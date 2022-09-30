@@ -28,6 +28,7 @@
 2. [avast/retdec: RetDec is a retargetable machine-code decompiler based on LLVM. (github.com)](https://github.com/avast/retdec)
 3. [Boomerang Decompiler (sourceforge.net)](https://boomerang.sourceforge.net/)     [BoomerangDecompiler/boomerang: Boomerang Decompiler - Fighting the code-rot :) (github.com)](https://github.com/BoomerangDecompiler/boomerang) 
 4. [yegord/snowman: Snowman decompiler (github.com)](https://github.com/yegord/snowman) 
+5. angr好像也有了
 
 也要学习程序分析的内容。
 
@@ -71,7 +72,15 @@ Markdown编辑器（建议）使用Typora，或VSCode
 
 开发环境：VSCode + CMake。将Wabt，LLVM等作为CMake的外部依赖。
 
+#### 开发环境搭建
 
+采用VSCode DevContainer。
+
+1. 安装Docker Desktop on Windows： https://docs.docker.com/desktop/install/windows-install/ （无论是家庭版还是专业版均可）
+   1. 其他系统直接安装docker
+1. 用vscode打开代码，安装Dev Containers插件，按Ctrl-Shift-P 然后输入查找 `Remote-Containers: Rebuild and Reopen in container`.
+1. 等待构建，构建完成后会直接进入开发环境中。
+1. 安装CMake相关插件，toolkit选clang。
 
 ### 提交代码前
 
@@ -81,6 +90,7 @@ Markdown编辑器（建议）使用Typora，或VSCode
 
 
 ### 其他
+
 各种杂七杂八的事情随意地列在这里
 
 1. 反编译优化后重新编译，和原有代码对比测试。效果好甚至可以作为字节码的优化器。
