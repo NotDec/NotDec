@@ -82,6 +82,9 @@ Markdown编辑器（建议）使用Typora，或VSCode
 1. 等待构建，构建完成后会直接进入开发环境中。
 1. 安装CMake相关插件，toolkit选clang。
 
+如果出现了无法使用windows侧的ssh-agent提供的ssh key的forward功能：
+https://stackoverflow.com/questions/72293035/error-communication-with-agent-failed-when-ssh-auth-sock-is-set-but-ssh-agent 
+
 ### 提交代码前
 
 1. 写好commit message，简要概况所有的修改。

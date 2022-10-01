@@ -2,6 +2,11 @@ wasm frontend 负责将WASM字节码转为LLVM IR。
 
 LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不断修补。
 
+## 代码架构
+
+- wasm模块解析器：基于wabt。[wasm-c-api](https://github.com/WebAssembly/wasm-c-api)不太行因为是用来embed一个WASM VM的。
+   - 目前直接通过
+   - 未来考虑通过find_package直接使用： https://github.com/WebAssembly/wabt/pull/1980
 
 
 ## Specification
