@@ -1,6 +1,7 @@
 #ifndef _FRONTEND_WASM_PARSER_H_
 #define _FRONTEND_WASM_PARSER_H_
 
+#include <iostream>
 
 // wabt header
 #include "src/binary-reader.h"
@@ -14,12 +15,15 @@
 namespace notdec::frontend::wasm {
 
 struct Context {
-    BaseContext llvmCtx;
-    const wabt::Module& module;
+    BaseContext& llvmCtx;
+    wabt::Module module;
+    Context(BaseContext& llvmCtx)
+        : llvmCtx(llvmCtx) {}
+    void visitModule();
 };
 
-Context *
-parse_wasm(const char *file_name);
+std::unique_ptr<Context> 
+parse_wasm(BaseContext& llvmCtx, const char *file_name);
 
 }
 #endif

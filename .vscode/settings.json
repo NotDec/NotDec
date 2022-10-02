@@ -64,5 +64,8 @@
         "streambuf": "cpp",
         "thread": "cpp",
         "typeinfo": "cpp"
-    }
+    },
+    "C_Cpp.default.includePath": [
+        "/usr/include/c++/11"
+    ]
 }

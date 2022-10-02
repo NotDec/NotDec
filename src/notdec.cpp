@@ -45,6 +45,7 @@ usage:
     }
     
     std::string insuffix = getSuffix(infilename);
+    notdec::frontend::BaseContext ctx(infilename);
     if (insuffix.size() == 0) {
         std::cout << "no suffix for input file. exiting." << std::endl;
         return 0;
@@ -52,7 +53,8 @@ usage:
 #ifdef NOTDEC_ENABLE_WASM
     else if (insuffix == ".wasm") {
         std::cout << "using wasm frontend." << std::endl;
-        notdec::frontend::wasm::Context *ctx = notdec::frontend::wasm::parse_wasm(infilename);
+        notdec::frontend::wasm::parse_wasm(ctx, infilename);
+        // TODO
     }
 #endif
     else {

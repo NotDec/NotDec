@@ -74,7 +74,7 @@ Markdown编辑器（建议）使用Typora，或VSCode
 
 #### 开发环境搭建
 
-采用VSCode DevContainer。
+采用VSCode DevContainer。出于[性能考虑](https://code.visualstudio.com/remote/advancedcontainers/improve-performance)，在clone时可以直接clone到wsl的ext4文件系统里。
 
 1. 安装Docker Desktop on Windows： https://docs.docker.com/desktop/install/windows-install/ （无论是家庭版还是专业版均可）
    1. 其他系统直接安装docker
