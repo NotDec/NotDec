@@ -9,23 +9,33 @@
 #include "src/ir.h"
 #include "src/stream.h"
 #include "src/validator.h"
+#include "src/cast.h"
 
 #include "frontend/context.h"
 
 namespace notdec::frontend::wasm {
 
 struct Context {
-    BaseContext& llvmCtx;
+    BaseContext& baseCtx;
+    llvm::LLVMContext& llvmContext;
+    llvm::Module& llvmModule;
     wabt::Module module;
     // mapping from global index to llvm thing
     std::vector<llvm::GlobalVariable*> globs;
     std::vector<llvm::Function*> funcs;
 
-    Context(BaseContext& llvmCtx)
-        : llvmCtx(llvmCtx) {}
+    Context(BaseContext& baseCtx)
+        : baseCtx(baseCtx), llvmContext(baseCtx.context), llvmModule(baseCtx.mod) {}
 
     void visitModule();
+    void visitGlobal(wabt::Global* gl, wabt::Index index);
+    void visitImportFunc(wabt::Func* func);
     llvm::Type* convertType(wabt::Type& ty);
+    llvm::FunctionType* convertFuncType(const wabt::FuncSignature& decl);
+
+
+private:
+    wabt::Index _func_index = 0;
 };
 
 std::unique_ptr<Context> 

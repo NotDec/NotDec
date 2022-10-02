@@ -44,43 +44,102 @@ parse_wasm(BaseContext& llvmCtx, const char *file_name) {
 }
 
 void Context::visitModule() {
-    using namespace llvm;
-    Module& mod = this->llvmCtx.mod;
+    using namespace wabt;
+    // change module name from file name to wasm module name if there is
+    if (!module.name.empty()) {
+        llvmModule.setModuleIdentifier(module.name);
+    }
 
     // visit global
     if(this->globs.size() != 0) {
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Cannot add module when globals is not empty" << std::endl;
         std::abort();
     }
-    int i = 0; // index
-    for (wabt::Global* gl : this->module.globals) {
-        std::string name = "global_" + std::to_string(i) + "_" + gl->name;
-        GlobalVariable *gv = new GlobalVariable(mod, convertType(gl->type), !gl->mutable_, 
-            GlobalValue::LinkageTypes::InternalLinkage, nullptr, name);
-        this->globs.push_back(gv);
-        i += 1;
+    Index i = 0;
+    for (Global* gl : this->module.globals) {
+        visitGlobal(gl, i);
+        i++;
     }
     // visit imports & build function index map
-    
+    for (Import* import : this->module.imports) {
+        switch (import->kind())
+        {
+        case ExternalKind::Func:
+            // visitImportFunc(&(cast<FuncImport>(import)->func));
+            break;
+        case ExternalKind::Table:
+            break;
+
+        case ExternalKind::Memory:
+            break;
+
+        case ExternalKind::Global:
+            break;
+
+        case ExternalKind::Tag:
+        default:
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unknown import kind" << std::endl;
+            std::abort();
+            break;
+        }
+    }
+    // iterate without import function
+    // see wabt src\wat-writer.cc WatWriter::WriteModule
+    for (ModuleField& field : module.fields) {
+        if (field.type() != ModuleFieldType::Func) {
+            continue;
+        }
+        Func& func = cast<FuncModuleField>(&field)->func;
+        // std::cout << func.name << std::endl;
+    }
+    // for (Func* func: this->module.funcs) {
+    //     std::cout << func->name << std::endl;
+    //     std::cout << "  " << func->exprs.size() << std::endl;
+    // }
     // visit exports and w x
+}
+
+void Context::visitGlobal(wabt::Global* gl, wabt::Index index) {
+    using namespace llvm;
+    // std::string name = "global_" + std::to_string(i) + "_" + gl->name;
+    GlobalVariable *gv = new GlobalVariable(llvmModule, convertType(gl->type), !gl->mutable_, 
+        GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl->name);
+    this->globs.push_back(gv);
+}
+
+void Context::visitImportFunc(wabt::Func* func) {
+    using namespace llvm;
+    FunctionType* funcType = convertFuncType(func->decl.sig);
+    Function* function = Function::Create(
+			funcType,
+			Function::ExternalLinkage,
+			func->name,
+			llvmModule);
+    this->funcs.push_back(function);
+    this->_func_index ++;
+}
+
+llvm::FunctionType* Context::convertFuncType(const wabt::FuncSignature& decl) {
+    // for (:func_sig.param_types)
+    // for (:func_sig.result_types)
+    return nullptr;
 }
 
 llvm::Type* Context::convertType(wabt::Type& ty) {
     using namespace llvm;
-    LLVMContext& ctx = this->llvmCtx.context;
     switch(ty) {
         case wabt::Type::I32:
-            return Type::getInt32Ty(ctx);
+            return Type::getInt32Ty(llvmContext);
         case wabt::Type::I64:
-            return Type::getInt64Ty(ctx);
+            return Type::getInt64Ty(llvmContext);
         case wabt::Type::F32:
-            return Type::getFloatTy(ctx);
+            return Type::getFloatTy(llvmContext);
         case wabt::Type::F64:
-            return Type::getDoubleTy(ctx);
+            return Type::getDoubleTy(llvmContext);
         case wabt::Type::V128:
-            return Type::getInt128Ty(ctx);
+            return Type::getInt128Ty(llvmContext);
         case wabt::Type::Void:
-            return Type::getVoidTy(ctx);
+            return Type::getVoidTy(llvmContext);
         default:
             std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Cannot convert type: " << ty.GetName() << std::endl;
             std::abort();
