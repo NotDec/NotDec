@@ -17,9 +17,15 @@ namespace notdec::frontend::wasm {
 struct Context {
     BaseContext& llvmCtx;
     wabt::Module module;
+    // mapping from global index to llvm thing
+    std::vector<llvm::GlobalVariable*> globs;
+    std::vector<llvm::Function*> funcs;
+
     Context(BaseContext& llvmCtx)
         : llvmCtx(llvmCtx) {}
+
     void visitModule();
+    llvm::Type* convertType(wabt::Type& ty);
 };
 
 std::unique_ptr<Context> 

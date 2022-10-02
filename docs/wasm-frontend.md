@@ -20,6 +20,10 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 
 1. 类型：i32 i64 对应LLVM中的i32 i64, f32 f64对应LLVM中的float double。
 2. 每个wasm的Global值转为llvm中一个的global值。相关访问只有Load和Store指令。
+   1. 名字更改为`global_<ind>_<original_name>`这种格式，即在原来名字前加上前缀标识，因为wasm的[name section](https://github.com/WebAssembly/extended-name-section/blob/main/proposals/extended-name-section/Overview.md)允许重名。
+   1. [Linkage Types](https://llvm.org/docs/LangRef.html#linkage-types) 选择internal。被导出的更改为external。
+   1. 根据mutable，设置llvm那边的const属性
+   1. 处理init_expr
 3. 内存：转为一个global数组，u8 array。
    1. 内存访问：计算关于u8的偏移（get element ptr），然后再转为对应的类型指针load出来。即LLVM中`[大数字 x i8]`类型。因为只是分析，所有不用考虑内存增长的事情。
 4. 函数

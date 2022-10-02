@@ -1,6 +1,8 @@
 #include <iostream>
 #include <algorithm>
 
+#include "llvm/Support/raw_ostream.h"
+
 #ifdef NOTDEC_ENABLE_WASM
 #include "frontend/wasm/parser.h"
 #endif
@@ -47,7 +49,7 @@ usage:
     std::string insuffix = getSuffix(infilename);
     notdec::frontend::BaseContext ctx(infilename);
     if (insuffix.size() == 0) {
-        std::cout << "no suffix for input file. exiting." << std::endl;
+        std::cout << "no extension for input file. exiting." << std::endl;
         return 0;
     }
 #ifdef NOTDEC_ENABLE_WASM
@@ -58,8 +60,21 @@ usage:
     }
 #endif
     else {
-        std::cout << "unknown suffix " << insuffix << " for input file. exiting." << std::endl;
+        std::cout << "unknown extension " << insuffix << " for input file. exiting." << std::endl;
         return 0;
+    }
+
+    std::string outsuffix = getSuffix(outfilename);
+    if (outsuffix == ".ll") {
+        std::error_code EC;
+        llvm::raw_fd_ostream os(outfilename, EC);
+        if (EC) {
+            std::cerr << "Cannot open output file." << std::endl;
+            std::cerr << EC.message() << std::endl;
+            std::abort();
+        }
+        ctx.mod.print(os, nullptr);
+        std::cout << "IR dumped to " << outfilename << std::endl;
     }
     
     return 0;
