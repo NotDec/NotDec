@@ -23,19 +23,25 @@ struct Context {
     // mapping from global index to llvm thing
     std::vector<llvm::GlobalVariable*> globs;
     std::vector<llvm::Function*> funcs;
+    std::vector<llvm::GlobalVariable*> mems;
 
     Context(BaseContext& baseCtx)
         : baseCtx(baseCtx), llvmContext(baseCtx.context), llvmModule(baseCtx.mod) {}
 
     void visitModule();
-    void visitGlobal(wabt::Global* gl, wabt::Index index);
-    void visitImportFunc(wabt::Func* func);
-    llvm::Type* convertType(wabt::Type& ty);
-    llvm::FunctionType* convertFuncType(const wabt::FuncSignature& decl);
+    void visitGlobal(wabt::Global& gl, bool isExternal);
+    void visitFunc(wabt::Func& func);
 
+    llvm::Function* declareFunc(wabt::Func& func, bool isExternal);
+    llvm::GlobalVariable* declareMemory(wabt::Memory& mem, bool isExternal);
+    llvm::Type* convertType(const wabt::Type& ty);
+    llvm::FunctionType* convertFuncType(const wabt::FuncSignature& decl);
+    void setFuncArgName(llvm::Function& function, const wabt::FuncSignature& decl);
 
 private:
     wabt::Index _func_index = 0;
+    wabt::Index _glob_index = 0;
+    wabt::Index _mem_index = 0;
 };
 
 std::unique_ptr<Context> 

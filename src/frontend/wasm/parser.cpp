@@ -49,40 +49,44 @@ void Context::visitModule() {
     if (!module.name.empty()) {
         llvmModule.setModuleIdentifier(module.name);
     }
-
-    // visit global
-    if(this->globs.size() != 0) {
+    if(this->_func_index != 0 || this->_glob_index != 0) {
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Cannot add module when globals is not empty" << std::endl;
         std::abort();
     }
-    Index i = 0;
-    for (Global* gl : this->module.globals) {
-        visitGlobal(gl, i);
-        i++;
-    }
+
     // visit imports & build function index map
     for (Import* import : this->module.imports) {
         switch (import->kind())
         {
         case ExternalKind::Func:
-            // visitImportFunc(&(cast<FuncImport>(import)->func));
-            break;
-        case ExternalKind::Table:
+            declareFunc(cast<FuncImport>(import)->func, true);
             break;
 
         case ExternalKind::Memory:
+            // create external memory variable
+            // declareMemory(cast<MemoryImport>(import)->memory, true);
             break;
 
         case ExternalKind::Global:
+            // set global to external linkage
+            visitGlobal(cast<GlobalImport>(import)->global, true);
             break;
 
         case ExternalKind::Tag:
+        case ExternalKind::Table:
         default:
             std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unknown import kind" << std::endl;
             std::abort();
             break;
         }
     }
+    // visit global
+    for (Global* gl : this->module.globals) {
+        visitGlobal(*gl, false);
+    }
+
+    // visit memory and data, create memory content
+    // visit export and change visibility
     // iterate without import function
     // see wabt src\wat-writer.cc WatWriter::WriteModule
     for (ModuleField& field : module.fields) {
@@ -90,42 +94,91 @@ void Context::visitModule() {
             continue;
         }
         Func& func = cast<FuncModuleField>(&field)->func;
-        // std::cout << func.name << std::endl;
+        visitFunc(func);
     }
     // for (Func* func: this->module.funcs) {
     //     std::cout << func->name << std::endl;
     //     std::cout << "  " << func->exprs.size() << std::endl;
     // }
     // visit exports and w x
+    // visit elem and create function pointer array
+    assert((funcs.size() == _func_index));
 }
 
-void Context::visitGlobal(wabt::Global* gl, wabt::Index index) {
+void Context::visitFunc(wabt::Func& func) {
+    using namespace llvm;
+    Function* function = declareFunc(func, false);
+    setFuncArgName(*function, func.decl.sig);
+    auto entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
+}
+
+void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
     using namespace llvm;
     // std::string name = "global_" + std::to_string(i) + "_" + gl->name;
-    GlobalVariable *gv = new GlobalVariable(llvmModule, convertType(gl->type), !gl->mutable_, 
-        GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl->name);
+    GlobalVariable *gv = new GlobalVariable(llvmModule, convertType(gl.type), !gl.mutable_, 
+        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name);
     this->globs.push_back(gv);
+    _glob_index ++;
 }
 
-void Context::visitImportFunc(wabt::Func* func) {
+llvm::GlobalVariable* Context::declareMemory(wabt::Memory& mem, bool isExternal) {
     using namespace llvm;
-    FunctionType* funcType = convertFuncType(func->decl.sig);
+    // mem.page_limits
+    // ArrayType::get(Type::getInt8Ty(llvmContext), );
+    // GlobalVariable *gv = new GlobalVariable(llvmModule, , !gl.mutable_, 
+    //     isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name);
+    // this->mems.push_back(gv);
+    _mem_index ++;
+}
+
+llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
+    using namespace llvm;
+    FunctionType* funcType = convertFuncType(func.decl.sig);
     Function* function = Function::Create(
-			funcType,
-			Function::ExternalLinkage,
-			func->name,
-			llvmModule);
+            funcType,
+            isExternal ? Function::ExternalLinkage : Function::InternalLinkage,
+            func.name,
+            llvmModule);
     this->funcs.push_back(function);
     this->_func_index ++;
+    return function;
+}
+
+void Context::setFuncArgName(llvm::Function& func, const wabt::FuncSignature& decl) {
+    using namespace llvm;
+    int argSize = decl.GetNumParams();
+    for (unsigned int i=0;i<argSize;i++) {
+        const std::string& name = decl.GetParamType(i).GetName();
+        func.getArg(i)->setName(name);
+        // std::cout << func.getArg(i)->getName().str() << std::endl;
+    }
 }
 
 llvm::FunctionType* Context::convertFuncType(const wabt::FuncSignature& decl) {
-    // for (:func_sig.param_types)
-    // for (:func_sig.result_types)
-    return nullptr;
+    using namespace llvm;
+    Type** llvmArgTypes;
+    size_t numParameters = decl.param_types.size();
+    llvmArgTypes = (Type**)alloca(sizeof(Type*) * numParameters);
+    int i = 0;
+    for (const wabt::Type& pt: decl.param_types) {
+        llvmArgTypes[i] = convertType(pt);
+        i++;
+    }
+    if (decl.GetNumResults() > 1) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Multi result is not currently supported." << std::endl;
+        std::abort();
+    }
+    Type* llvmReturnType;
+    if (decl.GetNumResults() == 0) {
+        llvmReturnType = Type::getVoidTy(llvmContext);
+    } else {
+        llvmReturnType = convertType(decl.GetResultType(0));
+    }
+    return FunctionType::get(
+        llvmReturnType, ArrayRef<Type*>(llvmArgTypes, numParameters), false);
 }
 
-llvm::Type* Context::convertType(wabt::Type& ty) {
+llvm::Type* Context::convertType(const wabt::Type& ty) {
     using namespace llvm;
     switch(ty) {
         case wabt::Type::I32:

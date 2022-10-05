@@ -15,6 +15,7 @@ if (NOTDEC_ENABLE_WASM)
 		PUBLIC
 		wabt::wabt
 	)
+	add_dependencies(notdec wabt)
 endif ()
 
 set_target_properties(notdec

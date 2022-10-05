@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13.4)
-project(nodec
+project(notdec
 	LANGUAGES C CXX
 	VERSION 0.0.1
 )
@@ -128,6 +128,8 @@ if (NOTDEC_ENABLE_WASM)
 		BINARY_DIR ${CMAKE_BINARY_DIR}/wabt-build
 		INSTALL_COMMAND ""
 		CMAKE_CACHE_ARGS "-DBUILD_LIBWASM:BOOL=ON "
+		# https://stackoverflow.com/questions/50400592/using-an-externalproject-download-step-with-ninja
+		BUILD_BYPRODUCTS "${CMAKE_BINARY_DIR}/wabt-build/libwabt.a"
 	)
 	include_directories(${CMAKE_BINARY_DIR}/wabt)
 	include_directories(${CMAKE_BINARY_DIR}/wabt-build)
