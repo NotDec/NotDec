@@ -1,9 +1,10 @@
 ; ModuleID = './test/emcc-print.wasm'
 source_filename = "./test/emcc-print.wasm"
 
-@"$__stack_pointer" = internal global i32
-@"$__stack_end" = internal global i32
-@"$__stack_base" = internal global i32
+@"$__stack_pointer" = internal global i32 5247184
+@"$__stack_end" = internal global i32 0
+@"$__stack_base" = internal global i32 0
+@mem0 = external dso_local global [16777216 x i8]
 
 declare i32 @"$__wasi_fd_seek"(i32, i64, i32, i32)
 
@@ -23,7 +24,7 @@ define internal i32 @"$__original_main"() {
 entry:
 }
 
-define internal void @"$_start"() {
+define void @"$_start"() {
 entry:
 }
 
@@ -75,7 +76,7 @@ define internal void @"$__lock"(i32 %i32) {
 entry:
 }
 
-define internal i32 @"$__errno_location"() {
+define i32 @"$__errno_location"() {
 entry:
 }
 
@@ -127,15 +128,15 @@ define internal i32 @"$__memcpy"(i32 %i32, i32 %i321, i32 %i322) {
 entry:
 }
 
-define internal void @"$emscripten_stack_init"() {
+define void @"$emscripten_stack_init"() {
 entry:
 }
 
-define internal i32 @"$emscripten_stack_get_free"() {
+define i32 @"$emscripten_stack_get_free"() {
 entry:
 }
 
-define internal i32 @"$emscripten_stack_get_end"() {
+define i32 @"$emscripten_stack_get_end"() {
 entry:
 }
 
@@ -239,14 +240,14 @@ define internal void @"$__unlockfile"(i32 %i32) {
 entry:
 }
 
-define internal i32 @"$stackSave"() {
+define i32 @"$stackSave"() {
 entry:
 }
 
-define internal void @"$stackRestore"(i32 %i32) {
+define void @"$stackRestore"(i32 %i32) {
 entry:
 }
 
-define internal i32 @"$stackAlloc"(i32 %i32) {
+define i32 @"$stackAlloc"(i32 %i32) {
 entry:
 }

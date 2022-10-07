@@ -15,7 +15,7 @@ if (NOTDEC_ENABLE_WASM)
 		PUBLIC
 		wabt::wabt
 	)
-	add_dependencies(notdec wabt)
+	# add_dependencies(notdec wabt)
 endif ()
 
 set_target_properties(notdec
@@ -27,6 +27,7 @@ set_target_properties(notdec
 
 add_executable(notdec-decompile 
 	notdec.cpp
+	utils.cpp
 )
 
 # target_compile_features(bin2pat PUBLIC cxx_std_17)

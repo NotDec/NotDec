@@ -1,5 +1,5 @@
-#ifndef _FRONTEND_WASM_PARSER_H_
-#define _FRONTEND_WASM_PARSER_H_
+#ifndef _NOTDEC_FRONTEND_WASM_PARSER_H_
+#define _NOTDEC_FRONTEND_WASM_PARSER_H_
 
 #include <iostream>
 
@@ -12,6 +12,7 @@
 #include "src/cast.h"
 
 #include "frontend/context.h"
+#include "utils.h"
 
 namespace notdec::frontend::wasm {
 
@@ -31,6 +32,7 @@ struct Context {
     void visitModule();
     void visitGlobal(wabt::Global& gl, bool isExternal);
     void visitFunc(wabt::Func& func);
+    llvm::Constant* visitInitExpr(wabt::ExprList& expr);
 
     llvm::Function* declareFunc(wabt::Func& func, bool isExternal);
     llvm::GlobalVariable* declareMemory(wabt::Memory& mem, bool isExternal);

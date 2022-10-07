@@ -8,6 +8,7 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 1. WAVM也是一个基于LLVM的带JIT功能的runtime。C++编写
    1. `WAVM\Lib\LLVMJIT\LLVMCompile.cpp` LLVMJIT::compileModule这个函数应该是编译入口点，很多可以参考。
    1. `WAVM\Lib\LLVMJIT\EmitFunction.cpp` EmitFunctionContext::emit 编译每个函数。关键是`decoder.decodeOp(*this);`这句，会根据不同的指令访问对应的同名函数，比如看`WAVM\Lib\LLVMJIT\EmitCore.cpp`，遇到block指令会调用EmitFunctionContext::block函数。
+1. [aWsm](https://github.com/gwsystems/aWsm) 也是一个基于LLVM的带JIT功能的runtime。同上，转换相关的逻辑也都是可以抄的。
 1. WAMR wasm-micro-runtime 基于LLVM的，但是是C语言，使用LLVM-C-API，我们打算用的是C++的API。
     1. 真的是自己写的字节码解析器好像。。。[wasm_loader.c](https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm_loader.c) [wasm.h](https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm.h)
     1. 有相关wasm到LLVM IR的转换可以参考：[aot_llvm_extra.cpp](https://github.com/bytecodealliance/wasm-micro-runtime/blob/c07584400134bb5f1be80b4f5df96eb1d8c94324/core/iwasm/compilation/aot_llvm_extra.cpp)
@@ -55,9 +56,9 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 
 ## 控制流处理
 
-目前block，loop分别对应在结尾，开头，增加一个label。if对应一些label和br_if，br代表直接跳转，br_if同理。比较麻烦的是br_table。但是看了下和LLVM的switch语句对应得非常好啊。
-
-
+1. block，loop分别对应在结尾，开头，增加一个label。
+1. if对应一些label和br_if，br代表直接跳转，br_if同理，根据语义找到对应的跳转目标，生成条件跳转即可。
+1. br_table看似比较麻烦，看了下和LLVM的switch语句对应得非常好啊。也是根据不同的值跳转到不同的边。
 
 ## Wasm中的非直接跳转（复习）
 

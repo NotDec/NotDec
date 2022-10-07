@@ -4,8 +4,7 @@
 namespace notdec::frontend::wasm {
 
 
-std::unique_ptr<Context> 
-parse_wasm(BaseContext& llvmCtx, const char *file_name) {
+std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name) {
     using namespace wabt;
     std::vector<uint8_t> file_data;
     Result result = ReadFile(file_name, &file_data);
@@ -64,7 +63,7 @@ void Context::visitModule() {
 
         case ExternalKind::Memory:
             // create external memory variable
-            // declareMemory(cast<MemoryImport>(import)->memory, true);
+            declareMemory(cast<MemoryImport>(import)->memory, true);
             break;
 
         case ExternalKind::Global:
@@ -85,8 +84,11 @@ void Context::visitModule() {
         visitGlobal(*gl, false);
     }
 
-    // visit memory and data, create memory content
-    // visit export and change visibility
+    // visit memory and data, create memory contentt
+    for (Memory* mem: this->module.memories) {
+        declareMemory(*mem, false);
+    }
+    // TODO data
     // iterate without import function
     // see wabt src\wat-writer.cc WatWriter::WriteModule
     for (ModuleField& field : module.fields) {
@@ -100,7 +102,47 @@ void Context::visitModule() {
     //     std::cout << func->name << std::endl;
     //     std::cout << "  " << func->exprs.size() << std::endl;
     // }
-    // visit exports and w x
+    // visit export and change visibility
+    for (Export* export_: this->module.exports) {
+        Index index;
+        // Func* func;
+        switch ((*export_).kind)
+        {
+        case ExternalKind::Func:
+            index = module.GetFuncIndex(export_->var);
+            // func = module.GetFunc(export_->var);
+            // std::cout << "export " << func->name << std::endl;
+            // std::cout << "export " << this->funcs[index]->getName().str() << std::endl;
+            this->funcs[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+            // 之前internal的时候同时自动设置了dso_local
+            this->funcs[index]->setDSOLocal(false);
+            break;
+
+        case ExternalKind::Table:
+            // TODO
+            index = module.GetTableIndex(export_->var);
+            break;
+
+        case ExternalKind::Memory:
+            index = module.GetMemoryIndex(export_->var);
+            this->mems[index]->setInitializer(nullptr);
+            this->mems[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+            break;
+
+        case ExternalKind::Global:
+            index = module.GetGlobalIndex(export_->var);
+            this->globs[index]->setInitializer(nullptr);
+            this->globs[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+            break;
+
+        case ExternalKind::Tag:
+            index = module.GetTagIndex(export_->var);
+            break;
+        
+        default:
+            break;
+        }
+    }
     // visit elem and create function pointer array
     assert((funcs.size() == _func_index));
 }
@@ -115,20 +157,76 @@ void Context::visitFunc(wabt::Func& func) {
 void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
     using namespace llvm;
     // std::string name = "global_" + std::to_string(i) + "_" + gl->name;
-    GlobalVariable *gv = new GlobalVariable(llvmModule, convertType(gl.type), !gl.mutable_, 
+    Type* ty = convertType(gl.type);
+    GlobalVariable *gv = new GlobalVariable(llvmModule, ty, !gl.mutable_, 
         isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name);
+    if (!isExternal) {
+        Constant* init = visitInitExpr(gl.init_expr);
+        if (init == nullptr) {
+            // std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Warn: use default InitExpr." << std::endl;
+            init = ConstantAggregateZero::get(ty);
+        }
+        gv->setInitializer(init);
+    }
     this->globs.push_back(gv);
     _glob_index ++;
 }
 
+llvm::Constant* Context::visitInitExpr(wabt::ExprList& expr) {
+    using namespace wabt;
+    if (expr.size() != 1) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: InitExpr size != 1." << std::endl;
+        std::abort();
+    }
+
+    if (expr.front().type() == ExprType::Const) {
+        const Const& const_ = cast<ConstExpr>(&expr.front())->const_;
+        uint64_t data[2];
+        switch (const_.type()) {
+        case Type::I32: 
+            return llvm::ConstantInt::get(convertType(const_.type()), const_.u32(), false);
+        case Type::I64:
+            return llvm::ConstantInt::get(convertType(const_.type()), const_.u64(), false);
+        case Type::F32:
+            return llvm::ConstantFP::get(convertType(const_.type()), llvm::APFloat(ieee_float(const_.f32_bits())));
+        case Type::F64:
+            return llvm::ConstantFP::get(convertType(const_.type()), llvm::APFloat(ieee_double(const_.f64_bits())));
+        case Type::V128:
+            data[0] = const_.vec128().u64(0);
+            data[1] = const_.vec128().u64(1);
+            return llvm::ConstantInt::get(convertType(const_.type()), llvm::APInt(128, llvm::ArrayRef<uint64_t>(data, 2)));
+        default:
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: InitExpr type unknown: " << const_.type().GetName() << std::endl;
+            std::abort();
+      }
+    } else if (expr.front().type() == ExprType::GlobalGet) {
+        // TODO
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: InitExpr with global.get is currently not supported." << std::endl;
+        std::abort();
+    }
+    return nullptr;
+}
+
 llvm::GlobalVariable* Context::declareMemory(wabt::Memory& mem, bool isExternal) {
     using namespace llvm;
-    // mem.page_limits
-    // ArrayType::get(Type::getInt8Ty(llvmContext), );
-    // GlobalVariable *gv = new GlobalVariable(llvmModule, , !gl.mutable_, 
-    //     isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name);
-    // this->mems.push_back(gv);
+    uint64_t len = mem.page_limits.initial;
+    if (mem.page_limits.has_max) {
+        uint64_t max = mem.page_limits.max;
+        if (max != len) {
+            std::cout << "memory min " << len << " max " << max <<std::endl;
+        }
+        len = max;
+    }
+    len = len * 65536;
+    ArrayType* ty = ArrayType::get(Type::getInt8Ty(llvmContext), len);
+    GlobalVariable *gv = new GlobalVariable(llvmModule, ty, false, 
+        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, "mem0");
+    if (!isExternal) {
+        gv->setInitializer(ConstantAggregateZero::get(ty));
+    }
+    this->mems.push_back(gv);
     _mem_index ++;
+    return gv;
 }
 
 llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {

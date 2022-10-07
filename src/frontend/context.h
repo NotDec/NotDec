@@ -1,5 +1,5 @@
-#ifndef _FRONTEND_CONTEXT_H_
-#define _FRONTEND_CONTEXT_H_
+#ifndef _NOTDEC_FRONTEND_CONTEXT_H_
+#define _NOTDEC_FRONTEND_CONTEXT_H_
 
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
