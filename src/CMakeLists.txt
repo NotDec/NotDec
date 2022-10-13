@@ -1,9 +1,9 @@
 
 add_library(notdec STATIC
-	frontend/wasm/parser.cpp
+	# source files that are common to all frontend
 )
 
-# include直接在外部设置了src。
+# include直接在外部设置了src目录。
 
 target_link_libraries(notdec
 	PUBLIC
@@ -11,6 +11,11 @@ target_link_libraries(notdec
 )
 
 if (NOTDEC_ENABLE_WASM)
+	target_sources(notdec PRIVATE
+		frontend/wasm/parser.cpp
+		frontend/wasm/parser-block.cpp
+	)
+
 	target_link_libraries(notdec
 		PUBLIC
 		wabt::wabt

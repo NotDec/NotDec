@@ -147,17 +147,44 @@ void Context::visitModule() {
     assert((funcs.size() == _func_index));
 }
 
+const std::string LOCAL_PREFIX = "_local_";
+const std::string PARAM_PREFIX = "_param_";
+
 void Context::visitFunc(wabt::Func& func) {
     using namespace llvm;
     Function* function = declareFunc(func, false);
     setFuncArgName(*function, func.decl.sig);
-    auto entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
+    BasicBlock* entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
+
+    // BasicBlock* returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
+    // auto returnPHIs = createPHIs(returnBlock, func.decl.sig.result_types);
+    
+    IRBuilder<> irBuilder(llvmContext);
+    irBuilder.SetInsertPoint(entryBasicBlock);
+    std::vector<llvm::Value*> locals;
+    // handle locals
+    Function::arg_iterator llvmArgIt = function->arg_begin();
+    wabt::Index numParam = func.GetNumParams();
+    for (wabt::Index i = 0;i<numParam;i++) {
+        AllocaInst* alloca = irBuilder.CreateAlloca(convertType(llvmContext, func.GetParamType(i)), nullptr, PARAM_PREFIX + std::to_string(i));
+        locals.push_back(alloca);
+        irBuilder.CreateStore(&*llvmArgIt, alloca);
+        ++llvmArgIt;
+    }
+    wabt::Index numLocal = func.GetNumLocals();
+    for (wabt::Index i = 0;i<numLocal;i++) {
+        AllocaInst* alloca = irBuilder.CreateAlloca(convertType(llvmContext, func.local_types[i]), nullptr, LOCAL_PREFIX + std::to_string(numParam + i));
+        locals.push_back(alloca);
+        irBuilder.CreateStore(convertZeroValue(llvmContext, func.local_types[i]), alloca);
+    }
+    // BlockContext bctx();
+
 }
 
 void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
     using namespace llvm;
     // std::string name = "global_" + std::to_string(i) + "_" + gl->name;
-    Type* ty = convertType(gl.type);
+    Type* ty = convertType(llvmContext, gl.type);
     GlobalVariable *gv = new GlobalVariable(llvmModule, ty, !gl.mutable_, 
         isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name);
     if (!isExternal) {
@@ -184,17 +211,17 @@ llvm::Constant* Context::visitInitExpr(wabt::ExprList& expr) {
         uint64_t data[2];
         switch (const_.type()) {
         case Type::I32: 
-            return llvm::ConstantInt::get(convertType(const_.type()), const_.u32(), false);
+            return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), const_.u32(), false);
         case Type::I64:
-            return llvm::ConstantInt::get(convertType(const_.type()), const_.u64(), false);
+            return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), const_.u64(), false);
         case Type::F32:
-            return llvm::ConstantFP::get(convertType(const_.type()), llvm::APFloat(ieee_float(const_.f32_bits())));
+            return llvm::ConstantFP::get(convertType(llvmContext, const_.type()), llvm::APFloat(ieee_float(const_.f32_bits())));
         case Type::F64:
-            return llvm::ConstantFP::get(convertType(const_.type()), llvm::APFloat(ieee_double(const_.f64_bits())));
+            return llvm::ConstantFP::get(convertType(llvmContext, const_.type()), llvm::APFloat(ieee_double(const_.f64_bits())));
         case Type::V128:
             data[0] = const_.vec128().u64(0);
             data[1] = const_.vec128().u64(1);
-            return llvm::ConstantInt::get(convertType(const_.type()), llvm::APInt(128, llvm::ArrayRef<uint64_t>(data, 2)));
+            return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), llvm::APInt(128, llvm::ArrayRef<uint64_t>(data, 2)));
         default:
             std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: InitExpr type unknown: " << const_.type().GetName() << std::endl;
             std::abort();
@@ -231,7 +258,7 @@ llvm::GlobalVariable* Context::declareMemory(wabt::Memory& mem, bool isExternal)
 
 llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
     using namespace llvm;
-    FunctionType* funcType = convertFuncType(func.decl.sig);
+    FunctionType* funcType = convertFuncType(llvmContext, func.decl.sig);
     Function* function = Function::Create(
             funcType,
             isExternal ? Function::ExternalLinkage : Function::InternalLinkage,
@@ -252,31 +279,40 @@ void Context::setFuncArgName(llvm::Function& func, const wabt::FuncSignature& de
     }
 }
 
-llvm::FunctionType* Context::convertFuncType(const wabt::FuncSignature& decl) {
+// TODO 从类里提出来
+llvm::FunctionType* convertFuncType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl) {
     using namespace llvm;
     Type** llvmArgTypes;
     size_t numParameters = decl.param_types.size();
     llvmArgTypes = (Type**)alloca(sizeof(Type*) * numParameters);
     int i = 0;
     for (const wabt::Type& pt: decl.param_types) {
-        llvmArgTypes[i] = convertType(pt);
+        llvmArgTypes[i] = convertType(llvmContext, pt);
         i++;
     }
+    // TODO multi return
     if (decl.GetNumResults() > 1) {
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Multi result is not currently supported." << std::endl;
         std::abort();
     }
-    Type* llvmReturnType;
-    if (decl.GetNumResults() == 0) {
-        llvmReturnType = Type::getVoidTy(llvmContext);
-    } else {
-        llvmReturnType = convertType(decl.GetResultType(0));
-    }
+    Type* llvmReturnType = convertReturnType(llvmContext, decl);
     return FunctionType::get(
         llvmReturnType, ArrayRef<Type*>(llvmArgTypes, numParameters), false);
 }
 
-llvm::Type* Context::convertType(const wabt::Type& ty) {
+llvm::Type* convertReturnType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl) {
+    using namespace llvm;
+    Type* llvmReturnType;
+    if (decl.GetNumResults() == 0) {
+        llvmReturnType = Type::getVoidTy(llvmContext);
+    } else {
+        llvmReturnType = convertType(llvmContext, decl.GetResultType(0));
+    }
+    return llvmReturnType;
+}
+
+// TODO 从类里提出来
+llvm::Type* convertType(llvm::LLVMContext& llvmContext, const wabt::Type& ty) {
     using namespace llvm;
     switch(ty) {
         case wabt::Type::I32:
@@ -291,6 +327,26 @@ llvm::Type* Context::convertType(const wabt::Type& ty) {
             return Type::getInt128Ty(llvmContext);
         case wabt::Type::Void:
             return Type::getVoidTy(llvmContext);
+        default:
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Cannot convert type: " << ty.GetName() << std::endl;
+            std::abort();
+    }
+}
+
+llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Type& ty) {
+    using namespace llvm;
+    switch(ty) {
+        case wabt::Type::I32:
+            return ConstantInt::get(Type::getInt32Ty(llvmContext), 0);
+        case wabt::Type::I64:
+            return ConstantInt::get(Type::getInt64Ty(llvmContext), 0);
+        case wabt::Type::F32:
+            return llvm::ConstantFP::get(Type::getFloatTy(llvmContext), 0);
+        case wabt::Type::F64:
+            return llvm::ConstantFP::get(Type::getDoubleTy(llvmContext), 0);
+        case wabt::Type::V128:
+            return ConstantInt::get(Type::getInt128Ty(llvmContext), 0);
+        case wabt::Type::Void:
         default:
             std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Cannot convert type: " << ty.GetName() << std::endl;
             std::abort();

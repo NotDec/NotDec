@@ -8,7 +8,7 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 1. WAVM也是一个基于LLVM的带JIT功能的runtime。C++编写
    1. `WAVM\Lib\LLVMJIT\LLVMCompile.cpp` LLVMJIT::compileModule这个函数应该是编译入口点，很多可以参考。
    1. `WAVM\Lib\LLVMJIT\EmitFunction.cpp` EmitFunctionContext::emit 编译每个函数。关键是`decoder.decodeOp(*this);`这句，会根据不同的指令访问对应的同名函数，比如看`WAVM\Lib\LLVMJIT\EmitCore.cpp`，遇到block指令会调用EmitFunctionContext::block函数。
-1. [aWsm](https://github.com/gwsystems/aWsm) 也是一个基于LLVM的带JIT功能的runtime。同上，转换相关的逻辑也都是可以抄的。
+1. [aWsm](https://github.com/gwsystems/aWsm) 也是一个基于LLVM的带JIT功能的runtime。虽然是rust写的，但是还是用的LLVM C++ API，转换相关的逻辑也都是可以抄的。
 1. WAMR wasm-micro-runtime 基于LLVM的，但是是C语言，使用LLVM-C-API，我们打算用的是C++的API。
     1. 真的是自己写的字节码解析器好像。。。[wasm_loader.c](https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm_loader.c) [wasm.h](https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm.h)
     1. 有相关wasm到LLVM IR的转换可以参考：[aot_llvm_extra.cpp](https://github.com/bytecodealliance/wasm-micro-runtime/blob/c07584400134bb5f1be80b4f5df96eb1d8c94324/core/iwasm/compilation/aot_llvm_extra.cpp)
@@ -49,18 +49,21 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 1. import了一个table。
 
 
-## 栈的处理
+## 指令、栈、控制流的处理
 
-参考WAVM，见顶部现有工具一节。参考栈验证逻辑。能保留的最好直接解码为SSA。
+参考WAVM，见顶部现有工具一节。参考栈验证逻辑。能保留的最好直接解码为SSA。这里的block直接考虑[Multi Value Extension](https://github.com/WebAssembly/multi-value)，防止以后架构需要重构，但是函数返回多个值的先不支持。
 
+- 每个栈上元素对应一个SSA的Value。某种形式上可以维护一个Value栈（作为局部变量，不需要作为Context）。
+- 控制流跳转维护一个block的嵌套栈，保存br时跳转的目标。
+- 处理Block的时候，这里用递归和用栈都可以。选择用实现起来更简单的递归。
 
-## 控制流处理
+### 控制流指令的处理，与SSA生成
 
-1. block，loop分别对应在结尾，开头，增加一个label。
+1. block，loop分别对应在结尾，开头，增加一个label。注意到block只需要为return的值创建Phi，loop需要对参数创建Phi。
 1. if对应一些label和br_if，br代表直接跳转，br_if同理，根据语义找到对应的跳转目标，生成条件跳转即可。
 1. br_table看似比较麻烦，看了下和LLVM的switch语句对应得非常好啊。也是根据不同的值跳转到不同的边。
 
-## Wasm中的非直接跳转（复习）
+### Wasm中的非直接跳转（复习）
 
 在二进制模块中有id为4的table section。里面有一系列的table类型，初始化则由element section负责。table类型有两部分，reftype和limit。[limit](https://webassembly.github.io/spec/core/binary/types.html#limits)应该是类似数组大小的东西，但是同时包含了上限和下限。
 

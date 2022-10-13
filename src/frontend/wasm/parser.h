@@ -12,9 +12,13 @@
 #include "src/cast.h"
 
 #include "frontend/context.h"
+#include "frontend/wasm/parser-block.h"
 #include "utils.h"
 
 namespace notdec::frontend::wasm {
+
+extern const std::string LOCAL_PREFIX;
+extern const std::string PARAM_PREFIX;
 
 struct Context {
     BaseContext& baseCtx;
@@ -36,8 +40,6 @@ struct Context {
 
     llvm::Function* declareFunc(wabt::Func& func, bool isExternal);
     llvm::GlobalVariable* declareMemory(wabt::Memory& mem, bool isExternal);
-    llvm::Type* convertType(const wabt::Type& ty);
-    llvm::FunctionType* convertFuncType(const wabt::FuncSignature& decl);
     void setFuncArgName(llvm::Function& function, const wabt::FuncSignature& decl);
 
 private:
@@ -48,6 +50,12 @@ private:
 
 std::unique_ptr<Context> 
 parse_wasm(BaseContext& llvmCtx, const char *file_name);
+
+llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Type& ty);
+llvm::Type* convertType(llvm::LLVMContext& llvmContext, const wabt::Type& ty);
+llvm::FunctionType* convertFuncType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
+llvm::Type* convertReturnType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
+
 
 }
 #endif
