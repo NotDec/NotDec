@@ -1,8 +1,46 @@
 #include "frontend/wasm/parser.h"
+#include "frontend/wasm/parser-block.h"
 
 
 namespace notdec::frontend::wasm {
 
+std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, const char *file_name) {
+    using namespace wabt;
+    std::vector<uint8_t> file_data;
+    Result result = ReadFile(file_name, &file_data);
+    std::unique_ptr<WastLexer> lexer = WastLexer::CreateBufferLexer(
+      file_name, file_data.data(), file_data.size());
+
+    
+    if (!Succeeded(result)) {
+        std::cerr << "Read wat file failed." << std::endl;
+        return std::unique_ptr<Context>(nullptr);
+    }
+    // Context ctx(llvmCtx);
+    std::unique_ptr<Context> ret = std::make_unique<Context>(llvmCtx);
+
+    Errors errors;
+    Features s_features;
+    // std::unique_ptr<FileStream> s_log_stream = FileStream::CreateStderr();
+    WastParseOptions options(s_features);
+    result = ParseWatModule(lexer.get(), (&(ret->module)), &errors, &options);
+    if (!Succeeded(result)) {
+        std::cerr << "Read wat file failed." << std::endl;
+        return std::unique_ptr<Context>(nullptr);
+    }
+    bool s_validate = true;
+    if (s_validate) {
+        ValidateOptions options(s_features);
+        result = ValidateModule(ret->module.get(), &errors, options);
+        if (!Succeeded(result)) {
+            std::cerr << "Wat validation failed." << std::endl;
+            return std::unique_ptr<Context>(nullptr);
+        }
+    }
+    // do generation
+    ret->visitModule();
+    return ret;
+}
 
 std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name) {
     using namespace wabt;
@@ -11,6 +49,7 @@ std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name)
     
     // Context ctx(llvmCtx);
     std::unique_ptr<Context> ret = std::make_unique<Context>(llvmCtx);
+    ret->module = std::make_unique<Module>();
     if (!Succeeded(result)) {
         std::cerr << "Read wasm file failed." << std::endl;
         return std::unique_ptr<Context>(nullptr);
@@ -23,7 +62,7 @@ std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name)
                             true, kStopOnFirstError,
                             true);
     result = ReadBinaryIr(file_name, file_data.data(), file_data.size(),
-                        options, &errors, &(ret->module));
+                        options, &errors, ret->module.get());
     if (!Succeeded(result)) {
         std::cerr << "Read wasm file failed." << std::endl;
         return std::unique_ptr<Context>(nullptr);
@@ -31,7 +70,7 @@ std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name)
     bool s_validate = true;
     if (s_validate) {
         ValidateOptions options(s_features);
-        result = ValidateModule(&(ret->module), &errors, options);
+        result = ValidateModule(ret->module.get(), &errors, options);
         if (!Succeeded(result)) {
             std::cerr << "Wasm validation failed." << std::endl;
             return std::unique_ptr<Context>(nullptr);
@@ -45,8 +84,8 @@ std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name)
 void Context::visitModule() {
     using namespace wabt;
     // change module name from file name to wasm module name if there is
-    if (!module.name.empty()) {
-        llvmModule.setModuleIdentifier(module.name);
+    if (!module->name.empty()) {
+        llvmModule.setModuleIdentifier(module->name);
     }
     if(this->_func_index != 0 || this->_glob_index != 0) {
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Cannot add module when globals is not empty" << std::endl;
@@ -54,7 +93,7 @@ void Context::visitModule() {
     }
 
     // visit imports & build function index map
-    for (Import* import : this->module.imports) {
+    for (Import* import : this->module->imports) {
         switch (import->kind())
         {
         case ExternalKind::Func:
@@ -80,36 +119,49 @@ void Context::visitModule() {
         }
     }
     // visit global
-    for (Global* gl : this->module.globals) {
+    for (Global* gl : this->module->globals) {
         visitGlobal(*gl, false);
     }
 
     // visit memory and data, create memory contentt
-    for (Memory* mem: this->module.memories) {
+    for (Memory* mem: this->module->memories) {
         declareMemory(*mem, false);
     }
+
     // TODO data
+
+    std::vector<llvm::Function*> nonImportFuncs;
     // iterate without import function
     // see wabt src\wat-writer.cc WatWriter::WriteModule
-    for (ModuleField& field : module.fields) {
+    for (ModuleField& field : module->fields) {
         if (field.type() != ModuleFieldType::Func) {
             continue;
         }
         Func& func = cast<FuncModuleField>(&field)->func;
-        visitFunc(func);
+        llvm::Function* function = declareFunc(func, false);
+        nonImportFuncs.push_back(function); 
+    }
+    std::size_t i = 0;
+    for (ModuleField& field : module->fields) {
+        if (field.type() != ModuleFieldType::Func) {
+            continue;
+        }
+        Func& func = cast<FuncModuleField>(&field)->func;
+        visitFunc(func, nonImportFuncs.at(i));
+        i++;
     }
     // for (Func* func: this->module.funcs) {
     //     std::cout << func->name << std::endl;
     //     std::cout << "  " << func->exprs.size() << std::endl;
     // }
     // visit export and change visibility
-    for (Export* export_: this->module.exports) {
+    for (Export* export_: this->module->exports) {
         Index index;
         // Func* func;
         switch ((*export_).kind)
         {
         case ExternalKind::Func:
-            index = module.GetFuncIndex(export_->var);
+            index = module->GetFuncIndex(export_->var);
             // func = module.GetFunc(export_->var);
             // std::cout << "export " << func->name << std::endl;
             // std::cout << "export " << this->funcs[index]->getName().str() << std::endl;
@@ -120,23 +172,23 @@ void Context::visitModule() {
 
         case ExternalKind::Table:
             // TODO
-            index = module.GetTableIndex(export_->var);
+            index = module->GetTableIndex(export_->var);
             break;
 
         case ExternalKind::Memory:
-            index = module.GetMemoryIndex(export_->var);
+            index = module->GetMemoryIndex(export_->var);
             this->mems[index]->setInitializer(nullptr);
             this->mems[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
             break;
 
         case ExternalKind::Global:
-            index = module.GetGlobalIndex(export_->var);
+            index = module->GetGlobalIndex(export_->var);
             this->globs[index]->setInitializer(nullptr);
             this->globs[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
             break;
 
         case ExternalKind::Tag:
-            index = module.GetTagIndex(export_->var);
+            index = module->GetTagIndex(export_->var);
             break;
         
         default:
@@ -144,41 +196,61 @@ void Context::visitModule() {
         }
     }
     // visit elem and create function pointer array
-    assert((funcs.size() == _func_index));
+    assert((this->funcs.size() == _func_index));
 }
 
 const std::string LOCAL_PREFIX = "_local_";
 const std::string PARAM_PREFIX = "_param_";
 
-void Context::visitFunc(wabt::Func& func) {
+void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
     using namespace llvm;
-    Function* function = declareFunc(func, false);
-    setFuncArgName(*function, func.decl.sig);
-    BasicBlock* entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
+    
+    BasicBlock* allocaBlock = llvm::BasicBlock::Create(llvmContext, "allocator", function);
 
-    // BasicBlock* returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
     // auto returnPHIs = createPHIs(returnBlock, func.decl.sig.result_types);
     
     IRBuilder<> irBuilder(llvmContext);
-    irBuilder.SetInsertPoint(entryBasicBlock);
-    std::vector<llvm::Value*> locals;
-    // handle locals
+    irBuilder.SetInsertPoint(allocaBlock);
+    std::unique_ptr<std::vector<llvm::Value*>> locals = std::make_unique<std::vector<llvm::Value*>>();
+
+    // handle locals (params)
     Function::arg_iterator llvmArgIt = function->arg_begin();
     wabt::Index numParam = func.GetNumParams();
     for (wabt::Index i = 0;i<numParam;i++) {
         AllocaInst* alloca = irBuilder.CreateAlloca(convertType(llvmContext, func.GetParamType(i)), nullptr, PARAM_PREFIX + std::to_string(i));
-        locals.push_back(alloca);
+        locals->push_back(alloca);
         irBuilder.CreateStore(&*llvmArgIt, alloca);
         ++llvmArgIt;
     }
+    // handle locals
     wabt::Index numLocal = func.GetNumLocals();
     for (wabt::Index i = 0;i<numLocal;i++) {
         AllocaInst* alloca = irBuilder.CreateAlloca(convertType(llvmContext, func.local_types[i]), nullptr, LOCAL_PREFIX + std::to_string(numParam + i));
-        locals.push_back(alloca);
+        locals->push_back(alloca);
         irBuilder.CreateStore(convertZeroValue(llvmContext, func.local_types[i]), alloca);
     }
-    // BlockContext bctx();
 
+    // alloca -> entry, ensure alloca will only execute once.
+    BasicBlock* entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
+    BasicBlock* returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
+    irBuilder.CreateBr(entryBasicBlock);
+
+    // create implicit entry -> return;
+    irBuilder.SetInsertPoint(entryBasicBlock);
+    irBuilder.SetInsertPoint(irBuilder.CreateBr(returnBlock)); // insert before jump
+
+    BlockContext bctx(*this, *function, irBuilder, std::move(locals));
+    bctx.visitBlock(wabt::LabelType::Func, entryBasicBlock, returnBlock, func.decl, func.exprs);
+
+    // handle implicit return
+    // TODO MultiValue
+    irBuilder.SetInsertPoint(returnBlock);
+    if (func.GetNumResults() == 1) {
+        irBuilder.CreateRet(bctx.stack.back()); bctx.stack.pop_back();
+    } else {
+        assert(func.GetNumResults() == 0);
+        irBuilder.CreateRetVoid();
+    }
 }
 
 void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
@@ -208,24 +280,7 @@ llvm::Constant* Context::visitInitExpr(wabt::ExprList& expr) {
 
     if (expr.front().type() == ExprType::Const) {
         const Const& const_ = cast<ConstExpr>(&expr.front())->const_;
-        uint64_t data[2];
-        switch (const_.type()) {
-        case Type::I32: 
-            return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), const_.u32(), false);
-        case Type::I64:
-            return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), const_.u64(), false);
-        case Type::F32:
-            return llvm::ConstantFP::get(convertType(llvmContext, const_.type()), llvm::APFloat(ieee_float(const_.f32_bits())));
-        case Type::F64:
-            return llvm::ConstantFP::get(convertType(llvmContext, const_.type()), llvm::APFloat(ieee_double(const_.f64_bits())));
-        case Type::V128:
-            data[0] = const_.vec128().u64(0);
-            data[1] = const_.vec128().u64(1);
-            return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), llvm::APInt(128, llvm::ArrayRef<uint64_t>(data, 2)));
-        default:
-            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: InitExpr type unknown: " << const_.type().GetName() << std::endl;
-            std::abort();
-      }
+        return visitConst(llvmContext, const_);
     } else if (expr.front().type() == ExprType::GlobalGet) {
         // TODO
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: InitExpr with global.get is currently not supported." << std::endl;
@@ -266,6 +321,7 @@ llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
             llvmModule);
     this->funcs.push_back(function);
     this->_func_index ++;
+    setFuncArgName(*function, func.decl.sig);
     return function;
 }
 
@@ -279,7 +335,16 @@ void Context::setFuncArgName(llvm::Function& func, const wabt::FuncSignature& de
     }
 }
 
-// TODO 从类里提出来
+llvm::Function* Context::findFunc(wabt::Var& var) {
+    wabt::Index ind;
+    if (var.is_index()) {
+        ind = var.index();
+    } else {
+        ind = module->func_bindings.FindIndex(var);
+    }
+    return funcs.at(ind);
+}
+
 llvm::FunctionType* convertFuncType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl) {
     using namespace llvm;
     Type** llvmArgTypes;
@@ -292,7 +357,7 @@ llvm::FunctionType* convertFuncType(llvm::LLVMContext& llvmContext, const wabt::
     }
     // TODO multi return
     if (decl.GetNumResults() > 1) {
-        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Multi result is not currently supported." << std::endl;
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Multi result is currently not supported." << std::endl;
         std::abort();
     }
     Type* llvmReturnType = convertReturnType(llvmContext, decl);

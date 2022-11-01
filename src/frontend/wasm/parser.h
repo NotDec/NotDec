@@ -6,13 +6,13 @@
 // wabt header
 #include "src/binary-reader.h"
 #include "src/binary-reader-ir.h"
+#include "src/wast-parser.h"
 #include "src/ir.h"
 #include "src/stream.h"
 #include "src/validator.h"
 #include "src/cast.h"
 
 #include "frontend/context.h"
-#include "frontend/wasm/parser-block.h"
 #include "utils.h"
 
 namespace notdec::frontend::wasm {
@@ -24,7 +24,7 @@ struct Context {
     BaseContext& baseCtx;
     llvm::LLVMContext& llvmContext;
     llvm::Module& llvmModule;
-    wabt::Module module;
+    std::unique_ptr<wabt::Module> module;
     // mapping from global index to llvm thing
     std::vector<llvm::GlobalVariable*> globs;
     std::vector<llvm::Function*> funcs;
@@ -35,12 +35,13 @@ struct Context {
 
     void visitModule();
     void visitGlobal(wabt::Global& gl, bool isExternal);
-    void visitFunc(wabt::Func& func);
+    void visitFunc(wabt::Func& func, llvm::Function* function);
     llvm::Constant* visitInitExpr(wabt::ExprList& expr);
 
     llvm::Function* declareFunc(wabt::Func& func, bool isExternal);
     llvm::GlobalVariable* declareMemory(wabt::Memory& mem, bool isExternal);
     void setFuncArgName(llvm::Function& function, const wabt::FuncSignature& decl);
+    llvm::Function* findFunc(wabt::Var& var);
 
 private:
     wabt::Index _func_index = 0;
@@ -48,8 +49,8 @@ private:
     wabt::Index _mem_index = 0;
 };
 
-std::unique_ptr<Context> 
-parse_wasm(BaseContext& llvmCtx, const char *file_name);
+std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name);
+std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, const char *file_name);
 
 llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Type& ty);
 llvm::Type* convertType(llvm::LLVMContext& llvmContext, const wabt::Type& ty);

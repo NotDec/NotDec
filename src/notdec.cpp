@@ -57,6 +57,10 @@ usage:
         std::cout << "using wasm frontend." << std::endl;
         notdec::frontend::wasm::parse_wasm(ctx, infilename);
         // TODO
+    } else if (insuffix == ".wat") {
+        std::cout << "using wat frontend." << std::endl;
+        notdec::frontend::wasm::parse_wat(ctx, infilename);
+        // TODO
     }
 #endif
     else {

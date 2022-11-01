@@ -20,6 +20,8 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
    - 目前直接通过
    - 未来考虑通过find_package直接使用： https://github.com/WebAssembly/wabt/pull/1980
 
+- 首先由于最后都是转IR，所以BaseContext保存LLVM相关的Context。其实可以作为全局变量，为了以后可能的并行，把这类全局变量都搞到一个类里。
+- wasm::Context是相关生成的代码依附的数据结构，保存比如wabt::Module这种Context。为了方便应用，增加了对BaseContext的引用，对llvmCtx的引用等等。
 
 ## Specification
 
@@ -54,14 +56,49 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 参考WAVM，见顶部现有工具一节。参考栈验证逻辑。能保留的最好直接解码为SSA。这里的block直接考虑[Multi Value Extension](https://github.com/WebAssembly/multi-value)，防止以后架构需要重构，但是函数返回多个值的先不支持。
 
 - 每个栈上元素对应一个SSA的Value。某种形式上可以维护一个Value栈（作为局部变量，不需要作为Context）。
-- 控制流跳转维护一个block的嵌套栈，保存br时跳转的目标。
-- 处理Block的时候，这里用递归和用栈都可以。选择用实现起来更简单的递归。
+- 控制流跳转维护一个block的嵌套栈，保存br时跳转的目标。关键是如何在找到跳转目标的同时，把栈弹到对应的值。
+- 处理Block的时候，这里用递归和用栈都可以。选择用实现起来更简单的递归。aWsm好像是递归的写法，WAVM好像是用栈，复杂一点。
 
 ### 控制流指令的处理，与SSA生成
+
+递归的基本块生成算法：
+
+1. ~~根据块的签名，块的参数压入value stack。。（没必要再用一个额外的stack防止访问更深元素，因为调用过了wabt的validate）~~ 
+1. 根据块的类型，设置好整体的跳转结构。然后创建Phi节点，设置Phi节点和参数/返回值的对应关系。
+1. 同时设置好BreakoutTarget结构体，压入栈中：
+   1. 根据是loop还是block类型的块创建Phi
+   1. 保存当前value栈的情况。
+1. 依次遍历每个指令生成。
+   1. 普通的指令根据指令语义，从value stack中取值，
+   1. 如果遇到了跳转指令：
+      1. 如果跳转的目标是普通基本块，则从栈上取值加入到对应的Phi中，
+1. 遇到块结束的时候，根据BreakoutTarget从栈上弹出到平衡状态。主要是为了这里去维护每个控制流对应的栈标签。
+1. Block结束时隐含跳转到结束块。如果是函数结束，处理函数返回。
+
+函数体好像大致也算一个Block块。
+
+控制流指令的对应：
 
 1. block，loop分别对应在结尾，开头，增加一个label。注意到block只需要为return的值创建Phi，loop需要对参数创建Phi。
 1. if对应一些label和br_if，br代表直接跳转，br_if同理，根据语义找到对应的跳转目标，生成条件跳转即可。
 1. br_table看似比较麻烦，看了下和LLVM的switch语句对应得非常好啊。也是根据不同的值跳转到不同的边。
+
+最开始的时候先写一个类型检查，打印出每个指令后当前栈上的类型情况的代码，然后再加生成相关的东西。
+
+wabt那边代表Block的结构体看wabt的`src\ir.h` 383行`struct Block`这边。
+- `std::string label` 直接放到BasicBlock的名字里面
+- `BlockDeclaration decl` 和`FuncDeclaration`是一个类型
+- `ExprList exprs`
+- `Location end_loc` 代表输入文件里的位置，暂时不管，除非后面想加debug信息
+
+多个参数和返回值的时候，顺序：
+- 函数参数逆序遍历（pop），同时从栈上pop出来。
+- 函数返回值顺序遍历，同时push到栈上。
+
+查OpCode看`wabt/src/opcode.def`。Opcode和ExprType之间的关系看`src\lexer-keywords.txt`，或者看`src\binary-reader.cc`里面对应的Opcode创建了什么Expr，~~或者看`src\binary-reader-ir.cc`里找对应的指令到底创建了哪种Expr类。~~
+
+这里面的类继承关系看 `src\ir.h`。其实就是搞了一个ExprType，然后在onXXX指令的函数处直接创建了这个类型的Expr，导致opcode和expr之间没有明确的对应关系。
+
 
 ### Wasm中的非直接跳转（复习）
 

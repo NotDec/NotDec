@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/bin/notdec",
-            "args": ["-i", "test/emcc-print.wasm", "-o", "test/emcc-print.ll"],
+            "args": ["-i", "test/wasm/emcc-print.wat", "-o", "test/wasm/emcc-print.wasm.ll"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
