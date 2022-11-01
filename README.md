@@ -1,3 +1,5 @@
+All rights reserved (currently). You cannot use this in any public published paper without our consent. We plan to set a MIT license after our work is published.
+
 目标：a webassembly and ethereum VM bytecode decompiler. 
 
 侧重于前中端（转IR与IR的优化。）
