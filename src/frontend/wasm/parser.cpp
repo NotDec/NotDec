@@ -113,8 +113,8 @@ void Context::visitModule() {
         case ExternalKind::Tag:
         case ExternalKind::Table:
         default:
-            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unknown import kind" << std::endl;
-            std::abort();
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unknown import kind: " << g_kind_name[static_cast<size_t>(import->kind())] << std::endl;
+            // std::abort();
             break;
         }
     }
@@ -124,8 +124,15 @@ void Context::visitModule() {
     }
 
     // visit memory and data, create memory contentt
-    for (Memory* mem: this->module->memories) {
-        declareMemory(*mem, false);
+    // for (Memory* mem: this->module->memories) {
+    //     declareMemory(*mem, false);
+    // }
+    for (ModuleField& field : module->fields) {
+        if (field.type() != ModuleFieldType::Memory) {
+            continue;
+        }
+        Memory& mem = cast<MemoryModuleField>(&field)->memory;
+        declareMemory(mem, false);
     }
 
     // TODO data
@@ -190,7 +197,7 @@ void Context::visitModule() {
         case ExternalKind::Tag:
             index = module->GetTagIndex(export_->var);
             break;
-        
+
         default:
             break;
         }
@@ -317,12 +324,22 @@ llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
     Function* function = Function::Create(
             funcType,
             isExternal ? Function::ExternalLinkage : Function::InternalLinkage,
-            func.name,
+            removeDollar(func.name),
             llvmModule);
     this->funcs.push_back(function);
     this->_func_index ++;
     setFuncArgName(*function, func.decl.sig);
     return function;
+}
+
+std::string removeDollar(std::string name) {
+    if (name.length() == 0) {
+        return name;
+    }
+    if (name.at(0) == '$') {
+        return name.substr(1);
+    }
+    return name;
 }
 
 void Context::setFuncArgName(llvm::Function& func, const wabt::FuncSignature& decl) {

@@ -129,7 +129,7 @@ llvm::Constant* visitConst(llvm::LLVMContext &llvmContext, const wabt::Const& co
     using namespace wabt;
     uint64_t data[2];
     switch (const_.type()) {
-    case Type::I32: 
+    case Type::I32:
         return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), const_.u32(), false);
     case Type::I64:
         return llvm::ConstantInt::get(convertType(llvmContext, const_.type()), const_.u64(), false);

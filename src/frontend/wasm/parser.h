@@ -57,6 +57,7 @@ llvm::Type* convertType(llvm::LLVMContext& llvmContext, const wabt::Type& ty);
 llvm::FunctionType* convertFuncType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
 llvm::Type* convertReturnType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
 
+std::string removeDollar(std::string name);
 
 }
 #endif

@@ -25,3 +25,7 @@ RUN sed -i "s/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g" /etc/apt/source
 
 USER vscode
 
+# TODO
+# curl https://wasmtime.dev/install.sh -sSf | bash
+# wasi-sdk install to /opt, add to path
+
