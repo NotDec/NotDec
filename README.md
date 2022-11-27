@@ -18,6 +18,27 @@ All rights reserved (currently). You cannot use this in any public published pap
 
 ### 不知道接下来怎么办？（资料收集）
 
+学习阶段：
+
+1. LLVM IR基础：只要达到能手写LLVM IR的程度就行。即主要理解各种语言特性对应的是什么样的LLVM IR代码。同时理解带alloca的半SSA形式，即alloca里的变量是非SSA，外面的是SSA。
+   - llvm-tutor 
+   - ollvm源码
+2. SSA与编译优化基础
+   - [《Engineering a compiler》](https://book.douban.com/subject/20436488/) 上来先看9.3章，深入研读。其他的章节没那么重要
+   - 再找找其他讲过SSA的中文书？
+   
+   下面有两个实验，动手做了印象才会深
+   - [mem2reg 实验指导 · GitBook (buaa-se-compiling.github.io)](https://buaa-se-compiling.github.io/miniSysY-tutorial/challenge/mem2reg/help.html)
+   - [Lv9+.4. SSA 形式 - 北京大学编译实践课程在线文档 | 北大编译实践在线文档 (pku-minic.github.io)](https://pku-minic.github.io/online-doc/#/lv9p-reincarnation/ssa-form)
+   
+   其他不错的资料：
+   - [《SSA book》](https://pfalcon.github.io/ssabook/latest/book-v1.pdf)
+   - [《simple and efficient ssa construction》](https://pp.info.uni-karlsruhe.de/uploads/publikationen/braun13cc.pdf)
+
+3. 反编译
+
+#### 直接相关的资料
+
 多看看现有的资料：
 
 1. Static Single Assignment for Decompilation vanEmmerik_ssa https://yurichev.com/mirrors/vanEmmerik_ssa.pdf
@@ -55,6 +76,10 @@ All rights reserved (currently). You cannot use this in any public published pap
 2. 
 
 ### 规划：反编译阶段
+
+![反编译的各个阶段](docs/imgs/decompiler-architecture.png)
+
+图片来自[Static Single Assignment for Decompilation](https://yurichev.com/mirrors/vanEmmerik_ssa.pdf)
 
 反编译中的关键算法： Type Recovery（通过指令约束推导类型） Structual Analysis(恢复控制流)
 
