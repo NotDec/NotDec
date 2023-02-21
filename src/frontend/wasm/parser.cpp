@@ -44,6 +44,7 @@ std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, const char *file_name) 
 
 std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name) {
     using namespace wabt;
+    // 这部分代码来自WABT，解析wasm文件
     std::vector<uint8_t> file_data;
     Result result = ReadFile(file_name, &file_data);
     
@@ -146,6 +147,9 @@ void Context::visitModule() {
         }
         Func& func = cast<FuncModuleField>(&field)->func;
         llvm::Function* function = declareFunc(func, false);
+        // if (baseCtx.opt.test_mode) {
+        //     function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+        // }
         nonImportFuncs.push_back(function); 
     }
     std::size_t i = 0;
@@ -324,7 +328,7 @@ llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
     Function* function = Function::Create(
             funcType,
             isExternal ? Function::ExternalLinkage : Function::InternalLinkage,
-            removeDollar(func.name),
+            baseCtx.opt.recompile ? removeDollar(func.name): func.name,
             llvmModule);
     this->funcs.push_back(function);
     this->_func_index ++;
@@ -434,5 +438,4 @@ llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Typ
             std::abort();
     }
 }
-
 }

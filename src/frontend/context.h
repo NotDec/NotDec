@@ -7,13 +7,20 @@
 
 namespace notdec::frontend {
 
+// default to zero or false
+struct options {
+    bool recompile;
+    bool test_mode;
+};
+
 struct BaseContext {
+    options opt;
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder;
     llvm::Module mod;
     std::map<std::string, llvm::Value *> namedValues;
-    BaseContext(const char* name)
-        : context(), builder(context), mod(name, context) {}
+    BaseContext(const char* name, options opt)
+        : opt(opt), context(), builder(context), mod(name, context) {}
 };
 
 }

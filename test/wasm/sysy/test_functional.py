@@ -6,11 +6,11 @@ NC='\033[0m' # No Color
 
 def get_decompile_commands(wasm_path, out_path):
     cwd = os.path.dirname(os.path.realpath(__file__))
-    return [f'{cwd}/../../../build/bin/notdec', '-i', wasm_path, '-o', out_path]
+    return [f'{cwd}/../../../build/bin/notdec', '-i', wasm_path, '-o', out_path, "--test-mode", "--recompile"]
 
 def get_run_commands(ir_path):
     cwd = os.path.dirname(os.path.realpath(__file__))
-    return ['lli-13', os.path.join(cwd, 'sylib.ll'), ir_path]
+    return ['lli-13', ir_path, os.path.join(cwd, 'sylib.ll')]
 
 def do_decompile(wasm_path, out_path):
     command = get_decompile_commands(wasm_path, out_path)
@@ -55,7 +55,7 @@ def test_run(target, out_file, in_file=None):
         print(RED+"Result Mismatch"+NC)
         return False
 
-class DefaultWidgetSizeTestCase(unittest.TestCase):
+class DefaultTestCase(unittest.TestCase):
     def test_functional(self):
         cwd = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(cwd, "functional")
@@ -69,15 +69,14 @@ class DefaultWidgetSizeTestCase(unittest.TestCase):
 
             print(RED+f'=========== decompiling {file} =========='+NC)
             self.assertTrue(do_decompile(wasm, ir), "decompilation error")
-            
-            # print(RED+f'=========== running {file} =========='+NC)
-            # in_file = file_no_suffix+".in"
-            # if not os.path.exists(file_no_suffix+".in"):
-            #     in_file = None
-            # ret = test_run(ir, file_no_suffix+".out", in_file)
-            # self.assertTrue(ret)
 
-            
+            print(RED+f'=========== running {file} =========='+NC)
+            in_file = file_no_suffix+".in"
+            if not os.path.exists(file_no_suffix+".in"):
+                in_file = None
+            ret = test_run(ir, file_no_suffix+".out", in_file)
+            self.assertTrue(ret)
 
-
-
+if __name__ == '__main__':
+    import unittest
+    unittest.main()

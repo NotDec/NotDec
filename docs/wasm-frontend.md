@@ -30,7 +30,7 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 1. [LLVM Language Reference Manual](https://llvm.org/docs/LangRef.html) 
 2. [2019 EuroLLVM Developers’ Meeting: V. Bridgers & F. Piovezan “LLVM IR Tutorial - Phis, GEPs ...” - YouTube](https://www.youtube.com/watch?v=m8G_S5LwlTo) 
 
-和WASM的语义：[Modules — WebAssembly 2.0 (Draft 2022-09-27)](https://webassembly.github.io/spec/core/binary/modules.html) 注意现在直接翻标准是新release的2.0标准了。我们暂时先支持1.0标准，wabt现在也仅支持1.0，如果文件头里写version为2会报错。1.0的标准可以看[这里](https://www.w3.org/TR/wasm-core-1/#syntax-importdesc)
+和WASM的语义：[Modules — WebAssembly 2.0 (Draft 2022-09-27)](https://webassembly.github.io/spec/core/binary/modules.html) 注意现在直接翻标准是新release的2.0标准了。**我们暂时先支持1.0标准**，wabt现在也仅支持1.0，如果文件头里写version为2会报错。1.0的标准可以看[这里](https://www.w3.org/TR/wasm-core-1/#syntax-importdesc)
 
 1. 名字比较难处理，wasm的[name section](https://github.com/WebAssembly/extended-name-section/blob/main/proposals/extended-name-section/Overview.md)允许重名，而且wasm中因为是二进制格式，理论上名字可以取任意utf-8。那边wat格式的定义也有类似的问题。但是wabt似乎已经处理了相关的问题？
    - 在src\binary-reader-ir.cc里的BinaryReaderIR::GetUniqueName函数，如果重名了会加数字后缀。

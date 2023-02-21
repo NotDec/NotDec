@@ -81,3 +81,11 @@ void putf(char a[], ...) {
 //   _sysy_h[_sysy_idx] += _sysy_m[_sysy_idx] / 60 ; _sysy_m[_sysy_idx] %= 60;
 //   _sysy_idx ++;
 // }
+
+// to be compatiable with ir
+// extern int __original_main(void);
+
+// int main() {
+//   __original_main();
+//   return 0;
+// }

@@ -32,8 +32,10 @@ std::string getSuffix(std::string fname) {
 }
 
 int main(int argc, char * argv[]) {
-    if(cmdOptionExists(argv, argv+argc, "-h") || cmdOptionExists(argv, argv+argc, "--help"))
-    {
+    notdec::frontend::options opts;
+
+    // parse cmdline
+    if(cmdOptionExists(argv, argv+argc, "-h") || cmdOptionExists(argv, argv+argc, "--help")) {
 usage:
         std::cout << "Usage: " << argv[0] << "-i wasm_file -o llvm_ir_file" << std::endl;
         return 0;
@@ -45,9 +47,17 @@ usage:
     {
         goto usage;
     }
+
+    if (cmdOptionExists(argv, argv+argc, "--recompile")) {
+        opts.recompile = true;
+    }
+
+    if (cmdOptionExists(argv, argv+argc, "--test-mode")) {
+        opts.test_mode = true;
+    }
     
     std::string insuffix = getSuffix(infilename);
-    notdec::frontend::BaseContext ctx(infilename);
+    notdec::frontend::BaseContext ctx(infilename, opts);
     if (insuffix.size() == 0) {
         std::cout << "no extension for input file. exiting." << std::endl;
         return 0;
