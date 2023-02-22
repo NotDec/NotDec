@@ -14,3 +14,8 @@
 1. 是否使用智能指针：https://stackoverflow.com/questions/106508/what-is-a-smart-pointer-and-when-should-i-use-one
 1. 用引用还是指针：https://stackoverflow.com/questions/7058339/when-to-use-references-vs-pointers
 1. 引用和指针的区别：https://stackoverflow.com/questions/57483/what-are-the-differences-between-a-pointer-variable-and-a-reference-variable
+
+### 注意事项
+
+1. 注意相关STL函数使用要带上check。
+    1. vector使用back一定要检查是否是空！！！ `assert(stack.size() > 0);`

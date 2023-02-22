@@ -35,6 +35,7 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
                 llvm::PHINode* phi = irBuilder.CreatePHI(convertType(llvmContext, decl.GetParamType(i)), 0, entry->getName() + "_" + std::to_string(i));
                 phis.push_front(phi);
                 // pop stack to Phi
+                assert(stack.size() > 0);
                 phi->addIncoming(stack.back(), entry); stack.pop_back();
             }
             // 把栈上参数转换为Phi
@@ -61,6 +62,7 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
     if (ret2phi) {
         // 从栈上pop值出来，准备放到Phi里。
         for (auto it = phis.rbegin(); it != phis.rend(); ++it) {
+            assert(stack.size() > 0);
             (*it)->addIncoming(stack.back(), entry); stack.pop_back();
         }
         for (auto phi: phis) {
@@ -87,9 +89,9 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             case ExprType::Load:
                 visitLoadInst(cast<LoadExpr>(&expr));
                 break;
+            case ExprType::LocalGet:
+
             case ExprType::Store:
-                
-                
             default:
                 std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
                 // really abort?
@@ -106,6 +108,7 @@ void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
     // using namespace wabt;
     using namespace llvm;
     GlobalVariable* mem = this->ctx.mems.at(0);
+    assert(stack.size() > 0);
     Value* base = stack.back(); stack.pop_back();
 
     // 会被IRBuilder处理，所以不用搞自己的特判优化。
@@ -129,6 +132,7 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     case wabt::Opcode::I64Add:
     case wabt::Opcode::F32Add:
     case wabt::Opcode::F64Add:
+        assert(stack.size() >= 2);
         p1 = stack.back(); stack.pop_back();
         p2 = stack.back(); stack.pop_back();
         ret = irBuilder.CreateAdd(p1, p2);
