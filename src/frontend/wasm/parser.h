@@ -37,6 +37,7 @@ struct Context {
     void visitGlobal(wabt::Global& gl, bool isExternal);
     void visitFunc(wabt::Func& func, llvm::Function* function);
     llvm::Constant* visitInitExpr(wabt::ExprList& expr);
+    llvm::GlobalVariable* visitDataSegment(wabt::DataSegment& ds);
 
     llvm::Function* declareFunc(wabt::Func& func, bool isExternal);
     llvm::GlobalVariable* declareMemory(wabt::Memory& mem, bool isExternal);
@@ -56,6 +57,7 @@ llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Typ
 llvm::Type* convertType(llvm::LLVMContext& llvmContext, const wabt::Type& ty);
 llvm::FunctionType* convertFuncType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
 llvm::Type* convertReturnType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
+llvm::Constant* createMemInitializer(llvm::LLVMContext& llvmContext, llvm::Type* memty, uint64_t offset, std::vector<uint8_t> data);
 
 std::string removeDollar(std::string name);
 

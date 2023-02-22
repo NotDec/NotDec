@@ -72,6 +72,7 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
 
 void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs) {
     using namespace wabt;
+    // 
     for (Expr& expr : exprs) {
         switch (expr.type()) {
             case ExprType::Binary:
@@ -83,12 +84,39 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             case ExprType::Call:
                 visitCallInst(cast<CallExpr>(&expr));
                 break;
+            case ExprType::Load:
+                visitLoadInst(cast<LoadExpr>(&expr));
+                break;
+            case ExprType::Store:
+                
+                
             default:
                 std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
                 // really abort?
                 // std::abort();
         }
     }
+}
+
+// 1. addr = mem + stack op
+// 2. addr += offset
+// 3. bit cast to expected ptr type
+// 4. load
+void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
+    // using namespace wabt;
+    using namespace llvm;
+    GlobalVariable* mem = this->ctx.mems.at(0);
+    Value* base = stack.back();
+
+    // 会被IRBuilder处理，所以不用搞自己的特判优化。
+    // if (expr->offset != 0) {
+    base = irBuilder.CreateAdd(base, llvm::ConstantInt::get(base->getType(), expr->offset, false), "calcOffset");
+    // }
+    Value* addr = irBuilder.CreateGEP(mem->getValueType(), mem, makeArrayRef(base));
+    Type* targetType = convertType(llvmContext, expr->opcode.GetResultType());
+    addr = irBuilder.CreateBitCast(addr, PointerType::getUnqual(targetType));
+    Value* result = irBuilder.CreateLoad(targetType, addr, "loadResult");
+    stack.push_back(result);
 }
 
 void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
@@ -145,6 +173,12 @@ llvm::Constant* visitConst(llvm::LLVMContext &llvmContext, const wabt::Const& co
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: InitExpr type unknown: " << const_.type().GetName() << std::endl;
         std::abort();
     }
+}
+
+int64_t unwrapIntConstant(llvm::Constant* c) {
+    using namespace llvm;
+    assert(isa<ConstantInt>(c));
+    return cast<ConstantInt>(c)->getSExtValue();
 }
 
 const char* labelTypeToString(wabt::LabelType lty) {

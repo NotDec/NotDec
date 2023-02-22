@@ -124,16 +124,25 @@ void Context::visitModule() {
         visitGlobal(*gl, false);
     }
 
-    // visit memory and data, create memory contentt
+    // visit memory and data, create memory content
     // for (Memory* mem: this->module->memories) {
     //     declareMemory(*mem, false);
     // }
     for (ModuleField& field : module->fields) {
+        // wabt\src\wat-writer.cc WatWriter::WriteModule
         if (field.type() != ModuleFieldType::Memory) {
             continue;
         }
         Memory& mem = cast<MemoryModuleField>(&field)->memory;
         declareMemory(mem, false);
+    }
+
+    for (ModuleField& field : module->fields) {
+        if (field.type() != ModuleFieldType::DataSegment) {
+            continue;
+        }
+        DataSegment& ds = cast<DataSegmentModuleField>(&field)->data_segment;
+        visitDataSegment(ds);
     }
 
     // TODO data
@@ -188,14 +197,16 @@ void Context::visitModule() {
 
         case ExternalKind::Memory:
             index = module->GetMemoryIndex(export_->var);
-            this->mems[index]->setInitializer(nullptr);
+            // this->mems[index]->setInitializer(nullptr);
             this->mems[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+            this->mems[index]->setDSOLocal(false);
             break;
 
         case ExternalKind::Global:
             index = module->GetGlobalIndex(export_->var);
-            this->globs[index]->setInitializer(nullptr);
+            // this->globs[index]->setInitializer(nullptr);
             this->globs[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+            this->globs[index]->setDSOLocal(false);
             break;
 
         case ExternalKind::Tag:
@@ -208,6 +219,23 @@ void Context::visitModule() {
     }
     // visit elem and create function pointer array
     assert((this->funcs.size() == _func_index));
+}
+
+llvm::GlobalVariable* Context::visitDataSegment(wabt::DataSegment& ds) {
+    using namespace llvm;
+    wabt::Index index = module->GetMemoryIndex(ds.memory_var);
+    if (index >= _mem_index) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: data section mem ref out of bound." << index << std::endl;
+        std::abort();
+    }
+    // LLVM side mem manipulation
+    GlobalVariable* mem = this->mems.at(index);
+    Type* memty = mem->getValueType();
+    assert(!mem->hasInitializer() || isa<ConstantAggregateZero>(* (mem->getInitializer())));
+    llvm::Constant* offset = visitInitExpr(ds.offset);
+    Constant* init = createMemInitializer(llvmContext, memty, unwrapIntConstant(offset), ds.data);
+    mem->setInitializer(init);
+    return mem;
 }
 
 const std::string LOCAL_PREFIX = "_local_";
@@ -269,7 +297,7 @@ void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
     // std::string name = "global_" + std::to_string(i) + "_" + gl->name;
     Type* ty = convertType(llvmContext, gl.type);
     GlobalVariable *gv = new GlobalVariable(llvmModule, ty, !gl.mutable_, 
-        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name);
+        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name.empty() ? "G" + std::to_string(_glob_index) : gl.name);
     if (!isExternal) {
         Constant* init = visitInitExpr(gl.init_expr);
         if (init == nullptr) {
@@ -334,6 +362,17 @@ llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
     this->_func_index ++;
     setFuncArgName(*function, func.decl.sig);
     return function;
+}
+
+llvm::Constant* createMemInitializer(llvm::LLVMContext& llvmContext, llvm::Type* memty, uint64_t offset, std::vector<uint8_t> data) {
+    using namespace llvm;
+    uint64_t memsize = cast<ArrayType>(*memty).getNumElements();
+    assert(data.size() + offset);
+    // TODO store buffer somewhere. create a struct for memory?
+    uint8_t* buffer = new uint8_t[memsize];
+    // copy data
+    ::memcpy(buffer+offset, data.data(), data.size() * sizeof(uint8_t));
+    return ConstantDataArray::getRaw(StringRef((char*)buffer, memsize), memsize, Type::getInt8Ty(llvmContext));
 }
 
 std::string removeDollar(std::string name) {

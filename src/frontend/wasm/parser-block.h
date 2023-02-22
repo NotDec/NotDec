@@ -47,10 +47,12 @@ struct BlockContext
     void visitBinaryInst(wabt::BinaryExpr* expr);
     void visitConstInst(wabt::ConstExpr* expr);
     void visitCallInst(wabt::CallExpr* expr);
+    void visitLoadInst(wabt::LoadExpr* expr);
 };
 
 llvm::Constant* visitConst(llvm::LLVMContext &llvmContext, const wabt::Const& const_);
 const char* labelTypeToString(wabt::LabelType lty);
+int64_t unwrapIntConstant(llvm::Constant* c);
 
 }
 
