@@ -10,10 +10,17 @@ def get_decompile_commands(wasm_path, out_path):
 
 def get_run_commands(ir_path):
     cwd = os.path.dirname(os.path.realpath(__file__))
-    return ['lli-13', ir_path, os.path.join(cwd, 'sylib.ll')]
+    # return ['lli-13', ir_path, os.path.join(cwd, 'sylib.ll')]
+    return [ir_path+'.elf']
+
+def do_compile(ir_path):
+    cwd = os.path.dirname(os.path.realpath(__file__))
+    command = ['clang-13', ir_path, os.path.join(cwd, 'sylib.ll'), '-o', ir_path+'.elf']
+    return os.system(' '.join(command)) == 0
 
 def do_decompile(wasm_path, out_path):
     command = get_decompile_commands(wasm_path, out_path)
+    print(' '.join(command))
     return os.system(' '.join(command)) == 0
 
 def test_run(target, out_file, in_file=None):
@@ -24,10 +31,11 @@ def test_run(target, out_file, in_file=None):
 
     from subprocess import Popen,PIPE,STDOUT
 
+    
     commands = get_run_commands(target)
     print(' '.join(commands))
 
-    p = Popen(commands, stdout=PIPE,  stdin=PIPE, stderr=PIPE)
+    p = Popen(' '.join(commands), stdout=PIPE,  stdin=PIPE, stderr=PIPE, shell=True)
     out, err = p.communicate(input=in_str)
     code = p.returncode
     if len(out) > 0 and out[-1] != ord('\n'):
@@ -71,6 +79,7 @@ class DefaultTestCase(unittest.TestCase):
             self.assertTrue(do_decompile(wasm, ir), "decompilation error")
 
             print(RED+f'=========== running {file} =========='+NC)
+            self.assertTrue(do_compile(ir), "recompilation error")
             in_file = file_no_suffix+".in"
             if not os.path.exists(file_no_suffix+".in"):
                 in_file = None
