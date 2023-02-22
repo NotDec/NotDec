@@ -106,13 +106,14 @@ void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
     // using namespace wabt;
     using namespace llvm;
     GlobalVariable* mem = this->ctx.mems.at(0);
-    Value* base = stack.back();
+    Value* base = stack.back(); stack.pop_back();
 
     // 会被IRBuilder处理，所以不用搞自己的特判优化。
     // if (expr->offset != 0) {
     base = irBuilder.CreateAdd(base, llvm::ConstantInt::get(base->getType(), expr->offset, false), "calcOffset");
     // }
-    Value* addr = irBuilder.CreateGEP(mem->getValueType(), mem, makeArrayRef(base));
+    Value* arr[2] = { ConstantInt::getNullValue(base->getType()) , base};
+    Value* addr = irBuilder.CreateGEP(mem->getValueType(), mem, makeArrayRef(arr, 2)); // Type::getInt8PtrTy(llvmContext)
     Type* targetType = convertType(llvmContext, expr->opcode.GetResultType());
     addr = irBuilder.CreateBitCast(addr, PointerType::getUnqual(targetType));
     Value* result = irBuilder.CreateLoad(targetType, addr, "loadResult");
@@ -120,14 +121,26 @@ void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
 }
 
 void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
+    using namespace llvm;
+    Value *ret = nullptr, *p1, *p2;
     switch (expr->opcode)
     {
     case wabt::Opcode::I32Add:
+    case wabt::Opcode::I64Add:
+    case wabt::Opcode::F32Add:
+    case wabt::Opcode::F64Add:
+        p1 = stack.back(); stack.pop_back();
+        p2 = stack.back(); stack.pop_back();
+        ret = irBuilder.CreateAdd(p1, p2);
         /* code */
         break;
     
     default:
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;
+    }
+    if (ret != nullptr) {
+        stack.push_back(ret);
     }
 }
 

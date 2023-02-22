@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import unittest
 import os,sys,subprocess
 
@@ -31,7 +32,6 @@ def test_run(target, out_file, in_file=None):
 
     from subprocess import Popen,PIPE,STDOUT
 
-    
     commands = get_run_commands(target)
     print(' '.join(commands))
 
