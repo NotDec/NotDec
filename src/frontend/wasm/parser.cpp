@@ -250,14 +250,15 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
     
     IRBuilder<> irBuilder(llvmContext);
     irBuilder.SetInsertPoint(allocaBlock);
-    std::unique_ptr<std::vector<llvm::Value*>> locals = std::make_unique<std::vector<llvm::Value*>>();
+    // std::unique_ptr<std::vector<llvm::Value*>> locals = std::make_unique<std::vector<llvm::Value*>>();
+    std::vector<llvm::Value*> locals = std::vector<llvm::Value*>();
 
     // handle locals (params)
     Function::arg_iterator llvmArgIt = function->arg_begin();
     wabt::Index numParam = func.GetNumParams();
     for (wabt::Index i = 0;i<numParam;i++) {
         AllocaInst* alloca = irBuilder.CreateAlloca(convertType(llvmContext, func.GetParamType(i)), nullptr, PARAM_PREFIX + std::to_string(i));
-        locals->push_back(alloca);
+        locals.push_back(alloca);
         irBuilder.CreateStore(&*llvmArgIt, alloca);
         ++llvmArgIt;
     }
@@ -265,7 +266,7 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
     wabt::Index numLocal = func.GetNumLocals();
     for (wabt::Index i = 0;i<numLocal;i++) {
         AllocaInst* alloca = irBuilder.CreateAlloca(convertType(llvmContext, func.local_types[i]), nullptr, LOCAL_PREFIX + std::to_string(numParam + i));
-        locals->push_back(alloca);
+        locals.push_back(alloca);
         irBuilder.CreateStore(convertZeroValue(llvmContext, func.local_types[i]), alloca);
     }
 

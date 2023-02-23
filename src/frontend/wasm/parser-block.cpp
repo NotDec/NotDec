@@ -74,7 +74,7 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
 
 void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs) {
     using namespace wabt;
-    // 
+    // ref: wabt\src\wat-writer.cc
     for (Expr& expr : exprs) {
         switch (expr.type()) {
             case ExprType::Binary:
@@ -89,9 +89,12 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             case ExprType::Load:
                 visitLoadInst(cast<LoadExpr>(&expr));
                 break;
-            case ExprType::LocalGet:
-
             case ExprType::Store:
+                visitStoreInst(cast<StoreExpr>(&expr));
+                break;
+            case ExprType::LocalGet:
+                visitLocalGet(cast<LocalGetExpr>(&expr));
+                break;
             default:
                 std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
                 // really abort?
@@ -100,12 +103,33 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
     }
 }
 
-// 1. addr = mem + stack op
-// 2. addr += offset
-// 3. bit cast to expected ptr type
-// 4. load
-void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
-    // using namespace wabt;
+void BlockContext::visitLocalGet(wabt::LocalGetExpr* expr) {
+    using namespace llvm;
+    // ctx.module->GetGlobalIndex(expr->var);
+    // assert(expr->var.is_index()); // 冗余
+    Value* target = locals.at(expr->var.index());
+    Value* loaded = irBuilder.CreateLoad(target->getType()->getPointerElementType(), target);
+    stack.push_back(loaded);
+}
+
+void BlockContext::visitGlobalGet(wabt::GlobalGetExpr* expr) {
+    using namespace llvm;
+    Value* target = locals.at(ctx.module->GetGlobalIndex(expr->var));
+    Value* loaded = irBuilder.CreateLoad(target->getType()->getPointerElementType(), target);
+    stack.push_back(loaded);
+}
+
+
+void BlockContext::visitStoreInst(wabt::StoreExpr* expr) {
+    using namespace llvm;
+    Value* addr = convertStackAddr(expr->offset);
+    assert(stack.size() > 0);
+    Value* val = stack.back(); stack.pop_back();
+    // 看是否要cast
+}
+
+// 从栈上读一个整数地址，加上offset，取默认的mem，然后返回指针。
+llvm::Value* BlockContext::convertStackAddr(uint64_t offset) {
     using namespace llvm;
     GlobalVariable* mem = this->ctx.mems.at(0);
     assert(stack.size() > 0);
@@ -113,13 +137,70 @@ void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
 
     // 会被IRBuilder处理，所以不用搞自己的特判优化。
     // if (expr->offset != 0) {
-    base = irBuilder.CreateAdd(base, llvm::ConstantInt::get(base->getType(), expr->offset, false), "calcOffset");
+    base = irBuilder.CreateAdd(base, llvm::ConstantInt::get(base->getType(), offset, false), "calcOffset");
     // }
+    // if ea+N/8 is larger than the length of mem, then trap?
     Value* arr[2] = { ConstantInt::getNullValue(base->getType()) , base};
-    Value* addr = irBuilder.CreateGEP(mem->getValueType(), mem, makeArrayRef(arr, 2)); // Type::getInt8PtrTy(llvmContext)
-    Type* targetType = convertType(llvmContext, expr->opcode.GetResultType());
+    return irBuilder.CreateGEP(mem->getValueType(), mem, makeArrayRef(arr, 2)); // Type::getInt8PtrTy(llvmContext)
+}
+
+// 1. addr = mem + stack op
+// 2. addr += offset
+// 3. bit cast to expected ptr type
+// 4. load
+void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
+    using namespace llvm;
+    Value* addr = convertStackAddr(expr->offset);
+
+    Type* targetType = nullptr;
+    switch (expr->opcode)
+    {
+    case wabt::Opcode::I32Load:
+    case wabt::Opcode::I64Load:
+    case wabt::Opcode::F32Load:
+    case wabt::Opcode::F64Load:
+        targetType = convertType(llvmContext, expr->opcode.GetResultType());
+    case wabt::Opcode::I32Load8S:
+    case wabt::Opcode::I32Load8U:
+    case wabt::Opcode::I64Load8S:
+    case wabt::Opcode::I64Load8U:
+        targetType = Type::getInt8Ty(llvmContext);
+    case wabt::Opcode::I32Load16S:
+    case wabt::Opcode::I32Load16U:
+    case wabt::Opcode::I64Load16S:
+    case wabt::Opcode::I64Load16U:
+        targetType = Type::getInt16Ty(llvmContext);
+    case wabt::Opcode::I64Load32S:
+    case wabt::Opcode::I64Load32U:
+        targetType = Type::getInt32Ty(llvmContext);
+    default:
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported Opcode: " << expr->opcode.GetName() << std::endl;
+        break;
+    }
+    assert(targetType != nullptr);
+
     addr = irBuilder.CreateBitCast(addr, PointerType::getUnqual(targetType));
     Value* result = irBuilder.CreateLoad(targetType, addr, "loadResult");
+    // possible extension
+    switch (expr->opcode)
+    {
+    case wabt::Opcode::I32Load8S:
+    case wabt::Opcode::I64Load8S:
+    case wabt::Opcode::I32Load16S:
+    case wabt::Opcode::I64Load16S:
+    case wabt::Opcode::I64Load32S:
+        result = irBuilder.CreateSExt(result, convertType(llvmContext, expr->opcode.GetResultType()));
+        break;
+    case wabt::Opcode::I32Load16U:
+    case wabt::Opcode::I64Load16U:
+    case wabt::Opcode::I32Load8U:
+    case wabt::Opcode::I64Load8U:
+    case wabt::Opcode::I64Load32U:
+        result = irBuilder.CreateZExt(result, convertType(llvmContext, expr->opcode.GetResultType()));
+        break;
+    default:
+        break;
+    }
     stack.push_back(result);
 }
 

@@ -33,21 +33,27 @@ struct BlockContext
     llvm::Function& function;
     llvm::IRBuilder<>& irBuilder;
     std::vector<BreakoutTarget> blockStack;
-    std::unique_ptr<std::vector<llvm::Value*>> locals;
+    std::vector<llvm::Value*> locals;
     // wasm stack
     std::vector<llvm::Value*> stack;
     std::vector<wabt::Type> type_stack;
 
     // rvalue reference here, use it by std::move(locals): BlockContext bctx(*function, irBuilder, std::move(locals));
-    BlockContext(Context& ctx, llvm::Function& f, llvm::IRBuilder<>& b, std::unique_ptr<std::vector<llvm::Value*>>&& locals)
-        : ctx(ctx), llvmContext(ctx.llvmContext), function(f), irBuilder(b), locals() {}
+    BlockContext(Context& ctx, llvm::Function& f, llvm::IRBuilder<>& b, std::vector<llvm::Value*>&& locals)
+        : ctx(ctx), llvmContext(ctx.llvmContext), function(f), irBuilder(b), locals(locals) {}
 
     void visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::BlockDeclaration& decl, wabt::ExprList& exprs);
     void visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs);
     void visitBinaryInst(wabt::BinaryExpr* expr);
     void visitConstInst(wabt::ConstExpr* expr);
     void visitCallInst(wabt::CallExpr* expr);
+
     void visitLoadInst(wabt::LoadExpr* expr);
+    void visitStoreInst(wabt::StoreExpr* expr);
+    llvm::Value* convertStackAddr(uint64_t offset);
+
+    void visitLocalGet(wabt::LocalGetExpr* expr);
+    void visitGlobalGet(wabt::GlobalGetExpr* expr);
 };
 
 llvm::Constant* visitConst(llvm::LLVMContext &llvmContext, const wabt::Const& const_);
