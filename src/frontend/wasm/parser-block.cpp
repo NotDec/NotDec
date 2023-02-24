@@ -111,6 +111,7 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             }
             std::cerr << std::endl;
         }
+        // 看每个expr type有哪些指令：wabt\src\lexer-keywords.txt
         switch (expr.type()) {
             case ExprType::Return:
                 visitReturn(cast<ReturnExpr>(&expr));
@@ -120,6 +121,9 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
                 break;
             case ExprType::Binary:
                 visitBinaryInst(cast<BinaryExpr>(&expr));
+                break;
+            case ExprType::Compare:
+                visitCompareExpr(cast<CompareExpr>(&expr));
                 break;
             case ExprType::Const:
                 visitConstInst(cast<ConstExpr>(&expr));
@@ -348,6 +352,90 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         break;
     }
     if (ret != nullptr) {
+        stack.push_back(ret);
+    }
+}
+
+
+void BlockContext::visitCompareExpr(wabt::CompareExpr* expr) {
+    using namespace llvm;
+    Value *ret = nullptr, *p1, *p2;
+    assert(stack.size() >= 2);
+    p1 = stack.back(); stack.pop_back();
+    p2 = stack.back(); stack.pop_back();
+    switch (expr->opcode)
+    {
+    case wabt::Opcode::I32Eq:
+    case wabt::Opcode::I64Eq:
+        ret = irBuilder.CreateICmpEQ(p2, p1);
+        break;
+    case wabt::Opcode::I32Ne:
+    case wabt::Opcode::I64Ne:
+        ret = irBuilder.CreateICmpNE(p2, p1);
+        break;
+    case wabt::Opcode::I32GeS:
+    case wabt::Opcode::I64GeS:
+        ret = irBuilder.CreateICmpSGE(p2, p1);
+        break;
+    case wabt::Opcode::I32GeU:
+    case wabt::Opcode::I64GeU:
+        ret = irBuilder.CreateICmpUGE(p2, p1);
+        break;
+    case wabt::Opcode::I32GtU:
+    case wabt::Opcode::I64GtU:
+        ret = irBuilder.CreateICmpUGT(p2, p1);
+        break;
+    case wabt::Opcode::I32GtS:
+    case wabt::Opcode::I64GtS:
+        ret = irBuilder.CreateICmpSGT(p2, p1);
+        break;
+    case wabt::Opcode::I32LeS:
+    case wabt::Opcode::I64LeS:
+        ret = irBuilder.CreateICmpSLE(p2, p1);
+        break;
+    case wabt::Opcode::I32LeU:
+    case wabt::Opcode::I64LeU:
+        ret = irBuilder.CreateICmpULE(p2, p1);
+        break;
+    case wabt::Opcode::I32LtS:
+    case wabt::Opcode::I64LtS:
+        ret = irBuilder.CreateICmpSLT(p2, p1);
+        break;
+    case wabt::Opcode::I32LtU:
+    case wabt::Opcode::I64LtU:
+        ret = irBuilder.CreateICmpULT(p2, p1);
+        break;
+    case wabt::Opcode::F32Eq:
+    case wabt::Opcode::F64Eq:
+        ret = irBuilder.CreateFCmpOEQ(p2, p1);
+        break;
+    case wabt::Opcode::F32Ne:
+    case wabt::Opcode::F64Ne:
+        ret = irBuilder.CreateFCmpUNE(p2, p1); // 出现NAN时要返回true
+        break;
+    case wabt::Opcode::F32Ge:
+    case wabt::Opcode::F64Ge:
+        ret = irBuilder.CreateFCmpOGE(p2, p1);
+        break;
+    case wabt::Opcode::F32Gt:
+    case wabt::Opcode::F64Gt:
+        ret = irBuilder.CreateFCmpOGT(p2, p1);
+        break;
+    case wabt::Opcode::F32Le:
+    case wabt::Opcode::F64Le:
+        ret = irBuilder.CreateFCmpOLE(p2, p1);
+        break;
+    case wabt::Opcode::F32Lt:
+    case wabt::Opcode::F64Lt:
+        ret = irBuilder.CreateFCmpOLT(p2, p1);
+        break;
+    
+    default:
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
+        break;
+    }
+    if (ret != nullptr) {
+        ret = irBuilder.CreateZExt(ret, convertType(llvmContext, expr->opcode.GetResultType()));
         stack.push_back(ret);
     }
 }

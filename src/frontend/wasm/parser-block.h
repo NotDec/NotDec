@@ -49,6 +49,7 @@ struct BlockContext
     void visitReturn(wabt::ReturnExpr* expr);
     void visitUnaryInst(wabt::UnaryExpr* expr);
     void visitBinaryInst(wabt::BinaryExpr* expr);
+    void visitCompareExpr(wabt::CompareExpr* expr);
     void visitConstInst(wabt::ConstExpr* expr);
     void visitCallInst(wabt::CallExpr* expr);
 

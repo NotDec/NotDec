@@ -145,7 +145,12 @@ reftype其实就是个enum，表示是不透明的external类型还是function�
 
 对应到LLVM IR的关键是，相同的语言特性会怎么在LLVM IR上实现/怎样的LLVM IR会编译到这样的wasm。LLVM里只有Call指令，但是参数是一个函数地址的value。目前看来可以搞一个函数指针数组，对应初始化后的table。然后将callind翻译为从函数指针中取，然后再call。
 
+### 比较 - 浮点数
 
+参照https://www.w3.org/TR/wasm-core-1/#-hrefop-feqmathrmfeq_n-z_1-z_2 和https://llvm.org/docs/LangRef.html#id309 对比语义
+
+1. feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用`fcmp oeq`。
+1. 而fne，有nan就返回1，所以要用`fcmp une`
 
 ## TODO
 
