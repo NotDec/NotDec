@@ -30,7 +30,8 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 1. [LLVM Language Reference Manual](https://llvm.org/docs/LangRef.html) 
 2. [2019 EuroLLVM Developers’ Meeting: V. Bridgers & F. Piovezan “LLVM IR Tutorial - Phis, GEPs ...” - YouTube](https://www.youtube.com/watch?v=m8G_S5LwlTo) 
 
-和WASM的语义：[Modules — WebAssembly 2.0 (Draft 2022-09-27)](https://webassembly.github.io/spec/core/binary/modules.html) 注意现在直接翻标准是新release的2.0标准了。**我们暂时先支持1.0标准**，wabt现在也仅支持1.0，如果文件头里写version为2会报错。1.0的标准可以看[这里](https://www.w3.org/TR/wasm-core-1/#syntax-importdesc)
+和WASM的语义：[Modules — WebAssembly 2.0 (Draft 2022-09-27)](https://webassembly.github.io/spec/core/binary/modules.html) 注意现在直接翻标准是新release的2.0标准了。**我们暂时先支持1.0标准**，wabt现在也仅支持1.0，如果文件头里写version为2会报错。1.0的标准可以看[这里](https://www.w3.org/TR/wasm-core-1/#syntax-importdesc)。
+不确定每个指令的语义，看[这种地方](https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/Numeric/Negate)。
 
 1. 名字比较难处理，wasm的[name section](https://github.com/WebAssembly/extended-name-section/blob/main/proposals/extended-name-section/Overview.md)允许重名，而且wasm中因为是二进制格式，理论上名字可以取任意utf-8。那边wat格式的定义也有类似的问题。但是wabt似乎已经处理了相关的问题？
    - 在src\binary-reader-ir.cc里的BinaryReaderIR::GetUniqueName函数，如果重名了会加数字后缀。
@@ -47,11 +48,6 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
    1. 每个Local转化为函数开头的一个alloca。
    2. [非直接跳转 callind](https://webassembly.github.io/spec/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-call-indirect-x-y) 
 
-### 难以处理的情况
-
-1. import了一个table。
-
-
 ## 指令、栈、控制流的处理
 
 参考WAVM，见顶部现有工具一节。参考栈验证逻辑。能保留的最好直接解码为SSA。这里的block直接考虑[Multi Value Extension](https://github.com/WebAssembly/multi-value)，防止以后架构需要重构，但是函数返回多个值的先不支持。
@@ -62,11 +58,21 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 
 ### 控制流指令的处理，与SSA生成
 
-递归的基本块生成算法：
+visitFunction：
+1. 创建allocaBlock，分配参数和local空间
+1. 创建alloca -> entry边，创建return块备用
+1. 调用visitBlock函数（visitBlock函数必须把所有的结束跳转都引导到exit块）
+1. 创建结尾的return指令。（visitBlock内部处理的时候只有br，return也看作特殊的br，函数只允许在结尾返回）
+
+递归的基本块生成算法visitBlock：
+**要求与保证**：
+1. 要求调用者提供的entry为空基本块（但是可以有Phi指令），便于创建Phi节点。
+1. 保证结束的时候跳转到exit块。不会有其他控制流。
 
 1. ~~根据块的签名，块的参数压入value stack。。（没必要再用一个额外的stack防止访问更深元素，因为调用过了wabt的validate）~~ 
-1. 根据块的类型，设置好整体的跳转结构。然后创建Phi节点，设置Phi节点和参数/返回值的对应关系。
-1. 同时设置好BreakoutTarget结构体，压入栈中：
+1. ~~根据块的类型，设置好整体的跳转结构。然后创建Phi节点，设置Phi节点和参数/返回值的对应关系。~~
+1. 先创建好跳转目标，Phi节点，用这些设置好BreakoutTarget结构体，压入栈中：
+   1. 
    1. 根据是loop还是block类型的块创建Phi
    1. 保存当前value栈的情况。
 1. 依次遍历每个指令生成。
@@ -74,7 +80,9 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
    1. 如果遇到了跳转指令：
       1. 如果跳转的目标是普通基本块，则从栈上取值加入到对应的Phi中，
 1. 遇到块结束的时候，根据BreakoutTarget从栈上弹出到平衡状态。主要是为了这里去维护每个控制流对应的栈标签。
-1. Block结束时隐含跳转到结束块。如果是函数结束，处理函数返回。
+1. Block结束时隐含跳转到结束块。
+
+loop和block的区别在于，给phi赋值，然后用Phi替换栈上值的地方不同。一个是基本块开头，一个是基本块结尾
 
 函数体好像大致也算一个Block块。
 
@@ -111,13 +119,12 @@ wabt那边代表Block的结构体看wabt的`src\ir.h` 383行`struct Block`这边
 
 ## 测试
 
-基于sysY语言的测试用例，自动编译为wasm和wat格式，反编译到IR后和sylib.c得到sylib.ll一起输入lli执行。验证输出的正确性。
-
-- 使用-c编译为未链接的object
-   - 缺点1：内存是导入的，大小不确定
-   - 缺点2：需要处理额外的。
-- 编译为完整模块，加上`-g -O0 --no-standard-libraries -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined`等选项。全部导出可以不用特殊处理main函数的导出，allow undefined好像会让没定义的都变成导入。
-   - 目前暂时的方案。
+1. 基于sysY语言的测试用例，自动编译为wasm和wat格式，反编译到IR后和sylib.c得到sylib.ll一起输入lli执行。验证输出的正确性。
+   - 使用-c编译为未链接的object ？
+      - 缺点1：内存是导入的，大小不确定
+      - 缺点2：需要处理额外的。
+   - 编译为完整模块，加上`-g -O0 --no-standard-libraries -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined`等选项。全部导出可以不用特殊处理main函数的导出，allow undefined好像会让没定义的都变成导入。
+      - 目前暂时的方案。
 
 
 ## 其他

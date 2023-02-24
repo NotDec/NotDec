@@ -29,9 +29,10 @@ struct Context {
     std::vector<llvm::GlobalVariable*> globs;
     std::vector<llvm::Function*> funcs;
     std::vector<llvm::GlobalVariable*> mems;
+    int log_level;
 
     Context(BaseContext& baseCtx)
-        : baseCtx(baseCtx), llvmContext(baseCtx.context), llvmModule(baseCtx.mod) {}
+        : baseCtx(baseCtx), llvmContext(baseCtx.context), llvmModule(baseCtx.mod), log_level(baseCtx.opt.log_level) {}
 
     void visitModule();
     void visitGlobal(wabt::Global& gl, bool isExternal);

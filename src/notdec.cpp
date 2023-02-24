@@ -1,5 +1,6 @@
 #include <iostream>
 #include <algorithm>
+#include <string>
 
 #include "llvm/Support/raw_ostream.h"
 
@@ -15,7 +16,7 @@ char* getCmdOption(char ** begin, char ** end, const std::string & option)
     {
         return *itr;
     }
-    return 0;
+    return nullptr;
 }
 
 bool cmdOptionExists(char** begin, char** end, const std::string& option)
@@ -54,6 +55,11 @@ usage:
 
     if (cmdOptionExists(argv, argv+argc, "--test-mode")) {
         opts.test_mode = true;
+    }
+
+    char* log_level = getCmdOption(argv, argv + argc, "--log-level");
+    if (log_level != nullptr) {
+        opts.log_level = std::stoi(log_level);
     }
     
     std::string insuffix = getSuffix(infilename);

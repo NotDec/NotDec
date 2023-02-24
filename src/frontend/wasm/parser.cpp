@@ -277,15 +277,20 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
 
     // create implicit entry -> return;
     irBuilder.SetInsertPoint(entryBasicBlock);
-    irBuilder.SetInsertPoint(irBuilder.CreateBr(returnBlock)); // insert before jump
+    // irBuilder.SetInsertPoint(irBuilder.CreateBr(returnBlock)); // insert before jump
+
+    if (log_level >= level_debug) {
+        std::cerr << "Debug: Analyzing function " << func.name << std::endl;
+    }
 
     BlockContext bctx(*this, *function, irBuilder, std::move(locals));
     bctx.visitBlock(wabt::LabelType::Func, entryBasicBlock, returnBlock, func.decl, func.exprs);
 
-    // handle implicit return
+    // create return
     // TODO MultiValue
     irBuilder.SetInsertPoint(returnBlock);
     if (func.GetNumResults() == 1) {
+        assert(bctx.stack.size() > 0);
         irBuilder.CreateRet(bctx.stack.back()); bctx.stack.pop_back();
     } else {
         assert(func.GetNumResults() == 0);

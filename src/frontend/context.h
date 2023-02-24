@@ -11,6 +11,7 @@ namespace notdec::frontend {
 struct options {
     bool recompile;
     bool test_mode;
+    int log_level = 5; // default log level = level_notice
 };
 
 struct BaseContext {

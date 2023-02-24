@@ -17,13 +17,14 @@ namespace notdec::frontend::wasm {
 
 struct BreakoutTarget {
     llvm::BasicBlock& target;
+    std::deque<llvm::PHINode*> phis;
     // value stack location
     std::size_t pos;
     wabt::BlockDeclaration& sig;
     wabt::LabelType lty;
 
-    BreakoutTarget(llvm::BasicBlock& target, std::size_t pos, wabt::BlockDeclaration& sig, wabt::LabelType lty)
-        : target(target), pos(pos), sig(sig), lty(lty) {}
+    BreakoutTarget(llvm::BasicBlock& target, std::deque<llvm::PHINode*> phis, std::size_t pos, wabt::BlockDeclaration& sig, wabt::LabelType lty)
+        : target(target), phis(phis), pos(pos), sig(sig), lty(lty) {}
 };
 
 struct BlockContext
@@ -37,13 +38,16 @@ struct BlockContext
     // wasm stack
     std::vector<llvm::Value*> stack;
     std::vector<wabt::Type> type_stack;
+    int log_level;
 
     // rvalue reference here, use it by std::move(locals): BlockContext bctx(*function, irBuilder, std::move(locals));
     BlockContext(Context& ctx, llvm::Function& f, llvm::IRBuilder<>& b, std::vector<llvm::Value*>&& locals)
-        : ctx(ctx), llvmContext(ctx.llvmContext), function(f), irBuilder(b), locals(locals) {}
+        : ctx(ctx), llvmContext(ctx.llvmContext), function(f), irBuilder(b), locals(locals), log_level(ctx.log_level) {}
 
     void visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::BlockDeclaration& decl, wabt::ExprList& exprs);
     void visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs);
+    void visitReturn(wabt::ReturnExpr* expr);
+    void visitUnaryInst(wabt::UnaryExpr* expr);
     void visitBinaryInst(wabt::BinaryExpr* expr);
     void visitConstInst(wabt::ConstExpr* expr);
     void visitCallInst(wabt::CallExpr* expr);
@@ -53,7 +57,9 @@ struct BlockContext
     llvm::Value* convertStackAddr(uint64_t offset);
 
     void visitLocalGet(wabt::LocalGetExpr* expr);
+    void visitLocalSet(wabt::LocalSetExpr* expr);
     void visitGlobalGet(wabt::GlobalGetExpr* expr);
+    void visitGlobalSet(wabt::GlobalSetExpr* expr);
 };
 
 llvm::Constant* visitConst(llvm::LLVMContext &llvmContext, const wabt::Const& const_);
