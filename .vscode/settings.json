@@ -64,7 +64,8 @@
         "streambuf": "cpp",
         "thread": "cpp",
         "typeinfo": "cpp",
-        "*.def": "cpp"
+        "*.def": "cpp",
+        "*.inc": "cpp"
     },
     "C_Cpp.default.includePath": [
         "/usr/include/c++/11"

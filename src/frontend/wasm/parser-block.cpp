@@ -97,13 +97,10 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
             stack.push_back(phi);
         }
     }
-    
 }
 
 void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs) {
-    using namespace llvm;
-    // ref: wabt\src\wat-writer.cc
-    for (wabt::Expr& expr : exprs) {
+    for (wabt::Expr& expr : exprs) { // 遍历每个指令的主要循环
         if (log_level >= level_debug) {
             std::cerr << "Debug: Visiting expr " << wabt::GetExprTypeName(expr);
             if (expr.loc.line != 0) {
@@ -111,28 +108,45 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             }
             std::cerr << std::endl;
         }
-        if (expr.type() == wabt::ExprType::Block) {
+        switch (expr.type()) {
+        case wabt::ExprType::Block: {
+            using namespace llvm;
+            auto e = wabt::cast<wabt::BlockExpr>(&expr);
             // 创建新的基本块作为entry，exit
-            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "TODO handle nested control flow." << std::endl;
-            std::abort();
-            // BasicBlock* entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", ctx.);
-            // BasicBlock* returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
-            // irBuilder.CreateBr(entryBasicBlock);
-
-        } else {
-            dispatchExprs(expr);
+            BasicBlock* entryBlock = llvm::BasicBlock::Create(llvmContext, "entry", &function);
+            BasicBlock* exitBlock = llvm::BasicBlock::Create(llvmContext, "return", &function);
+            irBuilder.CreateBr(entryBlock);
+            irBuilder.SetInsertPoint(entryBlock, entryBlock->begin());
+            visitBlock(wabt::LabelType::Block, entryBlock, exitBlock, e->block.decl, e->block.exprs);
+            if (!e->block.label.empty()) {
+                if (log_level >= level_debug) {
+                    std::cerr << "Debug: Visiting block " << e->block.label << std::endl;
+                }
+            }
+            irBuilder.SetInsertPoint(exitBlock, exitBlock->end());
+            irBuilder.CreateBr(exit);
+            break;
         }
-
+        case wabt::ExprType::Br:
+        
+            break;
+        case wabt::ExprType::Return:
+            visitReturn(wabt::cast<wabt::ReturnExpr>(&expr));
+            break;
+        default:
+            dispatchExprs(expr);
+            break;
+        }
+        
     }
 }
 
+ // 处理非控制流指令的分发函数
 void BlockContext::dispatchExprs(wabt::Expr& expr) {
     using namespace wabt;
+    // ref: wabt\src\wat-writer.cc
     // 看每个expr type有哪些指令：wabt\src\lexer-keywords.txt
     switch (expr.type()) {
-    case ExprType::Return:
-        visitReturn(cast<ReturnExpr>(&expr));
-        break;
     case ExprType::Unary:
         visitUnaryInst(cast<UnaryExpr>(&expr));
         break;
@@ -141,6 +155,9 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
         break;
     case ExprType::Compare:
         visitCompareExpr(cast<CompareExpr>(&expr));
+        break;
+    case ExprType::Convert:
+        visitConvertExpr(cast<ConvertExpr>(&expr));
         break;
     case ExprType::Const:
         visitConstInst(cast<ConstExpr>(&expr));
@@ -338,11 +355,31 @@ void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
     stack.push_back(result);
 }
 
+void BlockContext::visitConvertExpr(wabt::ConvertExpr* expr) {
+    using namespace llvm;
+    Value *ret = nullptr, *p1;
+    assert(stack.size() >= 1);
+    p1 = stack.back(); stack.pop_back();
+    switch (expr->opcode)
+    {
+    case wabt::Opcode::I32Eqz:
+    case wabt::Opcode::I64Eqz:
+        ret = irBuilder.CreateICmpEQ(p1, ConstantInt::get(p1->getType(), 0));
+        ret = irBuilder.CreateZExt(ret, p1->getType());
+    default:
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported Opcode: " << expr->opcode.GetName() << std::endl;
+        break;
+    }
+    if (ret != nullptr) {
+        stack.push_back(ret);
+    }
+}
+
 void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     using namespace llvm;
     Value *ret = nullptr, *p1;
     Function* f;
-    assert(stack.size() >= 2);
+    assert(stack.size() >= 1);
     p1 = stack.back(); stack.pop_back();
     switch (expr->opcode)
     {

@@ -33,7 +33,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/bin/notdec",
-            "args": ["-i", "${file}", "-o", "${file}.ll"],
+            "args": ["-i", "${file}", "-o", "${file}.ll", "--log-level", "7"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

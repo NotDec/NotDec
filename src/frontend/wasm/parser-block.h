@@ -52,6 +52,7 @@ struct BlockContext
     void visitUnaryInst(wabt::UnaryExpr* expr);
     void visitBinaryInst(wabt::BinaryExpr* expr);
     void visitCompareExpr(wabt::CompareExpr* expr);
+    void visitConvertExpr(wabt::ConvertExpr* expr);
     void visitConstInst(wabt::ConstExpr* expr);
     void visitCallInst(wabt::CallExpr* expr);
 
