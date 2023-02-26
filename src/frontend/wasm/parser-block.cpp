@@ -357,12 +357,14 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         break;
     case wabt::Opcode::I32Popcnt:
     case wabt::Opcode::I64Popcnt:
-        // ret = irBuilder.Create(p1);
-        // break;
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctpop, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
     case wabt::Opcode::I32Clz:
     case wabt::Opcode::I64Clz:
-        // ret = irBuilder.Create(p1);
-        // break;
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctlz, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;
@@ -459,6 +461,7 @@ void BlockContext::visitCompareExpr(wabt::CompareExpr* expr) {
 void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     using namespace llvm;
     Value *ret = nullptr, *p1, *p2;
+    Function *f; // for intrinsic
     assert(stack.size() >= 2);
     p1 = stack.back(); stack.pop_back();
     p2 = stack.back(); stack.pop_back();
@@ -539,14 +542,15 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     
     case wabt::Opcode::I32Rotl:
     case wabt::Opcode::I64Rotl:
-        // TODO
-        // ret = irBuilder.Create(p2, p1);
-        // break;
+        // using Intrinsics fshl https://github.com/llvm-mirror/llvm/blob/2c4ca6832fa6b306ee6a7010bfb80a3f2596f824/test/CodeGen/X86/funnel-shift-rot.ll
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::fshl, {p1->getType(),p1->getType(),p1->getType()});
+        ret = irBuilder.CreateCall(f, {p2, p2, p1});
+        break;
     case wabt::Opcode::I32Rotr:
     case wabt::Opcode::I64Rotr:
-        // TODO
-        // ret = irBuilder.Create(p2, p1);
-        // break;
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::fshr, {p1->getType(),p1->getType(),p1->getType()});
+        ret = irBuilder.CreateCall(f, {p2, p2, p1});
+        break;
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;

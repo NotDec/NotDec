@@ -113,13 +113,16 @@ wabt那边代表Block的结构体看wabt的`src\ir.h` 383行`struct Block`这边
 - 简单的可以对着这个找指令https://llvm.org/docs/LangRef.html。
 - 可以找llvm intrinsic，例如fabs指令使用了对应的`Intrinsic::fabs`
 - 更复杂的可以自己手写llvm函数，然后直接调自己写的函数，之后看看要不要内联什么的
-
+- 参考 WAMR https://github.com/bytecodealliance/wasm-micro-runtime/blob/d309091706f2fbfc3ccca2907226f57db4d612f3/core/iwasm/aot/aot_intrinsic.c
+- 参考 WAVM https://github.com/WAVM/WAVM/blob/79c3aa29366615d9b1593cd527e5b4b94cc6072a/Lib/LLVMJIT/EmitNumeric.cpp
 ### 比较 - 浮点数
 
 参照https://www.w3.org/TR/wasm-core-1/#-hrefop-feqmathrmfeq_n-z_1-z_2 和https://llvm.org/docs/LangRef.html#id309 对比语义
 
 1. feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用`fcmp oeq`。
 1. 而fne，有nan就返回1，所以要用`fcmp une`
+
+
 
 
 ### 链接
