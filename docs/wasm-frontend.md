@@ -108,6 +108,19 @@ wabt那边代表Block的结构体看wabt的`src\ir.h` 383行`struct Block`这边
 
 这里面的类继承关系看 `src\ir.h`。其实就是搞了一个ExprType，然后在onXXX指令的函数处直接创建了这个类型的Expr，导致opcode和expr之间没有明确的对应关系。
 
+## 运算指令的处理
+
+- 简单的可以对着这个找指令https://llvm.org/docs/LangRef.html。
+- 可以找llvm intrinsic，例如fabs指令使用了对应的`Intrinsic::fabs`
+- 更复杂的可以自己手写llvm函数，然后直接调自己写的函数，之后看看要不要内联什么的
+
+### 比较 - 浮点数
+
+参照https://www.w3.org/TR/wasm-core-1/#-hrefop-feqmathrmfeq_n-z_1-z_2 和https://llvm.org/docs/LangRef.html#id309 对比语义
+
+1. feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用`fcmp oeq`。
+1. 而fne，有nan就返回1，所以要用`fcmp une`
+
 
 ### 链接
 
@@ -144,13 +157,6 @@ reftype其实就是个enum，表示是不透明的external类型还是function�
 [Features to add after the MVP - WebAssembly 中文网|Wasm 中文文档](https://www.wasm.com.cn/docs/future-features/) https://www.w3.org/TR/wasm-core-1/#element-segments%E2%91%A0 （可以在这个页面搜索`at most one`） 这里提到了，MVP标准中wasm最多有一块内存，最多有一个table。
 
 对应到LLVM IR的关键是，相同的语言特性会怎么在LLVM IR上实现/怎样的LLVM IR会编译到这样的wasm。LLVM里只有Call指令，但是参数是一个函数地址的value。目前看来可以搞一个函数指针数组，对应初始化后的table。然后将callind翻译为从函数指针中取，然后再call。
-
-### 比较 - 浮点数
-
-参照https://www.w3.org/TR/wasm-core-1/#-hrefop-feqmathrmfeq_n-z_1-z_2 和https://llvm.org/docs/LangRef.html#id309 对比语义
-
-1. feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用`fcmp oeq`。
-1. 而fne，有nan就返回1，所以要用`fcmp une`
 
 ## TODO
 

@@ -101,62 +101,78 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
 }
 
 void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs) {
-    using namespace wabt;
+    using namespace llvm;
     // ref: wabt\src\wat-writer.cc
-    for (Expr& expr : exprs) {
+    for (wabt::Expr& expr : exprs) {
         if (log_level >= level_debug) {
-            std::cerr << "Debug: Visiting expr " << GetExprTypeName(expr);
+            std::cerr << "Debug: Visiting expr " << wabt::GetExprTypeName(expr);
             if (expr.loc.line != 0) {
                 std::cerr << ", at line " << expr.loc.line;
             }
             std::cerr << std::endl;
         }
-        // 看每个expr type有哪些指令：wabt\src\lexer-keywords.txt
-        switch (expr.type()) {
-            case ExprType::Return:
-                visitReturn(cast<ReturnExpr>(&expr));
-                break;
-            case ExprType::Unary:
-                visitUnaryInst(cast<UnaryExpr>(&expr));
-                break;
-            case ExprType::Binary:
-                visitBinaryInst(cast<BinaryExpr>(&expr));
-                break;
-            case ExprType::Compare:
-                visitCompareExpr(cast<CompareExpr>(&expr));
-                break;
-            case ExprType::Const:
-                visitConstInst(cast<ConstExpr>(&expr));
-                break;
-            case ExprType::Call:
-                visitCallInst(cast<CallExpr>(&expr));
-                break;
-            case ExprType::Load:
-                visitLoadInst(cast<LoadExpr>(&expr));
-                break;
-            case ExprType::Store:
-                visitStoreInst(cast<StoreExpr>(&expr));
-                break;
-            case ExprType::LocalGet:
-                visitLocalGet(cast<LocalGetExpr>(&expr));
-                break;
-            case ExprType::LocalSet:
-                visitLocalSet(cast<LocalSetExpr>(&expr));
-                break;
-            case ExprType::GlobalGet:
-                visitGlobalGet(cast<GlobalGetExpr>(&expr));
-                break;
-            case ExprType::GlobalSet:
-                visitGlobalSet(cast<GlobalSetExpr>(&expr));
-                break;
-            case ExprType::Unreachable:
-                irBuilder.CreateUnreachable();
-                break;
-            default:
-                std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
-                // really abort?
-                // std::abort();
+        if (expr.type() == wabt::ExprType::Block) {
+            // 创建新的基本块作为entry，exit
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "TODO handle nested control flow." << std::endl;
+            std::abort();
+            // BasicBlock* entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", ctx.);
+            // BasicBlock* returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
+            // irBuilder.CreateBr(entryBasicBlock);
+
+        } else {
+            dispatchExprs(expr);
         }
+
+    }
+}
+
+void BlockContext::dispatchExprs(wabt::Expr& expr) {
+    using namespace wabt;
+    // 看每个expr type有哪些指令：wabt\src\lexer-keywords.txt
+    switch (expr.type()) {
+    case ExprType::Return:
+        visitReturn(cast<ReturnExpr>(&expr));
+        break;
+    case ExprType::Unary:
+        visitUnaryInst(cast<UnaryExpr>(&expr));
+        break;
+    case ExprType::Binary:
+        visitBinaryInst(cast<BinaryExpr>(&expr));
+        break;
+    case ExprType::Compare:
+        visitCompareExpr(cast<CompareExpr>(&expr));
+        break;
+    case ExprType::Const:
+        visitConstInst(cast<ConstExpr>(&expr));
+        break;
+    case ExprType::Call:
+        visitCallInst(cast<CallExpr>(&expr));
+        break;
+    case ExprType::Load:
+        visitLoadInst(cast<LoadExpr>(&expr));
+        break;
+    case ExprType::Store:
+        visitStoreInst(cast<StoreExpr>(&expr));
+        break;
+    case ExprType::LocalGet:
+        visitLocalGet(cast<LocalGetExpr>(&expr));
+        break;
+    case ExprType::LocalSet:
+        visitLocalSet(cast<LocalSetExpr>(&expr));
+        break;
+    case ExprType::GlobalGet:
+        visitGlobalGet(cast<GlobalGetExpr>(&expr));
+        break;
+    case ExprType::GlobalSet:
+        visitGlobalSet(cast<GlobalSetExpr>(&expr));
+        break;
+    case ExprType::Unreachable:
+        irBuilder.CreateUnreachable();
+        break;
+    default:
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
+        // really abort?
+        // std::abort();
     }
 }
 
@@ -531,8 +547,6 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         // TODO
         // ret = irBuilder.Create(p2, p1);
         // break;
-    
-
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;

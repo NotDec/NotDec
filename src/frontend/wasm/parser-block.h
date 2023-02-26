@@ -46,6 +46,8 @@ struct BlockContext
 
     void visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::BlockDeclaration& decl, wabt::ExprList& exprs);
     void visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs);
+    void dispatchExprs(wabt::Expr& expr);
+
     void visitReturn(wabt::ReturnExpr* expr);
     void visitUnaryInst(wabt::UnaryExpr* expr);
     void visitBinaryInst(wabt::BinaryExpr* expr);
