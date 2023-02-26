@@ -365,6 +365,12 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctlz, p1->getType());
         ret = irBuilder.CreateCall(f, p1);
         break;
+    case wabt::Opcode::I32Ctz:
+    case wabt::Opcode::I64Ctz:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::cttz, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
+    
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;
@@ -550,6 +556,23 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     case wabt::Opcode::I64Rotr:
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::fshr, {p1->getType(),p1->getType(),p1->getType()});
         ret = irBuilder.CreateCall(f, {p2, p2, p1});
+        break;
+
+    // floor type only
+    case wabt::Opcode::F32Min:
+    case wabt::Opcode::F64Min:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::minnum, {p1->getType(),p1->getType()});
+        ret = irBuilder.CreateCall(f, {p2, p1});
+        break;
+    case wabt::Opcode::F32Max:
+    case wabt::Opcode::F64Max:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::maxnum, {p1->getType(),p1->getType()});
+        ret = irBuilder.CreateCall(f, {p2, p1});
+        break;
+    case wabt::Opcode::F32Copysign:
+    case wabt::Opcode::F64Copysign:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::copysign, {p1->getType(),p1->getType()});
+        ret = irBuilder.CreateCall(f, {p2, p1});
         break;
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
