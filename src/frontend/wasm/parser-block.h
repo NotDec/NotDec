@@ -47,8 +47,9 @@ struct BlockContext
     void visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::BlockDeclaration& decl, wabt::ExprList& exprs);
     void visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs);
     void dispatchExprs(wabt::Expr& expr);
+    void unwindStackTo(size_t pos);
 
-    void visitReturn(wabt::ReturnExpr* expr);
+    void visitBr(wabt::Expr* expr, std::size_t ind, llvm::Value* cond, llvm::BasicBlock* nextBlock);
     void visitUnaryInst(wabt::UnaryExpr* expr);
     void visitBinaryInst(wabt::BinaryExpr* expr);
     void visitCompareExpr(wabt::CompareExpr* expr);
@@ -70,6 +71,10 @@ struct BlockContext
 llvm::Constant* visitConst(llvm::LLVMContext &llvmContext, const wabt::Const& const_);
 const char* labelTypeToString(wabt::LabelType lty);
 int64_t unwrapIntConstant(llvm::Constant* c);
+llvm::BasicBlock::iterator getFirstNonPHIOrDbgOrLifetime(llvm::BasicBlock* bb);
+bool checkBlockLike(wabt::LabelType lty);
+bool isContainBlock(wabt::Expr& expr);
+wabt::Block& getBlock(wabt::Expr& expr);
 
 }
 

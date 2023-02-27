@@ -270,21 +270,14 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
         irBuilder.CreateStore(convertZeroValue(llvmContext, func.local_types[i]), alloca);
     }
 
-    // alloca -> entry, ensure alloca will only execute once.
-    BasicBlock* entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
     BasicBlock* returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
-    irBuilder.CreateBr(entryBasicBlock);
-
-    // create implicit entry -> return;
-    irBuilder.SetInsertPoint(entryBasicBlock);
-    // irBuilder.SetInsertPoint(irBuilder.CreateBr(returnBlock)); // insert before jump
 
     if (log_level >= level_debug) {
         std::cerr << "Debug: Analyzing function " << func.name << std::endl;
     }
 
     BlockContext bctx(*this, *function, irBuilder, std::move(locals));
-    bctx.visitBlock(wabt::LabelType::Func, entryBasicBlock, returnBlock, func.decl, func.exprs);
+    bctx.visitBlock(wabt::LabelType::Func, allocaBlock, returnBlock, func.decl, func.exprs);
 
     // create return
     // TODO MultiValue
@@ -293,7 +286,7 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
         assert(bctx.stack.size() > 0);
         irBuilder.CreateRet(bctx.stack.back()); bctx.stack.pop_back();
     } else {
-        assert(func.GetNumResults() == 0);
+        assert(func.GetNumResults() == 0); // ?
         irBuilder.CreateRetVoid();
     }
 }

@@ -55,39 +55,47 @@ LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不�
 - 每个栈上元素对应一个SSA的Value。某种形式上可以维护一个Value栈（作为局部变量，不需要作为Context）。
 - 控制流跳转维护一个block的嵌套栈，保存br时跳转的目标。关键是如何在找到跳转目标的同时，把栈弹到对应的值。
 - 处理Block的时候，这里用递归和用栈都可以。选择用实现起来更简单的递归。aWsm好像是递归的写法，WAVM好像是用栈，复杂一点。
+- loop和block的区别在于，给phi赋值，然后用Phi替换栈上值的地方不同。一个是基本块开头，一个是基本块结尾
+- 函数体大致也算一个Block块，但是labelType写Func。
 
 ### 控制流指令的处理，与SSA生成
 
 visitFunction：
 1. 创建allocaBlock，分配参数和local空间
+
 1. 创建alloca -> entry边，创建return块备用
 1. 调用visitBlock函数（visitBlock函数必须把所有的结束跳转都引导到exit块）
 1. 创建结尾的return指令。（visitBlock内部处理的时候只有br，return也看作特殊的br，函数只允许在结尾返回）
 
 递归的基本块生成算法visitBlock：
 **要求与保证**：
-1. 要求调用者提供的entry为空基本块（但是可以有Phi指令），便于创建Phi节点。
+1. 要求算法的整体表现类似于给定类型的单个指令
+1. 要求调用者提供的entry和exit中，需要创建Phi的那个为空基本块（但是可以有Phi指令），便于创建Phi节点。
 1. 保证结束的时候跳转到exit块。不会有其他控制流。
 
-1. ~~根据块的签名，块的参数压入value stack。。（没必要再用一个额外的stack防止访问更深元素，因为调用过了wabt的validate）~~ 
-1. ~~根据块的类型，设置好整体的跳转结构。然后创建Phi节点，设置Phi节点和参数/返回值的对应关系。~~
+注：
+1. 没必要再用一个额外的stack防止访问更深元素，因为调用过了wabt的validate
+
+调用visitBlock前，根据block类型
+1. Block类型：创建新的exit块，替换原来exit，处理完毕后新的exit作为entry继续生成指令，旧的exit还是exit
+1. Loop类型：创建新的entry块，替换原来entry。loop结束也一样。
+
+visitBlock：
 1. 先创建好跳转目标，Phi节点，用这些设置好BreakoutTarget结构体，压入栈中：
-   1. 
-   1. 根据是loop还是block类型的块创建Phi
+   1. 根据是loop还是block类型的块创建Phi。如果是Loop，直接把当前栈上的值弹出来，作为phi的operand，然后把phi push回去，替换。如果是block，先创建空的Phi。（等后面结束的时候再从栈上加operand。
    1. 保存当前value栈的情况。
 1. 依次遍历每个指令生成。
    1. 普通的指令根据指令语义，从value stack中取值，
    1. 如果遇到了跳转指令：
       1. 如果跳转的目标是普通基本块，则从栈上取值加入到对应的Phi中，
-1. 遇到块结束的时候，根据BreakoutTarget从栈上弹出到平衡状态。主要是为了这里去维护每个控制流对应的栈标签。
-1. Block结束时隐含跳转到结束块。
+1. 块结束的时候，不需要主动跳转到exit，因为exit不一定是当前block的exit，因为在Loop的情况下，结尾没有额外创建基本块，所以不需要特殊处理。Block结尾的跳转交给外面处理。
+1. Block结束时，在end前，处理隐含跳转到结束块。由于类型检查，不会有多余的值，不需要unwinding弹出栈。
 
-loop和block的区别在于，给phi赋值，然后用Phi替换栈上值的地方不同。一个是基本块开头，一个是基本块结尾
+控制流指令的处理：
 
-函数体好像大致也算一个Block块。
-
-控制流指令的对应：
-
+1. br指令，其后是stack可以是任何类型。为了处理这种情况，我们直接增加unreachable标识，无视这些指令。
+   - 对于Block
+   - 对于Loop，由于结尾是从Loop离开的唯一方式。如果有br指令封锁了结尾，则不可能从这个loop结尾离开了。此时直接保留UnReachableState
 1. block，loop分别对应在结尾，开头，增加一个label。注意到block只需要为return的值创建Phi，loop需要对参数创建Phi。
 1. if对应一些label和br_if，br代表直接跳转，br_if同理，根据语义找到对应的跳转目标，生成条件跳转即可。
 1. br_table看似比较麻烦，看了下和LLVM的switch语句对应得非常好啊。也是根据不同的值跳转到不同的边。
