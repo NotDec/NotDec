@@ -177,6 +177,9 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
     case ExprType::LocalSet:
         visitLocalSet(cast<LocalSetExpr>(&expr));
         break;
+    case ExprType::LocalTee:
+        visitLocalTee(cast<LocalTeeExpr>(&expr));
+        break;
     case ExprType::GlobalGet:
         visitGlobalGet(cast<GlobalGetExpr>(&expr));
         break;
@@ -213,6 +216,16 @@ void BlockContext::visitLocalSet(wabt::LocalSetExpr* expr) {
     Value* val = stack.back(); stack.pop_back();
     Value* target = locals.at(expr->var.index());
     irBuilder.CreateStore(val, target);
+}
+
+void BlockContext::visitLocalTee(wabt::LocalTeeExpr* expr) {
+    using namespace llvm;
+    assert(stack.size() > 0);
+    Value* val = stack.back(); /* stack.pop_back(); */
+    Value* target = locals.at(expr->var.index());
+    irBuilder.CreateStore(val, target);
+    
+
 }
 
 void BlockContext::visitGlobalSet(wabt::GlobalSetExpr* expr) {
@@ -366,6 +379,70 @@ void BlockContext::visitConvertExpr(wabt::ConvertExpr* expr) {
     case wabt::Opcode::I64Eqz:
         ret = irBuilder.CreateICmpEQ(p1, ConstantInt::get(p1->getType(), 0));
         ret = irBuilder.CreateZExt(ret, p1->getType());
+        break;
+    case wabt::Opcode::I64ExtendI32U:
+        ret = irBuilder.CreateSExt(p1,Type::getInt64Ty(llvmContext));
+        break;
+    case wabt::Opcode::I64ExtendI32S:
+        ret = irBuilder.CreateZExt(p1,Type::getInt64Ty(llvmContext));
+        break;
+    case wabt::Opcode::I32WrapI64:
+        ret = irBuilder.CreateTrunc(p1,Type::getInt32Ty(llvmContext));
+        break;
+    case wabt::Opcode::I32TruncF32S:
+    case wabt::Opcode::I32TruncF64S:
+        ret = irBuilder.CreateFPToSI(p1,Type::getInt32Ty(llvmContext));
+        break;
+    case wabt::Opcode::I32TruncF32U:
+    case wabt::Opcode::I32TruncF64U:
+        ret = irBuilder.CreateFPToUI(p1,Type::getInt32Ty(llvmContext));
+        break;
+    case wabt::Opcode::I64TruncF32S:
+    case wabt::Opcode::I64TruncF64S:
+        ret = irBuilder.CreateFPToSI(p1,Type::getInt64Ty(llvmContext));
+        break;
+    case wabt::Opcode::I64TruncF32U:
+    case wabt::Opcode::I64TruncF64U:
+        ret = irBuilder.CreateFPToUI(p1,Type::getInt64Ty(llvmContext));
+        break;
+
+    case wabt::Opcode::F32ConvertI32S:
+    case wabt::Opcode::F32ConvertI64S:
+        ret = irBuilder.CreateSIToFP(p1,Type::getFloatTy(llvmContext));
+        break;
+    case wabt::Opcode::F32ConvertI32U:
+    case wabt::Opcode::F32ConvertI64U:
+        ret = irBuilder.CreateUIToFP(p1,Type::getFloatTy(llvmContext));
+        break;
+    case wabt::Opcode::F64ConvertI32S:
+    case wabt::Opcode::F64ConvertI64S:
+        ret = irBuilder.CreateSIToFP(p1,Type::getDoubleTy(llvmContext));
+        break;
+    case wabt::Opcode::F64ConvertI32U:
+    case wabt::Opcode::F64ConvertI64U:
+        ret = irBuilder.CreateUIToFP(p1,Type::getDoubleTy(llvmContext));
+        break;
+    
+    case wabt::Opcode::F32DemoteF64:
+        ret = irBuilder.CreateFPTrunc(p1,Type::getFloatTy(llvmContext));
+        break;
+    case wabt::Opcode::F64PromoteF32:
+        ret = irBuilder.CreateFPExt(p1,Type::getDoubleTy(llvmContext));
+        break;
+    
+    case wabt::Opcode::I32ReinterpretF32:
+        ret = irBuilder.CreateBitCast(p1,Type::getInt32Ty(llvmContext));
+        break;
+    case wabt::Opcode::I64ReinterpretF64:
+        ret = irBuilder.CreateBitCast(p1,Type::getInt64Ty(llvmContext));
+        break;
+    case wabt::Opcode::F32ReinterpretI32:
+        ret = irBuilder.CreateBitCast(p1,Type::getFloatTy(llvmContext));
+        break;
+    case wabt::Opcode::F64ReinterpretI64:
+        ret = irBuilder.CreateBitCast(p1,Type::getDoubleTy(llvmContext));
+        break;
+
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported Opcode: " << expr->opcode.GetName() << std::endl;
         break;
@@ -407,7 +484,31 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::cttz, p1->getType());
         ret = irBuilder.CreateCall(f, p1);
         break;
-    
+    case wabt::Opcode::F32Ceil:
+    case wabt::Opcode::F64Ceil:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ceil, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
+    case wabt::Opcode::F32Floor:
+    case wabt::Opcode::F64Floor:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::floor, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
+    case wabt::Opcode::F32Nearest:
+    case wabt::Opcode::F64Nearest:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::rint, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
+    case wabt::Opcode::F32Trunc:
+    case wabt::Opcode::F64Trunc:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::trunc, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
+    case wabt::Opcode::F32Sqrt:
+    case wabt::Opcode::F64Sqrt:
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::sqrt, p1->getType());
+        ret = irBuilder.CreateCall(f, p1);
+        break;
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;
@@ -585,7 +686,6 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     
     case wabt::Opcode::I32Rotl:
     case wabt::Opcode::I64Rotl:
-        // using Intrinsics fshl https://github.com/llvm-mirror/llvm/blob/2c4ca6832fa6b306ee6a7010bfb80a3f2596f824/test/CodeGen/X86/funnel-shift-rot.ll
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::fshl, {p1->getType(),p1->getType(),p1->getType()});
         ret = irBuilder.CreateCall(f, {p2, p2, p1});
         break;

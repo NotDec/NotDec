@@ -62,6 +62,7 @@ struct BlockContext
 
     void visitLocalGet(wabt::LocalGetExpr* expr);
     void visitLocalSet(wabt::LocalSetExpr* expr);
+    void visitLocalTee(wabt::LocalTeeExpr* expr);
     void visitGlobalGet(wabt::GlobalGetExpr* expr);
     void visitGlobalSet(wabt::GlobalSetExpr* expr);
 };
