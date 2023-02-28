@@ -18,15 +18,17 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
     switch (lty) {
         case LabelType::Block:
         case LabelType::Func:
+        case LabelType::If:
             assert(exit->getFirstNonPHI() == nullptr);
             // 把参数留在栈上
             // 为基本块返回值创建Phi
             irBuilder.SetInsertPoint(exit, exit->begin());
             // 因为是push_back，所以是顺序遍历的。
             for (wabt::Index i = 0; i < decl.GetNumResults(); i++) {
-                llvm::PHINode* phi = irBuilder.CreatePHI(convertType(llvmContext, decl.GetResultType(i)), 0, entry->getName() + "_" + std::to_string(i));
+                llvm::PHINode* phi = irBuilder.CreatePHI(convertType(llvmContext, decl.GetResultType(i)), 0, exit->getName() + "_" + std::to_string(i));
                 phis.push_back(phi);
             }
+        case LabelType::Else:
             isBlockLike = true;
             // 有跳出的直接跳到exit
             breakTo = exit;
@@ -54,9 +56,6 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
             // 有跳出的直接跳到entry
             breakTo = entry;
             break;
-
-        case LabelType::If:
-        case LabelType::Else:
         case LabelType::Try:
         case LabelType::InitExpr:
         case LabelType::Catch:
@@ -66,11 +65,17 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
     }
     // 标记当前栈的位置，结束的时候先读取返回值然后再弹出到这个位置。
     std::size_t stack_pos = lty == LabelType::Func ? stack.size() : stack.size() - decl.GetNumParams();
-    blockStack.emplace_back(*breakTo, phis, stack_pos, decl, lty);
-
+    if (lty != LabelType::Else) {
+        blockStack.emplace_back(*breakTo, phis, stack_pos, decl, lty);
+    } else { // restore previous phis
+        stack_pos = blockStack.back().pos;
+        phis = blockStack.back().phis;
+    }
     // 依次遍历每个指令，同时处理栈的变化。
     visitControlInsts(entry, exit, exprs);
-    assert(blockStack.size() >= 0); blockStack.pop_back();
+    if (lty != LabelType::If) {
+        assert(blockStack.size() >= 0); blockStack.pop_back();
+    }
     if (irBuilder.GetInsertBlock() != nullptr) { // not unreachable, handle implicit return
         if (stack.size() != (stack_pos + decl.GetNumResults())) {
             std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Not enough value on stack" << std::endl;
@@ -82,17 +87,19 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
             for (auto it = phis.rbegin(); it != phis.rend(); ++it) {
                 (*it)->addIncoming(stack.back(), irBuilder.GetInsertBlock()); stack.pop_back();
             }
-            for (auto phi: phis) {
-                stack.push_back(phi);
+            if (lty != LabelType::If) {
+                for (auto phi: phis) {
+                    stack.push_back(phi);
+                }
             }
-            irBuilder.CreateBr(exit); // not for Loop
+            irBuilder.CreateBr(exit); // only for block, not for Loop
         }
     } else if (isBlockLike) { // terminate unreachable state if block
         irBuilder.SetInsertPoint(exit, getFirstNonPHIOrDbgOrLifetime(exit));
         // 把栈unwind到原本的位置
         if (stack.size() > stack_pos) {
-            if (log_level >= level_info) {
-                std::cerr << "Info: Discard " << stack.size() - stack_pos << " unreachable values." << std::endl;
+            if (log_level >= level_notice) {
+                std::cerr << "Notice: Discard " << stack.size() - stack_pos << " unreachable values." << std::endl;
             }
             while(stack.size() > stack_pos) {
                 stack.pop_back();
@@ -137,6 +144,9 @@ llvm::BasicBlock::iterator getFirstNonPHIOrDbgOrLifetime(llvm::BasicBlock* bb) {
 
 void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs) {
     for (wabt::Expr& expr : exprs) { // 遍历每个指令的主要循环
+        // llvm::StringRef entName = entry->getName();
+        // llvm::StringRef exitName = exit->getName();
+        // llvm::BasicBlock* bb = irBuilder.GetInsertBlock();
         if (log_level >= level_debug) {
             std::cerr << "Debug: Visiting expr " << wabt::GetExprTypeName(expr);
             if (isContainBlock(expr)) {
@@ -179,6 +189,38 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             irBuilder.CreateBr(entryBlock);
             entry = entryBlock; irBuilder.SetInsertPoint(entry);
             visitBlock(wabt::LabelType::Loop, entryBlock, exit, e->block.decl, e->block.exprs);
+            entry = irBuilder.GetInsertBlock();
+            break;
+        }
+        case wabt::ExprType::If: {
+            using namespace llvm;
+            auto e = wabt::cast<wabt::IfExpr>(&expr);
+            std::vector<llvm::Value*> params;
+            // boolean arg
+            assert(stack.size() >= 1);
+            Value* p1 = stack.back(); stack.pop_back();
+            // save other args
+            assert(stack.size() >= e->true_.decl.GetNumParams());
+            std::size_t start_ind = stack.size() - e->true_.decl.GetNumParams();
+            for (int i=start_ind;i < stack.size(); i++) {
+                params.push_back(stack.at(i));
+            }
+            // convert to i1
+            p1 = irBuilder.CreateICmpNE(p1, ConstantInt::getNullValue(p1->getType()), "brif_val");
+            BasicBlock* ifBlock = BasicBlock::Create(llvmContext, "ifblk", &function);
+            BasicBlock* elseBlock = BasicBlock::Create(llvmContext, "elseblk", &function);
+            BasicBlock* exitBlock = BasicBlock::Create(llvmContext, "ifblk_exit", &function);
+            irBuilder.CreateCondBr(p1, ifBlock, elseBlock);
+
+            entry = ifBlock; irBuilder.SetInsertPoint(entry);
+            visitBlock(wabt::LabelType::If, entry, exitBlock, e->true_.decl, e->true_.exprs);
+            // duplicate parameter
+            for (int i=0;i<params.size();i++) {
+                stack.push_back(params.at(i));
+            }
+            entry = elseBlock; irBuilder.SetInsertPoint(entry);
+            visitBlock(wabt::LabelType::Else, entry, exitBlock, e->true_.decl, e->false_);
+            entry = exitBlock; irBuilder.SetInsertPoint(entry);
             break;
         }
         case wabt::ExprType::BrIf: {
@@ -210,7 +252,6 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             dispatchExprs(expr);
             break;
         }
-        
     }
 }
 
@@ -326,6 +367,9 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
         break;
     case ExprType::Unreachable:
         irBuilder.CreateUnreachable();
+        break;
+    case ExprType::Drop:
+        assert(stack.size() > 0); stack.pop_back();
         break;
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
@@ -860,7 +904,11 @@ void BlockContext::visitCallInst(wabt::CallExpr* expr) {
         callArgsAlloca[i] = stack.back(); stack.pop_back();
     }
     // TODO MultiValue
-    stack.push_back(irBuilder.CreateCall(target->getFunctionType(), target, callArgs));
+    assert(wfunc->GetNumResults() <= 1);
+    Value* ret = irBuilder.CreateCall(target->getFunctionType(), target, callArgs);
+    if (wfunc->GetNumResults() != 0) {
+        stack.push_back(ret);
+    }
 }
 
 void BlockContext::visitConstInst(wabt::ConstExpr* expr) {

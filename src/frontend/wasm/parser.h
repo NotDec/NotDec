@@ -59,6 +59,7 @@ llvm::Type* convertType(llvm::LLVMContext& llvmContext, const wabt::Type& ty);
 llvm::FunctionType* convertFuncType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
 llvm::Type* convertReturnType(llvm::LLVMContext& llvmContext, const wabt::FuncSignature& decl);
 llvm::Constant* createMemInitializer(llvm::LLVMContext& llvmContext, llvm::Type* memty, uint64_t offset, std::vector<uint8_t> data);
+void modMemInitializer(llvm::StringRef ptr, uint64_t offset, std::vector<uint8_t> data);
 
 std::string removeDollar(std::string name);
 

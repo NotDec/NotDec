@@ -112,6 +112,12 @@ Markdown编辑器（建议）使用Typora，或VSCode
 如果出现了无法使用windows侧的ssh-agent提供的ssh key的forward功能：
 https://stackoverflow.com/questions/72293035/error-communication-with-agent-failed-when-ssh-auth-sock-is-set-but-ssh-agent 
 
+#### 代码调试
+
+直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。
+
+代码补全使用clangd插件。根据提示禁用Intellisense，然后确认下载一个clangd。
+
 ### 提交代码前
 
 1. 写好commit message，简要概况所有的修改。

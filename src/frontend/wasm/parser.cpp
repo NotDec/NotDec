@@ -231,10 +231,19 @@ llvm::GlobalVariable* Context::visitDataSegment(wabt::DataSegment& ds) {
     // LLVM side mem manipulation
     GlobalVariable* mem = this->mems.at(index);
     Type* memty = mem->getValueType();
-    assert(!mem->hasInitializer() || isa<ConstantAggregateZero>(* (mem->getInitializer())));
-    llvm::Constant* offset = visitInitExpr(ds.offset);
-    Constant* init = createMemInitializer(llvmContext, memty, unwrapIntConstant(offset), ds.data);
-    mem->setInitializer(init);
+    if (!mem->hasInitializer() || isa<ConstantAggregateZero>(* (mem->getInitializer()))) {
+        Constant* offset = visitInitExpr(ds.offset);
+        Constant* init = createMemInitializer(llvmContext, memty, unwrapIntConstant(offset), ds.data);
+        mem->setInitializer(init);
+    } else { // change existing mem
+        Constant* init = mem->getInitializer();
+        assert (isa<ConstantDataArray>(init));
+        ConstantDataArray* inita = cast<ConstantDataArray>(init);
+        StringRef data = inita->getAsString();
+
+        Constant* offset = visitInitExpr(ds.offset);
+        modMemInitializer(data, unwrapIntConstant(offset), ds.data);
+    }
     return mem;
 }
 
@@ -363,14 +372,22 @@ llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
     return function;
 }
 
+void modMemInitializer(llvm::StringRef ptr, uint64_t offset, std::vector<uint8_t> data) {
+    using namespace llvm;
+    uint64_t memsize = ptr.size();
+    assert(data.size() + offset <= memsize);
+    // copy data
+    ::memcpy((void *)(ptr.data() + offset), data.data(), data.size() * sizeof(uint8_t));
+}
+
 llvm::Constant* createMemInitializer(llvm::LLVMContext& llvmContext, llvm::Type* memty, uint64_t offset, std::vector<uint8_t> data) {
     using namespace llvm;
     uint64_t memsize = cast<ArrayType>(*memty).getNumElements();
-    assert(data.size() + offset);
+    assert(data.size() + offset <= memsize);
     // TODO store buffer somewhere. create a struct for memory?
-    uint8_t* buffer = new uint8_t[memsize];
+    uint8_t* buffer = new uint8_t[memsize]; // TODO when to free?
     // copy data
-    ::memcpy(buffer+offset, data.data(), data.size() * sizeof(uint8_t));
+    ::memcpy(buffer + offset, data.data(), data.size() * sizeof(uint8_t));
     return ConstantDataArray::getRaw(StringRef((char*)buffer, memsize), memsize, Type::getInt8Ty(llvmContext));
 }
 
