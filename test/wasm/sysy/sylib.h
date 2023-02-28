@@ -1,9 +1,6 @@
 #ifndef __SYLIB_H_
 #define __SYLIB_H_
 
-#include<stdio.h>
-#include<stdarg.h>
-#include<sys/time.h>
 /* Input & output functions */
 int getint(),getch(),getarray(int a[]);
 float getfloat();
@@ -13,7 +10,9 @@ void putint(int a),putch(int a),putarray(int n,int a[]);
 void putfloat(float a);
 void putfarray(int n, float a[]);
 
-void putf(char a[], ...);
+// void putf(char a[], ...);
+void  *memset(void *b, int c, unsigned long len);
+void * memcpy(void *to, const void *from, unsigned long numBytes);
 
 /* Timing function implementation */
 // struct timeval _sysy_start,_sysy_end;

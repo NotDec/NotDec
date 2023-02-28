@@ -16,7 +16,8 @@ def get_run_commands(ir_path):
 
 def do_compile(ir_path):
     cwd = os.path.dirname(os.path.realpath(__file__))
-    command = ['clang-13', ir_path, os.path.join(cwd, 'sylib.ll'), '-o', ir_path+'.elf']
+    command = ['clang-13', ir_path, os.path.join(cwd, 'sylib.ll'), '-g', '-o', ir_path+'.elf']
+    print(' '.join(command))
     return os.system(' '.join(command)) == 0
 
 def do_decompile(wasm_path, out_path):
@@ -33,7 +34,7 @@ def test_run(target, out_file, in_file=None):
     from subprocess import Popen,PIPE,STDOUT
 
     commands = get_run_commands(target)
-    print(' '.join(commands))
+    # print(' '.join(commands))
 
     p = Popen(' '.join(commands), stdout=PIPE,  stdin=PIPE, stderr=PIPE, shell=True)
     out, err = p.communicate(input=in_str)
