@@ -14,6 +14,7 @@ if (NOTDEC_ENABLE_WASM)
 	target_sources(notdec PRIVATE
 		frontend/wasm/parser.cpp
 		frontend/wasm/parser-block.cpp
+		frontend/wasm/parser-instruction.cpp
 	)
 
 	target_link_libraries(notdec
