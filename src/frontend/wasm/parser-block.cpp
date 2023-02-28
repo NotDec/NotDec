@@ -348,8 +348,6 @@ void BlockContext::visitLocalTee(wabt::LocalTeeExpr* expr) {
     Value* val = stack.back(); /* stack.pop_back(); */
     Value* target = locals.at(expr->var.index());
     irBuilder.CreateStore(val, target);
-    
-
 }
 
 void BlockContext::visitGlobalSet(wabt::GlobalSetExpr* expr) {
@@ -505,10 +503,10 @@ void BlockContext::visitConvertExpr(wabt::ConvertExpr* expr) {
         ret = irBuilder.CreateZExt(ret, p1->getType());
         break;
     case wabt::Opcode::I64ExtendI32U:
-        ret = irBuilder.CreateSExt(p1,Type::getInt64Ty(llvmContext));
+        ret = irBuilder.CreateZExt(p1,Type::getInt64Ty(llvmContext));
         break;
     case wabt::Opcode::I64ExtendI32S:
-        ret = irBuilder.CreateZExt(p1,Type::getInt64Ty(llvmContext));
+        ret = irBuilder.CreateSExt(p1,Type::getInt64Ty(llvmContext));
         break;
     case wabt::Opcode::I32WrapI64:
         ret = irBuilder.CreateTrunc(p1,Type::getInt32Ty(llvmContext));
@@ -620,7 +618,10 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         break;
     case wabt::Opcode::F32Nearest:
     case wabt::Opcode::F64Nearest:
-        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::rint, p1->getType());
+        // https://www.w3.org/TR/wasm-core-1/#-hrefop-fnearestmathrmfnearest_n-z
+        // https://llvm.org/docs/LangRef.html#llvm-round-intrinsic
+        // https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/Numeric/Nearest
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::roundeven, p1->getType());
         ret = irBuilder.CreateCall(f, p1);
         break;
     case wabt::Opcode::F32Trunc:
