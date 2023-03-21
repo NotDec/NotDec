@@ -156,9 +156,10 @@ void Context::visitModule() {
         }
         Func& func = cast<FuncModuleField>(&field)->func;
         llvm::Function* function = declareFunc(func, false);
-        // if (baseCtx.opt.test_mode) {
-        //     function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
-        // }
+        if (baseCtx.opt.test_mode &&  function->getName() == "__original_main") {
+            function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+            function->setName("main");
+        }
         nonImportFuncs.push_back(function); 
     }
     std::size_t i = 0;
@@ -286,8 +287,10 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
     }
 
     BlockContext bctx(*this, *function, irBuilder, std::move(locals));
-    bctx.visitBlock(wabt::LabelType::Func, allocaBlock, returnBlock, func.decl, func.exprs);
-
+    bool isReachableFun = bctx.visitBlock(wabt::LabelType::Func, allocaBlock, returnBlock, func.decl, func.exprs);
+    if(!isReachableFun){
+        return;
+    }
     // create return
     // TODO MultiValue
     irBuilder.SetInsertPoint(returnBlock);
