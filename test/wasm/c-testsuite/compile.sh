@@ -4,9 +4,9 @@ set -e
 
 BASEDIR=$(realpath $(dirname "$0"))
 
-if [ ! -f $BASEDIR/sylib.ll ]; then
-    /opt/wasi-sdk/wasi-sdk-16.0/bin/clang -target wasm32-unknown-wasi -S -emit-llvm ./sylib.c -O1 -o ./sylib.ll
-fi
+# if [ ! -f $BASEDIR/sylib.ll ]; then
+#     /opt/wasi-sdk/wasi-sdk-16.0/bin/clang -target wasm32-unknown-wasi -S -emit-llvm ./sylib.c -O1 -o ./sylib.ll
+# fi
 
 mkdir -p out_functional
 for file in $BASEDIR/functional/*.c; do

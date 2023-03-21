@@ -25,11 +25,11 @@ class DefaultTestCase(unittest.TestCase):
             self.assertTrue(do_decompile(wasm, ir), "decompilation error")
 
             print(RED+f'=========== running {file} =========='+NC)
-            self.assertTrue(do_compile(ir, [os.path.join(cwd, 'sylib.ll')]), "recompilation error")
+            self.assertTrue(do_compile(ir), "recompilation error")
             in_file = file_no_suffix+".in"
             if not os.path.exists(file_no_suffix+".in"):
                 in_file = None
-            ret = test_run(ir, file_no_suffix+".out", in_file, add_returncode=True)
+            ret = test_run(ir, file_no_suffix+".c.expected", in_file)
             self.assertTrue(ret)
 
 if __name__ == '__main__':

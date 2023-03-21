@@ -56,29 +56,29 @@ void putfarray(int n, float a[]) {
 //     va_end(args);
 // }
 
-void  *memset(void *b, int c, size_t len)
-{
-  int           i;
-  unsigned char *p = (unsigned long)b + &mem0;
-  i = 0;
-  while(len > 0)
-    {
-      *p = c;
-      p++;
-      len--;
-    }
-  return(b);
-}
+// void  *memset(void *b, int c, size_t len)
+// {
+//   int           i;
+//   unsigned char *p = (unsigned long)b + &mem0;
+//   i = 0;
+//   while(len > 0)
+//     {
+//       *p = c;
+//       p++;
+//       len--;
+//     }
+//   return(b);
+// }
 
-void * memcpy(void *dest, const void *src, size_t numBytes) {
-  char *csrc = (char *)(&mem0 + (unsigned long)src); 
-  char *cdest = (char *)(&mem0 + (unsigned long)dest); 
+// void * memcpy(void *dest, const void *src, size_t numBytes) {
+//   char *csrc = (char *)(&mem0 + (unsigned long)src); 
+//   char *cdest = (char *)(&mem0 + (unsigned long)dest); 
     
-  // Copy contents of src[] to dest[] 
-  for (int i=0; i<numBytes; i++) 
-      cdest[i] = csrc[i]; 
-  return(dest);
-}
+//   // Copy contents of src[] to dest[] 
+//   for (int i=0; i<numBytes; i++) 
+//       cdest[i] = csrc[i]; 
+//   return(dest);
+// }
 
 /* Timing function implementation */
 // __attribute((constructor)) void before_main(){

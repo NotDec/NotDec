@@ -11,7 +11,6 @@ std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, const char *file_name) 
     std::unique_ptr<WastLexer> lexer = WastLexer::CreateBufferLexer(
       file_name, file_data.data(), file_data.size());
 
-    
     if (!Succeeded(result)) {
         std::cerr << "Read wat file failed." << std::endl;
         return std::unique_ptr<Context>(nullptr);
@@ -156,7 +155,7 @@ void Context::visitModule() {
         }
         Func& func = cast<FuncModuleField>(&field)->func;
         llvm::Function* function = declareFunc(func, false);
-        if (baseCtx.opt.test_mode &&  function->getName() == "__original_main") {
+        if (baseCtx.opt.test_mode && function->getName() == "__original_main") {
             function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
             function->setName("main");
         }
@@ -287,10 +286,8 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
     }
 
     BlockContext bctx(*this, *function, irBuilder, std::move(locals));
-    bool isReachableFun = bctx.visitBlock(wabt::LabelType::Func, allocaBlock, returnBlock, func.decl, func.exprs);
-    if(!isReachableFun){
-        return;
-    }
+    bctx.visitBlock(wabt::LabelType::Func, allocaBlock, returnBlock, func.decl, func.exprs);
+
     // create return
     // TODO MultiValue
     irBuilder.SetInsertPoint(returnBlock);

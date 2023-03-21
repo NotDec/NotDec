@@ -15,3 +15,5 @@ build/
 
 __pycache__/
 .cache/
+
+libs/
