@@ -7,7 +7,7 @@ add_library(notdec STATIC
 
 target_link_libraries(notdec
 	PUBLIC
-	LLVMCore LLVMIRReader LLVMSupport # LLVMPasses
+	LLVMCore LLVMIRReader LLVMSupport LLVMPasses
 )
 
 if (NOTDEC_ENABLE_WASM)
@@ -15,6 +15,7 @@ if (NOTDEC_ENABLE_WASM)
 		frontend/wasm/parser.cpp
 		frontend/wasm/parser-block.cpp
 		frontend/wasm/parser-instruction.cpp
+		frontend/optimizers/opt-manager.cpp
 	)
 
 	target_link_libraries(notdec

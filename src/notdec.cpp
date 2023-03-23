@@ -6,6 +6,7 @@
 
 #ifdef NOTDEC_ENABLE_WASM
 #include "frontend/wasm/parser.h"
+#include "frontend/optimizers/opt-manager.h"
 #endif
 
 // https://stackoverflow.com/questions/865668/parsing-command-line-arguments-in-c
@@ -96,6 +97,9 @@ usage:
         ctx.mod.print(os, nullptr);
         std::cout << "IR dumped to " << outfilename << std::endl;
     }
+
+    // run passes
+    notdec::frontend::optimizers::run_passes(ctx.mod);
     
     return 0;
 }

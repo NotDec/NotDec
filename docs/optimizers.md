@@ -10,20 +10,6 @@
 
 
 
-## 规范
-
-### Manger
-
-LLVM PASS的管理有两种实现
-
-- LegacyPass Manger
-- NewPass Manger
-
-传统的LegacyPM有一些不足，例如Analysis Pass不能缓存分析的信息导致重复分析等。NewPM将Analysis和Pass做了区分。在LegacyPM中存在过多的全局变量与registries，每个Pass都需要通过宏来注册，NewPM改进了这一点，当然还有内联函数分析等其他优化。LLVM12使用的是LegacyPassManager，13之后默认使用的是NewPassManager，**本项目也使采用NewPassManager**。
-
-### 运行与管理
-
-LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。
 
 
 
@@ -31,8 +17,35 @@ LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。
 
 ## stack
 
-清除IR中的全局栈指针，并对其使用处的指令操作数(局部变量地址)进行转换。
+清除IR中的全局栈指针，并对其使用处的指令操作数(局部变量地址)进行转换，转换为对alloca里的东西的使用，把对mem0的使用，其中的使用mem0的栈部分，改为使用我们的alloca。
 参考[retdec/stack.cpp](https://github.com/avast/retdec/blob/master/src/bin2llvmir/optimizations/stack/stack.cpp)
+
+
+wasm解析为IR后先优化一下。
+
+- 如何判断global0是不是栈指针
+- 如何匹配函数开头的栈指针的sub操作
+- 如何判断哪些值是栈内存的指针
+
+只需要分析清楚对mem0取下标的这个值，是不是来自stackpointer的运算。
+1. 一定来自stack pointer
+1. 可能来自stack pointer
+1. 一定不来自stack pointer
+
+### 如何判断哪些值是栈内存的"抽象解释"算法
+
+和传统的数据流分析不同的地方在于，LLVM是SSA形式，每个值只有一个赋值点。因此，一个值要么是栈指针，要么不是。因此只需要直接循环迭代。
+
+为每个llvm的Value维护一个bool类型变量表示是否是栈指针。
+遍历所有基本块（可能拓扑排序会高效一点），直到某次完全遍历也没有任何变化
+初始化：算法开始前已经判断了函数开头的栈指针值，对应的bool设置为true
+如果遇到了运算，任意一个输入值对应true的话，结果也设置为true。
+
+把变量也标为是栈指针类型？所有对这个变量的load都是栈指针？
+
+如果把栈指针存到了结构体里怎么办？假装它没有定义结构体，定义了很多零散的变量？
+union怎么办？先不考虑。
+
 
 
 
