@@ -1,29 +1,31 @@
 #include <iostream>
-#include <algorithm>
 #include <string>
 
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
 
 #ifdef NOTDEC_ENABLE_WASM
 #include "frontend/wasm/parser.h"
 #include "frontend/optimizers/opt-manager.h"
 #endif
 
-// https://stackoverflow.com/questions/865668/parsing-command-line-arguments-in-c
-char* getCmdOption(char ** begin, char ** end, const std::string & option)
-{
-    char ** itr = std::find(begin, end, option);
-    if (itr != end && ++itr != end)
-    {
-        return *itr;
-    }
-    return nullptr;
-}
+//https://llvm.org/docs/CommandLine.html
+static cl::opt<std::string> inputFilename("i",cl::desc("input wasm/wat file"), cl::value_desc("wasm/wat"),cl::Required);
+static cl::opt<std::string> outputFilename("o",cl::desc("Specify output filename"), cl::value_desc("output.ll"),cl::Optional);
+static cl::opt<bool> recompile ("recompile", cl::desc("Enable recompile"),cl::init(false));
+static cl::opt<bool> testMode ("test-mode", cl::desc("Enable test mode"),cl::init(true));
+static cl::opt<bool> disablePass ("disable-pass", cl::desc("Disable all passes"),cl::init(false));
 
-bool cmdOptionExists(char** begin, char** end, const std::string& option)
-{
-    return std::find(begin, end, option) != end;
-}
+cl::opt<log_level> logLevel("log-level",cl::desc("Choose log level:"),
+    cl::values(
+    clEnumVal(level_emergent, "emergent"),
+    clEnumVal(level_alert, "alert"),
+    clEnumVal(level_critical, "critical"),
+    clEnumVal(level_error, "error"),
+    clEnumVal(level_warning, "warning"),
+    clEnumVal(level_notice, "notice"),
+    clEnumVal(level_info, "info"),
+    clEnumVal(level_debug, "debug")),cl::init(level_notice));
 
 std::string getSuffix(std::string fname) {
     std::size_t ind = fname.find_last_of('.');
@@ -34,37 +36,16 @@ std::string getSuffix(std::string fname) {
 }
 
 int main(int argc, char * argv[]) {
-    notdec::frontend::options opts;
-
-    // parse cmdline
-    if(cmdOptionExists(argv, argv+argc, "-h") || cmdOptionExists(argv, argv+argc, "--help")) {
-usage:
-        std::cout << "Usage: " << argv[0] << "-i wasm_file -o llvm_ir_file" << std::endl;
-        return 0;
-    }
-
-    char * outfilename = getCmdOption(argv, argv + argc, "-o");
-    char * infilename = getCmdOption(argv, argv + argc, "-i");
-    if (!(outfilename && infilename))
-    {
-        goto usage;
-    }
-
-    if (cmdOptionExists(argv, argv+argc, "--recompile")) {
-        opts.recompile = true;
-    }
-
-    if (cmdOptionExists(argv, argv+argc, "--test-mode")) {
-        opts.test_mode = true;
-    }
-
-    char* log_level = getCmdOption(argv, argv + argc, "--log-level");
-    if (log_level != nullptr) {
-        opts.log_level = std::stoi(log_level);
-    }
     
-    std::string insuffix = getSuffix(infilename);
-    notdec::frontend::BaseContext ctx(infilename, opts);
+    // parse cmdline
+    cl::ParseCommandLineOptions(argc,argv);
+    notdec::frontend::options opts;
+    opts.recompile = recompile;
+    opts.test_mode = testMode;
+    opts.log_level = logLevel;
+
+    std::string insuffix = getSuffix(inputFilename);
+    notdec::frontend::BaseContext ctx(inputFilename, opts);
     if (insuffix.size() == 0) {
         std::cout << "no extension for input file. exiting." << std::endl;
         return 0;
@@ -72,11 +53,11 @@ usage:
 #ifdef NOTDEC_ENABLE_WASM
     else if (insuffix == ".wasm") {
         std::cout << "using wasm frontend." << std::endl;
-        notdec::frontend::wasm::parse_wasm(ctx, infilename);
+        notdec::frontend::wasm::parse_wasm(ctx, inputFilename);
         // TODO
     } else if (insuffix == ".wat") {
         std::cout << "using wat frontend." << std::endl;
-        notdec::frontend::wasm::parse_wat(ctx, infilename);
+        notdec::frontend::wasm::parse_wat(ctx, inputFilename);
         // TODO
     }
 #endif
@@ -85,21 +66,20 @@ usage:
         return 0;
     }
 
-    std::string outsuffix = getSuffix(outfilename);
+    //run passes and dump IR
+    notdec::frontend::optimizers::run_passes(ctx.mod);
+    std::string outsuffix = getSuffix(outputFilename);
     if (outsuffix == ".ll") {
         std::error_code EC;
-        llvm::raw_fd_ostream os(outfilename, EC);
+        llvm::raw_fd_ostream os(outputFilename, EC);
         if (EC) {
             std::cerr << "Cannot open output file." << std::endl;
             std::cerr << EC.message() << std::endl;
             std::abort();
         }
         ctx.mod.print(os, nullptr);
-        std::cout << "IR dumped to " << outfilename << std::endl;
+        std::cout << "IR dumped to " << outputFilename << std::endl;
     }
-
-    // run passes
-    notdec::frontend::optimizers::run_passes(ctx.mod);
     
     return 0;
 }

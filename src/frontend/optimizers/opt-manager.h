@@ -17,6 +17,9 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 
+#include "llvm/Transforms/Utils/Mem2Reg.h"
+
+#include "frontend/optimizers/stack.cpp"
 using namespace llvm;
 
 namespace notdec::frontend::optimizers {

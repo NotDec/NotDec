@@ -5,7 +5,7 @@
 namespace notdec::frontend::optimizers {
 
 
-// New PM implementation
+// Function Pass example
 struct HelloWorld : PassInfoMixin<HelloWorld> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding pass manager (to be queried if need be)
@@ -23,16 +23,10 @@ struct HelloWorld : PassInfoMixin<HelloWorld> {
 
 // Module Pass example
 struct HelloModule : PassInfoMixin<HelloWorld> {
-  // Main entry point, takes IR unit to run the pass on (&F) and the
-  // corresponding pass manager (to be queried if need be)
   PreservedAnalyses run(Module &F, ModuleAnalysisManager &) {
     errs() << "(llvm-tutor) Hello Module: "<< F.getName() << "\n";
     return PreservedAnalyses::all();
   }
-
-  // Without isRequired returning true, this pass will be skipped for functions
-  // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
-  // all functions with optnone.
   static bool isRequired() { return true; }
 };
 
@@ -58,9 +52,14 @@ void run_passes(llvm::Module& mod) {
 
     // Create the pass manager.
     // This one corresponds to a typical -O2 optimization pipeline.
-    ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
-    MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
-    MPM.addPass(HelloModule());
+    ModulePassManager MPM; // = PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
+    //MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
+    //MPM.addPass(HelloModule());
+    
+
+    //mem2reg
+    MPM.addPass(createModuleToFunctionPassAdaptor(llvm::PromotePass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
     // Optimize the IR!
     MPM.run(mod, MAM);
 }

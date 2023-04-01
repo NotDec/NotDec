@@ -50,11 +50,20 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
     case ExprType::Unreachable:
         irBuilder.CreateUnreachable();
         break;
+
+    //TODO: support 2.0
+    case ExprType::MemoryGrow:
+        stack.pop_back();
+        stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+        break;   
+    case ExprType::MemorySize:
+        stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+        break;  
     case ExprType::Drop:
         assert(stack.size() > 0); stack.pop_back();
         break;
     default:
-        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr)  << std::endl;
         // really abort?
         // std::abort();
     }

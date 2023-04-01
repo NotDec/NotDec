@@ -202,7 +202,7 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             // save other args
             assert(stack.size() >= e->true_.decl.GetNumParams());
             std::size_t start_ind = stack.size() - e->true_.decl.GetNumParams();
-            for (int i=start_ind;i < stack.size(); i++) {
+            for (unsigned int i=start_ind;i < stack.size(); i++) {
                 params.push_back(stack.at(i));
             }
             // convert to i1
@@ -215,7 +215,7 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             entry = ifBlock; irBuilder.SetInsertPoint(entry);
             visitBlock(wabt::LabelType::If, entry, exitBlock, e->true_.decl, e->true_.exprs);
             // duplicate parameter
-            for (int i=0;i<params.size();i++) {
+            for (unsigned int i=0;i<params.size();i++) {
                 stack.push_back(params.at(i));
             }
             entry = elseBlock; irBuilder.SetInsertPoint(entry);

@@ -20,7 +20,7 @@ struct BaseContext {
     llvm::IRBuilder<> builder;
     llvm::Module mod;
     std::map<std::string, llvm::Value *> namedValues;
-    BaseContext(const char* name, options opt)
+    BaseContext(std::string& name, options opt)
         : opt(opt), context(), builder(context), mod(name, context) {}
 };
 

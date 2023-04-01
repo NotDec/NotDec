@@ -4,7 +4,7 @@
 
 namespace notdec::frontend::wasm {
 
-std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, const char *file_name) {
+std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, std::string &file_name) {
     using namespace wabt;
     std::vector<uint8_t> file_data;
     Result result = ReadFile(file_name, &file_data);
@@ -41,7 +41,7 @@ std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, const char *file_name) 
     return ret;
 }
 
-std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name) {
+std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, std::string &file_name) {
     using namespace wabt;
     // 这部分代码来自WABT，解析wasm文件
     std::vector<uint8_t> file_data;
@@ -61,7 +61,7 @@ std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, const char *file_name)
     ReadBinaryOptions options(s_features, nullptr,// s_log_stream.get(),
                             true, kStopOnFirstError,
                             true);
-    result = ReadBinaryIr(file_name, file_data.data(), file_data.size(),
+    result = ReadBinaryIr(&file_name[0], file_data.data(), file_data.size(),
                         options, &errors, ret->module.get());
     if (!Succeeded(result)) {
         std::cerr << "Read wasm file failed." << std::endl;
@@ -403,7 +403,7 @@ std::string removeDollar(std::string name) {
 
 void Context::setFuncArgName(llvm::Function& func, const wabt::FuncSignature& decl) {
     using namespace llvm;
-    int argSize = decl.GetNumParams();
+    unsigned argSize = decl.GetNumParams();
     for (unsigned int i=0;i<argSize;i++) {
         const std::string& name = decl.GetParamType(i).GetName();
         func.getArg(i)->setName(name);

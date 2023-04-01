@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Launch",
             "program": "${workspaceFolder}/build/bin/notdec",
-            "args": ["-i", "${file}", "-o", "${file}.ll", "--log-level", "7", "--test-mode", "--recompile"],
+            "args": ["-i", "${file}", "-o", "${file}.ll", "--log-level", "level_debug", "--test-mode", "--recompile"],
             "cwd": "${workspaceFolder}"
         }
     ]

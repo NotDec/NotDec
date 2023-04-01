@@ -4,13 +4,20 @@
             "name": "Linux",
             "includePath": [
                 "${default}",
-                "/usr/include/llvm-13"
+                "/usr/include/llvm-13/**"
             ],
+            "browse": { 
+                "path": [
+                    "/usr/include",
+                    "/usr/include/llvm-13/"
+                ]
+            },
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "gnu17",
             "intelliSenseMode": "linux-gcc-x64",
-            "configurationProvider": "ms-vscode.cmake-tools"
+            "configurationProvider": "ms-vscode.cmake-tools",
+            "cppStandard": "c++17"
         }
     ],
     "version": 4
