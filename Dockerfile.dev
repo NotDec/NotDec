@@ -1,8 +1,10 @@
 FROM ubuntu:22.04
 
-ENV LLVM_DIR /usr/lib/llvm-13/
-ENV TUTOR_DIR /llvm-tutor
+# docker build . --tag notdec-dev --build-arg UBUNTU_MIRROR=mirrors.tuna.tsinghua.edu.cn --build-arg PYTHON_MIRROR=pypi.tuna.tsinghua.edu.cn
+ARG UBUNTU_MIRROR=mirrors.ustc.edu.cn
+ARG PYTHON_MIRROR=pypi.tuna.tsinghua.edu.cn
 
+SHELL ["/bin/bash", "-c"]
 
 RUN useradd -m vscode -s /bin/bash
 WORKDIR /home/vscode
@@ -10,14 +12,15 @@ ENV HOME /home/vscode
 
 # Based on LLVM 13 beacuse SVF support llvm 13.
 
-RUN sed -i "s/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g" /etc/apt/sources.list \
-    && sed -i "s/security.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g" /etc/apt/sources.list \
+RUN if [[ ! -z "$UBUNTU_MIRROR" ]] ; then sed -i "s/archive.ubuntu.com/$UBUNTU_MIRROR/g" /etc/apt/sources.list \
+    && sed -i "s/security.ubuntu.com/$UBUNTU_MIRROR/g" /etc/apt/sources.list ; fi ; \
     && apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get -y install --no-install-recommends sudo openssh-client build-essential cmake ninja-build git wget nano lsb-release curl socat software-properties-common python3-minimal python3-pip python3-setuptools gpg-agent zlib1g-dev gdb gdbserver wabt lldb-13 \
+    && apt-get -y install --no-install-recommends sudo openssh-client build-essential cmake ninja-build git wget nano lsb-release curl socat software-properties-common python3-minimal python3-pip python3-setuptools gpg-agent zlib1g-dev gdb gdbserver wabt lldb-13 man-db \
     && wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
     && apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-13 main" \
     && apt-get update \
     && apt-get install -y llvm-13 llvm-13-dev llvm-13-tools clang-13 \
+    && if [[ ! -z "$PYTHON_MIRROR" ]] ; then python3 -m pip config set global.index-url https://$PYTHON_MIRROR/simple ; fi ; \
     && pip3 install lit \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && echo 'vscode:123456' | chpasswd \
