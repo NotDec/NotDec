@@ -51,8 +51,8 @@ private:
     wabt::Index _mem_index = 0;
 };
 
-std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, std::string &file_name);
-std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, std::string &file_name);
+std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, std::string file_name);
+std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, std::string file_name);
 
 llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Type& ty);
 llvm::Type* convertType(llvm::LLVMContext& llvmContext, const wabt::Type& ty);

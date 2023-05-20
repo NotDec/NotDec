@@ -51,16 +51,13 @@ void run_passes(llvm::Module& mod) {
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
     // Create the pass manager.
-    // This one corresponds to a typical -O2 optimization pipeline.
-    ModulePassManager MPM; // = PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
-    //MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
-    //MPM.addPass(HelloModule());
-    
-
-    //mem2reg
-    MPM.addPass(createModuleToFunctionPassAdaptor(llvm::PromotePass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
     // Optimize the IR!
+    // This one corresponds to a typical -O2 optimization pipeline.
+    ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
+    // MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
+    // MPM.addPass(HelloModule());
+
+    // MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
     MPM.run(mod, MAM);
 }
 

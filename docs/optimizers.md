@@ -34,9 +34,13 @@
 - 如何匹配函数开头的栈指针的sub操作
 - 如何判断哪些值是栈内存的指针
 
+### 挑战
+
+现在内存不是直接访问的：即load和store指令会在加载和保存的时候，将偏移加上mem0的基地址。但是，如果一旦引入了类似于直接alloca的这种情况，则它将是直接地址，而不是直接加上mem0的基地址。问题在于，可能会有指针混指的情况，即可能指向全局变量或者栈空间变量。这样在后面load/store的时候，无论是加上mem0的基址还是不加都有问题。
+
+因此引入地址空间的概念，引入数值和地址的转换符。
 
 
-TODO：
 
 能否保证语义安全？因为我们现在转出来的IR是能跑的，如果变量恢复后，是不是就不能跑了？比如部分变量识别失败，还是存到mem里去了。
 
@@ -80,3 +84,6 @@ TODO:
 类型恢复
 
 参考[GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)](https://github.com/GrammaTech/retypd-ghidra-plugin)
+
+
+
