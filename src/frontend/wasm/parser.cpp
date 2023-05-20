@@ -293,8 +293,7 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
     // TODO MultiValue
     irBuilder.SetInsertPoint(returnBlock);
     if (func.GetNumResults() == 1) {
-        assert(bctx.stack.size() > 0);
-        irBuilder.CreateRet(bctx.stack.back()); bctx.stack.pop_back();
+        irBuilder.CreateRet(bctx.popStack());
     } else {
         assert(func.GetNumResults() == 0); // ?
         irBuilder.CreateRetVoid();

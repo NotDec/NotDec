@@ -49,13 +49,15 @@ struct BlockContext
     void dispatchExprs(wabt::Expr& expr);
     void unwindStackTo(size_t pos);
 
-    void visitBr(wabt::Expr* expr, std::size_t ind, llvm::Value* cond, llvm::BasicBlock* nextBlock);
+    llvm::Instruction* visitBr(wabt::Expr* expr, std::size_t ind, llvm::Value* cond, llvm::BasicBlock* nextBlock);
     void visitUnaryInst(wabt::UnaryExpr* expr);
     void visitBinaryInst(wabt::BinaryExpr* expr);
     void visitCompareExpr(wabt::CompareExpr* expr);
     void visitConvertExpr(wabt::ConvertExpr* expr);
     void visitConstInst(wabt::ConstExpr* expr);
     void visitCallInst(wabt::CallExpr* expr);
+    void visitCallIndirectInst(wabt::CallIndirectExpr* expr);
+    void visitSelectExpr(wabt::SelectExpr* expr);
 
     void visitLoadInst(wabt::LoadExpr* expr);
     void visitStoreInst(wabt::StoreExpr* expr);
@@ -66,6 +68,12 @@ struct BlockContext
     void visitLocalTee(wabt::LocalTeeExpr* expr);
     void visitGlobalGet(wabt::GlobalGetExpr* expr);
     void visitGlobalSet(wabt::GlobalSetExpr* expr);
+
+    llvm::Value* popStack() {
+        assert(stack.size() >= 1);
+        llvm::Value* p1 = stack.back(); stack.pop_back();
+        return p1;
+    }
 };
 
 llvm::Constant* visitConst(llvm::LLVMContext &llvmContext, const wabt::Const& const_);

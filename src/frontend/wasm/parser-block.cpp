@@ -1,5 +1,11 @@
 
 #include "frontend/wasm/parser-block.h"
+#include "src/ir.h"
+#include <cstdlib>
+#include <llvm-13/llvm/IR/Constants.h>
+#include <llvm-13/llvm/IR/Instruction.h>
+#include <llvm-13/llvm/IR/Instructions.h>
+#include <llvm-13/llvm/Support/Casting.h>
 
 namespace notdec::frontend::wasm {
 
@@ -45,8 +51,7 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
                 llvm::PHINode* phi = irBuilder.CreatePHI(convertType(llvmContext, decl.GetParamType(i)), 0, entry->getName() + "_" + std::to_string(i));
                 phis.push_front(phi);
                 // 给phi赋值，然后用Phi替换栈上值
-                assert(stack.size() > 0);
-                phi->addIncoming(stack.back(), entry); stack.pop_back();
+                phi->addIncoming(popStack(), entry);
             }
             // 把栈上参数转换为Phi
             for (auto phi: phis) {
@@ -228,8 +233,7 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             auto e = wabt::cast<wabt::BrIfExpr>(&expr);
             std::size_t brind = (e->var.index() + 1);
             // boolean arg
-            assert(stack.size() >= 1);
-            Value* p1 = stack.back(); stack.pop_back();
+            Value* p1 = popStack();
             // convert to i1
             p1 = irBuilder.CreateICmpNE(p1, ConstantInt::getNullValue(p1->getType()), "brif_val");
             BasicBlock* nextBlock = llvm::BasicBlock::Create(llvmContext, "brif_next", &function);
@@ -245,6 +249,25 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             visitBr(&expr, blockStack.size() - brind, nullptr, nullptr);
             break;
         }
+        case wabt::ExprType::BrTable: {
+            using namespace llvm;
+            wabt::BrTableExpr* brt = wabt::cast<wabt::BrTableExpr>(&expr);
+            // 默认target
+            std::size_t defInd = (brt->default_target.index() + 1);
+            Value* p1 = popStack();
+            SwitchInst* si = cast<SwitchInst>(visitBr(brt, blockStack.size() - defInd, p1, nullptr));
+            // 其他target
+            for (wabt::Index i=0;i<brt->targets.size();i++) {
+                std::size_t ind = (brt->targets.at(i).index() + 1);
+                BreakoutTarget& bt = blockStack.at(ind);
+                si->addCase(ConstantInt::get(Type::getInt32Ty(llvmContext), i), &bt.target);
+                auto stackIt = stack.rbegin();
+                for (auto it = bt.phis.rbegin(); it != bt.phis.rend(); ++it, ++stackIt) {
+                    (*it)->addIncoming((*stackIt), irBuilder.GetInsertBlock());
+                }
+            }
+            break;
+        }
         case wabt::ExprType::Return:
             visitBr(&expr, 0, nullptr, nullptr);
             break;
@@ -255,24 +278,35 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
     }
 }
 
-void BlockContext::visitBr(wabt::Expr* expr, std::size_t ind, llvm::Value* cond, llvm::BasicBlock* nextBlock) {
-    // 等价于直接跳转出最外面的函数体block
+llvm::Instruction* BlockContext::visitBr(wabt::Expr* expr, std::size_t ind, llvm::Value* cond, llvm::BasicBlock* nextBlock) {
+    llvm::Instruction* ret;
     BreakoutTarget& bt = blockStack.at(ind);
     if (ind == 0) {
+        // 等价于直接跳转出最外面的函数体block
         assert(bt.lty == wabt::LabelType::Func);
     }
-    // irBuilder.CreateRet(stack.back()); stack.pop_back();
     // 返回值放到Phi里
     assert(stack.size() >= bt.phis.size());
-    for (auto it = bt.phis.rbegin(); it != bt.phis.rend(); ++it) {
-        (*it)->addIncoming(stack.back(), irBuilder.GetInsertBlock());// stack.pop_back();
+    auto stackIt = stack.rbegin();
+    for (auto it = bt.phis.rbegin(); it != bt.phis.rend(); ++it, ++stackIt) {
+        (*it)->addIncoming((*stackIt), irBuilder.GetInsertBlock());
     }
     if (cond == nullptr && nextBlock == nullptr) {
-        irBuilder.CreateBr(&bt.target);
+        assert(expr->type() == wabt::ExprType::Br || expr->type() == wabt::ExprType::Return);
+        ret = irBuilder.CreateBr(&bt.target);
+        irBuilder.ClearInsertionPoint(); // mark unreachable
+    } else if (cond != nullptr && nextBlock != nullptr) {
+        assert(expr->type() == wabt::ExprType::BrIf);
+        ret = irBuilder.CreateCondBr(cond, &bt.target, nextBlock);
+    } else if (cond != nullptr && nextBlock == nullptr) {
+        assert(expr->type() == wabt::ExprType::BrTable);
+        ret = irBuilder.CreateSwitch(cond, &bt.target);
         irBuilder.ClearInsertionPoint(); // mark unreachable
     } else {
-        irBuilder.CreateCondBr(cond, &bt.target, nextBlock);
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unexpected call to BlockContext::visitBr: " << std::endl;
+        std::abort();
     }
+    return ret;
 }
 
 bool isContainBlock(wabt::Expr& expr) {

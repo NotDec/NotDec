@@ -1,4 +1,5 @@
 #include "frontend/wasm/parser-block.h"
+#include <llvm-13/llvm/Support/Alignment.h>
 
 namespace notdec::frontend::wasm {
 
@@ -26,6 +27,9 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
     case ExprType::Call:
         visitCallInst(cast<CallExpr>(&expr));
         break;
+    case ExprType::CallIndirect:
+        visitCallIndirectInst(cast<CallIndirectExpr>(&expr));
+        break;
     case ExprType::Load:
         visitLoadInst(cast<LoadExpr>(&expr));
         break;
@@ -49,15 +53,38 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
         break;
     case ExprType::Unreachable:
         irBuilder.CreateUnreachable();
+        irBuilder.ClearInsertionPoint();
+        break;
+    case ExprType::Nop:
+        break;
+    case ExprType::Select:
+        visitSelectExpr(cast<SelectExpr>(&expr));
         break;
 
     //TODO: support 2.0
-    case ExprType::MemoryGrow:
-        stack.pop_back();
-        stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+    // case ExprType::MemoryGrow:
+    //     stack.pop_back();
+    //     stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+    //     break;
+    // case ExprType::MemorySize:
+    //     stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+    //     break;
+    case ExprType::MemoryCopy:
+        {
+            llvm::Value* num = popStack();
+            llvm::Value* src = convertStackAddr(0);
+            llvm::Value* dest = convertStackAddr(0);
+            irBuilder.CreateMemCpy(dest, llvm::MaybeAlign(0), src, llvm::MaybeAlign(0), num);
+        }
         break;
-    case ExprType::MemorySize:
-        stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+    case ExprType::MemoryFill:
+        {
+            llvm::Value* num = popStack();
+            llvm::Value* byte = popStack();
+            byte = irBuilder.CreateTrunc(byte, llvm::Type::getInt8Ty(llvmContext));
+            llvm::Value* dest = convertStackAddr(0);
+            irBuilder.CreateMemSet(dest, byte, num, llvm::MaybeAlign(0));
+        }
         break;
     case ExprType::Drop:
         assert(stack.size() > 0); stack.pop_back();
@@ -65,14 +92,13 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << GetExprTypeName(expr) << std::endl;
         // really abort?
-        // std::abort();
+        std::abort();
     }
 }
 
 void BlockContext::visitLocalSet(wabt::LocalSetExpr* expr) {
     using namespace llvm;
-    assert(stack.size() > 0);
-    Value* val = stack.back(); stack.pop_back();
+    Value* val = popStack();
     Value* target = locals.at(expr->var.index());
     irBuilder.CreateStore(val, target);
 }
@@ -87,8 +113,7 @@ void BlockContext::visitLocalTee(wabt::LocalTeeExpr* expr) {
 
 void BlockContext::visitGlobalSet(wabt::GlobalSetExpr* expr) {
     using namespace llvm;
-    assert(stack.size() > 0);
-    Value* val = stack.back(); stack.pop_back();
+    Value* val = popStack();
     Value* target = ctx.globs.at(ctx.module->GetGlobalIndex(expr->var));
     irBuilder.CreateStore(val, target);
 }
@@ -110,8 +135,7 @@ void BlockContext::visitGlobalGet(wabt::GlobalGetExpr* expr) {
 
 void BlockContext::visitStoreInst(wabt::StoreExpr* expr) {
     using namespace llvm;
-    assert(stack.size() > 0);
-    Value* val = stack.back(); stack.pop_back();
+    Value* val = popStack();
     Value* addr = convertStackAddr(expr->offset);
     // 看是否要cast
     Type* targetType = nullptr;
@@ -145,12 +169,22 @@ void BlockContext::visitStoreInst(wabt::StoreExpr* expr) {
     irBuilder.CreateStore(val, addr);
 }
 
+void BlockContext::visitSelectExpr(wabt::SelectExpr* expr) {
+    using namespace llvm;
+    Value* cond = popStack();
+    // convert to i1
+    cond = irBuilder.CreateICmpNE(cond, ConstantInt::getNullValue(cond->getType()), "select_cond");
+    Value* val2 = popStack();
+    Value* val1 = popStack();
+    Value* res = irBuilder.CreateSelect(cond, val1, val2);
+    stack.push_back(res);
+}
+
 // 从栈上读一个整数地址，加上offset，取默认的mem，然后返回指针。
 llvm::Value* BlockContext::convertStackAddr(uint64_t offset) {
     using namespace llvm;
     GlobalVariable* mem = this->ctx.mems.at(0);
-    assert(stack.size() > 0);
-    Value* base = stack.back(); stack.pop_back();
+    Value* base = popStack();
 
     // 会被IRBuilder处理，所以不用搞自己的特判优化。
     // if (expr->offset != 0) {
@@ -228,8 +262,7 @@ void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
 void BlockContext::visitConvertExpr(wabt::ConvertExpr* expr) {
     using namespace llvm;
     Value *ret = nullptr, *p1;
-    assert(stack.size() >= 1);
-    p1 = stack.back(); stack.pop_back();
+    p1 = popStack();
     switch (expr->opcode)
     {
     case wabt::Opcode::I32Eqz:
@@ -313,8 +346,7 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     using namespace llvm;
     Value *ret = nullptr, *p1;
     Function* f;
-    assert(stack.size() >= 1);
-    p1 = stack.back(); stack.pop_back();
+    p1 = popStack();
     switch (expr->opcode)
     {
     case wabt::Opcode::F32Neg:
@@ -382,9 +414,8 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
 void BlockContext::visitCompareExpr(wabt::CompareExpr* expr) {
     using namespace llvm;
     Value *ret = nullptr, *p1, *p2;
-    assert(stack.size() >= 2);
-    p1 = stack.back(); stack.pop_back();
-    p2 = stack.back(); stack.pop_back();
+    p1 = popStack();
+    p2 = popStack();
     switch (expr->opcode)
     {
     case wabt::Opcode::I32Eq:
@@ -466,9 +497,8 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     using namespace llvm;
     Value *ret = nullptr, *p1, *p2;
     Function *f; // for intrinsic
-    assert(stack.size() >= 2);
-    p1 = stack.back(); stack.pop_back();
-    p2 = stack.back(); stack.pop_back();
+    p1 = popStack();
+    p2 = popStack();
     switch (expr->opcode)
     {
     case wabt::Opcode::I32Add:
@@ -591,8 +621,31 @@ void BlockContext::visitCallInst(wabt::CallExpr* expr) {
     llvm::ArrayRef<llvm::Value*> callArgs = llvm::ArrayRef<llvm::Value*>(callArgsAlloca, paramCount);
     // https://stackoverflow.com/questions/5458204/unsigned-int-reverse-iteration-with-for-loops
     for (wabt::Index i = paramCount; i-- > 0;) {
-        assert(stack.size() > 0);
-        callArgsAlloca[i] = stack.back(); stack.pop_back();
+        callArgsAlloca[i] = popStack();
+    }
+    // TODO MultiValue
+    assert(wfunc->GetNumResults() <= 1);
+    Value* ret = irBuilder.CreateCall(target->getFunctionType(), target, callArgs);
+    if (wfunc->GetNumResults() != 0) {
+        stack.push_back(ret);
+    }
+}
+
+void BlockContext::visitCallIndirectInst(wabt::CallIndirectExpr* expr) {
+    using namespace llvm;
+    // 创建函数指针数组，全局变量
+    
+
+    Function* target = ctx.findFunc(expr->);
+    // get wabt func
+    wabt::Func* wfunc = ctx.module->GetFunc(expr->decl);
+    wabt::Index paramCount = wfunc->GetNumParams();
+    assert (target->getFunctionType()->getNumParams() == paramCount);
+    auto callArgsAlloca = (llvm::Value**)alloca(sizeof(llvm::Value*) * paramCount);
+    llvm::ArrayRef<llvm::Value*> callArgs = llvm::ArrayRef<llvm::Value*>(callArgsAlloca, paramCount);
+    // https://stackoverflow.com/questions/5458204/unsigned-int-reverse-iteration-with-for-loops
+    for (wabt::Index i = paramCount; i-- > 0;) {
+        callArgsAlloca[i] = popStack();
     }
     // TODO MultiValue
     assert(wfunc->GetNumResults() <= 1);
