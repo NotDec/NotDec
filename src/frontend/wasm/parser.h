@@ -29,6 +29,7 @@ struct Context {
     std::vector<llvm::GlobalVariable*> globs;
     std::vector<llvm::Function*> funcs;
     std::vector<llvm::GlobalVariable*> mems;
+    std::vector<llvm::GlobalVariable*> tables;
     int log_level;
 
     Context(BaseContext& baseCtx)
@@ -37,6 +38,11 @@ struct Context {
     void visitModule();
     void visitGlobal(wabt::Global& gl, bool isExternal);
     void visitFunc(wabt::Func& func, llvm::Function* function);
+    void visitTable(wabt::Table& table);
+    void visitElem(wabt::ElemSegment& elem);
+    llvm::PointerType* getFuncPointerType() {
+        return llvm::PointerType::get(llvm::FunctionType::get(llvm::Type::getVoidTy(llvmContext), false), 0);
+    }
     llvm::Constant* visitInitExpr(wabt::ExprList& expr);
     llvm::GlobalVariable* visitDataSegment(wabt::DataSegment& ds);
 
@@ -49,6 +55,7 @@ private:
     wabt::Index _func_index = 0;
     wabt::Index _glob_index = 0;
     wabt::Index _mem_index = 0;
+    wabt::Index _table_index = 0;
 };
 
 std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, std::string file_name);

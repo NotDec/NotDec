@@ -156,14 +156,26 @@ wabt那边代表Block的结构体看wabt的`src\ir.h` 383行`struct Block`这边
 
 ## 其他
 
-### Wasm中的非直接跳转（复习）
+### Wasm中的函数指针调用（复习）
 
 在二进制模块中有id为4的table section。里面有一系列的table类型，初始化则由element section负责。table类型有两部分，reftype和limit。[limit](https://webassembly.github.io/spec/core/binary/types.html#limits)应该是类似数组大小的东西，但是同时包含了上限和下限。
 
 reftype其实就是个enum，表示是不透明的external类型还是function类型。即，光是table section里，有用的信息只有定义了index，给每个index处的table标明了上下限。
 
-接下来看elem section。~~它可以是passive的，即等着被table.init指令使用，用来初始化某个table。或者是active的，直接初始化某个table。~~ 现在直接翻标准是新release的2.0标准了。我们暂时先支持1.0标准，wabt现在也仅支持1.0，如果文件头里写version为2会报错。（这个version是在整个二进制模块的header处定义的。）elem section由三部分组成：
+reference类型是和其他类型独立的。即真的无法观测到底是怎么表示的，只能被存在table里。即和程序call指令里面用的index不同。其实我们只要管func ref，external ref一般指不是函数的情况。如果有的话直接那个吧。
 
+接下来看elem section。它可以是passive的，即等着被table.init指令使用，用来初始化某个table。或者是active的，直接初始化某个table。最后可以是declarative的，说是前向声明。（TODO，不是特别理解）
+
+现在直接翻标准是新release的2.0标准了。我们暂时先支持1.0标准里面流行的active类型的elem。（wabt现在如果文件头里写version为2会报错。（这个version是在整个二进制模块的header处定义的。）但是依然支持这一部分的新格式，可能是以支持相关拓展的形式实现的）
+
+首先介绍[标志位](https://webassembly.github.io/spec/core/binary/modules.html#element-section)：
+- bit0: passive 或 active 的标志位。
+- bit1: 分两种情况
+   - active: 存在额外的table index。（否则默认是0） 
+   - 标志位表示是passive或者declarative。
+- bit2: bit 2 indicates the use of element type and element expressions instead of element kind and element indices.
+
+elem section由三部分组成：
 1. table index, 初始化哪个table。目前因为只有一个table，所以必须是0。
 2. offset, 常量表达式，即一些指令。例如：`41 01 0b`解码为`i32.const 1; end;`。
 3. vec(func ind) 一系列函数下标，表示要初始化成这些。
@@ -171,6 +183,8 @@ reftype其实就是个enum，表示是不透明的external类型还是function�
 [Features to add after the MVP - WebAssembly 中文网|Wasm 中文文档](https://www.wasm.com.cn/docs/future-features/) https://www.w3.org/TR/wasm-core-1/#element-segments%E2%91%A0 （可以在这个页面搜索`at most one`） 这里提到了，MVP标准中wasm最多有一块内存，最多有一个table。
 
 对应到LLVM IR的关键是，相同的语言特性会怎么在LLVM IR上实现/怎样的LLVM IR会编译到这样的wasm。LLVM里只有Call指令，但是参数是一个函数地址的value。目前看来可以搞一个函数指针数组，对应初始化后的table。然后将callind翻译为从函数指针中取，然后再call。
+
+至于非直接跳转，由于和llvm的switch完美对应，就非常简单。br_table指令会带有个table，让index从1到table的大小遍历，根据当前栈上的值是否等于当前index，从table里面取出要跳转的层数，找到对应的基本块，为switch增加跳转目标即可。
 
 ## TODO
 

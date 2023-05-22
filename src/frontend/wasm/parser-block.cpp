@@ -84,6 +84,7 @@ void BlockContext::visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm
     if (irBuilder.GetInsertBlock() != nullptr) { // not unreachable, handle implicit return
         if (stack.size() != (stack_pos + decl.GetNumResults())) {
             std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Not enough value on stack" << std::endl;
+            std::cerr << decl.GetNumResults() << " expected, but got " << (stack.size() - stack_pos) << std::endl;
             std::abort();
         }
         assert(stack.size() >= phis.size());

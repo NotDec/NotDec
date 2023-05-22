@@ -1,6 +1,14 @@
 #include "frontend/wasm/parser.h"
 #include "frontend/wasm/parser-block.h"
 #include "src/base-types.h"
+#include "src/ir.h"
+#include <cstdlib>
+#include <llvm-13/llvm/ADT/ArrayRef.h>
+#include <llvm-13/llvm/IR/Constant.h>
+#include <llvm-13/llvm/IR/Constants.h>
+#include <llvm-13/llvm/IR/DerivedTypes.h>
+#include <llvm-13/llvm/IR/GlobalVariable.h>
+#include <new>
 
 
 namespace notdec::frontend::wasm {
@@ -77,7 +85,6 @@ std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, std::string file_name)
             return std::unique_ptr<Context>(nullptr);
         }
     }
-    // TODO
     ret->visitModule();
     return ret;
 }
@@ -162,6 +169,13 @@ void Context::visitModule() {
         }
         nonImportFuncs.push_back(function); 
     }
+
+    // visit elem and create function pointer array
+    for (Table* field : this->module->tables) {
+        visitTable(*field);
+    }
+
+    // visit function
     std::size_t i = 0;
     for (ModuleField& field : module->fields) {
         if (field.type() != ModuleFieldType::Func) {
@@ -218,7 +232,10 @@ void Context::visitModule() {
             break;
         }
     }
-    // visit elem and create function pointer array
+    // elem段需要函数指针，所以依赖func段
+    for (ElemSegment* elem : this->module->elem_segments) {
+        visitElem(*elem);
+    }
     assert((this->funcs.size() == _func_index));
 }
 
@@ -316,6 +333,93 @@ void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
     }
     this->globs.push_back(gv);
     _glob_index ++;
+}
+
+void Context::visitTable(wabt::Table& table) {
+    using namespace llvm;
+    Type* ty;
+    if (table.elem_type == wabt::Type::FuncRef) {
+        // use a generic void func pointer, because the actual type is known.
+        // maybe migrate to https://llvm.org/docs/OpaquePointers.html in the future.
+        ty = getFuncPointerType();
+    } else {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: table elem type not supported: " << table.elem_type.GetName() << std::endl;
+        std::abort();
+    }
+
+    if (table.elem_limits.has_max && table.elem_limits.max != table.elem_limits.initial) {
+        // TODO
+        if (log_level >= level_warning)
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Warning: table elem limits has max." << std::endl;
+    }
+
+    ArrayType* aty = ArrayType::get(ty, table.elem_limits.initial);
+    GlobalVariable *gv = new GlobalVariable(llvmModule, aty, false, GlobalValue::LinkageTypes::ExternalLinkage, nullptr, table.name.empty() ? "T" + std::to_string(_table_index) : table.name);
+    this->tables.push_back(gv);
+    _table_index ++;
+}
+
+// ref: wabt/src/wat-writer.cc:1434 WatWriter::WriteElemSegment
+void Context::visitElem(wabt::ElemSegment& elem) {
+    using namespace llvm;
+    uint8_t flags = elem.GetFlags(module.get());
+    if (elem.elem_type != wabt::Type::FuncRef) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: elem type not supported: " << elem.elem_type.GetName() << std::endl;
+        std::abort();
+    }
+
+    // 1 根据table index找到对应的table
+    wabt::Index table_index;
+    if ((flags & (wabt::SegPassive | wabt::SegExplicitIndex)) == wabt::SegExplicitIndex) {
+        table_index = module->GetTableIndex(elem.table_var);
+    } else {
+        table_index = 0;
+    }
+    if (flags & wabt::SegPassive) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: passive elem segment not supported." << std::endl;
+        std::abort();
+    }
+
+    GlobalVariable *gv = tables.at(table_index); // TODO index
+
+    // 2 把函数指针填入
+    ArrayType* arr = cast<ArrayType>(gv->getValueType());
+    // all null
+    Constant** buffer = (Constant**) calloc(sizeof(Constant*), arr->getNumElements());
+    // 解析offset
+    Constant* offset_constant = visitInitExpr(elem.offset);
+    wabt::Index offset = unwrapIntConstant(offset_constant);
+    if (offset != 0) {
+        if (log_level >= level_warning)
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Warning: elem offset not zero." << std::endl;
+    }
+    for (wabt::Index i = 0; i < arr->getNumElements(); i++) {
+        if (!(i >= offset && i < offset + elem.elem_exprs.size())) {
+            buffer[i] = ConstantPointerNull::get(PointerType::get(arr->getElementType(), 0));
+            continue;
+        }
+        const wabt::ExprList& expr = elem.elem_exprs.at(i - offset);
+        if (flags & wabt::SegUseElemExprs) {
+            // TODO
+            std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: elem exprs not supported." << std::endl;
+            std::abort();
+        } else {
+            assert(expr.size() == 1);
+            assert(expr.front().type() == wabt::ExprType::RefFunc);
+            wabt::Index func_ind = module->GetFuncIndex(cast<wabt::RefFuncExpr>(&expr.front())->var);
+            Constant* func_addr = ConstantExpr::getBitCast(funcs.at(func_ind), getFuncPointerType());
+            buffer[i] = func_addr;
+        }
+    }
+
+    // ArrayRef<Constant*>(buffer, arr->getNumElements())
+    Constant* init = ConstantArray::get(arr, makeArrayRef(buffer, arr->getNumElements()));
+    if (gv->hasInitializer()) {
+        gv->getInitializer()->replaceAllUsesWith(init);
+    } else {
+        gv->setInitializer(init);
+    }
+    // free(buffer);
 }
 
 llvm::Constant* Context::visitInitExpr(wabt::ExprList& expr) {

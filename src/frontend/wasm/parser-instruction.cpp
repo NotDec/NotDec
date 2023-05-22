@@ -1,5 +1,10 @@
 #include "frontend/wasm/parser-block.h"
+#include <llvm-13/llvm/IR/DerivedTypes.h>
+#include <llvm-13/llvm/IR/GlobalVariable.h>
+#include <llvm-13/llvm/IR/Instructions.h>
 #include <llvm-13/llvm/Support/Alignment.h>
+#include <llvm-13/llvm/Support/Casting.h>
+#include <llvm-13/llvm/Support/raw_ostream.h>
 
 namespace notdec::frontend::wasm {
 
@@ -61,14 +66,16 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
         visitSelectExpr(cast<SelectExpr>(&expr));
         break;
 
-    //TODO: support 2.0
-    // case ExprType::MemoryGrow:
-    //     stack.pop_back();
-    //     stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
-    //     break;
-    // case ExprType::MemorySize:
-    //     stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
-    //     break;
+    // TODO: support 2.0
+    case ExprType::MemoryGrow:
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Warning: dummy implementation for " << GetExprTypeName(expr) << std::endl;
+        stack.pop_back();
+        stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+        break;
+    case ExprType::MemorySize:
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Warning: dummy implementation for " << GetExprTypeName(expr) << std::endl;
+        stack.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmContext), 0));
+        break;
     case ExprType::MemoryCopy:
         {
             llvm::Value* num = popStack();
@@ -633,24 +640,35 @@ void BlockContext::visitCallInst(wabt::CallExpr* expr) {
 
 void BlockContext::visitCallIndirectInst(wabt::CallIndirectExpr* expr) {
     using namespace llvm;
-    // 创建函数指针数组，全局变量
-    
 
-    Function* target = ctx.findFunc(expr->);
-    // get wabt func
-    wabt::Func* wfunc = ctx.module->GetFunc(expr->decl);
-    wabt::Index paramCount = wfunc->GetNumParams();
-    assert (target->getFunctionType()->getNumParams() == paramCount);
-    auto callArgsAlloca = (llvm::Value**)alloca(sizeof(llvm::Value*) * paramCount);
-    llvm::ArrayRef<llvm::Value*> callArgs = llvm::ArrayRef<llvm::Value*>(callArgsAlloca, paramCount);
+    // 1 找到table对应的函数指针数组（全局变量）
+    GlobalVariable* table = ctx.tables.at(ctx.module->GetTableIndex(expr->table));
+    // 2 获取index，保证index在范围内
+    Value* index = popStack();
+    // TODO 保证index在范围内
+    // 3 获取正确的函数指针类型
+    FunctionType* funcType = convertFuncType(llvmContext, expr->decl.sig);
+    wabt::Index paramCount = expr->decl.sig.param_types.size();
+    assert (funcType->getNumParams() == paramCount);
+    // 4 取下标，调用函数
+    Value* arr[2] = { ConstantInt::getNullValue(index->getType()) , index};
+    Value* ptr = irBuilder.CreateGEP(table->getValueType(), table, makeArrayRef(arr, 2));
+    
+    // ctx.llvmModule.getDataLayout().getABITypeAlign(funcType);
+    // outs() << *cast<GetElementPtrInst>(ptr);
+    Value* funcPtr = irBuilder.CreateLoad(ptr->getType()->getPointerElementType(), ptr, "callind_funcptr");
+    // Value* funcPtr = irBuilder.CreateExtractElement(table, index, "callind_funcptr");
+    funcPtr = irBuilder.CreateBitOrPointerCast(funcPtr, PointerType::get(funcType, 0));
+    auto callArgsAlloca = (llvm::Value**)calloc(sizeof(llvm::Value*), paramCount);
     // https://stackoverflow.com/questions/5458204/unsigned-int-reverse-iteration-with-for-loops
     for (wabt::Index i = paramCount; i-- > 0;) {
         callArgsAlloca[i] = popStack();
     }
+    llvm::ArrayRef<llvm::Value*> callArgs = llvm::ArrayRef<llvm::Value*>(callArgsAlloca, paramCount);
     // TODO MultiValue
-    assert(wfunc->GetNumResults() <= 1);
-    Value* ret = irBuilder.CreateCall(target->getFunctionType(), target, callArgs);
-    if (wfunc->GetNumResults() != 0) {
+    assert(expr->decl.GetNumResults() <= 1);
+    Value* ret = irBuilder.CreateCall(funcType, funcPtr, callArgs);
+    if (expr->decl.GetNumResults() != 0) {
         stack.push_back(ret);
     }
 }
