@@ -1,6 +1,7 @@
 
 #include "frontend/wasm/parser-block.h"
 #include "src/ir.h"
+#include <cassert>
 #include <cstdlib>
 #include <llvm-13/llvm/IR/Constants.h>
 #include <llvm-13/llvm/IR/Instruction.h>
@@ -162,7 +163,7 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
                 }
             }
             if (expr.loc.line != 0) {
-                std::cerr << ", at line " << expr.loc.line;
+                std::cerr << ", at "<< expr.loc.filename << ":" << expr.loc.line;
             }
             std::cerr << std::endl;
         }
@@ -245,6 +246,7 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
         }
         case wabt::ExprType::Br: {
             // index里面有assert。
+            // add 1 for negative index
             std::size_t brind = (wabt::cast<wabt::BrExpr>(&expr)->var.index() + 1);
             assert(blockStack.size() >= brind); // 防止下溢
             visitBr(&expr, blockStack.size() - brind, nullptr, nullptr);
@@ -264,6 +266,11 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
                 si->addCase(ConstantInt::get(Type::getInt32Ty(llvmContext), i), &bt.target);
                 auto stackIt = stack.rbegin();
                 for (auto it = bt.phis.rbegin(); it != bt.phis.rend(); ++it, ++stackIt) {
+                    if (stackIt == stack.rend()){
+                        std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Not enough value for br_table ind " << i << " level " << brt->targets.at(i).index() << std::endl;
+                        std::cerr << "Note: Jump target lable " << labelTypeToString(bt.lty) << " param num " << bt.sig.GetNumParams() << " result num " << bt.sig.GetNumResults() << std::endl;
+                        std::abort();
+                    }
                     (*it)->addIncoming((*stackIt), irBuilder.GetInsertBlock());
                 }
             }

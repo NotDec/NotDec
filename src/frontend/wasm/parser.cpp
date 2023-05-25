@@ -300,7 +300,7 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
     BasicBlock* returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
 
     if (log_level >= level_debug) {
-        std::cerr << "Debug: Analyzing function " << func.name << std::endl;
+        std::cerr << "Debug: Analyzing function " << func.name << "(" << func.loc.filename << ":" << func.loc.line << ")" << std::endl;
     }
 
     BlockContext bctx(*this, *function, irBuilder, std::move(locals));
