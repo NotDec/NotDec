@@ -260,7 +260,7 @@ void BlockContext::visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* 
             // 其他target
             for (wabt::Index i=0;i<brt->targets.size();i++) {
                 std::size_t ind = (brt->targets.at(i).index() + 1);
-                BreakoutTarget& bt = blockStack.at(ind);
+                BreakoutTarget& bt = blockStack.at(blockStack.size() - ind);
                 si->addCase(ConstantInt::get(Type::getInt32Ty(llvmContext), i), &bt.target);
                 auto stackIt = stack.rbegin();
                 for (auto it = bt.phis.rbegin(); it != bt.phis.rend(); ++it, ++stackIt) {
