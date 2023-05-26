@@ -10,7 +10,7 @@ pwd = os.path.dirname(os.path.realpath(__file__))
 def getIR_WAMR(wasm, ll, opt=0):
     # ./wamrc --target=i386 --bounds-checks=0 --format=llvmir-opt -o test.ll test.wasm
     cmd = [
-        "./wamrc",
+        "./bin/wamrc",
         "--target=i386",
         "--bounds-checks=0",
         "--format=llvmir-unopt",
@@ -23,7 +23,7 @@ def getIR_WAMR(wasm, ll, opt=0):
 
 def run_saber(ll, result):
     st = time.time()
-    cmd = ["./saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
+    cmd = ["./bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
     ret = os.system(" ".join(cmd))
     ed = time.time()
     return ed - st
@@ -46,14 +46,12 @@ compile_dir = out_dir + "/wamr_output"
 for root, dirs, files in os.walk(result_dir):
     for f in files:
         os.remove(os.path.join(root, f))
-    for d in dirs:
-        os.rmdir(os.path.join(root, d))
+
 
 for root, dirs, files in os.walk(compile_dir):
     for f in files:
         os.remove(os.path.join(root, f))
-    for d in dirs:
-        os.rmdir(os.path.join(root, d))
+
 
 
 for root, dirs, files in os.walk(data_dir):
@@ -68,6 +66,20 @@ for root, dirs, files in os.walk(data_dir):
 # 统计结果
 end = time.time()
 print("[+] total time: ", end - init)
+
+print("==================Lift result===================")
+
+lifted_count = 0
+for root, dirs, files in os.walk(compile_dir):
+    for f in files:
+        res = open(os.path.join(root, f), "r")
+        if res.read() != "":
+            lifted_count += 1
+
+print("lifted_count: ", lifted_count)
+
+
+print("==================Saber result===================")
 result = {}
 for root, dirs, files in os.walk(result_dir):
     for f in files:
@@ -118,7 +130,7 @@ total_CWE = {
     "CWE191": 3,
     "CWE483": 1,
 }
-print("==================Saber result===================")
+
 for i in result:
     if("std" in i):
         continue

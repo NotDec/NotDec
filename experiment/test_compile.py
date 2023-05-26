@@ -14,7 +14,7 @@ def do_compile_ll(src, out):
 def run_saber(ll, result):
     st = time.time()
     #stderr
-    cmd = ["./saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
+    cmd = ["./bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
     ret = os.system(" ".join(cmd))
     ed = time.time()
     return ed - st
