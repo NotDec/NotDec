@@ -65,7 +65,9 @@
         "thread": "cpp",
         "typeinfo": "cpp",
         "*.def": "cpp",
-        "*.inc": "cpp"
+        "*.inc": "cpp",
+        "complex": "cpp",
+        "shared_mutex": "cpp"
     },
     "C_Cpp.default.includePath": [
         "/usr/include/c++/11"

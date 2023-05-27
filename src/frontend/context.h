@@ -10,7 +10,7 @@ namespace notdec::frontend {
 // default to zero or false
 struct options {
     bool recompile;
-    bool test_mode;
+    bool compat_mode;
     int log_level = 5; // default log level = level_notice
 };
 

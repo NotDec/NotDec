@@ -12,7 +12,7 @@ def do_decompile(wasm,ll):
         wasm,
         "-o",
         ll,
-        "--test-mode",
+        "--compat-mode",
         "--recompile",
     ]
     print(" ".join(command))
@@ -20,7 +20,11 @@ def do_decompile(wasm,ll):
 
 
 def run_saber(ll, result):
+<<<<<<< Updated upstream
     #st = time.time()
+=======
+    st = time.time()
+>>>>>>> Stashed changes
     cmd = ["./bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
     ret = os.system(" ".join(cmd))
     #ed = time.time()

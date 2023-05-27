@@ -13,7 +13,7 @@
 static cl::opt<std::string> inputFilename("i",cl::desc("input wasm/wat file"), cl::value_desc("wasm/wat"),cl::Required);
 static cl::opt<std::string> outputFilename("o",cl::desc("Specify output filename"), cl::value_desc("output.ll"),cl::Optional);
 static cl::opt<bool> recompile ("recompile", cl::desc("Enable recompile"),cl::init(false));
-static cl::opt<bool> testMode ("test-mode", cl::desc("Enable test mode"),cl::init(true));
+static cl::opt<bool> compatMode ("compat-mode", cl::desc("Enable compat mode"),cl::init(true));
 static cl::opt<bool> disablePass ("disable-pass", cl::desc("Disable all passes"),cl::init(false));
 
 cl::opt<log_level> logLevel("log-level",cl::desc("Choose log level:"),
@@ -41,7 +41,7 @@ int main(int argc, char * argv[]) {
     cl::ParseCommandLineOptions(argc,argv);
     notdec::frontend::options opts;
     opts.recompile = recompile;
-    opts.test_mode = testMode;
+    opts.compat_mode = compatMode;
     opts.log_level = logLevel;
 
     std::string insuffix = getSuffix(inputFilename);

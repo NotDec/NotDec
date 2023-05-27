@@ -163,11 +163,11 @@ void Context::visitModule() {
         }
         Func& func = cast<FuncModuleField>(&field)->func;
         llvm::Function* function = declareFunc(func, false);
-        if (baseCtx.opt.test_mode && function->getName() == "__original_main") {
-            function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
-            function->setName("main");
-        }
-        nonImportFuncs.push_back(function); 
+        if (baseCtx.opt.compat_mode && function->getName() == "__original_main"){
+                function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+                function->setName("main");
+            }
+        nonImportFuncs.push_back(function);
     }
 
     // visit elem and create function pointer array
@@ -465,10 +465,17 @@ llvm::GlobalVariable* Context::declareMemory(wabt::Memory& mem, bool isExternal)
 llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
     using namespace llvm;
     FunctionType* funcType = convertFuncType(llvmContext, func.decl.sig);
+    std::string fname = func.name;
+    if (baseCtx.opt.recompile) {
+        fname = removeDollar(func.name);
+    }
+    if (baseCtx.opt.compat_mode && fname.empty()) {
+        fname = "func_" + std::to_string(_func_index);
+    }
     Function* function = Function::Create(
             funcType,
             isExternal ? Function::ExternalLinkage : Function::InternalLinkage,
-            baseCtx.opt.recompile ? removeDollar(func.name): func.name,
+            fname,
             llvmModule);
     this->funcs.push_back(function);
     this->_func_index ++;
