@@ -20,12 +20,11 @@ def do_decompile(wasm,ll):
 
 
 def run_saber(ll, result):
-    st = time.time()
+    #st = time.time()
     cmd = ["./bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
     ret = os.system(" ".join(cmd))
-    ed = time.time()
-    return ed - st
-
+    #ed = time.time()
+    return ret
 
 init = time.time()
 # traverse all files
@@ -36,7 +35,13 @@ data_dir = cwd + "/dataset/dataset-SAC-2022/wasm/"
 out_dir = cwd + "/out"
 result_dir = out_dir + "/notdec_result"
 compile_dir = out_dir + "/notdec_output"
-
+#if not exist, create
+if not os.path.exists(out_dir):
+    os.mkdir(out_dir)
+if not os.path.exists(result_dir):
+    os.mkdir(result_dir)
+if not os.path.exists(compile_dir):
+    os.mkdir(compile_dir)
 
 # remove result
 for root, dirs, files in os.walk(result_dir):

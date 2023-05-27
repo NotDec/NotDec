@@ -12,12 +12,11 @@ def do_compile_ll(src, out):
 
 
 def run_saber(ll, result):
-    st = time.time()
-    #stderr
+    #st = time.time()
     cmd = ["./bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
     ret = os.system(" ".join(cmd))
-    ed = time.time()
-    return ed - st
+    #ed = time.time()
+    return ret
 
 
 init = time.time()
@@ -27,9 +26,15 @@ print(cwd)
 
 data_dir = cwd + "/dataset/dataset-SAC-2022/src/"
 out_dir = cwd + "/out"
-result_dir = out_dir + "/result"
-compile_dir = out_dir + "/compile"
-
+result_dir = out_dir + "/compile_result"
+compile_dir = out_dir + "/compile_output"
+#if not exist, create
+if not os.path.exists(out_dir):
+    os.mkdir(out_dir)
+if not os.path.exists(result_dir):
+    os.mkdir(result_dir)
+if not os.path.exists(compile_dir):
+    os.mkdir(compile_dir)
 
 # remove result
 for root, dirs, files in os.walk(result_dir):
@@ -52,7 +57,15 @@ for root, dirs, files in os.walk(data_dir):
 # 统计结果
 end = time.time()
 print("[+] total time: ", end - init)
-
+print("===================Lift Result==================")
+ll_count = 0
+for root, dirs, files in os.walk(compile_dir):
+    for f in files:
+        #file size
+        if(os.path.getsize(os.path.join(root, f)) == 0):
+            continue
+        ll_count += 1
+print("total ll: ", ll_count)
 
 
 print("===================Saber Result==================")

@@ -4,21 +4,16 @@ import subprocess
 import re
 import time
 
-def do_decompile(wasm):
-    command = [
-        f"{cwd}/../../build/bin/WD40",
-        "-i",
-        data_dir + wasm,
-        "-o",
-        out_dir + wasm[:-5] + ".ll",
-        "--test-mode",
-        "--recompile",
-    ]
-    print(" ".join(command))
-    return os.system(" ".join(command)) == 0
 
+def fix_ir(ll):
+    f = open(ll, "r+")
+    #insert line in the first line
+    content = f.read()
+    f.seek(0, 0)
+    f.write("; ModuleID = 'WASM Module'\n" + content)
+    f.close()
 
-def getIR_WAVM(wasm, ll, isOPT=True):
+def getIR_WAVM(wasm, ll, isOPT=False):
     # f"wavm compile --format=optimized-llvmir {filename} {ll_file} --target-cpu generic")
     if isOPT:
         cmd = [
@@ -34,7 +29,7 @@ def getIR_WAVM(wasm, ll, isOPT=True):
         cmd = [
             "./bin/wavm",
             "compile",
-            "unoptimized-llvmir",
+            "--format=unoptimized-llvmir",
             wasm,
             ll,
             "--target-cpu",
@@ -44,25 +39,27 @@ def getIR_WAVM(wasm, ll, isOPT=True):
 
 
 def run_saber(ll, result):
-    st = time.time()
+    # st = time.time()
     cmd = ["./bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
     ret = os.system(" ".join(cmd))
-    ed = time.time()
-    return ed - st
-
-
+    # ed = time.time()
+    return ret
 
 
 init = time.time()
 # traverse all files
 cwd = os.path.dirname(os.path.realpath(__file__))
-print(cwd)
-
 data_dir = cwd + "/dataset/dataset-SAC-2022/wasm/"
 out_dir = cwd + "/out"
 result_dir = out_dir + "/wavm_result"
 compile_dir = out_dir + "/wavm_output"
-
+# if not exist, create
+if not os.path.exists(out_dir):
+    os.mkdir(out_dir)
+if not os.path.exists(result_dir):
+    os.mkdir(result_dir)
+if not os.path.exists(compile_dir):
+    os.mkdir(compile_dir)
 
 # remove result
 for root, dirs, files in os.walk(result_dir):
@@ -78,13 +75,12 @@ for root, dirs, files in os.walk(compile_dir):
         os.rmdir(os.path.join(root, d))
 
 
-
 for root, dirs, files in os.walk(data_dir):
     for f in files:
         now = os.path.join(root, f)
         ll = os.path.join(compile_dir, f[:-2]) + ".ll"
         getIR_WAVM(now, ll)
-        wavm_fix_ir(ll)
+        fix_ir(ll)
         result = result_dir + "/" + f[:-2] + ".out"
         run_saber(ll, result)
 
@@ -158,7 +154,7 @@ total_CWE = {
 }
 
 for i in result:
-    if("std" in i):
+    if "std" in i:
         continue
     print(
         i, result[i], "/", total_CWE[i], str(result[i] / total_CWE[i] * 100)[:4] + "%"
