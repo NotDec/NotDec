@@ -275,7 +275,7 @@ void BlockContext::visitConvertExpr(wabt::ConvertExpr* expr) {
     case wabt::Opcode::I32Eqz:
     case wabt::Opcode::I64Eqz:
         ret = irBuilder.CreateICmpEQ(p1, ConstantInt::get(p1->getType(), 0));
-        ret = irBuilder.CreateZExt(ret, p1->getType());
+        ret = irBuilder.CreateZExt(ret, Type::getInt32Ty(llvmContext));
         break;
     case wabt::Opcode::I64ExtendI32U:
         ret = irBuilder.CreateZExt(p1,Type::getInt64Ty(llvmContext));
@@ -495,7 +495,7 @@ void BlockContext::visitCompareExpr(wabt::CompareExpr* expr) {
         break;
     }
     if (ret != nullptr) {
-        ret = irBuilder.CreateZExt(ret, convertType(llvmContext, expr->opcode.GetResultType()));
+        ret = irBuilder.CreateZExt(ret, Type::getInt32Ty(ctx.llvmContext));
         stack.push_back(ret);
     }
 }
