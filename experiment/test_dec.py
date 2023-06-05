@@ -81,12 +81,19 @@ print("lifted_count: ", lifted_count)
 
 print("==================Saber result===================")
 result = {}
+
+summary = open("summary.txt", "w")
+
 for root, dirs, files in os.walk(result_dir):
     for f in files:
-        res = open(os.path.join(root, f), "r")
-        if res.read() != "":
+        fsize = os.path.getsize(os.path.join(root, f))
+        if fsize > 0:
             CWE_type = f.split("_")[0]
             result[CWE_type] = result.get(CWE_type, 0) + 1
+            res = open(os.path.join(root, f), "r")
+            summary.write("\n================================\n" + f + "\n")
+            summary.write(res.read() + "\n")
+        res.close()
 
 print(result)
 total_CWE = {
