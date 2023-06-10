@@ -1,4 +1,17 @@
-All rights reserved (currently). You cannot use this in any public published paper without our consent. We plan to set a MIT license after our work is published.
+# NotDec: WebAssembly Static Analysis Framework
+
+[中文](#中文)
+
+NotDec is
+1. A webassembly to LLVM IR lifter that generates clean code, optimized for static analysis.
+   - Binary Rewriting Framework (convert the IR back to webassembly) (TODO)
+1. A webassembly decompiler
+   - Variable Recovery
+   - Structual Analysis
+
+# 中文
+
+## 反编译器
 
 目标：a webassembly and ethereum VM bytecode decompiler. 
 
@@ -99,9 +112,9 @@ Markdown编辑器（建议）使用Typora，或VSCode
 
 开发环境：VSCode + CMake。将Wabt，LLVM等作为CMake的外部依赖。
 
-#### 开发环境搭建
+#### 开发环境搭建 - DevContainer
 
-采用VSCode DevContainer。出于[性能考虑](https://code.visualstudio.com/remote/advancedcontainers/improve-performance)，在clone时可以直接clone到wsl的ext4文件系统里。
+VSCode DevContainer。出于[性能考虑](https://code.visualstudio.com/remote/advancedcontainers/improve-performance)，在clone时可以直接clone到wsl的ext4文件系统里。
 
 1. 安装Docker Desktop on Windows： https://docs.docker.com/desktop/install/windows-install/ （无论是家庭版还是专业版均可）
    1. 其他系统直接安装docker
@@ -111,6 +124,18 @@ Markdown编辑器（建议）使用Typora，或VSCode
 
 如果出现了无法使用windows侧的ssh-agent提供的ssh key的forward功能：
 https://stackoverflow.com/questions/72293035/error-communication-with-agent-failed-when-ssh-auth-sock-is-set-but-ssh-agent 
+
+#### 开发环境搭建 - Linux
+
+基于Ubuntu系统。
+
+1. clone 本仓库
+1. 编译Debug版本的LLVM
+   - 方式1：下载提前构建好的LLVM，解压得到`llvm-14.0.6.obj`文件夹，放到项目根目录。
+   - 方式2：执行`scripts/build-debug-llvm.sh`脚本，下载并构建LLVM源码。中途可能遇到内存不足的情况，需要手动降低并行数量到1。
+      成功构建后可以将`llvm-14.0.6.obj`文件夹打包发送给其他人。
+1. 构建
+
 
 #### 代码调试
 

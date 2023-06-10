@@ -17,3 +17,7 @@ __pycache__/
 .cache/
 
 libs/
+
+llvm-source/
+llvm-build/
+*.obj/
