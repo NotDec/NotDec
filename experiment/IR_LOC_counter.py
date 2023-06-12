@@ -20,13 +20,13 @@ wavm_dir = cwd + "/out/wavm_output/"
 wamr_dir = cwd + "/out/wamr_output/"
 notdec_dir = cwd + "/out/notdec_output/"
 
-#get line count
+
+# get line count
 def get_line(filename):
     f = open(filename, "r")
     lines = f.readlines()
     return len(lines)
 
-    
 
 result = {}
 count = 0
@@ -41,32 +41,32 @@ for root, dirs, files in os.walk(data_dir):
             y2 = np.append(y2, get_line(f2))
             y3 = np.append(y3, get_line(f3))
             count += 1
-            print(count)
-            if(count == 100):
+            if count == 100:
                 break
-            
 
-        
 
 x = np.arange(0, len(y1), 1)
-
 
 
 # 创建画布和子图
 fig, ax = plt.subplots()
 
 # 绘制折线图
-ax.plot(x, y1, color="blue", label="WAVM")
-ax.plot(x, y2, color="green", label="WAMR")
-ax.plot(x, y3, color="red", label="notdec")
+ax.scatter(x, y1, color="blue", label="WAVM")
+ax.scatter(x, y2, color="green", label="WAMR")
+ax.scatter(x, y3, color="red", label="NotDec")
 
+ax.plot(x, y1, color="blue")
+ax.plot(x, y2, color="green")
+ax.plot(x, y3, color="red")
 # 设置标题和坐标轴标签
-ax.set_title("Line Chart")
-ax.set_xlabel("testcases")
-ax.set_ylabel("LOC")
-
+ax.set_title("IR size", fontsize=55)
+ax.set_xlabel("testcases", fontsize=33)
+ax.set_ylabel("LOC", fontsize=33)
+plt.yticks(np.arange(0, 100000, 5000), fontsize=20)
+plt.xticks(np.arange(0, 100, 5), fontsize=20)
 # 设置图例
-ax.legend()
+ax.legend(fontsize=28)
 
 # 保存为PNG图像
 plt.savefig("line_chart.png")

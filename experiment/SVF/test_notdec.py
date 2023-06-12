@@ -2,23 +2,27 @@ import os
 import sys
 import subprocess
 import re
+import time
 
-# get pwd
-pwd = os.path.dirname(os.path.realpath(__file__))
+cwd = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+bin_dir = cwd + "/bin"
+data_dir = cwd + "/dataset/dataset-SAC-2022/wasm/"
+out_dir = cwd + "/SVF/output"
+result_dir = out_dir + "/notdec_result"
+compile_dir = out_dir + "/notdec_liftedIR"
 
-
-def getIR_WAMR(wasm, ll, opt=0):
-    # ./wamrc --target=i386 --bounds-checks=0 --format=llvmir-opt -o test.ll test.wasm
-    cmd = [
-        "./bin/wamrc",
-        "--target=i386",
-        "--bounds-checks=0",
-        "--format=llvmir-unopt",
+def do_decompile(wasm,ll):
+    command = [
+        f"{cwd}/../build/bin/notdec",
+        "-i",
+        wasm,
         "-o",
         ll,
-        wasm,
+        "--compat-mode",
+        "--recompile",
     ]
-    return os.system(" ".join(cmd)) == 0
+    print(" ".join(command))
+    return os.system(" ".join(command)) == 0
 
 
 def run_saber(ll, result):
@@ -28,18 +32,8 @@ def run_saber(ll, result):
     #ed = time.time()
     return ret
 
-
-import time
-
 init = time.time()
 # traverse all files
-cwd = os.path.dirname(os.path.realpath(__file__))
-print(cwd)
-
-data_dir = cwd + "/dataset/dataset-SAC-2022/wasm/"
-out_dir = cwd + "/out"
-result_dir = out_dir + "/wamr_result"
-compile_dir = out_dir + "/wamr_output"
 
 #if not exist, create
 if not os.path.exists(out_dir):
@@ -49,26 +43,27 @@ if not os.path.exists(result_dir):
 if not os.path.exists(compile_dir):
     os.mkdir(compile_dir)
 
-
 # remove result
 for root, dirs, files in os.walk(result_dir):
     for f in files:
         os.remove(os.path.join(root, f))
 
+
 for root, dirs, files in os.walk(compile_dir):
     for f in files:
         os.remove(os.path.join(root, f))
+
 
 for root, dirs, files in os.walk(data_dir):
     for f in files:
         now = os.path.join(root, f)
         ll = os.path.join(compile_dir, f[:-2]) + ".ll"
-        getIR_WAMR(now, ll)
+        do_decompile(now, ll)
         result = result_dir + "/" + f[:-2] + ".out"
         run_saber(ll, result)
 
-
 # 统计结果
+
 end = time.time()
 print("[+] total time: ", end - init)
 
@@ -86,12 +81,19 @@ print("lifted_count: ", lifted_count)
 
 print("==================Saber result===================")
 result = {}
+
+summary = open("summary.txt", "w")
+
 for root, dirs, files in os.walk(result_dir):
     for f in files:
-        res = open(os.path.join(root, f), "r")
-        if res.read() != "":
+        fsize = os.path.getsize(os.path.join(root, f))
+        if fsize > 0:
             CWE_type = f.split("_")[0]
             result[CWE_type] = result.get(CWE_type, 0) + 1
+            res = open(os.path.join(root, f), "r")
+            summary.write("\n================================\n" + f + "\n")
+            summary.write(res.read() + "\n")
+        res.close()
 
 print(result)
 total_CWE = {

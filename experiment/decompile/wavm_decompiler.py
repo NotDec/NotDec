@@ -2,17 +2,23 @@ import re
 import os
 import sys
 
-if sys.argv.count != 2:
-    print("usage: wavm_decompiler.py src.wasm")
 
+if len(sys.argv) != 2:
+    print("usage: wavm_decompiler.py src.wasm")
+    exit()
+
+cwd = os.path.dirname(os.path.realpath(__file__))
 filename = os.path.basename(sys.argv[1])
-ll_file = filename.split('.')[0] + '.ll'
-fixll_file = filename.split('.')[0] + '_fix.ll'
-code_file = filename.split('.')[0] + '.c'
+filename_notsuffix = filename.split(".")[0]
+filepath = os.path.abspath(sys.argv[1]).replace(filename, "")
+output_path = cwd + '/output/'
+ll_file = output_path + filename_notsuffix+ '_wavm.ll'
+fixll_file = output_path + filename_notsuffix  + '_wavm_fix.ll'
+code_file = output_path + filename_notsuffix  + '_wavm.c'
 
 # wasm2llvmir
 os.system(
-    f"./bin/wavm compile --format=optimized-llvmir {sys.argv[1]} {ll_file} --target-cpu skylake")
+    f"{cwd}/../bin/wavm compile --format=optimized-llvmir {sys.argv[1]} {ll_file} --target-cpu skylake")
 ir = open(ll_file).read()
 
 # remove llvm ir dbg info
@@ -46,5 +52,10 @@ ir = n.sub(rename, ir)
 
 
 open(fixll_file, 'w').write(ir)
+
+
 # retdec
-os.system(f"./bin/retdec-llvmir2hll {fixll_file} -target-hll=c -o {code_file}")
+ret = os.system(f"{cwd}/../bin/retdec-llvmir2hll {fixll_file} -target-hll=c -o {code_file}")
+if ret == 0:
+    print(f'decompile output: {code_file}')
+

@@ -1,2 +1,4 @@
-out/
 bin/
+test/
+*.tar.xz
+*.tar.gz

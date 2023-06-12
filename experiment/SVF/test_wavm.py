@@ -4,6 +4,13 @@ import subprocess
 import re
 import time
 
+cwd = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+bin_dir = cwd + "/bin"
+data_dir = cwd + "/dataset/dataset-SAC-2022/wasm/"
+out_dir = cwd + "/SVF/output"
+result_dir = out_dir + "/wavm_result"
+compile_dir = out_dir + "/wavm_liftedIR"
+
 
 def fix_ir(ll):
     f = open(ll, "r+")
@@ -17,7 +24,7 @@ def getIR_WAVM(wasm, ll, isOPT=False):
     # f"wavm compile --format=optimized-llvmir {filename} {ll_file} --target-cpu generic")
     if isOPT:
         cmd = [
-            "./bin/wavm",
+            bin_dir + "/wavm",
             "compile",
             "--format=optimized-llvmir",
             wasm,
@@ -48,11 +55,7 @@ def run_saber(ll, result):
 
 init = time.time()
 # traverse all files
-cwd = os.path.dirname(os.path.realpath(__file__))
-data_dir = cwd + "/dataset/dataset-SAC-2022/wasm/"
-out_dir = cwd + "/out"
-result_dir = out_dir + "/wavm_result"
-compile_dir = out_dir + "/wavm_output"
+
 # if not exist, create
 if not os.path.exists(out_dir):
     os.mkdir(out_dir)

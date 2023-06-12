@@ -1,8 +1,8 @@
 
 if [ -d "./dataset-SAC-2022" ]; then
-  echo "文件夹已存在，跳过解压缩步骤"
+  echo "dataset existed"
 else
-  echo "文件夹不存在，解压缩 dataset-SAC-2022.tar.xz"
+  echo "unzipping dataset-SAC-2022.tar.xz"
   tar xvf ./dataset-SAC-2022.tar.xz
 fi
 
