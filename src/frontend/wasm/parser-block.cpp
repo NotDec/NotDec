@@ -3,10 +3,10 @@
 #include "src/ir.h"
 #include <cassert>
 #include <cstdlib>
-#include <llvm-13/llvm/IR/Constants.h>
-#include <llvm-13/llvm/IR/Instruction.h>
-#include <llvm-13/llvm/IR/Instructions.h>
-#include <llvm-13/llvm/Support/Casting.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/Support/Casting.h>
 
 namespace notdec::frontend::wasm {
 

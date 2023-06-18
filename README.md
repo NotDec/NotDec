@@ -11,6 +11,14 @@ NotDec is
 
 # 中文
 
+## TODO
+
+1. 将wasm lift到LLVM IR
+   - 支持将wasm内存直接映射到某个基地址，从而直接支持运行，以及memory grow相关指令。
+   - 支持DWARF调试信息，从而映射回原wat，wasm
+1. 设计一个映射，将lift之后的IR反向转回wasm
+
+
 ## 反编译器
 
 目标：a webassembly and ethereum VM bytecode decompiler. 
@@ -129,8 +137,14 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 
 基于Ubuntu系统。
 
+1. 软件安装
+   - apt安装
+      ```
+      sudo apt install wabt python-is-python3 clang-14
+      ```
+   - 安装wasi-sdk
 1. clone 本仓库
-1. 编译Debug版本的LLVM
+1. 编译一个LLVM
    - 方式1：下载提前构建好的LLVM，解压得到`llvm-14.0.6.obj`文件夹，放到项目根目录。
    - 方式2：执行`scripts/build-debug-llvm.sh`脚本，下载并构建LLVM源码。中途可能遇到内存不足的情况，需要手动降低并行数量到1。
       成功构建后可以将`llvm-14.0.6.obj`文件夹打包发送给其他人。

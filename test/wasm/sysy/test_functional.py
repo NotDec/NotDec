@@ -14,6 +14,7 @@ class DefaultTestCase(unittest.TestCase):
         cwd = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(cwd, "functional")
         outdir = os.path.join(cwd, "out_functional")
+        os.makedirs(outdir, exist_ok=True)
         for file in sorted(os.listdir(dir)):
             if not file.endswith(".c"):
                 continue

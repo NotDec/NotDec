@@ -3,11 +3,11 @@
 #include "src/base-types.h"
 #include "src/ir.h"
 #include <cstdlib>
-#include <llvm-13/llvm/ADT/ArrayRef.h>
-#include <llvm-13/llvm/IR/Constant.h>
-#include <llvm-13/llvm/IR/Constants.h>
-#include <llvm-13/llvm/IR/DerivedTypes.h>
-#include <llvm-13/llvm/IR/GlobalVariable.h>
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/IR/Constant.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <new>
 
 

@@ -21,6 +21,23 @@
 
 ### 手动编写测试用例
 
+### 编译选项的选择
+
+- `/opt/wasi-sdk-20.0/bin/wasm-ld --help`
+- 如何
+
+链接libc的好处是，可以利用memcpy等函数的实现。默认函数不导出且没有被使用就会被优化删除。
+
+1. `-I. -g -O0` 
+    - 让编译时能找到当前文件夹下的头文件，开启调试信息
+    - 关闭优化：开启后，栈指针相关操作，栈上变量访问将没那么明显
+1. `-Wl,--export-all` 导出所有函数。当链接libc的时候，可能会导出大量的`wasi_snapshot_preview1`相关函数，即使没有人调用。
+1. `-fno-builtin`
+1. `-fno-lto`
+1. `--no-standard-libraries`
+1. `-Wl,--no-entry` 不添加会报错`wasm-ld: error: entry symbol not defined (pass --no-entry to suppress): _start`
+1. `-Wl,--allow-undefined`
+1. `-lc` 链接libc
 
 ### 常见问题
 

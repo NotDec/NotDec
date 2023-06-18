@@ -9,7 +9,7 @@ project(notdec
 # 1. VERIFY LLVM INSTALLATION DIR
 # This is just a bit of a sanity checking.
 #===============================================================================
-set(LT_LLVM_INSTALL_DIR "/usr/lib/llvm-13" CACHE PATH "LLVM installation directory")
+set(LT_LLVM_INSTALL_DIR "${CMAKE_CURRENT_LIST_DIR}/llvm-14.0.6.obj" CACHE PATH "LLVM installation directory")
 
 # 1.1 Check the "include| directory
 set(LT_LLVM_INCLUDE_DIR "${LT_LLVM_INSTALL_DIR}/include/llvm")

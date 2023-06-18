@@ -53,7 +53,7 @@ void run_passes(llvm::Module& mod) {
     // Create the pass manager.
     // Optimize the IR!
     // This one corresponds to a typical -O2 optimization pipeline.
-    ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
+    ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
     // MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
     // MPM.addPass(HelloModule());
 

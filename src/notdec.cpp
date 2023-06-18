@@ -14,7 +14,8 @@ static cl::opt<std::string> inputFilename("i",cl::desc("input wasm/wat file"), c
 static cl::opt<std::string> outputFilename("o",cl::desc("Specify output filename"), cl::value_desc("output.ll"),cl::Optional);
 static cl::opt<bool> recompile ("recompile", cl::desc("Enable recompile"),cl::init(false));
 static cl::opt<bool> compatMode ("compat-mode", cl::desc("Enable compat mode"),cl::init(true));
-static cl::opt<bool> disablePass ("disable-pass", cl::desc("Disable all passes"),cl::init(false));
+// 等成熟之后，再默认开启反编译相关的pass。
+static cl::opt<bool> disablePass ("disable-pass", cl::desc("Disable all passes"),cl::init(true));
 
 cl::opt<log_level> logLevel("log-level",cl::desc("Choose log level:"),
     cl::values(
@@ -67,7 +68,9 @@ int main(int argc, char * argv[]) {
     }
 
     //run passes and dump IR
-    notdec::frontend::optimizers::run_passes(ctx.mod);
+    if (!disablePass) {
+        notdec::frontend::optimizers::run_passes(ctx.mod);
+    }
     std::string outsuffix = getSuffix(outputFilename);
     if (outsuffix == ".ll") {
         std::error_code EC;

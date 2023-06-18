@@ -1,10 +1,10 @@
 #include "frontend/wasm/parser-block.h"
-#include <llvm-13/llvm/IR/DerivedTypes.h>
-#include <llvm-13/llvm/IR/GlobalVariable.h>
-#include <llvm-13/llvm/IR/Instructions.h>
-#include <llvm-13/llvm/Support/Alignment.h>
-#include <llvm-13/llvm/Support/Casting.h>
-#include <llvm-13/llvm/Support/raw_ostream.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/Support/Alignment.h>
+#include <llvm/Support/Casting.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace notdec::frontend::wasm {
 
