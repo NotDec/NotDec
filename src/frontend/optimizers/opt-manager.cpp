@@ -58,7 +58,7 @@ void run_passes(llvm::Module& mod) {
     // MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
     // MPM.addPass(HelloModule());
     MPM.addPass(createModuleToFunctionPassAdaptor(llvm::PromotePass()));
-    
+    MPM.addPass(FunctionRenamer());
     //MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
     //MPM.addPass(createModuleToFunctionPassAdaptor(llvm::DCEPass()));
     MPM.run(mod, MAM);
