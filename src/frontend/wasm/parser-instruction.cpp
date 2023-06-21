@@ -372,13 +372,13 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         break;
     case wabt::Opcode::I32Clz:
     case wabt::Opcode::I64Clz:
-        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctlz, p1->getType());
-        ret = irBuilder.CreateCall(f, p1);
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctlz, {p1->getType(),Type::getInt1Ty(llvmContext)});
+        ret = irBuilder.CreateCall(f, {p1,ConstantInt::get(Type::getInt1Ty(llvmContext),false)});
         break;
     case wabt::Opcode::I32Ctz:
     case wabt::Opcode::I64Ctz:
-        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::cttz, p1->getType());
-        ret = irBuilder.CreateCall(f, p1);
+        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::cttz, {p1->getType(),Type::getInt1Ty(llvmContext)});
+        ret = irBuilder.CreateCall(f, {p1,ConstantInt::get(Type::getInt1Ty(llvmContext),false)});
         break;
     case wabt::Opcode::F32Ceil:
     case wabt::Opcode::F64Ceil:
@@ -408,6 +408,22 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::sqrt, p1->getType());
         ret = irBuilder.CreateCall(f, p1);
         break;
+
+    /* SIMD */    
+    case wabt::Opcode::V128Not:
+        ret = irBuilder.CreateNot(p1);
+        break;
+    case wabt::Opcode::V128AnyTrue:{
+	    llvm::ConstantInt* zero = ConstantInt::get(Type::getInt64Ty(irBuilder.getContext()), 0);
+	    llvm::Value* boolResult = irBuilder.CreateOr(
+	    	irBuilder.CreateICmpNE(irBuilder.CreateExtractElement(p1, uint64_t(0)), zero),
+	    	irBuilder.CreateICmpNE(irBuilder.CreateExtractElement(p1,  uint64_t(1)), zero));
+	    ret = irBuilder.CreateZExt(boolResult, llvm::Type::getInt32Ty(irBuilder.getContext()));
+        break;
+    }
+    case wabt::Opcode::I16X8Abs:
+        break;
+
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;
@@ -427,69 +443,122 @@ void BlockContext::visitCompareExpr(wabt::CompareExpr* expr) {
     {
     case wabt::Opcode::I32Eq:
     case wabt::Opcode::I64Eq:
+    case wabt::Opcode::I8X16Eq:
+    case wabt::Opcode::I16X8Eq:
+    case wabt::Opcode::I32X4Eq:
+    case wabt::Opcode::I64X2Eq:
         ret = irBuilder.CreateICmpEQ(p2, p1);
         break;
     case wabt::Opcode::I32Ne:
     case wabt::Opcode::I64Ne:
+    case wabt::Opcode::I8X16Ne:
+    case wabt::Opcode::I16X8Ne:
+    case wabt::Opcode::I32X4Ne:
+    case wabt::Opcode::I64X2Ne:
         ret = irBuilder.CreateICmpNE(p2, p1);
         break;
     case wabt::Opcode::I32GeS:
     case wabt::Opcode::I64GeS:
+    case wabt::Opcode::I8X16GeS:
+    case wabt::Opcode::I16X8GeS:
+    case wabt::Opcode::I32X4GeS:
+    case wabt::Opcode::I64X2GeS:
         ret = irBuilder.CreateICmpSGE(p2, p1);
         break;
     case wabt::Opcode::I32GeU:
     case wabt::Opcode::I64GeU:
+    case wabt::Opcode::I8X16GeU:
+    case wabt::Opcode::I16X8GeU:
+    case wabt::Opcode::I32X4GeU:
+    /*case wabt::Opcode::I64X2GeU: */
         ret = irBuilder.CreateICmpUGE(p2, p1);
         break;
     case wabt::Opcode::I32GtU:
     case wabt::Opcode::I64GtU:
+    case wabt::Opcode::I8X16GtU:
+    case wabt::Opcode::I16X8GtU:
+    case wabt::Opcode::I32X4GtU:
+    /*case wabt::Opcode::I64X2GtU: */
         ret = irBuilder.CreateICmpUGT(p2, p1);
         break;
     case wabt::Opcode::I32GtS:
     case wabt::Opcode::I64GtS:
+    case wabt::Opcode::I8X16GtS:
+    case wabt::Opcode::I16X8GtS:
+    case wabt::Opcode::I32X4GtS:
+    case wabt::Opcode::I64X2GtS:
         ret = irBuilder.CreateICmpSGT(p2, p1);
         break;
     case wabt::Opcode::I32LeS:
     case wabt::Opcode::I64LeS:
+    case wabt::Opcode::I8X16LeS:
+    case wabt::Opcode::I16X8LeS:
+    case wabt::Opcode::I32X4LeS:
+    case wabt::Opcode::I64X2LeS:
         ret = irBuilder.CreateICmpSLE(p2, p1);
         break;
     case wabt::Opcode::I32LeU:
     case wabt::Opcode::I64LeU:
+    case wabt::Opcode::I8X16LeU:
+    case wabt::Opcode::I16X8LeU:
+    case wabt::Opcode::I32X4LeU:
+    /*case wabt::Opcode::I64X2LeU: */
         ret = irBuilder.CreateICmpULE(p2, p1);
         break;
     case wabt::Opcode::I32LtS:
     case wabt::Opcode::I64LtS:
+    case wabt::Opcode::I8X16LtS:
+    case wabt::Opcode::I16X8LtS:
+    case wabt::Opcode::I32X4LtS:
+    case wabt::Opcode::I64X2LtS:
         ret = irBuilder.CreateICmpSLT(p2, p1);
         break;
     case wabt::Opcode::I32LtU:
     case wabt::Opcode::I64LtU:
+    case wabt::Opcode::I8X16LtU:
+    case wabt::Opcode::I16X8LtU:
+    case wabt::Opcode::I32X4LtU:
+    /*case wabt::Opcode::I64X2LtU: */
         ret = irBuilder.CreateICmpULT(p2, p1);
         break;
     case wabt::Opcode::F32Eq:
     case wabt::Opcode::F64Eq:
+    case wabt::Opcode::F32X4Eq:
+    case wabt::Opcode::F64X2Eq:
         ret = irBuilder.CreateFCmpOEQ(p2, p1);
         break;
     case wabt::Opcode::F32Ne:
     case wabt::Opcode::F64Ne:
+    case wabt::Opcode::F32X4Ne:
+    case wabt::Opcode::F64X2Ne:
         ret = irBuilder.CreateFCmpUNE(p2, p1); // 出现NAN时要返回true
         break;
     case wabt::Opcode::F32Ge:
     case wabt::Opcode::F64Ge:
+    case wabt::Opcode::F32X4Ge:
+    case wabt::Opcode::F64X2Ge:
         ret = irBuilder.CreateFCmpOGE(p2, p1);
         break;
     case wabt::Opcode::F32Gt:
     case wabt::Opcode::F64Gt:
+    case wabt::Opcode::F32X4Gt:
+    case wabt::Opcode::F64X2Gt:
         ret = irBuilder.CreateFCmpOGT(p2, p1);
         break;
     case wabt::Opcode::F32Le:
     case wabt::Opcode::F64Le:
+    case wabt::Opcode::F32X4Le:
+    case wabt::Opcode::F64X2Le:
         ret = irBuilder.CreateFCmpOLE(p2, p1);
         break;
     case wabt::Opcode::F32Lt:
     case wabt::Opcode::F64Lt:
+    case wabt::Opcode::F32X4Lt:
+    case wabt::Opcode::F64X2Lt:
         ret = irBuilder.CreateFCmpOLT(p2, p1);
         break;
-    
+
+
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;
@@ -608,6 +677,23 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::copysign, {p1->getType(),p1->getType()});
         ret = irBuilder.CreateCall(f, {p2, p1});
         break;
+
+    /* SIMD */
+    case wabt::Opcode::V128Andnot:
+        ret = irBuilder.CreateAnd(p2, irBuilder.CreateNot(p1));
+        break;
+    case wabt::Opcode::V128And:
+        ret = irBuilder.CreateAnd(p2, p1);
+        break;
+    case wabt::Opcode::V128Or:
+        ret = irBuilder.CreateOr(p2, p1);
+        break;
+    case wabt::Opcode::V128Xor:
+        ret = irBuilder.CreateXor(p2, p1);
+        break;
+
+
+
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported expr type: " << expr->opcode.GetName() << std::endl;
         break;
