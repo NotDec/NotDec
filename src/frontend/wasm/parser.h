@@ -4,13 +4,13 @@
 #include <iostream>
 
 // wabt header
-#include "src/binary-reader.h"
-#include "src/binary-reader-ir.h"
-#include "src/wast-parser.h"
-#include "src/ir.h"
-#include "src/stream.h"
-#include "src/validator.h"
-#include "src/cast.h"
+#include "wabt/binary-reader.h"
+#include "wabt/binary-reader-ir.h"
+#include "wabt/wast-parser.h"
+#include "wabt/ir.h"
+#include "wabt/stream.h"
+#include "wabt/validator.h"
+#include "wabt/cast.h"
 
 #include "frontend/context.h"
 #include "utils.h"

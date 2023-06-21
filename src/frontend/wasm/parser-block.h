@@ -6,8 +6,8 @@
 #include <iostream>
 
 // wabt header
-#include "src/ir.h"
-#include "src/cast.h"
+#include "wabt/ir.h"
+#include "wabt/cast.h"
 
 #include "llvm/IR/IRBuilder.h"
 

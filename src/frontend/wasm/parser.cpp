@@ -1,7 +1,7 @@
 #include "frontend/wasm/parser.h"
 #include "frontend/wasm/parser-block.h"
-#include "src/base-types.h"
-#include "src/ir.h"
+#include "wabt/base-types.h"
+#include "wabt/ir.h"
 #include <cstdlib>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/IR/Constant.h>
@@ -18,7 +18,7 @@ std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, std::string file_name) 
     std::vector<uint8_t> file_data;
     Result result = ReadFile(file_name, &file_data);
     std::unique_ptr<WastLexer> lexer = WastLexer::CreateBufferLexer(
-      file_name, file_data.data(), file_data.size());
+      file_name, file_data.data(), file_data.size(),nullptr);
 
     if (!Succeeded(result)) {
         std::cerr << "Read wat file failed." << std::endl;
@@ -192,19 +192,25 @@ void Context::visitModule() {
     // visit export and change visibility
     for (Export* export_: this->module->exports) {
         Index index;
-        // Func* func;
+        //Func* func;
         switch ((*export_).kind)
         {
-        case ExternalKind::Func:
+        case ExternalKind::Func:{
             index = module->GetFuncIndex(export_->var);
-            // func = module.GetFunc(export_->var);
-            // std::cout << "export " << func->name << std::endl;
-            // std::cout << "export " << this->funcs[index]->getName().str() << std::endl;
             this->funcs[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
             // 之前internal的时候同时自动设置了dso_local
             this->funcs[index]->setDSOLocal(false);
+            //rename func with export name
+            if(baseCtx.opt.compat_mode){
+                std::string export_name = export_->name;
+                if(this->funcs[index]->getName().str().rfind("func_") == 0){
+                    this->funcs[index]->setName(export_name);
+                }else if(this->funcs[index]->getName().str().length() > export_name.length() ){ //use shorter name
+                    this->funcs[index]->setName(export_name);
+                }
+            }
             break;
-
+        }
         case ExternalKind::Table:
             // TODO
             index = module->GetTableIndex(export_->var);
@@ -604,4 +610,5 @@ llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Typ
             std::abort();
     }
 }
+
 }

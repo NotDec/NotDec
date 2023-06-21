@@ -1,6 +1,6 @@
 
 #include "frontend/wasm/parser-block.h"
-#include "src/ir.h"
+#include "wabt/ir.h"
 #include <cassert>
 #include <cstdlib>
 #include <llvm/IR/Constants.h>

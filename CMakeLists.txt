@@ -123,7 +123,7 @@ if (NOTDEC_ENABLE_WASM)
 	# )
 	ExternalProject_add(
 		wabt 
-		URL https://github.com/WebAssembly/wabt/releases/download/1.0.29/wabt-1.0.29.tar.xz
+		URL https://github.com/WebAssembly/wabt/releases/download/1.0.33/wabt-1.0.33.tar.xz
 		SOURCE_DIR ${CMAKE_BINARY_DIR}/wabt
 		BINARY_DIR ${CMAKE_BINARY_DIR}/wabt-build
 		INSTALL_COMMAND ""
@@ -131,7 +131,7 @@ if (NOTDEC_ENABLE_WASM)
 		# https://stackoverflow.com/questions/50400592/using-an-externalproject-download-step-with-ninja
 		BUILD_BYPRODUCTS "${CMAKE_BINARY_DIR}/wabt-build/libwabt.a"
 	)
-	include_directories(${CMAKE_BINARY_DIR}/wabt)
+	include_directories(${CMAKE_BINARY_DIR}/wabt/include)
 	include_directories(${CMAKE_BINARY_DIR}/wabt-build)
 	add_library(wabt::wabt SHARED IMPORTED)
 	set_property(TARGET wabt::wabt PROPERTY IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/wabt-build/libwabt.a")
