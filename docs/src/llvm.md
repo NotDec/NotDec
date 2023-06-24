@@ -1,5 +1,11 @@
+# LLVM Basics
 
 ### 资料
+
+书籍：
+[Learning LLVM 12（中文版）](https://github.com/xiaoweiChen/Learn-LLVM-12)
+
+[LLVM-Techniques-Tips-and-Best-Practies（中文版）](https://github.com/xiaoweiChen/LLVM-Techniques-Tips-and-Best-Practies)
 
 如何操作LLVM IR：
 1. https://mukulrathi.com/create-your-own-programming-language/llvm-ir-cpp-api-tutorial/

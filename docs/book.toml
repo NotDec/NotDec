@@ -1,0 +1,6 @@
+[book]
+authors = ["am009"]
+language = "en"
+multilingual = false
+src = "src"
+title = "NotDec: Decompiler From Scratch"

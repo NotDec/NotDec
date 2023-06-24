@@ -1,4 +1,4 @@
-# NotDec: WebAssembly Decompiler and Static Analysis Framework
+# NotDec: A WebAssembly Decompiler for Static Analysis
 
 [中文](#中文)
 
@@ -21,8 +21,6 @@ NotDec is
 
 
 ## 反编译器
-
-目标：a webassembly and ethereum VM bytecode decompiler. 
 
 侧重于前中端（转IR与IR的优化。）
 
@@ -171,4 +169,3 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 
 1. 反编译优化后重新编译，和原有代码对比测试。效果好甚至可以作为字节码的优化器。
 2. 未来实现得够好之后，可以重写README，该文档可以改名为`plan.md`放到docs文件夹里。
-

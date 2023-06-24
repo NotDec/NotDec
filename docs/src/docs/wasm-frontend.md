@@ -1,3 +1,5 @@
+# WebAssembly Frontend
+
 wasm frontend 负责将WASM字节码转为LLVM IR。
 
 LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不断修补。
