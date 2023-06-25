@@ -18,6 +18,7 @@ def do_decompile(wasm,ll):
         wasm,
         "-o",
         ll,
+        "--log-level=level_error",
         "--compat-mode",
         "--recompile",
     ]
@@ -27,7 +28,7 @@ def do_decompile(wasm,ll):
 
 def run_saber(ll, result):
     #st = time.time()
-    cmd = ["./bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
+    cmd = ["../bin/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
     ret = os.system(" ".join(cmd))
     #ed = time.time()
     return ret

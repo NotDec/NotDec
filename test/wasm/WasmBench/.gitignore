@@ -1,3 +1,9 @@
 *.7z
 *.txt
 *.json
+*.wasm
+*.wat
+*.ll
+
+
+out_*/
