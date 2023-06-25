@@ -1,0 +1,737 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>NotDec: Decompiler From Scratch</title>
+        <meta name="robots" content="noindex" />
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = null;
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">3.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">3.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">3.2.</strong> CMake</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">NotDec: Decompiler From Scratch</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="notdec-webassembly-decompiler-and-static-analysis-framework"><a class="header" href="#notdec-webassembly-decompiler-and-static-analysis-framework">NotDec: WebAssembly Decompiler and Static Analysis Framework</a></h1>
+<p><a href="index.html#%E4%B8%AD%E6%96%87">中文</a></p>
+<p>NotDec is</p>
+<ol>
+<li>A project that aims to demystify the internal of decompiler.</li>
+<li>A webassembly to LLVM IR lifter that generates clean code, optimized for static analysis.
+<ul>
+<li>Binary Rewriting Framework (convert the IR back to webassembly) (TODO)</li>
+</ul>
+</li>
+<li>A webassembly decompiler
+<ul>
+<li>Variable Recovery</li>
+<li>Structual Analysis</li>
+</ul>
+</li>
+</ol>
+<h1 id="中文"><a class="header" href="#中文">中文</a></h1>
+<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
+<ol>
+<li>将wasm lift到LLVM IR
+<ul>
+<li>支持将wasm内存直接映射到某个基地址，从而直接支持运行，以及memory grow相关指令。</li>
+<li>支持DWARF调试信息，从而映射回原wat，wasm</li>
+</ul>
+</li>
+<li>设计一个映射，将lift之后的IR反向转回wasm</li>
+</ol>
+<h2 id="反编译器"><a class="header" href="#反编译器">反编译器</a></h2>
+<p>目标：a webassembly and ethereum VM bytecode decompiler. </p>
+<p>侧重于前中端（转IR与IR的优化。）</p>
+<h3 id="从零实现反编译器"><a class="header" href="#从零实现反编译器">从“零”实现反编译器</a></h3>
+<p>为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。</p>
+<p>怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。</p>
+<p>计划产出：</p>
+<ol>
+<li>反编译器自身：能够对“内存”中的变量也构建SSA进行优化。</li>
+<li>最终的结果能够很好地重编译。</li>
+<li>反编译器实现过程尽量记录完善的文档，未来考虑整理扩写为系列教程。</li>
+</ol>
+<h3 id="不知道接下来怎么办资料收集"><a class="header" href="#不知道接下来怎么办资料收集">不知道接下来怎么办？（资料收集）</a></h3>
+<p>学习阶段：</p>
+<ol>
+<li>
+<p>LLVM IR基础：只要达到能手写LLVM IR的程度就行。即主要理解各种语言特性对应的是什么样的LLVM IR代码。同时理解带alloca的半SSA形式，即alloca里的变量是非SSA，外面的是SSA。</p>
+<ul>
+<li>llvm-tutor </li>
+<li>ollvm源码</li>
+</ul>
+</li>
+<li>
+<p>SSA与编译优化基础</p>
+<ul>
+<li><a href="https://book.douban.com/subject/20436488/">《Engineering a compiler》</a> 上来先看9.3章，深入研读。其他的章节没那么重要</li>
+<li>再找找其他讲过SSA的中文书？</li>
+</ul>
+<p>下面有两个实验，动手做了印象才会深</p>
+<ul>
+<li><a href="https://buaa-se-compiling.github.io/miniSysY-tutorial/challenge/mem2reg/help.html">mem2reg 实验指导 · GitBook (buaa-se-compiling.github.io)</a></li>
+<li><a href="https://pku-minic.github.io/online-doc/#/lv9p-reincarnation/ssa-form">Lv9+.4. SSA 形式 - 北京大学编译实践课程在线文档 | 北大编译实践在线文档 (pku-minic.github.io)</a></li>
+</ul>
+<p>其他不错的资料：</p>
+<ul>
+<li><a href="https://pfalcon.github.io/ssabook/latest/book-v1.pdf">《SSA book》</a></li>
+<li><a href="https://pp.info.uni-karlsruhe.de/uploads/publikationen/braun13cc.pdf">《simple and efficient ssa construction》</a></li>
+</ul>
+</li>
+<li>
+<p>反编译</p>
+</li>
+</ol>
+<h4 id="直接相关的资料"><a class="header" href="#直接相关的资料">直接相关的资料</a></h4>
+<p>多看看现有的资料：</p>
+<ol>
+<li>Static Single Assignment for Decompilation vanEmmerik_ssa https://yurichev.com/mirrors/vanEmmerik_ssa.pdf</li>
+<li><a href="https://github.com/avast/retdec/tree/master/publications">retdec/publications at master · avast/retdec (github.com)</a> 
+<ol>
+<li>综述是<a href="http://www.fit.vutbr.cz/study/DP/PD.php?id=482&amp;file=t">Retargetable Analysis of Machine Code</a> </li>
+</ol>
+</li>
+</ol>
+<p>参考现有的反编译器：</p>
+<ol>
+<li>Ghidra <a href="https://github.com/NationalSecurityAgency/ghidra/blob/master/Ghidra/Features/Decompiler/src/decompile/cpp/docmain.hh">ghidra/docmain.hh at master · NationalSecurityAgency/ghidra (github.com)</a> 看代码前构建doxygen看文档。</li>
+<li><a href="https://github.com/avast/retdec">avast/retdec: RetDec is a retargetable machine-code decompiler based on LLVM. (github.com)</a></li>
+<li><a href="https://boomerang.sourceforge.net/">Boomerang Decompiler (sourceforge.net)</a>     <a href="https://github.com/BoomerangDecompiler/boomerang">BoomerangDecompiler/boomerang: Boomerang Decompiler - Fighting the code-rot :) (github.com)</a> </li>
+<li><a href="https://github.com/yegord/snowman">yegord/snowman: Snowman decompiler (github.com)</a> </li>
+<li>angr好像也有了</li>
+</ol>
+<p>也要学习程序分析的内容。</p>
+<p><a href="https://github.com/SVF-tools/SVF">SVF-tools/SVF: Static Value-Flow Analysis Framework for Source Code (github.com)</a> </p>
+<p>控制流恢复算法：</p>
+<ol>
+<li><a href="https://www.ndss-symposium.org/ndss2015/ndss-2015-programme/no-more-gotos-decompilation-using-pattern-independent-control-flow-structuring-and-semantics/">No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations – NDSS Symposium (ndss-symposium.org)</a> </li>
+<li>Phoenix: [Schwartz et al._2013_Native x86 Decompilation using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring.pdf (cmu.edu)](https://users.ece.cmu.edu/~dbrumley/pdf/Schwartz et al._2013_Native x86 Decompilation using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring.pdf) </li>
+</ol>
+<h3 id="规划基于llvm-ir的反编译"><a class="header" href="#规划基于llvm-ir的反编译">规划：基于LLVM IR的反编译</a></h3>
+<p>为什么要使用LLVM IR？</p>
+<ol>
+<li>之后可以直接对接SVF，得到较好的指针分析结果。</li>
+</ol>
+<p>优先实现wasm的反编译。</p>
+<ol>
+<li>Wasm转LLVM IR
+<ol>
+<li>WAVM是一个基于LLVM的wasm的JIT，有部分逻辑是WASM转 LLVM IR
+<ol>
+<li>生成的IR不够简洁，有很多为了编译到汇编的冗余的内容</li>
+</ol>
+</li>
+</ol>
+</li>
+<li></li>
+</ol>
+<h3 id="规划反编译阶段"><a class="header" href="#规划反编译阶段">规划：反编译阶段</a></h3>
+<p><img src="docs/imgs/decompiler-architecture.png" alt="反编译的各个阶段" /></p>
+<p>图片来自<a href="https://yurichev.com/mirrors/vanEmmerik_ssa.pdf">Static Single Assignment for Decompilation</a></p>
+<p>反编译中的关键算法： Type Recovery（通过指令约束推导类型） Structual Analysis(恢复控制流)</p>
+<ol>
+<li>前端：将字节码转为LLVM IR</li>
+<li>中端：优化与分析
+<ol>
+<li>分析函数参数、分析callee saved register (wasm可以跳过这个阶段)</li>
+<li>SSA构建：使得前端可以有些冗余的alloca，由SSA构建来将相关alloca消除。 （编译原理相关）</li>
+<li>GVNGCM：Global Value Numbering and Global Code Motion 优化算法，有强大的优化能力，有助于反混淆等。（编译原理相关）</li>
+<li>内存分析：将各种通过内存访问的变量显式地恢复出来。可能要用到指针分析算法，类型恢复等。关键词：Memory SSA。</li>
+</ol>
+</li>
+<li>后端：高层控制流恢复，将字节码转为AST，打印为高级语言的形式。</li>
+</ol>
+<h3 id="项目架构与工具"><a class="header" href="#项目架构与工具">项目架构与工具</a></h3>
+<p>Markdown编辑器（建议）使用Typora，或VSCode</p>
+<p>由于基于LLVM IR，因此语言采用C++。</p>
+<p>开发环境：VSCode + CMake。将Wabt，LLVM等作为CMake的外部依赖。</p>
+<h4 id="开发环境搭建---devcontainer"><a class="header" href="#开发环境搭建---devcontainer">开发环境搭建 - DevContainer</a></h4>
+<p>VSCode DevContainer。出于<a href="https://code.visualstudio.com/remote/advancedcontainers/improve-performance">性能考虑</a>，在clone时可以直接clone到wsl的ext4文件系统里。</p>
+<ol>
+<li>安装Docker Desktop on Windows： https://docs.docker.com/desktop/install/windows-install/ （无论是家庭版还是专业版均可）
+<ol>
+<li>其他系统直接安装docker</li>
+</ol>
+</li>
+<li>用vscode打开代码，安装Dev Containers插件，按Ctrl-Shift-P 然后输入查找 <code>Remote-Containers: Rebuild and Reopen in container</code>.</li>
+<li>等待构建，构建完成后会直接进入开发环境中。</li>
+<li>安装CMake相关插件，toolkit选clang。</li>
+</ol>
+<p>如果出现了无法使用windows侧的ssh-agent提供的ssh key的forward功能：
+https://stackoverflow.com/questions/72293035/error-communication-with-agent-failed-when-ssh-auth-sock-is-set-but-ssh-agent </p>
+<h4 id="开发环境搭建---linux"><a class="header" href="#开发环境搭建---linux">开发环境搭建 - Linux</a></h4>
+<p>基于Ubuntu系统。</p>
+<ol>
+<li>软件安装
+<ul>
+<li>apt安装
+<pre><code>sudo apt install wabt python-is-python3 clang-14
+</code></pre>
+</li>
+<li>安装wasi-sdk</li>
+</ul>
+</li>
+<li>clone 本仓库</li>
+<li>编译一个LLVM
+<ul>
+<li>方式1：下载提前构建好的LLVM，解压得到<code>llvm-14.0.6.obj</code>文件夹，放到项目根目录。</li>
+<li>方式2：执行<code>scripts/build-debug-llvm.sh</code>脚本，下载并构建LLVM源码。中途可能遇到内存不足的情况，需要手动降低并行数量到1。
+成功构建后可以将<code>llvm-14.0.6.obj</code>文件夹打包发送给其他人。</li>
+</ul>
+</li>
+<li>构建</li>
+</ol>
+<h4 id="代码调试"><a class="header" href="#代码调试">代码调试</a></h4>
+<p>直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。</p>
+<p>代码补全使用clangd插件。根据提示禁用Intellisense，然后确认下载一个clangd。</p>
+<h3 id="提交代码前"><a class="header" href="#提交代码前">提交代码前</a></h3>
+<ol>
+<li>写好commit message，简要概况所有的修改。</li>
+<li>检查添加的代码的注释和文档是否充足。</li>
+</ol>
+<h3 id="其他"><a class="header" href="#其他">其他</a></h3>
+<p>各种杂七杂八的事情随意地列在这里</p>
+<ol>
+<li>反编译优化后重新编译，和原有代码对比测试。效果好甚至可以作为字节码的优化器。</li>
+<li>未来实现得够好之后，可以重写README，该文档可以改名为<code>plan.md</code>放到docs文件夹里。</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="llvm-basics"><a class="header" href="#llvm-basics">LLVM Basics</a></h1>
+<h3 id="资料"><a class="header" href="#资料">资料</a></h3>
+<p>书籍：
+<a href="https://github.com/xiaoweiChen/Learn-LLVM-12">Learning LLVM 12（中文版）</a></p>
+<p><a href="https://github.com/xiaoweiChen/LLVM-Techniques-Tips-and-Best-Practies">LLVM-Techniques-Tips-and-Best-Practies（中文版）</a></p>
+<p>如何操作LLVM IR：</p>
+<ol>
+<li>https://mukulrathi.com/create-your-own-programming-language/llvm-ir-cpp-api-tutorial/</li>
+<li>可以使用<code>llc -march=cpp</code> ： https://stackoverflow.com/questions/7787308/how-can-i-declare-a-global-variable-in-llvm </li>
+<li>https://llvm.org/docs/LangRef.html 查询IR</li>
+</ol>
+<h3 id="debug"><a class="header" href="#debug">debug</a></h3>
+<p>打印使用<code>llvm::outs() &lt;&lt; xxx;</code>直接打印llvm Value</p>
+<h3 id="声明全局变量"><a class="header" href="#声明全局变量">声明全局变量</a></h3>
+<p>Global variable definitions must be initialized.</p>
+<p>Global variables in other translation units can also be declared, in which case they don’t have an initializer.</p>
+<ul>
+<li><code>dso_local</code> 看作是C语言的static，在同一个编译单元内</li>
+</ul>
+<p>LinkageTypes</p>
+<ul>
+<li><code>external</code> 是默认的，如果没有initializer就会带一个external，如果有就没有修饰符，正常的符号。</li>
+</ul>
+<h3 id="嵌套的指令-nested-instrucitons"><a class="header" href="#嵌套的指令-nested-instrucitons">嵌套的指令 nested instrucitons</a></h3>
+<p>https://lists.llvm.org/pipermail/llvm-dev/2015-October/091467.html</p>
+<p>使用IRBuilder创建的这个其实不是嵌套的指令，LLVM也不支持嵌套的指令，而是创建了GEP constant expression。这种表达式比指令更好，同时蕴含着没有副作用的语义。</p>
+<h3 id="passmanger"><a class="header" href="#passmanger">PassManger</a></h3>
+<p>LLVM PASS的管理有两种实现</p>
+<ul>
+<li>LegacyPass Manger</li>
+<li>NewPass Manger</li>
+</ul>
+<p>传统的LegacyPM有一些不足，例如Analysis Pass不能缓存分析的信息导致重复分析等。NewPM将Analysis和Pass做了区分。在LegacyPM中存在过多的全局变量与registries，每个Pass都需要通过宏来注册，NewPM改进了这一点，当然还有内联函数分析等其他优化。LLVM12使用的是LegacyPassManager，13之后默认使用的是NewPassManager，<strong>本项目也使采用NewPassManager</strong>。</p>
+<h3 id="运行与管理"><a class="header" href="#运行与管理">运行与管理</a></h3>
+<p>LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="notdec-development-document"><a class="header" href="#notdec-development-document">NotDec Development Document</a></h1>
+<p>NotDec的项目文档。</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="webassembly-frontend"><a class="header" href="#webassembly-frontend">WebAssembly Frontend</a></h1>
+<p>wasm frontend 负责将WASM字节码转为LLVM IR。</p>
+<p>LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不断修补。</p>
+<h2 id="wasm-现有工具"><a class="header" href="#wasm-现有工具">WASM 现有工具</a></h2>
+<ol>
+<li>WAVM也是一个基于LLVM的带JIT功能的runtime。C++编写
+<ol>
+<li><code>WAVM\Lib\LLVMJIT\LLVMCompile.cpp</code> LLVMJIT::compileModule这个函数应该是编译入口点，很多可以参考。</li>
+<li><code>WAVM\Lib\LLVMJIT\EmitFunction.cpp</code> EmitFunctionContext::emit 编译每个函数。关键是<code>decoder.decodeOp(*this);</code>这句，会根据不同的指令访问对应的同名函数，比如看<code>WAVM\Lib\LLVMJIT\EmitCore.cpp</code>，遇到block指令会调用EmitFunctionContext::block函数。</li>
+</ol>
+</li>
+<li><a href="https://github.com/gwsystems/aWsm">aWsm</a> 也是一个基于LLVM的带JIT功能的runtime。虽然是rust写的，但是还是用的LLVM C++ API，转换相关的逻辑也都是可以抄的。</li>
+<li>WAMR wasm-micro-runtime 基于LLVM的，但是是C语言，使用LLVM-C-API，我们打算用的是C++的API。
+<ol>
+<li>真的是自己写的字节码解析器好像。。。<a href="https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm_loader.c">wasm_loader.c</a> <a href="https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm.h">wasm.h</a></li>
+<li>有相关wasm到LLVM IR的转换可以参考：<a href="https://github.com/bytecodealliance/wasm-micro-runtime/blob/c07584400134bb5f1be80b4f5df96eb1d8c94324/core/iwasm/compilation/aot_llvm_extra.cpp">aot_llvm_extra.cpp</a></li>
+</ol>
+</li>
+</ol>
+<h2 id="代码架构"><a class="header" href="#代码架构">代码架构</a></h2>
+<ul>
+<li>
+<p>wasm模块解析器：基于wabt。<a href="https://github.com/WebAssembly/wasm-c-api">wasm-c-api</a>不太行因为是用来embed一个WASM VM的。</p>
+<ul>
+<li>目前直接通过</li>
+<li>未来考虑通过find_package直接使用： https://github.com/WebAssembly/wabt/pull/1980</li>
+</ul>
+</li>
+<li>
+<p>首先由于最后都是转IR，所以BaseContext保存LLVM相关的Context。其实可以作为全局变量，为了以后可能的并行，把这类全局变量都搞到一个类里。</p>
+</li>
+<li>
+<p>wasm::Context是相关生成的代码依附的数据结构，保存比如wabt::Module这种Context。为了方便应用，增加了对BaseContext的引用，对llvmCtx的引用等等。</p>
+</li>
+</ul>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>需要了解LLVM IR的语义：</p>
+<ol>
+<li><a href="https://llvm.org/docs/LangRef.html">LLVM Language Reference Manual</a> </li>
+<li><a href="https://www.youtube.com/watch?v=m8G_S5LwlTo">2019 EuroLLVM Developers’ Meeting: V. Bridgers &amp; F. Piovezan “LLVM IR Tutorial - Phis, GEPs ...” - YouTube</a> </li>
+</ol>
+<p>和WASM的语义：<a href="https://webassembly.github.io/spec/core/binary/modules.html">Modules — WebAssembly 2.0 (Draft 2022-09-27)</a> 注意现在直接翻标准是新release的2.0标准了。<strong>我们暂时先支持1.0标准</strong>，wabt现在也仅支持1.0，如果文件头里写version为2会报错。1.0的标准可以看<a href="https://www.w3.org/TR/wasm-core-1/#syntax-importdesc">这里</a>。
+不确定每个指令的语义，看<a href="https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/Numeric/Negate">这种地方</a>。</p>
+<ol>
+<li>名字比较难处理，wasm的<a href="https://github.com/WebAssembly/extended-name-section/blob/main/proposals/extended-name-section/Overview.md">name section</a>允许重名，而且wasm中因为是二进制格式，理论上名字可以取任意utf-8。那边wat格式的定义也有类似的问题。但是wabt似乎已经处理了相关的问题？
+<ul>
+<li>在src\binary-reader-ir.cc里的BinaryReaderIR::GetUniqueName函数，如果重名了会加数字后缀。</li>
+</ul>
+</li>
+<li>类型：i32 i64 对应LLVM中的i32 i64, f32 f64对应LLVM中的float double。</li>
+<li>每个wasm的Global值转为llvm中一个的global值。相关访问只有Load和Store指令。
+<ol>
+<li>名字直接使用wabt那边传过来的名字 <del>名字更改为<code>global_&lt;ind&gt;_&lt;original_name&gt;</code>这种格式，即在原来名字前加上前缀标识。</del></li>
+<li><a href="https://llvm.org/docs/LangRef.html#linkage-types">Linkage Types</a> 选择internal。被导出的更改为external。</li>
+<li>根据mutable，设置llvm那边的const属性</li>
+<li>处理init_expr</li>
+</ol>
+</li>
+<li>内存：转为一个global数组，u8 array。
+<ol>
+<li>内存初始化：似乎LLVM IR里一个数组不能部分初始化。很多0也没办法。就这样吧</li>
+<li>内存访问：计算关于u8的偏移（get element ptr），然后再转为对应的类型指针load出来。即LLVM中<code>[大数字 x i8]</code>类型。因为只是分析，所有不用考虑内存增长的事情。</li>
+</ol>
+</li>
+<li>函数
+<ol>
+<li>每个Local转化为函数开头的一个alloca。</li>
+<li><a href="https://webassembly.github.io/spec/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-call-indirect-x-y">非直接跳转 callind</a> </li>
+</ol>
+</li>
+</ol>
+<h2 id="指令栈控制流的处理"><a class="header" href="#指令栈控制流的处理">指令、栈、控制流的处理</a></h2>
+<p>参考WAVM，见顶部现有工具一节。参考栈验证逻辑。能保留的最好直接解码为SSA。这里的block直接考虑<a href="https://github.com/WebAssembly/multi-value">Multi Value Extension</a>，防止以后架构需要重构，但是函数返回多个值的先不支持。</p>
+<ul>
+<li>每个栈上元素对应一个SSA的Value。某种形式上可以维护一个Value栈（作为局部变量，不需要作为Context）。</li>
+<li>控制流跳转维护一个block的嵌套栈，保存br时跳转的目标。关键是如何在找到跳转目标的同时，把栈弹到对应的值。</li>
+<li>处理Block的时候，这里用递归和用栈都可以。选择用实现起来更简单的递归。aWsm好像是递归的写法，WAVM好像是用栈，复杂一点。</li>
+<li>loop和block的区别在于，给phi赋值，然后用Phi替换栈上值的地方不同。一个是基本块开头，一个是基本块结尾</li>
+<li>函数体大致也算一个Block块，但是labelType写Func。</li>
+</ul>
+<h3 id="控制流指令的处理与ssa生成"><a class="header" href="#控制流指令的处理与ssa生成">控制流指令的处理，与SSA生成</a></h3>
+<p>visitFunction：</p>
+<ol>
+<li>
+<p>创建allocaBlock，分配参数和local空间</p>
+</li>
+<li>
+<p>创建alloca -&gt; entry边，创建return块备用</p>
+</li>
+<li>
+<p>调用visitBlock函数（visitBlock函数必须把所有的结束跳转都引导到exit块）</p>
+</li>
+<li>
+<p>创建结尾的return指令。（visitBlock内部处理的时候只有br，return也看作特殊的br，函数只允许在结尾返回）</p>
+</li>
+</ol>
+<p>递归的基本块生成算法visitBlock：
+<strong>要求与保证</strong>：</p>
+<ol>
+<li>要求算法的整体表现类似于给定类型的单个指令</li>
+<li>要求调用者提供的entry和exit中，需要创建Phi的那个为空基本块（但是可以有Phi指令），便于创建Phi节点。</li>
+<li>保证结束的时候跳转到exit块。不会有其他控制流。</li>
+</ol>
+<p>注：</p>
+<ol>
+<li>没必要再用一个额外的stack防止访问更深元素，因为调用过了wabt的validate</li>
+</ol>
+<p>调用visitBlock前，根据block类型</p>
+<ol>
+<li>Block类型：创建新的exit块，替换原来exit，处理完毕后新的exit作为entry继续生成指令，旧的exit还是exit</li>
+<li>Loop类型：创建新的entry块，替换原来entry。loop结束也一样。</li>
+</ol>
+<p>visitBlock：</p>
+<ol>
+<li>先创建好跳转目标，Phi节点，用这些设置好BreakoutTarget结构体，压入栈中：
+<ol>
+<li>根据是loop还是block类型的块创建Phi。如果是Loop，直接把当前栈上的值弹出来，作为phi的operand，然后把phi push回去，替换。如果是block，先创建空的Phi。（等后面结束的时候再从栈上加operand。</li>
+<li>保存当前value栈的情况。</li>
+</ol>
+</li>
+<li>依次遍历每个指令生成。
+<ol>
+<li>普通的指令根据指令语义，从value stack中取值，</li>
+<li>如果遇到了跳转指令：
+<ol>
+<li>如果跳转的目标是普通基本块，则从栈上取值加入到对应的Phi中，</li>
+</ol>
+</li>
+</ol>
+</li>
+<li>块结束的时候，不需要主动跳转到exit，因为exit不一定是当前block的exit，因为在Loop的情况下，结尾没有额外创建基本块，所以不需要特殊处理。Block结尾的跳转交给外面处理。</li>
+<li>Block结束时，在end前，处理隐含跳转到结束块。由于类型检查，不会有多余的值，不需要unwinding弹出栈。</li>
+</ol>
+<p>控制流指令的处理：</p>
+<ol>
+<li>br指令，其后是stack可以是任何类型。为了处理这种情况，我们直接增加unreachable标识，无视这些指令。
+<ul>
+<li>对于Block</li>
+<li>对于Loop，由于结尾是从Loop离开的唯一方式。如果有br指令封锁了结尾，则不可能从这个loop结尾离开了。此时直接保留UnReachableState</li>
+</ul>
+</li>
+<li>block，loop分别对应在结尾，开头，增加一个label。注意到block只需要为return的值创建Phi，loop需要对参数创建Phi。</li>
+<li>if对应一些label和br_if，br代表直接跳转，br_if同理，根据语义找到对应的跳转目标，生成条件跳转即可。</li>
+<li>br_table看似比较麻烦，看了下和LLVM的switch语句对应得非常好啊。也是根据不同的值跳转到不同的边。</li>
+</ol>
+<p>最开始的时候先写一个类型检查，打印出每个指令后当前栈上的类型情况的代码，然后再加生成相关的东西。</p>
+<p>wabt那边代表Block的结构体看wabt的<code>src\ir.h</code> 383行<code>struct Block</code>这边。</p>
+<ul>
+<li><code>std::string label</code> 直接放到BasicBlock的名字里面</li>
+<li><code>BlockDeclaration decl</code> 和<code>FuncDeclaration</code>是一个类型</li>
+<li><code>ExprList exprs</code></li>
+<li><code>Location end_loc</code> 代表输入文件里的位置，暂时不管，除非后面想加debug信息</li>
+</ul>
+<p>多个参数和返回值的时候，顺序：</p>
+<ul>
+<li>函数参数逆序遍历（pop），同时从栈上pop出来。</li>
+<li>函数返回值顺序遍历，同时push到栈上。</li>
+</ul>
+<p>查OpCode看<code>wabt/src/opcode.def</code>。Opcode和ExprType之间的关系看<code>src\lexer-keywords.txt</code>，或者看<code>src\binary-reader.cc</code>里面对应的Opcode创建了什么Expr，<del>或者看<code>src\binary-reader-ir.cc</code>里找对应的指令到底创建了哪种Expr类。</del></p>
+<p>这里面的类继承关系看 <code>src\ir.h</code>。其实就是搞了一个ExprType，然后在onXXX指令的函数处直接创建了这个类型的Expr，导致opcode和expr之间没有明确的对应关系。</p>
+<h2 id="运算指令的处理"><a class="header" href="#运算指令的处理">运算指令的处理</a></h2>
+<ul>
+<li>简单的可以对着这个找指令https://llvm.org/docs/LangRef.html。</li>
+<li>可以找llvm intrinsic，例如fabs指令使用了对应的<code>Intrinsic::fabs</code></li>
+<li>更复杂的可以自己手写llvm函数，然后直接调自己写的函数，之后看看要不要内联什么的</li>
+</ul>
+<p>资料：</p>
+<ul>
+<li>WAMR里，intrinsic的实现 https://github.com/bytecodealliance/wasm-micro-runtime/blob/d309091706f2fbfc3ccca2907226f57db4d612f3/core/iwasm/aot/aot_intrinsic.c</li>
+<li>WAVM里，intrinsic的实现（使用irBuilder） https://github.com/WAVM/WAVM/blob/79c3aa29366615d9b1593cd527e5b4b94cc6072a/Lib/LLVMJIT/EmitNumeric.cpp</li>
+</ul>
+<h3 id="比较---浮点数"><a class="header" href="#比较---浮点数">比较 - 浮点数</a></h3>
+<p>参照https://www.w3.org/TR/wasm-core-1/#-hrefop-feqmathrmfeq_n-z_1-z_2 和https://llvm.org/docs/LangRef.html#id309 对比语义</p>
+<ol>
+<li>feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用<code>fcmp oeq</code>。</li>
+<li>而fne，有nan就返回1，所以要用<code>fcmp une</code></li>
+</ol>
+<h3 id="链接"><a class="header" href="#链接">链接</a></h3>
+<ul>
+<li>WebAssembly Object File Linking： https://github.com/WebAssembly/tool-conventions/blob/main/Linking.md</li>
+<li>Adventures in WebAssembly object files and linking： https://mike.zwobble.org/2021/04/adventures-in-webassembly-object-files-and-linking/</li>
+</ul>
+<p>相关section的解析可以看<code>src\binary-reader.cc</code>里的<code>BinaryReader::ReadCustomSection</code>函数。</p>
+<h2 id="测试"><a class="header" href="#测试">测试</a></h2>
+<ol>
+<li>基于sysY语言的测试用例，自动编译为wasm和wat格式，反编译到IR后和sylib.c得到sylib.ll一起输入lli执行。验证输出的正确性。
+<ul>
+<li>使用-c编译为未链接的object ？
+<ul>
+<li>缺点1：内存是导入的，大小不确定</li>
+<li>缺点2：需要处理额外的。</li>
+</ul>
+</li>
+<li>编译为完整模块，加上<code>-g -O0 --no-standard-libraries -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined</code>等选项。全部导出可以不用特殊处理main函数的导出，allow undefined好像会让没定义的都变成导入。
+<ul>
+<li>目前暂时的方案。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<h2 id="其他-1"><a class="header" href="#其他-1">其他</a></h2>
+<h3 id="wasm中的函数指针调用复习"><a class="header" href="#wasm中的函数指针调用复习">Wasm中的函数指针调用（复习）</a></h3>
+<p>在二进制模块中有id为4的table section。里面有一系列的table类型，初始化则由element section负责。table类型有两部分，reftype和limit。<a href="https://webassembly.github.io/spec/core/binary/types.html#limits">limit</a>应该是类似数组大小的东西，但是同时包含了上限和下限。</p>
+<p>reftype其实就是个enum，表示是不透明的external类型还是function类型。即，光是table section里，有用的信息只有定义了index，给每个index处的table标明了上下限。</p>
+<p>reference类型是和其他类型独立的。即真的无法观测到底是怎么表示的，只能被存在table里。即和程序call指令里面用的index不同。其实我们只要管func ref，external ref一般指不是函数的情况。如果有的话直接那个吧。</p>
+<p>接下来看elem section。它可以是passive的，即等着被table.init指令使用，用来初始化某个table。或者是active的，直接初始化某个table。最后可以是declarative的，说是前向声明。（TODO，不是特别理解）</p>
+<p>现在直接翻标准是新release的2.0标准了。我们暂时先支持1.0标准里面流行的active类型的elem。（wabt现在如果文件头里写version为2会报错。（这个version是在整个二进制模块的header处定义的。）但是依然支持这一部分的新格式，可能是以支持相关拓展的形式实现的）</p>
+<p>首先介绍<a href="https://webassembly.github.io/spec/core/binary/modules.html#element-section">标志位</a>：</p>
+<ul>
+<li>bit0: passive 或 active 的标志位。</li>
+<li>bit1: 分两种情况
+<ul>
+<li>active: 存在额外的table index。（否则默认是0） </li>
+<li>标志位表示是passive或者declarative。</li>
+</ul>
+</li>
+<li>bit2: bit 2 indicates the use of element type and element expressions instead of element kind and element indices.</li>
+</ul>
+<p>elem section由三部分组成：</p>
+<ol>
+<li>table index, 初始化哪个table。目前因为只有一个table，所以必须是0。</li>
+<li>offset, 常量表达式，即一些指令。例如：<code>41 01 0b</code>解码为<code>i32.const 1; end;</code>。</li>
+<li>vec(func ind) 一系列函数下标，表示要初始化成这些。</li>
+</ol>
+<p><a href="https://www.wasm.com.cn/docs/future-features/">Features to add after the MVP - WebAssembly 中文网|Wasm 中文文档</a> https://www.w3.org/TR/wasm-core-1/#element-segments%E2%91%A0 （可以在这个页面搜索<code>at most one</code>） 这里提到了，MVP标准中wasm最多有一块内存，最多有一个table。</p>
+<p>对应到LLVM IR的关键是，相同的语言特性会怎么在LLVM IR上实现/怎样的LLVM IR会编译到这样的wasm。LLVM里只有Call指令，但是参数是一个函数地址的value。目前看来可以搞一个函数指针数组，对应初始化后的table。然后将callind翻译为从函数指针中取，然后再call。</p>
+<p>至于非直接跳转，由于和llvm的switch完美对应，就非常简单。br_table指令会带有个table，让index从1到table的大小遍历，根据当前栈上的值是否等于当前index，从table里面取出要跳转的层数，找到对应的基本块，为switch增加跳转目标即可。</p>
+<h2 id="todo-1"><a class="header" href="#todo-1">TODO</a></h2>
+<p>最好能实现单个函数的反编译与混淆，即转换回Wasm时最好能保证其他部分不变。。。如果使用LLVM自己的wasm后端好像有点复杂</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="docs-of-optimizers"><a class="header" href="#docs-of-optimizers">Docs of optimizers</a></h1>
+<p>项目使用LLVM Pass框架来进行反编译中的中间代码优化。</p>
+<h2 id="相关资料"><a class="header" href="#相关资料">相关资料</a></h2>
+<p>入门教程<a href="https://github.com/banach-space/llvm-tutor">banach-space/llvm-tutor: A collection of out-of-tree LLVM passes for teaching and learning (github.com)</a></p>
+<p>中文文章[<a href="https://bbs.kanxue.com/thread-257665.htm">翻译]现代化地编写LLVM Pass -- part I-外文翻译-看雪论坛-安全社区|安全招聘|bbs.pediy.com (kanxue.com)</a></p>
+<h2 id="变量识别"><a class="header" href="#变量识别">变量识别</a></h2>
+<p>清除IR中的全局栈指针，并对其使用处的指令操作数(局部变量地址)进行转换，转换为对alloca里的东西的使用，把对mem0的使用，其中的使用mem0的栈部分，改为使用我们的alloca。
+参考<a href="https://github.com/avast/retdec/blob/master/src/bin2llvmir/optimizations/stack/stack.cpp">retdec/stack.cpp</a></p>
+<ul>
+<li>识别并消除函数开头和结尾的栈指针操作</li>
+<li>把对mem0的取下标+load/store操作，根据全局变量还是局部变量，转变为（新创建的）局部变量或者全局变量的操作。</li>
+</ul>
+<p>变量分为全局变量，局部变量，堆变量，堆变量一般直接调函数分配，暂时不考虑。</p>
+<ul>
+<li>全局变量的访问：对mem0取下标的这个值是常量（范围大致在1024到一个很大的值之间）【可能存在偏移运算】</li>
+<li>局部变量的访问：对mem0取下标的值，是栈指针（取global 0）【可能存在偏移运算】</li>
+<li>也可能直接把地址存入变量里，即取地址。</li>
+</ul>
+<p>其中偏移运算可能是常量也可能是变量，是变量时甚至可能存在乘法运算。
+（如果把栈指针存到了结构体里怎么办？假装它没有定义结构体，定义了很多零散的变量？）结构体的问题在于，成员地址可能基于结构体自身的指针计算得到</p>
+<ul>
+<li>如何判断global0是不是栈指针</li>
+<li>如何匹配函数开头的栈指针的sub操作</li>
+<li>如何判断哪些值是栈内存的指针</li>
+</ul>
+<h3 id="挑战"><a class="header" href="#挑战">挑战</a></h3>
+<p>现在内存不是直接访问的：即load和store指令会在加载和保存的时候，将偏移加上mem0的基地址。但是，如果一旦引入了类似于直接alloca的这种情况，则它将是直接地址，而不是直接加上mem0的基地址。问题在于，可能会有指针混指的情况，即可能指向全局变量或者栈空间变量。这样在后面load/store的时候，无论是加上mem0的基址还是不加都有问题。</p>
+<p>因此引入地址空间的概念，引入数值和地址的转换符。</p>
+<p>能否保证语义安全？因为我们现在转出来的IR是能跑的，如果变量恢复后，是不是就不能跑了？比如部分变量识别失败，还是存到mem里去了。</p>
+<h3 id="实现"><a class="header" href="#实现">实现</a></h3>
+<p>wasm解析为IR后先优化一下。</p>
+<h4 id="如何判断哪些值是栈内存的抽象解释算法"><a class="header" href="#如何判断哪些值是栈内存的抽象解释算法">如何判断哪些值是栈内存的&quot;抽象解释&quot;算法</a></h4>
+<p>和传统的数据流分析不同的地方在于，LLVM是SSA形式，每个值只有一个赋值点。因此，一个值要么是栈指针，要么不是。因此只需要直接循环迭代。但是LLVM里还是有变量，即alloca出来的值，可能因为控制流的跳转而来自不同的取值，从而导致基于变量计算出来的值，依赖于这个变量是不是和栈指针有关的东西。</p>
+<p>要分析清楚对mem0取下标的这个值，是不是来自stackpointer的运算。</p>
+<ol>
+<li>一定来自stack pointer</li>
+<li>可能来自stack pointer</li>
+<li>一定不来自stack pointer</li>
+</ol>
+<p>为每个llvm的Value维护一个bool类型变量表示是否是栈指针。
+遍历所有基本块（可能拓扑排序会高效一点），直到某次完全遍历也没有任何变化
+初始化：算法开始前已经判断了函数开头的栈指针值，对应的bool设置为true
+如果遇到了运算，任意一个输入值对应true的话，结果也设置为true。</p>
+<p>把变量也标为是栈指针类型？所有对这个变量的load都是栈指针？</p>
+<p>union怎么办？先不考虑。</p>
+<p>目前的解决方法：
+遇到内存访问指令沿着use-def向上回溯，构造一条chain 看是否可达sp,如果可达，那么就是栈地址，并把它放在栈相关集合中。
+如果存进去的值也是栈地址，那么就把对应偏移的放在另一个栈相关集合中。</p>
+<p>TODO:</p>
+<p>1.需要实现过程间分析，如果call指令的参数和返回值都是栈地址，需要把它们放到栈相关集合中。</p>
+<h2 id="retype"><a class="header" href="#retype">retype</a></h2>
+<p>类型恢复</p>
+<p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="other-notes"><a class="header" href="#other-notes">Other Notes</a></h1>
+<p>这里包括一些其他笔记，如C++，CMake的使用。</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="c-development"><a class="header" href="#c-development">C++ Development</a></h1>
+<h3 id="stackoverflow"><a class="header" href="#stackoverflow">stackoverflow</a></h3>
+<ol>
+<li>代码规范遵守LLVM的，https://llvm.org/docs/CodingStandards.html#do-not-use-rtti-or-exceptions 注意不要使用异常处理，用abort替代。可以使用<a href="https://stackoverflow.com/questions/2849832/c-c-line-number">特殊的宏</a>辅助打印错误信息。
+<pre><code class="language-cpp">if(this-&gt;globs.size() != 0) {
+    std::cerr &lt;&lt; __FILE__ &lt;&lt; &quot;:&quot; &lt;&lt; __LINE__ &lt;&lt; &quot;: &quot; &lt;&lt; &quot;Error: Cannot add module when globals is not empty&quot; &lt;&lt; std::endl;
+    std::abort();
+}
+</code></pre>
+</li>
+<li>最好不要在头文件里用using namespace。但是可以在函数体开头使用。 https://stackoverflow.com/questions/223021/whats-the-scope-of-the-using-declaration-in-c</li>
+<li>返回值选择object还是pointer： https://stackoverflow.com/questions/13213912/returning-an-object-or-a-pointer-in-c</li>
+<li>是否使用智能指针：https://stackoverflow.com/questions/106508/what-is-a-smart-pointer-and-when-should-i-use-one</li>
+<li>用引用还是指针：https://stackoverflow.com/questions/7058339/when-to-use-references-vs-pointers</li>
+<li>引用和指针的区别：https://stackoverflow.com/questions/57483/what-are-the-differences-between-a-pointer-variable-and-a-reference-variable</li>
+</ol>
+<h3 id="注意事项"><a class="header" href="#注意事项">注意事项</a></h3>
+<ol>
+<li>注意相关STL函数使用要带上check。
+<ol>
+<li>vector使用back一定要检查是否是空！！！ <code>assert(stack.size() &gt; 0);</code></li>
+</ol>
+</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="cmake-notes"><a class="header" href="#cmake-notes">CMake Notes</a></h1>
+<h3 id="cmake-学习资料"><a class="header" href="#cmake-学习资料">CMake 学习资料</a></h3>
+<ol>
+<li>https://eliasdaler.github.io/using-cmake/</li>
+<li>https://github.com/kigster/cmake-project-template 找一个模板项目作为参考</li>
+</ol>
+<h3 id="external-project"><a class="header" href="#external-project">External Project</a></h3>
+<p>基本就是先添加ExternalProject_add，然后add_library指定IMPORTED，设置import路径。最后使用的时候额外增加一个add_dependencies关联到ExternalProject_add的target。</p>
+<ol>
+<li>https://cmake.org/cmake/help/latest/module/ExternalProject.html</li>
+<li>https://stackoverflow.com/questions/51564251/correct-way-to-use-third-party-libraries-in-cmake-project/51567322#51567322</li>
+<li>https://stackoverflow.com/questions/51661637/having-cmake-build-but-not-install-an-external-project</li>
+<li>https://stackoverflow.com/questions/29533159/what-is-install-dir-useful-for-in-externalproject-add-command</li>
+<li>ninja报错找不到import的库的构建方法： https://stackoverflow.com/questions/50400592/using-an-externalproject-download-step-with-ninja</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </div>
+    </body>
+</html>

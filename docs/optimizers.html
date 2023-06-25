@@ -1,0 +1,251 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Decompiler Middle End - NotDec: Decompiler From Scratch</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = null;
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded "><a href="../llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="../docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="../docs/optimizers.html" class="active"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="../basics/index.html"><strong aria-hidden="true">3.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../basics/C++.html"><strong aria-hidden="true">3.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="../basics/cmake.html"><strong aria-hidden="true">3.2.</strong> CMake</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">NotDec: Decompiler From Scratch</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="docs-of-optimizers"><a class="header" href="#docs-of-optimizers">Docs of optimizers</a></h1>
+<p>项目使用LLVM Pass框架来进行反编译中的中间代码优化。</p>
+<h2 id="相关资料"><a class="header" href="#相关资料">相关资料</a></h2>
+<p>入门教程<a href="https://github.com/banach-space/llvm-tutor">banach-space/llvm-tutor: A collection of out-of-tree LLVM passes for teaching and learning (github.com)</a></p>
+<p>中文文章[<a href="https://bbs.kanxue.com/thread-257665.htm">翻译]现代化地编写LLVM Pass -- part I-外文翻译-看雪论坛-安全社区|安全招聘|bbs.pediy.com (kanxue.com)</a></p>
+<h2 id="变量识别"><a class="header" href="#变量识别">变量识别</a></h2>
+<p>清除IR中的全局栈指针，并对其使用处的指令操作数(局部变量地址)进行转换，转换为对alloca里的东西的使用，把对mem0的使用，其中的使用mem0的栈部分，改为使用我们的alloca。
+参考<a href="https://github.com/avast/retdec/blob/master/src/bin2llvmir/optimizations/stack/stack.cpp">retdec/stack.cpp</a></p>
+<ul>
+<li>识别并消除函数开头和结尾的栈指针操作</li>
+<li>把对mem0的取下标+load/store操作，根据全局变量还是局部变量，转变为（新创建的）局部变量或者全局变量的操作。</li>
+</ul>
+<p>变量分为全局变量，局部变量，堆变量，堆变量一般直接调函数分配，暂时不考虑。</p>
+<ul>
+<li>全局变量的访问：对mem0取下标的这个值是常量（范围大致在1024到一个很大的值之间）【可能存在偏移运算】</li>
+<li>局部变量的访问：对mem0取下标的值，是栈指针（取global 0）【可能存在偏移运算】</li>
+<li>也可能直接把地址存入变量里，即取地址。</li>
+</ul>
+<p>其中偏移运算可能是常量也可能是变量，是变量时甚至可能存在乘法运算。
+（如果把栈指针存到了结构体里怎么办？假装它没有定义结构体，定义了很多零散的变量？）结构体的问题在于，成员地址可能基于结构体自身的指针计算得到</p>
+<ul>
+<li>如何判断global0是不是栈指针</li>
+<li>如何匹配函数开头的栈指针的sub操作</li>
+<li>如何判断哪些值是栈内存的指针</li>
+</ul>
+<h3 id="挑战"><a class="header" href="#挑战">挑战</a></h3>
+<p>现在内存不是直接访问的：即load和store指令会在加载和保存的时候，将偏移加上mem0的基地址。但是，如果一旦引入了类似于直接alloca的这种情况，则它将是直接地址，而不是直接加上mem0的基地址。问题在于，可能会有指针混指的情况，即可能指向全局变量或者栈空间变量。这样在后面load/store的时候，无论是加上mem0的基址还是不加都有问题。</p>
+<p>因此引入地址空间的概念，引入数值和地址的转换符。</p>
+<p>能否保证语义安全？因为我们现在转出来的IR是能跑的，如果变量恢复后，是不是就不能跑了？比如部分变量识别失败，还是存到mem里去了。</p>
+<h3 id="实现"><a class="header" href="#实现">实现</a></h3>
+<p>wasm解析为IR后先优化一下。</p>
+<h4 id="如何判断哪些值是栈内存的抽象解释算法"><a class="header" href="#如何判断哪些值是栈内存的抽象解释算法">如何判断哪些值是栈内存的&quot;抽象解释&quot;算法</a></h4>
+<p>和传统的数据流分析不同的地方在于，LLVM是SSA形式，每个值只有一个赋值点。因此，一个值要么是栈指针，要么不是。因此只需要直接循环迭代。但是LLVM里还是有变量，即alloca出来的值，可能因为控制流的跳转而来自不同的取值，从而导致基于变量计算出来的值，依赖于这个变量是不是和栈指针有关的东西。</p>
+<p>要分析清楚对mem0取下标的这个值，是不是来自stackpointer的运算。</p>
+<ol>
+<li>一定来自stack pointer</li>
+<li>可能来自stack pointer</li>
+<li>一定不来自stack pointer</li>
+</ol>
+<p>为每个llvm的Value维护一个bool类型变量表示是否是栈指针。
+遍历所有基本块（可能拓扑排序会高效一点），直到某次完全遍历也没有任何变化
+初始化：算法开始前已经判断了函数开头的栈指针值，对应的bool设置为true
+如果遇到了运算，任意一个输入值对应true的话，结果也设置为true。</p>
+<p>把变量也标为是栈指针类型？所有对这个变量的load都是栈指针？</p>
+<p>union怎么办？先不考虑。</p>
+<p>目前的解决方法：
+遇到内存访问指令沿着use-def向上回溯，构造一条chain 看是否可达sp,如果可达，那么就是栈地址，并把它放在栈相关集合中。
+如果存进去的值也是栈地址，那么就把对应偏移的放在另一个栈相关集合中。</p>
+<p>TODO:</p>
+<p>1.需要实现过程间分析，如果call指令的参数和返回值都是栈地址，需要把它们放到栈相关集合中。</p>
+<h2 id="retype"><a class="header" href="#retype">retype</a></h2>
+<p>类型恢复</p>
+<p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../docs/wasm-frontend.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="../basics/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../docs/wasm-frontend.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="../basics/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

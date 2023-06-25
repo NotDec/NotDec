@@ -1,0 +1,428 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>WebAssembly Frontend - NotDec: Decompiler From Scratch</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = null;
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded "><a href="../llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="../docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../docs/wasm-frontend.html" class="active"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="../docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="../basics/index.html"><strong aria-hidden="true">3.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../basics/C++.html"><strong aria-hidden="true">3.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="../basics/cmake.html"><strong aria-hidden="true">3.2.</strong> CMake</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">NotDec: Decompiler From Scratch</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="webassembly-frontend"><a class="header" href="#webassembly-frontend">WebAssembly Frontend</a></h1>
+<p>wasm frontend 负责将WASM字节码转为LLVM IR。</p>
+<p>LLVM的好处就在于可以先生成比较差的IR，然后通过优化Pass不断修补。</p>
+<h2 id="wasm-现有工具"><a class="header" href="#wasm-现有工具">WASM 现有工具</a></h2>
+<ol>
+<li>WAVM也是一个基于LLVM的带JIT功能的runtime。C++编写
+<ol>
+<li><code>WAVM\Lib\LLVMJIT\LLVMCompile.cpp</code> LLVMJIT::compileModule这个函数应该是编译入口点，很多可以参考。</li>
+<li><code>WAVM\Lib\LLVMJIT\EmitFunction.cpp</code> EmitFunctionContext::emit 编译每个函数。关键是<code>decoder.decodeOp(*this);</code>这句，会根据不同的指令访问对应的同名函数，比如看<code>WAVM\Lib\LLVMJIT\EmitCore.cpp</code>，遇到block指令会调用EmitFunctionContext::block函数。</li>
+</ol>
+</li>
+<li><a href="https://github.com/gwsystems/aWsm">aWsm</a> 也是一个基于LLVM的带JIT功能的runtime。虽然是rust写的，但是还是用的LLVM C++ API，转换相关的逻辑也都是可以抄的。</li>
+<li>WAMR wasm-micro-runtime 基于LLVM的，但是是C语言，使用LLVM-C-API，我们打算用的是C++的API。
+<ol>
+<li>真的是自己写的字节码解析器好像。。。<a href="https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm_loader.c">wasm_loader.c</a> <a href="https://github.com/bytecodealliance/wasm-micro-runtime/blob/3220ff6941b64de684a5a60a5e3f8adad4a18fb0/core/iwasm/interpreter/wasm.h">wasm.h</a></li>
+<li>有相关wasm到LLVM IR的转换可以参考：<a href="https://github.com/bytecodealliance/wasm-micro-runtime/blob/c07584400134bb5f1be80b4f5df96eb1d8c94324/core/iwasm/compilation/aot_llvm_extra.cpp">aot_llvm_extra.cpp</a></li>
+</ol>
+</li>
+</ol>
+<h2 id="代码架构"><a class="header" href="#代码架构">代码架构</a></h2>
+<ul>
+<li>
+<p>wasm模块解析器：基于wabt。<a href="https://github.com/WebAssembly/wasm-c-api">wasm-c-api</a>不太行因为是用来embed一个WASM VM的。</p>
+<ul>
+<li>目前直接通过</li>
+<li>未来考虑通过find_package直接使用： https://github.com/WebAssembly/wabt/pull/1980</li>
+</ul>
+</li>
+<li>
+<p>首先由于最后都是转IR，所以BaseContext保存LLVM相关的Context。其实可以作为全局变量，为了以后可能的并行，把这类全局变量都搞到一个类里。</p>
+</li>
+<li>
+<p>wasm::Context是相关生成的代码依附的数据结构，保存比如wabt::Module这种Context。为了方便应用，增加了对BaseContext的引用，对llvmCtx的引用等等。</p>
+</li>
+</ul>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>需要了解LLVM IR的语义：</p>
+<ol>
+<li><a href="https://llvm.org/docs/LangRef.html">LLVM Language Reference Manual</a> </li>
+<li><a href="https://www.youtube.com/watch?v=m8G_S5LwlTo">2019 EuroLLVM Developers’ Meeting: V. Bridgers &amp; F. Piovezan “LLVM IR Tutorial - Phis, GEPs ...” - YouTube</a> </li>
+</ol>
+<p>和WASM的语义：<a href="https://webassembly.github.io/spec/core/binary/modules.html">Modules — WebAssembly 2.0 (Draft 2022-09-27)</a> 注意现在直接翻标准是新release的2.0标准了。<strong>我们暂时先支持1.0标准</strong>，wabt现在也仅支持1.0，如果文件头里写version为2会报错。1.0的标准可以看<a href="https://www.w3.org/TR/wasm-core-1/#syntax-importdesc">这里</a>。
+不确定每个指令的语义，看<a href="https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/Numeric/Negate">这种地方</a>。</p>
+<ol>
+<li>名字比较难处理，wasm的<a href="https://github.com/WebAssembly/extended-name-section/blob/main/proposals/extended-name-section/Overview.md">name section</a>允许重名，而且wasm中因为是二进制格式，理论上名字可以取任意utf-8。那边wat格式的定义也有类似的问题。但是wabt似乎已经处理了相关的问题？
+<ul>
+<li>在src\binary-reader-ir.cc里的BinaryReaderIR::GetUniqueName函数，如果重名了会加数字后缀。</li>
+</ul>
+</li>
+<li>类型：i32 i64 对应LLVM中的i32 i64, f32 f64对应LLVM中的float double。</li>
+<li>每个wasm的Global值转为llvm中一个的global值。相关访问只有Load和Store指令。
+<ol>
+<li>名字直接使用wabt那边传过来的名字 <del>名字更改为<code>global_&lt;ind&gt;_&lt;original_name&gt;</code>这种格式，即在原来名字前加上前缀标识。</del></li>
+<li><a href="https://llvm.org/docs/LangRef.html#linkage-types">Linkage Types</a> 选择internal。被导出的更改为external。</li>
+<li>根据mutable，设置llvm那边的const属性</li>
+<li>处理init_expr</li>
+</ol>
+</li>
+<li>内存：转为一个global数组，u8 array。
+<ol>
+<li>内存初始化：似乎LLVM IR里一个数组不能部分初始化。很多0也没办法。就这样吧</li>
+<li>内存访问：计算关于u8的偏移（get element ptr），然后再转为对应的类型指针load出来。即LLVM中<code>[大数字 x i8]</code>类型。因为只是分析，所有不用考虑内存增长的事情。</li>
+</ol>
+</li>
+<li>函数
+<ol>
+<li>每个Local转化为函数开头的一个alloca。</li>
+<li><a href="https://webassembly.github.io/spec/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-call-indirect-x-y">非直接跳转 callind</a> </li>
+</ol>
+</li>
+</ol>
+<h2 id="指令栈控制流的处理"><a class="header" href="#指令栈控制流的处理">指令、栈、控制流的处理</a></h2>
+<p>参考WAVM，见顶部现有工具一节。参考栈验证逻辑。能保留的最好直接解码为SSA。这里的block直接考虑<a href="https://github.com/WebAssembly/multi-value">Multi Value Extension</a>，防止以后架构需要重构，但是函数返回多个值的先不支持。</p>
+<ul>
+<li>每个栈上元素对应一个SSA的Value。某种形式上可以维护一个Value栈（作为局部变量，不需要作为Context）。</li>
+<li>控制流跳转维护一个block的嵌套栈，保存br时跳转的目标。关键是如何在找到跳转目标的同时，把栈弹到对应的值。</li>
+<li>处理Block的时候，这里用递归和用栈都可以。选择用实现起来更简单的递归。aWsm好像是递归的写法，WAVM好像是用栈，复杂一点。</li>
+<li>loop和block的区别在于，给phi赋值，然后用Phi替换栈上值的地方不同。一个是基本块开头，一个是基本块结尾</li>
+<li>函数体大致也算一个Block块，但是labelType写Func。</li>
+</ul>
+<h3 id="控制流指令的处理与ssa生成"><a class="header" href="#控制流指令的处理与ssa生成">控制流指令的处理，与SSA生成</a></h3>
+<p>visitFunction：</p>
+<ol>
+<li>
+<p>创建allocaBlock，分配参数和local空间</p>
+</li>
+<li>
+<p>创建alloca -&gt; entry边，创建return块备用</p>
+</li>
+<li>
+<p>调用visitBlock函数（visitBlock函数必须把所有的结束跳转都引导到exit块）</p>
+</li>
+<li>
+<p>创建结尾的return指令。（visitBlock内部处理的时候只有br，return也看作特殊的br，函数只允许在结尾返回）</p>
+</li>
+</ol>
+<p>递归的基本块生成算法visitBlock：
+<strong>要求与保证</strong>：</p>
+<ol>
+<li>要求算法的整体表现类似于给定类型的单个指令</li>
+<li>要求调用者提供的entry和exit中，需要创建Phi的那个为空基本块（但是可以有Phi指令），便于创建Phi节点。</li>
+<li>保证结束的时候跳转到exit块。不会有其他控制流。</li>
+</ol>
+<p>注：</p>
+<ol>
+<li>没必要再用一个额外的stack防止访问更深元素，因为调用过了wabt的validate</li>
+</ol>
+<p>调用visitBlock前，根据block类型</p>
+<ol>
+<li>Block类型：创建新的exit块，替换原来exit，处理完毕后新的exit作为entry继续生成指令，旧的exit还是exit</li>
+<li>Loop类型：创建新的entry块，替换原来entry。loop结束也一样。</li>
+</ol>
+<p>visitBlock：</p>
+<ol>
+<li>先创建好跳转目标，Phi节点，用这些设置好BreakoutTarget结构体，压入栈中：
+<ol>
+<li>根据是loop还是block类型的块创建Phi。如果是Loop，直接把当前栈上的值弹出来，作为phi的operand，然后把phi push回去，替换。如果是block，先创建空的Phi。（等后面结束的时候再从栈上加operand。</li>
+<li>保存当前value栈的情况。</li>
+</ol>
+</li>
+<li>依次遍历每个指令生成。
+<ol>
+<li>普通的指令根据指令语义，从value stack中取值，</li>
+<li>如果遇到了跳转指令：
+<ol>
+<li>如果跳转的目标是普通基本块，则从栈上取值加入到对应的Phi中，</li>
+</ol>
+</li>
+</ol>
+</li>
+<li>块结束的时候，不需要主动跳转到exit，因为exit不一定是当前block的exit，因为在Loop的情况下，结尾没有额外创建基本块，所以不需要特殊处理。Block结尾的跳转交给外面处理。</li>
+<li>Block结束时，在end前，处理隐含跳转到结束块。由于类型检查，不会有多余的值，不需要unwinding弹出栈。</li>
+</ol>
+<p>控制流指令的处理：</p>
+<ol>
+<li>br指令，其后是stack可以是任何类型。为了处理这种情况，我们直接增加unreachable标识，无视这些指令。
+<ul>
+<li>对于Block</li>
+<li>对于Loop，由于结尾是从Loop离开的唯一方式。如果有br指令封锁了结尾，则不可能从这个loop结尾离开了。此时直接保留UnReachableState</li>
+</ul>
+</li>
+<li>block，loop分别对应在结尾，开头，增加一个label。注意到block只需要为return的值创建Phi，loop需要对参数创建Phi。</li>
+<li>if对应一些label和br_if，br代表直接跳转，br_if同理，根据语义找到对应的跳转目标，生成条件跳转即可。</li>
+<li>br_table看似比较麻烦，看了下和LLVM的switch语句对应得非常好啊。也是根据不同的值跳转到不同的边。</li>
+</ol>
+<p>最开始的时候先写一个类型检查，打印出每个指令后当前栈上的类型情况的代码，然后再加生成相关的东西。</p>
+<p>wabt那边代表Block的结构体看wabt的<code>src\ir.h</code> 383行<code>struct Block</code>这边。</p>
+<ul>
+<li><code>std::string label</code> 直接放到BasicBlock的名字里面</li>
+<li><code>BlockDeclaration decl</code> 和<code>FuncDeclaration</code>是一个类型</li>
+<li><code>ExprList exprs</code></li>
+<li><code>Location end_loc</code> 代表输入文件里的位置，暂时不管，除非后面想加debug信息</li>
+</ul>
+<p>多个参数和返回值的时候，顺序：</p>
+<ul>
+<li>函数参数逆序遍历（pop），同时从栈上pop出来。</li>
+<li>函数返回值顺序遍历，同时push到栈上。</li>
+</ul>
+<p>查OpCode看<code>wabt/src/opcode.def</code>。Opcode和ExprType之间的关系看<code>src\lexer-keywords.txt</code>，或者看<code>src\binary-reader.cc</code>里面对应的Opcode创建了什么Expr，<del>或者看<code>src\binary-reader-ir.cc</code>里找对应的指令到底创建了哪种Expr类。</del></p>
+<p>这里面的类继承关系看 <code>src\ir.h</code>。其实就是搞了一个ExprType，然后在onXXX指令的函数处直接创建了这个类型的Expr，导致opcode和expr之间没有明确的对应关系。</p>
+<h2 id="运算指令的处理"><a class="header" href="#运算指令的处理">运算指令的处理</a></h2>
+<ul>
+<li>简单的可以对着这个找指令https://llvm.org/docs/LangRef.html。</li>
+<li>可以找llvm intrinsic，例如fabs指令使用了对应的<code>Intrinsic::fabs</code></li>
+<li>更复杂的可以自己手写llvm函数，然后直接调自己写的函数，之后看看要不要内联什么的</li>
+</ul>
+<p>资料：</p>
+<ul>
+<li>WAMR里，intrinsic的实现 https://github.com/bytecodealliance/wasm-micro-runtime/blob/d309091706f2fbfc3ccca2907226f57db4d612f3/core/iwasm/aot/aot_intrinsic.c</li>
+<li>WAVM里，intrinsic的实现（使用irBuilder） https://github.com/WAVM/WAVM/blob/79c3aa29366615d9b1593cd527e5b4b94cc6072a/Lib/LLVMJIT/EmitNumeric.cpp</li>
+</ul>
+<h3 id="比较---浮点数"><a class="header" href="#比较---浮点数">比较 - 浮点数</a></h3>
+<p>参照https://www.w3.org/TR/wasm-core-1/#-hrefop-feqmathrmfeq_n-z_1-z_2 和https://llvm.org/docs/LangRef.html#id309 对比语义</p>
+<ol>
+<li>feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用<code>fcmp oeq</code>。</li>
+<li>而fne，有nan就返回1，所以要用<code>fcmp une</code></li>
+</ol>
+<h3 id="链接"><a class="header" href="#链接">链接</a></h3>
+<ul>
+<li>WebAssembly Object File Linking： https://github.com/WebAssembly/tool-conventions/blob/main/Linking.md</li>
+<li>Adventures in WebAssembly object files and linking： https://mike.zwobble.org/2021/04/adventures-in-webassembly-object-files-and-linking/</li>
+</ul>
+<p>相关section的解析可以看<code>src\binary-reader.cc</code>里的<code>BinaryReader::ReadCustomSection</code>函数。</p>
+<h2 id="测试"><a class="header" href="#测试">测试</a></h2>
+<ol>
+<li>基于sysY语言的测试用例，自动编译为wasm和wat格式，反编译到IR后和sylib.c得到sylib.ll一起输入lli执行。验证输出的正确性。
+<ul>
+<li>使用-c编译为未链接的object ？
+<ul>
+<li>缺点1：内存是导入的，大小不确定</li>
+<li>缺点2：需要处理额外的。</li>
+</ul>
+</li>
+<li>编译为完整模块，加上<code>-g -O0 --no-standard-libraries -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined</code>等选项。全部导出可以不用特殊处理main函数的导出，allow undefined好像会让没定义的都变成导入。
+<ul>
+<li>目前暂时的方案。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<h2 id="其他"><a class="header" href="#其他">其他</a></h2>
+<h3 id="wasm中的函数指针调用复习"><a class="header" href="#wasm中的函数指针调用复习">Wasm中的函数指针调用（复习）</a></h3>
+<p>在二进制模块中有id为4的table section。里面有一系列的table类型，初始化则由element section负责。table类型有两部分，reftype和limit。<a href="https://webassembly.github.io/spec/core/binary/types.html#limits">limit</a>应该是类似数组大小的东西，但是同时包含了上限和下限。</p>
+<p>reftype其实就是个enum，表示是不透明的external类型还是function类型。即，光是table section里，有用的信息只有定义了index，给每个index处的table标明了上下限。</p>
+<p>reference类型是和其他类型独立的。即真的无法观测到底是怎么表示的，只能被存在table里。即和程序call指令里面用的index不同。其实我们只要管func ref，external ref一般指不是函数的情况。如果有的话直接那个吧。</p>
+<p>接下来看elem section。它可以是passive的，即等着被table.init指令使用，用来初始化某个table。或者是active的，直接初始化某个table。最后可以是declarative的，说是前向声明。（TODO，不是特别理解）</p>
+<p>现在直接翻标准是新release的2.0标准了。我们暂时先支持1.0标准里面流行的active类型的elem。（wabt现在如果文件头里写version为2会报错。（这个version是在整个二进制模块的header处定义的。）但是依然支持这一部分的新格式，可能是以支持相关拓展的形式实现的）</p>
+<p>首先介绍<a href="https://webassembly.github.io/spec/core/binary/modules.html#element-section">标志位</a>：</p>
+<ul>
+<li>bit0: passive 或 active 的标志位。</li>
+<li>bit1: 分两种情况
+<ul>
+<li>active: 存在额外的table index。（否则默认是0） </li>
+<li>标志位表示是passive或者declarative。</li>
+</ul>
+</li>
+<li>bit2: bit 2 indicates the use of element type and element expressions instead of element kind and element indices.</li>
+</ul>
+<p>elem section由三部分组成：</p>
+<ol>
+<li>table index, 初始化哪个table。目前因为只有一个table，所以必须是0。</li>
+<li>offset, 常量表达式，即一些指令。例如：<code>41 01 0b</code>解码为<code>i32.const 1; end;</code>。</li>
+<li>vec(func ind) 一系列函数下标，表示要初始化成这些。</li>
+</ol>
+<p><a href="https://www.wasm.com.cn/docs/future-features/">Features to add after the MVP - WebAssembly 中文网|Wasm 中文文档</a> https://www.w3.org/TR/wasm-core-1/#element-segments%E2%91%A0 （可以在这个页面搜索<code>at most one</code>） 这里提到了，MVP标准中wasm最多有一块内存，最多有一个table。</p>
+<p>对应到LLVM IR的关键是，相同的语言特性会怎么在LLVM IR上实现/怎样的LLVM IR会编译到这样的wasm。LLVM里只有Call指令，但是参数是一个函数地址的value。目前看来可以搞一个函数指针数组，对应初始化后的table。然后将callind翻译为从函数指针中取，然后再call。</p>
+<p>至于非直接跳转，由于和llvm的switch完美对应，就非常简单。br_table指令会带有个table，让index从1到table的大小遍历，根据当前栈上的值是否等于当前index，从table里面取出要跳转的层数，找到对应的基本块，为switch增加跳转目标即可。</p>
+<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
+<p>最好能实现单个函数的反编译与混淆，即转换回Wasm时最好能保证其他部分不变。。。如果使用LLVM自己的wasm后端好像有点复杂</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../docs/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="../docs/optimizers.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../docs/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="../docs/optimizers.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>
