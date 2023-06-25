@@ -145,6 +145,7 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="notdec-webassembly-decompiler-and-static-analysis-framework"><a class="header" href="#notdec-webassembly-decompiler-and-static-analysis-framework">NotDec: WebAssembly Decompiler and Static Analysis Framework</a></h1>
+<p><a href="https://notdec.github.io/NotDec/">Website</a></p>
 <p><a href="#%E4%B8%AD%E6%96%87">中文</a></p>
 <p>NotDec is</p>
 <ol>
@@ -162,7 +163,15 @@
 </li>
 </ol>
 <h1 id="中文"><a class="header" href="#中文">中文</a></h1>
-<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
+<h2 id="从零实现反编译器"><a class="header" href="#从零实现反编译器">从“零”实现反编译器</a></h2>
+<p>为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。侧重于前中端（转IR与IR的优化。）</p>
+<p>怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。</p>
+<h3 id="计划产出"><a class="header" href="#计划产出">计划产出：</a></h3>
+<ol>
+<li>现有反编译技术的详细调研总结，反编译器内部原理的详细调研文档。</li>
+<li>一个基于LLVM的WebAssembly反编译器。</li>
+</ol>
+<p><strong>反编译器自身</strong></p>
 <ol>
 <li>将wasm lift到LLVM IR
 <ul>
@@ -170,19 +179,8 @@
 <li>支持DWARF调试信息，从而映射回原wat，wasm</li>
 </ul>
 </li>
-<li>设计一个映射，将lift之后的IR反向转回wasm</li>
-</ol>
-<h2 id="反编译器"><a class="header" href="#反编译器">反编译器</a></h2>
-<p>目标：a webassembly and ethereum VM bytecode decompiler. </p>
-<p>侧重于前中端（转IR与IR的优化。）</p>
-<h3 id="从零实现反编译器"><a class="header" href="#从零实现反编译器">从“零”实现反编译器</a></h3>
-<p>为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。</p>
-<p>怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。</p>
-<p>计划产出：</p>
-<ol>
-<li>反编译器自身：能够对“内存”中的变量也构建SSA进行优化。</li>
-<li>最终的结果能够很好地重编译。</li>
-<li>反编译器实现过程尽量记录完善的文档，未来考虑整理扩写为系列教程。</li>
+<li>设计一个映射，将lift之后的IR反向转回wasm。使得最终的结果能够很好地重编译。</li>
+<li>能够对“内存”中的变量也构建SSA进行优化。</li>
 </ol>
 <h3 id="不知道接下来怎么办资料收集"><a class="header" href="#不知道接下来怎么办资料收集">不知道接下来怎么办？（资料收集）</a></h3>
 <p>学习阶段：</p>
@@ -317,11 +315,6 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 <h4 id="代码调试"><a class="header" href="#代码调试">代码调试</a></h4>
 <p>直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。</p>
 <p>代码补全使用clangd插件。根据提示禁用Intellisense，然后确认下载一个clangd。</p>
-<h3 id="提交代码前"><a class="header" href="#提交代码前">提交代码前</a></h3>
-<ol>
-<li>写好commit message，简要概况所有的修改。</li>
-<li>检查添加的代码的注释和文档是否充足。</li>
-</ol>
 <h3 id="其他"><a class="header" href="#其他">其他</a></h3>
 <p>各种杂七杂八的事情随意地列在这里</p>
 <ol>
