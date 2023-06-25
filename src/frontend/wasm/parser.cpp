@@ -18,7 +18,7 @@ std::unique_ptr<Context> parse_wat(BaseContext& llvmCtx, std::string file_name) 
     std::vector<uint8_t> file_data;
     Result result = ReadFile(file_name, &file_data);
     std::unique_ptr<WastLexer> lexer = WastLexer::CreateBufferLexer(
-      file_name, file_data.data(), file_data.size(),nullptr);
+      file_name, file_data.data(), file_data.size(), nullptr);
 
     if (!Succeeded(result)) {
         std::cerr << "Read wat file failed." << std::endl;

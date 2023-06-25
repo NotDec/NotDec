@@ -462,12 +462,14 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     case wabt::Opcode::I32Clz:
     case wabt::Opcode::I64Clz:
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctlz, {p1->getType(),Type::getInt1Ty(llvmContext)});
-        ret = irBuilder.CreateCall(f, {p1,ConstantInt::get(Type::getInt1Ty(llvmContext),false)});
+        // is_zero_poison = false
+        ret = irBuilder.CreateCall(f, {p1, ConstantInt::get(Type::getInt1Ty(llvmContext),false)});
         break;
     case wabt::Opcode::I32Ctz:
     case wabt::Opcode::I64Ctz:
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::cttz, {p1->getType(),Type::getInt1Ty(llvmContext)});
-        ret = irBuilder.CreateCall(f, {p1,ConstantInt::get(Type::getInt1Ty(llvmContext),false)});
+        // is_zero_poison = false
+        ret = irBuilder.CreateCall(f, {p1, ConstantInt::get(Type::getInt1Ty(llvmContext),false)});
         break;
     
     case wabt::Opcode::F32Ceil:
@@ -635,7 +637,7 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     case wabt::Opcode::I64And:
         ret = irBuilder.CreateAnd(p2, p1);
         break;
-    case wabt::Opcode::I32Or:
+    case wabt::Opcode::I32Or:   
     case wabt::Opcode::I64Or:
         ret = irBuilder.CreateOr(p2, p1);
         break;
@@ -697,11 +699,11 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     case wabt::Opcode::V128Xor:
         ret = irBuilder.CreateXor(p2, p1);
         break;
-    case wabt::Opcode::I8X16Swizzle:
-        //TODO
-        f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::aarch64_neon_tbl1, {p1->getType(),p1->getType()}); 
-        ret = irBuilder.CreateCall(f, {p2, p1});
-        break;
+    // case wabt::Opcode::I8X16Swizzle:
+    //     //TODO
+    //     f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::aarch64_neon_tbl1, {p1->getType(),p1->getType()}); 
+    //     ret = irBuilder.CreateCall(f, {p2, p1});
+    //     break;
 
     #define EMIT_SIMD_BINARY_OP(llvmType, emitCode)                 \
     {                                                               \

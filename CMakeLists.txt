@@ -132,7 +132,7 @@ if (NOTDEC_ENABLE_WASM)
 		BUILD_BYPRODUCTS "${CMAKE_BINARY_DIR}/wabt-build/libwabt.a"
 	)
 	include_directories(${CMAKE_BINARY_DIR}/wabt/include)
-	include_directories(${CMAKE_BINARY_DIR}/wabt-build)
+	include_directories(${CMAKE_BINARY_DIR}/wabt-build/include)
 	add_library(wabt::wabt SHARED IMPORTED)
 	set_property(TARGET wabt::wabt PROPERTY IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/wabt-build/libwabt.a")
 	# 定义相关宏，方便条件编译
