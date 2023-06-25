@@ -610,5 +610,4 @@ llvm::Constant* convertZeroValue(llvm::LLVMContext& llvmContext, const wabt::Typ
             std::abort();
     }
 }
-
 }

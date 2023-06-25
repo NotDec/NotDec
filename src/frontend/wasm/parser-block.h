@@ -26,6 +26,42 @@ struct BreakoutTarget {
     BreakoutTarget(llvm::BasicBlock& target, std::deque<llvm::PHINode*> phis, std::size_t pos, wabt::BlockDeclaration& sig, wabt::LabelType lty)
         : target(target), phis(phis), pos(pos), sig(sig), lty(lty) {}
 };
+struct extendType
+{
+	llvm::Type* i8Type;
+	llvm::Type* i16Type;
+	llvm::Type* i32Type;
+	llvm::Type* i64Type;
+	llvm::Type* f32Type;
+	llvm::Type* f64Type;
+	llvm::PointerType* i8PtrType;
+	
+	llvm::FixedVectorType* i8x8Type;
+	llvm::FixedVectorType* i16x4Type;
+	llvm::FixedVectorType* i32x2Type;
+	llvm::FixedVectorType* i64x1Type;
+	llvm::FixedVectorType* f32x2Type;
+	llvm::FixedVectorType* f64x1Type;
+	llvm::FixedVectorType* i8x16Type;
+	llvm::FixedVectorType* i16x8Type;
+	llvm::FixedVectorType* i32x4Type;
+	llvm::FixedVectorType* i64x2Type;
+	llvm::FixedVectorType* f32x4Type;
+	llvm::FixedVectorType* f64x2Type;
+	llvm::FixedVectorType* i8x32Type;
+	llvm::FixedVectorType* i16x16Type;
+	llvm::FixedVectorType* i32x8Type;
+	llvm::FixedVectorType* i64x4Type;
+	llvm::FixedVectorType* i8x48Type;
+	llvm::FixedVectorType* i16x24Type;
+	llvm::FixedVectorType* i32x12Type;
+	llvm::FixedVectorType* i64x6Type;
+	llvm::FixedVectorType* i8x64Type;
+	llvm::FixedVectorType* i16x32Type;
+	llvm::FixedVectorType* i32x16Type;
+	llvm::FixedVectorType* i64x8Type;
+	extendType(llvm::LLVMContext& llvmContext);
+};
 
 struct BlockContext
 {
@@ -39,10 +75,11 @@ struct BlockContext
     std::vector<llvm::Value*> stack;
     std::vector<wabt::Type> type_stack;
     int log_level;
+    extendType type;
 
     // rvalue reference here, use it by std::move(locals): BlockContext bctx(*function, irBuilder, std::move(locals));
     BlockContext(Context& ctx, llvm::Function& f, llvm::IRBuilder<>& b, std::vector<llvm::Value*>&& locals)
-        : ctx(ctx), llvmContext(ctx.llvmContext), function(f), irBuilder(b), locals(locals), log_level(ctx.log_level) {}
+        : ctx(ctx), llvmContext(ctx.llvmContext), function(f), irBuilder(b), locals(locals), log_level(ctx.log_level), type(ctx.llvmContext) {}
 
     void visitBlock(wabt::LabelType lty, llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::BlockDeclaration& decl, wabt::ExprList& exprs);
     void visitControlInsts(llvm::BasicBlock* entry, llvm::BasicBlock* exit, wabt::ExprList& exprs);
@@ -52,6 +89,7 @@ struct BlockContext
     llvm::Instruction* visitBr(wabt::Expr* expr, std::size_t ind, llvm::Value* cond, llvm::BasicBlock* nextBlock);
     void visitUnaryInst(wabt::UnaryExpr* expr);
     void visitBinaryInst(wabt::BinaryExpr* expr);
+    void visitTernaryInst(wabt::TernaryExpr* expr);
     void visitCompareExpr(wabt::CompareExpr* expr);
     void visitConvertExpr(wabt::ConvertExpr* expr);
     void visitConstInst(wabt::ConstExpr* expr);
@@ -68,6 +106,9 @@ struct BlockContext
     void visitLocalTee(wabt::LocalTeeExpr* expr);
     void visitGlobalGet(wabt::GlobalGetExpr* expr);
     void visitGlobalSet(wabt::GlobalSetExpr* expr);
+
+    void visitSimdLaneOp(wabt::SimdLaneOpExpr* expr);
+    llvm::Value* createExtractLane(llvm::Value* vector,llvm::Type* ty,uint64_t imm ,short sign);
 
     llvm::Value* popStack() {
         assert(stack.size() >= 1);

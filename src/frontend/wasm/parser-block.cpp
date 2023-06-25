@@ -393,4 +393,45 @@ const char* labelTypeToString(wabt::LabelType lty) {
     }
 }
 
+extendType::extendType(llvm::LLVMContext& llvmContext) {
+    i8Type = llvm::Type::getInt8Ty(llvmContext);
+	i16Type = llvm::Type::getInt16Ty(llvmContext);
+	i32Type = llvm::Type::getInt32Ty(llvmContext);
+	i64Type = llvm::Type::getInt64Ty(llvmContext);
+	f32Type = llvm::Type::getFloatTy(llvmContext);
+	f64Type = llvm::Type::getDoubleTy(llvmContext);
+	i8PtrType = i8Type->getPointerTo();
+
+
+	i8x8Type = llvm::FixedVectorType::get(i8Type, 8);
+	i16x4Type = llvm::FixedVectorType::get(i16Type, 4);
+	i32x2Type = llvm::FixedVectorType::get(i32Type, 2);
+	i64x1Type = llvm::FixedVectorType::get(i64Type, 1);
+	f32x2Type = llvm::FixedVectorType::get(f32Type, 2);
+	f64x1Type = llvm::FixedVectorType::get(f64Type, 1);
+
+	i8x16Type = llvm::FixedVectorType::get(i8Type, 16);
+	i16x8Type = llvm::FixedVectorType::get(i16Type, 8);
+	i32x4Type = llvm::FixedVectorType::get(i32Type, 4);
+	i64x2Type = llvm::FixedVectorType::get(i64Type, 2);
+	f32x4Type = llvm::FixedVectorType::get(f32Type, 4);
+	f64x2Type = llvm::FixedVectorType::get(f64Type, 2);
+
+	i8x32Type = llvm::FixedVectorType::get(i8Type, 32);
+	i16x16Type = llvm::FixedVectorType::get(i16Type, 16);
+	i32x8Type = llvm::FixedVectorType::get(i32Type, 8);
+	i64x4Type = llvm::FixedVectorType::get(i64Type, 4);
+
+	i8x48Type = llvm::FixedVectorType::get(i8Type, 48);
+	i16x24Type = llvm::FixedVectorType::get(i16Type, 24);
+	i32x12Type = llvm::FixedVectorType::get(i32Type, 12);
+	i64x6Type = llvm::FixedVectorType::get(i64Type, 6);
+
+	i8x64Type = llvm::FixedVectorType::get(i8Type, 64);
+	i16x32Type = llvm::FixedVectorType::get(i16Type, 32);
+	i32x16Type = llvm::FixedVectorType::get(i32Type, 16);
+	i64x8Type = llvm::FixedVectorType::get(i64Type, 8);
+
+}
+
 }
