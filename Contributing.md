@@ -1,7 +1,12 @@
 
 
+### 提交代码前
 
-## push前多使用 Git Rebase
+1. 写好commit message，简要概况所有的修改。
+2. 检查添加的代码的注释和文档是否充足。
+
+
+### push前多使用 Git Rebase
 
 在push前尽量rebase到最新的分支。
 

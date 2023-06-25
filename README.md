@@ -1,5 +1,7 @@
 # NotDec: WebAssembly Decompiler and Static Analysis Framework
 
+[Website](https://notdec.github.io/NotDec/)
+
 [中文](#中文)
 
 NotDec is
@@ -12,31 +14,24 @@ NotDec is
 
 # 中文
 
-## TODO
+## 从“零”实现反编译器
+
+为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。侧重于前中端（转IR与IR的优化。）
+
+怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。
+
+### 计划产出：
+
+1. 现有反编译技术的详细调研总结，反编译器内部原理的详细调研文档。
+1. 一个基于LLVM的WebAssembly反编译器。
+
+**反编译器自身**
 
 1. 将wasm lift到LLVM IR
    - 支持将wasm内存直接映射到某个基地址，从而直接支持运行，以及memory grow相关指令。
    - 支持DWARF调试信息，从而映射回原wat，wasm
-1. 设计一个映射，将lift之后的IR反向转回wasm
-
-
-## 反编译器
-
-目标：a webassembly and ethereum VM bytecode decompiler. 
-
-侧重于前中端（转IR与IR的优化。）
-
-### 从“零”实现反编译器
-
-为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。
-
-怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。
-
-计划产出：
-
-1. 反编译器自身：能够对“内存”中的变量也构建SSA进行优化。
-2. 最终的结果能够很好地重编译。
-3. 反编译器实现过程尽量记录完善的文档，未来考虑整理扩写为系列教程。
+1. 设计一个映射，将lift之后的IR反向转回wasm。使得最终的结果能够很好地重编译。
+1. 能够对“内存”中的变量也构建SSA进行优化。
 
 ### 不知道接下来怎么办？（资料收集）
 
@@ -157,12 +152,6 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。
 
 代码补全使用clangd插件。根据提示禁用Intellisense，然后确认下载一个clangd。
-
-### 提交代码前
-
-1. 写好commit message，简要概况所有的修改。
-2. 检查添加的代码的注释和文档是否充足。
-
 
 
 ### 其他
