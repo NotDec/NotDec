@@ -145,8 +145,7 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="notdec-webassembly-decompiler-and-static-analysis-framework"><a class="header" href="#notdec-webassembly-decompiler-and-static-analysis-framework">NotDec: WebAssembly Decompiler and Static Analysis Framework</a></h1>
-<p><a href="https://notdec.github.io/NotDec/">Website</a></p>
+                        <h1 id="notdec-a-webassembly-decompiler-for-static-analysis"><a class="header" href="#notdec-a-webassembly-decompiler-for-static-analysis">NotDec: A WebAssembly Decompiler for Static Analysis</a></h1>
 <p><a href="index.html#%E4%B8%AD%E6%96%87">中文</a></p>
 <p>NotDec is</p>
 <ol>
@@ -164,16 +163,7 @@
 </li>
 </ol>
 <h1 id="中文"><a class="header" href="#中文">中文</a></h1>
-<p><a href="https://notdec.github.io/NotDec/">文档站</a></p>
-<h2 id="从零实现反编译器"><a class="header" href="#从零实现反编译器">从“零”实现反编译器</a></h2>
-<p>为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。侧重于前中端（转IR与IR的优化。）</p>
-<p>怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。</p>
-<h3 id="计划产出"><a class="header" href="#计划产出">计划产出：</a></h3>
-<ol>
-<li>现有反编译技术的详细调研总结，反编译器内部原理的详细调研文档。</li>
-<li>一个基于LLVM的WebAssembly反编译器。</li>
-</ol>
-<p><strong>反编译器自身</strong></p>
+<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
 <ol>
 <li>将wasm lift到LLVM IR
 <ul>
@@ -181,8 +171,18 @@
 <li>支持DWARF调试信息，从而映射回原wat，wasm</li>
 </ul>
 </li>
-<li>设计一个映射，将lift之后的IR反向转回wasm。使得最终的结果能够很好地重编译。</li>
-<li>能够对“内存”中的变量也构建SSA进行优化。</li>
+<li>设计一个映射，将lift之后的IR反向转回wasm</li>
+</ol>
+<h2 id="反编译器"><a class="header" href="#反编译器">反编译器</a></h2>
+<p>侧重于前中端（转IR与IR的优化。）</p>
+<h3 id="从零实现反编译器"><a class="header" href="#从零实现反编译器">从“零”实现反编译器</a></h3>
+<p>为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。</p>
+<p>怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。</p>
+<p>计划产出：</p>
+<ol>
+<li>反编译器自身：能够对“内存”中的变量也构建SSA进行优化。</li>
+<li>最终的结果能够很好地重编译。</li>
+<li>反编译器实现过程尽量记录完善的文档，未来考虑整理扩写为系列教程。</li>
 </ol>
 <h3 id="不知道接下来怎么办资料收集"><a class="header" href="#不知道接下来怎么办资料收集">不知道接下来怎么办？（资料收集）</a></h3>
 <p>学习阶段：</p>
@@ -317,6 +317,11 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 <h4 id="代码调试"><a class="header" href="#代码调试">代码调试</a></h4>
 <p>直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。</p>
 <p>代码补全使用clangd插件。根据提示禁用Intellisense，然后确认下载一个clangd。</p>
+<h3 id="提交代码前"><a class="header" href="#提交代码前">提交代码前</a></h3>
+<ol>
+<li>写好commit message，简要概况所有的修改。</li>
+<li>检查添加的代码的注释和文档是否充足。</li>
+</ol>
 <h3 id="其他"><a class="header" href="#其他">其他</a></h3>
 <p>各种杂七杂八的事情随意地列在这里</p>
 <ol>
@@ -588,7 +593,7 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 <p><a href="https://www.wasm.com.cn/docs/future-features/">Features to add after the MVP - WebAssembly 中文网|Wasm 中文文档</a> https://www.w3.org/TR/wasm-core-1/#element-segments%E2%91%A0 （可以在这个页面搜索<code>at most one</code>） 这里提到了，MVP标准中wasm最多有一块内存，最多有一个table。</p>
 <p>对应到LLVM IR的关键是，相同的语言特性会怎么在LLVM IR上实现/怎样的LLVM IR会编译到这样的wasm。LLVM里只有Call指令，但是参数是一个函数地址的value。目前看来可以搞一个函数指针数组，对应初始化后的table。然后将callind翻译为从函数指针中取，然后再call。</p>
 <p>至于非直接跳转，由于和llvm的switch完美对应，就非常简单。br_table指令会带有个table，让index从1到table的大小遍历，根据当前栈上的值是否等于当前index，从table里面取出要跳转的层数，找到对应的基本块，为switch增加跳转目标即可。</p>
-<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
+<h2 id="todo-1"><a class="header" href="#todo-1">TODO</a></h2>
 <p>最好能实现单个函数的反编译与混淆，即转换回Wasm时最好能保证其他部分不变。。。如果使用LLVM自己的wasm后端好像有点复杂</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="docs-of-optimizers"><a class="header" href="#docs-of-optimizers">Docs of optimizers</a></h1>
 <p>项目使用LLVM Pass框架来进行反编译中的中间代码优化。</p>
@@ -640,9 +645,6 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 如果存进去的值也是栈地址，那么就把对应偏移的放在另一个栈相关集合中。</p>
 <p>TODO:</p>
 <p>1.需要实现过程间分析，如果call指令的参数和返回值都是栈地址，需要把它们放到栈相关集合中。</p>
-<h2 id="retype"><a class="header" href="#retype">retype</a></h2>
-<p>类型恢复</p>
-<p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="ghidra"><a class="header" href="#ghidra">Ghidra</a></h1>
 <h2 id="资源"><a class="header" href="#资源">资源</a></h2>
 <p>其他资源列表：</p>
@@ -876,28 +878,45 @@ trace list
 <li>retdec-llvmir2hll：</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="retypd"><a class="header" href="#retypd">retypd</a></h1>
+<p><a href="https://github.com/GrammaTech/retypd">retypd</a> 是一个高级的反编译算法，有一篇<a href="https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf">论文</a></p>
+<p>资源：</p>
+<ul>
+<li>优先看<a href="https://github.com/GrammaTech/retypd/blob/master/reference/type-recovery.rst">这个介绍</a>。</li>
+<li>这个<a href="https://github.com/GrammaTech/retypd/blob/master/reference/presentation_slides.pdf">PPT</a>比论文容易懂很多</li>
+</ul>
 <h4 id="retypdghidra-配置"><a class="header" href="#retypdghidra-配置">retypd+ghidra 配置</a></h4>
-<p>1.安装retypd </p>
+<p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
+<ol>
+<li>安装retypd </li>
+</ol>
 <pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd
 cd retypd
 pip install .
 </code></pre>
-<p>2.编译<code>GhidraRetypd</code>  安装ghidra_retypd_provider</p>
+<ol start="2">
+<li>编译<code>GhidraRetypd</code>  安装ghidra_retypd_provider</li>
+</ol>
 <pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd-ghidra-plugin
 cd retypd-ghidra-plugin
 make
 pip install .
 </code></pre>
-<p>3.修改 GhidraRetypd.zip中的extension.properties，添加</p>
+<ol start="3">
+<li>修改 GhidraRetypd.zip中的extension.properties，添加</li>
+</ol>
 <pre><code class="language-Python">version=10.2.3
 </code></pre>
-<p>4.安装插件</p>
+<ol start="4">
+<li>
+<p>安装插件</p>
 <ol>
 <li>打开 Ghidra 软件，点击 &quot;File&quot; 菜单，选择 &quot;Install Extensions&quot; 选项。</li>
 <li>在弹出的 &quot;Install Extensions&quot; 窗口中，点击 &quot;Browse&quot; 按钮选择你要安装的扩展程序。</li>
 <li>选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 &quot;Open&quot; 按钮。</li>
 <li>点击 &quot;OK&quot; 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。</li>
 <li>安装完成后，重启 Ghidra 软件。</li>
+</ol>
+</li>
 </ol>
 <p>为Ghidra 10.2.3 版本成功编译的retypd<a href="GhidraRetypd.zip">下载</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="other-notes"><a class="header" href="#other-notes">Other Notes</a></h1>

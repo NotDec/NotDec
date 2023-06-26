@@ -145,28 +145,45 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="retypd"><a class="header" href="#retypd">retypd</a></h1>
+<p><a href="https://github.com/GrammaTech/retypd">retypd</a> 是一个高级的反编译算法，有一篇<a href="https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf">论文</a></p>
+<p>资源：</p>
+<ul>
+<li>优先看<a href="https://github.com/GrammaTech/retypd/blob/master/reference/type-recovery.rst">这个介绍</a>。</li>
+<li>这个<a href="https://github.com/GrammaTech/retypd/blob/master/reference/presentation_slides.pdf">PPT</a>比论文容易懂很多</li>
+</ul>
 <h4 id="retypdghidra-配置"><a class="header" href="#retypdghidra-配置">retypd+ghidra 配置</a></h4>
-<p>1.安装retypd </p>
+<p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
+<ol>
+<li>安装retypd </li>
+</ol>
 <pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd
 cd retypd
 pip install .
 </code></pre>
-<p>2.编译<code>GhidraRetypd</code>  安装ghidra_retypd_provider</p>
+<ol start="2">
+<li>编译<code>GhidraRetypd</code>  安装ghidra_retypd_provider</li>
+</ol>
 <pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd-ghidra-plugin
 cd retypd-ghidra-plugin
 make
 pip install .
 </code></pre>
-<p>3.修改 GhidraRetypd.zip中的extension.properties，添加</p>
+<ol start="3">
+<li>修改 GhidraRetypd.zip中的extension.properties，添加</li>
+</ol>
 <pre><code class="language-Python">version=10.2.3
 </code></pre>
-<p>4.安装插件</p>
+<ol start="4">
+<li>
+<p>安装插件</p>
 <ol>
 <li>打开 Ghidra 软件，点击 &quot;File&quot; 菜单，选择 &quot;Install Extensions&quot; 选项。</li>
 <li>在弹出的 &quot;Install Extensions&quot; 窗口中，点击 &quot;Browse&quot; 按钮选择你要安装的扩展程序。</li>
 <li>选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 &quot;Open&quot; 按钮。</li>
 <li>点击 &quot;OK&quot; 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。</li>
 <li>安装完成后，重启 Ghidra 软件。</li>
+</ol>
+</li>
 </ol>
 <p>为Ghidra 10.2.3 版本成功编译的retypd<a href="GhidraRetypd.zip">下载</a></p>
 
