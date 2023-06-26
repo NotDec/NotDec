@@ -459,6 +459,9 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctpop, p1->getType());
         ret = irBuilder.CreateCall(f, p1);
         break;
+    case wabt::Opcode::I8X16Popcnt:
+        EMIT_SIMD_UNARY_OP(type.i8x16Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctpop, type.i8x16Type), v));
+        break;       
     case wabt::Opcode::I32Clz:
     case wabt::Opcode::I64Clz:
         f = Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::ctlz, {p1->getType(),Type::getInt1Ty(llvmContext)});
@@ -536,7 +539,34 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         EMIT_SIMD_UNARY_OP(type.f64x2Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::sqrt,type.f64x2Type), v));
         break;    
 
-    /* SIMD */    
+    case wabt::Opcode::I16X8AllTrue:
+        //TODO
+
+    case wabt::Opcode::I8X16Bitmask:    
+    {
+    	Value* i8x16Operand = irBuilder.CreateBitCast(p1, type.i8x16Type);
+	    auto i1x16Mask = irBuilder.CreateICmpSLT(
+		    i8x16Operand, ConstantVector::getNullValue(type.i8x16Type));
+		ret = irBuilder.CreateZExt(irBuilder.CreateBitCast(i1x16Mask, type.i16Type),
+								  type.i32Type);
+	
+    }
+        break;  
+    case wabt::Opcode::I16X8Bitmask: 
+    {
+
+    }
+        break;
+    case wabt::Opcode::I32X4Bitmask: 
+    {
+
+    }
+        break;
+    case wabt::Opcode::I64X2Bitmask: 
+    {
+
+    }
+        break;
     case wabt::Opcode::V128Not:
         ret = irBuilder.CreateNot(p1);
         break;
@@ -820,7 +850,121 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     case wabt::Opcode::F64X2Div:
         EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateFDiv(left, right));
         break;
+
+    #define EMIT_SIMD_SHIFT_OP(llvmType, emitCode)                                                              \
+    {                                                                                                           \
+    	FixedVectorType* vectorType = llvmType;                                                                 \
+    	llvm::Type* scalarType = llvmType->getScalarType();                                                     \
+        unsigned int numBits = scalarType->getIntegerBitWidth();                                                \
+        llvm::Value* mask = irBuilder.CreateAnd(p1, llvm::ConstantInt::get(p1->getType(), numBits - 1));        \ 
+    	llvm::Value* right = irBuilder.CreateVectorSplat(                                                       \
+    		(unsigned int)vectorType->getNumElements(),                                                         \
+    		irBuilder.CreateZExtOrTrunc(mask, scalarType));                                                     \
+    	llvm::Value* left = irBuilder.CreateBitCast(p2, llvmType);                                              \
+    	ret = emitCode;                                                                                         \
+    }
+    case wabt::Opcode::I8X16Shl:
+        EMIT_SIMD_SHIFT_OP(type.i8x16Type,irBuilder.CreateShl(left, right));
+        break;
+    case wabt::Opcode::I16X8Shl:
+        EMIT_SIMD_SHIFT_OP(type.i16x8Type,irBuilder.CreateShl(left, right));
+        break;       
+    case wabt::Opcode::I32X4Shl:
+        EMIT_SIMD_SHIFT_OP(type.i32x4Type,irBuilder.CreateShl(left, right));
+        break;           
+    case wabt::Opcode::I64X2Shl:
+        EMIT_SIMD_SHIFT_OP(type.i64x2Type,irBuilder.CreateShl(left, right));
+        break;         
     
+    case wabt::Opcode::I8X16ShrS:
+        EMIT_SIMD_SHIFT_OP(type.i8x16Type,irBuilder.CreateAShr(left, right));
+        break;
+    case wabt::Opcode::I16X8ShrS:
+        EMIT_SIMD_SHIFT_OP(type.i16x8Type,irBuilder.CreateAShr(left, right));
+        break;       
+    case wabt::Opcode::I32X4ShrS:
+        EMIT_SIMD_SHIFT_OP(type.i32x4Type,irBuilder.CreateAShr(left, right));
+        break;           
+    case wabt::Opcode::I64X2ShrS:
+        EMIT_SIMD_SHIFT_OP(type.i64x2Type,irBuilder.CreateAShr(left, right));
+        break;        
+    
+    case wabt::Opcode::I8X16ShrU:
+        EMIT_SIMD_SHIFT_OP(type.i8x16Type,irBuilder.CreateLShr(left, right));
+        break;
+    case wabt::Opcode::I16X8ShrU:
+        EMIT_SIMD_SHIFT_OP(type.i16x8Type,irBuilder.CreateLShr(left, right));
+        break;       
+    case wabt::Opcode::I32X4ShrU:
+        EMIT_SIMD_SHIFT_OP(type.i32x4Type,irBuilder.CreateLShr(left, right));
+        break;           
+    case wabt::Opcode::I64X2ShrU:
+        EMIT_SIMD_SHIFT_OP(type.i64x2Type,irBuilder.CreateLShr(left, right));
+        break; 
+
+
+    
+
+    case wabt::Opcode::I8X16MinS:
+        EMIT_SIMD_BINARY_OP(type.i8x16Type, irBuilder.CreateSelect(irBuilder.CreateICmpSLT(left, right), left, right));
+        break;
+    case wabt::Opcode::I8X16MinU:
+        EMIT_SIMD_BINARY_OP(type.i8x16Type, irBuilder.CreateSelect(irBuilder.CreateICmpULT(left, right), left, right));
+        break;
+    case wabt::Opcode::I16X8MinS:
+        EMIT_SIMD_BINARY_OP(type.i16x8Type, irBuilder.CreateSelect(irBuilder.CreateICmpSLT(left, right), left, right));
+        break;
+    case wabt::Opcode::I16X8MinU:
+        EMIT_SIMD_BINARY_OP(type.i16x8Type, irBuilder.CreateSelect(irBuilder.CreateICmpULT(left, right), left, right));
+        break;
+    case wabt::Opcode::I32X4MinS:
+        EMIT_SIMD_BINARY_OP(type.i32x4Type, irBuilder.CreateSelect(irBuilder.CreateICmpSLT(left, right), left, right));
+        break;
+    case wabt::Opcode::I32X4MinU:
+        EMIT_SIMD_BINARY_OP(type.i32x4Type, irBuilder.CreateSelect(irBuilder.CreateICmpULT(left, right), left, right));
+        break;
+    case wabt::Opcode::F32X4Min:
+        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::minnum, type.f32x4Type), {left,right}));
+        break;
+    case wabt::Opcode::F64X2Min:
+        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::minnum, type.f64x2Type), {left,right}));
+        break;        
+    case wabt::Opcode::F32X4PMin:
+        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, right, left), right, left));
+        break;        
+    case wabt::Opcode::F64X2PMin:
+        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, right, left), right, left));
+        break;                
+    case wabt::Opcode::I8X16MaxS:
+        EMIT_SIMD_BINARY_OP(type.i8x16Type, irBuilder.CreateSelect(irBuilder.CreateICmpSLT(left, right), right, left));
+        break;
+    case wabt::Opcode::I8X16MaxU:
+        EMIT_SIMD_BINARY_OP(type.i8x16Type, irBuilder.CreateSelect(irBuilder.CreateICmpULT(left, right), right, left));
+        break;
+    case wabt::Opcode::I16X8MaxS:
+        EMIT_SIMD_BINARY_OP(type.i16x8Type, irBuilder.CreateSelect(irBuilder.CreateICmpSLT(left, right), right, left));
+        break;
+    case wabt::Opcode::I16X8MaxU:
+        EMIT_SIMD_BINARY_OP(type.i16x8Type, irBuilder.CreateSelect(irBuilder.CreateICmpULT(left, right), right, left));
+        break;
+    case wabt::Opcode::I32X4MaxS:
+        EMIT_SIMD_BINARY_OP(type.i32x4Type, irBuilder.CreateSelect(irBuilder.CreateICmpSLT(left, right), right, left));
+        break;
+    case wabt::Opcode::I32X4MaxU:
+        EMIT_SIMD_BINARY_OP(type.i32x4Type, irBuilder.CreateSelect(irBuilder.CreateICmpULT(left, right), right, left));
+        break;
+    case wabt::Opcode::F32X4Max:
+        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::maxnum, type.f32x4Type), {left,right}));
+        break;
+    case wabt::Opcode::F64X2Max:
+        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::maxnum, type.f64x2Type), {left,right}));
+        break;        
+    case wabt::Opcode::F32X4PMax:
+        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, left, right), right, left));
+        break;        
+    case wabt::Opcode::F64X2PMax:
+        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, left, right), right, left));
+        break;         
 
 
 
