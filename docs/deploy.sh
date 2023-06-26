@@ -14,6 +14,9 @@
 echo "====> deploying to github"
 # 这里增加了一个remote叫github
 rm -r /tmp/book
+mkdir -p /tmp/book
+# https://stackoverflow.com/questions/41545293/branch-is-already-checked-out-at-other-location-in-git-worktrees
+git worktree prune
 git worktree add -B gh-pages /tmp/book github/gh-pages
 mdbook build
 rm -rf /tmp/book/*
