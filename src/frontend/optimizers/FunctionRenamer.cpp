@@ -26,7 +26,7 @@ class FunctionRenamer : public PassInfoMixin<FunctionRenamer> {
                 }
 
                 if (callInstCount == 1) {
-                    if (callee->getName().str().rfind("func_") == 0) {
+                    if (callee->getName().str().find("func_") == 0) {
                         std::string funcName = F.getName().str();
                         F.setName("jmp_" + funcName);
                         callee->setName(funcName);

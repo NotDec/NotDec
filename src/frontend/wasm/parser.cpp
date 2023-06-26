@@ -203,7 +203,7 @@ void Context::visitModule() {
             //rename func with export name
             if(baseCtx.opt.compat_mode){
                 std::string export_name = export_->name;
-                if(this->funcs[index]->getName().str().rfind("func_") == 0){
+                if(this->funcs[index]->getName().str().find("func_") == 0){
                     this->funcs[index]->setName(export_name);
                 }else if(this->funcs[index]->getName().str().length() > export_name.length() ){ //use shorter name
                     this->funcs[index]->setName(export_name);
