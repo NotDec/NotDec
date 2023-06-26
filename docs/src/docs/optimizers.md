@@ -79,11 +79,3 @@ TODO:
 1.需要实现过程间分析，如果call指令的参数和返回值都是栈地址，需要把它们放到栈相关集合中。
 
 
-## retype
-
-类型恢复
-
-参考[GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)](https://github.com/GrammaTech/retypd-ghidra-plugin)
-
-
-
