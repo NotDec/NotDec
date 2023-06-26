@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">3.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">3.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">3.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">6.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">6.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">6.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -164,6 +164,7 @@
 </li>
 </ol>
 <h1 id="中文"><a class="header" href="#中文">中文</a></h1>
+<p><a href="https://notdec.github.io/NotDec/">文档站</a></p>
 <h2 id="从零实现反编译器"><a class="header" href="#从零实现反编译器">从“零”实现反编译器</a></h2>
 <p>为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。侧重于前中端（转IR与IR的优化。）</p>
 <p>怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。</p>
@@ -642,6 +643,263 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 <h2 id="retype"><a class="header" href="#retype">retype</a></h2>
 <p>类型恢复</p>
 <p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="ghidra"><a class="header" href="#ghidra">Ghidra</a></h1>
+<h2 id="资源"><a class="header" href="#资源">资源</a></h2>
+<p>其他资源列表：</p>
+<ul>
+<li><a href="https://low-level.readthedocs.io/en/latest/reversing/ghidra/">Ghidra - low level</a> 这里有很多其他资源，dump local variables的脚本。和搭建调试环境的issue链接。</li>
+<li><a href="https://github.com/AllsafeCyberSecurity/awesome-ghidra">Awesome Ghidra</a></li>
+</ul>
+<p>书籍：</p>
+<ul>
+<li>《THE GHIDRA BOOK The Definitive Guide》 TheGhidraBook.pdf</li>
+<li>《Ghidra Software Reverse Engineering for Beginners》 有pdf</li>
+</ul>
+<p>使用教程：</p>
+<ul>
+<li>Ghidra API的tutorial：https://github.com/HackOvert/GhidraSnippets</li>
+<li>Dump出high-pcode的教程 https://github.com/HackOvert/GhidraSnippets#dumping-refined-pcode </li>
+<li>基于Ghidra实现的VSA：https://github.com/penhoi/ghidra-decompiler/wiki/Symbolic-Value-Set-Analysis </li>
+<li>如何开发调试Ghidra：https://spinsel.dev/2021/04/02/ghidra-decompiler-debugging.html 这人也</li>
+</ul>
+<p>代码分析：</p>
+<ul>
+<li><a href="https://conference.hitb.org/hitbsecconf2021sin/materials/D1T2%20-%20Taking%20Ghidra%20to%20The%20Next%20Level%20-%20Zhanzhao%20Ding.pdf">《Ghidra To The Next Level》</a> 丁湛钊的介绍 这个slides讲了不少ghidra的反编译器的设计。</li>
+<li><a href="https://www.freebuf.com/articles/network/278014.html">《记一次对Ghidra反编译的修复》</a>解释了反编译原理，里面解决的问题其实就是栈变量识别相关的 </li>
+<li><a href="https://github.com/NationalSecurityAgency/ghidra/blob/master/DevGuide.md">DevGuide.md</a> 官方的eclipse环境搭建</li>
+<li><a href="https://research.nccgroup.com/2022/05/20/earlyremoval-in-the-conservatory-with-the-wrench/">《Exploring Ghidra’s decompiler internals to make automatic P-Code analysis scripts》</a>解释了一些decomp_dbg的代码。</li>
+</ul>
+<h2 id="使用"><a class="header" href="#使用">使用</a></h2>
+<h3 id="ghidra-scripting"><a class="header" href="#ghidra-scripting">Ghidra scripting</a></h3>
+<ul>
+<li>
+<p>命令行直接加载二进制文件，可以设置分析后是否保存
+https://static.grumpycoder.net/pixel/support/analyzeHeadlessREADME.html#scripting_headlessScripts_controlProgramDisposition </p>
+</li>
+<li>
+<p>如何遍历定义的结构体成员
+https://reverseengineering.stackexchange.com/questions/21320/automate-looking-for-calls-to-an-offset-of-a-structure</p>
+<p><code>structure.getDefinedComponents</code> <code>Ghidra\Framework\SoftwareModeling\src\main\java\ghidra\program\model\data\CompositeInternal.java</code> 的dumpComponents方法是结构体转string的时候用到的。</p>
+</li>
+<li>
+<p>获取创建符号
+getSymbols(name, namespace)</p>
+</li>
+<li>
+<p>获取和创建函数
+FlatAPI的getFunction系列。按照namespace获取函数是在listing里：getCurrentProgram().getListing()</p>
+<p>Flatapi的createFunction。更多创建函数在FunctionManager：getCurrentProgram().getFunctionManager().createFunction</p>
+<p>getCurrentProgram().getExternalManager().addExtFunction好像同时会创建External Location和对应的函数？</p>
+</li>
+<li>
+<p>指定地址寻找函数
+看了下flat program api里面对getFirstFunction和getFunctionAfter的实现，发现就是currentProgram.getListing().getFunctions函数的简单调用。而且getFunctionAfter还有传入地址和函数的版本。</p>
+</li>
+<li>
+<p>设置函数签名
+FunctionSignatureParser负责的就是修改函数的时候，上面那个输入框的解析。</p>
+<p>FunctionEditorModel这个类负责这个输入框背后的逻辑：调用上述parser，得到FunctionDefinitionDataType，然后调用自身的setFunctionData函数。函数内部设置函数的参数和返回值。</p>
+</li>
+<li>
+<p>偏移找寄存器
+<code>\ghidra_10.1.2_PUBLIC\Ghidra\Processors\ARM\data\languages\ARM.sinc</code>看这个文件</p>
+</li>
+<li>
+<p>设置/读取寄存器值
+https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/ProgramContext.html </p>
+<p>program.getProgramContext().setValue(register, start, end, value); 一般可以start=end=想要的地址</p>
+<p>Ghidra\Features\Base\src\main\java\ghidra\app\util\viewer\field\RegisterFieldFactory.java getRegisterStrings好像是负责写assume xxx = xxx的。</p>
+<p>Ghidra\Features\Base\src\main\java\ghidra\app\util\viewer\field\RegisterFieldFactory.java getSetRegisters负责获取设置的寄存器</p>
+</li>
+<li>
+<p>加载头文件报错的常见解决方法
+在parse C source界面之所以会标红，应该是要自己在下面的-I选项给出这些头文件存在的位置。比如我的-IC:\Program Files\LLVM\lib\clang\13.0.0\include</p>
+<p>-IC:\Program Files (x86)\Dev-Cpp\MinGW64\lib\gcc\x86_64-w64-mingw32\4.9.2\include</p>
+<p>目前用到size_t的还真的不知道怎么办。上面两个头文件处理后都不太行，变成typedef <strong>SIZE_TYPE</strong> size_t;这种，而且完全看不到int32_t的定义。所以windows下的头文件不太行。还是得看看。最后从wsl里复制header出来，在x86_64-linux-gnu\bits\types.h这里定义了。但是我include好像没用，不知道为什么</p>
+<p>TODO：暂时放弃，直接使用types里面复制处理的。</p>
+<pre><code class="language-c">#define __stdcall
+struct va_list; // shitty hack
+typedef struct va_list *va_list;
+
+typedef long int ptrdiff_t;
+typedef long unsigned int size_t;
+</code></pre>
+<p>有些可以直接用-D参数的方式解决。-D甚至可以定义函数式宏：https://stackoverflow.com/questions/31857559/gcc-define-function-like-macros-using-d-argument </p>
+<p>-D__attribute__(x)= 好像没有用，但是ghidra好像能直接识别，不会报这个的错</p>
+<pre><code class="language-c">-Dsize_t=&quot;unsigned long&quot;
+
+/* Fixed-size types, underlying types depend on word size and compiler.  */
+typedef signed char __int8_t;
+typedef unsigned char __uint8_t;
+typedef signed short int __int16_t;
+typedef unsigned short int __uint16_t;
+typedef signed int __int32_t;
+typedef unsigned int __uint32_t;
+#if __WORDSIZE == 64
+typedef signed long int __int64_t;
+typedef unsigned long int __uint64_t;
+#else
+__extension__ typedef signed long long int __int64_t;
+__extension__ typedef unsigned long long int __uint64_t;
+#endif
+</code></pre>
+</li>
+</ul>
+<h4 id="memoryblock"><a class="header" href="#memoryblock">MemoryBlock</a></h4>
+<p>原来没有直接的方法，是通过创建新Block然后调用join方法。</p>
+<p><code>Ghidra\Features\Base\src\main\java\ghidra\app\plugin\core\memory\ExpandBlockModel.java</code> applyTo函数</p>
+<ul>
+<li>
+<p>读写内存区域
+Uninitialized的内存默认是不能写的，需要把要写的部分分割开，然后设置成initialized。</p>
+<p>https://github.com/NationalSecurityAgency/ghidra/issues/3585 </p>
+</li>
+<li>
+<p>动态链接与Thunk Function</p>
+<p>ThunkFunction corresponds to a fragment of code which simply passes control to a destination function. All Function behaviors are mapped through to the current destination function. 另外thunk不需要设置参数和返回值类型，直接复制的目标对象的类型。</p>
+<p>主要的逻辑在Ghidra\Features\Base\src\main\java\ghidra\app\util\opinion\ElfProgramBuilder.java这里。当加载程序的时候，它会处理各种符号。单是创建单独的external符号是在“<EXTERNAL>”（Library.UNKNOWN）这个库下的，默认没有map到内存中，所以getExternalSpaceAddress这里是一种Fake的地址。而内存中的“EXTERNAL”（MemoryBlock.EXTERNAL_BLOCK_NAME）是ElfProgramBuilder创建的。（通过搜索NOTE: This block is artificial and is used to make relocations work correctly找到的）</p>
+<p>为什么他创建的thunk方法可以不在listring的Function里显示，秘诀大概是：getCurrentProgram().getSymbolTable().removeSymbolSpecial。参照下面文件里搜索removeSymbolSpecial的代码。</p>
+<p>分配单独的一块内存创建EXTERNAL块相关的逻辑在Ghidra\Features\Base\src\main\java\ghidra\app\util\opinion\ElfProgramBuilder.java allocateLinkageBlock函数。</p>
+</li>
+</ul>
+<h3 id="查看high-p-code"><a class="header" href="#查看high-p-code">查看high p-code</a></h3>
+<p>https://reverseengineering.stackexchange.com/questions/29646/dump-pcode-in-ghidra-for-a-specific-decompiled-function 直接在界面点就可以，但是好像只是为了给你看形状的。打开python然后currentLocation.token.pcodeOp也可以稍微看看当前指针位置的。</p>
+<h3 id="ghidra-sleigh-调试环境"><a class="header" href="#ghidra-sleigh-调试环境">Ghidra-sleigh 调试环境</a></h3>
+<p>相关的C/C++代码主要在 Ghidra/Features/Decompiler/src/decompile.cpp下。docmain.hh和 doccore.hh两个文件可以先看，或者先build doc出来，生成的doc在<code>../doc</code>目录（Ghidra/Features/Decompiler/src/decompile/doc/html/index.html）</p>
+<p>根据这里https://daniao.ws/notes/quick-tips/build-ghidra下载并编译Ghidra。生成各种中间文件</p>
+<pre><code class="language-Bash">sudo apt install openjdk-17-jdk-headless
+wget -c https://services.gradle.org/distributions/gradle-8.1.1-bin.zip -P /tmp
+sudo unzip -d /opt/gradle /tmp/gradle-8.1.1-bin.zip
+export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin
+echo 'export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin' &gt;&gt; ~/.bashrc
+
+git clone https://github.com/NationalSecurityAgency/ghidra.git
+git checkout Ghidra_10.3.1_build
+git checkout -b mydev
+gradle --init-script gradle/support/fetchDependencies.gradle init
+gradle buildGhidra
+</code></pre>
+<p>然后vscode打开文件夹<code>/home/ubuntu/ghidra/Ghidra/Features/Decompiler/src/decompile</code></p>
+<p>使用bear生成compile_commands.json文件</p>
+<pre><code class="language-Bash">bear -- make decomp_dbg
+</code></pre>
+<p>增加debug配置。注意里面的环境变量指向ghidra源码文件夹</p>
+<pre><code class="language-JSON">{
+    &quot;version&quot;: &quot;0.2.0&quot;,
+    &quot;configurations&quot;: [
+        {
+            &quot;type&quot;: &quot;lldb&quot;,
+            &quot;request&quot;: &quot;launch&quot;,
+            &quot;name&quot;: &quot;Debug&quot;,
+            &quot;program&quot;: &quot;${workspaceFolder}/cpp/decomp_dbg&quot;,
+            &quot;args&quot;: [],
+            &quot;cwd&quot;: &quot;${workspaceFolder}/datatests&quot;,
+            &quot;env&quot;: {&quot;SLEIGHHOME&quot;: &quot;/home/ubuntu/ghidra&quot;}
+        }
+    ]
+}
+</code></pre>
+<p>从ghidra图形界面，反编译的右上角的debug decompiler里面可以导出xml文件，用于调试。</p>
+<h3 id="调试与decomp_dbg常用命令"><a class="header" href="#调试与decomp_dbg常用命令">调试与decomp_dbg常用命令</a></h3>
+<p>https://github.com/NationalSecurityAgency/ghidra/issues/720</p>
+<pre><code class="language-JSON">load file test 加载二进制文件
+load addr 0x1149
+decompile
+print C
+
+restore Reset.xml    加载xml文件
+trace address
+trace list
+</code></pre>
+<p>搜索相关的命令：<code>registerCommands</code> <code>registerCom</code> </p>
+<p>部分命令需要<code>OPACTION_DEBUG</code>开启</p>
+<h3 id="代码解读"><a class="header" href="#代码解读">代码解读</a></h3>
+<h4 id="sleigh"><a class="header" href="#sleigh">sleigh</a></h4>
+<p>Ghidra的Java部分代码启动sleigh子进程，然后通过stdin输入xml文件，stdout读取xml文件作为反编译结果。比如Ghidra\Features\Decompiler\src\main\java\ghidra\app\decompiler\DecompileResults.java parseRawString函数这里开始解析反编译器的输出的。Ghidra\Framework\SoftwareModeling\src\main\java\ghidra\program\model\pcode\HighFunction.java readXML函数里可以看到high pcode是基于这个ast的标签解析的。</p>
+<p>反编译输出展示上面的选项里，选Debug Function Decompilation导出的xml文件是反编译器的输入。根据https://github.com/NationalSecurityAgency/ghidra/issues/720 这里可以使用decomp_dbg命令行输入xml文件进行反编译。</p>
+<p>应该反编译过程中，Pcode都是一套Pcode，只不过https://spinsel.dev/assets/2020-06-17-ghidra-brainfuck-processor-1/ghidra_docs/language_spec/html/additionalpcode.html 有一些额外的东西只有在反编译之后才会产生。</p>
+<p>Heritage这个名词，对应的是SSA转换</p>
+<p>decomp_dbg 代码位于consolemain.cc（main 函数，也定义了 load/save/restore几条命令）、ifacedecomp.hh/cc （反编译相关命令）。</p>
+<ul>
+<li>Heritage::discoverIndexedStackPointers</li>
+</ul>
+<p>通过一通搜索，我找到了restructure varnode这个action，发现了一些问题。这个action的主要工作就是调用 ScopeLocal::restructureVarnode函数（varmap.hh/cc)，这个函数的工作分配给了 MapState::gatherVarnodes 、MapState::gatherOpen 和 MapState::gatherSymbols ，最后调用了ScopeLocal::restructure。</p>
+<p>其中有关的部分在gatherOpen和gatherVarnodes。gatherOpen在正常情况下，应该分析出好几段栈空间对应的 open RangeHint ，其中的处理逻辑在AliasChecker::gather -&gt; AliasChecker::gatherInternal -&gt; AliasChecker::gatherAdditiveBase 。</p>
+<p>MapState::gatherVarnodes</p>
+<p>所以，我将范围扩大到在heritage 、restructureVarnodes action之后，然后找到了相关的action ：RuleLoadVarnode和 RuleStoreVarnode。</p>
+<p>这两个action（其实是Rule）应该就是分析的主要了，他们都会经过RuleLoadVarnode::checkSpacebase -&gt; RuleLoadVarnode::vnSpacebase -&gt; RuleLoadVarnode::correctSpacebase (ruleaction.cc) 的检查。调试发现，没能分析出来的变量所对应的 store/load在correctSpacebase的检查中失败了 。</p>
+<p>这两个action（其实是Rule）应该就是分析的主要了，他们都会经过RuleLoadVarnode::checkSpacebase -&gt; RuleLoadVarnode::vnSpacebase -&gt; RuleLoadVarnode::correctSpacebase (ruleaction.cc) 的检查。调试发现，没能分析出来的变量所对应的 store/load在correctSpacebase的检查中失败了。</p>
+<p>ActionDatabase::buildDefaultGroups 分析好像是分组的，里面很多rule。</p>
+<p>“simplification styles” are also referred to as “root actions” or “groups” in the decompiler source code. They consist of groups of “base groups” such as “stackvars” or “typerecovery”, which are more fine-grained groups of specific analysis operations.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="retdec"><a class="header" href="#retdec">RetDec</a></h1>
+<p>https://zhuanlan.zhihu.com/p/509763117 有一些源码解读的内容。</p>
+<ul>
+<li>retdec的4.0是最后一个包含单独的ir转c工具的版本。相关代码<code>src/llvmir2hlltool/CMakeLists.txt</code> (要先checkout到v4.0。)</li>
+<li>能否直接把ir传给</li>
+</ul>
+<h3 id="开发环境"><a class="header" href="#开发环境">开发环境</a></h3>
+<p>在cmake配置里增加&quot;-DCMAKE_INSTALL_PREFIX=/home/xx/retdec/build/retdec-install&quot;，然后直接使用cmake插件，目标选择install。（因为retdec-decompile工具需要找到decompiler-config.json文件，因此需要安装）</p>
+<h4 id="入口函数"><a class="header" href="#入口函数">入口函数</a></h4>
+<ul>
+<li>retdec-decompiler.cpp 主要是解压，脱壳什么的，然后调用retdec::decompile函数。这里的retdec是namespace，不是class，所以就在src/retdec/retdec.cpp。</li>
+<li>其中非常重要的是读取share/retdec/decompiler-config.json，其中有llvmPasses这一项，指定了一系列pass名字。然后在那边retdec::decompile函数，他会根据config.parameters.llvmPasses里的值找到pass，然后依次加入passmanager里。然后pm.run(*module);运行结束之后，一切反编译过程都完成了。</li>
+</ul>
+<h4 id="pass功能"><a class="header" href="#pass功能">Pass功能</a></h4>
+<p>vscode代码搜索方法：基于<code>src/retdec-decompiler/decompiler-config.json</code>，对每个pass的名字带双引号搜索。比如搜<code>&quot;retdec-decoder&quot;</code></p>
+<ul>
+<li>retdec-provider-init： 这个pass负责给很多Provider类设置信息（到静态变量里）。FileImageProvider，DebugFormatProvider，DemanglerProvider等等。如果我们要设置一下简单的，可以直接在Pass运行前加。</li>
+<li>retdec-decoder：<code>src/bin2llvmir/optimizations/decoder/decoder.cpp</code> 负责把capstone的结果转成IR。</li>
+<li>&quot;retdec-x86-addr-spaces&quot;：把一些对FS，GS寄存器寻址的访问转成intrinsic call，如<code>getReadFsByte</code></li>
+<li>retdec-x87-fpu: replace fpu stack operations with FPU registers</li>
+<li>retdec-main-detection: 识别出main函数之后，也就是（在retdec自己的config里）重命名了一下。</li>
+<li>retdec-idioms-libgcc：把一些libgcc的算数运算替换成LLVM里的运算。</li>
+<li>retdec-idioms：把常见的指令组合替换成别的指令？</li>
+<li>retdec-inst-opt：好像是简单的窥孔优化。</li>
+<li>retdec-inst-opt-rda</li>
+<li>retdec-cond-branch-opt 这些优化应该不用</li>
+<li>retdec-syscalls：好像是把系统调用转成对应的call？有一个map</li>
+<li>**retdec-stack：**关键Pass，识别栈指针相关的操作。</li>
+<li>retdec-constants：好像是识别常量的类型的。看不懂。里面好像有根据debuginfo，获取data段变量类型。</li>
+<li>retdec-param-return：识别call指令参数的存放什么的</li>
+<li><strong>retdec-simple-types</strong>：关键类型识别Pass，eqSet和equation</li>
+<li>retdec-write-dsm：Generate the current disassembly？</li>
+<li>retdec-remove-asm-instrs：Remove all special instructions used to map LLVM instructions to ASM instructions</li>
+<li>retdec-class-hierarchy：好像是根据RTTI和vtable搞class的继承关系</li>
+<li>retdec-select-fncs：如果config里面选择了部分函数，就把其他函数删了。</li>
+<li>retdec-unreachable-funcs：删除不可达函数？</li>
+<li>retdec-register-localization让所有寄存器变成局部变量</li>
+<li>retdec-value-protect：Protect values from LLVM optimization passes</li>
+<li><strong>retdec-stack-ptr-op-remove</strong>：重要的</li>
+<li>retdec-remove-phi：</li>
+<li>retdec-write-ll：</li>
+<li>retdec-write-bc：</li>
+<li>retdec-llvmir2hll：</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="retypd"><a class="header" href="#retypd">retypd</a></h1>
+<h4 id="retypdghidra-配置"><a class="header" href="#retypdghidra-配置">retypd+ghidra 配置</a></h4>
+<p>1.安装retypd </p>
+<pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd
+cd retypd
+pip install .
+</code></pre>
+<p>2.编译<code>GhidraRetypd</code>  安装ghidra_retypd_provider</p>
+<pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd-ghidra-plugin
+cd retypd-ghidra-plugin
+make
+pip install .
+</code></pre>
+<p>3.修改 GhidraRetypd.zip中的extension.properties，添加</p>
+<pre><code class="language-Python">version=10.2.3
+</code></pre>
+<p>4.安装插件</p>
+<ol>
+<li>打开 Ghidra 软件，点击 &quot;File&quot; 菜单，选择 &quot;Install Extensions&quot; 选项。</li>
+<li>在弹出的 &quot;Install Extensions&quot; 窗口中，点击 &quot;Browse&quot; 按钮选择你要安装的扩展程序。</li>
+<li>选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 &quot;Open&quot; 按钮。</li>
+<li>点击 &quot;OK&quot; 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。</li>
+<li>安装完成后，重启 Ghidra 软件。</li>
+</ol>
+<p>为Ghidra 10.2.3 版本成功编译的retypd<a href="GhidraRetypd.zip">下载</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="other-notes"><a class="header" href="#other-notes">Other Notes</a></h1>
 <p>这里包括一些其他笔记，如C++，CMake的使用。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="c-development"><a class="header" href="#c-development">C++ Development</a></h1>
