@@ -38,7 +38,7 @@ struct Context {
     void visitModule();
     void visitGlobal(wabt::Global& gl, bool isExternal);
     void visitFunc(wabt::Func& func, llvm::Function* function);
-    void visitTable(wabt::Table& table);
+    void visitTable(wabt::Table& table, bool isExternal);
     void visitElem(wabt::ElemSegment& elem);
     llvm::PointerType* getFuncPointerType() {
         return llvm::PointerType::get(llvm::FunctionType::get(llvm::Type::getVoidTy(llvmContext), false), 0);

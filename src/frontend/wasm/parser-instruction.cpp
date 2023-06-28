@@ -1124,8 +1124,8 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     	FixedVectorType* vectorType = llvmType;                                                                 \
     	Type* scalarType = llvmType->getScalarType();                                                     \
         unsigned int numBits = scalarType->getIntegerBitWidth();                                                \
-        Value* mask = irBuilder.CreateAnd(p1, ConstantInt::get(p1->getType(), numBits - 1));        \
-    	Value* right = irBuilder.CreateVectorSplat(                                                       \
+        llvm::Value* mask = irBuilder.CreateAnd(p1, llvm::ConstantInt::get(p1->getType(), numBits - 1));        \
+    	llvm::Value* right = irBuilder.CreateVectorSplat(                                                       \
     		(unsigned int)vectorType->getNumElements(),                                                         \
     		irBuilder.CreateZExtOrTrunc(mask, scalarType));                                                     \
     	Value* left = irBuilder.CreateBitCast(p2, llvmType);                                              \

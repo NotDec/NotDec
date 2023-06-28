@@ -9,6 +9,7 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <new>
+#include <set>
 
 
 namespace notdec::frontend::wasm {
@@ -91,6 +92,10 @@ std::unique_ptr<Context> parse_wasm(BaseContext& llvmCtx, std::string file_name)
 
 void Context::visitModule() {
     using namespace wabt;
+    // TODO temporatily deduplicate.
+    // global can be in both Global list and import section.
+    std::set<Global*> visitedGlobals;
+
     // change module name from file name to wasm module name if there is
     if (!module->name.empty()) {
         llvmModule.setModuleIdentifier(module->name);
@@ -116,10 +121,14 @@ void Context::visitModule() {
         case ExternalKind::Global:
             // set global to external linkage
             visitGlobal(cast<GlobalImport>(import)->global, true);
+            visitedGlobals.insert(&cast<GlobalImport>(import)->global);
+            break;
+
+        case ExternalKind::Table:
+            visitTable(cast<TableImport>(import)->table, true);
             break;
 
         case ExternalKind::Tag:
-        case ExternalKind::Table:
         default:
             std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unknown import kind: " << g_kind_name[static_cast<size_t>(import->kind())] << std::endl;
             // std::abort();
@@ -128,6 +137,9 @@ void Context::visitModule() {
     }
     // visit global
     for (Global* gl : this->module->globals) {
+        if (visitedGlobals.count(gl) > 0) {
+            continue;
+        }
         visitGlobal(*gl, false);
     }
 
@@ -172,7 +184,7 @@ void Context::visitModule() {
 
     // visit elem and create function pointer array
     for (Table* field : this->module->tables) {
-        visitTable(*field);
+        visitTable(*field, false);
     }
 
     // visit function
@@ -341,7 +353,8 @@ void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
     _glob_index ++;
 }
 
-void Context::visitTable(wabt::Table& table) {
+// Declare the table. The initialization is done in elem section.
+void Context::visitTable(wabt::Table& table, bool isExternal) {
     using namespace llvm;
     Type* ty;
     if (table.elem_type == wabt::Type::FuncRef) {

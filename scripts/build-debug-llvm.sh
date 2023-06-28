@@ -48,7 +48,8 @@ cmake --build . --target install
 
 cd ..
 # 暂时编译好了手动删吧。
-rm -r llvm-source llvm-build llvm.zip
+# rm -r llvm-source llvm-build
+rm llvm.zip
 
 # Package the folder for delivery, use the following command
 echo "compressing llvm-14.0.6.obj to llvm-14.0.6.obj.tar.xz"
