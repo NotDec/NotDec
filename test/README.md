@@ -1,3 +1,8 @@
+# test
+
+TODO 将文件夹改名为tests
+
+由于makefile能够多进程并行，且支持增量编译，因此以后还是优先用makefile。
 
 ## wasm
 
@@ -28,6 +33,8 @@
 
 链接libc的好处是，可以利用memcpy等函数的实现。默认函数不导出且没有被使用就会被优化删除。
 
+1. `-c` 编译生成object，而不是可执行文件。特征：栈指针`__stack_pointer`也是导入的。由于object文件和可执行的wasm还是有点不一样，所以目前不要分析-c编译出来的wasm文件。不过这个选项可以用来观察函数名（找入口函数）。
+1. `-lc` 链接libc。好处是有memcpy，memset这种函数的实现，坏处是可能引入大量库函数（如果出现，还是不要链libc了）。
 1. `-I. -g -O0` 
     - 让编译时能找到当前文件夹下的头文件，开启调试信息
     - 关闭优化：开启后，栈指针相关操作，栈上变量访问将没那么明显
@@ -37,9 +44,16 @@
 1. `--no-standard-libraries`
 1. `-Wl,--no-entry` 不添加会报错`wasm-ld: error: entry symbol not defined (pass --no-entry to suppress): _start`
 1. `-Wl,--allow-undefined`
-1. `-lc` 链接libc
+
+**入口函数：** 
+- 之前： libc提供了真正的main，原有的main被重命名为__original_main
+- https://reviews.llvm.org/D70700 现在：__main_argc_argv
 
 ### 常见问题
+
+#### 2023年6月28日 调整SAC的juliet数据集的编译命令
+
+调整好的编译命令是`-D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined`
 
 #### 2023年3月21日 编译命令 出现对memcpy等函数的导入
 
