@@ -27,6 +27,7 @@ using namespace llvm;
 namespace notdec::frontend::optimizers {
 
 void run_passes(llvm::Module& mod);
+llvm::FunctionPassManager buildFunctionOptimizations();
 
 }
 

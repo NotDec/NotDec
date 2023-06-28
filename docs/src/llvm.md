@@ -12,6 +12,12 @@
 1. 可以使用`llc -march=cpp` ： https://stackoverflow.com/questions/7787308/how-can-i-declare-a-global-variable-in-llvm 
 1. https://llvm.org/docs/LangRef.html 查询IR
 
+中端优化：
+- 实现自己的mem2reg(SSA construction)：https://www.zzzconsulting.se/2018/07/16/llvm-exercise.html
+- 中端优化为什么这么神奇：https://blog.matthieud.me/2020/exploring-clang-llvm-optimization-on-programming-horror/
+
+YouTube的LLVM频道里有很多不错的视频。
+
 ### debug
 
 打印使用`llvm::outs() << xxx;`直接打印llvm Value
