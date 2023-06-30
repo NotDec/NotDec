@@ -143,10 +143,10 @@ https://reverseengineering.stackexchange.com/questions/29646/dump-pcode-in-ghidr
 相关的C/C++代码主要在 Ghidra/Features/Decompiler/src/decompile.cpp下。docmain.hh和 doccore.hh两个文件可以先看，或者先build doc出来，生成的doc在`../doc`目录（Ghidra/Features/Decompiler/src/decompile/doc/html/index.html）
 
 
-根据这里https://daniao.ws/notes/quick-tips/build-ghidra下载并编译Ghidra。生成各种中间文件
+根据这里https://daniao.ws/notes/quick-tips/build-ghidra 下载并编译Ghidra。生成各种中间文件
 
 ```Bash
-sudo apt install openjdk-17-jdk-headless
+sudo apt install openjdk-17-jdk-headless unzip --no-install-recommends
 wget -c https://services.gradle.org/distributions/gradle-8.1.1-bin.zip -P /tmp
 sudo unzip -d /opt/gradle /tmp/gradle-8.1.1-bin.zip
 export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin
@@ -207,10 +207,9 @@ trace list
 
 部分命令需要`OPACTION_DEBUG`开启
 
-### 代码解读
+## 反编译器代码解读（sleigh）
 
-
-#### sleigh
+**总体分析流程**
 
 Ghidra的Java部分代码启动sleigh子进程，然后通过stdin输入xml文件，stdout读取xml文件作为反编译结果。比如Ghidra\Features\Decompiler\src\main\java\ghidra\app\decompiler\DecompileResults.java parseRawString函数这里开始解析反编译器的输出的。Ghidra\Framework\SoftwareModeling\src\main\java\ghidra\program\model\pcode\HighFunction.java readXML函数里可以看到high pcode是基于这个ast的标签解析的。
 
@@ -218,7 +217,53 @@ Ghidra的Java部分代码启动sleigh子进程，然后通过stdin输入xml文�
 
 应该反编译过程中，Pcode都是一套Pcode，只不过https://spinsel.dev/assets/2020-06-17-ghidra-brainfuck-processor-1/ghidra_docs/language_spec/html/additionalpcode.html 有一些额外的东西只有在反编译之后才会产生。
 
-Heritage这个名词，对应的是SSA转换
+**反编译阶段**
+
+首先反编译过程被分为了几个大的 `simplification styles` `Root Action Groups`。它们由 `base groups` （例如 “stackvars” or “typerecovery”） 组成。
+
+- decompile – The main decompiler action
+- normalize – Decompilation tuned for normalization
+- jumptable – Simplify just enough to recover a jump-table
+- paramid – Simplify enough to recover function parameters
+- register – Perform one analysis pass on registers, without stack variables
+- firstpass – Construct the initial raw syntax tree, with no simplification
+
+在[universalAction](https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.1.2_build/Ghidra/Features/Decompiler/src/decompile/cpp/coreaction.cc#L5021-L5275)函数里构建了所有可能的Action和Rule列表，即定义了他们的执行顺序。每个Action或Rule是否运行再由标签确定。
+
+[Rule](https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L194): 代表着某个特定的点位可能采取的操作。它输入一个Pcode位置，首先判断能不能在该处应用，然后再应用更改。Rule可以通过`getOpList()`函数先给出一个点位可能的Opcode列表，方便外部提前过滤。多个Rule可以组合为`ActionPool`
+
+[Action](https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L52) 类似Pass，对一个函数做变换。每次变换递增一下count变量。
+
+和栈分析相关的标签：`localrecovery` `typerecovery` `stackvars`
+
+和栈分析相关的标签，和内部的Action和Rule：
+
+`base`
+- ActionHeritage SSA构建算法。
+
+`localrecovery`
+    - ActionRestrictLocal: 限制局部变量在栈上的可能范围，排除一些参数之类的栈范围，使得这些范围不会创建局部变量。
+        - 首先对每个FunctionCallSpecs，的每一个参数，把它们的地址排除在局部变量之外。
+        - 对保存的caller的寄存器，相关的栈内存排除在局部变量之外。
+        - 注：可见wasm里不用管这些。
+    - ActionRestructureVarnode
+        - gatherVarnodes：
+        - gatherOpen：
+        - gatherSymbols：
+        - restructure：
+
+`stackvars`
+    - RuleLoadVarnode
+    - RuleStoreVarnode
+
+`stackptrflow`
+    - ActionStackPtrFlow
+        - `checkClog`: Clog是指，栈指针加栈上的值？
+        - `analyzeExtraPop`: sub-functions TODO，难道是说子函数里面用父函数栈指针？
+
+
+关键的类型：
+- `LoadGuard`: 对一个，访问了栈，但是是在动态访问栈的load指令的描述。描述其可能访问的栈范围。包括min, max, step等。和VSA分析有很大关系。
 
 decomp_dbg 代码位于consolemain.cc（main 函数，也定义了 load/save/restore几条命令）、ifacedecomp.hh/cc （反编译相关命令）。
 
@@ -240,3 +285,8 @@ MapState::gatherVarnodes
 
  “simplification styles” are also referred to as “root actions” or “groups” in the decompiler source code. They consist of groups of “base groups” such as “stackvars” or “typerecovery”, which are more fine-grained groups of specific analysis operations.
 
+### Ghidra 中的 value set analysis
+
+TODO
+
+[ValueSetSolver](https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/rangeutil.hh#L274)

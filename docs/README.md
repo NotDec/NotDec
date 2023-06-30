@@ -1,6 +1,6 @@
 # NocDec 文档
 
-文档基于[mdBook](https://rust-lang.github.io/mdBook)编写，并单独作为网站，便于阅读。
+文档基于[mdBook](https://rust-lang.github.io/mdBook)编写，并单独作为网站，便于阅读。安装见mdBook文档（`cargo install mdbook`）
 
 - `src/README.md` 软链接到项目的ReadMe(`../../README.md`)，都是markdown，正好和github主页的展示保持一致。
 - `src/docs`目录下存放本项目主要文档

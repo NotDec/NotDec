@@ -139,15 +139,19 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 1. 软件安装
    - apt安装
       ```
-      sudo apt install wabt python-is-python3 clang-14
+      sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++
       ```
-   - 安装wasi-sdk
+   - 安装wasi-sdk到/opt
+      ```
+      wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sdk-20.0-linux.tar.gz -P /tmp
+      sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
+      ```
 1. clone 本仓库
-1. 编译一个LLVM
+1. 安装LLVM 14
    - 方式1：下载提前构建好的LLVM，解压得到`llvm-14.0.6.obj`文件夹，放到项目根目录。
    - 方式2：执行`scripts/build-debug-llvm.sh`脚本，下载并构建LLVM源码。中途可能遇到内存不足的情况，需要手动降低并行数量到1。
       成功构建后可以将`llvm-14.0.6.obj`文件夹打包发送给其他人。
-1. 构建
+1. cmake build本仓库
 
 
 #### 代码调试
