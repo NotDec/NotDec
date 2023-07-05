@@ -108,8 +108,16 @@ struct BlockContext
     void visitGlobalSet(wabt::GlobalSetExpr* expr);
 
     void visitSimdLaneOp(wabt::SimdLaneOpExpr* expr);
-    llvm::Value* createExtractLane(llvm::Value* vector,llvm::Type* ty,uint64_t imm ,short sign);
+    void visitSimdLoadLane(wabt::SimdLoadLaneExpr* expr);
+    void visitSimdStoreLane(wabt::SimdStoreLaneExpr* expr);
 
+    llvm::Value* createLoadLane(llvm::Value* vector, llvm::Value* addr, llvm::Type* ty, uint64_t imm);
+    llvm::Value* createStoreLane(llvm::Value* vector, llvm::Value* addr, llvm::Type* ty, uint64_t imm);
+    llvm::Value* createExtractLane(llvm::Value* vector, llvm::Type* ty, uint64_t imm , bool sign);
+    llvm::Value* createReplaceLane(llvm::Value* vector, llvm::Value* scalar, llvm::Type* ty, uint64_t imm);
+    llvm::Value* createAllTrue(llvm::Value* vector, llvm::FixedVectorType* vectorType);
+    llvm::Value* createSIMDExtend(llvm::Value* vector, llvm::FixedVectorType* vectorType, llvm::FixedVectorType* destType, unsigned int startIdx, bool sign);
+    llvm::Value* createSIMDTrunc(llvm::Value* vector, llvm::FixedVectorType* vectorType, llvm::FixedVectorType* destType, llvm::Value* floatMin,  bool sign);
     llvm::Value* popStack() {
         assert(stack.size() >= 1);
         llvm::Value* p1 = stack.back(); stack.pop_back();
