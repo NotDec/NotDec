@@ -65,7 +65,6 @@ void BlockContext::dispatchExprs(wabt::Expr& expr) {
     case ExprType::Select:
         visitSelectExpr(cast<SelectExpr>(&expr));
         break;
-
     // TODO: support 2.0
     case ExprType::MemoryGrow:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Warning: dummy implementation for " << GetExprTypeName(expr) << std::endl;
@@ -224,7 +223,7 @@ llvm::Value* BlockContext::convertStackAddr(uint64_t offset) {
 
     // 会被IRBuilder处理，所以不用搞自己的特判优化。
     // if (expr->offset != 0) {
-    base = irBuilder.CreateAdd(base, llvm::ConstantInt::get(base->getType(), offset, false), "calcOffset");
+    base = irBuilder.CreateAdd(base, ConstantInt::get(base->getType(), offset, false), "calcOffset");
     // }
     // if ea+N/8 is larger than the length of mem, then trap?
     Value* arr[2] = { ConstantInt::getNullValue(base->getType()) , base};
@@ -478,36 +477,36 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
 
     case wabt::Opcode::I8X16Abs:
     {
-        llvm::Value* v = irBuilder.CreateBitCast(p1, type.i8x16Type);
+        Value* v = irBuilder.CreateBitCast(p1, type.i8x16Type);
         ret = irBuilder.CreateSelect(
-            irBuilder.CreateICmpSLT(v,llvm::Constant::getNullValue(type.i8x16Type)),
+            irBuilder.CreateICmpSLT(v, Constant::getNullValue(type.i8x16Type)),
             irBuilder.CreateNeg(v),
             v);
     }
         break;
     case wabt::Opcode::I16X8Abs:
     {
-        llvm::Value* v = irBuilder.CreateBitCast(p1, type.i16x8Type);
+        Value* v = irBuilder.CreateBitCast(p1, type.i16x8Type);
         ret = irBuilder.CreateSelect(                                                               
-			irBuilder.CreateICmpSLT(v,llvm::Constant::getNullValue(type.i16x8Type)),         
+			irBuilder.CreateICmpSLT(v, Constant::getNullValue(type.i16x8Type)),         
 			irBuilder.CreateNeg(v),
             v);
     }
         break;
     case wabt::Opcode::I32X4Abs:
     {
-        llvm::Value* v = irBuilder.CreateBitCast(p1, type.i32x4Type);
+        Value* v = irBuilder.CreateBitCast(p1, type.i32x4Type);
         ret = irBuilder.CreateSelect(
-            irBuilder.CreateICmpSLT(v,llvm::Constant::getNullValue(type.i32x4Type)),
+            irBuilder.CreateICmpSLT(v, Constant::getNullValue(type.i32x4Type)),
             irBuilder.CreateNeg(v),
             v);
     }
         break;
     case wabt::Opcode::I64X2Abs:
     {
-        llvm::Value* v = irBuilder.CreateBitCast(p1, type.i64x2Type);
+        Value* v = irBuilder.CreateBitCast(p1, type.i64x2Type);
         ret = irBuilder.CreateSelect(
-            irBuilder.CreateICmpSLT(v,llvm::Constant::getNullValue(type.i64x2Type)),
+            irBuilder.CreateICmpSLT(v, Constant::getNullValue(type.i64x2Type)),
             irBuilder.CreateNeg(v),
             v);
     }
@@ -631,21 +630,21 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     case wabt::Opcode::I16X8Bitmask: 
     {	
         Value* i8x16Operand = irBuilder.CreateBitCast(p1, type.i16x8Type);
-	    Value* i1x8Mask = irBuilder.CreateICmpSLT(i8x16Operand, llvm::ConstantVector::getNullValue(type.i16x8Type));
+	    Value* i1x8Mask = irBuilder.CreateICmpSLT(i8x16Operand, ConstantVector::getNullValue(type.i16x8Type));
 	    ret = irBuilder.CreateZExt(irBuilder.CreateBitCast(i1x8Mask, type.i8Type), type.i32Type);
     }
         break;
     case wabt::Opcode::I32X4Bitmask: 
     {	
         Value* i32x4Operand = irBuilder.CreateBitCast(p1, type.i32x4Type);
-	    Value* i1x4Mask = irBuilder.CreateICmpSLT(i32x4Operand, llvm::ConstantVector::getNullValue(type.i32x4Type));
+	    Value* i1x4Mask = irBuilder.CreateICmpSLT(i32x4Operand, ConstantVector::getNullValue(type.i32x4Type));
 	    ret = irBuilder.CreateZExt(irBuilder.CreateBitCast(i1x4Mask, IntegerType::get(llvmContext, 4)), type.i32Type);
     }
         break;
     case wabt::Opcode::I64X2Bitmask: 
     {	
         Value* i64x2Operand = irBuilder.CreateBitCast(p1, type.i64x2Type);
-	    Value* i1x2Mask = irBuilder.CreateICmpSLT(i64x2Operand, llvm::ConstantVector::getNullValue(type.i64x2Type));
+	    Value* i1x2Mask = irBuilder.CreateICmpSLT(i64x2Operand, ConstantVector::getNullValue(type.i64x2Type));
 	    ret = irBuilder.CreateZExt(irBuilder.CreateBitCast(i1x2Mask, IntegerType::get(llvmContext, 2)), type.i32Type);
     }
         break;
@@ -653,11 +652,11 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         ret = irBuilder.CreateNot(p1);
         break;
     case wabt::Opcode::V128AnyTrue:{
-	    llvm::ConstantInt* zero = ConstantInt::get(Type::getInt64Ty(irBuilder.getContext()), 0);
-	    llvm::Value* boolResult = irBuilder.CreateOr(
+	    ConstantInt* zero = ConstantInt::get(Type::getInt64Ty(irBuilder.getContext()), 0);
+	    Value* boolResult = irBuilder.CreateOr(
 	    	irBuilder.CreateICmpNE(irBuilder.CreateExtractElement(p1, uint64_t(0)), zero),
-	    	irBuilder.CreateICmpNE(irBuilder.CreateExtractElement(p1,  uint64_t(1)), zero));
-	    ret = irBuilder.CreateZExt(boolResult, llvm::Type::getInt32Ty(irBuilder.getContext()));
+	    	irBuilder.CreateICmpNE(irBuilder.CreateExtractElement(p1, uint64_t(1)), zero));
+	    ret = irBuilder.CreateZExt(boolResult, Type::getInt32Ty(irBuilder.getContext()));
         break;
     }
     // SIMD Splat
@@ -684,7 +683,7 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
         Value* vec = irBuilder.CreateBitCast(p1, type.f64x2Type);
         vec = irBuilder.CreateFPTrunc(vec, type.f32x2Type);
         //two higher lanes of the result are initialized to zero
-        ret = llvm::Constant::getNullValue(type.f32x4Type);
+        ret = Constant::getNullValue(type.f32x4Type);
         ret = irBuilder.CreateInsertElement(ret, irBuilder.CreateExtractElement(vec, uint64_t(0)), uint64_t(0));
         ret = irBuilder.CreateInsertElement(ret, irBuilder.CreateExtractElement(vec, uint64_t(1)), uint64_t(1));
     }
@@ -693,7 +692,7 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     {   
         Value* vec = irBuilder.CreateBitCast(p1, type.f32x4Type);
         vec = irBuilder.CreateShuffleVector(vec,
-										llvm::UndefValue::get(type.f32x4Type),
+										UndefValue::get(type.f32x4Type),
 										(ArrayRef<int>){0, 1});
         ret = irBuilder.CreateFPExt(vec, type.f64x2Type);
     }
@@ -702,7 +701,7 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     case wabt::Opcode::I16X8ExtaddPairwiseI8X16S:
     {
         Value* vec = irBuilder.CreateBitCast(p1, type.i8x16Type);
-        Value* undef = llvm::UndefValue::get(type.i8x16Type);
+        Value* undef = UndefValue::get(type.i8x16Type);
         Value* vec1 = irBuilder.CreateShuffleVector(vec,
                                         undef,
                                         (ArrayRef<int>){0, 2, 4, 6, 8, 10, 12, 14});
@@ -717,7 +716,7 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     case wabt::Opcode::I16X8ExtaddPairwiseI8X16U:
     {
         Value* vec = irBuilder.CreateBitCast(p1, type.i8x16Type);
-        Value* undef = llvm::UndefValue::get(type.i8x16Type);
+        Value* undef = UndefValue::get(type.i8x16Type);
         Value* vec1 = irBuilder.CreateShuffleVector(vec,
                                         undef,
                                         (ArrayRef<int>){0, 2, 4, 6, 8, 10, 12, 14});
@@ -731,7 +730,7 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     case wabt::Opcode::I32X4ExtaddPairwiseI16X8S:
     {
         Value* vec = irBuilder.CreateBitCast(p1, type.i16x8Type);
-        Value* undef = llvm::UndefValue::get(type.i16x8Type);
+        Value* undef = UndefValue::get(type.i16x8Type);
         Value* vec1 = irBuilder.CreateShuffleVector(vec,
                                         undef,
                                         (ArrayRef<int>){0, 2, 4, 6});
@@ -746,7 +745,7 @@ void BlockContext::visitUnaryInst(wabt::UnaryExpr* expr) {
     case wabt::Opcode::I32X4ExtaddPairwiseI16X8U:
     {
         Value* vec = irBuilder.CreateBitCast(p1, type.i16x8Type);
-        Value* undef = llvm::UndefValue::get(type.i16x8Type);
+        Value* undef = UndefValue::get(type.i16x8Type);
         Value* vec1 = irBuilder.CreateShuffleVector(vec,
                                         undef,
                                         (ArrayRef<int>){0, 2, 4, 6});
@@ -863,7 +862,7 @@ llvm::Value* BlockContext::createSIMDExtend(llvm::Value* vector, llvm::FixedVect
     using namespace llvm;
     vector = irBuilder.CreateBitCast(vector, vectorType);
     FixedVectorType* halfVectorType = FixedVectorType::getHalfElementsVectorType(vectorType);
-    Value* halfVector = llvm::UndefValue::get(halfVectorType);
+    Value* halfVector = UndefValue::get(halfVectorType);
     int elementCount = halfVectorType->getNumElements();
     int mask[elementCount];
     for(int i = startIdx; i < elementCount; i++)
@@ -1006,8 +1005,8 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
 
     #define EMIT_SIMD_BINARY_OP(llvmType, emitCode)                 \
     {                                                               \
-		llvm::Value* right = irBuilder.CreateBitCast(p2, llvmType); \
-		llvm::Value* left = irBuilder.CreateBitCast(p1, llvmType);  \
+		Value* right = irBuilder.CreateBitCast(p2, llvmType); \
+		Value* left = irBuilder.CreateBitCast(p1, llvmType);  \
 		ret = emitCode;                                             \
     }                         
 	                                                                                       
@@ -1020,10 +1019,10 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         break;
     case wabt::Opcode::I8X16AddSatU:
     {
-        llvm::Value* right = irBuilder.CreateBitCast(p1, type.i8x16Type);
-		llvm::Value* left = irBuilder.CreateBitCast(p2, type.i8x16Type);
-		llvm::Value* add = irBuilder.CreateAdd(left, right);
-        ret = irBuilder.CreateSelect(irBuilder.CreateICmpUGT(left, add), llvm::Constant::getAllOnesValue(left->getType()), add);
+        Value* right = irBuilder.CreateBitCast(p1, type.i8x16Type);
+		Value* left = irBuilder.CreateBitCast(p2, type.i8x16Type);
+		Value* add = irBuilder.CreateAdd(left, right);
+        ret = irBuilder.CreateSelect(irBuilder.CreateICmpUGT(left, add), Constant::getAllOnesValue(left->getType()), add);
     }
         break;
     case wabt::Opcode::I16X8Add:
@@ -1035,10 +1034,10 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         break;
     case wabt::Opcode::I16X8AddSatU:
     {
-        llvm::Value* right = irBuilder.CreateBitCast(p1, type.i16x8Type);
-        llvm::Value* left = irBuilder.CreateBitCast(p2, type.i16x8Type);
-        llvm::Value* add = irBuilder.CreateAdd(left, right);
-        ret = irBuilder.CreateSelect(irBuilder.CreateICmpUGT(left, add), llvm::Constant::getAllOnesValue(left->getType()), add);
+        Value* right = irBuilder.CreateBitCast(p1, type.i16x8Type);
+        Value* left = irBuilder.CreateBitCast(p2, type.i16x8Type);
+        Value* add = irBuilder.CreateAdd(left, right);
+        ret = irBuilder.CreateSelect(irBuilder.CreateICmpUGT(left, add), Constant::getAllOnesValue(left->getType()), add);
     }
         break;
     case wabt::Opcode::I32X4Add:
@@ -1063,9 +1062,9 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         break;
     case wabt::Opcode::I8X16SubSatU:
     {   
-        llvm::Value* right = irBuilder.CreateBitCast(p1, type.i8x16Type);
-		llvm::Value* left = irBuilder.CreateBitCast(p2, type.i8x16Type);
-        llvm::Value* flag = irBuilder.CreateICmp(llvm::CmpInst::ICMP_UGT, left, right);
+        Value* right = irBuilder.CreateBitCast(p1, type.i8x16Type);
+        Value* left = irBuilder.CreateBitCast(p2, type.i8x16Type);
+        Value* flag = irBuilder.CreateICmp(CmpInst::ICMP_UGT, left, right);
         ret = irBuilder.CreateSub(irBuilder.CreateSelect(flag, left, right), right);
     }
         break;   
@@ -1078,9 +1077,9 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         break;
     case wabt::Opcode::I16X8SubSatU:
     {
-        llvm::Value* right = irBuilder.CreateBitCast(p1, type.i16x8Type);
-        llvm::Value* left = irBuilder.CreateBitCast(p2, type.i16x8Type);
-        llvm::Value* flag = irBuilder.CreateICmp(llvm::CmpInst::ICMP_UGT, left, right);
+        Value* right = irBuilder.CreateBitCast(p1, type.i16x8Type);
+        Value* left = irBuilder.CreateBitCast(p2, type.i16x8Type);
+        Value* flag = irBuilder.CreateICmp(CmpInst::ICMP_UGT, left, right);
         ret = irBuilder.CreateSub(irBuilder.CreateSelect(flag, left, right), right);
     }
         break;
@@ -1123,13 +1122,13 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
     #define EMIT_SIMD_SHIFT_OP(llvmType, emitCode)                                                              \
     {                                                                                                           \
     	FixedVectorType* vectorType = llvmType;                                                                 \
-    	llvm::Type* scalarType = llvmType->getScalarType();                                                     \
+    	Type* scalarType = llvmType->getScalarType();                                                     \
         unsigned int numBits = scalarType->getIntegerBitWidth();                                                \
-        llvm::Value* mask = irBuilder.CreateAnd(p1, llvm::ConstantInt::get(p1->getType(), numBits - 1));        \
-    	llvm::Value* right = irBuilder.CreateVectorSplat(                                                       \
+        Value* mask = irBuilder.CreateAnd(p1, ConstantInt::get(p1->getType(), numBits - 1));        \
+    	Value* right = irBuilder.CreateVectorSplat(                                                       \
     		(unsigned int)vectorType->getNumElements(),                                                         \
     		irBuilder.CreateZExtOrTrunc(mask, scalarType));                                                     \
-    	llvm::Value* left = irBuilder.CreateBitCast(p2, llvmType);                                              \
+    	Value* left = irBuilder.CreateBitCast(p2, llvmType);                                              \
     	ret = emitCode;                                                                                         \
     }
     case wabt::Opcode::I8X16Shl:
@@ -1177,7 +1176,7 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
 		Value* left = irBuilder.CreateBitCast(p1, type.i8x16Type);                        
 		Value* rightZExt = irBuilder.CreateZExt(right, type.i16x16Type); 
 		Value* leftZExt = irBuilder.CreateZExt(left, type.i16x16Type);   
-		Value* oneZExt = llvm::ConstantVector::getSplat(                                   
+		Value* oneZExt = ConstantVector::getSplat(                                   
 			type.i8x16Type->getElementCount(),                          
 			ConstantInt::get(type.i16x16Type->getElementType(), 1));
 		ret = irBuilder.CreateTrunc(
@@ -1192,7 +1191,7 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
 		Value* left = irBuilder.CreateBitCast(p1, type.i16x8Type);                        
 		Value* rightZExt = irBuilder.CreateZExt(right, type.i32x8Type); 
 		Value* leftZExt = irBuilder.CreateZExt(left, type.i32x8Type);   
-		Value* oneZExt = llvm::ConstantVector::getSplat(                                   
+		Value* oneZExt = ConstantVector::getSplat(                                   
 			type.i16x8Type->getElementCount(),                          
 			ConstantInt::get(type.i32x8Type->getElementType(), 1));
 		ret = irBuilder.CreateTrunc(
@@ -1227,10 +1226,10 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::minnum, type.f64x2Type), {left,right}));
         break;        
     case wabt::Opcode::F32X4PMin:
-        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, right, left), right, left));
+        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(CmpInst::FCMP_OLT, right, left), right, left));
         break;        
     case wabt::Opcode::F64X2PMin:
-        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, right, left), right, left));
+        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(CmpInst::FCMP_OLT, right, left), right, left));
         break;                
     case wabt::Opcode::I8X16MaxS:
         EMIT_SIMD_BINARY_OP(type.i8x16Type, irBuilder.CreateSelect(irBuilder.CreateICmpSLT(left, right), right, left));
@@ -1257,10 +1256,10 @@ void BlockContext::visitBinaryInst(wabt::BinaryExpr* expr) {
         EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateCall(Intrinsic::getDeclaration(&ctx.llvmModule, Intrinsic::maxnum, type.f64x2Type), {left,right}));
         break;        
     case wabt::Opcode::F32X4PMax:
-        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, left, right), right, left));
+        EMIT_SIMD_BINARY_OP(type.f32x4Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(CmpInst::FCMP_OLT, left, right), right, left));
         break;        
     case wabt::Opcode::F64X2PMax:
-        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(llvm::CmpInst::FCMP_OLT, left, right), right, left));
+        EMIT_SIMD_BINARY_OP(type.f64x2Type, irBuilder.CreateSelect(irBuilder.CreateFCmp(CmpInst::FCMP_OLT, left, right), right, left));
         break;         
 
     case wabt::Opcode::I16X8Q15mulrSatS:
@@ -1658,8 +1657,8 @@ void BlockContext::visitCallInst(wabt::CallExpr* expr) {
     wabt::Func* wfunc = ctx.module->GetFunc(expr->var);
     wabt::Index paramCount = wfunc->GetNumParams();
     assert (target->getFunctionType()->getNumParams() == paramCount);
-    auto callArgsAlloca = (llvm::Value**)alloca(sizeof(llvm::Value*) * paramCount);
-    llvm::ArrayRef<llvm::Value*> callArgs = llvm::ArrayRef<llvm::Value*>(callArgsAlloca, paramCount);
+    auto callArgsAlloca = (Value**)alloca(sizeof(Value*) * paramCount);
+    ArrayRef<Value*> callArgs = ArrayRef<Value*>(callArgsAlloca, paramCount);
     // https://stackoverflow.com/questions/5458204/unsigned-int-reverse-iteration-with-for-loops
     for (wabt::Index i = paramCount; i-- > 0;) {
         callArgsAlloca[i] = popStack();
@@ -1712,12 +1711,12 @@ void BlockContext::visitCallIndirectInst(wabt::CallIndirectExpr* expr) {
     Value* funcPtr = irBuilder.CreateLoad(ptr->getType()->getPointerElementType(), ptr, "callind_funcptr");
     // Value* funcPtr = irBuilder.CreateExtractElement(table, index, "callind_funcptr");
     funcPtr = irBuilder.CreateBitOrPointerCast(funcPtr, PointerType::get(funcType, 0));
-    auto callArgsAlloca = (llvm::Value**)calloc(sizeof(llvm::Value*), paramCount);
+    auto callArgsAlloca = (Value**)calloc(sizeof(Value*), paramCount);
     // https://stackoverflow.com/questions/5458204/unsigned-int-reverse-iteration-with-for-loops
     for (wabt::Index i = paramCount; i-- > 0;) {
         callArgsAlloca[i] = popStack();
     }
-    llvm::ArrayRef<llvm::Value*> callArgs = llvm::ArrayRef<llvm::Value*>(callArgsAlloca, paramCount);
+    ArrayRef<Value*> callArgs = ArrayRef<Value*>(callArgsAlloca, paramCount);
     // TODO MultiValue
     assert(expr->decl.GetNumResults() <= 1);
     Value* ret = irBuilder.CreateCall(funcType, funcPtr, callArgs);
@@ -1927,9 +1926,9 @@ void BlockContext::visitTernaryInst(wabt::TernaryExpr* expr){
     switch (expr->opcode){
     case wabt::Opcode::V128BitSelect:
     {
-        llvm::Value* mask = irBuilder.CreateBitCast(p1, type.i64x2Type);
-        llvm::Value* falseValue = irBuilder.CreateBitCast(p2, type.i64x2Type);
-        llvm::Value* trueValue = irBuilder.CreateBitCast(p3, type.i64x2Type);
+        Value* mask = irBuilder.CreateBitCast(p1, type.i64x2Type);
+        Value* falseValue = irBuilder.CreateBitCast(p2, type.i64x2Type);
+        Value* trueValue = irBuilder.CreateBitCast(p3, type.i64x2Type);
 	    ret = irBuilder.CreateOr(irBuilder.CreateAnd(trueValue, mask),
 							  irBuilder.CreateAnd(falseValue, irBuilder.CreateNot(mask)));
     }
