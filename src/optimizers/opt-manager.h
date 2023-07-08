@@ -20,8 +20,6 @@
 
 #include "llvm/Transforms/Utils/Mem2Reg.h"
 
-#include "frontend/optimizers/stack.cpp"
-#include "frontend/optimizers/FunctionRenamer.cpp"
 using namespace llvm;
 
 namespace notdec::frontend::optimizers {

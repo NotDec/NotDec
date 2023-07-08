@@ -20,8 +20,8 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Module.h>
 
-#include "retdec/bin2llvmir/providers/abi/abi.h"
-// #include "retdec/bin2llvmir/utils/debug.h"
+#include "optimizers/retdec-stack/retdec-abi.h"
+#include "optimizers/retdec-stack/retdec-utils.h"
 
 namespace retdec {
 namespace bin2llvmir {

@@ -4,6 +4,7 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 * @copyright Modified by NotDec project
 */
+#include <iostream>
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -14,12 +15,13 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Operator.h>
 
-#include "frontend/optimizers/retdec-stack.h"
+#include "optimizers/retdec-stack/retdec-abi.h"
+#include "optimizers/retdec-stack/retdec-stack.h"
 
 // #include "retdec/bin2llvmir/analyses/reaching_definitions.h"
 // #include "retdec/bin2llvmir/optimizations/stack/stack.h"
 // #include "retdec/bin2llvmir/providers/asm_instruction.h"
-// #include "retdec/bin2llvmir/utils/ir_modifier.h"
+#include "optimizers/retdec-stack/retdec-ir-modifier.h"
 
 using namespace llvm;
 
@@ -44,32 +46,22 @@ StackAnalysis::StackAnalysis() :
 bool StackAnalysis::runOnModule(llvm::Module& m)
 {
 	_module = &m;
-	_config = ConfigProvider::getConfig(_module);
-	_abi = AbiProvider::getAbi(_module);
-	_dbgf = DebugFormatProvider::getDebugFormat(_module);
+	// TODO memleak
+	_abi = new Abi(_module);
 	return run();
 }
 
 bool StackAnalysis::runOnModuleCustom(
 		llvm::Module& m,
-		Config* c,
-		Abi* abi,
-		DebugFormat* dbgf)
+		Abi* abi)
 {
 	_module = &m;
-	_config = c;
 	_abi = abi;
-	_dbgf = dbgf;
 	return run();
 }
 
 bool StackAnalysis::run()
 {
-	if (_config == nullptr)
-	{
-		return false;
-	}
-
 	ReachingDefinitionsAnalysis RDA;
 	RDA.runOnModule(*_module, _abi);
 
@@ -84,10 +76,10 @@ bool StackAnalysis::run()
 
 			if (StoreInst *store = dyn_cast<StoreInst>(&i))
 			{
-				if (AsmInstruction::isLlvmToAsmInstruction(store))
-				{
-					continue;
-				}
+				// if (AsmInstruction::isLlvmToAsmInstruction(store))
+				// {
+				// 	continue;
+				// }
 
 				handleInstruction(
 						RDA,
@@ -143,10 +135,10 @@ void StackAnalysis::handleInstruction(
 		llvm::Type* type,
 		std::map<llvm::Value*, llvm::Value*>& val2val)
 {
-	LOG << llvmObjToString(inst) << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << llvmObjToString(inst) << std::endl;
 
 	auto root = SymbolicTree::PrecomputedRdaWithValueMap(RDA, val, &val2val);
-	LOG << root << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << root << std::endl;
 
 	// TODO 如果把sp map到0，则相关栈操作数最终可以化简到常量。
 	// 如果已经map了，则一般属于情况2和情况3
@@ -165,29 +157,29 @@ void StackAnalysis::handleInstruction(
 		}
 		if (!stackPtr)
 		{
-			LOG << "===> no SP" << std::endl;
+			std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> no SP" << std::endl;
 			return;
 		}
 	}
 
 	// 来自调试信息和来自用户配置的变量。
-	auto* debugSv = getDebugStackVariable(inst->getFunction(), root);
-	auto* configSv = getConfigStackVariable(inst->getFunction(), root);
+	// auto* debugSv = getDebugStackVariable(inst->getFunction(), root);
+	// auto* configSv = getConfigStackVariable(inst->getFunction(), root);
 
 	// 直接化简成stack offset
 	root.simplifyNode();
-	LOG << root << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << root << std::endl;
 
 	// 简化后重新获取试试
-	if (debugSv == nullptr)
-	{
-		debugSv = getDebugStackVariable(inst->getFunction(), root);
-	}
+	// if (debugSv == nullptr)
+	// {
+	// 	debugSv = getDebugStackVariable(inst->getFunction(), root);
+	// }
 
-	if (configSv == nullptr)
-	{
-		configSv = getConfigStackVariable(inst->getFunction(), root);
-	}
+	// if (configSv == nullptr)
+	// {
+	// 	configSv = getConfigStackVariable(inst->getFunction(), root);
+	// }
 
 	// 如果简化失败，就放弃
 	auto* ci = dyn_cast_or_null<ConstantInt>(root.value);
@@ -205,48 +197,51 @@ void StackAnalysis::handleInstruction(
 		}
 	}
 
-	LOG << "===> " << llvmObjToString(ci) << std::endl;
-	LOG << "===> " << ci->getSExtValue() << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(ci) << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << ci->getSExtValue() << std::endl;
 
 	std::string name = "";
 	Type* t = type;
 
-	if (debugSv)
-	{
-		name = debugSv->getName();
-		t = llvm_utils::stringToLlvmTypeDefault(_module, debugSv->type.getLlvmIr());
-	}
-	else if (configSv)
-	{
-		name = configSv->getName();
-		t = llvm_utils::stringToLlvmTypeDefault(_module, configSv->type.getLlvmIr());
-	}
+	// if (debugSv)
+	// {
+	// 	name = debugSv->getName();
+	// 	t = llvm_utils::stringToLlvmTypeDefault(_module, debugSv->type.getLlvmIr());
+	// }
+	// else if (configSv)
+	// {
+	// 	name = configSv->getName();
+	// 	t = llvm_utils::stringToLlvmTypeDefault(_module, configSv->type.getLlvmIr());
+	// }
 
 	std::string realName;
-	if (debugSv)
-	{
-		realName = debugSv->getName();
-	}
-	else if (configSv)
-	{
-		realName = configSv->getName();
-	}
+	// if (debugSv)
+	// {
+	// 	realName = debugSv->getName();
+	// }
+	// else if (configSv)
+	// {
+	// 	realName = configSv->getName();
+	// }
 
 	// offset 输入IrModifier，创建alloca指令
-	IrModifier irModif(_module, _config);
-	auto p = irModif.getStackVariable(
-			inst->getFunction(),
-			ci->getSExtValue(),
-			t,
-			name,
-			realName,
-			debugSv || configSv);
+	// IrModifier irModif(_module, _config);
+	// auto p = irModif.getStackVariable(
+	// 		inst->getFunction(),
+	// 		ci->getSExtValue(),
+	// 		t,
+	// 		name,
+	// 		realName,
+	// 		debugSv || configSv);
 
-	AllocaInst* a = p.first;
+	// 改为直接创建Alloca指令。
+	assert(inst->getFunction()->getInstructionCount() != 0);
+	AllocaInst* a = new AllocaInst(t, 0, (name.empty() ? "stack_var_" : (name + "_"))
+			+ std::to_string(ci->getSExtValue()), &*llvm::inst_begin(inst->getFunction()));
 
-	LOG << "===> " << llvmObjToString(a) << std::endl;
-	LOG << "===> " << llvmObjToString(inst) << std::endl;
-	LOG << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(a) << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(inst) << std::endl;
+	std::cerr << __FILE__ << ":" << __LINE__ << ": " << std::endl;
 
 	auto* s = dyn_cast<StoreInst>(inst);
 	auto* l = dyn_cast<LoadInst>(inst);
@@ -256,7 +251,7 @@ void StackAnalysis::handleInstruction(
 	{
 		auto* conv = IrModifier::convertValueToType(
 				s->getValueOperand(),
-				a->getType()->getElementType(),
+				a->getType()->getPointerElementType(),
 				inst);
 		new StoreInst(conv, a, inst);
 		_toRemove.insert(s);
@@ -265,7 +260,7 @@ void StackAnalysis::handleInstruction(
 	// 把相关的load替换为对alloca的load。
 	else if (l && l->getPointerOperand() == val)
 	{
-		auto* nl = new LoadInst(a, "", l);
+		auto* nl = new LoadInst(a->getType(), a, "", l);
 		auto* conv = IrModifier::convertValueToType(nl, l->getType(), l);
 		l->replaceAllUsesWith(conv);
 		_toRemove.insert(l);
@@ -309,71 +304,6 @@ std::optional<int> StackAnalysis::getBaseOffset(SymbolicTree& root)
 	}
 
 	return baseOffset;
-}
-
-/**
- * Find a value that is being added to the stack pointer register in \p root.
- * Find a debug variable with offset equal to this value.
- */
-const retdec::common::Object* StackAnalysis::getDebugStackVariable(
-		llvm::Function* fnc,
-		SymbolicTree& root)
-{
-	auto baseOffset = getBaseOffset(root);
-	if (!baseOffset.has_value())
-	{
-		return nullptr;
-	}
-
-	if (_dbgf == nullptr)
-	{
-		return nullptr;
-	}
-
-	auto* debugFnc = _dbgf->getFunction(_config->getFunctionAddress(fnc));
-	if (debugFnc == nullptr)
-	{
-		return nullptr;
-	}
-
-	for (auto& var : debugFnc->locals)
-	{
-		if (!var.getStorage().isStack())
-		{
-			continue;
-		}
-		if (var.getStorage().getStackOffset() == baseOffset)
-		{
-			return &var;
-		}
-	}
-
-	return nullptr;
-}
-
-const retdec::common::Object* StackAnalysis::getConfigStackVariable(
-		llvm::Function* fnc,
-		SymbolicTree& root)
-{
-	auto baseOffset = getBaseOffset(root);
-	if (!baseOffset.has_value())
-	{
-		return nullptr;
-	}
-
-	auto cfn = _config->getConfigFunction(fnc);
-	if (cfn && _config->getLlvmStackVariable(fnc, baseOffset.value()) == nullptr)
-	{
-		for (auto& var: cfn->locals)
-		{
-			if (var.getStorage().getStackOffset() == baseOffset)
-			{
-				return &var;
-			}
-		}
-	}
-
-	return nullptr;
 }
 
 } // namespace bin2llvmir

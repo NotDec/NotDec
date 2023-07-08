@@ -13,7 +13,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Pass.h>
 
-#include "frontend/optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
 // #include "retdec/bin2llvmir/analyses/symbolic_tree.h"
 // #include "retdec/bin2llvmir/providers/abi/abi.h"
 // #include "retdec/bin2llvmir/providers/config.h"
@@ -30,9 +30,8 @@ class StackAnalysis : public llvm::ModulePass
 		virtual bool runOnModule(llvm::Module& m) override;
 		bool runOnModuleCustom(
 				llvm::Module& m,
-				Config* c,
-				Abi* abi,
-				DebugFormat* dbgf = nullptr);
+				Abi* abi
+				);
 
 	private:
 		bool run();
@@ -43,18 +42,10 @@ class StackAnalysis : public llvm::ModulePass
 				llvm::Type* type,
 				std::map<llvm::Value*, llvm::Value*>& val2val);
 		std::optional<int> getBaseOffset(SymbolicTree &root);
-		const retdec::common::Object* getDebugStackVariable(
-				llvm::Function* fnc,
-				SymbolicTree& root);
-		const retdec::common::Object* getConfigStackVariable(
-				llvm::Function* fnc,
-				SymbolicTree& root);
 
 	private:
 		llvm::Module* _module = nullptr;
-		Config* _config = nullptr;
 		Abi* _abi = nullptr;
-		DebugFormat* _dbgf = nullptr;
 
 		std::unordered_set<llvm::Value*> _toRemove;
 };

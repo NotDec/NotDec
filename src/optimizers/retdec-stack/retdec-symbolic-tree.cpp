@@ -11,13 +11,13 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Operator.h>
 
-#include "retdec/utils/string.h"
-#include "retdec/bin2llvmir/analyses/symbolic_tree.h"
-#include "retdec/bin2llvmir/utils/llvm.h"
-#include "retdec/bin2llvmir/providers/asm_instruction.h"
-#include "retdec/bin2llvmir/providers/config.h"
-#include "retdec/bin2llvmir/utils/debug.h"
-#include "retdec/bin2llvmir/utils/symbolic_tree_match.h"
+// #include "retdec/utils/string.h"
+#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+// #include "retdec/bin2llvmir/utils/llvm.h"
+// #include "retdec/bin2llvmir/providers/asm_instruction.h"
+// #include "retdec/bin2llvmir/providers/config.h"
+// #include "optimizers/retdec-stack/retdec-utils.h"
+#include "optimizers/retdec-stack/retdec-symbolic-tree-match.h"
 
 using namespace llvm;
 using namespace retdec::bin2llvmir::st_match;
@@ -26,6 +26,42 @@ using namespace retdec::bin2llvmir::st_match;
 
 namespace retdec {
 namespace bin2llvmir {
+
+/**
+ * Skips both casts and getelementptr instructions and constant expressions.
+ */
+llvm::Value* skipCasts(llvm::Value* val)
+{
+	while (true)
+	{
+		if (auto* c = dyn_cast_or_null<CastInst>(val))
+		{
+			val = c->getOperand(0);
+		}
+		else if (auto* p = dyn_cast_or_null<GetElementPtrInst>(val))
+		{
+			val = p->getOperand(0);
+		}
+		else if (auto* ce = dyn_cast_or_null<ConstantExpr>(val))
+		{
+			if (ce->isCast()
+					|| ce->getOpcode() == Instruction::GetElementPtr)
+			{
+				val = ce->getOperand(0);
+			}
+			else
+			{
+				return val;
+			}
+		}
+		else
+		{
+			return val;
+		}
+	}
+
+	return val;
+}
 
 SymbolicTree SymbolicTree::PrecomputedRda(
 		ReachingDefinitionsAnalysis& rda,
@@ -148,21 +184,6 @@ void SymbolicTree::expandNode(
 	{
 		if (!_trackThroughAllocaLoads
 				&& isa<AllocaInst>(l->getPointerOperand()))
-		{
-			return;
-		}
-
-		if (_trackOnlyFlagRegisters
-				&& _abi
-				&& _abi->isRegister(l->getPointerOperand())
-				&& !_abi->isFlagRegister(l->getPointerOperand()))
-		{
-			return;
-		}
-
-		if (!_trackThroughGeneralRegisterLoads
-				&& _abi
-				&& _abi->isGeneralPurposeRegister(l->getPointerOperand()))
 		{
 			return;
 		}
@@ -304,16 +325,16 @@ void SymbolicTree::expandNode(
 					linear);
 		}
 	}
-	else if (isa<AllocaInst>(value)
-			|| isa<CallInst>(value)
-			|| (_abi
-					&& _abi->isRegister(value)
-					&& !_abi->isStackPointerRegister(value)
-					&& !_abi->isZeroRegister(value)
-					&& value != _abi->getRegister(MIPS_REG_GP, _abi->isMips())))
-	{
-		// nothing
-	}
+	// else if (isa<AllocaInst>(value)
+	// 		|| isa<CallInst>(value)
+	// 		|| (_abi
+	// 				&& _abi->isRegister(value)
+	// 				&& !_abi->isStackPointerRegister(value)
+	// 				&& !_abi->isZeroRegister(value)
+	// 				&& value != _abi->getRegister(MIPS_REG_GP, _abi->isMips())))
+	// {
+	// 	// nothing
+	// }
 	else if (_simplifyAtCreation
 			&& (isa<CastInst>(value) || isa<ConstantExpr>(value)))
 	{
@@ -406,17 +427,6 @@ void SymbolicTree::_simplifyNode()
 	{
 		*this = std::move(ops[0]);
 	}
-	// MIPS, use function address for t9.
-	//
-	else if (_abi->isMips()
-			&& match(*this, m_Load(
-					m_Specific(_abi->getRegister(MIPS_REG_T9)),
-					&load)))
-	{
-		auto addr = AsmInstruction::getFunctionAddress(load->getFunction());
-		value = ConstantInt::get(load->getType(), addr);
-		ops.clear();
-	}
 	else if (match(*this, m_Load(m_GlobalVariable(global), &load))
 			&& global == load->getPointerOperand()
 			&& ops[0].ops.size() == 1)
@@ -424,8 +434,8 @@ void SymbolicTree::_simplifyNode()
 		*this = std::move(ops[0].ops[0]);
 	}
 	else if (match(*this, m_Load(m_Value(val), &load))
-			&& (isa<AllocaInst>(llvm_utils::skipCasts(load->getPointerOperand()))
-			|| isa<GlobalVariable>(llvm_utils::skipCasts(load->getPointerOperand()))))
+			&& (isa<AllocaInst>(skipCasts(load->getPointerOperand()))
+			|| isa<GlobalVariable>(skipCasts(load->getPointerOperand()))))
 	{
 		*this = std::move(ops[0]);
 	}
@@ -459,16 +469,16 @@ void SymbolicTree::_simplifyNode()
 		ops.clear();
 	}
 	// 全局变量常量（没有被load过）
-	else if (match(*this, m_Add(m_GlobalVariable(global), m_ConstantInt(c1)))
-			&& ops[0].user && !isa<LoadInst>(ops[0].user)
-			&& _config)
-	{
-		if (auto addr = _config->getGlobalAddress(global))
-		{
-			value = ConstantInt::get(c1->getType(), addr + c1->getSExtValue());
-			ops.clear();
-		}
-	}
+	// else if (match(*this, m_Add(m_GlobalVariable(global), m_ConstantInt(c1)))
+	// 		&& ops[0].user && !isa<LoadInst>(ops[0].user)
+	// 		&& _config)
+	// {
+	// 	if (auto addr = _config->getGlobalAddress(global))
+	// 	{
+	// 		value = ConstantInt::get(c1->getType(), addr + c1->getSExtValue());
+	// 		ops.clear();
+	// 	}
+	// }
 	else if (match(*this, m_Add(m_Value(), m_Zero()))
 			|| match(*this, m_Sub(m_Value(), m_Zero())))
 	{
@@ -510,33 +520,33 @@ void SymbolicTree::_simplifyNode()
  * >|   76092
  *
  */
-void SymbolicTree::solveMemoryLoads(FileImage* image)
-{
-	for (auto &o : ops)
-	{
-		o.solveMemoryLoads(image);
-	}
+// void SymbolicTree::solveMemoryLoads(FileImage* image)
+// {
+// 	for (auto &o : ops)
+// 	{
+// 		o.solveMemoryLoads(image);
+// 	}
 
-	auto* t = dyn_cast<IntegerType>(value->getType());
-	if (isa<LoadInst>(value)
-			&& t
-			&& ops.size() == 1
-			&& isa<ConstantInt>(ops[0].value))
-	{
-		auto* ci = cast<ConstantInt>(ops[0].value);
-		auto* seg = image->getImage()->getSegmentFromAddress(ci->getZExtValue());
-		auto* sec = seg ? seg->getSecSeg() : nullptr;
-		if (seg && (sec == nullptr || !sec->isBss()))
-		{
-			auto* res = image->getConstantInt(t, ci->getZExtValue());
-			if (res)
-			{
-				value = res;
-				ops.clear();
-			}
-		}
-	}
-}
+// 	auto* t = dyn_cast<IntegerType>(value->getType());
+// 	if (isa<LoadInst>(value)
+// 			&& t
+// 			&& ops.size() == 1
+// 			&& isa<ConstantInt>(ops[0].value))
+// 	{
+// 		auto* ci = cast<ConstantInt>(ops[0].value);
+// 		auto* seg = image->getImage()->getSegmentFromAddress(ci->getZExtValue());
+// 		auto* sec = seg ? seg->getSecSeg() : nullptr;
+// 		if (seg && (sec == nullptr || !sec->isBss()))
+// 		{
+// 			auto* res = image->getConstantInt(t, ci->getZExtValue());
+// 			if (res)
+// 			{
+// 				value = res;
+// 				ops.clear();
+// 			}
+// 		}
+// 	}
+// }
 
 SymbolicTree* SymbolicTree::getMaxIntValue()
 {
@@ -574,14 +584,18 @@ SymbolicTree* SymbolicTree::getMaxIntValue()
 	return max;
 }
 
+std::string getIndentation(std::size_t count, char c = '\t') {
+	return std::string(count, c);
+}
+
 std::string SymbolicTree::print(unsigned indent) const
 {
 	std::stringstream out;
 	if (Function* F = dyn_cast<Function>(value))
-		out << retdec::utils::getIndentation(indent) << ">| "
+		out << getIndentation(indent) << ">| "
 			<< F->getName().str() << std::endl;
 	else
-		out << retdec::utils::getIndentation(indent) << ">| "
+		out << getIndentation(indent) << ">| "
 			<< llvmObjToString(value) << std::endl;
 
 	++indent;
@@ -712,7 +726,7 @@ bool SymbolicTree::isNary(unsigned N) const
 //
 
 Abi* SymbolicTree::_abi = nullptr;
-Config* SymbolicTree::_config = nullptr;
+// Config* SymbolicTree::_config = nullptr;
 bool SymbolicTree::_val2valUsed = false;
 bool SymbolicTree::_trackThroughAllocaLoads = true;
 bool SymbolicTree::_trackThroughGeneralRegisterLoads = true;
@@ -723,7 +737,7 @@ unsigned SymbolicTree::_naryLimit = 3;
 void SymbolicTree::clear()
 {
 	_abi = nullptr;
-	_config = nullptr;
+	// _config = nullptr;
 	setToDefaultConfiguration();
 }
 
@@ -747,10 +761,10 @@ void SymbolicTree::setAbi(Abi* abi)
 	_abi = abi;
 }
 
-void SymbolicTree::setConfig(Config* config)
-{
-	_config = config;
-}
+// void SymbolicTree::setConfig(Config* config)
+// {
+// 	_config = config;
+// }
 
 void SymbolicTree::setTrackThroughAllocaLoads(bool b)
 {

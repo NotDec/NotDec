@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <iostream>
 
 #include <llvm/ADT/PostOrderIterator.h>
 #include <llvm/IR/CFG.h>
@@ -16,14 +17,14 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "retdec/utils/time.h"
-#include "retdec/bin2llvmir/analyses/reaching_definitions.h"
-#include "retdec/bin2llvmir/providers/asm_instruction.h"
-#include "retdec/bin2llvmir/providers/names.h"
-#define debug_enabled false
-#include "retdec/bin2llvmir/utils/llvm.h"
+// #include "retdec/utils/time.h"
+#include "optimizers/retdec-stack/retdec-reaching-definition.h"
+// #include "retdec/bin2llvmir/providers/asm_instruction.h"
+// #include "retdec/bin2llvmir/providers/names.h"
+// #define debug_enabled false
+// #include "retdec/bin2llvmir/utils/llvm.h"
 
-using namespace retdec::utils;
+// using namespace retdec::utils;
 using namespace llvm;
 
 namespace retdec {
@@ -42,7 +43,7 @@ bool ReachingDefinitionsAnalysis::runOnModule(
 {
 	_trackFlagRegs = trackFlagRegs;
 	_abi = abi;
-	_specialGlobal = AsmInstruction::getLlvmToAsmGlobalVariable(&M);
+	// _specialGlobal = AsmInstruction::getLlvmToAsmGlobalVariable(&M);
 
 	clear();
 	initializeBasicBlocks(M);
@@ -59,7 +60,7 @@ bool ReachingDefinitionsAnalysis::runOnFunction(
 {
 	_trackFlagRegs = trackFlagRegs;
 	_abi = abi;
-	_specialGlobal = AsmInstruction::getLlvmToAsmGlobalVariable(F.getParent());
+	// _specialGlobal = AsmInstruction::getLlvmToAsmGlobalVariable(F.getParent());
 
 	clear();
 	initializeBasicBlocks(F);
@@ -76,7 +77,7 @@ void ReachingDefinitionsAnalysis::run()
 	propagate();
 	initializeDefsAndUses();
 
-	LOG << *this << "\n";
+	std::cerr << *this << "\n";
 
 	clearInternal();
 }
@@ -106,12 +107,6 @@ void ReachingDefinitionsAnalysis::initializeBasicBlocks(llvm::Function& F)
 				{
 					continue;
 				}
-				if (!_trackFlagRegs
-						&& _abi
-						&& _abi->isFlagRegister(l->getPointerOperand()))
-				{
-					continue;
-				}
 
 				bbe.uses.push_back(Use(l, l->getPointerOperand(), insnPos));
 			}
@@ -119,12 +114,6 @@ void ReachingDefinitionsAnalysis::initializeBasicBlocks(llvm::Function& F)
 			{
 				if (!isa<GlobalVariable>(p2i->getPointerOperand())
 						&& !isa<AllocaInst>(p2i->getPointerOperand()))
-				{
-					continue;
-				}
-				if (!_trackFlagRegs
-						&& _abi
-						&& _abi->isFlagRegister(p2i->getPointerOperand()))
 				{
 					continue;
 				}
@@ -138,12 +127,6 @@ void ReachingDefinitionsAnalysis::initializeBasicBlocks(llvm::Function& F)
 				{
 					continue;
 				}
-				if (!_trackFlagRegs
-						&& _abi
-						&& _abi->isFlagRegister(gep->getPointerOperand()))
-				{
-					continue;
-				}
 
 				bbe.uses.push_back(Use(gep, gep->getPointerOperand(), insnPos));
 			}
@@ -154,16 +137,10 @@ void ReachingDefinitionsAnalysis::initializeBasicBlocks(llvm::Function& F)
 				{
 					continue;
 				}
-				if (!_trackFlagRegs
-						&& _abi
-						&& _abi->isFlagRegister(s->getPointerOperand()))
-				{
-					continue;
-				}
-				if (I.getOperand(1) == _specialGlobal)
-				{
-					continue;
-				}
+				// if (I.getOperand(1) == _specialGlobal)
+				// {
+				// 	continue;
+				// }
 
 				bbe.defs.push_back(Definition(s, s->getPointerOperand(), insnPos));
 			}
@@ -173,17 +150,10 @@ void ReachingDefinitionsAnalysis::initializeBasicBlocks(llvm::Function& F)
 			}
 			else if (auto* call = dyn_cast<CallInst>(&I))
 			{
-				unsigned args = call->getNumArgOperands();
+				unsigned args = call->getNumOperands();
 				for (unsigned i=0; i<args; ++i)
 				{
 					Value *a = call->getArgOperand(i);
-
-					if (!_trackFlagRegs
-							&& _abi
-							&& _abi->isFlagRegister(a))
-					{
-						continue;
-					}
 
 					if (isa<AllocaInst>(a) || isa<GlobalVariable>(a))
 					{
@@ -444,7 +414,7 @@ std::string BasicBlockEntry::getName() const
 	std::stringstream out;
 	std::string name = bb->getName().str();
 	if (name.empty())
-		out << names::generatedBasicBlockPrefix << id;
+		out << "dec_label_pc_" << id;
 	else
 		out << name;
 	return out.str();

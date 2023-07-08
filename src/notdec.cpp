@@ -6,7 +6,7 @@
 
 #ifdef NOTDEC_ENABLE_WASM
 #include "frontend/wasm/parser.h"
-#include "frontend/optimizers/opt-manager.h"
+#include "optimizers/opt-manager.h"
 #endif
 
 //https://llvm.org/docs/CommandLine.html

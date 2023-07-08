@@ -20,7 +20,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 
-#include "frontend/optimizers/retdec-stack/retdec-reaching-definition.h"
+#include "optimizers/retdec-stack/retdec-reaching-definition.h"
 // #include "retdec/bin2llvmir/analyses/reaching_definitions.h"
 // #include "retdec/bin2llvmir/providers/fileimage.h"
 
@@ -115,7 +115,7 @@ class SymbolicTree
 		unsigned getLevel() const;
 
 		void simplifyNode();
-		void solveMemoryLoads(FileImage* image);
+		// void solveMemoryLoads(FileImage* image);
 
 		SymbolicTree* getMaxIntValue();
 
@@ -139,7 +139,7 @@ class SymbolicTree
 		static void clear();
 		static bool isVal2ValMapUsed();
 		static void setAbi(Abi* abi);
-		static void setConfig(Config* config);
+		// static void setConfig(Config* config);
 		static void setToDefaultConfiguration();
 		static void setTrackThroughAllocaLoads(bool b);
 		static void setTrackThroughGeneralRegisterLoads(bool b);
@@ -149,7 +149,7 @@ class SymbolicTree
 
 	private:
 		static Abi* _abi;
-		static Config* _config;
+		// static Config* _config;
 		static bool _val2valUsed;
 		static bool _trackThroughAllocaLoads;
 		static bool _trackThroughGeneralRegisterLoads;

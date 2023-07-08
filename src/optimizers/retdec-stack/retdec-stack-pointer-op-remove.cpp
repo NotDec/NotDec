@@ -6,18 +6,20 @@
 
 #include <cassert>
 #include <iomanip>
+#include <iostream>
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 
-#include "retdec/bin2llvmir/utils/llvm.h"
-#include "retdec/utils/string.h"
-#include "retdec/bin2llvmir/optimizations/stack_pointer_ops/stack_pointer_ops.h"
-#include "retdec/bin2llvmir/utils/debug.h"
+#include "optimizers/retdec-stack/retdec-abi.h"
+#include "optimizers/retdec-stack/retdec-utils.h"
+// #include "retdec/utils/string.h"
+#include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
+// #include "retdec/bin2llvmir/utils/debug.h"
 
 
-using namespace retdec::utils;
+// using namespace retdec::utils;
 using namespace llvm;
 
 #define debug_enabled false
@@ -43,7 +45,8 @@ StackPointerOpsRemove::StackPointerOpsRemove() :
 bool StackPointerOpsRemove::runOnModule(Module& m)
 {
 	_module = &m;
-	_abi = AbiProvider::getAbi(_module);
+	// TODO memleak
+	_abi = new Abi(_module);
 	return run();
 }
 
@@ -71,7 +74,7 @@ bool StackPointerOpsRemove::removeStackPointerStores()
 {
 	if (_abi == nullptr)
 	{
-		LOG << "[ABORT] ABI is not available\n";
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "[ABORT] ABI is not available\n";
 		return false;
 	}
 
@@ -97,7 +100,7 @@ bool StackPointerOpsRemove::removeStackPointerStores()
 					continue;
 				}
 
-				LOG << "erase: " << llvmObjToString(inst) << std::endl;
+				std::cerr << __FILE__ << ":" << __LINE__ << ": " << "erase: " << llvmObjToString(inst) << std::endl;
 				inst->eraseFromParent();
 				changed = true;
 			}
@@ -133,14 +136,14 @@ bool StackPointerOpsRemove::removePreservationStores()
 				if (auto* s = dyn_cast<StoreInst>(u))
 				{
 					auto* l = dyn_cast<LoadInst>(s->getValueOperand());
-					if (l && storedVal == nullptr
-							&& (_abi->isRegister(l->getPointerOperand(), X86_REG_EBP)
-							|| _abi->isRegister(l->getPointerOperand(), X86_REG_RBP)))
-					{
-						storedVal = l->getPointerOperand();
-						toRemove.insert(s);
-					}
-					else if (l && l->getPointerOperand() == storedVal)
+					// if (l && storedVal == nullptr
+					// 		&& (_abi->isRegister(l->getPointerOperand(), X86_REG_EBP)
+					// 		|| _abi->isRegister(l->getPointerOperand(), X86_REG_RBP)))
+					// {
+					// 	storedVal = l->getPointerOperand();
+					// 	toRemove.insert(s);
+					// } else
+					if (l && l->getPointerOperand() == storedVal)
 					{
 						toRemove.insert(s);
 					}
@@ -155,14 +158,14 @@ bool StackPointerOpsRemove::removePreservationStores()
 					for (auto* uu : u->users())
 					{
 						auto* s = dyn_cast<StoreInst>(uu);
-						if (s && storedVal == nullptr
-								&& (_abi->isRegister(s->getPointerOperand(), X86_REG_EBP)
-								|| _abi->isRegister(s->getPointerOperand(), X86_REG_RBP)))
-						{
-							storedVal = s->getPointerOperand();
-							toRemove.insert(s);
-						}
-						else if (s && s->getPointerOperand() == storedVal)
+						// if (s && storedVal == nullptr
+						// 		&& (_abi->isRegister(s->getPointerOperand(), X86_REG_EBP)
+						// 		|| _abi->isRegister(s->getPointerOperand(), X86_REG_RBP)))
+						// {
+						// 	storedVal = s->getPointerOperand();
+						// 	toRemove.insert(s);
+						// } else
+						if (s && s->getPointerOperand() == storedVal)
 						{
 							toRemove.insert(s);
 						}

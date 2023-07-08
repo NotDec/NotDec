@@ -11,7 +11,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Pass.h>
 
-// #include "retdec/bin2llvmir/providers/abi/abi.h"
+#include "optimizers/retdec-stack/retdec-abi.h"
 
 namespace retdec {
 namespace bin2llvmir {
