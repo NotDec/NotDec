@@ -46,3 +46,15 @@ vscode代码搜索方法：基于`src/retdec-decompiler/decompiler-config.json`�
 - retdec-write-bc：
 - retdec-llvmir2hll：
 
+
+### retdec 栈恢复源码解读
+
+源码在`retdec\src\bin2llvmir\optimizations\stack\stack.cpp`
+
+大体要做的，是把栈指针的偏移访问，都改成alloca。
+1. 函数开头sub了栈指针，改成对应大小的alloca
+1. 处理load/store
+    - 如果是load：改为对对应alloca的对应偏移的load
+    - 如果是store：改为对对应alloca的对应偏移的store
+
+在上面算法的基础上，增加一个map，从变量映射到栈偏移。然后在load和store的时候尝试将ptr解析为栈指针的偏移。然后在对应大小的地方创建变量。

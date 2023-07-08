@@ -7,6 +7,15 @@
 - 这个[PPT](https://github.com/GrammaTech/retypd/blob/master/reference/presentation_slides.pdf)比论文容易懂很多
 
 
+#### monoid
+
+读《Haskell趣学指南》的Monoids一节，理解一下。
+
+### unification-based type inference algorithms
+
+https://www.cs.cornell.edu/courses/cs3110/2011sp/Lectures/lec26-type-inference/type-inference.htm
+
+
 #### retypd+ghidra 配置
 
 参考[GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)](https://github.com/GrammaTech/retypd-ghidra-plugin)

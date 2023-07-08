@@ -9,6 +9,7 @@
 - [Ghidra](ghidra.md)
 - [RetDec](retdec.md)
 - [Retypd](retypd.md)
+- [Papers](papers.md)
 - [Other Notes](basics/README.md)
     - [C++](basics/C++.md)
     - [CMake](basics/cmake.md)
