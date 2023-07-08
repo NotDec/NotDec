@@ -20,11 +20,13 @@
 
 #include "llvm/Transforms/Utils/Mem2Reg.h"
 
+#include "frontend/context.h"
+
 using namespace llvm;
 
 namespace notdec::frontend::optimizers {
 
-void run_passes(llvm::Module& mod);
+void run_passes(llvm::Module& mod, notdec::frontend::options opts);
 llvm::FunctionPassManager buildFunctionOptimizations();
 
 }

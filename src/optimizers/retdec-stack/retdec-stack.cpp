@@ -14,6 +14,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Operator.h>
+#include <llvm/IR/PassManager.h>
 
 #include "optimizers/retdec-stack/retdec-abi.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
@@ -28,27 +29,15 @@ using namespace llvm;
 namespace retdec {
 namespace bin2llvmir {
 
-char StackAnalysis::ID = 0;
-
-static RegisterPass<StackAnalysis> X(
-		"retdec-stack",
-		"Stack optimization",
-		false, // Only looks at CFG
-		false // Analysis Pass
-);
-
-StackAnalysis::StackAnalysis() :
-		ModulePass(ID)
-{
-
-}
-
-bool StackAnalysis::runOnModule(llvm::Module& m)
-{
-	_module = &m;
+PreservedAnalyses StackAnalysis::run(Module &M, ModuleAnalysisManager &AM) {
+	_module = &M;
 	// TODO memleak
 	_abi = new Abi(_module);
-	return run();
+	if (run()) {
+		return PreservedAnalyses::none();
+	} else {
+		return PreservedAnalyses::all();
+	}
 }
 
 bool StackAnalysis::runOnModuleCustom(

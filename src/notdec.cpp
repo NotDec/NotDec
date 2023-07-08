@@ -12,8 +12,8 @@
 //https://llvm.org/docs/CommandLine.html
 static cl::opt<std::string> inputFilename("i",cl::desc("input wasm/wat file"), cl::value_desc("wasm/wat"),cl::Required);
 static cl::opt<std::string> outputFilename("o",cl::desc("Specify output filename"), cl::value_desc("output.ll"),cl::Optional);
-static cl::opt<bool> recompile ("recompile", cl::desc("Enable recompile"),cl::init(false));
-static cl::opt<bool> compatMode ("compat-mode", cl::desc("Enable compat mode"),cl::init(true));
+static cl::opt<bool> recompile ("recompile", cl::desc("Enable recompile mode, only perform lifting and optimization, not performing further decompilation like stack recovery."),cl::init(false));
+static cl::opt<bool> compatMode ("compat-mode", cl::desc("Make IR more compatible, e.g., rename main function to main."),cl::init(true));
 static cl::opt<bool> disablePass ("disable-pass", cl::desc("Disable all passes"),cl::init(false));
 
 cl::opt<log_level> logLevel("log-level",cl::desc("Choose log level:"),
@@ -68,7 +68,7 @@ int main(int argc, char * argv[]) {
 
     //run passes and dump IR
     if (!disablePass) {
-        notdec::frontend::optimizers::run_passes(ctx.mod);
+        notdec::frontend::optimizers::run_passes(ctx.mod, opts);
     }
     std::string outsuffix = getSuffix(outputFilename);
     if (outsuffix == ".ll") {

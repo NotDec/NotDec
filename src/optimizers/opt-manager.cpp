@@ -1,4 +1,6 @@
 #include "optimizers/opt-manager.h"
+#include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
+#include "optimizers/retdec-stack/retdec-stack.h"
 #include "llvm/Transforms/Scalar/DCE.h"
 #include <algorithm>
 
@@ -40,7 +42,7 @@ struct HelloModule : PassInfoMixin<HelloWorld> {
   static bool isRequired() { return true; }
 };
 
-void run_passes(llvm::Module& mod) {
+void run_passes(llvm::Module& mod, notdec::frontend::options opts) {
     // Create the analysis managers.
     LoopAnalysisManager LAM;
     FunctionAnalysisManager FAM;
@@ -71,6 +73,12 @@ void run_passes(llvm::Module& mod) {
     //MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
     //MPM.addPass(createModuleToFunctionPassAdaptor(llvm::DCEPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+
+    // if not recompile then decompile.
+    if (!opts.recompile) {
+      MPM.addPass(retdec::bin2llvmir::StackAnalysis());
+      MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove());
+    }
     MPM.run(mod, MAM);
 }
 

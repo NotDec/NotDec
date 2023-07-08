@@ -11,7 +11,7 @@
 #include <unordered_set>
 
 #include <llvm/IR/Module.h>
-#include <llvm/Pass.h>
+#include <llvm/IR/PassManager.h>
 
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
 // #include "retdec/bin2llvmir/analyses/symbolic_tree.h"
@@ -21,13 +21,12 @@
 
 namespace retdec {
 namespace bin2llvmir {
-
-class StackAnalysis : public llvm::ModulePass
+using namespace llvm;
+class StackAnalysis : public llvm::PassInfoMixin<StackAnalysis>
 {
 	public:
-		static char ID;
-		StackAnalysis();
-		virtual bool runOnModule(llvm::Module& m) override;
+		StackAnalysis() = default;
+		PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 		bool runOnModuleCustom(
 				llvm::Module& m,
 				Abi* abi

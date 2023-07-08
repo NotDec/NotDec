@@ -150,7 +150,7 @@ void ReachingDefinitionsAnalysis::initializeBasicBlocks(llvm::Function& F)
 			}
 			else if (auto* call = dyn_cast<CallInst>(&I))
 			{
-				unsigned args = call->getNumOperands();
+				unsigned args = call->arg_size();
 				for (unsigned i=0; i<args; ++i)
 				{
 					Value *a = call->getArgOperand(i);

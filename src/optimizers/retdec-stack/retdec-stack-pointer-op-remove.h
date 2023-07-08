@@ -9,19 +9,20 @@
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Pass.h>
+#include <llvm/IR/PassManager.h>
 
 #include "optimizers/retdec-stack/retdec-abi.h"
 
 namespace retdec {
 namespace bin2llvmir {
 
-class StackPointerOpsRemove : public llvm::ModulePass
+using namespace llvm;
+
+class StackPointerOpsRemove : public llvm::PassInfoMixin<StackPointerOpsRemove>
 {
 	public:
-		static char ID;
-		StackPointerOpsRemove();
-		virtual bool runOnModule(llvm::Module& m) override;
+		StackPointerOpsRemove() = default;
+		PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 		bool runOnModuleCustom(llvm::Module& m, Abi* a);
 
 	private:

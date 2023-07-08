@@ -27,27 +27,16 @@ using namespace llvm;
 namespace retdec {
 namespace bin2llvmir {
 
-// char StackPointerOpsRemove::ID = 0;
-
-// static RegisterPass<StackPointerOpsRemove> X(
-// 		"retdec-stack-ptr-op-remove",
-// 		"Stack pointer operations optimization",
-// 		false, // Only looks at CFG
-// 		false // Analysis Pass
-// );
-
-StackPointerOpsRemove::StackPointerOpsRemove() :
-		ModulePass(ID)
+PreservedAnalyses StackPointerOpsRemove::run(Module &M, ModuleAnalysisManager &AM)
 {
-
-}
-
-bool StackPointerOpsRemove::runOnModule(Module& m)
-{
-	_module = &m;
+	_module = &M;
 	// TODO memleak
 	_abi = new Abi(_module);
-	return run();
+	if (run()) {
+		return PreservedAnalyses::none();
+	} else {
+		return PreservedAnalyses::all();
+	}
 }
 
 bool StackPointerOpsRemove::runOnModuleCustom(llvm::Module& m, Abi* a)

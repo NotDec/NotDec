@@ -276,6 +276,11 @@ Value* convertToType(
 	return conv;
 }
 
+Value* IrModifier::convertValueToType(Value* val, Type* type, Instruction* before)
+{
+	return convertToType(val, type, before, nullptr, false);
+}
+
 void _eraseUnusedInstructionRecursive(
 		const std::unordered_set<llvm::Value*>& workset)
 {

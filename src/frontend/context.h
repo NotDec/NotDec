@@ -1,6 +1,8 @@
 #ifndef _NOTDEC_FRONTEND_CONTEXT_H_
 #define _NOTDEC_FRONTEND_CONTEXT_H_
 
+#include <map>
+
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
