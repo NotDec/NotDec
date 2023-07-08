@@ -15,6 +15,7 @@ static cl::opt<std::string> outputFilename("o",cl::desc("Specify output filename
 static cl::opt<bool> recompile ("recompile", cl::desc("Enable recompile mode, only perform lifting and optimization, not performing further decompilation like stack recovery."),cl::init(false));
 static cl::opt<bool> compatMode ("compat-mode", cl::desc("Make IR more compatible, e.g., rename main function to main."),cl::init(true));
 static cl::opt<bool> disablePass ("disable-pass", cl::desc("Disable all passes"),cl::init(false));
+static cl::opt<bool> expandMem ("expand-mem", cl::desc("for debug purpose, not expand mem to real size"),cl::init(true));
 
 cl::opt<log_level> logLevel("log-level",cl::desc("Choose log level:"),
     cl::values(
@@ -43,6 +44,7 @@ int main(int argc, char * argv[]) {
     opts.recompile = recompile;
     opts.compat_mode = compatMode;
     opts.log_level = logLevel;
+    opts.expandMem = expandMem;
 
     std::string insuffix = getSuffix(inputFilename);
     notdec::frontend::BaseContext ctx(inputFilename, opts);

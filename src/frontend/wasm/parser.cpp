@@ -267,6 +267,12 @@ llvm::GlobalVariable* Context::visitDataSegment(wabt::DataSegment& ds) {
     // LLVM side mem manipulation
     GlobalVariable* mem = this->mems.at(index);
     Type* memty = mem->getValueType();
+
+    if (!baseCtx.opt.expandMem) {
+        // TODO
+        return mem;
+    }
+
     if (!mem->hasInitializer() || isa<ConstantAggregateZero>(* (mem->getInitializer()))) {
         Constant* offset = visitInitExpr(ds.offset);
         Constant* init = createMemInitializer(llvmContext, memty, unwrapIntConstant(offset), ds.data);

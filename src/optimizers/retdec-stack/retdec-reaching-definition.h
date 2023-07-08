@@ -165,7 +165,6 @@ class ReachingDefinitionsAnalysis
 	private:
 		std::map<const llvm::Function*, std::map<const llvm::BasicBlock*, BasicBlockEntry>> bbMap;
 		bool _trackFlagRegs = false;
-		const llvm::GlobalVariable* _specialGlobal = nullptr;
 		bool _run = false;
 		Abi* _abi = nullptr;
 };

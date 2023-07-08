@@ -7,7 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Launch",
+            "name": "decompile",
+            "program": "${workspaceFolder}/build/bin/notdec",
+            "args": ["-i", "${file}", "-o", "${file}.ll", "--log-level", "level_debug", "--compat-mode", "--expand-mem=false"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "recompile",
             "program": "${workspaceFolder}/build/bin/notdec",
             "args": ["-i", "${file}", "-o", "${file}.ll", "--log-level", "level_debug", "--compat-mode", "--recompile"],
             "cwd": "${workspaceFolder}"

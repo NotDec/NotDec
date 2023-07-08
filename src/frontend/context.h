@@ -13,6 +13,7 @@ namespace notdec::frontend {
 struct options {
     bool recompile;
     bool compat_mode;
+    bool expandMem;
     int log_level = 5; // default log level = level_notice
 };
 

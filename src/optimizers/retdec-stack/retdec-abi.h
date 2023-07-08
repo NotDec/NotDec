@@ -55,7 +55,7 @@ class Abi
 	//
 	protected:
 		llvm::Module* _module = nullptr;
-        llvm::GlobalVariable* sp;
+        llvm::GlobalVariable* sp = nullptr;
 		// Config* _config = nullptr;
 
 };
