@@ -348,6 +348,13 @@ void BlockContext::visitLoadInst(wabt::LoadExpr* expr) {
     case wabt::Opcode::V128Load32X2U:
         result = irBuilder.CreateZExt(result, type.i64x2Type);
         break;
+    // no cast
+    case wabt::Opcode::I32Load:
+    case wabt::Opcode::I64Load:
+    case wabt::Opcode::F32Load:
+    case wabt::Opcode::F64Load:
+    case wabt::Opcode::V128Load:
+        break;
     default:
         std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: Unsupported Opcode: " << expr->opcode.GetName() << std::endl;
         break;
