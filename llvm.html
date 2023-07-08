@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html" class="active"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">6.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">6.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">6.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html" class="active"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">7.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">7.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">7.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -155,6 +155,12 @@
 <li>可以使用<code>llc -march=cpp</code> ： https://stackoverflow.com/questions/7787308/how-can-i-declare-a-global-variable-in-llvm </li>
 <li>https://llvm.org/docs/LangRef.html 查询IR</li>
 </ol>
+<p>中端优化：</p>
+<ul>
+<li>实现自己的mem2reg(SSA construction)：https://www.zzzconsulting.se/2018/07/16/llvm-exercise.html</li>
+<li>中端优化为什么这么神奇：https://blog.matthieud.me/2020/exploring-clang-llvm-optimization-on-programming-horror/</li>
+</ul>
+<p>YouTube的LLVM频道里有很多不错的视频。</p>
 <h3 id="debug"><a class="header" href="#debug">debug</a></h3>
 <p>打印使用<code>llvm::outs() &lt;&lt; xxx;</code>直接打印llvm Value</p>
 <h3 id="声明全局变量"><a class="header" href="#声明全局变量">声明全局变量</a></h3>

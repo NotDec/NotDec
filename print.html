@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">6.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">6.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">6.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">7.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">7.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">7.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -298,21 +298,25 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 <li>软件安装
 <ul>
 <li>apt安装
-<pre><code>sudo apt install wabt python-is-python3 clang-14
+<pre><code>sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++
 </code></pre>
 </li>
-<li>安装wasi-sdk</li>
+<li>安装wasi-sdk到/opt
+<pre><code>wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sdk-20.0-linux.tar.gz -P /tmp
+sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
+</code></pre>
+</li>
 </ul>
 </li>
 <li>clone 本仓库</li>
-<li>编译一个LLVM
+<li>安装LLVM 14
 <ul>
 <li>方式1：下载提前构建好的LLVM，解压得到<code>llvm-14.0.6.obj</code>文件夹，放到项目根目录。</li>
 <li>方式2：执行<code>scripts/build-debug-llvm.sh</code>脚本，下载并构建LLVM源码。中途可能遇到内存不足的情况，需要手动降低并行数量到1。
 成功构建后可以将<code>llvm-14.0.6.obj</code>文件夹打包发送给其他人。</li>
 </ul>
 </li>
-<li>构建</li>
+<li>cmake build本仓库</li>
 </ol>
 <h4 id="代码调试"><a class="header" href="#代码调试">代码调试</a></h4>
 <p>直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。</p>
@@ -339,6 +343,12 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 <li>可以使用<code>llc -march=cpp</code> ： https://stackoverflow.com/questions/7787308/how-can-i-declare-a-global-variable-in-llvm </li>
 <li>https://llvm.org/docs/LangRef.html 查询IR</li>
 </ol>
+<p>中端优化：</p>
+<ul>
+<li>实现自己的mem2reg(SSA construction)：https://www.zzzconsulting.se/2018/07/16/llvm-exercise.html</li>
+<li>中端优化为什么这么神奇：https://blog.matthieud.me/2020/exploring-clang-llvm-optimization-on-programming-horror/</li>
+</ul>
+<p>YouTube的LLVM频道里有很多不错的视频。</p>
 <h3 id="debug"><a class="header" href="#debug">debug</a></h3>
 <p>打印使用<code>llvm::outs() &lt;&lt; xxx;</code>直接打印llvm Value</p>
 <h3 id="声明全局变量"><a class="header" href="#声明全局变量">声明全局变量</a></h3>
@@ -768,8 +778,8 @@ Uninitialized的内存默认是不能写的，需要把要写的部分分割开�
 <p>https://reverseengineering.stackexchange.com/questions/29646/dump-pcode-in-ghidra-for-a-specific-decompiled-function 直接在界面点就可以，但是好像只是为了给你看形状的。打开python然后currentLocation.token.pcodeOp也可以稍微看看当前指针位置的。</p>
 <h3 id="ghidra-sleigh-调试环境"><a class="header" href="#ghidra-sleigh-调试环境">Ghidra-sleigh 调试环境</a></h3>
 <p>相关的C/C++代码主要在 Ghidra/Features/Decompiler/src/decompile.cpp下。docmain.hh和 doccore.hh两个文件可以先看，或者先build doc出来，生成的doc在<code>../doc</code>目录（Ghidra/Features/Decompiler/src/decompile/doc/html/index.html）</p>
-<p>根据这里https://daniao.ws/notes/quick-tips/build-ghidra下载并编译Ghidra。生成各种中间文件</p>
-<pre><code class="language-Bash">sudo apt install openjdk-17-jdk-headless
+<p>根据这里https://daniao.ws/notes/quick-tips/build-ghidra 下载并编译Ghidra。生成各种中间文件</p>
+<pre><code class="language-Bash">sudo apt install openjdk-17-jdk-headless unzip --no-install-recommends
 wget -c https://services.gradle.org/distributions/gradle-8.1.1-bin.zip -P /tmp
 sudo unzip -d /opt/gradle /tmp/gradle-8.1.1-bin.zip
 export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin
@@ -815,12 +825,51 @@ trace list
 </code></pre>
 <p>搜索相关的命令：<code>registerCommands</code> <code>registerCom</code> </p>
 <p>部分命令需要<code>OPACTION_DEBUG</code>开启</p>
-<h3 id="代码解读"><a class="header" href="#代码解读">代码解读</a></h3>
-<h4 id="sleigh"><a class="header" href="#sleigh">sleigh</a></h4>
+<h2 id="反编译器代码解读sleigh"><a class="header" href="#反编译器代码解读sleigh">反编译器代码解读（sleigh）</a></h2>
+<p><strong>总体分析流程</strong></p>
 <p>Ghidra的Java部分代码启动sleigh子进程，然后通过stdin输入xml文件，stdout读取xml文件作为反编译结果。比如Ghidra\Features\Decompiler\src\main\java\ghidra\app\decompiler\DecompileResults.java parseRawString函数这里开始解析反编译器的输出的。Ghidra\Framework\SoftwareModeling\src\main\java\ghidra\program\model\pcode\HighFunction.java readXML函数里可以看到high pcode是基于这个ast的标签解析的。</p>
 <p>反编译输出展示上面的选项里，选Debug Function Decompilation导出的xml文件是反编译器的输入。根据https://github.com/NationalSecurityAgency/ghidra/issues/720 这里可以使用decomp_dbg命令行输入xml文件进行反编译。</p>
 <p>应该反编译过程中，Pcode都是一套Pcode，只不过https://spinsel.dev/assets/2020-06-17-ghidra-brainfuck-processor-1/ghidra_docs/language_spec/html/additionalpcode.html 有一些额外的东西只有在反编译之后才会产生。</p>
-<p>Heritage这个名词，对应的是SSA转换</p>
+<p><strong>反编译阶段</strong></p>
+<p>首先反编译过程被分为了几个大的 <code>simplification styles</code> <code>Root Action Groups</code>。它们由 <code>base groups</code> （例如 “stackvars” or “typerecovery”） 组成。</p>
+<ul>
+<li>decompile – The main decompiler action</li>
+<li>normalize – Decompilation tuned for normalization</li>
+<li>jumptable – Simplify just enough to recover a jump-table</li>
+<li>paramid – Simplify enough to recover function parameters</li>
+<li>register – Perform one analysis pass on registers, without stack variables</li>
+<li>firstpass – Construct the initial raw syntax tree, with no simplification</li>
+</ul>
+<p>在<a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.1.2_build/Ghidra/Features/Decompiler/src/decompile/cpp/coreaction.cc#L5021-L5275">universalAction</a>函数里构建了所有可能的Action和Rule列表，即定义了他们的执行顺序。每个Action或Rule是否运行再由标签确定。</p>
+<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L194">Rule</a>: 代表着某个特定的点位可能采取的操作。它输入一个Pcode位置，首先判断能不能在该处应用，然后再应用更改。Rule可以通过<code>getOpList()</code>函数先给出一个点位可能的Opcode列表，方便外部提前过滤。多个Rule可以组合为<code>ActionPool</code></p>
+<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L52">Action</a> 类似Pass，对一个函数做变换。每次变换递增一下count变量。</p>
+<p>和栈分析相关的标签：<code>localrecovery</code> <code>typerecovery</code> <code>stackvars</code></p>
+<p>和栈分析相关的标签，和内部的Action和Rule：</p>
+<p><code>base</code></p>
+<ul>
+<li>ActionHeritage SSA构建算法。</li>
+</ul>
+<p><code>localrecovery</code>
+- ActionRestrictLocal: 限制局部变量在栈上的可能范围，排除一些参数之类的栈范围，使得这些范围不会创建局部变量。
+- 首先对每个FunctionCallSpecs，的每一个参数，把它们的地址排除在局部变量之外。
+- 对保存的caller的寄存器，相关的栈内存排除在局部变量之外。
+- 注：可见wasm里不用管这些。
+- ActionRestructureVarnode
+- gatherVarnodes：
+- gatherOpen：
+- gatherSymbols：
+- restructure：</p>
+<p><code>stackvars</code>
+- RuleLoadVarnode
+- RuleStoreVarnode</p>
+<p><code>stackptrflow</code>
+- ActionStackPtrFlow
+- <code>checkClog</code>: Clog是指，栈指针加栈上的值？
+- <code>analyzeExtraPop</code>: sub-functions TODO，难道是说子函数里面用父函数栈指针？</p>
+<p>关键的类型：</p>
+<ul>
+<li><code>LoadGuard</code>: 对一个，访问了栈，但是是在动态访问栈的load指令的描述。描述其可能访问的栈范围。包括min, max, step等。和VSA分析有很大关系。</li>
+</ul>
 <p>decomp_dbg 代码位于consolemain.cc（main 函数，也定义了 load/save/restore几条命令）、ifacedecomp.hh/cc （反编译相关命令）。</p>
 <ul>
 <li>Heritage::discoverIndexedStackPointers</li>
@@ -833,6 +882,9 @@ trace list
 <p>这两个action（其实是Rule）应该就是分析的主要了，他们都会经过RuleLoadVarnode::checkSpacebase -&gt; RuleLoadVarnode::vnSpacebase -&gt; RuleLoadVarnode::correctSpacebase (ruleaction.cc) 的检查。调试发现，没能分析出来的变量所对应的 store/load在correctSpacebase的检查中失败了。</p>
 <p>ActionDatabase::buildDefaultGroups 分析好像是分组的，里面很多rule。</p>
 <p>“simplification styles” are also referred to as “root actions” or “groups” in the decompiler source code. They consist of groups of “base groups” such as “stackvars” or “typerecovery”, which are more fine-grained groups of specific analysis operations.</p>
+<h3 id="ghidra-中的-value-set-analysis"><a class="header" href="#ghidra-中的-value-set-analysis">Ghidra 中的 value set analysis</a></h3>
+<p>TODO</p>
+<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/rangeutil.hh#L274">ValueSetSolver</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="retdec"><a class="header" href="#retdec">RetDec</a></h1>
 <p>https://zhuanlan.zhihu.com/p/509763117 有一些源码解读的内容。</p>
 <ul>
@@ -877,6 +929,19 @@ trace list
 <li>retdec-write-bc：</li>
 <li>retdec-llvmir2hll：</li>
 </ul>
+<h3 id="retdec-栈恢复源码解读"><a class="header" href="#retdec-栈恢复源码解读">retdec 栈恢复源码解读</a></h3>
+<p>源码在<code>retdec\src\bin2llvmir\optimizations\stack\stack.cpp</code></p>
+<p>大体要做的，是把栈指针的偏移访问，都改成alloca。</p>
+<ol>
+<li>函数开头sub了栈指针，改成对应大小的alloca</li>
+<li>处理load/store
+<ul>
+<li>如果是load：改为对对应alloca的对应偏移的load</li>
+<li>如果是store：改为对对应alloca的对应偏移的store</li>
+</ul>
+</li>
+</ol>
+<p>在上面算法的基础上，增加一个map，从变量映射到栈偏移。然后在load和store的时候尝试将ptr解析为栈指针的偏移。然后在对应大小的地方创建变量。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="retypd"><a class="header" href="#retypd">retypd</a></h1>
 <p><a href="https://github.com/GrammaTech/retypd">retypd</a> 是一个高级的反编译算法，有一篇<a href="https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf">论文</a></p>
 <p>资源：</p>
@@ -884,6 +949,10 @@ trace list
 <li>优先看<a href="https://github.com/GrammaTech/retypd/blob/master/reference/type-recovery.rst">这个介绍</a>。</li>
 <li>这个<a href="https://github.com/GrammaTech/retypd/blob/master/reference/presentation_slides.pdf">PPT</a>比论文容易懂很多</li>
 </ul>
+<h4 id="monoid"><a class="header" href="#monoid">monoid</a></h4>
+<p>读《Haskell趣学指南》的Monoids一节，理解一下。</p>
+<h3 id="unification-based-type-inference-algorithms"><a class="header" href="#unification-based-type-inference-algorithms">unification-based type inference algorithms</a></h3>
+<p>https://www.cs.cornell.edu/courses/cs3110/2011sp/Lectures/lec26-type-inference/type-inference.htm</p>
 <h4 id="retypdghidra-配置"><a class="header" href="#retypdghidra-配置">retypd+ghidra 配置</a></h4>
 <p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
 <ol>
@@ -919,6 +988,182 @@ pip install .
 </li>
 </ol>
 <p>为Ghidra 10.2.3 版本成功编译的retypd<a href="GhidraRetypd.zip">下载</a></p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="现有论文"><a class="header" href="#现有论文">现有论文</a></h1>
+<h3 id="重要资源"><a class="header" href="#重要资源">重要资源</a></h3>
+<p><a href="https://ieeexplore.ieee.org/xpl/conhome/1000635/all-proceedings"><strong>Working Conference on Reverse Engineering (WCRE)：</strong></a></p>
+<p><a href="https://dl.acm.org/conference/pprew"><strong>PPREW-5: Proceedings of the 5th Program Protection and Reverse Engineering Workshop</strong></a> 这个期刊好啊。</p>
+<p><a href="https://dl.acm.org/conference/ssprew"><strong>SSPREW: Software Security, Protection, and Reverse Engineering Workshop</strong></a></p>
+<p>其他：</p>
+<ul>
+<li><a href="https://github.com/avast/retdec/blob/05c9b11351d3e82012d823fa3709f940033768cf/publications/README.md">RetDec的publication</a></li>
+<li><a href="https://www.backerstreet.com/decompiler/type_analysis.php">Decompiler Design - Type Analysis</a> 居然有介绍反编译器架构的网站。</li>
+</ul>
+<p>Github的两个list：</p>
+<ul>
+<li><a href="https://github.com/yasong/Awesome-Info-Inferring-Binary">Awesome-Info-Inferring-Binary</a></li>
+<li><a href="https://github.com/SystemSecurityStorm/Awesome-Binary-Rewriting">Awesome-Binary-Rewriting</a></li>
+</ul>
+<h2 id="读论文"><a class="header" href="#读论文">读论文</a></h2>
+<p>一篇很好的综述：<a href="https://yurichev.com/mirrors/vanEmmerik_ssa.pdf">Static Single Assignment for Decompilation (Boomerang)</a> 感觉可以抓住优化方面的脉络。</p>
+<p>摸着引用看论文确实有点用</p>
+<h3 id="控制流结构恢复-structural-analysis"><a class="header" href="#控制流结构恢复-structural-analysis">控制流结构恢复-structural analysis</a></h3>
+<p>很多都是借用现有的type recovery，重点去讲structure recovery。</p>
+<ul>
+<li>
+<p>【Phoenix】Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring <a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">paper link</a></p>
+<p><a href="https://users.ece.cmu.edu/~ejschwar/papers/arthesis14.pdf">Edward Schwartz's PhD thesis</a> 里面进一步介绍了Phoenix反编译器</p>
+<p>这篇论文关注控制结构的恢复。控制结构的恢复最早是基于interval analysis的（？这是什么得学一学）。后面才被细化为structural analysis</p>
+</li>
+<li>
+<p><a href="https://www.ndss-symposium.org/wp-content/uploads/2017/09/11_4_2.pdf">【Dream】No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations</a> <a href="https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf">slides</a> <a href="https://github.com/USECAP/dream">code</a></p>
+</li>
+</ul>
+<h3 id="类型恢复---type-recovery"><a class="header" href="#类型恢复---type-recovery">类型恢复 - Type Recovery</a></h3>
+<ul>
+<li>
+<p><a href="http://users.ece.cmu.edu/~aavgerin/papers/tie-ndss-2011.pdf">【TIE】Principled Reverse Engineering of Types in Binary Programs.</a> 这篇基于VSA搞了自己的DVSA，主要区别是StridedInterval里可以放除esp外的变量符号？。重点主要在后面的约束求解部分。后面的类型系统和求解部分也非常复杂TODO。</p>
+</li>
+<li>
+<p>【DIVINE】: DIscovering Variables IN Executables 这篇还是VSA系列的那些人写的。讲先用最简单的semi naive方法鉴别变量，跑VSA，然后拿VSA结果去生成约束跑ASI。迭代几次得到最好的结果。
+里面说如果变量是8字节大小，那VSA直接无法处理，值总是Top（32位程序）。那就不能直接把内存最大切分粒度搞成4字节？？</p>
+</li>
+<li>
+<p><a href="https://www.cs.purdue.edu/homes/xyzhang/Comp/ndss10.pdf">【REWARDS】Automatic Reverse Engineering of Data Structures from Binary Execution</a> TODO</p>
+</li>
+<li>
+<p><a href="https://arxiv.org/pdf/1603.05495.pdf">【retypd】</a> 需要进一步学习类型系统的高级知识，比如subtyping。它不仅开源，而且不需要VSA的指针信息。可以与之前需要VSA的结合？<del>但是似乎没有说怎么从一整块栈内存中识别出变量。</del></p>
+</li>
+<li>
+<p><a href="https://user.eng.umd.edu/~barua/elwazeer-PLDI-2013.pdf">【SecondWrite】</a></p>
+</li>
+</ul>
+<h3 id="变量恢复"><a class="header" href="#变量恢复">变量恢复</a></h3>
+<p>变量恢复和类型恢复关联较大。如果把函数开头分配的栈空间看作一个巨大的结构体，变量恢复就转换成了类型恢复。</p>
+<p><a href="https://www.cs.virginia.edu/~yk2bb/data/osprey_sp21.pdf">OSPREY: Recovery of Variable and Data Structure
+via Probabilistic Analysis for Stripped Binary</a> <a href="https://www.cs.purdue.edu/homes/zhan3299/res/SP21a_slides.pdf">slides</a> 把变量的访问看作变量存在的暗示，同时存在很多这样的暗示，使用概率性的推导。好像是基于后面那篇BDA的工作。</p>
+<h3 id="c-反编译"><a class="header" href="#c-反编译">C++ 反编译</a></h3>
+<p>C++的类给反编译带来了额外的困难，涉及到（复杂的）约束求解等。</p>
+<ul>
+<li>
+<p><a href="https://edmcman.github.io/papers/ccs18.pdf">Using Logic Programming to Recover C++ Classes</a> C++反编译 
+and Methods from Compiled Executables </p>
+</li>
+<li>
+<p>SmartDec: Approaching C++ Decompilation.</p>
+</li>
+<li>
+<p>Reconstruction of Class Hierarchies for Decompilation of C++ Programs.</p>
+</li>
+</ul>
+<h3 id="vsa相关"><a class="header" href="#vsa相关">VSA相关</a></h3>
+<ul>
+<li>
+<p><a href="http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.76.637&amp;rep=rep1&amp;type=pdf">WYSINWYX: WHAT YOU SEE IS NOT WHAT YOU EXECUTE</a> 第三章讲了VSA的事情。它也讲了很多二进制分析的事情。</p>
+<p>■ 文中提到的一些其他的没有用到VSA的方法：</p>
+<p>[33] C. Cifuentes and A. Fraboulet. Interprocedural data flow recovery of high-level language code from assembly. Technical Report 421, Univ. Queensland, 1997.</p>
+<p>[34] C. Cifuentes and A. Fraboulet. Intraprocedural static slicing of binary executables. In Proc. Int. Conf. on Software Maintenance (ICSM), pages 188–195, 1997.</p>
+<p>[35] C. Cifuentes, D. Simon, and A. Fraboulet. Assembly to high-level language translation. In Proc. Int. Conf. on Software Maintenance (ICSM), pages 228–237, 1998.</p>
+<p>[45] S.K. Debray, R. Muth, and M. Weippert. Alias analysis of executable code. In Proc. Principles of Programming Languages (POPL), pages 12–24, January 1998.</p>
+</li>
+<li>
+<p><a href="https://research.cs.wisc.edu/wpis/papers/cc04.pdf">基础的VSA</a> Analyzing Memory Accesses in x86 Executables</p>
+</li>
+<li>
+<p><a href="http://research.cs.wisc.edu/wpis/papers/etaps08.invited.pdf">Improved Memory-Access Analysis for x86 Executables</a>  GMOD-Based Merge Function</p>
+<p>这篇论文开头有很多引用：Research carried out during the last decade by our research group [64, 65, 6, 56, 55, 7, 8, 36, 4, 49, 9] as well as by others [48, 22, 33, 14, 2, 31, 13, 44, 32, 3, 54, 37, 21, 46, 28, 19, 16, 34, 66] has developed the foundations for performing static analysis at the machine-code level.  能找到非常多的其他paper了？</p>
+<p>没想到相比于源码级的分析，二进制级的分析还有好处。有很多源码层没有指明的实现细节（比如C++的表达式求值顺序），源码级分析想要sound需要考虑所有可能的实现，而二进制级的分析只需要考虑编译器选择的实现。</p>
+</li>
+<li>
+<p>《DIVINE: DIscovering Variables IN Executables》 （VSA with ASI(Automated Struct Identification)）（栈变量恢复）VSA可以用于一定程度的变量恢复。</p>
+</li>
+<li>
+<p><a href="https://www.zybuluo.com/SmashStack/note/847219">这人</a>想要实现Value Set Analysis到RadecoIL上。</p>
+</li>
+<li>
+<p><a href="https://github.com/radareorg/radeco/tree/master/radeco-lib/src/analysis/valueset">这里</a> 也有人实现，还有WYSINWYNX那个论文相关的东西？</p>
+</li>
+<li>
+<p><a href="http://www-verimag.imag.fr/~mounier/Enseignement/Software_Security/slides_lecture_7.pdf">这个课件</a>讲到了一点点。这门课是和安全相关的。TODO，不太看得懂。</p>
+</li>
+<li>
+<p><a href="https://www.ndss-symposium.org/wp-content/uploads/bar2021_23002_paper.pdf">研究VSA对人工分析的帮助</a>。（对学习VSA没啥用）</p>
+</li>
+</ul>
+<h3 id="其他-2"><a class="header" href="#其他-2">其他</a></h3>
+<ul>
+<li>
+<p><a href="https://dl.acm.org/doi/abs/10.1145/3395363.3397370">【DecFuzzer】How far we have come: testing decompilation correctness of C decompilers</a> <a href="https://github.com/monkbai/DecFuzzer">代码</a></p>
+<p>functionality-preserving disassembling and C style control structure recovery [17, 31, 47, 64, 65, 67]</p>
+<p>变量恢复static analysis and inference techniques [10, 12, 13, 30, 54]. </p>
+<p>fool-proof techniques for binary disassembling and decompilation [17, 31, 64-67].</p>
+<p>EMI编译器测试看了下是插入了不影响语义的代码之后去开编译优化，发现优化器做出的错误决定而导致的crash。比如把一个不该执行的循环内操作提到外面。错误判断一些分支恒为真或假。是设置Csmith的输出使得只生成一个函数？？</p>
+<p>本来Csmith生成的代码很多全局变量的使用。如果全局变量改变了，很难手动找到是哪个函数？它是生成了局部变量，然后把对全局变量的使用全替换成了局部变量，函数结束的时候把局部变量的值update到全局变量，这样如果全局变量变了，就肯定是在最后update的时候改变的。那手动看的时候不要继续找内部怎么使用？这样做有什么好处吗。。。可能是方便找到这个函数到底涉及到了哪些全局变量，然后方便只提取这些到反编译结果的全局变量？？</p>
+</li>
+<li>
+<p><a href="http://web.archive.org/web/20180517094139/http://decompilation.info/sites/all/files/articles/C%20decompilation.pdf">C Decompilation : Is It Possible?</a> 2009的一篇</p>
+<p>第二章相关工作里面有不少引用：</p>
+<p>structural analysis：[4–6]，这个也用在了编译器：[8]。</p>
+<p>unification-based algorithm for recovery of types：Mycroft [9]</p>
+<p>现有反编译器：DCC decompiler [7]. Boomerang [11], REC [12] and Hex-Rays plug-in [13]</p>
+</li>
+<li>
+<p><a href="https://www.rev.ng/downloads/iccst-18-paper.pdf">【rev.ng】rev.ng: A Multi-Architecture Framework for Reverse Engineering and Vulnerability Discovery.</a></p>
+<p>这个反编译器开源了lifter：先转到Qemu IR然后转到LLVM IR。这个好像也不太和反编译相关，也只是搞插桩、fuzzing的。</p>
+</li>
+<li>
+<p><a href="https://www.cs.unm.edu/~eschulte/data/bed.pdf">Evolving Exact Decompilation</a> 好像和主流的反编译技术不是特别相关。</p>
+</li>
+</ul>
+<p><strong>最近的新论文</strong></p>
+<ul>
+<li>
+<p><a href="https://www.usenix.org/system/files/sec19-guo.pdf">DEEPVSA</a>: Facilitating Value-set Analysis with Deep Learning for Postmortem Program Analysis 这篇参考意义不大，是ML结合的。</p>
+</li>
+<li>
+<p>BDA: Practical Dependence Analysis for Binary Executables by Unbiased Whole-Program Path Sampling and Per-Path Abstract Interpretation</p>
+</li>
+<li>
+<p>BinPointer: Towards Precise, Sound, and Scalable Binary-Level Pointer Analysis</p>
+<p>里面提到了 <a href="https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf">BPA: Refining Indirect Call Targets at the Binary Level</a>这篇也值得读。用了块内存的抽象解释。</p>
+</li>
+</ul>
+<h3 id="其他零散资料"><a class="header" href="#其他零散资料">其他零散资料：</a></h3>
+<ul>
+<li>
+<p>https://github.com/cmu-sei/pharos 涉及到很多反编译技术</p>
+</li>
+<li>
+<p>https://news.ycombinator.com/item?id=11218138 两个人的讨论。里面推荐对两篇文章的逆向引用搜索：https://scholar.google.com/scholar?as_ylo=2018&amp;hl=en&amp;as_sdt=2005&amp;sciodt=0,5&amp;cites=1148004013363547510&amp;scipsc=   https://scholar.google.com/scholar?cites=7322807636381891759&amp;as_sdt=2005&amp;sciodt=0,5&amp;hl=en </p>
+</li>
+<li>
+<p>https://github.com/toor-de-force/Ghidra-to-LLVM https://uwspace.uwaterloo.ca/bitstream/handle/10012/17976/Toor_Tejvinder.pdf?sequence=3&amp;isAllowed=y Ghidra Pcode编译到IR。代码太简单了。。栈内存好像是alloca出来的，可能还是想保持语义想运行。</p>
+</li>
+<li>
+<p>https://github.com/decomp/decomp 这人也想基于LLVM IR然后去优化。https://github.com/decomp/doc 相关文档 </p>
+</li>
+<li>
+<p><a href="http://www.program-transformation.org/Transform/DeCompilation">The Decompilation Wiki.</a></p>
+</li>
+<li>
+<p><a href="https://github.com/repzret/dagger">github.com/repzret/dagger</a> 反编译到LLVM IR。aarch64还在开发过程中。<a href="https://llvm.org/devmtg/2013-04/bougacha-slides.pdf">介绍的slides</a></p>
+<p>dagger主要讲的是反编译到IR上，找到语义等价的LLVM IR的指令的过程。感觉有点像编译器后端的Instruction Selection，可能能用上利用DAG（有向无环图）选择指令的技术。它是作为llvm的fork编写的，2017后就没有维护了。和llvm耦合好严重啊，都不知道哪里是它的代码。好像好复杂。</p>
+</li>
+<li>
+<p>https://github.com/JuliaComputingOSS/llvm-cbe 曾经IR到C有一个backend，2016年被移除了。现在有人接手</p>
+</li>
+<li>
+<p>https://corescholar.libraries.wright.edu/cgi/viewcontent.cgi?article=3277&amp;context=etd_all LLVM IR based decompilation。</p>
+</li>
+<li>
+<p>https://github.com/lifting-bits/sleigh sleigh作为Ghidra的反编译器，是用C++写的，而且汇编到pcode的lift部分也是它负责的。所以用Ghidra可能也只要用这个就可以了。</p>
+</li>
+<li>
+<p><a href="https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html">Ghidra上的ASI https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html</a> </p>
+</li>
+</ul>
+<h3 id="领域的大佬"><a class="header" href="#领域的大佬">领域的大佬</a></h3>
+<p>TODO</p>
+<p><a href="https://www.cse.psu.edu/~gxt29/publications/">Gang Tan</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="other-notes"><a class="header" href="#other-notes">Other Notes</a></h1>
 <p>这里包括一些其他笔记，如C++，CMake的使用。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="c-development"><a class="header" href="#c-development">C++ Development</a></h1>

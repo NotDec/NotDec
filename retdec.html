@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html" class="active"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">6.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">6.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">6.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html" class="active"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">7.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">7.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">7.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -188,6 +188,19 @@
 <li>retdec-write-bc：</li>
 <li>retdec-llvmir2hll：</li>
 </ul>
+<h3 id="retdec-栈恢复源码解读"><a class="header" href="#retdec-栈恢复源码解读">retdec 栈恢复源码解读</a></h3>
+<p>源码在<code>retdec\src\bin2llvmir\optimizations\stack\stack.cpp</code></p>
+<p>大体要做的，是把栈指针的偏移访问，都改成alloca。</p>
+<ol>
+<li>函数开头sub了栈指针，改成对应大小的alloca</li>
+<li>处理load/store
+<ul>
+<li>如果是load：改为对对应alloca的对应偏移的load</li>
+<li>如果是store：改为对对应alloca的对应偏移的store</li>
+</ul>
+</li>
+</ol>
+<p>在上面算法的基础上，增加一个map，从变量映射到栈偏移。然后在load和store的时候尝试将ptr解析为栈指针的偏移。然后在对应大小的地方创建变量。</p>
 
                     </main>
 

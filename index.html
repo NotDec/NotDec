@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html" class="active">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">6.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">6.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">6.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html" class="active">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">7.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">7.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">7.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -297,21 +297,25 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 <li>软件安装
 <ul>
 <li>apt安装
-<pre><code>sudo apt install wabt python-is-python3 clang-14
+<pre><code>sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++
 </code></pre>
 </li>
-<li>安装wasi-sdk</li>
+<li>安装wasi-sdk到/opt
+<pre><code>wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sdk-20.0-linux.tar.gz -P /tmp
+sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
+</code></pre>
+</li>
 </ul>
 </li>
 <li>clone 本仓库</li>
-<li>编译一个LLVM
+<li>安装LLVM 14
 <ul>
 <li>方式1：下载提前构建好的LLVM，解压得到<code>llvm-14.0.6.obj</code>文件夹，放到项目根目录。</li>
 <li>方式2：执行<code>scripts/build-debug-llvm.sh</code>脚本，下载并构建LLVM源码。中途可能遇到内存不足的情况，需要手动降低并行数量到1。
 成功构建后可以将<code>llvm-14.0.6.obj</code>文件夹打包发送给其他人。</li>
 </ul>
 </li>
-<li>构建</li>
+<li>cmake build本仓库</li>
 </ol>
 <h4 id="代码调试"><a class="header" href="#代码调试">代码调试</a></h4>
 <p>直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。</p>
