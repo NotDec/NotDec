@@ -10,7 +10,7 @@ SOURCES = $(basename $(wildcard $(FUNCTIONALDIR)/CWE*.c))
 # eg: functional => out_functional
 PREFIXEDS = $(addprefix out_, $(SOURCES))
 
-all: wat dec
+all: dec wat
 dec: $(addsuffix .dec.ll, $(PREFIXEDS))
 wat: $(addsuffix .wat, $(PREFIXEDS))
 wasm: $(addsuffix .wasm, $(PREFIXEDS))

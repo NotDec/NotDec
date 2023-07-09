@@ -54,3 +54,12 @@ LLVM PASS的管理有两种实现
 ### 运行与管理
 
 LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。
+
+### 调试
+
+我们基于 vscode开发，使用codelldb插件。发现无法下条件断点。
+- 首先下普通断点
+- 使用`breakpoint list` 查看断点编号
+- 使用`breakpoint modify 1 -c "((int64_t) (ci->getSExtValue()) < -100)"`这样的命令给断点增加条件
+
+更多使用方式见[lldb使用教程](https://lldb.llvm.org/use/tutorial.html)

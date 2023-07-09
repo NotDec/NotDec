@@ -4,6 +4,8 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 * @copyright Modified by NotDec project
 */
+#include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 
@@ -16,6 +18,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Operator.h>
 #include <llvm/IR/PassManager.h>
+#include <llvm/Support/Casting.h>
 
 #include "optimizers/retdec-stack/retdec-abi.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
@@ -61,6 +64,8 @@ bool StackAnalysis::run()
 	{
 		// 从store load指令映射到intConstant，即栈偏移
 		std::map<Value*, Value*> val2val;
+		// 从偏移映射到alloca
+		std::map<int64_t, Value*> off2alloca;
 		for (inst_iterator I = inst_begin(f), E = inst_end(f); I != E;)
 		{
 			Instruction& i = *I;
@@ -78,7 +83,7 @@ bool StackAnalysis::run()
 						store,
 						store->getValueOperand(),
 						store->getValueOperand()->getType(),
-						val2val);
+						val2val, off2alloca);
 
 				if (isa<GlobalVariable>(store->getPointerOperand()))
 				{
@@ -90,7 +95,7 @@ bool StackAnalysis::run()
 						store,
 						store->getPointerOperand(),
 						store->getValueOperand()->getType(),
-						val2val);
+						val2val, off2alloca);
 			}
 			else if (LoadInst* load = dyn_cast<LoadInst>(&i))
 			{
@@ -104,7 +109,7 @@ bool StackAnalysis::run()
 						load,
 						load->getPointerOperand(),
 						load->getType(),
-						val2val);
+						val2val, off2alloca);
 			}
 		}
 	}
@@ -125,7 +130,8 @@ void StackAnalysis::handleInstruction(
 		llvm::Instruction* inst,
 		llvm::Value* val,
 		llvm::Type* type,
-		std::map<llvm::Value*, llvm::Value*>& val2val)
+		std::map<llvm::Value*, llvm::Value*>& val2val,
+		std::map<int64_t, llvm::Value*>& off2alloca)
 {
 	if (_abi->isDebug()) {
 		std::cerr << __FILE__ << ":" << __LINE__ << ": " << llvmObjToString(inst) << std::endl;
@@ -159,26 +165,11 @@ void StackAnalysis::handleInstruction(
 		}
 	}
 
-	// 来自调试信息和来自用户配置的变量。
-	// auto* debugSv = getDebugStackVariable(inst->getFunction(), root);
-	// auto* configSv = getConfigStackVariable(inst->getFunction(), root);
-
 	// 直接化简成stack offset
 	root.simplifyNode();
 	if (_abi->isDebug()) {
 		std::cerr << __FILE__ << ":" << __LINE__ << ": " << root << std::endl;
 	}
-
-	// 简化后重新获取试试
-	// if (debugSv == nullptr)
-	// {
-	// 	debugSv = getDebugStackVariable(inst->getFunction(), root);
-	// }
-
-	// if (configSv == nullptr)
-	// {
-	// 	configSv = getConfigStackVariable(inst->getFunction(), root);
-	// }
 
 	// 如果简化失败，就放弃
 	auto* ci = dyn_cast_or_null<ConstantInt>(root.value);
@@ -201,44 +192,27 @@ void StackAnalysis::handleInstruction(
 		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << ci->getSExtValue() << std::endl;
 	}
 
-	std::string name = "";
 	Type* t = type;
-
-	// if (debugSv)
-	// {
-	// 	name = debugSv->getName();
-	// 	t = llvm_utils::stringToLlvmTypeDefault(_module, debugSv->type.getLlvmIr());
-	// }
-	// else if (configSv)
-	// {
-	// 	name = configSv->getName();
-	// 	t = llvm_utils::stringToLlvmTypeDefault(_module, configSv->type.getLlvmIr());
-	// }
-
-	std::string realName;
-	// if (debugSv)
-	// {
-	// 	realName = debugSv->getName();
-	// }
-	// else if (configSv)
-	// {
-	// 	realName = configSv->getName();
-	// }
-
-	// offset 输入IrModifier，创建alloca指令
-	// IrModifier irModif(_module, _config);
-	// auto p = irModif.getStackVariable(
-	// 		inst->getFunction(),
-	// 		ci->getSExtValue(),
-	// 		t,
-	// 		name,
-	// 		realName,
-	// 		debugSv || configSv);
+	std::string name = "stack_var_"
+			+ std::to_string(ci->getSExtValue()) + "_";
 
 	// 改为直接创建Alloca指令。
 	assert(inst->getFunction()->getInstructionCount() != 0);
-	AllocaInst* a = new AllocaInst(t, 0, (name.empty() ? "stack_var_" : (name + "_"))
-			+ std::to_string(ci->getSExtValue()), &*llvm::inst_begin(inst->getFunction()));
+
+	AllocaInst* a;
+	auto it = off2alloca.find(ci->getSExtValue());
+	if (it != off2alloca.end()) {
+		a = cast<AllocaInst>(it->second);
+		if (_abi->isDebug()) {
+			std::cerr << __FILE__ << ":" << __LINE__ << ": " << "use existing local " << name << std::endl;
+		}
+	} else {
+		a = new AllocaInst(t, 0, name, &*llvm::inst_begin(inst->getFunction()));
+		off2alloca.emplace(ci->getSExtValue(), a);
+		if (_abi->isDebug()) {
+			std::cerr << __FILE__ << ":" << __LINE__ << ": " << "creating local val " << name << std::endl;
+		}
+	}
 
 	if (_abi->isDebug()) {
 		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(a) << std::endl;

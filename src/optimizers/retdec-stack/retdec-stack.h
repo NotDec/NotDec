@@ -39,7 +39,8 @@ class StackAnalysis : public llvm::PassInfoMixin<StackAnalysis>
 				llvm::Instruction* inst,
 				llvm::Value* val,
 				llvm::Type* type,
-				std::map<llvm::Value*, llvm::Value*>& val2val);
+				std::map<llvm::Value*, llvm::Value*>& val2val,
+				std::map<int64_t, llvm::Value*>& off2alloca);
 		std::optional<int> getBaseOffset(SymbolicTree &root);
 
 	private:
