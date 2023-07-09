@@ -30,8 +30,10 @@ namespace bin2llvmir {
 PreservedAnalyses StackPointerOpsRemove::run(Module &M, ModuleAnalysisManager &AM)
 {
 	_module = &M;
-	// TODO memleak
-	_abi = new Abi(_module);
+	if (_abi == nullptr) {
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: ABI not set.";
+		std::abort();
+	}
 	if (run()) {
 		return PreservedAnalyses::none();
 	} else {

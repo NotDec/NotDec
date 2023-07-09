@@ -9,11 +9,11 @@
 
 namespace notdec::frontend {
 
-// default to zero or false
+// sync with cmdline default value.
 struct options {
-    bool recompile;
-    bool compat_mode;
-    bool expandMem;
+    bool recompile = false;
+    bool compat_mode = true;
+    bool expandMem = true;
     int log_level = 5; // default log level = level_notice
 };
 

@@ -1,6 +1,8 @@
 
 #include "utils.h"
 
+const char* MEM_NAME = "__notdec_mem0";
+
 
 // https://stackoverflow.com/questions/48803363/bitwise-casting-uint32-t-to-float-in-c-c
 float ieee_float(uint32_t f)

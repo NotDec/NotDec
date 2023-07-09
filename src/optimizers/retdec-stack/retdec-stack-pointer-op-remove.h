@@ -21,7 +21,7 @@ using namespace llvm;
 class StackPointerOpsRemove : public llvm::PassInfoMixin<StackPointerOpsRemove>
 {
 	public:
-		StackPointerOpsRemove() = default;
+		StackPointerOpsRemove(Abi* abi): _abi(abi) {}
 		PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 		bool runOnModuleCustom(llvm::Module& m, Abi* a);
 

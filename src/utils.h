@@ -19,4 +19,6 @@ enum log_level {
     level_debug = 7
 };
 
+extern const char* MEM_NAME;
+
 #endif

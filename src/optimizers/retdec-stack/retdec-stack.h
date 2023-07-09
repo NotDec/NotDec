@@ -25,7 +25,7 @@ using namespace llvm;
 class StackAnalysis : public llvm::PassInfoMixin<StackAnalysis>
 {
 	public:
-		StackAnalysis() = default;
+		StackAnalysis(Abi* abi): _abi(abi) {}
 		PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 		bool runOnModuleCustom(
 				llvm::Module& m,

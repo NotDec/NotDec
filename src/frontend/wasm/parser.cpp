@@ -478,7 +478,7 @@ llvm::GlobalVariable* Context::declareMemory(wabt::Memory& mem, bool isExternal)
     len = len * 65536;
     ArrayType* ty = ArrayType::get(Type::getInt8Ty(llvmContext), len);
     GlobalVariable *gv = new GlobalVariable(llvmModule, ty, false, 
-        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, "mem0");
+        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, "__notdec_mem0");
     if (!isExternal) {
         gv->setInitializer(ConstantAggregateZero::get(ty));
     }

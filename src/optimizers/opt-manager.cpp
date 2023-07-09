@@ -1,9 +1,13 @@
 #include "optimizers/opt-manager.h"
+#include "optimizers/retdec-stack/retdec-abi.h"
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
+#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "utils.h"
 #include "llvm/Transforms/Scalar/DCE.h"
 #include <algorithm>
 
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/Scalar/InstSimplifyPass.h>
 #include "llvm/Transforms/Scalar/SCCP.h"
@@ -42,7 +46,18 @@ struct HelloModule : PassInfoMixin<HelloWorld> {
   static bool isRequired() { return true; }
 };
 
-void run_passes(llvm::Module& mod, notdec::frontend::options opts) {
+void DecompileConfig::find_special_gv() {
+  for (GlobalVariable& gv: mod.getGlobalList()) {
+    if (gv.getName().equals("$__stack_pointer")) {
+      sp = &gv;
+    }
+    if (gv.getName().equals(MEM_NAME)) {
+      mem = &gv;
+    }
+  }
+}
+
+void DecompileConfig::run_passes() {
     // Create the analysis managers.
     LoopAnalysisManager LAM;
     FunctionAnalysisManager FAM;
@@ -76,8 +91,13 @@ void run_passes(llvm::Module& mod, notdec::frontend::options opts) {
 
     // if not recompile then decompile.
     if (!opts.recompile) {
-      MPM.addPass(retdec::bin2llvmir::StackAnalysis());
-      MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove());
+      find_special_gv();
+      retdec::bin2llvmir::Abi abi(&mod);
+      abi.setStackPointer(sp);
+      abi.setMemory(mem);
+      retdec::bin2llvmir::SymbolicTree::setAbi(&abi);
+      MPM.addPass(retdec::bin2llvmir::StackAnalysis(&abi));
+      MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));
     }
     MPM.run(mod, MAM);
 }

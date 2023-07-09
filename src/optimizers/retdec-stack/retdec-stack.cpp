@@ -4,6 +4,7 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 * @copyright Modified by NotDec project
 */
+#include <cstdlib>
 #include <iostream>
 
 #include <llvm/IR/Constants.h>
@@ -31,8 +32,10 @@ namespace bin2llvmir {
 
 PreservedAnalyses StackAnalysis::run(Module &M, ModuleAnalysisManager &AM) {
 	_module = &M;
-	// TODO memleak
-	_abi = new Abi(_module);
+	if (_abi == nullptr) {
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Error: ABI not set.";
+		std::abort();
+	}
 	if (run()) {
 		return PreservedAnalyses::none();
 	} else {

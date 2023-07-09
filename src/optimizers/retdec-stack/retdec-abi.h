@@ -44,7 +44,9 @@ class Abi
 		bool isRegister(const llvm::Value* val) const;
 		// bool isRegister(const llvm::Value* val, uint32_t r) const;
 		bool isStackPointerRegister(const llvm::Value* val) const;
-        void setStackPointer(const llvm::GlobalVariable* val) const;
+		bool isMemory(const llvm::Value* val) const;
+        void setStackPointer(llvm::GlobalVariable* val);
+        void setMemory(llvm::GlobalVariable* val);
 
 	// Stacks.
 	//
@@ -56,6 +58,7 @@ class Abi
 	protected:
 		llvm::Module* _module = nullptr;
         llvm::GlobalVariable* sp = nullptr;
+        llvm::GlobalVariable* mem = nullptr;
 		// Config* _config = nullptr;
 
 };

@@ -4,6 +4,9 @@
  * @copyright (c) 2017 Avast Software, licensed under the MIT license
  */
 
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/Support/Casting.h>
 #include <ostream>
 #include <sstream>
 
@@ -348,6 +351,21 @@ void SymbolicTree::expandNode(
 				val2val,
 				linear);
 	}
+	else if (_abi->isStackPointerRegister(value)) {
+		ops.emplace_back(
+					RDA,
+					ConstantInt::get(
+				value->getType()->getPointerElementType(),
+				0),
+					value,
+					getLevel() + 1,
+					maxNodeLevel,
+					val2val,
+					linear);
+	}
+	else if (isa<GlobalVariable>(value) && !dyn_cast<GlobalVariable>(value)->isConstant()) {
+		// skip non constant global.
+	}
 	else if (User* U = dyn_cast<User>(value))
 	{
 		for (unsigned i = 0; i < U->getNumOperands(); ++i)
@@ -468,6 +486,19 @@ void SymbolicTree::_simplifyNode()
 				c1->getSExtValue() & c2->getSExtValue());
 		ops.clear();
 	}
+	// 无视gep加载内存
+	// %10 = getelementptr [131072 x i8], [131072 x i8]* @mem0, i64 0, i64 %9  --->  %9
+	else if (isa<GetElementPtrInst>(value) && _abi->isMemory(ops[0].value) && match(ops[1], m_ConstantInt(c1)) && c1->getZExtValue() == 0) {
+		*this = std::move(ops[2]);
+	}
+	// 在上面expand的时候直接展开到0了。下面这个映射就注释了
+	// 把SP映射到0
+	// else if (_abi->isStackPointerRegister(value)) {
+	// 	value = ConstantInt::get(
+	// 			val->getType()->getPointerElementType(),
+	// 			0);
+	// 	ops.clear();
+	// }
 	// 全局变量常量（没有被load过）
 	// else if (match(*this, m_Add(m_GlobalVariable(global), m_ConstantInt(c1)))
 	// 		&& ops[0].user && !isa<LoadInst>(ops[0].user)

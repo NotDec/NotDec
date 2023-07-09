@@ -46,6 +46,25 @@ bool Abi::isRegister(const llvm::Value* val) const
 // 	return sp == val;
 // }
 
+
+void Abi::setMemory(llvm::GlobalVariable* val) {
+    mem = val;
+}
+
+
+void Abi::setStackPointer(llvm::GlobalVariable* val) {
+    sp = val;
+}
+
+bool Abi::isMemory(const llvm::Value* val) const
+{
+    if (mem == nullptr) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": " << " abi mem not set";
+        std::abort();
+    }
+	return mem == val;
+}
+
 bool Abi::isStackPointerRegister(const llvm::Value* val) const
 {
     if (sp == nullptr) {

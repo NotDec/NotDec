@@ -70,7 +70,8 @@ int main(int argc, char * argv[]) {
 
     //run passes and dump IR
     if (!disablePass) {
-        notdec::frontend::optimizers::run_passes(ctx.mod, opts);
+        notdec::frontend::optimizers::DecompileConfig conf(ctx.mod, ctx.opt);
+        conf.run_passes();
     }
     std::string outsuffix = getSuffix(outputFilename);
     if (outsuffix == ".ll") {

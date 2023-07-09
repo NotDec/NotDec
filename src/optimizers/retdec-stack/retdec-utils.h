@@ -1,3 +1,8 @@
+
+#ifndef RETDEC_BIN2LLVMIR_ANALYSES_DEBUG_H
+#define RETDEC_BIN2LLVMIR_ANALYSES_DEBUG_H
+
+
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -19,3 +24,5 @@ std::string llvmObjToString(const T* t)
 	return ss.str();
 }
 std::string llvmObjToString(const llvm::Module* t);
+
+#endif

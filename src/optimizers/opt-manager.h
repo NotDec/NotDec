@@ -1,5 +1,5 @@
-#ifndef _NOTDEC_FRONTEND_OPTIMIZERS_OPTMANAGER_H_
-#define _NOTDEC_FRONTEND_OPTIMIZERS_OPTMANAGER_H_
+#ifndef _NOTDEC_OPTIMIZERS_OPTMANAGER_H_
+#define _NOTDEC_OPTIMIZERS_OPTMANAGER_H_
 
 
 #include "llvm/ADT/StringMap.h"
@@ -19,6 +19,8 @@
 #include "llvm/Passes/OptimizationLevel.h"
 
 #include "llvm/Transforms/Utils/Mem2Reg.h"
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Value.h>
 
 #include "frontend/context.h"
 
@@ -26,7 +28,20 @@ using namespace llvm;
 
 namespace notdec::frontend::optimizers {
 
-void run_passes(llvm::Module& mod, notdec::frontend::options opts);
+struct DecompileConfig {
+
+    DecompileConfig(llvm::Module& mod, notdec::frontend::options opt)
+        : mod(mod), opts(opt) { }
+
+    llvm::Module& mod;
+    notdec::frontend::options opts;
+    llvm::GlobalVariable* sp = nullptr;
+    llvm::GlobalVariable* mem = nullptr;
+
+    void find_special_gv();
+    void run_passes();
+};
+
 llvm::FunctionPassManager buildFunctionOptimizations();
 
 }
