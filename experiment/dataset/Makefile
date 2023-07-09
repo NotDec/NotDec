@@ -24,7 +24,7 @@ out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
 	/opt/wasi-sdk-16.0/bin/clang -D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined -o ./$@ ./$<
 
 %.dec.ll: %.wasm
-	../../build/bin/notdec --compat-mode --recompile -o $@ -i $<
+	../../build/bin/notdec --compat-mode -o $@ -i $<
 
 %.wat: %.wasm
 	wasm2wat -f --enable-all ./$< > ./$@

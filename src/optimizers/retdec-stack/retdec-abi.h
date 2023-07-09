@@ -7,6 +7,7 @@
 #ifndef RETDEC_BIN2LLVMIR_PROVIDERS_ABI_ABI_H
 #define RETDEC_BIN2LLVMIR_PROVIDERS_ABI_ABI_H
 
+#include "utils.h"
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -45,8 +46,12 @@ class Abi
 		// bool isRegister(const llvm::Value* val, uint32_t r) const;
 		bool isStackPointerRegister(const llvm::Value* val) const;
 		bool isMemory(const llvm::Value* val) const;
+		bool isDebug() const { return log_level >= level_debug; }
         void setStackPointer(llvm::GlobalVariable* val);
         void setMemory(llvm::GlobalVariable* val);
+        void setLogLevel(int log_level) {
+			this->log_level = log_level;
+		}
 
 	// Stacks.
 	//
@@ -59,6 +64,7 @@ class Abi
 		llvm::Module* _module = nullptr;
         llvm::GlobalVariable* sp = nullptr;
         llvm::GlobalVariable* mem = nullptr;
+		int log_level = 5;
 		// Config* _config = nullptr;
 
 };

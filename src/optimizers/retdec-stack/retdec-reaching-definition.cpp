@@ -21,7 +21,6 @@
 #include "optimizers/retdec-stack/retdec-reaching-definition.h"
 // #include "retdec/bin2llvmir/providers/asm_instruction.h"
 // #include "retdec/bin2llvmir/providers/names.h"
-// #define debug_enabled false
 // #include "retdec/bin2llvmir/utils/llvm.h"
 
 // using namespace retdec::utils;
@@ -77,7 +76,9 @@ void ReachingDefinitionsAnalysis::run()
 	propagate();
 	initializeDefsAndUses();
 
-	std::cerr << *this << "\n";
+	if (_abi->isDebug()) {
+		std::cerr << *this << "\n";
+	}
 
 	clearInternal();
 }

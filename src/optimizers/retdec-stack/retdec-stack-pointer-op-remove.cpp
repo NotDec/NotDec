@@ -16,13 +16,12 @@
 #include "optimizers/retdec-stack/retdec-utils.h"
 // #include "retdec/utils/string.h"
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
+#include "utils.h"
 // #include "retdec/bin2llvmir/utils/debug.h"
 
 
 // using namespace retdec::utils;
 using namespace llvm;
-
-#define debug_enabled false
 
 namespace retdec {
 namespace bin2llvmir {
@@ -91,7 +90,9 @@ bool StackPointerOpsRemove::removeStackPointerStores()
 					continue;
 				}
 
-				std::cerr << __FILE__ << ":" << __LINE__ << ": " << "erase: " << llvmObjToString(inst) << std::endl;
+				if (_abi->isDebug()) {
+					std::cerr << __FILE__ << ":" << __LINE__ << ": " << "erase: " << llvmObjToString(inst) << std::endl;
+				}
 				inst->eraseFromParent();
 				changed = true;
 			}

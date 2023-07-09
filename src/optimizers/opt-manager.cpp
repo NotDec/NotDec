@@ -95,6 +95,7 @@ void DecompileConfig::run_passes() {
       retdec::bin2llvmir::Abi abi(&mod);
       abi.setStackPointer(sp);
       abi.setMemory(mem);
+      abi.setLogLevel(opts.log_level);
       retdec::bin2llvmir::SymbolicTree::setAbi(&abi);
       MPM.addPass(retdec::bin2llvmir::StackAnalysis(&abi));
       MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));

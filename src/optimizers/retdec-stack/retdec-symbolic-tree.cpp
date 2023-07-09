@@ -25,8 +25,6 @@
 using namespace llvm;
 using namespace retdec::bin2llvmir::st_match;
 
-#define debug_enabled false
-
 namespace retdec {
 namespace bin2llvmir {
 

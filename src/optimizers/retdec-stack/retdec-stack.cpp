@@ -127,11 +127,14 @@ void StackAnalysis::handleInstruction(
 		llvm::Type* type,
 		std::map<llvm::Value*, llvm::Value*>& val2val)
 {
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << llvmObjToString(inst) << std::endl;
+	if (_abi->isDebug()) {
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << llvmObjToString(inst) << std::endl;
+	}
 
 	auto root = SymbolicTree::PrecomputedRdaWithValueMap(RDA, val, &val2val);
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << root << std::endl;
-
+	if (_abi->isDebug()) {
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << root << std::endl;
+	}
 	// TODO 如果把sp map到0，则相关栈操作数最终可以化简到常量。
 	// 如果已经map了，则一般属于情况2和情况3
 	// 如果没有映射，也没有SP，就直接报错返回。
@@ -149,7 +152,9 @@ void StackAnalysis::handleInstruction(
 		}
 		if (!stackPtr)
 		{
-			std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> no SP" << std::endl;
+			if (_abi->isDebug()) {
+				std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> no SP" << std::endl;
+			}
 			return;
 		}
 	}
@@ -160,7 +165,9 @@ void StackAnalysis::handleInstruction(
 
 	// 直接化简成stack offset
 	root.simplifyNode();
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << root << std::endl;
+	if (_abi->isDebug()) {
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << root << std::endl;
+	}
 
 	// 简化后重新获取试试
 	// if (debugSv == nullptr)
@@ -189,8 +196,10 @@ void StackAnalysis::handleInstruction(
 		}
 	}
 
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(ci) << std::endl;
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << ci->getSExtValue() << std::endl;
+	if (_abi->isDebug()) {
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(ci) << std::endl;
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << ci->getSExtValue() << std::endl;
+	}
 
 	std::string name = "";
 	Type* t = type;
@@ -231,9 +240,11 @@ void StackAnalysis::handleInstruction(
 	AllocaInst* a = new AllocaInst(t, 0, (name.empty() ? "stack_var_" : (name + "_"))
 			+ std::to_string(ci->getSExtValue()), &*llvm::inst_begin(inst->getFunction()));
 
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(a) << std::endl;
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(inst) << std::endl;
-	std::cerr << __FILE__ << ":" << __LINE__ << ": " << std::endl;
+	if (_abi->isDebug()) {
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(a) << std::endl;
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << "===> " << llvmObjToString(inst) << std::endl;
+		std::cerr << __FILE__ << ":" << __LINE__ << ": " << std::endl;
+	}
 
 	auto* s = dyn_cast<StoreInst>(inst);
 	auto* l = dyn_cast<LoadInst>(inst);
