@@ -114,7 +114,7 @@ wabt那边代表Block的结构体看wabt的`src\ir.h` 383行`struct Block`这边
 - 函数参数逆序遍历（pop），同时从栈上pop出来。
 - 函数返回值顺序遍历，同时push到栈上。
 
-查OpCode看`wabt/src/opcode.def`。Opcode和ExprType之间的关系看`src\lexer-keywords.txt`，或者看`src\binary-reader.cc`里面对应的Opcode创建了什么Expr，~~或者看`src\binary-reader-ir.cc`里找对应的指令到底创建了哪种Expr类。~~
+查OpCode看`wabt/include/wabt/opcode.def`。Opcode和ExprType之间的关系看`src\lexer-keywords.txt`，或者看`wabt/src/lexer-keywords.txt`里面对应的Opcode创建了什么Expr，~~或者看`src\binary-reader-ir.cc`里找对应的指令到底创建了哪种Expr类。~~
 
 这里面的类继承关系看 `src\ir.h`。其实就是搞了一个ExprType，然后在onXXX指令的函数处直接创建了这个类型的Expr，导致opcode和expr之间没有明确的对应关系。
 
@@ -134,6 +134,26 @@ wabt那边代表Block的结构体看wabt的`src\ir.h` 383行`struct Block`这边
 
 1. feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用`fcmp oeq`。
 1. 而fne，有nan就返回1，所以要用`fcmp une`
+
+### SIMD
+
+参照 https://github.com/WebAssembly/simd/blob/master/proposals/simd/SIMD.md
+指令 https://github.com/zeux/wasm-simd/blob/master/Instructions.md
+https://nemequ.github.io/waspr/instructions
+
+#### 指令格式
+`{interpretation}.{operation}` 
+
+前缀`{interpretation}`表示如何解释 v128 类型的字节：格式为`{t}{lane_width}x{n}`
+
+- t是类型: v（只划分不解释）/i（整形）/f（浮点）
+- lane_width是lane位宽：8/16/32/64
+- n是lane总数
+#### 处理
+1. 默认的v128在LLVM IR中被定义为`<2 x i64>` 类型。
+1. Wasm指令中的vector操作数都是v128类型，`{interpretation}`则是指令执行和执行完的向量类型，所以需要使用BitCast进行转换。过多的BitCast显得很繁杂，参考了WAVM使用宏定义来简化代码。
+1. LLVM中的Intrinsic对vector支持很好，直接转换好数据类型后调用对应的Intrinsic即可。
+1. 有些指令设计向量的缩减与扩增，可以用Shuffle配合mask来实现。
 
 
 
