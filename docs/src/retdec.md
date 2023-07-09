@@ -47,14 +47,26 @@ vscode代码搜索方法：基于`src/retdec-decompiler/decompiler-config.json`�
 - retdec-llvmir2hll：
 
 
-### retdec 栈恢复源码解读
+### retdec 栈恢复算法
 
-源码在`retdec\src\bin2llvmir\optimizations\stack\stack.cpp`
+源码在`retdec\src\bin2llvmir\optimizations\stack\stack.cpp`。总体思路非常简单，分析每个load和store用到的东西，提取成一个表达式树（SymbolicTree类）。首先判断表达式树里面有没有栈指针，没有就不处理。然后尝试把整个表达式树化简，把栈指针看作0，化简成一个常量，然后把这个常量当作栈偏移，创建一个alloca去替换它。
 
-大体要做的，是把栈指针的偏移访问，都改成alloca。
-1. 函数开头sub了栈指针，改成对应大小的alloca
-1. 处理load/store
-    - 如果是load：改为对对应alloca的对应偏移的load
-    - 如果是store：改为对对应alloca的对应偏移的store
+这个方法还是有很大问题，有许多处理不了的情况。从这个角度看，retdec确实是比ghidra差的。现在现有的开源反编译器里面也就ghidra最好了。比如如果存在memcpy这种函数的调用，由于直接传地址，所以不是load/store的形式，而是计算完地址直接传给函数了，导致没有将里面的值替换为新创建的alloca。
 
-在上面算法的基础上，增加一个map，从变量映射到栈偏移。然后在load和store的时候尝试将ptr解析为栈指针的偏移。然后在对应大小的地方创建变量。
+**代码解读**
+
+- abi.cpp 主要负责提供两个函数，isStackPointer和（我们自己新增的）isMemory，判断一个值是否是栈指针。
+- reaching-definition.cpp 计算load和store之间的到达定值关系？
+- symbolic-tree.cpp 符号树。
+    - expand操作，当初次构建符号树的时候，会从感兴趣的值开始反向遍历Use关系，生成符号树。
+        - 我们适配wasm时，让栈指针的子节点为常量0。方便后续化简栈指针偏移的访问为常量（之后的化简操作会将栈指针视为常量0）。（retdec在分析非wasm程序时，会为寄存器创建对应的全局变量，初始值为0，但是我们wasm的栈指针初始值不为0，所以需要修改。）
+    - simplifyNode操作，尝试将符号树化简。比如如果有算数操作，且两边都是常量，则会化简为运算后的结果。
+- stack.cpp 栈分析的主体代码。遍历处理load/store指令。有三种情况：1 处理Load指令的指针，2 处理Store指令打算存进内存的值，3 处理store指令的指针
+    - 对要分析的Value构建SymbolicTree（expand操作）。
+    - 使用val2val这个map进行缓存，缓存已经化简过的结果，从被分析的value映射到化简后的ConstantInt。如果不在缓存里，继续后面的分析。
+    - 首先判断当前的SymbolicTree里面有没有栈指针，如果没有就直接返回，放弃处理。
+    - 化简当前的SymbolicTree，如果化简为ConstantInt常量，则继续处理，否则直接返回放弃处理。
+    - （我们新增）使用off2alloca这个map从偏移映射到alloca指令，防止重复创建栈变量。
+    - 把化简后的常量当作栈偏移，为每个不同的栈偏移创建变量。变量类型从load/store中找的好像。
+    - 把当前被分析的Value替换为对应的Alloca指令。
+- stack-pointer-op-remove.cpp 独立的pass，移除栈变量识别后无用的代码。
