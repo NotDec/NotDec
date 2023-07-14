@@ -11,51 +11,8 @@ out_dir = cwd + "/SVF/output"
 result_dir = out_dir + "/clang_result"
 compile_dir = out_dir + "/clang_liftedIR"
 
-def do_compile_ll(src, out):
-    command = ["clang-13", "-O0 -S -emit-llvm", "-g0", src, "-o", out]
-    print(" ".join(command))
-    return os.system(" ".join(command)) == 0
-
-
-def run_saber(ll, result):
-    #st = time.time()
-    cmd = [bin_dir + "/saber", ll, "-leak", "-stat=false", "-clock-type=wall", "2>", result]
-    ret = os.system(" ".join(cmd))
-    #ed = time.time()
-    return ret
-
-
-init = time.time()
-
-#if not exist, create
-if not os.path.exists(out_dir):
-    os.mkdir(out_dir)
-if not os.path.exists(result_dir):
-    os.mkdir(result_dir)
-if not os.path.exists(compile_dir):
-    os.mkdir(compile_dir)
-
-# remove result
-for root, dirs, files in os.walk(result_dir):
-    for f in files:
-        os.remove(os.path.join(root, f))
-
-for root, dirs, files in os.walk(compile_dir):
-    for f in files:
-        os.remove(os.path.join(root, f))
-
-# compile
-for root, dirs, files in os.walk(data_dir):
-    for f in files:
-        now = os.path.join(root, f)
-        ll = os.path.join(compile_dir, f[:-2]) + ".ll"
-        do_compile_ll(now, ll)
-        result = result_dir + "/" + f[:-2] + ".out"
-        run_saber(ll, result)
 
 # 统计结果
-end = time.time()
-print("[+] total time: ", end - init)
 print("===================Lift Result==================")
 ll_count = 0
 for root, dirs, files in os.walk(compile_dir):
@@ -68,15 +25,30 @@ print("total ll: ", ll_count)
 
 
 print("===================Saber Result==================")
-result = {}
-for root, dirs, files in os.walk(result_dir):
-    for f in files:
-        res = open(os.path.join(root, f), "r")
-        if res.read() != "":
-            CWE_type = f.split("_")[0]
-            result[CWE_type] = result.get(CWE_type, 0) + 1
+result_dir = os.path.join(cwd, "dataset", "out_dataset-SAC-2022", "src")
+result_compile = {}
+result_dec = {}
+for file in os.listdir(result_dir):
+    if file.endswith(".dec.ll.svf"):
+        res = open(os.path.join(result_dir, file), "r")
+        res = res.read()
+        if res != "":
+            print(f"{os.path.join(result_dir, file)}: {res}")
+            CWE_type = file.split("_")[0]
+            result_dec[CWE_type] = result_dec.get(CWE_type, 0) + 1
+    if file.endswith(".com.ll.svf"):
+        res = open(os.path.join(result_dir, file), "r")
+        res = res.read()
+        if res != "":
+            print(f"{os.path.join(result_dir, file)}: {res}")
+            CWE_type = file.split("_")[0]
+            result_compile[CWE_type] = result_compile.get(CWE_type, 0) + 1
 
-print(result)
+result_dec = {k:result_dec[k] for k in sorted(result_dec)}
+result_compile = {k:result_compile[k] for k in sorted(result_compile)}
+
+print(result_compile)
+print(result_dec)
 total_CWE = {
     "CWE122": 780,
     "CWE127": 226,
@@ -119,10 +91,17 @@ total_CWE = {
     "CWE483": 1,
 }
 
-for i in result:
+for i in result_compile:
     if("std" in i):
         continue
     print(
-        i, result[i], "/", total_CWE[i], str(result[i] / total_CWE[i] * 100)[:4] + "%"
+        i, result_compile[i], "/", total_CWE[i], str(result_compile[i] / total_CWE[i] * 100)[:4] + "%"
+    )
+print("=====decompile======")
+for i in result_dec:
+    if("std" in i):
+        continue
+    print(
+        i, result_dec[i], "/", total_CWE[i], str(result_dec[i] / total_CWE[i] * 100)[:4] + "%"
     )
     

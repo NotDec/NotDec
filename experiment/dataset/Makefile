@@ -1,8 +1,11 @@
-.PHONY: all clean wat wasm dec
+.PHONY: all clean wat wasm dec compile svf_com svf_dec
 
 FUNCTIONALDIR = dataset-SAC-2022/src
 
-# 先初始化创建文件夹
+# 1. 设置SVF
+# 将saber放到path export PATH=/sn640/SVF/Release-build/bin:$PATH
+# export SVF_DIR=/sn640/SVF
+# 2. 初始化创建文件夹
 # mkdir -p ./out_dataset-SAC-2022/src/
 # 然后直接make -j`nproc`
 
@@ -10,12 +13,14 @@ SOURCES = $(basename $(wildcard $(FUNCTIONALDIR)/CWE*.c))
 # eg: functional => out_functional
 PREFIXEDS = $(addprefix out_, $(SOURCES))
 
-all: dec wat
+all: svf_dec svf_com compile dec wat
 dec: $(addsuffix .dec.ll, $(PREFIXEDS))
 wat: $(addsuffix .wat, $(PREFIXEDS))
 wasm: $(addsuffix .wasm, $(PREFIXEDS))
+compile: $(addsuffix .com.ll, $(PREFIXEDS))
+svf_com: $(addsuffix .com.ll.svf, $(PREFIXEDS))
+svf_dec: $(addsuffix .dec.ll.svf, $(PREFIXEDS))
 
-#  $(addsuffix .clif, $(basename $(wildcard *.c))) $(addsuffix .wavm.ll, $(basename $(wildcard *.c))) $(addsuffix .wasm-decompile, $(basename $(wildcard *.c))) $(addsuffix .wasmdec, $(basename $(wildcard *.c))) $(addsuffix .wasm2c.cc, $(basename $(wildcard *.c)))
 # emcc ./$< -g -s EXPORTED_FUNCTIONS=_main -s ERROR_ON_UNDEFINED_SYMBOLS=0 -o ./$@
 # -g -O0 --no-standard-libraries -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined 
 out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
@@ -23,11 +28,20 @@ out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
 # /opt/wasi-sdk-20.0/bin/clang -fno-builtin -fno-lto -Wl,--lto-O0 -I. -g -O0 --no-standard-libraries -Wl,--entry=main -lc -Wl,--allow-undefined -o ${out}.wasm $file
 	/opt/wasi-sdk-16.0/bin/clang -D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined -o ./$@ ./$<
 
+out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
+	clang-14 -O0 -S -emit-llvm -g0 -o ./$@ ./$<
+
 %.dec.ll: %.wasm
 	../../build/bin/notdec --compat-mode -o $@ -i $<
 
 %.wat: %.wasm
-	wasm2wat -f --enable-all ./$< > ./$@
+	wasm2wat -f --enable-all $< > $@
+
+%.com.ll.svf: %.com.ll
+	saber $< -leak -dfree -fileck -stat=false -clock-type=wall > $@ 2>&1
+
+%.dec.ll.svf: %.dec.ll
+	saber $< -leak -dfree -fileck -stat=false -clock-type=wall > $@ 2>&1
 
 %.wasm2c.cc: %.wasm
 	wasm2c ./$< > ./$@
