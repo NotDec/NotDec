@@ -237,7 +237,7 @@ void StackAnalysis::handleInstruction(
 	// 把相关的load替换为对alloca的load。
 	else if (l && l->getPointerOperand() == val)
 	{
-		auto* nl = new LoadInst(a->getType(), a, "", l);
+		auto* nl = new LoadInst(a->getType()->getPointerElementType(), a, "", l);
 		auto* conv = IrModifier::convertValueToType(nl, l->getType(), l);
 		l->replaceAllUsesWith(conv);
 		_toRemove.insert(l);

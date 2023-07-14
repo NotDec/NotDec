@@ -48,7 +48,7 @@ struct HelloModule : PassInfoMixin<HelloWorld> {
 
 void DecompileConfig::find_special_gv() {
   for (GlobalVariable& gv: mod.getGlobalList()) {
-    if (gv.getName().equals("$__stack_pointer")) {
+    if (gv.getName().equals("__stack_pointer")) {
       sp = &gv;
     }
     if (gv.getName().equals(MEM_NAME)) {

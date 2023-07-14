@@ -4,6 +4,7 @@
 #include "wabt/ir.h"
 #include <cstdlib>
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -175,10 +176,15 @@ void Context::visitModule() {
         }
         Func& func = cast<FuncModuleField>(&field)->func;
         llvm::Function* function = declareFunc(func, false);
-        if (baseCtx.opt.compat_mode && function->getName() == "__original_main"){
+        if (baseCtx.opt.compat_mode){
+            if (function->getName().front() == '$') {
+                function->setName(removeDollar(function->getName()));
+            }
+            if (function->getName().equals( "__original_main") || function->getName().equals("__main_argc_argv")) {
                 function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
                 function->setName("main");
             }
+        }
         nonImportFuncs.push_back(function);
     }
 
@@ -212,7 +218,7 @@ void Context::visitModule() {
             this->funcs[index]->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
             // 之前internal的时候同时自动设置了dso_local
             this->funcs[index]->setDSOLocal(false);
-            //rename func with export name
+            // rename func with its export name
             if(baseCtx.opt.compat_mode){
                 std::string export_name = export_->name;
                 if(this->funcs[index]->getName().str().find("func_") == 0){
@@ -343,10 +349,13 @@ void Context::visitFunc(wabt::Func& func, llvm::Function* function) {
 
 void Context::visitGlobal(wabt::Global& gl, bool isExternal) {
     using namespace llvm;
-    // std::string name = "global_" + std::to_string(i) + "_" + gl->name;
+    std::string gname = gl.name.empty() ? "__notdec_global_" + std::to_string(_glob_index) : gl.name;
+    if (baseCtx.opt.compat_mode) {
+        gname = removeDollar(gname);
+    }
     Type* ty = convertType(llvmContext, gl.type);
     GlobalVariable *gv = new GlobalVariable(llvmModule, ty, !gl.mutable_, 
-        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gl.name.empty() ? "G" + std::to_string(_glob_index) : gl.name);
+        isExternal ? GlobalValue::LinkageTypes::ExternalLinkage : GlobalValue::LinkageTypes::InternalLinkage, nullptr, gname);
     if (!isExternal) {
         Constant* init = visitInitExpr(gl.init_expr);
         if (init == nullptr) {
@@ -491,7 +500,7 @@ llvm::Function* Context::declareFunc(wabt::Func& func, bool isExternal) {
     using namespace llvm;
     FunctionType* funcType = convertFuncType(llvmContext, func.decl.sig);
     std::string fname = func.name;
-    if (baseCtx.opt.recompile) {
+    if (baseCtx.opt.recompile || baseCtx.opt.compat_mode) {
         fname = removeDollar(func.name);
     }
     if (baseCtx.opt.compat_mode && fname.empty()) {
@@ -532,6 +541,16 @@ std::string removeDollar(std::string name) {
         return name;
     }
     if (name.at(0) == '$') {
+        return name.substr(1);
+    }
+    return name;
+}
+
+llvm::StringRef removeDollar(llvm::StringRef name) {
+    if (name.size() == 0) {
+        return name;
+    }
+    if (name.front() == '$') {
         return name.substr(1);
     }
     return name;

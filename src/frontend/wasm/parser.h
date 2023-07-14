@@ -69,6 +69,7 @@ llvm::Constant* createMemInitializer(llvm::LLVMContext& llvmContext, llvm::Type*
 void modMemInitializer(llvm::StringRef ptr, uint64_t offset, std::vector<uint8_t> data);
 
 std::string removeDollar(std::string name);
+llvm::StringRef removeDollar(llvm::StringRef name);
 
 }
 #endif
