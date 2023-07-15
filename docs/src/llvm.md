@@ -18,27 +18,38 @@
 
 YouTube的LLVM频道里有很多不错的视频。
 - 2019 LLVM Developers’ Meeting: E. Christopher & J. Doerfert “Introduction to LLVM” 
+    
     果然后端的水很深啊。
 - 2019 EuroLLVM Developers’ Meeting: V. Bridgers & F. Piovezan “LLVM IR Tutorial - Phis, GEPs and other things, oh my! - Vince Bridgers (Intel Corporation)”》
+    
     讲getelementptr指令讲得特别好，要是当时理解debug info metadata的时候看了这个就好了。
 - 2019 LLVM Developers’ Meeting: J. Paquette & F. Hahn “Getting Started With LLVM: Basics”
+    
     前半 讲了LLVM IR Pass需要考虑到的一些东西，users的概念，讲了移除基本块和指令时需要注意的。 后半部分讲Backend Pass也非常不错。
 - 2019 LLVM Developers’ Meeting: S. Haastregt & A. Stulova “An overview of Clang ”
+    
     讲了clang前端的架构。和之前想象中有些不一样。先是driver，然后是前端：词法分析语法分析，生成AST后codegen生成IR。
 - 2017 LLVM Developers’ Meeting: D. Michael “XRay in LLVM: Function Call Tracing and Analysis ” 
+    
     非常不错的Hook介入的框架
 - 2018 EuroLLVM Developers’ Meeting: C. Hubain & C. Tessier “Implementing an LLVM based Dynamic Binary Instrumentation framework  - Charles Hubain 
+    
     是Quarkslab的那个QBDI，有时间真得好好学学。
 - 2017 LLVM Developers’ Meeting: “Challenges when building an LLVM bitcode Obfuscator ” 
+    
     汇编混淆确实需要考虑很多情况。。
 - 2014 LLVM Developers’ Meeting: “Debug Info Tutorial ”
 - 2019 LLVM Developers’ Meeting: S. Haastregt & A. Stulova “An overview of Clang ”
+    
     讲了clang前端的架构。和之前想象中有些不一样。先是driver，然后是前端：词法分析语法分析，生成AST后codegen生成IR。
 - 2017 LLVM Developers’ Meeting: D. Michael “XRay in LLVM: Function Call Tracing and Analysis
+    
     非常不错的Hook介入的框架
 - 2018 EuroLLVM Developers’ Meeting: C. Hubain & C. Tessier “Implementing an LLVM based Dynamic Binary Instrumentation framework  - Charles Hubain 
+    
     是Quarkslab的那个QBDI，有时间真得好好学学。
 - 2017 LLVM Developers’ Meeting: “Challenges when building an LLVM bitcode Obfuscator ” 
+    
     汇编混淆确实需要考虑很多情况。
 
 其他：
