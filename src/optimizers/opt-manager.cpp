@@ -7,9 +7,20 @@
 #include "llvm/Transforms/Scalar/DCE.h"
 #include <algorithm>
 
+#include <cstddef>
+#include <iostream>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/Support/Casting.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/Scalar/InstSimplifyPass.h>
+#include <string>
+#include <utility>
+#include <vector>
 #include "llvm/Transforms/Scalar/SCCP.h"
 #include "llvm/Transforms/Utils/SimplifyCFGOptions.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
@@ -20,11 +31,132 @@
 
 namespace notdec::frontend::optimizers {
 
+// 把malloc的函数签名改为返回指针，把free的函数签名改为接受指针。
+// 因为LLVM不能直接修改函数的签名，导致需要创建一个新的函数替代旧的函数。
+struct FuncSigModify : PassInfoMixin<FuncSigModify> {
+  std::vector<std::pair<Function*, Function*>> toReplace;
+  // Main entry point, takes IR unit to run the pass on (&F) and the
+  // corresponding pass manager (to be queried if need be)
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &) {
+    llvm::IRBuilder<> builder(M.getContext());
+    // 1 为每个要改变前面的函数创建新的函数
+    Function* malloc = M.getFunction("malloc");
+    if (malloc != nullptr && (!malloc->getReturnType()->isPointerTy())) {
+      addChangeRetToPointer(malloc);
+    }
+    Function* calloc = M.getFunction("calloc");
+    if (calloc != nullptr && (!calloc->getReturnType()->isPointerTy())) {
+      addChangeRetToPointer(calloc);
+    }
+    Function* free = M.getFunction("free");
+    if (free != nullptr && (!free->getReturnType()->isPointerTy())) {
+      addChangeArgToPointer(free, 0);
+    }
+    for(Function& F: M) {
+      run(F);
+    }
+    // 删除原来的malloc
+    for(auto &p: toReplace) {
+      std::string name = p.first->getName().str();
+      p.first->eraseFromParent();
+      p.second->setName(name);
+    }
+    return PreservedAnalyses::all();
+  }
+
+  void addChangeArgToPointer(Function* func, int index) {
+    std::cerr << "Changing the definition of " << func->getName().str() << std::endl;
+    // lib\Transforms\Utils\CloneFunction.cpp
+    std::vector<Type *> ArgTypes;
+
+    int i=0;
+    for (const Argument &I : func->args()) {
+      if (i == index) {
+        ArgTypes.push_back(I.getType()->getPointerTo());
+      } else {
+        ArgTypes.push_back(I.getType());
+      }
+      i++;  
+    }
+
+    FunctionType* fty = FunctionType::get(func->getReturnType(), ArgTypes, func->getFunctionType()->isVarArg());
+    Function* newFunc = Function::Create(fty, func->getLinkage(), func->getAddressSpace(),
+                                  func->getName(), func->getParent());
+    toReplace.emplace_back(func, newFunc);
+  }
+
+  void addChangeRetToPointer(Function* func) {
+    std::cerr << "Changing the definition of " << func->getName().str() << std::endl;
+    // lib\Transforms\Utils\CloneFunction.cpp
+    std::vector<Type *> ArgTypes;
+
+    for (const Argument &I : func->args())
+        ArgTypes.push_back(I.getType());
+    FunctionType* fty = FunctionType::get(func->getReturnType()->getPointerTo(), ArgTypes, func->getFunctionType()->isVarArg());
+    Function* newFunc = Function::Create(fty, func->getLinkage(), func->getAddressSpace(),
+                                  func->getName(), func->getParent());
+    toReplace.emplace_back(func, newFunc);
+  }
+
+  // 直接遍历新函数的每一个参数的类型，和旧的函数参数的类型对比，如果发现有不同，就创建bitcast指令转换
+  // 返回值同理。最后替换原有的call指令。
+  void changeCall(CallInst* call, Function* to) {
+    IRBuilder<> builder(call->getContext());
+    std::vector<Value*> args;
+    builder.SetInsertPoint(call);
+    Function* called = call->getCalledFunction();
+    // 为参数创建bitcast
+    for (int i=0;i<called->arg_size();i++) {
+      const Argument *current = called->getArg(i);
+      const Argument *target = to->getArg(i);
+      if (current->getType() != target->getType()) {
+        Value* arg = builder.CreateBitOrPointerCast(call->getArgOperand(i), target->getType());
+        args.push_back(arg);
+        llvm::errs() << "bitcast arg " << i << ": " << current;
+      } else {
+        args.push_back(call->getArgOperand(i));
+      }
+    }
+    // 创建调用
+    Value* new_call = builder.CreateCall(to->getFunctionType(), to, args);
+    // 为返回值创建bitcast，转换回原来的指令
+    if (called->getReturnType() != to->getReturnType()) {
+      // builder.SetInsertPoint(call->getNextNode());
+      new_call = builder.CreateBitOrPointerCast(new_call, called->getReturnType());
+    }
+    // 替换指令返回值
+    call->replaceAllUsesWith(new_call);
+    call->eraseFromParent();
+  }
+
+  void run(Function &F) {
+    for(BasicBlock &BB : F) {
+      auto InstIter = BB.begin();
+      while(InstIter != BB.end()) {
+        CallInst* call = dyn_cast_or_null<CallInst>(&*InstIter);
+        ++InstIter;
+        if ((call != nullptr)) {
+          for (auto p: toReplace) {
+            if (call->getCalledFunction() == p.first) {
+              changeCall(call, p.second);
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Without isRequired returning true, this pass will be skipped for functions
+  // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
+  // all functions with optnone.
+  static bool isRequired() { return true; }
+};
 
 // Function Pass example
 struct HelloWorld : PassInfoMixin<HelloWorld> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
-  // corresponding pass manager (to be queried if need be)
+  // corresponding  pass manager (to be queried if need be)
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
     errs() << "(llvm-tutor) Hello from: "<< F.getName() << "\n";
     errs() << "(llvm-tutor)   number of arguments: " << F.arg_size() << "\n";
@@ -100,6 +232,7 @@ void DecompileConfig::run_passes() {
       MPM.addPass(retdec::bin2llvmir::StackAnalysis(&abi));
       MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));
     }
+    MPM.addPass(FuncSigModify());
     MPM.run(mod, MAM);
 }
 
