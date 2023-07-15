@@ -161,6 +161,46 @@
 <li>中端优化为什么这么神奇：https://blog.matthieud.me/2020/exploring-clang-llvm-optimization-on-programming-horror/</li>
 </ul>
 <p>YouTube的LLVM频道里有很多不错的视频。</p>
+<ul>
+<li>2019 LLVM Developers’ Meeting: E. Christopher &amp; J. Doerfert “Introduction to LLVM” 
+果然后端的水很深啊。</li>
+<li>2019 EuroLLVM Developers’ Meeting: V. Bridgers &amp; F. Piovezan “LLVM IR Tutorial - Phis, GEPs and other things, oh my! - Vince Bridgers (Intel Corporation)”》
+讲getelementptr指令讲得特别好，要是当时理解debug info metadata的时候看了这个就好了。</li>
+<li>2019 LLVM Developers’ Meeting: J. Paquette &amp; F. Hahn “Getting Started With LLVM: Basics”
+前半 讲了LLVM IR Pass需要考虑到的一些东西，users的概念，讲了移除基本块和指令时需要注意的。 后半部分讲Backend Pass也非常不错。</li>
+<li>2019 LLVM Developers’ Meeting: S. Haastregt &amp; A. Stulova “An overview of Clang ”
+讲了clang前端的架构。和之前想象中有些不一样。先是driver，然后是前端：词法分析语法分析，生成AST后codegen生成IR。</li>
+<li>2017 LLVM Developers’ Meeting: D. Michael “XRay in LLVM: Function Call Tracing and Analysis ” 
+非常不错的Hook介入的框架</li>
+<li>2018 EuroLLVM Developers’ Meeting: C. Hubain &amp; C. Tessier “Implementing an LLVM based Dynamic Binary Instrumentation framework  - Charles Hubain 
+是Quarkslab的那个QBDI，有时间真得好好学学。</li>
+<li>2017 LLVM Developers’ Meeting: “Challenges when building an LLVM bitcode Obfuscator ” 
+汇编混淆确实需要考虑很多情况。。</li>
+<li>2014 LLVM Developers’ Meeting: “Debug Info Tutorial ”</li>
+<li>2019 LLVM Developers’ Meeting: S. Haastregt &amp; A. Stulova “An overview of Clang ”
+讲了clang前端的架构。和之前想象中有些不一样。先是driver，然后是前端：词法分析语法分析，生成AST后codegen生成IR。</li>
+<li>2017 LLVM Developers’ Meeting: D. Michael “XRay in LLVM: Function Call Tracing and Analysis
+非常不错的Hook介入的框架</li>
+<li>2018 EuroLLVM Developers’ Meeting: C. Hubain &amp; C. Tessier “Implementing an LLVM based Dynamic Binary Instrumentation framework  - Charles Hubain 
+是Quarkslab的那个QBDI，有时间真得好好学学。</li>
+<li>2017 LLVM Developers’ Meeting: “Challenges when building an LLVM bitcode Obfuscator ” 
+汇编混淆确实需要考虑很多情况。</li>
+</ul>
+<p>其他：</p>
+<ul>
+<li>language server
+<ul>
+<li><a href="https://www.youtube.com/watch?v=5HIyAXj1YNQ">CppCon 2018: Ilya Biryukov “Clangd: architecture of a scalable C++ language server” - YouTube</a></li>
+<li><a href="https://www.apress.com/br/book/9781484277911">Language Server Protocol and Implementation</a> </li>
+<li><a href="https://www.oreilly.com/library/view/modern-vim/9781680506006/f_0057.xhtml">Integrating with the Language Server Protocol</a> </li>
+</ul>
+</li>
+<li>《Getting Started with LLVM Core Libraries》前端代码转换的部分
+<ul>
+<li><a href="https://getting-started-with-llvm-core-libraries-zh-cn.readthedocs.io/zh_CN/latest/">Getting Started with LLVM Core Libraries（中文版）</a></li>
+</ul>
+</li>
+</ul>
 <h3 id="debug"><a class="header" href="#debug">debug</a></h3>
 <p>打印使用<code>llvm::outs() &lt;&lt; xxx;</code>直接打印llvm Value</p>
 <h3 id="声明全局变量"><a class="header" href="#声明全局变量">声明全局变量</a></h3>
@@ -185,6 +225,14 @@
 <p>传统的LegacyPM有一些不足，例如Analysis Pass不能缓存分析的信息导致重复分析等。NewPM将Analysis和Pass做了区分。在LegacyPM中存在过多的全局变量与registries，每个Pass都需要通过宏来注册，NewPM改进了这一点，当然还有内联函数分析等其他优化。LLVM12使用的是LegacyPassManager，13之后默认使用的是NewPassManager，<strong>本项目也使采用NewPassManager</strong>。</p>
 <h3 id="运行与管理"><a class="header" href="#运行与管理">运行与管理</a></h3>
 <p>LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。</p>
+<h3 id="调试"><a class="header" href="#调试">调试</a></h3>
+<p>我们基于 vscode开发，使用codelldb插件。发现无法下条件断点。</p>
+<ul>
+<li>首先下普通断点</li>
+<li>使用<code>breakpoint list</code> 查看断点编号</li>
+<li>使用<code>breakpoint modify 1 -c &quot;((int64_t) (ci-&gt;getSExtValue()) &lt; -100)&quot;</code>这样的命令给断点增加条件</li>
+</ul>
+<p>更多使用方式见<a href="https://lldb.llvm.org/use/tutorial.html">lldb使用教程</a></p>
 
                     </main>
 

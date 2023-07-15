@@ -349,6 +349,46 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <li>中端优化为什么这么神奇：https://blog.matthieud.me/2020/exploring-clang-llvm-optimization-on-programming-horror/</li>
 </ul>
 <p>YouTube的LLVM频道里有很多不错的视频。</p>
+<ul>
+<li>2019 LLVM Developers’ Meeting: E. Christopher &amp; J. Doerfert “Introduction to LLVM” 
+果然后端的水很深啊。</li>
+<li>2019 EuroLLVM Developers’ Meeting: V. Bridgers &amp; F. Piovezan “LLVM IR Tutorial - Phis, GEPs and other things, oh my! - Vince Bridgers (Intel Corporation)”》
+讲getelementptr指令讲得特别好，要是当时理解debug info metadata的时候看了这个就好了。</li>
+<li>2019 LLVM Developers’ Meeting: J. Paquette &amp; F. Hahn “Getting Started With LLVM: Basics”
+前半 讲了LLVM IR Pass需要考虑到的一些东西，users的概念，讲了移除基本块和指令时需要注意的。 后半部分讲Backend Pass也非常不错。</li>
+<li>2019 LLVM Developers’ Meeting: S. Haastregt &amp; A. Stulova “An overview of Clang ”
+讲了clang前端的架构。和之前想象中有些不一样。先是driver，然后是前端：词法分析语法分析，生成AST后codegen生成IR。</li>
+<li>2017 LLVM Developers’ Meeting: D. Michael “XRay in LLVM: Function Call Tracing and Analysis ” 
+非常不错的Hook介入的框架</li>
+<li>2018 EuroLLVM Developers’ Meeting: C. Hubain &amp; C. Tessier “Implementing an LLVM based Dynamic Binary Instrumentation framework  - Charles Hubain 
+是Quarkslab的那个QBDI，有时间真得好好学学。</li>
+<li>2017 LLVM Developers’ Meeting: “Challenges when building an LLVM bitcode Obfuscator ” 
+汇编混淆确实需要考虑很多情况。。</li>
+<li>2014 LLVM Developers’ Meeting: “Debug Info Tutorial ”</li>
+<li>2019 LLVM Developers’ Meeting: S. Haastregt &amp; A. Stulova “An overview of Clang ”
+讲了clang前端的架构。和之前想象中有些不一样。先是driver，然后是前端：词法分析语法分析，生成AST后codegen生成IR。</li>
+<li>2017 LLVM Developers’ Meeting: D. Michael “XRay in LLVM: Function Call Tracing and Analysis
+非常不错的Hook介入的框架</li>
+<li>2018 EuroLLVM Developers’ Meeting: C. Hubain &amp; C. Tessier “Implementing an LLVM based Dynamic Binary Instrumentation framework  - Charles Hubain 
+是Quarkslab的那个QBDI，有时间真得好好学学。</li>
+<li>2017 LLVM Developers’ Meeting: “Challenges when building an LLVM bitcode Obfuscator ” 
+汇编混淆确实需要考虑很多情况。</li>
+</ul>
+<p>其他：</p>
+<ul>
+<li>language server
+<ul>
+<li><a href="https://www.youtube.com/watch?v=5HIyAXj1YNQ">CppCon 2018: Ilya Biryukov “Clangd: architecture of a scalable C++ language server” - YouTube</a></li>
+<li><a href="https://www.apress.com/br/book/9781484277911">Language Server Protocol and Implementation</a> </li>
+<li><a href="https://www.oreilly.com/library/view/modern-vim/9781680506006/f_0057.xhtml">Integrating with the Language Server Protocol</a> </li>
+</ul>
+</li>
+<li>《Getting Started with LLVM Core Libraries》前端代码转换的部分
+<ul>
+<li><a href="https://getting-started-with-llvm-core-libraries-zh-cn.readthedocs.io/zh_CN/latest/">Getting Started with LLVM Core Libraries（中文版）</a></li>
+</ul>
+</li>
+</ul>
 <h3 id="debug"><a class="header" href="#debug">debug</a></h3>
 <p>打印使用<code>llvm::outs() &lt;&lt; xxx;</code>直接打印llvm Value</p>
 <h3 id="声明全局变量"><a class="header" href="#声明全局变量">声明全局变量</a></h3>
@@ -373,6 +413,14 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <p>传统的LegacyPM有一些不足，例如Analysis Pass不能缓存分析的信息导致重复分析等。NewPM将Analysis和Pass做了区分。在LegacyPM中存在过多的全局变量与registries，每个Pass都需要通过宏来注册，NewPM改进了这一点，当然还有内联函数分析等其他优化。LLVM12使用的是LegacyPassManager，13之后默认使用的是NewPassManager，<strong>本项目也使采用NewPassManager</strong>。</p>
 <h3 id="运行与管理"><a class="header" href="#运行与管理">运行与管理</a></h3>
 <p>LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。</p>
+<h3 id="调试"><a class="header" href="#调试">调试</a></h3>
+<p>我们基于 vscode开发，使用codelldb插件。发现无法下条件断点。</p>
+<ul>
+<li>首先下普通断点</li>
+<li>使用<code>breakpoint list</code> 查看断点编号</li>
+<li>使用<code>breakpoint modify 1 -c &quot;((int64_t) (ci-&gt;getSExtValue()) &lt; -100)&quot;</code>这样的命令给断点增加条件</li>
+</ul>
+<p>更多使用方式见<a href="https://lldb.llvm.org/use/tutorial.html">lldb使用教程</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="notdec-development-document"><a class="header" href="#notdec-development-document">NotDec Development Document</a></h1>
 <p>NotDec的项目文档。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="webassembly-frontend"><a class="header" href="#webassembly-frontend">WebAssembly Frontend</a></h1>
@@ -533,7 +581,7 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <li>函数参数逆序遍历（pop），同时从栈上pop出来。</li>
 <li>函数返回值顺序遍历，同时push到栈上。</li>
 </ul>
-<p>查OpCode看<code>wabt/src/opcode.def</code>。Opcode和ExprType之间的关系看<code>src\lexer-keywords.txt</code>，或者看<code>src\binary-reader.cc</code>里面对应的Opcode创建了什么Expr，<del>或者看<code>src\binary-reader-ir.cc</code>里找对应的指令到底创建了哪种Expr类。</del></p>
+<p>查OpCode看<code>wabt/include/wabt/opcode.def</code>。Opcode和ExprType之间的关系看<code>src\lexer-keywords.txt</code>，或者看<code>wabt/src/lexer-keywords.txt</code>里面对应的Opcode创建了什么Expr，<del>或者看<code>src\binary-reader-ir.cc</code>里找对应的指令到底创建了哪种Expr类。</del></p>
 <p>这里面的类继承关系看 <code>src\ir.h</code>。其实就是搞了一个ExprType，然后在onXXX指令的函数处直接创建了这个类型的Expr，导致opcode和expr之间没有明确的对应关系。</p>
 <h2 id="运算指令的处理"><a class="header" href="#运算指令的处理">运算指令的处理</a></h2>
 <ul>
@@ -551,6 +599,25 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <ol>
 <li>feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用<code>fcmp oeq</code>。</li>
 <li>而fne，有nan就返回1，所以要用<code>fcmp une</code></li>
+</ol>
+<h3 id="simd"><a class="header" href="#simd">SIMD</a></h3>
+<p>参照 https://github.com/WebAssembly/simd/blob/master/proposals/simd/SIMD.md
+指令 https://github.com/zeux/wasm-simd/blob/master/Instructions.md
+https://nemequ.github.io/waspr/instructions</p>
+<h4 id="指令格式"><a class="header" href="#指令格式">指令格式</a></h4>
+<p><code>{interpretation}.{operation}</code> </p>
+<p>前缀<code>{interpretation}</code>表示如何解释 v128 类型的字节：格式为<code>{t}{lane_width}x{n}</code></p>
+<ul>
+<li>t是类型: v（只划分不解释）/i（整形）/f（浮点）</li>
+<li>lane_width是lane位宽：8/16/32/64</li>
+<li>n是lane总数</li>
+</ul>
+<h4 id="处理"><a class="header" href="#处理">处理</a></h4>
+<ol>
+<li>默认的v128在LLVM IR中被定义为<code>&lt;2 x i64&gt;</code> 类型。</li>
+<li>Wasm指令中的vector操作数都是v128类型，<code>{interpretation}</code>则是指令执行和执行完的向量类型，所以需要使用BitCast进行转换。过多的BitCast显得很繁杂，参考了WAVM使用宏定义来简化代码。</li>
+<li>LLVM中的Intrinsic对vector支持很好，直接转换好数据类型后调用对应的Intrinsic即可。</li>
+<li>有些指令设计向量的缩减与扩增，可以用Shuffle配合mask来实现。</li>
 </ol>
 <h3 id="链接"><a class="header" href="#链接">链接</a></h3>
 <ul>
@@ -681,7 +748,122 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <li><a href="https://github.com/NationalSecurityAgency/ghidra/blob/master/DevGuide.md">DevGuide.md</a> 官方的eclipse环境搭建</li>
 <li><a href="https://research.nccgroup.com/2022/05/20/earlyremoval-in-the-conservatory-with-the-wrench/">《Exploring Ghidra’s decompiler internals to make automatic P-Code analysis scripts》</a>解释了一些decomp_dbg的代码。</li>
 </ul>
-<h2 id="使用"><a class="header" href="#使用">使用</a></h2>
+<h3 id="ghidra-sleigh-调试环境搭建"><a class="header" href="#ghidra-sleigh-调试环境搭建">Ghidra-sleigh 调试环境搭建</a></h3>
+<p>相关的C/C++代码主要在 Ghidra/Features/Decompiler/src/decompile.cpp下。docmain.hh和 doccore.hh两个文件可以先看，或者先build doc出来，生成的doc在<code>../doc</code>目录（Ghidra/Features/Decompiler/src/decompile/doc/html/index.html）</p>
+<p>根据这里https://daniao.ws/notes/quick-tips/build-ghidra 下载并编译Ghidra。生成各种中间文件</p>
+<pre><code class="language-Bash">sudo apt install openjdk-17-jdk-headless unzip --no-install-recommends
+wget -c https://services.gradle.org/distributions/gradle-8.1.1-bin.zip -P /tmp
+sudo unzip -d /opt/gradle /tmp/gradle-8.1.1-bin.zip
+export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin
+echo 'export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin' &gt;&gt; ~/.bashrc
+
+git clone https://github.com/NationalSecurityAgency/ghidra.git
+git checkout Ghidra_10.3.1_build
+git checkout -b mydev
+gradle --init-script gradle/support/fetchDependencies.gradle init
+gradle buildGhidra
+</code></pre>
+<p>然后vscode打开文件夹<code>/home/ubuntu/ghidra/Ghidra/Features/Decompiler/src/decompile</code></p>
+<p>使用bear生成compile_commands.json文件</p>
+<pre><code class="language-Bash">bear -- make decomp_dbg
+</code></pre>
+<p>增加debug配置。注意里面的环境变量指向ghidra源码文件夹</p>
+<pre><code class="language-JSON">{
+    &quot;version&quot;: &quot;0.2.0&quot;,
+    &quot;configurations&quot;: [
+        {
+            &quot;type&quot;: &quot;lldb&quot;,
+            &quot;request&quot;: &quot;launch&quot;,
+            &quot;name&quot;: &quot;Debug&quot;,
+            &quot;program&quot;: &quot;${workspaceFolder}/cpp/decomp_dbg&quot;,
+            &quot;args&quot;: [],
+            &quot;cwd&quot;: &quot;${workspaceFolder}/datatests&quot;,
+            &quot;env&quot;: {&quot;SLEIGHHOME&quot;: &quot;/home/ubuntu/ghidra&quot;}
+        }
+    ]
+}
+</code></pre>
+<p>从ghidra图形界面，反编译的右上角的debug decompiler里面可以导出xml文件，用于调试。</p>
+<h3 id="调试与decomp_dbg常用命令"><a class="header" href="#调试与decomp_dbg常用命令">调试与decomp_dbg常用命令</a></h3>
+<p>https://github.com/NationalSecurityAgency/ghidra/issues/720</p>
+<pre><code class="language-JSON">load file test 加载二进制文件
+load addr 0x1149
+decompile
+print C
+
+restore Reset.xml    加载xml文件
+trace address
+trace list
+</code></pre>
+<p>搜索相关的命令：<code>registerCommands</code> <code>registerCom</code> </p>
+<p>部分命令需要<code>OPACTION_DEBUG</code>开启</p>
+<h2 id="反编译器代码解读sleigh"><a class="header" href="#反编译器代码解读sleigh">反编译器代码解读（sleigh）</a></h2>
+<p><strong>总体分析流程</strong></p>
+<p>Ghidra的Java部分代码启动sleigh子进程，然后通过stdin输入xml文件，stdout读取xml文件作为反编译结果。比如Ghidra\Features\Decompiler\src\main\java\ghidra\app\decompiler\DecompileResults.java parseRawString函数这里开始解析反编译器的输出的。Ghidra\Framework\SoftwareModeling\src\main\java\ghidra\program\model\pcode\HighFunction.java readXML函数里可以看到high pcode是基于这个ast的标签解析的。</p>
+<p>反编译输出展示上面的选项里，选Debug Function Decompilation导出的xml文件是反编译器的输入。根据https://github.com/NationalSecurityAgency/ghidra/issues/720 这里可以使用decomp_dbg命令行输入xml文件进行反编译。</p>
+<p>应该反编译过程中，Pcode都是一套Pcode，只不过https://spinsel.dev/assets/2020-06-17-ghidra-brainfuck-processor-1/ghidra_docs/language_spec/html/additionalpcode.html 有一些额外的东西只有在反编译之后才会产生。</p>
+<p><strong>反编译阶段</strong></p>
+<p>首先反编译过程被分为了几个大的 <code>simplification styles</code> <code>Root Action Groups</code>。它们由 <code>base groups</code> （例如 “stackvars” or “typerecovery”） 组成。</p>
+<ul>
+<li>decompile – The main decompiler action</li>
+<li>normalize – Decompilation tuned for normalization</li>
+<li>jumptable – Simplify just enough to recover a jump-table</li>
+<li>paramid – Simplify enough to recover function parameters</li>
+<li>register – Perform one analysis pass on registers, without stack variables</li>
+<li>firstpass – Construct the initial raw syntax tree, with no simplification</li>
+</ul>
+<p>在<a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.1.2_build/Ghidra/Features/Decompiler/src/decompile/cpp/coreaction.cc#L5021-L5275">universalAction</a>函数里构建了所有可能的Action和Rule列表，即定义了他们的执行顺序。每个Action或Rule是否运行再由标签确定。</p>
+<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L194">Rule</a>: 代表着某个特定的点位可能采取的操作。它输入一个Pcode位置，首先判断能不能在该处应用，然后再应用更改。Rule可以通过<code>getOpList()</code>函数先给出一个点位可能的Opcode列表，方便外部提前过滤。多个Rule可以组合为<code>ActionPool</code></p>
+<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L52">Action</a> 类似Pass，对一个函数做变换。每次变换递增一下count变量。</p>
+<p>和栈分析相关的标签：<code>localrecovery</code> <code>typerecovery</code> <code>stackvars</code></p>
+<p>和栈分析相关的标签，和内部的Action和Rule：</p>
+<p><code>base</code></p>
+<ul>
+<li>ActionHeritage SSA构建算法。</li>
+</ul>
+<p><code>localrecovery</code>
+- ActionRestrictLocal: 限制局部变量在栈上的可能范围，排除一些参数之类的栈范围，使得这些范围不会创建局部变量。
+- 首先对每个FunctionCallSpecs，的每一个参数，把它们的地址排除在局部变量之外。
+- 对保存的caller的寄存器，相关的栈内存排除在局部变量之外。
+- 注：可见wasm里不用管这些。
+- ActionRestructureVarnode
+- gatherVarnodes：从varnode中收集栈上值的类型信息。它遍历funcdata在stack这个space上的Varnode，然后在对应的栈偏移处增加当前varnode的类型信息，表示为增加一个RangeHint
+- gatherOpen：先调用 AliasChecker::gather，收集一个AddBase的list，包含所有的栈相关指针，然后对每个指针调用gatherOffset, 收集偏移。最后会设置一个aliasBoundary为最小的offset，可能比它大就可能alias。
+- AliasChecker::gather：对于给定的函数和address space（栈），收集所有，指向当前地址空间的，指针（varnode）。
+- AliasChecker::gatherAdditiveBase：首先从栈指针开始，收集所有和它有关的加法操作（INT_ADD, INT_SUB, PTRADD, PTRSUB, and SEGMENTOP）。广度优先地遍历，vnqueue作为worklist。最后生成了AddBase的一个list，表示每个有关的root varnode和可能存在的index varnode。
+- gatherOffset：对每个收集的AddBase的base调用，负责计算出varnode的常量offset
+- gatherSymbols：
+- ScopeLocal::restructure：</p>
+<p><code>stackvars</code>
+- RuleLoadVarnode
+- RuleStoreVarnode</p>
+<p><code>stackptrflow</code>
+- ActionStackPtrFlow
+- <code>checkClog</code>: Clog是指，栈指针加栈上的值？
+- <code>analyzeExtraPop</code>: sub-functions TODO，难道是说子函数里面用父函数栈指针？</p>
+<p>decomp_dbg 代码位于consolemain.cc（main 函数，也定义了 load/save/restore几条命令）、ifacedecomp.hh/cc （反编译相关命令）。</p>
+<ul>
+<li>Heritage::discoverIndexedStackPointers</li>
+</ul>
+<p>通过一通搜索，我找到了restructure varnode这个action，发现了一些问题。这个action的主要工作就是调用 ScopeLocal::restructureVarnode函数（varmap.hh/cc)，这个函数的工作分配给了 MapState::gatherVarnodes 、MapState::gatherOpen 和 MapState::gatherSymbols ，最后调用了ScopeLocal::restructure。</p>
+<p>其中有关的部分在gatherOpen和gatherVarnodes。gatherOpen在正常情况下，应该分析出好几段栈空间对应的 open RangeHint ，其中的处理逻辑在AliasChecker::gather -&gt; AliasChecker::gatherInternal -&gt; AliasChecker::gatherAdditiveBase 。</p>
+<p>MapState::gatherVarnodes</p>
+<p>所以，我将范围扩大到在heritage 、restructureVarnodes action之后，然后找到了相关的action ：RuleLoadVarnode和 RuleStoreVarnode。</p>
+<p>这两个action（其实是Rule）应该就是分析的主要了，他们都会经过RuleLoadVarnode::checkSpacebase -&gt; RuleLoadVarnode::vnSpacebase -&gt; RuleLoadVarnode::correctSpacebase (ruleaction.cc) 的检查。调试发现，没能分析出来的变量所对应的 store/load在correctSpacebase的检查中失败了 。</p>
+<p>这两个action（其实是Rule）应该就是分析的主要了，他们都会经过RuleLoadVarnode::checkSpacebase -&gt; RuleLoadVarnode::vnSpacebase -&gt; RuleLoadVarnode::correctSpacebase (ruleaction.cc) 的检查。调试发现，没能分析出来的变量所对应的 store/load在correctSpacebase的检查中失败了。</p>
+<p>ActionDatabase::buildDefaultGroups 分析好像是分组的，里面很多rule。</p>
+<p>“simplification styles” are also referred to as “root actions” or “groups” in the decompiler source code. They consist of groups of “base groups” such as “stackvars” or “typerecovery”, which are more fine-grained groups of specific analysis operations.</p>
+<h3 id="ghidra-中的-value-set-analysis"><a class="header" href="#ghidra-中的-value-set-analysis">Ghidra 中的 value set analysis</a></h3>
+<ul>
+<li><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/rangeutil.hh#L274"><code>ValueSetSolver</code></a> VSA分析。好像会先执行<code>vsSolver.establishValueSets</code>给要分析的值赋初始值，然后调用<code>vsSolver.solve</code>运算。
+<ul>
+<li><code>CircleRange</code>: 底层抽象域，针对不同opcode写了运算，例如<code>CircleRange::pushForwardBinary</code>负责binary op</li>
+<li>使用方面，有两个使用点：一个<code>IfcAnalyzeRange</code>好像是执行<code>analyze range full|partial &lt;varnode&gt;</code>命令的时候触发。另外一个是<code>ValueSetSolver.analyzeNewLoadGuards</code>函数，为LoadGuard确认访问范围。</li>
+</ul>
+</li>
+<li><code>LoadGuard</code>: 对一个，访问了栈，但是是在动态访问栈的load指令的描述。描述其可能访问的栈范围。包括min, max, step等。和VSA分析有很大关系。</li>
+</ul>
+<h2 id="编写插件"><a class="header" href="#编写插件">编写插件</a></h2>
 <h3 id="ghidra-scripting"><a class="header" href="#ghidra-scripting">Ghidra scripting</a></h3>
 <ul>
 <li>
@@ -776,115 +958,6 @@ Uninitialized的内存默认是不能写的，需要把要写的部分分割开�
 </ul>
 <h3 id="查看high-p-code"><a class="header" href="#查看high-p-code">查看high p-code</a></h3>
 <p>https://reverseengineering.stackexchange.com/questions/29646/dump-pcode-in-ghidra-for-a-specific-decompiled-function 直接在界面点就可以，但是好像只是为了给你看形状的。打开python然后currentLocation.token.pcodeOp也可以稍微看看当前指针位置的。</p>
-<h3 id="ghidra-sleigh-调试环境"><a class="header" href="#ghidra-sleigh-调试环境">Ghidra-sleigh 调试环境</a></h3>
-<p>相关的C/C++代码主要在 Ghidra/Features/Decompiler/src/decompile.cpp下。docmain.hh和 doccore.hh两个文件可以先看，或者先build doc出来，生成的doc在<code>../doc</code>目录（Ghidra/Features/Decompiler/src/decompile/doc/html/index.html）</p>
-<p>根据这里https://daniao.ws/notes/quick-tips/build-ghidra 下载并编译Ghidra。生成各种中间文件</p>
-<pre><code class="language-Bash">sudo apt install openjdk-17-jdk-headless unzip --no-install-recommends
-wget -c https://services.gradle.org/distributions/gradle-8.1.1-bin.zip -P /tmp
-sudo unzip -d /opt/gradle /tmp/gradle-8.1.1-bin.zip
-export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin
-echo 'export PATH=$PATH:/opt/gradle/gradle-8.1.1/bin' &gt;&gt; ~/.bashrc
-
-git clone https://github.com/NationalSecurityAgency/ghidra.git
-git checkout Ghidra_10.3.1_build
-git checkout -b mydev
-gradle --init-script gradle/support/fetchDependencies.gradle init
-gradle buildGhidra
-</code></pre>
-<p>然后vscode打开文件夹<code>/home/ubuntu/ghidra/Ghidra/Features/Decompiler/src/decompile</code></p>
-<p>使用bear生成compile_commands.json文件</p>
-<pre><code class="language-Bash">bear -- make decomp_dbg
-</code></pre>
-<p>增加debug配置。注意里面的环境变量指向ghidra源码文件夹</p>
-<pre><code class="language-JSON">{
-    &quot;version&quot;: &quot;0.2.0&quot;,
-    &quot;configurations&quot;: [
-        {
-            &quot;type&quot;: &quot;lldb&quot;,
-            &quot;request&quot;: &quot;launch&quot;,
-            &quot;name&quot;: &quot;Debug&quot;,
-            &quot;program&quot;: &quot;${workspaceFolder}/cpp/decomp_dbg&quot;,
-            &quot;args&quot;: [],
-            &quot;cwd&quot;: &quot;${workspaceFolder}/datatests&quot;,
-            &quot;env&quot;: {&quot;SLEIGHHOME&quot;: &quot;/home/ubuntu/ghidra&quot;}
-        }
-    ]
-}
-</code></pre>
-<p>从ghidra图形界面，反编译的右上角的debug decompiler里面可以导出xml文件，用于调试。</p>
-<h3 id="调试与decomp_dbg常用命令"><a class="header" href="#调试与decomp_dbg常用命令">调试与decomp_dbg常用命令</a></h3>
-<p>https://github.com/NationalSecurityAgency/ghidra/issues/720</p>
-<pre><code class="language-JSON">load file test 加载二进制文件
-load addr 0x1149
-decompile
-print C
-
-restore Reset.xml    加载xml文件
-trace address
-trace list
-</code></pre>
-<p>搜索相关的命令：<code>registerCommands</code> <code>registerCom</code> </p>
-<p>部分命令需要<code>OPACTION_DEBUG</code>开启</p>
-<h2 id="反编译器代码解读sleigh"><a class="header" href="#反编译器代码解读sleigh">反编译器代码解读（sleigh）</a></h2>
-<p><strong>总体分析流程</strong></p>
-<p>Ghidra的Java部分代码启动sleigh子进程，然后通过stdin输入xml文件，stdout读取xml文件作为反编译结果。比如Ghidra\Features\Decompiler\src\main\java\ghidra\app\decompiler\DecompileResults.java parseRawString函数这里开始解析反编译器的输出的。Ghidra\Framework\SoftwareModeling\src\main\java\ghidra\program\model\pcode\HighFunction.java readXML函数里可以看到high pcode是基于这个ast的标签解析的。</p>
-<p>反编译输出展示上面的选项里，选Debug Function Decompilation导出的xml文件是反编译器的输入。根据https://github.com/NationalSecurityAgency/ghidra/issues/720 这里可以使用decomp_dbg命令行输入xml文件进行反编译。</p>
-<p>应该反编译过程中，Pcode都是一套Pcode，只不过https://spinsel.dev/assets/2020-06-17-ghidra-brainfuck-processor-1/ghidra_docs/language_spec/html/additionalpcode.html 有一些额外的东西只有在反编译之后才会产生。</p>
-<p><strong>反编译阶段</strong></p>
-<p>首先反编译过程被分为了几个大的 <code>simplification styles</code> <code>Root Action Groups</code>。它们由 <code>base groups</code> （例如 “stackvars” or “typerecovery”） 组成。</p>
-<ul>
-<li>decompile – The main decompiler action</li>
-<li>normalize – Decompilation tuned for normalization</li>
-<li>jumptable – Simplify just enough to recover a jump-table</li>
-<li>paramid – Simplify enough to recover function parameters</li>
-<li>register – Perform one analysis pass on registers, without stack variables</li>
-<li>firstpass – Construct the initial raw syntax tree, with no simplification</li>
-</ul>
-<p>在<a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.1.2_build/Ghidra/Features/Decompiler/src/decompile/cpp/coreaction.cc#L5021-L5275">universalAction</a>函数里构建了所有可能的Action和Rule列表，即定义了他们的执行顺序。每个Action或Rule是否运行再由标签确定。</p>
-<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L194">Rule</a>: 代表着某个特定的点位可能采取的操作。它输入一个Pcode位置，首先判断能不能在该处应用，然后再应用更改。Rule可以通过<code>getOpList()</code>函数先给出一个点位可能的Opcode列表，方便外部提前过滤。多个Rule可以组合为<code>ActionPool</code></p>
-<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/action.hh#L52">Action</a> 类似Pass，对一个函数做变换。每次变换递增一下count变量。</p>
-<p>和栈分析相关的标签：<code>localrecovery</code> <code>typerecovery</code> <code>stackvars</code></p>
-<p>和栈分析相关的标签，和内部的Action和Rule：</p>
-<p><code>base</code></p>
-<ul>
-<li>ActionHeritage SSA构建算法。</li>
-</ul>
-<p><code>localrecovery</code>
-- ActionRestrictLocal: 限制局部变量在栈上的可能范围，排除一些参数之类的栈范围，使得这些范围不会创建局部变量。
-- 首先对每个FunctionCallSpecs，的每一个参数，把它们的地址排除在局部变量之外。
-- 对保存的caller的寄存器，相关的栈内存排除在局部变量之外。
-- 注：可见wasm里不用管这些。
-- ActionRestructureVarnode
-- gatherVarnodes：
-- gatherOpen：
-- gatherSymbols：
-- restructure：</p>
-<p><code>stackvars</code>
-- RuleLoadVarnode
-- RuleStoreVarnode</p>
-<p><code>stackptrflow</code>
-- ActionStackPtrFlow
-- <code>checkClog</code>: Clog是指，栈指针加栈上的值？
-- <code>analyzeExtraPop</code>: sub-functions TODO，难道是说子函数里面用父函数栈指针？</p>
-<p>关键的类型：</p>
-<ul>
-<li><code>LoadGuard</code>: 对一个，访问了栈，但是是在动态访问栈的load指令的描述。描述其可能访问的栈范围。包括min, max, step等。和VSA分析有很大关系。</li>
-</ul>
-<p>decomp_dbg 代码位于consolemain.cc（main 函数，也定义了 load/save/restore几条命令）、ifacedecomp.hh/cc （反编译相关命令）。</p>
-<ul>
-<li>Heritage::discoverIndexedStackPointers</li>
-</ul>
-<p>通过一通搜索，我找到了restructure varnode这个action，发现了一些问题。这个action的主要工作就是调用 ScopeLocal::restructureVarnode函数（varmap.hh/cc)，这个函数的工作分配给了 MapState::gatherVarnodes 、MapState::gatherOpen 和 MapState::gatherSymbols ，最后调用了ScopeLocal::restructure。</p>
-<p>其中有关的部分在gatherOpen和gatherVarnodes。gatherOpen在正常情况下，应该分析出好几段栈空间对应的 open RangeHint ，其中的处理逻辑在AliasChecker::gather -&gt; AliasChecker::gatherInternal -&gt; AliasChecker::gatherAdditiveBase 。</p>
-<p>MapState::gatherVarnodes</p>
-<p>所以，我将范围扩大到在heritage 、restructureVarnodes action之后，然后找到了相关的action ：RuleLoadVarnode和 RuleStoreVarnode。</p>
-<p>这两个action（其实是Rule）应该就是分析的主要了，他们都会经过RuleLoadVarnode::checkSpacebase -&gt; RuleLoadVarnode::vnSpacebase -&gt; RuleLoadVarnode::correctSpacebase (ruleaction.cc) 的检查。调试发现，没能分析出来的变量所对应的 store/load在correctSpacebase的检查中失败了 。</p>
-<p>这两个action（其实是Rule）应该就是分析的主要了，他们都会经过RuleLoadVarnode::checkSpacebase -&gt; RuleLoadVarnode::vnSpacebase -&gt; RuleLoadVarnode::correctSpacebase (ruleaction.cc) 的检查。调试发现，没能分析出来的变量所对应的 store/load在correctSpacebase的检查中失败了。</p>
-<p>ActionDatabase::buildDefaultGroups 分析好像是分组的，里面很多rule。</p>
-<p>“simplification styles” are also referred to as “root actions” or “groups” in the decompiler source code. They consist of groups of “base groups” such as “stackvars” or “typerecovery”, which are more fine-grained groups of specific analysis operations.</p>
-<h3 id="ghidra-中的-value-set-analysis"><a class="header" href="#ghidra-中的-value-set-analysis">Ghidra 中的 value set analysis</a></h3>
-<p>TODO</p>
-<p><a href="https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.3.1_build/Ghidra/Features/Decompiler/src/decompile/cpp/rangeutil.hh#L274">ValueSetSolver</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="retdec"><a class="header" href="#retdec">RetDec</a></h1>
 <p>https://zhuanlan.zhihu.com/p/509763117 有一些源码解读的内容。</p>
 <ul>
@@ -929,19 +1002,36 @@ trace list
 <li>retdec-write-bc：</li>
 <li>retdec-llvmir2hll：</li>
 </ul>
-<h3 id="retdec-栈恢复源码解读"><a class="header" href="#retdec-栈恢复源码解读">retdec 栈恢复源码解读</a></h3>
-<p>源码在<code>retdec\src\bin2llvmir\optimizations\stack\stack.cpp</code></p>
-<p>大体要做的，是把栈指针的偏移访问，都改成alloca。</p>
-<ol>
-<li>函数开头sub了栈指针，改成对应大小的alloca</li>
-<li>处理load/store
+<h3 id="retdec-栈恢复算法"><a class="header" href="#retdec-栈恢复算法">retdec 栈恢复算法</a></h3>
+<p>源码在<code>retdec\src\bin2llvmir\optimizations\stack\stack.cpp</code>。总体思路非常简单，分析每个load和store用到的东西，提取成一个表达式树（SymbolicTree类）。首先判断表达式树里面有没有栈指针，没有就不处理。然后尝试把整个表达式树化简，把栈指针看作0，化简成一个常量，然后把这个常量当作栈偏移，创建一个alloca去替换它。</p>
+<p>这个方法还是有很大问题，有许多处理不了的情况。从这个角度看，retdec确实是比ghidra差的。现在现有的开源反编译器里面也就ghidra最好了。比如如果存在memcpy这种函数的调用，由于直接传地址，所以不是load/store的形式，而是计算完地址直接传给函数了，导致没有将里面的值替换为新创建的alloca。</p>
+<p><strong>代码解读</strong></p>
 <ul>
-<li>如果是load：改为对对应alloca的对应偏移的load</li>
-<li>如果是store：改为对对应alloca的对应偏移的store</li>
+<li>abi.cpp 主要负责提供两个函数，isStackPointer和（我们自己新增的）isMemory，判断一个值是否是栈指针。</li>
+<li>reaching-definition.cpp 计算load和store之间的到达定值关系？</li>
+<li>symbolic-tree.cpp 符号树。
+<ul>
+<li>expand操作，当初次构建符号树的时候，会从感兴趣的值开始反向遍历Use关系，生成符号树。
+<ul>
+<li>我们适配wasm时，让栈指针的子节点为常量0。方便后续化简栈指针偏移的访问为常量（之后的化简操作会将栈指针视为常量0）。（retdec在分析非wasm程序时，会为寄存器创建对应的全局变量，初始值为0，但是我们wasm的栈指针初始值不为0，所以需要修改。）</li>
 </ul>
 </li>
-</ol>
-<p>在上面算法的基础上，增加一个map，从变量映射到栈偏移。然后在load和store的时候尝试将ptr解析为栈指针的偏移。然后在对应大小的地方创建变量。</p>
+<li>simplifyNode操作，尝试将符号树化简。比如如果有算数操作，且两边都是常量，则会化简为运算后的结果。</li>
+</ul>
+</li>
+<li>stack.cpp 栈分析的主体代码。遍历处理load/store指令。有三种情况：1 处理Load指令的指针，2 处理Store指令打算存进内存的值，3 处理store指令的指针
+<ul>
+<li>对要分析的Value构建SymbolicTree（expand操作）。</li>
+<li>使用val2val这个map进行缓存，缓存已经化简过的结果，从被分析的value映射到化简后的ConstantInt。如果不在缓存里，继续后面的分析。</li>
+<li>首先判断当前的SymbolicTree里面有没有栈指针，如果没有就直接返回，放弃处理。</li>
+<li>化简当前的SymbolicTree，如果化简为ConstantInt常量，则继续处理，否则直接返回放弃处理。</li>
+<li>（我们新增）使用off2alloca这个map从偏移映射到alloca指令，防止重复创建栈变量。</li>
+<li>把化简后的常量当作栈偏移，为每个不同的栈偏移创建变量。变量类型从load/store中找的好像。</li>
+<li>把当前被分析的Value替换为对应的Alloca指令。</li>
+</ul>
+</li>
+<li>stack-pointer-op-remove.cpp 独立的pass，移除栈变量识别后无用的代码。</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="retypd"><a class="header" href="#retypd">retypd</a></h1>
 <p><a href="https://github.com/GrammaTech/retypd">retypd</a> 是一个高级的反编译算法，有一篇<a href="https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf">论文</a></p>
 <p>资源：</p>

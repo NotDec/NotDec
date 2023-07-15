@@ -302,7 +302,7 @@
 <li>函数参数逆序遍历（pop），同时从栈上pop出来。</li>
 <li>函数返回值顺序遍历，同时push到栈上。</li>
 </ul>
-<p>查OpCode看<code>wabt/src/opcode.def</code>。Opcode和ExprType之间的关系看<code>src\lexer-keywords.txt</code>，或者看<code>src\binary-reader.cc</code>里面对应的Opcode创建了什么Expr，<del>或者看<code>src\binary-reader-ir.cc</code>里找对应的指令到底创建了哪种Expr类。</del></p>
+<p>查OpCode看<code>wabt/include/wabt/opcode.def</code>。Opcode和ExprType之间的关系看<code>src\lexer-keywords.txt</code>，或者看<code>wabt/src/lexer-keywords.txt</code>里面对应的Opcode创建了什么Expr，<del>或者看<code>src\binary-reader-ir.cc</code>里找对应的指令到底创建了哪种Expr类。</del></p>
 <p>这里面的类继承关系看 <code>src\ir.h</code>。其实就是搞了一个ExprType，然后在onXXX指令的函数处直接创建了这个类型的Expr，导致opcode和expr之间没有明确的对应关系。</p>
 <h2 id="运算指令的处理"><a class="header" href="#运算指令的处理">运算指令的处理</a></h2>
 <ul>
@@ -320,6 +320,25 @@
 <ol>
 <li>feq在wasm中，如果有nan就返回0，反过来只有无nan才返回true，所以采用<code>fcmp oeq</code>。</li>
 <li>而fne，有nan就返回1，所以要用<code>fcmp une</code></li>
+</ol>
+<h3 id="simd"><a class="header" href="#simd">SIMD</a></h3>
+<p>参照 https://github.com/WebAssembly/simd/blob/master/proposals/simd/SIMD.md
+指令 https://github.com/zeux/wasm-simd/blob/master/Instructions.md
+https://nemequ.github.io/waspr/instructions</p>
+<h4 id="指令格式"><a class="header" href="#指令格式">指令格式</a></h4>
+<p><code>{interpretation}.{operation}</code> </p>
+<p>前缀<code>{interpretation}</code>表示如何解释 v128 类型的字节：格式为<code>{t}{lane_width}x{n}</code></p>
+<ul>
+<li>t是类型: v（只划分不解释）/i（整形）/f（浮点）</li>
+<li>lane_width是lane位宽：8/16/32/64</li>
+<li>n是lane总数</li>
+</ul>
+<h4 id="处理"><a class="header" href="#处理">处理</a></h4>
+<ol>
+<li>默认的v128在LLVM IR中被定义为<code>&lt;2 x i64&gt;</code> 类型。</li>
+<li>Wasm指令中的vector操作数都是v128类型，<code>{interpretation}</code>则是指令执行和执行完的向量类型，所以需要使用BitCast进行转换。过多的BitCast显得很繁杂，参考了WAVM使用宏定义来简化代码。</li>
+<li>LLVM中的Intrinsic对vector支持很好，直接转换好数据类型后调用对应的Intrinsic即可。</li>
+<li>有些指令设计向量的缩减与扩增，可以用Shuffle配合mask来实现。</li>
 </ol>
 <h3 id="链接"><a class="header" href="#链接">链接</a></h3>
 <ul>
