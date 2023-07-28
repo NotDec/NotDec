@@ -70,3 +70,63 @@ vscode代码搜索方法：基于`src/retdec-decompiler/decompiler-config.json`�
     - 把化简后的常量当作栈偏移，为每个不同的栈偏移创建变量。变量类型从load/store中找的好像。
     - 把当前被分析的Value替换为对应的Alloca指令。
 - stack-pointer-op-remove.cpp 独立的pass，移除栈变量识别后无用的代码。
+
+
+### retdec 关键类型识别
+
+源码在`retdec/src/bin2llvmir/optimizations/simple_types/simple_types.cpp`。感觉就是一个启发式的算法，利用库函数和DEBUG信息来恢复类型，涉及到一些指针分析的内容。比较迷惑的一点是这个Pass会运行两次，第一次应该是比较重要的，第二次涉及到一些前端的函数，主要做的好像就是针对宽字符类型参数的修复。
+
+**数据结构**
+- eSourcePriority：一个枚举类型，作用是定义优先级，每个`ValueEntry`、`TypeEntry`都有一个优先级，优先级越高，说明其类型信息越准确。
+    - 0 | PRIORITY_NONE：默认优先级
+    - 1 | PRIORITY_LIT：一般就是非用户定义的函数，如动态链接/静态链接/系统调用/IDIOM（不太明白是什么）
+    - 2 | PRIORITY_DEBUG :表示该变量/函数是从debug信息中引入的。
+
+- ValueEntry；对原生Value的封装，成员函数有value比较、hash以及`getTypeForPropagation`：就是获取value的类型，如果是普通指针的话就返回指向的元素类型，数组指针则返回数组内元素类型（函数名中的Propagation可能就是来自这里），如果是函数那么返回函数的返回值类型。
+
+- TypeEntry： 同样也是对原生Type的封装，没有比较特殊的成员函数。
+
+- EquationEntry；用于描述两个等价集的关系，就两个关系：
+    - otherIsPtrToThis ： 是另一个集合的指向
+    - thisIsPtrToOther ： 是另一个集合的指针
+
+- EqSet (Equivalence set)：等价集，一个类型对应一个等价集，比较重要的成员变量有：
+    ```C++
+    public:
+		TypeEntry masterType; //主类型，会在propagate时不断更新，
+		ValueEntrySet valSet; //储存与指针有关的Value集合，propagate时会遍历
+                              //这个集合，寻找优先级高的Value的类型作为主类型
+		TypeEntrySet typeSet; //储存与指针有关的Type集合，propagate时会遍历
+                              //这个集合，寻找优先级高的类型作为主类型
+		EquationEntrySet equationSet; //储存有可能指向该Value的指针，实际并没有用到
+    ```
+
+- EqSetContainer ：储存Module中的全部等价集。
+
+**代码解读**
+
+第一次调用Pass的流程：
+
+1. buildEqSets: 对所有全局变量，函数参数、Alloca指令调用`processRoot`，实际上就是为指针建立一个`EqSet`，并把跟它有关的Value、Type放进去。
+    - processRoot(Value *v)：创建一个新的`EqSet`，将v加入待处理队列`toProcess`，并调用`processValue`。
+    - processValue：处理待处理队列`toProcess`中的v，将v放入`EqSet`，并遍历v的所有`Use`，调用`processUse`。
+    - processUse：真正的处理函数，因为use一般是各种指令，需要对不同的指令做不同的处理：
+        - 通常情况就是把指令的操作数都加入待处理队列。
+        - 如果是是`Store`指令，那指针操作数也要放入`toProcess`
+        - 如果是常量表达式`ConstantExpr`，那就继续往下寻找真正Use的地方。
+        - `PtrToInt`/`BitCast`：如果操作数是全局变量，那就放入`val2PtrVal`集合，因为ptrtoint和bitcast实际上就是把指针存在一个临时寄存器里，不知道为什么不处理alloc的指针。
+        - ...
+
+1. buildEquations：遍历`val2PtrVal`集合，更新`equationSet`，实际上就是维护指针和存指针的变量的关系。
+1. propagate：在module的范围内进行的类型信息的传播与合并，优先级的作用体现在这里，优先级越高的类型会替代`masterType`。
+1. apply：更新`valSet`中各个Value的类型，调用`IrModifier`修改类型。
+1. eraseObsoleteInstructions：删除被替换掉的指令。
+1. setGlobalConstants： 将没有Store指令的全局变量设置const属性，这个属性是retdec自己定义的。
+
+第二次有不同的流程，遍历每个全局变量的Users，只处理两种指令：
+- 如果是`CallInst`，如果全局变量为宽字符类型并且是函数的参数，则使用 IrModifier 对象将其类型更改为宽字符类型。
+- 如果是`ConstantExpr`,那么继续往下寻找真正Use的地方，如果找到的是`CallInst`，就跟上面的流程基本一致。
+
+
+
+
