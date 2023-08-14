@@ -189,13 +189,47 @@ void DecompileConfig::find_special_gv() {
   }
 }
 
+/* 寻找栈指针
+1.加载栈指针存在局部变量读出再加减的情况 所以在去除局部变量后进行
+2.wasm中不一定存在global.set 全局栈指针
+*/
+void DecompileConfig::find_stack_ptr(BasicBlock& BB) {
+  BasicBlock& enrtyBlock = BB.isEntryBlock() ? BB : BB.getParent()->getEntryBlock();
+  Instruction* sp = nullptr; 
+  for (Instruction& I : enrtyBlock) {
+    if (LoadInst* load = dyn_cast<LoadInst>(&I)) {
+      if(isa<GlobalVariable>(load->getOperand(0))){ 
+        bool maybeStackPtr = true;
+        for(Value* next : load->users()){  //遍历后继指令
+          Instruction *nextInst = dyn_cast<Instruction>(next);
+          if (!(nextInst->getOpcode() == Instruction::Add ||
+                nextInst->getOpcode() == Instruction::Sub ||
+                nextInst->getOpcode() == Instruction::Store)) {
+            maybeStackPtr = false;
+            break;
+          }
+        }
+        if(maybeStackPtr)
+          sp = load;
+      }   
+      break; //只判断第一条load指令
+    }
+  }
+  if(sp)
+    errs() << "find stackPtr LoadInst"<< *sp << "\n";
+}
+
+void DecompileConfig::find_stack_ptr(Function& f){
+    if(!f.empty())
+      find_stack_ptr(f.getEntryBlock());
+}
+
 void DecompileConfig::run_passes() {
     // Create the analysis managers.
     LoopAnalysisManager LAM;
     FunctionAnalysisManager FAM;
     CGSCCAnalysisManager CGAM;
     ModuleAnalysisManager MAM;
-
     // Create the new pass manager builder.
     // Take a look at the PassBuilder constructor parameters for more
     // customization, e.g. specifying a TargetMachine or various debugging
@@ -234,6 +268,9 @@ void DecompileConfig::run_passes() {
     }
     MPM.addPass(FuncSigModify());
     MPM.run(mod, MAM);
+    // for(Function& f: mod){
+    //   find_stack_ptr(f);
+    // }
 }
 
 // 需要去掉尾递归等优化，因此需要构建自己的Pass。
