@@ -26,8 +26,6 @@ Github的两个list：
 
 一篇很好的综述：[Static Single Assignment for Decompilation (Boomerang)](https://yurichev.com/mirrors/vanEmmerik_ssa.pdf) 感觉可以抓住优化方面的脉络。
 
-摸着引用看论文确实有点用
-
 ### 控制流结构恢复-structural analysis
 
 很多都是借用现有的type recovery，重点去讲structure recovery。
@@ -39,8 +37,6 @@ Github的两个list：
     这篇论文关注控制结构的恢复。控制结构的恢复最早是基于interval analysis的（？这是什么得学一学）。后面才被细化为structural analysis
 
 - [【Dream】No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11_4_2.pdf) [slides](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf) [code](https://github.com/USECAP/dream)
-    
-
 
 ### 类型恢复 - Type Recovery
 
@@ -53,7 +49,7 @@ Github的两个list：
 
 - [【retypd】](https://arxiv.org/pdf/1603.05495.pdf) 需要进一步学习类型系统的高级知识，比如subtyping。它不仅开源，而且不需要VSA的指针信息。可以与之前需要VSA的结合？~~但是似乎没有说怎么从一整块栈内存中识别出变量。~~
 
-- [【SecondWrite】](https://user.eng.umd.edu/~barua/elwazeer-PLDI-2013.pdf)
+- [【SecondWrite】Scalable Variable and Data Type Detection in a Binary Rewriter](https://user.eng.umd.edu/~barua/elwazeer-PLDI-2013.pdf) 
 
 ### 变量恢复
 
@@ -66,7 +62,7 @@ via Probabilistic Analysis for Stripped Binary](https://www.cs.virginia.edu/~yk2
 
 C++的类给反编译带来了额外的困难，涉及到（复杂的）约束求解等。
 
-- [Using Logic Programming to Recover C++ Classes](https://edmcman.github.io/papers/ccs18.pdf) C++反编译 
+- [OOAnalyzer: Using Logic Programming to Recover C++ Classes](https://edmcman.github.io/papers/ccs18.pdf) C++反编译 
 and Methods from Compiled Executables 
 
 - SmartDec: Approaching C++ Decompilation.
@@ -103,21 +99,7 @@ and Methods from Compiled Executables
 
 - [这个课件](http://www-verimag.imag.fr/~mounier/Enseignement/Software_Security/slides_lecture_7.pdf)讲到了一点点。这门课是和安全相关的。TODO，不太看得懂。
 
-- [研究VSA对人工分析的帮助](https://www.ndss-symposium.org/wp-content/uploads/bar2021_23002_paper.pdf)。（对学习VSA没啥用）
-
-### 其他
-
-- [【DecFuzzer】How far we have come: testing decompilation correctness of C decompilers](https://dl.acm.org/doi/abs/10.1145/3395363.3397370 ) [代码](https://github.com/monkbai/DecFuzzer)
-
-    functionality-preserving disassembling and C style control structure recovery [17, 31, 47, 64, 65, 67]
-	
-    变量恢复static analysis and inference techniques [10, 12, 13, 30, 54]. 
-	
-    fool-proof techniques for binary disassembling and decompilation [17, 31, 64-67].
-
-    EMI编译器测试看了下是插入了不影响语义的代码之后去开编译优化，发现优化器做出的错误决定而导致的crash。比如把一个不该执行的循环内操作提到外面。错误判断一些分支恒为真或假。是设置Csmith的输出使得只生成一个函数？？
-    
-    本来Csmith生成的代码很多全局变量的使用。如果全局变量改变了，很难手动找到是哪个函数？它是生成了局部变量，然后把对全局变量的使用全替换成了局部变量，函数结束的时候把局部变量的值update到全局变量，这样如果全局变量变了，就肯定是在最后update的时候改变的。那手动看的时候不要继续找内部怎么使用？这样做有什么好处吗。。。可能是方便找到这个函数到底涉及到了哪些全局变量，然后方便只提取这些到反编译结果的全局变量？？
+### 框架与综述
 
 - [C Decompilation : Is It Possible?](http://web.archive.org/web/20180517094139/http://decompilation.info/sites/all/files/articles/C%20decompilation.pdf) 2009的一篇
 
@@ -133,7 +115,56 @@ and Methods from Compiled Executables
     
     这个反编译器开源了lifter：先转到Qemu IR然后转到LLVM IR。这个好像也不太和反编译相关，也只是搞插桩、fuzzing的。
 
-- [Evolving Exact Decompilation](https://www.cs.unm.edu/~eschulte/data/bed.pdf) 好像和主流的反编译技术不是特别相关。
+### 下游研究 - 测试
+
+
+- [【DecFuzzer】How far we have come: testing decompilation correctness of C decompilers](https://dl.acm.org/doi/abs/10.1145/3395363.3397370 ) [代码](https://github.com/monkbai/DecFuzzer)
+
+    functionality-preserving disassembling and C style control structure recovery [17, 31, 47, 64, 65, 67]
+	
+    变量恢复static analysis and inference techniques [10, 12, 13, 30, 54]. 
+	
+    fool-proof techniques for binary disassembling and decompilation [17, 31, 64-67].
+
+    EMI编译器测试看了下是插入了不影响语义的代码之后去开编译优化，发现优化器做出的错误决定而导致的crash。比如把一个不该执行的循环内操作提到外面。错误判断一些分支恒为真或假。是设置Csmith的输出使得只生成一个函数？？
+    
+    本来Csmith生成的代码很多全局变量的使用。如果全局变量改变了，很难手动找到是哪个函数？它是生成了局部变量，然后把对全局变量的使用全替换成了局部变量，函数结束的时候把局部变量的值update到全局变量，这样如果全局变量变了，就肯定是在最后update的时候改变的。那手动看的时候不要继续找内部怎么使用？这样做有什么好处吗。。。可能是方便找到这个函数到底涉及到了哪些全局变量，然后方便只提取这些到反编译结果的全局变量？？
+
+
+### SecondWrite系列
+
+- [Decompilation to Compiler High IR in a binary rewriter](https://user.eng.umd.edu/~barua/high-IR-technical-report10.pdf) 提升到编译器IR，然后优化。对写反编译有较大启发
+
+    - 有一段提到了栈编译的坏处。
+
+
+### 基于搜索的反编译
+
+- [Evolving Exact Decompilation](https://www.cs.unm.edu/~eschulte/data/bed.pdf) 好像和主流的反编译技术不同。
+- [Decompilation as search](https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-844.pdf) 
+
+### Java 字节码反编译
+
+Java反编译的几篇
+
+- Proebsting and Watterson [24] 《Krakatoa: Decompilation in java (does bytecode reveal source?).》
+- Dava Miecznikowski and Hendren [22] 《Decompiling java bytecode: Problems, traps and pitfalls》
+- Naeem and Hendren [25] 《Programmer-friendly decompiled java,》
+- Harrand et al. [27] present Arlecchino  《Java decompiler diversity and its application to meta-decompilation》
+
+### 其他
+
+- [Decomperson: How Humans Decompile and What We Can Learn From It](https://www.usenix.org/system/files/sec22-burk.pdf) 人经常会看生成的汇编，做些很小的修改。意味着可能可以强化学习。另外反编译可能代码片段可以拆分成子任务？，因为人经常关注一个小片段。
+
+- [A Survey of Software Reverse Engineering Applications | SpringerLink](https://link.springer.com/chapter/10.1007/978-3-030-24268-8_22) 讲了逆向软件分析的合理性，用处等等。以后写intro的时候很有用。
+
+- [An evaluation of output from current Java bytecode decompilers: Is it Android which is responsible for such quality boost?](https://ieeexplore.ieee.org/abstract/document/8109451/) 
+
+- [Retrofitting Security in COTS Software with Binary Rewriting](https://angelosk.github.io/Papers/2011/secondwrite.pdf) 给二进制增加保护。也提到了优化
+
+- [DECOMPERSON: How Humans Decompile and What We Can Learn From It](https://www.usenix.org/system/files/sec22-burk.pdf) 调研人工反编译的过程
+
+- [研究VSA对人工分析的帮助](https://www.ndss-symposium.org/wp-content/uploads/bar2021_23002_paper.pdf)。（对学习VSA没啥用）
 
 
 **最近的新论文**
@@ -144,10 +175,10 @@ and Methods from Compiled Executables
 
 - BinPointer: Towards Precise, Sound, and Scalable Binary-Level Pointer Analysis
     
-    里面提到了 [BPA: Refining Indirect Call Targets at the Binary Level](https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf)这篇也值得读。用了块内存的抽象解释。
+    提及：[BPA: Refining Indirect Call Targets at the Binary Level](https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf)这篇也值得读。用了块内存的抽象解释。
 
 
-### 其他零散资料：
+### 其他资料（网页等）：
 
 - https://github.com/cmu-sei/pharos 涉及到很多反编译技术
 

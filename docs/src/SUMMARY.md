@@ -10,6 +10,7 @@
 - [RetDec](retdec.md)
 - [Retypd](retypd.md)
 - [Papers](papers.md)
+- [Datalog](datalog.md)
 - [Other Notes](basics/README.md)
     - [C++](basics/C++.md)
     - [CMake](basics/cmake.md)
