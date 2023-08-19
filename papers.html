@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html" class="active"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">7.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">7.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">7.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html" class="active"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -161,7 +161,6 @@
 </ul>
 <h2 id="读论文"><a class="header" href="#读论文">读论文</a></h2>
 <p>一篇很好的综述：<a href="https://yurichev.com/mirrors/vanEmmerik_ssa.pdf">Static Single Assignment for Decompilation (Boomerang)</a> 感觉可以抓住优化方面的脉络。</p>
-<p>摸着引用看论文确实有点用</p>
 <h3 id="控制流结构恢复-structural-analysis"><a class="header" href="#控制流结构恢复-structural-analysis">控制流结构恢复-structural analysis</a></h3>
 <p>很多都是借用现有的type recovery，重点去讲structure recovery。</p>
 <ul>
@@ -190,7 +189,7 @@
 <p><a href="https://arxiv.org/pdf/1603.05495.pdf">【retypd】</a> 需要进一步学习类型系统的高级知识，比如subtyping。它不仅开源，而且不需要VSA的指针信息。可以与之前需要VSA的结合？<del>但是似乎没有说怎么从一整块栈内存中识别出变量。</del></p>
 </li>
 <li>
-<p><a href="https://user.eng.umd.edu/~barua/elwazeer-PLDI-2013.pdf">【SecondWrite】</a></p>
+<p><a href="https://user.eng.umd.edu/~barua/elwazeer-PLDI-2013.pdf">【SecondWrite】Scalable Variable and Data Type Detection in a Binary Rewriter</a> </p>
 </li>
 </ul>
 <h3 id="变量恢复"><a class="header" href="#变量恢复">变量恢复</a></h3>
@@ -201,7 +200,7 @@ via Probabilistic Analysis for Stripped Binary</a> <a href="https://www.cs.purdu
 <p>C++的类给反编译带来了额外的困难，涉及到（复杂的）约束求解等。</p>
 <ul>
 <li>
-<p><a href="https://edmcman.github.io/papers/ccs18.pdf">Using Logic Programming to Recover C++ Classes</a> C++反编译 
+<p><a href="https://edmcman.github.io/papers/ccs18.pdf">OOAnalyzer: Using Logic Programming to Recover C++ Classes</a> C++反编译 
 and Methods from Compiled Executables </p>
 </li>
 <li>
@@ -241,20 +240,9 @@ and Methods from Compiled Executables </p>
 <li>
 <p><a href="http://www-verimag.imag.fr/~mounier/Enseignement/Software_Security/slides_lecture_7.pdf">这个课件</a>讲到了一点点。这门课是和安全相关的。TODO，不太看得懂。</p>
 </li>
-<li>
-<p><a href="https://www.ndss-symposium.org/wp-content/uploads/bar2021_23002_paper.pdf">研究VSA对人工分析的帮助</a>。（对学习VSA没啥用）</p>
-</li>
 </ul>
-<h3 id="其他"><a class="header" href="#其他">其他</a></h3>
+<h3 id="框架与综述"><a class="header" href="#框架与综述">框架与综述</a></h3>
 <ul>
-<li>
-<p><a href="https://dl.acm.org/doi/abs/10.1145/3395363.3397370">【DecFuzzer】How far we have come: testing decompilation correctness of C decompilers</a> <a href="https://github.com/monkbai/DecFuzzer">代码</a></p>
-<p>functionality-preserving disassembling and C style control structure recovery [17, 31, 47, 64, 65, 67]</p>
-<p>变量恢复static analysis and inference techniques [10, 12, 13, 30, 54]. </p>
-<p>fool-proof techniques for binary disassembling and decompilation [17, 31, 64-67].</p>
-<p>EMI编译器测试看了下是插入了不影响语义的代码之后去开编译优化，发现优化器做出的错误决定而导致的crash。比如把一个不该执行的循环内操作提到外面。错误判断一些分支恒为真或假。是设置Csmith的输出使得只生成一个函数？？</p>
-<p>本来Csmith生成的代码很多全局变量的使用。如果全局变量改变了，很难手动找到是哪个函数？它是生成了局部变量，然后把对全局变量的使用全替换成了局部变量，函数结束的时候把局部变量的值update到全局变量，这样如果全局变量变了，就肯定是在最后update的时候改变的。那手动看的时候不要继续找内部怎么使用？这样做有什么好处吗。。。可能是方便找到这个函数到底涉及到了哪些全局变量，然后方便只提取这些到反编译结果的全局变量？？</p>
-</li>
 <li>
 <p><a href="http://web.archive.org/web/20180517094139/http://decompilation.info/sites/all/files/articles/C%20decompilation.pdf">C Decompilation : Is It Possible?</a> 2009的一篇</p>
 <p>第二章相关工作里面有不少引用：</p>
@@ -266,8 +254,59 @@ and Methods from Compiled Executables </p>
 <p><a href="https://www.rev.ng/downloads/iccst-18-paper.pdf">【rev.ng】rev.ng: A Multi-Architecture Framework for Reverse Engineering and Vulnerability Discovery.</a></p>
 <p>这个反编译器开源了lifter：先转到Qemu IR然后转到LLVM IR。这个好像也不太和反编译相关，也只是搞插桩、fuzzing的。</p>
 </li>
+</ul>
+<h3 id="下游研究---测试"><a class="header" href="#下游研究---测试">下游研究 - 测试</a></h3>
+<ul>
 <li>
-<p><a href="https://www.cs.unm.edu/~eschulte/data/bed.pdf">Evolving Exact Decompilation</a> 好像和主流的反编译技术不是特别相关。</p>
+<p><a href="https://dl.acm.org/doi/abs/10.1145/3395363.3397370">【DecFuzzer】How far we have come: testing decompilation correctness of C decompilers</a> <a href="https://github.com/monkbai/DecFuzzer">代码</a></p>
+<p>functionality-preserving disassembling and C style control structure recovery [17, 31, 47, 64, 65, 67]</p>
+<p>变量恢复static analysis and inference techniques [10, 12, 13, 30, 54]. </p>
+<p>fool-proof techniques for binary disassembling and decompilation [17, 31, 64-67].</p>
+<p>EMI编译器测试看了下是插入了不影响语义的代码之后去开编译优化，发现优化器做出的错误决定而导致的crash。比如把一个不该执行的循环内操作提到外面。错误判断一些分支恒为真或假。是设置Csmith的输出使得只生成一个函数？？</p>
+<p>本来Csmith生成的代码很多全局变量的使用。如果全局变量改变了，很难手动找到是哪个函数？它是生成了局部变量，然后把对全局变量的使用全替换成了局部变量，函数结束的时候把局部变量的值update到全局变量，这样如果全局变量变了，就肯定是在最后update的时候改变的。那手动看的时候不要继续找内部怎么使用？这样做有什么好处吗。。。可能是方便找到这个函数到底涉及到了哪些全局变量，然后方便只提取这些到反编译结果的全局变量？？</p>
+</li>
+</ul>
+<h3 id="secondwrite系列"><a class="header" href="#secondwrite系列">SecondWrite系列</a></h3>
+<ul>
+<li>
+<p><a href="https://user.eng.umd.edu/~barua/high-IR-technical-report10.pdf">Decompilation to Compiler High IR in a binary rewriter</a> 提升到编译器IR，然后优化。对写反编译有较大启发</p>
+<ul>
+<li>有一段提到了栈编译的坏处。</li>
+</ul>
+</li>
+</ul>
+<h3 id="基于搜索的反编译"><a class="header" href="#基于搜索的反编译">基于搜索的反编译</a></h3>
+<ul>
+<li><a href="https://www.cs.unm.edu/~eschulte/data/bed.pdf">Evolving Exact Decompilation</a> 好像和主流的反编译技术不同。</li>
+<li><a href="https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-844.pdf">Decompilation as search</a> </li>
+</ul>
+<h3 id="java-字节码反编译"><a class="header" href="#java-字节码反编译">Java 字节码反编译</a></h3>
+<p>Java反编译的几篇</p>
+<ul>
+<li>Proebsting and Watterson [24] 《Krakatoa: Decompilation in java (does bytecode reveal source?).》</li>
+<li>Dava Miecznikowski and Hendren [22] 《Decompiling java bytecode: Problems, traps and pitfalls》</li>
+<li>Naeem and Hendren [25] 《Programmer-friendly decompiled java,》</li>
+<li>Harrand et al. [27] present Arlecchino  《Java decompiler diversity and its application to meta-decompilation》</li>
+</ul>
+<h3 id="其他"><a class="header" href="#其他">其他</a></h3>
+<ul>
+<li>
+<p><a href="https://www.usenix.org/system/files/sec22-burk.pdf">Decomperson: How Humans Decompile and What We Can Learn From It</a> 人经常会看生成的汇编，做些很小的修改。意味着可能可以强化学习。另外反编译可能代码片段可以拆分成子任务？，因为人经常关注一个小片段。</p>
+</li>
+<li>
+<p><a href="https://link.springer.com/chapter/10.1007/978-3-030-24268-8_22">A Survey of Software Reverse Engineering Applications | SpringerLink</a> 讲了逆向软件分析的合理性，用处等等。以后写intro的时候很有用。</p>
+</li>
+<li>
+<p><a href="https://ieeexplore.ieee.org/abstract/document/8109451/">An evaluation of output from current Java bytecode decompilers: Is it Android which is responsible for such quality boost?</a> </p>
+</li>
+<li>
+<p><a href="https://angelosk.github.io/Papers/2011/secondwrite.pdf">Retrofitting Security in COTS Software with Binary Rewriting</a> 给二进制增加保护。也提到了优化</p>
+</li>
+<li>
+<p><a href="https://www.usenix.org/system/files/sec22-burk.pdf">DECOMPERSON: How Humans Decompile and What We Can Learn From It</a> 调研人工反编译的过程</p>
+</li>
+<li>
+<p><a href="https://www.ndss-symposium.org/wp-content/uploads/bar2021_23002_paper.pdf">研究VSA对人工分析的帮助</a>。（对学习VSA没啥用）</p>
 </li>
 </ul>
 <p><strong>最近的新论文</strong></p>
@@ -280,10 +319,10 @@ and Methods from Compiled Executables </p>
 </li>
 <li>
 <p>BinPointer: Towards Precise, Sound, and Scalable Binary-Level Pointer Analysis</p>
-<p>里面提到了 <a href="https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf">BPA: Refining Indirect Call Targets at the Binary Level</a>这篇也值得读。用了块内存的抽象解释。</p>
+<p>提及：<a href="https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf">BPA: Refining Indirect Call Targets at the Binary Level</a>这篇也值得读。用了块内存的抽象解释。</p>
 </li>
 </ul>
-<h3 id="其他零散资料"><a class="header" href="#其他零散资料">其他零散资料：</a></h3>
+<h3 id="其他资料网页等"><a class="header" href="#其他资料网页等">其他资料（网页等）：</a></h3>
 <ul>
 <li>
 <p>https://github.com/cmu-sei/pharos 涉及到很多反编译技术</p>
@@ -329,7 +368,7 @@ and Methods from Compiled Executables </p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next" href="basics/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next" href="datalog.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -343,7 +382,7 @@ and Methods from Compiled Executables </p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next" href="basics/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next" href="datalog.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

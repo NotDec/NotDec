@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded "><a href="../llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="../docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="../docs/optimizers.html" class="active"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="../ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="../retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="../retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="../papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="../basics/index.html"><strong aria-hidden="true">7.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../basics/C++.html"><strong aria-hidden="true">7.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="../basics/cmake.html"><strong aria-hidden="true">7.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded "><a href="../llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="../docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="../docs/optimizers.html" class="active"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="../ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="../retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="../retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="../papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="../datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="../basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="../basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -150,6 +150,12 @@
 <p>入门教程<a href="https://github.com/banach-space/llvm-tutor">banach-space/llvm-tutor: A collection of out-of-tree LLVM passes for teaching and learning (github.com)</a></p>
 <p>中文文章[<a href="https://bbs.kanxue.com/thread-257665.htm">翻译]现代化地编写LLVM Pass -- part I-外文翻译-看雪论坛-安全社区|安全招聘|bbs.pediy.com (kanxue.com)</a></p>
 <h2 id="变量识别"><a class="header" href="#变量识别">变量识别</a></h2>
+<ul>
+<li>优化：运行LLVM的一系列代码优化，包括SSA构建（Promote）。</li>
+<li>全局栈指针识别：在第一个基本块，在任何内存访问之前，是否对全局变量进行了一读一写的修改，且写的是读出的值加一个常量。是的话就认为是栈指针。如果大于等于一半的函数是同一个栈指针，则标记它为全局的栈指针。</li>
+<li>指针识别：基于已有的指针类型，运行基于Datalog规则的指针类型分析，将所有替换为指针。</li>
+<li>类型识别：基于Retypd，</li>
+</ul>
 <p>清除IR中的全局栈指针，并对其使用处的指令操作数(局部变量地址)进行转换，转换为对alloca里的东西的使用，把对mem0的使用，其中的使用mem0的栈部分，改为使用我们的alloca。
 参考<a href="https://github.com/avast/retdec/blob/master/src/bin2llvmir/optimizations/stack/stack.cpp">retdec/stack.cpp</a></p>
 <ul>
