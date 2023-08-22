@@ -4,25 +4,17 @@
 
 NotDec is
 1. A project that aims to demystify the internal of decompiler.
-1. A webassembly to LLVM IR lifter that generates clean code, optimized for static analysis.
-   - Binary Rewriting Framework (convert the IR back to webassembly) (TODO)
-1. A webassembly decompiler
+1. A webassembly decompiler that can experiment with new decompiler techniques.
    - Variable Recovery
    - Structual Analysis
 
 # 中文
 
-## TODO
+## NotDec: 反编译器原理分析
 
-1. 将wasm lift到LLVM IR
-   - 支持将wasm内存直接映射到某个基地址，从而直接支持运行，以及memory grow相关指令。
-   - 支持DWARF调试信息，从而映射回原wat，wasm
-1. 设计一个映射，将lift之后的IR反向转回wasm
-
-
-## 反编译器
-
-侧重于前中端（转IR与IR的优化。）
+本项目旨在：
+1. 学习现有反编译器的原理，系统地总结现有反编译器的工作，算法
+1. 选择合适的算法，尝试实现自己的反编译器
 
 ### 从“零”实现反编译器
 
@@ -167,9 +159,16 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 
 
 
-### 其他
+## 其他
 
 各种杂七杂八的事情随意地列在这里
 
 1. 反编译优化后重新编译，和原有代码对比测试。效果好甚至可以作为字节码的优化器。
 2. 未来实现得够好之后，可以重写README，该文档可以改名为`plan.md`放到docs文件夹里。
+
+## TODO
+
+1. 将wasm lift到LLVM IR
+   - 支持将wasm内存直接映射到某个基地址，从而直接支持运行，以及memory grow相关指令。
+   - 支持DWARF调试信息，从而映射回原wat，wasm
+1. 设计一个映射，将lift之后的IR反向转回wasm

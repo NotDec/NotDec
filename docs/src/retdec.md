@@ -49,7 +49,7 @@ vscode代码搜索方法：基于`src/retdec-decompiler/decompiler-config.json`�
 
 ### retdec 栈恢复算法
 
-源码在`retdec\src\bin2llvmir\optimizations\stack\stack.cpp`。总体思路非常简单，分析每个load和store用到的东西，提取成一个表达式树（SymbolicTree类）。首先判断表达式树里面有没有栈指针，没有就不处理。然后尝试把整个表达式树化简，把栈指针看作0，化简成一个常量，然后把这个常量当作栈偏移，创建一个alloca去替换它。
+源码在[`retdec\src\bin2llvmir\optimizations\stack\stack.cpp`](https://github.com/avast/retdec/blob/master/src/bin2llvmir/optimizations/stack/stack.cpp)。总体思路非常简单，分析每个load和store用到的东西，提取成一个表达式树（SymbolicTree类）。首先判断表达式树里面有没有栈指针，没有就不处理。然后尝试把整个表达式树化简，把栈指针看作0，化简成一个常量，然后把这个常量当作栈偏移，创建一个alloca去替换它。
 
 这个方法还是有很大问题，有许多处理不了的情况。从这个角度看，retdec确实是比ghidra差的。现在现有的开源反编译器里面也就ghidra最好了。比如如果存在memcpy这种函数的调用，由于直接传地址，所以不是load/store的形式，而是计算完地址直接传给函数了，导致没有将里面的值替换为新创建的alloca。
 

@@ -22,7 +22,7 @@ NotDec is
 
 怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。
 
-### 计划产出：
+### 目标：
 
 1. 现有反编译技术的详细调研总结，反编译器内部原理的详细调研文档。
 1. 一个基于LLVM的WebAssembly反编译器。
@@ -35,9 +35,7 @@ NotDec is
 1. 设计一个映射，将lift之后的IR反向转回wasm。使得最终的结果能够很好地重编译。
 1. 能够对“内存”中的变量也构建SSA进行优化。
 
-### 不知道接下来怎么办？（资料收集）
-
-学习阶段：
+### 学习阶段：
 
 1. LLVM IR基础：只要达到能手写LLVM IR的程度就行。即主要理解各种语言特性对应的是什么样的LLVM IR代码。同时理解带alloca的半SSA形式，即alloca里的变量是非SSA，外面的是SSA。
    - llvm-tutor 
@@ -45,18 +43,18 @@ NotDec is
 2. SSA与编译优化基础
    - [《Engineering a compiler》](https://book.douban.com/subject/20436488/) 上来先看9.3章，深入研读。其他的章节没那么重要
    - 再找找其他讲过SSA的中文书？
-   
-   下面有两个实验，动手做了印象才会深
+
+   关于SSA的实验
    - [mem2reg 实验指导 · GitBook (buaa-se-compiling.github.io)](https://buaa-se-compiling.github.io/miniSysY-tutorial/challenge/mem2reg/help.html)
    - [Lv9+.4. SSA 形式 - 北京大学编译实践课程在线文档 | 北大编译实践在线文档 (pku-minic.github.io)](https://pku-minic.github.io/online-doc/#/lv9p-reincarnation/ssa-form)
-   
+
    其他不错的资料：
    - [《SSA book》](https://pfalcon.github.io/ssabook/latest/book-v1.pdf)
    - [《simple and efficient ssa construction》](https://pp.info.uni-karlsruhe.de/uploads/publikationen/braun13cc.pdf)
 
 3. 反编译
 
-#### 直接相关的资料
+#### 反编译相关的资料
 
 多看看现有的资料：
 
@@ -112,8 +110,6 @@ NotDec is
 
 ### 项目架构与工具
 
-Markdown编辑器（建议）使用Typora，或VSCode
-
 由于基于LLVM IR，因此语言采用C++。
 
 开发环境：VSCode + CMake。将Wabt，LLVM等作为CMake的外部依赖。
@@ -154,12 +150,4 @@ https://stackoverflow.com/questions/72293035/error-communication-with-agent-fail
 直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用CodeLLDB插件。
 
 代码补全使用clangd插件。根据提示禁用Intellisense，然后确认下载一个clangd。
-
-
-### 其他
-
-各种杂七杂八的事情随意地列在这里
-
-1. 反编译优化后重新编译，和原有代码对比测试。效果好甚至可以作为字节码的优化器。
-2. 未来实现得够好之后，可以重写README，该文档可以改名为`plan.md`放到docs文件夹里。
 

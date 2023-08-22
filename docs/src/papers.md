@@ -1,7 +1,7 @@
-# 现有论文
+# 现有论文与资源
 
 
-### 重要资源
+## 资源集
 
 [**Working Conference on Reverse Engineering (WCRE)：**](https://ieeexplore.ieee.org/xpl/conhome/1000635/all-proceedings )
 
@@ -21,6 +21,17 @@ Github的两个list：
 - [Awesome-Info-Inferring-Binary](https://github.com/yasong/Awesome-Info-Inferring-Binary)
 - [Awesome-Binary-Rewriting](https://github.com/SystemSecurityStorm/Awesome-Binary-Rewriting)
 
+### 课程
+
+- [CMU Lecture Notes on Decompilation (15411: Compiler Design)](https://www.cs.cmu.edu/~fp/courses/15411-f13/lectures/20-decompilation.pdf) 反编译内部各个阶段都有介绍。
+
+## 现有的反编译器
+
+1. Ghidra [ghidra/docmain.hh at master · NationalSecurityAgency/ghidra (github.com)](https://github.com/NationalSecurityAgency/ghidra/blob/master/Ghidra/Features/Decompiler/src/decompile/cpp/docmain.hh) 看代码前构建doxygen看文档。
+2. [avast/retdec: RetDec is a retargetable machine-code decompiler based on LLVM. (github.com)](https://github.com/avast/retdec)
+3. [Boomerang Decompiler (sourceforge.net)](https://boomerang.sourceforge.net/)     [BoomerangDecompiler/boomerang: Boomerang Decompiler - Fighting the code-rot :) (github.com)](https://github.com/BoomerangDecompiler/boomerang) 
+4. [yegord/snowman: Snowman decompiler (github.com)](https://github.com/yegord/snowman) 
+5. angr好像也有了
 
 ## 读论文
 
@@ -115,9 +126,11 @@ and Methods from Compiled Executables
     
     这个反编译器开源了lifter：先转到Qemu IR然后转到LLVM IR。这个好像也不太和反编译相关，也只是搞插桩、fuzzing的。
 
-### 下游研究 - 测试
+## 下游研究
 
+- [Augmenting Decompiler Output with Learned Variable Names and Types](https://www.usenix.org/system/files/sec22summer_chen-qibin.pdf) 基于AI恢复反编译的变量名。
 
+**反编译器测试**
 - [【DecFuzzer】How far we have come: testing decompilation correctness of C decompilers](https://dl.acm.org/doi/abs/10.1145/3395363.3397370 ) [代码](https://github.com/monkbai/DecFuzzer)
 
     functionality-preserving disassembling and C style control structure recovery [17, 31, 47, 64, 65, 67]
@@ -129,6 +142,8 @@ and Methods from Compiled Executables
     EMI编译器测试看了下是插入了不影响语义的代码之后去开编译优化，发现优化器做出的错误决定而导致的crash。比如把一个不该执行的循环内操作提到外面。错误判断一些分支恒为真或假。是设置Csmith的输出使得只生成一个函数？？
     
     本来Csmith生成的代码很多全局变量的使用。如果全局变量改变了，很难手动找到是哪个函数？它是生成了局部变量，然后把对全局变量的使用全替换成了局部变量，函数结束的时候把局部变量的值update到全局变量，这样如果全局变量变了，就肯定是在最后update的时候改变的。那手动看的时候不要继续找内部怎么使用？这样做有什么好处吗。。。可能是方便找到这个函数到底涉及到了哪些全局变量，然后方便只提取这些到反编译结果的全局变量？？
+
+- [Semantic Fidelity of Decompilers](https://apps.dtic.mil/sti/trecms/pdf/AD1173815.pdf) CMU的技术报告。这篇基于上面的进一步做了。基于副作用（全局变量，内存访问，函数调用）分析单个函数函数的反编译正确性。
 
 
 ### SecondWrite系列
@@ -143,7 +158,7 @@ and Methods from Compiled Executables
 - [Evolving Exact Decompilation](https://www.cs.unm.edu/~eschulte/data/bed.pdf) 好像和主流的反编译技术不同。
 - [Decompilation as search](https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-844.pdf) 
 
-### Java 字节码反编译
+## Java 字节码反编译
 
 Java反编译的几篇
 
@@ -151,8 +166,13 @@ Java反编译的几篇
 - Dava Miecznikowski and Hendren [22] 《Decompiling java bytecode: Problems, traps and pitfalls》
 - Naeem and Hendren [25] 《Programmer-friendly decompiled java,》
 - Harrand et al. [27] present Arlecchino  《Java decompiler diversity and its application to meta-decompilation》
+- [《Decompiler Implementation》](https://link.springer.com/chapter/10.1007/978-1-4302-0739-9_6) 一本书，讲Java字节码反编译的，暂未找到免费的电子版。
 
-### 其他
+## 其他相关的静态分析技术
+
+[Aggregate structure identification and its application to program analysis](https://dl.acm.org/doi/10.1145/292540.292553) 
+
+## 其他
 
 - [Decomperson: How Humans Decompile and What We Can Learn From It](https://www.usenix.org/system/files/sec22-burk.pdf) 人经常会看生成的汇编，做些很小的修改。意味着可能可以强化学习。另外反编译可能代码片段可以拆分成子任务？，因为人经常关注一个小片段。
 
@@ -174,7 +194,7 @@ Java反编译的几篇
 - BDA: Practical Dependence Analysis for Binary Executables by Unbiased Whole-Program Path Sampling and Per-Path Abstract Interpretation
 
 - BinPointer: Towards Precise, Sound, and Scalable Binary-Level Pointer Analysis
-    
+
     提及：[BPA: Refining Indirect Call Targets at the Binary Level](https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf)这篇也值得读。用了块内存的抽象解释。
 
 
@@ -196,12 +216,10 @@ Java反编译的几篇
 
 - https://github.com/lifting-bits/sleigh sleigh作为Ghidra的反编译器，是用C++写的，而且汇编到pcode的lift部分也是它负责的。所以用Ghidra可能也只要用这个就可以了。
 
-- [Ghidra上的ASI https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html](https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html) 
+- [Ghidra上的ASI https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html](https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html)
 
-### 领域的大佬
+## 领域的研究者
 
-TODO
+[Shuai Wang](https://www.cse.ust.hk/~shuaiw/)
 
 [Gang Tan](https://www.cse.psu.edu/~gxt29/publications/)
-
-
