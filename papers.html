@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Papers - NotDec: Decompiler From Scratch</title>
+        <title>Papers&amp;Resources - NotDec: Decompiler From Scratch</title>
 
 
         <!-- Custom HTML head -->
@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html" class="active"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/frontend.html"><strong aria-hidden="true">2.1.</strong> Decompiler Frontend</a></li><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.2.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.3.</strong> Decompiler Middle End</a></li><li class="chapter-item expanded "><a href="docs/backend.html"><strong aria-hidden="true">2.4.</strong> Decompiler Back End</a></li></ol></li><li class="chapter-item expanded "><a href="papers.html" class="active"><strong aria-hidden="true">3.</strong> Papers&Resources</a></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">4.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">5.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">6.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -144,8 +144,8 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="现有论文"><a class="header" href="#现有论文">现有论文</a></h1>
-<h3 id="重要资源"><a class="header" href="#重要资源">重要资源</a></h3>
+                        <h1 id="现有论文与资源"><a class="header" href="#现有论文与资源">现有论文与资源</a></h1>
+<h2 id="资源集"><a class="header" href="#资源集">资源集</a></h2>
 <p><a href="https://ieeexplore.ieee.org/xpl/conhome/1000635/all-proceedings"><strong>Working Conference on Reverse Engineering (WCRE)：</strong></a></p>
 <p><a href="https://dl.acm.org/conference/pprew"><strong>PPREW-5: Proceedings of the 5th Program Protection and Reverse Engineering Workshop</strong></a> 这个期刊好啊。</p>
 <p><a href="https://dl.acm.org/conference/ssprew"><strong>SSPREW: Software Security, Protection, and Reverse Engineering Workshop</strong></a></p>
@@ -159,6 +159,18 @@
 <li><a href="https://github.com/yasong/Awesome-Info-Inferring-Binary">Awesome-Info-Inferring-Binary</a></li>
 <li><a href="https://github.com/SystemSecurityStorm/Awesome-Binary-Rewriting">Awesome-Binary-Rewriting</a></li>
 </ul>
+<h3 id="课程"><a class="header" href="#课程">课程</a></h3>
+<ul>
+<li><a href="https://www.cs.cmu.edu/~fp/courses/15411-f13/lectures/20-decompilation.pdf">CMU Lecture Notes on Decompilation (15411: Compiler Design)</a> 反编译内部各个阶段都有介绍。</li>
+</ul>
+<h2 id="现有的反编译器"><a class="header" href="#现有的反编译器">现有的反编译器</a></h2>
+<ol>
+<li>Ghidra <a href="https://github.com/NationalSecurityAgency/ghidra/blob/master/Ghidra/Features/Decompiler/src/decompile/cpp/docmain.hh">ghidra/docmain.hh at master · NationalSecurityAgency/ghidra (github.com)</a> 看代码前构建doxygen看文档。</li>
+<li><a href="https://github.com/avast/retdec">avast/retdec: RetDec is a retargetable machine-code decompiler based on LLVM. (github.com)</a></li>
+<li><a href="https://boomerang.sourceforge.net/">Boomerang Decompiler (sourceforge.net)</a>     <a href="https://github.com/BoomerangDecompiler/boomerang">BoomerangDecompiler/boomerang: Boomerang Decompiler - Fighting the code-rot :) (github.com)</a> </li>
+<li><a href="https://github.com/yegord/snowman">yegord/snowman: Snowman decompiler (github.com)</a> </li>
+<li>angr好像也有了</li>
+</ol>
 <h2 id="读论文"><a class="header" href="#读论文">读论文</a></h2>
 <p>一篇很好的综述：<a href="https://yurichev.com/mirrors/vanEmmerik_ssa.pdf">Static Single Assignment for Decompilation (Boomerang)</a> 感觉可以抓住优化方面的脉络。</p>
 <h3 id="控制流结构恢复-structural-analysis"><a class="header" href="#控制流结构恢复-structural-analysis">控制流结构恢复-structural analysis</a></h3>
@@ -194,8 +206,7 @@
 </ul>
 <h3 id="变量恢复"><a class="header" href="#变量恢复">变量恢复</a></h3>
 <p>变量恢复和类型恢复关联较大。如果把函数开头分配的栈空间看作一个巨大的结构体，变量恢复就转换成了类型恢复。</p>
-<p><a href="https://www.cs.virginia.edu/~yk2bb/data/osprey_sp21.pdf">OSPREY: Recovery of Variable and Data Structure
-via Probabilistic Analysis for Stripped Binary</a> <a href="https://www.cs.purdue.edu/homes/zhan3299/res/SP21a_slides.pdf">slides</a> 把变量的访问看作变量存在的暗示，同时存在很多这样的暗示，使用概率性的推导。好像是基于后面那篇BDA的工作。</p>
+<p><a href="https://www.cs.virginia.edu/~yk2bb/data/osprey_sp21.pdf">OSPREY: Recovery of Variable and Data Structure via Probabilistic Analysis for Stripped Binary</a> <a href="https://www.cs.purdue.edu/homes/zhan3299/res/SP21a_slides.pdf">slides</a> 把变量的访问看作变量存在的暗示，同时存在很多这样的暗示，使用概率性的推导。好像是基于后面那篇BDA的工作。</p>
 <h3 id="c-反编译"><a class="header" href="#c-反编译">C++ 反编译</a></h3>
 <p>C++的类给反编译带来了额外的困难，涉及到（复杂的）约束求解等。</p>
 <ul>
@@ -255,7 +266,11 @@ and Methods from Compiled Executables </p>
 <p>这个反编译器开源了lifter：先转到Qemu IR然后转到LLVM IR。这个好像也不太和反编译相关，也只是搞插桩、fuzzing的。</p>
 </li>
 </ul>
-<h3 id="下游研究---测试"><a class="header" href="#下游研究---测试">下游研究 - 测试</a></h3>
+<h2 id="下游研究"><a class="header" href="#下游研究">下游研究</a></h2>
+<ul>
+<li><a href="https://www.usenix.org/system/files/sec22summer_chen-qibin.pdf">Augmenting Decompiler Output with Learned Variable Names and Types</a> 基于AI恢复反编译的变量名。</li>
+</ul>
+<p><strong>反编译器测试</strong></p>
 <ul>
 <li>
 <p><a href="https://dl.acm.org/doi/abs/10.1145/3395363.3397370">【DecFuzzer】How far we have come: testing decompilation correctness of C decompilers</a> <a href="https://github.com/monkbai/DecFuzzer">代码</a></p>
@@ -264,6 +279,9 @@ and Methods from Compiled Executables </p>
 <p>fool-proof techniques for binary disassembling and decompilation [17, 31, 64-67].</p>
 <p>EMI编译器测试看了下是插入了不影响语义的代码之后去开编译优化，发现优化器做出的错误决定而导致的crash。比如把一个不该执行的循环内操作提到外面。错误判断一些分支恒为真或假。是设置Csmith的输出使得只生成一个函数？？</p>
 <p>本来Csmith生成的代码很多全局变量的使用。如果全局变量改变了，很难手动找到是哪个函数？它是生成了局部变量，然后把对全局变量的使用全替换成了局部变量，函数结束的时候把局部变量的值update到全局变量，这样如果全局变量变了，就肯定是在最后update的时候改变的。那手动看的时候不要继续找内部怎么使用？这样做有什么好处吗。。。可能是方便找到这个函数到底涉及到了哪些全局变量，然后方便只提取这些到反编译结果的全局变量？？</p>
+</li>
+<li>
+<p><a href="https://apps.dtic.mil/sti/trecms/pdf/AD1173815.pdf">Semantic Fidelity of Decompilers</a> CMU的技术报告。这篇基于上面的进一步做了。基于副作用（全局变量，内存访问，函数调用）分析单个函数函数的反编译正确性。</p>
 </li>
 </ul>
 <h3 id="secondwrite系列"><a class="header" href="#secondwrite系列">SecondWrite系列</a></h3>
@@ -280,15 +298,18 @@ and Methods from Compiled Executables </p>
 <li><a href="https://www.cs.unm.edu/~eschulte/data/bed.pdf">Evolving Exact Decompilation</a> 好像和主流的反编译技术不同。</li>
 <li><a href="https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-844.pdf">Decompilation as search</a> </li>
 </ul>
-<h3 id="java-字节码反编译"><a class="header" href="#java-字节码反编译">Java 字节码反编译</a></h3>
+<h2 id="java-字节码反编译"><a class="header" href="#java-字节码反编译">Java 字节码反编译</a></h2>
 <p>Java反编译的几篇</p>
 <ul>
 <li>Proebsting and Watterson [24] 《Krakatoa: Decompilation in java (does bytecode reveal source?).》</li>
 <li>Dava Miecznikowski and Hendren [22] 《Decompiling java bytecode: Problems, traps and pitfalls》</li>
 <li>Naeem and Hendren [25] 《Programmer-friendly decompiled java,》</li>
 <li>Harrand et al. [27] present Arlecchino  《Java decompiler diversity and its application to meta-decompilation》</li>
+<li><a href="https://link.springer.com/chapter/10.1007/978-1-4302-0739-9_6">《Decompiler Implementation》</a> 一本书，讲Java字节码反编译的，暂未找到免费的电子版。</li>
 </ul>
-<h3 id="其他"><a class="header" href="#其他">其他</a></h3>
+<h2 id="其他相关的静态分析技术"><a class="header" href="#其他相关的静态分析技术">其他相关的静态分析技术</a></h2>
+<p><a href="https://dl.acm.org/doi/10.1145/292540.292553">Aggregate structure identification and its application to program analysis</a> </p>
+<h2 id="其他"><a class="header" href="#其他">其他</a></h2>
 <ul>
 <li>
 <p><a href="https://www.usenix.org/system/files/sec22-burk.pdf">Decomperson: How Humans Decompile and What We Can Learn From It</a> 人经常会看生成的汇编，做些很小的修改。意味着可能可以强化学习。另外反编译可能代码片段可以拆分成子任务？，因为人经常关注一个小片段。</p>
@@ -353,22 +374,24 @@ and Methods from Compiled Executables </p>
 <p>https://github.com/lifting-bits/sleigh sleigh作为Ghidra的反编译器，是用C++写的，而且汇编到pcode的lift部分也是它负责的。所以用Ghidra可能也只要用这个就可以了。</p>
 </li>
 <li>
-<p><a href="https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html">Ghidra上的ASI https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html</a> </p>
+<p><a href="https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html">Ghidra上的ASI https://blog.grimm-co.com/2020/11/automated-struct-identification-with.html</a></p>
 </li>
 </ul>
-<h3 id="领域的大佬"><a class="header" href="#领域的大佬">领域的大佬</a></h3>
-<p>TODO</p>
+<h2 id="领域的研究者"><a class="header" href="#领域的研究者">领域的研究者</a></h2>
+<p><a href="https://www.cse.ust.hk/~shuaiw/">Shuai Wang</a></p>
 <p><a href="https://www.cse.psu.edu/~gxt29/publications/">Gang Tan</a></p>
+<p><strong>WebAssembly</strong></p>
+<p>University of Stuttgart 的 <a href="https://software-lab.org/people/Michael_Pradel.html">Michael Pradel</a> 以及他的学生 <a href="https://dlehmann.eu/">Daniel Lehmann</a> 在webassembly方面发了很多paper。</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="retypd.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="docs/backend.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next" href="datalog.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next" href="ghidra.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -378,11 +401,11 @@ and Methods from Compiled Executables </p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="retypd.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="docs/backend.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next" href="datalog.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next" href="ghidra.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

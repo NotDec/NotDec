@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded "><a href="../llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="../docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="../docs/optimizers.html" class="active"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="../ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="../retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="../retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="../papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="../datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="../basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="../basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded "><a href="../llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="../docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../docs/frontend.html"><strong aria-hidden="true">2.1.</strong> Decompiler Frontend</a></li><li class="chapter-item expanded "><a href="../docs/wasm-frontend.html"><strong aria-hidden="true">2.2.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="../docs/optimizers.html" class="active"><strong aria-hidden="true">2.3.</strong> Decompiler Middle End</a></li><li class="chapter-item expanded "><a href="../docs/backend.html"><strong aria-hidden="true">2.4.</strong> Decompiler Back End</a></li></ol></li><li class="chapter-item expanded "><a href="../papers.html"><strong aria-hidden="true">3.</strong> Papers&Resources</a></li><li class="chapter-item expanded "><a href="../ghidra.html"><strong aria-hidden="true">4.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="../retdec.html"><strong aria-hidden="true">5.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="../retypd.html"><strong aria-hidden="true">6.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="../datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="../basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="../basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -146,22 +146,63 @@
                     <main>
                         <h1 id="docs-of-optimizers"><a class="header" href="#docs-of-optimizers">Docs of optimizers</a></h1>
 <p>项目使用LLVM Pass框架来进行反编译中的中间代码优化。</p>
-<h2 id="相关资料"><a class="header" href="#相关资料">相关资料</a></h2>
+<h2 id="llvm-pass入门资料"><a class="header" href="#llvm-pass入门资料">LLVM Pass入门资料</a></h2>
 <p>入门教程<a href="https://github.com/banach-space/llvm-tutor">banach-space/llvm-tutor: A collection of out-of-tree LLVM passes for teaching and learning (github.com)</a></p>
-<p>中文文章[<a href="https://bbs.kanxue.com/thread-257665.htm">翻译]现代化地编写LLVM Pass -- part I-外文翻译-看雪论坛-安全社区|安全招聘|bbs.pediy.com (kanxue.com)</a></p>
-<h2 id="变量识别"><a class="header" href="#变量识别">变量识别</a></h2>
+<p>中文文章<a href="https://bbs.kanxue.com/thread-257665.htm">[翻译]现代化地编写LLVM Pass -- part I-外文翻译-看雪论坛-安全社区|安全招聘|bbs.pediy.com (kanxue.com)</a></p>
+<h2 id="变量恢复"><a class="header" href="#变量恢复">变量恢复</a></h2>
 <ul>
-<li>优化：运行LLVM的一系列代码优化，包括SSA构建（Promote）。</li>
+<li>优化：wasm解析为IR后先优化一下，对后续反编译有好处。运行LLVM的一系列代码优化，包括SSA构建（Promote）。</li>
 <li>全局栈指针识别：在第一个基本块，在任何内存访问之前，是否对全局变量进行了一读一写的修改，且写的是读出的值加一个常量。是的话就认为是栈指针。如果大于等于一半的函数是同一个栈指针，则标记它为全局的栈指针。</li>
 <li>指针识别：基于已有的指针类型，运行基于Datalog规则的指针类型分析，将所有替换为指针。</li>
 <li>类型识别：基于Retypd，</li>
 </ul>
-<p>清除IR中的全局栈指针，并对其使用处的指令操作数(局部变量地址)进行转换，转换为对alloca里的东西的使用，把对mem0的使用，其中的使用mem0的栈部分，改为使用我们的alloca。
-参考<a href="https://github.com/avast/retdec/blob/master/src/bin2llvmir/optimizations/stack/stack.cpp">retdec/stack.cpp</a></p>
+<h3 id="栈指针识别"><a class="header" href="#栈指针识别">栈指针识别</a></h3>
+<p><strong>背景</strong>：根据《An Empirical Study of Real-World WebAssembly Binaries: Security, Languages, Use Cases.》这篇paper，有约一半的wasm都使用global 0作为栈指针。这说明针对栈指针的分析的重要性。这也是向更通用的算法拓展的一步。</p>
+<p><strong>算法</strong>：在第一个基本块，在任何内存访问之前，是否对全局变量进行了一读一写的修改，且写的是读出的值加一个常量。是的话就认为是栈指针。</p>
+<p><strong>局限性</strong>：可能出现加载栈指针后，先存在局部变量里读出再sub的情况。我们通过在分析前调用 Promote 这个SSA构建的pass，缓解这个问题。</p>
+<h3 id="指针类型识别"><a class="header" href="#指针类型识别">指针类型识别</a></h3>
+<p>为了简化考虑，把一切都平坦化，假定栈大小固定，则可以看作栈上都是普通的基本类型变量。不考虑数组，把数组看作是结构体的特殊情况。不考虑数组下标，都看作是指针的整数加减运算。</p>
+<p><strong>背景</strong>：在二进制层数字和指针是混在一起的。因此往往需要把未经分析的值看作比如<code>undef32</code>类型，然后在分析过程中设置为更细分的数字类型和指针类型。可以看作是一个类型的lattice。</p>
+<blockquote>
+<p>类型分析是少数可以用数据流术语表达的问题之一，并且是真正双向的。</p>
+</blockquote>
+<ol>
+<li>定义的类型影响使用的类型</li>
+<li>使用的类型影响定义的类型：</li>
+<li>库函数调用（看作使用）影响之前的定义，已知返回值类型的赋值影响之前的定义。引用参数调用影响之前的定义。</li>
+</ol>
+<p><strong>wasm指针</strong>：现在内存不是直接访问的：即load和store指令会在加载和保存的时候，将偏移加上mem0的基地址。但是，如果一旦引入了类似于直接alloca的这种情况，则它将是直接地址，而不是直接加上mem0的基地址。问题在于，可能会有指针混指的情况，即可能指向全局变量或者栈空间变量。这样在后面load/store的时候，无论是加上mem0的基址还是不加都有问题。因此引入地址空间的概念。将wasm的内存指针单独分离出来，成为独立的地址空间。</p>
+<p><strong>算法</strong>：双向的传播问题，可以用传统的数据流分析实现，但是较为复杂。先使用Datalog进行原型设计，后期再改进。</p>
+<ul>
+<li>加法运算：数字加数字，指针加数字，数字加指针，三种情况。
+<ul>
+<li>如果运算的参数中有指针，则结果也是指针。</li>
+<li>如果发现了一边是指针，另一边大概率是整数类型，同时结果类型也是指针类型。</li>
+<li>反向推导：如果运算的结果是指针类型，则里面至少有一个指针类型。（放弃该信息，因为帮助不大）</li>
+</ul>
+</li>
+<li>减法运算：数字减数字，指针减数字，指针减指针（小概率），指针减法运算
+<ul>
+<li>（如果不考虑指针减去指针）第二个参数是数字类型。</li>
+<li>（如果不考虑指针减去指针）第一个参数是指针类型，结果也是指针类型。</li>
+<li>（a-b=c）如果a是指针，b是数字，则c是指针</li>
+<li>（a-b=c）如果a是数字，则b不是指针</li>
+<li>（a-b=c）如果b是指针，则a是指针，c是数字</li>
+</ul>
+</li>
+</ul>
+<h3 id="变量访问识别"><a class="header" href="#变量访问识别">变量访问识别</a></h3>
+<p>进一步识别每个内存访问，以及涉及的加法运算。</p>
+<ul>
+<li>加法运算：某个类型的某个偏移出</li>
+</ul>
+<p>结构体的识别的关键在于，我是从谁那里，加了一个偏移。一般是从栈指针，但是一旦是从别的变量那边加出来的，这时候可能就代表着结构体。</p>
+<h3 id="实现"><a class="header" href="#实现">实现</a></h3>
 <ul>
 <li>识别并消除函数开头和结尾的栈指针操作</li>
 <li>把对mem0的取下标+load/store操作，根据全局变量还是局部变量，转变为（新创建的）局部变量或者全局变量的操作。</li>
 </ul>
+<p>清除IR中的全局栈指针，并对其使用处的指令操作数(局部变量地址)进行转换，转换为对alloca里的东西的使用，把对mem0的使用，其中的使用mem0的栈部分，改为使用我们的alloca。</p>
 <p>变量分为全局变量，局部变量，堆变量，堆变量一般直接调函数分配，暂时不考虑。</p>
 <ul>
 <li>全局变量的访问：对mem0取下标的这个值是常量（范围大致在1024到一个很大的值之间）【可能存在偏移运算】</li>
@@ -175,12 +216,6 @@
 <li>如何匹配函数开头的栈指针的sub操作</li>
 <li>如何判断哪些值是栈内存的指针</li>
 </ul>
-<h3 id="挑战"><a class="header" href="#挑战">挑战</a></h3>
-<p>现在内存不是直接访问的：即load和store指令会在加载和保存的时候，将偏移加上mem0的基地址。但是，如果一旦引入了类似于直接alloca的这种情况，则它将是直接地址，而不是直接加上mem0的基地址。问题在于，可能会有指针混指的情况，即可能指向全局变量或者栈空间变量。这样在后面load/store的时候，无论是加上mem0的基址还是不加都有问题。</p>
-<p>因此引入地址空间的概念，引入数值和地址的转换符。</p>
-<p>能否保证语义安全？因为我们现在转出来的IR是能跑的，如果变量恢复后，是不是就不能跑了？比如部分变量识别失败，还是存到mem里去了。</p>
-<h3 id="实现"><a class="header" href="#实现">实现</a></h3>
-<p>wasm解析为IR后先优化一下。</p>
 <h4 id="如何判断哪些值是栈内存的抽象解释算法"><a class="header" href="#如何判断哪些值是栈内存的抽象解释算法">如何判断哪些值是栈内存的&quot;抽象解释&quot;算法</a></h4>
 <p>和传统的数据流分析不同的地方在于，LLVM是SSA形式，每个值只有一个赋值点。因此，一个值要么是栈指针，要么不是。因此只需要直接循环迭代。但是LLVM里还是有变量，即alloca出来的值，可能因为控制流的跳转而来自不同的取值，从而导致基于变量计算出来的值，依赖于这个变量是不是和栈指针有关的东西。</p>
 <p>要分析清楚对mem0取下标的这个值，是不是来自stackpointer的运算。</p>
@@ -200,6 +235,7 @@
 如果存进去的值也是栈地址，那么就把对应偏移的放在另一个栈相关集合中。</p>
 <p>TODO:</p>
 <p>1.需要实现过程间分析，如果call指令的参数和返回值都是栈地址，需要把它们放到栈相关集合中。</p>
+<p>能否保证语义安全？因为我们现在转出来的IR是能跑的，如果变量恢复后，是不是就不能跑了？比如部分变量识别失败，还是存到mem里去了。</p>
 
                     </main>
 
@@ -209,7 +245,7 @@
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next" href="../ghidra.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next" href="../docs/backend.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -223,7 +259,7 @@
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next" href="../ghidra.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next" href="../docs/backend.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

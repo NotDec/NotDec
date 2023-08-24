@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html" class="active">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.1.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.2.</strong> Decompiler Middle End</a></li></ol></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">3.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">4.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">5.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="papers.html"><strong aria-hidden="true">6.</strong> Papers</a></li><li class="chapter-item expanded "><a href="datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html" class="active">Introduction</a></li><li class="chapter-item expanded "><a href="llvm.html"><strong aria-hidden="true">1.</strong> LLVM Basics</a></li><li class="chapter-item expanded "><a href="docs/index.html"><strong aria-hidden="true">2.</strong> NotDec Development Document</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="docs/frontend.html"><strong aria-hidden="true">2.1.</strong> Decompiler Frontend</a></li><li class="chapter-item expanded "><a href="docs/wasm-frontend.html"><strong aria-hidden="true">2.2.</strong> WebAssembly Frontend</a></li><li class="chapter-item expanded "><a href="docs/optimizers.html"><strong aria-hidden="true">2.3.</strong> Decompiler Middle End</a></li><li class="chapter-item expanded "><a href="docs/backend.html"><strong aria-hidden="true">2.4.</strong> Decompiler Back End</a></li></ol></li><li class="chapter-item expanded "><a href="papers.html"><strong aria-hidden="true">3.</strong> Papers&Resources</a></li><li class="chapter-item expanded "><a href="ghidra.html"><strong aria-hidden="true">4.</strong> Ghidra</a></li><li class="chapter-item expanded "><a href="retdec.html"><strong aria-hidden="true">5.</strong> RetDec</a></li><li class="chapter-item expanded "><a href="retypd.html"><strong aria-hidden="true">6.</strong> Retypd</a></li><li class="chapter-item expanded "><a href="datalog.html"><strong aria-hidden="true">7.</strong> Datalog</a></li><li class="chapter-item expanded "><a href="basics/index.html"><strong aria-hidden="true">8.</strong> Other Notes</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="basics/C++.html"><strong aria-hidden="true">8.1.</strong> C++</a></li><li class="chapter-item expanded "><a href="basics/cmake.html"><strong aria-hidden="true">8.2.</strong> CMake</a></li></ol></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -149,12 +149,7 @@
 <p>NotDec is</p>
 <ol>
 <li>A project that aims to demystify the internal of decompiler.</li>
-<li>A webassembly to LLVM IR lifter that generates clean code, optimized for static analysis.
-<ul>
-<li>Binary Rewriting Framework (convert the IR back to webassembly) (TODO)</li>
-</ul>
-</li>
-<li>A webassembly decompiler
+<li>A webassembly decompiler that can experiment with new decompiler techniques.
 <ul>
 <li>Variable Recovery</li>
 <li>Structual Analysis</li>
@@ -162,18 +157,12 @@
 </li>
 </ol>
 <h1 id="中文"><a class="header" href="#中文">中文</a></h1>
-<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
+<h2 id="notdec-反编译器原理分析"><a class="header" href="#notdec-反编译器原理分析">NotDec: 反编译器原理分析</a></h2>
+<p>本项目旨在：</p>
 <ol>
-<li>将wasm lift到LLVM IR
-<ul>
-<li>支持将wasm内存直接映射到某个基地址，从而直接支持运行，以及memory grow相关指令。</li>
-<li>支持DWARF调试信息，从而映射回原wat，wasm</li>
-</ul>
-</li>
-<li>设计一个映射，将lift之后的IR反向转回wasm</li>
+<li>学习现有反编译器的原理，系统地总结现有反编译器的工作，算法</li>
+<li>选择合适的算法，尝试实现自己的反编译器</li>
 </ol>
-<h2 id="反编译器"><a class="header" href="#反编译器">反编译器</a></h2>
-<p>侧重于前中端（转IR与IR的优化。）</p>
 <h3 id="从零实现反编译器"><a class="header" href="#从零实现反编译器">从“零”实现反编译器</a></h3>
 <p>为什么要从零开始？为了更好地学习反编译器的原理。即使最后改为对接现有的反编译器。</p>
 <p>怎么样的从零？可以使用现有的disassembler，IR，compiler等，但是不能直接去对接现有的反编译器。前期可以使用一些LLVM的Pass，后期最好都替换为自己写的Pass。</p>
@@ -325,11 +314,21 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <li>写好commit message，简要概况所有的修改。</li>
 <li>检查添加的代码的注释和文档是否充足。</li>
 </ol>
-<h3 id="其他"><a class="header" href="#其他">其他</a></h3>
+<h2 id="其他"><a class="header" href="#其他">其他</a></h2>
 <p>各种杂七杂八的事情随意地列在这里</p>
 <ol>
 <li>反编译优化后重新编译，和原有代码对比测试。效果好甚至可以作为字节码的优化器。</li>
 <li>未来实现得够好之后，可以重写README，该文档可以改名为<code>plan.md</code>放到docs文件夹里。</li>
+</ol>
+<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
+<ol>
+<li>将wasm lift到LLVM IR
+<ul>
+<li>支持将wasm内存直接映射到某个基地址，从而直接支持运行，以及memory grow相关指令。</li>
+<li>支持DWARF调试信息，从而映射回原wat，wasm</li>
+</ul>
+</li>
+<li>设计一个映射，将lift之后的IR反向转回wasm</li>
 </ol>
 
                     </main>
