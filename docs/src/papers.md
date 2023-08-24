@@ -66,8 +66,7 @@ Github的两个list：
 
 变量恢复和类型恢复关联较大。如果把函数开头分配的栈空间看作一个巨大的结构体，变量恢复就转换成了类型恢复。
 
-[OSPREY: Recovery of Variable and Data Structure
-via Probabilistic Analysis for Stripped Binary](https://www.cs.virginia.edu/~yk2bb/data/osprey_sp21.pdf) [slides](https://www.cs.purdue.edu/homes/zhan3299/res/SP21a_slides.pdf) 把变量的访问看作变量存在的暗示，同时存在很多这样的暗示，使用概率性的推导。好像是基于后面那篇BDA的工作。
+[OSPREY: Recovery of Variable and Data Structure via Probabilistic Analysis for Stripped Binary](https://www.cs.virginia.edu/~yk2bb/data/osprey_sp21.pdf) [slides](https://www.cs.purdue.edu/homes/zhan3299/res/SP21a_slides.pdf) 把变量的访问看作变量存在的暗示，同时存在很多这样的暗示，使用概率性的推导。好像是基于后面那篇BDA的工作。
 
 ### C++ 反编译
 
@@ -123,7 +122,7 @@ and Methods from Compiled Executables
     现有反编译器：DCC decompiler [7]. Boomerang [11], REC [12] and Hex-Rays plug-in [13]
 
 - [【rev.ng】rev.ng: A Multi-Architecture Framework for Reverse Engineering and Vulnerability Discovery.](https://www.rev.ng/downloads/iccst-18-paper.pdf)
-    
+
     这个反编译器开源了lifter：先转到Qemu IR然后转到LLVM IR。这个好像也不太和反编译相关，也只是搞插桩、fuzzing的。
 
 ## 下游研究
@@ -220,6 +219,13 @@ Java反编译的几篇
 
 ## 领域的研究者
 
+
 [Shuai Wang](https://www.cse.ust.hk/~shuaiw/)
 
 [Gang Tan](https://www.cse.psu.edu/~gxt29/publications/)
+
+
+**WebAssembly**
+
+University of Stuttgart 的 [Michael Pradel](https://software-lab.org/people/Michael_Pradel.html) 以及他的学生 [Daniel Lehmann](https://dlehmann.eu/) 在webassembly方面发了很多paper。
+

@@ -7,6 +7,7 @@
     - [Decompiler Frontend](docs/frontend.md)
     - [WebAssembly Frontend](docs/wasm-frontend.md)
     - [Decompiler Middle End](docs/optimizers.md)
+    - [Decompiler Back End](docs/backend.md)
 - [Papers&Resources](papers.md)
 - [Ghidra](ghidra.md)
 - [RetDec](retdec.md)
