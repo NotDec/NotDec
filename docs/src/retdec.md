@@ -9,6 +9,15 @@ https://zhuanlan.zhihu.com/p/509763117 有一些源码解读的内容。
 
 在cmake配置里增加"-DCMAKE_INSTALL_PREFIX=/home/xx/retdec/build/retdec-install"，然后直接使用cmake插件，目标选择install。（因为retdec-decompile工具需要找到decompiler-config.json文件，因此需要安装）
 
+在`deps/llvm/CMakeLists.txt`里面将LLVM的构建设置为`RelWithDebInfo`，后续调试的时候能够看到更多的内容，比如LLVM的结构体成员的内容。
+
+可以使用Vscode + cmake 插件，在设置里为cmake配置额外的参数，设置安装的前缀路径即可。
+```
+"cmake.configureArgs": [
+    "-DCMAKE_INSTALL_PREFIX=/sn640/retdec/build/retdec-install"
+],
+```
+
 #### 入口函数
 
 - retdec-decompiler.cpp 主要是解压，脱壳什么的，然后调用retdec::decompile函数。这里的retdec是namespace，不是class，所以就在src/retdec/retdec.cpp。

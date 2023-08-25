@@ -49,6 +49,8 @@ Github的两个list：
 
 - [【Dream】No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11_4_2.pdf) [slides](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf) [code](https://github.com/USECAP/dream)
 
+- [【Rev.ng】A Comb for Decompiled C Code](https://dl.acm.org/doi/pdf/10.1145/3320269.3384766) Rev.ng他们2020年的新的反编译的结构恢复算法。
+
 ### 类型恢复 - Type Recovery
 
 - [【TIE】Principled Reverse Engineering of Types in Binary Programs.](http://users.ece.cmu.edu/~aavgerin/papers/tie-ndss-2011.pdf) 这篇基于VSA搞了自己的DVSA，主要区别是StridedInterval里可以放除esp外的变量符号？。重点主要在后面的约束求解部分。后面的类型系统和求解部分也非常复杂TODO。
