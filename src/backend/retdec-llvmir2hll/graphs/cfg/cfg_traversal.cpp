@@ -8,10 +8,10 @@
 #include <tuple>
 #include <unordered_set>
 
-#include "retdec/llvmir2hll/graphs/cfg/cfg_traversal.h"
-#include "retdec/llvmir2hll/ir/empty_stmt.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_traversal.h"
+#include "backend/retdec-llvmir2hll/ir/empty_stmt.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::hasItem;
 

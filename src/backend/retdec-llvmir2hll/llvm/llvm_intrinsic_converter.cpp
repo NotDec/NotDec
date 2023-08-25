@@ -6,14 +6,14 @@
 
 #include <string>
 
-#include "retdec/llvmir2hll/ir/call_expr.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/llvm/llvm_intrinsic_converter.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/ir/call_expr.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/llvm/llvm_intrinsic_converter.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 using retdec::utils::endsWith;
 using retdec::utils::hasItem;

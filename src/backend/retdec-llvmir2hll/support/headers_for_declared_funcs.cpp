@@ -6,11 +6,11 @@
 
 #include <optional>
 
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/semantics/semantics.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/headers_for_declared_funcs.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/headers_for_declared_funcs.h"
 
 namespace retdec {
 namespace llvmir2hll {

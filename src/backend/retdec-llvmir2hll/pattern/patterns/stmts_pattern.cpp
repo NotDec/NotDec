@@ -4,8 +4,8 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/pattern/patterns/stmts_pattern.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/pattern/patterns/stmts_pattern.h"
 
 namespace retdec {
 namespace llvmir2hll {

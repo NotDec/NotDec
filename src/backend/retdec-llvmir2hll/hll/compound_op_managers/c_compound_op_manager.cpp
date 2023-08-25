@@ -4,8 +4,8 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/hll/compound_op_managers/c_compound_op_manager.h"
-#include "retdec/llvmir2hll/ir/const_int.h"
+#include "backend/retdec-llvmir2hll/hll/compound_op_managers/c_compound_op_manager.h"
+#include "backend/retdec-llvmir2hll/ir/const_int.h"
 
 namespace retdec {
 namespace llvmir2hll {

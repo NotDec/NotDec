@@ -4,10 +4,10 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/assign_stmt.h"
-#include "retdec/llvmir2hll/ir/expression.h"
-#include "retdec/llvmir2hll/optimizer/optimizers/self_assign_optimizer.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/ir/assign_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/expression.h"
+#include "backend/retdec-llvmir2hll/optimizer/optimizers/self_assign_optimizer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

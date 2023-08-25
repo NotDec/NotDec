@@ -5,8 +5,8 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/semantics/semantics/impl_support/get_name_of_param.h"
-#include "retdec/llvmir2hll/semantics/semantics/libc_semantics/get_name_of_param.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics/impl_support/get_name_of_param.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics/libc_semantics/get_name_of_param.h"
 
 namespace retdec {
 namespace llvmir2hll {

@@ -4,13 +4,13 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/empty_stmt.h"
-#include "retdec/llvmir2hll/ir/goto_stmt.h"
-#include "retdec/llvmir2hll/ir/return_stmt.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/llvm/llvm_support.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/conversion.h"
+#include "backend/retdec-llvmir2hll/ir/empty_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/goto_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/return_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/llvm/llvm_support.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"
 
 namespace retdec {
 namespace llvmir2hll {

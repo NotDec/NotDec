@@ -8,15 +8,15 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
 
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/type.h"
-#include "retdec/llvmir2hll/ir/unknown_type.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/llvm/llvm_support.h"
-#include "retdec/llvmir2hll/llvm/llvmir2bir_converter/variables_manager.h"
-#include "retdec/llvmir2hll/var_name_gen/var_name_gens/num_var_name_gen.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/type.h"
+#include "backend/retdec-llvmir2hll/ir/unknown_type.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/llvm/llvm_support.h"
+#include "backend/retdec-llvmir2hll/llvm/llvmir2bir_converter/variables_manager.h"
+#include "backend/retdec-llvmir2hll/var_name_gen/var_name_gens/num_var_name_gen.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::getValuesFromMap;
 

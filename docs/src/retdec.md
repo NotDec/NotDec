@@ -137,5 +137,29 @@ vscode代码搜索方法：基于`src/retdec-decompiler/decompiler-config.json`�
 - 如果是`ConstantExpr`,那么继续往下寻找真正Use的地方，如果找到的是`CallInst`，就跟上面的流程基本一致。
 
 
+### 结构分析-llvmir2hll
 
+
+#### 移植
+
+- 首先将`src/llvmir2hll`目录（以及include目录）复制了过来，然后使用替换把对应路径的include替换为新路径的include。
+    ```
+    cp -r /sn640/retdec/src/llvmir2hll ./retdec-llvmir2hll
+    cp -r /sn640/retdec/include/retdec/llvmir2hll/* ./retdec-llvmir2hll/
+    cp -r /sn640/retdec/src/common ./retdec-llvmir2hll/
+    cp -r /sn640/retdec/include/retdec/common ./retdec-llvmir2hll/
+    cp -r /sn640/retdec/include/retdec/utils ./retdec-llvmir2hll/
+    cp -r /sn640/retdec/src/utils ./retdec-llvmir2hll/
+    cp -r /sn640/retdec/include/retdec/config ./retdec-llvmir2hll/retdec-config
+    cp -r /sn640/retdec/src/config/* ./retdec-llvmir2hll/retdec-config
+    cp -r /sn640/retdec/src/serdes ./retdec-llvmir2hll/
+    cp -r /sn640/retdec/include/retdec/serdes ./retdec-llvmir2hll/
+    ```
+    在vscode里面把`#include "retdec/llvmir2hll` -> `#include "backend/retdec-llvmir2hll`
+    把`#include "retdec/common` -> `#include "backend/retdec-llvmir2hll/common`
+    把`#include "retdec/utils` -> `#include "backend/retdec-llvmir2hll/utils`
+
+    增加cmake里面的源码
+    ` find common/ utils/ retdec-config/ serdes/ retdec-utils/ -name "*.cpp" `
+- 发现使用了common里面的东西，把common目录也复制过来
 

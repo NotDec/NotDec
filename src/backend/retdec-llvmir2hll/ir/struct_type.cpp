@@ -6,11 +6,11 @@
 
 #include <cstdint>
 
-#include "retdec/llvmir2hll/ir/const_int.h"
-#include "retdec/llvmir2hll/ir/struct_type.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/visitor.h"
-#include "retdec/utils/conversion.h"
+#include "backend/retdec-llvmir2hll/ir/const_int.h"
+#include "backend/retdec-llvmir2hll/ir/struct_type.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/visitor.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"
 
 namespace retdec {
 namespace llvmir2hll {

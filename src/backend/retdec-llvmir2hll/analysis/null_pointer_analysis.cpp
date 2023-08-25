@@ -4,12 +4,12 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/analysis/null_pointer_analysis.h"
-#include "retdec/llvmir2hll/ir/const_null_pointer.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/global_var_def.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/analysis/null_pointer_analysis.h"
+#include "backend/retdec-llvmir2hll/ir/const_null_pointer.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/global_var_def.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

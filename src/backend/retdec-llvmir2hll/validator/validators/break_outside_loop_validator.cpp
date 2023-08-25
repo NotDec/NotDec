@@ -5,13 +5,13 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/break_stmt.h"
-#include "retdec/llvmir2hll/ir/continue_stmt.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/utils/ir.h"
-#include "retdec/llvmir2hll/validator/validator_factory.h"
-#include "retdec/llvmir2hll/validator/validators/break_outside_loop_validator.h"
+#include "backend/retdec-llvmir2hll/ir/break_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/continue_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/validator/validator_factory.h"
+#include "backend/retdec-llvmir2hll/validator/validators/break_outside_loop_validator.h"
 
 namespace retdec {
 namespace llvmir2hll {

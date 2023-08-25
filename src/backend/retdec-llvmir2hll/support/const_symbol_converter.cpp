@@ -7,20 +7,20 @@
 #include <optional>
 #include <vector>
 
-#include "retdec/llvmir2hll/ir/bit_or_op_expr.h"
-#include "retdec/llvmir2hll/ir/call_expr.h"
-#include "retdec/llvmir2hll/ir/const_int.h"
-#include "retdec/llvmir2hll/ir/const_null_pointer.h"
-#include "retdec/llvmir2hll/ir/const_symbol.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/int_type.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/semantics/semantics.h"
-#include "retdec/llvmir2hll/support/const_symbol_converter.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/types.h"
-#include "retdec/llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/ir/bit_or_op_expr.h"
+#include "backend/retdec-llvmir2hll/ir/call_expr.h"
+#include "backend/retdec-llvmir2hll/ir/const_int.h"
+#include "backend/retdec-llvmir2hll/ir/const_null_pointer.h"
+#include "backend/retdec-llvmir2hll/ir/const_symbol.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/int_type.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics.h"
+#include "backend/retdec-llvmir2hll/support/const_symbol_converter.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/types.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
 
 namespace retdec {
 namespace llvmir2hll {

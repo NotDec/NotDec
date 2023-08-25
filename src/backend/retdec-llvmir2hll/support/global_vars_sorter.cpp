@@ -7,14 +7,14 @@
 #include <algorithm>
 #include <map>
 
-#include "retdec/llvmir2hll/ir/expression.h"
-#include "retdec/llvmir2hll/ir/global_var_def.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/global_vars_sorter.h"
-#include "retdec/llvmir2hll/support/visitors/ordered_all_visitor.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/non_copyable.h"
+#include "backend/retdec-llvmir2hll/ir/expression.h"
+#include "backend/retdec-llvmir2hll/ir/global_var_def.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/global_vars_sorter.h"
+#include "backend/retdec-llvmir2hll/support/visitors/ordered_all_visitor.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/non_copyable.h"
 
 using retdec::utils::hasItem;
 

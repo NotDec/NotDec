@@ -7,12 +7,12 @@
 #include <algorithm>
 #include <set>
 
-#include "retdec/llvmir2hll/graphs/cfg/cfg.h"
-#include "retdec/llvmir2hll/ir/empty_stmt.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/conversion.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg.h"
+#include "backend/retdec-llvmir2hll/ir/empty_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"
 
 using retdec::utils::hasItem;
 using retdec::utils::removeItem;

@@ -9,10 +9,10 @@
 #include <iomanip>
 #include <sstream>
 
-#include "retdec/llvmir2hll/ir/const_string.h"
-#include "retdec/llvmir2hll/ir/string_type.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/visitor.h"
+#include "backend/retdec-llvmir2hll/ir/const_string.h"
+#include "backend/retdec-llvmir2hll/ir/string_type.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/visitor.h"
 
 namespace retdec {
 namespace llvmir2hll {

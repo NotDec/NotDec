@@ -64,3 +64,11 @@ set_target_properties(notdec-decompile
 )
 
 install(TARGETS notdec-decompile DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
+	# remove -fno-rtti
+	string(REPLACE " -fno-rtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+	add_subdirectory(backend/retdec-llvmir2hll)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+	# for retdec-llvmir2hll
+endif()

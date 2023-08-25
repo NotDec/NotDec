@@ -4,8 +4,8 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/var_name_gen/var_name_gen.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/var_name_gen/var_name_gen.h"
 
 namespace retdec {
 namespace llvmir2hll {

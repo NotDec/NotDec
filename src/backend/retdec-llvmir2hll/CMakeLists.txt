@@ -1,4 +1,26 @@
 
+include(ExternalProject)
+ExternalProject_Add(
+    rapidjson
+    PREFIX "vendor/rapidjson"
+    GIT_REPOSITORY "https://github.com/Tencent/rapidjson.git"
+    GIT_TAG dfbe1db9da455552f7a9ad5d2aea17dd9d832ac1
+    TIMEOUT 10
+    CMAKE_ARGS
+        -DRAPIDJSON_BUILD_TESTS=OFF
+        -DRAPIDJSON_BUILD_DOC=OFF
+        -DRAPIDJSON_BUILD_EXAMPLES=OFF
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    UPDATE_COMMAND ""
+	SOURCE_DIR ${CMAKE_BINARY_DIR}/rapidjson
+)
+
+# Prepare RapidJSON (RapidJSON is a header-only library)
+ExternalProject_Get_Property(rapidjson source_dir)
+set(RAPIDJSON_INCLUDE_DIR ${source_dir}/include)
+
 add_library(llvmir2hll STATIC
 	analysis/alias_analysis/alias_analyses/basic_alias_analysis.cpp
 	analysis/alias_analysis/alias_analyses/simple_alias_analysis.cpp
@@ -292,6 +314,55 @@ add_library(llvmir2hll STATIC
 	var_renamer/var_renamers/readable_var_renamer.cpp
 	var_renamer/var_renamers/simple_var_renamer.cpp
 	var_renamer/var_renamers/unified_var_renamer.cpp
+	common/calling_convention.cpp
+	common/address.cpp
+	common/class.cpp
+	common/tool_info.cpp
+	common/file_format.cpp
+	common/object.cpp
+	common/architecture.cpp
+	common/file_type.cpp
+	common/basic_block.cpp
+	common/storage.cpp
+	common/type.cpp
+	common/function.cpp
+	common/language.cpp
+	common/vtable.cpp
+	common/pattern.cpp
+	retdec-config/parameters.cpp
+	retdec-config/config.cpp
+	serdes/calling_convention.cpp
+	serdes/address.cpp
+	serdes/class.cpp
+	serdes/tool_info.cpp
+	serdes/file_format.cpp
+	serdes/object.cpp
+	serdes/architecture.cpp
+	serdes/file_type.cpp
+	serdes/basic_block.cpp
+	serdes/storage.cpp
+	serdes/type.cpp
+	serdes/function.cpp
+	serdes/language.cpp
+	serdes/vtable.cpp
+	serdes/pattern.cpp
+	serdes/std.cpp
+	retdec-utils/binary_path.cpp
+	retdec-utils/memory.cpp
+	retdec-utils/crc32.cpp
+	retdec-utils/ord_lookup.cpp
+	retdec-utils/time.cpp
+	retdec-utils/math.cpp
+	retdec-utils/conversion.cpp
+	retdec-utils/alignment.cpp
+	retdec-utils/file_io.cpp
+	retdec-utils/byte_value_storage.cpp
+	retdec-utils/system.cpp
+	retdec-utils/dynamic_buffer.cpp
+	retdec-utils/io/logger.cpp
+	retdec-utils/io/log.cpp
+	retdec-utils/version.cpp
+	retdec-utils/string.cpp
 	llvmir2hll.cpp
 )
 add_library(retdec::llvmir2hll ALIAS llvmir2hll)
@@ -300,8 +371,7 @@ target_compile_features(llvmir2hll PUBLIC cxx_std_17)
 
 target_include_directories(llvmir2hll
 	PUBLIC
-		$<BUILD_INTERFACE:${RETDEC_INCLUDE_DIR}>
-		$<INSTALL_INTERFACE:${RETDEC_INSTALL_INCLUDE_DIR}>
+	${RAPIDJSON_INCLUDE_DIR}
 )
 
 # target_link_libraries(llvmir2hll
@@ -320,6 +390,11 @@ target_include_directories(llvmir2hll
 if(MSVC)
 	target_compile_options(llvmir2hll PUBLIC "/bigobj")
 endif()
+
+target_compile_options(llvmir2hll PRIVATE 
+	"-frtti"
+	"-DRAPIDJSON_HAS_CXX11_RVALUE_REFS=1"
+	"-DRAPIDJSON_HAS_STDSTRING=1")
 
 set_target_properties(llvmir2hll
 	PROPERTIES

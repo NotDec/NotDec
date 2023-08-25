@@ -4,11 +4,11 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/expression.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/ir/while_loop_stmt.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/visitor.h"
+#include "backend/retdec-llvmir2hll/ir/expression.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/ir/while_loop_stmt.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/visitor.h"
 
 namespace retdec {
 namespace llvmir2hll {

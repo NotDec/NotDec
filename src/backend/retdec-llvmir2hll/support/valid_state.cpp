@@ -4,7 +4,7 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/support/valid_state.h"
+#include "backend/retdec-llvmir2hll/support/valid_state.h"
 
 namespace retdec {
 namespace llvmir2hll {

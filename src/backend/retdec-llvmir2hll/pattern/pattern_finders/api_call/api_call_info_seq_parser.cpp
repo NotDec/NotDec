@@ -9,8 +9,8 @@
 #include <cstddef>
 #include <functional>
 
-#include "retdec/llvmir2hll/pattern/pattern_finders/api_call/api_call_info_seq_parser.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/pattern/pattern_finders/api_call/api_call_info_seq_parser.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

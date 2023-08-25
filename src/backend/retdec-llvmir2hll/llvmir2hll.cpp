@@ -3,8 +3,8 @@
 #include <fstream>
 #include <memory>
 
-#include "retdec/llvmir2hll/llvmir2hll.h"
-#include "retdec/utils/io/log.h"
+#include "backend/retdec-llvmir2hll/llvmir2hll.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/io/log.h"
 
 using namespace llvm;
 using namespace retdec::utils::io;

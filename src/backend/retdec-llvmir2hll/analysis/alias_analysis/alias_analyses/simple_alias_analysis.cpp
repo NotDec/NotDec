@@ -4,17 +4,17 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/analysis/alias_analysis/alias_analyses/simple_alias_analysis.h"
-#include "retdec/llvmir2hll/analysis/alias_analysis/alias_analysis_factory.h"
-#include "retdec/llvmir2hll/ir/address_op_expr.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/global_var_def.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/pointer_type.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/analysis/alias_analysis/alias_analyses/simple_alias_analysis.h"
+#include "backend/retdec-llvmir2hll/analysis/alias_analysis/alias_analysis_factory.h"
+#include "backend/retdec-llvmir2hll/ir/address_op_expr.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/global_var_def.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/pointer_type.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::hasItem;
 

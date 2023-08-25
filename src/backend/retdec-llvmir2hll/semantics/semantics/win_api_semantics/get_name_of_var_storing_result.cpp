@@ -5,8 +5,8 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/semantics/semantics/impl_support/get_name_of_var_storing_result.h"
-#include "retdec/llvmir2hll/semantics/semantics/win_api_semantics/get_name_of_var_storing_result.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics/impl_support/get_name_of_var_storing_result.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics/win_api_semantics/get_name_of_var_storing_result.h"
 
 namespace retdec {
 namespace llvmir2hll {

@@ -4,9 +4,9 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/call_expr.h"
-#include "retdec/llvmir2hll/obtainer/calls_obtainer.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/ir/call_expr.h"
+#include "backend/retdec-llvmir2hll/obtainer/calls_obtainer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

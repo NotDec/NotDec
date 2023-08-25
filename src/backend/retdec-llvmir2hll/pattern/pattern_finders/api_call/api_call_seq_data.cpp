@@ -4,13 +4,13 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/call_expr.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/pattern/pattern_finders/api_call/api_call_seq_data.h"
-#include "retdec/llvmir2hll/pattern/patterns/stmts_pattern.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/utils/ir.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/ir/call_expr.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/pattern/pattern_finders/api_call/api_call_seq_data.h"
+#include "backend/retdec-llvmir2hll/pattern/patterns/stmts_pattern.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::addToMap;
 

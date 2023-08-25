@@ -4,7 +4,7 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/semantics/semantics/impl_support/get_c_header_file_for_func.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics/impl_support/get_c_header_file_for_func.h"
 
 namespace retdec {
 namespace llvmir2hll {

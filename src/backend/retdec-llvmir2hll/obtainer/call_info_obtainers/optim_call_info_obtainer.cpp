@@ -4,18 +4,18 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/graphs/cfg/cfg_traversals/optim_func_info_cfg_traversal.h"
-#include "retdec/llvmir2hll/graphs/cg/cg.h"
-#include "retdec/llvmir2hll/ir/call_expr.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/obtainer/call_info_obtainer_factory.h"
-#include "retdec/llvmir2hll/obtainer/call_info_obtainers/optim_call_info_obtainer.h"
-#include "retdec/utils/container.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/io/log.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_traversals/optim_func_info_cfg_traversal.h"
+#include "backend/retdec-llvmir2hll/graphs/cg/cg.h"
+#include "backend/retdec-llvmir2hll/ir/call_expr.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/obtainer/call_info_obtainer_factory.h"
+#include "backend/retdec-llvmir2hll/obtainer/call_info_obtainers/optim_call_info_obtainer.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/io/log.h"
 
 using retdec::utils::addToSet;
 using retdec::utils::hasItem;

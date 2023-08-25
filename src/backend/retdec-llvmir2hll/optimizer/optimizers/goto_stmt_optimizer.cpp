@@ -6,12 +6,12 @@
 
 #include <sstream>
 
-#include "retdec/llvmir2hll/ir/break_stmt.h"
-#include "retdec/llvmir2hll/ir/continue_stmt.h"
-#include "retdec/llvmir2hll/ir/goto_stmt.h"
-#include "retdec/llvmir2hll/ir/return_stmt.h"
-#include "retdec/llvmir2hll/optimizer/optimizers/goto_stmt_optimizer.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/ir/break_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/continue_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/goto_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/return_stmt.h"
+#include "backend/retdec-llvmir2hll/optimizer/optimizers/goto_stmt_optimizer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

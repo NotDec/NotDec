@@ -4,15 +4,15 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/call_expr.h"
-#include "retdec/llvmir2hll/ir/call_stmt.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/optimizer/optimizers/llvm_intrinsics_optimizer.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/ir/call_expr.h"
+#include "backend/retdec-llvmir2hll/ir/call_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/optimizer/optimizers/llvm_intrinsics_optimizer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 using retdec::utils::hasItem;
 using retdec::utils::startsWith;

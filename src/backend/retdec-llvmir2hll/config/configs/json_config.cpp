@@ -6,11 +6,11 @@
 
 #include <sstream>
 
-#include "retdec/llvmir2hll/config/configs/json_config.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/config/config.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/config/configs/json_config.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-config/config.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 using namespace std::string_literals;
 

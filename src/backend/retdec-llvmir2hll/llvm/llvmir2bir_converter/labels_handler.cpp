@@ -6,11 +6,11 @@
 
 #include <llvm/IR/BasicBlock.h>
 
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/llvm/llvm_support.h"
-#include "retdec/llvmir2hll/llvm/llvmir2bir_converter/labels_handler.h"
-#include "retdec/llvmir2hll/utils/string.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/llvm/llvm_support.h"
+#include "backend/retdec-llvmir2hll/llvm/llvmir2bir_converter/labels_handler.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::hasItem;
 

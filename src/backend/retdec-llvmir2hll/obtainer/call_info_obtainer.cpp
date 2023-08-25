@@ -6,16 +6,16 @@
 
 #include <cstddef>
 
-#include "retdec/llvmir2hll/analysis/value_analysis.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg_builders/non_recursive_cfg_builder.h"
-#include "retdec/llvmir2hll/ir/call_expr.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/obtainer/call_info_obtainer.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/io/log.h"
+#include "backend/retdec-llvmir2hll/analysis/value_analysis.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_builders/non_recursive_cfg_builder.h"
+#include "backend/retdec-llvmir2hll/ir/call_expr.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/obtainer/call_info_obtainer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/io/log.h"
 
 using namespace retdec::utils::io;
 using retdec::utils::hasItem;

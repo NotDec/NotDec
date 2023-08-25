@@ -5,12 +5,12 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/return_stmt.h"
-#include "retdec/llvmir2hll/ir/void_type.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/validator/validator_factory.h"
-#include "retdec/llvmir2hll/validator/validators/return_validator.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/return_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/void_type.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/validator/validator_factory.h"
+#include "backend/retdec-llvmir2hll/validator/validators/return_validator.h"
 
 namespace retdec {
 namespace llvmir2hll {

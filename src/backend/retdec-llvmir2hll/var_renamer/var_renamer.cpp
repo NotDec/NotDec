@@ -6,18 +6,18 @@
 
 #include <cctype>
 
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/global_var_def.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/types.h"
-#include "retdec/llvmir2hll/utils/ir.h"
-#include "retdec/llvmir2hll/utils/string.h"
-#include "retdec/llvmir2hll/var_renamer/var_renamer.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/conversion.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/global_var_def.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/types.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
+#include "backend/retdec-llvmir2hll/var_renamer/var_renamer.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"
 
 using retdec::utils::hasItem;
 using retdec::utils::mapGetValueOrDefault;

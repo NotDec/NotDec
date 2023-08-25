@@ -4,11 +4,11 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/semantics/semantics/compound_semantics.h"
-#include "retdec/llvmir2hll/semantics/semantics/compound_semantics_builder.h"
-#include "retdec/llvmir2hll/semantics/semantics_factory.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/io/log.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics/compound_semantics.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics/compound_semantics_builder.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics_factory.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/io/log.h"
 
 using namespace retdec::utils::io;
 

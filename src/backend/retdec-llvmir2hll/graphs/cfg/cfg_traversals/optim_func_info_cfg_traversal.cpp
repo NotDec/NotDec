@@ -4,20 +4,20 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/analysis/value_analysis.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg_traversals/optim_func_info_cfg_traversal.h"
-#include "retdec/llvmir2hll/graphs/cg/cg.h"
-#include "retdec/llvmir2hll/ir/assign_stmt.h"
-#include "retdec/llvmir2hll/ir/constant.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/global_var_def.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/return_stmt.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/utils/ir.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/analysis/value_analysis.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_traversals/optim_func_info_cfg_traversal.h"
+#include "backend/retdec-llvmir2hll/graphs/cg/cg.h"
+#include "backend/retdec-llvmir2hll/ir/assign_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/constant.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/global_var_def.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/return_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::addToSet;
 using retdec::utils::hasItem;

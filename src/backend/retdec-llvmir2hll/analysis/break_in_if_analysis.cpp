@@ -4,12 +4,12 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/analysis/break_in_if_analysis.h"
-#include "retdec/llvmir2hll/ir/break_stmt.h"
-#include "retdec/llvmir2hll/ir/goto_stmt.h"
-#include "retdec/llvmir2hll/ir/if_stmt.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/analysis/break_in_if_analysis.h"
+#include "backend/retdec-llvmir2hll/ir/break_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/goto_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/if_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

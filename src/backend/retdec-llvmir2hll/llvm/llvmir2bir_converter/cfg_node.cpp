@@ -7,10 +7,10 @@
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Instructions.h>
 
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/llvm/llvmir2bir_converter/cfg_node.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/llvm/llvmir2bir_converter/cfg_node.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::hasItem;
 

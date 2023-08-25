@@ -4,21 +4,21 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/assign_stmt.h"
-#include "retdec/llvmir2hll/ir/break_stmt.h"
-#include "retdec/llvmir2hll/ir/const_bool.h"
-#include "retdec/llvmir2hll/ir/empty_stmt.h"
-#include "retdec/llvmir2hll/ir/expression.h"
-#include "retdec/llvmir2hll/ir/if_stmt.h"
-#include "retdec/llvmir2hll/ir/not_op_expr.h"
-#include "retdec/llvmir2hll/ir/return_stmt.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/ir/while_loop_stmt.h"
-#include "retdec/llvmir2hll/optimizer/optimizers/while_true_to_while_cond_optimizer.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/expression_negater.h"
-#include "retdec/llvmir2hll/utils/ir.h"
-#include "retdec/llvmir2hll/utils/loop_optimizer.h"
+#include "backend/retdec-llvmir2hll/ir/assign_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/break_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/const_bool.h"
+#include "backend/retdec-llvmir2hll/ir/empty_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/expression.h"
+#include "backend/retdec-llvmir2hll/ir/if_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/not_op_expr.h"
+#include "backend/retdec-llvmir2hll/ir/return_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/ir/while_loop_stmt.h"
+#include "backend/retdec-llvmir2hll/optimizer/optimizers/while_true_to_while_cond_optimizer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/expression_negater.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/utils/loop_optimizer.h"
 
 namespace retdec {
 namespace llvmir2hll {

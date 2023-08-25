@@ -6,19 +6,19 @@
 
 #include <optional>
 
-#include "retdec/llvmir2hll/analysis/goto_target_analysis.h"
-#include "retdec/llvmir2hll/evaluator/arithm_expr_evaluator.h"
-#include "retdec/llvmir2hll/ir/break_stmt.h"
-#include "retdec/llvmir2hll/ir/const_float.h"
-#include "retdec/llvmir2hll/ir/const_int.h"
-#include "retdec/llvmir2hll/ir/continue_stmt.h"
-#include "retdec/llvmir2hll/ir/for_loop_stmt.h"
-#include "retdec/llvmir2hll/ir/return_stmt.h"
-#include "retdec/llvmir2hll/ir/switch_stmt.h"
-#include "retdec/llvmir2hll/ir/value.h"
-#include "retdec/llvmir2hll/ir/while_loop_stmt.h"
-#include "retdec/llvmir2hll/optimizer/optimizers/dead_code_optimizer.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/analysis/goto_target_analysis.h"
+#include "backend/retdec-llvmir2hll/evaluator/arithm_expr_evaluator.h"
+#include "backend/retdec-llvmir2hll/ir/break_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/const_float.h"
+#include "backend/retdec-llvmir2hll/ir/const_int.h"
+#include "backend/retdec-llvmir2hll/ir/continue_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/for_loop_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/return_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/switch_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/value.h"
+#include "backend/retdec-llvmir2hll/ir/while_loop_stmt.h"
+#include "backend/retdec-llvmir2hll/optimizer/optimizers/dead_code_optimizer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

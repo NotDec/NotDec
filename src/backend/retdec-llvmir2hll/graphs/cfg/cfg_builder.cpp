@@ -4,9 +4,9 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/graphs/cfg/cfg.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg_builder.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_builder.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

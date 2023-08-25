@@ -6,9 +6,9 @@
 
 #include <string>
 
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/pattern/pattern_finder_runners/cli_pattern_finder_runner.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/pattern/pattern_finder_runners/cli_pattern_finder_runner.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 using namespace retdec::utils::io;
 

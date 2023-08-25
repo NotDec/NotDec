@@ -7,18 +7,18 @@
 #include <algorithm>
 #include <optional>
 
-#include "retdec/llvmir2hll/config/config.h"
-#include "retdec/llvmir2hll/ir/empty_stmt.h"
-#include "retdec/llvmir2hll/ir/expression.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/global_var_def.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/ir/variable.h"
-#include "retdec/llvmir2hll/semantics/semantics.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/config/config.h"
+#include "backend/retdec-llvmir2hll/ir/empty_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/expression.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/global_var_def.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/ir/variable.h"
+#include "backend/retdec-llvmir2hll/semantics/semantics.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 using retdec::utils::FilterIterator;
 using retdec::utils::filterTo;

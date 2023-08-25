@@ -4,13 +4,13 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/ir/add_op_expr.h"
-#include "retdec/llvmir2hll/ir/const_float.h"
-#include "retdec/llvmir2hll/ir/const_int.h"
-#include "retdec/llvmir2hll/ir/expression.h"
-#include "retdec/llvmir2hll/ir/sub_op_expr.h"
-#include "retdec/llvmir2hll/optimizer/optimizers/simplify_arithm_expr/sub_optimizer.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/ir/add_op_expr.h"
+#include "backend/retdec-llvmir2hll/ir/const_float.h"
+#include "backend/retdec-llvmir2hll/ir/const_int.h"
+#include "backend/retdec-llvmir2hll/ir/expression.h"
+#include "backend/retdec-llvmir2hll/ir/sub_op_expr.h"
+#include "backend/retdec-llvmir2hll/optimizer/optimizers/simplify_arithm_expr/sub_optimizer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

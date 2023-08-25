@@ -7,17 +7,17 @@
 #include <algorithm>
 #include <queue>
 
-#include "retdec/llvmir2hll/graphs/cfg/cfg.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg_writer_factory.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg_writers/graphviz_cfg_writer.h"
-#include "retdec/llvmir2hll/ir/expression.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/utils/graphviz.h"
-#include "retdec/utils/container.h"
-#include "retdec/utils/conversion.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_writer_factory.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_writers/graphviz_cfg_writer.h"
+#include "backend/retdec-llvmir2hll/ir/expression.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/utils/graphviz.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 using retdec::utils::hasItem;
 using retdec::utils::replaceCharsWithStrings;

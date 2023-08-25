@@ -4,14 +4,14 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/analysis/value_analysis.h"
-#include "retdec/llvmir2hll/ir/empty_stmt.h"
-#include "retdec/llvmir2hll/ir/ufor_loop_stmt.h"
-#include "retdec/llvmir2hll/ir/while_loop_stmt.h"
-#include "retdec/llvmir2hll/optimizer/optimizers/while_true_to_ufor_loop_optimizer.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/utils/ir.h"
-#include "retdec/llvmir2hll/utils/loop_optimizer.h"
+#include "backend/retdec-llvmir2hll/analysis/value_analysis.h"
+#include "backend/retdec-llvmir2hll/ir/empty_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/ufor_loop_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/while_loop_stmt.h"
+#include "backend/retdec-llvmir2hll/optimizer/optimizers/while_true_to_ufor_loop_optimizer.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/utils/loop_optimizer.h"
 
 namespace retdec {
 namespace llvmir2hll {

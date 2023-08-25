@@ -4,17 +4,17 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/analysis/goto_target_analysis.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg_builders/non_recursive_cfg_builder.h"
-#include "retdec/llvmir2hll/ir/empty_stmt.h"
-#include "retdec/llvmir2hll/ir/function.h"
-#include "retdec/llvmir2hll/ir/module.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/unreachable_code_in_cfg_remover.h"
-#include "retdec/llvmir2hll/utils/ir.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/analysis/goto_target_analysis.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_builders/non_recursive_cfg_builder.h"
+#include "backend/retdec-llvmir2hll/ir/empty_stmt.h"
+#include "backend/retdec-llvmir2hll/ir/function.h"
+#include "backend/retdec-llvmir2hll/ir/module.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/unreachable_code_in_cfg_remover.h"
+#include "backend/retdec-llvmir2hll/utils/ir.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::hasItem;
 

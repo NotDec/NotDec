@@ -6,11 +6,11 @@
 
 #include <llvm/ADT/SmallVector.h>
 
-#include "retdec/llvmir2hll/ir/const_float.h"
-#include "retdec/llvmir2hll/ir/float_type.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/visitor.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/ir/const_float.h"
+#include "backend/retdec-llvmir2hll/ir/float_type.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/visitor.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 using retdec::utils::startsWith;
 using retdec::utils::toLower;

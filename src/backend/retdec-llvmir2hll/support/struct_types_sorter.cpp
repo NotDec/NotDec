@@ -6,11 +6,11 @@
 
 #include <algorithm>
 
-#include "retdec/llvmir2hll/ir/array_type.h"
-#include "retdec/llvmir2hll/ir/struct_type.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/support/struct_types_sorter.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/ir/array_type.h"
+#include "backend/retdec-llvmir2hll/ir/struct_type.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/support/struct_types_sorter.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::hasItem;
 

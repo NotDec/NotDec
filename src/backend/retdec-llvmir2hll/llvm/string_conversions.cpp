@@ -10,9 +10,9 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/GlobalVariable.h>
 
-#include "retdec/llvmir2hll/ir/const_string.h"
-#include "retdec/llvmir2hll/llvm/string_conversions.h"
-#include "retdec/llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/ir/const_string.h"
+#include "backend/retdec-llvmir2hll/llvm/string_conversions.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
 
 namespace retdec {
 namespace llvmir2hll {

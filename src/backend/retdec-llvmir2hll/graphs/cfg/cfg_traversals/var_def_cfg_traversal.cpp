@@ -4,11 +4,11 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/analysis/value_analysis.h"
-#include "retdec/llvmir2hll/graphs/cfg/cfg_traversals/var_def_cfg_traversal.h"
-#include "retdec/llvmir2hll/ir/statement.h"
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/utils/container.h"
+#include "backend/retdec-llvmir2hll/analysis/value_analysis.h"
+#include "backend/retdec-llvmir2hll/graphs/cfg/cfg_traversals/var_def_cfg_traversal.h"
+#include "backend/retdec-llvmir2hll/ir/statement.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::shareSomeItem;
 

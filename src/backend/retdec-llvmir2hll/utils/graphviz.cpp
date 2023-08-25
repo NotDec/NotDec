@@ -6,10 +6,10 @@
 
 #include <cctype>
 
-#include "retdec/llvmir2hll/support/debug.h"
-#include "retdec/llvmir2hll/utils/graphviz.h"
-#include "retdec/utils/conversion.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/support/debug.h"
+#include "backend/retdec-llvmir2hll/utils/graphviz.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 using namespace std::string_literals;
 

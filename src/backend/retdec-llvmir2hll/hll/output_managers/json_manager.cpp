@@ -4,8 +4,8 @@
 * @copyright (c) 2019 Avast Software, licensed under the MIT license
 */
 
-#include "retdec/llvmir2hll/hll/output_managers/json_manager.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/hll/output_managers/json_manager.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 namespace retdec {
 namespace llvmir2hll {
