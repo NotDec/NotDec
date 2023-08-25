@@ -193,7 +193,7 @@ void DecompileConfig::find_special_gv() {
 1.加载栈指针存在局部变量读出再加减的情况 所以在去除局部变量后进行
 2.wasm中不一定存在global.set 全局栈指针
 */
-void DecompileConfig::find_stack_ptr(BasicBlock& BB) {
+void find_stack_ptr(BasicBlock& BB) {
   BasicBlock& enrtyBlock = BB.isEntryBlock() ? BB : BB.getParent()->getEntryBlock();
   Instruction* sp = nullptr; 
   for (Instruction& I : enrtyBlock) {
@@ -219,7 +219,7 @@ void DecompileConfig::find_stack_ptr(BasicBlock& BB) {
     errs() << "find stackPtr LoadInst"<< *sp << "\n";
 }
 
-void DecompileConfig::find_stack_ptr(Function& f){
+void find_stack_ptr(Function& f){
     if(!f.empty())
       find_stack_ptr(f.getEntryBlock());
 }

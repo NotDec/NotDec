@@ -38,13 +38,13 @@ struct DecompileConfig {
     llvm::GlobalVariable* sp = nullptr;
     llvm::GlobalVariable* mem = nullptr;
 
-    void find_special_gv();
-    void find_stack_ptr(BasicBlock& BB);
-    void find_stack_ptr(Function& F);    
+    void find_special_gv();  
     void run_passes();
 };
 
 llvm::FunctionPassManager buildFunctionOptimizations();
+void find_stack_ptr(BasicBlock& BB);
+void find_stack_ptr(Function& F);  
 
 }
 
