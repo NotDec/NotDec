@@ -9,6 +9,8 @@
 #include "optimizers/opt-manager.h"
 #endif
 
+#include "backend/structural-analysis-ACDI.h"
+
 //https://llvm.org/docs/CommandLine.html
 static cl::opt<std::string> inputFilename("i",cl::desc("input wasm/wat file"), cl::value_desc("wasm/wat"),cl::Required);
 static cl::opt<std::string> outputFilename("o",cl::desc("Specify output filename"), cl::value_desc("output.ll"),cl::Optional);
@@ -84,6 +86,16 @@ int main(int argc, char * argv[]) {
         }
         ctx.mod.print(os, nullptr);
         std::cout << "IR dumped to " << outputFilename << std::endl;
+    } else if (outsuffix == ".c") {
+        std::error_code EC;
+        llvm::raw_fd_ostream os(outputFilename, EC);
+        if (EC) {
+            std::cerr << "Cannot open output file." << std::endl;
+            std::cerr << EC.message() << std::endl;
+            std::abort();
+        }
+        printModule(ctx.mod, os);
+        std::cout << "Decompile to " << outputFilename << std::endl;
     }
     
     return 0;
