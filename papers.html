@@ -177,12 +177,16 @@
 <p>很多都是借用现有的type recovery，重点去讲structure recovery。</p>
 <ul>
 <li>
-<p>【Phoenix】Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring <a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">paper link</a></p>
-<p><a href="https://users.ece.cmu.edu/~ejschwar/papers/arthesis14.pdf">Edward Schwartz's PhD thesis</a> 里面进一步介绍了Phoenix反编译器</p>
-<p>这篇论文关注控制结构的恢复。控制结构的恢复最早是基于interval analysis的（？这是什么得学一学）。后面才被细化为structural analysis</p>
+<p><a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">【Phoenix】</a> 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 <a href="https://edmcman.github.io/pres/usenix13.pptx">slides</a></p>
+<p><a href="https://edmcman.github.io/papers/arthesis14.pdf">Edward Schwartz's PhD thesis</a> 里面进一步介绍了Phoenix反编译器</p>
+<p>在reko反编译器里也有这个算法的<a href="https://github.com/uxmal/reko/blob/931ca7d4f61eb35459f65e23923914ce39d0bdf3/src/Decompiler/Structure/StructureAnalysis.cs#L1143">实现</a></p>
+<p>这篇论文关注控制结构的恢复。控制结构的恢复最早是基于interval analysis的（？这是什么得学一学）。后面才被细化为structural analysis。</p>
 </li>
 <li>
 <p><a href="https://www.ndss-symposium.org/wp-content/uploads/2017/09/11_4_2.pdf">【Dream】No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations</a> <a href="https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf">slides</a> <a href="https://github.com/USECAP/dream">code</a></p>
+</li>
+<li>
+<p><a href="https://dl.acm.org/doi/pdf/10.1145/3320269.3384766">【Rev.ng】A Comb for Decompiled C Code</a> Rev.ng他们2020年的新的反编译的结构恢复算法。</p>
 </li>
 </ul>
 <h3 id="类型恢复---type-recovery"><a class="header" href="#类型恢复---type-recovery">类型恢复 - Type Recovery</a></h3>
@@ -343,6 +347,18 @@ and Methods from Compiled Executables </p>
 <p>提及：<a href="https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf">BPA: Refining Indirect Call Targets at the Binary Level</a>这篇也值得读。用了块内存的抽象解释。</p>
 </li>
 </ul>
+<h3 id="existing-projects"><a class="header" href="#existing-projects">Existing projects</a></h3>
+<ul>
+<li>
+<p><a href="https://github.com/uxmal/reko">reko</a> A decompiler with GUI, still actively maintained.</p>
+</li>
+<li>
+<p><a href="https://github.com/decomp/decomp">decomp</a> 2020, an attempt to decompile using LLVM IR to golang. and <a href="https://github.com/decomp/decomp/issues/184">a list of other decompiler</a></p>
+</li>
+<li>
+<p><a href="https://github.com/repzret/dagger">github.com/repzret/dagger</a> 反编译到LLVM IR。aarch64还在开发过程中。<a href="https://llvm.org/devmtg/2013-04/bougacha-slides.pdf">介绍的slides</a></p>
+</li>
+</ul>
 <h3 id="其他资料网页等"><a class="header" href="#其他资料网页等">其他资料（网页等）：</a></h3>
 <ul>
 <li>
@@ -359,9 +375,6 @@ and Methods from Compiled Executables </p>
 </li>
 <li>
 <p><a href="http://www.program-transformation.org/Transform/DeCompilation">The Decompilation Wiki.</a></p>
-</li>
-<li>
-<p><a href="https://github.com/repzret/dagger">github.com/repzret/dagger</a> 反编译到LLVM IR。aarch64还在开发过程中。<a href="https://llvm.org/devmtg/2013-04/bougacha-slides.pdf">介绍的slides</a></p>
 <p>dagger主要讲的是反编译到IR上，找到语义等价的LLVM IR的指令的过程。感觉有点像编译器后端的Instruction Selection，可能能用上利用DAG（有向无环图）选择指令的技术。它是作为llvm的fork编写的，2017后就没有维护了。和llvm耦合好严重啊，都不知道哪里是它的代码。好像好复杂。</p>
 </li>
 <li>
@@ -378,6 +391,7 @@ and Methods from Compiled Executables </p>
 </li>
 </ul>
 <h2 id="领域的研究者"><a class="header" href="#领域的研究者">领域的研究者</a></h2>
+<p><a href="https://edmcman.github.io/publications/">Edward Schwartz</a></p>
 <p><a href="https://www.cse.ust.hk/~shuaiw/">Shuai Wang</a></p>
 <p><a href="https://www.cse.psu.edu/~gxt29/publications/">Gang Tan</a></p>
 <p><strong>WebAssembly</strong></p>
