@@ -28,14 +28,101 @@ Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处
 
 然而，有个PPT里面说，这种T1 T2转换，对控制流的缩减，从而对控制流划分的层次结构，不一定规范地符合真实源码里面的划分。T1 T2转换是最早的，最简单的一种interval analysis.
 
-## Structural Analysis
+## Structural Analysis For Dataflow Analysis
 
-- [反编译的结构分析](https://www.cs.tufts.edu/comp/150FP/archive/cristina-cifuentes/structuring-algorithm.pdf)
-- [《Advanced Compiler Design and Implementation》](https://www.cs.princeton.edu/courses/archive/spr04/cos598C/lectures/10-Structural.pdf) 在203页更详细地介绍了structural analysis。建议从196页的Reducibility开始阅读。（书里面的页码，不是pdf的页码）
+- [《A Structural Algorithm for Decompilation》反编译的结构分析](https://www.cs.tufts.edu/comp/150FP/archive/cristina-cifuentes/structuring-algorithm.pdf)
+    - 在CMU的lecture notes里面提到了这个paper
+- [《Advanced Compiler Design and Implementation》](https://github.com/rambhawan/Computer-Compiler-Lang/blob/master/Advanced%20Compiler%20Design%20and%20Implementation.pdf) 
+    - Phoenix论文里，提到结构分析的时候就让读者看这里。因此非常值得读一读。
+    - 在203页更详细地介绍了structural analysis。建议从196页的Reducibility开始阅读。（书里面的页码，不是pdf的页码）这些结构分析都比较老了，而且有的不太是为反编译设计的。
+
+**概述**：在编译优化方面，有研究人员发现，要是在IR（CFG）层面能够用上AST层面的信息（IF，While，For控制流结构），能够加速现有的数据流分析。然而在IR（CFG）层面，高级语言的结构信息已经丢失了。因此，有部分研究人员提出了通过模式匹配的方式，从CFG中识别出控制流结构。由此诞生了interval analysis算法，后续发展出了Structural Analysis。
+
+结构分析一般可以分为一下几个步骤：
+1. 类似interval analysis的嵌套区域划分。
+1. 将划分好的子区域进行模式匹配，匹配为高级语言的控制结构。
+
+**定义：(Maximal Interval)**：最大的，单入口子图，（假设入口节点为I）且子图中所有闭合的路径都包含I。
+
+**定义：Minimal Interval**：是指：(1) 一个natural loop，(2)一个最大的有向无环子图，(3)一个最小的不可规约区域。和maximal interval主要区别大概在于，maximal interval划分loop的时候会把连带的有向无环分支带上，而minimal interval会单独分出来。
+
+一个minimal interval和maximal interval的区别如下：左边是maximal interval的划分，右边是minimal interval的划分。
+
+![](backend/interval-example.png)
+
+**定义：Natural Loop**：Natural Loop的关键在于那个反向边，即头节点支配尾节点的边。
+
+在《A Structural Algorithm for Decompilation》里直接使用了类似T1-T2规约的方式划分interval。
+
+**Interval Analysis (maximal interval)**：该算法就是《A Structural Algorithm for Decompilation》里面用的，算法如下：
+
+![](backend/interval_analysis_algo.png)
+
+- 迭代性：该算法是一个迭代的算法，每一次迭代找出节点集合后，即使可以看作一个新的单个抽象节点，也不会产生新的节点集合包含这些本轮生成的抽象节点了，这些嵌套的情况是下一轮迭代负责的。
+- 从entry节点开始，依次类似T1 T2规约的方法（即，“看是否某节点仅有一个前驱”的拓展版，看某节点的前驱是否都在集合里）把节点加入集合中。如果结束了，就从当前集合的后继节点里抓节点出来再进行这个过程。直到所有节点都被归入了某个集合。
+- 更新H的一行，意思是：加入H的新节点，(1)不属于当前规约好的集合，(2)直接前驱在当前规约好的集合里。  （即，按顺序弄。）
+
+在《Advanced Compiler Design and Implementation》里提到这种方式划分的是Maximal Interval。书中还提出了改进版的算法，划分的是Minimal Interval，划分效果更好，更小的区域便于后续划分高级语言的控制结构。
+
+**Interval Analysis (minimal interval)**：该算法是《Advanced Compiler Design and Implementation》提出的改进版：
+1. 使用一个后序遍历找到loop header，和improper region的header。
+1. 对每个loop header构建natural loop区域。(使用支配图，判断是否有前驱节点指过来的边是反向边，即head dom tail)
+1. 对improper region的header构建minimal SCC
+    1. 构建区域之后，对（区域的）所有的直接后继节点构建最大的有向无环子图，如果成功弄出节点数量大于1的子图，就构建一个有向无环区域。
+1. 递归整个过程直到终止。
+
+可以感受到，其实是基于前一个算法，融合了把有向无环的子区域分离的想法。同时还顺便分离了有环区域中的natural loop。（但是，有一些具体的实现也还是不清楚。。）
+
 
 **背景1 深度优先遍历与逆后序遍历：** Depth First Spanning Tree 是在DFS遍历过程中生成的一个树。基本思想是，DFS遍历过程中，会出现一种情况：判断当前节点指向其他节点的一条边的时候，发现这个边指向的目标节点已经被访问过了，所以就不需要沿着这条边过去了。因此可以将边划分为遍历使用了的边，和遍历过程中没有使用的边。
 
 在深度优先遍历时，怎么才算是反向边？当然是这条边指向了已经被访问的节点。即遍历时发现指向的地方已经访问过了。也有可能出现，根据选择的子节点不同导致反向边不同的情况。比如两个子树交叉指向隔壁更高的节点。深度优先遍历的时候，走过的边属于前向边。如果某条边反过来就属于前向边，则它是反向边（和某个前向边形成2节点的小环）。剩下的边属于交叉边。
 
+**一个如何确定反向边的问题**：在《A Structural Algorithm for Decompilation》里直接使用了类似T1-T2规约的方式划分interval。后面判断是否是loop的时候提到，只需要检查interval的header的前驱指过来的边是不是反向边。而且只需要看后序遍历的顺序上的关系即可。我们这里探讨的问题是：**（检查interval header的predecessor）真的只需要看后续遍历的顺序就可以确定是否是反向边吗？**反向边的定义是，head节点支配tail节点。假如我们有个interval，有个back edge，如果想破坏这个支配关系的同时，保留后序遍历的顺序。假如根节点在DFS优先遍历左子树，我们的interval也在左子树，我们从右子树引一条边过来，这样不会影响左子树节点在后序遍历的顺序。同时我们把边指向header到tail节点的路径上，这样head就不再支配tail了。这样不就破坏了这个关系了吗？除非，这样引入的边会破坏interval的划分。确实，我们考虑那个被指向的节点，这个节点之前之所以会被归到这个interval，是因为它的所有前驱都在interval里了。这样增加的边会影响interval的划分，因此我们没能找到反例。
+
+
+**结构分析算法(《Advanced Compiler Design and Implementation》)**
+这边书中的算法是基于最早的结构分析《Structural Analysis: A New Approach to Flow Analysis in Optimizing Compilers》的改进。
+书中205页介绍的算法的大体结构如下：
+1. 使用一个DFS_Postorder算法，给每个节点标上序号。
+1. 在一系列的节点遍历中，不断辨识出新的区域，把这些区域规约成单个抽象节点（因此可能需要修复图结构，并且可能需要重新做后序遍历）。
+    1. 规约时，把进入区域的边，离开区域的边作为这个抽象节点和其他节点的边。
+1. 直到最后规约为仅一个节点。
+
+
+## Structural Analysis For Decompilation
+
+**概述**：
+
+然而，上面介绍的，为数据流分析加速设计的结构分析，用于反编译有着根本性的缺点。
+1. 仅识别了一些简单的图模式。虽然通过递归，能够识别这些模式的组合，但当出现了复杂的图的时候，会完全放弃识别。无环图被识别为Proper Region，有环图被识别为Improper Region。
+    1. 这对数据流分析算法没有影响，因为没识别出来可以按照旧的方式分析，只不过无法加速了。然而，这一点对我们反编译非常致命，直接放弃了划分。
+        1. Phoenix在usenix 2013提出了，可以将部分边转成goto，从而能够继续识别出更多的控制流结构。
+1. 本质上，稍微复杂一点的CFG，确实就不能识别控制流结构了。
+
+- [\[Phoenix\]](https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf) 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 [slides](https://edmcman.github.io/pres/usenix13.pptx)
+
+**Phoenix算法**：正如paper的3.1节所说，和结构分析很相似。
+- 
+
+
+**Interval Analysis as a pre step?**：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。这是为什么？
+
+- Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败。
+- Cyclic Region：识别natural loop。如果无法识别，还是返回失败。
+- 
+
+可以发现，如果匹配失败，总要用fallback去删边，所以详尽地划分cyclic，acyclic interval也没有意义了，反而是给自己增加了限制，限制必须在这个interval区域内匹配。直接匹配过去便是。
+
+
+**子问题：有向无环图的规约**
+- 必然存在“叶子节点”，即不指向其他节点的节点。根据这种节点的被指向情况分类
+    - 仅有一个节点指向它：类似叶子节点，可以规约成block。
+    - 有多个节点指向它：后续寻找菱形，三角形，多分叉合并继续规约。
+然而，对于任意子图，并不是都一定能规约成IF-ELSE结构，比如下面的图：
+
+![sample-graph1](backend/graph1.drawio.svg)
+
+## Structural Analysis For Decompilation
 
 

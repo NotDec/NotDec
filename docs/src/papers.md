@@ -41,11 +41,13 @@ Github的两个list：
 
 很多都是借用现有的type recovery，重点去讲structure recovery。
 
-- 【Phoenix】Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring [paper link](https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf)
+- [【Phoenix】](https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf) 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 [slides](https://edmcman.github.io/pres/usenix13.pptx)
     
-    [Edward Schwartz's PhD thesis](https://users.ece.cmu.edu/~ejschwar/papers/arthesis14.pdf) 里面进一步介绍了Phoenix反编译器
+    [Edward Schwartz's PhD thesis](https://edmcman.github.io/papers/arthesis14.pdf) 里面进一步介绍了Phoenix反编译器
     
-    这篇论文关注控制结构的恢复。控制结构的恢复最早是基于interval analysis的（？这是什么得学一学）。后面才被细化为structural analysis
+    在reko反编译器里也有这个算法的[实现](https://github.com/uxmal/reko/blob/931ca7d4f61eb35459f65e23923914ce39d0bdf3/src/Decompiler/Structure/StructureAnalysis.cs#L1143)
+
+    这篇论文关注控制结构的恢复。控制结构的恢复最早是基于interval analysis的（？这是什么得学一学）。后面才被细化为structural analysis。  
 
 - [【Dream】No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11_4_2.pdf) [slides](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf) [code](https://github.com/USECAP/dream)
 
@@ -199,6 +201,15 @@ Java反编译的几篇
     提及：[BPA: Refining Indirect Call Targets at the Binary Level](https://www.cse.psu.edu/~gxt29/papers/cfgByDatalog_NDSS21.pdf)这篇也值得读。用了块内存的抽象解释。
 
 
+### Existing projects
+
+- [reko](https://github.com/uxmal/reko) A decompiler with GUI, still actively maintained.
+
+- [decomp](https://github.com/decomp/decomp) 2020, an attempt to decompile using LLVM IR to golang. and [a list of other decompiler](https://github.com/decomp/decomp/issues/184)
+
+- [github.com/repzret/dagger](https://github.com/repzret/dagger) 反编译到LLVM IR。aarch64还在开发过程中。[介绍的slides](https://llvm.org/devmtg/2013-04/bougacha-slides.pdf)
+
+
 ### 其他资料（网页等）：
 
 - https://github.com/cmu-sei/pharos 涉及到很多反编译技术
@@ -207,7 +218,6 @@ Java反编译的几篇
 - https://github.com/toor-de-force/Ghidra-to-LLVM https://uwspace.uwaterloo.ca/bitstream/handle/10012/17976/Toor_Tejvinder.pdf?sequence=3&isAllowed=y Ghidra Pcode编译到IR。代码太简单了。。栈内存好像是alloca出来的，可能还是想保持语义想运行。
 - https://github.com/decomp/decomp 这人也想基于LLVM IR然后去优化。https://github.com/decomp/doc 相关文档 
 - [The Decompilation Wiki.](http://www.program-transformation.org/Transform/DeCompilation)
-- [github.com/repzret/dagger](https://github.com/repzret/dagger) 反编译到LLVM IR。aarch64还在开发过程中。[介绍的slides](https://llvm.org/devmtg/2013-04/bougacha-slides.pdf)
 
     dagger主要讲的是反编译到IR上，找到语义等价的LLVM IR的指令的过程。感觉有点像编译器后端的Instruction Selection，可能能用上利用DAG（有向无环图）选择指令的技术。它是作为llvm的fork编写的，2017后就没有维护了。和llvm耦合好严重啊，都不知道哪里是它的代码。好像好复杂。
 
@@ -221,6 +231,7 @@ Java反编译的几篇
 
 ## 领域的研究者
 
+[Edward Schwartz](https://edmcman.github.io/publications/)
 
 [Shuai Wang](https://www.cse.ust.hk/~shuaiw/)
 
