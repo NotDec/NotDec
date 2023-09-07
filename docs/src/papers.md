@@ -35,7 +35,7 @@ Github的两个list：
 
 ## 读论文
 
-一篇很好的综述：[Static Single Assignment for Decompilation (Boomerang)](https://yurichev.com/mirrors/vanEmmerik_ssa.pdf) 感觉可以抓住优化方面的脉络。
+反编译器中端很好的资料：[Static Single Assignment for Decompilation (Boomerang)](https://yurichev.com/mirrors/vanEmmerik_ssa.pdf) 感觉可以抓住优化方面的脉络。虽然还是有不少启发式的方法，但相比其他资料已经好了很多。SSA现在也已经是反编译器不可缺少的重要部分。
 
 ### 控制流结构恢复-structural analysis
 
@@ -208,6 +208,11 @@ Java反编译的几篇
 - [decomp](https://github.com/decomp/decomp) 2020, an attempt to decompile using LLVM IR to golang. and [a list of other decompiler](https://github.com/decomp/decomp/issues/184)
 
 - [github.com/repzret/dagger](https://github.com/repzret/dagger) 反编译到LLVM IR。aarch64还在开发过程中。[介绍的slides](https://llvm.org/devmtg/2013-04/bougacha-slides.pdf)
+
+- [avast/retdec](retdec.md)
+- [Boomerang (sourceforge)](https://boomerang.sourceforge.net/) or [BoomerangDecompiler/boomerang (github.com)](https://github.com/BoomerangDecompiler/boomerang) 
+- [yegord/snowman (github.com)](https://github.com/yegord/snowman) 
+- angr好像也有了反编译
 
 
 ### 其他资料（网页等）：

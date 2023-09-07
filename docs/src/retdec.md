@@ -1,9 +1,13 @@
 # RetDec
 
+- [retdec/publications at master · avast/retdec (github.com)](https://github.com/avast/retdec/tree/master/publications) 
+   - 综述：[Retargetable Analysis of Machine Code](http://www.fit.vutbr.cz/study/DP/PD.php?id=482&file=t) 
+
+## 代码
+
 https://zhuanlan.zhihu.com/p/509763117 有一些源码解读的内容。
 
 - retdec的4.0是最后一个包含单独的ir转c工具的版本。相关代码`src/llvmir2hlltool/CMakeLists.txt` (要先checkout到v4.0。)
-- 能否直接把ir传给
 
 ### 开发环境
 

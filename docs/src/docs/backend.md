@@ -50,7 +50,11 @@ Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处
 
 ![](backend/interval-example.png)
 
-**定义：Natural Loop**：Natural Loop的关键在于那个反向边，即头节点支配尾节点的边。
+**定义：Natural Loop**：[Natural Loop](https://web.cs.wpi.edu/~kal/PLT/PLT8.6.4.html) 背景：在编译原理里面的loop，也是希望仅有单个节点支配整个loop。我们使用支配关系寻找loop的时候，由于它是一个loop，因此必然至少有个“反向边”，不然构不成一个环。  Natural Loop的关键在于那个反向边，即头节点支配尾节点的边。
+
+一个反向边的Natural Loop，是指，最小的，包括反向边的节点集合，整个集合的前驱仅有entry节点，没有其他节点。（即，natural loop严格说并不是一个单独的概念，反而是对一条反向边而言的。）
+
+当你移除那个entry节点的时候，因为entry节点支配其他节点，图就被分裂成了两部分。此时寻找所有有路径到达t的节点（t这里指反向边的源节点），这些节点和entry节点构成了natural loop。
 
 在《A Structural Algorithm for Decompilation》里直接使用了类似T1-T2规约的方式划分interval。
 
@@ -58,9 +62,9 @@ Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处
 
 ![](backend/interval_analysis_algo.png)
 
-- 迭代性：该算法是一个迭代的算法，每一次迭代找出节点集合后，即使可以看作一个新的单个抽象节点，也不会产生新的节点集合包含这些本轮生成的抽象节点了，这些嵌套的情况是下一轮迭代负责的。
+- 迭代性：该算法是一个迭代的算法，每一次迭代找出节点集合后，即使可以看作一个新的单个抽象节点，也不会产生新的节点集合包含这些本轮生成的抽象节点了，这些嵌套的情况是下一轮迭代负责的。（图片里的算法不包含这个迭代，迭代在另外一个没截图的算法里）
 - 从entry节点开始，依次类似T1 T2规约的方法（即，“看是否某节点仅有一个前驱”的拓展版，看某节点的前驱是否都在集合里）把节点加入集合中。如果结束了，就从当前集合的后继节点里抓节点出来再进行这个过程。直到所有节点都被归入了某个集合。
-- 更新H的一行，意思是：加入H的新节点，(1)不属于当前规约好的集合，(2)直接前驱在当前规约好的集合里。  （即，按顺序弄。）
+- 更新H的那一行代码的意思是：加入H的新节点，(1)不属于当前规约好的集合，(2)直接前驱在当前规约好的集合里。 （即，按顺序弄。）
 
 在《Advanced Compiler Design and Implementation》里提到这种方式划分的是Maximal Interval。书中还提出了改进版的算法，划分的是Minimal Interval，划分效果更好，更小的区域便于后续划分高级语言的控制结构。
 
@@ -100,20 +104,62 @@ Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处
         1. Phoenix在usenix 2013提出了，可以将部分边转成goto，从而能够继续识别出更多的控制流结构。
 1. 本质上，稍微复杂一点的CFG，确实就不能识别控制流结构了。
 
+### SESS
+
+**Single entry single successor (SESS)**分析
+
+来自《Enhanced Structural Analysis for C Code Reconstruction from IR Code》论文中的3.3节。（论文中3.1、3.2回顾了一下什么是结构分析）。
+
+背景：结构分析其实没有考虑break，continue等跳转指令。带有这些跳出语句的，也可能被归类为proper/improper region。
+
+定义：假设有一个CFG，内部划分了SESS区域R，唯一的entry节点是r，successor节点是s，则有以下性质：
+
+![SESS region](backend/SESS-region.png)
+
+SESS区域：entry r属于region，successor s不属于区域内（看作区域的线性后继块）。
+- 对于（整个图的）任意边，如果source属于区域内
+  - 要么target属于区域内，区域内部边
+  - 要么target等于successor节点
+- 如果source不属于区域内
+  - 要么target是entry节点（进入）
+  - 要么target不属于区域内（区域外部边）
+
+有哪些边被否认了？区域内部到区域外部的，不经过entry和exit的边。
+
+**Tail Region**：文中提出了Tail Region的概念。一个break语句的基本块，原本是跳走的，但是识别成tail region之后，就假装没有那个边。
+
+一些其他点：
+- 论文中提到有这些性质的区域可以直接输出为C语言代码。因此SESS算法的目的是让SESS区域覆盖尽可能多的边。
+- 在原有匹配cyclic region，acyclic region之后，如果匹配失败，就尝试匹配tail region。这里在Phoenix里面提到，这篇论文里没有写清楚具体的匹配算法。而且他们发现，经常确实也匹配不到这种tail region，如果图太复杂还是会失败。
+- 关于论文没有说清楚的其他点，首先是怎么识别SESS region吧，可能是在原有的划分region基础上再做些判断。其次是怎么识别tail region的跳走的边。可能是识别region的基础上，看边是不是跳到head和tail的吧。
+
+###  Phoenix
+
 - [\[Phoenix\]](https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf) 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 [slides](https://edmcman.github.io/pres/usenix13.pptx)
 
-**Phoenix算法**：正如paper的3.1节所说，和结构分析很相似。
-- 
+paper的3.1节介绍了算法框架，和结构分析很相似。
+- 使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
+    - 如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过
+    - 如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过
+        - 
+    - 如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
+        - 优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。
+        - 优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？
 
+具体应该选择哪些边移除？确实是一个值得思考的问题。
 
-**Interval Analysis as a pre step?**：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。这是为什么？
+**算法的输入输出：**：输入当然是CFG。如何规划输出的格式？
 
-- Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败。
-- Cyclic Region：识别natural loop。如果无法识别，还是返回失败。
-- 
+TODO
 
-可以发现，如果匹配失败，总要用fallback去删边，所以详尽地划分cyclic，acyclic interval也没有意义了，反而是给自己增加了限制，限制必须在这个interval区域内匹配。直接匹配过去便是。
+**Interval Analysis as a pre step?**：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？
 
+- Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败（归类为proper region）。
+- Cyclic Region：识别natural loop。如果无法识别，还是返回失败(归类为improper region)。
+
+可以发现，如果匹配失败，总要用fallback去删边，所以详尽地划分cyclic，acyclic interval也没有意义了，反而是给自己增加了限制，限制必须在这个interval区域内匹配。我们只需要直接匹配过去便是，不必太在于具体是什么region。
+
+natural loop，如果才能
 
 **子问题：有向无环图的规约**
 - 必然存在“叶子节点”，即不指向其他节点的节点。根据这种节点的被指向情况分类
@@ -123,6 +169,13 @@ Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处
 
 ![sample-graph1](backend/graph1.drawio.svg)
 
-## Structural Analysis For Decompilation
+
+### Dream
+
+- [Dream](https://net.cs.uni-bonn.de/fileadmin/ag/martini/Staff/yakdan/dream_ndss2015.pdf):《No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations》 [slides](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf)
+- [fcd decompiler](https://github.com/fay59/fcd) and its blog posts (404 now, find content in web archive)
+    - [http://zneak.github.io/fcd/2016/02/24/seseloop.html](http://web.archive.org/web/20210924232738/http://zneak.github.io/fcd/2016/02/24/seseloop.html)
+    - http://zneak.github.io/fcd/2016/02/17/structuring.html
+    - http://zneak.github.io/fcd/2016/02/21/csaw-wyvern.html
 
 

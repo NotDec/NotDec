@@ -29,6 +29,7 @@
 
 相关的C/C++代码主要在 Ghidra/Features/Decompiler/src/decompile.cpp下。docmain.hh和 doccore.hh两个文件可以先看，或者先build doc出来，生成的doc在`../doc`目录（Ghidra/Features/Decompiler/src/decompile/doc/html/index.html）
 
+Ghidra-sleigh的[ghidra/docmain.hh](https://github.com/NationalSecurityAgency/ghidra/blob/master/Ghidra/Features/Decompiler/src/decompile/cpp/docmain.hh) 里有很多文档，看代码前构建doxygen看文档。
 
 根据这里https://daniao.ws/notes/quick-tips/build-ghidra 下载并编译Ghidra。生成各种中间文件
 
