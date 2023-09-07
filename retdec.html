@@ -145,10 +145,17 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="retdec"><a class="header" href="#retdec">RetDec</a></h1>
+<ul>
+<li><a href="https://github.com/avast/retdec/tree/master/publications">retdec/publications at master · avast/retdec (github.com)</a> 
+<ul>
+<li>综述：<a href="http://www.fit.vutbr.cz/study/DP/PD.php?id=482&amp;file=t">Retargetable Analysis of Machine Code</a> </li>
+</ul>
+</li>
+</ul>
+<h2 id="代码"><a class="header" href="#代码">代码</a></h2>
 <p>https://zhuanlan.zhihu.com/p/509763117 有一些源码解读的内容。</p>
 <ul>
 <li>retdec的4.0是最后一个包含单独的ir转c工具的版本。相关代码<code>src/llvmir2hlltool/CMakeLists.txt</code> (要先checkout到v4.0。)</li>
-<li>能否直接把ir传给</li>
 </ul>
 <h3 id="开发环境"><a class="header" href="#开发环境">开发环境</a></h3>
 <p>在cmake配置里增加&quot;-DCMAKE_INSTALL_PREFIX=/home/xx/retdec/build/retdec-install&quot;，然后直接使用cmake插件，目标选择install。（因为retdec-decompile工具需要找到decompiler-config.json文件，因此需要安装）</p>

@@ -172,6 +172,7 @@
 </ul>
 <h3 id="ghidra-sleigh-调试环境搭建"><a class="header" href="#ghidra-sleigh-调试环境搭建">Ghidra-sleigh 调试环境搭建</a></h3>
 <p>相关的C/C++代码主要在 Ghidra/Features/Decompiler/src/decompile.cpp下。docmain.hh和 doccore.hh两个文件可以先看，或者先build doc出来，生成的doc在<code>../doc</code>目录（Ghidra/Features/Decompiler/src/decompile/doc/html/index.html）</p>
+<p>Ghidra-sleigh的<a href="https://github.com/NationalSecurityAgency/ghidra/blob/master/Ghidra/Features/Decompiler/src/decompile/cpp/docmain.hh">ghidra/docmain.hh</a> 里有很多文档，看代码前构建doxygen看文档。</p>
 <p>根据这里https://daniao.ws/notes/quick-tips/build-ghidra 下载并编译Ghidra。生成各种中间文件</p>
 <pre><code class="language-Bash">sudo apt install openjdk-17-jdk-headless unzip --no-install-recommends
 wget -c https://services.gradle.org/distributions/gradle-8.1.1-bin.zip -P /tmp
