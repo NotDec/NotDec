@@ -1,0 +1,34 @@
+.type tid <: unsigned
+.type vid <: unsigned
+
+// LLVM types
+.decl BaseType(id: tid, name: symbol) // void int float pointer vector struct
+.decl PointerType(id: tid, basetid: tid)
+.decl ArrayType(id: tid, basetid: tid, elemcount: unsigned)
+.decl VectorType(id: tid, basetid: tid, elemcount: unsigned)
+.decl StructType(id: tid, str: symbol)
+.decl LabelType(id: tid)
+
+.decl IntConstant(id: vid, type: tid, value: unsigned)
+.decl FloatConstant(id: vid, type: tid, value: symbol)
+.decl PointerConstant(id: vid, type: tid, value: symbol) // null
+.decl StructConstant(id: vid, type: tid, value: symbol)
+.decl VectorConstant(id: vid, type: tid, value: symbol)
+
+// relation between value and its type
+.decl ValueType(id: tid, type: tid)
+
+// global variables
+.decl GlobalVariable(id: vid, name: symbol)
+.decl GlobalVarAttr(id: vid, isconst: unsigned, linkage: symbol, visibility: unsigned)
+
+// func value type is return type
+.decl Func(id: vid, name: symbol)
+.decl FuncAttr(id: vid, linkage: symbol, visibility: unsigned)
+.decl FuncArgument(id: vid, func: vid, idx: unsigned, name: symbol)
+
+.decl BlockLabel(id: vid, name: symbol)
+.decl Instruction(id: vid, block: vid, opcode: symbol)
+
+
+.input Global Func Block Instruction

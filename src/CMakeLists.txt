@@ -72,3 +72,7 @@ if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 	# for retdec-llvmir2hll
 endif()
+
+if(NOTDEC_ENABLE_DATALOG)
+	add_subdirectory(datalog)
+endif()

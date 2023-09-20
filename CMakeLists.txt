@@ -111,7 +111,8 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 #===============================================================================
 
 option(NOTDEC_ENABLE_WASM "Enable wasm decompilation support." ON)
-option(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL "Enable retdec llvmir2hll." ON)
+option(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL "Enable retdec llvmir2hll." OFF)
+option(NOTDEC_ENABLE_DATALOG "Enable datalog generator." ON)
 
 if (NOTDEC_ENABLE_WASM)
 	include(ExternalProject)

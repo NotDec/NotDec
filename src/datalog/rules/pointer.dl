@@ -1,0 +1,6 @@
+
+// 初始会输入一些指针信息
+.decl isPointer(val: vid)
+
+isPointer(X) :- isPointer(Y), Add.
+
