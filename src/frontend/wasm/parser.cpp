@@ -97,6 +97,18 @@ void Context::visitModule() {
     // global can be in both Global list and import section.
     std::set<Global*> visitedGlobals;
 
+    // TODO detect wabt memory64 extension
+    // funcrefs and externrefs have address space 10, 20 in LLVM Webassembly IR datalayout
+    // target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
+    // e little endian
+    // m:e mangling elf
+    // p:32:32 32bit pointer.
+    // S128 Stack natural alignment 128bit
+
+    // target triple = "wasm32-unknown-wasi"
+    llvmModule.setDataLayout("e-m:e-p:32:32-i64:64-n32:64-S128");
+    llvmModule.setTargetTriple("wasm32-unknown-wasi");
+
     // change module name from file name to wasm module name if there is
     if (!module->name.empty()) {
         llvmModule.setModuleIdentifier(module->name);
