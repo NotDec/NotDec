@@ -86,17 +86,18 @@ int main(int argc, char * argv[]) {
         }
         ctx.mod.print(os, nullptr);
         std::cout << "IR dumped to " << outputFilename << std::endl;
-    } else if (outsuffix == ".c") {
-        std::error_code EC;
-        llvm::raw_fd_ostream os(outputFilename, EC);
-        if (EC) {
-            std::cerr << "Cannot open output file." << std::endl;
-            std::cerr << EC.message() << std::endl;
-            std::abort();
-        }
-        printModule(ctx.mod, os);
-        std::cout << "Decompile to " << outputFilename << std::endl;
     }
-    
+    // else if (outsuffix == ".c") {
+    //     std::error_code EC;
+    //     llvm::raw_fd_ostream os(outputFilename, EC);
+    //     if (EC) {
+    //         std::cerr << "Cannot open output file." << std::endl;
+    //         std::cerr << EC.message() << std::endl;
+    //         std::abort();
+    //     }
+    //     printModule(ctx.mod, os);
+    //     std::cout << "Decompile to " << outputFilename << std::endl;
+    // }
+
     return 0;
 }
