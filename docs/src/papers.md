@@ -55,6 +55,8 @@ Github的两个list：
 
 ### 类型恢复 - Type Recovery
 
+
+
 - [【TIE】Principled Reverse Engineering of Types in Binary Programs.](http://users.ece.cmu.edu/~aavgerin/papers/tie-ndss-2011.pdf) 这篇基于VSA搞了自己的DVSA，主要区别是StridedInterval里可以放除esp外的变量符号？。重点主要在后面的约束求解部分。后面的类型系统和求解部分也非常复杂TODO。
 
 - 【DIVINE】: DIscovering Variables IN Executables 这篇还是VSA系列的那些人写的。讲先用最简单的semi naive方法鉴别变量，跑VSA，然后拿VSA结果去生成约束跑ASI。迭代几次得到最好的结果。

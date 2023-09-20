@@ -146,11 +146,23 @@ paper的3.1节介绍了算法框架，和结构分析很相似。
         - 优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。
         - 优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？
 
-具体应该选择哪些边移除？确实是一个值得思考的问题。
+具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。
 
-**算法的输入输出：**：输入当然是CFG。如何规划输出的格式？
+**算法的输入输出：**：输入当然是CFG。如何规划输出的格式？结构分析的本质是把CFG组织成了带有标签的树的结构。树的节点里蕴含额外的控制流跳转信息。
 
-TODO
+结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式
+- 原有的基本块划分能否和AST共存？即，能否将结构分析的结果表示为原有IR上的标记？不太行。映射可以做到，但是如果强行想要做标记，可能会不方便打印。
+    - 结构分析有点像是，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Else结构，就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢了信息的。
+- SSA能否和AST共存？稍微搜了一下，不太能。确实和我想的一样，最多就是基本块参数。还是直接把SSA解构了吧。
+    - SSA保留比较麻烦，可以考虑写成basic block argument的形式，在if while这种结构的末尾加上（带基本块参数的）goto？或者直接留下基本块参数。
+
+- Region：算法的主体数据结构，对`List<Statement>`的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。
+    - 最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。([reko - RegionGraphBuilder](https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs))，在算法的迭代下不断折叠。
+    - 最后的效果就是整个函数体变成单个linear region。
+- Statement：已经结构化的基本块/statement的集合。
+    - 不使用Expression，而是结合LLVM的指令。
+- LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。
+
 
 **Interval Analysis as a pre step?**：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？
 
