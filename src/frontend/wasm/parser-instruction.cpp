@@ -208,7 +208,7 @@ void BlockContext::visitStoreInst(wabt::StoreExpr *expr) {
     break;
   }
   assert(targetType != nullptr);
-  // addr = irBuilder.CreateBitCast(addr, PointerType::getUnqual(targetType));
+  addr = irBuilder.CreateBitCast(addr, PointerType::getUnqual(targetType));
   irBuilder.CreateStore(val, addr);
 }
 
@@ -306,7 +306,7 @@ void BlockContext::visitLoadInst(wabt::LoadExpr *expr) {
   }
   assert(targetType != nullptr);
 
-  // addr = irBuilder.CreateBitCast(addr, PointerType::getUnqual(targetType));
+  addr = irBuilder.CreateBitCast(addr, PointerType::getUnqual(targetType));
   Value *result = irBuilder.CreateLoad(targetType, addr, "loadResult");
   // possible extension
   switch (expr->opcode) {
@@ -1869,8 +1869,8 @@ void BlockContext::visitCallIndirectInst(wabt::CallIndirectExpr *expr) {
   Value *funcPtr = irBuilder.CreateLoad(ptr->getType()->getPointerElementType(),
                                         ptr, "callind_funcptr");
   // if (ctx.baseCtx.opt.recompile)
-  // funcPtr = irBuilder.CreateBitOrPointerCast(funcPtr,
-  // PointerType::get(funcType, 0));
+  funcPtr =
+      irBuilder.CreateBitOrPointerCast(funcPtr, PointerType::get(funcType, 0));
   auto callArgsAlloca = (Value **)calloc(sizeof(Value *), paramCount);
   // https://stackoverflow.com/questions/5458204/unsigned-int-reverse-iteration-with-for-loops
   for (wabt::Index i = paramCount; i-- > 0;) {
