@@ -1,6 +1,13 @@
 
 // 初始会输入一些指针信息
 .decl isPointer(val: vid)
+.decl isMemory(val: vid)
+.input isPointer, isMemory
+.output isPointer
 
-isPointer(X) :- isPointer(Y), Add.
-
+// getelemptr mem, 0
+isPointer(X) :- 
+    Instruction(id, "getelementptr", _, _),
+    Operand(id, 0, memId), 
+    isMemory(memId),
+    Operand(id, 1, X).

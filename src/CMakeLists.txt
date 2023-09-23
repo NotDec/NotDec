@@ -29,6 +29,8 @@ target_sources(notdec PRIVATE
 	frontend/wasm/parser-block.cpp
 	frontend/wasm/parser-instruction.cpp
 	optimizers/opt-manager.cpp
+	optimizers/stack.cpp
+	optimizers/stack-pointer-finder.cpp
 	optimizers/retdec-stack/retdec-abi.cpp
 	optimizers/retdec-stack/retdec-ir-modifier.cpp
 	optimizers/retdec-stack/retdec-reaching-definition.cpp
@@ -56,6 +58,7 @@ add_executable(notdec-decompile
 
 target_link_libraries(notdec-decompile 
 	notdec
+	notdec-datalog
 )
 
 set_target_properties(notdec-decompile

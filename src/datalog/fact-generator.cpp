@@ -1,29 +1,42 @@
 #include "datalog/fact-generator.h"
+#include <cassert>
 #include <cstddef>
-#include <iostream>
-#include <llvm/IR/Value.h>
-#include <string>
-#include <sstream>
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
+#include <llvm/IR/Constant.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Value.h>
+#include <llvm/Support/Casting.h>
+#include <llvm/Support/raw_ostream.h>
+#include <sstream>
+#include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "datalog/fact-names.def"
 
 namespace notdec::datalog {
 
-template<typename Value, typename... Values>
-std::string to_fact_str ( Value v, Values... vs )
-{
+template <typename Value, typename... Values>
+std::string to_fact_str(Value v, Values... vs) {
   std::ostringstream oss;
   using expander = int[];
   oss << v; // first
-  (void) expander{ 0, (oss << '\t' << vs, void(), 0)... };
+  (void)expander{0, (oss << '\t' << vs, void(), 0)...};
   return oss.str() + '\n';
 }
 
-void FactGenerator::generate(llvm::Module &mod, const char* outputDirname) {
+void FactGenerator::visit_module() {
+  visit_gvs();
+  visit_functions();
+}
+
+void FactGenerator::generate(llvm::Module &mod, const char *outputDirname) {
   FactGenerator fg(mod);
-  fg.emit_gvs();
-  fg.emit_functions();
+  fg.visit_module();
   if (outputDirname != nullptr) {
     fg.output_files(outputDirname);
   }
@@ -31,108 +44,163 @@ void FactGenerator::generate(llvm::Module &mod, const char* outputDirname) {
 
 void FactGenerator::output_files(std::string outputDirname) {
   // if dir not exist, create it
-  // std::string cmd = "mkdir -p " + outputDirname;
-  // system(cmd.c_str());
+  mkdir(outputDirname.c_str(), 0755);
   for (auto &kv : facts) {
     std::string fact_filename = outputDirname + "/" + kv.first + ".csv";
     std::ofstream fact_file(fact_filename);
     fact_file << kv.second;
     fact_file.close();
+    if (!fact_file) {
+      std::cerr << "Error: " << strerror(errno);
+      std::abort();
+    }
   }
 }
 
 // https://github.com/llvm/llvm-project/blob/7cbf1a2591520c2491aa35339f227775f4d3adf6/llvm/lib/IR/AsmWriter.cpp#L536
-size_t FactGenerator::emit_type(llvm::Type* ty) {
+size_t FactGenerator::visit_type(llvm::Type *ty) {
   size_t id = -1;
+  std::pair<size_t, bool> ins;
   size_t id_dep = -1;
   std::string type_str;
   switch (ty->getTypeID()) {
-  case Type::VoidTyID:      type_str = "void"; break;
-  case Type::HalfTyID:      type_str = "half"; break;
-  case Type::BFloatTyID:    type_str = "bfloat"; break;
-  case Type::FloatTyID:     type_str = "float"; break;
-  case Type::DoubleTyID:    type_str = "double"; break;
-  case Type::X86_FP80TyID:  type_str = "x86_fp80"; break;
-  case Type::FP128TyID:     type_str = "fp128"; break;
-  case Type::PPC_FP128TyID: type_str = "ppc_fp128"; break;
-  case Type::LabelTyID:     type_str = "label"; break;
-  case Type::MetadataTyID:  type_str = "metadata"; break;
-  case Type::X86_MMXTyID:   type_str = "x86_mmx"; break;
-  case Type::X86_AMXTyID:   type_str = "x86_amx"; break;
-  case Type::TokenTyID:     type_str = "token"; break;
-  case llvm::Type::IntegerTyID: type_str = printType(ty); break;
-  case llvm::Type::PointerTyID:
-    id_dep = emit_type(ty->getPointerElementType());
+  case Type::VoidTyID:
+    type_str = "void";
+    break;
+  case Type::HalfTyID:
+    type_str = "half";
+    break;
+  case Type::BFloatTyID:
+    type_str = "bfloat";
+    break;
+  case Type::FloatTyID:
+    type_str = "float";
+    break;
+  case Type::DoubleTyID:
+    type_str = "double";
+    break;
+  case Type::X86_FP80TyID:
+    type_str = "x86_fp80";
+    break;
+  case Type::FP128TyID:
+    type_str = "fp128";
+    break;
+  case Type::PPC_FP128TyID:
+    type_str = "ppc_fp128";
+    break;
+  case Type::LabelTyID:
+    type_str = "label";
+    break;
+  case Type::MetadataTyID:
+    type_str = "metadata";
+    break;
+  case Type::X86_MMXTyID:
+    type_str = "x86_mmx";
+    break;
+  case Type::X86_AMXTyID:
+    type_str = "x86_amx";
+    break;
+  case Type::TokenTyID:
+    type_str = "token";
+    break;
+  case llvm::Type::FunctionTyID:
+    type_str = "function";
+    break;
+  case llvm::Type::IntegerTyID:
     type_str = printType(ty);
-    id = get_or_insert_type(type_str);
-    append_fact(FACT_PointerType, to_fact_str(id, id_dep));
+    break;
+  case llvm::Type::PointerTyID:
+    id_dep = visit_type(ty->getPointerElementType());
+    type_str = printType(ty);
+    ins = get_or_insert_type(type_str);
+    id = ins.first;
+    if (ins.second) {
+      append_fact(FACT_PointerType, to_fact_str(id, id_dep));
+    }
     return id;
   case llvm::Type::StructTyID:
     type_str = printType(ty);
-    id = get_or_insert_type(type_str);
-    append_fact(FACT_StructType, to_fact_str(id, type_str));
+    ins = get_or_insert_type(type_str);
+    id = ins.first;
+    if (ins.second) {
+      append_fact(FACT_StructType, to_fact_str(id, type_str));
+    }
     return id;
   case llvm::Type::ArrayTyID:
-    id_dep = emit_type(ty->getArrayElementType());
+    id_dep = visit_type(ty->getArrayElementType());
     type_str = printType(ty);
-    id = get_or_insert_type(type_str);
-    append_fact(FACT_ArrayType, to_fact_str(id, id_dep, ty->getArrayNumElements()));
+    ins = get_or_insert_type(type_str);
+    id = ins.first;
+    if (ins.second) {
+      append_fact(FACT_ArrayType,
+                  to_fact_str(id, id_dep, ty->getArrayNumElements()));
+    }
     return id;
   case llvm::Type::FixedVectorTyID:
-    id_dep = emit_type(ty->getArrayElementType());
+    id_dep = visit_type(ty->getArrayElementType());
     type_str = printType(ty);
-    id = get_or_insert_type(type_str);
-    append_fact(FACT_VectorType, to_fact_str(id, id_dep, ty->getArrayNumElements()));
+    ins = get_or_insert_type(type_str);
+    id = ins.first;
+    if (ins.second) {
+      append_fact(FACT_VectorType,
+                  to_fact_str(id, id_dep, ty->getArrayNumElements()));
+    }
     return id;
-  case llvm::Type::FunctionTyID:
   case llvm::Type::ScalableVectorTyID:
-  // default:
-    std::cerr << __FILE__ << ":" << __LINE__ << ": " << "Unsupported type: " << printType(ty) << std::endl;
+    // default:
+    std::cerr << __FILE__ << ":" << __LINE__ << ": "
+              << "Unsupported type: " << printType(ty) << std::endl;
     std::abort();
   }
-    id = get_or_insert_type(type_str);
+  ins = get_or_insert_type(type_str);
+  id = ins.first;
+  if (ins.second) {
     append_fact(FACT_BaseType, to_fact_str(id, type_str));
-    return id;
+  }
+  return id;
 }
 
-void FactGenerator::emit_gvs() {
+void FactGenerator::visit_gvs() {
   for (auto &gv : mod.globals()) {
     auto name = getNameOrAsOperand(gv);
     auto id = valueID++;
     append_fact(FACT_GlobalVariable, to_fact_str(id, name));
+    assert(value2id.emplace(&gv, id).second);
 
     // auto type = printType(gv.getValueType());
-    auto tid = emit_type(gv.getValueType());
+    auto tid = visit_type(gv.getValueType());
     append_fact(FACT_ValueType, to_fact_str(id, tid));
 
-    unsigned long isConst = gv.isConstant() ? 1 : 0;
+    size_t isConst = gv.isConstant() ? 1 : 0;
     auto linkage = getLinkageName(gv.getLinkage());
     auto visibility = getVisibilityName(gv.getVisibility());
-    append_fact(FACT_GlobalVarAttr, to_fact_str(id, isConst, linkage, visibility));
+    append_fact(FACT_GlobalVarAttr,
+                to_fact_str(id, isConst, linkage, visibility));
   }
 }
 
-unsigned long FactGenerator::get_or_insert_type(std::string key) {
+// 2nd arg: is_inserted
+std::pair<size_t, bool> FactGenerator::get_or_insert_type(std::string key) {
   // https://stackoverflow.com/questions/1409454/c-map-find-to-possibly-insert-how-to-optimize-operations
-  typedef std::map<std::string, unsigned long> M;
+  typedef std::map<std::string, size_t> M;
   typedef M::iterator I;
-  std::pair<I, bool> const& r=type_ids.insert(M::value_type(key, typeID));
+  std::pair<I, bool> const &r = type_ids.insert(M::value_type(key, typeID));
   if (r.second) {
     // value was inserted; now my_map[foo_obj]="some value"
-    return typeID++;
+    return std::pair<size_t, bool>(typeID++, true);
   } else {
     // value wasn't inserted because my_map[foo_obj] already existed.
     // note: the old value is available through r.first->second
     // and may not be "some value"
-    return r.first->second;
+    return std::pair<size_t, bool>(r.first->second, false);
   }
 }
 
-void FactGenerator::append_fact(const char* key, std::string to_append) {
+void FactGenerator::append_fact(const char *key, std::string to_append) {
   // https://stackoverflow.com/questions/1409454/c-map-find-to-possibly-insert-how-to-optimize-operations
-  typedef std::map<const char*,std::string> M;
+  typedef std::map<const char *, std::string> M;
   typedef M::iterator I;
-  std::pair<I, bool> const& r=facts.insert(M::value_type(key, to_append));
+  std::pair<I, bool> const &r = facts.insert(M::value_type(key, to_append));
   if (r.second) {
     // value was inserted; now my_map[foo_obj]="some value"
   } else {
@@ -143,10 +211,56 @@ void FactGenerator::append_fact(const char* key, std::string to_append) {
   }
 }
 
-void FactGenerator::emit_functions() {
-  for(auto &f: mod.functions()) {
+size_t FactGenerator::visit_operand(llvm::Value &val) {
+  // 1. operand is other value(e.g. instruction, gv...)
+  // 2. operand is constant
+  if (value2id.count(&val)) {
+    return value2id.at(&val);
+  } else if (isa<Constant>(val)) {
+    assert(!isa<Function>(val));
+    Constant *con = static_cast<Constant *>(&val);
+    return visit_constant(*con);
+  } else {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "Unsupported inst operand: " << val << "\n";
+    std::abort();
+  }
+}
+
+size_t FactGenerator::visit_constant(const llvm::Constant &c) {
+  auto tid = visit_type(c.getType());
+
+  auto id = valueID++;
+  assert(value2id.emplace(&c, id).second);
+  if (isa<ConstantInt>(&c)) {
+    // Signed or not?
+    append_fact(
+        FACT_IntConstant,
+        to_fact_str(id, tid,
+                    static_cast<const ConstantInt &>(c).getSExtValue()));
+  } else {
+    append_fact(FACT_Constant, to_fact_str(id, tid, printValue(c)));
+  }
+  return id;
+}
+
+size_t FactGenerator::get_or_insert_value(const llvm::Value *val) {
+  if (value2id.count(val)) {
+    return value2id.at(val);
+  } else {
+    auto id = valueID++;
+    assert(value2id.emplace(val, id).second);
+  }
+}
+
+void FactGenerator::visit_functions() {
+  InstructionVisitor IV(*this, mod);
+
+  // export all function first
+  for (auto &f : mod.functions()) {
     auto name = getNameOrAsOperand(f);
     auto id = valueID++;
+    assert(value2id.emplace(&f, id).second);
     append_fact(FACT_Func, to_fact_str(id, name));
 
     auto linkage = getLinkageName(f.getLinkage());
@@ -154,28 +268,104 @@ void FactGenerator::emit_functions() {
     append_fact(FACT_FuncAttr, to_fact_str(id, linkage, visibility));
 
     // return as value type
-    auto type_id = emit_type(f.getReturnType());
-    append_fact(FACT_ValueType, to_fact_str(id, type_id));
+    auto type_id = visit_type(f.getReturnType());
+    append_fact(FACT_FuncRetTy, to_fact_str(id, type_id));
 
-    for(auto& arg: f.args()) {
+    for (auto &arg : f.args()) {
       auto arg_name = getNameOrAsOperand(arg);
       auto arg_id = valueID++;
-      append_fact(FACT_FuncArgument, to_fact_str(arg_id, id, arg_name));
+      append_fact(FACT_FuncArg, to_fact_str(arg_id, id, arg_name));
+      assert(value2id.emplace(&arg, arg_id).second);
 
-      auto arg_type_id = emit_type(arg.getType());
+      auto arg_type_id = visit_type(arg.getType());
       append_fact(FACT_ValueType, to_fact_str(arg_id, arg_type_id));
+    }
+  }
+
+  for (auto &f : mod.functions()) {
+    auto id = value2id.at(&f);
+
+    if (f.isDeclaration()) {
+      continue;
+    }
+
+    for (const llvm::BasicBlock &bb : f) {
+      auto name = getNameOrAsOperand(bb);
+      auto id = valueID++;
+      append_fact(FACT_BasicBlock, to_fact_str(id, name));
+      assert(value2id.emplace(&bb, id).second);
+
+      auto bb_type_id = visit_type(bb.getType());
+      append_fact(FACT_ValueType, to_fact_str(id, bb_type_id));
+
+      size_t prev_instr_id = 0;
+      for (const llvm::Instruction &instr : bb) {
+        auto inst_id = valueID++;
+        auto inst_name = getNameOrAsOperand(instr);
+        append_fact(FACT_Instruction,
+                    to_fact_str(inst_id, instr.getOpcodeName(), inst_name, id));
+        assert(value2id.emplace(&instr, inst_id).second);
+
+        auto inst_type_id = visit_type(instr.getType());
+        append_fact(FACT_ValueType, to_fact_str(inst_id, inst_type_id));
+
+        // Record instruction flows
+        if (prev_instr_id) {
+          append_fact(FACT_InstNext, to_fact_str(prev_instr_id, id));
+        }
+        prev_instr_id = inst_id;
+      }
+
+      // block entry
+      auto block_entry_id = value2id.at(&bb.getInstList().front());
+      append_fact(FACT_BlockEntryInst, to_fact_str(id, block_entry_id));
+    }
+
+    // entry 关系
+    auto entry_id = value2id.at(&f.getEntryBlock());
+    append_fact(FACT_FuncEntryBlock, to_fact_str(id, entry_id));
+
+    // 再次遍历导出CFG关系
+    for (const llvm::BasicBlock &bb : f) {
+      auto id = value2id.at(&bb);
+      // Record basic block predecessors
+      for (llvm::const_pred_iterator pi = pred_begin(&bb),
+                                     pi_end = pred_end(&bb);
+           pi != pi_end; ++pi) {
+        auto pred_id = value2id.at(*pi);
+        append_fact(FACT_CFGEdge, to_fact_str(pred_id, id));
+
+        auto pred_inst_id = value2id.at((*pi)->getTerminator());
+        auto succ_inst_id = value2id.at(&bb.getInstList().front());
+        append_fact(FACT_InstNext, to_fact_str(pred_inst_id, succ_inst_id));
+      }
+
+      for (const llvm::Instruction &instr : bb) {
+        auto inst_id = value2id.at(&instr);
+
+        // visit operands in second pass
+        size_t ind = 0;
+        for (auto &op : instr.operands()) {
+          auto op_vid = visit_operand(*op.get());
+          append_fact(FACT_Operand, to_fact_str(inst_id, ind, op_vid));
+
+          ind += 1;
+        }
+
+        IV.visit(const_cast<llvm::Instruction &>(instr));
+      }
     }
   }
 }
 
-std::string printType(Type* ty) {
+std::string printType(Type *ty) {
   std::string type_str;
   llvm::raw_string_ostream rso(type_str);
   ty->print(rso);
   return rso.str();
 }
 
-const char* getVisibilityName(GlobalValue::VisibilityTypes VT) {
+const char *getVisibilityName(GlobalValue::VisibilityTypes VT) {
   switch (VT) {
   case GlobalValue::DefaultVisibility:
     return "default";
@@ -187,8 +377,7 @@ const char* getVisibilityName(GlobalValue::VisibilityTypes VT) {
   llvm_unreachable("invalid visibility");
 }
 
-
-const char* getLinkageName(GlobalValue::LinkageTypes LT) {
+const char *getLinkageName(GlobalValue::LinkageTypes LT) {
   switch (LT) {
   case GlobalValue::ExternalLinkage:
     return "external";
@@ -216,15 +405,26 @@ const char* getLinkageName(GlobalValue::LinkageTypes LT) {
   llvm_unreachable("invalid linkage");
 }
 
-std::string getNameOrAsOperand(Value& val) {
-  if (!val.getName().empty())
-    return std::string(val.getName());
-
-  std::string BBName;
-  raw_string_ostream OS(BBName);
-  val.printAsOperand(OS, false);
+std::string printValue(const Value &val) {
+  std::string Name;
+  raw_string_ostream OS(Name);
+  val.print(OS);
   return OS.str();
 }
 
+std::string getNameOrAsOperand(const Value &val) {
+  if (!val.getName().empty())
+    return std::string(val.getName());
+
+  std::string Name;
+  raw_string_ostream OS(Name);
+  val.printAsOperand(OS, false);
+  // void type inst
+  if (OS.str() == "<badref>") {
+    Name.clear();
+    val.print(OS);
+  }
+  return OS.str();
 }
 
+} // namespace notdec::datalog

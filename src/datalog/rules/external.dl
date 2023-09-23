@@ -2,18 +2,16 @@
 .type vid <: unsigned
 
 // LLVM types
-.decl BaseType(id: tid, name: symbol) // void int float pointer vector struct
+.decl BaseType(id: tid, name: symbol) // void int float pointer vector struct label
 .decl PointerType(id: tid, basetid: tid)
 .decl ArrayType(id: tid, basetid: tid, elemcount: unsigned)
 .decl VectorType(id: tid, basetid: tid, elemcount: unsigned)
 .decl StructType(id: tid, str: symbol)
-.decl LabelType(id: tid)
+// .decl LabelType(id: tid)
+.input BaseType, PointerType, ArrayType, VectorType, StructType
 
 .decl IntConstant(id: vid, type: tid, value: unsigned)
-.decl FloatConstant(id: vid, type: tid, value: symbol)
-.decl PointerConstant(id: vid, type: tid, value: symbol) // null
-.decl StructConstant(id: vid, type: tid, value: symbol)
-.decl VectorConstant(id: vid, type: tid, value: symbol)
+.decl Constant(id: vid, type: tid, value: symbol) // all other constants
 
 // relation between value and its type
 .decl ValueType(id: tid, type: tid)
@@ -21,14 +19,23 @@
 // global variables
 .decl GlobalVariable(id: vid, name: symbol)
 .decl GlobalVarAttr(id: vid, isconst: unsigned, linkage: symbol, visibility: unsigned)
+.input IntConstant, Constant, ValueType, GlobalVariable, GlobalVarAttr
 
 // func value type is return type
 .decl Func(id: vid, name: symbol)
 .decl FuncAttr(id: vid, linkage: symbol, visibility: unsigned)
-.decl FuncArgument(id: vid, func: vid, idx: unsigned, name: symbol)
+.decl FuncArg(id: vid, func: vid, idx: unsigned, name: symbol)
+.decl FuncRetTy(func: vid, type: tid)
+.input Func, FuncAttr, FuncArg, FuncRetTy
 
-.decl BlockLabel(id: vid, name: symbol)
-.decl Instruction(id: vid, block: vid, opcode: symbol)
+// block type is label
+.decl BasicBlock(id: vid, name: symbol)
+.decl Instruction(id: vid, opcode: symbol, name: symbol, block: vid)
+.decl Operand(inst: vid, idx: unsigned, value: vid)
+.input BasicBlock, Instruction, Operand
 
-
-.input Global Func Block Instruction
+.decl BlockEntryInst(func: vid, entry: vid)
+.decl FuncEntryBlock(func: vid, entry: vid)
+.decl CFGEdge(from: vid, to: vid)
+.decl InstNext(from: vid, to: vid)
+.input BlockEntryInst, FuncEntryBlock, CFGEdge, InstNext
