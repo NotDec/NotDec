@@ -1,5 +1,5 @@
 # ======== custom target to generate souffle c++ source ==================
-
+# Used in outer project
 add_custom_target(souffle_cpp DEPENDS 
                 "rules/pointer_main.cpp")
 

@@ -6,17 +6,17 @@
 .decl isMemory(val: vid)
 .input point2Pointer, isMemory
 
-.decl isPointer(val: vid, status: ptrDomain)
+.decl highType(val: vid, status: ptrDomain)
 
 // Top always wins
-isPointer(val, _) <= isPointer(val, $Top()) :- true.
+highType(val, _) <= highType(val, $Top()) :- true.
 
 // Multiple values implies Top
-isPointer(val, $Top()) :- isPointer(val, $Pointer()), isPointer(val, $Number()).
-.output isPointer
+highType(val, $Top()) :- highType(val, $Pointer()), highType(val, $Number()).
+.output highType
 
 // getelemptr mem, 0, X
-isPointer(X, $Pointer()) :- 
+highType(X, $Pointer()) :- 
     Instruction(id, "getelementptr", _, _),
     Operand(id, 0, memId),
     isMemory(memId),
@@ -25,14 +25,14 @@ isPointer(X, $Pointer()) :-
     Operand(id, 2, X).
 
 // load from point2Pointer
-isPointer(load_inst, $Pointer()) :- 
+highType(load_inst, $Pointer()) :- 
     Instruction(load_inst, "load", _, _),
     Operand(load_inst, 0, sp),
     point2Pointer(sp).
     // and i32 type?
 
 // store to point2Pointer
-isPointer(store_val, $Pointer()) :- 
+highType(store_val, $Pointer()) :- 
     Instruction(store_inst, "store", _, _),
     Operand(store_inst, 0, store_val),
     Operand(store_inst, 1, sp),
@@ -40,18 +40,18 @@ isPointer(store_val, $Pointer()) :-
 
 
 // int + ptr = ptr
-isPointer(ptr_add, $Pointer()) :-
+highType(ptr_add, $Pointer()) :-
     Instruction(ptr_add, "add", _, _),
     Operand(ptr_add, _, ptr),
-    isPointer(ptr, $Pointer()),
+    highType(ptr, $Pointer()),
     Operand(ptr_add, _, offset),
     ValueType(offset, ty),
     SizeType(ty).
 
 // ptr = int + ptr
-isPointer(ptr_add_op, $Pointer()) :-
+highType(ptr_add_op, $Pointer()) :-
     Instruction(ptr_add, "add", _, _),
-    isPointer(ptr_add, $Pointer()),
+    highType(ptr_add, $Pointer()),
     Operand(ptr_add, _, ptr_add_op),
     Operand(ptr_add, _, offset),
     ValueType(offset, ty),
@@ -59,18 +59,18 @@ isPointer(ptr_add_op, $Pointer()) :-
 
 
 // ptr = ptr - int
-isPointer(ptr_sub, $Pointer()) :-
+highType(ptr_sub, $Pointer()) :-
     Instruction(ptr_sub, "sub", _, _),
     Operand(ptr_add, 0, ptr),
-    isPointer(ptr, $Pointer()),
+    highType(ptr, $Pointer()),
     Operand(ptr_add, 1, offset),
     ValueType(offset, ty),
     SizeType(ty).
 
 // ptr - int = ptr
-isPointer(ptr_sub_op, $Pointer()) :-
+highType(ptr_sub_op, $Pointer()) :-
     Instruction(ptr_sub, "sub", _, _),
-    isPointer(ptr_sub, $Pointer()),
+    highType(ptr_sub, $Pointer()),
     Operand(ptr_sub, 0, ptr_sub_op),
     Operand(ptr_sub, 1, offset),
     ValueType(offset, ty),

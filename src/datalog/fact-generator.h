@@ -32,7 +32,7 @@ protected:
   std::pair<size_t, bool> get_or_insert_type(std::string key);
 
   std::map<const llvm::Value *, size_t> value2id;
-  std::map<const llvm::BasicBlock *, size_t> id2value;
+  std::map<size_t, const llvm::Value *> id2value;
   size_t get_or_insert_value(const llvm::Value *val, bool assert_not_exist);
   size_t get_or_insert_value(const llvm::Value *val);
 

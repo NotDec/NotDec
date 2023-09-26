@@ -15,8 +15,8 @@
                 "${file}",
                 "-o",
                 "${file}.ll",
-                "--log-level",
-                "level_debug",
+                // "--log-level",
+                // "level_debug",
                 "--compat-mode",
                 "--expand-mem=false"
             ],

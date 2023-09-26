@@ -2,15 +2,46 @@
 #include "optimizers/pointer-type-recovery.h"
 #include "datalog/fact-generator.h"
 #include "optimizers/stack-pointer-finder.h"
+#include <iterator>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/FileSystem.h>
+#include <souffle/SouffleInterface.h>
+#include <system_error>
 
+namespace souffle {
+extern "C" {
+extern void *__factory_Sf_pointer_main_instance;
+}
+} // namespace souffle
+
+// Force linking of the main instance of the program
+static void *volatile dummy = &souffle::__factory_Sf_pointer_main_instance;
+
+static const bool is_debug = true;
 using namespace llvm;
-// TOOD 1.如果offset是重新计算的，LLVM value不对应，但是运行时对应 （需要SAT？）
-//      2.测试点55不通过:  回溯到参数，变成了一个过程间分析问题
+
+// TODO 重构直接输入facts
 namespace notdec::optimizers {
+
+void fetch_result(souffle::SouffleProgram *prog) {
+  if (souffle::Relation *rel = prog->getRelation("highType")) {
+    // int myInt;
+    // std::string mySymbol;
+    // for (auto &output : *rel) {
+    //   output >> mySymbol >> myString;
+    // }
+    std::cerr << "type is: " << rel->getSignature() << std::endl;
+  } else {
+    std::cerr << "Failed to get output relation\n";
+    exit(1);
+  }
+}
 
 PreservedAnalyses PointerTypeRecovery::run(Module &M,
                                            ModuleAnalysisManager &MAM) {
+  // supress warning that dummy is unused.
+  (void)dummy;
   datalog::FactGenerator fg(M);
   fg.visit_module();
 
@@ -29,7 +60,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
                    datalog::to_fact_str(fg.get_value_id(mem)));
   }
 
-  // find sp
+  // find sp and set isPointer
   auto sp = MAM.getResult<StackPointerFinderAnalysis>(M);
   if (sp.result == nullptr) {
     std::cerr << "ERROR: sp not found!!";
@@ -38,12 +69,42 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
                    datalog::to_fact_str(fg.get_value_id(sp.result)));
   }
 
-  // generate stack pointer facts
-  // fg.append_fact(datalog::FACT_IsPointer, );
+  // run souffle
+  const char *Name = "pointer_main";
+  if (souffle::SouffleProgram *prog =
+          souffle::ProgramFactory::newInstance(Name)) {
+    // create temp dir
+    SmallString<128> Path;
+    std::error_code EC;
+    EC = llvm::sys::fs::createUniqueDirectory(Name, Path);
+    if (!EC) {
+      // Resolve any symlinks in the new directory.
+      std::string UnresolvedPath(Path.str());
+      EC = llvm::sys::fs::real_path(UnresolvedPath, Path);
+    }
+    const char *temp_path = Path.c_str();
 
-  fg.output_files("notdec-facts");
-  // TODO run souffle
+    std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
+    fg.output_files(temp_path);
+    // run the program...
+    prog->loadAll(temp_path);
+    prog->run();
+    prog->printAll(temp_path);
 
+    // read analysis result
+    fetch_result(prog);
+
+    // clean up
+    // delete directory if not debug
+    if (!is_debug && !Path.empty()) {
+      assert(llvm::sys::fs::remove_directories(Path.str()) == std::errc());
+    }
+    delete prog;
+  } else {
+    std::cerr << "Souffle: Failed to create instance!!!" << std::endl;
+    std::cerr << "PointerTypeRecovery: Failed!" << std::endl;
+    return PreservedAnalyses::all();
+  }
   // TODO read souffle result
 
   // update pointer types

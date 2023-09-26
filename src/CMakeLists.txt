@@ -76,6 +76,8 @@ if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
 	# for retdec-llvmir2hll
 endif()
 
-if(NOTDEC_ENABLE_DATALOG)
-	add_subdirectory(datalog)
-endif()
+add_subdirectory(datalog)
+add_dependencies(notdec souffle_cpp)
+target_sources(notdec PRIVATE
+        datalog/rules/pointer_main.cpp)
+set_source_files_properties(datalog/rules/pointer_main.cpp PROPERTIES COMPILE_FLAGS "-frtti -w -D__EMBEDDED_SOUFFLE__ -DRAM_DOMAIN_SIZE=64")
