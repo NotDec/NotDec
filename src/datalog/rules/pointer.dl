@@ -1,13 +1,84 @@
+.type ptrDomain = /* Unknown{} | */ Pointer{} | Number {} | Top {}
 
-// 初始会输入一些指针信息
-.decl isPointer(val: vid)
+// 指针的指针，如：作为全局变量地址的sp。
+.decl point2Pointer(val: vid)
+// specify memory value
 .decl isMemory(val: vid)
-.input isPointer, isMemory
+.input point2Pointer, isMemory
+
+.decl isPointer(val: vid, status: ptrDomain)
+
+// Top always wins
+isPointer(val, _) <= isPointer(val, $Top()) :- true.
+
+// Multiple values implies Top
+isPointer(val, $Top()) :- isPointer(val, $Pointer()), isPointer(val, $Number()).
 .output isPointer
 
-// getelemptr mem, 0
-isPointer(X) :- 
+// getelemptr mem, 0, X
+isPointer(X, $Pointer()) :- 
     Instruction(id, "getelementptr", _, _),
-    Operand(id, 0, memId), 
+    Operand(id, 0, memId),
     isMemory(memId),
-    Operand(id, 1, X).
+    Operand(id, 1, zeroid),
+    IntConstant(zeroid, 0),
+    Operand(id, 2, X).
+
+// load from point2Pointer
+isPointer(load_inst, $Pointer()) :- 
+    Instruction(load_inst, "load", _, _),
+    Operand(load_inst, 0, sp),
+    point2Pointer(sp).
+    // and i32 type?
+
+// store to point2Pointer
+isPointer(store_val, $Pointer()) :- 
+    Instruction(store_inst, "store", _, _),
+    Operand(store_inst, 0, store_val),
+    Operand(store_inst, 1, sp),
+    point2Pointer(sp).
+
+
+// int + ptr = ptr
+isPointer(ptr_add, $Pointer()) :-
+    Instruction(ptr_add, "add", _, _),
+    Operand(ptr_add, _, ptr),
+    isPointer(ptr, $Pointer()),
+    Operand(ptr_add, _, offset),
+    ValueType(offset, ty),
+    SizeType(ty).
+
+// ptr = int + ptr
+isPointer(ptr_add_op, $Pointer()) :-
+    Instruction(ptr_add, "add", _, _),
+    isPointer(ptr_add, $Pointer()),
+    Operand(ptr_add, _, ptr_add_op),
+    Operand(ptr_add, _, offset),
+    ValueType(offset, ty),
+    SizeType(ty).
+
+
+// ptr = ptr - int
+isPointer(ptr_sub, $Pointer()) :-
+    Instruction(ptr_sub, "sub", _, _),
+    Operand(ptr_add, 0, ptr),
+    isPointer(ptr, $Pointer()),
+    Operand(ptr_add, 1, offset),
+    ValueType(offset, ty),
+    SizeType(ty).
+
+// ptr - int = ptr
+isPointer(ptr_sub_op, $Pointer()) :-
+    Instruction(ptr_sub, "sub", _, _),
+    isPointer(ptr_sub, $Pointer()),
+    Operand(ptr_sub, 0, ptr_sub_op),
+    Operand(ptr_sub, 1, offset),
+    ValueType(offset, ty),
+    SizeType(ty).
+
+// ptr - ptr = int
+// TODO
+
+// TODO Phi Inst propergate
+
+// Function formal arg to actual arg

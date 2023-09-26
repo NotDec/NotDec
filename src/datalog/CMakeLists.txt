@@ -1,3 +1,13 @@
+# ======== custom target to generate souffle c++ source ==================
+
+add_custom_target(souffle_cpp DEPENDS 
+                "rules/pointer_main.cpp")
+
+add_custom_command(OUTPUT "rules/pointer_main.cpp"
+    COMMAND souffle -g pointer_main.cpp pointer_main.dl
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rules
+)
+
 # ======== custom target to generate fact-names.def and fact-names.h ==================
 add_custom_target(fact_names DEPENDS "fact-names.def" "fact-names.h")
 

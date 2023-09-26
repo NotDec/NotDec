@@ -7,14 +7,16 @@
 .decl ArrayType(id: tid, basetid: tid, elemcount: unsigned)
 .decl VectorType(id: tid, basetid: tid, elemcount: unsigned)
 .decl StructType(id: tid, str: symbol)
+// size_t type
+.decl SizeType(ty: tid)
 // .decl LabelType(id: tid)
-.input BaseType, PointerType, ArrayType, VectorType, StructType
+.input BaseType, PointerType, ArrayType, VectorType, StructType, SizeType
 
-.decl IntConstant(id: vid, type: tid, value: unsigned)
-.decl Constant(id: vid, type: tid, value: symbol) // all other constants
+.decl IntConstant(id: vid, value: number)
+.decl Constant(id: vid, value: symbol) // all other constants
 
 // relation between value and its type
-.decl ValueType(id: tid, type: tid)
+.decl ValueType(id: vid, type: tid)
 
 // global variables
 .decl GlobalVariable(id: vid, name: symbol)

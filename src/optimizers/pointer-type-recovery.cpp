@@ -1,6 +1,8 @@
 
-#include "optimizers/stack.h"
+#include "optimizers/pointer-type-recovery.h"
+#include "datalog/fact-generator.h"
 #include "optimizers/stack-pointer-finder.h"
+#include <llvm/IR/Value.h>
 
 using namespace llvm;
 // TOOD 1.如果offset是重新计算的，LLVM value不对应，但是运行时对应 （需要SAT？）
@@ -9,14 +11,43 @@ namespace notdec::optimizers {
 
 PreservedAnalyses PointerTypeRecovery::run(Module &M,
                                            ModuleAnalysisManager &MAM) {
-  auto StackPointer = MAM.getResult<StackPointerFinderAnalysis>(M);
   datalog::FactGenerator fg(M);
   fg.visit_module();
+
+  // find mem
+  Value *mem = nullptr;
+  for (GlobalVariable &gv : M.getGlobalList()) {
+    if (gv.getName().equals(MEM_NAME)) {
+      mem = &gv;
+      break;
+    }
+  }
+  if (mem == nullptr) {
+    std::cerr << "ERROR: mem not found!!";
+  } else {
+    fg.append_fact(datalog::FACT_isMemory,
+                   datalog::to_fact_str(fg.get_value_id(mem)));
+  }
+
+  // find sp
+  auto sp = MAM.getResult<StackPointerFinderAnalysis>(M);
+  if (sp.result == nullptr) {
+    std::cerr << "ERROR: sp not found!!";
+  } else {
+    fg.append_fact(datalog::FACT_point2Pointer,
+                   datalog::to_fact_str(fg.get_value_id(sp.result)));
+  }
 
   // generate stack pointer facts
   // fg.append_fact(datalog::FACT_IsPointer, );
 
   fg.output_files("notdec-facts");
+  // TODO run souffle
+
+  // TODO read souffle result
+
+  // update pointer types
+
   // return PreservedAnalyses::none();
   return PreservedAnalyses::all();
 }

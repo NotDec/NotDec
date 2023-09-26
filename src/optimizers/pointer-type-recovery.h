@@ -1,5 +1,5 @@
-#ifndef _NOTDEC_OPTIMIZERS_STACK_H_
-#define _NOTDEC_OPTIMIZERS_STACK_H_
+#ifndef _NOTDEC_OPTIMIZERS_POINTER_TYPE_RECOVERY_H_
+#define _NOTDEC_OPTIMIZERS_POINTER_TYPE_RECOVERY_H_
 
 #include <set>
 
@@ -29,6 +29,8 @@ struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
   // all functions with optnone.
   static bool isRequired() { return true; }
+
+  const char *MEM_NAME = "__notdec_mem0";
 };
 
 } // namespace notdec::optimizers

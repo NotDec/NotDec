@@ -1,4 +1,5 @@
 #include "datalog/fact-generator.h"
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -6,12 +7,12 @@
 #include <iostream>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
-#include <sstream>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -20,18 +21,16 @@
 
 namespace notdec::datalog {
 
-template <typename Value, typename... Values>
-std::string to_fact_str(Value v, Values... vs) {
-  std::ostringstream oss;
-  using expander = int[];
-  oss << v; // first
-  (void)expander{0, (oss << '\t' << vs, void(), 0)...};
-  return oss.str() + '\n';
+size_t FactGenerator::get_value_id(const llvm::Value *val) {
+  return value2id.at(val);
 }
 
 void FactGenerator::visit_module() {
   visit_gvs();
   visit_functions();
+  auto sizet =
+      visit_type(mod.getDataLayout().getIntPtrType(mod.getContext(), 0));
+  append_fact(FACT_SizeType, to_fact_str(sizet));
 }
 
 void FactGenerator::generate(llvm::Module &mod, const char *outputDirname) {
@@ -46,7 +45,7 @@ void FactGenerator::output_files(std::string outputDirname) {
   // if dir not exist, create it
   mkdir(outputDirname.c_str(), 0755);
   for (auto &kv : facts) {
-    std::string fact_filename = outputDirname + "/" + kv.first + ".csv";
+    std::string fact_filename = outputDirname + "/" + kv.first + ".facts";
     std::ofstream fact_file(fact_filename);
     fact_file << kv.second;
     fact_file.close();
@@ -163,9 +162,8 @@ size_t FactGenerator::visit_type(llvm::Type *ty) {
 void FactGenerator::visit_gvs() {
   for (auto &gv : mod.globals()) {
     auto name = getNameOrAsOperand(gv);
-    auto id = valueID++;
+    auto id = get_or_insert_value(&gv, true);
     append_fact(FACT_GlobalVariable, to_fact_str(id, name));
-    assert(value2id.emplace(&gv, id).second);
 
     // auto type = printType(gv.getValueType());
     auto tid = visit_type(gv.getValueType());
@@ -230,26 +228,34 @@ size_t FactGenerator::visit_operand(llvm::Value &val) {
 size_t FactGenerator::visit_constant(const llvm::Constant &c) {
   auto tid = visit_type(c.getType());
 
-  auto id = valueID++;
-  assert(value2id.emplace(&c, id).second);
+  auto id = get_or_insert_value(&c);
   if (isa<ConstantInt>(&c)) {
     // Signed or not?
     append_fact(
         FACT_IntConstant,
-        to_fact_str(id, tid,
-                    static_cast<const ConstantInt &>(c).getSExtValue()));
+        to_fact_str(id, static_cast<const ConstantInt &>(c).getSExtValue()));
   } else {
-    append_fact(FACT_Constant, to_fact_str(id, tid, printValue(c)));
+    append_fact(FACT_Constant, to_fact_str(id, printSafeValue(c)));
   }
+  append_fact(FACT_ValueType, to_fact_str(id, tid));
   return id;
 }
 
 size_t FactGenerator::get_or_insert_value(const llvm::Value *val) {
-  if (value2id.count(val)) {
+  return get_or_insert_value(val, false);
+}
+
+// 可以都改用这个函数插入
+size_t FactGenerator::get_or_insert_value(const llvm::Value *val,
+                                          bool assert_not_exist) {
+  // only enable this if assert_not_exist is false
+  if (!assert_not_exist && value2id.count(val)) {
     return value2id.at(val);
   } else {
     auto id = valueID++;
     assert(value2id.emplace(val, id).second);
+    assert(id2value.emplace(id, val).second);
+    return id;
   }
 }
 
@@ -259,8 +265,7 @@ void FactGenerator::visit_functions() {
   // export all function first
   for (auto &f : mod.functions()) {
     auto name = getNameOrAsOperand(f);
-    auto id = valueID++;
-    assert(value2id.emplace(&f, id).second);
+    auto id = get_or_insert_value(&f);
     append_fact(FACT_Func, to_fact_str(id, name));
 
     auto linkage = getLinkageName(f.getLinkage());
@@ -273,9 +278,8 @@ void FactGenerator::visit_functions() {
 
     for (auto &arg : f.args()) {
       auto arg_name = getNameOrAsOperand(arg);
-      auto arg_id = valueID++;
+      auto arg_id = get_or_insert_value(&arg);
       append_fact(FACT_FuncArg, to_fact_str(arg_id, id, arg_name));
-      assert(value2id.emplace(&arg, arg_id).second);
 
       auto arg_type_id = visit_type(arg.getType());
       append_fact(FACT_ValueType, to_fact_str(arg_id, arg_type_id));
@@ -291,20 +295,18 @@ void FactGenerator::visit_functions() {
 
     for (const llvm::BasicBlock &bb : f) {
       auto name = getNameOrAsOperand(bb);
-      auto id = valueID++;
+      auto id = get_or_insert_value(&bb);
       append_fact(FACT_BasicBlock, to_fact_str(id, name));
-      assert(value2id.emplace(&bb, id).second);
 
       auto bb_type_id = visit_type(bb.getType());
       append_fact(FACT_ValueType, to_fact_str(id, bb_type_id));
 
       size_t prev_instr_id = 0;
       for (const llvm::Instruction &instr : bb) {
-        auto inst_id = valueID++;
+        auto inst_id = get_or_insert_value(&instr);
         auto inst_name = getNameOrAsOperand(instr);
         append_fact(FACT_Instruction,
                     to_fact_str(inst_id, instr.getOpcodeName(), inst_name, id));
-        assert(value2id.emplace(&instr, inst_id).second);
 
         auto inst_type_id = visit_type(instr.getType());
         append_fact(FACT_ValueType, to_fact_str(inst_id, inst_type_id));
@@ -405,6 +407,15 @@ const char *getLinkageName(GlobalValue::LinkageTypes LT) {
   llvm_unreachable("invalid linkage");
 }
 
+std::string printSafeValue(const Value &val) {
+  auto str = printValue(val);
+  std::replace(str.begin(), str.end(), '\n', ' ');
+  if (str.size() > 30) {
+    str = str.substr(0, 30) + "...";
+  }
+  return str;
+}
+
 std::string printValue(const Value &val) {
   std::string Name;
   raw_string_ostream OS(Name);
@@ -421,8 +432,7 @@ std::string getNameOrAsOperand(const Value &val) {
   val.printAsOperand(OS, false);
   // void type inst
   if (OS.str() == "<badref>") {
-    Name.clear();
-    val.print(OS);
+    return printSafeValue(val);
   }
   return OS.str();
 }

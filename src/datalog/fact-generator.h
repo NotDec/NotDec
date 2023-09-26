@@ -8,6 +8,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Type.h>
 #include <map>
+#include <sstream>
 #include <string>
 
 using namespace llvm;
@@ -31,17 +32,17 @@ protected:
   std::pair<size_t, bool> get_or_insert_type(std::string key);
 
   std::map<const llvm::Value *, size_t> value2id;
+  std::map<const llvm::BasicBlock *, size_t> id2value;
+  size_t get_or_insert_value(const llvm::Value *val, bool assert_not_exist);
   size_t get_or_insert_value(const llvm::Value *val);
 
 public:
   llvm::Module &mod;
   FactGenerator(llvm::Module &mod) : mod(mod) {}
 
-  // std::map<const llvm::BasicBlock*, size_t> bb2id;
-  // std::map<const llvm::Instruction*, size_t> inst2id;
-
   std::map<const char *, std::string> facts;
   void append_fact(const char *key, std::string to_append);
+  size_t get_value_id(const llvm::Value *val);
 
   static void generate(llvm::Module &mod, const char *outputDirname);
 
@@ -76,6 +77,16 @@ const char *getVisibilityName(GlobalValue::VisibilityTypes VT);
 std::string printType(Type *ty);
 std::string getNameOrAsOperand(const Value &val);
 std::string printValue(const Value &val);
+std::string printSafeValue(const Value &val);
+
+template <typename Value, typename... Values>
+std::string to_fact_str(Value v, Values... vs) {
+  std::ostringstream oss;
+  using expander = int[];
+  oss << v; // first
+  (void)expander{0, (oss << '\t' << vs, void(), 0)...};
+  return oss.str() + '\n';
+}
 
 } // namespace notdec::datalog
 

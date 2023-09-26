@@ -13,13 +13,17 @@ type_map = {
     "symbol": "std::string",
 }
 
-with open(f"{script_dir}/rules/external.dl", "r") as f:
-    external = f.readlines()
+rules = []
+
+for file in os.listdir(f"{script_dir}/rules"):
+    if not file.endswith(".dl"): continue
+    with open(f"{script_dir}/rules/{file}", "r") as f:
+        rules += f.readlines()
 
 facts = []
 fact_defs = []
 
-for line in external:
+for line in rules:
     line = line.strip()
     if not line.startswith(".decl"): continue
     # decl, decl_ty = re.match(r".decl\s+(\w+)\s*\(\s*((\w+\s*:\s*\w+[,\s]*)*)\)", line).groups()

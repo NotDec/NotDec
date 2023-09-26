@@ -8,16 +8,53 @@
             "type": "lldb",
             "request": "launch",
             "name": "decompile",
-            "program": "${workspaceFolder}/build/bin/notdec",
-            "args": ["-i", "${file}", "-o", "${file}.ll", "--log-level", "level_debug", "--compat-mode", "--expand-mem=false"],
-            "cwd": "${workspaceFolder}"
+            // "program": "${workspaceFolder}/build/bin/notdec",
+            "program": "${command:cmake.launchTargetPath}",
+            "args": [
+                "-i",
+                "${file}",
+                "-o",
+                "${file}.ll",
+                "--log-level",
+                "level_debug",
+                "--compat-mode",
+                "--expand-mem=false"
+            ],
+            "cwd": "${workspaceFolder}",
+            // "preLaunchTask": "build"
         },
         {
             "type": "lldb",
             "request": "launch",
             "name": "recompile",
-            "program": "${workspaceFolder}/build/bin/notdec",
-            "args": ["-i", "${file}", "-o", "${file}.ll", "--log-level", "level_debug", "--compat-mode", "--recompile"],
+            "program": "${command:cmake.launchTargetPath}",
+            "args": [
+                "-i",
+                "${file}",
+                "-o",
+                "${file}.ll",
+                "--log-level",
+                "level_debug",
+                "--compat-mode",
+                "--recompile"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "structural emcc_print",
+            "program": "${command:cmake.launchTargetPath}",
+            "args": [
+                "-i",
+                "${file}",
+                "-o",
+                "${file}.c",
+                "--log-level",
+                "level_info",
+                "--compat-mode",
+                "--expand-mem=false"
+            ],
             "cwd": "${workspaceFolder}"
         }
     ]

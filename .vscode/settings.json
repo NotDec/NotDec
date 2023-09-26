@@ -74,5 +74,10 @@
     ],
     "cSpell.words": [
         "retdec"
+    ],
+    "cmake.generator": "Ninja",
+    "editor.formatOnSave": true,
+    "cmake.configureArgs": [
+        "-DCMAKE_CXX_FLAGS=\"-fuse-ld=lld\""
     ]
 }

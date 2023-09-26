@@ -1,10 +1,10 @@
 #include "optimizers/opt-manager.h"
+#include "optimizers/pointer-type-recovery.h"
 #include "optimizers/retdec-stack/retdec-abi.h"
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
 #include "optimizers/stack-pointer-finder.h"
-#include "optimizers/stack.h"
 #include "utils.h"
 #include "llvm/Transforms/Scalar/DCE.h"
 #include <algorithm>

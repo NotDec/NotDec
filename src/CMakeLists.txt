@@ -29,7 +29,7 @@ target_sources(notdec PRIVATE
 	frontend/wasm/parser-block.cpp
 	frontend/wasm/parser-instruction.cpp
 	optimizers/opt-manager.cpp
-	optimizers/stack.cpp
+	optimizers/pointer-type-recovery.cpp
 	optimizers/stack-pointer-finder.cpp
 	optimizers/retdec-stack/retdec-abi.cpp
 	optimizers/retdec-stack/retdec-ir-modifier.cpp
