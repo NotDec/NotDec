@@ -10,6 +10,29 @@ NotDec is
    - Variable Recovery
    - Structual Analysis
 
+
+#### Development - Linux
+
+Based on Ubuntu 22.04
+
+1. Install dependencies
+   - Use `apt`
+      ```
+      sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++ ninja-build
+      ```
+   - Install `wasi-sdk` to `/opt`
+      ```
+      wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sdk-20.0-linux.tar.gz -P /tmp
+      sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
+      ```
+1. clone this repo
+1. Install LLVM 14
+   - Execute `scripts/build-debug-llvm.sh` to download and build LLVM. You may encounter errors about no memory during linking, just decrease the parallel number to 1.
+1. Install Souffle
+   - https://souffle-lang.github.io/build and set `SOUFFLE_DOMAIN_64BIT=ON`
+1. cmake build
+
+
 # 中文
 
 [文档站](https://notdec.github.io/NotDec/)
@@ -97,28 +120,6 @@ VSCode DevContainer。出于[性能考虑](https://code.visualstudio.com/remote/
 
 如果出现了无法使用windows侧的ssh-agent提供的ssh key的forward功能：
 https://stackoverflow.com/questions/72293035/error-communication-with-agent-failed-when-ssh-auth-sock-is-set-but-ssh-agent 
-
-#### 开发环境搭建 - Linux
-
-基于Ubuntu系统。
-
-1. 软件安装
-   - apt安装
-      ```
-      sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++
-      ```
-   - 安装wasi-sdk到/opt
-      ```
-      wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sdk-20.0-linux.tar.gz -P /tmp
-      sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
-      ```
-1. clone 本仓库
-1. 安装LLVM 14
-   - 方式1：下载提前构建好的LLVM，解压得到`llvm-14.0.6.obj`文件夹，放到项目根目录。
-   - 方式2：执行`scripts/build-debug-llvm.sh`脚本，下载并构建LLVM源码。中途可能遇到内存不足的情况，需要手动降低并行数量到1。
-      成功构建后可以将`llvm-14.0.6.obj`文件夹打包发送给其他人。
-1. cmake build本仓库
-
 
 #### 代码调试
 
