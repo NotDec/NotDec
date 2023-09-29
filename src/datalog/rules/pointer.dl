@@ -1,4 +1,6 @@
-.type ptrDomain = /* Unknown{} | */ Pointer{} | Number {} | Top {}
+// alphabetic order, TODO currently must in a line for gen_header.py
+.type highTypeDomain = Number {} | Pointer {} | Top {} 
+//    /* | Unknown{} */ // unknown (bottom) not analyzed
 
 // 指针的指针，如：作为全局变量地址的sp。
 .decl point2Pointer(val: vid)
@@ -6,7 +8,7 @@
 .decl isMemory(val: vid)
 .input point2Pointer, isMemory
 
-.decl highType(val: vid, status: ptrDomain)
+.decl highType(val: vid, status: highTypeDomain)
 
 // Top always wins
 highType(val, _) <= highType(val, $Top()) :- true.
@@ -81,4 +83,16 @@ highType(ptr_sub_op, $Pointer()) :-
 
 // TODO Phi Inst propergate
 
-// Function formal arg to actual arg
+// // Function formal arg to actual arg
+// highType(arg, $Pointer()) :-
+//     Instruction(arg, "call", _, _),
+//     Operand(arg, 0, func),
+//     Function(func),
+//     Operand(arg, _, arg),
+//     FunctionArgument(func, arg).
+
+// // Function return value
+// highType(func, $Pointer()) :-
+//     Instruction(ret, "ret", _, _),
+//     Operand(ret, 0, func),
+//     Function(func, _),

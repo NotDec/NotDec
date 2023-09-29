@@ -10,6 +10,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <variant>
 
 using namespace llvm;
 
@@ -31,10 +32,16 @@ protected:
   std::map<std::string, size_t> type_ids;
   std::pair<size_t, bool> get_or_insert_type(std::string key);
 
-  std::map<const llvm::Value *, size_t> value2id;
-  std::map<size_t, const llvm::Value *> id2value;
-  size_t get_or_insert_value(const llvm::Value *val, bool assert_not_exist);
-  size_t get_or_insert_value(const llvm::Value *val);
+public:
+  // Abstract Values attach to a llvm value.
+  using aval = std::pair<const llvm::Value *, const char *>;
+  using val_t = std::variant<const llvm::Value *, aval>;
+
+protected:
+  std::map<val_t, size_t> value2id;
+  std::map<size_t, val_t> id2value;
+  size_t get_or_insert_value(val_t val, bool assert_not_exist);
+  size_t get_or_insert_value(val_t val);
 
 public:
   llvm::Module &mod;
@@ -42,7 +49,8 @@ public:
 
   std::map<const char *, std::string> facts;
   void append_fact(const char *key, std::string to_append);
-  size_t get_value_id(const llvm::Value *val);
+  size_t get_value_id(val_t val);
+  val_t get_value_by_id(size_t vid);
 
   static void generate(llvm::Module &mod, const char *outputDirname);
 
@@ -57,16 +65,20 @@ public:
   void output_files(std::string outputDirname);
 };
 
+/// For functions in InstVisitor to override, see:
+/// https://llvm.org/doxygen/classllvm_1_1InstVisitor.html
 class InstructionVisitor : public llvm::InstVisitor<InstructionVisitor> {
   friend class FactGenerator;
 
 public:
   InstructionVisitor(FactGenerator &generator, const llvm::Module &M)
-      : gen(generator), module(M) {}
+      : fg(generator), module(M) {}
+
+  void visitReturnInst(ReturnInst &I);
 
 private:
   /* Instance of outer fact-generator */
-  FactGenerator &gen;
+  FactGenerator &fg;
 
   /* Associated LLVM module */
   const llvm::Module &module;

@@ -2,12 +2,23 @@
 #include "optimizers/pointer-type-recovery.h"
 #include "datalog/fact-generator.h"
 #include "optimizers/stack-pointer-finder.h"
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <llvm/ADT/SmallString.h>
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Casting.h>
 #include <llvm/Support/FileSystem.h>
-#include <souffle/SouffleInterface.h>
+#include <llvm/Support/raw_ostream.h>
+#include <map>
+#include <ostream>
+#include <souffle/RamTypes.h>
 #include <system_error>
+#include <variant>
 
 namespace souffle {
 extern "C" {
@@ -24,17 +35,73 @@ using namespace llvm;
 // TODO 重构直接输入facts
 namespace notdec::optimizers {
 
-void fetch_result(souffle::SouffleProgram *prog) {
+void static inline assert_sizet(Type *ty, Module &M) {
+  assert(ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits()));
+}
+
+void static inline assert_sizet(Value *val, Module &M) {
+  assert_sizet(val->getType(), M);
+}
+
+template <typename T>
+long static get_ty_or_negative1(std::map<T, long> &m, T val) {
+  if (m.find(val) == m.end()) {
+    return -1;
+  }
+  return m.at(val);
+}
+
+void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
+                                       souffle::SouffleProgram *prog) {
+  using aval = datalog::FactGenerator::aval;
   if (souffle::Relation *rel = prog->getRelation("highType")) {
-    // int myInt;
-    // std::string mySymbol;
-    // for (auto &output : *rel) {
-    //   output >> mySymbol >> myString;
-    // }
-    std::cerr << "type is: " << rel->getSignature() << std::endl;
+    // std::cerr << "type is: " << rel->getSignature() << std::endl;
+    souffle::RamUnsigned vid;
+    souffle::RamSigned ptr_domain;
+    for (auto &output : *rel) {
+      output >> vid >> ptr_domain;
+      // std::cerr << "vid: " << vid << ", isptr: " << ptr_domain << std::endl;
+    }
+    auto value_var = fg.get_value_by_id(vid);
+    if (std::holds_alternative<const llvm::Value *>(value_var)) {
+      auto val =
+          const_cast<llvm::Value *>(std::get<const llvm::Value *>(value_var));
+      if (ptr_domain == datalog::ARITY_highTypeDomain::Top) {
+        llvm::errs() << "Datalog: type conflict(top): " << *val << "\n";
+      }
+      if (Instruction *inst = dyn_cast<Instruction>(val)) {
+        inst2type.emplace(inst, ptr_domain);
+      } else if (Argument *arg = dyn_cast<Argument>(val)) {
+        arg2type.emplace(arg, ptr_domain);
+      } else if (GlobalVariable *gv = dyn_cast<GlobalVariable>(val)) {
+        gv2type.emplace(gv, ptr_domain);
+      } else {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                  << "Unknown Value: ";
+        llvm::errs() << *val << "\n";
+        std::abort();
+      }
+    } else if (std::holds_alternative<aval>(value_var)) {
+      auto val = std::get<aval>(value_var);
+      if (strcmp(val.second, datalog::FACT_FuncRet) == 0) {
+        func_ret2type.emplace(cast<Function>(const_cast<Value *>(val.first)),
+                              ptr_domain);
+      } else {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                  << "Unknown Abstract Value: " << val.second << std::endl;
+        std::abort();
+      }
+    } else {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Unhandled variant type: " << value_var.index() << std::endl;
+      std::abort();
+    }
+
   } else {
-    std::cerr << "Failed to get output relation\n";
-    exit(1);
+    std::cerr << __FILE__ << ":" << __LINE__ << ": "
+              << "Failed to get output relation!\n"
+              << std::endl;
+    std::abort();
   }
 }
 
@@ -45,7 +112,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   datalog::FactGenerator fg(M);
   fg.visit_module();
 
-  // find mem
+  // 1. find mem/sp, export facts.
   Value *mem = nullptr;
   for (GlobalVariable &gv : M.getGlobalList()) {
     if (gv.getName().equals(MEM_NAME)) {
@@ -69,7 +136,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
                    datalog::to_fact_str(fg.get_value_id(sp.result)));
   }
 
-  // run souffle
+  // 2. run souffle
   const char *Name = "pointer_main";
   if (souffle::SouffleProgram *prog =
           souffle::ProgramFactory::newInstance(Name)) {
@@ -92,7 +159,9 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     prog->printAll(temp_path);
 
     // read analysis result
-    fetch_result(prog);
+    fetch_result(fg, prog);
+    // add sp to result
+    gv2type.emplace(sp.result, datalog::ARITY_highTypeDomain::Pointer);
 
     // clean up
     // delete directory if not debug
@@ -105,12 +174,72 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     std::cerr << "PointerTypeRecovery: Failed!" << std::endl;
     return PreservedAnalyses::all();
   }
-  // TODO read souffle result
 
-  // update pointer types
+  // 3. update pointer types
+  auto pty = get_pointer_type(M);
 
-  // return PreservedAnalyses::none();
-  return PreservedAnalyses::all();
+  // GlobalVariable: change type
+  for (GlobalVariable &gv : M.globals()) {
+    long ty = get_ty_or_negative1(gv2type, &gv);
+
+    if (ty == datalog::ARITY_highTypeDomain::Pointer) {
+      assert_sizet(gv.getValueType(), M);
+      gv.mutateType(pty->getPointerTo());
+      llvm::errs() << *gv.getType();
+    }
+  }
+
+  for (Function &F : M) {
+    bool isChanged = false;
+    // copy functino type, and modify arg or ret type.
+    Type **llvmArgTypes;
+    size_t numParameters = F.arg_size();
+    llvmArgTypes = (Type **)alloca(sizeof(Type *) * numParameters);
+    Type *retType = F.getReturnType();
+
+    // if arg typed to pointer, change it
+    for (size_t i = 0; i < numParameters; i++) {
+      Argument *arg = F.getArg(i);
+      long ty = get_ty_or_negative1(arg2type, arg);
+      if (ty != datalog::ARITY_highTypeDomain::Pointer) {
+        llvmArgTypes[i] = arg->getType();
+      } else { // is Pointer
+        assert_sizet(arg, M);
+        llvmArgTypes[i] = pty;
+        arg->mutateType(pty);
+        isChanged = true;
+      }
+    }
+    // if ret typed to pointer
+    long ty = get_ty_or_negative1(func_ret2type, &F);
+    if (ty == datalog::ARITY_highTypeDomain::Pointer) {
+      assert_sizet(F.getReturnType(), M);
+      retType = pty;
+      isChanged = true;
+    }
+
+    if (isChanged) {
+      FunctionType *newType = FunctionType::get(
+          retType, ArrayRef<Type *>(llvmArgTypes, numParameters), F.isVarArg());
+      F.mutateType(newType);
+    }
+
+    // handle insts
+    for (Instruction &inst : instructions(F)) {
+      long ty = get_ty_or_negative1(inst2type, &inst);
+      if (ty == datalog::ARITY_highTypeDomain::Pointer) {
+        assert_sizet(&inst, M);
+        inst.mutateType(pty);
+      }
+    }
+  }
+
+  return PreservedAnalyses::none();
+}
+
+Type *PointerTypeRecovery::get_pointer_type(Module &M) {
+  // char* type
+  return PointerType::get(IntegerType::get(M.getContext(), 8), 0);
 }
 
 struct stack : PassInfoMixin<stack> {

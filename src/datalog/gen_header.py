@@ -37,6 +37,24 @@ for line in rules:
     fact_defs.append(f'const char* FACT_{decl} = "{decl}";')
     facts.append(f'extern const char* FACT_{decl};')
 
+# enum ARITY_highType {
+#     Pointer,
+#     ...
+# };
+
+# handle ADT enum definition
+for line in rules:
+    line = line.strip()
+    if not line.startswith(".type"): continue
+    if '|' not in line: continue
+    name = re.search(r".type\s+(\w+)\s*=", line).group(1)
+    facts.append(f'enum ARITY_{name} {{')
+    # re find all items
+    # first word after '=' or '|'
+    for mat in re.findall(r'[=|]\s*(\w+)', line):
+        facts.append(f"  {mat},")
+    facts.append("};")
+
 with open(f"{script_dir}/fact-names.h", "w") as f:
     f.write('namespace notdec::datalog {\n')
     f.write('\n'.join(facts))

@@ -23,15 +23,15 @@
 .decl GlobalVarAttr(id: vid, isconst: unsigned, linkage: symbol, visibility: unsigned)
 .input IntConstant, Constant, ValueType, GlobalVariable, GlobalVarAttr
 
-// func value type is return type
 .decl Func(id: vid, name: symbol)
 .decl FuncAttr(id: vid, linkage: symbol, visibility: unsigned)
 .decl FuncArg(id: vid, func: vid, idx: unsigned, name: symbol)
-.decl FuncRetTy(func: vid, type: tid)
-.input Func, FuncAttr, FuncArg, FuncRetTy
+// 函数返回值的抽象节点。return的时候也得和引用参数一样，指定是哪个返回值
+.decl FuncRet(id: vid, func: vid)
+.input Func, FuncAttr, FuncArg, FuncRet
 
 // block type is label
-.decl BasicBlock(id: vid, name: symbol)
+.decl BasicBlock(id: vid, func: vid, name: symbol)
 .decl Instruction(id: vid, opcode: symbol, name: symbol, block: vid)
 .decl Operand(inst: vid, idx: unsigned, value: vid)
 .input BasicBlock, Instruction, Operand
@@ -41,3 +41,7 @@
 .decl CFGEdge(from: vid, to: vid)
 .decl InstNext(from: vid, to: vid)
 .input BlockEntryInst, FuncEntryBlock, CFGEdge, InstNext
+
+// instruction specific relationship
+.decl RetInstVal(inst: vid, ret_val: vid)
+.input RetInstVal

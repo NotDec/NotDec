@@ -1,6 +1,9 @@
 #ifndef _NOTDEC_OPTIMIZERS_POINTER_TYPE_RECOVERY_H_
 #define _NOTDEC_OPTIMIZERS_POINTER_TYPE_RECOVERY_H_
 
+#include <llvm/IR/Argument.h>
+#include <llvm/IR/Instruction.h>
+#include <map>
 #include <set>
 
 #include <llvm/IR/GlobalVariable.h>
@@ -13,6 +16,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <souffle/SouffleInterface.h>
 
 #include "datalog/fact-generator.h"
 
@@ -31,6 +35,14 @@ struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   static bool isRequired() { return true; }
 
   const char *MEM_NAME = "__notdec_mem0";
+  std::map<Argument *, long> arg2type;
+  std::map<Instruction *, long> inst2type;
+  std::map<Function *, long> func_ret2type;
+  std::map<GlobalVariable *, long> gv2type;
+  std::map<Value *, Value *> replace_map;
+
+  void fetch_result(datalog::FactGenerator &fg, souffle::SouffleProgram *prog);
+  static Type *get_pointer_type(Module &M);
 };
 
 } // namespace notdec::optimizers
