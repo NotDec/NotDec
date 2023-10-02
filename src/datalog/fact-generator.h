@@ -6,6 +6,7 @@
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 #include <map>
 #include <sstream>
@@ -75,6 +76,7 @@ public:
       : fg(generator), module(M) {}
 
   void visitReturnInst(ReturnInst &I);
+  void visitCallInst(CallInst &I);
 
 private:
   /* Instance of outer fact-generator */

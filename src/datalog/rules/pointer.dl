@@ -1,3 +1,5 @@
+// Pointer Type Analysis Rules
+
 // alphabetic order, TODO currently must in a line for gen_header.py
 .type highTypeDomain = Number {} | Pointer {} | Top {} 
 //    /* | Unknown{} */ // unknown (bottom) not analyzed
@@ -63,9 +65,9 @@ highType(ptr_add_op, $Pointer()) :-
 // ptr = ptr - int
 highType(ptr_sub, $Pointer()) :-
     Instruction(ptr_sub, "sub", _, _),
-    Operand(ptr_add, 0, ptr),
+    Operand(ptr_sub, 0, ptr),
     highType(ptr, $Pointer()),
-    Operand(ptr_add, 1, offset),
+    Operand(ptr_sub, 1, offset),
     ValueType(offset, ty),
     SizeType(ty).
 
@@ -79,20 +81,48 @@ highType(ptr_sub_op, $Pointer()) :-
     SizeType(ty).
 
 // ptr - ptr = int
-// TODO
+// highType(ptr_sub, $Number()) :-
+//     Instruction(ptr_sub, "sub", _, _),
+//     Operand(ptr_sub, 0, ptr1),
+//     highType(ptr1, $Pointer()),
+//     Operand(ptr_sub, 1, ptr2),
+//     highType(ptr2, $Pointer()).
+
 
 // TODO Phi Inst propergate
 
-// // Function formal arg to actual arg
-// highType(arg, $Pointer()) :-
-//     Instruction(arg, "call", _, _),
-//     Operand(arg, 0, func),
-//     Function(func),
-//     Operand(arg, _, arg),
-//     FunctionArgument(func, arg).
+// ========== interprocedual: call related ============
 
-// // Function return value
-// highType(func, $Pointer()) :-
-//     Instruction(ret, "ret", _, _),
-//     Operand(ret, 0, func),
-//     Function(func, _),
+// ret inst -> abstract return value
+highType(retv, hty) :-
+    // if there is a `ret val`, and the return inst refers to retv
+    Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
+    highType(val, hty). // val is pointer -> retv is pointer
+
+highType(val, hty) :-
+    // if there is a `ret val`, and the return inst refers to retv
+    Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
+    highType(retv, hty). // retv is pointer -> val is pointer
+
+// abstract return value -> call inst
+highType(call, hty) :-
+    // if there is a `call func ...`, and the func's return value is retv
+    Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
+    highType(retv, hty). // retv is pointer -> call result is pointer
+
+highType(retv, hty) :-
+    // if there is a `call func ...`, and the func's return value is retv
+    Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
+    highType(call, hty). // call result is pointer -> retv is pointer
+
+// argument -> call operand
+// only 2 rules, because Arg will be directly refered by inst.
+highType(arg, hty) :-
+    // if there is a `call func ...`, i-th arg is val, and the func's i-th arg is arg.
+    Instruction(call, "call", _, _), Operand(call, idx, val), CallTarget(call, func), FuncArg(arg, func, idx, _),
+    highType(val, hty). // call arg -> func arg
+
+highType(arg, hty) :-
+    // if there is a `call func ...`, i-th arg is val, and the func's i-th arg is arg.
+    Instruction(call, "call", _, _), Operand(call, idx, val), CallTarget(call, func), FuncArg(arg, func, idx, _),
+    highType(val, hty). // func arg -> call arg

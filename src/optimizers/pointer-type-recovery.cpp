@@ -56,47 +56,51 @@ void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
   using aval = datalog::FactGenerator::aval;
   if (souffle::Relation *rel = prog->getRelation("highType")) {
     // std::cerr << "type is: " << rel->getSignature() << std::endl;
+    // std::cerr << "getArity is: " << rel->getArity() << std::endl;
+    // std::cerr << "name is: " << rel->getName() << std::endl;
+    // std::cerr << "name is: " << prog-><< std::endl;
     souffle::RamUnsigned vid;
     souffle::RamSigned ptr_domain;
     for (auto &output : *rel) {
       output >> vid >> ptr_domain;
       // std::cerr << "vid: " << vid << ", isptr: " << ptr_domain << std::endl;
-    }
-    auto value_var = fg.get_value_by_id(vid);
-    if (std::holds_alternative<const llvm::Value *>(value_var)) {
-      auto val =
-          const_cast<llvm::Value *>(std::get<const llvm::Value *>(value_var));
-      if (ptr_domain == datalog::ARITY_highTypeDomain::Top) {
-        llvm::errs() << "Datalog: type conflict(top): " << *val << "\n";
-      }
-      if (Instruction *inst = dyn_cast<Instruction>(val)) {
-        inst2type.emplace(inst, ptr_domain);
-      } else if (Argument *arg = dyn_cast<Argument>(val)) {
-        arg2type.emplace(arg, ptr_domain);
-      } else if (GlobalVariable *gv = dyn_cast<GlobalVariable>(val)) {
-        gv2type.emplace(gv, ptr_domain);
-      } else {
-        std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                  << "Unknown Value: ";
-        llvm::errs() << *val << "\n";
-        std::abort();
-      }
-    } else if (std::holds_alternative<aval>(value_var)) {
-      auto val = std::get<aval>(value_var);
-      if (strcmp(val.second, datalog::FACT_FuncRet) == 0) {
-        func_ret2type.emplace(cast<Function>(const_cast<Value *>(val.first)),
-                              ptr_domain);
-      } else {
-        std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                  << "Unknown Abstract Value: " << val.second << std::endl;
-        std::abort();
-      }
-    } else {
-      std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Unhandled variant type: " << value_var.index() << std::endl;
-      std::abort();
-    }
 
+      auto value_var = fg.get_value_by_id(vid);
+      if (std::holds_alternative<const llvm::Value *>(value_var)) {
+        auto val =
+            const_cast<llvm::Value *>(std::get<const llvm::Value *>(value_var));
+        if (ptr_domain == datalog::ARITY_highTypeDomain::Top) {
+          llvm::errs() << "Datalog: type conflict(top): " << *val << "\n";
+        }
+        if (Instruction *inst = dyn_cast<Instruction>(val)) {
+          inst2type.emplace(inst, ptr_domain);
+        } else if (Argument *arg = dyn_cast<Argument>(val)) {
+          arg2type.emplace(arg, ptr_domain);
+        } else if (GlobalVariable *gv = dyn_cast<GlobalVariable>(val)) {
+          gv2type.emplace(gv, ptr_domain);
+        } else {
+          std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                    << "Unknown Value: ";
+          llvm::errs() << *val << "\n";
+          // std::abort();
+        }
+      } else if (std::holds_alternative<aval>(value_var)) {
+        auto val = std::get<aval>(value_var);
+        if (strcmp(val.second, datalog::FACT_FuncRet) == 0) {
+          func_ret2type.emplace(cast<Function>(const_cast<Value *>(val.first)),
+                                ptr_domain);
+        } else {
+          std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                    << "Unknown Abstract Value: " << val.second << std::endl;
+          std::abort();
+        }
+      } else {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                  << "Unhandled variant type: " << value_var.index()
+                  << std::endl;
+        std::abort();
+      }
+    }
   } else {
     std::cerr << __FILE__ << ":" << __LINE__ << ": "
               << "Failed to get output relation!\n"
@@ -177,15 +181,29 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
 
   // 3. update pointer types
   auto pty = get_pointer_type(M);
+  // erase later to prevent memory address reuse
+  std::vector<llvm::GlobalVariable *> gv2erase;
 
+  // llvm\lib\Transforms\Utils\CloneModule.cpp
   // GlobalVariable: change type
   for (GlobalVariable &gv : M.globals()) {
     long ty = get_ty_or_negative1(gv2type, &gv);
 
     if (ty == datalog::ARITY_highTypeDomain::Pointer) {
       assert_sizet(gv.getValueType(), M);
-      gv.mutateType(pty->getPointerTo());
-      llvm::errs() << *gv.getType();
+      // handle initializer
+      auto init = gv.getInitializer();
+      init = ConstantExpr::getIntToPtr(init, pty);
+      gv.setInitializer(nullptr);
+
+      GlobalVariable *new_gv = new GlobalVariable(
+          M, pty, gv.isConstant(), gv.getLinkage(), init, gv.getName(), &gv,
+          gv.getThreadLocalMode(), gv.getType()->getAddressSpace());
+      new_gv->copyAttributesFrom(&gv);
+      new_gv->takeName(&gv); // so that no numeric suffix in name
+      gv.replaceAllUsesWith(new_gv);
+
+      gv2erase.emplace_back(&gv);
     }
   }
 
@@ -232,6 +250,12 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         inst.mutateType(pty);
       }
     }
+  }
+
+  // free all old values
+  for (auto v : gv2erase) {
+    assert(v->use_empty());
+    v->eraseFromParent();
   }
 
   return PreservedAnalyses::none();

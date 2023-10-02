@@ -44,4 +44,5 @@
 
 // instruction specific relationship
 .decl RetInstVal(inst: vid, ret_val: vid)
-.input RetInstVal
+.decl CallTarget(inst: vid, target_func: vid)
+.input RetInstVal, CallTarget

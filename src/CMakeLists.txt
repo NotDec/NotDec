@@ -1,3 +1,4 @@
+add_subdirectory(datalog)
 
 add_library(notdec STATIC
 	# source files that are common to all frontend
@@ -8,6 +9,7 @@ add_library(notdec STATIC
 target_link_libraries(notdec
 	PUBLIC
 	LLVMCore LLVMIRReader LLVMSupport LLVMPasses
+	notdec-datalog
 )
 
 if (NOTDEC_ENABLE_WASM)
@@ -58,7 +60,6 @@ add_executable(notdec-decompile
 
 target_link_libraries(notdec-decompile 
 	notdec
-	notdec-datalog
 )
 
 set_target_properties(notdec-decompile
@@ -76,8 +77,10 @@ if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
 	# for retdec-llvmir2hll
 endif()
 
-add_subdirectory(datalog)
+
 add_dependencies(notdec souffle_cpp)
+set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/datalog/rules/pointer_main.cpp PROPERTY GENERATED 1)
+
 target_sources(notdec PRIVATE
         datalog/rules/pointer_main.cpp)
 set_source_files_properties(datalog/rules/pointer_main.cpp PROPERTIES COMPILE_FLAGS "-frtti -w -D__EMBEDDED_SOUFFLE__ -DRAM_DOMAIN_SIZE=64")

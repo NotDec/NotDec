@@ -286,13 +286,15 @@ void FactGenerator::visit_functions() {
     auto type_id = visit_type(f.getReturnType());
     append_fact(FACT_ValueType, to_fact_str(ret_id, type_id));
 
+    size_t ind = 0;
     for (auto &arg : f.args()) {
       auto arg_name = getNameOrAsOperand(arg);
       auto arg_id = get_or_insert_value(&arg);
-      append_fact(FACT_FuncArg, to_fact_str(arg_id, id, arg_name));
+      append_fact(FACT_FuncArg, to_fact_str(arg_id, id, ind, arg_name));
 
       auto arg_type_id = visit_type(arg.getType());
       append_fact(FACT_ValueType, to_fact_str(arg_id, arg_type_id));
+      ind += 1;
     }
   }
 
@@ -356,6 +358,12 @@ void FactGenerator::visit_functions() {
       for (const llvm::Instruction &instr : bb) {
         auto inst_id = value2id.at(&instr);
 
+        // skip call inst. visitCallInst will handle it.
+        if (isa<CallInst>(instr)) {
+          IV.visit(const_cast<llvm::Instruction &>(instr));
+          continue;
+        }
+
         // visit operands in second pass
         size_t ind = 0;
         for (auto &op : instr.operands()) {
@@ -376,6 +384,24 @@ void InstructionVisitor::visitReturnInst(ReturnInst &I) {
                  to_fact_str(fg.value2id.at(&I),
                              fg.value2id.at(FactGenerator::aval{
                                  I.getParent()->getParent(), FACT_FuncRet})));
+}
+
+void InstructionVisitor::visitCallInst(CallInst &I) {
+  // for each arg (instead of operand)
+  size_t ind = 0;
+  for (auto &arg : I.args()) {
+    auto op_vid = fg.visit_operand(*arg.get());
+    fg.append_fact(FACT_Operand, to_fact_str(fg.value2id.at(&I), ind, op_vid));
+    ind += 1;
+  }
+
+  // TODO call indirect
+  auto target = I.getCalledFunction();
+  if (target == nullptr) {
+    return;
+  }
+  fg.append_fact(FACT_CallTarget,
+                 to_fact_str(fg.value2id.at(&I), fg.value2id.at(target)));
 }
 
 std::string printType(Type *ty) {
