@@ -7,4 +7,4 @@ if [ -z "${1}" ]; then
     exit
 fi
 
-souffle $SCRIPTPATH/pointer_main.dl -F $1 -D $1
+souffle $SCRIPTPATH/pointer_main.dl --debug-report=$1/debug.html -F $1 -D $1

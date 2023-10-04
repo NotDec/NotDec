@@ -2,6 +2,18 @@ add_subdirectory(datalog)
 
 add_library(notdec STATIC
 	# source files that are common to all frontend
+	optimizers/opt-manager.cpp
+	optimizers/pointer-type-recovery.cpp
+	optimizers/stack-pointer-finder.cpp
+	optimizers/stack-alloca.cpp
+	optimizers/retdec-stack/retdec-abi.cpp
+	optimizers/retdec-stack/retdec-ir-modifier.cpp
+	optimizers/retdec-stack/retdec-reaching-definition.cpp
+	optimizers/retdec-stack/retdec-stack.cpp
+	optimizers/retdec-stack/retdec-stack-pointer-op-remove.cpp
+	optimizers/retdec-stack/retdec-symbolic-tree.cpp
+	optimizers/retdec-stack/retdec-utils.cpp
+	backend/structural-analysis-ACDI.cpp
 )
 
 # include直接在外部设置了src目录。
@@ -26,22 +38,6 @@ if (NOTDEC_ENABLE_WASM)
 	# add_dependencies(notdec wabt)
 endif ()
 
-target_sources(notdec PRIVATE
-	frontend/wasm/parser.cpp
-	frontend/wasm/parser-block.cpp
-	frontend/wasm/parser-instruction.cpp
-	optimizers/opt-manager.cpp
-	optimizers/pointer-type-recovery.cpp
-	optimizers/stack-pointer-finder.cpp
-	optimizers/retdec-stack/retdec-abi.cpp
-	optimizers/retdec-stack/retdec-ir-modifier.cpp
-	optimizers/retdec-stack/retdec-reaching-definition.cpp
-	optimizers/retdec-stack/retdec-stack.cpp
-	optimizers/retdec-stack/retdec-stack-pointer-op-remove.cpp
-	optimizers/retdec-stack/retdec-symbolic-tree.cpp
-	optimizers/retdec-stack/retdec-utils.cpp
-	backend/structural-analysis-ACDI.cpp
-)
 
 
 set_target_properties(notdec

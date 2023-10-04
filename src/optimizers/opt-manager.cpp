@@ -1,25 +1,30 @@
+#include <algorithm>
+#include <cstddef>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "optimizers/opt-manager.h"
 #include "optimizers/pointer-type-recovery.h"
 #include "optimizers/retdec-stack/retdec-abi.h"
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "optimizers/stack-alloca.h"
 #include "optimizers/stack-pointer-finder.h"
 #include "utils.h"
-#include "llvm/Transforms/Scalar/DCE.h"
-#include <algorithm>
 
 #include "llvm/IR/Verifier.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar/ADCE.h"
 #include "llvm/Transforms/Scalar/BDCE.h"
+#include "llvm/Transforms/Scalar/DCE.h"
 #include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
 #include "llvm/Transforms/Scalar/SCCP.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
 #include "llvm/Transforms/Utils/SimplifyCFGOptions.h"
-#include <cstddef>
-#include <cstdlib>
-#include <iostream>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -32,9 +37,6 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/Scalar/InstSimplifyPass.h>
-#include <string>
-#include <utility>
-#include <vector>
 
 namespace notdec::optimizers {
 
@@ -196,7 +198,7 @@ struct HelloWorld : PassInfoMixin<HelloWorld> {
 };
 
 // Module Pass example
-struct HelloModule : PassInfoMixin<HelloWorld> {
+struct HelloModule : PassInfoMixin<HelloModule> {
   PreservedAnalyses run(Module &F, ModuleAnalysisManager &) {
     errs() << "(llvm-tutor) Hello Module: " << F.getName() << "\n";
     return PreservedAnalyses::all();
@@ -263,6 +265,7 @@ void DecompileConfig::run_passes() {
       MPM.addPass(retdec::bin2llvmir::StackAnalysis(&abi));
       MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));
     } else if (opts.stackRec == "notdec") {
+      MPM.addPass(LinearAllocationRecovery());
       MPM.addPass(VerifierPass(false));
       // // 导出datalog规则
       MPM.addPass(PointerTypeRecovery());

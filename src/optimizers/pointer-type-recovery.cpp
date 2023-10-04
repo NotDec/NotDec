@@ -8,6 +8,9 @@
 #include <iterator>
 #include <llvm/ADT/SmallString.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
@@ -43,22 +46,24 @@ void static inline assert_sizet(Value *val, Module &M) {
   assert_sizet(val->getType(), M);
 }
 
-template <typename T>
-long static get_ty_or_negative1(std::map<T, long> &m, T val) {
-  if (m.find(val) == m.end()) {
+long PointerTypeRecovery::get_ty_or_negative1(llvm::Value *val) {
+  if (val2hty.find(val) == val2hty.end()) {
     return -1;
   }
-  return m.at(val);
+  return val2hty.at(val);
+}
+
+long PointerTypeRecovery::get_ty_or_negative1(aval val) {
+  if (val2hty.find(val) == val2hty.end()) {
+    return -1;
+  }
+  return val2hty.at(val);
 }
 
 void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
                                        souffle::SouffleProgram *prog) {
   using aval = datalog::FactGenerator::aval;
   if (souffle::Relation *rel = prog->getRelation("highType")) {
-    // std::cerr << "type is: " << rel->getSignature() << std::endl;
-    // std::cerr << "getArity is: " << rel->getArity() << std::endl;
-    // std::cerr << "name is: " << rel->getName() << std::endl;
-    // std::cerr << "name is: " << prog-><< std::endl;
     souffle::RamUnsigned vid;
     souffle::RamSigned ptr_domain;
     for (auto &output : *rel) {
@@ -66,40 +71,18 @@ void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
       // std::cerr << "vid: " << vid << ", isptr: " << ptr_domain << std::endl;
 
       auto value_var = fg.get_value_by_id(vid);
-      if (std::holds_alternative<const llvm::Value *>(value_var)) {
-        auto val =
-            const_cast<llvm::Value *>(std::get<const llvm::Value *>(value_var));
-        if (ptr_domain == datalog::ARITY_highTypeDomain::Top) {
+      if (ptr_domain == datalog::ARITY_highTypeDomain::Top) {
+        if (std::holds_alternative<const llvm::Value *>(value_var)) {
+          auto val = const_cast<llvm::Value *>(
+              std::get<const llvm::Value *>(value_var));
           llvm::errs() << "Datalog: type conflict(top): " << *val << "\n";
+        } else if (std::holds_alternative<aval>(value_var)) {
+          auto val = std::get<aval>(value_var);
+          llvm::errs() << "Datalog: type conflict(top): " << val.second
+                       << " of " << *val.first << "\n";
         }
-        if (Instruction *inst = dyn_cast<Instruction>(val)) {
-          inst2type.emplace(inst, ptr_domain);
-        } else if (Argument *arg = dyn_cast<Argument>(val)) {
-          arg2type.emplace(arg, ptr_domain);
-        } else if (GlobalVariable *gv = dyn_cast<GlobalVariable>(val)) {
-          gv2type.emplace(gv, ptr_domain);
-        } else {
-          std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                    << "Unknown Value: ";
-          llvm::errs() << *val << "\n";
-          // std::abort();
-        }
-      } else if (std::holds_alternative<aval>(value_var)) {
-        auto val = std::get<aval>(value_var);
-        if (strcmp(val.second, datalog::FACT_FuncRet) == 0) {
-          func_ret2type.emplace(cast<Function>(const_cast<Value *>(val.first)),
-                                ptr_domain);
-        } else {
-          std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                    << "Unknown Abstract Value: " << val.second << std::endl;
-          std::abort();
-        }
-      } else {
-        std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                  << "Unhandled variant type: " << value_var.index()
-                  << std::endl;
-        std::abort();
       }
+      val2hty.emplace(value_var, ptr_domain);
     }
   } else {
     std::cerr << __FILE__ << ":" << __LINE__ << ": "
@@ -134,7 +117,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   // find sp and set isPointer
   auto sp = MAM.getResult<StackPointerFinderAnalysis>(M);
   if (sp.result == nullptr) {
-    std::cerr << "ERROR: sp not found!!";
+    std::cerr << "ERROR: Stack Pointer not found!!";
   } else {
     fg.append_fact(datalog::FACT_point2Pointer,
                    datalog::to_fact_str(fg.get_value_id(sp.result)));
@@ -164,8 +147,9 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
 
     // read analysis result
     fetch_result(fg, prog);
+    std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
     // add sp to result
-    gv2type.emplace(sp.result, datalog::ARITY_highTypeDomain::Pointer);
+    val2hty.emplace(sp.result, datalog::ARITY_highTypeDomain::Pointer);
 
     // clean up
     // delete directory if not debug
@@ -181,13 +165,15 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
 
   // 3. update pointer types
   auto pty = get_pointer_type(M);
+  IRBuilder builder(M.getContext());
   // erase later to prevent memory address reuse
   std::vector<llvm::GlobalVariable *> gv2erase;
+  std::vector<llvm::Instruction *> inst2erase;
 
   // llvm\lib\Transforms\Utils\CloneModule.cpp
   // GlobalVariable: change type
   for (GlobalVariable &gv : M.globals()) {
-    long ty = get_ty_or_negative1(gv2type, &gv);
+    long ty = get_ty_or_negative1(&gv);
 
     if (ty == datalog::ARITY_highTypeDomain::Pointer) {
       assert_sizet(gv.getValueType(), M);
@@ -218,7 +204,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     // if arg typed to pointer, change it
     for (size_t i = 0; i < numParameters; i++) {
       Argument *arg = F.getArg(i);
-      long ty = get_ty_or_negative1(arg2type, arg);
+      long ty = get_ty_or_negative1(arg);
       if (ty != datalog::ARITY_highTypeDomain::Pointer) {
         llvmArgTypes[i] = arg->getType();
       } else { // is Pointer
@@ -229,7 +215,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
       }
     }
     // if ret typed to pointer
-    long ty = get_ty_or_negative1(func_ret2type, &F);
+    long ty = get_ty_or_negative1(aval{&F, datalog::FACT_FuncRet});
     if (ty == datalog::ARITY_highTypeDomain::Pointer) {
       assert_sizet(F.getReturnType(), M);
       retType = pty;
@@ -244,10 +230,39 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
 
     // handle insts
     for (Instruction &inst : instructions(F)) {
-      long ty = get_ty_or_negative1(inst2type, &inst);
+      long ty = get_ty_or_negative1(&inst);
       if (ty == datalog::ARITY_highTypeDomain::Pointer) {
         assert_sizet(&inst, M);
         inst.mutateType(pty);
+      }
+      if (auto add = dyn_cast<BinaryOperator>(&inst)) {
+        if (add->getOpcode() == Instruction::Add) {
+          // find ptr and number operand
+          Value *op1 = add->getOperand(0);
+          Value *op2 = add->getOperand(1);
+          long ty1 = get_ty_or_negative1(op1);
+          long ty2 = get_ty_or_negative1(op2);
+          if (ty1 != datalog::Pointer && ty2 != datalog::Pointer) {
+            llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                         << "Warning: ptr = unk + unk: " << *add << "\n";
+            continue;
+          }
+          // not pointer + pointer
+          assert(!(ty1 == datalog::Pointer && ty2 == datalog::Pointer));
+          // op1 = ptr, op2 = number
+          if (ty1 != datalog::Pointer) {
+            std::swap(op1, op2);
+            std::swap(ty1, ty2);
+          }
+          builder.SetInsertPoint(add);
+          if (op1->getType()->isIntegerTy()) {
+            op1 = builder.CreateIntToPtr(op1, pty);
+          }
+          auto gep = builder.CreateGEP(pty->getPointerElementType(), op1, op2,
+                                       add->getName());
+          add->replaceAllUsesWith(gep);
+          inst2erase.emplace_back(add);
+        }
       }
     }
   }
@@ -255,6 +270,10 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   // free all old values
   for (auto v : gv2erase) {
     assert(v->use_empty());
+    v->eraseFromParent();
+  }
+  // erase insts
+  for (auto v : inst2erase) {
     v->eraseFromParent();
   }
 
@@ -337,10 +356,12 @@ struct stack : PassInfoMixin<stack> {
       }
     }
     if (stackSize == nullptr) {
-      errs() << "[-] sp not found in function " << F.getName() << "\n";
+      errs() << "[-] Stack Pointer not found in function " << F.getName()
+             << "\n";
+      errs() << "PointerTypeRecovery cannot proceed!\n";
       return PreservedAnalyses::all();
     } else
-      errs() << "[+] sp found in function " << F.getName()
+      errs() << "[+] Stack Pointer found in function " << F.getName()
              << "size: " << *stackSize << "\n";
 
     // create newsp
