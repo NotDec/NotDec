@@ -4,11 +4,9 @@
 .type highTypeDomain = Number {} | Pointer {} | Top {} 
 //    /* | Unknown{} */ // unknown (bottom) not analyzed
 
-// 指针的指针，如：作为全局变量地址的sp。
-.decl point2Pointer(val: vid)
 // specify memory value
 .decl isMemory(val: vid)
-.input point2Pointer, isMemory
+.input isMemory
 
 .decl highType(val: vid, status: highTypeDomain)
 
@@ -19,6 +17,25 @@ highType(val, _) <= highType(val, $Top()) :- true.
 highType(val, $Top()) :- highType(val, $Pointer()), highType(val, $Number()).
 .output highType
 
+// ======== Rule start =========
+
+// int constant in (0,1000) is number
+highType(id, $Number()) :- 
+    IntConstant(id, num), num > 0, num < 1000.
+
+// alloca is pointer
+highType(val, $Pointer()) :- 
+    Instruction(val, "alloca", _, _).
+
+// gep is pointer
+highType(id, $Pointer()) :- 
+    Instruction(id, "getelementptr", _, _).
+
+// gep op is pointer
+highType(op, $Pointer()) :- 
+    Instruction(id, "getelementptr", _, _),
+    Operand(id, 0, op), ValueType(op, ty), SizeType(ty).
+
 // getelemptr mem, 0, X
 highType(X, $Pointer()) :- 
     Instruction(id, "getelementptr", _, _),
@@ -28,129 +45,113 @@ highType(X, $Pointer()) :-
     IntConstant(zeroid, 0),
     Operand(id, 2, X).
 
-// load from point2Pointer
-highType(load_inst, $Pointer()) :- 
-    Instruction(load_inst, "load", _, _),
-    Operand(load_inst, 0, sp),
-    point2Pointer(sp).
-    // and i32 type?
-
-// store to point2Pointer
-highType(store_val, $Pointer()) :- 
-    Instruction(store_inst, "store", _, _),
-    Operand(store_inst, 0, store_val),
-    Operand(store_inst, 1, sp),
-    point2Pointer(sp).
-
 
 // ========= Add =============
 
 // number + number = number
-// highType(add, $Number()) :- 
-//     Instruction(add, "add", _, _),
-//     Operand(add, 0, op1), highType(op1, $Number()),
-//     Operand(add, 1, op2), highType(op2, $Number()).
+highType(add, $Number()) :- 
+    Instruction(add, "add", _, _),
+    Operand(add, 0, op1), highType(op1, $Number()),
+    Operand(add, 1, op2), highType(op2, $Number()).
 
 // if result is number, type two operands as number
-// highType(op, $Number()) :- 
-//     Instruction(num_add, "add", _, _), Operand(num_add, _, op),
-//     highType(num_add, $Number()).
+highType(op, $Number()) :- 
+    Instruction(num_add, "add", _, _), Operand(num_add, _, op),
+    highType(num_add, $Number()).
 
 // ptr + ptr = top
-// highType(add, $Top()) :- 
-//     Instruction(add, "add", _, _),
-//     Operand(add, 0, op1), highType(op1, $Pointer()),
-//     Operand(add, 1, op2), highType(op2, $Pointer()).
+highType(add, $Top()) :- 
+    Instruction(add, "add", _, _),
+    Operand(add, 0, op1), highType(op1, $Pointer()),
+    Operand(add, 1, op2), highType(op2, $Pointer()).
 
-// // if a operand of add is ptr, then type result as ptr
-// highType(ptr_add, $Pointer()) :-
-//     Instruction(ptr_add, "add", _, _), Operand(ptr_add, _, ptr), highType(ptr, $Pointer()).
+// if a operand of add is ptr, then type result as ptr
+highType(ptr_add, $Pointer()) :-
+    Instruction(ptr_add, "add", _, _), Operand(ptr_add, _, ptr), highType(ptr, $Pointer()).
 
-// // if a operand of add is ptr, then type another operand as number
-// highType(offset, $Number()) :-
-//     Instruction(ptr_add, "add", _, _), Operand(ptr_add, idx1, ptr), highType(ptr, $Pointer()),
-//     Operand(ptr_add, idx2, offset), idx1 != idx2.
-//     // ValueType(offset, ty), SizeType(ty).
+// if a operand of add is ptr, then type another operand as number
+highType(offset, $Number()) :-
+    Instruction(ptr_add, "add", _, _), Operand(ptr_add, idx1, ptr), highType(ptr, $Pointer()),
+    Operand(ptr_add, idx2, offset), idx1 != idx2.
 
 // if result is ptr, one operand is number, then type another operand as ptr
-// highType(ptr, $Pointer()) :-
-//     Instruction(ptr_add, "add", _, _), Operand(ptr_add, idx1, ptr),
-//     Operand(ptr_add, idx2, offset), idx1 != idx2,
-//     highType(ptr_add, $Pointer()), highType(offset, $Number()).
-//     // ValueType(offset, ty), SizeType(ty).
+highType(ptr, $Pointer()) :-
+    Instruction(ptr_add, "add", _, _), Operand(ptr_add, idx1, ptr),
+    Operand(ptr_add, idx2, offset), idx1 != idx2,
+    highType(ptr_add, $Pointer()), highType(offset, $Number()).
 
-// // if result is ptr, one operand is ptr, then type another operand as number
-// highType(offset, $Number()) :-
-//     Instruction(ptr_add, "add", _, _), Operand(ptr_add, idx1, ptr),
-//     Operand(ptr_add, idx2, offset), idx1 != idx2,
-//     highType(ptr_add, $Pointer()), highType(ptr, $Pointer()).
+// if result is ptr, one operand is ptr, then type another operand as number
+highType(offset, $Number()) :-
+    Instruction(ptr_add, "add", _, _), Operand(ptr_add, idx1, ptr),
+    Operand(ptr_add, idx2, offset), idx1 != idx2,
+    highType(ptr_add, $Pointer()), highType(ptr, $Pointer()).
 
-// // ======== Sub: Forward =========
+// ======== Sub: Forward =========
 
-// // num - num = num
-// highType(sub, $Number()) :- 
-//     Instruction(sub, "sub", _, _),
-//     Operand(sub, 0, op1), highType(op1, $Number()),
-//     Operand(sub, 1, op2), highType(op2, $Number()).
+// num - num = num
+highType(sub, $Number()) :- 
+    Instruction(sub, "sub", _, _),
+    Operand(sub, 0, op1), highType(op1, $Number()),
+    Operand(sub, 1, op2), highType(op2, $Number()).
 
-// // if op1 is ptr, op2 is number, then type result as ptr
-// highType(ptr_sub, $Pointer()) :-
-//     Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
-//     Operand(ptr_sub, 1, op2),
-//     highType(op1, $Pointer()), highType(op2, $Number()).
+// if op1 is ptr, op2 is number, then type result as ptr
+highType(ptr_sub, $Pointer()) :-
+    Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
+    Operand(ptr_sub, 1, op2),
+    highType(op1, $Pointer()), highType(op2, $Number()).
 
-// // if op1 is ptr, op2 is ptr, then type result as number
-// highType(ptr_sub, $Number()) :-
-//     Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
-//     Operand(ptr_sub, 1, op2),
-//     highType(op1, $Pointer()), highType(op2, $Pointer()).
+// if op1 is ptr, op2 is ptr, then type result as number
+highType(ptr_sub, $Number()) :-
+    Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
+    Operand(ptr_sub, 1, op2),
+    highType(op1, $Pointer()), highType(op2, $Pointer()).
 
-// // // if op1 is num, op2 is ptr, then type result as top
-// // highType(ptr_sub, $Top()) :-
-// //     Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
-// //     Operand(ptr_sub, 1, op2),
-// //     highType(op1, $Number()), highType(op2, $Pointer()).
+// if op1 is num, op2 is ptr, then type result as top
+highType(ptr_sub, $Top()) :-
+    Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
+    Operand(ptr_sub, 1, op2),
+    highType(op1, $Number()), highType(op2, $Pointer()).
 
-// // ======== Sub: Reverse =========
+// ======== Sub: Reverse =========
 
-// // if result is number, two operands has same high type (pointer or number).
-// highType(op2, hty) :- 
-//     Instruction(sub, "sub", _, _), Operand(sub, idx1, op1),
-//     Operand(sub, idx2, op2), idx1 != idx2,
-//     highType(op1, hty), highType(sub, $Number()),
-//     ( hty = $Pointer() ; hty = $Number() ).
+// if result is number, two operands has same high type (pointer or number).
+highType(op2, hty) :- 
+    Instruction(sub, "sub", _, _), Operand(sub, idx1, op1),
+    Operand(sub, idx2, op2), idx1 != idx2,
+    highType(op1, hty), highType(sub, $Number()),
+    ( hty = $Pointer() ; hty = $Number() ).
 
-// // // if result is pointer, type first op as pointer, second op as number
-// // highType(op1, $Pointer()), highType(op2, $Number()) :-
-// //     Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
-// //     Operand(ptr_sub, 1, op2),
-// //     highType(ptr_sub, $Pointer()).
+// if result is pointer, type first op as pointer, second op as number
+highType(op1, $Pointer()), highType(op2, $Number()) :-
+    Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
+    Operand(ptr_sub, 1, op2),
+    highType(ptr_sub, $Pointer()).
 
 // TODO Phi Inst propergate
 
 // ========== interprocedual: call related ============
 
 // ret inst -> abstract return value
-// highType(retv, hty) :-
-//     // if there is a `ret val`, and the return inst refers to retv
-//     Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
-//     highType(val, hty). // val is pointer -> retv is pointer
+highType(retv, hty) :-
+    // if there is a `ret val`, and the return inst refers to retv
+    Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
+    highType(val, hty). // val is pointer -> retv is pointer
 
-// highType(val, hty) :-
-//     // if there is a `ret val`, and the return inst refers to retv
-//     Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
-//     highType(retv, hty). // retv is pointer -> val is pointer
+highType(val, hty) :-
+    // if there is a `ret val`, and the return inst refers to retv
+    Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
+    highType(retv, hty). // retv is pointer -> val is pointer
 
-// // abstract return value -> call inst
-// highType(call, hty) :-
-//     // if there is a `call func ...`, and the func's return value is retv
-//     Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
-//     highType(retv, hty). // retv is pointer -> call result is pointer
+// abstract return value -> call inst
+highType(call, hty) :-
+    // if there is a `call func ...`, and the func's return value is retv
+    Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
+    highType(retv, hty). // retv is pointer -> call result is pointer
 
-// highType(retv, hty) :-
-//     // if there is a `call func ...`, and the func's return value is retv
-//     Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
-//     highType(call, hty). // call result is pointer -> retv is pointer
+highType(retv, hty) :-
+    // if there is a `call func ...`, and the func's return value is retv
+    Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
+    highType(call, hty). // call result is pointer -> retv is pointer
 
 // argument -> call operand
 // only 2 rules, because Arg will be directly refered by inst.

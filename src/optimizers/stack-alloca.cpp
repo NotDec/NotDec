@@ -2,13 +2,15 @@
 #include "optimizers/stack-pointer-finder.h"
 #include <cassert>
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/PatternMatch.h>
+#include <type_traits>
 
 namespace notdec::optimizers {
 PreservedAnalyses LinearAllocationRecovery::run(Module &M,
                                                 ModuleAnalysisManager &MAM) {
-  errs() << "(llvm-tutor) Hello Module: " << M.getName() << "\n";
+  errs() << " ============== LinearAllocationRecovery  ===============\n";
   auto sp_result = MAM.getResult<StackPointerFinderAnalysis>(M);
   auto sp = sp_result.result;
   if (sp == nullptr) {
@@ -32,54 +34,43 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
   }
 
   using namespace llvm::PatternMatch;
-  Value *prev_sp = nullptr;
+  Value *sp1 = nullptr;
+  Instruction *prev_sp = nullptr;
   Value *space;
+  Instruction *prologue_add = nullptr;
   // rely on canonical form of LLVM Instructions, So run instcombine first.
   // see:
   // https://www.npopov.com/2023/04/10/LLVM-Canonicalization-and-target-independence.html
 
-  auto pat_alloc1 =
-      m_Store(m_Add(m_Load(m_Specific(sp)), m_Value(space)), m_Specific(sp));
-  auto pat_alloc2 =
-      m_Store(m_Add(m_Value(space), m_Load(m_Specific(sp))), m_Specific(sp));
-  auto pat_alloc_sub =
-      m_Store(m_Sub(m_Load(m_Specific(sp)), m_Value(space)), m_Specific(sp));
-  auto pat_restore = m_Store(m_Deferred(prev_sp), m_Specific(sp));
+  auto pat_alloc = StackPointerMatcher(sp1, space, prev_sp, prologue_add, sp);
 
   // 1. find the stack allocation in entry
   // 2. remove stack pointer restoration.
   // 3. replace allocation with alloca
   // 3.1 according to the grow direction
+  Instruction *prologue_store = nullptr;
+  IRBuilder builder(M.getContext());
   for (auto *F : worklist) {
-    Instruction *prologue_store = nullptr;
-    Instruction *prologue_add = nullptr;
-
+    bool matched = false;
     auto *entry = &F->getEntryBlock();
     // use llvm PatternMatch to match in the entry block.
     for (auto &I : *entry) {
-      if (PatternMatch::match(&I, pat_alloc1) ||
-          PatternMatch::match(&I, pat_alloc_sub)) {
+      if (PatternMatch::match(&I, pat_alloc)) {
         prologue_store = &I;
-        prologue_add = cast<Instruction>(I.getOperand(0));
-        // get the original sp
-        prev_sp = prologue_add->getOperand(0);
-        // llvm::errs() << "stack alloc: " << *space << "\n";
-        break;
-      } else if (PatternMatch::match(&I, pat_alloc2)) {
-        prologue_store = &I;
-        prologue_add = cast<Instruction>(I.getOperand(0));
-        // get the original sp
-        prev_sp = prologue_add->getOperand(1);
+        matched = true;
         // llvm::errs() << "stack alloc: " << *space << "\n";
         break;
       }
     }
-    if (prev_sp == nullptr) {
-      llvm::errs() << "ERROR: cannot find stack allocation for " << F->getName()
-                   << "\n";
+    if (!matched) {
+      llvm::errs()
+          << "ERROR: cannot find stack allocation in entry block! func: "
+          << F->getName() << "\n";
       continue;
     }
+    assert(prologue_add != nullptr && space != nullptr);
     // find epilogue in exit blocks, and remove it.
+    auto pat_restore = m_Store(m_Deferred(prev_sp), m_Specific(sp));
     bool removed = false;
     for (auto &BB : *F) {
       if (BB.getTerminator()->getNumSuccessors() == 0) {
@@ -94,10 +85,36 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
       }
     }
     if (!removed) {
-      llvm::errs() << "ERROR: Cannot find sp restore?: " << F->getName()
+      llvm::errs() << "ERROR: Cannot find sp restore? func: " << F->getName()
                    << "\n";
       continue;
     }
+
+    // replace the stack allocation with alloca.
+    bool grow_negative = sp_result.direction == 0;
+    auto pty = PointerType::get(IntegerType::get(M.getContext(), 8), 0);
+    assert(prologue_add->getParent() == prev_sp->getParent());
+
+    if (grow_negative) {
+      space = builder.CreateNeg(space);
+    }
+    builder.SetInsertPoint(prologue_add);
+    auto alloc =
+        builder.CreateAlloca(pty->getPointerElementType(), space, "stack");
+    auto alloc_end = builder.CreateGEP(pty->getPointerElementType(), alloc,
+                                       space, "stack_end");
+
+    Instruction *high_addr = prologue_add;
+    Instruction *low_addr = prev_sp;
+    if (grow_negative) {
+      std::swap(high_addr, low_addr);
+    }
+    // replace all uses of prev_sp with alloc_end.
+    low_addr->replaceAllUsesWith(alloc);
+    low_addr->eraseFromParent();
+    high_addr->replaceAllUsesWith(alloc_end);
+    high_addr->eraseFromParent();
+    prologue_store->eraseFromParent();
   }
   // perform the transformation:
 

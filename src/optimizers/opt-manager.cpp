@@ -265,9 +265,9 @@ void DecompileConfig::run_passes() {
       MPM.addPass(retdec::bin2llvmir::StackAnalysis(&abi));
       MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));
     } else if (opts.stackRec == "notdec") {
+      MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
-      // MPM.addPass(VerifierPass(false));
-      // MPM.addPass(PointerTypeRecovery());
+      MPM.addPass(PointerTypeRecovery());
       // MPM.addPass(VerifierPass(false));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__

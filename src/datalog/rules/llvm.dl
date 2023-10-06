@@ -12,7 +12,7 @@
 // .decl LabelType(id: tid)
 .input BaseType, PointerType, ArrayType, VectorType, StructType, SizeType
 
-.decl IntConstant(id: vid, value: number)
+.decl IntConstant(id: vid, value: number) // saturate if out of range
 .decl Constant(id: vid, value: symbol) // all other constants
 
 // relation between value and its type

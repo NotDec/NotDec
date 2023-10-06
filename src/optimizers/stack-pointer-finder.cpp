@@ -1,6 +1,8 @@
 #include "optimizers/stack-pointer-finder.h"
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/PatternMatch.h>
+#include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 
 namespace notdec::optimizers {
@@ -28,75 +30,26 @@ StackPointerFinderAnalysis::find_stack_ptr(BasicBlock &entryBlock) {
   using namespace llvm::PatternMatch;
   Value *sp_val;
   Value *size_val;
-  auto pat_alloc_sub = m_Store(
-      m_Sub(m_Load(m_Value(size_val)), m_Value(sp_val)), m_Deferred(sp_val));
-  auto pat_alloc_add =
-      m_Store(m_Add_Comm(m_Load(m_Value(size_val)), m_Value(sp_val)),
-              m_Deferred(sp_val));
+  Instruction *add;
+
+  auto pat_alloc = StackPointerMatcher(sp_val, size_val, load, add);
 
   for (Instruction &I : entryBlock) {
-    if (StoreInst *store = dyn_cast<StoreInst>(&I)) {
-      return nullptr;
-    }
-    // 第一个内存访问的load指令
-    if ((load = dyn_cast<LoadInst>(&I))) {
-      if ((sp = dyn_cast<GlobalVariable>(load->getOperand(0)))) {
-        // bool maybeStackPtr = true;
-        // for(Value* next : load->users()){  //遍历后继指令
-        //   Instruction *nextInst = dyn_cast<Instruction>(next);
-        //   if (!(nextInst->getOpcode() == Instruction::Add ||
-        //         nextInst->getOpcode() == Instruction::Sub ||
-        //         nextInst->getOpcode() == Instruction::Store)) {
-        //     maybeStackPtr = false;
-        //     break;
-        //   }
-        // }
-        // if(!maybeStackPtr)
-        //   sp = nullptr;
-      }
-      break; // 只判断第一条load指令
+    if (PatternMatch::match(&I, pat_alloc)) {
+      sp = dyn_cast<GlobalVariable>(sp_val);
+      break;
     }
   }
-  if (sp == nullptr) {
-    return nullptr;
-  }
-  // 判断是否有分配栈空间的行为。
-  // 1. 有add/sub行为
-  Instruction *sub = nullptr;
-  for (Value *next : load->users()) { // 遍历后继指令
-    if (Instruction *nextInst = dyn_cast<Instruction>(next)) {
-      if (nextInst->getParent() != &entryBlock) {
-        continue;
-      }
-      if (nextInst->getOpcode() == Instruction::Add ||
-          nextInst->getOpcode() == Instruction::Sub) {
-        sub = nextInst;
-        break;
-      }
+  // 0 for negative, 1 for positive.
+  bool direction = 0;
+  if (auto constant = dyn_cast<ConstantInt>(size_val)) {
+    if (constant->getSExtValue() > 0) {
+      direction = 1;
+    } else {
+      direction = 0;
     }
+    direction_count[direction]++;
   }
-  if (sub == nullptr) {
-    return nullptr;
-  }
-  // 2. 有store行为
-  Instruction *store = nullptr;
-  for (Value *next : load->users()) { // 遍历后继指令
-    if (Instruction *nextInst = dyn_cast<Instruction>(next)) {
-      if (nextInst->getParent() != &entryBlock) {
-        continue;
-      }
-      if (nextInst->getOpcode() == Instruction::Store) {
-        store = nextInst;
-      }
-    }
-  }
-  if (store == nullptr) {
-    return nullptr;
-  }
-  if (store->getOperand(0) != sub || store->getOperand(1) != sp) {
-    return nullptr;
-  }
-  // bool direction = sub.
   return sp;
 }
 
@@ -116,33 +69,46 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
   GlobalVariable *sp = nullptr;
   for (GlobalVariable &gv : mod.getGlobalList()) {
     if (gv.getName().equals("__stack_pointer")) {
-      errs() << "Select stack pointer because of its name: " << gv << "\n";
       sp = &gv;
     }
   }
-  if (sp == nullptr) {
-    for (Function &f : mod) {
-      if (GlobalVariable *gv = find_stack_ptr(f)) {
-        sp_count[gv]++;
-      }
+  GlobalVariable *max_sp = nullptr;
+  for (Function &f : mod) {
+    if (GlobalVariable *gv = find_stack_ptr(f)) {
+      sp_count[gv]++;
     }
-    std::cerr << "Try to guess stack pointer:" << std::endl;
-    // find the most voted stack pointer.
-    size_t max = 0;
-    GlobalVariable *max_sp = nullptr;
-    for (auto pair : sp_count) {
-      llvm::errs() << *pair.first << ": " << pair.second << "\n";
-      if (pair.second > max) {
-        max = pair.second;
-        max_sp = pair.first;
-      }
+  }
+  size_t max = 0;
+  std::cerr << "Try to guess stack pointer:" << std::endl;
+  for (auto pair : sp_count) {
+    llvm::errs() << *pair.first << ": " << pair.second << "\n";
+    if (pair.second > max) {
+      max = pair.second;
+      max_sp = pair.first;
     }
+  }
+  if (max_sp != nullptr) {
     llvm::errs() << "Selected stack pointer: " << *max_sp << "\n";
+  }
+  if (sp != nullptr) {
+    errs() << "Select stack pointer because of its name: " << *sp << "\n";
+    if (sp != max_sp) {
+      errs() << "WARNING: Stack pointer mismatch! (Name vs Analysis)\n";
+    }
+  } else {
+    // find the most voted stack pointer.
     sp = max_sp;
   }
 
   Result ret;
   ret.result = sp;
+  ret.direction = direction_count[0] > direction_count[1] ? 0 : 1;
+  std::cerr << "stack direction: "
+            << (ret.direction == 0 ? "negative" : "positive") << " ("
+            << direction_count[ret.direction] << ")" << std::endl;
+  if (direction_count[ret.direction] == 0) {
+    errs() << "WARNING: Stack direction is not determined!\n";
+  }
   return ret;
 }
 

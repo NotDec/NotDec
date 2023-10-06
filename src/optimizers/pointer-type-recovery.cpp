@@ -7,6 +7,8 @@
 #include <cstring>
 #include <iterator>
 #include <llvm/ADT/SmallString.h>
+#include <llvm/IR/Constant.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstIterator.h>
@@ -39,7 +41,8 @@ using namespace llvm;
 namespace notdec::optimizers {
 
 void static inline assert_sizet(Type *ty, Module &M) {
-  assert(ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits()));
+  assert(ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits()) ||
+         ty->isPointerTy());
 }
 
 void static inline assert_sizet(Value *val, Module &M) {
@@ -94,6 +97,7 @@ void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
 
 PreservedAnalyses PointerTypeRecovery::run(Module &M,
                                            ModuleAnalysisManager &MAM) {
+  errs() << " ============== PointerTypeRecovery  ===============\n";
   // supress warning that dummy is unused.
   (void)dummy;
   datalog::FactGenerator fg(M);
@@ -114,14 +118,21 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
                    datalog::to_fact_str(fg.get_value_id(mem)));
   }
 
-  // find sp and set isPointer
-  auto sp = MAM.getResult<StackPointerFinderAnalysis>(M);
-  if (sp.result == nullptr) {
-    std::cerr << "ERROR: The stack pointer is not found!!";
-  } else {
-    fg.append_fact(datalog::FACT_point2Pointer,
-                   datalog::to_fact_str(fg.get_value_id(sp.result)));
-  }
+  // // assume constant less than 1000 is Number
+  // for (auto &F : M) {
+  //   for (auto &B : F) {
+  //     for (auto &I : B) {
+  //       for (auto &op : I.operands()) {
+  //         if (auto val = dyn_cast<ConstantInt>(op.get())) {
+  //           if (val->getZExtValue() < 1000) {
+  //             fg.append_fact(datalog::FACT_highType,
+  //                            datalog::to_fact_str(fg.get_value_id(&I)));
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 
   // 2. run souffle
   const char *Name = "pointer_main";
@@ -147,9 +158,9 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
 
     // read analysis result
     fetch_result(fg, prog);
-    std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
-    // add sp to result
-    val2hty.emplace(sp.result, datalog::ARITY_highTypeDomain::Pointer);
+    // remove mem
+    val2hty.erase(mem);
+    // std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
 
     // clean up
     // delete directory if not debug
@@ -169,6 +180,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   // erase later to prevent memory address reuse
   std::vector<llvm::GlobalVariable *> gv2erase;
   std::vector<llvm::Instruction *> inst2erase;
+  std::vector<Value *> not_inferred_add;
 
   // llvm\lib\Transforms\Utils\CloneModule.cpp
   // GlobalVariable: change type
@@ -243,8 +255,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
           long ty1 = get_ty_or_negative1(op1);
           long ty2 = get_ty_or_negative1(op2);
           if (ty1 != datalog::Pointer && ty2 != datalog::Pointer) {
-            llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                         << "Warning: ptr = unk + unk: " << *add << "\n";
+            not_inferred_add.emplace_back(add);
             continue;
           }
           // not pointer + pointer
@@ -265,6 +276,9 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         }
       }
     }
+  }
+  for (auto add : not_inferred_add) {
+    llvm::errs() << "Warning: ptr = unk + unk: " << *add << "\n";
   }
 
   // free all old values
