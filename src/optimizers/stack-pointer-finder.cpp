@@ -1,18 +1,39 @@
 #include "optimizers/stack-pointer-finder.h"
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/PatternMatch.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace notdec::optimizers {
 
 using namespace llvm;
 
+// Commutable add matcher
+template <typename LHS, typename RHS>
+inline llvm::PatternMatch::BinaryOp_match<LHS, RHS, Instruction::Add, true>
+m_Add_Comm(const LHS &L, const RHS &R) {
+  return llvm::PatternMatch::BinaryOp_match<LHS, RHS, Instruction::Add, true>(
+      L, R);
+}
+
+// store (add/sub (load sp) num) sp
 /* 寻找栈指针
 1.加载栈指针存在局部变量读出再加减的情况 所以在去除局部变量后进行
 2.wasm中不一定存在global.set 全局栈指针
 */
-GlobalVariable *find_stack_ptr(BasicBlock &entryBlock) {
+GlobalVariable *
+StackPointerFinderAnalysis::find_stack_ptr(BasicBlock &entryBlock) {
   // assert(enrtyBlock.isEntryBlock());
   GlobalVariable *sp = nullptr;
   Instruction *load = nullptr;
+  using namespace llvm::PatternMatch;
+  Value *sp_val;
+  Value *size_val;
+  auto pat_alloc_sub = m_Store(
+      m_Sub(m_Load(m_Value(size_val)), m_Value(sp_val)), m_Deferred(sp_val));
+  auto pat_alloc_add =
+      m_Store(m_Add_Comm(m_Load(m_Value(size_val)), m_Value(sp_val)),
+              m_Deferred(sp_val));
+
   for (Instruction &I : entryBlock) {
     if (StoreInst *store = dyn_cast<StoreInst>(&I)) {
       return nullptr;
@@ -75,30 +96,38 @@ GlobalVariable *find_stack_ptr(BasicBlock &entryBlock) {
   if (store->getOperand(0) != sub || store->getOperand(1) != sp) {
     return nullptr;
   }
+  // bool direction = sub.
   return sp;
 }
 
-GlobalVariable *find_stack_ptr(Function &f) {
+GlobalVariable *StackPointerFinderAnalysis::find_stack_ptr(Function &f) {
   if (!f.empty())
     return find_stack_ptr(f.getEntryBlock());
   return nullptr;
 }
 
-GlobalVariable *find_stack_ptr(Module &mod) {
+GlobalVariable *StackPointerFinderAnalysis::find_stack_ptr(Module &mod) {
+  StackPointerFinderAnalysis ana;
+  return ana.run(mod).result;
+}
+
+StackPointerFinderAnalysis::Result
+StackPointerFinderAnalysis::run(llvm::Module &mod) {
   GlobalVariable *sp = nullptr;
   for (GlobalVariable &gv : mod.getGlobalList()) {
     if (gv.getName().equals("__stack_pointer")) {
+      errs() << "Select stack pointer because of its name: " << gv << "\n";
       sp = &gv;
     }
   }
   if (sp == nullptr) {
-    std::map<GlobalVariable *, size_t> sp_count;
     for (Function &f : mod) {
       if (GlobalVariable *gv = find_stack_ptr(f)) {
         sp_count[gv]++;
       }
     }
     std::cerr << "Try to guess stack pointer:" << std::endl;
+    // find the most voted stack pointer.
     size_t max = 0;
     GlobalVariable *max_sp = nullptr;
     for (auto pair : sp_count) {
@@ -111,7 +140,10 @@ GlobalVariable *find_stack_ptr(Module &mod) {
     llvm::errs() << "Selected stack pointer: " << *max_sp << "\n";
     sp = max_sp;
   }
-  return sp;
+
+  Result ret;
+  ret.result = sp;
+  return ret;
 }
 
 } // namespace notdec::optimizers

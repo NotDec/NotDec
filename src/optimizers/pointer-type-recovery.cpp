@@ -117,7 +117,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   // find sp and set isPointer
   auto sp = MAM.getResult<StackPointerFinderAnalysis>(M);
   if (sp.result == nullptr) {
-    std::cerr << "ERROR: Stack Pointer not found!!";
+    std::cerr << "ERROR: The stack pointer is not found!!";
   } else {
     fg.append_fact(datalog::FACT_point2Pointer,
                    datalog::to_fact_str(fg.get_value_id(sp.result)));
@@ -356,12 +356,12 @@ struct stack : PassInfoMixin<stack> {
       }
     }
     if (stackSize == nullptr) {
-      errs() << "[-] Stack Pointer not found in function " << F.getName()
+      errs() << "[-] The stack pointer is not found in function " << F.getName()
              << "\n";
       errs() << "PointerTypeRecovery cannot proceed!\n";
       return PreservedAnalyses::all();
     } else
-      errs() << "[+] Stack Pointer found in function " << F.getName()
+      errs() << "[+] The stack pointer is found in function " << F.getName()
              << "size: " << *stackSize << "\n";
 
     // create newsp

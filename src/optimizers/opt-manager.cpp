@@ -212,7 +212,7 @@ void DecompileConfig::find_special_gv() {
       mem = &gv;
     }
   }
-  sp = find_stack_ptr(mod);
+  sp = StackPointerFinderAnalysis::find_stack_ptr(mod);
 }
 
 void DecompileConfig::run_passes() {
@@ -266,10 +266,9 @@ void DecompileConfig::run_passes() {
       MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));
     } else if (opts.stackRec == "notdec") {
       MPM.addPass(LinearAllocationRecovery());
-      MPM.addPass(VerifierPass(false));
-      // // 导出datalog规则
-      MPM.addPass(PointerTypeRecovery());
-      // 读取分析结果，修改指针类型。
+      // MPM.addPass(VerifierPass(false));
+      // MPM.addPass(PointerTypeRecovery());
+      // MPM.addPass(VerifierPass(false));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << opts.stackRec

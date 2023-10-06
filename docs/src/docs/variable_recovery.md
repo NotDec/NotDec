@@ -9,3 +9,26 @@
 - [CMU Lecture Notes on Decompilation (15411: Compiler Design)](https://www.cs.cmu.edu/~fp/courses/15411-f13/lectures/20-decompilation.pdf) 
 
 **基于约束求解的方法** 考虑到可能存在的约束，我们需要重新对这些分析执行约束求解。
+
+**基于格和数据流分析**
+
+### 寻找栈指针
+
+栈指针访问的识别：在第一个基本块，在任何内存访问之前，是否对全局变量进行了一读一写的修改，且写的是读出的值加一个常量。是的话就认为是栈指针。
+
+```llvm
+%0 = load i32, i32* @"$__stack_pointer", align 4
+%1 = sub i32 %0, 32
+store i32 %1, i32* @"$__stack_pointer", align 4
+```
+
+**Pattern Matching and Canonical Form**
+一个明显的问题：我们模式匹配的时候，需要考虑
+- 栈的增长方向，决定了指令可能是add还是sub
+- 加法指令的分配律问题：需要考虑load的结果在add的左边还是右边，但是规则匹配不支持这种分配律的情况
+
+然而：
+- 这些问题，显然，在编译器的窥孔优化等问题中也存在
+- 可以观察到，在增加了优化相关的Pass之后，sub指令甚至变成了`add xxx, -32`这种形式。
+
+在编译优化中为了解决这个问题，往往会引入指令的canonical form，统一把这种分配律的自由问题限制一下，规定一下谁在左谁在右。比如我们这里的例子，加减常量统一使用add指令（减的话就是加一个负数），且常量在右边。[这个帖子](https://www.npopov.com/2023/04/10/LLVM-Canonicalization-and-target-independence.html) 有一些更详细的介绍。即：有了InstCombine这个Pass之后，至少对于这种常量加减的情况，我们可以放心地只匹配一部分模式了？
