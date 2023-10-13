@@ -79,4 +79,4 @@ set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/datalog/rules/pointer_main.cpp P
 
 target_sources(notdec PRIVATE
         datalog/rules/pointer_main.cpp)
-set_source_files_properties(datalog/rules/pointer_main.cpp PROPERTIES COMPILE_FLAGS "-frtti -w -D__EMBEDDED_SOUFFLE__ -DRAM_DOMAIN_SIZE=64")
+set_source_files_properties(datalog/rules/pointer_main.cpp PROPERTIES COMPILE_FLAGS "-frtti -w -D__EMBEDDED_SOUFFLE__")

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -238,10 +239,12 @@ size_t FactGenerator::visit_constant(const llvm::Constant &c) {
 
   auto id = get_or_insert_value(&c);
   if (isa<ConstantInt>(&c)) {
+    // saturate to 32bit signed int, because souffle use 32bit domain by default
+    auto num = static_cast<const ConstantInt &>(c).getSExtValue();
+    num = std::clamp(num, (int64_t)std::numeric_limits<int32_t>::min(),
+                     (int64_t)std::numeric_limits<int32_t>::max());
     // Signed or not?
-    append_fact(
-        FACT_IntConstant,
-        to_fact_str(id, static_cast<const ConstantInt &>(c).getSExtValue()));
+    append_fact(FACT_IntConstant, to_fact_str(id, num));
   } else {
     append_fact(FACT_Constant, to_fact_str(id, printSafeValue(c)));
   }

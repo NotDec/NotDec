@@ -30,9 +30,6 @@ target_link_libraries(notdec-datalog
 
 add_dependencies(notdec-datalog fact_names)
 
-# use souffle 64bit domain
-target_compile_definitions(notdec-datalog PUBLIC RAM_DOMAIN_SIZE=64)
-
 # main
 add_executable(notdec-factgen
 	fact-generator-main.cpp
