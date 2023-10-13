@@ -36,14 +36,10 @@ highType(op, $Pointer()) :-
     Instruction(id, "getelementptr", _, _),
     Operand(id, 0, op), ValueType(op, ty), SizeType(ty).
 
-// getelemptr mem, 0, X
+// bitcast i8* %xxx to i32*
 highType(X, $Pointer()) :- 
-    Instruction(id, "getelementptr", _, _),
-    Operand(id, 0, memId),
-    isMemory(memId),
-    Operand(id, 1, zeroid),
-    IntConstant(zeroid, 0),
-    Operand(id, 2, X).
+    Instruction(id, "inttoptr", _, _), // ValueType(id, ty), PointerType(ty, _),
+    Operand(id, 0, X).
 
 
 // ========= Add =============

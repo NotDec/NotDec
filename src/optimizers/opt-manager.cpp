@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
+#include <llvm/IR/PassManager.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -268,7 +269,9 @@ void DecompileConfig::run_passes() {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
       MPM.addPass(PointerTypeRecovery());
-      // MPM.addPass(VerifierPass(false));
+      std::cerr << "======= After PointerTypeRecovery ========\n";
+      MPM.addPass(VerifierPass(false));
+      // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << opts.stackRec
@@ -289,8 +292,6 @@ llvm::FunctionPassManager buildFunctionOptimizations() {
   FPM.addPass(
       SimplifyCFGPass(SimplifyCFGOptions().convertSwitchRangeToICmp(false)));
   FPM.addPass(InstCombinePass());
-  // MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
-  // MPM.addPass(HelloModule());
   FPM.addPass(llvm::PromotePass());
   FPM.addPass(llvm::GVNPass());
 

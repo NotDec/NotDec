@@ -231,10 +231,15 @@ llvm::Value *BlockContext::convertStackAddr(uint64_t offset) {
   Value *base = popStack();
 
   // 会被IRBuilder处理，所以不用搞自己的特判优化。
-  // if (expr->offset != 0) {
   base = irBuilder.CreateAdd(
       base, ConstantInt::get(base->getType(), offset, false), "calcOffset");
-  // }
+
+  // 反编译（非重编译）时不生成gep
+  if (!ctx.baseCtx.opt.recompile) {
+    return irBuilder.CreateIntToPtr(
+        base, PointerType::get(IntegerType::get(llvmContext, 8), 0));
+  }
+
   // if ea+N/8 is larger than the length of mem, then trap?
   Value *arr[2] = {ConstantInt::getNullValue(base->getType()), base};
   return irBuilder.CreateGEP(

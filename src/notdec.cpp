@@ -37,10 +37,11 @@ static cl::opt<bool> compatMode(
     cl::init(true));
 static cl::opt<bool> disablePass("disable-pass", cl::desc("Disable all passes"),
                                  cl::init(false));
-static cl::opt<bool>
-    expandMem("expand-mem",
-              cl::desc("for debug purpose, not expand mem to real size"),
-              cl::init(true));
+static cl::opt<bool> expandMem(
+    "expand-mem",
+    cl::desc(
+        "(for recompile mode) not expand mem to real size for debug purpose."),
+    cl::init(true));
 
 cl::opt<log_level> logLevel("log-level", cl::desc("Choose log level:"),
                             cl::values(clEnumVal(level_emergent, "emergent"),

@@ -17,8 +17,7 @@
                 "${file}.ll",
                 // "--log-level",
                 // "level_debug",
-                "--compat-mode",
-                "--expand-mem=false"
+                "--compat-mode"
             ],
             "cwd": "${workspaceFolder}",
             // "preLaunchTask": "build"
@@ -36,7 +35,8 @@
                 "--log-level",
                 "level_debug",
                 "--compat-mode",
-                "--recompile"
+                "--recompile",
+                "--expand-mem=false"
             ],
             "cwd": "${workspaceFolder}"
         },

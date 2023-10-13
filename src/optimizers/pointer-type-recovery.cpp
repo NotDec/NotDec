@@ -158,7 +158,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
 
     // read analysis result
     fetch_result(fg, prog);
-    // remove mem
+    // ignore mem
     val2hty.erase(mem);
     // std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
 
@@ -237,7 +237,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     if (isChanged) {
       FunctionType *newType = FunctionType::get(
           retType, ArrayRef<Type *>(llvmArgTypes, numParameters), F.isVarArg());
-      F.mutateType(newType);
+      F.mutateType(PointerType::getUnqual(newType));
     }
 
     // handle insts
