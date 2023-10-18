@@ -23,20 +23,16 @@ highType(val, $Top()) :- highType(val, $Pointer()), highType(val, $Number()).
 highType(id, $Number()) :- 
     IntConstant(id, num), num > 0, num < 1000.
 
-// alloca is pointer
+// ptr typed inst is pointer
 highType(val, $Pointer()) :- 
-    Instruction(val, "alloca", _, _).
-
-// gep is pointer
-highType(id, $Pointer()) :- 
-    Instruction(id, "getelementptr", _, _).
+    Instruction(val, _, _, _), ValueType(val, ty), PointerType(ty, _).
 
 // gep op is pointer
 highType(op, $Pointer()) :- 
     Instruction(id, "getelementptr", _, _),
     Operand(id, 0, op), ValueType(op, ty), SizeType(ty).
 
-// bitcast i8* %xxx to i32*
+// inttoptr before load/store indicates pointer
 highType(X, $Pointer()) :- 
     Instruction(id, "inttoptr", _, _), // ValueType(id, ty), PointerType(ty, _),
     Operand(id, 0, X).

@@ -6,19 +6,23 @@
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallString.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Transforms/Utils/Cloning.h>
 #include <map>
 #include <ostream>
 #include <souffle/RamTypes.h>
@@ -40,13 +44,39 @@ using namespace llvm;
 // TODO 重构直接输入facts
 namespace notdec::optimizers {
 
+void static replaceAllUseWithExcept(Value *from, Value *to) {
+  Value *except = to;
+  for (User *use : from->users()) {
+    if (use == except) {
+      continue;
+    }
+    use->replaceUsesOfWith(from, to);
+  }
+}
+
+void static replaceAllUseWithExcept(Value *from, Value *to, Value *except) {
+  for (User *use : from->users()) {
+    if (use == except) {
+      continue;
+    }
+    use->replaceUsesOfWith(from, to);
+  }
+}
+
+bool static inline is_sizet(Type *ty, Module &M) {
+  return ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits());
+}
+
+bool static inline is_sizet(Value *val, Module &M) {
+  return is_sizet(val->getType(), M);
+}
+
 void static inline assert_sizet(Type *ty, Module &M) {
-  assert(ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits()) ||
-         ty->isPointerTy());
+  assert(is_sizet(ty, M));
 }
 
 void static inline assert_sizet(Value *val, Module &M) {
-  assert_sizet(val->getType(), M);
+  assert(is_sizet(val, M));
 }
 
 long PointerTypeRecovery::get_ty_or_negative1(llvm::Value *val) {
@@ -81,8 +111,13 @@ void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
           llvm::errs() << "Datalog: type conflict(top): " << *val << "\n";
         } else if (std::holds_alternative<aval>(value_var)) {
           auto val = std::get<aval>(value_var);
-          llvm::errs() << "Datalog: type conflict(top): " << val.second
-                       << " of " << *val.first << "\n";
+          if (isa<Function>(val.first)) {
+            llvm::errs() << "Datalog: type conflict(top): " << val.second
+                         << " of Function" << val.first->getName() << "\n";
+          } else {
+            llvm::errs() << "Datalog: type conflict(top): " << val.second
+                         << " of " << *val.first << "\n";
+          }
         }
       }
       val2hty.emplace(value_var, ptr_domain);
@@ -180,6 +215,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   // erase later to prevent memory address reuse
   std::vector<llvm::GlobalVariable *> gv2erase;
   std::vector<llvm::Instruction *> inst2erase;
+  std::vector<llvm::Function *> func2erase;
   std::vector<Value *> not_inferred_add;
 
   // llvm\lib\Transforms\Utils\CloneModule.cpp
@@ -199,13 +235,13 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
           gv.getThreadLocalMode(), gv.getType()->getAddressSpace());
       new_gv->copyAttributesFrom(&gv);
       new_gv->takeName(&gv); // so that no numeric suffix in name
-      gv.replaceAllUsesWith(new_gv);
+      gv.replaceAllUsesWith(ConstantExpr::getBitCast(new_gv, gv.getType()));
 
       gv2erase.emplace_back(&gv);
     }
   }
 
-  for (Function &F : M) {
+  for (Function &F : make_early_inc_range(M)) {
     bool isChanged = false;
     // copy functino type, and modify arg or ret type.
     Type **llvmArgTypes;
@@ -217,7 +253,8 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     for (size_t i = 0; i < numParameters; i++) {
       Argument *arg = F.getArg(i);
       long ty = get_ty_or_negative1(arg);
-      if (ty != datalog::ARITY_highTypeDomain::Pointer) {
+      if (ty != datalog::ARITY_highTypeDomain::Pointer ||
+          arg->getType()->isPointerTy()) {
         llvmArgTypes[i] = arg->getType();
       } else { // is Pointer
         assert_sizet(arg, M);
@@ -228,25 +265,53 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     }
     // if ret typed to pointer
     long ty = get_ty_or_negative1(aval{&F, datalog::FACT_FuncRet});
-    if (ty == datalog::ARITY_highTypeDomain::Pointer) {
+    if (ty == datalog::ARITY_highTypeDomain::Pointer &&
+        !F.getReturnType()->isPointerTy()) {
       assert_sizet(F.getReturnType(), M);
       retType = pty;
       isChanged = true;
     }
 
     if (isChanged) {
+      // Change function type: there is no way other than creating a new
+      // function. see: lib\Transforms\Utils\CloneFunction.cpp
+      // llvm::CloneFunction
       FunctionType *newType = FunctionType::get(
           retType, ArrayRef<Type *>(llvmArgTypes, numParameters), F.isVarArg());
-      F.mutateType(PointerType::getUnqual(newType));
+      // F.mutateType(PointerType::getUnqual(newType));
+      Function *NewF = Function::Create(newType, F.getLinkage(),
+                                        F.getAddressSpace(), "", F.getParent());
+      NewF->takeName(&F);
+      ValueToValueMapTy VMap;
+
+      // copying the names of the mapped arguments over
+      Function::arg_iterator DestI = NewF->arg_begin();
+      for (const Argument &I : F.args()) {
+        DestI->setName(I.getName()); // Copy the name over...
+        VMap[&I] = &*DestI++;        // Add mapping to VMap
+      }
+
+      SmallVector<ReturnInst *, 8> Returns; // Ignore returns cloned.
+      CloneFunctionInto(NewF, &F, VMap,
+                        CloneFunctionChangeType::LocalChangesOnly, Returns, "");
+
+      F.replaceAllUsesWith(NewF);
+      func2erase.push_back(&F);
+      // TODO replace all call arg with int2ptr
+      // TODO what about indirect call?
     }
 
     // handle insts
     for (Instruction &inst : instructions(F)) {
-      long ty = get_ty_or_negative1(&inst);
-      if (ty == datalog::ARITY_highTypeDomain::Pointer) {
-        assert_sizet(&inst, M);
-        inst.mutateType(pty);
+      // only handle size_t
+      if (!is_sizet(&inst, M)) {
+        continue;
       }
+      long ty = get_ty_or_negative1(&inst);
+      if (ty != datalog::ARITY_highTypeDomain::Pointer) {
+        continue;
+      }
+
       if (auto add = dyn_cast<BinaryOperator>(&inst)) {
         if (add->getOpcode() == Instruction::Add) {
           // find ptr and number operand
@@ -255,8 +320,10 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
           long ty1 = get_ty_or_negative1(op1);
           long ty2 = get_ty_or_negative1(op2);
           if (ty1 != datalog::Pointer && ty2 != datalog::Pointer) {
-            not_inferred_add.emplace_back(add);
-            continue;
+            llvm::errs() << "Warning: ptr = unk + unk: " << *add << "\n";
+            builder.SetInsertPoint(inst.getNextNode());
+            auto int2ptr = builder.CreateIntToPtr(&inst, pty);
+            replaceAllUseWithExcept(&inst, int2ptr);
           }
           // not pointer + pointer
           assert(!(ty1 == datalog::Pointer && ty2 == datalog::Pointer));
@@ -273,12 +340,18 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
                                        add->getName());
           add->replaceAllUsesWith(gep);
           inst2erase.emplace_back(add);
+        } else {
+          llvm::errs() << "Warning: unhandled BinaryOperator: " << inst << "\n";
         }
+      } else if (auto phi = dyn_cast<PHINode>(&inst)) {
+        inst.mutateType(pty);
+      } else {
+        llvm::errs() << "Warning: unhandled inst: " << inst << "\n";
+        builder.SetInsertPoint(inst.getNextNode());
+        auto int2ptr = builder.CreateIntToPtr(&inst, pty);
+        replaceAllUseWithExcept(&inst, int2ptr);
       }
     }
-  }
-  for (auto add : not_inferred_add) {
-    llvm::errs() << "Warning: ptr = unk + unk: " << *add << "\n";
   }
 
   // free all old values
@@ -288,6 +361,10 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   }
   // erase insts
   for (auto v : inst2erase) {
+    v->eraseFromParent();
+  }
+  // erase func
+  for (auto v : func2erase) {
     v->eraseFromParent();
   }
 
