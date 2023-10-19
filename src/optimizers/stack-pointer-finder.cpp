@@ -34,11 +34,16 @@ StackPointerFinderAnalysis::find_stack_ptr(BasicBlock &entryBlock) {
 
   auto pat_alloc = StackPointerMatcher(sp_val, size_val, load, add);
 
+  bool matched = false;
   for (Instruction &I : entryBlock) {
     if (PatternMatch::match(&I, pat_alloc)) {
       sp = dyn_cast<GlobalVariable>(sp_val);
+      matched = true;
       break;
     }
+  }
+  if (!matched) {
+    return nullptr;
   }
   // 0 for negative, 1 for positive.
   bool direction = 0;

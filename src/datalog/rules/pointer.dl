@@ -19,13 +19,18 @@ highType(val, $Top()) :- highType(val, $Pointer()), highType(val, $Number()).
 
 // ======== Rule start =========
 
-// int constant in (0,1000) is number
+// int constant in (-1000, 1000) is number
 highType(id, $Number()) :- 
-    IntConstant(id, num), num > 0, num < 1000.
+    IntConstant(id, num), num > -1000, num < 1000.
 
 // ptr typed inst is pointer
 highType(val, $Pointer()) :- 
     Instruction(val, _, _, _), ValueType(val, ty), PointerType(ty, _).
+
+// ptrtoint is pointer
+highType(val, $Pointer()) :- 
+    Instruction(val, "ptrtoint", _, _),
+    ValueType(val, ty), SizeType(ty).
 
 // gep op is pointer
 highType(op, $Pointer()) :- 
@@ -127,32 +132,32 @@ highType(op1, $Pointer()), highType(op2, $Number()) :-
 highType(retv, hty) :-
     // if there is a `ret val`, and the return inst refers to retv
     Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
-    highType(val, hty). // val is pointer -> retv is pointer
+    highType(val, hty), hty = $Pointer(). // val is pointer -> retv is pointer
 
 highType(val, hty) :-
     // if there is a `ret val`, and the return inst refers to retv
     Instruction(ret, "ret", _, _), Operand(ret, 0, val), RetInstVal(ret, retv),
-    highType(retv, hty). // retv is pointer -> val is pointer
+    highType(retv, hty), hty = $Pointer(). // retv is pointer -> val is pointer
 
 // abstract return value -> call inst
 highType(call, hty) :-
     // if there is a `call func ...`, and the func's return value is retv
     Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
-    highType(retv, hty). // retv is pointer -> call result is pointer
+    highType(retv, hty), hty = $Pointer(). // retv is pointer -> call result is pointer
 
 highType(retv, hty) :-
     // if there is a `call func ...`, and the func's return value is retv
     Instruction(call, "call", _, _), CallTarget(call, func), FuncRet(retv, func),
-    highType(call, hty). // call result is pointer -> retv is pointer
+    highType(call, hty), hty = $Pointer(). // call result is pointer -> retv is pointer
 
 // argument -> call operand
 // only 2 rules, because Arg will be directly refered by inst.
 highType(arg, hty) :-
     // if there is a `call func ...`, i-th arg is val, and the func's i-th arg is arg.
     Instruction(call, "call", _, _), Operand(call, idx, val), CallTarget(call, func), FuncArg(arg, func, idx, _),
-    highType(val, hty). // call arg -> func arg
+    highType(val, hty), hty = $Pointer(). // call arg -> func arg
 
 highType(arg, hty) :-
     // if there is a `call func ...`, i-th arg is val, and the func's i-th arg is arg.
     Instruction(call, "call", _, _), Operand(call, idx, val), CallTarget(call, func), FuncArg(arg, func, idx, _),
-    highType(val, hty). // func arg -> call arg
+    highType(val, hty), hty = $Pointer(). // func arg -> call arg

@@ -8,6 +8,8 @@
 #include <type_traits>
 
 namespace notdec::optimizers {
+
+/// Uses ptrtoint to ensure type correctness.
 PreservedAnalyses LinearAllocationRecovery::run(Module &M,
                                                 ModuleAnalysisManager &MAM) {
   errs() << " ============== LinearAllocationRecovery  ===============\n";
@@ -99,10 +101,12 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
       space = builder.CreateNeg(space);
     }
     builder.SetInsertPoint(prologue_add);
-    auto alloc =
+    Value *alloc =
         builder.CreateAlloca(pty->getPointerElementType(), space, "stack");
-    auto alloc_end = builder.CreateGEP(pty->getPointerElementType(), alloc,
-                                       space, "stack_end");
+    Value *alloc_end = builder.CreateGEP(pty->getPointerElementType(), alloc,
+                                         space, "stack_end");
+    alloc = builder.CreatePtrToInt(alloc, prev_sp->getType());
+    alloc_end = builder.CreatePtrToInt(alloc_end, prev_sp->getType());
 
     Instruction *high_addr = prologue_add;
     Instruction *low_addr = prev_sp;

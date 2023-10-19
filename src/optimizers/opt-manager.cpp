@@ -269,7 +269,6 @@ void DecompileConfig::run_passes() {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
       MPM.addPass(PointerTypeRecovery());
-      std::cerr << "======= After PointerTypeRecovery ========\n";
       MPM.addPass(VerifierPass(false));
       // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
     } else {
