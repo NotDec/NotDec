@@ -37,6 +37,16 @@ highType(op, $Pointer()) :-
     Instruction(id, "getelementptr", _, _),
     Operand(id, 0, op), ValueType(op, ty), SizeType(ty).
 
+// gep pass pointer
+highType(id, $Pointer()) :-
+    Instruction(id, "getelementptr", _, _),
+    Operand(id, 0, op), highType(op, $Pointer()).
+
+// ptrtoint pass pointer
+highType(id, $Pointer()) :-
+    Instruction(id, "ptrtoint", _, _),
+    Operand(id, 0, op), highType(op, $Pointer()).
+
 // inttoptr before load/store indicates pointer
 highType(X, $Pointer()) :- 
     Instruction(id, "inttoptr", _, _), // ValueType(id, ty), PointerType(ty, _),

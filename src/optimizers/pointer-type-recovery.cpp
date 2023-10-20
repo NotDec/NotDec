@@ -255,70 +255,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     }
   }
 
-  // change function type before call insts.
-  for (Function &F_ : make_early_inc_range(M)) {
-    Function *F = &F_;
-    bool isChanged = false;
-    // copy functino type, and modify arg or ret type.
-    Type **llvmArgTypes;
-    size_t numParameters = F->arg_size();
-    llvmArgTypes = (Type **)alloca(sizeof(Type *) * numParameters);
-    Type *retType = F->getReturnType();
-
-    // if arg typed to pointer, change it
-    for (size_t i = 0; i < numParameters; i++) {
-      Argument *arg = F->getArg(i);
-      long ty = get_ty_or_negative1(arg);
-      if (ty != datalog::ARITY_highTypeDomain::Pointer ||
-          arg->getType()->isPointerTy()) {
-        llvmArgTypes[i] = arg->getType();
-      } else { // is Pointer
-        assert_sizet(arg, M);
-        llvmArgTypes[i] = pty;
-        arg->mutateType(pty);
-        isChanged = true;
-      }
-    }
-    // if ret typed to pointer
-    long ty = get_ty_or_negative1(aval{F, datalog::FACT_FuncRet});
-    if (ty == datalog::ARITY_highTypeDomain::Pointer &&
-        !F->getReturnType()->isPointerTy()) {
-      assert_sizet(F->getReturnType(), M);
-      retType = pty;
-      isChanged = true;
-    }
-
-    if (isChanged) {
-      // Change function type: there is no way other than creating a new
-      // function. see: lib\Transforms\Utils\CloneFunction.cpp
-      // llvm::CloneFunction
-      FunctionType *newType = FunctionType::get(
-          retType, ArrayRef<Type *>(llvmArgTypes, numParameters),
-          F->isVarArg());
-      // F->mutateType(PointerType::getUnqual(newType));
-      Function *NewF = Function::Create(
-          newType, F->getLinkage(), F->getAddressSpace(), "", F->getParent());
-      NewF->takeName(F);
-      ValueToValueMapTy VMap;
-
-      // copying the names of the mapped arguments over
-      Function::arg_iterator DestI = NewF->arg_begin();
-      for (const Argument &I : F->args()) {
-        DestI->setName(I.getName()); // Copy the name over...
-        VMap[&I] = &*DestI++;        // Add mapping to VMap
-      }
-
-      SmallVector<ReturnInst *, 8> Returns; // Ignore returns cloned.
-      CloneFunctionInto(NewF, F, VMap,
-                        CloneFunctionChangeType::LocalChangesOnly, Returns, "");
-
-      F->replaceAllUsesWith(NewF);
-      func2erase.push_back(F);
-      F = NewF;
-      // TODO replace all call arg with int2ptr
-      // TODO what about indirect call?
-    }
-
+  for (Function &F : make_early_inc_range(M)) {
     // handle insts
     for (Instruction &inst : make_early_inc_range(instructions(F))) {
       // only handle size_t
@@ -385,6 +322,73 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         val2hty.emplace(int2ptr, datalog::Pointer);
         replaceAllUseWithExcept<IntToPtrInst>(&inst, int2ptr);
       }
+    }
+  }
+
+  // change function type after all insts
+  for (Function &F : make_early_inc_range(M)) {
+    bool isChanged = false;
+    // copy functino type, and modify arg or ret type.
+    Type **llvmArgTypes;
+    size_t numParameters = F.arg_size();
+    llvmArgTypes = (Type **)alloca(sizeof(Type *) * numParameters);
+    Type *retType = F.getReturnType();
+
+    // if arg typed to pointer, change it
+    for (size_t i = 0; i < numParameters; i++) {
+      Argument *arg = F.getArg(i);
+      long ty = get_ty_or_negative1(arg);
+      if (ty != datalog::ARITY_highTypeDomain::Pointer ||
+          arg->getType()->isPointerTy()) {
+        llvmArgTypes[i] = arg->getType();
+      } else { // is Pointer
+        assert_sizet(arg, M);
+        llvmArgTypes[i] = pty;
+        arg->mutateType(pty);
+        isChanged = true;
+      }
+    }
+    // if ret typed to pointer
+    long ty = get_ty_or_negative1(aval{&F, datalog::FACT_FuncRet});
+    if (ty == datalog::ARITY_highTypeDomain::Pointer &&
+        !F.getReturnType()->isPointerTy()) {
+      assert_sizet(F.getReturnType(), M);
+      retType = pty;
+      isChanged = true;
+    }
+
+    if (isChanged) {
+      // Change function type: there is no way other than creating a new
+      // function. see: lib\Transforms\Utils\CloneFunction.cpp
+      // llvm::CloneFunction
+      FunctionType *newType = FunctionType::get(
+          retType, ArrayRef<Type *>(llvmArgTypes, numParameters), F.isVarArg());
+      // F.mutateType(PointerType::getUnqual(newType));
+      Function *NewF = Function::Create(newType, F.getLinkage(),
+                                        F.getAddressSpace(), "", F.getParent());
+      NewF->takeName(&F);
+      ValueToValueMapTy VMap;
+
+      // copying the names of the mapped arguments over
+      Function::arg_iterator DestI = NewF->arg_begin();
+      for (const Argument &I : F.args()) {
+        DestI->setName(I.getName()); // Copy the name over...
+        VMap[&I] = &*DestI++;        // Add mapping to VMap
+      }
+
+      SmallVector<ReturnInst *, 8> Returns; // Ignore returns cloned.
+      CloneFunctionInto(NewF, &F, VMap,
+                        CloneFunctionChangeType::LocalChangesOnly, Returns, "");
+
+      F.replaceAllUsesWith(NewF);
+      for (User *use : NewF->users()) {
+        if (CallBase *cb = dyn_cast<CallBase>(use)) {
+          cb->mutateFunctionType(NewF->getFunctionType());
+        }
+      }
+      func2erase.push_back(&F);
+      // TODO replace all call arg with int2ptr
+      // TODO what about indirect call? replace in table
     }
   }
 
