@@ -3,6 +3,7 @@
 
 #include <map>
 
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/PassManager.h>
 #include <souffle/SouffleInterface.h>
 
@@ -32,6 +33,8 @@ struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   void fetch_result(datalog::FactGenerator &fg, souffle::SouffleProgram *prog);
   long get_ty_or_negative1(llvm::Value *val);
   long get_ty_or_negative1(aval val);
+  Value *castBack(llvm::IRBuilder<> *builder, Instruction *inst, Type *old_ty,
+                  long hty = -1);
   static Type *get_pointer_type(Module &M);
 };
 

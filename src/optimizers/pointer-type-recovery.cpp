@@ -8,16 +8,18 @@
 #include <iterator>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallString.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FileSystem.h>
@@ -27,6 +29,7 @@
 #include <ostream>
 #include <souffle/RamTypes.h>
 #include <system_error>
+#include <utility>
 #include <variant>
 
 namespace souffle {
@@ -105,6 +108,28 @@ long PointerTypeRecovery::get_ty_or_negative1(aval val) {
     return -1;
   }
   return val2hty.at(val);
+}
+
+Value *insertOpCast(IRBuilder<> *builder, Instruction *inst, Value *op,
+                    Type *DestTy) {
+  // assert op is used by inst
+  builder->SetInsertPoint(inst);
+  auto cast = builder->CreateBitOrPointerCast(op, DestTy);
+  inst->replaceUsesOfWith(op, cast);
+  return cast;
+}
+
+// must ensure datalog::Pointer
+Value *PointerTypeRecovery::castBack(IRBuilder<> *builder, Instruction *inst,
+                                     Type *old_ty, long hty) {
+  assert(inst->getType()->isPointerTy());
+  builder->SetInsertPoint(inst->getNextNode());
+  auto ptr2int = builder->CreateBitOrPointerCast(inst, old_ty);
+  if (hty != -1) {
+    val2hty.emplace(ptr2int, hty);
+  }
+  replaceAllUseWithExcept(inst, ptr2int);
+  return ptr2int;
 }
 
 void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
@@ -255,14 +280,20 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     }
   }
 
+  // handle inst first, before function cloning.
   for (Function &F : make_early_inc_range(M)) {
     // handle insts
     for (Instruction &inst : make_early_inc_range(instructions(F))) {
+      // ignore casts?
+      if (isa<CastInst>(&inst)) {
+        continue;
+      }
       // only handle size_t
       if (!is_sizet(&inst, M)) {
         continue;
       }
       long ty = get_ty_or_negative1(&inst);
+      // only handle pointer type change
       if (ty != datalog::ARITY_highTypeDomain::Pointer) {
         continue;
       }
@@ -281,10 +312,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
             llvm::errs() << "Warning: ptr(" << fg.get_value_id(add)
                          << ") = " << (names + 1)[ty1] << " + "
                          << (names + 1)[ty2] << ": " << *add << "\n ";
-            builder.SetInsertPoint(inst.getNextNode());
-            auto int2ptr = builder.CreateIntToPtr(&inst, pty);
-            val2hty.emplace(int2ptr, datalog::Pointer);
-            replaceAllUseWithExcept<IntToPtrInst>(&inst, int2ptr);
+            // castBack(&builder, &inst, pty, datalog::Pointer);
             continue;
           }
           // not pointer + pointer
@@ -295,10 +323,8 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
             std::swap(ty1, ty2);
           }
           builder.SetInsertPoint(add);
-          if (op1->getType()->isIntegerTy()) {
-            // only used by gep, no need to add val2hty.
-            op1 = builder.CreateIntToPtr(op1, pty);
-          }
+          // only used by gep, no need to add val2hty.
+          op1 = builder.CreateIntToPtr(op1, pty);
           auto gep = builder.CreateGEP(pty->getPointerElementType(), op1, op2,
                                        add->getName());
           val2hty.emplace(gep, datalog::Pointer);
@@ -310,22 +336,34 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
           llvm::errs() << "Warning: unhandled BinaryOperator: " << inst << "\n";
         }
       } else if (auto phi = dyn_cast<PHINode>(&inst)) {
+        auto old_ty = phi->getType();
         inst.mutateType(pty);
-        builder.SetInsertPoint(inst.getNextNode());
-        auto int2ptr = builder.CreateIntToPtr(&inst, pty);
-        val2hty.emplace(int2ptr, datalog::Pointer);
-        replaceAllUseWithExcept<IntToPtrInst>(&inst, int2ptr);
+        castBack(&builder, &inst, old_ty, datalog::Pointer);
+      } else if (auto load = dyn_cast<LoadInst>(&inst)) {
+        // change to load i8* i8** xx
+        auto old_ty = load->getType();
+        // insert bitcast before load
+        auto ptr = load->getPointerOperand();
+        assert_sizet(load->getType(), M);
+        load->mutateType(pty);
+        insertOpCast(&builder, load, ptr, PointerType::getUnqual(pty));
+        // cast back after load
+        castBack(&builder, load, old_ty, datalog::Pointer);
       } else {
         llvm::errs() << "Warning: unhandled inst: " << inst << "\n";
-        builder.SetInsertPoint(inst.getNextNode());
-        auto int2ptr = builder.CreateIntToPtr(&inst, pty);
-        val2hty.emplace(int2ptr, datalog::Pointer);
-        replaceAllUseWithExcept<IntToPtrInst>(&inst, int2ptr);
+        // builder.SetInsertPoint(inst.getNextNode());
+        // auto int2ptr = builder.CreateIntToPtr(&inst, pty);
+        // val2hty.emplace(int2ptr, datalog::Pointer);
+        // replaceAllUseWithExcept<IntToPtrInst>(&inst, int2ptr);
       }
     }
   }
+  // erase insts before function cloning
+  for (auto v : inst2erase) {
+    v->eraseFromParent();
+  }
 
-  // change function type after all insts
+  // change function type using cloning
   for (Function &F : make_early_inc_range(M)) {
     bool isChanged = false;
     // copy functino type, and modify arg or ret type.
@@ -383,11 +421,23 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
       F.replaceAllUsesWith(NewF);
       for (User *use : NewF->users()) {
         if (CallBase *cb = dyn_cast<CallBase>(use)) {
-          cb->mutateFunctionType(NewF->getFunctionType());
+          auto old_fty = cb->getFunctionType();
+          auto new_fty = NewF->getFunctionType();
+          cb->mutateFunctionType(new_fty);
+          // insert int2ptr for call arg
+          for (auto i = 0; i < cb->arg_size(); i++) {
+            if (old_fty->getParamType(i) != new_fty->getParamType(i)) {
+              auto op = cb->getArgOperand(i);
+              insertOpCast(&builder, cb, op, new_fty->getParamType(i));
+            }
+          }
+          // insert ptr2int for return value.
+          if (old_fty->getReturnType() != new_fty->getReturnType()) {
+            castBack(&builder, cb, old_fty->getReturnType(), datalog::Pointer);
+          }
         }
       }
       func2erase.push_back(&F);
-      // TODO replace all call arg with int2ptr
       // TODO what about indirect call? replace in table
     }
   }
@@ -395,10 +445,6 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   // free all old values
   for (auto v : gv2erase) {
     assert(v->use_empty());
-    v->eraseFromParent();
-  }
-  // erase insts
-  for (auto v : inst2erase) {
     v->eraseFromParent();
   }
   // erase func

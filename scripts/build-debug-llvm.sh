@@ -11,7 +11,7 @@ LLVMHome="$CODE_HOME/llvm-14.0.6.obj"
 SourceLLVM="https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-14.0.6.zip"
 
 
-read -r -p "Do you have tons of memory and stack space (40GB) for Debug info? [y/N] " response
+read -r -p "Do you have tons of memory and disk space (>40GB) for Debug info? [y/N] " response
 if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]
 then
     build_type=RelWithDebInfo
