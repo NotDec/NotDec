@@ -134,7 +134,15 @@ highType(op1, $Pointer()), highType(op2, $Number()) :-
     Operand(ptr_sub, 1, op2),
     highType(ptr_sub, $Pointer()).
 
-// TODO Phi Inst propergate
+// Phi Inst Op to phi
+highType(phi, $Pointer()) :-
+    Instruction(phi, "phi", _, _), Operand(phi, _, op),
+    highType(op, $Pointer()).
+
+// // Phi to each op
+// highType(op, $Pointer()) :-
+//     Instruction(phi, "phi", _, _), Operand(phi, _, op),
+//     highType(phi, $Pointer()), Instruction(op, _, _, _).
 
 // ========== interprocedual: call related ============
 

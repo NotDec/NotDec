@@ -3,6 +3,7 @@
 #include "datalog/fact-generator.h"
 #include "optimizers/stack-pointer-finder.h"
 #include <cassert>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -50,7 +51,8 @@ namespace notdec::optimizers {
 template <typename T>
 void static replaceAllUseWithExcept(Value *from, Value *to) {
   Value *except = to;
-  for (User *use : from->users()) {
+  std::vector<User *> users(from->user_begin(), from->user_end());
+  for (User *use : users) {
     if (use == except) {
       continue;
     }
@@ -61,18 +63,26 @@ void static replaceAllUseWithExcept(Value *from, Value *to) {
   }
 }
 
-void static replaceAllUseWithExcept(Value *from, Value *to) {
+void replaceAllUseWithExcept(Value *from, Value *to) {
   Value *except = to;
-  for (User *use : from->users()) {
+  std::vector<User *> users(from->user_begin(), from->user_end());
+  for (User *use : users) {
     if (use == except) {
       continue;
     }
     use->replaceUsesOfWith(from, to);
   }
+  // assert number of user is 1
+  // size_t num = 0;
+  // for (User *use : from->users()) {
+  //   num++;
+  // }
+  // assert(num == 1);
 }
 
-void static replaceAllUseWithExcept(Value *from, Value *to, Value *except) {
-  for (User *use : from->users()) {
+void replaceAllUseWithExcept(Value *from, Value *to, Value *except) {
+  std::vector<User *> users(from->user_begin(), from->user_end());
+  for (User *use : users) {
     if (use == except) {
       continue;
     }
@@ -110,10 +120,27 @@ long PointerTypeRecovery::get_ty_or_negative1(aval val) {
   return val2hty.at(val);
 }
 
+/// Insert cast for one operand of PHI.
+Value *insertPhiOpCast(IRBuilder<> *builder, Instruction *inst, Value *op,
+                       Type *DestTy, unsigned index) {
+  assert(isa<PHINode>(inst));
+  auto phi = cast<PHINode>(inst);
+  builder->SetInsertPoint(phi->getIncomingBlock(index)->getTerminator());
+  auto cast = builder->CreateBitOrPointerCast(op, DestTy);
+  phi->setIncomingValue(index, cast);
+  return cast;
+}
+
+/// Insert cast for one operand of an instruction.
 Value *insertOpCast(IRBuilder<> *builder, Instruction *inst, Value *op,
                     Type *DestTy) {
   // assert op is used by inst
-  builder->SetInsertPoint(inst);
+  if (auto phi = dyn_cast<PHINode>(inst)) {
+    assert(false &&
+           "insertOpCast: phi not supported, use insertPhiOpCast instead!!");
+  } else {
+    builder->SetInsertPoint(inst);
+  }
   auto cast = builder->CreateBitOrPointerCast(op, DestTy);
   inst->replaceUsesOfWith(op, cast);
   return cast;
@@ -123,7 +150,11 @@ Value *insertOpCast(IRBuilder<> *builder, Instruction *inst, Value *op,
 Value *PointerTypeRecovery::castBack(IRBuilder<> *builder, Instruction *inst,
                                      Type *old_ty, long hty) {
   assert(inst->getType()->isPointerTy());
-  builder->SetInsertPoint(inst->getNextNode());
+  if (isa<PHINode>(inst)) {
+    builder->SetInsertPoint(inst->getParent()->getFirstNonPHIOrDbgOrLifetime());
+  } else {
+    builder->SetInsertPoint(inst->getNextNonDebugInstruction());
+  }
   auto ptr2int = builder->CreateBitOrPointerCast(inst, old_ty);
   if (hty != -1) {
     val2hty.emplace(ptr2int, hty);
@@ -337,7 +368,12 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         }
       } else if (auto phi = dyn_cast<PHINode>(&inst)) {
         auto old_ty = phi->getType();
-        inst.mutateType(pty);
+        phi->mutateType(pty);
+        for (auto i = 0; i < phi->getNumIncomingValues(); i++) {
+          auto op = phi->getIncomingValue(i);
+          // auto blk = phi->getIncomingBlock(i);
+          insertPhiOpCast(&builder, phi, op, pty, i);
+        }
         castBack(&builder, &inst, old_ty, datalog::Pointer);
       } else if (auto load = dyn_cast<LoadInst>(&inst)) {
         // change to load i8* i8** xx
@@ -349,6 +385,8 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         insertOpCast(&builder, load, ptr, PointerType::getUnqual(pty));
         // cast back after load
         castBack(&builder, load, old_ty, datalog::Pointer);
+      } else if (isa<CallInst>(&inst)) {
+        // do nothing
       } else {
         llvm::errs() << "Warning: unhandled inst: " << inst << "\n";
         // builder.SetInsertPoint(inst.getNextNode());
@@ -382,7 +420,6 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
       } else { // is Pointer
         assert_sizet(arg, M);
         llvmArgTypes[i] = pty;
-        arg->mutateType(pty);
         isChanged = true;
       }
     }
@@ -401,7 +438,6 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
       // llvm::CloneFunction
       FunctionType *newType = FunctionType::get(
           retType, ArrayRef<Type *>(llvmArgTypes, numParameters), F.isVarArg());
-      // F.mutateType(PointerType::getUnqual(newType));
       Function *NewF = Function::Create(newType, F.getLinkage(),
                                         F.getAddressSpace(), "", F.getParent());
       NewF->takeName(&F);
@@ -437,6 +473,34 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
           }
         }
       }
+
+      // cast argument in entry block
+      if (!F.isDeclaration()) {
+        for (auto i = 0; i < NewF->arg_size(); i++) {
+          auto arg = NewF->getArg(i);
+          auto old_arg = F.getArg(i);
+          if (arg->getType() != old_arg->getType()) {
+            builder.SetInsertPoint(
+                &*NewF->getEntryBlock().getFirstInsertionPt());
+            auto casted =
+                builder.CreateBitOrPointerCast(arg, old_arg->getType());
+            val2hty.emplace(casted, datalog::Pointer);
+            replaceAllUseWithExcept(arg, casted);
+          }
+        }
+        // handle cast before return insts
+        auto ret_ty = NewF->getReturnType();
+        for (auto &B : *NewF) {
+          for (auto &I : B) {
+            if (auto ret = dyn_cast<ReturnInst>(&I)) {
+              if (auto op = ret->getReturnValue()) {
+                insertOpCast(&builder, ret, op, ret_ty);
+              }
+            }
+          }
+        }
+      }
+
       func2erase.push_back(&F);
       // TODO what about indirect call? replace in table
     }
