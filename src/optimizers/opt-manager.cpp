@@ -288,8 +288,7 @@ llvm::FunctionPassManager buildFunctionOptimizations() {
       FPM; // = PB.buildFunctionSimplificationPipeline(OptimizationLevel::O1,
            // ThinOrFullLTOPhase::None);
 
-  FPM.addPass(
-      SimplifyCFGPass(SimplifyCFGOptions().convertSwitchRangeToICmp(false)));
+  FPM.addPass(SimplifyCFGPass(SimplifyCFGOptions()));
   FPM.addPass(InstCombinePass());
   FPM.addPass(llvm::PromotePass());
   FPM.addPass(llvm::GVNPass());
@@ -315,6 +314,9 @@ llvm::FunctionPassManager buildFunctionOptimizations() {
   // TODO: Investigate if this is too expensive.
   FPM.addPass(ADCEPass());
   FPM.addPass(InstCombinePass());
+  // 简化Phi里面重复的基本块和值
+  FPM.addPass(SimplifyCFGPass(SimplifyCFGOptions()));
+
   return FPM;
 }
 

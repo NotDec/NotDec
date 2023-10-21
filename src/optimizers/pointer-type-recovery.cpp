@@ -120,15 +120,23 @@ long PointerTypeRecovery::get_ty_or_negative1(aval val) {
   return val2hty.at(val);
 }
 
-/// Insert cast for one operand of PHI.
-Value *insertPhiOpCast(IRBuilder<> *builder, Instruction *inst, Value *op,
-                       Type *DestTy, unsigned index) {
-  assert(isa<PHINode>(inst));
-  auto phi = cast<PHINode>(inst);
-  builder->SetInsertPoint(phi->getIncomingBlock(index)->getTerminator());
-  auto cast = builder->CreateBitOrPointerCast(op, DestTy);
-  phi->setIncomingValue(index, cast);
-  return cast;
+/// Insert cast for one operand of PHI or Call.
+Value *insertOpCastAtInd(IRBuilder<> *builder, Instruction *inst, Value *op,
+                         Type *DestTy, unsigned index) {
+  Value *casted = nullptr;
+  if (auto phi = dyn_cast<PHINode>(inst)) {
+    builder->SetInsertPoint(phi->getIncomingBlock(index)->getTerminator());
+    auto casted = builder->CreateBitOrPointerCast(op, DestTy);
+    phi->setIncomingValue(index, casted);
+  } else if (auto call = dyn_cast<CallBase>(inst)) {
+    assert(call->getArgOperand(index) == op);
+    builder->SetInsertPoint(inst);
+    casted = builder->CreateBitOrPointerCast(op, DestTy);
+    call->setArgOperand(index, casted);
+  } else {
+    assert(false && "insertOpCastAtInd: not supported inst!!");
+  }
+  return casted;
 }
 
 /// Insert cast for one operand of an instruction.
@@ -372,7 +380,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         for (auto i = 0; i < phi->getNumIncomingValues(); i++) {
           auto op = phi->getIncomingValue(i);
           // auto blk = phi->getIncomingBlock(i);
-          insertPhiOpCast(&builder, phi, op, pty, i);
+          insertOpCastAtInd(&builder, phi, op, pty, i);
         }
         castBack(&builder, &inst, old_ty, datalog::Pointer);
       } else if (auto load = dyn_cast<LoadInst>(&inst)) {
@@ -454,26 +462,6 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
       CloneFunctionInto(NewF, &F, VMap,
                         CloneFunctionChangeType::LocalChangesOnly, Returns, "");
 
-      F.replaceAllUsesWith(NewF);
-      for (User *use : NewF->users()) {
-        if (CallBase *cb = dyn_cast<CallBase>(use)) {
-          auto old_fty = cb->getFunctionType();
-          auto new_fty = NewF->getFunctionType();
-          cb->mutateFunctionType(new_fty);
-          // insert int2ptr for call arg
-          for (auto i = 0; i < cb->arg_size(); i++) {
-            if (old_fty->getParamType(i) != new_fty->getParamType(i)) {
-              auto op = cb->getArgOperand(i);
-              insertOpCast(&builder, cb, op, new_fty->getParamType(i));
-            }
-          }
-          // insert ptr2int for return value.
-          if (old_fty->getReturnType() != new_fty->getReturnType()) {
-            castBack(&builder, cb, old_fty->getReturnType(), datalog::Pointer);
-          }
-        }
-      }
-
       // cast argument in entry block
       if (!F.isDeclaration()) {
         for (auto i = 0; i < NewF->arg_size(); i++) {
@@ -497,6 +485,27 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
                 insertOpCast(&builder, ret, op, ret_ty);
               }
             }
+          }
+        }
+      }
+
+      F.replaceAllUsesWith(NewF);
+      std::vector<User *> users(NewF->user_begin(), NewF->user_end());
+      for (User *use : users) {
+        if (CallBase *cb = dyn_cast<CallBase>(use)) {
+          auto old_fty = cb->getFunctionType();
+          auto new_fty = NewF->getFunctionType();
+          cb->mutateFunctionType(new_fty);
+          // insert int2ptr for call arg
+          for (unsigned i = 0; i < cb->arg_size(); i++) {
+            if (old_fty->getParamType(i) != new_fty->getParamType(i)) {
+              auto op = cb->getArgOperand(i);
+              insertOpCastAtInd(&builder, cb, op, new_fty->getParamType(i), i);
+            }
+          }
+          // insert ptr2int for return value.
+          if (old_fty->getReturnType() != new_fty->getReturnType()) {
+            castBack(&builder, cb, old_fty->getReturnType(), datalog::Pointer);
           }
         }
       }

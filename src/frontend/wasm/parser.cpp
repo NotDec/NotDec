@@ -353,6 +353,7 @@ llvm::GlobalVariable *Context::visitDataSegment(wabt::DataSegment &ds) {
 }
 
 const std::string LOCAL_PREFIX = "_local_";
+const std::string ARG_PREFIX = "_arg_";
 const std::string PARAM_PREFIX = "_param_";
 
 void Context::visitFunc(wabt::Func &func, llvm::Function *function) {
@@ -663,8 +664,11 @@ void Context::setFuncArgName(llvm::Function &func,
   using namespace llvm;
   wabt::Index argSize = decl.GetNumParams();
   for (wabt::Index i = 0; i < argSize; i++) {
-    const std::string &name = decl.GetParamType(i).GetName();
-    func.getArg(i)->setName(name);
+    if (decl.param_type_names.count(i) != 0) {
+      func.getArg(i)->setName(decl.param_type_names.at(i));
+    } else {
+      func.getArg(i)->setName(ARG_PREFIX + std::to_string(i));
+    }
     // std::cout << func.getArg(i)->getName().str() << std::endl;
   }
 }
