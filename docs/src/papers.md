@@ -249,3 +249,9 @@ Java反编译的几篇
 
 University of Stuttgart 的 [Michael Pradel](https://software-lab.org/people/Michael_Pradel.html) 以及他的学生 [Daniel Lehmann](https://dlehmann.eu/) 在webassembly方面发了很多paper。
 
+
+## WebAssembly的反编译
+
+一篇本科毕业论文[《Decompilation of WebAssembly using Datalog》](http://kth.diva-portal.org/smash/record.jsf?pid=diva2%3A1708139&dswid=-3540)，可以在[这里](https://www.diva-portal.org/smash/get/diva2:1708139/FULLTEXT01.pdf)下载到全文。作者是[LOVE BRANDEFELT](https://gitlab.com/lbrande)，代码在[这个gitlab仓库](https://gitlab.com/lbrande/dwad)
+
+基于Rust语言，遍历了各种指令，导出为Facts，代码并不复杂。Facts包含大量的CSV文件。

@@ -13,6 +13,7 @@
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "optimizers/retypd-generate.h"
 #include "optimizers/stack-alloca.h"
 #include "optimizers/stack-pointer-finder.h"
 #include "utils.h"
@@ -270,7 +271,9 @@ void DecompileConfig::run_passes() {
       MPM.addPass(LinearAllocationRecovery());
       MPM.addPass(PointerTypeRecovery());
       MPM.addPass(VerifierPass(false));
-      // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+      MPM.addPass(RetypdRunner());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << opts.stackRec

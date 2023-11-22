@@ -5,6 +5,36 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: notdec_retypd_provider",
+            "type": "python",
+            "request": "launch",
+            "module": "notdec_retypd_provider",
+            "cwd": "${workspaceFolder}/src/optimizers",
+            "justMyCode": false,
+            "args": [
+                "--json-in",
+                "/tmp/notdec_retypd-970811/retypd-constrains.json"
+            ]
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "decompile emcc_print",
+            // "program": "${workspaceFolder}/build/bin/notdec",
+            "program": "${command:cmake.launchTargetPath}",
+            "args": [
+                "-i",
+                "${workspaceFolder}/test/wasm/emcc-print.wat",
+                "-o",
+                "${workspaceFolder}/test/wasm/emcc-print.wat.ll",
+                // "--log-level",
+                // "level_debug",
+                "--compat-mode"
+            ],
+            "cwd": "${workspaceFolder}",
+            // "preLaunchTask": "build"
+        },
+        {
             "type": "lldb",
             "request": "launch",
             "name": "decompile",

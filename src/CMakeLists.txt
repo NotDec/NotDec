@@ -6,6 +6,7 @@ add_library(notdec STATIC
 	optimizers/pointer-type-recovery.cpp
 	optimizers/stack-pointer-finder.cpp
 	optimizers/stack-alloca.cpp
+	optimizers/retypd-generate.cpp
 	optimizers/retdec-stack/retdec-abi.cpp
 	optimizers/retdec-stack/retdec-ir-modifier.cpp
 	optimizers/retdec-stack/retdec-reaching-definition.cpp

@@ -18,6 +18,11 @@
 - elipmoc/gigahorse
 - ddisasm
 
+**博客**
+
+- [Dimension Shift! 一起来学Datalog吧！](https://www.jianshu.com/p/d7598d17ff2b)
+
+
 ### 将LLVM IR导出为Datalog规则
 
 Datalog挺像数据库的。Souffle的语法也拓展了很多特性，使得导出的写法不止一种。

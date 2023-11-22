@@ -251,7 +251,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   const char *Name = "pointer_main";
   if (souffle::SouffleProgram *prog =
           souffle::ProgramFactory::newInstance(Name)) {
-    // create temp dir
+    // create a temporary directory
     SmallString<128> Path;
     std::error_code EC;
     EC = llvm::sys::fs::createUniqueDirectory(Name, Path);
@@ -525,6 +525,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     v->eraseFromParent();
   }
 
+  errs() << " ============== PointerTypeRecovery finished  ===============\n";
   return PreservedAnalyses::none();
 }
 

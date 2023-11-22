@@ -1,4 +1,5 @@
 #include "datalog/fact-generator.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -6,6 +7,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
@@ -14,9 +19,6 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
-#include <string>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include "datalog/fact-names.def"
 

@@ -32,3 +32,10 @@ store i32 %1, i32* @"$__stack_pointer", align 4
 - 可以观察到，在增加了优化相关的Pass之后，sub指令甚至变成了`add xxx, -32`这种形式。
 
 在编译优化中为了解决这个问题，往往会引入指令的canonical form，统一把这种分配律的自由问题限制一下，规定一下谁在左谁在右。比如我们这里的例子，加减常量统一使用add指令（减的话就是加一个负数），且常量在右边。[这个帖子](https://www.npopov.com/2023/04/10/LLVM-Canonicalization-and-target-independence.html) 有一些更详细的介绍。即：有了InstCombine这个Pass之后，至少对于这种常量加减的情况，我们可以放心地只匹配一部分模式了？
+
+
+### 基于retypd的类型恢复
+
+基于retypd恢复类型，我们只需要为每个函数生成约束。然后生成一个调用图。将这两个东西喂给retypd，再解析分析结果得到类型即可。
+
+
