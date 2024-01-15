@@ -16,12 +16,12 @@
 
 from json import JSONEncoder
 
-from retypd.c_types import PointerType, CType, FunctionType, CompoundType
+from retypd.c_types import PointerType, CType, FunctionType, CompoundType, ArrayType
 from typing import Iterable, Set, List
 
 
 def is_non_primitive(ctype: CType) -> bool:
-    return isinstance(ctype, (FunctionType, CompoundType, PointerType))
+    return isinstance(ctype, (FunctionType, CompoundType, PointerType, ArrayType))
 
 
 def collect_all_non_primitive_types(
@@ -34,6 +34,8 @@ def collect_all_non_primitive_types(
             return [ctype.target_type]
         elif isinstance(ctype, CompoundType):
             return [field.ctype for field in ctype.fields]
+        elif isinstance(ctype, ArrayType):
+            return [ctype.member_type]
         else:
             raise Exception(f"Cannot get subtypes of {type(ctype)}")
 
@@ -79,6 +81,12 @@ class CTypeJsonEncoder(JSONEncoder):
                 "ret": str(obj.return_type)
                 if obj.return_type is not None
                 else "None",
+            }
+        elif isinstance(obj, ArrayType):
+            return {
+                "type": "array",
+                "member_type": str(obj.member_type),
+                "length": obj.length,
             }
         else:
             return super().default(obj)

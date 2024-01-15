@@ -124,7 +124,7 @@ https://www.cs.cornell.edu/courses/cs3110/2011sp/Lectures/lec26-type-inference/t
 
 接着我们看ghidra_retypd_provider内部是如何调用retypd的。
 
-- 使用`SchemaParser.parse_constraint`解析每个约束项，放到一个集合里，再按函数名字放到map里，然后构建`Program`：
+- 使用`SchemaParser.parse_constraint`解析每个约束项（`SubtypeConstraint`），它保存子类型关系左右两边的变量（`DerivedTypeVariable`）。每个函数的约束项放到一个集合里，再按函数名字放到map里，然后构建`Program`：
     ```python
     program = Program(
         CLattice(),
@@ -173,4 +173,7 @@ version=10.2.3
     3. 选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 "Open" 按钮。
     4. 点击 "OK" 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。
     5. 安装完成后，重启 Ghidra。
+
+## 算法详解
+
 

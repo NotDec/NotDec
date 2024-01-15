@@ -22,6 +22,7 @@ struct RetypdGenerator {
   std::map<Function *, std::vector<std::string>> func_constrains;
   std::map<Function *, std::set<Function *>> call_graphs;
   std::string data_layout;
+  std::vector<std::string> *current;
   unsigned pointer_size = 0;
 
   void run(Module &M);

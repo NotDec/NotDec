@@ -43,8 +43,14 @@ def main():
         help="The function to analyze, "
         "if not specified the whole program is analyzed",
     )
+    parser.add_argument(
+        "--debug-dir",
+        type=str,
+        help="debug folder to dump intermediate results"
+        "if not specified no intermediate results are dumped",
+    )
     args = parser.parse_args()
-    types = infer_types(args.json_in, args.function)
+    types = infer_types(args.json_in, args.function, args.debug_dir)
     output_path = args.json_in.with_name(args.json_in.name + ".types.json")
     serialize_types(types, output_path)
 

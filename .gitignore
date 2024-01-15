@@ -18,6 +18,7 @@ __pycache__/
 
 libs/
 
+llvmorg-*.zip
 llvm-source/
 llvm-build/
 *.obj/

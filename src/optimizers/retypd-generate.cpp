@@ -4,7 +4,10 @@
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/Constant.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
@@ -62,13 +65,13 @@ void RetypdGenerator::run(Module &M) {
 }
 
 void RetypdGenerator::run(Function &F) {
+  current = &func_constrains[&F];
   RetypdGeneratorVisitor visitor(*this, func_constrains[&F]);
   visitor.visit(F);
 }
 
 // 都用这个函数，获取或插入
 size_t RetypdGenerator::get_or_insert_value(Value *val) {
-  // only enable this if assert_not_exist is false
   if (val2type_var.count(val)) {
     return val2type_var.at(val);
   } else {
@@ -79,14 +82,76 @@ size_t RetypdGenerator::get_or_insert_value(Value *val) {
   }
 }
 
+std::string llvm_type_var(Type *ty) {
+  if (ty->isPointerTy()) {
+    // 20231122 why there is pointer constant(not inttoptr constant expr)
+    assert(false && "TODO can this be pointer?");
+    return llvm_type_var(ty->getPointerElementType()) + "*";
+  }
+  if (ty->isFloatTy()) {
+    return "float";
+  } else if (ty->isDoubleTy()) {
+    return "double";
+  } else if (ty->isIntegerTy()) {
+    if (ty->getIntegerBitWidth() == 1)
+      return "bool";
+    if (ty->getIntegerBitWidth() == 8)
+      return "uint8";
+    if (ty->getIntegerBitWidth() == 16)
+      return "uint16";
+    if (ty->getIntegerBitWidth() == 32)
+      return "uint32";
+    if (ty->getIntegerBitWidth() == 64)
+      return "uint64";
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "Warn: unknown integer type: " << *ty << "\n";
+    assert(false && "unknown integer type");
+  } else {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "Warn: unknown constant type: " << *ty << "\n";
+    assert(false && "unknown constant type");
+  }
+}
+
 // get id, and return string name.
 std::string RetypdGenerator::get_type_var(Value *val) {
-  size_t id = get_or_insert_value(val);
-  if (auto arg = dyn_cast<Argument>(val)) {
-    return arg2name(get_func_name(*arg->getParent()), arg->getArgNo());
+  bool is_new = false;
+  size_t id;
+  std::string ret;
+  if (val2type_var.count(val)) {
+    // exists
+    id = val2type_var.at(val);
   } else {
-    return id2name(id);
+    // insert new
+    id = type_val_id++;
+    assert(val2type_var.emplace(val, id).second);
+    assert(type_var2val.emplace(id, val).second);
+
+    is_new = true;
   }
+  if (auto arg = dyn_cast<Argument>(val)) {
+    ret = arg2name(get_func_name(*arg->getParent()), arg->getArgNo());
+  } else {
+    ret = id2name(id);
+  }
+
+  if (is_new) {
+    // if constant, insert additional constraint.
+    if (auto cexp = dyn_cast<ConstantExpr>(val)) {
+
+      // inttoptr constant <= void* ?
+      current->push_back("┬* <= " + ret);
+    } else if (auto gv = dyn_cast<GlobalVariable>(val)) {
+    } else if (Constant *c = dyn_cast<Constant>(val)) {
+      if (c->isNullValue()) {
+
+      } else {
+        auto ty = c->getType();
+        current->push_back(llvm_type_var(ty) + " <= " + ret);
+      }
+    }
+  }
+  return ret;
 }
 
 std::string RetypdGenerator::sanitize_name(std::string s) {
@@ -193,17 +258,14 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCmpInst(CmpInst &I) {
   // constant usually at the right side.
   auto *src2 = I.getOperand(1);
   if (isa<Constant>(src1) && !isa<Constant>(src2)) {
+    // 2023.11.22 because of InstCombine, this should not happen?
+    assert(false && "constant cannot be at the left side of cmp");
     std::swap(src1, src2);
   }
   auto result_var = cg.get_type_var(&I);
-  if (auto constant = dyn_cast<Constant>(src2)) {
-    I.isSigned();
-    // TODO for each case: icmp unsigned/signed and fcmp
-  } else {
-    auto src2_var = cg.get_type_var(src2);
-    auto src1_var = cg.get_type_var(src1);
-    constrains.push_back(src1_var + " <= " + src2_var);
-  }
+  auto src2_var = cg.get_type_var(src2);
+  auto src1_var = cg.get_type_var(src1);
+  constrains.push_back(src2_var + " <= " + src1_var);
   constrains.push_back("bool <= " + result_var);
 }
 

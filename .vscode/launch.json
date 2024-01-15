@@ -13,7 +13,9 @@
             "justMyCode": false,
             "args": [
                 "--json-in",
-                "/tmp/notdec_retypd-970811/retypd-constrains.json"
+                "${file}",
+                "--debug-dir",
+                "${fileDirname}"
             ]
         },
         {

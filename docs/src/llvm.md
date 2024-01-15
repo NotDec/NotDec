@@ -106,3 +106,9 @@ LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。
 - 使用`breakpoint modify 1 -c "((int64_t) (ci->getSExtValue()) < -100)"`这样的命令给断点增加条件
 
 更多使用方式见[lldb使用教程](https://lldb.llvm.org/use/tutorial.html)
+
+## 修改LLVM值的类型
+
+LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵活变动。比如一个整数，虽然可能有一些加法运算，但是你还是可以强制把它设成指针类型，然后在每个使用点插入ptrtoint指令转回去。
+
+有些LLVM值的类型，修改起来非常麻烦。尤其是函数的参数和返回值类型。函数也是GlobalValue，甚至是Constant。
