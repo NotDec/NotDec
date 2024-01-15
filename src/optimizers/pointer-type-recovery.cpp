@@ -42,7 +42,6 @@ extern void *__factory_Sf_pointer_main_instance;
 // Force linking of the main instance of the program
 static void *volatile dummy = &souffle::__factory_Sf_pointer_main_instance;
 
-static const bool is_debug = true;
 using namespace llvm;
 
 // TODO 重构直接输入facts
@@ -214,72 +213,66 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   // supress warning that dummy is unused.
   (void)dummy;
   datalog::FactGenerator fg(M);
-  fg.visit_module();
 
   // 1. find mem/sp, export facts.
-  Value *mem = nullptr;
-  for (GlobalVariable &gv : M.getGlobalList()) {
-    if (gv.getName().equals(MEM_NAME)) {
-      mem = &gv;
-      break;
-    }
-  }
-  if (mem == nullptr) {
-    std::cerr << "ERROR: mem not found!!";
-  } else {
-    fg.append_fact(datalog::FACT_isMemory,
-                   datalog::to_fact_str(fg.get_value_id(mem)));
-  }
-
-  // // assume constant less than 1000 is Number
-  // for (auto &F : M) {
-  //   for (auto &B : F) {
-  //     for (auto &I : B) {
-  //       for (auto &op : I.operands()) {
-  //         if (auto val = dyn_cast<ConstantInt>(op.get())) {
-  //           if (val->getZExtValue() < 1000) {
-  //             fg.append_fact(datalog::FACT_highType,
-  //                            datalog::to_fact_str(fg.get_value_id(&I)));
-  //           }
-  //         }
-  //       }
-  //     }
+  // Value *mem = nullptr;
+  // for (GlobalVariable &gv : M.getGlobalList()) {
+  //   if (gv.getName().equals(MEM_NAME)) {
+  //     mem = &gv;
+  //     break;
   //   }
+  // }
+  // if (mem == nullptr) {
+  //   std::cerr << "ERROR: mem not found!!";
+  // } else {
+  //   fg.append_fact(datalog::FACT_isMemory,
+  //                  datalog::to_fact_str(fg.get_value_id(mem)));
   // }
 
   // 2. run souffle
   const char *Name = "pointer_main";
   if (souffle::SouffleProgram *prog =
           souffle::ProgramFactory::newInstance(Name)) {
-    // create a temporary directory
-    SmallString<128> Path;
-    std::error_code EC;
-    EC = llvm::sys::fs::createUniqueDirectory(Name, Path);
-    if (!EC) {
-      // Resolve any symlinks in the new directory.
-      std::string UnresolvedPath(Path.str());
-      EC = llvm::sys::fs::real_path(UnresolvedPath, Path);
+    if (debug) {
+      fg.visit_module();
+      // create a temporary directory
+      SmallString<128> Path;
+      std::error_code EC;
+      EC = llvm::sys::fs::createUniqueDirectory(Name, Path);
+      if (!EC) {
+        // Resolve any symlinks in the new directory.
+        std::string UnresolvedPath(Path.str());
+        EC = llvm::sys::fs::real_path(UnresolvedPath, Path);
+      }
+      const char *temp_path = Path.c_str();
+
+      std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
+      fg.output_files(temp_path);
+      prog->loadAll(temp_path);
+      // run the program...
+      prog->run();
+      prog->printAll(temp_path);
+      // std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
+
+      // clean up
+      // delete directory if not debug
+      // if (!is_debug && !Path.empty()) {
+      //   assert(llvm::sys::fs::remove_directories(Path.str()) == std::errc());
+      // }
+
+      // read analysis result
+      fetch_result(fg, prog);
+    } else {
+      fg.set_program(prog);
+      fg.visit_module();
+      prog->run();
+      // read analysis result
+      fetch_result(fg, prog);
     }
-    const char *temp_path = Path.c_str();
 
-    std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
-    fg.output_files(temp_path);
-    // run the program...
-    prog->loadAll(temp_path);
-    prog->run();
-    prog->printAll(temp_path);
-
-    // read analysis result
-    fetch_result(fg, prog);
     // ignore mem
-    val2hty.erase(mem);
-    // std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
+    // val2hty.erase(mem);
 
-    // clean up
-    // delete directory if not debug
-    if (!is_debug && !Path.empty()) {
-      assert(llvm::sys::fs::remove_directories(Path.str()) == std::errc());
-    }
     delete prog;
   } else {
     std::cerr << "Souffle: Failed to create instance!!!" << std::endl;

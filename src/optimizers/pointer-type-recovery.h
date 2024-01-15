@@ -22,7 +22,10 @@ struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
   // all functions with optnone.
   // static bool isRequired() { return true; }
+  PointerTypeRecovery() = default;
+  PointerTypeRecovery(bool in_memory) : debug(in_memory) {}
 
+  bool debug = false;
   const char *MEM_NAME = "__notdec_mem0";
   using aval = datalog::FactGenerator::aval;
   using val_t = datalog::FactGenerator::val_t;

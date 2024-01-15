@@ -5,8 +5,8 @@
 //    /* | Unknown{} */ // unknown (bottom) not analyzed
 
 // specify memory value
-.decl isMemory(val: vid)
-.input isMemory
+// .decl isMemory(val: vid)
+// .input isMemory
 
 .decl highType(val: vid, status: highTypeDomain)
 

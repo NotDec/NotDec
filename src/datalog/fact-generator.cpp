@@ -26,21 +26,31 @@ namespace notdec::datalog {
 
 using val_t = FactGenerator::val_t;
 
-val_t FactGenerator::get_value_by_id(size_t vid) {
+val_t FactGenerator::get_value_by_id(id_t vid) {
   if (id2value.count(vid) > 0) {
     return id2value.at(vid);
   }
   return nullptr;
 }
 
-size_t FactGenerator::get_value_id(val_t val) { return value2id.at(val); }
+id_t FactGenerator::get_value_id(val_t val) { return value2id.at(val); }
 
 void FactGenerator::visit_module() {
   visit_gvs();
   visit_functions();
   auto sizet =
       visit_type(mod.getDataLayout().getIntPtrType(mod.getContext(), 0));
-  append_fact(FACT_SizeType, to_fact_str(sizet));
+  append_fact(FACT_SizeType, sizet);
+
+  // when a relation is not used by any rule, it cannot be found in the program.
+  if (!ignored_relations.empty()) {
+    std::cerr << "Warning: " << ignored_relations.size()
+              << " relations are ignored: ";
+    for (auto rel : ignored_relations) {
+      std::cerr << rel << " ";
+    }
+    std::cerr << std::endl;
+  }
 }
 
 void FactGenerator::generate(llvm::Module &mod, const char *outputDirname) {
@@ -68,10 +78,10 @@ void FactGenerator::output_files(std::string outputDirname) {
 }
 
 // https://github.com/llvm/llvm-project/blob/7cbf1a2591520c2491aa35339f227775f4d3adf6/llvm/lib/IR/AsmWriter.cpp#L536
-size_t FactGenerator::visit_type(llvm::Type *ty) {
-  size_t id = -1;
-  std::pair<size_t, bool> ins;
-  size_t id_dep = -1;
+id_t FactGenerator::visit_type(llvm::Type *ty) {
+  id_t id = -1;
+  std::pair<id_t, bool> ins;
+  id_t id_dep = -1;
   std::string type_str;
   switch (ty->getTypeID()) {
   case Type::VoidTyID:
@@ -125,7 +135,7 @@ size_t FactGenerator::visit_type(llvm::Type *ty) {
     ins = get_or_insert_type(type_str);
     id = ins.first;
     if (ins.second) {
-      append_fact(FACT_PointerType, to_fact_str(id, id_dep));
+      append_fact(FACT_PointerType, id, id_dep);
     }
     return id;
   case llvm::Type::StructTyID:
@@ -133,7 +143,7 @@ size_t FactGenerator::visit_type(llvm::Type *ty) {
     ins = get_or_insert_type(type_str);
     id = ins.first;
     if (ins.second) {
-      append_fact(FACT_StructType, to_fact_str(id, type_str));
+      append_fact(FACT_StructType, id, type_str);
     }
     return id;
   case llvm::Type::ArrayTyID:
@@ -142,8 +152,7 @@ size_t FactGenerator::visit_type(llvm::Type *ty) {
     ins = get_or_insert_type(type_str);
     id = ins.first;
     if (ins.second) {
-      append_fact(FACT_ArrayType,
-                  to_fact_str(id, id_dep, ty->getArrayNumElements()));
+      append_fact(FACT_ArrayType, id, id_dep, (unsigned_t)ty->getArrayNumElements());
     }
     return id;
   case llvm::Type::FixedVectorTyID:
@@ -152,8 +161,7 @@ size_t FactGenerator::visit_type(llvm::Type *ty) {
     ins = get_or_insert_type(type_str);
     id = ins.first;
     if (ins.second) {
-      append_fact(FACT_VectorType,
-                  to_fact_str(id, id_dep, ty->getArrayNumElements()));
+      append_fact(FACT_VectorType, id, id_dep, (unsigned_t)ty->getArrayNumElements());
     }
     return id;
   case llvm::Type::ScalableVectorTyID:
@@ -165,7 +173,7 @@ size_t FactGenerator::visit_type(llvm::Type *ty) {
   ins = get_or_insert_type(type_str);
   id = ins.first;
   if (ins.second) {
-    append_fact(FACT_BaseType, to_fact_str(id, type_str));
+    append_fact(FACT_BaseType, id, type_str);
   }
   return id;
 }
@@ -174,38 +182,37 @@ void FactGenerator::visit_gvs() {
   for (auto &gv : mod.globals()) {
     auto name = getNameOrAsOperand(gv);
     auto id = get_or_insert_value(&gv, true);
-    append_fact(FACT_GlobalVariable, to_fact_str(id, name));
+    append_fact(FACT_GlobalVariable, id, name);
 
     // auto type = printType(gv.getValueType());
     auto tid = visit_type(gv.getValueType());
-    append_fact(FACT_ValueType, to_fact_str(id, tid));
+    append_fact(FACT_ValueType, id, tid);
 
-    size_t isConst = gv.isConstant() ? 1 : 0;
+    number_t isConst = gv.isConstant() ? 1 : 0;
     auto linkage = getLinkageName(gv.getLinkage());
     auto visibility = getVisibilityName(gv.getVisibility());
-    append_fact(FACT_GlobalVarAttr,
-                to_fact_str(id, isConst, linkage, visibility));
+    append_fact(FACT_GlobalVarAttr, id, isConst, linkage, visibility);
   }
 }
 
 // 2nd arg: is_inserted
-std::pair<size_t, bool> FactGenerator::get_or_insert_type(std::string key) {
+std::pair<id_t, bool> FactGenerator::get_or_insert_type(std::string key) {
   // https://stackoverflow.com/questions/1409454/c-map-find-to-possibly-insert-how-to-optimize-operations
-  typedef std::map<std::string, size_t> M;
+  typedef std::map<std::string, id_t> M;
   typedef M::iterator I;
   std::pair<I, bool> const &r = type_ids.insert(M::value_type(key, typeID));
   if (r.second) {
     // value was inserted; now my_map[foo_obj]="some value"
-    return std::pair<size_t, bool>(typeID++, true);
+    return std::pair<id_t, bool>(typeID++, true);
   } else {
     // value wasn't inserted because my_map[foo_obj] already existed.
     // note: the old value is available through r.first->second
     // and may not be "some value"
-    return std::pair<size_t, bool>(r.first->second, false);
+    return std::pair<id_t, bool>(r.first->second, false);
   }
 }
 
-void FactGenerator::append_fact(const char *key, std::string to_append) {
+void inline FactGenerator::append_fact_str(const char *key, std::string to_append) {
   // https://stackoverflow.com/questions/1409454/c-map-find-to-possibly-insert-how-to-optimize-operations
   typedef std::map<const char *, std::string> M;
   typedef M::iterator I;
@@ -220,7 +227,7 @@ void FactGenerator::append_fact(const char *key, std::string to_append) {
   }
 }
 
-size_t FactGenerator::visit_operand(llvm::Value &val) {
+id_t FactGenerator::visit_operand(llvm::Value &val) {
   // 1. operand is other value(e.g. instruction, gv...)
   // 2. operand is constant
   if (value2id.count(&val)) {
@@ -236,30 +243,30 @@ size_t FactGenerator::visit_operand(llvm::Value &val) {
   }
 }
 
-size_t FactGenerator::visit_constant(const llvm::Constant &c) {
+id_t FactGenerator::visit_constant(const llvm::Constant &c) {
   auto tid = visit_type(c.getType());
 
   auto id = get_or_insert_value(&c);
   if (isa<ConstantInt>(&c)) {
     // saturate to 32bit signed int, because souffle use 32bit domain by default
     auto num = static_cast<const ConstantInt &>(c).getSExtValue();
-    num = std::clamp(num, (int64_t)std::numeric_limits<int32_t>::min(),
+    number_t num_clamped = std::clamp(num, (int64_t)std::numeric_limits<int32_t>::min(),
                      (int64_t)std::numeric_limits<int32_t>::max());
     // Signed or not?
-    append_fact(FACT_IntConstant, to_fact_str(id, num));
+    append_fact(FACT_IntConstant, id, num_clamped);
   } else {
-    append_fact(FACT_Constant, to_fact_str(id, printSafeValue(c)));
+    append_fact(FACT_Constant, id, printSafeValue(c));
   }
-  append_fact(FACT_ValueType, to_fact_str(id, tid));
+  append_fact(FACT_ValueType, id, tid);
   return id;
 }
 
-size_t FactGenerator::get_or_insert_value(val_t val) {
+id_t FactGenerator::get_or_insert_value(val_t val) {
   return get_or_insert_value(val, false);
 }
 
 // 可以都改用这个函数插入
-size_t FactGenerator::get_or_insert_value(val_t val, bool assert_not_exist) {
+id_t FactGenerator::get_or_insert_value(val_t val, bool assert_not_exist) {
   // only enable this if assert_not_exist is false
   if (!assert_not_exist && value2id.count(val)) {
     return value2id.at(val);
@@ -278,27 +285,27 @@ void FactGenerator::visit_functions() {
   for (auto &f : mod.functions()) {
     auto name = getNameOrAsOperand(f);
     auto id = get_or_insert_value(&f);
-    append_fact(FACT_Func, to_fact_str(id, name));
+    append_fact(FACT_Func, id, name);
 
     auto linkage = getLinkageName(f.getLinkage());
     auto visibility = getVisibilityName(f.getVisibility());
-    append_fact(FACT_FuncAttr, to_fact_str(id, linkage, visibility));
+    append_fact(FACT_FuncAttr, id, linkage, visibility);
 
     // return as a abstract value.
     auto ret_id =
         get_or_insert_value(FactGenerator::aval{&f, FACT_FuncRet}, true);
-    append_fact(FACT_FuncRet, to_fact_str(ret_id, id));
+    append_fact(FACT_FuncRet, ret_id, id);
     auto type_id = visit_type(f.getReturnType());
-    append_fact(FACT_ValueType, to_fact_str(ret_id, type_id));
+    append_fact(FACT_ValueType, ret_id, type_id);
 
-    size_t ind = 0;
+    id_t ind = 0;
     for (auto &arg : f.args()) {
       auto arg_name = getNameOrAsOperand(arg);
       auto arg_id = get_or_insert_value(&arg);
-      append_fact(FACT_FuncArg, to_fact_str(arg_id, id, ind, arg_name));
+      append_fact(FACT_FuncArg, arg_id, id, ind, arg_name);
 
       auto arg_type_id = visit_type(arg.getType());
-      append_fact(FACT_ValueType, to_fact_str(arg_id, arg_type_id));
+      append_fact(FACT_ValueType, arg_id, arg_type_id);
       ind += 1;
     }
   }
@@ -313,36 +320,35 @@ void FactGenerator::visit_functions() {
     for (const llvm::BasicBlock &bb : f) {
       auto name = getNameOrAsOperand(bb);
       auto id = get_or_insert_value(&bb);
-      append_fact(FACT_BasicBlock, to_fact_str(id, fid, name));
+      append_fact(FACT_BasicBlock, id, fid, name);
 
       auto bb_type_id = visit_type(bb.getType());
-      append_fact(FACT_ValueType, to_fact_str(id, bb_type_id));
+      append_fact(FACT_ValueType, id, bb_type_id);
 
-      size_t prev_instr_id = 0;
+      id_t prev_instr_id = 0;
       for (const llvm::Instruction &instr : bb) {
         auto inst_id = get_or_insert_value(&instr);
         auto inst_name = getNameOrAsOperand(instr);
-        append_fact(FACT_Instruction,
-                    to_fact_str(inst_id, instr.getOpcodeName(), inst_name, id));
+        append_fact(FACT_Instruction, inst_id, instr.getOpcodeName(), inst_name, id);
 
         auto inst_type_id = visit_type(instr.getType());
-        append_fact(FACT_ValueType, to_fact_str(inst_id, inst_type_id));
+        append_fact(FACT_ValueType, inst_id, inst_type_id);
 
         // Record instruction flows
         if (prev_instr_id) {
-          append_fact(FACT_InstNext, to_fact_str(prev_instr_id, id));
+          append_fact(FACT_InstNext, prev_instr_id, id);
         }
         prev_instr_id = inst_id;
       }
 
       // block entry
       auto block_entry_id = value2id.at(&bb.getInstList().front());
-      append_fact(FACT_BlockEntryInst, to_fact_str(id, block_entry_id));
+      append_fact(FACT_BlockEntryInst, id, block_entry_id);
     }
 
     // entry 关系
     auto entry_id = value2id.at(&f.getEntryBlock());
-    append_fact(FACT_FuncEntryBlock, to_fact_str(fid, entry_id));
+    append_fact(FACT_FuncEntryBlock, fid, entry_id);
 
     // Traverse again to export CFG relation/operand relation.
     // e.g., call inst cannot find target function id during the first pass.
@@ -353,11 +359,11 @@ void FactGenerator::visit_functions() {
                                      pi_end = pred_end(&bb);
            pi != pi_end; ++pi) {
         auto pred_id = value2id.at(*pi);
-        append_fact(FACT_CFGEdge, to_fact_str(pred_id, id));
+        append_fact(FACT_CFGEdge, pred_id, id);
 
         auto pred_inst_id = value2id.at((*pi)->getTerminator());
         auto succ_inst_id = value2id.at(&bb.getInstList().front());
-        append_fact(FACT_InstNext, to_fact_str(pred_inst_id, succ_inst_id));
+        append_fact(FACT_InstNext, pred_inst_id, succ_inst_id);
       }
 
       for (const llvm::Instruction &instr : bb) {
@@ -370,10 +376,10 @@ void FactGenerator::visit_functions() {
         }
 
         // visit operands in second pass
-        size_t ind = 0;
+        id_t ind = 0;
         for (auto &op : instr.operands()) {
           auto op_vid = visit_operand(*op.get());
-          append_fact(FACT_Operand, to_fact_str(inst_id, ind, op_vid));
+          append_fact(FACT_Operand, inst_id, ind, op_vid);
 
           ind += 1;
         }
@@ -385,18 +391,17 @@ void FactGenerator::visit_functions() {
 }
 
 void InstructionVisitor::visitReturnInst(ReturnInst &I) {
-  fg.append_fact(FACT_RetInstVal,
-                 to_fact_str(fg.value2id.at(&I),
+  fg.append_fact(FACT_RetInstVal, fg.value2id.at(&I),
                              fg.value2id.at(FactGenerator::aval{
-                                 I.getParent()->getParent(), FACT_FuncRet})));
+                                 I.getParent()->getParent(), FACT_FuncRet}));
 }
 
 void InstructionVisitor::visitCallInst(CallInst &I) {
   // for each arg (instead of operand)
-  size_t ind = 0;
+  id_t ind = 0;
   for (auto &arg : I.args()) {
     auto op_vid = fg.visit_operand(*arg.get());
-    fg.append_fact(FACT_Operand, to_fact_str(fg.value2id.at(&I), ind, op_vid));
+    fg.append_fact(FACT_Operand, fg.value2id.at(&I), ind, op_vid);
     ind += 1;
   }
 
@@ -405,8 +410,7 @@ void InstructionVisitor::visitCallInst(CallInst &I) {
   if (target == nullptr) {
     return;
   }
-  fg.append_fact(FACT_CallTarget,
-                 to_fact_str(fg.value2id.at(&I), fg.value2id.at(target)));
+  fg.append_fact(FACT_CallTarget, fg.value2id.at(&I), fg.value2id.at(target));
 }
 
 std::string printType(Type *ty) {
