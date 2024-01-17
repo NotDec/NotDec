@@ -77,7 +77,11 @@ bool LLVMSupport::isInlineAsm(const llvm::Instruction *i) {
 	PRECONDITION_NON_NULL(i);
 
 	if (const llvm::CallInst *ci = llvm::dyn_cast<llvm::CallInst>(i)) {
+#if LLVM_VERSION_MAJOR < 11
 		return llvm::isa<llvm::InlineAsm>(ci->getCalledValue());
+#else
+		return llvm::isa<llvm::InlineAsm>(ci->getCalledOperand());
+#endif
 	}
 	return false;
 }

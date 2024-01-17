@@ -24,7 +24,6 @@ class AddrSpaceCastInst;
 class BinaryOperator;
 class BitCastInst;
 class CallInst;
-class CompositeType;
 class ConstantExpr;
 class ExtractValueInst;
 class FCmpInst;
@@ -75,7 +74,7 @@ public:
 	/// @{
 	ShPtr<Expression> convertInstructionToExpression(llvm::Instruction *inst);
 	ShPtr<CallExpr> convertCallInstToCallExpr(llvm::CallInst &inst);
-	ShPtr<Expression> generateAccessToAggregateType(llvm::CompositeType *type,
+	ShPtr<Expression> generateAccessToAggregateType(llvm::Type *type,
 		const ShPtr<Expression> &base, const llvm::ArrayRef<unsigned> &indices);
 	/// @}
 

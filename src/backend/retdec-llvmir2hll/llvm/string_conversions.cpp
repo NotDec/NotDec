@@ -27,7 +27,16 @@ namespace {
 *    (of arbitrary length)
 */
 std::size_t getCharSize(const llvm::Type *type) {
+#if LLVM_VERSION_MAJOR < 11
 	auto arrayType = llvm::dyn_cast<llvm::SequentialType>(type);
+#else
+	if (auto arrayType = llvm::dyn_cast<llvm::ArrayType>(type)) {
+		return arrayType->getElementType()->getPrimitiveSizeInBits();
+	} else if (auto vectorType = llvm::dyn_cast<llvm::VectorType>(type)) {
+		return vectorType->getElementType()->getPrimitiveSizeInBits();
+	}
+	auto arrayType = llvm::dyn_cast<llvm::ArrayType>(type);
+#endif
 	PRECONDITION(arrayType, "expected type to be llvm::SequentialType");
 	return arrayType->getElementType()->getPrimitiveSizeInBits();
 }

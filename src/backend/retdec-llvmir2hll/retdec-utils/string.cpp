@@ -14,8 +14,8 @@
 #include <regex>
 #include <sstream>
 
-#include "retdec/utils/conversion.h"
-#include "retdec/utils/string.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
 
 namespace retdec {
 namespace utils {

@@ -112,7 +112,11 @@ std::string ConstInt::toString(unsigned radix, const std::string &prefix) const 
 	PRECONDITION(radix == 2 || radix == 8 || radix == 10 || radix == 16 || radix == 36,
 		"invalid radix " << radix);
 
+#if LLVM_VERSION_MAJOR < 13 
 	std::string asString(toLower(value.toString(radix, isSigned())));
+#else
+	std::string asString(toLower(llvm::toString(value, radix)));
+#endif
 	if (prefix.empty()) {
 		return asString;
 	}

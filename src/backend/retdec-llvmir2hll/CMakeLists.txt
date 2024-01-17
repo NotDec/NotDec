@@ -15,6 +15,7 @@ ExternalProject_Add(
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
 	SOURCE_DIR ${CMAKE_BINARY_DIR}/rapidjson
+	BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/rapidjson
 )
 
 # Prepare RapidJSON (RapidJSON is a header-only library)
@@ -364,6 +365,7 @@ add_library(llvmir2hll STATIC
 	retdec-utils/version.cpp
 	retdec-utils/string.cpp
 	llvmir2hll.cpp
+	config.cpp
 )
 add_library(retdec::llvmir2hll ALIAS llvmir2hll)
 
@@ -373,6 +375,7 @@ target_include_directories(llvmir2hll
 	PUBLIC
 	${RAPIDJSON_INCLUDE_DIR}
 )
+add_dependencies(llvmir2hll rapidjson)
 
 # target_link_libraries(llvmir2hll
 # 	PUBLIC

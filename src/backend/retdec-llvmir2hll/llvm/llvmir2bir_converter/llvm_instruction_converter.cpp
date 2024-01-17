@@ -165,11 +165,19 @@ ShPtr<Expression> LLVMInstructionConverter::convertInstructionToExpression(
 */
 ShPtr<CallExpr> LLVMInstructionConverter::convertCallInstToCallExpr(llvm::CallInst &inst) {
 	ExprVector args;
+#if LLVM_VERSION_MAJOR < 11
 	for (auto &arg: inst.arg_operands()) {
 		args.push_back(getConverter()->convertValueToExpression(arg));
 	}
 
 	auto calledExpr = getConverter()->convertValueToExpression(inst.getCalledValue());
+#else
+	for (auto &arg: inst.args()) {
+		args.push_back(getConverter()->convertValueToExpression(arg));
+	}
+
+	auto calledExpr = getConverter()->convertValueToExpression(inst.getCalledOperand());
+#endif
 	return CallExpr::create(calledExpr, args);
 }
 
@@ -182,20 +190,20 @@ ShPtr<CallExpr> LLVMInstructionConverter::convertCallInstToCallExpr(llvm::CallIn
 * @param[in] indices Array of indices.
 */
 ShPtr<Expression> LLVMInstructionConverter::generateAccessToAggregateType(
-		llvm::CompositeType *type, const ShPtr<Expression> &base,
+		llvm::Type *type, const ShPtr<Expression> &base,
 		const llvm::ArrayRef<unsigned> &indices) {
 	auto typeIt = type;
 	auto access = base;
 	for (const auto &index: indices) {
 		auto indexBir = ConstInt::create(index, COMPOSITE_TYPE_INDEX_SIZE_BITS);
 
-		if (typeIt->isStructTy()) {
+		if (auto structTy = dyn_cast<llvm::StructType>(typeIt)) {
 			access = StructIndexOpExpr::create(access, indexBir);
-		} else if (typeIt->isArrayTy()) {
+			typeIt = structTy->getTypeAtIndex(index);
+		} else if (auto arrTy = dyn_cast<llvm::ArrayType>(typeIt)) {
 			access = ArrayIndexOpExpr::create(access, indexBir);
+			typeIt = arrTy->getArrayElementType();
 		}
-
-		typeIt = llvm::dyn_cast<llvm::CompositeType>(typeIt->getTypeAtIndex(index));
 	}
 
 	return access;
@@ -377,7 +385,7 @@ ShPtr<Expression> LLVMInstructionConverter::visitGetElementPtrInst(
 */
 ShPtr<Expression> LLVMInstructionConverter::visitExtractValueInst(
 		llvm::ExtractValueInst &inst) {
-	auto type = llvm::cast<llvm::CompositeType>(inst.getAggregateOperand()->getType());
+	auto type = inst.getAggregateOperand()->getType();
 	auto base = getConverter()->convertValueToExpression(inst.getAggregateOperand());
 	return generateAccessToAggregateType(type, base, inst.getIndices());
 }

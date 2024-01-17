@@ -18,7 +18,7 @@
 #include "backend/retdec-llvmir2hll/llvm/llvmir2bir_converter/variables_manager.h"
 #include "backend/retdec-llvmir2hll/support/debug.h"
 #include "backend/retdec-llvmir2hll/utils/ir.h"
-#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
+#include "backend/retdec-llvmir2hll/utils/string.h"
 #include "backend/retdec-llvmir2hll/retdec-utils/io/log.h"
 
 using namespace retdec::utils::io;
@@ -122,7 +122,7 @@ ShPtr<Variable> LLVMIR2BIRConverter::convertGlobalVariable(
 		var->markAsExternal();
 	}
 
-	auto a = resModule->getConfig()->getAddressForGlobalVar(globVar.getName());
+	auto a = resModule->getConfig()->getAddressForGlobalVar(globVar.getName().str());
 	var->setAddress(a);
 
 	return var;
@@ -186,7 +186,7 @@ ShPtr<Function> LLVMIR2BIRConverter::convertFuncDeclaration(
 	auto retType = converter->convertType(func.getReturnType());
 	auto params = convertFuncParams(func);
 
-	auto birFunc = Function::create(resModule, retType, func.getName(), params);
+	auto birFunc = Function::create(resModule, retType, func.getName().str(), params);
 	variablesManager->addGlobalValVarPair(&func, birFunc->getAsVar());
 	birFunc->setVarArg(func.isVarArg());
 	return birFunc;
@@ -196,9 +196,9 @@ ShPtr<Function> LLVMIR2BIRConverter::convertFuncDeclaration(
 * @brief Updates the given LLVM function @a func from declaration to definition.
 */
 void LLVMIR2BIRConverter::updateFuncToDefinition(llvm::Function &func) {
-	auto name = func.getName();
+	auto name = func.getName().str();
 	if (enableDebug) {
-		Log::phase("converting function " + name.str(), Log::SubPhase);
+		Log::phase("converting function " + name, Log::SubPhase);
 	}
 
 	auto birFunc = resModule->getFuncByName(name);

@@ -12,6 +12,7 @@
 #include <string>
 
 #include <llvm/ADT/APInt.h>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/ADT/APSInt.h>
 
 #include "backend/retdec-llvmir2hll/ir/constant.h"

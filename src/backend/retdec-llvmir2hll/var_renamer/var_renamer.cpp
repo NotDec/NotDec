@@ -14,7 +14,7 @@
 #include "backend/retdec-llvmir2hll/support/debug.h"
 #include "backend/retdec-llvmir2hll/support/types.h"
 #include "backend/retdec-llvmir2hll/utils/ir.h"
-#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
+#include "backend/retdec-llvmir2hll/utils/string.h"
 #include "backend/retdec-llvmir2hll/var_renamer/var_renamer.h"
 #include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 #include "backend/retdec-llvmir2hll/retdec-utils/conversion.h"

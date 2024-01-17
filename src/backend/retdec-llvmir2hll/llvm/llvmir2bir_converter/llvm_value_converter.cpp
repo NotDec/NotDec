@@ -172,7 +172,7 @@ ShPtr<Type> LLVMValueConverter::convertType(const llvm::Type *type) {
 */
 bool LLVMValueConverter::storesStringLiteral(
 		const llvm::GlobalVariable &globVar) const {
-	return resModule->isGlobalVarStoringStringLiteral(globVar.getName())
+	return resModule->isGlobalVarStoringStringLiteral(globVar.getName().str())
 		|| stores8BitStringLiteral(&globVar);
 }
 
@@ -218,7 +218,7 @@ ShPtr<CallExpr> LLVMValueConverter::convertCallInstToCallExpr(llvm::CallInst &in
 * @param[in] indices Array of indices.
 */
 ShPtr<Expression> LLVMValueConverter::generateAccessToAggregateType(
-		llvm::CompositeType *type, ShPtr<Expression> base,
+		llvm::Type *type, ShPtr<Expression> base,
 		llvm::ArrayRef<unsigned> indices) {
 	return instConverter->generateAccessToAggregateType(type, base, indices);
 }

@@ -12,7 +12,7 @@ namespace version {
 
 std::string getCommitHash()
 {
-	return RETDEC_GIT_COMMIT_HASH;
+	return "6238ecada5a880cf3df6b6ad90d49b0c06fdb84b";
 }
 
 std::string getShortCommitHash(unsigned length)
@@ -22,12 +22,12 @@ std::string getShortCommitHash(unsigned length)
 
 std::string getBuildDate()
 {
-	return RETDEC_BUILD_DATE;
+	return "2023-05-25";
 }
 
 std::string getVersionTag()
 {
-	return RETDEC_GIT_VERSION_TAG;
+	return "master";
 }
 
 std::string getVersionStringLong()

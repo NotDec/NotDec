@@ -9,7 +9,7 @@
 #include "backend/retdec-llvmir2hll/support/debug.h"
 #include "backend/retdec-llvmir2hll/var_name_gen/var_name_gen_factory.h"
 #include "backend/retdec-llvmir2hll/var_name_gen/var_name_gens/fruit_var_name_gen.h"
-#include "backend/retdec-llvmir2hll/retdec-utilsc-utils/array.h"
+#include "backend/retdec-llvmir2hll/retdec-utils/array.h"
 
 using retdec::utils::arraySize;
 

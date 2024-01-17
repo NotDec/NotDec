@@ -375,7 +375,7 @@ std::string CFGNode::getName() const {
 		return "<unnamed>";
 	}
 
-	return firstBasicBlock->getName();
+	return firstBasicBlock->getName().str();
 }
 
 /**

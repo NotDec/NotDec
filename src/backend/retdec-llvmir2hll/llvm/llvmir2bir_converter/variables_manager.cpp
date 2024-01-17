@@ -92,7 +92,7 @@ ShPtr<Variable> VariablesManager::getOrCreateLocalVar(llvm::Value *val) {
 		a = LLVMSupport::getInstAddress(insn);
 	}
 
-	auto var = Variable::create(val->getName(), UnknownType::create(), a);
+	auto var = Variable::create(val->getName().str(), UnknownType::create(), a);
 	localVarsMap.emplace(val, var);
 	return var;
 }

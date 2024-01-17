@@ -130,7 +130,7 @@ ShPtr<Statement> BasicBlockConverter::visitCallInst(llvm::CallInst &inst) {
 * @endcode
 */
 ShPtr<Statement> BasicBlockConverter::visitInsertValueInst(llvm::InsertValueInst &inst) {
-	auto type = llvm::cast<llvm::CompositeType>(inst.getAggregateOperand()->getType());
+	auto type = inst.getAggregateOperand()->getType();
 	auto base = converter->convertValueToExpression(&inst);
 
 	auto lhs = converter->generateAccessToAggregateType(type, base, inst.getIndices());

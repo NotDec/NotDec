@@ -25,12 +25,12 @@
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/TargetRegistry.h>
+// #include <llvm/Support/TargetRegistry.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Target/TargetMachine.h>
 
-#include "backend/retdec-llvmir2hll/config/config.h"
+#include "backend/retdec-llvmir2hll/retdec-config/config.h"
 #include "backend/retdec-llvmir2hll/analysis/alias_analysis/alias_analysis.h"
 #include "backend/retdec-llvmir2hll/analysis/alias_analysis/alias_analysis_factory.h"
 #include "backend/retdec-llvmir2hll/analysis/value_analysis.h"

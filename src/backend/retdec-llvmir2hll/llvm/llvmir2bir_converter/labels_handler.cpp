@@ -9,7 +9,7 @@
 #include "backend/retdec-llvmir2hll/ir/statement.h"
 #include "backend/retdec-llvmir2hll/llvm/llvm_support.h"
 #include "backend/retdec-llvmir2hll/llvm/llvmir2bir_converter/labels_handler.h"
-#include "backend/retdec-llvmir2hll/retdec-utils/string.h"
+#include "backend/retdec-llvmir2hll/utils/string.h"
 #include "backend/retdec-llvmir2hll/retdec-utils/container.h"
 
 using retdec::utils::hasItem;
@@ -25,7 +25,7 @@ namespace llvmir2hll {
 */
 std::string LabelsHandler::getLabel(const llvm::BasicBlock *bb) const {
 	return getAddressFromLabel(
-		bb->getName(),
+		bb->getName().str(),
 		LLVMSupport::getBasicBlockLabelPrefix()
 	);
 }

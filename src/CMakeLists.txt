@@ -71,7 +71,8 @@ if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
 	string(REPLACE " -fno-rtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 	add_subdirectory(backend/retdec-llvmir2hll)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
-	# for retdec-llvmir2hll
+	# enable retdec interface in notdec
+	target_compile_definitions(notdec PUBLIC ENABLE_RETDEC_LLVMIR2HLL)
 endif()
 
 

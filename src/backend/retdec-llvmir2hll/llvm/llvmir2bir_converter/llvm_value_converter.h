@@ -15,7 +15,6 @@
 namespace llvm {
 
 class CallInst;
-class CompositeType;
 class Constant;
 class GlobalVariable;
 class Instruction;
@@ -72,7 +71,7 @@ public:
 	ShPtr<Expression> convertInstructionToExpression(llvm::Instruction *inst);
 	ShPtr<CallExpr> convertCallInstToCallExpr(llvm::CallInst &inst);
 	ShPtr<Expression> generateAccessToAggregateType(
-		llvm::CompositeType *type, ShPtr<Expression> base,
+		llvm::Type *type, ShPtr<Expression> base,
 		llvm::ArrayRef<unsigned> indices);
 	/// @}
 

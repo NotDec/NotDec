@@ -133,7 +133,7 @@ ShPtr<StructType> LLVMTypeConverter::convert(const llvm::StructType *type) {
 		elemTypes.push_back(convert(elem));
 	}
 
-	std::string name = type->hasName() ? type->getName() : "";
+	std::string name = type->hasName() ? type->getName().str() : "";
 	return StructType::create(elemTypes, name);
 }
 

@@ -46,7 +46,7 @@ std::unique_ptr<llvm::ToolOutputFile> getOutputStream(
 	auto out = std::make_unique<ToolOutputFile>(
 			outputFile,
 			ec,
-			sys::fs::F_None
+			sys::fs::OF_None
 	);
 	if (ec)
 	{
