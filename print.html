@@ -422,6 +422,9 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <li>使用<code>breakpoint modify 1 -c &quot;((int64_t) (ci-&gt;getSExtValue()) &lt; -100)&quot;</code>这样的命令给断点增加条件</li>
 </ul>
 <p>更多使用方式见<a href="https://lldb.llvm.org/use/tutorial.html">lldb使用教程</a></p>
+<h2 id="修改llvm值的类型"><a class="header" href="#修改llvm值的类型">修改LLVM值的类型</a></h2>
+<p>LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵活变动。比如一个整数，虽然可能有一些加法运算，但是你还是可以强制把它设成指针类型，然后在每个使用点插入ptrtoint指令转回去。</p>
+<p>有些LLVM值的类型，修改起来非常麻烦。尤其是函数的参数和返回值类型。函数也是GlobalValue，甚至是Constant。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="notdec-development-document"><a class="header" href="#notdec-development-document">NotDec Development Document</a></h1>
 <p>NotDec的项目文档。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="反编译器前端"><a class="header" href="#反编译器前端">反编译器前端</a></h1>
@@ -796,15 +799,16 @@ https://nemequ.github.io/waspr/instructions</p>
 </ul>
 <p>然而，有个PPT里面说，这种T1 T2转换，对控制流的缩减，从而对控制流划分的层次结构，不一定规范地符合真实源码里面的划分。T1 T2转换是最早的，最简单的一种interval analysis.</p>
 <h2 id="structural-analysis-for-dataflow-analysis"><a class="header" href="#structural-analysis-for-dataflow-analysis">Structural Analysis For Dataflow Analysis</a></h2>
+<p><strong>相关资料</strong></p>
 <ul>
 <li><a href="https://www.cs.tufts.edu/comp/150FP/archive/cristina-cifuentes/structuring-algorithm.pdf">《A Structural Algorithm for Decompilation》反编译的结构分析</a>
 <ul>
-<li>在CMU的lecture notes里面提到了这个paper</li>
+<li>在一个CMU的lecture notes里面提到了这个paper</li>
 </ul>
 </li>
-<li><a href="https://github.com/rambhawan/Computer-Compiler-Lang/blob/master/Advanced%20Compiler%20Design%20and%20Implementation.pdf">《Advanced Compiler Design and Implementation》</a> 
+<li><a href="https://github.com/rambhawan/Computer-Compiler-Lang/blob/master/Advanced%20Compiler%20Design%20and%20Implementation.pdf">《Advanced Compiler Design and Implementation》</a>  非常经典的编译器理论书籍
 <ul>
-<li>Phoenix论文里，提到结构分析的时候就让读者看这里。因此非常值得读一读。</li>
+<li>Phoenix论文里，提到结构分析的时候，也推荐了让读者去看这里。因此非常值得读一读。</li>
 <li>在203页更详细地介绍了structural analysis。建议从196页的Reducibility开始阅读。（书里面的页码，不是pdf的页码）这些结构分析都比较老了，而且有的不太是为反编译设计的。</li>
 </ul>
 </li>
@@ -819,36 +823,38 @@ https://nemequ.github.io/waspr/instructions</p>
 <p><strong>定义：Minimal Interval</strong>：是指：(1) 一个natural loop，(2)一个最大的有向无环子图，(3)一个最小的不可规约区域。和maximal interval主要区别大概在于，maximal interval划分loop的时候会把连带的有向无环分支带上，而minimal interval会单独分出来。</p>
 <p>一个minimal interval和maximal interval的区别如下：左边是maximal interval的划分，右边是minimal interval的划分。</p>
 <p><img src="docs/backend/interval-example.png" alt="" /></p>
-<p><strong>定义：Natural Loop</strong>：<a href="https://web.cs.wpi.edu/~kal/PLT/PLT8.6.4.html">Natural Loop</a> 背景：在编译原理里面的loop，也是希望仅有单个节点支配整个loop。我们使用支配关系寻找loop的时候，由于它是一个loop，因此必然至少有个“反向边”，不然构不成一个环。  Natural Loop的关键在于那个反向边，即头节点支配尾节点的边。</p>
-<p>一个反向边的Natural Loop，是指，最小的，包括反向边的节点集合，整个集合的前驱仅有entry节点，没有其他节点。（即，natural loop严格说并不是一个单独的概念，反而是对一条反向边而言的。）</p>
+<p><strong>定义：<a href="https://web.cs.wpi.edu/~kal/PLT/PLT8.6.4.html">Natural Loop</a></strong> 背景：在编译原理里面的loop，也是希望仅有单个节点支配整个loop。我们使用支配关系寻找loop的时候，由于它是一个loop，因此必然至少有个“反向边”，不然构不成一个环。  Natural Loop的关键在于那个反向边，即头节点支配尾节点的边。</p>
+<p>一个反向边的Natural Loop（即，natural loop严格说并不是一个单独的概念，反而是对一条反向边而言的。），是指，最小的，包括反向边头和尾节点的节点集合，集合内所有节点的前驱，要么在集合内，要么这个节点是entry节点，前驱是entry的前驱。</p>
 <p>当你移除那个entry节点的时候，因为entry节点支配其他节点，图就被分裂成了两部分。此时寻找所有有路径到达t的节点（t这里指反向边的源节点），这些节点和entry节点构成了natural loop。</p>
 <p>在《A Structural Algorithm for Decompilation》里直接使用了类似T1-T2规约的方式划分interval。</p>
 <p><strong>Interval Analysis (maximal interval)</strong>：该算法就是《A Structural Algorithm for Decompilation》里面用的，算法如下：</p>
 <p><img src="docs/backend/interval_analysis_algo.png" alt="" /></p>
+<p><strong>迭代性</strong>：该算法是一个迭代的算法，每一次迭代找出节点集合后，即使可以看作一个新的单个抽象节点，也不会产生新的节点集合包含这些本轮生成的抽象节点了，这些Interval嵌套的情况是由下一轮迭代负责的。（图片里的算法不包含这个迭代，迭代在另外一个没截图的算法里）</p>
+<p><strong>步骤：</strong></p>
 <ul>
-<li>迭代性：该算法是一个迭代的算法，每一次迭代找出节点集合后，即使可以看作一个新的单个抽象节点，也不会产生新的节点集合包含这些本轮生成的抽象节点了，这些嵌套的情况是下一轮迭代负责的。（图片里的算法不包含这个迭代，迭代在另外一个没截图的算法里）</li>
 <li>从entry节点开始，依次类似T1 T2规约的方法（即，“看是否某节点仅有一个前驱”的拓展版，看某节点的前驱是否都在集合里）把节点加入集合中。如果结束了，就从当前集合的后继节点里抓节点出来再进行这个过程。直到所有节点都被归入了某个集合。</li>
 <li>更新H的那一行代码的意思是：加入H的新节点，(1)不属于当前规约好的集合，(2)直接前驱在当前规约好的集合里。 （即，按顺序弄。）</li>
 </ul>
 <p>在《Advanced Compiler Design and Implementation》里提到这种方式划分的是Maximal Interval。书中还提出了改进版的算法，划分的是Minimal Interval，划分效果更好，更小的区域便于后续划分高级语言的控制结构。</p>
-<p><strong>Interval Analysis (minimal interval)</strong>：该算法是《Advanced Compiler Design and Implementation》提出的改进版：</p>
+<p><strong>Interval Analysis (minimal interval)</strong>：该算法是《Advanced Compiler Design and Implementation》提出的改进版。它将CFG划分为三个部分，无环（acylic），natural loop和improper region。无环部分即有向无环子图，其他两种区域则包含环。后面会提到，proper region指一些虽然无环，但是也不能被简单的if-else等结构匹配的无环部分。improper region与之对应，有环，但是是比较复杂的环。</p>
+<p><strong>步骤：</strong></p>
 <ol>
-<li>使用一个后序遍历找到loop header，和improper region的header。</li>
+<li>使用一个后序遍历找到loop header，和improper region的header。（后面再详细解释）</li>
 <li>对每个loop header构建natural loop区域。(使用支配图，判断是否有前驱节点指过来的边是反向边，即head dom tail)</li>
-<li>对improper region的header构建minimal SCC
+<li>对improper region的header构建minimal SCC。（即只把环分离出来）
 <ol>
-<li>构建区域之后，对（区域的）所有的直接后继节点构建最大的有向无环子图，如果成功弄出节点数量大于1的子图，就构建一个有向无环区域。</li>
+<li>构建区域之后，对（区域的）所有的直接后继节点构建最大的有向无环子图（把环上长出的分支分离出来），如果成功弄出节点数量大于1的子图，就构建一个有向无环区域。</li>
 </ol>
 </li>
 <li>递归整个过程直到终止。</li>
 </ol>
-<p>可以感受到，其实是基于前一个算法，融合了把有向无环的子区域分离的想法。同时还顺便分离了有环区域中的natural loop。（但是，有一些具体的实现也还是不清楚。。）</p>
+<p>可以感受到，这其实是基于前一个算法，融合了把有向无环的子区域分离的想法。同时还顺便分离了有环区域中的natural loop。（但是，有一些具体的实现细节也还是不清楚。。）下面详细解释算法细节。</p>
 <p><strong>背景1 深度优先遍历与逆后序遍历：</strong> Depth First Spanning Tree 是在DFS遍历过程中生成的一个树。基本思想是，DFS遍历过程中，会出现一种情况：判断当前节点指向其他节点的一条边的时候，发现这个边指向的目标节点已经被访问过了，所以就不需要沿着这条边过去了。因此可以将边划分为遍历使用了的边，和遍历过程中没有使用的边。</p>
-<p>在深度优先遍历时，怎么才算是反向边？当然是这条边指向了已经被访问的节点。即遍历时发现指向的地方已经访问过了。也有可能出现，根据选择的子节点不同导致反向边不同的情况。比如两个子树交叉指向隔壁更高的节点。深度优先遍历的时候，走过的边属于前向边。如果某条边反过来就属于前向边，则它是反向边（和某个前向边形成2节点的小环）。剩下的边属于交叉边。</p>
-<p><strong>一个如何确定反向边的问题</strong>：在《A Structural Algorithm for Decompilation》里直接使用了类似T1-T2规约的方式划分interval。后面判断是否是loop的时候提到，只需要检查interval的header的前驱指过来的边是不是反向边。而且只需要看后序遍历的顺序上的关系即可。我们这里探讨的问题是：**（检查interval header的predecessor）真的只需要看后续遍历的顺序就可以确定是否是反向边吗？**反向边的定义是，head节点支配tail节点。假如我们有个interval，有个back edge，如果想破坏这个支配关系的同时，保留后序遍历的顺序。假如根节点在DFS优先遍历左子树，我们的interval也在左子树，我们从右子树引一条边过来，这样不会影响左子树节点在后序遍历的顺序。同时我们把边指向header到tail节点的路径上，这样head就不再支配tail了。这样不就破坏了这个关系了吗？除非，这样引入的边会破坏interval的划分。确实，我们考虑那个被指向的节点，这个节点之前之所以会被归到这个interval，是因为它的所有前驱都在interval里了。这样增加的边会影响interval的划分，因此我们没能找到反例。</p>
+<p>在深度优先遍历时，怎么才算是反向边？当然是这条边指向了已经被访问的节点。即遍历时发现指向的地方已经访问过了。这个过程并不是确定性的：即，也有可能出现，根据选择的子节点不同导致反向边不同的情况。比如两个子树交叉指向隔壁子树的更高的节点。深度优先遍历的时候，走过的边属于前向边（forward）。如果某条边反过来就属于前向边，则它是反向边（和某个前向边形成2节点的小环）。剩下的边属于交叉边。</p>
+<p><strong>是否完全确定反向边？</strong>：在《A Structural Algorithm for Decompilation》里直接使用了类似T1-T2规约的方式划分interval。后面判断是否是loop的时候提到，只需要检查interval的header的前驱指过来的边是不是反向边。而且只需要看后序遍历的顺序上的关系即可。我们这里探讨的问题是：**（检查interval header的predecessor）真的只需要看后续遍历的顺序就可以确定是否是反向边吗？**反向边的定义是，head节点支配tail节点。假如我们有个interval，有个back edge，如果想破坏这个支配关系的同时，保留后序遍历的顺序。假如根节点在DFS优先遍历左子树，我们的interval也在左子树，我们从右子树引一条边过来，这样不会影响左子树节点在后序遍历的顺序。同时我们把边指向header到tail节点的路径上，这样head就不再支配tail了。这样不就破坏了这个关系了吗？除非，这样引入的边会破坏interval的划分。确实，我们考虑那个被指向的节点，这个节点之前之所以会被归到这个interval，是因为它的所有前驱都在interval里了。这样增加的边会影响interval的划分，因此我们没能找到反例。</p>
 <p><strong>结构分析算法(《Advanced Compiler Design and Implementation》)</strong>
-这边书中的算法是基于最早的结构分析《Structural Analysis: A New Approach to Flow Analysis in Optimizing Compilers》的改进。
-书中205页介绍的算法的大体结构如下：</p>
+这边书中的算法是基于最早的结构分析《Structural Analysis: A New Approach to Flow Analysis in Optimizing Compilers》的改进。它的区域类型有：Block, IfThen, IfThenElse, Case, Proper, SelfLoop, WhileLoop, NaturalLoop, Improper这几种。</p>
+<p><strong>算法的大体结构如下：</strong>（书中205页）</p>
 <ol>
 <li>使用一个DFS_Postorder算法，给每个节点标上序号。</li>
 <li>在一系列的节点遍历中，不断辨识出新的区域，把这些区域规约成单个抽象节点（因此可能需要修复图结构，并且可能需要重新做后序遍历）。
@@ -895,14 +901,14 @@ https://nemequ.github.io/waspr/instructions</p>
 </li>
 </ul>
 <p>有哪些边被否认了？区域内部到区域外部的，不经过entry和exit的边。</p>
-<p><strong>Tail Region</strong>：文中提出了Tail Region的概念。一个break语句的基本块，原本是跳走的，但是识别成tail region之后，就假装没有那个边。</p>
-<p>一些其他点：</p>
+<p><strong>Tail Region</strong>：文中提出了Tail Region的概念，它为现实中break的情况设计。一个带break语句的基本块，原本有一个很难处理的跳出的边。有了tail region之后，把它识别成tail region，就暂时假装没有那个边，继续做相关分析。</p>
+<p><strong>一些其他点：</strong></p>
 <ul>
 <li>论文中提到有这些性质的区域可以直接输出为C语言代码。因此SESS算法的目的是让SESS区域覆盖尽可能多的边。</li>
 <li>在原有匹配cyclic region，acyclic region之后，如果匹配失败，就尝试匹配tail region。这里在Phoenix里面提到，这篇论文里没有写清楚具体的匹配算法。而且他们发现，经常确实也匹配不到这种tail region，如果图太复杂还是会失败。</li>
 <li>关于论文没有说清楚的其他点，首先是怎么识别SESS region吧，可能是在原有的划分region基础上再做些判断。其次是怎么识别tail region的跳走的边。可能是识别region的基础上，看边是不是跳到head和tail的吧。</li>
 </ul>
-<h3 id="phoenix"><a class="header" href="#phoenix">Phoenix</a></h3>
+<h3 id="phoenix-第一个真正实用的结构恢复算法"><a class="header" href="#phoenix-第一个真正实用的结构恢复算法">Phoenix 第一个“真正实用”的结构恢复算法</a></h3>
 <ul>
 <li><a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">[Phoenix]</a> 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 <a href="https://edmcman.github.io/pres/usenix13.pptx">slides</a></li>
 </ul>
@@ -911,9 +917,7 @@ https://nemequ.github.io/waspr/instructions</p>
 <li>使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
 <ul>
 <li>如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过</li>
-<li>
-<h2 id="如果是cyclic的区域算法尝试找natural-loop匹配常见的循环模式或者就是普通的loop匹配不了还是跳过"><a class="header" href="#如果是cyclic的区域算法尝试找natural-loop匹配常见的循环模式或者就是普通的loop匹配不了还是跳过">如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过</a></h2>
-</li>
+<li>如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过</li>
 <li>如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
 <ul>
 <li>优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。</li>
@@ -923,9 +927,39 @@ https://nemequ.github.io/waspr/instructions</p>
 </ul>
 </li>
 </ul>
-<p>具体应该选择哪些边移除？确实是一个值得思考的问题。</p>
-<p><strong>算法的输入输出：</strong>：输入当然是CFG。如何规划输出的格式？</p>
-<p>TODO</p>
+<p>具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。</p>
+<p><strong>算法的输入输出</strong>：输入当然是CFG。如何规划输出的格式？结构分析的本质是把CFG组织成了带有标签的树的结构。树的节点里蕴含额外的控制流跳转信息。</p>
+<p>结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式</p>
+<ul>
+<li>
+<p>可能会有这种原始的想法：能不能把结果表示为CFG上的简单标记？似乎是不能的，因为是完全不一样的东西。</p>
+<ul>
+<li>比如，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Then-Else结构，单看IF块就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢失了信息的。</li>
+</ul>
+</li>
+<li>
+<p>LLVM的SSA能否和AST共存？稍微搜了一下，不太能。确实和我想的一样，最多就是基本块参数。还是直接把SSA解构了吧。</p>
+<ul>
+<li>SSA保留比较麻烦，可以考虑写成basic block argument的形式，在if while这种结构的末尾加上（带基本块参数的）goto？或者直接留下基本块参数。</li>
+</ul>
+</li>
+<li>
+<p>Region：算法的主体数据结构，对<code>List&lt;Statement&gt;</code>的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。</p>
+<ul>
+<li>最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。(<a href="https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs">reko - RegionGraphBuilder</a>)，在算法的迭代下不断折叠。</li>
+<li>最后的效果就是整个函数体变成单个linear region。</li>
+</ul>
+</li>
+<li>
+<p>Statement：已经结构化的基本块/statement的集合。</p>
+<ul>
+<li>不使用Expression，而是结合LLVM的指令。</li>
+</ul>
+</li>
+<li>
+<p>LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。</p>
+</li>
+</ul>
 <p><strong>Interval Analysis as a pre step?</strong>：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？</p>
 <ul>
 <li>Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败（归类为proper region）。</li>
@@ -1219,6 +1253,9 @@ and Methods from Compiled Executables </p>
 <p><a href="https://www.cse.psu.edu/~gxt29/publications/">Gang Tan</a></p>
 <p><strong>WebAssembly</strong></p>
 <p>University of Stuttgart 的 <a href="https://software-lab.org/people/Michael_Pradel.html">Michael Pradel</a> 以及他的学生 <a href="https://dlehmann.eu/">Daniel Lehmann</a> 在webassembly方面发了很多paper。</p>
+<h2 id="webassembly的反编译"><a class="header" href="#webassembly的反编译">WebAssembly的反编译</a></h2>
+<p>一篇本科毕业论文<a href="http://kth.diva-portal.org/smash/record.jsf?pid=diva2%3A1708139&amp;dswid=-3540">《Decompilation of WebAssembly using Datalog》</a>，可以在<a href="https://www.diva-portal.org/smash/get/diva2:1708139/FULLTEXT01.pdf">这里</a>下载到全文。作者是<a href="https://gitlab.com/lbrande">LOVE BRANDEFELT</a>，代码在<a href="https://gitlab.com/lbrande/dwad">这个gitlab仓库</a></p>
+<p>基于Rust语言，遍历了各种指令，导出为Facts，代码并不复杂。Facts包含大量的CSV文件。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="ghidra"><a class="header" href="#ghidra">Ghidra</a></h1>
 <h2 id="资源"><a class="header" href="#资源">资源</a></h2>
 <p>其他资源列表：</p>
@@ -1515,6 +1552,25 @@ Uninitialized的内存默认是不能写的，需要把要写的部分分割开�
 </ul>
 <h3 id="retdec-栈恢复算法"><a class="header" href="#retdec-栈恢复算法">retdec 栈恢复算法</a></h3>
 <p>源码在<a href="https://github.com/avast/retdec/blob/master/src/bin2llvmir/optimizations/stack/stack.cpp"><code>retdec\src\bin2llvmir\optimizations\stack\stack.cpp</code></a>。总体思路非常简单，分析每个load和store用到的东西，提取成一个表达式树（SymbolicTree类）。首先判断表达式树里面有没有栈指针，没有就不处理。然后尝试把整个表达式树化简，把栈指针看作0，化简成一个常量，然后把这个常量当作栈偏移，创建一个alloca去替换它。</p>
+<p>例如，对于下面的语法树：</p>
+<pre><code>src/optimizers/retdec-stack/retdec-stack.cpp:142: 
+-----------------------------------------------
+&gt;|   %254 = getelementptr [16777216 x i8], [16777216 x i8]* @__notdec_mem0, i64 0, i64 %253
+        &gt;| @__notdec_mem0 = global [16777216 x i8] zeroinitializer
+        &gt;| i64 0
+        &gt;|   %calcOffset249 = add i32 %0, -16
+                &gt;|   %0 = load i32, i32* @__stack_pointer, align 4
+                        &gt;| @__stack_pointer = internal global i32 5247184
+                                &gt;| i32 0
+                &gt;| i32 -16
+-----------------------------------------------
+</code></pre>
+<p>被化简为：</p>
+<pre><code>src/optimizers/retdec-stack/retdec-stack.cpp:171: 
+-----------------------------------------------
+&gt;| i32 -16
+-----------------------------------------------
+</code></pre>
 <p>这个方法还是有很大问题，有许多处理不了的情况。从这个角度看，retdec确实是比ghidra差的。现在现有的开源反编译器里面也就ghidra最好了。比如如果存在memcpy这种函数的调用，由于直接传地址，所以不是load/store的形式，而是计算完地址直接传给函数了，导致没有将里面的值替换为新创建的alloca。</p>
 <p><strong>代码解读</strong></p>
 <ul>
@@ -1656,60 +1712,212 @@ cp -r /sn640/retdec/include/retdec/serdes ./retdec-llvmir2hll/
 <li>优先看<a href="https://github.com/GrammaTech/retypd/blob/master/reference/type-recovery.rst">这个介绍</a>。</li>
 <li>这个<a href="https://github.com/GrammaTech/retypd/blob/master/reference/presentation_slides.pdf">PPT</a>比论文容易懂很多</li>
 </ul>
+<h2 id="背景"><a class="header" href="#背景">背景</a></h2>
 <h4 id="monoid"><a class="header" href="#monoid">monoid</a></h4>
 <p>读《Haskell趣学指南》的Monoids一节，理解一下。</p>
 <h3 id="unification-based-type-inference-algorithms"><a class="header" href="#unification-based-type-inference-algorithms">unification-based type inference algorithms</a></h3>
 <p>https://www.cs.cornell.edu/courses/cs3110/2011sp/Lectures/lec26-type-inference/type-inference.htm</p>
-<h4 id="retypdghidra-配置"><a class="header" href="#retypdghidra-配置">retypd+ghidra 配置</a></h4>
-<p>参考<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">GrammaTech/retypd-ghidra-plugin: Retypd plugin for Ghidra reverse engineering framework from NSA (github.com)</a></p>
-<ol>
-<li>安装retypd </li>
-</ol>
-<pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd
-cd retypd
-pip install .
+<h2 id="约束语法"><a class="header" href="#约束语法">约束语法</a></h2>
+<p><img src="imgs/retypd-label.png" alt="retypd-label" /></p>
+<p><strong>sketches</strong> 约束的求解结果被表示为sketches。每个value关联上一个sketch，包含该value的所有能力，即能否被store，能否访问指定的偏移。同时sketch还包含一个可自定义的lattice，用来传播类似于typedef这种类型。</p>
+<p><strong>规则</strong> 规则都表示为“X ⊑ Y”的形式，意思是“X is a subtype of Y ”。</p>
+<p><strong>S-Pointer and S-Field⊕/⊖</strong> 通过搜索代码，可以得知，至少在<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">retypd-ghidra-plugin</a>和<a href="https://github.com/GrammaTech/gtirb-ddisasm-retypd">gtirb-ddisasm-retypd</a>中是没有和这个相关的规则的生成的。</p>
+<p><strong>covariant/contravariant</strong></p>
+<p><strong>规则生成</strong></p>
+<ul>
+<li>复制操作：x := y，此时保守地认为，有可能是子类型赋值给了父类型变量：Y ⊑ X。
+<ul>
+<li>由复制操作带来的数据流，类型方向是父类型。子类型赋值给了父类型。</li>
+</ul>
+</li>
+<li>指针加载：x := *p，生成：P.load.σ32@0 ⊑ X 。</li>
+<li>指针赋值：*q := y，生成 Y ⊑ Q.store.σ32@0 。</li>
+<li>函数调用：如果有调用y := f(x)，生成 X ⊑ F.in 和 F.out ⊑ Y 。</li>
+<li>icmp：两值进行比较的时候：1 bool类型是结果的子类型。2 两个被比较的值直接，随便生成一个子类型关系？</li>
+</ul>
+<h2 id="开发与使用"><a class="header" href="#开发与使用">开发与使用</a></h2>
+<p>如何使用当前开源的代码呢？代码是一个python模块。当前开源的两个相关的使用代码有：<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">retypd-ghidra-plugin</a>和<a href="https://github.com/GrammaTech/gtirb-ddisasm-retypd">gtirb-ddisasm-retypd</a>。</p>
+<p>首先分析<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">retypd-ghidra-plugin</a>是如何使用retypd的。内部代码主要分为ghidra插件的java代码，和封装模块，<a href="https://github.com/GrammaTech/retypd-ghidra-plugin/tree/master/ghidra_retypd_provider">ghidra_retypd_provider</a>。Java代码部分通过Ghidra提供的API，从Ghidra的反编译器的IR中提取出相关的类型约束，提取为json文件。然后调用python封装模块读取并求解，结果也表示为json文件。然后Ghidra插件部分的java代码读取结果，并设置相应的类型。（注，无论是上次分析lua虚拟机，还是这次分析<code>/bin/ls</code>，花的时间特别久，半小时往上）</p>
+<p>输入ghidra_retypd_provider的样例json约束文件如下。可以观察到，每个函数的约束单独分开，同时还包含一个call graph部分。</p>
+<pre><code class="language-json">{
+  &quot;language&quot;: &quot;x86/little/64/default&quot;,
+  &quot;constraints&quot;: {
+    &quot;FUN_00109d00&quot;: [
+        &quot;v_7456 ⊑ v_7780&quot;,
+        &quot;v_997 ⊑ int64&quot;,
+        &quot;v_1441 ⊑ FUN_00109b50.in_13&quot;,
+        &quot;v_4504 ⊑ v_1242.store.σ8@0&quot;,
+        &quot;v_6777 ⊑ FUN_00109b50.in_5&quot;,
+        &quot;bool ⊑ v_542&quot;,
+        &quot;v_2301 ⊑ null&quot;,
+        &quot;v_7379.load.σ8@0*[nobound] ⊑ v_1441&quot;,
+        &quot;v_4396 ⊑ v_1671.store.σ8@0*[nobound]&quot;,
+        &quot;v_1188.load.σ8@0 ⊑ v_1191&quot;,
+        &quot;v_1671.load.σ8@0*[nobound] ⊑ v_1720&quot;,
+    ],
+    &quot;FUN_00110e10&quot;: [
+        ...
+    ]
+  }
+  &quot;callgraph&quot;: {
+    &quot;FUN_00109d00&quot;: [
+      &quot;FUN_001158c0&quot;,
+      &quot;FUN_00115920&quot;,
+      &quot;FUN_00109b50&quot;,
+      &quot;FUN_00115b30&quot;
+    ],
+    &quot;FUN_00110e10&quot;: [
+      &quot;strcmp&quot;,
+      &quot;strlen&quot;,
+      &quot;FUN_001158c0&quot;,
+      &quot;getgrnam&quot;,
+      &quot;strcpy&quot;
+    ],
+    ...
+  }
+}
 </code></pre>
-<ol start="2">
-<li>编译<code>GhidraRetypd</code>  安装ghidra_retypd_provider</li>
-</ol>
-<pre><code class="language-Python">git clone https://github.com/GrammaTech/retypd-ghidra-plugin
-cd retypd-ghidra-plugin
-make
-pip install .
+<p>输出ghidra_retypd_provider的样例json结果文件如下。可以观察到，包含两种类型的结果，分别是结构体和函数。结构体包含内部的成员及类型。函数块描述了函数的各个参数的类型。在<a href="https://github.com/am009/retypd-ghidra-plugin/blob/e4f587a2560148f0d0ebbdb2f26fc9977587661f/ghidra_retypd_provider/type_serialization.py#L51">这里</a>的自定义encoder中定义了转json的函数。</p>
+<p>这一点其实很奇怪，似乎该插件关注的核心是函数参数类型。这里<a href="https://github.com/am009/retypd-ghidra-plugin/blob/7c2547574cd86100e02793ae2c8c0cc8f88c3990/GhidraRetypd/src/main/java/ghidraretypd/RetypdTypes.java#L272">后续解析和类型设置</a>也说明了这一点。</p>
+<pre><code class="language-json">[
+  {
+    &quot;type&quot;: &quot;struct&quot;,
+    &quot;name&quot;: &quot;struct_545&quot;,
+    &quot;fields&quot;: [
+      {
+        &quot;name&quot;: &quot;field_0&quot;,
+        &quot;type&quot;: &quot;char1_t*&quot;,
+        &quot;offset&quot;: 0
+      },
+      {
+        &quot;name&quot;: &quot;field_1&quot;,
+        &quot;type&quot;: &quot;char1_t[4]&quot;,
+        &quot;offset&quot;: 168
+      }
+    ]
+  },
+  {
+    &quot;type&quot;: &quot;function&quot;,
+    &quot;name&quot;: &quot;function_260&quot;,
+    &quot;params&quot;: [
+      {
+        &quot;index&quot;: 0,
+        &quot;type&quot;: &quot;char1_t[4]&quot;
+      }
+    ],
+    &quot;ret&quot;: &quot;char1_t[0]&quot;
+  },
+  ...
+]
 </code></pre>
-<ol start="3">
-<li>修改 GhidraRetypd.zip中的extension.properties，添加</li>
-</ol>
+<p>接着我们看ghidra_retypd_provider内部是如何调用retypd的。</p>
+<ul>
+<li>使用<code>SchemaParser.parse_constraint</code>解析每个约束项（<code>SubtypeConstraint</code>），它保存子类型关系左右两边的变量（<code>DerivedTypeVariable</code>）。每个函数的约束项放到一个集合里，再按函数名字放到map里，然后构建<code>Program</code>：
+<pre><code class="language-python">program = Program(
+    CLattice(),
+    {},
+    parsed_constraints,
+    callgraph,
+)
+</code></pre>
+这里<code>parsed_constraints</code>就是准备好的那个map。callgraph都不用动，就是<code>Dict[str, List[str]]</code>。前两个参数分别是<code>types: Lattice[DerivedTypeVariable]</code>和<code>global_vars: Iterable[MaybeVar]</code>。</li>
+<li>使用Solver去求解约束：
+<pre><code class="language-python">config = SolverConfig(top_down_propagation=True)
+solver = Solver(program, config, verbose=LogLevel.DEBUG)
+_, sketches = solver()
+</code></pre>
+查看solver的<code>__call__</code>方法，可以发现返回类型是<code>Dict[DerivedTypeVariable, ConstraintSet]</code>和<code>Dict[DerivedTypeVariable, Sketch]</code>。</li>
+<li>传入<code>CTypeGenerator</code>，得到最终的类型结果。
+<pre><code class="language-python">gen = CTypeGenerator(
+    sketches,
+    CLattice(),
+    CLatticeCTypes(),
+    int_size,
+    pointer_size,
+)
+return list(gen().values())
+</code></pre>
+<code>CTypeGenerator</code>的<code>__call__</code>方法的返回类型是<code>Dict[DerivedTypeVariable, CType]</code>。</li>
+</ul>
+<p>根据<a href="https://github.com/GrammaTech/retypd/blob/e2c2adac5b123aa68b573192519f0d01e365527d/src/parser.py#L111">这里</a>，每个规则大致就是<code>var1 ⊑ var2</code>或者<code>var1 &lt;= var2</code>，然后两边的变量就是DerivedTypeVariable类型的。因此，上面结果里返回的map其实就能够用来查每个变量的类型。</p>
+<h4 id="retypd-ghidra-插件"><a class="header" href="#retypd-ghidra-插件">retypd ghidra 插件</a></h4>
+<p>在我的<a href="https://github.com/am009/retypd-ghidra-plugin">fork</a>仓库里可以直接下载到构建好的插件，修改版Ghidra，以及docker镜像。同时提供了给retypd的样例输入和输出。</p>
+<p>通过修改 GhidraRetypd.zip中的extension.properties，可以绕过ghidra插件安装时的版本检查</p>
 <pre><code class="language-Python">version=10.2.3
 </code></pre>
-<ol start="4">
-<li>
-<p>安装插件</p>
-<ol>
-<li>打开 Ghidra 软件，点击 &quot;File&quot; 菜单，选择 &quot;Install Extensions&quot; 选项。</li>
-<li>在弹出的 &quot;Install Extensions&quot; 窗口中，点击 &quot;Browse&quot; 按钮选择你要安装的扩展程序。</li>
-<li>选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 &quot;Open&quot; 按钮。</li>
-<li>点击 &quot;OK&quot; 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。</li>
-<li>安装完成后，重启 Ghidra 软件。</li>
-</ol>
-</li>
-</ol>
-<p>为Ghidra 10.2.3 版本成功编译的retypd<a href="GhidraRetypd.zip">下载</a></p>
+<p>安装Ghidra插件：</p>
+<pre><code>1. 打开 Ghidra 软件，点击 &quot;File&quot; 菜单，选择 &quot;Install Extensions&quot; 选项。
+2. 在弹出的 &quot;Install Extensions&quot; 窗口中，点击 &quot;Browse&quot; 按钮选择你要安装的扩展程序。
+3. 选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 &quot;Open&quot; 按钮。
+4. 点击 &quot;OK&quot; 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。
+5. 安装完成后，重启 Ghidra。
+</code></pre>
+<h2 id="算法详解"><a class="header" href="#算法详解">算法详解</a></h2>
+<p>我们分析的不是具体的程序中的变量，而是他们的类型和类型之间的关系。因为复杂的约束关系，我们会把类型再设为一个类型变量，称为DataTypeVariable，DTV。</p>
+<p><strong>什么是Sketches</strong>：一个类型变量DTV，可能有各种各样的能力，比如可以在offset为4的地方load出一个四字节的值 （<code>.load.σ32@4</code>）。首先可以遍历所有的约束关系，比如<code>v_4504 ⊑ v_1242.store.σ8@0</code>，对每个关系单独看两边的变量，然后看比如<code>v_1242</code>是否被直接这样取过offset，然后把这些操作收集起来。但是这样还不够，因为可能因为约束的存在，其他变量能做的操作，它因为约束，应该也能做。这些都求解出来，得到的数据结构就是一个Sketch。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="datalog"><a class="header" href="#datalog">Datalog</a></h1>
 <p>基于Datalog描述程序分析的优点是开发迅速。</p>
-<p><a href="http://blogs.evergreen.edu/sosw/files/2014/04/Green-Vol5-DBS-017.pdf">Datalog and Recursive Query Processing</a>  综述，介绍datalog</p>
 <ul>
 <li>Souffie使用了Futamura projections技术将datalog转C++代码</li>
 </ul>
-<h2 id="基于datalog的llvm分析"><a class="header" href="#基于datalog的llvm分析">基于Datalog的LLVM分析</a></h2>
+<h2 id="现有工具资料"><a class="header" href="#现有工具资料">现有工具/资料</a></h2>
+<ul>
+<li>综述，介绍datalog：<a href="http://blogs.evergreen.edu/sosw/files/2014/04/Green-Vol5-DBS-017.pdf">Datalog and Recursive Query Processing</a></li>
+</ul>
+<p><strong>基于Datalog的LLVM分析</strong></p>
 <ul>
 <li><a href="https://github.com/vandaltool/vandalir">Vandal</a> </li>
 </ul>
-<h2 id="基于datalog的反编译"><a class="header" href="#基于datalog的反编译">基于Datalog的反编译</a></h2>
+<p><strong>基于Datalog的反编译</strong>（相关的工作）</p>
 <ul>
-<li>webassembly datalog</li>
+<li>webassembly decompilation based on datalog</li>
 <li>elipmoc/gigahorse</li>
-<li></li>
+<li>ddisasm</li>
+</ul>
+<p><strong>博客</strong></p>
+<ul>
+<li><a href="https://www.jianshu.com/p/d7598d17ff2b">Dimension Shift! 一起来学Datalog吧！</a></li>
+</ul>
+<h3 id="将llvm-ir导出为datalog规则"><a class="header" href="#将llvm-ir导出为datalog规则">将LLVM IR导出为Datalog规则</a></h3>
+<p>Datalog挺像数据库的。Souffle的语法也拓展了很多特性，使得导出的写法不止一种。</p>
+<ul>
+<li>VandalIR，基于python的llvmlite模块，直接解析IR字符串。
+<ul>
+<li>导出IR时给每个函数和基本块有一个ID。</li>
+<li>指令还有一个virtual register，即指令<code>%xx = ...</code>最左边的部分。LLVM中负责打印IR的相关的源码在<a href="https://github.com/llvm/llvm-project/blob/llvmorg-16.0.6/llvm/lib/IR/AsmWriter.cpp#L2414">llvm\lib\IR\AsmWriter.cpp</a>，可以看到，有Name的会打印Name，没有Name的打印编号Slot是由WriterCtx.Machine负责的。因此总体上还是按照LLVM的规范，依次给没有Name的Value按顺序赋序号。</li>
+<li>指令没有新的方式。</li>
+</ul>
+</li>
+</ul>
+<p>几个需要考虑的设计选择：</p>
+<ul>
+<li>如何给每个函数、基本块、指令确定一个ID？
+<ul>
+<li>（最后选了）使用valueID，给每个Value一个ID，包括指令，函数参数，基本块，函数。类似的，给每个类型一个ID，用类型的字符串表示做去重。
+<ul>
+<li>使用AssemblyAnnotationWriter，给IR里面的指令用注释标出来编号。</li>
+</ul>
+</li>
+<li>函数名-基本块编号-指令编号：因为根据<a href="https://stackoverflow.com/questions/66528940/unique-identifierinteger-id-for-llvminstruction-across-different-run#comment117667940_66528940">这里</a>，基本块在函数里的顺序是不会边的</li>
+<li>使用函数名-基本块名-指令名
+<ul>
+<li>导出前用一个Pass给每个没有名字的基本块，指令命名。</li>
+<li>没有名字的使用<code>printAsOperand</code>获取。但是这样还是有问题，对于没有返回值的指令，比如store，会打印<code>void &lt;badref&gt;</code>。这种情况可以另外单独给个ID。</li>
+</ul>
+</li>
+<li>使用基本块地址，指令的地址：LLVM不会移动指令。但是要求得在单次运行中完成，即直接导入souffle依赖，在内存里传递facts。</li>
+</ul>
+</li>
+<li>指令的表示
+<ul>
+<li>每个指令单独一个decl</li>
+<li>指令复用同一个decl：用id/enum表示不同的指令opcode，引用其他指令就用Pos/ID表示
+<ul>
+<li>遇到了常量怎么办？给常量也有一个ID？</li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="other-notes"><a class="header" href="#other-notes">Other Notes</a></h1>
 <p>这里包括一些其他笔记，如C++，CMake的使用。</p>

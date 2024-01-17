@@ -257,6 +257,9 @@
 <li>使用<code>breakpoint modify 1 -c &quot;((int64_t) (ci-&gt;getSExtValue()) &lt; -100)&quot;</code>这样的命令给断点增加条件</li>
 </ul>
 <p>更多使用方式见<a href="https://lldb.llvm.org/use/tutorial.html">lldb使用教程</a></p>
+<h2 id="修改llvm值的类型"><a class="header" href="#修改llvm值的类型">修改LLVM值的类型</a></h2>
+<p>LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵活变动。比如一个整数，虽然可能有一些加法运算，但是你还是可以强制把它设成指针类型，然后在每个使用点插入ptrtoint指令转回去。</p>
+<p>有些LLVM值的类型，修改起来非常麻烦。尤其是函数的参数和返回值类型。函数也是GlobalValue，甚至是Constant。</p>
 
                     </main>
 
