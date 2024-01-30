@@ -118,6 +118,12 @@
                         <a href="print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
+                        <a href="https://github.com/NotDec/notdec" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/NotDec/NotDec/edit/main/docs/src/retdec.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
 
                     </div>
                 </div>
@@ -165,13 +171,13 @@
     &quot;-DCMAKE_INSTALL_PREFIX=/sn640/retdec/build/retdec-install&quot;
 ],
 </code></pre>
-<h4 id="入口函数"><a class="header" href="#入口函数">入口函数</a></h4>
+<h4 id="入口"><a class="header" href="#入口">入口</a></h4>
 <ul>
 <li>retdec-decompiler.cpp 主要是解压，脱壳什么的，然后调用retdec::decompile函数。这里的retdec是namespace，不是class，所以就在src/retdec/retdec.cpp。</li>
 <li>其中非常重要的是读取share/retdec/decompiler-config.json，其中有llvmPasses这一项，指定了一系列pass名字。然后在那边retdec::decompile函数，他会根据config.parameters.llvmPasses里的值找到pass，然后依次加入passmanager里。然后pm.run(*module);运行结束之后，一切反编译过程都完成了。</li>
 </ul>
-<h4 id="pass功能"><a class="header" href="#pass功能">Pass功能</a></h4>
-<p>vscode代码搜索方法：基于<code>src/retdec-decompiler/decompiler-config.json</code>，对每个pass的名字带双引号搜索。比如搜<code>&quot;retdec-decoder&quot;</code></p>
+<h4 id="pass"><a class="header" href="#pass">Pass</a></h4>
+<p>基于<code>src/retdec-decompiler/decompiler-config.json</code>列出来的每个pass名字，对每个pass的名字带双引号（比如<code>&quot;retdec-decoder&quot;</code>）在vscode里搜索，可以直接定位到对应的Pass代码位置。</p>
 <ul>
 <li>retdec-provider-init： 这个pass负责给很多Provider类设置信息（到静态变量里）。FileImageProvider，DebugFormatProvider，DemanglerProvider等等。如果我们要设置一下简单的，可以直接在Pass运行前加。</li>
 <li>retdec-decoder：<code>src/bin2llvmir/optimizations/decoder/decoder.cpp</code> 负责把capstone的结果转成IR。</li>
@@ -181,7 +187,7 @@
 <li>retdec-idioms-libgcc：把一些libgcc的算数运算替换成LLVM里的运算。</li>
 <li>retdec-idioms：把常见的指令组合替换成别的指令？</li>
 <li>retdec-inst-opt：好像是简单的窥孔优化。</li>
-<li>retdec-inst-opt-rda</li>
+<li>retdec-inst-opt-rda：</li>
 <li>retdec-cond-branch-opt 这些优化应该不用</li>
 <li>retdec-syscalls：好像是把系统调用转成对应的call？有一个map</li>
 <li>**retdec-stack：**关键Pass，识别栈指针相关的操作。</li>
@@ -353,9 +359,14 @@ cp -r /sn640/retdec/include/retdec/serdes ./retdec-llvmir2hll/
 <code>find common/ utils/ retdec-config/ serdes/ retdec-utils/ -name &quot;*.cpp&quot;</code></p>
 </li>
 <li>
-<p>发现使用了common里面的东西，把common目录也复制过来</p>
+<p>发现使用了common里面的东西，把common目录也复制过来。同理复制config目录</p>
+</li>
+<li>
+<p>修复大量编译报错，以及新版本LLVM的变化</p>
 </li>
 </ul>
+<h4 id="调用"><a class="header" href="#调用">调用</a></h4>
+<p>分析<code>src/llvmir2hll/llvmir2hll.cpp</code>中对llvmir2hll的<a href="https://github.com/avast/retdec/blob/eba8d78c3432b6ad7c3aa9ef913b42b5ce7f9baf/src/llvmir2hll/llvmir2hll.cpp#L150">调用</a>。</p>
 
                     </main>
 
