@@ -1,4 +1,6 @@
+#include "backend/structural-analysis.h"
 #include <iostream>
+#include <llvm/IRReader/IRReader.h>
 #include <string>
 
 #include "llvm/Support/CommandLine.h"
@@ -78,16 +80,22 @@ int main(int argc, char *argv[]) {
   if (insuffix.size() == 0) {
     std::cout << "no extension for input file. exiting." << std::endl;
     return 0;
+  } else if (insuffix == ".ll" || insuffix == ".bc") {
+    std::cout << "directly loading LLVM IR." << std::endl;
+    SMDiagnostic Err;
+    ctx.setModule(parseIRFile(inputFilename, Err, ctx.context));
+    // TODO: enable optimization?
+    disablePass = true;
   }
 #ifdef NOTDEC_ENABLE_WASM
   else if (insuffix == ".wasm") {
+    opts.from_wasm = true;
     std::cout << "using wasm frontend." << std::endl;
     notdec::frontend::wasm::parse_wasm(ctx, inputFilename);
-    // TODO
   } else if (insuffix == ".wat") {
+    opts.from_wasm = true;
     std::cout << "using wat frontend." << std::endl;
     notdec::frontend::wasm::parse_wat(ctx, inputFilename);
-    // TODO
   }
 #endif
   else {
@@ -98,9 +106,10 @@ int main(int argc, char *argv[]) {
 
   // run passes and dump IR
   if (!disablePass) {
-    notdec::optimizers::DecompileConfig conf(ctx.mod, ctx.opt);
+    notdec::optimizers::DecompileConfig conf(ctx.getModule(), ctx.opt);
     conf.run_passes();
   }
+
   std::string outsuffix = getSuffix(outputFilename);
   if (outsuffix == ".ll") {
     std::error_code EC;
@@ -110,20 +119,19 @@ int main(int argc, char *argv[]) {
       std::cerr << EC.message() << std::endl;
       std::abort();
     }
-    ctx.mod.print(os, nullptr);
+    ctx.getModule().print(os, nullptr);
     std::cout << "IR dumped to " << outputFilename << std::endl;
+  } else if (outsuffix == ".c") {
+    std::error_code EC;
+    llvm::raw_fd_ostream os(outputFilename, EC);
+    if (EC) {
+      std::cerr << "Cannot open output file." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    notdec::backend::decompileModule(ctx.getModule(), os);
+    std::cout << "Decompile to " << outputFilename << std::endl;
   }
-  // else if (outsuffix == ".c") {
-  //     std::error_code EC;
-  //     llvm::raw_fd_ostream os(outputFilename, EC);
-  //     if (EC) {
-  //         std::cerr << "Cannot open output file." << std::endl;
-  //         std::cerr << EC.message() << std::endl;
-  //         std::abort();
-  //     }
-  //     printModule(ctx.mod, os);
-  //     std::cout << "Decompile to " << outputFilename << std::endl;
-  // }
 
   return 0;
 }

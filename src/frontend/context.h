@@ -11,6 +11,7 @@ namespace notdec::frontend {
 
 // sync with cmdline default value.
 struct options {
+  bool from_wasm = false;
   bool recompile = false;
   bool compat_mode = true;
   bool expandMem = true;
@@ -22,10 +23,14 @@ struct BaseContext {
   options opt;
   llvm::LLVMContext context;
   llvm::IRBuilder<> builder;
-  llvm::Module mod;
+  std::unique_ptr<llvm::Module> mod;
   std::map<std::string, llvm::Value *> namedValues;
   BaseContext(std::string name, options opt)
-      : opt(opt), context(), builder(context), mod(name, context) {}
+      : opt(opt), context(), builder(context),
+        mod(new llvm::Module(name, context)) {}
+
+  llvm::Module &getModule() { return *mod; }
+  void setModule(std::unique_ptr<llvm::Module> m) { mod = std::move(m); }
 };
 
 } // namespace notdec::frontend

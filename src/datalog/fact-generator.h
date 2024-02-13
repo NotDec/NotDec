@@ -10,10 +10,10 @@
 #include <llvm/IR/Type.h>
 #include <map>
 #include <souffle/RamTypes.h>
+#include <souffle/SouffleInterface.h>
 #include <sstream>
 #include <string>
 #include <variant>
-#include <souffle/SouffleInterface.h>
 
 using namespace llvm;
 
@@ -35,9 +35,10 @@ std::string inline to_fact_str(Value v, Values... vs) {
 // 提取顺序：先指令，后operand，防止引用失效
 // 先所有函数，后指令。因为指令可能引用函数
 /// Generate facts from llvm::Module
-/// When \p SouffleProgram* is provided, the facts are directly inserted into the SouffleProgram.
-/// Otherwise, the facts are stored in a map, and can be output to csv files.
-/// The constructor without \p SouffleProgram* is deprecated, and may be removed in the future.
+/// When \p SouffleProgram* is provided, the facts are directly inserted into
+/// the SouffleProgram. Otherwise, the facts are stored in a map, and can be
+/// output to csv files. The constructor without \p SouffleProgram* is
+/// deprecated, and may be removed in the future.
 class FactGenerator {
   friend class InstructionVisitor;
 
@@ -66,16 +67,17 @@ protected:
 
 public:
   llvm::Module &mod;
-  souffle::SouffleProgram* prog = nullptr;
+  souffle::SouffleProgram *prog = nullptr;
   /// Construct an instance that uses std::map to hold csv values
   FactGenerator(llvm::Module &mod) : mod(mod) {}
   /// Construct an instance that directly insert to SouffleProgram
-  FactGenerator(llvm::Module &mod, souffle::SouffleProgram* prog) : mod(mod), prog(prog) {}
-  void set_program(souffle::SouffleProgram* prog) { this->prog = prog; }
+  FactGenerator(llvm::Module &mod, souffle::SouffleProgram *prog)
+      : mod(mod), prog(prog) {}
+  void set_program(souffle::SouffleProgram *prog) { this->prog = prog; }
 
   std::map<const char *, std::string> facts;
 
-  std::set<const char*> ignored_relations;
+  std::set<const char *> ignored_relations;
   /// main interface to append facts. At least one Value is required.
   template <typename Value, typename... Values>
   void append_fact(const char *key, Value v, Values... vs) {
@@ -117,7 +119,6 @@ public:
 /// For functions in InstVisitor to override, see:
 /// https://llvm.org/doxygen/classllvm_1_1InstVisitor.html
 class InstructionVisitor : public llvm::InstVisitor<InstructionVisitor> {
-  friend class FactGenerator;
 
 public:
   InstructionVisitor(FactGenerator &generator, const llvm::Module &M)

@@ -1,93 +1,91 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Python: notdec_retypd_provider",
-            "type": "python",
-            "request": "launch",
-            "module": "notdec_retypd_provider",
-            "cwd": "${workspaceFolder}/src/optimizers",
-            "justMyCode": false,
-            "args": [
-                "--json-in",
-                "${file}",
-                "--debug-dir",
-                "${fileDirname}"
-            ]
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "decompile emcc_print",
-            // "program": "${workspaceFolder}/build/bin/notdec",
-            "program": "${command:cmake.launchTargetPath}",
-            "args": [
-                "-i",
-                "${workspaceFolder}/test/wasm/emcc-print.wat",
-                "-o",
-                "${workspaceFolder}/test/wasm/emcc-print.wat.ll",
-                // "--log-level",
-                // "level_debug",
-                "--compat-mode"
-            ],
-            "cwd": "${workspaceFolder}",
-            // "preLaunchTask": "build"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "decompile",
-            // "program": "${workspaceFolder}/build/bin/notdec",
-            "program": "${command:cmake.launchTargetPath}",
-            "args": [
-                "-i",
-                "${file}",
-                "-o",
-                "${file}.ll",
-                // "--log-level",
-                // "level_debug",
-                "--compat-mode"
-            ],
-            "cwd": "${workspaceFolder}",
-            // "preLaunchTask": "build"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "recompile",
-            "program": "${command:cmake.launchTargetPath}",
-            "args": [
-                "-i",
-                "${file}",
-                "-o",
-                "${file}.ll",
-                "--log-level",
-                "level_debug",
-                "--compat-mode",
-                "--recompile",
-                "--expand-mem=false"
-            ],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "structural emcc_print",
-            "program": "${command:cmake.launchTargetPath}",
-            "args": [
-                "-i",
-                "${file}",
-                "-o",
-                "${file}.c",
-                "--log-level",
-                "level_info",
-                "--compat-mode",
-                "--expand-mem=false"
-            ],
-            "cwd": "${workspaceFolder}"
-        }
-    ]
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: notdec_retypd_provider",
+      "type": "python",
+      "request": "launch",
+      "module": "notdec_retypd_provider",
+      "cwd": "${workspaceFolder}/src/optimizers",
+      "justMyCode": false,
+      "args": [
+        "--json-in",
+        "${file}",
+        "--debug-dir",
+        "${fileDirname}"
+      ]
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "decompile emcc_print",
+      // "program": "${workspaceFolder}/build/bin/notdec",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [
+        "-i",
+        "${workspaceFolder}/test/wasm/emcc-print.wat",
+        "-o",
+        "${workspaceFolder}/test/wasm/emcc-print.wat.ll",
+        // "--log-level",
+        // "level_debug",
+        "--compat-mode"
+      ],
+      "cwd": "${workspaceFolder}",
+      // "preLaunchTask": "build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "decompile",
+      // "program": "${workspaceFolder}/build/bin/notdec",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [
+        "-i",
+        "${file}",
+        "-o",
+        "${file}.ll",
+        // "--log-level",
+        // "level_debug",
+        "--compat-mode"
+      ],
+      "cwd": "${workspaceFolder}",
+      // "preLaunchTask": "build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "recompile",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [
+        "-i",
+        "${file}",
+        "-o",
+        "${file}.ll",
+        "--log-level",
+        "level_debug",
+        "--compat-mode",
+        "--recompile",
+        "--expand-mem=false"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "structural emcc_print",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [
+        "-i",
+        "${file}",
+        "-o",
+        "${file}.c",
+        "--log-level",
+        "level_debug"
+      ],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
 }

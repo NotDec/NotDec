@@ -22,14 +22,14 @@ https://zhuanlan.zhihu.com/p/509763117 有一些源码解读的内容。
 ],
 ```
 
-#### 入口函数
+#### 入口
 
 - retdec-decompiler.cpp 主要是解压，脱壳什么的，然后调用retdec::decompile函数。这里的retdec是namespace，不是class，所以就在src/retdec/retdec.cpp。
 - 其中非常重要的是读取share/retdec/decompiler-config.json，其中有llvmPasses这一项，指定了一系列pass名字。然后在那边retdec::decompile函数，他会根据config.parameters.llvmPasses里的值找到pass，然后依次加入passmanager里。然后pm.run(*module);运行结束之后，一切反编译过程都完成了。
 
-#### Pass功能
+#### Pass
 
-vscode代码搜索方法：基于`src/retdec-decompiler/decompiler-config.json`，对每个pass的名字带双引号搜索。比如搜`"retdec-decoder"`
+基于`src/retdec-decompiler/decompiler-config.json`列出来的每个pass名字，对每个pass的名字带双引号（比如`"retdec-decoder"`）在vscode里搜索，可以直接定位到对应的Pass代码位置。
 
 - retdec-provider-init： 这个pass负责给很多Provider类设置信息（到静态变量里）。FileImageProvider，DebugFormatProvider，DemanglerProvider等等。如果我们要设置一下简单的，可以直接在Pass运行前加。
 - retdec-decoder：`src/bin2llvmir/optimizations/decoder/decoder.cpp` 负责把capstone的结果转成IR。
@@ -39,7 +39,7 @@ vscode代码搜索方法：基于`src/retdec-decompiler/decompiler-config.json`�
 - retdec-idioms-libgcc：把一些libgcc的算数运算替换成LLVM里的运算。
 - retdec-idioms：把常见的指令组合替换成别的指令？
 - retdec-inst-opt：好像是简单的窥孔优化。
-- retdec-inst-opt-rda
+- retdec-inst-opt-rda：
 - retdec-cond-branch-opt 这些优化应该不用
 - retdec-syscalls：好像是把系统调用转成对应的call？有一个map
 - **retdec-stack：**关键Pass，识别栈指针相关的操作。
@@ -166,7 +166,6 @@ src/optimizers/retdec-stack/retdec-stack.cpp:171:
 
 ### 结构分析-llvmir2hll
 
-
 #### 移植
 
 - 首先将`src/llvmir2hll`目录（以及include目录）复制了过来，然后使用替换把对应路径的include替换为新路径的include。
@@ -188,5 +187,9 @@ src/optimizers/retdec-stack/retdec-stack.cpp:171:
 
     增加cmake里面的源码
     ` find common/ utils/ retdec-config/ serdes/ retdec-utils/ -name "*.cpp" `
-- 发现使用了common里面的东西，把common目录也复制过来
+- 发现使用了common里面的东西，把common目录也复制过来。同理复制config目录
+- 修复大量编译报错，以及新版本LLVM的变化
 
+#### 调用
+
+分析`src/llvmir2hll/llvmir2hll.cpp`中对llvmir2hll的[调用](https://github.com/avast/retdec/blob/eba8d78c3432b6ad7c3aa9ef913b42b5ce7f9baf/src/llvmir2hll/llvmir2hll.cpp#L150)。

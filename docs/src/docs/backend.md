@@ -2,12 +2,12 @@
 
 结构分析负责将IR转换为伪C代码。
 
-## (最简单的)fallback实现
+## 使用Goto语句的IR转C
 
 <!-- - 判断每个IR语句是否有副作用。如果不存在副作用，且仅有一个user，则作为表达式折叠到其他语句。否则生成局部变量储存它的值。 -->
 - 给所有的基本块前添加标号，对于任意控制流跳转，使用goto实现。最后删除无用的标号。
 
-Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处理的边转换为Goto语句。
+这种方法可以考虑作为现有算法的辅助，将算法无法处理的边转换为Goto语句。算法可以自由选择能够折叠的边进行折叠，从而只需要考虑实际的结构分析效果，不必纠结算法的完善和鲁棒性。
 
 ## Structural Analysis 和 Reducible Control Flow
 
@@ -38,7 +38,7 @@ Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处
     - Phoenix论文里，提到结构分析的时候，也推荐了让读者去看这里。因此非常值得读一读。
     - 在203页更详细地介绍了structural analysis。建议从196页的Reducibility开始阅读。（书里面的页码，不是pdf的页码）这些结构分析都比较老了，而且有的不太是为反编译设计的。
 
-**概述**：在编译优化方面，有研究人员发现，要是在IR（CFG）层面能够用上AST层面的信息（IF，While，For控制流结构），能够加速现有的数据流分析。然而在IR（CFG）层面，高级语言的结构信息已经丢失了。因此，有部分研究人员提出了通过模式匹配的方式，从CFG中识别出控制流结构。由此诞生了interval analysis算法，后续发展出了Structural Analysis。
+**概述**：在编译优化方面，有研究人员提出，要是在IR（CFG）层面能够用上AST层面的信息（IF，While，For控制流结构），能够加速现有的数据流分析。然而在IR（CFG）层面，高级语言的结构信息已经丢失了。因此，有部分研究人员提出了通过模式匹配的方式，从CFG中识别出控制流结构。由此诞生了interval analysis算法，后续发展出了Structural Analysis。
 
 结构分析一般可以分为一下几个步骤：
 1. 类似interval analysis的嵌套区域划分。
@@ -142,6 +142,7 @@ SESS区域：entry r属于region，successor s不属于区域内（看作区域�
 ### Phoenix 第一个“真正实用”的结构恢复算法
 
 - [\[Phoenix\]](https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf) 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 [slides](https://edmcman.github.io/pres/usenix13.pptx)
+- [reko的实现](https://github.com/uxmal/reko/blob/a42da9990a674f275a2d9e76ba00bb264d5eb470/src/Decompiler/Structure/StructureAnalysis.cs)
 
 paper的3.1节介绍了算法框架，和结构分析很相似。
 - 使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
@@ -169,7 +170,7 @@ paper的3.1节介绍了算法框架，和结构分析很相似。
 - LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。
 
 
-**Interval Analysis as a pre step?**：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？
+**Interval Analysis as a pre-step?**：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？
 
 - Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败（归类为proper region）。
 - Cyclic Region：识别natural loop。如果无法识别，还是返回失败(归类为improper region)。

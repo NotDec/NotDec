@@ -254,6 +254,8 @@ void DecompileConfig::run_passes() {
 
   // if not recompile then decompile.
   if (!opts.recompile) {
+    // TODO: what if ir is not from wasm. opt.from_wasm = false;
+    assert(opts.from_wasm && "only support wasm input now");
     StackPointerFinderAnalysis SPF;
     MAM.registerPass([&]() { return SPF; });
 

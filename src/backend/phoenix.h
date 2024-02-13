@@ -4,21 +4,17 @@
 #include "backend/region-graph.h"
 #include "backend/structural-analysis.h"
 
-
 namespace notdec::backend {
 
-class Phoenix: IStructuralAnalysis
-{
-    RegionGraph graph;
-    bool isCanceled = false;
+class Phoenix : IStructuralAnalysis {
+  bool isCanceled = false;
 
 public:
-    Phoenix(llvm::Module& mod, llvm::Function& func): IStructuralAnalysis(mod, func), graph(func) {}
+  Phoenix(SAFuncContext &ctx) : IStructuralAnalysis(ctx) {}
 
-    virtual Region execute();
+  virtual Region execute();
 };
 
-
-}
+} // namespace notdec::backend
 
 #endif

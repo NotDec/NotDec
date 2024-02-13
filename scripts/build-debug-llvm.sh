@@ -6,6 +6,7 @@ source "$SCRIPT_DIR/utils.sh"
 
 CODE_HOME=`dirname ${SCRIPT_DIR}` # parent folder of scripts folder
 echo "project is at ${CODE_HOME}"
+cd $CODE_HOME
 LLVMHome="$CODE_HOME/llvm-14.0.6.obj"
 
 SourceLLVM="https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-14.0.6.zip"
@@ -14,8 +15,8 @@ SourceLLVM="https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-14.0.
 read -r -p "Do you have tons of memory and disk space (>40GB) for Debug info? [y/N] " response
 if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]
 then
-    build_type=RelWithDebInfo
-    # build_type=Debug
+    # build_type=RelWithDebInfo
+    build_type=Debug
 else
     build_type=Release
 fi
@@ -40,7 +41,7 @@ cd llvm-build
 set -e
 
 # /*/ is a dirty hack to get llvm-project-llvmorg-version...
-cmake -DCMAKE_BUILD_TYPE=${build_type} -DCMAKE_INSTALL_PREFIX="$LLVMHome" -DLLVM_OPTIMIZED_TABLEGEN=ON ../llvm-source/*/llvm
+cmake -DCMAKE_BUILD_TYPE=${build_type} -DCMAKE_INSTALL_PREFIX="$LLVMHome" -DLLVM_OPTIMIZED_TABLEGEN=ON -DLLVM_ENABLE_PROJECTS="clang" ../llvm-source/*/llvm
 # 直接多线程编译可以出现内存不足的情况，后面链接时减少并行数量。经测试，32G内存在后期链接也只能并行数量1。
 cmake --build . -j `nproc` || cmake --build . -j 1
 # cmake --install .

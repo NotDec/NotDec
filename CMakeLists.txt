@@ -51,6 +51,7 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH "${LT_LLVM_INSTALL_DIR}/lib/cmake/llvm/")
 
 find_package(LLVM 14 REQUIRED CONFIG)
+find_package(CLANG 14 REQUIRED CONFIG)
 
 # Another sanity check
 if(NOT "14" VERSION_EQUAL "${LLVM_VERSION_MAJOR}")
@@ -111,7 +112,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 #===============================================================================
 
 option(NOTDEC_ENABLE_WASM "Enable wasm decompilation support." ON)
-option(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL "Enable retdec llvmir2hll." OFF)
+option(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL "Enable retdec llvmir2hll." ON)
 
 if (NOTDEC_ENABLE_WASM)
 	include(ExternalProject)
