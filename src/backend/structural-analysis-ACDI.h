@@ -1,7 +1,0 @@
-#ifndef _NOTDEC_BACKEND_STRUCTURAL_ACDI_H_
-#define _NOTDEC_BACKEND_STRUCTURAL_ACDI_H_
-
-
-
-
-#endif

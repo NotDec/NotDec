@@ -10,6 +10,7 @@ NotDec is
    - Variable Recovery
    - Structual Analysis
 
+Keywords: Reverse LLVM, LLVM C Backend / llvm-cbe.
 
 #### Development - Linux
 

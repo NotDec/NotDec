@@ -51,7 +51,10 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH "${LT_LLVM_INSTALL_DIR}/lib/cmake/llvm/")
 
 find_package(LLVM 14 REQUIRED CONFIG)
-find_package(CLANG 14 REQUIRED CONFIG)
+
+# See: https://stackoverflow.com/questions/55921707/setting-path-to-clang-library-in-cmake
+list(APPEND CMAKE_PREFIX_PATH "${LT_LLVM_INSTALL_DIR}/lib/cmake/clang/")
+find_package(Clang REQUIRED CONFIG)
 
 # Another sanity check
 if(NOT "14" VERSION_EQUAL "${LLVM_VERSION_MAJOR}")
@@ -72,6 +75,11 @@ message("LLVM STATUS:
 include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
 link_directories(${LLVM_LIBRARY_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
+
+# Clang header and library paths
+include_directories(SYSTEM ${CLANG_INCLUDE_DIRS})
+link_directories(${CLANG_LIBRARY_DIRS})
+add_definitions(${CLANG_DEFINITIONS})
 
 #===============================================================================
 # 3. LLVM-TUTOR BUILD CONFIGURATION

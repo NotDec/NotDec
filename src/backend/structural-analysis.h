@@ -1,19 +1,24 @@
 #ifndef _NOTDEC_BACKEND_STRUCTURAL_H_
 #define _NOTDEC_BACKEND_STRUCTURAL_H_
 
-#include "backend/exprs.h"
-#include "backend/region-graph.h"
-#include "backend/statements.h"
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/Expr.h>
+#include <clang/AST/Stmt.h>
+#include <clang/AST/Type.h>
+#include <clang/Analysis/CFG.h>
+#include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/BitVector.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/Module.h>
 
 #include "optimizers/retdec-stack/retdec-utils.h"
+#include "utils.h"
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Value.h>
+#include <memory>
 
 namespace notdec::backend {
 
@@ -21,34 +26,77 @@ void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &os);
 std::string printBasicBlock(const llvm::BasicBlock *b);
 std::string printFunction(const llvm::Function *F);
 
-using ExprMap = std::map<llvm::Value *, Expr *>;
 class SAContext;
+class SAFuncContext;
+
+class TypeBuilder {
+  clang::ASTContext &Ctx;
+
+public:
+  TypeBuilder(clang::ASTContext &Ctx) : Ctx(Ctx) {}
+  clang::QualType visitType(llvm::Type &Ty);
+  clang::QualType
+  visitFunctionType(llvm::FunctionType &Ty,
+                    clang::FunctionProtoType::ExtProtoInfo &EPI);
+};
 
 /// Structural analysis context for a function.
 class SAFuncContext {
-  llvm::Function &func;
-  RegionGraph rg;
-  // map from block to region
-  std::map<llvm::BasicBlock *, Region *> btor;
-  // declarations at the beginning of the function
-  std::vector<Statement *> decls;
-  ExprMap exprMap;
   SAContext &ctx;
+  llvm::Function &func;
+  // map from llvm inst to clang stmt
+  std::map<llvm::Value *, clang::Stmt *> StmtMap;
+  // map from llvm inst to clang expr
+  std::map<llvm::Value *, clang::Expr *> ExprMap;
+  // map from llvm block to CFGBlock
+  std::map<llvm::BasicBlock *, clang::CFGBlock *> bmap;
+  TypeBuilder TB;
+  clang::FunctionDecl *FD = nullptr;
+
+  std::unique_ptr<clang::CFG> CFG;
+  clang::CFGBlock *Exit = nullptr;
 
 public:
-  SAFuncContext(SAContext &ctx, llvm::Function &func) : func(func), ctx(ctx) {}
+  SAFuncContext(SAContext &ctx, llvm::Function &func)
+      : ctx(ctx), func(func), TB(getASTContext()) {
+    CFG = std::make_unique<clang::CFG>();
+  }
 
-  void init();
+  clang::ASTContext &getASTContext();
+  clang::CFG &getCFG() { return *CFG; }
+  TypeBuilder &getTypeBuilder() { return TB; }
+  bool isExpr(llvm::Value &v) { return ExprMap.count(&v) > 0; }
+  bool isStmt(llvm::Value &v) { return StmtMap.count(&v) > 0; }
+  clang::Stmt *getStmt(llvm::Value &v) { return StmtMap.at(&v); }
+  void addStmt(llvm::Value &v, clang::Stmt &s) { StmtMap[&v] = &s; }
+  clang::Expr *getExpr(llvm::Value &v) { return ExprMap.at(&v); }
+  void addExpr(llvm::Value &v, clang::Expr &s) { ExprMap[&v] = &s; }
+  clang::CFGBlock *getBlock(llvm::BasicBlock &bb) { return bmap.at(&bb); }
+  void addBlock(llvm::BasicBlock &bb, clang::CFGBlock &b) { bmap[&bb] = &b; }
+  void run();
+  static clang::StorageClass getStorageClass(llvm::GlobalValue &GV);
 };
 
 /// Main data structures for structural analysis
 class SAContext {
+protected:
   llvm::Module &mod;
-  ASTContext astCtx;
   std::map<llvm::Function *, SAFuncContext> funcContexts;
 
+  // Clang AST
+  std::unique_ptr<clang::ASTUnit> ASTunit;
+
 public:
-  SAContext(llvm::Module &mod) : mod(mod) {}
+  SAContext(llvm::Module &mod) : mod(mod) {
+    // TODO: set target arch by cmdline or input arch, so that TargetInfo is set
+    // and int width is correct.
+
+    // follow llvm unittests/Analysis/CFGTest.cpp, so we don't need to create
+    // ASTContext.
+    ASTunit = clang::tooling::buildASTFromCode("", "decompiled.c");
+  }
+
+  clang::ASTContext &getASTContext() { return ASTunit->getASTContext(); }
 
   /// A new context is created if not exist
   SAFuncContext &getFuncContext(llvm::Function &func) {
@@ -71,42 +119,75 @@ public:
   IStructuralAnalysis(SAFuncContext &ctx) : ctx(ctx) {}
 
   virtual ~IStructuralAnalysis() = default;
-  virtual Region execute() = 0;
+  virtual void execute() = 0;
+};
+
+/// Build expressions instead of creating stmts for instructions and IR
+/// expressions.
+///
+/// To have a comprehensive IR value visitor, refer to Value class hierarchy
+/// https://llvm.org/doxygen/classllvm_1_1Value.html and
+/// llvm/lib/IR/Verifier.cpp.
+///
+/// Don't use interfaces like visit(Inst), because we need to check for cache
+/// first.
+class ExprBuilder : public llvm::InstVisitor<ExprBuilder, clang::Expr *> {
+protected:
+  clang::ASTContext &Ctx;
+  SAFuncContext &FCtx; // TODO only reference part of the context
+
+  clang::Expr *visitConstant(llvm::Constant &I);
+  clang::QualType visitType(llvm::Type &Ty) {
+    return FCtx.getTypeBuilder().visitType(Ty);
+  }
+
+public:
+  ExprBuilder(SAFuncContext &FCtx);
+  clang::Expr *visitInstruction(llvm::Instruction &I) { return nullptr; }
+  // The main interface to convert a llvm::Value to Expr.
+  clang::Expr *visitValue(llvm::Value *Val);
 };
 
 /// Convert instructions with side effects to a statement.
 /// Other instructions are waited to be folded.
 /// while visiting instructions, statements created are inserted into the
 /// region.
-class LLVMRegionBuilder : public llvm::InstVisitor<LLVMRegionBuilder> {
-  SAFuncContext &funcCtx;
-  llvm::BasicBlock *bb = nullptr;
-  Region *region = nullptr;
+class CFGBuilder : public llvm::InstVisitor<CFGBuilder> {
+protected:
+  clang::ASTContext &Ctx;
+  SAFuncContext &FCtx; // TODO only reference part of the context
+  clang::CFGBlock *Blk = nullptr;
+  ExprBuilder EB;
 
-  static Region::RegionType successor2Rty(unsigned int numSuccessors) {
-    static Region::RegionType Successor2Rty[3] = {
-        Region::RegionType::Tail, Region::RegionType::Linear,
-        Region::RegionType::Condition};
-    if (numSuccessors > 2) {
-      return Region::RegionType::Switch;
-    } else {
-      return Successor2Rty[numSuccessors];
-    }
+  clang::QualType visitType(llvm::Type &Ty) {
+    return FCtx.getTypeBuilder().visitType(Ty);
   }
 
 public:
+  clang::CFGBlock *run(llvm::BasicBlock &BB) {
+    auto ret = FCtx.getCFG().createBlock();
+    if (BB.isEntryBlock()) {
+      FCtx.getCFG().setEntry(ret);
+    }
+    // maintain block mapping
+    FCtx.addBlock(BB, *ret);
+    // set current block so that visitor for terminator can insert CFGTerminator
+    setBlock(ret);
+    llvm::InstVisitor<CFGBuilder>::visit(BB);
+    return ret;
+  }
   // void visitBinaryOperator(llvm::BinaryOperator &I) {}
-  void visitCallInst(llvm::CallInst &I) {}
+  void visitReturnInst(llvm::ReturnInst &I) {
+    clang::Stmt *ret;
+    ret = clang::ReturnStmt::Create(Ctx, clang::SourceLocation(),
+                                    EB.visitValue(I.getReturnValue()), nullptr);
+    FCtx.addStmt(I, *ret);
+    Blk->setTerminator(clang::CFGTerminator(ret));
+  }
 
-  LLVMRegionBuilder(SAFuncContext &funcCtx) : funcCtx(funcCtx) {}
-  Region build(llvm::BasicBlock &bb);
-};
-
-class LLVMExprBuilder : public llvm::InstVisitor<LLVMExprBuilder, Expr> {
-  SAFuncContext &funcCtx;
-  llvm::BasicBlock *bb = nullptr;
-  Region *region = nullptr;
-  LLVMExprBuilder(SAFuncContext &funcCtx) : funcCtx(funcCtx) {}
+  CFGBuilder(SAFuncContext &FCtx)
+      : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}
+  void setBlock(clang::CFGBlock *blk) { Blk = blk; }
 };
 
 } // namespace notdec::backend

@@ -139,37 +139,6 @@ SESS区域：entry r属于region，successor s不属于区域内（看作区域�
 - 在原有匹配cyclic region，acyclic region之后，如果匹配失败，就尝试匹配tail region。这里在Phoenix里面提到，这篇论文里没有写清楚具体的匹配算法。而且他们发现，经常确实也匹配不到这种tail region，如果图太复杂还是会失败。
 - 关于论文没有说清楚的其他点，首先是怎么识别SESS region吧，可能是在原有的划分region基础上再做些判断。其次是怎么识别tail region的跳走的边。可能是识别region的基础上，看边是不是跳到head和tail的吧。
 
-### Phoenix 第一个“真正实用”的结构恢复算法
-
-- [\[Phoenix\]](https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf) 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 [slides](https://edmcman.github.io/pres/usenix13.pptx)
-- [reko的实现](https://github.com/uxmal/reko/blob/a42da9990a674f275a2d9e76ba00bb264d5eb470/src/Decompiler/Structure/StructureAnalysis.cs)
-
-paper的3.1节介绍了算法框架，和结构分析很相似。
-- 使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
-    - 如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过
-    - 如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过
-    - 如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
-        - 优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。
-        - 优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？
-
-具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。
-
-**算法的输入输出**：输入当然是CFG。如何规划输出的格式？结构分析的本质是把CFG组织成了带有标签的树的结构。树的节点里蕴含额外的控制流跳转信息。
-
-结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式
-- 可能会有这种原始的想法：能不能把结果表示为CFG上的简单标记？似乎是不能的，因为是完全不一样的东西。
-    - 比如，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Then-Else结构，单看IF块就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢失了信息的。
-- LLVM的SSA能否和AST共存？稍微搜了一下，不太能。确实和我想的一样，最多就是基本块参数。还是直接把SSA解构了吧。
-    - SSA保留比较麻烦，可以考虑写成basic block argument的形式，在if while这种结构的末尾加上（带基本块参数的）goto？或者直接留下基本块参数。
-
-- Region：算法的主体数据结构，对`List<Statement>`的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。
-    - 最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。([reko - RegionGraphBuilder](https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs))，在算法的迭代下不断折叠。
-    - 最后的效果就是整个函数体变成单个linear region。
-- Statement：已经结构化的基本块/statement的集合。
-    - 不使用Expression，而是结合LLVM的指令。
-- LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。
-
-
 **Interval Analysis as a pre-step?**：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？
 
 - Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败（归类为proper region）。
@@ -186,6 +155,39 @@ natural loop，如果才能
 然而，对于任意子图，并不是都一定能规约成IF-ELSE结构，比如下面的图：
 
 ![sample-graph1](backend/graph1.drawio.svg)
+
+
+### Phoenix 第一个“真正实用”的结构恢复算法
+
+- [\[Phoenix\]](https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf) 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 [slides](https://edmcman.github.io/pres/usenix13.pptx)
+- [reko的实现](https://github.com/uxmal/reko/blob/a42da9990a674f275a2d9e76ba00bb264d5eb470/src/Decompiler/Structure/StructureAnalysis.cs)
+
+paper的3.1节介绍了算法框架，和结构分析很相似。
+- 使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
+    - 如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过
+    - 如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过
+    - 如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
+        - 优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。
+        - 优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？
+
+具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。
+
+#### reko的实现
+
+- Region：算法的主体数据结构，对`List<Statement>`的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。
+    - 最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。([reko - RegionGraphBuilder](https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs))，在算法的迭代下不断折叠。
+    - 最后的效果就是整个函数体变成单个linear region。
+- Statement：已经结构化的基本块/statement的集合。
+    - 不使用Expression，而是结合LLVM的指令。
+- LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。
+
+
+**算法的输入输出**：首先包括一个将LLVM指令重新折叠为C表达式的数据结构，负责创建所有其他语句。而结构恢复算法，则主要负责创建if，else，while，这些语句。我们基于Clang AST生成C/C++源码。可以发现，clang中有些源码分析也需要CFG，因此也为源码块的CFG数据结构。基于Clang内置的[CFG数据结构](https://clang.llvm.org/docs/InternalsManual.html#the-cfg-class)，我们先将IR转换为这里的CFG结构，然后再由结构分析基于CFG生成完整的文件的AST。
+
+结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式
+- 可能会有这种原始的想法：能不能把结果表示为CFG上的简单标记？似乎是不能的，因为是完全不一样的东西。
+    - 比如，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Then-Else结构，单看IF块就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢失了信息的。
+- LLVM的SSA能否和AST共存？稍微搜了一下，不太能。而且在表达式折叠的时候，遇到这种跨基本块的phi数据流，也适合创建新的变量。
 
 
 ### Dream
