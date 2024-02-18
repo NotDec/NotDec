@@ -1,11 +1,14 @@
 # ======== custom target to generate souffle c++ source ==================
-# Used in outer project
+# Used in the outer project
 add_custom_target(souffle_cpp DEPENDS 
                 "rules/pointer_main.cpp")
 
-add_custom_command(OUTPUT "rules/pointer_main.cpp"
+file( GLOB DATALOG_RULES rules/*.dl )
+
+add_custom_command(OUTPUT ${CMAKE_CURRENT_LIST_DIR}/rules/pointer_main.cpp
     COMMAND souffle -g pointer_main.cpp pointer_main.dl
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rules
+    DEPENDS ${DATALOG_RULES}
     VERBATIM
 )
 
@@ -14,6 +17,7 @@ add_custom_target(fact_names DEPENDS "${CMAKE_CURRENT_LIST_DIR}/fact-names.def" 
 
 add_custom_command(OUTPUT "${CMAKE_CURRENT_LIST_DIR}/fact-names.def" "${CMAKE_CURRENT_LIST_DIR}/fact-names.h"
     COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/gen_header.py
+    DEPENDS ${DATALOG_RULES}
     VERBATIM
 )
 
