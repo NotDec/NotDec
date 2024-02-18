@@ -11,8 +11,6 @@
 #include "optimizers/opt-manager.h"
 #endif
 
-#include "backend/structural-analysis-ACDI.h"
-
 using namespace llvm;
 
 // https://llvm.org/docs/CommandLine.html

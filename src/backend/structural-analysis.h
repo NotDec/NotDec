@@ -49,7 +49,8 @@ class SAFuncContext {
   // map from llvm inst to clang expr
   std::map<llvm::Value *, clang::Expr *> ExprMap;
   // map from llvm block to CFGBlock
-  std::map<llvm::BasicBlock *, clang::CFGBlock *> bmap;
+  std::map<llvm::BasicBlock *, clang::CFGBlock *> ll2cfg;
+  std::map<clang::CFGBlock *, llvm::BasicBlock *> cfg2ll;
   TypeBuilder TB;
   clang::FunctionDecl *FD = nullptr;
 
@@ -62,6 +63,8 @@ public:
     CFG = std::make_unique<clang::CFG>();
   }
 
+  clang::FunctionDecl *getFunctionDecl() { return FD; }
+  llvm::Function &getFunction() { return func; }
   clang::ASTContext &getASTContext();
   clang::CFG &getCFG() { return *CFG; }
   TypeBuilder &getTypeBuilder() { return TB; }
@@ -71,8 +74,12 @@ public:
   void addStmt(llvm::Value &v, clang::Stmt &s) { StmtMap[&v] = &s; }
   clang::Expr *getExpr(llvm::Value &v) { return ExprMap.at(&v); }
   void addExpr(llvm::Value &v, clang::Expr &s) { ExprMap[&v] = &s; }
-  clang::CFGBlock *getBlock(llvm::BasicBlock &bb) { return bmap.at(&bb); }
-  void addBlock(llvm::BasicBlock &bb, clang::CFGBlock &b) { bmap[&bb] = &b; }
+  clang::CFGBlock *getBlock(llvm::BasicBlock &bb) { return ll2cfg.at(&bb); }
+  void addBlock(llvm::BasicBlock &bb, clang::CFGBlock &b) {
+    ll2cfg[&bb] = &b;
+    cfg2ll[&b] = &bb;
+  }
+  llvm::BasicBlock *getBlock(clang::CFGBlock &bb) { return cfg2ll.at(&bb); }
   void run();
   static clang::StorageClass getStorageClass(llvm::GlobalValue &GV);
 };
@@ -120,6 +127,8 @@ public:
 
   virtual ~IStructuralAnalysis() = default;
   virtual void execute() = 0;
+  clang::LabelDecl *getBlockLabel(clang::CFGBlock *blk);
+  void mergeBlock(llvm::BasicBlock &bb, llvm::BasicBlock &next);
 };
 
 /// Build expressions instead of creating stmts for instructions and IR
@@ -183,6 +192,9 @@ public:
                                     EB.visitValue(I.getReturnValue()), nullptr);
     FCtx.addStmt(I, *ret);
     Blk->setTerminator(clang::CFGTerminator(ret));
+  }
+  void visitUnreachableInst(llvm::UnreachableInst &I) {
+    // TODO create call statement to something like abort.
   }
 
   CFGBuilder(SAFuncContext &FCtx)

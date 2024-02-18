@@ -9,6 +9,7 @@
 #include <clang/AST/Type.h>
 #include <clang/Analysis/CFG.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/Twine.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
@@ -133,6 +134,16 @@ void SAFuncContext::run() {
       }
     }
 
+    // connect the edges
+    for (llvm::BasicBlock &bb : func) {
+      for (auto succ : llvm::successors(&bb)) {
+        auto *src = getBlock(bb);
+        auto *dst = getBlock(*succ);
+        src->addSuccessor(clang::CFGBlock::AdjacentBlock(dst, true),
+                          CFG->getBumpVectorContext());
+      }
+    }
+
     // TODO: create structural analysis according to cmdline
     Goto SA(*this);
     SA.execute();
@@ -144,6 +155,10 @@ void SAFuncContext::run() {
     // block.
     clang::CFGBlock &entry = CFG->getEntry();
     llvm::SmallVector<clang::Stmt *> Stmts;
+    // add labelStmt
+    if (auto l = entry.getLabel()) {
+      Stmts.push_back(l);
+    }
     for (auto elem : entry) {
       // if is stmt, then add to FD
       auto stmt = elem.getAs<clang::CFGStmt>();
@@ -217,6 +232,8 @@ clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
     return Ctx.DoubleTy;
   } else if (Ty.isVoidTy()) {
     return Ctx.VoidTy;
+  } else if (Ty.isIntegerTy(1)) {
+    return Ctx.BoolTy;
   }
 
   if (Ty.isIntegerTy()) {
@@ -251,6 +268,29 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C) {
                  << "UnImplemented: ExprBuilder.visitConstant cannot handle: "
                  << C << "\n";
     std::abort();
+  }
+}
+
+/// get the label for the block. Create if not exist.
+clang::LabelDecl *IStructuralAnalysis::getBlockLabel(clang::CFGBlock *Blk) {
+  if (auto label = Blk->getLabel()) {
+    return llvm::cast<clang::LabelStmt>(label)->getDecl();
+  } else {
+    auto &astCtx = ctx.getASTContext();
+    auto bb = ctx.getBlock(*Blk);
+    auto Name = bb->hasName() ? bb->getName()
+                              : "block_" + llvm::Twine(Blk->getBlockID());
+    // create the label
+    llvm::SmallString<128> Buf;
+    clang::IdentifierInfo *II = &astCtx.Idents.get(Name.toStringRef(Buf));
+    auto LabelDecl = clang::LabelDecl::Create(astCtx, ctx.getFunctionDecl(),
+                                              clang::SourceLocation(), II);
+    // create LabelStmt
+    auto LabelStmt = new (astCtx)
+        clang::LabelStmt(clang::SourceLocation(), LabelDecl,
+                         new (astCtx) clang::NullStmt(clang::SourceLocation()));
+    Blk->setLabel(LabelStmt);
+    return LabelDecl;
   }
 }
 

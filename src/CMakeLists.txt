@@ -16,6 +16,7 @@ add_library(notdec STATIC
 	optimizers/retdec-stack/retdec-utils.cpp
 	backend/structural-analysis.cpp
 	backend/phoenix.cpp
+	backend/goto.cpp
 )
 
 # include直接在外部设置了src目录。
