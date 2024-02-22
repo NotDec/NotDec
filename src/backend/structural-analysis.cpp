@@ -4,11 +4,13 @@
 #include "backend/goto.h"
 #include "backend/phoenix.h"
 #include "utils.h"
+#include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Type.h>
 #include <clang/Analysis/CFG.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/Support/Casting.h>
@@ -18,6 +20,21 @@
 namespace notdec::backend {
 
 int LogLevel = level_debug;
+
+template <class T>
+clang::IdentifierInfo *getNewIdentifierInfo(T &Names,
+                                            clang::IdentifierTable &Idents,
+                                            llvm::StringRef Name) {
+  llvm::SmallString<128> Buf;
+  auto Iter = Names.find(Name);
+  unsigned ID = 0;
+  while (Iter != Names.end()) {
+    // already exist, add suffix to the name
+    Iter = Names.find((Name + llvm::Twine(ID)).toStringRef(Buf));
+    ++ID;
+  }
+  return &Idents.get(Name);
+}
 
 ExprBuilder::ExprBuilder(SAFuncContext &FCtx)
     : Ctx(FCtx.getASTContext()), FCtx(FCtx) {}
@@ -83,12 +100,14 @@ void SAFuncContext::run() {
   // 1. build the CFGBlocks
   CFGBuilder Builder(*this);
 
-  // the first block will be implicitly registered as the exit block.
-  Exit = CFG->createBlock();
+  // Create the stub exit block.
+  // The first block will be implicitly registered as the exit block.
+  // TODO the exit block is not used. Edges to exit block are not maintained.
+  clang::CFGBlock *Exit = CFG->createBlock();
   assert(Exit == &CFG->getExit());
 
   // create function decl
-  clang::IdentifierInfo *II = &getASTContext().Idents.get(func.getName());
+  clang::IdentifierInfo *II = ctx.getIdentifierInfo(func.getName());
   clang::FunctionProtoType::ExtProtoInfo EPI;
   EPI.Variadic = func.isVarArg();
   FD = clang::FunctionDecl::Create(
@@ -144,11 +163,23 @@ void SAFuncContext::run() {
       }
     }
 
+    if (LogLevel >= level_debug) {
+      llvm::errs() << "========" << func.getName() << ": "
+                   << "Before Structural Analysis ========"
+                   << "\n";
+      CFG->dump(getASTContext().getLangOpts(), true);
+    }
+
     // TODO: create structural analysis according to cmdline
     Goto SA(*this);
     SA.execute();
 
-    CFG->print(llvm::errs(), getASTContext().getLangOpts(), true);
+    if (LogLevel >= level_debug) {
+      llvm::errs() << "========" << func.getName() << ": "
+                   << "After Structural Analysis ========"
+                   << "\n";
+      CFG->dump(getASTContext().getLangOpts(), true);
+    }
 
     // Finalize steps
     // After structural analysis, the CFG is expected to have only one linear
@@ -282,7 +313,7 @@ clang::LabelDecl *IStructuralAnalysis::getBlockLabel(clang::CFGBlock *Blk) {
                               : "block_" + llvm::Twine(Blk->getBlockID());
     // create the label
     llvm::SmallString<128> Buf;
-    clang::IdentifierInfo *II = &astCtx.Idents.get(Name.toStringRef(Buf));
+    clang::IdentifierInfo *II = ctx.getIdentifierInfo(Name.toStringRef(Buf));
     auto LabelDecl = clang::LabelDecl::Create(astCtx, ctx.getFunctionDecl(),
                                               clang::SourceLocation(), II);
     // create LabelStmt

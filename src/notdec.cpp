@@ -83,6 +83,10 @@ int main(int argc, char *argv[]) {
     SMDiagnostic Err;
     ctx.setModule(parseIRFile(inputFilename, Err, ctx.context));
     // TODO: enable optimization?
+    if (!ctx.hasModule()) {
+      Err.print("IR parsing failed: ", errs());
+      return 0;
+    }
     disablePass = true;
   }
 #ifdef NOTDEC_ENABLE_WASM

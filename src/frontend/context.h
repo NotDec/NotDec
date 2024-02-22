@@ -30,6 +30,7 @@ struct BaseContext {
         mod(new llvm::Module(name, context)) {}
 
   llvm::Module &getModule() { return *mod; }
+  bool hasModule() { return mod != nullptr; }
   void setModule(std::unique_ptr<llvm::Module> m) { mod = std::move(m); }
 };
 

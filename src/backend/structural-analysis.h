@@ -8,6 +8,7 @@
 #include <clang/Analysis/CFG.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/BitVector.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/Module.h>
@@ -25,6 +26,11 @@ namespace notdec::backend {
 void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &os);
 std::string printBasicBlock(const llvm::BasicBlock *b);
 std::string printFunction(const llvm::Function *F);
+
+template <class SetTy>
+clang::IdentifierInfo *getNewIdentifierInfo(SetTy &Names,
+                                            clang::IdentifierTable &Idents,
+                                            llvm::StringRef Name);
 
 class SAContext;
 class SAFuncContext;
@@ -52,17 +58,22 @@ class SAFuncContext {
   std::map<llvm::BasicBlock *, clang::CFGBlock *> ll2cfg;
   std::map<clang::CFGBlock *, llvm::BasicBlock *> cfg2ll;
   TypeBuilder TB;
-  clang::FunctionDecl *FD = nullptr;
 
+  clang::FunctionDecl *FD = nullptr;
   std::unique_ptr<clang::CFG> CFG;
-  clang::CFGBlock *Exit = nullptr;
+  // For checking local names (of variables, labels) are used or not.
+  std::unique_ptr<llvm::StringSet<>> Names;
 
 public:
   SAFuncContext(SAContext &ctx, llvm::Function &func)
       : ctx(ctx), func(func), TB(getASTContext()) {
     CFG = std::make_unique<clang::CFG>();
+    Names = std::make_unique<llvm::StringSet<>>();
   }
 
+  clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
+    return getNewIdentifierInfo(*Names, getASTContext().Idents, Name);
+  }
   clang::FunctionDecl *getFunctionDecl() { return FD; }
   llvm::Function &getFunction() { return func; }
   clang::ASTContext &getASTContext();
@@ -104,6 +115,11 @@ public:
   }
 
   clang::ASTContext &getASTContext() { return ASTunit->getASTContext(); }
+
+  clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
+    auto &Idents = getASTContext().Idents;
+    return getNewIdentifierInfo(Idents, Idents, Name);
+  }
 
   /// A new context is created if not exist
   SAFuncContext &getFuncContext(llvm::Function &func) {

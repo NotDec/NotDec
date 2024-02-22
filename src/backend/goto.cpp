@@ -71,13 +71,31 @@ void Goto::execute() {
     }
   }
   // merge all blocks into one. Remove all other blocks and edges.
-  clang::CFGBlock &entry = CFG.getEntry();
-  CFG.blo;
+  clang::CFGBlock &Entry = CFG.getEntry();
+  // because we only need one block, instead of maintaining all edges, we remove
+  // all succs and preds of entry block, and ignore other blocks' edges.
+  Entry.succ_clear();
+  Entry.pred_clear();
   for (auto it = bbs.begin(); it != bbs.end(); ++it) {
-    if ((*it).isEntryBlock()) {
+    // push all statements into entry block
+    auto Current = ctx.getBlock(*it);
+    if (Current == &Entry) {
       continue;
     }
+    // add if there is a label statement
+    if (Current->getLabel() != nullptr) {
+      Entry.appendStmt(Current->getLabel(), CFG.getBumpVectorContext());
+    }
+    CFG.dump(ASTCtx.getLangOpts(), true);
+    // elements should be added in reverse order
+    for (auto elem = Current->rbegin(); elem != Current->rend(); ++elem) {
+      Entry.appendElement(*elem, CFG.getBumpVectorContext());
+    }
+    // remove the block from the cfg
+    CFG.erase(Current);
   }
+  // The exit block is set to the first stub block created. We currently do not
+  // care about it.
 }
 
 } // namespace notdec::backend

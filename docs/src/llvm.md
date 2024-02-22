@@ -112,3 +112,37 @@ LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。
 LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵活变动。比如一个整数，虽然可能有一些加法运算，但是你还是可以强制把它设成指针类型，然后在每个使用点插入ptrtoint指令转回去。
 
 有些LLVM值的类型，修改起来非常麻烦。尤其是函数的参数和返回值类型。函数也是GlobalValue，甚至是Constant。
+
+### Clang 
+
+**AST handling**
+
+- 创建AST时有两种方式
+  1. 使用Create方法，如`clang::FunctionDecl::Create(...)`
+  2. 没有Create方法时，使用ASTContext的new操作符。如：`new (ASTCtx) clang::GotoStmt(...)`
+
+**CFG handling**
+
+CFGBlock包含：
+- LabelStatement，用于生成Goto语句。
+- 一系列语句
+- CFGTerminator
+  - 对于return/unreachable：保存对应的返回语句或函数调用语句。
+  - 对于br/switch，保存对应的条件表达式。同时保证successor的顺序。
+
+
+- CFGBuilder在LLVM中是逆序创建的，即逆向遍历AST，逆向创建语句。在打印或者遍历CFG块的时候，其中`CFGBlock::ElementList`把正常的iterator改用reverse_iterator实现。存储的时候是逆向存储，但是后续读取每个CFGBlock的时候也被偷偷改成逆向读取。但是我们算法如果不是逆向的话，想要在末尾继续插入语句，反而需要插入到开头，内存开销增加了。
+  - 如果将结构恢复算法弄成逆向的，首先找到所有的没有后继节点的结束块，每个结束块分治。
+- 对于`if (A && B && C)`，`CFGBlock->getTerminatorStmt()`会在C处返回整个`A && B && C`表达式。调用`getLastCondition()`，会把CFGBlock最后一个statement转换成Expr返回。
+
+**BumpVector Memory Allocation**
+
+Clang的内存分配都是通过ASTContext进行的，内部使用了一个BumpAllocator，Bump是一种简单的线性内存分配，内存不会真正被释放，放弃内存复用。或者等一整块分配结束之后，再整块全部释放。根据[这里](https://github.com/llvm/llvm-project/blob/e6de9ed37308e46560243229dd78e84542f37ead/clang/include/clang/AST/ASTContext.h#L617)，ASTContext解构时释放所有存储AST节点的内存。
+
+- 根据[这里](https://discourse.llvm.org/t/checker-for-destruction-needing-classes-allocated-in-bumpptrallocators/15386)，从这里分配的相关的数据结构内部不能有std::vector或者SmallVector这种会在堆上分配内存的数据结构。因为不会调用destructor，导致堆上的内存不会被free，导致内存泄露。
+
+BumpVectorContext存储了一个`llvm::PointerIntPair<llvm::BumpPtrAllocator*, 1> Alloc;`，这是一个指针低位复用的数据结构，可以理解为一个指针加一个bool值。用户传入外部的allocator，比如ASTContext的，完全不释放内存。也可以让它新建一个allocator，并在解构的时候释放所有内存。
+
+Clang CFG内置了一个BumpVectorContext，解构时会释放所有内存。因此在结构分析过程中，CFG相关的基本块虽然出现创建后又删除的情况，但不会导致内存泄露。 TODO: 一些临时的AST节点，如一些临时的Goto语句，它们的内存释放怎么办？
+
+这次在BumpVector里增加的erase函数，仅把元素移动到末尾然后解构，和内存泄露应该无关。
