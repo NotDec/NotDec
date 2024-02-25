@@ -160,16 +160,21 @@ void SAFuncContext::run() {
                 getASTContext(), FD, clang::SourceLocation(),
                 clang::SourceLocation(), II2, TB.visitType(*inst.getType()),
                 nullptr, clang::SC_None);
-            clang::DeclRefExpr *ref = clang::DeclRefExpr::Create(
-                getASTContext(), clang::NestedNameSpecifierLoc(),
-                clang::SourceLocation(), decl, false,
-                clang::DeclarationNameInfo(II2, clang::SourceLocation()),
-                expr->getType(), clang::VK_LValue);
-            // assign stmt
-            clang::Stmt *DS = clang::BinaryOperator::Create(
-                getASTContext(), ref, expr, clang::BO_Assign, expr->getType(),
-                clang::VK_PRValue, clang::OK_Ordinary, clang::SourceLocation(),
-                clang::FPOptionsOverride());
+            decl->setInit(expr);
+            clang::DeclStmt *DS = new (getASTContext()) clang::DeclStmt(
+                clang::DeclGroupRef(decl), clang::SourceLocation(),
+                clang::SourceLocation());
+
+            // clang::DeclRefExpr *ref = clang::DeclRefExpr::Create(
+            //     getASTContext(), clang::NestedNameSpecifierLoc(),
+            //     clang::SourceLocation(), decl, false,
+            //     clang::DeclarationNameInfo(II2, clang::SourceLocation()),
+            //     expr->getType(), clang::VK_LValue);
+            // // assign stmt
+            // clang::Stmt *DS = clang::BinaryOperator::Create(
+            //     getASTContext(), ref, expr, clang::BO_Assign,
+            //     expr->getType(), clang::VK_PRValue, clang::OK_Ordinary,
+            //     clang::SourceLocation(), clang::FPOptionsOverride());
             block->appendStmt(DS);
           }
         } else {
