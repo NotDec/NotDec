@@ -111,10 +111,10 @@ protected:
 class CFGTerminator {
 private:
   using Stmt = clang::Stmt;
-  Stmt *Data;
+  Stmt *Data = nullptr;
 
 public:
-  CFGTerminator() { assert(!isValid()); }
+  CFGTerminator() {}
   CFGTerminator(Stmt *S) : Data(S) {}
   bool isValid() const { return Data != nullptr; }
   Stmt *getStmt() { return Data; }
@@ -152,8 +152,8 @@ public:
   using ElementListTy = std::deque<CFGElement>;
   using Stmt = clang::Stmt;
 
-  CFGBlock() = default;
-  CFGBlock(unsigned ID) : BlockID(ID) {}
+  CFGBlock(CFG *parent) : Parent(parent){};
+  CFGBlock(CFG *parent, unsigned ID) : BlockID(ID), Parent(parent) {}
 
   ElementListTy Elements;
 
@@ -218,6 +218,8 @@ public:
   iterator end() { return Elements.end(); }
   const_iterator begin() const { return Elements.begin(); }
   const_iterator end() const { return Elements.end(); }
+  iterator insert(iterator it, CFGElement e) { return Elements.insert(it, e); }
+  iterator erase(iterator it) { return Elements.erase(it); }
 
   reverse_iterator rbegin() { return Elements.rbegin(); }
   reverse_iterator rend() { return Elements.rend(); }
@@ -260,6 +262,7 @@ public:
   succ_iterator succ_end() { return Succs.end(); }
   const_succ_iterator succ_begin() const { return Succs.begin(); }
   const_succ_iterator succ_end() const { return Succs.end(); }
+  void succ_clear() { return Succs.clear(); }
 
   succ_reverse_iterator succ_rbegin() { return Succs.rbegin(); }
   succ_reverse_iterator succ_rend() { return Succs.rend(); }
@@ -315,13 +318,13 @@ public:
   void addSuccessor(AdjacentBlock Succ);
 
   void appendStmt(Stmt *statement) { Elements.push_back(CFGStmt(statement)); }
+  void appendElement(CFGElement statement) { Elements.push_back(statement); }
 };
 
 class CFG {
   using CFGBlockListTy = std::list<CFGBlock>;
 
 public:
-  CFGBlock *createBlock();
   void setEntry(CFGBlock *B) { Entry = B; }
   void setExit(CFGBlock *B) { Exit = B; }
 
@@ -342,6 +345,8 @@ public:
   reverse_iterator rend() { return Blocks.rend(); }
   const_reverse_iterator rbegin() const { return Blocks.rbegin(); }
   const_reverse_iterator rend() const { return Blocks.rend(); }
+
+  iterator erase(iterator I) { return Blocks.erase(I); }
 
   CFGBlock &getEntry() { return *Entry; }
   const CFGBlock &getEntry() const { return *Entry; }
@@ -375,6 +380,8 @@ public:
   void viewCFG(const LangOptions &LO) const;
   void print(raw_ostream &OS, const LangOptions &LO, bool ShowColors) const;
   void dump(const LangOptions &LO, bool ShowColors) const;
+
+  iterator createBlock();
 
 private:
   CFGBlock *Entry = nullptr;

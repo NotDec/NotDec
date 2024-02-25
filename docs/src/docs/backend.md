@@ -198,4 +198,9 @@ paper的3.1节介绍了算法框架，和结构分析很相似。
     - http://zneak.github.io/fcd/2016/02/17/structuring.html
     - http://zneak.github.io/fcd/2016/02/21/csaw-wyvern.html
 
+### 表达式折叠
+
+- 加法：nsw，nuw。当溢出时会变成poison value。
+- 移位运算：逻辑移位对应C语言无符号数字的移位，算数移位对应有符号数字的移位。（根据[这里](https://stackoverflow.com/questions/7622/are-the-shift-operators-arithmetic-or-logical-in-c)）
+- TODO
 

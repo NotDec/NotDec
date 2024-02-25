@@ -11,6 +11,7 @@ public:
   Goto(SAFuncContext &ctx) : IStructuralAnalysis(ctx) {}
 
   void execute() override;
+  void simplityBlock(CFGBlock &Block);
 };
 
 } // namespace notdec::backend

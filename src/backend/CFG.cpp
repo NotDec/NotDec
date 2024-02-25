@@ -704,9 +704,42 @@ void CFG::viewCFG(const LangOptions &LO) const {
   // #endif
 }
 void CFG::print(raw_ostream &OS, const LangOptions &LO, bool ShowColors) const {
+  StmtPrinterHelper Helper(this, LO);
+
+  // Print the entry block.
+  print_block(OS, this, getEntry(), Helper, true, ShowColors);
+
+  // Iterate through the CFGBlocks and print them one by one.
+  for (const_iterator I = Blocks.begin(), E = Blocks.end(); I != E; ++I) {
+    // Skip the entry block, because we already printed it.
+    if (&(*I) == &getEntry() || &(*I) == &getExit())
+      continue;
+
+    print_block(OS, this, *I, Helper, true, ShowColors);
+  }
+
+  // Print the exit block.
+  print_block(OS, this, getExit(), Helper, true, ShowColors);
+  OS << '\n';
+  OS.flush();
 }
 void CFG::dump(const LangOptions &LO, bool ShowColors) const {
   print(llvm::errs(), LO, ShowColors);
+}
+
+CFG::iterator CFG::createBlock() {
+  bool first_block = begin() == end();
+
+  Blocks.emplace_back(this, NumBlockIDs++);
+
+  // If this is the first block, set it as the Entry and Exit.
+  if (first_block) {
+    Entry = Exit = &back();
+  }
+
+  auto it = end();
+  --it;
+  return it;
 }
 
 } // namespace notdec::backend

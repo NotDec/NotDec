@@ -6,9 +6,12 @@
 #include "utils.h"
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
+#include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Type.h>
 #include <clang/Analysis/CFG.h>
+#include <clang/Basic/LangOptions.h>
+#include <clang/Basic/Specifiers.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
@@ -20,6 +23,16 @@
 namespace notdec::backend {
 
 int LogLevel = level_debug;
+
+const llvm::StringSet<> SAContext::Keywords = {
+#define KEYWORD(NAME, FLAGS) #NAME,
+#include "clang/Basic/TokenKinds.def"
+#undef KEYWORD
+};
+
+bool SAContext::isKeyword(llvm::StringRef Name) {
+  return Keywords.find(Name) != Keywords.end();
+}
 
 template <class T>
 clang::IdentifierInfo *getNewIdentifierInfo(T &Names,
@@ -102,9 +115,10 @@ void SAFuncContext::run() {
 
   // Create the stub exit block.
   // The first block will be implicitly registered as the exit block.
-  // TODO the exit block is not used. Edges to exit block are not maintained.
-  clang::CFGBlock *Exit = CFG->createBlock();
-  assert(Exit == &CFG->getExit());
+  // TODO the exit block is currently not used. Edges to exit block are not
+  // maintained.
+  CFG::iterator Exit = Cfg->createBlock();
+  assert(&*Exit == &Cfg->getExit());
 
   // create function decl
   clang::IdentifierInfo *II = ctx.getIdentifierInfo(func.getName());
@@ -129,19 +143,34 @@ void SAFuncContext::run() {
 
         } else if (isStmt(inst)) {
           auto *stmt = getStmt(inst);
-          block->appendStmt(stmt, CFG->getBumpVectorContext());
+          block->appendStmt(stmt);
         } else if (isExpr(inst)) {
           // check if the expr is used by other insts in the same block
           if (!usedInBlock(inst, bb)) {
-            std::abort();
-            // auto *expr = getExpr(inst);
-            // clang::IdentifierInfo *II2 =
-            //     &getASTContext().Idents.get(inst.getNameOrAsOperand());
-            // clang::VarDecl *decl = clang::VarDecl::Create(
-            //     getASTContext(), FD, clang::SourceLocation(),
-            //     clang::SourceLocation(), II2, TB.visitType(*inst.getType()),
-            //     nullptr, clang::SC_None);
-            // block->appendStmt(decl, CFG->getBumpVectorContext());
+            auto *expr = getExpr(inst);
+            auto Name =
+                (inst.hasName() && !SAContext::isKeyword(inst.getName()))
+                    ? inst.getName()
+                    : "temp_" + llvm::Twine(++tempVarID);
+
+            llvm::SmallString<128> Buf;
+            clang::IdentifierInfo *II2 =
+                &getASTContext().Idents.get(Name.toStringRef(Buf));
+            clang::VarDecl *decl = clang::VarDecl::Create(
+                getASTContext(), FD, clang::SourceLocation(),
+                clang::SourceLocation(), II2, TB.visitType(*inst.getType()),
+                nullptr, clang::SC_None);
+            clang::DeclRefExpr *ref = clang::DeclRefExpr::Create(
+                getASTContext(), clang::NestedNameSpecifierLoc(),
+                clang::SourceLocation(), decl, false,
+                clang::DeclarationNameInfo(II2, clang::SourceLocation()),
+                expr->getType(), clang::VK_LValue);
+            // assign stmt
+            clang::Stmt *DS = clang::BinaryOperator::Create(
+                getASTContext(), ref, expr, clang::BO_Assign, expr->getType(),
+                clang::VK_PRValue, clang::OK_Ordinary, clang::SourceLocation(),
+                clang::FPOptionsOverride());
+            block->appendStmt(DS);
           }
         } else {
           llvm::errs()
@@ -156,10 +185,9 @@ void SAFuncContext::run() {
     // connect the edges
     for (llvm::BasicBlock &bb : func) {
       for (auto succ : llvm::successors(&bb)) {
-        auto *src = getBlock(bb);
-        auto *dst = getBlock(*succ);
-        src->addSuccessor(clang::CFGBlock::AdjacentBlock(dst, true),
-                          CFG->getBumpVectorContext());
+        auto src = getBlock(bb);
+        auto dst = getBlock(*succ);
+        src->addSuccessor(CFGBlock::AdjacentBlock(&*dst));
       }
     }
 
@@ -167,7 +195,7 @@ void SAFuncContext::run() {
       llvm::errs() << "========" << func.getName() << ": "
                    << "Before Structural Analysis ========"
                    << "\n";
-      CFG->dump(getASTContext().getLangOpts(), true);
+      Cfg->dump(getASTContext().getLangOpts(), true);
     }
 
     // TODO: create structural analysis according to cmdline
@@ -178,13 +206,13 @@ void SAFuncContext::run() {
       llvm::errs() << "========" << func.getName() << ": "
                    << "After Structural Analysis ========"
                    << "\n";
-      CFG->dump(getASTContext().getLangOpts(), true);
+      Cfg->dump(getASTContext().getLangOpts(), true);
     }
 
     // Finalize steps
     // After structural analysis, the CFG is expected to have only one linear
     // block.
-    clang::CFGBlock &entry = CFG->getEntry();
+    CFGBlock &entry = Cfg->getEntry();
     llvm::SmallVector<clang::Stmt *> Stmts;
     // add labelStmt
     if (auto l = entry.getLabel()) {
@@ -192,13 +220,13 @@ void SAFuncContext::run() {
     }
     for (auto elem : entry) {
       // if is stmt, then add to FD
-      auto stmt = elem.getAs<clang::CFGStmt>();
+      auto stmt = elem.getAs<CFGStmt>();
       if (stmt.hasValue()) {
         Stmts.push_back(const_cast<clang::Stmt *>(stmt->getStmt()));
       }
     }
     auto term = entry.getTerminator();
-    if (term.isStmtBranch()) {
+    if (term.getStmt() != nullptr) {
       if (auto t = term.getStmt()) {
         Stmts.push_back(t);
       }
@@ -241,7 +269,6 @@ TypeBuilder::visitFunctionType(llvm::FunctionType &Ty,
     Args[i] = visitType(*Ty.getParamType(i));
   }
   clang::QualType RetTy = visitType(*Ty.getReturnType());
-  RetTy.print(llvm::errs(), Ctx.getPrintingPolicy());
   return Ctx.getFunctionType(RetTy, Args, EPI);
 }
 
@@ -303,14 +330,15 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C) {
 }
 
 /// get the label for the block. Create if not exist.
-clang::LabelDecl *IStructuralAnalysis::getBlockLabel(clang::CFGBlock *Blk) {
+clang::LabelDecl *IStructuralAnalysis::getBlockLabel(CFGBlock *Blk) {
   if (auto label = Blk->getLabel()) {
     return llvm::cast<clang::LabelStmt>(label)->getDecl();
   } else {
     auto &astCtx = ctx.getASTContext();
     auto bb = ctx.getBlock(*Blk);
-    auto Name = bb->hasName() ? bb->getName()
-                              : "block_" + llvm::Twine(Blk->getBlockID());
+    auto Name = (bb->hasName() && !SAContext::isKeyword(bb->getName()))
+                    ? bb->getName()
+                    : "block_" + llvm::Twine(Blk->getBlockID());
     // create the label
     llvm::SmallString<128> Buf;
     clang::IdentifierInfo *II = ctx.getIdentifierInfo(Name.toStringRef(Buf));
