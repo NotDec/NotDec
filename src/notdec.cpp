@@ -91,11 +91,11 @@ int main(int argc, char *argv[]) {
   }
 #ifdef NOTDEC_ENABLE_WASM
   else if (insuffix == ".wasm") {
-    opts.from_wasm = true;
+    ctx.opt.from_wasm = true;
     std::cout << "using wasm frontend." << std::endl;
     notdec::frontend::wasm::parse_wasm(ctx, inputFilename);
   } else if (insuffix == ".wat") {
-    opts.from_wasm = true;
+    ctx.opt.from_wasm = true;
     std::cout << "using wat frontend." << std::endl;
     notdec::frontend::wasm::parse_wat(ctx, inputFilename);
   }

@@ -75,7 +75,7 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "structural emcc_print",
+      "name": "structural",
       "program": "${command:cmake.launchTargetPath}",
       "args": [
         "-i",

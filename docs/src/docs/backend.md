@@ -198,9 +198,31 @@ paper的3.1节介绍了算法框架，和结构分析很相似。
     - http://zneak.github.io/fcd/2016/02/17/structuring.html
     - http://zneak.github.io/fcd/2016/02/21/csaw-wyvern.html
 
+
+
 ### 表达式折叠
 
-- 加法：nsw，nuw。当溢出时会变成poison value。
+副作用的处理：不考虑是否有副作用，即都当有副作用处理。暂时不考虑无副作用的表达式为了简洁的折叠。例如`int tmp = 1+2; f(tmp); g(tmp)` 不会折叠为`f(1+2); g(1+2)`;
+
+- Stmt和Expr的划分：
+  - 如果一个指令没有返回值，纯粹只有副作用，则作为Stmt。例如Store指令。
+  - 如果一个指令可能有返回值，则作为Expr，根据引用情况和次数考虑
+    - 如果指令没有使用者，则直接将表达式作为stmt插入。
+    - 如果指令被基本块外指令引用，或者被当前基本块的指令引用多次，则创建局部变量，然后注册这个局部变量到ExprMap。
+    - 如果指令被当前基本块内的指令引用，且仅被引用一次，则直接作为表达式折叠到对应的指令内。直接将当前表达式注册到ExprMap。
+
+
+Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副作用就应该作为Stmt。而是指令没有返回值，不会被作为value才作为Stmt。具体是否应该把Expr作为Stmt放下来，这个都得放。具体是否应该创建一个局部变量，得看是否在一个基本块。如果发现这个Expr的基本块和当前的基本块不同的话，就应该在那边为这个expr创建一个局部变量。
+
+### 指令处理
+
+- 加法：nsw，nuw。当溢出时会变成poison value。这个暂时不考虑。
 - 移位运算：逻辑移位对应C语言无符号数字的移位，算数移位对应有符号数字的移位。（根据[这里](https://stackoverflow.com/questions/7622/are-the-shift-operators-arithmetic-or-logical-in-c)）
 - TODO
+- AllocaInst: 
+  - If the inst is at the outermost level, then create a corresponding local variable. 
+  - If not, this is a rare case, create corresponding calls to the `alloca` function.
+- CallInst:
+  - Organize and maintain a map from llvm functions to Clang function declarations.
+  - Handle function pointers: TODO
 

@@ -13,7 +13,7 @@ wasm: $(addsuffix .wasm, $(PREFIXEDS))
 # emcc ./$< -g -s EXPORTED_FUNCTIONS=_main -s ERROR_ON_UNDEFINED_SYMBOLS=0 -o ./$@
 # -g -O0 --no-standard-libraries -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined 
 out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
-	/opt/wasi-sdk/wasi-sdk-16.0/bin/clang -I.. -c -O -o ./$@ ./$<
+	/opt/wasi-sdk-16.0/bin/clang -I.. -c -O -o ./$@ ./$<
 
 %.wat: %.wasm
 	wasm2wat -f --enable-all ./$< > ./$@

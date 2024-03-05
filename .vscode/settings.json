@@ -74,8 +74,10 @@
     ],
     "cSpell.words": [
         "notdec",
+        "Preds",
         "retdec",
-        "retypd"
+        "retypd",
+        "Succs"
     ],
     "cmake.generator": "Ninja",
     "editor.formatOnSave": true,

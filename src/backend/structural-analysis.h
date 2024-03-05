@@ -5,6 +5,7 @@
 #include "optimizers/retdec-stack/retdec-utils.h"
 #include "utils.h"
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Type.h>
@@ -125,7 +126,7 @@ class SAFuncContext {
   // map from llvm block to CFGBlock. Store the iterator to facilitate deletion
   std::map<llvm::BasicBlock *, CFG::iterator> ll2cfg;
   std::map<CFGBlock *, llvm::BasicBlock *> cfg2ll;
-  TypeBuilder TB;
+  TypeBuilder &TB;
 
   clang::FunctionDecl *FD = nullptr;
   std::unique_ptr<CFG> Cfg;
@@ -135,17 +136,14 @@ class SAFuncContext {
   unsigned tempVarID = 0;
 
 public:
-  SAFuncContext(SAContext &ctx, llvm::Function &func)
-      : ctx(ctx), func(func), TB(getASTContext()) {
-    Cfg = std::make_unique<CFG>();
-    Names = std::make_unique<llvm::StringSet<>>();
-  }
+  SAFuncContext(SAContext &ctx, llvm::Function &func);
 
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
     return getNewIdentifierInfo(*Names, getASTContext().Idents, Name);
   }
   clang::FunctionDecl *getFunctionDecl() { return FD; }
   llvm::Function &getFunction() { return func; }
+  SAContext &getSAContext() { return ctx; }
   clang::ASTContext &getASTContext();
   class CFG &getCFG() { return *Cfg; }
   TypeBuilder &getTypeBuilder() { return TB; }
@@ -164,30 +162,35 @@ public:
   }
   llvm::BasicBlock *getBlock(CFGBlock &bb) { return cfg2ll.at(&bb); }
   void run();
-  static clang::StorageClass getStorageClass(llvm::GlobalValue &GV);
 };
 
 /// Main data structures for structural analysis
 class SAContext {
 protected:
-  llvm::Module &mod;
+  llvm::Module &M;
   std::map<llvm::Function *, SAFuncContext> funcContexts;
+  std::map<llvm::Function *, clang::FunctionDecl *> funcDecls;
 
-  // Clang AST
+  // Clang AST should be placed first, so that it is initialized first.
   std::unique_ptr<clang::ASTUnit> ASTunit;
 
+  TypeBuilder TB;
+
 public:
-  SAContext(llvm::Module &mod) : mod(mod) {
+  // The usage of `clang::tooling::buildASTFromCode` follows llvm
+  // unittests/Analysis/CFGTest.cpp, so we don't need to create ASTContext.
+  SAContext(llvm::Module &mod)
+      : M(mod), ASTunit(clang::tooling::buildASTFromCode("", "decompiled.c")),
+        TB(getASTContext()) {
     // TODO: set target arch by cmdline or input arch, so that TargetInfo is set
     // and int width is correct.
-
-    // follow llvm unittests/Analysis/CFGTest.cpp, so we don't need to create
-    // ASTContext.
-    ASTunit = clang::tooling::buildASTFromCode("", "decompiled.c");
   }
+  void createDecls();
 
   clang::ASTContext &getASTContext() { return ASTunit->getASTContext(); }
+  TypeBuilder &getTypeBuilder() { return TB; }
 
+  static clang::StorageClass getStorageClass(llvm::GlobalValue &GV);
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
     auto &Idents = getASTContext().Idents;
     return getNewIdentifierInfo(Idents, Idents, Name);
@@ -201,6 +204,9 @@ public:
       return result.first->second;
     }
     return funcContexts.at(&func);
+  }
+  clang::FunctionDecl *getFunctionDecl(llvm::Function &F) {
+    return funcDecls.at(&F);
   }
 
   static const llvm::StringSet<> Keywords;
@@ -222,8 +228,8 @@ public:
   void mergeBlock(llvm::BasicBlock &bb, llvm::BasicBlock &next);
 };
 
-/// Build expressions instead of creating stmts for instructions and IR
-/// expressions.
+/// Build an expression that refers to the IR value. It does not create stmts
+/// for instructions or IR expressions.
 ///
 /// To have a comprehensive IR value visitor, refer to Value class hierarchy
 /// https://llvm.org/doxygen/classllvm_1_1Value.html and
@@ -248,10 +254,10 @@ public:
   clang::Expr *visitValue(llvm::Value *Val);
 };
 
-/// Convert instructions with side effects to a statement.
-/// Other instructions are waited to be folded.
-/// while visiting instructions, statements created are inserted into the
-/// region.
+/// Convert visited instructions and register the result to the expr or
+/// statement map using `FCtx.addExpr` or `FCtx.AddStmt`.
+/// Instructions that has side effects are converted to statements, or expr
+/// otherwise.
 class CFGBuilder : public llvm::InstVisitor<CFGBuilder> {
 protected:
   clang::ASTContext &Ctx;
@@ -281,6 +287,11 @@ public:
     return &*ret;
   }
 
+  /// Conversion types for converting LLVM binary operator to C operations.
+  /// For example, if a LLVM add is signed, we need to ensure the operand
+  /// expression is signed or insert a cast.
+  /// The logical shift corresponds to the C unsigned number shift, and the
+  /// arithmetical shift corresponds to the C signed number shift.
   enum Conversion {
     None,
     Signed,
@@ -289,6 +300,7 @@ public:
     Logical,    // make left op unsigned
   };
 
+  /// Get the signedness of the binary operator.
   Conversion getSignedness(llvm::Instruction::BinaryOps op) {
     switch (op) {
     case llvm::Instruction::Add:
@@ -320,6 +332,7 @@ public:
     }
   }
 
+  /// Convert the LLVM binary operator to a Clang binary operator op.
   clang::Optional<clang::BinaryOperatorKind>
   convertOp(llvm::Instruction::BinaryOps op) {
     switch (op) {
@@ -358,66 +371,30 @@ public:
     }
   }
 
-  clang::Expr *castSigned(clang::Expr *E) {
-    if (E->getType()->isUnsignedIntegerType()) {
-      auto ty = makeSigned(E->getType());
-      return clang::CStyleCastExpr::Create(
-          Ctx, ty, clang::VK_PRValue, clang::CK_IntegralCast, E, nullptr,
-          clang::FPOptionsOverride(), Ctx.CreateTypeSourceInfo(ty),
-          clang::SourceLocation(), clang::SourceLocation());
-    }
-    return E;
+  /// Ensure the expression is signed, or insert a cast.
+  clang::Expr *castSigned(clang::Expr *E);
+  /// Ensure the expression is unsigned, or insert a cast.
+  clang::Expr *castUnsigned(clang::Expr *E);
+  clang::DeclRefExpr *
+  makeDeclRefExpr(clang::ValueDecl *D,
+                  bool RefersToEnclosingVariableOrCapture = false);
+  clang::ImplicitCastExpr *
+  makeImplicitCast(clang::Expr *Arg, clang::QualType Ty, clang::CastKind CK) {
+    return clang::ImplicitCastExpr::Create(
+        Ctx, Ty,
+        /* CastKind=*/CK,
+        /* Expr=*/Arg,
+        /* CXXCastPath=*/nullptr,
+        /* ExprValueKind=*/clang::VK_PRValue,
+        /* FPFeatures */ clang::FPOptionsOverride());
   }
 
-  clang::Expr *castUnsigned(clang::Expr *E) {
-    if (E->getType()->isSignedIntegerType()) {
-      auto ty = makeUnsigned(E->getType());
-      return clang::CStyleCastExpr::Create(
-          Ctx, ty, clang::VK_PRValue, clang::CK_IntegralCast, E, nullptr,
-          clang::FPOptionsOverride(), Ctx.CreateTypeSourceInfo(ty),
-          clang::SourceLocation(), clang::SourceLocation());
-    }
-    return E;
-  }
-
-  void visitBinaryOperator(llvm::BinaryOperator &I) {
-    clang::Optional<clang::BinaryOperatorKind> op = convertOp(I.getOpcode());
-    if (op.hasValue()) {
-      Conversion cv = getSignedness(I.getOpcode());
-      // insert conversion if needed
-      clang::Expr *lhs = EB.visitValue(I.getOperand(0));
-      if (cv == Signed || cv == Arithmetic) {
-        lhs = castSigned(lhs);
-      } else if (cv == Unsigned || cv == Logical) {
-        lhs = castUnsigned(lhs);
-      }
-      clang::Expr *rhs = EB.visitValue(I.getOperand(1));
-      if (cv == Signed) {
-        rhs = castSigned(rhs);
-      } else if (cv == Unsigned) {
-        rhs = castUnsigned(rhs);
-      }
-
-      clang::Expr *binop = clang::BinaryOperator::Create(
-          Ctx, lhs, rhs, op.getValue(), visitType(*I.getType()),
-          clang::VK_PRValue, clang::OK_Ordinary, clang::SourceLocation(),
-          clang::FPOptionsOverride());
-      FCtx.addExpr(I, *binop);
-      return;
-    }
-    llvm_unreachable("CFGBuilder.visitBinaryOperator: unexpected op type");
-  }
-
-  void visitReturnInst(llvm::ReturnInst &I) {
-    clang::Stmt *ret;
-    ret = clang::ReturnStmt::Create(Ctx, clang::SourceLocation(),
-                                    EB.visitValue(I.getReturnValue()), nullptr);
-    FCtx.addStmt(I, *ret);
-    Blk->setTerminator(CFGTerminator(ret));
-  }
+  void visitBinaryOperator(llvm::BinaryOperator &I);
+  void visitReturnInst(llvm::ReturnInst &I);
   void visitUnreachableInst(llvm::UnreachableInst &I) {
     // TODO create call statement to something like abort.
   }
+  void visitCallInst(llvm::CallInst &I);
 
   CFGBuilder(SAFuncContext &FCtx)
       : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}
