@@ -4,6 +4,7 @@
 #include "backend/goto.h"
 #include "backend/phoenix.h"
 #include "utils.h"
+#include <cassert>
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
@@ -16,6 +17,9 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalObject.h>
+#include <llvm/IR/GlobalValue.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <utility>
@@ -25,29 +29,95 @@ namespace notdec::backend {
 static int LogLevel = level_debug;
 
 void CFGBuilder::visitCallInst(llvm::CallInst &I) {
-  // TODO Function pointer call
-  llvm::Function *Callee = I.getCalledFunction();
-  auto FD = FCtx.getSAContext().getFunctionDecl(*Callee);
-  llvm::SmallVector<clang::Expr *, 16> Args(I.getNumOperands());
-  for (unsigned i = 0; i < I.getNumOperands(); i++) {
-    Args[i] = EB.visitValue(I.getOperand(i));
+  // See also:
+  // https://github.com/llvm/llvm-project/blob/d8e5a0c42bd8796cce9caa53aacab88c7cb2a3eb/clang/lib/Analysis/BodyFarm.cpp#L245
+  llvm::SmallVector<clang::Expr *, 16> Args(I.arg_size());
+  for (unsigned i = 0; i < I.arg_size(); i++) {
+    Args[i] = EB.visitValue(I.getArgOperand(i));
+    assert(Args[i] != nullptr && "CFGBuilder.visitCallInst: Args[i] is null?");
   }
-  clang::QualType Ty = FD->getType();
-  clang::Expr *FRef = makeDeclRefExpr(FD);
-  if (Ty->isLValueReferenceType() && FRef->getType()->isFunctionType()) {
-    Ty = Ctx.getPointerType(Ty.getNonReferenceType());
-    FRef = makeImplicitCast(FRef, Ty, clang::CK_FunctionToPointerDecay);
+  llvm::Function *Callee = I.getCalledFunction();
+  clang::QualType *ret;
+  clang::Expr *FRef;
+  if (Callee != nullptr) {
+    auto FD = FCtx.getSAContext().getFunctionDecl(*Callee);
+    clang::QualType Ty = FD->getType();
+    FRef = makeDeclRefExpr(FD);
+    if (Ty->isLValueReferenceType() && FRef->getType()->isFunctionType()) {
+      Ty = Ctx.getPointerType(Ty.getNonReferenceType());
+      FRef = makeImplicitCast(FRef, Ty, clang::CK_FunctionToPointerDecay);
+    }
+  } else {
+    // Function pointer call
+    // TODO: double check
+    auto CalleeExpr = EB.visitValue(I.getCalledOperand());
+    assert(CalleeExpr != nullptr &&
+           "CFGBuilder.visitCallInst: CalleeExpr is null?");
+    assert(CalleeExpr->getType()->isPointerType() &&
+           CalleeExpr->getType()->getPointeeType()->isFunctionType() &&
+           "CallInst operand is not a function pointer?");
+    FRef = CalleeExpr;
   }
   // TODO? CallExpr type is function return type or not?
-  auto Call = clang::CallExpr::Create(
-      Ctx, FRef, Args, FD->getReturnType(), clang::VK_PRValue,
-      clang::SourceLocation(), clang::FPOptionsOverride());
-  FCtx.addExpr(I, *Call);
+  auto Call = clang::CallExpr::Create(Ctx, FRef, Args, *ret, clang::VK_PRValue,
+                                      clang::SourceLocation(),
+                                      clang::FPOptionsOverride());
+
+  addExprOrStmt(I, *Call);
 }
 
-clang::DeclRefExpr *
-CFGBuilder::makeDeclRefExpr(clang::ValueDecl *D,
-                            bool RefersToEnclosingVariableOrCapture) {
+void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
+                                  CFGBlock &block) {
+  if (v.getNumUses() == 0) {
+    // Treat as stmt
+    block.appendStmt(&Stmt);
+    return;
+  }
+  assert(llvm::isa<clang::Expr>(&Stmt) &&
+         "SAFuncContext.addExprOrStmt: Instruction has uses but is not Expr?");
+  auto &Expr = llvm::cast<clang::Expr>(Stmt);
+  if (!llvm::isa<llvm::Instruction>(&v)) {
+    ExprMap[&v] = &Expr; // directly insert if not instruction
+    return;
+  }
+  auto &inst = *llvm::cast<llvm::Instruction>(&v);
+  if (onlyUsedInBlock(inst)) {
+    // Has one use and is in the same block
+    ExprMap[&v] = &Expr; // wait to be folded
+  } else {
+    // Create a local variable for it, in order to be faithful to the IR.
+    auto Name = (inst.hasName() && !SAContext::isKeyword(inst.getName()))
+                    ? inst.getName()
+                    : "temp_" + llvm::Twine(++tempVarID);
+
+    llvm::SmallString<128> Buf;
+    clang::IdentifierInfo *II2 =
+        &getASTContext().Idents.get(Name.toStringRef(Buf));
+    clang::VarDecl *decl = clang::VarDecl::Create(
+        getASTContext(), FD, clang::SourceLocation(), clang::SourceLocation(),
+        II2, TB.visitType(*inst.getType()), nullptr, clang::SC_None);
+    decl->setInit(&Expr);
+    clang::DeclStmt *DS = new (getASTContext())
+        clang::DeclStmt(clang::DeclGroupRef(decl), clang::SourceLocation(),
+                        clang::SourceLocation());
+
+    // clang::DeclRefExpr *ref = clang::DeclRefExpr::Create(
+    //     getASTContext(), clang::NestedNameSpecifierLoc(),
+    //     clang::SourceLocation(), decl, false,
+    //     clang::DeclarationNameInfo(II2, clang::SourceLocation()),
+    //     expr->getType(), clang::VK_LValue);
+    // // assign stmt
+    // clang::Stmt *DS = clang::BinaryOperator::Create(
+    //     getASTContext(), ref, expr, clang::BO_Assign,
+    //     expr->getType(), clang::VK_PRValue, clang::OK_Ordinary,
+    //     clang::SourceLocation(), clang::FPOptionsOverride());
+    block.appendStmt(DS);
+  }
+}
+
+clang::DeclRefExpr *makeDeclRefExpr(clang::ValueDecl *D,
+                                    bool RefersToEnclosingVariableOrCapture) {
+  clang::ASTContext &Ctx = D->getASTContext();
   clang::QualType Type = D->getType().getNonReferenceType();
 
   clang::DeclRefExpr *DR = clang::DeclRefExpr::Create(
@@ -101,7 +171,7 @@ void CFGBuilder::visitBinaryOperator(llvm::BinaryOperator &I) {
         Ctx, lhs, rhs, op.getValue(), visitType(*I.getType()),
         clang::VK_PRValue, clang::OK_Ordinary, clang::SourceLocation(),
         clang::FPOptionsOverride());
-    FCtx.addExpr(I, *binop);
+    addExprOrStmt(I, *binop);
     return;
   }
   llvm_unreachable("CFGBuilder.visitBinaryOperator: unexpected op type");
@@ -111,7 +181,7 @@ void CFGBuilder::visitReturnInst(llvm::ReturnInst &I) {
   clang::Stmt *ret;
   ret = clang::ReturnStmt::Create(Ctx, clang::SourceLocation(),
                                   EB.visitValue(I.getReturnValue()), nullptr);
-  FCtx.addStmt(I, *ret);
+  // addExprOrStmt(I, *ret);
   Blk->setTerminator(CFGTerminator(ret));
 }
 
@@ -197,6 +267,20 @@ bool usedInBlock(llvm::Instruction &inst, llvm::BasicBlock &bb) {
   return false;
 }
 
+bool onlyUsedInBlock(llvm::Instruction &inst) {
+  llvm::BasicBlock *BB = inst.getParent();
+  if (inst.hasOneUse()) {
+    for (llvm::User *U : inst.users()) {
+      if (llvm::Instruction *UI = llvm::dyn_cast<llvm::Instruction>(U)) {
+        if (UI->getParent() == BB) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 clang::StorageClass SAContext::getStorageClass(llvm::GlobalValue &GV) {
   return GV.isDeclaration() ? clang::SC_Extern
          : GV.getLinkage() == llvm::GlobalValue::LinkageTypes::InternalLinkage
@@ -220,7 +304,7 @@ void SAContext::createDecls() {
         TB.visitFunctionType(*F.getFunctionType(), EPI), nullptr,
         getStorageClass(F));
     getASTContext().getTranslationUnitDecl()->addDecl(FD);
-    funcDecls.insert(std::make_pair(&F, FD));
+    globalDecls.insert(std::make_pair(&F, FD));
   }
 }
 
@@ -252,60 +336,9 @@ void SAFuncContext::run() {
   FD->setPreviousDeclaration(PrevFD);
 
   for (llvm::BasicBlock &bb : func) {
-    // convert each instructions to stmt, and fill the StmtMap
-    auto block = Builder.run(bb);
-
-    // insert correct stmts to form a block.
-    // iterate all insts, if not referenced by any inst in current block, or
-    // has side effect, then put in the CFGBlock.
-    for (llvm::Instruction &inst : bb) {
-      if (inst.isTerminator()) {
-
-      } else if (isStmt(inst)) {
-        auto *stmt = getStmt(inst);
-        block->appendStmt(stmt);
-      } else if (isExpr(inst)) {
-        // check if the expr is used by other insts in the same block
-        if (!usedInBlock(inst, bb)) {
-          // if not used by other insts in the same block, then create a
-          // local variable for it, in order to be faithful to the IR.
-          auto *expr = getExpr(inst);
-          auto Name = (inst.hasName() && !SAContext::isKeyword(inst.getName()))
-                          ? inst.getName()
-                          : "temp_" + llvm::Twine(++tempVarID);
-
-          llvm::SmallString<128> Buf;
-          clang::IdentifierInfo *II2 =
-              &getASTContext().Idents.get(Name.toStringRef(Buf));
-          clang::VarDecl *decl = clang::VarDecl::Create(
-              getASTContext(), FD, clang::SourceLocation(),
-              clang::SourceLocation(), II2, TB.visitType(*inst.getType()),
-              nullptr, clang::SC_None);
-          decl->setInit(expr);
-          clang::DeclStmt *DS = new (getASTContext())
-              clang::DeclStmt(clang::DeclGroupRef(decl),
-                              clang::SourceLocation(), clang::SourceLocation());
-
-          // clang::DeclRefExpr *ref = clang::DeclRefExpr::Create(
-          //     getASTContext(), clang::NestedNameSpecifierLoc(),
-          //     clang::SourceLocation(), decl, false,
-          //     clang::DeclarationNameInfo(II2, clang::SourceLocation()),
-          //     expr->getType(), clang::VK_LValue);
-          // // assign stmt
-          // clang::Stmt *DS = clang::BinaryOperator::Create(
-          //     getASTContext(), ref, expr, clang::BO_Assign,
-          //     expr->getType(), clang::VK_PRValue, clang::OK_Ordinary,
-          //     clang::SourceLocation(), clang::FPOptionsOverride());
-          block->appendStmt(DS);
-        }
-      } else {
-        llvm::errs()
-            << __FILE__ << ":" << __LINE__ << ": "
-            << "ERROR: SAFuncContext::init: Instruction not converted: " << inst
-            << "\n";
-        std::abort();
-      }
-    }
+    // create initial CFGBlocks by converting each instructions (except for
+    // Terminators) to Clang AST
+    Builder.run(bb);
   }
 
   // connect the edges
@@ -361,6 +394,7 @@ void SAFuncContext::run() {
   auto CS = clang::CompoundStmt::Create(
       getASTContext(), Stmts, clang::SourceLocation(), clang::SourceLocation());
   FD->setBody(CS);
+  getASTContext().getTranslationUnitDecl()->addDecl(FD);
 }
 
 clang::Expr *ExprBuilder::visitValue(llvm::Value *Val) {
@@ -435,7 +469,10 @@ clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
 }
 
 clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C) {
-  if (llvm::ConstantInt *CI = llvm::dyn_cast<llvm::ConstantInt>(&C)) {
+  if (llvm::GlobalObject *GO = llvm::dyn_cast<llvm::GlobalObject>(&C)) {
+    // global variables and functions
+    return makeDeclRefExpr(FCtx.getSAContext().getGlobalDecl(*GO));
+  } else if (llvm::ConstantInt *CI = llvm::dyn_cast<llvm::ConstantInt>(&C)) {
     return clang::IntegerLiteral::Create(Ctx, CI->getValue(),
                                          visitType(*CI->getType()),
                                          clang::SourceLocation());

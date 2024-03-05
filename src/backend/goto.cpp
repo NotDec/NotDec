@@ -97,7 +97,7 @@ void Goto::execute() {
     // remove the block from the cfg
     CFG.erase(Current);
   }
-  simplityBlock(Entry);
+  simplifyBlock(Entry);
   // The exit block is set to the first stub block created. We currently do not
   // care about it.
 }
@@ -110,7 +110,7 @@ clang::Stmt *getStmt(CFGElement e) {
 }
 
 // remote all NullStmt and merge GotoStmt with LabelStmt
-void Goto::simplityBlock(CFGBlock &Block) {
+void Goto::simplifyBlock(CFGBlock &Block) {
   for (auto it = Block.begin(); it != Block.end();) {
     if (auto stmt = getStmt(*it)) {
       if (auto gotoStmt = llvm::dyn_cast<clang::GotoStmt>(stmt)) {

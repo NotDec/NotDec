@@ -4,6 +4,7 @@
 #include "backend/CFG.h"
 #include "optimizers/retdec-stack/retdec-utils.h"
 #include "utils.h"
+#include <cassert>
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
@@ -18,6 +19,8 @@
 #include <llvm/ADT/StringSet.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalObject.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
@@ -27,9 +30,17 @@
 
 namespace notdec::backend {
 
+// main interface
 void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &os);
 std::string printBasicBlock(const llvm::BasicBlock *b);
 std::string printFunction(const llvm::Function *F);
+
+// utility functions
+bool onlyUsedInBlock(llvm::Instruction &inst);
+bool usedInBlock(llvm::Instruction &inst, llvm::BasicBlock &bb);
+clang::DeclRefExpr *
+makeDeclRefExpr(clang::ValueDecl *D,
+                bool RefersToEnclosingVariableOrCapture = false);
 
 template <class SetTy>
 clang::IdentifierInfo *getNewIdentifierInfo(SetTy &Names,
@@ -119,8 +130,6 @@ public:
 class SAFuncContext {
   SAContext &ctx;
   llvm::Function &func;
-  // map from llvm inst to clang stmt
-  std::map<llvm::Value *, clang::Stmt *> StmtMap;
   // map from llvm inst to clang expr
   std::map<llvm::Value *, clang::Expr *> ExprMap;
   // map from llvm block to CFGBlock. Store the iterator to facilitate deletion
@@ -138,6 +147,8 @@ class SAFuncContext {
 public:
   SAFuncContext(SAContext &ctx, llvm::Function &func);
 
+  // Main interface for CFGBuilder to add an expression for an instruction.
+  void addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt, CFGBlock &block);
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
     return getNewIdentifierInfo(*Names, getASTContext().Idents, Name);
   }
@@ -148,11 +159,7 @@ public:
   class CFG &getCFG() { return *Cfg; }
   TypeBuilder &getTypeBuilder() { return TB; }
   bool isExpr(llvm::Value &v) { return ExprMap.count(&v) > 0; }
-  bool isStmt(llvm::Value &v) { return StmtMap.count(&v) > 0; }
-  clang::Stmt *getStmt(llvm::Value &v) { return StmtMap.at(&v); }
-  void addStmt(llvm::Value &v, clang::Stmt &s) { StmtMap[&v] = &s; }
   clang::Expr *getExpr(llvm::Value &v) { return ExprMap.at(&v); }
-  void addExpr(llvm::Value &v, clang::Expr &s) { ExprMap[&v] = &s; }
   CFG::iterator &getBlock(llvm::BasicBlock &bb) { return ll2cfg.at(&bb); }
   CFG::iterator createBlock(llvm::BasicBlock &bb) {
     CFG::iterator b = getCFG().createBlock();
@@ -169,7 +176,9 @@ class SAContext {
 protected:
   llvm::Module &M;
   std::map<llvm::Function *, SAFuncContext> funcContexts;
-  std::map<llvm::Function *, clang::FunctionDecl *> funcDecls;
+  // Stores the mapping from llvm global object to clang decls for Functions and
+  // GlobalVariables.
+  std::map<llvm::GlobalObject *, clang::ValueDecl *> globalDecls;
 
   // Clang AST should be placed first, so that it is initialized first.
   std::unique_ptr<clang::ASTUnit> ASTunit;
@@ -206,7 +215,13 @@ public:
     return funcContexts.at(&func);
   }
   clang::FunctionDecl *getFunctionDecl(llvm::Function &F) {
-    return funcDecls.at(&F);
+    return llvm::cast<clang::FunctionDecl>(globalDecls.at(&F));
+  }
+  clang::VarDecl *getGlobalVarDecl(llvm::GlobalVariable &GV) {
+    return llvm::cast<clang::VarDecl>(globalDecls.at(&GV));
+  }
+  clang::ValueDecl *getGlobalDecl(llvm::GlobalObject &GO) {
+    return globalDecls.at(&GO);
   }
 
   static const llvm::StringSet<> Keywords;
@@ -273,6 +288,11 @@ protected:
   }
   clang::QualType makeUnsigned(clang::QualType Ty) {
     return FCtx.getTypeBuilder().makeUnsigned(Ty);
+  }
+
+  void addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt) {
+    assert(Blk != nullptr && "Block can't be null!");
+    FCtx.addExprOrStmt(v, Stmt, *Blk);
   }
 
 public:
@@ -375,9 +395,6 @@ public:
   clang::Expr *castSigned(clang::Expr *E);
   /// Ensure the expression is unsigned, or insert a cast.
   clang::Expr *castUnsigned(clang::Expr *E);
-  clang::DeclRefExpr *
-  makeDeclRefExpr(clang::ValueDecl *D,
-                  bool RefersToEnclosingVariableOrCapture = false);
   clang::ImplicitCastExpr *
   makeImplicitCast(clang::Expr *Arg, clang::QualType Ty, clang::CastKind CK) {
     return clang::ImplicitCastExpr::Create(
