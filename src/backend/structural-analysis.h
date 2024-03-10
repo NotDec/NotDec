@@ -16,8 +16,10 @@
 #include <clang/Basic/Specifiers.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/BitVector.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalObject.h>
 #include <llvm/IR/GlobalVariable.h>
@@ -41,24 +43,63 @@ bool usedInBlock(llvm::Instruction &inst, llvm::BasicBlock &bb);
 clang::DeclRefExpr *
 makeDeclRefExpr(clang::ValueDecl *D,
                 bool RefersToEnclosingVariableOrCapture = false);
+struct ValueNamer {
+  llvm::SmallString<128> Buf;
+  unsigned int FuncCount = 0;
+  unsigned int StructCount = 0;
+  unsigned int GlobCount = 0;
+  llvm::StringRef getBlockName(llvm::BasicBlock &Val, unsigned int id) {
+    return getValueName(Val, "block_", id);
+  }
+  llvm::StringRef getFuncName(llvm::Function &Val) {
+    return getValueName(Val, "func_", FuncCount);
+  }
+  llvm::StringRef getGlobName(llvm::GlobalVariable &Val) {
+    return getValueName(Val, "global_", GlobCount);
+  }
+  llvm::StringRef getStructName(llvm::StructType &Ty) {
+    return getTypeName(Ty, "struct_", StructCount);
+  }
+  llvm::StringRef getFieldName(unsigned int id) {
+    Buf.clear();
+    llvm::raw_svector_ostream OS(Buf);
+    OS << "field_" << id;
+    return OS.str();
+  }
+
+protected:
+  llvm::StringRef getTypeName(llvm::StructType &Ty, const char *prefix,
+                              unsigned int &id);
+  llvm::StringRef getValueName(llvm::Value &Val, const char *prefix,
+                               unsigned int &id);
+};
 
 template <class SetTy>
 clang::IdentifierInfo *getNewIdentifierInfo(SetTy &Names,
                                             clang::IdentifierTable &Idents,
                                             llvm::StringRef Name);
 
+clang::IdentifierInfo *getGlobalIdentifierInfo(clang::ASTContext &Ctx,
+                                               llvm::StringRef Name);
+
 class SAContext;
 class SAFuncContext;
 
 class TypeBuilder {
   clang::ASTContext &Ctx;
+  // For creating names for structs.
+  ValueNamer *VN = nullptr;
+  // Map from llvm struct type to clang RecordDecl type.
+  std::map<llvm::Type *, clang::Decl *> typeMap;
 
 public:
-  TypeBuilder(clang::ASTContext &Ctx) : Ctx(Ctx) {}
+  TypeBuilder(clang::ASTContext &Ctx, ValueNamer &VN) : Ctx(Ctx), VN(&VN) {}
+  clang::RecordDecl *createRecordDecl(llvm::StructType &Ty);
+  clang::QualType visitStructType(llvm::StructType &Ty);
   clang::QualType visitType(llvm::Type &Ty);
   clang::QualType
   visitFunctionType(llvm::FunctionType &Ty,
-                    clang::FunctionProtoType::ExtProtoInfo &EPI);
+                    const clang::FunctionProtoType::ExtProtoInfo &EPI);
   clang::QualType makeSigned(clang::QualType Ty) {
     auto qty = Ty->getCanonicalTypeInternal();
     if (const auto *BT = llvm::dyn_cast<clang::BuiltinType>(qty)) {
@@ -126,10 +167,42 @@ public:
   }
 };
 
+/// Build an expression that refers to the IR value. It does not create stmts
+/// for instructions or IR expressions.
+///
+/// To have a comprehensive IR value visitor, refer to Value class hierarchy
+/// https://llvm.org/doxygen/classllvm_1_1Value.html and
+/// llvm/lib/IR/Verifier.cpp.
+///
+/// Don't use interfaces like visit(Inst), because we need to check for cache
+/// first.
+class ExprBuilder : public llvm::InstVisitor<ExprBuilder, clang::Expr *> {
+protected:
+  SAFuncContext *FCtx = nullptr; // TODO only reference part of the context
+  SAContext &SCtx;
+  clang::ASTContext &Ctx;
+  TypeBuilder &TB;
+
+  clang::Expr *visitConstant(llvm::Constant &I,
+                             clang::QualType Ty = clang::QualType());
+  clang::QualType visitType(llvm::Type &Ty) { return TB.visitType(Ty); }
+
+public:
+  ExprBuilder(SAContext &SCtx, clang::ASTContext &Ctx, TypeBuilder &TB)
+      : SCtx(SCtx), Ctx(Ctx), TB(TB) {}
+  ExprBuilder(SAFuncContext &FCtx);
+  clang::Expr *visitInstruction(llvm::Instruction &I) { return nullptr; }
+  // The main interface to convert a llvm::Value to Expr.
+  clang::Expr *visitValue(llvm::Value *Val,
+                          clang::QualType Ty = clang::QualType());
+  clang::Expr *visitInitializer(llvm::Value *Val, clang::QualType Ty);
+  clang::Expr *createCompoundLiteralExpr(llvm::Value *Val);
+};
+
 /// Structural analysis context for a function.
 class SAFuncContext {
   SAContext &ctx;
-  llvm::Function &func;
+  llvm::Function &Func;
   // map from llvm inst to clang expr
   std::map<llvm::Value *, clang::Expr *> ExprMap;
   // map from llvm block to CFGBlock. Store the iterator to facilitate deletion
@@ -153,7 +226,7 @@ public:
     return getNewIdentifierInfo(*Names, getASTContext().Idents, Name);
   }
   clang::FunctionDecl *getFunctionDecl() { return FD; }
-  llvm::Function &getFunction() { return func; }
+  llvm::Function &getFunction() { return Func; }
   SAContext &getSAContext() { return ctx; }
   clang::ASTContext &getASTContext();
   class CFG &getCFG() { return *Cfg; }
@@ -184,25 +257,27 @@ protected:
   std::unique_ptr<clang::ASTUnit> ASTunit;
 
   TypeBuilder TB;
+  ValueNamer VN;
+  ExprBuilder EB; // for building initialize exprs
 
 public:
   // The usage of `clang::tooling::buildASTFromCode` follows llvm
   // unittests/Analysis/CFGTest.cpp, so we don't need to create ASTContext.
   SAContext(llvm::Module &mod)
       : M(mod), ASTunit(clang::tooling::buildASTFromCode("", "decompiled.c")),
-        TB(getASTContext()) {
+        TB(getASTContext(), VN), EB(*this, getASTContext(), TB) {
     // TODO: set target arch by cmdline or input arch, so that TargetInfo is set
     // and int width is correct.
   }
   void createDecls();
 
   clang::ASTContext &getASTContext() { return ASTunit->getASTContext(); }
+  ValueNamer &getValueNamer() { return VN; }
   TypeBuilder &getTypeBuilder() { return TB; }
 
   static clang::StorageClass getStorageClass(llvm::GlobalValue &GV);
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
-    auto &Idents = getASTContext().Idents;
-    return getNewIdentifierInfo(Idents, Idents, Name);
+    return getGlobalIdentifierInfo(getASTContext(), Name);
   }
 
   /// A new context is created if not exist
@@ -241,32 +316,7 @@ public:
   virtual void execute() = 0;
   clang::LabelDecl *getBlockLabel(CFGBlock *blk);
   void mergeBlock(llvm::BasicBlock &bb, llvm::BasicBlock &next);
-};
-
-/// Build an expression that refers to the IR value. It does not create stmts
-/// for instructions or IR expressions.
-///
-/// To have a comprehensive IR value visitor, refer to Value class hierarchy
-/// https://llvm.org/doxygen/classllvm_1_1Value.html and
-/// llvm/lib/IR/Verifier.cpp.
-///
-/// Don't use interfaces like visit(Inst), because we need to check for cache
-/// first.
-class ExprBuilder : public llvm::InstVisitor<ExprBuilder, clang::Expr *> {
-protected:
-  clang::ASTContext &Ctx;
-  SAFuncContext &FCtx; // TODO only reference part of the context
-
-  clang::Expr *visitConstant(llvm::Constant &I);
-  clang::QualType visitType(llvm::Type &Ty) {
-    return FCtx.getTypeBuilder().visitType(Ty);
-  }
-
-public:
-  ExprBuilder(SAFuncContext &FCtx);
-  clang::Expr *visitInstruction(llvm::Instruction &I) { return nullptr; }
-  // The main interface to convert a llvm::Value to Expr.
-  clang::Expr *visitValue(llvm::Value *Val);
+  ValueNamer &getValueNamer() { return ctx.getSAContext().getValueNamer(); }
 };
 
 /// Convert visited instructions and register the result to the expr or

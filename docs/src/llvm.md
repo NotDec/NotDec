@@ -146,3 +146,10 @@ BumpVectorContext存储了一个`llvm::PointerIntPair<llvm::BumpPtrAllocator*, 1
 Clang CFG内置了一个BumpVectorContext，解构时会释放所有内存。因此在结构分析过程中，CFG相关的基本块虽然出现创建后又删除的情况，但不会导致内存泄露。 TODO: 一些临时的AST节点，如一些临时的Goto语句，它们的内存释放怎么办？
 
 这次在BumpVector里增加的erase函数，仅把元素移动到末尾然后解构，和内存泄露应该无关。
+
+**clang::QualType**
+
+QualType 本质上就是一个指针，同时复用了低位的bit位，存储一些qualifier信息，如volatile等修饰符。
+- QualType大部分情况下可以看作是clang::Type*
+- QualType有可能为空指针，同时也可以直接创建空的QualType
+

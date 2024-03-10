@@ -6,16 +6,23 @@
 #include "utils.h"
 #include <cassert>
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/Comment.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
+#include <clang/AST/OperationKinds.h>
+#include <clang/AST/RawCommentList.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Type.h>
 #include <clang/Analysis/CFG.h>
+#include <clang/Basic/LLVM.h>
 #include <clang/Basic/LangOptions.h>
+#include <clang/Basic/SourceLocation.h>
 #include <clang/Basic/Specifiers.h>
+#include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalObject.h>
@@ -37,7 +44,7 @@ void CFGBuilder::visitCallInst(llvm::CallInst &I) {
     assert(Args[i] != nullptr && "CFGBuilder.visitCallInst: Args[i] is null?");
   }
   llvm::Function *Callee = I.getCalledFunction();
-  clang::QualType *ret;
+  clang::QualType ret;
   clang::Expr *FRef;
   if (Callee != nullptr) {
     auto FD = FCtx.getSAContext().getFunctionDecl(*Callee);
@@ -47,6 +54,7 @@ void CFGBuilder::visitCallInst(llvm::CallInst &I) {
       Ty = Ctx.getPointerType(Ty.getNonReferenceType());
       FRef = makeImplicitCast(FRef, Ty, clang::CK_FunctionToPointerDecay);
     }
+    ret = FD->getReturnType();
   } else {
     // Function pointer call
     // TODO: double check
@@ -57,9 +65,12 @@ void CFGBuilder::visitCallInst(llvm::CallInst &I) {
            CalleeExpr->getType()->getPointeeType()->isFunctionType() &&
            "CallInst operand is not a function pointer?");
     FRef = CalleeExpr;
+    ret =
+        llvm::cast<clang::FunctionType>(CalleeExpr->getType()->getPointeeType())
+            ->getReturnType();
   }
   // TODO? CallExpr type is function return type or not?
-  auto Call = clang::CallExpr::Create(Ctx, FRef, Args, *ret, clang::VK_PRValue,
+  auto Call = clang::CallExpr::Create(Ctx, FRef, Args, ret, clang::VK_PRValue,
                                       clang::SourceLocation(),
                                       clang::FPOptionsOverride());
 
@@ -210,8 +221,15 @@ clang::IdentifierInfo *getNewIdentifierInfo(T &Names,
   return &Idents.get(Name);
 }
 
+clang::IdentifierInfo *getGlobalIdentifierInfo(clang::ASTContext &Ctx,
+                                               llvm::StringRef Name) {
+  auto &Idents = Ctx.Idents;
+  return getNewIdentifierInfo(Idents, Idents, Name);
+}
+
 ExprBuilder::ExprBuilder(SAFuncContext &FCtx)
-    : Ctx(FCtx.getASTContext()), FCtx(FCtx) {}
+    : FCtx(&FCtx), SCtx(FCtx.getSAContext()), Ctx(FCtx.getASTContext()),
+      TB(FCtx.getTypeBuilder()) {}
 
 clang::ASTContext &SAFuncContext::getASTContext() {
   return ctx.getASTContext();
@@ -289,13 +307,26 @@ clang::StorageClass SAContext::getStorageClass(llvm::GlobalValue &GV) {
 }
 
 void SAContext::createDecls() {
-  // for (llvm::GlobalVariable &GV : M.globals()) {
-  //   llvm::errs() << "Global Variable: " << GV.getName() << "\n";
-  // }
+
+  // visit all type definitions
+  for (llvm::StructType *Ty : M.getIdentifiedStructTypes()) {
+    llvm::errs() << "Visiting: " << *Ty << "\n";
+    // create a RecordDecl in place.
+    TB.createRecordDecl(*Ty);
+  }
+
+  // TODO: add comments
+  // getASTContext().addComment(
+  //     clang::RawComment(getASTContext().getSourceManager(),
+  //                       clang::SourceRange(), clang::CommentOptions(),
+  //                       false));
+
+  // create function decls
   for (llvm::Function &F : M) {
     // llvm::errs() << "Function: " << F.getName() << "\n";
     // create function decl
-    clang::IdentifierInfo *II = getIdentifierInfo(F.getName());
+    clang::IdentifierInfo *II =
+        getIdentifierInfo(getValueNamer().getFuncName(F));
     clang::FunctionProtoType::ExtProtoInfo EPI;
     EPI.Variadic = F.isVarArg();
     clang::FunctionDecl *FD = clang::FunctionDecl::Create(
@@ -306,12 +337,34 @@ void SAContext::createDecls() {
     getASTContext().getTranslationUnitDecl()->addDecl(FD);
     globalDecls.insert(std::make_pair(&F, FD));
   }
+
+  // create global variable decls
+  for (llvm::GlobalVariable &GV : M.globals()) {
+    clang::IdentifierInfo *II =
+        getIdentifierInfo(getValueNamer().getGlobName(GV));
+    auto Ty = TB.visitType(*GV.getValueType());
+    clang::VarDecl *VD = clang::VarDecl::Create(
+        getASTContext(), getASTContext().getTranslationUnitDecl(),
+        clang::SourceLocation(), clang::SourceLocation(), II, Ty, nullptr,
+        getStorageClass(GV));
+
+    getASTContext().getTranslationUnitDecl()->addDecl(VD);
+    globalDecls.insert(std::make_pair(&GV, VD));
+  }
+
+  // create global variable initializers
+  for (llvm::GlobalVariable &GV : M.globals()) {
+    auto VD = getGlobalVarDecl(GV);
+    if (GV.hasInitializer()) {
+      VD->setInit(EB.visitInitializer(GV.getInitializer(), VD->getType()));
+    }
+  }
 }
 
 void SAFuncContext::run() {
   // will not run over declaration
-  assert(!func.isDeclaration());
-  auto PrevFD = ctx.getFunctionDecl(func);
+  assert(!Func.isDeclaration());
+  auto PrevFD = ctx.getFunctionDecl(Func);
   assert(PrevFD != nullptr && "SAFuncContext::run: FunctionDecl is null, not "
                               "created by `SAContext::createDecls`?");
   // 1. build the CFGBlocks
@@ -325,24 +378,25 @@ void SAFuncContext::run() {
   assert(&*Exit == &Cfg->getExit());
 
   // create function decl again, and set the previous declaration.
-  clang::IdentifierInfo *II = ctx.getIdentifierInfo(func.getName());
+  clang::IdentifierInfo *II =
+      ctx.getIdentifierInfo(getSAContext().getValueNamer().getFuncName(Func));
   clang::FunctionProtoType::ExtProtoInfo EPI;
-  EPI.Variadic = func.isVarArg();
+  EPI.Variadic = Func.isVarArg();
   FD = clang::FunctionDecl::Create(
       getASTContext(), getASTContext().getTranslationUnitDecl(),
       clang::SourceLocation(), clang::SourceLocation(), II,
-      TB.visitFunctionType(*func.getFunctionType(), EPI), nullptr,
-      SAContext::getStorageClass(func));
+      TB.visitFunctionType(*Func.getFunctionType(), EPI), nullptr,
+      SAContext::getStorageClass(Func));
   FD->setPreviousDeclaration(PrevFD);
 
-  for (llvm::BasicBlock &bb : func) {
+  for (llvm::BasicBlock &bb : Func) {
     // create initial CFGBlocks by converting each instructions (except for
     // Terminators) to Clang AST
     Builder.run(bb);
   }
 
   // connect the edges
-  for (llvm::BasicBlock &bb : func) {
+  for (llvm::BasicBlock &bb : Func) {
     for (auto succ : llvm::successors(&bb)) {
       auto src = getBlock(bb);
       auto dst = getBlock(*succ);
@@ -351,7 +405,7 @@ void SAFuncContext::run() {
   }
 
   if (LogLevel >= level_debug) {
-    llvm::errs() << "========" << func.getName() << ": "
+    llvm::errs() << "========" << Func.getName() << ": "
                  << "Before Structural Analysis ========"
                  << "\n";
     Cfg->dump(getASTContext().getLangOpts(), true);
@@ -362,7 +416,7 @@ void SAFuncContext::run() {
   SA.execute();
 
   if (LogLevel >= level_debug) {
-    llvm::errs() << "========" << func.getName() << ": "
+    llvm::errs() << "========" << Func.getName() << ": "
                  << "After Structural Analysis ========"
                  << "\n";
     Cfg->dump(getASTContext().getLangOpts(), true);
@@ -397,18 +451,29 @@ void SAFuncContext::run() {
   getASTContext().getTranslationUnitDecl()->addDecl(FD);
 }
 
-clang::Expr *ExprBuilder::visitValue(llvm::Value *Val) {
+clang::Expr *ExprBuilder::createCompoundLiteralExpr(llvm::Value *Val) {
+  auto ObjTy = TB.visitType(*Val->getType());
+  clang::Expr *ret = new (Ctx) clang::CompoundLiteralExpr(
+      clang::SourceLocation(), Ctx.getTrivialTypeSourceInfo(ObjTy), ObjTy,
+      clang::VK_LValue, visitValue(Val), false);
+  ret = clang::ImplicitCastExpr::Create(Ctx, ObjTy, clang::CK_LValueToRValue,
+                                        ret, nullptr, clang::VK_PRValue,
+                                        clang::FPOptionsOverride());
+  return ret;
+}
+
+clang::Expr *ExprBuilder::visitValue(llvm::Value *Val, clang::QualType Ty) {
   if (Val == nullptr) {
     return nullptr;
   }
-  // cache
-  if (FCtx.isExpr(*Val)) {
-    return FCtx.getExpr(*Val);
+  // Check for ExprMap
+  if (FCtx != nullptr && FCtx->isExpr(*Val)) {
+    return FCtx->getExpr(*Val);
   }
   if (llvm::Instruction *Inst = llvm::dyn_cast<llvm::Instruction>(Val)) {
     return visit(*Inst);
   } else if (llvm::Constant *C = llvm::dyn_cast<llvm::Constant>(Val)) {
-    return visitConstant(*C);
+    return visitConstant(*C, Ty);
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "UnImplemented: ExprBuilder.visitValue cannot handle: "
@@ -417,9 +482,8 @@ clang::Expr *ExprBuilder::visitValue(llvm::Value *Val) {
   }
 }
 
-clang::QualType
-TypeBuilder::visitFunctionType(llvm::FunctionType &Ty,
-                               clang::FunctionProtoType::ExtProtoInfo &EPI) {
+clang::QualType TypeBuilder::visitFunctionType(
+    llvm::FunctionType &Ty, const clang::FunctionProtoType::ExtProtoInfo &EPI) {
   llvm::SmallVector<clang::QualType, 16> Args(Ty.getNumParams());
   for (unsigned i = 0; i < Ty.getNumParams(); i++) {
     Args[i] = visitType(*Ty.getParamType(i));
@@ -428,18 +492,61 @@ TypeBuilder::visitFunctionType(llvm::FunctionType &Ty,
   return Ctx.getFunctionType(RetTy, Args, EPI);
 }
 
-clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
-  if (Ty.isFunctionTy()) {
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "ERROR: TypeBuilder::visitType cannot handle FunctionTy, "
-                    "use visitFunctionType instead: "
-                 << Ty << "\n";
-    std::abort();
+clang::RecordDecl *TypeBuilder::createRecordDecl(llvm::StructType &Ty) {
+  clang::IdentifierInfo *II = nullptr;
+  if (Ty.hasName()) {
+    II = getGlobalIdentifierInfo(Ctx, VN->getStructName(Ty));
   }
-  // else if (Ty.isStructTy()) {
-  //   return visitStructType(Ty);
-  // }
-  // for simple primitive types
+  clang::RecordDecl *decl = clang::RecordDecl::Create(
+      Ctx, clang::TagDecl::TagKind::TTK_Struct, Ctx.getTranslationUnitDecl(),
+      clang::SourceLocation(), clang::SourceLocation(), II);
+  // save to map early so that recursive pointers are allowed, for example:
+  // `struct A { struct A *a; };`
+  typeMap[&Ty] = decl;
+  decl->startDefinition();
+  for (unsigned i = 0; i < Ty.getNumElements(); i++) {
+    auto FieldTy = visitType(*Ty.getElementType(i));
+    // TODO handle field name.
+    clang::IdentifierInfo *FieldII =
+        getGlobalIdentifierInfo(Ctx, VN->getFieldName(i));
+    clang::FieldDecl *FieldDecl = clang::FieldDecl::Create(
+        Ctx, decl, clang::SourceLocation(), clang::SourceLocation(), FieldII,
+        FieldTy, nullptr, nullptr, false, clang::ICIS_NoInit);
+    decl->addDecl(FieldDecl);
+  }
+  decl->completeDefinition();
+  Ctx.getTranslationUnitDecl()->addDecl(decl);
+  return decl;
+}
+
+clang::QualType TypeBuilder::visitStructType(llvm::StructType &Ty) {
+  // return if is cached in type map
+  if (typeMap.find(&Ty) != typeMap.end()) {
+    clang::RecordDecl *decl = llvm::cast<clang::RecordDecl>(typeMap[&Ty]);
+    return Ctx.getRecordType(decl);
+  }
+  assert(Ty.isLiteral() && "TypeBuilder.visitStructType: Non-literal type "
+                           "should be visited ahead of time!");
+  // create a RecordDecl in place.
+  auto decl = createRecordDecl(Ty);
+  return Ctx.getRecordType(decl);
+}
+
+clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
+  if (Ty.isPointerTy()) {
+    return Ctx.getPointerType(visitType(*Ty.getPointerElementType()));
+  } else if (Ty.isFunctionTy()) {
+    return visitFunctionType(llvm::cast<llvm::FunctionType>(Ty),
+                             clang::FunctionProtoType::ExtProtoInfo());
+  } else if (Ty.isArrayTy()) {
+    return Ctx.getConstantArrayType(visitType(*Ty.getArrayElementType()),
+                                    llvm::APInt(32, Ty.getArrayNumElements()),
+                                    nullptr, clang::ArrayType::Normal, 0);
+  } else if (Ty.isStructTy()) {
+    auto StructTy = llvm::cast<llvm::StructType>(&Ty);
+    return visitStructType(*StructTy);
+  }
+  // simple primitive types
   if (Ty.isFloatTy()) {
     return Ctx.FloatTy;
   } else if (Ty.isDoubleTy()) {
@@ -468,10 +575,43 @@ clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
   }
 }
 
-clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C) {
+// This is separated because zero initializer requires type information
+clang::Expr *ExprBuilder::visitInitializer(llvm::Value *Val,
+                                           clang::QualType Ty) {
+
+  return visitValue(Val, Ty);
+}
+
+clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
   if (llvm::GlobalObject *GO = llvm::dyn_cast<llvm::GlobalObject>(&C)) {
     // global variables and functions
-    return makeDeclRefExpr(FCtx.getSAContext().getGlobalDecl(*GO));
+    return makeDeclRefExpr(SCtx.getGlobalDecl(*GO));
+  } else if (llvm::ConstantAggregate *CA =
+                 llvm::dyn_cast<llvm::ConstantAggregate>(&C)) {
+    // struct and array
+    llvm::SmallVector<clang::Expr *> vec(CA->getNumOperands());
+    for (unsigned i = 0; i < CA->getNumOperands(); i++) {
+      vec[i] = visitValue(CA->getOperand(i));
+    }
+    return new (Ctx) clang::InitListExpr(Ctx, clang::SourceLocation(), vec,
+                                         clang::SourceLocation());
+  } else if (llvm::ConstantAggregateZero *CAZ =
+                 llvm::dyn_cast<llvm::ConstantAggregateZero>(&C)) {
+    assert(!Ty.isNull() && "ExprBuilder.visitConstant: Ty is null?");
+    auto ret = new (Ctx) clang::InitListExpr(Ctx, clang::SourceLocation(), {},
+                                             clang::SourceLocation());
+    ret->setArrayFiller(new (Ctx) clang::ImplicitValueInitExpr(Ty));
+    return ret;
+    // We create ImplicitValueInitExpr for zero initializer but it requires type
+    // information, so use visitInitializer instead
+    // llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+    //              << "Error: ExprBuilder.visitConstant cannot handle "
+    //                 "ConstantAggregateZero, use visitInitializer instead.\n";
+  } else if (llvm::ConstantPointerNull *CPN =
+                 llvm::dyn_cast<llvm::ConstantPointerNull>(&C)) {
+    // TODO insert a ImplicitCastExpr<NullToPointer> to corresponding type?
+    return clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 0, false),
+                                         Ctx.IntTy, clang::SourceLocation());
   } else if (llvm::ConstantInt *CI = llvm::dyn_cast<llvm::ConstantInt>(&C)) {
     return clang::IntegerLiteral::Create(Ctx, CI->getValue(),
                                          visitType(*CI->getType()),
@@ -495,12 +635,8 @@ clang::LabelDecl *IStructuralAnalysis::getBlockLabel(CFGBlock *Blk) {
   } else {
     auto &astCtx = ctx.getASTContext();
     auto bb = ctx.getBlock(*Blk);
-    auto Name = (bb->hasName() && !SAContext::isKeyword(bb->getName()))
-                    ? bb->getName()
-                    : "block_" + llvm::Twine(Blk->getBlockID());
-    // create the label
-    llvm::SmallString<128> Buf;
-    clang::IdentifierInfo *II = ctx.getIdentifierInfo(Name.toStringRef(Buf));
+    clang::IdentifierInfo *II = ctx.getIdentifierInfo(
+        getValueNamer().getBlockName(*bb, Blk->getBlockID()));
     auto LabelDecl = clang::LabelDecl::Create(astCtx, ctx.getFunctionDecl(),
                                               clang::SourceLocation(), II);
     // create LabelStmt
@@ -513,9 +649,31 @@ clang::LabelDecl *IStructuralAnalysis::getBlockLabel(CFGBlock *Blk) {
 }
 
 SAFuncContext::SAFuncContext(SAContext &ctx, llvm::Function &func)
-    : ctx(ctx), func(func), TB(ctx.getTypeBuilder()) {
+    : ctx(ctx), Func(func), TB(ctx.getTypeBuilder()) {
   Cfg = std::make_unique<CFG>();
   Names = std::make_unique<llvm::StringSet<>>();
+}
+
+llvm::StringRef ValueNamer::getValueName(llvm::Value &Val, const char *prefix,
+                                         unsigned int &id) {
+  if (Val.hasName() && !SAContext::isKeyword(Val.getName())) {
+    return Val.getName();
+  }
+  Buf.clear();
+  llvm::raw_svector_ostream OS(Buf);
+  OS << prefix << FuncCount++;
+  return OS.str();
+}
+
+llvm::StringRef ValueNamer::getTypeName(llvm::StructType &Ty,
+                                        const char *prefix, unsigned int &id) {
+  if (Ty.hasName() && !SAContext::isKeyword(Ty.getName())) {
+    return Ty.getName();
+  }
+  Buf.clear();
+  llvm::raw_svector_ostream OS(Buf);
+  OS << prefix << FuncCount++;
+  return OS.str();
 }
 
 } // namespace notdec::backend

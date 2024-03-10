@@ -216,6 +216,30 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 
 ### 指令处理
 
+**ConstantExpression**
+
+- 常量数组，常量结构体
+  - 直接的对应是[Compound literals](https://en.cppreference.com/w/c/language/compound_literal)再内置InitListExpr。但它会创建一个匿名对象，所以大部分情况还是不会转成它的。
+    - 如果是在初始化变量，则直接转换成纯InitListExpr。
+    - （暂未实现）如果在其他地方（如指令里）用到了，同时是递归的最外层，则
+      - 结构体转换成ImplicitCastExpr(LValueToRValue) + Compound Literal + InitListExpr。
+      - 数组转换成ImplicitCastExpr(ArrayToPointerDecay) + CompoundLiteralExpr(array) + InitListExpr。
+    - 如果是递归创建内部的表达式，则只创建InitListExpr部分。
+  - 如果遇到了ConstantInitializerZero，则应该转换为`InitListExpr + array_filler: ImplicitValueInitExpr`
+  - 创建常量需要传入一个额外的类型：
+    - 创建ImplicitValueInitExpr需要设置类型。
+    - 创建Compound Literal也需要类型。
+- 结构体类型
+  - LLVM中预定义的结构体类型，提前遍历并存放好。维护一个从llvm type到RecordDecl的映射。
+  - LLVM中的Literal 结构体转换为C语言中的匿名结构体。
+    - 首先看当前llvm Type是否被映射和缓存，即该匿名结构体已经遇到过。
+    - 直接创建一个匿名RecordDecl，加入映射，并直接插入到TranslationUnitDecl里的当前位置。
+  - 结构体成员名字无法保存在IR中。（TODO，目前直接按顺序生成一个名字）
+    - 结构体的成员名字可以考虑保存在Meta data，如DebugInfo里
+    - 缺点：必须依附于这个类型的全局变量。不能直接依附到类型上。MataData只能依附于指令，函数等
+
+**BinaryOperator**
+
 - 加法：nsw，nuw。当溢出时会变成poison value。这个暂时不考虑。
 - 移位运算：逻辑移位对应C语言无符号数字的移位，算数移位对应有符号数字的移位。（根据[这里](https://stackoverflow.com/questions/7622/are-the-shift-operators-arithmetic-or-logical-in-c)）
 - TODO
@@ -225,4 +249,8 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 - CallInst:
   - Organize and maintain a map from llvm functions to Clang function declarations.
   - Handle function pointers: TODO
+
+**添加注释**
+
+添加注释不是简单地插入AST，因为Clang没有把注释这样管理，而是直接插入到ASTContext里面，而且要创建RawComment，而不是对应的语法树结构。没有找到将对应的Comment类插入进去的函数，应该需要自己实现。可能需要把字符串直接插入SourceManager里面，然后把sourceRange拿出来创建Comments。
 

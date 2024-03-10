@@ -6,4 +6,7 @@
 - Add more comments.
 - Write docs in English.
 
+**Backend**
+- make null pointer constant really NULL instead of 0.
+
 ## Changelog
