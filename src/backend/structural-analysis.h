@@ -24,6 +24,7 @@
 #include <llvm/IR/GlobalObject.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/InstVisitor.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
@@ -402,6 +403,85 @@ public:
     }
   }
 
+  Conversion getSignedness(llvm::CmpInst::Predicate op) {
+    switch (op) {
+    case llvm::CmpInst::ICMP_UGT:
+    case llvm::CmpInst::ICMP_UGE:
+    case llvm::CmpInst::ICMP_ULT:
+    case llvm::CmpInst::ICMP_ULE:
+      return Unsigned;
+    case llvm::CmpInst::ICMP_SGT:
+    case llvm::CmpInst::ICMP_SGE:
+    case llvm::CmpInst::ICMP_SLT:
+    case llvm::CmpInst::ICMP_SLE:
+      return Signed;
+    case llvm::CmpInst::ICMP_EQ:
+    case llvm::CmpInst::ICMP_NE:
+      return None;
+    default:
+      return None;
+    }
+  }
+
+  /// Convert the LLVM compare operator to Clang binary operator op.
+  clang::Optional<clang::BinaryOperatorKind>
+  convertOp(llvm::CmpInst::Predicate op) {
+    switch (op) {
+    case llvm::CmpInst::Predicate::ICMP_EQ:
+      return clang::BO_EQ;
+    case llvm::CmpInst::Predicate::ICMP_NE:
+      return clang::BO_NE;
+    case llvm::CmpInst::Predicate::ICMP_UGT:
+      return clang::BO_GT;
+    case llvm::CmpInst::Predicate::ICMP_UGE:
+      return clang::BO_GE;
+    case llvm::CmpInst::Predicate::ICMP_ULT:
+      return clang::BO_LT;
+    case llvm::CmpInst::Predicate::ICMP_ULE:
+      return clang::BO_LE;
+    case llvm::CmpInst::Predicate::ICMP_SGT:
+      return clang::BO_GT;
+    case llvm::CmpInst::Predicate::ICMP_SGE:
+      return clang::BO_GE;
+    case llvm::CmpInst::Predicate::ICMP_SLT:
+      return clang::BO_LT;
+    case llvm::CmpInst::Predicate::ICMP_SLE:
+      return clang::BO_LE;
+    case llvm::CmpInst::FCMP_FALSE:
+    case llvm::CmpInst::FCMP_TRUE:
+      llvm_unreachable("CFGBuilder.convertOp: FCMP_FALSE or FCMP_TRUE should "
+                       "be considered ahead of time.");
+    // TODO handle ordered and unordered comparison
+    // probably by converting unordered comparison to ordered comparison plus
+    // negation, or a function call.
+    case llvm::CmpInst::FCMP_OEQ:
+    case llvm::CmpInst::FCMP_UEQ:
+      return clang::BO_EQ;
+    case llvm::CmpInst::FCMP_OGT:
+    case llvm::CmpInst::FCMP_UGT:
+      return clang::BO_GT;
+    case llvm::CmpInst::FCMP_OGE:
+    case llvm::CmpInst::FCMP_UGE:
+      return clang::BO_GE;
+    case llvm::CmpInst::FCMP_OLT:
+    case llvm::CmpInst::FCMP_ULT:
+      return clang::BO_LT;
+    case llvm::CmpInst::FCMP_OLE:
+    case llvm::CmpInst::FCMP_ULE:
+      return clang::BO_LE;
+    case llvm::CmpInst::FCMP_ONE:
+    case llvm::CmpInst::FCMP_UNE:
+      return clang::BO_NE;
+    case llvm::CmpInst::FCMP_ORD:
+    case llvm::CmpInst::FCMP_UNO:
+      llvm::errs() << "CFGBuilder.convertOp: FCMP_ORD or FCMP_UNO handling "
+                      "not implemented\n";
+    case llvm::CmpInst::BAD_FCMP_PREDICATE:
+    case llvm::CmpInst::BAD_ICMP_PREDICATE:
+      return clang::None;
+    }
+  }
+
   /// Convert the LLVM binary operator to a Clang binary operator op.
   clang::Optional<clang::BinaryOperatorKind>
   convertOp(llvm::Instruction::BinaryOps op) {
@@ -462,6 +542,8 @@ public:
     // TODO create call statement to something like abort.
   }
   void visitCallInst(llvm::CallInst &I);
+  // visit compare insts
+  void visitCmpInst(llvm::CmpInst &I);
 
   CFGBuilder(SAFuncContext &FCtx)
       : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}

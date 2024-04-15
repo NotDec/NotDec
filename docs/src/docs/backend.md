@@ -216,6 +216,11 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 
 ### 指令处理
 
+**类型**
+
+- 将IR类型对应地带着指针类型转换，冗余的解引用和取地址使用窥孔优化消除：IR的全局变量对应它的指针类型，alloca对应局部变量的指针类型。
+  - 窥孔优化：clang没有自带的。根据ASTMatcher自己写一个吧。
+
 **ConstantExpression**
 
 - 常量数组，常量结构体
@@ -254,3 +259,9 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 
 添加注释不是简单地插入AST，因为Clang没有把注释这样管理，而是直接插入到ASTContext里面，而且要创建RawComment，而不是对应的语法树结构。没有找到将对应的Comment类插入进去的函数，应该需要自己实现。可能需要把字符串直接插入SourceManager里面，然后把sourceRange拿出来创建Comments。
 
+**Alloca指令**
+
+根据alloca指令是否在函数开头的必经之路（从entry遍历找到只有一个succ和pred的集合）上，将alloca分为动态alloca和静态alloca。
+
+- 静态Alloca：创建对应类型的变量。
+- 动态Alloca（很少）：TODO，转换为alloca函数调用

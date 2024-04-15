@@ -35,6 +35,44 @@ namespace notdec::backend {
 
 static int LogLevel = level_debug;
 
+void CFGBuilder::visitCmpInst(llvm::CmpInst &I) {
+  // handle FCMP_FALSE and FCMP_TRUE case
+  // TODO: return typedef TRUE and FALSE
+  if (I.getPredicate() == llvm::CmpInst::FCMP_FALSE) {
+    // create int 0
+    addExprOrStmt(
+        I, *clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 0, false),
+                                          Ctx.IntTy, clang::SourceLocation()));
+    return;
+  } else if (I.getPredicate() == llvm::CmpInst::FCMP_TRUE) {
+    addExprOrStmt(
+        I, *clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 1, false),
+                                          Ctx.IntTy, clang::SourceLocation()));
+    return;
+  }
+
+  clang::Optional<clang::BinaryOperatorKind> op = convertOp(I.getPredicate());
+  assert(op.hasValue() && "CFGBuilder.visitCmpInst: unexpected predicate");
+  Conversion cv = getSignedness(I.getPredicate());
+  clang::Expr *lhs = EB.visitValue(I.getOperand(0));
+  if (cv == Signed) {
+    lhs = castSigned(lhs);
+  } else if (cv == Unsigned) {
+    lhs = castUnsigned(lhs);
+  }
+  clang::Expr *rhs = EB.visitValue(I.getOperand(1));
+  if (cv == Signed) {
+    lhs = castSigned(lhs);
+  } else if (cv == Unsigned) {
+    lhs = castUnsigned(lhs);
+  }
+  clang::Expr *cmp = clang::BinaryOperator::Create(
+      Ctx, lhs, rhs, *op, visitType(*I.getType()), clang::VK_PRValue,
+      clang::OK_Ordinary, clang::SourceLocation(), clang::FPOptionsOverride());
+  addExprOrStmt(I, *cmp);
+  return;
+}
+
 void CFGBuilder::visitCallInst(llvm::CallInst &I) {
   // See also:
   // https://github.com/llvm/llvm-project/blob/d8e5a0c42bd8796cce9caa53aacab88c7cb2a3eb/clang/lib/Analysis/BodyFarm.cpp#L245
@@ -162,30 +200,27 @@ clang::Expr *CFGBuilder::castUnsigned(clang::Expr *E) {
 
 void CFGBuilder::visitBinaryOperator(llvm::BinaryOperator &I) {
   clang::Optional<clang::BinaryOperatorKind> op = convertOp(I.getOpcode());
-  if (op.hasValue()) {
-    Conversion cv = getSignedness(I.getOpcode());
-    // insert conversion if needed
-    clang::Expr *lhs = EB.visitValue(I.getOperand(0));
-    if (cv == Signed || cv == Arithmetic) {
-      lhs = castSigned(lhs);
-    } else if (cv == Unsigned || cv == Logical) {
-      lhs = castUnsigned(lhs);
-    }
-    clang::Expr *rhs = EB.visitValue(I.getOperand(1));
-    if (cv == Signed) {
-      rhs = castSigned(rhs);
-    } else if (cv == Unsigned) {
-      rhs = castUnsigned(rhs);
-    }
-
-    clang::Expr *binop = clang::BinaryOperator::Create(
-        Ctx, lhs, rhs, op.getValue(), visitType(*I.getType()),
-        clang::VK_PRValue, clang::OK_Ordinary, clang::SourceLocation(),
-        clang::FPOptionsOverride());
-    addExprOrStmt(I, *binop);
-    return;
+  assert(op.hasValue() && "CFGBuilder.visitBinaryOperator: unexpected op type");
+  Conversion cv = getSignedness(I.getOpcode());
+  // insert conversion if needed
+  clang::Expr *lhs = EB.visitValue(I.getOperand(0));
+  if (cv == Signed || cv == Arithmetic) {
+    lhs = castSigned(lhs);
+  } else if (cv == Unsigned || cv == Logical) {
+    lhs = castUnsigned(lhs);
   }
-  llvm_unreachable("CFGBuilder.visitBinaryOperator: unexpected op type");
+  clang::Expr *rhs = EB.visitValue(I.getOperand(1));
+  if (cv == Signed) {
+    rhs = castSigned(rhs);
+  } else if (cv == Unsigned) {
+    rhs = castUnsigned(rhs);
+  }
+
+  clang::Expr *binop = clang::BinaryOperator::Create(
+      Ctx, lhs, rhs, op.getValue(), visitType(*I.getType()), clang::VK_PRValue,
+      clang::OK_Ordinary, clang::SourceLocation(), clang::FPOptionsOverride());
+  addExprOrStmt(I, *binop);
+  return;
 }
 
 void CFGBuilder::visitReturnInst(llvm::ReturnInst &I) {
