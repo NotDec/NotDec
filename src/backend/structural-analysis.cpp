@@ -13,11 +13,14 @@
 #include <clang/AST/RawCommentList.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Type.h>
+#include <clang/ASTMatchers/ASTMatchFinder.h>
+#include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Analysis/CFG.h>
 #include <clang/Basic/LLVM.h>
 #include <clang/Basic/LangOptions.h>
 #include <clang/Basic/SourceLocation.h>
 #include <clang/Basic/Specifiers.h>
+#include <clang/Tooling/Transformer/RewriteRule.h>
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
@@ -28,6 +31,7 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalObject.h>
 #include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <utility>
@@ -51,19 +55,74 @@ bool isMustViaBlock(llvm::BasicBlock &bb) {
   return false;
 }
 
-void CFGBuilder::visitAllocInst(llvm::AllocaInst &I) {
+clang::Expr *addrOf(clang::ASTContext &Ctx, clang::Expr *E) {
+  // eliminate addrOf + deref
+  if (llvm::isa<clang::UnaryOperator>(E) &&
+      llvm::cast<clang::UnaryOperator>(E)->getOpcode() == clang::UO_Deref) {
+    return llvm::cast<clang::UnaryOperator>(E)->getSubExpr();
+  }
+  return clang::UnaryOperator::Create(Ctx, E, clang::UO_AddrOf, E->getType(),
+                                      clang::VK_LValue, clang::OK_Ordinary,
+                                      clang::SourceLocation(), false,
+                                      clang::FPOptionsOverride());
+}
+
+clang::Expr *deref(clang::ASTContext &Ctx, clang::Expr *E) {
+  // eliminate deref + addrOf
+  if (llvm::isa<clang::UnaryOperator>(E) &&
+      llvm::cast<clang::UnaryOperator>(E)->getOpcode() == clang::UO_AddrOf) {
+    return llvm::cast<clang::UnaryOperator>(E)->getSubExpr();
+  }
+  return clang::UnaryOperator::Create(Ctx, E, clang::UO_Deref, E->getType(),
+                                      clang::VK_LValue, clang::OK_Ordinary,
+                                      clang::SourceLocation(), false,
+                                      clang::FPOptionsOverride());
+}
+
+void CFGBuilder::visitAllocaInst(llvm::AllocaInst &I) {
   // check if the instruction is in the entry block.
   if (isMustViaBlock(*I.getParent())) {
     // create a local variable
-    // clang::VarDecl *VD = clang::VarDecl::Create(
-    //     Ctx, FCtx.getFunctionDecl(), clang::SourceLocation(),
-    //     clang::SourceLocation(), II, Ty, nullptr, getStorageClass(GV));
+    auto II = FCtx.getIdentifierInfo(
+        FCtx.getValueNamer().getTempName(I, &FCtx.getFunction()));
+    clang::VarDecl *VD = clang::VarDecl::Create(
+        Ctx, FCtx.getFunctionDecl(), clang::SourceLocation(),
+        clang::SourceLocation(), II,
+        FCtx.getTypeBuilder().visitType(*I.getAllocatedType()), nullptr,
+        clang::SC_None);
+
+    // Create a decl statement.
+    clang::DeclStmt *DS = new (Ctx)
+        clang::DeclStmt(clang::DeclGroupRef(VD), clang::SourceLocation(),
+                        clang::SourceLocation());
+    Blk->appendStmt(DS);
+    FCtx.getFunctionDecl()->addDecl(VD);
+    // When alloca is referenced, it refers to the address of the DeclRefExpr
+    auto addr = addrOf(Ctx, makeDeclRefExpr(VD));
+    addExprOrStmt(I, *addr);
   } else {
     // TODO create a alloca call
     llvm::errs() << "Warning: Dynamic stack allocation in "
                  << I.getParent()->getParent()->getName() << ": " << I << "\n";
     std::abort();
   }
+}
+
+void CFGBuilder::visitStoreInst(llvm::StoreInst &I) {
+  // store = assign + deref left.
+  clang::Expr *lhs = EB.visitValue(I.getPointerOperand());
+  clang::Expr *rhs = EB.visitValue(I.getValueOperand());
+  lhs = deref(Ctx, lhs);
+  clang::Expr *assign = clang::BinaryOperator::Create(
+      Ctx, lhs, rhs, clang::BO_Assign, lhs->getType(), clang::VK_LValue,
+      clang::OK_Ordinary, clang::SourceLocation(), clang::FPOptionsOverride());
+  addExprOrStmt(I, *assign);
+}
+
+void CFGBuilder::visitLoadInst(llvm::LoadInst &I) {
+  clang::Expr *E = EB.visitValue(I.getPointerOperand());
+  E = deref(Ctx, E);
+  addExprOrStmt(I, *E);
 }
 
 void CFGBuilder::visitCmpInst(llvm::CmpInst &I) {
@@ -160,7 +219,8 @@ void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
   assert(llvm::isa<clang::Expr>(&Stmt) &&
          "SAFuncContext.addExprOrStmt: Instruction has uses but is not Expr?");
   auto &Expr = llvm::cast<clang::Expr>(Stmt);
-  if (!llvm::isa<llvm::Instruction>(&v)) {
+  // non-instruction or expr-like instruction.
+  if (!llvm::isa<llvm::Instruction>(&v) || llvm::isa<llvm::AllocaInst>(&v)) {
     ExprMap[&v] = &Expr; // directly insert if not instruction
     return;
   }

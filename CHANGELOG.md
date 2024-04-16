@@ -8,5 +8,7 @@
 
 **Backend**
 - make null pointer constant really NULL instead of 0.
+- add typedef for boolean constant
+- handle unordered float pointer operation
 
 ## Changelog

@@ -218,8 +218,11 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 
 **类型**
 
-- 将IR类型对应地带着指针类型转换，冗余的解引用和取地址使用窥孔优化消除：IR的全局变量对应它的指针类型，alloca对应局部变量的指针类型。
-  - 窥孔优化：clang没有自带的。根据ASTMatcher自己写一个吧。
+- 将IR类型对应地带着指针类型转换，冗余的解引用和取地址~~使用窥孔优化~~在生成AST时消除：IR的全局变量对应它的指针类型，alloca对应局部变量的指针类型。
+  - ~~窥孔优化：clang没有自带的。根据ASTMatcher自己写一个吧。~~ 根据[这里](https://www.youtube.com/watch?v=_rUwW8Awc5s)，AST其实很难修改。
+    - Clang::Tooling::transformer：将AST修改为对应的代码文本。通过再次parse，有可能可以实现类似AST修改的效果。
+    - lib/Sema/TreeTransform.h内部库。没有细看。
+    - clangTooling, rewriter: 例如[这里](https://github.com/eliben/llvm-clang-samples/blob/master/src_clang/matchers_rewriter.cpp), 在AST转文本代码的时候介入并进行修改。
 
 **名称**
 

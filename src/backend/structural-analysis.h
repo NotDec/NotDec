@@ -288,6 +288,7 @@ public:
   TypeBuilder &getTypeBuilder() { return TB; }
 
   static clang::StorageClass getStorageClass(llvm::GlobalValue &GV);
+  /// Also ensure the uniqueness of Names.
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
     return getNewIdentifierInfo(*Names, getASTContext().Idents, Name);
   }
@@ -555,7 +556,9 @@ public:
   }
   void visitCallInst(llvm::CallInst &I);
   void visitCmpInst(llvm::CmpInst &I);
-  void visitAllocInst(llvm::AllocaInst &I);
+  void visitAllocaInst(llvm::AllocaInst &I);
+  void visitStoreInst(llvm::StoreInst &I);
+  void visitLoadInst(llvm::LoadInst &I);
 
   CFGBuilder(SAFuncContext &FCtx)
       : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}
