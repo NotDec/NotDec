@@ -221,6 +221,15 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 - 将IR类型对应地带着指针类型转换，冗余的解引用和取地址使用窥孔优化消除：IR的全局变量对应它的指针类型，alloca对应局部变量的指针类型。
   - 窥孔优化：clang没有自带的。根据ASTMatcher自己写一个吧。
 
+**名称**
+
+为了简化设计，全局不允许出现重名的情况。全局使用IdentifierInfo判断重名情况，重名时尝试增加"_1"递增的数字后缀。函数内使用Names判断重名情况
+
+- 尽量还原LLVM IR，使用IR中的名称
+  - GlobalVariable，Function等使用IR对应的名称。
+  - 局部变量对应alloca指令，因此使用Alloca指令的名称。
+  - 如果没有名称，则生成前缀加编号的临时名称，如func_1。
+
 **ConstantExpression**
 
 - 常量数组，常量结构体

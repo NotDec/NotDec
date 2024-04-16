@@ -153,3 +153,10 @@ QualType 本质上就是一个指针，同时复用了低位的bit位，存储�
 - QualType大部分情况下可以看作是clang::Type*
 - QualType有可能为空指针，同时也可以直接创建空的QualType
 
+**clang::IdentifierInfo**
+
+IdentifierInfo除了名字字符串之外，仅仅存储了一些名字的种类信息，例如是不是define的，是不是keyword，是不是variable或者function name。
+
+- **变量重名**：它似乎并不对应作用域，并不用于检测变量重名。
+  - [`Sema::LookupName`](https://github.com/llvm/llvm-project/blob/f15014ff549a8686671a599f7b49ce9963769eaf/clang/lib/Sema/SemaLookup.cpp#L1914) 内部手动遍历检测了重名情况。
+

@@ -22,6 +22,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -34,6 +35,36 @@
 namespace notdec::backend {
 
 static int LogLevel = level_debug;
+
+/// Check if the block is the entry block of the function, or a must via block
+/// that follows the entry.
+bool isMustViaBlock(llvm::BasicBlock &bb) {
+  llvm::Function *F = bb.getParent();
+  llvm::BasicBlock *entry = &F->getEntryBlock();
+  // from entry, continue if unique successor and predecessor.
+  do {
+    if (entry == &bb) {
+      return true;
+    }
+    entry = entry->getUniqueSuccessor();
+  } while (entry != nullptr && entry->getUniquePredecessor() != nullptr);
+  return false;
+}
+
+void CFGBuilder::visitAllocInst(llvm::AllocaInst &I) {
+  // check if the instruction is in the entry block.
+  if (isMustViaBlock(*I.getParent())) {
+    // create a local variable
+    // clang::VarDecl *VD = clang::VarDecl::Create(
+    //     Ctx, FCtx.getFunctionDecl(), clang::SourceLocation(),
+    //     clang::SourceLocation(), II, Ty, nullptr, getStorageClass(GV));
+  } else {
+    // TODO create a alloca call
+    llvm::errs() << "Warning: Dynamic stack allocation in "
+                 << I.getParent()->getParent()->getName() << ": " << I << "\n";
+    std::abort();
+  }
+}
 
 void CFGBuilder::visitCmpInst(llvm::CmpInst &I) {
   // handle FCMP_FALSE and FCMP_TRUE case
@@ -115,6 +146,10 @@ void CFGBuilder::visitCallInst(llvm::CallInst &I) {
   addExprOrStmt(I, *Call);
 }
 
+ValueNamer &SAFuncContext::getValueNamer() {
+  return getSAContext().getValueNamer();
+}
+
 void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
                                   CFGBlock &block) {
   if (v.getNumUses() == 0) {
@@ -135,13 +170,10 @@ void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
     ExprMap[&v] = &Expr; // wait to be folded
   } else {
     // Create a local variable for it, in order to be faithful to the IR.
-    auto Name = (inst.hasName() && !SAContext::isKeyword(inst.getName()))
-                    ? inst.getName()
-                    : "temp_" + llvm::Twine(++tempVarID);
+    auto Name = getValueNamer().getTempName(inst, &Func);
 
     llvm::SmallString<128> Buf;
-    clang::IdentifierInfo *II2 =
-        &getASTContext().Idents.get(Name.toStringRef(Buf));
+    clang::IdentifierInfo *II2 = getIdentifierInfo(Name);
     clang::VarDecl *decl = clang::VarDecl::Create(
         getASTContext(), FD, clang::SourceLocation(), clang::SourceLocation(),
         II2, TB.visitType(*inst.getType()), nullptr, clang::SC_None);
@@ -256,11 +288,11 @@ clang::IdentifierInfo *getNewIdentifierInfo(T &Names,
   return &Idents.get(Name);
 }
 
-clang::IdentifierInfo *getGlobalIdentifierInfo(clang::ASTContext &Ctx,
-                                               llvm::StringRef Name) {
-  auto &Idents = Ctx.Idents;
-  return getNewIdentifierInfo(Idents, Idents, Name);
-}
+// clang::IdentifierInfo *getGlobalIdentifierInfo(clang::ASTContext &Ctx,
+//                                                llvm::StringRef Name) {
+//   auto &Idents = Ctx.Idents;
+//   return getNewIdentifierInfo(Idents, Idents, Name);
+// }
 
 ExprBuilder::ExprBuilder(SAFuncContext &FCtx)
     : FCtx(&FCtx), SCtx(FCtx.getSAContext()), Ctx(FCtx.getASTContext()),
@@ -530,7 +562,7 @@ clang::QualType TypeBuilder::visitFunctionType(
 clang::RecordDecl *TypeBuilder::createRecordDecl(llvm::StructType &Ty) {
   clang::IdentifierInfo *II = nullptr;
   if (Ty.hasName()) {
-    II = getGlobalIdentifierInfo(Ctx, VN->getStructName(Ty));
+    II = getIdentifierInfo(VN->getStructName(Ty));
   }
   clang::RecordDecl *decl = clang::RecordDecl::Create(
       Ctx, clang::TagDecl::TagKind::TTK_Struct, Ctx.getTranslationUnitDecl(),
@@ -542,8 +574,7 @@ clang::RecordDecl *TypeBuilder::createRecordDecl(llvm::StructType &Ty) {
   for (unsigned i = 0; i < Ty.getNumElements(); i++) {
     auto FieldTy = visitType(*Ty.getElementType(i));
     // TODO handle field name.
-    clang::IdentifierInfo *FieldII =
-        getGlobalIdentifierInfo(Ctx, VN->getFieldName(i));
+    clang::IdentifierInfo *FieldII = getIdentifierInfo(VN->getFieldName(i));
     clang::FieldDecl *FieldDecl = clang::FieldDecl::Create(
         Ctx, decl, clang::SourceLocation(), clang::SourceLocation(), FieldII,
         FieldTy, nullptr, nullptr, false, clang::ICIS_NoInit);
@@ -696,7 +727,7 @@ llvm::StringRef ValueNamer::getValueName(llvm::Value &Val, const char *prefix,
   }
   Buf.clear();
   llvm::raw_svector_ostream OS(Buf);
-  OS << prefix << FuncCount++;
+  OS << prefix << id++;
   return OS.str();
 }
 
@@ -707,7 +738,7 @@ llvm::StringRef ValueNamer::getTypeName(llvm::StructType &Ty,
   }
   Buf.clear();
   llvm::raw_svector_ostream OS(Buf);
-  OS << prefix << FuncCount++;
+  OS << prefix << id++;
   return OS.str();
 }
 

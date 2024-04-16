@@ -29,6 +29,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/ErrorHandling.h>
+#include <map>
 #include <memory>
 
 namespace notdec::backend {
@@ -49,6 +50,7 @@ struct ValueNamer {
   unsigned int FuncCount = 0;
   unsigned int StructCount = 0;
   unsigned int GlobCount = 0;
+  std::map<llvm::Function *, unsigned int> TempCount;
   llvm::StringRef getBlockName(llvm::BasicBlock &Val, unsigned int id) {
     return getValueName(Val, "block_", id);
   }
@@ -60,6 +62,9 @@ struct ValueNamer {
   }
   llvm::StringRef getStructName(llvm::StructType &Ty) {
     return getTypeName(Ty, "struct_", StructCount);
+  }
+  llvm::StringRef getTempName(llvm::Value &Val, llvm::Function *func) {
+    return getValueName(Val, "temp_", TempCount[func]);
   }
   llvm::StringRef getFieldName(unsigned int id) {
     Buf.clear();
@@ -80,8 +85,8 @@ clang::IdentifierInfo *getNewIdentifierInfo(SetTy &Names,
                                             clang::IdentifierTable &Idents,
                                             llvm::StringRef Name);
 
-clang::IdentifierInfo *getGlobalIdentifierInfo(clang::ASTContext &Ctx,
-                                               llvm::StringRef Name);
+// clang::IdentifierInfo *getGlobalIdentifierInfo(clang::ASTContext &Ctx,
+//                                                llvm::StringRef Name);
 
 class SAContext;
 class SAFuncContext;
@@ -92,12 +97,17 @@ class TypeBuilder {
   ValueNamer *VN = nullptr;
   // Map from llvm struct type to clang RecordDecl type.
   std::map<llvm::Type *, clang::Decl *> typeMap;
+  llvm::StringSet<> &Names;
 
 public:
-  TypeBuilder(clang::ASTContext &Ctx, ValueNamer &VN) : Ctx(Ctx), VN(&VN) {}
+  TypeBuilder(clang::ASTContext &Ctx, ValueNamer &VN, llvm::StringSet<> &Names)
+      : Ctx(Ctx), VN(&VN), Names(Names) {}
   clang::RecordDecl *createRecordDecl(llvm::StructType &Ty);
   clang::QualType visitStructType(llvm::StructType &Ty);
   clang::QualType visitType(llvm::Type &Ty);
+  clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
+    return getNewIdentifierInfo(Names, Ctx.Idents, Name);
+  }
   clang::QualType
   visitFunctionType(llvm::FunctionType &Ty,
                     const clang::FunctionProtoType::ExtProtoInfo &EPI);
@@ -216,8 +226,6 @@ class SAFuncContext {
   // For checking local names (of variables, labels) are used or not.
   std::unique_ptr<llvm::StringSet<>> Names;
 
-  unsigned tempVarID = 0;
-
 public:
   SAFuncContext(SAContext &ctx, llvm::Function &func);
 
@@ -232,6 +240,7 @@ public:
   clang::ASTContext &getASTContext();
   class CFG &getCFG() { return *Cfg; }
   TypeBuilder &getTypeBuilder() { return TB; }
+  ValueNamer &getValueNamer();
   bool isExpr(llvm::Value &v) { return ExprMap.count(&v) > 0; }
   clang::Expr *getExpr(llvm::Value &v) { return ExprMap.at(&v); }
   CFG::iterator &getBlock(llvm::BasicBlock &bb) { return ll2cfg.at(&bb); }
@@ -248,6 +257,7 @@ public:
 /// Main data structures for structural analysis
 class SAContext {
 protected:
+  std::unique_ptr<llvm::StringSet<>> Names;
   llvm::Module &M;
   std::map<llvm::Function *, SAFuncContext> funcContexts;
   // Stores the mapping from llvm global object to clang decls for Functions and
@@ -265,8 +275,9 @@ public:
   // The usage of `clang::tooling::buildASTFromCode` follows llvm
   // unittests/Analysis/CFGTest.cpp, so we don't need to create ASTContext.
   SAContext(llvm::Module &mod)
-      : M(mod), ASTunit(clang::tooling::buildASTFromCode("", "decompiled.c")),
-        TB(getASTContext(), VN), EB(*this, getASTContext(), TB) {
+      : Names(std::make_unique<llvm::StringSet<>>()), M(mod),
+        ASTunit(clang::tooling::buildASTFromCode("", "decompiled.c")),
+        TB(getASTContext(), VN, *Names), EB(*this, getASTContext(), TB) {
     // TODO: set target arch by cmdline or input arch, so that TargetInfo is set
     // and int width is correct.
   }
@@ -278,7 +289,7 @@ public:
 
   static clang::StorageClass getStorageClass(llvm::GlobalValue &GV);
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
-    return getGlobalIdentifierInfo(getASTContext(), Name);
+    return getNewIdentifierInfo(*Names, getASTContext().Idents, Name);
   }
 
   /// A new context is created if not exist
@@ -320,10 +331,11 @@ public:
   ValueNamer &getValueNamer() { return ctx.getSAContext().getValueNamer(); }
 };
 
-/// Convert visited instructions and register the result to the expr or
-/// statement map using `FCtx.addExpr` or `FCtx.AddStmt`.
-/// Instructions that has side effects are converted to statements, or expr
-/// otherwise.
+/// CFGBuilder builds ASTs for basic blocks. In contrast, ExprBuilder build ASTs
+/// for expressions and does not insert new statements.
+/// CFGBuilder converts visited instructions and register the result to the expr
+/// or statement map using `FCtx.addExpr` or `FCtx.AddStmt`. Instructions that
+/// has side effects are converted to statements, or expr otherwise.
 class CFGBuilder : public llvm::InstVisitor<CFGBuilder> {
 protected:
   clang::ASTContext &Ctx;
@@ -542,8 +554,8 @@ public:
     // TODO create call statement to something like abort.
   }
   void visitCallInst(llvm::CallInst &I);
-  // visit compare insts
   void visitCmpInst(llvm::CmpInst &I);
+  void visitAllocInst(llvm::AllocaInst &I);
 
   CFGBuilder(SAFuncContext &FCtx)
       : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}
