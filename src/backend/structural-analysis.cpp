@@ -1,14 +1,16 @@
 
 
 #include "backend/structural-analysis.h"
+#include "../utils.h"
 #include "backend/goto.h"
 #include "backend/phoenix.h"
-#include "utils.h"
+#include "backend/utils.h"
 #include <cassert>
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Comment.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
+#include <clang/AST/ExprCXX.h>
 #include <clang/AST/OperationKinds.h>
 #include <clang/AST/PrettyPrinter.h>
 #include <clang/AST/RawCommentList.h>
@@ -21,6 +23,7 @@
 #include <clang/Basic/LangOptions.h>
 #include <clang/Basic/SourceLocation.h>
 #include <clang/Basic/Specifiers.h>
+#include <clang/Basic/TokenKinds.h>
 #include <clang/Tooling/Transformer/RewriteRule.h>
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
@@ -62,10 +65,9 @@ clang::Expr *addrOf(clang::ASTContext &Ctx, clang::Expr *E) {
       llvm::cast<clang::UnaryOperator>(E)->getOpcode() == clang::UO_Deref) {
     return llvm::cast<clang::UnaryOperator>(E)->getSubExpr();
   }
-  return clang::UnaryOperator::Create(
-      Ctx, E, clang::UO_AddrOf, Ctx.getPointerType(E->getType()),
-      clang::VK_LValue, clang::OK_Ordinary, clang::SourceLocation(), false,
-      clang::FPOptionsOverride());
+  return createUnaryOperator(Ctx, E, clang::UO_AddrOf,
+                             Ctx.getPointerType(E->getType()),
+                             clang::VK_LValue);
 }
 
 clang::Expr *deref(clang::ASTContext &Ctx, clang::Expr *E) {
@@ -74,10 +76,8 @@ clang::Expr *deref(clang::ASTContext &Ctx, clang::Expr *E) {
       llvm::cast<clang::UnaryOperator>(E)->getOpcode() == clang::UO_AddrOf) {
     return llvm::cast<clang::UnaryOperator>(E)->getSubExpr();
   }
-  return clang::UnaryOperator::Create(
-      Ctx, E, clang::UO_Deref, E->getType()->getPointeeType(), clang::VK_LValue,
-      clang::OK_Ordinary, clang::SourceLocation(), false,
-      clang::FPOptionsOverride());
+  return createUnaryOperator(Ctx, E, clang::UO_Deref,
+                             E->getType()->getPointeeType(), clang::VK_LValue);
 }
 
 void CFGBuilder::visitAllocaInst(llvm::AllocaInst &I) {
@@ -123,10 +123,8 @@ void CFGBuilder::visitGetElementPtrInst(llvm::GetElementPtrInst &I) {
       if (IndexNum != 0) {
         // Create pointer arithmetic
         clang::Expr *Index = EB.visitValue(LIndex);
-        Val = clang::BinaryOperator::Create(
-            Ctx, Val, Index, clang::BO_Add, Val->getType(), clang::VK_LValue,
-            clang::OK_Ordinary, clang::SourceLocation(),
-            clang::FPOptionsOverride());
+        Val = createBinaryOperator(Ctx, Val, Index, clang::BO_Add,
+                                   Val->getType(), clang::VK_LValue);
       }
       Val = deref(Ctx, Val);
     } else if (auto ArrayTy = Ty->getAsArrayTypeUnsafe()) {
@@ -174,9 +172,8 @@ void CFGBuilder::visitStoreInst(llvm::StoreInst &I) {
   clang::Expr *lhs = EB.visitValue(I.getPointerOperand());
   clang::Expr *rhs = EB.visitValue(I.getValueOperand());
   lhs = deref(Ctx, lhs);
-  clang::Expr *assign = clang::BinaryOperator::Create(
-      Ctx, lhs, rhs, clang::BO_Assign, lhs->getType(), clang::VK_LValue,
-      clang::OK_Ordinary, clang::SourceLocation(), clang::FPOptionsOverride());
+  clang::Expr *assign = createBinaryOperator(Ctx, lhs, rhs, clang::BO_Assign,
+                                             lhs->getType(), clang::VK_LValue);
   addExprOrStmt(I, *assign);
 }
 
@@ -217,9 +214,8 @@ void CFGBuilder::visitCmpInst(llvm::CmpInst &I) {
   } else if (cv == Unsigned) {
     lhs = castUnsigned(lhs);
   }
-  clang::Expr *cmp = clang::BinaryOperator::Create(
-      Ctx, lhs, rhs, *op, visitType(*I.getType()), clang::VK_PRValue,
-      clang::OK_Ordinary, clang::SourceLocation(), clang::FPOptionsOverride());
+  clang::Expr *cmp = createBinaryOperator(
+      Ctx, lhs, rhs, *op, visitType(*I.getType()), clang::VK_PRValue);
   addExprOrStmt(I, *cmp);
   return;
 }
@@ -302,17 +298,16 @@ void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
     clang::DeclStmt *DS = new (getASTContext())
         clang::DeclStmt(clang::DeclGroupRef(decl), clang::SourceLocation(),
                         clang::SourceLocation());
-
+    // Use Assign stmt
     // clang::DeclRefExpr *ref = clang::DeclRefExpr::Create(
     //     getASTContext(), clang::NestedNameSpecifierLoc(),
     //     clang::SourceLocation(), decl, false,
     //     clang::DeclarationNameInfo(II2, clang::SourceLocation()),
     //     expr->getType(), clang::VK_LValue);
     // // assign stmt
-    // clang::Stmt *DS = clang::BinaryOperator::Create(
+    // clang::Stmt *DS = createBinaryOperator(
     //     getASTContext(), ref, expr, clang::BO_Assign,
-    //     expr->getType(), clang::VK_PRValue, clang::OK_Ordinary,
-    //     clang::SourceLocation(), clang::FPOptionsOverride());
+    //     expr->getType(), clang::VK_PRValue);
     block.appendStmt(DS);
   }
 }
@@ -369,9 +364,8 @@ void CFGBuilder::visitBinaryOperator(llvm::BinaryOperator &I) {
     rhs = castUnsigned(rhs);
   }
 
-  clang::Expr *binop = clang::BinaryOperator::Create(
-      Ctx, lhs, rhs, op.getValue(), visitType(*I.getType()), clang::VK_PRValue,
-      clang::OK_Ordinary, clang::SourceLocation(), clang::FPOptionsOverride());
+  clang::Expr *binop = createBinaryOperator(
+      Ctx, lhs, rhs, op.getValue(), visitType(*I.getType()), clang::VK_PRValue);
   addExprOrStmt(I, *binop);
   return;
 }
@@ -438,8 +432,10 @@ void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &OS) {
     SAFuncContext &FuncCtx =
         Ctx.getFuncContext(const_cast<llvm::Function &>(F));
     FuncCtx.run();
-    // TODO only when debug
-    FuncCtx.getFunctionDecl()->dump();
+    if (LogLevel >= level_debug) {
+      llvm::errs() << "Function: " << F.getName() << "\n";
+      FuncCtx.getFunctionDecl()->dump();
+    }
   }
   Ctx.getASTContext().getTranslationUnitDecl()->print(OS);
 }
@@ -774,7 +770,7 @@ clang::Expr *ExprBuilder::visitInitializer(llvm::Value *Val,
 clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
   if (llvm::GlobalObject *GO = llvm::dyn_cast<llvm::GlobalObject>(&C)) {
     // global variables and functions
-    return makeDeclRefExpr(SCtx.getGlobalDecl(*GO));
+    return addrOf(Ctx, makeDeclRefExpr(SCtx.getGlobalDecl(*GO)));
   } else if (llvm::ConstantAggregate *CA =
                  llvm::dyn_cast<llvm::ConstantAggregate>(&C)) {
     // struct and array

@@ -259,17 +259,30 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 
 - 加法：nsw，nuw。当溢出时会变成poison value。这个暂时不考虑。
 - 移位运算：逻辑移位对应C语言无符号数字的移位，算数移位对应有符号数字的移位。（根据[这里](https://stackoverflow.com/questions/7622/are-the-shift-operators-arithmetic-or-logical-in-c)）
-- TODO
-- AllocaInst: 
-  - If the inst is at the outermost level, then create a corresponding local variable. 
-  - If not, this is a rare case, create corresponding calls to the `alloca` function.
-- CallInst:
+
+**运算符优先级：Operator Precedence**
+
+[C Operator Precedence](https://en.cppreference.com/w/c/language/operator_precedence)
+
+总体的优先级顺序：变量成员和数组访问和后缀一元运算符，前缀一元运算符，其他二元运算符。注意：
+- 变量成员和数组访问其实可以看作是一种后缀一元运算符。Clang里这两者是单独的表达式类型。既然它们优先级最高，就不需要单独考虑处理。函数调用，强制类型转换同理。
+- 一元运算符根据前缀和后缀分两个优先级。
+- 三元运算符，中间可以看作已经带了括号，从而看作一个二元运算符。
+
+增加函数考虑是否增加括号：
+
+- 函数1：获取表达式优先级
+  - 判断是一元，二元，三元，然后给出优先级数字值。
+- 函数2：根据优先级获取结合律，返回bool类型，是左结合还是右结合
+- 函数3：参数1 当前运算符优先级，参数2 子表达式优先级，参数3: bool is_left 运算符左边还是右边
+  - 判断子表达式优先级是否低于当前一元运算符优先级，是则增加括号。
+  - 如果优先级同级，调用函数2获取结合律信息，然后根据左结合和右结合处理。左结合运算符：如果同级则不需要在左边子表达式增加括号。
+    - 如果结合率和当前处理的边相同则不需要括号，反之需要括号。
+
+**CallInst**
+
   - Organize and maintain a map from llvm functions to Clang function declarations.
   - Handle function pointers: TODO
-
-**添加注释**
-
-添加注释不是简单地插入AST，因为Clang没有把注释这样管理，而是直接插入到ASTContext里面，而且要创建RawComment，而不是对应的语法树结构。没有找到将对应的Comment类插入进去的函数，应该需要自己实现。可能需要把字符串直接插入SourceManager里面，然后把sourceRange拿出来创建Comments。
 
 **Alloca指令**
 
@@ -277,6 +290,10 @@ Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副�
 
 - 静态Alloca：创建对应类型的变量。
 - 动态Alloca（很少）：TODO，转换为alloca函数调用
+
+- AllocaInst: 
+  - If the inst is at the outermost level, then create a corresponding local variable. 
+  - If not, this is a rare case, create corresponding calls to the `alloca` function.
 
 **GetElementPtr**
 
@@ -301,3 +318,7 @@ C的指针相关运算内部细节：
 
 GetElementPtr先获取内部指针值的类型，然后依次处理每个下标：
 - 如果是结构体成员或者数组，则先解引用，然后增加运算，然后再取地址。
+
+**添加注释**
+
+添加注释不是简单地插入AST，因为Clang没有把注释这样管理，而是直接插入到ASTContext里面，而且要创建RawComment，而不是对应的语法树结构。没有找到将对应的Comment类插入进去的函数，应该需要自己实现。可能需要把字符串直接插入SourceManager里面，然后把sourceRange拿出来创建Comments。
