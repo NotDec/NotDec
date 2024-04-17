@@ -10,6 +10,7 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/OperationKinds.h>
+#include <clang/AST/PrettyPrinter.h>
 #include <clang/AST/RawCommentList.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Type.h>
@@ -61,10 +62,10 @@ clang::Expr *addrOf(clang::ASTContext &Ctx, clang::Expr *E) {
       llvm::cast<clang::UnaryOperator>(E)->getOpcode() == clang::UO_Deref) {
     return llvm::cast<clang::UnaryOperator>(E)->getSubExpr();
   }
-  return clang::UnaryOperator::Create(Ctx, E, clang::UO_AddrOf, E->getType(),
-                                      clang::VK_LValue, clang::OK_Ordinary,
-                                      clang::SourceLocation(), false,
-                                      clang::FPOptionsOverride());
+  return clang::UnaryOperator::Create(
+      Ctx, E, clang::UO_AddrOf, Ctx.getPointerType(E->getType()),
+      clang::VK_LValue, clang::OK_Ordinary, clang::SourceLocation(), false,
+      clang::FPOptionsOverride());
 }
 
 clang::Expr *deref(clang::ASTContext &Ctx, clang::Expr *E) {
@@ -73,10 +74,10 @@ clang::Expr *deref(clang::ASTContext &Ctx, clang::Expr *E) {
       llvm::cast<clang::UnaryOperator>(E)->getOpcode() == clang::UO_AddrOf) {
     return llvm::cast<clang::UnaryOperator>(E)->getSubExpr();
   }
-  return clang::UnaryOperator::Create(Ctx, E, clang::UO_Deref, E->getType(),
-                                      clang::VK_LValue, clang::OK_Ordinary,
-                                      clang::SourceLocation(), false,
-                                      clang::FPOptionsOverride());
+  return clang::UnaryOperator::Create(
+      Ctx, E, clang::UO_Deref, E->getType()->getPointeeType(), clang::VK_LValue,
+      clang::OK_Ordinary, clang::SourceLocation(), false,
+      clang::FPOptionsOverride());
 }
 
 void CFGBuilder::visitAllocaInst(llvm::AllocaInst &I) {
@@ -106,6 +107,66 @@ void CFGBuilder::visitAllocaInst(llvm::AllocaInst &I) {
                  << I.getParent()->getParent()->getName() << ": " << I << "\n";
     std::abort();
   }
+}
+
+void CFGBuilder::visitGetElementPtrInst(llvm::GetElementPtrInst &I) {
+  clang::Expr *Val = EB.visitValue(I.getPointerOperand());
+  const clang::Type *Ty = Val->getType().getTypePtr();
+  for (unsigned i = 0; i < I.getNumIndices(); i++) {
+    llvm::Value *LIndex = *(I.idx_begin() + i);
+    auto IndexNum = llvm::cast<llvm::ConstantInt>(LIndex)->getZExtValue();
+    // TODO Assert llvm type to ensure that each step is correct.
+    // llvm::Type *lty = I.getTypeAtIndex(I.getSourceElementType(), i);
+    if (auto PointerTy = Ty->getAs<clang::PointerType>()) {
+      // 1. pointer arithmetic + deref
+      Ty = PointerTy->getPointeeType().getTypePtr();
+      if (IndexNum != 0) {
+        // Create pointer arithmetic
+        clang::Expr *Index = EB.visitValue(LIndex);
+        Val = clang::BinaryOperator::Create(
+            Ctx, Val, Index, clang::BO_Add, Val->getType(), clang::VK_LValue,
+            clang::OK_Ordinary, clang::SourceLocation(),
+            clang::FPOptionsOverride());
+      }
+      Val = deref(Ctx, Val);
+    } else if (auto ArrayTy = Ty->getAsArrayTypeUnsafe()) {
+      // 2. array indexing
+      clang::Expr *Index = EB.visitValue(LIndex);
+      Ty = ArrayTy->getElementType().getTypePtr();
+      Val = new (Ctx) clang::ArraySubscriptExpr(
+          Val, Index, ArrayTy->getElementType(), clang::VK_LValue,
+          clang::OK_Ordinary, clang::SourceLocation());
+    } else if (auto RecordTy = Ty->getAs<clang::RecordType>()) {
+      // 3. field reference
+      auto Decl = RecordTy->getDecl();
+      auto Field = Decl->field_begin();
+      std::advance(Field, IndexNum);
+      // check if the val is deref, if so, then remove it and use arrow expr.
+      bool useArrow = false;
+      if (llvm::isa<clang::UnaryOperator>(Val) &&
+          llvm::cast<clang::UnaryOperator>(Val)->getOpcode() ==
+              clang::UO_Deref) {
+        Val = llvm::cast<clang::UnaryOperator>(Val)->getSubExpr();
+        useArrow = true;
+      }
+      Ty = Field->getType().getTypePtr();
+      Val = clang::MemberExpr::Create(
+          Ctx, Val, useArrow, clang::SourceLocation(),
+          clang::NestedNameSpecifierLoc(), clang::SourceLocation(), *Field,
+          clang::DeclAccessPair::make(*Field, Field->getAccess()),
+          clang::DeclarationNameInfo(), nullptr, Field->getType(),
+          clang::VK_LValue, clang::OK_Ordinary, clang::NOUR_None);
+    } else {
+      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                   << "UnImplemented: CFGBuilder.visitGetElementPtrInst cannot "
+                      "handle type: ";
+      Ty->dump();
+      llvm::errs() << "\n";
+      std::abort();
+    }
+  }
+  // implicit addrOf at the end of GEP
+  addExprOrStmt(I, *addrOf(Ctx, Val));
 }
 
 void CFGBuilder::visitStoreInst(llvm::StoreInst &I) {
@@ -377,6 +438,8 @@ void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &OS) {
     SAFuncContext &FuncCtx =
         Ctx.getFuncContext(const_cast<llvm::Function &>(F));
     FuncCtx.run();
+    // TODO only when debug
+    FuncCtx.getFunctionDecl()->dump();
   }
   Ctx.getASTContext().getTranslationUnitDecl()->print(OS);
 }
