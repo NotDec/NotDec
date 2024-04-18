@@ -499,20 +499,11 @@ clang::StorageClass SAContext::getStorageClass(llvm::GlobalValue &GV) {
 }
 
 void SAContext::createDecls() {
-
-  // Sometimes the IR structure definition is not in a topological sort
-  // sequence. Like functions, so we declare all structures first.
-  for (llvm::StructType *Ty : M.getIdentifiedStructTypes()) {
-    llvm::errs() << "Declaring struct: " << *Ty << "\n";
-    // create a RecordDecl in place.
-    TB.createRecordDecl(*Ty, false, false);
-  }
-
   // visit all record definitions
   for (llvm::StructType *Ty : M.getIdentifiedStructTypes()) {
     llvm::errs() << "Creating struct: " << *Ty << "\n";
-    // create a RecordDecl in place.
-    TB.createRecordDecl(*Ty, true, true);
+    // create RecordDecls
+    TB.visitStructType(*Ty);
   }
 
   // TODO: add comments
@@ -701,9 +692,6 @@ clang::RecordDecl *TypeBuilder::createRecordDecl(llvm::StructType &Ty,
   }
 
   clang::RecordDecl *prev = nullptr;
-  if (isDefinition && isNotLiteral) {
-    prev = llvm::cast<clang::RecordDecl>(typeMap.at(&Ty));
-  }
   clang::RecordDecl *decl = clang::RecordDecl::Create(
       Ctx, clang::TagDecl::TagKind::TTK_Struct, Ctx.getTranslationUnitDecl(),
       clang::SourceLocation(), clang::SourceLocation(), II, prev);
@@ -739,17 +727,22 @@ clang::QualType TypeBuilder::visitStructType(llvm::StructType &Ty) {
     clang::RecordDecl *decl = llvm::cast<clang::RecordDecl>(typeMap[&Ty]);
     return Ctx.getRecordType(decl);
   }
-  assert(Ty.isLiteral() && "TypeBuilder.visitStructType: Non-literal type "
-                           "should be visited ahead of time!");
-  // Handle unnamed struct definition: (`struct {int x;} a,b`)
-  // See also https://lists.llvm.org/pipermail/cfe-dev/2021-February/067631.html
-  // create a non-freestanding RecordDecl in place.
-  auto decl = createRecordDecl(Ty, true, false);
-  // This also requires that the var decl uses a ElaboratedType whose owned tag
-  // decl is the previous RecordDecl
-  auto ElabTy = Ctx.getElaboratedType(clang::ETK_Struct, nullptr,
-                                      Ctx.getRecordType(decl), decl);
-  return ElabTy;
+  // if type not visited yet, create it.
+  if (Ty.isLiteral()) {
+    // Handle unnamed struct definition: (`struct {int x;} a,b`)
+    // See also
+    // https://lists.llvm.org/pipermail/cfe-dev/2021-February/067631.html create
+    // a non-freestanding RecordDecl in place.
+    auto decl = createRecordDecl(Ty, true, false);
+    // This also requires that the var decl uses a ElaboratedType whose owned
+    // tag decl is the previous RecordDecl
+    auto ElabTy = Ctx.getElaboratedType(clang::ETK_Struct, nullptr,
+                                        Ctx.getRecordType(decl), decl);
+    return ElabTy;
+  } else {
+    // insertion is done in createRecordDecl
+    return Ctx.getRecordType(createRecordDecl(Ty, true, true));
+  }
 }
 
 clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
