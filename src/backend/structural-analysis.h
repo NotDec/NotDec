@@ -78,6 +78,7 @@ protected:
                               unsigned int &id);
   llvm::StringRef getValueName(llvm::Value &Val, const char *prefix,
                                unsigned int &id);
+  void escapeBuf();
 };
 
 template <class SetTy>

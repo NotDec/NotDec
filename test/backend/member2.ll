@@ -1,6 +1,6 @@
 %union.anon = type { i64, [24 x i8] }
 %struct.anon.0 = type { i64, i64, %union.anon, i64, i64 }
-%struct.anon = type { i64, %struct.foo, i64 }
+%struct.anon = type { i64, %struct.anon.0, i64 }
 %struct.foo = type { %struct.anon }
 
 @chunky = common dso_local global %struct.foo zeroinitializer, align 8

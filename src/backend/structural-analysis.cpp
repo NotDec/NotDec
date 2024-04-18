@@ -36,6 +36,7 @@
 #include <llvm/IR/GlobalObject.h>
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Operator.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <utility>
@@ -109,7 +110,8 @@ void CFGBuilder::visitAllocaInst(llvm::AllocaInst &I) {
   }
 }
 
-void CFGBuilder::visitGetElementPtrInst(llvm::GetElementPtrInst &I) {
+clang::Expr *handleGEP(clang::ASTContext &Ctx, ExprBuilder &EB,
+                       llvm::GEPOperator &I) {
   clang::Expr *Val = EB.visitValue(I.getPointerOperand());
   const clang::Type *Ty = Val->getType().getTypePtr();
   for (unsigned i = 0; i < I.getNumIndices(); i++) {
@@ -164,7 +166,11 @@ void CFGBuilder::visitGetElementPtrInst(llvm::GetElementPtrInst &I) {
     }
   }
   // implicit addrOf at the end of GEP
-  addExprOrStmt(I, *addrOf(Ctx, Val));
+  return addrOf(Ctx, Val);
+}
+
+void CFGBuilder::visitGetElementPtrInst(llvm::GetElementPtrInst &I) {
+  addExprOrStmt(I, *handleGEP(Ctx, EB, llvm::cast<llvm::GEPOperator>(I)));
 }
 
 void CFGBuilder::visitStoreInst(llvm::StoreInst &I) {
@@ -834,12 +840,17 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
     return clang::FloatingLiteral::Create(Ctx, CFP->getValueAPF(), true,
                                           visitType(*CFP->getType()),
                                           clang::SourceLocation());
-  } else {
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "UnImplemented: ExprBuilder.visitConstant cannot handle: "
-                 << C << "\n";
-    std::abort();
+  } else if (llvm::ConstantExpr *CE = llvm::dyn_cast<llvm::ConstantExpr>(&C)) {
+    // https://llvm.org/docs/LangRef.html#constant-expressions
+    // handle gep
+    if (CE->getOpcode() == llvm::Instruction::GetElementPtr) {
+      return handleGEP(Ctx, *this, *llvm::cast<llvm::GEPOperator>(CE));
+    }
   }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "UnImplemented: ExprBuilder.visitConstant cannot handle: "
+               << C << "\n";
+  std::abort();
 }
 
 /// get the label for the block. Create if not exist.
@@ -868,25 +879,37 @@ SAFuncContext::SAFuncContext(SAContext &ctx, llvm::Function &func)
   Names = std::make_unique<llvm::StringSet<>>();
 }
 
+void ValueNamer::escapeBuf() {
+  for (auto &c : Buf) {
+    if (!std::isalnum(c) && c != '_') {
+      c = '_';
+    }
+  }
+}
+
 llvm::StringRef ValueNamer::getValueName(llvm::Value &Val, const char *prefix,
                                          unsigned int &id) {
-  if (Val.hasName() && !SAContext::isKeyword(Val.getName())) {
-    return Val.getName();
-  }
   Buf.clear();
   llvm::raw_svector_ostream OS(Buf);
-  OS << prefix << id++;
+  if (Val.hasName() && !SAContext::isKeyword(Val.getName())) {
+    OS << Val.getName();
+    escapeBuf();
+  } else {
+    OS << prefix << id++;
+  }
   return OS.str();
 }
 
 llvm::StringRef ValueNamer::getTypeName(llvm::StructType &Ty,
                                         const char *prefix, unsigned int &id) {
-  if (Ty.hasName() && !SAContext::isKeyword(Ty.getName())) {
-    return Ty.getName();
-  }
   Buf.clear();
   llvm::raw_svector_ostream OS(Buf);
-  OS << prefix << id++;
+  if (Ty.hasName() && !SAContext::isKeyword(Ty.getName())) {
+    OS << Ty.getName();
+    escapeBuf();
+  } else {
+    OS << prefix << id++;
+  }
   return OS.str();
 }
 
