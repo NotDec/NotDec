@@ -494,11 +494,19 @@ clang::StorageClass SAContext::getStorageClass(llvm::GlobalValue &GV) {
 
 void SAContext::createDecls() {
 
-  // visit all type definitions
+  // Sometimes the IR structure definition is not in a topological sort
+  // sequence. Like functions, so we declare all structures first.
   for (llvm::StructType *Ty : M.getIdentifiedStructTypes()) {
-    llvm::errs() << "Visiting: " << *Ty << "\n";
+    llvm::errs() << "Declaring struct: " << *Ty << "\n";
     // create a RecordDecl in place.
-    TB.createRecordDecl(*Ty);
+    TB.createRecordDecl(*Ty, false, false);
+  }
+
+  // visit all record definitions
+  for (llvm::StructType *Ty : M.getIdentifiedStructTypes()) {
+    llvm::errs() << "Creating struct: " << *Ty << "\n";
+    // create a RecordDecl in place.
+    TB.createRecordDecl(*Ty, true, true);
   }
 
   // TODO: add comments
@@ -678,28 +686,43 @@ clang::QualType TypeBuilder::visitFunctionType(
   return Ctx.getFunctionType(RetTy, Args, EPI);
 }
 
-clang::RecordDecl *TypeBuilder::createRecordDecl(llvm::StructType &Ty) {
+clang::RecordDecl *TypeBuilder::createRecordDecl(llvm::StructType &Ty,
+                                                 bool isDefinition,
+                                                 bool isNotLiteral) {
   clang::IdentifierInfo *II = nullptr;
   if (Ty.hasName()) {
     II = getIdentifierInfo(VN->getStructName(Ty));
   }
+
+  clang::RecordDecl *prev = nullptr;
+  if (isDefinition && isNotLiteral) {
+    prev = llvm::cast<clang::RecordDecl>(typeMap.at(&Ty));
+  }
   clang::RecordDecl *decl = clang::RecordDecl::Create(
       Ctx, clang::TagDecl::TagKind::TTK_Struct, Ctx.getTranslationUnitDecl(),
-      clang::SourceLocation(), clang::SourceLocation(), II);
+      clang::SourceLocation(), clang::SourceLocation(), II, prev);
+  // Set free standing so that unnamed struct can be combined:
+  // (`struct {int x;} a,b`)
+  // This also requires that the var decl uses a ElaboratedType whose owned tag
+  // decl is the previous RecordDecl
+  // See also https://lists.llvm.org/pipermail/cfe-dev/2021-February/067631.html
+  decl->setFreeStanding(isNotLiteral);
   // save to map early so that recursive pointers are allowed, for example:
   // `struct A { struct A *a; };`
   typeMap[&Ty] = decl;
-  decl->startDefinition();
-  for (unsigned i = 0; i < Ty.getNumElements(); i++) {
-    auto FieldTy = visitType(*Ty.getElementType(i));
-    // TODO handle field name.
-    clang::IdentifierInfo *FieldII = getIdentifierInfo(VN->getFieldName(i));
-    clang::FieldDecl *FieldDecl = clang::FieldDecl::Create(
-        Ctx, decl, clang::SourceLocation(), clang::SourceLocation(), FieldII,
-        FieldTy, nullptr, nullptr, false, clang::ICIS_NoInit);
-    decl->addDecl(FieldDecl);
+  if (isDefinition) {
+    decl->startDefinition();
+    for (unsigned i = 0; i < Ty.getNumElements(); i++) {
+      auto FieldTy = visitType(*Ty.getElementType(i));
+      // TODO handle field name.
+      clang::IdentifierInfo *FieldII = getIdentifierInfo(VN->getFieldName(i));
+      clang::FieldDecl *FieldDecl = clang::FieldDecl::Create(
+          Ctx, decl, clang::SourceLocation(), clang::SourceLocation(), FieldII,
+          FieldTy, nullptr, nullptr, false, clang::ICIS_NoInit);
+      decl->addDecl(FieldDecl);
+    }
+    decl->completeDefinition();
   }
-  decl->completeDefinition();
   Ctx.getTranslationUnitDecl()->addDecl(decl);
   return decl;
 }
@@ -712,9 +735,15 @@ clang::QualType TypeBuilder::visitStructType(llvm::StructType &Ty) {
   }
   assert(Ty.isLiteral() && "TypeBuilder.visitStructType: Non-literal type "
                            "should be visited ahead of time!");
-  // create a RecordDecl in place.
-  auto decl = createRecordDecl(Ty);
-  return Ctx.getRecordType(decl);
+  // Handle unnamed struct definition: (`struct {int x;} a,b`)
+  // See also https://lists.llvm.org/pipermail/cfe-dev/2021-February/067631.html
+  // create a non-freestanding RecordDecl in place.
+  auto decl = createRecordDecl(Ty, true, false);
+  // This also requires that the var decl uses a ElaboratedType whose owned tag
+  // decl is the previous RecordDecl
+  auto ElabTy = Ctx.getElaboratedType(clang::ETK_Struct, nullptr,
+                                      Ctx.getRecordType(decl), decl);
+  return ElabTy;
 }
 
 clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {

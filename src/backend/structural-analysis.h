@@ -102,7 +102,8 @@ class TypeBuilder {
 public:
   TypeBuilder(clang::ASTContext &Ctx, ValueNamer &VN, llvm::StringSet<> &Names)
       : Ctx(Ctx), VN(&VN), Names(Names) {}
-  clang::RecordDecl *createRecordDecl(llvm::StructType &Ty);
+  clang::RecordDecl *createRecordDecl(llvm::StructType &Ty, bool isDefinition,
+                                      bool hasPrevDef);
   clang::QualType visitStructType(llvm::StructType &Ty);
   clang::QualType visitType(llvm::Type &Ty);
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {

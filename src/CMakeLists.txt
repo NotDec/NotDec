@@ -18,6 +18,7 @@ add_library(notdec STATIC
 	backend/phoenix.cpp
 	backend/CFG.cpp
 	backend/goto.cpp
+	backend/utils.cpp
 )
 
 # include直接在外部设置了src目录。
