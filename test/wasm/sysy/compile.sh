@@ -13,8 +13,9 @@ for file in $BASEDIR/functional/*.c; do
     name=$(basename $file)
     echo compiling $name ...
     out=$BASEDIR/out_functional/${name}
-    # /opt/wasi-sdk/wasi-sdk-16.0/bin/clang -fno-builtin -I. -g -O0 --no-standard-libraries -Wl,--no-entry -lc -Wl,--allow-undefined -o ${out}.wasm $file
+    # /opt/wasi-sdk-16.0/bin/clang -I. -g -O0 --no-standard-libraries -Wl,--no-entry -lc -Wl,--allow-undefined -o ${out}.wasm $file
     # -Wl,--export-all   -Wl,--export=main
     /opt/wasi-sdk-20.0/bin/clang -fno-builtin -fno-lto -Wl,--lto-O0 -I. -g -O0 --no-standard-libraries -Wl,--entry=main -lc -Wl,--allow-undefined -o ${out}.wasm $file
     wasm2wat ${out}.wasm -o ${out}.wat
+    # /opt/wasi-sdk-20.0/bin/clang -Xclang -no-opaque-pointers -I. -c -emit-llvm -S -o ${out}.ll $file
 done

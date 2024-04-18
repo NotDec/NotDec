@@ -50,7 +50,7 @@ def test_run(target, out_file, in_file=None, add_returncode=False):
 
     print('result: ',out)
     print('excepted: ',s)
-    if out.strip() == s.strip():
+    if out.replace(b'\r\n', b'\n').strip() == s.replace(b'\r\n', b'\n').strip():
         print(RED+"=========== Pass! ==============" +NC)
         return True
     s = s.rsplit(b"\n", 1)

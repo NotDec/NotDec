@@ -200,6 +200,13 @@ void Context::visitModule() {
         function->setLinkage(llvm::GlobalValue::LinkageTypes::ExternalLinkage);
         function->setName("main");
       }
+      // Temporary fix for the sysY test cases
+      if (function->getName().equals("memset")) {
+        function->setName("memset_1");
+      }
+      if (function->getName().equals("memcpy")) {
+        function->setName("memcpy_1");
+      }
     }
     nonImportFuncs.push_back(function);
   }

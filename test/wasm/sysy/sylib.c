@@ -2,7 +2,7 @@
 #include<stdio.h>
 #include<stdarg.h>
 #include"sylib.h"
-extern unsigned char mem0;
+extern unsigned char __notdec_mem0;
 /* Input & output functions */
 int getint(){int t; scanf("%d",&t); return t; }
 int getch(){char c; scanf("%c",&c); return (int)c; }
@@ -14,7 +14,7 @@ float getfloat(){
 
 int getarray(int a[]){
   int n;
-  a = (int *)(&mem0 + (unsigned long)a);
+  a = (int *)(&__notdec_mem0 + (unsigned long)a);
   scanf("%d",&n);
   for(int i=0;i<n;i++)scanf("%d",&a[i]);
   return n;
@@ -22,7 +22,7 @@ int getarray(int a[]){
 
 int getfarray(float a[]) {
     int n;
-    a = (float *)(&mem0 + (unsigned long)a);
+    a = (float *)(&__notdec_mem0 + (unsigned long)a);
     scanf("%d", &n);
     for (int i = 0; i < n; i++) {
         scanf("%a", &a[i]);
@@ -32,7 +32,7 @@ int getfarray(float a[]) {
 void putint(int a){ printf("%d",a);}
 void putch(int a){ printf("%c",a); }
 void putarray(int n,int a[]){
-  a = (int *)(&mem0 + (unsigned long)a);
+  a = (int *)(&__notdec_mem0 + (unsigned long)a);
   printf("%d:",n);
   for(int i=0;i<n;i++)printf(" %d",a[i]);
   printf("\n");
@@ -42,7 +42,7 @@ void putfloat(float a) {
 }
 void putfarray(int n, float a[]) {
     printf("%d:", n);
-    a = (float *)(&mem0 + (unsigned long)a);
+    a = (float *)(&__notdec_mem0 + (unsigned long)a);
     for (int i = 0; i < n; i++) {
         printf(" %a", a[i]);
     }
@@ -59,7 +59,7 @@ void putfarray(int n, float a[]) {
 // void  *memset(void *b, int c, size_t len)
 // {
 //   int           i;
-//   unsigned char *p = (unsigned long)b + &mem0;
+//   unsigned char *p = (unsigned long)b + &__notdec_mem0;
 //   i = 0;
 //   while(len > 0)
 //     {
@@ -71,8 +71,8 @@ void putfarray(int n, float a[]) {
 // }
 
 // void * memcpy(void *dest, const void *src, size_t numBytes) {
-//   char *csrc = (char *)(&mem0 + (unsigned long)src); 
-//   char *cdest = (char *)(&mem0 + (unsigned long)dest); 
+//   char *csrc = (char *)(&__notdec_mem0 + (unsigned long)src); 
+//   char *cdest = (char *)(&__notdec_mem0 + (unsigned long)dest); 
     
 //   // Copy contents of src[] to dest[] 
 //   for (int i=0; i<numBytes; i++) 
