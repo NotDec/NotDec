@@ -124,7 +124,10 @@ public:
   clang::QualType
   visitFunctionType(llvm::FunctionType &Ty,
                     const clang::FunctionProtoType::ExtProtoInfo &EPI);
-  clang::QualType makeSigned(clang::QualType Ty) {
+
+  // TODO move to a dedicated file
+  static clang::QualType makeSigned(clang::ASTContext &Ctx,
+                                    clang::QualType Ty) {
     auto qty = Ty->getCanonicalTypeInternal();
     if (const auto *BT = llvm::dyn_cast<clang::BuiltinType>(qty)) {
       switch (BT->getKind()) {
@@ -156,7 +159,8 @@ public:
     }
     llvm_unreachable("TypeBuilder.makeSigned: unexpected type");
   }
-  clang::QualType makeUnsigned(clang::QualType Ty) {
+  static clang::QualType makeUnsigned(clang::ASTContext &Ctx,
+                                      clang::QualType Ty) {
     auto qty = Ty->getCanonicalTypeInternal();
     if (const auto *BT = llvm::dyn_cast<clang::BuiltinType>(qty)) {
       switch (BT->getKind()) {
@@ -244,6 +248,9 @@ public:
 
   // Main interface for CFGBuilder to add an expression for an instruction.
   void addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt, CFGBlock &block);
+  /// Directly register the mapping from llvm value to clang expr. Do not use
+  /// this and use addExprOrStmt instead most of the time.
+  void addMapping(llvm::Value &v, clang::Expr &Expr) { ExprMap[&v] = &Expr; }
   clang::IdentifierInfo *getIdentifierInfo(llvm::StringRef Name) {
     return getNewIdentifierInfo(*Names, getASTContext().Idents, Name);
   }
@@ -360,12 +367,6 @@ protected:
   clang::QualType visitType(llvm::Type &Ty) {
     return FCtx.getTypeBuilder().visitType(Ty);
   }
-  clang::QualType makeSigned(clang::QualType Ty) {
-    return FCtx.getTypeBuilder().makeSigned(Ty);
-  }
-  clang::QualType makeUnsigned(clang::QualType Ty) {
-    return FCtx.getTypeBuilder().makeUnsigned(Ty);
-  }
 
   void addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt) {
     assert(Blk != nullptr && "Block can't be null!");
@@ -403,173 +404,6 @@ public:
     return &*ret;
   }
 
-  /// Conversion types for converting LLVM binary operator to C operations.
-  /// For example, if a LLVM add is signed, we need to ensure the operand
-  /// expression is signed or insert a cast.
-  /// The logical shift corresponds to the C unsigned number shift, and the
-  /// arithmetical shift corresponds to the C signed number shift.
-  enum Conversion {
-    None,
-    Signed,
-    Unsigned,
-    Arithmetic, // make left op signed
-    Logical,    // make left op unsigned
-  };
-
-  /// Get the signedness of the binary operator.
-  Conversion getSignedness(llvm::Instruction::BinaryOps op) {
-    switch (op) {
-    case llvm::Instruction::Add:
-    case llvm::Instruction::Sub:
-    case llvm::Instruction::Mul:
-    case llvm::Instruction::And:
-    case llvm::Instruction::Or:
-    case llvm::Instruction::Xor:
-    case llvm::Instruction::Shl:
-      return None;
-    case llvm::Instruction::LShr:
-      return Logical;
-    case llvm::Instruction::AShr:
-      return Arithmetic;
-    case llvm::Instruction::UDiv:
-    case llvm::Instruction::URem:
-      return Unsigned;
-    case llvm::Instruction::SDiv:
-    case llvm::Instruction::SRem:
-      return Signed;
-    case llvm::Instruction::FAdd:
-    case llvm::Instruction::FSub:
-    case llvm::Instruction::FMul:
-    case llvm::Instruction::FDiv:
-    case llvm::Instruction::FRem:
-      return None;
-    default:
-      return None;
-    }
-  }
-
-  Conversion getSignedness(llvm::CmpInst::Predicate op) {
-    switch (op) {
-    case llvm::CmpInst::ICMP_UGT:
-    case llvm::CmpInst::ICMP_UGE:
-    case llvm::CmpInst::ICMP_ULT:
-    case llvm::CmpInst::ICMP_ULE:
-      return Unsigned;
-    case llvm::CmpInst::ICMP_SGT:
-    case llvm::CmpInst::ICMP_SGE:
-    case llvm::CmpInst::ICMP_SLT:
-    case llvm::CmpInst::ICMP_SLE:
-      return Signed;
-    case llvm::CmpInst::ICMP_EQ:
-    case llvm::CmpInst::ICMP_NE:
-      return None;
-    default:
-      return None;
-    }
-  }
-
-  /// Convert the LLVM compare operator to Clang binary operator op.
-  clang::Optional<clang::BinaryOperatorKind>
-  convertOp(llvm::CmpInst::Predicate op) {
-    switch (op) {
-    case llvm::CmpInst::Predicate::ICMP_EQ:
-      return clang::BO_EQ;
-    case llvm::CmpInst::Predicate::ICMP_NE:
-      return clang::BO_NE;
-    case llvm::CmpInst::Predicate::ICMP_UGT:
-      return clang::BO_GT;
-    case llvm::CmpInst::Predicate::ICMP_UGE:
-      return clang::BO_GE;
-    case llvm::CmpInst::Predicate::ICMP_ULT:
-      return clang::BO_LT;
-    case llvm::CmpInst::Predicate::ICMP_ULE:
-      return clang::BO_LE;
-    case llvm::CmpInst::Predicate::ICMP_SGT:
-      return clang::BO_GT;
-    case llvm::CmpInst::Predicate::ICMP_SGE:
-      return clang::BO_GE;
-    case llvm::CmpInst::Predicate::ICMP_SLT:
-      return clang::BO_LT;
-    case llvm::CmpInst::Predicate::ICMP_SLE:
-      return clang::BO_LE;
-    case llvm::CmpInst::FCMP_FALSE:
-    case llvm::CmpInst::FCMP_TRUE:
-      llvm_unreachable("CFGBuilder.convertOp: FCMP_FALSE or FCMP_TRUE should "
-                       "be considered ahead of time.");
-    // TODO handle ordered and unordered comparison
-    // probably by converting unordered comparison to ordered comparison plus
-    // negation, or a function call.
-    case llvm::CmpInst::FCMP_OEQ:
-    case llvm::CmpInst::FCMP_UEQ:
-      return clang::BO_EQ;
-    case llvm::CmpInst::FCMP_OGT:
-    case llvm::CmpInst::FCMP_UGT:
-      return clang::BO_GT;
-    case llvm::CmpInst::FCMP_OGE:
-    case llvm::CmpInst::FCMP_UGE:
-      return clang::BO_GE;
-    case llvm::CmpInst::FCMP_OLT:
-    case llvm::CmpInst::FCMP_ULT:
-      return clang::BO_LT;
-    case llvm::CmpInst::FCMP_OLE:
-    case llvm::CmpInst::FCMP_ULE:
-      return clang::BO_LE;
-    case llvm::CmpInst::FCMP_ONE:
-    case llvm::CmpInst::FCMP_UNE:
-      return clang::BO_NE;
-    case llvm::CmpInst::FCMP_ORD:
-    case llvm::CmpInst::FCMP_UNO:
-      llvm::errs() << "CFGBuilder.convertOp: FCMP_ORD or FCMP_UNO handling "
-                      "not implemented\n";
-    case llvm::CmpInst::BAD_FCMP_PREDICATE:
-    case llvm::CmpInst::BAD_ICMP_PREDICATE:
-      return clang::None;
-    }
-  }
-
-  /// Convert the LLVM binary operator to a Clang binary operator op.
-  clang::Optional<clang::BinaryOperatorKind>
-  convertOp(llvm::Instruction::BinaryOps op) {
-    switch (op) {
-    case llvm::Instruction::Add:
-    case llvm::Instruction::FAdd:
-      return clang::BO_Add;
-    case llvm::Instruction::Sub:
-    case llvm::Instruction::FSub:
-      return clang::BO_Sub;
-    case llvm::Instruction::Mul:
-    case llvm::Instruction::FMul:
-      return clang::BO_Mul;
-    case llvm::Instruction::UDiv:
-    case llvm::Instruction::SDiv:
-      return clang::BO_Div;
-    case llvm::Instruction::URem:
-    case llvm::Instruction::SRem:
-    case llvm::Instruction::FRem:
-      return clang::BO_Rem;
-
-    case llvm::Instruction::Shl:
-      return clang::BO_Shl;
-    case llvm::Instruction::LShr:
-      return clang::BO_Shr;
-    case llvm::Instruction::AShr:
-      return clang::BO_Shl;
-
-    case llvm::Instruction::And:
-      return clang::BO_And;
-    case llvm::Instruction::Or:
-      return clang::BO_Or;
-    case llvm::Instruction::Xor:
-      return clang::BO_Xor;
-    default:
-      return clang::None;
-    }
-  }
-
-  /// Ensure the expression is signed, or insert a cast.
-  clang::Expr *castSigned(clang::Expr *E);
-  /// Ensure the expression is unsigned, or insert a cast.
-  clang::Expr *castUnsigned(clang::Expr *E);
   clang::ImplicitCastExpr *
   makeImplicitCast(clang::Expr *Arg, clang::QualType Ty, clang::CastKind CK) {
     return clang::ImplicitCastExpr::Create(
@@ -597,11 +431,49 @@ public:
   void visitStoreInst(llvm::StoreInst &I);
   void visitLoadInst(llvm::LoadInst &I);
   void visitGetElementPtrInst(llvm::GetElementPtrInst &I);
+  void visitUnaryOperator(llvm::UnaryOperator &I);
+  void visitCastInst(llvm::CastInst &I);
 
   CFGBuilder(SAFuncContext &FCtx)
       : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}
   void setBlock(CFGBlock *blk) { Blk = blk; }
 };
+
+// ============
+// Signedness
+// ============
+
+/// Conversion types for converting LLVM binary operator to C operations.
+/// For example, if a LLVM add is signed, we need to ensure the operand
+/// expression is signed or insert a cast.
+/// The logical shift corresponds to the C unsigned number shift, and the
+/// arithmetical shift corresponds to the C signed number shift.
+enum Conversion {
+  None,
+  Signed,
+  Unsigned,
+  Arithmetic, // make left op signed
+  Logical,    // make left op unsigned
+};
+
+/// Get the signedness of the binary operator.
+Conversion getSignedness(llvm::Instruction::BinaryOps op);
+
+Conversion getSignedness(llvm::CmpInst::Predicate op);
+
+/// Convert the LLVM compare operator to Clang binary operator op.
+clang::Optional<clang::BinaryOperatorKind>
+convertOp(llvm::CmpInst::Predicate op);
+
+/// Convert the LLVM binary operator to a Clang binary operator op.
+clang::Optional<clang::BinaryOperatorKind>
+convertOp(llvm::Instruction::BinaryOps op);
+/// Ensure the expression is signed, or insert a cast.
+clang::Expr *castSigned(clang::ASTContext &Ctx, TypeBuilder &TB,
+                        clang::Expr *E);
+/// Ensure the expression is unsigned, or insert a cast.
+clang::Expr *castUnsigned(clang::ASTContext &Ctx, TypeBuilder &TB,
+                          clang::Expr *E);
 
 } // namespace notdec::backend
 

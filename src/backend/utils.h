@@ -199,5 +199,18 @@ inline clang::UnaryOperator *createUnaryOperator(clang::ASTContext &Ctx,
       VK, clang::OK_Ordinary, clang::SourceLocation(), false,
       clang::FPOptionsOverride());
 }
+
+// create cstylecast
+inline clang::CStyleCastExpr *createCStyleCastExpr(clang::ASTContext &Ctx,
+                                                   clang::QualType QT,
+                                                   clang::ExprValueKind VK,
+                                                   clang::CastKind CK,
+                                                   clang::Expr *E) {
+  return clang::CStyleCastExpr::Create(
+      Ctx, QT, VK, CK, addParenthesis<clang::CStyleCastExpr>(Ctx, E, true),
+      nullptr, clang::FPOptionsOverride(), Ctx.getTrivialTypeSourceInfo(QT),
+      clang::SourceLocation(), clang::SourceLocation());
+}
+
 } // namespace notdec::backend
 #endif

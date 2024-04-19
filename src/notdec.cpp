@@ -1,6 +1,7 @@
 #include "backend/structural-analysis.h"
 #include <iostream>
 #include <llvm/IRReader/IRReader.h>
+#include <llvm/Support/Debug.h>
 #include <string>
 
 #include "llvm/Support/CommandLine.h"
@@ -54,6 +55,27 @@ cl::opt<log_level> logLevel("log-level", cl::desc("Choose log level:"),
                                        clEnumVal(level_debug, "debug")),
                             cl::init(level_notice));
 
+// static ManagedStatic<std::vector<std::string>> CurrentDebugType;
+
+// struct DebugOnlyOpt {
+//   void operator=(const std::string &Val) const {
+//     if (Val.empty())
+//       return;
+//     DebugFlag = true;
+//     SmallVector<StringRef, 8> dbgTypes;
+//     StringRef(Val).split(dbgTypes, ',', -1, false);
+//     for (auto dbgType : dbgTypes)
+//       CurrentDebugType->push_back(std::string(dbgType));
+//   }
+// };
+// static DebugOnlyOpt DebugOnlyOptLoc;
+// cl::opt<DebugOnlyOpt, true, cl::parser<std::string>> debugOnly(
+//     "debug-only",
+//     cl::desc("Enable a specific type of debug output (comma separated list "
+//              "of types)"),
+//     cl::Hidden, cl::ZeroOrMore, cl::value_desc("debug string"),
+//     cl::location(DebugOnlyOptLoc), cl::ValueRequired);
+
 std::string getSuffix(std::string fname) {
   std::size_t ind = fname.find_last_of('.');
   if (ind != std::string::npos) {
@@ -62,8 +84,12 @@ std::string getSuffix(std::string fname) {
   return std::string();
 }
 
-int main(int argc, char *argv[]) {
+namespace llvm {
+void initDebugOptions();
+}
 
+int main(int argc, char *argv[]) {
+  initDebugOptions();
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
   notdec::frontend::options opts;
@@ -72,6 +98,11 @@ int main(int argc, char *argv[]) {
   opts.log_level = logLevel;
   opts.expandMem = expandMem;
   opts.stackRec = stackRec;
+
+  // if log level is debug, also enable debug flag
+  if (logLevel == level_debug) {
+    DebugFlag = true;
+  }
 
   std::string insuffix = getSuffix(inputFilename);
   notdec::frontend::BaseContext ctx(inputFilename, opts);

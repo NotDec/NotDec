@@ -38,7 +38,10 @@
 #include <llvm/IR/GlobalObject.h>
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Operator.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <utility>
@@ -115,13 +118,13 @@ clang::Expr *handleGEP(clang::ASTContext &Ctx, ExprBuilder &EB,
   const clang::Type *Ty = Val->getType().getTypePtr();
   for (unsigned i = 0; i < I.getNumIndices(); i++) {
     llvm::Value *LIndex = *(I.idx_begin() + i);
-    auto IndexNum = llvm::cast<llvm::ConstantInt>(LIndex)->getZExtValue();
     // TODO Assert llvm type to ensure that each step is correct.
     // llvm::Type *lty = I.getTypeAtIndex(I.getSourceElementType(), i);
     if (auto PointerTy = Ty->getAs<clang::PointerType>()) {
       // 1. pointer arithmetic + deref
       Ty = PointerTy->getPointeeType().getTypePtr();
-      if (IndexNum != 0) {
+      if (llvm::isa<llvm::ConstantInt>(LIndex) &&
+          llvm::cast<llvm::ConstantInt>(LIndex)->getZExtValue() != 0) {
         // Create pointer arithmetic
         clang::Expr *Index = EB.visitValue(LIndex);
         Val = createBinaryOperator(Ctx, Val, Index, clang::BO_Add,
@@ -139,6 +142,7 @@ clang::Expr *handleGEP(clang::ASTContext &Ctx, ExprBuilder &EB,
       // 3. field reference
       auto Decl = RecordTy->getDecl();
       auto Field = Decl->field_begin();
+      auto IndexNum = llvm::cast<llvm::ConstantInt>(LIndex)->getZExtValue();
       std::advance(Field, IndexNum);
       // check if the val is deref, if so, then remove it and use arrow expr.
       bool useArrow = false;
@@ -188,41 +192,196 @@ void CFGBuilder::visitLoadInst(llvm::LoadInst &I) {
   addExprOrStmt(I, *E);
 }
 
-void CFGBuilder::visitCmpInst(llvm::CmpInst &I) {
+clang::Expr *handleCmp(clang::ASTContext &Ctx, TypeBuilder &TB, ExprBuilder &EB,
+                       llvm::CmpInst::Predicate OpCode, llvm::Type *Result,
+                       llvm::Value *Op0, llvm::Value *Op1) {
   // handle FCMP_FALSE and FCMP_TRUE case
   // TODO: return typedef TRUE and FALSE
-  if (I.getPredicate() == llvm::CmpInst::FCMP_FALSE) {
+  if (OpCode == llvm::CmpInst::FCMP_FALSE) {
     // create int 0
-    addExprOrStmt(
-        I, *clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 0, false),
-                                          Ctx.IntTy, clang::SourceLocation()));
-    return;
-  } else if (I.getPredicate() == llvm::CmpInst::FCMP_TRUE) {
-    addExprOrStmt(
-        I, *clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 1, false),
-                                          Ctx.IntTy, clang::SourceLocation()));
-    return;
+    return clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 0, false),
+                                         Ctx.IntTy, clang::SourceLocation());
+  } else if (OpCode == llvm::CmpInst::FCMP_TRUE) {
+    return clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 1, false),
+                                         Ctx.IntTy, clang::SourceLocation());
   }
 
-  clang::Optional<clang::BinaryOperatorKind> op = convertOp(I.getPredicate());
+  clang::Optional<clang::BinaryOperatorKind> op = convertOp(OpCode);
   assert(op.hasValue() && "CFGBuilder.visitCmpInst: unexpected predicate");
-  Conversion cv = getSignedness(I.getPredicate());
-  clang::Expr *lhs = EB.visitValue(I.getOperand(0));
+  Conversion cv = getSignedness(OpCode);
+  clang::Expr *lhs = EB.visitValue(Op0);
   if (cv == Signed) {
-    lhs = castSigned(lhs);
+    lhs = castSigned(Ctx, TB, lhs);
   } else if (cv == Unsigned) {
-    lhs = castUnsigned(lhs);
+    lhs = castUnsigned(Ctx, TB, lhs);
   }
-  clang::Expr *rhs = EB.visitValue(I.getOperand(1));
+  clang::Expr *rhs = EB.visitValue(Op1);
   if (cv == Signed) {
-    lhs = castSigned(lhs);
+    lhs = castSigned(Ctx, TB, lhs);
   } else if (cv == Unsigned) {
-    lhs = castUnsigned(lhs);
+    lhs = castUnsigned(Ctx, TB, lhs);
   }
   clang::Expr *cmp = createBinaryOperator(
-      Ctx, lhs, rhs, *op, visitType(*I.getType()), clang::VK_PRValue);
+      Ctx, lhs, rhs, *op, TB.visitType(*Result), clang::VK_PRValue);
+  return cmp;
+}
+
+void CFGBuilder::visitCmpInst(llvm::CmpInst &I) {
+  auto cmp = handleCmp(Ctx, FCtx.getTypeBuilder(), EB, I.getPredicate(),
+                       I.getType(), I.getOperand(0), I.getOperand(1));
   addExprOrStmt(I, *cmp);
   return;
+}
+
+/// Get the signedness of the binary operator.
+Conversion getSignedness(llvm::Instruction::BinaryOps op) {
+  switch (op) {
+  case llvm::Instruction::Add:
+  case llvm::Instruction::Sub:
+  case llvm::Instruction::Mul:
+  case llvm::Instruction::And:
+  case llvm::Instruction::Or:
+  case llvm::Instruction::Xor:
+  case llvm::Instruction::Shl:
+    return None;
+  case llvm::Instruction::LShr:
+    return Logical;
+  case llvm::Instruction::AShr:
+    return Arithmetic;
+  case llvm::Instruction::UDiv:
+  case llvm::Instruction::URem:
+    return Unsigned;
+  case llvm::Instruction::SDiv:
+  case llvm::Instruction::SRem:
+    return Signed;
+  case llvm::Instruction::FAdd:
+  case llvm::Instruction::FSub:
+  case llvm::Instruction::FMul:
+  case llvm::Instruction::FDiv:
+  case llvm::Instruction::FRem:
+    return None;
+  default:
+    return None;
+  }
+}
+
+Conversion getSignedness(llvm::CmpInst::Predicate op) {
+  switch (op) {
+  case llvm::CmpInst::ICMP_UGT:
+  case llvm::CmpInst::ICMP_UGE:
+  case llvm::CmpInst::ICMP_ULT:
+  case llvm::CmpInst::ICMP_ULE:
+    return Unsigned;
+  case llvm::CmpInst::ICMP_SGT:
+  case llvm::CmpInst::ICMP_SGE:
+  case llvm::CmpInst::ICMP_SLT:
+  case llvm::CmpInst::ICMP_SLE:
+    return Signed;
+  case llvm::CmpInst::ICMP_EQ:
+  case llvm::CmpInst::ICMP_NE:
+    return None;
+  default:
+    return None;
+  }
+}
+
+/// Convert the LLVM compare operator to Clang binary operator op.
+clang::Optional<clang::BinaryOperatorKind>
+convertOp(llvm::CmpInst::Predicate op) {
+  switch (op) {
+  case llvm::CmpInst::Predicate::ICMP_EQ:
+    return clang::BO_EQ;
+  case llvm::CmpInst::Predicate::ICMP_NE:
+    return clang::BO_NE;
+  case llvm::CmpInst::Predicate::ICMP_UGT:
+    return clang::BO_GT;
+  case llvm::CmpInst::Predicate::ICMP_UGE:
+    return clang::BO_GE;
+  case llvm::CmpInst::Predicate::ICMP_ULT:
+    return clang::BO_LT;
+  case llvm::CmpInst::Predicate::ICMP_ULE:
+    return clang::BO_LE;
+  case llvm::CmpInst::Predicate::ICMP_SGT:
+    return clang::BO_GT;
+  case llvm::CmpInst::Predicate::ICMP_SGE:
+    return clang::BO_GE;
+  case llvm::CmpInst::Predicate::ICMP_SLT:
+    return clang::BO_LT;
+  case llvm::CmpInst::Predicate::ICMP_SLE:
+    return clang::BO_LE;
+  case llvm::CmpInst::FCMP_FALSE:
+  case llvm::CmpInst::FCMP_TRUE:
+    llvm_unreachable("CFGBuilder.convertOp: FCMP_FALSE or FCMP_TRUE should "
+                     "be considered ahead of time.");
+  // TODO handle ordered and unordered comparison
+  // probably by converting unordered comparison to ordered comparison plus
+  // negation, or a function call.
+  case llvm::CmpInst::FCMP_OEQ:
+  case llvm::CmpInst::FCMP_UEQ:
+    return clang::BO_EQ;
+  case llvm::CmpInst::FCMP_OGT:
+  case llvm::CmpInst::FCMP_UGT:
+    return clang::BO_GT;
+  case llvm::CmpInst::FCMP_OGE:
+  case llvm::CmpInst::FCMP_UGE:
+    return clang::BO_GE;
+  case llvm::CmpInst::FCMP_OLT:
+  case llvm::CmpInst::FCMP_ULT:
+    return clang::BO_LT;
+  case llvm::CmpInst::FCMP_OLE:
+  case llvm::CmpInst::FCMP_ULE:
+    return clang::BO_LE;
+  case llvm::CmpInst::FCMP_ONE:
+  case llvm::CmpInst::FCMP_UNE:
+    return clang::BO_NE;
+  case llvm::CmpInst::FCMP_ORD:
+  case llvm::CmpInst::FCMP_UNO:
+    llvm::errs() << "CFGBuilder.convertOp: FCMP_ORD or FCMP_UNO handling "
+                    "not implemented\n";
+  case llvm::CmpInst::BAD_FCMP_PREDICATE:
+  case llvm::CmpInst::BAD_ICMP_PREDICATE:
+    return clang::None;
+  }
+}
+
+/// Convert the LLVM binary operator to a Clang binary operator op.
+clang::Optional<clang::BinaryOperatorKind>
+convertOp(llvm::Instruction::BinaryOps op) {
+  switch (op) {
+  case llvm::Instruction::Add:
+  case llvm::Instruction::FAdd:
+    return clang::BO_Add;
+  case llvm::Instruction::Sub:
+  case llvm::Instruction::FSub:
+    return clang::BO_Sub;
+  case llvm::Instruction::Mul:
+  case llvm::Instruction::FMul:
+    return clang::BO_Mul;
+  case llvm::Instruction::UDiv:
+  case llvm::Instruction::SDiv:
+  case llvm::Instruction::FDiv:
+    return clang::BO_Div;
+  case llvm::Instruction::URem:
+  case llvm::Instruction::SRem:
+  case llvm::Instruction::FRem:
+    return clang::BO_Rem;
+
+  case llvm::Instruction::Shl:
+    return clang::BO_Shl;
+  case llvm::Instruction::LShr:
+    return clang::BO_Shr;
+  case llvm::Instruction::AShr:
+    return clang::BO_Shl;
+
+  case llvm::Instruction::And:
+    return clang::BO_And;
+  case llvm::Instruction::Or:
+    return clang::BO_Or;
+  case llvm::Instruction::Xor:
+    return clang::BO_Xor;
+  default:
+    return clang::None;
+  }
 }
 
 void CFGBuilder::visitCallInst(llvm::CallInst &I) {
@@ -304,6 +463,7 @@ void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
     clang::DeclStmt *DS = new (getASTContext())
         clang::DeclStmt(clang::DeclGroupRef(decl), clang::SourceLocation(),
                         clang::SourceLocation());
+
     // Use Assign stmt
     // clang::DeclRefExpr *ref = clang::DeclRefExpr::Create(
     //     getASTContext(), clang::NestedNameSpecifierLoc(),
@@ -315,6 +475,7 @@ void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
     //     getASTContext(), ref, expr, clang::BO_Assign,
     //     expr->getType(), clang::VK_PRValue);
     block.appendStmt(DS);
+    ExprMap[&v] = makeDeclRefExpr(decl);
   }
 }
 
@@ -330,9 +491,10 @@ clang::DeclRefExpr *makeDeclRefExpr(clang::ValueDecl *D,
   return DR;
 }
 
-clang::Expr *CFGBuilder::castSigned(clang::Expr *E) {
+clang::Expr *castSigned(clang::ASTContext &Ctx, TypeBuilder &TB,
+                        clang::Expr *E) {
   if (E->getType()->isUnsignedIntegerType()) {
-    auto ty = makeSigned(E->getType());
+    auto ty = TB.makeSigned(Ctx, E->getType());
     return clang::CStyleCastExpr::Create(
         Ctx, ty, clang::VK_PRValue, clang::CK_IntegralCast, E, nullptr,
         clang::FPOptionsOverride(), Ctx.CreateTypeSourceInfo(ty),
@@ -341,9 +503,10 @@ clang::Expr *CFGBuilder::castSigned(clang::Expr *E) {
   return E;
 }
 
-clang::Expr *CFGBuilder::castUnsigned(clang::Expr *E) {
+clang::Expr *castUnsigned(clang::ASTContext &Ctx, TypeBuilder &TB,
+                          clang::Expr *E) {
   if (E->getType()->isSignedIntegerType()) {
-    auto ty = makeUnsigned(E->getType());
+    auto ty = TB.makeUnsigned(Ctx, E->getType());
     return clang::CStyleCastExpr::Create(
         Ctx, ty, clang::VK_PRValue, clang::CK_IntegralCast, E, nullptr,
         clang::FPOptionsOverride(), Ctx.CreateTypeSourceInfo(ty),
@@ -352,26 +515,144 @@ clang::Expr *CFGBuilder::castUnsigned(clang::Expr *E) {
   return E;
 }
 
-void CFGBuilder::visitBinaryOperator(llvm::BinaryOperator &I) {
-  clang::Optional<clang::BinaryOperatorKind> op = convertOp(I.getOpcode());
-  assert(op.hasValue() && "CFGBuilder.visitBinaryOperator: unexpected op type");
-  Conversion cv = getSignedness(I.getOpcode());
-  // insert conversion if needed
-  clang::Expr *lhs = EB.visitValue(I.getOperand(0));
-  if (cv == Signed || cv == Arithmetic) {
-    lhs = castSigned(lhs);
-  } else if (cv == Unsigned || cv == Logical) {
-    lhs = castUnsigned(lhs);
+void CFGBuilder::visitUnaryOperator(llvm::UnaryOperator &I) {
+  clang::UnaryOperatorKind op;
+  switch (I.getOpcode()) {
+  case llvm::Instruction::FNeg:
+    op = clang::UO_Minus;
+    break;
+  default:
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "CFGBuilder.visitUnaryOperator: unexpected opcode: "
+                 << I.getOpcode() << "\n";
+    std::abort();
   }
-  clang::Expr *rhs = EB.visitValue(I.getOperand(1));
+  clang::Expr *expr =
+      createUnaryOperator(Ctx, EB.visitValue(I.getOperand(0)), op,
+                          visitType(*I.getType()), clang::VK_PRValue);
+  addExprOrStmt(I, *expr);
+}
+
+/// Handle the cast instruction. Shared by instruction visitor and expr
+/// builder (for ConstantExpr operators).
+clang::Expr *handleCast(clang::ASTContext &Ctx, llvm::LLVMContext &LCtx,
+                        ExprBuilder &EB, TypeBuilder &TB,
+                        llvm::Instruction::CastOps OpCode, llvm::Type *srcTy,
+                        llvm::Type *destTy, llvm::Value *Operand) {
+  // If zext i1 to integer, then ignore.
+  if (srcTy->isIntegerTy(1)) {
+    srcTy = llvm::Type::getInt32Ty(LCtx);
+  }
+  if (destTy->isIntegerTy(1)) {
+    destTy = llvm::Type::getInt32Ty(LCtx);
+  }
+  if (srcTy == destTy) {
+    // no need to cast
+    return nullptr;
+  }
+  // TODO handle signness and ZExt SExt
+  clang::CastKind ck;
+  switch (OpCode) {
+  case llvm::Instruction::Trunc:
+    ck = clang::CK_IntegralCast;
+    break;
+  case llvm::Instruction::ZExt:
+    ck = clang::CK_IntegralCast;
+    break;
+  case llvm::Instruction::SExt:
+    ck = clang::CK_IntegralCast;
+    break;
+  case llvm::Instruction::FPTrunc:
+    ck = clang::CK_FloatingCast;
+    break;
+  case llvm::Instruction::FPExt:
+    ck = clang::CK_FloatingCast;
+    break;
+  case llvm::Instruction::UIToFP:
+    ck = clang::CK_IntegralToFloating;
+    break;
+  case llvm::Instruction::SIToFP:
+    ck = clang::CK_IntegralToFloating;
+    break;
+  case llvm::Instruction::FPToUI:
+    if (destTy->isIntegerTy(1)) {
+      ck = clang::CK_FloatingToBoolean;
+    } else {
+      ck = clang::CK_FloatingToIntegral;
+    }
+    break;
+  case llvm::Instruction::FPToSI:
+    ck = clang::CK_FloatingToIntegral;
+    break;
+  case llvm::Instruction::PtrToInt:
+    if (destTy->isIntegerTy(1)) {
+      ck = clang::CK_PointerToBoolean;
+    } else {
+      ck = clang::CK_PointerToIntegral;
+    }
+    break;
+  case llvm::Instruction::IntToPtr:
+    ck = clang::CK_IntegralToPointer;
+    break;
+  case llvm::Instruction::BitCast:
+    ck = clang::CK_BitCast;
+    break;
+  case llvm::Instruction::AddrSpaceCast:
+    ck = clang::CK_AddressSpaceConversion;
+    break;
+  default:
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "CFGBuilder.visitCastInst: unexpected opcode: " << OpCode
+                 << "\n";
+    std::abort();
+  }
+  clang::Expr *expr =
+      createCStyleCastExpr(Ctx, TB.visitType(*destTy), clang::VK_PRValue, ck,
+                           EB.visitValue(Operand));
+  return expr;
+}
+
+void CFGBuilder::visitCastInst(llvm::CastInst &I) {
+  auto srcTy = I.getSrcTy();
+  auto destTy = I.getDestTy();
+  auto expr = handleCast(Ctx, I.getContext(), EB, FCtx.getTypeBuilder(),
+                         I.getOpcode(), srcTy, destTy, I.getOperand(0));
+  if (expr == nullptr) {
+    // no need to cast
+    FCtx.addMapping(I, *EB.visitValue(I.getOperand(0)));
+    return;
+  }
+  addExprOrStmt(I, *expr);
+}
+
+clang::Expr *handleBinary(clang::ASTContext &Ctx, ExprBuilder &EB,
+                          TypeBuilder &TB, llvm::Instruction::BinaryOps OpCode,
+                          llvm::Type *Result, llvm::Value *L, llvm::Value *R) {
+  clang::Optional<clang::BinaryOperatorKind> op = convertOp(OpCode);
+  assert(op.hasValue() && "CFGBuilder.visitBinaryOperator: unexpected op type");
+  Conversion cv = getSignedness(OpCode);
+  // insert conversion if needed
+  clang::Expr *lhs = EB.visitValue(L);
+  if (cv == Signed || cv == Arithmetic) {
+    lhs = castSigned(Ctx, TB, lhs);
+  } else if (cv == Unsigned || cv == Logical) {
+    lhs = castUnsigned(Ctx, TB, lhs);
+  }
+  clang::Expr *rhs = EB.visitValue(R);
   if (cv == Signed) {
-    rhs = castSigned(rhs);
+    rhs = castSigned(Ctx, TB, rhs);
   } else if (cv == Unsigned) {
-    rhs = castUnsigned(rhs);
+    rhs = castUnsigned(Ctx, TB, rhs);
   }
 
   clang::Expr *binop = createBinaryOperator(
-      Ctx, lhs, rhs, op.getValue(), visitType(*I.getType()), clang::VK_PRValue);
+      Ctx, lhs, rhs, op.getValue(), TB.visitType(*Result), clang::VK_PRValue);
+  return binop;
+}
+
+void CFGBuilder::visitBinaryOperator(llvm::BinaryOperator &I) {
+  auto binop = handleBinary(Ctx, EB, FCtx.getTypeBuilder(), I.getOpcode(),
+                            I.getType(), I.getOperand(0), I.getOperand(1));
   addExprOrStmt(I, *binop);
   return;
 }
@@ -787,7 +1068,8 @@ clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
   } else if (Ty.isVoidTy()) {
     return Ctx.VoidTy;
   } else if (Ty.isIntegerTy(1)) {
-    return Ctx.BoolTy;
+    return Ctx.IntTy;
+    // return Ctx.BoolTy;
   }
 
   if (Ty.isIntegerTy()) {
@@ -824,7 +1106,7 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
     // struct and array
     llvm::SmallVector<clang::Expr *> vec(CA->getNumOperands());
     for (unsigned i = 0; i < CA->getNumOperands(); i++) {
-      vec[i] = visitValue(CA->getOperand(i));
+      vec[i] = visitValue(CA->getOperand(i), Ty);
     }
     return new (Ctx) clang::InitListExpr(Ctx, clang::SourceLocation(), vec,
                                          clang::SourceLocation());
@@ -833,7 +1115,7 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
     // struct and array
     llvm::SmallVector<clang::Expr *> vec(CS->getNumOperands());
     for (unsigned i = 0; i < CS->getNumOperands(); i++) {
-      vec[i] = visitValue(CS->getOperand(i));
+      vec[i] = visitValue(CS->getOperand(i), Ty);
     }
     return new (Ctx) clang::InitListExpr(Ctx, clang::SourceLocation(), vec,
                                          clang::SourceLocation());
@@ -855,8 +1137,13 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
     return clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, 0, false),
                                          Ctx.IntTy, clang::SourceLocation());
   } else if (llvm::ConstantInt *CI = llvm::dyn_cast<llvm::ConstantInt>(&C)) {
-    return clang::IntegerLiteral::Create(Ctx, CI->getValue(),
-                                         visitType(*CI->getType()),
+    auto val = CI->getValue();
+    if (val.getBitWidth() == 1) {
+      val = val.zext(32);
+    }
+    // TODO: eliminate Ui8 Ui16 i8 i16 suffix?
+    // https://stackoverflow.com/questions/33659846/microsoft-integer-literal-extensions-where-documented
+    return clang::IntegerLiteral::Create(Ctx, val, visitType(*CI->getType()),
                                          clang::SourceLocation());
   } else if (llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(&C)) {
     return clang::FloatingLiteral::Create(Ctx, CFP->getValueAPF(), true,
@@ -867,6 +1154,59 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
     // handle gep
     if (CE->getOpcode() == llvm::Instruction::GetElementPtr) {
       return handleGEP(Ctx, *this, *llvm::cast<llvm::GEPOperator>(CE));
+    }
+    // handle casts
+    switch (CE->getOpcode()) {
+    case llvm::Instruction::Trunc:
+    case llvm::Instruction::ZExt:
+    case llvm::Instruction::SExt:
+    case llvm::Instruction::FPTrunc:
+    case llvm::Instruction::FPExt:
+    case llvm::Instruction::UIToFP:
+    case llvm::Instruction::SIToFP:
+    case llvm::Instruction::FPToUI:
+    case llvm::Instruction::FPToSI:
+    case llvm::Instruction::PtrToInt:
+    case llvm::Instruction::IntToPtr:
+    case llvm::Instruction::BitCast:
+    case llvm::Instruction::AddrSpaceCast:
+      return handleCast(Ctx, CE->getContext(), *this, TB,
+                        (llvm::Instruction::CastOps)CE->getOpcode(),
+                        CE->getOperand(0)->getType(), CE->getType(),
+                        CE->getOperand(0));
+
+    case llvm::Instruction::ICmp:
+    case llvm::Instruction::FCmp:
+      return handleCmp(Ctx, TB, *this,
+                       (llvm::CmpInst::Predicate)CE->getPredicate(),
+                       CE->getType(), CE->getOperand(0), CE->getOperand(1));
+    case llvm::Instruction::Add:
+    case llvm::Instruction::FAdd:
+    case llvm::Instruction::Sub:
+    case llvm::Instruction::FSub:
+    case llvm::Instruction::Mul:
+    case llvm::Instruction::FMul:
+    case llvm::Instruction::UDiv:
+    case llvm::Instruction::SDiv:
+    case llvm::Instruction::FDiv:
+    case llvm::Instruction::URem:
+    case llvm::Instruction::SRem:
+    case llvm::Instruction::FRem:
+    case llvm::Instruction::Shl:
+    case llvm::Instruction::LShr:
+    case llvm::Instruction::AShr:
+    case llvm::Instruction::And:
+    case llvm::Instruction::Or:
+    case llvm::Instruction::Xor:
+      return handleBinary(Ctx, *this, TB,
+                          (llvm::Instruction::BinaryOps)CE->getOpcode(),
+                          CE->getType(), CE->getOperand(0), CE->getOperand(1));
+    default:
+      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                   << "UnImplemented: ExprBuilder.visitConstant cannot handle "
+                      "ConstantExpr: "
+                   << *CE << "\n";
+      std::abort();
     }
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "

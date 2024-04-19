@@ -36,8 +36,7 @@ void Goto::execute() {
       // }
       auto Succ = *Current->succ_begin();
       auto label = getBlockLabel(Succ.getBlock());
-      auto Goto = new (ASTCtx) clang::GotoStmt(label, clang::SourceLocation(),
-                                               clang::SourceLocation());
+      auto Goto = createGotoStmt(label);
       Current->appendStmt(Goto);
     } else if (succ_size == 2) {
       auto tmp = Current->succ_begin();
@@ -59,15 +58,13 @@ void Goto::execute() {
         cond = createUnaryOperator(ASTCtx, cond, clang::UO_LNot, ASTCtx.BoolTy,
                                    clang::VK_PRValue);
       }
-      auto GotoB1 = new (ASTCtx) clang::GotoStmt(
-          getBlockLabel(b1), clang::SourceLocation(), clang::SourceLocation());
+      auto GotoB1 = createGotoStmt(getBlockLabel(b1));
       auto IfGotoB1 = clang::IfStmt::Create(
           ASTCtx, clang::SourceLocation(), clang::IfStatementKind::Ordinary,
           nullptr, nullptr, cond, clang::SourceLocation(),
           clang::SourceLocation(), GotoB1, clang::SourceLocation());
       Current->appendStmt(IfGotoB1);
-      auto GotoB2 = new (ASTCtx) clang::GotoStmt(
-          getBlockLabel(b2), clang::SourceLocation(), clang::SourceLocation());
+      auto GotoB2 = createGotoStmt(getBlockLabel(b2));
       Current->appendStmt(GotoB2);
     } else if (succ_size > 2) {
       // TODO handle switch.
@@ -114,7 +111,8 @@ clang::Stmt *getStmt(CFGElement e) {
 
 // remote all NullStmt and merge GotoStmt with LabelStmt
 void Goto::simplifyBlock(CFGBlock &Block) {
-  for (auto it = Block.begin(); it != Block.end(); ++it) {
+  // remove two adjacent goto + label
+  for (auto it = Block.begin(); it != Block.end();) {
     if (auto stmt = getStmt(*it)) {
       if (auto gotoStmt = llvm::dyn_cast<clang::GotoStmt>(stmt)) {
         auto next = std::next(it);
@@ -127,23 +125,47 @@ void Goto::simplifyBlock(CFGBlock &Block) {
           }
         }
       }
-
-      // TODO: if label has no user, remove it
     }
+    // increment the iterator if not continue
+    ++it;
   }
 
-  for (auto it = Block.begin(); it != Block.end(); ++it) {
+  // replace adjacent label with the last label
+  for (auto it = Block.begin(); it != Block.end();) {
     if (auto stmt = getStmt(*it)) {
-      // if (auto label = llvm::dyn_cast<clang::LabelStmt>(stmt)) {
-      //   if (llvm::isa<clang::NullStmt>(label->getSubStmt()) &&
-      //       std::next(it) != Block.end()) {
-      //     if (auto next = getStmt(*std::next(it))) {
-      //       llvm::errs() << "Folding LabelStmt\n";
-      //       label->setSubStmt(next);
-      //       Block.erase(std::next(it));
-      //     }
-      //   }
-      // }
+      // for each label stmt
+      if ((llvm::isa<clang::LabelStmt>(stmt)) && std::next(it) != Block.end()) {
+        clang::LabelStmt *label = llvm::cast<clang::LabelStmt>(stmt);
+        if (auto nextLabel =
+                llvm::dyn_cast<clang::LabelStmt>(getStmt(*std::next(it)))) {
+          llvm::errs() << "Merge adjacent label: " << label->getName()
+                       << " and " << nextLabel->getName() << "\n";
+
+          assert(llvm::isa<clang::NullStmt>(label->getSubStmt()));
+          assert(llvm::isa<clang::NullStmt>(nextLabel->getSubStmt()));
+          replaceAllUsesWith(label->getDecl(), nextLabel->getDecl());
+          it = Block.erase(it);
+          continue;
+        }
+      }
+    }
+    // increment the iterator if not continue
+    ++it;
+  }
+
+  // fold label with NullStmt and remove NullStmt
+  for (auto it = Block.begin(); it != Block.end();) {
+    if (auto stmt = getStmt(*it)) {
+      if (auto label = llvm::dyn_cast<clang::LabelStmt>(stmt)) {
+        if (llvm::isa<clang::NullStmt>(label->getSubStmt()) &&
+            std::next(it) != Block.end()) {
+          if (auto next = getStmt(*std::next(it))) {
+            llvm::errs() << "Folding LabelStmt " << label->getName() << "\n";
+            label->setSubStmt(next);
+            Block.erase(std::next(it));
+          }
+        }
+      }
 
       // remove NullStmt
       if (auto term = llvm::dyn_cast<clang::NullStmt>(stmt)) {
@@ -152,6 +174,8 @@ void Goto::simplifyBlock(CFGBlock &Block) {
         continue;
       }
     }
+    // increment the iterator if not continue
+    ++it;
   }
 }
 
