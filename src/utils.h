@@ -1,6 +1,7 @@
 #ifndef _NOTDEC_UTILS_H_
 #define _NOTDEC_UTILS_H_
 
+#include "llvm/Support/CommandLine.h"
 #include <cstdint>
 #include <cstring>
 #include <sstream>
@@ -20,6 +21,8 @@ enum log_level {
 };
 
 extern const char *MEM_NAME;
+
+extern llvm::cl::opt<log_level> logLevel;
 
 template <typename T> std::string int_to_hex(T i) {
   std::stringstream stream;

@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
     std::cout << "no extension for input file. exiting." << std::endl;
     return 0;
   } else if (insuffix == ".ll" || insuffix == ".bc") {
-    std::cout << "directly loading LLVM IR." << std::endl;
+    std::cout << "Loading LLVM IR: " << inputFilename << std::endl;
     SMDiagnostic Err;
     ctx.setModule(parseIRFile(inputFilename, Err, ctx.context));
     // TODO: enable optimization?
@@ -132,7 +132,7 @@ int main(int argc, char *argv[]) {
       std::abort();
     }
     notdec::backend::decompileModule(ctx.getModule(), os);
-    std::cout << "Decompile to " << outputFilename << std::endl;
+    std::cout << "Decompile result: " << outputFilename << std::endl;
   }
 
   return 0;

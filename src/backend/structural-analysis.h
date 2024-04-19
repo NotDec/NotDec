@@ -16,6 +16,7 @@
 #include <clang/Basic/Specifiers.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/BitVector.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/IR/BasicBlock.h>
@@ -50,7 +51,8 @@ struct ValueNamer {
   unsigned int FuncCount = 0;
   unsigned int StructCount = 0;
   unsigned int GlobCount = 0;
-  std::map<llvm::Function *, unsigned int> TempCount;
+  unsigned int TempCount = 0;
+  unsigned int ArgCount = 0;
   llvm::StringRef getBlockName(llvm::BasicBlock &Val, unsigned int id) {
     return getValueName(Val, "block_", id);
   }
@@ -63,9 +65,18 @@ struct ValueNamer {
   llvm::StringRef getStructName(llvm::StructType &Ty) {
     return getTypeName(Ty, "struct_", StructCount);
   }
-  llvm::StringRef getTempName(llvm::Value &Val, llvm::Function *func) {
-    return getValueName(Val, "temp_", TempCount[func]);
+  llvm::StringRef getTempName(llvm::Value &Val) {
+    return getValueName(Val, "temp_", TempCount);
   }
+  llvm::StringRef getArgName(llvm::Value &Val) {
+    return getValueName(Val, "arg_", ArgCount);
+  }
+  // clear arg count and temp count
+  void clearFuncCount() {
+    ArgCount = 0;
+    TempCount = 0;
+  }
+  // Currently LLVM field has no name
   llvm::StringRef getFieldName(unsigned int id) {
     Buf.clear();
     llvm::raw_svector_ostream OS(Buf);
@@ -362,13 +373,32 @@ protected:
   }
 
 public:
+  void visitArgs() {
+    llvm::SmallVector<clang::ParmVarDecl *, 16> Params;
+    // create param var decl for arguments
+    for (llvm::Argument &Arg : FCtx.getFunction().args()) {
+      clang::IdentifierInfo *II =
+          FCtx.getIdentifierInfo(FCtx.getValueNamer().getArgName(Arg));
+      clang::ParmVarDecl *PD = clang::ParmVarDecl::Create(
+          Ctx, FCtx.getFunctionDecl(), clang::SourceLocation(),
+          clang::SourceLocation(), II,
+          FCtx.getTypeBuilder().visitType(*Arg.getType()), nullptr,
+          clang::SC_None, nullptr);
+      addExprOrStmt(Arg, *makeDeclRefExpr(PD));
+      FCtx.getFunctionDecl()->addDecl(PD);
+      Params.push_back(PD);
+    }
+    // set params for function Decl
+    FCtx.getFunctionDecl()->setParams(Params);
+  }
   CFGBlock *run(llvm::BasicBlock &BB) {
     auto ret = FCtx.createBlock(BB);
-    if (BB.isEntryBlock()) {
-      FCtx.getCFG().setEntry(&*ret);
-    }
     // set current block so that visitor for terminator can insert CFGTerminator
     setBlock(&*ret);
+    if (BB.isEntryBlock()) {
+      FCtx.getCFG().setEntry(&*ret);
+      visitArgs();
+    }
     llvm::InstVisitor<CFGBuilder>::visit(BB);
     return &*ret;
   }
@@ -551,11 +581,16 @@ public:
         /* FPFeatures */ clang::FPOptionsOverride());
   }
 
-  void visitBinaryOperator(llvm::BinaryOperator &I);
   void visitReturnInst(llvm::ReturnInst &I);
   void visitUnreachableInst(llvm::UnreachableInst &I) {
     // TODO create call statement to something like abort.
   }
+  void visitBranchInst(llvm::BranchInst &I) {
+    if (I.isConditional()) {
+      Blk->setTerminator(CFGTerminator(EB.visitValue(I.getCondition())));
+    }
+  }
+  void visitBinaryOperator(llvm::BinaryOperator &I);
   void visitCallInst(llvm::CallInst &I);
   void visitCmpInst(llvm::CmpInst &I);
   void visitAllocaInst(llvm::AllocaInst &I);

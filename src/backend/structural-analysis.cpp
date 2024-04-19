@@ -29,7 +29,9 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
+#include <llvm/IR/Argument.h>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -42,8 +44,6 @@
 #include <utility>
 
 namespace notdec::backend {
-
-static int LogLevel = level_debug;
 
 /// Check if the block is the entry block of the function, or a must via block
 /// that follows the entry.
@@ -85,8 +85,7 @@ void CFGBuilder::visitAllocaInst(llvm::AllocaInst &I) {
   // check if the instruction is in the entry block.
   if (isMustViaBlock(*I.getParent())) {
     // create a local variable
-    auto II = FCtx.getIdentifierInfo(
-        FCtx.getValueNamer().getTempName(I, &FCtx.getFunction()));
+    auto II = FCtx.getIdentifierInfo(FCtx.getValueNamer().getTempName(I));
     clang::VarDecl *VD = clang::VarDecl::Create(
         Ctx, FCtx.getFunctionDecl(), clang::SourceLocation(),
         clang::SourceLocation(), II,
@@ -274,6 +273,12 @@ ValueNamer &SAFuncContext::getValueNamer() {
 
 void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
                                   CFGBlock &block) {
+  // non-instruction or expr-like instruction.
+  if (!llvm::isa<llvm::Instruction>(&v) || llvm::isa<llvm::AllocaInst>(&v) ||
+      llvm::isa<llvm::Argument>(&v)) {
+    ExprMap[&v] = &llvm::cast<clang::Expr>(Stmt);
+    return;
+  }
   if (v.getNumUses() == 0) {
     // Treat as stmt
     block.appendStmt(&Stmt);
@@ -282,18 +287,13 @@ void SAFuncContext::addExprOrStmt(llvm::Value &v, clang::Stmt &Stmt,
   assert(llvm::isa<clang::Expr>(&Stmt) &&
          "SAFuncContext.addExprOrStmt: Instruction has uses but is not Expr?");
   auto &Expr = llvm::cast<clang::Expr>(Stmt);
-  // non-instruction or expr-like instruction.
-  if (!llvm::isa<llvm::Instruction>(&v) || llvm::isa<llvm::AllocaInst>(&v)) {
-    ExprMap[&v] = &Expr; // directly insert if not instruction
-    return;
-  }
   auto &inst = *llvm::cast<llvm::Instruction>(&v);
   if (onlyUsedInBlock(inst)) {
     // Has one use and is in the same block
     ExprMap[&v] = &Expr; // wait to be folded
   } else {
     // Create a local variable for it, in order to be faithful to the IR.
-    auto Name = getValueNamer().getTempName(inst, &Func);
+    auto Name = getValueNamer().getTempName(inst);
 
     llvm::SmallString<128> Buf;
     clang::IdentifierInfo *II2 = getIdentifierInfo(Name);
@@ -438,7 +438,7 @@ void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &OS) {
     SAFuncContext &FuncCtx =
         Ctx.getFuncContext(const_cast<llvm::Function &>(F));
     FuncCtx.run();
-    if (LogLevel >= level_debug) {
+    if (logLevel >= level_debug) {
       llvm::errs() << "Function: " << F.getName() << "\n";
       FuncCtx.getFunctionDecl()->dump();
     }
@@ -514,6 +514,8 @@ void SAContext::createDecls() {
 
   // create function decls
   for (llvm::Function &F : M) {
+    getValueNamer().clearFuncCount();
+    llvm::SmallVector<clang::ParmVarDecl *, 16> Params;
     // llvm::errs() << "Function: " << F.getName() << "\n";
     // create function decl
     clang::IdentifierInfo *II =
@@ -525,6 +527,19 @@ void SAContext::createDecls() {
         clang::SourceLocation(), clang::SourceLocation(), II,
         TB.visitFunctionType(*F.getFunctionType(), EPI), nullptr,
         getStorageClass(F));
+
+    // create function parameters
+    for (llvm::Argument &Arg : F.args()) {
+      clang::IdentifierInfo *ArgII =
+          getIdentifierInfo(getValueNamer().getArgName(Arg));
+      clang::ParmVarDecl *PVD = clang::ParmVarDecl::Create(
+          getASTContext(), FD, clang::SourceLocation(), clang::SourceLocation(),
+          ArgII, TB.visitType(*Arg.getType()), nullptr, clang::SC_None,
+          nullptr);
+      Params.push_back(PVD);
+    }
+    FD->setParams(Params);
+
     getASTContext().getTranslationUnitDecl()->addDecl(FD);
     globalDecls.insert(std::make_pair(&F, FD));
   }
@@ -534,6 +549,9 @@ void SAContext::createDecls() {
     clang::IdentifierInfo *II =
         getIdentifierInfo(getValueNamer().getGlobName(GV));
     auto Ty = TB.visitType(*GV.getValueType());
+    if (GV.isConstant()) {
+      Ty = Ty.withConst();
+    }
     clang::VarDecl *VD = clang::VarDecl::Create(
         getASTContext(), getASTContext().getTranslationUnitDecl(),
         clang::SourceLocation(), clang::SourceLocation(), II, Ty, nullptr,
@@ -555,6 +573,7 @@ void SAContext::createDecls() {
 void SAFuncContext::run() {
   // will not run over declaration
   assert(!Func.isDeclaration());
+  ctx.getValueNamer().clearFuncCount();
   auto PrevFD = ctx.getFunctionDecl(Func);
   assert(PrevFD != nullptr && "SAFuncContext::run: FunctionDecl is null, not "
                               "created by `SAContext::createDecls`?");
@@ -588,14 +607,15 @@ void SAFuncContext::run() {
 
   // connect the edges
   for (llvm::BasicBlock &bb : Func) {
-    for (auto succ : llvm::successors(&bb)) {
+    auto term = bb.getTerminator();
+    for (auto succ : llvm::successors(term)) {
       auto src = getBlock(bb);
       auto dst = getBlock(*succ);
       src->addSuccessor(CFGBlock::AdjacentBlock(&*dst));
     }
   }
 
-  if (LogLevel >= level_debug) {
+  if (logLevel >= level_debug) {
     llvm::errs() << "========" << Func.getName() << ": "
                  << "Before Structural Analysis ========"
                  << "\n";
@@ -606,7 +626,7 @@ void SAFuncContext::run() {
   Goto SA(*this);
   SA.execute();
 
-  if (LogLevel >= level_debug) {
+  if (logLevel >= level_debug) {
     llvm::errs() << "========" << Func.getName() << ": "
                  << "After Structural Analysis ========"
                  << "\n";
@@ -668,7 +688,7 @@ clang::Expr *ExprBuilder::visitValue(llvm::Value *Val, clang::QualType Ty) {
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "UnImplemented: ExprBuilder.visitValue cannot handle: "
-                 << Val << "\n";
+                 << *Val << "\n";
     std::abort();
   }
 }
@@ -774,7 +794,7 @@ clang::QualType TypeBuilder::visitType(llvm::Type &Ty) {
     // TODO get signed or unsigned
     auto ret = Ctx.getIntTypeForBitwidth(Ty.getIntegerBitWidth(), false);
     if (ret.isNull()) {
-      if (LogLevel >= level_warning) {
+      if (logLevel >= level_warning) {
         llvm::errs() << "Warning: cannot find exact type for: " << Ty << "\n";
       }
       ret = Ctx.getBitIntType(true, Ty.getIntegerBitWidth());
@@ -805,6 +825,15 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
     llvm::SmallVector<clang::Expr *> vec(CA->getNumOperands());
     for (unsigned i = 0; i < CA->getNumOperands(); i++) {
       vec[i] = visitValue(CA->getOperand(i));
+    }
+    return new (Ctx) clang::InitListExpr(Ctx, clang::SourceLocation(), vec,
+                                         clang::SourceLocation());
+  } else if (llvm::ConstantDataSequential *CS =
+                 llvm::dyn_cast<llvm::ConstantDataSequential>(&C)) {
+    // struct and array
+    llvm::SmallVector<clang::Expr *> vec(CS->getNumOperands());
+    for (unsigned i = 0; i < CS->getNumOperands(); i++) {
+      vec[i] = visitValue(CS->getOperand(i));
     }
     return new (Ctx) clang::InitListExpr(Ctx, clang::SourceLocation(), vec,
                                          clang::SourceLocation());

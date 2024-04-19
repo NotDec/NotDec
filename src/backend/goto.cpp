@@ -1,9 +1,11 @@
 #include "backend/goto.h"
 #include "backend/CFG.h"
+#include "backend/utils.h"
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Analysis/CFG.h>
 #include <clang/Basic/Specifiers.h>
+#include <cstdlib>
 #include <llvm/Support/Casting.h>
 #include <type_traits>
 
@@ -46,29 +48,30 @@ void Goto::execute() {
 
       // Make b1 the fallthrough block
       auto nextBlock = &(*next(it));
-      if (nextBlock == ctx.getBlock(*b2)) {
+      // if false block == fall through, then can eliminate the goto
+      if (nextBlock == ctx.getBlock(*b1)) {
         std::swap(b1, b2);
         invert = true;
       }
       clang::Expr *cond = llvm::cast<clang::Expr>(Current->getTerminatorStmt());
+      Current->setTerminator(nullptr);
       if (invert) {
-        cond = clang::UnaryOperator::Create(
-            ASTCtx, cond, clang::UO_LNot, ASTCtx.BoolTy, clang::VK_PRValue,
-            clang::OK_Ordinary, clang::SourceLocation(), false,
-            clang::FPOptionsOverride());
+        cond = createUnaryOperator(ASTCtx, cond, clang::UO_LNot, ASTCtx.BoolTy,
+                                   clang::VK_PRValue);
       }
-      auto GotoB2 = new (ASTCtx) clang::GotoStmt(
-          getBlockLabel(b2), clang::SourceLocation(), clang::SourceLocation());
-      auto IfGotoB2 = clang::IfStmt::Create(
-          ASTCtx, clang::SourceLocation(), clang::IfStatementKind::Ordinary,
-          nullptr, nullptr, cond, clang::SourceLocation(),
-          clang::SourceLocation(), GotoB2, clang::SourceLocation());
-      Current->appendStmt(IfGotoB2);
       auto GotoB1 = new (ASTCtx) clang::GotoStmt(
           getBlockLabel(b1), clang::SourceLocation(), clang::SourceLocation());
-      Current->appendStmt(GotoB1);
+      auto IfGotoB1 = clang::IfStmt::Create(
+          ASTCtx, clang::SourceLocation(), clang::IfStatementKind::Ordinary,
+          nullptr, nullptr, cond, clang::SourceLocation(),
+          clang::SourceLocation(), GotoB1, clang::SourceLocation());
+      Current->appendStmt(IfGotoB1);
+      auto GotoB2 = new (ASTCtx) clang::GotoStmt(
+          getBlockLabel(b2), clang::SourceLocation(), clang::SourceLocation());
+      Current->appendStmt(GotoB2);
     } else if (succ_size > 2) {
       // TODO handle switch.
+      std::abort();
     }
   }
   // merge all blocks into one. Remove all other blocks and edges.
@@ -111,7 +114,7 @@ clang::Stmt *getStmt(CFGElement e) {
 
 // remote all NullStmt and merge GotoStmt with LabelStmt
 void Goto::simplifyBlock(CFGBlock &Block) {
-  for (auto it = Block.begin(); it != Block.end();) {
+  for (auto it = Block.begin(); it != Block.end(); ++it) {
     if (auto stmt = getStmt(*it)) {
       if (auto gotoStmt = llvm::dyn_cast<clang::GotoStmt>(stmt)) {
         auto next = std::next(it);
@@ -125,16 +128,22 @@ void Goto::simplifyBlock(CFGBlock &Block) {
         }
       }
 
-      if (auto label = llvm::dyn_cast<clang::LabelStmt>(stmt)) {
-        if (llvm::isa<clang::NullStmt>(label->getSubStmt()) &&
-            std::next(it) != Block.end()) {
-          if (auto next = getStmt(*std::next(it))) {
-            llvm::errs() << "Folding LabelStmt\n";
-            label->setSubStmt(next);
-            Block.erase(std::next(it));
-          }
-        }
-      }
+      // TODO: if label has no user, remove it
+    }
+  }
+
+  for (auto it = Block.begin(); it != Block.end(); ++it) {
+    if (auto stmt = getStmt(*it)) {
+      // if (auto label = llvm::dyn_cast<clang::LabelStmt>(stmt)) {
+      //   if (llvm::isa<clang::NullStmt>(label->getSubStmt()) &&
+      //       std::next(it) != Block.end()) {
+      //     if (auto next = getStmt(*std::next(it))) {
+      //       llvm::errs() << "Folding LabelStmt\n";
+      //       label->setSubStmt(next);
+      //       Block.erase(std::next(it));
+      //     }
+      //   }
+      // }
 
       // remove NullStmt
       if (auto term = llvm::dyn_cast<clang::NullStmt>(stmt)) {
@@ -142,10 +151,7 @@ void Goto::simplifyBlock(CFGBlock &Block) {
         it = Block.erase(it);
         continue;
       }
-
-      // TODO: if label has no user, remove it
     }
-    ++it;
   }
 }
 

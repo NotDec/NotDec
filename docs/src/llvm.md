@@ -128,7 +128,7 @@ CFGBlock包含：
 - 一系列语句
 - CFGTerminator
   - 对于return/unreachable：保存对应的返回语句或函数调用语句。
-  - 对于br/switch，保存对应的条件表达式。同时保证successor的顺序。
+  - 对于br/switch，保存对应的条件表达式。同时保证successor的顺序：本来CFG保证的是If-Then-Else顺序，但是如果是条件跳转，我们使用True-False的顺序，和IR里的successor()顺序一致。
 
 
 - CFGBuilder在LLVM中是逆序创建的，即逆向遍历AST，逆向创建语句。在打印或者遍历CFG块的时候，其中`CFGBlock::ElementList`把正常的iterator改用reverse_iterator实现。存储的时候是逆向存储，但是后续读取每个CFGBlock的时候也被偷偷改成逆向读取。但是我们算法如果不是逆向的话，想要在末尾继续插入语句，反而需要插入到开头，内存开销增加了。
