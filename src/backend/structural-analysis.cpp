@@ -710,6 +710,8 @@ std::string printBasicBlock(const llvm::BasicBlock *b) {
 
 /// Decompile the module to c and print to a file.
 void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &OS) {
+  // demote SSA using reg2mem
+  demoteSSA(M);
   SAContext Ctx(const_cast<llvm::Module &>(M));
   Ctx.createDecls();
   for (const llvm::Function &F : M) {

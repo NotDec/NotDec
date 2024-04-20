@@ -4,10 +4,13 @@
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Expr.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/Debug.h>
 #include <type_traits>
 
 namespace notdec::backend {
+
+void demoteSSA(llvm::Module &M);
 
 // ===============
 // Precedence

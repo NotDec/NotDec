@@ -4,11 +4,33 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/OperationKinds.h>
 #include <iostream>
+#include <llvm/IR/PassManager.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Transforms/Scalar/Reg2Mem.h>
 #include <type_traits>
 
 #define DEBUG_TYPE "notdec-backend-utils"
 
 namespace notdec::backend {
+
+/// Run the RegToMemPass to demote SSA to memory, i.e., eliminate Phi nodes.
+void demoteSSA(llvm::Module &M) {
+  using namespace llvm;
+  // Create the analysis managers.
+  LoopAnalysisManager LAM;
+  FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM;
+  ModuleAnalysisManager MAM;
+  ModulePassManager MPM;
+  PassBuilder PB;
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
+  MPM.run(M, MAM);
+}
 
 // ===============
 // Precedence

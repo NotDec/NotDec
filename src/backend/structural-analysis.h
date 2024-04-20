@@ -342,6 +342,35 @@ class IStructuralAnalysis {
 protected:
   SAFuncContext &ctx;
 
+  clang::Expr *invertCond(clang::Expr *cond) {
+    if (auto *BO = llvm::dyn_cast<clang::BinaryOperator>(cond)) {
+      switch (BO->getOpcode()) {
+      case clang::BO_EQ:
+        BO->setOpcode(clang::BO_NE);
+        return BO;
+      case clang::BO_NE:
+        BO->setOpcode(clang::BO_EQ);
+        return BO;
+      case clang::BO_LT:
+        BO->setOpcode(clang::BO_GE);
+        return BO;
+      case clang::BO_GT:
+        BO->setOpcode(clang::BO_LE);
+        return BO;
+      case clang::BO_LE:
+        BO->setOpcode(clang::BO_GT);
+        return BO;
+      case clang::BO_GE:
+        BO->setOpcode(clang::BO_LT);
+        return BO;
+      default:
+        break;
+      }
+    }
+    return createUnaryOperator(ctx.getASTContext(), cond, clang::UO_LNot,
+                               ctx.getASTContext().IntTy, clang::VK_PRValue);
+  }
+
 public:
   IStructuralAnalysis(SAFuncContext &ctx) : ctx(ctx) {}
 
@@ -433,6 +462,12 @@ public:
   void visitGetElementPtrInst(llvm::GetElementPtrInst &I);
   void visitUnaryOperator(llvm::UnaryOperator &I);
   void visitCastInst(llvm::CastInst &I);
+  void visitPhiNode(llvm::PHINode &I) {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "CFGBuilder.visitPhiNode: PHI node should be eliminated by "
+                    "reg2mem first!\n";
+    std::abort();
+  }
 
   CFGBuilder(SAFuncContext &FCtx)
       : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}

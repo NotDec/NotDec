@@ -7,9 +7,12 @@
 #include <clang/Basic/Specifiers.h>
 #include <cstdlib>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/Debug.h>
 #include <type_traits>
 
 namespace notdec::backend {
+
+#define DEBUG_TYPE "SA-goto"
 
 template <typename ForwardIt>
 ForwardIt
@@ -55,8 +58,7 @@ void Goto::execute() {
       clang::Expr *cond = llvm::cast<clang::Expr>(Current->getTerminatorStmt());
       Current->setTerminator(nullptr);
       if (invert) {
-        cond = createUnaryOperator(ASTCtx, cond, clang::UO_LNot, ASTCtx.BoolTy,
-                                   clang::VK_PRValue);
+        cond = invertCond(cond);
       }
       auto GotoB1 = createGotoStmt(getBlockLabel(b1));
       auto IfGotoB1 = clang::IfStmt::Create(
@@ -119,7 +121,12 @@ void Goto::simplifyBlock(CFGBlock &Block) {
         if (auto label =
                 llvm::dyn_cast_or_null<clang::LabelStmt>(getStmt(*next))) {
           if (label->getDecl() == gotoStmt->getLabel()) {
-            llvm::errs() << "Removing redundant goto: ", stmt->dump();
+            LLVM_DEBUG(llvm::dbgs() << "Removing redundant goto: "
+                                    << label->getName() << "\n");
+            auto &vec = labelUsers[label->getDecl()];
+            auto it2 = std::find(vec.begin(), vec.end(), gotoStmt);
+            assert(it2 != vec.end());
+            vec.erase(it2);
             it = Block.erase(it);
             continue;
           }
@@ -138,8 +145,9 @@ void Goto::simplifyBlock(CFGBlock &Block) {
         clang::LabelStmt *label = llvm::cast<clang::LabelStmt>(stmt);
         if (auto nextLabel =
                 llvm::dyn_cast<clang::LabelStmt>(getStmt(*std::next(it)))) {
-          llvm::errs() << "Merge adjacent label: " << label->getName()
-                       << " and " << nextLabel->getName() << "\n";
+          LLVM_DEBUG(llvm::dbgs()
+                     << "Merge adjacent label: " << label->getName() << " and "
+                     << nextLabel->getName() << "\n");
 
           assert(llvm::isa<clang::NullStmt>(label->getSubStmt()));
           assert(llvm::isa<clang::NullStmt>(nextLabel->getSubStmt()));
@@ -153,14 +161,21 @@ void Goto::simplifyBlock(CFGBlock &Block) {
     ++it;
   }
 
-  // fold label with NullStmt and remove NullStmt
+  // remove label without users, fold label with NullStmt and remove NullStmt
   for (auto it = Block.begin(); it != Block.end();) {
     if (auto stmt = getStmt(*it)) {
       if (auto label = llvm::dyn_cast<clang::LabelStmt>(stmt)) {
-        if (llvm::isa<clang::NullStmt>(label->getSubStmt()) &&
-            std::next(it) != Block.end()) {
+        if (labelUsers[label->getDecl()].empty()) {
+          LLVM_DEBUG(llvm::dbgs() << "Removing unused LabelStmt: "
+                                  << label->getName() << "\n");
+          labelUsers.erase(label->getDecl());
+          it = Block.erase(it);
+          continue;
+        } else if (llvm::isa<clang::NullStmt>(label->getSubStmt()) &&
+                   std::next(it) != Block.end()) {
           if (auto next = getStmt(*std::next(it))) {
-            llvm::errs() << "Folding LabelStmt " << label->getName() << "\n";
+            LLVM_DEBUG(llvm::dbgs()
+                       << "Folding LabelStmt " << label->getName() << "\n");
             label->setSubStmt(next);
             Block.erase(std::next(it));
           }
@@ -169,7 +184,7 @@ void Goto::simplifyBlock(CFGBlock &Block) {
 
       // remove NullStmt
       if (auto term = llvm::dyn_cast<clang::NullStmt>(stmt)) {
-        llvm::errs() << "Removing NullStmt\n";
+        LLVM_DEBUG(llvm::dbgs() << "Removing NullStmt\n");
         it = Block.erase(it);
         continue;
       }
