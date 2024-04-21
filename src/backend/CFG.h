@@ -10,11 +10,14 @@
 #ifndef _NOTDEC_BACKEND_CFG_H_
 #define _NOTDEC_BACKEND_CFG_H_
 
-#include <clang/AST/Stmt.h>
 #include <deque>
 #include <list>
-#include <llvm/Support/raw_ostream.h>
 #include <vector>
+
+#include <clang/AST/Stmt.h>
+#include <llvm/ADT/GraphTraits.h>
+#include <llvm/Support/raw_ostream.h>
+
 namespace notdec::backend {
 
 class CFGElement;
@@ -350,6 +353,17 @@ public:
   const_iterator begin() const { return Blocks.begin(); }
   const_iterator end() const { return Blocks.end(); }
 
+  iterator nodes_begin() { return iterator(Blocks.begin()); }
+  iterator nodes_end() { return iterator(Blocks.end()); }
+
+  llvm::iterator_range<iterator> nodes() { return {begin(), end()}; }
+  llvm::iterator_range<const_iterator> const_nodes() const {
+    return {begin(), end()};
+  }
+
+  const_iterator nodes_begin() const { return const_iterator(Blocks.begin()); }
+  const_iterator nodes_end() const { return const_iterator(Blocks.end()); }
+
   reverse_iterator rbegin() { return Blocks.rbegin(); }
   reverse_iterator rend() { return Blocks.rend(); }
   const_reverse_iterator rbegin() const { return Blocks.rbegin(); }
@@ -399,5 +413,141 @@ private:
   CFGBlockListTy Blocks;
 };
 } // namespace notdec::backend
+
+//===----------------------------------------------------------------------===//
+// GraphTraits specializations for CFG basic block graphs (source-level CFGs)
+//===----------------------------------------------------------------------===//
+
+namespace llvm {
+
+/// Implement simplify_type for CFGTerminator, so that we can dyn_cast from
+/// CFGTerminator to a specific Stmt class.
+template <> struct simplify_type<::notdec::backend::CFGTerminator> {
+  using SimpleType = ::clang::Stmt *;
+
+  static SimpleType getSimplifiedValue(::notdec::backend::CFGTerminator Val) {
+    return Val.getStmt();
+  }
+};
+
+// Traits for: CFGBlock
+
+template <> struct ::llvm::GraphTraits<::notdec::backend::CFGBlock *> {
+  using NodeRef = ::notdec::backend::CFGBlock *;
+  using ChildIteratorType = ::notdec::backend::CFGBlock::succ_iterator;
+
+  static NodeRef getEntryNode(::notdec::backend::CFGBlock *BB) { return BB; }
+  static ChildIteratorType child_begin(NodeRef N) { return N->succ_begin(); }
+  static ChildIteratorType child_end(NodeRef N) { return N->succ_end(); }
+};
+
+template <> struct ::llvm::GraphTraits<const ::notdec::backend::CFGBlock *> {
+  using NodeRef = const ::notdec::backend::CFGBlock *;
+  using ChildIteratorType = ::notdec::backend::CFGBlock::const_succ_iterator;
+
+  static NodeRef getEntryNode(const ::notdec::backend::CFGBlock *BB) {
+    return BB;
+  }
+  static ChildIteratorType child_begin(NodeRef N) { return N->succ_begin(); }
+  static ChildIteratorType child_end(NodeRef N) { return N->succ_end(); }
+};
+
+template <> struct GraphTraits<Inverse<::notdec::backend::CFGBlock *>> {
+  using NodeRef = ::notdec::backend::CFGBlock *;
+  using ChildIteratorType = ::notdec::backend::CFGBlock::const_pred_iterator;
+
+  static NodeRef getEntryNode(Inverse<::notdec::backend::CFGBlock *> G) {
+    return G.Graph;
+  }
+
+  static ChildIteratorType child_begin(NodeRef N) { return N->pred_begin(); }
+  static ChildIteratorType child_end(NodeRef N) { return N->pred_end(); }
+};
+
+template <> struct GraphTraits<Inverse<const ::notdec::backend::CFGBlock *>> {
+  using NodeRef = const ::notdec::backend::CFGBlock *;
+  using ChildIteratorType = ::notdec::backend::CFGBlock::const_pred_iterator;
+
+  static NodeRef getEntryNode(Inverse<const ::notdec::backend::CFGBlock *> G) {
+    return G.Graph;
+  }
+
+  static ChildIteratorType child_begin(NodeRef N) { return N->pred_begin(); }
+  static ChildIteratorType child_end(NodeRef N) { return N->pred_end(); }
+};
+
+// Traits for: CFG
+
+template <>
+struct GraphTraits<::notdec::backend::CFG *>
+    : public GraphTraits<::notdec::backend::CFGBlock *> {
+  using nodes_iterator = ::notdec::backend::CFG::iterator;
+
+  static NodeRef getEntryNode(::notdec::backend::CFG *F) {
+    return &F->getEntry();
+  }
+  static nodes_iterator nodes_begin(::notdec::backend::CFG *F) {
+    return F->nodes_begin();
+  }
+  static nodes_iterator nodes_end(::notdec::backend::CFG *F) {
+    return F->nodes_end();
+  }
+  static unsigned size(::notdec::backend::CFG *F) { return F->size(); }
+};
+
+template <>
+struct GraphTraits<const ::notdec::backend::CFG *>
+    : public GraphTraits<const ::notdec::backend::CFGBlock *> {
+  using nodes_iterator = ::notdec::backend::CFG::const_iterator;
+
+  static NodeRef getEntryNode(const ::notdec::backend::CFG *F) {
+    return &F->getEntry();
+  }
+
+  static nodes_iterator nodes_begin(const ::notdec::backend::CFG *F) {
+    return F->nodes_begin();
+  }
+
+  static nodes_iterator nodes_end(const ::notdec::backend::CFG *F) {
+    return F->nodes_end();
+  }
+
+  static unsigned size(const ::notdec::backend::CFG *F) { return F->size(); }
+};
+
+template <>
+struct GraphTraits<Inverse<::notdec::backend::CFG *>>
+    : public GraphTraits<Inverse<::notdec::backend::CFGBlock *>> {
+  using nodes_iterator = ::notdec::backend::CFG::iterator;
+
+  static NodeRef getEntryNode(::notdec::backend::CFG *F) {
+    return &F->getExit();
+  }
+  static nodes_iterator nodes_begin(::notdec::backend::CFG *F) {
+    return F->nodes_begin();
+  }
+  static nodes_iterator nodes_end(::notdec::backend::CFG *F) {
+    return F->nodes_end();
+  }
+};
+
+template <>
+struct GraphTraits<Inverse<const ::notdec::backend::CFG *>>
+    : public GraphTraits<Inverse<const ::notdec::backend::CFGBlock *>> {
+  using nodes_iterator = ::notdec::backend::CFG::const_iterator;
+
+  static NodeRef getEntryNode(const ::notdec::backend::CFG *F) {
+    return &F->getExit();
+  }
+
+  static nodes_iterator nodes_begin(const ::notdec::backend::CFG *F) {
+    return F->nodes_begin();
+  }
+
+  static nodes_iterator nodes_end(const ::notdec::backend::CFG *F) {
+    return F->nodes_end();
+  }
+};
+} // namespace llvm
 
 #endif

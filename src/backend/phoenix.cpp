@@ -1,16 +1,17 @@
 // Phoenix: Native x86 Decompilation Using Semantics-Preserving Structural
 // Analysis and Iterative Control-Flow Structuring
 
-#include "backend/phoenix.h"
 #include <iostream>
 #include <llvm/Support/raw_ostream.h>
+
+#include "backend/PostOrderCFGView.h"
+#include "backend/phoenix.h"
+
 namespace notdec::backend {
 
 void Phoenix::execute() {
   CFG &CFG = FCtx.getCFG();
   int iterations = 0;
-  int oldCount;
-  int newCount;
   do {
     if (isCanceled) {
       break;
@@ -22,40 +23,27 @@ void Phoenix::execute() {
       break;
     }
 
-    oldCount = CFG.size();
-  } while (true);
-}
-//     oldCount = regionGraph.Nodes.Count;
-//     this.doms = new DominatorGraph<Region>(this.regionGraph, this.entry);
-//     this.unresolvedCycles = new Queue<(Region, ISet<Region>)>();
-//     this.unresolvedSwitches = new Queue<Region>();
-//     var postOrder = new
-//     DfsIterator<Region>(regionGraph).PostOrder(entry).ToList();
+    int oldCount = CFG.size();
+    auto postView = PostOrderCFGView::create(&CFG);
 
-//     foreach (var n in postOrder)
-//     {
-//         Probe();
-//         bool didReduce;
-//         do
-//         {
-//             if (eventListener.IsCanceled())
-//                 break;
-//             didReduce = ReduceAcyclic(n);
-//             if (!didReduce && IsCyclic(n))
-//             {
-//                 didReduce = ReduceCyclic(n);
-//             }
-//         } while (didReduce);
-//     }
-//     newCount = regionGraph.Nodes.Count;
-//     if (newCount == oldCount && newCount > 1)
-//     {
-//         // Didn't make any progress this round,
-//         // try refining unstructured regions
-//         ProcessUnresolvedRegions();
-//     }
-// } while (regionGraph.Nodes.Count > 1);
-// return entry;
-// }
+    for (auto Block : *postView) {
+      // Probe();
+      bool Changed = false;
+      // do {
+      //   Changed = ReduceAcyclic(Block);
+      //   if (!Changed && IsCyclic(Block)) {
+      //     Changed = ReduceCyclic(Block);
+      //   }
+      // } while (Changed);
+
+      // if (CFG.size() == oldCount && CFG.size() > 1) {
+      //   // Didn't make any progress this round,
+      //   // try refining unstructured regions
+      //   ProcessUnresolvedRegions();
+      // }
+    }
+
+  } while (CFG.size() > 1);
+}
 
 } // namespace notdec::backend
