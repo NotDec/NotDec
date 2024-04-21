@@ -340,7 +340,7 @@ public:
 // TODO: add const to the module and function?
 class IStructuralAnalysis {
 protected:
-  SAFuncContext &ctx;
+  SAFuncContext &FCtx;
 
   clang::Expr *invertCond(clang::Expr *cond) {
     if (auto *BO = llvm::dyn_cast<clang::BinaryOperator>(cond)) {
@@ -367,18 +367,18 @@ protected:
         break;
       }
     }
-    return createUnaryOperator(ctx.getASTContext(), cond, clang::UO_LNot,
-                               ctx.getASTContext().IntTy, clang::VK_PRValue);
+    return createUnaryOperator(FCtx.getASTContext(), cond, clang::UO_LNot,
+                               FCtx.getASTContext().IntTy, clang::VK_PRValue);
   }
 
 public:
-  IStructuralAnalysis(SAFuncContext &ctx) : ctx(ctx) {}
+  IStructuralAnalysis(SAFuncContext &ctx) : FCtx(ctx) {}
 
   virtual ~IStructuralAnalysis() = default;
   virtual void execute() = 0;
   clang::LabelDecl *getBlockLabel(CFGBlock *blk);
   void mergeBlock(llvm::BasicBlock &bb, llvm::BasicBlock &next);
-  ValueNamer &getValueNamer() { return ctx.getSAContext().getValueNamer(); }
+  ValueNamer &getValueNamer() { return FCtx.getSAContext().getValueNamer(); }
 };
 
 /// CFGBuilder builds ASTs for basic blocks. In contrast, ExprBuilder build ASTs

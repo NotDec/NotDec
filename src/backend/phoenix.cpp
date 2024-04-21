@@ -3,26 +3,28 @@
 
 #include "backend/phoenix.h"
 #include <iostream>
+#include <llvm/Support/raw_ostream.h>
 namespace notdec::backend {
 
-// void Phoenix::execute() {
+void Phoenix::execute() {
+  CFG &CFG = FCtx.getCFG();
+  int iterations = 0;
+  int oldCount;
+  int newCount;
+  do {
+    if (isCanceled) {
+      break;
+    }
+    ++iterations;
+    if (iterations > 1000) {
+      llvm::errs() << "Structure analysis stopped making progress, quitting."
+                   << " Func: " << FCtx.getFunction().getName();
+      break;
+    }
 
-// int iterations = 0;
-// int oldCount;
-// int newCount;
-// do {
-//     if (isCanceled) {
-//         break;
-//     }
-//     ++iterations;
-//     if (iterations > 1000)
-//     {
-//         std::cerr << "Structure analysis stopped making progress,
-//         quitting."
-//             << " Func: " << func.getName().str();
-//         break;
-//     }
-
+    oldCount = CFG.size();
+  } while (true);
+}
 //     oldCount = regionGraph.Nodes.Count;
 //     this.doms = new DominatorGraph<Region>(this.regionGraph, this.entry);
 //     this.unresolvedCycles = new Queue<(Region, ISet<Region>)>();

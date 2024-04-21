@@ -9,16 +9,18 @@
 namespace notdec::backend {
 
 class Goto : IStructuralAnalysis {
-
+  /// Map from label to all GotoStmts that use it.
+  /// Assuming all goto stmt is created by createGotoStmt.
   std::map<clang::LabelDecl *, std::vector<clang::GotoStmt *>> labelUsers;
 
   clang::GotoStmt *createGotoStmt(clang::LabelDecl *label) {
-    auto Goto = new (ctx.getASTContext()) clang::GotoStmt(
+    auto Goto = new (FCtx.getASTContext()) clang::GotoStmt(
         label, clang::SourceLocation(), clang::SourceLocation());
     labelUsers[label].push_back(Goto);
     return Goto;
   }
 
+  /// Replace all uses of a label with a new label.
   void replaceAllUsesWith(clang::LabelDecl *label, clang::LabelDecl *newLabel) {
     auto &users = labelUsers[label];
     for (auto user : users) {

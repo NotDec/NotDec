@@ -24,12 +24,12 @@ next(ForwardIt it,
 
 // 1. Look at the CFG edges, instead of the basic block terminator edges.
 void Goto::execute() {
-  auto &ASTCtx = ctx.getASTContext();
-  CFG &CFG = ctx.getCFG();
+  auto &ASTCtx = FCtx.getASTContext();
+  CFG &CFG = FCtx.getCFG();
   // for each block, insert goto statement to represent outgoing edges.
-  auto &bbs = ctx.getFunction().getBasicBlockList();
+  auto &bbs = FCtx.getFunction().getBasicBlockList();
   for (auto it = bbs.begin(); it != bbs.end(); ++it) {
-    auto Current = ctx.getBlock(*it);
+    auto Current = FCtx.getBlock(*it);
     auto succ_size = Current->succ_size();
     // for unconditional branch
     if (succ_size == 1) {
@@ -51,7 +51,7 @@ void Goto::execute() {
       // Make b1 the fallthrough block
       auto nextBlock = &(*next(it));
       // if false block == fall through, then can eliminate the goto
-      if (nextBlock == ctx.getBlock(*b1)) {
+      if (nextBlock == FCtx.getBlock(*b1)) {
         std::swap(b1, b2);
         invert = true;
       }
@@ -81,7 +81,7 @@ void Goto::execute() {
   Entry.pred_clear();
   for (auto it = bbs.begin(); it != bbs.end(); ++it) {
     // push all statements into entry block
-    auto Current = ctx.getBlock(*it);
+    auto Current = FCtx.getBlock(*it);
     if (&*Current == &Entry) {
       continue;
     }

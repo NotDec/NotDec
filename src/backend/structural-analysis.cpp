@@ -1222,11 +1222,11 @@ clang::LabelDecl *IStructuralAnalysis::getBlockLabel(CFGBlock *Blk) {
   if (auto label = Blk->getLabel()) {
     return llvm::cast<clang::LabelStmt>(label)->getDecl();
   } else {
-    auto &astCtx = ctx.getASTContext();
-    auto bb = ctx.getBlock(*Blk);
-    clang::IdentifierInfo *II = ctx.getIdentifierInfo(
+    auto &astCtx = FCtx.getASTContext();
+    auto bb = FCtx.getBlock(*Blk);
+    clang::IdentifierInfo *II = FCtx.getIdentifierInfo(
         getValueNamer().getBlockName(*bb, Blk->getBlockID()));
-    auto LabelDecl = clang::LabelDecl::Create(astCtx, ctx.getFunctionDecl(),
+    auto LabelDecl = clang::LabelDecl::Create(astCtx, FCtx.getFunctionDecl(),
                                               clang::SourceLocation(), II);
     // create LabelStmt
     auto LabelStmt = new (astCtx)

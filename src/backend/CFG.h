@@ -1,3 +1,12 @@
+//===- CFG.h - Classes for representing and building CFGs -------*- C++ -*-===//
+//===----------------------------------------------------------------------===//
+//
+// This file implements a simplified version of clang's CFG.
+// 1. use C++ STL instead of Custom allocator.
+// 2. Add utility functions to remove blocks.
+//
+//===----------------------------------------------------------------------===//
+
 #ifndef _NOTDEC_BACKEND_CFG_H_
 #define _NOTDEC_BACKEND_CFG_H_
 
@@ -360,10 +369,9 @@ public:
   /// Returns the total number of BlockIDs allocated (which start at 0).
   unsigned getNumBlockIDs() const { return NumBlockIDs; }
 
-  /// Return the total number of CFGBlocks within the CFG This is simply a
-  /// renaming of the getNumBlockIDs(). This is necessary because the dominator
-  /// implementation needs such an interface.
-  unsigned size() const { return NumBlockIDs; }
+  /// Return the total number of CFGBlocks within the CFG. This is necessary
+  /// because the dominator implementation needs such an interface.
+  unsigned size() const { return Blocks.size(); }
 
   /// Returns true if the CFG has no branches. Usually it boils down to the CFG
   /// having exactly three blocks (entry, the actual code, exit), but sometimes

@@ -10,9 +10,9 @@ protected:
   bool isCanceled = false;
 
 public:
-  Phoenix(SAFuncContext &ctx) : IStructuralAnalysis(ctx) {}
+  Phoenix(SAFuncContext &Ctx) : IStructuralAnalysis(Ctx) {}
 
-  void execute() override{};
+  void execute() override;
 };
 
 } // namespace notdec::backend
