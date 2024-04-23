@@ -234,7 +234,7 @@ class SAFuncContext {
   // map from llvm inst to clang expr
   std::map<llvm::Value *, clang::Expr *> ExprMap;
   // map from llvm block to CFGBlock. Store the iterator to facilitate deletion
-  std::map<llvm::BasicBlock *, CFG::iterator> ll2cfg;
+  std::map<llvm::BasicBlock *, CFGBlock *> ll2cfg;
   std::map<CFGBlock *, llvm::BasicBlock *> cfg2ll;
   TypeBuilder &TB;
 
@@ -263,12 +263,12 @@ public:
   ValueNamer &getValueNamer();
   bool isExpr(llvm::Value &v) { return ExprMap.count(&v) > 0; }
   clang::Expr *getExpr(llvm::Value &v) { return ExprMap.at(&v); }
-  CFG::iterator &getBlock(llvm::BasicBlock &bb) { return ll2cfg.at(&bb); }
-  CFG::iterator createBlock(llvm::BasicBlock &bb) {
+  CFGBlock *&getBlock(llvm::BasicBlock &bb) { return ll2cfg.at(&bb); }
+  CFGBlock *createBlock(llvm::BasicBlock &bb) {
     CFG::iterator b = getCFG().createBlock();
-    ll2cfg[&bb] = b;
-    cfg2ll[&*b] = &bb;
-    return b;
+    ll2cfg[&bb] = *b;
+    cfg2ll[*b] = &bb;
+    return *b;
   }
   llvm::BasicBlock *getBlock(CFGBlock &bb) { return cfg2ll.at(&bb); }
   void run();
@@ -341,6 +341,7 @@ public:
 class IStructuralAnalysis {
 protected:
   SAFuncContext &FCtx;
+  CFG &CFG;
 
   clang::Expr *invertCond(clang::Expr *cond) {
     if (auto *BO = llvm::dyn_cast<clang::BinaryOperator>(cond)) {
@@ -372,13 +373,69 @@ protected:
   }
 
 public:
-  IStructuralAnalysis(SAFuncContext &ctx) : FCtx(ctx) {}
+  IStructuralAnalysis(SAFuncContext &ctx) : FCtx(ctx), CFG(FCtx.getCFG()) {}
 
   virtual ~IStructuralAnalysis() = default;
   virtual void execute() = 0;
   clang::LabelDecl *getBlockLabel(CFGBlock *blk);
   void mergeBlock(llvm::BasicBlock &bb, llvm::BasicBlock &next);
   ValueNamer &getValueNamer() { return FCtx.getSAContext().getValueNamer(); }
+
+  // utility functions
+  /// Get the condition of a binary conditional block from the terminator and
+  /// remove the terminator.
+  clang::Expr *takeBinaryCond(CFGBlock &B) {
+    assert(B.succ_size() == 2 &&
+           "getBinaryCond: block should have 2 successors!");
+    auto ret = llvm::cast<clang::Expr>(B.getTerminatorStmt());
+    B.setTerminator(nullptr);
+    return ret;
+  }
+  clang::CompoundStmt *makeCompoundStmt(CFGBlock *el) {
+    // convert to vector
+    std::vector<clang::Stmt *> stmts;
+    for (auto elem = el->begin(); elem != el->end(); ++elem) {
+      if (auto stmt = elem->getAs<CFGStmt>()) {
+        stmts.push_back(const_cast<clang::Stmt *>(stmt->getStmt()));
+      }
+    }
+    return clang::CompoundStmt::Create(FCtx.getASTContext(), stmts,
+                                       clang::SourceLocation(),
+                                       clang::SourceLocation());
+  }
+  void removeEdge(CFGBlock *From, CFGBlock *To) {
+    From->removeSucc(To);
+    To->removePred(From);
+  }
+  /// Replace all successors of From with To.
+  void replaceSuccessors(CFGBlock *From, CFGBlock *To) {
+    for (auto &Succ : To->succs()) {
+      From->addSuccessor(Succ);
+      // replace pred of succ
+      for (auto &Pred : Succ->preds()) {
+        if (Pred == To) {
+          Pred.setBlock(From);
+        }
+      }
+    }
+    To->succ_clear();
+  }
+  // get the only successor or nullptr.
+  CFGBlock *linearSuccessor(CFGBlock *Block) {
+    if (Block->succ_size() != 1) {
+      return nullptr;
+    }
+    return *Block->succ_begin();
+  }
+  // check if the block has only predecessor pred.
+  bool onlyPred(CFGBlock *Block, CFGBlock *Pred) {
+    for (auto &P : Block->preds()) {
+      if (P.getBlock() != Pred) {
+        return false;
+      }
+    }
+    return true;
+  }
 };
 
 /// CFGBuilder builds ASTs for basic blocks. In contrast, ExprBuilder build ASTs
@@ -424,13 +481,13 @@ public:
   CFGBlock *run(llvm::BasicBlock &BB) {
     auto ret = FCtx.createBlock(BB);
     // set current block so that visitor for terminator can insert CFGTerminator
-    setBlock(&*ret);
+    setBlock(ret);
     if (BB.isEntryBlock()) {
-      FCtx.getCFG().setEntry(&*ret);
+      FCtx.getCFG().setEntry(ret);
       visitArgs();
     }
     llvm::InstVisitor<CFGBuilder>::visit(BB);
-    return &*ret;
+    return ret;
   }
 
   clang::ImplicitCastExpr *

@@ -20,6 +20,7 @@ add_library(notdec STATIC
 	backend/goto.cpp
 	backend/utils.cpp
 	backend/PostOrderCFGView.cpp
+	backend/Dominators.cpp
 )
 
 # include直接在外部设置了src目录。

@@ -138,6 +138,9 @@ public:
 ///
 ///  (1) A set of statements/expressions (which may contain subexpressions).
 ///  (2) A "terminator" statement (not in the set of statements).
+///      (2.1) for conditional block, it contains the condition expression.
+///      (2.2) for unconditional block (succ = 1/0), it is null.
+///      (2.3) for switch (succ > 2), it contains the condition expression.
 ///  (3) A list of successors and predecessors.
 ///
 /// Terminator: The terminator represents the type of control-flow that occurs
@@ -148,8 +151,7 @@ public:
 ///
 /// Predecessors: the order in the set of predecessors is arbitrary.
 ///
-/// Successors: the order in the set of successors is NOT arbitrary.  We
-///  currently have the following orderings based on the terminator:
+/// Successors orderings of original Clang CFG:
 ///
 ///     Terminator     |   Successor Ordering
 ///  ------------------|------------------------------------
@@ -158,10 +160,9 @@ public:
 ///     logical and/or |  expression that consumes the op, RHS
 ///     vbase inits    |  already handled by the most derived class; not yet
 ///
-/// But note that any of that may be NULL in case of optimized-out edges.
 class CFGBlock {
 public:
-  using ElementListTy = std::deque<CFGElement>;
+  using ElementListTy = std::vector<CFGElement>;
   using Stmt = clang::Stmt;
 
   CFGBlock(CFG *parent) : Parent(parent){};
@@ -188,6 +189,7 @@ public:
   public:
     AdjacentBlock(CFGBlock *B) : Block(B) {}
     CFGBlock *getBlock() { return Block; }
+    void setBlock(CFGBlock *B) { Block = B; }
     /// Provide an implicit conversion to CFGBlock* so that
     /// AdjacentBlock can be substituted for CFGBlock*.
     operator CFGBlock *() const { return Block; }
@@ -237,6 +239,8 @@ public:
   reverse_iterator rend() { return Elements.rend(); }
   const_reverse_iterator rbegin() const { return Elements.rbegin(); }
   const_reverse_iterator rend() const { return Elements.rend(); }
+
+  unsigned long size() const { return Elements.size(); }
 
   // CFG iterators
   using pred_iterator = AdjacentBlocks::iterator;
@@ -294,11 +298,22 @@ public:
   bool pred_empty() const { return Preds.empty(); }
 
   // Manipulation of block contents
-
   void setTerminator(CFGTerminator Term) { Terminator = Term; }
   void setLabel(Stmt *Statement) { Label = Statement; }
   void setHasNoReturnElement() { HasNoReturnElement = true; }
   CFGTerminator getTerminator() const { return Terminator; }
+  void removeSucc(CFGBlock *B) {
+    Succs.erase(
+        std::remove_if(Succs.begin(), Succs.end(),
+                       [B](AdjacentBlock &AB) { return AB.getBlock() == B; }),
+        Succs.end());
+  }
+  void removePred(CFGBlock *B) {
+    Preds.erase(
+        std::remove_if(Preds.begin(), Preds.end(),
+                       [B](AdjacentBlock &AB) { return AB.getBlock() == B; }),
+        Preds.end());
+  }
 
   Stmt *getTerminatorStmt() { return Terminator.getStmt(); }
   const Stmt *getTerminatorStmt() const { return Terminator.getStmt(); }
@@ -334,7 +349,7 @@ public:
 };
 
 class CFG {
-  using CFGBlockListTy = std::list<CFGBlock>;
+  using CFGBlockListTy = std::vector<CFGBlock *>;
 
 public:
   void setEntry(CFGBlock *B) { Entry = B; }
@@ -345,8 +360,10 @@ public:
   using reverse_iterator = std::reverse_iterator<iterator>;
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-  CFGBlock &front() { return Blocks.front(); }
-  CFGBlock &back() { return Blocks.back(); }
+  CFGBlock &front() { return *Blocks.front(); }
+  CFGBlock &back() { return *Blocks.back(); }
+
+  CFGBlock **data() { return Blocks.data(); }
 
   iterator begin() { return Blocks.begin(); }
   iterator end() { return Blocks.end(); }
@@ -369,7 +386,13 @@ public:
   const_reverse_iterator rbegin() const { return Blocks.rbegin(); }
   const_reverse_iterator rend() const { return Blocks.rend(); }
 
-  iterator erase(iterator I) { return Blocks.erase(I); }
+  iterator erase(iterator I) {
+    auto ret = Blocks.erase(I);
+    return ret;
+  }
+  void remove(CFGBlock *I) {
+    Blocks.erase(std::remove(Blocks.begin(), Blocks.end(), I), Blocks.end());
+  }
 
   CFGBlock &getEntry() { return *Entry; }
   const CFGBlock &getEntry() const { return *Entry; }
@@ -404,6 +427,8 @@ public:
   void dump(const LangOptions &LO, bool ShowColors) const;
 
   iterator createBlock();
+
+  int sanityCheck();
 
 private:
   CFGBlock *Entry = nullptr;
@@ -481,16 +506,16 @@ template <> struct GraphTraits<Inverse<const ::notdec::backend::CFGBlock *>> {
 template <>
 struct GraphTraits<::notdec::backend::CFG *>
     : public GraphTraits<::notdec::backend::CFGBlock *> {
-  using nodes_iterator = ::notdec::backend::CFG::iterator;
+  using nodes_iterator = ::notdec::backend::CFGBlock **;
 
   static NodeRef getEntryNode(::notdec::backend::CFG *F) {
     return &F->getEntry();
   }
   static nodes_iterator nodes_begin(::notdec::backend::CFG *F) {
-    return F->nodes_begin();
+    return F->data();
   }
   static nodes_iterator nodes_end(::notdec::backend::CFG *F) {
-    return F->nodes_end();
+    return F->data() + F->size();
   }
   static unsigned size(::notdec::backend::CFG *F) { return F->size(); }
 };
@@ -498,18 +523,18 @@ struct GraphTraits<::notdec::backend::CFG *>
 template <>
 struct GraphTraits<const ::notdec::backend::CFG *>
     : public GraphTraits<const ::notdec::backend::CFGBlock *> {
-  using nodes_iterator = ::notdec::backend::CFG::const_iterator;
+  using nodes_iterator = ::notdec::backend::CFGBlock *const *;
 
   static NodeRef getEntryNode(const ::notdec::backend::CFG *F) {
     return &F->getEntry();
   }
 
   static nodes_iterator nodes_begin(const ::notdec::backend::CFG *F) {
-    return F->nodes_begin();
+    return const_cast<::notdec::backend::CFG *>(F)->data();
   }
 
   static nodes_iterator nodes_end(const ::notdec::backend::CFG *F) {
-    return F->nodes_end();
+    return const_cast<::notdec::backend::CFG *>(F)->data() + F->size();
   }
 
   static unsigned size(const ::notdec::backend::CFG *F) { return F->size(); }
@@ -518,34 +543,34 @@ struct GraphTraits<const ::notdec::backend::CFG *>
 template <>
 struct GraphTraits<Inverse<::notdec::backend::CFG *>>
     : public GraphTraits<Inverse<::notdec::backend::CFGBlock *>> {
-  using nodes_iterator = ::notdec::backend::CFG::iterator;
+  using nodes_iterator = ::notdec::backend::CFGBlock **;
 
   static NodeRef getEntryNode(::notdec::backend::CFG *F) {
     return &F->getExit();
   }
   static nodes_iterator nodes_begin(::notdec::backend::CFG *F) {
-    return F->nodes_begin();
+    return F->data();
   }
   static nodes_iterator nodes_end(::notdec::backend::CFG *F) {
-    return F->nodes_end();
+    return F->data() + F->size();
   }
 };
 
 template <>
 struct GraphTraits<Inverse<const ::notdec::backend::CFG *>>
     : public GraphTraits<Inverse<const ::notdec::backend::CFGBlock *>> {
-  using nodes_iterator = ::notdec::backend::CFG::const_iterator;
+  using nodes_iterator = ::notdec::backend::CFGBlock *const *;
 
   static NodeRef getEntryNode(const ::notdec::backend::CFG *F) {
     return &F->getExit();
   }
 
   static nodes_iterator nodes_begin(const ::notdec::backend::CFG *F) {
-    return F->nodes_begin();
+    return const_cast<::notdec::backend::CFG *>(F)->data();
   }
 
   static nodes_iterator nodes_end(const ::notdec::backend::CFG *F) {
-    return F->nodes_end();
+    return const_cast<::notdec::backend::CFG *>(F)->data() + F->size();
   }
 };
 } // namespace llvm

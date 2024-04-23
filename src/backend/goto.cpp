@@ -25,7 +25,6 @@ next(ForwardIt it,
 // 1. Look at the CFG edges, instead of the basic block terminator edges.
 void Goto::execute() {
   auto &ASTCtx = FCtx.getASTContext();
-  CFG &CFG = FCtx.getCFG();
   // for each block, insert goto statement to represent outgoing edges.
   auto &bbs = FCtx.getFunction().getBasicBlockList();
   for (auto it = bbs.begin(); it != bbs.end(); ++it) {
@@ -37,8 +36,8 @@ void Goto::execute() {
       // auto nextBlock = &(*next(it));
       // if (nextBlock == br->getSuccessor(0)) {
       // }
-      auto Succ = *Current->succ_begin();
-      auto label = getBlockLabel(Succ.getBlock());
+      auto Succ = Current->succ_begin();
+      auto label = getBlockLabel(Succ->getBlock());
       auto Goto = createGotoStmt(label);
       Current->appendStmt(Goto);
     } else if (succ_size == 2) {
@@ -55,8 +54,7 @@ void Goto::execute() {
         std::swap(b1, b2);
         invert = true;
       }
-      clang::Expr *cond = llvm::cast<clang::Expr>(Current->getTerminatorStmt());
-      Current->setTerminator(nullptr);
+      clang::Expr *cond = takeBinaryCond(*Current);
       if (invert) {
         cond = invertCond(cond);
       }
@@ -82,7 +80,7 @@ void Goto::execute() {
   for (auto it = bbs.begin(); it != bbs.end(); ++it) {
     // push all statements into entry block
     auto Current = FCtx.getBlock(*it);
-    if (&*Current == &Entry) {
+    if (Current == &Entry) {
       continue;
     }
     // add if there is a label statement
@@ -97,7 +95,7 @@ void Goto::execute() {
       Entry.appendStmt(Current->getTerminatorStmt());
     }
     // remove the block from the cfg
-    CFG.erase(Current);
+    CFG.remove(Current);
   }
   simplifyBlock(Entry);
   // The exit block is set to the first stub block created. We currently do not

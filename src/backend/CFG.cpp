@@ -72,11 +72,11 @@ public:
       return;
     for (CFG::const_iterator I = cfg->begin(), E = cfg->end(); I != E; ++I) {
       unsigned j = 1;
-      for (CFGBlock::const_iterator BI = (*I).begin(), BEnd = (*I).end();
+      for (CFGBlock::const_iterator BI = (*I)->begin(), BEnd = (*I)->end();
            BI != BEnd; ++BI, ++j) {
         if (Optional<CFGStmt> SE = BI->getAs<CFGStmt>()) {
           const Stmt *stmt = SE->getStmt();
-          std::pair<unsigned, unsigned> P((*I).getBlockID(), j);
+          std::pair<unsigned, unsigned> P((*I)->getBlockID(), j);
           StmtMap[stmt] = P;
 
           switch (stmt->getStmtClass()) {
@@ -290,6 +290,8 @@ void CFGElement::dumpToStream(llvm::raw_ostream &OS) const {
   print_elem(OS, Helper, *this);
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch"
 static void print_elem(raw_ostream &OS, StmtPrinterHelper &Helper,
                        const CFGElement &E) {
   switch (E.getKind()) {
@@ -442,6 +444,7 @@ static void print_elem(raw_ostream &OS, StmtPrinterHelper &Helper,
     // }
   }
 }
+#pragma clang diagnostic pop
 
 static void print_block(raw_ostream &OS, const CFG *cfg, const CFGBlock &B,
                         StmtPrinterHelper &Helper, bool print_edges,
@@ -638,6 +641,7 @@ void CFGBlock::print(raw_ostream &OS, const CFG *cfg, const LangOptions &LO,
 
 void CFGBlock::printTerminator(raw_ostream &OS, const LangOptions &LO) const {}
 
+/// Add a edge to the current block. Also adds the pred of succ.
 void CFGBlock::addSuccessor(AdjacentBlock Succ) {
   if (CFGBlock *B = Succ.getBlock()) {
     B->Preds.push_back(AdjacentBlock(this));
@@ -712,10 +716,10 @@ void CFG::print(raw_ostream &OS, const LangOptions &LO, bool ShowColors) const {
   // Iterate through the CFGBlocks and print them one by one.
   for (const_iterator I = Blocks.begin(), E = Blocks.end(); I != E; ++I) {
     // Skip the entry block, because we already printed it.
-    if (&(*I) == &getEntry() || &(*I) == &getExit())
+    if (*I == &getEntry() || *I == &getExit())
       continue;
 
-    print_block(OS, this, *I, Helper, true, ShowColors);
+    print_block(OS, this, **I, Helper, true, ShowColors);
   }
 
   // Print the exit block.
@@ -730,7 +734,7 @@ void CFG::dump(const LangOptions &LO, bool ShowColors) const {
 CFG::iterator CFG::createBlock() {
   bool first_block = begin() == end();
 
-  Blocks.emplace_back(this, NumBlockIDs++);
+  Blocks.emplace_back(new CFGBlock(this, NumBlockIDs++));
 
   // If this is the first block, set it as the Entry and Exit.
   if (first_block) {

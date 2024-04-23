@@ -863,12 +863,12 @@ void SAFuncContext::run() {
   // 1. build the CFGBlocks
   CFGBuilder Builder(*this);
 
-  // Create the stub exit block.
-  // The first block will be implicitly registered as the exit block.
-  // TODO the exit block is currently not used. Edges to exit block are not
-  // maintained.
-  CFG::iterator Exit = Cfg->createBlock();
-  assert(&*Exit == &Cfg->getExit());
+  // // Create the stub exit block.
+  // // The first block will be implicitly registered as the exit block.
+  // // TODO the exit block is currently not used. Edges to exit block are not
+  // // maintained.
+  // CFG::iterator Exit = Cfg->createBlock();
+  // assert(&*Exit == &Cfg->getExit());
 
   // create function decl again, and set the previous declaration.
   clang::IdentifierInfo *II =
@@ -894,7 +894,7 @@ void SAFuncContext::run() {
     for (auto succ : llvm::successors(term)) {
       auto src = getBlock(bb);
       auto dst = getBlock(*succ);
-      src->addSuccessor(CFGBlock::AdjacentBlock(&*dst));
+      src->addSuccessor(CFGBlock::AdjacentBlock(dst));
     }
   }
 
@@ -906,7 +906,7 @@ void SAFuncContext::run() {
   }
 
   // TODO: create structural analysis according to cmdline
-  Goto SA(*this);
+  Phoenix SA(*this);
   SA.execute();
 
   if (logLevel >= level_debug) {
