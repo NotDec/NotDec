@@ -234,6 +234,7 @@ public:
   const_iterator end() const { return Elements.end(); }
   iterator insert(iterator it, CFGElement e) { return Elements.insert(it, e); }
   iterator erase(iterator it) { return Elements.erase(it); }
+  void clear() { Elements.clear(); }
 
   reverse_iterator rbegin() { return Elements.rbegin(); }
   reverse_iterator rend() { return Elements.rend(); }
@@ -386,12 +387,9 @@ public:
   const_reverse_iterator rbegin() const { return Blocks.rbegin(); }
   const_reverse_iterator rend() const { return Blocks.rend(); }
 
-  iterator erase(iterator I) {
-    auto ret = Blocks.erase(I);
-    return ret;
-  }
   void remove(CFGBlock *I) {
     Blocks.erase(std::remove(Blocks.begin(), Blocks.end(), I), Blocks.end());
+    delete I;
   }
 
   CFGBlock &getEntry() { return *Entry; }

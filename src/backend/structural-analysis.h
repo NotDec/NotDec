@@ -391,7 +391,7 @@ public:
     B.setTerminator(nullptr);
     return ret;
   }
-  clang::CompoundStmt *makeCompoundStmt(CFGBlock *el) {
+  clang::CompoundStmt *makeCompoundStmt(CFGBlock *el, bool remove = false) {
     // convert to vector
     std::vector<clang::Stmt *> stmts;
     for (auto elem = el->begin(); elem != el->end(); ++elem) {
@@ -399,9 +399,20 @@ public:
         stmts.push_back(const_cast<clang::Stmt *>(stmt->getStmt()));
       }
     }
+    if (remove) {
+      el->clear();
+    }
     return clang::CompoundStmt::Create(FCtx.getASTContext(), stmts,
                                        clang::SourceLocation(),
                                        clang::SourceLocation());
+  }
+  clang::Stmt *createWhileTrue(clang::Stmt *body) {
+    auto &Ctx = FCtx.getASTContext();
+    auto tru = clang::IntegerLiteral::Create(
+        Ctx, llvm::APInt(32, 1, true), Ctx.IntTy, clang::SourceLocation());
+    return clang::WhileStmt::Create(
+        Ctx, nullptr, tru, body, clang::SourceLocation(),
+        clang::SourceLocation(), clang::SourceLocation());
   }
   void removeEdge(CFGBlock *From, CFGBlock *To) {
     From->removeSucc(To);
@@ -426,6 +437,13 @@ public:
       return nullptr;
     }
     return *Block->succ_begin();
+  }
+  // get the only predecessor
+  CFGBlock *singlePredecessor(CFGBlock *Block) {
+    if (Block->pred_size() != 1) {
+      return nullptr;
+    }
+    return *Block->pred_begin();
   }
   // check if the block has only predecessor pred.
   bool onlyPred(CFGBlock *Block, CFGBlock *Pred) {
