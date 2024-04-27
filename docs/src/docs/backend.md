@@ -208,7 +208,11 @@ paper的3.1节介绍了算法框架，和结构分析很相似。
     - http://zneak.github.io/fcd/2016/02/17/structuring.html
     - http://zneak.github.io/fcd/2016/02/21/csaw-wyvern.html
 
+## 实现
 
+目标是支持任意IR的转C语言伪代码。一些IR层丢失的类型信息（整数是否有符号，结构体的字段名称等）需要额外的数据结构。
+
+**代码优化**：Phi指令不好提供支持，我们使用demoteSSA去除Phi指令。为了消除demoteSSA带来的额外空基本块，我们再调用了SimplifyCFG pass。
 
 ### 表达式折叠
 
@@ -223,6 +227,14 @@ paper的3.1节介绍了算法框架，和结构分析很相似。
 
 
 Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副作用就应该作为Stmt。而是指令没有返回值，不会被作为value才作为Stmt。具体是否应该把Expr作为Stmt放下来，这个都得放。具体是否应该创建一个局部变量，得看是否在一个基本块。如果发现这个Expr的基本块和当前的基本块不同的话，就应该在那边为这个expr创建一个局部变量。
+
+**逻辑表达式**: C/C++的and/or具有短路的性质。但在无副作用时这影响不大。但是在IR中，如果尝试直接优先折叠成and/or指令，则会不存在短路，语义发生变化。因此逻辑运算符需要在结构分析中处理。
+
+- DemoteSSA会引入不必要的基本块，我们使用SimplifyCFG处理这些基本块。SimplifyCFG同时还会折叠and/or表达式，但是折叠后是select指令的形式。
+  - select 指令对应ternary三元运算符。同时select 如果作用在i1，同时两边如果存在false或者true常量时，可以作为and/or处理。
+    - select i1 expr1, i1 true, i1 expr2 -> expr1 || expr2
+    - select i1 expr1, i1 expr2, i1 false -> expr1 && expr2
+- LLVM里的instcombine会将这种模式转为and/or（见[这里](https://aqjune.github.io/posts/2021-10-4.the-select-story.html)），但是我们不需要考虑那么多，直接两种都支持。
 
 ### 指令处理
 

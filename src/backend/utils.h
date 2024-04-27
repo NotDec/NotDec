@@ -192,6 +192,17 @@ createBinaryOperator(clang::ASTContext &Ctx, clang::Expr *LHS, clang::Expr *RHS,
       clang::FPOptionsOverride());
 }
 
+inline clang::ConditionalOperator *
+createConditionalOperator(clang::ASTContext &Ctx, clang::Expr *cond,
+                          clang::Expr *LHS, clang::Expr *RHS,
+                          clang::QualType QT, clang::ExprValueKind VK) {
+  return new (Ctx) clang::ConditionalOperator(
+      addParenthesis<clang::ConditionalOperator>(Ctx, cond, true),
+      clang::SourceLocation(), LHS, clang::SourceLocation(),
+      addParenthesis<clang::ConditionalOperator>(Ctx, RHS, false), QT, VK,
+      clang::OK_Ordinary);
+}
+
 inline clang::UnaryOperator *createUnaryOperator(clang::ASTContext &Ctx,
                                                  clang::Expr *E,
                                                  clang::UnaryOperatorKind OK,

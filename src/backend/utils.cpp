@@ -7,6 +7,7 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Transforms/Scalar/Reg2Mem.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <type_traits>
 
 #define DEBUG_TYPE "notdec-backend-utils"
@@ -29,6 +30,10 @@ void demoteSSA(llvm::Module &M) {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
+
+  // SimplifyCFGOptions Opts;
+  // Opts.setSimplifyCondBranch(false);
+  // MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(Opts)));
   MPM.run(M, MAM);
 }
 

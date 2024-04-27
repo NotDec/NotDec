@@ -539,6 +539,7 @@ clang::Expr *handleCast(clang::ASTContext &Ctx, llvm::LLVMContext &LCtx,
                         ExprBuilder &EB, TypeBuilder &TB,
                         llvm::Instruction::CastOps OpCode, llvm::Type *srcTy,
                         llvm::Type *destTy, llvm::Value *Operand) {
+  auto Val = EB.visitValue(Operand);
   // If zext i1 to integer, then ignore.
   if (srcTy->isIntegerTy(1)) {
     srcTy = llvm::Type::getInt32Ty(LCtx);
@@ -548,7 +549,7 @@ clang::Expr *handleCast(clang::ASTContext &Ctx, llvm::LLVMContext &LCtx,
   }
   if (srcTy == destTy) {
     // no need to cast
-    return nullptr;
+    return Val;
   }
   // TODO handle signness and ZExt SExt
   clang::CastKind ck;
@@ -606,9 +607,8 @@ clang::Expr *handleCast(clang::ASTContext &Ctx, llvm::LLVMContext &LCtx,
                  << "\n";
     std::abort();
   }
-  clang::Expr *expr =
-      createCStyleCastExpr(Ctx, TB.visitType(*destTy), clang::VK_PRValue, ck,
-                           EB.visitValue(Operand));
+  clang::Expr *expr = createCStyleCastExpr(Ctx, TB.visitType(*destTy),
+                                           clang::VK_PRValue, ck, Val);
   return expr;
 }
 
@@ -664,6 +664,41 @@ void CFGBuilder::visitReturnInst(llvm::ReturnInst &I) {
   addExprOrStmt(I, *ret);
   // not add to terminator!
   // Blk->setTerminator(CFGTerminator(ret));
+}
+
+/// Convert SelectInst to Ternary operator `?:`.
+/// If the usage matches the and/or logical operator, then convert to && or ||
+void CFGBuilder::visitSelectInst(llvm::SelectInst &I) {
+  auto &TB = FCtx.getTypeBuilder();
+  auto RTy = TB.visitType(*I.getType());
+  clang::Expr *cond = EB.visitValue(I.getCondition());
+  if (I.getType()->isIntegerTy(1)) {
+    // select i1 expr1, i1 true, i1 expr2 -> expr1 || expr2
+    if (auto i = llvm::dyn_cast<llvm::ConstantInt>(I.getTrueValue())) {
+      if (i->isOne()) {
+        clang::Expr *fl = EB.visitValue(I.getFalseValue());
+        auto exp = createBinaryOperator(Ctx, cond, fl, clang::BO_LOr, RTy,
+                                        clang::VK_PRValue);
+        addExprOrStmt(I, *exp);
+        return;
+      }
+    }
+    // select i1 expr1, i1 expr2, i1 false -> expr1 && expr2
+    if (auto i = llvm::dyn_cast<llvm::ConstantInt>(I.getFalseValue())) {
+      if (i->isZero()) {
+        clang::Expr *tr = EB.visitValue(I.getTrueValue());
+        auto exp = createBinaryOperator(Ctx, cond, tr, clang::BO_LAnd, RTy,
+                                        clang::VK_PRValue);
+        addExprOrStmt(I, *exp);
+        return;
+      }
+    }
+  }
+  clang::Expr *tr = EB.visitValue(I.getTrueValue());
+  clang::Expr *fl = EB.visitValue(I.getFalseValue());
+  auto exp =
+      createConditionalOperator(Ctx, cond, tr, fl, RTy, clang::VK_PRValue);
+  addExprOrStmt(I, *exp);
 }
 
 const llvm::StringSet<> SAContext::Keywords = {

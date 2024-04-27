@@ -95,8 +95,7 @@ void backwardVisit(std::set<CFGBlock *> &visited, CFGBlock *Entry,
   }
   for (auto &pred : Current->preds()) {
     auto P = pred.getBlock();
-    if (visited.find(P) != visited.end()) {
-      visited.insert(P);
+    if (visited.find(P) == visited.end()) {
       backwardVisit(visited, Entry, P);
     }
   }
@@ -110,7 +109,7 @@ void forwardVisit(std::set<CFGBlock *> &visited, std::set<CFGBlock *> gray,
   assert(visited.insert(Current).second);
   for (auto &pred : Current->succs()) {
     auto P = pred.getBlock();
-    if (visited.find(P) != visited.end() && gray.count(P) == 1) {
+    if (visited.find(P) == visited.end() && gray.count(P) == 1) {
       forwardVisit(visited, gray, P);
     }
   }
@@ -127,7 +126,9 @@ std::unique_ptr<std::set<CFGBlock *>> getLoopNodes(CFGBlock *Block,
     if (Dom.properlyDominates(Block, P)) {
       // backward visit from back edge node
       // because Block dom P, back visit from P will find Block eventually.
-      backwardVisit(Gray, Block, P);
+      if (Gray.count(P) == 0) {
+        backwardVisit(Gray, Block, P);
+      }
     } else if (P == Block) {
       // self loop
       ret->insert(P);

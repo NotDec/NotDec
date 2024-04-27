@@ -542,6 +542,7 @@ public:
                     "reg2mem first!\n";
     std::abort();
   }
+  void visitSelectInst(llvm::SelectInst &I);
 
   CFGBuilder(SAFuncContext &FCtx)
       : Ctx(FCtx.getASTContext()), FCtx(FCtx), EB(FCtx) {}
