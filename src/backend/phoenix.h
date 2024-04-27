@@ -38,7 +38,6 @@ protected:
   bool ReduceCyclic(CFGBlock *Block);
   bool reduceSequence(CFGBlock *Block);
   bool reduceIfRegion(CFGBlock *Block);
-  bool reduceSelf(CFGBlock *Block);
   bool ProcessUnresolvedRegions();
   bool refineLoop(CFGBlock *head, std::set<CFGBlock *> &loopNodes);
   void refineIncSwitch(CFGBlock *switchHead);

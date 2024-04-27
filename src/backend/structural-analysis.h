@@ -32,6 +32,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <map>
 #include <memory>
+#include <vector>
 
 namespace notdec::backend {
 
@@ -452,6 +453,31 @@ public:
       }
     }
     return true;
+  }
+};
+
+// A -> B -> C, and
+// 1. B is an empty block
+// 2. B has only one succ.
+// then remove B in the middle: A -> C
+class CFGCleaner : IStructuralAnalysis {
+public:
+  CFGCleaner(SAFuncContext &Ctx) : IStructuralAnalysis(Ctx) {}
+
+  void execute() override {
+    std::vector<CFGBlock *> blks(CFG.begin(), CFG.end());
+    for (auto Block : blks) {
+      if (Block->size() == 0 && Block->succ_size() == 1 &&
+          Block->pred_size() > 0) {
+        auto succ = linearSuccessor(Block);
+        succ->removePred(Block);
+        for (auto pred : Block->preds()) {
+          pred->replaceSucc(Block, succ);
+          succ->addOnlyPredecessor(pred);
+        }
+        CFG.remove(Block);
+      }
+    }
   }
 };
 

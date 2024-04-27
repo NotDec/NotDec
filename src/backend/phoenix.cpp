@@ -17,10 +17,15 @@
 #include "backend/CFG.h"
 #include "backend/PostOrderCFGView.h"
 #include "backend/phoenix.h"
+#include "backend/structural-analysis.h"
 
 namespace notdec::backend {
 
 void Phoenix::execute() {
+  // clean up empty blocks
+  CFGCleaner CC(FCtx);
+  CC.execute();
+
   int iterations = 0;
   do {
     if (isCanceled) {
@@ -48,9 +53,6 @@ void Phoenix::execute() {
       }
 
       bool Changed;
-      if (reduceSelf(Block)) {
-        break;
-      }
       int round = 0;
       do {
         Changed = false;
@@ -714,25 +716,6 @@ bool Phoenix::lastResort(CFGBlock *n) {
     return true;
   } else {
     // Whoa, we're in trouble now....
-    return false;
-  }
-}
-
-// A -> B -> C, and
-// 1. B is an empty block
-// 2. B has only one succ.
-// then remove B in the middle: A -> C
-bool Phoenix::reduceSelf(CFGBlock *Block) {
-  if (Block->size() == 0 && Block->succ_size() == 1 && Block->pred_size() > 0) {
-    auto succ = linearSuccessor(Block);
-    succ->removePred(Block);
-    for (auto pred : Block->preds()) {
-      pred->replaceSucc(Block, succ);
-      succ->addOnlyPredecessor(pred);
-    }
-    CFG.remove(Block);
-    return true;
-  } else {
     return false;
   }
 }
