@@ -73,14 +73,16 @@
 
 在《Advanced Compiler Design and Implementation》里提到这种方式划分的是Maximal Interval。书中还提出了改进版的算法，划分的是Minimal Interval，划分效果更好，更小的区域便于后续划分高级语言的控制结构。
 
-**Interval Analysis (minimal interval)**：该算法是《Advanced Compiler Design and Implementation》提出的改进版。它将CFG划分为三个部分，无环（acylic），natural loop和improper region。无环部分即有向无环子图，其他两种区域则包含环。后面会提到，proper region指一些虽然无环，但是也不能被简单的if-else等结构匹配的无环部分。improper region与之对应，有环，但是是比较复杂的环。
+**Interval Analysis (minimal interval)**：该算法是《Advanced Compiler Design and Implementation》提出的改进版。它将CFG划分为三个部分，无环（acylic），natural loop和improper region。无环部分即有向无环子图，其他两种区域则包含环。
+
+- **proper region和improper region**：proper region指一些虽然无环，但是也不能被简单的if-else等结构匹配的无环部分。improper region与之对应，有环，但是是比较复杂的环。
 
 **步骤：**
 1. 使用一个后序遍历找到loop header，和improper region的header。（后面再详细解释）
-1. 对每个loop header构建natural loop区域。(使用支配图，判断是否有前驱节点指过来的边是反向边，即head dom tail)
-1. 对improper region的header构建minimal SCC。（即只把环分离出来）
+2. 对每个loop header构建natural loop区域。(使用支配图，判断是否有前驱节点指过来的边是反向边，即head dom tail)
+3. 对improper region的header构建minimal SCC。（即只把环分离出来）
     1. 构建区域之后，对（区域的）所有的直接后继节点构建最大的有向无环子图（把环上长出的分支分离出来），如果成功弄出节点数量大于1的子图，就构建一个有向无环区域。
-1. 递归整个过程直到终止。
+4. 递归整个过程直到终止。
 
 可以感受到，这其实是基于前一个算法，融合了把有向无环的子区域分离的想法。同时还顺便分离了有环区域中的natural loop。（但是，有一些具体的实现细节也还是不清楚。。）下面详细解释算法细节。
 
@@ -165,12 +167,20 @@ natural loop，如果才能
 paper的3.1节介绍了算法框架，和结构分析很相似。
 - 使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
     - 如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过
-    - 如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过
+    - 如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。实在处理不了还是跳过
+      - 如果匹配失败，进入Loop Refinement阶段（3.6节）。
     - 如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
         - 优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。
         - 优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？
 
 具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。
+
+**Loop的节点**：
+- 原始的定义：一个反向边的Natural Loop（即，natural loop严格说并不是一个单独的概念，反而是对一条反向边而言的。），是指，最小的，包括反向边头和尾节点的节点集合，集合内所有节点的前驱，要么在集合内，要么这个节点是entry节点，前驱是entry的前驱。
+- 存在的问题：不能涵盖一些break语句所在基本块的节点。这些节点被上面定义的“最小”排除。
+- 新的定义：除了原始定义中的节点，额外增加了一些节点。
+  - 新增节点的定义1：被loop header, 即entry支配的节点中：排除从loop的successor节点，不经过loop header可达的节点。
+  - 新增节点的定义2：满足两个条件：条件1：被entry支配。条件2，从loop的successor节点出发，不经过loop header的条件下，不可达。
 
 #### reko的实现
 

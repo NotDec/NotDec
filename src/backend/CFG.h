@@ -10,8 +10,11 @@
 #ifndef _NOTDEC_BACKEND_CFG_H_
 #define _NOTDEC_BACKEND_CFG_H_
 
+#include <cassert>
 #include <deque>
 #include <list>
+#include <set>
+#include <utility>
 #include <vector>
 
 #include <clang/AST/Stmt.h>
@@ -165,8 +168,10 @@ public:
   using ElementListTy = std::vector<CFGElement>;
   using Stmt = clang::Stmt;
 
-  CFGBlock(CFG *parent) : Parent(parent){};
-  CFGBlock(CFG *parent, unsigned ID) : BlockID(ID), Parent(parent) {}
+  CFGBlock(CFG *parent) : Parent(parent) { HasNoReturnElement = false; };
+  CFGBlock(CFG *parent, unsigned ID) : BlockID(ID), Parent(parent) {
+    HasNoReturnElement = false;
+  }
 
   ElementListTy Elements;
 
@@ -187,8 +192,9 @@ public:
     CFGBlock *Block;
 
   public:
+    bool operator<(const AdjacentBlock &rhs) const { return Block < rhs.Block; }
     AdjacentBlock(CFGBlock *B) : Block(B) {}
-    CFGBlock *getBlock() { return Block; }
+    CFGBlock *getBlock() const { return Block; }
     void setBlock(CFGBlock *B) { Block = B; }
     /// Provide an implicit conversion to CFGBlock* so that
     /// AdjacentBlock can be substituted for CFGBlock*.
@@ -202,8 +208,9 @@ public:
   };
 
 private:
+  using AdjacentBlockSet = std::set<AdjacentBlock>;
   using AdjacentBlocks = std::vector<AdjacentBlock>;
-  AdjacentBlocks Preds;
+  AdjacentBlockSet Preds;
   AdjacentBlocks Succs;
 
   /// This bit is set when the basic block contains a function call
@@ -221,6 +228,32 @@ private:
   CFG *Parent;
 
 public:
+  std::pair<CFGBlock *, CFGBlock *> getTwoSuccs() {
+    assert(succ_size() == 2);
+    return std::make_pair(Succs[0], Succs[1]);
+  }
+  bool isTrueBrSucc(CFGBlock *To) {
+    assert(succ_size() == 2);
+    return Succs[0] == To;
+  }
+  bool isFalseBrSucc(CFGBlock *To) {
+    assert(succ_size() == 2);
+    return Succs[1] == To;
+  }
+  void replaceSucc(CFGBlock *From, CFGBlock *To) {
+    for (auto &succ : Succs) {
+      if (succ == From) {
+        succ.setBlock(To);
+        return;
+      }
+    }
+    assert(false && "replaceSucc failed!");
+  }
+  void replacePred(CFGBlock *From, CFGBlock *To) {
+    assert(Preds.erase(AdjacentBlock(From)) == 1);
+    Preds.insert(AdjacentBlock(To));
+  }
+
   using iterator = ElementListTy::iterator;
   using const_iterator = ElementListTy::const_iterator;
   using reverse_iterator = ElementListTy::reverse_iterator;
@@ -244,10 +277,10 @@ public:
   unsigned long size() const { return Elements.size(); }
 
   // CFG iterators
-  using pred_iterator = AdjacentBlocks::iterator;
-  using const_pred_iterator = AdjacentBlocks::const_iterator;
-  using pred_reverse_iterator = AdjacentBlocks::reverse_iterator;
-  using const_pred_reverse_iterator = AdjacentBlocks::const_reverse_iterator;
+  using pred_iterator = AdjacentBlockSet::iterator;
+  using const_pred_iterator = AdjacentBlockSet::const_iterator;
+  using pred_reverse_iterator = AdjacentBlockSet::reverse_iterator;
+  using const_pred_reverse_iterator = AdjacentBlockSet::const_reverse_iterator;
   using pred_range = llvm::iterator_range<pred_iterator>;
   using pred_const_range = llvm::iterator_range<const_pred_iterator>;
 
@@ -309,12 +342,7 @@ public:
                        [B](AdjacentBlock &AB) { return AB.getBlock() == B; }),
         Succs.end());
   }
-  void removePred(CFGBlock *B) {
-    Preds.erase(
-        std::remove_if(Preds.begin(), Preds.end(),
-                       [B](AdjacentBlock &AB) { return AB.getBlock() == B; }),
-        Preds.end());
-  }
+  void removePred(CFGBlock *B) { Preds.erase(AdjacentBlock(B)); }
 
   Stmt *getTerminatorStmt() { return Terminator.getStmt(); }
   const Stmt *getTerminatorStmt() const { return Terminator.getStmt(); }
@@ -344,7 +372,11 @@ public:
 
   /// Adds a (potentially unreachable) successor block to the current block.
   void addSuccessor(AdjacentBlock Succ);
+  void addOnlyPredecessor(AdjacentBlock Pred) { Preds.insert(Pred); }
 
+  void prependStmt(Stmt *statement) {
+    Elements.insert(Elements.begin(), CFGStmt(statement));
+  }
   void appendStmt(Stmt *statement) { Elements.push_back(CFGStmt(statement)); }
   void appendElement(CFGElement statement) { Elements.push_back(statement); }
 };
@@ -366,6 +398,9 @@ public:
 
   CFGBlock **data() { return Blocks.data(); }
 
+  bool contains(CFGBlock *B) {
+    return std::find(Blocks.begin(), Blocks.end(), B) != Blocks.end();
+  }
   iterator begin() { return Blocks.begin(); }
   iterator end() { return Blocks.end(); }
   const_iterator begin() const { return Blocks.begin(); }

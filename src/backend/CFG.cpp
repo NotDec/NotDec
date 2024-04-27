@@ -644,7 +644,7 @@ void CFGBlock::printTerminator(raw_ostream &OS, const LangOptions &LO) const {}
 /// Add a edge to the current block. Also adds the pred of succ.
 void CFGBlock::addSuccessor(AdjacentBlock Succ) {
   if (CFGBlock *B = Succ.getBlock()) {
-    B->Preds.push_back(AdjacentBlock(this));
+    B->Preds.insert(AdjacentBlock(this));
   }
 
   Succs.push_back(Succ);

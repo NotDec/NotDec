@@ -342,6 +342,8 @@ class IStructuralAnalysis {
 protected:
   SAFuncContext &FCtx;
   CFG &CFG;
+  // initialize after FCtx
+  clang::ASTContext &Ctx;
 
   clang::Expr *invertCond(clang::Expr *cond) {
     if (auto *BO = llvm::dyn_cast<clang::BinaryOperator>(cond)) {
@@ -373,11 +375,12 @@ protected:
   }
 
 public:
-  IStructuralAnalysis(SAFuncContext &ctx) : FCtx(ctx), CFG(FCtx.getCFG()) {}
+  IStructuralAnalysis(SAFuncContext &ctx)
+      : FCtx(ctx), CFG(FCtx.getCFG()), Ctx(ctx.getASTContext()) {}
 
   virtual ~IStructuralAnalysis() = default;
   virtual void execute() = 0;
-  clang::LabelDecl *getBlockLabel(CFGBlock *blk);
+  clang::LabelDecl *getBlockLabel(CFGBlock *blk, bool prepend = false);
   void mergeBlock(llvm::BasicBlock &bb, llvm::BasicBlock &next);
   ValueNamer &getValueNamer() { return FCtx.getSAContext().getValueNamer(); }
 
@@ -418,18 +421,14 @@ public:
     From->removeSucc(To);
     To->removePred(From);
   }
-  /// Replace all successors of From with To.
-  void replaceSuccessors(CFGBlock *From, CFGBlock *To) {
-    for (auto &Succ : To->succs()) {
-      From->addSuccessor(Succ);
+  /// Move all outgoing edges of From to To.
+  void replaceSuccessors(CFGBlock *From, CFGBlock *Target) {
+    for (auto &Succ : From->succs()) {
+      Target->addSuccessor(Succ);
       // replace pred of succ
-      for (auto &Pred : Succ->preds()) {
-        if (Pred == To) {
-          Pred.setBlock(From);
-        }
-      }
+      Succ->replacePred(From, Target);
     }
-    To->succ_clear();
+    From->succ_clear();
   }
   // get the only successor or nullptr.
   CFGBlock *linearSuccessor(CFGBlock *Block) {

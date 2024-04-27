@@ -661,8 +661,9 @@ void CFGBuilder::visitReturnInst(llvm::ReturnInst &I) {
   clang::Stmt *ret;
   ret = clang::ReturnStmt::Create(Ctx, clang::SourceLocation(),
                                   EB.visitValue(I.getReturnValue()), nullptr);
-  // addExprOrStmt(I, *ret);
-  Blk->setTerminator(CFGTerminator(ret));
+  addExprOrStmt(I, *ret);
+  // not add to terminator!
+  // Blk->setTerminator(CFGTerminator(ret));
 }
 
 const llvm::StringSet<> SAContext::Keywords = {
@@ -1218,7 +1219,8 @@ clang::Expr *ExprBuilder::visitConstant(llvm::Constant &C, clang::QualType Ty) {
 }
 
 /// get the label for the block. Create if not exist.
-clang::LabelDecl *IStructuralAnalysis::getBlockLabel(CFGBlock *Blk) {
+clang::LabelDecl *IStructuralAnalysis::getBlockLabel(CFGBlock *Blk,
+                                                     bool prepend) {
   if (auto label = Blk->getLabel()) {
     return llvm::cast<clang::LabelStmt>(label)->getDecl();
   } else {
@@ -1232,7 +1234,11 @@ clang::LabelDecl *IStructuralAnalysis::getBlockLabel(CFGBlock *Blk) {
     auto LabelStmt = new (astCtx)
         clang::LabelStmt(clang::SourceLocation(), LabelDecl,
                          new (astCtx) clang::NullStmt(clang::SourceLocation()));
-    Blk->setLabel(LabelStmt);
+    if (prepend) {
+      Blk->prependStmt(LabelStmt);
+    } else {
+      Blk->setLabel(LabelStmt);
+    }
     return LabelDecl;
   }
 }
