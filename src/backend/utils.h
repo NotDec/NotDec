@@ -5,12 +5,30 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Expr.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/Support/Debug.h>
 #include <type_traits>
 
 namespace notdec::backend {
 
 void demoteSSA(llvm::Module &M);
+
+// ===============
+// Pass
+// ===============
+
+// Function Pass example
+struct RetDupPass : llvm::PassInfoMixin<RetDupPass> {
+  // Main entry point, takes IR unit to run the pass on (&F) and the
+  // corresponding  pass manager (to be queried if need be)
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  // Without isRequired returning true, this pass will be skipped for functions
+  // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
+  // all functions with optnone.
+  static bool isRequired() { return true; }
+};
 
 // ===============
 // Precedence

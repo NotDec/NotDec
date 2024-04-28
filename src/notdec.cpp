@@ -36,45 +36,27 @@ static cl::opt<bool> compatMode(
     "compat-mode",
     cl::desc("Make IR more compatible, e.g., rename main function to main."),
     cl::init(true));
-static cl::opt<bool> disablePass("disable-pass", cl::desc("Disable all passes"),
-                                 cl::init(false));
+static cl::opt<bool>
+    disablePass("disable-pass",
+                cl::desc("Disable all passes in the middle end"),
+                cl::init(false));
 static cl::opt<bool> expandMem(
     "expand-mem",
     cl::desc(
         "(for recompile mode) not expand mem to real size for debug purpose."),
     cl::init(true));
 
-cl::opt<log_level> logLevel("log-level", cl::desc("Choose log level:"),
-                            cl::values(clEnumVal(level_emergent, "emergent"),
-                                       clEnumVal(level_alert, "alert"),
-                                       clEnumVal(level_critical, "critical"),
-                                       clEnumVal(level_error, "error"),
-                                       clEnumVal(level_warning, "warning"),
-                                       clEnumVal(level_notice, "notice"),
-                                       clEnumVal(level_info, "info"),
-                                       clEnumVal(level_debug, "debug")),
-                            cl::init(level_notice));
-
-// static ManagedStatic<std::vector<std::string>> CurrentDebugType;
-
-// struct DebugOnlyOpt {
-//   void operator=(const std::string &Val) const {
-//     if (Val.empty())
-//       return;
-//     DebugFlag = true;
-//     SmallVector<StringRef, 8> dbgTypes;
-//     StringRef(Val).split(dbgTypes, ',', -1, false);
-//     for (auto dbgType : dbgTypes)
-//       CurrentDebugType->push_back(std::string(dbgType));
-//   }
-// };
-// static DebugOnlyOpt DebugOnlyOptLoc;
-// cl::opt<DebugOnlyOpt, true, cl::parser<std::string>> debugOnly(
-//     "debug-only",
-//     cl::desc("Enable a specific type of debug output (comma separated list "
-//              "of types)"),
-//     cl::Hidden, cl::ZeroOrMore, cl::value_desc("debug string"),
-//     cl::location(DebugOnlyOptLoc), cl::ValueRequired);
+cl::opt<log_level>
+    logLevel("log-level", cl::desc("Log level:"),
+             cl::values(clEnumValN(level_emergent, "emergent", "emergent"),
+                        clEnumValN(level_alert, "alert", "alert"),
+                        clEnumValN(level_critical, "critical", "critical"),
+                        clEnumValN(level_error, "error", "error"),
+                        clEnumValN(level_warning, "warning", "warning"),
+                        clEnumValN(level_notice, "notice", "notice"),
+                        clEnumValN(level_info, "info", "info"),
+                        clEnumValN(level_debug, "debug", "debug")),
+             cl::init(level_notice));
 
 std::string getSuffix(std::string fname) {
   std::size_t ind = fname.find_last_of('.');
@@ -84,6 +66,9 @@ std::string getSuffix(std::string fname) {
   return std::string();
 }
 
+// https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
+// initialize function for the fine-grained debug info with DEBUG_TYPE and the
+// -debug-only option
 namespace llvm {
 void initDebugOptions();
 }

@@ -646,6 +646,14 @@ clang::Expr *handleBinary(clang::ASTContext &Ctx, ExprBuilder &EB,
     rhs = castUnsigned(Ctx, TB, rhs);
   }
 
+  // handle logical and/or
+  if (*op == clang::BO_And && Result->isIntegerTy(1)) {
+    op = clang::BO_LAnd;
+  }
+  if (*op == clang::BO_Or && Result->isIntegerTy(1)) {
+    op = clang::BO_LOr;
+  }
+
   clang::Expr *binop = createBinaryOperator(
       Ctx, lhs, rhs, op.getValue(), TB.visitType(*Result), clang::VK_PRValue);
   return binop;
@@ -939,6 +947,10 @@ void SAFuncContext::run() {
   CFGCleaner CC(*this);
   CC.execute();
 
+  // create logical and/or
+  CompoundConditionBuilder CCB(*this);
+  CCB.execute();
+
   if (logLevel >= level_debug) {
     llvm::errs() << "========" << Func.getName() << ": "
                  << "Before Structural Analysis ========"
@@ -946,9 +958,9 @@ void SAFuncContext::run() {
     Cfg->dump(getASTContext().getLangOpts(), true);
   }
 
-  // create logical and/or
-  CompoundConditionBuilder CCB(*this);
-  CCB.execute();
+  // TODO: create structural analysis according to cmdline
+  Phoenix SA(*this);
+  SA.execute();
 
   if (logLevel >= level_debug) {
     llvm::errs() << "========" << Func.getName() << ": "
@@ -956,10 +968,6 @@ void SAFuncContext::run() {
                  << "\n";
     Cfg->dump(getASTContext().getLangOpts(), true);
   }
-
-  // TODO: create structural analysis according to cmdline
-  Phoenix SA(*this);
-  SA.execute();
 
   // Finalize steps
   // After structural analysis, the CFG is expected to have only one linear
