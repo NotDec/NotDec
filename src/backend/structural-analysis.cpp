@@ -2,6 +2,7 @@
 
 #include "backend/structural-analysis.h"
 #include "../utils.h"
+#include "backend/CompoundConditionBuilder.h"
 #include "backend/goto.h"
 #include "backend/phoenix.h"
 #include "backend/utils.h"
@@ -934,6 +935,10 @@ void SAFuncContext::run() {
     }
   }
 
+  // clean up empty blocks
+  CFGCleaner CC(*this);
+  CC.execute();
+
   if (logLevel >= level_debug) {
     llvm::errs() << "========" << Func.getName() << ": "
                  << "Before Structural Analysis ========"
@@ -941,9 +946,9 @@ void SAFuncContext::run() {
     Cfg->dump(getASTContext().getLangOpts(), true);
   }
 
-  // TODO: create structural analysis according to cmdline
-  Phoenix SA(*this);
-  SA.execute();
+  // create logical and/or
+  CompoundConditionBuilder CCB(*this);
+  CCB.execute();
 
   if (logLevel >= level_debug) {
     llvm::errs() << "========" << Func.getName() << ": "
@@ -951,6 +956,10 @@ void SAFuncContext::run() {
                  << "\n";
     Cfg->dump(getASTContext().getLangOpts(), true);
   }
+
+  // TODO: create structural analysis according to cmdline
+  Phoenix SA(*this);
+  SA.execute();
 
   // Finalize steps
   // After structural analysis, the CFG is expected to have only one linear

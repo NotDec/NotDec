@@ -16,7 +16,7 @@ for file in $SYSY/*.c; do
     out=$SCRIPTPATH/out_sysy_functional/${name}
     # /opt/wasi-sdk-20.0/bin/clang -Xclang -no-opaque-pointers -I$SYSY/.. -c -emit-llvm -S -o ${out}.ll $file
     clang-14 -Xclang -disable-O0-optnone -I$SYSY/.. -c -emit-llvm -S -o ${out}.ll $file
-    # opt-14 -reg2mem -S -o ${out}.ll ${out}.ll
+    opt-14 -reg2mem --simplifycfg --simplifycfg-branch-fold-threshold=0 -S -o ${out}.ll ${out}.ll
     # opt-14 -reg2mem --simplifycfg -S -o ${out}.ll ${out}.ll
     echo $NOTDEC_BIN -i ${out}.ll -o ${out}.c
     $NOTDEC_BIN -i ${out}.ll -o ${out}.c

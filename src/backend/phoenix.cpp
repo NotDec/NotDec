@@ -22,10 +22,6 @@
 namespace notdec::backend {
 
 void Phoenix::execute() {
-  // clean up empty blocks
-  CFGCleaner CC(FCtx);
-  CC.execute();
-
   int iterations = 0;
   do {
     if (isCanceled) {

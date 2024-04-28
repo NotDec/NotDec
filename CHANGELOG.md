@@ -18,3 +18,6 @@
 1. migrate structural analysis from reko.
 2. add reduceSelf: A -> B -> C, B is an empty block, and B has only one succ and only one pred.
 3. consider reducing return stmt before SSA destruction. Because: `tmp1 = 10; goto ret; ret: tmp0 = tmp1; return tmp0`
+
+**2024-04-27**
+1. The simplify CFG pass in LLVM has a branch-fold-threshold. We prefer to set it to 0, so that the folding of some (not all because of the threshold) logical and/or is not done in the IR level. However it is a static clang opt; it can be set by cmdline but not API. We will have to leave it enable.

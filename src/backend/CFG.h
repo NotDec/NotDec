@@ -343,6 +343,7 @@ public:
         Succs.end());
   }
   void removePred(CFGBlock *B) { Preds.erase(AdjacentBlock(B)); }
+  void addPred(CFGBlock *B) { Preds.insert(AdjacentBlock(B)); }
 
   Stmt *getTerminatorStmt() { return Terminator.getStmt(); }
   const Stmt *getTerminatorStmt() const { return Terminator.getStmt(); }

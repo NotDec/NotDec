@@ -21,6 +21,7 @@ add_library(notdec STATIC
 	backend/utils.cpp
 	backend/PostOrderCFGView.cpp
 	backend/Dominators.cpp
+	backend/CompoundConditionBuilder.cpp
 )
 
 # include直接在外部设置了src目录。

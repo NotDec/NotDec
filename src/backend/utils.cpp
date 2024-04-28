@@ -31,9 +31,9 @@ void demoteSSA(llvm::Module &M) {
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
 
-  // SimplifyCFGOptions Opts;
-  // Opts.setSimplifyCondBranch(false);
-  // MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(Opts)));
+  SimplifyCFGOptions Opts;
+  // Opts.bonusInstThreshold(0);
+  MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(Opts)));
   MPM.run(M, MAM);
 }
 
