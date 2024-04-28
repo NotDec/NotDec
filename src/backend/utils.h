@@ -17,7 +17,21 @@ void demoteSSA(llvm::Module &M);
 // Pass
 // ===============
 
-// Function Pass example
+// merge into single predecessor
+// eliminate empty block with only one successor.
+struct AdjustCFGPass : llvm::PassInfoMixin<AdjustCFGPass> {
+  // Main entry point, takes IR unit to run the pass on (&F) and the
+  // corresponding  pass manager (to be queried if need be)
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  // Without isRequired returning true, this pass will be skipped for functions
+  // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
+  // all functions with optnone.
+  static bool isRequired() { return true; }
+};
+
+// match phi ret pattern and duplicate return block.
 struct RetDupPass : llvm::PassInfoMixin<RetDupPass> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding  pass manager (to be queried if need be)

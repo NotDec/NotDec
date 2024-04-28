@@ -21,3 +21,8 @@
 
 **2024-04-27**
 1. The simplify CFG pass in LLVM has a branch-fold-threshold. We prefer to set it to 0, so that the folding of some (not all because of the threshold) logical and/or is not done in the IR level. However it is a static clang opt; it can be set by cmdline but not API. We will have to leave it enable.
+
+**2024-04-28**
+1. The simplify CFG pass will merge all return block to create a common exit block, which is undesirable.
+2. the ideal process: fully optimized IR in SSA -> return duplication -> SSA destruction -> structural analysis
+3. our statement inserter requires the CFG is simplified, because in the case of `A: %1 = bitcast 0 to i32; B: ret %1`, we will find the `%1` used by other blocks and create a variable for it.

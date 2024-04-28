@@ -47,6 +47,8 @@
 #include <llvm/Support/raw_ostream.h>
 #include <utility>
 
+#define DEBUG_TYPE "structural-analysis"
+
 namespace notdec::backend {
 
 /// Check if the block is the entry block of the function, or a must via block
@@ -757,6 +759,11 @@ std::string printBasicBlock(const llvm::BasicBlock *b) {
 void decompileModule(llvm::Module &M, llvm::raw_fd_ostream &OS) {
   // demote SSA using reg2mem
   demoteSSA(M);
+  LLVM_DEBUG(
+      llvm::dbgs() << "\n========= IR before structural analysis =========\n");
+  LLVM_DEBUG(llvm::dbgs() << M);
+  LLVM_DEBUG(llvm::dbgs()
+             << "\n========= End IR before structural analysis =========\n");
   SAContext Ctx(const_cast<llvm::Module &>(M));
   Ctx.createDecls();
   for (const llvm::Function &F : M) {

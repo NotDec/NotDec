@@ -5,6 +5,8 @@
 #include <clang/AST/OperationKinds.h>
 #include <iostream>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/CFG.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/PassManager.h>
@@ -39,16 +41,124 @@ void demoteSSA(llvm::Module &M) {
   MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(Opts)));
   MPM.addPass(createModuleToFunctionPassAdaptor(RetDupPass()));
   // MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
+  MPM.addPass(createModuleToFunctionPassAdaptor(AdjustCFGPass()));
   MPM.run(M, MAM);
-
-  llvm::errs() << M;
 }
 
 // ===============
 // Pass
 // ===============
 
-llvm::Value *matchReturn(llvm::BasicBlock &BB) {
+// https://github.com/llvm/llvm-project/blob/7cf1fef45f13991e2d3b97e0612cfb88bf906a50/llvm/examples/IRTransforms/SimplifyCFG.cpp#L63
+static bool removeDeadBlocks_v1(llvm::Function &F) {
+  using namespace llvm;
+  bool Changed = false;
+
+  // Remove trivially dead blocks.
+  for (BasicBlock &BB : make_early_inc_range(F)) {
+    // Skip blocks we know to not be trivially dead. We know a block is
+    // guaranteed to be dead, iff it is neither the entry block nor
+    // has any predecessors.
+    if (&F.getEntryBlock() == &BB || !pred_empty(&BB))
+      continue;
+
+    // Notify successors of BB that BB is going to be removed. This removes
+    // incoming values from BB from PHIs in the successors. Note that this will
+    // not actually remove BB from the predecessor lists of its successors.
+    for (BasicBlock *Succ : successors(&BB))
+      Succ->removePredecessor(&BB);
+    // TODO: Find a better place to put such small variations.
+    // Alternatively, we can update the PHI nodes manually:
+    // for (PHINode &PN : make_early_inc_range(Succ->phis()))
+    //  PN.removeIncomingValue(&BB);
+
+    // Replace all instructions in BB with an undef constant. The block is
+    // unreachable, so the results of the instructions should never get used.
+    while (!BB.empty()) {
+      Instruction &I = BB.back();
+      I.replaceAllUsesWith(UndefValue::get(I.getType()));
+      I.eraseFromParent();
+    }
+
+    // Finally remove the basic block.
+    BB.eraseFromParent();
+    Changed = true;
+  }
+
+  return Changed;
+}
+
+static bool mergeIntoSinglePredecessor_v1(llvm::Function &F) {
+  using namespace llvm;
+  bool Changed = false;
+
+  // Merge blocks with single predecessors.
+  for (BasicBlock &BB : make_early_inc_range(F)) {
+    BasicBlock *Pred = BB.getSinglePredecessor();
+    // Make sure  BB has a single predecessor Pred and BB is the single
+    // successor of Pred.
+    if (!Pred || Pred->getSingleSuccessor() != &BB)
+      continue;
+
+    // Do not try to merge self loops. That can happen in dead blocks.
+    if (Pred == &BB)
+      continue;
+
+    // Need to replace it before nuking the branch.
+    BB.replaceAllUsesWith(Pred);
+    // PHI nodes in BB can only have a single incoming value. Remove them.
+    for (PHINode &PN : make_early_inc_range(BB.phis())) {
+      PN.replaceAllUsesWith(PN.getIncomingValue(0));
+      PN.eraseFromParent();
+    }
+    // Move all instructions from BB to Pred.
+    for (Instruction &I : make_early_inc_range(BB))
+      I.moveBefore(Pred->getTerminator());
+
+    // Remove the Pred's terminator (which jumped to BB). BB's terminator
+    // will become Pred's terminator.
+    Pred->getTerminator()->eraseFromParent();
+    BB.eraseFromParent();
+
+    Changed = true;
+  }
+
+  return Changed;
+}
+
+static bool eliminateEmptyBr(llvm::Function &F) {
+  using namespace llvm;
+  bool Changed = false;
+  // Remove blocks with single successors.
+  for (BasicBlock &BB : make_early_inc_range(F)) {
+    BasicBlock *Succ = BB.getSingleSuccessor();
+    // Make sure BB has a single successor Succ and BB is empty
+    if (!Succ || BB.size() > 1)
+      continue;
+    assert(isa<BranchInst>(BB.front()));
+    assert(cast<BranchInst>(BB.front()).isUnconditional());
+
+    for (BasicBlock *Pred : make_early_inc_range(predecessors(&BB))) {
+      Pred->getTerminator()->replaceSuccessorWith(&BB, Succ);
+    }
+
+    BB.eraseFromParent();
+    Changed = true;
+  }
+
+  return Changed;
+}
+
+llvm::PreservedAnalyses AdjustCFGPass::run(llvm::Function &F,
+                                           llvm::FunctionAnalysisManager &) {
+  bool Changed = false;
+  Changed |= removeDeadBlocks_v1(F);
+  Changed |= mergeIntoSinglePredecessor_v1(F);
+  Changed |= eliminateEmptyBr(F);
+  return llvm::PreservedAnalyses::none();
+}
+
+static llvm::Value *matchReturn(llvm::BasicBlock &BB) {
   auto it = BB.begin();
   if (auto *r = llvm::dyn_cast<llvm::ReturnInst>(&*it)) {
     return r->getReturnValue();
