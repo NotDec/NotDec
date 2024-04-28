@@ -14,6 +14,7 @@
 #include <llvm/Support/Casting.h>
 #include <llvm/Transforms/Scalar/Reg2Mem.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
+#include <llvm/Transforms/Utils/Local.h>
 #include <type_traits>
 #include <vector>
 
@@ -40,7 +41,7 @@ void demoteSSA(llvm::Module &M) {
   SimplifyCFGOptions Opts;
   MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(Opts)));
   MPM.addPass(createModuleToFunctionPassAdaptor(RetDupPass()));
-  // MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
+  MPM.addPass(createModuleToFunctionPassAdaptor(DemotePhiPass()));
   MPM.addPass(createModuleToFunctionPassAdaptor(AdjustCFGPass()));
   MPM.run(M, MAM);
 }
@@ -48,6 +49,36 @@ void demoteSSA(llvm::Module &M) {
 // ===============
 // Pass
 // ===============
+
+llvm::PreservedAnalyses DemotePhiPass::run(llvm::Function &F,
+                                           llvm::FunctionAnalysisManager &) {
+  using namespace llvm;
+  // Insert all new allocas into entry block.
+  BasicBlock *BBEntry = &F.getEntryBlock();
+  assert(pred_empty(BBEntry) &&
+         "Entry block to function must not have predecessors!");
+
+  // Find first non-alloca instruction and create insertion point. This is
+  // safe if block is well-formed: it always have terminator, otherwise
+  // we'll get and assertion.
+  BasicBlock::iterator I = BBEntry->begin();
+  while (isa<AllocaInst>(I))
+    ++I;
+
+  CastInst *AllocaInsertionPoint = new BitCastInst(
+      Constant::getNullValue(Type::getInt32Ty(F.getContext())),
+      Type::getInt32Ty(F.getContext()), "reg2mem alloca point", &*I);
+  std::list<Instruction *> WorkList;
+  // Find all phi's
+  for (BasicBlock &BB : F)
+    for (auto &Phi : BB.phis())
+      WorkList.push_front(&Phi);
+
+  // Demote phi nodes
+  for (Instruction *I : WorkList)
+    DemotePHIToStack(cast<PHINode>(I), AllocaInsertionPoint);
+  return llvm::PreservedAnalyses::none();
+}
 
 // https://github.com/llvm/llvm-project/blob/7cf1fef45f13991e2d3b97e0612cfb88bf906a50/llvm/examples/IRTransforms/SimplifyCFG.cpp#L63
 static bool removeDeadBlocks_v1(llvm::Function &F) {

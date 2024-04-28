@@ -33,14 +33,18 @@ struct AdjustCFGPass : llvm::PassInfoMixin<AdjustCFGPass> {
 
 // match phi ret pattern and duplicate return block.
 struct RetDupPass : llvm::PassInfoMixin<RetDupPass> {
-  // Main entry point, takes IR unit to run the pass on (&F) and the
-  // corresponding  pass manager (to be queried if need be)
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 
-  // Without isRequired returning true, this pass will be skipped for functions
-  // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
-  // all functions with optnone.
+  static bool isRequired() { return true; }
+};
+
+// Demote phi to stack like Reg2mem pass. The difference is not demoting values
+// that escape the basic block, but only demote phis.
+struct DemotePhiPass : llvm::PassInfoMixin<DemotePhiPass> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
   static bool isRequired() { return true; }
 };
 
