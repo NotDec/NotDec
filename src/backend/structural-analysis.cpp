@@ -616,6 +616,10 @@ clang::Expr *handleCast(clang::ASTContext &Ctx, llvm::LLVMContext &LCtx,
 }
 
 void CFGBuilder::visitCastInst(llvm::CastInst &I) {
+  // Ignore reg2mem alloca point inserted by reg2mem.
+  if (I.getNumUses() == 0 && I.getName().startswith("reg2mem alloca point")) {
+    return;
+  }
   auto srcTy = I.getSrcTy();
   auto destTy = I.getDestTy();
   auto expr = handleCast(Ctx, I.getContext(), EB, FCtx.getTypeBuilder(),
