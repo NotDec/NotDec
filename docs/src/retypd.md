@@ -176,7 +176,10 @@ version=10.2.3
 - 《[Pushdown systems](http://www.lsv.fr/~schwoon/enseignement/verification/ws1112/c3.pdf)》了解下推自动机
 - 《[Saturation algorithms for model-checking pushdown systems](https://arxiv.org/abs/1405.5593)》了解Saturation algorithms相关的背景概念。
 
-此外，一个重要的结论是下推系统可达的栈内容形成了一个正则语言，因此可以表示为有限状态自动机。但是最初提出的算法是指数级的。后面有人提出了多项式级的算法，核心思想就是引入一个saturation process，转换被逐渐地加入有限自动机。
+有两个重要结论：
+
+- 下推系统可达的栈内容形成了一个正则语言，因此可以表示为有限状态自动机。但是最初提出的算法是指数级的。后面有人提出了多项式级的算法，核心思想就是引入一个saturation process，转换被逐渐地加入有限自动机。（这个结论没有被retypd使用）
+- 下推系统定义了配置（状态加栈字符串）之间的转换关系，可以多项式时间内构建一个带输出的有限状态自动机（transducer）识别这些转换关系。（retypd使用的结论）
 
 **有限自动机**
 
@@ -252,6 +255,7 @@ $$
       - 借助中间状态 $r_{(C,q,A)}$ 我们
     - **一致性**：如果在P中有两个状态可以互推，当且仅当我们P'中这两个状态可以反着互推。而且P'满足上面定理的要求，然后应用上面正推的定理，成功证明反推定理。
 
+**和retypd的PDS对应**：我们构建的PDS表达的是子类型之间的转换关系。但是实际构建出来可能存在很多初始状态不可达的序列。例如如果有规则 $A.load \sqsubseteq B$ 我们增加初始状态的转换，使得初始状态可达 (A/B, $\bot$) 的配置。但是规则并不允许 $(A, \bot) \rightarrow (A, .load)$ ，否则存在子类型关系 $A \sqsubseteq A.load$。也因此，这里构建的自动机没有用在retypd中。
 
 **PDS对应的自动机**
 
@@ -343,7 +347,9 @@ $$
 
 核心在于，将状态转换改为了一个push pop栈的序列。即，如果有一个 $pA \rightarrow rw$ 规则，那么我们这里构建一个序列：pop A，push ...(构成w的几个字符)。表示栈上的变化关系。
 
-然后使用饱和算法。这里需要每条边上的操作只能压入或者弹出单个字符。即找到两个路径上能化简的状态，然后直接连过去，标上化简后的操作序列。
+然后使用饱和（Saturation）算法。这里需要每条边上的操作只能压入或者弹出单个字符。即找到两个路径上能化简的状态，然后直接连过去，标上化简后的操作序列。
+
+这里的饱和（Saturation）算法才是后面retypd使用的。
 
 ### retypd 基础符号
 
@@ -368,7 +374,8 @@ $$
 - Type Scheme类型方案，表示一个泛型的函数。 $\forall{\overline{\alpha}}.{\mathcal{C}}\Rightarrow{\beta}$ 表示在约束C的条件下，带有模板变量集合 $\overline{\alpha}$ 的泛型类型 $\beta$
   - 仅增加约束： $\forall \tau . C \Rightarrow \tau$ 表示仅对类型 $\tau$ 增加约束。 
     - 例如 $\forall \tau . (\tau.\mathsf{in}.\mathsf{load}.\sigma\mathsf{32@4} \sqsubseteq \tau.\mathsf{out}) \Rightarrow \tau$ 表示函数返回了参数在4字节offset位置的成员。
-
+  - 和约束的关系：基本是对应的。可以想象为我们主要关注约束，任何类型方案都可以理解为，声明一些通配符变量，然后定义一些约束。例如 $\forall \alpha . (\exists \tau . \mathcal{C}) \Rightarrow \alpha$ 。通过引入新的类型变量，可以让最右侧总是等于单个变量。如果能把约束里每个类型变量解出来，那么这个泛型也很容易得到。
+  - 和sketch的关系。通过inferShapes算法将约束求解为变量映射到sketch的树/自动机结构。
 
 **常见术语**
 
@@ -414,7 +421,7 @@ $$
   - 例如通用的恒等函数，直接将参数返回，表示为，对任意的类型X，返回值的类型也是X。对应我们的表示可能是 $F.in \sqsubseteq F.out$
 - PDS = （未化简，或者简化后的）约束 = 类型方案 type scheme
 
-**我们为什么要简化约束？** 令 $\mathcal{C}$ 表示由抽象解释生成的过程的约束集，并且 $\overline{\alpha}$ 是 $\mathcal{C}$ 中的自由类型变量集。我们其实已经可以使用 $\forall{\overline{\alpha}}.\,{\mathcal{C}}\!\Rightarrow\!{\tau}$ 作为过程类型方案中的约束集，因为合法调用 $f$ 时使用的输入和输出类型显然是满足 $\mathcal{C}$ 的。然而，实际上我们不能直接使用这个约束集，因为这会导致在嵌套过程中产生很多无用的自由变量，并且约束集的增长率很高。
+**我们为什么要简化约束？** 为了减少无用的自由变量，降低约束集的增长率。令 $\mathcal{C}$ 表示由抽象解释生成的过程的约束集，并且 $\overline{\alpha}$ 是 $\mathcal{C}$ 中的自由类型变量集。我们其实已经可以使用 $\forall{\overline{\alpha}}.\,{\mathcal{C}}\!\Rightarrow\!{\tau}$ 作为过程类型方案中的约束集，因为合法调用 $f$ 时使用的输入和输出类型显然是满足 $\mathcal{C}$ 的。然而，实际上我们不能直接使用这个约束集，因为这会导致在嵌套过程中产生很多无用的自由变量，并且约束集的增长率很高。从另一方面想，主要是简化了临时变量吧，这也很像是saturation算法做的事情。从另一方面想，主要是简化了临时变量吧，这也很像是saturation算法做的事情。
 
 这个简化算法的输入是，从一个函数的推断得到的一个类型方案 $\forall{\overline{\alpha}}.\,{C}\!\Rightarrow\!{\tau}$ （包括自由类型变量，约束，和泛型），并创建一个较小的约束集 $\mathcal{C}'$，使得任何由 $\mathcal{C}$ 对 $\tau$ 的约束也被 $\mathcal{C}'$ 所蕴含。
 
@@ -424,10 +431,17 @@ $$
 - 递归类型约束： $\tau.u {\;\sqsubseteq\;} \tau.v$
 - 涉及常量类型的约束： $\tau.u {\;\sqsubseteq\;} \overline{\kappa}$ 或者 $\overline{\kappa} {\;\sqsubseteq\;} \tau.u$ 其中 $\overline{\kappa}$ 是类型常量.
 
+
 ### Roadmap
 
-1. （A.）收集初始约束。
-2. （F.1）约束简化算法。简化后的约束就是type schemes？
+1. （A.）收集初始约束。插入外部函数已知的参数类型。
+2. （F.1）约束简化算法。简化后的约束就是type schemes。这里对每个强连通分量后序遍历进行处理，处理完的分量留在场上。
+   1. 基于约束集合构建初始图。子类型关系增加标记为1的边。对标签增加和减少的关系，增加对应push/pop的边。
+   2. 运行Saturation算法，将 `push α -> 1 -> pop a` 这种边序列增加shortcut边。应用S-Pointer的实例化规则
+  - Step 3: Identify the “externally-visible” type variables and constants; call that set E .
+  - Step 4: Use Tarjan’s path-expression algorithm to describe all paths that start and end in E but only travel through E c.
+  - Step 5: Intersect the path expressions with the language (recall _)\*(forget _)\*.
+  - Step 6: Interpret the resulting language as a regular set of subtype constraints. (“forgets” on the right, “recalls” on the left)
 3. （F.2）构建sketches（为每个类型变量，比如函数类型）（自底向上遍历call graph的顺序），同时细化具体类型。
 4. （4.3）最后转换sketches到C类型。
 
@@ -488,7 +502,9 @@ Retypd 的核心饱和算法在子类型约束的数量上是三次方的；由�
 由于每个过程的约束集是独立简化的，因此三次方的 $n^3$ 因子由最大过程大小控制，而不是整个二进制文件的大小。
 相比之下，像 Andersen 这样的源代码指向分析通常与指针变量的总数呈三次方，并且根据用于上下文敏感性的调用字符串深度呈
 
-## 算法：细节（Appendix D）
+## 算法细节
+
+### 约束简化算法（Appendix D）
 
 **基础符号**
 
@@ -511,16 +527,9 @@ Retypd 的核心饱和算法在子类型约束的数量上是三次方的；由�
     - 比如，随便写一个规则 $a.\sigma\mathsf{N@k} \sqsubseteq b.load$ 表示可以从状态为 $a$ 栈内容为 $\sigma\mathsf{N@k}$ 的配置转换到 状态为 $b$ 栈内容为 $load$ 的配置。
   - 可达性：派生的子类型关系。
     - 然后，如果 $b.load$ 又是 $c$ 的子类型，两个规则合起来，在自动机上，状态 $a.\sigma\mathsf{N@k}$ 到 $c$ 也是可达的（走了两步）。因此也具有子类型关系。 $a.\sigma\mathsf{N@k} \sqsubseteq c$。
-- P-自动机（从下推系统P转换而来）对应了类型的自动机结构sketch。
-  - P-自动机从PDS的状态开始，对应栈为空的PDS配置，到终态能匹配的语言代表所有可能的栈字符的集合构成的语言。表达了一个类型所有可能的能力。
-  - P-自动机接受一个字符串，表示这个派生类型变量存在。
-- 饱和算法和类型推断的对应关系：
-  - 下推系统中每个状态下栈组成的语言是正则的。对应我们每个基本类型变量可能存在的能力标签集合是正则的。这个很显然吧。
-  - 可以多项式时间构建出，每个状态下，对应的有限状态自动机，识别栈可能出现的字符串集合。对应：可以构建出有限状态自动机表达某个类型所有可能的能力。
-    - 跨基础类型变量的子类型关系呢？这里可以想象，子类型关系只是用来传递能力的。把每个基础变量初始状态拿出来单独看从这里可达的自动机部分，子类型关系反映在不同基础变量的这个“树”的交叉的部分。
-      ![](imgs/subtypeFSM.drawio.png)
 
-Transducer：
+
+### Transducer 与其构建
 
 - Transducer可以表示下推自动机的所有的推断关系！任意两个dtv字符串之间的子类型关系！
 - Transducer和类型推断的对应关系。
@@ -560,10 +569,129 @@ Transducer：
 - 标签 操作 lhs 和 rhs 的作用：用于防止推导中使用来自 $\mathcal{V}_i$ 的变量，防止 $\mathcal{P}_\mathcal{C}$ 接受代表非基本证明的推导。
   - 例如，我们写一个递归的无限约束 $var.load \sqsubseteq var$，推导为 $var.load.load \sqsubseteq var.load \sqsubseteq var$ ，在增加标签之后就变成了 $var_{L}.load \sqsubseteq var_{R}$ 从而不会被递归推导。
 
-## TODO
+基于Transducer的约束简化算法包含四个步骤：
 
-- monoid: 读《Haskell趣学指南》的Monoids一节，理解一下。
+- 构建初始图
+  - 生成的约束可以直接看作PDS，这里的初始图表示未化简的transducer。
+- Saturation。
+- Tarjan's PathExpression 算法
+- 转换回约束
 
-**unification-based type inference algorithms**
+**Saturation算法**
 
-https://www.cs.cornell.edu/courses/cs3110/2011sp/Lectures/lec26-type-inference/type-inference.htm
+实际算法直接构建对应的，在边上标记有push/pop序列的自动机，即Transducer。然后在上面执行saturation算法。
+
+1. 基于约束集合构建初始图。子类型关系增加标记为1的边。对标签增加和减少的关系，增加对应push/pop的边。
+   1. 规则左边存在的变量，标记pop边，右边的变量标记push边。
+   2. 状态标记代表剩余的可读字符串，所以push之后反而变少，pop反而变多。
+2. 运行Saturation算法，
+   1. 维护Reaching Set集合 $R(x)$
+      1. 初始的时候，遍历所有边，如果存在一个 `push l` 的边从 x 到 y 的边，则 $R(y) \leftarrow R(y) \cup {(l,x)}$ 从 x 节点 push l 可以来到 y 。即，只关注push边。
+      2. 循环开始时，假如有子类型关系边 $(x, y, 1)$ ，则 $R(y) \leftarrow R(y) \cup R(x)$ 父类型更新子类型的可达关系。
+   2. （循环内）Saturation规则：将 `push α -> 1 -> pop a` 这种边序列增加shortcut边。即，如果存在边 $(x, y, pop\;l)$ 且 x 的到达集合 $R(x)$ 内有一个对应标签的到达关系 $(l,z)$ 则给增加子类型关系边 $(z, y, 1)$。
+   3. 同时考虑S-Pointer规则：如果有一个 $(.store, z) \in R(x)$，想象边从 z 到 x，上面标记push store。此时找到x的逆 variance 节点 $x^-$，然后给 $R(x^-)$ 增加 $(.load, z)$
+      1. 直接应用： $(.load,\;x.store) \in R(\overline{x})$ 不是最典型的例子。往往会结合之前新增的子类型边。
+      2. 可以想象 $x$ 到 $x^-$ 额外增加了pop store和push load边。
+         ![](imgs/s-ptr-example.drawio.png)
+      3. 应用时最好 $\overline{x}$ 也存在在图上。
+
+实际实现时，saturation算法被包含在Transducer的构建中。Transducer的构建在两个地方发挥作用：
+
+- 约束的简化。
+- 给sketch标记lattice元素时用来查询。
+
+**Tarjan’s path-expression algorithm** 来自论文 《Fast Algorithms for Solving Path Problems》（see also this [Github repo](https://github.com/johspaeth/PathExpression)）。 在一个有向图中，求解一个源点到其他任意点的可能的路径构成的正则表达式。
+
+在Saturation算法后，首先找到感兴趣的变量集合 $\mathcal{\epsilon}$ 然后找出所有开始并结束于 $\mathcal{\epsilon}$ 但是不经过 $\mathcal{\epsilon}$ 的路径表达式。然后和 $(recall\;\_)^*(forget \;\_)^*$ 求交集（recall就是pop，forget就是push）。正则表达式也可以看作自动机，因此这里得到了一个新的自动机。
+
+将自动机翻译为一系列子类型约束：首先将源点和目的点的基础类型变量，作为子类型关系变量的两侧。如果路径上遇到了forget标记，则在右侧增加label。遇到了recall，对应的label增加到左侧。如果存在通配关系，引入新的类型变量，表示为递归的约束。
+
+**将Transducer转换回约束（D.3 TypeScheme）** 这里的算法D.3并不是直接被用。而是主要反映一个性质。上述 transducer 在构建时，我们理解为有一个隐藏的栈，会从状态push进去。这里仅仅是构建了一个完全对应的PDS，把这个栈显式地表示出来。
+
+算法具体实现的时候，则是在前一步就找出从有趣变量到有趣变量的路径，然后直接把路径写成约束。
+
+**性质**：最终得到的自动机Q有以下性质：
+
+- 将 pop l 看作读取输入 l，push l 看作写出字符 l，1 看作空转换（ε）。则这个Transducer描述了PDS所有可能的派生关系，即所有可能的子类型关系。
+- 如果在Q下，字符 Xu 能转换为 Yv，当且仅当X和Y是感兴趣变量，且存在一个基础的派生关系 $\mathcal{C} \vdash X.u \sqsubseteq Y.v$ 。
+
+### Sketches 构成的格
+
+- sketch
+  - 定义1：sketch是一个带有标记的regular tree。
+  - 定义2：sketch可以被看作两个函数
+    - 前缀闭合的语言： $\mathcal{L}(S) \subseteq \Sigma^*$
+    - 从语言上的单词映射到lattice标记的函数 $\nu : S \to \Lambda$ ，例如 $\nu_S(w)$。
+  - 定义3：通过折叠sketch子树，sketch可以表示为一个有限状态自动机，每个状态标注了一个lattice元素 $\Lambda$ 。
+    - 这个自动机的每个状态都是接受态。因为语言是前缀闭合的。
+  - sketch的格结构。偏序关系写作 $X \trianglelefteq Y$ 
+    - 为sketch的树结构定义了 $\sqcup$ 和 $\sqcap$ 运算：在语言上分别是交和并。对应节点不变，或者根据variance在节点标记的格上做交或者并。
+
+一个在变量集合V上的约束集合C的解，是一个变量到sketch的映射，满足：
+
+- 如果是类型常量，则路径为空，lattice标记为常量
+- 如果约束能推出 $X.v$ 存在，则v属于语言 $v \in \mathcal{L}(X)$
+- 如果有子类型关系 $\mathcal{C} \vdash X.u \sqsubseteq Y.v$
+  - 对应的节点上的lattice标记也有偏序关系
+  - 对应的子树之间有sketch的偏序关系 $u^{-1} S_X \trianglelefteq v^{-1} S_Y$ 
+
+sketch 和约束的对应关系很好。任何约束集合都能被一个sketch表示，只要没有证明出lattice标记上不可能的关系。
+
+**从约束构建sketches (E.1 InferShapes)**
+
+将子类型关系理解为等价关系。
+
+1. 为每个变量，以及前缀隐含的变量存在，创建节点。
+2. 构建图，边上标记field label的增加关系。
+3. 划分等价关系：
+   1. 如果有子类型关系，则属于一个等价类。 
+      1. 如果因为子类型关系在没有函数调用时是结构化的，即形状上一致，父子类型可拥有的field label一致，因此这里的父子关系划分的等价类内部，只要有一个变量能有某个label，则类内每个变量都能有这个label。
+   2. 等价类内两个变量，访问相同的标签得到的变量，（有子类型关系）也在同一个等价类内。
+      1. 这个地方有点像Steensgaard的线性指针分析算法。
+   3. 等价类内两个变量，一个访问load标签，一个访问store标签，得到的新变量也属于同一个等价类。
+4. 计算每个等价类的形状，就是等价类内每个变量的sketch的形状。
+
+算法中实际实现时使用的步骤
+
+1. Substitute 
+
+**标记lattice元素 (F.2 Solve)**
+
+具体sketch上每个节点标什么lattice元素，借助了前面的transducer。关注所有的类型常量，然后看这个类型常量和哪些dtv有子类型关系，有则更新对应的lattice标记。根据子类型或父类型，取交或者并。
+
+![sketch-lattice-annotation](imgs/sketch-lattice-annotation.png)
+
+
+### Tarjan Path Expression
+
+基础符号
+
+- $\epsilon(P(a,b))$ 从源点a到目标点b的路径表达式P(a,b)，所表达的所有路径的集合。
+- $\Lambda$ 表示空路径，源点和目的点为同一点时，为空路径。
+
+定义
+
+### Q&A
+
+Q1. **为什么实现的时候，那边先infer shapes然后才简化约束？那能不能直接不简化约束了，既然我本来就想要内部的变量**
+
+确实不应该这样？简化约束应当是最早的一步，然后才是type scheme。但是这并不代表简化约束是没有意义的。因为如果其他地方如果调用了这边的函数，会实例化约束。简化了还是有好处的。
+
+从我的其他角度：
+
+- 先infer shapes可以获取到小的内部变量的类型，不然后面这些变量被简化没了。
+- sketches可以作为函数的简化版约束，用在增量运算。关联Q3
+
+Q2. **为什么算法要后序遍历SCC？起到什么作用？**
+
+TODO
+
+Q3. 给定一个SCC内所有函数的已经简化完的约束。开始分析另一个调用了已分析函数的SCC，是否会对之前函数的分析结果产生影响？？
+
+直观上看，函数就是函数本身，type schemes也就是一个函数到约束集合的映射，所以外部调用不会对函数类型有影响。细化到最具体的类型是后面考虑的事情。
+
+如何证明？类型从形状和lattice两方面考虑。类型关系在函数调用的时候允许丢失一些能力（non-structural subtyping）。
+
+Q4. 为什么只有函数调用的时候是non-structural subtyping?
+
+可能一般以函数为单位做抽象？一般不会出现：函数内部一小块代码突然被看作更泛化的代码。
