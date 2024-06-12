@@ -437,7 +437,7 @@ $$
 ### Roadmap
 
 1. （A.）收集初始约束。插入外部函数已知的参数类型。
-2. （F.1）约束简化算法。简化后的约束就是type schemes。这里对每个强连通分量后序遍历进行处理，处理完的分量留在场上。
+2. （F.1）约束简化算法。简化后的约束就是type schemes。这里对每个强连通分量后序遍历进行处理，处理完的分量内的type schemes保存下来，等待实例化。
    1. 基于约束集合构建初始图。子类型关系增加标记为1的边。对标签增加和减少的关系，增加对应push/pop的边。
    2. 运行Saturation算法，将 `push α -> 1 -> pop a` 这种边序列增加shortcut边。应用S-Pointer的实例化规则
   - Step 3: Identify the “externally-visible” type variables and constants; call that set E .
@@ -718,6 +718,39 @@ Q7. 约束的实例化是怎么做的？
 
 另外，这说明提取约束时需要显式体现函数调用。可能可以为每个函数调用的约束增加一个调用地址标识。
 
+Q8. 为什么要标记L和R？为什么构图时仅对左边的增加forget边，右边的变量仅增加recall边？能否证明，不标记L和R，仅仅限制路径探索不能再经过interesting的变量，即可得到相同的约束？如果不能，则得到的约束是否能用？
+
+区分L/R以及仅对左边的增加forget边，右边的变量仅增加recall边，可以使得我们关注的变量不会存在于推导树内部。
+
+推理关系和 proof tree 之间有对应关系。区分L和R的区别在于是否把L的变量当R的变量，从而递归推进了子类型关系。回忆elementary proof的定义，能否保证得到的约束关系的推导树，都没有感兴趣的变量在函数内部？
+
+能否给出一个例子，使得某个saturation推导使得感兴趣的变量在推导树中间。
+
+为了给出这样一个例子，首先回忆，为什么要简化类型约束。关键在于，是否任何原约束集合能推导出的关系，我们给出的简化的约束集合也能推导出来？
+
+没有任何field label的`F.in`不能出现在该函数的子类型关系的子类型一方。同样，对应的`F.out`不能出现在子类型关系的父类型一方。
+
+另外，如果一个变量仅出现在子类型关系左边（contra-variant时仅出现在右边）。不会出现反过来的情况，因此即使加上了这样的边也不会被用到。定理：如果有临时变量t，仅出现在子类型关系左边，证明不会有额外的边指向t，因此即使有边从t指向end，也不会被用到。证明：有边指向t有两种情况。第一种：构建图的时候有边指向。这种情况需要t在子类型关系右边，所以不成立。第二种，saturation时增加了边指向。根据saturation规则，仅有某个节点已经被某个pop边指向的时候，这个节点才会可能获得新增的1边。因为t没有其他边指向它，所以不成立。
+
+Q9. 单个SCC内如何处理多态的类型关系？以及non-structural subtyping?
+
+可以假设，能形成SCC的变量，不太可能有多态的类型关系，所以，就按照非多态的角度考虑？
+
+TODO？这一块和full-context-sensitive的分析之间有点关系？
+
+Q10. 为什么算法，在单个函数内关于指令是指令数的三次方的复杂度？
+
+我们关注那个SCC的循环：生成约束的低于三次方。然后是对于每函数，这里还不是指令，不太算一个N。内部transducer函数构图，saturate，pathexpr算法。文章说saturate是主要的复杂度来源。
+
+其实这里SCC构图之后，对每个普通的函数，已经可以做一些简单的优化了？比如一个base var没有其他的节点，然后仅有一个successor和predecessor，则可以消除。怎么有点像基本块的。
+
+或者我可以把所有感兴趣的变量都区分L/R，先saturate一次，然后每次分析把图复制一份，merge其他的非感兴趣的图。
+
+Q11. 函数内的类型分析算法是怎么做的？
+
+首先，假如你已经有了被调函数的type schemes，type lattice，而且所有变量都是需要的，不需要简化。那么可以构建图，然后假设完全是non-structural subtyping，直接推导sketches。为了标记lattice，则需要构建transducer推导然后标记相关元素。
+
+
 ### 图算法基础
 
 回顾之前的算法，我们先构建transducer图表示所有可能的子类型关系，然后饱和算法，再与productive语言相交。然后我们选择一系列感兴趣的变量，计算对应的路径表达式，然后再转换回约束。
@@ -728,8 +761,12 @@ Q7. 约束的实例化是怎么做的？
    1. 对每个结束状态，从它开始，利用一系列规则归纳，归纳过程中允许边上直接标记为正则表达式，最后起始态和结束态会相邻。此时删除其他状态，并总结出对应的正则表达式。
    2. 最后将得到的多个正则表达式并起来。得到最终的表达式。
 2. （Tarjan's path expression算法）给定有向图，和图上的某个源点，求出源点到图上任意一个其他点之间的可达路径，所构成的表达式。
+3. 两个算法之间的关联：path expression算法会构建path sequence，缓存了子图的结果。而上面的表达式算法则没有这样做，因此path expression算法效率更高一些。（TODO 对吗？）
 
 #### Tarjan's path expression算法
+
+- "Fast Algorithms for Solving Path Problems"
+- "A Unified Approach to Path Problems"
 
 **定义：** 给定有向图 $G=(V, E)$ ，对于单源点 s 的路径表达式（path expression）问题是，对于任何顶点v，求解出一个无歧义的路径表达式 $P(s,v)$ 使得 它所表达的路径 $\sigma(P(s,v))$ 包含了所有的从s到v的路径。
 
@@ -740,11 +777,17 @@ Q7. 约束的实例化是怎么做的？
 
 **路径序列（Path Sequence）：** 一个有向图G的路径序列是一个序列 $(P_1,v_1,w_1), (P_2,v_2,w_2),...,(P_l,v_l,w_l)$ ，满足以下条件：
 
-1. 对于 $1 \le i \le l$ ， $P_l$ 是一个无歧义的路径表达式，具有类型 $(v_i, w_i)$
+1. 对于 $1 \le i \le l$ ， $P_l$ 是一个无歧义的路径表达式，具有类型 $(v_i, w_i)$ (即该表达式表示从 $v_i$ 到 $w_i$ 的路径)
 2. （空路径）对于 $1 \le i \le l$ ，如果 $v_i = w_i$，则空路径 $\Lambda \in \sigma(P_i)$
 3. （非空路径）对于任何非空的路径p，存在一个唯一的下标序列 $1 \le i_1 \le i_2 \le ... \le i_k \le l$ 并且存在一个唯一的p的划分（不会划分出非空序列） $p=p_1,p_2,...,p_k$ 使得 $p_j \in \sigma(P_{i_j})$ 对于 $1 \le j \le k$。
 
 **如何理解非空路径条件？** 图可以被分区为 $l$ 部分，且每个分区都按顺序有个编号。然后每条路径都可以被这些部分切分，但是可能不经过部分分区。这里经过了k个分区，编号依次是 $i_1,...,i_k$。让 $j$ 从1遍历到 $k$ ，每个分区内的路径 $p_j$ 是属于对应分区的路径表达式能够表达的所有路径集合 $\sigma(P_{i_j})$。
+
+**如何理解路径序列？** 任何图上的路径需要被分解为路径序列。
+
+- 比如我们可以构造一个路径序列，从图上任意点到任意点，则每个路径能直接找到对应。此时路径序列的顺序不重要。
+- 对于有向无环图，每个边可以单独成为一个路径序列，因为这个边是连接这两个节点的唯一必经路径。每个路径可以直接分解为每条边，然后对应到路径序列中。。
+- 对于强连通分量这种复杂情况，实在不行我们可以为里面任意两个点构建路径序列。如果有路径经过了强连通分量内部，如果能直接找到对应，则此时分量内部路径序列的顺序不重要。
 
 **Solve算法**：给定一个路径序列，我们可以使用下面的传播算法解决单源点的路径表达式问题。
 
@@ -753,7 +796,7 @@ Q7. 约束的实例化是怎么做的？
   - 如果 路径序列 $(P_i,v_i,w_i)$ 中的 $v_i = w_i$ ， $P(s, v_i):= [P(s,v_i)\;\cdot\;P_i]$ 
   - 如果 $v_i \ne w_i$ ，$P(s,w_i) = [P(s,w_i)\cup[P(s,v_i)\;\cdot\;P_i]]$
 
-（这个算法基本上就是把路径连接起来。）
+（这个算法基本上就是把路径连接起来。另外意味着我们需要按拓扑排序给节点一个编号）
 
 **路径表达式简化算法（方括号）**：
 
@@ -774,23 +817,24 @@ Q7. 约束的实例化是怎么做的？
 
 **Eliminate算法：** 我们可以对任意的图构建路径序列。
 
-$$
-\begin{aligned}
-&\text { procedure ELIMINATE; }\\
-&\text { begin }\\
-&\text { inittalize: for } v:=1 \text { until } n \text { do for } w:=1 \text { until } n \text { do } P(v, w):=\varnothing \text { od od }\\
-&\text { for each } e \in E \text { do } P(h(e), t(e)):=[P(h(e), t(e)) \cup e] \text { od; }\\
-&\text { loop: for } v=1 \text { until } n \text { do }\\
-&P(v, v)=\left[P(\nu, v)^*\right],\\
-&\text { for each } u>v \text { such that } P(u, v) \neq \varnothing \text { do }\\
-&P(u, v):=[P(u, v) \cdot P(v, v)] ;\\
-&\text { for each } w>v \text { such that } P(v, w) \neq \varnothing \text { do }\\
-&P(u, w):=[P(u, w) \cup[P(u, v) \cdot P(v, w)]] \text { od od }\\
-&\text { end ELIMINATE, }
-\end{aligned}
-$$
+- 初始化： 
+  - $P(v, w):=\varnothing$ 任意两个顶点间都初始化为空集合
+  - 然后对每个边 $e \in E$ ， 让路径表达式包含当前边 $P(h(e), t(e)):=[P(h(e), t(e)) \cup e]$
+- 求解的主循环：
+  - 让v遍历每个节点序号1到n
+    - $P(v, v)=\left[P(\nu, v)^*\right]$
+    - 遍历每个 $u \gt v$ ，如果 $P(u, v) \neq \varnothing$
+      - $P(u, v):=[P(u, v) \cdot P(v, v)]$
+      - 遍历每个 $w \gt v$ ，如果 $P(v, w) \neq \varnothing$
+        - $P(u, w):=[P(u, w) \cup[P(u, v) \cdot P(v, w)]]$
 
-为了提升Eliminate算法的效率，有两种方法，他们都对图进行分解。首先可以将图按强连通分量SCC分解。
+比如，如果一个有向无环图，按照拓扑排序编号，则 $u \gt v$ 时， $P(u, v)$ 必然为空，导致该算法无法进入循环，什么也做不了。但是实际上，初始化过程中，就已经完成了path sequence的构建了。因为有向无环图的路径序列就是每个边单独构成的序列。
+
+**Eliminate结果的顺序**：Eliminate算法计算得到的结果，需要按照正确的顺序排列才能形成路径序列：
+
+Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by ELIMINATE. Then the following sequence is a path sequence: the elements of $\{(P(u, w), u, w) \mid P(u, w) \notin\{\varnothing, \Lambda\} \; and \; u \leq w\}$ in increasing order on $u$, followed by the elements of $\{(P(u, w), u, w) \mid P(u, w)=\varnothing \; and \; u>w\}$ in decreasing order on $u$.
+
+**问题的分解**： 为了提升Eliminate算法的效率，有两种方法，他们都对图进行分解。首先可以将图按强连通分量SCC分解。
 
 **有向无环图的路径序列：** 首先将节点按照拓扑排序编号，可以直接得到集合 $\{(e, h(e),t(e))|e\in E\}$ 将这个集合中的点按照 $h(e)$ 升序排序，可以直接得到路径序列。
 
