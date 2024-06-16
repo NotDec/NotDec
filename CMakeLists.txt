@@ -123,28 +123,8 @@ option(NOTDEC_ENABLE_WASM "Enable wasm decompilation support." ON)
 option(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL "Enable retdec llvmir2hll." ON)
 
 if (NOTDEC_ENABLE_WASM)
-	include(ExternalProject)
-	# ExternalProject_add(
-	# 	wabt 
-	# 	URL https://github.com/WebAssembly/wabt/releases/download/1.0.29/wabt-1.0.29.tar.xz
-	# 	PREFIX ${CMAKE_BINARY_DIR}/wabt
-	# 	CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/wabt
-	# 	CMAKE_CACHE_ARGS "-DBUILD_LIBWASM:BOOL=ON "
-	# )
-	ExternalProject_add(
-		wabt 
-		URL https://github.com/WebAssembly/wabt/releases/download/1.0.33/wabt-1.0.33.tar.xz
-		SOURCE_DIR ${CMAKE_BINARY_DIR}/wabt
-		BINARY_DIR ${CMAKE_BINARY_DIR}/wabt-build
-		INSTALL_COMMAND ""
-		CMAKE_CACHE_ARGS "-DBUILD_LIBWASM:BOOL=ON "
-		# https://stackoverflow.com/questions/50400592/using-an-externalproject-download-step-with-ninja
-		BUILD_BYPRODUCTS "${CMAKE_BINARY_DIR}/wabt-build/libwabt.a"
-	)
-	include_directories(${CMAKE_BINARY_DIR}/wabt/include)
-	include_directories(${CMAKE_BINARY_DIR}/wabt-build/include)
-	add_library(wabt::wabt SHARED IMPORTED)
-	set_property(TARGET wabt::wabt PROPERTY IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/wabt-build/libwabt.a")
+  add_subdirectory(external/NotDec-wasm2llvm)
+	
 	# 定义相关宏，方便条件编译
 	add_compile_definitions(NOTDEC_ENABLE_WASM)
 endif ()

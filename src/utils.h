@@ -1,13 +1,10 @@
 #ifndef _NOTDEC_UTILS_H_
 #define _NOTDEC_UTILS_H_
 
-#include "llvm/Support/CommandLine.h"
 #include <cstdint>
 #include <cstring>
+#include <llvm/Support/CommandLine.h>
 #include <sstream>
-
-float ieee_float(uint32_t f);
-double ieee_double(uint64_t f);
 
 enum log_level {
   level_emergent = 0,
@@ -20,14 +17,6 @@ enum log_level {
   level_debug = 7
 };
 
-extern const char *MEM_NAME;
-
 extern llvm::cl::opt<log_level> logLevel;
-
-template <typename T> std::string int_to_hex(T i) {
-  std::stringstream stream;
-  stream << "0x" << std::hex << i;
-  return stream.str();
-}
 
 #endif

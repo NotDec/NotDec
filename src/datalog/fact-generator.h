@@ -1,12 +1,12 @@
 #ifndef _NOTDEC_DATALOG_FACT_GENERATOR_H_
 #define _NOTDEC_DATALOG_FACT_GENERATOR_H_
 
-#include "llvm/IR/Module.h"
 #include <cstddef>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <map>
 #include <souffle/RamTypes.h>

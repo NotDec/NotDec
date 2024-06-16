@@ -4,8 +4,8 @@
 #include <llvm/Support/Debug.h>
 #include <string>
 
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/raw_ostream.h"
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/raw_ostream.h>
 
 #ifdef NOTDEC_ENABLE_WASM
 #include "frontend/wasm/parser.h"

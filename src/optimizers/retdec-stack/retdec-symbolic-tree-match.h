@@ -12,7 +12,7 @@
 #ifndef RETDEC_BIN2LLVMIR_UTILS_SYMBOLIC_TREE_MATCH_H
 #define RETDEC_BIN2LLVMIR_UTILS_SYMBOLIC_TREE_MATCH_H
 
-#include "llvm/IR/Operator.h"
+#include <llvm/IR/Operator.h>
 
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
 
