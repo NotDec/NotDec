@@ -30,54 +30,41 @@ namespace bin2llvmir {
 const uint32_t Abi::REG_INVALID = 0;
 const unsigned Abi::DEFAULT_ADDR_SPACE = 0;
 
-Abi::Abi(llvm::Module* m) :
-		_module(m)
-{
+Abi::Abi(llvm::Module *m) : _module(m) {}
 
-}
-
-bool Abi::isRegister(const llvm::Value* val) const
-{
-	return sp == val;
-}
+bool Abi::isRegister(const llvm::Value *val) const { return sp == val; }
 
 // bool Abi::isRegister(const llvm::Value* val, uint32_t r) const
 // {
 // 	return sp == val;
 // }
 
+void Abi::setMemory(llvm::GlobalVariable *val) { mem = val; }
 
-void Abi::setMemory(llvm::GlobalVariable* val) {
-    mem = val;
-}
+void Abi::setStackPointer(llvm::GlobalVariable *val) { sp = val; }
 
-
-void Abi::setStackPointer(llvm::GlobalVariable* val) {
-    sp = val;
-}
-
-bool Abi::isMemory(const llvm::Value* val) const
-{
-    if (mem == nullptr) {
-        std::cerr << __FILE__ << ":" << __LINE__ << ": " << " abi mem not set";
-        std::abort();
-    }
-	return mem == val;
-}
-
-bool Abi::isStackPointerRegister(const llvm::Value* val) const
-{
-    if (sp == nullptr) {
-        std::cerr << __FILE__ << ":" << __LINE__ << ": " << " abi sp not set";
-        std::abort();
-    }
-	return sp == val;
-}
-
-bool Abi::isStackVariable(const Value* val) const
-{
-    std::cerr << __FILE__ << ":" << __LINE__ << ": " << "unimplemented";
+bool Abi::isMemory(const llvm::Value *val) const {
+  if (mem == nullptr) {
+    std::cerr << __FILE__ << ":" << __LINE__ << ": "
+              << " abi mem not set";
     std::abort();
+  }
+  return mem == val;
+}
+
+bool Abi::isStackPointerRegister(const llvm::Value *val) const {
+  if (sp == nullptr) {
+    std::cerr << __FILE__ << ":" << __LINE__ << ": "
+              << " abi sp not set";
+    std::abort();
+  }
+  return sp == val;
+}
+
+bool Abi::isStackVariable(const Value *val) const {
+  std::cerr << __FILE__ << ":" << __LINE__ << ": "
+            << "unimplemented";
+  std::abort();
 }
 
 } // namespace bin2llvmir

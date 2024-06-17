@@ -14,14 +14,6 @@ add_library(notdec STATIC
 	optimizers/retdec-stack/retdec-stack-pointer-op-remove.cpp
 	optimizers/retdec-stack/retdec-symbolic-tree.cpp
 	optimizers/retdec-stack/retdec-utils.cpp
-	backend/structural-analysis.cpp
-	backend/phoenix.cpp
-	backend/CFG.cpp
-	backend/goto.cpp
-	backend/utils.cpp
-	backend/PostOrderCFGView.cpp
-	backend/Dominators.cpp
-	backend/CompoundConditionBuilder.cpp
 )
 
 # include直接在外部设置了src目录。
@@ -29,19 +21,29 @@ add_library(notdec STATIC
 target_link_libraries(notdec
 	PUBLIC
 	LLVMCore LLVMIRReader LLVMSupport LLVMPasses
-  clangAST clangTooling
+	clangAST clangTooling
 	notdec-datalog
 )
 
 if (NOTDEC_ENABLE_WASM)
-  target_sources(notdec PRIVATE
+	target_sources(notdec PRIVATE
 		frontend/wasm.cpp
 	)
 	target_link_libraries(notdec
 		PUBLIC
 		notdec-wasm2llvm
 	)
-endif ()
+endif()
+
+if (NOTDEC_ENABLE_LLVM2C)
+	# target_sources(notdec PRIVATE
+	# 	backend/main.cpp
+	# )
+	target_link_libraries(notdec
+		PUBLIC
+		notdec-llvm2c
+	)
+endif()
 
 set_target_properties(notdec
 	PROPERTIES
@@ -52,7 +54,6 @@ set_target_properties(notdec
 
 add_executable(notdec-decompile 
 	notdec.cpp
-	utils.cpp
 )
 
 # target_compile_features(bin2pat PUBLIC cxx_std_17)
@@ -69,18 +70,18 @@ set_target_properties(notdec-decompile
 install(TARGETS notdec-decompile DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
-	# remove -fno-rtti
-	string(REPLACE " -fno-rtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-	add_subdirectory(backend/retdec-llvmir2hll)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
-	# enable retdec interface in notdec
-	target_compile_definitions(notdec PUBLIC ENABLE_RETDEC_LLVMIR2HLL)
+	# # remove -fno-rtti
+	# string(REPLACE " -fno-rtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+	# add_subdirectory(backend/retdec-llvmir2hll)
+	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+	# # enable retdec interface in notdec
+	# target_compile_definitions(notdec PUBLIC ENABLE_RETDEC_LLVMIR2HLL)
 endif()
 
-
 add_dependencies(notdec souffle_cpp)
-set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/datalog/rules/pointer_main.cpp PROPERTY GENERATED 1)
+set_property(SOURCE ${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp PROPERTY GENERATED 1)
 
+# TODO
 target_sources(notdec PRIVATE
-        datalog/rules/pointer_main.cpp)
-set_source_files_properties(datalog/rules/pointer_main.cpp PROPERTIES COMPILE_FLAGS "-frtti -w -D__EMBEDDED_SOUFFLE__")
+	${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp)
+set_source_files_properties(${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp PROPERTIES COMPILE_FLAGS "-frtti -w -D__EMBEDDED_SOUFFLE__")

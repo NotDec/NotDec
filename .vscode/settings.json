@@ -73,8 +73,11 @@
         "/usr/include/c++/11"
     ],
     "cSpell.words": [
+        "decompilation",
+        "Decompiler",
         "notdec",
         "Preds",
+        "pushdown",
         "retdec",
         "retypd",
         "Succs"

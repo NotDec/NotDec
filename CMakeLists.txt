@@ -120,15 +120,22 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 #===============================================================================
 
 option(NOTDEC_ENABLE_WASM "Enable wasm decompilation support." ON)
-option(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL "Enable retdec llvmir2hll." ON)
+option(NOTDEC_ENABLE_LLVM2C "Enable notdec llvm2c backend." ON)
 
 if (NOTDEC_ENABLE_WASM)
-  add_subdirectory(external/NotDec-wasm2llvm)
+	add_subdirectory(external/NotDec-wasm2llvm)
 	
 	# 定义相关宏，方便条件编译
 	add_compile_definitions(NOTDEC_ENABLE_WASM)
 endif ()
 
-include_directories(${PROJECT_SOURCE_DIR}/src)
+if (NOTDEC_ENABLE_LLVM2C)
+	add_subdirectory(external/NotDec-llvm2c)
+	add_compile_definitions(NOTDEC_ENABLE_LLVM2C)
+endif ()
+
+include_directories(${PROJECT_SOURCE_DIR}/include/notdec)
+include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${CMAKE_BINARY_DIR})
 
 add_subdirectory(src)

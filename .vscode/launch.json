@@ -30,7 +30,7 @@
         "-o",
         "${workspaceFolder}/test/wasm/emcc-print.wat.ll",
         // "--log-level",
-        // "level_debug",
+        // "debug",
         "--compat-mode"
       ],
       "cwd": "${workspaceFolder}",
@@ -48,7 +48,7 @@
         "-o",
         "${file}.ll",
         // "--log-level",
-        // "level_debug",
+        // "debug",
         "--compat-mode"
       ],
       "cwd": "${workspaceFolder}",
@@ -65,7 +65,7 @@
         "-o",
         "${file}.ll",
         "--log-level",
-        "level_debug",
+        "debug",
         "--compat-mode",
         "--recompile",
         "--expand-mem=false"
@@ -83,7 +83,7 @@
         "-o",
         "${file}.c",
         "--log-level",
-        "level_debug"
+        "debug"
       ],
       "cwd": "${workspaceFolder}"
     }

@@ -1,3 +1,6 @@
 [submodule "external/NotDec-wasm2llvm"]
 	path = external/NotDec-wasm2llvm
 	url = https://github.com/NotDec/NotDec-wasm2llvm
+[submodule "external/NotDec-llvm2c"]
+	path = external/NotDec-llvm2c
+	url = https://github.com/NotDec/NotDec-llvm2c

@@ -7,17 +7,6 @@
 #include <utility>
 #include <vector>
 
-#include "optimizers/opt-manager.h"
-#include "optimizers/pointer-type-recovery.h"
-#include "optimizers/retdec-stack/retdec-abi.h"
-#include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
-#include "optimizers/retdec-stack/retdec-stack.h"
-#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
-#include "optimizers/retypd-generate.h"
-#include "optimizers/stack-alloca.h"
-#include "optimizers/stack-pointer-finder.h"
-#include "utils.h"
-
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -27,6 +16,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Pass.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
@@ -40,7 +30,21 @@
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
+#include "notdec-wasm2llvm/utils.h"
+#include "optimizers/opt-manager.h"
+#include "optimizers/pointer-type-recovery.h"
+#include "optimizers/retdec-stack/retdec-abi.h"
+#include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
+#include "optimizers/retdec-stack/retdec-stack.h"
+#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "optimizers/retypd-generate.h"
+#include "optimizers/stack-alloca.h"
+#include "optimizers/stack-pointer-finder.h"
+#include "utils.h"
+
 namespace notdec::optimizers {
+
+using notdec::frontend::wasm::MEM_NAME;
 
 using namespace llvm;
 
@@ -253,9 +257,7 @@ void DecompileConfig::run_passes() {
   // MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
 
   // if not recompile then decompile.
-  if (!opts.recompile) {
-    // TODO: what if ir is not from wasm. opt.from_wasm = false;
-    assert(opts.from_wasm && "only support wasm input now");
+  if (!opts.onlyOptimize) {
     StackPointerFinderAnalysis SPF;
     MAM.registerPass([&]() { return SPF; });
 

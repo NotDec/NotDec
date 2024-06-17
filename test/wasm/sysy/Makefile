@@ -1,4 +1,4 @@
-.PHONY: all clean wat wasm 
+.PHONY: all clean wat wasm
 
 FUNCTIONALDIR = functional
 

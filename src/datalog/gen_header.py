@@ -6,6 +6,14 @@ script_dir = os.path.dirname(script_path)
 parent_dir = os.path.dirname(script_dir)
 # sys.path.insert(1, parent_dir)
 
+if len(sys.argv) < 2:
+    print(f"This file will look for datalog files in {script_dir}/rules, \
+          Then generate the fact-names.h and fact-names.def to a folder specified by the first argument")
+    exit(1)
+
+print(f"Generating fact-names.h and fact-names.def to {sys.argv[1]}")
+target_folder = sys.argv[1]
+
 type_map = {
     "unsigned": "unsigned long",
     "vid": "unsigned long",
@@ -55,12 +63,12 @@ for line in rules:
         facts.append(f"  {mat},")
     facts.append("};")
 
-with open(f"{script_dir}/fact-names.h", "w") as f:
+with open(f"{target_folder}/fact-names.h", "w") as f:
     f.write('namespace notdec::datalog {\n')
     f.write('\n'.join(facts))
     f.write('\n} // namespace notdec::datalog')
 
-with open(f"{script_dir}/fact-names.def", "w") as f:
+with open(f"{target_folder}/fact-names.def", "w") as f:
     f.write('namespace notdec::datalog {\n')
     f.write('\n'.join(fact_defs))
     f.write('\n} // namespace notdec::datalog')

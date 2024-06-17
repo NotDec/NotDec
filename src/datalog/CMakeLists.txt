@@ -1,27 +1,32 @@
 # ======== custom target to generate souffle c++ source ==================
 # Used in the outer project
 add_custom_target(souffle_cpp DEPENDS 
-                "rules/pointer_main.cpp")
+                "${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp")
 
 file( GLOB DATALOG_RULES rules/*.dl )
+# file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/datalog)
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_LIST_DIR}/rules/pointer_main.cpp
-    COMMAND souffle -g pointer_main.cpp pointer_main.dl
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp
+    COMMAND souffle -g ${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp pointer_main.dl
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rules
     DEPENDS ${DATALOG_RULES}
     VERBATIM
 )
 
 # ======== custom target to generate fact-names.def and fact-names.h ==================
-add_custom_target(fact_names DEPENDS "${CMAKE_CURRENT_LIST_DIR}/fact-names.def" "${CMAKE_CURRENT_LIST_DIR}/fact-names.h")
+add_custom_target(fact_names DEPENDS 
+	"${CMAKE_BINARY_DIR}/datalog/fact-names.def"
+	"${CMAKE_BINARY_DIR}/datalog/fact-names.h"
+)
 
-add_custom_command(OUTPUT "${CMAKE_CURRENT_LIST_DIR}/fact-names.def" "${CMAKE_CURRENT_LIST_DIR}/fact-names.h"
-    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/gen_header.py
+add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/datalog/fact-names.def" "${CMAKE_BINARY_DIR}/datalog/fact-names.h"
+    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/gen_header.py "${CMAKE_BINARY_DIR}/datalog"
     DEPENDS ${DATALOG_RULES}
     VERBATIM
 )
 
 # ======== notdec-datalog library ==================
+
 add_library(notdec-datalog STATIC
 	# source files that are common to all frontend
     fact-generator.cpp

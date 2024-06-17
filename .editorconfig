@@ -10,3 +10,11 @@ end_of_line = lf
 charset = utf-8
 trim_trailing_whitespace = false
 insert_final_newline = true
+
+[{CMakeLists.txt,*.cmake}]
+indent_size = 4
+indent_style = tab
+
+[*.py]
+indent_size = 4
+indent_style = space
