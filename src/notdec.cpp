@@ -10,7 +10,9 @@
 #ifdef NOTDEC_ENABLE_WASM
 #include "notdec-wasm2llvm/interface.h"
 #endif
-#include "notdec-llvm2c/structural-analysis.h"
+#ifdef NOTDEC_ENABLE_LLVM2C
+#include "notdec-llvm2c/Interface.h"
+#endif
 
 #include "optimizers/opt-manager.h"
 #include "utils.h"
@@ -28,7 +30,7 @@ static cl::opt<std::string> inputFilename(
                    ", .wasm, .wat"
 #endif
                    ),
-    cl::Required);
+    cl::Required, cl::cat(NotdecCat));
 static cl::opt<std::string> outputFilename(
     "o", cl::desc("Specify output filename. Supported extension: .ll, .bc, .c"),
     cl::value_desc("output.ll"), cl::Optional, cl::cat(NotdecCat));
@@ -43,10 +45,26 @@ static cl::opt<log_level>
                         clEnumValN(level_notice, "notice", "notice"),
                         clEnumValN(level_info, "info", "info"),
                         clEnumValN(level_debug, "debug", "debug")),
-             cl::init(level_notice));
+             cl::init(level_notice), cl::cat(NotdecCat));
 
 #ifdef NOTDEC_ENABLE_WASM
 #include "notdec-wasm2llvm/commandlines.def"
+
+static cl::opt<log_level> Wasm2LLVMLogLevel(
+    "wasm2llvm-log-level", cl::desc("Log level:"),
+    cl::values(clEnumValN(level_emergent, "emergent", "emergent"),
+               clEnumValN(level_alert, "alert", "alert"),
+               clEnumValN(level_critical, "critical", "critical"),
+               clEnumValN(level_error, "error", "error"),
+               clEnumValN(level_warning, "warning", "warning"),
+               clEnumValN(level_notice, "notice", "notice"),
+               clEnumValN(level_info, "info", "info"),
+               clEnumValN(level_debug, "debug", "debug")),
+    cl::init(level_notice), cl::cat(Wasm2llvmCat));
+#endif
+
+#ifdef NOTDEC_ENABLE_LLVM2C
+#include "notdec-llvm2c/Commandlines.def"
 #endif
 
 static cl::opt<std::string> stackRec(
@@ -115,11 +133,13 @@ int main(int argc, char *argv[]) {
 #ifdef NOTDEC_ENABLE_WASM
   else if (insuffix == ".wasm") {
     std::cout << "Loading Wasm: " << inputFilename << std::endl;
-    notdec::frontend::parse_wasm(Ctx.context, Ctx.getModule(), getWasmOptions(),
+    notdec::frontend::parse_wasm(Ctx.context, Ctx.getModule(),
+                                 getWasmOptions(Wasm2LLVMLogLevel),
                                  inputFilename);
   } else if (insuffix == ".wat") {
     std::cout << "Loading Wat: " << inputFilename << std::endl;
-    notdec::frontend::parse_wat(Ctx.context, Ctx.getModule(), getWasmOptions(),
+    notdec::frontend::parse_wat(Ctx.context, Ctx.getModule(),
+                                getWasmOptions(Wasm2LLVMLogLevel),
                                 inputFilename);
   }
 #endif
@@ -164,7 +184,7 @@ int main(int argc, char *argv[]) {
       std::cerr << EC.message() << std::endl;
       std::abort();
     }
-    notdec::llvm2c::decompileModule(Ctx.getModule(), os);
+    notdec::llvm2c::decompileModule(Ctx.getModule(), os, getLLVM2COptions());
     std::cout << "Decompile result: " << outputFilename << std::endl;
   }
 

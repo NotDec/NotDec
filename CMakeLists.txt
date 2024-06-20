@@ -121,6 +121,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 
 option(NOTDEC_ENABLE_WASM "Enable wasm decompilation support." ON)
 option(NOTDEC_ENABLE_LLVM2C "Enable notdec llvm2c backend." ON)
+# TODO add tests
 
 if (NOTDEC_ENABLE_WASM)
 	add_subdirectory(external/NotDec-wasm2llvm)
