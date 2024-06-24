@@ -83,7 +83,7 @@ public:
   void append_fact(const char *key, Value v, Values... vs) {
     // legacy mode: convert to csv string and insert into facts map.
     if (prog == nullptr) {
-      append_fact(key, to_fact_str(v, vs...));
+      append_fact_str(key, to_fact_str(v, vs...));
       return;
     }
     if (souffle::Relation *rel = prog->getRelation(key)) {
