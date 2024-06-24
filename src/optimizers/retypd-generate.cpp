@@ -1,6 +1,7 @@
 #include "optimizers/retypd-generate.h"
 #include <cassert>
 #include <iostream>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/Constant.h>
@@ -23,14 +24,14 @@
 
 namespace notdec::optimizers {
 
-static const bool is_debug = true;
+const char *RetypdGenerator::Memory = "MEMORY";
 
 /// Uses ptrtoint to ensure type correctness.
 PreservedAnalyses RetypdRunner::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
   RetypdGenerator Generator;
-  Generator.run(M);
+  Generator.run(M, StackPointer);
 
   // create a temporary directory
   SmallString<128> Path;
@@ -57,7 +58,8 @@ PreservedAnalyses RetypdRunner::run(Module &M, ModuleAnalysisManager &MAM) {
   return PreservedAnalyses::none();
 }
 
-void RetypdGenerator::run(Module &M) {
+void RetypdGenerator::run(Module &M, llvm::Value *StackPointer) {
+  this->StackPointer = StackPointer;
   data_layout = std::move(M.getDataLayoutStr());
   pointer_size = M.getDataLayout().getPointerSizeInBits();
   for (auto &F : M) {
@@ -115,8 +117,42 @@ std::string llvm_type_var(Type *Ty) {
   }
 }
 
+std::string RetypdGenerator::get_type_var(Value *Val) {
+  // ignore irrelevant cast instructions
+  if (is_cast(Val)) {
+    return get_type_var(cast<CastInst>(Val)->getOperand(0));
+  }
+  if (Constant *C = dyn_cast<Constant>(Val)) {
+    // check for constantExpr
+    if (auto CE = dyn_cast<ConstantExpr>(C)) {
+      // ignore bitcast
+      if (CE->getOpcode() == Instruction::BitCast) {
+        return get_type_var(CE->getOperand(0));
+      }
+      if (CE->getOpcode() == Instruction::IntToPtr) {
+        if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
+          return deref(Memory, "int", getPointerElemSize(CE->getType()),
+                       toString(Addr->getValue(), 10, false).c_str());
+        }
+      }
+    }
+    // global variable
+    if (isa<GlobalValue>(C)) {
+      return get_named_type_var(Val);
+    }
+    if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
+      auto Ty = C->getType();
+      return llvm_type_var(Ty);
+    }
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "ERROR: unhandled type of constant: " << *C << "\n";
+    std::abort();
+  }
+  return get_named_type_var(Val);
+}
+
 // get id, and return string name.
-std::string RetypdGenerator::get_type_var(Value *val) {
+std::string RetypdGenerator::get_named_type_var(Value *val) {
   bool IsNew = false;
   size_t Id;
   std::string Ret;
@@ -138,18 +174,7 @@ std::string RetypdGenerator::get_type_var(Value *val) {
   }
 
   if (IsNew) {
-    // if constant, insert additional constraint.
-    if (auto CExp = dyn_cast<ConstantExpr>(val)) {
-      // inttoptr constant <= void* ?
-      current->push_back("┬* <= " + Ret);
-    } else if (auto gv = dyn_cast<GlobalVariable>(val)) {
-    } else if (Constant *c = dyn_cast<Constant>(val)) {
-      if (c->isNullValue()) {
-
-      } else {
-        auto Ty = c->getType();
-        current->push_back(llvm_type_var(Ty) + " <= " + Ret);
-      }
+    if (auto gv = dyn_cast<GlobalVariable>(val)) {
     }
   }
   return Ret;
@@ -300,38 +325,32 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   constrains.push_back(SrcVar + " <= " + cg.get_type_var(&I));
 }
 
-std::string RetypdGenerator::deref(std::string Label, const char *Mode,
-                                   long BitSize, int Offset, int Count) {
-  assert(BitSize % 8 == 0 && "size must be byte aligned");
-  long Size = BitSize = BitSize / 8;
-  std::string OffsetStr;
-  std::string CountStr;
+std::string RetypdGenerator::offset(APInt Offset, int Count) {
+  std::string OffsetStr = toString(Offset, 10, false);
+  // case -1:
+  //   OffsetStr = "0*[nobound]";
+  //   break;
+  // case -2:
+  //   OffsetStr = "0*[nullterm]";
 
-  switch (Offset) {
-  case -1:
-    OffsetStr = "0*[nobound]";
-    break;
-  case -2:
-    OffsetStr = "0*[nullterm]";
-    break;
-  default:
-    OffsetStr = std::to_string(Offset);
-    break;
+  if (Count > 1) {
+    OffsetStr += "*" + std::to_string(Count);
   }
-  CountStr = (Count > 1 ? "*" + std::to_string(Count) : "");
-
-  return Label + "." + Mode + ".σ" + std::to_string(Size) + "@" + OffsetStr +
-         CountStr;
+  return OffsetStr;
 }
 
+std::string RetypdGenerator::deref(std::string Label, const char *Mode,
+                                   long BitSize, const char *OffsetStr) {
+  assert(BitSize % 8 == 0 && "size must be byte aligned");
+  long Size = BitSize = BitSize / 8;
+  return Label + "." + Mode + ".σ" + std::to_string(Size) + "@" + OffsetStr;
+}
+
+// Special logics for load and store when generating type variables.
 std::string RetypdGenerator::deref_label(Value *Val, long BitSize,
                                          const char *Mode) {
   assert(BitSize != 0 && "zero size!?");
-  // if not instruction, directly deref
-  if (!isa<Instruction>(Val)) {
-    return deref(get_type_var(Val), Mode, BitSize, 0);
-  } else {
-    auto *Inst = dyn_cast<Instruction>(Val);
+  if (auto *Inst = dyn_cast<Instruction>(Val)) {
     // ignore cast
     if (is_cast(Inst)) {
       return deref_label(Inst->getOperand(0), BitSize, Mode);
@@ -342,7 +361,7 @@ std::string RetypdGenerator::deref_label(Value *Val, long BitSize,
       // current consider only i8* or i8 array
       auto *Gep = dyn_cast<GetElementPtrInst>(Inst);
       auto *ETy = Gep->getSourceElementType();
-      int64_t Off;
+      std::string Off;
       // gep i8, i8*
       if (ETy->isIntegerTy(8)) {
         auto v1 = Gep->getOperand(1);
@@ -351,7 +370,7 @@ std::string RetypdGenerator::deref_label(Value *Val, long BitSize,
         } else {
           std::cerr << __FILE__ << ":" << __LINE__ << ": "
                     << "Warn: gep offset not constant\n";
-          Off = -1;
+          Off = "0*[nobound]";
         }
       } else if (ETy->isArrayTy() &&
                  ETy->getArrayElementType()->isIntegerTy(8)) {
@@ -363,23 +382,36 @@ std::string RetypdGenerator::deref_label(Value *Val, long BitSize,
         } else {
           std::cerr << __FILE__ << ":" << __LINE__ << ": "
                     << "Warn: gep offset not constant\n";
-          Off = -1;
+          Off = "0*[nobound]";
         }
       } else {
         llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                      << "Warn: unknown gep: " << *Inst << "\n";
-        Off = -1;
+        Off = "0*[nobound]";
       }
       // off is initialized in each branch
-      return deref(get_type_var(Gep->getOperand(0)), Mode, BitSize, Off);
+      return deref(get_type_var(Gep->getOperand(0)), Mode, BitSize,
+                   Off.c_str());
     }
     default:
-      std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Warn: Unhandled inst in deref_label: "
-                << Inst->getOpcodeName() << " \n";
-      return deref(get_type_var(Val), Mode, BitSize, 0);
+      break;
     }
+  } else if (auto CExp = dyn_cast<ConstantExpr>(Val)) {
+    auto Op = CExp->getOpcode();
+    if (Op == Instruction::IntToPtr) {
+      if (auto Addr = dyn_cast<ConstantInt>(CExp->getOperand(0))) {
+        // e.g. i32* inttoptr (i32 1024 to i32*)
+        // the offset should be unsigned.
+        return deref(Memory, Mode, getPointerElemSize(CExp->getType()),
+                     toString(Addr->getValue(), 10, false).c_str());
+      }
+    }
+  } else {
+    return deref(get_type_var(Val), Mode, BitSize, 0);
   }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "Warn: Unhandled value in deref_label: " << *Val << " \n";
+  std::abort();
 }
 
 // =========== end: load/store insts ===========

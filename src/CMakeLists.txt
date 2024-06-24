@@ -26,9 +26,6 @@ target_link_libraries(notdec
 )
 
 if (NOTDEC_ENABLE_WASM)
-	target_sources(notdec PRIVATE
-		frontend/wasm.cpp
-	)
 	target_link_libraries(notdec
 		PUBLIC
 		notdec-wasm2llvm

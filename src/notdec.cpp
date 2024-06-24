@@ -100,7 +100,7 @@ void initDebugOptions();
 }
 
 int main(int argc, char *argv[]) {
-  initDebugOptions();
+  // initDebugOptions();
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
   notdec::Options opts{
@@ -109,11 +109,6 @@ int main(int argc, char *argv[]) {
       .stackRec = stackRec,
       .log_level = LogLevel,
   };
-
-  // if log level is debug, also enable debug flag
-  if (LogLevel == level_debug) {
-    DebugFlag = true;
-  }
 
   std::string insuffix = getSuffix(inputFilename);
   notdec::DecompilerContext Ctx(inputFilename, opts);
@@ -132,14 +127,34 @@ int main(int argc, char *argv[]) {
   }
 #ifdef NOTDEC_ENABLE_WASM
   else if (insuffix == ".wasm") {
+    notdec::frontend::wasm::Options WasmOpts;
+    // use decompiler config if decompilation is enabled
+    if (!opts.disableAllPasses) {
+      WasmOpts = notdec::frontend::wasm::Options{
+          .GenIntToPtr = true,
+          .SplitMem = true,
+          .LogLevel = Wasm2LLVMLogLevel,
+      };
+    } else {
+      WasmOpts = getWasmOptions(Wasm2LLVMLogLevel);
+    }
     std::cout << "Loading Wasm: " << inputFilename << std::endl;
-    notdec::frontend::parse_wasm(Ctx.context, Ctx.getModule(),
-                                 getWasmOptions(Wasm2LLVMLogLevel),
+    notdec::frontend::parse_wasm(Ctx.context, Ctx.getModule(), WasmOpts,
                                  inputFilename);
   } else if (insuffix == ".wat") {
+    notdec::frontend::wasm::Options WasmOpts;
+    // use decompiler config if decompilation is enabled
+    if (!opts.disableAllPasses) {
+      WasmOpts = notdec::frontend::wasm::Options{
+          .GenIntToPtr = true,
+          .SplitMem = true,
+          .LogLevel = Wasm2LLVMLogLevel,
+      };
+    } else {
+      WasmOpts = getWasmOptions(Wasm2LLVMLogLevel);
+    }
     std::cout << "Loading Wat: " << inputFilename << std::endl;
-    notdec::frontend::parse_wat(Ctx.context, Ctx.getModule(),
-                                getWasmOptions(Wasm2LLVMLogLevel),
+    notdec::frontend::parse_wat(Ctx.context, Ctx.getModule(), WasmOpts,
                                 inputFilename);
   }
 #endif

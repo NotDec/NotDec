@@ -27,3 +27,11 @@
     ```
     git push origin am009/dev:main
     ```
+
+### 代码风格
+
+遵循LLVM风格，以下是一些总结
+
+- DEBUG_TYPE 小写，横线连接。
+
+

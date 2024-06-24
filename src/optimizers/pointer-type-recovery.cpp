@@ -186,6 +186,10 @@ void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
           auto val = const_cast<llvm::Value *>(
               std::get<const llvm::Value *>(value_var));
           llvm::errs() << "Datalog: type conflict(top): " << *val << "\n";
+          if (auto inst = dyn_cast<Instruction>(val)) {
+            auto func = inst->getParent();
+            llvm::errs() << "Datalog: From block " << func->getName() << "\n";
+          }
         } else if (std::holds_alternative<aval>(value_var)) {
           auto val = std::get<aval>(value_var);
           if (isa<Function>(val.first)) {
@@ -252,7 +256,8 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
       // run the program...
       prog->run();
       prog->printAll(temp_path);
-      // std::cerr << "Souffle: Running on directory " << temp_path << std::endl;
+      // std::cerr << "Souffle: Running on directory " << temp_path <<
+      // std::endl;
 
       // clean up
       // delete directory if not debug
@@ -482,13 +487,20 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         }
       }
 
-      F.replaceAllUsesWith(NewF);
-      std::vector<User *> users(NewF->user_begin(), NewF->user_end());
-      for (User *use : users) {
-        if (CallBase *cb = dyn_cast<CallBase>(use)) {
+      // F.replaceAllUsesWith(NewF);
+      std::vector<User *> users(F.user_begin(), F.user_end());
+      for (User *user : users) {
+        if (auto *C = dyn_cast<Constant>(user)) {
+          if (!isa<GlobalValue>(C)) {
+            C->handleOperandChange(&F, NewF);
+            continue;
+          }
+        }
+        if (CallBase *cb = dyn_cast<CallBase>(user)) {
           auto old_fty = cb->getFunctionType();
           auto new_fty = NewF->getFunctionType();
           cb->mutateFunctionType(new_fty);
+          cb->setCalledFunction(NewF);
           // insert int2ptr for call arg
           for (unsigned i = 0; i < cb->arg_size(); i++) {
             if (old_fty->getParamType(i) != new_fty->getParamType(i)) {
@@ -501,6 +513,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
             castBack(&builder, cb, old_fty->getReturnType(), datalog::Pointer);
           }
         }
+        user->replaceUsesOfWith(&F, NewF);
       }
 
       func2erase.push_back(&F);

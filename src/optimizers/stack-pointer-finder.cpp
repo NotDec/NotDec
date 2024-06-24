@@ -96,7 +96,7 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
     llvm::errs() << "Selected stack pointer: " << *max_sp << "\n";
   }
   if (sp != nullptr) {
-    errs() << "Select stack pointer because of its name: " << *sp << "\n";
+    errs() << "Select stack pointer because of its NAME: " << *sp << "\n";
     if (sp != max_sp) {
       errs() << "WARNING: Stack pointer mismatch! (Name vs Analysis)\n";
     }
@@ -107,7 +107,7 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
 
   Result ret;
   ret.result = sp;
-  ret.direction = direction_count[0] > direction_count[1] ? 0 : 1;
+  ret.direction = direction_count[0] >= direction_count[1] ? 0 : 1;
   std::cerr << "stack direction: "
             << (ret.direction == 0 ? "negative" : "positive") << " ("
             << direction_count[ret.direction] << ")" << std::endl;

@@ -24,12 +24,12 @@ namespace notdec::optimizers {
 struct DecompileConfig {
 
   DecompileConfig(llvm::Module &mod, notdec::Options opt)
-      : mod(mod), opts(opt) {}
+      : Mod(mod), Opts(opt) {}
 
-  llvm::Module &mod;
-  notdec::Options opts;
-  llvm::GlobalVariable *sp = nullptr;
-  llvm::GlobalVariable *mem = nullptr;
+  llvm::Module &Mod;
+  notdec::Options Opts;
+  llvm::GlobalVariable *SP = nullptr;
+  llvm::GlobalVariable *Mem = nullptr;
 
   void find_special_gv();
   void run_passes();

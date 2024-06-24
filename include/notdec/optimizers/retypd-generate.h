@@ -13,6 +13,9 @@ namespace notdec::optimizers {
 using namespace llvm;
 
 struct RetypdRunner : PassInfoMixin<RetypdRunner> {
+  llvm::Value *StackPointer;
+  RetypdRunner(llvm::Value *StackPointer) : StackPointer(StackPointer) {}
+
   PreservedAnalyses run(Module &F, ModuleAnalysisManager &);
 };
 
@@ -23,14 +26,17 @@ struct RetypdGenerator {
   std::map<Function *, std::set<Function *>> call_graphs;
   std::string data_layout;
   std::vector<std::string> *current;
+  llvm::Value *StackPointer;
   unsigned pointer_size = 0;
 
-  void run(Module &M);
+  void run(Module &M, llvm::Value *StackPointer);
 
 protected:
   void run(Function &M);
 
 public:
+  static const char *Memory;
+
   void gen_call_graph(Module &M);
   void gen_json(std::string outputFilename);
 
@@ -38,16 +44,16 @@ public:
   size_t get_or_insert_value(Value *val);
   std::string get_func_name(Function &func);
   std::string get_type_var(Value *val);
+  std::string get_named_type_var(Value *val);
   std::string deref_label(Value *val, long size, const char *mode);
   unsigned getPointerElemSize(Type *ty);
-  static inline bool is_cast(Instruction *I) {
-    return I->getOpcode() == Instruction::CastOps::BitCast ||
-           I->getOpcode() == Instruction::CastOps::AddrSpaceCast ||
-           I->getOpcode() == Instruction::CastOps::IntToPtr ||
-           I->getOpcode() == Instruction::CastOps::PtrToInt;
+  static inline bool is_cast(Value *Val) {
+    return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,
+                     IntToPtrInst>(Val);
   }
-  static std::string deref(std::string label, const char *mode, long size,
-                           int offset, int count = 0);
+  static std::string deref(std::string Label, const char *Mode, long BitSize,
+                           const char *OffsetStr);
+  static std::string offset(APInt Offset, int Count = 0);
   static std::string ret2name(std::string funcName);
   static std::string id2name(size_t id);
   static std::string arg2name(std::string funcName, unsigned ind);

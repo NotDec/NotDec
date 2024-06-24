@@ -1,3 +1,0 @@
-
-
-namespace notdec::frontend::wasm {}
