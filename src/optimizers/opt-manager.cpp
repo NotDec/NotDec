@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <llvm/IR/PassManager.h>
+#include <llvm/Support/Debug.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -17,6 +18,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Pass.h>
+#include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
@@ -213,12 +215,12 @@ struct HelloModule : PassInfoMixin<HelloModule> {
 };
 
 void DecompileConfig::find_special_gv() {
-  for (GlobalVariable &gv : mod.getGlobalList()) {
+  for (GlobalVariable &gv : Mod.getGlobalList()) {
     if (gv.getName().equals(MEM_NAME)) {
-      mem = &gv;
+      Mem = &gv;
     }
   }
-  sp = StackPointerFinderAnalysis::find_stack_ptr(mod);
+  SP = StackPointerFinderAnalysis::find_stack_ptr(Mod);
 }
 
 void DecompileConfig::run_passes() {
@@ -227,11 +229,17 @@ void DecompileConfig::run_passes() {
   FunctionAnalysisManager FAM;
   CGSCCAnalysisManager CGAM;
   ModuleAnalysisManager MAM;
+
+  // add instrumentations.
+  PassInstrumentationCallbacks PIC;
+  StandardInstrumentations SI(::llvm::DebugFlag, false, PrintPassOptions());
+  SI.registerCallbacks(PIC, &FAM);
+
   // Create the new pass manager builder.
   // Take a look at the PassBuilder constructor parameters for more
   // customization, e.g. specifying a TargetMachine or various debugging
   // options.
-  PassBuilder PB;
+  PassBuilder PB(nullptr, PipelineTuningOptions(), None, &PIC);
 
   // Register all the basic analyses with the managers.
   PB.registerModuleAnalyses(MAM);
@@ -257,36 +265,36 @@ void DecompileConfig::run_passes() {
   // MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
 
   // if not recompile then decompile.
-  if (!opts.onlyOptimize) {
+  if (!Opts.onlyOptimize) {
     StackPointerFinderAnalysis SPF;
     MAM.registerPass([&]() { return SPF; });
 
-    if (opts.stackRec == "retdec") {
+    if (Opts.stackRec == "retdec") {
       find_special_gv();
-      retdec::bin2llvmir::Abi abi(&mod);
-      abi.setStackPointer(sp);
-      abi.setMemory(mem);
-      abi.setLogLevel(opts.log_level);
+      retdec::bin2llvmir::Abi abi(&Mod);
+      abi.setStackPointer(SP);
+      abi.setMemory(Mem);
+      abi.setLogLevel(Opts.log_level);
       retdec::bin2llvmir::SymbolicTree::setAbi(&abi);
       MPM.addPass(retdec::bin2llvmir::StackAnalysis(&abi));
       MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));
-    } else if (opts.stackRec == "notdec") {
+    } else if (Opts.stackRec == "notdec") {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
       MPM.addPass(PointerTypeRecovery());
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      MPM.addPass(RetypdRunner());
+      MPM.addPass(RetypdRunner(SP));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
-                << ": unknown stack recovery method: " << opts.stackRec
+                << ": unknown stack recovery method: " << Opts.stackRec
                 << std::endl;
       std::abort();
     }
   }
   // MPM.addPass(FuncSigModify());
-  MPM.run(mod, MAM);
+  MPM.run(Mod, MAM);
 }
 
 // 需要去掉尾递归等优化，因此需要构建自己的Pass。
