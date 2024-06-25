@@ -9,7 +9,7 @@
 
 #include "datalog/fact-generator.h"
 
-namespace notdec::optimizers {
+namespace notdec {
 
 using namespace llvm;
 
@@ -23,9 +23,12 @@ struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   // all functions with optnone.
   // static bool isRequired() { return true; }
   PointerTypeRecovery() = default;
-  PointerTypeRecovery(bool in_memory) : debug(in_memory) {}
+  PointerTypeRecovery(bool in_memory) : in_memory(in_memory) {}
 
-  bool debug = false;
+  class PTRAnnotationWriter;
+  void print(Module &M, std::string path) const;
+
+  bool in_memory = false;
   const char *MEM_NAME = "__notdec_mem0";
   using aval = datalog::FactGenerator::aval;
   using val_t = datalog::FactGenerator::val_t;
@@ -41,6 +44,6 @@ struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   static Type *get_pointer_type(Module &M);
 };
 
-} // namespace notdec::optimizers
+} // namespace notdec
 
 #endif

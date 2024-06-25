@@ -232,8 +232,14 @@ void DecompileConfig::run_passes() {
 
   // add instrumentations.
   PassInstrumentationCallbacks PIC;
-  StandardInstrumentations SI(::llvm::DebugFlag, false, PrintPassOptions());
+  StandardInstrumentations SI(::llvm::DebugFlag, false,
+                              PrintPassOptions{.SkipAnalyses = true});
   SI.registerCallbacks(PIC, &FAM);
+  PIC.addClassToPassName("notdec::LinearAllocationRecovery",
+                         "linear-allocation-recovery");
+  PIC.addClassToPassName("notdec::PointerTypeRecovery",
+                         "pointer-type-recovery");
+  PIC.addClassToPassName("notdec::RetypdRunner", "retypd");
 
   // Create the new pass manager builder.
   // Take a look at the PassBuilder constructor parameters for more
@@ -281,11 +287,13 @@ void DecompileConfig::run_passes() {
     } else if (Opts.stackRec == "notdec") {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
-      MPM.addPass(PointerTypeRecovery());
+      MPM.addPass(PointerTypeRecovery(
+          llvm::DebugFlag &&
+          llvm::isCurrentDebugType("pointer-type-recovery")));
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      MPM.addPass(RetypdRunner(SP));
+      MPM.addPass(RetypdRunner());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec

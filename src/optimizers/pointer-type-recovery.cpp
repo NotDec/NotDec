@@ -1,15 +1,18 @@
-
-#include "optimizers/pointer-type-recovery.h"
-#include "datalog/fact-generator.h"
-#include "optimizers/stack-pointer-finder.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <map>
+#include <ostream>
+#include <system_error>
+#include <utility>
+#include <variant>
+
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/IR/AssemblyAnnotationWriter.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -24,14 +27,17 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/FormattedStream.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Cloning.h>
-#include <map>
-#include <ostream>
+
 #include <souffle/RamTypes.h>
-#include <system_error>
-#include <utility>
-#include <variant>
+
+#include "datalog/fact-generator.h"
+#include "optimizers/pointer-type-recovery.h"
+#include "optimizers/stack-pointer-finder.h"
+
+#define DEBUG_TYPE "pointer-type-recovery"
 
 namespace souffle {
 extern "C" {
@@ -45,7 +51,7 @@ static void *volatile dummy = &souffle::__factory_Sf_pointer_main_instance;
 using namespace llvm;
 
 // TODO 重构直接输入facts
-namespace notdec::optimizers {
+namespace notdec {
 
 template <typename T>
 void static replaceAllUseWithExcept(Value *from, Value *to) {
@@ -199,6 +205,10 @@ void PointerTypeRecovery::fetch_result(datalog::FactGenerator &fg,
             llvm::errs() << "Datalog: type conflict(top): " << val.second
                          << " of " << *val.first << "\n";
           }
+        } else if (std::holds_alternative<const llvm::Use *>(value_var)) {
+          auto val = std::get<const llvm::Use *>(value_var);
+          llvm::errs() << "Datalog: type conflict(top): " << *val->get()
+                       << " From User: " << *val->getUser() << "\n";
         }
       }
       val2hty.emplace(value_var, ptr_domain);
@@ -237,7 +247,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
   const char *Name = "pointer_main";
   if (souffle::SouffleProgram *prog =
           souffle::ProgramFactory::newInstance(Name)) {
-    if (debug) {
+    if (in_memory) {
       fg.visit_module();
       // create a temporary directory
       SmallString<128> Path;
@@ -267,6 +277,10 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
 
       // read analysis result
       fetch_result(fg, prog);
+
+      // print original module
+      print(M, std::string(temp_path) + "/ir.ll");
+
     } else {
       fg.set_program(prog);
       fg.visit_module();
@@ -342,7 +356,8 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
           Value *op2 = add->getOperand(1);
           long ty1 = get_ty_or_negative1(op1);
           long ty2 = get_ty_or_negative1(op2);
-          if (ty1 != datalog::Pointer && ty2 != datalog::Pointer) {
+          if ((ty1 != datalog::Pointer && ty2 != datalog::Pointer) ||
+              (ty1 == datalog::Pointer && ty2 == datalog::Pointer)) {
             static const char *names[] = {"None", "Number", "Pointer", "Top"};
             assert(ty1 >= -1 && ty2 >= -1);
             assert(ty1 < 3 && ty2 < 3);
@@ -352,8 +367,6 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
             // castBack(&builder, &inst, pty, datalog::Pointer);
             continue;
           }
-          // not pointer + pointer
-          assert(!(ty1 == datalog::Pointer && ty2 == datalog::Pointer));
           // op1 = ptr, op2 = number
           if (ty1 != datalog::Pointer) {
             std::swap(op1, op2);
@@ -540,4 +553,65 @@ Type *PointerTypeRecovery::get_pointer_type(Module &M) {
   return PointerType::get(IntegerType::get(M.getContext(), 8), 0);
 }
 
-} // namespace notdec::optimizers
+class PointerTypeRecovery::PTRAnnotationWriter
+    : public llvm::AssemblyAnnotationWriter {
+  const std::map<val_t, long> &val2hty;
+
+  static const char *htyStr(long hty) {
+    if (hty == datalog::ARITY_highTypeDomain::Number) {
+      return "Number";
+    } else if (hty == datalog::ARITY_highTypeDomain::Pointer) {
+      return "Pointer";
+    } else if (hty == datalog::ARITY_highTypeDomain::Top) {
+      return "Top";
+    } else {
+      return "Unknown";
+    }
+  }
+
+  void emitFunctionAnnot(const Function *F,
+                         formatted_raw_ostream &OS) override {
+    OS << " ; (";
+    for (auto &arg : F->args()) {
+      if (val2hty.find(&arg) != val2hty.end()) {
+        OS << htyStr(val2hty.at(&arg)) << ", ";
+      } else {
+        OS << "Unk, ";
+      }
+    }
+    OS << ")";
+    if (!F->getReturnType()->isVoidTy()) {
+      if (val2hty.find(aval{F, datalog::FACT_FuncRet}) != val2hty.end()) {
+        OS << " -> " << htyStr(val2hty.at(aval{F, datalog::FACT_FuncRet}));
+      } else {
+        OS << " -> Unk";
+      }
+    }
+
+    OS << "\n";
+  }
+
+  void printInfoComment(const Value &V, formatted_raw_ostream &OS) override {
+    if (val2hty.find(&V) != val2hty.end()) {
+      OS << " ; " << htyStr(val2hty.at(&V)) << "\n";
+    }
+  }
+
+public:
+  PTRAnnotationWriter(const std::map<val_t, long> &val2hty)
+      : val2hty(val2hty) {}
+};
+
+void PointerTypeRecovery::print(Module &M, std::string path) const {
+  std::error_code EC;
+  llvm::raw_fd_ostream os(path, EC);
+  if (EC) {
+    std::cerr << "Cannot open output file: " << path << std::endl;
+    std::cerr << EC.message() << std::endl;
+    std::abort();
+  }
+  PTRAnnotationWriter PAW(val2hty);
+  M.print(os, &PAW);
+}
+
+} // namespace notdec

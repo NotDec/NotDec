@@ -21,17 +21,32 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "Structural emcc_print",
+      // "program": "${workspaceFolder}/build/bin/notdec",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [
+        "${workspaceFolder}/test/wasm/emcc-print.wat",
+        "-o",
+        "${workspaceFolder}/test/wasm/emcc-print.wat.c",
+        "--log-level=debug",
+        "--no-mem-initializer",
+        "--disable-all-pass"
+      ],
+      "cwd": "${workspaceFolder}",
+      // "preLaunchTask": "build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "decompile emcc_print",
       // "program": "${workspaceFolder}/build/bin/notdec",
       "program": "${command:cmake.launchTargetPath}",
       "args": [
-        "-i",
         "${workspaceFolder}/test/wasm/emcc-print.wat",
         "-o",
         "${workspaceFolder}/test/wasm/emcc-print.wat.ll",
-        // "--log-level",
-        // "debug",
-        "--compat-mode"
+        "--log-level=debug",
+        "--split-mem",
       ],
       "cwd": "${workspaceFolder}",
       // "preLaunchTask": "build"
@@ -43,13 +58,11 @@
       // "program": "${workspaceFolder}/build/bin/notdec",
       "program": "${command:cmake.launchTargetPath}",
       "args": [
-        "-i",
         "${file}",
         "-o",
         "${file}.ll",
-        // "--log-level",
-        // "debug",
-        "--compat-mode"
+        "-debug-only=retypd",
+        // "--print-before=linear-allocation-recovery"
       ],
       "cwd": "${workspaceFolder}",
       // "preLaunchTask": "build"
@@ -60,7 +73,6 @@
       "name": "recompile",
       "program": "${command:cmake.launchTargetPath}",
       "args": [
-        "-i",
         "${file}",
         "-o",
         "${file}.ll",
@@ -78,7 +90,6 @@
       "name": "structural",
       "program": "${command:cmake.launchTargetPath}",
       "args": [
-        "-i",
         "${file}",
         "-o",
         "${file}.c",

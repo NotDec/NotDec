@@ -5,7 +5,7 @@
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace notdec::optimizers {
+namespace notdec {
 
 using namespace llvm;
 
@@ -117,4 +117,4 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
   return ret;
 }
 
-} // namespace notdec::optimizers
+} // namespace notdec

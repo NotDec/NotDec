@@ -3,7 +3,7 @@
 
 #include <llvm/IR/PassManager.h>
 
-namespace notdec::optimizers {
+namespace notdec {
 
 using namespace llvm;
 
@@ -11,6 +11,6 @@ struct LinearAllocationRecovery : PassInfoMixin<LinearAllocationRecovery> {
   PreservedAnalyses run(Module &F, ModuleAnalysisManager &);
 };
 
-} // namespace notdec::optimizers
+} // namespace notdec
 
 #endif

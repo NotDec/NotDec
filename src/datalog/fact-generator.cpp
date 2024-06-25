@@ -30,7 +30,7 @@ val_t FactGenerator::get_value_by_id(id_t vid) {
   if (id2value.count(vid) > 0) {
     return id2value.at(vid);
   }
-  return nullptr;
+  return (Value *)nullptr;
 }
 
 id_t FactGenerator::get_value_id(val_t val) { return value2id.at(val); }
@@ -152,7 +152,8 @@ id_t FactGenerator::visit_type(llvm::Type *ty) {
     ins = get_or_insert_type(type_str);
     id = ins.first;
     if (ins.second) {
-      append_fact(FACT_ArrayType, id, id_dep, (unsigned_t)ty->getArrayNumElements());
+      append_fact(FACT_ArrayType, id, id_dep,
+                  (unsigned_t)ty->getArrayNumElements());
     }
     return id;
   case llvm::Type::FixedVectorTyID:
@@ -161,7 +162,8 @@ id_t FactGenerator::visit_type(llvm::Type *ty) {
     ins = get_or_insert_type(type_str);
     id = ins.first;
     if (ins.second) {
-      append_fact(FACT_VectorType, id, id_dep, (unsigned_t)ty->getArrayNumElements());
+      append_fact(FACT_VectorType, id, id_dep,
+                  (unsigned_t)ty->getArrayNumElements());
     }
     return id;
   case llvm::Type::ScalableVectorTyID:
@@ -212,7 +214,8 @@ std::pair<id_t, bool> FactGenerator::get_or_insert_type(std::string key) {
   }
 }
 
-void inline FactGenerator::append_fact_str(const char *key, std::string to_append) {
+void inline FactGenerator::append_fact_str(const char *key,
+                                           std::string to_append) {
   // https://stackoverflow.com/questions/1409454/c-map-find-to-possibly-insert-how-to-optimize-operations
   typedef std::map<const char *, std::string> M;
   typedef M::iterator I;
@@ -227,15 +230,16 @@ void inline FactGenerator::append_fact_str(const char *key, std::string to_appen
   }
 }
 
-id_t FactGenerator::visit_operand(llvm::Value &val) {
+id_t FactGenerator::visit_operand(const llvm::Value &val,
+                                  const llvm::Use *Use) {
   // 1. operand is other value(e.g. instruction, gv...)
   // 2. operand is constant
   if (value2id.count(&val)) {
     return value2id.at(&val);
   } else if (isa<Constant>(val)) {
     assert(!isa<Function>(val));
-    Constant *con = static_cast<Constant *>(&val);
-    return visit_constant(*con);
+    const Constant *con = cast<Constant>(&val);
+    return visit_constant(*con, Use);
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "Unsupported inst operand: " << val << "\n";
@@ -243,15 +247,18 @@ id_t FactGenerator::visit_operand(llvm::Value &val) {
   }
 }
 
-id_t FactGenerator::visit_constant(const llvm::Constant &c) {
+id_t FactGenerator::visit_constant(const llvm::Constant &c,
+                                   const llvm::Use *Use) {
   auto tid = visit_type(c.getType());
 
-  auto id = get_or_insert_value(&c);
+  // To differentiate constants, differentiate using Use.
+  auto id = get_or_insert_value(Use);
   if (isa<ConstantInt>(&c)) {
     // saturate to 32bit signed int, because souffle use 32bit domain by default
     auto num = static_cast<const ConstantInt &>(c).getSExtValue();
-    number_t num_clamped = std::clamp(num, (int64_t)std::numeric_limits<int32_t>::min(),
-                     (int64_t)std::numeric_limits<int32_t>::max());
+    number_t num_clamped =
+        std::clamp(num, (int64_t)std::numeric_limits<int32_t>::min(),
+                   (int64_t)std::numeric_limits<int32_t>::max());
     // Signed or not?
     append_fact(FACT_IntConstant, id, num_clamped);
   } else {
@@ -279,7 +286,7 @@ id_t FactGenerator::get_or_insert_value(val_t val, bool assert_not_exist) {
 }
 
 void FactGenerator::visit_functions() {
-  InstructionVisitor IV(*this, mod);
+  InstructionVisitor IV(*this);
 
   // export all function first
   for (auto &f : mod.functions()) {
@@ -329,7 +336,8 @@ void FactGenerator::visit_functions() {
       for (const llvm::Instruction &instr : bb) {
         auto inst_id = get_or_insert_value(&instr);
         auto inst_name = getNameOrAsOperand(instr);
-        append_fact(FACT_Instruction, inst_id, instr.getOpcodeName(), inst_name, id);
+        append_fact(FACT_Instruction, inst_id, instr.getOpcodeName(), inst_name,
+                    id);
 
         auto inst_type_id = visit_type(instr.getType());
         append_fact(FACT_ValueType, inst_id, inst_type_id);
@@ -378,7 +386,7 @@ void FactGenerator::visit_functions() {
         // visit operands in second pass
         id_t ind = 0;
         for (auto &op : instr.operands()) {
-          auto op_vid = visit_operand(*op.get());
+          auto op_vid = visit_operand(*op.get(), &op);
           append_fact(FACT_Operand, inst_id, ind, op_vid);
 
           ind += 1;
@@ -392,15 +400,15 @@ void FactGenerator::visit_functions() {
 
 void InstructionVisitor::visitReturnInst(ReturnInst &I) {
   fg.append_fact(FACT_RetInstVal, fg.value2id.at(&I),
-                             fg.value2id.at(FactGenerator::aval{
-                                 I.getParent()->getParent(), FACT_FuncRet}));
+                 fg.value2id.at(FactGenerator::aval{I.getParent()->getParent(),
+                                                    FACT_FuncRet}));
 }
 
 void InstructionVisitor::visitCallInst(CallInst &I) {
   // for each arg (instead of operand)
   id_t ind = 0;
   for (auto &arg : I.args()) {
-    auto op_vid = fg.visit_operand(*arg.get());
+    auto op_vid = fg.visit_operand(*arg.get(), &arg);
     fg.append_fact(FACT_Operand, fg.value2id.at(&I), ind, op_vid);
     ind += 1;
   }

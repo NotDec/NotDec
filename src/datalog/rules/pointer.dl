@@ -67,10 +67,10 @@ highType(op, $Number()) :-
     highType(num_add, $Number()).
 
 // ptr + ptr = top
-highType(add, $Top()) :- 
-    Instruction(add, "add", _, _),
-    Operand(add, 0, op1), highType(op1, $Pointer()),
-    Operand(add, 1, op2), highType(op2, $Pointer()).
+// highType(add, $Top()) :- 
+//     Instruction(add, "add", _, _),
+//     Operand(add, 0, op1), highType(op1, $Pointer()),
+//     Operand(add, 1, op2), highType(op2, $Pointer()).
 
 // if a operand of add is ptr, then type result as ptr
 highType(ptr_add, $Pointer()) :-
@@ -114,10 +114,10 @@ highType(ptr_sub, $Number()) :-
     highType(op1, $Pointer()), highType(op2, $Pointer()).
 
 // if op1 is num, op2 is ptr, then type result as top
-highType(ptr_sub, $Top()) :-
-    Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
-    Operand(ptr_sub, 1, op2),
-    highType(op1, $Number()), highType(op2, $Pointer()).
+// highType(ptr_sub, $Top()) :-
+//     Instruction(ptr_sub, "sub", _, _), Operand(ptr_sub, 0, op1),
+//     Operand(ptr_sub, 1, op2),
+//     highType(op1, $Number()), highType(op2, $Pointer()).
 
 // ======== Sub: Reverse =========
 
@@ -138,11 +138,6 @@ highType(op1, $Pointer()), highType(op2, $Number()) :-
 highType(phi, $Pointer()) :-
     Instruction(phi, "phi", _, _), Operand(phi, _, op),
     highType(op, $Pointer()).
-
-// // Phi to each op
-// highType(op, $Pointer()) :-
-//     Instruction(phi, "phi", _, _), Operand(phi, _, op),
-//     highType(phi, $Pointer()), Instruction(op, _, _, _).
 
 // ========== interprocedual: call related ============
 
@@ -169,13 +164,22 @@ highType(retv, hty) :-
     highType(call, hty), hty = $Pointer(). // call result is pointer -> retv is pointer
 
 // argument -> call operand
-// only 2 rules, because Arg will be directly refered by inst.
+// only 2 rules, because Arg will be directly refered by inst, no abstract node.
 highType(arg, hty) :-
     // if there is a `call func ...`, i-th arg is val, and the func's i-th arg is arg.
     Instruction(call, "call", _, _), Operand(call, idx, val), CallTarget(call, func), FuncArg(arg, func, idx, _),
     highType(val, hty), hty = $Pointer(). // call arg -> func arg
 
-highType(arg, hty) :-
+highType(val, hty) :-
     // if there is a `call func ...`, i-th arg is val, and the func's i-th arg is arg.
     Instruction(call, "call", _, _), Operand(call, idx, val), CallTarget(call, func), FuncArg(arg, func, idx, _),
-    highType(val, hty), hty = $Pointer(). // func arg -> call arg
+    highType(arg, hty), hty = $Pointer(). // func arg -> call arg
+
+// ===== Instructions ======
+
+// Phi to each op
+highType(op, $Pointer()) :-
+    Instruction(phi, "phi", _, _), Operand(phi, _, op),
+    highType(phi, $Pointer()), Instruction(op, _, _, _).
+
+// TODO: select

@@ -45,7 +45,9 @@ class FactGenerator {
 public:
   // Abstract Values attach to a llvm value.
   using aval = std::pair<const llvm::Value *, const char *>;
-  using val_t = std::variant<const llvm::Value *, aval>;
+  // Instance usage of Constants
+  using ival = const llvm::Use *;
+  using val_t = std::variant<const llvm::Value *, aval, ival>;
   using number_t = souffle::RamSigned;
   using unsigned_t = souffle::RamUnsigned;
   using id_t = souffle::RamUnsigned;
@@ -104,8 +106,8 @@ public:
 
   static void generate(llvm::Module &mod, const char *outputDirname);
 
-  id_t visit_constant(const llvm::Constant &c);
-  id_t visit_operand(llvm::Value &val);
+  id_t visit_constant(const llvm::Constant &c, const llvm::Use *Use);
+  id_t visit_operand(const llvm::Value &val, const llvm::Use *Use);
   id_t visit_type(llvm::Type *ty);
 
   void visit_module();
@@ -121,8 +123,7 @@ public:
 class InstructionVisitor : public llvm::InstVisitor<InstructionVisitor> {
 
 public:
-  InstructionVisitor(FactGenerator &generator, const llvm::Module &M)
-      : fg(generator), module(M) {}
+  InstructionVisitor(FactGenerator &generator) : fg(generator) {}
 
   void visitReturnInst(ReturnInst &I);
   void visitCallInst(CallInst &I);
@@ -132,7 +133,7 @@ private:
   FactGenerator &fg;
 
   /* Associated LLVM module */
-  const llvm::Module &module;
+  // const llvm::Module &Module;
 };
 
 const char *getLinkageName(GlobalValue::LinkageTypes LT);

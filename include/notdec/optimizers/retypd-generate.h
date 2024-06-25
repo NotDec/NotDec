@@ -8,14 +8,11 @@
 #include <string>
 #include <vector>
 
-namespace notdec::optimizers {
+namespace notdec {
 
 using namespace llvm;
 
 struct RetypdRunner : PassInfoMixin<RetypdRunner> {
-  llvm::Value *StackPointer;
-  RetypdRunner(llvm::Value *StackPointer) : StackPointer(StackPointer) {}
-
   PreservedAnalyses run(Module &F, ModuleAnalysisManager &);
 };
 
@@ -106,6 +103,6 @@ protected:
   };
 };
 
-} // namespace notdec::optimizers
+} // namespace notdec
 
 #endif

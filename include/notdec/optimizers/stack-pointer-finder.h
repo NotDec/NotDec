@@ -10,7 +10,7 @@
 #include <llvm/IR/PatternMatch.h>
 #include <llvm/Pass.h>
 
-namespace notdec::optimizers {
+namespace notdec {
 
 using namespace llvm;
 
@@ -93,5 +93,5 @@ public:
   // Analyze the bitcode/IR in the given LLVM module.
   Result run(llvm::Module &M, llvm::ModuleAnalysisManager &) { return run(M); }
 };
-} // namespace notdec::optimizers
+} // namespace notdec
 #endif

@@ -113,6 +113,30 @@ LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵
 
 有些LLVM值的类型，修改起来非常麻烦。尤其是函数的参数和返回值类型。函数也是GlobalValue，甚至是Constant。
 
+### 打印Pass前后IR
+
+LLVM提供了方便的 `--print-after-all` 等选项。首先在创建PassBuilder的时候，创建插桩的类并注册CallBack。注册所有的标准插桩后很多选项都可以生效，包括计算Pass的运行时间，是否在每个前后打印Pass，展示IR的变化diff，甚至生成HTML的报告。
+
+```cpp
+// add instrumentations.
+PassInstrumentationCallbacks PIC;
+StandardInstrumentations SI(::llvm::DebugFlag, false, PrintPassOptions());
+SI.registerCallbacks(PIC, &FAM);
+```
+
+现在新的Pass都继承自 `PassInfoMixin` 类，这个类会增加一个name函数，在运行时可以动态获取类的名称（包含namespace）。如果不确定可以在`--print-after-all` 后在log里查看。这个名称称为 PassID 。
+
+命令行参数里指定的是通过PassID查找得到的缩略名称。需要提前在 `PassInstrumentationCallbacks` 中注册：
+
+```
+  PIC.addClassToPassName("notdec::LinearAllocationRecovery",
+                         "linear-allocation-recovery");
+  PIC.addClassToPassName("notdec::PointerTypeRecovery",
+                         "pointer-type-recovery");
+```
+
+此时就可以在命令行中指定相关的pass打印了。比如 `--print-before=pointer-type-recovery` 。
+
 ### Clang 
 
 **AST handling**

@@ -1,6 +1,8 @@
-#include "optimizers/retypd-generate.h"
 #include <cassert>
 #include <iostream>
+#include <string>
+#include <utility>
+
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Argument.h>
@@ -17,12 +19,12 @@
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include <string>
-#include <utility>
+#include "optimizers/retypd-generate.h"
+#include "optimizers/stack-pointer-finder.h"
 
-#define DEBUG_TYPE "retypd-generate"
+#define DEBUG_TYPE "retypd"
 
-namespace notdec::optimizers {
+namespace notdec {
 
 const char *RetypdGenerator::Memory = "MEMORY";
 
@@ -30,8 +32,9 @@ const char *RetypdGenerator::Memory = "MEMORY";
 PreservedAnalyses RetypdRunner::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
+  auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
   RetypdGenerator Generator;
-  Generator.run(M, StackPointer);
+  Generator.run(M, SP.result);
 
   // create a temporary directory
   SmallString<128> Path;
@@ -552,4 +555,4 @@ void RetypdGenerator::gen_call_graph(Module &M) {
   }
 }
 
-} // namespace notdec::optimizers
+} // namespace notdec

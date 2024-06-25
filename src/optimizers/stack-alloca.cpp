@@ -7,7 +7,7 @@
 #include <llvm/IR/PatternMatch.h>
 #include <type_traits>
 
-namespace notdec::optimizers {
+namespace notdec {
 
 /// Uses ptrtoint to ensure type correctness.
 PreservedAnalyses LinearAllocationRecovery::run(Module &M,
@@ -124,4 +124,4 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
 
   return PreservedAnalyses::none();
 }
-} // namespace notdec::optimizers
+} // namespace notdec
