@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <iostream>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
 #include <sstream>
 
@@ -18,5 +20,27 @@ enum log_level {
 };
 
 extern llvm::cl::opt<log_level> logLevel;
+
+namespace notdec {
+
+bool inline is_size_t(llvm::Type *ty, llvm::Module &M) {
+  return ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits());
+}
+
+bool inline is_size_t(llvm::Value *val, llvm::Module &M) {
+  return is_size_t(val->getType(), M);
+}
+
+void inline assert_size_t(llvm::Type *ty, llvm::Module &M) {
+  assert(is_size_t(ty, M));
+}
+
+void inline assert_size_t(llvm::Value *val, llvm::Module &M) {
+  assert(is_size_t(val, M));
+}
+
+void printModule(llvm::Module &M, const char *path);
+
+} // namespace notdec
 
 #endif

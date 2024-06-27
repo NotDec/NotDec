@@ -14,6 +14,7 @@ add_library(notdec STATIC
 	optimizers/retdec-stack/retdec-stack-pointer-op-remove.cpp
 	optimizers/retdec-stack/retdec-symbolic-tree.cpp
 	optimizers/retdec-stack/retdec-utils.cpp
+	utils.cpp
 )
 
 # include直接在外部设置了src目录。

@@ -107,7 +107,31 @@ LLVM API允许在应用程序中嵌入LLVM Pass，并将其作为库调用。
 
 更多使用方式见[lldb使用教程](https://lldb.llvm.org/use/tutorial.html)
 
-## 修改LLVM值的类型
+一些非常实用的调试技巧
+
+- 打印指令，值，函数等： `expr llvm::errs() << I`
+- 打印模块：使用定义的工具函数： `expr notdec::printModule(M, "out.ll")`
+
+### InstVisitor
+
+```cpp
+  class MyVisitor
+      : public llvm::InstVisitor<MyVisitor> {
+```
+
+访问逻辑：
+
+- 名字仅有visit的为入口函数。访问模块或者函数 (`Visitor.visit(M)`) 会帮你访问里面的指令
+- 默认继承的父类的行为：
+  - 指令的入口函数 (`void visit(Instruction &I)`): （一般不会override）根据指令类型调用细分的visit方法
+  - 各种其他类型的细分visit方法调用对应的大类visit方法 例如 `visitLoadInst -> visitUnaryInstruction`。
+  - 最后一个大类visit方法 `visitInstruction`： 为空。
+
+总结：细分visit方法是我们要override的，如果没有override实现，则会因为继承的默认实现继续分流到大类方法，最终到最通用的`visitInstruction`。反过来说如果override了，（如果没有主动去调用）则会截断这类指令的访问，使得这类指令不会主动调用 `visitInstruction`。
+
+需要注意，如果想要visitor有个返回值类型，需要在父类模板的第二个参数指定类型，同时必须实现visitInstruction方法，因为至少要给你的返回类型指定一个默认返回值。
+
+### 修改LLVM值的类型
 
 LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵活变动。比如一个整数，虽然可能有一些加法运算，但是你还是可以强制把它设成指针类型，然后在每个使用点插入ptrtoint指令转回去。
 

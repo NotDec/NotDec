@@ -25,3 +25,7 @@ llvm-build/
 
 notdec-facts/
 notdec-outs/
+
+out.txt
+llvm-14.0.6.obj.tar.xz
+tmp.md

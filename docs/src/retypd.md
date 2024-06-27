@@ -8,7 +8,7 @@
 
 **资源**
 
-[retypd](https://github.com/GrammaTech/retypd) 是一个高级的反编译算法，有一篇[论文](https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf): 《[Polymorphic Type Inference for Machine Code](https://arxiv.org/abs/1603.05495)》
+[retypd](https://github.com/GrammaTech/retypd) 是一个非常高级的反编译类型恢复算法，技术领先程度足以超出其他论文好几年。有一篇[论文](https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf): 《[Polymorphic Type Inference for Machine Code](https://arxiv.org/abs/1603.05495)》
 
 资源：
 - 优先看[这个介绍](https://github.com/GrammaTech/retypd/blob/master/reference/type-recovery.rst)。
@@ -839,3 +839,38 @@ Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by EL
 **有向无环图的路径序列：** 首先将节点按照拓扑排序编号，可以直接得到集合 $\{(e, h(e),t(e))|e\in E\}$ 将这个集合中的点按照 $h(e)$ 升序排序，可以直接得到路径序列。
 
 **拓展到任意有向图：** 对于有向图G，首先将图中的强连通分离凝结成单个点表示，则可以得到有向无环图，这些节点 $G_1,G_2,...,G_k$ 表示图G中的一个子图，编号按照拓扑排序。假设这些子图的路径表达式是 $X_1,...,X_k$ ，设 $Y_l$ 是序列 $\{e,h(e),t(e)|h(e) \in G_l \; and \; t(e) \notin G_l\}$ 任意排序（注意到 $Y_k$ 为空）。则 $X_1,Y_1,X_2,Y_2,...,X_{k-1},Y_{k-1},X_k$是G的一个路径序列。
+
+## 从静态分析的视角看
+
+**SSA的静态分析和传统静态分析**
+
+- SSA的静态分析是在 SSA Edge ，即def-use chain上进行，遇到Phi指令merge结果。。
+- 传统静态分析在CFG上进行，遇到控制流合并时merge结果。
+
+**基本运算**
+
+- 变量赋值/数据流传递：对应子类型关系。
+  - 指针分析：指针之间的赋值对应一个特殊的操作。
+- 加法和减法：
+  - 类型分析：生成加减法约束。从静态分析的角度说，它是类型分析中的转换函数。
+  - 指针分析：变成完全不同但有联系的指针对象。
+- 内存读取和存储：
+  - 类型分析：
+    - 读取：更新读取值代表的类型变量的能力，根据类型关系将这个能力传播出去。
+    - 存储：数据流关系 + 变量能力更新。
+    - 此外，如果指针p可能指向对象a，有： `a <= p.load.σN@x`或者 `p.store.σN@x <= a`。但是这里是非SSA值才需要这么做。如果都SSA了，则我们这里存储时会直接引用到某个对象，而不是一个指针变量。我现在栈空间得先split开吗？
+  - 指针分析：需要更深的访问语义，即得到具体的访问对象。
+
+**加减法约束**
+
+加减法约束的计算问题，其实是一个双向数据流分析问题。对应关系如下：
+
+- 数据流流动关系，即SSA上的def-use关系，对应约束生成时的子类型关系，都是一种边。
+- 指针类型关于子类型关系双向传递，子类型关系可以看作是数据流分析的边，加减法看作带有运算的基本块。然后基于worklist算法，递归应用约束，直到迭代到不动点。。
+- 子类型关系。
+
+因为本来就有基于类型的alias analysis。所以涉及指针的时候，类型分析和指针分析和别名分析真的有联系。
+
+- 指针分析是别名分析的更精确版本。别名分析可以看作指针分析的应用。
+- 类型分析需要随着指针指向去传播。
+- 类型分析涉及指针时，不需要考虑流敏感性，上下文敏感性。

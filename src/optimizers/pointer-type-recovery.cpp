@@ -36,6 +36,7 @@
 #include "datalog/fact-generator.h"
 #include "optimizers/pointer-type-recovery.h"
 #include "optimizers/stack-pointer-finder.h"
+#include "utils.h"
 
 #define DEBUG_TYPE "pointer-type-recovery"
 
@@ -93,22 +94,6 @@ void replaceAllUseWithExcept(Value *from, Value *to, Value *except) {
     }
     use->replaceUsesOfWith(from, to);
   }
-}
-
-bool static inline is_sizet(Type *ty, Module &M) {
-  return ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits());
-}
-
-bool static inline is_sizet(Value *val, Module &M) {
-  return is_sizet(val->getType(), M);
-}
-
-void static inline assert_sizet(Type *ty, Module &M) {
-  assert(is_sizet(ty, M));
-}
-
-void static inline assert_sizet(Value *val, Module &M) {
-  assert(is_sizet(val, M));
 }
 
 long PointerTypeRecovery::get_ty_or_negative1(llvm::Value *val) {
@@ -314,7 +299,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     long ty = get_ty_or_negative1(&gv);
 
     if (ty == datalog::ARITY_highTypeDomain::Pointer) {
-      assert_sizet(gv.getValueType(), M);
+      assert_size_t(gv.getValueType(), M);
       // handle initializer
       auto init = gv.getInitializer();
       init = ConstantExpr::getIntToPtr(init, pty);
@@ -340,7 +325,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         continue;
       }
       // only handle size_t
-      if (!is_sizet(&inst, M)) {
+      if (!is_size_t(&inst, M)) {
         continue;
       }
       long ty = get_ty_or_negative1(&inst);
@@ -399,7 +384,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
         auto old_ty = load->getType();
         // insert bitcast before load
         auto ptr = load->getPointerOperand();
-        assert_sizet(load->getType(), M);
+        assert_size_t(load->getType(), M);
         load->mutateType(pty);
         insertOpCast(&builder, load, ptr, PointerType::getUnqual(pty));
         // cast back after load
@@ -437,7 +422,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
           arg->getType()->isPointerTy()) {
         llvmArgTypes[i] = arg->getType();
       } else { // is Pointer
-        assert_sizet(arg, M);
+        assert_size_t(arg, M);
         llvmArgTypes[i] = pty;
         isChanged = true;
       }
@@ -446,7 +431,7 @@ PreservedAnalyses PointerTypeRecovery::run(Module &M,
     long ty = get_ty_or_negative1(aval{&F, datalog::FACT_FuncRet});
     if (ty == datalog::ARITY_highTypeDomain::Pointer &&
         !F.getReturnType()->isPointerTy()) {
-      assert_sizet(F.getReturnType(), M);
+      assert_size_t(F.getReturnType(), M);
       retType = pty;
       isChanged = true;
     }
