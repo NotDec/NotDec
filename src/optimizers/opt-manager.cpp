@@ -287,13 +287,13 @@ void DecompileConfig::run_passes() {
     } else if (Opts.stackRec == "notdec") {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
-      MPM.addPass(PointerTypeRecovery(
-          llvm::DebugFlag &&
-          llvm::isCurrentDebugType("pointer-type-recovery")));
-      MPM.addPass(VerifierPass(false));
+      // MPM.addPass(PointerTypeRecovery(
+      //     llvm::DebugFlag &&
+      //     llvm::isCurrentDebugType("pointer-type-recovery")));
+      // MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      MPM.addPass(RetypdRunner());
+      // MPM.addPass(RetypdRunner());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec

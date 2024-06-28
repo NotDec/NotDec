@@ -69,11 +69,23 @@ GlobalVariable *StackPointerFinderAnalysis::find_stack_ptr(Module &mod) {
   return ana.run(mod).result;
 }
 
+const char *StackPointerFinderAnalysis::StackPointerNames[] = {
+    "__stack_pointer", "env.__stack_pointer"};
+
+static inline bool isStackPointerName(const StringRef &Name) {
+  for (const char *Str : StackPointerFinderAnalysis::StackPointerNames) {
+    if (Name == Str) {
+      return true;
+    }
+  }
+  return false;
+}
+
 StackPointerFinderAnalysis::Result
 StackPointerFinderAnalysis::run(llvm::Module &mod) {
   GlobalVariable *sp = nullptr;
   for (GlobalVariable &gv : mod.getGlobalList()) {
-    if (gv.getName().equals("__stack_pointer")) {
+    if (isStackPointerName(gv.getName())) {
       sp = &gv;
     }
   }
@@ -97,7 +109,7 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
   }
   if (sp != nullptr) {
     errs() << "Select stack pointer because of its NAME: " << *sp << "\n";
-    if (sp != max_sp) {
+    if (sp != max_sp && max_sp != nullptr) {
       errs() << "WARNING: Stack pointer mismatch! (Name vs Analysis)\n";
     }
   } else {
@@ -112,7 +124,8 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
             << (ret.direction == 0 ? "negative" : "positive") << " ("
             << direction_count[ret.direction] << ")" << std::endl;
   if (direction_count[ret.direction] == 0) {
-    errs() << "WARNING: Stack direction is not determined!\n";
+    errs()
+        << "WARNING: Stack direction is not determined! Default to negative.\n";
   }
   return ret;
 }

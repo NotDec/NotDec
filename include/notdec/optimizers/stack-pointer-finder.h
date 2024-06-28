@@ -1,6 +1,7 @@
 #ifndef _NOTDEC_OPTIMIZERS_STACK_POINTER_FINDER_H_
 #define _NOTDEC_OPTIMIZERS_STACK_POINTER_FINDER_H_
 
+#include <cassert>
 #include <iostream>
 #include <map>
 
@@ -15,8 +16,9 @@ namespace notdec {
 using namespace llvm;
 
 /// Match the following pattern:
-/// store (add (load sp) num) sp
+/// store (add (load sp) space) sp
 /// If specific_sp is not null, then specifically match sp as specific_sp.
+/// For tail function, there is no store to the stack pointer.
 struct StackPointerMatcher {
   Value *&sp;
   Value *&space;
@@ -50,6 +52,9 @@ struct StackPointerMatcher {
       load = cast<Instruction>(add->getOperand(0));
       return true;
     } else if (PatternMatch::match(I, pat_alloc2)) {
+      assert(
+          false &&
+          "instCombine should have moved the constant to the second operand!");
       if (specific_sp != nullptr && sp != specific_sp) {
         return false;
       }
@@ -69,6 +74,8 @@ struct StackPointerFinderResult {
 class StackPointerFinderAnalysis
     : public AnalysisInfoMixin<StackPointerFinderAnalysis> {
 public:
+  static const char *StackPointerNames[];
+
   explicit StackPointerFinderAnalysis() = default;
   ~StackPointerFinderAnalysis() = default;
   // Provide a unique key, i.e., memory address to be used by the LLVM's pass
