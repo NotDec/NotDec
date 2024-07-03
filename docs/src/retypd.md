@@ -874,3 +874,11 @@ Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by EL
 - 指针分析是别名分析的更精确版本。别名分析可以看作指针分析的应用。
 - 类型分析需要随着指针指向去传播。
 - 类型分析涉及指针时，不需要考虑流敏感性，上下文敏感性。
+
+## Steensgaard 线性时间 指针分析
+
+相关资料：
+
+1. [DCC888 编译器静态分析课 Pointer Analysis](https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/PointerAnalysis.pdf) 
+2. [北京大学 软件分析 熊英飞](https://xiongyingfei.github.io/SA/2017/10_control_flow_analysis.pdf) 
+
