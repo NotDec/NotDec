@@ -33,6 +33,9 @@ namespace notdec {
 /// For tail functions, the update and the restore step can be omitted. and they
 /// just address the stack directly.
 /// TODO handle tail function with no stack space. two pattern will not match.
+/// rely on canonical form of LLVM Instructions, So run instcombine first.
+/// see:
+/// https://www.npopov.com/2023/04/10/LLVM-Canonicalization-and-target-independence.html
 PreservedAnalyses LinearAllocationRecovery::run(Module &M,
                                                 ModuleAnalysisManager &MAM) {
   errs() << " ============== LinearAllocationRecovery  ===============\n";
@@ -64,9 +67,6 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
   Value *space;
   Instruction *add_load_sp;
   ConstantInt *offset;
-  // rely on canonical form of LLVM Instructions, So run instcombine first.
-  // see:
-  // https://www.npopov.com/2023/04/10/LLVM-Canonicalization-and-target-independence.html
 
   auto pat_alloc = StackPointerMatcher(sp1, space, LoadSP, add_load_sp, sp);
   auto pat_alloc_offset = m_Add(m_Load(m_Specific(sp)), m_ConstantInt(offset));

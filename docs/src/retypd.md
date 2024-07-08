@@ -436,11 +436,13 @@ $$
 
 ### Roadmap
 
-1. （A.）收集初始约束。插入外部函数已知的参数类型。
+1. （A.）收集文字格式的初始约束，构建初始图。插入外部函数已知的参数类型。
 2. （F.1）约束简化算法。简化后的约束就是type schemes。这里对每个强连通分量后序遍历进行处理，处理完的分量内的type schemes保存下来，等待实例化。
    1. 基于约束集合构建初始图。子类型关系增加标记为1的边。对标签增加和减少的关系，增加对应push/pop的边。
-   2. 运行Saturation算法，将 `push α -> 1 -> pop a` 这种边序列增加shortcut边。应用S-Pointer的实例化规则
-  - Step 3: Identify the “externally-visible” type variables and constants; call that set E .
+      1. 比如对于dtv `F.in_a.load.off_4_size_8` 构建一系列图节点 `F -> F.in_a -> ... -> F.in_a.load.off_4_size_8`。
+      2. 对于约束关系两边的dtv，连接边（边上标记1）。
+   2. 运行Saturation算法，将 `push α -> 1 -> pop α` 这种边序列增加shortcut边。应用S-Pointer的实例化规则
+  - Step 3: Identify the “externally-visible” type variables and constants; call that set E.
   - Step 4: Use Tarjan’s path-expression algorithm to describe all paths that start and end in E but only travel through E c.
   - Step 5: Intersect the path expressions with the language (recall _)\*(forget _)\*.
   - Step 6: Interpret the resulting language as a regular set of subtype constraints. (“forgets” on the right, “recalls” on the left)
@@ -448,7 +450,6 @@ $$
 4. （4.3）最后转换sketches到C类型。
 
 对于每个SCC看作按需分析。每个SCC能够简化算法计算出对应的summary。
-
 
 ### 无约束的下推系统 Unconstrained Pushdown Systems
 
