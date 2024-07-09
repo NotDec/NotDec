@@ -20,7 +20,9 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
+#include <variant>
 
+#include "Retypd/Schema.h"
 #include "optimizers/retypd-generate.h"
 #include "optimizers/stack-pointer-finder.h"
 #include "utils.h"
@@ -33,7 +35,7 @@ const char *RetypdGenerator::Stack = "STACK";
 const char *RetypdGenerator::Memory = "MEMORY";
 
 /// Uses ptrtoint to ensure type correctness.
-PreservedAnalyses RetypdRunner::run(Module &M, ModuleAnalysisManager &MAM) {
+PreservedAnalyses Retypd::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
   LLVM_DEBUG(printModule(M, "current.ll"));
@@ -77,7 +79,6 @@ void RetypdGenerator::run(Module &M, llvm::Value *StackPointer) {
   for (auto &F : M) {
     run(F);
   }
-  gen_call_graph(M);
 }
 
 void RetypdGenerator::run(Function &F) {
@@ -119,11 +120,16 @@ static std::string GetLLVMTypeBase(Type *Ty) {
   }
 }
 
-static inline TypeVariable GetLLVMTypeVar(Type *Ty) {
-  return TypeVariable{.name = GetLLVMTypeBase(Ty), .isPrimitive = true};
+static inline VariableWithOffset makeTv(std::string Name,
+                                        SimpleNumericalDomain offset = {0}) {
+  return VariableWithOffset(retypd::DerivedTypeVariable{.name = Name}, offset);
 }
 
-TypeVariable &RetypdGenerator::getTypeVar(Value *Val) {
+static inline VariableWithOffset GetLLVMTypeVar(Type *Ty) {
+  return makeTv("#" + GetLLVMTypeBase(Ty));
+}
+
+VariableWithOffset &RetypdGenerator::getTypeVar(Value *Val) {
   if (Val2Dtv.count(Val)) {
     return Val2Dtv.at(Val);
   }
@@ -131,7 +137,7 @@ TypeVariable &RetypdGenerator::getTypeVar(Value *Val) {
   return setTypeVar(Val, ret);
 }
 
-TypeVariable RetypdGenerator::getTypeVarNoCache(Value *Val) {
+VariableWithOffset RetypdGenerator::getTypeVarNoCache(Value *Val) {
   if (Constant *C = dyn_cast<Constant>(Val)) {
     // check for constantExpr
     if (auto CE = dyn_cast<ConstantExpr>(C)) {
@@ -141,17 +147,17 @@ TypeVariable RetypdGenerator::getTypeVarNoCache(Value *Val) {
       }
       if (CE->getOpcode() == Instruction::IntToPtr) {
         if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
-          return TypeVariable{.name = Memory,
-                              .currentOffset = Addr->getValue().getSExtValue()};
+          return makeTv(Memory,
+                        SimpleNumericalDomain{Addr->getValue().getSExtValue()});
         }
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
       if (gv == StackPointer) {
-        return TypeVariable{.name = Stack};
+        return makeTv(Stack);
       } else if (auto Func = dyn_cast<Function>(C)) {
-        return TypeVariable{.name = getNewName(*Func, "Func_")};
+        return makeTv(getNewName(*Func, "Func_"));
       }
-      return TypeVariable{.name = gv->getName().str()};
+      return makeTv(gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
       auto Ty = C->getType();
       return GetLLVMTypeVar(Ty);
@@ -162,15 +168,14 @@ TypeVariable RetypdGenerator::getTypeVarNoCache(Value *Val) {
         << *C << "\n";
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
-    TypeVariable tv = getTypeVar(arg->getParent());
-    tv.labels.append(".in_");
-    tv.labels += arg->getArgNo();
+    VariableWithOffset tv = getTypeVar(arg->getParent());
+    tv.dtv.labels.push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val
                << "\n";
-  return TypeVariable{.name = getNewName(*Val, "new_")};
+  return makeTv(getNewName(*Val, "new_"));
 }
 
 std::string RetypdGenerator::sanitize_name(std::string S) {
@@ -195,7 +200,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitReturnInst(ReturnInst &I) {
   }
   auto SrcVar = cg.getTypeVar(Src);
   auto DstVar = cg.getTypeVar(I.getFunction());
-  DstVar.labels.append(".out");
+  DstVar.dtv.labels.push_back(retypd::OutLabel{});
   // src is a subtype of dest
   cg.addConstraint(SrcVar, DstVar);
 }
@@ -214,8 +219,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   for (int i = 0; i < I.arg_size(); i++) {
     auto ParamVar = cg.getTypeVar(Target->getArg(i));
     if (instanceId > 0) {
-      ParamVar.labels.append("#");
-      ParamVar.labels += std::to_string(instanceId);
+      ParamVar.dtv.instanceId = instanceId;
     }
     auto ArgumentVar = cg.getTypeVar(I.getArgOperand(i));
     // argument is a subtype of param
@@ -223,12 +227,12 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   }
   // for return value
   auto DstVar = cg.getTypeVar(Target);
-  DstVar.labels.append(".out");
+  DstVar.dtv.labels.push_back(retypd::OutLabel{});
   cg.setTypeVar(&I, DstVar);
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitSelectInst(SelectInst &I) {
-  auto DstVar = TypeVariable{.name = cg.getNewName(I, "select_")};
+  auto DstVar = makeTv(cg.getNewName(I, "select_"));
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
   auto Src1Var = cg.getTypeVar(Src1);
@@ -241,7 +245,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitSelectInst(SelectInst &I) {
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
   // Create a stub variable, defer constraints generation to handlePHINodes
-  auto DstVar = TypeVariable{.name = cg.getNewName(I, "phi_")};
+  auto DstVar = makeTv(cg.getNewName(I, "phi_"));
   cg.setTypeVar(&I, DstVar);
 }
 
@@ -267,7 +271,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
   } else if (auto trunc = dyn_cast<TruncInst>(&I)) {
     auto *Src = trunc->getOperand(0);
     auto SrcVar = cg.getTypeVar(Src);
-    std::optional<TypeVariable> DstVar;
+    std::optional<VariableWithOffset> DstVar;
     // TODO
     if (trunc->getType()->isIntegerTy(1)) {
       DstVar = GetLLVMTypeVar(trunc->getType());
@@ -293,41 +297,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
     GetElementPtrInst &Gep) {
-  // current consider only i8* or i8 array
-  auto *ETy = Gep.getSourceElementType();
-  TypeVariable::offset_t Off;
-  // gep i8, i8*
-  if (ETy->isIntegerTy(8)) {
-    auto v1 = Gep.getOperand(1);
-    if (auto c = dyn_cast<ConstantInt>(v1)) {
-      Off.emplace<long>(c->getSExtValue());
-    } else {
-      std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Warn: gep offset not constant\n";
-      Off = "0*[nobound]";
-    }
-  } else if (ETy->isArrayTy() && ETy->getArrayElementType()->isIntegerTy(8)) {
-    // gep [n x i8], [n x i8]*
-    assert(cast<ConstantInt>(Gep.getOperand(1))->getSExtValue() == 0);
-    auto V2 = Gep.getOperand(2);
-    if (auto C = dyn_cast<ConstantInt>(V2)) {
-      Off.emplace<long>(C->getSExtValue());
-    } else {
-      std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Warn: gep offset not constant\n";
-      Off = "0*[nobound]";
-    }
-  } else {
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "ERROR: RetypdGeneratorVisitor::visitGetElementPtrInst gep "
-                    "offset unhandled: "
-                 << Gep << "\n";
-    std::abort();
-  }
-  // off is initialized in each branch
-  TypeVariable TV = cg.getTypeVar(Gep.getOperand(0));
-  TV.addOffset(Off);
-  cg.setTypeVar(&Gep, TV);
+  assert(false && "Gep should not exist before this pass");
 }
 
 // FCMP implies float?
@@ -402,14 +372,14 @@ unsigned RetypdGenerator::getPointerElemSize(Type *ty) {
 void RetypdGenerator::RetypdGeneratorVisitor::visitStoreInst(StoreInst &I) {
   auto DstVar =
       cg.deref(I.getPointerOperand(),
-               cg.getPointerElemSize(I.getPointerOperandType()), "store");
+               cg.getPointerElemSize(I.getPointerOperandType()), false);
   cg.addConstraint(cg.getTypeVar(I.getValueOperand()), DstVar);
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   auto SrcVar =
       cg.deref(I.getPointerOperand(),
-               cg.getPointerElemSize(I.getPointerOperandType()), "load");
+               cg.getPointerElemSize(I.getPointerOperandType()), true);
   cg.setTypeVar(&I, SrcVar);
 }
 
@@ -427,22 +397,28 @@ std::string RetypdGenerator::offset(APInt Offset, int Count) {
   return OffsetStr;
 }
 
-std::string RetypdGenerator::make_deref(const char *Mode, long BitSize,
-                                        const char *OffsetStr) {
+retypd::DerefLabel RetypdGenerator::make_deref(uint32_t BitSize,
+                                               SimpleNumericalDomain Offset) {
   assert(BitSize % 8 == 0 && "size must be byte aligned");
-  long Size = BitSize = BitSize / 8;
-  return ".σ" + std::to_string(Size) + "@" + OffsetStr;
+  uint32_t Size = BitSize = BitSize / 8;
+
+  return retypd::DerefLabel{.size = Size,
+                            .offset = static_cast<int32_t>(Offset.offset),
+                            .bound = Offset.bound};
 }
 
 // Special logics for load and store when generating type variables.
-TypeVariable RetypdGenerator::deref(Value *Val, long BitSize,
-                                    const char *Mode) {
+VariableWithOffset RetypdGenerator::deref(Value *Val, long BitSize,
+                                          bool isLoad) {
   assert(BitSize != 0 && "RetypdGenerator::deref: zero size!?");
   // from the offset, generate a loaded type variable.
   auto DstVar = getTypeVar(Val);
-  auto Offset = DstVar.takeOffset();
-  DstVar.labels.append(
-      make_deref(Mode, BitSize, DstVar.takeOffsetStr().c_str()));
+  if (isLoad) {
+    DstVar.dtv.labels.push_back(retypd::LoadLabel{});
+  } else {
+    DstVar.dtv.labels.push_back(retypd::StoreLabel{});
+  }
+  DstVar.dtv.labels.push_back(make_deref(BitSize, DstVar.offset));
   return DstVar;
 }
 
@@ -512,8 +488,7 @@ void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I,
       ty =
           typeSize.at(output).at(I->getType()->getPrimitiveSizeInBits()).data();
     }
-    cg.addConstraint(TypeVariable{.name = ty, .isPrimitive = true},
-                     cg.getTypeVar(I));
+    cg.addConstraint(makeTv(std::string("#") + ty), cg.getTypeVar(I));
   }
   assert(size == I->getNumOperands() && "input size not match");
 
@@ -521,8 +496,7 @@ void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I,
     auto *Src = I->getOperand(i);
     auto SrcVar = cg.getTypeVar(Src);
     // hack:https://stackoverflow.com/questions/17787394/why-doesnt-stdinitializer-list-provide-a-subscript-operator
-    cg.addConstraint(SrcVar,
-                     TypeVariable{.name = inputs[i], .isPrimitive = true});
+    cg.addConstraint(SrcVar, makeTv(std::string("#") + inputs[i]));
   }
 }
 
@@ -530,8 +504,9 @@ void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I,
 
 std::string RetypdGenerator::getFuncName(Function &F) {
   auto ret = getTypeVar(&F);
-  assert(ret.labels.empty() && "getFuncName: non empty label for function.");
-  return ret.name;
+  assert(ret.dtv.labels.empty() &&
+         "getFuncName: non empty label for function.");
+  return ret.dtv.name;
 }
 
 void RetypdGenerator::gen_json(std::string OutputFilename) {
@@ -543,23 +518,11 @@ void RetypdGenerator::gen_json(std::string OutputFilename) {
     auto funcName = getFuncName(*kv.first);
     json::Array FuncConstrainsJson;
     for (auto &c : kv.second) {
-      FuncConstrainsJson.push_back(c);
+      FuncConstrainsJson.push_back(toString(c));
     }
     Constraints[funcName] = json::Value(std::move(FuncConstrainsJson));
   }
   Root["constraints"] = json::Value(std::move(Constraints));
-
-  // iterate call_graphs
-  json::Object CallGraph;
-  for (auto &kv : call_graphs) {
-    auto funcName = getFuncName(*kv.first);
-    json::Array CallGraphJson;
-    for (auto &c : kv.second) {
-      CallGraphJson.push_back(getFuncName(*c));
-    }
-    CallGraph[funcName] = std::move(CallGraphJson);
-  }
-  Root["callgraph"] = std::move(CallGraph);
 
   // write to file
   std::error_code EC;
@@ -572,25 +535,6 @@ void RetypdGenerator::gen_json(std::string OutputFilename) {
   }
   json::OStream J(os, 2);
   J.value(std::move(Root));
-}
-
-void RetypdGenerator::gen_call_graph(Module &M) {
-  CallGraph CG(M);
-  for (auto &Node : CG) {
-    auto func = const_cast<Function *>(Node.first);
-    if (func == nullptr) {
-      continue;
-    }
-    std::set<Function *> Callees;
-    for (auto &Edge : *Node.second) {
-      auto Callee = const_cast<Function *>(Edge.second->getFunction());
-      if (Callee == nullptr) {
-        continue;
-      }
-      Callees.emplace(Callee);
-    }
-    call_graphs.emplace(func, std::move(Callees));
-  }
 }
 
 } // namespace notdec

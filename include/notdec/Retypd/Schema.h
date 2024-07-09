@@ -3,7 +3,6 @@
 
 #include <deque>
 #include <llvm/ADT/Optional.h>
-#include <llvm/ADT/StringRef.h>
 #include <string>
 #include <variant>
 
@@ -30,13 +29,13 @@ using Bound = std::variant<None, NullTerm, NoBound, Fixed>;
 std::string toString(Bound b);
 
 struct InLabel {
-  llvm::StringRef name;
+  std::string name;
 };
 struct OutLabel {
-  llvm::StringRef name;
+  std::string name;
 };
 struct DerefLabel {
-  uint32_t base;
+  uint32_t size;
   int32_t offset;
   Bound bound;
 };
@@ -50,8 +49,9 @@ std::string toString(FieldLabel f);
 Variance getVariance(FieldLabel &f);
 
 struct DerivedTypeVariable {
-  llvm::StringRef name;
+  std::string name;
   std::deque<FieldLabel> labels;
+  unsigned instanceId = 0;
 
   DerivedTypeVariable getSubDtv(size_t index) const {
     DerivedTypeVariable sub_dtv;
@@ -68,16 +68,38 @@ struct DerivedTypeVariable {
     }
     return v;
   }
+
+  bool isPrimitive() const { return name.at(0) == '#'; }
 };
 
 std::string toString(DerivedTypeVariable dtv);
 
-struct Constraint {
-  DerivedTypeVariable left;
-  DerivedTypeVariable right;
+struct SubTypeConstraint {
+  DerivedTypeVariable sub;
+  DerivedTypeVariable sup;
 };
 
+std::string toString(SubTypeConstraint c);
+
+struct AddConstraint {
+  DerivedTypeVariable left;
+  DerivedTypeVariable right;
+  DerivedTypeVariable result;
+};
+struct SubConstraint {
+  DerivedTypeVariable left;
+  DerivedTypeVariable right;
+  DerivedTypeVariable result;
+};
+std::string toString(AddConstraint c);
+std::string toString(SubConstraint c);
+
+using Constraint =
+    std::variant<SubTypeConstraint, AddConstraint, SubConstraint>;
 std::string toString(Constraint c);
+inline bool isSubtypeConstraint(Constraint c) {
+  return std::holds_alternative<SubTypeConstraint>(c);
+}
 
 } // namespace notdec::retypd
 

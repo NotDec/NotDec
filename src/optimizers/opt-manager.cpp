@@ -290,10 +290,10 @@ void DecompileConfig::run_passes() {
       // MPM.addPass(PointerTypeRecovery(
       //     llvm::DebugFlag &&
       //     llvm::isCurrentDebugType("pointer-type-recovery")));
-      // MPM.addPass(VerifierPass(false));
-      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      // MPM.addPass(RetypdRunner());
+      MPM.addPass(VerifierPass(false));
+      // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+      MPM.addPass(Retypd());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec

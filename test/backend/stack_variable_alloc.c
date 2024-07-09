@@ -1,4 +1,5 @@
 
+#include <cstddef>
 #include<stdio.h>
 
 // ../../scripts/clang-wasi-simple.sh ./stack_variable_alloc.c -o stack_variable_alloc.wasm
@@ -26,12 +27,32 @@ void do_printf2(const struct tmp* a) {
   printf("%p\n%p\n%p\n", &a->a, &a->b, &a->c);
 }
 
+// 如果仅仅取一个变量的地址，则不知道它的成员或者大小。
 void test2() {
   struct tmp a;
   do_printf2(&a);
 }
 
+// 如果直接取成员地址，优化后可能也完全不一样。但是可以看作结构体平坦化之后的结果？
+void test3() {
+  struct tmp a;
+  struct tmp b;
+  struct tmp c;
+  do_printf(&a.a, &b.b, &c.c);
+}
+
+// 类型推断和指针数字类型区分之间的复杂关系
+void* test4() {
+  int a = 5;
+  int* b = &a;
+  int* c = &a;
+  int **d = &b;
+  do_printf(((*d) + (*c)), NULL, NULL); 
+}
+
 int main() {
   test1();
   test2();
+  test3();
+  test4();
 }

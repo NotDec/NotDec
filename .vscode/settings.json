@@ -80,6 +80,7 @@
         "pushdown",
         "retdec",
         "retypd",
+        "startswith",
         "Succs"
     ],
     "cmake.generator": "Ninja",

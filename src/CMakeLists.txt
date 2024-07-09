@@ -14,6 +14,8 @@ add_library(notdec STATIC
 	optimizers/retdec-stack/retdec-stack-pointer-op-remove.cpp
 	optimizers/retdec-stack/retdec-symbolic-tree.cpp
 	optimizers/retdec-stack/retdec-utils.cpp
+	Retypd/Parser.cpp
+	Retypd/Graph.cpp
 	Retypd/Schema.cpp
 	utils.cpp
 )

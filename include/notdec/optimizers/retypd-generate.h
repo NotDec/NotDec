@@ -1,6 +1,7 @@
 #ifndef _NOTDEC_OPTIMIZERS_RETYPD_GENERATE_H_
 #define _NOTDEC_OPTIMIZERS_RETYPD_GENERATE_H_
 
+#include "Retypd/Schema.h"
 #include <cassert>
 #include <deque>
 #include <iostream>
@@ -19,71 +20,46 @@ namespace notdec {
 
 using namespace llvm;
 
-struct RetypdRunner : PassInfoMixin<RetypdRunner> {
+struct Retypd : PassInfoMixin<Retypd> {
   PreservedAnalyses run(Module &F, ModuleAnalysisManager &);
 };
 
-struct TypeVariable {
-  using offset_t = std::variant<long, std::string>;
-  std::string name;
-  std::string labels;
-  offset_t currentOffset = 0;
-  bool isPrimitive = false;
-
-  std::string str() const {
-    assert(std::get<long>(currentOffset) == 0 &&
-           "TypeVariable::str: currentOffset not zero");
-    return name + labels;
-  }
-  std::variant<long, std::string> takeOffset() {
-    auto ret = currentOffset;
-    currentOffset = 0;
-    return ret;
-  }
-  std::string takeOffsetStr() {
-    if (std::holds_alternative<long>(currentOffset)) {
-      auto ret = std::get<long>(currentOffset);
-      currentOffset = 0;
-      return std::to_string(ret);
-    } else if (std::holds_alternative<std::string>(currentOffset)) {
-      auto ret = std::get<std::string>(currentOffset);
-      currentOffset = 0;
-      return ret;
-    }
-    assert(false && "TypeVariable::takeOffsetStr: unknown variant!");
-  }
-  void addOffset(offset_t &other) {
-    if (std::holds_alternative<long>(currentOffset) &&
-        std::holds_alternative<long>(other)) {
-      currentOffset = std::get<long>(currentOffset) + std::get<long>(other);
-    } else if (std::holds_alternative<std::string>(currentOffset) &&
-               std::holds_alternative<long>(other)) {
-      // keep the string
-    } else if (std::holds_alternative<long>(currentOffset) &&
-               std::holds_alternative<std::string>(other)) {
-      currentOffset = std::get<std::string>(other);
-    } else if (std::holds_alternative<std::string>(currentOffset) &&
-               std::holds_alternative<std::string>(other)) {
-      if (std::get<std::string>(currentOffset) !=
-          std::get<std::string>(other)) {
-        // create warning
-        std::cerr << "TypeVariable::addOffset: different string offsets: "
-                  << std::get<std::string>(currentOffset) << " and "
-                  << std::get<std::string>(other) << "\n";
-      }
-      currentOffset = std::get<std::string>(currentOffset);
-    } else {
-      assert(false && "TypeVariable::addOffset: unknown variant!");
-    }
+struct SimpleNumericalDomain {
+  using offset_num_t = int64_t;
+  using offset_t = std::variant<offset_num_t, std::string>;
+  offset_num_t offset = 0;
+  retypd::Bound bound = retypd::None{};
+  bool isZero() const {
+    return offset == 0 && std::holds_alternative<retypd::None>(bound);
   }
 };
 
+struct VariableWithOffset {
+  retypd::DerivedTypeVariable dtv;
+  SimpleNumericalDomain offset;
+  bool isPrimitive = false;
+
+  VariableWithOffset(retypd::DerivedTypeVariable dtv,
+                     SimpleNumericalDomain offset = {0})
+      : dtv(dtv), offset(offset){};
+
+  std::string str() const { return toString(dtv); }
+};
+
+inline retypd::SubTypeConstraint makeCons(const VariableWithOffset &sub,
+                                          const VariableWithOffset &sup) {
+  if (!sub.offset.isZero() || !sup.offset.isZero()) {
+    std::cerr << __FILE__ << ":" << __LINE__ << ": "
+              << "makeCons: offset not zero?\n";
+  }
+  return retypd::SubTypeConstraint{sub.dtv, sup.dtv};
+}
+
 struct RetypdGenerator {
-  std::map<Value *, TypeVariable> Val2Dtv;
-  std::map<Function *, std::vector<std::string>> func_constrains;
-  std::map<Function *, std::set<Function *>> call_graphs;
+  std::map<Value *, VariableWithOffset> Val2Dtv;
+  std::map<Function *, std::vector<retypd::Constraint>> func_constrains;
   std::string data_layout;
-  std::vector<std::string> *current;
+  std::vector<retypd::Constraint> *current;
   llvm::Value *StackPointer;
   unsigned pointer_size = 0;
 
@@ -97,36 +73,43 @@ public:
   static const char *Stack;
   static const char *Memory;
 
-  void gen_call_graph(Module &M);
-  void gen_json(std::string outputFilename);
+  void gen_json(std::string OutputFilename);
 
-  TypeVariable &setTypeVar(Value *val, const TypeVariable &dtv) {
+  VariableWithOffset &setTypeVar(Value *val, const VariableWithOffset &dtv) {
     auto ref = Val2Dtv.emplace(val, dtv);
     assert(ref.second && "setTypeVar: Value already exists");
     return ref.first->second;
   }
-  void addConstraint(const TypeVariable &sub, const TypeVariable &sup) {
-    if (sub.isPrimitive && sup.isPrimitive) {
-      assert(sub.name == sup.name &&
-             "addConstraint: different primitive types !?");
-      return;
-    }
-    current->push_back(sub.str() + " <= " + sup.str());
+  void addConstraint(const VariableWithOffset &sub,
+                     const VariableWithOffset &sup) {
+    addConstraint(makeCons(sub, sup));
   }
-  TypeVariable &getTypeVar(Value *val);
-  TypeVariable getTypeVarNoCache(Value *Val);
+  void addConstraint(retypd::Constraint Cons) {
+    if (std::holds_alternative<retypd::SubTypeConstraint>(Cons)) {
+      auto &SCons = std::get<retypd::SubTypeConstraint>(Cons);
+      if (SCons.sub.isPrimitive() && SCons.sup.isPrimitive()) {
+        assert(SCons.sub.name == SCons.sup.name &&
+               "addConstraint: different primitive types !?");
+        return;
+      }
+    }
+
+    current->push_back(Cons);
+  }
+  VariableWithOffset &getTypeVar(Value *val);
+  VariableWithOffset getTypeVarNoCache(Value *Val);
   // get a new type_var name from type_val_id
   std::string getNewName(Value &Val, const char *prefix = "v_");
   std::string getFuncName(Function &F);
 
-  TypeVariable deref(Value *val, long size, const char *mode);
+  VariableWithOffset deref(Value *val, long BitSize, bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {
     return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,
                      IntToPtrInst>(Val);
   }
-  static std::string make_deref(const char *Mode, long BitSize,
-                                const char *OffsetStr);
+  static retypd::DerefLabel make_deref(uint32_t BitSize,
+                                       SimpleNumericalDomain Offset);
   static std::string offset(APInt Offset, int Count = 0);
   static std::string sanitize_name(std::string s);
 
@@ -158,7 +141,7 @@ protected:
 
   public:
     RetypdGeneratorVisitor(RetypdGenerator &cg,
-                           std::vector<std::string> &constrains)
+                           std::vector<retypd::Constraint> &constrains)
         : cg(cg) {}
     // overloaded visit functions
     void visitCastInst(CastInst &I);

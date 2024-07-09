@@ -8,11 +8,11 @@ std::string toString(EdgeLabel label) {
   } else if (std::holds_alternative<ForgetLabel>(label)) {
     return "forget " + toString(std::get<ForgetLabel>(label).label);
   } else if (std::holds_alternative<ForgetBase>(label)) {
-    return "forget " + std::get<ForgetBase>(label).base.str();
+    return "forget " + std::get<ForgetBase>(label).base;
   } else if (std::holds_alternative<RecallLabel>(label)) {
     return "recall " + toString(std::get<RecallLabel>(label).label);
   } else if (std::holds_alternative<RecallBase>(label)) {
-    return "recall " + std::get<RecallBase>(label).base.str();
+    return "recall " + std::get<RecallBase>(label).base;
   }
   return "unknown";
 }

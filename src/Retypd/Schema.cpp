@@ -18,12 +18,12 @@ std::string toString(Bound b) {
 
 std::string toString(FieldLabel f) {
   if (std::holds_alternative<InLabel>(f)) {
-    return "in_" + std::get<InLabel>(f).name.str();
+    return "in_" + std::get<InLabel>(f).name;
   } else if (std::holds_alternative<OutLabel>(f)) {
-    return "out_" + std::get<OutLabel>(f).name.str();
+    return "out_" + std::get<OutLabel>(f).name;
   } else if (std::holds_alternative<DerefLabel>(f)) {
     auto d = std::get<DerefLabel>(f);
-    return "σ" + std::to_string(d.base) + "@" + std::to_string(d.offset) +
+    return "σ" + std::to_string(d.size) + "@" + std::to_string(d.offset) +
            toString(d.bound);
   } else if (std::holds_alternative<LoadLabel>(f)) {
     return "load";
@@ -51,15 +51,39 @@ Variance getVariance(FieldLabel &f) {
 }
 
 std::string toString(DerivedTypeVariable dtv) {
-  std::string s = dtv.name.str();
+  std::string s = dtv.name;
   for (auto &label : dtv.labels) {
     s += "." + toString(label);
+  }
+  if (dtv.instanceId != 0) {
+    s += "#" + std::to_string(dtv.instanceId);
   }
   return s;
 }
 
+std::string toString(SubTypeConstraint c) {
+  return toString(c.sub) + " <= " + toString(c.sup);
+}
+
+std::string toString(AddConstraint c) {
+  return "Add(" + toString(c.left) + " + " + toString(c.right) + "=" +
+         toString(c.result) + ")";
+}
+std::string toString(SubConstraint c) {
+  return "Sub(" + toString(c.left) + " - " + toString(c.right) + "=" +
+         toString(c.result) + ")";
+}
+
 std::string toString(Constraint c) {
-  return toString(c.left) + " <= " + toString(c.right);
+  if (std::holds_alternative<SubTypeConstraint>(c)) {
+    return toString(std::get<SubTypeConstraint>(c));
+  } else if (std::holds_alternative<AddConstraint>(c)) {
+    return toString(std::get<AddConstraint>(c));
+  } else if (std::holds_alternative<SubConstraint>(c)) {
+    return toString(std::get<SubConstraint>(c));
+  } else {
+    assert(false && "unknown Constraint");
+  }
 }
 
 } // namespace notdec::retypd

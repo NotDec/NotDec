@@ -87,16 +87,13 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "structural",
-      "program": "${command:cmake.launchTargetPath}",
+      "name": "GraphTest SlidesExampleTest",
+      "program": "${workspaceFolder}/build/bin/GraphTest",
       "args": [
-        "${file}",
-        "-o",
-        "${file}.c",
-        "--log-level",
-        "debug"
+        "--gtest_filter=Retypd.SlidesExampleTest",
       ],
-      "cwd": "${workspaceFolder}"
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "CMake: build"
     }
   ]
 }
