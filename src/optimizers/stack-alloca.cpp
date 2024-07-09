@@ -80,13 +80,13 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
     space = nullptr;
     add_load_sp = nullptr;
     Instruction *prologue_store = nullptr;
+    // 1. Match for stack allocation level.
     // level = 2 normal stack allocation.
     // level = 1 tail function stack allocation.
     // level = 0 cannot match stack allocation.
     int match_level = 0;
     auto *entry = &F->getEntryBlock();
-    // try to Match normal stack allocation.
-    // use llvm PatternMatch to match in the entry block.
+    // 1.1 Match normal stack allocation in the entry block.
     for (auto &I : *entry) {
       if (PatternMatch::match(&I, pat_alloc)) {
         prologue_store = &I;
@@ -95,15 +95,14 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         break;
       }
     }
-    // try to match tail function stack allocation if not matched.
-    // there is at least one Add(Load(sp), offset).
+    // 1.2 Try to match tail function stack allocation if not matched.
+    // There should be at least one Add(Load(sp), offset).
     if (match_level == 0) {
       bool has_load_sp = false;
       for (auto &BB : *F) {
         for (auto &I : BB) {
           if (PatternMatch::match(&I, pat_alloc_offset)) {
-            add_load_sp = &I;
-            LoadSP = cast<Instruction>(add_load_sp->getOperand(0));
+            LoadSP = cast<Instruction>(I.getOperand(0));
             match_level = 1;
             // llvm::errs() << "stack alloc: " << *space << "\n";
             break;
@@ -118,12 +117,14 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
             << "ERROR: No pattern matched but the stack pointer is accessed!\n";
       }
     }
-    // failed to match any stack allocation.
+    // 1.3 Failed to match any stack allocation.
     if (match_level == 0) {
       llvm::errs() << "ERROR: cannot find stack allocation in func: "
                    << F->getName() << "\n";
       continue;
     }
+    // For normal stack allocation (level = 2): Remove epilogue that restore the
+    // stack pointer
     if (match_level == 2) {
       assert(add_load_sp != nullptr && space != nullptr);
       assert(add_load_sp->getParent() == LoadSP->getParent());
@@ -151,90 +152,37 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
 
     // replace the stack allocation with alloca.
     bool grow_negative = sp_result.direction == 0;
+    auto pty = PointerType::get(IntegerType::get(M.getContext(), 8), 0);
+    auto SizeTy = IntegerType::get(M.getContext(),
+                                   M.getDataLayout().getPointerSizeInBits());
     // TODO handle positive grow direction.
     assert(grow_negative == true);
-
-    // ======== 2. Analyzing accesses. ===========
-
-    RangeSpliting RS;
-    std::map<long, std::vector<llvm::Instruction *>> Offset2Insts;
-    // get the total size of the stack allocation, only for match_level == 2.
-    if (match_level == 2) {
-      if (auto C = dyn_cast<llvm::ConstantInt>(space)) {
-        RS.splitAt(C->getSExtValue());
-        // offset2insts[0].push_back(load_sp);
-      } else {
-        llvm::errs() << "ERROR: stack allocation size is not a constant! func: "
-                     << F->getName() << "\n";
-      }
+    // When match_level == 1, Only LoadSP is not null.
+    if (match_level == 1) {
+      space = ConstantInt::getNullValue(SizeTy);
+    } else if (grow_negative) {
+      space = Builder.CreateNeg(space);
     }
+    Builder.SetInsertPoint(LoadSP);
+    Value *alloc =
+        Builder.CreateAlloca(pty->getPointerElementType(), space, "stack");
+    Value *alloc_end = Builder.CreateGEP(pty->getPointerElementType(), alloc,
+                                         space, "stack_end");
+    alloc = Builder.CreatePtrToInt(alloc, LoadSP->getType());
+    alloc_end = Builder.CreatePtrToInt(alloc_end, LoadSP->getType());
 
-    // match all add instruction.
-    for (auto &BB : *F) {
-      for (auto &I : make_early_inc_range(BB)) {
-        if (PatternMatch::match(&I, pat_alloc_offset)) {
-          RS.splitAt(offset->getSExtValue());
-          Offset2Insts[offset->getSExtValue()].push_back(&I);
-        }
-      }
+    Instruction *high_addr = add_load_sp;
+    Instruction *low_addr = LoadSP;
+    if (grow_negative) {
+      std::swap(high_addr, low_addr);
     }
-    Offset2Insts[0].push_back(LoadSP);
-
-    // ======== 3.1 Create the struct. ===========
-    // Create the struct that represents the whole stack.
-
-    assert(LoadSP != nullptr);
-    if (entry->empty()) {
-      Builder.SetInsertPoint(entry);
-    } else {
-      Builder.SetInsertPoint(&entry->front());
-    }
-    auto PTy = PointerType::get(IntegerType::get(M.getContext(), 8), 0);
-    auto ITy = IntegerType::get(M.getContext(),
-                                M.getDataLayout().getPointerSizeInBits());
-
-    // create alloca for each range
-    auto StackName = ("stack_" + F->getName()).str();
-    auto StackTy = StructType::create(M.getContext(), StackName);
-    SmallVector<Type *> Elems;
-
-    // We have to build the type first. Gep inst cannot be created for unknown
-    // type.
-    for (uint64_t Ind = 0; Ind < RS.ranges.size(); Ind++) {
-      auto &R = RS.ranges[Ind];
-      // std::string Name = "stack_" + offsetStr(R.start) + "_" +
-      //                    offsetStr(R.start + R.size) + "_";
-      Elems.push_back(ArrayType::get(PTy->getPointerElementType(), R.size));
-    }
-    if (RS.last() != 0 && !Offset2Insts[RS.last()].empty()) {
-      Elems.push_back(ArrayType::get(PTy->getPointerElementType(), 0));
-      llvm::errs() << "Warning: Last stack object has unknown size! function:"
-                   << F->getName() << "\n";
-    }
-    StackTy->setBody(Elems, true);
-
-    Value *Alloc = Builder.CreateAlloca(StackTy, nullptr, StackName + "_");
-    for (uint64_t Ind = 0; Ind < RS.ranges.size(); Ind++) {
-      auto &R = RS.ranges[Ind];
-      Value *Addr = Builder.CreateGEP(
-          StackTy, Alloc,
-          {ConstantInt::get(ITy, 0), ConstantInt::get(ITy, Ind)});
-      Addr = Builder.CreatePtrToInt(Addr, LoadSP->getType());
-
-      for (auto inst : Offset2Insts[R.start]) {
-        inst->replaceAllUsesWith(Addr);
-        inst->eraseFromParent();
-      }
-    }
-    if (RS.last() != 0 && !Offset2Insts[RS.last()].empty()) {
-      Value *Addr = Builder.CreateGEP(
-          StackTy, Alloc,
-          {ConstantInt::get(ITy, 0), ConstantInt::get(ITy, RS.ranges.size())});
-      Addr = Builder.CreatePtrToInt(Addr, LoadSP->getType());
-      for (auto inst : Offset2Insts[RS.last()]) {
-        inst->replaceAllUsesWith(Addr);
-        inst->eraseFromParent();
-      }
+    // replace all uses of LoadSP with alloc_end.
+    low_addr->replaceAllUsesWith(alloc);
+    low_addr->eraseFromParent();
+    if (high_addr != nullptr) {
+      assert(match_level == 2);
+      high_addr->replaceAllUsesWith(alloc_end);
+      high_addr->eraseFromParent();
     }
 
     if (match_level == 2) {
