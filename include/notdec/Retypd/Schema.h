@@ -9,20 +9,27 @@
 namespace notdec::retypd {
 
 using Variance = bool;
-const Variance Covariant = true;
-const Variance Contravariant = false;
+const Variance Covariant = false;
+const Variance Contravariant = true;
 
-inline const char *toString(Variance v) { return v ? "⊕" : "⊖"; }
+inline const char *toString(Variance v) { return v ? "⊖" : "⊕"; }
 inline Variance invert(Variance v) { return !v; }
-inline Variance combine(Variance a, Variance b) { return a == b; }
+inline Variance combine(Variance a, Variance b) { return a != b; }
 
 // Field labels
 
-struct None {};
-struct NullTerm {};
-struct NoBound {};
+struct None {
+  bool operator<(const None &rhs) const { return false; }
+};
+struct NullTerm {
+  bool operator<(const NullTerm &rhs) const { return false; }
+};
+struct NoBound {
+  bool operator<(const NoBound &rhs) const { return false; }
+};
 struct Fixed {
   uint32_t bound;
+  bool operator<(const Fixed &rhs) const { return bound < rhs.bound; }
 };
 using Bound = std::variant<None, NullTerm, NoBound, Fixed>;
 
@@ -30,17 +37,27 @@ std::string toString(Bound b);
 
 struct InLabel {
   std::string name;
+  bool operator<(const InLabel &rhs) const { return name < rhs.name; }
 };
 struct OutLabel {
   std::string name;
+  bool operator<(const OutLabel &rhs) const { return name < rhs.name; }
 };
 struct DerefLabel {
   uint32_t size;
   int32_t offset;
   Bound bound;
+  bool operator<(const DerefLabel &rhs) const {
+    return std::tie(size, offset, bound) <
+           std::tie(rhs.size, rhs.offset, rhs.bound);
+  }
 };
-struct LoadLabel {};
-struct StoreLabel {};
+struct LoadLabel {
+  bool operator<(const LoadLabel &rhs) const { return false; }
+};
+struct StoreLabel {
+  bool operator<(const StoreLabel &rhs) const { return false; }
+};
 using FieldLabel =
     std::variant<InLabel, OutLabel, DerefLabel, LoadLabel, StoreLabel>;
 
@@ -50,26 +67,33 @@ Variance getVariance(FieldLabel &f);
 
 struct DerivedTypeVariable {
   std::string name;
-  std::deque<FieldLabel> labels;
+  std::deque<FieldLabel> Labels;
   unsigned instanceId = 0;
 
   DerivedTypeVariable getSubDtv(size_t index) const {
     DerivedTypeVariable sub_dtv;
     sub_dtv.name = this->name;
-    sub_dtv.labels.insert(sub_dtv.labels.end(), this->labels.begin(),
-                          this->labels.begin() + index);
+    sub_dtv.Labels.insert(sub_dtv.Labels.end(), this->Labels.begin(),
+                          this->Labels.begin() + index);
     return sub_dtv;
   }
 
   Variance pathVariance(DerivedTypeVariable dtv) const {
     Variance v = Covariant;
-    for (auto &label : dtv.labels) {
+    for (auto &label : dtv.Labels) {
       v = combine(v, getVariance(label));
     }
     return v;
   }
 
   bool isPrimitive() const { return name.at(0) == '#'; }
+
+  // Comparator for stored in a std::map
+  // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
+  bool operator<(const DerivedTypeVariable &rhs) const {
+    return std::tie(name, Labels, instanceId) <
+           std::tie(rhs.name, rhs.Labels, rhs.instanceId);
+  }
 };
 
 std::string toString(DerivedTypeVariable dtv);

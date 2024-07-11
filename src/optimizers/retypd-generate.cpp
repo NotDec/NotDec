@@ -169,7 +169,7 @@ VariableWithOffset RetypdGenerator::getTypeVarNoCache(Value *Val) {
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
     VariableWithOffset tv = getTypeVar(arg->getParent());
-    tv.dtv.labels.push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
+    tv.dtv.Labels.push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -200,7 +200,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitReturnInst(ReturnInst &I) {
   }
   auto SrcVar = cg.getTypeVar(Src);
   auto DstVar = cg.getTypeVar(I.getFunction());
-  DstVar.dtv.labels.push_back(retypd::OutLabel{});
+  DstVar.dtv.Labels.push_back(retypd::OutLabel{});
   // src is a subtype of dest
   cg.addConstraint(SrcVar, DstVar);
 }
@@ -227,7 +227,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   }
   // for return value
   auto DstVar = cg.getTypeVar(Target);
-  DstVar.dtv.labels.push_back(retypd::OutLabel{});
+  DstVar.dtv.Labels.push_back(retypd::OutLabel{});
   cg.setTypeVar(&I, DstVar);
 }
 
@@ -414,11 +414,11 @@ VariableWithOffset RetypdGenerator::deref(Value *Val, long BitSize,
   // from the offset, generate a loaded type variable.
   auto DstVar = getTypeVar(Val);
   if (isLoad) {
-    DstVar.dtv.labels.push_back(retypd::LoadLabel{});
+    DstVar.dtv.Labels.push_back(retypd::LoadLabel{});
   } else {
-    DstVar.dtv.labels.push_back(retypd::StoreLabel{});
+    DstVar.dtv.Labels.push_back(retypd::StoreLabel{});
   }
-  DstVar.dtv.labels.push_back(make_deref(BitSize, DstVar.offset));
+  DstVar.dtv.Labels.push_back(make_deref(BitSize, DstVar.offset));
   return DstVar;
 }
 
@@ -504,7 +504,7 @@ void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I,
 
 std::string RetypdGenerator::getFuncName(Function &F) {
   auto ret = getTypeVar(&F);
-  assert(ret.dtv.labels.empty() &&
+  assert(ret.dtv.Labels.empty() &&
          "getFuncName: non empty label for function.");
   return ret.dtv.name;
 }
