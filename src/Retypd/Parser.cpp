@@ -1,5 +1,6 @@
 
 #include "Retypd/Parser.h"
+#include "Retypd/Schema.h"
 
 namespace notdec::retypd {
 
@@ -155,12 +156,12 @@ ParseResultT<LoadLabel> parseLoad(llvm::StringRef str) {
   return {str, LoadLabel{}};
 }
 
-ParseResultT<LoadLabel> parseStore(llvm::StringRef str) {
+ParseResultT<StoreLabel> parseStore(llvm::StringRef str) {
   str = skipWhitespace(str);
   if (!str.consume_front("store")) {
     return {str, "parseLoad: Expect store: " + str.substr(0, 10)};
   }
-  return {str, LoadLabel{}};
+  return {str, StoreLabel{}};
 }
 
 ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str) {

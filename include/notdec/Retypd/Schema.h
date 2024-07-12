@@ -37,12 +37,22 @@ std::string toString(Bound b);
 
 struct InLabel {
   std::string name;
+  // prevent variant to be default constructed.
+  InLabel() = delete;
   bool operator<(const InLabel &rhs) const { return name < rhs.name; }
+  bool operator==(const InLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
+
 struct OutLabel {
   std::string name;
   bool operator<(const OutLabel &rhs) const { return name < rhs.name; }
+  bool operator==(const OutLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
+
 struct DerefLabel {
   uint32_t size;
   int32_t offset;
@@ -51,13 +61,25 @@ struct DerefLabel {
     return std::tie(size, offset, bound) <
            std::tie(rhs.size, rhs.offset, rhs.bound);
   }
+  bool operator==(const DerefLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
+
 struct LoadLabel {
   bool operator<(const LoadLabel &rhs) const { return false; }
+  bool operator==(const LoadLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
+
 struct StoreLabel {
   bool operator<(const StoreLabel &rhs) const { return false; }
+  bool operator==(const StoreLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
+
 using FieldLabel =
     std::variant<InLabel, OutLabel, DerefLabel, LoadLabel, StoreLabel>;
 
@@ -123,6 +145,38 @@ using Constraint =
 std::string toString(Constraint c);
 inline bool isSubtypeConstraint(Constraint c) {
   return std::holds_alternative<SubTypeConstraint>(c);
+}
+
+struct One {
+  bool operator<(const One &rhs) const { return false; }
+};
+struct ForgetLabel {
+  FieldLabel label;
+  bool operator<(const ForgetLabel &rhs) const { return label < rhs.label; }
+};
+struct ForgetBase {
+  std::string base;
+  bool operator<(const ForgetBase &rhs) const { return base < rhs.base; }
+};
+struct RecallLabel {
+  FieldLabel label;
+  bool operator<(const RecallLabel &rhs) const { return label < rhs.label; }
+};
+struct RecallBase {
+  std::string base;
+  bool operator<(const RecallBase &rhs) const { return base < rhs.base; }
+};
+using EdgeLabel =
+    std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase>;
+
+std::string toString(EdgeLabel label);
+inline bool isBase(EdgeLabel label) {
+  return std::holds_alternative<ForgetBase>(label) ||
+         std::holds_alternative<RecallBase>(label);
+}
+inline bool isLabel(EdgeLabel label) {
+  return std::holds_alternative<ForgetLabel>(label) ||
+         std::holds_alternative<RecallLabel>(label);
 }
 
 } // namespace notdec::retypd

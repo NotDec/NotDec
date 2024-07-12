@@ -35,7 +35,7 @@ ParseResultT<InLabel> parseInLabel(llvm::StringRef str);
 ParseResultT<OutLabel> parseOutLabel(llvm::StringRef str);
 ParseResultT<DerefLabel> parseDerefLabel(llvm::StringRef str);
 ParseResultT<LoadLabel> parseLoad(llvm::StringRef str);
-ParseResultT<LoadLabel> parseStore(llvm::StringRef str);
+ParseResultT<StoreLabel> parseStore(llvm::StringRef str);
 ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str);
 ParseResultT<DerivedTypeVariable> parseDerivedTypeVariable(llvm::StringRef str);
 ParseResultT<SubTypeConstraint> parseSubTypeConstraint(llvm::StringRef str);

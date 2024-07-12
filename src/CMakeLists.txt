@@ -17,6 +17,7 @@ add_library(notdec STATIC
 	Retypd/Parser.cpp
 	Retypd/Graph.cpp
 	Retypd/Schema.cpp
+	Retypd/RExp.cpp
 	utils.cpp
 )
 

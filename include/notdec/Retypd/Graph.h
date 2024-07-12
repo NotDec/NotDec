@@ -13,41 +13,10 @@
 #include <llvm/ADT/simple_ilist.h>
 #include <llvm/Support/GraphWriter.h>
 
+#include "Retypd/RExp.h"
 #include "Retypd/Schema.h"
 
 namespace notdec::retypd {
-
-struct One {
-  bool operator<(const One &rhs) const { return false; }
-};
-struct ForgetLabel {
-  FieldLabel label;
-  bool operator<(const ForgetLabel &rhs) const { return label < rhs.label; }
-};
-struct ForgetBase {
-  std::string base;
-  bool operator<(const ForgetBase &rhs) const { return base < rhs.base; }
-};
-struct RecallLabel {
-  FieldLabel label;
-  bool operator<(const RecallLabel &rhs) const { return label < rhs.label; }
-};
-struct RecallBase {
-  std::string base;
-  bool operator<(const RecallBase &rhs) const { return base < rhs.base; }
-};
-using EdgeLabel =
-    std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase>;
-
-std::string toString(EdgeLabel label);
-inline bool isBase(EdgeLabel label) {
-  return std::holds_alternative<ForgetBase>(label) ||
-         std::holds_alternative<RecallBase>(label);
-}
-inline bool isLabel(EdgeLabel label) {
-  return std::holds_alternative<ForgetLabel>(label) ||
-         std::holds_alternative<RecallLabel>(label);
-}
 
 struct CGNode;
 struct ConstraintGraph;
@@ -85,7 +54,7 @@ using CGBase = llvm::DirectedGraph<CGNode, CGEdge>;
 // TODO make node immutable
 struct CGNode : CGNodeBase {
   const NodeKey key;
-  std::list<CGEdge> outEdges;
+  std::set<CGEdge> outEdges;
   CGNode(NodeKey key) : key(key) {}
 };
 
@@ -106,22 +75,40 @@ struct ConstraintGraph : CGBase {
   std::set<CGNode *> StartNodes;
   std::set<CGNode *> EndNodes;
   // pub path_seq: Vec<(NodeIndex, NodeIndex, RExp)>,
+  std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> PathSeq;
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
 
   ConstraintGraph(std::string FuncName) : FuncName(FuncName) {}
   void build(std::vector<Constraint> &Cons);
   void buildInitialGraph(std::vector<Constraint> &Cons);
+  void saturate();
+  void layerSplit();
+  void buildPathSequence();
+  std::vector<Constraint> solve_constraints_between();
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);
   void printGraph(const char *DotFile);
 
 protected:
   // Graph related operations
-  CGNode &GetOrInsertNode(const NodeKey &N);
-  void AddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
-    auto &it = From.outEdges.emplace_back(To, Label);
-    connect(From, To, it);
+  CGNode &getOrInsertNode(const NodeKey &N);
+  void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    auto it = From.outEdges.find(CGEdge(To, Label));
+    assert(it != From.outEdges.end());
+    From.removeEdge(const_cast<CGEdge &>(*it));
+    From.outEdges.erase(it);
+  }
+  bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    if (&From == &To) {
+      assert(std::holds_alternative<One>(Label));
+      return false;
+    }
+    auto it = From.outEdges.emplace(To, Label);
+    if (it.second) {
+      connect(From, To, const_cast<CGEdge &>(*it.first));
+    }
+    return it.second;
   }
 };
 

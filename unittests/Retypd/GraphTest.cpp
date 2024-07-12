@@ -15,7 +15,7 @@ parse_constraints(std::vector<const char *> cons_str) {
       std::cerr << res.second.msg().str() << "\n";
     }
     ret.push_back(res.second.get());
-    // std::cerr << notdec::retypd::toString(res.second.get()) << "\n";
+    std::cerr << notdec::retypd::toString(res.second.get()) << "\n";
   }
   return ret;
 }
@@ -24,6 +24,9 @@ parse_constraints(std::vector<const char *> cons_str) {
 TEST(Retypd, SaturationPaperTest) {
   std::vector<notdec::retypd::Constraint> cons =
       parse_constraints({"y <= p", "p <= x", "#A <= x.store", "y.load <= #B"});
+  notdec::retypd::ConstraintGraph CG("SaturationPaper");
+  CG.build(cons);
+  CG.printGraph("SaturationPaper.dot");
 }
 
 // A simple example from the paper.
@@ -41,5 +44,5 @@ TEST(Retypd, SlidesExampleTest) {
   });
   notdec::retypd::ConstraintGraph CG("SlideExample");
   CG.build(cons);
-  CG.printGraph("test.dot");
+  CG.printGraph("SlideExample.dot");
 }
