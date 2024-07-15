@@ -21,7 +21,11 @@ If address sanitizer is enabled, my VSCode clangd language server does not work 
 
 1. Try to rebuild my debug version of LLVM with compiler-rt. 
    1. Changed the build script: `-DLLVM_ENABLE_PROJECTS="clang;compiler-rt"`
-   2. Changed the cmake file in llvm compiler rt cmake files according to this [issue](https://github.com/llvm/llvm-project/issues/67085).
+   2. Changed the cmake file in llvm compiler rt cmake files according to this [issue](https://github.com/llvm/llvm-project/issues/67085). 
+
+These does not work.
+
+Final solution: Add `-DCMAKE_CXX_FLAGS=-fsanitize=address -idirafter /usr/lib/llvm-14/lib/clang/14.0.0/include`
 
 **2024-04-26**
 
