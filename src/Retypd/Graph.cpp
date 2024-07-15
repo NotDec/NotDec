@@ -37,41 +37,9 @@ std::string toString(EdgeLabel label) {
   assert(false && "Unknown FieldLabel!");
 }
 
-std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between(
-    std::set<std::string> &InterestingVars) {
+std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 
   std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P;
-  // Imagine a "#Start" node connecting to a subset of start nodes that is in
-  // the set of interesting variables.
-  // And a "#End" node connecting from a subset of end nodes that is in the set
-  // of interesting variables.
-  std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> SeqPrefix;
-  std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> SeqSuffix;
-  // 1.1. Imagine that we prepend the path sequence with a set of path from
-  // "#Start" to the start nodes, and run solve over these paths
-  for (auto N : StartNodes) {
-    // is an interesting var or is a primitive type
-    if ((InterestingVars.count(N->key.Base.name) != 0) ||
-        N->key.Base.name.at(0) == '#') {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "Adding a path from #Start to " << N->key.str() << "\n");
-      SeqPrefix.emplace_back(Start, N,
-                             rexp::create(RecallBase{N->key.Base.name}));
-    }
-  }
-
-  // 1.2. Imagine that we append with a set of path from the end nodes to
-  // "#End", and run solve over these paths
-  for (auto N : EndNodes) {
-    // is an interesting var or is a primitive type
-    if ((InterestingVars.count(N->key.Base.name) != 0) ||
-        N->key.Base.name.at(0) == '#') {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "Adding a path from " << N->key.str() << " to #End\n");
-      SeqSuffix.emplace_back(N, End,
-                             rexp::create(ForgetBase{N->key.Base.name}));
-    }
-  }
 
   auto getPexp = [&](CGNode *From, CGNode *To) -> rexp::PRExp {
     auto Key = std::make_pair(From, To);
@@ -102,12 +70,9 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between(
     assignPExp(From, To, rexp::simplifyOnce(Old | E));
   };
 
-  // https://stackoverflow.com/questions/14366576/boostrangejoin-for-multiple-ranges
-  auto R1 = boost::join(SeqPrefix, PathSeq);
-  auto SeqIter = boost::range::join(R1, SeqSuffix);
   // 1.3. solve the pathexpr(start)
   auto Source = Start;
-  for (auto Ent : SeqIter) {
+  for (auto Ent : PathSeq) {
     auto [From, To, E] = Ent;
     if (From == To) {
       // P[source, from] = P[source, from] & exp
@@ -165,10 +130,33 @@ ConstraintGraph::simplify(std::vector<Constraint> &Cons,
   }
   layerSplit();
   printGraph("trans_layerSplit.dot");
-  buildPathSequence();
   Start = &getOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#Start"}});
   End = &getOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#End"}});
-  return solve_constraints_between(InterestingVars);
+
+  // Link nodes to "#Start"
+  for (auto N : StartNodes) {
+    // is an interesting var or is a primitive type
+    if ((InterestingVars.count(N->key.Base.name) != 0) ||
+        N->key.Base.name.at(0) == '#') {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Adding an edge from #Start to " << N->key.str() << "\n");
+      addEdge(*Start, *N, RecallBase{N->key.Base.name});
+    }
+  }
+
+  // Link nodes to "#End"
+  for (auto N : EndNodes) {
+    // is an interesting var or is a primitive type
+    if ((InterestingVars.count(N->key.Base.name) != 0) ||
+        N->key.Base.name.at(0) == '#') {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Adding an edge from " << N->key.str() << " to #End\n");
+      addEdge(*N, *End, ForgetBase{N->key.Base.name});
+    }
+  }
+
+  buildPathSequence();
+  return solve_constraints_between();
 }
 
 void ConstraintGraph::buildPathSequence() {
@@ -550,7 +538,7 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
   std::vector<EdgeLabel> stack;
   expToConstraintsRecursive(result, stack, E, true);
   for (auto &ELs : result) {
-    LLVM_DEBUG(llvm::dbgs() << "Normalize path: " << toString(ELs));
+    LLVM_DEBUG(llvm::dbgs() << "Normalized path: " << toString(ELs) << "\n");
     SubTypeConstraint Cons = normalizePath(ELs);
     if (Cons.sub != Cons.sup) {
       ret.push_back(Cons);

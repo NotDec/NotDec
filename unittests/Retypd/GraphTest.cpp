@@ -23,6 +23,8 @@ parse_constraints(std::vector<const char *> cons_str) {
 
 // A simple example from the paper.
 TEST(Retypd, SaturationPaperTest) {
+  llvm::DebugFlag = true;
+  llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons =
       parse_constraints({"y <= p", "p <= x", "#A <= x.store", "y.load <= #B"});
   notdec::retypd::ConstraintGraph CG("SaturationPaper");

@@ -45,14 +45,24 @@ struct Node {
   EdgeLabel E;
 };
 
+inline bool isNull(const PRExp &rexp) {
+  return std::holds_alternative<Null>(*rexp);
+}
+
+inline bool isEmpty(const PRExp &rexp) {
+  return std::holds_alternative<Empty>(*rexp);
+}
+
+PRExp create(const EdgeLabel &EL);
 std::string toString(const PRExp &rexp);
 PRExp simplifyOnce(const PRExp &Original);
 std::optional<retypd::EdgeLabel *> first_node(const PRExp &rexp);
 std::optional<retypd::EdgeLabel *> last_node(const PRExp &rexp);
 PRExp operator&(const PRExp &A, const PRExp &B);
 PRExp operator|(const PRExp &A, const PRExp &B);
+
 std::vector<std::tuple<CGNode *, CGNode *, PRExp>>
-eliminate(const ConstraintGraph &CG, std::vector<CGNode *> SCCNodes);
+eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes);
 
 } // namespace notdec::retypd::rexp
 

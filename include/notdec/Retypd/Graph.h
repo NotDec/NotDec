@@ -31,7 +31,8 @@ struct NodeKey {
 
   std::optional<std::pair<FieldLabel, NodeKey>> forgetOnce() const;
   std::string str() const {
-    return IsNewLayer ? "F: " : "" + toString(Base) + toString(SuffixVariance);
+    return (IsNewLayer ? "F: " : "") + toString(Base) +
+           toString(SuffixVariance);
   }
 
   // Comparator for stored in a std::map
@@ -80,12 +81,18 @@ struct ConstraintGraph : CGBase {
   CGNode *End = nullptr;
 
   ConstraintGraph(std::string FuncName) : FuncName(FuncName) {}
-  void build(std::vector<Constraint> &Cons);
+
+  // Main interface for constraint simplification
+  std::vector<SubTypeConstraint>
+  simplify(std::vector<Constraint> &Cons,
+           std::set<std::string> &InterestingVars);
+
+  // internal steps
   void buildInitialGraph(std::vector<Constraint> &Cons);
   void saturate();
   void layerSplit();
   void buildPathSequence();
-  std::vector<Constraint> solve_constraints_between();
+  std::vector<SubTypeConstraint> solve_constraints_between();
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);
   void printGraph(const char *DotFile);
@@ -112,6 +119,8 @@ protected:
   }
 };
 
+std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E);
+
 } // namespace notdec::retypd
 
 namespace llvm {
@@ -135,7 +144,7 @@ template <> struct llvm::GraphTraits<CGNode *> {
       mapped_iterator<CGNode::iterator, decltype(&DGTestGetTargetNode)>;
   using ChildEdgeIteratorType = CGNode::iterator;
 
-  static NodeRef getEntryNode(NodeRef N) { return N; }
+  static NodeRef getEntryNode(NodeRef N) { std::abort(); }
   static ChildIteratorType child_begin(NodeRef N) {
     return ChildIteratorType(N->begin(), &DGTestGetTargetNode);
   }
@@ -152,7 +161,7 @@ template <> struct llvm::GraphTraits<CGNode *> {
 template <>
 struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
   using nodes_iterator = ConstraintGraph::iterator;
-  static NodeRef getEntryNode(ConstraintGraph *DG) { return *DG->begin(); }
+  static NodeRef getEntryNode(ConstraintGraph *DG) { return DG->Start; }
   static nodes_iterator nodes_begin(ConstraintGraph *DG) { return DG->begin(); }
   static nodes_iterator nodes_end(ConstraintGraph *DG) { return DG->end(); }
 };

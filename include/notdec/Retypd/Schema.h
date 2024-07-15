@@ -116,6 +116,11 @@ struct DerivedTypeVariable {
     return std::tie(name, Labels, instanceId) <
            std::tie(rhs.name, rhs.Labels, rhs.instanceId);
   }
+
+  bool operator!=(const DerivedTypeVariable &rhs) const {
+    return std::tie(name, Labels, instanceId) !=
+           std::tie(rhs.name, rhs.Labels, rhs.instanceId);
+  }
 };
 
 std::string toString(DerivedTypeVariable dtv);
