@@ -425,7 +425,7 @@ void ConstraintGraph::printGraph(const char *DotFile) {
   OutStream.close();
 }
 
-std::string toString(NodeKey K) { return K.str(); }
+std::string toString(const NodeKey &K) { return K.str(); }
 
 /// \arg isLeaf: whether the current node is a leaf node.
 static void

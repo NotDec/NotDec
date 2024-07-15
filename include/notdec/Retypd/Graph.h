@@ -43,7 +43,7 @@ struct NodeKey {
   }
 };
 
-std::string toString(NodeKey K);
+std::string toString(const NodeKey &K);
 
 // Follows llvm/unittests/ADT/DirectedGraphTest.cpp
 struct CGNode;

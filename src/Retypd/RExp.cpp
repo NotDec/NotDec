@@ -22,7 +22,7 @@ std::string toString(const PRExp &rexp) {
   } else if (std::holds_alternative<Empty>(*rexp)) {
     return "ε";
   } else if (std::holds_alternative<Star>(*rexp)) {
-    return "Star";
+    return "(" + toString(std::get<Star>(*rexp).E) + ")*";
   } else if (std::holds_alternative<Or>(*rexp)) {
     std::string ret = "(";
     for (const auto &e : std::get<Or>(*rexp).E) {
@@ -117,7 +117,7 @@ PRExp simplifyOnce(const PRExp &Original) {
     auto &E = std::get<Star>(*Original).E;
     // remove directly nested star
     if (std::holds_alternative<Star>(*E)) {
-      return E;
+      return std::get<Star>(*E).E;
     } else if (std::holds_alternative<Empty>(*E)) {
       return std::make_shared<RExp>(Empty{});
     } else if (std::holds_alternative<Null>(*E)) {
@@ -287,7 +287,7 @@ eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes) {
       if (SCCNodes.count(&Target) == 0) {
         continue;
       }
-      auto R = P.insert({{N, &Target}, create(E.Label)});
+      auto R = P.insert_or_assign({N, &Target}, create(E.Label));
       assert(R.second && "Not Inserted?");
     }
   }
@@ -296,7 +296,8 @@ eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes) {
     CGNode *V = Nodes[VInd];
     auto VV = getMap(V, V);
     if (!isNull(VV)) {
-      P.insert({{V, V}, simplifyOnce(std::make_shared<RExp>(Star{VV}))});
+      P.insert_or_assign({V, V},
+                         simplifyOnce(std::make_shared<RExp>(Star{VV})));
     }
     for (unsigned UInd = VInd + 1; UInd < Nodes.size(); UInd++) {
       CGNode *U = Nodes[UInd];
@@ -307,7 +308,7 @@ eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes) {
 
       if (!isNull(VV)) {
         UV = simplifyOnce(UV & VV);
-        P.insert({{U, V}, UV});
+        P.insert_or_assign({U, V}, UV);
       }
 
       for (unsigned WInd = VInd + 1; WInd < Nodes.size(); WInd++) {
@@ -319,7 +320,7 @@ eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes) {
 
         auto UW = getMap(U, W);
         UW = simplifyOnce(UW | simplifyOnce(UV & VW));
-        P.insert({{U, W}, UW});
+        P.insert_or_assign({U, W}, UW);
       }
     }
   }
