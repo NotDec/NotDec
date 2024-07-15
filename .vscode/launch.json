@@ -87,13 +87,17 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "GraphTest SlidesExampleTest",
+      "name": "GraphTest SaturationPaperTest",
       "program": "${workspaceFolder}/build/bin/GraphTest",
       "args": [
-        "--gtest_filter=Retypd.SlidesExampleTest",
+        "--gtest_filter=Retypd.SaturationPaperTest",
       ],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "CMake: build"
+      "preLaunchTask": "CMake: build",
+      "env": {
+        "DEBUG_TRANS_INIT_GRAPH": "1",
+        "DEBUG_TRANS_SAT_GRAPH": "1"
+      }
     }
   ]
 }

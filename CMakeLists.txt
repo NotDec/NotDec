@@ -128,6 +128,9 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+find_package(Boost REQUIRED COMPONENTS system)
+include_directories( ${Boost_INCLUDE_DIR} )
+
 #===============================================================================
 # 以下为项目自己的CMake相关配置
 #===============================================================================

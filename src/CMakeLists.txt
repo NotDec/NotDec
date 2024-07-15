@@ -28,6 +28,7 @@ target_link_libraries(notdec
 	LLVMCore LLVMIRReader LLVMSupport LLVMPasses
 	clangAST clangTooling
 	notdec-datalog
+	${Boost_LIBRARIES}
 )
 
 if (NOTDEC_ENABLE_WASM)

@@ -2,6 +2,7 @@
 #include "Retypd/Parser.h"
 #include "Retypd/Schema.h"
 #include <gtest/gtest.h>
+#include <llvm/Support/Debug.h>
 #include <vector>
 
 std::vector<notdec::retypd::Constraint>
@@ -25,12 +26,20 @@ TEST(Retypd, SaturationPaperTest) {
   std::vector<notdec::retypd::Constraint> cons =
       parse_constraints({"y <= p", "p <= x", "#A <= x.store", "y.load <= #B"});
   notdec::retypd::ConstraintGraph CG("SaturationPaper");
-  CG.build(cons);
+
+  std::set<std::string> InterestingVars;
+  auto Cons = CG.simplify(cons, InterestingVars);
   CG.printGraph("SaturationPaper.dot");
+  std::cerr << "Simplified Constraints:" << std::endl;
+  for (auto &C : Cons) {
+    std::cerr << notdec::retypd::toString(C) << "\n";
+  }
 }
 
 // A simple example from the paper.
 TEST(Retypd, SlidesExampleTest) {
+  llvm::DebugFlag = true;
+  llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons = parse_constraints({
       "F.in_stack0 <= 𝛿",
       "𝛼 <= 𝜑",
@@ -43,6 +52,13 @@ TEST(Retypd, SlidesExampleTest) {
       "#SuccessZ <= close.out_eax",
   });
   notdec::retypd::ConstraintGraph CG("SlideExample");
-  CG.build(cons);
+  std::set<std::string> InterestingVars;
+  InterestingVars.insert("F");
+  auto Cons = CG.simplify(cons, InterestingVars);
   CG.printGraph("SlideExample.dot");
+
+  std::cerr << "Simplified Constraints:" << std::endl;
+  for (auto &C : Cons) {
+    std::cerr << notdec::retypd::toString(C) << "\n";
+  }
 }

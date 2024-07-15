@@ -38,7 +38,7 @@ cd llvm-build
 # 出错了直接退出
 set -e
 
-cmake -DCMAKE_BUILD_TYPE=${build_type} -DCMAKE_INSTALL_PREFIX="$LLVMHome" -DLLVM_OPTIMIZED_TABLEGEN=ON -DLLVM_ENABLE_PROJECTS="clang" ../llvm-source/llvm
+cmake -DCMAKE_BUILD_TYPE=${build_type} -DCMAKE_INSTALL_PREFIX="$LLVMHome" -DLLVM_OPTIMIZED_TABLEGEN=ON -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" ../llvm-source/llvm
 # 直接多线程编译可以出现内存不足的情况，后面链接时减少并行数量。经测试，32G内存在后期链接也只能并行数量1。
 cmake --build . -j `nproc` || cmake --build . -j 1
 # cmake --install .

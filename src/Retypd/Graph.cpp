@@ -1,5 +1,9 @@
+#include <boost/range/join.hpp>
 #include <cassert>
+#include <cstddef>
 #include <cstring>
+#include <iostream>
+#include <llvm/ADT/STLExtras.h>
 #include <map>
 #include <optional>
 #include <tuple>
@@ -11,6 +15,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "Retypd/Graph.h"
+#include "Retypd/RExp.h"
 #include "Retypd/Schema.h"
 
 #define DEBUG_TYPE "retypd_graph"
@@ -29,10 +34,121 @@ std::string toString(EdgeLabel label) {
   } else if (std::holds_alternative<RecallBase>(label)) {
     return "recall " + std::get<RecallBase>(label).base;
   }
-  return "unknown";
+  assert(false && "Unknown FieldLabel!");
 }
 
-void ConstraintGraph::build(std::vector<Constraint> &Cons) {
+std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between(
+    std::set<std::string> &InterestingVars) {
+
+  std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P;
+  // Imagine a "#Start" node connecting to a subset of start nodes that is in
+  // the set of interesting variables.
+  // And a "#End" node connecting from a subset of end nodes that is in the set
+  // of interesting variables.
+  std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> SeqPrefix;
+  std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> SeqSuffix;
+  // 1.1. Imagine that we prepend the path sequence with a set of path from
+  // "#Start" to the start nodes, and run solve over these paths
+  for (auto N : StartNodes) {
+    // is an interesting var or is a primitive type
+    if ((InterestingVars.count(N->key.Base.name) != 0) ||
+        N->key.Base.name.at(0) == '#') {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Adding a path from #Start to " << N->key.str() << "\n");
+      SeqPrefix.emplace_back(Start, N,
+                             rexp::create(RecallBase{N->key.Base.name}));
+    }
+  }
+
+  // 1.2. Imagine that we append with a set of path from the end nodes to
+  // "#End", and run solve over these paths
+  for (auto N : EndNodes) {
+    // is an interesting var or is a primitive type
+    if ((InterestingVars.count(N->key.Base.name) != 0) ||
+        N->key.Base.name.at(0) == '#') {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Adding a path from " << N->key.str() << " to #End\n");
+      SeqSuffix.emplace_back(N, End,
+                             rexp::create(ForgetBase{N->key.Base.name}));
+    }
+  }
+
+  auto getPexp = [&](CGNode *From, CGNode *To) -> rexp::PRExp {
+    auto Key = std::make_pair(From, To);
+    if (P.count(Key)) {
+      return P[Key];
+    }
+    if (From == To) {
+      return std::make_shared<rexp::RExp>(rexp::Empty{});
+    } else {
+      return std::make_shared<rexp::RExp>(rexp::Null{});
+    }
+  };
+  auto assignPExp = [&](CGNode *From, CGNode *To, rexp::PRExp E) {
+    if (From == To && rexp::isEmpty(E)) {
+      return;
+    }
+    if (From != To && rexp::isNull(E)) {
+      return;
+    }
+    P[std::make_pair(From, To)] = E;
+  };
+  auto bitandAssignPExp = [&](CGNode *From, CGNode *To, rexp::PRExp E) {
+    auto Old = getPexp(From, To);
+    assignPExp(From, To, rexp::simplifyOnce(Old & E));
+  };
+  auto bitorAssignPExp = [&](CGNode *From, CGNode *To, rexp::PRExp E) {
+    auto Old = getPexp(From, To);
+    assignPExp(From, To, rexp::simplifyOnce(Old | E));
+  };
+
+  // https://stackoverflow.com/questions/14366576/boostrangejoin-for-multiple-ranges
+  auto R1 = boost::join(SeqPrefix, PathSeq);
+  auto SeqIter = boost::range::join(R1, SeqSuffix);
+  // 1.3. solve the pathexpr(start)
+  auto Source = Start;
+  for (auto Ent : SeqIter) {
+    auto [From, To, E] = Ent;
+    if (From == To) {
+      // P[source, from] = P[source, from] & exp
+      bitandAssignPExp(Source, From, E);
+    } else {
+      // P[source, to] = P[source, to] | (P[source, from] & exp)
+      auto srcFrom = getPexp(Source, From);
+      bitorAssignPExp(Source, To, rexp::simplifyOnce(srcFrom & E));
+    }
+  }
+  auto finalExp = getPexp(Start, End);
+  if ((::llvm::DebugFlag && ::llvm::isCurrentDebugType(DEBUG_TYPE))) {
+    // flatten the outer most Or
+    if (std::holds_alternative<rexp::Or>(*finalExp)) {
+      auto &Inner = std::get<rexp::Or>(*finalExp).E;
+      llvm::dbgs() << "Final Expression: \n";
+      for (auto Exp : Inner) {
+        llvm::dbgs() << "  " << toString(Exp) << "\n";
+      }
+    } else {
+      llvm::dbgs() << "Final Expression: " << toString(finalExp) << "\n";
+    }
+  }
+
+  // 2. adjust the expr to create type schemes.
+  auto ret = expToConstraints(finalExp);
+  // 3. delete invalid constraints like: int64.in_0
+  // 4. substitute temp vars to prevent name collision.
+  return ret;
+}
+
+std::vector<SubTypeConstraint>
+ConstraintGraph::simplify(std::vector<Constraint> &Cons,
+                          std::set<std::string> &InterestingVars) {
+
+  // if (!InterestingVars.has_value()) {
+  //   assert(false); // TODO: is this useful?
+  //   InterestingVars = std::set<std::string>();
+  //   InterestingVars->insert(FuncName);
+  // }
+
   buildInitialGraph(Cons);
   if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) ||
@@ -48,31 +164,52 @@ void ConstraintGraph::build(std::vector<Constraint> &Cons) {
     }
   }
   layerSplit();
+  printGraph("trans_layerSplit.dot");
   buildPathSequence();
-  // GetOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#Start"}});
-  // GetOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#End"}});
+  Start = &getOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#Start"}});
+  End = &getOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#End"}});
+  return solve_constraints_between(InterestingVars);
 }
 
 void ConstraintGraph::buildPathSequence() {
   assert(PathSeq.size() == 0 && "Path sequence already built!?");
-  std::vector<std::vector<CGNode *>> SCCs;
+  std::vector<std::set<CGNode *>> SCCs;
   for (auto I = llvm::scc_begin(this); !I.isAtEnd(); ++I) {
-    SCCs.push_back(*I);
+    SCCs.emplace_back((*I).begin(), (*I).end());
+  }
+  // View the graph as a directed acyclic graph of SCC
+  for (auto &SCC : llvm::reverse(SCCs)) {
+    // run eliminate for each SCC
+    if (SCC.size() > 1) {
+      auto Seqs = rexp::eliminate(*this, SCC);
+      PathSeq.insert(PathSeq.end(), Seqs.begin(), Seqs.end());
+    }
+    // Add all edges out of the current SCC to the path sequence.
+    for (auto N : SCC) {
+      for (auto &E : N->outEdges) {
+        auto &Target = const_cast<CGNode &>(E.getTargetNode());
+        // Add the edge to the path sequence.
+        if (SCC.count(&Target) == 0) {
+          PathSeq.emplace_back(N, &Target, rexp::create(E.Label));
+        }
+      }
+    }
   }
 }
 
 void ConstraintGraph::layerSplit() {
-  // add new layer nodes
-  for (auto &Ent : Nodes) {
-    NodeKey NewKey = Ent.first;
-    NewKey.IsNewLayer = true;
-    auto &NewNode = getOrInsertNode(NewKey);
-  }
   // add edges
+  std::vector<std::tuple<CGNode *, CGNode *, CGNode *, FieldLabel>> toChange;
   for (auto &Ent : Nodes) {
+    if (Ent.second.key.IsNewLayer) {
+      continue;
+    }
     auto &Source = Ent.second;
     for (auto &Edge : Source.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      if (Target.key.IsNewLayer) {
+        continue;
+      }
       NodeKey NewSrc = Source.key;
       NewSrc.IsNewLayer = true;
       auto &NewSrcNode = getOrInsertNode(NewSrc);
@@ -84,10 +221,31 @@ void ConstraintGraph::layerSplit() {
       }
       addEdge(NewSrcNode, NewDstNode, Edge.Label);
       if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
-        removeEdge(Source, Target, Edge.Label);
-        addEdge(Source, NewDstNode, Edge.Label);
+        FieldLabel FL = std::get<ForgetLabel>(Edge.Label).label;
+        // Edge reference will be invalidated. Edge changes is deferred.
+        toChange.emplace_back(&Source, &Target, &NewDstNode, FL);
       }
     }
+  }
+  // deferred Edge modification
+  for (auto &Ent : toChange) {
+    auto [Source, Target, NewDst, Label] = Ent;
+    LLVM_DEBUG(llvm::dbgs()
+               << "layerSplit: Retarget Edge from " << toString(Source->key)
+               << " to " << toString(Target->key) << " with forget "
+               << toString(Label) << " to " << toString(NewDst->key) << "\n");
+    removeEdge(*Source, *Target, ForgetLabel{Label});
+    addEdge(*Source, *NewDst, ForgetLabel{Label});
+  }
+  // Add new edge in the new layer to end nodes.
+  for (CGNode *Ent : EndNodes) {
+    if (Ent->key.IsNewLayer) {
+      continue;
+    }
+    NodeKey NewKey = Ent->key;
+    NewKey.IsNewLayer = true;
+    auto &NewNode = getOrInsertNode(NewKey);
+    EndNodes.insert(&NewNode);
   }
 }
 
@@ -142,7 +300,7 @@ void ConstraintGraph::saturate() {
           // end: for each recall edge.
           if (ReachingSet.count(&Source)) {
             for (auto &Reach : ReachingSet[&Source]) {
-              if (Reach.first == Capa.label) {
+              if (Reach.first == Capa.label && Reach.second != &Target) {
                 LLVM_DEBUG(llvm::dbgs()
                            << "Adding Edge From " << Reach.second->key.str()
                            << " to " << Target.key.str() << " with _1_ \n");
@@ -280,5 +438,125 @@ void ConstraintGraph::printGraph(const char *DotFile) {
 }
 
 std::string toString(NodeKey K) { return K.str(); }
+
+/// \arg isLeaf: whether the current node is a leaf node.
+static void
+expToConstraintsRecursive(std::vector<std::vector<EdgeLabel>> &result,
+                          std::vector<EdgeLabel> &stack, rexp::PRExp E,
+                          bool isLeaf) {
+  // TODO: 这里可能有指数级的复杂度。考虑And(Or("recall a", "recall b"), "forget
+  // #A")，这里用栈模拟是错误的。处理And的时候不能假设Or那边只返回单个表达式序列，即不能用栈存储。
+  //
+  if (std::holds_alternative<rexp::Or>(*E)) {
+    std::size_t stackLevel = stack.size();
+    for (auto E1 : std::get<rexp::Or>(*E).E) {
+      expToConstraintsRecursive(result, stack, E1, isLeaf);
+      stack.resize(stackLevel);
+    }
+  } else if (std::holds_alternative<rexp::And>(*E)) {
+    auto &V = std::get<rexp::And>(*E).E;
+    for (std::size_t Ind = 0; Ind < V.size(); Ind++) {
+      auto E1 = V[Ind];
+      bool isLeaf1 = (Ind == V.size() - 1) ? isLeaf : false;
+      expToConstraintsRecursive(result, stack, E1, isLeaf1);
+    }
+  } else if (std::holds_alternative<rexp::Star>(*E)) {
+    auto Inner = std::get<rexp::Star>(*E).E;
+    std::string tempName = "__temp";
+
+    stack.push_back(ForgetBase{tempName});
+    result.push_back(stack);
+    stack.clear();
+
+    // Create recursive constraints.
+    expToConstraintsRecursive(result, stack,
+                              rexp::create(RecallBase{tempName}) & Inner &
+                                  rexp::create(ForgetBase{tempName}),
+                              true);
+
+    stack.clear();
+    stack.push_back(RecallBase{tempName});
+
+    // 4. act as a normal Node
+    if (isLeaf) {
+      // TODO: ensure
+      assert(false && "pexp_to_constraints: Star on leaf node!?");
+      result.push_back(stack);
+    }
+  } else if (std::holds_alternative<rexp::Node>(*E)) {
+    stack.push_back(std::get<rexp::Node>(*E).E);
+    if (isLeaf) {
+      result.push_back(stack);
+    }
+  } else if (std::holds_alternative<rexp::Null>(*E) ||
+             std::holds_alternative<rexp::Empty>(*E)) {
+    assert(false && "pexp_to_constraints: Null or Empty on expression leaf! "
+                    "The exp is not fully simplified?");
+  }
+}
+
+std::string toString(const std::vector<EdgeLabel> &ELs) {
+  std::string ret;
+  for (auto &EL : ELs) {
+    ret += toString(EL) + " ";
+  }
+  return ret;
+}
+
+SubTypeConstraint normalizePath(const std::vector<EdgeLabel> &ELs) {
+  // the pexp must be in (recall _)*(forget _)*
+  SubTypeConstraint Ret;
+  if (ELs.size() < 2) {
+    assert(false && "normalize_path: path size < 2!");
+  }
+  auto &First = ELs[0];
+  if (!std::holds_alternative<RecallBase>(First)) {
+    assert(false && "normalize_path: first label is not RecallBase!");
+  }
+  Ret.sub.name = std::get<RecallBase>(First).base;
+  auto &Last = ELs[ELs.size() - 1];
+  if (!std::holds_alternative<ForgetBase>(Last)) {
+    assert(false && "normalize_path: Last label is not ForgetBase!");
+  }
+  Ret.sup.name = std::get<ForgetBase>(Last).base;
+
+  bool isForget = false;
+  for (std::size_t Ind = 1; Ind < ELs.size() - 1; Ind++) {
+    auto &EL = ELs[Ind];
+    if (std::holds_alternative<RecallLabel>(EL)) {
+      if (isForget) {
+        assert(false && "normalize_path: Path has Recall after Forget!");
+      }
+      Ret.sub.Labels.push_back(std::get<RecallLabel>(EL).label);
+    } else if (std::holds_alternative<ForgetLabel>(EL)) {
+      isForget = true;
+      Ret.sup.Labels.push_back(std::get<ForgetLabel>(EL).label);
+    } else {
+      assert(false && "normalize_path: Base label type in the middle!");
+    }
+  }
+  return Ret;
+}
+
+/// the pexp must be in (recall _)*(forget _)*
+std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
+  std::vector<SubTypeConstraint> ret;
+  if (rexp::isEmpty(E)) {
+    return ret;
+  } else if (rexp::isNull(E)) {
+    assert(false && "pexp_to_constraints: Null path!");
+  }
+  std::vector<std::vector<EdgeLabel>> result;
+  std::vector<EdgeLabel> stack;
+  expToConstraintsRecursive(result, stack, E, true);
+  for (auto &ELs : result) {
+    LLVM_DEBUG(llvm::dbgs() << "Normalize path: " << toString(ELs));
+    SubTypeConstraint Cons = normalizePath(ELs);
+    if (Cons.sub != Cons.sup) {
+      ret.push_back(Cons);
+    }
+  }
+  return ret;
+}
 
 } // namespace notdec::retypd
