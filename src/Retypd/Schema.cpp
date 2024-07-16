@@ -2,7 +2,7 @@
 
 namespace notdec::retypd {
 
-std::string toString(Bound b) {
+std::string toString(const Bound &b) {
   if (std::holds_alternative<None>(b)) {
     return "";
   } else if (std::holds_alternative<NoBound>(b)) {
@@ -16,7 +16,7 @@ std::string toString(Bound b) {
   }
 }
 
-std::string toString(FieldLabel f) {
+std::string toString(const FieldLabel &f) {
   if (std::holds_alternative<InLabel>(f)) {
     return "in_" + std::get<InLabel>(f).name;
   } else if (std::holds_alternative<OutLabel>(f)) {
@@ -34,7 +34,7 @@ std::string toString(FieldLabel f) {
   }
 }
 
-Variance getVariance(FieldLabel &f) {
+Variance getVariance(const FieldLabel &f) {
   if (std::holds_alternative<InLabel>(f)) {
     return Contravariant;
   } else if (std::holds_alternative<OutLabel>(f)) {
@@ -50,7 +50,7 @@ Variance getVariance(FieldLabel &f) {
   }
 }
 
-std::string toString(DerivedTypeVariable dtv) {
+std::string toString(const DerivedTypeVariable &dtv) {
   std::string s = dtv.name;
   for (auto &label : dtv.Labels) {
     s += "." + toString(label);
@@ -61,26 +61,26 @@ std::string toString(DerivedTypeVariable dtv) {
   return s;
 }
 
-std::string toString(SubTypeConstraint c) {
+std::string toStringImpl(const SubTypeConstraint &c) {
   return toString(c.sub) + " <= " + toString(c.sup);
 }
 
-std::string toString(AddConstraint c) {
+std::string toStringImpl(const AddConstraint &c) {
   return "Add(" + toString(c.left) + " + " + toString(c.right) + "=" +
          toString(c.result) + ")";
 }
-std::string toString(SubConstraint c) {
+std::string toStringImpl(const SubConstraint &c) {
   return "Sub(" + toString(c.left) + " - " + toString(c.right) + "=" +
          toString(c.result) + ")";
 }
 
-std::string toString(Constraint c) {
+std::string toString(const Constraint &c) {
   if (std::holds_alternative<SubTypeConstraint>(c)) {
-    return toString(std::get<SubTypeConstraint>(c));
+    return toStringImpl(std::get<SubTypeConstraint>(c));
   } else if (std::holds_alternative<AddConstraint>(c)) {
-    return toString(std::get<AddConstraint>(c));
+    return toStringImpl(std::get<AddConstraint>(c));
   } else if (std::holds_alternative<SubConstraint>(c)) {
-    return toString(std::get<SubConstraint>(c));
+    return toStringImpl(std::get<SubConstraint>(c));
   } else {
     assert(false && "unknown Constraint");
   }

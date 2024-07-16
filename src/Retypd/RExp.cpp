@@ -9,6 +9,10 @@
 
 namespace notdec::retypd::rexp {
 
+PRExp createOr() { return std::make_shared<RExp>(Or{}); }
+PRExp createAnd() { return std::make_shared<RExp>(And{}); }
+PRExp createStar(const PRExp &EL) { return std::make_shared<RExp>(Star{EL}); }
+
 PRExp create(const EdgeLabel &EL) {
   if (std::holds_alternative<One>(EL)) {
     return std::make_shared<RExp>(Empty{});
@@ -133,12 +137,12 @@ PRExp simplifyOnce(const PRExp &Original) {
 /// \brief Get the first path expression node.
 ///
 /// Used for checking if it is a recall or forget.
-std::optional<retypd::EdgeLabel *> first_node(const PRExp &rexp) {
+std::optional<retypd::EdgeLabel *> firstNode(const PRExp &rexp) {
   if (std::holds_alternative<Node>(*rexp)) {
     return &std::get<Node>(*rexp).E;
   } else if (std::holds_alternative<Or>(*rexp)) {
     for (const auto &e : std::get<Or>(*rexp).E) {
-      auto ret = first_node(e);
+      auto ret = firstNode(e);
       if (ret) {
         return ret;
       }
@@ -146,14 +150,14 @@ std::optional<retypd::EdgeLabel *> first_node(const PRExp &rexp) {
     return std::nullopt;
   } else if (std::holds_alternative<And>(*rexp)) {
     for (const auto &e : std::get<And>(*rexp).E) {
-      auto ret = first_node(e);
+      auto ret = firstNode(e);
       if (ret) {
         return ret;
       }
     }
     return std::nullopt;
   } else if (std::holds_alternative<Star>(*rexp)) {
-    return first_node(std::get<Star>(*rexp).E);
+    return firstNode(std::get<Star>(*rexp).E);
   } else if (std::holds_alternative<Empty>(*rexp) ||
              std::holds_alternative<Null>(*rexp)) {
     return std::nullopt;
@@ -164,14 +168,14 @@ std::optional<retypd::EdgeLabel *> first_node(const PRExp &rexp) {
 /// \brief Get the last path expression node.
 ///
 /// Used for checking if it is a recall or forget.
-std::optional<retypd::EdgeLabel *> last_node(const PRExp &rexp) {
+std::optional<retypd::EdgeLabel *> lastNode(const PRExp &rexp) {
   if (std::holds_alternative<Node>(*rexp)) {
     return &std::get<Node>(*rexp).E;
   } else if (std::holds_alternative<Or>(*rexp)) {
     auto &E = std::get<Or>(*rexp).E;
     for (auto it = E.rbegin(); it != E.rend(); ++it) {
       const auto &E2 = *it;
-      auto ret = last_node(E2);
+      auto ret = lastNode(E2);
       if (ret) {
         return ret;
       }
@@ -181,14 +185,14 @@ std::optional<retypd::EdgeLabel *> last_node(const PRExp &rexp) {
     auto &E = std::get<And>(*rexp).E;
     for (auto it = E.rbegin(); it != E.rend(); ++it) {
       const auto &E2 = *it;
-      auto ret = last_node(E2);
+      auto ret = lastNode(E2);
       if (ret) {
         return ret;
       }
     }
     return std::nullopt;
   } else if (std::holds_alternative<Star>(*rexp)) {
-    return last_node(std::get<Star>(*rexp).E);
+    return lastNode(std::get<Star>(*rexp).E);
   } else if (std::holds_alternative<Empty>(*rexp) ||
              std::holds_alternative<Null>(*rexp)) {
     return std::nullopt;
@@ -267,8 +271,8 @@ PRExp operator|(const PRExp &A, const PRExp &B) {
 std::vector<std::tuple<CGNode *, CGNode *, PRExp>>
 eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes) {
   // default to Null path (no path).
-  // TODO: std::map<std::pair<unsigned, unsigned>, PRExp> P; ? use index instead
-  // of pointer
+  // TODO: std::map<std::pair<unsigned, unsigned>, PRExp> P; ? use index
+  // instead of pointer
   std::map<std::pair<CGNode *, CGNode *>, PRExp> P;
   auto getMap = [&](CGNode *N1, CGNode *N2) -> PRExp {
     auto It = P.find({N1, N2});

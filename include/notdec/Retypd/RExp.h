@@ -53,11 +53,15 @@ inline bool isEmpty(const PRExp &rexp) {
   return std::holds_alternative<Empty>(*rexp);
 }
 
+PRExp createOr();
+PRExp createAnd();
+PRExp createStar(const PRExp &EL);
 PRExp create(const EdgeLabel &EL);
+
 std::string toString(const PRExp &rexp);
 PRExp simplifyOnce(const PRExp &Original);
-std::optional<retypd::EdgeLabel *> first_node(const PRExp &rexp);
-std::optional<retypd::EdgeLabel *> last_node(const PRExp &rexp);
+std::optional<retypd::EdgeLabel *> firstNode(const PRExp &rexp);
+std::optional<retypd::EdgeLabel *> lastNode(const PRExp &rexp);
 PRExp operator&(const PRExp &A, const PRExp &B);
 PRExp operator|(const PRExp &A, const PRExp &B);
 

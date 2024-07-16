@@ -33,7 +33,7 @@ struct Fixed {
 };
 using Bound = std::variant<None, NullTerm, NoBound, Fixed>;
 
-std::string toString(Bound b);
+std::string toString(const Bound &b);
 
 struct InLabel {
   std::string name;
@@ -83,9 +83,9 @@ struct StoreLabel {
 using FieldLabel =
     std::variant<InLabel, OutLabel, DerefLabel, LoadLabel, StoreLabel>;
 
-std::string toString(FieldLabel f);
+std::string toString(const FieldLabel &f);
 
-Variance getVariance(FieldLabel &f);
+Variance getVariance(const FieldLabel &f);
 
 struct DerivedTypeVariable {
   std::string name;
@@ -123,14 +123,12 @@ struct DerivedTypeVariable {
   }
 };
 
-std::string toString(DerivedTypeVariable dtv);
+std::string toString(const DerivedTypeVariable &dtv);
 
 struct SubTypeConstraint {
   DerivedTypeVariable sub;
   DerivedTypeVariable sup;
 };
-
-std::string toString(SubTypeConstraint c);
 
 struct AddConstraint {
   DerivedTypeVariable left;
@@ -142,12 +140,10 @@ struct SubConstraint {
   DerivedTypeVariable right;
   DerivedTypeVariable result;
 };
-std::string toString(AddConstraint c);
-std::string toString(SubConstraint c);
 
 using Constraint =
     std::variant<SubTypeConstraint, AddConstraint, SubConstraint>;
-std::string toString(Constraint c);
+std::string toString(const Constraint &c);
 inline bool isSubtypeConstraint(Constraint c) {
   return std::holds_alternative<SubTypeConstraint>(c);
 }
@@ -174,7 +170,7 @@ struct RecallBase {
 using EdgeLabel =
     std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase>;
 
-std::string toString(EdgeLabel label);
+std::string toString(const EdgeLabel &label);
 inline bool isBase(EdgeLabel label) {
   return std::holds_alternative<ForgetBase>(label) ||
          std::holds_alternative<RecallBase>(label);

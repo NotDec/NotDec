@@ -5,8 +5,11 @@
 #include <iostream>
 #include <llvm/ADT/STLExtras.h>
 #include <map>
+#include <memory>
 #include <optional>
+#include <string>
 #include <tuple>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -22,7 +25,7 @@
 
 namespace notdec::retypd {
 
-std::string toString(EdgeLabel label) {
+std::string toString(const EdgeLabel &label) {
   if (std::holds_alternative<One>(label)) {
     return "_1_";
   } else if (std::holds_alternative<ForgetLabel>(label)) {
@@ -426,63 +429,6 @@ void ConstraintGraph::printGraph(const char *DotFile) {
 }
 
 std::string toString(const NodeKey &K) { return K.str(); }
-
-/// \arg isLeaf: whether the current node is a leaf node.
-static void
-expToConstraintsRecursive(std::vector<std::vector<EdgeLabel>> &result,
-                          std::vector<EdgeLabel> &stack, rexp::PRExp E,
-                          bool isLeaf) {
-  // TODO: 这里可能有指数级的复杂度。考虑And(Or("recall a", "recall b"), "forget
-  // #A")，这里用栈模拟是错误的。处理And的时候不能假设Or那边只返回单个表达式序列，即不能用栈存储。
-  //
-  if (std::holds_alternative<rexp::Or>(*E)) {
-    std::size_t stackLevel = stack.size();
-    for (auto E1 : std::get<rexp::Or>(*E).E) {
-      expToConstraintsRecursive(result, stack, E1, isLeaf);
-      stack.resize(stackLevel);
-    }
-  } else if (std::holds_alternative<rexp::And>(*E)) {
-    auto &V = std::get<rexp::And>(*E).E;
-    for (std::size_t Ind = 0; Ind < V.size(); Ind++) {
-      auto E1 = V[Ind];
-      bool isLeaf1 = (Ind == V.size() - 1) ? isLeaf : false;
-      expToConstraintsRecursive(result, stack, E1, isLeaf1);
-    }
-  } else if (std::holds_alternative<rexp::Star>(*E)) {
-    auto Inner = std::get<rexp::Star>(*E).E;
-    std::string tempName = "__temp";
-
-    stack.push_back(ForgetBase{tempName});
-    result.push_back(stack);
-    stack.clear();
-
-    // Create recursive constraints.
-    expToConstraintsRecursive(result, stack,
-                              rexp::create(RecallBase{tempName}) & Inner &
-                                  rexp::create(ForgetBase{tempName}),
-                              true);
-
-    stack.clear();
-    stack.push_back(RecallBase{tempName});
-
-    // 4. act as a normal Node
-    if (isLeaf) {
-      // TODO: ensure
-      assert(false && "pexp_to_constraints: Star on leaf node!?");
-      result.push_back(stack);
-    }
-  } else if (std::holds_alternative<rexp::Node>(*E)) {
-    stack.push_back(std::get<rexp::Node>(*E).E);
-    if (isLeaf) {
-      result.push_back(stack);
-    }
-  } else if (std::holds_alternative<rexp::Null>(*E) ||
-             std::holds_alternative<rexp::Empty>(*E)) {
-    assert(false && "pexp_to_constraints: Null or Empty on expression leaf! "
-                    "The exp is not fully simplified?");
-  }
-}
-
 std::string toString(const std::vector<EdgeLabel> &ELs) {
   std::string ret;
   for (auto &EL : ELs) {
@@ -491,9 +437,111 @@ std::string toString(const std::vector<EdgeLabel> &ELs) {
   return ret;
 }
 
-SubTypeConstraint normalizePath(const std::vector<EdgeLabel> &ELs) {
+struct ExprToConstraintsContext {
+  static const char *tempNamePrefix;
+  int TempNameIndex = 0;
+  // std::function<std::string()> &tempNameGenerator;
+  std::string genTempName() {
+    return tempNamePrefix + std::to_string(TempNameIndex++);
+  }
+  std::vector<std::vector<EdgeLabel>> ConstraintsSequence;
+
+  std::vector<std::vector<EdgeLabel>>
+  expToConstraintsSequenceRecursive(rexp::PRExp E);
+  static std::vector<SubTypeConstraint>
+  normalizePath(const std::vector<EdgeLabel> &ELs);
+  static std::vector<SubTypeConstraint> constraintsSequenceToConstraints(
+      const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence);
+};
+
+const char *ExprToConstraintsContext::tempNamePrefix = "__temp_";
+
+/// \arg isLeaf: whether the current node is a leaf node.
+std::vector<std::vector<EdgeLabel>>
+ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
+  std::vector<std::vector<EdgeLabel>> Result;
+  if (std::holds_alternative<rexp::Or>(*E)) {
+    for (auto E1 : std::get<rexp::Or>(*E).E) {
+      auto R1 = expToConstraintsSequenceRecursive(E1);
+      Result.insert(Result.end(), R1.begin(), R1.end());
+    }
+  } else if (std::holds_alternative<rexp::And>(*E)) {
+    auto &V = std::get<rexp::And>(*E).E;
+    assert(V.size() > 0 &&
+           "expToConstraintsRecursive: rexp::And with size == 0!");
+    std::vector<std::vector<EdgeLabel>> Current =
+        expToConstraintsSequenceRecursive(V[0]);
+    std::vector<std::vector<EdgeLabel>> Result1;
+    for (std::size_t Ind = 1; Ind < V.size(); Ind++) {
+      auto &E1 = V[Ind];
+      auto R1 = expToConstraintsSequenceRecursive(E1);
+      // Cartesian product
+      for (auto &C1 : Current) {
+        for (auto &C2 : R1) {
+          Result1.emplace_back(C1.begin(), C1.end());
+          Result1.back().insert(Result1.back().end(), C2.begin(), C2.end());
+        }
+      }
+      // Current = Result1
+      std::swap(Current, Result1);
+      // Result1 = empty
+      Result1.clear();
+    }
+    return Current;
+  } else if (std::holds_alternative<rexp::Star>(*E)) {
+    auto Inner = std::get<rexp::Star>(*E).E;
+    std::string tempName = genTempName();
+
+    assert((*rexp::firstNode(Inner))->index() ==
+               (*rexp::lastNode(Inner))->index() &&
+           "Star with mixed recall and forget!");
+
+    // Create recursive constraints.
+    auto NewInner = rexp::create(RecallBase{tempName}) & Inner &
+                    rexp::create(ForgetBase{tempName});
+    auto Seq = expToConstraintsSequenceRecursive(NewInner);
+    ConstraintsSequence.insert(ConstraintsSequence.end(), Seq.begin(),
+                               Seq.end());
+
+    // Split the Rule in the middle.
+    // Later in normalizePath, we will detect ForgetBase/RecallBase in the
+    // middle.
+    std::vector<EdgeLabel> V2;
+    V2.push_back(ForgetBase{tempName});
+    V2.push_back(RecallBase{tempName});
+    Result.push_back(V2);
+  } else if (std::holds_alternative<rexp::Node>(*E)) {
+    std::vector<EdgeLabel> Vec;
+    Vec.push_back(std::get<rexp::Node>(*E).E);
+    Result.push_back(Vec);
+  } else if (std::holds_alternative<rexp::Null>(*E) ||
+             std::holds_alternative<rexp::Empty>(*E)) {
+    assert(false && "pexp_to_constraints: Null or Empty on expression leaf! "
+                    "The exp is not fully simplified?");
+  }
+  return Result;
+}
+
+std::vector<SubTypeConstraint>
+ExprToConstraintsContext::constraintsSequenceToConstraints(
+    const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence) {
+  std::vector<SubTypeConstraint> Ret;
+  for (auto &CS : ConstraintsSequence) {
+    LLVM_DEBUG(llvm::dbgs() << "Normalized path: " << toString(CS) << "\n");
+    std::vector<SubTypeConstraint> Cons = normalizePath(CS);
+    for (auto &Con : Cons) {
+      if (Con.sub != Con.sup) {
+        Ret.push_back(Con);
+      }
+    }
+  }
+  return Ret;
+}
+
+std::vector<SubTypeConstraint>
+ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
   // the pexp must be in (recall _)*(forget _)*
-  SubTypeConstraint Ret;
+  std::vector<SubTypeConstraint> Ret;
   if (ELs.size() < 2) {
     assert(false && "normalize_path: path size < 2!");
   }
@@ -501,24 +549,48 @@ SubTypeConstraint normalizePath(const std::vector<EdgeLabel> &ELs) {
   if (!std::holds_alternative<RecallBase>(First)) {
     assert(false && "normalize_path: first label is not RecallBase!");
   }
-  Ret.sub.name = std::get<RecallBase>(First).base;
-  auto &Last = ELs[ELs.size() - 1];
-  if (!std::holds_alternative<ForgetBase>(Last)) {
-    assert(false && "normalize_path: Last label is not ForgetBase!");
-  }
-  Ret.sup.name = std::get<ForgetBase>(Last).base;
+  Ret.emplace_back();
+  // Ret.back().sub.name = std::get<RecallBase>(First).base;
+  // auto &Last = ELs[ELs.size() - 1];
+  // if (!std::holds_alternative<ForgetBase>(Last)) {
+  //   assert(false && "normalize_path: Last label is not ForgetBase!");
+  // }
+  // Ret.sup.name = std::get<ForgetBase>(Last).base;
 
   bool isForget = false;
-  for (std::size_t Ind = 1; Ind < ELs.size() - 1; Ind++) {
+  for (std::size_t Ind = 0; Ind < ELs.size(); Ind++) {
     auto &EL = ELs[Ind];
-    if (std::holds_alternative<RecallLabel>(EL)) {
+    if (std::holds_alternative<RecallBase>(EL)) {
+      auto &Name = std::get<RecallBase>(EL).base;
+      if (Ind == 0) {
+        // OK
+      } else {
+        assert(Ret.back().sub.name.empty());
+        assert(Ret.back().sub.Labels.empty());
+        assert(Ret.back().sup.name.empty());
+        assert(Ret.back().sup.Labels.empty());
+      }
+      Ret.back().sub.name = Name;
+    } else if (std::holds_alternative<ForgetBase>(EL)) {
+      auto &Name = std::get<ForgetBase>(EL).base;
+      Ret.back().sup.name = Name;
+      if (Ind == ELs.size() - 1) {
+        // OK
+      } else {
+        // Must be a temp name.
+        assert(Name.rfind(tempNamePrefix, 0) == 0);
+        // Reset the state.
+        isForget = false;
+        Ret.emplace_back();
+      }
+    } else if (std::holds_alternative<RecallLabel>(EL)) {
       if (isForget) {
         assert(false && "normalize_path: Path has Recall after Forget!");
       }
-      Ret.sub.Labels.push_back(std::get<RecallLabel>(EL).label);
+      Ret.back().sub.Labels.push_back(std::get<RecallLabel>(EL).label);
     } else if (std::holds_alternative<ForgetLabel>(EL)) {
       isForget = true;
-      Ret.sup.Labels.push_back(std::get<ForgetLabel>(EL).label);
+      Ret.back().sup.Labels.push_back(std::get<ForgetLabel>(EL).label);
     } else {
       assert(false && "normalize_path: Base label type in the middle!");
     }
@@ -528,23 +600,16 @@ SubTypeConstraint normalizePath(const std::vector<EdgeLabel> &ELs) {
 
 /// the pexp must be in (recall _)*(forget _)*
 std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
-  std::vector<SubTypeConstraint> ret;
   if (rexp::isEmpty(E)) {
-    return ret;
+    return {};
   } else if (rexp::isNull(E)) {
     assert(false && "pexp_to_constraints: Null path!");
   }
-  std::vector<std::vector<EdgeLabel>> result;
-  std::vector<EdgeLabel> stack;
-  expToConstraintsRecursive(result, stack, E, true);
-  for (auto &ELs : result) {
-    LLVM_DEBUG(llvm::dbgs() << "Normalized path: " << toString(ELs) << "\n");
-    SubTypeConstraint Cons = normalizePath(ELs);
-    if (Cons.sub != Cons.sup) {
-      ret.push_back(Cons);
-    }
-  }
-  return ret;
+  ExprToConstraintsContext Ctx;
+  auto Seq = Ctx.expToConstraintsSequenceRecursive(E);
+  Ctx.ConstraintsSequence.insert(Ctx.ConstraintsSequence.end(), Seq.begin(),
+                                 Seq.end());
+  return Ctx.constraintsSequenceToConstraints(Ctx.ConstraintsSequence);
 }
 
 } // namespace notdec::retypd
