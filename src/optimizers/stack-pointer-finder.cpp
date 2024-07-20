@@ -11,10 +11,8 @@ using namespace llvm;
 
 // Commutable add matcher
 template <typename LHS, typename RHS>
-inline llvm::PatternMatch::BinaryOp_match<LHS, RHS, Instruction::Add, true>
-m_Add_Comm(const LHS &L, const RHS &R) {
-  return llvm::PatternMatch::BinaryOp_match<LHS, RHS, Instruction::Add, true>(
-      L, R);
+inline llvm::PatternMatch::BinaryOp_match<LHS, RHS, Instruction::Add, true> m_Add_Comm(const LHS &L, const RHS &R) {
+  return llvm::PatternMatch::BinaryOp_match<LHS, RHS, Instruction::Add, true>(L, R);
 }
 
 // store (add/sub (load sp) num) sp
@@ -22,8 +20,7 @@ m_Add_Comm(const LHS &L, const RHS &R) {
 1.加载栈指针存在局部变量读出再加减的情况 所以在去除局部变量后进行
 2.wasm中不一定存在global.set 全局栈指针
 */
-GlobalVariable *
-StackPointerFinderAnalysis::find_stack_ptr(BasicBlock &entryBlock) {
+GlobalVariable *StackPointerFinderAnalysis::find_stack_ptr(BasicBlock &entryBlock) {
   // assert(enrtyBlock.isEntryBlock());
   GlobalVariable *sp = nullptr;
   Instruction *load = nullptr;
@@ -69,8 +66,7 @@ GlobalVariable *StackPointerFinderAnalysis::find_stack_ptr(Module &mod) {
   return ana.run(mod).result;
 }
 
-const char *StackPointerFinderAnalysis::StackPointerNames[] = {
-    "__stack_pointer", "env.__stack_pointer"};
+const char *StackPointerFinderAnalysis::StackPointerNames[] = {"__stack_pointer", "env.__stack_pointer"};
 
 static inline bool isStackPointerName(const StringRef &Name) {
   for (const char *Str : StackPointerFinderAnalysis::StackPointerNames) {
@@ -81,8 +77,7 @@ static inline bool isStackPointerName(const StringRef &Name) {
   return false;
 }
 
-StackPointerFinderAnalysis::Result
-StackPointerFinderAnalysis::run(llvm::Module &mod) {
+StackPointerFinderAnalysis::Result StackPointerFinderAnalysis::run(llvm::Module &mod) {
   GlobalVariable *sp = nullptr;
   for (GlobalVariable &gv : mod.getGlobalList()) {
     if (isStackPointerName(gv.getName())) {
@@ -98,7 +93,7 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
   size_t max = 0;
   std::cerr << "Try to guess stack pointer:" << std::endl;
   for (auto pair : sp_count) {
-    llvm::errs() << *pair.first << ": " << pair.second << "\n";
+    llvm::errs() << *pair.first << "(score: " << pair.second << ")\n";
     if (pair.second > max) {
       max = pair.second;
       max_sp = pair.first;
@@ -120,12 +115,10 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
   Result ret;
   ret.result = sp;
   ret.direction = direction_count[0] >= direction_count[1] ? 0 : 1;
-  std::cerr << "stack direction: "
-            << (ret.direction == 0 ? "negative" : "positive") << " ("
+  std::cerr << "stack direction: " << (ret.direction == 0 ? "negative" : "positive") << " ("
             << direction_count[ret.direction] << ")" << std::endl;
   if (direction_count[ret.direction] == 0) {
-    errs()
-        << "WARNING: Stack direction is not determined! Default to negative.\n";
+    errs() << "WARNING: Stack direction is not determined! Default to negative.\n";
   }
   return ret;
 }

@@ -61,9 +61,7 @@ PreservedAnalyses Retypd::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // clean up
   // delete directory if not debug
-  LLVM_DEBUG(if (!Path.empty()) {
-    assert(llvm::sys::fs::remove_directories(Path.str()) == std::errc());
-  });
+  LLVM_DEBUG(if (!Path.empty()) { assert(llvm::sys::fs::remove_directories(Path.str()) == std::errc()); });
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
   return PreservedAnalyses::none();
@@ -120,14 +118,11 @@ static std::string GetLLVMTypeBase(Type *Ty) {
   }
 }
 
-static inline VariableWithOffset makeTv(std::string Name,
-                                        SimpleNumericalDomain offset = {0}) {
+static inline VariableWithOffset makeTv(std::string Name, SimpleNumericalDomain offset = {0}) {
   return VariableWithOffset(retypd::DerivedTypeVariable{.name = Name}, offset);
 }
 
-static inline VariableWithOffset GetLLVMTypeVar(Type *Ty) {
-  return makeTv("#" + GetLLVMTypeBase(Ty));
-}
+static inline VariableWithOffset GetLLVMTypeVar(Type *Ty) { return makeTv("#" + GetLLVMTypeBase(Ty)); }
 
 VariableWithOffset &RetypdGenerator::getTypeVar(Value *Val) {
   if (Val2Dtv.count(Val)) {
@@ -147,8 +142,7 @@ VariableWithOffset RetypdGenerator::getTypeVarNoCache(Value *Val) {
       }
       if (CE->getOpcode() == Instruction::IntToPtr) {
         if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
-          return makeTv(Memory,
-                        SimpleNumericalDomain{Addr->getValue().getSExtValue()});
+          return makeTv(Memory, SimpleNumericalDomain{Addr->getValue().getSExtValue()});
         }
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
@@ -162,10 +156,8 @@ VariableWithOffset RetypdGenerator::getTypeVarNoCache(Value *Val) {
       auto Ty = C->getType();
       return GetLLVMTypeVar(Ty);
     }
-    llvm::errs()
-        << __FILE__ << ":" << __LINE__ << ": "
-        << "ERROR: RetypdGenerator::getTypeVar unhandled type of constant: "
-        << *C << "\n";
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "ERROR: RetypdGenerator::getTypeVar unhandled type of constant: " << *C << "\n";
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
     VariableWithOffset tv = getTypeVar(arg->getParent());
@@ -173,8 +165,7 @@ VariableWithOffset RetypdGenerator::getTypeVarNoCache(Value *Val) {
     return tv;
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val
-               << "\n";
+               << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val << "\n";
   return makeTv(getNewName(*Val, "new_"));
 }
 
@@ -215,7 +206,8 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   }
   // differentiate different call instances in the same function
   auto TargetVar = cg.getFuncName(*Target);
-  auto instanceId = cg.callInstanceId[TargetVar]++;
+  // Starts from 1. So that it is different from the default 0.
+  auto instanceId = ++cg.callInstanceId[TargetVar];
   for (int i = 0; i < I.arg_size(); i++) {
     auto ParamVar = cg.getTypeVar(Target->getArg(i));
     if (instanceId > 0) {
@@ -237,14 +229,21 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitSelectInst(SelectInst &I) {
   auto *Src2 = I.getFalseValue();
   auto Src1Var = cg.getTypeVar(Src1);
   auto Src2Var = cg.getTypeVar(Src2);
-  // Generate boolean constraints or not? TODO
+  // Not generate boolean constraints. Because it must be i1.
   // constrains.push_back("bool <= " + cg.getTypeVar(I.getCondition()));
   cg.addConstraint(Src1Var, DstVar);
   cg.addConstraint(Src2Var, DstVar);
+  cg.setTypeVar(&I, DstVar);
+}
+
+void RetypdGenerator::RetypdGeneratorVisitor::visitAllocaInst(AllocaInst &I) {
+  auto DstVar = makeTv(cg.getNewName(I, "alloca_"));
+  cg.setTypeVar(&I, DstVar);
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
   // Create a stub variable, defer constraints generation to handlePHINodes
+  // Because it goes across the basic block boundary. Operands may be not found using getTypeVar.
   auto DstVar = makeTv(cg.getNewName(I, "phi_"));
   cg.setTypeVar(&I, DstVar);
 }
@@ -290,14 +289,13 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
     }
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: RetypdGenerator::getTypeVar unhandled CastInst: " << I
-               << "\n";
+               << "ERROR: RetypdGenerator::getTypeVar unhandled CastInst: " << I << "\n";
   std::abort();
 }
 
-void RetypdGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
-    GetElementPtrInst &Gep) {
+void RetypdGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(GetElementPtrInst &Gep) {
   assert(false && "Gep should not exist before this pass");
+  // But if we really want to support this, handle it the same way as add.
 }
 
 // FCMP implies float?
@@ -308,14 +306,12 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitICmpInst(ICmpInst &I) {
 
   // for pointer
   if (Src1->getType()->isPointerTy()) {
-    assert(Src2->getType()->isPointerTy() &&
-           "RetypdGenerator: ICmpInst: Src2 is not pointer");
+    assert(Src2->getType()->isPointerTy() && "RetypdGenerator: ICmpInst: Src2 is not pointer");
 
   } else if (is_size_t(Src1, *I.getModule())) {
     // for pointer-sized integer, the comparision may not be integer
     // comparision.
-    assert(is_size_t(Src2, *I.getModule()) &&
-           "RetypdGenerator: ICmpInst: Src2 is not size_t");
+    assert(is_size_t(Src2, *I.getModule()) && "RetypdGenerator: ICmpInst: Src2 is not size_t");
     if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2)) {
       // 2023.11.22 because of InstCombine, this should not happen?
       assert(false && "constant cannot be at the left side of cmp");
@@ -353,6 +349,8 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitFCmpInst(FCmpInst &I) {
   cg.setTypeVar(&I, GetLLVMTypeVar(I.getType()));
 }
 
+// #region LoadStore
+
 // =========== begin: load/store insts and deref analysis ===========
 
 unsigned RetypdGenerator::getPointerElemSize(Type *ty) {
@@ -362,24 +360,19 @@ unsigned RetypdGenerator::getPointerElemSize(Type *ty) {
     return Size;
   }
   if (Elem->isPointerTy()) {
-    assert(pointer_size != 0 &&
-           "RetypdGenerator: pointer size not initialized");
+    assert(pointer_size != 0 && "RetypdGenerator: pointer size not initialized");
     return pointer_size;
   }
   assert(false && "unknown pointer type");
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitStoreInst(StoreInst &I) {
-  auto DstVar =
-      cg.deref(I.getPointerOperand(),
-               cg.getPointerElemSize(I.getPointerOperandType()), false);
+  auto DstVar = cg.deref(I.getPointerOperand(), cg.getPointerElemSize(I.getPointerOperandType()), false);
   cg.addConstraint(cg.getTypeVar(I.getValueOperand()), DstVar);
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
-  auto SrcVar =
-      cg.deref(I.getPointerOperand(),
-               cg.getPointerElemSize(I.getPointerOperandType()), true);
+  auto SrcVar = cg.deref(I.getPointerOperand(), cg.getPointerElemSize(I.getPointerOperandType()), true);
   cg.setTypeVar(&I, SrcVar);
 }
 
@@ -397,19 +390,15 @@ std::string RetypdGenerator::offset(APInt Offset, int Count) {
   return OffsetStr;
 }
 
-retypd::DerefLabel RetypdGenerator::make_deref(uint32_t BitSize,
-                                               SimpleNumericalDomain Offset) {
+retypd::DerefLabel RetypdGenerator::make_deref(uint32_t BitSize, SimpleNumericalDomain Offset) {
   assert(BitSize % 8 == 0 && "size must be byte aligned");
   uint32_t Size = BitSize = BitSize / 8;
 
-  return retypd::DerefLabel{.size = Size,
-                            .offset = static_cast<int32_t>(Offset.offset),
-                            .bound = Offset.bound};
+  return retypd::DerefLabel{.size = Size, .offset = static_cast<int32_t>(Offset.offset), .bound = Offset.bound};
 }
 
 // Special logics for load and store when generating type variables.
-VariableWithOffset RetypdGenerator::deref(Value *Val, long BitSize,
-                                          bool isLoad) {
+VariableWithOffset RetypdGenerator::deref(Value *Val, long BitSize, bool isLoad) {
   assert(BitSize != 0 && "RetypdGenerator::deref: zero size!?");
   // from the offset, generate a loaded type variable.
   auto DstVar = getTypeVar(Val);
@@ -424,69 +413,75 @@ VariableWithOffset RetypdGenerator::deref(Value *Val, long BitSize,
 
 // =========== end: load/store insts ===========
 
+// #endregion LoadStore
+
 // =========== begin: other insts ===========
 
-const std::map<unsigned, RetypdGenerator::PcodeOpType>
-    RetypdGenerator::opTypes = {
-        // for Trunc, ZExt, SExt
-        {Instruction::Trunc, {"int", (const char *[1]){"int"}, 1}},
-        {Instruction::ZExt, {"uint", (const char *[1]){"int"}, 1}},
-        {Instruction::SExt, {"int", (const char *[1]){"int"}, 1}},
+const std::map<unsigned, RetypdGenerator::PcodeOpType> RetypdGenerator::opTypes = {
+    // for Trunc, ZExt, SExt
+    {Instruction::Trunc, {"int", (const char *[1]){"int"}, 1}},
+    {Instruction::ZExt, {"uint", (const char *[1]){"int"}, 1}},
+    {Instruction::SExt, {"int", (const char *[1]){"int"}, 1}},
 
-        // other cast insts: FPToUIInst, FPToSIInst, UIToFPInst, SIToFPInst
-        {Instruction::FPToUI, {"uint", (const char *[1]){"float"}, 1}},
-        {Instruction::FPToSI, {"int", (const char *[1]){"float"}, 1}},
-        {Instruction::UIToFP, {"float", (const char *[1]){"uint"}, 1}},
-        {Instruction::SIToFP, {"float", (const char *[1]){"int"}, 1}},
-        {Instruction::FPTrunc, {"float", (const char *[1]){"float"}, 1}},
-        {Instruction::FPExt, {"float", (const char *[1]){"float"}, 1}},
+    // other cast insts: FPToUIInst, FPToSIInst, UIToFPInst, SIToFPInst
+    {Instruction::FPToUI, {"uint", (const char *[1]){"float"}, 1}},
+    {Instruction::FPToSI, {"int", (const char *[1]){"float"}, 1}},
+    {Instruction::UIToFP, {"float", (const char *[1]){"uint"}, 1}},
+    {Instruction::SIToFP, {"float", (const char *[1]){"int"}, 1}},
+    {Instruction::FPTrunc, {"float", (const char *[1]){"float"}, 1}},
+    {Instruction::FPExt, {"float", (const char *[1]){"float"}, 1}},
 
-        {Instruction::UDiv, {"uint", (const char *[2]){"uint", "uint"}, 2}},
-        {Instruction::SDiv, {"int", (const char *[2]){"int", "int"}, 2}},
-        {Instruction::URem, {"uint", (const char *[2]){"uint", "uint"}, 2}},
-        {Instruction::SRem, {"int", (const char *[2]){"int", "int"}, 2}},
-        {Instruction::Xor, {"int", (const char *[2]){"int", "int"}, 2}},
-        {Instruction::FNeg, {"float", (const char *[2]){"float"}, 1}},
-        {Instruction::FAdd, {"float", (const char *[2]){"float", "float"}, 2}},
-        {Instruction::FSub, {"float", (const char *[2]){"float", "float"}, 2}},
-        {Instruction::FMul, {"float", (const char *[2]){"float", "float"}, 2}},
-        {Instruction::FDiv, {"float", (const char *[2]){"float", "float"}, 2}},
+    {Instruction::UDiv, {"uint", (const char *[2]){"uint", "uint"}, 2}},
+    {Instruction::SDiv, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::URem, {"uint", (const char *[2]){"uint", "uint"}, 2}},
+    {Instruction::SRem, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::Xor, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::FNeg, {"float", (const char *[2]){"float"}, 1}},
+    {Instruction::FAdd, {"float", (const char *[2]){"float", "float"}, 2}},
+    {Instruction::FSub, {"float", (const char *[2]){"float", "float"}, 2}},
+    {Instruction::FMul, {"float", (const char *[2]){"float", "float"}, 2}},
+    {Instruction::FDiv, {"float", (const char *[2]){"float", "float"}, 2}},
 
-        // {Instruction::Add, {"int", {"int", "int"}}},
-        // {Instruction::Sub, {"int", {"int", "int"}}},
-        // {Instruction::Mul, {"int", {"int", "int"}}},
+    {Instruction::Add, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::Sub, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::Mul, {"int", (const char *[2]){"int", "int"}, 2}},
 
-        // {Instruction::Shl, {"int", {"int", "int"}}},
-        // {Instruction::LShr, {"int", {"int", "int"}}},
-        // {Instruction::AShr, {"int", {"int", "int"}}},
-        // {Instruction::And, {"int", {"int", "int"}}},
-        // {Instruction::Or, {"int", {"int", "int"}}},
+    {Instruction::Shl, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::LShr, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::AShr, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::And, {"int", (const char *[2]){"int", "int"}, 2}},
+    {Instruction::Or, {"int", (const char *[2]){"int", "int"}, 2}},
 };
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitInstruction(Instruction &I) {
   if (opTypes.count(I.getOpcode())) {
     opTypes.at(I.getOpcode()).addConstrains(&I, cg);
   }
-  llvm::errs() << "WARN: RetypdGeneratorVisitor unhandled instruction: " << I
-               << "\n";
+  llvm::errs() << "WARN: RetypdGeneratorVisitor unhandled instruction: " << I << "\n";
 }
 
-const std::map<std::string_view, std::map<int, std::string_view>>
-    RetypdGenerator::typeSize = {
-        {"int", {{8, "int8"}, {16, "int16"}, {32, "int32"}, {64, "int64"}}},
-        {"uint",
-         {{8, "uint8"}, {16, "uint16"}, {32, "uint32"}, {64, "uint64"}}},
-        {"float", {{32, "float"}, {64, "double"}}},
+void RetypdGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) { llvm::errs() << "Visiting __func__ \n"; }
+void RetypdGenerator::RetypdGeneratorVisitor::visitSub(BinaryOperator &I) { llvm::errs() << "Visiting __func__ \n"; }
+void RetypdGenerator::RetypdGeneratorVisitor::visitMul(BinaryOperator &I) { llvm::errs() << "Visiting __func__ \n"; }
+
+void RetypdGenerator::RetypdGeneratorVisitor::visitShl(BinaryOperator &I) { llvm::errs() << "visiting __func__ \n"; }
+void RetypdGenerator::RetypdGeneratorVisitor::visitLShr(BinaryOperator &I) { llvm::errs() << "visiting __func__ \n"; }
+void RetypdGenerator::RetypdGeneratorVisitor::visitAShr(BinaryOperator &I) { llvm::errs() << "visiting __func__ \n"; }
+void RetypdGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) { llvm::errs() << "visiting __func__ \n"; }
+void RetypdGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) { llvm::errs() << "Visiting __func__ \n"; }
+
+const std::map<std::string_view, std::map<int, std::string_view>> RetypdGenerator::typeSize = {
+    {"int", {{8, "int8"}, {16, "int16"}, {32, "int32"}, {64, "int64"}}},
+    {"uint", {{8, "uint8"}, {16, "uint16"}, {32, "uint32"}, {64, "uint64"}}},
+    {"float", {{32, "float"}, {64, "double"}}},
 };
 
-void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I,
-                                                 RetypdGenerator &cg) const {
+void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I, RetypdGenerator &cg) const {
   if (!I->getType()->isVoidTy()) {
     const char *ty = output;
     // for this opcode, change type according to the size.
     if (typeSize.count(output)) {
-      ty =
-          typeSize.at(output).at(I->getType()->getPrimitiveSizeInBits()).data();
+      ty = typeSize.at(output).at(I->getType()->getPrimitiveSizeInBits()).data();
     }
     cg.addConstraint(makeTv(std::string("#") + ty), cg.getTypeVar(I));
   }
@@ -504,8 +499,7 @@ void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I,
 
 std::string RetypdGenerator::getFuncName(Function &F) {
   auto ret = getTypeVar(&F);
-  assert(ret.dtv.Labels.empty() &&
-         "getFuncName: non empty label for function.");
+  assert(ret.dtv.Labels.empty() && "getFuncName: non empty label for function.");
   return ret.dtv.name;
 }
 

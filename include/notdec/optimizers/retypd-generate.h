@@ -29,9 +29,7 @@ struct SimpleNumericalDomain {
   using offset_t = std::variant<offset_num_t, std::string>;
   offset_num_t offset = 0;
   retypd::Bound bound = retypd::None{};
-  bool isZero() const {
-    return offset == 0 && std::holds_alternative<retypd::None>(bound);
-  }
+  bool isZero() const { return offset == 0 && std::holds_alternative<retypd::None>(bound); }
 };
 
 struct VariableWithOffset {
@@ -39,15 +37,12 @@ struct VariableWithOffset {
   SimpleNumericalDomain offset;
   bool isPrimitive = false;
 
-  VariableWithOffset(retypd::DerivedTypeVariable dtv,
-                     SimpleNumericalDomain offset = {0})
-      : dtv(dtv), offset(offset){};
+  VariableWithOffset(retypd::DerivedTypeVariable dtv, SimpleNumericalDomain offset = {0}) : dtv(dtv), offset(offset){};
 
   std::string str() const { return toString(dtv); }
 };
 
-inline retypd::SubTypeConstraint makeCons(const VariableWithOffset &sub,
-                                          const VariableWithOffset &sup) {
+inline retypd::SubTypeConstraint makeCons(const VariableWithOffset &sub, const VariableWithOffset &sup) {
   if (!sub.offset.isZero() || !sup.offset.isZero()) {
     std::cerr << __FILE__ << ":" << __LINE__ << ": "
               << "makeCons: offset not zero?\n";
@@ -80,16 +75,12 @@ public:
     assert(ref.second && "setTypeVar: Value already exists");
     return ref.first->second;
   }
-  void addConstraint(const VariableWithOffset &sub,
-                     const VariableWithOffset &sup) {
-    addConstraint(makeCons(sub, sup));
-  }
+  void addConstraint(const VariableWithOffset &sub, const VariableWithOffset &sup) { addConstraint(makeCons(sub, sup)); }
   void addConstraint(retypd::Constraint Cons) {
     if (std::holds_alternative<retypd::SubTypeConstraint>(Cons)) {
       auto &SCons = std::get<retypd::SubTypeConstraint>(Cons);
       if (SCons.sub.isPrimitive() && SCons.sup.isPrimitive()) {
-        assert(SCons.sub.name == SCons.sup.name &&
-               "addConstraint: different primitive types !?");
+        assert(SCons.sub.name == SCons.sup.name && "addConstraint: different primitive types !?");
         return;
       }
     }
@@ -105,11 +96,9 @@ public:
   VariableWithOffset deref(Value *val, long BitSize, bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {
-    return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,
-                     IntToPtrInst>(Val);
+    return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst, IntToPtrInst>(Val);
   }
-  static retypd::DerefLabel make_deref(uint32_t BitSize,
-                                       SimpleNumericalDomain Offset);
+  static retypd::DerefLabel make_deref(uint32_t BitSize, SimpleNumericalDomain Offset);
   static std::string offset(APInt Offset, int Count = 0);
   static std::string sanitize_name(std::string s);
 
@@ -123,26 +112,21 @@ protected:
     int size;
 
   public:
-    PcodeOpType(const char *output, const char *inputs[], int size)
-        : output(output), inputs(inputs), size(size) {}
+    PcodeOpType(const char *output, const char *inputs[], int size) : output(output), inputs(inputs), size(size) {}
     void addConstrains(Instruction *I, RetypdGenerator &cg) const;
   };
 
-  static const std::map<std::string_view, std::map<int, std::string_view>>
-      typeSize;
+  static const std::map<std::string_view, std::map<int, std::string_view>> typeSize;
   static const std::map<unsigned, PcodeOpType> opTypes;
 
   // visitor class
-  class RetypdGeneratorVisitor
-      : public llvm::InstVisitor<RetypdGeneratorVisitor> {
+  class RetypdGeneratorVisitor : public llvm::InstVisitor<RetypdGeneratorVisitor> {
     RetypdGenerator &cg;
     // defer phi node constraints
     std::vector<llvm::PHINode *> phiNodes;
 
   public:
-    RetypdGeneratorVisitor(RetypdGenerator &cg,
-                           std::vector<retypd::Constraint> &constrains)
-        : cg(cg) {}
+    RetypdGeneratorVisitor(RetypdGenerator &cg, std::vector<retypd::Constraint> &constrains) : cg(cg) {}
     // overloaded visit functions
     void visitCastInst(CastInst &I);
     void visitCallBase(CallBase &I);
@@ -150,16 +134,31 @@ protected:
     void visitPHINode(PHINode &I);
     void visitLoadInst(LoadInst &I);
     void visitStoreInst(StoreInst &I);
-    // void visitAllocaInst(AllocaInst &I);
+    void visitAllocaInst(AllocaInst &I);
     void visitGetElementPtrInst(GetElementPtrInst &I);
     void visitICmpInst(ICmpInst &I);
     void visitFCmpInst(FCmpInst &I);
     void visitSelectInst(SelectInst &I);
-    // use opTypes to handle other insts.
-    void visitInstruction(Instruction &I);
+
+    void visitAdd(BinaryOperator &I);
+    void visitSub(BinaryOperator &I);
+    void visitMul(BinaryOperator &I);
+
+    void visitShl(BinaryOperator &I);
+    void visitLShr(BinaryOperator &I);
+    void visitAShr(BinaryOperator &I);
+    // handle sth like
+    // 1. Alignment/ Use lowest bits in pointer: And %x, 0xffffff00.
+    // 2. set lowest bits in the pointer: Or %x, 0x7
+    void visitAnd(BinaryOperator &I);
+    void visitOr(BinaryOperator &I);
+
+    // ignore control flow related instructions
     void visitUnreachableInst(UnreachableInst &I) {}
     void visitBranchInst(BranchInst &I) {}
     void handlePHINodes();
+    // use opTypes to handle other insts.
+    void visitInstruction(Instruction &I);
   };
 };
 

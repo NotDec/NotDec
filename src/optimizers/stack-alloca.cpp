@@ -8,6 +8,7 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/IR/PatternMatch.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
@@ -36,8 +37,10 @@ namespace notdec {
 /// rely on canonical form of LLVM Instructions, So run instcombine first.
 /// see:
 /// https://www.npopov.com/2023/04/10/LLVM-Canonicalization-and-target-independence.html
-PreservedAnalyses LinearAllocationRecovery::run(Module &M,
-                                                ModuleAnalysisManager &MAM) {
+///
+/// Currently we only replace the stack pointer load and restore with alloca. No add is converted to gep currently.
+/// If the stack grows negative, the offsets will also be negative. But in the alloca, the size is still positive.
+PreservedAnalyses LinearAllocationRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   errs() << " ============== LinearAllocationRecovery  ===============\n";
   auto sp_result = MAM.getResult<StackPointerFinderAnalysis>(M);
   auto sp = sp_result.result;
@@ -113,14 +116,12 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         }
       }
       if (match_level == 0 && has_load_sp) {
-        llvm::errs()
-            << "ERROR: No pattern matched but the stack pointer is accessed!\n";
+        llvm::errs() << "ERROR: No pattern matched but the stack pointer is accessed in func: " << F->getName() << "!\n";
       }
     }
     // 1.3 Failed to match any stack allocation.
     if (match_level == 0) {
-      llvm::errs() << "ERROR: cannot find stack allocation in func: "
-                   << F->getName() << "\n";
+      llvm::errs() << "ERROR: cannot find stack allocation in func: " << F->getName() << "\n";
       continue;
     }
     // For normal stack allocation (level = 2): Remove epilogue that restore the
@@ -129,7 +130,7 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
       assert(add_load_sp != nullptr && space != nullptr);
       assert(add_load_sp->getParent() == LoadSP->getParent());
       // find epilogue in exit blocks, and remove it.
-      auto pat_restore = m_Store(m_Deferred(LoadSP), m_Specific(sp));
+      auto pat_restore = m_Store(m_Specific(LoadSP), m_Specific(sp));
       bool removed = false;
       for (auto &BB : *F) {
         if (BB.getTerminator()->getNumSuccessors() == 0) {
@@ -144,8 +145,7 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         }
       }
       if (!removed) {
-        llvm::errs() << "ERROR: Cannot find sp restore? func: " << F->getName()
-                     << "\n";
+        llvm::errs() << "ERROR: Cannot find sp restore? func: " << F->getName() << "\n";
         continue;
       }
     }
@@ -153,29 +153,30 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
     // replace the stack allocation with alloca.
     bool grow_negative = sp_result.direction == 0;
     auto pty = PointerType::get(IntegerType::get(M.getContext(), 8), 0);
-    auto SizeTy = IntegerType::get(M.getContext(),
-                                   M.getDataLayout().getPointerSizeInBits());
+    auto SizeTy = IntegerType::get(M.getContext(), M.getDataLayout().getPointerSizeInBits());
     // TODO handle positive grow direction.
     assert(grow_negative == true);
     // When match_level == 1, Only LoadSP is not null.
     if (match_level == 1) {
       space = ConstantInt::getNullValue(SizeTy);
-    } else if (grow_negative) {
-      space = Builder.CreateNeg(space);
     }
+    //  else if (grow_negative) {
+    //   space = Builder.CreateNeg(space);
+    // }
     Builder.SetInsertPoint(LoadSP);
     Value *alloc =
-        Builder.CreateAlloca(pty->getPointerElementType(), space, "stack");
-    Value *alloc_end = Builder.CreateGEP(pty->getPointerElementType(), alloc,
-                                         space, "stack_end");
-    alloc = Builder.CreatePtrToInt(alloc, LoadSP->getType());
-    alloc_end = Builder.CreatePtrToInt(alloc_end, LoadSP->getType());
+        Builder.CreateAlloca(pty->getPointerElementType(), grow_negative ? Builder.CreateNeg(space) : space, "stack_addr");
+    cast<Instruction>(alloc)->setMetadata("notdec.stack_direction",
+                                          MDNode::get(M.getContext(), MDString::get(M.getContext(), "negative")));
+    alloc = Builder.CreatePtrToInt(alloc, LoadSP->getType(), "stack");
+    Value *alloc_end = Builder.CreateAdd(alloc, space, "stack_end");
 
+    // The name is incorrect. high_addr does not mean it will must
     Instruction *high_addr = add_load_sp;
     Instruction *low_addr = LoadSP;
-    if (grow_negative) {
-      std::swap(high_addr, low_addr);
-    }
+    // if (grow_negative) {
+    //   std::swap(high_addr, low_addr);
+    // }
     // replace all uses of LoadSP with alloc_end.
     low_addr->replaceAllUsesWith(alloc);
     low_addr->eraseFromParent();

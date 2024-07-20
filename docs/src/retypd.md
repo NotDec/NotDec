@@ -676,6 +676,7 @@ sketch 和约束的对应关系很好。任何约束集合都能被一个sketch�
 
 定义
 
+
 ### Q&A
 
 Q1. **为什么实现的时候，那边先infer shapes然后才简化约束？那能不能直接不简化约束了，既然我本来就想要内部的变量**
@@ -841,26 +842,83 @@ Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by EL
 
 **拓展到任意有向图：** 对于有向图G，首先将图中的强连通分离凝结成单个点表示，则可以得到有向无环图，这些节点 $G_1,G_2,...,G_k$ 表示图G中的一个子图，编号按照拓扑排序。假设这些子图的路径表达式是 $X_1,...,X_k$ ，设 $Y_l$ 是序列 $\{e,h(e),t(e)|h(e) \in G_l \; and \; t(e) \notin G_l\}$ 任意排序（注意到 $Y_k$ 为空）。则 $X_1,Y_1,X_2,Y_2,...,X_{k-1},Y_{k-1},X_k$是G的一个路径序列。
 
-## 从静态分析的视角看
+## 与其他算法的关系
 
-**SSA的静态分析和传统静态分析**
 
-- SSA的静态分析是在 SSA Edge ，即def-use chain上进行，遇到Phi指令merge结果。。
-- 传统静态分析在CFG上进行，遇到控制流合并时merge结果。
+### Retypd与现有指针分析的关系
+
+#### Steensgaard 线性时间 指针分析
+
+相关资料：
+
+1. [DCC888 编译器静态分析课 Pointer Analysis](https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/PointerAnalysis.pdf) 
+2. [北京大学 软件分析 熊英飞](https://xiongyingfei.github.io/SA/2017/10_control_flow_analysis.pdf) 
+
+#### 与 Anderson 指针分析的关系
+
+对应retypd论文中Constraint generation一节。
+
+对于语句 q = &x，如何生成约束？有两种方式
+
+- x是q加载后的子类型（提前假设q会被load）： 生成 `x <= q.load.off0@N`
+- q存入值是x的子类型（提前假设q会被store）：生成 `q.store.off0@N <= x` 
+
+需要考虑的问题是，立刻生成这两个约束，和维护一个指针分析，根据指针分析的结果生成这些约束。这两种方式是否有区别。
+
+- 假如提前生成了这个约束，是否会产生什么额外的影响？
+  -  直观来说，额外生成的 q.load.off0@N  q.store.off0@N 还能有谁指向吗？
+- 如果Steensgaard指针分析能推断出指向关系，假如不产生指针分析的约束，原有类型系统是否依然能推断出来类型关系。
+
+证明：
+
+分每种语句考虑(TODO 证明 offset和load/store可以绑定/合并)
+
+- **语句1**：对于 x = &O1，对应 `O1 <= x.load`  和  `x.store <= O1` 我们把指向关系定义为这两个关系的组合。
+- **语句2**：对于 y = x (x <= y)，在retypd下有如下图结构：
+
+![assignment constraint graph](imgs/assignment-retypd.drawio.png)
+
+在指针分析中有如下约束： pts(x) $\subseteq$ pts(y) 我们尝试证明：
+
+- 对于任何x可能指向的对象，y也会指向它。
+  - 1 已知 O1 <= x.load ，证明 O1 <= y.load：证：由 x.load <= y.load 显然 O1 <= x.load <= y.load
+  - 2 已知 x.store <= O1 ，证明 y.store <= O1：证：由y.store <= x.store 显然 y.store <= x.store <= O1
+
+能否证明充要条件？如果存在 `O1 <= x.load`  和  `x.store <= O1` 则必然在Anderson指针分析中有 O1 $\in$ pts(x)
+
+则我们可以证明，retypd是一种基于anderson指针分析的类型推断算法。
+
+![Pointer analysis constraints](imgs/Anderson-pointer-algo.png)
+
+**语句3**：对于a = *b，有  b.load <= a
+
+- 方式1 提前生成约束： 由归纳法，如果之前的其他语句都能够维持和指针分析等效的分析关系，当前语句依然能维持关系，则关系继续维持。
+  - 提前生成约束会额外生成约束： 对于任何 O $\in$ pts(b) 有 b.store <= O 似乎影响不大？
+- 方式2 根据指针分析生成约束：对于任何 v $\in$ pts(b) ，生成/之前有 v <= b.load。因此有 v <= b.load <= a。对应 v $\subseteq$ a
+
+**语句4**：对于*a = b，有 b <= a.store
+
+- 根据指针分析生成约束：对于任何 v $\in$ pts(a) ，之前有 a.store <= v。所以有 b <= a.store <= v。对应 b $\subseteq$ v
+
+- saturation算法和Anderson指针分析算法求解时的异同。
+- retypd如果没有区分指针的load和store，是否依然和anderson指针分析一致？
+  - 不行，明显上面的证明是和load和store性质有很大关系的。
+
+**问题**：offset和load/store可以绑定/合并
+
+**证明**：首先.in 和.out只能在最外层。因此没有什么能够介入load/store中间。其次，每次load和store必然有offset和size。我们讨论某个变量的load和store的时候，本质上在讨论所有可能的offset和size之间的关系/对应的结构体类型。
+
+## 实现 - 约束生成
 
 **基本运算**
 
+根据指令的依赖关系，自底向上处理指令，插入到指令到约束集合的集合。生成约束变量。
+
+- 指针相关
+  - 存地址运算：由上面的证明，直接假设它之后会被load/store，生成两条约束。
 - 变量赋值/数据流传递：对应子类型关系。
-  - 指针分析：指针之间的赋值对应一个特殊的操作。
-- 加法和减法：
-  - 类型分析：生成加减法约束。从静态分析的角度说，它是类型分析中的转换函数。
-  - 指针分析：变成完全不同但有联系的指针对象。
-- 内存读取和存储：
-  - 类型分析：
-    - 读取：更新读取值代表的类型变量的能力，根据类型关系将这个能力传播出去。
-    - 存储：数据流关系 + 变量能力更新。
-    - 此外，如果指针p可能指向对象a，有： `a <= p.load.σN@x`或者 `p.store.σN@x <= a`。但是这里是非SSA值才需要这么做。如果都SSA了，则我们这里存储时会直接引用到某个对象，而不是一个指针变量。我现在栈空间得先split开吗？
-  - 指针分析：需要更深的访问语义，即得到具体的访问对象。
+- 加法和减法约束
+  - 函数内是双向数据流分析，但是要和Summary-based analysis结合，无法求解的约束存到summary里尝试化简。
 
 **加减法约束**
 
@@ -876,10 +934,9 @@ Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by EL
 - 类型分析需要随着指针指向去传播。
 - 类型分析涉及指针时，不需要考虑流敏感性，上下文敏感性。
 
-## Steensgaard 线性时间 指针分析
+## 其他
 
-相关资料：
+**SSA的静态分析和传统静态分析**
 
-1. [DCC888 编译器静态分析课 Pointer Analysis](https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/PointerAnalysis.pdf) 
-2. [北京大学 软件分析 熊英飞](https://xiongyingfei.github.io/SA/2017/10_control_flow_analysis.pdf) 
-
+- SSA的静态分析是在 SSA Edge ，即def-use chain上进行，遇到Phi指令merge结果。。
+- 传统静态分析在CFG上进行，遇到控制流合并时merge结果。
