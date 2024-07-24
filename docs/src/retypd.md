@@ -449,6 +449,16 @@ $$
 3. （F.2）构建sketches（为每个类型变量，比如函数类型）（自底向上遍历call graph的顺序），同时细化具体类型。
 4. （4.3）最后转换sketches到C类型。
 
+类型恢复本质上是三层分析的叠加：
+
+- 指针和数字类型的区分。
+- 指针能力分析。
+- 自定义的typedef常量类型传播。
+
+本质上，retypd在前两者里用的是快速的steensgaard的指针分析，在最后这层的分析上用的是Anderson的指针分析算法。
+
+retypd为什么不直接采用steensgaard的类型恢复？因为常量用不了，merge了直接变成父类型，基本无法传播自定义的typedef类型。。
+
 对于每个SCC看作按需分析。每个SCC能够简化算法计算出对应的summary。
 
 ### 无约束的下推系统 Unconstrained Pushdown Systems
@@ -940,3 +950,15 @@ Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by EL
 
 - SSA的静态分析是在 SSA Edge ，即def-use chain上进行，遇到Phi指令merge结果。。
 - 传统静态分析在CFG上进行，遇到控制流合并时merge结果。
+
+**静态分析之间的分层依赖**
+
+静态分析直接可能有依赖关系。比如指针和数字类型区分就被retypd类型恢复依赖，retypd进一步恢复指针的具体类型。
+
+静态分析之间，是依赖关系还是更复杂的的关系。在于是否上层依赖的分析结果会反哺下层分析的结果。比如这里retypd如果恢复了更详细的具体类型，比如两个指针指向的结构体成员之间的复杂关系，那么这两个就有关系。。
+
+问题：基于Steensgaard的线性时间指针分析算法的合并存储图，和retypd的sketches 等价图分析指针和数字类型，达到的精度是否相同？
+
+答：应该是相同的。retypd的等价图构建后就等价是Steensgaard的存储关系图。
+
+但是在跨函数分析框架下，这些具体分析都是一样地需要专门看待。。
