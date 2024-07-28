@@ -40,6 +40,27 @@ std::string toString(const EdgeLabel &label) {
   assert(false && "Unknown FieldLabel!");
 }
 
+std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
+  assert(!isLayerSplit && "printConstraints: graph is already split!?");
+
+  std::vector<SubTypeConstraint> ret;
+  for (auto &Ent : Nodes) {
+    // TODO deduplicate?
+    // if (Ent.second.key.SuffixVariance == Contravariant) {
+    //   continue;
+    // }
+    auto &Source = Ent.second;
+    for (auto &Edge : Source.outEdges) {
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      if (std::holds_alternative<One>(Edge.Label)) {
+        ret.push_back(SubTypeConstraint{.sub = Ent.second.key.Base,
+                                        .sup = Target.key.Base});
+      }
+    }
+  }
+  return ret;
+}
+
 std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 
   std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P;
@@ -108,8 +129,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 }
 
 std::vector<SubTypeConstraint>
-ConstraintGraph::simplify(std::vector<Constraint> &Cons,
-                          std::set<std::string> &InterestingVars) {
+ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
 
   // if (!InterestingVars.has_value()) {
   //   assert(false); // TODO: is this useful?
@@ -117,7 +137,6 @@ ConstraintGraph::simplify(std::vector<Constraint> &Cons,
   //   InterestingVars->insert(FuncName);
   // }
 
-  buildInitialGraph(Cons);
   if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) ||
         (std::strstr(path, FuncName.c_str()))) {
@@ -189,6 +208,8 @@ void ConstraintGraph::buildPathSequence() {
 }
 
 void ConstraintGraph::layerSplit() {
+  assert(!isLayerSplit && "layerSplit: already split!?");
+  isLayerSplit = true;
   // add edges
   std::vector<std::tuple<CGNode *, CGNode *, CGNode *, FieldLabel>> toChange;
   for (auto &Ent : Nodes) {
@@ -336,36 +357,46 @@ void ConstraintGraph::saturate() {
   }
 }
 
-/// build the initial graph (Algorithm D.1 Transducer)
-void ConstraintGraph::buildInitialGraph(std::vector<Constraint> &Cons) {
-  for (Constraint &C : Cons) {
+ConstraintGraph
+ConstraintGraph::fromConstraints(std::string FuncName,
+                                 std::vector<Constraint> &Cons) {
+  ConstraintGraph G(FuncName);
+  for (auto &C : Cons) {
     if (std::holds_alternative<SubTypeConstraint>(C)) {
-      auto &SC = std::get<SubTypeConstraint>(C);
-      // 1. add two node and 1-labeled edge
-      auto &NodeL = getOrInsertNode(SC.sub);
-      auto &NodeR = getOrInsertNode(SC.sup);
-      // add 1-labeled edge between them
-      addEdge(NodeL, NodeR, One{});
-      // 2. add each sub var node and edges.
-      // 2.1 left
-      addRecalls(NodeL);
-      // 2.2 right
-      addForgets(NodeR);
-
-      // 3-4 the inverse of the above
-      // 3. inverse node and 1-labeled edge
-      auto &RNodeL = getOrInsertNode(NodeKey(SC.sub, Contravariant));
-      auto &RNodeR = getOrInsertNode(NodeKey(SC.sup, Contravariant));
-      // add 1-labeled edge between them
-      addEdge(RNodeR, RNodeL, One{});
-      // 4.1 inverse left
-      addRecalls(RNodeL);
-      // 4.2 inverse right
-      addForgets(RNodeR);
+      auto &SCons = std::get<SubTypeConstraint>(C);
+      G.addConstraint(SCons.sub, SCons.sup);
     } else {
-      AddConstraints.push_back(C);
+      assert(false && "buildInitialGraph: Unimplemented constraint type!");
     }
   }
+  return G;
+}
+
+/// Interface for initial constraint insertion
+/// Also build the initial graph (Algorithm D.1 Transducer)
+void ConstraintGraph::addConstraint(const DerivedTypeVariable &sub,
+                                    const DerivedTypeVariable &sup) {
+  // 1. add two node and 1-labeled edge
+  auto &NodeL = getOrInsertNode(sub);
+  auto &NodeR = getOrInsertNode(sup);
+  // add 1-labeled edge between them
+  addEdge(NodeL, NodeR, One{});
+  // 2. add each sub var node and edges.
+  // 2.1 left
+  addRecalls(NodeL);
+  // 2.2 right
+  addForgets(NodeR);
+
+  // 3-4 the inverse of the above
+  // 3. inverse node and 1-labeled edge
+  auto &RNodeL = getOrInsertNode(NodeKey(sub, Contravariant));
+  auto &RNodeR = getOrInsertNode(NodeKey(sup, Contravariant));
+  // add 1-labeled edge between them
+  addEdge(RNodeR, RNodeL, One{});
+  // 4.1 inverse left
+  addRecalls(RNodeL);
+  // 4.2 inverse right
+  addForgets(RNodeR);
 }
 
 std::optional<std::pair<FieldLabel, NodeKey>> NodeKey::forgetOnce() const {

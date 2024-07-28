@@ -7,9 +7,11 @@
 #include <string>
 #include <vector>
 
-std::vector<notdec::retypd::Constraint>
-parse_constraints(std::vector<const char *> cons_str) {
-  std::vector<notdec::retypd::Constraint> ret;
+using notdec::retypd::Constraint;
+using notdec::retypd::ConstraintGraph;
+
+std::vector<Constraint> parse_constraints(std::vector<const char *> cons_str) {
+  std::vector<Constraint> ret;
   for (const char *con : cons_str) {
     auto res = notdec::retypd::parseSubTypeConstraint(con);
     EXPECT_EQ(res.first.size(), 0);
@@ -39,10 +41,11 @@ TEST(Retypd, SaturationPaperTest) {
   llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons = parse_constraints(
       {"y <= p", "p <= x", "#A <= x.store4", "y.load4 <= #B"});
-  notdec::retypd::ConstraintGraph CG("SaturationPaper");
+  ConstraintGraph CG =
+      ConstraintGraph::fromConstraints("SaturationPaper", cons);
 
   std::set<std::string> InterestingVars;
-  auto Cons = CG.simplify(cons, InterestingVars);
+  auto Cons = CG.simplify(InterestingVars);
   CG.printGraph("SaturationPaper.dot");
   std::cerr << "Simplified Constraints:" << std::endl;
   for (auto &C : Cons) {
@@ -56,7 +59,7 @@ TEST(Retypd, SaturationPaperTest) {
 TEST(Retypd, SlidesExampleTest) {
   llvm::DebugFlag = true;
   llvm::setCurrentDebugType("retypd_graph");
-  std::vector<notdec::retypd::Constraint> cons = parse_constraints({
+  std::vector<Constraint> cons = parse_constraints({
       "F.in_stack0 <= 𝛿",
       "𝛼 <= 𝜑",
       "𝛿 <= 𝜑",
@@ -67,10 +70,10 @@ TEST(Retypd, SlidesExampleTest) {
       "close.in_stack0 <= #FileDescriptor",
       "#SuccessZ <= close.out_eax",
   });
-  notdec::retypd::ConstraintGraph CG("SlideExample");
+  ConstraintGraph CG = ConstraintGraph::fromConstraints("SlideExample", cons);
   std::set<std::string> InterestingVars;
   InterestingVars.insert("F");
-  auto Cons = CG.simplify(cons, InterestingVars);
+  auto Cons = CG.simplify(InterestingVars);
   // CG.printGraph("SlideExample.dot");
 
   // std::cerr << "Simplified Constraints:" << std::endl;

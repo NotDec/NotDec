@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -15,6 +16,7 @@
 
 #include "Retypd/RExp.h"
 #include "Retypd/Schema.h"
+#include "Retypd/Unify.h"
 
 namespace notdec::retypd {
 
@@ -56,6 +58,11 @@ using CGBase = llvm::DirectedGraph<CGNode, CGEdge>;
 struct CGNode : CGNodeBase {
   const NodeKey key;
   std::set<CGEdge> outEdges;
+
+  // Map from CGNode to SSGNode using union-find
+  // We will not remove CGNode from the graph, but just update, so it is safe to
+  // use raw pointer here.
+  std::variant<CGNode *, SSGNode *> SSGNode;
   CGNode(NodeKey key) : key(key) {}
 };
 
@@ -79,16 +86,19 @@ struct ConstraintGraph : CGBase {
   std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> PathSeq;
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
+  bool isLayerSplit = false;
 
   ConstraintGraph(std::string FuncName) : FuncName(FuncName) {}
 
+  // Interface for initial constraint insertion
+  void addConstraint(const DerivedTypeVariable &sub,
+                     const DerivedTypeVariable &sup);
+
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
-  simplify(std::vector<Constraint> &Cons,
-           std::set<std::string> &InterestingVars);
+  simplify(std::set<std::string> &InterestingVars);
 
   // internal steps
-  void buildInitialGraph(std::vector<Constraint> &Cons);
   void saturate();
   void layerSplit();
   void buildPathSequence();
@@ -96,6 +106,9 @@ struct ConstraintGraph : CGBase {
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);
   void printGraph(const char *DotFile);
+  std::vector<SubTypeConstraint> toConstraints();
+  static ConstraintGraph fromConstraints(std::string FuncName,
+                                         std::vector<Constraint> &Cons);
 
 protected:
   // Graph related operations
