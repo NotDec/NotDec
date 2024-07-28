@@ -27,6 +27,7 @@ bool check(std::vector<notdec::retypd::SubTypeConstraint> &Cons,
            std::set<std::string> Answer) {
   EXPECT_EQ(Cons.size(), Answer.size());
   for (auto &C : Cons) {
+    std::cerr << "Checking: " << notdec::retypd::toString(C) << std::endl;
     EXPECT_TRUE(Answer.count(notdec::retypd::toString(C)) == 1);
   }
   return true;
@@ -36,8 +37,8 @@ bool check(std::vector<notdec::retypd::SubTypeConstraint> &Cons,
 TEST(Retypd, SaturationPaperTest) {
   llvm::DebugFlag = true;
   llvm::setCurrentDebugType("retypd_graph");
-  std::vector<notdec::retypd::Constraint> cons =
-      parse_constraints({"y <= p", "p <= x", "#A <= x.store", "y.load <= #B"});
+  std::vector<notdec::retypd::Constraint> cons = parse_constraints(
+      {"y <= p", "p <= x", "#A <= x.store4", "y.load4 <= #B"});
   notdec::retypd::ConstraintGraph CG("SaturationPaper");
 
   std::set<std::string> InterestingVars;
@@ -59,8 +60,8 @@ TEST(Retypd, SlidesExampleTest) {
       "F.in_stack0 <= 𝛿",
       "𝛼 <= 𝜑",
       "𝛿 <= 𝜑",
-      "𝜑.load.σ4@0 <= 𝛼",
-      "𝜑.load.σ4@4 <= 𝛼'",
+      "𝜑.load4.@0 <= 𝛼",
+      "𝜑.load4.@4 <= 𝛼'",
       "𝛼' <= close.in_stack0",
       "close.out_eax <= F.out_eax",
       "close.in_stack0 <= #FileDescriptor",
@@ -77,8 +78,8 @@ TEST(Retypd, SlidesExampleTest) {
   //   std::cerr << notdec::retypd::toString(C) << "\n";
   // }
   check(Cons,
-        {"__temp_0.σ4@0.load <= __temp_0", "#SuccessZ <= F.out_eax",
-         "F.in_stack0.load <= __temp_0", "__temp_0.σ4@4 <= #FileDescriptor"});
+        {"__temp_0.@0.load4 <= __temp_0", "#SuccessZ <= F.out_eax",
+         "F.in_stack0.load4 <= __temp_0", "__temp_0.@4 <= #FileDescriptor"});
 }
 
 void printConstraints(

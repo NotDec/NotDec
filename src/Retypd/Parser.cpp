@@ -2,6 +2,7 @@
 #include "Retypd/Parser.h"
 #include "Retypd/Schema.h"
 #include "Utils/Range.h"
+#include <iostream>
 #include <string>
 
 namespace notdec::retypd {
@@ -151,14 +152,15 @@ ParseResultT<OffsetLabel> parseOffsetLabel(llvm::StringRef str) {
   llvm::StringRef rest = str;
 
   decltype(OffsetRange::offset) Offset = 0;
-  if (rest.consume_front("@")) {
-    auto [rest2, ROffset] = parseU32(rest);
-    if (!ROffset.isOk()) {
-      return {str, ROffset.msg()};
-    }
-    Offset = ROffset.get();
-    rest = rest2;
+  if (!rest.consume_front("@")) {
+    return {str, "parseOffsetLabel: Expect @: " + str.substr(0, 10)};
   }
+  auto [rest2, ROffset] = parseU32(rest);
+  if (!ROffset.isOk()) {
+    return {str, ROffset.msg()};
+  }
+  Offset = ROffset.get();
+  rest = rest2;
 
   OffsetRange ret = OffsetRange{.offset = Offset};
   while (rest.size() > 0 && rest.front() == '+') {
@@ -177,10 +179,11 @@ ParseResultT<LoadLabel> parseLoad(llvm::StringRef str) {
   if (!str.consume_front("load")) {
     return {str, "parseLoad: Expect load: " + str.substr(0, 10)};
   }
-  auto [rest2, RSize] = parseU32(str);
+  auto [rest, RSize] = parseU32(str);
   if (!RSize.isOk()) {
     return {str, RSize.msg()};
   }
+  str = rest;
   return {str, LoadLabel{.Size = RSize.get()}};
 }
 
@@ -189,10 +192,11 @@ ParseResultT<StoreLabel> parseStore(llvm::StringRef str) {
   if (!str.consume_front("store")) {
     return {str, "parseLoad: Expect store: " + str.substr(0, 10)};
   }
-  auto [rest2, RSize] = parseU32(str);
+  auto [rest, RSize] = parseU32(str);
   if (!RSize.isOk()) {
     return {str, RSize.msg()};
   }
+  str = rest;
   return {str, StoreLabel{.Size = RSize.get()}};
 }
 
@@ -240,7 +244,8 @@ parseDerivedTypeVariable(llvm::StringRef str) {
     if (!RField.isOk()) {
       return {rest, RField.msg()};
     }
-    labels.push_back(RField.get());
+    auto &Field = RField.get();
+    labels.push_back(Field);
     rest = rest1;
     rest = skipWhitespace(rest);
   }

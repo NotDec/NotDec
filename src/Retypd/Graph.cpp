@@ -314,12 +314,12 @@ void ConstraintGraph::saturate() {
             LLVM_DEBUG(llvm::dbgs()
                        << "node " << Reach.second->key.str() << " can reach "
                        << Ent.first->key.str() << " with \".store\" \n");
-            Label = LoadLabel{};
+            Label = LoadLabel{.Size = std::get<StoreLabel>(Reach.first).Size};
           } else if (std::holds_alternative<LoadLabel>(Reach.first)) {
             LLVM_DEBUG(llvm::dbgs()
                        << "node " << Reach.second->key.str() << " can reach "
                        << Ent.first->key.str() << " with \".load\" \n");
-            Label = StoreLabel{};
+            Label = StoreLabel{.Size = std::get<LoadLabel>(Reach.first).Size};
           } else {
             continue;
           }
