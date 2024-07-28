@@ -263,9 +263,105 @@
 <li>使用<code>breakpoint modify 1 -c &quot;((int64_t) (ci-&gt;getSExtValue()) &lt; -100)&quot;</code>这样的命令给断点增加条件</li>
 </ul>
 <p>更多使用方式见<a href="https://lldb.llvm.org/use/tutorial.html">lldb使用教程</a></p>
-<h2 id="修改llvm值的类型"><a class="header" href="#修改llvm值的类型">修改LLVM值的类型</a></h2>
+<p>一些非常实用的调试技巧</p>
+<ul>
+<li>打印指令，值，函数等： <code>expr llvm::errs() &lt;&lt; I</code></li>
+<li>打印模块：使用定义的工具函数： <code>expr notdec::printModule(M, &quot;out.ll&quot;)</code></li>
+</ul>
+<h3 id="instvisitor"><a class="header" href="#instvisitor">InstVisitor</a></h3>
+<pre><code class="language-cpp">  class MyVisitor
+      : public llvm::InstVisitor&lt;MyVisitor&gt; {
+</code></pre>
+<p>访问逻辑：</p>
+<ul>
+<li>名字仅有visit的为入口函数。访问模块或者函数 (<code>Visitor.visit(M)</code>) 会帮你访问里面的指令</li>
+<li>默认继承的父类的行为：
+<ul>
+<li>指令的入口函数 (<code>void visit(Instruction &amp;I)</code>): （一般不会override）根据指令类型调用细分的visit方法</li>
+<li>各种其他类型的细分visit方法调用对应的大类visit方法 例如 <code>visitLoadInst -&gt; visitUnaryInstruction</code>。</li>
+<li>最后一个大类visit方法 <code>visitInstruction</code>： 为空。</li>
+</ul>
+</li>
+</ul>
+<p>总结：细分visit方法是我们要override的，如果没有override实现，则会因为继承的默认实现继续分流到大类方法，最终到最通用的<code>visitInstruction</code>。反过来说如果override了，（如果没有主动去调用）则会截断这类指令的访问，使得这类指令不会主动调用 <code>visitInstruction</code>。</p>
+<p>需要注意，如果想要visitor有个返回值类型，需要在父类模板的第二个参数指定类型，同时必须实现visitInstruction方法，因为至少要给你的返回类型指定一个默认返回值。</p>
+<h3 id="修改llvm值的类型"><a class="header" href="#修改llvm值的类型">修改LLVM值的类型</a></h3>
 <p>LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵活变动。比如一个整数，虽然可能有一些加法运算，但是你还是可以强制把它设成指针类型，然后在每个使用点插入ptrtoint指令转回去。</p>
 <p>有些LLVM值的类型，修改起来非常麻烦。尤其是函数的参数和返回值类型。函数也是GlobalValue，甚至是Constant。</p>
+<h3 id="打印pass前后ir"><a class="header" href="#打印pass前后ir">打印Pass前后IR</a></h3>
+<p>LLVM提供了方便的 <code>--print-after-all</code> 等选项。首先在创建PassBuilder的时候，创建插桩的类并注册CallBack。注册所有的标准插桩后很多选项都可以生效，包括计算Pass的运行时间，是否在每个前后打印Pass，展示IR的变化diff，甚至生成HTML的报告。</p>
+<pre><code class="language-cpp">// add instrumentations.
+PassInstrumentationCallbacks PIC;
+StandardInstrumentations SI(::llvm::DebugFlag, false, PrintPassOptions());
+SI.registerCallbacks(PIC, &amp;FAM);
+</code></pre>
+<p>现在新的Pass都继承自 <code>PassInfoMixin</code> 类，这个类会增加一个name函数，在运行时可以动态获取类的名称（包含namespace）。如果不确定可以在<code>--print-after-all</code> 后在log里查看。这个名称称为 PassID 。</p>
+<p>命令行参数里指定的是通过PassID查找得到的缩略名称。需要提前在 <code>PassInstrumentationCallbacks</code> 中注册：</p>
+<pre><code>  PIC.addClassToPassName(&quot;notdec::LinearAllocationRecovery&quot;,
+                         &quot;linear-allocation-recovery&quot;);
+  PIC.addClassToPassName(&quot;notdec::PointerTypeRecovery&quot;,
+                         &quot;pointer-type-recovery&quot;);
+</code></pre>
+<p>此时就可以在命令行中指定相关的pass打印了。比如 <code>--print-before=pointer-type-recovery</code> 。</p>
+<h3 id="clang"><a class="header" href="#clang">Clang</a></h3>
+<p><strong>AST handling</strong></p>
+<ul>
+<li>创建AST时有两种方式
+<ol>
+<li>使用Create方法，如<code>clang::FunctionDecl::Create(...)</code></li>
+<li>没有Create方法时，使用ASTContext的new操作符。如：<code>new (ASTCtx) clang::GotoStmt(...)</code></li>
+</ol>
+</li>
+</ul>
+<p><strong>CFG handling</strong></p>
+<p>CFGBlock包含：</p>
+<ul>
+<li>
+<p>LabelStatement，用于生成Goto语句。</p>
+</li>
+<li>
+<p>一系列语句</p>
+</li>
+<li>
+<p>CFGTerminator</p>
+<ul>
+<li>对于return/unreachable：保存对应的返回语句或函数调用语句。</li>
+<li>对于br/switch，保存对应的条件表达式。同时保证successor的顺序：本来CFG保证的是If-Then-Else顺序，但是如果是条件跳转，我们使用True-False的顺序，和IR里的successor()顺序一致。</li>
+</ul>
+</li>
+<li>
+<p>CFGBuilder在LLVM中是逆序创建的，即逆向遍历AST，逆向创建语句。在打印或者遍历CFG块的时候，其中<code>CFGBlock::ElementList</code>把正常的iterator改用reverse_iterator实现。存储的时候是逆向存储，但是后续读取每个CFGBlock的时候也被偷偷改成逆向读取。但是我们算法如果不是逆向的话，想要在末尾继续插入语句，反而需要插入到开头，内存开销增加了。</p>
+<ul>
+<li>如果将结构恢复算法弄成逆向的，首先找到所有的没有后继节点的结束块，每个结束块分治。</li>
+</ul>
+</li>
+<li>
+<p>对于<code>if (A &amp;&amp; B &amp;&amp; C)</code>，<code>CFGBlock-&gt;getTerminatorStmt()</code>会在C处返回整个<code>A &amp;&amp; B &amp;&amp; C</code>表达式。调用<code>getLastCondition()</code>，会把CFGBlock最后一个statement转换成Expr返回。</p>
+</li>
+</ul>
+<p><strong>BumpVector Memory Allocation</strong></p>
+<p>Clang的内存分配都是通过ASTContext进行的，内部使用了一个BumpAllocator，Bump是一种简单的线性内存分配，内存不会真正被释放，放弃内存复用。或者等一整块分配结束之后，再整块全部释放。根据<a href="https://github.com/llvm/llvm-project/blob/e6de9ed37308e46560243229dd78e84542f37ead/clang/include/clang/AST/ASTContext.h#L617">这里</a>，ASTContext解构时释放所有存储AST节点的内存。</p>
+<ul>
+<li>根据<a href="https://discourse.llvm.org/t/checker-for-destruction-needing-classes-allocated-in-bumpptrallocators/15386">这里</a>，从这里分配的相关的数据结构内部不能有std::vector或者SmallVector这种会在堆上分配内存的数据结构。因为不会调用destructor，导致堆上的内存不会被free，导致内存泄露。</li>
+</ul>
+<p>BumpVectorContext存储了一个<code>llvm::PointerIntPair&lt;llvm::BumpPtrAllocator*, 1&gt; Alloc;</code>，这是一个指针低位复用的数据结构，可以理解为一个指针加一个bool值。用户传入外部的allocator，比如ASTContext的，完全不释放内存。也可以让它新建一个allocator，并在解构的时候释放所有内存。</p>
+<p>Clang CFG内置了一个BumpVectorContext，解构时会释放所有内存。因此在结构分析过程中，CFG相关的基本块虽然出现创建后又删除的情况，但不会导致内存泄露。 TODO: 一些临时的AST节点，如一些临时的Goto语句，它们的内存释放怎么办？</p>
+<p>这次在BumpVector里增加的erase函数，仅把元素移动到末尾然后解构，和内存泄露应该无关。</p>
+<p><strong>clang::QualType</strong></p>
+<p>QualType 本质上就是一个指针，同时复用了低位的bit位，存储一些qualifier信息，如volatile等修饰符。</p>
+<ul>
+<li>QualType大部分情况下可以看作是clang::Type*</li>
+<li>QualType有可能为空指针，同时也可以直接创建空的QualType</li>
+</ul>
+<p><strong>clang::IdentifierInfo</strong></p>
+<p>IdentifierInfo除了名字字符串之外，仅仅存储了一些名字的种类信息，例如是不是define的，是不是keyword，是不是variable或者function name。</p>
+<ul>
+<li><strong>变量重名</strong>：它似乎并不对应作用域，并不用于检测变量重名。
+<ul>
+<li><a href="https://github.com/llvm/llvm-project/blob/f15014ff549a8686671a599f7b49ce9963769eaf/clang/lib/Sema/SemaLookup.cpp#L1914"><code>Sema::LookupName</code></a> 内部手动遍历检测了重名情况。</li>
+</ul>
+</li>
+</ul>
 
                     </main>
 

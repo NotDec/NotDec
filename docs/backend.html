@@ -152,12 +152,12 @@
                     <main>
                         <h1 id="反编译器后端---结构分析"><a class="header" href="#反编译器后端---结构分析">反编译器后端 - 结构分析</a></h1>
 <p>结构分析负责将IR转换为伪C代码。</p>
-<h2 id="最简单的fallback实现"><a class="header" href="#最简单的fallback实现">(最简单的)fallback实现</a></h2>
+<h2 id="使用goto语句的ir转c"><a class="header" href="#使用goto语句的ir转c">使用Goto语句的IR转C</a></h2>
 <!-- - 判断每个IR语句是否有副作用。如果不存在副作用，且仅有一个user，则作为表达式折叠到其他语句。否则生成局部变量储存它的值。 -->
 <ul>
 <li>给所有的基本块前添加标号，对于任意控制流跳转，使用goto实现。最后删除无用的标号。</li>
 </ul>
-<p>Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处理的边转换为Goto语句。</p>
+<p>这种方法可以考虑作为现有算法的辅助，将算法无法处理的边转换为Goto语句。算法可以自由选择能够折叠的边进行折叠，从而只需要考虑实际的结构分析效果，不必纠结算法的完善和鲁棒性。</p>
 <h2 id="structural-analysis-和-reducible-control-flow"><a class="header" href="#structural-analysis-和-reducible-control-flow">Structural Analysis 和 Reducible Control Flow</a></h2>
 <ul>
 <li><a href="http://baishakhir.github.io/class/2020_Fall/5_control_flow_analysis.pdf">PPT(结尾介绍了Reducibility)</a></li>
@@ -193,7 +193,7 @@
 </ul>
 </li>
 </ul>
-<p><strong>概述</strong>：在编译优化方面，有研究人员发现，要是在IR（CFG）层面能够用上AST层面的信息（IF，While，For控制流结构），能够加速现有的数据流分析。然而在IR（CFG）层面，高级语言的结构信息已经丢失了。因此，有部分研究人员提出了通过模式匹配的方式，从CFG中识别出控制流结构。由此诞生了interval analysis算法，后续发展出了Structural Analysis。</p>
+<p><strong>概述</strong>：在编译优化方面，有研究人员提出，要是在IR（CFG）层面能够用上AST层面的信息（IF，While，For控制流结构），能够加速现有的数据流分析。然而在IR（CFG）层面，高级语言的结构信息已经丢失了。因此，有部分研究人员提出了通过模式匹配的方式，从CFG中识别出控制流结构。由此诞生了interval analysis算法，后续发展出了Structural Analysis。</p>
 <p>结构分析一般可以分为一下几个步骤：</p>
 <ol>
 <li>类似interval analysis的嵌套区域划分。</li>
@@ -216,7 +216,10 @@
 <li>更新H的那一行代码的意思是：加入H的新节点，(1)不属于当前规约好的集合，(2)直接前驱在当前规约好的集合里。 （即，按顺序弄。）</li>
 </ul>
 <p>在《Advanced Compiler Design and Implementation》里提到这种方式划分的是Maximal Interval。书中还提出了改进版的算法，划分的是Minimal Interval，划分效果更好，更小的区域便于后续划分高级语言的控制结构。</p>
-<p><strong>Interval Analysis (minimal interval)</strong>：该算法是《Advanced Compiler Design and Implementation》提出的改进版。它将CFG划分为三个部分，无环（acylic），natural loop和improper region。无环部分即有向无环子图，其他两种区域则包含环。后面会提到，proper region指一些虽然无环，但是也不能被简单的if-else等结构匹配的无环部分。improper region与之对应，有环，但是是比较复杂的环。</p>
+<p><strong>Interval Analysis (minimal interval)</strong>：该算法是《Advanced Compiler Design and Implementation》提出的改进版。它将CFG划分为三个部分，无环（acylic），natural loop和improper region。无环部分即有向无环子图，其他两种区域则包含环。</p>
+<ul>
+<li><strong>proper region和improper region</strong>：proper region指一些虽然无环，但是也不能被简单的if-else等结构匹配的无环部分。improper region与之对应，有环，但是是比较复杂的环。</li>
+</ul>
 <p><strong>步骤：</strong></p>
 <ol>
 <li>使用一个后序遍历找到loop header，和improper region的header。（后面再详细解释）</li>
@@ -288,59 +291,7 @@
 <li>在原有匹配cyclic region，acyclic region之后，如果匹配失败，就尝试匹配tail region。这里在Phoenix里面提到，这篇论文里没有写清楚具体的匹配算法。而且他们发现，经常确实也匹配不到这种tail region，如果图太复杂还是会失败。</li>
 <li>关于论文没有说清楚的其他点，首先是怎么识别SESS region吧，可能是在原有的划分region基础上再做些判断。其次是怎么识别tail region的跳走的边。可能是识别region的基础上，看边是不是跳到head和tail的吧。</li>
 </ul>
-<h3 id="phoenix-第一个真正实用的结构恢复算法"><a class="header" href="#phoenix-第一个真正实用的结构恢复算法">Phoenix 第一个“真正实用”的结构恢复算法</a></h3>
-<ul>
-<li><a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">[Phoenix]</a> 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 <a href="https://edmcman.github.io/pres/usenix13.pptx">slides</a></li>
-</ul>
-<p>paper的3.1节介绍了算法框架，和结构分析很相似。</p>
-<ul>
-<li>使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
-<ul>
-<li>如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过</li>
-<li>如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过</li>
-<li>如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
-<ul>
-<li>优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。</li>
-<li>优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-<p>具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。</p>
-<p><strong>算法的输入输出</strong>：输入当然是CFG。如何规划输出的格式？结构分析的本质是把CFG组织成了带有标签的树的结构。树的节点里蕴含额外的控制流跳转信息。</p>
-<p>结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式</p>
-<ul>
-<li>
-<p>可能会有这种原始的想法：能不能把结果表示为CFG上的简单标记？似乎是不能的，因为是完全不一样的东西。</p>
-<ul>
-<li>比如，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Then-Else结构，单看IF块就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢失了信息的。</li>
-</ul>
-</li>
-<li>
-<p>LLVM的SSA能否和AST共存？稍微搜了一下，不太能。确实和我想的一样，最多就是基本块参数。还是直接把SSA解构了吧。</p>
-<ul>
-<li>SSA保留比较麻烦，可以考虑写成basic block argument的形式，在if while这种结构的末尾加上（带基本块参数的）goto？或者直接留下基本块参数。</li>
-</ul>
-</li>
-<li>
-<p>Region：算法的主体数据结构，对<code>List&lt;Statement&gt;</code>的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。</p>
-<ul>
-<li>最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。(<a href="https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs">reko - RegionGraphBuilder</a>)，在算法的迭代下不断折叠。</li>
-<li>最后的效果就是整个函数体变成单个linear region。</li>
-</ul>
-</li>
-<li>
-<p>Statement：已经结构化的基本块/statement的集合。</p>
-<ul>
-<li>不使用Expression，而是结合LLVM的指令。</li>
-</ul>
-</li>
-<li>
-<p>LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。</p>
-</li>
-</ul>
-<p><strong>Interval Analysis as a pre step?</strong>：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？</p>
+<p><strong>Interval Analysis as a pre-step?</strong>：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？</p>
 <ul>
 <li>Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败（归类为proper region）。</li>
 <li>Cyclic Region：识别natural loop。如果无法识别，还是返回失败(归类为improper region)。</li>
@@ -358,6 +309,67 @@
 </li>
 </ul>
 <p><img src="backend/graph1.drawio.svg" alt="sample-graph1" /></p>
+<h3 id="phoenix-第一个真正实用的结构恢复算法"><a class="header" href="#phoenix-第一个真正实用的结构恢复算法">Phoenix 第一个“真正实用”的结构恢复算法</a></h3>
+<ul>
+<li><a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">[Phoenix]</a> 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 <a href="https://edmcman.github.io/pres/usenix13.pptx">slides</a></li>
+<li><a href="https://github.com/uxmal/reko/blob/a42da9990a674f275a2d9e76ba00bb264d5eb470/src/Decompiler/Structure/StructureAnalysis.cs">reko的实现</a></li>
+</ul>
+<p>paper的3.1节介绍了算法框架，和结构分析很相似。</p>
+<ul>
+<li>使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
+<ul>
+<li>如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过</li>
+<li>如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。实在处理不了还是跳过
+<ul>
+<li>如果匹配失败，进入Loop Refinement阶段（3.6节）。</li>
+</ul>
+</li>
+<li>如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
+<ul>
+<li>优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。</li>
+<li>优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。</p>
+<p><strong>Loop的节点</strong>：</p>
+<ul>
+<li>原始的定义：一个反向边的Natural Loop（即，natural loop严格说并不是一个单独的概念，反而是对一条反向边而言的。），是指，最小的，包括反向边头和尾节点的节点集合，集合内所有节点的前驱，要么在集合内，要么这个节点是entry节点，前驱是entry的前驱。</li>
+<li>存在的问题：不能涵盖一些break语句所在基本块的节点。这些节点被上面定义的“最小”排除。</li>
+<li>新的定义：除了原始定义中的节点，额外增加了一些节点。
+<ul>
+<li>新增节点的定义1：被loop header, 即entry支配的节点中：排除从loop的successor节点，不经过loop header可达的节点。</li>
+<li>新增节点的定义2：满足两个条件：条件1：被entry支配。条件2，从loop的successor节点出发，不经过loop header的条件下，不可达。</li>
+</ul>
+</li>
+</ul>
+<h4 id="reko的实现"><a class="header" href="#reko的实现">reko的实现</a></h4>
+<ul>
+<li>Region：算法的主体数据结构，对<code>List&lt;Statement&gt;</code>的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。
+<ul>
+<li>最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。(<a href="https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs">reko - RegionGraphBuilder</a>)，在算法的迭代下不断折叠。</li>
+<li>最后的效果就是整个函数体变成单个linear region。</li>
+</ul>
+</li>
+<li>Statement：已经结构化的基本块/statement的集合。
+<ul>
+<li>不使用Expression，而是结合LLVM的指令。</li>
+</ul>
+</li>
+<li>LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。</li>
+</ul>
+<p><strong>算法的输入输出</strong>：首先包括一个将LLVM指令重新折叠为C表达式的数据结构，负责创建所有其他语句。而结构恢复算法，则主要负责创建if，else，while，这些语句。我们基于Clang AST生成C/C++源码。可以发现，clang中有些源码分析也需要CFG，因此也为源码块的CFG数据结构。基于Clang内置的<a href="https://clang.llvm.org/docs/InternalsManual.html#the-cfg-class">CFG数据结构</a>，我们先将IR转换为这里的CFG结构，然后再由结构分析基于CFG生成完整的文件的AST。</p>
+<p>结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式</p>
+<ul>
+<li>可能会有这种原始的想法：能不能把结果表示为CFG上的简单标记？似乎是不能的，因为是完全不一样的东西。
+<ul>
+<li>比如，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Then-Else结构，单看IF块就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢失了信息的。</li>
+</ul>
+</li>
+<li>LLVM的SSA能否和AST共存？稍微搜了一下，不太能。而且在表达式折叠的时候，遇到这种跨基本块的phi数据流，也适合创建新的变量。</li>
+</ul>
 <h3 id="dream"><a class="header" href="#dream">Dream</a></h3>
 <ul>
 <li><a href="https://net.cs.uni-bonn.de/fileadmin/ag/martini/Staff/yakdan/dream_ndss2015.pdf">Dream</a>:《No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations》 <a href="https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf">slides</a></li>
@@ -369,6 +381,202 @@
 </ul>
 </li>
 </ul>
+<h2 id="实现"><a class="header" href="#实现">实现</a></h2>
+<p>目标是支持任意IR的转C语言伪代码。一些IR层丢失的类型信息（整数是否有符号，结构体的字段名称等）需要额外的数据结构。</p>
+<p><strong>代码优化</strong>：Phi指令不好提供支持，我们使用demoteSSA去除Phi指令。为了消除demoteSSA带来的额外空基本块，我们再调用了SimplifyCFG pass。</p>
+<h3 id="表达式折叠"><a class="header" href="#表达式折叠">表达式折叠</a></h3>
+<p>副作用的处理：不考虑是否有副作用，即都当有副作用处理。暂时不考虑无副作用的表达式为了简洁的折叠。例如<code>int tmp = 1+2; f(tmp); g(tmp)</code> 不会折叠为<code>f(1+2); g(1+2)</code>;</p>
+<ul>
+<li>Stmt和Expr的划分：
+<ul>
+<li>如果一个指令没有返回值，纯粹只有副作用，则作为Stmt。例如Store指令。</li>
+<li>如果一个指令可能有返回值，则作为Expr，根据引用情况和次数考虑
+<ul>
+<li>如果指令没有使用者，则直接将表达式作为stmt插入。</li>
+<li>如果指令被基本块外指令引用，或者被当前基本块的指令引用多次，则创建局部变量，然后注册这个局部变量到ExprMap。</li>
+<li>如果指令被当前基本块内的指令引用，且仅被引用一次，则直接作为表达式折叠到对应的指令内。直接将当前表达式注册到ExprMap。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副作用就应该作为Stmt。而是指令没有返回值，不会被作为value才作为Stmt。具体是否应该把Expr作为Stmt放下来，这个都得放。具体是否应该创建一个局部变量，得看是否在一个基本块。如果发现这个Expr的基本块和当前的基本块不同的话，就应该在那边为这个expr创建一个局部变量。</p>
+<p><strong>逻辑表达式</strong>: C/C++的and/or具有短路的性质。但在无副作用时这影响不大。但是在IR中，如果尝试直接优先折叠成and/or指令，则会不存在短路，语义发生变化。因此逻辑运算符需要在结构分析中处理。</p>
+<ul>
+<li>DemoteSSA会引入不必要的基本块，我们使用SimplifyCFG处理这些基本块。SimplifyCFG同时还会折叠and/or表达式，但是折叠后是select指令的形式。
+<ul>
+<li>select 指令对应ternary三元运算符。同时select 如果作用在i1，同时两边如果存在false或者true常量时，可以作为and/or处理。
+<ul>
+<li>select i1 expr1, i1 true, i1 expr2 -&gt; expr1 || expr2</li>
+<li>select i1 expr1, i1 expr2, i1 false -&gt; expr1 &amp;&amp; expr2</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>LLVM里的instcombine会将这种模式转为and/or（见<a href="https://aqjune.github.io/posts/2021-10-4.the-select-story.html">这里</a>），但是我们不需要考虑那么多，直接两种都支持。</li>
+</ul>
+<h3 id="指令处理"><a class="header" href="#指令处理">指令处理</a></h3>
+<p><strong>类型</strong></p>
+<ul>
+<li>将IR类型对应地带着指针类型转换，冗余的解引用和取地址~~使用窥孔优化~~在生成AST时消除：IR的全局变量对应它的指针类型，alloca对应局部变量的指针类型。
+<ul>
+<li><del>窥孔优化：clang没有自带的。根据ASTMatcher自己写一个吧。</del> 根据<a href="https://www.youtube.com/watch?v=_rUwW8Awc5s">这里</a>，AST其实很难修改。
+<ul>
+<li>Clang::Tooling::transformer：将AST修改为对应的代码文本。通过再次parse，有可能可以实现类似AST修改的效果。</li>
+<li>lib/Sema/TreeTransform.h内部库。没有细看。</li>
+<li>clangTooling, rewriter: 例如<a href="https://github.com/eliben/llvm-clang-samples/blob/master/src_clang/matchers_rewriter.cpp">这里</a>, 在AST转文本代码的时候介入并进行修改。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>名称</strong></p>
+<p>为了简化设计，全局不允许出现重名的情况。全局使用IdentifierInfo判断重名情况，重名时尝试增加&quot;_1&quot;递增的数字后缀。函数内使用Names判断重名情况</p>
+<ul>
+<li>尽量还原LLVM IR，使用IR中的名称
+<ul>
+<li>GlobalVariable，Function等使用IR对应的名称。</li>
+<li>局部变量对应alloca指令，因此使用Alloca指令的名称。</li>
+<li>如果没有名称，则生成前缀加编号的临时名称，如func_1。</li>
+</ul>
+</li>
+</ul>
+<p><strong>ConstantExpression</strong></p>
+<ul>
+<li>常量数组，常量结构体
+<ul>
+<li>直接的对应是<a href="https://en.cppreference.com/w/c/language/compound_literal">Compound literals</a>再内置InitListExpr。但它会创建一个匿名对象，所以大部分情况还是不会转成它的。
+<ul>
+<li>如果是在初始化变量，则直接转换成纯InitListExpr。</li>
+<li>（暂未实现）如果在其他地方（如指令里）用到了，同时是递归的最外层，则
+<ul>
+<li>结构体转换成ImplicitCastExpr(LValueToRValue) + Compound Literal + InitListExpr。</li>
+<li>数组转换成ImplicitCastExpr(ArrayToPointerDecay) + CompoundLiteralExpr(array) + InitListExpr。</li>
+</ul>
+</li>
+<li>如果是递归创建内部的表达式，则只创建InitListExpr部分。</li>
+</ul>
+</li>
+<li>如果遇到了ConstantInitializerZero，则应该转换为<code>InitListExpr + array_filler: ImplicitValueInitExpr</code></li>
+<li>创建常量需要传入一个额外的类型：
+<ul>
+<li>创建ImplicitValueInitExpr需要设置类型。</li>
+<li>创建Compound Literal也需要类型。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>结构体类型
+<ul>
+<li>LLVM中预定义的结构体类型，提前遍历并存放好。维护一个从llvm type到RecordDecl的映射。</li>
+<li>LLVM中的Literal 结构体转换为C语言中的匿名结构体。
+<ul>
+<li>首先看当前llvm Type是否被映射和缓存，即该匿名结构体已经遇到过。</li>
+<li>直接创建一个匿名RecordDecl，加入映射，并直接插入到TranslationUnitDecl里的当前位置。</li>
+</ul>
+</li>
+<li>结构体成员名字无法保存在IR中。（TODO，目前直接按顺序生成一个名字）
+<ul>
+<li>结构体的成员名字可以考虑保存在Meta data，如DebugInfo里</li>
+<li>缺点：必须依附于这个类型的全局变量。不能直接依附到类型上。MataData只能依附于指令，函数等</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>BinaryOperator</strong></p>
+<ul>
+<li>加法：nsw，nuw。当溢出时会变成poison value。这个暂时不考虑。</li>
+<li>移位运算：逻辑移位对应C语言无符号数字的移位，算数移位对应有符号数字的移位。（根据<a href="https://stackoverflow.com/questions/7622/are-the-shift-operators-arithmetic-or-logical-in-c">这里</a>）</li>
+</ul>
+<p><strong>运算符优先级：Operator Precedence</strong></p>
+<p><a href="https://en.cppreference.com/w/c/language/operator_precedence">C Operator Precedence</a></p>
+<p>总体的优先级顺序：变量成员和数组访问和后缀一元运算符，前缀一元运算符，其他二元运算符。注意：</p>
+<ul>
+<li>变量成员和数组访问其实可以看作是一种后缀一元运算符。Clang里这两者是单独的表达式类型。既然它们优先级最高，就不需要单独考虑处理。函数调用，强制类型转换同理。</li>
+<li>一元运算符根据前缀和后缀分两个优先级。</li>
+<li>三元运算符，中间可以看作已经带了括号，从而看作一个二元运算符。</li>
+</ul>
+<p>增加函数考虑是否增加括号：</p>
+<ul>
+<li>函数1：获取表达式优先级
+<ul>
+<li>判断是一元，二元，三元，然后给出优先级数字值。</li>
+</ul>
+</li>
+<li>函数2：根据优先级获取结合律，返回bool类型，是左结合还是右结合</li>
+<li>函数3：参数1 当前运算符优先级，参数2 子表达式优先级，参数3: bool is_left 运算符左边还是右边
+<ul>
+<li>判断子表达式优先级是否低于当前一元运算符优先级，是则增加括号。</li>
+<li>如果优先级同级，调用函数2获取结合律信息，然后根据左结合和右结合处理。左结合运算符：如果同级则不需要在左边子表达式增加括号。
+<ul>
+<li>如果结合率和当前处理的边相同则不需要括号，反之需要括号。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>CallInst</strong></p>
+<ul>
+<li>Organize and maintain a map from llvm functions to Clang function declarations.</li>
+<li>Handle function pointers: TODO</li>
+</ul>
+<p><strong>Alloca指令</strong></p>
+<p>根据alloca指令是否在函数开头的必经之路（从entry遍历找到只有一个succ和pred的集合）上，将alloca分为动态alloca和静态alloca。</p>
+<ul>
+<li>
+<p>静态Alloca：创建对应类型的变量。</p>
+</li>
+<li>
+<p>动态Alloca（很少）：TODO，转换为alloca函数调用</p>
+</li>
+<li>
+<p>AllocaInst: </p>
+<ul>
+<li>If the inst is at the outermost level, then create a corresponding local variable. </li>
+<li>If not, this is a rare case, create corresponding calls to the <code>alloca</code> function.</li>
+</ul>
+</li>
+</ul>
+<p><strong>GetElementPtr</strong></p>
+<p>LLVM数组与C数组的对应：</p>
+<ul>
+<li>C数组变量 -&gt; LLVM数组指针再解引用一下（LLVM常通过指针操作变量）</li>
+<li>gep操作时第一个index不为0 -&gt; C里面<code>int arr[3]; (&amp;arr) + 1</code> （意味着GEP不需要在开头默认解引用一下）</li>
+<li>gep如果有且只有第一个index，则类型不变 -&gt; GEP结束隐含了取地址操作。</li>
+</ul>
+<p>GEP中途每一步结束并没有保证结果是指针类型，而是在结束的时候额外做了取地址。
+GEP每一步类型必定会细化：如果是指针，则会解引用（数组取成员0），如果是数组或者结构体，会取成员。</p>
+<p>C的指针相关运算内部细节：</p>
+<ul>
+<li>结构体运算：结构体值 -&gt; 结构体成员值
+<ul>
+<li>箭头运算：结构体指针 -&gt; 结构体成员值 （在开始前先解引用）（对应Gep里的两步）</li>
+</ul>
+</li>
+<li>数组运算：
+<ul>
+<li>数组值到数组成员值</li>
+<li>指针的数组运算（不考虑）：指针到指针解引用后成员值（指针运算外加解引用）（对应Gep里的两步）
+<ul>
+<li>解引用运算 = 数组下标取0</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>指针加减法运算：指针值 -&gt; 新指针值</li>
+<li>解引用运算 + 取地址
+<ul>
+<li>指针 -&gt; 指针内部成员指针</li>
+</ul>
+</li>
+</ul>
+<p>GetElementPtr先获取内部指针值的类型，然后依次处理每个下标：</p>
+<ul>
+<li>如果是结构体成员或者数组，则先解引用，然后增加运算，然后再取地址。</li>
+</ul>
+<p><strong>添加注释</strong></p>
+<p>添加注释不是简单地插入AST，因为Clang没有把注释这样管理，而是直接插入到ASTContext里面，而且要创建RawComment，而不是对应的语法树结构。没有找到将对应的Comment类插入进去的函数，应该需要自己实现。可能需要把字符串直接插入SourceManager里面，然后把sourceRange拿出来创建Comments。</p>
 
                     </main>
 

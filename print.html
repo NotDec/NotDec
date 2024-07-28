@@ -425,9 +425,105 @@ sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
 <li>使用<code>breakpoint modify 1 -c &quot;((int64_t) (ci-&gt;getSExtValue()) &lt; -100)&quot;</code>这样的命令给断点增加条件</li>
 </ul>
 <p>更多使用方式见<a href="https://lldb.llvm.org/use/tutorial.html">lldb使用教程</a></p>
-<h2 id="修改llvm值的类型"><a class="header" href="#修改llvm值的类型">修改LLVM值的类型</a></h2>
+<p>一些非常实用的调试技巧</p>
+<ul>
+<li>打印指令，值，函数等： <code>expr llvm::errs() &lt;&lt; I</code></li>
+<li>打印模块：使用定义的工具函数： <code>expr notdec::printModule(M, &quot;out.ll&quot;)</code></li>
+</ul>
+<h3 id="instvisitor"><a class="header" href="#instvisitor">InstVisitor</a></h3>
+<pre><code class="language-cpp">  class MyVisitor
+      : public llvm::InstVisitor&lt;MyVisitor&gt; {
+</code></pre>
+<p>访问逻辑：</p>
+<ul>
+<li>名字仅有visit的为入口函数。访问模块或者函数 (<code>Visitor.visit(M)</code>) 会帮你访问里面的指令</li>
+<li>默认继承的父类的行为：
+<ul>
+<li>指令的入口函数 (<code>void visit(Instruction &amp;I)</code>): （一般不会override）根据指令类型调用细分的visit方法</li>
+<li>各种其他类型的细分visit方法调用对应的大类visit方法 例如 <code>visitLoadInst -&gt; visitUnaryInstruction</code>。</li>
+<li>最后一个大类visit方法 <code>visitInstruction</code>： 为空。</li>
+</ul>
+</li>
+</ul>
+<p>总结：细分visit方法是我们要override的，如果没有override实现，则会因为继承的默认实现继续分流到大类方法，最终到最通用的<code>visitInstruction</code>。反过来说如果override了，（如果没有主动去调用）则会截断这类指令的访问，使得这类指令不会主动调用 <code>visitInstruction</code>。</p>
+<p>需要注意，如果想要visitor有个返回值类型，需要在父类模板的第二个参数指定类型，同时必须实现visitInstruction方法，因为至少要给你的返回类型指定一个默认返回值。</p>
+<h3 id="修改llvm值的类型"><a class="header" href="#修改llvm值的类型">修改LLVM值的类型</a></h3>
 <p>LLVM值的类型，基于def-use关系，其实利用类型转换还是可以灵活变动。比如一个整数，虽然可能有一些加法运算，但是你还是可以强制把它设成指针类型，然后在每个使用点插入ptrtoint指令转回去。</p>
 <p>有些LLVM值的类型，修改起来非常麻烦。尤其是函数的参数和返回值类型。函数也是GlobalValue，甚至是Constant。</p>
+<h3 id="打印pass前后ir"><a class="header" href="#打印pass前后ir">打印Pass前后IR</a></h3>
+<p>LLVM提供了方便的 <code>--print-after-all</code> 等选项。首先在创建PassBuilder的时候，创建插桩的类并注册CallBack。注册所有的标准插桩后很多选项都可以生效，包括计算Pass的运行时间，是否在每个前后打印Pass，展示IR的变化diff，甚至生成HTML的报告。</p>
+<pre><code class="language-cpp">// add instrumentations.
+PassInstrumentationCallbacks PIC;
+StandardInstrumentations SI(::llvm::DebugFlag, false, PrintPassOptions());
+SI.registerCallbacks(PIC, &amp;FAM);
+</code></pre>
+<p>现在新的Pass都继承自 <code>PassInfoMixin</code> 类，这个类会增加一个name函数，在运行时可以动态获取类的名称（包含namespace）。如果不确定可以在<code>--print-after-all</code> 后在log里查看。这个名称称为 PassID 。</p>
+<p>命令行参数里指定的是通过PassID查找得到的缩略名称。需要提前在 <code>PassInstrumentationCallbacks</code> 中注册：</p>
+<pre><code>  PIC.addClassToPassName(&quot;notdec::LinearAllocationRecovery&quot;,
+                         &quot;linear-allocation-recovery&quot;);
+  PIC.addClassToPassName(&quot;notdec::PointerTypeRecovery&quot;,
+                         &quot;pointer-type-recovery&quot;);
+</code></pre>
+<p>此时就可以在命令行中指定相关的pass打印了。比如 <code>--print-before=pointer-type-recovery</code> 。</p>
+<h3 id="clang"><a class="header" href="#clang">Clang</a></h3>
+<p><strong>AST handling</strong></p>
+<ul>
+<li>创建AST时有两种方式
+<ol>
+<li>使用Create方法，如<code>clang::FunctionDecl::Create(...)</code></li>
+<li>没有Create方法时，使用ASTContext的new操作符。如：<code>new (ASTCtx) clang::GotoStmt(...)</code></li>
+</ol>
+</li>
+</ul>
+<p><strong>CFG handling</strong></p>
+<p>CFGBlock包含：</p>
+<ul>
+<li>
+<p>LabelStatement，用于生成Goto语句。</p>
+</li>
+<li>
+<p>一系列语句</p>
+</li>
+<li>
+<p>CFGTerminator</p>
+<ul>
+<li>对于return/unreachable：保存对应的返回语句或函数调用语句。</li>
+<li>对于br/switch，保存对应的条件表达式。同时保证successor的顺序：本来CFG保证的是If-Then-Else顺序，但是如果是条件跳转，我们使用True-False的顺序，和IR里的successor()顺序一致。</li>
+</ul>
+</li>
+<li>
+<p>CFGBuilder在LLVM中是逆序创建的，即逆向遍历AST，逆向创建语句。在打印或者遍历CFG块的时候，其中<code>CFGBlock::ElementList</code>把正常的iterator改用reverse_iterator实现。存储的时候是逆向存储，但是后续读取每个CFGBlock的时候也被偷偷改成逆向读取。但是我们算法如果不是逆向的话，想要在末尾继续插入语句，反而需要插入到开头，内存开销增加了。</p>
+<ul>
+<li>如果将结构恢复算法弄成逆向的，首先找到所有的没有后继节点的结束块，每个结束块分治。</li>
+</ul>
+</li>
+<li>
+<p>对于<code>if (A &amp;&amp; B &amp;&amp; C)</code>，<code>CFGBlock-&gt;getTerminatorStmt()</code>会在C处返回整个<code>A &amp;&amp; B &amp;&amp; C</code>表达式。调用<code>getLastCondition()</code>，会把CFGBlock最后一个statement转换成Expr返回。</p>
+</li>
+</ul>
+<p><strong>BumpVector Memory Allocation</strong></p>
+<p>Clang的内存分配都是通过ASTContext进行的，内部使用了一个BumpAllocator，Bump是一种简单的线性内存分配，内存不会真正被释放，放弃内存复用。或者等一整块分配结束之后，再整块全部释放。根据<a href="https://github.com/llvm/llvm-project/blob/e6de9ed37308e46560243229dd78e84542f37ead/clang/include/clang/AST/ASTContext.h#L617">这里</a>，ASTContext解构时释放所有存储AST节点的内存。</p>
+<ul>
+<li>根据<a href="https://discourse.llvm.org/t/checker-for-destruction-needing-classes-allocated-in-bumpptrallocators/15386">这里</a>，从这里分配的相关的数据结构内部不能有std::vector或者SmallVector这种会在堆上分配内存的数据结构。因为不会调用destructor，导致堆上的内存不会被free，导致内存泄露。</li>
+</ul>
+<p>BumpVectorContext存储了一个<code>llvm::PointerIntPair&lt;llvm::BumpPtrAllocator*, 1&gt; Alloc;</code>，这是一个指针低位复用的数据结构，可以理解为一个指针加一个bool值。用户传入外部的allocator，比如ASTContext的，完全不释放内存。也可以让它新建一个allocator，并在解构的时候释放所有内存。</p>
+<p>Clang CFG内置了一个BumpVectorContext，解构时会释放所有内存。因此在结构分析过程中，CFG相关的基本块虽然出现创建后又删除的情况，但不会导致内存泄露。 TODO: 一些临时的AST节点，如一些临时的Goto语句，它们的内存释放怎么办？</p>
+<p>这次在BumpVector里增加的erase函数，仅把元素移动到末尾然后解构，和内存泄露应该无关。</p>
+<p><strong>clang::QualType</strong></p>
+<p>QualType 本质上就是一个指针，同时复用了低位的bit位，存储一些qualifier信息，如volatile等修饰符。</p>
+<ul>
+<li>QualType大部分情况下可以看作是clang::Type*</li>
+<li>QualType有可能为空指针，同时也可以直接创建空的QualType</li>
+</ul>
+<p><strong>clang::IdentifierInfo</strong></p>
+<p>IdentifierInfo除了名字字符串之外，仅仅存储了一些名字的种类信息，例如是不是define的，是不是keyword，是不是variable或者function name。</p>
+<ul>
+<li><strong>变量重名</strong>：它似乎并不对应作用域，并不用于检测变量重名。
+<ul>
+<li><a href="https://github.com/llvm/llvm-project/blob/f15014ff549a8686671a599f7b49ce9963769eaf/clang/lib/Sema/SemaLookup.cpp#L1914"><code>Sema::LookupName</code></a> 内部手动遍历检测了重名情况。</li>
+</ul>
+</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="notdec-development-document"><a class="header" href="#notdec-development-document">NotDec Development Document</a></h1>
 <p>NotDec的项目文档。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="反编译器前端"><a class="header" href="#反编译器前端">反编译器前端</a></h1>
@@ -715,7 +811,12 @@ https://nemequ.github.io/waspr/instructions</p>
 <ul>
 <li>如果运算的参数中有指针，则结果也是指针。</li>
 <li>如果发现了一边是指针，另一边大概率是整数类型，同时结果类型也是指针类型。</li>
-<li>反向推导：如果运算的结果是指针类型，则里面至少有一个指针类型。（放弃该信息，因为帮助不大）</li>
+<li>反向推导：如果运算的结果是指针类型，则里面至少有一个指针类型。
+<ul>
+<li>如果已知某个参数是整数，则另一个参数为指针类型</li>
+<li>如果已知某个参数是指针类型，则另外一个参数为整数类型。</li>
+</ul>
+</li>
 </ul>
 </li>
 <li>减法运算：数字减数字，指针减数字，指针减指针（小概率），指针减法运算
@@ -723,7 +824,7 @@ https://nemequ.github.io/waspr/instructions</p>
 <li>（如果不考虑指针减去指针）第二个参数是数字类型。</li>
 <li>（如果不考虑指针减去指针）第一个参数是指针类型，结果也是指针类型。</li>
 <li>（a-b=c）如果a是指针，b是数字，则c是指针</li>
-<li>（a-b=c）如果a是数字，则b不是指针</li>
+<li>（a-b=c）如果a是数字，则b和c都是数字</li>
 <li>（a-b=c）如果b是指针，则a是指针，c是数字</li>
 </ul>
 </li>
@@ -775,12 +876,12 @@ https://nemequ.github.io/waspr/instructions</p>
 <p>能否保证语义安全？因为我们现在转出来的IR是能跑的，如果变量恢复后，是不是就不能跑了？比如部分变量识别失败，还是存到mem里去了。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="反编译器后端---结构分析"><a class="header" href="#反编译器后端---结构分析">反编译器后端 - 结构分析</a></h1>
 <p>结构分析负责将IR转换为伪C代码。</p>
-<h2 id="最简单的fallback实现"><a class="header" href="#最简单的fallback实现">(最简单的)fallback实现</a></h2>
+<h2 id="使用goto语句的ir转c"><a class="header" href="#使用goto语句的ir转c">使用Goto语句的IR转C</a></h2>
 <!-- - 判断每个IR语句是否有副作用。如果不存在副作用，且仅有一个user，则作为表达式折叠到其他语句。否则生成局部变量储存它的值。 -->
 <ul>
 <li>给所有的基本块前添加标号，对于任意控制流跳转，使用goto实现。最后删除无用的标号。</li>
 </ul>
-<p>Fallback实现可以考虑作为现有算法的辅助，将其他算法无法处理的边转换为Goto语句。</p>
+<p>这种方法可以考虑作为现有算法的辅助，将算法无法处理的边转换为Goto语句。算法可以自由选择能够折叠的边进行折叠，从而只需要考虑实际的结构分析效果，不必纠结算法的完善和鲁棒性。</p>
 <h2 id="structural-analysis-和-reducible-control-flow"><a class="header" href="#structural-analysis-和-reducible-control-flow">Structural Analysis 和 Reducible Control Flow</a></h2>
 <ul>
 <li><a href="http://baishakhir.github.io/class/2020_Fall/5_control_flow_analysis.pdf">PPT(结尾介绍了Reducibility)</a></li>
@@ -816,7 +917,7 @@ https://nemequ.github.io/waspr/instructions</p>
 </ul>
 </li>
 </ul>
-<p><strong>概述</strong>：在编译优化方面，有研究人员发现，要是在IR（CFG）层面能够用上AST层面的信息（IF，While，For控制流结构），能够加速现有的数据流分析。然而在IR（CFG）层面，高级语言的结构信息已经丢失了。因此，有部分研究人员提出了通过模式匹配的方式，从CFG中识别出控制流结构。由此诞生了interval analysis算法，后续发展出了Structural Analysis。</p>
+<p><strong>概述</strong>：在编译优化方面，有研究人员提出，要是在IR（CFG）层面能够用上AST层面的信息（IF，While，For控制流结构），能够加速现有的数据流分析。然而在IR（CFG）层面，高级语言的结构信息已经丢失了。因此，有部分研究人员提出了通过模式匹配的方式，从CFG中识别出控制流结构。由此诞生了interval analysis算法，后续发展出了Structural Analysis。</p>
 <p>结构分析一般可以分为一下几个步骤：</p>
 <ol>
 <li>类似interval analysis的嵌套区域划分。</li>
@@ -839,7 +940,10 @@ https://nemequ.github.io/waspr/instructions</p>
 <li>更新H的那一行代码的意思是：加入H的新节点，(1)不属于当前规约好的集合，(2)直接前驱在当前规约好的集合里。 （即，按顺序弄。）</li>
 </ul>
 <p>在《Advanced Compiler Design and Implementation》里提到这种方式划分的是Maximal Interval。书中还提出了改进版的算法，划分的是Minimal Interval，划分效果更好，更小的区域便于后续划分高级语言的控制结构。</p>
-<p><strong>Interval Analysis (minimal interval)</strong>：该算法是《Advanced Compiler Design and Implementation》提出的改进版。它将CFG划分为三个部分，无环（acylic），natural loop和improper region。无环部分即有向无环子图，其他两种区域则包含环。后面会提到，proper region指一些虽然无环，但是也不能被简单的if-else等结构匹配的无环部分。improper region与之对应，有环，但是是比较复杂的环。</p>
+<p><strong>Interval Analysis (minimal interval)</strong>：该算法是《Advanced Compiler Design and Implementation》提出的改进版。它将CFG划分为三个部分，无环（acylic），natural loop和improper region。无环部分即有向无环子图，其他两种区域则包含环。</p>
+<ul>
+<li><strong>proper region和improper region</strong>：proper region指一些虽然无环，但是也不能被简单的if-else等结构匹配的无环部分。improper region与之对应，有环，但是是比较复杂的环。</li>
+</ul>
 <p><strong>步骤：</strong></p>
 <ol>
 <li>使用一个后序遍历找到loop header，和improper region的header。（后面再详细解释）</li>
@@ -911,59 +1015,7 @@ https://nemequ.github.io/waspr/instructions</p>
 <li>在原有匹配cyclic region，acyclic region之后，如果匹配失败，就尝试匹配tail region。这里在Phoenix里面提到，这篇论文里没有写清楚具体的匹配算法。而且他们发现，经常确实也匹配不到这种tail region，如果图太复杂还是会失败。</li>
 <li>关于论文没有说清楚的其他点，首先是怎么识别SESS region吧，可能是在原有的划分region基础上再做些判断。其次是怎么识别tail region的跳走的边。可能是识别region的基础上，看边是不是跳到head和tail的吧。</li>
 </ul>
-<h3 id="phoenix-第一个真正实用的结构恢复算法"><a class="header" href="#phoenix-第一个真正实用的结构恢复算法">Phoenix 第一个“真正实用”的结构恢复算法</a></h3>
-<ul>
-<li><a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">[Phoenix]</a> 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 <a href="https://edmcman.github.io/pres/usenix13.pptx">slides</a></li>
-</ul>
-<p>paper的3.1节介绍了算法框架，和结构分析很相似。</p>
-<ul>
-<li>使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
-<ul>
-<li>如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过</li>
-<li>如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。匹配不了还是跳过</li>
-<li>如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
-<ul>
-<li>优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。</li>
-<li>优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-<p>具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。</p>
-<p><strong>算法的输入输出</strong>：输入当然是CFG。如何规划输出的格式？结构分析的本质是把CFG组织成了带有标签的树的结构。树的节点里蕴含额外的控制流跳转信息。</p>
-<p>结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式</p>
-<ul>
-<li>
-<p>可能会有这种原始的想法：能不能把结果表示为CFG上的简单标记？似乎是不能的，因为是完全不一样的东西。</p>
-<ul>
-<li>比如，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Then-Else结构，单看IF块就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢失了信息的。</li>
-</ul>
-</li>
-<li>
-<p>LLVM的SSA能否和AST共存？稍微搜了一下，不太能。确实和我想的一样，最多就是基本块参数。还是直接把SSA解构了吧。</p>
-<ul>
-<li>SSA保留比较麻烦，可以考虑写成basic block argument的形式，在if while这种结构的末尾加上（带基本块参数的）goto？或者直接留下基本块参数。</li>
-</ul>
-</li>
-<li>
-<p>Region：算法的主体数据结构，对<code>List&lt;Statement&gt;</code>的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。</p>
-<ul>
-<li>最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。(<a href="https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs">reko - RegionGraphBuilder</a>)，在算法的迭代下不断折叠。</li>
-<li>最后的效果就是整个函数体变成单个linear region。</li>
-</ul>
-</li>
-<li>
-<p>Statement：已经结构化的基本块/statement的集合。</p>
-<ul>
-<li>不使用Expression，而是结合LLVM的指令。</li>
-</ul>
-</li>
-<li>
-<p>LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。</p>
-</li>
-</ul>
-<p><strong>Interval Analysis as a pre step?</strong>：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？</p>
+<p><strong>Interval Analysis as a pre-step?</strong>：上面介绍时，似乎说Interval分析是结构分析的预处理步骤。Interval分析可以划分子图，然后子图再去模式匹配。然而观察到，论文里给出的算法居然看不出来有做Interval Analysis。也没有写清楚如何判断一个节点后面的区域是cyclic的，还是acyclic的。这是为什么？</p>
 <ul>
 <li>Acyclic Region：识别是否是IF的三角形，IF-ELSE的菱形。如果不是，就返回匹配失败（归类为proper region）。</li>
 <li>Cyclic Region：识别natural loop。如果无法识别，还是返回失败(归类为improper region)。</li>
@@ -981,6 +1033,67 @@ https://nemequ.github.io/waspr/instructions</p>
 </li>
 </ul>
 <p><img src="docs/backend/graph1.drawio.svg" alt="sample-graph1" /></p>
+<h3 id="phoenix-第一个真正实用的结构恢复算法"><a class="header" href="#phoenix-第一个真正实用的结构恢复算法">Phoenix 第一个“真正实用”的结构恢复算法</a></h3>
+<ul>
+<li><a href="https://kapravelos.com/teaching/csc591-s20/readings/decompilation.pdf">[Phoenix]</a> 《Native x86 Decompilation Using Semantics-Preserving Structural Analysis and Iterative Control-Flow Structuring》 <a href="https://edmcman.github.io/pres/usenix13.pptx">slides</a></li>
+<li><a href="https://github.com/uxmal/reko/blob/a42da9990a674f275a2d9e76ba00bb264d5eb470/src/Decompiler/Structure/StructureAnalysis.cs">reko的实现</a></li>
+</ul>
+<p>paper的3.1节介绍了算法框架，和结构分析很相似。</p>
+<ul>
+<li>使用后序遍历，遍历每个节点。直观上子节点被处理合并后再处理父节点。遍历每个节点时，判断是acyclic还是cyclic的。
+<ul>
+<li>如果是acyclic的区域，算法尝试匹配几种简单的模式，以及潜在的switch语句。匹配不了还是会跳过</li>
+<li>如果是cyclic的区域，算法尝试找natural loop，匹配常见的循环模式，或者就是普通的loop。实在处理不了还是跳过
+<ul>
+<li>如果匹配失败，进入Loop Refinement阶段（3.6节）。</li>
+</ul>
+</li>
+<li>如果一轮下来都匹配失败了，则使用“最后手段”将一个跳转归类为goto，并忽视它，再重新进行一轮。
+<ul>
+<li>优先选择：源节点没有支配目标节点。源节点支配了目标节点的边，大概率是比较重要的边。</li>
+<li>优先选择：目标节点支配了源节点。这种不就是natural loop的边吗？</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>具体应该选择哪些边移除？当前的选择到底好不好？确实是一个值得思考的问题。</p>
+<p><strong>Loop的节点</strong>：</p>
+<ul>
+<li>原始的定义：一个反向边的Natural Loop（即，natural loop严格说并不是一个单独的概念，反而是对一条反向边而言的。），是指，最小的，包括反向边头和尾节点的节点集合，集合内所有节点的前驱，要么在集合内，要么这个节点是entry节点，前驱是entry的前驱。</li>
+<li>存在的问题：不能涵盖一些break语句所在基本块的节点。这些节点被上面定义的“最小”排除。</li>
+<li>新的定义：除了原始定义中的节点，额外增加了一些节点。
+<ul>
+<li>新增节点的定义1：被loop header, 即entry支配的节点中：排除从loop的successor节点，不经过loop header可达的节点。</li>
+<li>新增节点的定义2：满足两个条件：条件1：被entry支配。条件2，从loop的successor节点出发，不经过loop header的条件下，不可达。</li>
+</ul>
+</li>
+</ul>
+<h4 id="reko的实现"><a class="header" href="#reko的实现">reko的实现</a></h4>
+<ul>
+<li>Region：算法的主体数据结构，对<code>List&lt;Statement&gt;</code>的封装，但是内部不止可以放指令，还可以放statement。当折叠If, While等结构的时候，它们作为单个statement。
+<ul>
+<li>最开始的时候根据基本块的后继块数量情况，每个块创建region，同时将线性的指令都转换为statement。(<a href="https://github.com/uxmal/reko/blob/a7c5e21c17a43479d487d44922471c57417d50c6/src/Decompiler/Structure/RegionGraphBuilder.cs">reko - RegionGraphBuilder</a>)，在算法的迭代下不断折叠。</li>
+<li>最后的效果就是整个函数体变成单个linear region。</li>
+</ul>
+</li>
+<li>Statement：已经结构化的基本块/statement的集合。
+<ul>
+<li>不使用Expression，而是结合LLVM的指令。</li>
+</ul>
+</li>
+<li>LLVM语句序列化写出来就已经可以看作全是goto的高级语言了。因此不额外增加goto statement。</li>
+</ul>
+<p><strong>算法的输入输出</strong>：首先包括一个将LLVM指令重新折叠为C表达式的数据结构，负责创建所有其他语句。而结构恢复算法，则主要负责创建if，else，while，这些语句。我们基于Clang AST生成C/C++源码。可以发现，clang中有些源码分析也需要CFG，因此也为源码块的CFG数据结构。基于Clang内置的<a href="https://clang.llvm.org/docs/InternalsManual.html#the-cfg-class">CFG数据结构</a>，我们先将IR转换为这里的CFG结构，然后再由结构分析基于CFG生成完整的文件的AST。</p>
+<p>结构化算法尝试将现有的基本块CFG的IR架构，重新组织为类似AST的形式</p>
+<ul>
+<li>可能会有这种原始的想法：能不能把结果表示为CFG上的简单标记？似乎是不能的，因为是完全不一样的东西。
+<ul>
+<li>比如，把结构嵌套折叠到了一个条件跳转里。但是这种折叠，在IR上不一定看得出来。比如，菱形的IF-Then-Else结构，单看IF块就没有明显的从if开头，到整个if结构的successor的边。如果仅把结构分析的结果看作是对边的标记，这里肯定是丢失了信息的。</li>
+</ul>
+</li>
+<li>LLVM的SSA能否和AST共存？稍微搜了一下，不太能。而且在表达式折叠的时候，遇到这种跨基本块的phi数据流，也适合创建新的变量。</li>
+</ul>
 <h3 id="dream"><a class="header" href="#dream">Dream</a></h3>
 <ul>
 <li><a href="https://net.cs.uni-bonn.de/fileadmin/ag/martini/Staff/yakdan/dream_ndss2015.pdf">Dream</a>:《No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations》 <a href="https://www.ndss-symposium.org/wp-content/uploads/2017/09/11NoMoreGotos.slide_.pdf">slides</a></li>
@@ -992,6 +1105,202 @@ https://nemequ.github.io/waspr/instructions</p>
 </ul>
 </li>
 </ul>
+<h2 id="实现-1"><a class="header" href="#实现-1">实现</a></h2>
+<p>目标是支持任意IR的转C语言伪代码。一些IR层丢失的类型信息（整数是否有符号，结构体的字段名称等）需要额外的数据结构。</p>
+<p><strong>代码优化</strong>：Phi指令不好提供支持，我们使用demoteSSA去除Phi指令。为了消除demoteSSA带来的额外空基本块，我们再调用了SimplifyCFG pass。</p>
+<h3 id="表达式折叠"><a class="header" href="#表达式折叠">表达式折叠</a></h3>
+<p>副作用的处理：不考虑是否有副作用，即都当有副作用处理。暂时不考虑无副作用的表达式为了简洁的折叠。例如<code>int tmp = 1+2; f(tmp); g(tmp)</code> 不会折叠为<code>f(1+2); g(1+2)</code>;</p>
+<ul>
+<li>Stmt和Expr的划分：
+<ul>
+<li>如果一个指令没有返回值，纯粹只有副作用，则作为Stmt。例如Store指令。</li>
+<li>如果一个指令可能有返回值，则作为Expr，根据引用情况和次数考虑
+<ul>
+<li>如果指令没有使用者，则直接将表达式作为stmt插入。</li>
+<li>如果指令被基本块外指令引用，或者被当前基本块的指令引用多次，则创建局部变量，然后注册这个局部变量到ExprMap。</li>
+<li>如果指令被当前基本块内的指令引用，且仅被引用一次，则直接作为表达式折叠到对应的指令内。直接将当前表达式注册到ExprMap。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>Expr现在的表示有bug。Call不好说作为expr还是stmt。并不是有副作用就应该作为Stmt。而是指令没有返回值，不会被作为value才作为Stmt。具体是否应该把Expr作为Stmt放下来，这个都得放。具体是否应该创建一个局部变量，得看是否在一个基本块。如果发现这个Expr的基本块和当前的基本块不同的话，就应该在那边为这个expr创建一个局部变量。</p>
+<p><strong>逻辑表达式</strong>: C/C++的and/or具有短路的性质。但在无副作用时这影响不大。但是在IR中，如果尝试直接优先折叠成and/or指令，则会不存在短路，语义发生变化。因此逻辑运算符需要在结构分析中处理。</p>
+<ul>
+<li>DemoteSSA会引入不必要的基本块，我们使用SimplifyCFG处理这些基本块。SimplifyCFG同时还会折叠and/or表达式，但是折叠后是select指令的形式。
+<ul>
+<li>select 指令对应ternary三元运算符。同时select 如果作用在i1，同时两边如果存在false或者true常量时，可以作为and/or处理。
+<ul>
+<li>select i1 expr1, i1 true, i1 expr2 -&gt; expr1 || expr2</li>
+<li>select i1 expr1, i1 expr2, i1 false -&gt; expr1 &amp;&amp; expr2</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>LLVM里的instcombine会将这种模式转为and/or（见<a href="https://aqjune.github.io/posts/2021-10-4.the-select-story.html">这里</a>），但是我们不需要考虑那么多，直接两种都支持。</li>
+</ul>
+<h3 id="指令处理"><a class="header" href="#指令处理">指令处理</a></h3>
+<p><strong>类型</strong></p>
+<ul>
+<li>将IR类型对应地带着指针类型转换，冗余的解引用和取地址~~使用窥孔优化~~在生成AST时消除：IR的全局变量对应它的指针类型，alloca对应局部变量的指针类型。
+<ul>
+<li><del>窥孔优化：clang没有自带的。根据ASTMatcher自己写一个吧。</del> 根据<a href="https://www.youtube.com/watch?v=_rUwW8Awc5s">这里</a>，AST其实很难修改。
+<ul>
+<li>Clang::Tooling::transformer：将AST修改为对应的代码文本。通过再次parse，有可能可以实现类似AST修改的效果。</li>
+<li>lib/Sema/TreeTransform.h内部库。没有细看。</li>
+<li>clangTooling, rewriter: 例如<a href="https://github.com/eliben/llvm-clang-samples/blob/master/src_clang/matchers_rewriter.cpp">这里</a>, 在AST转文本代码的时候介入并进行修改。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>名称</strong></p>
+<p>为了简化设计，全局不允许出现重名的情况。全局使用IdentifierInfo判断重名情况，重名时尝试增加&quot;_1&quot;递增的数字后缀。函数内使用Names判断重名情况</p>
+<ul>
+<li>尽量还原LLVM IR，使用IR中的名称
+<ul>
+<li>GlobalVariable，Function等使用IR对应的名称。</li>
+<li>局部变量对应alloca指令，因此使用Alloca指令的名称。</li>
+<li>如果没有名称，则生成前缀加编号的临时名称，如func_1。</li>
+</ul>
+</li>
+</ul>
+<p><strong>ConstantExpression</strong></p>
+<ul>
+<li>常量数组，常量结构体
+<ul>
+<li>直接的对应是<a href="https://en.cppreference.com/w/c/language/compound_literal">Compound literals</a>再内置InitListExpr。但它会创建一个匿名对象，所以大部分情况还是不会转成它的。
+<ul>
+<li>如果是在初始化变量，则直接转换成纯InitListExpr。</li>
+<li>（暂未实现）如果在其他地方（如指令里）用到了，同时是递归的最外层，则
+<ul>
+<li>结构体转换成ImplicitCastExpr(LValueToRValue) + Compound Literal + InitListExpr。</li>
+<li>数组转换成ImplicitCastExpr(ArrayToPointerDecay) + CompoundLiteralExpr(array) + InitListExpr。</li>
+</ul>
+</li>
+<li>如果是递归创建内部的表达式，则只创建InitListExpr部分。</li>
+</ul>
+</li>
+<li>如果遇到了ConstantInitializerZero，则应该转换为<code>InitListExpr + array_filler: ImplicitValueInitExpr</code></li>
+<li>创建常量需要传入一个额外的类型：
+<ul>
+<li>创建ImplicitValueInitExpr需要设置类型。</li>
+<li>创建Compound Literal也需要类型。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>结构体类型
+<ul>
+<li>LLVM中预定义的结构体类型，提前遍历并存放好。维护一个从llvm type到RecordDecl的映射。</li>
+<li>LLVM中的Literal 结构体转换为C语言中的匿名结构体。
+<ul>
+<li>首先看当前llvm Type是否被映射和缓存，即该匿名结构体已经遇到过。</li>
+<li>直接创建一个匿名RecordDecl，加入映射，并直接插入到TranslationUnitDecl里的当前位置。</li>
+</ul>
+</li>
+<li>结构体成员名字无法保存在IR中。（TODO，目前直接按顺序生成一个名字）
+<ul>
+<li>结构体的成员名字可以考虑保存在Meta data，如DebugInfo里</li>
+<li>缺点：必须依附于这个类型的全局变量。不能直接依附到类型上。MataData只能依附于指令，函数等</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>BinaryOperator</strong></p>
+<ul>
+<li>加法：nsw，nuw。当溢出时会变成poison value。这个暂时不考虑。</li>
+<li>移位运算：逻辑移位对应C语言无符号数字的移位，算数移位对应有符号数字的移位。（根据<a href="https://stackoverflow.com/questions/7622/are-the-shift-operators-arithmetic-or-logical-in-c">这里</a>）</li>
+</ul>
+<p><strong>运算符优先级：Operator Precedence</strong></p>
+<p><a href="https://en.cppreference.com/w/c/language/operator_precedence">C Operator Precedence</a></p>
+<p>总体的优先级顺序：变量成员和数组访问和后缀一元运算符，前缀一元运算符，其他二元运算符。注意：</p>
+<ul>
+<li>变量成员和数组访问其实可以看作是一种后缀一元运算符。Clang里这两者是单独的表达式类型。既然它们优先级最高，就不需要单独考虑处理。函数调用，强制类型转换同理。</li>
+<li>一元运算符根据前缀和后缀分两个优先级。</li>
+<li>三元运算符，中间可以看作已经带了括号，从而看作一个二元运算符。</li>
+</ul>
+<p>增加函数考虑是否增加括号：</p>
+<ul>
+<li>函数1：获取表达式优先级
+<ul>
+<li>判断是一元，二元，三元，然后给出优先级数字值。</li>
+</ul>
+</li>
+<li>函数2：根据优先级获取结合律，返回bool类型，是左结合还是右结合</li>
+<li>函数3：参数1 当前运算符优先级，参数2 子表达式优先级，参数3: bool is_left 运算符左边还是右边
+<ul>
+<li>判断子表达式优先级是否低于当前一元运算符优先级，是则增加括号。</li>
+<li>如果优先级同级，调用函数2获取结合律信息，然后根据左结合和右结合处理。左结合运算符：如果同级则不需要在左边子表达式增加括号。
+<ul>
+<li>如果结合率和当前处理的边相同则不需要括号，反之需要括号。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>CallInst</strong></p>
+<ul>
+<li>Organize and maintain a map from llvm functions to Clang function declarations.</li>
+<li>Handle function pointers: TODO</li>
+</ul>
+<p><strong>Alloca指令</strong></p>
+<p>根据alloca指令是否在函数开头的必经之路（从entry遍历找到只有一个succ和pred的集合）上，将alloca分为动态alloca和静态alloca。</p>
+<ul>
+<li>
+<p>静态Alloca：创建对应类型的变量。</p>
+</li>
+<li>
+<p>动态Alloca（很少）：TODO，转换为alloca函数调用</p>
+</li>
+<li>
+<p>AllocaInst: </p>
+<ul>
+<li>If the inst is at the outermost level, then create a corresponding local variable. </li>
+<li>If not, this is a rare case, create corresponding calls to the <code>alloca</code> function.</li>
+</ul>
+</li>
+</ul>
+<p><strong>GetElementPtr</strong></p>
+<p>LLVM数组与C数组的对应：</p>
+<ul>
+<li>C数组变量 -&gt; LLVM数组指针再解引用一下（LLVM常通过指针操作变量）</li>
+<li>gep操作时第一个index不为0 -&gt; C里面<code>int arr[3]; (&amp;arr) + 1</code> （意味着GEP不需要在开头默认解引用一下）</li>
+<li>gep如果有且只有第一个index，则类型不变 -&gt; GEP结束隐含了取地址操作。</li>
+</ul>
+<p>GEP中途每一步结束并没有保证结果是指针类型，而是在结束的时候额外做了取地址。
+GEP每一步类型必定会细化：如果是指针，则会解引用（数组取成员0），如果是数组或者结构体，会取成员。</p>
+<p>C的指针相关运算内部细节：</p>
+<ul>
+<li>结构体运算：结构体值 -&gt; 结构体成员值
+<ul>
+<li>箭头运算：结构体指针 -&gt; 结构体成员值 （在开始前先解引用）（对应Gep里的两步）</li>
+</ul>
+</li>
+<li>数组运算：
+<ul>
+<li>数组值到数组成员值</li>
+<li>指针的数组运算（不考虑）：指针到指针解引用后成员值（指针运算外加解引用）（对应Gep里的两步）
+<ul>
+<li>解引用运算 = 数组下标取0</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>指针加减法运算：指针值 -&gt; 新指针值</li>
+<li>解引用运算 + 取地址
+<ul>
+<li>指针 -&gt; 指针内部成员指针</li>
+</ul>
+</li>
+</ul>
+<p>GetElementPtr先获取内部指针值的类型，然后依次处理每个下标：</p>
+<ul>
+<li>如果是结构体成员或者数组，则先解引用，然后增加运算，然后再取地址。</li>
+</ul>
+<p><strong>添加注释</strong></p>
+<p>添加注释不是简单地插入AST，因为Clang没有把注释这样管理，而是直接插入到ASTContext里面，而且要创建RawComment，而不是对应的语法树结构。没有找到将对应的Comment类插入进去的函数，应该需要自己实现。可能需要把字符串直接插入SourceManager里面，然后把sourceRange拿出来创建Comments。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="现有论文与资源"><a class="header" href="#现有论文与资源">现有论文与资源</a></h1>
 <h2 id="资源集"><a class="header" href="#资源集">资源集</a></h2>
 <p><a href="https://ieeexplore.ieee.org/xpl/conhome/1000635/all-proceedings"><strong>Working Conference on Reverse Engineering (WCRE)：</strong></a></p>
@@ -1714,23 +2023,17 @@ cp -r /sn640/retdec/include/retdec/serdes ./retdec-llvmir2hll/
 <h4 id="调用"><a class="header" href="#调用">调用</a></h4>
 <p>分析<code>src/llvmir2hll/llvmir2hll.cpp</code>中对llvmir2hll的<a href="https://github.com/avast/retdec/blob/eba8d78c3432b6ad7c3aa9ef913b42b5ce7f9baf/src/llvmir2hll/llvmir2hll.cpp#L150">调用</a>。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="retypd"><a class="header" href="#retypd">retypd</a></h1>
-<p><a href="https://github.com/GrammaTech/retypd">retypd</a> 是一个高级的反编译算法，有一篇<a href="https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf">论文</a></p>
+<p><strong>Intro</strong></p>
+<p>钻研了半年多《<a href="https://arxiv.org/abs/1603.05495">Polymorphic Type Inference for Machine Code</a>》论文。看完本文后还有任何相关的问题可以问我。</p>
+<p>跨函数的类型传播算法，可以将库函数的类型传递到代码内部。即使没有库函数识别时，也可以识别处函数内的结构体信息。</p>
+<p><strong>资源</strong></p>
+<p><a href="https://github.com/GrammaTech/retypd">retypd</a> 是一个非常高级的反编译类型恢复算法，技术领先程度足以超出其他论文好几年。有一篇<a href="https://github.com/GrammaTech/retypd/blob/master/reference/paper.pdf">论文</a>: 《<a href="https://arxiv.org/abs/1603.05495">Polymorphic Type Inference for Machine Code</a>》</p>
 <p>资源：</p>
 <ul>
 <li>优先看<a href="https://github.com/GrammaTech/retypd/blob/master/reference/type-recovery.rst">这个介绍</a>。</li>
 <li>这个<a href="https://github.com/GrammaTech/retypd/blob/master/reference/presentation_slides.pdf">PPT</a>比论文容易懂很多</li>
 </ul>
 <h2 id="背景"><a class="header" href="#背景">背景</a></h2>
-<h4 id="monoid"><a class="header" href="#monoid">monoid</a></h4>
-<p>读《Haskell趣学指南》的Monoids一节，理解一下。</p>
-<h3 id="unification-based-type-inference-algorithms"><a class="header" href="#unification-based-type-inference-algorithms">unification-based type inference algorithms</a></h3>
-<p>https://www.cs.cornell.edu/courses/cs3110/2011sp/Lectures/lec26-type-inference/type-inference.htm</p>
-<h2 id="约束语法"><a class="header" href="#约束语法">约束语法</a></h2>
-<p><img src="imgs/retypd-label.png" alt="retypd-label" /></p>
-<p><strong>sketches</strong> 约束的求解结果被表示为sketches。每个value关联上一个sketch，包含该value的所有能力，即能否被store，能否访问指定的偏移。同时sketch还包含一个可自定义的lattice，用来传播类似于typedef这种类型。</p>
-<p><strong>规则</strong> 规则都表示为“X ⊑ Y”的形式，意思是“X is a subtype of Y ”。</p>
-<p><strong>S-Pointer and S-Field⊕/⊖</strong> 通过搜索代码，可以得知，至少在<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">retypd-ghidra-plugin</a>和<a href="https://github.com/GrammaTech/gtirb-ddisasm-retypd">gtirb-ddisasm-retypd</a>中是没有和这个相关的规则的生成的。</p>
-<p><strong>covariant/contravariant</strong></p>
 <p><strong>规则生成</strong></p>
 <ul>
 <li>复制操作：x := y，此时保守地认为，有可能是子类型赋值给了父类型变量：Y ⊑ X。
@@ -1820,7 +2123,8 @@ cp -r /sn640/retdec/include/retdec/serdes ./retdec-llvmir2hll/
 </code></pre>
 <p>接着我们看ghidra_retypd_provider内部是如何调用retypd的。</p>
 <ul>
-<li>使用<code>SchemaParser.parse_constraint</code>解析每个约束项（<code>SubtypeConstraint</code>），它保存子类型关系左右两边的变量（<code>DerivedTypeVariable</code>）。每个函数的约束项放到一个集合里，再按函数名字放到map里，然后构建<code>Program</code>：
+<li>
+<p>使用<code>SchemaParser.parse_constraint</code>解析每个约束项（<code>SubtypeConstraint</code>），它保存子类型关系左右两边的变量（<code>DerivedTypeVariable</code>）。每个函数的约束项放到一个集合里，再按函数名字放到map里，然后构建<code>Program</code>：</p>
 <pre><code class="language-python">program = Program(
     CLattice(),
     {},
@@ -1828,14 +2132,18 @@ cp -r /sn640/retdec/include/retdec/serdes ./retdec-llvmir2hll/
     callgraph,
 )
 </code></pre>
-这里<code>parsed_constraints</code>就是准备好的那个map。callgraph都不用动，就是<code>Dict[str, List[str]]</code>。前两个参数分别是<code>types: Lattice[DerivedTypeVariable]</code>和<code>global_vars: Iterable[MaybeVar]</code>。</li>
-<li>使用Solver去求解约束：
+<p>这里<code>parsed_constraints</code>就是准备好的那个map。callgraph都不用动，就是<code>Dict[str, List[str]]</code>。前两个参数分别是<code>types: Lattice[DerivedTypeVariable]</code>和<code>global_vars: Iterable[MaybeVar]</code>。</p>
+</li>
+<li>
+<p>使用Solver去求解约束：</p>
 <pre><code class="language-python">config = SolverConfig(top_down_propagation=True)
 solver = Solver(program, config, verbose=LogLevel.DEBUG)
 _, sketches = solver()
 </code></pre>
-查看solver的<code>__call__</code>方法，可以发现返回类型是<code>Dict[DerivedTypeVariable, ConstraintSet]</code>和<code>Dict[DerivedTypeVariable, Sketch]</code>。</li>
-<li>传入<code>CTypeGenerator</code>，得到最终的类型结果。
+<p>查看solver的<code>__call__</code>方法，可以发现返回类型是<code>Dict[DerivedTypeVariable, ConstraintSet]</code>和<code>Dict[DerivedTypeVariable, Sketch]</code>。</p>
+</li>
+<li>
+<p>传入<code>CTypeGenerator</code>，得到最终的类型结果。</p>
 <pre><code class="language-python">gen = CTypeGenerator(
     sketches,
     CLattice(),
@@ -1845,24 +2153,1006 @@ _, sketches = solver()
 )
 return list(gen().values())
 </code></pre>
-<code>CTypeGenerator</code>的<code>__call__</code>方法的返回类型是<code>Dict[DerivedTypeVariable, CType]</code>。</li>
+<p><code>CTypeGenerator</code>的<code>__call__</code>方法的返回类型是<code>Dict[DerivedTypeVariable, CType]</code>。</p>
+</li>
 </ul>
 <p>根据<a href="https://github.com/GrammaTech/retypd/blob/e2c2adac5b123aa68b573192519f0d01e365527d/src/parser.py#L111">这里</a>，每个规则大致就是<code>var1 ⊑ var2</code>或者<code>var1 &lt;= var2</code>，然后两边的变量就是DerivedTypeVariable类型的。因此，上面结果里返回的map其实就能够用来查每个变量的类型。</p>
+<p><strong>S-Pointer and S-Field⊕/⊖</strong> 通过搜索代码，可以得知，至少在<a href="https://github.com/GrammaTech/retypd-ghidra-plugin">retypd-ghidra-plugin</a>和<a href="https://github.com/GrammaTech/gtirb-ddisasm-retypd">gtirb-ddisasm-retypd</a>中是没有和这个相关的规则的生成的。</p>
 <h4 id="retypd-ghidra-插件"><a class="header" href="#retypd-ghidra-插件">retypd ghidra 插件</a></h4>
 <p>在我的<a href="https://github.com/am009/retypd-ghidra-plugin">fork</a>仓库里可以直接下载到构建好的插件，修改版Ghidra，以及docker镜像。同时提供了给retypd的样例输入和输出。</p>
 <p>通过修改 GhidraRetypd.zip中的extension.properties，可以绕过ghidra插件安装时的版本检查</p>
 <pre><code class="language-Python">version=10.2.3
 </code></pre>
 <p>安装Ghidra插件：</p>
-<pre><code>1. 打开 Ghidra 软件，点击 &quot;File&quot; 菜单，选择 &quot;Install Extensions&quot; 选项。
-2. 在弹出的 &quot;Install Extensions&quot; 窗口中，点击 &quot;Browse&quot; 按钮选择你要安装的扩展程序。
-3. 选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 &quot;Open&quot; 按钮。
-4. 点击 &quot;OK&quot; 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。
-5. 安装完成后，重启 Ghidra。
-</code></pre>
+<ol>
+<li>打开 Ghidra 软件，点击 &quot;File&quot; 菜单，选择 &quot;Install Extensions&quot; 选项。</li>
+<li>在弹出的 &quot;Install Extensions&quot; 窗口中，点击 &quot;Browse&quot; 按钮选择你要安装的扩展程序。</li>
+<li>选中你要安装的扩展程序文件（通常是一个 zip 压缩文件），然后点击 &quot;Open&quot; 按钮。</li>
+<li>点击 &quot;OK&quot; 按钮开始安装扩展程序。在安装过程中，Ghidra 软件会自动解压缩扩展程序文件，并将它们安装到正确的目录中。</li>
+<li>安装完成后，重启 Ghidra。</li>
+</ol>
 <h2 id="算法详解"><a class="header" href="#算法详解">算法详解</a></h2>
+<ul>
+<li>首先阅读<a href="http://www.lsv.fr/~schwoon/enseignement/verification/ws1112/c3.pdf">这个PPT</a>和这个论文《<a href="https://arxiv.org/pdf/1405.5593">Saturation algorithms for model-checking pushdown systems</a>》，学会B¨uchi发现， Caucal提出的这个saturation算法。</li>
+<li>然后阅读论文，学习其中基于saturation算法改进的部分。</li>
+</ul>
+<h3 id="自动机基础-saturation-algorithms"><a class="header" href="#自动机基础-saturation-algorithms">自动机基础 Saturation algorithms</a></h3>
+<p>资料：</p>
+<ul>
+<li>《<a href="http://www.lsv.fr/~schwoon/enseignement/verification/ws1112/c3.pdf">Pushdown systems</a>》了解下推自动机</li>
+<li>《<a href="https://arxiv.org/abs/1405.5593">Saturation algorithms for model-checking pushdown systems</a>》了解Saturation algorithms相关的背景概念。</li>
+</ul>
+<p>有两个重要结论：</p>
+<ul>
+<li>下推系统可达的栈内容形成了一个正则语言，因此可以表示为有限状态自动机。但是最初提出的算法是指数级的。后面有人提出了多项式级的算法，核心思想就是引入一个saturation process，转换被逐渐地加入有限自动机。（这个结论没有被retypd使用）</li>
+<li>下推系统定义了配置（状态加栈字符串）之间的转换关系，可以多项式时间内构建一个带输出的有限状态自动机（transducer）识别这些转换关系。（retypd使用的结论）</li>
+</ul>
+<p><strong>有限自动机</strong></p>
+<ul>
+<li>$\Sigma$ 是自动机的字符集。$\Sigma^{*}$ 是字符串的集合。 $\Gamma^{\leq n}$ 是长度最多为n的字符串集合。</li>
+<li>一个在字符集 $\Sigma$ 上的自动机 $\mathcal{A}$ 是一个元组： $(\mathbb{S},\mathcal{I},\mathcal{F},\delta)$ 分别代表有限的状态集合，初始状态集合，最终状态集合，转换规则集合 $\delta \subseteq \mathbb{S} \times \Sigma \times \mathbb{S}$ 表示从一个状态遇到一个字符，转换到另外一个状态。
+<ul>
+<li>有时会把字符集写进来 $(\mathbb{S},\Sigma,\mathcal{I},\mathcal{F},\delta)$ 变成五元组</li>
+</ul>
+</li>
+<li>$s \overset{a}{\underset{\mathcal{A}}{\longrightarrow}} t$ 表示自动机 $\mathcal{A}$ 有这样一个转换 $(s,a,t)$</li>
+<li>$s \overset{w}{\underset{\mathcal{A}}{\Longrightarrow}} t$ 表示自动机读入字符串w之后可以转换到t。</li>
+</ul>
+<h4 id="下推系统-pushdown-system-与-p-自动机"><a class="header" href="#下推系统-pushdown-system-与-p-自动机">下推系统 pushdown system 与 P-自动机</a></h4>
+<p><strong>和下推自动机的区别</strong>：pushdown system是自动机的简化版本。当我们用PDS建模程序的时候，有时不太关注读入和识别字符，而是关注栈状态的转移。</p>
+<p>和自动机的区别在于没有识别字符串这种概念。自动机一般只能用来识别字符串，有初始态，终止态，遇到某个字符的时候触发转换规则。这里的下推系统则不是识别字符串的，即转换规则里不需要读入字符，直接改变状态和栈内容。这里下推系统直接主要关注栈上的内容字符串。</p>
+<p>一个下推系统是四元组 $(Q,\Gamma,\bot,\Delta)$</p>
+<ul>
+<li>$Q$ 是有限的控制状态的集合</li>
+<li>$\Gamma$ 是有限的栈字符集</li>
+<li>$\bot \in \Gamma$ 是一个特殊的底部栈字符</li>
+<li>$\Delta \subseteq (Q \times \Gamma) \times (Q \times \Gamma^{\leq 2})$ 是转换的集合。表示在一个状态从栈上弹出一个字符，转换到另外一个状态并压入一个字符串。</li>
+<li>Configuration表示系统状态，是 当前状态 $\in Q$ 和 当前栈字符串 $\in \Gamma^{*}$ 的二元组。</li>
+<li>不考虑弹出超过栈底的情况。所以有时会引入特殊底部栈字符，然后要求规则不会把这个符号弹出来。</li>
+</ul>
+<p><strong>Pushdown system （PDS）可以用来分析程序</strong></p>
+<ul>
+<li>程序表示
+<ul>
+<li>状态Q保存程序的全局变量</li>
+<li>栈反映程序执行的调用栈</li>
+<li>栈上字符编码程序局部变量：比如编码为 当前program counter 和 局部变量的二元组。</li>
+</ul>
+</li>
+<li>一些例子
+<ul>
+<li>状态 $pAw$, 这里 $p$ 表示状态，代表全局变量， $Aw$ 表示栈。其中 $A$ 表示当前的PC和局部变量，w表示调用栈中，被“暂停”执行的程序状态，包括返回地址和局部变量情况。</li>
+<li>状态转换 $pA \rightarrow qB$ 表示执行一个普通语句。
+<ul>
+<li>全局变量可能发生修改，从 $p$ 变成 $q$ ，</li>
+<li>栈深度不变，但是从A变成B，表示当前PC和局部变量发生了变化。</li>
+</ul>
+</li>
+<li>状态转换 $pA \rightarrow qBC$ 表示函数调用
+<ul>
+<li>栈深度增加了，B里面包含了返回地址以及调用者的局部变量状态。现在压入了被调用者的栈。</li>
+</ul>
+</li>
+<li>$pA \rightarrow q\epsilon$ 表示函数返回
+<ul>
+<li>栈上弹出了一个字符，表示弹出了一个调用栈。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>PDS的可达性问题</strong></p>
+<p>给定一个PDS和两个configuration $c,c'$，是否能从 $c$ 走到 $c'$ 状态？</p>
+<p>$$
+{ w \in \Gamma^{*} \mid  \exists q \in Q, (q_{0},\bot) \Rightarrow (q,w) }
+$$</p>
+<p>即求出这样一个集合，从起始状态 $(q_{0},\bot)$ 出发能推导到的所有状态 $(q,w)$ (这里状态 $q \in Q$ 任意)，其中字符串w组成的集合。</p>
+<p><strong>一个非常重要的结论是，这里可达的字符串集合形成了正则语言。</strong> 这意味着函数调用时的状态转换可以用一个有限状态自动机表示。</p>
+<p><strong>PDS的configuration的正则性：</strong></p>
+<ul>
+<li><strong>背景</strong>：众所周知，能被确定有限状态自动机识别的语言是正则（regular）语言。而说到语言，我们会想到根据语法生成的规则，最后推导出很多可以被接受的字符串，但是语言本质也就是一种无限的字符串的集合。
+<ul>
+<li>如果是有限的话，直接对每个字符串用or连接就完全匹配了。所以一般讨论的都是无限的字符串集合。</li>
+</ul>
+</li>
+<li><strong>定义1</strong>：如果某个配置集合 $C$ 是正则的，那么对任意的状态 $p \in Q$ （即不管状态），在这个配置集合里面的所有字符串w构成的集合， ${ w \in \Gamma^{*} \mid (p,w) \in C}$ 是正则的。即栈状态构成正则语言。
+<ul>
+<li>简单来说，不管state，如果栈上字符的集合构成正则的语言，则这个configuration集合是正则的。</li>
+</ul>
+</li>
+<li><strong>定理1，初始状态可达的配置集合的正则性</strong>：
+<ul>
+<li>定义：初始配置：任意状态，但是栈为空（仅有 $\bot$ 符号）的配置</li>
+<li>任意pushdown system，从初始配置出发，可达的配置是正则的。</li>
+</ul>
+</li>
+<li><strong>定理2：后推闭包的正则性</strong>：给定一个正则配置集合C，基于自动机规则任意后推形成的闭包集合也是正则的。
+<ul>
+<li>写作：$Post^*_{P}(C) = { c'  \mid \exists c \in C, c \underset{P}{\Longrightarrow} c' }$ 从任意的C中配置开始，在自动机P下能推导出c'，则c'属于集合。</li>
+<li>这一定理能从定理1推出：构建一个新自动机P'，增加很多新的state，使得当前配置集合都是初始配置。这里定理里的后推可得到的配置集合其实就是可达的配置集合。</li>
+</ul>
+</li>
+<li><strong>倒推闭包的正则性</strong>：正则集合的倒推集合，即另外一个配置集合Pre*(C)，能够推理得到当前集合C。当前集合是正则的，则Pre*(C)也是正则的。
+<ul>
+<li><strong>原因</strong>：有时候想要基于程序的错误状态，倒退前面的可达状态。</li>
+<li><strong>证明</strong>：思想是，构建新的自动机P'，规则和P是反着来的。
+<ul>
+<li>如果P有个规则是 $qA \rightarrow p$ 即弹出了字符A。我们P'增加反着来，压入字符A的规则 $pX \rightarrow qAX$。即对于任意字符X，都允许压入AX。</li>
+<li>如果P有个规则是 $qA \rightarrow pBC$ 弹出A压入BC。则我们需要增加两个规则。
+<ul>
+<li>$pB \rightarrow r_{(C,q,A)}$</li>
+<li>$r_{(C,q,A)} C  \rightarrow  q A$</li>
+<li>直接插入规则的问题在于，下推自动机左边一般只能匹配一个栈顶字符，右边则可以为空，也可以压入两个字符。这里我们需要考虑同时按顺序存在BC字符的情况。</li>
+<li>借助中间状态 $r_{(C,q,A)}$ 我们</li>
+</ul>
+</li>
+<li><strong>一致性</strong>：如果在P中有两个状态可以互推，当且仅当我们P'中这两个状态可以反着互推。而且P'满足上面定理的要求，然后应用上面正推的定理，成功证明反推定理。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>和retypd的PDS对应</strong>：我们构建的PDS表达的是子类型之间的转换关系。但是实际构建出来可能存在很多初始状态不可达的序列。例如如果有规则 $A.load \sqsubseteq B$ 我们增加初始状态的转换，使得初始状态可达 (A/B, $\bot$) 的配置。但是规则并不允许 $(A, \bot) \rightarrow (A, .load)$ ，否则存在子类型关系 $A \sqsubseteq A.load$。也因此，这里构建的自动机没有用在retypd中。</p>
+<p><strong>PDS对应的自动机</strong></p>
+<p>有一个PDS $\mathcal{P}=(P, \Gamma, \Delta)$，我们对应有一个有限自动机 $\mathcal{A}=(Q, \Gamma, P, T, F)$</p>
+<ul>
+<li>PDS的栈字符集 $\Gamma$ 被用作有限自动机的字符集。PDS栈字符原本用来表示局部变量和PC。</li>
+<li>PDS的控制状态（表示全局变量），被用作有限自动机的初始状态。</li>
+<li>我们称，有限自动机接受配置 $pw$ ，如果自动机从状态p开始，接受字符串w之后能停止在终结态。而且对应每个PDS都能构造出这样的自动机。
+<ul>
+<li>直观上理解：对任意的state（代表了程序的全局变量状态），此时可能的栈情况是什么样的？这些所有可能的栈情况可以用一个有限自动机来表达。</li>
+<li>上面提到，不考虑状态，单把栈上字符串拿出来，形成的也是正则语言。这里其实表达的是一个意思。每个configuration的状态作为初始状态，然后存在一个P-有限自动机匹配栈上的内容，其实就是说明了栈上形成的是正则语言。</li>
+</ul>
+</li>
+</ul>
+<p><strong>Pre(S)的Saturation Algorithm</strong></p>
+<ul>
+<li>相关符号总结
+<ul>
+<li>$\Delta$: pushdown system的下推规则</li>
+<li>$\delta$: P-自动机的状态推理规则。后面会不断增加规则，构成一个递增的规则序列。</li>
+<li>$Q$: pushdown system的状态集合，也是P-自动机的初始状态</li>
+<li>$\mathcal{F}$: P-自动机的终止状态集合</li>
+<li>$\mathcal{A}$: P-自动机。包括状态集合 $\mathbb{S}$, 初始状态 $Q$, 推理规则 $\delta$ 和终止状态 $\mathcal{F}$。</li>
+<li>$\mathcal{L}(\mathcal{A})$: 表示A接受的语言。</li>
+<li>$\mathcal{B}$: 需要构建的新自动机，接受 $Pre^{*}_P (\mathcal{L}(\mathcal{A}))$</li>
+</ul>
+</li>
+<li>Saturation Algorithm算法
+<ul>
+<li>
+<p>前提：已知一个下推系统 $P=(Q,\Gamma,\bot,\Delta)$ ,和对应的P-自动机 $\mathcal{A}=(\mathbb{S},Q,\delta,\mathcal{F})$</p>
+</li>
+<li>
+<p>目标：构建出一个新的自动机 $\mathcal{B}$ 接受语言 $Pre^{*}_P (\mathcal{L}(\mathcal{A}))$</p>
+</li>
+<li>
+<p>过程：构建一个自动机的序列 $(\mathcal{A}<em>{i})</em>{i \in [0,N]}$</p>
+<ul>
+<li>其中其他部分都是相同的，状态数量是相同的，只有转换规则 $\delta_i$ 不同。</li>
+<li>保证转换规则只会增加新的规则： $i \in [0,N-1]$, $\delta_{i} \subseteq \delta_{i+1}$</li>
+<li>最后转换规则会收敛，达到不动点： $\delta_{i+1}=\delta_{i}$</li>
+<li>每次至少增加一个规则，因此程序最多走 $|Q|^{2} |\Gamma|$ 步
+<ul>
+<li>作为一个有限状态自动机，这里只对Q状态增加边，每两个状态之间最多 $|\Gamma|$ 个规则。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>算法：如果有一个规则 $pA \rightarrow qw$ ，同时现在的P-自动机存在一个路径 $q \overset{w}{\underset{\mathcal{A}_{i}}{\Longrightarrow}} s$ 我们给P-自动机增加一个新的转换规则 $p \xrightarrow[]{A} s$</p>
+<p><img src="imgs/saturation.drawio.png" alt="saturaion" /></p>
+<p><code>p Au -&gt; q wu</code>。原有自动机为黑色部分，u代表未知任意字符串，即代表的是路径，内部省略了具体的其他节点。意味着从状态为q栈为空的状态，能够接受一个字符串wu。</p>
+<p>然后我们新增了这样一条规则，使得状态为p，字符串为Au也被接受了。</p>
+<p>规则的构建使得，某个下推系统的前驱规则的节点被覆盖到了。而最后目的自动机 $\mathcal{B}$ 由于达到了不动点，因此关于下推系统P的前驱规则封闭。</p>
+</li>
+<li>
+<p>证明过程的不变量：在这个自动机转换规则的序列中，存在一些始终为真的条件。如果自动机存在转换规则 $p \xrightarrow[]{A} s$ ，那么以下两个性质始终满足满足。</p>
+<ul>
+<li>如果状态s属于下推系统P的状态：在下推系统P中存在规则 $pA \overset{}{\underset{P}{\Longrightarrow}} s$。这是一个弹出栈字符的规则。</li>
+<li>如果状态s属于其他状态，即不属于下推系统P的状态：对于任何从状态s出发能被接受的字符串u，配置 $(p,Au)$ 属于 $Pre^{*}_P (\mathcal{L}(\mathcal{A}))$</li>
+<li>从这个不变关系，可以推出， $\mathcal{L}(\mathcal{A}_i) \subseteq Pre^{<em>}_P (\mathcal{L}(\mathcal{A}))$ ，即每个A的语言都是我们目标的子集。 特别地， $\mathcal{L}(\mathcal{B}) \subseteq Pre^{</em>}_P (\mathcal{L}(\mathcal{A}))$ 最终迭代的不动点也是这样。</li>
+</ul>
+</li>
+<li>
+<p>最小关系：我们如果只关注状态在Q中（下推系统的状态）的部分，那么关系只在 $(Q \times {\varepsilon}) \times (Q \times \Gamma)$ 上被添加 1. 左边都是初始状态; 2. 转换规则都是接受了一个字符。 这里增加的关系可以被看作是一个最小关系 $\mathcal{R}$</p>
+<ul>
+<li>$pA ; \mathcal{R} ; q$ 如果存在规则 $pA \rightarrow q$</li>
+<li>$pA ; \mathcal{R} ; q$ 如果 $rB ; \mathcal{R} ; q$ 并且 $pA \rightarrow rB$ 在规则中。
+<ul>
+<li>这里关系 $\mathcal{R}$ 似乎会对每个带栈字符的状态创建一个无字符的对应状态？比如这里为 $rB$ 引入中间状态</li>
+</ul>
+</li>
+<li>$pA ; \mathcal{R} ; q$ 如果存在规则 $pA \rightarrow rBC$，并且存在状态 $s\in Q$，关系 $rB ; \mathcal{R} ; s$ 和 $sC ; \mathcal{R} ; q$
+<ul>
+<li>这里 $q$ 仿佛直接代表了 $rBC$</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="描述派生可达关系的-transducer"><a class="header" href="#描述派生可达关系的-transducer">描述派生（可达）关系的 Transducer</a></h4>
+<p>基础概念：</p>
+<ul>
+<li>
+<p>Finite State Transducer 其实就是带有输出的有限状态自动机（finite state automaton）。</p>
+</li>
+<li>
+<p>派生关系 $Deriv_{P}$：描述任意两个字符串之间的关系： $Deriv_{P} ={ (u,v) \in \Gamma^{*} \mid (q_{0},u) \overset{}{\underset{P}{\Longrightarrow}} (q_{f},v) }.$</p>
+<ul>
+<li>$Deriv_{P} \subseteq \Gamma^{<em>} \times \Gamma^{</em>}$ 。是字符串之间的关系。</li>
+</ul>
+</li>
+<li>
+<p>操作：$A_{+}$ 表示压入单个符号的操作 push A（$A \in \Gamma$ 是字符）。 $A_{-}$ 同理。</p>
+<ul>
+<li>操作集合 $\Gamma_{+}={ A_{+} \mid A \in \Gamma}$ push操作的集合，  $\Gamma_{-}$ 同理。 $\overline{\Gamma}=\Gamma_{+} \cup \Gamma_{-}$ 表示两个的并集。</li>
+<li>操作序列： $\alpha=\alpha_{1} \ldots \alpha_{n} \in \overline{\Gamma}^{*}$ 表示一系列操作。
+<ul>
+<li>例如， $pA \rightarrow qBC$ 的操作序列是 $A_{-}C_{+}B_{+}$</li>
+</ul>
+</li>
+<li>操作转换关系： $u \overset{\alpha}{\underset{}{\leadsto}} v$ 表示栈状态 $u \in \Gamma^{*}$ 在操作 $\alpha$ 下变成了栈状态 $v$。</li>
+<li>non-productive序列：无法被应用的栈序列，常常是这种 $B_{+} C_{-}$ 先push再pop一个不同符号的序列，刚压入B，怎么可能栈顶弹出C呢？
+<ul>
+<li>就像下面对比图先走橙色边再走蓝色边一样。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>对比自动机和transducer</p>
+<p><img src="imgs/saturation3.drawio.png" alt="对比自动机和transducer" /></p>
+<p>这里可以看到，transducer的状态和PDS是完全对应的，前面的自动机则仅是初始状态和PDS相同，只有栈为空的时候才对应PDS对应的状态。</p>
+<p>Transducer 每条边上也只能push或pop一个字符，这里是简略写法，隐藏了中间的状态。但是是否打破了Transducer和PDS状态的对应关系？并没有，如果要求PDS每次也只能增加或者减少一个栈字符，则两边还是对应的。</p>
+</li>
+<li>
+<p>行为集合 $Behaviour_{P}$ 表示下推系统P，不管是否non-productive，可能走出的所有栈操作序列的集合。</p>
+<ul>
+<li>即我现在只需要管状态转换，不需要管栈操作的应用。</li>
+<li>即画出上面的转换图，然后随便沿着边走</li>
+</ul>
+</li>
+<li>
+<p>$Behaviour_{P}$ 和 $Deriv_{P}$ 的关系：对于任何在行为集合的操作序列， $\alpha \in Behaviour_{P}$ ， 两个字符串属于派生关系集合 $(u,v) \in Deriv_{P}$ 当且仅当 这两个字符串存在操作关系 $u \overset{\alpha}{\underset{}{\leadsto}} v$ 。</p>
+<ul>
+<li>然而这个定义不太行，因为 (1) $Behaviour_{P}$ 有很多不合法的序列。(2) 存在刚push就pop的冗余序列，如 $A_{-} B_{+} A_{+} A_{-} C_{+} C_{-}=A_{-} B_{+}$ 。</li>
+</ul>
+</li>
+<li>
+<p>简化关系 $\mapsto$ ：表示一个栈操作序列被简化为另外一个栈操作序列。消除了上面的这种刚push就pop的冗余行为</p>
+<ul>
+<li>例如 $B_{-}A_{+}A_{-}C_{+} \mapsto B_{-}C_{+}$</li>
+</ul>
+</li>
+<li>
+<p>操作序列集合在简化操作下维持正则性：如果一个操作序列集合R内的每个操作都被 $\mapsto$ 简化，那么新的集合 $Red(R) = { Red(\alpha)  \mid \alpha \in R }$ 也是正则的</p>
+</li>
+<li>
+<p>操作序列自动机的简化算法： $Red(R)$ 能在 $\mathcal{O}(|\mathcal{A}|^{3})$ 的复杂度构建出来。</p>
+</li>
+<li>
+<p>简化并移除non-productive序列的操作集合 $RP_{P}$</p>
+<ul>
+<li>移除non-productive序列：简化后很容易识别，直接扫描找先push再pop的序列。因为如果push的字符和pop的字符不同则不合法，相同则说明化简没有结束。</li>
+<li>性质：可以推出里面的序列必然只会先pop再push。</li>
+</ul>
+</li>
+<li>
+<p>最终的结论：</p>
+<ul>
+<li>$Deriv_{P}$ 的关系 $(w_{1},w_{2})$ 对应到transducer 必然是，找出两个串的公共后缀，然后先pop w1的前缀，然后push w2的前缀。</li>
+<li>$Deriv_{P}$ 对应的 Transducer 可以在多项式时间内被构建出来。</li>
+</ul>
+</li>
+</ul>
+<p>核心在于，将状态转换改为了一个push pop栈的序列。即，如果有一个 $pA \rightarrow rw$ 规则，那么我们这里构建一个序列：pop A，push ...(构成w的几个字符)。表示栈上的变化关系。</p>
+<p>然后使用饱和（Saturation）算法。这里需要每条边上的操作只能压入或者弹出单个字符。即找到两个路径上能化简的状态，然后直接连过去，标上化简后的操作序列。</p>
+<p>这里的饱和（Saturation）算法才是后面retypd使用的。</p>
+<h3 id="retypd-基础符号"><a class="header" href="#retypd-基础符号">retypd 基础符号</a></h3>
+<p><strong>使用的符号</strong></p>
+<ul>
+<li>$\mathcal{V}$: 类型变量的集合
+<ul>
+<li>在这个集合里包含一系列类型常量，作为一种符号描述。这些类型常量可能形成一个lattice，但是我们不解释它们。</li>
+</ul>
+</li>
+<li>$\Sigma$: 字段标签 field label。不一定是有限的。主要的符号如下：
+<ul>
+<li>$\mathsf{.in}_L$ 函数在位置L的输入</li>
+<li>$\mathsf{.out}_L$ 函数在L位置的输出</li>
+<li>$\mathsf{.load}$ 可读的指针</li>
+<li>$\mathsf{.store}$ 可写的指针</li>
+<li>$.\sigma\mathsf{N@k}$ 在偏移k处有一个N bit的成员。</li>
+</ul>
+</li>
+<li>函数 $\langle \cdot \rangle : \Sigma \to { \oplus, \ominus }$: 从结构体label映射到 ${ \oplus, \ominus }$ 表示variance，协变和逆变属性</li>
+<li>派生的类型变量 derived type variable (定义3.1)：形为 $\alpha w$ ，其中类型变量 $\alpha \in \mathcal{V}$ and 字段标签 $w \in \Sigma^*$.</li>
+<li>标签 $\ell$ 的variance (定义3.2)，指的是前面的类型变量的类型如果发生变化时，带标签的派生类型变量的variance的变化方向。 $\alpha.\ell$ 和 $\beta.\ell$ 中，如果 $\alpha$ 是 $\beta$ 的子类型。</li>
+<li>约束 $c$ (定义3.3)有两种形式。约束的集合用 $\mathcal{C}$ 表示
+<ul>
+<li>存在形式: (派生)类型变量X存在</li>
+<li>子类型形式：(派生)类型变量X是Y的子类型。</li>
+<li>约束的推导 $\mathcal{C} \vdash c$ 表示约束能从原约束集合中，由那些规则派生出来。</li>
+<li>约束中的自由变量定义 $\exists \tau . \mathcal{C}$ 表示，存在变量 $\tau$ 满足了约束集合。</li>
+</ul>
+</li>
+<li>Type Scheme类型方案，表示一个泛型的函数。 $\forall{\overline{\alpha}}.{\mathcal{C}}\Rightarrow{\beta}$ 表示在约束C的条件下，带有模板变量集合 $\overline{\alpha}$ 的泛型类型 $\beta$
+<ul>
+<li>仅增加约束： $\forall \tau . C \Rightarrow \tau$ 表示仅对类型 $\tau$ 增加约束。
+<ul>
+<li>例如 $\forall \tau . (\tau.\mathsf{in}.\mathsf{load}.\sigma\mathsf{32@4} \sqsubseteq \tau.\mathsf{out}) \Rightarrow \tau$ 表示函数返回了参数在4字节offset位置的成员。</li>
+</ul>
+</li>
+<li>和约束的关系：基本是对应的。可以想象为我们主要关注约束，任何类型方案都可以理解为，声明一些通配符变量，然后定义一些约束。例如 $\forall \alpha . (\exists \tau . \mathcal{C}) \Rightarrow \alpha$ 。通过引入新的类型变量，可以让最右侧总是等于单个变量。如果能把约束里每个类型变量解出来，那么这个泛型也很容易得到。</li>
+<li>和sketch的关系。通过inferShapes算法将约束求解为变量映射到sketch的树/自动机结构。</li>
+</ul>
+</li>
+</ul>
+<p><strong>常见术语</strong></p>
+<ul>
+<li>pushdown system: 在基本的自动机的基础上，额外增加了一个栈结构。</li>
+<li>non-structural subtyping: 即子类型关系不一定非要结构完全相同（在structural subtyping中只能叶子节点不同）。尤其是在有结构体和对象这种情况。见<a href="https://web.cs.ucla.edu/~palsberg/paper/fac97.pdf">&quot;Type Inference with Non-structural Subtyping&quot;</a></li>
+</ul>
+<p><strong>规约规则</strong></p>
+<ul>
+<li><strong>T-Left</strong>/<strong>T-Right</strong>/<strong>T-Prefix</strong>: 如果存在约束 $\alpha \sqsubseteq \beta$ ，则 $\alpha$ 和 $\beta$ 存在。如果存在一个带field label的派生变量，则原始变量存在。
+<ul>
+<li>这意味着在算法中我们在访问约束时会创建对应变量节点。</li>
+</ul>
+</li>
+<li><strong>T-InheritL</strong> / <strong>T-InheritR</strong>: 子类型能安全代换父类型。父类型如果能带一个field label，则子类型带有相同的field label的派生变量也存在。</li>
+<li><strong>S-Refl</strong>: 反射性，自己是自己的子类型。</li>
+<li><strong>S-Field$_\oplus$</strong> / <strong>S-Field$_\ominus$</strong>: 如果field label的variance是协变 $\oplus$，则原变量子类型关系在带上标签后保持。否则反过来。</li>
+<li><strong>S-Pointer</strong>: 指针存入的类型是取出的子类型。</li>
+</ul>
+<p><strong>sketches</strong> 约束的求解结果被表示为sketches。每个value关联上一个sketch，包含该value的所有能力，即能否被store，能否访问指定的偏移。同时sketch还包含一个可自定义的lattice，用来传播类似于typedef这种类型。</p>
 <p>我们分析的不是具体的程序中的变量，而是他们的类型和类型之间的关系。因为复杂的约束关系，我们会把类型再设为一个类型变量，称为DataTypeVariable，DTV。</p>
-<p><strong>什么是Sketches</strong>：一个类型变量DTV，可能有各种各样的能力，比如可以在offset为4的地方load出一个四字节的值 （<code>.load.σ32@4</code>）。首先可以遍历所有的约束关系，比如<code>v_4504 ⊑ v_1242.store.σ8@0</code>，对每个关系单独看两边的变量，然后看比如<code>v_1242</code>是否被直接这样取过offset，然后把这些操作收集起来。但是这样还不够，因为可能因为约束的存在，其他变量能做的操作，它因为约束，应该也能做。这些都求解出来，得到的数据结构就是一个Sketch。</p>
+<p><strong>什么是Sketches</strong>：一个派生类型变量DTV，可能有各种各样的能力，比如可以在offset为4的地方load出一个四字节的值 （<code>.load.σ32@4</code>）。首先可以遍历所有的约束关系，比如<code>v_4504 ⊑ v_1242.store.σ8@0</code>，对每个关系单独看两边的变量，然后看比如<code>v_1242</code>是否被直接这样取过offset，然后把这些操作收集起来。但是这样还不够，因为可能因为约束的存在，其他变量能做的操作，它因为约束，应该也能做。这些都求解出来，得到的数据结构就是一个Sketch。</p>
+<p>一个Sketch才是真正直接代表一个具体的类型。是一个树状的类型结构。这个树的边上标记了field label，节点上标记了类型lattice上的元素。</p>
+<p><strong>基于程序操作的约束生成</strong></p>
+<ul>
+<li>变量复制/赋值：要么两边类型相同，要么根据安全代换原则，子类型被赋值为父类型。</li>
+<li>指针读取：增加field label。
+<ul>
+<li>指针的读和写能力分开考虑。子类型方面特殊处理。</li>
+</ul>
+</li>
+<li>函数调用：参数父类型，返回值子类型。
+<ul>
+<li>单独的类型变量规则是structural的，即子类型和父类型的能力必须一致。但是在函数调用时，可以遗忘一些能力。</li>
+</ul>
+</li>
+</ul>
+<h2 id="规约算法概述section-5"><a class="header" href="#规约算法概述section-5">规约算法：概述（Section 5）</a></h2>
+<h3 id="约束的简化"><a class="header" href="#约束的简化">约束的简化</a></h3>
+<p><strong>类型，以及函数的类型到底应该怎么表示？</strong></p>
+<ul>
+<li>格表示的类型：对于单个固定大小的基本类型，可以使用lattice结构以及一个偏序关系表示类型。子类型为格上的偏序关系</li>
+<li>对于复杂的具有能力的类型，比如访问某个偏移字段的能力，加载出值的能力，则类似结构体的子类型关系，子类型允许具有更多能力，安全代换父类型。</li>
+<li>函数的类型则涉及到泛型的类型方案的表示 $\forall{\overline{\alpha}}.,{C}!\Rightarrow!{\tau}$ 。为函数的输入和输出类型创建类型变量，然后得到一个变量的最小约束集合表示这个函数的类型。
+<ul>
+<li>例如通用的恒等函数，直接将参数返回，表示为，对任意的类型X，返回值的类型也是X。对应我们的表示可能是 $F.in \sqsubseteq F.out$</li>
+</ul>
+</li>
+<li>PDS = （未化简，或者简化后的）约束 = 类型方案 type scheme</li>
+</ul>
+<p><strong>我们为什么要简化约束？</strong> 为了减少无用的自由变量，降低约束集的增长率。令 $\mathcal{C}$ 表示由抽象解释生成的过程的约束集，并且 $\overline{\alpha}$ 是 $\mathcal{C}$ 中的自由类型变量集。我们其实已经可以使用 $\forall{\overline{\alpha}}.,{\mathcal{C}}!\Rightarrow!{\tau}$ 作为过程类型方案中的约束集，因为合法调用 $f$ 时使用的输入和输出类型显然是满足 $\mathcal{C}$ 的。</p>
+<p>然而，实际上我们不能直接使用这个约束集，因为这会导致在嵌套过程中产生很多无用的自由变量，并且约束集的增长率很高。如果一个函数没有调用其他函数，则确实约束集就自己。但是当函数调用别人，其他函数又调用更其他的函数，此时每次为一个函数推理类型时，就会牵涉进来所有这些涉及的函数的约束。因此化简约束是非常有必要的（TODO，是否可以根据约束的性质，判断它是否需要牵涉进来？）。</p>
+<p>这个简化算法的输入是，从一个函数的推断得到的一个类型方案 $\forall{\overline{\alpha}}.,{C}!\Rightarrow!{\tau}$ （包括自由类型变量，约束，和泛型），并创建一个较小的约束集 $\mathcal{C}'$，使得任何由 $\mathcal{C}$ 对 $\tau$ 的约束也被 $\mathcal{C}'$ 所蕴含。</p>
+<p>相反，我们寻求生成一个<strong>简化的约束集</strong> $\mathcal{C}'$，使得如果 $c$ 是一个“有趣”的约束，并且 $\mathcal{C} ;\vdash; c$，那么 $\mathcal{C}' ;\vdash; c$ 也同样成立。但什么让一个约束变得有趣呢？</p>
+<ul>
+<li>能力约束，表示某个dtv有某个field label</li>
+<li>递归类型约束： $\tau.u {;\sqsubseteq;} \tau.v$</li>
+<li>涉及常量类型的约束： $\tau.u {;\sqsubseteq;} \overline{\kappa}$ 或者 $\overline{\kappa} {;\sqsubseteq;} \tau.u$ 其中 $\overline{\kappa}$ 是类型常量.</li>
+</ul>
+<h3 id="roadmap"><a class="header" href="#roadmap">Roadmap</a></h3>
+<ol>
+<li>（A.）收集文字格式的初始约束，构建初始图。插入外部函数已知的参数类型。</li>
+<li>（F.1）约束简化算法。简化后的约束就是type schemes。这里对每个强连通分量后序遍历进行处理，处理完的分量内的type schemes保存下来，等待实例化。
+<ol>
+<li>基于约束集合构建初始图。子类型关系增加标记为1的边。对标签增加和减少的关系，增加对应push/pop的边。
+<ol>
+<li>比如对于dtv <code>F.in_a.load.off_4_size_8</code> 构建一系列图节点 <code>F -&gt; F.in_a -&gt; ... -&gt; F.in_a.load.off_4_size_8</code>。</li>
+<li>对于约束关系两边的dtv，连接边（边上标记1）。</li>
+</ol>
+</li>
+<li>运行Saturation算法，将 <code>push α -&gt; 1 -&gt; pop α</code> 这种边序列增加shortcut边。应用S-Pointer的实例化规则</li>
+</ol>
+</li>
+</ol>
+<ul>
+<li>Step 3: Identify the “externally-visible” type variables and constants; call that set E.</li>
+<li>Step 4: Use Tarjan’s path-expression algorithm to describe all paths that start and end in E but only travel through E c.</li>
+<li>Step 5: Intersect the path expressions with the language (recall _)*(forget _)*.</li>
+<li>Step 6: Interpret the resulting language as a regular set of subtype constraints. (“forgets” on the right, “recalls” on the left)</li>
+</ul>
+<ol start="3">
+<li>（F.2）构建sketches（为每个类型变量，比如函数类型）（自底向上遍历call graph的顺序），同时细化具体类型。</li>
+<li>（4.3）最后转换sketches到C类型。</li>
+</ol>
+<p>类型恢复本质上是三层分析的叠加：</p>
+<ul>
+<li>指针和数字类型的区分。</li>
+<li>指针能力分析。</li>
+<li>自定义的typedef常量类型传播。</li>
+</ul>
+<p>本质上，retypd在前两者里用的是快速的steensgaard的指针分析，在最后这层的分析上用的是Anderson的指针分析算法。</p>
+<p>retypd为什么不直接采用steensgaard的类型恢复？因为常量用不了，merge了直接变成父类型，基本无法传播自定义的typedef类型。。</p>
+<p>对于每个SCC看作按需分析。每个SCC能够简化算法计算出对应的summary。</p>
+<h3 id="无约束的下推系统-unconstrained-pushdown-systems"><a class="header" href="#无约束的下推系统-unconstrained-pushdown-systems">无约束的下推系统 Unconstrained Pushdown Systems</a></h3>
+<p><strong>无约束的含义</strong>：TODO。可能是表示没有限制栈符号和转换规则的有限性？</p>
+<p>核心思路： 下推系统 $\mathcal{P}_\mathcal{C}$ 的转换序列，可以直接对应上基于约束集合 $\mathcal{C}$ 上的子类型推导判断的推导树。</p>
+<p>定义：一个<strong>无约束下推系统</strong>是由三个部分组成的元组 $\mathcal{P} = (\mathcal{V}, \Sigma, \Delta)$，其中 $\mathcal{V}$ 是<strong>控制位置</strong>的集合，$\Sigma$ 是<strong>栈符号</strong>的集合，而 $\Delta$ 是包含在 $(\mathcal{V} \times \Sigma^<em>)^2$ 内的（可能无限）<strong>转换规则</strong>的集合。转换规则表示为 $\langle X; u \rangle \hookrightarrow \langle Y;v\rangle$，其中 $X,Y \in \mathcal{V}$ 且 $u,v \in \Sigma^</em>$。我们定义<strong>配置</strong>的集合为 $\mathcal{V} \times \Sigma^*$。在配置 $(p,w)$ 中，$p$ 称为<strong>控制状态</strong>，$w$ 称为<strong>栈状态</strong>。</p>
+<p>注意到，我们既不要求栈符号的集合也不要求转换规则的集合是有限的。这种自由度是为了模拟推导规则 S-Pointer， 正如图3的推导规则 S-Pointer 所示，它对应于一个无限的转换规则集。</p>
+<p><strong>为什么要用下推系统？</strong> 下推系统能很好地反映类型关系关于能力的传递关系，反映在下推系统上就是后缀子串的关系。</p>
+<ul>
+<li>转换关系定义：一个无约束的下推系统 $\mathcal{P}$ 确定了一个<strong>转换关系</strong> $\longrightarrow$ 在配置集合上： $(X,w) \longrightarrow (Y,w')$ 如果存在一个后缀 $s$ 和一个规则 $\langle {X}; {u} \rangle \hookrightarrow 	\langle {Y}; {v} \rangle$，使得 $w = us$ 和 $w' = vs$。$\longrightarrow$ 的传递闭包表示为 $\stackrel{*}{\longrightarrow}$。
+<ul>
+<li>这里的公共后缀s，就可以想象为类型的能力。比如各种偏移里的字段。然后前缀类型变量，比如两个结构体类型，如果符合子类型关系，则对应的访问相同的字段得到的类型变量，则也存在子类型关系。</li>
+</ul>
+</li>
+</ul>
+<p>有了这个定义，我们可以陈述我们简化算法背后的主要定理。这里一个类型对应一个 $(\mathcal{V} \cup \Sigma)^*$ 字符串。</p>
+<p>设 $\mathcal{C}$ 是一个约束集合，$\mathcal{V}$ 是一组基类型变量集合。定义 在类型变量和标签集合构成的两个字符串之间的关系 $(\mathcal{V} \cup \Sigma)^* \times (\mathcal{V} \cup \Sigma)^*$ 的一个子集 $S_\mathcal{C}$，
+通过 $(Xu, Yv) \in S_\mathcal{C}$ 当且仅当 $\mathcal{C} ;\vdash; X.u {;\sqsubseteq;} Y.v$。
+那么 $S_\mathcal{C}$ 是一个正则集合，并且可以在 $O(|\mathcal{C}|^3)$ 时间内构造一个识别 $S_\mathcal{C}$ 的自动机 $Q$。</p>
+<p>证明：基本思想是将每个 $X.u {;\sqsubseteq;} Y.v \in \mathcal{C}$
+作为下推系统 $\mathcal{P}$ 中的一个转换规则 $\langle {X}; {u} \rangle \hookrightarrow	\langle {Y}; {v} \rangle$。
+此外，我们为每个 $X \in \mathcal{V}$ 添加控制状态 ${^#{Start}}, {^#{End}}$ 及其转换 $\langle {{^#{Start}}}; {X} \rangle \hookrightarrow \langle {X}; {\varepsilon} \rangle$
+和 $\langle {X}; {\varepsilon} \rangle \hookrightarrow \langle {{^#{End}}}; {X} \rangle$。
+目前，
+假设所有标签都是协变的，并且忽略规则 S-Pointer。
+通过构造，$({^#{Start}}, Xu) \stackrel{<em>}{\longrightarrow} ({^#{End}}, Yv)$ 在 $\mathcal{P}$ 中当且仅当 $\mathcal{C} ;\vdash; X.u {;\sqsubseteq;} Y.v$。
+Büchi [27] 保证，对于任何标准（非无约束）下推系统中的两个控制状态 $A$ 和 $B$，
+所有满足 $(A, u) \stackrel{</em>}{\longrightarrow} (B, v)$ 的 $(u,v)$ 对组成的集合是一个正则语言；
+Caucal [8] 给出了一个构造识别这种语言的自动机的饱和算法。</p>
+<p>在完整的证明中，我们增加了两个创新之处：首先，我们通过将variance数据编码到控制状态和转换规则中，支持逆变堆栈符号。
+第二个创新之处涉及到 S-Pointer 规则；这个规则是有问题的，因为自然的编码将导致无限多的转换规则。
+我们将 Caucal 的构造扩展为在饱和过程中懒惰实例化所有必要的 S-Pointer 应用。
+详情见 Appendix D。</p>
+<p>由于 $\mathcal{C}$ 通常涉及到无限多的约束，
+这个定理特别有用：它告诉我们由 $\mathcal{C}$ 引发的完整约束集合可以通过自动机 $Q$ 的有限编码来实现。
+对约束闭包的进一步操作，如有效的最小化，可以在 $Q$ 上进行。通过限制与 ${^#{Start}}$ 和 ${^#{End}}$ 的转换，使用相同的算法
+消去类型变量，生成所需的约束简化。</p>
+<p><strong>推理的整体复杂性</strong></p>
+<p>用于执行约束集简化类型方案构造的饱和算法，
+在最坏情况下，是关于简化子类型约束数量的三次方。由于一些著名的指针分析方法也具有三次方复杂度（如 Andersen [4]），
+因此很自然地会怀疑 Retypd 的“无需指向”分析是否真的比基于指向分析数据的类型推理系统提供优势。</p>
+<p>为了理解 Retypd 的效率所在，首先考虑 $O(n^3)$ 中的 $n$。
+Retypd 的核心饱和算法在子类型约束的数量上是三次方的；由于机器代码指令的简单性，每条指令大约会产生一个子类型约束。
+此外，Retypd 在每个独立的过程中应用约束简化以消除该过程局部的类型变量，
+从而得到只涉及过程形参、全局变量和类型常量的约束集。在实践中，这些简化的约束集很小。</p>
+<p>由于每个过程的约束集是独立简化的，因此三次方的 $n^3$ 因子由最大过程大小控制，而不是整个二进制文件的大小。
+相比之下，像 Andersen 这样的源代码指向分析通常与指针变量的总数呈三次方，并且根据用于上下文敏感性的调用字符串深度呈</p>
+<h2 id="算法细节"><a class="header" href="#算法细节">算法细节</a></h2>
+<h3 id="约束简化算法appendix-d"><a class="header" href="#约束简化算法appendix-d">约束简化算法（Appendix D）</a></h3>
+<p><strong>基础符号</strong></p>
+<ul>
+<li>$\amalg$ 表示集合的不交并。表示某个集合可以分割为不同的组成部分。
+<ul>
+<li>$\mathcal{V} = \mathcal{V}_i \amalg \mathcal{V}_u$ 表示类型变量集合被分割为interesting和uninteresting两部分。</li>
+</ul>
+</li>
+<li>一个证明是elementary的，如果证明的结论的子类型关系里没有uninteresting的变量，且证明过程中，uninteresting变量都只在内部。
+<ul>
+<li>$\mathcal{C} {;\vdash;}^{\mathcal{V}<em>i}</em>\text{elem} X.u {;\sqsubseteq;} Y.v$ 表示约束集合 $\mathcal{C}$ 上能够推理出这样一个子类型约束。其中类型变量都定义在 ${\mathcal{V}_i}$ 上，并且这样的关系是elementary的。</li>
+</ul>
+</li>
+</ul>
+<p><strong>自动机</strong></p>
+<p>对应关系：</p>
+<ul>
+<li>一个类型（sketch）就是一个有限状态自动机。
+<ul>
+<li>本来用树就够了，但是递归类型会导致无限长的树。根据子树的有限性，用自动机处理递归的情况。典型的例子是复杂的递归结构体类型。</li>
+</ul>
+</li>
+<li>下推自动机工作的过程就是我们类型推理的过程
+<ul>
+<li>当前状态表示基础的类型变量。</li>
+<li>栈状态表示标签，比如<code>.load</code>，field访问</li>
+<li>自动机配置：状态+栈状态。表示一个派生变量。</li>
+<li>状态转换规则：子类型关系。
+<ul>
+<li>比如，随便写一个规则 $a.\sigma\mathsf{N@k} \sqsubseteq b.load$ 表示可以从状态为 $a$ 栈内容为 $\sigma\mathsf{N@k}$ 的配置转换到 状态为 $b$ 栈内容为 $load$ 的配置。</li>
+</ul>
+</li>
+<li>可达性：派生的子类型关系。
+<ul>
+<li>然后，如果 $b.load$ 又是 $c$ 的子类型，两个规则合起来，在自动机上，状态 $a.\sigma\mathsf{N@k}$ 到 $c$ 也是可达的（走了两步）。因此也具有子类型关系。 $a.\sigma\mathsf{N@k} \sqsubseteq c$。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h3 id="transducer-与其构建"><a class="header" href="#transducer-与其构建">Transducer 与其构建</a></h3>
+<ul>
+<li>Transducer可以表示下推自动机的所有的推断关系！任意两个dtv字符串之间的子类型关系！</li>
+<li>Transducer和类型推断的对应关系。</li>
+</ul>
+<p>重要概念：</p>
+<ul>
+<li>
+<p>$\mathcal{P}_\mathcal{C}$ 表示我们这里构建的pushdown system。包含三部分 $(\widetilde{\mathcal{V}}, \widetilde{\Sigma}, \Delta)$</p>
+<ul>
+<li>状态集合： $\widetilde{\mathcal{V}} = \left(\mathsf{lhs}(\mathcal{V}_i) \amalg \mathsf{rhs}(\mathcal{V}_i) \amalg \mathcal{V}_u\right) \times { \oplus, \ominus } \cup { {^#{Start}}, {^#{End}} }$
+<ul>
+<li>额外增加的两个特殊状态 start 和 end</li>
+<li>带有variance标签的状态，包括三部分
+<ul>
+<li>带有L或R标签的interesting变量</li>
+<li>uninteresting变量</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>栈字符集： $\widetilde{\Sigma} = \Sigma \cup { v^\oplus <del>|</del> v \in \mathcal{V}_i } \cup { v^\ominus <del>|</del> v \in \mathcal{V}_i }$
+<ul>
+<li>包含普通的field label</li>
+<li>带有variance标记的有趣变量。TODO这表示什么意思</li>
+</ul>
+</li>
+<li>转换规则包括四部分 $\Delta = \Delta_\mathcal{C} \amalg \Delta_\mathsf{ptr} \amalg \Delta_\mathsf{start} \amalg \Delta_\mathsf{end}$
+<ul>
+<li>$\Delta_\mathcal{C}$ 现有的规则，经过rule函数转换后的结果</li>
+<li>$\Delta_\mathsf{ptr}$ PTR规则，经过rule函数转换后的结果</li>
+<li>$\Delta_\mathsf{start} = \left{\langle {{^#Start}}; {v^\oplus} \rangle \hookrightarrow \langle {v^\oplus_\mathsf{L}}; {\varepsilon} \rangle~|<del>v \in \mathcal{V}<em>i \right} \cup \left{\langle {{^#Start}}; {v^\ominus} \rangle \hookrightarrow \langle {v^\ominus</em>\mathsf{L}}; {\varepsilon} \rangle</del>|~v \in \mathcal{V}_i \right}$
+<ul>
+<li>表示start状态可以把栈上的唯一变量标签转换为当前状态，栈为空</li>
+</ul>
+</li>
+<li>$\Delta_\mathsf{end} = \left{\langle {v^\oplus_\mathsf{R}}; {\varepsilon} \rangle \hookrightarrow \langle {{^#End}}; {v^\oplus} \rangle~|<del>v \in \mathcal{V}<em>i \right} \cup \left{\langle {v^\ominus</em>\mathsf{R}}; {\varepsilon} \rangle \hookrightarrow \langle {{^#End}}; {v^\ominus} \rangle</del>|~v \in \mathcal{V}_i \right}$
+<ul>
+<li>表示当前状态为某个变量，栈为空的时候，可以转换到End状态，把变量放到标签。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>$\mathsf{Deriv}<em>{\mathcal{P_C}}$ 表示 $\mathcal{P}</em>\mathcal{C}$ 上派生得到的约束</p>
+</li>
+<li>
+<p>$\mathsf{Deriv}<em>{\mathcal{P_C}}' = \left{ (X.u, Y.v) <del>|</del> (X^{\langle u \rangle}u, Y^{\langle v \rangle} v)\in \mathsf{Deriv}</em>{\mathcal{P_C}}\right}$</p>
+<ul>
+<li>表示 $\mathcal{P}_\mathcal{C}$ 上删去variance标签得到的约束。</li>
+</ul>
+</li>
+<li>
+<p>rule辅助函数，对普通的规则，生成我们内部使用的，带variance标签的规则形式</p>
+<ul>
+<li>$\mathsf{rule}^\oplus(p.u \sqsubseteq q.v) = \langle {\mathsf{lhs}(p)^{\langle u \rangle}}; {u} \rangle \hookrightarrow \langle {\mathsf{rhs}(q)^{\langle v \rangle}}; {v} \rangle \$
+<ul>
+<li>首先观察到分别给左边和后边的有趣的基本类型变量，通过lhs和rhs函数带上了L/R标记</li>
+<li>其次将field label的variance标签标记到了类型变量上</li>
+</ul>
+</li>
+<li>$\mathsf{rule}^\ominus(p.u \sqsubseteq q.v) = \langle {\mathsf{lhs}(p)^{\ominus \cdot \langle u \rangle}}; {u} \rangle \hookrightarrow \langle {\mathsf{rhs}(q)^{\ominus \cdot \langle v \rangle}}; {v} \rangle \$
+<ul>
+<li>这里的点运算符就是variance的叠加运算。</li>
+<li>TODO：这里的规则有什么实际的含义吗？</li>
+</ul>
+</li>
+<li>$\mathsf{rules}(c) = { \mathsf{rule}^\oplus(c),~ \mathsf{rule}^\ominus(c)}$
+<ul>
+<li>表示对每个约束生成两种类型的约束，带有不同的variance标记。</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>状态上的variance标签的作用：控制状态上的 ${ \oplus, \ominus }$ 上标用于追踪栈状态的当前variance，这使得我们能够区分在协变和逆变位置使用公理的情况。</p>
+</li>
+<li>
+<p>标签 操作 lhs 和 rhs 的作用：用于防止推导中使用来自 $\mathcal{V}<em>i$ 的变量，防止 $\mathcal{P}</em>\mathcal{C}$ 接受代表非基本证明的推导。</p>
+<ul>
+<li>例如，我们写一个递归的无限约束 $var.load \sqsubseteq var$，推导为 $var.load.load \sqsubseteq var.load \sqsubseteq var$ ，在增加标签之后就变成了 $var_{L}.load \sqsubseteq var_{R}$ 从而不会被递归推导。</li>
+</ul>
+</li>
+</ul>
+<p>基于Transducer的约束简化算法包含四个步骤：</p>
+<ul>
+<li>构建初始图
+<ul>
+<li>生成的约束可以直接看作PDS，这里的初始图表示未化简的transducer。</li>
+</ul>
+</li>
+<li>Saturation。</li>
+<li>Tarjan's PathExpression 算法</li>
+<li>转换回约束</li>
+</ul>
+<p><strong>Saturation算法</strong></p>
+<p>实际算法直接构建对应的，在边上标记有push/pop序列的自动机，即Transducer。然后在上面执行saturation算法。</p>
+<ol>
+<li>基于约束集合构建初始图。子类型关系增加标记为1的边。对标签增加和减少的关系，增加对应push/pop的边。
+<ol>
+<li>规则左边存在的变量，标记pop边，右边的变量标记push边。</li>
+<li>状态标记代表剩余的可读字符串，所以push之后反而变少，pop反而变多。</li>
+</ol>
+</li>
+<li>运行Saturation算法，
+<ol>
+<li>维护Reaching Set集合 $R(x)$
+<ol>
+<li>初始的时候，遍历所有边，如果存在一个 <code>push l</code> 的边从 x 到 y 的边，则 $R(y) \leftarrow R(y) \cup {(l,x)}$ 从 x 节点 push l 可以来到 y 。即，只关注push边。</li>
+<li>循环开始时，假如有子类型关系边 $(x, y, 1)$ ，则 $R(y) \leftarrow R(y) \cup R(x)$ 父类型更新子类型的可达关系。</li>
+</ol>
+</li>
+<li>（循环内）Saturation规则：将 <code>push α -&gt; 1 -&gt; pop a</code> 这种边序列增加shortcut边。即，如果存在边 $(x, y, pop;l)$ 且 x 的到达集合 $R(x)$ 内有一个对应标签的到达关系 $(l,z)$ 则给增加子类型关系边 $(z, y, 1)$。</li>
+<li>同时考虑S-Pointer规则：如果有一个 $(.store, z) \in R(x)$，想象边从 z 到 x，上面标记push store。此时找到x的逆 variance 节点 $x^-$，然后给 $R(x^-)$ 增加 $(.load, z)$
+<ol>
+<li>直接应用： $(.load,;x.store) \in R(\overline{x})$ 不是最典型的例子。往往会结合之前新增的子类型边。</li>
+<li>可以想象 $x$ 到 $x^-$ 额外增加了pop store和push load边。
+<img src="imgs/s-ptr-example.drawio.png" alt="" /></li>
+<li>应用时最好 $\overline{x}$ 也存在在图上。</li>
+</ol>
+</li>
+</ol>
+</li>
+</ol>
+<p>实际实现时，saturation算法被包含在Transducer的构建中。Transducer的构建在两个地方发挥作用：</p>
+<ul>
+<li>约束的简化。</li>
+<li>给sketch标记lattice元素时用来查询。</li>
+</ul>
+<p><strong>Tarjan’s path-expression algorithm</strong> 来自论文 《Fast Algorithms for Solving Path Problems》（see also this <a href="https://github.com/johspaeth/PathExpression">Github repo</a>）。 在一个有向图中，求解一个源点到其他任意点的可能的路径构成的正则表达式。</p>
+<p>在Saturation算法后，首先找到感兴趣的变量集合 $\mathcal{\epsilon}$ 然后找出所有开始并结束于 $\mathcal{\epsilon}$ 但是不经过 $\mathcal{\epsilon}$ 的路径表达式。然后和 $(recall;_)^<em>(forget ;_)^</em>$ 求交集（recall就是pop，forget就是push）。正则表达式也可以看作自动机，因此这里得到了一个新的自动机。</p>
+<p>将自动机翻译为一系列子类型约束：首先将源点和目的点的基础类型变量，作为子类型关系变量的两侧。如果路径上遇到了forget标记，则在右侧增加label。遇到了recall，对应的label增加到左侧。如果存在通配关系，引入新的类型变量，表示为递归的约束。</p>
+<p><strong>将Transducer转换回约束（D.3 TypeScheme）</strong> 这里的算法D.3并不是直接被用。而是主要反映一个性质。上述 transducer 在构建时，我们理解为有一个隐藏的栈，会从状态push进去。这里仅仅是构建了一个完全对应的PDS，把这个栈显式地表示出来。</p>
+<p>算法具体实现的时候，则是在前一步就找出从有趣变量到有趣变量的路径，然后直接把路径写成约束。</p>
+<p><strong>性质</strong>：最终得到的自动机Q有以下性质：</p>
+<ul>
+<li>将 pop l 看作读取输入 l，push l 看作写出字符 l，1 看作空转换（ε）。则这个Transducer描述了PDS所有可能的派生关系，即所有可能的子类型关系。</li>
+<li>如果在Q下，字符 Xu 能转换为 Yv，当且仅当X和Y是感兴趣变量，且存在一个基础的派生关系 $\mathcal{C} \vdash X.u \sqsubseteq Y.v$ 。</li>
+</ul>
+<h3 id="sketches-构成的格"><a class="header" href="#sketches-构成的格">Sketches 构成的格</a></h3>
+<ul>
+<li>sketch
+<ul>
+<li>定义1：sketch是一个带有标记的regular tree。</li>
+<li>定义2：sketch可以被看作两个函数
+<ul>
+<li>前缀闭合的语言： $\mathcal{L}(S) \subseteq \Sigma^*$</li>
+<li>从语言上的单词映射到lattice标记的函数 $\nu : S \to \Lambda$ ，例如 $\nu_S(w)$。</li>
+</ul>
+</li>
+<li>定义3：通过折叠sketch子树，sketch可以表示为一个有限状态自动机，每个状态标注了一个lattice元素 $\Lambda$ 。
+<ul>
+<li>这个自动机的每个状态都是接受态。因为语言是前缀闭合的。</li>
+</ul>
+</li>
+<li>sketch的格结构。偏序关系写作 $X \trianglelefteq Y$
+<ul>
+<li>为sketch的树结构定义了 $\sqcup$ 和 $\sqcap$ 运算：在语言上分别是交和并。对应节点不变，或者根据variance在节点标记的格上做交或者并。</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>一个在变量集合V上的约束集合C的解，是一个变量到sketch的映射，满足：</p>
+<ul>
+<li>如果是类型常量，则路径为空，lattice标记为常量</li>
+<li>如果约束能推出 $X.v$ 存在，则v属于语言 $v \in \mathcal{L}(X)$</li>
+<li>如果有子类型关系 $\mathcal{C} \vdash X.u \sqsubseteq Y.v$
+<ul>
+<li>对应的节点上的lattice标记也有偏序关系</li>
+<li>对应的子树之间有sketch的偏序关系 $u^{-1} S_X \trianglelefteq v^{-1} S_Y$</li>
+</ul>
+</li>
+</ul>
+<p>sketch 和约束的对应关系很好。任何约束集合都能被一个sketch表示，只要没有证明出lattice标记上不可能的关系。</p>
+<p><strong>从约束构建sketches (E.1 InferShapes)</strong></p>
+<p>将子类型关系理解为等价关系。</p>
+<ol>
+<li>为每个变量，以及前缀隐含的变量存在，创建节点。</li>
+<li>构建图，边上标记field label的增加关系。</li>
+<li>划分等价关系：
+<ol>
+<li>如果有子类型关系，则属于一个等价类。
+<ol>
+<li>如果因为子类型关系在没有函数调用时是结构化的，即形状上一致，父子类型可拥有的field label一致，因此这里的父子关系划分的等价类内部，只要有一个变量能有某个label，则类内每个变量都能有这个label。</li>
+</ol>
+</li>
+<li>等价类内两个变量，访问相同的标签得到的变量，（有子类型关系）也在同一个等价类内。
+<ol>
+<li>这个地方有点像Steensgaard的线性指针分析算法。</li>
+</ol>
+</li>
+<li>等价类内两个变量，一个访问load标签，一个访问store标签，得到的新变量也属于同一个等价类。</li>
+</ol>
+</li>
+<li>计算每个等价类的形状，就是等价类内每个变量的sketch的形状。</li>
+</ol>
+<p>算法中实际实现时使用的步骤</p>
+<ol>
+<li>Substitute</li>
+</ol>
+<p><strong>标记lattice元素 (F.2 Solve)</strong></p>
+<p>具体sketch上每个节点标什么lattice元素，借助了前面的transducer。关注所有的类型常量，然后看这个类型常量和哪些dtv有子类型关系，有则更新对应的lattice标记。根据子类型或父类型，取交或者并。</p>
+<p><img src="imgs/sketch-lattice-annotation.png" alt="sketch-lattice-annotation" /></p>
+<h3 id="tarjan-path-expression"><a class="header" href="#tarjan-path-expression">Tarjan Path Expression</a></h3>
+<p>基础符号</p>
+<ul>
+<li>$\epsilon(P(a,b))$ 从源点a到目标点b的路径表达式P(a,b)，所表达的所有路径的集合。</li>
+<li>$\Lambda$ 表示空路径，源点和目的点为同一点时，为空路径。</li>
+</ul>
+<p>定义</p>
+<h3 id="qa"><a class="header" href="#qa">Q&amp;A</a></h3>
+<p>Q1. <strong>为什么实现的时候，那边先infer shapes然后才简化约束？那能不能直接不简化约束了，既然我本来就想要内部的变量</strong></p>
+<p>确实不应该这样？简化约束应当是最早的一步，然后才是type scheme。但是这并不代表简化约束是没有意义的。因为如果其他地方如果调用了这边的函数，会实例化约束。简化了还是有好处的。</p>
+<p>从我的其他角度：</p>
+<ul>
+<li>先infer shapes可以获取到小的内部变量的类型，不然后面这些变量被简化没了。</li>
+<li>sketches可以作为函数的简化版约束，用在增量运算。关联Q3</li>
+</ul>
+<p>Q2. <strong>为什么算法要后序遍历SCC？起到什么作用？</strong></p>
+<p>TODO</p>
+<p>Q3. 给定一个SCC内所有函数的已经简化完的约束。开始分析另一个调用了已分析函数的SCC，是否会对之前函数的分析结果产生影响？？</p>
+<p>直观上看，函数就是函数本身，type schemes也就是一个函数到约束集合的映射，所以外部调用不会对函数类型有影响。细化到最具体的类型是后面考虑的事情。</p>
+<p>如何证明？类型从形状和lattice两方面考虑。类型关系在函数调用的时候允许丢失一些能力（non-structural subtyping）。</p>
+<p>Q4. 为什么只有函数调用的时候是non-structural subtyping?</p>
+<p>可能一般以函数为单位做抽象？一般不会出现：函数内部一小块代码突然被看作更泛化的代码。</p>
+<p>Q5. 如何将Sketch转换为普通类型？</p>
+<p>从根节点出发，为所有可达路径构建path expression。？</p>
+<p>Q6. 全局变量怎么处理？</p>
+<ol>
+<li>全局变量被认为是参数和返回值的拓展？在分析时作为一个interesting的变量，从而在简化约束得到type scheme的时候，能够得到它和其他类型变量之间的关系？如果其他函数也用了同样的全局变量，就可以对接上。</li>
+<li>全局变量可以看作一个无参函数？函数的type scheme是最简化的约束，假设存在任何调用者，也不因caller的调用而变化。这个角度考虑，如果看作一个无参函数，任何全局变量的类型都是一个无约束的自由类型变量。真正发挥作用的时候，仅仅是后面的附录G里面，根据使用细化类型的时候才真正产生类型。这个是不是就是retypd代码里的top down propagation？TODO
+<ol>
+<li>比如存在全局变量g，以及getter函数get_g和setter函数set_g。简化约束过程中，不推断G的类型。最后结束时根据使用会给G赋值一个最精确的类型。如果使用是通过get_g和set_g，则get_g因为使用获得的类型，能否从g顺着传播到set_g？</li>
+</ol>
+</li>
+</ol>
+<p>Q7. 约束的实例化是怎么做的？</p>
+<ul>
+<li>在简化约束，求每个函数的type scheme时：
+<ul>
+<li>如果涉及的函数调用在SCC外，则根据调用点的不同，总是创建额外的实例。例如identity函数，函数内调用多次是不同的类型。</li>
+<li>如果涉及的函数在SCC内。则不复制任何实例。TODO是这样吗？调研一下summary based analysis是如何处理递归和调用环的情况的。</li>
+</ul>
+</li>
+</ul>
+<p>另外，这说明提取约束时需要显式体现函数调用。可能可以为每个函数调用的约束增加一个调用地址标识。</p>
+<p>Q8. 为什么要标记L和R？为什么构图时仅对左边的增加forget边，右边的变量仅增加recall边？能否证明，不标记L和R，仅仅限制路径探索不能再经过interesting的变量，即可得到相同的约束？如果不能，则得到的约束是否能用？</p>
+<p>区分L/R以及仅对左边的增加forget边，右边的变量仅增加recall边，可以使得我们关注的变量不会存在于推导树内部。</p>
+<p>推理关系和 proof tree 之间有对应关系。区分L和R的区别在于是否把L的变量当R的变量，从而递归推进了子类型关系。回忆elementary proof的定义，能否保证得到的约束关系的推导树，都没有感兴趣的变量在函数内部？</p>
+<p>能否给出一个例子，使得某个saturation推导使得感兴趣的变量在推导树中间。</p>
+<p>为了给出这样一个例子，首先回忆，为什么要简化类型约束。关键在于，是否任何原约束集合能推导出的关系，我们给出的简化的约束集合也能推导出来？</p>
+<p>没有任何field label的<code>F.in</code>不能出现在该函数的子类型关系的子类型一方。同样，对应的<code>F.out</code>不能出现在子类型关系的父类型一方。</p>
+<p>另外，如果一个变量仅出现在子类型关系左边（contra-variant时仅出现在右边）。不会出现反过来的情况，因此即使加上了这样的边也不会被用到。定理：如果有临时变量t，仅出现在子类型关系左边，证明不会有额外的边指向t，因此即使有边从t指向end，也不会被用到。证明：有边指向t有两种情况。第一种：构建图的时候有边指向。这种情况需要t在子类型关系右边，所以不成立。第二种，saturation时增加了边指向。根据saturation规则，仅有某个节点已经被某个pop边指向的时候，这个节点才会可能获得新增的1边。因为t没有其他边指向它，所以不成立。</p>
+<p>Q9. 单个SCC内如何处理多态的类型关系？以及non-structural subtyping?</p>
+<p>可以假设，能形成SCC的变量，不太可能有多态的类型关系，所以，就按照非多态的角度考虑？</p>
+<p>TODO？这一块和full-context-sensitive的分析之间有点关系？</p>
+<p>Q10. 为什么算法，在单个函数内关于指令是指令数的三次方的复杂度？</p>
+<p>我们关注那个SCC的循环：生成约束的低于三次方。然后是对于每函数，这里还不是指令，不太算一个N。内部transducer函数构图，saturate，pathexpr算法。文章说saturate是主要的复杂度来源。</p>
+<p>其实这里SCC构图之后，对每个普通的函数，已经可以做一些简单的优化了？比如一个base var没有其他的节点，然后仅有一个successor和predecessor，则可以消除。怎么有点像基本块的。</p>
+<p>或者我可以把所有感兴趣的变量都区分L/R，先saturate一次，然后每次分析把图复制一份，merge其他的非感兴趣的图。</p>
+<p>Q11. 函数内的类型分析算法是怎么做的？</p>
+<p>首先，假如你已经有了被调函数的type schemes，type lattice，而且所有变量都是需要的，不需要简化。那么可以构建图，然后假设完全是non-structural subtyping，直接推导sketches。为了标记lattice，则需要构建transducer推导然后标记相关元素。</p>
+<h3 id="图算法基础"><a class="header" href="#图算法基础">图算法基础</a></h3>
+<p>回顾之前的算法，我们先构建transducer图表示所有可能的子类型关系，然后饱和算法，再与productive语言相交。然后我们选择一系列感兴趣的变量，计算对应的路径表达式，然后再转换回约束。</p>
+<p>为了将带有标记的图转换回约束，有两个相关的算法：</p>
+<ol>
+<li>将有限状态自动机转换为正则表达式的算法。 我们构建图的时候其实是有起始态和结束态的。把它看作一个自动机，然后即可求解出对应的正则表达式。
+<ol>
+<li>对每个结束状态，从它开始，利用一系列规则归纳，归纳过程中允许边上直接标记为正则表达式，最后起始态和结束态会相邻。此时删除其他状态，并总结出对应的正则表达式。</li>
+<li>最后将得到的多个正则表达式并起来。得到最终的表达式。</li>
+</ol>
+</li>
+<li>（Tarjan's path expression算法）给定有向图，和图上的某个源点，求出源点到图上任意一个其他点之间的可达路径，所构成的表达式。</li>
+<li>两个算法之间的关联：path expression算法会构建path sequence，缓存了子图的结果。而上面的表达式算法则没有这样做，因此path expression算法效率更高一些。（TODO 对吗？）</li>
+</ol>
+<h4 id="tarjans-path-expression算法"><a class="header" href="#tarjans-path-expression算法">Tarjan's path expression算法</a></h4>
+<ul>
+<li>&quot;Fast Algorithms for Solving Path Problems&quot;</li>
+<li>&quot;A Unified Approach to Path Problems&quot;</li>
+</ul>
+<p><strong>定义：</strong> 给定有向图 $G=(V, E)$ ，对于单源点 s 的路径表达式（path expression）问题是，对于任何顶点v，求解出一个无歧义的路径表达式 $P(s,v)$ 使得 它所表达的路径 $\sigma(P(s,v))$ 包含了所有的从s到v的路径。</p>
+<p>注：</p>
+<ul>
+<li>这里指的表达式就是由路径构成的正则表达式，包括$\cup$, $*$, $;\cdot;$(连接) 等特殊符号。</li>
+<li>该问题还存在变种：single-sink，all-pairs</li>
+</ul>
+<p><strong>路径序列（Path Sequence）：</strong> 一个有向图G的路径序列是一个序列 $(P_1,v_1,w_1), (P_2,v_2,w_2),...,(P_l,v_l,w_l)$ ，满足以下条件：</p>
+<ol>
+<li>对于 $1 \le i \le l$ ， $P_l$ 是一个无歧义的路径表达式，具有类型 $(v_i, w_i)$ (即该表达式表示从 $v_i$ 到 $w_i$ 的路径)</li>
+<li>（空路径）对于 $1 \le i \le l$ ，如果 $v_i = w_i$，则空路径 $\Lambda \in \sigma(P_i)$</li>
+<li>（非空路径）对于任何非空的路径p，存在一个唯一的下标序列 $1 \le i_1 \le i_2 \le ... \le i_k \le l$ 并且存在一个唯一的p的划分（不会划分出非空序列） $p=p_1,p_2,...,p_k$ 使得 $p_j \in \sigma(P_{i_j})$ 对于 $1 \le j \le k$。</li>
+</ol>
+<p><strong>如何理解非空路径条件？</strong> 图可以被分区为 $l$ 部分，且每个分区都按顺序有个编号。然后每条路径都可以被这些部分切分，但是可能不经过部分分区。这里经过了k个分区，编号依次是 $i_1,...,i_k$。让 $j$ 从1遍历到 $k$ ，每个分区内的路径 $p_j$ 是属于对应分区的路径表达式能够表达的所有路径集合 $\sigma(P_{i_j})$。</p>
+<p><strong>如何理解路径序列？</strong> 任何图上的路径需要被分解为路径序列。</p>
+<ul>
+<li>比如我们可以构造一个路径序列，从图上任意点到任意点，则每个路径能直接找到对应。此时路径序列的顺序不重要。</li>
+<li>对于有向无环图，每个边可以单独成为一个路径序列，因为这个边是连接这两个节点的唯一必经路径。每个路径可以直接分解为每条边，然后对应到路径序列中。。</li>
+<li>对于强连通分量这种复杂情况，实在不行我们可以为里面任意两个点构建路径序列。如果有路径经过了强连通分量内部，如果能直接找到对应，则此时分量内部路径序列的顺序不重要。</li>
+</ul>
+<p><strong>Solve算法</strong>：给定一个路径序列，我们可以使用下面的传播算法解决单源点的路径表达式问题。</p>
+<ul>
+<li>初始化：设置 $P(s,s) = \Lambda$ ，同时对每个不为s的顶点，初始化 $P(s,v) = \emptyset$</li>
+<li>循环：让i从1到 $l$ （有 $l$ 个顶点）
+<ul>
+<li>如果 路径序列 $(P_i,v_i,w_i)$ 中的 $v_i = w_i$ ， $P(s, v_i):= [P(s,v_i);\cdot;P_i]$</li>
+<li>如果 $v_i \ne w_i$ ，$P(s,w_i) = [P(s,w_i)\cup[P(s,v_i);\cdot;P_i]]$</li>
+</ul>
+</li>
+</ul>
+<p>（这个算法基本上就是把路径连接起来。另外意味着我们需要按拓扑排序给节点一个编号）</p>
+<p><strong>路径表达式简化算法（方括号）</strong>：</p>
+<ul>
+<li>如果路径表达式 R 具有形式 $R_1 \cup R_2$ 则，
+<ul>
+<li>如果任意一边为空集合，则直接简化为另外一边</li>
+</ul>
+</li>
+<li>如果路径表达式具有形式  $R_1;\cdot;R_2$ 则
+<ul>
+<li>如果任意一边是空集，则直接返回空集</li>
+<li>如果任意一边是空路径，则直接简化为另外一边</li>
+</ul>
+</li>
+<li>如果路径表达式具有形式 $R_1^*$
+<ul>
+<li>如果 $R_1$ 是空集或者空路径，则直接返回空路径</li>
+</ul>
+</li>
+<li>否则原样返回</li>
+</ul>
+<p><strong>使用Solve函数解决路径问题</strong></p>
+<ul>
+<li>对于单源点路径表达式问题（single-source path expression），我们构建Path Sequence然后调用Solve一次</li>
+<li>对于所有节点对的路径表达式问题（all-pairs path expression），我们构建Path Sequence然后把每个点作为源点，调用Solve。</li>
+<li>对于单目的点的路径表达式问题（single-sink path expression），我们构建一个边都是反向的图，然后转换为单源点的路径表达式问题。</li>
+</ul>
+<p><strong>Eliminate算法：</strong> 我们可以对任意的图构建路径序列。</p>
+<ul>
+<li>初始化：
+<ul>
+<li>$P(v, w):=\varnothing$ 任意两个顶点间都初始化为空集合</li>
+<li>然后对每个边 $e \in E$ ， 让路径表达式包含当前边 $P(h(e), t(e)):=[P(h(e), t(e)) \cup e]$</li>
+</ul>
+</li>
+<li>求解的主循环：
+<ul>
+<li>让v遍历每个节点序号1到n
+<ul>
+<li>$P(v, v)=\left[P(\nu, v)^*\right]$</li>
+<li>遍历每个 $u \gt v$ ，如果 $P(u, v) \neq \varnothing$
+<ul>
+<li>$P(u, v):=[P(u, v) \cdot P(v, v)]$</li>
+<li>遍历每个 $w \gt v$ ，如果 $P(v, w) \neq \varnothing$
+<ul>
+<li>$P(u, w):=[P(u, w) \cup[P(u, v) \cdot P(v, w)]]$</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>比如，如果一个有向无环图，按照拓扑排序编号，则 $u \gt v$ 时， $P(u, v)$ 必然为空，导致该算法无法进入循环，什么也做不了。但是实际上，初始化过程中，就已经完成了path sequence的构建了。因为有向无环图的路径序列就是每个边单独构成的序列。</p>
+<p><strong>Eliminate结果的顺序</strong>：Eliminate算法计算得到的结果，需要按照正确的顺序排列才能形成路径序列：</p>
+<p>Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by ELIMINATE. Then the following sequence is a path sequence: the elements of ${(P(u, w), u, w) \mid P(u, w) \notin{\varnothing, \Lambda} ; and ; u \leq w}$ in increasing order on $u$, followed by the elements of ${(P(u, w), u, w) \mid P(u, w)=\varnothing ; and ; u&gt;w}$ in decreasing order on $u$.</p>
+<p><strong>问题的分解</strong>： 为了提升Eliminate算法的效率，有两种方法，他们都对图进行分解。首先可以将图按强连通分量SCC分解。</p>
+<p><strong>有向无环图的路径序列：</strong> 首先将节点按照拓扑排序编号，可以直接得到集合 ${(e, h(e),t(e))|e\in E}$ 将这个集合中的点按照 $h(e)$ 升序排序，可以直接得到路径序列。</p>
+<p><strong>拓展到任意有向图：</strong> 对于有向图G，首先将图中的强连通分离凝结成单个点表示，则可以得到有向无环图，这些节点 $G_1,G_2,...,G_k$ 表示图G中的一个子图，编号按照拓扑排序。假设这些子图的路径表达式是 $X_1,...,X_k$ ，设 $Y_l$ 是序列 ${e,h(e),t(e)|h(e) \in G_l ; and ; t(e) \notin G_l}$ 任意排序（注意到 $Y_k$ 为空）。则 $X_1,Y_1,X_2,Y_2,...,X_{k-1},Y_{k-1},X_k$是G的一个路径序列。</p>
+<h2 id="与其他算法的关系"><a class="header" href="#与其他算法的关系">与其他算法的关系</a></h2>
+<h3 id="retypd与现有指针分析的关系"><a class="header" href="#retypd与现有指针分析的关系">Retypd与现有指针分析的关系</a></h3>
+<h4 id="steensgaard-线性时间-指针分析"><a class="header" href="#steensgaard-线性时间-指针分析">Steensgaard 线性时间 指针分析</a></h4>
+<p>相关资料：</p>
+<ol>
+<li><a href="https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/PointerAnalysis.pdf">DCC888 编译器静态分析课 Pointer Analysis</a></li>
+<li><a href="https://xiongyingfei.github.io/SA/2017/10_control_flow_analysis.pdf">北京大学 软件分析 熊英飞</a></li>
+</ol>
+<h4 id="与-anderson-指针分析的关系"><a class="header" href="#与-anderson-指针分析的关系">与 Anderson 指针分析的关系</a></h4>
+<p>对应retypd论文中Constraint generation一节。</p>
+<p>对于语句 q = &amp;x，如何生成约束？有两种方式</p>
+<ul>
+<li>x是q加载后的子类型（提前假设q会被load）： 生成 <code>x &lt;= q.load.off0@N</code></li>
+<li>q存入值是x的子类型（提前假设q会被store）：生成 <code>q.store.off0@N &lt;= x</code></li>
+</ul>
+<p>需要考虑的问题是，立刻生成这两个约束，和维护一个指针分析，根据指针分析的结果生成这些约束。这两种方式是否有区别。</p>
+<ul>
+<li>假如提前生成了这个约束，是否会产生什么额外的影响？
+<ul>
+<li>直观来说，额外生成的 q.load.off0@N  q.store.off0@N 还能有谁指向吗？</li>
+</ul>
+</li>
+<li>如果Steensgaard指针分析能推断出指向关系，假如不产生指针分析的约束，原有类型系统是否依然能推断出来类型关系。</li>
+</ul>
+<p>证明：</p>
+<p>分每种语句考虑(TODO 证明 offset和load/store可以绑定/合并)</p>
+<ul>
+<li><strong>语句1</strong>：对于 x = &amp;O1，对应 <code>O1 &lt;= x.load</code>  和  <code>x.store &lt;= O1</code> 我们把指向关系定义为这两个关系的组合。</li>
+<li><strong>语句2</strong>：对于 y = x (x &lt;= y)，在retypd下有如下图结构：</li>
+</ul>
+<p><img src="imgs/assignment-retypd.drawio.png" alt="assignment constraint graph" /></p>
+<p>在指针分析中有如下约束： pts(x) $\subseteq$ pts(y) 我们尝试证明：</p>
+<ul>
+<li>对于任何x可能指向的对象，y也会指向它。
+<ul>
+<li>1 已知 O1 &lt;= x.load ，证明 O1 &lt;= y.load：证：由 x.load &lt;= y.load 显然 O1 &lt;= x.load &lt;= y.load</li>
+<li>2 已知 x.store &lt;= O1 ，证明 y.store &lt;= O1：证：由y.store &lt;= x.store 显然 y.store &lt;= x.store &lt;= O1</li>
+</ul>
+</li>
+</ul>
+<p>能否证明充要条件？如果存在 <code>O1 &lt;= x.load</code>  和  <code>x.store &lt;= O1</code> 则必然在Anderson指针分析中有 O1 $\in$ pts(x)</p>
+<p>则我们可以证明，retypd是一种基于anderson指针分析的类型推断算法。</p>
+<p><img src="imgs/Anderson-pointer-algo.png" alt="Pointer analysis constraints" /></p>
+<p><strong>语句3</strong>：对于a = *b，有  b.load &lt;= a</p>
+<ul>
+<li>方式1 提前生成约束： 由归纳法，如果之前的其他语句都能够维持和指针分析等效的分析关系，当前语句依然能维持关系，则关系继续维持。
+<ul>
+<li>提前生成约束会额外生成约束： 对于任何 O $\in$ pts(b) 有 b.store &lt;= O 似乎影响不大？</li>
+</ul>
+</li>
+<li>方式2 根据指针分析生成约束：对于任何 v $\in$ pts(b) ，生成/之前有 v &lt;= b.load。因此有 v &lt;= b.load &lt;= a。对应 v $\subseteq$ a</li>
+</ul>
+<p><strong>语句4</strong>：对于*a = b，有 b &lt;= a.store</p>
+<ul>
+<li>
+<p>根据指针分析生成约束：对于任何 v $\in$ pts(a) ，之前有 a.store &lt;= v。所以有 b &lt;= a.store &lt;= v。对应 b $\subseteq$ v</p>
+</li>
+<li>
+<p>saturation算法和Anderson指针分析算法求解时的异同。</p>
+</li>
+<li>
+<p>retypd如果没有区分指针的load和store，是否依然和anderson指针分析一致？</p>
+<ul>
+<li>不行，明显上面的证明是和load和store性质有很大关系的。</li>
+</ul>
+</li>
+</ul>
+<p><strong>问题</strong>：offset和load/store可以绑定/合并</p>
+<p><strong>证明</strong>：首先.in 和.out只能在最外层。因此没有什么能够介入load/store中间。其次，每次load和store必然有offset和size。我们讨论某个变量的load和store的时候，本质上在讨论所有可能的offset和size之间的关系/对应的结构体类型。</p>
+<p><strong>结构体域敏感的指针分析</strong></p>
+<p>《Efficient Field-Sensitive Pointer Analysis for C》中提出了几种新的操作</p>
+<h2 id="实现---约束生成"><a class="header" href="#实现---约束生成">实现 - 约束生成</a></h2>
+<p><strong>基本运算</strong></p>
+<p>根据指令的依赖关系，自底向上处理指令，插入到指令到约束集合的集合。生成约束变量。</p>
+<ul>
+<li>指针相关
+<ul>
+<li>存地址运算：由上面的证明，直接假设它之后会被load/store，生成两条约束。</li>
+</ul>
+</li>
+<li>变量赋值/数据流传递：对应子类型关系。</li>
+<li>加法和减法约束
+<ul>
+<li>函数内是双向数据流分析，但是要和Summary-based analysis结合，无法求解的约束存到summary里尝试化简。</li>
+</ul>
+</li>
+</ul>
+<p><strong>加减法约束</strong></p>
+<p>加减法约束的计算问题，其实是一个双向数据流分析问题。对应关系如下：</p>
+<ul>
+<li>数据流流动关系，即SSA上的def-use关系，对应约束生成时的子类型关系，都是一种边。</li>
+<li>指针类型关于子类型关系双向传递，子类型关系可以看作是数据流分析的边，加减法看作带有运算的基本块。然后基于worklist算法，递归应用约束，直到迭代到不动点。。</li>
+<li>子类型关系。</li>
+</ul>
+<p>因为本来就有基于类型的alias analysis。所以涉及指针的时候，类型分析和指针分析和别名分析真的有联系。</p>
+<ul>
+<li>指针分析是别名分析的更精确版本。别名分析可以看作指针分析的应用。</li>
+<li>类型分析需要随着指针指向去传播。</li>
+<li>类型分析涉及指针时，不需要考虑流敏感性，上下文敏感性。</li>
+</ul>
+<h2 id="其他-2"><a class="header" href="#其他-2">其他</a></h2>
+<p><strong>SSA的静态分析和传统静态分析</strong></p>
+<ul>
+<li>SSA的静态分析是在 SSA Edge ，即def-use chain上进行，遇到Phi指令merge结果。。</li>
+<li>传统静态分析在CFG上进行，遇到控制流合并时merge结果。</li>
+</ul>
+<p><strong>静态分析之间的分层依赖</strong></p>
+<p>静态分析直接可能有依赖关系。比如指针和数字类型区分就被retypd类型恢复依赖，retypd进一步恢复指针的具体类型。</p>
+<p>静态分析之间，是依赖关系还是更复杂的的关系。在于是否上层依赖的分析结果会反哺下层分析的结果。比如这里retypd如果恢复了更详细的具体类型，比如两个指针指向的结构体成员之间的复杂关系，那么这两个就有关系。。</p>
+<p>问题：基于Steensgaard的线性时间指针分析算法的合并存储图，和retypd的sketches 等价图分析指针和数字类型，达到的精度是否相同？</p>
+<p>答：应该是相同的。retypd的等价图构建后就等价是Steensgaard的存储关系图。</p>
+<p>但是在跨函数分析框架下，这些具体分析都是一样地需要专门看待。。</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="datalog"><a class="header" href="#datalog">Datalog</a></h1>
 <p>基于Datalog描述程序分析的优点是开发迅速。</p>
 <ul>
