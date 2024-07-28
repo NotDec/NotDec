@@ -1,5 +1,5 @@
-#ifndef _NOTDEC_UTILS_RANGE_H_
-#define _NOTDEC_UTILS_RANGE_H_
+#ifndef _NOTDEC_UTILS_GHIDRA_RANGE_H_
+#define _NOTDEC_UTILS_GHIDRA_RANGE_H_
 
 #include <cstdint>
 namespace notdec {
@@ -29,6 +29,8 @@ namespace notdec {
 ///     do {
 ///     } while(range.getNext(val));
 ///   \endcode
+/// Notes from notdec: size is the size of the number in bytes. Numbers with different size
+/// are considered from different domain and cannot interact
 class CircleRange {
   uint64_t left;               ///< Left boundary of the open range [left,right)
   uint64_t right;              ///< Right boundary of the open range [left,right)

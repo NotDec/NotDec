@@ -1,8 +1,12 @@
 
 #include "Retypd/Parser.h"
 #include "Retypd/Schema.h"
+#include "Utils/Range.h"
+#include <string>
 
 namespace notdec::retypd {
+
+// Keeps in sync with the printing.
 
 // get the size of the first utf-8 code point.
 std::size_t GetFirst(const llvm::StringRef &text, std::size_t start) {
@@ -60,7 +64,6 @@ ParseResultT<llvm::StringRef> mustParseIdentifier(llvm::StringRef str) {
 }
 
 ParseResultT<int32_t> parseI32(llvm::StringRef str) {
-  str = skipWhitespace(str);
   bool negative = false;
   if (str.consume_front("-")) {
     negative = true;
@@ -74,6 +77,19 @@ ParseResultT<int32_t> parseI32(llvm::StringRef str) {
   } else {
     int32_t num = std::stoi(str.substr(0, end).str());
     return {str.substr(end), negative ? -num : num};
+  }
+}
+
+ParseResultT<uint32_t> parseU32(llvm::StringRef str) {
+  std::size_t end = 0;
+  while (end < str.size() && std::isdigit(str[end])) {
+    ++end;
+  }
+  if (end == 0) {
+    return {str, "parseU32: Expect number: " + str.substr(0, 10)};
+  } else {
+    uint32_t num = std::stoul(str.substr(0, end).str());
+    return {str.substr(end), num};
   }
 }
 
@@ -109,43 +125,51 @@ ParseResultT<OutLabel> parseOutLabel(llvm::StringRef str) {
   }
 }
 
-ParseResultT<DerefLabel> parseDerefLabel(llvm::StringRef str) {
+ParseResultT<ArrayOffset> parseArrayOffset(llvm::StringRef str) {
   str = skipWhitespace(str);
-  if (!str.consume_front("σ")) {
-    return {str, "parseDerefLabel: Expect σ: " + str.substr(0, 10)};
+  if (!str.consume_front("+")) {
+    return {str, "parseArrayOffset: Expect +: " + str.substr(0, 10)};
   }
-  auto [rest1, RSize] = parseI32(str);
+  str = skipWhitespace(str);
+  auto [rest1, RSize] = parseU32(str);
   if (!RSize.isOk()) {
     return {str, RSize.msg()};
   }
-  if (!rest1.consume_front("@")) {
-    return {str, "parseDerefLabel: Expect @: " + str.substr(0, 10)};
-  }
-  auto [rest2, ROffset] = parseI32(rest1);
-  if (!ROffset.isOk()) {
-    return {str, ROffset.msg()};
-  }
-  Bound b = None{};
-  if (rest2.consume_front("*[")) {
-    if (rest2.consume_front("nulterm")) {
-      b = NullTerm{};
-    } else if (rest2.consume_front("nobound")) {
-      b = NoBound{};
-    } else {
-      auto [rest3, RBound] = parseI32(str);
-      // must match
-      if (!RBound.isOk()) {
-        return {str, RBound.msg()};
-      }
-      assert(RBound.get() > 0);
-      b = Fixed{static_cast<uint32_t>(RBound.get())};
+  decltype(ArrayOffset::Limit) Limit = -1;
+  if (rest1.consume_front("[")) {
+    auto [rest2, RLimit] = parseI32(rest1);
+    if (!RLimit.isOk()) {
+      return {str, RLimit.msg()};
     }
-    if (!rest2.consume_front("]")) {
-      return {str, "parseDerefLabel: Expect ]: " + str.substr(0, 10)};
-    }
+    Limit = RLimit.get();
   }
-  return {rest2,
-          DerefLabel{static_cast<uint32_t>(RSize.get()), ROffset.get(), b}};
+  return {rest1, ArrayOffset{RSize.get(), Limit}};
+}
+
+ParseResultT<OffsetLabel> parseOffsetLabel(llvm::StringRef str) {
+  str = skipWhitespace(str);
+  llvm::StringRef rest = str;
+
+  decltype(OffsetRange::offset) Offset = 0;
+  if (rest.consume_front("@")) {
+    auto [rest2, ROffset] = parseU32(rest);
+    if (!ROffset.isOk()) {
+      return {str, ROffset.msg()};
+    }
+    Offset = ROffset.get();
+    rest = rest2;
+  }
+
+  OffsetRange ret = OffsetRange{.offset = Offset};
+  while (rest.size() > 0 && rest.front() == '+') {
+    auto [rest3, RArray] = parseArrayOffset(rest);
+    if (!RArray.isOk()) {
+      return {str, RArray.msg()};
+    }
+    ret.access.push_back(RArray.get());
+    rest = rest3;
+  }
+  return {rest, OffsetLabel{.range = ret}};
 }
 
 ParseResultT<LoadLabel> parseLoad(llvm::StringRef str) {
@@ -153,7 +177,11 @@ ParseResultT<LoadLabel> parseLoad(llvm::StringRef str) {
   if (!str.consume_front("load")) {
     return {str, "parseLoad: Expect load: " + str.substr(0, 10)};
   }
-  return {str, LoadLabel{}};
+  auto [rest2, RSize] = parseU32(str);
+  if (!RSize.isOk()) {
+    return {str, RSize.msg()};
+  }
+  return {str, LoadLabel{.Size = RSize.get()}};
 }
 
 ParseResultT<StoreLabel> parseStore(llvm::StringRef str) {
@@ -161,7 +189,11 @@ ParseResultT<StoreLabel> parseStore(llvm::StringRef str) {
   if (!str.consume_front("store")) {
     return {str, "parseLoad: Expect store: " + str.substr(0, 10)};
   }
-  return {str, StoreLabel{}};
+  auto [rest2, RSize] = parseU32(str);
+  if (!RSize.isOk()) {
+    return {str, RSize.msg()};
+  }
+  return {str, StoreLabel{.Size = RSize.get()}};
 }
 
 ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str) {
@@ -174,7 +206,7 @@ ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str) {
   if (ROut.isOk()) {
     return {rest1, FieldLabel{ROut.get()}};
   }
-  auto [rest2, RDeref] = parseDerefLabel(str);
+  auto [rest2, RDeref] = parseOffsetLabel(str);
   if (RDeref.isOk()) {
     return {rest2, FieldLabel{RDeref.get()}};
   }

@@ -84,7 +84,8 @@ struct FuncSigModify : PassInfoMixin<FuncSigModify> {
   }
 
   void addChangeArgToPointer(Function *func, int index) {
-    std::cerr << "Changing the definition of " << func->getName().str() << std::endl;
+    std::cerr << "Changing the definition of " << func->getName().str()
+              << std::endl;
     // lib\Transforms\Utils\CloneFunction.cpp
     std::vector<Type *> ArgTypes;
 
@@ -98,23 +99,28 @@ struct FuncSigModify : PassInfoMixin<FuncSigModify> {
       i++;
     }
 
-    FunctionType *fty = FunctionType::get(func->getReturnType(), ArgTypes, func->getFunctionType()->isVarArg());
+    FunctionType *fty = FunctionType::get(func->getReturnType(), ArgTypes,
+                                          func->getFunctionType()->isVarArg());
     Function *newFunc =
-        Function::Create(fty, func->getLinkage(), func->getAddressSpace(), func->getName(), func->getParent());
+        Function::Create(fty, func->getLinkage(), func->getAddressSpace(),
+                         func->getName(), func->getParent());
     toReplace.emplace_back(func, newFunc);
   }
 
   void addChangeRetToPointer(Function *func) {
-    std::cerr << "Changing the definition of " << func->getName().str() << std::endl;
+    std::cerr << "Changing the definition of " << func->getName().str()
+              << std::endl;
     // lib\Transforms\Utils\CloneFunction.cpp
     std::vector<Type *> ArgTypes;
 
     for (const Argument &I : func->args())
       ArgTypes.push_back(I.getType());
     FunctionType *fty =
-        FunctionType::get(func->getReturnType()->getPointerTo(), ArgTypes, func->getFunctionType()->isVarArg());
+        FunctionType::get(func->getReturnType()->getPointerTo(), ArgTypes,
+                          func->getFunctionType()->isVarArg());
     Function *newFunc =
-        Function::Create(fty, func->getLinkage(), func->getAddressSpace(), func->getName(), func->getParent());
+        Function::Create(fty, func->getLinkage(), func->getAddressSpace(),
+                         func->getName(), func->getParent());
     toReplace.emplace_back(func, newFunc);
   }
 
@@ -130,7 +136,8 @@ struct FuncSigModify : PassInfoMixin<FuncSigModify> {
       const Argument *current = called->getArg(i);
       const Argument *target = to->getArg(i);
       if (current->getType() != target->getType()) {
-        Value *arg = builder.CreateBitOrPointerCast(call->getArgOperand(i), target->getType());
+        Value *arg = builder.CreateBitOrPointerCast(call->getArgOperand(i),
+                                                    target->getType());
         args.push_back(arg);
         llvm::errs() << "bitcast arg " << i << ": " << current;
       } else {
@@ -142,7 +149,8 @@ struct FuncSigModify : PassInfoMixin<FuncSigModify> {
     // 为返回值创建bitcast，转换回原来的指令
     if (called->getReturnType() != to->getReturnType()) {
       // builder.SetInsertPoint(call->getNextNode());
-      new_call = builder.CreateBitOrPointerCast(new_call, called->getReturnType());
+      new_call =
+          builder.CreateBitOrPointerCast(new_call, called->getReturnType());
     }
     // 替换指令返回值
     call->replaceAllUsesWith(new_call);
@@ -224,10 +232,13 @@ void DecompileConfig::run_passes() {
 
   // add instrumentations.
   PassInstrumentationCallbacks PIC;
-  StandardInstrumentations SI(::llvm::DebugFlag, false, PrintPassOptions{.SkipAnalyses = true});
+  StandardInstrumentations SI(::llvm::DebugFlag, false,
+                              PrintPassOptions{.SkipAnalyses = true});
   SI.registerCallbacks(PIC, &FAM);
-  PIC.addClassToPassName("notdec::LinearAllocationRecovery", "linear-allocation-recovery");
-  PIC.addClassToPassName("notdec::PointerTypeRecovery", "pointer-type-recovery");
+  PIC.addClassToPassName("notdec::LinearAllocationRecovery",
+                         "linear-allocation-recovery");
+  PIC.addClassToPassName("notdec::PointerTypeRecovery",
+                         "pointer-type-recovery");
   PIC.addClassToPassName("notdec::RetypdRunner", "retypd");
 
   // Create the new pass manager builder.
@@ -284,7 +295,9 @@ void DecompileConfig::run_passes() {
       // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
       MPM.addPass(Retypd());
     } else {
-      std::cerr << __FILE__ << ":" << __LINE__ << ": unknown stack recovery method: " << Opts.stackRec << std::endl;
+      std::cerr << __FILE__ << ":" << __LINE__
+                << ": unknown stack recovery method: " << Opts.stackRec
+                << std::endl;
       std::abort();
     }
   }
@@ -294,8 +307,9 @@ void DecompileConfig::run_passes() {
 
 // 需要去掉尾递归等优化，因此需要构建自己的Pass。
 llvm::FunctionPassManager buildFunctionOptimizations() {
-  FunctionPassManager FPM; // = PB.buildFunctionSimplificationPipeline(OptimizationLevel::O1,
-                           // ThinOrFullLTOPhase::None);
+  FunctionPassManager
+      FPM; // = PB.buildFunctionSimplificationPipeline(OptimizationLevel::O1,
+           // ThinOrFullLTOPhase::None);
 
   FPM.addPass(SimplifyCFGPass(SimplifyCFGOptions()));
   FPM.addPass(InstCombinePass());

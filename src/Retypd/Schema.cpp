@@ -21,14 +21,13 @@ std::string toString(const FieldLabel &f) {
     return "in_" + std::get<InLabel>(f).name;
   } else if (std::holds_alternative<OutLabel>(f)) {
     return "out_" + std::get<OutLabel>(f).name;
-  } else if (std::holds_alternative<DerefLabel>(f)) {
-    auto d = std::get<DerefLabel>(f);
-    return "σ" + std::to_string(d.size) + "@" + std::to_string(d.offset) +
-           toString(d.bound);
+  } else if (std::holds_alternative<OffsetLabel>(f)) {
+    auto d = std::get<OffsetLabel>(f);
+    return toString(d.range);
   } else if (std::holds_alternative<LoadLabel>(f)) {
-    return "load";
+    return "load" + std::to_string(std::get<LoadLabel>(f).Size);
   } else if (std::holds_alternative<StoreLabel>(f)) {
-    return "store";
+    return "store" + std::to_string(std::get<StoreLabel>(f).Size);
   } else {
     assert(false && "unknown FieldLabel");
   }
@@ -39,7 +38,7 @@ Variance getVariance(const FieldLabel &f) {
     return Contravariant;
   } else if (std::holds_alternative<OutLabel>(f)) {
     return Covariant;
-  } else if (std::holds_alternative<DerefLabel>(f)) {
+  } else if (std::holds_alternative<OffsetLabel>(f)) {
     return Covariant;
   } else if (std::holds_alternative<LoadLabel>(f)) {
     return Covariant;

@@ -11,6 +11,8 @@ namespace notdec::retypd {
 template <typename T> using ResultT = std::variant<T, llvm::Twine>;
 
 // TODO Refactor to use expected.
+// TODO refactor to use a C++ parser combinator like
+// https://github.com/foonathan/lexy
 template <typename T> struct Result {
   ResultT<T> inner;
   Result(const T &inner) : inner(inner) {}
@@ -33,7 +35,7 @@ ParseResultT<llvm::StringRef> mustParseIdentifier(llvm::StringRef str);
 ParseResultT<int32_t> parseI32(llvm::StringRef str);
 ParseResultT<InLabel> parseInLabel(llvm::StringRef str);
 ParseResultT<OutLabel> parseOutLabel(llvm::StringRef str);
-ParseResultT<DerefLabel> parseDerefLabel(llvm::StringRef str);
+ParseResultT<OffsetLabel> parseOffsetLabel(llvm::StringRef str);
 ParseResultT<LoadLabel> parseLoad(llvm::StringRef str);
 ParseResultT<StoreLabel> parseStore(llvm::StringRef str);
 ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str);

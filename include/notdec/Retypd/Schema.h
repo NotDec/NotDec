@@ -1,6 +1,8 @@
 #ifndef _NOTDEC_RETYPD_SCHEMA_H_
 #define _NOTDEC_RETYPD_SCHEMA_H_
 
+#include "Utils/Range.h"
+#include <cstdint>
 #include <deque>
 #include <llvm/ADT/Optional.h>
 #include <string>
@@ -53,35 +55,32 @@ struct OutLabel {
   }
 };
 
-struct DerefLabel {
-  uint32_t size;
-  int32_t offset;
-  Bound bound;
-  bool operator<(const DerefLabel &rhs) const {
-    return std::tie(size, offset, bound) <
-           std::tie(rhs.size, rhs.offset, rhs.bound);
-  }
-  bool operator==(const DerefLabel &rhs) const {
+struct OffsetLabel {
+  OffsetRange range;
+  bool operator<(const OffsetLabel &rhs) const { return range < rhs.range; }
+  bool operator==(const OffsetLabel &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
 
 struct LoadLabel {
-  bool operator<(const LoadLabel &rhs) const { return false; }
+  uint32_t Size;
+  bool operator<(const LoadLabel &rhs) const { return Size < rhs.Size; }
   bool operator==(const LoadLabel &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
 
 struct StoreLabel {
-  bool operator<(const StoreLabel &rhs) const { return false; }
+  uint32_t Size;
+  bool operator<(const StoreLabel &rhs) const { return Size < rhs.Size; }
   bool operator==(const StoreLabel &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
 
 using FieldLabel =
-    std::variant<InLabel, OutLabel, DerefLabel, LoadLabel, StoreLabel>;
+    std::variant<InLabel, OutLabel, OffsetLabel, LoadLabel, StoreLabel>;
 
 std::string toString(const FieldLabel &f);
 
