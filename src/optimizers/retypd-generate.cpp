@@ -44,8 +44,17 @@ PreservedAnalyses Retypd::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(printModule(M, "current.ll"));
 
   auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
-  RetypdGenerator Generator;
-  Generator.run(M, SP.result);
+  this->StackPointer = SP.result;
+
+  data_layout = std::move(M.getDataLayoutStr());
+  pointer_size = M.getDataLayout().getPointerSizeInBits();
+
+  // TODO!! reverse post order
+  for (auto &F : M) {
+    auto &Generator =
+        func_ctxs.emplace(&F, RetypdGenerator(*this)).first->second;
+    Generator.run(F);
+  }
 
   // create a temporary directory
   SmallString<128> Path;
@@ -58,7 +67,7 @@ PreservedAnalyses Retypd::run(Module &M, ModuleAnalysisManager &MAM) {
   }
   auto TempPath = Path.str().str() + "/retypd-constrains.json";
 
-  Generator.gen_json(TempPath);
+  gen_json(TempPath);
 
   errs() << "constrains path: " << TempPath << "\n";
 
@@ -72,21 +81,8 @@ PreservedAnalyses Retypd::run(Module &M, ModuleAnalysisManager &MAM) {
   return PreservedAnalyses::none();
 }
 
-void RetypdGenerator::run(Module &M, llvm::Value *StackPointer) {
-  this->StackPointer = StackPointer;
-  data_layout = std::move(M.getDataLayoutStr());
-  pointer_size = M.getDataLayout().getPointerSizeInBits();
-  for (auto &F : M) {
-    getFuncName(F);
-  }
-  for (auto &F : M) {
-    run(F);
-  }
-}
-
 void RetypdGenerator::run(Function &F) {
-  current = &func_constrains[&F];
-  RetypdGeneratorVisitor Visitor(*this, func_constrains[&F]);
+  RetypdGeneratorVisitor Visitor(*this);
   Visitor.visit(F);
   Visitor.handlePHINodes();
   callInstanceId.clear();
@@ -135,9 +131,9 @@ static inline DerivedTypeVariable GetLLVMTypeVar(Type *Ty) {
   return makeTv("#" + GetLLVMTypeBase(Ty));
 }
 
-DerivedTypeVariable &RetypdGenerator::getTypeVar(Value *Val) {
+const DerivedTypeVariable &RetypdGenerator::getTypeVar(Value *Val) {
   if (Val2Dtv.count(Val)) {
-    return Val2Dtv.at(Val);
+    return Val2Dtv.at(Val)->key.Base;
   }
   auto ret = getTypeVarNoCache(Val);
   return setTypeVar(Val, ret);
@@ -160,10 +156,10 @@ DerivedTypeVariable RetypdGenerator::getTypeVarNoCache(Value *Val) {
         }
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
-      if (gv == StackPointer) {
+      if (gv == Ctx.StackPointer) {
         return makeTv(Stack);
       } else if (auto Func = dyn_cast<Function>(C)) {
-        return makeTv(getNewName(*Func, "Func_"));
+        return makeTv(Ctx.getName(*Func, "Func_"));
       }
       return makeTv(gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
@@ -183,22 +179,23 @@ DerivedTypeVariable RetypdGenerator::getTypeVarNoCache(Value *Val) {
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val
                << "\n";
-  return makeTv(getNewName(*Val, "new_"));
+  return makeTv(Ctx.getName(*Val, "new_"));
 }
 
-std::string RetypdGenerator::sanitize_name(std::string S) {
+// TODO: accept any character in name by using single quotes like LLVM IR.
+std::string Retypd::sanitize_name(std::string S) {
   std::replace(S.begin(), S.end(), '.', '_');
   std::replace(S.begin(), S.end(), '@', '_');
   return S;
 }
 
-std::string RetypdGenerator::getNewName(Value &Val, const char *prefix) {
-  if (Val.hasName()) {
-    return sanitize_name(Val.getName().str());
-  } else {
+std::string Retypd::getName(Value &Val, const char *prefix) {
+  if (!Val.hasName()) {
     auto Id = typeValId++;
+    Val.setName(prefix + std::to_string(Id));
     return prefix + std::to_string(Id);
   }
+  return Val.getName().str();
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitReturnInst(ReturnInst &I) {
@@ -222,7 +219,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     return;
   }
   // differentiate different call instances in the same function
-  auto TargetVar = cg.getFuncName(*Target);
+  auto TargetVar = cg.Ctx.getName(*Target);
   // Starts from 1. So that it is different from the default 0.
   auto instanceId = ++cg.callInstanceId[TargetVar];
   for (int i = 0; i < I.arg_size(); i++) {
@@ -241,7 +238,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitSelectInst(SelectInst &I) {
-  auto DstVar = makeTv(cg.getNewName(I, "select_"));
+  auto DstVar = makeTv(cg.Ctx.getName(I, "select_"));
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
   auto Src1Var = cg.getTypeVar(Src1);
@@ -254,7 +251,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitSelectInst(SelectInst &I) {
 }
 
 void RetypdGenerator::RetypdGeneratorVisitor::visitAllocaInst(AllocaInst &I) {
-  auto DstVar = makeTv(cg.getNewName(I, "alloca_"));
+  auto DstVar = makeTv(cg.Ctx.getName(I, "alloca_"));
   cg.setTypeVar(&I, DstVar);
 }
 
@@ -262,7 +259,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
   // Create a stub variable, defer constraints generation to handlePHINodes
   // Because it goes across the basic block boundary. Operands may be not found
   // using getTypeVar.
-  auto DstVar = makeTv(cg.getNewName(I, "phi_"));
+  auto DstVar = makeTv(cg.Ctx.getName(I, "phi_"));
   cg.setTypeVar(&I, DstVar);
 }
 
@@ -382,9 +379,9 @@ unsigned RetypdGenerator::getPointerElemSize(Type *ty) {
     return Size;
   }
   if (Elem->isPointerTy()) {
-    assert(pointer_size != 0 &&
+    assert(Ctx.pointer_size != 0 &&
            "RetypdGenerator: pointer size not initialized");
-    return pointer_size;
+    return Ctx.pointer_size;
   }
   assert(false && "unknown pointer type");
 }
@@ -553,21 +550,15 @@ void RetypdGenerator::PcodeOpType::addConstrains(Instruction *I,
 
 // =========== end: other insts ===========
 
-std::string RetypdGenerator::getFuncName(Function &F) {
-  auto ret = getTypeVar(&F);
-  assert(ret.Labels.empty() && "getFuncName: non empty label for function.");
-  return ret.name;
-}
-
-void RetypdGenerator::gen_json(std::string OutputFilename) {
+void Retypd::gen_json(std::string OutputFilename) {
   json::Object Root({{"data_layout", data_layout}});
 
   json::Object Constraints;
   // iterate func_constrains
-  for (auto &kv : func_constrains) {
-    auto funcName = getFuncName(*kv.first);
+  for (auto &kv : func_ctxs) {
+    auto funcName = getName(*kv.first);
     json::Array FuncConstrainsJson;
-    for (auto &c : kv.second) {
+    for (auto &c : kv.second.CG.toConstraints()) {
       FuncConstrainsJson.push_back(toString(c));
     }
     Constraints[funcName] = json::Value(std::move(FuncConstrainsJson));

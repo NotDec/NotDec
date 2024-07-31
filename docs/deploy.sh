@@ -24,4 +24,4 @@ cp -rp book/* /tmp/book/
 cd /tmp/book && \
     git add --all && \
     git commit -m "deployed on $(date) by $(git config --get user.name)" && \
-    git push github gh-pages
+    git push github -f gh-pages

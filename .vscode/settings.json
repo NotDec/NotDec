@@ -89,5 +89,14 @@
   "cmake.configureArgs": [
     "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
     "-DCMAKE_CXX_FLAGS=-fsanitize=address -idirafter /usr/lib/llvm-14/lib/clang/14.0.0/include"
-  ]
+  ],
+  "maptz.regionfolder": {
+    "[cpp]": {
+      "foldEnd": "//#endregion",
+      "foldEndRegex": "[#]?endregion",
+      "foldStart": "[NAME]",
+      "foldStartRegex": "//[\\s]*[#]?region[\\s]*(.*)",
+      "disableFolding": false
+    }
+  }
 }

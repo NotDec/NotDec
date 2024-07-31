@@ -441,9 +441,9 @@ void ConstraintGraph::addForgets(CGNode &N) {
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N) {
   auto [it, inserted] = Nodes.try_emplace(N, N);
   if (inserted) {
+    // TODO initialize link
     assert(addNode(it->second));
   }
-
   return it->second;
 }
 

@@ -5,42 +5,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: notdec_retypd_provider",
-      "type": "python",
-      "request": "launch",
-      "module": "notdec_retypd_provider",
-      "cwd": "${workspaceFolder}/src/optimizers",
-      "justMyCode": false,
-      "args": [
-        "--json-in",
-        "${file}",
-        "--debug-dir",
-        "${fileDirname}"
-      ]
-    },
-    {
       "type": "lldb",
       "request": "launch",
-      "name": "Structural emcc_print",
-      // "program": "${workspaceFolder}/build/bin/notdec",
-      "program": "${command:cmake.launchTargetPath}",
-      "args": [
-        "${workspaceFolder}/test/wasm/emcc-print.wat",
-        "-o",
-        "${workspaceFolder}/test/wasm/emcc-print.wat.c",
-        "--log-level=debug",
-        "--no-mem-initializer",
-        "--disable-all-pass"
-      ],
-      "cwd": "${workspaceFolder}",
-      // "preLaunchTask": "build"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "decompile emcc_print",
-      // "program": "${workspaceFolder}/build/bin/notdec",
-      "program": "${command:cmake.launchTargetPath}",
+      "name": "decompile emcc-print",
+      "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
         "${workspaceFolder}/test/wasm/emcc-print.wat",
         "-o",
@@ -49,7 +17,7 @@
         "--split-mem",
       ],
       "cwd": "${workspaceFolder}",
-      // "preLaunchTask": "build"
+      "preLaunchTask": "CMake: build",
     },
     {
       "type": "lldb",
@@ -65,7 +33,7 @@
         // "--print-before=linear-allocation-recovery"
       ],
       "cwd": "${workspaceFolder}",
-      // "preLaunchTask": "build"
+      "preLaunchTask": "CMake: build",
     },
     {
       "type": "lldb",

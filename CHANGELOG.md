@@ -11,6 +11,9 @@
 - add typedef for boolean constant
 - handle unordered float pointer operation
 
+**Type recovery**
+- how to handle dynamic call using function pointer? how to traverse reverse post order?
+
 ## Changelog
 
 **2024-07-15**

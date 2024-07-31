@@ -62,7 +62,9 @@ struct CGNode : CGNodeBase {
   // Map from CGNode to SSGNode using union-find
   // We will not remove CGNode from the graph, but just update, so it is safe to
   // use raw pointer here.
-  std::variant<CGNode *, SSGNode *> SSGNode;
+  SSGLink Link;
+  SSGLink &getLink() { return Link; }
+
   CGNode(NodeKey key) : key(key) {}
 };
 
@@ -88,8 +90,10 @@ struct ConstraintGraph : CGBase {
   CGNode *End = nullptr;
   bool isLayerSplit = false;
 
+  ConstraintGraph() {}
   ConstraintGraph(std::string FuncName) : FuncName(FuncName) {}
 
+  CGNode &getOrInsertNode(const NodeKey &N);
   // Interface for initial constraint insertion
   void addConstraint(const DerivedTypeVariable &sub,
                      const DerivedTypeVariable &sup);
@@ -112,7 +116,6 @@ struct ConstraintGraph : CGBase {
 
 protected:
   // Graph related operations
-  CGNode &getOrInsertNode(const NodeKey &N);
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     auto it = From.outEdges.find(CGEdge(To, Label));
     assert(it != From.outEdges.end());

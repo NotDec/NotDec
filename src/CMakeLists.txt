@@ -18,6 +18,7 @@ add_library(notdec STATIC
 	Retypd/Graph.cpp
 	Retypd/Schema.cpp
 	Retypd/RExp.cpp
+	Retypd/Unify.cpp
 	Utils/Range.cpp
 	utils.cpp
 )

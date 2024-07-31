@@ -15,7 +15,10 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
 
+#include "Retypd/Graph.h"
+#include "Retypd/RExp.h"
 #include "Retypd/Schema.h"
+#include "Retypd/Unify.h"
 #include "Utils/Range.h"
 
 namespace notdec {
@@ -23,8 +26,24 @@ namespace notdec {
 using namespace llvm;
 using retypd::DerivedTypeVariable;
 
+struct RetypdGenerator;
 struct Retypd : PassInfoMixin<Retypd> {
-  PreservedAnalyses run(Module &F, ModuleAnalysisManager &);
+  std::map<Function *, RetypdGenerator> func_ctxs;
+  llvm::Value *StackPointer;
+  std::string data_layout;
+  unsigned pointer_size = 0;
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
+  void gen_json(std::string OutputFilename);
+
+  static std::string sanitize_name(std::string s);
+
+protected:
+  size_t typeValId = 0;
+
+public:
+  // get a new type_var name from type_val_id
+  std::string getName(Value &Val, const char *prefix = "v_");
 };
 
 inline retypd::SubTypeConstraint makeCons(const DerivedTypeVariable &sub,
@@ -33,51 +52,40 @@ inline retypd::SubTypeConstraint makeCons(const DerivedTypeVariable &sub,
 }
 
 struct RetypdGenerator {
-  std::map<Value *, DerivedTypeVariable> Val2Dtv;
-  std::map<Function *, std::vector<retypd::Constraint>> func_constrains;
-  std::string data_layout;
-  std::vector<retypd::Constraint> *current;
-  llvm::Value *StackPointer;
-  unsigned pointer_size = 0;
+  Retypd &Ctx;
+  std::map<Value *, retypd::CGNode *> Val2Dtv;
+  retypd::ConstraintGraph CG;
+  retypd::StorageShapeGraph SSG;
 
-  void run(Module &M, llvm::Value *StackPointer);
+  void run(Function &M);
+  RetypdGenerator(Retypd &Ctx) : Ctx(Ctx) {}
 
 protected:
   std::map<std::string, long> callInstanceId;
-  void run(Function &M);
 
 public:
   static const char *Stack;
   static const char *Memory;
 
-  void gen_json(std::string OutputFilename);
-
-  DerivedTypeVariable &setTypeVar(Value *val, const DerivedTypeVariable &dtv) {
-    auto ref = Val2Dtv.emplace(val, dtv);
+  const DerivedTypeVariable &setTypeVar(Value *val,
+                                        const DerivedTypeVariable &dtv) {
+    auto ref = Val2Dtv.emplace(val, &CG.getOrInsertNode(dtv));
+    ref.first->second->Link.setNode(SSG.createUnknown());
     assert(ref.second && "setTypeVar: Value already exists");
-    return ref.first->second;
+    return ref.first->second->key.Base;
   }
   void addConstraint(const DerivedTypeVariable &sub,
                      const DerivedTypeVariable &sup) {
-    addConstraint(makeCons(sub, sup));
-  }
-  void addConstraint(retypd::Constraint Cons) {
-    if (std::holds_alternative<retypd::SubTypeConstraint>(Cons)) {
-      auto &SCons = std::get<retypd::SubTypeConstraint>(Cons);
-      if (SCons.sub.isPrimitive() && SCons.sup.isPrimitive()) {
-        assert(SCons.sub.name == SCons.sup.name &&
-               "addConstraint: different primitive types !?");
-        return;
-      }
+    if (sub.isPrimitive() && sup.isPrimitive()) {
+      assert(sub.name == sup.name &&
+             "addConstraint: different primitive types !?");
+      return;
     }
-
-    current->push_back(Cons);
+    CG.addConstraint(sub, sup);
+    CG.getOrInsertNode(sub).Link.unify(CG.getOrInsertNode(sup).Link);
   }
-  DerivedTypeVariable &getTypeVar(Value *val);
+  const DerivedTypeVariable &getTypeVar(Value *val);
   DerivedTypeVariable getTypeVarNoCache(Value *Val);
-  // get a new type_var name from type_val_id
-  std::string getNewName(Value &Val, const char *prefix = "v_");
-  std::string getFuncName(Function &F);
 
   void setOffset(DerivedTypeVariable &dtv, OffsetRange Offset);
   DerivedTypeVariable deref(Value *Val, long BitSize, bool isLoad);
@@ -87,11 +95,8 @@ public:
                      IntToPtrInst>(Val);
   }
   static std::string offset(APInt Offset, int Count = 0);
-  static std::string sanitize_name(std::string s);
 
 protected:
-  size_t typeValId = 0;
-
   struct PcodeOpType {
     const char *output;
     // allow for uniform initializations
@@ -116,9 +121,7 @@ protected:
     std::vector<llvm::PHINode *> phiNodes;
 
   public:
-    RetypdGeneratorVisitor(RetypdGenerator &cg,
-                           std::vector<retypd::Constraint> &constrains)
-        : cg(cg) {}
+    RetypdGeneratorVisitor(RetypdGenerator &cg) : cg(cg) {}
     // overloaded visit functions
     void visitCastInst(CastInst &I);
     void visitCallBase(CallBase &I);
