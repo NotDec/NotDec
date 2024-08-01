@@ -39,7 +39,7 @@ struct StorageShapeGraph;
 
 struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
-  StorageShapeGraph *Parent;
+  StorageShapeGraph *Parent = nullptr;
   void setParent(StorageShapeGraph *P) { Parent = P; }
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGNode>::iterator eraseFromParent();
@@ -67,12 +67,12 @@ struct SSGNode
 
 struct SSGLink
     : public llvm::ilist_node_with_parent<SSGLink, StorageShapeGraph> {
-  StorageShapeGraph *Parent;
+  StorageShapeGraph *Parent = nullptr;
   void setParent(StorageShapeGraph *P) { Parent = P; }
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGLink>::iterator eraseFromParent();
 
-  // SSGLink(StorageShapeGraph &SSG) : Parent(&SSG) {}
+  SSGLink(StorageShapeGraph &SSG) : Parent(&SSG) {}
 
   using LinkTy = std::variant<SSGLink *, SSGNode *>;
   LinkTy Link;

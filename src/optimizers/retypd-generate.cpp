@@ -51,8 +51,8 @@ PreservedAnalyses Retypd::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // TODO!! reverse post order
   for (auto &F : M) {
-    auto &Generator =
-        func_ctxs.emplace(&F, RetypdGenerator(*this)).first->second;
+    auto it = func_ctxs.emplace(&F, *this);
+    auto &Generator = it.first->second;
     Generator.run(F);
   }
 

@@ -56,6 +56,7 @@ using CGBase = llvm::DirectedGraph<CGNode, CGEdge>;
 
 // TODO make node immutable
 struct CGNode : CGNodeBase {
+  ConstraintGraph &Parent;
   const NodeKey key;
   std::set<CGEdge> outEdges;
 
@@ -65,7 +66,7 @@ struct CGNode : CGNodeBase {
   SSGLink Link;
   SSGLink &getLink() { return Link; }
 
-  CGNode(NodeKey key) : key(key) {}
+  CGNode(ConstraintGraph &Parent, NodeKey key);
 };
 
 struct CGEdge : CGEdgeBase {
@@ -79,6 +80,7 @@ struct CGEdge : CGEdgeBase {
 };
 
 struct ConstraintGraph : CGBase {
+  StorageShapeGraph SSG;
   std::string FuncName;
   std::map<NodeKey, CGNode> Nodes;
   std::vector<Constraint> AddConstraints;

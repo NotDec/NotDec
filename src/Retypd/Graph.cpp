@@ -439,9 +439,8 @@ void ConstraintGraph::addForgets(CGNode &N) {
 }
 
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N) {
-  auto [it, inserted] = Nodes.try_emplace(N, N);
+  auto [it, inserted] = Nodes.try_emplace(N, *this, N);
   if (inserted) {
-    // TODO initialize link
     assert(addNode(it->second));
   }
   return it->second;
@@ -641,6 +640,11 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
   Ctx.ConstraintsSequence.insert(Ctx.ConstraintsSequence.end(), Seq.begin(),
                                  Seq.end());
   return Ctx.constraintsSequenceToConstraints(Ctx.ConstraintsSequence);
+}
+
+CGNode::CGNode(ConstraintGraph &Parent, NodeKey key)
+    : Parent(Parent), key(key), Link(Parent.SSG) {
+  Link.setNode(Link.Parent->createUnknown());
 }
 
 } // namespace notdec::retypd
