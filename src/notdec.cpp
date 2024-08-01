@@ -14,7 +14,7 @@
 #include "notdec-llvm2c/Interface.h"
 #endif
 
-#include "optimizers/opt-manager.h"
+#include "optimizers/PassManager.h"
 #include "utils.h"
 
 using namespace llvm;

@@ -15,10 +15,10 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
 
-#include "Retypd/Graph.h"
-#include "Retypd/RExp.h"
-#include "Retypd/Schema.h"
-#include "Retypd/Unify.h"
+#include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/RExp.h"
+#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/StorageShapeGraph.h"
 #include "Utils/Range.h"
 
 namespace notdec {
@@ -55,10 +55,10 @@ struct RetypdGenerator {
   Retypd &Ctx;
   std::map<Value *, retypd::CGNode *> Val2Dtv;
   retypd::ConstraintGraph CG;
-  retypd::StorageShapeGraph SSG;
+  retypd::StorageShapeGraph &SSG;
 
-  void run(Function &M);
-  RetypdGenerator(Retypd &Ctx) : Ctx(Ctx) {}
+  void run(Function &F);
+  RetypdGenerator(Retypd &Ctx) : Ctx(Ctx), SSG(CG.SSG) {}
 
 protected:
   std::map<std::string, long> callInstanceId;
@@ -70,7 +70,6 @@ public:
   const DerivedTypeVariable &setTypeVar(Value *val,
                                         const DerivedTypeVariable &dtv) {
     auto ref = Val2Dtv.emplace(val, &CG.getOrInsertNode(dtv));
-    ref.first->second->Link.setNode(SSG.createUnknown());
     assert(ref.second && "setTypeVar: Value already exists");
     return ref.first->second->key.Base;
   }

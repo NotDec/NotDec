@@ -22,10 +22,10 @@
 #include <llvm/Support/raw_ostream.h>
 #include <variant>
 
-#include "Retypd/Schema.h"
+#include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
-#include "optimizers/retypd-generate.h"
-#include "optimizers/stack-pointer-finder.h"
+#include "optimizers/ConstraintGenerator.h"
+#include "optimizers/StackPointerFinder.h"
 #include "utils.h"
 
 #define DEBUG_TYPE "retypd"

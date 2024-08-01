@@ -3,9 +3,9 @@
 #include <variant>
 #include <vector>
 
-#include "Retypd/Graph.h"
-#include "Retypd/RExp.h"
-#include "Retypd/Schema.h"
+#include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/RExp.h"
+#include "TypeRecovery/Schema.h"
 
 namespace notdec::retypd::rexp {
 

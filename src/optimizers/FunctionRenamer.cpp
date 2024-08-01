@@ -8,6 +8,7 @@ using namespace llvm;
 
 namespace notdec::frontend::optimizers {
 
+/// Find some stub function calls. rename jmp_XXX.
 class FunctionRenamer : public PassInfoMixin<FunctionRenamer> {
 public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {

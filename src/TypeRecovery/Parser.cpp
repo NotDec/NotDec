@@ -1,6 +1,6 @@
 
-#include "Retypd/Parser.h"
-#include "Retypd/Schema.h"
+#include "TypeRecovery/Parser.h"
+#include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
 #include <iostream>
 #include <string>

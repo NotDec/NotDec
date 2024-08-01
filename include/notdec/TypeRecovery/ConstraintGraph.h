@@ -14,9 +14,9 @@
 #include <llvm/ADT/simple_ilist.h>
 #include <llvm/Support/GraphWriter.h>
 
-#include "Retypd/RExp.h"
-#include "Retypd/Schema.h"
-#include "Retypd/Unify.h"
+#include "TypeRecovery/RExp.h"
+#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/StorageShapeGraph.h"
 
 namespace notdec::retypd {
 

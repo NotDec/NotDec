@@ -17,9 +17,9 @@
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "Retypd/Graph.h"
-#include "Retypd/RExp.h"
-#include "Retypd/Schema.h"
+#include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/RExp.h"
+#include "TypeRecovery/Schema.h"
 
 #define DEBUG_TYPE "retypd_graph"
 

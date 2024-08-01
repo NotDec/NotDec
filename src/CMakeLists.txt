@@ -2,11 +2,11 @@ add_subdirectory(datalog)
 
 add_library(notdec STATIC
 	# source files that are common to all frontend
-	optimizers/opt-manager.cpp
-	optimizers/pointer-type-recovery.cpp
-	optimizers/stack-pointer-finder.cpp
-	optimizers/stack-alloca.cpp
-	optimizers/retypd-generate.cpp
+	optimizers/PassManager.cpp
+	optimizers/PointerTypeRecovery.cpp
+	optimizers/StackPointerFinder.cpp
+	optimizers/StackAlloca.cpp
+	optimizers/ConstraintGenerator.cpp
 	optimizers/retdec-stack/retdec-abi.cpp
 	optimizers/retdec-stack/retdec-ir-modifier.cpp
 	optimizers/retdec-stack/retdec-reaching-definition.cpp
@@ -14,11 +14,11 @@ add_library(notdec STATIC
 	optimizers/retdec-stack/retdec-stack-pointer-op-remove.cpp
 	optimizers/retdec-stack/retdec-symbolic-tree.cpp
 	optimizers/retdec-stack/retdec-utils.cpp
-	Retypd/Parser.cpp
-	Retypd/Graph.cpp
-	Retypd/Schema.cpp
-	Retypd/RExp.cpp
-	Retypd/Unify.cpp
+	TypeRecovery/Parser.cpp
+	TypeRecovery/ConstraintGraph.cpp
+	TypeRecovery/Schema.cpp
+	TypeRecovery/RExp.cpp
+	TypeRecovery/StorageShapeGraph.cpp
 	Utils/Range.cpp
 	utils.cpp
 )

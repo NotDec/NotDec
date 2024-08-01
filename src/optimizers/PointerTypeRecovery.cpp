@@ -34,8 +34,8 @@
 #include <souffle/RamTypes.h>
 
 #include "datalog/fact-generator.h"
-#include "optimizers/pointer-type-recovery.h"
-#include "optimizers/stack-pointer-finder.h"
+#include "optimizers/PointerTypeRecovery.h"
+#include "optimizers/StackPointerFinder.h"
 #include "utils.h"
 
 #define DEBUG_TYPE "pointer-type-recovery"

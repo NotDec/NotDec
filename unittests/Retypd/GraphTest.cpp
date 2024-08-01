@@ -1,7 +1,7 @@
-#include "Retypd/Graph.h"
-#include "Retypd/Parser.h"
-#include "Retypd/RExp.h"
-#include "Retypd/Schema.h"
+#include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/Parser.h"
+#include "TypeRecovery/RExp.h"
+#include "TypeRecovery/Schema.h"
 #include <gtest/gtest.h>
 #include <llvm/Support/Debug.h>
 #include <string>

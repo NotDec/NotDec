@@ -1,7 +1,7 @@
 #ifndef _NOTDEC_RETYPD_REXP_H_
 #define _NOTDEC_RETYPD_REXP_H_
 
-#include "Retypd/Schema.h"
+#include "TypeRecovery/Schema.h"
 #include <memory>
 #include <optional>
 #include <set>

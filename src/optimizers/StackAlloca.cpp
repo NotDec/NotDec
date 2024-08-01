@@ -1,5 +1,5 @@
-#include "optimizers/stack-alloca.h"
-#include "optimizers/stack-pointer-finder.h"
+#include "optimizers/StackAlloca.h"
+#include "optimizers/StackPointerFinder.h"
 #include <cassert>
 #include <cstdint>
 #include <llvm/ADT/STLExtras.h>
@@ -38,9 +38,11 @@ namespace notdec {
 /// see:
 /// https://www.npopov.com/2023/04/10/LLVM-Canonicalization-and-target-independence.html
 ///
-/// Currently we only replace the stack pointer load and restore with alloca. No add is converted to gep currently.
-/// If the stack grows negative, the offsets will also be negative. But in the alloca, the size is still positive.
-PreservedAnalyses LinearAllocationRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
+/// Currently we only replace the stack pointer load and restore with alloca. No
+/// add is converted to gep currently. If the stack grows negative, the offsets
+/// will also be negative. But in the alloca, the size is still positive.
+PreservedAnalyses LinearAllocationRecovery::run(Module &M,
+                                                ModuleAnalysisManager &MAM) {
   errs() << " ============== LinearAllocationRecovery  ===============\n";
   auto sp_result = MAM.getResult<StackPointerFinderAnalysis>(M);
   auto sp = sp_result.result;
@@ -116,12 +118,15 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M, ModuleAnalysisManager
         }
       }
       if (match_level == 0 && has_load_sp) {
-        llvm::errs() << "ERROR: No pattern matched but the stack pointer is accessed in func: " << F->getName() << "!\n";
+        llvm::errs() << "ERROR: No pattern matched but the stack pointer is "
+                        "accessed in func: "
+                     << F->getName() << "!\n";
       }
     }
     // 1.3 Failed to match any stack allocation.
     if (match_level == 0) {
-      llvm::errs() << "ERROR: cannot find stack allocation in func: " << F->getName() << "\n";
+      llvm::errs() << "ERROR: cannot find stack allocation in func: "
+                   << F->getName() << "\n";
       continue;
     }
     // For normal stack allocation (level = 2): Remove epilogue that restore the
@@ -145,7 +150,8 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M, ModuleAnalysisManager
         }
       }
       if (!removed) {
-        llvm::errs() << "ERROR: Cannot find sp restore? func: " << F->getName() << "\n";
+        llvm::errs() << "ERROR: Cannot find sp restore? func: " << F->getName()
+                     << "\n";
         continue;
       }
     }
@@ -153,7 +159,8 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M, ModuleAnalysisManager
     // replace the stack allocation with alloca.
     bool grow_negative = sp_result.direction == 0;
     auto pty = PointerType::get(IntegerType::get(M.getContext(), 8), 0);
-    auto SizeTy = IntegerType::get(M.getContext(), M.getDataLayout().getPointerSizeInBits());
+    auto SizeTy = IntegerType::get(M.getContext(),
+                                   M.getDataLayout().getPointerSizeInBits());
     // TODO handle positive grow direction.
     assert(grow_negative == true);
     // When match_level == 1, Only LoadSP is not null.
@@ -164,10 +171,12 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M, ModuleAnalysisManager
     //   space = Builder.CreateNeg(space);
     // }
     Builder.SetInsertPoint(LoadSP);
-    Value *alloc =
-        Builder.CreateAlloca(pty->getPointerElementType(), grow_negative ? Builder.CreateNeg(space) : space, "stack_addr");
-    cast<Instruction>(alloc)->setMetadata("notdec.stack_direction",
-                                          MDNode::get(M.getContext(), MDString::get(M.getContext(), "negative")));
+    Value *alloc = Builder.CreateAlloca(
+        pty->getPointerElementType(),
+        grow_negative ? Builder.CreateNeg(space) : space, "stack_addr");
+    cast<Instruction>(alloc)->setMetadata(
+        "notdec.stack_direction",
+        MDNode::get(M.getContext(), MDString::get(M.getContext(), "negative")));
     alloc = Builder.CreatePtrToInt(alloc, LoadSP->getType(), "stack");
     Value *alloc_end = Builder.CreateAdd(alloc, space, "stack_end");
 

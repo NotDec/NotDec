@@ -33,15 +33,15 @@
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
 #include "notdec-wasm2llvm/utils.h"
-#include "optimizers/opt-manager.h"
-#include "optimizers/pointer-type-recovery.h"
+#include "optimizers/ConstraintGenerator.h"
+#include "optimizers/PassManager.h"
+#include "optimizers/PointerTypeRecovery.h"
+#include "optimizers/StackAlloca.h"
+#include "optimizers/StackPointerFinder.h"
 #include "optimizers/retdec-stack/retdec-abi.h"
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
-#include "optimizers/retypd-generate.h"
-#include "optimizers/stack-alloca.h"
-#include "optimizers/stack-pointer-finder.h"
 #include "utils.h"
 
 namespace notdec::optimizers {
