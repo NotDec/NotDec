@@ -22,7 +22,7 @@ struct Primitive {
   bool operator==(const Primitive &Other) const { return name == Other.name; }
 };
 struct Pointer {};
-using UniTy = std::variant<Unknown, Primitive, Pointer>;
+using StorageShapeTy = std::variant<Unknown, Primitive, Pointer>;
 // mergeMap[left index][right index] = isPreserveLeft
 // row -> right index, column -> left index
 const unsigned char UniTyMergeMap[][3] = {
@@ -35,33 +35,38 @@ bool unifyPrimitive(Primitive &Left, Primitive &Right);
 
 bool unifyPointer(Pointer &Left, Pointer &Right);
 
+bool unify(StorageShapeTy &Left, StorageShapeTy &Right);
+
 struct StorageShapeGraph;
 
 struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
   StorageShapeGraph *Parent = nullptr;
-  void setParent(StorageShapeGraph *P) { Parent = P; }
+  // void setParent(StorageShapeGraph *P) { Parent = P; }
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGNode>::iterator eraseFromParent();
 
-  UniTy Ty;
-  bool unify(SSGNode &other) {
-    UniTy &Left = Ty;
-    UniTy &Right = other.Ty;
-    unsigned char Val = UniTyMergeMap[Left.index()][Right.index()];
-    if (Val == 2) { // same inner type
-      if (std::holds_alternative<Pointer>(Left)) {
-        return unifyPointer(std::get<Pointer>(Left), std::get<Pointer>(Right));
-      } else if (std::holds_alternative<Primitive>(Left)) {
-        return unifyPrimitive(std::get<Primitive>(Left),
-                              std::get<Primitive>(Right));
-      } else if (std::holds_alternative<Unknown>(Left)) {
-        return true;
-      }
-      assert(false && "unify: unhandled type");
+  SSGNode(StorageShapeGraph &SSG) : Parent(&SSG) {}
+
+  // protected:
+  StorageShapeTy Ty;
+
+  // Setting current type by reusing the unify logic.
+  void setStorageShape(StorageShapeTy other) {
+    bool preserveLeft = notdec::retypd::unify(Ty, other);
+    if (preserveLeft) {
+      // good
     } else {
-      return Val == 1;
+      Ty = other;
     }
+  }
+
+  /// merge two SSGNode into one. Return true if the left one is preserved.
+  /// the other one is expected to be removed.
+  bool unify(SSGNode &other) {
+    StorageShapeTy &Left = Ty;
+    StorageShapeTy &Right = other.Ty;
+    return notdec::retypd::unify(Left, Right);
   }
 };
 
@@ -95,6 +100,7 @@ struct SSGLink
   }
   void setForward(SSGLink *N) { Link = N; }
   void setNode(SSGNode *N) { Link = N; }
+  SSGNode *lookupNode() { return lookup(this)->getNode(); }
   SSGNode *getNode() {
     if (auto *N = std::get_if<SSGNode *>(&Link)) {
       return *N;
@@ -137,9 +143,8 @@ struct StorageShapeGraph {
   }
 
   SSGNode *createUnknown() {
-    SSGNode *N = new SSGNode();
+    SSGNode *N = new SSGNode(*this);
     N->Ty = Unknown();
-    N->setParent(this);
     Nodes.push_back(N);
     return N;
   }

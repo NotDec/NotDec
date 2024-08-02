@@ -51,9 +51,43 @@ inline retypd::SubTypeConstraint makeCons(const DerivedTypeVariable &sub,
   return retypd::SubTypeConstraint{sub, sup};
 }
 
+struct ReturnValue {
+  llvm::Function *Func;
+  int32_t Index;
+  bool operator<(const ReturnValue &rhs) const {
+    return std::tie(Func, Index) < std::tie(rhs.Func, rhs.Index);
+  }
+  bool operator==(const ReturnValue &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+};
+struct CallArg {
+  llvm::CallBase *Call;
+  int32_t InstanceId;
+  int32_t Index;
+  bool operator<(const CallArg &rhs) const {
+    return std::tie(Call, InstanceId, Index) <
+           std::tie(rhs.Call, rhs.InstanceId, rhs.Index);
+  }
+  bool operator==(const CallArg &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+};
+struct CallRet {
+  llvm::CallBase *Call;
+  int32_t InstanceId;
+  bool operator<(const CallRet &rhs) const {
+    return std::tie(Call, InstanceId) < std::tie(rhs.Call, InstanceId);
+  }
+  bool operator==(const CallRet &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+};
+using ValMapKey = std::variant<llvm::Value *, ReturnValue, CallArg, CallRet>;
+
 struct RetypdGenerator {
   Retypd &Ctx;
-  std::map<Value *, retypd::CGNode *> Val2Dtv;
+  std::map<ValMapKey, retypd::CGNode *> Val2Node;
   retypd::ConstraintGraph CG;
   retypd::StorageShapeGraph &SSG;
 
@@ -61,20 +95,19 @@ struct RetypdGenerator {
   RetypdGenerator(Retypd &Ctx) : Ctx(Ctx), SSG(CG.SSG) {}
 
 protected:
-  std::map<std::string, long> callInstanceId;
+  std::map<std::string, int32_t> callInstanceId;
 
 public:
   static const char *Stack;
   static const char *Memory;
 
-  const DerivedTypeVariable &setTypeVar(Value *val,
-                                        const DerivedTypeVariable &dtv) {
-    auto ref = Val2Dtv.emplace(val, &CG.getOrInsertNode(dtv));
+  CGNode &setTypeVar(ValMapKey val, const DerivedTypeVariable &dtv) {
+    auto ref = Val2Node.emplace(val, &CG.getOrInsertNode(dtv));
     assert(ref.second && "setTypeVar: Value already exists");
-    return ref.first->second->key.Base;
+    return *ref.first->second;
   }
-  void addConstraint(const DerivedTypeVariable &sub,
-                     const DerivedTypeVariable &sup) {
+  void addSubtype(const DerivedTypeVariable &sub,
+                  const DerivedTypeVariable &sup) {
     if (sub.isPrimitive() && sup.isPrimitive()) {
       assert(sub.name == sup.name &&
              "addConstraint: different primitive types !?");
@@ -83,8 +116,9 @@ public:
     CG.addConstraint(sub, sup);
     CG.getOrInsertNode(sub).Link.unify(CG.getOrInsertNode(sup).Link);
   }
-  const DerivedTypeVariable &getTypeVar(Value *val);
-  DerivedTypeVariable getTypeVarNoCache(Value *Val);
+  const DerivedTypeVariable &getTypeVar(ValMapKey val);
+  DerivedTypeVariable convertTypeVar(ValMapKey Val);
+  DerivedTypeVariable convertTypeVarVal(Value *Val);
 
   void setOffset(DerivedTypeVariable &dtv, OffsetRange Offset);
   DerivedTypeVariable deref(Value *Val, long BitSize, bool isLoad);

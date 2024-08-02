@@ -24,4 +24,22 @@ bool unifyPointer(Pointer &Left, Pointer &Right) {
   return true;
 }
 
+bool unify(StorageShapeTy &Left, StorageShapeTy &Right) {
+  StorageShapeTy ret = Left;
+  unsigned char Val = UniTyMergeMap[Left.index()][Right.index()];
+  if (Val == 2) { // same inner type
+    if (std::holds_alternative<Pointer>(Left)) {
+      return unifyPointer(std::get<Pointer>(Left), std::get<Pointer>(Right));
+    } else if (std::holds_alternative<Primitive>(Left)) {
+      return unifyPrimitive(std::get<Primitive>(Left),
+                            std::get<Primitive>(Right));
+    } else if (std::holds_alternative<Unknown>(Left)) {
+      return true;
+    }
+    assert(false && "unify: unhandled type");
+  } else {
+    return Val == 1;
+  }
+}
+
 } // namespace notdec::retypd
