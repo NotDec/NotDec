@@ -24,7 +24,7 @@
 namespace notdec {
 
 using namespace llvm;
-using retypd::DerivedTypeVariable;
+using retypd::TypeVariable;
 
 struct RetypdGenerator;
 struct Retypd : PassInfoMixin<Retypd> {
@@ -46,8 +46,8 @@ public:
   std::string getName(Value &Val, const char *prefix = "v_");
 };
 
-inline retypd::SubTypeConstraint makeCons(const DerivedTypeVariable &sub,
-                                          const DerivedTypeVariable &sup) {
+inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
+                                          const TypeVariable &sup) {
   return retypd::SubTypeConstraint{sub, sup};
 }
 
@@ -63,7 +63,7 @@ struct ReturnValue {
 };
 struct CallArg {
   llvm::CallBase *Call;
-  int32_t InstanceId;
+  uint32_t InstanceId;
   int32_t Index;
   bool operator<(const CallArg &rhs) const {
     return std::tie(Call, InstanceId, Index) <
@@ -75,7 +75,7 @@ struct CallArg {
 };
 struct CallRet {
   llvm::CallBase *Call;
-  int32_t InstanceId;
+  uint32_t InstanceId;
   bool operator<(const CallRet &rhs) const {
     return std::tie(Call, InstanceId) < std::tie(rhs.Call, InstanceId);
   }
@@ -83,7 +83,20 @@ struct CallRet {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
-using ValMapKey = std::variant<llvm::Value *, ReturnValue, CallArg, CallRet>;
+/// Differentiate pointer-sized int constant. It can be pointer or int under
+/// different context.
+struct IntConstant {
+  llvm::Constant *Val;
+  llvm::User *User;
+  bool operator<(const IntConstant &rhs) const {
+    return std::tie(Val, User) < std::tie(rhs.Val, User);
+  }
+  bool operator==(const IntConstant &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+};
+using ValMapKey =
+    std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
 
 struct RetypdGenerator {
   Retypd &Ctx;
@@ -95,33 +108,32 @@ struct RetypdGenerator {
   RetypdGenerator(Retypd &Ctx) : Ctx(Ctx), SSG(CG.SSG) {}
 
 protected:
-  std::map<std::string, int32_t> callInstanceId;
+  std::map<std::string, uint32_t> callInstanceId;
 
 public:
   static const char *Stack;
   static const char *Memory;
 
-  CGNode &setTypeVar(ValMapKey val, const DerivedTypeVariable &dtv) {
+  CGNode &setTypeVar(ValMapKey val, const TypeVariable &dtv) {
     auto ref = Val2Node.emplace(val, &CG.getOrInsertNode(dtv));
     assert(ref.second && "setTypeVar: Value already exists");
     return *ref.first->second;
   }
-  void addSubtype(const DerivedTypeVariable &sub,
-                  const DerivedTypeVariable &sup) {
+  void addSubtype(const TypeVariable &sub, const TypeVariable &sup) {
     if (sub.isPrimitive() && sup.isPrimitive()) {
-      assert(sub.name == sup.name &&
+      assert(sub.getBaseName() == sup.getBaseName() &&
              "addConstraint: different primitive types !?");
       return;
     }
     CG.addConstraint(sub, sup);
     CG.getOrInsertNode(sub).Link.unify(CG.getOrInsertNode(sup).Link);
   }
-  const DerivedTypeVariable &getTypeVar(ValMapKey val);
-  DerivedTypeVariable convertTypeVar(ValMapKey Val);
-  DerivedTypeVariable convertTypeVarVal(Value *Val);
+  const TypeVariable &getTypeVar(ValMapKey val);
+  TypeVariable convertTypeVar(ValMapKey Val);
+  TypeVariable convertTypeVarVal(Value *Val);
 
-  void setOffset(DerivedTypeVariable &dtv, OffsetRange Offset);
-  DerivedTypeVariable deref(Value *Val, long BitSize, bool isLoad);
+  void setOffset(TypeVariable &dtv, OffsetRange Offset);
+  TypeVariable deref(Value *Val, long BitSize, bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {
     return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,

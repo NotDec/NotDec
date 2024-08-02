@@ -50,7 +50,7 @@ Variance getVariance(const FieldLabel &f) {
 }
 
 std::string toString(const DerivedTypeVariable &dtv) {
-  std::string s = dtv.name;
+  std::string s = dtv.Name;
   for (auto &label : dtv.Labels) {
     s += "." + toString(label);
   }
@@ -58,6 +58,26 @@ std::string toString(const DerivedTypeVariable &dtv) {
     s += "#" + std::to_string(dtv.instanceId);
   }
   return s;
+}
+
+std::string toString(const IntConstantVar &V) {
+  return "#Int#" + toString(V.Val) + "#" + toString(V.InstanceId);
+}
+
+std::string toString(const PrimitiveTypeVariable &dtv) {
+  return "#" + dtv.name;
+}
+
+std::string toString(const TypeVariable &dtv) {
+  if (std::holds_alternative<DerivedTypeVariable>(dtv.Inner)) {
+    return toString(std::get<DerivedTypeVariable>(dtv.Inner));
+  } else if (std::holds_alternative<IntConstantVar>(dtv.Inner)) {
+    return toString(std::get<IntConstantVar>(dtv.Inner));
+  } else if (std::holds_alternative<PrimitiveTypeVariable>(dtv.Inner)) {
+    return toString(std::get<PrimitiveTypeVariable>(dtv.Inner));
+  } else {
+    assert(false && "unknown TypeVariable");
+  }
 }
 
 std::string toStringImpl(const SubTypeConstraint &c) {

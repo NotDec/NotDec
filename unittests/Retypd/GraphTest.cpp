@@ -97,8 +97,8 @@ void printConstraints(
 TEST(Retypd, ExpToConstraint1Test) {
   using namespace notdec::retypd::rexp;
   using namespace notdec::retypd;
-  auto Prefix = create(RecallBase{"alpha"});
-  auto Suffix = create(ForgetBase{"beta"});
+  auto Prefix = create(RecallBase{TypeVariable::CreateDtv("alpha")});
+  auto Suffix = create(ForgetBase{TypeVariable::CreateDtv("beta")});
 
   auto StarForget1 =
       Prefix & createStar(create(ForgetLabel{LoadLabel{}})) & Suffix;

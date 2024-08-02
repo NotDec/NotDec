@@ -120,16 +120,15 @@ static std::string getLLVMTypeBase(Type *Ty) {
   }
 }
 
-static inline DerivedTypeVariable makeTv(std::string Name) {
-  retypd::DerivedTypeVariable ret{.name = Name};
-  return ret;
+static inline TypeVariable makeTv(std::string Name) {
+  return retypd::TypeVariable::CreateDtv(Name);
 }
 
-static inline DerivedTypeVariable getLLVMTypeVar(Type *Ty) {
-  return makeTv("#" + getLLVMTypeBase(Ty));
+static inline TypeVariable getLLVMTypeVar(Type *Ty) {
+  return retypd::TypeVariable::CreatePrimitive(getLLVMTypeBase(Ty));
 }
 
-const DerivedTypeVariable &RetypdGenerator::getTypeVar(ValMapKey Val) {
+const TypeVariable &RetypdGenerator::getTypeVar(ValMapKey Val) {
   if (Val2Node.count(Val)) {
     return Val2Node.at(Val)->key.Base;
   }
@@ -137,24 +136,24 @@ const DerivedTypeVariable &RetypdGenerator::getTypeVar(ValMapKey Val) {
   return setTypeVar(Val, ret).key.Base;
 }
 
-DerivedTypeVariable RetypdGenerator::convertTypeVar(ValMapKey Val) {
+TypeVariable RetypdGenerator::convertTypeVar(ValMapKey Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertTypeVarVal(*V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     auto tv = makeTv(Ctx.getName(*F->Func, "func_"));
-    tv.Labels.push_back(retypd::OutLabel{});
+    tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
     // TODO what if function pointer?
     auto tv = makeTv(Ctx.getName(*Arg->Call->getCalledFunction(), "func_"));
-    tv.instanceId = Arg->InstanceId;
-    tv.Labels.push_back(retypd::InLabel{std::to_string(Arg->Index)});
+    tv.getInstanceId() = Arg->InstanceId;
+    tv.getLabels().push_back(retypd::InLabel{std::to_string(Arg->Index)});
     return tv;
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     // TODO what if function pointer?
     auto tv = makeTv(Ctx.getName(*Ret->Call->getCalledFunction(), "func_"));
-    tv.instanceId = Ret->InstanceId;
-    tv.Labels.push_back(retypd::OutLabel{});
+    tv.getInstanceId() = Ret->InstanceId;
+    tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
   }
   llvm::errs()
@@ -163,7 +162,7 @@ DerivedTypeVariable RetypdGenerator::convertTypeVar(ValMapKey Val) {
   std::abort();
 }
 
-DerivedTypeVariable RetypdGenerator::convertTypeVarVal(Value *Val) {
+TypeVariable RetypdGenerator::convertTypeVarVal(Value *Val) {
   if (Constant *C = dyn_cast<Constant>(Val)) {
     // check for constantExpr
     if (auto CE = dyn_cast<ConstantExpr>(C)) {
@@ -196,8 +195,8 @@ DerivedTypeVariable RetypdGenerator::convertTypeVarVal(Value *Val) {
         << *C << "\n";
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
-    DerivedTypeVariable tv = getTypeVar(arg->getParent());
-    tv.Labels.push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
+    TypeVariable tv = getTypeVar(arg->getParent());
+    tv.getLabels().push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -311,7 +310,7 @@ void RetypdGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
   } else if (auto trunc = dyn_cast<TruncInst>(&I)) {
     auto *Src = trunc->getOperand(0);
     auto SrcVar = cg.getTypeVar(Src);
-    std::optional<DerivedTypeVariable> DstVar;
+    std::optional<TypeVariable> DstVar;
     // TODO
     if (trunc->getType()->isIntegerTy(1)) {
       DstVar = getLLVMTypeVar(trunc->getType());
@@ -441,30 +440,30 @@ std::string RetypdGenerator::offset(APInt Offset, int Count) {
   return OffsetStr;
 }
 
-void RetypdGenerator::setOffset(DerivedTypeVariable &dtv, OffsetRange Offset) {
+void RetypdGenerator::setOffset(TypeVariable &dtv, OffsetRange Offset) {
   OffsetLabel *current;
-  if (!dtv.Labels.empty() &&
-      std::holds_alternative<OffsetLabel>(dtv.Labels.back())) {
+  if (!dtv.getLabels().empty() &&
+      std::holds_alternative<OffsetLabel>(dtv.getLabels().back())) {
     // current = &std::get<OffsetLabel>(dtv.Labels.back());
     assert(false && "not implemented merging of offset labels");
   } else {
     current = &std::get<OffsetLabel>(
-        dtv.Labels.emplace_back(OffsetLabel{.range = Offset}));
+        dtv.getLabels().emplace_back(OffsetLabel{.range = Offset}));
   }
 }
 
 // Special logics for load and store when generating type variables.
-DerivedTypeVariable RetypdGenerator::deref(Value *Val, long BitSize,
-                                           bool isLoad) {
+TypeVariable RetypdGenerator::deref(Value *Val, long BitSize,
+                                    bool isLoadOrStore) {
   assert(BitSize != 0 && "RetypdGenerator::deref: zero size!?");
   // from the offset, generate a loaded type variable.
   auto DstVar = getTypeVar(Val);
   assert(BitSize % 8 == 0 && "size must be byte aligned");
   uint32_t Size = BitSize = BitSize / 8;
-  if (isLoad) {
-    DstVar.Labels.push_back(retypd::LoadLabel{.Size = Size});
+  if (isLoadOrStore) {
+    DstVar.getLabels().push_back(retypd::LoadLabel{.Size = Size});
   } else {
-    DstVar.Labels.push_back(retypd::StoreLabel{.Size = Size});
+    DstVar.getLabels().push_back(retypd::StoreLabel{.Size = Size});
   }
   return DstVar;
 }

@@ -2,6 +2,7 @@
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
+#include <cassert>
 #include <iostream>
 #include <string>
 
@@ -42,7 +43,6 @@ bool is_separator(llvm::StringRef str) {
 ParseResultT<llvm::StringRef> parseIdentifier(llvm::StringRef Str) {
   Str = skipWhitespace(Str);
   llvm::StringRef Rest = Str;
-  llvm::StringRef identifier;
   std::size_t end = 0;
   while (end < Str.size() && !is_separator(Rest)) {
     end += GetFirst(Rest);
@@ -252,9 +252,28 @@ parseDerivedTypeVariable(llvm::StringRef str) {
   return {rest, DerivedTypeVariable{Name.str(), labels}};
 }
 
+ParseResultT<TypeVariable> parseTypeVariable(llvm::StringRef str) {
+  str = skipWhitespace(str);
+  if (str.consume_front("#Int#")) {
+    assert(false && "Not implemented");
+  } else if (str.consume_front("#")) {
+    auto [rest, RName] = mustParseIdentifier(str);
+    if (!RName.isOk()) {
+      return {rest, RName.msg()};
+    }
+    return {rest, TypeVariable::CreatePrimitive(RName.get().str())};
+  } else {
+    auto [rest, RDtv] = parseDerivedTypeVariable(str);
+    if (!RDtv.isOk()) {
+      return {rest, RDtv.msg()};
+    }
+    return {rest, TypeVariable{RDtv.get()}};
+  }
+}
+
 ParseResultT<SubTypeConstraint> parseSubTypeConstraint(llvm::StringRef str) {
   str = skipWhitespace(str);
-  auto [rest, RSub] = parseDerivedTypeVariable(str);
+  auto [rest, RSub] = parseTypeVariable(str);
   if (!RSub.isOk()) {
     return {rest, RSub.msg()};
   }
@@ -263,11 +282,11 @@ ParseResultT<SubTypeConstraint> parseSubTypeConstraint(llvm::StringRef str) {
     return {rest, "parseSubTypeConstraint: Expect <= :" + rest.substr(0, 10)};
   }
   rest = skipWhitespace(rest);
-  auto [rest1, RSup] = parseDerivedTypeVariable(rest);
+  auto [rest1, RSup] = parseTypeVariable(rest);
   if (!RSup.isOk()) {
     return {rest, RSup.msg()};
   }
-  return {rest1, SubTypeConstraint{RSub.get(), RSup.get()}};
+  return {rest1, SubTypeConstraint{{RSub.get()}, {RSup.get()}}};
 }
 
 } // namespace notdec::retypd

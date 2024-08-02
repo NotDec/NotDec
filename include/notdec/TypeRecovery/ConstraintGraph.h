@@ -24,11 +24,11 @@ struct CGNode;
 struct ConstraintGraph;
 
 struct NodeKey {
-  DerivedTypeVariable Base;
+  TypeVariable Base;
   Variance SuffixVariance = Covariant;
   bool IsNewLayer = false;
-  NodeKey(const DerivedTypeVariable &Base) : Base(Base) {}
-  NodeKey(const DerivedTypeVariable &Base, Variance V)
+  NodeKey(const TypeVariable &Base) : Base(Base) {}
+  NodeKey(const TypeVariable &Base, Variance V)
       : Base(Base), SuffixVariance(V) {}
 
   std::optional<std::pair<FieldLabel, NodeKey>> forgetOnce() const;
@@ -97,8 +97,7 @@ struct ConstraintGraph : CGBase {
 
   CGNode &getOrInsertNode(const NodeKey &N);
   // Interface for initial constraint insertion
-  void addConstraint(const DerivedTypeVariable &sub,
-                     const DerivedTypeVariable &sup);
+  void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
 
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>

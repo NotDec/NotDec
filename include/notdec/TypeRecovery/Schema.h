@@ -2,6 +2,7 @@
 #define _NOTDEC_RETYPD_SCHEMA_H_
 
 #include "Utils/Range.h"
+#include <cassert>
 #include <cstdint>
 #include <deque>
 #include <llvm/ADT/Optional.h>
@@ -87,57 +88,163 @@ std::string toString(const FieldLabel &f);
 Variance getVariance(const FieldLabel &f);
 
 struct DerivedTypeVariable {
-  std::string name;
+  std::string Name;
   std::deque<FieldLabel> Labels;
-  unsigned instanceId = 0;
+  uint32_t instanceId = 0;
 
   DerivedTypeVariable getSubDtv(size_t index) const {
+    assert(index <= this->Labels.size());
     DerivedTypeVariable sub_dtv;
-    sub_dtv.name = this->name;
+    sub_dtv.Name = this->Name;
     sub_dtv.Labels.insert(sub_dtv.Labels.end(), this->Labels.begin(),
                           this->Labels.begin() + index);
     return sub_dtv;
   }
 
-  Variance pathVariance(DerivedTypeVariable dtv) const {
+  Variance pathVariance() const {
     Variance v = Covariant;
-    for (auto &label : dtv.Labels) {
+    for (auto &label : Labels) {
       v = combine(v, getVariance(label));
     }
     return v;
   }
 
-  bool isPrimitive() const { return name.at(0) == '#'; }
-
   // Comparator for stored in a std::map
   // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
   bool operator<(const DerivedTypeVariable &rhs) const {
-    return std::tie(name, Labels, instanceId) <
-           std::tie(rhs.name, rhs.Labels, rhs.instanceId);
+    return std::tie(Name, Labels, instanceId) <
+           std::tie(rhs.Name, rhs.Labels, rhs.instanceId);
   }
-
-  bool operator!=(const DerivedTypeVariable &rhs) const {
-    return std::tie(name, Labels, instanceId) !=
-           std::tie(rhs.name, rhs.Labels, rhs.instanceId);
+  bool operator==(const DerivedTypeVariable &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
   }
 };
 
-std::string toString(const DerivedTypeVariable &dtv);
+struct PrimitiveTypeVariable {
+  std::string name;
+  bool operator<(const PrimitiveTypeVariable &rhs) const {
+    return std::tie(name) < std::tie(rhs.name);
+  }
+  bool operator==(const PrimitiveTypeVariable &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+};
+
+struct IntConstantVar {
+  OffsetRange Val;
+  uint32_t InstanceId = 0;
+  bool operator<(const IntConstantVar &rhs) const {
+    return std::tie(Val, InstanceId) < std::tie(rhs.Val, rhs.InstanceId);
+  }
+  bool operator==(const IntConstantVar &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+};
+
+struct TypeVariable {
+  using InnerTy =
+      std::variant<DerivedTypeVariable, PrimitiveTypeVariable, IntConstantVar>;
+  InnerTy Inner;
+
+  static TypeVariable CreatePrimitive(std::string name) {
+    return TypeVariable{PrimitiveTypeVariable{name}};
+  }
+
+  static TypeVariable CreateDtv(std::string name) {
+    return TypeVariable{DerivedTypeVariable{name}};
+  }
+
+  void setName(std::string Name) {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      dtv->Name = Name;
+    } else {
+      assert(false && "TypeVariable::setName: Not a DerivedTypeVariable!");
+    }
+  }
+
+  TypeVariable toBase() const {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return {DerivedTypeVariable{.Name = dtv->Name,
+                                  .instanceId = dtv->instanceId}};
+    } else {
+      return *this;
+    }
+  }
+
+  bool hasLabel() const {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return dtv->Labels.size() > 0;
+    } else {
+      return false;
+    }
+  }
+
+  std::deque<FieldLabel> &getLabels() {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return dtv->Labels;
+    } else {
+      assert(false && "getLabels: Not a DerivedTypeVariable");
+    }
+  }
+
+  uint32_t &getInstanceId() {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return dtv->instanceId;
+    } else if (auto *icv = std::get_if<IntConstantVar>(&Inner)) {
+      return icv->InstanceId;
+    } else {
+      assert(false && "getInstanceId: No instanceId.");
+    }
+  }
+
+  std::string getBaseName() const {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return dtv->Name;
+    } else if (auto *ptv = std::get_if<PrimitiveTypeVariable>(&Inner)) {
+      return ptv->name;
+    } else {
+      assert(false && "getBaseName: No name.");
+    }
+  }
+
+  bool isDtv() const {
+    return std::holds_alternative<DerivedTypeVariable>(Inner);
+  }
+
+  bool isPrimitive() const {
+    return std::holds_alternative<PrimitiveTypeVariable>(Inner);
+  }
+
+  // Comparator for stored in a std::map
+  // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
+  bool operator<(const TypeVariable &rhs) const {
+    return std::tie(Inner) < std::tie(rhs.Inner);
+  }
+
+  bool operator==(const TypeVariable &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  bool operator!=(const TypeVariable &rhs) const {
+    return (*this < rhs) || (rhs < *this);
+  }
+};
+
+std::string toString(const TypeVariable &dtv);
 
 struct SubTypeConstraint {
-  DerivedTypeVariable sub;
-  DerivedTypeVariable sup;
+  TypeVariable sub;
+  TypeVariable sup;
 };
 
 struct AddConstraint {
-  DerivedTypeVariable left;
-  DerivedTypeVariable right;
-  DerivedTypeVariable result;
+  TypeVariable left;
+  TypeVariable right;
+  TypeVariable result;
 };
 struct SubConstraint {
-  DerivedTypeVariable left;
-  DerivedTypeVariable right;
-  DerivedTypeVariable result;
+  TypeVariable left;
+  TypeVariable right;
+  TypeVariable result;
 };
 
 using Constraint =
@@ -155,7 +262,7 @@ struct ForgetLabel {
   bool operator<(const ForgetLabel &rhs) const { return label < rhs.label; }
 };
 struct ForgetBase {
-  std::string base;
+  TypeVariable base;
   bool operator<(const ForgetBase &rhs) const { return base < rhs.base; }
 };
 struct RecallLabel {
@@ -163,7 +270,7 @@ struct RecallLabel {
   bool operator<(const RecallLabel &rhs) const { return label < rhs.label; }
 };
 struct RecallBase {
-  std::string base;
+  TypeVariable base;
   bool operator<(const RecallBase &rhs) const { return base < rhs.base; }
 };
 using EdgeLabel =

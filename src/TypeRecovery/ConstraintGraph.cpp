@@ -31,11 +31,11 @@ std::string toString(const EdgeLabel &label) {
   } else if (std::holds_alternative<ForgetLabel>(label)) {
     return "forget " + toString(std::get<ForgetLabel>(label).label);
   } else if (std::holds_alternative<ForgetBase>(label)) {
-    return "forget " + std::get<ForgetBase>(label).base;
+    return "forget " + toString(std::get<ForgetBase>(label).base);
   } else if (std::holds_alternative<RecallLabel>(label)) {
     return "recall " + toString(std::get<RecallLabel>(label).label);
   } else if (std::holds_alternative<RecallBase>(label)) {
-    return "recall " + std::get<RecallBase>(label).base;
+    return "recall " + toString(std::get<RecallBase>(label).base);
   }
   assert(false && "Unknown FieldLabel!");
 }
@@ -152,28 +152,30 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
   }
   layerSplit();
   printGraph("trans_layerSplit.dot");
-  Start = &getOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#Start"}});
-  End = &getOrInsertNode(NodeKey{DerivedTypeVariable{.name = "#End"}});
+  Start = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#Start")});
+  End = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#End")});
 
   // Link nodes to "#Start"
   for (auto N : StartNodes) {
     // is an interesting var or is a primitive type
-    if ((InterestingVars.count(N->key.Base.name) != 0) ||
-        N->key.Base.name.at(0) == '#') {
+    if ((N->key.Base.isDtv() &&
+         InterestingVars.count(N->key.Base.getBaseName()) != 0) ||
+        N->key.Base.isPrimitive()) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from #Start to " << N->key.str() << "\n");
-      addEdge(*Start, *N, RecallBase{N->key.Base.name});
+      addEdge(*Start, *N, RecallBase{N->key.Base.toBase()});
     }
   }
 
   // Link nodes to "#End"
   for (auto N : EndNodes) {
     // is an interesting var or is a primitive type
-    if ((InterestingVars.count(N->key.Base.name) != 0) ||
-        N->key.Base.name.at(0) == '#') {
+    if ((N->key.Base.isDtv() &&
+         InterestingVars.count(N->key.Base.getBaseName()) != 0) ||
+        N->key.Base.isPrimitive()) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from " << N->key.str() << " to #End\n");
-      addEdge(*N, *End, ForgetBase{N->key.Base.name});
+      addEdge(*N, *End, ForgetBase{N->key.Base.toBase()});
     }
   }
 
@@ -374,8 +376,8 @@ ConstraintGraph::fromConstraints(std::string FuncName,
 
 /// Interface for initial constraint insertion
 /// Also build the initial graph (Algorithm D.1 Transducer)
-void ConstraintGraph::addConstraint(const DerivedTypeVariable &sub,
-                                    const DerivedTypeVariable &sup) {
+void ConstraintGraph::addConstraint(const TypeVariable &sub,
+                                    const TypeVariable &sup) {
   // 1. add two node and 1-labeled edge
   auto &NodeL = getOrInsertNode(sub);
   auto &NodeR = getOrInsertNode(sup);
@@ -400,12 +402,12 @@ void ConstraintGraph::addConstraint(const DerivedTypeVariable &sub,
 }
 
 std::optional<std::pair<FieldLabel, NodeKey>> NodeKey::forgetOnce() const {
-  if (Base.Labels.empty()) {
+  if (!Base.hasLabel()) {
     return std::nullopt;
   }
   NodeKey NewKey(*this);
-  FieldLabel Label = NewKey.Base.Labels.back();
-  NewKey.Base.Labels.pop_back();
+  FieldLabel Label = NewKey.Base.getLabels().back();
+  NewKey.Base.getLabels().pop_back();
   NewKey.SuffixVariance = combine(this->SuffixVariance, getVariance(Label));
   return std::make_pair(Label, NewKey);
 }
@@ -527,8 +529,9 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
            "Star with mixed recall and forget!");
 
     // Create recursive constraints.
-    auto NewInner = rexp::create(RecallBase{tempName}) & Inner &
-                    rexp::create(ForgetBase{tempName});
+    auto NewInner =
+        rexp::create(RecallBase{TypeVariable::CreateDtv(tempName)}) & Inner &
+        rexp::create(ForgetBase{TypeVariable::CreateDtv(tempName)});
     auto Seq = expToConstraintsSequenceRecursive(NewInner);
     ConstraintsSequence.insert(ConstraintsSequence.end(), Seq.begin(),
                                Seq.end());
@@ -537,8 +540,8 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
     // Later in normalizePath, we will detect ForgetBase/RecallBase in the
     // middle.
     std::vector<EdgeLabel> V2;
-    V2.push_back(ForgetBase{tempName});
-    V2.push_back(RecallBase{tempName});
+    V2.push_back(ForgetBase{TypeVariable::CreateDtv(tempName)});
+    V2.push_back(RecallBase{TypeVariable::CreateDtv(tempName)});
     Result.push_back(V2);
   } else if (std::holds_alternative<rexp::Node>(*E)) {
     std::vector<EdgeLabel> Vec;
@@ -595,20 +598,24 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
       if (Ind == 0) {
         // OK
       } else {
-        assert(Ret.back().sub.name.empty());
-        assert(Ret.back().sub.Labels.empty());
-        assert(Ret.back().sup.name.empty());
-        assert(Ret.back().sup.Labels.empty());
+        assert(Ret.back().sub.getBaseName().empty());
+        assert(!Ret.back().sub.hasLabel());
+        assert(Ret.back().sup.getBaseName().empty());
+        assert(!Ret.back().sup.hasLabel());
       }
-      Ret.back().sub.name = Name;
+      Ret.back().sub = Name;
     } else if (std::holds_alternative<ForgetBase>(EL)) {
       auto &Name = std::get<ForgetBase>(EL).base;
-      Ret.back().sup.name = Name;
+      if (Ret.back().sup.hasLabel()) {
+        Ret.back().sup.setName(Name.getBaseName());
+      } else {
+        Ret.back().sup = Name;
+      }
       if (Ind == ELs.size() - 1) {
         // OK
       } else {
         // Must be a temp name.
-        assert(Name.rfind(tempNamePrefix, 0) == 0);
+        assert(Name.getBaseName().rfind(tempNamePrefix, 0) == 0);
         // Reset the state.
         isForget = false;
         Ret.emplace_back();
@@ -617,10 +624,10 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
       if (isForget) {
         assert(false && "normalize_path: Path has Recall after Forget!");
       }
-      Ret.back().sub.Labels.push_back(std::get<RecallLabel>(EL).label);
+      Ret.back().sub.getLabels().push_back(std::get<RecallLabel>(EL).label);
     } else if (std::holds_alternative<ForgetLabel>(EL)) {
       isForget = true;
-      Ret.back().sup.Labels.push_back(std::get<ForgetLabel>(EL).label);
+      Ret.back().sup.getLabels().push_back(std::get<ForgetLabel>(EL).label);
     } else {
       assert(false && "normalize_path: Base label type in the middle!");
     }
