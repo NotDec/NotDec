@@ -93,9 +93,15 @@ std::string toStringImpl(const SubConstraint &c) {
          toString(c.result) + ")";
 }
 
+std::string toStringImpl(const CmpConstraint &c) {
+  return "Cmp(" + toString(c.left) + " == " + toString(c.right) + ")";
+}
+
 std::string toString(const Constraint &c) {
   if (std::holds_alternative<SubTypeConstraint>(c)) {
     return toStringImpl(std::get<SubTypeConstraint>(c));
+  } else if (std::holds_alternative<CmpConstraint>(c)) {
+    return toStringImpl(std::get<CmpConstraint>(c));
   } else if (std::holds_alternative<AddConstraint>(c)) {
     return toStringImpl(std::get<AddConstraint>(c));
   } else if (std::holds_alternative<SubConstraint>(c)) {

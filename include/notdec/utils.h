@@ -41,6 +41,26 @@ void inline assert_size_t(llvm::Value *val, llvm::Module &M) {
 
 void printModule(llvm::Module &M, const char *path);
 
+/// An ilist node that can access its parent list and has eraseFromParent impl.
+///
+/// Requires \c NodeTy to have \a getParent() to find the parent node, and the
+/// \c ParentTy to have \a getSublistAccess() to get a reference to the list.
+template <typename NodeTy, typename ParentTy, class... Options>
+class node_with_erase
+    : public llvm::ilist_node_with_parent<NodeTy, ParentTy, Options...> {
+protected:
+  ParentTy *Parent = nullptr;
+
+public:
+  inline ParentTy *getParent() { return Parent; }
+  typename llvm::iplist<NodeTy>::iterator eraseFromParent() {
+    auto &List = getParent()->*(ParentTy::getSublistAccess((NodeTy *)nullptr));
+    return List.erase(this->getIterator());
+  }
+
+  node_with_erase(ParentTy &P) : Parent(&P) {}
+};
+
 } // namespace notdec
 
 #endif

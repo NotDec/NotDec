@@ -50,7 +50,7 @@ struct ArrayOffset {
 /// This class represents one possible access, in the form of `offset + bx + cy
 /// + ...` where `bx + cy + ...` are the ArrayAccesses.
 struct OffsetRange {
-  uint64_t offset = 0;
+  int64_t offset = 0;
   std::vector<ArrayOffset> access;
 
   bool isZero() const { return offset == 0 && access.size() == 0; }

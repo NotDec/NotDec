@@ -1,6 +1,8 @@
 #ifndef _NOTDEC_RETYPD_UNIFY_H_
 #define _NOTDEC_RETYPD_UNIFY_H_
 
+#include "TypeRecovery/Schema.h"
+#include "utils.h"
 #include <cassert>
 #include <cstdint>
 #include <list>
@@ -128,23 +130,73 @@ struct SSGLink
   }
 };
 
+struct AddNodeCons {
+  SSGNode *Left;
+  SSGNode *Right;
+  SSGNode *Result;
+};
+struct SubNodeCons {
+  SSGNode *Left;
+  SSGNode *Right;
+  SSGNode *Result;
+};
+struct CmpNodeCons {
+  SSGNode *Left;
+  SSGNode *Right;
+};
+using NodeCons = std::variant<AddNodeCons, SubNodeCons, CmpNodeCons>;
+
+struct ConstraintNode : node_with_erase<ConstraintNode, StorageShapeGraph> {
+  ConstraintNode(StorageShapeGraph &SSG) : node_with_erase(SSG) {}
+  NodeCons C;
+};
+
+struct SignednessNode : node_with_erase<SignednessNode, StorageShapeGraph> {
+  SignednessNode(StorageShapeGraph &SSG) : node_with_erase(SSG) {}
+  SSGNode *Node;
+  bool IsSigned;
+  const char *Reason;
+};
+
 struct StorageShapeGraph {
   std::string FuncName;
+  // list for SSGNode
   using NodesType = llvm::ilist<SSGNode>;
   NodesType Nodes;
   static NodesType StorageShapeGraph::*getSublistAccess(SSGNode *) {
     return &StorageShapeGraph::Nodes;
   }
+  // list for SSGLink
   using LinksType = llvm::ilist<SSGLink>;
   LinksType Links;
   std::map<llvm::Value *, std::shared_ptr<SSGLink>> Val2Node;
   static LinksType StorageShapeGraph::*getSublistAccess(SSGLink *) {
     return &StorageShapeGraph::Links;
   }
+  // list for ConstraintNode
+  using ConstraintsType = llvm::ilist<ConstraintNode>;
+  ConstraintsType Constraints;
+  static ConstraintsType StorageShapeGraph::*
+  getSublistAccess(ConstraintNode *) {
+    return &StorageShapeGraph::Constraints;
+  }
+  // list for SignednessNode
+  using SignednessType = llvm::ilist<SignednessNode>;
+  SignednessType Signedness;
+  static SignednessType StorageShapeGraph::*getSublistAccess(SignednessNode *) {
+    return &StorageShapeGraph::Signedness;
+  }
 
   SSGNode *createUnknown() {
     SSGNode *N = new SSGNode(*this);
     N->Ty = Unknown();
+    Nodes.push_back(N);
+    return N;
+  }
+
+  SSGNode *createPrimitive(std::string Name) {
+    SSGNode *N = new SSGNode(*this);
+    N->Ty = Primitive{.name = Name};
     Nodes.push_back(N);
     return N;
   }

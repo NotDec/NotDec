@@ -154,6 +154,10 @@ struct TypeVariable {
     return TypeVariable{DerivedTypeVariable{name}};
   }
 
+  static TypeVariable CreateIntConstant(OffsetRange val, uint32_t instanceId) {
+    return TypeVariable{IntConstantVar{.Val = val, .InstanceId = instanceId}};
+  }
+
   void setName(std::string Name) {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
       dtv->Name = Name;
@@ -246,13 +250,14 @@ struct SubConstraint {
   TypeVariable right;
   TypeVariable result;
 };
+struct CmpConstraint {
+  TypeVariable left;
+  TypeVariable right;
+};
 
-using Constraint =
-    std::variant<SubTypeConstraint, AddConstraint, SubConstraint>;
+using Constraint = std::variant<SubTypeConstraint, AddConstraint, SubConstraint,
+                                CmpConstraint>;
 std::string toString(const Constraint &c);
-inline bool isSubtypeConstraint(Constraint c) {
-  return std::holds_alternative<SubTypeConstraint>(c);
-}
 
 struct One {
   bool operator<(const One &rhs) const { return false; }

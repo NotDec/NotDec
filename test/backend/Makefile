@@ -4,3 +4,6 @@
 
 %.wat: %.wasm
 	wasm2wat -f --enable-all ./$< > ./$@
+
+%.ll: %.c
+	clang -c -emit-llvm -S ./$< -o ./$@

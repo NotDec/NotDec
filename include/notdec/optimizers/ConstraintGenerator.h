@@ -26,9 +26,12 @@ namespace notdec {
 using namespace llvm;
 using retypd::TypeVariable;
 
-struct RetypdGenerator;
-struct Retypd : PassInfoMixin<Retypd> {
-  std::map<Function *, RetypdGenerator> func_ctxs;
+bool hasUser(const Value *Val, const User *User);
+bool isFinal(const std::string &Name);
+
+struct ConstraintsGenerator;
+struct TypeRecovery : PassInfoMixin<TypeRecovery> {
+  std::map<Function *, ConstraintsGenerator> func_ctxs;
   llvm::Value *StackPointer;
   std::string data_layout;
   unsigned pointer_size = 0;
@@ -50,6 +53,10 @@ inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
                                           const TypeVariable &sup) {
   return retypd::SubTypeConstraint{sub, sup};
 }
+
+// When solving inter-procedurally, link CallArg (caller) with Argument*
+// (callee) link CallRet (caller) with ReturnValue (callee) Separate
+// representation because you need to handle instance id anyway.
 
 struct ReturnValue {
   llvm::Function *Func;
@@ -86,7 +93,7 @@ struct CallRet {
 /// Differentiate pointer-sized int constant. It can be pointer or int under
 /// different context.
 struct IntConstant {
-  llvm::Constant *Val;
+  llvm::ConstantInt *Val;
   llvm::User *User;
   bool operator<(const IntConstant &rhs) const {
     return std::tie(Val, User) < std::tie(rhs.Val, User);
@@ -98,26 +105,55 @@ struct IntConstant {
 using ValMapKey =
     std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
 
-struct RetypdGenerator {
-  Retypd &Ctx;
+struct ConstraintsGenerator {
+  TypeRecovery &Ctx;
   std::map<ValMapKey, retypd::CGNode *> Val2Node;
   retypd::ConstraintGraph CG;
   retypd::StorageShapeGraph &SSG;
 
   void run(Function &F);
-  RetypdGenerator(Retypd &Ctx) : Ctx(Ctx), SSG(CG.SSG) {}
+  ConstraintsGenerator(TypeRecovery &Ctx) : Ctx(Ctx), SSG(CG.SSG) {}
 
 protected:
   std::map<std::string, uint32_t> callInstanceId;
+  std::vector<IntConstant> intConstantIds;
 
 public:
   static const char *Stack;
   static const char *Memory;
 
-  CGNode &setTypeVar(ValMapKey val, const TypeVariable &dtv) {
-    auto ref = Val2Node.emplace(val, &CG.getOrInsertNode(dtv));
-    assert(ref.second && "setTypeVar: Value already exists");
+  CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User) {
+    // Differentiate int32/int64 by User.
+    if (auto V = std::get_if<llvm::Value *>(&Val)) {
+      if (auto CI = dyn_cast<ConstantInt>(*V)) {
+        if (CI->getBitWidth() == 32 || CI->getBitWidth() == 64) {
+          assert(User != nullptr &&
+                 "RetypdGenerator::getTypeVar: User is Null!");
+          assert(hasUser(*V, User) &&
+                 "convertTypeVarVal: constant not used by user");
+          Val = IntConstant{.Val = cast<ConstantInt>(*V), .User = User};
+        }
+      }
+    }
+    auto ref = Val2Node.emplace(Val, &CG.getOrInsertNode(dtv));
+    if (!ref.second) {
+      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                   << "setTypeVar: Value already mapped to "
+                   << toString(ref.first->second->key.Base)
+                   << ", but now set to" << toString(dtv) << "\n";
+      std::abort();
+    }
     return *ref.first->second;
+  }
+  CGNode &newVarSubtype(llvm::Value *Val, const TypeVariable &dtv,
+                        const char *prefix = "v_") {
+    if (dtv.isPrimitive() && isFinal(dtv.getBaseName())) {
+      return setTypeVar(Val, dtv, nullptr);
+    }
+    auto &Node = setTypeVar(
+        Val, TypeVariable::CreateDtv(Ctx.getName(*Val, prefix)), nullptr);
+    addSubtype(Node.key.Base, dtv);
+    return Node;
   }
   void addSubtype(const TypeVariable &sub, const TypeVariable &sup) {
     if (sub.isPrimitive() && sup.isPrimitive()) {
@@ -128,12 +164,17 @@ public:
     CG.addConstraint(sub, sup);
     CG.getOrInsertNode(sub).Link.unify(CG.getOrInsertNode(sup).Link);
   }
-  const TypeVariable &getTypeVar(ValMapKey val);
-  TypeVariable convertTypeVar(ValMapKey Val);
-  TypeVariable convertTypeVarVal(Value *Val);
+
+  void setPointer(CGNode &Node) {
+    Node.Link.lookupNode()->setStorageShape(retypd::Pointer{});
+  }
+
+  const TypeVariable &getTypeVar(ValMapKey val, User *User);
+  TypeVariable convertTypeVar(ValMapKey Val, User *User = nullptr);
+  TypeVariable convertTypeVarVal(Value *Val, User *User = nullptr);
 
   void setOffset(TypeVariable &dtv, OffsetRange Offset);
-  TypeVariable deref(Value *Val, long BitSize, bool isLoad);
+  TypeVariable deref(Value *Val, User *User, long BitSize, bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {
     return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,
@@ -143,30 +184,37 @@ public:
 
 protected:
   struct PcodeOpType {
+    // We only care about number or non-number, and signedness.
+    // Size is not included.
+    // so nullptr / int / sint / uint
     const char *output;
     // allow for uniform initializations
-    const char **inputs;
     int size;
+    const char **inputs;
 
   public:
-    PcodeOpType(const char *output, const char *inputs[], int size)
-        : output(output), inputs(inputs), size(size) {}
-    void addConstrains(Instruction *I, RetypdGenerator &cg) const;
+    PcodeOpType(const char *output, int size, const char *inputs[])
+        : output(output), size(size), inputs(inputs) {}
+    bool addRetConstraint(Instruction *I, ConstraintsGenerator &cg) const;
+    bool addOpConstraint(unsigned Index, Instruction *I,
+                         ConstraintsGenerator &cg) const;
   };
 
-  static const std::map<std::string_view, std::map<int, std::string_view>>
-      typeSize;
   static const std::map<unsigned, PcodeOpType> opTypes;
 
   // visitor class
+  // Visit each basic block in topo order. Then handle dataflow of Phi nodes.
+  // After visiting each instruction, it must be assigned a type variable.
+  // Often visitor will immediately add a subtype constraint. If the primitive
+  // type is final, then it will directly map as the known type.
   class RetypdGeneratorVisitor
       : public llvm::InstVisitor<RetypdGeneratorVisitor> {
-    RetypdGenerator &cg;
+    ConstraintsGenerator &cg;
     // defer phi node constraints
     std::vector<llvm::PHINode *> phiNodes;
 
   public:
-    RetypdGeneratorVisitor(RetypdGenerator &cg) : cg(cg) {}
+    RetypdGeneratorVisitor(ConstraintsGenerator &cg) : cg(cg) {}
     // overloaded visit functions
     void visitCastInst(CastInst &I);
     void visitCallBase(CallBase &I);
@@ -177,18 +225,13 @@ protected:
     void visitAllocaInst(AllocaInst &I);
     void visitGetElementPtrInst(GetElementPtrInst &I);
     void visitICmpInst(ICmpInst &I);
-    void visitFCmpInst(FCmpInst &I);
     void visitSelectInst(SelectInst &I);
 
     void visitAdd(BinaryOperator &I);
     void visitSub(BinaryOperator &I);
-    void visitMul(BinaryOperator &I);
 
-    void visitShl(BinaryOperator &I);
-    void visitLShr(BinaryOperator &I);
-    void visitAShr(BinaryOperator &I);
     // handle sth like
-    // 1. Alignment/ Use lowest bits in pointer: And %x, 0xffffff00.
+    // 1. Alignment/ Use lowest bits in pointer: And %x, 0xfffffff0.
     // 2. set lowest bits in the pointer: Or %x, 0x7
     void visitAnd(BinaryOperator &I);
     void visitOr(BinaryOperator &I);
@@ -201,6 +244,18 @@ protected:
     void visitInstruction(Instruction &I);
   };
 };
+
+void inline ensureSequence(Value *&Src1, Value *&Src2) {
+  if (isa<ConstantInt>(Src1) && isa<ConstantInt>(Src2)) {
+    assert(false && "Constant at both sides. Run Optimization first!");
+  }
+  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2)) {
+    // because of InstCombine canonical form, this should not happen?
+    assert(false &&
+           "Constant cannot be at the left side. Run InstCombine first.");
+    std::swap(Src1, Src2);
+  }
+}
 
 } // namespace notdec
 

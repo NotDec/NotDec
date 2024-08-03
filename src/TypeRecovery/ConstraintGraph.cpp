@@ -615,6 +615,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
         // OK
       } else {
         // Must be a temp name.
+        // https://stackoverflow.com/a/40441240/13798540
         assert(Name.getBaseName().rfind(tempNamePrefix, 0) == 0);
         // Reset the state.
         isForget = false;
@@ -651,7 +652,11 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
 
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key)
     : Parent(Parent), key(key), Link(Parent.SSG) {
-  Link.setNode(Link.Parent->createUnknown());
+  if (key.Base.isPrimitive()) {
+    Link.setNode(Link.Parent->createPrimitive(key.Base.getBaseName()));
+  } else {
+    Link.setNode(Link.Parent->createUnknown());
+  }
 }
 
 } // namespace notdec::retypd

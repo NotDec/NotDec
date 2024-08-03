@@ -239,7 +239,7 @@ void DecompileConfig::run_passes() {
                          "linear-allocation-recovery");
   PIC.addClassToPassName("notdec::PointerTypeRecovery",
                          "pointer-type-recovery");
-  PIC.addClassToPassName("notdec::RetypdRunner", "retypd");
+  PIC.addClassToPassName("notdec::TypeRecovery", "type-recovery");
 
   // Create the new pass manager builder.
   // Take a look at the PassBuilder constructor parameters for more
@@ -293,7 +293,7 @@ void DecompileConfig::run_passes() {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      MPM.addPass(Retypd());
+      MPM.addPass(TypeRecovery());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec
