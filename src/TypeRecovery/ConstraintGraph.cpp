@@ -25,6 +25,8 @@
 
 namespace notdec::retypd {
 
+void ConstraintGraph::solve() { SSG.solve(); }
+
 std::string toString(const EdgeLabel &label) {
   if (std::holds_alternative<One>(label)) {
     return "_1_";

@@ -2,6 +2,8 @@
 
 namespace notdec::retypd {
 
+void StorageShapeGraph::solve() {}
+
 llvm::iplist<SSGNode>::iterator SSGNode::eraseFromParent() {
   auto &List =
       getParent()->*(StorageShapeGraph::getSublistAccess((SSGNode *)nullptr));

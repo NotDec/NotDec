@@ -44,7 +44,6 @@ struct StorageShapeGraph;
 struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
   StorageShapeGraph *Parent = nullptr;
-  // void setParent(StorageShapeGraph *P) { Parent = P; }
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGNode>::iterator eraseFromParent();
 
@@ -147,7 +146,8 @@ struct CmpNodeCons {
 using NodeCons = std::variant<AddNodeCons, SubNodeCons, CmpNodeCons>;
 
 struct ConstraintNode : node_with_erase<ConstraintNode, StorageShapeGraph> {
-  ConstraintNode(StorageShapeGraph &SSG) : node_with_erase(SSG) {}
+  ConstraintNode(StorageShapeGraph &SSG, NodeCons C)
+      : node_with_erase(SSG), C(C) {}
   NodeCons C;
 };
 
@@ -193,9 +193,26 @@ struct StorageShapeGraph {
 
   StorageShapeGraph(std::string FuncName) : FuncName(FuncName) { initMemory(); }
 
+  void solve();
+
   SSGNode *initMemory() {
     Memory = createUnknown();
     return Memory;
+  }
+
+  void addAddCons(SSGNode *Left, SSGNode *Right, SSGNode *Result) {
+    AddNodeCons C = {.Left = Left, .Right = Right, .Result = Result};
+    Constraints.push_back(new ConstraintNode(*this, C));
+  }
+
+  void addSubCons(SSGNode *Left, SSGNode *Right, SSGNode *Result) {
+    SubNodeCons C = {.Left = Left, .Right = Right, .Result = Result};
+    Constraints.push_back(new ConstraintNode(*this, C));
+  }
+
+  void addCmpCons(SSGNode *Left, SSGNode *Right) {
+    CmpNodeCons C = {.Left = Left, .Right = Right};
+    Constraints.push_back(new ConstraintNode(*this, C));
   }
 
   SSGNode *createUnknown() {

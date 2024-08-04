@@ -53,6 +53,8 @@ public:
   static const char *PhiPrefix;
   static const char *SelectPrefix;
   static const char *NewPrefix;
+  static const char *AddPrefix;
+  static const char *SubPrefix;
 };
 
 inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
@@ -111,6 +113,9 @@ struct IntConstant {
 using ValMapKey =
     std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
 
+/// The ConstraintsGenerator class is responsible for generating constraints.
+/// The ConstraintGraph/StorageShapeGraph is expected to be able to print to a
+/// readable format. (TODO)
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
   Function &Func;
@@ -118,7 +123,8 @@ struct ConstraintsGenerator {
   retypd::ConstraintGraph CG;
   retypd::StorageShapeGraph &SSG;
 
-  void run();
+  void solve();
+  void generate();
   ConstraintsGenerator(TypeRecovery &Ctx, Function &F)
       : Ctx(Ctx), Func(F), CG(Ctx.getName(F, TypeRecovery::FuncPrefix)),
         SSG(CG.SSG) {}
@@ -175,9 +181,17 @@ public:
     Node.Link.lookupNode()->setStorageShape(retypd::Pointer{});
   }
 
+  retypd::CGNode &getNode(ValMapKey Val, User *User);
+  retypd::SSGNode *getSSGNode(ValMapKey Val, User *User);
+
   const TypeVariable &getTypeVar(ValMapKey val, User *User);
   TypeVariable convertTypeVar(ValMapKey Val, User *User = nullptr);
   TypeVariable convertTypeVarVal(Value *Val, User *User = nullptr);
+  void addAddConstraint(const ValMapKey LHS, const ValMapKey RHS,
+                        BinaryOperator *Result);
+  void addSubConstraint(const ValMapKey LHS, const ValMapKey RHS,
+                        BinaryOperator *Result);
+  void addCmpConstraint(const ValMapKey LHS, const ValMapKey RHS, ICmpInst *I);
 
   void setOffset(TypeVariable &dtv, OffsetRange Offset);
   TypeVariable deref(Value *Val, User *User, long BitSize, bool isLoad);

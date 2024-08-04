@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
+#include <llvm/IR/InstrTypes.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -22,6 +23,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <variant>
 
+#include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/StorageShapeGraph.h"
 #include "Utils/Range.h"
@@ -33,6 +35,7 @@
 
 namespace notdec {
 
+using retypd::CGNode;
 using retypd::OffsetLabel;
 
 const char *ConstraintGraph::Memory = "MEMORY";
@@ -41,6 +44,32 @@ const char *TypeRecovery::FuncPrefix = "func_";
 const char *TypeRecovery::PhiPrefix = "phi_";
 const char *TypeRecovery::SelectPrefix = "select_";
 const char *TypeRecovery::NewPrefix = "new_";
+const char *TypeRecovery::AddPrefix = "add_";
+const char *TypeRecovery::SubPrefix = "sub_";
+
+/// Visit Add/Mul chain, add the results to OffsetRange.
+OffsetRange matchOffsetRange(llvm::Value *I) {
+  assert(I->getType()->isIntegerTy());
+  if (auto *CI = dyn_cast<llvm::ConstantInt>(I)) {
+    return OffsetRange{.offset = CI->getSExtValue()};
+  }
+  // unknown value = 1*x
+  if (!isa<llvm::BinaryOperator>(I)) {
+    return OffsetRange{.offset = 0, .access = {{1, 0}}};
+  }
+  auto *BinOp = cast<llvm::BinaryOperator>(I);
+  auto *Src1 = BinOp->getOperand(0);
+  auto *Src2 = BinOp->getOperand(1);
+  ensureSequence(Src1, Src2);
+  // check if add or mul
+  if (BinOp->getOpcode() == llvm::Instruction::Add) {
+    return matchOffsetRange(Src1) + matchOffsetRange(Src2);
+  } else if (BinOp->getOpcode() == llvm::Instruction::Mul) {
+    return matchOffsetRange(Src1) * matchOffsetRange(Src2);
+  } else {
+    return OffsetRange{.offset = 0, .access = {{1, 0}}};
+  }
+}
 
 PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
@@ -53,12 +82,12 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   data_layout = std::move(M.getDataLayoutStr());
   pointer_size = M.getDataLayout().getPointerSizeInBits();
 
-  // TODO!! reverse post order
+  // TODO!! reverse post order of functions?
   for (auto &F : M) {
     auto it = func_ctxs.try_emplace(&F, *this, F);
     assert(it.second && "TypeRecovery::run: duplicate function?");
     auto &Generator = it.first->second;
-    Generator.run();
+    Generator.generate();
   }
 
   // create a temporary directory
@@ -86,12 +115,14 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   return PreservedAnalyses::none();
 }
 
-void ConstraintsGenerator::run() {
+void ConstraintsGenerator::generate() {
   RetypdGeneratorVisitor Visitor(*this);
   Visitor.visit(Func);
   Visitor.handlePHINodes();
   callInstanceId.clear();
 }
+
+void ConstraintsGenerator::solve() { CG.solve(); }
 
 static bool mustBePrimitive(const llvm::Type *Ty) {
   if (Ty->isFloatTy() || Ty->isDoubleTy()) {
@@ -164,8 +195,7 @@ bool hasUser(const Value *Val, const User *User) {
   return false;
 }
 
-const TypeVariable &ConstraintsGenerator::getTypeVar(ValMapKey Val,
-                                                     User *User) {
+retypd::CGNode &ConstraintsGenerator::getNode(ValMapKey Val, User *User) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     if (auto CI = dyn_cast<ConstantInt>(*V)) {
@@ -178,10 +208,19 @@ const TypeVariable &ConstraintsGenerator::getTypeVar(ValMapKey Val,
     }
   }
   if (Val2Node.count(Val)) {
-    return Val2Node.at(Val)->key.Base;
+    return *Val2Node.at(Val);
   }
   auto ret = convertTypeVar(Val);
-  return setTypeVar(Val, ret, User).key.Base;
+  return setTypeVar(Val, ret, User);
+}
+
+retypd::SSGNode *ConstraintsGenerator::getSSGNode(ValMapKey Val, User *User) {
+  return getNode(Val, User).getLink().lookupNode();
+}
+
+const TypeVariable &ConstraintsGenerator::getTypeVar(ValMapKey Val,
+                                                     User *User) {
+  return getNode(Val, User).key.Base;
 }
 
 TypeVariable ConstraintsGenerator::convertTypeVar(ValMapKey Val, User *User) {
@@ -406,6 +445,13 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
     GetElementPtrInst &Gep) {
   assert(false && "Gep should not exist before this pass");
   // But if we really want to support this, handle it the same way as AddInst.
+  // A shortcut to create a offseted pointer. the operate type must be i8*. Just
+  // like ptradd.
+}
+
+void ConstraintsGenerator::addCmpConstraint(const ValMapKey LHS,
+                                            const ValMapKey RHS, ICmpInst *I) {
+  SSG.addCmpCons(getSSGNode(LHS, I), getSSGNode(RHS, I));
 }
 
 // for pointer sized int, probably is pointer comparision. So we cannot make a
@@ -413,12 +459,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitICmpInst(ICmpInst &I) {
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
-  ensureSequence(Src1, Src2);
 
-  auto &Node1 = cg.getTypeVar(Src1, &I);
-  auto &Node2 = cg.getTypeVar(Src2, &I);
-  // TODO Add CmpConstraint
-  assert(false && "TODO rewrite.");
+  cg.addCmpConstraint(Src1, Src2, &I);
 
   // type the inst as bool
   assert(I.getType()->isIntegerTy(1));
@@ -567,11 +609,38 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
   }
 }
 
-void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
-  llvm::errs() << "Visiting " << __FUNCTION__ << " \n";
+void ConstraintsGenerator::addAddConstraint(const ValMapKey LHS,
+                                            const ValMapKey RHS,
+                                            BinaryOperator *I) {
+  SSG.addAddCons(getSSGNode(LHS, I), getSSGNode(RHS, I),
+                 getSSGNode(I, nullptr));
 }
+
+void ConstraintsGenerator::addSubConstraint(const ValMapKey LHS,
+                                            const ValMapKey RHS,
+                                            BinaryOperator *Result) {
+  SSG.addSubCons(getSSGNode(LHS, Result), getSSGNode(RHS, Result),
+                 getSSGNode(Result, nullptr));
+}
+
+void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
+  auto *Src1 = I.getOperand(0);
+  auto *Src2 = I.getOperand(1);
+
+  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::AddPrefix));
+  cg.setTypeVar(&I, DstVar, nullptr);
+
+  cg.addAddConstraint(Src1, Src2, &I);
+}
+
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSub(BinaryOperator &I) {
-  llvm::errs() << "Visiting " << __FUNCTION__ << " \n";
+  auto *Src1 = I.getOperand(0);
+  auto *Src2 = I.getOperand(1);
+
+  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::SubPrefix));
+  cg.setTypeVar(&I, DstVar, nullptr);
+
+  cg.addSubConstraint(Src1, Src2, &I);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {

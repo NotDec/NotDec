@@ -104,6 +104,8 @@ struct ConstraintGraph : CGBase {
   std::vector<SubTypeConstraint>
   simplify(std::set<std::string> &InterestingVars);
 
+  void solve();
+
   // internal steps
   void saturate();
   void layerSplit();
