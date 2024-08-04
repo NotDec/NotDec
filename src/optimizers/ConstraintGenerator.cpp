@@ -35,8 +35,12 @@ namespace notdec {
 
 using retypd::OffsetLabel;
 
-const char *ConstraintsGenerator::Stack = "STACK";
-const char *ConstraintsGenerator::Memory = "MEMORY";
+const char *ConstraintGraph::Memory = "MEMORY";
+const char *TypeRecovery::DefaultPrefix = "v_";
+const char *TypeRecovery::FuncPrefix = "func_";
+const char *TypeRecovery::PhiPrefix = "phi_";
+const char *TypeRecovery::SelectPrefix = "select_";
+const char *TypeRecovery::NewPrefix = "new_";
 
 PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
@@ -51,9 +55,10 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // TODO!! reverse post order
   for (auto &F : M) {
-    auto it = func_ctxs.emplace(&F, *this);
+    auto it = func_ctxs.try_emplace(&F, *this, F);
+    assert(it.second && "TypeRecovery::run: duplicate function?");
     auto &Generator = it.first->second;
-    Generator.run(F);
+    Generator.run();
   }
 
   // create a temporary directory
@@ -81,9 +86,9 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   return PreservedAnalyses::none();
 }
 
-void ConstraintsGenerator::run(Function &F) {
+void ConstraintsGenerator::run() {
   RetypdGeneratorVisitor Visitor(*this);
-  Visitor.visit(F);
+  Visitor.visit(Func);
   Visitor.handlePHINodes();
   callInstanceId.clear();
 }
@@ -183,18 +188,20 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ValMapKey Val, User *User) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertTypeVarVal(*V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    auto tv = makeTv(Ctx.getName(*F->Func, "func_"));
+    auto tv = makeTv(Ctx.getName(*F->Func, TypeRecovery::FuncPrefix));
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
     // TODO what if function pointer?
-    auto tv = makeTv(Ctx.getName(*Arg->Call->getCalledFunction(), "func_"));
+    auto tv = makeTv(
+        Ctx.getName(*Arg->Call->getCalledFunction(), TypeRecovery::FuncPrefix));
     tv.getInstanceId() = Arg->InstanceId;
     tv.getLabels().push_back(retypd::InLabel{std::to_string(Arg->Index)});
     return tv;
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     // TODO what if function pointer?
-    auto tv = makeTv(Ctx.getName(*Ret->Call->getCalledFunction(), "func_"));
+    auto tv = makeTv(
+        Ctx.getName(*Ret->Call->getCalledFunction(), TypeRecovery::FuncPrefix));
     tv.getInstanceId() = Ret->InstanceId;
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
@@ -220,17 +227,17 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
       }
       if (CE->getOpcode() == Instruction::IntToPtr) {
         if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
-          auto tv = makeTv(Memory);
+          auto tv = makeTv(CG.Memory);
           setOffset(tv, OffsetRange{.offset = Addr->getSExtValue()});
           return tv;
         }
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
       if (gv == Ctx.StackPointer) {
-        assert(false && "convertTypeVarVal: direct use of stack pointer?");
-        return makeTv(Stack);
+        assert(false && "convertTypeVarVal: direct use of stack pointer?, run "
+                        "StackAllocationRecovery first");
       } else if (auto Func = dyn_cast<Function>(C)) {
-        return makeTv(Ctx.getName(*Func, "func_"));
+        return makeTv(Ctx.getName(*Func, TypeRecovery::FuncPrefix));
       }
       return makeTv(gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
@@ -254,7 +261,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val
                << "\n";
-  return makeTv(Ctx.getName(*Val, "new_"));
+  return makeTv(Ctx.getName(*Val, TypeRecovery::NewPrefix));
 }
 
 // TODO: accept any character in name by using single quotes like LLVM IR.
@@ -294,7 +301,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     return;
   }
   // differentiate different call instances in the same function
-  auto TargetName = cg.Ctx.getName(*Target, "func_");
+  auto TargetName = cg.Ctx.getName(*Target, TypeRecovery::FuncPrefix);
   // Starts from 1. So that it is different from the default 0.
   auto InstanceId = ++cg.callInstanceId[TargetName];
   for (int i = 0; i < I.arg_size(); i++) {
@@ -311,7 +318,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
     SelectInst &I) {
-  auto DstVar = makeTv(cg.Ctx.getName(I, "select_"));
+  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::SelectPrefix));
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
   auto Src1Var = cg.getTypeVar(Src1, &I);
@@ -342,7 +349,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
   // Only Phi can create inter-block dataflow besides direct reference (valid if
   // we follow a topological sort of basic blocks)
 
-  auto DstVar = makeTv(cg.Ctx.getName(I, "phi_"));
+  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::PhiPrefix));
   cg.setTypeVar(&I, DstVar, nullptr);
 }
 

@@ -46,7 +46,13 @@ protected:
 
 public:
   // get a new type_var name from type_val_id
-  std::string getName(Value &Val, const char *prefix = "v_");
+  std::string getName(Value &Val,
+                      const char *prefix = TypeRecovery::DefaultPrefix);
+  static const char *DefaultPrefix;
+  static const char *FuncPrefix;
+  static const char *PhiPrefix;
+  static const char *SelectPrefix;
+  static const char *NewPrefix;
 };
 
 inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
@@ -107,21 +113,21 @@ using ValMapKey =
 
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
+  Function &Func;
   std::map<ValMapKey, retypd::CGNode *> Val2Node;
   retypd::ConstraintGraph CG;
   retypd::StorageShapeGraph &SSG;
 
-  void run(Function &F);
-  ConstraintsGenerator(TypeRecovery &Ctx) : Ctx(Ctx), SSG(CG.SSG) {}
+  void run();
+  ConstraintsGenerator(TypeRecovery &Ctx, Function &F)
+      : Ctx(Ctx), Func(F), CG(Ctx.getName(F, TypeRecovery::FuncPrefix)),
+        SSG(CG.SSG) {}
 
 protected:
   std::map<std::string, uint32_t> callInstanceId;
   std::vector<IntConstant> intConstantIds;
 
 public:
-  static const char *Stack;
-  static const char *Memory;
-
   CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User) {
     // Differentiate int32/int64 by User.
     if (auto V = std::get_if<llvm::Value *>(&Val)) {
@@ -146,7 +152,7 @@ public:
     return *ref.first->second;
   }
   CGNode &newVarSubtype(llvm::Value *Val, const TypeVariable &dtv,
-                        const char *prefix = "v_") {
+                        const char *prefix = TypeRecovery::DefaultPrefix) {
     if (dtv.isPrimitive() && isFinal(dtv.getBaseName())) {
       return setTypeVar(Val, dtv, nullptr);
     }

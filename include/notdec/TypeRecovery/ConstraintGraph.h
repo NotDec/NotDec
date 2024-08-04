@@ -80,8 +80,8 @@ struct CGEdge : CGEdgeBase {
 };
 
 struct ConstraintGraph : CGBase {
-  StorageShapeGraph SSG;
   std::string FuncName;
+  StorageShapeGraph SSG;
   std::map<NodeKey, CGNode> Nodes;
   std::vector<Constraint> AddConstraints;
   std::set<CGNode *> StartNodes;
@@ -91,9 +91,10 @@ struct ConstraintGraph : CGBase {
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
   bool isLayerSplit = false;
+  // TODO prevent name collision
+  static const char *Memory;
 
-  ConstraintGraph() {}
-  ConstraintGraph(std::string FuncName) : FuncName(FuncName) {}
+  ConstraintGraph(std::string FuncName) : FuncName(FuncName), SSG(FuncName) {}
 
   CGNode &getOrInsertNode(const NodeKey &N);
   // Interface for initial constraint insertion

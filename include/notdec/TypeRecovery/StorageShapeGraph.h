@@ -160,6 +160,9 @@ struct SignednessNode : node_with_erase<SignednessNode, StorageShapeGraph> {
 
 struct StorageShapeGraph {
   std::string FuncName;
+  SSGNode *Memory = nullptr;
+
+  // region ilist definition
   // list for SSGNode
   using NodesType = llvm::ilist<SSGNode>;
   NodesType Nodes;
@@ -185,6 +188,14 @@ struct StorageShapeGraph {
   SignednessType Signedness;
   static SignednessType StorageShapeGraph::*getSublistAccess(SignednessNode *) {
     return &StorageShapeGraph::Signedness;
+  }
+  // endregion ilist definition
+
+  StorageShapeGraph(std::string FuncName) : FuncName(FuncName) { initMemory(); }
+
+  SSGNode *initMemory() {
+    Memory = createUnknown();
+    return Memory;
   }
 
   SSGNode *createUnknown() {
