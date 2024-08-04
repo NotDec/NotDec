@@ -72,11 +72,11 @@ struct SSGNode
 };
 
 struct SSGLink
-    : public llvm::ilist_node_with_parent<SSGLink, StorageShapeGraph> {
+/*: public llvm::ilist_node_with_parent<SSGLink, StorageShapeGraph>*/ {
   StorageShapeGraph *Parent = nullptr;
   void setParent(StorageShapeGraph *P) { Parent = P; }
   inline StorageShapeGraph *getParent() { return Parent; }
-  llvm::iplist<SSGLink>::iterator eraseFromParent();
+  // llvm::iplist<SSGLink>::iterator eraseFromParent();
 
   SSGLink(StorageShapeGraph &SSG) : Parent(&SSG) {}
 
@@ -170,12 +170,12 @@ struct StorageShapeGraph {
     return &StorageShapeGraph::Nodes;
   }
   // list for SSGLink
-  using LinksType = llvm::ilist<SSGLink>;
-  LinksType Links;
-  std::map<llvm::Value *, std::shared_ptr<SSGLink>> Val2Node;
-  static LinksType StorageShapeGraph::*getSublistAccess(SSGLink *) {
-    return &StorageShapeGraph::Links;
-  }
+  // using LinksType = llvm::ilist<SSGLink>;
+  // LinksType Links;
+  // std::map<llvm::Value *, std::shared_ptr<SSGLink>> Val2Node;
+  // static LinksType StorageShapeGraph::*getSublistAccess(SSGLink *) {
+  //   return &StorageShapeGraph::Links;
+  // }
   // list for ConstraintNode
   using ConstraintsType = llvm::ilist<ConstraintNode>;
   ConstraintsType Constraints;

@@ -654,6 +654,7 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
 
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key)
     : Parent(Parent), key(key), Link(Parent.SSG) {
+  // Create the link in the SSG.
   if (key.Base.isPrimitive()) {
     Link.setNode(Link.Parent->createPrimitive(key.Base.getBaseName()));
   } else {
