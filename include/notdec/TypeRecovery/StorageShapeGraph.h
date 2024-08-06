@@ -20,35 +20,12 @@
 
 namespace notdec::retypd {
 
-// TODO: optimization: Use nullptr to represent Unknown?
-struct Unknown {
-  bool operator<(const Unknown &rhs) const { return false; }
-  bool operator==(const Unknown &rhs) const {
-    return !(*this < rhs) && !(rhs < *this);
-  }
-  bool operator!=(const Unknown &Other) const { return !(*this == Other); }
+enum StorageShapeTy {
+  Unknown = 0,
+  Primitive = 1,
+  Pointer = 2,
 };
 
-struct Primitive {
-  std::string name;
-  bool operator<(const Primitive &rhs) const {
-    return std::tie(name) < std::tie(name);
-  }
-  bool operator==(const Primitive &rhs) const {
-    return !(*this < rhs) && !(rhs < *this);
-  }
-  bool operator!=(const Primitive &Other) const { return !(*this == Other); }
-};
-
-struct Pointer {
-  bool operator<(const Pointer &rhs) const { return false; }
-  bool operator==(const Pointer &rhs) const {
-    return !(*this < rhs) && !(rhs < *this);
-  }
-  bool operator!=(const Pointer &Other) const { return !(*this == Other); }
-};
-
-using StorageShapeTy = std::variant<Unknown, Primitive, Pointer>;
 // mergeMap[left index][right index] = isPreserveLeft
 // column -> right index, row -> left index
 const unsigned char UniTyMergeMap[][3] = {
@@ -56,10 +33,6 @@ const unsigned char UniTyMergeMap[][3] = {
     {1, 2, 0},
     {1, 1, 2},
 };
-
-Primitive unifyPrimitive(const Primitive &Left, const Primitive &Right);
-
-Pointer unifyPointer(const Pointer &Left, const Pointer &Right);
 
 StorageShapeTy unify(const StorageShapeTy &Left, const StorageShapeTy &Right);
 
@@ -78,9 +51,9 @@ struct SSGNode
   // protected:
   StorageShapeTy Ty;
   const StorageShapeTy &getTy() { return Ty; }
-  bool isUnknown() { return std::holds_alternative<Unknown>(Ty); }
-  bool isPrimitive() { return std::holds_alternative<Primitive>(Ty); }
-  bool isPointer() { return std::holds_alternative<Pointer>(Ty); }
+  bool isUnknown() { return Ty == Unknown; }
+  bool isPrimitive() { return Ty == Primitive; }
+  bool isPointer() { return Ty == Pointer; }
   char getIPChar() {
     if (isUnknown()) {
       return 'u';
@@ -89,7 +62,7 @@ struct SSGNode
     } else if (isPointer()) {
       return 'p';
     }
-    assert(false && "SSGNode::getip: unhandled type");
+    assert(false && "SSGNode::getIPChar: unhandled type");
   }
 
   /// Setting current type by reusing the unify logic.
@@ -302,14 +275,14 @@ struct StorageShapeGraph {
 
   SSGNode *createUnknown() {
     SSGNode *N = new SSGNode(*this);
-    N->Ty = Unknown();
+    N->Ty = Unknown;
     Nodes.push_back(N);
     return N;
   }
 
   SSGNode *createPrimitive(std::string Name) {
     SSGNode *N = new SSGNode(*this);
-    N->Ty = Primitive{.name = Name};
+    N->Ty = Primitive;
     Nodes.push_back(N);
     return N;
   }

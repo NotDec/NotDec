@@ -40,15 +40,15 @@ std::pair<llvm::SmallVector<SSGNode *, 3>, bool> AddNodeCons::solve() {
   // Left alias right: Must be number
   // this includes the Left == Right == Result case.
   if (Left == Right) {
-    bool IsChanged = Left->unifyStorageShape(Primitive{.name = "int"});
+    bool IsChanged = Left->unifyStorageShape(Primitive);
     if (IsChanged) {
       Changed.push_back(Left);
     }
-    IsChanged = Right->unifyStorageShape(Primitive{.name = "int"});
+    IsChanged = Right->unifyStorageShape(Primitive);
     if (IsChanged) {
       Changed.push_back(Right);
     }
-    IsChanged = Result->unifyStorageShape(Primitive{.name = "int"});
+    IsChanged = Result->unifyStorageShape(Primitive);
     if (IsChanged) {
       Changed.push_back(Result);
     }
@@ -58,14 +58,14 @@ std::pair<llvm::SmallVector<SSGNode *, 3>, bool> AddNodeCons::solve() {
   // If Left == Result, Right must be number, and Left and Result have same
   // type
   else if (Left == Result) {
-    bool IsChanged = Right->unifyStorageShape(Primitive{.name = "int"});
+    bool IsChanged = Right->unifyStorageShape(Primitive);
     if (IsChanged) {
       Changed.push_back(Right);
     }
     FullySolved = !Left->isUnknown();
   } else if (Right == Result) {
     // same as above
-    bool IsChanged = Left->unifyStorageShape(Primitive{.name = "int"});
+    bool IsChanged = Left->unifyStorageShape(Primitive);
     if (IsChanged) {
       Changed.push_back(Left);
     }
@@ -108,9 +108,9 @@ std::pair<llvm::SmallVector<SSGNode *, 3>, bool> AddNodeCons::solve() {
 StorageShapeTy fromIPChar(char C) {
   switch (C) {
   case 'I':
-    return Primitive{.name = "int"};
+    return Primitive;
   case 'P':
-    return Pointer();
+    return Pointer;
   default:
     assert(false && "fromIPChar: unhandled char");
   }
@@ -129,31 +129,14 @@ llvm::iplist<SSGNode>::iterator SSGNode::eraseFromParent() {
 //   return List.erase(getIterator());
 // }
 
-Primitive unifyPrimitive(const Primitive &Left, const Primitive &Right) {
-  assert(Left == Right && "unifyPrimitive: Left and Right are different");
-  return Left;
-}
-
-Pointer unifyPointer(const Pointer &Left, const Pointer &Right) {
-  // TODO
-  return Left;
-}
-
 // Like a operator
 StorageShapeTy unify(const StorageShapeTy &Left, const StorageShapeTy &Right) {
   StorageShapeTy ret = Left;
-  if (Left.index() == Right.index()) { // same inner type
-    if (std::holds_alternative<Pointer>(Left)) {
-      return unifyPointer(std::get<Pointer>(Left), std::get<Pointer>(Right));
-    } else if (std::holds_alternative<Primitive>(Left)) {
-      return unifyPrimitive(std::get<Primitive>(Left),
-                            std::get<Primitive>(Right));
-    } else if (std::holds_alternative<Unknown>(Left)) {
-      return Left;
-    }
-    assert(false && "unify: unhandled type");
+  if (Left == Right) { // same inner type
+    return Left;
   } else {
-    unsigned char Val = UniTyMergeMap[Left.index()][Right.index()];
+    unsigned char Val = UniTyMergeMap[Left][Right];
+    assert(Val != 2);
     if (Val != 0) {
       return Left;
     } else {
