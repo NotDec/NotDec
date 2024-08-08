@@ -7,6 +7,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
 #include <sstream>
+#include <variant>
 
 enum log_level {
   level_emergent = 0,
@@ -59,6 +60,34 @@ public:
   }
 
   node_with_erase(ParentTy &P) : Parent(&P) {}
+};
+
+template <typename ParentTy, typename TargetTy> class DSULink {
+  using LinkTy = std::variant<ParentTy *, TargetTy>;
+
+protected:
+  LinkTy Link;
+
+public:
+  DSULink(TargetTy Val) : Link(Val) {}
+  bool isForward() { return std::holds_alternative<ParentTy *>(Link); }
+  ParentTy *getForward() { return std::get<ParentTy *>(Link); }
+  TargetTy getTarget() { return std::get<TargetTy>(Link); }
+  void setForward(ParentTy *Val) { Link = Val; }
+  static ParentTy *getRepresent(ParentTy *N) {
+    std::vector<ParentTy *> path;
+    while (N->getLink().isForward()) {
+      path.push_back(N);
+      N = N->getLink().getForward();
+    }
+    for (auto *P : path) {
+      P->getLink() = N;
+    }
+    return N;
+  }
+  static TargetTy lookup(ParentTy *N) {
+    return getRepresent(N)->getLink().getTarget();
+  }
 };
 
 } // namespace notdec

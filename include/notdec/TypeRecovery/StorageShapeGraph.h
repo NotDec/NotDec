@@ -20,11 +20,19 @@
 
 namespace notdec::retypd {
 
-enum StorageShapeTy {
+struct StorageShapeGraph;
+struct SSGNode;
+
+enum PtrOrNum {
   Unknown = 0,
-  Primitive = 1,
+  NonPtr = 1,
   Pointer = 2,
 };
+
+using PNVarTy = unsigned long;
+const int PNVarStart = 3;
+inline bool isUnknown(PNVarTy Ty) { return Ty >= PNVarStart; }
+bool isUnknown(SSGNode *N);
 
 // mergeMap[left index][right index] = isPreserveLeft
 // column -> right index, row -> left index
@@ -34,11 +42,9 @@ const unsigned char UniTyMergeMap[][3] = {
     {1, 1, 2},
 };
 
-StorageShapeTy unify(const StorageShapeTy &Left, const StorageShapeTy &Right);
+PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right);
 
-StorageShapeTy fromIPChar(char C);
-
-struct StorageShapeGraph;
+PtrOrNum fromIPChar(char C);
 
 struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
@@ -46,63 +52,52 @@ struct SSGNode
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGNode>::iterator eraseFromParent();
 
-  SSGNode(StorageShapeGraph &SSG) : Parent(&SSG) {}
+  SSGNode(StorageShapeGraph &SSG, unsigned long PNVar);
 
-  // protected:
-  StorageShapeTy Ty;
-  const StorageShapeTy &getTy() { return Ty; }
-  bool isUnknown() { return Ty == Unknown; }
-  bool isPrimitive() { return Ty == Primitive; }
-  bool isPointer() { return Ty == Pointer; }
-  char getIPChar() {
-    if (isUnknown()) {
+  // #region Ptr/Num handling
+  /// Represent the type of the node 0-2, Or an unknown variable 3+.
+  /// Maintain the reverse map Parent->PNVarToNode
+  PNVarTy PNVar;
+  PNVarTy getPNVar() { return PNVar; }
+  static PtrOrNum toPNTy(PNVarTy PNVar) {
+    PNVarTy E = PNVar > 2 ? 0 : PNVar;
+    return static_cast<PtrOrNum>(E);
+  }
+  PtrOrNum getPNTy() { return toPNTy(PNVar); }
+
+protected:
+  bool setPtrOrNum(PtrOrNum Ty);
+
+public:
+  /// Unify the PNVarTy of the node to other type or unknown var.
+  bool setPNVar(PNVarTy Ty);
+
+  // void setPtr();
+  // void setNonPtr();
+
+  bool isNonPtr() { return getPNTy() == NonPtr; }
+  bool isPointer() { return getPNTy() == Pointer; }
+  char getPNChar() {
+    if (isUnknown(this)) {
       return 'u';
-    } else if (isPrimitive()) {
+    } else if (isNonPtr()) {
       return 'i';
     } else if (isPointer()) {
       return 'p';
     }
-    assert(false && "SSGNode::getIPChar: unhandled type");
+    assert(false && "SSGNode::getPNChar: unhandled type");
   }
 
-  /// Setting current type by reusing the unify logic.
-  /// return isChanged (not include signedness). TODO consider signedness later
-  bool unifyStorageShape(StorageShapeTy other) {
-    StorageShapeTy R = notdec::retypd::unify(Ty, other);
-    bool isChanged = R != Ty;
-    Ty = R;
-    return isChanged;
-  }
+  /// merge two PNVar into one. Return the unified PNVar.
+  PNVarTy unifyPN(SSGNode &other);
+  friend struct AddNodeCons;
+  // #endregion Ptr/Num handling
 
   /// merge two SSGNode into one. Return true if the left one is preserved.
   /// the other one is expected to be removed.
   bool unify(SSGNode &other) {
-    StorageShapeTy R = notdec::retypd::unify(Ty, other.Ty);
-    if (R == Ty) {
-      return true;
-    } else if (R == other.Ty) {
-      return false;
-    } else {
-      Ty = R;
-      return true;
-    }
-  }
-
-protected:
-  friend class AddNodeCons;
-  // Another Union-find layer for solving pointer/number identification.
-  SSGNode *Link = nullptr;
-  SSGNode *PNIlookup() {
-    std::vector<SSGNode *> path;
-    SSGNode *N = this;
-    while (N->Link != nullptr) {
-      path.push_back(N);
-      N = N->Link;
-    }
-    for (auto *P : path) {
-      P->Link = N;
-    }
-    return N;
+    unifyPN(other);
+    return true;
   }
 };
 
@@ -169,19 +164,32 @@ struct AddNodeCons {
 
   static const char Rules[][3];
   // return a list of changed nodes and whether the constraint is fully solved.
-  std::pair<llvm::SmallVector<SSGNode *, 3>, bool> solve();
+  llvm::SmallVector<SSGNode *, 3> solve();
+  bool isFullySolved() {
+    return !isUnknown(Left) && !isUnknown(Right) && !isUnknown(Result);
+  }
 };
+
 struct SubNodeCons {
   SSGNode *Left;
   SSGNode *Right;
   SSGNode *Result;
   static const char Rules[][3];
+  llvm::SmallVector<SSGNode *, 3> solve();
+  bool isFullySolved() {
+    return !isUnknown(Left) && !isUnknown(Right) && !isUnknown(Result);
+  }
 };
-struct CmpNodeCons {
+struct NeNodeCons {
   SSGNode *Left;
   SSGNode *Right;
+  llvm::SmallVector<SSGNode *, 3> solve();
+  bool isFullySolved() {
+    assert(isUnknown(Left) == isUnknown(Right));
+    return !isUnknown(Left) && !isUnknown(Right);
+  }
 };
-using NodeCons = std::variant<AddNodeCons, SubNodeCons, CmpNodeCons>;
+using NodeCons = std::variant<AddNodeCons, SubNodeCons, NeNodeCons>;
 
 struct PNIConsNode : node_with_erase<PNIConsNode, StorageShapeGraph> {
   PNIConsNode(StorageShapeGraph &SSG, NodeCons C)
@@ -191,12 +199,23 @@ struct PNIConsNode : node_with_erase<PNIConsNode, StorageShapeGraph> {
     assert(false && "TODO");
     // call solve according to the variant
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
-      auto [Changed, FullySolved] = Add->solve();
-      return Changed;
+      return Add->solve();
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
-    } else if (auto *Cmp = std::get_if<CmpNodeCons>(&C)) {
+      return Sub->solve();
+    } else if (auto *Cmp = std::get_if<NeNodeCons>(&C)) {
+      return Cmp->solve();
     }
     // If fully solved, remove from NodeToConstraint Map. Remove self.
+  }
+  bool isFullySolved() {
+    if (auto *Add = std::get_if<AddNodeCons>(&C)) {
+      return Add->isFullySolved();
+    } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
+      return Sub->isFullySolved();
+    } else if (auto *Cmp = std::get_if<NeNodeCons>(&C)) {
+      return Cmp->isFullySolved();
+    }
+    assert(false && "PNIConsNode::isFullySolved: unhandled variant");
   }
 };
 
@@ -265,26 +284,35 @@ struct StorageShapeGraph {
     Constraints.push_back(Node);
   }
 
-  void addCmpCons(SSGNode *Left, SSGNode *Right) {
-    CmpNodeCons C = {.Left = Left, .Right = Right};
+  void addNeCons(SSGNode *Left, SSGNode *Right) {
+    NeNodeCons C = {.Left = Left, .Right = Right};
     auto *Node = new PNIConsNode(*this, C);
     NodeToConstraint[Left].insert(Node);
     NodeToConstraint[Right].insert(Node);
     Constraints.push_back(Node);
   }
 
+  friend struct SSGNode;
+  static unsigned long PNVarCounter;
+  std::map<PNVarTy, std::set<SSGNode *>> PNVarToNode;
   SSGNode *createUnknown() {
-    SSGNode *N = new SSGNode(*this);
-    N->Ty = Unknown;
+    SSGNode *N = new SSGNode(*this, ++PNVarCounter);
+    Nodes.push_back(N);
+    return N;
+  }
+  SSGNode *createPrimitive(std::string Name) {
+    SSGNode *N = new SSGNode(*this, NonPtr);
     Nodes.push_back(N);
     return N;
   }
 
-  SSGNode *createPrimitive(std::string Name) {
-    SSGNode *N = new SSGNode(*this);
-    N->Ty = Primitive;
-    Nodes.push_back(N);
-    return N;
+  void mergePNVar(PNVarTy Var, PNVarTy Target) {
+    assert(Var >= PNVarStart && Target != 0);
+    for (auto *N : PNVarToNode[Var]) {
+      N->PNVar = Target;
+      PNVarToNode[Target].insert(N);
+    }
+    PNVarToNode.erase(Var);
   }
 };
 

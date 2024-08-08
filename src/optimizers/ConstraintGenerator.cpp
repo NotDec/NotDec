@@ -451,7 +451,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
 
 void ConstraintsGenerator::addCmpConstraint(const ValMapKey LHS,
                                             const ValMapKey RHS, ICmpInst *I) {
-  SSG.addCmpCons(getSSGNode(LHS, I), getSSGNode(RHS, I));
+  getSSGNode(LHS, I)->unifyPN(*getSSGNode(RHS, I));
 }
 
 // for pointer sized int, probably is pointer comparision. So we cannot make a
