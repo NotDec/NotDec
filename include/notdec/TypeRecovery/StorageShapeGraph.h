@@ -1,27 +1,30 @@
 #ifndef _NOTDEC_RETYPD_UNIFY_H_
 #define _NOTDEC_RETYPD_UNIFY_H_
 
-#include "TypeRecovery/Schema.h"
-#include "utils.h"
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <list>
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/ADT/ilist.h>
-#include <llvm/ADT/ilist_node.h>
 #include <map>
 #include <memory>
 #include <set>
 #include <utility>
 #include <variant>
-
-#include <llvm/IR/Value.h>
 #include <vector>
+
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/ilist.h>
+#include <llvm/ADT/ilist_node.h>
+#include <llvm/IR/Value.h>
+
+#include "TypeRecovery/Schema.h"
+#include "utils.h"
 
 namespace notdec::retypd {
 
 struct StorageShapeGraph;
 struct SSGNode;
+struct PNINode;
 
 enum PtrOrNum {
   Unknown = 0,
@@ -31,6 +34,7 @@ enum PtrOrNum {
 
 using PNIVarTy = unsigned long;
 bool isUnknown(SSGNode *N);
+bool isUnknown(PNINode *N);
 inline PtrOrNum inverse(PtrOrNum Ty) {
   if (Ty == NonPtr) {
     return Pointer;
@@ -67,6 +71,21 @@ public:
   bool setPtrOrNum(PtrOrNum NewTy);
   PtrOrNum getPtrOrNum() { return Ty; }
   void setConflict() { hasConflict = true; }
+
+  bool isNonPtr() { return getPtrOrNum() == NonPtr; }
+  bool isPointer() { return getPtrOrNum() == Pointer; }
+  char getPNChar() {
+    if (isUnknown(this)) {
+      return 'u';
+    } else if (isNonPtr()) {
+      return 'i';
+    } else if (isPointer()) {
+      return 'p';
+    }
+    assert(false && "SSGNode::getPNChar: unhandled type");
+  }
+  /// merge two PNVar into one. Return the unified PNVar.
+  PNINode *unifyPN(PNINode &other);
 };
 
 struct SSGNode
@@ -89,33 +108,14 @@ public:
 
   bool setPtrOrNum(PtrOrNum Ty) { return PNIVar->setPtrOrNum(Ty); }
   /// Unify the PNVarTy of the node to other type or unknown var.
-  bool unifyPNIVar(PNINode *Ty);
+  SSGNode *unifyPN(SSGNode &Other);
 
-  // void setPtr();
-  // void setNonPtr();
-
-  bool isNonPtr() { return getPNTy() == NonPtr; }
-  bool isPointer() { return getPNTy() == Pointer; }
-  char getPNChar() {
-    if (isUnknown(this)) {
-      return 'u';
-    } else if (isNonPtr()) {
-      return 'i';
-    } else if (isPointer()) {
-      return 'p';
-    }
-    assert(false && "SSGNode::getPNChar: unhandled type");
-  }
-
-  /// merge two PNVar into one. Return the unified PNVar.
-  SSGNode *unifyPN(SSGNode &other);
-  friend struct AddNodeCons;
   // #endregion Ptr/Num handling
 
   /// merge two SSGNode into one. Return true if the left one is preserved.
   /// the other one is expected to be removed.
   bool unify(SSGNode &other) {
-    unifyPN(other);
+    PNIVar->unifyPN(*other.PNIVar);
     return true;
   }
 };
@@ -177,64 +177,82 @@ struct SSGLink {
 };
 
 struct AddNodeCons {
-  SSGNode *Left;
-  SSGNode *Right;
-  SSGNode *Result;
+  PNINode *Left;
+  PNINode *Right;
+  PNINode *Result;
 
   static const char Rules[][3];
   // return a list of changed nodes and whether the constraint is fully solved.
-  llvm::SmallVector<SSGNode *, 3> solve();
+  llvm::SmallVector<PNINode *, 3> solve();
   bool isFullySolved() {
     return !isUnknown(Left) && !isUnknown(Right) && !isUnknown(Result);
   }
 };
 
 struct SubNodeCons {
-  SSGNode *Left;
-  SSGNode *Right;
-  SSGNode *Result;
+  PNINode *Left;
+  PNINode *Right;
+  PNINode *Result;
   static const char Rules[][3];
-  llvm::SmallVector<SSGNode *, 3> solve();
+  llvm::SmallVector<PNINode *, 3> solve();
   bool isFullySolved() {
     return !isUnknown(Left) && !isUnknown(Right) && !isUnknown(Result);
   }
 };
-struct NeNodeCons {
-  SSGNode *Left;
-  SSGNode *Right;
-  llvm::SmallVector<SSGNode *, 3> solve();
-  bool isFullySolved() {
-    assert(isUnknown(Left) == isUnknown(Right));
-    return !isUnknown(Left) && !isUnknown(Right);
-  }
-};
-using NodeCons = std::variant<AddNodeCons, SubNodeCons, NeNodeCons>;
+using NodeCons = std::variant<AddNodeCons, SubNodeCons>;
 
 struct PNIConsNode : node_with_erase<PNIConsNode, StorageShapeGraph> {
   PNIConsNode(StorageShapeGraph &SSG, NodeCons C)
       : node_with_erase(SSG), C(C) {}
   NodeCons C;
-  llvm::SmallVector<SSGNode *, 3> solve() {
-    assert(false && "TODO");
+  llvm::SmallVector<PNINode *, 3> solve() {
     // call solve according to the variant
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
       return Add->solve();
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
       return Sub->solve();
-    } else if (auto *Cmp = std::get_if<NeNodeCons>(&C)) {
-      return Cmp->solve();
     }
-    // If fully solved, remove from NodeToConstraint Map. Remove self.
+    assert(false && "PNIConsNode::solve: unhandled variant");
   }
   bool isFullySolved() {
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
       return Add->isFullySolved();
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
       return Sub->isFullySolved();
-    } else if (auto *Cmp = std::get_if<NeNodeCons>(&C)) {
-      return Cmp->isFullySolved();
     }
     assert(false && "PNIConsNode::isFullySolved: unhandled variant");
+  }
+  void replaceUseOfWith(PNINode *Old, PNINode *New) {
+    if (auto *Add = std::get_if<AddNodeCons>(&C)) {
+      if (Add->Left == Old) {
+        Add->Left = New;
+      }
+      if (Add->Right == Old) {
+        Add->Right = New;
+      }
+      if (Add->Result == Old) {
+        Add->Result = New;
+      }
+    } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
+      if (Sub->Left == Old) {
+        Sub->Left = New;
+      }
+      if (Sub->Right == Old) {
+        Sub->Right = New;
+      }
+      if (Sub->Result == Old) {
+        Sub->Result = New;
+      }
+    }
+    assert(false && "PNIConsNode::replaceUseOfWith: unhandled variant");
+  }
+  std::array<PNINode *, 3> getNodes() {
+    if (auto *Add = std::get_if<AddNodeCons>(&C)) {
+      return {Add->Left, Add->Right, Add->Result};
+    } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
+      return {Sub->Left, Sub->Right, Sub->Result};
+    }
+    assert(false && "PNIConsNode::getNodes: unhandled variant");
   }
 };
 
@@ -264,7 +282,7 @@ struct StorageShapeGraph {
     return &StorageShapeGraph::Constraints;
   }
   // Map for worklist algorithm.
-  std::map<SSGNode *, std::set<PNIConsNode *>> NodeToConstraint;
+  std::map<PNINode *, std::set<PNIConsNode *>> PNIToCons;
 
   // list for SignednessNode
   using SignednessType = llvm::ilist<SignednessNode>;
@@ -298,20 +316,24 @@ struct StorageShapeGraph {
   }
 
   void addAddCons(SSGNode *Left, SSGNode *Right, SSGNode *Result) {
-    AddNodeCons C = {.Left = Left, .Right = Right, .Result = Result};
+    AddNodeCons C = {.Left = Left->getPNVar(),
+                     .Right = Right->getPNVar(),
+                     .Result = Result->getPNVar()};
     auto *Node = new PNIConsNode(*this, C);
-    NodeToConstraint[Left].insert(Node);
-    NodeToConstraint[Right].insert(Node);
-    NodeToConstraint[Result].insert(Node);
+    PNIToCons[Left->getPNVar()].insert(Node);
+    PNIToCons[Right->getPNVar()].insert(Node);
+    PNIToCons[Result->getPNVar()].insert(Node);
     Constraints.push_back(Node);
   }
 
   void addSubCons(SSGNode *Left, SSGNode *Right, SSGNode *Result) {
-    SubNodeCons C = {.Left = Left, .Right = Right, .Result = Result};
+    SubNodeCons C = {.Left = Left->getPNVar(),
+                     .Right = Right->getPNVar(),
+                     .Result = Result->getPNVar()};
     auto *Node = new PNIConsNode(*this, C);
-    NodeToConstraint[Left].insert(Node);
-    NodeToConstraint[Right].insert(Node);
-    NodeToConstraint[Result].insert(Node);
+    PNIToCons[Left->getPNVar()].insert(Node);
+    PNIToCons[Right->getPNVar()].insert(Node);
+    PNIToCons[Result->getPNVar()].insert(Node);
     Constraints.push_back(Node);
   }
 
@@ -339,11 +361,21 @@ struct StorageShapeGraph {
   }
 
   void mergePNVarTo(PNINode *Var, PNINode *Target) {
-    for (auto *N : PNIToNode[Var]) {
-      N->PNIVar = Target;
-      PNIToNode[Target].insert(N);
+    // maintain PNIToNode
+    if (PNIToNode.count(Var)) {
+      for (auto *N : PNIToNode[Var]) {
+        N->PNIVar = Target;
+        PNIToNode[Target].insert(N);
+      }
+      PNIToNode.erase(Var);
     }
-    PNIToNode.erase(Var);
+    // maintain NodeToConstraint
+    if (PNIToCons.count(Var)) {
+      for (auto *Cons : PNIToCons[Var]) {
+        Cons->replaceUseOfWith(Var, Target);
+      }
+      PNIToCons.erase(Var);
+    }
     Var->eraseFromParent();
   }
 
@@ -374,6 +406,13 @@ struct StorageShapeGraph {
         assert(false && "should be unreachable");
       }
     }
+  }
+  void eraseConstraint(PNIConsNode *Cons) {
+    for (auto *N : Cons->getNodes()) {
+      assert(N != nullptr);
+      PNIToCons[N].erase(Cons);
+    }
+    Cons->eraseFromParent();
   }
 };
 

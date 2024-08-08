@@ -23,8 +23,17 @@ void StorageShapeGraph::solve() {
     auto Changed = C->solve();
     bool isFullySolved = C->isFullySolved();
     // add according to changed.
+    for (auto *N : Changed) {
+      for (auto *C2 : PNIToCons[N]) {
+        if (C2 == C) {
+          continue;
+        }
+        Worklist.insert(C2);
+      }
+    }
     if (isFullySolved) {
-      C->eraseFromParent();
+      eraseConstraint(C);
+      C = nullptr;
     }
   }
 }
@@ -42,31 +51,13 @@ const char SubNodeCons::Rules[][3] = {
     {'i', 'I', 'I'}, {'I', 'i', 'i'}, {'P', 'i', 'p'}, {'P', 'p', 'I'},
     {'p', 'P', 'i'}, {'p', 'i', 'P'}, {'p', 'I', 'p'}};
 
-llvm::SmallVector<SSGNode *, 3> NeNodeCons::solve() {
-  if (isUnknown(Left) != isUnknown(Right)) {
-    if (!isUnknown(Left)) {
-      bool IsChanged = Right->setPtrOrNum(inverse(Left->getPNTy()));
-      if (IsChanged) {
-        return {Right};
-      }
-    } else {
-      assert(!isUnknown(Right));
-      bool IsChanged = Left->setPtrOrNum(inverse(Right->getPNTy()));
-      if (IsChanged) {
-        return {Left};
-      }
-    }
-  }
-  return {};
-}
-
-llvm::SmallVector<SSGNode *, 3> AddNodeCons::solve() {
-  llvm::SmallVector<SSGNode *, 3> Changed;
+llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
+  llvm::SmallVector<PNINode *, 3> Changed;
 
   // 1. solving using add rules.
   for (const char *Rule : Rules) {
     bool NotMatch = false;
-    SSGNode *Arr[3] = {Left, Right, Result};
+    PNINode *Arr[3] = {Left, Right, Result};
     // first scan lower case letters
     for (unsigned i = 0; i < 3; i++) {
       if (std::islower(Rule[i]) && Rule[i] != Arr[i]->getPNChar()) {
@@ -93,7 +84,7 @@ llvm::SmallVector<SSGNode *, 3> AddNodeCons::solve() {
   }
 
   unsigned unknownCount = 0;
-  for (SSGNode *N : {Left, Right, Result}) {
+  for (PNINode *N : {Left, Right, Result}) {
     if (isUnknown(N)) {
       unknownCount++;
     }
@@ -103,7 +94,7 @@ llvm::SmallVector<SSGNode *, 3> AddNodeCons::solve() {
   // 2. check using alias relation
   // Left alias right: Must be number
   // this includes the Left == Right == Result case.
-  if (Left->getPNVar() == Right->getPNVar()) {
+  if (Left == Right) {
     bool IsChanged = Left->setPtrOrNum(NonPtr);
     if (IsChanged) {
       Changed.push_back(Left);
@@ -118,13 +109,13 @@ llvm::SmallVector<SSGNode *, 3> AddNodeCons::solve() {
     }
   }
   // Left != Right.
-  else if (Left->getPNVar() == Result->getPNVar()) {
+  else if (Left == Result) {
     // If Left == Result, Right must be number
     bool IsChanged = Right->setPtrOrNum(NonPtr);
     if (IsChanged) {
       Changed.push_back(Right);
     }
-  } else if (Right->getPNVar() == Result->getPNVar()) {
+  } else if (Right == Result) {
     // same as above
     bool IsChanged = Left->setPtrOrNum(NonPtr);
     if (IsChanged) {
@@ -161,13 +152,13 @@ llvm::SmallVector<SSGNode *, 3> AddNodeCons::solve() {
   return Changed;
 }
 
-llvm::SmallVector<SSGNode *, 3> SubNodeCons::solve() {
-  llvm::SmallVector<SSGNode *, 3> Changed;
+llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
+  llvm::SmallVector<PNINode *, 3> Changed;
 
   // 1. solving using add rules.
   for (const char *Rule : Rules) {
     bool NotMatch = false;
-    SSGNode *Arr[3] = {Left, Right, Result};
+    PNINode *Arr[3] = {Left, Right, Result};
     // first scan lower case letters
     for (unsigned i = 0; i < 3; i++) {
       if (std::islower(Rule[i]) && Rule[i] != Arr[i]->getPNChar()) {
@@ -194,7 +185,7 @@ llvm::SmallVector<SSGNode *, 3> SubNodeCons::solve() {
   }
 
   unsigned unknownCount = 0;
-  for (SSGNode *N : {Left, Right, Result}) {
+  for (PNINode *N : {Left, Right, Result}) {
     if (isUnknown(N)) {
       unknownCount++;
     }
@@ -204,7 +195,7 @@ llvm::SmallVector<SSGNode *, 3> SubNodeCons::solve() {
   // 2. check using alias relation
   // Right alias Result: Must be number
   // this includes the Left == Right == Result case.
-  if (Result->getPNVar() == Right->getPNVar()) {
+  if (Result == Right) {
     bool IsChanged = Left->setPtrOrNum(NonPtr);
     if (IsChanged) {
       Changed.push_back(Left);
@@ -217,7 +208,7 @@ llvm::SmallVector<SSGNode *, 3> SubNodeCons::solve() {
     if (IsChanged) {
       Changed.push_back(Result);
     }
-  } else if (Left->getPNVar() == Right->getPNVar()) {
+  } else if (Left == Right) {
     // If Left == Right, Result must be number
     // Must be unknown because there are at least 2 unknowns.
     assert(isUnknown(Left));
@@ -225,7 +216,7 @@ llvm::SmallVector<SSGNode *, 3> SubNodeCons::solve() {
     if (IsChanged) {
       Changed.push_back(Result);
     }
-  } else if (Left->getPNVar() == Result->getPNVar()) {
+  } else if (Left == Result) {
     // same as above
     bool IsChanged = Right->setPtrOrNum(NonPtr);
     if (IsChanged) {
@@ -317,16 +308,21 @@ PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right) {
   }
 }
 
-SSGNode *SSGNode::unifyPN(SSGNode &other) {
-  auto *Node = Parent->mergePNINodes(this->getPNVar(), other.getPNVar());
+PNINode *PNINode::unifyPN(PNINode &other) {
+  auto *Node = Parent->mergePNINodes(this, &other);
+  return Node;
+}
+
+SSGNode *SSGNode::unifyPN(SSGNode &Other) {
+  auto *Node = PNIVar->unifyPN(*Other.getPNVar());
   if (Node == nullptr) {
     // no need to merge
     return nullptr;
   } else if (Node == this->getPNVar()) {
     return this;
   } else {
-    assert(Node == other.getPNVar());
-    return &other;
+    assert(Node == Other.getPNVar());
+    return &Other;
   }
 }
 
@@ -335,6 +331,7 @@ SSGNode::SSGNode(StorageShapeGraph &SSG) : Parent(&SSG) {
   Parent->PNIToNode[PNIVar].insert(this);
 }
 
+bool isUnknown(PNINode *N) { return N->getPtrOrNum() == Unknown; }
 bool isUnknown(SSGNode *N) { return N->getPNVar()->getPtrOrNum() == Unknown; }
 
 } // namespace notdec::retypd

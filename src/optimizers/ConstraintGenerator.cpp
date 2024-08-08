@@ -35,7 +35,6 @@
 
 namespace notdec {
 
-using retypd::CGNode;
 using retypd::OffsetLabel;
 
 const char *ConstraintGraph::Memory = "MEMORY";
@@ -88,6 +87,7 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     assert(it.second && "TypeRecovery::run: duplicate function?");
     auto &Generator = it.first->second;
     Generator.generate();
+    Generator.solve();
   }
 
   // create a temporary directory
