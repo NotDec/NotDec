@@ -178,7 +178,7 @@ public:
   }
 
   void setPointer(CGNode &Node) {
-    Node.Link.lookupNode()->setPNVar(retypd::Pointer);
+    Node.Link.lookupNode()->getPNVar()->setPtrOrNum(retypd::Pointer);
   }
 
   retypd::CGNode &getNode(ValMapKey Val, User *User);

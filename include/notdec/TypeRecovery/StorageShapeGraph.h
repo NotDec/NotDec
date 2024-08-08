@@ -29,10 +29,17 @@ enum PtrOrNum {
   Pointer = 2,
 };
 
-using PNVarTy = unsigned long;
-const int PNVarStart = 3;
-inline bool isUnknown(PNVarTy Ty) { return Ty >= PNVarStart; }
+using PNIVarTy = unsigned long;
 bool isUnknown(SSGNode *N);
+inline PtrOrNum inverse(PtrOrNum Ty) {
+  if (Ty == NonPtr) {
+    return Pointer;
+  } else if (Ty == Pointer) {
+    return NonPtr;
+  } else {
+    assert(false && "inverse: Unknown type");
+  }
+}
 
 // mergeMap[left index][right index] = isPreserveLeft
 // column -> right index, row -> left index
@@ -46,31 +53,43 @@ PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right);
 
 PtrOrNum fromIPChar(char C);
 
+struct PNINode : node_with_erase<PNINode, StorageShapeGraph> {
+protected:
+  friend struct StorageShapeGraph;
+  PNINode(StorageShapeGraph &SSG, PNIVarTy Var)
+      : node_with_erase(SSG), Var(Var) {}
+  PNIVarTy Var = 0;
+  PtrOrNum Ty = Unknown;
+  bool hasConflict = false;
+
+public:
+  /// Convenient method to set the type of the PNVar.
+  bool setPtrOrNum(PtrOrNum NewTy);
+  PtrOrNum getPtrOrNum() { return Ty; }
+  void setConflict() { hasConflict = true; }
+};
+
 struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
   StorageShapeGraph *Parent = nullptr;
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGNode>::iterator eraseFromParent();
 
-  SSGNode(StorageShapeGraph &SSG, unsigned long PNVar);
+protected:
+  friend struct StorageShapeGraph;
+  SSGNode(StorageShapeGraph &SSG);
 
+public:
   // #region Ptr/Num handling
   /// Represent the type of the node 0-2, Or an unknown variable 3+.
   /// Maintain the reverse map Parent->PNVarToNode
-  PNVarTy PNVar;
-  PNVarTy getPNVar() { return PNVar; }
-  static PtrOrNum toPNTy(PNVarTy PNVar) {
-    PNVarTy E = PNVar > 2 ? 0 : PNVar;
-    return static_cast<PtrOrNum>(E);
-  }
-  PtrOrNum getPNTy() { return toPNTy(PNVar); }
+  PNINode *PNIVar;
+  PNINode *getPNVar() { return PNIVar; }
+  PtrOrNum getPNTy() { return PNIVar->getPtrOrNum(); }
 
-protected:
-  bool setPtrOrNum(PtrOrNum Ty);
-
-public:
+  bool setPtrOrNum(PtrOrNum Ty) { return PNIVar->setPtrOrNum(Ty); }
   /// Unify the PNVarTy of the node to other type or unknown var.
-  bool setPNVar(PNVarTy Ty);
+  bool unifyPNIVar(PNINode *Ty);
 
   // void setPtr();
   // void setNonPtr();
@@ -89,7 +108,7 @@ public:
   }
 
   /// merge two PNVar into one. Return the unified PNVar.
-  PNVarTy unifyPN(SSGNode &other);
+  SSGNode *unifyPN(SSGNode &other);
   friend struct AddNodeCons;
   // #endregion Ptr/Num handling
 
@@ -230,7 +249,7 @@ struct StorageShapeGraph {
   std::string FuncName;
   SSGNode *Memory = nullptr;
 
-  // region ilist definition
+  // region linked list definitions
   // list for SSGNode
   using NodesType = llvm::ilist<SSGNode>;
   NodesType Nodes;
@@ -255,7 +274,19 @@ struct StorageShapeGraph {
   }
   std::map<SSGNode *, std::set<SignednessNode *>> NodeToSignedness;
 
-  // endregion ilist definition
+  // list for PNINode
+  using PNINodesType = llvm::ilist<PNINode>;
+  PNINodesType PNINodes;
+  static PNINodesType StorageShapeGraph::*getSublistAccess(PNINode *) {
+    return &StorageShapeGraph::PNINodes;
+  }
+  std::map<PNINode *, std::set<SSGNode *>> PNIToNode;
+  PNINode *createPNINode() {
+    auto *N = new PNINode(*this, PNVarCounter++);
+    PNINodes.push_back(N);
+    return N;
+  }
+  // endregion linked list definitions
 
   StorageShapeGraph(std::string FuncName) : FuncName(FuncName) { initMemory(); }
 
@@ -284,35 +315,65 @@ struct StorageShapeGraph {
     Constraints.push_back(Node);
   }
 
-  void addNeCons(SSGNode *Left, SSGNode *Right) {
-    NeNodeCons C = {.Left = Left, .Right = Right};
-    auto *Node = new PNIConsNode(*this, C);
-    NodeToConstraint[Left].insert(Node);
-    NodeToConstraint[Right].insert(Node);
-    Constraints.push_back(Node);
-  }
+  // void addNeCons(SSGNode *Left, SSGNode *Right) {
+  //   NeNodeCons C = {.Left = Left, .Right = Right};
+  //   auto *Node = new PNIConsNode(*this, C);
+  //   NodeToConstraint[Left].insert(Node);
+  //   NodeToConstraint[Right].insert(Node);
+  //   Constraints.push_back(Node);
+  // }
 
   friend struct SSGNode;
   static unsigned long PNVarCounter;
-  std::map<PNVarTy, std::set<SSGNode *>> PNVarToNode;
   SSGNode *createUnknown() {
-    SSGNode *N = new SSGNode(*this, ++PNVarCounter);
+    SSGNode *N = new SSGNode(*this);
     Nodes.push_back(N);
     return N;
   }
   SSGNode *createPrimitive(std::string Name) {
-    SSGNode *N = new SSGNode(*this, NonPtr);
+    // TODO handle Name
+    SSGNode *N = new SSGNode(*this);
+    N->PNIVar->setPtrOrNum(NonPtr);
     Nodes.push_back(N);
     return N;
   }
 
-  void mergePNVar(PNVarTy Var, PNVarTy Target) {
-    assert(Var >= PNVarStart && Target != 0);
-    for (auto *N : PNVarToNode[Var]) {
-      N->PNVar = Target;
-      PNVarToNode[Target].insert(N);
+  void mergePNVarTo(PNINode *Var, PNINode *Target) {
+    for (auto *N : PNIToNode[Var]) {
+      N->PNIVar = Target;
+      PNIToNode[Target].insert(N);
     }
-    PNVarToNode.erase(Var);
+    PNIToNode.erase(Var);
+    Var->eraseFromParent();
+  }
+
+  PNINode *mergePNINodes(PNINode *Left, PNINode *Right) {
+    if (Left == Right || Left->getPtrOrNum() == Right->getPtrOrNum()) {
+      // no need to merge
+      return nullptr;
+    }
+    if (Left->getPtrOrNum() == Unknown) {
+      mergePNVarTo(Left, Right);
+      return Right;
+    } else if (Right->getPtrOrNum() == Unknown) {
+      mergePNVarTo(Right, Left);
+      return Left;
+    } else {
+      if (Left->getPtrOrNum() == NonPtr && Right->getPtrOrNum() == Pointer) {
+        std::cerr << "Warning: mergePNINodes: Pointer and NonPtr merge\n";
+        mergePNVarTo(Left, Right);
+        Right->setConflict();
+        return Right;
+      } else if ((Left->getPtrOrNum() == Pointer &&
+                  Right->getPtrOrNum() == NonPtr)) {
+        std::cerr << "Warning: mergePNINodes: Pointer and NonPtr merge\n";
+        mergePNVarTo(Right, Left);
+        Left->setConflict();
+        return Left;
+      } else {
+        assert(false && "should be unreachable");
+      }
+    }
   }
 };
 
