@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "llvm/Transforms/Scalar/IndVarSimplify.h"
+#include "llvm/Transforms/Scalar/LoopRotation.h"
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -293,6 +295,10 @@ void DecompileConfig::run_passes() {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(
+          createFunctionToLoopPassAdaptor(LoopRotatePass())));
+      MPM.addPass(createModuleToFunctionPassAdaptor(
+          createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
       MPM.addPass(TypeRecovery());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__

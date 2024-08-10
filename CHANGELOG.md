@@ -13,6 +13,7 @@
 
 **Type recovery**
 - how to handle dynamic call using function pointer? how to traverse reverse post order?
+- Add a test case for basic block not in topo order. Check whether opt passes will reorder it.
 
 ## Changelog
 
