@@ -109,13 +109,13 @@ struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
   StorageShapeGraph *Parent = nullptr;
   unsigned long Id = 0;
-  unsigned long size = 0;
+  unsigned int Size = 0;
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGNode>::iterator eraseFromParent();
 
 protected:
   friend struct StorageShapeGraph;
-  SSGNode(StorageShapeGraph &SSG, unsigned long Id);
+  SSGNode(StorageShapeGraph &SSG, unsigned long Id, unsigned int size);
   void setPNVar(PNINode *PN) {
     assert(std::holds_alternative<SSGValue>(Ty));
     std::get<SSGValue>(Ty).PNIVar = PN;
@@ -346,7 +346,7 @@ struct StorageShapeGraph {
   void solve();
 
   SSGNode *initMemory() {
-    Memory = createUnknown();
+    Memory = createUnknown(0);
     return Memory;
   }
 
@@ -382,14 +382,14 @@ struct StorageShapeGraph {
 
   friend struct SSGNode;
   static unsigned long IdCounter;
-  SSGNode *createUnknown() {
-    SSGNode *N = new SSGNode(*this, IdCounter++);
+  SSGNode *createUnknown(unsigned int Size) {
+    SSGNode *N = new SSGNode(*this, IdCounter++, Size);
     Nodes.push_back(N);
     return N;
   }
-  SSGNode *createPrimitive(std::string Name) {
+  SSGNode *createPrimitive(std::string Name, unsigned int Size) {
     // TODO handle Name
-    SSGNode *N = new SSGNode(*this, IdCounter++);
+    SSGNode *N = new SSGNode(*this, IdCounter++, Size);
     N->getPNVar()->setPtrOrNum(NonPtr);
     Nodes.push_back(N);
     return N;

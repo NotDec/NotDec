@@ -139,7 +139,8 @@ protected:
   std::vector<IntConstant> intConstantIds;
 
 public:
-  CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User) {
+  CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User,
+                     unsigned int Size) {
     // Differentiate int32/int64 by User.
     if (auto V = std::get_if<llvm::Value *>(&Val)) {
       if (auto CI = dyn_cast<ConstantInt>(*V)) {
@@ -152,7 +153,7 @@ public:
         }
       }
     }
-    auto ref = Val2Node.emplace(Val, &CG.getOrInsertNode(dtv));
+    auto ref = Val2Node.emplace(Val, &CG.getOrInsertNode(dtv, Size));
     if (!ref.second) {
       llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                    << "setTypeVar: Value already mapped to "
@@ -164,11 +165,14 @@ public:
   }
   CGNode &newVarSubtype(llvm::Value *Val, const TypeVariable &dtv,
                         const char *prefix = TypeRecovery::DefaultPrefix) {
+    assert(Val2Node.find(Val) == Val2Node.end() &&
+           "newVarSubtype: Value already mapped!");
+    auto Size = Val->getType()->getScalarSizeInBits();
     if (dtv.isPrimitive() && isFinal(dtv.getBaseName())) {
-      return setTypeVar(Val, dtv, nullptr);
+      return setTypeVar(Val, dtv, nullptr, Size);
     }
     auto &Node = setTypeVar(
-        Val, TypeVariable::CreateDtv(Ctx.getName(*Val, prefix)), nullptr);
+        Val, TypeVariable::CreateDtv(Ctx.getName(*Val, prefix)), nullptr, Size);
     addSubtype(Node.key.Base, dtv);
     return Node;
   }

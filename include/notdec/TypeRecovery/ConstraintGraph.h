@@ -60,6 +60,7 @@ struct CGNode : CGNodeBase {
   ConstraintGraph &Parent;
   const NodeKey key;
   std::set<CGEdge> outEdges;
+  unsigned int Size;
 
   // Map from CGNode to SSGNode using union-find
   // We will not remove CGNode from the graph, but just update, so it is safe to
@@ -67,7 +68,7 @@ struct CGNode : CGNodeBase {
   SSGLink Link;
   SSGLink &getLink() { return Link; }
 
-  CGNode(ConstraintGraph &Parent, NodeKey key);
+  CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size);
   std::string str() { return key.str() + "-" + Link.lookupNode()->str(); }
 };
 
@@ -98,7 +99,7 @@ struct ConstraintGraph : CGBase {
 
   ConstraintGraph(std::string FuncName) : FuncName(FuncName), SSG(FuncName) {}
 
-  CGNode &getOrInsertNode(const NodeKey &N);
+  CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
   // Interface for initial constraint insertion
   void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
 

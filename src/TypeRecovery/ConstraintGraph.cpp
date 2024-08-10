@@ -442,8 +442,8 @@ void ConstraintGraph::addForgets(CGNode &N) {
   EndNodes.insert(T);
 }
 
-CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N) {
-  auto [it, inserted] = Nodes.try_emplace(N, *this, N);
+CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size) {
+  auto [it, inserted] = Nodes.try_emplace(N, *this, N, Size);
   if (inserted) {
     assert(addNode(it->second));
   }
@@ -652,13 +652,13 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
   return Ctx.constraintsSequenceToConstraints(Ctx.ConstraintsSequence);
 }
 
-CGNode::CGNode(ConstraintGraph &Parent, NodeKey key)
-    : Parent(Parent), key(key), Link(Parent.SSG) {
+CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size)
+    : Parent(Parent), key(key), Size(Size), Link(Parent.SSG) {
   // Create the link in the SSG.
   if (key.Base.isPrimitive()) {
-    Link.setNode(Link.Parent->createPrimitive(key.Base.getBaseName()));
+    Link.setNode(Link.Parent->createPrimitive(key.Base.getBaseName(), Size));
   } else {
-    Link.setNode(Link.Parent->createUnknown());
+    Link.setNode(Link.Parent->createUnknown(Size));
   }
 }
 

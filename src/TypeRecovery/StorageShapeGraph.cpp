@@ -328,8 +328,8 @@ SSGNode *SSGNode::unifyPN(SSGNode &Other) {
   }
 }
 
-SSGNode::SSGNode(StorageShapeGraph &SSG, unsigned long Id)
-    : Parent(&SSG), Id(Id) {
+SSGNode::SSGNode(StorageShapeGraph &SSG, unsigned long Id, unsigned int size)
+    : Parent(&SSG), Id(Id), Size(size) {
   auto PNIVar = SSG.createPNINode();
   Ty = SSGValue{.PNIVar = PNIVar};
   Parent->PNIToNode[PNIVar].insert(this);

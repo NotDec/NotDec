@@ -197,6 +197,26 @@ bool hasUser(const Value *Val, const User *User) {
   return false;
 }
 
+unsigned int getSize(const ValMapKey &Val) {
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    return (*V)->getType()->getScalarSizeInBits();
+  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+    return F->Func->getReturnType()->getScalarSizeInBits();
+  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
+    // TODO what if function pointer?
+    return Arg->Call->getArgOperand(Arg->Index)
+        ->getType()
+        ->getScalarSizeInBits();
+  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
+    return Ret->Call->getType()->getScalarSizeInBits();
+  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+    return IC->Val->getBitWidth();
+  }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "ERROR: getSize: unhandled type of ValMapKey\n";
+  std::abort();
+}
+
 retypd::CGNode &ConstraintsGenerator::getNode(ValMapKey Val, User *User) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
@@ -213,7 +233,7 @@ retypd::CGNode &ConstraintsGenerator::getNode(ValMapKey Val, User *User) {
     return *Val2Node.at(Val);
   }
   auto ret = convertTypeVar(Val);
-  return setTypeVar(Val, ret, User);
+  return setTypeVar(Val, ret, User, getSize(Val));
 }
 
 retypd::SSGNode *ConstraintsGenerator::getSSGNode(ValMapKey Val, User *User) {
@@ -352,9 +372,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     // argument is a subtype of param
     cg.addSubtype(ValVar, ArgVar);
   }
-  // for return value
-  auto DstVar = cg.getTypeVar(CallRet{.Call = &I}, &I);
-  cg.setTypeVar(&I, DstVar, nullptr);
+  if (!I.getType()->isVoidTy()) {
+    // for return value
+    auto DstVar = cg.getTypeVar(CallRet{.Call = &I}, &I);
+    cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
+  }
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
@@ -365,7 +387,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
   auto Src1Var = cg.getTypeVar(Src1, &I);
   auto Src2Var = cg.getTypeVar(Src2, &I);
   // Not generate boolean constraints. Because it must be i1.
-  cg.setTypeVar(&I, DstVar, nullptr);
+  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
   cg.addSubtype(Src1Var, DstVar);
   cg.addSubtype(Src2Var, DstVar);
 }
@@ -377,7 +399,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
     prefix = "stack_";
   }
   auto DstVar = makeTv(cg.Ctx.getName(I, prefix));
-  auto &Node = cg.setTypeVar(&I, DstVar, nullptr);
+  auto &Node =
+      cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
   // set as pointer type
   cg.setPointer(Node);
 }
@@ -391,7 +414,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
   // we follow a topological sort of basic blocks)
 
   auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::PhiPrefix));
-  cg.setTypeVar(&I, DstVar, nullptr);
+  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::handlePHINodes() {
@@ -499,7 +522,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   auto SrcVar =
       cg.deref(I.getPointerOperand(), &I,
                cg.getPointerElemSize(I.getPointerOperandType()), true);
-  cg.setTypeVar(&I, SrcVar, nullptr);
+  cg.setTypeVar(&I, SrcVar, nullptr, I.getType()->getScalarSizeInBits());
 }
 
 std::string ConstraintsGenerator::offset(APInt Offset, int Count) {
@@ -630,7 +653,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
 
   auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::AddPrefix));
-  cg.setTypeVar(&I, DstVar, nullptr);
+  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
 
   cg.addAddConstraint(Src1, Src2, &I);
 }
@@ -640,7 +663,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitSub(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
 
   auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::SubPrefix));
-  cg.setTypeVar(&I, DstVar, nullptr);
+  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
 
   cg.addSubConstraint(Src1, Src2, &I);
 }
@@ -702,7 +725,8 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   if (ty == nullptr) {
     return false;
   }
-  cg.setTypeVar(I, TypeVariable::CreatePrimitive(ty), nullptr);
+  cg.setTypeVar(I, TypeVariable::CreatePrimitive(ty), nullptr,
+                I->getType()->getScalarSizeInBits());
   return true;
 }
 
