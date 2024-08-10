@@ -2,6 +2,7 @@
 #define _NOTDEC_RETYPD_GRAPH_H_
 
 #include <list>
+#include <llvm/IR/AssemblyAnnotationWriter.h>
 #include <map>
 #include <optional>
 #include <set>
@@ -67,6 +68,7 @@ struct CGNode : CGNodeBase {
   SSGLink &getLink() { return Link; }
 
   CGNode(ConstraintGraph &Parent, NodeKey key);
+  std::string str() { return key.str() + "-" + Link.lookupNode()->str(); }
 };
 
 struct CGEdge : CGEdgeBase {

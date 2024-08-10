@@ -5,7 +5,7 @@
 
 namespace notdec::retypd {
 
-unsigned long StorageShapeGraph::PNVarCounter = 1;
+unsigned long StorageShapeGraph::IdCounter = 1;
 
 void StorageShapeGraph::solve() {
   // write a worklist algorithm.
@@ -288,7 +288,7 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
       return false;
     }
   }
-  assert(NewTy == Unknown);
+  assert(Ty == Unknown);
   Ty = NewTy;
   return true;
 }
@@ -326,12 +326,15 @@ SSGNode *SSGNode::unifyPN(SSGNode &Other) {
   }
 }
 
-SSGNode::SSGNode(StorageShapeGraph &SSG) : Parent(&SSG) {
+SSGNode::SSGNode(StorageShapeGraph &SSG, unsigned long Id)
+    : Parent(&SSG), Id(Id) {
   PNIVar = SSG.createPNINode();
   Parent->PNIToNode[PNIVar].insert(this);
 }
 
-bool isUnknown(PNINode *N) { return N->getPtrOrNum() == Unknown; }
-bool isUnknown(SSGNode *N) { return N->getPNVar()->getPtrOrNum() == Unknown; }
+bool isUnknown(const PNINode *N) { return N->getPtrOrNum() == Unknown; }
+bool isUnknown(const SSGNode *N) {
+  return N->getPNVar()->getPtrOrNum() == Unknown;
+}
 
 } // namespace notdec::retypd

@@ -4,6 +4,9 @@
 #include <cassert>
 #include <deque>
 #include <iostream>
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/Support/Casting.h>
 #include <map>
 #include <string>
 #include <variant>
@@ -14,6 +17,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/FormattedStream.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/RExp.h"
@@ -45,6 +49,7 @@ protected:
   size_t typeValId = 0;
 
 public:
+  void print(Module &M, std::string path);
   // get a new type_var name from type_val_id
   std::string getName(Value &Val,
                       const char *prefix = TypeRecovery::DefaultPrefix);
@@ -68,7 +73,7 @@ inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
 
 struct ReturnValue {
   llvm::Function *Func;
-  int32_t Index;
+  int32_t Index = 0;
   bool operator<(const ReturnValue &rhs) const {
     return std::tie(Func, Index) < std::tie(rhs.Func, rhs.Index);
   }

@@ -90,6 +90,8 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     Generator.solve();
   }
 
+  print(M, "TypeRecovery.ll");
+
   // create a temporary directory
   SmallString<128> Path;
   std::error_code EC;
@@ -747,6 +749,91 @@ void TypeRecovery::gen_json(std::string OutputFilename) {
   }
   json::OStream J(os, 2);
   J.value(std::move(Root));
+}
+
+class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
+  // ConstraintsGenerator &CG;
+  std::map<Function *, ConstraintsGenerator> &func_ctxs;
+
+  void emitFunctionAnnot(const llvm::Function *F,
+                         llvm::formatted_raw_ostream &OS) override {
+    auto &CG = func_ctxs.at(const_cast<llvm::Function *>(F));
+    OS << "; ";
+    if (!F->getReturnType()->isVoidTy()) {
+      OS << CG.getNode(ReturnValue{.Func = const_cast<llvm::Function *>(F)},
+                       nullptr)
+                .str();
+      OS << " <- ";
+    }
+    OS << "(";
+    for (auto &Arg : F->args()) {
+      OS << CG.getNode(const_cast<llvm::Argument *>(&Arg), nullptr).str()
+         << ", ";
+    }
+    OS << ")";
+    OS << "\n";
+  }
+
+  void printInfoComment(const llvm::Value &V,
+                        llvm::formatted_raw_ostream &OS) override {
+
+    // TODO: print CallArg and CallRet
+    // if (auto Call = llvm::dyn_cast<CallBase>(&V)) {
+    //   OS << " ; ";
+    //   if (!Call->getType()->isVoidTy()) {
+    //     OS << CG.getNode(CallArg{.Func = const_cast<llvm::Function *>(F)},
+    //                      nullptr)
+    //               .str();
+    //     OS << " -> ";
+    //   }
+    //   OS << "(";
+    //   for (auto &Arg : F->args()) {
+    //     OS << CG.getNode(CallRet{.Call = Call, .Index = }, nullptr).str()
+    //        << ", ";
+    //   }
+    //   OS << ")";
+    //   OS << "\n";
+    // }
+
+    const Instruction *Instr = dyn_cast<Instruction>(&V);
+    if (Instr == nullptr) {
+      return;
+    }
+    auto &CG = func_ctxs.at(const_cast<llvm::Function *>(Instr->getFunction()));
+
+    OS << "; ";
+    if (!V.getType()->isVoidTy()) {
+      OS << CG.getNode(const_cast<llvm::Value *>(&V), nullptr).str();
+      if (Instr != nullptr) {
+        OS << " <- ";
+      }
+    }
+    if (Instr != nullptr) {
+      OS << "(";
+      for (const Use &Op : Instr->operands()) {
+        OS << CG.getNode(Op.get(), const_cast<llvm::Instruction *>(Instr)).str()
+           << ", ";
+      }
+      OS << ")";
+    }
+    // OS << "\n";
+  }
+
+public:
+  CGAnnotationWriter(std::map<Function *, ConstraintsGenerator> &func_ctxs)
+      : func_ctxs(func_ctxs) {}
+};
+
+void TypeRecovery::print(llvm::Module &M, std::string path) {
+  std::error_code EC;
+  llvm::raw_fd_ostream os(path, EC);
+  if (EC) {
+    std::cerr << "Cannot open output file: " << path << std::endl;
+    std::cerr << EC.message() << std::endl;
+    std::abort();
+  }
+  CGAnnotationWriter AW(func_ctxs);
+  M.print(os, &AW);
 }
 
 } // namespace notdec
