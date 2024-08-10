@@ -265,8 +265,10 @@ PtrOrNum fromIPChar(char C) {
 }
 
 llvm::iplist<SSGNode>::iterator SSGNode::eraseFromParent() {
-  // remove self from PNVarToNode map
-  Parent->PNIToNode[PNIVar].erase(this);
+  if (!isAggregate()) {
+    // remove self from PNVarToNode map
+    Parent->PNIToNode[getPNVar()].erase(this);
+  }
   auto &List =
       getParent()->*(StorageShapeGraph::getSublistAccess((SSGNode *)nullptr));
   return List.erase(getIterator());
@@ -314,7 +316,7 @@ PNINode *PNINode::unifyPN(PNINode &other) {
 }
 
 SSGNode *SSGNode::unifyPN(SSGNode &Other) {
-  auto *Node = PNIVar->unifyPN(*Other.getPNVar());
+  auto *Node = getPNVar()->unifyPN(*Other.getPNVar());
   if (Node == nullptr) {
     // no need to merge
     return nullptr;
@@ -328,7 +330,8 @@ SSGNode *SSGNode::unifyPN(SSGNode &Other) {
 
 SSGNode::SSGNode(StorageShapeGraph &SSG, unsigned long Id)
     : Parent(&SSG), Id(Id) {
-  PNIVar = SSG.createPNINode();
+  auto PNIVar = SSG.createPNINode();
+  Ty = SSGValue{.PNIVar = PNIVar};
   Parent->PNIToNode[PNIVar].insert(this);
 }
 
