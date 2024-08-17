@@ -926,7 +926,7 @@ Theorem 4. Let $P(u, w)$ for $u, w \in V$ be the path expressions computed by EL
 
   - 不行，明显上面的证明是和load和store性质有很大关系的。
 
-**问题**：offset和load/store可以绑定/合并
+**问题**：offset和load/store可以绑定/合并?
 
 **证明**：首先.in 和.out只能在最外层。因此没有什么能够介入load/store中间。其次，每次load和store必然有offset和size。我们讨论某个变量的load和store的时候，本质上在讨论所有可能的offset和size之间的关系/对应的结构体类型。
 

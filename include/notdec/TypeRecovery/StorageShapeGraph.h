@@ -58,16 +58,17 @@ PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right);
 
 PtrOrNum fromIPChar(char C);
 
-struct PNINode : node_with_erase<PNINode, StorageShapeGraph> {
+struct PNINode : public node_with_erase<PNINode, StorageShapeGraph> {
 protected:
   friend struct StorageShapeGraph;
-  PNINode(StorageShapeGraph &SSG, unsigned long Id)
-      : node_with_erase(SSG), Id(Id) {}
+  PNINode(StorageShapeGraph &SSG);
   unsigned long Id = 0;
   PtrOrNum Ty = Unknown;
   bool hasConflict = false;
 
 public:
+  llvm::iplist<PNINode>::iterator eraseFromParent();
+
   /// Convenient method to set the type of the PNVar.
   bool setPtrOrNum(PtrOrNum NewTy);
   PtrOrNum getPtrOrNum() const { return Ty; }
@@ -98,56 +99,167 @@ struct SSGValue {
   /// Represent the type of the node 0-2, Or an unknown variable 3+.
   /// Maintain the reverse map Parent->PNVarToNode
   PNINode *PNIVar = nullptr;
-  SSGNode *PointsTo = nullptr; // pointes to edge. Nullptr for empty struct.
+  SSGNode *PointsTo = nullptr; // pointes to edge. Nullptr for empty struct with
+                               // no relationship.
 };
 
 struct SSGAggregate {
-  std::map<OffsetRange, SSGNode *> Values;
+  using IndexTy = unsigned;
+  // using RangeTy = std::pair<IndexTy, unsigned>;
+  // using EntryTy = std::pair<RangeTy, SSGNode *>;
+  struct EntryTy {
+    IndexTy Start;
+    unsigned Size;
+    SSGNode *Target;
+  };
+  // Ensure range will not overlap
+  using iterator = std::vector<EntryTy>::iterator;
+  std::vector<EntryTy> Values;
+
+  EntryTy *find(IndexTy Start, unsigned Size) {
+    for (auto &Entry : Values) {
+      unsigned End = Entry.Start + Entry.Size;
+      if (Entry.Start <= Start && Entry.Size >= Size) {
+        // Contains or equal
+        return &Entry;
+      } else if (Entry.Start >= Start + Size) {
+        // Goes over
+        return nullptr;
+      } else if (End < Start) {
+        continue;
+      } else {
+        assert(false && "SSGAggregate::find: overlap?");
+      }
+    }
+    return nullptr;
+  }
 };
 
 struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
   StorageShapeGraph *Parent = nullptr;
   unsigned long Id = 0;
-  unsigned int Size = 0;
+  unsigned Size = 0;
   inline StorageShapeGraph *getParent() { return Parent; }
   llvm::iplist<SSGNode>::iterator eraseFromParent();
 
 protected:
   friend struct StorageShapeGraph;
-  SSGNode(StorageShapeGraph &SSG, unsigned long Id, unsigned int size);
+  SSGNode(StorageShapeGraph &SSG, unsigned size);
+  /// Move constructor for makeAggregate
+  SSGNode(SSGNode &&Other);
   void setPNVar(PNINode *PN) {
     assert(std::holds_alternative<SSGValue>(Ty));
-    std::get<SSGValue>(Ty).PNIVar = PN;
+    getAsValue().PNIVar = PN;
   }
 
 public:
   using SSGTy = std::variant<SSGValue, SSGAggregate>;
   SSGTy Ty;
+  // reverse link to the users.
+  std::set<SSGNode *> AggregateUsers;
   bool isAggregate() const { return std::holds_alternative<SSGAggregate>(Ty); }
+  SSGAggregate &getAggregate() {
+    assert(isAggregate());
+    return std::get<SSGAggregate>(Ty);
+  }
+  const SSGAggregate &getAggregate() const {
+    assert(isAggregate());
+    return std::get<SSGAggregate>(Ty);
+  }
+  // Allow implicit conversion to SSGValue by add zero offset
+  notdec::retypd::SSGValue &getAsValue() {
+    if (!isAggregate()) {
+      return std::get<SSGValue>(Ty);
+    } else {
+      auto &Agg = getAggregate();
+      assert(!Agg.Values.empty());
+      assert(Agg.Values.front().Start == 0);
+      return Agg.Values.front().Target->getAsValue();
+    }
+  }
+  const notdec::retypd::SSGValue &getAsValue() const {
+    return const_cast<SSGNode *>(this)->getAsValue();
+  }
 
   // #region Ptr/Num handling
-  const PNINode *getPNVar() const {
-    assert(std::holds_alternative<SSGValue>(Ty));
-    return std::get<SSGValue>(Ty).PNIVar;
-  }
-  PNINode *getPNVar() {
-    assert(std::holds_alternative<SSGValue>(Ty));
-    return std::get<SSGValue>(Ty).PNIVar;
-  }
-  PtrOrNum getPNTy() { return getPNVar()->getPtrOrNum(); }
+  const PNINode *getPNVar() const { return getAsValue().PNIVar; }
+  PNINode *getPNVar() { return getAsValue().PNIVar; }
+  SSGNode *getPointsTo() { return getAsValue().PointsTo; }
+  void setPointsTo(SSGNode *N) { getAsValue().PointsTo = N; }
+  PtrOrNum getPNTy() const { return getPNVar()->getPtrOrNum(); }
+  bool isNonPtr() const { return getPNTy() == NonPtr; }
+  bool isPointer() const { return getPNTy() == Pointer; }
 
   bool setPtrOrNum(PtrOrNum Ty) { return getPNVar()->setPtrOrNum(Ty); }
   /// Unify the PNVarTy of the node to other type or unknown var.
   SSGNode *unifyPN(SSGNode &Other);
   // #endregion Ptr/Num handling
 
-  /// merge two SSGNode into one. Return true if the left one is preserved.
-  /// the other one is expected to be removed.
-  bool unify(SSGNode &other) {
-    getPNVar()->unifyPN(*other.getPNVar());
-    return true;
+  unsigned getSize() const {
+    if (!isAggregate()) {
+      return Size;
+    } else {
+      auto &Values = getAggregate().Values;
+      unsigned oldSize = Size;
+      if (Values.empty()) {
+        return 0;
+      } else {
+        // no recursive update
+        return Values.back().Start + Values.back().Size;
+      }
+    }
   }
+
+  SSGNode *cloneNonAgg() const;
+  void makeAggregate();
+
+  void replaceUseOfWith(SSGNode *Old, SSGNode *New) {
+    if (!isAggregate()) {
+      if (isPointer() && getPointsTo() == Old) {
+        setPointsTo(New);
+      }
+    } else {
+      auto &Agg = getAggregate();
+      for (auto &Entry : Agg.Values) {
+        if (Entry.Target == Old) {
+          Entry.Target = New;
+        }
+      }
+    }
+  }
+
+  /// Merge the other SSGNode into one.
+  /// the other SSGNode is expected to be removed.
+  void unify(SSGNode &OtherNode, unsigned Offset = 0);
+
+  /// Propagate the size change (capabilities) upward.
+  /// May invalidate all index/iterator after the entry.
+  void updateEntSize(std::size_t Index);
+  void updateEntSize(SSGAggregate::iterator Index) {
+    updateEntSize(std::distance(getAggregate().Values.begin(), Index));
+  }
+
+  void tryRemoveUse(SSGNode *Target) {
+    assert(isAggregate());
+    bool stillUse = false;
+    for (auto &Ent : getAggregate().Values) {
+      if (Ent.Target == Target) {
+        stillUse = true;
+      }
+    }
+    if (!stillUse) {
+      Target->AggregateUsers.erase(this);
+    }
+  }
+  void eraseEntry(std::size_t Index) {
+    assert(isAggregate());
+    auto &Agg = getAggregate();
+    auto *Target = Agg.Values[Index].Target;
+    Agg.Values.erase(Agg.Values.begin() + Index);
+    tryRemoveUse(Target);
+  }
+
   std::string str() const {
     return "SSG_" + std::to_string(Id) + "-" + getPNVar()->str();
   }
@@ -335,7 +447,7 @@ struct StorageShapeGraph {
   }
   std::map<PNINode *, std::set<SSGNode *>> PNIToNode;
   PNINode *createPNINode() {
-    auto *N = new PNINode(*this, IdCounter++);
+    auto *N = new PNINode(*this);
     PNINodes.push_back(N);
     return N;
   }
@@ -381,15 +493,28 @@ struct StorageShapeGraph {
   // }
 
   friend struct SSGNode;
+
+protected:
   static unsigned long IdCounter;
+
+public:
+  unsigned long getNextId() { return IdCounter++; }
+  SSGNode *moveNonAgg(SSGNode &N) {
+    // target to the same PNINode. Because struct as a value represents the
+    // value at offset zero. (implicit add offset zero.)
+    assert(!N.isAggregate());
+    SSGNode *NewN = new SSGNode(std::move(N));
+    Nodes.push_back(NewN);
+    return NewN;
+  }
   SSGNode *createUnknown(unsigned int Size) {
-    SSGNode *N = new SSGNode(*this, IdCounter++, Size);
+    SSGNode *N = new SSGNode(*this, Size);
     Nodes.push_back(N);
     return N;
   }
   SSGNode *createPrimitive(std::string Name, unsigned int Size) {
     // TODO handle Name
-    SSGNode *N = new SSGNode(*this, IdCounter++, Size);
+    SSGNode *N = new SSGNode(*this, Size);
     N->getPNVar()->setPtrOrNum(NonPtr);
     Nodes.push_back(N);
     return N;
@@ -412,6 +537,13 @@ struct StorageShapeGraph {
       PNIToCons.erase(Var);
     }
     Var->eraseFromParent();
+  }
+
+  SSGNode *replaceSSGNodes(SSGNode *Discard, SSGNode *Keep) {
+    for (auto *User : Discard->AggregateUsers) {
+      User->replaceUseOfWith(Discard, Keep);
+    }
+    Discard->eraseFromParent();
   }
 
   PNINode *mergePNINodes(PNINode *Left, PNINode *Right) {
