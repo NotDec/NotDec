@@ -364,7 +364,7 @@ void ConstraintGraph::saturate() {
 ConstraintGraph
 ConstraintGraph::fromConstraints(std::string FuncName,
                                  std::vector<Constraint> &Cons) {
-  ConstraintGraph G(FuncName);
+  ConstraintGraph G(nullptr, FuncName);
   for (auto &C : Cons) {
     if (std::holds_alternative<SubTypeConstraint>(C)) {
       auto &SCons = std::get<SubTypeConstraint>(C);

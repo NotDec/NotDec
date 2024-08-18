@@ -107,6 +107,9 @@ struct OffsetRange {
     }
     return ret;
   }
+  OffsetRange operator*(const int64_t Rhs) const {
+    return *this * OffsetRange{.offset = Rhs};
+  }
   OffsetRange operator*(const OffsetRange Rhs) const {
     OffsetRange Ret;
     Ret.offset = offset * Rhs.offset;

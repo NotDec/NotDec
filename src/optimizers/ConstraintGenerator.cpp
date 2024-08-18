@@ -46,7 +46,7 @@ const char *TypeRecovery::NewPrefix = "new_";
 const char *TypeRecovery::AddPrefix = "add_";
 const char *TypeRecovery::SubPrefix = "sub_";
 
-/// Visit Add/Mul chain, add the results to OffsetRange.
+/// Visit Add/Mul/shl chain, add the results to OffsetRange.
 OffsetRange matchOffsetRange(llvm::Value *I) {
   assert(I->getType()->isIntegerTy());
   if (auto *CI = dyn_cast<llvm::ConstantInt>(I)) {
@@ -65,8 +65,29 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
     return matchOffsetRange(Src1) + matchOffsetRange(Src2);
   } else if (BinOp->getOpcode() == llvm::Instruction::Mul) {
     return matchOffsetRange(Src1) * matchOffsetRange(Src2);
+  } else if (BinOp->getOpcode() == llvm::Instruction::Shl &&
+             llvm::isa<ConstantInt>(Src2)) {
+    return matchOffsetRange(Src1) *
+           (1 << llvm::cast<ConstantInt>(Src2)->getSExtValue());
   } else {
     return OffsetRange{.offset = 0, .access = {{1, 0}}};
+  }
+}
+
+void ConstraintsGenerator::onEraseConstraint(const retypd::ConsNode *Cons) {
+  // If add constraint solved, check for constant add.
+  if (Cons->isAdd()) {
+    auto [Left, Right, Result] = Cons->getNodes();
+    auto BinOp = const_cast<llvm::BinaryOperator *>(Cons->getInst());
+    auto *LeftVal = BinOp->getOperand(0);
+    auto *RightVal = BinOp->getOperand(1);
+    if (Left->getPtrOrNum() == retypd::NonPtr &&
+        Right->getPtrOrNum() == retypd::Pointer) {
+      addSubTypeCons(RightVal, BinOp, matchOffsetRange(LeftVal));
+    } else if (Left->getPtrOrNum() == retypd::Pointer &&
+               Right->getPtrOrNum() == retypd::NonPtr) {
+      addSubTypeCons(LeftVal, BinOp, matchOffsetRange(RightVal));
+    }
   }
 }
 
@@ -124,7 +145,7 @@ void ConstraintsGenerator::generate() {
   callInstanceId.clear();
 }
 
-void ConstraintsGenerator::solve() { CG.solve(); }
+void ConstraintsGenerator::solve() { SSG.solve(); }
 
 static bool mustBePrimitive(const llvm::Type *Ty) {
   if (Ty->isFloatTy() || Ty->isDoubleTy()) {
@@ -234,6 +255,10 @@ retypd::CGNode &ConstraintsGenerator::getNode(ValMapKey Val, User *User) {
   }
   auto ret = convertTypeVar(Val);
   return setTypeVar(Val, ret, User, getSize(Val));
+}
+
+retypd::SSGNode *ConstraintsGenerator::getSSGNode(const TypeVariable &Val) {
+  return CG.getOrInsertNode(Val).Link.lookupNode();
 }
 
 retypd::SSGNode *ConstraintsGenerator::getSSGNode(ValMapKey Val, User *User) {
@@ -437,11 +462,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
     cg.newVarSubtype(&I, SrcVar);
     return;
   } else if (isa<PtrToIntInst, IntToPtrInst, BitCastInst>(I)) {
-    // ignore cast, but set value as pointer.
+    // ignore cast, view as assignment.
     auto *Src = I.getOperand(0);
     auto SrcVar = cg.getTypeVar(Src, &I);
-    auto &Node = cg.newVarSubtype(&I, SrcVar);
-    cg.setPointer(Node);
+    /*auto &Node = */ cg.newVarSubtype(&I, SrcVar);
+    // cg.setPointer(Node);
     return;
   } else if (isa<TruncInst, ZExtInst>(&I)) {
     auto *Src = I.getOperand(0);
@@ -633,19 +658,30 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
     }
   }
 }
+using retypd::SSGNode;
+void ConstraintsGenerator::addSubTypeCons(SSGNode *LHS, SSGNode *RHS,
+                                          OffsetRange Offset) {
+  SSG.addSubTypeCons(RHS, LHS, Offset);
+}
+
+void ConstraintsGenerator::addSubTypeCons(llvm::Value *LHS,
+                                          llvm::BinaryOperator *RHS,
+                                          OffsetRange Offset) {
+  addSubTypeCons(getSSGNode(RHS, nullptr), getSSGNode(LHS, RHS), Offset);
+}
 
 void ConstraintsGenerator::addAddConstraint(const ValMapKey LHS,
                                             const ValMapKey RHS,
                                             BinaryOperator *I) {
-  SSG.addAddCons(getSSGNode(LHS, I), getSSGNode(RHS, I),
-                 getSSGNode(I, nullptr));
+  SSG.addAddCons(getSSGNode(LHS, I), getSSGNode(RHS, I), getSSGNode(I, nullptr),
+                 I);
 }
 
 void ConstraintsGenerator::addSubConstraint(const ValMapKey LHS,
                                             const ValMapKey RHS,
-                                            BinaryOperator *Result) {
-  SSG.addSubCons(getSSGNode(LHS, Result), getSSGNode(RHS, Result),
-                 getSSGNode(Result, nullptr));
+                                            BinaryOperator *I) {
+  SSG.addSubCons(getSSGNode(LHS, I), getSSGNode(RHS, I), getSSGNode(I, nullptr),
+                 I);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {

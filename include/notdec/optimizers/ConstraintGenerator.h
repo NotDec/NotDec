@@ -32,6 +32,7 @@ using retypd::TypeVariable;
 
 bool hasUser(const Value *Val, const User *User);
 bool isFinal(const std::string &Name);
+OffsetRange matchOffsetRange(llvm::Value *I);
 
 struct ConstraintsGenerator;
 struct TypeRecovery : PassInfoMixin<TypeRecovery> {
@@ -131,7 +132,7 @@ struct ConstraintsGenerator {
   void solve();
   void generate();
   ConstraintsGenerator(TypeRecovery &Ctx, Function &F)
-      : Ctx(Ctx), Func(F), CG(Ctx.getName(F, TypeRecovery::FuncPrefix)),
+      : Ctx(Ctx), Func(F), CG(this, Ctx.getName(F, TypeRecovery::FuncPrefix)),
         SSG(CG.SSG) {}
 
 protected:
@@ -182,8 +183,8 @@ public:
              "addConstraint: different primitive types !?");
       return;
     }
-    CG.addConstraint(sub, sup);
-    CG.getOrInsertNode(sub).Link.unify(CG.getOrInsertNode(sup).Link);
+    // CG.addConstraint(sub, sup);
+    SSG.addSubTypeCons(getSSGNode(sub), getSSGNode(sup), {0});
   }
 
   void setPointer(CGNode &Node) {
@@ -192,6 +193,7 @@ public:
 
   retypd::CGNode &getNode(ValMapKey Val, User *User);
   retypd::SSGNode *getSSGNode(ValMapKey Val, User *User);
+  retypd::SSGNode *getSSGNode(const TypeVariable &Val);
 
   const TypeVariable &getTypeVar(ValMapKey val, User *User);
   TypeVariable convertTypeVar(ValMapKey Val, User *User = nullptr);
@@ -201,6 +203,11 @@ public:
   void addSubConstraint(const ValMapKey LHS, const ValMapKey RHS,
                         BinaryOperator *Result);
   void addCmpConstraint(const ValMapKey LHS, const ValMapKey RHS, ICmpInst *I);
+  void onEraseConstraint(const retypd::ConsNode *Cons);
+  void addSubTypeCons(retypd::SSGNode *LHS, retypd::SSGNode *RHS,
+                      OffsetRange Offset);
+  void addSubTypeCons(llvm::Value *LHS, llvm::BinaryOperator *RHS,
+                      OffsetRange Offset);
 
   void setOffset(TypeVariable &dtv, OffsetRange Offset);
   TypeVariable deref(Value *Val, User *User, long BitSize, bool isLoad);

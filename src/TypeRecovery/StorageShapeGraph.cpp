@@ -1,7 +1,10 @@
 #include "TypeRecovery/StorageShapeGraph.h"
+#include "Utils/Range.h"
+#include "optimizers/ConstraintGenerator.h"
 #include <cassert>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <queue>
 
 namespace notdec::retypd {
@@ -14,12 +17,12 @@ void StorageShapeGraph::solve() {
   // (maintain a map from var to constraints, maintain when two unknown vars
   // merge)
   // When two unknown vars merge, add all constraints that use these two vars.
-  std::set<PNIConsNode *> Worklist;
+  std::set<ConsNode *> Worklist;
   for (auto &C : Constraints) {
     Worklist.insert(&C);
   }
   while (!Worklist.empty()) {
-    PNIConsNode *C = *Worklist.begin();
+    ConsNode *C = *Worklist.begin();
     Worklist.erase(C);
     auto Changed = C->solve();
     bool isFullySolved = C->isFullySolved();
@@ -32,11 +35,26 @@ void StorageShapeGraph::solve() {
         Worklist.insert(C2);
       }
     }
+    // remove the constraint if fully solved.
     if (isFullySolved) {
       eraseConstraint(C);
       C = nullptr;
     }
   }
+}
+
+void StorageShapeGraph::eraseConstraint(ConsNode *Cons) {
+  if (CG != nullptr) {
+    CG->onEraseConstraint(Cons);
+  }
+  if (Cons->isOfPN()) {
+    for (auto *N : Cons->getNodes()) {
+      assert(N != nullptr);
+      PNIToCons[N].erase(Cons);
+    }
+  }
+
+  Cons->eraseFromParent();
 }
 
 // retypd. Figure 13.
@@ -254,6 +272,8 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
   return Changed;
 }
 
+void SubTypeNodeCons::solve() { Sup->unify(*Sub, Offset); }
+
 PtrOrNum fromIPChar(char C) {
   switch (C) {
   case 'I':
@@ -341,7 +361,20 @@ SSGNode *SSGNode::unifyPN(SSGNode &Other) {
 /// This node is the parent type of OtherNode. This node can have more
 /// capabilities.
 /// Example: For `q = p + 4`, run p.unify(q, 4).
-void SSGNode::unify(SSGNode &OtherNode, unsigned Offset) {
+void SSGNode::unify(SSGNode &OtherNode, OffsetRange OffR) {
+  if (getPNTy() != OtherNode.getPNTy()) {
+    assert(false && "SSGNode::unify: PN type mismatch");
+  }
+  if (isNonPtr()) {
+    if (Size != OtherNode.Size) {
+      std::cerr << "Warning: SSGNode::unify: size mismatch\n";
+    }
+    // TODO unify primitive type
+    return;
+  }
+  // handle array later
+  assert(OffR.access.size() == 0);
+  int64_t Offset = OffR.offset;
   // 1. If offset is not zero, try to find or delegate the subrange for it.
   // Because this and other should have its own type (represented by a
   // SSGNode). Make offset zero first.

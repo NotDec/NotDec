@@ -97,7 +97,8 @@ struct ConstraintGraph : CGBase {
   // TODO prevent name collision
   static const char *Memory;
 
-  ConstraintGraph(std::string FuncName) : FuncName(FuncName), SSG(FuncName) {}
+  ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName)
+      : FuncName(FuncName), SSG(CG, FuncName) {}
 
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
   // Interface for initial constraint insertion
