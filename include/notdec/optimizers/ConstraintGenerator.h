@@ -33,6 +33,7 @@ using retypd::TypeVariable;
 bool hasUser(const Value *Val, const User *User);
 bool isFinal(const std::string &Name);
 OffsetRange matchOffsetRange(llvm::Value *I);
+bool mustBePrimitive(const llvm::Type *Ty);
 
 struct ConstraintsGenerator;
 struct TypeRecovery : PassInfoMixin<TypeRecovery> {
@@ -46,9 +47,6 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
 
   static std::string sanitize_name(std::string s);
 
-protected:
-  size_t typeValId = 0;
-
 public:
   void print(Module &M, std::string path);
   // get a new type_var name from type_val_id
@@ -61,6 +59,22 @@ public:
   static const char *NewPrefix;
   static const char *AddPrefix;
   static const char *SubPrefix;
+};
+
+struct ValueNamer {
+protected:
+  static size_t typeValId;
+
+public:
+  static std::string getName(Value &Val,
+                             const char *prefix = TypeRecovery::DefaultPrefix) {
+    if (!Val.hasName()) {
+      auto Id = typeValId++;
+      Val.setName(prefix + std::to_string(Id));
+      return prefix + std::to_string(Id);
+    }
+    return Val.getName().str();
+  }
 };
 
 inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
@@ -118,6 +132,8 @@ struct IntConstant {
 };
 using ValMapKey =
     std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
+
+std::string getName(const ValMapKey &Val);
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
 /// The ConstraintGraph/StorageShapeGraph is expected to be able to print to a
@@ -218,7 +234,7 @@ public:
   }
   static std::string offset(APInt Offset, int Count = 0);
 
-protected:
+public:
   struct PcodeOpType {
     // We only care about number or non-number, and signedness.
     // Size is not included.
@@ -238,6 +254,7 @@ protected:
 
   static const std::map<unsigned, PcodeOpType> opTypes;
 
+protected:
   // visitor class
   // Visit each basic block in topo order. Then handle dataflow of Phi nodes.
   // After visiting each instruction, it must be assigned a type variable.

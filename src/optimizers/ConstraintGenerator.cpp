@@ -37,6 +37,7 @@ namespace notdec {
 
 using retypd::OffsetLabel;
 
+size_t ValueNamer::typeValId = 0;
 const char *ConstraintGraph::Memory = "MEMORY";
 const char *TypeRecovery::DefaultPrefix = "v_";
 const char *TypeRecovery::FuncPrefix = "func_";
@@ -45,6 +46,25 @@ const char *TypeRecovery::SelectPrefix = "select_";
 const char *TypeRecovery::NewPrefix = "new_";
 const char *TypeRecovery::AddPrefix = "add_";
 const char *TypeRecovery::SubPrefix = "sub_";
+
+std::string getName(const ValMapKey &Val) {
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    return ValueNamer::getName(**V);
+  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+    return ValueNamer::getName(*F->Func, "ReturnValue_");
+  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
+    return ValueNamer::getName(*const_cast<llvm::CallBase *>(Arg->Call)) +
+           "_CallArg_" + std::to_string(Arg->Index);
+  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
+    return ValueNamer::getName(*const_cast<llvm::CallBase *>(Ret->Call)) +
+           "_CallRet";
+  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+    return "IntConstant_" + int_to_hex(IC->Val->getSExtValue());
+  }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "ERROR: getName: unhandled type of ValMapKey\n";
+  std::abort();
+}
 
 /// Visit Add/Mul/shl chain, add the results to OffsetRange.
 OffsetRange matchOffsetRange(llvm::Value *I) {
@@ -147,7 +167,7 @@ void ConstraintsGenerator::generate() {
 
 void ConstraintsGenerator::solve() { SSG.solve(); }
 
-static bool mustBePrimitive(const llvm::Type *Ty) {
+bool mustBePrimitive(const llvm::Type *Ty) {
   if (Ty->isFloatTy() || Ty->isDoubleTy()) {
     return true;
   }
@@ -358,12 +378,7 @@ std::string TypeRecovery::sanitize_name(std::string S) {
 }
 
 std::string TypeRecovery::getName(Value &Val, const char *prefix) {
-  if (!Val.hasName()) {
-    auto Id = typeValId++;
-    Val.setName(prefix + std::to_string(Id));
-    return prefix + std::to_string(Id);
-  }
-  return Val.getName().str();
+  return ValueNamer::getName(Val, prefix);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdint>
 #include <list>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/InstrTypes.h>
 #include <map>
 #include <memory>
@@ -101,11 +102,10 @@ public:
 };
 
 struct SSGValue {
-  /// Represent the type of the node 0-2, Or an unknown variable 3+.
   /// Maintain the reverse map Parent->PNVarToNode
   PNINode *PNIVar = nullptr;
-  SSGNode *PointsTo = nullptr; // pointes to edge. Nullptr for empty struct with
-                               // no relationship.
+  // pointes to edge. Nullptr for empty struct with no relationship.
+  SSGNode *PointsTo = nullptr;
 };
 
 struct SSGAggregate {
@@ -143,6 +143,7 @@ struct SSGAggregate {
 struct SSGNode
     : public llvm::ilist_node_with_parent<SSGNode, StorageShapeGraph> {
   StorageShapeGraph *Parent = nullptr;
+  std::string Name;
   unsigned long Id = 0;
   unsigned Size = 0;
   inline StorageShapeGraph *getParent() { return Parent; }
@@ -150,15 +151,18 @@ struct SSGNode
 
 protected:
   friend struct StorageShapeGraph;
-  SSGNode(StorageShapeGraph &SSG, unsigned size);
+  SSGNode(StorageShapeGraph &SSG, unsigned size, bool isAgg = false);
   /// Move constructor for makeAggregate
-  SSGNode(SSGNode &&Other);
+  // SSGNode(SSGNode &&Other);
   void setPNVar(PNINode *PN) {
     assert(std::holds_alternative<SSGValue>(Ty));
     getAsValue().PNIVar = PN;
   }
 
 public:
+  void setName(const std::string N) { Name = N; }
+  std::string getName() const { return Name; }
+
   using SSGTy = std::variant<SSGValue, SSGAggregate>;
   SSGTy Ty;
   // reverse link to the users.
@@ -187,6 +191,8 @@ public:
     return const_cast<SSGNode *>(this)->getAsValue();
   }
 
+  SSGAggregate &getPointsToAgg();
+
   // #region Ptr/Num handling
   const PNINode *getPNVar() const { return getAsValue().PNIVar; }
   PNINode *getPNVar() { return getAsValue().PNIVar; }
@@ -201,6 +207,12 @@ public:
   /// Unify the PNVarTy of the node to other type or unknown var.
   SSGNode *unifyPN(SSGNode &Other);
   // #endregion Ptr/Num handling
+
+  llvm::ConstantInt *IntC = nullptr;
+  bool isIntConstant() const { return IntC != nullptr; }
+  void setIntConstant(llvm::ConstantInt *Constant) { this->IntC = Constant; }
+
+  std::set<SSGNode *> strictParent;
 
   unsigned getSize() const {
     if (!isAggregate()) {
@@ -217,7 +229,7 @@ public:
   }
 
   SSGNode *cloneNonAgg() const;
-  void makeAggregate();
+  // void makeAggregate();
 
   void replaceUseOfWith(SSGNode *Old, SSGNode *New) {
     if (!isAggregate()) {
@@ -236,9 +248,9 @@ public:
 
   /// Merge the other SSGNode into one.
   /// the other SSGNode is expected to be removed.
-  void unify(SSGNode &OtherNode, OffsetRange Offset = {.offset = 0});
-  void unify(SSGNode &OtherNode, int64_t Offset) {
-    unify(OtherNode, {.offset = Offset});
+  void mergeTo(SSGNode &OtherNode, OffsetRange Offset = {.offset = 0});
+  void mergeTo(SSGNode &OtherNode, int64_t Offset) {
+    mergeTo(OtherNode, {.offset = Offset});
   }
 
   /// Propagate the size change (capabilities) upward.
@@ -247,6 +259,9 @@ public:
   void updateEntSize(SSGAggregate::iterator Index) {
     updateEntSize(std::distance(getAggregate().Values.begin(), Index));
   }
+
+  /// delegate a node to a offset
+  void delegateToOffset(SSGNode &Target, int64_t Offset);
 
   void tryRemoveUse(SSGNode *Target) {
     assert(isAggregate());
@@ -441,8 +456,8 @@ struct SignednessNode : node_with_erase<SignednessNode, StorageShapeGraph> {
 };
 
 struct StorageShapeGraph {
-  ConstraintsGenerator *CG;
-  std::string FuncName;
+  std::function<void(const retypd::ConsNode *)> onEraseConstraint;
+  std::string Name;
   SSGNode *Memory = nullptr;
 
   // region linked list definitions
@@ -484,8 +499,10 @@ struct StorageShapeGraph {
   }
   // endregion linked list definitions
 
-  StorageShapeGraph(ConstraintsGenerator *CG, std::string FuncName)
-      : CG(CG), FuncName(FuncName) {
+  StorageShapeGraph(
+      std::function<void(const retypd::ConsNode *)> onEraseConstraint,
+      std::string Name)
+      : onEraseConstraint(onEraseConstraint), Name(Name) {
     initMemory();
   }
 
@@ -544,20 +561,25 @@ protected:
 
 public:
   unsigned long getNextId() { return IdCounter++; }
-  SSGNode *moveNonAgg(SSGNode &N) {
-    // target to the same PNINode. Because struct as a value represents the
-    // value at offset zero. (implicit add offset zero.)
-    assert(!N.isAggregate());
-    SSGNode *NewN = new SSGNode(std::move(N));
-    Nodes.push_back(NewN);
-    return NewN;
+  // SSGNode *moveNonAgg(SSGNode &N) {
+  //   // target to the same PNINode. Because struct as a value represents the
+  //   // value at offset zero. (implicit add offset zero.)
+  //   assert(!N.isAggregate());
+  //   SSGNode *NewN = new SSGNode(std::move(N));
+  //   Nodes.push_back(NewN);
+  //   return NewN;
+  // }
+  SSGNode *createAgg() {
+    SSGNode *N = new SSGNode(*this, 0, true);
+    Nodes.push_back(N);
+    return N;
   }
   SSGNode *createUnknown(unsigned int Size) {
     SSGNode *N = new SSGNode(*this, Size);
     Nodes.push_back(N);
     return N;
   }
-  SSGNode *createPrimitive(std::string Name, unsigned int Size) {
+  SSGNode *createNonPtr(std::string Name, unsigned int Size) {
     // TODO handle Name
     SSGNode *N = new SSGNode(*this, Size);
     N->getPNVar()->setPtrOrNum(NonPtr);

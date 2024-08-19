@@ -20,6 +20,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
+#include "optimizers/ConstraintGenerator.h"
 
 #define DEBUG_TYPE "retypd_graph"
 
@@ -41,6 +42,11 @@ std::string toString(const EdgeLabel &label) {
   }
   assert(false && "Unknown FieldLabel!");
 }
+
+ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName)
+    : FuncName(FuncName),
+      SSG([=](const retypd::ConsNode *Node) { CG->onEraseConstraint(Node); },
+          FuncName) {}
 
 std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   assert(!isLayerSplit && "printConstraints: graph is already split!?");
@@ -656,7 +662,7 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size)
     : Parent(Parent), key(key), Size(Size), Link(Parent.SSG) {
   // Create the link in the SSG.
   if (key.Base.isPrimitive()) {
-    Link.setNode(Link.Parent->createPrimitive(key.Base.getBaseName(), Size));
+    Link.setNode(Link.Parent->createNonPtr(key.Base.getBaseName(), Size));
   } else {
     Link.setNode(Link.Parent->createUnknown(Size));
   }

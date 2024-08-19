@@ -34,6 +34,7 @@
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
+#include "TypeRecovery/SSGSolver.h"
 #include "notdec-wasm2llvm/utils.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "optimizers/PassManager.h"
@@ -299,7 +300,7 @@ void DecompileConfig::run_passes() {
           createFunctionToLoopPassAdaptor(LoopRotatePass())));
       MPM.addPass(createModuleToFunctionPassAdaptor(
           createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
-      MPM.addPass(TypeRecovery());
+      MPM.addPass(retypd::SSGTypeRec());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec
