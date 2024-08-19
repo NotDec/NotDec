@@ -294,20 +294,20 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ValMapKey Val, User *User) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertTypeVarVal(*V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    auto tv = makeTv(Ctx.getName(*F->Func, TypeRecovery::FuncPrefix));
+    auto tv = makeTv(ValueNamer::getName(*F->Func, TypeRecovery::FuncPrefix));
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
     // TODO what if function pointer?
-    auto tv = makeTv(
-        Ctx.getName(*Arg->Call->getCalledFunction(), TypeRecovery::FuncPrefix));
+    auto tv = makeTv(ValueNamer::getName(*Arg->Call->getCalledFunction(),
+                                         TypeRecovery::FuncPrefix));
     tv.getInstanceId() = Arg->InstanceId;
     tv.getLabels().push_back(retypd::InLabel{std::to_string(Arg->Index)});
     return tv;
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     // TODO what if function pointer?
-    auto tv = makeTv(
-        Ctx.getName(*Ret->Call->getCalledFunction(), TypeRecovery::FuncPrefix));
+    auto tv = makeTv(ValueNamer::getName(*Ret->Call->getCalledFunction(),
+                                         TypeRecovery::FuncPrefix));
     tv.getInstanceId() = Ret->InstanceId;
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
@@ -343,7 +343,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
         assert(false && "convertTypeVarVal: direct use of stack pointer?, run "
                         "StackAllocationRecovery first");
       } else if (auto Func = dyn_cast<Function>(C)) {
-        return makeTv(Ctx.getName(*Func, TypeRecovery::FuncPrefix));
+        return makeTv(ValueNamer::getName(*Func, TypeRecovery::FuncPrefix));
       }
       return makeTv(gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
@@ -367,7 +367,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val
                << "\n";
-  return makeTv(Ctx.getName(*Val, TypeRecovery::NewPrefix));
+  return makeTv(ValueNamer::getName(*Val, TypeRecovery::NewPrefix));
 }
 
 // TODO: accept any character in name by using single quotes like LLVM IR.
@@ -375,10 +375,6 @@ std::string TypeRecovery::sanitize_name(std::string S) {
   std::replace(S.begin(), S.end(), '.', '_');
   std::replace(S.begin(), S.end(), '@', '_');
   return S;
-}
-
-std::string TypeRecovery::getName(Value &Val, const char *prefix) {
-  return ValueNamer::getName(Val, prefix);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
@@ -402,7 +398,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     return;
   }
   // differentiate different call instances in the same function
-  auto TargetName = cg.Ctx.getName(*Target, TypeRecovery::FuncPrefix);
+  auto TargetName = ValueNamer::getName(*Target, TypeRecovery::FuncPrefix);
   // Starts from 1. So that it is different from the default 0.
   auto InstanceId = ++cg.callInstanceId[TargetName];
   for (int i = 0; i < I.arg_size(); i++) {
@@ -421,7 +417,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
     SelectInst &I) {
-  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::SelectPrefix));
+  auto DstVar = makeTv(ValueNamer::getName(I, TypeRecovery::SelectPrefix));
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
   auto Src1Var = cg.getTypeVar(Src1, &I);
@@ -438,7 +434,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
   if (I.getParent()->isEntryBlock()) {
     prefix = "stack_";
   }
-  auto DstVar = makeTv(cg.Ctx.getName(I, prefix));
+  auto DstVar = makeTv(ValueNamer::getName(I, prefix));
   auto &Node =
       cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
   // set as pointer type
@@ -453,7 +449,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
   // Only Phi can create inter-block dataflow besides direct reference (valid if
   // we follow a topological sort of basic blocks)
 
-  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::PhiPrefix));
+  auto DstVar = makeTv(ValueNamer::getName(I, TypeRecovery::PhiPrefix));
   cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
 }
 
@@ -703,7 +699,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
 
-  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::AddPrefix));
+  auto DstVar = makeTv(ValueNamer::getName(I, TypeRecovery::AddPrefix));
   cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
 
   cg.addAddConstraint(Src1, Src2, &I);
@@ -713,7 +709,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitSub(BinaryOperator &I) {
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
 
-  auto DstVar = makeTv(cg.Ctx.getName(I, TypeRecovery::SubPrefix));
+  auto DstVar = makeTv(ValueNamer::getName(I, TypeRecovery::SubPrefix));
   cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
 
   cg.addSubConstraint(Src1, Src2, &I);
@@ -804,7 +800,7 @@ void TypeRecovery::gen_json(std::string OutputFilename) {
   json::Object Constraints;
   // iterate func_constrains
   for (auto &kv : func_ctxs) {
-    auto funcName = getName(*kv.first);
+    auto funcName = ValueNamer::getName(*kv.first);
     json::Array FuncConstrainsJson;
     for (auto &c : kv.second.CG.toConstraints()) {
       FuncConstrainsJson.push_back(toString(c));

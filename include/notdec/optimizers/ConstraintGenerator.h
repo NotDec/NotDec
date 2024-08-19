@@ -42,6 +42,7 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
   std::string data_layout;
   unsigned pointer_size = 0;
 
+  // bool FlowSensitive = false;
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
   void gen_json(std::string OutputFilename);
 
@@ -49,9 +50,6 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
 
 public:
   void print(Module &M, std::string path);
-  // get a new type_var name from type_val_id
-  std::string getName(Value &Val,
-                      const char *prefix = TypeRecovery::DefaultPrefix);
   static const char *DefaultPrefix;
   static const char *FuncPrefix;
   static const char *PhiPrefix;
@@ -148,7 +146,8 @@ struct ConstraintsGenerator {
   void solve();
   void generate();
   ConstraintsGenerator(TypeRecovery &Ctx, Function &F)
-      : Ctx(Ctx), Func(F), CG(this, Ctx.getName(F, TypeRecovery::FuncPrefix)),
+      : Ctx(Ctx), Func(F),
+        CG(this, ValueNamer::getName(F, TypeRecovery::FuncPrefix)),
         SSG(CG.SSG) {}
 
 protected:
@@ -189,7 +188,8 @@ public:
       return setTypeVar(Val, dtv, nullptr, Size);
     }
     auto &Node = setTypeVar(
-        Val, TypeVariable::CreateDtv(Ctx.getName(*Val, prefix)), nullptr, Size);
+        Val, TypeVariable::CreateDtv(ValueNamer::getName(*Val, prefix)),
+        nullptr, Size);
     addSubtype(Node.key.Base, dtv);
     return Node;
   }
