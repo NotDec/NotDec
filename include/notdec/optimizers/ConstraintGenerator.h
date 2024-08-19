@@ -50,13 +50,6 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
 
 public:
   void print(Module &M, std::string path);
-  static const char *DefaultPrefix;
-  static const char *FuncPrefix;
-  static const char *PhiPrefix;
-  static const char *SelectPrefix;
-  static const char *NewPrefix;
-  static const char *AddPrefix;
-  static const char *SubPrefix;
 };
 
 struct ValueNamer {
@@ -65,7 +58,7 @@ protected:
 
 public:
   static std::string getName(Value &Val,
-                             const char *prefix = TypeRecovery::DefaultPrefix) {
+                             const char *prefix = ValueNamer::DefaultPrefix) {
     if (!Val.hasName()) {
       auto Id = typeValId++;
       Val.setName(prefix + std::to_string(Id));
@@ -73,6 +66,13 @@ public:
     }
     return Val.getName().str();
   }
+  static const char *DefaultPrefix;
+  static const char *FuncPrefix;
+  static const char *PhiPrefix;
+  static const char *SelectPrefix;
+  static const char *NewPrefix;
+  static const char *AddPrefix;
+  static const char *SubPrefix;
 };
 
 inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
@@ -147,8 +147,7 @@ struct ConstraintsGenerator {
   void generate();
   ConstraintsGenerator(TypeRecovery &Ctx, Function &F)
       : Ctx(Ctx), Func(F),
-        CG(this, ValueNamer::getName(F, TypeRecovery::FuncPrefix)),
-        SSG(CG.SSG) {}
+        CG(this, ValueNamer::getName(F, ValueNamer::FuncPrefix)), SSG(CG.SSG) {}
 
 protected:
   std::map<std::string, uint32_t> callInstanceId;
@@ -180,7 +179,7 @@ public:
     return *ref.first->second;
   }
   CGNode &newVarSubtype(llvm::Value *Val, const TypeVariable &dtv,
-                        const char *prefix = TypeRecovery::DefaultPrefix) {
+                        const char *prefix = ValueNamer::DefaultPrefix) {
     assert(Val2Node.find(Val) == Val2Node.end() &&
            "newVarSubtype: Value already mapped!");
     auto Size = Val->getType()->getScalarSizeInBits();
