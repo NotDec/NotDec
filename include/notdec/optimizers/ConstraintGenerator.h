@@ -2,6 +2,7 @@
 #define _NOTDEC_OPTIMIZERS_RETYPD_GENERATE_H_
 
 #include <cassert>
+#include <cstddef>
 #include <deque>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
@@ -32,7 +33,6 @@ using retypd::TypeVariable;
 
 bool hasUser(const Value *Val, const User *User);
 bool isFinal(const std::string &Name);
-OffsetRange matchOffsetRange(llvm::Value *I);
 bool mustBePrimitive(const llvm::Type *Ty);
 
 struct ConstraintsGenerator;
@@ -55,6 +55,7 @@ protected:
   static size_t typeValId;
 
 public:
+  static size_t getId() { return typeValId++; }
   static std::string getName(Value &Val,
                              const char *prefix = ValueNamer::DefaultPrefix) {
     if (!Val.hasName()) {
@@ -197,9 +198,7 @@ public:
     CG.addConstraint(sub, sup);
   }
 
-  void setPointer(CGNode &Node) {
-    Node.getPNIVar()->setPtrOrNum(retypd::Pointer);
-  }
+  void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
   retypd::CGNode &getNode(ValMapKey Val, User *User);
 
@@ -211,7 +210,7 @@ public:
   void addSubConstraint(const ValMapKey LHS, const ValMapKey RHS,
                         BinaryOperator *Result);
   void addCmpConstraint(const ValMapKey LHS, const ValMapKey RHS, ICmpInst *I);
-  void onEraseConstraint(const retypd::ConsNode *Cons);
+  // void onEraseConstraint(const retypd::ConsNode *Cons);
   // void addSubTypeCons(retypd::SSGNode *LHS, retypd::SSGNode *RHS,
   //                     OffsetRange Offset);
   // void addSubTypeCons(llvm::Value *LHS, llvm::BinaryOperator *RHS,

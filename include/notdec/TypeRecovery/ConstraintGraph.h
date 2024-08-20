@@ -18,6 +18,7 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
+#include "Utils/Range.h"
 
 namespace notdec {
 struct ConstraintsGenerator;
@@ -59,7 +60,6 @@ using CGNodeBase = llvm::DGNode<CGNode, CGEdge>;
 using CGEdgeBase = llvm::DGEdge<CGNode, CGEdge>;
 using CGBase = llvm::DirectedGraph<CGNode, CGEdge>;
 
-// TODO make node immutable
 struct CGNode : CGNodeBase {
   ConstraintGraph &Parent;
   const NodeKey key;
@@ -79,6 +79,8 @@ protected:
 public:
   CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size);
   std::string str() { return key.str() + "-" + PNIVar->str(); }
+  void onSetPointer();
+  void setAsPtrAdd(CGNode *Other, OffsetRange Off);
 };
 
 struct CGEdge : CGEdgeBase {
@@ -105,6 +107,7 @@ struct ConstraintGraph : CGBase {
   bool isLayerSplit = false;
   // TODO prevent name collision
   static const char *Memory;
+  CGNode *MemoryNode = nullptr;
 
   ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName);
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
@@ -147,6 +150,12 @@ protected:
       connect(From, To, const_cast<CGEdge &>(*it.first));
     }
     return it.second;
+  }
+  void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
+
+public:
+  void setPointer(CGNode &Node) {
+    Node.getPNIVar()->setPtrOrNum(retypd::Pointer);
   }
 };
 

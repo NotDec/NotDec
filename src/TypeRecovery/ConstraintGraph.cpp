@@ -27,6 +27,29 @@
 
 namespace notdec::retypd {
 
+void CGNode::onSetPointer() {
+  if (key.Base.isIntConstant()) {
+    // convert to offset of memory
+    auto TV = Parent.MemoryNode->key.Base;
+    TV.getLabels().push_back(OffsetLabel{key.Base.getIntConstant()});
+    // replace the node key
+    ConstraintGraph &Parent = this->Parent;
+    auto Ent = Parent.Nodes.extract(this->key);
+    auto &Base = Ent.mapped().key.Base;
+    const_cast<TypeVariable &>(Base) = TV;
+    Ent.key() = Ent.mapped().key;
+    Parent.Nodes.insert(std::move(Ent));
+    // try to add related edges.
+    Parent.addConstraint(TV, TV);
+  }
+}
+
+void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {
+  auto TV = Other->key.Base;
+  TV.getLabels().push_back(OffsetLabel{Off});
+  Parent.addConstraint(TV, this->key.Base);
+}
+
 void ConstraintGraph::solve() {
   if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
@@ -57,9 +80,10 @@ std::string toString(const EdgeLabel &label) {
 }
 
 ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name)
-    : Name(Name),
-      PG([=](const retypd::ConsNode *Node) { CG->onEraseConstraint(Node); },
-         Name) {}
+    : Name(Name), PG(Name) {
+  MemoryNode = &getOrInsertNode(NodeKey{TypeVariable::CreateDtv(Memory)});
+  setPointer(*MemoryNode);
+}
 
 std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   assert(!isLayerSplit && "printConstraints: graph is already split!?");
@@ -401,7 +425,9 @@ void ConstraintGraph::addConstraint(const TypeVariable &sub,
   auto &NodeL = getOrInsertNode(sub);
   auto &NodeR = getOrInsertNode(sup);
   // add 1-labeled edge between them
-  addEdge(NodeL, NodeR, One{});
+  if (NodeL != NodeR) {
+    addEdge(NodeL, NodeR, One{});
+  }
   // 2. add each sub var node and edges.
   // 2.1 left
   addRecalls(NodeL);

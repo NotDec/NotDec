@@ -65,56 +65,9 @@ std::string getName(const ValMapKey &Val) {
   std::abort();
 }
 
-/// Visit Add/Mul/shl chain, add the results to OffsetRange.
-OffsetRange matchOffsetRange(llvm::Value *I) {
-  assert(I->getType()->isIntegerTy());
-  if (auto *CI = dyn_cast<llvm::ConstantInt>(I)) {
-    return OffsetRange{.offset = CI->getSExtValue()};
-  }
-  // unknown value = 1*x
-  if (!isa<llvm::BinaryOperator>(I)) {
-    return OffsetRange{.offset = 0, .access = {{1, 0}}};
-  }
-  auto *BinOp = cast<llvm::BinaryOperator>(I);
-  auto *Src1 = BinOp->getOperand(0);
-  auto *Src2 = BinOp->getOperand(1);
-  ensureSequence(Src1, Src2);
-  // check if add or mul
-  if (BinOp->getOpcode() == llvm::Instruction::Add) {
-    return matchOffsetRange(Src1) + matchOffsetRange(Src2);
-  } else if (BinOp->getOpcode() == llvm::Instruction::Mul) {
-    return matchOffsetRange(Src1) * matchOffsetRange(Src2);
-  } else if (BinOp->getOpcode() == llvm::Instruction::Shl &&
-             llvm::isa<ConstantInt>(Src2)) {
-    return matchOffsetRange(Src1) *
-           (1 << llvm::cast<ConstantInt>(Src2)->getSExtValue());
-  } else {
-    return OffsetRange{.offset = 0, .access = {{1, 0}}};
-  }
-}
-
-void ConstraintsGenerator::onEraseConstraint(const retypd::ConsNode *Cons) {
-  // If add constraint solved, check for constant add.
-  if (Cons->isAdd()) {
-    auto [Left, Right, Result] = Cons->getNodes();
-    auto BinOp = const_cast<llvm::BinaryOperator *>(Cons->getInst());
-    auto *LeftVal = BinOp->getOperand(0);
-    auto *RightVal = BinOp->getOperand(1);
-    OffsetRange Off;
-    retypd::TypeVariable TV;
-    if (Left->getPtrOrNum() == retypd::NonPtr &&
-        Right->getPtrOrNum() == retypd::Pointer) {
-      Off = matchOffsetRange(LeftVal);
-      TV = getTypeVar(RightVal, BinOp);
-    } else if (Left->getPtrOrNum() == retypd::Pointer &&
-               Right->getPtrOrNum() == retypd::NonPtr) {
-      Off = matchOffsetRange(RightVal);
-      TV = getTypeVar(LeftVal, BinOp);
-    }
-    auto AddResult = getTypeVar(BinOp, nullptr);
-    TV.getLabels().push_back(OffsetLabel{Off});
-    CG.replaceTypeVarWith(AddResult, TV, Off);
-  }
+void ConstraintGraph::replaceTypeVarWith(CGNode &Node,
+                                         const TypeVariable &New) {
+  assert(Node.key.Base.isIntConstant());
 }
 
 PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {

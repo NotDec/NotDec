@@ -219,6 +219,17 @@ struct TypeVariable {
     return std::holds_alternative<PrimitiveTypeVariable>(Inner);
   }
 
+  bool isIntConstant() const {
+    return std::holds_alternative<IntConstantVar>(Inner);
+  }
+  OffsetRange getIntConstant() const {
+    if (auto *icv = std::get_if<IntConstantVar>(&Inner)) {
+      return icv->Val;
+    } else {
+      assert(false && "getIntConstant: Not an IntConstantVar");
+    }
+  }
+
   // Comparator for stored in a std::map
   // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
   bool operator<(const TypeVariable &rhs) const {

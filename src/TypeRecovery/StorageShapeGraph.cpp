@@ -257,9 +257,6 @@ SSGAggregate &SSGNode::getPointsToAgg() {
   return getPointsTo()->getAggregate();
 }
 
-PNINode::PNINode(StorageShapeGraph &SSG)
-    : node_with_erase(SSG), Id(Parent->getNextId()) {}
-
 SSGNode::SSGNode(StorageShapeGraph &SSG, unsigned int size, bool isAgg)
     : Parent(&SSG), Id(Parent->getNextId()), Size(size) {
   if (isAgg) {

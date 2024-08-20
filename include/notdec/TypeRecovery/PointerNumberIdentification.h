@@ -24,6 +24,8 @@ namespace notdec::retypd {
 struct PNIGraph;
 struct CGNode;
 
+OffsetRange matchOffsetRange(llvm::Value *I);
+
 // #region PtrOrNum
 
 enum PtrOrNum {
@@ -94,30 +96,26 @@ public:
 };
 
 struct AddNodeCons {
-  PNINode *Left = nullptr;
-  PNINode *Right = nullptr;
-  PNINode *Result = nullptr;
+  CGNode *LeftNode = nullptr;
+  CGNode *RightNode = nullptr;
+  CGNode *ResultNode = nullptr;
   llvm::BinaryOperator *Inst;
 
   static const char Rules[][3];
   // return a list of changed nodes and whether the constraint is fully solved.
   llvm::SmallVector<PNINode *, 3> solve();
-  bool isFullySolved() {
-    return !Left->isUnknown() && !Right->isUnknown() && !Result->isUnknown();
-  }
+  bool isFullySolved();
 };
 
 struct SubNodeCons {
-  PNINode *Left = nullptr;
-  PNINode *Right = nullptr;
-  PNINode *Result = nullptr;
+  CGNode *LeftNode = nullptr;
+  CGNode *RightNode = nullptr;
+  CGNode *ResultNode = nullptr;
   llvm::BinaryOperator *Inst;
 
   static const char Rules[][3];
   llvm::SmallVector<PNINode *, 3> solve();
-  bool isFullySolved() {
-    return !Left->isUnknown() && !Right->isUnknown() && !Result->isUnknown();
-  }
+  bool isFullySolved();
 };
 
 using NodeCons = std::variant<AddNodeCons, SubNodeCons>;
@@ -142,41 +140,15 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
     }
     assert(false && "PNIConsNode::isFullySolved: unhandled variant");
   }
-  void replaceUseOfWith(PNINode *Old, PNINode *New) {
-    if (auto *Add = std::get_if<AddNodeCons>(&C)) {
-      if (Add->Left == Old) {
-        Add->Left = New;
-      }
-      if (Add->Right == Old) {
-        Add->Right = New;
-      }
-      if (Add->Result == Old) {
-        Add->Result = New;
-      }
-      return;
-    } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
-      if (Sub->Left == Old) {
-        Sub->Left = New;
-      }
-      if (Sub->Right == Old) {
-        Sub->Right = New;
-      }
-      if (Sub->Result == Old) {
-        Sub->Result = New;
-      }
-      return;
-    }
-    assert(false && "PNIConsNode::replaceUseOfWith: unhandled variant");
-  }
-  std::array<const PNINode *, 3> getNodes() const {
+  std::array<const CGNode *, 3> getNodes() const {
     auto ret = const_cast<ConsNode *>(this)->getNodes();
     return {ret[0], ret[1], ret[2]};
   }
-  std::array<PNINode *, 3> getNodes() {
+  std::array<CGNode *, 3> getNodes() {
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
-      return {Add->Left, Add->Right, Add->Result};
+      return {Add->LeftNode, Add->RightNode, Add->ResultNode};
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
-      return {Sub->Left, Sub->Right, Sub->Result};
+      return {Sub->LeftNode, Sub->RightNode, Sub->ResultNode};
     }
     assert(false && "PNIConsNode::getNodes: unhandled variant");
   }
@@ -194,7 +166,6 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
 
 struct PNIGraph {
   std::string Name;
-  std::function<void(const retypd::ConsNode *)> onEraseConstraint;
 
   // list for ConstraintNode
   using ConstraintsType = llvm::ilist<ConsNode>;
@@ -202,8 +173,7 @@ struct PNIGraph {
   static ConstraintsType PNIGraph::*getSublistAccess(ConsNode *) {
     return &PNIGraph::Constraints;
   }
-  // Map for worklist algorithm.
-  std::map<PNINode *, std::set<ConsNode *>> PNIToCons;
+  std::map<CGNode *, std::set<ConsNode *>> NodeToCons;
 
   // list for PNINode
   using PNINodesType = llvm::ilist<PNINode>;
@@ -212,15 +182,16 @@ struct PNIGraph {
     return &PNIGraph::PNINodes;
   }
   std::map<PNINode *, std::set<CGNode *>> PNIToNode;
+  const std::set<CGNode *> &getNodeSet(PNINode *Cons) {
+    return PNIToNode[Cons];
+  }
   PNINode *createPNINode() {
     auto *N = new PNINode(*this);
     PNINodes.push_back(N);
     return N;
   }
 
-  PNIGraph(std::function<void(const retypd::ConsNode *)> onEraseConstraint,
-           std::string Name)
-      : Name(Name), onEraseConstraint(onEraseConstraint) {}
+  PNIGraph(std::string Name) : Name(Name) {}
 
   void addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
                   llvm::BinaryOperator *Inst);
@@ -260,6 +231,8 @@ struct PNIGraph {
     }
   }
   void eraseConstraint(ConsNode *Cons);
+  void solve();
+  void onSetPointer(PNINode *N);
 };
 
 } // namespace notdec::retypd

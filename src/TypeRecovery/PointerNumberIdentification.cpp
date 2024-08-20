@@ -1,13 +1,104 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/ConstraintGraph.h"
+#include "optimizers/ConstraintGenerator.h"
+#include <cassert>
 
 namespace notdec::retypd {
 
+/// Visit Add/Mul/shl chain, add the results to OffsetRange.
+OffsetRange matchOffsetRange(llvm::Value *I) {
+  using namespace llvm;
+  assert(I->getType()->isIntegerTy());
+  if (auto *CI = dyn_cast<llvm::ConstantInt>(I)) {
+    return OffsetRange{.offset = CI->getSExtValue()};
+  }
+  // unknown value = 1*x
+  if (!isa<llvm::BinaryOperator>(I)) {
+    return OffsetRange{.offset = 0, .access = {{1, 0}}};
+  }
+  auto *BinOp = cast<llvm::BinaryOperator>(I);
+  auto *Src1 = BinOp->getOperand(0);
+  auto *Src2 = BinOp->getOperand(1);
+  if (isa<ConstantInt>(Src1) && isa<ConstantInt>(Src2)) {
+    assert(false && "Constant at both sides. Run Optimization first!");
+  }
+  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2)) {
+    // because of InstCombine canonical form, this should not happen?
+    assert(false &&
+           "Constant cannot be at the left side. Run InstCombine first.");
+    std::swap(Src1, Src2);
+  }
+  // check if add or mul
+  if (BinOp->getOpcode() == llvm::Instruction::Add) {
+    return matchOffsetRange(Src1) + matchOffsetRange(Src2);
+  } else if (BinOp->getOpcode() == llvm::Instruction::Mul) {
+    return matchOffsetRange(Src1) * matchOffsetRange(Src2);
+  } else if (BinOp->getOpcode() == llvm::Instruction::Shl &&
+             llvm::isa<ConstantInt>(Src2)) {
+    return matchOffsetRange(Src1) *
+           (1 << llvm::cast<ConstantInt>(Src2)->getSExtValue());
+  } else {
+    return OffsetRange{.offset = 0, .access = {{1, 0}}};
+  }
+}
+
+void PNIGraph::solve() {
+  // write a worklist algorithm.
+  // When a unknown var changed to known, add all constraints that use this var.
+  // (maintain a map from var to constraints, maintain when two unknown vars
+  // merge)
+  // When two unknown vars merge, add all constraints that use these two vars.
+  std::set<ConsNode *> Worklist;
+  for (auto &C : Constraints) {
+    Worklist.insert(&C);
+  }
+  while (!Worklist.empty()) {
+    ConsNode *C = *Worklist.begin();
+    Worklist.erase(C);
+    auto Changed = C->solve();
+    bool isFullySolved = C->isFullySolved();
+    // add according to changed.
+    for (auto *N : Changed) {
+      for (auto *N2 : PNIToNode[N]) {
+        if (NodeToCons.count(N2)) {
+          for (auto *C2 : NodeToCons[N2]) {
+            if (C2 == C) {
+              continue;
+            }
+            Worklist.insert(C2);
+          }
+        }
+      }
+    }
+    // remove the constraint if fully solved.
+    if (isFullySolved) {
+      eraseConstraint(C);
+      C = nullptr;
+    }
+  }
+}
+
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
-  onEraseConstraint(Cons);
+  // Check if the constraint should be converted
+  if (Cons->isAdd()) {
+    auto [Left, Right, Result] = Cons->getNodes();
+    auto BinOp = const_cast<llvm::BinaryOperator *>(Cons->getInst());
+    auto *LeftVal = BinOp->getOperand(0);
+    auto *RightVal = BinOp->getOperand(1);
+    OffsetRange Off;
+    if (Left->getPNIVar()->getPtrOrNum() == retypd::NonPtr &&
+        Right->getPNIVar()->getPtrOrNum() == retypd::Pointer) {
+      Off = matchOffsetRange(LeftVal);
+      Result->setAsPtrAdd(Right, Off);
+    } else if (Left->getPNIVar()->getPtrOrNum() == retypd::Pointer &&
+               Right->getPNIVar()->getPtrOrNum() == retypd::NonPtr) {
+      Off = matchOffsetRange(RightVal);
+      Result->setAsPtrAdd(Left, Off);
+    }
+  }
   for (auto *N : Cons->getNodes()) {
     assert(N != nullptr);
-    PNIToCons[N].erase(Cons);
+    NodeToCons[N].erase(Cons);
   }
 
   Cons->eraseFromParent();
@@ -26,7 +117,24 @@ const char SubNodeCons::Rules[][3] = {
     {'i', 'I', 'I'}, {'I', 'i', 'i'}, {'P', 'i', 'p'}, {'P', 'p', 'I'},
     {'p', 'P', 'i'}, {'p', 'i', 'P'}, {'p', 'I', 'p'}};
 
+bool AddNodeCons::isFullySolved() {
+  PNINode *Left = this->LeftNode->getPNIVar();
+  PNINode *Right = this->RightNode->getPNIVar();
+  PNINode *Result = this->ResultNode->getPNIVar();
+  return !Left->isUnknown() && !Right->isUnknown() && !Result->isUnknown();
+}
+
+bool SubNodeCons::isFullySolved() {
+  PNINode *Left = this->LeftNode->getPNIVar();
+  PNINode *Right = this->RightNode->getPNIVar();
+  PNINode *Result = this->ResultNode->getPNIVar();
+  return !Left->isUnknown() && !Right->isUnknown() && !Result->isUnknown();
+}
+
 llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
+  PNINode *Left = this->LeftNode->getPNIVar();
+  PNINode *Right = this->RightNode->getPNIVar();
+  PNINode *Result = this->ResultNode->getPNIVar();
   llvm::SmallVector<PNINode *, 3> Changed;
 
   // 1. solving using add rules.
@@ -47,8 +155,8 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
     // this rule match, apply upper case letter constraints.
     for (unsigned i = 0; i < 3; i++) {
       if (std::isupper(Rule[i])) {
-        PtrOrNum ToUnify = fromIPChar(Rule[i]);
-        bool IsChanged = Arr[i]->setPtrOrNum(ToUnify);
+        PtrOrNum PTy = fromIPChar(Rule[i]);
+        bool IsChanged = Arr[i]->setPtrOrNum(PTy);
         // Update changed list accordingly.
         if (IsChanged) {
           Changed.push_back(Arr[i]);
@@ -106,14 +214,12 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
         // Unify Right and Result
         auto *Merged = Right->unifyPN(*Result);
         assert(Merged != nullptr);
-        Changed.push_back(Right);
-        Changed.push_back(Result);
+        Changed.push_back(Merged);
       } else if (Right->isNonPtr()) {
         // Unify Left and Result
         auto *Merged = Left->unifyPN(*Result);
         assert(Merged != nullptr);
-        Changed.push_back(Left);
-        Changed.push_back(Result);
+        Changed.push_back(Merged);
       } else if (Result->isPointer()) {
         // 2. Unknown + Unknown = Pointer
         // degrade to Left != Right constraint? Not very useful
@@ -128,6 +234,9 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
 }
 
 llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
+  PNINode *Left = this->LeftNode->getPNIVar();
+  PNINode *Right = this->RightNode->getPNIVar();
+  PNINode *Result = this->ResultNode->getPNIVar();
   llvm::SmallVector<PNINode *, 3> Changed;
 
   // 1. solving using add rules.
@@ -207,14 +316,12 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
         // Unify Left and Result
         auto *Merged = Left->unifyPN(*Result);
         assert(Merged != nullptr);
-        Changed.push_back(Left);
-        Changed.push_back(Result);
+        Changed.push_back(Merged);
       } else if (Result->isNonPtr()) {
         // Unify Left and Right
         auto *Merged = Left->unifyPN(*Right);
         assert(Merged != nullptr);
-        Changed.push_back(Left);
-        Changed.push_back(Right);
+        Changed.push_back(Merged);
       } else if (Result->isPointer()) {
         // 2. Pointer - Unknown = Unknown
         // degrade to Result != Right constraint? Not very useful
@@ -243,8 +350,17 @@ PtrOrNum fromIPChar(char C) {
 llvm::iplist<PNINode>::iterator PNINode::eraseFromParent() {
   // Check links before destruction. Should be replaced beforehand.
   assert(Parent->PNIToNode.count(this) == 0);
-  assert(Parent->PNIToCons.count(this) == 0);
   return node_with_erase<PNINode, PNIGraph>::eraseFromParent();
+}
+
+// Notify CGNode that it becomes a pointer.
+void PNIGraph::onSetPointer(PNINode *N) {
+  assert(N->isPointer());
+  if (PNIToNode.count(N) > 0) {
+    for (auto *Node : PNIToNode[N]) {
+      Node->onSetPointer();
+    }
+  }
 }
 
 bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
@@ -258,6 +374,7 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
     hasConflict = true;
     if (Ty == NonPtr && NewTy == Pointer) {
       Ty = Pointer;
+      Parent->onSetPointer(this);
       return true;
     } else {
       return false;
@@ -265,6 +382,9 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   }
   assert(Ty == Unknown);
   Ty = NewTy;
+  if (NewTy == Pointer) {
+    Parent->onSetPointer(this);
+  }
   return true;
 }
 
@@ -290,27 +410,23 @@ PNINode *PNINode::unifyPN(PNINode &other) {
 
 void PNIGraph::addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
                           llvm::BinaryOperator *Inst) {
-  AddNodeCons C = {.Left = Left->getPNIVar(),
-                   .Right = Right->getPNIVar(),
-                   .Result = Result->getPNIVar(),
-                   .Inst = Inst};
+  AddNodeCons C = {
+      .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
   auto *Node = new ConsNode(*this, C);
-  PNIToCons[Left->getPNIVar()].insert(Node);
-  PNIToCons[Right->getPNIVar()].insert(Node);
-  PNIToCons[Result->getPNIVar()].insert(Node);
+  NodeToCons[Left].insert(Node);
+  NodeToCons[Right].insert(Node);
+  NodeToCons[Result].insert(Node);
   Constraints.push_back(Node);
 }
 
 void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
                           llvm::BinaryOperator *Inst) {
-  SubNodeCons C = {.Left = Left->getPNIVar(),
-                   .Right = Right->getPNIVar(),
-                   .Result = Result->getPNIVar(),
-                   .Inst = Inst};
+  SubNodeCons C = {
+      .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
   auto *Node = new ConsNode(*this, C);
-  PNIToCons[Left->getPNIVar()].insert(Node);
-  PNIToCons[Right->getPNIVar()].insert(Node);
-  PNIToCons[Result->getPNIVar()].insert(Node);
+  NodeToCons[Left].insert(Node);
+  NodeToCons[Right].insert(Node);
+  NodeToCons[Result].insert(Node);
   Constraints.push_back(Node);
 }
 
@@ -323,14 +439,11 @@ void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
     }
     PNIToNode.erase(Var);
   }
-  // maintain NodeToConstraint
-  if (PNIToCons.count(Var)) {
-    for (auto *Cons : PNIToCons[Var]) {
-      Cons->replaceUseOfWith(Var, Target);
-    }
-    PNIToCons.erase(Var);
-  }
+  // TODO maintain a Changed list?
   Var->eraseFromParent();
 }
+
+PNINode::PNINode(PNIGraph &SSG)
+    : node_with_erase(SSG), Id(ValueNamer::getId()) {}
 
 } // namespace notdec::retypd
