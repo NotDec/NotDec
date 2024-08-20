@@ -249,7 +249,7 @@ parseDerivedTypeVariable(llvm::StringRef str) {
     rest = rest1;
     rest = skipWhitespace(rest);
   }
-  return {rest, DerivedTypeVariable{Name.str(), labels}};
+  return {rest, DerivedTypeVariable{{Name.str()}, labels}};
 }
 
 ParseResultT<TypeVariable> parseTypeVariable(llvm::StringRef str) {

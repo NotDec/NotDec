@@ -147,7 +147,6 @@ struct ConstraintsGenerator {
       : Ctx(Ctx), CG(this, "Global"), PG(CG.PG) {}
 
 protected:
-  std::map<std::string, uint32_t> callInstanceId;
   std::vector<IntConstant> intConstantIds;
 
 public:
@@ -180,7 +179,7 @@ public:
     assert(Val2Node.find(Val) == Val2Node.end() &&
            "newVarSubtype: Value already mapped!");
     auto Size = Val->getType()->getScalarSizeInBits();
-    if (dtv.isPrimitive() && isFinal(dtv.getBaseName())) {
+    if (dtv.isPrimitive() && isFinal(dtv.getPrimitiveName())) {
       return setTypeVar(Val, dtv, nullptr, Size);
     }
     auto &Node = setTypeVar(
@@ -191,7 +190,7 @@ public:
   }
   void addSubtype(const TypeVariable &sub, const TypeVariable &sup) {
     if (sub.isPrimitive() && sup.isPrimitive()) {
-      assert(sub.getBaseName() == sup.getBaseName() &&
+      assert(sub.getPrimitiveName() == sup.getPrimitiveName() &&
              "addConstraint: different primitive types !?");
       return;
     }
@@ -216,7 +215,7 @@ public:
   // void addSubTypeCons(llvm::Value *LHS, llvm::BinaryOperator *RHS,
   //                     OffsetRange Offset);
 
-  void setOffset(TypeVariable &dtv, OffsetRange Offset);
+  void addOffset(TypeVariable &dtv, OffsetRange Offset);
   TypeVariable deref(Value *Val, User *User, long BitSize, bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {

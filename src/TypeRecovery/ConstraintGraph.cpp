@@ -201,9 +201,9 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
   // Link nodes to "#Start"
   for (auto N : StartNodes) {
     // is an interesting var or is a primitive type
-    if ((N->key.Base.isDtv() &&
-         InterestingVars.count(N->key.Base.getBaseName()) != 0) ||
-        N->key.Base.isPrimitive()) {
+    if (N->key.Base.isPrimitive() ||
+        (N->key.Base.isDtv() &&
+         InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from #Start to " << N->key.str() << "\n");
       addEdge(*Start, *N, RecallBase{N->key.Base.toBase()});
@@ -213,9 +213,9 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
   // Link nodes to "#End"
   for (auto N : EndNodes) {
     // is an interesting var or is a primitive type
-    if ((N->key.Base.isDtv() &&
-         InterestingVars.count(N->key.Base.getBaseName()) != 0) ||
-        N->key.Base.isPrimitive()) {
+    if (N->key.Base.isPrimitive() ||
+        (N->key.Base.isDtv() &&
+         InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from " << N->key.str() << " to #End\n");
       addEdge(*N, *End, ForgetBase{N->key.Base.toBase()});
@@ -652,7 +652,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
     } else if (std::holds_alternative<ForgetBase>(EL)) {
       auto &Name = std::get<ForgetBase>(EL).base;
       if (Ret.back().sup.hasLabel()) {
-        Ret.back().sup.setName(Name.getBaseName());
+        Ret.back().sup.setBase(Name.getBase());
       } else {
         Ret.back().sup = Name;
       }

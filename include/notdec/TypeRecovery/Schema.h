@@ -87,15 +87,65 @@ std::string toString(const FieldLabel &f);
 
 Variance getVariance(const FieldLabel &f);
 
-struct DerivedTypeVariable {
-  std::string Name;
-  std::deque<FieldLabel> Labels;
+struct BaseType {
+  using BaseTy = std::variant<std::string, OffsetRange>;
+  BaseTy Base;
+  // 1. differentiate different int instance
+  // 2. differentiate different call instance
   uint32_t instanceId = 0;
+
+  bool operator<(const BaseType &rhs) const {
+    return std::tie(Base, instanceId) < std::tie(rhs.Base, rhs.instanceId);
+  }
+  bool operator==(const BaseType &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  std::string str() const {
+    std::string Ret;
+    if (auto *s = std::get_if<std::string>(&Base)) {
+      Ret = *s;
+    } else if (auto *r = std::get_if<OffsetRange>(&Base)) {
+      Ret = "#Int#" + toString(*r);
+      assert(instanceId > 0);
+    } else {
+      assert(false && "BaseType::str: Not a string or OffsetRange");
+    }
+    if (instanceId > 0) {
+      Ret += "#" + std::to_string(instanceId);
+    }
+    return Ret;
+  }
+};
+
+struct DerivedTypeVariable {
+  BaseType Base;
+  std::deque<FieldLabel> Labels;
+
+  uint32_t &instanceId() { return Base.instanceId; }
+  std::string getBaseName() const {
+    if (auto *s = std::get_if<std::string>(&Base.Base)) {
+      return *s;
+    } else {
+      assert(false && "DerivedTypeVariable::getBaseName: Base.Base is not a "
+                      "string, but a IntConstant");
+    }
+  }
+  bool isIntConstant() const {
+    return std::holds_alternative<OffsetRange>(Base.Base);
+  }
+  OffsetRange getIntConstant() const {
+    if (auto *r = std::get_if<OffsetRange>(&Base.Base)) {
+      return *r;
+    } else {
+      assert(false && "DerivedTypeVariable::getIntConstant: Base.Base is not a "
+                      "IntConstant");
+    }
+  }
 
   DerivedTypeVariable getSubDtv(size_t index) const {
     assert(index <= this->Labels.size());
     DerivedTypeVariable sub_dtv;
-    sub_dtv.Name = this->Name;
+    sub_dtv.Base = this->Base;
     sub_dtv.Labels.insert(sub_dtv.Labels.end(), this->Labels.begin(),
                           this->Labels.begin() + index);
     return sub_dtv;
@@ -112,8 +162,7 @@ struct DerivedTypeVariable {
   // Comparator for stored in a std::map
   // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
   bool operator<(const DerivedTypeVariable &rhs) const {
-    return std::tie(Name, Labels, instanceId) <
-           std::tie(rhs.Name, rhs.Labels, rhs.instanceId);
+    return std::tie(Base, Labels) < std::tie(rhs.Base, rhs.Labels);
   }
   bool operator==(const DerivedTypeVariable &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
@@ -130,20 +179,8 @@ struct PrimitiveTypeVariable {
   }
 };
 
-struct IntConstantVar {
-  OffsetRange Val;
-  uint32_t InstanceId = 0;
-  bool operator<(const IntConstantVar &rhs) const {
-    return std::tie(Val, InstanceId) < std::tie(rhs.Val, rhs.InstanceId);
-  }
-  bool operator==(const IntConstantVar &rhs) const {
-    return !(*this < rhs) && !(rhs < *this);
-  }
-};
-
 struct TypeVariable {
-  using InnerTy =
-      std::variant<DerivedTypeVariable, PrimitiveTypeVariable, IntConstantVar>;
+  using InnerTy = std::variant<DerivedTypeVariable, PrimitiveTypeVariable>;
   InnerTy Inner;
 
   static TypeVariable CreatePrimitive(std::string name) {
@@ -151,25 +188,17 @@ struct TypeVariable {
   }
 
   static TypeVariable CreateDtv(std::string name) {
-    return TypeVariable{DerivedTypeVariable{name}};
+    return TypeVariable{DerivedTypeVariable{{name}}};
   }
 
   static TypeVariable CreateIntConstant(OffsetRange val, uint32_t instanceId) {
-    return TypeVariable{IntConstantVar{.Val = val, .InstanceId = instanceId}};
-  }
-
-  void setName(std::string Name) {
-    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      dtv->Name = Name;
-    } else {
-      assert(false && "TypeVariable::setName: Not a DerivedTypeVariable!");
-    }
+    return TypeVariable{
+        DerivedTypeVariable{.Base = {.Base = val, .instanceId = instanceId}}};
   }
 
   TypeVariable toBase() const {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      return {DerivedTypeVariable{.Name = dtv->Name,
-                                  .instanceId = dtv->instanceId}};
+      return {DerivedTypeVariable{.Base = dtv->Base}};
     } else {
       return *this;
     }
@@ -191,23 +220,37 @@ struct TypeVariable {
     }
   }
 
-  uint32_t &getInstanceId() {
+  uint32_t &instanceId() {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      return dtv->instanceId;
-    } else if (auto *icv = std::get_if<IntConstantVar>(&Inner)) {
-      return icv->InstanceId;
+      return dtv->instanceId();
     } else {
       assert(false && "getInstanceId: No instanceId.");
     }
   }
 
+  std::string getPrimitiveName() const {
+    if (auto *ptv = std::get_if<PrimitiveTypeVariable>(&Inner)) {
+      return ptv->name;
+    } else {
+      assert(false && "getPrimitiveName: Not a PrimitiveTypeVariable");
+    }
+  }
+
   std::string getBaseName() const {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      return dtv->Name;
+      return dtv->getBaseName();
     } else if (auto *ptv = std::get_if<PrimitiveTypeVariable>(&Inner)) {
       return ptv->name;
     } else {
       assert(false && "getBaseName: No name.");
+    }
+  }
+
+  BaseType getBase() const {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return dtv->Base;
+    } else {
+      assert(false && "getBase: Not a DerivedTypeVariable");
     }
   }
 
@@ -220,13 +263,14 @@ struct TypeVariable {
   }
 
   bool isIntConstant() const {
-    return std::holds_alternative<IntConstantVar>(Inner);
+    return std::holds_alternative<DerivedTypeVariable>(Inner) &&
+           std::get<DerivedTypeVariable>(Inner).isIntConstant();
   }
   OffsetRange getIntConstant() const {
-    if (auto *icv = std::get_if<IntConstantVar>(&Inner)) {
-      return icv->Val;
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return dtv->getIntConstant();
     } else {
-      assert(false && "getIntConstant: Not an IntConstantVar");
+      assert(false && "getIntConstant: Not a DerivedTypeVariable");
     }
   }
 
@@ -241,6 +285,14 @@ struct TypeVariable {
   }
   bool operator!=(const TypeVariable &rhs) const {
     return (*this < rhs) || (rhs < *this);
+  }
+
+  void setBase(BaseType Base) {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      dtv->Base = Base;
+    } else {
+      assert(false && "TypeVariable::setName: Not a DerivedTypeVariable!");
+    }
   }
 };
 

@@ -36,7 +36,7 @@ namespace notdec {
 
 using retypd::OffsetLabel;
 
-size_t ValueNamer::typeValId = 0;
+size_t ValueNamer::typeValId = 1;
 const char *ConstraintGraph::Memory = "MEMORY";
 const char *ValueNamer::DefaultPrefix = "v_";
 const char *ValueNamer::FuncPrefix = "func_";
@@ -101,12 +101,11 @@ void ConstraintsGenerator::generate(llvm::Function *Func) {
   RetypdGeneratorVisitor Visitor(*this);
   Visitor.visit(Func);
   Visitor.handlePHINodes();
-  callInstanceId.clear();
 }
 
 void ConstraintsGenerator::solve() {
-  assert(false && "TODO");
-  // CG.saturate();
+  PG.solve();
+  CG.saturate();
   // CG.layerSplit();
   // CG.buildPathSequence();
   // CG.solve();
@@ -247,14 +246,14 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ValMapKey Val, User *User) {
     // TODO what if function pointer?
     auto tv = makeTv(ValueNamer::getName(*Arg->Call->getCalledFunction(),
                                          ValueNamer::FuncPrefix));
-    tv.getInstanceId() = Arg->InstanceId;
+    // tv.getInstanceId() = Arg->InstanceId;
     tv.getLabels().push_back(retypd::InLabel{std::to_string(Arg->Index)});
     return tv;
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     // TODO what if function pointer?
     auto tv = makeTv(ValueNamer::getName(*Ret->Call->getCalledFunction(),
                                          ValueNamer::FuncPrefix));
-    tv.getInstanceId() = Ret->InstanceId;
+    // tv.getInstanceId() = Ret->InstanceId;
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
   } else if (auto IC = std::get_if<IntConstant>(&Val)) {
@@ -280,7 +279,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
       if (CE->getOpcode() == Instruction::IntToPtr) {
         if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
           auto tv = makeTv(CG.Memory);
-          setOffset(tv, OffsetRange{.offset = Addr->getSExtValue()});
+          addOffset(tv, OffsetRange{.offset = Addr->getSExtValue()});
           return tv;
         }
       }
@@ -346,7 +345,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   // differentiate different call instances in the same function
   auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
   // Starts from 1. So that it is different from the default 0.
-  auto InstanceId = ++cg.callInstanceId[TargetName];
+  // auto InstanceId = ++cg.callInstanceId[TargetName];
+  uint32_t InstanceId = 0;
   for (int i = 0; i < I.arg_size(); i++) {
     auto ArgVar = cg.getTypeVar(
         CallArg{.Call = &I, .InstanceId = InstanceId, .Index = i}, &I);
@@ -521,18 +521,14 @@ std::string ConstraintsGenerator::offset(APInt Offset, int Count) {
   return OffsetStr;
 }
 
-void ConstraintsGenerator::setOffset(TypeVariable &dtv, OffsetRange Offset) {
-  OffsetLabel *current;
+void ConstraintsGenerator::addOffset(TypeVariable &dtv, OffsetRange Offset) {
   if (!dtv.getLabels().empty() &&
       std::holds_alternative<OffsetLabel>(dtv.getLabels().back())) {
-    // current = &std::get<OffsetLabel>(dtv.Labels.back());
-    assert(false && "not implemented merging of offset labels");
+    std::get<OffsetLabel>(dtv.getLabels().back()).range =
+        std::get<OffsetLabel>(dtv.getLabels().back()).range + Offset;
   } else {
-    current = &std::get<OffsetLabel>(
-        dtv.getLabels().emplace_back(OffsetLabel{.range = Offset}));
+    dtv.getLabels().emplace_back(OffsetLabel{.range = Offset});
   }
-  assert(false && "TODO");
-  (void)current;
 }
 
 // Special logics for load and store when generating type variables.
