@@ -25,7 +25,6 @@
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Schema.h"
-#include "TypeRecovery/StorageShapeGraph.h"
 #include "Utils/Range.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "optimizers/StackPointerFinder.h"
@@ -101,20 +100,27 @@ void ConstraintsGenerator::onEraseConstraint(const retypd::ConsNode *Cons) {
     auto BinOp = const_cast<llvm::BinaryOperator *>(Cons->getInst());
     auto *LeftVal = BinOp->getOperand(0);
     auto *RightVal = BinOp->getOperand(1);
+    OffsetRange Off;
+    retypd::TypeVariable TV;
     if (Left->getPtrOrNum() == retypd::NonPtr &&
         Right->getPtrOrNum() == retypd::Pointer) {
-      addSubTypeCons(RightVal, BinOp, matchOffsetRange(LeftVal));
+      Off = matchOffsetRange(LeftVal);
+      TV = getTypeVar(RightVal, BinOp);
     } else if (Left->getPtrOrNum() == retypd::Pointer &&
                Right->getPtrOrNum() == retypd::NonPtr) {
-      addSubTypeCons(LeftVal, BinOp, matchOffsetRange(RightVal));
+      Off = matchOffsetRange(RightVal);
+      TV = getTypeVar(LeftVal, BinOp);
     }
+    auto AddResult = getTypeVar(BinOp, nullptr);
+    TV.getLabels().push_back(OffsetLabel{Off});
+    CG.replaceTypeVarWith(AddResult, TV, Off);
   }
 }
 
 PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
-  LLVM_DEBUG(printModule(M, "current.ll"));
+  LLVM_DEBUG(printModule(M, "before-TypeRecovery.ll"));
 
   auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
   this->StackPointer = SP.result;
@@ -122,50 +128,36 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   data_layout = std::move(M.getDataLayoutStr());
   pointer_size = M.getDataLayout().getPointerSizeInBits();
 
-  // TODO!! reverse post order of functions?
+  ConstraintsGenerator Generator(*this);
+  // TODO: context-sensitive
   for (auto &F : M) {
-    auto it = func_ctxs.try_emplace(&F, *this, F);
-    assert(it.second && "TypeRecovery::run: duplicate function?");
-    auto &Generator = it.first->second;
-    Generator.generate();
-    Generator.solve();
+    Generator.generate(&F);
   }
 
-  print(M, "TypeRecovery.ll");
+  gen_json("retypd-constrains.json");
 
-  // create a temporary directory
-  SmallString<128> Path;
-  std::error_code EC;
-  EC = llvm::sys::fs::createUniqueDirectory("notdec_retypd", Path);
-  if (!EC) {
-    // Resolve any symlinks in the new directory.
-    std::string UnresolvedPath(Path.str());
-    EC = llvm::sys::fs::real_path(UnresolvedPath, Path);
-  }
-  auto TempPath = Path.str().str() + "/retypd-constrains.json";
-
-  gen_json(TempPath);
-
-  errs() << "constrains path: " << TempPath << "\n";
-
-  // clean up
-  // delete directory if not debug
-  LLVM_DEBUG(if (!Path.empty()) {
-    assert(llvm::sys::fs::remove_directories(Path.str()) == std::errc());
-  });
+  Generator.solve();
+  // TODO convert the type back to LLVM IR
+  print(M, "after-TypeRecovery.ll");
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
   return PreservedAnalyses::none();
 }
 
-void ConstraintsGenerator::generate() {
+void ConstraintsGenerator::generate(llvm::Function *Func) {
   RetypdGeneratorVisitor Visitor(*this);
   Visitor.visit(Func);
   Visitor.handlePHINodes();
   callInstanceId.clear();
 }
 
-void ConstraintsGenerator::solve() { SSG.solve(); }
+void ConstraintsGenerator::solve() {
+  assert(false && "TODO");
+  // CG.saturate();
+  // CG.layerSplit();
+  // CG.buildPathSequence();
+  // CG.solve();
+}
 
 bool mustBePrimitive(const llvm::Type *Ty) {
   if (Ty->isFloatTy() || Ty->isDoubleTy()) {
@@ -277,13 +269,14 @@ retypd::CGNode &ConstraintsGenerator::getNode(ValMapKey Val, User *User) {
   return setTypeVar(Val, ret, User, getSize(Val));
 }
 
-retypd::SSGNode *ConstraintsGenerator::getSSGNode(const TypeVariable &Val) {
-  return CG.getOrInsertNode(Val).Link.lookupNode();
-}
+// retypd::SSGNode *ConstraintsGenerator::getSSGNode(const TypeVariable &Val) {
+//   return CG.getOrInsertNode(Val).Link.lookupNode();
+// }
 
-retypd::SSGNode *ConstraintsGenerator::getSSGNode(ValMapKey Val, User *User) {
-  return getNode(Val, User).getLink().lookupNode();
-}
+// retypd::SSGNode *ConstraintsGenerator::getSSGNode(ValMapKey Val, User *User)
+// {
+//   return getNode(Val, User).getLink().lookupNode();
+// }
 
 const TypeVariable &ConstraintsGenerator::getTypeVar(ValMapKey Val,
                                                      User *User) {
@@ -512,7 +505,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
 
 void ConstraintsGenerator::addCmpConstraint(const ValMapKey LHS,
                                             const ValMapKey RHS, ICmpInst *I) {
-  getSSGNode(LHS, I)->unifyPN(*getSSGNode(RHS, I));
+  getNode(LHS, I).getPNIVar()->unifyPN(*getNode(RHS, I).getPNIVar());
 }
 
 // for pointer sized int, probably is pointer comparision. So we cannot make a
@@ -669,30 +662,28 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
     }
   }
 }
-using retypd::SSGNode;
-void ConstraintsGenerator::addSubTypeCons(SSGNode *LHS, SSGNode *RHS,
-                                          OffsetRange Offset) {
-  SSG.addSubTypeCons(RHS, LHS, Offset);
-}
 
-void ConstraintsGenerator::addSubTypeCons(llvm::Value *LHS,
-                                          llvm::BinaryOperator *RHS,
-                                          OffsetRange Offset) {
-  addSubTypeCons(getSSGNode(RHS, nullptr), getSSGNode(LHS, RHS), Offset);
-}
+// void ConstraintsGenerator::addSubTypeCons(SSGNode *LHS, SSGNode *RHS,
+//                                           OffsetRange Offset) {
+//   SSG.addSubTypeCons(RHS, LHS, Offset);
+// }
+
+// void ConstraintsGenerator::addSubTypeCons(llvm::Value *LHS,
+//                                           llvm::BinaryOperator *RHS,
+//                                           OffsetRange Offset) {
+//   addSubTypeCons(getSSGNode(RHS, nullptr), getSSGNode(LHS, RHS), Offset);
+// }
 
 void ConstraintsGenerator::addAddConstraint(const ValMapKey LHS,
                                             const ValMapKey RHS,
                                             BinaryOperator *I) {
-  SSG.addAddCons(getSSGNode(LHS, I), getSSGNode(RHS, I), getSSGNode(I, nullptr),
-                 I);
+  PG.addAddCons(&getNode(LHS, I), &getNode(RHS, I), &getNode(I, nullptr), I);
 }
 
 void ConstraintsGenerator::addSubConstraint(const ValMapKey LHS,
                                             const ValMapKey RHS,
                                             BinaryOperator *I) {
-  SSG.addSubCons(getSSGNode(LHS, I), getSSGNode(RHS, I), getSSGNode(I, nullptr),
-                 I);
+  PG.addSubCons(&getNode(LHS, I), &getNode(RHS, I), &getNode(I, nullptr), I);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
@@ -795,31 +786,31 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
 // =========== end: other insts ===========
 
 void TypeRecovery::gen_json(std::string OutputFilename) {
-  json::Object Root({{"data_layout", data_layout}});
+  // json::Object Root({{"data_layout", data_layout}});
 
-  json::Object Constraints;
-  // iterate func_constrains
-  for (auto &kv : func_ctxs) {
-    auto funcName = ValueNamer::getName(*kv.first);
-    json::Array FuncConstrainsJson;
-    for (auto &c : kv.second.CG.toConstraints()) {
-      FuncConstrainsJson.push_back(toString(c));
-    }
-    Constraints[funcName] = json::Value(std::move(FuncConstrainsJson));
-  }
-  Root["constraints"] = json::Value(std::move(Constraints));
+  // json::Object Constraints;
+  // // iterate func_constrains
+  // for (auto &kv : func_ctxs) {
+  //   auto funcName = ValueNamer::getName(*kv.first);
+  //   json::Array FuncConstrainsJson;
+  //   for (auto &c : kv.second.CG.toConstraints()) {
+  //     FuncConstrainsJson.push_back(toString(c));
+  //   }
+  //   Constraints[funcName] = json::Value(std::move(FuncConstrainsJson));
+  // }
+  // Root["constraints"] = json::Value(std::move(Constraints));
 
-  // write to file
-  std::error_code EC;
-  llvm::raw_fd_ostream os(OutputFilename, EC);
-  if (EC) {
-    std::cerr << __FILE__ << ":" << __LINE__ << ": "
-              << "Cannot open output json file." << std::endl;
-    std::cerr << EC.message() << std::endl;
-    std::abort();
-  }
-  json::OStream J(os, 2);
-  J.value(std::move(Root));
+  // // write to file
+  // std::error_code EC;
+  // llvm::raw_fd_ostream os(OutputFilename, EC);
+  // if (EC) {
+  //   std::cerr << __FILE__ << ":" << __LINE__ << ": "
+  //             << "Cannot open output json file." << std::endl;
+  //   std::cerr << EC.message() << std::endl;
+  //   std::abort();
+  // }
+  // json::OStream J(os, 2);
+  // J.value(std::move(Root));
 }
 
 class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
@@ -903,8 +894,8 @@ void TypeRecovery::print(llvm::Module &M, std::string path) {
     std::cerr << EC.message() << std::endl;
     std::abort();
   }
-  CGAnnotationWriter AW(func_ctxs);
-  M.print(os, &AW);
+  // CGAnnotationWriter AW(func_ctxs);
+  // M.print(os, &AW);
 }
 
 } // namespace notdec

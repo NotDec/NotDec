@@ -18,8 +18,7 @@ add_library(notdec STATIC
 	TypeRecovery/ConstraintGraph.cpp
 	TypeRecovery/Schema.cpp
 	TypeRecovery/RExp.cpp
-	TypeRecovery/StorageShapeGraph.cpp
-	TypeRecovery/SSGSolver.cpp
+	TypeRecovery/PointerNumberIdentification.cpp
 	Utils/Range.cpp
 	utils.cpp
 )

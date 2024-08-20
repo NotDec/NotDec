@@ -15,9 +15,13 @@
 #include <llvm/ADT/simple_ilist.h>
 #include <llvm/Support/GraphWriter.h>
 
+#include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
-#include "TypeRecovery/StorageShapeGraph.h"
+
+namespace notdec {
+struct ConstraintsGenerator;
+}
 
 namespace notdec::retypd {
 
@@ -65,11 +69,16 @@ struct CGNode : CGNodeBase {
   // Map from CGNode to SSGNode using union-find
   // We will not remove CGNode from the graph, but just update, so it is safe to
   // use raw pointer here.
-  SSGLink Link;
-  SSGLink &getLink() { return Link; }
+  PNINode *PNIVar = nullptr;
+  PNINode *getPNIVar() { return PNIVar; }
 
+protected:
+  friend struct PNIGraph;
+  void setPNIVar(PNINode *N) { PNIVar = N; }
+
+public:
   CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size);
-  std::string str() { return key.str() + "-" + Link.lookupNode()->str(); }
+  std::string str() { return key.str() + "-" + PNIVar->str(); }
 };
 
 struct CGEdge : CGEdgeBase {
@@ -83,13 +92,13 @@ struct CGEdge : CGEdgeBase {
 };
 
 struct ConstraintGraph : CGBase {
-  std::string FuncName;
-  StorageShapeGraph SSG;
+  std::string Name;
+  PNIGraph PG;
   std::map<NodeKey, CGNode> Nodes;
-  std::vector<Constraint> AddConstraints;
+  // TODO split constraint generation and solving
+  // std::vector<Constraint> AddConstraints;
   std::set<CGNode *> StartNodes;
   std::set<CGNode *> EndNodes;
-  // pub path_seq: Vec<(NodeIndex, NodeIndex, RExp)>,
   std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> PathSeq;
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
@@ -193,7 +202,7 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
   using GraphRef = ConstraintGraph *;
   using NodeRef = CGNode *;
   DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
-  static std::string getGraphName(GraphRef CG) { return CG->FuncName; }
+  static std::string getGraphName(GraphRef CG) { return CG->Name; }
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
     return Node->key.str();
   }

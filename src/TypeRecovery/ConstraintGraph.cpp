@@ -18,6 +18,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
 #include "optimizers/ConstraintGenerator.h"
@@ -26,7 +27,19 @@
 
 namespace notdec::retypd {
 
-void ConstraintGraph::solve() { SSG.solve(); }
+void ConstraintGraph::solve() {
+  if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      printGraph("trans_init.dot");
+    }
+  }
+  saturate();
+  if (const char *path = std::getenv("DEBUG_TRANS_SAT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      printGraph("trans_sat.dot");
+    }
+  }
+}
 
 std::string toString(const EdgeLabel &label) {
   if (std::holds_alternative<One>(label)) {
@@ -43,10 +56,10 @@ std::string toString(const EdgeLabel &label) {
   assert(false && "Unknown FieldLabel!");
 }
 
-ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName)
-    : FuncName(FuncName),
-      SSG([=](const retypd::ConsNode *Node) { CG->onEraseConstraint(Node); },
-          FuncName) {}
+ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name)
+    : Name(Name),
+      PG([=](const retypd::ConsNode *Node) { CG->onEraseConstraint(Node); },
+         Name) {}
 
 std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   assert(!isLayerSplit && "printConstraints: graph is already split!?");
@@ -146,15 +159,13 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
   // }
 
   if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) ||
-        (std::strstr(path, FuncName.c_str()))) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
       printGraph("trans_init.dot");
     }
   }
   saturate();
   if (const char *path = std::getenv("DEBUG_TRANS_SAT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) ||
-        (std::strstr(path, FuncName.c_str()))) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
       printGraph("trans_sat.dot");
     }
   }
@@ -659,12 +670,10 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
 }
 
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size)
-    : Parent(Parent), key(key), Size(Size), Link(Parent.SSG) {
+    : Parent(Parent), key(key), Size(Size), PNIVar(Parent.PG.createPNINode()) {
   // Create the link in the SSG.
   if (key.Base.isPrimitive()) {
-    Link.setNode(Link.Parent->createNonPtr(key.Base.getBaseName(), Size));
-  } else {
-    Link.setNode(Link.Parent->createUnknown(Size));
+    PNIVar->setPtrOrNum(NonPtr);
   }
 }
 

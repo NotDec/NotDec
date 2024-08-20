@@ -20,9 +20,9 @@
 #include <llvm/Support/FormattedStream.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
-#include "TypeRecovery/StorageShapeGraph.h"
 #include "Utils/Range.h"
 
 namespace notdec {
@@ -37,12 +37,10 @@ bool mustBePrimitive(const llvm::Type *Ty);
 
 struct ConstraintsGenerator;
 struct TypeRecovery : PassInfoMixin<TypeRecovery> {
-  std::map<Function *, ConstraintsGenerator> func_ctxs;
   llvm::Value *StackPointer;
   std::string data_layout;
   unsigned pointer_size = 0;
 
-  // bool FlowSensitive = false;
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
   void gen_json(std::string OutputFilename);
 
@@ -138,16 +136,14 @@ std::string getName(const ValMapKey &Val);
 /// readable format. (TODO)
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
-  Function &Func;
   std::map<ValMapKey, retypd::CGNode *> Val2Node;
   retypd::ConstraintGraph CG;
-  retypd::StorageShapeGraph &SSG;
+  retypd::PNIGraph &PG;
 
   void solve();
-  void generate();
-  ConstraintsGenerator(TypeRecovery &Ctx, Function &F)
-      : Ctx(Ctx), Func(F),
-        CG(this, ValueNamer::getName(F, ValueNamer::FuncPrefix)), SSG(CG.SSG) {}
+  void generate(llvm::Function *Func);
+  ConstraintsGenerator(TypeRecovery &Ctx)
+      : Ctx(Ctx), CG(this, "Global"), PG(CG.PG) {}
 
 protected:
   std::map<std::string, uint32_t> callInstanceId;
@@ -198,17 +194,14 @@ public:
              "addConstraint: different primitive types !?");
       return;
     }
-    // CG.addConstraint(sub, sup);
-    SSG.addSubTypeCons(getSSGNode(sub), getSSGNode(sup), {0});
+    CG.addConstraint(sub, sup);
   }
 
   void setPointer(CGNode &Node) {
-    Node.Link.lookupNode()->getPNVar()->setPtrOrNum(retypd::Pointer);
+    Node.getPNIVar()->setPtrOrNum(retypd::Pointer);
   }
 
   retypd::CGNode &getNode(ValMapKey Val, User *User);
-  retypd::SSGNode *getSSGNode(ValMapKey Val, User *User);
-  retypd::SSGNode *getSSGNode(const TypeVariable &Val);
 
   const TypeVariable &getTypeVar(ValMapKey val, User *User);
   TypeVariable convertTypeVar(ValMapKey Val, User *User = nullptr);
@@ -219,10 +212,10 @@ public:
                         BinaryOperator *Result);
   void addCmpConstraint(const ValMapKey LHS, const ValMapKey RHS, ICmpInst *I);
   void onEraseConstraint(const retypd::ConsNode *Cons);
-  void addSubTypeCons(retypd::SSGNode *LHS, retypd::SSGNode *RHS,
-                      OffsetRange Offset);
-  void addSubTypeCons(llvm::Value *LHS, llvm::BinaryOperator *RHS,
-                      OffsetRange Offset);
+  // void addSubTypeCons(retypd::SSGNode *LHS, retypd::SSGNode *RHS,
+  //                     OffsetRange Offset);
+  // void addSubTypeCons(llvm::Value *LHS, llvm::BinaryOperator *RHS,
+  //                     OffsetRange Offset);
 
   void setOffset(TypeVariable &dtv, OffsetRange Offset);
   TypeVariable deref(Value *Val, User *User, long BitSize, bool isLoad);
