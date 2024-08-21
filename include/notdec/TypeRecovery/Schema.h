@@ -187,8 +187,9 @@ struct TypeVariable {
     return TypeVariable{PrimitiveTypeVariable{name}};
   }
 
-  static TypeVariable CreateDtv(std::string name) {
-    return TypeVariable{DerivedTypeVariable{{name}}};
+  static TypeVariable CreateDtv(std::string name, uint32_t instanceId = 0) {
+    return TypeVariable{
+        DerivedTypeVariable{{.Base = name, .instanceId = instanceId}}};
   }
 
   static TypeVariable CreateIntConstant(OffsetRange val, uint32_t instanceId) {

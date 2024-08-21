@@ -79,7 +79,7 @@ protected:
 public:
   CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size);
   std::string str() { return key.str() + "-" + PNIVar->str(); }
-  void onSetPointer();
+  void onUpdatePNType();
   void setAsPtrAdd(CGNode *Other, OffsetRange Off);
 };
 
@@ -102,6 +102,7 @@ struct ConstraintGraph : CGBase {
   std::set<CGNode *> StartNodes;
   std::set<CGNode *> EndNodes;
   std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> PathSeq;
+  std::map<CGNode *, std::set<std::pair<FieldLabel, CGNode *>>> ReachingSet;
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
   bool isLayerSplit = false;
@@ -135,6 +136,7 @@ struct ConstraintGraph : CGBase {
 protected:
   // Graph related operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    assert(isLayerSplit);
     auto it = From.outEdges.find(CGEdge(To, Label));
     assert(it != From.outEdges.end());
     From.removeEdge(const_cast<CGEdge &>(*it));
@@ -145,6 +147,16 @@ protected:
       assert(std::holds_alternative<One>(Label));
       return false;
     }
+    if (!isLayerSplit) {
+      // maintain the initial reaching push/forget set.
+      if (std::holds_alternative<ForgetLabel>(Label)) {
+        auto Capa = std::get<ForgetLabel>(Label);
+        ReachingSet[&To].insert({Capa.label, &From});
+      } else if (std::holds_alternative<One>(Label)) {
+        // unify PN
+        From.getPNIVar()->unifyPN(*To.getPNIVar());
+      }
+    }
     auto it = From.outEdges.emplace(To, Label);
     if (it.second) {
       connect(From, To, const_cast<CGEdge &>(*it.first));
@@ -152,6 +164,10 @@ protected:
     return it.second;
   }
   void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
+  friend struct CGNode;
+  void replaceNodeKey(CGNode &Node, const TypeVariable &NewVar);
+  void addLeftRecalls(const TypeVariable &sub);
+  // void addRightForgets(const TypeVariable &sup);
 
 public:
   void setPointer(CGNode &Node) {

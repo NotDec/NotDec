@@ -88,6 +88,7 @@ public:
   }
   /// merge two PNVar into one. Return the unified PNVar.
   PNINode *unifyPN(PNINode &other);
+  void addUser(CGNode *Node);
 
   std::string str() const {
     return "PNI_" + std::to_string(Id) + "(" + getPNChar() +
@@ -166,6 +167,7 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
 
 struct PNIGraph {
   std::string Name;
+  std::set<ConsNode *> Worklist;
 
   // list for ConstraintNode
   using ConstraintsType = llvm::ilist<ConsNode>;
@@ -185,9 +187,10 @@ struct PNIGraph {
   const std::set<CGNode *> &getNodeSet(PNINode *Cons) {
     return PNIToNode[Cons];
   }
-  PNINode *createPNINode() {
+  PNINode *createPNINode(CGNode *To) {
     auto *N = new PNINode(*this);
     PNINodes.push_back(N);
+    PNIToNode[N].insert(To);
     return N;
   }
 
@@ -198,8 +201,6 @@ struct PNIGraph {
 
   void addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
                   llvm::BinaryOperator *Inst);
-
-  void mergePNVarTo(PNINode *Var, PNINode *Target);
 
   PNINode *mergePNINodes(PNINode *Left, PNINode *Right) {
     if (Left == Right ||
@@ -231,8 +232,12 @@ struct PNIGraph {
     }
   }
   void eraseConstraint(ConsNode *Cons);
-  void solve();
-  void onSetPointer(PNINode *N);
+  bool solve();
+  void onUpdatePNType(PNINode *N);
+
+protected:
+  void markChanged(PNINode *N, ConsNode *Except = nullptr);
+  void mergePNVarTo(PNINode *Var, PNINode *Target);
 };
 
 } // namespace notdec::retypd

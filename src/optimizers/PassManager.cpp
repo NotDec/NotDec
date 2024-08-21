@@ -255,6 +255,8 @@ void DecompileConfig::run_passes() {
   PB.registerFunctionAnalyses(FAM);
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  StackPointerFinderAnalysis SPF;
+  MAM.registerPass([&]() { return SPF; });
 
   // Create the pass manager.
   // Optimize the IR!
@@ -262,8 +264,15 @@ void DecompileConfig::run_passes() {
   // ModulePassManager MPM =
   // PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
   ModulePassManager MPM;
-  FunctionPassManager FPM = buildFunctionOptimizations();
 
+  bool onlyRunTypeRecovery = getenv("NOTDEC_ONLY_TYPEREC") != nullptr;
+  if (onlyRunTypeRecovery) {
+    MPM.addPass(TypeRecovery());
+    MPM.run(Mod, MAM);
+    return;
+  }
+
+  FunctionPassManager FPM = buildFunctionOptimizations();
   // MPM.addPass(FunctionRenamer());
   // MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
   // MPM.addPass(createModuleToFunctionPassAdaptor(llvm::DCEPass()));
@@ -274,8 +283,6 @@ void DecompileConfig::run_passes() {
 
   // if not recompile then decompile.
   if (!Opts.onlyOptimize) {
-    StackPointerFinderAnalysis SPF;
-    MAM.registerPass([&]() { return SPF; });
 
     if (Opts.stackRec == "retdec") {
       find_special_gv();

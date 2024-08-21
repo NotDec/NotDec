@@ -42,16 +42,8 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
   }
 }
 
-void PNIGraph::solve() {
-  // write a worklist algorithm.
-  // When a unknown var changed to known, add all constraints that use this var.
-  // (maintain a map from var to constraints, maintain when two unknown vars
-  // merge)
-  // When two unknown vars merge, add all constraints that use these two vars.
-  std::set<ConsNode *> Worklist;
-  for (auto &C : Constraints) {
-    Worklist.insert(&C);
-  }
+bool PNIGraph::solve() {
+  bool AnyChanged = false;
   while (!Worklist.empty()) {
     ConsNode *C = *Worklist.begin();
     Worklist.erase(C);
@@ -59,16 +51,8 @@ void PNIGraph::solve() {
     bool isFullySolved = C->isFullySolved();
     // add according to changed.
     for (auto *N : Changed) {
-      for (auto *N2 : PNIToNode[N]) {
-        if (NodeToCons.count(N2)) {
-          for (auto *C2 : NodeToCons[N2]) {
-            if (C2 == C) {
-              continue;
-            }
-            Worklist.insert(C2);
-          }
-        }
-      }
+      AnyChanged = true;
+      markChanged(N, C);
     }
     // remove the constraint if fully solved.
     if (isFullySolved) {
@@ -76,6 +60,7 @@ void PNIGraph::solve() {
       C = nullptr;
     }
   }
+  return AnyChanged;
 }
 
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
@@ -99,6 +84,10 @@ void PNIGraph::eraseConstraint(ConsNode *Cons) {
   for (auto *N : Cons->getNodes()) {
     assert(N != nullptr);
     NodeToCons[N].erase(Cons);
+  }
+
+  if (Worklist.count(Cons)) {
+    Worklist.erase(Cons);
   }
 
   Cons->eraseFromParent();
@@ -354,11 +343,10 @@ llvm::iplist<PNINode>::iterator PNINode::eraseFromParent() {
 }
 
 // Notify CGNode that it becomes a pointer.
-void PNIGraph::onSetPointer(PNINode *N) {
-  assert(N->isPointer());
+void PNIGraph::onUpdatePNType(PNINode *N) {
   if (PNIToNode.count(N) > 0) {
     for (auto *Node : PNIToNode[N]) {
-      Node->onSetPointer();
+      Node->onUpdatePNType();
     }
   }
 }
@@ -374,7 +362,7 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
     hasConflict = true;
     if (Ty == NonPtr && NewTy == Pointer) {
       Ty = Pointer;
-      Parent->onSetPointer(this);
+      Parent->onUpdatePNType(this);
       return true;
     } else {
       return false;
@@ -382,9 +370,7 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   }
   assert(Ty == Unknown);
   Ty = NewTy;
-  if (NewTy == Pointer) {
-    Parent->onSetPointer(this);
-  }
+  Parent->onUpdatePNType(this);
   return true;
 }
 
@@ -417,6 +403,7 @@ void PNIGraph::addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
   NodeToCons[Right].insert(Node);
   NodeToCons[Result].insert(Node);
   Constraints.push_back(Node);
+  Worklist.insert(Node);
 }
 
 void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
@@ -428,6 +415,22 @@ void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
   NodeToCons[Right].insert(Node);
   NodeToCons[Result].insert(Node);
   Constraints.push_back(Node);
+  Worklist.insert(Node);
+}
+
+void PNIGraph::markChanged(PNINode *N, ConsNode *Except) {
+  // worklist algorithm.
+  // When a var changed, add all constraints that use this var.
+  for (auto *N2 : PNIToNode[N]) {
+    if (NodeToCons.count(N2)) {
+      for (auto *C2 : NodeToCons[N2]) {
+        if (C2 == Except) {
+          continue;
+        }
+        Worklist.insert(C2);
+      }
+    }
+  }
 }
 
 void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
@@ -439,9 +442,11 @@ void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
     }
     PNIToNode.erase(Var);
   }
-  // TODO maintain a Changed list?
   Var->eraseFromParent();
+  // Target is Changed, add related cons to worklist
+  markChanged(Target);
 }
+void PNINode::addUser(CGNode *Node) { Parent->PNIToNode[this].insert(Node); }
 
 PNINode::PNINode(PNIGraph &SSG)
     : node_with_erase(SSG), Id(ValueNamer::getId()) {}

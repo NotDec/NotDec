@@ -27,20 +27,53 @@
 
 namespace notdec::retypd {
 
-void CGNode::onSetPointer() {
+void ConstraintGraph::replaceNodeKey(CGNode &Node, const TypeVariable &TV) {
+  auto &TV1 = const_cast<TypeVariable &>(TV);
+  assert(Node.key.Base.isIntConstant());
+  assert(TV.getBase() == MemoryNode->key.Base.getBase());
+  assert(TV1.getLabels().size() == 1);
+  assert(std::holds_alternative<OffsetLabel>(TV1.getLabels().back()));
+
+  // replace all intConstants with memory.offset
+  for (auto &Current : Nodes) {
+    if (Current.first.Base.getBase() == Node.key.Base.getBase()) {
+      auto Ent = Nodes.extract(Current.first);
+      auto &Base = const_cast<TypeVariable &>(Ent.mapped().key.Base);
+      Base.setBase(TV.getBase());
+      auto &Labels = Base.getLabels();
+      Labels.insert(Labels.begin(), TV1.getLabels().begin(),
+                    TV1.getLabels().end());
+      Ent.key() = Ent.mapped().key;
+      Nodes.insert(std::move(Ent));
+    }
+  }
+
+  // fix related edges.
+  addConstraint(TV, TV);
+  // maintain the reaching push set
+
+  // do the same for contra-variant node.
+}
+
+void CGNode::onUpdatePNType() {
   if (key.Base.isIntConstant()) {
-    // convert to offset of memory
-    auto TV = Parent.MemoryNode->key.Base;
-    TV.getLabels().push_back(OffsetLabel{key.Base.getIntConstant()});
-    // replace the node key
-    ConstraintGraph &Parent = this->Parent;
-    auto Ent = Parent.Nodes.extract(this->key);
-    auto &Base = Ent.mapped().key.Base;
-    const_cast<TypeVariable &>(Base) = TV;
-    Ent.key() = Ent.mapped().key;
-    Parent.Nodes.insert(std::move(Ent));
-    // try to add related edges.
-    Parent.addConstraint(TV, TV);
+    if (getPNIVar()->isPointer()) {
+      // convert to offset of memory
+      auto TV = Parent.MemoryNode->key.Base;
+      TV.getLabels().push_back(OffsetLabel{key.Base.getIntConstant()});
+      // // add subtype of memory
+      // Parent.addConstraint(TV, this->key.Base);
+
+      // replace the node key, recursive
+      // should only exist at the left side of rules.
+      Parent.replaceNodeKey(*this, TV);
+
+    } else if (getPNIVar()->isNonPtr()) {
+      // do nothing in case of conflict
+      // view as int later lazily.
+    } else {
+      assert(false && "onUpdatePNType: Unknown PNType");
+    }
   }
 }
 
@@ -175,24 +208,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 
 std::vector<SubTypeConstraint>
 ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
-
-  // if (!InterestingVars.has_value()) {
-  //   assert(false); // TODO: is this useful?
-  //   InterestingVars = std::set<std::string>();
-  //   InterestingVars->insert(FuncName);
-  // }
-
-  if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      printGraph("trans_init.dot");
-    }
-  }
-  saturate();
-  if (const char *path = std::getenv("DEBUG_TRANS_SAT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      printGraph("trans_sat.dot");
-    }
-  }
+  solve();
   layerSplit();
   printGraph("trans_layerSplit.dot");
   Start = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#Start")});
@@ -308,25 +324,27 @@ void ConstraintGraph::layerSplit() {
 
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
-  bool Changed = false;
-  std::map<CGNode *, std::set<std::pair<FieldLabel, CGNode *>>> ReachingSet;
+  bool Changed = true;
+  // solve PNI first.
+  PG.solve();
 
-  // 1. add forget edge to reaching set
-  for (auto &Ent : Nodes) {
-    auto &Source = Ent.second;
-    for (auto &Edge : Source.outEdges) {
-      // For each edge, check if is forget edge.
-      if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
-        auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-        auto Capa = std::get<ForgetLabel>(Edge.Label);
-        auto Res = ReachingSet[&Target].insert({
-            Capa.label,
-            &Source,
-        });
-        Changed |= Res.second;
-      }
-    }
-  }
+  // Initial reaching push set is maintained during edge insertion.
+  // 1. add forget edges to reaching set
+  // for (auto &Ent : Nodes) {
+  //   auto &Source = Ent.second;
+  //   for (auto &Edge : Source.outEdges) {
+  //     // For each edge, check if is forget edge.
+  //     if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
+  //       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+  //       auto Capa = std::get<ForgetLabel>(Edge.Label);
+  //       auto Res = ReachingSet[&Target].insert({
+  //           Capa.label,
+  //           &Source,
+  //       });
+  //       Changed |= Res.second;
+  //     }
+  //   }
+  // }
 
   while (Changed) {
     Changed = false;
@@ -399,6 +417,8 @@ void ConstraintGraph::saturate() {
         }
       }
     }
+    // Run PNI solving again.
+    Changed |= PG.solve();
   }
 }
 
@@ -416,6 +436,22 @@ ConstraintGraph::fromConstraints(std::string FuncName,
   }
   return G;
 }
+
+void ConstraintGraph::addLeftRecalls(const TypeVariable &sub) {
+  auto &NodeL = getOrInsertNode(sub);
+  // 2.1 left
+  addRecalls(NodeL);
+  auto &RNodeL = getOrInsertNode(NodeKey(sub, Contravariant));
+  // 4.1 inverse left
+  addRecalls(RNodeL);
+}
+
+// void ConstraintGraph::addRightForgets(const TypeVariable &sup) {
+//   auto &NodeR = getOrInsertNode(sup);
+//   addForgets(NodeR);
+//   auto &RNodeR = getOrInsertNode(NodeKey(sup, Contravariant));
+//   addForgets(RNodeR);
+// }
 
 /// Interface for initial constraint insertion
 /// Also build the initial graph (Algorithm D.1 Transducer)
@@ -696,7 +732,17 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
 }
 
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size)
-    : Parent(Parent), key(key), Size(Size), PNIVar(Parent.PG.createPNINode()) {
+    : Parent(Parent), key(key), Size(Size), PNIVar(nullptr) {
+  // for contravariant, we reuse the PNINode.
+  if (key.SuffixVariance == Covariant) {
+    this->PNIVar = Parent.PG.createPNINode(this);
+  } else {
+    auto NewKey = key;
+    NewKey.SuffixVariance = Covariant;
+    this->PNIVar = Parent.getOrInsertNode(NewKey).getPNIVar();
+    this->PNIVar->addUser(this);
+  }
+
   // Create the link in the SSG.
   if (key.Base.isPrimitive()) {
     PNIVar->setPtrOrNum(NonPtr);

@@ -44,8 +44,6 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
   void gen_json(std::string OutputFilename);
 
-  static std::string sanitize_name(std::string s);
-
 public:
   void print(Module &M, std::string path);
 };
@@ -146,9 +144,6 @@ struct ConstraintsGenerator {
   ConstraintsGenerator(TypeRecovery &Ctx)
       : Ctx(Ctx), CG(this, "Global"), PG(CG.PG) {}
 
-protected:
-  std::vector<IntConstant> intConstantIds;
-
 public:
   CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User,
                      unsigned int Size) {
@@ -185,7 +180,7 @@ public:
     auto &Node = setTypeVar(
         Val, TypeVariable::CreateDtv(ValueNamer::getName(*Val, prefix)),
         nullptr, Size);
-    addSubtype(Node.key.Base, dtv);
+    addSubtype(dtv, Node.key.Base);
     return Node;
   }
   void addSubtype(const TypeVariable &sub, const TypeVariable &sup) {
