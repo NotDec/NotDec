@@ -166,7 +166,7 @@ protected:
   void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
   friend struct CGNode;
   void replaceNodeKey(CGNode &Node, const TypeVariable &NewVar);
-  void addLeftRecalls(const TypeVariable &sub);
+  // void addLeftRecalls(const TypeVariable &sub);
   // void addRightForgets(const TypeVariable &sup);
 
 public:

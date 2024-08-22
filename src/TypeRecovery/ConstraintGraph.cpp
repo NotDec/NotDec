@@ -437,14 +437,14 @@ ConstraintGraph::fromConstraints(std::string FuncName,
   return G;
 }
 
-void ConstraintGraph::addLeftRecalls(const TypeVariable &sub) {
-  auto &NodeL = getOrInsertNode(sub);
-  // 2.1 left
-  addRecalls(NodeL);
-  auto &RNodeL = getOrInsertNode(NodeKey(sub, Contravariant));
-  // 4.1 inverse left
-  addRecalls(RNodeL);
-}
+// void ConstraintGraph::addLeftRecalls(const TypeVariable &sub) {
+//   auto &NodeL = getOrInsertNode(sub);
+//   // 2.1 left
+//   addRecalls(NodeL);
+//   auto &RNodeL = getOrInsertNode(NodeKey(sub, Contravariant));
+//   // 4.1 inverse left
+//   addRecalls(RNodeL);
+// }
 
 // void ConstraintGraph::addRightForgets(const TypeVariable &sup) {
 //   auto &NodeR = getOrInsertNode(sup);
@@ -467,8 +467,10 @@ void ConstraintGraph::addConstraint(const TypeVariable &sub,
   // 2. add each sub var node and edges.
   // 2.1 left
   addRecalls(NodeL);
+  addForgets(NodeL);
   // 2.2 right
   addForgets(NodeR);
+  addRecalls(NodeR);
 
   // 3-4 the inverse of the above
   // 3. inverse node and 1-labeled edge
@@ -478,8 +480,10 @@ void ConstraintGraph::addConstraint(const TypeVariable &sub,
   addEdge(RNodeR, RNodeL, One{});
   // 4.1 inverse left
   addRecalls(RNodeL);
+  addForgets(RNodeL);
   // 4.2 inverse right
   addForgets(RNodeR);
+  addRecalls(RNodeR);
 }
 
 std::optional<std::pair<FieldLabel, NodeKey>> NodeKey::forgetOnce() const {
@@ -504,7 +508,9 @@ void ConstraintGraph::addRecalls(CGNode &N) {
     T = &NNext;
   }
   // We do not really link the node to #Start
-  StartNodes.insert(T);
+  if (N.key.SuffixVariance == Covariant) {
+    StartNodes.insert(T);
+  }
 }
 
 void ConstraintGraph::addForgets(CGNode &N) {
@@ -518,7 +524,9 @@ void ConstraintGraph::addForgets(CGNode &N) {
     T = &NNext;
   }
   // We do not really link the node to #Start
-  EndNodes.insert(T);
+  if (N.key.SuffixVariance == Covariant) {
+    EndNodes.insert(T);
+  }
 }
 
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size) {
@@ -709,7 +717,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
       Ret.back().sub.getLabels().push_back(std::get<RecallLabel>(EL).label);
     } else if (std::holds_alternative<ForgetLabel>(EL)) {
       isForget = true;
-      Ret.back().sup.getLabels().push_back(std::get<ForgetLabel>(EL).label);
+      Ret.back().sup.getLabels().push_front(std::get<ForgetLabel>(EL).label);
     } else {
       assert(false && "normalize_path: Base label type in the middle!");
     }
