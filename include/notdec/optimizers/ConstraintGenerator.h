@@ -142,7 +142,7 @@ struct ConstraintsGenerator {
   void solve();
   void generate(llvm::Function *Func);
   ConstraintsGenerator(TypeRecovery &Ctx)
-      : Ctx(Ctx), CG(this, "Global"), PG(CG.PG) {}
+      : Ctx(Ctx), CG(this, "Global", false), PG(*CG.PG) {}
 
 public:
   CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User,

@@ -2,7 +2,7 @@
 
 ## TODO
 
-- Move all header to a dedicated `include` folder. Make other change according to the cmake project structure.
+- Split into more cmake sub-project.
 - Add more comments.
 - Write docs in English.
 
@@ -12,6 +12,7 @@
 - handle unordered float pointer operation
 
 **Type recovery**
+- Check for any possible name collision
 - how to handle dynamic call using function pointer? how to traverse reverse post order?
 - Add a test case for basic block not in topo order. Check whether opt passes will reorder it.
 

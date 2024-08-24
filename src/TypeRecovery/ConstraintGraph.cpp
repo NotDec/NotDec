@@ -112,12 +112,6 @@ std::string toString(const EdgeLabel &label) {
   assert(false && "Unknown FieldLabel!");
 }
 
-ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name)
-    : Name(Name), PG(Name) {
-  MemoryNode = &getOrInsertNode(NodeKey{TypeVariable::CreateDtv(Memory)});
-  setPointer(*MemoryNode);
-}
-
 std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   assert(!isLayerSplit && "printConstraints: graph is already split!?");
 
@@ -326,8 +320,9 @@ void ConstraintGraph::layerSplit() {
 void ConstraintGraph::saturate() {
   bool Changed = true;
   // solve PNI first.
-  PG.solve();
-
+  if (PG) {
+    PG->solve();
+  }
   // Initial reaching push set is maintained during edge insertion.
   // 1. add forget edges to reaching set
   // for (auto &Ent : Nodes) {
@@ -418,7 +413,9 @@ void ConstraintGraph::saturate() {
       }
     }
     // Run PNI solving again.
-    Changed |= PG.solve();
+    if (PG) {
+      Changed |= PG->solve();
+    }
   }
 }
 
@@ -739,16 +736,80 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
   return Ctx.constraintsSequenceToConstraints(Ctx.ConstraintsSequence);
 }
 
+ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
+                                 bool disablePNI)
+    : Name(Name) {
+  if (!disablePNI) {
+    PG = std::make_unique<PNIGraph>(Name);
+  }
+  MemoryNode = &getOrInsertNode(NodeKey{TypeVariable::CreateDtv(Memory)});
+  if (!disablePNI) {
+    setPointer(*MemoryNode);
+  }
+}
+
+ConstraintGraph ConstraintGraph::clone(bool removePNI) {
+  std::map<CGNode *, CGNode *> Old2New;
+  // loses CG pointer when cloning.
+  ConstraintGraph G(nullptr, Name, (!(bool)PG) || removePNI);
+  // map the memory node
+  Old2New.emplace(MemoryNode, G.MemoryNode);
+
+  // clone all nodes
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    auto &NewNode = G.getOrInsertNode(Node.key, Node.Size);
+    Old2New.emplace(&Node, &NewNode);
+  }
+
+  // clone all edges
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    auto NewNode = Old2New[&Node];
+    for (auto &Edge : Node.outEdges) {
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      auto NewTarget = Old2New[&Target];
+      G.onlyAddEdge(*NewNode, *NewTarget, Edge.Label);
+    }
+  }
+
+  // clone PNI Graph
+  if (PG && !removePNI) {
+    G.PG = std::make_unique<PNIGraph>(PG->Name);
+    G.PG->cloneFrom(*PG, Old2New);
+  }
+
+  // handle fields
+  G.isLayerSplit = isLayerSplit;
+  if (Start) {
+    G.Start = Old2New[Start];
+  }
+  if (End) {
+    G.End = Old2New[End];
+  }
+  for (auto &N : StartNodes) {
+    G.StartNodes.insert(Old2New[N]);
+  }
+  for (auto &N : EndNodes) {
+    G.EndNodes.insert(Old2New[N]);
+  }
+
+  return G;
+}
+
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size)
     : Parent(Parent), key(key), Size(Size), PNIVar(nullptr) {
-  // for contravariant, we reuse the PNINode.
-  if (key.SuffixVariance == Covariant) {
-    this->PNIVar = Parent.PG.createPNINode(this);
-  } else {
-    auto NewKey = key;
-    NewKey.SuffixVariance = Covariant;
-    this->PNIVar = Parent.getOrInsertNode(NewKey).getPNIVar();
-    this->PNIVar->addUser(this);
+  if (Parent.PG) {
+    // for contravariant/new layer, we reuse the PNINode.
+    if (key.SuffixVariance == Covariant && key.IsNewLayer == false) {
+      this->PNIVar = Parent.PG->createPNINode(this);
+    } else {
+      auto NewKey = key;
+      NewKey.SuffixVariance = Covariant;
+      NewKey.IsNewLayer = false;
+      this->PNIVar = Parent.getOrInsertNode(NewKey).getPNIVar();
+      this->PNIVar->addUser(this);
+    }
   }
 
   // Create the link in the SSG.

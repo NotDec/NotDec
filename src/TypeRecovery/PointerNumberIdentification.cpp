@@ -451,4 +451,38 @@ void PNINode::addUser(CGNode *Node) { Parent->PNIToNode[this].insert(Node); }
 PNINode::PNINode(PNIGraph &SSG)
     : node_with_erase(SSG), Id(ValueNamer::getId()) {}
 
+void PNINode::cloneFrom(PNINode &N) {
+  Ty = N.Ty;
+  hasConflict = N.hasConflict;
+  Id = ValueNamer::getId();
+}
+
+void PNIGraph::cloneFrom(PNIGraph &G, std::map<CGNode *, CGNode *> Old2New) {
+  assert(PNINodes.size() == 0);
+  assert(Constraints.size() == 0);
+  // clone PNINodes
+  for (auto &N : G.PNINodes) {
+    auto *NewNode = new PNINode(*this);
+    NewNode->cloneFrom(N);
+    PNINodes.push_back(NewNode);
+    // maintain PNIToNode
+    for (auto *Node : G.PNIToNode[&N]) {
+      Old2New[Node]->setPNIVar(NewNode);
+      PNIToNode[NewNode].insert(Old2New[Node]);
+    }
+  }
+  // clone Constraints
+  for (auto &C : Constraints) {
+    auto *NewNode = new ConsNode(*this, AddNodeCons{});
+    NewNode->cloneFrom(C, Old2New);
+    Constraints.push_back(NewNode);
+    NodeToCons[NewNode->getNodes()[0]].insert(NewNode);
+    NodeToCons[NewNode->getNodes()[1]].insert(NewNode);
+    NodeToCons[NewNode->getNodes()[2]].insert(NewNode);
+    if (G.Worklist.count(&C)) {
+      Worklist.insert(NewNode);
+    }
+  }
+}
+
 } // namespace notdec::retypd

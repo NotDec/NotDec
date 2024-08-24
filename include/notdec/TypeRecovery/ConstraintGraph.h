@@ -4,6 +4,7 @@
 #include <list>
 #include <llvm/IR/AssemblyAnnotationWriter.h>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -95,7 +96,7 @@ struct CGEdge : CGEdgeBase {
 
 struct ConstraintGraph : CGBase {
   std::string Name;
-  PNIGraph PG;
+  std::unique_ptr<PNIGraph> PG;
   std::map<NodeKey, CGNode> Nodes;
   // TODO split constraint generation and solving
   // std::vector<Constraint> AddConstraints;
@@ -110,7 +111,9 @@ struct ConstraintGraph : CGBase {
   static const char *Memory;
   CGNode *MemoryNode = nullptr;
 
-  ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName);
+  ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName,
+                  bool disablePNI = false);
+  ConstraintGraph clone(bool removePNI = false);
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
   // Interface for initial constraint insertion
   void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
@@ -157,6 +160,9 @@ protected:
         From.getPNIVar()->unifyPN(*To.getPNIVar());
       }
     }
+    return onlyAddEdge(From, To, Label);
+  }
+  bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     auto it = From.outEdges.emplace(To, Label);
     if (it.second) {
       connect(From, To, const_cast<CGEdge &>(*it.first));
