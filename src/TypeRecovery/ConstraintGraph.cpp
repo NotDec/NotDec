@@ -458,7 +458,7 @@ void ConstraintGraph::addConstraint(const TypeVariable &sub,
   auto &NodeL = getOrInsertNode(sub);
   auto &NodeR = getOrInsertNode(sup);
   // add 1-labeled edge between them
-  if (NodeL != NodeR) {
+  if (&NodeL != &NodeR) {
     addEdge(NodeL, NodeR, One{});
   }
   // 2. add each sub var node and edges.
@@ -528,9 +528,6 @@ void ConstraintGraph::addForgets(CGNode &N) {
 
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size) {
   auto [it, inserted] = Nodes.try_emplace(N, *this, N, Size);
-  if (inserted) {
-    assert(addNode(it->second));
-  }
   return it->second;
 }
 

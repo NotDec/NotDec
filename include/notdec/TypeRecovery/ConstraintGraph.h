@@ -2,7 +2,6 @@
 #define _NOTDEC_RETYPD_GRAPH_H_
 
 #include <list>
-#include <llvm/IR/AssemblyAnnotationWriter.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -11,9 +10,9 @@
 #include <variant>
 #include <vector>
 
-#include <llvm/ADT/DirectedGraph.h>
 #include <llvm/ADT/ilist.h>
 #include <llvm/ADT/simple_ilist.h>
+#include <llvm/IR/AssemblyAnnotationWriter.h>
 #include <llvm/Support/GraphWriter.h>
 
 #include "TypeRecovery/PointerNumberIdentification.h"
@@ -54,18 +53,19 @@ struct NodeKey {
 
 std::string toString(const NodeKey &K);
 
-// Follows llvm/unittests/ADT/DirectedGraphTest.cpp
 struct CGNode;
 struct CGEdge;
-using CGNodeBase = llvm::DGNode<CGNode, CGEdge>;
-using CGEdgeBase = llvm::DGEdge<CGNode, CGEdge>;
-using CGBase = llvm::DirectedGraph<CGNode, CGEdge>;
 
-struct CGNode : CGNodeBase {
+struct CGNode {
   ConstraintGraph &Parent;
   const NodeKey key;
+  std::set<CGEdge *> inEdges;
   std::set<CGEdge> outEdges;
   unsigned int Size;
+
+  using iterator = std::set<CGEdge>::iterator;
+  iterator begin() { return outEdges.begin(); }
+  iterator end() { return outEdges.end(); }
 
   // Map from CGNode to SSGNode using union-find
   // We will not remove CGNode from the graph, but just update, so it is safe to
@@ -84,9 +84,16 @@ public:
   void setAsPtrAdd(CGNode *Other, OffsetRange Off);
 };
 
-struct CGEdge : CGEdgeBase {
+struct CGEdge {
+  CGNode &FromNode;
+  CGNode &TargetNode;
   EdgeLabel Label;
-  CGEdge(CGNode &Target, EdgeLabel &L) : CGEdgeBase(Target), Label(L) {}
+  CGEdge(CGNode &From, CGNode &Target, EdgeLabel &L)
+      : FromNode(From), TargetNode(Target), Label(L) {}
+
+  const CGNode &getTargetNode() const { return TargetNode; }
+  CGNode &getTargetNode() { return TargetNode; }
+
   bool operator<(const CGEdge &rhs) const {
     auto p1 = &TargetNode;
     auto p2 = &rhs.TargetNode;
@@ -95,7 +102,7 @@ struct CGEdge : CGEdgeBase {
 };
 
 struct DFAMinimizer;
-struct ConstraintGraph : CGBase {
+struct ConstraintGraph {
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
   std::map<NodeKey, CGNode> Nodes;
@@ -115,8 +122,13 @@ struct ConstraintGraph : CGBase {
   ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName,
                   bool disablePNI = false);
   ConstraintGraph clone(bool removePNI = false);
-  bool empty() { return Nodes.empty(); }
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
+
+  using iterator = std::map<NodeKey, CGNode>::iterator;
+  iterator begin() { return Nodes.begin(); }
+  iterator end() { return Nodes.end(); }
+  bool empty() { return Nodes.empty(); }
+
   // Interface for initial constraint insertion
   void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
 
@@ -142,9 +154,9 @@ protected:
   // Graph related operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(isLayerSplit);
-    auto it = From.outEdges.find(CGEdge(To, Label));
+    auto it = From.outEdges.find(CGEdge(From, To, Label));
     assert(it != From.outEdges.end());
-    From.removeEdge(const_cast<CGEdge &>(*it));
+    To.inEdges.erase(const_cast<CGEdge *>(&*it));
     From.outEdges.erase(it);
   }
   bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
@@ -165,9 +177,9 @@ protected:
     return onlyAddEdge(From, To, Label);
   }
   bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
-    auto it = From.outEdges.emplace(To, Label);
+    auto it = From.outEdges.emplace(From, To, Label);
     if (it.second) {
-      connect(From, To, const_cast<CGEdge &>(*it.first));
+      To.inEdges.insert(const_cast<CGEdge *>(&*it.first));
     }
     return it.second;
   }
@@ -199,22 +211,22 @@ using notdec::retypd::ConstraintGraph;
 template <> struct llvm::GraphTraits<CGNode *> {
   using NodeRef = CGNode *;
 
-  static CGNode *DGTestGetTargetNode(DGEdge<CGNode, CGEdge> *P) {
-    return &P->getTargetNode();
+  static CGNode *CGGetTargetNode(const CGEdge &P) {
+    return const_cast<CGNode *>(&P.getTargetNode());
   }
 
   // Provide a mapped iterator so that the GraphTrait-based implementations can
   // find the target nodes without having to explicitly go through the edges.
   using ChildIteratorType =
-      mapped_iterator<CGNode::iterator, decltype(&DGTestGetTargetNode)>;
+      mapped_iterator<CGNode::iterator, decltype(&CGGetTargetNode)>;
   using ChildEdgeIteratorType = CGNode::iterator;
 
   static NodeRef getEntryNode(NodeRef N) { std::abort(); }
   static ChildIteratorType child_begin(NodeRef N) {
-    return ChildIteratorType(N->begin(), &DGTestGetTargetNode);
+    return ChildIteratorType(N->begin(), &CGGetTargetNode);
   }
   static ChildIteratorType child_end(NodeRef N) {
-    return ChildIteratorType(N->end(), &DGTestGetTargetNode);
+    return ChildIteratorType(N->end(), &CGGetTargetNode);
   }
 
   static ChildEdgeIteratorType child_edge_begin(NodeRef N) {
@@ -225,10 +237,20 @@ template <> struct llvm::GraphTraits<CGNode *> {
 
 template <>
 struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
-  using nodes_iterator = ConstraintGraph::iterator;
+  using NodeRef = CGNode *;
+  static CGNode *CGGetNode(ConstraintGraph::iterator::reference Entry) {
+    return &Entry.second;
+  }
+  using nodes_iterator =
+      mapped_iterator<ConstraintGraph::iterator, decltype(&CGGetNode)>;
+
   static NodeRef getEntryNode(ConstraintGraph *DG) { return DG->Start; }
-  static nodes_iterator nodes_begin(ConstraintGraph *DG) { return DG->begin(); }
-  static nodes_iterator nodes_end(ConstraintGraph *DG) { return DG->end(); }
+  static nodes_iterator nodes_begin(ConstraintGraph *DG) {
+    return nodes_iterator(DG->begin(), &CGGetNode);
+  }
+  static nodes_iterator nodes_end(ConstraintGraph *DG) {
+    return nodes_iterator(DG->end(), &CGGetNode);
+  }
 };
 
 template <>
@@ -246,7 +268,7 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
                     llvm::GraphTraits<CGNode *>::ChildIteratorType I,
                     GraphRef CG) {
     return std::string("label=\"") +
-           notdec::retypd::toString((*I.getCurrent())->Label) + "\"";
+           notdec::retypd::toString((*I.getCurrent()).Label) + "\"";
   }
 };
 
