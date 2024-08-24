@@ -39,6 +39,8 @@ struct ConstraintsGenerator;
 struct TypeRecovery : PassInfoMixin<TypeRecovery> {
   llvm::Value *StackPointer;
   std::string data_layout;
+  // Map from SCC to initial constraint graph.
+  std::map<llvm::Function *, ConstraintsGenerator> func_ctxs;
   unsigned pointer_size = 0;
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
@@ -62,6 +64,9 @@ public:
       return prefix + std::to_string(Id);
     }
     return Val.getName().str();
+  }
+  static std::string getName(const char *prefix = ValueNamer::DefaultPrefix) {
+    return prefix + std::to_string(typeValId++);
   }
   static const char *DefaultPrefix;
   static const char *FuncPrefix;

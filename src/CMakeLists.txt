@@ -19,6 +19,7 @@ add_library(notdec STATIC
 	TypeRecovery/Schema.cpp
 	TypeRecovery/RExp.cpp
 	TypeRecovery/PointerNumberIdentification.cpp
+	TypeRecovery/NFAMinimize.cpp
 	Utils/Range.cpp
 	utils.cpp
 )

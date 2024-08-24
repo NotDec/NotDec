@@ -94,6 +94,7 @@ struct CGEdge : CGEdgeBase {
   }
 };
 
+struct DFAMinimizer;
 struct ConstraintGraph : CGBase {
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
@@ -114,6 +115,7 @@ struct ConstraintGraph : CGBase {
   ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName,
                   bool disablePNI = false);
   ConstraintGraph clone(bool removePNI = false);
+  bool empty() { return Nodes.empty(); }
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
   // Interface for initial constraint insertion
   void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
@@ -171,6 +173,7 @@ protected:
   }
   void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
   friend struct CGNode;
+  friend struct DFAMinimizer;
   void replaceNodeKey(CGNode &Node, const TypeVariable &NewVar);
   // void addLeftRecalls(const TypeVariable &sub);
   // void addRightForgets(const TypeVariable &sup);

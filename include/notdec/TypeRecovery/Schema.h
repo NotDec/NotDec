@@ -325,22 +325,37 @@ std::string toString(const Constraint &c);
 
 struct One {
   bool operator<(const One &rhs) const { return false; }
+  bool operator==(const One &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
 struct ForgetLabel {
   FieldLabel label;
   bool operator<(const ForgetLabel &rhs) const { return label < rhs.label; }
+  bool operator==(const ForgetLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
 struct ForgetBase {
   TypeVariable base;
   bool operator<(const ForgetBase &rhs) const { return base < rhs.base; }
+  bool operator==(const ForgetBase &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
 struct RecallLabel {
   FieldLabel label;
   bool operator<(const RecallLabel &rhs) const { return label < rhs.label; }
+  bool operator==(const RecallLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
 struct RecallBase {
   TypeVariable base;
   bool operator<(const RecallBase &rhs) const { return base < rhs.base; }
+  bool operator==(const RecallBase &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
 using EdgeLabel =
     std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase>;
