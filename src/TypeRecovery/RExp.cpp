@@ -340,7 +340,7 @@ eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes) {
     if (isNull(Ent.second)) {
       continue;
     }
-    if (IndexMap[Ent.first.first] < IndexMap[Ent.first.second]) {
+    if (IndexMap[Ent.first.first] <= IndexMap[Ent.first.second]) {
       Ascending.push_back({Ent.first.first, Ent.first.second, Ent.second});
     } else {
       Descending.push_back({Ent.first.first, Ent.first.second, Ent.second});
