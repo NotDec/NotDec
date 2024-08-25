@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include <llvm/ADT/SCCIterator.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Argument.h>
@@ -80,6 +81,14 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   data_layout = std::move(M.getDataLayoutStr());
   pointer_size = M.getDataLayout().getPointerSizeInBits();
+
+  // get the CallGraph, iterate by topological order of SCC
+  CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
+  // Walk the callgraph in bottom-up SCC order.
+  scc_iterator<CallGraph *> CGI = scc_begin(&CG);
+  while (!CGI.isAtEnd()) {
+    const std::vector<CallGraphNode *> &NodeVec = *CGI;
+  }
 
   ConstraintsGenerator Generator(*this);
   // TODO: context-sensitive

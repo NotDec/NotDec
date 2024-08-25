@@ -18,6 +18,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
@@ -232,8 +233,10 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
     }
   }
 
-  buildPathSequence();
-  return solve_constraints_between();
+  auto G2 = minimize(this);
+  G2.printGraph("trans_min.dot");
+  G2.buildPathSequence();
+  return G2.solve_constraints_between();
 }
 
 void ConstraintGraph::buildPathSequence() {
@@ -247,6 +250,13 @@ void ConstraintGraph::buildPathSequence() {
     // run eliminate for each SCC
     if (SCC.size() > 1) {
       auto Seqs = rexp::eliminate(*this, SCC);
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Path Sequence for SCC: " << toString(SCC) << ":\n");
+      for (auto &Seq : Seqs) {
+        LLVM_DEBUG(llvm::dbgs() << "  From " << toString(std::get<0>(Seq)->key)
+                                << " To " << toString(std::get<1>(Seq)->key)
+                                << ": " << toString(std::get<2>(Seq)) << "\n");
+      }
       PathSeq.insert(PathSeq.end(), Seqs.begin(), Seqs.end());
     }
     // Add all edges out of the current SCC to the path sequence.
@@ -552,6 +562,14 @@ std::string toString(const std::vector<EdgeLabel> &ELs) {
   return ret;
 }
 
+std::string toString(const std::set<CGNode *> Set) {
+  std::string ret;
+  for (auto &N : Set) {
+    ret += N->key.str() + ",";
+  }
+  return "{" + ret + "}";
+}
+
 struct ExprToConstraintsContext {
   static const char *tempNamePrefix;
   int TempNameIndex = 0;
@@ -807,11 +825,10 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size)
       this->PNIVar = Parent.getOrInsertNode(NewKey).getPNIVar();
       this->PNIVar->addUser(this);
     }
-  }
 
-  // Create the link in the SSG.
-  if (key.Base.isPrimitive()) {
-    PNIVar->setPtrOrNum(NonPtr);
+    if (key.Base.isPrimitive()) {
+      PNIVar->setPtrOrNum(NonPtr);
+    }
   }
 }
 

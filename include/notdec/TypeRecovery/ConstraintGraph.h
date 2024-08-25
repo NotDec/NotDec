@@ -64,8 +64,11 @@ struct CGNode {
   unsigned int Size;
 
   using iterator = std::set<CGEdge>::iterator;
+  using pred_iterator = std::set<CGEdge *>::iterator;
   iterator begin() { return outEdges.begin(); }
   iterator end() { return outEdges.end(); }
+  pred_iterator pred_begin() { return inEdges.begin(); }
+  pred_iterator pred_end() { return inEdges.end(); }
 
   // Map from CGNode to SSGNode using union-find
   // We will not remove CGNode from the graph, but just update, so it is safe to
@@ -91,8 +94,12 @@ struct CGEdge {
   CGEdge(CGNode &From, CGNode &Target, EdgeLabel &L)
       : FromNode(From), TargetNode(Target), Label(L) {}
 
+  EdgeLabel getLabel() const { return Label; }
+
   const CGNode &getTargetNode() const { return TargetNode; }
   CGNode &getTargetNode() { return TargetNode; }
+  const CGNode &getSourceNode() const { return FromNode; }
+  CGNode &getSourceNode() { return FromNode; }
 
   bool operator<(const CGEdge &rhs) const {
     auto p1 = &TargetNode;
@@ -101,7 +108,18 @@ struct CGEdge {
   }
 };
 
-struct DFAMinimizer;
+struct RevEdge {
+  CGEdge &Edge;
+  RevEdge(CGEdge &E) : Edge(E) {}
+  CGNode &getTargetNode() { return Edge.getSourceNode(); }
+  CGNode &getSourceNode() { return Edge.getTargetNode(); }
+  EdgeLabel getLabel() const { return Edge.getLabel(); }
+
+  // Act as a pointer
+  RevEdge &operator*() { return *this; }
+  RevEdge *operator->() { return this; }
+};
+
 struct ConstraintGraph {
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
@@ -119,15 +137,16 @@ struct ConstraintGraph {
   static const char *Memory;
   CGNode *MemoryNode = nullptr;
 
-  ConstraintGraph(ConstraintsGenerator *CG, std::string FuncName,
+  ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
                   bool disablePNI = false);
   ConstraintGraph clone(bool removePNI = false);
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
 
+  std::string getName() { return Name; }
   using iterator = std::map<NodeKey, CGNode>::iterator;
   iterator begin() { return Nodes.begin(); }
   iterator end() { return Nodes.end(); }
-  bool empty() { return Nodes.empty(); }
+  bool empty() { return Nodes.size() == 1; }
 
   // Interface for initial constraint insertion
   void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
@@ -185,7 +204,7 @@ protected:
   }
   void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
   friend struct CGNode;
-  friend struct DFAMinimizer;
+  template <typename GraphTy, typename NodeTy> friend struct NFADeterminizer;
   void replaceNodeKey(CGNode &Node, const TypeVariable &NewVar);
   // void addLeftRecalls(const TypeVariable &sub);
   // void addRightForgets(const TypeVariable &sup);
@@ -197,6 +216,7 @@ public:
 };
 
 std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E);
+std::string toString(const std::set<CGNode *> Set);
 
 } // namespace notdec::retypd
 
@@ -208,36 +228,44 @@ namespace llvm {
 using notdec::retypd::CGEdge;
 using notdec::retypd::CGNode;
 using notdec::retypd::ConstraintGraph;
+using notdec::retypd::RevEdge;
+
 template <> struct llvm::GraphTraits<CGNode *> {
   using NodeRef = CGNode *;
 
-  static CGNode *CGGetTargetNode(const CGEdge &P) {
+  static CGNode *CGEdgeToTarget(const CGEdge &P) {
     return const_cast<CGNode *>(&P.getTargetNode());
+  }
+
+  static CGEdge *CGEdgeToPtr(const CGEdge &P) {
+    return const_cast<CGEdge *>(&P);
   }
 
   // Provide a mapped iterator so that the GraphTrait-based implementations can
   // find the target nodes without having to explicitly go through the edges.
   using ChildIteratorType =
-      mapped_iterator<CGNode::iterator, decltype(&CGGetTargetNode)>;
-  using ChildEdgeIteratorType = CGNode::iterator;
+      mapped_iterator<CGNode::iterator, decltype(&CGEdgeToTarget)>;
+  using ChildEdgeIteratorType =
+      mapped_iterator<CGNode::iterator, decltype(&CGEdgeToPtr)>;
 
-  static NodeRef getEntryNode(NodeRef N) { std::abort(); }
+  // static NodeRef getEntryNode(NodeRef N) { std::abort(); }
   static ChildIteratorType child_begin(NodeRef N) {
-    return ChildIteratorType(N->begin(), &CGGetTargetNode);
+    return ChildIteratorType(N->begin(), &CGEdgeToTarget);
   }
   static ChildIteratorType child_end(NodeRef N) {
-    return ChildIteratorType(N->end(), &CGGetTargetNode);
+    return ChildIteratorType(N->end(), &CGEdgeToTarget);
   }
 
   static ChildEdgeIteratorType child_edge_begin(NodeRef N) {
-    return N->begin();
+    return ChildEdgeIteratorType(N->begin(), &CGEdgeToPtr);
   }
-  static ChildEdgeIteratorType child_edge_end(NodeRef N) { return N->end(); }
+  static ChildEdgeIteratorType child_edge_end(NodeRef N) {
+    return ChildEdgeIteratorType(N->end(), &CGEdgeToPtr);
+  }
 };
 
 template <>
 struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
-  using NodeRef = CGNode *;
   static CGNode *CGGetNode(ConstraintGraph::iterator::reference Entry) {
     return &Entry.second;
   }
@@ -245,6 +273,8 @@ struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
       mapped_iterator<ConstraintGraph::iterator, decltype(&CGGetNode)>;
 
   static NodeRef getEntryNode(ConstraintGraph *DG) { return DG->Start; }
+  static NodeRef getExitNode(ConstraintGraph *DG) { return DG->End; }
+
   static nodes_iterator nodes_begin(ConstraintGraph *DG) {
     return nodes_iterator(DG->begin(), &CGGetNode);
   }
@@ -271,6 +301,67 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
            notdec::retypd::toString((*I.getCurrent()).Label) + "\"";
   }
 };
+
+//===----------------------------------------------------------------------===//
+// Inverse GraphTraits specializations for ConstraintGraph
+//===----------------------------------------------------------------------===//
+
+// Inverse by value
+template <class GraphType> struct InverseVal {
+  const GraphType Graph;
+
+  inline InverseVal(const GraphType G) : Graph(G) {}
+};
+
+template <> struct GraphTraits<InverseVal<CGNode *>> {
+  using NodeRef = InverseVal<CGNode *>;
+  static CGNode *CGEdgeToSource(const CGEdge *P) {
+    return const_cast<CGNode *>(&P->getSourceNode());
+  }
+
+  static RevEdge CGEdgeToRevEdge(const CGEdge *P) {
+    return RevEdge(*const_cast<CGEdge *>(P));
+  }
+
+  // Provide a mapped iterator so that the GraphTrait-based implementations can
+  // find the souce nodes without having to explicitly go through the edges.
+  using ChildIteratorType =
+      mapped_iterator<CGNode::pred_iterator, decltype(&CGEdgeToSource)>;
+  using ChildEdgeIteratorType =
+      mapped_iterator<CGNode::pred_iterator, decltype(&CGEdgeToRevEdge)>;
+
+  // static NodeRef getEntryNode(InverseVal<CGNode *> G) { std::abort(); }
+  static ChildIteratorType child_begin(NodeRef N) {
+    return ChildIteratorType(N.Graph->pred_begin(), &CGEdgeToSource);
+  }
+  static ChildIteratorType child_end(NodeRef N) {
+    return ChildIteratorType(N.Graph->pred_end(), &CGEdgeToSource);
+  }
+  static ChildEdgeIteratorType child_edge_begin(NodeRef N) {
+    return ChildEdgeIteratorType(N.Graph->pred_begin(), &CGEdgeToRevEdge);
+  }
+  static ChildEdgeIteratorType child_edge_end(NodeRef N) {
+    return ChildEdgeIteratorType(N.Graph->pred_end(), &CGEdgeToRevEdge);
+  }
+};
+
+template <>
+struct GraphTraits<InverseVal<ConstraintGraph *>>
+    : public GraphTraits<InverseVal<CGNode *>> {
+
+  static NodeRef getExitNode(InverseVal<ConstraintGraph *> G) {
+    return G.Graph->Start;
+  }
+
+  static NodeRef getEntryNode(InverseVal<ConstraintGraph *> G) {
+    return G.Graph->End;
+  }
+};
+
+inline bool operator<(const InverseVal<CGNode *> &N1,
+                      const InverseVal<CGNode *> &N2) {
+  return N1.Graph < N2.Graph;
+}
 
 } // namespace llvm
 

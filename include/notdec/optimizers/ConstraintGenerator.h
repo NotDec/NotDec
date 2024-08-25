@@ -25,6 +25,7 @@
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
+#include "Utils/ValueNamer.h"
 
 namespace notdec {
 
@@ -48,33 +49,6 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
 
 public:
   void print(Module &M, std::string path);
-};
-
-struct ValueNamer {
-protected:
-  static size_t typeValId;
-
-public:
-  static size_t getId() { return typeValId++; }
-  static std::string getName(Value &Val,
-                             const char *prefix = ValueNamer::DefaultPrefix) {
-    if (!Val.hasName()) {
-      auto Id = typeValId++;
-      Val.setName(prefix + std::to_string(Id));
-      return prefix + std::to_string(Id);
-    }
-    return Val.getName().str();
-  }
-  static std::string getName(const char *prefix = ValueNamer::DefaultPrefix) {
-    return prefix + std::to_string(typeValId++);
-  }
-  static const char *DefaultPrefix;
-  static const char *FuncPrefix;
-  static const char *PhiPrefix;
-  static const char *SelectPrefix;
-  static const char *NewPrefix;
-  static const char *AddPrefix;
-  static const char *SubPrefix;
 };
 
 inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
