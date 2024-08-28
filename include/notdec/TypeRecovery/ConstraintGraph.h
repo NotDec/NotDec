@@ -146,7 +146,7 @@ struct ConstraintGraph {
   using iterator = std::map<NodeKey, CGNode>::iterator;
   iterator begin() { return Nodes.begin(); }
   iterator end() { return Nodes.end(); }
-  bool empty() { return Nodes.size() == 1; }
+  bool empty() { return Nodes.empty(); }
 
   // Interface for initial constraint insertion
   void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
@@ -156,6 +156,11 @@ struct ConstraintGraph {
   simplify(std::set<std::string> &InterestingVars);
 
   void solve();
+
+  // Lazy initialization of special nodes.
+  CGNode *getStartNode();
+  CGNode *getEndNode();
+  CGNode *getMemoryNode();
 
   // internal steps
   void saturate();
@@ -272,8 +277,10 @@ struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
   using nodes_iterator =
       mapped_iterator<ConstraintGraph::iterator, decltype(&CGGetNode)>;
 
-  static NodeRef getEntryNode(ConstraintGraph *DG) { return DG->Start; }
-  static NodeRef getExitNode(ConstraintGraph *DG) { return DG->End; }
+  static NodeRef getEntryNode(ConstraintGraph *DG) {
+    return DG->getStartNode();
+  }
+  static NodeRef getExitNode(ConstraintGraph *DG) { return DG->getEndNode(); }
 
   static nodes_iterator nodes_begin(ConstraintGraph *DG) {
     return nodes_iterator(DG->begin(), &CGGetNode);
@@ -350,11 +357,11 @@ struct GraphTraits<InverseVal<ConstraintGraph *>>
     : public GraphTraits<InverseVal<CGNode *>> {
 
   static NodeRef getExitNode(InverseVal<ConstraintGraph *> G) {
-    return G.Graph->Start;
+    return G.Graph->getStartNode();
   }
 
   static NodeRef getEntryNode(InverseVal<ConstraintGraph *> G) {
-    return G.Graph->End;
+    return G.Graph->getEndNode();
   }
 };
 

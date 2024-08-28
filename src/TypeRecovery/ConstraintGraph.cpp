@@ -31,7 +31,7 @@ namespace notdec::retypd {
 void ConstraintGraph::replaceNodeKey(CGNode &Node, const TypeVariable &TV) {
   auto &TV1 = const_cast<TypeVariable &>(TV);
   assert(Node.key.Base.isIntConstant());
-  assert(TV.getBase() == MemoryNode->key.Base.getBase());
+  assert(TV.getBase() == getMemoryNode()->key.Base.getBase());
   assert(TV1.getLabels().size() == 1);
   assert(std::holds_alternative<OffsetLabel>(TV1.getLabels().back()));
 
@@ -52,7 +52,7 @@ void ConstraintGraph::replaceNodeKey(CGNode &Node, const TypeVariable &TV) {
   // fix related edges.
   addConstraint(TV, TV);
   // maintain the reaching push set
-
+  assert(false && "TODO");
   // do the same for contra-variant node.
 }
 
@@ -60,7 +60,7 @@ void CGNode::onUpdatePNType() {
   if (key.Base.isIntConstant()) {
     if (getPNIVar()->isPointer()) {
       // convert to offset of memory
-      auto TV = Parent.MemoryNode->key.Base;
+      auto TV = Parent.getMemoryNode()->key.Base;
       TV.getLabels().push_back(OffsetLabel{key.Base.getIntConstant()});
       // // add subtype of memory
       // Parent.addConstraint(TV, this->key.Base);
@@ -168,7 +168,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
   };
 
   // 1.3. solve the pathexpr(start)
-  auto Source = Start;
+  auto Source = getStartNode();
   for (auto Ent : PathSeq) {
     auto [From, To, E] = Ent;
     if (From == To) {
@@ -180,7 +180,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
       bitorAssignPExp(Source, To, rexp::simplifyOnce(srcFrom & E));
     }
   }
-  auto finalExp = getPexp(Start, End);
+  auto finalExp = getPexp(getStartNode(), getEndNode());
   if ((::llvm::DebugFlag && ::llvm::isCurrentDebugType(DEBUG_TYPE))) {
     // flatten the outer most Or
     if (std::holds_alternative<rexp::Or>(*finalExp)) {
@@ -206,8 +206,6 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
   solve();
   layerSplit();
   printGraph("trans_layerSplit.dot");
-  Start = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#Start")});
-  End = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#End")});
 
   // Link nodes to "#Start"
   for (auto N : StartNodes) {
@@ -217,7 +215,7 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from #Start to " << N->key.str() << "\n");
-      addEdge(*Start, *N, RecallBase{N->key.Base.toBase()});
+      addEdge(*getStartNode(), *N, RecallBase{N->key.Base.toBase()});
     }
   }
 
@@ -229,7 +227,7 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from " << N->key.str() << " to #End\n");
-      addEdge(*N, *End, ForgetBase{N->key.Base.toBase()});
+      addEdge(*N, *getEndNode(), ForgetBase{N->key.Base.toBase()});
     }
   }
 
@@ -751,15 +749,38 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
   return Ctx.constraintsSequenceToConstraints(Ctx.ConstraintsSequence);
 }
 
+CGNode *ConstraintGraph::getMemoryNode() {
+  if (MemoryNode != nullptr) {
+    return MemoryNode;
+  }
+  MemoryNode = &getOrInsertNode(NodeKey{TypeVariable::CreateDtv(Memory)});
+  if (PG) {
+    setPointer(*MemoryNode);
+  }
+  return MemoryNode;
+}
+
+CGNode *ConstraintGraph::getStartNode() {
+  if (Start != nullptr) {
+    return Start;
+  }
+  Start = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#Start")});
+  return Start;
+}
+
+CGNode *ConstraintGraph::getEndNode() {
+  if (End != nullptr) {
+    return End;
+  }
+  End = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#End")});
+  return End;
+}
+
 ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
                                  bool disablePNI)
     : Name(Name) {
   if (!disablePNI) {
     PG = std::make_unique<PNIGraph>(Name);
-  }
-  MemoryNode = &getOrInsertNode(NodeKey{TypeVariable::CreateDtv(Memory)});
-  if (!disablePNI) {
-    setPointer(*MemoryNode);
   }
 }
 
@@ -767,8 +788,6 @@ ConstraintGraph ConstraintGraph::clone(bool removePNI) {
   std::map<CGNode *, CGNode *> Old2New;
   // loses CG pointer when cloning.
   ConstraintGraph G(nullptr, Name, (!(bool)PG) || removePNI);
-  // map the memory node
-  Old2New.emplace(MemoryNode, G.MemoryNode);
 
   // clone all nodes
   for (auto &Ent : Nodes) {
@@ -796,6 +815,9 @@ ConstraintGraph ConstraintGraph::clone(bool removePNI) {
 
   // handle fields
   G.isLayerSplit = isLayerSplit;
+  if (MemoryNode) {
+    G.MemoryNode = Old2New[MemoryNode];
+  }
   if (Start) {
     G.Start = Old2New[Start];
   }

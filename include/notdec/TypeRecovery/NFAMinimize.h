@@ -37,14 +37,10 @@ struct NFADeterminizer {
     auto OldGStart = GT::getEntryNode(OldG);
     auto OldGEnd = GT::getExitNode(OldG);
     assert(NewG->empty() && "NewG must be empty");
-    // 1. Create the start/end node
-    NewG->Start = &NewG->getOrInsertNode(
-        NodeKey{TypeVariable::CreatePrimitive("#Start")});
-    NewG->End =
-        &NewG->getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#End")});
+    // 1. Map the start/end node
     std::set<NodeTy> StartSet = {OldGStart};
-    auto StartIt = DTrans.emplace(StartSet, NewG->Start);
-    DTrans[{OldGEnd}] = NewG->End;
+    auto StartIt = DTrans.emplace(StartSet, NewG->getStartNode());
+    DTrans[{OldGEnd}] = NewG->getEndNode();
     Worklist.push(StartIt.first);
     while (!Worklist.empty()) {
       auto It = Worklist.front();
