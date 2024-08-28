@@ -89,7 +89,7 @@ public:
   /// merge two PNVar into one. Return the unified PNVar.
   PNINode *unifyPN(PNINode &other);
   void addUser(CGNode *Node);
-  void cloneFrom(PNINode &N);
+  void cloneFrom(const PNINode &N);
 
   std::string str() const {
     return "PNI_" + std::to_string(Id) + "(" + getPNChar() +
@@ -164,7 +164,7 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
     }
     assert(false && "PNIConsNode::getInst: unhandled variant");
   }
-  void cloneFrom(ConsNode &N, std::map<CGNode *, CGNode *> Old2New) {
+  void cloneFrom(ConsNode &N, std::map<const CGNode *, CGNode *> Old2New) {
     if (auto *Add = std::get_if<AddNodeCons>(&N.C)) {
       auto *NewLeft = Old2New[Add->LeftNode];
       auto *NewRight = Old2New[Add->RightNode];
@@ -212,7 +212,7 @@ struct PNIGraph {
   }
 
   PNIGraph(std::string Name) : Name(Name) {}
-  void cloneFrom(PNIGraph &G, std::map<CGNode *, CGNode *> Old2New);
+  void cloneFrom(const PNIGraph &G, std::map<const CGNode *, CGNode *> Old2New);
 
   void addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
                   llvm::BinaryOperator *Inst);

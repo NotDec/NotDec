@@ -45,7 +45,7 @@ TEST(Retypd, SaturationPaperTest) {
       ConstraintGraph::fromConstraints("SaturationPaper", cons);
 
   std::set<std::string> InterestingVars;
-  auto Cons = CG.simplify(InterestingVars);
+  auto Cons = CG.simplifiedExpr(InterestingVars);
   CG.printGraph("SaturationPaper.dot");
   std::cerr << "Simplified Constraints:" << std::endl;
   for (auto &C : Cons) {
@@ -73,7 +73,7 @@ TEST(Retypd, SlidesExampleTest) {
   ConstraintGraph CG = ConstraintGraph::fromConstraints("SlideExample", cons);
   std::set<std::string> InterestingVars;
   InterestingVars.insert("F");
-  auto Cons = CG.simplify(InterestingVars);
+  auto Cons = CG.simplifiedExpr(InterestingVars);
   // CG.printGraph("SlideExample.dot");
 
   // std::cerr << "Simplified Constraints:" << std::endl;

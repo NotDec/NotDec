@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -88,17 +89,32 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   scc_iterator<CallGraph *> CGI = scc_begin(&CG);
   while (!CGI.isAtEnd()) {
     const std::vector<CallGraphNode *> &NodeVec = *CGI;
+
+    // Calc name for current SCC
+    std::string Name;
+    for (auto CGN : NodeVec) {
+      if (!Name.empty()) {
+        Name += ",";
+      }
+      Name += CGN->getFunction()->getName().str();
+    }
+
+    std::shared_ptr<ConstraintsGenerator> Generator =
+        std::make_shared<ConstraintsGenerator>(*this, Name);
+
+    // TODO: context-sensitive
+    for (auto CGN : NodeVec) {
+      Generator->visit(CGN->getFunction());
+      auto It = FuncCtxs.emplace(CGN->getFunction(), Generator);
+      assert(It.second && "Function already processed?");
+    }
+
+    Generator->solve();
+    ++CGI;
   }
 
-  ConstraintsGenerator Generator(*this);
-  // TODO: context-sensitive
-  for (auto &F : M) {
-    Generator.generate(&F);
-  }
+  // gen_json("retypd-constrains.json");
 
-  gen_json("retypd-constrains.json");
-
-  Generator.solve();
   // TODO convert the type back to LLVM IR
   print(M, "after-TypeRecovery.ll");
 
@@ -106,7 +122,7 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   return PreservedAnalyses::none();
 }
 
-void ConstraintsGenerator::generate(llvm::Function *Func) {
+void ConstraintsGenerator::visit(llvm::Function *Func) {
   RetypdGeneratorVisitor Visitor(*this);
   Visitor.visit(Func);
   Visitor.handlePHINodes();

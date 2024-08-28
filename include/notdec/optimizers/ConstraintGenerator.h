@@ -9,6 +9,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/Support/Casting.h>
 #include <map>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -41,7 +42,7 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
   llvm::Value *StackPointer;
   std::string data_layout;
   // Map from SCC to initial constraint graph.
-  std::map<llvm::Function *, ConstraintsGenerator> func_ctxs;
+  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   unsigned pointer_size = 0;
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
@@ -119,9 +120,9 @@ struct ConstraintsGenerator {
   retypd::PNIGraph &PG;
 
   void solve();
-  void generate(llvm::Function *Func);
-  ConstraintsGenerator(TypeRecovery &Ctx)
-      : Ctx(Ctx), CG(this, "Global", false), PG(*CG.PG) {}
+  void visit(llvm::Function *Func);
+  ConstraintsGenerator(TypeRecovery &Ctx, std::string Name)
+      : Ctx(Ctx), CG(this, Name, false), PG(*CG.PG) {}
 
 public:
   CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User,

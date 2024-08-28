@@ -91,11 +91,6 @@ void ConstraintGraph::solve() {
     }
   }
   saturate();
-  if (const char *path = std::getenv("DEBUG_TRANS_SAT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      printGraph("trans_sat.dot");
-    }
-  }
 }
 
 std::string toString(const EdgeLabel &label) {
@@ -201,40 +196,56 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
   return ret;
 }
 
-std::vector<SubTypeConstraint>
+ConstraintGraph
 ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
   solve();
-  layerSplit();
-  printGraph("trans_layerSplit.dot");
+  return simplifyImpl(InterestingVars);
+}
+
+ConstraintGraph
+ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
+  ConstraintGraph G = clone();
+  G.layerSplit();
 
   // Link nodes to "#Start"
-  for (auto N : StartNodes) {
+  for (auto N : G.StartNodes) {
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
         (N->key.Base.isDtv() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from #Start to " << N->key.str() << "\n");
-      addEdge(*getStartNode(), *N, RecallBase{N->key.Base.toBase()});
+      G.addEdge(*G.getStartNode(), *N, RecallBase{N->key.Base.toBase()});
     }
   }
 
   // Link nodes to "#End"
-  for (auto N : EndNodes) {
+  for (auto N : G.EndNodes) {
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
         (N->key.Base.isDtv() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from " << N->key.str() << " to #End\n");
-      addEdge(*N, *getEndNode(), ForgetBase{N->key.Base.toBase()});
+      G.addEdge(*N, *G.getEndNode(), ForgetBase{N->key.Base.toBase()});
     }
   }
+  auto G2 = minimize(&G);
+  if (const char *path = std::getenv("DEBUG_MIN_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      G2.printGraph("trans_min.dot");
+    }
+  }
+  return G2;
+}
 
-  auto G2 = minimize(this);
-  G2.printGraph("trans_min.dot");
-  G2.buildPathSequence();
-  return G2.solve_constraints_between();
+// Simplify graph and build path expr.
+std::vector<SubTypeConstraint>
+ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) {
+  auto G = simplify(InterestingVars);
+
+  G.buildPathSequence();
+  return G.solve_constraints_between();
 }
 
 void ConstraintGraph::buildPathSequence() {
@@ -321,6 +332,11 @@ void ConstraintGraph::layerSplit() {
     NewKey.IsNewLayer = true;
     auto &NewNode = getOrInsertNode(NewKey);
     EndNodes.insert(&NewNode);
+  }
+  if (const char *path = std::getenv("DEBUG_LAYER_SPLIT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      printGraph("trans_layerSplit.dot");
+    }
   }
 }
 
@@ -423,6 +439,12 @@ void ConstraintGraph::saturate() {
     // Run PNI solving again.
     if (PG) {
       Changed |= PG->solve();
+    }
+  }
+
+  if (const char *path = std::getenv("DEBUG_TRANS_SAT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      printGraph("trans_sat.dot");
     }
   }
 }
@@ -784,8 +806,8 @@ ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
   }
 }
 
-ConstraintGraph ConstraintGraph::clone(bool removePNI) {
-  std::map<CGNode *, CGNode *> Old2New;
+ConstraintGraph ConstraintGraph::clone(bool removePNI) const {
+  std::map<const CGNode *, CGNode *> Old2New;
   // loses CG pointer when cloning.
   ConstraintGraph G(nullptr, Name, (!(bool)PG) || removePNI);
 

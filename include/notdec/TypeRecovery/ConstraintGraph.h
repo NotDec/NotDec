@@ -139,7 +139,7 @@ struct ConstraintGraph {
 
   ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
                   bool disablePNI = false);
-  ConstraintGraph clone(bool removePNI = false);
+  ConstraintGraph clone(bool removePNI = false) const;
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
 
   std::string getName() { return Name; }
@@ -153,8 +153,14 @@ struct ConstraintGraph {
 
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
-  simplify(std::set<std::string> &InterestingVars);
+  simplifiedExpr(std::set<std::string> &InterestingVars);
+  ConstraintGraph simplify(std::set<std::string> &InterestingVars);
 
+protected:
+  // Create a new simplified.
+  ConstraintGraph simplifyImpl(std::set<std::string> &InterestingVars) const;
+
+public:
   void solve();
 
   // Lazy initialization of special nodes.

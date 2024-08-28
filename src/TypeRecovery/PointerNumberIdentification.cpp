@@ -451,13 +451,14 @@ void PNINode::addUser(CGNode *Node) { Parent->PNIToNode[this].insert(Node); }
 PNINode::PNINode(PNIGraph &SSG)
     : node_with_erase(SSG), Id(ValueNamer::getId()) {}
 
-void PNINode::cloneFrom(PNINode &N) {
+void PNINode::cloneFrom(const PNINode &N) {
   Ty = N.Ty;
   hasConflict = N.hasConflict;
   Id = ValueNamer::getId();
 }
 
-void PNIGraph::cloneFrom(PNIGraph &G, std::map<CGNode *, CGNode *> Old2New) {
+void PNIGraph::cloneFrom(const PNIGraph &G,
+                         std::map<const CGNode *, CGNode *> Old2New) {
   assert(PNINodes.size() == 0);
   assert(Constraints.size() == 0);
   // clone PNINodes
@@ -466,7 +467,7 @@ void PNIGraph::cloneFrom(PNIGraph &G, std::map<CGNode *, CGNode *> Old2New) {
     NewNode->cloneFrom(N);
     PNINodes.push_back(NewNode);
     // maintain PNIToNode
-    for (auto *Node : G.PNIToNode[&N]) {
+    for (const auto *Node : G.PNIToNode.at(const_cast<PNINode *>(&N))) {
       Old2New[Node]->setPNIVar(NewNode);
       PNIToNode[NewNode].insert(Old2New[Node]);
     }
