@@ -155,6 +155,7 @@ struct ConstraintGraph {
   std::vector<SubTypeConstraint>
   simplifiedExpr(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify(std::set<std::string> &InterestingVars);
+  void instantiate(const ConstraintGraph &Sum, size_t ID);
 
 protected:
   // Create a new simplified.

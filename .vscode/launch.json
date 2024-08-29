@@ -7,6 +7,25 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "decompile offset1",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "test/backend/offset1.wat",
+        "-o",
+        "test/backend/offset1.wat.ll",
+        "-debug-only=type-recovery",
+        "--print-before=type-recovery"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "CMake: build",
+      "env": {
+        "DEBUG_MIN_GRAPH": "1",
+        "DEBUG_TRANS_SAT_GRAPH": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "decompile emcc-print",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
@@ -23,17 +42,20 @@
       "type": "lldb",
       "request": "launch",
       "name": "decompile",
-      // "program": "${workspaceFolder}/build/bin/notdec",
-      "program": "${command:cmake.launchTargetPath}",
+      "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
         "${file}",
         "-o",
         "${file}.ll",
-        "-debug-only=retypd",
-        // "--print-before=linear-allocation-recovery"
+        "-debug-only=type-recovery",
+        "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
+      "env": {
+        "DEBUG_MIN_GRAPH": "1",
+        "DEBUG_TRANS_SAT_GRAPH": "1"
+      }
     },
     {
       "type": "lldb",

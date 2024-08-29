@@ -129,6 +129,57 @@ std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   return ret;
 }
 
+void ConstraintGraph::instantiate(const ConstraintGraph &Sum, size_t ID) {
+  assert(ID > 0);
+  std::map<const CGNode *, CGNode *> Old2New;
+  // ignore start and end nodes.
+  std::set<const CGNode *> SkipNodes = {Sum.Start, Sum.End};
+
+  // not add id to memory node.
+  if (Sum.MemoryNode) {
+    Old2New.emplace(Sum.MemoryNode, getMemoryNode());
+  }
+
+  // clone node and add instance id
+  for (auto &Ent : Sum.Nodes) {
+    if (SkipNodes.count(&Ent.second)) {
+      continue;
+    }
+    if (&Ent.second == Sum.MemoryNode) {
+      continue;
+    }
+    NodeKey NK = Ent.second.key;
+    if (NK.Base.hasInstanceId()) {
+      NK.Base.setInstanceId(ID);
+    }
+    auto &NewNode = getOrInsertNode(NK);
+    auto Pair = Old2New.emplace(&Ent.second, &NewNode);
+    assert(Pair.second && "instantiate: Node already inserted!?");
+  }
+
+  // clone all edges
+  for (auto &Ent : Sum.Nodes) {
+    auto &Node = Ent.second;
+    if (SkipNodes.count(&Node)) {
+      continue;
+    }
+    auto NewNode = Old2New.at(&Node);
+    for (auto &Edge : Node.outEdges) {
+      auto &Target = Edge.getTargetNode();
+      if (SkipNodes.count(&Target)) {
+        continue;
+      }
+      auto NewTarget = Old2New.at(&Target);
+      onlyAddEdge(*NewNode, *NewTarget, Edge.Label);
+    }
+  }
+
+  // clone PNI Graph
+  if (PG && Sum.PG) {
+    PG->cloneFrom(*Sum.PG, Old2New);
+  }
+}
+
 std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 
   std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P;
@@ -211,7 +262,7 @@ ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
   for (auto N : G.StartNodes) {
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
-        (N->key.Base.isDtv() &&
+        (N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from #Start to " << N->key.str() << "\n");
@@ -223,7 +274,7 @@ ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
   for (auto N : G.EndNodes) {
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
-        (N->key.Base.isDtv() &&
+        (N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from " << N->key.str() << " to #End\n");
@@ -231,7 +282,7 @@ ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
     }
   }
   auto G2 = minimize(&G);
-  if (const char *path = std::getenv("DEBUG_MIN_GRAPH")) {
+  if (const char *path = std::getenv("DEBUG_TRANS_MIN_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
       G2.printGraph("trans_min.dot");
     }
@@ -333,7 +384,7 @@ void ConstraintGraph::layerSplit() {
     auto &NewNode = getOrInsertNode(NewKey);
     EndNodes.insert(&NewNode);
   }
-  if (const char *path = std::getenv("DEBUG_LAYER_SPLIT_GRAPH")) {
+  if (const char *path = std::getenv("DEBUG_TRANS_LAYER_SPLIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
       printGraph("trans_layerSplit.dot");
     }
@@ -815,16 +866,17 @@ ConstraintGraph ConstraintGraph::clone(bool removePNI) const {
   for (auto &Ent : Nodes) {
     auto &Node = Ent.second;
     auto &NewNode = G.getOrInsertNode(Node.key, Node.Size);
-    Old2New.emplace(&Node, &NewNode);
+    auto Pair = Old2New.emplace(&Node, &NewNode);
+    assert(Pair.second && "clone: Node already cloned!?");
   }
 
   // clone all edges
   for (auto &Ent : Nodes) {
     auto &Node = Ent.second;
-    auto NewNode = Old2New[&Node];
+    auto NewNode = Old2New.at(&Node);
     for (auto &Edge : Node.outEdges) {
-      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-      auto NewTarget = Old2New[&Target];
+      auto &Target = Edge.getTargetNode();
+      auto NewTarget = Old2New.at(&Target);
       G.onlyAddEdge(*NewNode, *NewTarget, Edge.Label);
     }
   }
@@ -838,19 +890,19 @@ ConstraintGraph ConstraintGraph::clone(bool removePNI) const {
   // handle fields
   G.isLayerSplit = isLayerSplit;
   if (MemoryNode) {
-    G.MemoryNode = Old2New[MemoryNode];
+    G.MemoryNode = Old2New.at(MemoryNode);
   }
   if (Start) {
-    G.Start = Old2New[Start];
+    G.Start = Old2New.at(Start);
   }
   if (End) {
-    G.End = Old2New[End];
+    G.End = Old2New.at(End);
   }
   for (auto &N : StartNodes) {
-    G.StartNodes.insert(Old2New[N]);
+    G.StartNodes.insert(Old2New.at(N));
   }
   for (auto &N : EndNodes) {
-    G.EndNodes.insert(Old2New[N]);
+    G.EndNodes.insert(Old2New.at(N));
   }
 
   return G;

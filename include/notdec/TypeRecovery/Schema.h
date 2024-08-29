@@ -2,6 +2,7 @@
 #define _NOTDEC_RETYPD_SCHEMA_H_
 
 #include "Utils/Range.h"
+#include "utils.h"
 #include <cassert>
 #include <cstdint>
 #include <deque>
@@ -87,55 +88,48 @@ std::string toString(const FieldLabel &f);
 
 Variance getVariance(const FieldLabel &f);
 
-struct BaseType {
-  using BaseTy = std::variant<std::string, OffsetRange>;
-  BaseTy Base;
-  // 1. differentiate different int instance
-  // 2. differentiate different call instance
-  uint32_t instanceId = 0;
-
-  bool operator<(const BaseType &rhs) const {
-    return std::tie(Base, instanceId) < std::tie(rhs.Base, rhs.instanceId);
+struct BaseConstant {
+  OffsetRange Val = {0};
+  void *User = nullptr;
+  bool operator<(const BaseConstant &rhs) const {
+    return std::tie(Val, User) < std::tie(rhs.Val, rhs.User);
   }
-  bool operator==(const BaseType &rhs) const {
+  bool operator==(const BaseConstant &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
   std::string str() const {
-    std::string Ret;
-    if (auto *s = std::get_if<std::string>(&Base)) {
-      Ret = *s;
-    } else if (auto *r = std::get_if<OffsetRange>(&Base)) {
-      Ret = "#Int#" + toString(*r);
-      assert(instanceId > 0);
-    } else {
-      assert(false && "BaseType::str: Not a string or OffsetRange");
-    }
-    if (instanceId > 0) {
-      Ret += "#" + std::to_string(instanceId);
-    }
-    return Ret;
+    return "#Int#" + toString(Val) + "_" + int_to_hex((unsigned long)User);
   }
 };
 
 struct DerivedTypeVariable {
-  BaseType Base;
+  using BaseTy = std::variant<std::string, BaseConstant>;
+  BaseTy Base;
   std::deque<FieldLabel> Labels;
+  // differentiate Nodes from summary instantiation
+  size_t instanceId = 0;
 
-  uint32_t &instanceId() { return Base.instanceId; }
+  size_t getInstanceId() { return instanceId; }
+  void setInstanceId(size_t id) { instanceId = id; }
+
+  bool hasBaseName() const { return std::holds_alternative<std::string>(Base); }
+
   std::string getBaseName() const {
-    if (auto *s = std::get_if<std::string>(&Base.Base)) {
+    if (auto *s = std::get_if<std::string>(&Base)) {
       return *s;
     } else {
       assert(false && "DerivedTypeVariable::getBaseName: Base.Base is not a "
                       "string, but a IntConstant");
     }
   }
+
   bool isIntConstant() const {
-    return std::holds_alternative<OffsetRange>(Base.Base);
+    return std::holds_alternative<BaseConstant>(Base);
   }
+
   OffsetRange getIntConstant() const {
-    if (auto *r = std::get_if<OffsetRange>(&Base.Base)) {
-      return *r;
+    if (auto *r = std::get_if<BaseConstant>(&Base)) {
+      return r->Val;
     } else {
       assert(false && "DerivedTypeVariable::getIntConstant: Base.Base is not a "
                       "IntConstant");
@@ -167,6 +161,21 @@ struct DerivedTypeVariable {
   bool operator==(const DerivedTypeVariable &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
+  std::string str() const {
+    std::string Ret;
+    if (auto *s = std::get_if<std::string>(&Base)) {
+      Ret = *s;
+    } else {
+      Ret = std::get<BaseConstant>(Base).str();
+    }
+    if (instanceId > 0) {
+      Ret += "#" + std::to_string(instanceId);
+    }
+    for (auto &label : Labels) {
+      Ret += "." + toString(label);
+    }
+    return Ret;
+  }
 };
 
 struct PrimitiveTypeVariable {
@@ -187,14 +196,13 @@ struct TypeVariable {
     return TypeVariable{PrimitiveTypeVariable{name}};
   }
 
-  static TypeVariable CreateDtv(std::string name, uint32_t instanceId = 0) {
-    return TypeVariable{
-        DerivedTypeVariable{{.Base = name, .instanceId = instanceId}}};
+  static TypeVariable CreateDtv(std::string name) {
+    return TypeVariable{DerivedTypeVariable{.Base = name}};
   }
 
-  static TypeVariable CreateIntConstant(OffsetRange val, uint32_t instanceId) {
+  static TypeVariable CreateIntConstant(OffsetRange val, void *User) {
     return TypeVariable{
-        DerivedTypeVariable{.Base = {.Base = val, .instanceId = instanceId}}};
+        DerivedTypeVariable{.Base = BaseConstant{.Val = val, .User = User}}};
   }
 
   TypeVariable toBase() const {
@@ -221,11 +229,19 @@ struct TypeVariable {
     }
   }
 
-  uint32_t &instanceId() {
+  size_t getInstanceId() {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      return dtv->instanceId();
+      return dtv->getInstanceId();
     } else {
       assert(false && "getInstanceId: No instanceId.");
+    }
+  }
+
+  void setInstanceId(size_t id) {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      dtv->setInstanceId(id);
+    } else {
+      assert(false && "setInstanceId: Not a DerivedTypeVariable");
     }
   }
 
@@ -235,6 +251,12 @@ struct TypeVariable {
     } else {
       assert(false && "getPrimitiveName: Not a PrimitiveTypeVariable");
     }
+  }
+
+  bool hasBaseName() const {
+    return std::holds_alternative<PrimitiveTypeVariable>(Inner) ||
+           (std::holds_alternative<DerivedTypeVariable>(Inner) &&
+            std::get<DerivedTypeVariable>(Inner).hasBaseName());
   }
 
   std::string getBaseName() const {
@@ -247,7 +269,7 @@ struct TypeVariable {
     }
   }
 
-  BaseType getBase() const {
+  DerivedTypeVariable::BaseTy getBase() const {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
       return dtv->Base;
     } else {
@@ -255,7 +277,7 @@ struct TypeVariable {
     }
   }
 
-  bool isDtv() const {
+  bool hasInstanceId() const {
     return std::holds_alternative<DerivedTypeVariable>(Inner);
   }
 
@@ -288,7 +310,7 @@ struct TypeVariable {
     return (*this < rhs) || (rhs < *this);
   }
 
-  void setBase(BaseType Base) {
+  void setBase(DerivedTypeVariable::BaseTy Base) {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
       dtv->Base = Base;
     } else {

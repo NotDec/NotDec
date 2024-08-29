@@ -75,13 +75,15 @@
   "cSpell.words": [
     "decompilation",
     "Decompiler",
+    "endregion",
     "notdec",
     "Preds",
     "pushdown",
     "retdec",
     "retypd",
     "startswith",
-    "Succs"
+    "Succs",
+    "worklist"
   ],
   "cmake.generator": "Ninja",
   "editor.formatOnSave": true,

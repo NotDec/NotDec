@@ -13,21 +13,25 @@ using llvm::Value;
 
 struct ValueNamer {
 protected:
-  static size_t typeValId;
+  static size_t ID;
 
 public:
-  static size_t getId() { return typeValId++; }
+  static size_t getId() { return ID++; }
   static std::string getName(Value &Val,
-                             const char *prefix = ValueNamer::DefaultPrefix) {
+                             const char *prefix = ValueNamer::DefaultPrefix,
+                             bool Unique = false) {
     if (!Val.hasName()) {
-      auto Id = typeValId++;
+      auto Id = ID++;
       Val.setName(prefix + std::to_string(Id));
       return prefix + std::to_string(Id);
+    } else if (Unique) {
+      auto Id = ID++;
+      return prefix + std::to_string(Id) + "_" + Val.getName().str();
     }
     return Val.getName().str();
   }
   static std::string getName(const char *prefix = ValueNamer::DefaultPrefix) {
-    return prefix + std::to_string(typeValId++);
+    return prefix + std::to_string(ID++);
   }
   static const char *DefaultPrefix;
   static const char *FuncPrefix;

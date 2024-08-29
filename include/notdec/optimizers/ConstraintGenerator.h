@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
@@ -43,6 +44,8 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
   std::string data_layout;
   // Map from SCC to initial constraint graph.
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
+  std::map<llvm::Function *, std::shared_ptr<retypd::ConstraintGraph>>
+      FuncSummaries;
   unsigned pointer_size = 0;
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
@@ -73,7 +76,7 @@ struct ReturnValue {
 };
 struct CallArg {
   llvm::CallBase *Call;
-  uint32_t InstanceId;
+  size_t InstanceId;
   int32_t Index;
   bool operator<(const CallArg &rhs) const {
     return std::tie(Call, InstanceId, Index) <
@@ -85,7 +88,7 @@ struct CallArg {
 };
 struct CallRet {
   llvm::CallBase *Call;
-  uint32_t InstanceId;
+  size_t InstanceId;
   bool operator<(const CallRet &rhs) const {
     return std::tie(Call, InstanceId) < std::tie(rhs.Call, InstanceId);
   }
@@ -118,11 +121,19 @@ struct ConstraintsGenerator {
   std::map<ValMapKey, retypd::CGNode *> Val2Node;
   retypd::ConstraintGraph CG;
   retypd::PNIGraph &PG;
+  std::set<llvm::Function *> SCCs;
 
-  void solve();
-  void visit(llvm::Function *Func);
-  ConstraintsGenerator(TypeRecovery &Ctx, std::string Name)
-      : Ctx(Ctx), CG(this, Name, false), PG(*CG.PG) {}
+  retypd::ConstraintGraph genSummary();
+  std::function<std::shared_ptr<retypd::ConstraintGraph>(llvm::Function *)>
+      GetSummary;
+  size_t instantiateSummary(llvm::Function *Target);
+  void run();
+  ConstraintsGenerator(
+      TypeRecovery &Ctx, std::string Name, std::set<llvm::Function *> SCCs,
+      std::function<std::shared_ptr<retypd::ConstraintGraph>(llvm::Function *)>
+          GetSummary)
+      : Ctx(Ctx), CG(this, Name, false), PG(*CG.PG), SCCs(SCCs),
+        GetSummary(GetSummary) {}
 
 public:
   CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User,

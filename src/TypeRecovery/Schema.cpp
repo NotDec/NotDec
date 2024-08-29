@@ -52,13 +52,7 @@ Variance getVariance(const FieldLabel &f) {
   }
 }
 
-std::string toString(const DerivedTypeVariable &dtv) {
-  std::string s = dtv.Base.str();
-  for (auto &label : dtv.Labels) {
-    s += "." + toString(label);
-  }
-  return s;
-}
+std::string toString(const DerivedTypeVariable &dtv) { return dtv.str(); }
 
 std::string toString(const PrimitiveTypeVariable &dtv) {
   return "#" + dtv.name;

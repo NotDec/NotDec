@@ -2,6 +2,7 @@
 #define _NOTDEC_UTILS_ALLSCC_H_
 
 #include <llvm/ADT/SCCIterator.h>
+#include <llvm/ADT/iterator_range.h>
 
 namespace notdec {
 
@@ -41,6 +42,7 @@ protected:
     }
   };
 
+  const GraphT G;
   /// The visit counters used to detect when a complete SCC is on the stack.
   /// visitNum is the global counter.
   ///
@@ -67,8 +69,8 @@ protected:
   /// Compute the next SCC using the DFS traversal.
   void GetNextSCC();
 
-  all_scc_iterator(NodeRef entryN) : visitNum(0) {
-    DFSVisitOne(entryN);
+  all_scc_iterator(const GraphT G) : G(G), visitNum(0) {
+    DFSVisitOne(GT::getEntryNode(G));
     GetNextSCC();
   }
 
@@ -76,9 +78,7 @@ protected:
   all_scc_iterator() = default;
 
 public:
-  static all_scc_iterator begin(const GraphT &G) {
-    return all_scc_iterator(GT::getEntryNode(G));
-  }
+  static all_scc_iterator begin(const GraphT &G) { return all_scc_iterator(G); }
   static all_scc_iterator end(const GraphT &) { return all_scc_iterator(); }
 
   /// Direct loop termination test which is more efficient than
@@ -155,6 +155,16 @@ void all_scc_iterator<GraphT, GT>::DFSVisitChildren() {
 template <class GraphT, class GT>
 void all_scc_iterator<GraphT, GT>::GetNextSCC() {
   CurrentSCC.clear(); // Prepare to compute the next SCC
+  if (VisitStack.empty()) {
+    // find a node that has not been visited yet
+    for (auto N : llvm::make_range(GT::nodes_begin(const_cast<GraphT>(G)),
+                                   GT::nodes_end(const_cast<GraphT>(G)))) {
+      if (nodeVisitNumbers.find(N) == nodeVisitNumbers.end()) {
+        DFSVisitOne(N);
+        break;
+      }
+    }
+  }
   while (!VisitStack.empty()) {
     DFSVisitChildren();
 
