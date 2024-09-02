@@ -9,7 +9,14 @@
 
 namespace notdec::retypd {
 
-ConstraintGraph minimize(ConstraintGraph *G) {
+ConstraintGraph determinize(const ConstraintGraph *G) {
+  ConstraintGraph NewG(nullptr, G->getName(), true);
+  NFADeterminizer D(G, &NewG);
+  D.run();
+  return NewG;
+}
+
+ConstraintGraph minimize(const ConstraintGraph *G) {
   ConstraintGraph NewG(nullptr, G->getName(), true);
   NFAInvDeterminizer D(G, &NewG);
   D.run();

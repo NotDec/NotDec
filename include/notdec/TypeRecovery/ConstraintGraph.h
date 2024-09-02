@@ -85,6 +85,7 @@ public:
   std::string str() { return key.str() + "-" + PNIVar->str(); }
   void onUpdatePNType();
   void setAsPtrAdd(CGNode *Other, OffsetRange Off);
+  TypeVariable getTypeVar() { return key.Base; }
 };
 
 struct CGEdge {
@@ -142,7 +143,7 @@ struct ConstraintGraph {
   ConstraintGraph clone(bool removePNI = false) const;
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
 
-  std::string getName() { return Name; }
+  std::string getName() const { return Name; }
   using iterator = std::map<NodeKey, CGNode>::iterator;
   iterator begin() { return Nodes.begin(); }
   iterator end() { return Nodes.end(); }
@@ -155,7 +156,8 @@ struct ConstraintGraph {
   std::vector<SubTypeConstraint>
   simplifiedExpr(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify(std::set<std::string> &InterestingVars);
-  void instantiate(const ConstraintGraph &Sum, size_t ID);
+  void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
+                   size_t ID);
 
 protected:
   // Create a new simplified.
@@ -172,6 +174,7 @@ public:
   // internal steps
   void saturate();
   void layerSplit();
+  void pushSplit();
   void buildPathSequence();
   std::vector<SubTypeConstraint> solve_constraints_between();
   void addRecalls(CGNode &N);
@@ -184,7 +187,6 @@ public:
 protected:
   // Graph related operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
-    assert(isLayerSplit);
     auto it = From.outEdges.find(CGEdge(From, To, Label));
     assert(it != From.outEdges.end());
     To.inEdges.erase(const_cast<CGEdge *>(&*it));
@@ -217,11 +219,12 @@ protected:
   void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
   friend struct CGNode;
   template <typename GraphTy, typename NodeTy> friend struct NFADeterminizer;
-  void replaceNodeKey(CGNode &Node, const TypeVariable &NewVar);
+  void replaceNodeKey(CGNode &Node, const NodeKey &Key);
   // void addLeftRecalls(const TypeVariable &sub);
   // void addRightForgets(const TypeVariable &sup);
 
 public:
+  // void reTagBaseTV();
   void setPointer(CGNode &Node) {
     Node.getPNIVar()->setPtrOrNum(retypd::Pointer);
   }
@@ -295,6 +298,9 @@ struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
   static nodes_iterator nodes_end(ConstraintGraph *DG) {
     return nodes_iterator(DG->end(), &CGGetNode);
   }
+  static notdec::retypd::TypeVariable getTypeVar(NodeRef N) {
+    return N->getTypeVar();
+  }
 };
 
 template <>
@@ -356,6 +362,9 @@ template <> struct GraphTraits<InverseVal<CGNode *>> {
   }
   static ChildEdgeIteratorType child_edge_end(NodeRef N) {
     return ChildEdgeIteratorType(N.Graph->pred_end(), &CGEdgeToRevEdge);
+  }
+  static notdec::retypd::TypeVariable getTypeVar(NodeRef N) {
+    return N.Graph->getTypeVar();
   }
 };
 

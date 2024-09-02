@@ -114,11 +114,14 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
   std::set<CallGraphNode *> Visited;
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
-  std::set<std::vector<CallGraphNode *>> AllSCCs;
+  std::vector<std::pair<std::vector<CallGraphNode *>,
+                        std::shared_ptr<ConstraintsGenerator>>>
+      AllSCCs;
 
   // Walk the callgraph in bottom-up SCC order.
   for (; !CGI.isAtEnd(); ++CGI) {
     const std::vector<CallGraphNode *> &NodeVec = *CGI;
+    AllSCCs.emplace_back(std::make_pair(NodeVec, nullptr));
 
     // Calc name for current SCC
     std::string Name;
@@ -141,18 +144,56 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     std::shared_ptr<ConstraintsGenerator> Generator =
         std::make_shared<ConstraintsGenerator>(
-            *this, Name, SCCs, [&](auto *F) { return FuncSummaries.at(F); });
+            *this, Name, SCCs, [&](auto *F) { return &FuncSummaries.at(F); });
 
     Generator->run();
 
-    // TODO: ConstraintGraph is moved, is it correct?
-    std::shared_ptr<retypd::ConstraintGraph> CG =
-        std::make_shared<retypd::ConstraintGraph>(Generator->genSummary());
+    // TODO: If the SCC is not called by any other function out of the SCC, we
+    // can skip summary generation. Even start Top-down phase.
+
+    auto Summary = Generator->genSummary();
+
+    std::cerr << "Summary for " << Name << ":\n";
+    for (auto &C : Summary) {
+      std::cerr << "  " << notdec::retypd::toString(C) << "\n";
+    }
     for (auto F : SCCs) {
       auto It = FuncCtxs.emplace(F, Generator);
       assert(It.second && "Function already in FuncCtxs?");
-      auto It2 = FuncSummaries.emplace(F, CG);
+      auto It2 = FuncSummaries.emplace(F, Summary);
       assert(It2.second && "Function summary already exist?");
+    }
+    AllSCCs.back().second = Generator;
+  }
+
+  // Top-down Phase
+  for (auto It = AllSCCs.rbegin(); It != AllSCCs.rend(); ++It) {
+    const std::vector<CallGraphNode *> &NodeVec = It->first;
+    auto &Generator = It->second;
+    // Solve types for each function actual arguments.
+    for (CallGraphNode *CGN : NodeVec) {
+      for (auto &Edge : *CGN) {
+        if (!Edge.first.hasValue()) {
+          continue;
+        }
+        CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
+        auto Target = Edge.second->getFunction();
+        auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+        if (Target == nullptr) {
+          continue;
+        }
+        size_t InstanceId = Generator->CallToID.at(I);
+        for (int i = 0; i < I->arg_size(); i++) {
+          auto TV = getCallArgTV(Target, InstanceId, i);
+          // auto Sketches =
+          Generator->solveType(TV);
+        }
+        if (!I->getType()->isVoidTy()) {
+          auto TV = getCallRetTV(Target, InstanceId);
+          // auto Sketches =
+          Generator->solveType(TV);
+        }
+      }
     }
   }
 
@@ -175,18 +216,21 @@ void ConstraintsGenerator::run() {
 
 size_t ConstraintsGenerator::instantiateSummary(llvm::Function *Target) {
   auto ID = ValueNamer::getId();
-  auto Sum = GetSummary(Target);
+  const std::vector<retypd::SubTypeConstraint> *Sum = GetSummary(Target);
   CG.instantiate(*Sum, ID);
   return ID;
 }
 
-ConstraintGraph ConstraintsGenerator::genSummary() {
+std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
   std::set<std::string> InterestingVars;
   for (auto *F : SCCs) {
     assert(F->hasName());
     InterestingVars.insert(F->getName().str());
   }
-  return CG.simplify(InterestingVars);
+  if (CG.MemoryNode != nullptr) {
+    InterestingVars.insert(CG.Memory);
+  }
+  return CG.simplifiedExpr(InterestingVars);
 }
 
 bool mustBePrimitive(const llvm::Type *Ty) {
@@ -413,6 +457,13 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
   cg.addSubtype(SrcVar, DstVar);
 }
 
+void ConstraintsGenerator::solveType(TypeVariable &Node) {
+  // Because we always do layer split after clone, so we can refer to Node by
+  // type variable.
+  auto &CGNode = CG.Nodes.at(Node);
+  // CG.solveSketch(CGNode);
+}
+
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   auto Target = I.getCalledFunction();
   if (Target == nullptr) {
@@ -421,7 +472,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
               << "Warn: RetypdGenerator: indirect call not supported yet\n";
     return;
   }
-  auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+
   if (cg.SCCs.count(Target)) {
     // Call within the SCC:
     // directly link to the function tv.
@@ -446,21 +497,16 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
       // differentiate different call instances in the same function
       InstanceId = cg.instantiateSummary(Target);
     }
+    cg.CallToID.emplace(&I, InstanceId);
     for (int i = 0; i < I.arg_size(); i++) {
-      auto ArgVar = TypeVariable{
-          DerivedTypeVariable{.Base = TargetName,
-                              .Labels = {retypd::InLabel{std::to_string(i)}},
-                              .instanceId = InstanceId}};
+      auto ArgVar = getCallArgTV(Target, InstanceId, i);
       auto ValVar = cg.getTypeVar(I.getArgOperand(i), &I);
       // argument is a subtype of param
       cg.addSubtype(ValVar, ArgVar);
     }
     if (!I.getType()->isVoidTy()) {
       // for return value
-      auto DstVar =
-          TypeVariable{DerivedTypeVariable{.Base = TargetName,
-                                           .Labels = {retypd::OutLabel{}},
-                                           .instanceId = InstanceId}};
+      auto DstVar = getCallRetTV(Target, InstanceId);
       cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
     }
   }
@@ -607,10 +653,14 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
-  auto SrcVar =
+  auto LoadedVar =
       cg.deref(I.getPointerOperand(), &I,
                cg.getPointerElemSize(I.getPointerOperandType()), true);
-  cg.setTypeVar(&I, SrcVar, nullptr, I.getType()->getScalarSizeInBits());
+  auto &Node =
+      cg.setTypeVar(&I, LoadedVar, nullptr, I.getType()->getScalarSizeInBits());
+  if (mustBePrimitive(I.getType())) {
+    cg.addSubtype(Node.key.Base, getLLVMTypeVar(I.getType()));
+  }
 }
 
 std::string ConstraintsGenerator::offset(APInt Offset, int Count) {

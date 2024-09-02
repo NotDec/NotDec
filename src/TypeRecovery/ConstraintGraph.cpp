@@ -1,6 +1,7 @@
 #include <boost/range/join.hpp>
 #include <cassert>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <llvm/ADT/STLExtras.h>
@@ -28,32 +29,32 @@
 
 namespace notdec::retypd {
 
-void ConstraintGraph::replaceNodeKey(CGNode &Node, const TypeVariable &TV) {
-  auto &TV1 = const_cast<TypeVariable &>(TV);
-  assert(Node.key.Base.isIntConstant());
-  assert(TV.getBase() == getMemoryNode()->key.Base.getBase());
-  assert(TV1.getLabels().size() == 1);
-  assert(std::holds_alternative<OffsetLabel>(TV1.getLabels().back()));
+// // retag base node according to base edges.
+// void ConstraintGraph::reTagBaseTV() {
+//   for (auto &Edge : Start->outEdges) {
+//     if (isBase(Edge.getLabel())) {
+//       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+//       assert(!Target.key.Base.hasLabel() ||
+//              const_cast<TypeVariable &>(Target.key.Base).getLabels().size()
+//              ==
+//                  0);
+//       replaceNodeKey(Target, NodeKey{getBase(Edge.getLabel())});
+//     }
+//   }
+// }
 
-  // replace all intConstants with memory.offset
-  for (auto &Current : Nodes) {
-    if (Current.first.Base.getBase() == Node.key.Base.getBase()) {
-      auto Ent = Nodes.extract(Current.first);
-      auto &Base = const_cast<TypeVariable &>(Ent.mapped().key.Base);
-      Base.setBase(TV.getBase());
-      auto &Labels = Base.getLabels();
-      Labels.insert(Labels.begin(), TV1.getLabels().begin(),
-                    TV1.getLabels().end());
-      Ent.key() = Ent.mapped().key;
-      Nodes.insert(std::move(Ent));
-    }
-  }
+void ConstraintGraph::replaceNodeKey(CGNode &Node, const NodeKey &Key) {
+  // auto &TV1 = const_cast<TypeVariable &>(TV);
+  // assert(Node.key.Base.isIntConstant());
+  // assert(TV.getBase() == getMemoryNode()->key.Base.getBase());
+  // assert(TV1.getLabels().size() == 1);
+  // assert(std::holds_alternative<OffsetLabel>(TV1.getLabels().back()));
 
-  // fix related edges.
-  addConstraint(TV, TV);
-  // maintain the reaching push set
-  assert(false && "TODO");
-  // do the same for contra-variant node.
+  auto Ent = Nodes.extract(Node.key);
+  const_cast<NodeKey &>(Ent.mapped().key) = Key;
+
+  Ent.key() = Ent.mapped().key;
+  Nodes.insert(std::move(Ent));
 }
 
 void CGNode::onUpdatePNType() {
@@ -67,8 +68,14 @@ void CGNode::onUpdatePNType() {
 
       // replace the node key, recursive
       // should only exist at the left side of rules.
-      Parent.replaceNodeKey(*this, TV);
-
+      NodeKey NewKey = key;
+      NewKey.Base = TV;
+      Parent.replaceNodeKey(*this, NewKey);
+      // fix related edges.
+      Parent.addConstraint(TV, TV);
+      // maintain the reaching push set
+      assert(false && "TODO");
+      // do the same for contra-variant node..? is it exist?
     } else if (getPNIVar()->isNonPtr()) {
       // do nothing in case of conflict
       // view as int later lazily.
@@ -129,55 +136,21 @@ std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   return ret;
 }
 
-void ConstraintGraph::instantiate(const ConstraintGraph &Sum, size_t ID) {
+void ConstraintGraph::instantiate(
+    const std::vector<retypd::SubTypeConstraint> &Sum, size_t ID) {
   assert(ID > 0);
-  std::map<const CGNode *, CGNode *> Old2New;
-  // ignore start and end nodes.
-  std::set<const CGNode *> SkipNodes = {Sum.Start, Sum.End};
-
-  // not add id to memory node.
-  if (Sum.MemoryNode) {
-    Old2New.emplace(Sum.MemoryNode, getMemoryNode());
+  for (auto &C : Sum) {
+    auto Sub = C.sub;
+    auto Sup = C.sup;
+    if (Sub.hasInstanceId()) {
+      Sub.setInstanceId(ID);
+    }
+    if (Sup.hasInstanceId()) {
+      Sup.setInstanceId(ID);
+    }
+    addConstraint(Sub, Sup);
   }
-
-  // clone node and add instance id
-  for (auto &Ent : Sum.Nodes) {
-    if (SkipNodes.count(&Ent.second)) {
-      continue;
-    }
-    if (&Ent.second == Sum.MemoryNode) {
-      continue;
-    }
-    NodeKey NK = Ent.second.key;
-    if (NK.Base.hasInstanceId()) {
-      NK.Base.setInstanceId(ID);
-    }
-    auto &NewNode = getOrInsertNode(NK);
-    auto Pair = Old2New.emplace(&Ent.second, &NewNode);
-    assert(Pair.second && "instantiate: Node already inserted!?");
-  }
-
-  // clone all edges
-  for (auto &Ent : Sum.Nodes) {
-    auto &Node = Ent.second;
-    if (SkipNodes.count(&Node)) {
-      continue;
-    }
-    auto NewNode = Old2New.at(&Node);
-    for (auto &Edge : Node.outEdges) {
-      auto &Target = Edge.getTargetNode();
-      if (SkipNodes.count(&Target)) {
-        continue;
-      }
-      auto NewTarget = Old2New.at(&Target);
-      onlyAddEdge(*NewNode, *NewTarget, Edge.Label);
-    }
-  }
-
-  // clone PNI Graph
-  if (PG && Sum.PG) {
-    PG->cloneFrom(*Sum.PG, Old2New);
-  }
+  // TODO What about PNI
 }
 
 std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
@@ -255,8 +228,8 @@ ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
 
 ConstraintGraph
 ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
+  // TODO: eliminate this clone by removing Start and End nodes later.
   ConstraintGraph G = clone();
-  G.layerSplit();
 
   // Link nodes to "#Start"
   for (auto N : G.StartNodes) {
@@ -281,13 +254,84 @@ ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
       G.addEdge(*N, *G.getEndNode(), ForgetBase{N->key.Base.toBase()});
     }
   }
+
+  G.layerSplit();
+
   auto G2 = minimize(&G);
-  if (const char *path = std::getenv("DEBUG_TRANS_MIN_GRAPH")) {
+  if (const char *path = std::getenv("DEBUG_TRANS_MIN1_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      G2.printGraph("trans_min.dot");
+      G2.printGraph("trans_min1.dot");
     }
   }
-  return G2;
+
+  G2.pushSplit();
+
+  auto G3 = minimize(&G2);
+  if (const char *path = std::getenv("DEBUG_TRANS_MIN_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      G3.printGraph("trans_min.dot");
+    }
+  }
+
+  return G3;
+}
+
+/// Intersect the language, that disallow recall and forget the same thing.
+/// Must not have null/epsilon moves.
+void ConstraintGraph::pushSplit() {
+  for (auto &Ent : Nodes) {
+    if (&Ent.second == Start || &Ent.second == End) {
+      continue;
+    }
+    CGNode *Current = &Ent.second;
+    for (auto InEdge : Current->inEdges) {
+      if (std::holds_alternative<One>(InEdge->getLabel())) {
+        std::cerr
+            << __FILE__ << ":" << __LINE__ << ": "
+            << " Error: pushSplit: epsilon/null move is not supported!! \n";
+        std::abort();
+      }
+      if (isRecall(InEdge->getLabel())) {
+        auto &Source = InEdge->getSourceNode();
+        auto InComingRecall = InEdge->getLabel();
+        // find the forget edge
+        for (auto OutEdge : Current->outEdges) {
+          if (isForget(OutEdge.Label) &&
+              hasSameBaseOrLabel(InEdge->getLabel(), OutEdge.getLabel())) {
+            auto OutGoingForget = OutEdge.Label;
+            auto &Target = OutEdge.getTargetNode();
+            std::cerr << "Removing a path from " << toString(Source.key) << " "
+                      << toString(InComingRecall) << " to "
+                      << toString(Current->key) << " "
+                      << toString(OutGoingForget) << " to "
+                      << toString(Target.key) << "\n";
+            if (Current->inEdges.size() > 1) {
+              // duplicate the node that isolate the incoming recall edge.
+              auto &NewNode = getOrInsertNode(NodeKey{
+                  TypeVariable::CreateDtv(ValueNamer::getName("norec_"))});
+              // copy all out edges
+              for (auto &Edge : Current->outEdges) {
+                auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
+                addEdge(NewNode, Target2, Edge.getLabel());
+              }
+              // Move all same recall edge to the new node.
+              for (auto InEdge2 : Current->inEdges) {
+                if (InEdge2->getLabel() == InComingRecall) {
+                  addEdge(InEdge2->getSourceNode(), NewNode,
+                          InEdge2->getLabel());
+                  removeEdge(InEdge2->getSourceNode(), *Current,
+                             InEdge2->getLabel());
+                }
+              }
+              Current = &NewNode;
+            }
+            // Remove the forget edge.
+            removeEdge(*Current, OutEdge.getTargetNode(), OutEdge.Label);
+          }
+        }
+      }
+    }
+  }
 }
 
 // Simplify graph and build path expr.
@@ -332,13 +376,63 @@ void ConstraintGraph::buildPathSequence() {
   }
 }
 
+/// Intersect the language with recall*forget*.
+/// Support null/epsilon moves.
 void ConstraintGraph::layerSplit() {
+  // using ND = NFADeterminizer<>;
   assert(!isLayerSplit && "layerSplit: already split!?");
   isLayerSplit = true;
-  // add edges
-  std::vector<std::tuple<CGNode *, CGNode *, CGNode *, FieldLabel>> toChange;
+
+  // 1. eliminate null move/epsilon edges
+  // Depricated 20240831 because 1 too much edge is added. 2 we need to link
+  // start & end first, or you can not infer subtype relation between
+  // top-level vars. for (auto &Ent : Nodes) {
+  //   auto &Source = Ent.second;
+  //   std::set<CGNode *> T = {&Source};
+  //   auto SourceClosure = ND::countClosure(T);
+  //   std::set<EdgeLabel> outLabels = ND::allOutLabels(SourceClosure);
+  //   for (auto &Edge : outLabels) {
+  //     if (std::holds_alternative<One>(Edge)) {
+  //       continue;
+  //     }
+  //     auto T2 = ND::move(SourceClosure, Edge);
+  //     auto NewTargets = ND::countClosure(T2);
+  //     for (auto Target : NewTargets) {
+  //       addEdge(Source, *Target, Edge);
+  //     }
+  //   }
+  // }
+
+  // if (const char *path = std::getenv("DEBUG_TRANS_NULL_ELIM1_GRAPH")) {
+  //   if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str())))
+  //   {
+  //     printGraph("trans_nullelim1.dot");
+  //   }
+  // }
+
+  // // remove all null edges
+  // for (auto &Ent : Nodes) {
+  //   auto &Source = Ent.second;
+  //   for (auto &Edge : Source.outEdges) {
+  //     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+  //     if (std::holds_alternative<One>(Edge.Label)) {
+  //       removeEdge(Source, Target, One{});
+  //     }
+  //   }
+  // }
+
+  // if (const char *path = std::getenv("DEBUG_TRANS_NULL_ELIM_GRAPH")) {
+  //   if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str())))
+  //   {
+  //     printGraph("trans_nullelim.dot");
+  //   }
+  // }
+
+  // 2. perform layer split
+  std::vector<std::tuple<CGNode *, CGNode *, CGNode *, EdgeLabel>> toChange;
   for (auto &Ent : Nodes) {
-    if (Ent.second.key.IsNewLayer) {
+    // Do not copy edges from start.
+    if (Ent.second.key.IsNewLayer || &Ent.second == Start) {
       continue;
     }
     auto &Source = Ent.second;
@@ -353,14 +447,15 @@ void ConstraintGraph::layerSplit() {
       NodeKey NewDst = Target.key;
       NewDst.IsNewLayer = true;
       auto &NewDstNode = getOrInsertNode(NewDst);
-      if (std::holds_alternative<RecallLabel>(Edge.Label)) {
+      if (isRecall(Edge.Label)) {
         continue;
       }
+      // Copy the non-Recall edge to the new layer.
       addEdge(NewSrcNode, NewDstNode, Edge.Label);
-      if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
-        FieldLabel FL = std::get<ForgetLabel>(Edge.Label).label;
+      // Update the Forget edge to target the new layer.
+      if (isForget(Edge.Label)) {
         // Edge reference will be invalidated. Edge changes is deferred.
-        toChange.emplace_back(&Source, &Target, &NewDstNode, FL);
+        toChange.emplace_back(&Source, &Target, &NewDstNode, Edge.Label);
       }
     }
   }
@@ -369,12 +464,13 @@ void ConstraintGraph::layerSplit() {
     auto [Source, Target, NewDst, Label] = Ent;
     LLVM_DEBUG(llvm::dbgs()
                << "layerSplit: Retarget Edge from " << toString(Source->key)
-               << " to " << toString(Target->key) << " with forget "
-               << toString(Label) << " to " << toString(NewDst->key) << "\n");
-    removeEdge(*Source, *Target, ForgetLabel{Label});
-    addEdge(*Source, *NewDst, ForgetLabel{Label});
+               << " to " << toString(Target->key) << " with " << toString(Label)
+               << " to " << toString(NewDst->key) << "\n");
+    removeEdge(*Source, *Target, Label);
+    addEdge(*Source, *NewDst, Label);
   }
-  // Add new edge in the new layer to end nodes.
+
+  // Update end nodes to nodes in the new layer.
   for (CGNode *Ent : EndNodes) {
     if (Ent->key.IsNewLayer) {
       continue;
@@ -384,6 +480,22 @@ void ConstraintGraph::layerSplit() {
     auto &NewNode = getOrInsertNode(NewKey);
     EndNodes.insert(&NewNode);
   }
+  // remove old end nodes that is not in the new layer.
+  for (auto it = EndNodes.begin(); it != EndNodes.end();) {
+    if (!(*it)->key.IsNewLayer) {
+      it = EndNodes.erase(it);
+    } else {
+      it++;
+    }
+  }
+  // Update the end node to the new layer.
+  if (End != nullptr) {
+    NodeKey NewKey = End->key;
+    NewKey.IsNewLayer = true;
+    auto &NewNode = getOrInsertNode(NewKey);
+    End = &NewNode;
+  }
+
   if (const char *path = std::getenv("DEBUG_TRANS_LAYER_SPLIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
       printGraph("trans_layerSplit.dot");

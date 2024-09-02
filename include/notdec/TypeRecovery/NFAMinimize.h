@@ -26,12 +26,12 @@ struct NFADeterminizer {
   // using NodeTy = CGNode *;
   using GT = llvm::GraphTraits<GraphTy>;
 
-  const GraphTy OldG;
+  GraphTy OldG;
   ConstraintGraph *NewG;
   std::map<std::set<NodeTy>, CGNode *> DTrans;
   using EntryTy = typename std::map<std::set<NodeTy>, CGNode *>::iterator;
-  NFADeterminizer(ConstraintGraph *Old, ConstraintGraph *New)
-      : OldG(Old), NewG(New) {}
+  NFADeterminizer(const ConstraintGraph *Old, ConstraintGraph *New)
+      : OldG(const_cast<ConstraintGraph *>(Old)), NewG(New) {}
   void run() {
     std::queue<EntryTy> Worklist;
     auto OldGStart = GT::getEntryNode(OldG);
@@ -61,7 +61,8 @@ struct NFADeterminizer {
       Worklist.pop();
     }
   }
-  std::set<NodeTy> move(const std::set<NodeTy> &N, EdgeLabel L) {
+
+  static std::set<NodeTy> move(const std::set<NodeTy> &N, EdgeLabel L) {
     std::set<NodeTy> ret;
     for (auto Node : N) {
       for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
@@ -73,7 +74,8 @@ struct NFADeterminizer {
     }
     return ret;
   }
-  std::set<NodeTy> countClosure(const std::set<NodeTy> &N) {
+
+  static std::set<NodeTy> countClosure(const std::set<NodeTy> &N) {
     std::set<NodeTy> Ret(N);
     std::queue<NodeTy> Worklist;
     for (auto Node : N) {
@@ -106,7 +108,8 @@ struct NFADeterminizer {
     assert(it.second);
     return it.first;
   }
-  std::set<EdgeLabel> allOutLabels(const std::set<NodeTy> &N) {
+
+  static std::set<EdgeLabel> allOutLabels(const std::set<NodeTy> &N) {
     std::set<EdgeLabel> ret;
     for (auto Node : N) {
       for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
@@ -124,7 +127,8 @@ struct NFADeterminizer {
 
 using NFAInvDeterminizer = NFADeterminizer<llvm::InverseVal<ConstraintGraph *>,
                                            llvm::InverseVal<CGNode *>>;
-ConstraintGraph minimize(ConstraintGraph *G);
+ConstraintGraph determinize(const ConstraintGraph *G);
+ConstraintGraph minimize(const ConstraintGraph *G);
 
 } // namespace notdec::retypd
 

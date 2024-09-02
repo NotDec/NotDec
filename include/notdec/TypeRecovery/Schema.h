@@ -277,6 +277,14 @@ struct TypeVariable {
     }
   }
 
+  void setBase(DerivedTypeVariable::BaseTy Base) {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      dtv->Base = Base;
+    } else {
+      assert(false && "TypeVariable::setName: Not a DerivedTypeVariable!");
+    }
+  }
+
   bool hasInstanceId() const {
     return std::holds_alternative<DerivedTypeVariable>(Inner);
   }
@@ -308,14 +316,6 @@ struct TypeVariable {
   }
   bool operator!=(const TypeVariable &rhs) const {
     return (*this < rhs) || (rhs < *this);
-  }
-
-  void setBase(DerivedTypeVariable::BaseTy Base) {
-    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      dtv->Base = Base;
-    } else {
-      assert(false && "TypeVariable::setName: Not a DerivedTypeVariable!");
-    }
   }
 };
 
@@ -387,9 +387,49 @@ inline bool isBase(EdgeLabel label) {
   return std::holds_alternative<ForgetBase>(label) ||
          std::holds_alternative<RecallBase>(label);
 }
+inline TypeVariable getBase(EdgeLabel label) {
+  if (auto *fb = std::get_if<ForgetBase>(&label)) {
+    return fb->base;
+  } else if (auto *rb = std::get_if<RecallBase>(&label)) {
+    return rb->base;
+  } else {
+    assert(false && "getBase: Not a ForgetBase or RecallBase");
+  }
+}
+
+inline FieldLabel getLabel(EdgeLabel label) {
+  if (auto *fl = std::get_if<ForgetLabel>(&label)) {
+    return fl->label;
+  } else if (auto *rl = std::get_if<RecallLabel>(&label)) {
+    return rl->label;
+  } else {
+    assert(false && "getLabel: Not a ForgetLabel or RecallLabel");
+  }
+}
+
 inline bool isLabel(EdgeLabel label) {
   return std::holds_alternative<ForgetLabel>(label) ||
          std::holds_alternative<RecallLabel>(label);
+}
+
+inline bool isForget(EdgeLabel label) {
+  return std::holds_alternative<ForgetLabel>(label) ||
+         std::holds_alternative<ForgetBase>(label);
+}
+
+inline bool isRecall(EdgeLabel label) {
+  return std::holds_alternative<RecallLabel>(label) ||
+         std::holds_alternative<RecallBase>(label);
+}
+
+inline bool hasSameBaseOrLabel(EdgeLabel a, EdgeLabel b) {
+  if (isBase(a) && isBase(b)) {
+    return getBase(a) == getBase(b);
+  } else if (isLabel(a) && isLabel(b)) {
+    return getLabel(a) == getLabel(b);
+  } else {
+    return false;
+  }
 }
 
 } // namespace notdec::retypd

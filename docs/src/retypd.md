@@ -328,7 +328,7 @@ $$
 
 基础概念：
 
-- Finite State Transducer 其实就是带有输出的有限状态自动机（finite state automaton）。
+- Finite State Transducer 其实就是带有输出的有限状态自动机（finite state automaton）。简单来说自动机的边上标记了(push/pop, 字符)的pair，表示一个操作。想象自动机有一个栈，栈里放了一个待转换的字符串，自动机先走过一些弹出字符的边，弹出栈顶对应字符，然后再走一些压入字符的边，压入字符到栈顶，这样就完成了栈顶，甚至整个字符串的替换。此时把栈拿出来就是输出的字符串。
 - 派生关系 $Deriv_{P}$：描述任意两个字符串之间的关系： $Deriv_{P} =\{ (u,v) \in \Gamma^{*} \mid (q_{0},u) \overset{}{\underset{P}{\Longrightarrow}} (q_{f},v) \}.$
 
   - $Deriv_{P} \subseteq \Gamma^{*} \times \Gamma^{*}$ 。是字符串之间的关系。

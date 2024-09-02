@@ -32,6 +32,7 @@
 namespace notdec {
 
 using namespace llvm;
+using retypd::DerivedTypeVariable;
 using retypd::TypeVariable;
 
 bool hasUser(const Value *Val, const User *User);
@@ -44,7 +45,7 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
   std::string data_layout;
   // Map from SCC to initial constraint graph.
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
-  std::map<llvm::Function *, std::shared_ptr<retypd::ConstraintGraph>>
+  std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
       FuncSummaries;
   unsigned pointer_size = 0;
 
@@ -122,15 +123,20 @@ struct ConstraintsGenerator {
   retypd::ConstraintGraph CG;
   retypd::PNIGraph &PG;
   std::set<llvm::Function *> SCCs;
+  std::map<CallBase *, size_t> CallToID;
 
-  retypd::ConstraintGraph genSummary();
-  std::function<std::shared_ptr<retypd::ConstraintGraph>(llvm::Function *)>
+  std::vector<retypd::SubTypeConstraint> genSummary();
+  std::function<const std::vector<retypd::SubTypeConstraint> *(
+      llvm::Function *)>
       GetSummary;
   size_t instantiateSummary(llvm::Function *Target);
+  void solveType(TypeVariable &Node);
+
   void run();
   ConstraintsGenerator(
       TypeRecovery &Ctx, std::string Name, std::set<llvm::Function *> SCCs,
-      std::function<std::shared_ptr<retypd::ConstraintGraph>(llvm::Function *)>
+      std::function<
+          const std::vector<retypd::SubTypeConstraint> *(llvm::Function *)>
           GetSummary)
       : Ctx(Ctx), CG(this, Name, false), PG(*CG.PG), SCCs(SCCs),
         GetSummary(GetSummary) {}
@@ -284,6 +290,22 @@ void inline ensureSequence(Value *&Src1, Value *&Src2) {
            "Constant cannot be at the left side. Run InstCombine first.");
     std::swap(Src1, Src2);
   }
+}
+
+TypeVariable inline getCallArgTV(llvm::Function *Target, size_t InstanceId,
+                                 int32_t Index) {
+  auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+  return TypeVariable{
+      DerivedTypeVariable{.Base = TargetName,
+                          .Labels = {retypd::InLabel{std::to_string(Index)}},
+                          .instanceId = InstanceId}};
+}
+
+TypeVariable inline getCallRetTV(llvm::Function *Target, size_t InstanceId) {
+  auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+  return TypeVariable{DerivedTypeVariable{.Base = TargetName,
+                                          .Labels = {retypd::OutLabel{}},
+                                          .instanceId = InstanceId}};
 }
 
 } // namespace notdec
