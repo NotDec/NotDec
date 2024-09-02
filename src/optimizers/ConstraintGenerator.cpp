@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 
 #include <llvm/ADT/SCCIterator.h>
@@ -114,14 +115,14 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
   std::set<CallGraphNode *> Visited;
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
-  std::vector<std::pair<std::vector<CallGraphNode *>,
-                        std::shared_ptr<ConstraintsGenerator>>>
+  std::vector<std::tuple<std::vector<CallGraphNode *>,
+                         std::shared_ptr<ConstraintsGenerator>, std::string>>
       AllSCCs;
 
   // Walk the callgraph in bottom-up SCC order.
   for (; !CGI.isAtEnd(); ++CGI) {
     const std::vector<CallGraphNode *> &NodeVec = *CGI;
-    AllSCCs.emplace_back(std::make_pair(NodeVec, nullptr));
+    AllSCCs.emplace_back(std::make_tuple(NodeVec, nullptr, ""));
 
     // Calc name for current SCC
     std::string Name;
@@ -163,13 +164,18 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto It2 = FuncSummaries.emplace(F, Summary);
       assert(It2.second && "Function summary already exist?");
     }
-    AllSCCs.back().second = Generator;
+    std::get<1>(AllSCCs.back()) = Generator;
+    std::get<2>(AllSCCs.back()) = Name;
   }
 
   // Top-down Phase
   for (auto It = AllSCCs.rbegin(); It != AllSCCs.rend(); ++It) {
-    const std::vector<CallGraphNode *> &NodeVec = It->first;
-    auto &Generator = It->second;
+    const std::vector<CallGraphNode *> &NodeVec = std::get<0>(*It);
+    auto &Generator = std::get<1>(*It);
+    auto &Name = std::get<2>(*It);
+
+    std::cerr << "Processing SCC: " << Name << "\n";
+
     // Solve types for each function actual arguments.
     for (CallGraphNode *CGN : NodeVec) {
       for (auto &Edge : *CGN) {
@@ -212,6 +218,11 @@ void ConstraintsGenerator::run() {
     Visitor.visit(Func);
     Visitor.handlePHINodes();
   }
+  if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(CG.Name.c_str(), path))) {
+      CG.printGraph("trans_init.dot");
+    }
+  }
 }
 
 size_t ConstraintsGenerator::instantiateSummary(llvm::Function *Target) {
@@ -230,6 +241,7 @@ std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
   if (CG.MemoryNode != nullptr) {
     InterestingVars.insert(CG.Memory);
   }
+  CG.solve();
   return CG.simplifiedExpr(InterestingVars);
 }
 
@@ -461,7 +473,7 @@ void ConstraintsGenerator::solveType(TypeVariable &Node) {
   // Because we always do layer split after clone, so we can refer to Node by
   // type variable.
   auto &CGNode = CG.Nodes.at(Node);
-  // CG.solveSketch(CGNode);
+  CG.solveSketch(CGNode);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {

@@ -91,14 +91,7 @@ void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {
   Parent.addConstraint(TV, this->key.Base);
 }
 
-void ConstraintGraph::solve() {
-  if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      printGraph("trans_init.dot");
-    }
-  }
-  saturate();
-}
+void ConstraintGraph::solve() { saturate(); }
 
 std::string toString(const EdgeLabel &label) {
   if (std::holds_alternative<One>(label)) {
@@ -220,51 +213,55 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
   return ret;
 }
 
-ConstraintGraph
-ConstraintGraph::simplify(std::set<std::string> &InterestingVars) {
-  solve();
-  return simplifyImpl(InterestingVars);
-}
-
-ConstraintGraph
-ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
-  // TODO: eliminate this clone by removing Start and End nodes later.
-  ConstraintGraph G = clone();
-
+void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
   // Link nodes to "#Start"
-  for (auto N : G.StartNodes) {
+  for (auto N : StartNodes) {
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
         (N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from #Start to " << N->key.str() << "\n");
-      G.addEdge(*G.getStartNode(), *N, RecallBase{N->key.Base.toBase()});
+      addEdge(*getStartNode(), *N, RecallBase{.base = N->key.Base.toBase()});
     }
   }
 
   // Link nodes to "#End"
-  for (auto N : G.EndNodes) {
+  for (auto N : EndNodes) {
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
         (N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from " << N->key.str() << " to #End\n");
-      G.addEdge(*N, *G.getEndNode(), ForgetBase{N->key.Base.toBase()});
+      addEdge(*N, *getEndNode(), ForgetBase{.base = N->key.Base.toBase()});
     }
   }
+}
 
-  G.layerSplit();
+ConstraintGraph ConstraintGraph::cloneAndSimplify() const {
+  auto G = clone();
+  return G.simplify();
+}
 
-  auto G2 = minimize(&G);
+ConstraintGraph ConstraintGraph::simplify() {
+  layerSplit();
+
+  auto G2 = minimize(this);
   if (const char *path = std::getenv("DEBUG_TRANS_MIN1_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
       G2.printGraph("trans_min1.dot");
     }
   }
 
+  G2.printGraph("trans_before_push_split.dot");
+
   G2.pushSplit();
+  if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      G2.printGraph("trans_push_split.dot");
+    }
+  }
 
   auto G3 = minimize(&G2);
   if (const char *path = std::getenv("DEBUG_TRANS_MIN_GRAPH")) {
@@ -279,6 +276,9 @@ ConstraintGraph::simplifyImpl(std::set<std::string> &InterestingVars) const {
 /// Intersect the language, that disallow recall and forget the same thing.
 /// Must not have null/epsilon moves.
 void ConstraintGraph::pushSplit() {
+  std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
+  std::set<std::tuple<CGNode *, EdgeLabel, EdgeLabel>> toIsolate;
+
   for (auto &Ent : Nodes) {
     if (&Ent.second == Start || &Ent.second == End) {
       continue;
@@ -300,35 +300,49 @@ void ConstraintGraph::pushSplit() {
               hasSameBaseOrLabel(InEdge->getLabel(), OutEdge.getLabel())) {
             auto OutGoingForget = OutEdge.Label;
             auto &Target = OutEdge.getTargetNode();
-            std::cerr << "Removing a path from " << toString(Source.key) << " "
-                      << toString(InComingRecall) << " to "
-                      << toString(Current->key) << " "
-                      << toString(OutGoingForget) << " to "
-                      << toString(Target.key) << "\n";
-            if (Current->inEdges.size() > 1) {
-              // duplicate the node that isolate the incoming recall edge.
-              auto &NewNode = getOrInsertNode(NodeKey{
-                  TypeVariable::CreateDtv(ValueNamer::getName("norec_"))});
-              // copy all out edges
-              for (auto &Edge : Current->outEdges) {
-                auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
-                addEdge(NewNode, Target2, Edge.getLabel());
-              }
-              // Move all same recall edge to the new node.
-              for (auto InEdge2 : Current->inEdges) {
-                if (InEdge2->getLabel() == InComingRecall) {
-                  addEdge(InEdge2->getSourceNode(), NewNode,
-                          InEdge2->getLabel());
-                  removeEdge(InEdge2->getSourceNode(), *Current,
-                             InEdge2->getLabel());
-                }
-              }
-              Current = &NewNode;
+            if (false) {
+              std::cerr << "Removing a path from " << toString(Source.key)
+                        << " " << toString(InComingRecall) << " to "
+                        << toString(Current->key) << " "
+                        << toString(OutGoingForget) << " to "
+                        << toString(Target.key) << "\n";
             }
-            // Remove the forget edge.
-            removeEdge(*Current, OutEdge.getTargetNode(), OutEdge.Label);
+            if (Current->inEdges.size() == 1) {
+              // Remove the forget edge.
+              toRemove.emplace_back(Current, &Target, OutGoingForget);
+            } else if (Current->outEdges.size() == 1) {
+              // Remove the recall edge.
+              toRemove.emplace_back(&Source, Current, InComingRecall);
+            } else {
+              toIsolate.emplace(Current, InComingRecall, OutGoingForget);
+            }
           }
         }
+      }
+    }
+  }
+
+  for (auto &Ent : toRemove) {
+    auto [Source, Target, Label] = Ent;
+    removeEdge(*Source, *Target, Label);
+  }
+  for (auto &Ent : toIsolate) {
+    auto [Current, Recall, Forget] = Ent;
+    // duplicate the node that isolate the incoming recall edge.
+    auto &NewNode = getOrInsertNode(
+        NodeKey{TypeVariable::CreateDtv(ValueNamer::getName("split_"))});
+    // copy all out edges except the forget edge.
+    for (auto &Edge : Current->outEdges) {
+      auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
+      if (Edge.Label != Forget) {
+        addEdge(NewNode, Target2, Edge.getLabel());
+      }
+    }
+    // Move all same recall edge to the new node.
+    for (auto InEdge2 : Current->inEdges) {
+      if (InEdge2->getLabel() == Recall) {
+        addEdge(InEdge2->getSourceNode(), NewNode, InEdge2->getLabel());
+        removeEdge(InEdge2->getSourceNode(), *Current, InEdge2->getLabel());
       }
     }
   }
@@ -336,11 +350,14 @@ void ConstraintGraph::pushSplit() {
 
 // Simplify graph and build path expr.
 std::vector<SubTypeConstraint>
-ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) {
-  auto G = simplify(InterestingVars);
+ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) const {
+  // TODO: eliminate this clone by removing Start and End nodes later.
+  auto G = clone();
+  G.linkVars(InterestingVars);
+  auto G2 = G.simplify();
 
-  G.buildPathSequence();
-  return G.solve_constraints_between();
+  G2.buildPathSequence();
+  return G2.solve_constraints_between();
 }
 
 void ConstraintGraph::buildPathSequence() {
@@ -501,6 +518,44 @@ void ConstraintGraph::layerSplit() {
       printGraph("trans_layerSplit.dot");
     }
   }
+}
+
+void ConstraintGraph::solveSketch(CGNode &N) const {
+  // 1 clone the graph
+  ConstraintGraph G = clone();
+  // 2. make all nodes accepting. focus on the recall subgraph, but allow recall
+  // base primitive.
+  for (auto &Ent : G.Nodes) {
+    auto &Source = Ent.second;
+    // 2.1 remove all forget label edge
+    for (auto &Edge : Source.outEdges) {
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
+        G.removeEdge(Source, Target, Edge.Label);
+      }
+    }
+    if (&Source == G.Start || &Source == G.End) {
+      continue;
+    }
+    // 2.2 if the node has not forget prim edge, add one to top.
+    bool HasForgetPrim = false;
+    for (auto &Edge : Source.outEdges) {
+      if (std::holds_alternative<ForgetBase>(Edge.Label)) {
+        if (std::get<ForgetBase>(Edge.Label).base.isPrimitive()) {
+          HasForgetPrim = true;
+          break;
+        }
+      }
+    }
+    if (!HasForgetPrim) {
+      G.addEdge(Source, *G.getEndNode(),
+                ForgetBase{TypeVariable::CreatePrimitive("top")});
+    }
+  }
+  std::set<std::string> Vars = {"stack"};
+  G.linkVars(Vars);
+  auto G2 = G.simplify();
+  G2.printGraph("test.dot");
 }
 
 /// Algorithm D.2 Saturation algorithm
@@ -923,9 +978,12 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
 /// the pexp must be in (recall _)*(forget _)*
 std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
   if (rexp::isEmpty(E)) {
-    return {};
+    assert(false && "pexp_to_constraints: Empty path!");
+    // return {};
   } else if (rexp::isNull(E)) {
-    assert(false && "pexp_to_constraints: Null path!");
+    std::cerr << "pexp_to_constraints: Null path!\n";
+    return {};
+    // assert(false && "pexp_to_constraints: Null path!");
   }
   ExprToConstraintsContext Ctx;
   auto Seq = Ctx.expToConstraintsSequenceRecursive(E);

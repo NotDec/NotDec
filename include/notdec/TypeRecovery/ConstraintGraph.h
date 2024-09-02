@@ -154,14 +154,12 @@ struct ConstraintGraph {
 
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
-  simplifiedExpr(std::set<std::string> &InterestingVars);
-  ConstraintGraph simplify(std::set<std::string> &InterestingVars);
+  simplifiedExpr(std::set<std::string> &InterestingVars) const;
+  void linkVars(std::set<std::string> &InterestingVars);
+  ConstraintGraph simplify();
+  ConstraintGraph cloneAndSimplify() const;
   void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
                    size_t ID);
-
-protected:
-  // Create a new simplified.
-  ConstraintGraph simplifyImpl(std::set<std::string> &InterestingVars) const;
 
 public:
   void solve();
@@ -170,6 +168,8 @@ public:
   CGNode *getStartNode();
   CGNode *getEndNode();
   CGNode *getMemoryNode();
+
+  void solveSketch(CGNode &N) const;
 
   // internal steps
   void saturate();
