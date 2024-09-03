@@ -45,6 +45,7 @@ TEST(Retypd, SaturationPaperTest) {
       ConstraintGraph::fromConstraints("SaturationPaper", cons);
 
   std::set<std::string> InterestingVars;
+  CG.solve();
   auto Cons = CG.simplifiedExpr(InterestingVars);
   CG.printGraph("SaturationPaper.dot");
   std::cerr << "Simplified Constraints:" << std::endl;
@@ -73,6 +74,7 @@ TEST(Retypd, SlidesExampleTest) {
   ConstraintGraph CG = ConstraintGraph::fromConstraints("SlideExample", cons);
   std::set<std::string> InterestingVars;
   InterestingVars.insert("F");
+  CG.solve();
   auto Cons = CG.simplifiedExpr(InterestingVars);
   // CG.printGraph("SlideExample.dot");
 
@@ -109,4 +111,17 @@ TEST(Retypd, ExpToConstraint1Test) {
       Prefix & createStar(create(RecallLabel{LoadLabel{}})) & Suffix;
   std::cerr << "Converting Expr: " << toString(StarRecall1) << std::endl;
   printConstraints(expToConstraints(StarRecall1));
+}
+
+// A test for the ExprToConstraints
+TEST(Retypd, EdgeLabel1) {
+  using notdec::retypd::EdgeLabel;
+  auto EL1 = notdec::retypd::RecallBase{
+      .base = notdec::retypd::TypeVariable::CreateDtv("alpha"),
+      .V = notdec::retypd::Covariant};
+  auto EL2 = notdec::retypd::RecallBase{
+      .base = notdec::retypd::TypeVariable::CreateDtv("alpha"),
+      .V = notdec::retypd::Contravariant};
+  EXPECT_TRUE(EL1 != EL2);
+  EXPECT_FALSE(EL1 == EL2);
 }

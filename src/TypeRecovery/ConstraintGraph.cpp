@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/STLExtras.h>
 #include <map>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -92,21 +94,6 @@ void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {
 }
 
 void ConstraintGraph::solve() { saturate(); }
-
-std::string toString(const EdgeLabel &label) {
-  if (std::holds_alternative<One>(label)) {
-    return "_1_";
-  } else if (std::holds_alternative<ForgetLabel>(label)) {
-    return "forget " + toString(std::get<ForgetLabel>(label).label);
-  } else if (std::holds_alternative<ForgetBase>(label)) {
-    return "forget " + toString(std::get<ForgetBase>(label).base);
-  } else if (std::holds_alternative<RecallLabel>(label)) {
-    return "recall " + toString(std::get<RecallLabel>(label).label);
-  } else if (std::holds_alternative<RecallBase>(label)) {
-    return "recall " + toString(std::get<RecallBase>(label).base);
-  }
-  assert(false && "Unknown FieldLabel!");
-}
 
 std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   assert(!isLayerSplit && "printConstraints: graph is already split!?");
@@ -222,7 +209,9 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from #Start to " << N->key.str() << "\n");
-      addEdge(*getStartNode(), *N, RecallBase{.base = N->key.Base.toBase()});
+      addEdge(
+          *getStartNode(), *N,
+          RecallBase{.base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
     }
   }
 
@@ -234,7 +223,9 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Adding an edge from " << N->key.str() << " to #End\n");
-      addEdge(*N, *getEndNode(), ForgetBase{.base = N->key.Base.toBase()});
+      addEdge(
+          *N, *getEndNode(),
+          ForgetBase{.base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
     }
   }
 }
@@ -248,13 +239,8 @@ ConstraintGraph ConstraintGraph::simplify() {
   layerSplit();
 
   auto G2 = minimize(this);
-  if (const char *path = std::getenv("DEBUG_TRANS_MIN1_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      G2.printGraph("trans_min1.dot");
-    }
-  }
 
-  G2.printGraph("trans_before_push_split.dot");
+  // G2.printGraph("trans_before_push_split.dot");
 
   G2.pushSplit();
   if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
@@ -264,13 +250,150 @@ ConstraintGraph ConstraintGraph::simplify() {
   }
 
   auto G3 = minimize(&G2);
+
+  G3.contraVariantSplit();
+  if (const char *path = std::getenv("DEBUG_TRANS_CV_SPLIT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      G3.printGraph("trans_cv_split.dot");
+    }
+  }
+  auto G4 = minimize(&G3);
   if (const char *path = std::getenv("DEBUG_TRANS_MIN_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      G3.printGraph("trans_min.dot");
+      G4.printGraph("trans_min.dot");
     }
   }
 
-  return G3;
+  return G4;
+}
+
+void ConstraintGraph::contraVariantSplit() {
+  markVariance();
+  std::vector<CGNode *> toHandle;
+  // for all contra-variant nodes
+  for (auto &Ent : Nodes) {
+    auto &Source = Ent.second;
+    if (Source.key.SuffixVariance != Contravariant) {
+      continue;
+    }
+    // Check if has both recall and forget edge
+    bool HasRecall = false;
+    bool HasForget = false;
+    for (auto &Edge : Source.outEdges) {
+      if (isRecall(Edge.Label)) {
+        HasRecall = true;
+      }
+      if (isForget(Edge.Label)) {
+        HasForget = true;
+      }
+    }
+    for (auto Edge : Source.inEdges) {
+      if (isRecall(Edge->Label)) {
+        HasRecall = true;
+      }
+      if (isForget(Edge->Label)) {
+        HasForget = true;
+      }
+    }
+    if (HasRecall && HasForget) {
+      toHandle.push_back(&Source);
+    }
+  }
+  // For these nodes, split them that recall and forget are separated.
+  for (auto N : toHandle) {
+    // duplicate the node that isolate the recall edge.
+    auto &NewNode = getOrInsertNode(
+        NodeKey{TypeVariable::CreateDtv(ValueNamer::getName("split_"))});
+    // Move all incoming recall edge to the new node.
+    for (auto InEdge2 : N->inEdges) {
+      if (isRecall(InEdge2->Label)) {
+        addEdge(InEdge2->getSourceNode(), NewNode, InEdge2->Label);
+        removeEdge(InEdge2->getSourceNode(), *N, InEdge2->Label);
+      }
+    }
+    // Move all outgoing recall edge to the new node.
+    for (auto &Edge : N->outEdges) {
+      if (isRecall(Edge.Label)) {
+        auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
+        addEdge(NewNode, Target2, Edge.Label);
+        removeEdge(*N, Target2, Edge.Label);
+      }
+    }
+  }
+}
+
+/// Mark the variance of the node according to the edges.
+/// DFS traversal.
+void ConstraintGraph::markVariance() {
+  std::map<CGNode *, Variance> Visited;
+  std::queue<std::pair<CGNode *, Variance>> Worklist;
+  Worklist.push(std::make_pair(getStartNode(), Covariant));
+
+  while (!Worklist.empty()) {
+    auto N = Worklist.front();
+    Worklist.pop();
+    if (Visited.count(N.first) != 0) {
+      // Check if the variance is consistent.
+      if (Visited[N.first] != N.second) {
+        std::cerr << "Error: labelVariance: variance is inconsistent: "
+                  << toString(N.first->key) << "\n";
+        std::abort();
+      }
+      continue;
+    }
+    Visited.emplace(N);
+    for (auto &Edge : N.first->outEdges) {
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      auto &Label = Edge.getLabel();
+      if (std::holds_alternative<One>(Label)) {
+        Worklist.push(std::make_pair(&Target, N.second));
+      } else if (auto *RL = std::get_if<RecallLabel>(&Label)) {
+        Worklist.push(
+            std::make_pair(&Target, combine(N.second, getVariance(RL->label))));
+      } else if (auto *FL = std::get_if<ForgetLabel>(&Label)) {
+        Worklist.push(
+            std::make_pair(&Target, combine(N.second, getVariance(FL->label))));
+      } else if (auto *RB = std::get_if<RecallBase>(&Label)) {
+        Worklist.push(std::make_pair(&Target, combine(N.second, RB->V)));
+      } else if (auto *FB = std::get_if<ForgetBase>(&Label)) {
+        // Worklist.push(std::make_pair(&Target, ));
+        assert(&Target == getEndNode() && "ForgetBase should only target End");
+        if (N.second != FB->V) {
+          std::cerr << "Error: labelVariance: variance is inconsistent: "
+                    << toString(N.first->key) << "\n";
+          std::abort();
+        }
+      } else {
+        std::cerr << "Error: labelVariance: unknown edge label: "
+                  << toString(Label) << "\n";
+        std::abort();
+      }
+    }
+  }
+
+  // Label all nodes with the variance.
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    if (&Node == Start || &Node == End) {
+      continue;
+    }
+    if (Visited.count(&Node) == 0) {
+      std::cerr << "Error: labelVariance: node is not visited: "
+                << toString(Node.key) << "\n";
+      std::abort();
+    }
+    // Node.key.SuffixVariance = Visited[&Node];
+    // use map extract
+    auto Ent2 = Nodes.extract(Node.key);
+    const_cast<NodeKey &>(Ent2.mapped().key).SuffixVariance = Visited[&Node];
+    Ent2.key() = Ent2.mapped().key;
+    Nodes.insert(std::move(Ent2));
+    // std::cerr << "Node: " << toString(Node.key)
+    //           << " Variance: " << toString(Visited[&Node]) << "\n";
+  }
+  // std::cerr << " OK\n";
+
+  return;
 }
 
 /// Intersect the language, that disallow recall and forget the same thing.
@@ -753,9 +876,9 @@ void ConstraintGraph::addRecalls(CGNode &N) {
     T = &NNext;
   }
   // We do not really link the node to #Start
-  if (N.key.SuffixVariance == Covariant) {
-    StartNodes.insert(T);
-  }
+  // if (N.key.SuffixVariance == Covariant) {
+  StartNodes.insert(T);
+  // }
 }
 
 void ConstraintGraph::addForgets(CGNode &N) {
@@ -769,9 +892,9 @@ void ConstraintGraph::addForgets(CGNode &N) {
     T = &NNext;
   }
   // We do not really link the node to #Start
-  if (N.key.SuffixVariance == Covariant) {
-    EndNodes.insert(T);
-  }
+  // if (N.key.SuffixVariance == Covariant) {
+  EndNodes.insert(T);
+  // }
 }
 
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size) {
@@ -819,7 +942,8 @@ struct ExprToConstraintsContext {
 
   std::vector<std::vector<EdgeLabel>>
   expToConstraintsSequenceRecursive(rexp::PRExp E);
-  static std::vector<SubTypeConstraint>
+  static std::pair<
+      std::vector<std::tuple<SubTypeConstraint, Variance, Variance>>, Variance>
   normalizePath(const std::vector<EdgeLabel> &ELs);
   static std::vector<SubTypeConstraint> constraintsSequenceToConstraints(
       const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence);
@@ -900,20 +1024,38 @@ ExprToConstraintsContext::constraintsSequenceToConstraints(
   std::vector<SubTypeConstraint> Ret;
   for (auto &CS : ConstraintsSequence) {
     LLVM_DEBUG(llvm::dbgs() << "Normalized path: " << toString(CS) << "\n");
-    std::vector<SubTypeConstraint> Cons = normalizePath(CS);
+
+    std::pair<std::vector<std::tuple<SubTypeConstraint, Variance, Variance>>,
+              Variance>
+        P = normalizePath(CS);
+    auto &Cons = P.first;
+
+    std::cerr << ((P.second == Covariant) ? "" : "Skipped ") << "Cons: \n";
     for (auto &Con : Cons) {
-      if (Con.sub != Con.sup) {
-        Ret.push_back(Con);
+      std::cerr << "  " << toString(std::get<0>(Con).sub)
+                << toString(std::get<1>(Con))
+                << " <= " << toString(std::get<0>(Con).sup)
+                << toString(std::get<2>(Con)) << "\n";
+      // assert(std::get<1>(Con) == std::get<2>(Con));
+      if (std::get<1>(Con) != std::get<2>(Con)) {
+        std::cerr << "Warning:!\n";
+      }
+      if (P.second == Covariant &&
+          std::get<0>(Con).sub != std::get<0>(Con).sup) {
+        Ret.push_back(std::get<0>(Con));
       }
     }
   }
   return Ret;
 }
 
-std::vector<SubTypeConstraint>
+std::pair<std::vector<std::tuple<SubTypeConstraint, Variance, Variance>>,
+          Variance>
 ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
+  // The variance between recalls and forgets.
+  std::optional<Variance> PathVariance;
   // the pexp must be in (recall _)*(forget _)*
-  std::vector<SubTypeConstraint> Ret;
+  std::vector<std::tuple<SubTypeConstraint, Variance, Variance>> Ret;
   if (ELs.size() < 2) {
     assert(false && "normalize_path: path size < 2!");
   }
@@ -922,12 +1064,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
     assert(false && "normalize_path: first label is not RecallBase!");
   }
   Ret.emplace_back();
-  // Ret.back().sub.name = std::get<RecallBase>(First).base;
-  // auto &Last = ELs[ELs.size() - 1];
-  // if (!std::holds_alternative<ForgetBase>(Last)) {
-  //   assert(false && "normalize_path: Last label is not ForgetBase!");
-  // }
-  // Ret.sup.name = std::get<ForgetBase>(Last).base;
+  auto *Back = &std::get<0>(Ret.back());
 
   bool isForget = false;
   for (std::size_t Ind = 0; Ind < ELs.size(); Ind++) {
@@ -936,43 +1073,71 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
       auto &Name = std::get<RecallBase>(EL).base;
       if (Ind == 0) {
         // OK
+        std::get<1>(Ret.back()) = std::get<RecallBase>(EL).V;
       } else {
-        assert(Ret.back().sub.getBaseName().empty());
-        assert(!Ret.back().sub.hasLabel());
-        assert(Ret.back().sup.getBaseName().empty());
-        assert(!Ret.back().sup.hasLabel());
+        assert(Back->sub.getBaseName().empty());
+        assert(!Back->sub.hasLabel());
+        assert(Back->sup.getBaseName().empty());
+        assert(!Back->sup.hasLabel());
       }
-      Ret.back().sub = Name;
+      Back->sub = Name;
     } else if (std::holds_alternative<ForgetBase>(EL)) {
       auto &Name = std::get<ForgetBase>(EL).base;
-      if (Ret.back().sup.hasLabel()) {
-        Ret.back().sup.setBase(Name.getBase());
+      if (Back->sup.hasLabel()) {
+        Back->sup.setBase(Name.getBase());
       } else {
-        Ret.back().sup = Name;
+        Back->sup = Name;
       }
       if (Ind == ELs.size() - 1) {
+        // Collect the variance between recalls and forgets.
+        if (!isForget) {
+          assert(!PathVariance);
+          PathVariance =
+              combine(std::get<1>(Ret.back()), Back->sub.pathVariance());
+        }
+        isForget = true;
         // OK
+        std::get<2>(Ret.back()) = std::get<ForgetBase>(EL).V;
       } else {
         // Must be a temp name.
         // https://stackoverflow.com/a/40441240/13798540
         assert(Name.getBaseName().rfind(tempNamePrefix, 0) == 0);
-        // Reset the state.
-        isForget = false;
+        // Compute current variance.
+        Variance Current =
+            combine(std::get<1>(Ret.back()), Back->sub.pathVariance());
+        Current = combine(Current, Back->sup.pathVariance());
+        std::get<2>(Ret.back()) = Current;
+
         Ret.emplace_back();
+        Back = &std::get<0>(Ret.back());
+        std::get<1>(Ret.back()) = Current;
       }
     } else if (std::holds_alternative<RecallLabel>(EL)) {
       if (isForget) {
         assert(false && "normalize_path: Path has Recall after Forget!");
       }
-      Ret.back().sub.getLabels().push_back(std::get<RecallLabel>(EL).label);
+      Back->sub.getLabels().push_back(std::get<RecallLabel>(EL).label);
     } else if (std::holds_alternative<ForgetLabel>(EL)) {
+      // Collect the variance between recalls and forgets.
+      if (!isForget) {
+        assert(!PathVariance);
+        PathVariance =
+            combine(std::get<1>(Ret.back()), Back->sub.pathVariance());
+      }
       isForget = true;
-      Ret.back().sup.getLabels().push_front(std::get<ForgetLabel>(EL).label);
+      Back->sup.getLabels().push_front(std::get<ForgetLabel>(EL).label);
     } else {
       assert(false && "normalize_path: Base label type in the middle!");
     }
   }
-  return Ret;
+
+  // combine the variance with label variance.
+  for (auto &Ent : Ret) {
+    auto &Con = std::get<0>(Ent);
+    std::get<1>(Ent) = combine(std::get<1>(Ent), Con.sub.pathVariance());
+    std::get<2>(Ent) = combine(std::get<2>(Ent), Con.sup.pathVariance());
+  }
+  return std::make_pair(Ret, PathVariance.value());
 }
 
 /// the pexp must be in (recall _)*(forget _)*
@@ -981,7 +1146,6 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
     assert(false && "pexp_to_constraints: Empty path!");
     // return {};
   } else if (rexp::isNull(E)) {
-    std::cerr << "pexp_to_constraints: Null path!\n";
     return {};
     // assert(false && "pexp_to_constraints: Null path!");
   }

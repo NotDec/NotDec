@@ -205,6 +205,14 @@ struct TypeVariable {
         DerivedTypeVariable{.Base = BaseConstant{.Val = val, .User = User}}};
   }
 
+  Variance pathVariance() const {
+    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+      return dtv->pathVariance();
+    } else {
+      return Covariant;
+    }
+  }
+
   TypeVariable toBase() const {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
       return {DerivedTypeVariable{.Base = dtv->Base}};
@@ -360,7 +368,10 @@ struct ForgetLabel {
 };
 struct ForgetBase {
   TypeVariable base;
-  bool operator<(const ForgetBase &rhs) const { return base < rhs.base; }
+  Variance V;
+  bool operator<(const ForgetBase &rhs) const {
+    return std::tie(base, V) < std::tie(rhs.base, rhs.V);
+  }
   bool operator==(const ForgetBase &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
@@ -374,7 +385,10 @@ struct RecallLabel {
 };
 struct RecallBase {
   TypeVariable base;
-  bool operator<(const RecallBase &rhs) const { return base < rhs.base; }
+  Variance V;
+  bool operator<(const RecallBase &rhs) const {
+    return std::tie(base, V) < std::tie(rhs.base, rhs.V);
+  }
   bool operator==(const RecallBase &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
@@ -430,6 +444,10 @@ inline bool hasSameBaseOrLabel(EdgeLabel a, EdgeLabel b) {
   } else {
     return false;
   }
+}
+
+inline bool operator!=(const EdgeLabel &N1, const EdgeLabel &N2) {
+  return !(N1 == N2);
 }
 
 } // namespace notdec::retypd

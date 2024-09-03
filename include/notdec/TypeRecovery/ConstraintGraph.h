@@ -95,7 +95,7 @@ struct CGEdge {
   CGEdge(CGNode &From, CGNode &Target, EdgeLabel &L)
       : FromNode(From), TargetNode(Target), Label(L) {}
 
-  EdgeLabel getLabel() const { return Label; }
+  const EdgeLabel &getLabel() const { return Label; }
 
   const CGNode &getTargetNode() const { return TargetNode; }
   CGNode &getTargetNode() { return TargetNode; }
@@ -114,7 +114,7 @@ struct RevEdge {
   RevEdge(CGEdge &E) : Edge(E) {}
   CGNode &getTargetNode() { return Edge.getSourceNode(); }
   CGNode &getSourceNode() { return Edge.getTargetNode(); }
-  EdgeLabel getLabel() const { return Edge.getLabel(); }
+  const EdgeLabel &getLabel() const { return Edge.getLabel(); }
 
   // Act as a pointer
   RevEdge &operator*() { return *this; }
@@ -176,6 +176,8 @@ public:
   void layerSplit();
   void pushSplit();
   void buildPathSequence();
+  void markVariance();
+  void contraVariantSplit();
   std::vector<SubTypeConstraint> solve_constraints_between();
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);

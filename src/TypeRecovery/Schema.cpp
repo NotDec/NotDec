@@ -5,6 +5,23 @@
 
 namespace notdec::retypd {
 
+std::string toString(const EdgeLabel &label) {
+  if (std::holds_alternative<One>(label)) {
+    return "_1_";
+  } else if (std::holds_alternative<ForgetLabel>(label)) {
+    return "forget " + toString(std::get<ForgetLabel>(label).label);
+  } else if (std::holds_alternative<ForgetBase>(label)) {
+    return "forget " + toString(std::get<ForgetBase>(label).base) +
+           toString(std::get<ForgetBase>(label).V);
+  } else if (std::holds_alternative<RecallLabel>(label)) {
+    return "recall " + toString(std::get<RecallLabel>(label).label);
+  } else if (std::holds_alternative<RecallBase>(label)) {
+    return "recall " + toString(std::get<RecallBase>(label).base) +
+           toString(std::get<RecallBase>(label).V);
+  }
+  assert(false && "Unknown FieldLabel!");
+}
+
 std::string toString(const Bound &b) {
   if (std::holds_alternative<None>(b)) {
     return "";
