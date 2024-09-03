@@ -26,6 +26,7 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
+#include "TypeRecovery/Sketch.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
 
@@ -47,6 +48,10 @@ struct TypeRecovery : PassInfoMixin<TypeRecovery> {
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
       FuncSummaries;
+  std::map<llvm::Function *,
+           std::pair<std::vector<std::shared_ptr<retypd::Sketch>>,
+                     std::shared_ptr<retypd::Sketch>>>
+      FuncSketches;
   unsigned pointer_size = 0;
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
@@ -130,7 +135,7 @@ struct ConstraintsGenerator {
       llvm::Function *)>
       GetSummary;
   size_t instantiateSummary(llvm::Function *Target);
-  void solveType(TypeVariable &Node);
+  std::shared_ptr<retypd::Sketch> solveType(TypeVariable &Node);
 
   void run();
   ConstraintsGenerator(

@@ -25,6 +25,7 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
+#include "TypeRecovery/Sketch.h"
 #include "optimizers/ConstraintGenerator.h"
 
 #define DEBUG_TYPE "retypd_graph"
@@ -214,7 +215,10 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
           RecallBase{.base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
     }
   }
+  linkEndVars(InterestingVars);
+}
 
+void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
   // Link nodes to "#End"
   for (auto N : EndNodes) {
     // is an interesting var or is a primitive type
@@ -643,14 +647,20 @@ void ConstraintGraph::layerSplit() {
   }
 }
 
-void ConstraintGraph::solveSketch(CGNode &N) const {
+std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
   // 1 clone the graph
+  printGraph("sketches1.dot");
   ConstraintGraph G = clone();
-  // 2. make all nodes accepting. focus on the recall subgraph, but allow recall
+
+  // 2. add recall edge to the node.
+  G.addEdge(*G.getStartNode(), G.getOrInsertNode(N.key, N.Size),
+            RecallBase{.base = N.key.Base.toBase(), .V = N.key.SuffixVariance});
+
+  // 3. make all nodes accepting. focus on the recall subgraph, but allow recall
   // base primitive.
   for (auto &Ent : G.Nodes) {
     auto &Source = Ent.second;
-    // 2.1 remove all forget label edge
+    // 3.1 remove all forget label edge
     for (auto &Edge : Source.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
       if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
@@ -660,7 +670,7 @@ void ConstraintGraph::solveSketch(CGNode &N) const {
     if (&Source == G.Start || &Source == G.End) {
       continue;
     }
-    // 2.2 if the node has not forget prim edge, add one to top.
+    // 3.2 if the node has not forget prim edge, add one to top.
     bool HasForgetPrim = false;
     for (auto &Edge : Source.outEdges) {
       if (std::holds_alternative<ForgetBase>(Edge.Label)) {
@@ -672,13 +682,20 @@ void ConstraintGraph::solveSketch(CGNode &N) const {
     }
     if (!HasForgetPrim) {
       G.addEdge(Source, *G.getEndNode(),
-                ForgetBase{TypeVariable::CreatePrimitive("top")});
+                ForgetBase{.base = TypeVariable::CreatePrimitive("top"),
+                           .V = Source.key.SuffixVariance});
     }
   }
-  std::set<std::string> Vars = {"stack"};
-  G.linkVars(Vars);
+  // 4. Link vars from primitives to #End.
+  std::set<std::string> Vars = {};
+  G.linkEndVars(Vars);
+
+  // 5. solve the sketch
   auto G2 = G.simplify();
-  G2.printGraph("test.dot");
+  G2.printGraph("before-sketch.dot");
+  auto Sk = Sketch::fromConstraintGraph(G2, Name + "-" + N.key.str());
+  Sk->printGraph("sketch.dot");
+  return Sk;
 }
 
 /// Algorithm D.2 Saturation algorithm
@@ -902,14 +919,14 @@ CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size) {
   return it->second;
 }
 
-void ConstraintGraph::printGraph(const char *DotFile) {
+void ConstraintGraph::printGraph(const char *DotFile) const {
   std::error_code EC;
   llvm::raw_fd_ostream OutStream(DotFile, EC);
   if (EC) {
     llvm::errs() << "Error: " << EC.message() << "\n";
     return;
   }
-  llvm::WriteGraph(OutStream, this, false);
+  llvm::WriteGraph(OutStream, const_cast<ConstraintGraph *>(this), false);
   OutStream.flush();
   OutStream.close();
 }

@@ -28,6 +28,7 @@
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Schema.h"
+#include "TypeRecovery/Sketch.h"
 #include "Utils/AllSCCIterator.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
@@ -185,19 +186,31 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
         auto Target = Edge.second->getFunction();
         auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+        auto &TargetSketches = FuncSketches[Target];
+        if (I->arg_size() > 0 && TargetSketches.first.size() == 0) {
+          TargetSketches.first.resize(I->arg_size(), nullptr);
+        }
         if (Target == nullptr) {
           continue;
         }
         size_t InstanceId = Generator->CallToID.at(I);
         for (int i = 0; i < I->arg_size(); i++) {
           auto TV = getCallArgTV(Target, InstanceId, i);
-          // auto Sketches =
-          Generator->solveType(TV);
+          auto Sketch = Generator->solveType(TV);
+          if (TargetSketches.first[i] == nullptr) {
+            TargetSketches.first[i] = Sketch;
+          } else {
+            TargetSketches.first[i]->join(*Sketch);
+          }
         }
         if (!I->getType()->isVoidTy()) {
           auto TV = getCallRetTV(Target, InstanceId);
-          // auto Sketches =
-          Generator->solveType(TV);
+          auto Sketch = Generator->solveType(TV);
+          if (TargetSketches.second == nullptr) {
+            TargetSketches.second = Sketch;
+          } else {
+            TargetSketches.second->join(*Sketch);
+          }
         }
       }
     }
@@ -469,11 +482,12 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
   cg.addSubtype(SrcVar, DstVar);
 }
 
-void ConstraintsGenerator::solveType(TypeVariable &Node) {
+std::shared_ptr<retypd::Sketch>
+ConstraintsGenerator::solveType(TypeVariable &Node) {
   // Because we always do layer split after clone, so we can refer to Node by
   // type variable.
   auto &CGNode = CG.Nodes.at(Node);
-  CG.solveSketch(CGNode);
+  return CG.solveSketch(CGNode);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {

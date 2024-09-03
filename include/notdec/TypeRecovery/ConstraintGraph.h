@@ -18,6 +18,7 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
+#include "TypeRecovery/Sketch.h"
 #include "Utils/Range.h"
 
 namespace notdec {
@@ -92,7 +93,7 @@ struct CGEdge {
   CGNode &FromNode;
   CGNode &TargetNode;
   EdgeLabel Label;
-  CGEdge(CGNode &From, CGNode &Target, EdgeLabel &L)
+  CGEdge(CGNode &From, CGNode &Target, const EdgeLabel &L)
       : FromNode(From), TargetNode(Target), Label(L) {}
 
   const EdgeLabel &getLabel() const { return Label; }
@@ -156,6 +157,7 @@ struct ConstraintGraph {
   std::vector<SubTypeConstraint>
   simplifiedExpr(std::set<std::string> &InterestingVars) const;
   void linkVars(std::set<std::string> &InterestingVars);
+  void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
   ConstraintGraph cloneAndSimplify() const;
   void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
@@ -169,7 +171,7 @@ public:
   CGNode *getEndNode();
   CGNode *getMemoryNode();
 
-  void solveSketch(CGNode &N) const;
+  std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
 
   // internal steps
   void saturate();
@@ -181,7 +183,7 @@ public:
   std::vector<SubTypeConstraint> solve_constraints_between();
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);
-  void printGraph(const char *DotFile);
+  void printGraph(const char *DotFile) const;
   std::vector<SubTypeConstraint> toConstraints();
   static ConstraintGraph fromConstraints(std::string FuncName,
                                          std::vector<Constraint> &Cons);
@@ -247,7 +249,7 @@ using notdec::retypd::CGNode;
 using notdec::retypd::ConstraintGraph;
 using notdec::retypd::RevEdge;
 
-template <> struct llvm::GraphTraits<CGNode *> {
+template <> struct GraphTraits<CGNode *> {
   using NodeRef = CGNode *;
 
   static CGNode *CGEdgeToTarget(const CGEdge &P) {
@@ -283,21 +285,20 @@ template <> struct llvm::GraphTraits<CGNode *> {
 
 template <>
 struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
+  using GraphRef = ConstraintGraph *;
   static CGNode *CGGetNode(ConstraintGraph::iterator::reference Entry) {
     return &Entry.second;
   }
   using nodes_iterator =
       mapped_iterator<ConstraintGraph::iterator, decltype(&CGGetNode)>;
 
-  static NodeRef getEntryNode(ConstraintGraph *DG) {
-    return DG->getStartNode();
-  }
-  static NodeRef getExitNode(ConstraintGraph *DG) { return DG->getEndNode(); }
+  static NodeRef getEntryNode(GraphRef DG) { return DG->getStartNode(); }
+  static NodeRef getExitNode(GraphRef DG) { return DG->getEndNode(); }
 
-  static nodes_iterator nodes_begin(ConstraintGraph *DG) {
+  static nodes_iterator nodes_begin(GraphRef DG) {
     return nodes_iterator(DG->begin(), &CGGetNode);
   }
-  static nodes_iterator nodes_end(ConstraintGraph *DG) {
+  static nodes_iterator nodes_end(GraphRef DG) {
     return nodes_iterator(DG->end(), &CGGetNode);
   }
   static notdec::retypd::TypeVariable getTypeVar(NodeRef N) {
@@ -315,10 +316,9 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
     return Node->key.str();
   }
 
-  std::string
-  getEdgeAttributes(const NodeRef Node,
-                    llvm::GraphTraits<CGNode *>::ChildIteratorType I,
-                    GraphRef CG) {
+  std::string getEdgeAttributes(const NodeRef Node,
+                                llvm::GraphTraits<NodeRef>::ChildIteratorType I,
+                                GraphRef CG) {
     return std::string("label=\"") +
            notdec::retypd::toString((*I.getCurrent()).Label) + "\"";
   }
