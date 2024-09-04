@@ -3,6 +3,7 @@
 
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
+#include <cassert>
 #include <llvm/ADT/ilist_node.h>
 #include <llvm/Support/GraphWriter.h>
 #include <memory>
@@ -81,7 +82,7 @@ struct SketchEdge {
 
 struct Sketch {
   std::string Name;
-  SketchNode *Root;
+  SketchNode *Root = nullptr;
 
   // list for SketchNode
   using NodeListType = llvm::ilist<SketchNode>;
@@ -94,6 +95,10 @@ struct Sketch {
   iterator end() { return SketchNodes.end(); }
   SketchNode *getRoot() { return Root; }
   const SketchNode *getRoot() const { return Root; }
+  void setRoot(SketchNode *Root) {
+    assert(this->Root == nullptr);
+    this->Root = Root;
+  }
 
   Sketch(std::string Name) : Name(Name) {}
   static std::shared_ptr<Sketch> fromConstraintGraph(const ConstraintGraph &CG,

@@ -649,13 +649,13 @@ void ConstraintGraph::layerSplit() {
 
 std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
   // 1 clone the graph
-  printGraph("sketches1.dot");
   ConstraintGraph G = clone();
 
   // 2. add recall edge to the node.
   G.addEdge(*G.getStartNode(), G.getOrInsertNode(N.key, N.Size),
-            RecallBase{.base = N.key.Base.toBase(), .V = N.key.SuffixVariance});
+            RecallBase{.base = N.key.Base, .V = N.key.SuffixVariance});
 
+  G.printGraph("sketches1.dot");
   // 3. make all nodes accepting. focus on the recall subgraph, but allow recall
   // base primitive.
   for (auto &Ent : G.Nodes) {

@@ -215,7 +215,8 @@ struct TypeVariable {
 
   TypeVariable toBase() const {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      return {DerivedTypeVariable{.Base = dtv->Base}};
+      return {DerivedTypeVariable{.Base = dtv->Base,
+                                  .instanceId = dtv->instanceId}};
     } else {
       return *this;
     }

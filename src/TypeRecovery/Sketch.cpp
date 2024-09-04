@@ -221,6 +221,7 @@ std::shared_ptr<Sketch> Sketch::fromConstraintGraph(const ConstraintGraph &CG1,
       }
     }
   }
+  S->setRoot(NodeMap.at(&Init));
   return S;
 }
 

@@ -7,19 +7,19 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "decompile offset1",
+      "name": "decompile SimpleRecursive2.ll",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
-        "test/backend/offset1.wat",
+        "test/backend/SimpleRecursive2.ll",
         "-o",
-        "test/backend/offset1.wat.ll",
+        "test/backend/SimpleRecursive2.ll.ll",
         "-debug-only=type-recovery",
         "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "DEBUG_MIN_GRAPH": "1",
+        "DEBUG_TRANS_MIN_GRAPH": "1",
         "DEBUG_TRANS_SAT_GRAPH": "1"
       }
     },
@@ -53,7 +53,7 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "DEBUG_MIN_GRAPH": "1",
+        "DEBUG_TRANS_MIN_GRAPH": "1",
         "DEBUG_TRANS_SAT_GRAPH": "1"
       }
     },
@@ -85,8 +85,10 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "DEBUG_TRANS_INIT_GRAPH": "1",
-        "DEBUG_TRANS_SAT_GRAPH": "1"
+        "DEBUG_TRANS_LAYER_SPLIT_GRAPH": "1",
+        "DEBUG_TRANS_MIN_GRAPH": "1",
+        "DEBUG_TRANS_CV_SPLIT_GRAPH": "1",
+        "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1"
       }
     }
   ]
