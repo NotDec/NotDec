@@ -9,6 +9,8 @@
 #include <sstream>
 #include <variant>
 
+std::string getSuffix(std::string fname);
+
 enum log_level {
   level_emergent = 0,
   level_alert = 1,

@@ -162,6 +162,7 @@ struct ConstraintGraph {
   ConstraintGraph cloneAndSimplify() const;
   void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
                    size_t ID);
+  CGNode &instantiateSketch(std::shared_ptr<retypd::Sketch> Sk);
 
 public:
   void solve();
@@ -198,8 +199,9 @@ protected:
   }
   bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
-      assert(std::holds_alternative<One>(Label));
-      return false;
+      std::cerr << "Warning: Non-null self edge: " << toString(From.key)
+                << " To " << toString(To.key) << " Label: " << toString(Label)
+                << "\n";
     }
     if (!isLayerSplit) {
       // maintain the initial reaching push/forget set.

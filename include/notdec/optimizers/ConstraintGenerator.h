@@ -2,6 +2,9 @@
 #define _NOTDEC_OPTIMIZERS_RETYPD_GENERATE_H_
 
 #include <cassert>
+#include <clang/AST/Type.h>
+#include <clang/Frontend/ASTUnit.h>
+#include <clang/Tooling/Tooling.h>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -41,30 +44,6 @@ bool isFinal(const std::string &Name);
 bool mustBePrimitive(const llvm::Type *Ty);
 
 struct ConstraintsGenerator;
-struct TypeRecovery : PassInfoMixin<TypeRecovery> {
-  llvm::Value *StackPointer;
-  std::string data_layout;
-  // Map from SCC to initial constraint graph.
-  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
-  std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
-      FuncSummaries;
-  std::map<llvm::Function *,
-           std::pair<std::vector<std::shared_ptr<retypd::Sketch>>,
-                     std::shared_ptr<retypd::Sketch>>>
-      FuncSketches;
-  unsigned pointer_size = 0;
-
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
-  void gen_json(std::string OutputFilename);
-
-public:
-  void print(Module &M, std::string path);
-};
-
-inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
-                                          const TypeVariable &sup) {
-  return retypd::SubTypeConstraint{sub, sup};
-}
 
 // When solving inter-procedurally, link CallArg (caller) with Argument*
 // (callee) link CallRet (caller) with ReturnValue (callee) Separate
@@ -119,6 +98,44 @@ using ValMapKey =
 
 std::string getName(const ValMapKey &Val);
 
+struct TypeRecoveryResult {
+  std::map<ValMapKey, clang::QualType> ValueTypes;
+  std::unique_ptr<clang::ASTUnit> ASTUnit;
+};
+
+struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
+  // Provide a unique key, i.e., memory address to be used by the LLVM's pass
+  // infrastructure.
+  static inline llvm::AnalysisKey Key; // NOLINT
+  friend llvm::AnalysisInfoMixin<TypeRecovery>;
+
+  // Specify the result type of this analysis pass.
+  using Result = TypeRecoveryResult;
+
+  llvm::Value *StackPointer;
+  std::string data_layout;
+  // Map from SCC to initial constraint graph.
+  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
+  std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
+      FuncSummaries;
+  std::map<llvm::Function *,
+           std::pair<std::vector<std::shared_ptr<retypd::Sketch>>,
+                     std::shared_ptr<retypd::Sketch>>>
+      FuncSketches;
+  unsigned pointer_size = 0;
+
+  Result run(Module &M, ModuleAnalysisManager &);
+  void gen_json(std::string OutputFilename);
+
+public:
+  void print(Module &M, std::string path);
+};
+
+inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
+                                          const TypeVariable &sup) {
+  return retypd::SubTypeConstraint{sub, sup};
+}
+
 /// The ConstraintsGenerator class is responsible for generating constraints.
 /// The ConstraintGraph/StorageShapeGraph is expected to be able to print to a
 /// readable format. (TODO)
@@ -135,7 +152,11 @@ struct ConstraintsGenerator {
       llvm::Function *)>
       GetSummary;
   size_t instantiateSummary(llvm::Function *Target);
-  std::shared_ptr<retypd::Sketch> solveType(TypeVariable &Node);
+  std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);
+  void instantiateSketchAsSub(ValMapKey Val,
+                              std::shared_ptr<retypd::Sketch> Sk);
+  void instantiateSketchAsSup(ValMapKey Val,
+                              std::shared_ptr<retypd::Sketch> Sk);
 
   void run();
   ConstraintsGenerator(
@@ -297,9 +318,13 @@ void inline ensureSequence(Value *&Src1, Value *&Src2) {
   }
 }
 
+std::string inline getFuncTvName(llvm::Function *Func) {
+  return ValueNamer::getName(*Func, ValueNamer::FuncPrefix);
+}
+
 TypeVariable inline getCallArgTV(llvm::Function *Target, size_t InstanceId,
                                  int32_t Index) {
-  auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+  auto TargetName = getFuncTvName(Target);
   return TypeVariable{
       DerivedTypeVariable{.Base = TargetName,
                           .Labels = {retypd::InLabel{std::to_string(Index)}},
@@ -307,7 +332,7 @@ TypeVariable inline getCallArgTV(llvm::Function *Target, size_t InstanceId,
 }
 
 TypeVariable inline getCallRetTV(llvm::Function *Target, size_t InstanceId) {
-  auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+  auto TargetName = getFuncTvName(Target);
   return TypeVariable{DerivedTypeVariable{.Base = TargetName,
                                           .Labels = {retypd::OutLabel{}},
                                           .instanceId = InstanceId}};

@@ -18,16 +18,20 @@
 #include <llvm/Transforms/Utils/Mem2Reg.h>
 
 #include "context.h"
+#include "notdec-llvm2c/Interface.h"
 
 namespace notdec::optimizers {
 
 struct DecompileConfig {
 
-  DecompileConfig(llvm::Module &mod, notdec::Options opt)
-      : Mod(mod), Opts(opt) {}
+  DecompileConfig(llvm::Module &mod, std::string OutFilePath,
+                  notdec::Options opt, ::notdec::llvm2c::Options llvm2cOpt)
+      : Mod(mod), OutFilePath(OutFilePath), Opts(opt), llvm2cOpt(llvm2cOpt) {}
 
   llvm::Module &Mod;
+  std::string OutFilePath;
   notdec::Options Opts;
+  ::notdec::llvm2c::Options llvm2cOpt;
   llvm::GlobalVariable *SP = nullptr;
   llvm::GlobalVariable *Mem = nullptr;
 

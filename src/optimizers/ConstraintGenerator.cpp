@@ -1,7 +1,9 @@
 #include <cassert>
+#include <clang/AST/Type.h>
 #include <cstdlib>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Value.h>
 #include <memory>
 #include <optional>
 #include <string>
@@ -29,6 +31,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
+#include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
@@ -77,31 +80,12 @@ void ConstraintGraph::replaceTypeVarWith(CGNode &Node,
   assert(Node.key.Base.isIntConstant());
 }
 
-// std::set<std::vector<CallGraphNode *>> getAllSCCs(CallGraph &CG) {
-//   std::set<CallGraphNode *> Visited;
-//   std::set<std::vector<CallGraphNode *>> AllSCCs;
-//   // Entry node of the GraphTrait
-//   CallGraphNode *NotVisited = CG.getExternalCallingNode();
-//   do {
-//     scc_iterator<CallGraph *> CGI(NotVisited);
-//     for (; !CGI.isAtEnd(); ++CGI) {
-//       const std::vector<CallGraphNode *> &NodeVec = *CGI;
-//       AllSCCs.insert(NodeVec);
-//     }
-//     // Find new unvisited node
-//     NotVisited = nullptr;
-//     for (auto &Pair : CG) {
-//       if (Visited.count(Pair.second.get()) == 0) {
-//         NotVisited = Pair.second.get();
-//         break;
-//       }
-//     }
-//   } while (true);
+inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
+  llvm::errs() << "  Value: " << *V << " has type: " << CTy.getAsString()
+               << "\n";
+}
 
-//   return AllSCCs;
-// }
-
-PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
+TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
   LLVM_DEBUG(printModule(M, "before-TypeRecovery.ll"));
@@ -116,6 +100,7 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
   std::set<CallGraphNode *> Visited;
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
+  // tuple(SCCNodes, ConstraintsGenerator, SCCName)
   std::vector<std::tuple<std::vector<CallGraphNode *>,
                          std::shared_ptr<ConstraintsGenerator>, std::string>>
       AllSCCs;
@@ -169,7 +154,10 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::get<2>(AllSCCs.back()) = Name;
   }
 
-  // Top-down Phase
+  TypeRecovery::Result Result;
+  retypd::SketchToCTypeBuilder TB(M.getName());
+
+  // Top-down Phase: build the result(Map from value to clang C type)
   for (auto It = AllSCCs.rbegin(); It != AllSCCs.rend(); ++It) {
     const std::vector<CallGraphNode *> &NodeVec = std::get<0>(*It);
     auto &Generator = std::get<1>(*It);
@@ -177,22 +165,77 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     std::cerr << "Processing SCC: " << Name << "\n";
 
-    // Solve types for each function actual arguments.
+    // Collect all functions for SCC checking
+    std::set<llvm::Function *> SCCSet;
+    for (auto CGN : NodeVec) {
+      if (CGN->getFunction() == nullptr) {
+        continue;
+      }
+      SCCSet.insert(CGN->getFunction());
+    }
+
+    // instantiate the Sketches.
     for (CallGraphNode *CGN : NodeVec) {
+      auto *Current = CGN->getFunction();
+      if (Current == nullptr) {
+        continue;
+      }
+      if (FuncSketches.count(Current) == 0) {
+        continue;
+      }
+      auto &CurrentSketches = FuncSketches.at(Current);
+      for (int i = 0; i < Current->arg_size(); i++) {
+        auto *Arg = Current->getArg(i);
+        Generator->instantiateSketchAsSub(Arg, CurrentSketches.first.at(i));
+      }
+      if (!Current->getReturnType()->isVoidTy()) {
+        Generator->instantiateSketchAsSup(ReturnValue{.Func = Current},
+                                          CurrentSketches.second);
+      }
+    }
+
+    for (CallGraphNode *CGN : NodeVec) {
+      auto *Current = CGN->getFunction();
+      if (Current == nullptr) {
+        continue;
+      }
+      // If the FuncSketches is empty(no any caller), solve and fill by itself.
+      if (FuncSketches.count(Current) == 0) {
+        // get Or emplace new
+        auto &CurrentSketches = FuncSketches[Current];
+        if (Current->arg_size() > 0 && CurrentSketches.first.size() == 0) {
+          CurrentSketches.first.resize(Current->arg_size(), nullptr);
+        }
+
+        for (int i = 0; i < Current->arg_size(); i++) {
+          auto TV = Generator->solveType(getCallArgTV(Current, 0, i));
+          assert(CurrentSketches.first[i] == nullptr);
+          CurrentSketches.first[i] = TV;
+        }
+        if (!Current->getReturnType()->isVoidTy()) {
+          auto TV = Generator->solveType(getCallRetTV(Current, 0));
+          assert(CurrentSketches.second == nullptr);
+          CurrentSketches.second = TV;
+        }
+      }
+      // Solve types for callee actual arguments.
       for (auto &Edge : *CGN) {
         if (!Edge.first.hasValue()) {
           continue;
         }
         CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
         auto Target = Edge.second->getFunction();
-        auto TargetName = ValueNamer::getName(*Target, ValueNamer::FuncPrefix);
+        if (Target == nullptr || SCCSet.count(Target) > 0) {
+          continue;
+        }
+        auto TargetName = getFuncTvName(Target);
+
+        // get Or emplace new
         auto &TargetSketches = FuncSketches[Target];
         if (I->arg_size() > 0 && TargetSketches.first.size() == 0) {
           TargetSketches.first.resize(I->arg_size(), nullptr);
         }
-        if (Target == nullptr) {
-          continue;
-        }
+
         size_t InstanceId = Generator->CallToID.at(I);
         for (int i = 0; i < I->arg_size(); i++) {
           auto TV = getCallArgTV(Target, InstanceId, i);
@@ -214,7 +257,63 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
       }
     }
+
+    // Convert the Arg and return type of functions in current SCC and save to
+    // result
+    // Solve and convert stack (alloca) types and save to result
+    for (CallGraphNode *CGN : NodeVec) {
+      auto *Current = CGN->getFunction();
+      if (Current == nullptr) {
+        continue;
+      }
+      auto &CurrentSketches = FuncSketches.at(Current);
+      for (int i = 0; i < Current->arg_size(); i++) {
+        auto *Arg = Current->getArg(i);
+        auto Sk = CurrentSketches.first[i];
+        if (Sk == nullptr) {
+          llvm::errs() << "Warn: Arg " << *Arg
+                       << " of Func: " << Current->getName()
+                       << " has no type info\n";
+          continue;
+        }
+        auto CTy = TB.buildType(*Sk, Arg->getType()->getPrimitiveSizeInBits());
+        dumpTypes(Arg, CTy);
+        Result.ValueTypes.emplace(Arg, CTy);
+      }
+      if (!Current->getReturnType()->isVoidTy()) {
+        auto Sk = CurrentSketches.second;
+        if (Sk == nullptr) {
+          llvm::errs() << "Warn: Return value of Func: " << Current->getName()
+                       << " has no type info\n";
+          continue;
+        }
+        auto CTy = TB.buildType(
+            *Sk, Current->getReturnType()->getPrimitiveSizeInBits());
+        llvm::errs() << "Return Value of Func: " << Current->getName()
+                     << " has type: " << CTy.getAsString() << "\n";
+        Result.ValueTypes.emplace(ReturnValue{.Func = Current}, CTy);
+      }
+      if (!Current->isDeclaration()) {
+        // find all alloca in entry block and convert.
+        for (auto &I : Current->getEntryBlock()) {
+          if (auto *AI = dyn_cast<AllocaInst>(&I)) {
+            auto Sk =
+                Generator->solveType(Generator->getNode(AI, nullptr).key.Base);
+            if (Sk == nullptr) {
+              continue;
+            }
+            auto CTy =
+                TB.buildType(*Sk, AI->getType()->getPrimitiveSizeInBits());
+            dumpTypes(AI, CTy);
+            Result.ValueTypes.emplace(AI, CTy);
+          }
+        }
+      }
+    }
   }
+
+  // move the ASTUnit to result
+  Result.ASTUnit = std::move(TB.ASTUnit);
 
   // gen_json("retypd-constrains.json");
 
@@ -222,7 +321,19 @@ PreservedAnalyses TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   print(M, "after-TypeRecovery.ll");
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
-  return PreservedAnalyses::none();
+  return Result;
+}
+
+void ConstraintsGenerator::instantiateSketchAsSub(
+    ValMapKey Val, std::shared_ptr<retypd::Sketch> Sk) {
+  CGNode &Root = CG.instantiateSketch(Sk);
+  addSubtype(Root.key.Base, getTypeVar(Val, nullptr));
+}
+
+void ConstraintsGenerator::instantiateSketchAsSup(
+    ValMapKey Val, std::shared_ptr<retypd::Sketch> Sk) {
+  CGNode &Root = CG.instantiateSketch(Sk);
+  addSubtype(getTypeVar(Val, nullptr), Root.key.Base);
 }
 
 void ConstraintsGenerator::run() {
@@ -386,22 +497,20 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ValMapKey Val, User *User) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertTypeVarVal(*V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    auto tv = makeTv(ValueNamer::getName(*F->Func, ValueNamer::FuncPrefix));
+    auto tv = makeTv(getFuncTvName(F->Func));
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
     assert(false);
     // TODO what if function pointer?
-    auto tv = makeTv(ValueNamer::getName(*Arg->Call->getCalledFunction(),
-                                         ValueNamer::FuncPrefix));
+    auto tv = makeTv(getFuncTvName(Arg->Call->getCalledFunction()));
     // tv.getInstanceId() = Arg->InstanceId;
     tv.getLabels().push_back(retypd::InLabel{std::to_string(Arg->Index)});
     return tv;
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     assert(false);
     // TODO what if function pointer?
-    auto tv = makeTv(ValueNamer::getName(*Ret->Call->getCalledFunction(),
-                                         ValueNamer::FuncPrefix));
+    auto tv = makeTv(getFuncTvName(Ret->Call->getCalledFunction()));
     // tv.getInstanceId() = Ret->InstanceId;
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
@@ -436,7 +545,8 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
         assert(false && "convertTypeVarVal: direct use of stack pointer?, run "
                         "StackAllocationRecovery first");
       } else if (auto Func = dyn_cast<Function>(C)) {
-        return makeTv(ValueNamer::getName(*Func, ValueNamer::FuncPrefix));
+        // Consistent with Call handling
+        return makeTv(getFuncTvName(Func));
       }
       return makeTv(gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
@@ -453,6 +563,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
         << *C << "\n";
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
+    // Consistent with Call handling
     TypeVariable tv = getTypeVar(arg->getParent(), User);
     tv.getLabels().push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
@@ -483,10 +594,13 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
 }
 
 std::shared_ptr<retypd::Sketch>
-ConstraintsGenerator::solveType(TypeVariable &Node) {
+ConstraintsGenerator::solveType(const TypeVariable &TV) {
   // Because we always do layer split after clone, so we can refer to Node by
   // type variable.
-  auto &CGNode = CG.Nodes.at(Node);
+  if (CG.Nodes.count(TV) == 0) {
+    return nullptr;
+  }
+  auto &CGNode = CG.Nodes.at(TV);
   return CG.solveSketch(CGNode);
 }
 

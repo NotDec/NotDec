@@ -2,6 +2,13 @@
 #include <iostream>
 #include <llvm/IR/Module.h>
 
+std::string getSuffix(std::string fname) {
+  std::size_t ind = fname.find_last_of('.');
+  if (ind != std::string::npos) {
+    return fname.substr(ind);
+  }
+  return std::string();
+}
 namespace notdec {
 
 [[nodiscard]] bool printModule(llvm::Module &M, const char *path) {

@@ -1,7 +1,6 @@
 #include <iostream>
 #include <string>
 
-#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
@@ -10,6 +9,7 @@
 #ifdef NOTDEC_ENABLE_WASM
 #include "notdec-wasm2llvm/interface.h"
 #endif
+
 #ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-llvm2c/Interface.h"
 #endif
@@ -83,14 +83,6 @@ static cl::opt<bool>
     disableAllPasses("disable-all-pass",
                      cl::desc("Disable all passes in the middle end"),
                      cl::init(false), cl::cat(NotdecCat));
-
-std::string getSuffix(std::string fname) {
-  std::size_t ind = fname.find_last_of('.');
-  if (ind != std::string::npos) {
-    return fname.substr(ind);
-  }
-  return std::string();
-}
 
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
@@ -166,41 +158,9 @@ int main(int argc, char *argv[]) {
 
   // run passes and dump IR
   if (!opts.disableAllPasses) {
-    notdec::optimizers::DecompileConfig conf(Ctx.getModule(), Ctx.opt);
+    notdec::optimizers::DecompileConfig conf(Ctx.getModule(), outputFilename,
+                                             Ctx.opt, getLLVM2COptions());
     conf.run_passes();
-  }
-
-  std::string outsuffix = getSuffix(outputFilename);
-  if (outsuffix == ".ll") {
-    std::error_code EC;
-    llvm::raw_fd_ostream os(outputFilename, EC);
-    if (EC) {
-      std::cerr << "Cannot open output file." << std::endl;
-      std::cerr << EC.message() << std::endl;
-      std::abort();
-    }
-    Ctx.getModule().print(os, nullptr);
-    std::cout << "IR dumped to " << outputFilename << std::endl;
-  } else if (outsuffix == ".bc") {
-    std::error_code EC;
-    llvm::raw_fd_ostream os(outputFilename, EC);
-    if (EC) {
-      std::cerr << "Cannot open output file." << std::endl;
-      std::cerr << EC.message() << std::endl;
-      std::abort();
-    }
-    llvm::WriteBitcodeToFile(Ctx.getModule(), os);
-    std::cout << "Bitcode dumped to " << outputFilename << std::endl;
-  } else if (outsuffix == ".c") {
-    std::error_code EC;
-    llvm::raw_fd_ostream os(outputFilename, EC);
-    if (EC) {
-      std::cerr << "Cannot open output file." << std::endl;
-      std::cerr << EC.message() << std::endl;
-      std::abort();
-    }
-    notdec::llvm2c::decompileModule(Ctx.getModule(), os, getLLVM2COptions());
-    std::cout << "Decompile result: " << outputFilename << std::endl;
   }
 
   return 0;

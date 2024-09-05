@@ -6,6 +6,7 @@
 #include <iostream>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/iterator_range.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -45,6 +46,27 @@ namespace notdec::retypd {
 //     }
 //   }
 // }
+
+CGNode &ConstraintGraph::instantiateSketch(std::shared_ptr<retypd::Sketch> Sk) {
+  std::map<retypd::SketchNode *, CGNode *> NodeMap;
+  // 1. clone the graph nodes
+  for (auto &Node : llvm::make_range(Sk->begin(), Sk->end())) {
+    auto &NewNode = getOrInsertNode(NodeKey(
+        TypeVariable::CreateDtv(ValueNamer::getName("sketch_")), Node.V));
+    NodeMap.emplace(&Node, &NewNode);
+  }
+  // 2. clone all edges as recall edges. Also add reverse forget edges.
+  for (auto &Node : llvm::make_range(Sk->begin(), Sk->end())) {
+    auto *Source = NodeMap[&Node];
+    for (auto &Edge : Node) {
+      auto &TargetSk = const_cast<SketchNode &>(Edge.getTargetNode());
+      auto *Target = NodeMap.at(&TargetSk);
+      addEdge(*Source, *Target, RecallLabel{Edge.getLabel()});
+      addEdge(*Target, *Source, ForgetLabel{Edge.getLabel()});
+    }
+  }
+  return *NodeMap.at(Sk->getRoot());
+}
 
 void ConstraintGraph::replaceNodeKey(CGNode &Node, const NodeKey &Key) {
   // auto &TV1 = const_cast<TypeVariable &>(TV);
@@ -655,7 +677,7 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
   G.addEdge(*G.getStartNode(), G.getOrInsertNode(N.key, N.Size),
             RecallBase{.base = N.key.Base, .V = N.key.SuffixVariance});
 
-  G.printGraph("sketches1.dot");
+  // G.printGraph("sketches1.dot");
   // 3. make all nodes accepting. focus on the recall subgraph, but allow recall
   // base primitive.
   for (auto &Ent : G.Nodes) {
@@ -692,9 +714,9 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
 
   // 5. solve the sketch
   auto G2 = G.simplify();
-  G2.printGraph("before-sketch.dot");
+  // G2.printGraph("before-sketch.dot");
   auto Sk = Sketch::fromConstraintGraph(G2, Name + "-" + N.key.str());
-  Sk->printGraph("sketch.dot");
+  // Sk->printGraph("sketch.dot");
   return Sk;
 }
 

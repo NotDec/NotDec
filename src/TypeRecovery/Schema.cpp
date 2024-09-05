@@ -40,7 +40,9 @@ std::string toString(const FieldLabel &f) {
   if (std::holds_alternative<InLabel>(f)) {
     return "in_" + std::get<InLabel>(f).name;
   } else if (std::holds_alternative<OutLabel>(f)) {
-    return "out_" + std::get<OutLabel>(f).name;
+    return std::get<OutLabel>(f).name.empty()
+               ? "out"
+               : "out_" + std::get<OutLabel>(f).name;
   } else if (std::holds_alternative<OffsetLabel>(f)) {
     auto d = std::get<OffsetLabel>(f);
     return toString(d.range);

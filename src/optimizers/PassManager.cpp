@@ -11,6 +11,7 @@
 #include "llvm/Transforms/Scalar/IndVarSimplify.h"
 #include "llvm/Transforms/Scalar/LoopRotation.h"
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -46,11 +47,69 @@
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
 #include "utils.h"
 
+#ifdef NOTDEC_ENABLE_LLVM2C
+#include "notdec-llvm2c/Interface.h"
+#endif
+
 namespace notdec::optimizers {
 
 using notdec::frontend::wasm::MEM_NAME;
 
 using namespace llvm;
+
+// A Pass that convert module to C.
+struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
+
+  std::string OutFilePath;
+  ::notdec::llvm2c::Options llvm2cOpt;
+
+  NotdecLLVM2C(std::string outFilePath, ::notdec::llvm2c::Options llvm2cOpt)
+      : OutFilePath(outFilePath), llvm2cOpt(llvm2cOpt) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    auto &HighTypes = MAM.getResult<TypeRecovery>(M);
+
+    std::cerr << "Current Type definitions:\n";
+    HighTypes.ASTUnit->getASTContext().getTranslationUnitDecl()->print(
+        llvm::errs());
+
+    std::string outsuffix = getSuffix(OutFilePath);
+    if (outsuffix == ".ll") {
+      std::error_code EC;
+      llvm::raw_fd_ostream os(OutFilePath, EC);
+      if (EC) {
+        std::cerr << "Cannot open output file." << std::endl;
+        std::cerr << EC.message() << std::endl;
+        std::abort();
+      }
+      M.print(os, nullptr);
+      std::cout << "IR dumped to " << OutFilePath << std::endl;
+    } else if (outsuffix == ".bc") {
+      std::error_code EC;
+      llvm::raw_fd_ostream os(OutFilePath, EC);
+      if (EC) {
+        std::cerr << "Cannot open output file." << std::endl;
+        std::cerr << EC.message() << std::endl;
+        std::abort();
+      }
+      llvm::WriteBitcodeToFile(M, os);
+      std::cout << "Bitcode dumped to " << OutFilePath << std::endl;
+    } else if (outsuffix == ".c") {
+      std::error_code EC;
+      llvm::raw_fd_ostream os(OutFilePath, EC);
+      if (EC) {
+        std::cerr << "Cannot open output file." << std::endl;
+        std::cerr << EC.message() << std::endl;
+        std::abort();
+      }
+      notdec::llvm2c::decompileModule(M, os, llvm2cOpt);
+      std::cout << "Decompile result: " << OutFilePath << std::endl;
+    }
+
+    return PreservedAnalyses::all();
+  }
+  static bool isRequired() { return true; }
+};
 
 // 把malloc的函数签名改为返回指针，把free的函数签名改为接受指针。
 // 因为LLVM不能直接修改函数的签名，导致需要创建一个新的函数替代旧的函数。
@@ -255,8 +314,8 @@ void DecompileConfig::run_passes() {
   PB.registerFunctionAnalyses(FAM);
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-  StackPointerFinderAnalysis SPF;
-  MAM.registerPass([&]() { return SPF; });
+  MAM.registerPass([&]() { return StackPointerFinderAnalysis(); });
+  MAM.registerPass([&]() { return TypeRecovery(); });
 
   // Create the pass manager.
   // Optimize the IR!
@@ -265,12 +324,12 @@ void DecompileConfig::run_passes() {
   // PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
   ModulePassManager MPM;
 
-  bool onlyRunTypeRecovery = getenv("NOTDEC_ONLY_TYPEREC") != nullptr;
-  if (onlyRunTypeRecovery) {
-    MPM.addPass(TypeRecovery());
-    MPM.run(Mod, MAM);
-    return;
-  }
+  // bool onlyRunTypeRecovery = getenv("NOTDEC_ONLY_TYPEREC") != nullptr;
+  // if (onlyRunTypeRecovery) {
+  //   MPM.addPass(TypeRecovery());
+  //   MPM.run(Mod, MAM);
+  //   return;
+  // }
 
   FunctionPassManager FPM = buildFunctionOptimizations();
   // MPM.addPass(FunctionRenamer());
@@ -307,7 +366,6 @@ void DecompileConfig::run_passes() {
       MPM.addPass(createModuleToFunctionPassAdaptor(
           createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
       // MPM.addPass(retypd::SSGTypeRec());
-      MPM.addPass(TypeRecovery());
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec
@@ -315,7 +373,7 @@ void DecompileConfig::run_passes() {
       std::abort();
     }
   }
-  // MPM.addPass(FuncSigModify());
+  MPM.addPass(NotdecLLVM2C(OutFilePath, llvm2cOpt));
   MPM.run(Mod, MAM);
 }
 
