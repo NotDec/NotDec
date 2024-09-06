@@ -18,7 +18,7 @@ SSGNode &SSGTypeRec::getOrInsertNode(llvm::Value *Val, User *User) {
   return getOrInsertNode(Val, Val->getType()->getScalarSizeInBits(), User);
 }
 
-SSGNode &SSGTypeRec::getOrInsertNode(ValMapKey Key, unsigned int Size,
+SSGNode &SSGTypeRec::getOrInsertNode(ExtValPtr Key, unsigned int Size,
                                      User *User) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Key)) {

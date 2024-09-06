@@ -12,7 +12,7 @@
 - handle unordered float pointer operation
 
 **Type recovery**
-- Check for any possible name collision
+- Check for any possible name collision, especially for function.
 - how to handle dynamic call using function pointer? how to traverse reverse post order?
 - Add a test case for basic block not in topo order. Check whether opt passes will reorder it.
 - Check if PNI graph correctly reflected in summary using a test case.

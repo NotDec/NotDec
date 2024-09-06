@@ -56,7 +56,7 @@ const char *ValueNamer::NewPrefix = "new_";
 const char *ValueNamer::AddPrefix = "add_";
 const char *ValueNamer::SubPrefix = "sub_";
 
-std::string getName(const ValMapKey &Val) {
+std::string getName(const ExtValuePtr &Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return ValueNamer::getName(**V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
@@ -71,7 +71,7 @@ std::string getName(const ValMapKey &Val) {
     return "IntConstant_" + int_to_hex(IC->Val->getSExtValue());
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getName: unhandled type of ValMapKey\n";
+               << "ERROR: getName: unhandled type of ExtValPtr\n";
   std::abort();
 }
 
@@ -325,13 +325,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 }
 
 void ConstraintsGenerator::instantiateSketchAsSub(
-    ValMapKey Val, std::shared_ptr<retypd::Sketch> Sk) {
+    ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
   CGNode &Root = CG.instantiateSketch(Sk);
   addSubtype(Root.key.Base, getTypeVar(Val, nullptr));
 }
 
 void ConstraintsGenerator::instantiateSketchAsSup(
-    ValMapKey Val, std::shared_ptr<retypd::Sketch> Sk) {
+    ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
   CGNode &Root = CG.instantiateSketch(Sk);
   addSubtype(getTypeVar(Val, nullptr), Root.key.Base);
 }
@@ -440,7 +440,7 @@ bool hasUser(const Value *Val, const User *User) {
   return false;
 }
 
-unsigned int getSize(const ValMapKey &Val) {
+unsigned int getSize(const ExtValuePtr &Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return (*V)->getType()->getScalarSizeInBits();
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
@@ -456,11 +456,11 @@ unsigned int getSize(const ValMapKey &Val) {
     return IC->Val->getBitWidth();
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getSize: unhandled type of ValMapKey\n";
+               << "ERROR: getSize: unhandled type of ExtValPtr\n";
   std::abort();
 }
 
-retypd::CGNode &ConstraintsGenerator::getNode(ValMapKey Val, User *User) {
+retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     if (auto CI = dyn_cast<ConstantInt>(*V)) {
@@ -483,17 +483,17 @@ retypd::CGNode &ConstraintsGenerator::getNode(ValMapKey Val, User *User) {
 //   return CG.getOrInsertNode(Val).Link.lookupNode();
 // }
 
-// retypd::SSGNode *ConstraintsGenerator::getSSGNode(ValMapKey Val, User *User)
+// retypd::SSGNode *ConstraintsGenerator::getSSGNode(ExtValPtr Val, User *User)
 // {
 //   return getNode(Val, User).getLink().lookupNode();
 // }
 
-const TypeVariable &ConstraintsGenerator::getTypeVar(ValMapKey Val,
+const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,
                                                      User *User) {
   return getNode(Val, User).key.Base;
 }
 
-TypeVariable ConstraintsGenerator::convertTypeVar(ValMapKey Val, User *User) {
+TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertTypeVarVal(*V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
@@ -521,7 +521,7 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ValMapKey Val, User *User) {
   }
   llvm::errs()
       << __FILE__ << ":" << __LINE__ << ": "
-      << "ERROR: RetypdGenerator::convertTypeVar unhandled type of ValMapKey\n";
+      << "ERROR: RetypdGenerator::convertTypeVar unhandled type of ExtValPtr\n";
   std::abort();
 }
 
@@ -748,8 +748,9 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
   // like ptradd.
 }
 
-void ConstraintsGenerator::addCmpConstraint(const ValMapKey LHS,
-                                            const ValMapKey RHS, ICmpInst *I) {
+void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,
+                                            const ExtValuePtr RHS,
+                                            ICmpInst *I) {
   getNode(LHS, I).getPNIVar()->unifyPN(*getNode(RHS, I).getPNIVar());
 }
 
@@ -920,14 +921,14 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
 //   addSubTypeCons(getSSGNode(RHS, nullptr), getSSGNode(LHS, RHS), Offset);
 // }
 
-void ConstraintsGenerator::addAddConstraint(const ValMapKey LHS,
-                                            const ValMapKey RHS,
+void ConstraintsGenerator::addAddConstraint(const ExtValuePtr LHS,
+                                            const ExtValuePtr RHS,
                                             BinaryOperator *I) {
   PG.addAddCons(&getNode(LHS, I), &getNode(RHS, I), &getNode(I, nullptr), I);
 }
 
-void ConstraintsGenerator::addSubConstraint(const ValMapKey LHS,
-                                            const ValMapKey RHS,
+void ConstraintsGenerator::addSubConstraint(const ExtValuePtr LHS,
+                                            const ExtValuePtr RHS,
                                             BinaryOperator *I) {
   PG.addSubCons(&getNode(LHS, I), &getNode(RHS, I), &getNode(I, nullptr), I);
 }

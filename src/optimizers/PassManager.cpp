@@ -67,6 +67,7 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
       : OutFilePath(outFilePath), llvm2cOpt(llvm2cOpt) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    // Run type recovery.
     auto &HighTypes = MAM.getResult<TypeRecovery>(M);
 
     std::cerr << "Current Type definitions:\n";

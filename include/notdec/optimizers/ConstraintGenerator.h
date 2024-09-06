@@ -93,13 +93,13 @@ struct IntConstant {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
-using ValMapKey =
+using ExtValuePtr =
     std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
 
-std::string getName(const ValMapKey &Val);
+std::string getName(const ExtValuePtr &Val);
 
 struct TypeRecoveryResult {
-  std::map<ValMapKey, clang::QualType> ValueTypes;
+  std::map<ExtValuePtr, clang::QualType> ValueTypes;
   std::unique_ptr<clang::ASTUnit> ASTUnit;
 };
 
@@ -141,7 +141,7 @@ inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
 /// readable format. (TODO)
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
-  std::map<ValMapKey, retypd::CGNode *> Val2Node;
+  std::map<ExtValuePtr, retypd::CGNode *> Val2Node;
   retypd::ConstraintGraph CG;
   retypd::PNIGraph &PG;
   std::set<llvm::Function *> SCCs;
@@ -153,9 +153,9 @@ struct ConstraintsGenerator {
       GetSummary;
   size_t instantiateSummary(llvm::Function *Target);
   std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);
-  void instantiateSketchAsSub(ValMapKey Val,
+  void instantiateSketchAsSub(ExtValuePtr Val,
                               std::shared_ptr<retypd::Sketch> Sk);
-  void instantiateSketchAsSup(ValMapKey Val,
+  void instantiateSketchAsSup(ExtValuePtr Val,
                               std::shared_ptr<retypd::Sketch> Sk);
 
   void run();
@@ -168,7 +168,7 @@ struct ConstraintsGenerator {
         GetSummary(GetSummary) {}
 
 public:
-  CGNode &setTypeVar(ValMapKey Val, const TypeVariable &dtv, User *User,
+  CGNode &setTypeVar(ExtValuePtr Val, const TypeVariable &dtv, User *User,
                      unsigned int Size) {
     // Differentiate int32/int64 by User.
     if (auto V = std::get_if<llvm::Value *>(&Val)) {
@@ -217,16 +217,17 @@ public:
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
-  retypd::CGNode &getNode(ValMapKey Val, User *User);
+  retypd::CGNode &getNode(ExtValuePtr Val, User *User);
 
-  const TypeVariable &getTypeVar(ValMapKey val, User *User);
-  TypeVariable convertTypeVar(ValMapKey Val, User *User = nullptr);
+  const TypeVariable &getTypeVar(ExtValuePtr val, User *User);
+  TypeVariable convertTypeVar(ExtValuePtr Val, User *User = nullptr);
   TypeVariable convertTypeVarVal(Value *Val, User *User = nullptr);
-  void addAddConstraint(const ValMapKey LHS, const ValMapKey RHS,
+  void addAddConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
                         BinaryOperator *Result);
-  void addSubConstraint(const ValMapKey LHS, const ValMapKey RHS,
+  void addSubConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
                         BinaryOperator *Result);
-  void addCmpConstraint(const ValMapKey LHS, const ValMapKey RHS, ICmpInst *I);
+  void addCmpConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
+                        ICmpInst *I);
   // void onEraseConstraint(const retypd::ConsNode *Cons);
   // void addSubTypeCons(retypd::SSGNode *LHS, retypd::SSGNode *RHS,
   //                     OffsetRange Offset);

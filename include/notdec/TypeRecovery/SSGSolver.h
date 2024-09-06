@@ -17,7 +17,7 @@ using namespace llvm;
 
 struct SSGTypeRec : llvm::PassInfoMixin<SSGTypeRec> {
   StorageShapeGraph SSG;
-  std::map<ValMapKey, retypd::SSGLink> Val2Node;
+  std::map<ExtValPtr, retypd::SSGLink> Val2Node;
   unsigned pointer_size = 0;
 
   SSGTypeRec() : SSG([](const retypd::ConsNode *Node) {}, "") {}
@@ -25,7 +25,7 @@ struct SSGTypeRec : llvm::PassInfoMixin<SSGTypeRec> {
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
 
   SSGNode &getOrInsertNode(llvm::Value *Val, User *User = nullptr);
-  SSGNode &getOrInsertNode(ValMapKey Key, unsigned int Size,
+  SSGNode &getOrInsertNode(ExtValPtr Key, unsigned int Size,
                            User *User = nullptr);
   void setAsPtr(SSGNode &Key);
   void setAsNonPtr(SSGNode &Key);
