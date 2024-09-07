@@ -40,6 +40,10 @@ public:
   static const char *NewPrefix;
   static const char *AddPrefix;
   static const char *SubPrefix;
+  static const char *StackPrefix;
+  static const char *AllocaPrefix;
+  static const char *LoadPrefix;
+  static const char *StorePrefix;
 };
 } // namespace notdec
 #endif

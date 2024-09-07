@@ -71,7 +71,7 @@ struct OffsetRange {
     for (auto &a : access) {
       s += "+" + std::to_string(a.Size) + "i";
       if (a.Count != -1) {
-        s += "[" + std::to_string(a.Count);
+        s += "[" + std::to_string(a.Count) + "]";
       }
     }
     return s;

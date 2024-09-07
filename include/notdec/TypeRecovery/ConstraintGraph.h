@@ -199,6 +199,9 @@ protected:
   }
   bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
+      if (std::holds_alternative<One>(Label)) {
+        return false;
+      }
       std::cerr << "Warning: Non-null self edge: " << toString(From.key)
                 << " To " << toString(To.key) << " Label: " << toString(Label)
                 << "\n";
@@ -225,7 +228,8 @@ protected:
   void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
   friend struct CGNode;
   template <typename GraphTy, typename NodeTy> friend struct NFADeterminizer;
-  void replaceNodeKey(CGNode &Node, const NodeKey &Key);
+  void replaceNodeKey(const TypeVariable &Old, const TypeVariable &New);
+  void replaceNodeKeyImpl(const CGNode &Node, const NodeKey &Key);
   // void addLeftRecalls(const TypeVariable &sub);
   // void addRightForgets(const TypeVariable &sup);
 

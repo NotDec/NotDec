@@ -57,6 +57,10 @@ llvm::iplist<SketchNode>::iterator SketchNode::eraseFromParent() {
 void SketchNode::join(std::map<const SketchNode *, SketchNode *> &Old2New,
                       const SketchNode &Other) {
   assert(V == Covariant);
+  if (Old2New.count(&Other)) {
+    // already merged
+    return;
+  }
   Element = notdec::retypd::join(Element, Other.Element);
   std::map<FieldLabel, const SketchNode *> OtherLabels = buildLabelMap(Other);
   std::vector<std::tuple<SketchNode *, SketchNode *, FieldLabel>> toRemove;
@@ -103,6 +107,10 @@ void SketchNode::join(std::map<const SketchNode *, SketchNode *> &Old2New,
 void SketchNode::meet(std::map<const SketchNode *, SketchNode *> &Old2New,
                       const SketchNode &Other) {
   assert(V == Contravariant);
+  if (Old2New.count(&Other)) {
+    // already merged
+    return;
+  }
   Element = notdec::retypd::meet(Element, Other.Element);
   std::map<FieldLabel, const SketchNode *> OtherLabels = buildLabelMap(Other);
   std::map<FieldLabel, SketchNode *> ThisLabels = buildLabelMap(*this);

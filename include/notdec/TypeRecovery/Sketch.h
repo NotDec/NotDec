@@ -194,7 +194,7 @@ template <> struct DOTGraphTraits<Sketch *> : public DefaultDOTGraphTraits {
   DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
   static std::string getGraphName(GraphRef CG) { return CG->Name; }
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
-    return Node->getElement();
+    return Node->getElement() + notdec::retypd::toString(Node->V);
   }
 
   std::string getEdgeAttributes(const NodeRef Node,

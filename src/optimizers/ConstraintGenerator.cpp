@@ -55,6 +55,10 @@ const char *ValueNamer::SelectPrefix = "select_";
 const char *ValueNamer::NewPrefix = "new_";
 const char *ValueNamer::AddPrefix = "add_";
 const char *ValueNamer::SubPrefix = "sub_";
+const char *ValueNamer::StackPrefix = "stack_";
+const char *ValueNamer::AllocaPrefix = "alloca_";
+const char *ValueNamer::LoadPrefix = "load_";
+const char *ValueNamer::StorePrefix = "store_";
 
 std::string getName(const ExtValuePtr &Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
@@ -88,7 +92,8 @@ inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
-  LLVM_DEBUG(printModule(M, "before-TypeRecovery.ll"));
+  // LLVM_DEBUG(printModule(M, "before-TypeRecovery.ll"));
+  printModule(M, "before-TypeRecovery.ll");
 
   auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
   this->StackPointer = SP.result;
@@ -154,12 +159,17 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::get<2>(AllSCCs.back()) = Name;
   }
 
+  std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
+
   TypeRecovery::Result Result;
   retypd::SketchToCTypeBuilder TB(M.getName());
 
   // Top-down Phase: build the result(Map from value to clang C type)
   for (auto It = AllSCCs.rbegin(); It != AllSCCs.rend(); ++It) {
     const std::vector<CallGraphNode *> &NodeVec = std::get<0>(*It);
+    if (std::get<1>(*It) == nullptr) {
+      continue;
+    }
     auto &Generator = std::get<1>(*It);
     auto &Name = std::get<2>(*It);
 
@@ -229,6 +239,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           continue;
         }
         auto TargetName = getFuncTvName(Target);
+        llvm::errs() << "Solving Call in SCC: " << *I << "\n";
 
         // get Or emplace new
         auto &TargetSketches = FuncSketches[Target];
@@ -291,7 +302,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             *Sk, Current->getReturnType()->getPrimitiveSizeInBits());
         llvm::errs() << "Return Value of Func: " << Current->getName()
                      << " has type: " << CTy.getAsString() << "\n";
-        Result.ValueTypes.emplace(ReturnValue{.Func = Current}, CTy);
+        Result.FuncRetTypes.emplace(Current, CTy);
       }
       if (!Current->isDeclaration()) {
         // find all alloca in entry block and convert.
@@ -475,7 +486,7 @@ retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
   if (Val2Node.count(Val)) {
     return *Val2Node.at(Val);
   }
-  auto ret = convertTypeVar(Val);
+  auto ret = convertTypeVar(Val, User);
   return setTypeVar(Val, ret, User, getSize(Val));
 }
 
@@ -515,6 +526,7 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
     tv.getLabels().push_back(retypd::OutLabel{});
     return tv;
   } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+    assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     auto ret = TypeVariable::CreateIntConstant(
         OffsetRange{.offset = IC->Val->getSExtValue()}, User);
     return ret;
@@ -542,8 +554,11 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
       if (gv == Ctx.StackPointer) {
-        assert(false && "convertTypeVarVal: direct use of stack pointer?, run "
-                        "StackAllocationRecovery first");
+        std::cerr
+            << "Error: convertTypeVarVal: direct use of stack pointer?, ensure "
+               "StackAllocationRecovery is run before, Or add external summary "
+               "for this function.\n";
+        return makeTv(ValueNamer::getName());
       } else if (auto Func = dyn_cast<Function>(C)) {
         // Consistent with Call handling
         return makeTv(getFuncTvName(Func));
@@ -568,6 +583,30 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
     tv.getLabels().push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
   }
+
+  // Use different suffix for different type of value.
+  if (auto *Sel = dyn_cast<SelectInst>(Val)) {
+    return makeTv(ValueNamer::getName(*Sel, ValueNamer::SelectPrefix, true));
+  } else if (auto *Alloca = dyn_cast<AllocaInst>(Val)) {
+    const char *prefix = ValueNamer::AllocaPrefix;
+    if (Alloca->getParent()->isEntryBlock()) {
+      prefix = ValueNamer::StackPrefix;
+    }
+    return makeTv(ValueNamer::getName(*Alloca, prefix, true));
+  } else if (auto Phi = dyn_cast<PHINode>(Val)) {
+    return makeTv(ValueNamer::getName(*Phi, ValueNamer::PhiPrefix, true));
+  } else if (auto *I = dyn_cast<Instruction>(Val)) {
+    return makeTv(ValueNamer::getName(*I, ValueNamer::NewPrefix, true));
+  } else if (auto *Load = dyn_cast<LoadInst>(Val)) {
+    return makeTv(ValueNamer::getName(*Load, ValueNamer::LoadPrefix, true));
+  } else if (auto *Store = dyn_cast<StoreInst>(Val)) {
+    return makeTv(ValueNamer::getName(*Store, ValueNamer::StorePrefix, true));
+  } else if (auto *Add = dyn_cast<BinaryOperator>(Val)) {
+    return makeTv(ValueNamer::getName(*Add, ValueNamer::AddPrefix, true));
+  } else if (auto *Sub = dyn_cast<BinaryOperator>(Val)) {
+    return makeTv(ValueNamer::getName(*Sub, ValueNamer::SubPrefix, true));
+  }
+
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val
                << "\n";
@@ -623,10 +662,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
       cg.addSubtype(ValVar, ArgVar);
     }
     if (!I.getType()->isVoidTy()) {
-      // for return value
-      auto DstVar = cg.getTypeVar(ReturnValue{.Func = Target}, &I);
-      cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
-      // TODO: create a top-level type var for this return value instance?
+      // type var should be consistent with return instruction
+      auto FormalRetVar = cg.getTypeVar(ReturnValue{.Func = Target}, &I);
+      auto ValVar = cg.getTypeVar(&I, nullptr);
+      // formal return -> actual return
+      cg.addSubtype(FormalRetVar, ValVar);
     }
   } else {
     size_t InstanceId;
@@ -646,48 +686,35 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     }
     if (!I.getType()->isVoidTy()) {
       // for return value
-      auto DstVar = getCallRetTV(Target, InstanceId);
-      cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
+      auto FormalRetVar = getCallRetTV(Target, InstanceId);
+      auto ValVar = cg.getTypeVar(&I, nullptr);
+      // formal return -> actual return
+      cg.addSubtype(FormalRetVar, ValVar);
     }
   }
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
     SelectInst &I) {
-  auto DstVar = makeTv(ValueNamer::getName(I, ValueNamer::SelectPrefix, true));
+  auto DstVar = cg.getTypeVar(&I, nullptr);
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
   auto Src1Var = cg.getTypeVar(Src1, &I);
   auto Src2Var = cg.getTypeVar(Src2, &I);
   // Not generate boolean constraints. Because it must be i1.
-  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
   cg.addSubtype(Src1Var, DstVar);
   cg.addSubtype(Src2Var, DstVar);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
     AllocaInst &I) {
-  const char *prefix = "alloca_";
-  if (I.getParent()->isEntryBlock()) {
-    prefix = "stack_";
-  }
-  auto DstVar = makeTv(ValueNamer::getName(I, prefix, true));
-  auto &Node =
-      cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
+  auto &Node = cg.getNode(&I, nullptr);
   // set as pointer type
   cg.setPointer(Node);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
-  // Create a stub variable, defer constraints generation (and unification) to
-  // handlePHINodes Because it goes across the basic block boundary. Operands
-  // may be not found using getTypeVar.
-
-  // Only Phi can create inter-block dataflow besides direct reference (valid if
-  // we follow a topological sort of basic blocks)
-
-  auto DstVar = makeTv(ValueNamer::getName(I, ValueNamer::PhiPrefix, true));
-  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
+  // Defer constraints generation (and unification) to handlePHINodes
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::handlePHINodes() {
@@ -707,33 +734,46 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
     // ignore cast, propagate the type of the operand.
     auto *Src = I.getOperand(0);
     auto SrcVar = cg.getTypeVar(Src, &I);
-    cg.newVarSubtype(&I, SrcVar);
+    cg.addVarSubtype(&I, SrcVar);
     return;
   } else if (isa<PtrToIntInst, IntToPtrInst, BitCastInst>(I)) {
     // ignore cast, view as assignment.
     auto *Src = I.getOperand(0);
     auto SrcVar = cg.getTypeVar(Src, &I);
-    /*auto &Node = */ cg.newVarSubtype(&I, SrcVar);
+    /*auto &Node = */ cg.addVarSubtype(&I, SrcVar);
     // cg.setPointer(Node);
     return;
   } else if (isa<TruncInst, ZExtInst>(&I)) {
     auto *Src = I.getOperand(0);
     if (is32Or64Int(I.getSrcTy()) && is32Or64Int(I.getDestTy())) {
       auto SrcVar = cg.getTypeVar(Src, &I);
-      cg.newVarSubtype(&I, SrcVar);
-      return;
+      cg.addVarSubtype(&I, SrcVar);
     } else {
       if (isa<ZExtInst>(&I)) {
-        cg.newVarSubtype(&I, TypeVariable::CreatePrimitive("uint"));
+        cg.addVarSubtype(&I, TypeVariable::CreatePrimitive("uint"));
         cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
                       TypeVariable::CreatePrimitive("uint"));
       } else {
-        cg.newVarSubtype(&I, getLLVMTypeVar(I.getType()));
+        cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
         cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
                       getLLVMTypeVar(I.getOperand(0)->getType()));
       }
     }
+    return;
+  } else if (isa<SExtInst>(&I)) {
+    auto *Src = I.getOperand(0);
+    auto &SrcVar = cg.getTypeVar(Src, &I);
+    cg.addSubtype(SrcVar, TypeVariable::CreatePrimitive("sint"));
+    cg.addVarSubtype(&I, TypeVariable::CreatePrimitive("sint"));
+    cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
+                  TypeVariable::CreatePrimitive("sint"));
+    return;
+  } else if (isa<FPToUIInst, FPToSIInst, UIToFPInst, SIToFPInst, FPTruncInst,
+                 FPExtInst>(&I)) {
+    visitInstruction(I);
+    return;
   }
+
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "ERROR: RetypdGenerator::getTypeVar unhandled CastInst: " << I
                << "\n";
@@ -742,7 +782,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
     GetElementPtrInst &Gep) {
-  assert(false && "Gep should not exist before this pass");
+  std::cerr << "Warning: RetypdGeneratorVisitor::visitGetElementPtrInst: "
+               "Gep should not exist before this pass!\n";
   // But if we really want to support this, handle it the same way as AddInst.
   // A shortcut to create a offseted pointer. the operate type must be i8*. Just
   // like ptradd.
@@ -764,7 +805,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitICmpInst(ICmpInst &I) {
 
   // type the inst as bool
   assert(I.getType()->isIntegerTy(1));
-  cg.newVarSubtype(&I, getLLVMTypeVar(I.getType()));
+  cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
 }
 
 // #region LoadStore
@@ -797,10 +838,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   auto LoadedVar =
       cg.deref(I.getPointerOperand(), &I,
                cg.getPointerElemSize(I.getPointerOperandType()), true);
-  auto &Node =
-      cg.setTypeVar(&I, LoadedVar, nullptr, I.getType()->getScalarSizeInBits());
+  auto ValVar = cg.getNode(&I, nullptr);
+  // formal load -> actual load
+  cg.addSubtype(LoadedVar, ValVar.key.Base);
   if (mustBePrimitive(I.getType())) {
-    cg.addSubtype(Node.key.Base, getLLVMTypeVar(I.getType()));
+    cg.addSubtype(ValVar.key.Base, getLLVMTypeVar(I.getType()));
   }
 }
 
@@ -829,18 +871,17 @@ void ConstraintsGenerator::addOffset(TypeVariable &dtv, OffsetRange Offset) {
 }
 
 // Special logics for load and store when generating type variables.
-TypeVariable ConstraintsGenerator::deref(Value *Val, User *User, long BitSize,
-                                         bool isLoadOrStore) {
+TypeVariable ConstraintsGenerator::deref(Value *Val, User *User,
+                                         unsigned BitSize, bool isLoadOrStore) {
   setPointer(getNode(Val, User));
   assert(BitSize != 0 && "RetypdGenerator::deref: zero size!?");
   // from the offset, generate a loaded type variable.
   auto DstVar = getTypeVar(Val, User);
   assert(BitSize % 8 == 0 && "size is not byte aligned!?");
-  uint32_t Size = BitSize = BitSize / 8;
   if (isLoadOrStore) {
-    DstVar.getLabels().push_back(retypd::LoadLabel{.Size = Size});
+    DstVar.getLabels().push_back(retypd::LoadLabel{.Size = BitSize});
   } else {
-    DstVar.getLabels().push_back(retypd::StoreLabel{.Size = Size});
+    DstVar.getLabels().push_back(retypd::StoreLabel{.Size = BitSize});
   }
   return DstVar;
 }
@@ -885,7 +926,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
   if (I.getType()->isVoidTy()) {
     // skip void type
   } else if (mustBePrimitive(I.getType())) {
-    cg.newVarSubtype(&I, getLLVMTypeVar(I.getType()));
+    cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
   } else if (opTypes.count(I.getOpcode()) &&
              opTypes.at(I.getOpcode()).addRetConstraint(&I, cg)) {
     // good
@@ -937,18 +978,12 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
 
-  auto DstVar = makeTv(ValueNamer::getName(I, ValueNamer::AddPrefix, true));
-  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
-
   cg.addAddConstraint(Src1, Src2, &I);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSub(BinaryOperator &I) {
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
-
-  auto DstVar = makeTv(ValueNamer::getName(I, ValueNamer::SubPrefix, true));
-  cg.setTypeVar(&I, DstVar, nullptr, I.getType()->getScalarSizeInBits());
 
   cg.addSubConstraint(Src1, Src2, &I);
 }
@@ -963,7 +998,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {
     // at least most of the bits are passed, View as pointer alignment.
     if ((CI->getZExtValue() & 0x3fffff00) == 0x3fffff00) {
       // act as simple assignment
-      cg.newVarSubtype(&I, cg.getTypeVar(Src1, &I));
+      cg.addVarSubtype(&I, cg.getTypeVar(Src1, &I));
       return;
     }
   } else {
@@ -972,7 +1007,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {
     cg.addSubtype(cg.getTypeVar(Src2, &I), getLLVMTypeVar(Src2->getType()));
   }
   // view as numeric operation?
-  cg.newVarSubtype(&I, getLLVMTypeVar(I.getType()));
+  cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
   cg.addSubtype(cg.getTypeVar(Src1, &I), getLLVMTypeVar(Src1->getType()));
   return;
 }
@@ -987,7 +1022,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) {
     // at least most of the bits are passed, View as pointer alignment.
     if ((CI->getZExtValue() & 0x3fffff00) == 0) {
       // act as simple assignment
-      cg.newVarSubtype(&I, cg.getTypeVar(Src1, &I));
+      cg.addVarSubtype(&I, cg.getTypeVar(Src1, &I));
       return;
     }
   } else {
@@ -996,7 +1031,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) {
     cg.addSubtype(cg.getTypeVar(Src2, &I), getLLVMTypeVar(Src2->getType()));
   }
   // view as numeric operation?
-  cg.newVarSubtype(&I, getLLVMTypeVar(I.getType()));
+  cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
   cg.addSubtype(cg.getTypeVar(Src1, &I), getLLVMTypeVar(Src1->getType()));
   return;
 }
@@ -1010,8 +1045,7 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   if (ty == nullptr) {
     return false;
   }
-  cg.setTypeVar(I, TypeVariable::CreatePrimitive(ty), nullptr,
-                I->getType()->getScalarSizeInBits());
+  cg.addVarSubtype(I, TypeVariable::CreatePrimitive(ty));
   return true;
 }
 

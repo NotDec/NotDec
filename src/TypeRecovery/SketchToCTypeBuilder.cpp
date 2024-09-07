@@ -3,6 +3,7 @@
 
 namespace notdec::retypd {
 
+// TODO a better lattice representation
 clang::QualType fromLatticeElem(clang::ASTContext &Ctx, std::string Name,
                                 unsigned BitSize) {
   if (Name == "top") {
@@ -85,10 +86,22 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const SketchNode &Node,
         assert(It.second && "Duplicate offset edge");
       }
     } else if (auto *LL = std::get_if<LoadLabel>(&Edge.getLabel())) {
-      assert(!Load2Node);
+      // assert(!Load2Node);
+      if (Load2Node) {
+        llvm::errs()
+            << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
+            << toString(Edge.getLabel()) << " and "
+            << toString(Load2Node->first) << "\n";
+      }
       Load2Node.emplace(*LL, &Target);
     } else if (auto *SL = std::get_if<StoreLabel>(&Edge.getLabel())) {
-      assert(!Store2Node);
+      if (Store2Node) {
+        // TODO: create union?
+        llvm::errs()
+            << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
+            << toString(Edge.getLabel()) << " and "
+            << toString(Store2Node->first) << "\n";
+      }
       Store2Node.emplace(*SL, &Target);
     } else {
       assert(false && "Unknown edge type");
@@ -98,13 +111,13 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const SketchNode &Node,
   // handle load/store edges
   clang::QualType LoadOrStoreTy;
   if (Load2Node && !Store2Node) {
-    assert(Node.V == Covariant);
+    // assert(Node.V == Covariant);
     LoadOrStoreTy = visitType(*Load2Node->second, Load2Node->first.Size);
   } else if (!Load2Node && Store2Node) {
-    assert(Node.V == Contravariant);
+    // assert(Node.V == Contravariant);
     LoadOrStoreTy = visitType(*Store2Node->second, Store2Node->first.Size);
   } else if (Load2Node && Store2Node) {
-    assert(false && "Is this case really exist?");
+    // assert(false && "Is this case really exist?");
     // both load and store present, prefer load when covariant,
     if (Node.V == Covariant) {
       LoadOrStoreTy = visitType(*Load2Node->second, Load2Node->first.Size);

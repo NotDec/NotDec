@@ -33,6 +33,10 @@
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
 
+#ifdef NOTDEC_ENABLE_LLVM2C
+#include "notdec-llvm2c/Interface.h"
+#endif
+
 namespace notdec {
 
 using namespace llvm;
@@ -93,15 +97,12 @@ struct IntConstant {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
+
+// Extend Value* with some special values.
 using ExtValuePtr =
     std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
 
 std::string getName(const ExtValuePtr &Val);
-
-struct TypeRecoveryResult {
-  std::map<ExtValuePtr, clang::QualType> ValueTypes;
-  std::unique_ptr<clang::ASTUnit> ASTUnit;
-};
 
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Provide a unique key, i.e., memory address to be used by the LLVM's pass
@@ -110,7 +111,7 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   friend llvm::AnalysisInfoMixin<TypeRecovery>;
 
   // Specify the result type of this analysis pass.
-  using Result = TypeRecoveryResult;
+  using Result = ::notdec::llvm2c::HighTypes;
 
   llvm::Value *StackPointer;
   std::string data_layout;
@@ -174,11 +175,7 @@ public:
     if (auto V = std::get_if<llvm::Value *>(&Val)) {
       if (auto CI = dyn_cast<ConstantInt>(*V)) {
         if (CI->getBitWidth() == 32 || CI->getBitWidth() == 64) {
-          assert(User != nullptr &&
-                 "RetypdGenerator::getTypeVar: User is Null!");
-          assert(hasUser(*V, User) &&
-                 "convertTypeVarVal: constant not used by user");
-          Val = IntConstant{.Val = cast<ConstantInt>(*V), .User = User};
+          assert(false && "Should already be converted to IntConstant");
         }
       }
     }
@@ -187,29 +184,25 @@ public:
       llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                    << "setTypeVar: Value already mapped to "
                    << toString(ref.first->second->key.Base)
-                   << ", but now set to" << toString(dtv) << "\n";
+                   << ", but now set to " << toString(dtv) << "\n";
       std::abort();
     }
     return *ref.first->second;
   }
-  CGNode &newVarSubtype(llvm::Value *Val, const TypeVariable &dtv,
-                        const char *prefix = ValueNamer::DefaultPrefix) {
-    assert(Val2Node.find(Val) == Val2Node.end() &&
-           "newVarSubtype: Value already mapped!");
-    auto Size = Val->getType()->getScalarSizeInBits();
-    if (dtv.isPrimitive() && isFinal(dtv.getPrimitiveName())) {
-      return setTypeVar(Val, dtv, nullptr, Size);
-    }
-    auto &Node = setTypeVar(
-        Val, TypeVariable::CreateDtv(ValueNamer::getName(*Val, prefix)),
-        nullptr, Size);
+  CGNode &addVarSubtype(llvm::Value *Val, const TypeVariable &dtv) {
+    auto &Node = getNode(Val, nullptr);
     addSubtype(dtv, Node.key.Base);
     return Node;
   }
   void addSubtype(const TypeVariable &sub, const TypeVariable &sup) {
     if (sub.isPrimitive() && sup.isPrimitive()) {
-      assert(sub.getPrimitiveName() == sup.getPrimitiveName() &&
-             "addConstraint: different primitive types !?");
+      // TODO check if this is correct
+      if (sub.getPrimitiveName() != sup.getPrimitiveName()) {
+        std::cerr << "addSubtype: relation between primitive types: "
+                  << toString(sub) << " <= " << toString(sup) << "\n";
+        // assert(sub.getPrimitiveName() == sup.getPrimitiveName() &&
+        //        "addConstraint: different primitive types !?");
+      }
       return;
     }
     CG.addConstraint(sub, sup);
@@ -235,7 +228,7 @@ public:
   //                     OffsetRange Offset);
 
   void addOffset(TypeVariable &dtv, OffsetRange Offset);
-  TypeVariable deref(Value *Val, User *User, long BitSize, bool isLoad);
+  TypeVariable deref(Value *Val, User *User, unsigned BitSize, bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {
     return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,

@@ -4,13 +4,13 @@
 #include <iostream>
 #include <llvm/IR/PassManager.h>
 #include <llvm/Support/Debug.h>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "llvm/Transforms/Scalar/IndVarSimplify.h"
-#include "llvm/Transforms/Scalar/LoopRotation.h"
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -29,7 +29,9 @@
 #include <llvm/Transforms/Scalar/BDCE.h>
 #include <llvm/Transforms/Scalar/DCE.h>
 #include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Scalar/IndVarSimplify.h>
 #include <llvm/Transforms/Scalar/InstSimplifyPass.h>
+#include <llvm/Transforms/Scalar/LoopRotation.h>
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
 #include <llvm/Transforms/Scalar/SCCP.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
@@ -57,14 +59,56 @@ using notdec::frontend::wasm::MEM_NAME;
 
 using namespace llvm;
 
+// A Pass that undo some optimizations of the InstCombinePass.
+struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
+    auto &AC = AM.getResult<AssumptionAnalysis>(F);
+    auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
+    const DataLayout &DL = F.getParent()->getDataLayout();
+    llvm::IRBuilder<> Builder(F.getParent()->getContext());
+    std::vector<Instruction *> toRemove;
+
+    for (BasicBlock &BB : F) {
+      for (Instruction &I : BB) {
+        // A+B --> A|B iff A and B have no bits set in common.
+        if (BinaryOperator *BO = dyn_cast<BinaryOperator>(&I)) {
+          if (BO->getOpcode() == Instruction::Or) {
+            Value *LHS = BO->getOperand(0);
+            Value *RHS = BO->getOperand(1);
+            if (llvm::haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT)) {
+              // https://github.com/llvm/llvm-project/blob/e188aae406f3fecaed65a1f7e6562205f0de937e/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp#L4095
+              Builder.SetInsertPoint(BO);
+              Instruction *Result =
+                  llvm::cast<Instruction>(Builder.CreateAdd(LHS, RHS));
+              Result->copyMetadata(
+                  I, {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
+              BO->replaceAllUsesWith(Result);
+              Result->takeName(BO);
+              toRemove.push_back(BO);
+            }
+          }
+        }
+      }
+    }
+
+    for (Instruction *V : toRemove) {
+      V->eraseFromParent();
+    }
+
+    return PreservedAnalyses::all();
+  }
+
+  static bool isRequired() { return true; }
+};
+
 // A Pass that convert module to C.
 struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
 
   std::string OutFilePath;
   ::notdec::llvm2c::Options llvm2cOpt;
 
-  NotdecLLVM2C(std::string outFilePath, ::notdec::llvm2c::Options llvm2cOpt)
-      : OutFilePath(outFilePath), llvm2cOpt(llvm2cOpt) {}
+  NotdecLLVM2C(std::string outFilePath, ::notdec::llvm2c::Options &llvm2cOpt)
+      : OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
     // Run type recovery.
@@ -72,7 +116,7 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
 
     std::cerr << "Current Type definitions:\n";
     HighTypes.ASTUnit->getASTContext().getTranslationUnitDecl()->print(
-        llvm::errs());
+        llvm::errs(), 2);
 
     std::string outsuffix = getSuffix(OutFilePath);
     if (outsuffix == ".ll") {
@@ -103,7 +147,9 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
         std::cerr << EC.message() << std::endl;
         std::abort();
       }
-      notdec::llvm2c::decompileModule(M, os, llvm2cOpt);
+      notdec::llvm2c::decompileModule(
+          M, os, llvm2cOpt,
+          std::make_unique<TypeRecovery::Result>(std::move(HighTypes)));
       std::cout << "Decompile result: " << OutFilePath << std::endl;
     }
 
@@ -361,6 +407,7 @@ void DecompileConfig::run_passes() {
       //     llvm::isCurrentDebugType("pointer-type-recovery")));
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(
           createFunctionToLoopPassAdaptor(LoopRotatePass())));

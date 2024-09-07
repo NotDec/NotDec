@@ -68,7 +68,20 @@ CGNode &ConstraintGraph::instantiateSketch(std::shared_ptr<retypd::Sketch> Sk) {
   return *NodeMap.at(Sk->getRoot());
 }
 
-void ConstraintGraph::replaceNodeKey(CGNode &Node, const NodeKey &Key) {
+void ConstraintGraph::replaceNodeKey(const TypeVariable &Old,
+                                     const TypeVariable &New) {
+  const CGNode &OldNode = Nodes.at(Old);
+  replaceNodeKeyImpl(OldNode, New);
+
+  // handle contra-variant nodes
+  if (Nodes.count({Old, Contravariant})) {
+    const CGNode &OldNode1 = Nodes.at({Old, Contravariant});
+    replaceNodeKeyImpl(OldNode1, {New, Contravariant});
+  }
+}
+
+void ConstraintGraph::replaceNodeKeyImpl(const CGNode &Node,
+                                         const NodeKey &Key) {
   // auto &TV1 = const_cast<TypeVariable &>(TV);
   // assert(Node.key.Base.isIntConstant());
   // assert(TV.getBase() == getMemoryNode()->key.Base.getBase());
@@ -87,20 +100,15 @@ void CGNode::onUpdatePNType() {
     if (getPNIVar()->isPointer()) {
       // convert to offset of memory
       auto TV = Parent.getMemoryNode()->key.Base;
-      TV.getLabels().push_back(OffsetLabel{key.Base.getIntConstant()});
-      // // add subtype of memory
-      // Parent.addConstraint(TV, this->key.Base);
-
-      // replace the node key, recursive
-      // should only exist at the left side of rules.
-      NodeKey NewKey = key;
-      NewKey.Base = TV;
-      Parent.replaceNodeKey(*this, NewKey);
-      // fix related edges.
-      Parent.addConstraint(TV, TV);
-      // maintain the reaching push set
-      assert(false && "TODO");
-      // do the same for contra-variant node..? is it exist?
+      auto Label = OffsetLabel{key.Base.getIntConstant()};
+      TV.getLabels().push_back(Label);
+      std::string name =
+          "intptr_" + key.Base.getIntConstant().str().substr(1) + '_';
+      TypeVariable NewTV =
+          TypeVariable::CreateDtv(ValueNamer::getName(name.c_str()));
+      Parent.replaceNodeKey(this->key.Base, NewTV);
+      // add subtype of memory
+      Parent.addConstraint(TV, this->key.Base);
     } else if (getPNIVar()->isNonPtr()) {
       // do nothing in case of conflict
       // view as int later lazily.
@@ -230,8 +238,9 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
     if (N->key.Base.isPrimitive() ||
         (N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "Adding an edge from #Start to " << N->key.str() << "\n");
+      // LLVM_DEBUG(llvm::dbgs()
+      //            << "Adding an edge from #Start to " << N->key.str() <<
+      //            "\n");
       addEdge(
           *getStartNode(), *N,
           RecallBase{.base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
@@ -247,8 +256,8 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
     if (N->key.Base.isPrimitive() ||
         (N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
-      LLVM_DEBUG(llvm::dbgs()
-                 << "Adding an edge from " << N->key.str() << " to #End\n");
+      // LLVM_DEBUG(llvm::dbgs()
+      //            << "Adding an edge from " << N->key.str() << " to #End\n");
       addEdge(
           *N, *getEndNode(),
           ForgetBase{.base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
@@ -628,10 +637,11 @@ void ConstraintGraph::layerSplit() {
   // deferred Edge modification
   for (auto &Ent : toChange) {
     auto [Source, Target, NewDst, Label] = Ent;
-    LLVM_DEBUG(llvm::dbgs()
-               << "layerSplit: Retarget Edge from " << toString(Source->key)
-               << " to " << toString(Target->key) << " with " << toString(Label)
-               << " to " << toString(NewDst->key) << "\n");
+    // LLVM_DEBUG(llvm::dbgs()
+    //            << "layerSplit: Retarget Edge from " << toString(Source->key)
+    //            << " to " << toString(Target->key) << " with " <<
+    //            toString(Label)
+    //            << " to " << toString(NewDst->key) << "\n");
     removeEdge(*Source, *Target, Label);
     addEdge(*Source, *NewDst, Label);
   }
@@ -715,9 +725,22 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
   // 5. solve the sketch
   auto G2 = G.simplify();
   // G2.printGraph("before-sketch.dot");
+
+  G2.markVariance();
   auto Sk = Sketch::fromConstraintGraph(G2, Name + "-" + N.key.str());
   // Sk->printGraph("sketch.dot");
   return Sk;
+}
+
+// utility function for debugging
+[[nodiscard]] std::string
+toString(const std::set<std::pair<FieldLabel, CGNode *>> &S) {
+  std::string ret = "{";
+  for (auto &Ent : S) {
+    ret += "(" + toString(Ent.first) + ", " + Ent.second->key.str() + "), ";
+  }
+  ret += "}";
+  return ret;
 }
 
 /// Algorithm D.2 Saturation algorithm
@@ -794,14 +817,14 @@ void ConstraintGraph::saturate() {
         for (auto &Reach : Ent.second) {
           std::optional<FieldLabel> Label;
           if (std::holds_alternative<StoreLabel>(Reach.first)) {
-            LLVM_DEBUG(llvm::dbgs()
-                       << "node " << Reach.second->key.str() << " can reach "
-                       << Ent.first->key.str() << " with \".store\" \n");
+            // LLVM_DEBUG(llvm::dbgs()
+            //            << "node " << Reach.second->key.str() << " can reach "
+            //            << Ent.first->key.str() << " with \".store\" \n");
             Label = LoadLabel{.Size = std::get<StoreLabel>(Reach.first).Size};
           } else if (std::holds_alternative<LoadLabel>(Reach.first)) {
-            LLVM_DEBUG(llvm::dbgs()
-                       << "node " << Reach.second->key.str() << " can reach "
-                       << Ent.first->key.str() << " with \".load\" \n");
+            // LLVM_DEBUG(llvm::dbgs()
+            //            << "node " << Reach.second->key.str() << " can reach "
+            //            << Ent.first->key.str() << " with \".load\" \n");
             Label = StoreLabel{.Size = std::get<LoadLabel>(Reach.first).Size};
           } else {
             continue;

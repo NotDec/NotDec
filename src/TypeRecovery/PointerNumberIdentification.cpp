@@ -2,6 +2,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "optimizers/ConstraintGenerator.h"
 #include <cassert>
+#include <llvm/IR/InstrTypes.h>
 
 namespace notdec::retypd {
 
@@ -15,7 +16,14 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
   // unknown value = 1*x
   if (!isa<llvm::BinaryOperator>(I)) {
     return OffsetRange{.offset = 0, .access = {{1, 0}}};
+  } else {
+    auto Opcode = cast<BinaryOperator>(I)->getOpcode();
+    if (Opcode != Instruction::Add && Opcode != Instruction::Mul &&
+        Opcode != Instruction::Shl) {
+      return OffsetRange{.offset = 0, .access = {{1, 0}}};
+    }
   }
+  // is Add, Mul, Shl
   auto *BinOp = cast<llvm::BinaryOperator>(I);
   auto *Src1 = BinOp->getOperand(0);
   auto *Src2 = BinOp->getOperand(1);
@@ -311,7 +319,7 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
         auto *Merged = Left->unifyPN(*Right);
         assert(Merged != nullptr);
         Changed.push_back(Merged);
-      } else if (Result->isPointer()) {
+      } else if (Left->isPointer()) {
         // 2. Pointer - Unknown = Unknown
         // degrade to Result != Right constraint? Not very useful
       } else {
