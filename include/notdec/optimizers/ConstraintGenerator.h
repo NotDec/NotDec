@@ -30,6 +30,7 @@
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
+#include "TypeRecovery/TRContext.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
 
@@ -41,6 +42,7 @@ namespace notdec {
 
 using namespace llvm;
 using retypd::DerivedTypeVariable;
+using retypd::TRContext;
 using retypd::TypeVariable;
 
 bool hasUser(const Value *Val, const User *User);
@@ -113,6 +115,9 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Specify the result type of this analysis pass.
   using Result = ::notdec::llvm2c::HighTypes;
 
+  TypeRecovery(TRContext &TRCtx) : TRCtx(TRCtx) {}
+
+  TRContext &TRCtx;
   llvm::Value *StackPointer;
   std::string data_layout;
   // Map from SCC to initial constraint graph.
@@ -131,11 +136,6 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
 public:
   void print(Module &M, std::string path);
 };
-
-inline retypd::SubTypeConstraint makeCons(const TypeVariable &sub,
-                                          const TypeVariable &sup) {
-  return retypd::SubTypeConstraint{sub, sup};
-}
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
 /// The ConstraintGraph/StorageShapeGraph is expected to be able to print to a
@@ -165,7 +165,7 @@ struct ConstraintsGenerator {
       std::function<
           const std::vector<retypd::SubTypeConstraint> *(llvm::Function *)>
           GetSummary)
-      : Ctx(Ctx), CG(this, Name, false), PG(*CG.PG), SCCs(SCCs),
+      : Ctx(Ctx), CG(Ctx.TRCtx, Name, false), PG(*CG.PG), SCCs(SCCs),
         GetSummary(GetSummary) {}
 
 public:
@@ -227,7 +227,7 @@ public:
   // void addSubTypeCons(llvm::Value *LHS, llvm::BinaryOperator *RHS,
   //                     OffsetRange Offset);
 
-  void addOffset(TypeVariable &dtv, OffsetRange Offset);
+  TypeVariable addOffset(TypeVariable &dtv, OffsetRange Offset);
   TypeVariable deref(Value *Val, User *User, unsigned BitSize, bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {
@@ -316,20 +316,18 @@ std::string inline getFuncTvName(llvm::Function *Func) {
   return ValueNamer::getName(*Func, ValueNamer::FuncPrefix);
 }
 
-TypeVariable inline getCallArgTV(llvm::Function *Target, size_t InstanceId,
-                                 int32_t Index) {
+inline TypeVariable getCallArgTV(retypd::TRContext &Ctx, llvm::Function *Target,
+                                 size_t InstanceId, int32_t Index) {
   auto TargetName = getFuncTvName(Target);
-  return TypeVariable{
-      DerivedTypeVariable{.Base = TargetName,
-                          .Labels = {retypd::InLabel{std::to_string(Index)}},
-                          .instanceId = InstanceId}};
+  TypeVariable TV = TypeVariable::CreateDtv(Ctx, TargetName, InstanceId);
+  return TV.pushLabel(retypd::InLabel{std::to_string(Index)});
 }
 
-TypeVariable inline getCallRetTV(llvm::Function *Target, size_t InstanceId) {
+inline TypeVariable getCallRetTV(retypd::TRContext &Ctx, llvm::Function *Target,
+                                 size_t InstanceId) {
   auto TargetName = getFuncTvName(Target);
-  return TypeVariable{DerivedTypeVariable{.Base = TargetName,
-                                          .Labels = {retypd::OutLabel{}},
-                                          .instanceId = InstanceId}};
+  TypeVariable TV = TypeVariable::CreateDtv(Ctx, TargetName, InstanceId);
+  return TV.pushLabel(retypd::OutLabel{});
 }
 
 } // namespace notdec

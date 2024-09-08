@@ -1,9 +1,81 @@
-#include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
 #include <string>
 #include <variant>
 
+#include "TypeRecovery/TRContext.h"
+
+#include "TypeRecovery/Schema.h"
+
 namespace notdec::retypd {
+
+// TODO: two insertion and one allocation.
+// Optimize to one insertion and no allocation using several separate map.
+// Map String base -> TV
+// Map TV,label -> TV
+
+const PooledTypeVariable *
+PooledTypeVariable::intern(TRContext &Ctx, const PooledTypeVariable &TV) {
+  auto IT = Ctx.TypeVars.find(const_cast<PooledTypeVariable *>(&TV));
+  if (IT != Ctx.TypeVars.end()) {
+    return *IT;
+  } else {
+    auto *TVPtr = new PooledTypeVariable(TV);
+    Ctx.TypeVars.insert(TVPtr);
+    return TVPtr;
+  }
+}
+
+const PooledTypeVariable *PooledTypeVariable::popLabel() const {
+  PooledTypeVariable TV = *this;
+  TV.getLabels().pop_back();
+  return intern(*Ctx, TV);
+}
+
+const PooledTypeVariable *
+PooledTypeVariable::pushLabel(FieldLabel label) const {
+  PooledTypeVariable TV = *this;
+  TV.getLabels().push_back(label);
+  return intern(*Ctx, TV);
+}
+
+const PooledTypeVariable *PooledTypeVariable::toBase() const {
+  if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
+    PooledTypeVariable TV = PooledTypeVariable{.Ctx = Ctx,
+                                               .Inner = DerivedTypeVariable{
+                                                   .Base = dtv->Base,
+                                               }};
+    return intern(*Ctx, TV);
+  } else {
+    return this;
+  }
+}
+
+const PooledTypeVariable *
+PooledTypeVariable::CreatePrimitive(TRContext &Ctx, std::string name) {
+  PooledTypeVariable TV = {&Ctx, PrimitiveTypeVariable{name}};
+  return intern(Ctx, TV);
+}
+
+const PooledTypeVariable *
+PooledTypeVariable::CreateDtv(TRContext &Ctx, DerivedTypeVariable dtv) {
+  PooledTypeVariable TV = {&Ctx, dtv};
+  return intern(Ctx, TV);
+}
+
+const PooledTypeVariable *PooledTypeVariable::CreateDtv(TRContext &Ctx,
+                                                        std::string name) {
+  PooledTypeVariable TV = {&Ctx, DerivedTypeVariable{.Base = name}};
+  return intern(Ctx, TV);
+}
+
+const PooledTypeVariable *PooledTypeVariable::CreateIntConstant(TRContext &Ctx,
+                                                                OffsetRange val,
+                                                                void *User) {
+  PooledTypeVariable TV = PooledTypeVariable{
+      &Ctx,
+      DerivedTypeVariable{.Base = BaseConstant{.Val = val, .User = User}}};
+  return intern(Ctx, TV);
+}
 
 std::string toString(const EdgeLabel &label) {
   if (std::holds_alternative<One>(label)) {
@@ -11,12 +83,12 @@ std::string toString(const EdgeLabel &label) {
   } else if (std::holds_alternative<ForgetLabel>(label)) {
     return "forget " + toString(std::get<ForgetLabel>(label).label);
   } else if (std::holds_alternative<ForgetBase>(label)) {
-    return "forget " + toString(std::get<ForgetBase>(label).base) +
+    return "forget " + toString(std::get<ForgetBase>(label).Base) +
            toString(std::get<ForgetBase>(label).V);
   } else if (std::holds_alternative<RecallLabel>(label)) {
     return "recall " + toString(std::get<RecallLabel>(label).label);
   } else if (std::holds_alternative<RecallBase>(label)) {
-    return "recall " + toString(std::get<RecallBase>(label).base) +
+    return "recall " + toString(std::get<RecallBase>(label).Base) +
            toString(std::get<RecallBase>(label).V);
   }
   assert(false && "Unknown FieldLabel!");
@@ -77,15 +149,9 @@ std::string toString(const PrimitiveTypeVariable &dtv) {
   return "#" + dtv.name;
 }
 
-std::string toString(const TypeVariable &dtv) {
-  if (std::holds_alternative<DerivedTypeVariable>(dtv.Inner)) {
-    return toString(std::get<DerivedTypeVariable>(dtv.Inner));
-  } else if (std::holds_alternative<PrimitiveTypeVariable>(dtv.Inner)) {
-    return toString(std::get<PrimitiveTypeVariable>(dtv.Inner));
-  } else {
-    assert(false && "unknown TypeVariable");
-  }
-}
+std::string toString(const PooledTypeVariable *dtv) { return dtv->str(); }
+
+std::string toString(const TypeVariable &dtv) { return dtv.str(); }
 
 std::string toStringImpl(const SubTypeConstraint &c) {
   return toString(c.sub) + " <= " + toString(c.sup);

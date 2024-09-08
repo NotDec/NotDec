@@ -1,4 +1,3 @@
-#include <boost/range/join.hpp>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -27,32 +26,19 @@
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
+#include "TypeRecovery/TRContext.h"
 #include "optimizers/ConstraintGenerator.h"
 
 #define DEBUG_TYPE "retypd_graph"
 
 namespace notdec::retypd {
 
-// // retag base node according to base edges.
-// void ConstraintGraph::reTagBaseTV() {
-//   for (auto &Edge : Start->outEdges) {
-//     if (isBase(Edge.getLabel())) {
-//       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-//       assert(!Target.key.Base.hasLabel() ||
-//              const_cast<TypeVariable &>(Target.key.Base).getLabels().size()
-//              ==
-//                  0);
-//       replaceNodeKey(Target, NodeKey{getBase(Edge.getLabel())});
-//     }
-//   }
-// }
-
 CGNode &ConstraintGraph::instantiateSketch(std::shared_ptr<retypd::Sketch> Sk) {
   std::map<retypd::SketchNode *, CGNode *> NodeMap;
   // 1. clone the graph nodes
   for (auto &Node : llvm::make_range(Sk->begin(), Sk->end())) {
     auto &NewNode = getOrInsertNode(NodeKey(
-        TypeVariable::CreateDtv(ValueNamer::getName("sketch_")), Node.V));
+        TypeVariable::CreateDtv(Ctx, ValueNamer::getName("sketch_")), Node.V));
     NodeMap.emplace(&Node, &NewNode);
   }
   // 2. clone all edges as recall edges. Also add reverse forget edges.
@@ -70,12 +56,13 @@ CGNode &ConstraintGraph::instantiateSketch(std::shared_ptr<retypd::Sketch> Sk) {
 
 void ConstraintGraph::replaceNodeKey(const TypeVariable &Old,
                                      const TypeVariable &New) {
+  TypeVariable IC = Old;
   const CGNode &OldNode = Nodes.at(Old);
   replaceNodeKeyImpl(OldNode, New);
 
   // handle contra-variant nodes
-  if (Nodes.count({Old, Contravariant})) {
-    const CGNode &OldNode1 = Nodes.at({Old, Contravariant});
+  if (Nodes.count({IC, Contravariant})) {
+    const CGNode &OldNode1 = Nodes.at({IC, Contravariant});
     replaceNodeKeyImpl(OldNode1, {New, Contravariant});
   }
 }
@@ -96,16 +83,16 @@ void ConstraintGraph::replaceNodeKeyImpl(const CGNode &Node,
 }
 
 void CGNode::onUpdatePNType() {
-  if (key.Base.isIntConstant()) {
+  if (this->key.Base.isIntConstant()) {
     if (getPNIVar()->isPointer()) {
       // convert to offset of memory
       auto TV = Parent.getMemoryNode()->key.Base;
       auto Label = OffsetLabel{key.Base.getIntConstant()};
-      TV.getLabels().push_back(Label);
+      TV = TV.pushLabel(Label);
       std::string name =
           "intptr_" + key.Base.getIntConstant().str().substr(1) + '_';
-      TypeVariable NewTV =
-          TypeVariable::CreateDtv(ValueNamer::getName(name.c_str()));
+      TypeVariable NewTV = TypeVariable::CreateDtv(
+          Parent.Ctx, ValueNamer::getName(name.c_str()));
       Parent.replaceNodeKey(this->key.Base, NewTV);
       // add subtype of memory
       Parent.addConstraint(TV, this->key.Base);
@@ -120,7 +107,7 @@ void CGNode::onUpdatePNType() {
 
 void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {
   auto TV = Other->key.Base;
-  TV.getLabels().push_back(OffsetLabel{Off});
+  TV = TV.pushLabel(OffsetLabel{Off});
   Parent.addConstraint(TV, this->key.Base);
 }
 
@@ -225,7 +212,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
   }
 
   // 2. adjust the expr to create type schemes.
-  auto ret = expToConstraints(finalExp);
+  auto ret = expToConstraints(Ctx, finalExp);
   // 3. delete invalid constraints like: int64.in_0
   // 4. substitute temp vars to prevent name collision.
   return ret;
@@ -243,7 +230,7 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
       //            "\n");
       addEdge(
           *getStartNode(), *N,
-          RecallBase{.base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
+          RecallBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
     }
   }
   linkEndVars(InterestingVars);
@@ -260,7 +247,7 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
       //            << "Adding an edge from " << N->key.str() << " to #End\n");
       addEdge(
           *N, *getEndNode(),
-          ForgetBase{.base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
+          ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
     }
   }
 }
@@ -338,7 +325,7 @@ void ConstraintGraph::contraVariantSplit() {
   for (auto N : toHandle) {
     // duplicate the node that isolate the recall edge.
     auto &NewNode = getOrInsertNode(
-        NodeKey{TypeVariable::CreateDtv(ValueNamer::getName("split_"))});
+        NodeKey{TypeVariable::CreateDtv(Ctx, ValueNamer::getName("split_"))});
     // Move all incoming recall edge to the new node.
     for (auto InEdge2 : N->inEdges) {
       if (isRecall(InEdge2->Label)) {
@@ -488,7 +475,7 @@ void ConstraintGraph::pushSplit() {
     auto [Current, Recall, Forget] = Ent;
     // duplicate the node that isolate the incoming recall edge.
     auto &NewNode = getOrInsertNode(
-        NodeKey{TypeVariable::CreateDtv(ValueNamer::getName("split_"))});
+        NodeKey{TypeVariable::CreateDtv(Ctx, ValueNamer::getName("split_"))});
     // copy all out edges except the forget edge.
     for (auto &Edge : Current->outEdges) {
       auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
@@ -685,7 +672,7 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
 
   // 2. add recall edge to the node.
   G.addEdge(*G.getStartNode(), G.getOrInsertNode(N.key, N.Size),
-            RecallBase{.base = N.key.Base, .V = N.key.SuffixVariance});
+            RecallBase{.Base = N.key.Base, .V = N.key.SuffixVariance});
 
   // G.printGraph("sketches1.dot");
   // 3. make all nodes accepting. focus on the recall subgraph, but allow recall
@@ -706,7 +693,7 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
     bool HasForgetPrim = false;
     for (auto &Edge : Source.outEdges) {
       if (std::holds_alternative<ForgetBase>(Edge.Label)) {
-        if (std::get<ForgetBase>(Edge.Label).base.isPrimitive()) {
+        if (std::get<ForgetBase>(Edge.Label).Base.isPrimitive()) {
           HasForgetPrim = true;
           break;
         }
@@ -714,7 +701,7 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
     }
     if (!HasForgetPrim) {
       G.addEdge(Source, *G.getEndNode(),
-                ForgetBase{.base = TypeVariable::CreatePrimitive("top"),
+                ForgetBase{.Base = TypeVariable::CreatePrimitive(Ctx, "top"),
                            .V = Source.key.SuffixVariance});
     }
   }
@@ -853,9 +840,9 @@ void ConstraintGraph::saturate() {
 }
 
 ConstraintGraph
-ConstraintGraph::fromConstraints(std::string FuncName,
+ConstraintGraph::fromConstraints(TRContext &Ctx, std::string FuncName,
                                  std::vector<Constraint> &Cons) {
-  ConstraintGraph G(nullptr, FuncName);
+  ConstraintGraph G(Ctx, FuncName);
   for (auto &C : Cons) {
     if (std::holds_alternative<SubTypeConstraint>(C)) {
       auto &SCons = std::get<SubTypeConstraint>(C);
@@ -866,22 +853,6 @@ ConstraintGraph::fromConstraints(std::string FuncName,
   }
   return G;
 }
-
-// void ConstraintGraph::addLeftRecalls(const TypeVariable &sub) {
-//   auto &NodeL = getOrInsertNode(sub);
-//   // 2.1 left
-//   addRecalls(NodeL);
-//   auto &RNodeL = getOrInsertNode(NodeKey(sub, Contravariant));
-//   // 4.1 inverse left
-//   addRecalls(RNodeL);
-// }
-
-// void ConstraintGraph::addRightForgets(const TypeVariable &sup) {
-//   auto &NodeR = getOrInsertNode(sup);
-//   addForgets(NodeR);
-//   auto &RNodeR = getOrInsertNode(NodeKey(sup, Contravariant));
-//   addForgets(RNodeR);
-// }
 
 /// Interface for initial constraint insertion
 /// Also build the initial graph (Algorithm D.1 Transducer)
@@ -922,7 +893,7 @@ std::optional<std::pair<FieldLabel, NodeKey>> NodeKey::forgetOnce() const {
   }
   NodeKey NewKey(*this);
   FieldLabel Label = NewKey.Base.getLabels().back();
-  NewKey.Base.getLabels().pop_back();
+  NewKey.Base = NewKey.Base.popLabel();
   NewKey.SuffixVariance = combine(this->SuffixVariance, getVariance(Label));
   return std::make_pair(Label, NewKey);
 }
@@ -994,6 +965,7 @@ std::string toString(const std::set<CGNode *> Set) {
 }
 
 struct ExprToConstraintsContext {
+  TRContext &Ctx;
   static const char *tempNamePrefix;
   int TempNameIndex = 0;
   // std::function<std::string()> &tempNameGenerator;
@@ -1005,9 +977,12 @@ struct ExprToConstraintsContext {
   std::vector<std::vector<EdgeLabel>>
   expToConstraintsSequenceRecursive(rexp::PRExp E);
   static std::pair<
-      std::vector<std::tuple<SubTypeConstraint, Variance, Variance>>, Variance>
+      std::vector<std::tuple<std::pair<PooledTypeVariable, PooledTypeVariable>,
+                             Variance, Variance>>,
+      Variance>
   normalizePath(const std::vector<EdgeLabel> &ELs);
   static std::vector<SubTypeConstraint> constraintsSequenceToConstraints(
+      TRContext &Ctx,
       const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence);
 };
 
@@ -1055,8 +1030,9 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
 
     // Create recursive constraints.
     auto NewInner =
-        rexp::create(RecallBase{TypeVariable::CreateDtv(tempName)}) & Inner &
-        rexp::create(ForgetBase{TypeVariable::CreateDtv(tempName)});
+        rexp::create(RecallBase{TypeVariable::CreateDtv(Ctx, tempName)}) &
+        Inner &
+        rexp::create(ForgetBase{TypeVariable::CreateDtv(Ctx, tempName)});
     auto Seq = expToConstraintsSequenceRecursive(NewInner);
     ConstraintsSequence.insert(ConstraintsSequence.end(), Seq.begin(),
                                Seq.end());
@@ -1065,8 +1041,8 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
     // Later in normalizePath, we will detect ForgetBase/RecallBase in the
     // middle.
     std::vector<EdgeLabel> V2;
-    V2.push_back(ForgetBase{TypeVariable::CreateDtv(tempName)});
-    V2.push_back(RecallBase{TypeVariable::CreateDtv(tempName)});
+    V2.push_back(ForgetBase{TypeVariable::CreateDtv(Ctx, tempName)});
+    V2.push_back(RecallBase{TypeVariable::CreateDtv(Ctx, tempName)});
     Result.push_back(V2);
   } else if (std::holds_alternative<rexp::Node>(*E)) {
     std::vector<EdgeLabel> Vec;
@@ -1082,42 +1058,52 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
 
 std::vector<SubTypeConstraint>
 ExprToConstraintsContext::constraintsSequenceToConstraints(
+    TRContext &Ctx,
     const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence) {
   std::vector<SubTypeConstraint> Ret;
   for (auto &CS : ConstraintsSequence) {
     LLVM_DEBUG(llvm::dbgs() << "Normalized path: " << toString(CS) << "\n");
 
-    std::pair<std::vector<std::tuple<SubTypeConstraint, Variance, Variance>>,
+    std::pair<std::vector<
+                  std::tuple<std::pair<PooledTypeVariable, PooledTypeVariable>,
+                             Variance, Variance>>,
               Variance>
         P = normalizePath(CS);
     auto &Cons = P.first;
 
     std::cerr << ((P.second == Covariant) ? "" : "Skipped ") << "Cons: \n";
     for (auto &Con : Cons) {
-      std::cerr << "  " << toString(std::get<0>(Con).sub)
-                << toString(std::get<1>(Con))
-                << " <= " << toString(std::get<0>(Con).sup)
+      auto &TVPair = std::get<0>(Con);
+      std::cerr << "  " << toString(&TVPair.first) << toString(std::get<1>(Con))
+                << " <= " << toString(&TVPair.second)
                 << toString(std::get<2>(Con)) << "\n";
       // assert(std::get<1>(Con) == std::get<2>(Con));
       if (std::get<1>(Con) != std::get<2>(Con)) {
         std::cerr << "Warning:!\n";
       }
-      if (P.second == Covariant &&
-          std::get<0>(Con).sub != std::get<0>(Con).sup) {
-        Ret.push_back(std::get<0>(Con));
+      TVPair.first.Ctx = &Ctx;
+      TVPair.second.Ctx = &Ctx;
+      if (P.second == Covariant && TVPair.first != TVPair.second) {
+        Ret.push_back(SubTypeConstraint{
+            {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.first)},
+            {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.second)}});
       }
     }
   }
   return Ret;
 }
 
-std::pair<std::vector<std::tuple<SubTypeConstraint, Variance, Variance>>,
-          Variance>
+std::pair<
+    std::vector<std::tuple<std::pair<PooledTypeVariable, PooledTypeVariable>,
+                           Variance, Variance>>,
+    Variance>
 ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
   // The variance between recalls and forgets.
   std::optional<Variance> PathVariance;
   // the pexp must be in (recall _)*(forget _)*
-  std::vector<std::tuple<SubTypeConstraint, Variance, Variance>> Ret;
+  std::vector<std::tuple<std::pair<PooledTypeVariable, PooledTypeVariable>,
+                         Variance, Variance>>
+      Ret;
   if (ELs.size() < 2) {
     assert(false && "normalize_path: path size < 2!");
   }
@@ -1132,30 +1118,30 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
   for (std::size_t Ind = 0; Ind < ELs.size(); Ind++) {
     auto &EL = ELs[Ind];
     if (std::holds_alternative<RecallBase>(EL)) {
-      auto &Name = std::get<RecallBase>(EL).base;
+      auto Name = std::get<RecallBase>(EL).Base;
       if (Ind == 0) {
         // OK
         std::get<1>(Ret.back()) = std::get<RecallBase>(EL).V;
       } else {
-        assert(Back->sub.getBaseName().empty());
-        assert(!Back->sub.hasLabel());
-        assert(Back->sup.getBaseName().empty());
-        assert(!Back->sup.hasLabel());
+        assert(Back->first.getBaseName().empty());
+        assert(!Back->first.hasLabel());
+        assert(Back->second.getBaseName().empty());
+        assert(!Back->second.hasLabel());
       }
-      Back->sub = Name;
+      Back->first = *Name.Var;
     } else if (std::holds_alternative<ForgetBase>(EL)) {
-      auto &Name = std::get<ForgetBase>(EL).base;
-      if (Back->sup.hasLabel()) {
-        Back->sup.setBase(Name.getBase());
+      auto Name = std::get<ForgetBase>(EL).Base;
+      if (Back->second.hasLabel()) {
+        Back->second.setBase(Name.getBase());
       } else {
-        Back->sup = Name;
+        Back->second = *Name.Var;
       }
       if (Ind == ELs.size() - 1) {
         // Collect the variance between recalls and forgets.
         if (!isForget) {
           assert(!PathVariance);
           PathVariance =
-              combine(std::get<1>(Ret.back()), Back->sub.pathVariance());
+              combine(std::get<1>(Ret.back()), Back->first.pathVariance());
         }
         isForget = true;
         // OK
@@ -1166,8 +1152,8 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
         assert(Name.getBaseName().rfind(tempNamePrefix, 0) == 0);
         // Compute current variance.
         Variance Current =
-            combine(std::get<1>(Ret.back()), Back->sub.pathVariance());
-        Current = combine(Current, Back->sup.pathVariance());
+            combine(std::get<1>(Ret.back()), Back->first.pathVariance());
+        Current = combine(Current, Back->second.pathVariance());
         std::get<2>(Ret.back()) = Current;
 
         Ret.emplace_back();
@@ -1178,16 +1164,16 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
       if (isForget) {
         assert(false && "normalize_path: Path has Recall after Forget!");
       }
-      Back->sub.getLabels().push_back(std::get<RecallLabel>(EL).label);
+      Back->first.getLabels().push_back(std::get<RecallLabel>(EL).label);
     } else if (std::holds_alternative<ForgetLabel>(EL)) {
       // Collect the variance between recalls and forgets.
       if (!isForget) {
         assert(!PathVariance);
         PathVariance =
-            combine(std::get<1>(Ret.back()), Back->sub.pathVariance());
+            combine(std::get<1>(Ret.back()), Back->first.pathVariance());
       }
       isForget = true;
-      Back->sup.getLabels().push_front(std::get<ForgetLabel>(EL).label);
+      Back->second.getLabels().push_front(std::get<ForgetLabel>(EL).label);
     } else {
       assert(false && "normalize_path: Base label type in the middle!");
     }
@@ -1196,14 +1182,15 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
   // combine the variance with label variance.
   for (auto &Ent : Ret) {
     auto &Con = std::get<0>(Ent);
-    std::get<1>(Ent) = combine(std::get<1>(Ent), Con.sub.pathVariance());
-    std::get<2>(Ent) = combine(std::get<2>(Ent), Con.sup.pathVariance());
+    std::get<1>(Ent) = combine(std::get<1>(Ent), Con.first.pathVariance());
+    std::get<2>(Ent) = combine(std::get<2>(Ent), Con.second.pathVariance());
   }
   return std::make_pair(Ret, PathVariance.value());
 }
 
 /// the pexp must be in (recall _)*(forget _)*
-std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
+std::vector<SubTypeConstraint> expToConstraints(TRContext &TRCtx,
+                                                rexp::PRExp E) {
   if (rexp::isEmpty(E)) {
     assert(false && "pexp_to_constraints: Empty path!");
     // return {};
@@ -1211,18 +1198,18 @@ std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E) {
     return {};
     // assert(false && "pexp_to_constraints: Null path!");
   }
-  ExprToConstraintsContext Ctx;
+  ExprToConstraintsContext Ctx{TRCtx};
   auto Seq = Ctx.expToConstraintsSequenceRecursive(E);
   Ctx.ConstraintsSequence.insert(Ctx.ConstraintsSequence.end(), Seq.begin(),
                                  Seq.end());
-  return Ctx.constraintsSequenceToConstraints(Ctx.ConstraintsSequence);
+  return Ctx.constraintsSequenceToConstraints(TRCtx, Ctx.ConstraintsSequence);
 }
 
 CGNode *ConstraintGraph::getMemoryNode() {
   if (MemoryNode != nullptr) {
     return MemoryNode;
   }
-  MemoryNode = &getOrInsertNode(NodeKey{TypeVariable::CreateDtv(Memory)});
+  MemoryNode = &getOrInsertNode(NodeKey{TypeVariable::CreateDtv(Ctx, Memory)});
   if (PG) {
     setPointer(*MemoryNode);
   }
@@ -1233,7 +1220,8 @@ CGNode *ConstraintGraph::getStartNode() {
   if (Start != nullptr) {
     return Start;
   }
-  Start = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#Start")});
+  Start =
+      &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive(Ctx, "#Start")});
   return Start;
 }
 
@@ -1241,13 +1229,13 @@ CGNode *ConstraintGraph::getEndNode() {
   if (End != nullptr) {
     return End;
   }
-  End = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive("#End")});
+  End = &getOrInsertNode(NodeKey{TypeVariable::CreatePrimitive(Ctx, "#End")});
   return End;
 }
 
-ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
+ConstraintGraph::ConstraintGraph(TRContext &Ctx, std::string Name,
                                  bool disablePNI)
-    : Name(Name) {
+    : Ctx(Ctx), Name(Name) {
   if (!disablePNI) {
     PG = std::make_unique<PNIGraph>(Name);
   }
@@ -1256,7 +1244,7 @@ ConstraintGraph::ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
 ConstraintGraph ConstraintGraph::clone(bool removePNI) const {
   std::map<const CGNode *, CGNode *> Old2New;
   // loses CG pointer when cloning.
-  ConstraintGraph G(nullptr, Name, (!(bool)PG) || removePNI);
+  ConstraintGraph G(Ctx, Name, (!(bool)PG) || removePNI);
 
   // clone all nodes
   for (auto &Ent : Nodes) {

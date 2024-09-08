@@ -123,6 +123,7 @@ struct RevEdge {
 };
 
 struct ConstraintGraph {
+  TRContext &Ctx;
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
   std::map<NodeKey, CGNode> Nodes;
@@ -139,8 +140,7 @@ struct ConstraintGraph {
   static const char *Memory;
   CGNode *MemoryNode = nullptr;
 
-  ConstraintGraph(ConstraintsGenerator *CG, std::string Name,
-                  bool disablePNI = false);
+  ConstraintGraph(TRContext &Ctx, std::string Name, bool disablePNI = false);
   ConstraintGraph clone(bool removePNI = false) const;
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
 
@@ -186,7 +186,7 @@ public:
   void addForgets(CGNode &N);
   void printGraph(const char *DotFile) const;
   std::vector<SubTypeConstraint> toConstraints();
-  static ConstraintGraph fromConstraints(std::string FuncName,
+  static ConstraintGraph fromConstraints(TRContext &Ctx, std::string FuncName,
                                          std::vector<Constraint> &Cons);
 
 protected:
@@ -225,13 +225,10 @@ protected:
     }
     return it.second;
   }
-  void replaceTypeVarWith(CGNode &Node, const TypeVariable &New);
   friend struct CGNode;
   template <typename GraphTy, typename NodeTy> friend struct NFADeterminizer;
   void replaceNodeKey(const TypeVariable &Old, const TypeVariable &New);
   void replaceNodeKeyImpl(const CGNode &Node, const NodeKey &Key);
-  // void addLeftRecalls(const TypeVariable &sub);
-  // void addRightForgets(const TypeVariable &sup);
 
 public:
   // void reTagBaseTV();
@@ -240,7 +237,7 @@ public:
   }
 };
 
-std::vector<SubTypeConstraint> expToConstraints(rexp::PRExp E);
+std::vector<SubTypeConstraint> expToConstraints(TRContext &Ctx, rexp::PRExp E);
 std::string toString(const std::set<CGNode *> Set);
 
 } // namespace notdec::retypd

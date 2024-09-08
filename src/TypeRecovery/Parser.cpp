@@ -252,7 +252,8 @@ parseDerivedTypeVariable(llvm::StringRef str) {
   return {rest, DerivedTypeVariable{{Name.str()}, labels}};
 }
 
-ParseResultT<TypeVariable> parseTypeVariable(llvm::StringRef str) {
+ParseResultT<TypeVariable> parseTypeVariable(TRContext &Ctx,
+                                             llvm::StringRef str) {
   str = skipWhitespace(str);
   if (str.consume_front("#Int#")) {
     assert(false && "Not implemented");
@@ -261,19 +262,20 @@ ParseResultT<TypeVariable> parseTypeVariable(llvm::StringRef str) {
     if (!RName.isOk()) {
       return {rest, RName.msg()};
     }
-    return {rest, TypeVariable::CreatePrimitive(RName.get().str())};
+    return {rest, TypeVariable::CreatePrimitive(Ctx, RName.get().str())};
   } else {
     auto [rest, RDtv] = parseDerivedTypeVariable(str);
     if (!RDtv.isOk()) {
       return {rest, RDtv.msg()};
     }
-    return {rest, TypeVariable{RDtv.get()}};
+    return {rest, TypeVariable::CreateDtv(Ctx, RDtv.get())};
   }
 }
 
-ParseResultT<SubTypeConstraint> parseSubTypeConstraint(llvm::StringRef str) {
+ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
+                                                       llvm::StringRef str) {
   str = skipWhitespace(str);
-  auto [rest, RSub] = parseTypeVariable(str);
+  auto [rest, RSub] = parseTypeVariable(Ctx, str);
   if (!RSub.isOk()) {
     return {rest, RSub.msg()};
   }
@@ -282,11 +284,11 @@ ParseResultT<SubTypeConstraint> parseSubTypeConstraint(llvm::StringRef str) {
     return {rest, "parseSubTypeConstraint: Expect <= :" + rest.substr(0, 10)};
   }
   rest = skipWhitespace(rest);
-  auto [rest1, RSup] = parseTypeVariable(rest);
+  auto [rest1, RSup] = parseTypeVariable(Ctx, rest);
   if (!RSup.isOk()) {
     return {rest, RSup.msg()};
   }
-  return {rest1, SubTypeConstraint{{RSub.get()}, {RSup.get()}}};
+  return {rest1, SubTypeConstraint{RSub.get(), RSup.get()}};
 }
 
 } // namespace notdec::retypd

@@ -19,6 +19,25 @@
 
 ## Changelog
 
+**2024-09-06**
+
+InstCombine transforms `add` instructions to `or`, this is ridiculous... In [here](https://github.com/llvm/llvm-project/blob/f15014ff549a8686671a599f7b49ce9963769eaf/llvm/lib/Transforms/InstCombine/InstCombineAddSub.cpp#L1379), If the two number have no common bits set in common, LLVM transforms it into a or instruction. However, or instruction is generally less useful in type recovery, we still need to consider it as an add.
+
+The new `or disjoint` (a blog [here](https://www.npopov.com/2024/01/01/This-year-in-LLVM-2023.html#or-disjoint)) is helpful, but it is too new...
+
+```
+  %8 = and i32 %7, 15
+  %9 = add i32 %8, 1600
+```
+
+becomes
+
+```
+  %6 = and i32 %5, 15
+  %7 = or i32 %6, 1600
+```
+
+
 **2024-07-15**
 
 If address sanitizer is enabled, my VSCode clangd language server does not work and reports errors that included file: 'sanitizer/asan_interface.h' not found. But the project just builds and works fine.

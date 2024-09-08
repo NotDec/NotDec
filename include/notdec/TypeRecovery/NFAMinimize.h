@@ -26,6 +26,7 @@ struct NFADeterminizer {
   // using NodeTy = CGNode *;
   using GT = llvm::GraphTraits<GraphTy>;
 
+  ValueNamer NewVN;
   GraphTy OldG;
   ConstraintGraph *NewG;
   std::map<std::set<NodeTy>, CGNode *> DTrans;
@@ -103,7 +104,7 @@ struct NFADeterminizer {
       return DTrans.find(N);
     }
     auto &NewNode = NewG->getOrInsertNode(
-        NodeKey{TypeVariable::CreateDtv(ValueNamer::getName("dfa_"))});
+        NodeKey{TypeVariable::CreateDtv(NewG->Ctx, NewVN.getNewName("dfa_"))});
     auto it = DTrans.emplace(N, &NewNode);
     assert(it.second);
     return it.first;

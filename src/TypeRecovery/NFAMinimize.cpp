@@ -10,17 +10,17 @@
 namespace notdec::retypd {
 
 ConstraintGraph determinize(const ConstraintGraph *G) {
-  ConstraintGraph NewG(nullptr, G->getName(), true);
+  ConstraintGraph NewG(G->Ctx, G->getName(), true);
   NFADeterminizer D(G, &NewG);
   D.run();
   return NewG;
 }
 
 ConstraintGraph minimize(const ConstraintGraph *G) {
-  ConstraintGraph NewG(nullptr, G->getName(), true);
+  ConstraintGraph NewG(G->Ctx, G->getName(), true);
   NFAInvDeterminizer D(G, &NewG);
   D.run();
-  ConstraintGraph NewG2(nullptr, G->getName(), true);
+  ConstraintGraph NewG2(G->Ctx, G->getName(), true);
   NFAInvDeterminizer D2(&NewG, &NewG2);
   D2.run();
   return NewG2;

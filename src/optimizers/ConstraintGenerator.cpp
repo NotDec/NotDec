@@ -43,10 +43,9 @@
 
 namespace notdec {
 
-using retypd::DerivedTypeVariable;
 using retypd::OffsetLabel;
 
-size_t ValueNamer::ID = 1;
+ValueNamer ValueNamer::Instance = ValueNamer();
 const char *ConstraintGraph::Memory = "MEMORY";
 const char *ValueNamer::DefaultPrefix = "v_";
 const char *ValueNamer::FuncPrefix = "func_";
@@ -77,11 +76,6 @@ std::string getName(const ExtValuePtr &Val) {
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "ERROR: getName: unhandled type of ExtValPtr\n";
   std::abort();
-}
-
-void ConstraintGraph::replaceTypeVarWith(CGNode &Node,
-                                         const TypeVariable &New) {
-  assert(Node.key.Base.isIntConstant());
 }
 
 inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
@@ -218,12 +212,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
 
         for (int i = 0; i < Current->arg_size(); i++) {
-          auto TV = Generator->solveType(getCallArgTV(Current, 0, i));
+          auto TV = Generator->solveType(getCallArgTV(TRCtx, Current, 0, i));
           assert(CurrentSketches.first[i] == nullptr);
           CurrentSketches.first[i] = TV;
         }
         if (!Current->getReturnType()->isVoidTy()) {
-          auto TV = Generator->solveType(getCallRetTV(Current, 0));
+          auto TV = Generator->solveType(getCallRetTV(TRCtx, Current, 0));
           assert(CurrentSketches.second == nullptr);
           CurrentSketches.second = TV;
         }
@@ -249,7 +243,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
         size_t InstanceId = Generator->CallToID.at(I);
         for (int i = 0; i < I->arg_size(); i++) {
-          auto TV = getCallArgTV(Target, InstanceId, i);
+          auto TV = getCallArgTV(TRCtx, Target, InstanceId, i);
           auto Sketch = Generator->solveType(TV);
           if (TargetSketches.first[i] == nullptr) {
             TargetSketches.first[i] = Sketch;
@@ -258,7 +252,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           }
         }
         if (!I->getType()->isVoidTy()) {
-          auto TV = getCallRetTV(Target, InstanceId);
+          auto TV = getCallRetTV(TRCtx, Target, InstanceId);
           auto Sketch = Generator->solveType(TV);
           if (TargetSketches.second == nullptr) {
             TargetSketches.second = Sketch;
@@ -418,12 +412,12 @@ static std::string getLLVMTypeBase(Type *Ty) {
   }
 }
 
-static inline TypeVariable makeTv(std::string Name) {
-  return retypd::TypeVariable::CreateDtv(Name);
+static inline TypeVariable makeTv(retypd::TRContext &Ctx, std::string Name) {
+  return retypd::TypeVariable::CreateDtv(Ctx, Name);
 }
 
-static inline TypeVariable getLLVMTypeVar(Type *Ty) {
-  return retypd::TypeVariable::CreatePrimitive(getLLVMTypeBase(Ty));
+static inline TypeVariable getLLVMTypeVar(retypd::TRContext &Ctx, Type *Ty) {
+  return retypd::TypeVariable::CreatePrimitive(Ctx, getLLVMTypeBase(Ty));
 }
 
 static bool is32Or64Int(const Type *Ty) {
@@ -490,15 +484,6 @@ retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
   return setTypeVar(Val, ret, User, getSize(Val));
 }
 
-// retypd::SSGNode *ConstraintsGenerator::getSSGNode(const TypeVariable &Val) {
-//   return CG.getOrInsertNode(Val).Link.lookupNode();
-// }
-
-// retypd::SSGNode *ConstraintsGenerator::getSSGNode(ExtValPtr Val, User *User)
-// {
-//   return getNode(Val, User).getLink().lookupNode();
-// }
-
 const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,
                                                      User *User) {
   return getNode(Val, User).key.Base;
@@ -508,27 +493,27 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertTypeVarVal(*V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    auto tv = makeTv(getFuncTvName(F->Func));
-    tv.getLabels().push_back(retypd::OutLabel{});
+    auto tv = makeTv(Ctx.TRCtx, getFuncTvName(F->Func));
+    tv = tv.pushLabel(retypd::OutLabel{});
     return tv;
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
     assert(false);
     // TODO what if function pointer?
-    auto tv = makeTv(getFuncTvName(Arg->Call->getCalledFunction()));
+    auto tv = makeTv(Ctx.TRCtx, getFuncTvName(Arg->Call->getCalledFunction()));
     // tv.getInstanceId() = Arg->InstanceId;
-    tv.getLabels().push_back(retypd::InLabel{std::to_string(Arg->Index)});
+    tv = tv.pushLabel(retypd::InLabel{std::to_string(Arg->Index)});
     return tv;
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     assert(false);
     // TODO what if function pointer?
-    auto tv = makeTv(getFuncTvName(Ret->Call->getCalledFunction()));
+    auto tv = makeTv(Ctx.TRCtx, getFuncTvName(Ret->Call->getCalledFunction()));
     // tv.getInstanceId() = Ret->InstanceId;
-    tv.getLabels().push_back(retypd::OutLabel{});
+    tv = tv.pushLabel(retypd::OutLabel{});
     return tv;
   } else if (auto IC = std::get_if<IntConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     auto ret = TypeVariable::CreateIntConstant(
-        OffsetRange{.offset = IC->Val->getSExtValue()}, User);
+        Ctx.TRCtx, OffsetRange{.offset = IC->Val->getSExtValue()}, User);
     return ret;
   }
   llvm::errs()
@@ -547,7 +532,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
       }
       if (CE->getOpcode() == Instruction::IntToPtr) {
         if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
-          auto tv = makeTv(CG.Memory);
+          auto tv = makeTv(Ctx.TRCtx, CG.Memory);
           addOffset(tv, OffsetRange{.offset = Addr->getSExtValue()});
           return tv;
         }
@@ -558,19 +543,19 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
             << "Error: convertTypeVarVal: direct use of stack pointer?, ensure "
                "StackAllocationRecovery is run before, Or add external summary "
                "for this function.\n";
-        return makeTv(ValueNamer::getName());
+        return makeTv(Ctx.TRCtx, ValueNamer::getName());
       } else if (auto Func = dyn_cast<Function>(C)) {
         // Consistent with Call handling
-        return makeTv(getFuncTvName(Func));
+        return makeTv(Ctx.TRCtx, getFuncTvName(Func));
       }
-      return makeTv(gv->getName().str());
+      return makeTv(Ctx.TRCtx, gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
       if (auto CI = dyn_cast<ConstantInt>(C)) {
         assert(CI->getBitWidth() != 32 && CI->getBitWidth() != 64 &&
                "Should be handled earlier");
       }
       auto Ty = C->getType();
-      return getLLVMTypeVar(Ty);
+      return getLLVMTypeVar(Ctx.TRCtx, Ty);
     }
     llvm::errs()
         << __FILE__ << ":" << __LINE__ << ": "
@@ -580,37 +565,45 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
     // Consistent with Call handling
     TypeVariable tv = getTypeVar(arg->getParent(), User);
-    tv.getLabels().push_back(retypd::InLabel{std::to_string(arg->getArgNo())});
+    tv = tv.pushLabel(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
   }
 
   // Use different suffix for different type of value.
   if (auto *Sel = dyn_cast<SelectInst>(Val)) {
-    return makeTv(ValueNamer::getName(*Sel, ValueNamer::SelectPrefix, true));
+    return makeTv(Ctx.TRCtx,
+                  ValueNamer::getName(*Sel, ValueNamer::SelectPrefix, true));
   } else if (auto *Alloca = dyn_cast<AllocaInst>(Val)) {
     const char *prefix = ValueNamer::AllocaPrefix;
     if (Alloca->getParent()->isEntryBlock()) {
       prefix = ValueNamer::StackPrefix;
     }
-    return makeTv(ValueNamer::getName(*Alloca, prefix, true));
+    return makeTv(Ctx.TRCtx, ValueNamer::getName(*Alloca, prefix, true));
   } else if (auto Phi = dyn_cast<PHINode>(Val)) {
-    return makeTv(ValueNamer::getName(*Phi, ValueNamer::PhiPrefix, true));
+    return makeTv(Ctx.TRCtx,
+                  ValueNamer::getName(*Phi, ValueNamer::PhiPrefix, true));
   } else if (auto *I = dyn_cast<Instruction>(Val)) {
-    return makeTv(ValueNamer::getName(*I, ValueNamer::NewPrefix, true));
+    return makeTv(Ctx.TRCtx,
+                  ValueNamer::getName(*I, ValueNamer::NewPrefix, true));
   } else if (auto *Load = dyn_cast<LoadInst>(Val)) {
-    return makeTv(ValueNamer::getName(*Load, ValueNamer::LoadPrefix, true));
+    return makeTv(Ctx.TRCtx,
+                  ValueNamer::getName(*Load, ValueNamer::LoadPrefix, true));
   } else if (auto *Store = dyn_cast<StoreInst>(Val)) {
-    return makeTv(ValueNamer::getName(*Store, ValueNamer::StorePrefix, true));
+    return makeTv(Ctx.TRCtx,
+                  ValueNamer::getName(*Store, ValueNamer::StorePrefix, true));
   } else if (auto *Add = dyn_cast<BinaryOperator>(Val)) {
-    return makeTv(ValueNamer::getName(*Add, ValueNamer::AddPrefix, true));
+    return makeTv(Ctx.TRCtx,
+                  ValueNamer::getName(*Add, ValueNamer::AddPrefix, true));
   } else if (auto *Sub = dyn_cast<BinaryOperator>(Val)) {
-    return makeTv(ValueNamer::getName(*Sub, ValueNamer::SubPrefix, true));
+    return makeTv(Ctx.TRCtx,
+                  ValueNamer::getName(*Sub, ValueNamer::SubPrefix, true));
   }
 
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "WARN: RetypdGenerator::getTypeVar unhandled value: " << *Val
                << "\n";
-  return makeTv(ValueNamer::getName(*Val, ValueNamer::NewPrefix, true));
+  return makeTv(Ctx.TRCtx,
+                ValueNamer::getName(*Val, ValueNamer::NewPrefix, true));
 }
 
 // TODO: accept any character in name by using single quotes like LLVM IR.
@@ -679,14 +672,14 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     }
     cg.CallToID.emplace(&I, InstanceId);
     for (int i = 0; i < I.arg_size(); i++) {
-      auto ArgVar = getCallArgTV(Target, InstanceId, i);
+      auto ArgVar = getCallArgTV(cg.Ctx.TRCtx, Target, InstanceId, i);
       auto ValVar = cg.getTypeVar(I.getArgOperand(i), &I);
       // argument is a subtype of param
       cg.addSubtype(ValVar, ArgVar);
     }
     if (!I.getType()->isVoidTy()) {
       // for return value
-      auto FormalRetVar = getCallRetTV(Target, InstanceId);
+      auto FormalRetVar = getCallRetTV(cg.Ctx.TRCtx, Target, InstanceId);
       auto ValVar = cg.getTypeVar(&I, nullptr);
       // formal return -> actual return
       cg.addSubtype(FormalRetVar, ValVar);
@@ -750,23 +743,24 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
       cg.addVarSubtype(&I, SrcVar);
     } else {
       if (isa<ZExtInst>(&I)) {
-        cg.addVarSubtype(&I, TypeVariable::CreatePrimitive("uint"));
+        cg.addVarSubtype(&I,
+                         TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "uint"));
         cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
-                      TypeVariable::CreatePrimitive("uint"));
+                      TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "uint"));
       } else {
-        cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
+        cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
         cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
-                      getLLVMTypeVar(I.getOperand(0)->getType()));
+                      getLLVMTypeVar(cg.Ctx.TRCtx, I.getOperand(0)->getType()));
       }
     }
     return;
   } else if (isa<SExtInst>(&I)) {
     auto *Src = I.getOperand(0);
-    auto &SrcVar = cg.getTypeVar(Src, &I);
-    cg.addSubtype(SrcVar, TypeVariable::CreatePrimitive("sint"));
-    cg.addVarSubtype(&I, TypeVariable::CreatePrimitive("sint"));
+    auto SrcVar = cg.getTypeVar(Src, &I);
+    cg.addSubtype(SrcVar, TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "sint"));
+    cg.addVarSubtype(&I, TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "sint"));
     cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
-                  TypeVariable::CreatePrimitive("sint"));
+                  TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "sint"));
     return;
   } else if (isa<FPToUIInst, FPToSIInst, UIToFPInst, SIToFPInst, FPTruncInst,
                  FPExtInst>(&I)) {
@@ -805,7 +799,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitICmpInst(ICmpInst &I) {
 
   // type the inst as bool
   assert(I.getType()->isIntegerTy(1));
-  cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
+  cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
 }
 
 // #region LoadStore
@@ -842,7 +836,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   // formal load -> actual load
   cg.addSubtype(LoadedVar, ValVar.key.Base);
   if (mustBePrimitive(I.getType())) {
-    cg.addSubtype(ValVar.key.Base, getLLVMTypeVar(I.getType()));
+    cg.addSubtype(ValVar.key.Base, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
   }
 }
 
@@ -860,13 +854,15 @@ std::string ConstraintsGenerator::offset(APInt Offset, int Count) {
   return OffsetStr;
 }
 
-void ConstraintsGenerator::addOffset(TypeVariable &dtv, OffsetRange Offset) {
+TypeVariable ConstraintsGenerator::addOffset(TypeVariable &dtv,
+                                             OffsetRange Offset) {
   if (!dtv.getLabels().empty() &&
       std::holds_alternative<OffsetLabel>(dtv.getLabels().back())) {
-    std::get<OffsetLabel>(dtv.getLabels().back()).range =
-        std::get<OffsetLabel>(dtv.getLabels().back()).range + Offset;
+    OffsetLabel LastLabel = std::get<OffsetLabel>(dtv.getLabels().back());
+    LastLabel.range = LastLabel.range + Offset;
+    return dtv.popLabel().pushLabel(LastLabel);
   } else {
-    dtv.getLabels().emplace_back(OffsetLabel{.range = Offset});
+    return dtv.pushLabel(OffsetLabel{.range = Offset});
   }
 }
 
@@ -879,9 +875,9 @@ TypeVariable ConstraintsGenerator::deref(Value *Val, User *User,
   auto DstVar = getTypeVar(Val, User);
   assert(BitSize % 8 == 0 && "size is not byte aligned!?");
   if (isLoadOrStore) {
-    DstVar.getLabels().push_back(retypd::LoadLabel{.Size = BitSize});
+    DstVar = DstVar.pushLabel(retypd::LoadLabel{.Size = BitSize});
   } else {
-    DstVar.getLabels().push_back(retypd::StoreLabel{.Size = BitSize});
+    DstVar = DstVar.pushLabel(retypd::StoreLabel{.Size = BitSize});
   }
   return DstVar;
 }
@@ -926,7 +922,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
   if (I.getType()->isVoidTy()) {
     // skip void type
   } else if (mustBePrimitive(I.getType())) {
-    cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
+    cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
   } else if (opTypes.count(I.getOpcode()) &&
              opTypes.at(I.getOpcode()).addRetConstraint(&I, cg)) {
     // good
@@ -940,7 +936,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
     if (Op->getType()->isVoidTy()) {
       // skip void type
     } else if (mustBePrimitive(Op->getType())) {
-      cg.addSubtype(cg.getTypeVar(Op, &I), getLLVMTypeVar(Op->getType()));
+      cg.addSubtype(cg.getTypeVar(Op, &I),
+                    getLLVMTypeVar(cg.Ctx.TRCtx, Op->getType()));
     } else if (opTypes.count(I.getOpcode()) &&
                opTypes.at(I.getOpcode()).addOpConstraint(Ind, &I, cg)) {
       // good
@@ -1004,11 +1001,13 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "Warn: And op without constant: " << I << "\n";
-    cg.addSubtype(cg.getTypeVar(Src2, &I), getLLVMTypeVar(Src2->getType()));
+    cg.addSubtype(cg.getTypeVar(Src2, &I),
+                  getLLVMTypeVar(cg.Ctx.TRCtx, Src2->getType()));
   }
   // view as numeric operation?
-  cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
-  cg.addSubtype(cg.getTypeVar(Src1, &I), getLLVMTypeVar(Src1->getType()));
+  cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
+  cg.addSubtype(cg.getTypeVar(Src1, &I),
+                getLLVMTypeVar(cg.Ctx.TRCtx, Src1->getType()));
   return;
 }
 
@@ -1028,11 +1027,13 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) {
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "Warn: And op without constant: " << I << "\n";
-    cg.addSubtype(cg.getTypeVar(Src2, &I), getLLVMTypeVar(Src2->getType()));
+    cg.addSubtype(cg.getTypeVar(Src2, &I),
+                  getLLVMTypeVar(cg.Ctx.TRCtx, Src2->getType()));
   }
   // view as numeric operation?
-  cg.addVarSubtype(&I, getLLVMTypeVar(I.getType()));
-  cg.addSubtype(cg.getTypeVar(Src1, &I), getLLVMTypeVar(Src1->getType()));
+  cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
+  cg.addSubtype(cg.getTypeVar(Src1, &I),
+                getLLVMTypeVar(cg.Ctx.TRCtx, Src1->getType()));
   return;
 }
 
@@ -1045,7 +1046,7 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   if (ty == nullptr) {
     return false;
   }
-  cg.addVarSubtype(I, TypeVariable::CreatePrimitive(ty));
+  cg.addVarSubtype(I, TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, ty));
   return true;
 }
 
@@ -1060,7 +1061,8 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
   if (ty == nullptr) {
     return false;
   }
-  cg.addSubtype(cg.getTypeVar(Op, I), TypeVariable::CreatePrimitive(ty));
+  cg.addSubtype(cg.getTypeVar(Op, I),
+                TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, ty));
   return true;
 }
 

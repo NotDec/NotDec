@@ -40,7 +40,10 @@ ParseResultT<LoadLabel> parseLoad(llvm::StringRef str);
 ParseResultT<StoreLabel> parseStore(llvm::StringRef str);
 ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str);
 ParseResultT<DerivedTypeVariable> parseDerivedTypeVariable(llvm::StringRef str);
-ParseResultT<SubTypeConstraint> parseSubTypeConstraint(llvm::StringRef str);
+ParseResultT<TypeVariable> parseTypeVariable(TRContext &Ctx,
+                                             llvm::StringRef str);
+ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
+                                                       llvm::StringRef str);
 
 } // namespace notdec::retypd
 

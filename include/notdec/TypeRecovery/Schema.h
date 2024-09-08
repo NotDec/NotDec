@@ -12,6 +12,8 @@
 
 namespace notdec::retypd {
 
+struct TRContext;
+
 using Variance = bool;
 const Variance Covariant = false;
 const Variance Contravariant = true;
@@ -106,11 +108,6 @@ struct DerivedTypeVariable {
   using BaseTy = std::variant<std::string, BaseConstant>;
   BaseTy Base;
   std::deque<FieldLabel> Labels;
-  // differentiate Nodes from summary instantiation
-  size_t instanceId = 0;
-
-  size_t getInstanceId() { return instanceId; }
-  void setInstanceId(size_t id) { instanceId = id; }
 
   bool hasBaseName() const { return std::holds_alternative<std::string>(Base); }
 
@@ -168,15 +165,14 @@ struct DerivedTypeVariable {
     } else {
       Ret = std::get<BaseConstant>(Base).str();
     }
-    if (instanceId > 0) {
-      Ret += "#" + std::to_string(instanceId);
-    }
     for (auto &label : Labels) {
       Ret += "." + toString(label);
     }
     return Ret;
   }
 };
+
+std::string toString(const DerivedTypeVariable &dtv);
 
 struct PrimitiveTypeVariable {
   std::string name;
@@ -188,37 +184,36 @@ struct PrimitiveTypeVariable {
   }
 };
 
-struct TypeVariable {
+std::string toString(const PrimitiveTypeVariable &dtv);
+
+struct PooledTypeVariable {
+  TRContext *Ctx;
   using InnerTy = std::variant<DerivedTypeVariable, PrimitiveTypeVariable>;
   InnerTy Inner;
 
-  static TypeVariable CreatePrimitive(std::string name) {
-    return TypeVariable{PrimitiveTypeVariable{name}};
-  }
+  static const PooledTypeVariable *intern(TRContext &Ctx,
+                                          const PooledTypeVariable &TV);
+  static const PooledTypeVariable *CreatePrimitive(TRContext &Ctx,
+                                                   std::string name);
 
-  static TypeVariable CreateDtv(std::string name) {
-    return TypeVariable{DerivedTypeVariable{.Base = name}};
-  }
+  static const PooledTypeVariable *CreateDtv(TRContext &Ctx, std::string name);
 
-  static TypeVariable CreateIntConstant(OffsetRange val, void *User) {
-    return TypeVariable{
-        DerivedTypeVariable{.Base = BaseConstant{.Val = val, .User = User}}};
-  }
+  static const PooledTypeVariable *CreateDtv(TRContext &Ctx,
+                                             DerivedTypeVariable dtv);
+
+  static const PooledTypeVariable *
+  CreateIntConstant(TRContext &Ctx, OffsetRange val, void *User);
+
+  const PooledTypeVariable *pushLabel(FieldLabel label) const;
+  const PooledTypeVariable *popLabel() const;
+
+  const PooledTypeVariable *toBase() const;
 
   Variance pathVariance() const {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
       return dtv->pathVariance();
     } else {
       return Covariant;
-    }
-  }
-
-  TypeVariable toBase() const {
-    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      return {DerivedTypeVariable{.Base = dtv->Base,
-                                  .instanceId = dtv->instanceId}};
-    } else {
-      return *this;
     }
   }
 
@@ -238,19 +233,11 @@ struct TypeVariable {
     }
   }
 
-  size_t getInstanceId() {
+  const std::deque<FieldLabel> &getLabels() const {
     if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      return dtv->getInstanceId();
+      return dtv->Labels;
     } else {
-      assert(false && "getInstanceId: No instanceId.");
-    }
-  }
-
-  void setInstanceId(size_t id) {
-    if (auto *dtv = std::get_if<DerivedTypeVariable>(&Inner)) {
-      dtv->setInstanceId(id);
-    } else {
-      assert(false && "setInstanceId: Not a DerivedTypeVariable");
+      assert(false && "getLabels: Not a DerivedTypeVariable");
     }
   }
 
@@ -294,10 +281,6 @@ struct TypeVariable {
     }
   }
 
-  bool hasInstanceId() const {
-    return std::holds_alternative<DerivedTypeVariable>(Inner);
-  }
-
   bool isPrimitive() const {
     return std::holds_alternative<PrimitiveTypeVariable>(Inner);
   }
@@ -316,8 +299,128 @@ struct TypeVariable {
 
   // Comparator for stored in a std::map
   // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
+  bool operator<(const PooledTypeVariable &rhs) const {
+    assert(Ctx != nullptr && rhs.Ctx != nullptr);
+    return std::tie(Ctx, Inner) < std::tie(rhs.Ctx, rhs.Inner);
+  }
+
+  bool operator==(const PooledTypeVariable &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  bool operator!=(const PooledTypeVariable &rhs) const {
+    return (*this < rhs) || (rhs < *this);
+  }
+
+  std::string str() const {
+    if (std::holds_alternative<DerivedTypeVariable>(Inner)) {
+      std::string Ret = toString(std::get<DerivedTypeVariable>(Inner));
+      return Ret;
+    } else if (std::holds_alternative<PrimitiveTypeVariable>(Inner)) {
+      return toString(std::get<PrimitiveTypeVariable>(Inner));
+    } else {
+      assert(false && "unknown TypeVariable");
+    }
+  }
+
+  // TODO how to make this private while allow emplace_back.
+  // protected:
+  friend struct ExprToConstraintsContext;
+  PooledTypeVariable &operator=(const PooledTypeVariable &) = default;
+  PooledTypeVariable(const PooledTypeVariable &) = default;
+  PooledTypeVariable() = default;
+};
+
+std::string toString(const PooledTypeVariable *dtv);
+
+struct TypeVariable {
+  TRContext *Ctx;
+  const PooledTypeVariable *Var;
+  // differentiate Nodes from summary instantiation
+  size_t instanceId = 0;
+
+  bool hasInstanceId() const {
+    return std::holds_alternative<DerivedTypeVariable>(Var->Inner);
+  }
+
+  size_t getInstanceId() const {
+    if (hasInstanceId()) {
+      return instanceId;
+    } else {
+      assert(instanceId == 0);
+      assert(false && "getInstanceId: No instanceId.");
+    }
+  }
+
+  void setInstanceId(size_t id) {
+    if (hasInstanceId()) {
+      instanceId = id;
+    } else {
+      assert(instanceId == 0);
+      assert(false && "setInstanceId: Not a DerivedTypeVariable");
+    }
+  }
+
+  static TypeVariable CreatePrimitive(TRContext &Ctx, std::string name) {
+    return {&Ctx, PooledTypeVariable::CreatePrimitive(Ctx, name)};
+  }
+
+  static TypeVariable CreateDtv(TRContext &Ctx, std::string name,
+                                size_t InstanceId = 0) {
+    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, name), InstanceId};
+  }
+
+  static TypeVariable CreateDtv(TRContext &Ctx, DerivedTypeVariable dtv) {
+    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, dtv)};
+  }
+
+  static TypeVariable CreateIntConstant(TRContext &Ctx, OffsetRange val,
+                                        void *User) {
+    return {&Ctx, PooledTypeVariable::CreateIntConstant(Ctx, val, User)};
+  }
+
+  TypeVariable pushLabel(FieldLabel label) const {
+    return {Ctx, Var->pushLabel(label), instanceId};
+  }
+  TypeVariable popLabel() const { return {Ctx, Var->popLabel(), instanceId}; }
+
+  Variance pathVariance() const { return Var->pathVariance(); }
+
+  TypeVariable toBase() const { return {Ctx, Var->toBase(), instanceId}; }
+
+  bool hasLabel() const { return Var->hasLabel(); }
+
+  const std::deque<FieldLabel> &getLabels() const { return Var->getLabels(); }
+
+  std::string getPrimitiveName() const { return Var->getPrimitiveName(); }
+
+  bool hasBaseName() const { return Var->hasBaseName(); }
+
+  std::string getBaseName() const { return Var->getBaseName(); }
+
+  DerivedTypeVariable::BaseTy getBase() const { return Var->getBase(); }
+
+  bool isPrimitive() const { return Var->isPrimitive(); }
+
+  bool isIntConstant() const { return Var->isIntConstant(); }
+  OffsetRange getIntConstant() const { return Var->getIntConstant(); }
+
+  std::string str() const {
+    std::string Ret = Var->str();
+    if (std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
+      if (getInstanceId() > 0) {
+        Ret += "#" + std::to_string(getInstanceId());
+      }
+    }
+    return Ret;
+  }
+
+  // Comparator for stored in a std::map
+  // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
   bool operator<(const TypeVariable &rhs) const {
-    return std::tie(Inner) < std::tie(rhs.Inner);
+    if (!std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
+      assert(instanceId == 0);
+    }
+    return std::tie(Var, instanceId) < std::tie(rhs.Var, instanceId);
   }
 
   bool operator==(const TypeVariable &rhs) const {
@@ -368,10 +471,10 @@ struct ForgetLabel {
   }
 };
 struct ForgetBase {
-  TypeVariable base;
+  TypeVariable Base;
   Variance V;
   bool operator<(const ForgetBase &rhs) const {
-    return std::tie(base, V) < std::tie(rhs.base, rhs.V);
+    return std::tie(Base, V) < std::tie(rhs.Base, rhs.V);
   }
   bool operator==(const ForgetBase &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
@@ -385,10 +488,10 @@ struct RecallLabel {
   }
 };
 struct RecallBase {
-  TypeVariable base;
+  TypeVariable Base;
   Variance V;
   bool operator<(const RecallBase &rhs) const {
-    return std::tie(base, V) < std::tie(rhs.base, rhs.V);
+    return std::tie(Base, V) < std::tie(rhs.Base, rhs.V);
   }
   bool operator==(const RecallBase &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
@@ -404,9 +507,9 @@ inline bool isBase(EdgeLabel label) {
 }
 inline TypeVariable getBase(EdgeLabel label) {
   if (auto *fb = std::get_if<ForgetBase>(&label)) {
-    return fb->base;
+    return fb->Base;
   } else if (auto *rb = std::get_if<RecallBase>(&label)) {
-    return rb->base;
+    return rb->Base;
   } else {
     assert(false && "getBase: Not a ForgetBase or RecallBase");
   }

@@ -37,6 +37,7 @@
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
+#include "TypeRecovery/TRContext.h"
 #include "notdec-wasm2llvm/utils.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "optimizers/PassManager.h"
@@ -362,7 +363,8 @@ void DecompileConfig::run_passes() {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   MAM.registerPass([&]() { return StackPointerFinderAnalysis(); });
-  MAM.registerPass([&]() { return TypeRecovery(); });
+  retypd::TRContext TRCtx;
+  MAM.registerPass([&]() { return TypeRecovery(TRCtx); });
 
   // Create the pass manager.
   // Optimize the IR!

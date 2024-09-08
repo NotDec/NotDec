@@ -221,9 +221,9 @@ std::shared_ptr<Sketch> Sketch::fromConstraintGraph(const ConstraintGraph &CG1,
         S->addEdge(*SN, *TN, L->label);
       } else if (auto *B = std::get_if<ForgetBase>(&Label)) {
         assert(&Target == CG.getEndNode());
-        assert(B->base.isPrimitive());
+        assert(B->Base.isPrimitive());
         auto *SN = getNode(Node);
-        SN->merge(B->base.getPrimitiveName());
+        SN->merge(B->Base.getPrimitiveName());
       } else {
         assert(false && "Sketch::fromConstraintGraph: unexpected edge");
       }
