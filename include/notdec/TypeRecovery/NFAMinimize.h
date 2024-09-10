@@ -130,6 +130,9 @@ using NFAInvDeterminizer = NFADeterminizer<llvm::InverseVal<ConstraintGraph *>,
                                            llvm::InverseVal<CGNode *>>;
 ConstraintGraph determinize(const ConstraintGraph *G);
 ConstraintGraph minimize(const ConstraintGraph *G);
+ConstraintGraph
+minimizeWithMap(const ConstraintGraph *G,
+                std::map<std::set<CGNode *>, CGNode *> &NodeMap);
 
 } // namespace notdec::retypd
 

@@ -6,6 +6,7 @@
 #include <llvm/ADT/iterator_range.h>
 #include <queue>
 #include <set>
+#include <utility>
 
 namespace notdec::retypd {
 
@@ -14,6 +15,36 @@ ConstraintGraph determinize(const ConstraintGraph *G) {
   NFADeterminizer D(G, &NewG);
   D.run();
   return NewG;
+}
+
+std::map<std::set<CGNode *>, CGNode *>
+combineDFAMap(const std::map<std::set<InverseVal<CGNode *>>, CGNode *> &M1,
+              const std::map<std::set<InverseVal<CGNode *>>, CGNode *> &M2,
+              ConstraintGraph *G2) {
+  std::map<std::set<CGNode *>, CGNode *> Result;
+
+  // build a reverse map of M1
+  std::map<CGNode *, std::set<CGNode *>> M1Rev;
+  for (auto &Ent : M1) {
+    for (auto &Node : Ent.first) {
+      M1Rev[Ent.second].insert(Node.Graph);
+    }
+  }
+
+  // M1 is a map from Original state to a G1 New state, M2 is a map from G1 New
+  // states to a G2 New state. build a map of Original states to a G2 New state.
+  for (auto &Ent : M2) {
+    std::set<CGNode *> OriginalNodeSet;
+    for (auto G1Node : Ent.first) {
+      for (auto OriNode : M1Rev[G1Node.Graph]) {
+        OriginalNodeSet.insert(OriNode);
+      }
+    }
+    assert(&Ent.second->Parent == G2);
+    Result[OriginalNodeSet] = Ent.second;
+  }
+
+  return Result;
 }
 
 ConstraintGraph minimize(const ConstraintGraph *G) {
@@ -25,4 +56,21 @@ ConstraintGraph minimize(const ConstraintGraph *G) {
   D2.run();
   return NewG2;
 }
+
+ConstraintGraph
+minimizeWithMap(const ConstraintGraph *G,
+                std::map<std::set<CGNode *>, CGNode *> &NodeMap) {
+  ConstraintGraph NewG(G->Ctx, G->getName(), true);
+  NFAInvDeterminizer D(G, &NewG);
+  D.run();
+  ConstraintGraph NewG2(G->Ctx, G->getName(), true);
+  NFAInvDeterminizer D2(&NewG, &NewG2);
+
+  // Combine two map
+  NodeMap = combineDFAMap(D.DTrans, D2.DTrans, &NewG2);
+
+  D2.run();
+  return NewG2;
+}
+
 } // namespace notdec::retypd

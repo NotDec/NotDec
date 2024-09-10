@@ -418,8 +418,6 @@ void ConstraintGraph::markVariance() {
   return;
 }
 
-/// Intersect the language, that disallow recall and forget the same thing.
-/// Must not have null/epsilon moves.
 void ConstraintGraph::pushSplit() {
   std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
   std::set<std::tuple<CGNode *, EdgeLabel, EdgeLabel>> toIsolate;
@@ -666,30 +664,22 @@ void ConstraintGraph::layerSplit() {
   }
 }
 
-std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
-  // 1 clone the graph
-  ConstraintGraph G = clone();
-
-  // 2. add recall edge to the node.
-  G.addEdge(*G.getStartNode(), G.getOrInsertNode(N.key, N.Size),
-            RecallBase{.Base = N.key.Base, .V = N.key.SuffixVariance});
-
-  // G.printGraph("sketches1.dot");
-  // 3. make all nodes accepting. focus on the recall subgraph, but allow recall
+void ConstraintGraph::sketchSplit() {
+  // 1. make all nodes accepting. focus on the recall subgraph, but allow recall
   // base primitive.
-  for (auto &Ent : G.Nodes) {
+  for (auto &Ent : Nodes) {
     auto &Source = Ent.second;
-    // 3.1 remove all forget label edge
+    // 1.1 remove all forget label edge
     for (auto &Edge : Source.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
       if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
-        G.removeEdge(Source, Target, Edge.Label);
+        removeEdge(Source, Target, Edge.Label);
       }
     }
-    if (&Source == G.Start || &Source == G.End) {
+    if (&Source == Start || &Source == End) {
       continue;
     }
-    // 3.2 if the node has not forget prim edge, add one to top.
+    // 1.2 if the node has not forget prim edge, add one to top.
     bool HasForgetPrim = false;
     for (auto &Edge : Source.outEdges) {
       if (std::holds_alternative<ForgetBase>(Edge.Label)) {
@@ -700,16 +690,30 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
       }
     }
     if (!HasForgetPrim) {
-      G.addEdge(Source, *G.getEndNode(),
-                ForgetBase{.Base = TypeVariable::CreatePrimitive(Ctx, "top"),
-                           .V = Source.key.SuffixVariance});
+      addEdge(Source, *getEndNode(),
+              ForgetBase{.Base = TypeVariable::CreatePrimitive(Ctx, "top"),
+                         .V = Source.key.SuffixVariance});
     }
   }
-  // 4. Link vars from primitives to #End.
+  // 2. Link vars from primitives to #End.
   std::set<std::string> Vars = {};
-  G.linkEndVars(Vars);
+  linkEndVars(Vars);
+}
 
-  // 5. solve the sketch
+std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
+  assert(&N.Parent == this && "solveSketch: node is not in the graph");
+  // 1 clone the graph
+  ConstraintGraph G = clone();
+
+  // 2. add recall edge to the node.
+  G.addEdge(*G.getStartNode(), G.getOrInsertNode(N.key, N.Size),
+            RecallBase{.Base = N.key.Base, .V = N.key.SuffixVariance});
+
+  // G.printGraph("sketches1.dot");
+  // 3. focus on the recall subgraph.
+  G.sketchSplit();
+
+  // 4. solve the sketch
   auto G2 = G.simplify();
   // G2.printGraph("before-sketch.dot");
 
@@ -717,6 +721,60 @@ std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
   auto Sk = Sketch::fromConstraintGraph(G2, Name + "-" + N.key.str());
   // Sk->printGraph("sketch.dot");
   return Sk;
+}
+
+void ConstraintGraph::solveSketchQueries(
+    const std::vector<std::pair<
+        TypeVariable, std::function<void(std::shared_ptr<retypd::Sketch>)>>>
+        &Queries) const {
+  // 1 clone the graph
+  ConstraintGraph G = clone();
+
+  // 2. add recall edges to these nodes.
+  assert(G.getStartNode()->outEdges.empty() && "solveSketchQueries: start node "
+                                               "should not have any out edges");
+  for (auto &Ent : Queries) {
+    auto &N = G.getOrInsertNode(Ent.first);
+    assert(N.key.SuffixVariance == Covariant);
+    G.addEdge(*G.getStartNode(), N,
+              RecallBase{.Base = N.key.Base, .V = N.key.SuffixVariance});
+  }
+
+  // 3. focus on the recall subgraph.
+  G.sketchSplit();
+
+  // 4. solve the sketch
+  auto G2 = G.simplify();
+
+  G2.printGraph("sketch-forest.dot");
+
+  // 5. for each query, relink the start edges.
+  for (auto &Ent : Queries) {
+    auto G3 = G2.clone();
+    std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> ToRemove;
+    bool found = false;
+    for (auto &Edge : G3.getStartNode()->outEdges) {
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      if (auto *RB = std::get_if<RecallBase>(&Edge.Label)) {
+        if (RB->Base == Ent.first) {
+          found = true;
+          continue;
+        }
+        // G3.removeEdge(*G3.getStartNode(), Target, Edge.Label);
+        ToRemove.emplace_back(G3.getStartNode(), &Target, Edge.Label);
+      }
+    }
+    assert(found); // must found because all nodes are accepting
+    for (auto &Ent : ToRemove) {
+      auto [Source, Target, Label] = Ent;
+      G3.removeEdge(*Source, *Target, Label);
+    }
+    assert(G3.getStartNode()->outEdges.size() == 1);
+    auto G4 = G3.simplify();
+    G4.markVariance();
+    auto Sk = Sketch::fromConstraintGraph(G4, Name + "-" + Ent.first.str());
+    Ent.second(Sk);
+  }
 }
 
 // utility function for debugging
@@ -785,9 +843,9 @@ void ConstraintGraph::saturate() {
           if (ReachingSet.count(&Source)) {
             for (auto &Reach : ReachingSet[&Source]) {
               if (Reach.first == Capa.label && Reach.second != &Target) {
-                LLVM_DEBUG(llvm::dbgs()
-                           << "Adding Edge From " << Reach.second->key.str()
-                           << " to " << Target.key.str() << " with _1_ \n");
+                // LLVM_DEBUG(llvm::dbgs()
+                //            << "Adding Edge From " << Reach.second->key.str()
+                //            << " to " << Target.key.str() << " with _1_ \n");
                 // We are iterating through Recall edges, and we insert One
                 // edge, so it is ok to modify edge during iterating.
                 Changed |= addEdge(*Reach.second, Target, One{});
@@ -1071,19 +1129,27 @@ ExprToConstraintsContext::constraintsSequenceToConstraints(
         P = normalizePath(CS);
     auto &Cons = P.first;
 
-    std::cerr << ((P.second == Covariant) ? "" : "Skipped ") << "Cons: \n";
+    // std::cerr << ((P.second == Covariant) ? "" : "Skipped ") << "Cons: \n";
     for (auto &Con : Cons) {
       auto &TVPair = std::get<0>(Con);
-      std::cerr << "  " << toString(&TVPair.first) << toString(std::get<1>(Con))
-                << " <= " << toString(&TVPair.second)
-                << toString(std::get<2>(Con)) << "\n";
+      // std::cerr << "  " << toString(&TVPair.first) <<
+      // toString(std::get<1>(Con))
+      //           << " <= " << toString(&TVPair.second)
+      //           << toString(std::get<2>(Con)) << "\n";
       // assert(std::get<1>(Con) == std::get<2>(Con));
-      if (std::get<1>(Con) != std::get<2>(Con)) {
-        std::cerr << "Warning:!\n";
-      }
+      // if (std::get<1>(Con) != std::get<2>(Con)) {
+      //   std::cerr << "Warning:!\n";
+      // }
       TVPair.first.Ctx = &Ctx;
       TVPair.second.Ctx = &Ctx;
-      if (P.second == Covariant && TVPair.first != TVPair.second) {
+      assert(P.second == Covariant);
+      if (TVPair.first != TVPair.second) {
+        if (TVPair.first.isPrimitive() && TVPair.second.isPrimitive()) {
+          LLVM_DEBUG(llvm::dbgs() << "Inferred subtype between primitives: "
+                                  << toString(&TVPair.first) << " <= "
+                                  << toString(&TVPair.second) << "\n");
+          continue;
+        }
         Ret.push_back(SubTypeConstraint{
             {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.first)},
             {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.second)}});

@@ -172,15 +172,27 @@ public:
   CGNode *getEndNode();
   CGNode *getMemoryNode();
 
+  void solveSketchQueries(
+      const std::vector<std::pair<
+          TypeVariable, std::function<void(std::shared_ptr<retypd::Sketch>)>>>
+          &Queries) const;
   std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
 
   // internal steps
   void saturate();
   void layerSplit();
+  /// Intersect the language, that disallow recall and forget the same thing.
+  /// Must not have null/epsilon moves.
   void pushSplit();
+  /// Intersect the language, that disallow contravariant node have both recall
+  /// in and forget out. Only care about the relation where the recall and
+  /// forget conjunction is covariant.
+  void contraVariantSplit();
   void buildPathSequence();
   void markVariance();
-  void contraVariantSplit();
+  /// Focus on the recall subgraph and use forget edge to label nodes. mark all
+  /// nodes as accepting by link with `forget #top`.
+  void sketchSplit();
   std::vector<SubTypeConstraint> solve_constraints_between();
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);

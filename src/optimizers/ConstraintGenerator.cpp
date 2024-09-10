@@ -1,9 +1,11 @@
 #include <cassert>
 #include <clang/AST/Type.h>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Value.h>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,6 +29,7 @@
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
 #include <variant>
+#include <vector>
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Schema.h"
@@ -137,7 +140,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // TODO: If the SCC is not called by any other function out of the SCC, we
     // can skip summary generation. Even start Top-down phase.
 
-    auto Summary = Generator->genSummary();
+    std::vector<retypd::SubTypeConstraint> Summary = Generator->genSummary();
 
     std::cerr << "Summary for " << Name << ":\n";
     for (auto &C : Summary) {
@@ -198,6 +201,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       }
     }
 
+    std::vector<std::pair<TypeVariable,
+                          std::function<void(std::shared_ptr<retypd::Sketch>)>>>
+        Queries;
+    std::map<Value *, std::shared_ptr<retypd::Sketch>> StackSketches;
+
     for (CallGraphNode *CGN : NodeVec) {
       auto *Current = CGN->getFunction();
       if (Current == nullptr) {
@@ -212,14 +220,21 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
 
         for (int i = 0; i < Current->arg_size(); i++) {
-          auto TV = Generator->solveType(getCallArgTV(TRCtx, Current, 0, i));
           assert(CurrentSketches.first[i] == nullptr);
-          CurrentSketches.first[i] = TV;
+          // auto Sk = Generator->solveType(getCallArgTV(TRCtx, Current, 0, i));
+          // CurrentSketches.first[i] = Sk;
+          Queries.emplace_back(getCallArgTV(TRCtx, Current, 0, i),
+                               [&CurrentSketches, i](auto Sk) {
+                                 CurrentSketches.first[i] = Sk;
+                               });
         }
         if (!Current->getReturnType()->isVoidTy()) {
-          auto TV = Generator->solveType(getCallRetTV(TRCtx, Current, 0));
           assert(CurrentSketches.second == nullptr);
-          CurrentSketches.second = TV;
+          // auto Sk = Generator->solveType(getCallRetTV(TRCtx, Current, 0));
+          // CurrentSketches.second = Sk;
+          Queries.emplace_back(
+              getCallRetTV(TRCtx, Current, 0),
+              [&CurrentSketches](auto Sk) { CurrentSketches.second = Sk; });
         }
       }
       // Solve types for callee actual arguments.
@@ -243,25 +258,62 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
         size_t InstanceId = Generator->CallToID.at(I);
         for (int i = 0; i < I->arg_size(); i++) {
-          auto TV = getCallArgTV(TRCtx, Target, InstanceId, i);
-          auto Sketch = Generator->solveType(TV);
-          if (TargetSketches.first[i] == nullptr) {
-            TargetSketches.first[i] = Sketch;
-          } else {
-            TargetSketches.first[i]->join(*Sketch);
-          }
+          // auto TV = getCallArgTV(TRCtx, Target, InstanceId, i);
+          // auto Sketch = Generator->solveType(TV);
+          // if (TargetSketches.first[i] == nullptr) {
+          //   TargetSketches.first[i] = Sketch;
+          // } else {
+          //   TargetSketches.first[i]->join(*Sketch);
+          // }
+          Queries.emplace_back(getCallArgTV(TRCtx, Target, InstanceId, i),
+                               [&TargetSketches, i](auto Sk) {
+                                 if (TargetSketches.first[i] == nullptr) {
+                                   TargetSketches.first[i] = Sk;
+                                 } else {
+                                   TargetSketches.first[i]->join(*Sk);
+                                 }
+                               });
         }
         if (!I->getType()->isVoidTy()) {
-          auto TV = getCallRetTV(TRCtx, Target, InstanceId);
-          auto Sketch = Generator->solveType(TV);
-          if (TargetSketches.second == nullptr) {
-            TargetSketches.second = Sketch;
-          } else {
-            TargetSketches.second->join(*Sketch);
+          // auto TV = getCallRetTV(TRCtx, Target, InstanceId);
+          // auto Sketch = Generator->solveType(TV);
+          // if (TargetSketches.second == nullptr) {
+          //   TargetSketches.second = Sketch;
+          // } else {
+          //   TargetSketches.second->join(*Sketch);
+          // }
+          Queries.emplace_back(getCallRetTV(TRCtx, Target, InstanceId),
+                               [&TargetSketches](auto Sk) {
+                                 if (TargetSketches.second == nullptr) {
+                                   TargetSketches.second = Sk;
+                                 } else {
+                                   TargetSketches.second->join(*Sk);
+                                 }
+                               });
+        }
+      }
+      // Solve Stacks
+      if (!Current->isDeclaration()) {
+        // find all alloca in entry block and convert.
+        for (auto &I : Current->getEntryBlock()) {
+          if (auto *AI = dyn_cast<AllocaInst>(&I)) {
+            // auto Sk =
+            //     Generator->solveType(Generator->getNode(AI,
+            //     nullptr).key.Base);
+            // if (Sk != nullptr) {
+            //   StackSketches.emplace(AI, Sk);
+            // }
+            Queries.emplace_back(Generator->getNode(AI, nullptr).key.Base,
+                                 [&StackSketches, AI](auto Sk) {
+                                   StackSketches.emplace(AI, Sk);
+                                 });
           }
         }
       }
     }
+
+    // Solve all queries
+    Generator->CG.solveSketchQueries(Queries);
 
     // Convert the Arg and return type of functions in current SCC and save to
     // result
@@ -302,11 +354,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         // find all alloca in entry block and convert.
         for (auto &I : Current->getEntryBlock()) {
           if (auto *AI = dyn_cast<AllocaInst>(&I)) {
-            auto Sk =
-                Generator->solveType(Generator->getNode(AI, nullptr).key.Base);
-            if (Sk == nullptr) {
+            if (StackSketches.count(AI) == 0) {
               continue;
             }
+            auto Sk = StackSketches.at(AI);
             auto CTy =
                 TB.buildType(*Sk, AI->getType()->getPrimitiveSizeInBits());
             dumpTypes(AI, CTy);
@@ -532,8 +583,8 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
       }
       if (CE->getOpcode() == Instruction::IntToPtr) {
         if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
-          auto tv = makeTv(Ctx.TRCtx, CG.Memory);
-          addOffset(tv, OffsetRange{.offset = Addr->getSExtValue()});
+          auto tv = CG.getMemoryNode()->key.Base;
+          tv = addOffset(tv, OffsetRange{.offset = Addr->getSExtValue()});
           return tv;
         }
       }
@@ -986,7 +1037,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitSub(BinaryOperator &I) {
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {
-  llvm::errs() << "visiting " << __FUNCTION__ << " \n";
+  // llvm::errs() << "visiting " << __FUNCTION__ << " \n";
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);
@@ -1012,7 +1063,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) {
-  llvm::errs() << "Visiting " << __FUNCTION__ << " \n";
+  // llvm::errs() << "Visiting " << __FUNCTION__ << " \n";
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);

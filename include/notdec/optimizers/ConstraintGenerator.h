@@ -294,6 +294,8 @@ protected:
     // ignore control flow related instructions
     void visitUnreachableInst(UnreachableInst &I) {}
     void visitBranchInst(BranchInst &I) {}
+    void visitSwitchInst(SwitchInst &I) {}
+
     void handlePHINodes();
     // use opTypes to handle other insts.
     void visitInstruction(Instruction &I);
