@@ -11,10 +11,14 @@
 - add typedef for boolean constant
 - handle unordered float pointer operation
 
-**Type recovery**
-- Check for any possible name collision, especially for function.
+**Type Recovery**
+- How to recognize array? and nested array and structs.
 - how to handle dynamic call using function pointer? how to traverse reverse post order?
-- Add a test case for basic block not in topo order. Check whether opt passes will reorder it.
+- How to allow user annotated type to propagate freely. How to do library recognition?
+- Combine Type Recovery with pointer analysis. Focus on the type of allocated objects.
+
+**Type recovery - detail**
+- Check for any possible name collision, especially for function.
 - Check if PNI graph correctly reflected in summary using a test case.
 
 ## Changelog

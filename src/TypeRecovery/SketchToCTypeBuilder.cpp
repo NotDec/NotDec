@@ -1,5 +1,9 @@
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/Range.h"
+#include "clang/AST/Attr.h"
+#include "clang/AST/Comment.h"
+#include <clang/AST/ASTFwd.h>
+#include <clang/Basic/SourceLocation.h>
 
 namespace notdec::retypd {
 
@@ -148,6 +152,26 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const SketchNode &Node,
       clang::FieldDecl *Field = clang::FieldDecl::Create(
           Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII,
           Ent.second, nullptr, nullptr, false, clang::ICIS_NoInit);
+
+      bool useComment = false;
+      if (useComment) {
+        // TODO support comment. ASTWriter does not support comment?
+        clang::comments::TextComment *TC =
+            new (Ctx.getAllocator()) clang::comments::TextComment(
+                clang::SourceLocation(), clang::SourceLocation(),
+                "off:" + std::to_string(Ent.first.offset));
+        clang::comments::ParagraphComment *PC =
+            new (Ctx.getAllocator()) clang::comments::ParagraphComment(
+                clang::ArrayRef<clang::comments::InlineContentComment *>(TC));
+        clang::comments::FullComment *FC = new (Ctx.getAllocator())
+            clang::comments::FullComment({PC}, nullptr);
+        Ctx.ParsedComments[Field] = FC;
+      } else {
+        Field->addAttr(clang::AnnotateAttr::Create(
+            Ctx, "off:" + std::to_string(Ent.first.offset), nullptr, 0,
+            clang::AttributeCommonInfo(clang::SourceRange())));
+      }
+
       Decl->addDecl(Field);
     }
     Decl->completeDefinition();

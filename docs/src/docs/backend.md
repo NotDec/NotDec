@@ -344,3 +344,34 @@ GetElementPtr先获取内部指针值的类型，然后依次处理每个下标�
 **添加注释**
 
 添加注释不是简单地插入AST，因为Clang没有把注释这样管理，而是直接插入到ASTContext里面，而且要创建RawComment，而不是对应的语法树结构。没有找到将对应的Comment类插入进去的函数，应该需要自己实现。可能需要把字符串直接插入SourceManager里面，然后把sourceRange拿出来创建Comments。
+
+### Annotation与标注
+
+- Decl底下可以有Comment。似乎是来自ASTContext里的[`ParsedComments`](https://github.com/llvm/llvm-project/blob/e6de9ed37308e46560243229dd78e84542f37ead/clang/include/clang/AST/ASTContext.h#L831)Map，将Decl映射到Comment。使用cacheRawCommentForDecl添加映射。
+  - TODO: 当前增加之后还不能打印出来。虽然ASTDump（打印语法树结构）支持，但是ASTWriter似乎还没支持FullComment。
+- annotation则是作为一种attr添加，比如[这里](https://github.com/llvm/llvm-project/blob/2618247c61c25cf9bd4cb315ee51cff2b3ab3add/clang/examples/AnnotateFunctions/AnnotateFunctions.cpp#L35)。
+
+
+```c
+struct st {
+   __attribute__((annotate("str"))) int  a ; 
+  /*hello=1*/int b;
+  long c; // off=2
+  struct st* d;
+};
+```
+
+```
+|-RecordDecl 0x5580d0 prev 0x558028 <line:5:1, line:10:1> line:5:8 struct st definition
+| |-FieldDecl 0x5581c0 <line:6:4, col:42> col:42 a 'int'
+| | `-AnnotateAttr 0x558210 <col:19, col:33> "str"
+| |-FieldDecl 0x5582d0 <line:7:14, col:18> col:18 b 'int'
+| | `-FullComment 0x558890 <col:5, col:11>
+| |   `-ParagraphComment 0x558860 <col:5, col:11>
+| |     `-TextComment 0x558830 <col:5, col:11> Text="hello=1"
+| |-FieldDecl 0x558338 <line:8:3, col:8> col:8 c 'long'
+| | `-FullComment 0x558960 <col:13, col:18>
+| |   `-ParagraphComment 0x558930 <col:13, col:18>
+| |     `-TextComment 0x558900 <col:13, col:18> Text=" off=2"
+| `-FieldDecl 0x558470 <line:9:3, col:14> col:14 d 'struct st *'
+```
