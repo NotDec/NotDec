@@ -50,7 +50,7 @@ void inline assert_size_t(llvm::Value *val, llvm::Module &M) {
   assert(is_size_t(val, M));
 }
 
-void printModule(llvm::Module &M, const char *path);
+bool printModule(llvm::Module &M, const char *path);
 
 /// An ilist node that can access its parent list and has eraseFromParent impl.
 ///

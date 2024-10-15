@@ -136,6 +136,9 @@ struct ConstraintGraph {
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
   bool isLayerSplit = false;
+  // If the graph has eliminated the forget-label edges for building sketches.
+  // TODO: update set and check of the flag, or use a enum for state.
+  bool isSketchSplit = false;
   // TODO prevent name collision
   static const char *Memory;
   CGNode *MemoryNode = nullptr;
@@ -201,6 +204,14 @@ public:
   static ConstraintGraph fromConstraints(TRContext &Ctx, std::string FuncName,
                                          std::vector<Constraint> &Cons);
 
+  bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    auto it = From.outEdges.emplace(From, To, Label);
+    if (it.second) {
+      To.inEdges.insert(const_cast<CGEdge *>(&*it.first));
+    }
+    return it.second;
+  }
+
 protected:
   // Graph related operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
@@ -229,13 +240,6 @@ protected:
       }
     }
     return onlyAddEdge(From, To, Label);
-  }
-  bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
-    auto it = From.outEdges.emplace(From, To, Label);
-    if (it.second) {
-      To.inEdges.insert(const_cast<CGEdge *>(&*it.first));
-    }
-    return it.second;
   }
   friend struct CGNode;
   template <typename GraphTy, typename NodeTy> friend struct NFADeterminizer;

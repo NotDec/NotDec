@@ -40,7 +40,7 @@ public:
     return Instance.getNewName(Val, prefix, Unique);
   }
   static std::string getName(const char *prefix = ValueNamer::DefaultPrefix) {
-    return Instance.getNewName();
+    return Instance.getNewName(prefix);
   }
   static const char *DefaultPrefix;
   static const char *FuncPrefix;

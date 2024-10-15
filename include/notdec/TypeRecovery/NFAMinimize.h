@@ -39,7 +39,7 @@ struct NFADeterminizer {
     auto OldGEnd = GT::getExitNode(OldG);
     assert(NewG->empty() && "NewG must be empty");
     // 1. Map the start/end node
-    std::set<NodeTy> StartSet = {OldGStart};
+    std::set<NodeTy> StartSet = countClosure({OldGStart});
     auto StartIt = DTrans.emplace(StartSet, NewG->getStartNode());
     DTrans[{OldGEnd}] = NewG->getEndNode();
     Worklist.push(StartIt.first);
@@ -129,6 +129,9 @@ struct NFADeterminizer {
 using NFAInvDeterminizer = NFADeterminizer<llvm::InverseVal<ConstraintGraph *>,
                                            llvm::InverseVal<CGNode *>>;
 ConstraintGraph determinize(const ConstraintGraph *G);
+ConstraintGraph
+determinizeWithMap(const ConstraintGraph *G,
+                   std::map<std::set<CGNode *>, CGNode *> &NodeMap);
 ConstraintGraph minimize(const ConstraintGraph *G);
 ConstraintGraph
 minimizeWithMap(const ConstraintGraph *G,

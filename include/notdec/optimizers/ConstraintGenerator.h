@@ -124,6 +124,7 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
       FuncSummaries;
+  // map from function to its argument and return type sketches.
   std::map<llvm::Function *,
            std::pair<std::vector<std::shared_ptr<retypd::Sketch>>,
                      std::shared_ptr<retypd::Sketch>>>
@@ -147,6 +148,9 @@ struct ConstraintsGenerator {
   retypd::PNIGraph &PG;
   std::set<llvm::Function *> SCCs;
   std::map<CallBase *, size_t> CallToID;
+
+  // Map from named types to sketches.
+  std::map<std::string, std::unique_ptr<ConstraintGraph>> NodeMap;
 
   std::vector<retypd::SubTypeConstraint> genSummary();
   std::function<const std::vector<retypd::SubTypeConstraint> *(

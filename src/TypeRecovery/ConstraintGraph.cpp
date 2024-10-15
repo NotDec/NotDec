@@ -689,7 +689,7 @@ void ConstraintGraph::sketchSplit() {
         }
       }
     }
-    if (!HasForgetPrim) {
+    if (!HasForgetPrim && !Source.key.Base.isPrimitive()) {
       addEdge(Source, *getEndNode(),
               ForgetBase{.Base = TypeVariable::CreatePrimitive(Ctx, "top"),
                          .V = Source.key.SuffixVariance});
@@ -1339,6 +1339,7 @@ ConstraintGraph ConstraintGraph::clone(bool removePNI) const {
 
   // handle fields
   G.isLayerSplit = isLayerSplit;
+  G.isSketchSplit = isSketchSplit;
   if (MemoryNode) {
     G.MemoryNode = Old2New.at(MemoryNode);
   }

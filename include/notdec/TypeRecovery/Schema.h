@@ -472,7 +472,7 @@ struct ForgetLabel {
 };
 struct ForgetBase {
   TypeVariable Base;
-  Variance V;
+  Variance V = Covariant;
   bool operator<(const ForgetBase &rhs) const {
     return std::tie(Base, V) < std::tie(rhs.Base, rhs.V);
   }
@@ -489,7 +489,7 @@ struct RecallLabel {
 };
 struct RecallBase {
   TypeVariable Base;
-  Variance V;
+  Variance V = Covariant;
   bool operator<(const RecallBase &rhs) const {
     return std::tie(Base, V) < std::tie(rhs.Base, rhs.V);
   }

@@ -73,4 +73,14 @@ minimizeWithMap(const ConstraintGraph *G,
   return NewG2;
 }
 
+ConstraintGraph
+determinizeWithMap(const ConstraintGraph *G,
+                   std::map<std::set<CGNode *>, CGNode *> &NodeMap) {
+  ConstraintGraph NewG(G->Ctx, G->getName(), true);
+  NFADeterminizer D(G, &NewG);
+  D.run();
+  NodeMap = D.DTrans;
+  return NewG;
+}
+
 } // namespace notdec::retypd
