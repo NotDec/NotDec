@@ -253,7 +253,8 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
 }
 
 ConstraintGraph ConstraintGraph::cloneAndSimplify() const {
-  auto G = clone();
+  std::map<const CGNode *, CGNode *> Old2New;
+  auto G = clone(Old2New);
   return G.simplify();
 }
 
@@ -495,7 +496,8 @@ void ConstraintGraph::pushSplit() {
 std::vector<SubTypeConstraint>
 ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) const {
   // TODO: eliminate this clone by removing Start and End nodes later.
-  auto G = clone();
+  std::map<const CGNode *, CGNode *> Old2New;
+  auto G = clone(Old2New);
   G.linkVars(InterestingVars);
   auto G2 = G.simplify();
 
@@ -703,7 +705,8 @@ void ConstraintGraph::sketchSplit() {
 std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
   assert(&N.Parent == this && "solveSketch: node is not in the graph");
   // 1 clone the graph
-  ConstraintGraph G = clone();
+  std::map<const CGNode *, CGNode *> Old2New;
+  ConstraintGraph G = clone(Old2New);
 
   // 2. add recall edge to the node.
   G.addEdge(*G.getStartNode(), G.getOrInsertNode(N.key, N.Size),
@@ -728,7 +731,8 @@ void ConstraintGraph::solveSketchQueries(
         TypeVariable, std::function<void(std::shared_ptr<retypd::Sketch>)>>>
         &Queries) const {
   // 1 clone the graph
-  ConstraintGraph G = clone();
+  std::map<const CGNode *, CGNode *> Old2New;
+  ConstraintGraph G = clone(Old2New);
 
   // 2. add recall edges to these nodes.
   assert(G.getStartNode()->outEdges.empty() && "solveSketchQueries: start node "
@@ -750,7 +754,8 @@ void ConstraintGraph::solveSketchQueries(
 
   // 5. for each query, relink the start edges.
   for (auto &Ent : Queries) {
-    auto G3 = G2.clone();
+    std::map<const CGNode *, CGNode *> Old2New;
+    auto G3 = G2.clone(Old2New);
     std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> ToRemove;
     bool found = false;
     for (auto &Edge : G3.getStartNode()->outEdges) {
@@ -991,6 +996,14 @@ void ConstraintGraph::addForgets(CGNode &N) {
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size) {
   auto [it, inserted] = Nodes.try_emplace(N, *this, N, Size);
   return it->second;
+}
+
+void ConstraintGraph::removeNode(const NodeKey &N) {
+  assert(Nodes.count(N) && "removeNode: node not found");
+  auto &Node = Nodes.at(N);
+  assert(Node.outEdges.empty() && "removeNode: node has out edges");
+  assert(Node.inEdges.empty() && "removeNode: node has in edges");
+  Nodes.erase(N);
 }
 
 void ConstraintGraph::printGraph(const char *DotFile) const {
@@ -1307,8 +1320,10 @@ ConstraintGraph::ConstraintGraph(TRContext &Ctx, std::string Name,
   }
 }
 
-ConstraintGraph ConstraintGraph::clone(bool removePNI) const {
-  std::map<const CGNode *, CGNode *> Old2New;
+ConstraintGraph
+ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
+                       bool removePNI) const {
+  assert(Old2New.empty() && "clone: Old2New is not empty!");
   // loses CG pointer when cloning.
   ConstraintGraph G(Ctx, Name, (!(bool)PG) || removePNI);
 

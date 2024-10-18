@@ -144,8 +144,10 @@ struct ConstraintGraph {
   CGNode *MemoryNode = nullptr;
 
   ConstraintGraph(TRContext &Ctx, std::string Name, bool disablePNI = false);
-  ConstraintGraph clone(bool removePNI = false) const;
+  ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New,
+                        bool removePNI = false) const;
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
+  void removeNode(const NodeKey &N);
 
   std::string getName() const { return Name; }
   using iterator = std::map<NodeKey, CGNode>::iterator;
@@ -212,7 +214,6 @@ public:
     return it.second;
   }
 
-protected:
   // Graph related operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     auto it = From.outEdges.find(CGEdge(From, To, Label));
@@ -220,6 +221,8 @@ protected:
     To.inEdges.erase(const_cast<CGEdge *>(&*it));
     From.outEdges.erase(it);
   }
+
+protected:
   bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
       if (std::holds_alternative<One>(Label)) {

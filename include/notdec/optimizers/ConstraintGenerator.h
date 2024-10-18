@@ -163,6 +163,12 @@ struct ConstraintsGenerator {
   void instantiateSketchAsSup(ExtValuePtr Val,
                               std::shared_ptr<retypd::Sketch> Sk);
 
+  // for determinization: extended powerset construction
+  std::map<std::set<CGNode *>, CGNode *> DTrans;
+  void determinize();
+  void determinizeTo(ConstraintGraph &Other,
+                     std::map<CGNode *, CGNode *> &Old2New);
+
   void run();
   ConstraintsGenerator(
       TypeRecovery &Ctx, std::string Name, std::set<llvm::Function *> SCCs,
