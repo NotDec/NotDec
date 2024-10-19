@@ -682,20 +682,20 @@ void ConstraintGraph::sketchSplit() {
       continue;
     }
     // 1.2 if the node has not forget prim edge, add one to top.
-    bool HasForgetPrim = false;
-    for (auto &Edge : Source.outEdges) {
-      if (std::holds_alternative<ForgetBase>(Edge.Label)) {
-        if (std::get<ForgetBase>(Edge.Label).Base.isPrimitive()) {
-          HasForgetPrim = true;
-          break;
-        }
-      }
-    }
-    if (!HasForgetPrim && !Source.key.Base.isPrimitive()) {
-      addEdge(Source, *getEndNode(),
-              ForgetBase{.Base = TypeVariable::CreatePrimitive(Ctx, "top"),
-                         .V = Source.key.SuffixVariance});
-    }
+    // bool HasForgetPrim = false;
+    // for (auto &Edge : Source.outEdges) {
+    //   if (std::holds_alternative<ForgetBase>(Edge.Label)) {
+    //     if (std::get<ForgetBase>(Edge.Label).Base.isPrimitive()) {
+    //       HasForgetPrim = true;
+    //       break;
+    //     }
+    //   }
+    // }
+    // if (!HasForgetPrim && !Source.key.Base.isPrimitive()) {
+    //   addEdge(Source, *getEndNode(),
+    //           ForgetBase{.Base = TypeVariable::CreatePrimitive(Ctx, "top"),
+    //                      .V = Source.key.SuffixVariance});
+    // }
   }
   // 2. Link vars from primitives to #End.
   std::set<std::string> Vars = {};

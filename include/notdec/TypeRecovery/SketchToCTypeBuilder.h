@@ -1,8 +1,8 @@
 #ifndef _NOTDEC_RETYPD_SK2C_H
 #define _NOTDEC_RETYPD_SK2C_H
 
+#include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Schema.h"
-#include "TypeRecovery/Sketch.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
 #include <clang/AST/ASTContext.h>
@@ -28,16 +28,16 @@ struct SketchToCTypeBuilder {
   SketchToCTypeBuilder(llvm::StringRef FileName)
       : ASTUnit(clang::tooling::buildASTFromCode("", "decompilation.c")) {}
 
-  clang::QualType buildType(const Sketch &Sk, unsigned BitSize) {
+  clang::QualType buildType(const CGNode &Root, unsigned BitSize) {
     TypeBuilderImpl Builder{ASTUnit->getASTContext()};
-    return Builder.visitType(*Sk.Root, BitSize);
+    return Builder.visitType(Root, BitSize);
   }
 
   struct TypeBuilderImpl {
     clang::ASTContext &Ctx;
-    std::map<const SketchNode *, clang::QualType> NodeTypeMap;
-    std::set<const SketchNode *> Visited;
-    clang::QualType visitType(const SketchNode &Node, unsigned BitSize);
+    std::map<const CGNode *, clang::QualType> NodeTypeMap;
+    std::set<const CGNode *> Visited;
+    clang::QualType visitType(const CGNode &Node, unsigned BitSize);
   };
 };
 

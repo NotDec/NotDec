@@ -49,7 +49,7 @@ clang::RecordDecl *createStruct(clang::ASTContext &Ctx) {
 }
 
 clang::QualType
-SketchToCTypeBuilder::TypeBuilderImpl::visitType(const SketchNode &Node,
+SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
                                                  unsigned BitSize) {
   if (Visited.count(&Node)) {
     if (NodeTypeMap.count(&Node)) {
@@ -68,47 +68,60 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const SketchNode &Node,
 
   // 1. no out edges, then it is a simple primitive type
   if (Node.outEdges.empty()) {
-    return fromLatticeElem(Ctx, Node.Element, BitSize);
+    // assert(false && "TODO");
+    return fromLatticeElem(Ctx, "top", BitSize);
+  }
+  // if only one edge to #End with forget primitive, then it is a simple
+  // primitive type
+  if (Node.outEdges.size() == 1) {
+    auto &Edge = *Node.outEdges.begin();
+    if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
+      if (FB->Base.isPrimitive()) {
+        return fromLatticeElem(Ctx, FB->Base.getPrimitiveName(), BitSize);
+      }
+    }
   }
 
   // std::map<OffsetLabel, SketchNode *> Off2Node;
   std::map<OffsetRange, clang::QualType> FieldMap;
-  std::optional<std::pair<LoadLabel, SketchNode *>> Load2Node;
-  std::optional<std::pair<StoreLabel, SketchNode *>> Store2Node;
+  std::optional<std::pair<LoadLabel, CGNode *>> Load2Node;
+  std::optional<std::pair<StoreLabel, CGNode *>> Store2Node;
   // handle all out edges
   for (auto &Edge : Node.outEdges) {
-    auto &Target = const_cast<SketchNode &>(Edge.getTargetNode());
-    if (auto *OL = std::get_if<OffsetLabel>(&Edge.getLabel())) {
-      // handle offset edges:
-      // must be struct type. Save to map early.
-      if (!NodeTypeMap.count(&Node)) {
-        // must be struct type
-        clang::RecordDecl *Decl = createStruct(Ctx);
-        //
-        NodeTypeMap.emplace(&Node, Ctx.getPointerType(Ctx.getRecordType(Decl)));
-        auto It = FieldMap.emplace(OL->range, visitType(Target, BitSize));
-        assert(It.second && "Duplicate offset edge");
+    auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+    if (auto *RL = std::get_if<RecallLabel>(&Edge.getLabel())) {
+      if (auto *OL = std::get_if<OffsetLabel>(&RL->label)) {
+        // handle offset edges:
+        // must be struct type. Save to map early.
+        if (!NodeTypeMap.count(&Node)) {
+          // must be struct type
+          clang::RecordDecl *Decl = createStruct(Ctx);
+          NodeTypeMap.emplace(&Node,
+                              Ctx.getPointerType(Ctx.getRecordType(Decl)));
+          auto It = FieldMap.emplace(OL->range, visitType(Target, BitSize));
+          assert(It.second && "Duplicate offset edge");
+        }
+      } else if (auto *LL = std::get_if<LoadLabel>(&RL->label)) {
+        // assert(!Load2Node);
+        if (Load2Node) {
+          llvm::errs()
+              << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
+              << toString(Edge.getLabel()) << " and "
+              << toString(Load2Node->first) << "\n";
+        }
+        Load2Node.emplace(*LL, &Target);
+      } else if (auto *SL = std::get_if<StoreLabel>(&RL->label)) {
+        if (Store2Node) {
+          // TODO: create union?
+          llvm::errs()
+              << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
+              << toString(Edge.getLabel()) << " and "
+              << toString(Store2Node->first) << "\n";
+        }
+        Store2Node.emplace(*SL, &Target);
+      } else {
+        assert(false && "Unknown edge type");
       }
-    } else if (auto *LL = std::get_if<LoadLabel>(&Edge.getLabel())) {
-      // assert(!Load2Node);
-      if (Load2Node) {
-        llvm::errs()
-            << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
-            << toString(Edge.getLabel()) << " and "
-            << toString(Load2Node->first) << "\n";
-      }
-      Load2Node.emplace(*LL, &Target);
-    } else if (auto *SL = std::get_if<StoreLabel>(&Edge.getLabel())) {
-      if (Store2Node) {
-        // TODO: create union?
-        llvm::errs()
-            << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
-            << toString(Edge.getLabel()) << " and "
-            << toString(Store2Node->first) << "\n";
-      }
-      Store2Node.emplace(*SL, &Target);
-    } else {
-      assert(false && "Unknown edge type");
     }
   }
 
@@ -123,7 +136,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const SketchNode &Node,
   } else if (Load2Node && Store2Node) {
     // assert(false && "Is this case really exist?");
     // both load and store present, prefer load when covariant,
-    if (Node.V == Covariant) {
+    if (Node.key.SuffixVariance == Covariant) {
       LoadOrStoreTy = visitType(*Load2Node->second, Load2Node->first.Size);
     } else {
       // prefer store when contravariant
