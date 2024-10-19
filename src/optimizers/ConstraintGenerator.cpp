@@ -68,7 +68,7 @@ std::string getName(const ExtValuePtr &Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return ValueNamer::getName(**V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    return ValueNamer::getName(*F->Func, "ReturnValue_");
+    return "ReturnValue_" + ValueNamer::getName(*F->Func, "func_");
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
     return ValueNamer::getName(*const_cast<llvm::CallBase *>(Arg->Call)) +
            "_CallArg_" + std::to_string(Arg->Index);
@@ -219,7 +219,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         Queries;
     std::map<Value *, std::shared_ptr<retypd::Sketch>> StackSketches;
 
-    std::map<Value *, clang::QualType> ValueTypes2;
+    std::map<ExtValuePtr, clang::QualType> ValueTypes2;
     // std::map<Value *, std::shared_ptr<retypd::Sketch>> ValueTypes;
     // For a big function type graph
     // - save argument and return value sketches (save to FuncSketches),
@@ -232,6 +232,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     // TODO: how to handle function
 
+    Generator->CG.printGraph("Current.before-sks.dot");
+
     // check if saturated
     // 0. pre-process the big graph: focus on the push subgraph.
     Generator->CG.sketchSplit();
@@ -241,6 +243,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           (std::string(GraphDir) + "/" + Generator->CG.getName() + ".sks.dot")
               .c_str());
     }
+    Generator->CG.printGraph("Current.sks.dot");
 
     std::map<CGNode *, CGNode *> Old2New;
     Generator->determinizeTo(GlobalTypes, Old2New);
@@ -250,6 +253,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto *NewNode = Old2New.at(Node);
       Val2NodeGlobal.emplace(Ent.first, NewNode);
     }
+
+    GlobalTypes.printGraph("GlobalTypes.dtm.dot");
+    // TODO: Make struct type equal over subtype relation.
+    // TODO: Merge multiple forget edges.
+
+    GlobalTypes.printGraph("GlobalTypes.fin.dot");
 
     // TODO further merge and simplify graph.
 
@@ -564,11 +573,23 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     // for each value in value map
     for (auto &Ent : Generator->Val2Node) {
+      // TODO support function type.
+      if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+        if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+          continue;
+        }
+      }
       auto *Node = Ent.second;
       auto *NewNode = Old2New.at(Node);
       clang::QualType CTy = TB.buildType(*NewNode, Node->Size);
-      dumpTypes(Ent.first, CTy);
-      ValueTypes.emplace(Ent.first, Sk);
+      if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
+        llvm::errs() << "  Value: " << **V << " has type: " << CTy.getAsString()
+                     << "\n";
+      } else {
+        llvm::errs() << "  Special Value: " << getName(Ent.first)
+                     << " has type: " << CTy.getAsString() << "\n";
+      }
+      ValueTypes2.emplace(Ent.first, CTy);
     }
   }
 
@@ -593,23 +614,28 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 void ConstraintsGenerator::determinizeTo(
     ConstraintGraph &Other, std::map<CGNode *, CGNode *> &Old2New) {
   // DTrans map the set of our nodes to `Other`'s node.
+  assert(Old2New.empty());
   assert(DTrans.empty());
-  // copy all nodes in the value map
-  for (auto &Ent : Val2Node) {
-    auto &NewNode = Other.getOrInsertNode(Ent.second->key, Ent.second->Size);
-    Old2New.emplace(&Ent.second, &NewNode);
-  }
 
   using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
 
-  auto getOrSetNewNode = [this,
-                          &Other](const std::set<CGNode *> &N) -> EntryTy {
+  auto getOrSetNewNode = [this, &Other](const std::set<CGNode *> &N,
+                                        const retypd::NodeKey *Key =
+                                            nullptr) -> EntryTy {
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
-    auto &NewNode = Other.getOrInsertNode(retypd::NodeKey{
-        TypeVariable::CreateDtv(Ctx.TRCtx, ValueNamer::getName("dtm_"))});
-    auto it = DTrans.emplace(N, &NewNode);
+
+    std::pair<decltype(DTrans)::iterator, bool> it;
+    if (Key != nullptr) {
+      auto &NewNode = Other.getOrInsertNode(*Key);
+      it = DTrans.emplace(N, &NewNode);
+    } else {
+      auto &NewNode = Other.getOrInsertNode(retypd::NodeKey{
+          TypeVariable::CreateDtv(Ctx.TRCtx, ValueNamer::getName("dtm_"))});
+      it = DTrans.emplace(N, &NewNode);
+    }
+
     assert(it.second);
     return it.first;
   };
@@ -619,26 +645,29 @@ void ConstraintsGenerator::determinizeTo(
 
   // for each node in the value map
   for (auto &Ent : Val2Node) {
-    auto *NewNode = Old2New.at(Ent.second);
     std::set<CGNode *> StartSet =
         retypd::NFADeterminizer<>::countClosure({Ent.second});
-    auto pair1 = DTrans.emplace(StartSet, Ent.second);
-    if (pair1.second) {
-      Worklist.push(pair1.first);
-    } else {
-      // TODO merge the node in the value map
-      assert(false);
-    }
+    auto NewNodeEnt = getOrSetNewNode(StartSet, &Ent.second->key);
+    Old2New.emplace(Ent.second, NewNodeEnt->second);
+    Worklist.push(NewNodeEnt);
   }
 
   while (!Worklist.empty()) {
     auto It = Worklist.front();
-    auto &Node = *It->second;
+    auto &NewNode = *It->second;
     std::set<retypd::EdgeLabel> outLabels =
         retypd::NFADeterminizer<>::allOutLabels(It->first);
     for (auto &L : outLabels) {
       auto S = retypd::NFADeterminizer<>::countClosure(
           retypd::NFADeterminizer<>::move(It->first, L));
+      // print nodes in S
+      if (false) {
+        llvm::errs() << "Nodes in S: ";
+        for (auto *N : S) {
+          llvm::errs() << retypd::toString(N->key.Base) << " ";
+        }
+        llvm::errs() << "\n";
+      }
       if (S.count(CG.getEndNode())) {
         assert(S.size() == 1);
       }
@@ -647,7 +676,7 @@ void ConstraintsGenerator::determinizeTo(
         Worklist.push(NewNodeEnt);
       }
       auto &ToNode = *DTrans.at(S);
-      Other.onlyAddEdge(Node, ToNode, L);
+      Other.onlyAddEdge(NewNode, ToNode, L);
     }
     Worklist.pop();
   }

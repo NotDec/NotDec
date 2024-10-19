@@ -207,6 +207,7 @@ public:
                                          std::vector<Constraint> &Cons);
 
   bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    assert(&From.Parent == this && &To.Parent == this);
     auto it = From.outEdges.emplace(From, To, Label);
     if (it.second) {
       To.inEdges.insert(const_cast<CGEdge *>(&*it.first));
