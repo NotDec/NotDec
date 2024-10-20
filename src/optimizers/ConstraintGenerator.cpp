@@ -161,6 +161,14 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
 
   // Top-down Phase: build the result(Map from value to clang C type)
+  // We have a big global type graph, corresponds to C AST that link the
+  // declared struct type to the real definition to form a graph.
+
+  // Steps:
+  // 1. sketchSplit
+  // 2. extended powerset construction to global type graph.
+  // 3. convert to map.
+  // TODO: how to handle function type
 
   // Global type graph
   ConstraintGraph GlobalTypes(TRCtx, "GlobalTypes", true);
@@ -169,11 +177,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   TypeRecovery::Result Result;
   retypd::SketchToCTypeBuilder TB(M.getName());
-
-  const char *GraphDir = std::getenv("OUT_TOPDOWN_SPLIT_RAW");
-  if (GraphDir) {
-    system(("mkdir -p " + std::string(GraphDir)).c_str());
-  }
 
   for (auto It = AllSCCs.rbegin(); It != AllSCCs.rend(); ++It) {
     const std::vector<CallGraphNode *> &NodeVec = std::get<0>(*It);
@@ -194,7 +197,29 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       SCCSet.insert(CGN->getFunction());
     }
 
-    // instantiate the argument/return value Sketches.
+    Generator->CG.printGraph("Current.before-sks.dot");
+
+    // check if saturated
+    // 0. pre-process the big graph: focus on the push subgraph.
+    Generator->CG.sketchSplit();
+
+    // TODO remove debug output
+    Generator->CG.printGraph("Current.sks.dot");
+
+    std::map<CGNode *, CGNode *> Old2New;
+    Generator->determinizeTo(GlobalTypes, Old2New);
+    // fill the value-to-node map
+    for (auto &Ent : Generator->Val2Node) {
+      auto *Node = Ent.second;
+      auto *NewNode = Old2New.at(Node);
+      Val2NodeGlobal.emplace(Ent.first, NewNode);
+    }
+
+    GlobalTypes.printGraph("GlobalTypes.dtm.dot");
+    // TODO: Make struct type equal over subtype relation?
+    // TODO: Merge multiple forget edges.
+
+    // TODO: link the argument/return value Sketches.
     // for (CallGraphNode *CGN : NodeVec) {
     //   auto *Current = CGN->getFunction();
     //   if (Current == nullptr) {
@@ -214,389 +239,28 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     //   }
     // }
 
-    std::vector<std::pair<TypeVariable,
-                          std::function<void(std::shared_ptr<retypd::Sketch>)>>>
-        Queries;
-    std::map<Value *, std::shared_ptr<retypd::Sketch>> StackSketches;
-
-    std::map<ExtValuePtr, clang::QualType> ValueTypes2;
-    // std::map<Value *, std::shared_ptr<retypd::Sketch>> ValueTypes;
-    // For a big function type graph
-    // - save argument and return value sketches (save to FuncSketches),
-    // directly convert other values to type.
-
-    // Steps:
-    // 1. sketchSplit
-    // 2. extended powerset construction.
-    // 3. convert to map.
-
-    // TODO: how to handle function
-
-    Generator->CG.printGraph("Current.before-sks.dot");
-
-    // check if saturated
-    // 0. pre-process the big graph: focus on the push subgraph.
-    Generator->CG.sketchSplit();
-
-    if (GraphDir) {
-      Generator->CG.printGraph(
-          (std::string(GraphDir) + "/" + Generator->CG.getName() + ".sks.dot")
-              .c_str());
-    }
-    Generator->CG.printGraph("Current.sks.dot");
-
-    std::map<CGNode *, CGNode *> Old2New;
-    Generator->determinizeTo(GlobalTypes, Old2New);
-    // fill the global val map
-    for (auto &Ent : Generator->Val2Node) {
-      auto *Node = Ent.second;
-      auto *NewNode = Old2New.at(Node);
-      Val2NodeGlobal.emplace(Ent.first, NewNode);
-    }
-
-    GlobalTypes.printGraph("GlobalTypes.dtm.dot");
-    // TODO: Make struct type equal over subtype relation.
-    // TODO: Merge multiple forget edges.
-
     GlobalTypes.printGraph("GlobalTypes.fin.dot");
 
-    // TODO further merge and simplify graph.
-
-    // if (GraphDir) {
-    //   Generator->CG.printGraph(
-    //       (std::string(GraphDir) + "/" + Generator->CG.getName() + "dtm.dot")
-    //           .c_str());
-    // }
-
-    // 1. pass the value to node map, try to solve all sketches in scc order.
-    // all_scc_iterator<ConstraintGraph *> ConGI =
-    //     notdec::scc_begin(&Generator->CG);
-
-    // std::map<const retypd::CGNode *, std::shared_ptr<ConstraintGraph>>
-    //     Val2Sketch;
-    // std::set<const retypd::CGNode *> Visited;
-    // for (; !ConGI.isAtEnd(); ++ConGI) {
-    //   const std::vector<retypd::CGNode *> &NodeVec = *ConGI;
-    //   std::set<retypd::CGNode *> SCCSet =
-    //       std::set<retypd::CGNode *>(NodeVec.begin(), NodeVec.end());
-
-    //   // Try to refactor this to a iterator or for loop
-    //   while (!SCCSet.empty()) {
-    //     // select one node from SCCSet
-    //     retypd::CGNode *Current = nullptr;
-    //     if (SCCSet.size() == 1) {
-    //       Current = *SCCSet.begin();
-    //     } else {
-    //       // find a node that has outgoing edge to visited nodes.
-    //       bool hasOutgoing = false;
-    //       for (auto *Node : SCCSet) {
-    //         for (auto &Edge : Node->outEdges) {
-    //           if (Visited.count(&Edge.getTargetNode()) > 0) {
-    //             Current = Node;
-    //             hasOutgoing = true;
-    //             break;
-    //           }
-    //         }
-    //         if (hasOutgoing) {
-    //           break;
-    //         }
-    //       }
-    //       if (Current == nullptr) {
-    //         // no outgoing edge to visited nodes, must be leaf SCC, select
-    //         one
-    //         // randomly.
-    //         Current = *SCCSet.begin();
-    //       }
-    //     }
-
-    //     // ignore start or end node.
-    //     if (Current == Generator->CG.getStartNode() ||
-    //         Current == Generator->CG.getEndNode()) {
-    //       SCCSet.erase(Current);
-    //       continue;
-    //     }
-
-    //     std::string SkName = ValueNamer::getName("sk_");
-    //     std::shared_ptr<ConstraintGraph> Sk1 =
-    //         std::make_shared<ConstraintGraph>(TRCtx, SkName, true);
-    //     // pull in the subgraph, determinization, with all forget-base edges
-    //     to
-    //     // #End (Node annotations).
-    //     // Sk1->addSubGraph(SCCSet);
-
-    //     std::map<const CGNode *, CGNode *> Old2New;
-    //     // clone all nodes
-    //     for (auto *Node : SCCSet) {
-    //       auto &NewNode = Sk1->getOrInsertNode(Node->key, Node->Size);
-    //       auto Pair = Old2New.emplace(Node, &NewNode);
-    //       assert(Pair.second && "clone: Node already cloned!?");
-    //     }
-    //     // clone Start/End node.
-    //     Old2New.emplace(Generator->CG.getStartNode(), Sk1->getStartNode());
-    //     Old2New.emplace(Generator->CG.getEndNode(), Sk1->getEndNode());
-
-    //     // clone all edges
-    //     for (auto *Node : SCCSet) {
-    //       auto NewNode = Old2New.at(Node);
-    //       for (auto &Edge : Node->outEdges) {
-    //         auto &Target = Edge.getTargetNode();
-    //         // within the same SCC
-    //         CGNode *NewTarget;
-    //         if (Old2New.count(&Target) > 0) {
-    //           NewTarget = Old2New.at(&Target);
-    //         } else {
-    //           // other nodes, get the sk type, add forget edge.
-    //           auto Sk = Val2Sketch.at(&Target);
-    //           NewTarget = &Sk1->getOrInsertNode(retypd::NodeKey(
-    //               retypd::TypeVariable::CreateDtv(TRCtx, Sk->getName())));
-    //           Sk1->onlyAddEdge(
-    //               *NewTarget, *Sk->getEndNode(),
-    //               retypd::ForgetBase{.Base = retypd::TypeVariable::CreateDtv(
-    //                                      TRCtx, Sk->getName())});
-    //         }
-    //         Sk1->onlyAddEdge(*NewNode, *NewTarget, Edge.Label);
-    //       }
-    //     }
-
-    //     // add start link
-    //     Sk1->onlyAddEdge(*Sk1->getStartNode(), *Old2New.at(Current),
-    //                      retypd::One{});
-
-    //     // debug: get dot graph here.
-    //     llvm::errs() << "debug";
-
-    //     // do determinization
-    //     std::map<std::set<CGNode *>, CGNode *> NodeMap;
-    //     auto DG = retypd::determinizeWithMap(Sk1.get(), NodeMap);
-
-    //     std::map<CGNode *, std::set<CGNode *>> NodeMapR;
-    //     for (auto &Ent : NodeMap) {
-    //       NodeMapR[Ent.second].insert(Ent.first.begin(), Ent.first.end());
-    //     }
-
-    //     // add current node to sketch map
-    //     DG.Name = SkName;
-    //     // Val2Sketch.emplace(Current, DG);
-
-    //     // do a post-order visit. If there are multiple nodes, they must be a
-    //     // SCC. merge two outgoing forget edge in
-
-    //     // if there is only two node, one forget sk edge, we just use that sk
-    //     as
-    //     // the type.
-
-    //     SCCSet.erase(Current);
-    //   }
-    //   // If there is no SCC, we process each node at a time.
-    //   // If there is SCC, we process nodes that have direct edge to visited
-    //   // nodes.
-
-    //   // For the first loop:
-    //   // 1. add all nodes in current SCC to the new graph
-    //   // preserve incoming edges, Change the source to #Start. Maintain a map
-    //   // from source node to edge.
-
-    //   // For later loops: if previous incoming edges' source nodes
-    //   // are added, update the source node of the edges.
-
-    //   // Solve Sketches & types of nodes in current SCC in value map. save to
-    //   // result.
-
-    //   // we implicitly have a "typedef" name for each node.
-    //   // So we only focus on each
-
-    //   // TODO: if two same struct types are to be merged, use the same name?
-    // }
-
-    // for (CallGraphNode *CGN : NodeVec) {
-    //   auto *Current = CGN->getFunction();
-    //   if (Current == nullptr) {
-    //     continue;
-    //   }
-    //   // If the FuncSketches is empty(no any caller), solve and fill by
-    //   itself. if (FuncSketches.count(Current) == 0) {
-    //     // get Or emplace new
-    //     auto &CurrentSketches = FuncSketches[Current];
-    //     if (Current->arg_size() > 0 && CurrentSketches.first.size() == 0) {
-    //       CurrentSketches.first.resize(Current->arg_size(), nullptr);
-    //     }
-
-    //     for (int i = 0; i < Current->arg_size(); i++) {
-    //       assert(CurrentSketches.first[i] == nullptr);
-    //       // auto Sk = Generator->solveType(getCallArgTV(TRCtx, Current, 0,
-    //       i));
-    //       // CurrentSketches.first[i] = Sk;
-    //       Queries.emplace_back(getCallArgTV(TRCtx, Current, 0, i),
-    //                            [&CurrentSketches, i](auto Sk) {
-    //                              CurrentSketches.first[i] = Sk;
-    //                            });
-    //     }
-    //     if (!Current->getReturnType()->isVoidTy()) {
-    //       assert(CurrentSketches.second == nullptr);
-    //       // auto Sk = Generator->solveType(getCallRetTV(TRCtx, Current, 0));
-    //       // CurrentSketches.second = Sk;
-    //       Queries.emplace_back(
-    //           getCallRetTV(TRCtx, Current, 0),
-    //           [&CurrentSketches](auto Sk) { CurrentSketches.second = Sk; });
-    //     }
-    //   }
-    //   // Solve types for callee actual arguments.
-    //   for (auto &Edge : *CGN) {
-    //     if (!Edge.first.hasValue()) {
-    //       continue;
-    //     }
-    //     CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
-    //     auto Target = Edge.second->getFunction();
-    //     if (Target == nullptr || SCCSet.count(Target) > 0) {
-    //       continue;
-    //     }
-    //     auto TargetName = getFuncTvName(Target);
-    //     llvm::errs() << "Solving Call in SCC: " << *I << "\n";
-
-    //     // get Or emplace new
-    //     auto &TargetSketches = FuncSketches[Target];
-    //     if (I->arg_size() > 0 && TargetSketches.first.size() == 0) {
-    //       TargetSketches.first.resize(I->arg_size(), nullptr);
-    //     }
-
-    //     size_t InstanceId = Generator->CallToID.at(I);
-    //     for (int i = 0; i < I->arg_size(); i++) {
-    //       // auto TV = getCallArgTV(TRCtx, Target, InstanceId, i);
-    //       // auto Sketch = Generator->solveType(TV);
-    //       // if (TargetSketches.first[i] == nullptr) {
-    //       //   TargetSketches.first[i] = Sketch;
-    //       // } else {
-    //       //   TargetSketches.first[i]->join(*Sketch);
-    //       // }
-    //       Queries.emplace_back(getCallArgTV(TRCtx, Target, InstanceId, i),
-    //                            [&TargetSketches, i](auto Sk) {
-    //                              if (TargetSketches.first[i] == nullptr) {
-    //                                TargetSketches.first[i] = Sk;
-    //                              } else {
-    //                                TargetSketches.first[i]->join(*Sk);
-    //                              }
-    //                            });
-    //     }
-    //     if (!I->getType()->isVoidTy()) {
-    //       // auto TV = getCallRetTV(TRCtx, Target, InstanceId);
-    //       // auto Sketch = Generator->solveType(TV);
-    //       // if (TargetSketches.second == nullptr) {
-    //       //   TargetSketches.second = Sketch;
-    //       // } else {
-    //       //   TargetSketches.second->join(*Sketch);
-    //       // }
-    //       Queries.emplace_back(getCallRetTV(TRCtx, Target, InstanceId),
-    //                            [&TargetSketches](auto Sk) {
-    //                              if (TargetSketches.second == nullptr) {
-    //                                TargetSketches.second = Sk;
-    //                              } else {
-    //                                TargetSketches.second->join(*Sk);
-    //                              }
-    //                            });
-    //     }
-    //   }
-    //   // Solve Stacks
-    //   if (!Current->isDeclaration()) {
-    //     // find all alloca in entry block and convert.
-    //     for (auto &I : Current->getEntryBlock()) {
-    //       if (auto *AI = dyn_cast<AllocaInst>(&I)) {
-    //         // auto Sk =
-    //         //     Generator->solveType(Generator->getNode(AI,
-    //         //     nullptr).key.Base);
-    //         // if (Sk != nullptr) {
-    //         //   StackSketches.emplace(AI, Sk);
-    //         // }
-    //         Queries.emplace_back(Generator->getNode(AI, nullptr).key.Base,
-    //                              [&StackSketches, AI](auto Sk) {
-    //                                StackSketches.emplace(AI, Sk);
-    //                              });
-    //       }
-    //     }
-    //   }
-    // }
-
-    // // Solve all queries
-    // Generator->CG.solveSketchQueries(Queries);
-
-    // Convert the Arg and return type of functions in current SCC and save to
-    // result
-    // Solve and convert stack (alloca) types and save to result
-    // for (CallGraphNode *CGN : NodeVec) {
-    //   auto *Current = CGN->getFunction();
-    //   if (Current == nullptr) {
-    //     continue;
-    //   }
-    //   auto &CurrentSketches = FuncSketches.at(Current);
-    //   for (int i = 0; i < Current->arg_size(); i++) {
-    //     auto *Arg = Current->getArg(i);
-    //     auto Sk = CurrentSketches.first[i];
-    //     if (Sk == nullptr) {
-    //       llvm::errs() << "Warn: Arg " << *Arg
-    //                    << " of Func: " << Current->getName()
-    //                    << " has no type info\n";
-    //       continue;
-    //     }
-    //     auto CTy = TB.buildType(*Sk,
-    //     Arg->getType()->getPrimitiveSizeInBits()); dumpTypes(Arg, CTy);
-    //     Result.ValueTypes.emplace(Arg, CTy);
-    //   }
-    //   if (!Current->getReturnType()->isVoidTy()) {
-    //     auto Sk = CurrentSketches.second;
-    //     if (Sk == nullptr) {
-    //       llvm::errs() << "Warn: Return value of Func: " <<
-    //       Current->getName()
-    //                    << " has no type info\n";
-    //       continue;
-    //     }
-    //     auto CTy = TB.buildType(
-    //         *Sk, Current->getReturnType()->getPrimitiveSizeInBits());
-    //     llvm::errs() << "Return Value of Func: " << Current->getName()
-    //                  << " has type: " << CTy.getAsString() << "\n";
-    //     Result.FuncRetTypes.emplace(Current, CTy);
-    //   }
-    //   if (!Current->isDeclaration()) {
-    //     // find all alloca in entry block and convert.
-    //     for (auto &I : Current->getEntryBlock()) {
-    //       if (auto *AI = dyn_cast<AllocaInst>(&I)) {
-    //         if (StackSketches.count(AI) == 0) {
-    //           continue;
-    //         }
-    //         auto Sk = StackSketches.at(AI);
-    //         auto CTy =
-    //             TB.buildType(*Sk, AI->getType()->getPrimitiveSizeInBits());
-    //         dumpTypes(AI, CTy);
-    //         Result.ValueTypes.emplace(AI, CTy);
-    //       }
-    //     }
-    //   }
-    // }
-
-    // for each value in value map
-    for (auto &Ent : Generator->Val2Node) {
-      // TODO support function type.
-      if (std::holds_alternative<llvm::Value *>(Ent.first)) {
-        if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
-          continue;
-        }
-      }
-      auto *Node = Ent.second;
-      auto *NewNode = Old2New.at(Node);
-      clang::QualType CTy = TB.buildType(*NewNode, Node->Size);
-      if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-        llvm::errs() << "  Value: " << **V << " has type: " << CTy.getAsString()
-                     << "\n";
-      } else {
-        llvm::errs() << "  Special Value: " << getName(Ent.first)
-                     << " has type: " << CTy.getAsString() << "\n";
-      }
-      ValueTypes2.emplace(Ent.first, CTy);
-    }
+    // TODO further merge and simplify graph?
   }
 
-  if (GraphDir) {
-    std::cerr << "Output topdown split graph to: " << GraphDir
-              << ", abort execution\n";
-    exit(0);
+  // for each value in value map
+  for (auto &Ent : Val2NodeGlobal) {
+    // TODO support function type.
+    if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+      if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+        continue;
+      }
+    }
+    auto *Node = Ent.second;
+    clang::QualType CTy = TB.buildType(*Node, Node->Size);
+    if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
+      llvm::errs() << "  Value: " << **V << " has type: " << CTy.getAsString()
+                   << "\n";
+    } else {
+      llvm::errs() << "  Special Value: " << getName(Ent.first)
+                   << " has type: " << CTy.getAsString() << "\n";
+    }
   }
 
   // move the ASTUnit to result

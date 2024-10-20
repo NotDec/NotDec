@@ -22,23 +22,22 @@ clang::QualType fromLatticeElem(clang::ASTContext &Ctx, std::string Name,
 clang::RecordDecl *createStruct(clang::ASTContext &Ctx);
 
 struct SketchToCTypeBuilder {
-  std::unique_ptr<clang::ASTUnit> ASTUnit;
-
-  // Todo: Change filename or remove the argument
-  SketchToCTypeBuilder(llvm::StringRef FileName)
-      : ASTUnit(clang::tooling::buildASTFromCode("", "decompilation.c")) {}
-
-  clang::QualType buildType(const CGNode &Root, unsigned BitSize) {
-    TypeBuilderImpl Builder{ASTUnit->getASTContext()};
-    return Builder.visitType(Root, BitSize);
-  }
-
   struct TypeBuilderImpl {
     clang::ASTContext &Ctx;
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
     clang::QualType visitType(const CGNode &Node, unsigned BitSize);
   };
+  std::unique_ptr<clang::ASTUnit> ASTUnit;
+  TypeBuilderImpl Builder{ASTUnit->getASTContext()};
+
+  // Todo: Change filename or remove the argument
+  SketchToCTypeBuilder(llvm::StringRef FileName)
+      : ASTUnit(clang::tooling::buildASTFromCode("", "decompilation.c")) {}
+
+  clang::QualType buildType(const CGNode &Root, unsigned BitSize) {
+    return Builder.visitType(Root, BitSize);
+  }
 };
 
 } // namespace notdec::retypd

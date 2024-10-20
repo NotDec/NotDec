@@ -55,6 +55,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     if (NodeTypeMap.count(&Node)) {
       return NodeTypeMap.at(&Node);
     } else {
+      // Visited, but have not set a type (in progress, i.e. visiting dependency
+      // nodes).
+      // TODO: remove debug output.
       std::cerr << "Cyclic dependency forces the node become struct.\n";
       clang::RecordDecl *Decl = createStruct(Ctx);
       clang::QualType Ret = Ctx.getPointerType(Ctx.getRecordType(Decl));
@@ -63,10 +66,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     }
   }
   Visited.emplace(&Node);
-  // TODO add attribute to contain the offset info.
   // Generally, a node represents a struct type
 
-  // 1. no out edges, then it is a simple primitive type
+  // 1. no out edges, then it is top
   if (Node.outEdges.empty()) {
     // assert(false && "TODO");
     return fromLatticeElem(Ctx, "top", BitSize);
