@@ -67,11 +67,9 @@ struct ReturnValue {
 };
 struct CallArg {
   llvm::CallBase *Call;
-  size_t InstanceId;
   int32_t Index;
   bool operator<(const CallArg &rhs) const {
-    return std::tie(Call, InstanceId, Index) <
-           std::tie(rhs.Call, rhs.InstanceId, rhs.Index);
+    return std::tie(Call, Index) < std::tie(rhs.Call, rhs.Index);
   }
   bool operator==(const CallArg &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
@@ -79,9 +77,8 @@ struct CallArg {
 };
 struct CallRet {
   llvm::CallBase *Call;
-  size_t InstanceId;
   bool operator<(const CallRet &rhs) const {
-    return std::tie(Call, InstanceId) < std::tie(rhs.Call, InstanceId);
+    return std::tie(Call) < std::tie(rhs.Call);
   }
   bool operator==(const CallRet &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
@@ -104,6 +101,7 @@ struct IntConstant {
 using ExtValuePtr =
     std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
 
+ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User);
 std::string getName(const ExtValuePtr &Val);
 
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
@@ -124,11 +122,9 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
       FuncSummaries;
-  // map from function to its argument and return type sketches.
-  std::map<llvm::Function *,
-           std::pair<std::vector<std::shared_ptr<retypd::Sketch>>,
-                     std::shared_ptr<retypd::Sketch>>>
-      FuncSketches;
+  // map from function to its actual argument and return type nodes in the
+  // global graph.
+  std::map<llvm::Function *, std::vector<llvm::CallBase *>> FuncSketches;
   unsigned pointer_size = 0;
 
   Result run(Module &M, ModuleAnalysisManager &);
@@ -156,7 +152,7 @@ struct ConstraintsGenerator {
   std::function<const std::vector<retypd::SubTypeConstraint> *(
       llvm::Function *)>
       GetSummary;
-  size_t instantiateSummary(llvm::Function *Target);
+  void instantiateSummary(llvm::Function *Target, size_t instanceId);
   std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);
   void instantiateSketchAsSub(ExtValuePtr Val,
                               std::shared_ptr<retypd::Sketch> Sk);
@@ -166,8 +162,6 @@ struct ConstraintsGenerator {
   // for determinization: extended powerset construction
   std::map<std::set<CGNode *>, CGNode *> DTrans;
   void determinize();
-  void determinizeTo(ConstraintGraph &Other,
-                     std::map<CGNode *, CGNode *> &Old2New);
 
   void run();
   ConstraintsGenerator(
@@ -177,6 +171,8 @@ struct ConstraintsGenerator {
           GetSummary)
       : Ctx(Ctx), CG(Ctx.TRCtx, Name, false), PG(*CG.PG), SCCs(SCCs),
         GetSummary(GetSummary) {}
+  ConstraintsGenerator(TypeRecovery &Ctx, std::string Name)
+      : Ctx(Ctx), CG(Ctx.TRCtx, Name, true), PG(*CG.PG) {}
 
 public:
   CGNode &setTypeVar(ExtValuePtr Val, const TypeVariable &dtv, User *User,

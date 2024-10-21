@@ -64,6 +64,111 @@ const char *ValueNamer::AllocaPrefix = "alloca_";
 const char *ValueNamer::LoadPrefix = "load_";
 const char *ValueNamer::StorePrefix = "store_";
 
+bool mustBePrimitive(const llvm::Type *Ty) {
+  if (Ty->isFloatTy() || Ty->isDoubleTy()) {
+    return true;
+  }
+  if (Ty->isIntegerTy()) {
+    return Ty->getIntegerBitWidth() < 32;
+  }
+  if (Ty->isPointerTy()) {
+    return false;
+  }
+  return false;
+}
+
+static std::string getLLVMTypeBase(Type *Ty) {
+  if (Ty->isPointerTy()) {
+    // 20231122 why there is pointer constant(not inttoptr constant expr)
+    assert(false && "TODO can this be pointer?");
+    return getLLVMTypeBase(Ty->getPointerElementType()) + "*";
+  }
+  if (Ty->isFloatTy()) {
+    return "float";
+  } else if (Ty->isDoubleTy()) {
+    return "double";
+  } else if (Ty->isIntegerTy()) {
+    if (Ty->getIntegerBitWidth() == 1)
+      return "bool";
+    else
+      return "int";
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "Warn: unknown integer type: " << *Ty << "\n";
+    assert(false && "unknown integer type");
+  } else {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "Warn: unknown constant type: " << *Ty << "\n";
+    assert(false && "unknown constant type");
+  }
+}
+
+static inline TypeVariable makeTv(retypd::TRContext &Ctx, std::string Name) {
+  return retypd::TypeVariable::CreateDtv(Ctx, Name);
+}
+
+static inline TypeVariable getLLVMTypeVar(retypd::TRContext &Ctx, Type *Ty) {
+  return retypd::TypeVariable::CreatePrimitive(Ctx, getLLVMTypeBase(Ty));
+}
+
+static bool is32Or64Int(const Type *Ty) {
+  if (Ty->isIntegerTy()) {
+    return Ty->getIntegerBitWidth() == 32 || Ty->getIntegerBitWidth() == 64;
+  }
+  return false;
+}
+
+// Check if a primitive type is final. Currently only int is not final for
+// unknown signedness.
+bool isFinal(const std::string &Name) {
+  if (Name == "int") {
+    return false;
+  }
+  return true;
+}
+
+bool hasUser(const Value *Val, const User *User) {
+  for (auto U : Val->users()) {
+    if (U == User) {
+      return true;
+    }
+  }
+  return false;
+}
+
+unsigned int getSize(const ExtValuePtr &Val) {
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    return (*V)->getType()->getScalarSizeInBits();
+  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+    return F->Func->getReturnType()->getScalarSizeInBits();
+  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
+    // TODO what if function pointer?
+    return Arg->Call->getArgOperand(Arg->Index)
+        ->getType()
+        ->getScalarSizeInBits();
+  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
+    return Ret->Call->getType()->getScalarSizeInBits();
+  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+    return IC->Val->getBitWidth();
+  }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "ERROR: getSize: unhandled type of ExtValPtr\n";
+  std::abort();
+}
+
+// TODO refactor: increase code reusability
+ExtValuePtr getExtValuePtr(llvm::Value *V, User *User) {
+  ExtValuePtr Val = V;
+  if (auto CI = dyn_cast<ConstantInt>(V)) {
+    if (CI->getBitWidth() == 32 || CI->getBitWidth() == 64) {
+      assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
+      assert(hasUser(V, User) &&
+             "convertTypeVarVal: constant not used by user");
+      Val = IntConstant{.Val = cast<ConstantInt>(V), .User = User};
+    }
+  }
+  return Val;
+}
+
 std::string getName(const ExtValuePtr &Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return ValueNamer::getName(**V);
@@ -171,9 +276,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // TODO: how to handle function type
 
   // Global type graph
-  ConstraintGraph GlobalTypes(TRCtx, "GlobalTypes", true);
+  // std::unique_ptr<ConstraintGraph> GlobalTypes =
+  //     std::make_unique<ConstraintGraph>(TRCtx, "GlobalTypes", true);
   // Global Value Map
-  std::map<ExtValuePtr, retypd::CGNode *> Val2NodeGlobal;
+  // std::unique_ptr<std::map<ExtValuePtr, retypd::CGNode *>> Val2NodeGlobal;
+  ConstraintsGenerator GlobalTypes(*this, "GlobalTypes");
 
   TypeRecovery::Result Result;
   retypd::SketchToCTypeBuilder TB(M.getName());
@@ -200,52 +307,148 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     Generator->CG.printGraph("Current.before-sks.dot");
 
     // check if saturated
-    // 0. pre-process the big graph: focus on the push subgraph.
+    // 0. pre-process the big graph: focus on the push/recall subgraph.
     Generator->CG.sketchSplit();
 
     // TODO remove debug output
     Generator->CG.printGraph("Current.sks.dot");
+    GlobalTypes.CG.printGraph("Global.before.dot");
 
-    std::map<CGNode *, CGNode *> Old2New;
-    Generator->determinizeTo(GlobalTypes, Old2New);
-    // fill the value-to-node map
+    // copy all nodes into the global type graph
+    for (auto &Ent : Generator->CG) {
+      auto &Node = Ent.second;
+      auto &NewNode = GlobalTypes.CG.getOrInsertNode(Node.key);
+      for (auto &Edge : Node.outEdges) {
+        auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+        auto &NewTarget = GlobalTypes.CG.getOrInsertNode(Target.key);
+        GlobalTypes.CG.onlyAddEdge(NewNode, NewTarget, Edge.Label);
+      }
+    }
+    // maintain the value map
     for (auto &Ent : Generator->Val2Node) {
-      auto *Node = Ent.second;
-      auto *NewNode = Old2New.at(Node);
-      Val2NodeGlobal.emplace(Ent.first, NewNode);
+      auto &Node = *Ent.second;
+      auto &NewNode = GlobalTypes.CG.getOrInsertNode(Node.key);
+      GlobalTypes.Val2Node.emplace(Ent.first, &NewNode);
     }
 
-    GlobalTypes.printGraph("GlobalTypes.dtm.dot");
-    // TODO: Make struct type equal over subtype relation?
-    // TODO: Merge multiple forget edges.
+    // // only copy some types that are used instead of the whole graph
+    // std::map<CGNode *, CGNode *> G2L;
+    // std::function<CGNode *(CGNode *, retypd::ConstraintGraph &)>
+    //     AddReachableNodes =
+    //         [&](CGNode *Node, retypd::ConstraintGraph &To) -> CGNode * {
+    //   assert(&Node->Parent == &GlobalTypes.CG);
+    //   if (G2L.count(Node)) {
+    //     return G2L.at(Node);
+    //   }
+    //   auto &NewNode = To.getOrInsertNode(Node->key);
+    //   G2L.emplace(Node, &NewNode);
+    //   for (auto &Edge : Node->outEdges) {
+    //     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+    //     AddReachableNodes(&Target, To);
+    //     To.onlyAddEdge(NewNode, *G2L.at(&Target), Edge.Label);
+    //   }
+    //   return &NewNode;
+    // };
 
-    // TODO: link the argument/return value Sketches.
-    // for (CallGraphNode *CGN : NodeVec) {
-    //   auto *Current = CGN->getFunction();
-    //   if (Current == nullptr) {
-    //     continue;
-    //   }
-    //   if (FuncSketches.count(Current) == 0) {
-    //     continue;
-    //   }
-    //   auto &CurrentSketches = FuncSketches.at(Current);
-    //   for (int i = 0; i < Current->arg_size(); i++) {
-    //     auto *Arg = Current->getArg(i);
-    //     Generator->instantiateSketchAsSub(Arg, CurrentSketches.first.at(i));
-    //   }
-    //   if (!Current->getReturnType()->isVoidTy()) {
-    //     Generator->instantiateSketchAsSup(ReturnValue{.Func = Current},
-    //                                       CurrentSketches.second);
+    // link the types between functions:
+    // 1. copy all global types into the graph (maintain the value map)
+    // TODO: ?
+    // clone all edges:
+    // for (auto &Ent : GlobalTypes) {
+    //   auto &Node = Ent.second;
+    //   auto &NewNode = Generator->CG.getOrInsertNode(Node.key);
+    //   for (auto &Edge : Node.outEdges) {
+    //     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+    //     auto &NewTarget = Generator->CG.getOrInsertNode(Target.key);
+    //     Generator->CG.onlyAddEdge(NewNode, NewTarget, Edge.Label);
     //   }
     // }
+    // for (auto &Ent : Val2NodeGlobal) {
+    //   auto &Node = *Ent.second;
+    //   auto &NewNode = Generator->CG.getOrInsertNode(Node.key);
+    //   Generator->Val2Node.emplace(Ent.first, &NewNode);
+    // }
 
-    GlobalTypes.printGraph("GlobalTypes.fin.dot");
+    // TODO refactor: 改成从指定集合开始所有可达的节点复制进来。然后维护value
+    // map，在结束的时候重新求解并合并回去。
+
+    // 2. link the argument/return value subtype relations.
+    for (CallGraphNode *CGN : NodeVec) {
+      auto *Current = CGN->getFunction();
+      if (Current == nullptr) {
+        continue;
+      }
+      if (FuncSketches.count(Current) == 0) {
+        continue;
+      }
+      auto &CurrentSketches = FuncSketches.at(Current);
+      if (CurrentSketches.empty()) {
+        std::cerr << "No actual param types for " << Current->getName().str()
+                  << "\n";
+      }
+      for (auto *Call : CurrentSketches) {
+        for (int i = 0; i < Current->arg_size(); i++) {
+          auto *Arg = Current->getArg(i);
+          // assume the type variable is now in the graph.
+          GlobalTypes.CG.onlyAddEdge(
+              GlobalTypes.getNode(Call->getArgOperand(i), Call),
+              GlobalTypes.getNode(Arg, nullptr), retypd::One{});
+        }
+        if (!Current->getReturnType()->isVoidTy()) {
+          GlobalTypes.CG.onlyAddEdge(
+              GlobalTypes.getNode(ReturnValue{.Func = Current}, nullptr),
+              GlobalTypes.getNode(Call, nullptr), retypd::One{});
+        }
+      }
+    }
+
+    GlobalTypes.CG.printGraph("GlobalTypes.linked.dot");
+
+    // 3. perform quotient equivalence on the graph.
+    // TODO
+
+    // 4. determinize the graph
+    GlobalTypes.determinize();
+
+    // std::map<CGNode *, CGNode *> Old2New;
+    // Generator->determinizeTo(*GlobalTypes, Old2New);
+    // // fill the value-to-node map
+    // for (auto &Ent : Generator->Val2Node) {
+    //   auto *Node = Ent.second;
+    //   auto *NewNode = Old2New.at(Node);
+    //   Val2NodeGlobal.emplace(Ent.first, NewNode);
+    // }
+
+    // 5. save the special actual arg and return value nodes.
+    // for each callee
+    for (CallGraphNode *CGN : NodeVec) {
+      auto *Current = CGN->getFunction();
+      if (Current == nullptr) {
+        continue;
+      }
+      for (auto &Edge : *CGN) {
+        if (!Edge.first.hasValue()) {
+          continue;
+        }
+        CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
+        auto Target = Edge.second->getFunction();
+        if (Target == nullptr || SCCSet.count(Target) > 0) {
+          continue;
+        }
+        auto TargetName = getFuncTvName(Target);
+        llvm::errs() << "Solving Call in SCC: " << *I << "\n";
+
+        auto &TargetSketches = FuncSketches[Target];
+        TargetSketches.push_back(I);
+      }
+    }
+    GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
 
     // TODO further merge and simplify graph?
   }
 
-  // for each value in value map
-  for (auto &Ent : Val2NodeGlobal) {
+  // build AST type for each value in value map
+  for (auto &Ent : GlobalTypes.Val2Node) {
     // TODO support function type.
     if (std::holds_alternative<llvm::Value *>(Ent.first)) {
       if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
@@ -275,81 +478,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   return Result;
 }
 
-void ConstraintsGenerator::determinizeTo(
-    ConstraintGraph &Other, std::map<CGNode *, CGNode *> &Old2New) {
-  // DTrans map the set of our nodes to `Other`'s node.
-  assert(Old2New.empty());
-  assert(DTrans.empty());
-
-  using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
-
-  auto getOrSetNewNode = [this, &Other](const std::set<CGNode *> &N,
-                                        const retypd::NodeKey *Key =
-                                            nullptr) -> EntryTy {
-    if (DTrans.count(N)) {
-      return DTrans.find(N);
-    }
-
-    std::pair<decltype(DTrans)::iterator, bool> it;
-    if (Key != nullptr) {
-      auto &NewNode = Other.getOrInsertNode(*Key);
-      it = DTrans.emplace(N, &NewNode);
-    } else {
-      auto &NewNode = Other.getOrInsertNode(retypd::NodeKey{
-          TypeVariable::CreateDtv(Ctx.TRCtx, ValueNamer::getName("dtm_"))});
-      it = DTrans.emplace(N, &NewNode);
-    }
-
-    assert(it.second);
-    return it.first;
-  };
-
-  DTrans[{CG.getEndNode()}] = Other.getEndNode();
-  std::queue<EntryTy> Worklist;
-
-  // for each node in the value map
-  for (auto &Ent : Val2Node) {
-    std::set<CGNode *> StartSet =
-        retypd::NFADeterminizer<>::countClosure({Ent.second});
-    auto NewNodeEnt = getOrSetNewNode(StartSet, &Ent.second->key);
-    Old2New.emplace(Ent.second, NewNodeEnt->second);
-    Worklist.push(NewNodeEnt);
-  }
-
-  while (!Worklist.empty()) {
-    auto It = Worklist.front();
-    auto &NewNode = *It->second;
-    std::set<retypd::EdgeLabel> outLabels =
-        retypd::NFADeterminizer<>::allOutLabels(It->first);
-    for (auto &L : outLabels) {
-      auto S = retypd::NFADeterminizer<>::countClosure(
-          retypd::NFADeterminizer<>::move(It->first, L));
-      // print nodes in S
-      if (false) {
-        llvm::errs() << "Nodes in S: ";
-        for (auto *N : S) {
-          llvm::errs() << retypd::toString(N->key.Base) << " ";
-        }
-        llvm::errs() << "\n";
-      }
-      if (S.count(CG.getEndNode())) {
-        assert(S.size() == 1);
-      }
-      if (DTrans.count(S) == 0) {
-        auto NewNodeEnt = getOrSetNewNode(S);
-        Worklist.push(NewNodeEnt);
-      }
-      auto &ToNode = *DTrans.at(S);
-      Other.onlyAddEdge(NewNode, ToNode, L);
-    }
-    Worklist.pop();
-  }
-}
-
 void ConstraintsGenerator::determinize() {
-  assert(DTrans.empty());
-  std::map<const CGNode *, CGNode *> Old2New;
-  ConstraintGraph Backup = CG.clone(Old2New, true);
+  // assert(DTrans.empty());
+  DTrans.clear();
+  std::map<const CGNode *, CGNode *> This2Bak;
+  ConstraintGraph Backup = CG.clone(This2Bak, true);
   // remove all edges in the graph
   for (auto &Ent : CG) {
     for (auto &Edge : Ent.second.outEdges) {
@@ -388,7 +521,7 @@ void ConstraintsGenerator::determinize() {
   std::queue<EntryTy> Worklist;
   // for each node in the value map
   for (auto &Ent : Val2Node) {
-    auto *BakNode = Old2New.at(Ent.second);
+    auto *BakNode = This2Bak.at(Ent.second);
     std::set<CGNode *> StartSet =
         retypd::NFADeterminizer<>::countClosure({BakNode});
     auto pair1 = DTrans.emplace(StartSet, Ent.second);
@@ -447,11 +580,10 @@ void ConstraintsGenerator::run() {
   }
 }
 
-size_t ConstraintsGenerator::instantiateSummary(llvm::Function *Target) {
-  auto ID = ValueNamer::getId();
+void ConstraintsGenerator::instantiateSummary(llvm::Function *Target,
+                                              size_t InstanceId) {
   const std::vector<retypd::SubTypeConstraint> *Sum = GetSummary(Target);
-  CG.instantiate(*Sum, ID);
-  return ID;
+  CG.instantiate(*Sum, InstanceId);
 }
 
 std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
@@ -465,97 +597,6 @@ std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
   }
   CG.solve();
   return CG.simplifiedExpr(InterestingVars);
-}
-
-bool mustBePrimitive(const llvm::Type *Ty) {
-  if (Ty->isFloatTy() || Ty->isDoubleTy()) {
-    return true;
-  }
-  if (Ty->isIntegerTy()) {
-    return Ty->getIntegerBitWidth() < 32;
-  }
-  if (Ty->isPointerTy()) {
-    return false;
-  }
-  return false;
-}
-
-static std::string getLLVMTypeBase(Type *Ty) {
-  if (Ty->isPointerTy()) {
-    // 20231122 why there is pointer constant(not inttoptr constant expr)
-    assert(false && "TODO can this be pointer?");
-    return getLLVMTypeBase(Ty->getPointerElementType()) + "*";
-  }
-  if (Ty->isFloatTy()) {
-    return "float";
-  } else if (Ty->isDoubleTy()) {
-    return "double";
-  } else if (Ty->isIntegerTy()) {
-    if (Ty->getIntegerBitWidth() == 1)
-      return "bool";
-    else
-      return "int";
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "Warn: unknown integer type: " << *Ty << "\n";
-    assert(false && "unknown integer type");
-  } else {
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "Warn: unknown constant type: " << *Ty << "\n";
-    assert(false && "unknown constant type");
-  }
-}
-
-static inline TypeVariable makeTv(retypd::TRContext &Ctx, std::string Name) {
-  return retypd::TypeVariable::CreateDtv(Ctx, Name);
-}
-
-static inline TypeVariable getLLVMTypeVar(retypd::TRContext &Ctx, Type *Ty) {
-  return retypd::TypeVariable::CreatePrimitive(Ctx, getLLVMTypeBase(Ty));
-}
-
-static bool is32Or64Int(const Type *Ty) {
-  if (Ty->isIntegerTy()) {
-    return Ty->getIntegerBitWidth() == 32 || Ty->getIntegerBitWidth() == 64;
-  }
-  return false;
-}
-
-// Check if a primitive type is final. Currently only int is not final for
-// unknown signedness.
-bool isFinal(const std::string &Name) {
-  if (Name == "int") {
-    return false;
-  }
-  return true;
-}
-
-bool hasUser(const Value *Val, const User *User) {
-  for (auto U : Val->users()) {
-    if (U == User) {
-      return true;
-    }
-  }
-  return false;
-}
-
-unsigned int getSize(const ExtValuePtr &Val) {
-  if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    return (*V)->getType()->getScalarSizeInBits();
-  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    return F->Func->getReturnType()->getScalarSizeInBits();
-  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
-    // TODO what if function pointer?
-    return Arg->Call->getArgOperand(Arg->Index)
-        ->getType()
-        ->getScalarSizeInBits();
-  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
-    return Ret->Call->getType()->getScalarSizeInBits();
-  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
-    return IC->Val->getBitWidth();
-  }
-  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getSize: unhandled type of ExtValPtr\n";
-  std::abort();
 }
 
 retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
@@ -589,19 +630,23 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
     auto tv = makeTv(Ctx.TRCtx, getFuncTvName(F->Func));
     tv = tv.pushLabel(retypd::OutLabel{});
     return tv;
-  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
+  } else if (auto Arg = std::get_if<CallArg>(&Val)) { // TODO: deprecated
     assert(false);
     // TODO what if function pointer?
-    auto tv = makeTv(Ctx.TRCtx, getFuncTvName(Arg->Call->getCalledFunction()));
-    // tv.getInstanceId() = Arg->InstanceId;
-    tv = tv.pushLabel(retypd::InLabel{std::to_string(Arg->Index)});
+    auto tv = getCallArgTV(Ctx.TRCtx, Arg->Call->getCalledFunction(),
+                           CallToID.at(Arg->Call), Arg->Index);
+    // makeTv(Ctx.TRCtx, getFuncTvName(Arg->Call->getCalledFunction()));
+    // // tv.getInstanceId() = Arg->InstanceId;
+    // tv = tv.pushLabel(retypd::InLabel{std::to_string(Arg->Index)});
     return tv;
-  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
+  } else if (auto Ret = std::get_if<CallRet>(&Val)) { // TODO: deprecated
     assert(false);
     // TODO what if function pointer?
-    auto tv = makeTv(Ctx.TRCtx, getFuncTvName(Ret->Call->getCalledFunction()));
-    // tv.getInstanceId() = Ret->InstanceId;
-    tv = tv.pushLabel(retypd::OutLabel{});
+    auto tv = getCallRetTV(Ctx.TRCtx, Ret->Call->getCalledFunction(),
+                           CallToID.at(Ret->Call));
+    // makeTv(Ctx.TRCtx, getFuncTvName(Ret->Call->getCalledFunction()));
+    // // tv.getInstanceId() = Ret->InstanceId;
+    // tv = tv.pushLabel(retypd::OutLabel{});
     return tv;
   } else if (auto IC = std::get_if<IntConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
@@ -755,13 +800,10 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
       cg.addSubtype(FormalRetVar, ValVar);
     }
   } else {
-    size_t InstanceId;
-    if (Target->isDeclaration()) {
-      // empty summary, still differentiate different call instances
-      InstanceId = ValueNamer::getId();
-    } else {
-      // differentiate different call instances in the same function
-      InstanceId = cg.instantiateSummary(Target);
+    // differentiate different call instances in the same function
+    size_t InstanceId = ValueNamer::getId();
+    if (!Target->isDeclaration()) {
+      cg.instantiateSummary(Target, InstanceId);
     }
     cg.CallToID.emplace(&I, InstanceId);
     for (int i = 0; i < I.arg_size(); i++) {
