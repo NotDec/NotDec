@@ -309,6 +309,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // check if saturated
     // 0. pre-process the big graph: focus on the push/recall subgraph.
     Generator->CG.sketchSplit();
+    Generator->removeUnreachable();
 
     // TODO remove debug output
     Generator->CG.printGraph("Current.sks.dot");
@@ -330,47 +331,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto &NewNode = GlobalTypes.CG.getOrInsertNode(Node.key);
       GlobalTypes.Val2Node.emplace(Ent.first, &NewNode);
     }
-
-    // // only copy some types that are used instead of the whole graph
-    // std::map<CGNode *, CGNode *> G2L;
-    // std::function<CGNode *(CGNode *, retypd::ConstraintGraph &)>
-    //     AddReachableNodes =
-    //         [&](CGNode *Node, retypd::ConstraintGraph &To) -> CGNode * {
-    //   assert(&Node->Parent == &GlobalTypes.CG);
-    //   if (G2L.count(Node)) {
-    //     return G2L.at(Node);
-    //   }
-    //   auto &NewNode = To.getOrInsertNode(Node->key);
-    //   G2L.emplace(Node, &NewNode);
-    //   for (auto &Edge : Node->outEdges) {
-    //     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-    //     AddReachableNodes(&Target, To);
-    //     To.onlyAddEdge(NewNode, *G2L.at(&Target), Edge.Label);
-    //   }
-    //   return &NewNode;
-    // };
-
-    // link the types between functions:
-    // 1. copy all global types into the graph (maintain the value map)
-    // TODO: ?
-    // clone all edges:
-    // for (auto &Ent : GlobalTypes) {
-    //   auto &Node = Ent.second;
-    //   auto &NewNode = Generator->CG.getOrInsertNode(Node.key);
-    //   for (auto &Edge : Node.outEdges) {
-    //     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-    //     auto &NewTarget = Generator->CG.getOrInsertNode(Target.key);
-    //     Generator->CG.onlyAddEdge(NewNode, NewTarget, Edge.Label);
-    //   }
-    // }
-    // for (auto &Ent : Val2NodeGlobal) {
-    //   auto &Node = *Ent.second;
-    //   auto &NewNode = Generator->CG.getOrInsertNode(Node.key);
-    //   Generator->Val2Node.emplace(Ent.first, &NewNode);
-    // }
-
-    // TODO refactor: 改成从指定集合开始所有可达的节点复制进来。然后维护value
-    // map，在结束的时候重新求解并合并回去。
 
     // 2. link the argument/return value subtype relations.
     for (CallGraphNode *CGN : NodeVec) {
@@ -408,16 +368,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // TODO
 
     // 4. determinize the graph
-    GlobalTypes.determinize();
-
-    // std::map<CGNode *, CGNode *> Old2New;
-    // Generator->determinizeTo(*GlobalTypes, Old2New);
-    // // fill the value-to-node map
-    // for (auto &Ent : Generator->Val2Node) {
-    //   auto *Node = Ent.second;
-    //   auto *NewNode = Old2New.at(Node);
-    //   Val2NodeGlobal.emplace(Ent.first, NewNode);
-    // }
+    // GlobalTypes.determinize();
+    // GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
 
     // 5. save the special actual arg and return value nodes.
     // for each callee
@@ -442,10 +394,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         TargetSketches.push_back(I);
       }
     }
-    GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
 
-    // TODO further merge and simplify graph?
+    // TODO further merge and simplify the graph?
   }
+
+  GlobalTypes.determinize();
+  GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
 
   // build AST type for each value in value map
   for (auto &Ent : GlobalTypes.Val2Node) {
@@ -476,6 +430,45 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
   return Result;
+}
+
+void ConstraintsGenerator::removeUnreachable() {
+  assert(CG.getStartNode()->outEdges.size() == 0);
+  std::set<CGNode *> ReachableNodes;
+
+  std::queue<CGNode *> Worklist;
+  for (auto &Ent : Val2Node) {
+    Worklist.push(Ent.second);
+  }
+  while (!Worklist.empty()) {
+    auto *Node = Worklist.front();
+    if (ReachableNodes.count(Node) == 0) {
+      ReachableNodes.insert(Node);
+      for (auto &Edge : Node->outEdges) {
+        Worklist.push(&const_cast<CGNode &>(Edge.getTargetNode()));
+      }
+    }
+    Worklist.pop();
+  }
+
+  // remove all unreachable nodes
+  std::vector<CGNode *> ToErase;
+  for (auto &Ent : CG) {
+    auto *Node = &Ent.second;
+    if (Node == CG.getStartNode() || Node == CG.getEndNode()) {
+      continue;
+    }
+    if (ReachableNodes.count(Node) == 0) {
+      ToErase.push_back(Node);
+      // erase all out edges
+      for (auto &Edge : Ent.second.outEdges) {
+        CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+      }
+    }
+  }
+  for (auto *Node : ToErase) {
+    CG.removeNode(Node->key);
+  }
 }
 
 void ConstraintsGenerator::determinize() {
