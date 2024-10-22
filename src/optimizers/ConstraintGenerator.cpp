@@ -64,6 +64,32 @@ const char *ValueNamer::AllocaPrefix = "alloca_";
 const char *ValueNamer::LoadPrefix = "load_";
 const char *ValueNamer::StorePrefix = "store_";
 
+void dump(const ExtValuePtr &Val) {
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    llvm::errs() << "Value: " << **V << "\n";
+    return;
+  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+    llvm::errs() << "ReturnValue: " + ValueNamer::getName(*F->Func, "func_");
+    return;
+  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
+    llvm::errs() << ValueNamer::getName(
+                        *const_cast<llvm::CallBase *>(Arg->Call)) +
+                        "_CallArg_" + std::to_string(Arg->Index);
+    return;
+  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
+    llvm::errs() << ValueNamer::getName(
+                        *const_cast<llvm::CallBase *>(Ret->Call)) +
+                        "_CallRet";
+    return;
+  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+    llvm::errs() << "IntConstant: " << *IC->Val;
+    return;
+  }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "ERROR: getName: unhandled type of ExtValPtr\n";
+  std::abort();
+}
+
 bool mustBePrimitive(const llvm::Type *Ty) {
   if (Ty->isFloatTy() || Ty->isDoubleTy()) {
     return true;
@@ -521,8 +547,18 @@ void ConstraintsGenerator::determinize() {
     if (pair1.second) {
       Worklist.push(pair1.first);
     } else {
+      // Can be a epsilon loop.
       // TODO merge the node in the value map
-      assert(false);
+      if (pair1.first->second != Ent.second) {
+        Backup.printEpsilonLoop(
+            "debugloop",
+            *reinterpret_cast<std::set<const CGNode *> *>(&StartSet));
+        Backup
+            .getSubGraph(
+                *reinterpret_cast<std::set<const CGNode *> *>(&StartSet), false)
+            .printGraph("debug_sub.dot");
+        assert(false);
+      }
     }
   }
 
@@ -685,8 +721,9 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
         assert(CI->getBitWidth() != 32 && CI->getBitWidth() != 64 &&
                "Should be handled earlier");
       }
-      auto Ty = C->getType();
-      return getLLVMTypeVar(Ctx.TRCtx, Ty);
+      return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));
+      // auto Ty = C->getType();
+      // return getLLVMTypeVar(Ctx.TRCtx, Ty);
     }
     llvm::errs()
         << __FILE__ << ":" << __LINE__ << ": "

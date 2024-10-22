@@ -202,6 +202,14 @@ public:
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);
   void printGraph(const char *DotFile) const;
+  ConstraintGraph getSubGraph(const std::set<const CGNode *> &Roots,
+                              bool AllReachable) const;
+  std::set<const CGNode *>
+  getReachableNodes(std::set<const CGNode *> Initial) const;
+  void printSubGraph(const char *DotFile, std::set<const CGNode *> Roots) const;
+  void printSubGraph(const char *DotFile, const CGNode *Root) const;
+  void printEpsilonLoop(const char *DotFile,
+                        std::set<const CGNode *> Nodes) const;
   std::vector<SubTypeConstraint> toConstraints();
   static ConstraintGraph fromConstraints(TRContext &Ctx, std::string FuncName,
                                          std::vector<Constraint> &Cons);
@@ -304,6 +312,8 @@ template <> struct GraphTraits<CGNode *> {
   static ChildEdgeIteratorType child_edge_end(NodeRef N) {
     return ChildEdgeIteratorType(N->end(), &CGEdgeToPtr);
   }
+
+  static bool isPrimitive(NodeRef N) { return N->key.Base.isPrimitive(); }
 };
 
 template <>

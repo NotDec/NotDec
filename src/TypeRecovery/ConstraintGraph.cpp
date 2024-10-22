@@ -700,6 +700,26 @@ void ConstraintGraph::sketchSplit() {
   // 2. Link vars from primitives to #End.
   std::set<std::string> Vars = {};
   linkEndVars(Vars);
+
+  // // 3. remove edge that is parent type of primitives.
+  // for (auto &Ent : Nodes) {
+  //   if (&Ent.second == Start || &Ent.second == End) {
+  //     continue;
+  //   }
+  //   if (Ent.second.key.Base.isPrimitive()) {
+  //     assert(!Ent.second.key.Base.hasLabel());
+  //     std::vector<CGEdge *> toRemove;
+  //     for (auto &Edge : Ent.second.outEdges) {
+  //       if (std::holds_alternative<One>(Edge.Label)) {
+  //         toRemove.push_back(const_cast<CGEdge *>(&Edge));
+  //       }
+  //     }
+  //     for (auto Edge : toRemove) {
+  //       removeEdge(Edge->getSourceNode(), Edge->getTargetNode(),
+  //       Edge->Label);
+  //     }
+  //   }
+  // }
 }
 
 std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
@@ -1016,6 +1036,92 @@ void ConstraintGraph::printGraph(const char *DotFile) const {
   llvm::WriteGraph(OutStream, const_cast<ConstraintGraph *>(this), false);
   OutStream.flush();
   OutStream.close();
+}
+
+void ConstraintGraph::printEpsilonLoop(const char *DotPrefix,
+                                       std::set<const CGNode *> Nodes) const {
+  ConstraintGraph Temp = getSubGraph(Nodes, false);
+  int i = 0;
+  for (scc_iterator<ConstraintGraph *> I = scc_begin(&Temp); !I.isAtEnd();
+       ++I) {
+    const std::vector<notdec::retypd::CGNode *> &SCC = *I;
+    if (SCC.size() > 1) {
+      std::set<const CGNode *> SCCSet;
+      for (auto *N : SCC) {
+        SCCSet.insert(N);
+      }
+      ConstraintGraph Temp1 = getSubGraph(SCCSet, false);
+      Temp1.printGraph(
+          (std::string(DotPrefix) + std::to_string(++i) + ".dot").c_str());
+    }
+  }
+  std::cerr << "printed " << i << " epsilon SCCs.\n";
+}
+
+std::set<const CGNode *>
+ConstraintGraph::getReachableNodes(std::set<const CGNode *> Initial) const {
+  std::set<const CGNode *> ReachableNodes;
+  std::queue<const CGNode *> Worklist;
+  for (auto *Node : Initial) {
+    assert(&Node->Parent == this && "printSubGraph: node is not in the graph");
+    Worklist.push(Node);
+  }
+  while (!Worklist.empty()) {
+    auto *Node = Worklist.front();
+    if (ReachableNodes.count(Node) == 0) {
+      ReachableNodes.insert(Node);
+      for (auto &Edge : Node->outEdges) {
+        Worklist.push(&const_cast<CGNode &>(Edge.getTargetNode()));
+      }
+    }
+    Worklist.pop();
+  }
+  return ReachableNodes;
+}
+
+ConstraintGraph
+ConstraintGraph::getSubGraph(const std::set<const CGNode *> &Roots,
+                             bool AllReachable) const {
+  ConstraintGraph Temp(Ctx, this->Name);
+
+  std::set<const CGNode *> ReachableNodes;
+  if (AllReachable) {
+    ReachableNodes = getReachableNodes(Roots);
+  } else {
+    ReachableNodes = Roots;
+  }
+
+  for (auto &Ent : Nodes) {
+    if (ReachableNodes.count(&Ent.second) != 0) {
+      auto &NewNode = Temp.getOrInsertNode(Ent.second.key);
+      for (auto &Edge : Ent.second.outEdges) {
+        if (ReachableNodes.count(&Edge.getTargetNode()) != 0) {
+          auto &Target = Temp.getOrInsertNode(Edge.getTargetNode().key);
+          Temp.onlyAddEdge(NewNode, Target, Edge.Label);
+        } else {
+          if (AllReachable) {
+            // not possible
+            assert(false);
+          }
+        }
+      }
+    }
+  }
+
+  return Temp;
+}
+
+void ConstraintGraph::printSubGraph(const char *DotFile,
+                                    std::set<const CGNode *> Roots) const {
+  ConstraintGraph Temp = getSubGraph(Roots, true);
+
+  Temp.printGraph(DotFile);
+}
+
+void ConstraintGraph::printSubGraph(const char *DotFile,
+                                    const CGNode *Root) const {
+  std::set<const CGNode *> Roots = {Root};
+  printSubGraph(DotFile, Roots);
 }
 
 std::string toString(const NodeKey &K) { return K.str(); }
