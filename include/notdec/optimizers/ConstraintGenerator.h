@@ -162,6 +162,7 @@ struct ConstraintsGenerator {
 
   // for determinization: extended powerset construction
   std::map<std::set<CGNode *>, CGNode *> DTrans;
+  void determinizeStructEqual();
   void determinize();
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();

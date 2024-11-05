@@ -390,12 +390,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     GlobalTypes.CG.printGraph("GlobalTypes.linked.dot");
 
-    // 3. perform quotient equivalence on the graph.
-    // TODO
-
+    // 3. perform quotient equivalence on the graph..?
     // 4. determinize the graph
-    // GlobalTypes.determinize();
-    // GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
+    GlobalTypes.determinize();
+    GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
 
     // 5. save the special actual arg and return value nodes.
     // for each callee
@@ -423,9 +421,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     // TODO further merge and simplify the graph?
   }
-
-  GlobalTypes.determinize();
-  GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
 
   // build AST type for each value in value map
   for (auto &Ent : GlobalTypes.Val2Node) {
@@ -494,6 +489,202 @@ void ConstraintsGenerator::removeUnreachable() {
   }
   for (auto *Node : ToErase) {
     CG.removeNode(Node->key);
+  }
+}
+
+std::set<CGNode *> countClosureBidirectionalEqual(const std::set<CGNode *> &N) {
+  std::set<CGNode *> Ret;
+  std::queue<CGNode *> Worklist;
+  for (auto Node : N) {
+    Ret.insert(Node);
+    Worklist.push(Node);
+  }
+  while (!Worklist.empty()) {
+    auto Node = Worklist.front();
+    Worklist.pop();
+    for (auto &Edge : Node->outEdges) {
+      if (std::holds_alternative<retypd::One>(Edge.getLabel())) {
+        auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+        if (Ret.count(&Target) == 0) {
+          Ret.insert(&Target);
+          Worklist.push(&Target);
+        }
+      }
+    }
+
+    for (auto *Edge : Node->inEdges) {
+      if (std::holds_alternative<retypd::One>(Edge->getLabel())) {
+        auto &Target = const_cast<CGNode &>(Edge->getSourceNode());
+        if (Ret.count(&Target) == 0) {
+          Ret.insert(&Target);
+          Worklist.push(&Target);
+        }
+      }
+    }
+  }
+  return Ret;
+}
+
+std::set<CGNode *> countClosureStructEq(const std::set<CGNode *> &N) {
+  auto Ret = countClosureBidirectionalEqual(N);
+  bool HasPrimitive = false;
+  for (auto Node : Ret) {
+    if (Node->key.Base.isPrimitive()) {
+      HasPrimitive = true;
+      break;
+    }
+  }
+  if (!HasPrimitive) {
+    return Ret;
+  } else {
+    return retypd::NFADeterminizer<>::countClosure(N);
+  }
+}
+
+std::set<CGNode *> moveLoadEqStore(const std::set<CGNode *> &N,
+                                   retypd::EdgeLabel L) {
+  std::set<CGNode *> ret;
+  for (auto Node : N) {
+    for (auto &Edge : Node->outEdges) {
+      if (Edge.getLabel() == L) {
+        ret.insert(&const_cast<CGNode &>(Edge.getTargetNode()));
+      }
+      // view store == load
+      if (auto Rec = std::get_if<retypd::RecallLabel>(&Edge.getLabel())) {
+        if (auto Rec2 = std::get_if<retypd::RecallLabel>(&L)) {
+          if (std::holds_alternative<retypd::LoadLabel>(Rec->label) &&
+              std::holds_alternative<retypd::StoreLabel>(Rec2->label)) {
+            ret.insert(&const_cast<CGNode &>(Edge.getTargetNode()));
+          }
+          if (std::holds_alternative<retypd::StoreLabel>(Rec->label) &&
+              std::holds_alternative<retypd::LoadLabel>(Rec2->label)) {
+            ret.insert(&const_cast<CGNode &>(Edge.getTargetNode()));
+          }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+void ConstraintsGenerator::determinizeStructEqual() {
+  // assert(DTrans.empty());
+  DTrans.clear();
+  std::map<const CGNode *, CGNode *> This2Bak;
+  ConstraintGraph Backup = CG.clone(This2Bak, true);
+  // remove all edges in the graph
+  for (auto &Ent : CG) {
+    for (auto &Edge : Ent.second.outEdges) {
+      // TODO optimize:
+      CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+    }
+  }
+  // remove all node that is not in the value map
+  std::set<CGNode *> Nodes;
+  for (auto &Ent : Val2Node) {
+    Nodes.insert(Ent.second);
+  }
+  for (auto &Ent : CG) {
+    if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
+      continue;
+    }
+    if (Nodes.count(&Ent.second) == 0) {
+      CG.removeNode(Ent.second.key);
+    }
+  }
+
+  using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
+
+  auto getOrSetNewNode = [this](const std::set<CGNode *> &N) -> EntryTy {
+    if (DTrans.count(N)) {
+      return DTrans.find(N);
+    }
+    auto &NewNode = CG.getOrInsertNode(retypd::NodeKey{
+        TypeVariable::CreateDtv(Ctx.TRCtx, ValueNamer::getName("dtm_"))});
+    auto it = DTrans.emplace(N, &NewNode);
+    assert(it.second);
+    return it.first;
+  };
+
+  // map from replaced node to the new node
+  std::map<CGNode *, CGNode *> ReplaceMap;
+  auto Lookup = [&ReplaceMap](CGNode *Node) -> CGNode * {
+    std::vector<CGNode *> PathNodes;
+    while (ReplaceMap.count(Node)) {
+      PathNodes.push_back(Node);
+      Node = ReplaceMap.at(Node);
+    }
+    for (auto *N : PathNodes) {
+      ReplaceMap[N] = Node;
+    }
+    return Node;
+  };
+
+  DTrans[{Backup.getEndNode()}] = CG.getEndNode();
+  std::queue<EntryTy> Worklist;
+  // for each node in the value map
+  for (auto &Ent : Val2Node) {
+    auto *BakNode = This2Bak.at(Ent.second);
+    std::set<CGNode *> StartSet = countClosureStructEq({BakNode});
+    auto pair1 = DTrans.emplace(StartSet, Ent.second);
+    if (pair1.second) {
+      Worklist.push(pair1.first);
+    } else {
+      // Can be a epsilon loop.
+      // TODO merge the node in the value map
+      if (pair1.first->second != Ent.second) {
+        // merge the node in the value map
+        std::cerr
+            << "ConstraintsGenerator::determinizeStructEqual: Merging node "
+            << toString(Ent.second->key) << " to "
+            << toString(pair1.first->second->key) << "\n";
+        // Ent.second = pair1.first->second;
+        // CG.removeNode(Ent.second->key);
+        ReplaceMap.emplace(Ent.second, pair1.first->second);
+        // assert(false);
+      }
+    }
+  }
+
+  // DSU flatten for Val2Node
+  for (auto &Ent : Val2Node) {
+    if (ReplaceMap.count(Ent.second)) {
+      Ent.second = Lookup(Ent.second);
+    }
+  }
+
+  // remove all node that is not in the value map again
+  Nodes.clear();
+  for (auto &Ent : Val2Node) {
+    Nodes.insert(Ent.second);
+  }
+  for (auto &Ent : CG) {
+    if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
+      continue;
+    }
+    if (Nodes.count(&Ent.second) == 0) {
+      CG.removeNode(Ent.second.key);
+    }
+  }
+
+  while (!Worklist.empty()) {
+    auto It = Worklist.front();
+    auto &Node = *It->second;
+    std::set<retypd::EdgeLabel> outLabels =
+        retypd::NFADeterminizer<>::allOutLabels(It->first);
+    for (auto &L : outLabels) {
+      auto S = countClosureStructEq(moveLoadEqStore(It->first, L));
+      if (S.count(Backup.getEndNode())) {
+        assert(S.size() == 1);
+      }
+      if (DTrans.count(S) == 0) {
+        auto NewNodeEnt = getOrSetNewNode(S);
+        Worklist.push(NewNodeEnt);
+      }
+      auto &ToNode = *DTrans.at(S);
+      CG.onlyAddEdge(Node, ToNode, L);
+    }
+    Worklist.pop();
   }
 }
 

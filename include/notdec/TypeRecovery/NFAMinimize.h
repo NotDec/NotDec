@@ -77,6 +77,7 @@ struct NFADeterminizer {
   }
 
   static std::set<NodeTy> countClosure(const std::set<NodeTy> &N) {
+    // initialize with N
     std::set<NodeTy> Ret(N);
     std::queue<NodeTy> Worklist;
     for (auto Node : N) {
