@@ -12,7 +12,26 @@
       "args": [
         "test/backend/SimpleRecursive2.ll",
         "-o",
-        "test/backend/SimpleRecursive2.ll.ll",
+        "test/backend/SimpleRecursive2.c",
+        "-debug-only=type-recovery",
+        "--print-before=type-recovery"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "CMake: build",
+      "env": {
+        "DEBUG_TRANS_MIN_GRAPH": "1",
+        "DEBUG_TRANS_SAT_GRAPH": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "decompile BottomUp1.ll",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "test/backend/BottomUp1.ll",
+        "-o",
+        "test/backend/BottomUp1.c",
         "-debug-only=type-recovery",
         "--print-before=type-recovery"
       ],
@@ -31,8 +50,9 @@
       "args": [
         "${workspaceFolder}/test/wasm/emcc-print.wat",
         "-o",
-        "${workspaceFolder}/test/wasm/emcc-print.wat.ll",
-        "--log-level=debug",
+        "${workspaceFolder}/test/wasm/emcc-print.wat.c",
+        // "--log-level=debug",
+        "-debug-only=structural-analysis",
         "--split-mem",
       ],
       "cwd": "${workspaceFolder}",
@@ -46,7 +66,7 @@
       "args": [
         "${file}",
         "-o",
-        "${file}.ll",
+        "${file}.c",
         "-debug-only=type-recovery",
         "--print-before=type-recovery"
       ],
@@ -77,10 +97,10 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "GraphTest SlidesExampleTest",
+      "name": "GraphTest PtrSet1",
       "program": "${workspaceFolder}/build/bin/GraphTest",
       "args": [
-        "--gtest_filter=Retypd.SlidesExampleTest",
+        "--gtest_filter=Retypd.PtrSet1",
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",

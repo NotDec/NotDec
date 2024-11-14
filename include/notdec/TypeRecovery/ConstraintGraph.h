@@ -1,6 +1,7 @@
 #ifndef _NOTDEC_RETYPD_GRAPH_H_
 #define _NOTDEC_RETYPD_GRAPH_H_
 
+#include <cassert>
 #include <list>
 #include <map>
 #include <memory>
@@ -146,7 +147,8 @@ struct ConstraintGraph {
   ConstraintGraph(TRContext &Ctx, std::string Name, bool disablePNI = false);
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New,
                         bool removePNI = false) const;
-  CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0);
+  CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0,
+                          bool AssertExist = false);
   void removeNode(const NodeKey &N);
 
   std::string getName() const { return Name; }
@@ -267,6 +269,12 @@ public:
 
 std::vector<SubTypeConstraint> expToConstraints(TRContext &Ctx, rexp::PRExp E);
 std::string toString(const std::set<CGNode *> Set);
+
+inline NodeKey MakeContraVariant(NodeKey Key) {
+  assert(Key.SuffixVariance == Covariant);
+  Key.SuffixVariance = Contravariant;
+  return Key;
+}
 
 } // namespace notdec::retypd
 

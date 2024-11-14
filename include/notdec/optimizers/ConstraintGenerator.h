@@ -141,6 +141,7 @@ public:
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
   std::map<ExtValuePtr, retypd::CGNode *> Val2Node;
+  std::map<ExtValuePtr, retypd::CGNode *> Val2NodeContra;
   retypd::ConstraintGraph CG;
   retypd::PNIGraph &PG;
   std::set<llvm::Function *> SCCs;
@@ -221,6 +222,9 @@ public:
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
   retypd::CGNode &getNode(ExtValuePtr Val, User *User);
+  retypd::CGNode &getNode(retypd::NodeKey Key) {
+    return CG.getOrInsertNode(Key, 0, true);
+  }
 
   const TypeVariable &getTypeVar(ExtValuePtr val, User *User);
   TypeVariable convertTypeVar(ExtValuePtr Val, User *User = nullptr);

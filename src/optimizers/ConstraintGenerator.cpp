@@ -1,8 +1,10 @@
 #include <cassert>
 #include <clang/AST/Type.h>
+#include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <llvm/ADT/Optional.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Value.h>
 #include <map>
@@ -219,6 +221,10 @@ inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
                << "\n";
 }
 
+std::string join(std::string path, std::string elem) {
+  return path.back() == '/' ? path + elem : path + "/" + elem;
+}
+
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
@@ -239,6 +245,20 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   std::vector<std::tuple<std::vector<CallGraphNode *>,
                          std::shared_ptr<ConstraintsGenerator>, std::string>>
       AllSCCs;
+
+  const char *DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
+  llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
+  if (DebugDir) {
+    llvm::sys::fs::create_directories(DebugDir);
+    std::error_code EC;
+    SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output json file." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+  }
 
   // Walk the callgraph in bottom-up SCC order.
   for (; !CGI.isAtEnd(); ++CGI) {
@@ -287,6 +307,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
     std::get<1>(AllSCCs.back()) = Generator;
     std::get<2>(AllSCCs.back()) = Name;
+    // write the SCC index to file
+    if (SCCsCatalog) {
+      *SCCsCatalog << "SCC" << AllSCCs.size() - 1 << "," << Name << "\n";
+    }
   }
 
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
@@ -312,6 +336,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   retypd::SketchToCTypeBuilder TB(M.getName());
 
   for (auto It = AllSCCs.rbegin(); It != AllSCCs.rend(); ++It) {
+    std::size_t SCCIndex = std::distance(AllSCCs.rbegin(), It);
+    std::string SCCName = "SCC" + std::to_string(SCCIndex);
+
+    llvm::Optional<std::string> DirPath;
+    if (DebugDir) {
+      DirPath.emplace(join(DebugDir, SCCName));
+      llvm::sys::fs::create_directories(*DirPath);
+    }
+
     const std::vector<CallGraphNode *> &NodeVec = std::get<0>(*It);
     if (std::get<1>(*It) == nullptr) {
       continue;
@@ -330,16 +363,19 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       SCCSet.insert(CGN->getFunction());
     }
 
-    Generator->CG.printGraph("Current.before-sks.dot");
+    if (DirPath) {
+      Generator->CG.printGraph(join(*DirPath, "Original.dot").c_str());
+    }
 
     // check if saturated
     // 0. pre-process the big graph: focus on the push/recall subgraph.
     Generator->CG.sketchSplit();
     Generator->removeUnreachable();
 
-    // TODO remove debug output
-    Generator->CG.printGraph("Current.sks.dot");
-    GlobalTypes.CG.printGraph("Global.before.dot");
+    if (DirPath) {
+      Generator->CG.printGraph(join(*DirPath, "Original.sks.dot").c_str());
+      GlobalTypes.CG.printGraph(join(*DirPath, "Global.before.dot").c_str());
+    }
 
     // copy all nodes into the global type graph
     for (auto &Ent : Generator->CG) {
@@ -353,9 +389,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
     // maintain the value map
     for (auto &Ent : Generator->Val2Node) {
-      auto &Node = *Ent.second;
-      auto &NewNode = GlobalTypes.CG.getOrInsertNode(Node.key);
+      auto *Node = Ent.second;
+      auto &NewNode = GlobalTypes.CG.getOrInsertNode(Node->key, 0, true);
       GlobalTypes.Val2Node.emplace(Ent.first, &NewNode);
+      // also maintain contravariant value map
+      auto &Node2 =
+          GlobalTypes.CG.getOrInsertNode(MakeContraVariant(Node->key));
+      GlobalTypes.Val2NodeContra.emplace(Ent.first, &Node2);
     }
 
     // 2. link the argument/return value subtype relations.
@@ -376,24 +416,39 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         for (int i = 0; i < Current->arg_size(); i++) {
           auto *Arg = Current->getArg(i);
           // assume the type variable is now in the graph.
+          auto &NFrom = GlobalTypes.getNode(Call->getArgOperand(i), Call);
+          auto &NTo = GlobalTypes.getNode(Arg, nullptr);
+          GlobalTypes.CG.onlyAddEdge(NFrom, NTo, retypd::One{});
           GlobalTypes.CG.onlyAddEdge(
-              GlobalTypes.getNode(Call->getArgOperand(i), Call),
-              GlobalTypes.getNode(Arg, nullptr), retypd::One{});
+              GlobalTypes.getNode(retypd::MakeContraVariant(NTo.key)),
+              GlobalTypes.getNode(retypd::MakeContraVariant(NFrom.key)),
+              retypd::One{});
         }
         if (!Current->getReturnType()->isVoidTy()) {
+          auto &NFrom =
+              GlobalTypes.getNode(ReturnValue{.Func = Current}, nullptr);
+          auto &NTo = GlobalTypes.getNode(Call, nullptr);
+          GlobalTypes.CG.onlyAddEdge(NFrom, NTo, retypd::One{});
           GlobalTypes.CG.onlyAddEdge(
-              GlobalTypes.getNode(ReturnValue{.Func = Current}, nullptr),
-              GlobalTypes.getNode(Call, nullptr), retypd::One{});
+              GlobalTypes.getNode(retypd::MakeContraVariant(NTo.key)),
+              GlobalTypes.getNode(retypd::MakeContraVariant(NFrom.key)),
+              retypd::One{});
         }
       }
     }
 
-    GlobalTypes.CG.printGraph("GlobalTypes.linked.dot");
+    if (DirPath) {
+      GlobalTypes.CG.printGraph(
+          join(*DirPath, "GlobalTypes.linked.dot").c_str());
+    }
 
     // 3. perform quotient equivalence on the graph..?
     // 4. determinize the graph
     GlobalTypes.determinize();
-    GlobalTypes.CG.printGraph("GlobalTypes.dtm.dot");
+
+    if (DirPath) {
+      GlobalTypes.CG.printGraph(join(*DirPath, "GlobalTypes.dtm.dot").c_str());
+    }
 
     // 5. save the special actual arg and return value nodes.
     // for each callee
@@ -433,11 +488,20 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     auto *Node = Ent.second;
     clang::QualType CTy = TB.buildType(*Node, Node->Size);
     if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-      llvm::errs() << "  Value: " << **V << " has type: " << CTy.getAsString()
-                   << "\n";
+      llvm::errs() << "  Value: " << **V
+                   << " upper bound: " << CTy.getAsString() << "\n";
     } else {
       llvm::errs() << "  Special Value: " << getName(Ent.first)
-                   << " has type: " << CTy.getAsString() << "\n";
+                   << " upper bound: " << CTy.getAsString() << "\n";
+    }
+    CTy = TB.buildType(
+        GlobalTypes.getNode(retypd::MakeContraVariant(Node->key)), Node->Size);
+    if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
+      llvm::errs() << "  Value: " << **V
+                   << " lower bound: " << CTy.getAsString() << "\n";
+    } else {
+      llvm::errs() << "  Special Value: " << getName(Ent.first)
+                   << " lower bound: " << CTy.getAsString() << "\n";
     }
   }
 
@@ -459,7 +523,10 @@ void ConstraintsGenerator::removeUnreachable() {
 
   std::queue<CGNode *> Worklist;
   for (auto &Ent : Val2Node) {
-    Worklist.push(Ent.second);
+    auto *Node = Ent.second;
+    Worklist.push(Node);
+    // also add contravariant node
+    Worklist.push(&CG.getOrInsertNode(MakeContraVariant(Node->key)));
   }
   while (!Worklist.empty()) {
     auto *Node = Worklist.front();
@@ -490,6 +557,33 @@ void ConstraintsGenerator::removeUnreachable() {
   for (auto *Node : ToErase) {
     CG.removeNode(Node->key);
   }
+}
+
+// When encountered a primitive node, ignore its edges.
+std::set<CGNode *> countClosureFix(const std::set<CGNode *> &N) {
+  std::set<CGNode *> Ret;
+  std::queue<CGNode *> Worklist;
+  for (auto Node : N) {
+    Ret.insert(Node);
+    Worklist.push(Node);
+  }
+  while (!Worklist.empty()) {
+    auto Node = Worklist.front();
+    Worklist.pop();
+    if (Node->key.Base.isPrimitive()) {
+      continue;
+    }
+    for (auto &Edge : Node->outEdges) {
+      if (std::holds_alternative<retypd::One>(Edge.getLabel())) {
+        auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+        if (Ret.count(&Target) == 0) {
+          Ret.insert(&Target);
+          Worklist.push(&Target);
+        }
+      }
+    }
+  }
+  return Ret;
 }
 
 std::set<CGNode *> countClosureBidirectionalEqual(const std::set<CGNode *> &N) {
@@ -701,15 +795,17 @@ void ConstraintsGenerator::determinize() {
     }
   }
   // remove all node that is not in the value map
-  std::set<CGNode *> Nodes;
+  std::set<CGNode *> V2NNodes;
   for (auto &Ent : Val2Node) {
-    Nodes.insert(Ent.second);
+    V2NNodes.insert(Ent.second);
+    // contravariant nodes.
+    V2NNodes.insert(&CG.getOrInsertNode(MakeContraVariant(Ent.second->key)));
   }
   for (auto &Ent : CG) {
     if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
       continue;
     }
-    if (Nodes.count(&Ent.second) == 0) {
+    if (V2NNodes.count(&Ent.second) == 0) {
       CG.removeNode(Ent.second.key);
     }
   }
@@ -729,18 +825,18 @@ void ConstraintsGenerator::determinize() {
 
   DTrans[{Backup.getEndNode()}] = CG.getEndNode();
   std::queue<EntryTy> Worklist;
+
   // for each node in the value map
-  for (auto &Ent : Val2Node) {
-    auto *BakNode = This2Bak.at(Ent.second);
-    std::set<CGNode *> StartSet =
-        retypd::NFADeterminizer<>::countClosure({BakNode});
-    auto pair1 = DTrans.emplace(StartSet, Ent.second);
+  for (auto *Node : V2NNodes) {
+    auto *BakNode = This2Bak.at(Node);
+    std::set<CGNode *> StartSet = countClosureFix({BakNode});
+    auto pair1 = DTrans.emplace(StartSet, Node);
     if (pair1.second) {
       Worklist.push(pair1.first);
     } else {
       // Can be a epsilon loop.
       // TODO merge the node in the value map
-      if (pair1.first->second != Ent.second) {
+      if (pair1.first->second != Node) {
         Backup.printEpsilonLoop(
             "debugloop",
             *reinterpret_cast<std::set<const CGNode *> *>(&StartSet));
@@ -759,8 +855,7 @@ void ConstraintsGenerator::determinize() {
     std::set<retypd::EdgeLabel> outLabels =
         retypd::NFADeterminizer<>::allOutLabels(It->first);
     for (auto &L : outLabels) {
-      auto S = retypd::NFADeterminizer<>::countClosure(
-          retypd::NFADeterminizer<>::move(It->first, L));
+      auto S = countClosureFix(retypd::NFADeterminizer<>::move(It->first, L));
       if (S.count(Backup.getEndNode())) {
         assert(S.size() == 1);
       }

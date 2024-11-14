@@ -1013,8 +1013,12 @@ void ConstraintGraph::addForgets(CGNode &N) {
   // }
 }
 
-CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size) {
+CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size,
+                                         bool AssertExist) {
   auto [it, inserted] = Nodes.try_emplace(N, *this, N, Size);
+  if (AssertExist) {
+    assert(!inserted && "getOrInsertNode: node already exists");
+  }
   return it->second;
 }
 
