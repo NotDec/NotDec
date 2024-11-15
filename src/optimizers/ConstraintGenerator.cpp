@@ -335,8 +335,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   TypeRecovery::Result Result;
   retypd::SketchToCTypeBuilder TB(M.getName());
 
-  for (auto It = AllSCCs.rbegin(); It != AllSCCs.rend(); ++It) {
-    std::size_t SCCIndex = std::distance(AllSCCs.rbegin(), It);
+  for (std::size_t Index1 = AllSCCs.size(); Index1 > 0; --Index1) {
+    std::size_t SCCIndex = Index1 - 1;
+    auto &It = AllSCCs[SCCIndex];
     std::string SCCName = "SCC" + std::to_string(SCCIndex);
 
     llvm::Optional<std::string> DirPath;
@@ -345,12 +346,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       llvm::sys::fs::create_directories(*DirPath);
     }
 
-    const std::vector<CallGraphNode *> &NodeVec = std::get<0>(*It);
-    if (std::get<1>(*It) == nullptr) {
+    const std::vector<CallGraphNode *> &NodeVec = std::get<0>(It);
+    if (std::get<1>(It) == nullptr) {
       continue;
     }
-    auto &Generator = std::get<1>(*It);
-    auto &Name = std::get<2>(*It);
+    auto &Generator = std::get<1>(It);
+    auto &Name = std::get<2>(It);
 
     std::cerr << "Processing SCC: " << Name << "\n";
 
@@ -364,7 +365,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     if (DirPath) {
-      Generator->CG.printGraph(join(*DirPath, "Original.dot").c_str());
+      Generator->CG.printGraph(join(*DirPath, "00-Original.dot").c_str());
     }
 
     // check if saturated
@@ -373,8 +374,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     Generator->removeUnreachable();
 
     if (DirPath) {
-      Generator->CG.printGraph(join(*DirPath, "Original.sks.dot").c_str());
-      GlobalTypes.CG.printGraph(join(*DirPath, "Global.before.dot").c_str());
+      Generator->CG.printGraph(join(*DirPath, "01-Original.sks.dot").c_str());
+      GlobalTypes.CG.printGraph(join(*DirPath, "01-Global.before.dot").c_str());
     }
 
     // copy all nodes into the global type graph
@@ -396,6 +397,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto &Node2 =
           GlobalTypes.CG.getOrInsertNode(MakeContraVariant(Node->key));
       GlobalTypes.Val2NodeContra.emplace(Ent.first, &Node2);
+    }
+
+    if (DirPath) {
+      GlobalTypes.CG.printGraph(join(*DirPath, "02-Global.added.dot").c_str());
     }
 
     // 2. link the argument/return value subtype relations.
@@ -439,16 +444,17 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     if (DirPath) {
       GlobalTypes.CG.printGraph(
-          join(*DirPath, "GlobalTypes.linked.dot").c_str());
+          join(*DirPath, "03-GlobalTypes.linked.dot").c_str());
     }
 
     // 3. perform quotient equivalence on the graph..?
     // 4. determinize the graph
-    GlobalTypes.determinize();
+    // GlobalTypes.determinize();
 
-    if (DirPath) {
-      GlobalTypes.CG.printGraph(join(*DirPath, "GlobalTypes.dtm.dot").c_str());
-    }
+    // if (DirPath) {
+    //   GlobalTypes.CG.printGraph(
+    //       join(*DirPath, "04-GlobalTypes.dtm.dot").c_str());
+    // }
 
     // 5. save the special actual arg and return value nodes.
     // for each callee
