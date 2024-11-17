@@ -1,4 +1,6 @@
 #include "TypeRecovery/SketchToCTypeBuilder.h"
+#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Comment.h"
@@ -14,7 +16,7 @@ clang::QualType fromLatticeElem(clang::ASTContext &Ctx, std::string Name,
     // TODO create typedef to unsigned int. e.g., typedef top32 uint32_t
     return Ctx.UnsignedIntTy;
   };
-  if (BitSize == 1) {
+  if (BitSize == 1 || Name == "bool") {
     return Ctx.BoolTy;
   }
   if (Name == "float") {
@@ -71,17 +73,36 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   // 1. no out edges, then it is top
   if (Node.outEdges.empty()) {
     // assert(false && "TODO");
-    return fromLatticeElem(Ctx, "top", BitSize);
+    auto Ret = fromLatticeElem(Ctx, "top", BitSize);
+    NodeTypeMap.emplace(&Node, Ret);
+    return Ret;
   }
-  // if only one edge to #End with forget primitive, then it is a simple
+  // if only edges to #End with forget primitive, then it is a simple
   // primitive type
-  if (Node.outEdges.size() == 1) {
-    auto &Edge = *Node.outEdges.begin();
+  std::string Var;
+  bool AllForgetPrim = true;
+  for (auto &Edge : Node.outEdges) {
+    bool IsForgetPrim = false;
     if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
       if (FB->Base.isPrimitive()) {
-        return fromLatticeElem(Ctx, FB->Base.getPrimitiveName(), BitSize);
+        IsForgetPrim = true;
+        if (Var.empty()) {
+          Var = FB->Base.getPrimitiveName();
+        } else {
+          if (Node.key.SuffixVariance == Covariant) {
+            Var = meet(Var, FB->Base.getPrimitiveName());
+          } else {
+            Var = join(Var, FB->Base.getPrimitiveName());
+          }
+        }
       }
     }
+    AllForgetPrim &= IsForgetPrim;
+  }
+  if (AllForgetPrim) {
+    auto Ret = fromLatticeElem(Ctx, Var, BitSize);
+    NodeTypeMap.emplace(&Node, Ret);
+    return Ret;
   }
 
   // std::map<OffsetLabel, SketchNode *> Off2Node;

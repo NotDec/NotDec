@@ -6,6 +6,7 @@
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/Decl.h>
 #include <clang/AST/Type.h>
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/Tooling.h>
@@ -27,6 +28,21 @@ struct SketchToCTypeBuilder {
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
     clang::QualType visitType(const CGNode &Node, unsigned BitSize);
+    std::map<std::string, clang::QualType> TypeDefs;
+    TypeBuilderImpl(clang::ASTContext &Ctx) : Ctx(Ctx) {}
+
+    clang::QualType getTop() {
+      if (TypeDefs.count("top")) {
+        return TypeDefs.at("top");
+      }
+      auto Decl = clang::TypedefDecl::Create(
+          Ctx, Ctx.getTranslationUnitDecl(), clang::SourceLocation(),
+          clang::SourceLocation(), &Ctx.Idents.get("top"),
+          Ctx.CreateTypeSourceInfo(Ctx.UnsignedIntTy));
+      auto Ret = Ctx.getTypedefType(Decl);
+      TypeDefs.emplace("top", Ret);
+      return Ret;
+    }
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   TypeBuilderImpl Builder{ASTUnit->getASTContext()};

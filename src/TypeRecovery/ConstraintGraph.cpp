@@ -1017,9 +1017,15 @@ CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N, unsigned int Size,
                                          bool AssertExist) {
   auto [it, inserted] = Nodes.try_emplace(N, *this, N, Size);
   if (AssertExist) {
-    assert(!inserted && "getOrInsertNode: node already exists");
+    assert(!inserted && "getOrInsertNode: node not exist!");
   }
   return it->second;
+}
+
+std::pair<std::map<NodeKey, CGNode>::iterator, bool>
+ConstraintGraph::emplaceNode(const NodeKey &N, unsigned int Size,
+                             bool AssertExist) {
+  return Nodes.try_emplace(N, *this, N, Size);
 }
 
 void ConstraintGraph::removeNode(const NodeKey &N) {
@@ -1430,57 +1436,65 @@ ConstraintGraph::ConstraintGraph(TRContext &Ctx, std::string Name,
   }
 }
 
-ConstraintGraph
-ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
-                       bool removePNI) const {
+void ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
+                            const ConstraintGraph &From, ConstraintGraph &To,
+                            bool removePNI) {
   assert(Old2New.empty() && "clone: Old2New is not empty!");
+  assert(&From.Ctx == &To.Ctx && "clone: Ctx mismatch!");
   // loses CG pointer when cloning.
-  ConstraintGraph G(Ctx, Name, (!(bool)PG) || removePNI);
+  removePNI = (!(bool)From.PG) || removePNI;
+  To.Name = From.Name;
 
   // clone all nodes
-  for (auto &Ent : Nodes) {
+  for (auto &Ent : From.Nodes) {
     auto &Node = Ent.second;
-    auto &NewNode = G.getOrInsertNode(Node.key, Node.Size);
+    auto &NewNode = To.getOrInsertNode(Node.key, Node.Size);
     auto Pair = Old2New.emplace(&Node, &NewNode);
     assert(Pair.second && "clone: Node already cloned!?");
   }
 
   // clone all edges
-  for (auto &Ent : Nodes) {
+  for (auto &Ent : From.Nodes) {
     auto &Node = Ent.second;
     auto NewNode = Old2New.at(&Node);
     for (auto &Edge : Node.outEdges) {
       auto &Target = Edge.getTargetNode();
       auto NewTarget = Old2New.at(&Target);
-      G.onlyAddEdge(*NewNode, *NewTarget, Edge.Label);
+      To.onlyAddEdge(*NewNode, *NewTarget, Edge.Label);
     }
   }
 
   // clone PNI Graph
-  if (PG && !removePNI) {
-    G.PG = std::make_unique<PNIGraph>(PG->Name);
-    G.PG->cloneFrom(*PG, Old2New);
+  if (From.PG && !removePNI) {
+    To.PG = std::make_unique<PNIGraph>(From.PG->Name);
+    To.PG->cloneFrom(*From.PG, Old2New);
   }
 
   // handle fields
-  G.isLayerSplit = isLayerSplit;
-  G.isSketchSplit = isSketchSplit;
-  if (MemoryNode) {
-    G.MemoryNode = Old2New.at(MemoryNode);
+  To.isLayerSplit = From.isLayerSplit;
+  To.isSketchSplit = From.isSketchSplit;
+  if (From.MemoryNode) {
+    To.MemoryNode = Old2New.at(From.MemoryNode);
   }
-  if (Start) {
-    G.Start = Old2New.at(Start);
+  if (From.Start) {
+    To.Start = Old2New.at(From.Start);
   }
-  if (End) {
-    G.End = Old2New.at(End);
+  if (From.End) {
+    To.End = Old2New.at(From.End);
   }
-  for (auto &N : StartNodes) {
-    G.StartNodes.insert(Old2New.at(N));
+  for (auto &N : From.StartNodes) {
+    To.StartNodes.insert(Old2New.at(N));
   }
-  for (auto &N : EndNodes) {
-    G.EndNodes.insert(Old2New.at(N));
+  for (auto &N : From.EndNodes) {
+    To.EndNodes.insert(Old2New.at(N));
   }
+}
 
+ConstraintGraph
+ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
+                       bool removePNI) const {
+  ConstraintGraph G(Ctx, Name, (!(bool)PG) || removePNI);
+  clone(Old2New, *this, G, removePNI);
   return G;
 }
 

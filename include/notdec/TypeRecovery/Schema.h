@@ -404,6 +404,10 @@ struct TypeVariable {
   bool isIntConstant() const { return Var->isIntConstant(); }
   OffsetRange getIntConstant() const { return Var->getIntConstant(); }
 
+  bool isEnd() const {
+    return Var->isPrimitive() && Var->getPrimitiveName() == "#End";
+  }
+
   std::string str() const {
     std::string Ret = Var->str();
     if (std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {

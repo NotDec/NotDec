@@ -145,10 +145,16 @@ struct ConstraintGraph {
   CGNode *MemoryNode = nullptr;
 
   ConstraintGraph(TRContext &Ctx, std::string Name, bool disablePNI = false);
+  static void clone(std::map<const CGNode *, CGNode *> &Old2New,
+                    const ConstraintGraph &From, ConstraintGraph &To,
+                    bool removePNI = false);
+  // Node map is the core data of cloning.
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New,
                         bool removePNI = false) const;
   CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0,
                           bool AssertExist = false);
+  std::pair<std::map<NodeKey, CGNode>::iterator, bool>
+  emplaceNode(const NodeKey &N, unsigned int Size, bool AssertExist);
   void removeNode(const NodeKey &N);
 
   std::string getName() const { return Name; }
@@ -227,6 +233,7 @@ public:
 
   // Graph related operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    assert(&From.Parent == this && &To.Parent == this);
     auto it = From.outEdges.find(CGEdge(From, To, Label));
     assert(it != From.outEdges.end());
     To.inEdges.erase(const_cast<CGEdge *>(&*it));

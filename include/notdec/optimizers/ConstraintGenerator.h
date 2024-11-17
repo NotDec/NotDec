@@ -104,6 +104,7 @@ using ExtValuePtr =
 ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User);
 std::string getName(const ExtValuePtr &Val);
 void dump(const ExtValuePtr &Val);
+unsigned int getSize(const ExtValuePtr &Val);
 
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Provide a unique key, i.e., memory address to be used by the LLVM's pass
@@ -123,9 +124,6 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
       FuncSummaries;
-  // map from function to its actual argument and return type nodes in the
-  // global graph.
-  std::map<llvm::Function *, std::vector<llvm::CallBase *>> FuncSketches;
   unsigned pointer_size = 0;
 
   Result run(Module &M, ModuleAnalysisManager &);
@@ -141,14 +139,11 @@ public:
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
   std::map<ExtValuePtr, retypd::CGNode *> Val2Node;
-  std::map<ExtValuePtr, retypd::CGNode *> Val2NodeContra;
   retypd::ConstraintGraph CG;
-  retypd::PNIGraph &PG;
+  retypd::PNIGraph *PG;
   std::set<llvm::Function *> SCCs;
   std::map<CallBase *, size_t> CallToID;
-
-  // Map from named types to sketches.
-  std::map<std::string, std::unique_ptr<ConstraintGraph>> NodeMap;
+  std::string DebugDir;
 
   std::vector<retypd::SubTypeConstraint> genSummary();
   std::function<const std::vector<retypd::SubTypeConstraint> *(
@@ -164,20 +159,23 @@ struct ConstraintsGenerator {
   // for determinization: extended powerset construction
   std::map<std::set<CGNode *>, CGNode *> DTrans;
   void determinizeStructEqual();
+  void eliminateCycle();
   void determinize();
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();
 
   void run();
+  // clone CG and maintain value map.
+  ConstraintsGenerator clone(std::map<const CGNode *, CGNode *> &Old2New);
   ConstraintsGenerator(
       TypeRecovery &Ctx, std::string Name, std::set<llvm::Function *> SCCs,
       std::function<
           const std::vector<retypd::SubTypeConstraint> *(llvm::Function *)>
           GetSummary)
-      : Ctx(Ctx), CG(Ctx.TRCtx, Name, false), PG(*CG.PG), SCCs(SCCs),
+      : Ctx(Ctx), CG(Ctx.TRCtx, Name, false), PG(CG.PG.get()), SCCs(SCCs),
         GetSummary(GetSummary) {}
   ConstraintsGenerator(TypeRecovery &Ctx, std::string Name)
-      : Ctx(Ctx), CG(Ctx.TRCtx, Name, true), PG(*CG.PG) {}
+      : Ctx(Ctx), CG(Ctx.TRCtx, Name, true), PG(CG.PG.get()) {}
 
 public:
   CGNode &setTypeVar(ExtValuePtr Val, const TypeVariable &dtv, User *User,
@@ -222,8 +220,8 @@ public:
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
   retypd::CGNode &getNode(ExtValuePtr Val, User *User);
-  retypd::CGNode &getNode(retypd::NodeKey Key) {
-    return CG.getOrInsertNode(Key, 0, true);
+  retypd::CGNode &getNode(retypd::NodeKey Key, bool AssertExist = true) {
+    return CG.getOrInsertNode(Key, 0, AssertExist);
   }
 
   const TypeVariable &getTypeVar(ExtValuePtr val, User *User);
