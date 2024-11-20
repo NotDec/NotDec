@@ -14,11 +14,9 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace notdec::retypd {
-
-clang::QualType fromLatticeElem(clang::ASTContext &Ctx, std::string Name,
-                                unsigned BitSize);
 
 clang::RecordDecl *createStruct(clang::ASTContext &Ctx);
 
@@ -27,22 +25,44 @@ struct SketchToCTypeBuilder {
     clang::ASTContext &Ctx;
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
+    // Main interface: recursively visit the node and build the type
     clang::QualType visitType(const CGNode &Node, unsigned BitSize);
-    std::map<std::string, clang::QualType> TypeDefs;
     TypeBuilderImpl(clang::ASTContext &Ctx) : Ctx(Ctx) {}
 
-    clang::QualType getTop() {
-      if (TypeDefs.count("top")) {
-        return TypeDefs.at("top");
+    std::map<std::string, clang::QualType> TypeDefs;
+    clang::QualType getUndef(unsigned BitSize) {
+      assert(BitSize > 0);
+      std::string Name = "undef" + std::to_string(BitSize);
+      if (TypeDefs.count(Name)) {
+        return TypeDefs.at(Name);
       }
       auto Decl = clang::TypedefDecl::Create(
           Ctx, Ctx.getTranslationUnitDecl(), clang::SourceLocation(),
-          clang::SourceLocation(), &Ctx.Idents.get("top"),
-          Ctx.CreateTypeSourceInfo(Ctx.UnsignedIntTy));
+          clang::SourceLocation(), &Ctx.Idents.get(Name),
+          Ctx.CreateTypeSourceInfo(Ctx.getIntTypeForBitwidth(BitSize, false)));
+      Ctx.getTranslationUnitDecl()->addDecl(Decl);
       auto Ret = Ctx.getTypedefType(Decl);
-      TypeDefs.emplace("top", Ret);
+      TypeDefs.emplace(Name, Ret);
       return Ret;
     }
+
+    clang::QualType getBot(unsigned BitSize) {
+      assert(BitSize > 0);
+      std::string Name = "bottom" + std::to_string(BitSize);
+      if (TypeDefs.count(Name)) {
+        return TypeDefs.at(Name);
+      }
+      auto Decl = clang::TypedefDecl::Create(
+          Ctx, Ctx.getTranslationUnitDecl(), clang::SourceLocation(),
+          clang::SourceLocation(), &Ctx.Idents.get(Name),
+          Ctx.CreateTypeSourceInfo(Ctx.getIntTypeForBitwidth(BitSize, false)));
+      Ctx.getTranslationUnitDecl()->addDecl(Decl);
+      auto Ret = Ctx.getTypedefType(Decl);
+      TypeDefs.emplace(Name, Ret);
+      return Ret;
+    }
+
+    clang::QualType fromLatticeElem(std::string Name, unsigned BitSize);
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   TypeBuilderImpl Builder{ASTUnit->getASTContext()};
@@ -52,6 +72,7 @@ struct SketchToCTypeBuilder {
       : ASTUnit(clang::tooling::buildASTFromCode("", "decompilation.c")) {}
 
   clang::QualType buildType(const CGNode &Root, unsigned BitSize) {
+    assert(BitSize > 0);
     return Builder.visitType(Root, BitSize);
   }
 };

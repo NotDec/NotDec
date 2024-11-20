@@ -10,12 +10,16 @@
 namespace notdec::retypd {
 
 // TODO a better lattice representation
-clang::QualType fromLatticeElem(clang::ASTContext &Ctx, std::string Name,
-                                unsigned BitSize) {
+clang::QualType
+SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(std::string Name,
+                                                       unsigned BitSize) {
   if (Name == "top") {
     // TODO create typedef to unsigned int. e.g., typedef top32 uint32_t
-    return Ctx.UnsignedIntTy;
-  };
+    return getUndef(BitSize);
+  }
+  if (Name == "bottom") {
+    return getBot(BitSize);
+  }
   if (BitSize == 1 || Name == "bool") {
     return Ctx.BoolTy;
   }
@@ -73,7 +77,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   // 1. no out edges, then it is top
   if (Node.outEdges.empty()) {
     // assert(false && "TODO");
-    auto Ret = fromLatticeElem(Ctx, "top", BitSize);
+    auto Ret = fromLatticeElem("top", BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }
@@ -100,7 +104,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     AllForgetPrim &= IsForgetPrim;
   }
   if (AllForgetPrim) {
-    auto Ret = fromLatticeElem(Ctx, Var, BitSize);
+    auto Ret = fromLatticeElem(Var, BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }

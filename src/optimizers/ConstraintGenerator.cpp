@@ -8,6 +8,7 @@
 #include <iostream>
 #include <llvm/ADT/Optional.h>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 #include <map>
 #include <memory>
@@ -44,6 +45,7 @@
 #include "Utils/AllSCCIterator.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
+#include "notdec-llvm2c/Interface.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "optimizers/StackPointerFinder.h"
 #include "utils.h"
@@ -192,8 +194,11 @@ bool hasUser(const Value *Val, const User *User) {
   return false;
 }
 
-unsigned int getSize(const ExtValuePtr &Val) {
+unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    if ((*V)->getType()->isPointerTy()) {
+      return pointer_size;
+    }
     return (*V)->getType()->getScalarSizeInBits();
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     return F->Func->getReturnType()->getScalarSizeInBits();
@@ -611,6 +616,23 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // TODO further merge and simplify the graph?
   }
 
+  auto Convert = [&](ExtValuePtr Val) -> llvm2c::WValuePtr {
+    if (auto V = std::get_if<llvm::Value *>(&Val)) {
+      return *V;
+    } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+      return llvm2c::RetVal{.Func = F->Func, .Index = F->Index};
+    } else if (auto Arg = std::get_if<CallArg>(&Val)) {
+      assert(false);
+    } else if (auto Ret = std::get_if<CallRet>(&Val)) {
+      assert(false);
+    } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+      return llvm2c::UsedConstant(IC->Val, IC->User);
+    }
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "ERROR: getName: unhandled type of ExtValPtr\n";
+    std::abort();
+  };
+
   assert(SCCGraphs.size() == AllSCCs.size());
   // build AST type for each value in value map
   for (int i = 0; i < SCCGraphs.size(); i++) {
@@ -641,7 +663,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto *Node = Ent.second;
       assert(&Node->Parent == &G2.CG &&
              "RetypdGenerator::getTypeVar: Node is not in the graph");
-      clang::QualType CTy = TB.buildType(*Node, getSize(Ent.first));
+      auto Size = getSize(Ent.first, pointer_size);
+      assert(Size > 0);
+      clang::QualType CTy = TB.buildType(*Node, Size);
+      assert(Result.ValueTypes.count(Convert(Ent.first)) == 0);
+      Result.ValueTypes[Convert(Ent.first)] = CTy;
       if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
         llvm::errs() << "  Value: " << **V
                      << " upper bound: " << CTy.getAsString() << "\n";
@@ -649,9 +675,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         llvm::errs() << "  Special Value: " << getName(Ent.first)
                      << " upper bound: " << CTy.getAsString() << "\n";
       }
+
       if (G2.CG.Nodes.count(retypd::MakeContraVariant(Node->key)) > 0) {
         CTy = TB.buildType(G2.getNode(retypd::MakeContraVariant(Node->key)),
-                           getSize(Ent.first));
+                           Size);
+
         if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
           llvm::errs() << "  Value: " << **V
                        << " lower bound: " << CTy.getAsString() << "\n";
@@ -659,6 +687,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           llvm::errs() << "  Special Value: " << getName(Ent.first)
                        << " lower bound: " << CTy.getAsString() << "\n";
         }
+        assert(Result.ValueTypesUpperBound.count(Convert(Ent.first)) == 0);
+        Result.ValueTypesUpperBound[Convert(Ent.first)] = CTy;
       } else {
         llvm::errs() << "  Value: " << getName(Ent.first)
                      << " has no lower bound\n";
@@ -1183,7 +1213,7 @@ retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
     return *Val2Node.at(Val);
   }
   auto ret = convertTypeVar(Val, User);
-  return setTypeVar(Val, ret, User, getSize(Val));
+  return setTypeVar(Val, ret, User, getSize(Val, Ctx.pointer_size));
 }
 
 const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,

@@ -113,10 +113,12 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
     // Run type recovery.
-    auto &HighTypes = MAM.getResult<TypeRecovery>(M);
+    std::unique_ptr<TypeRecovery::Result> HighTypes =
+        std::make_unique<TypeRecovery::Result>(
+            std::move(MAM.getResult<TypeRecovery>(M)));
 
     std::cerr << "Current Type definitions:\n";
-    HighTypes.ASTUnit->getASTContext().getTranslationUnitDecl()->print(
+    HighTypes->ASTUnit->getASTContext().getTranslationUnitDecl()->print(
         llvm::errs(), 2);
 
     std::string outsuffix = getSuffix(OutFilePath);
@@ -148,9 +150,7 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
         std::cerr << EC.message() << std::endl;
         std::abort();
       }
-      notdec::llvm2c::decompileModule(
-          M, os, llvm2cOpt,
-          std::make_unique<TypeRecovery::Result>(std::move(HighTypes)));
+      notdec::llvm2c::decompileModule(M, os, llvm2cOpt, std::move(HighTypes));
       std::cout << "Decompile result: " << OutFilePath << std::endl;
     }
 

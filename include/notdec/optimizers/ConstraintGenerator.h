@@ -104,7 +104,7 @@ using ExtValuePtr =
 ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User);
 std::string getName(const ExtValuePtr &Val);
 void dump(const ExtValuePtr &Val);
-unsigned int getSize(const ExtValuePtr &Val);
+unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size);
 
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Provide a unique key, i.e., memory address to be used by the LLVM's pass
