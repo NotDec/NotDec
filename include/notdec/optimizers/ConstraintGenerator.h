@@ -86,20 +86,20 @@ struct CallRet {
 };
 /// Differentiate pointer-sized int constant. It can be pointer or int under
 /// different context.
-struct IntConstant {
-  llvm::ConstantInt *Val;
+struct UConstant {
+  llvm::Constant *Val;
   llvm::User *User;
-  bool operator<(const IntConstant &rhs) const {
-    return std::tie(Val, User) < std::tie(rhs.Val, User);
+  bool operator<(const UConstant &rhs) const {
+    return std::tie(Val, User) < std::tie(rhs.Val, rhs.User);
   }
-  bool operator==(const IntConstant &rhs) const {
+  bool operator==(const UConstant &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
 
 // Extend Value* with some special values.
 using ExtValuePtr =
-    std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, IntConstant>;
+    std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, UConstant>;
 
 ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User);
 std::string getName(const ExtValuePtr &Val);
@@ -182,9 +182,9 @@ public:
                      unsigned int Size) {
     // Differentiate int32/int64 by User.
     if (auto V = std::get_if<llvm::Value *>(&Val)) {
-      if (auto CI = dyn_cast<ConstantInt>(*V)) {
-        if (CI->getBitWidth() == 32 || CI->getBitWidth() == 64) {
-          assert(false && "Should already be converted to IntConstant");
+      if (!isa<GlobalValue>(*V)) {
+        if (auto CI = dyn_cast<Constant>(*V)) {
+          assert(false && "Should already be converted to UConstant");
         }
       }
     }

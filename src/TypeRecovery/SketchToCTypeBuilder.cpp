@@ -13,15 +13,15 @@ namespace notdec::retypd {
 clang::QualType
 SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(std::string Name,
                                                        unsigned BitSize) {
+  if (BitSize == 1 || Name == "bool") {
+    return Ctx.BoolTy;
+  }
   if (Name == "top") {
     // TODO create typedef to unsigned int. e.g., typedef top32 uint32_t
     return getUndef(BitSize);
   }
   if (Name == "bottom") {
     return getBot(BitSize);
-  }
-  if (BitSize == 1 || Name == "bool") {
-    return Ctx.BoolTy;
   }
   if (Name == "float") {
     return Ctx.FloatTy;

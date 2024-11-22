@@ -114,8 +114,8 @@ void dump(const ExtValuePtr &Val) {
                         *const_cast<llvm::CallBase *>(Ret->Call)) +
                         "_CallRet";
     return;
-  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
-    llvm::errs() << "IntConstant: " << *IC->Val;
+  } else if (auto IC = std::get_if<UConstant>(&Val)) {
+    llvm::errs() << "IntConstant: " << *IC->Val << ", User: " << *IC->User;
     return;
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -209,8 +209,14 @@ unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
         ->getScalarSizeInBits();
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     return Ret->Call->getType()->getScalarSizeInBits();
-  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
-    return IC->Val->getBitWidth();
+  } else if (auto IC = std::get_if<UConstant>(&Val)) {
+    if (IC->Val->getType()->isPointerTy()) {
+      return pointer_size;
+    }
+    if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
+      return CI->getBitWidth();
+    }
+    assert(false && "TODO");
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "ERROR: getSize: unhandled type of ExtValPtr\n";
@@ -220,12 +226,12 @@ unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
 // TODO refactor: increase code reusability
 ExtValuePtr getExtValuePtr(llvm::Value *V, User *User) {
   ExtValuePtr Val = V;
-  if (auto CI = dyn_cast<ConstantInt>(V)) {
-    if (CI->getBitWidth() == 32 || CI->getBitWidth() == 64) {
+  if (!isa<GlobalValue>(*V)) {
+    if (auto CI = dyn_cast<Constant>(V)) {
       assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
       assert(hasUser(V, User) &&
              "convertTypeVarVal: constant not used by user");
-      Val = IntConstant{.Val = cast<ConstantInt>(V), .User = User};
+      Val = UConstant{.Val = cast<Constant>(V), .User = User};
     }
   }
   return Val;
@@ -242,8 +248,12 @@ std::string getName(const ExtValuePtr &Val) {
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
     return ValueNamer::getName(*const_cast<llvm::CallBase *>(Ret->Call)) +
            "_CallRet";
-  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
-    return "IntConstant_" + int_to_hex(IC->Val->getSExtValue());
+  } else if (auto IC = std::get_if<UConstant>(&Val)) {
+    if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
+      return "IntConstant_" + int_to_hex(CI->getSExtValue());
+    } else {
+      return "Constant_" + ValueNamer::getName(*IC->Val, "constant_");
+    }
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "ERROR: getName: unhandled type of ExtValPtr\n";
@@ -625,7 +635,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       assert(false);
     } else if (auto Ret = std::get_if<CallRet>(&Val)) {
       assert(false);
-    } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+    } else if (auto IC = std::get_if<UConstant>(&Val)) {
       return llvm2c::UsedConstant(IC->Val, IC->User);
     }
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -673,7 +683,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
                      << " upper bound: " << CTy.getAsString() << "\n";
       } else {
         llvm::errs() << "  Special Value: " << getName(Ent.first)
-                     << " upper bound: " << CTy.getAsString() << "\n";
+                     << " upper bound: " << CTy.getAsString();
+        if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
+          llvm::errs() << " User: " << *UC->User;
+        }
+        llvm::errs() << "\n";
       }
 
       if (G2.CG.Nodes.count(retypd::MakeContraVariant(Node->key)) > 0) {
@@ -1200,12 +1214,12 @@ std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
 retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    if (auto CI = dyn_cast<ConstantInt>(*V)) {
-      if (CI->getBitWidth() == 32 || CI->getBitWidth() == 64) {
+    if (!isa<GlobalValue>(*V)) {
+      if (auto CI = dyn_cast<Constant>(*V)) {
         assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
         assert(hasUser(*V, User) &&
                "convertTypeVarVal: constant not used by user");
-        Val = IntConstant{.Val = cast<ConstantInt>(*V), .User = User};
+        Val = UConstant{.Val = cast<Constant>(*V), .User = User};
       }
     }
   }
@@ -1223,7 +1237,7 @@ const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,
 
 TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    return convertTypeVarVal(*V);
+    return convertTypeVarVal(*V, User);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     auto tv = makeTv(Ctx.TRCtx, getFuncTvName(F->Func));
     tv = tv.pushLabel(retypd::OutLabel{});
@@ -1246,11 +1260,14 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
     // // tv.getInstanceId() = Ret->InstanceId;
     // tv = tv.pushLabel(retypd::OutLabel{});
     return tv;
-  } else if (auto IC = std::get_if<IntConstant>(&Val)) {
+  } else if (auto IC = std::get_if<UConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
-    auto ret = TypeVariable::CreateIntConstant(
-        Ctx.TRCtx, OffsetRange{.offset = IC->Val->getSExtValue()}, User);
-    return ret;
+    if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
+      auto ret = TypeVariable::CreateIntConstant(
+          Ctx.TRCtx, OffsetRange{.offset = CI->getSExtValue()}, User);
+      return ret;
+    }
+    return convertTypeVarVal(IC->Val, IC->User);
   }
   llvm::errs()
       << __FILE__ << ":" << __LINE__ << ": "
@@ -1287,8 +1304,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
       return makeTv(Ctx.TRCtx, gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
       if (auto CI = dyn_cast<ConstantInt>(C)) {
-        assert(CI->getBitWidth() != 32 && CI->getBitWidth() != 64 &&
-               "Should be handled earlier");
+        assert(false && "Should be converted earlier");
       }
       return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));
       // auto Ty = C->getType();
@@ -1301,7 +1317,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
     // Consistent with Call handling
-    TypeVariable tv = getTypeVar(arg->getParent(), User);
+    TypeVariable tv = getTypeVar(arg->getParent(), nullptr);
     tv = tv.pushLabel(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
   }
@@ -1513,8 +1529,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
   std::cerr << "Warning: RetypdGeneratorVisitor::visitGetElementPtrInst: "
                "Gep should not exist before this pass!\n";
   // But if we really want to support this, handle it the same way as AddInst.
-  // A shortcut to create a offseted pointer. the operate type must be i8*. Just
-  // like ptradd.
+  // A shortcut to create a offseted pointer. the operate type must be i8*.
+  // Just like ptradd.
 }
 
 void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,

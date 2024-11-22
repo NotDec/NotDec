@@ -32,7 +32,7 @@ out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
 	clang-14 -O0 -S -emit-llvm -g0 -o ./$@ ./$<
 
 %.dec.ll: %.wasm
-	../../build/bin/notdec --compat-mode -o $@ -i $<
+	bash -c '../../build/bin/notdec -o $@ $< 2>&1 | tee $<.log ; exit $${PIPESTATUS[0]}'
 
 %.wat: %.wasm
 	wasm2wat -f --enable-all $< > $@

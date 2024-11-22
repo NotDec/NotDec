@@ -22,13 +22,11 @@ SSGNode &SSGTypeRec::getOrInsertNode(ExtValPtr Key, unsigned int Size,
                                      User *User) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Key)) {
-    if (auto CI = dyn_cast<ConstantInt>(*V)) {
-      if (CI->getBitWidth() == 32 || CI->getBitWidth() == 64) {
+    if (auto CI = dyn_cast<Constant>(*V)) {
         assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
         assert(hasUser(*V, User) &&
                "convertTypeVarVal: constant not used by user");
-        Key = IntConstant{.Val = cast<ConstantInt>(*V), .User = User};
-      }
+        Key = UConstant{.Val = cast<Constant>(*V), .User = User};
     }
   }
   auto [It, Inserted] = Val2Node.try_emplace(Key, SSG);
