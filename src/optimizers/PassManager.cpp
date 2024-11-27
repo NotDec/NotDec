@@ -112,14 +112,6 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
       : OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
-    // Run type recovery.
-    std::unique_ptr<TypeRecovery::Result> HighTypes =
-        std::make_unique<TypeRecovery::Result>(
-            std::move(MAM.getResult<TypeRecovery>(M)));
-
-    std::cerr << "Current Type definitions:\n";
-    HighTypes->ASTUnit->getASTContext().getTranslationUnitDecl()->print(
-        llvm::errs(), 2);
 
     std::string outsuffix = getSuffix(OutFilePath);
     if (outsuffix == ".ll") {
@@ -143,6 +135,16 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
       llvm::WriteBitcodeToFile(M, os);
       std::cout << "Bitcode dumped to " << OutFilePath << std::endl;
     } else if (outsuffix == ".c") {
+      // notdec::llvm2c::demoteSSA(M);
+      // Run type recovery.
+      std::unique_ptr<TypeRecovery::Result> HighTypes =
+          std::make_unique<TypeRecovery::Result>(
+              std::move(MAM.getResult<TypeRecovery>(M)));
+
+      std::cerr << "Current Type definitions:\n";
+      HighTypes->ASTUnit->getASTContext().getTranslationUnitDecl()->print(
+          llvm::errs(), 2);
+
       std::error_code EC;
       llvm::raw_fd_ostream os(OutFilePath, EC);
       if (EC) {
@@ -150,6 +152,8 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
         std::cerr << EC.message() << std::endl;
         std::abort();
       }
+      // TODO do tr after SSA demotion.
+      llvm2cOpt.noDemoteSSA = true;
       notdec::llvm2c::decompileModule(M, os, llvm2cOpt, std::move(HighTypes));
       std::cout << "Decompile result: " << OutFilePath << std::endl;
     }
@@ -411,11 +415,11 @@ void DecompileConfig::run_passes() {
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(
-          createFunctionToLoopPassAdaptor(LoopRotatePass())));
-      MPM.addPass(createModuleToFunctionPassAdaptor(
-          createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
-      // MPM.addPass(retypd::SSGTypeRec());
+
+      // MPM.addPass(createModuleToFunctionPassAdaptor(
+      //     createFunctionToLoopPassAdaptor(LoopRotatePass())));
+      // MPM.addPass(createModuleToFunctionPassAdaptor(
+      //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec

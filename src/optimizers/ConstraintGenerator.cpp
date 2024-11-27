@@ -1458,6 +1458,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
   // Defer constraints generation (and unification) to handlePHINodes
+  phiNodes.push_back(&I);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::handlePHINodes() {
