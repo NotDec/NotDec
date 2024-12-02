@@ -52,9 +52,10 @@ struct StackPointerMatcher {
       load = cast<Instruction>(add->getOperand(0));
       return true;
     } else if (PatternMatch::match(I, pat_alloc2)) {
-      assert(
-          false &&
-          "instCombine should have moved the constant to the second operand!");
+      if (isa<Constant>(space)) {
+        assert(false && "instCombine should have moved the constant to the "
+                        "second operand!");
+      }
       if (specific_sp != nullptr && sp != specific_sp) {
         return false;
       }

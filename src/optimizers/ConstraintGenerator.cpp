@@ -1281,14 +1281,48 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User) {
     if (auto CE = dyn_cast<ConstantExpr>(C)) {
       // ignore bitcast ConstantExpr
       if (CE->getOpcode() == Instruction::BitCast) {
-        return getTypeVar(CE->getOperand(0), User);
-      }
-      if (CE->getOpcode() == Instruction::IntToPtr) {
+        return getTypeVar(CE->getOperand(0), CE);
+      } else if (CE->getOpcode() == Instruction::IntToPtr) {
         if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
           auto tv = CG.getMemoryNode()->key.Base;
           tv = addOffset(tv, OffsetRange{.offset = Addr->getSExtValue()});
           return tv;
         }
+      } else if (CE->getOpcode() == Instruction::GetElementPtr) {
+        // getelementptr of table, i.e., function pointer array
+        if (auto GV = dyn_cast<GlobalVariable>(CE->getOperand(0))) {
+          // if is function pointer array
+          auto T1 = GV->getType();
+          if (T1->isPointerTy() && T1->getPointerElementType()->isArrayTy() &&
+              T1->getPointerElementType()
+                  ->getArrayElementType()
+                  ->isPointerTy() &&
+              T1->getPointerElementType()
+                      ->getArrayElementType()
+                      ->getPointerElementType() != nullptr &&
+              T1->getPointerElementType()
+                  ->getArrayElementType()
+                  ->getPointerElementType()
+                  ->isFunctionTy()) {
+            // if constant offset
+            if (auto CI1 = dyn_cast<ConstantInt>(CE->getOperand(1))) {
+              if (CI1->isZero()) {
+                if (auto CI = dyn_cast<ConstantInt>(CE->getOperand(2))) {
+                  auto tv = makeTv(Ctx.TRCtx, GV->getName().str());
+                  tv = tv.pushLabel(retypd::OffsetLabel{
+                      .range = OffsetRange{.offset = CI->getSExtValue() *
+                                                     Ctx.pointer_size}});
+                  return tv;
+                }
+              }
+            }
+          }
+        }
+      } else {
+        llvm::errs()
+            << __FILE__ << ":" << __LINE__ << ": "
+            << "ERROR: RetypdGenerator::getTypeVar unhandled ConstantExpr: "
+            << *C << "\n";
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
       if (gv == Ctx.StackPointer) {
