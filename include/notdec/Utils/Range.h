@@ -76,6 +76,18 @@ struct OffsetRange {
     }
     return s;
   }
+
+  // unary operator -
+  // OffsetRange operator-() const {
+  //   OffsetRange ret;
+  //   ret.offset = -offset;
+  //   for (auto &a : access) {
+  //     // TODO
+  //     ret.access.push_back(ArrayOffset(a.Size, -a.Count));
+  //   }
+  //   return ret;
+  // }
+
   OffsetRange operator+(const OffsetRange &rhs) const {
     OffsetRange ret;
     ret.offset += rhs.offset;
@@ -107,9 +119,11 @@ struct OffsetRange {
     }
     return ret;
   }
+
   OffsetRange operator*(const int64_t Rhs) const {
     return *this * OffsetRange{.offset = Rhs};
   }
+
   OffsetRange operator*(const OffsetRange Rhs) const {
     OffsetRange Ret;
     Ret.offset = offset * Rhs.offset;

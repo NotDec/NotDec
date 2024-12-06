@@ -283,6 +283,17 @@ inline NodeKey MakeContraVariant(NodeKey Key) {
   return Key;
 }
 
+inline bool isOffsetOrOne(const CGEdge &E) {
+  if (auto Rec = std::get_if<notdec::retypd::RecallLabel>(&E.Label)) {
+    return std::holds_alternative<notdec::retypd::OffsetLabel>(Rec->label);
+  } else if (auto Rec = std::get_if<notdec::retypd::ForgetLabel>(&E.Label)) {
+    return std::holds_alternative<notdec::retypd::OffsetLabel>(Rec->label);
+  } else if (std::holds_alternative<notdec::retypd::One>(E.Label)) {
+    return true;
+  }
+  return false;
+}
+
 } // namespace notdec::retypd
 
 namespace llvm {
@@ -441,6 +452,127 @@ inline bool operator<(const InverseVal<CGNode *> &N1,
                       const InverseVal<CGNode *> &N2) {
   return N1.Graph < N2.Graph;
 }
+
+// Only look for offset edges
+template <class GraphType> struct OffsetOnly {
+  GraphType Graph;
+
+  inline OffsetOnly(const GraphType G) : Graph(G) {}
+  OffsetOnly &operator=(const OffsetOnly &other) {
+    this->Graph = other.Graph;
+    return *this;
+  }
+  // conversion
+  operator GraphType() const { return Graph; }
+};
+
+template <typename BaseIt> struct FilteredIterator : BaseIt {
+  typedef std::function<bool(const typename BaseIt::value_type &)> FilterType;
+  FilteredIterator() = default;
+  FilteredIterator(FilterType filter, BaseIt base, BaseIt end = {})
+      : BaseIt(base), End(end), Filter(filter) {
+    while (*this != End && !Filter(**this)) {
+      ++*this;
+    }
+  }
+
+  FilteredIterator &operator++() {
+    do {
+      BaseIt::operator++();
+    } while (*this != End && !Filter(**this));
+    return *this;
+  }
+
+  FilteredIterator operator++(int) {
+    FilteredIterator copy = *this;
+    ++*this;
+    return copy;
+  }
+
+private:
+  BaseIt End;
+  FilterType Filter;
+};
+
+using notdec::retypd::isOffsetOrOne;
+
+template <> struct GraphTraits<OffsetOnly<CGNode *>> {
+  using NodeRef = OffsetOnly<CGNode *>;
+
+  static CGNode *CGEdgeToTarget(const CGEdge &P) {
+    return const_cast<CGNode *>(&P.getTargetNode());
+  }
+
+  static CGEdge *CGEdgeToPtr(const CGEdge &P) {
+    return const_cast<CGEdge *>(&P);
+  }
+  static NodeRef getEdgeTarget(const CGEdge *Edge) {
+    return const_cast<CGNode *>(&Edge->getTargetNode());
+  }
+  static notdec::retypd::EdgeLabel getEdgeLabel(const CGEdge *Edge) {
+    return Edge->Label;
+  }
+
+  using FilteredIt = FilteredIterator<CGNode::iterator>;
+  using ChildIteratorType =
+      mapped_iterator<FilteredIt, decltype(&CGEdgeToTarget)>;
+
+  using ChildEdgeIteratorType =
+      mapped_iterator<FilteredIt, decltype(&CGEdgeToPtr)>;
+
+  static ChildIteratorType child_begin(NodeRef N) {
+    return ChildIteratorType(
+        FilteredIt(isOffsetOrOne, N.Graph->begin(), N.Graph->end()),
+        &CGEdgeToTarget);
+  }
+  static ChildIteratorType child_end(NodeRef N) {
+    return ChildIteratorType(
+        FilteredIt(isOffsetOrOne, N.Graph->end(), N.Graph->end()),
+        &CGEdgeToTarget);
+  }
+  static ChildEdgeIteratorType child_edge_begin(NodeRef N) {
+    return ChildEdgeIteratorType(
+        FilteredIt(isOffsetOrOne, N.Graph->begin(), N.Graph->end()),
+        &CGEdgeToPtr);
+  }
+  static ChildEdgeIteratorType child_edge_end(NodeRef N) {
+    return ChildEdgeIteratorType(
+        FilteredIt(isOffsetOrOne, N.Graph->end(), N.Graph->end()),
+        &CGEdgeToPtr);
+  }
+  static notdec::retypd::TypeVariable getTypeVar(NodeRef N) {
+    return N.Graph->getTypeVar();
+  }
+
+  static NodeRef getEntryNode(OffsetOnly<NodeRef> G) { return G.Graph; }
+};
+
+inline bool operator<(const OffsetOnly<CGNode *> &N1,
+                      const OffsetOnly<CGNode *> &N2) {
+  return N1.Graph < N2.Graph;
+}
+
+inline bool operator!=(const OffsetOnly<CGNode *> &N1,
+                       const OffsetOnly<CGNode *> &N2) {
+  return N1.Graph != N2.Graph;
+}
+
+template <> struct DenseMapInfo<OffsetOnly<CGNode *>> {
+  using T = OffsetOnly<CGNode *>;
+  using DIP = DenseMapInfo<CGNode *>;
+
+  static inline T getEmptyKey() { return DIP::getEmptyKey(); }
+
+  static inline T getTombstoneKey() { return DIP::getTombstoneKey(); }
+
+  static unsigned getHashValue(const T PtrVal) {
+    return DIP::getHashValue(PtrVal.Graph);
+  }
+
+  static bool isEqual(const T LHS, const T RHS) {
+    return LHS.Graph == RHS.Graph;
+  }
+};
 
 } // namespace llvm
 

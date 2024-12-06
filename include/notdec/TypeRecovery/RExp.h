@@ -167,6 +167,56 @@ eliminate(std::set<NodeRef> &SCCNodes) {
   return Ascending;
 }
 
+template <typename NodeRef>
+std::map<std::pair<NodeRef, NodeRef>, rexp::PRExp> solve_constraints(
+    NodeRef Source,
+    std::vector<std::tuple<NodeRef, NodeRef, rexp::PRExp>> &PathSeq) {
+  std::map<std::pair<NodeRef, NodeRef>, rexp::PRExp> P;
+
+  auto getPexp = [&](NodeRef From, NodeRef To) -> rexp::PRExp {
+    auto Key = std::make_pair(From, To);
+    if (P.count(Key)) {
+      return P[Key];
+    }
+    if (From == To) {
+      return std::make_shared<rexp::RExp>(rexp::Empty{});
+    } else {
+      return std::make_shared<rexp::RExp>(rexp::Null{});
+    }
+  };
+  auto assignPExp = [&](NodeRef From, NodeRef To, rexp::PRExp E) {
+    if (From == To && rexp::isEmpty(E)) {
+      return;
+    }
+    if (From != To && rexp::isNull(E)) {
+      return;
+    }
+    P[std::make_pair(From, To)] = E;
+  };
+  auto bitandAssignPExp = [&](NodeRef From, NodeRef To, rexp::PRExp E) {
+    auto Old = getPexp(From, To);
+    assignPExp(From, To, rexp::simplifyOnce(Old & E));
+  };
+  auto bitorAssignPExp = [&](NodeRef From, NodeRef To, rexp::PRExp E) {
+    auto Old = getPexp(From, To);
+    assignPExp(From, To, rexp::simplifyOnce(Old | E));
+  };
+
+  // 1.3. solve the pathexpr(start)
+  for (auto Ent : PathSeq) {
+    auto [From, To, E] = Ent;
+    if (From == To) {
+      // P[source, from] = P[source, from] & exp
+      bitandAssignPExp(Source, From, E);
+    } else {
+      // P[source, to] = P[source, to] | (P[source, from] & exp)
+      auto srcFrom = getPexp(Source, From);
+      bitorAssignPExp(Source, To, rexp::simplifyOnce(srcFrom & E));
+    }
+  }
+  return P;
+}
+
 } // namespace notdec::retypd::rexp
 
 #endif

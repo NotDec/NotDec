@@ -153,8 +153,8 @@ void ConstraintGraph::instantiate(
 
 std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 
-  std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P;
-
+  std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P =
+      rexp::solve_constraints(getStartNode(), PathSeq);
   auto getPexp = [&](CGNode *From, CGNode *To) -> rexp::PRExp {
     auto Key = std::make_pair(From, To);
     if (P.count(Key)) {
@@ -166,37 +166,6 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
       return std::make_shared<rexp::RExp>(rexp::Null{});
     }
   };
-  auto assignPExp = [&](CGNode *From, CGNode *To, rexp::PRExp E) {
-    if (From == To && rexp::isEmpty(E)) {
-      return;
-    }
-    if (From != To && rexp::isNull(E)) {
-      return;
-    }
-    P[std::make_pair(From, To)] = E;
-  };
-  auto bitandAssignPExp = [&](CGNode *From, CGNode *To, rexp::PRExp E) {
-    auto Old = getPexp(From, To);
-    assignPExp(From, To, rexp::simplifyOnce(Old & E));
-  };
-  auto bitorAssignPExp = [&](CGNode *From, CGNode *To, rexp::PRExp E) {
-    auto Old = getPexp(From, To);
-    assignPExp(From, To, rexp::simplifyOnce(Old | E));
-  };
-
-  // 1.3. solve the pathexpr(start)
-  auto Source = getStartNode();
-  for (auto Ent : PathSeq) {
-    auto [From, To, E] = Ent;
-    if (From == To) {
-      // P[source, from] = P[source, from] & exp
-      bitandAssignPExp(Source, From, E);
-    } else {
-      // P[source, to] = P[source, to] | (P[source, from] & exp)
-      auto srcFrom = getPexp(Source, From);
-      bitorAssignPExp(Source, To, rexp::simplifyOnce(srcFrom & E));
-    }
-  }
   auto finalExp = getPexp(getStartNode(), getEndNode());
   if ((::llvm::DebugFlag && ::llvm::isCurrentDebugType(DEBUG_TYPE))) {
     // flatten the outer most Or
