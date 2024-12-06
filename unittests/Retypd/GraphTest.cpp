@@ -45,11 +45,11 @@ TEST(Retypd, SaturationPaperTest) {
   llvm::DebugFlag = true;
   llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons = parse_constraints(
-      Ctx, {"y <= p", "p <= x", "#A <= x.store4", "y.load4 <= #B"});
+      Ctx, {"y <= p", "p <= x", "A <= x.store4", "y.load4 <= B"});
   ConstraintGraph CG =
       ConstraintGraph::fromConstraints(Ctx, "SaturationPaper", cons);
 
-  std::set<std::string> InterestingVars;
+  std::set<std::string> InterestingVars = {"A", "B"};
   CG.solve();
   auto Cons = CG.simplifiedExpr(InterestingVars);
   CG.printGraph("SaturationPaper.dot");
@@ -58,7 +58,7 @@ TEST(Retypd, SaturationPaperTest) {
     std::cerr << notdec::retypd::toString(C) << "\n";
   }
 
-  check(Cons, {"#A <= #B"});
+  check(Cons, {"A <= B"});
 }
 
 // A simple example from the paper.
