@@ -14,6 +14,7 @@ PRExp createAnd() { return std::make_shared<RExp>(And{}); }
 PRExp createStar(const PRExp &EL) { return std::make_shared<RExp>(Star{EL}); }
 
 PRExp create(const EdgeLabel &EL) {
+  // ignore one edge.
   if (std::holds_alternative<One>(EL)) {
     return std::make_shared<RExp>(Empty{});
   }
@@ -267,97 +268,5 @@ PRExp operator|(const PRExp &A, const PRExp &B) {
 }
 
 // TODO: do we need &= or |=
-
-std::vector<std::tuple<CGNode *, CGNode *, PRExp>>
-eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes) {
-  // default to Null path (no path).
-  // TODO: std::map<std::pair<unsigned, unsigned>, PRExp> P; ? use index
-  // instead of pointer
-  std::map<std::pair<CGNode *, CGNode *>, PRExp> P;
-  auto getMap = [&](CGNode *N1, CGNode *N2) -> PRExp {
-    auto It = P.find({N1, N2});
-    if (It == P.end()) {
-      return std::make_shared<RExp>(Null{});
-    }
-    return It->second;
-  };
-
-  std::vector<CGNode *> Nodes;
-  // For each edge within SCC, initialize.
-  for (auto N : SCCNodes) {
-    Nodes.push_back(N);
-    for (auto &E : N->outEdges) {
-      auto &Target = const_cast<CGNode &>(E.getTargetNode());
-      if (SCCNodes.count(&Target) == 0) {
-        continue;
-      }
-      auto R = P.insert_or_assign({N, &Target}, create(E.Label));
-      assert(R.second && "Not Inserted?");
-    }
-  }
-
-  for (unsigned VInd = 0; VInd < Nodes.size(); VInd++) {
-    CGNode *V = Nodes[VInd];
-    auto VV = getMap(V, V);
-    if (!isNull(VV)) {
-      P.insert_or_assign({V, V},
-                         simplifyOnce(std::make_shared<RExp>(Star{VV})));
-    }
-    for (unsigned UInd = VInd + 1; UInd < Nodes.size(); UInd++) {
-      CGNode *U = Nodes[UInd];
-      auto UV = getMap(U, V);
-      if (isNull(UV)) {
-        continue;
-      }
-
-      if (!isNull(VV)) {
-        UV = simplifyOnce(UV & VV);
-        P.insert_or_assign({U, V}, UV);
-      }
-
-      for (unsigned WInd = VInd + 1; WInd < Nodes.size(); WInd++) {
-        CGNode *W = Nodes[WInd];
-        auto VW = getMap(V, W);
-        if (isNull(VW)) {
-          continue;
-        }
-
-        auto UW = getMap(U, W);
-        UW = simplifyOnce(UW | simplifyOnce(UV & VW));
-        P.insert_or_assign({U, W}, UW);
-      }
-    }
-  }
-
-  std::map<CGNode *, unsigned> IndexMap;
-  for (unsigned i = 0; i < Nodes.size(); i++) {
-    IndexMap.insert({Nodes[i], i});
-  }
-  std::vector<std::tuple<CGNode *, CGNode *, PRExp>> Ascending;
-  Ascending.reserve(P.size());
-  std::vector<std::tuple<CGNode *, CGNode *, PRExp>> Descending;
-  for (auto &Ent : P) {
-    if (isNull(Ent.second)) {
-      continue;
-    }
-    if (IndexMap[Ent.first.first] <= IndexMap[Ent.first.second]) {
-      Ascending.push_back({Ent.first.first, Ent.first.second, Ent.second});
-    } else {
-      Descending.push_back({Ent.first.first, Ent.first.second, Ent.second});
-    }
-  }
-  // sort Ascending by the first index
-  std::sort(Ascending.begin(), Ascending.end(),
-            [&](const auto &A, const auto &B) {
-              return IndexMap[std::get<0>(A)] < IndexMap[std::get<0>(B)];
-            });
-  // sort Descending by the first index
-  std::sort(Descending.begin(), Descending.end(),
-            [&](const auto &A, const auto &B) {
-              return IndexMap[std::get<0>(A)] > IndexMap[std::get<0>(B)];
-            });
-  Ascending.insert(Ascending.end(), Descending.begin(), Descending.end());
-  return Ascending;
-}
 
 } // namespace notdec::retypd::rexp

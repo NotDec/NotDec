@@ -305,6 +305,12 @@ template <> struct GraphTraits<CGNode *> {
   static CGEdge *CGEdgeToPtr(const CGEdge &P) {
     return const_cast<CGEdge *>(&P);
   }
+  static NodeRef getEdgeTarget(const CGEdge *Edge) {
+    return const_cast<CGNode *>(&Edge->getTargetNode());
+  }
+  static notdec::retypd::EdgeLabel getEdgeLabel(const CGEdge *Edge) {
+    return Edge->Label;
+  }
 
   // Provide a mapped iterator so that the GraphTrait-based implementations can
   // find the target nodes without having to explicitly go through the edges.

@@ -515,7 +515,7 @@ void ConstraintGraph::buildPathSequence() {
   for (auto &SCC : llvm::reverse(SCCs)) {
     // run eliminate for each SCC
     if (SCC.size() > 1) {
-      auto Seqs = rexp::eliminate(*this, SCC);
+      auto Seqs = rexp::eliminate(SCC);
       LLVM_DEBUG(llvm::dbgs()
                  << "Path Sequence for SCC: " << toString(SCC) << ":\n");
       for (auto &Seq : Seqs) {

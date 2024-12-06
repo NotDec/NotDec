@@ -2,6 +2,8 @@
 #define _NOTDEC_RETYPD_REXP_H_
 
 #include "TypeRecovery/Schema.h"
+#include <llvm/ADT/GraphTraits.h>
+#include <llvm/ADT/iterator_range.h>
 #include <memory>
 #include <optional>
 #include <set>
@@ -65,8 +67,105 @@ std::optional<retypd::EdgeLabel *> lastNode(const PRExp &rexp);
 PRExp operator&(const PRExp &A, const PRExp &B);
 PRExp operator|(const PRExp &A, const PRExp &B);
 
-std::vector<std::tuple<CGNode *, CGNode *, PRExp>>
-eliminate(const ConstraintGraph &CG, std::set<CGNode *> &SCCNodes);
+// std::vector<std::tuple<NodeRef , NodeRef , PRExp>>
+// eliminate(std::set<NodeRef > &SCCNodes);
+
+template <class NodeRef>
+std::vector<std::tuple<NodeRef, NodeRef, PRExp>>
+eliminate(std::set<NodeRef> &SCCNodes) {
+  using GT = llvm::GraphTraits<NodeRef>;
+  // default to Null path (no path).
+  // TODO: std::map<std::pair<unsigned, unsigned>, PRExp> P; ? use index
+  // instead of pointer
+  std::map<std::pair<NodeRef, NodeRef>, PRExp> P;
+  auto getMap = [&](NodeRef N1, NodeRef N2) -> PRExp {
+    auto It = P.find({N1, N2});
+    if (It == P.end()) {
+      return std::make_shared<RExp>(Null{});
+    }
+    return It->second;
+  };
+
+  // have a index for each node.
+  std::vector<NodeRef> Nodes;
+  // For each edge within SCC, initialize.
+  for (auto N : SCCNodes) {
+    Nodes.push_back(N);
+    for (auto E :
+         llvm::make_range(GT::child_edge_begin(N), GT::child_edge_end(N))) {
+      auto &Target = *GT::getEdgeTarget(E);
+      if (SCCNodes.count(&Target) == 0) {
+        continue;
+      }
+      auto R = P.insert_or_assign({N, &Target}, create(GT::getEdgeLabel(E)));
+      assert(R.second && "Not Inserted?");
+    }
+  }
+
+  // eliminate
+  for (unsigned VInd = 0; VInd < Nodes.size(); VInd++) {
+    NodeRef V = Nodes[VInd];
+    auto VV = getMap(V, V);
+    if (!isNull(VV)) {
+      P.insert_or_assign({V, V},
+                         simplifyOnce(std::make_shared<RExp>(Star{VV})));
+    }
+    for (unsigned UInd = VInd + 1; UInd < Nodes.size(); UInd++) {
+      NodeRef U = Nodes[UInd];
+      auto UV = getMap(U, V);
+      if (isNull(UV)) {
+        continue;
+      }
+
+      if (!isNull(VV)) {
+        UV = simplifyOnce(UV & VV);
+        P.insert_or_assign({U, V}, UV);
+      }
+
+      for (unsigned WInd = VInd + 1; WInd < Nodes.size(); WInd++) {
+        NodeRef W = Nodes[WInd];
+        auto VW = getMap(V, W);
+        if (isNull(VW)) {
+          continue;
+        }
+
+        auto UW = getMap(U, W);
+        UW = simplifyOnce(UW | simplifyOnce(UV & VW));
+        P.insert_or_assign({U, W}, UW);
+      }
+    }
+  }
+
+  std::map<NodeRef, unsigned> IndexMap;
+  for (unsigned i = 0; i < Nodes.size(); i++) {
+    IndexMap.insert({Nodes[i], i});
+  }
+  std::vector<std::tuple<NodeRef, NodeRef, PRExp>> Ascending;
+  Ascending.reserve(P.size());
+  std::vector<std::tuple<NodeRef, NodeRef, PRExp>> Descending;
+  for (auto &Ent : P) {
+    if (isNull(Ent.second)) {
+      continue;
+    }
+    if (IndexMap[Ent.first.first] <= IndexMap[Ent.first.second]) {
+      Ascending.push_back({Ent.first.first, Ent.first.second, Ent.second});
+    } else {
+      Descending.push_back({Ent.first.first, Ent.first.second, Ent.second});
+    }
+  }
+  // sort Ascending by the first index
+  std::sort(Ascending.begin(), Ascending.end(),
+            [&](const auto &A, const auto &B) {
+              return IndexMap[std::get<0>(A)] < IndexMap[std::get<0>(B)];
+            });
+  // sort Descending by the first index
+  std::sort(Descending.begin(), Descending.end(),
+            [&](const auto &A, const auto &B) {
+              return IndexMap[std::get<0>(A)] > IndexMap[std::get<0>(B)];
+            });
+  Ascending.insert(Ascending.end(), Descending.begin(), Descending.end());
+  return Ascending;
+}
 
 } // namespace notdec::retypd::rexp
 
