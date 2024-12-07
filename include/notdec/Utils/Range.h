@@ -6,6 +6,7 @@
 #ifndef _NOTDEC_UTILS_RANGE_H_
 #define _NOTDEC_UTILS_RANGE_H_
 
+#include <cassert>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -23,10 +24,21 @@ namespace notdec {
 struct ArrayOffset {
   uint64_t Size = 0;
   // 0 represents unbounded
-  uint64_t Count = 0;
+  // Unused now, so make it const to prevent error.
+  const uint64_t Count = 0;
 
   ArrayOffset(uint64_t Size = 0, uint64_t Count = 0)
       : Size(Size), Count(Count){};
+
+  // copy constructor
+  ArrayOffset(const ArrayOffset &other)
+      : Size(other.Size), Count(other.Count) {}
+
+  ArrayOffset &operator=(const ArrayOffset &other) {
+    Size = other.Size;
+    assert(Count == 0 && "Count should be 0");
+    return *this;
+  }
 
   bool operator==(const ArrayOffset &rhs) const {
     return std::tie(Size, Count) == std::tie(rhs.Size, rhs.Count);
@@ -77,16 +89,22 @@ struct OffsetRange {
     return s;
   }
 
+  OffsetRange mulx() const {
+    OffsetRange ret = *this;
+    if (offset == 0) {
+      return ret;
+    }
+    auto New = OffsetRange();
+    New.access.push_back(ArrayOffset(offset));
+    return ret + New;
+  }
+
   // unary operator -
-  // OffsetRange operator-() const {
-  //   OffsetRange ret;
-  //   ret.offset = -offset;
-  //   for (auto &a : access) {
-  //     // TODO
-  //     ret.access.push_back(ArrayOffset(a.Size, -a.Count));
-  //   }
-  //   return ret;
-  // }
+  OffsetRange operator-() const {
+    OffsetRange ret = *this;
+    ret.offset = -ret.offset;
+    return ret;
+  }
 
   OffsetRange operator+(const OffsetRange &rhs) const {
     OffsetRange ret = *this;

@@ -136,7 +136,7 @@ ParseResultT<ArrayOffset> parseArrayOffset(llvm::StringRef str) {
   if (!RSize.isOk()) {
     return {str, RSize.msg()};
   }
-  decltype(ArrayOffset::Count) Limit = -1;
+  auto Limit = decltype(ArrayOffset::Count)(-1);
   if (rest1.consume_front("[")) {
     auto [rest2, RLimit] = parseI32(rest1);
     if (!RLimit.isOk()) {

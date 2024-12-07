@@ -202,6 +202,8 @@ public:
   /// forget conjunction is covariant.
   void contraVariantSplit();
   void buildPathSequence();
+  std::set<std::pair<CGNode *, OffsetRange>>
+  getNodeReachableOffset(CGNode &Start);
   void markVariance();
   /// Focus on the recall subgraph and use forget edge to label nodes. mark all
   /// nodes as accepting by link with `forget #top`.
@@ -251,10 +253,10 @@ protected:
                 << "\n";
     }
     if (!isLayerSplit) {
-      // maintain the initial reaching push/forget set.
       if (std::holds_alternative<ForgetLabel>(Label)) {
         auto Capa = std::get<ForgetLabel>(Label);
-        ReachingSet[&To].insert({Capa.label, &From});
+        // maintain the initial reaching push/forget set.
+        // ReachingSet[&To].insert({Capa.label, &From, OffsetRange()});
       } else if (std::holds_alternative<One>(Label)) {
         // unify PN
         From.getPNIVar()->unifyPN(*To.getPNIVar());

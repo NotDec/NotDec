@@ -52,7 +52,30 @@ TEST(Retypd, SaturationPaperTest) {
   std::set<std::string> InterestingVars = {"A", "B"};
   CG.solve();
   auto Cons = CG.simplifiedExpr(InterestingVars);
-  CG.printGraph("SaturationPaper.dot");
+  // CG.printGraph("SaturationPaper.dot");
+  std::cerr << "Simplified Constraints:" << std::endl;
+  for (auto &C : Cons) {
+    std::cerr << notdec::retypd::toString(C) << "\n";
+  }
+
+  check(Cons, {"A <= B"});
+}
+
+// A simple example from the paper.
+TEST(Retypd, SaturationOffsetTest) {
+  TRContext Ctx;
+  llvm::DebugFlag = true;
+  llvm::setCurrentDebugType("retypd_graph");
+  std::vector<notdec::retypd::Constraint> cons =
+      parse_constraints(Ctx, {"x.@2 <= C", "C.@2 <= D", "D <= y.@4",
+                              "A <= x.load4", "y.load4 <= B"});
+  ConstraintGraph CG =
+      ConstraintGraph::fromConstraints(Ctx, "SaturationOffsetTest", cons);
+
+  std::set<std::string> InterestingVars = {"A", "B"};
+  CG.solve();
+  auto Cons = CG.simplifiedExpr(InterestingVars);
+  CG.printGraph("SaturationOffsetTest.dot");
   std::cerr << "Simplified Constraints:" << std::endl;
   for (auto &C : Cons) {
     std::cerr << notdec::retypd::toString(C) << "\n";
