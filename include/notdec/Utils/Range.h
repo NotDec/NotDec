@@ -89,7 +89,7 @@ struct OffsetRange {
   // }
 
   OffsetRange operator+(const OffsetRange &rhs) const {
-    OffsetRange ret;
+    OffsetRange ret = *this;
     ret.offset += rhs.offset;
     // merge sort
     auto p1 = access.begin();
@@ -125,7 +125,7 @@ struct OffsetRange {
   }
 
   OffsetRange operator*(const OffsetRange Rhs) const {
-    OffsetRange Ret;
+    OffsetRange Ret = *this;
     Ret.offset = offset * Rhs.offset;
     std::map<uint64_t, uint64_t> Size2Limit;
     for (uint64_t i = 0; i < access.size() + 1; i++) {
