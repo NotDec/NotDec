@@ -345,9 +345,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // TODO: If the SCC is not called by any other function out of the SCC, we
     // can skip summary generation. Even start Top-down phase.
 
+    std::cerr << "Summary for " << Name << ":\n";
     std::vector<retypd::SubTypeConstraint> Summary = Generator->genSummary();
 
-    std::cerr << "Summary for " << Name << ":\n";
     for (auto &C : Summary) {
       std::cerr << "  " << notdec::retypd::toString(C) << "\n";
     }

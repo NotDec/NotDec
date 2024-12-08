@@ -500,7 +500,7 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
       Ret.emplace_back();
       for (auto R : Rs) {
         auto R1 = R.mulx();
-        Ret.back().insert({false, R1});
+        Ret.back().insert({true, R1});
       }
     } else if (auto *And = std::get_if<rexp::And>(&*E)) {
       // try to eliminate the forget and recall node.
@@ -520,7 +520,7 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
           }
         } else {
           auto R = calcOffset(Inner);
-          Recalls.push_back({false, R});
+          Recalls.push_back({true, R});
         }
       }
       // for each possible combination (Cartesian product)
@@ -584,13 +584,13 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
       if (Forgets.count(R)) {
         continue;
       }
-      Val = Val + (-R);
+      Val = Val + R;
     }
     for (auto R : Forgets) {
       if (Recalls.count(R)) {
         continue;
       }
-      Val = Val + R;
+      Val = Val + (-R);
     }
     Ret.insert(Val);
   }
