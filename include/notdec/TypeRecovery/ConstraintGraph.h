@@ -26,6 +26,10 @@ namespace notdec {
 struct ConstraintsGenerator;
 }
 
+namespace llvm {
+template <class GraphType> struct OffsetOnly;
+}
+
 namespace notdec::retypd {
 
 struct CGNode;
@@ -202,8 +206,14 @@ public:
   /// forget conjunction is covariant.
   void contraVariantSplit();
   void buildPathSequence();
+
+  std::map<std::set<llvm::OffsetOnly<CGNode *>>,
+           std::vector<std::tuple<llvm::OffsetOnly<CGNode *>,
+                                  llvm::OffsetOnly<CGNode *>, rexp::PRExp>>>
+      ElimCache;
   std::set<std::pair<CGNode *, OffsetRange>>
   getNodeReachableOffset(CGNode &Start);
+
   void markVariance();
   /// Focus on the recall subgraph and use forget edge to label nodes. mark all
   /// nodes as accepting by link with `forget #top`.

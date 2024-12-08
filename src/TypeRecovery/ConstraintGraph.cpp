@@ -478,84 +478,126 @@ ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) const {
 }
 
 std::set<OffsetRange> calcOffset(rexp::PRExp E) {
-  // TODO
-  std::set<OffsetRange> Ret;
-  if (auto *Null = std::get_if<rexp::Null>(&*E)) {
-    assert(false);
-  } else if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
-    Ret.insert(OffsetRange());
-  } else if (auto *Or = std::get_if<rexp::Or>(&*E)) {
-    for (auto &Inner : Or->E) {
-      auto R = calcOffset(Inner);
-      Ret.insert(R.begin(), R.end());
-    }
-  } else if (auto *Star = std::get_if<rexp::Star>(&*E)) {
-    auto Rs = calcOffset(Star->E);
-    for (auto R : Rs) {
-      auto R1 = R.mulx();
-      Ret.insert(R1);
-    }
-  } else if (auto *And = std::get_if<rexp::And>(&*E)) {
-    // try to eliminate the forget and recall node.
-    std::set<OffsetRange> Recalls;
-    std::set<OffsetRange> Forgets;
-    for (auto &Inner : And->E) {
-      if (auto *N1 = std::get_if<rexp::Node>(&*Inner)) {
-        // handle forget offset and recall offset
-        if (auto *RL = std::get_if<RecallLabel>(&N1->E)) {
-          if (auto OL1 = std::get_if<OffsetLabel>(&RL->label)) {
-            Recalls.insert(OL1->range);
+  if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
+    return {OffsetRange()};
+  }
+  std::function<std::vector<std::set<std::pair<bool, OffsetRange>>>(
+      rexp::PRExp)>
+      FlattenRec = [&](rexp::PRExp E)
+      -> std::vector<std::set<std::pair<bool, OffsetRange>>> {
+    std::vector<std::set<std::pair<bool, OffsetRange>>> Ret;
+    if (auto *Null = std::get_if<rexp::Null>(&*E)) {
+      assert(false);
+    } else if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
+      return {{{false, OffsetRange()}}};
+    } else if (auto *Or = std::get_if<rexp::Or>(&*E)) {
+      for (auto &Inner : Or->E) {
+        auto R = FlattenRec(Inner);
+        Ret.insert(Ret.end(), R.begin(), R.end());
+      }
+    } else if (auto *Star = std::get_if<rexp::Star>(&*E)) {
+      auto Rs = calcOffset(Star->E);
+      Ret.emplace_back();
+      for (auto R : Rs) {
+        auto R1 = R.mulx();
+        Ret.back().insert({false, R1});
+      }
+    } else if (auto *And = std::get_if<rexp::And>(&*E)) {
+      // try to eliminate the forget and recall node.
+      // first bool: true for recall.
+      std::vector<std::pair<bool, std::set<OffsetRange>>> Recalls;
+      for (auto &Inner : And->E) {
+        if (auto *N1 = std::get_if<rexp::Node>(&*Inner)) {
+          // handle forget offset and recall offset
+          if (auto *RL = std::get_if<RecallLabel>(&N1->E)) {
+            if (auto OL1 = std::get_if<OffsetLabel>(&RL->label)) {
+              Recalls.push_back({true, {OL1->range}});
+            }
+          } else if (auto *FL = std::get_if<ForgetLabel>(&N1->E)) {
+            if (auto OL2 = std::get_if<OffsetLabel>(&FL->label)) {
+              Recalls.push_back({false, {OL2->range}});
+            }
           }
-        } else if (auto *FL = std::get_if<ForgetLabel>(&N1->E)) {
-          if (auto OL2 = std::get_if<OffsetLabel>(&FL->label)) {
-            Forgets.insert(OL2->range);
+        } else {
+          auto R = calcOffset(Inner);
+          Recalls.push_back({false, R});
+        }
+      }
+      // for each possible combination (Cartesian product)
+      // note: this creates a vector containing one empty vector
+      std::vector<std::vector<std::pair<bool, OffsetRange>>> Results = {{}};
+      for (const auto &Ents : Recalls) {
+        // helper vector so that we don't modify results while iterating
+        std::vector<std::vector<std::pair<bool, OffsetRange>>> next_results;
+        for (const auto &result : Results) {
+          auto [isRecall, NewValues] = Ents;
+          for (const auto &value : NewValues) {
+            next_results.push_back(result);
+            next_results.back().push_back({isRecall, value});
           }
         }
+        Results = std::move(next_results);
+      }
+      // insert to Ret
+      for (auto &Result : Results) {
+        Ret.push_back({Result.begin(), Result.end()});
+      }
+    } else if (auto *Node = std::get_if<rexp::Node>(&*E)) {
+      // handle forget offset and recall offset
+      if (auto *RL = std::get_if<RecallLabel>(&Node->E)) {
+        if (auto OL1 = std::get_if<OffsetLabel>(&RL->label)) {
+          Ret.push_back({{true, OL1->range}});
+        }
+        return Ret;
+      } else if (auto *FL = std::get_if<ForgetLabel>(&Node->E)) {
+        if (auto OL2 = std::get_if<OffsetLabel>(&FL->label)) {
+          Ret.push_back({{false, OL2->range}});
+        }
+        return Ret;
+      }
+      std::cerr << "Error: calcOffset: unknown Node: " << toString(Node->E)
+                << "\n";
+      std::abort();
+    } else {
+      std::cerr << "Error: calcOffset: unknown PRExp: " << toString(E) << "\n";
+      std::abort();
+    }
+    assert(!Ret.empty());
+    return Ret;
+  };
+  std::set<OffsetRange> Ret;
+  auto Results = FlattenRec(E);
+
+  // for each recall, check if there is a forget, and eliminate them.
+  for (auto &Result : Results) {
+    OffsetRange Val;
+    std::set<OffsetRange> Recalls;
+    std::set<OffsetRange> Forgets;
+    for (auto &Ent : Result) {
+      if (Ent.first) {
+        Recalls.insert(Ent.second);
       } else {
-        auto R = calcOffset(Inner);
-        Forgets.insert(R.begin(), R.end());
+        Forgets.insert(Ent.second);
       }
     }
-    // for each recall, check if there is a forget, and eliminate them.
     for (auto R : Recalls) {
       if (Forgets.count(R)) {
         continue;
       }
-      Ret.insert(-R);
+      Val = Val + (-R);
     }
     for (auto R : Forgets) {
       if (Recalls.count(R)) {
         continue;
       }
-      Ret.insert(R);
+      Val = Val + R;
     }
-
-  } else if (auto *Node = std::get_if<rexp::Node>(&*E)) {
-    // handle forget offset and recall offset
-    if (auto *RL = std::get_if<RecallLabel>(&Node->E)) {
-      if (auto OL1 = std::get_if<OffsetLabel>(&RL->label)) {
-        Ret.insert(-OL1->range);
-      }
-      return Ret;
-    } else if (auto *FL = std::get_if<ForgetLabel>(&Node->E)) {
-      if (auto OL2 = std::get_if<OffsetLabel>(&FL->label)) {
-        Ret.insert(OL2->range);
-      }
-      return Ret;
-    }
-    std::cerr << "Error: calcOffset: unknown Node: " << toString(Node->E)
-              << "\n";
-    std::abort();
-  } else {
-    std::cerr << "Error: calcOffset: unknown PRExp: " << toString(E) << "\n";
-    std::abort();
+    Ret.insert(Val);
   }
   return Ret;
 }
 
-std::set<std::pair<CGNode *, OffsetRange>>
-ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
-  std::set<std::pair<CGNode *, OffsetRange>> Ret;
+bool isOffsetRelated(CGNode &Start) {
   // fast path, if there is no outgoing or incoming offset edge, only consider
   // one edge.
   bool HasOffset = false;
@@ -573,22 +615,25 @@ ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
       }
     }
   }
-  if (!HasOffset) {
-    // Incoming
-    for (auto InEdge : Start.inEdges) {
-      if (auto EL1 = std::get_if<RecallLabel>(&InEdge->Label)) {
-        if (std::holds_alternative<OffsetLabel>(EL1->label)) {
-          HasOffset = true;
-          break;
-        }
-      } else if (auto EL2 = std::get_if<ForgetLabel>(&InEdge->Label)) {
-        if (std::holds_alternative<OffsetLabel>(EL2->label)) {
-          HasOffset = true;
-          break;
-        }
-      }
-    }
+  // Because of symmetrical, there must be outgoing offset if there is incoming
+  // offset.
+  return HasOffset;
+}
+
+std::string toString(const std::set<OffsetRange> &S) {
+  std::string Ret = "{";
+  for (auto &R : S) {
+    Ret += R.str() + ", ";
   }
+  return Ret + "}";
+};
+
+std::set<std::pair<CGNode *, OffsetRange>>
+ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
+  std::set<std::pair<CGNode *, OffsetRange>> Ret;
+  // fast path, if there is no outgoing or incoming offset edge, only consider
+  // one edge.
+  bool HasOffset = isOffsetRelated(Start);
 
   if (!HasOffset) {
     // only check for outgoing one edge
@@ -624,16 +669,21 @@ ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
     // run eliminate for each SCC
     if (SCC.size() > 1) {
       // Cache the path sequence for each SCC.
-      auto Seqs = rexp::eliminate(SCC);
-      // LLVM_DEBUG(llvm::dbgs() << "(offonly) PathSeq for SCC: "
-      //                         << toString(convertSet(SCC)) << ":\n");
-      // for (auto &Seq : Seqs) {
-      //   LLVM_DEBUG(llvm::dbgs()
-      //              << "  From " << toString(std::get<0>(Seq).Graph->key)
-      //              << " To " << toString(std::get<1>(Seq).Graph->key) << ": "
-      //              << toString(std::get<2>(Seq)) << "\n");
-      // }
-      PathSeq.insert(PathSeq.end(), Seqs.begin(), Seqs.end());
+      if (ElimCache.count(SCC) == 0) {
+        auto Seqs = rexp::eliminate(SCC);
+        LLVM_DEBUG(llvm::dbgs() << "(offonly) PathSeq for SCC: "
+                                << toString(convertSet(SCC)) << ":\n");
+        for (auto &Seq : Seqs) {
+          LLVM_DEBUG(llvm::dbgs()
+                     << "  From " << toString(std::get<0>(Seq).Graph->key)
+                     << " To " << toString(std::get<1>(Seq).Graph->key) << ": "
+                     << toString(std::get<2>(Seq)) << "\n");
+        }
+        ElimCache[SCC] = Seqs;
+      } else {
+        auto &Seqs = ElimCache[SCC];
+        PathSeq.insert(PathSeq.end(), Seqs.begin(), Seqs.end());
+      }
     }
     // Add all edges out of the current SCC to the path sequence.
     for (auto N : SCC) {
@@ -652,20 +702,26 @@ ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
   // Use the PathSeq to build the reachable offset.
   std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P =
       rexp::solve_constraints(&Start, PathSeq);
+  // LLVM_DEBUG(llvm::dbgs() << "Final result for " << toString(Start.key)
+  //                         << " : \n");
   for (auto &Ent : P) {
     auto StartN = Ent.first.first;
-    auto EndN = Ent.first.second;
+    auto TargetN = Ent.first.second;
     if (StartN != &Start) {
       continue;
     }
-    if (StartN == EndN) {
+    if (StartN == TargetN) {
       continue;
     }
 
     auto &Exp = Ent.second;
     std::set<OffsetRange> Calced = calcOffset(Exp);
+    // debug print
+    // LLVM_DEBUG(llvm::dbgs()
+    //            << "  can reach " << toString(TargetN->key) << " With "
+    //            << toString(Exp) << ": " << toString(Calced) << "\n");
     for (auto &R : Calced) {
-      Ret.emplace(EndN, R);
+      Ret.emplace(TargetN, R);
     }
   }
   return Ret;
@@ -690,6 +746,21 @@ void ConstraintGraph::buildPathSequence() {
                                 << ": " << toString(std::get<2>(Seq)) << "\n");
       }
       PathSeq.insert(PathSeq.end(), Seqs.begin(), Seqs.end());
+    } else {
+      // if has self loop, add a star to the path sequence.
+      auto N = *SCC.begin();
+      std::set<rexp::PRExp> OrInner;
+      // auto Or = std::make_shared<rexp::RExp>(rexp::Or{});
+      for (auto &Edge : N->outEdges) {
+        if (&Edge.getTargetNode() == N) {
+          OrInner.insert(rexp::create(Edge.Label));
+        }
+      }
+      if (OrInner.size() > 0) {
+        auto Or = std::make_shared<rexp::RExp>(rexp::Or{.E = OrInner});
+        PathSeq.emplace_back(N, N,
+                             std::make_shared<rexp::RExp>(rexp::Star{.E = Or}));
+      }
     }
     // Add all edges out of the current SCC to the path sequence.
     for (auto N : SCC) {
@@ -981,6 +1052,13 @@ toString(const std::set<std::pair<FieldLabel, CGNode *>> &S) {
 
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
+  bool DenseSubtype = false;
+  if (const char *val = std::getenv("NOTDEC_SAT_DENSESUBTYPE")) {
+    if ((std::strcmp(val, "1") == 0)) {
+      DenseSubtype = true;
+    }
+  }
+
   bool Changed = true;
   // solve PNI first.
   if (PG) {
@@ -995,10 +1073,15 @@ void ConstraintGraph::saturate() {
       if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
         auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
         auto Capa = std::get<ForgetLabel>(Edge.Label);
-        // if (!std::holds_alternative<OffsetLabel>(Capa.label)) {
-        auto Res = ReachingSet[&Target].insert({Capa.label, &Source});
-        Changed |= Res.second;
-        // }
+        if (DenseSubtype) {
+          if (!std::holds_alternative<OffsetLabel>(Capa.label)) {
+            auto Res = ReachingSet[&Target].insert({Capa.label, &Source});
+            Changed |= Res.second;
+          }
+        } else {
+          auto Res = ReachingSet[&Target].insert({Capa.label, &Source});
+          Changed |= Res.second;
+        }
       }
     }
   }
@@ -1008,6 +1091,28 @@ void ConstraintGraph::saturate() {
     // For each edge, if it is One edge, add reaching set.
     for (auto &Ent : Nodes) {
       auto &Source = Ent.second;
+
+      if (DenseSubtype) {
+        // Add transitive subtypeing and cancel out offset edges.
+        if (isOffsetRelated(Source)) {
+          auto Re = getNodeReachableOffset(Source);
+          for (auto &Ent : Re) {
+            if (Ent.first == &Source) {
+              continue;
+            }
+            if (Ent.second.isZero()) {
+              bool Added = addEdge(Source, *Ent.first, One{});
+              if (Added) {
+                LLVM_DEBUG(llvm::dbgs()
+                           << "(Off) Adding Edge From " << Source.key.str()
+                           << " to " << Ent.first->key.str() << " with _1_ \n");
+                Changed |= Added;
+              }
+            }
+          }
+        }
+      }
+
       for (auto &Edge : Source.outEdges) {
         if (std::holds_alternative<One>(Edge.Label)) {
           auto &Target = const_cast<CGNode &>(Edge.getTargetNode());

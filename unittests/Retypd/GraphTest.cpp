@@ -94,7 +94,7 @@ TEST(Retypd, SlidesExampleTest) {
                                  "F.in_stack0 <= 𝛿",
                                  "𝛼 <= 𝜑",
                                  "𝛿 <= 𝜑",
-                                 "𝜑.load4.@0 <= 𝛼",
+                                 "𝜑.load4 <= 𝛼",
                                  "𝜑.load4.@4 <= 𝛼'",
                                  "𝛼' <= close.in_stack0",
                                  "close.out_eax <= F.out_eax",
@@ -109,12 +109,12 @@ TEST(Retypd, SlidesExampleTest) {
   auto Cons = CG.simplifiedExpr(InterestingVars);
   // CG.printGraph("SlideExample.dot");
 
-  // std::cerr << "Simplified Constraints:" << std::endl;
-  // for (auto &C : Cons) {
-  //   std::cerr << notdec::retypd::toString(C) << "\n";
-  // }
+  std::cerr << "Simplified Constraints:" << std::endl;
+  for (auto &C : Cons) {
+    std::cerr << notdec::retypd::toString(C) << "\n";
+  }
   check(Cons,
-        {"__temp_0.@0.load4 <= __temp_0", "#SuccessZ <= F.out_eax",
+        {"__temp_0.load4 <= __temp_0", "#SuccessZ <= F.out_eax",
          "F.in_stack0.load4 <= __temp_0", "__temp_0.@4 <= #FileDescriptor"});
 }
 

@@ -97,8 +97,17 @@ eliminate(std::set<NodeRef> &SCCNodes) {
       if (SCCNodes.count(&Target) == 0) {
         continue;
       }
-      auto R = P.insert_or_assign({N, &Target}, create(GT::getEdgeLabel(E)));
-      assert(R.second && "Not Inserted?");
+      auto E1 = create(GT::getEdgeLabel(E));
+      auto R = P.insert({{N, &Target}, E1});
+      // assert(R.second && "Not Inserted?");
+      if (!R.second) {
+        // not inserted? There is a multi edge.
+        std::set<PRExp> OrInner;
+        OrInner.insert(R.first->second);
+        OrInner.insert(E1);
+        auto Or1 = std::make_shared<RExp>(Or{.E = OrInner});
+        P.insert_or_assign({N, &Target}, Or1);
+      }
     }
   }
 
