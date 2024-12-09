@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -164,9 +165,9 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
       return P[Key];
     }
     if (From == To) {
-      return std::make_shared<rexp::RExp>(rexp::Empty{});
+      return rexp::createEmpty();
     } else {
-      return std::make_shared<rexp::RExp>(rexp::Null{});
+      return rexp::createNull();
     }
   };
   auto finalExp = getPexp(getStartNode(), getEndNode());
@@ -233,18 +234,18 @@ ConstraintGraph ConstraintGraph::cloneAndSimplify() const {
 ConstraintGraph ConstraintGraph::simplify() {
   layerSplit();
 
-  auto G2 = minimize(this);
+  // auto G2 = minimize(this);
 
-  // G2.printGraph("trans_before_push_split.dot");
+  // // G2.printGraph("trans_before_push_split.dot");
 
-  G2.pushSplit();
-  if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      G2.printGraph("trans_push_split.dot");
-    }
-  }
+  // G2.pushSplit();
+  // if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
+  //   if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+  //     G2.printGraph("trans_push_split.dot");
+  //   }
+  // }
 
-  auto G3 = minimize(&G2);
+  auto G3 = minimize(this);
 
   G3.contraVariantSplit();
   if (const char *path = std::getenv("DEBUG_TRANS_CV_SPLIT_GRAPH")) {
@@ -481,11 +482,11 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
   if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
     return {OffsetRange()};
   }
-  std::function<std::vector<std::set<std::pair<bool, OffsetRange>>>(
+  std::function<std::vector<std::vector<std::pair<bool, OffsetRange>>>(
       rexp::PRExp)>
       FlattenRec = [&](rexp::PRExp E)
-      -> std::vector<std::set<std::pair<bool, OffsetRange>>> {
-    std::vector<std::set<std::pair<bool, OffsetRange>>> Ret;
+      -> std::vector<std::vector<std::pair<bool, OffsetRange>>> {
+    std::vector<std::vector<std::pair<bool, OffsetRange>>> Ret;
     if (auto *Null = std::get_if<rexp::Null>(&*E)) {
       assert(false);
     } else if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
@@ -500,7 +501,7 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
       Ret.emplace_back();
       for (auto R : Rs) {
         auto R1 = R.mulx();
-        Ret.back().insert({true, R1});
+        Ret.back().push_back({true, R1});
       }
     } else if (auto *And = std::get_if<rexp::And>(&*E)) {
       // try to eliminate the forget and recall node.
@@ -538,10 +539,7 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
         }
         Results = std::move(next_results);
       }
-      // insert to Ret
-      for (auto &Result : Results) {
-        Ret.push_back({Result.begin(), Result.end()});
-      }
+      Ret = std::move(Results);
     } else if (auto *Node = std::get_if<rexp::Node>(&*E)) {
       // handle forget offset and recall offset
       if (auto *RL = std::get_if<RecallLabel>(&Node->E)) {
@@ -571,26 +569,23 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
   // for each recall, check if there is a forget, and eliminate them.
   for (auto &Result : Results) {
     OffsetRange Val;
-    std::set<OffsetRange> Recalls;
-    std::set<OffsetRange> Forgets;
+    std::map<OffsetRange, int64_t> Counts;
     for (auto &Ent : Result) {
       if (Ent.first) {
-        Recalls.insert(Ent.second);
+        Counts[Ent.second] += 1;
       } else {
-        Forgets.insert(Ent.second);
+        Counts[Ent.second] -= 1;
       }
     }
-    for (auto R : Recalls) {
-      if (Forgets.count(R)) {
-        continue;
+    for (auto &Ent : Counts) {
+      while (Ent.second > 0) {
+        Val = Val + Ent.first;
+        Ent.second--;
       }
-      Val = Val + R;
-    }
-    for (auto R : Forgets) {
-      if (Recalls.count(R)) {
-        continue;
+      while (Ent.second < 0) {
+        Val = Val + (-Ent.first);
+        Ent.second++;
       }
-      Val = Val + (-R);
     }
     Ret.insert(Val);
   }
@@ -702,8 +697,8 @@ ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
   // Use the PathSeq to build the reachable offset.
   std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P =
       rexp::solve_constraints(&Start, PathSeq);
-  // LLVM_DEBUG(llvm::dbgs() << "Final result for " << toString(Start.key)
-  //                         << " : \n");
+  LLVM_DEBUG(llvm::dbgs() << "Final result for " << toString(Start.key)
+                          << " : \n");
   for (auto &Ent : P) {
     auto StartN = Ent.first.first;
     auto TargetN = Ent.first.second;
@@ -717,9 +712,9 @@ ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
     auto &Exp = Ent.second;
     std::set<OffsetRange> Calced = calcOffset(Exp);
     // debug print
-    // LLVM_DEBUG(llvm::dbgs()
-    //            << "  can reach " << toString(TargetN->key) << " With "
-    //            << toString(Exp) << ": " << toString(Calced) << "\n");
+    LLVM_DEBUG(llvm::dbgs()
+               << "  can reach " << toString(TargetN->key) << " With "
+               << toString(Exp) << ": " << toString(Calced) << "\n");
     for (auto &R : Calced) {
       Ret.emplace(TargetN, R);
     }
@@ -1476,6 +1471,48 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
       // Result1 = empty
       Result1.clear();
     }
+    // try to simplify adjacent Recall/Forget
+    auto Simplify = [&](std::vector<EdgeLabel> &V) {
+      bool updated = false;
+      std::vector<EdgeLabel> NewV;
+      for (size_t Ind2 = 0; Ind2 < V.size(); Ind2++) {
+        if (Ind2 + 1 < V.size()) {
+          auto &E1 = V[Ind2];
+          auto &E2 = V[Ind2 + 1];
+          if (auto RL = std::get_if<RecallLabel>(&E1)) {
+            if (auto FL = std::get_if<ForgetLabel>(&E2)) {
+              if (RL->label == FL->label) {
+                // skip these two elements
+                Ind2++;
+                continue;
+              }
+            }
+          }
+          if (auto RL = std::get_if<RecallBase>(&E1)) {
+            if (auto FL = std::get_if<ForgetBase>(&E2)) {
+              if (RL->Base == FL->Base) {
+                // skip these two elements
+                Ind2++;
+                continue;
+              }
+            }
+          }
+        }
+        NewV.push_back(V[Ind2]);
+      }
+      if (NewV.size() < V.size()) {
+        LLVM_DEBUG(llvm::dbgs() << "Simplified: From " << toString(V) << " to "
+                                << toString(NewV) << "\n");
+        V = NewV;
+        updated = true;
+      }
+      return updated;
+    };
+    for (size_t Ind = 0; Ind < Current.size(); Ind++) {
+      std::vector<EdgeLabel> &V = Current[Ind];
+      do {
+      } while (Simplify(V));
+    }
     return Current;
   } else if (std::holds_alternative<rexp::Star>(*E)) {
     auto Inner = std::get<rexp::Star>(*E).E;
@@ -1569,6 +1606,9 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
   std::vector<std::tuple<std::pair<PooledTypeVariable, PooledTypeVariable>,
                          Variance, Variance>>
       Ret;
+  if (ELs.empty()) {
+    return std::make_pair(Ret, Covariant);
+  }
   if (ELs.size() < 2) {
     assert(false && "normalize_path: path size < 2!");
   }

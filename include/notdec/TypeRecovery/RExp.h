@@ -31,7 +31,9 @@ using notdec::retypd::EdgeLabel;
 using RExp = std::variant<Null, Empty, Star, Or, And, Node>;
 using PRExp = std::shared_ptr<std::variant<Null, Empty, Star, Or, And, Node>>;
 struct Null {};
+extern PRExp NullInstance;
 struct Empty {};
+extern PRExp EmptyInstance;
 struct Star {
   PRExp E;
 };
@@ -55,6 +57,8 @@ inline bool isEmpty(const PRExp &rexp) {
   return std::holds_alternative<Empty>(*rexp);
 }
 
+PRExp createNull();
+PRExp createEmpty();
 PRExp createOr();
 PRExp createAnd();
 PRExp createStar(const PRExp &EL);
@@ -81,7 +85,7 @@ eliminate(std::set<NodeRef> &SCCNodes) {
   auto getMap = [&](NodeRef N1, NodeRef N2) -> PRExp {
     auto It = P.find({N1, N2});
     if (It == P.end()) {
-      return std::make_shared<RExp>(Null{});
+      return createNull();
     }
     return It->second;
   };
@@ -116,8 +120,7 @@ eliminate(std::set<NodeRef> &SCCNodes) {
     NodeRef V = Nodes[VInd];
     auto VV = getMap(V, V);
     if (!isNull(VV)) {
-      P.insert_or_assign({V, V},
-                         simplifyOnce(std::make_shared<RExp>(Star{VV})));
+      P.insert_or_assign({V, V}, simplifyOnce(createStar(VV)));
     }
     for (unsigned UInd = VInd + 1; UInd < Nodes.size(); UInd++) {
       NodeRef U = Nodes[UInd];
@@ -188,9 +191,9 @@ std::map<std::pair<NodeRef, NodeRef>, rexp::PRExp> solve_constraints(
       return P[Key];
     }
     if (From == To) {
-      return std::make_shared<rexp::RExp>(rexp::Empty{});
+      return createEmpty();
     } else {
-      return std::make_shared<rexp::RExp>(rexp::Null{});
+      return createNull();
     }
   };
   auto assignPExp = [&](NodeRef From, NodeRef To, rexp::PRExp E) {
