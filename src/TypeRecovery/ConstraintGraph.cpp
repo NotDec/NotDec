@@ -1554,7 +1554,7 @@ std::vector<SubTypeConstraint>
 ExprToConstraintsContext::constraintsSequenceToConstraints(
     TRContext &Ctx,
     const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence) {
-  std::vector<SubTypeConstraint> Ret;
+  std::set<SubTypeConstraint> Ret;
   for (auto &CS : ConstraintsSequence) {
     LLVM_DEBUG(llvm::dbgs() << "Normalized path: " << toString(CS) << "\n");
 
@@ -1586,13 +1586,17 @@ ExprToConstraintsContext::constraintsSequenceToConstraints(
                                   << toString(&TVPair.second) << "\n");
           continue;
         }
-        Ret.push_back(SubTypeConstraint{
+        Ret.insert(SubTypeConstraint{
             {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.first)},
             {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.second)}});
       }
     }
   }
-  return Ret;
+  std::vector<SubTypeConstraint> RetVec;
+  for (auto &Ent : Ret) {
+    RetVec.push_back(Ent);
+  }
+  return RetVec;
 }
 
 std::pair<

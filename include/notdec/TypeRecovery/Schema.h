@@ -440,6 +440,12 @@ std::string toString(const TypeVariable &dtv);
 struct SubTypeConstraint {
   TypeVariable sub;
   TypeVariable sup;
+  bool operator<(const SubTypeConstraint &rhs) const {
+    return std::tie(sub, sup) < std::tie(rhs.sub, rhs.sup);
+  }
+  bool operator==(const SubTypeConstraint &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
 
 struct AddConstraint {
