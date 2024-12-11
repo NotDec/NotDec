@@ -36,6 +36,25 @@
 
 namespace notdec::retypd {
 
+llvm::Optional<std::pair<bool, OffsetRange>>
+EdgeLabel2Offset(const EdgeLabel &E) {
+  if (auto OL = std::get_if<ForgetLabel>(&E)) {
+    if (auto OL2 = std::get_if<OffsetLabel>(&OL->label)) {
+      return std::make_pair(false, OL2->range);
+    }
+  }
+  if (auto OL = std::get_if<RecallLabel>(&E)) {
+    if (auto OL2 = std::get_if<OffsetLabel>(&OL->label)) {
+      return std::make_pair(true, OL2->range);
+    }
+  }
+  return llvm::None;
+};
+
+void ConstraintGraph::aggressiveSimplify() {
+  // TODO
+}
+
 CGNode &ConstraintGraph::instantiateSketch(std::shared_ptr<retypd::Sketch> Sk) {
   std::map<retypd::SketchNode *, CGNode *> NodeMap;
   // 1. clone the graph nodes
@@ -473,9 +492,35 @@ ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) const {
   auto G = clone(Old2New);
   G.linkVars(InterestingVars);
   auto G2 = G.simplify();
+  G2.aggressiveSimplify();
 
   G2.buildPathSequence();
   return G2.solve_constraints_between();
+}
+
+// bool -> isRecall
+OffsetRange
+mergeOffsetLabels(const std::vector<std::pair<bool, OffsetRange>> &V) {
+  OffsetRange Val;
+  std::map<OffsetRange, int64_t> Counts;
+  for (auto &Ent : V) {
+    if (Ent.first) {
+      Counts[Ent.second] += 1;
+    } else {
+      Counts[Ent.second] -= 1;
+    }
+  }
+  for (auto &Ent : Counts) {
+    while (Ent.second > 0) {
+      Val = Val + Ent.first;
+      Ent.second--;
+    }
+    while (Ent.second < 0) {
+      Val = Val + (-Ent.first);
+      Ent.second++;
+    }
+  }
+  return Val;
 }
 
 std::set<OffsetRange> calcOffset(rexp::PRExp E) {
@@ -568,25 +613,7 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
 
   // for each recall, check if there is a forget, and eliminate them.
   for (auto &Result : Results) {
-    OffsetRange Val;
-    std::map<OffsetRange, int64_t> Counts;
-    for (auto &Ent : Result) {
-      if (Ent.first) {
-        Counts[Ent.second] += 1;
-      } else {
-        Counts[Ent.second] -= 1;
-      }
-    }
-    for (auto &Ent : Counts) {
-      while (Ent.second > 0) {
-        Val = Val + Ent.first;
-        Ent.second--;
-      }
-      while (Ent.second < 0) {
-        Val = Val + (-Ent.first);
-        Ent.second++;
-      }
-    }
+    OffsetRange Val = mergeOffsetLabels(Result);
     Ret.insert(Val);
   }
   return Ret;
@@ -1471,7 +1498,8 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
       // Result1 = empty
       Result1.clear();
     }
-    // try to simplify adjacent Recall/Forget
+
+    // try to simplify adjacent Recall/Forget and merge adjacent offset edges.
     auto Simplify = [&](std::vector<EdgeLabel> &V) {
       bool updated = false;
       std::vector<EdgeLabel> NewV;
@@ -1479,6 +1507,7 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
         if (Ind2 + 1 < V.size()) {
           auto &E1 = V[Ind2];
           auto &E2 = V[Ind2 + 1];
+          // simplify adjacent Recall/Forget
           if (auto RL = std::get_if<RecallLabel>(&E1)) {
             if (auto FL = std::get_if<ForgetLabel>(&E2)) {
               if (RL->label == FL->label) {
@@ -1497,8 +1526,74 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
               }
             }
           }
+          // eliminate Forget+Recall the same offset.
+          if (auto RL = std::get_if<ForgetLabel>(&E1)) {
+            if (auto FL = std::get_if<RecallLabel>(&E2)) {
+              if (std::holds_alternative<OffsetLabel>(RL->label) &&
+                  std::holds_alternative<OffsetLabel>(FL->label)) {
+                if (std::get<OffsetLabel>(RL->label).range ==
+                    std::get<OffsetLabel>(FL->label).range) {
+                  // skip these two elements
+                  Ind2++;
+                  continue;
+                }
+              }
+            }
+          }
         }
         NewV.push_back(V[Ind2]);
+      }
+      if (NewV.size() < V.size()) {
+        LLVM_DEBUG(llvm::dbgs() << "Simplified: From " << toString(V) << " to "
+                                << toString(NewV) << "\n");
+        V = NewV;
+        updated = true;
+      }
+      return updated;
+    };
+    auto SimplifyOffset = [&](std::vector<EdgeLabel> &V) {
+      bool updated = false;
+      std::vector<EdgeLabel> NewV;
+      std::vector<EdgeLabel> OffsetBufferL;
+      std::vector<std::pair<bool, OffsetRange>> OffsetBuffer;
+      for (size_t Ind2 = 0; Ind2 < V.size(); Ind2++) {
+        auto &E1 = V[Ind2];
+        auto O1 = EdgeLabel2Offset(E1);
+        if (O1.hasValue()) {
+          OffsetBuffer.push_back(*O1);
+          OffsetBufferL.push_back(E1);
+          continue;
+        } else {
+          if (OffsetBuffer.size() > 1) {
+            // merge the offset edges.
+            OffsetRange R = mergeOffsetLabels(OffsetBuffer);
+            if (OffsetBuffer.front().first) {
+              NewV.push_back(RecallLabel{OffsetLabel{R}});
+            } else {
+              NewV.push_back(ForgetLabel{OffsetLabel{-R}});
+            }
+          } else if (OffsetBuffer.size() == 1) {
+            NewV.push_back(OffsetBufferL[0]);
+          }
+          OffsetBuffer.clear();
+          OffsetBufferL.clear();
+        }
+        NewV.push_back(V[Ind2]);
+      }
+      if (!OffsetBufferL.empty()) {
+        if (OffsetBuffer.size() > 1) {
+          // merge the offset edges.
+          OffsetRange R = mergeOffsetLabels(OffsetBuffer);
+          if (OffsetBuffer.front().first) {
+            NewV.push_back(RecallLabel{OffsetLabel{R}});
+          } else {
+            NewV.push_back(ForgetLabel{OffsetLabel{-R}});
+          }
+        } else if (OffsetBuffer.size() == 1) {
+          NewV.push_back(OffsetBufferL[0]);
+        }
+        OffsetBuffer.clear();
+        OffsetBufferL.clear();
       }
       if (NewV.size() < V.size()) {
         LLVM_DEBUG(llvm::dbgs() << "Simplified: From " << toString(V) << " to "
@@ -1512,6 +1607,7 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
       std::vector<EdgeLabel> &V = Current[Ind];
       do {
       } while (Simplify(V));
+      SimplifyOffset(V);
     }
     return Current;
   } else if (std::holds_alternative<rexp::Star>(*E)) {

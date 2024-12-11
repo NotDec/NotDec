@@ -345,6 +345,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // TODO: If the SCC is not called by any other function out of the SCC, we
     // can skip summary generation. Even start Top-down phase.
 
+    if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
+      if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+        Generator->CG.printGraph("trans_init.dot");
+      }
+    }
+
     std::cerr << "Summary for " << Name << ":\n";
     std::vector<retypd::SubTypeConstraint> Summary = Generator->genSummary();
 
@@ -1811,7 +1817,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) {
     }
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "Warn: And op without constant: " << I << "\n";
+                 << "Warn: Or op without constant: " << I << "\n";
     cg.addSubtype(cg.getTypeVar(Src2, &I),
                   getLLVMTypeVar(cg.Ctx.TRCtx, Src2->getType()));
   }

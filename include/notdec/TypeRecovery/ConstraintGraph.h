@@ -176,6 +176,7 @@ struct ConstraintGraph {
   void linkVars(std::set<std::string> &InterestingVars);
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
+  void aggressiveSimplify();
   ConstraintGraph cloneAndSimplify() const;
   void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
                    size_t ID);
