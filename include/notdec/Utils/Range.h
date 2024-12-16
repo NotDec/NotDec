@@ -6,15 +6,19 @@
 #ifndef _NOTDEC_UTILS_RANGE_H_
 #define _NOTDEC_UTILS_RANGE_H_
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
 
 namespace notdec {
+
+std::vector<int64_t> PrimeFactors(int64_t n);
 
 /// \brief Represents one array accesses, the `ax` part in `ax+b`.
 ///
@@ -99,6 +103,15 @@ struct OffsetRange {
     return ret + New;
   }
 
+  bool has1x() const {
+    for (auto &a : access) {
+      if (a.Size == 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // unary operator -
   OffsetRange operator-() const {
     OffsetRange ret = *this;
@@ -106,68 +119,13 @@ struct OffsetRange {
     return ret;
   }
 
-  OffsetRange operator+(const OffsetRange &rhs) const {
-    OffsetRange ret = *this;
-    ret.offset += rhs.offset;
-    // merge sort
-    auto p1 = access.begin();
-    auto p2 = rhs.access.begin();
-    while (p1 != access.end() || p2 != rhs.access.end()) {
-      if (p1 == access.end()) {
-        ret.access.push_back(*p2);
-        p2++;
-      } else if (p2 == rhs.access.end()) {
-        ret.access.push_back(*p1);
-        p1++;
-      } else if (p1->Size < p2->Size) {
-        ret.access.push_back(*p1);
-        p1++;
-      } else if (p1->Size > p2->Size) {
-        ret.access.push_back(*p2);
-        p2++;
-      } else {
-        int64_t Count = 0;
-        if (p1->Count > 0 && p2->Count > 0) {
-          Count = p1->Count + p2->Count;
-        }
-        ret.access.push_back(ArrayOffset(p1->Size, Count));
-        p1++;
-        p2++;
-      }
-    }
-    return ret;
-  }
+  OffsetRange operator+(const OffsetRange &rhs) const;
 
   OffsetRange operator*(const int64_t Rhs) const {
     return *this * OffsetRange{.offset = Rhs};
   }
 
-  OffsetRange operator*(const OffsetRange Rhs) const {
-    OffsetRange Ret = *this;
-    Ret.offset = offset * Rhs.offset;
-    std::map<uint64_t, uint64_t> Size2Limit;
-    for (uint64_t i = 0; i < access.size() + 1; i++) {
-      for (uint64_t j = 0; j < Rhs.access.size() + 1; j++) {
-        if (i == 0 && j == 0) {
-          continue;
-        }
-        ArrayOffset Left = i == 0 ? ArrayOffset(offset, 1) : access[i - 1];
-        ArrayOffset Right =
-            j == 0 ? ArrayOffset(Rhs.offset, 1) : Rhs.access[j - 1];
-        ArrayOffset New = Left * Right;
-        if (Size2Limit.find(New.Size) == Size2Limit.end()) {
-          Size2Limit[New.Size] = New.Count;
-        } else {
-          uint64_t Count = 0;
-          if (New.Count > 0 && Size2Limit[New.Size] > 0) {
-            Count = New.Count + Size2Limit[New.Size];
-          }
-          Size2Limit[New.Size] = Count;
-        }
-      }
-    }
-    return Ret;
-  }
+  OffsetRange operator*(const OffsetRange Rhs) const;
 };
 
 std::string toString(const OffsetRange &a);

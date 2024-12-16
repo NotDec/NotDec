@@ -52,7 +52,80 @@ EdgeLabel2Offset(const EdgeLabel &E) {
 };
 
 void ConstraintGraph::aggressiveSimplify() {
-  // TODO
+  // do not include path with size 8.
+  // 1. remove all load8/store8 edges.
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    std::vector<const CGEdge *> toRemove;
+    for (auto &Edge : Node.outEdges) {
+      if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
+        if (std::holds_alternative<LoadLabel>(Rec->label) &&
+            std::get<LoadLabel>(Rec->label).Size == 8) {
+          toRemove.push_back(&Edge);
+        } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
+                   std::get<StoreLabel>(Rec->label).Size == 8) {
+          toRemove.push_back(&Edge);
+        }
+      }
+      if (auto Rec = std::get_if<ForgetLabel>(&Edge.getLabel())) {
+        if (std::holds_alternative<LoadLabel>(Rec->label) &&
+            std::get<LoadLabel>(Rec->label).Size == 8) {
+          toRemove.push_back(&Edge);
+        } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
+                   std::get<StoreLabel>(Rec->label).Size == 8) {
+          toRemove.push_back(&Edge);
+        }
+      }
+    }
+    for (auto Edge : toRemove) {
+      removeEdge(Node, const_cast<CGNode &>(Edge->getTargetNode()),
+                 Edge->getLabel());
+    }
+  }
+
+  // for each node's offset edges.
+  // for (auto &Ent : Nodes) {
+  //   auto &Node = Ent.second;
+  //   std::vector<std::pair<std::pair<bool, OffsetRange>, CGEdge *>>
+  //       outOffsetEdges;
+  //   for (auto &Edge : Node.outEdges) {
+  //     auto O1 = EdgeLabel2Offset(Edge.getLabel());
+  //     if (O1.hasValue()) {
+  //       outOffsetEdges.emplace_back(*O1, &Edge);
+  //     }
+  //   }
+  //   for (auto &Ent : outOffsetEdges) {
+  //     auto &[O1, Edge] = Ent;
+  //     if (O1.second.has1x()) {
+  //       int64_t Start = O1.first ? O1.second.offset : (-O1.second.offset);
+  //       int64_t End = Start + 4;
+  //       std::cerr << "ConstraintGraph::aggressiveSimplify: Merge Off Edges "
+  //                 << toString(Node.key) << toString(Edge->getLabel())
+  //                 << " from offset " << Start << " To " << End << "\n";
+  //       for (auto &Ent2 : outOffsetEdges) {
+  //         if (Ent2.second == Edge) {
+  //           continue;
+  //         }
+  //         auto &[O2, Edge2] = Ent2;
+  //         OffsetRange Adj = O2.first ? O2.second : (-O2.second);
+  //         if (Adj.offset >= Start && Adj.offset < End) {
+  //           if (Adj.access.empty()) {
+  //             // merge
+  //             std::cerr
+  //                 << "ConstraintGraph::aggressiveSimplify: Merge Off Edges "
+  //                 << toString(Node.key) << toString(Edge2->getLabel())
+  //                 << " from offset " << Adj.offset << " To " << End << "\n";
+  //             // remove the edge
+  //             removeEdge(Node, Edge2->getTargetNode(), Edge2->getLabel());
+  //             // merge node to target.
+  //             mergeNodeTo(Edge2->getTargetNode(), Edge->getTargetNode());
+  //           } else if (Adj.has1x()) {
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 }
 
 CGNode &ConstraintGraph::instantiateSketch(std::shared_ptr<retypd::Sketch> Sk) {

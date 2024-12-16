@@ -39,6 +39,7 @@
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/NFAMinimize.h"
+#include "TypeRecovery/Parser.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
@@ -216,6 +217,10 @@ unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
     if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
       return CI->getBitWidth();
     }
+    if (!IC->Val->getType()->isAggregateType() &&
+        !IC->Val->getType()->isVectorTy()) {
+      return IC->Val->getType()->getScalarSizeInBits();
+    }
     assert(false && "TODO");
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -269,6 +274,15 @@ std::string join(std::string path, std::string elem) {
   return path.back() == '/' ? path + elem : path + "/" + elem;
 }
 
+auto isGV = [](const ExtValuePtr &N) {
+  if (auto V = std::get_if<llvm::Value *>(&N)) {
+    if (llvm::isa<llvm::GlobalValue>(*V)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
@@ -311,6 +325,30 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
            std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
       FuncCalls;
 
+  std::map<std::string, std::vector<retypd::SubTypeConstraint>>
+      SummaryOverride = {
+          {std::string("memset"),
+           retypd::parse_subtype_constraints(
+               TRCtx, {"memset.in_0 <= memset.out", "memset.in_1 <= #uint"})},
+          {std::string("memcpy"),
+           retypd::parse_subtype_constraints(
+               TRCtx, {"memcpy.in_1 <= memcpy.in_0",
+                       "memcpy.in_0 <= memcpy.out", "memcpy.in_2 <= #uint"})},
+          {std::string("__memcpy"),
+           retypd::parse_subtype_constraints(TRCtx,
+                                             {"__memcpy.in_1 <= __memcpy.in_0",
+                                              "__memcpy.in_0 <= __memcpy.out",
+                                              "__memcpy.in_2 <= #uint"})},
+          {std::string("memchr"), {}},
+          {std::string("pop_arg"), {}},
+          {std::string("fmt_fp"), {}},
+      };
+
+  bool DisableOverride = false;
+  if (DisableOverride) {
+    SummaryOverride = {};
+  }
+
   // Walk the callgraph in bottom-up SCC order.
   for (; !CGI.isAtEnd(); ++CGI) {
     const std::vector<CallGraphNode *> &NodeVec = *CGI;
@@ -351,8 +389,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       }
     }
 
-    std::cerr << "Summary for " << Name << ":\n";
-    std::vector<retypd::SubTypeConstraint> Summary = Generator->genSummary();
+    std::vector<retypd::SubTypeConstraint> Summary;
+    if (SummaryOverride.count(Name)) {
+      std::cerr << "Summary Overriden: " << Name << ":\n";
+      Summary = SummaryOverride.at(Name);
+      Generator->CG.solve();
+    } else {
+      std::cerr << "Summary for " << Name << ":\n";
+      Summary = Generator->genSummary();
+    }
 
     for (auto &C : Summary) {
       std::cerr << "  " << notdec::retypd::toString(C) << "\n";
@@ -682,7 +727,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto Size = getSize(Ent.first, pointer_size);
       assert(Size > 0);
       clang::QualType CTy = TB.buildType(*Node, Size);
-      assert(Result.ValueTypes.count(Convert(Ent.first)) == 0);
+      if (isGV(Ent.first) && Result.ValueTypes.count(Convert(Ent.first)) != 0) {
+        llvm::errs() << "Warning: TODO handle Global Value type merge: "
+                     << getName(Ent.first) << "\n";
+      }
+      assert(Result.ValueTypes.count(Convert(Ent.first)) == 0 ||
+             isGV(Ent.first));
       Result.ValueTypes[Convert(Ent.first)] = CTy;
       if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
         llvm::errs() << "  Value: " << **V
@@ -707,7 +757,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           llvm::errs() << "  Special Value: " << getName(Ent.first)
                        << " lower bound: " << CTy.getAsString() << "\n";
         }
-        assert(Result.ValueTypesUpperBound.count(Convert(Ent.first)) == 0);
+        assert(Result.ValueTypesUpperBound.count(Convert(Ent.first)) == 0 ||
+               isGV(Ent.first));
         Result.ValueTypesUpperBound[Convert(Ent.first)] = CTy;
       } else {
         llvm::errs() << "  Value: " << getName(Ent.first)

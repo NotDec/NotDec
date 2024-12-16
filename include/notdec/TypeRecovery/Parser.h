@@ -44,6 +44,8 @@ ParseResultT<TypeVariable> parseTypeVariable(TRContext &Ctx,
                                              llvm::StringRef str);
 ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
                                                        llvm::StringRef str);
+std::vector<SubTypeConstraint>
+parse_subtype_constraints(TRContext &Ctx, std::vector<const char *> cons_str);
 
 } // namespace notdec::retypd
 

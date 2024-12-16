@@ -291,4 +291,20 @@ ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
   return {rest1, SubTypeConstraint{RSub.get(), RSup.get()}};
 }
 
+std::vector<SubTypeConstraint>
+parse_subtype_constraints(TRContext &Ctx, std::vector<const char *> cons_str) {
+  std::vector<SubTypeConstraint> ret;
+  for (const char *con : cons_str) {
+    auto res = notdec::retypd::parseSubTypeConstraint(Ctx, con);
+    assert(res.first.size() == 0);
+    assert(res.second.isOk());
+    if (res.second.isErr()) {
+      std::cerr << res.second.msg().str() << "\n";
+    }
+    ret.push_back(res.second.get());
+    // std::cerr << notdec::retypd::toString(res.second.get()) << "\n";
+  }
+  return ret;
+}
+
 } // namespace notdec::retypd
