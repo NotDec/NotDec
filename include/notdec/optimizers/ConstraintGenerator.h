@@ -105,6 +105,19 @@ ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User);
 std::string getName(const ExtValuePtr &Val);
 void dump(const ExtValuePtr &Val);
 unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size);
+inline void wrapExtValuePtrWithUser(ExtValuePtr &Val, User *User) {
+  // Differentiate int32/int64 by User.
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    if (!isa<GlobalValue>(*V)) {
+      if (auto CI = dyn_cast<Constant>(*V)) {
+        assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
+        assert(hasUser(*V, User) &&
+               "convertTypeVarVal: constant not used by user");
+        Val = UConstant{.Val = cast<Constant>(*V), .User = User};
+      }
+    }
+  }
+}
 
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Provide a unique key, i.e., memory address to be used by the LLVM's pass
@@ -131,6 +144,7 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
 
 public:
   void print(Module &M, std::string path);
+  void printAnnotatedModule(Module &M, std::string path);
 };
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
@@ -199,7 +213,7 @@ public:
     return *ref.first->second;
   }
   CGNode &addVarSubtype(llvm::Value *Val, const TypeVariable &dtv) {
-    auto &Node = getNode(Val, nullptr);
+    auto &Node = getOrInsertNode(Val, nullptr);
     addSubtype(dtv, Node.key.Base);
     return Node;
   }
@@ -219,8 +233,10 @@ public:
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
-  retypd::CGNode &getNode(ExtValuePtr Val, User *User);
-  retypd::CGNode &getNode(retypd::NodeKey Key, bool AssertExist = true) {
+  retypd::CGNode *getNode(ExtValuePtr Val, User *User);
+  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User);
+  retypd::CGNode &getOrInsertNode1(retypd::NodeKey Key,
+                                   bool AssertExist = true) {
     return CG.getOrInsertNode(Key, 0, AssertExist);
   }
 

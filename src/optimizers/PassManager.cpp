@@ -153,7 +153,7 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
         std::abort();
       }
       // TODO do tr after SSA demotion.
-      llvm2cOpt.noDemoteSSA = true;
+      // llvm2cOpt.noDemoteSSA = true;
       notdec::llvm2c::decompileModule(M, os, llvm2cOpt, std::move(HighTypes));
       std::cout << "Decompile result: " << OutFilePath << std::endl;
     }

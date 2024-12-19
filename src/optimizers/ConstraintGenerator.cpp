@@ -422,6 +422,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
 
+  if (DebugDir) {
+    printAnnotatedModule(M, join(DebugDir, "01-BottomUp.anno.ll").c_str());
+  }
+
   // Top-down Phase: build the result(Map from value to clang C type)
   // We have a big global type graph, corresponds to C AST that link the
   // declared struct type to the real definition to form a graph.
@@ -542,16 +546,17 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             std::get<1>(AllSCCs.at(Func2SCCIndex.at(Elem.second)));
 
         for (int i = 0; i < Call->arg_size(); i++) {
-          auto &NFrom = CallerGenerator->getNode(Call->getArgOperand(i), Call);
+          auto &NFrom =
+              CallerGenerator->getOrInsertNode(Call->getArgOperand(i), Call);
           ArgNodes[i].insert(&NFrom);
           ArgNodesContra[i].insert(
-              &CallerGenerator->getNode(MakeContraVariant(NFrom.key)));
+              &CallerGenerator->getOrInsertNode1(MakeContraVariant(NFrom.key)));
         }
         if (!Current->getReturnType()->isVoidTy()) {
-          auto &NFrom = CallerGenerator->getNode(Call, nullptr);
+          auto &NFrom = CallerGenerator->getOrInsertNode(Call, nullptr);
           RetNodes.insert(&NFrom);
           RetNodesContra.insert(
-              &CallerGenerator->getNode(MakeContraVariant(NFrom.key)));
+              &CallerGenerator->getOrInsertNode1(MakeContraVariant(NFrom.key)));
         }
       }
 
@@ -618,21 +623,22 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         auto Prefix = ("argd_" + std::to_string(i));
         auto &ArgSet = ArgNodes[i];
         auto *D = determinizeTo(ArgSet, Prefix.c_str());
-        auto &To = CurrentTypes.getNode(Current->getArg(i), nullptr);
+        auto &To = CurrentTypes.getOrInsertNode(Current->getArg(i), nullptr);
         CurrentTypes.CG.onlyAddEdge(*D, To, retypd::One{});
         auto &ArgSetContra = ArgNodesContra[i];
         auto *DContra = determinizeTo(ArgSetContra, Prefix.c_str());
-        auto &ToContra = CurrentTypes.getNode(MakeContraVariant(To.key), false);
+        auto &ToContra =
+            CurrentTypes.getOrInsertNode1(MakeContraVariant(To.key), false);
         CurrentTypes.CG.onlyAddEdge(ToContra, *DContra, retypd::One{});
       }
       if (!Current->getReturnType()->isVoidTy()) {
         auto *D = determinizeTo(RetNodes, "retd");
         auto &From =
-            CurrentTypes.getNode(ReturnValue{.Func = Current}, nullptr);
+            CurrentTypes.getOrInsertNode(ReturnValue{.Func = Current}, nullptr);
         CurrentTypes.CG.onlyAddEdge(From, *D, retypd::One{});
         auto *DContra = determinizeTo(RetNodesContra, "retd");
         auto &FromContra =
-            CurrentTypes.getNode(MakeContraVariant(From.key), false);
+            CurrentTypes.getOrInsertNode1(MakeContraVariant(From.key), false);
         CurrentTypes.CG.onlyAddEdge(*DContra, FromContra, retypd::One{});
       }
     }
@@ -675,6 +681,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     // TODO further merge and simplify the graph?
+  }
+
+  if (DebugDir) {
+    printAnnotatedModule(M,
+                         join(DebugDir, "03-After-BottomUp.anno.ll").c_str());
   }
 
   auto Convert = [&](ExtValuePtr Val) -> llvm2c::WValuePtr {
@@ -747,8 +758,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       if (G2.CG.Nodes.count(retypd::MakeContraVariant(Node->key)) > 0) {
-        CTy = TB.buildType(G2.getNode(retypd::MakeContraVariant(Node->key)),
-                           Size);
+        CTy = TB.buildType(
+            G2.getOrInsertNode1(retypd::MakeContraVariant(Node->key)), Size);
 
         if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
           llvm::errs() << "  Value: " << **V
@@ -1268,20 +1279,21 @@ std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
   return CG.simplifiedExpr(InterestingVars);
 }
 
-retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
-  // Differentiate int32/int64 by User.
-  if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    if (!isa<GlobalValue>(*V)) {
-      if (auto CI = dyn_cast<Constant>(*V)) {
-        assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
-        assert(hasUser(*V, User) &&
-               "convertTypeVarVal: constant not used by user");
-        Val = UConstant{.Val = cast<Constant>(*V), .User = User};
-      }
-    }
-  }
+retypd::CGNode *ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
+  wrapExtValuePtrWithUser(Val, User);
+
   if (Val2Node.count(Val)) {
-    return *Val2Node.at(Val);
+    return Val2Node.at(Val);
+  }
+  return nullptr;
+}
+
+retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
+                                                      User *User) {
+  wrapExtValuePtrWithUser(Val, User);
+  auto Node = getNode(Val, User);
+  if (Node != nullptr) {
+    return *Node;
   }
   auto ret = convertTypeVar(Val, User);
   return setTypeVar(Val, ret, User, getSize(Val, Ctx.pointer_size));
@@ -1289,7 +1301,7 @@ retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
 
 const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,
                                                      User *User) {
-  return getNode(Val, User).key.Base;
+  return getOrInsertNode(Val, User).key.Base;
 }
 
 TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
@@ -1320,6 +1332,11 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User) {
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
+      // debug
+      if (llvm::isa<AllocaInst>(User)) {
+        llvm::errs() << "here: " << *User;
+        llvm::errs() << "\n";
+      }
       auto ret = TypeVariable::CreateIntConstant(
           Ctx.TRCtx, OffsetRange{.offset = CI->getSExtValue()}, User);
       return ret;
@@ -1542,7 +1559,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
     AllocaInst &I) {
-  auto &Node = cg.getNode(&I, nullptr);
+  auto &Node = cg.getOrInsertNode(&I, nullptr);
   // set as pointer type
   cg.setPointer(Node);
 }
@@ -1628,7 +1645,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
 void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,
                                             const ExtValuePtr RHS,
                                             ICmpInst *I) {
-  getNode(LHS, I).getPNIVar()->unifyPN(*getNode(RHS, I).getPNIVar());
+  getOrInsertNode(LHS, I).getPNIVar()->unifyPN(
+      *getOrInsertNode(RHS, I).getPNIVar());
 }
 
 // for pointer sized int, probably is pointer comparision. So we cannot make a
@@ -1674,7 +1692,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   auto LoadedVar =
       cg.deref(I.getPointerOperand(), &I,
                cg.getPointerElemSize(I.getPointerOperandType()), true);
-  auto ValVar = cg.getNode(&I, nullptr);
+  auto ValVar = cg.getOrInsertNode(&I, nullptr);
   // formal load -> actual load
   cg.addSubtype(LoadedVar, ValVar.key.Base);
   if (mustBePrimitive(I.getType())) {
@@ -1711,7 +1729,7 @@ TypeVariable ConstraintsGenerator::addOffset(TypeVariable &dtv,
 // Special logics for load and store when generating type variables.
 TypeVariable ConstraintsGenerator::deref(Value *Val, User *User,
                                          unsigned BitSize, bool isLoadOrStore) {
-  setPointer(getNode(Val, User));
+  setPointer(getOrInsertNode(Val, User));
   assert(BitSize != 0 && "RetypdGenerator::deref: zero size!?");
   // from the offset, generate a loaded type variable.
   auto DstVar = getTypeVar(Val, User);
@@ -1804,13 +1822,15 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
 void ConstraintsGenerator::addAddConstraint(const ExtValuePtr LHS,
                                             const ExtValuePtr RHS,
                                             BinaryOperator *I) {
-  PG->addAddCons(&getNode(LHS, I), &getNode(RHS, I), &getNode(I, nullptr), I);
+  PG->addAddCons(&getOrInsertNode(LHS, I), &getOrInsertNode(RHS, I),
+                 &getOrInsertNode(I, nullptr), I);
 }
 
 void ConstraintsGenerator::addSubConstraint(const ExtValuePtr LHS,
                                             const ExtValuePtr RHS,
                                             BinaryOperator *I) {
-  PG->addSubCons(&getNode(LHS, I), &getNode(RHS, I), &getNode(I, nullptr), I);
+  PG->addSubCons(&getOrInsertNode(LHS, I), &getOrInsertNode(RHS, I),
+                 &getOrInsertNode(I, nullptr), I);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
@@ -1940,21 +1960,25 @@ void TypeRecovery::gen_json(std::string OutputFilename) {
 
 class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
   // ConstraintsGenerator &CG;
-  std::map<Function *, ConstraintsGenerator> &func_ctxs;
+  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> &FuncCtxs;
 
   void emitFunctionAnnot(const llvm::Function *F,
                          llvm::formatted_raw_ostream &OS) override {
-    auto &CG = func_ctxs.at(const_cast<llvm::Function *>(F));
+    if (FuncCtxs.count(const_cast<llvm::Function *>(F)) == 0) {
+      return;
+    }
+    auto &CG = FuncCtxs.at(const_cast<llvm::Function *>(F));
     OS << "; ";
     if (!F->getReturnType()->isVoidTy()) {
-      OS << CG.getNode(ReturnValue{.Func = const_cast<llvm::Function *>(F)},
-                       nullptr)
+      OS << CG->getOrInsertNode(
+                  ReturnValue{.Func = const_cast<llvm::Function *>(F)}, nullptr)
                 .str();
       OS << " <- ";
     }
     OS << "(";
     for (auto &Arg : F->args()) {
-      OS << CG.getNode(const_cast<llvm::Argument *>(&Arg), nullptr).str()
+      OS << CG->getOrInsertNode(const_cast<llvm::Argument *>(&Arg), nullptr)
+                .str()
          << ", ";
     }
     OS << ")";
@@ -1986,11 +2010,11 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
     if (Instr == nullptr) {
       return;
     }
-    auto &CG = func_ctxs.at(const_cast<llvm::Function *>(Instr->getFunction()));
+    auto &CG = FuncCtxs.at(const_cast<llvm::Function *>(Instr->getFunction()));
 
     OS << "; ";
     if (!V.getType()->isVoidTy()) {
-      OS << CG.getNode(const_cast<llvm::Value *>(&V), nullptr).str();
+      OS << CG->getOrInsertNode(const_cast<llvm::Value *>(&V), nullptr).str();
       if (Instr != nullptr) {
         OS << " <- ";
       }
@@ -1998,8 +2022,9 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
     if (Instr != nullptr) {
       OS << "(";
       for (const Use &Op : Instr->operands()) {
-        OS << CG.getNode(Op.get(), const_cast<llvm::Instruction *>(Instr)).str()
-           << ", ";
+        auto *Node =
+            CG->getNode(Op.get(), const_cast<llvm::Instruction *>(Instr));
+        OS << (Node == nullptr ? "null" : Node->str()) << ", ";
       }
       OS << ")";
     }
@@ -2007,8 +2032,9 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
   }
 
 public:
-  CGAnnotationWriter(std::map<Function *, ConstraintsGenerator> &func_ctxs)
-      : func_ctxs(func_ctxs) {}
+  CGAnnotationWriter(std::map<llvm::Function *,
+                              std::shared_ptr<ConstraintsGenerator>> &func_ctxs)
+      : FuncCtxs(func_ctxs) {}
 };
 
 void TypeRecovery::print(llvm::Module &M, std::string path) {
@@ -2019,8 +2045,18 @@ void TypeRecovery::print(llvm::Module &M, std::string path) {
     std::cerr << EC.message() << std::endl;
     std::abort();
   }
-  // CGAnnotationWriter AW(func_ctxs);
-  // M.print(os, &AW);
+}
+
+void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path) {
+  std::error_code EC;
+  llvm::raw_fd_ostream os(path, EC);
+  if (EC) {
+    std::cerr << "Cannot open output file: " << path << std::endl;
+    std::cerr << EC.message() << std::endl;
+    std::abort();
+  }
+  CGAnnotationWriter AW((FuncCtxs));
+  M.print(os, &AW);
 }
 
 } // namespace notdec
