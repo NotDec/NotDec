@@ -54,34 +54,34 @@ EdgeLabel2Offset(const EdgeLabel &E) {
 void ConstraintGraph::aggressiveSimplify() {
   // do not include path with size 8.
   // 1. remove all load8/store8 edges.
-  for (auto &Ent : Nodes) {
-    auto &Node = Ent.second;
-    std::vector<const CGEdge *> toRemove;
-    for (auto &Edge : Node.outEdges) {
-      if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
-        if (std::holds_alternative<LoadLabel>(Rec->label) &&
-            std::get<LoadLabel>(Rec->label).Size == 8) {
-          toRemove.push_back(&Edge);
-        } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
-                   std::get<StoreLabel>(Rec->label).Size == 8) {
-          toRemove.push_back(&Edge);
-        }
-      }
-      if (auto Rec = std::get_if<ForgetLabel>(&Edge.getLabel())) {
-        if (std::holds_alternative<LoadLabel>(Rec->label) &&
-            std::get<LoadLabel>(Rec->label).Size == 8) {
-          toRemove.push_back(&Edge);
-        } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
-                   std::get<StoreLabel>(Rec->label).Size == 8) {
-          toRemove.push_back(&Edge);
-        }
-      }
-    }
-    for (auto Edge : toRemove) {
-      removeEdge(Node, const_cast<CGNode &>(Edge->getTargetNode()),
-                 Edge->getLabel());
-    }
-  }
+  // for (auto &Ent : Nodes) {
+  //   auto &Node = Ent.second;
+  //   std::vector<const CGEdge *> toRemove;
+  //   for (auto &Edge : Node.outEdges) {
+  //     if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
+  //       if (std::holds_alternative<LoadLabel>(Rec->label) &&
+  //           std::get<LoadLabel>(Rec->label).Size == 8) {
+  //         toRemove.push_back(&Edge);
+  //       } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
+  //                  std::get<StoreLabel>(Rec->label).Size == 8) {
+  //         toRemove.push_back(&Edge);
+  //       }
+  //     }
+  //     if (auto Rec = std::get_if<ForgetLabel>(&Edge.getLabel())) {
+  //       if (std::holds_alternative<LoadLabel>(Rec->label) &&
+  //           std::get<LoadLabel>(Rec->label).Size == 8) {
+  //         toRemove.push_back(&Edge);
+  //       } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
+  //                  std::get<StoreLabel>(Rec->label).Size == 8) {
+  //         toRemove.push_back(&Edge);
+  //       }
+  //     }
+  //   }
+  //   for (auto Edge : toRemove) {
+  //     removeEdge(Node, const_cast<CGNode &>(Edge->getTargetNode()),
+  //                Edge->getLabel());
+  //   }
+  // }
 
   // for each node's offset edges.
   // for (auto &Ent : Nodes) {

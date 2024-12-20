@@ -746,15 +746,24 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
              isGV(Ent.first));
       Result.ValueTypes[Convert(Ent.first)] = CTy;
       if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-        llvm::errs() << "  Value: " << **V
-                     << " upper bound: " << CTy.getAsString() << "\n";
+        llvm::errs() << "  Value: " << **V;
+        llvm::Function *F = nullptr;
+        if (auto I = llvm::dyn_cast<Instruction>(*V)) {
+          F = I->getFunction();
+
+        } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
+          F = Arg->getParent();
+        }
+        if (F) {
+          llvm::errs() << " (In Func: " << F->getName() << ")";
+        }
+        llvm::errs() << " upper bound: " << CTy.getAsString();
       } else {
         llvm::errs() << "  Special Value: " << getName(Ent.first)
                      << " upper bound: " << CTy.getAsString();
         if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
           llvm::errs() << " User: " << *UC->User;
         }
-        llvm::errs() << "\n";
       }
 
       if (G2.CG.Nodes.count(retypd::MakeContraVariant(Node->key)) > 0) {
@@ -762,19 +771,17 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             G2.getOrInsertNode1(retypd::MakeContraVariant(Node->key)), Size);
 
         if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-          llvm::errs() << "  Value: " << **V
-                       << " lower bound: " << CTy.getAsString() << "\n";
+          llvm::errs() << " lower bound: " << CTy.getAsString();
         } else {
-          llvm::errs() << "  Special Value: " << getName(Ent.first)
-                       << " lower bound: " << CTy.getAsString() << "\n";
+          llvm::errs() << " lower bound: " << CTy.getAsString();
         }
         assert(Result.ValueTypesUpperBound.count(Convert(Ent.first)) == 0 ||
                isGV(Ent.first));
         Result.ValueTypesUpperBound[Convert(Ent.first)] = CTy;
       } else {
-        llvm::errs() << "  Value: " << getName(Ent.first)
-                     << " has no lower bound\n";
+        llvm::errs() << " has no lower bound\n";
       }
+      llvm::errs() << "\n";
     }
   }
 
