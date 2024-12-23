@@ -20,6 +20,8 @@
 
 namespace notdec::retypd {
 
+struct ConstraintGraph;
+
 // Forward Declaration
 struct PNIGraph;
 struct CGNode;
@@ -30,7 +32,7 @@ OffsetRange matchOffsetRange(llvm::Value *I);
 
 enum PtrOrNum {
   Unknown = 0,
-  NonPtr = 1,
+  NonPtr = 1, // Number
   Pointer = 2,
 };
 
@@ -55,12 +57,15 @@ const unsigned char UniTyMergeMap[][3] = {
 
 PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right);
 PtrOrNum fromIPChar(char C);
+PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize);
 // #endregion PtrOrNum
 
 struct PNINode : public node_with_erase<PNINode, PNIGraph> {
 protected:
   friend struct PNIGraph;
   PNINode(PNIGraph &SSG);
+  // clone constructor for PNIGraph::cloneFrom
+  PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode);
   unsigned long Id = 0;
   PtrOrNum Ty = Unknown;
   bool hasConflict = false;
@@ -69,7 +74,10 @@ public:
   llvm::iplist<PNINode>::iterator eraseFromParent();
 
   /// Convenient method to set the type of the PNVar.
+  bool setPtr() { return setPtrOrNum(Pointer); }
+  bool setNonPtr() { return setPtrOrNum(NonPtr); }
   bool setPtrOrNum(PtrOrNum NewTy);
+
   PtrOrNum getPtrOrNum() const { return Ty; }
   void setConflict() { hasConflict = true; }
 
@@ -183,8 +191,10 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
 };
 
 struct PNIGraph {
+  ConstraintGraph &CG;
   std::string Name;
   std::set<ConsNode *> Worklist;
+  long PointerSize = 0;
 
   // list for ConstraintNode
   using ConstraintsType = llvm::ilist<ConsNode>;
@@ -211,7 +221,8 @@ struct PNIGraph {
     return N;
   }
 
-  PNIGraph(std::string Name) : Name(Name) {}
+  PNIGraph(ConstraintGraph &CG, std::string Name, long PointerSize)
+      : CG(CG), Name(Name), PointerSize(PointerSize) {}
   void cloneFrom(const PNIGraph &G, std::map<const CGNode *, CGNode *> Old2New);
 
   void addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,

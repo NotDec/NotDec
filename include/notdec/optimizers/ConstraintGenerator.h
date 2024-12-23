@@ -11,6 +11,7 @@
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Type.h>
 #include <llvm/Support/Casting.h>
 #include <map>
 #include <memory>
@@ -104,6 +105,7 @@ using ExtValuePtr =
 ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User);
 std::string getName(const ExtValuePtr &Val);
 void dump(const ExtValuePtr &Val);
+llvm::Type *getType(const ExtValuePtr &Val);
 unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size);
 inline void wrapExtValuePtrWithUser(ExtValuePtr &Val, User *User) {
   // Differentiate int32/int64 by User.
@@ -117,6 +119,18 @@ inline void wrapExtValuePtrWithUser(ExtValuePtr &Val, User *User) {
       }
     }
   }
+}
+// Check if differentiated constants (especially int32/int64 constants) by User.
+inline bool checkWrapped(ExtValuePtr &Val) {
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    if (!isa<GlobalValue>(*V)) {
+      if (auto CI = dyn_cast<Constant>(*V)) {
+        return false;
+        // assert(false && "Should already be converted to UConstant");
+      }
+    }
+  }
+  return true;
 }
 
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
@@ -164,11 +178,11 @@ struct ConstraintsGenerator {
       llvm::Function *)>
       GetSummary;
   void instantiateSummary(llvm::Function *Target, size_t instanceId);
-  std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);
-  void instantiateSketchAsSub(ExtValuePtr Val,
-                              std::shared_ptr<retypd::Sketch> Sk);
-  void instantiateSketchAsSup(ExtValuePtr Val,
-                              std::shared_ptr<retypd::Sketch> Sk);
+  // std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);
+  // void instantiateSketchAsSub(ExtValuePtr Val,
+  //                             std::shared_ptr<retypd::Sketch> Sk);
+  // void instantiateSketchAsSup(ExtValuePtr Val,
+  //                             std::shared_ptr<retypd::Sketch> Sk);
 
   // for determinization: extended powerset construction
   std::map<std::set<CGNode *>, CGNode *> DTrans;
@@ -186,59 +200,40 @@ struct ConstraintsGenerator {
       std::function<
           const std::vector<retypd::SubTypeConstraint> *(llvm::Function *)>
           GetSummary)
-      : Ctx(Ctx), CG(Ctx.TRCtx, Name, false), PG(CG.PG.get()), SCCs(SCCs),
-        GetSummary(GetSummary) {}
+      : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
+        SCCs(SCCs), GetSummary(GetSummary) {}
   ConstraintsGenerator(TypeRecovery &Ctx, std::string Name)
-      : Ctx(Ctx), CG(Ctx.TRCtx, Name, true), PG(CG.PG.get()) {}
+      : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, true), PG(CG.PG.get()) {
+  }
 
 public:
-  CGNode &setTypeVar(ExtValuePtr Val, const TypeVariable &dtv, User *User,
-                     unsigned int Size) {
-    // Differentiate int32/int64 by User.
-    if (auto V = std::get_if<llvm::Value *>(&Val)) {
-      if (!isa<GlobalValue>(*V)) {
-        if (auto CI = dyn_cast<Constant>(*V)) {
-          assert(false && "Should already be converted to UConstant");
-        }
-      }
-    }
-    auto ref = Val2Node.emplace(Val, &CG.getOrInsertNode(dtv, Size));
-    if (!ref.second) {
-      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "setTypeVar: Value already mapped to "
-                   << toString(ref.first->second->key.Base)
-                   << ", but now set to " << toString(dtv) << "\n";
-      std::abort();
-    }
-    return *ref.first->second;
-  }
-  CGNode &addVarSubtype(llvm::Value *Val, const TypeVariable &dtv) {
+  CGNode &addVarSubtype(llvm::Value *Val, CGNode &dtv) {
     auto &Node = getOrInsertNode(Val, nullptr);
-    addSubtype(dtv, Node.key.Base);
+    addSubtype(dtv, Node);
     return Node;
   }
-  void addSubtype(const TypeVariable &sub, const TypeVariable &sup) {
-    if (sub.isPrimitive() && sup.isPrimitive()) {
+  void addSubtype(CGNode &SubNode, CGNode &SupNode) {
+    auto &Sub = SubNode.key.Base;
+    auto &Sup = SupNode.key.Base;
+    if (Sub.isPrimitive() && Sup.isPrimitive()) {
       // TODO check if this is correct
-      if (sub.getPrimitiveName() != sup.getPrimitiveName()) {
+      if (Sub.getPrimitiveName() != Sup.getPrimitiveName()) {
         std::cerr << "addSubtype: relation between primitive types: "
-                  << toString(sub) << " <= " << toString(sup) << "\n";
+                  << toString(Sub) << " <= " << toString(Sup) << "\n";
         // assert(sub.getPrimitiveName() == sup.getPrimitiveName() &&
         //        "addConstraint: different primitive types !?");
       }
       return;
     }
-    CG.addConstraint(sub, sup);
+    CG.addConstraint(SubNode, SupNode);
   }
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
-  retypd::CGNode *getNode(ExtValuePtr Val, User *User);
+  retypd::CGNode &getNode(ExtValuePtr Val, User *User);
+  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User);
+  retypd::CGNode &createNode(ExtValuePtr Val, User *User);
   retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User);
-  retypd::CGNode &getOrInsertNode1(retypd::NodeKey Key,
-                                   bool AssertExist = true) {
-    return CG.getOrInsertNode(Key, 0, AssertExist);
-  }
 
   const TypeVariable &getTypeVar(ExtValuePtr val, User *User);
   TypeVariable convertTypeVar(ExtValuePtr Val, User *User = nullptr);

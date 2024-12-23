@@ -2,6 +2,9 @@
 #ifndef _NOTDEC_RETYPD_DFA_MIN_H_
 #define _NOTDEC_RETYPD_DFA_MIN_H_
 
+#include <cassert>
+#include <llvm/IR/Type.h>
+#include <llvm/Support/raw_ostream.h>
 #include <map>
 #include <queue>
 
@@ -100,12 +103,39 @@ struct NFADeterminizer {
     return Ret;
   }
 
+  static void printLowTyDiffSet(const std::set<NodeTy> &N) {
+    llvm::errs() << "Different low type in a set of nodes: \n";
+    for (auto Node : N) {
+      llvm::errs() << "Node: " << GT::toString(Node)
+                   << " LowType: " << *GT::getLowTy(Node) << "\n";
+    }
+    llvm::errs() << "End of different low type set.\n";
+  }
+
+  static llvm::Type *ensureSameLowTy(const std::set<NodeTy> &N) {
+    // ensure the set of nodes has the same low type.
+    assert(N.size() > 0);
+    llvm::Type *LowTy = nullptr;
+    for (auto N1 : N) {
+      if (LowTy == nullptr) {
+        LowTy = GT::getLowTy(N1);
+      } else {
+        if (GT::getLowTy(N1) == nullptr || LowTy != GT::getLowTy(N1)) {
+          printLowTyDiffSet(N);
+          assert(false && "Different low type in a set of nodes");
+        }
+      }
+    }
+    return LowTy;
+  }
+
   EntryTy getOrSetNewNode(const std::set<NodeTy> &N) {
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
     auto &NewNode = NewG->getOrInsertNode(
-        NodeKey{TypeVariable::CreateDtv(NewG->Ctx, NewVN.getNewName("dfa_"))});
+        NodeKey{TypeVariable::CreateDtv(NewG->Ctx, NewVN.getNewName("dfa_"))},
+        ensureSameLowTy(N));
     auto it = DTrans.emplace(N, &NewNode);
     assert(it.second);
     return it.first;

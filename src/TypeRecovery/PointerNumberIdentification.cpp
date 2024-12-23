@@ -2,6 +2,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "optimizers/ConstraintGenerator.h"
 #include <cassert>
+#include <iostream>
 #include <llvm/IR/InstrTypes.h>
 
 namespace notdec::retypd {
@@ -454,16 +455,17 @@ void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
   // Target is Changed, add related cons to worklist
   markChanged(Target);
 }
-void PNINode::addUser(CGNode *Node) { Parent->PNIToNode[this].insert(Node); }
+void PNINode::addUser(CGNode *Node) {
+  assert(&Node->Parent == &Parent->CG);
+  Parent->PNIToNode[this].insert(Node);
+}
 
 PNINode::PNINode(PNIGraph &SSG)
     : node_with_erase(SSG), Id(ValueNamer::getId()) {}
 
-void PNINode::cloneFrom(const PNINode &N) {
-  Ty = N.Ty;
-  hasConflict = N.hasConflict;
-  Id = ValueNamer::getId();
-}
+PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
+    : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty),
+      hasConflict(OtherGraphNode.hasConflict) {}
 
 void PNIGraph::cloneFrom(const PNIGraph &G,
                          std::map<const CGNode *, CGNode *> Old2New) {
@@ -471,13 +473,15 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
   assert(Constraints.size() == 0);
   // clone PNINodes
   for (auto &N : G.PNINodes) {
-    auto *NewNode = new PNINode(*this);
-    NewNode->cloneFrom(N);
+    auto *NewNode = new PNINode(*this, N);
     PNINodes.push_back(NewNode);
     // maintain PNIToNode
     for (const auto *Node : G.PNIToNode.at(const_cast<PNINode *>(&N))) {
-      Old2New[Node]->setPNIVar(NewNode);
-      PNIToNode[NewNode].insert(Old2New[Node]);
+      if (Old2New.count(Node) == 0) {
+        std::cerr << toString(Node->key) << "\n";
+      }
+      Old2New.at(Node)->setPNIVar(NewNode);
+      PNIToNode[NewNode].insert(Old2New.at(Node));
     }
   }
   // clone Constraints
@@ -491,6 +495,17 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
     if (G.Worklist.count(&C)) {
       Worklist.insert(NewNode);
     }
+  }
+}
+
+PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize) {
+  assert(PointerSize == 32 || PointerSize == 64);
+  if (LowTy->isPointerTy()) {
+    return Pointer;
+  } else if (LowTy->isIntegerTy(PointerSize)) {
+    return Unknown;
+  } else {
+    return NonPtr;
   }
 }
 

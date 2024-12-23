@@ -2,6 +2,7 @@
 #include <clang/AST/Type.h>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <functional>
@@ -9,6 +10,7 @@
 #include <llvm/ADT/Optional.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
 #include <map>
 #include <memory>
@@ -40,6 +42,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/Parser.h"
+#include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
@@ -195,36 +198,34 @@ bool hasUser(const Value *Val, const User *User) {
   return false;
 }
 
-unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
+llvm::Type *getType(const ExtValuePtr &Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    if ((*V)->getType()->isPointerTy()) {
-      return pointer_size;
-    }
-    return (*V)->getType()->getScalarSizeInBits();
+    return (*V)->getType();
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    return F->Func->getReturnType()->getScalarSizeInBits();
+    return F->Func->getReturnType();
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
-    // TODO what if function pointer?
-    return Arg->Call->getArgOperand(Arg->Index)
-        ->getType()
-        ->getScalarSizeInBits();
+    return Arg->Call->getArgOperand(Arg->Index)->getType();
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
-    return Ret->Call->getType()->getScalarSizeInBits();
+    return Ret->Call->getType();
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
-    if (IC->Val->getType()->isPointerTy()) {
-      return pointer_size;
-    }
-    if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
-      return CI->getBitWidth();
-    }
-    if (!IC->Val->getType()->isAggregateType() &&
-        !IC->Val->getType()->isVectorTy()) {
-      return IC->Val->getType()->getScalarSizeInBits();
-    }
-    assert(false && "TODO");
+    return IC->Val->getType();
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getSize: unhandled type of ExtValPtr\n";
+               << "ERROR: getType: unhandled type of ExtValPtr\n";
+  std::abort();
+}
+
+unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
+  assert(pointer_size != 0);
+  auto Ty = getType(Val);
+  if (Ty->isPointerTy()) {
+    return pointer_size;
+  }
+  if (!Ty->isAggregateType() && !Ty->isVectorTy()) {
+    return Ty->getScalarSizeInBits();
+  }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "ERROR: getSize: unhandled llvm type: " << *Ty << "\n";
   std::abort();
 }
 
@@ -493,20 +494,32 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           join(*DirPath, "01-Global.before.dot").c_str());
     }
 
-    // copy all nodes into the global type graph
+    // copy all nodes and Edges into the SCC type graph
     for (auto &Ent : Generator->CG) {
       auto &Node = Ent.second;
-      auto &NewNode = CurrentTypes.CG.getOrInsertNode(Node.key);
+      auto LowTy = Node.LowType;
+      // reflect/freeze the PNI graph result into LowTy.
+      // Only update pointer-sized int type.
+      if (Node.getPNIVar()->isPointer()) {
+        if (LowTy == nullptr || LowTy->isIntegerTy()) {
+          LowTy = llvm::Type::getInt8PtrTy(M.getContext());
+        }
+      }
+      auto &NewNode = CurrentTypes.CG.createNode(Node.key, LowTy);
+    }
+    for (auto &Ent : Generator->CG) {
+      auto &Node = Ent.second;
+      auto &NewNode = CurrentTypes.CG.getNode(Node.key);
       for (auto &Edge : Node.outEdges) {
         auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-        auto &NewTarget = CurrentTypes.CG.getOrInsertNode(Target.key);
+        auto &NewTarget = CurrentTypes.CG.getNode(Target.key);
         CurrentTypes.CG.onlyAddEdge(NewNode, NewTarget, Edge.Label);
       }
     }
     // maintain the value map
     for (auto &Ent : Generator->Val2Node) {
       auto *Node = Ent.second;
-      auto &NewNode = CurrentTypes.CG.getOrInsertNode(Node->key, 0, true);
+      auto &NewNode = CurrentTypes.CG.getNode(Node->key);
       CurrentTypes.Val2Node.emplace(Ent.first, &NewNode);
     }
 
@@ -550,13 +563,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               CallerGenerator->getOrInsertNode(Call->getArgOperand(i), Call);
           ArgNodes[i].insert(&NFrom);
           ArgNodesContra[i].insert(
-              &CallerGenerator->getOrInsertNode1(MakeContraVariant(NFrom.key)));
+              &CallerGenerator->CG.getNode(MakeContraVariant(NFrom.key)));
         }
         if (!Current->getReturnType()->isVoidTy()) {
           auto &NFrom = CallerGenerator->getOrInsertNode(Call, nullptr);
           RetNodes.insert(&NFrom);
           RetNodesContra.insert(
-              &CallerGenerator->getOrInsertNode1(MakeContraVariant(NFrom.key)));
+              &CallerGenerator->CG.getNode(MakeContraVariant(NFrom.key)));
         }
       }
 
@@ -586,9 +599,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           if (hasEnd) {
             NewNode = CG.getEndNode();
           } else {
+            auto *LowTy = notdec::retypd::NFADeterminizer<>::ensureSameLowTy(N);
+
             NewNode =
-                &CG.getOrInsertNode(retypd::NodeKey{TypeVariable::CreateDtv(
-                    CG.Ctx, ValueNamer::getName(NamePrefix))});
+                &CG.createNode(retypd::NodeKey{TypeVariable::CreateDtv(
+                                   CG.Ctx, ValueNamer::getName(NamePrefix))},
+                               LowTy);
           }
 
           auto it = DTrans.emplace(N, NewNode);
@@ -627,9 +643,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         CurrentTypes.CG.onlyAddEdge(*D, To, retypd::One{});
         auto &ArgSetContra = ArgNodesContra[i];
         auto *DContra = determinizeTo(ArgSetContra, Prefix.c_str());
-        auto &ToContra =
-            CurrentTypes.getOrInsertNode1(MakeContraVariant(To.key), false);
-        CurrentTypes.CG.onlyAddEdge(ToContra, *DContra, retypd::One{});
+        auto *ToContra =
+            CurrentTypes.CG.getNodeOrNull(MakeContraVariant(To.key));
+        if (ToContra != nullptr) {
+          CurrentTypes.CG.onlyAddEdge(*ToContra, *DContra, retypd::One{});
+        }
       }
       if (!Current->getReturnType()->isVoidTy()) {
         auto *D = determinizeTo(RetNodes, "retd");
@@ -637,9 +655,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             CurrentTypes.getOrInsertNode(ReturnValue{.Func = Current}, nullptr);
         CurrentTypes.CG.onlyAddEdge(From, *D, retypd::One{});
         auto *DContra = determinizeTo(RetNodesContra, "retd");
-        auto &FromContra =
-            CurrentTypes.getOrInsertNode1(MakeContraVariant(From.key), false);
-        CurrentTypes.CG.onlyAddEdge(*DContra, FromContra, retypd::One{});
+        auto *FromContra =
+            CurrentTypes.CG.getNodeOrNull(MakeContraVariant(From.key));
+        if (FromContra != nullptr) {
+          CurrentTypes.CG.onlyAddEdge(*DContra, *FromContra, retypd::One{});
+        }
       }
     }
 
@@ -766,9 +786,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
       }
 
-      if (G2.CG.Nodes.count(retypd::MakeContraVariant(Node->key)) > 0) {
-        CTy = TB.buildType(
-            G2.getOrInsertNode1(retypd::MakeContraVariant(Node->key)), Size);
+      if (G2.CG.hasNode(retypd::MakeContraVariant(Node->key))) {
+        CTy = TB.buildType(G2.CG.getNode(retypd::MakeContraVariant(Node->key)),
+                           Size);
 
         if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
           llvm::errs() << " lower bound: " << CTy.getAsString();
@@ -819,7 +839,7 @@ void ConstraintsGenerator::removeUnreachable() {
     auto *Node = Ent.second;
     Worklist.push(Node);
     // also add contravariant node
-    Worklist.push(&CG.getOrInsertNode(MakeContraVariant(Node->key)));
+    Worklist.push(&CG.getNode(MakeContraVariant(Node->key)));
   }
   while (!Worklist.empty()) {
     auto *Node = Worklist.front();
@@ -927,6 +947,7 @@ std::set<CGNode *> moveLoadEqStore(const std::set<CGNode *> &N,
   return ret;
 }
 
+// view subtype edges as bidirectional.
 void ConstraintsGenerator::determinizeStructEqual() {
   // assert(DTrans.empty());
   DTrans.clear();
@@ -959,8 +980,11 @@ void ConstraintsGenerator::determinizeStructEqual() {
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
-    auto &NewNode = CG.getOrInsertNode(retypd::NodeKey{
-        TypeVariable::CreateDtv(Ctx.TRCtx, ValueNamer::getName("dtm_"))});
+    auto *LowTy = notdec::retypd::NFADeterminizer<>::ensureSameLowTy(N);
+    auto &NewNode =
+        CG.getOrInsertNode(retypd::NodeKey{TypeVariable::CreateDtv(
+                               Ctx.TRCtx, ValueNamer::getName("dtm_"))},
+                           LowTy);
     auto it = DTrans.emplace(N, &NewNode);
     assert(it.second);
     return it.first;
@@ -1112,9 +1136,10 @@ void ConstraintsGenerator::eliminateCycle() {
       Out.close();
     }
 
+    auto *LowTy = notdec::retypd::NFADeterminizer<>::ensureSameLowTy(ToMerge);
     // 3. make the value map to only one node
     auto &Merged = CG.getOrInsertNode(
-        retypd::NodeKey{TypeVariable::CreateDtv(Ctx.TRCtx, Name)});
+        retypd::NodeKey{TypeVariable::CreateDtv(Ctx.TRCtx, Name)}, LowTy);
     // Update value map
     for (auto &Val : ToMergeVal) {
       Val2Node[Val] = &Merged;
@@ -1164,8 +1189,7 @@ void ConstraintsGenerator::determinize() {
     V2NNodes.insert(Ent.second);
     // contravariant nodes.
     if (CG.Nodes.count(MakeContraVariant(Ent.second->key)) != 0) {
-      V2NNodes.insert(
-          &CG.getOrInsertNode(MakeContraVariant(Ent.second->key), 0, true));
+      V2NNodes.insert(&CG.getNode(MakeContraVariant(Ent.second->key)));
     }
   }
   for (auto &Ent : CG) {
@@ -1183,8 +1207,11 @@ void ConstraintsGenerator::determinize() {
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
-    auto &NewNode = CG.getOrInsertNode(retypd::NodeKey{
-        TypeVariable::CreateDtv(Ctx.TRCtx, ValueNamer::getName("dtm_"))});
+    auto *LowTy = notdec::retypd::NFADeterminizer<>::ensureSameLowTy(N);
+    auto &NewNode =
+        CG.getOrInsertNode(retypd::NodeKey{TypeVariable::CreateDtv(
+                               Ctx.TRCtx, ValueNamer::getName("dtm_"))},
+                           LowTy);
     auto it = DTrans.emplace(N, &NewNode);
     assert(it.second);
     return it.first;
@@ -1242,17 +1269,17 @@ void ConstraintsGenerator::determinize() {
   }
 }
 
-void ConstraintsGenerator::instantiateSketchAsSub(
-    ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
-  CGNode &Root = CG.instantiateSketch(Sk);
-  addSubtype(Root.key.Base, getTypeVar(Val, nullptr));
-}
+// void ConstraintsGenerator::instantiateSketchAsSub(
+//     ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
+//   CGNode &Root = CG.instantiateSketch(Sk);
+//   addSubtype(Root.key.Base, getTypeVar(Val, nullptr));
+// }
 
-void ConstraintsGenerator::instantiateSketchAsSup(
-    ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
-  CGNode &Root = CG.instantiateSketch(Sk);
-  addSubtype(getTypeVar(Val, nullptr), Root.key.Base);
-}
+// void ConstraintsGenerator::instantiateSketchAsSup(
+//     ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
+//   CGNode &Root = CG.instantiateSketch(Sk);
+//   addSubtype(getTypeVar(Val, nullptr), Root.key.Base);
+// }
 
 void ConstraintsGenerator::run() {
   for (llvm::Function *Func : SCCs) {
@@ -1286,7 +1313,8 @@ std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
   return CG.simplifiedExpr(InterestingVars);
 }
 
-retypd::CGNode *ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
+retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val,
+                                                    User *User) {
   wrapExtValuePtrWithUser(Val, User);
 
   if (Val2Node.count(Val)) {
@@ -1295,15 +1323,34 @@ retypd::CGNode *ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
   return nullptr;
 }
 
+retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
+  wrapExtValuePtrWithUser(Val, User);
+
+  return *Val2Node.at(Val);
+}
+
+retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User) {
+  wrapExtValuePtrWithUser(Val, User);
+  auto Dtv = convertTypeVar(Val, User);
+  auto It = Val2Node.emplace(Val, &CG.createNode(Dtv, getType(Val)));
+  if (!It.second) {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "setTypeVar: Value already mapped to "
+                 << toString(It.first->second->key.Base) << ", but now set to "
+                 << toString(Dtv) << "\n";
+    std::abort();
+  }
+  return *It.first->second;
+}
+
 retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
                                                       User *User) {
   wrapExtValuePtrWithUser(Val, User);
-  auto Node = getNode(Val, User);
+  auto Node = getNodeOrNull(Val, User);
   if (Node != nullptr) {
     return *Node;
   }
-  auto ret = convertTypeVar(Val, User);
-  return setTypeVar(Val, ret, User, getSize(Val, Ctx.pointer_size));
+  return createNode(Val, User);
 }
 
 const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,
@@ -1487,22 +1534,22 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
   if (Src == nullptr) { // ret void.
     return;
   }
-  auto SrcVar = cg.getTypeVar(Src, &I);
-  auto DstVar = cg.getTypeVar(ReturnValue{.Func = I.getFunction()}, &I);
+  auto &SrcVar = cg.getOrInsertNode(Src, &I);
+  auto &DstVar = cg.createNode(ReturnValue{.Func = I.getFunction()}, &I);
   // src is a subtype of dest
   cg.addSubtype(SrcVar, DstVar);
 }
 
-std::shared_ptr<retypd::Sketch>
-ConstraintsGenerator::solveType(const TypeVariable &TV) {
-  // Because we always do layer split after clone, so we can refer to Node by
-  // type variable.
-  if (CG.Nodes.count(TV) == 0) {
-    return nullptr;
-  }
-  auto &CGNode = CG.Nodes.at(TV);
-  return CG.solveSketch(CGNode);
-}
+// std::shared_ptr<retypd::Sketch>
+// ConstraintsGenerator::solveType(const TypeVariable &TV) {
+//   // Because we always do layer split after clone, so we can refer to Node by
+//   // type variable.
+//   if (CG.Nodes.count(TV) == 0) {
+//     return nullptr;
+//   }
+//   auto &CGNode = CG.Nodes.at(TV);
+//   return CG.solveSketch(CGNode);
+// }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   auto Target = I.getCalledFunction();
@@ -1517,15 +1564,15 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     // Call within the SCC:
     // directly link to the function tv.
     for (int i = 0; i < I.arg_size(); i++) {
-      auto ArgVar = cg.getTypeVar(Target->getArg(i), &I);
-      auto ValVar = cg.getTypeVar(I.getArgOperand(i), &I);
+      auto &ArgVar = cg.getOrInsertNode(Target->getArg(i), &I);
+      auto &ValVar = cg.getOrInsertNode(I.getArgOperand(i), &I);
       // argument is a subtype of param
       cg.addSubtype(ValVar, ArgVar);
     }
     if (!I.getType()->isVoidTy()) {
       // type var should be consistent with return instruction
-      auto FormalRetVar = cg.getTypeVar(ReturnValue{.Func = Target}, &I);
-      auto ValVar = cg.getTypeVar(&I, nullptr);
+      auto &FormalRetVar = cg.getOrInsertNode(ReturnValue{.Func = Target}, &I);
+      auto &ValVar = cg.getOrInsertNode(&I, nullptr);
       // formal return -> actual return
       cg.addSubtype(FormalRetVar, ValVar);
     }
@@ -1538,27 +1585,29 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     cg.CallToID.emplace(&I, InstanceId);
     for (int i = 0; i < I.arg_size(); i++) {
       auto ArgVar = getCallArgTV(cg.Ctx.TRCtx, Target, InstanceId, i);
-      auto ValVar = cg.getTypeVar(I.getArgOperand(i), &I);
+      auto &ValVar = cg.getOrInsertNode(I.getArgOperand(i), &I);
+      auto &ArgNode = cg.CG.createNode(ArgVar, I.getArgOperand(i)->getType());
       // argument is a subtype of param
-      cg.addSubtype(ValVar, ArgVar);
+      cg.addSubtype(ValVar, ArgNode);
     }
     if (!I.getType()->isVoidTy()) {
       // for return value
       auto FormalRetVar = getCallRetTV(cg.Ctx.TRCtx, Target, InstanceId);
-      auto ValVar = cg.getTypeVar(&I, nullptr);
+      auto &ValVar = cg.getOrInsertNode(&I, nullptr);
+      auto &RetNode = cg.CG.createNode(FormalRetVar, I.getType());
       // formal return -> actual return
-      cg.addSubtype(FormalRetVar, ValVar);
+      cg.addSubtype(RetNode, ValVar);
     }
   }
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
     SelectInst &I) {
-  auto DstVar = cg.getTypeVar(&I, nullptr);
+  auto &DstVar = cg.createNode(&I, nullptr);
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
-  auto Src1Var = cg.getTypeVar(Src1, &I);
-  auto Src2Var = cg.getTypeVar(Src2, &I);
+  auto &Src1Var = cg.getOrInsertNode(Src1, &I);
+  auto &Src2Var = cg.getOrInsertNode(Src2, &I);
   // Not generate boolean constraints. Because it must be i1.
   cg.addSubtype(Src1Var, DstVar);
   cg.addSubtype(Src2Var, DstVar);
@@ -1566,7 +1615,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
     AllocaInst &I) {
-  auto &Node = cg.getOrInsertNode(&I, nullptr);
+  auto &Node = cg.createNode(&I, nullptr);
   // set as pointer type
   cg.setPointer(Node);
 }
@@ -1578,10 +1627,10 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::handlePHINodes() {
   for (auto I : phiNodes) {
-    auto DstVar = cg.getTypeVar(I, nullptr);
+    auto &DstVar = cg.getNode(I, nullptr);
     for (auto &Op : I->incoming_values()) {
       auto *Src = Op.get();
-      auto SrcVar = cg.getTypeVar(Src, I);
+      auto &SrcVar = cg.getOrInsertNode(Src, I);
       // src is a subtype of dest
       cg.addSubtype(SrcVar, DstVar);
     }
@@ -1592,44 +1641,51 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
   if (isa<BitCastInst>(I)) {
     // ignore cast, propagate the type of the operand.
     auto *Src = I.getOperand(0);
-    auto SrcVar = cg.getTypeVar(Src, &I);
+    auto &SrcVar = cg.getOrInsertNode(Src, &I);
     cg.addVarSubtype(&I, SrcVar);
     return;
   } else if (isa<PtrToIntInst, IntToPtrInst, BitCastInst>(I)) {
     // ignore cast, view as assignment.
     auto *Src = I.getOperand(0);
-    auto SrcVar = cg.getTypeVar(Src, &I);
+    auto &SrcVar = cg.getOrInsertNode(Src, &I);
     /*auto &Node = */ cg.addVarSubtype(&I, SrcVar);
     // cg.setPointer(Node);
     return;
-  } else if (isa<TruncInst, ZExtInst>(&I)) {
-    auto *Src = I.getOperand(0);
-    if (is32Or64Int(I.getSrcTy()) && is32Or64Int(I.getDestTy())) {
-      auto SrcVar = cg.getTypeVar(Src, &I);
-      cg.addVarSubtype(&I, SrcVar);
-    } else {
-      if (isa<ZExtInst>(&I)) {
-        cg.addVarSubtype(&I,
-                         TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "uint"));
-        cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
-                      TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "uint"));
-      } else {
-        cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
-        cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
-                      getLLVMTypeVar(cg.Ctx.TRCtx, I.getOperand(0)->getType()));
-      }
-    }
-    return;
-  } else if (isa<SExtInst>(&I)) {
-    auto *Src = I.getOperand(0);
-    auto SrcVar = cg.getTypeVar(Src, &I);
-    cg.addSubtype(SrcVar, TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "sint"));
-    cg.addVarSubtype(&I, TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "sint"));
-    cg.addSubtype(cg.getTypeVar(I.getOperand(0), &I),
-                  TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, "sint"));
-    return;
-  } else if (isa<FPToUIInst, FPToSIInst, UIToFPInst, SIToFPInst, FPTruncInst,
-                 FPExtInst>(&I)) {
+  }
+  // // Override implementation for TruncInst, ZExtInst here
+  // else if (isa<TruncInst, ZExtInst>(&I)) {
+  //   auto *Src = I.getOperand(0);
+  //   // if (is32Or64Int(I.getSrcTy()) && is32Or64Int(I.getDestTy())) {
+  //   //   auto &SrcVar = cg.getOrInsertNode(Src, &I);
+  //   //   cg.addVarSubtype(&I, SrcVar);
+  //   // } else {
+  //   if (isa<ZExtInst>(&I)) {
+  //     assert(I.getType()->isIntegerTy());
+  //     auto &Node = cg.getOrInsertNode(&I, nullptr);
+  //     auto &UintNodeOut = cg.CG.getOrCreatePrim(
+  //         "uint" + std::to_string(I.getType()->getIntegerBitWidth()),
+  //         I.getType());
+  //     cg.addSubtype(UintNodeOut, Node);
+  //     // zext result is a number
+  //     Node.getPNIVar()->setNonPtr();
+
+  //     auto &NodeIn = cg.getOrInsertNode(I.getOperand(0), &I);
+  //     auto &UintNodeIn = cg.CG.getOrCreatePrim(
+  //         "uint" +
+  //             std::to_string(I.getOperand(0)->getType()->getIntegerBitWidth()),
+  //         I.getOperand(0)->getType());
+  //     cg.addSubtype(NodeIn, UintNodeIn);
+  //     NodeIn.getPNIVar()->setNonPtr();
+  //   } else {
+  //     // View as typecast: we have low type in the Node so no need to create
+  //     // relations.
+  //     auto &Result = cg.createNode(&I, nullptr);
+  //   }
+  //   // }
+  //   return;
+  // }
+  else if (isa<TruncInst, ZExtInst, SExtInst, FPToUIInst, FPToSIInst,
+               UIToFPInst, SIToFPInst, FPTruncInst, FPExtInst>(&I)) {
     visitInstruction(I);
     return;
   }
@@ -1664,9 +1720,9 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitICmpInst(ICmpInst &I) {
 
   cg.addCmpConstraint(Src1, Src2, &I);
 
-  // type the inst as bool
+  // type the inst as bool?
   assert(I.getType()->isIntegerTy(1));
-  cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
+  cg.createNode(&I, nullptr);
 }
 
 // #region LoadStore
@@ -1675,14 +1731,14 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitICmpInst(ICmpInst &I) {
 
 unsigned ConstraintsGenerator::getPointerElemSize(Type *ty) {
   Type *Elem = ty->getPointerElementType();
-  unsigned Size = Elem->getPrimitiveSizeInBits();
-  if (Size != 0) {
-    return Size;
-  }
   if (Elem->isPointerTy()) {
     assert(Ctx.pointer_size != 0 &&
            "RetypdGenerator: pointer size not initialized");
     return Ctx.pointer_size;
+  }
+  unsigned Size = Elem->getPrimitiveSizeInBits();
+  if (Size != 0) {
+    return Size;
   }
   assert(false && "unknown pointer type");
 }
@@ -1692,19 +1748,19 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
   auto DstVar =
       cg.deref(I.getPointerOperand(), &I,
                cg.getPointerElemSize(I.getPointerOperandType()), false);
-  cg.addSubtype(cg.getTypeVar(I.getValueOperand(), &I), DstVar);
+  auto &StoreNode = cg.CG.createNode(DstVar, I.getPointerOperand()->getType());
+  // actual store -> formal store
+  cg.addSubtype(cg.getOrInsertNode(I.getValueOperand(), &I), StoreNode);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   auto LoadedVar =
       cg.deref(I.getPointerOperand(), &I,
                cg.getPointerElemSize(I.getPointerOperandType()), true);
-  auto ValVar = cg.getOrInsertNode(&I, nullptr);
+  auto &LoadNode =
+      cg.CG.createNode(LoadedVar, I.getPointerOperand()->getType());
   // formal load -> actual load
-  cg.addSubtype(LoadedVar, ValVar.key.Base);
-  if (mustBePrimitive(I.getType())) {
-    cg.addSubtype(ValVar.key.Base, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
-  }
+  cg.addSubtype(LoadNode, cg.getOrInsertNode(&I, nullptr));
 }
 
 std::string ConstraintsGenerator::offset(APInt Offset, int Count) {
@@ -1759,6 +1815,8 @@ const std::map<unsigned, ConstraintsGenerator::PcodeOpType>
     ConstraintsGenerator::opTypes = {
         // for Trunc, ZExt, SExt
         {Instruction::SExt, {"sint", 1, (const char *[1]){"sint"}}},
+        {Instruction::ZExt, {"uint", 1, (const char *[1]){"uint"}}},
+        {Instruction::Trunc, {"int", 1, (const char *[1]){"int"}}},
 
         // other cast insts: FPToUIInst, FPToSIInst, UIToFPInst, SIToFPInst
         {Instruction::FPToUI, {"uint", 1, (const char *[1]){nullptr}}},
@@ -1788,8 +1846,6 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
   // return value
   if (I.getType()->isVoidTy()) {
     // skip void type
-  } else if (mustBePrimitive(I.getType())) {
-    cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
   } else if (opTypes.count(I.getOpcode()) &&
              opTypes.at(I.getOpcode()).addRetConstraint(&I, cg)) {
     // good
@@ -1802,9 +1858,6 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
     auto Op = I.getOperand(Ind);
     if (Op->getType()->isVoidTy()) {
       // skip void type
-    } else if (mustBePrimitive(Op->getType())) {
-      cg.addSubtype(cg.getTypeVar(Op, &I),
-                    getLLVMTypeVar(cg.Ctx.TRCtx, Op->getType()));
     } else if (opTypes.count(I.getOpcode()) &&
                opTypes.at(I.getOpcode()).addOpConstraint(Ind, &I, cg)) {
       // good
@@ -1860,23 +1913,25 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);
 
+  auto &Src1Node = cg.getOrInsertNode(Src1, &I);
+  auto &Src2Node = cg.getOrInsertNode(Src2, &I);
+  auto &RetNode = cg.getOrInsertNode(&I, nullptr);
+
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
     if ((CI->getZExtValue() & 0x3fffff00) == 0x3fffff00) {
       // act as simple assignment
-      cg.addVarSubtype(&I, cg.getTypeVar(Src1, &I));
+      cg.addSubtype(RetNode, Src1Node);
       return;
     }
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "Warn: And op without constant: " << I << "\n";
-    cg.addSubtype(cg.getTypeVar(Src2, &I),
-                  getLLVMTypeVar(cg.Ctx.TRCtx, Src2->getType()));
   }
   // view as numeric operation?
-  cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
-  cg.addSubtype(cg.getTypeVar(Src1, &I),
-                getLLVMTypeVar(cg.Ctx.TRCtx, Src1->getType()));
+  Src1Node.getPNIVar()->setNonPtr();
+  Src2Node.getPNIVar()->setNonPtr();
+  RetNode.getPNIVar()->setNonPtr();
   return;
 }
 
@@ -1886,37 +1941,59 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);
 
+  auto &Src1Node = cg.getOrInsertNode(Src1, &I);
+  auto &Src2Node = cg.getOrInsertNode(Src2, &I);
+  auto &RetNode = cg.getOrInsertNode(&I, nullptr);
+
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
     if ((CI->getZExtValue() & 0x3fffff00) == 0) {
       // act as simple assignment
-      cg.addVarSubtype(&I, cg.getTypeVar(Src1, &I));
+      cg.addSubtype(RetNode, Src1Node);
       return;
     }
   } else {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "Warn: Or op without constant: " << I << "\n";
-    cg.addSubtype(cg.getTypeVar(Src2, &I),
-                  getLLVMTypeVar(cg.Ctx.TRCtx, Src2->getType()));
   }
   // view as numeric operation?
-  cg.addVarSubtype(&I, getLLVMTypeVar(cg.Ctx.TRCtx, I.getType()));
-  cg.addSubtype(cg.getTypeVar(Src1, &I),
-                getLLVMTypeVar(cg.Ctx.TRCtx, Src1->getType()));
+  Src1Node.getPNIVar()->setNonPtr();
+  Src2Node.getPNIVar()->setNonPtr();
+  RetNode.getPNIVar()->setNonPtr();
   return;
 }
 
+bool strEq(const char *S1, const char *S2) { return strcmp(S1, S2) == 0; }
+
 bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     Instruction *I, ConstraintsGenerator &cg) const {
+  auto &N = cg.createNode(I, nullptr);
   if (I->getType()->isVoidTy()) {
     return false;
   }
   const char *ty = output;
-  if (ty == nullptr) {
-    return false;
+  if (ty == nullptr) { // no action
+    return true;
+  } else if (strEq(ty, "sint")) {
+    N.getPNIVar()->setNonPtr();
+    auto &SintNode = cg.CG.getOrCreatePrim(
+        "sint" + std::to_string(I->getType()->getIntegerBitWidth()),
+        I->getType());
+    cg.addSubtype(SintNode, N);
+    return true;
+  } else if (strEq(ty, "uint")) {
+    N.getPNIVar()->setNonPtr();
+    auto &UintNode = cg.CG.getOrCreatePrim(
+        "uint" + std::to_string(I->getType()->getIntegerBitWidth()),
+        I->getType());
+    cg.addSubtype(UintNode, N);
+    return true;
+  } else if (strEq(ty, "int")) {
+    N.getPNIVar()->setNonPtr();
+    return true;
   }
-  cg.addVarSubtype(I, TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, ty));
-  return true;
+
+  return false;
 }
 
 bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
@@ -1926,13 +2003,29 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
   if (Op->getType()->isVoidTy()) {
     return false;
   }
+  auto &N = cg.createNode(Op, I);
   const char *ty = inputs[Index];
   if (ty == nullptr) {
-    return false;
+    return true;
+  } else if (strEq(ty, "sint")) {
+    N.getPNIVar()->setNonPtr();
+    auto &SintNode = cg.CG.getOrCreatePrim(
+        "sint" + std::to_string(I->getType()->getIntegerBitWidth()),
+        I->getType());
+    cg.addSubtype(N, SintNode);
+    return true;
+  } else if (strEq(ty, "uint")) {
+    N.getPNIVar()->setNonPtr();
+    auto &UintNode = cg.CG.getOrCreatePrim(
+        "uint" + std::to_string(I->getType()->getIntegerBitWidth()),
+        I->getType());
+    cg.addSubtype(N, UintNode);
+    return true;
+  } else if (strEq(ty, "int")) {
+    N.getPNIVar()->setNonPtr();
+    return true;
   }
-  cg.addSubtype(cg.getTypeVar(Op, I),
-                TypeVariable::CreatePrimitive(cg.Ctx.TRCtx, ty));
-  return true;
+  return false;
 }
 
 // =========== end: other insts ===========
@@ -2030,7 +2123,7 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
       OS << "(";
       for (const Use &Op : Instr->operands()) {
         auto *Node =
-            CG->getNode(Op.get(), const_cast<llvm::Instruction *>(Instr));
+            CG->getNodeOrNull(Op.get(), const_cast<llvm::Instruction *>(Instr));
         OS << (Node == nullptr ? "null" : Node->str()) << ", ";
       }
       OS << ")";

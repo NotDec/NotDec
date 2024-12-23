@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <list>
+#include <llvm/IR/Type.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -67,7 +68,7 @@ struct CGNode {
   const NodeKey key;
   std::set<CGEdge *> inEdges;
   std::set<CGEdge> outEdges;
-  unsigned int Size;
+  llvm::Type *LowType = nullptr;
 
   using iterator = std::set<CGEdge>::iterator;
   using pred_iterator = std::set<CGEdge *>::iterator;
@@ -87,7 +88,8 @@ protected:
   void setPNIVar(PNINode *N) { PNIVar = N; }
 
 public:
-  CGNode(ConstraintGraph &Parent, NodeKey key, unsigned int Size);
+  CGNode(const CGNode &) = delete;
+  CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowType);
   std::string str() { return key.str() + "-" + PNIVar->str(); }
   void onUpdatePNType();
   void setAsPtrAdd(CGNode *Other, OffsetRange Off);
@@ -147,19 +149,33 @@ struct ConstraintGraph {
   // TODO prevent name collision
   static const char *Memory;
   CGNode *MemoryNode = nullptr;
+  // TODO replace with datalayout?
+  long PointerSize = 0;
 
-  ConstraintGraph(TRContext &Ctx, std::string Name, bool disablePNI = false);
+  ConstraintGraph(TRContext &Ctx, long PointerSize, std::string Name,
+                  bool disablePNI = false);
   static void clone(std::map<const CGNode *, CGNode *> &Old2New,
                     const ConstraintGraph &From, ConstraintGraph &To,
                     bool removePNI = false);
   // Node map is the core data of cloning.
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New,
                         bool removePNI = false) const;
-  CGNode &getOrInsertNode(const NodeKey &N, unsigned int Size = 0,
-                          bool AssertExist = false);
-  std::pair<std::map<NodeKey, CGNode>::iterator, bool>
-  emplaceNode(const NodeKey &N, unsigned int Size, bool AssertExist);
+
+  CGNode &getOrCreatePrim(std::string Name, llvm::Type *LowType) {
+    auto &Ret =
+        getOrInsertNode(TypeVariable::CreatePrimitive(Ctx, Name), LowType);
+    assert(Ret.LowType == LowType);
+    return Ret;
+  }
+
+  bool hasNode(const NodeKey &N);
+  // must get the node
+  CGNode &getNode(const NodeKey &N);
+  CGNode *getNodeOrNull(const NodeKey &N);
+  CGNode &createNode(const NodeKey &N, llvm::Type *LowType);
+  CGNode &cloneNode(const CGNode &Other);
   void removeNode(const NodeKey &N);
+  CGNode &getOrInsertNode(const NodeKey &N, llvm::Type *LowType);
 
   std::string getName() const { return Name; }
   using iterator = std::map<NodeKey, CGNode>::iterator;
@@ -168,7 +184,7 @@ struct ConstraintGraph {
   bool empty() { return Nodes.empty(); }
 
   // Interface for initial constraint insertion
-  void addConstraint(const TypeVariable &sub, const TypeVariable &sup);
+  void addConstraint(CGNode &NodeL, CGNode &NodeR);
 
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
@@ -180,7 +196,7 @@ struct ConstraintGraph {
   ConstraintGraph cloneAndSimplify() const;
   void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
                    size_t ID);
-  CGNode &instantiateSketch(std::shared_ptr<retypd::Sketch> Sk);
+  // CGNode &instantiateSketch(std::shared_ptr<retypd::Sketch> Sk);
 
 public:
   void solve();
@@ -190,11 +206,12 @@ public:
   CGNode *getEndNode();
   CGNode *getMemoryNode();
 
-  void solveSketchQueries(
-      const std::vector<std::pair<
-          TypeVariable, std::function<void(std::shared_ptr<retypd::Sketch>)>>>
-          &Queries) const;
-  std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
+  // void solveSketchQueries(
+  //     const std::vector<std::pair<
+  //         TypeVariable,
+  //         std::function<void(std::shared_ptr<retypd::Sketch>)>>> &Queries)
+  //         const;
+  // std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
 
   // internal steps
   void saturate();
@@ -233,7 +250,8 @@ public:
                         std::set<const CGNode *> Nodes) const;
   std::vector<SubTypeConstraint> toConstraints();
   static ConstraintGraph fromConstraints(TRContext &Ctx, std::string FuncName,
-                                         std::vector<Constraint> &Cons);
+                                         std::vector<Constraint> &Cons,
+                                         long PointerSize = 32);
 
   bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(&From.Parent == this && &To.Parent == this);
@@ -254,6 +272,9 @@ public:
   }
 
 protected:
+  std::pair<std::map<NodeKey, CGNode>::iterator, bool>
+  emplace(const NodeKey &N, llvm::Type *LowType);
+
   bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
       if (std::holds_alternative<One>(Label)) {
@@ -264,10 +285,20 @@ protected:
                 << "\n";
     }
     if (!isLayerSplit) {
-      if (std::holds_alternative<ForgetLabel>(Label)) {
-        auto Capa = std::get<ForgetLabel>(Label);
-        // maintain the initial reaching push/forget set.
-        // ReachingSet[&To].insert({Capa.label, &From, OffsetRange()});
+      if (auto F = std::get_if<ForgetLabel>(&Label)) {
+        if (auto O = std::get_if<OffsetLabel>(&F->label)) {
+          // unify PN
+          From.getPNIVar()->unifyPN(*To.getPNIVar());
+          // also should be pointer, TODO: set or assert?
+          assert(From.getPNIVar()->isPointer());
+        }
+      } else if (auto R = std::get_if<RecallLabel>(&Label)) {
+        if (auto O = std::get_if<OffsetLabel>(&R->label)) {
+          // unify PN
+          From.getPNIVar()->unifyPN(*To.getPNIVar());
+          // also should be pointer, TODO: set or assert?
+          assert(From.getPNIVar()->isPointer());
+        }
       } else if (std::holds_alternative<One>(Label)) {
         // unify PN
         From.getPNIVar()->unifyPN(*To.getPNIVar());
@@ -382,6 +413,10 @@ struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
   static notdec::retypd::TypeVariable getTypeVar(NodeRef N) {
     return N->getTypeVar();
   }
+  static llvm::Type *getLowTy(NodeRef N) { return N->LowType; }
+  static std::string toString(NodeRef N) {
+    return notdec::retypd::toString(N->key);
+  }
 };
 
 template <>
@@ -445,6 +480,10 @@ template <> struct GraphTraits<InverseVal<CGNode *>> {
   }
   static notdec::retypd::TypeVariable getTypeVar(NodeRef N) {
     return N.Graph->getTypeVar();
+  }
+  static llvm::Type *getLowTy(NodeRef N) { return N.Graph->LowType; }
+  static std::string toString(NodeRef N) {
+    return notdec::retypd::toString(N.Graph->key);
   }
 };
 
@@ -555,6 +594,10 @@ template <> struct GraphTraits<OffsetOnly<CGNode *>> {
   }
   static notdec::retypd::TypeVariable getTypeVar(NodeRef N) {
     return N.Graph->getTypeVar();
+  }
+  static llvm::Type *getLowTy(NodeRef N) { return N.Graph->LowType; }
+  static std::string toString(NodeRef N) {
+    return notdec::retypd::toString(N.Graph->key);
   }
 
   static NodeRef getEntryNode(OffsetOnly<NodeRef> G) { return G.Graph; }
