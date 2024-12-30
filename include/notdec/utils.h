@@ -7,6 +7,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
 #include <sstream>
+#include <string>
 #include <variant>
 
 std::string getSuffix(std::string fname);
@@ -25,6 +26,10 @@ enum log_level {
 extern llvm::cl::opt<log_level> logLevel;
 
 namespace notdec {
+
+bool inline startswith(std::string str, const char *prefix) {
+  return str.rfind(prefix, 0) == 0;
+}
 
 template <typename T> std::string int_to_hex(T i) {
   std::stringstream stream;

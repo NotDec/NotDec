@@ -5,6 +5,10 @@
 #include <cassert>
 #include <cstdint>
 #include <list>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Type.h>
 #include <map>
 #include <memory>
 #include <set>
@@ -32,16 +36,18 @@ OffsetRange matchOffsetRange(llvm::Value *I);
 
 enum PtrOrNum {
   Unknown = 0,
-  NonPtr = 1, // Number
+  Number = 1,
   Pointer = 2,
+  Null = 3,
+  NotPN = 4,
 };
 
 bool isUnknown(const CGNode *N);
 inline PtrOrNum inverse(PtrOrNum Ty) {
-  if (Ty == NonPtr) {
+  if (Ty == Number) {
     return Pointer;
   } else if (Ty == Pointer) {
-    return NonPtr;
+    return Number;
   } else {
     assert(false && "inverse: Unknown type");
   }
@@ -60,14 +66,17 @@ PtrOrNum fromIPChar(char C);
 PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize);
 // #endregion PtrOrNum
 
+// PNINode stores low level LLVM type. If the LowTy is pointer or
+// pointer-sized int, we use PtrOrNum to further distinguish.
 struct PNINode : public node_with_erase<PNINode, PNIGraph> {
 protected:
   friend struct PNIGraph;
-  PNINode(PNIGraph &SSG);
+  PNINode(PNIGraph &SSG, llvm::Type *LowTy);
   // clone constructor for PNIGraph::cloneFrom
   PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode);
   unsigned long Id = 0;
-  PtrOrNum Ty = Unknown;
+  PtrOrNum Ty = Null;
+  llvm::Type *LowTy = nullptr;
   bool hasConflict = false;
 
 public:
@@ -75,33 +84,83 @@ public:
 
   /// Convenient method to set the type of the PNVar.
   bool setPtr() { return setPtrOrNum(Pointer); }
-  bool setNonPtr() { return setPtrOrNum(NonPtr); }
+  bool setNonPtr() { return setPtrOrNum(Number); }
   bool setPtrOrNum(PtrOrNum NewTy);
+  bool setPtrIfRelated() {
+    if (isPNRelated()) {
+      return setPtrOrNum(Pointer);
+    }
+    return false;
+  }
+  bool setNonPtrIfRelated() {
+    if (isPNRelated()) {
+      return setPtrOrNum(Number);
+    }
+    return false;
+  }
 
   PtrOrNum getPtrOrNum() const { return Ty; }
   void setConflict() { hasConflict = true; }
+  llvm::Type *normalizeLowTy(llvm::Type *T);
+  llvm::Type *getLowTy() const { return LowTy; }
+  void updateLowTy(llvm::Type *T);
 
-  bool isNonPtr() const { return getPtrOrNum() == NonPtr; }
+  bool isNumber() const { return getPtrOrNum() == Number; }
   bool isPointer() const { return getPtrOrNum() == Pointer; }
   bool isUnknown() const { return getPtrOrNum() == Unknown; }
+  bool isNull() const { return getPtrOrNum() == Null; }
+  bool isNotPN() const { return getPtrOrNum() == NotPN; }
+  bool isPNRelated() const {
+    return getPtrOrNum() != NotPN && getPtrOrNum() != Null;
+  }
   char getPNChar() const {
     if (isUnknown()) {
       return 'u';
-    } else if (isNonPtr()) {
+    } else if (isNumber()) {
       return 'i';
     } else if (isPointer()) {
       return 'p';
+    } else if (isNotPN()) {
+      return 'o';
     }
     assert(false && "CGNode::getPNChar: unhandled type");
   }
   /// merge two PNVar into one. Return the unified PNVar.
-  PNINode *unifyPN(PNINode &other);
+  PNINode *unify(PNINode &other);
+  static llvm::Type *mergeLowTy(llvm::Type *T, llvm::Type *O);
   void addUser(CGNode *Node);
-  void cloneFrom(const PNINode &N);
+
+  bool equal(const PNINode &Other) const {
+    if (Ty == Other.Ty && Ty == NotPN) {
+      return LowTy == Other.LowTy;
+    }
+    return Ty == Other.Ty;
+  }
 
   std::string str() const {
-    return "PNI_" + std::to_string(Id) + "(" + getPNChar() +
-           (hasConflict ? "C" : "") + ")";
+    if (isNull()) {
+      return "Null";
+    }
+    if (isUnknown()) {
+      return "Unknown";
+    }
+    if (isNumber()) {
+      return "Number";
+    }
+    if (isPointer()) {
+      return "Pointer";
+    }
+    if (isNotPN()) {
+      if (LowTy == nullptr) {
+        return "NotPN";
+      } else {
+        std::string str;
+        llvm::raw_string_ostream rso(str);
+        LowTy->print(rso);
+        return str;
+      }
+    }
+    assert(false && "PNINode::str: unhandled type");
   }
 };
 
@@ -112,7 +171,8 @@ struct AddNodeCons {
   llvm::BinaryOperator *Inst;
 
   static const char Rules[][3];
-  // return a list of changed nodes and whether the constraint is fully solved.
+  // return a list of changed nodes and whether the constraint is fully
+  // solved.
   llvm::SmallVector<PNINode *, 3> solve();
   bool isFullySolved();
 };
@@ -192,6 +252,8 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
 
 struct PNIGraph {
   ConstraintGraph &CG;
+  llvm::LLVMContext &LLCtx;
+  llvm::FunctionType *FuncTy = nullptr;
   std::string Name;
   std::set<ConsNode *> Worklist;
   long PointerSize = 0;
@@ -214,15 +276,25 @@ struct PNIGraph {
   const std::set<CGNode *> &getNodeSet(PNINode *Cons) {
     return PNIToNode[Cons];
   }
-  PNINode *createPNINode(CGNode *To) {
-    auto *N = new PNINode(*this);
+  PNINode *createPNINode(CGNode *To, llvm::Type *LowTy) {
+    auto *N = new PNINode(*this, LowTy);
     PNINodes.push_back(N);
     PNIToNode[N].insert(To);
     return N;
   }
+  PNINode *clonePNINode(const PNINode &OGN) {
+    auto *N = new PNINode(*this, OGN);
+    PNINodes.push_back(N);
+    return N;
+  }
+  static void addPNINodeTarget(CGNode &To, PNINode &N);
+  void markRemoved(CGNode &N);
 
-  PNIGraph(ConstraintGraph &CG, std::string Name, long PointerSize)
-      : CG(CG), Name(Name), PointerSize(PointerSize) {}
+  PNIGraph(ConstraintGraph &CG, llvm::LLVMContext &LLCtx, std::string Name,
+           long PointerSize)
+      : CG(CG), LLCtx(LLCtx),
+        FuncTy(llvm::FunctionType::get(llvm::Type::getInt8PtrTy(LLCtx), false)),
+        Name(Name), PointerSize(PointerSize) {}
   void cloneFrom(const PNIGraph &G, std::map<const CGNode *, CGNode *> Old2New);
 
   void addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
@@ -232,8 +304,38 @@ struct PNIGraph {
                   llvm::BinaryOperator *Inst);
 
   PNINode *mergePNINodes(PNINode *Left, PNINode *Right) {
-    if (Left == Right ||
-        (!Left->isUnknown() && Left->getPtrOrNum() == Right->getPtrOrNum())) {
+    if (Left == Right) {
+      return Left;
+    }
+    if (Left->isNull()) {
+      mergePNVarTo(Left, Right);
+      return Right;
+    } else if (Right->isNull()) {
+      mergePNVarTo(Right, Left);
+      return Left;
+    }
+
+    if (Left->isNotPN()) {
+      assert(Right->isNotPN());
+    }
+    if (Right->isNotPN()) {
+      assert(Left->isNotPN());
+    }
+    if (Left->isNotPN() || Right->isNotPN()) {
+      if (Left->LowTy == nullptr) {
+        mergePNVarTo(Left, Right);
+        return Right;
+      } else if (Right->LowTy == nullptr) {
+        mergePNVarTo(Right, Left);
+        return Left;
+      } else {
+        assert(Left->LowTy == Right->LowTy);
+        mergePNVarTo(Left, Right);
+        return Right;
+      }
+    }
+
+    if (!Left->isUnknown() && Left->getPtrOrNum() == Right->getPtrOrNum()) {
       // no need to merge
       return nullptr;
     }
@@ -244,13 +346,13 @@ struct PNIGraph {
       mergePNVarTo(Right, Left);
       return Left;
     } else {
-      if (Left->getPtrOrNum() == NonPtr && Right->getPtrOrNum() == Pointer) {
+      if (Left->getPtrOrNum() == Number && Right->getPtrOrNum() == Pointer) {
         std::cerr << "Warning: mergePNINodes: Pointer and NonPtr merge\n";
         mergePNVarTo(Left, Right);
         Right->setConflict();
         return Right;
       } else if ((Left->getPtrOrNum() == Pointer &&
-                  Right->getPtrOrNum() == NonPtr)) {
+                  Right->getPtrOrNum() == Number)) {
         std::cerr << "Warning: mergePNINodes: Pointer and NonPtr merge\n";
         mergePNVarTo(Right, Left);
         Left->setConflict();

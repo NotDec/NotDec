@@ -11,6 +11,7 @@
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Support/Casting.h>
 #include <map>
@@ -166,6 +167,8 @@ public:
 /// readable format. (TODO)
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
+  // todo refactor to save the target module.
+  LLVMContext &LLCtx;
   std::map<ExtValuePtr, retypd::CGNode *> Val2Node;
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
@@ -195,16 +198,20 @@ struct ConstraintsGenerator {
   void run();
   // clone CG and maintain value map.
   ConstraintsGenerator clone(std::map<const CGNode *, CGNode *> &Old2New);
+  void cloneTo(ConstraintsGenerator &Target,
+               std::map<const CGNode *, CGNode *> &Old2New);
   ConstraintsGenerator(
-      TypeRecovery &Ctx, std::string Name, std::set<llvm::Function *> SCCs,
+      TypeRecovery &Ctx, LLVMContext &LLCtx, std::string Name,
+      std::set<llvm::Function *> SCCs,
       std::function<
           const std::vector<retypd::SubTypeConstraint> *(llvm::Function *)>
           GetSummary)
-      : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
+      : Ctx(Ctx), LLCtx(LLCtx),
+        CG(Ctx.TRCtx, &LLCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
         SCCs(SCCs), GetSummary(GetSummary) {}
-  ConstraintsGenerator(TypeRecovery &Ctx, std::string Name)
-      : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, true), PG(CG.PG.get()) {
-  }
+  ConstraintsGenerator(TypeRecovery &Ctx, LLVMContext &LLCtx, std::string Name)
+      : Ctx(Ctx), LLCtx(LLCtx),
+        CG(Ctx.TRCtx, &LLCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()) {}
 
 public:
   CGNode &addVarSubtype(llvm::Value *Val, CGNode &dtv) {

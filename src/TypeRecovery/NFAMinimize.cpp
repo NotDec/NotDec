@@ -11,7 +11,7 @@
 namespace notdec::retypd {
 
 ConstraintGraph determinize(const ConstraintGraph *G) {
-  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), true);
+  ConstraintGraph NewG(G->Ctx, G->LLCtx, G->PointerSize, G->getName(), true);
   NFADeterminizer D(G, &NewG);
   D.run();
   return NewG;
@@ -48,10 +48,12 @@ combineDFAMap(const std::map<std::set<InverseVal<CGNode *>>, CGNode *> &M1,
 }
 
 ConstraintGraph minimize(const ConstraintGraph *G) {
-  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), true);
+  ConstraintGraph NewG(G->Ctx, G->LLCtx, G->PointerSize, G->getName(),
+                       G->PG == nullptr);
   NFAInvDeterminizer D(G, &NewG);
   D.run();
-  ConstraintGraph NewG2(G->Ctx, G->PointerSize, G->getName(), true);
+  ConstraintGraph NewG2(G->Ctx, G->LLCtx, G->PointerSize, G->getName(),
+                        G->PG == nullptr);
   NFAInvDeterminizer D2(&NewG, &NewG2);
   D2.run();
   return NewG2;
@@ -60,10 +62,12 @@ ConstraintGraph minimize(const ConstraintGraph *G) {
 ConstraintGraph
 minimizeWithMap(const ConstraintGraph *G,
                 std::map<std::set<CGNode *>, CGNode *> &NodeMap) {
-  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), true);
+  ConstraintGraph NewG(G->Ctx, G->LLCtx, G->PointerSize, G->getName(),
+                       G->PG == nullptr);
   NFAInvDeterminizer D(G, &NewG);
   D.run();
-  ConstraintGraph NewG2(G->Ctx, G->PointerSize, G->getName(), true);
+  ConstraintGraph NewG2(G->Ctx, G->LLCtx, G->PointerSize, G->getName(),
+                        G->PG == nullptr);
   NFAInvDeterminizer D2(&NewG, &NewG2);
 
   // Combine two map
@@ -76,7 +80,8 @@ minimizeWithMap(const ConstraintGraph *G,
 ConstraintGraph
 determinizeWithMap(const ConstraintGraph *G,
                    std::map<std::set<CGNode *>, CGNode *> &NodeMap) {
-  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), true);
+  ConstraintGraph NewG(G->Ctx, G->LLCtx, G->PointerSize, G->getName(),
+                       G->PG == nullptr);
   NFADeterminizer D(G, &NewG);
   D.run();
   NodeMap = D.DTrans;

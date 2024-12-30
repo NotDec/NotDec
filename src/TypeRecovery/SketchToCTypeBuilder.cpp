@@ -2,8 +2,10 @@
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
+#include "utils.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Comment.h"
+#include <cassert>
 #include <clang/AST/ASTFwd.h>
 #include <clang/Basic/SourceLocation.h>
 
@@ -29,11 +31,22 @@ SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(std::string Name,
   if (Name == "double") {
     return Ctx.DoubleTy;
   }
-  if (Name == "int" || Name == "uint" || Name == "sint") {
+  if (Name == "ptr") {
+    return Ctx.VoidPtrTy;
+  }
+  if (startswith(Name, "int") || startswith(Name, "uint") ||
+      startswith(Name, "sint")) {
     bool Signed = false;
-    if (Name == "sint") {
+    if (startswith(Name, "sint")) {
       Signed = true;
     }
+    int BitSize1;
+    if (startswith(Name, "int")) {
+      BitSize1 = std::stoi(Name.substr(3));
+    } else {
+      BitSize1 = std::stoi(Name.substr(4));
+    }
+    assert(BitSize1 == BitSize && "BitSize mismatch");
     auto ret = Ctx.getIntTypeForBitwidth(BitSize, Signed);
     if (ret.isNull()) {
       llvm::errs() << "Warning: cannot find exact type for Int of size "
@@ -72,15 +85,18 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     }
   }
   Visited.emplace(&Node);
-  // Generally, a node represents a struct type
 
-  // 1. no out edges, then it is top
+  // no out edges, then it is top
   if (Node.outEdges.empty()) {
     // assert(false && "TODO");
-    auto Ret = fromLatticeElem("top", BitSize);
+    auto Ret = fromLatticeElem(fromLLVMType(Node.getLowTy()), BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }
+
+  // 1 Check if pointer type.
+  bool isPtrPNI = Node.getPNIVar() != nullptr && Node.getPNIVar()->isPointer();
+
   // if only edges to #End with forget primitive, then it is a simple
   // primitive type
   std::string Var;
@@ -102,6 +118,18 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
       }
     }
     AllForgetPrim &= IsForgetPrim;
+  }
+
+  if (isPtrPNI && AllForgetPrim) {
+    assert(false && "PNI is pointer type, but all edges are forget primitive");
+  }
+
+  if (!isPtrPNI && AllForgetPrim) {
+    if (Node.key.SuffixVariance == Covariant) {
+      Var = meet(Var, fromLLVMType(Node.getLowTy()));
+    } else {
+      Var = join(Var, fromLLVMType(Node.getLowTy()));
+    }
   }
   if (AllForgetPrim) {
     auto Ret = fromLatticeElem(Var, BitSize);

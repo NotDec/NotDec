@@ -424,7 +424,7 @@ struct TypeVariable {
     if (!std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
       assert(instanceId == 0);
     }
-    return std::tie(Var, instanceId) < std::tie(rhs.Var, instanceId);
+    return std::tie(Var, instanceId) < std::tie(rhs.Var, rhs.instanceId);
   }
 
   bool operator==(const TypeVariable &rhs) const {

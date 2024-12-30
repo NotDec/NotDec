@@ -1,15 +1,34 @@
 #include "TypeRecovery/Lattice.h"
+#include "utils.h"
+#include <cassert>
 #include <iostream>
 
 namespace notdec::retypd {
-
-bool isInt(std::string a) { return a == "int" || a == "sint" || a == "uint"; }
 
 // https://en.wikipedia.org/wiki/Join_and_meet
 
 static bool isFloat(std::string a) { return a == "float" || a == "double"; }
 static bool isInt1(std::string a) {
-  return a == "int" || a == "sint" || a == "uint";
+  return startswith(a, "int") || startswith(a, "sint") || startswith(a, "uint");
+}
+
+std::string fromLLVMType(llvm::Type *T) {
+  if (T == nullptr) {
+    return "top";
+  }
+  if (T->isIntegerTy()) {
+    return "int" + std::to_string(T->getIntegerBitWidth());
+  }
+  if (T->isFloatTy()) {
+    return "float";
+  }
+  if (T->isDoubleTy()) {
+    return "double";
+  }
+  if (T->isPointerTy()) {
+    return "ptr";
+  }
+  assert(false && "TODO: unhandled LLVM type");
 }
 
 std::string join(std::string a, std::string b) {

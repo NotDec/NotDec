@@ -4,6 +4,7 @@
 #include <cassert>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Type.h>
 
 namespace notdec::retypd {
 
@@ -72,6 +73,12 @@ bool PNIGraph::solve() {
   return AnyChanged;
 }
 
+void PNIGraph::addPNINodeTarget(CGNode &To, PNINode &N) {
+  assert(To.getPNIVar() == nullptr);
+  To.setPNIVar(&N);
+  N.Parent->PNIToNode[&N].insert(&To);
+}
+
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
   // Check if the constraint should be converted
   if (Cons->isAdd()) {
@@ -80,12 +87,12 @@ void PNIGraph::eraseConstraint(ConsNode *Cons) {
     auto *LeftVal = BinOp->getOperand(0);
     auto *RightVal = BinOp->getOperand(1);
     OffsetRange Off;
-    if (Left->getPNIVar()->getPtrOrNum() == retypd::NonPtr &&
+    if (Left->getPNIVar()->getPtrOrNum() == retypd::Number &&
         Right->getPNIVar()->getPtrOrNum() == retypd::Pointer) {
       Off = matchOffsetRange(LeftVal);
       Result->setAsPtrAdd(Right, Off);
     } else if (Left->getPNIVar()->getPtrOrNum() == retypd::Pointer &&
-               Right->getPNIVar()->getPtrOrNum() == retypd::NonPtr) {
+               Right->getPNIVar()->getPtrOrNum() == retypd::Number) {
       Off = matchOffsetRange(RightVal);
       Result->setAsPtrAdd(Left, Off);
     }
@@ -133,6 +140,9 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
   PNINode *Left = this->LeftNode->getPNIVar();
   PNINode *Right = this->RightNode->getPNIVar();
   PNINode *Result = this->ResultNode->getPNIVar();
+  assert(Left->isPNRelated());
+  assert(Right->isPNRelated());
+  assert(Result->isPNRelated());
   llvm::SmallVector<PNINode *, 3> Changed;
 
   // 1. solving using add rules.
@@ -176,15 +186,15 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
   // Left alias right: Must be number
   // this includes the Left == Right == Result case.
   if (Left == Right) {
-    bool IsChanged = Left->setPtrOrNum(NonPtr);
+    bool IsChanged = Left->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Left);
     }
-    IsChanged = Right->setPtrOrNum(NonPtr);
+    IsChanged = Right->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Right);
     }
-    IsChanged = Result->setPtrOrNum(NonPtr);
+    IsChanged = Result->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Result);
     }
@@ -192,13 +202,13 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
   // Left != Right.
   else if (Left == Result) {
     // If Left == Result, Right must be number
-    bool IsChanged = Right->setPtrOrNum(NonPtr);
+    bool IsChanged = Right->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Right);
     }
   } else if (Right == Result) {
     // same as above
-    bool IsChanged = Left->setPtrOrNum(NonPtr);
+    bool IsChanged = Left->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Left);
     }
@@ -208,14 +218,14 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
       assert(unknownCount == 2);
       // 1. Unknown + Number = SameUnknown
       //    or Number + Unknown = SameUnknown
-      if (Left->isNonPtr()) {
+      if (Left->isNumber()) {
         // Unify Right and Result
-        auto *Merged = Right->unifyPN(*Result);
+        auto *Merged = Right->unify(*Result);
         assert(Merged != nullptr);
         Changed.push_back(Merged);
-      } else if (Right->isNonPtr()) {
+      } else if (Right->isNumber()) {
         // Unify Left and Result
-        auto *Merged = Left->unifyPN(*Result);
+        auto *Merged = Left->unify(*Result);
         assert(Merged != nullptr);
         Changed.push_back(Merged);
       } else if (Result->isPointer()) {
@@ -235,6 +245,9 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
   PNINode *Left = this->LeftNode->getPNIVar();
   PNINode *Right = this->RightNode->getPNIVar();
   PNINode *Result = this->ResultNode->getPNIVar();
+  assert(Left->isPNRelated());
+  assert(Right->isPNRelated());
+  assert(Result->isPNRelated());
   llvm::SmallVector<PNINode *, 3> Changed;
 
   // 1. solving using add rules.
@@ -278,15 +291,15 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
   // Right alias Result: Must be number
   // this includes the Left == Right == Result case.
   if (Result == Right) {
-    bool IsChanged = Left->setPtrOrNum(NonPtr);
+    bool IsChanged = Left->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Left);
     }
-    IsChanged = Right->setPtrOrNum(NonPtr);
+    IsChanged = Right->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Right);
     }
-    IsChanged = Result->setPtrOrNum(NonPtr);
+    IsChanged = Result->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Result);
     }
@@ -294,13 +307,13 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
     // If Left == Right, Result must be number
     // Must be unknown because there are at least 2 unknowns.
     assert(Left->isUnknown());
-    bool IsChanged = Result->setPtrOrNum(NonPtr);
+    bool IsChanged = Result->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Result);
     }
   } else if (Left == Result) {
     // same as above
-    bool IsChanged = Right->setPtrOrNum(NonPtr);
+    bool IsChanged = Right->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Right);
     }
@@ -310,14 +323,14 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
       assert(unknownCount == 2);
       // 1. Unknown - Number = SameUnknown
       //    or Unknown - SameUnknown = Number
-      if (Right->isNonPtr()) {
+      if (Right->isNumber()) {
         // Unify Left and Result
-        auto *Merged = Left->unifyPN(*Result);
+        auto *Merged = Left->unify(*Result);
         assert(Merged != nullptr);
         Changed.push_back(Merged);
-      } else if (Result->isNonPtr()) {
+      } else if (Result->isNumber()) {
         // Unify Left and Right
-        auto *Merged = Left->unifyPN(*Right);
+        auto *Merged = Left->unify(*Right);
         assert(Merged != nullptr);
         Changed.push_back(Merged);
       } else if (Left->isPointer()) {
@@ -336,7 +349,7 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
 PtrOrNum fromIPChar(char C) {
   switch (C) {
   case 'I':
-    return NonPtr;
+    return Number;
   case 'P':
     return Pointer;
   default:
@@ -360,16 +373,29 @@ void PNIGraph::onUpdatePNType(PNINode *N) {
   }
 }
 
+// return if updated.
 bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
-  assert(NewTy != Unknown);
+  assert(NewTy != Null);
+  if (Ty == Null) {
+    Ty = NewTy;
+    return true;
+  }
+
+  if (Ty == NotPN) {
+    assert(NewTy == NotPN);
+    return false;
+  }
+  assert(NewTy != NotPN);
+
+  assert(isPNRelated() && NewTy != NotPN && NewTy != Null);
   if (Ty == NewTy) {
     return false;
   }
-  if ((Ty == NonPtr && NewTy == Pointer) ||
-      (Ty == Pointer && NewTy == NonPtr)) {
+  if ((Ty == Number && NewTy == Pointer) ||
+      (Ty == Pointer && NewTy == Number)) {
     std::cerr << "Warning: PNINode::setPtrOrNum: Pointer and NonPtr merge\n";
     hasConflict = true;
-    if (Ty == NonPtr && NewTy == Pointer) {
+    if (Ty == Number && NewTy == Pointer) {
       Ty = Pointer;
       Parent->onUpdatePNType(this);
       return true;
@@ -385,6 +411,15 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
 
 // Like a operator
 PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right) {
+  // this type enum is determined when creating the node by inspecting the LLVM
+  // Type
+  if (Left == NotPN) {
+    assert(Right == NotPN);
+  }
+  if (Right == NotPN) {
+    assert(Left == NotPN);
+  }
+
   if (Left == Right) { // same inner type
     return Left;
   } else {
@@ -398,13 +433,27 @@ PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right) {
   }
 }
 
-PNINode *PNINode::unifyPN(PNINode &other) {
+llvm::Type *PNINode::mergeLowTy(llvm::Type *T, llvm::Type *O) {
+  if (T == nullptr) {
+    return O;
+  } else if (O == nullptr) {
+    return T;
+  } else {
+    assert(T == O);
+    return T;
+  }
+}
+
+PNINode *PNINode::unify(PNINode &other) {
   auto *Node = Parent->mergePNINodes(this, &other);
   return Node;
 }
 
 void PNIGraph::addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
                           llvm::BinaryOperator *Inst) {
+  assert(Left->getPNIVar()->isPNRelated());
+  assert(Right->getPNIVar()->isPNRelated());
+  assert(Result->getPNIVar()->isPNRelated());
   AddNodeCons C = {
       .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
   auto *Node = new ConsNode(*this, C);
@@ -417,6 +466,9 @@ void PNIGraph::addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
 
 void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
                           llvm::BinaryOperator *Inst) {
+  assert(Left->getPNIVar()->isPNRelated());
+  assert(Right->getPNIVar()->isPNRelated());
+  assert(Result->getPNIVar()->isPNRelated());
   SubNodeCons C = {
       .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
   auto *Node = new ConsNode(*this, C);
@@ -455,17 +507,65 @@ void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
   // Target is Changed, add related cons to worklist
   markChanged(Target);
 }
+
+void PNIGraph::markRemoved(CGNode &Node) {
+  if (auto *P = Node.getPNIVar()) {
+    PNIToNode[P].erase(&Node);
+    if (PNIToNode[P].empty()) {
+      PNIToNode.erase(P);
+      P->eraseFromParent();
+    }
+    Node.setPNIVar(nullptr);
+  }
+}
+
 void PNINode::addUser(CGNode *Node) {
   assert(&Node->Parent == &Parent->CG);
   Parent->PNIToNode[this].insert(Node);
 }
 
-PNINode::PNINode(PNIGraph &SSG)
-    : node_with_erase(SSG), Id(ValueNamer::getId()) {}
+llvm::Type *PNINode::normalizeLowTy(llvm::Type *T) {
+  // normalize all pointer type.
+  if (T->isPointerTy()) {
+    T = llvm::Type::getInt8PtrTy(T->getContext());
+  } else if (T->isFunctionTy()) {
+    // TODO pass llvmContext and create basic type as PNIGraph member
+    T = Parent->FuncTy;
+  }
+  return T;
+}
+
+PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize) {
+  assert(PointerSize == 32 || PointerSize == 64);
+  if (LowTy == nullptr) {
+    return Null;
+  } else if (LowTy->isPointerTy()) {
+    return Pointer;
+  } else if (LowTy->isIntegerTy(PointerSize)) {
+    return Unknown;
+  } else {
+    return NotPN;
+  }
+}
+
+void PNINode::updateLowTy(llvm::Type *T) {
+  assert(T != nullptr);
+  T = normalizeLowTy(T);
+
+  if (LowTy == nullptr) {
+    LowTy = T;
+    setPtrOrNum(fromLLVMTy(LowTy, Parent->PointerSize));
+  }
+}
+
+// When LowTy is pointer-sized int, we initialize Ty as Unknown.
+PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
+    : node_with_erase(SSG), Id(ValueNamer::getId()),
+      Ty(fromLLVMTy(LowTy, SSG.PointerSize)), LowTy(LowTy) {}
 
 PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
     : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty),
-      hasConflict(OtherGraphNode.hasConflict) {}
+      LowTy(OtherGraphNode.LowTy), hasConflict(OtherGraphNode.hasConflict) {}
 
 void PNIGraph::cloneFrom(const PNIGraph &G,
                          std::map<const CGNode *, CGNode *> Old2New) {
@@ -473,15 +573,14 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
   assert(Constraints.size() == 0);
   // clone PNINodes
   for (auto &N : G.PNINodes) {
-    auto *NewNode = new PNINode(*this, N);
-    PNINodes.push_back(NewNode);
+    auto *NewNode = clonePNINode(N);
     // maintain PNIToNode
-    for (const auto *Node : G.PNIToNode.at(const_cast<PNINode *>(&N))) {
-      if (Old2New.count(Node) == 0) {
-        std::cerr << toString(Node->key) << "\n";
+    for (const auto *OldCGNode : G.PNIToNode.at(const_cast<PNINode *>(&N))) {
+      if (Old2New.count(OldCGNode) == 0) {
+        std::cerr << toString(OldCGNode->key) << "\n";
       }
-      Old2New.at(Node)->setPNIVar(NewNode);
-      PNIToNode[NewNode].insert(Old2New.at(Node));
+      auto *NewCGNode = Old2New.at(OldCGNode);
+      addPNINodeTarget(*NewCGNode, *NewNode);
     }
   }
   // clone Constraints
@@ -495,17 +594,6 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
     if (G.Worklist.count(&C)) {
       Worklist.insert(NewNode);
     }
-  }
-}
-
-PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize) {
-  assert(PointerSize == 32 || PointerSize == 64);
-  if (LowTy->isPointerTy()) {
-    return Pointer;
-  } else if (LowTy->isIntegerTy(PointerSize)) {
-    return Unknown;
-  } else {
-    return NonPtr;
   }
 }
 

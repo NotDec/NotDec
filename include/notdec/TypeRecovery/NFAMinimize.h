@@ -11,6 +11,7 @@
 #include <llvm/ADT/GraphTraits.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/ValueNamer.h"
 
@@ -103,39 +104,44 @@ struct NFADeterminizer {
     return Ret;
   }
 
-  static void printLowTyDiffSet(const std::set<NodeTy> &N) {
-    llvm::errs() << "Different low type in a set of nodes: \n";
+  static void printPNDiffSet(const std::set<NodeTy> &N) {
+    llvm::errs() << "  Different low type in a set of nodes: \n";
     for (auto Node : N) {
-      llvm::errs() << "Node: " << GT::toString(Node)
-                   << " LowType: " << *GT::getLowTy(Node) << "\n";
+      llvm::errs() << "    Node: " << GT::toString(Node)
+                   << " PNI: " << GT::getInner(Node)->getPNIVar()->str()
+                   << "\n";
     }
-    llvm::errs() << "End of different low type set.\n";
+    llvm::errs() << "  End of different low type set.\n";
   }
 
-  static llvm::Type *ensureSameLowTy(const std::set<NodeTy> &N) {
+  static PNINode *ensureSamePNI(const std::set<NodeTy> &N) {
     // ensure the set of nodes has the same low type.
     assert(N.size() > 0);
-    llvm::Type *LowTy = nullptr;
+    PNINode *PN = nullptr;
     for (auto N1 : N) {
-      if (LowTy == nullptr) {
-        LowTy = GT::getLowTy(N1);
+      if (PN == nullptr || PN->isNull()) {
+        PN = GT::getInner(N1)->getPNIVar();
       } else {
-        if (GT::getLowTy(N1) == nullptr || LowTy != GT::getLowTy(N1)) {
-          printLowTyDiffSet(N);
-          assert(false && "Different low type in a set of nodes");
+        auto *PN1 = GT::getInner(N1)->getPNIVar();
+        if (PN1 != nullptr && !PN1->isNull() && !PN->equal(*PN1)) {
+          llvm::errs() << "Error: Different PNI in a set of nodes!\n";
+          printPNDiffSet(N);
+          return nullptr;
         }
       }
     }
-    return LowTy;
+    return PN;
   }
 
   EntryTy getOrSetNewNode(const std::set<NodeTy> &N) {
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
-    auto &NewNode = NewG->getOrInsertNode(
+    auto *OldPN = ensureSamePNI(N);
+    auto &NewNode = NewG->createNodeClonePNI(
         NodeKey{TypeVariable::CreateDtv(NewG->Ctx, NewVN.getNewName("dfa_"))},
-        ensureSameLowTy(N));
+        OldPN);
+
     auto it = DTrans.emplace(N, &NewNode);
     assert(it.second);
     return it.first;

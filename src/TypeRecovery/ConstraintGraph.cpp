@@ -7,6 +7,7 @@
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/iterator_range.h>
+#include <llvm/IR/Type.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -191,11 +192,11 @@ void CGNode::onUpdatePNType() {
       TypeVariable NewTV = TypeVariable::CreateDtv(
           Parent.Ctx, ValueNamer::getName(name.c_str()));
       Parent.replaceNodeKey(this->key.Base, NewTV);
-      this->LowType = Parent.getMemoryNode()->LowType;
-      // add subtype of memory
-      Parent.addConstraint(
-          Parent.getOrInsertNode(TV, Parent.getMemoryNode()->LowType), *this);
-    } else if (getPNIVar()->isNonPtr()) {
+      // keep PNI untouched. Lowtype is still int.
+      // this->setPointer();
+      // Fix links with memory node.
+      Parent.addConstraint(*this, *this);
+    } else if (getPNIVar()->isNumber()) {
       // do nothing in case of conflict
       // view as int later lazily.
     } else {
@@ -207,7 +208,9 @@ void CGNode::onUpdatePNType() {
 void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {
   auto TV = Other->key.Base;
   TV = TV.pushLabel(OffsetLabel{Off});
-  Parent.addConstraint(Parent.getOrInsertNode(TV, Other->LowType), *this);
+  auto &PtrAdd = Parent.getOrInsertNode(TV, nullptr);
+  PtrAdd.setPNIPointer();
+  Parent.addConstraint(PtrAdd, *this);
 }
 
 void ConstraintGraph::solve() { saturate(); }
@@ -395,9 +398,9 @@ void ConstraintGraph::contraVariantSplit() {
   // For these nodes, split them that recall and forget are separated.
   for (auto N : toHandle) {
     // duplicate the node that isolate the recall edge.
-    auto &NewNode = createNode(
+    auto &NewNode = createNodeWithPNI(
         NodeKey{TypeVariable::CreateDtv(Ctx, ValueNamer::getName("split_"))},
-        N->LowType);
+        N->getPNIVar());
     // Move all incoming recall edge to the new node.
     for (auto InEdge2 : N->inEdges) {
       if (isRecall(InEdge2->Label)) {
@@ -544,9 +547,9 @@ void ConstraintGraph::pushSplit() {
   for (auto &Ent : toIsolate) {
     auto [Current, Recall, Forget] = Ent;
     // duplicate the node that isolate the incoming recall edge.
-    auto &NewNode = createNode(
+    auto &NewNode = createNodeWithPNI(
         NodeKey{TypeVariable::CreateDtv(Ctx, ValueNamer::getName("split_"))},
-        Current->LowType);
+        Current->getPNIVar());
     // copy all out edges except the forget edge.
     for (auto &Edge : Current->outEdges) {
       auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
@@ -895,7 +898,7 @@ void ConstraintGraph::layerSplit() {
     auto &Source = Ent.second;
     NodeKey NewSrc = Source.key;
     NewSrc.IsNewLayer = true;
-    auto &New = createNode(NewSrc, Source.LowType);
+    auto &New = createNodeWithPNI(NewSrc, Source.getPNIVar());
     Old2New.insert({&Source, &New});
   }
 
@@ -1270,7 +1273,7 @@ ConstraintGraph ConstraintGraph::fromConstraints(TRContext &Ctx,
                                                  std::string FuncName,
                                                  std::vector<Constraint> &Cons,
                                                  long PointerSize) {
-  ConstraintGraph G(Ctx, PointerSize, FuncName);
+  ConstraintGraph G(Ctx, nullptr, PointerSize, FuncName, true);
   for (auto &C : Cons) {
     if (std::holds_alternative<SubTypeConstraint>(C)) {
       auto &SCons = std::get<SubTypeConstraint>(C);
@@ -1300,10 +1303,10 @@ void ConstraintGraph::addConstraint(CGNode &NodeL, CGNode &NodeR) {
 
   // 3-4 the inverse of the above
   // 3. inverse node and 1-labeled edge
-  auto &RNodeL =
-      getOrInsertNode(NodeKey(NodeL.key.Base, Contravariant), NodeL.LowType);
-  auto &RNodeR =
-      getOrInsertNode(NodeKey(NodeR.key.Base, Contravariant), NodeR.LowType);
+  auto &RNodeL = getOrInsertNodeWithPNI(NodeKey(NodeL.key.Base, Contravariant),
+                                        NodeL.getPNIVar());
+  auto &RNodeR = getOrInsertNodeWithPNI(NodeKey(NodeR.key.Base, Contravariant),
+                                        NodeR.getPNIVar());
   // add 1-labeled edge between them
   addEdge(RNodeR, RNodeL, One{});
   // 4.1 inverse left
@@ -1357,9 +1360,22 @@ void ConstraintGraph::addForgets(CGNode &N) {
   // }
 }
 
+CGNode &ConstraintGraph::getOrInsertNodeWithPNI(const NodeKey &N, PNINode *PN) {
+  if (Nodes.count(N) == 0) {
+    return createNodeWithPNI(N, PN);
+  } else {
+    return getNode(N);
+  }
+}
+
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N,
                                          llvm::Type *LowType) {
-  auto [it, inserted] = Nodes.try_emplace(N, *this, N, LowType);
+  auto [it, inserted] = Nodes.try_emplace(N, *this, N, (llvm::Type *)nullptr);
+  if (!inserted) {
+    if (LowType != nullptr) {
+      it->second.getPNIVar()->updateLowTy(LowType);
+    }
+  }
   return it->second;
 }
 
@@ -1372,22 +1388,42 @@ CGNode *ConstraintGraph::getNodeOrNull(const NodeKey &N) {
   return nullptr;
 }
 
+std::pair<std::map<NodeKey, CGNode>::iterator, bool>
+ConstraintGraph::emplace(const NodeKey &N, llvm::Type *LowType) {
+  return Nodes.emplace(std::piecewise_construct, std::forward_as_tuple(N),
+                       std::forward_as_tuple(*this, N, LowType));
+}
+
 CGNode &ConstraintGraph::createNode(const NodeKey &N, llvm::Type *LowType) {
   auto It = emplace(N, LowType);
   assert(It.second && "createNode failed: node already exists");
   return It.first->second;
 }
 
-CGNode &ConstraintGraph::cloneNode(const CGNode &Other) {
-  assert(&Other.Parent != this);
-  auto &N = createNode(Other.key, Other.LowType);
-  return N;
+CGNode &ConstraintGraph::createNodeWithPNI(const NodeKey &N, PNINode *PNI) {
+  auto It = Nodes.emplace(std::piecewise_construct, std::forward_as_tuple(N),
+                          std::forward_as_tuple(*this, N, PNI));
+  assert(It.second && "createNode failed: node already exists");
+  return It.first->second;
 }
 
-std::pair<std::map<NodeKey, CGNode>::iterator, bool>
-ConstraintGraph::emplace(const NodeKey &N, llvm::Type *LowType) {
-  return Nodes.emplace(std::piecewise_construct, std::forward_as_tuple(N),
-                       std::forward_as_tuple(*this, N, LowType));
+CGNode &ConstraintGraph::createNodeClonePNI(const NodeKey &N, PNINode *ON) {
+  CGNode *NewN;
+  assert(PG != nullptr);
+  if (ON != nullptr) {
+    NewN = &createNodeWithPNI(N, nullptr);
+    auto PN = PG->clonePNINode(*ON);
+    PNIGraph::addPNINodeTarget(*NewN, *PN);
+  } else {
+    NewN = &createNode(N, nullptr);
+  }
+  return *NewN;
+}
+
+CGNode &ConstraintGraph::cloneNode(const CGNode &Other) {
+  assert(&Other.Parent != this);
+  auto &N = createNodeWithPNI(Other.key, nullptr);
+  return N;
 }
 
 void ConstraintGraph::removeNode(const NodeKey &N) {
@@ -1395,6 +1431,13 @@ void ConstraintGraph::removeNode(const NodeKey &N) {
   auto &Node = Nodes.at(N);
   assert(Node.outEdges.empty() && "removeNode: node has out edges");
   assert(Node.inEdges.empty() && "removeNode: node has in edges");
+  PG->markRemoved(Node);
+  if (StartNodes.count(&Node) != 0) {
+    StartNodes.erase(&Node);
+  }
+  if (EndNodes.count(&Node) != 0) {
+    EndNodes.erase(&Node);
+  }
   Nodes.erase(N);
 }
 
@@ -1454,7 +1497,7 @@ ConstraintGraph::getReachableNodes(std::set<const CGNode *> Initial) const {
 ConstraintGraph
 ConstraintGraph::getSubGraph(const std::set<const CGNode *> &Roots,
                              bool AllReachable) const {
-  ConstraintGraph Temp(Ctx, PointerSize, this->Name);
+  ConstraintGraph Temp(Ctx, LLCtx, PointerSize, this->Name, true);
 
   std::set<const CGNode *> ReachableNodes;
   if (AllReachable) {
@@ -1919,11 +1962,13 @@ CGNode *ConstraintGraph::getEndNode() {
   return End;
 }
 
-ConstraintGraph::ConstraintGraph(TRContext &Ctx, long PointerSize,
-                                 std::string Name, bool disablePNI)
-    : Ctx(Ctx), Name(Name), PointerSize(PointerSize) {
+ConstraintGraph::ConstraintGraph(TRContext &Ctx, llvm::LLVMContext *LLCtx,
+                                 long PointerSize, std::string Name,
+                                 bool disablePNI)
+    : Ctx(Ctx), LLCtx(LLCtx), Name(Name), PointerSize(PointerSize) {
   if (!disablePNI) {
-    PG = std::make_unique<PNIGraph>(*this, Name, PointerSize);
+    assert(LLCtx != nullptr);
+    PG = std::make_unique<PNIGraph>(*this, *LLCtx, Name, PointerSize);
   }
 }
 
@@ -1939,7 +1984,7 @@ void ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
   // clone all nodes
   for (auto &Ent : From.Nodes) {
     auto &Node = Ent.second;
-    auto &NewNode = To.createNode(Node.key, Node.LowType);
+    auto &NewNode = To.createNodeWithPNI(Node.key, (PNINode *)nullptr);
     auto Pair = Old2New.insert({&Node, &NewNode});
     assert(Pair.second && "clone: Node already cloned!?");
   }
@@ -1957,7 +2002,9 @@ void ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
 
   // clone PNI Graph
   if (From.PG && !removePNI) {
-    To.PG = std::make_unique<PNIGraph>(To, From.PG->Name, From.PG->PointerSize);
+    assert(From.LLCtx != nullptr);
+    To.PG = std::make_unique<PNIGraph>(To, *From.LLCtx, From.PG->Name,
+                                       From.PG->PointerSize);
     To.PG->cloneFrom(*From.PG, Old2New);
   }
 
@@ -1984,43 +2031,57 @@ void ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
 ConstraintGraph
 ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
                        bool removePNI) const {
-  ConstraintGraph G(Ctx, PointerSize, Name, (!(bool)PG) || removePNI);
+  ConstraintGraph G(Ctx, LLCtx, PointerSize, Name, (!(bool)PG) || removePNI);
   clone(Old2New, *this, G, removePNI);
   return G;
 }
 
-CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowType)
-    : Parent(Parent), key(key), LowType(LowType), PNIVar(nullptr) {
+CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy)
+    : Parent(Parent), key(key) {
   if (Parent.PG) {
-    // for new layer node, we reuse the PNINode.
-    if (key.IsNewLayer) {
-      auto NewKey = key;
-      NewKey.IsNewLayer = false;
-      this->PNIVar = Parent.getNode(NewKey).getPNIVar();
-      this->PNIVar->addUser(this);
-    } else {
-      // if the other variance node exist, use that node's PNINode.
-      NodeKey NewKey = key;
-      if (key.SuffixVariance == Covariant) {
-        NewKey.SuffixVariance = Contravariant;
-      } else {
-        NewKey.SuffixVariance = Covariant;
-      }
-      if (Parent.hasNode(NewKey)) {
-        this->PNIVar = Parent.getNode(NewKey).getPNIVar();
-        this->PNIVar->addUser(this);
-      } else {
-        // create a new PNINode.
-        this->PNIVar = Parent.PG->createPNINode(this);
-        if (LowType != nullptr) {
-          // Init PNIVar according to the LowType.
-          auto P = fromLLVMTy(LowType, Parent.PointerSize);
-          if (P != Unknown) {
-            this->PNIVar->setPtrOrNum(P);
-          }
-        }
-      }
+    PNIVar = Parent.PG->createPNINode(this, LowTy);
+  }
+}
+
+CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
+    : Parent(Parent), key(key), PNIVar(nullptr) {
+  if (N != nullptr) {
+    assert(Parent.PG != nullptr);
+  }
+  if (Parent.PG) {
+    if (N != nullptr) {
+      assert(N->getParent() == Parent.PG.get());
+      PNIGraph::addPNINodeTarget(*this, *N);
     }
+    // // try to reuse the PNINode as possible: other variance or new layer.
+    // // for new layer node, non-new-layer node must exist, and reuse the
+    // PNINode. if (key.IsNewLayer) {
+    //   auto NewKey = key;
+    //   NewKey.IsNewLayer = false;
+    //   this->PNIVar = Parent.getNode(NewKey).getPNIVar();
+    //   this->PNIVar->addUser(this);
+    //   if (LowType != nullptr) {
+    //     this->PNIVar->updateLowTy(LowType);
+    //   }
+    // } else {
+    //   // if the other variance node exist, use that node's PNINode.
+    //   NodeKey NewKey = key;
+    //   if (key.SuffixVariance == Covariant) {
+    //     NewKey.SuffixVariance = Contravariant;
+    //   } else {
+    //     NewKey.SuffixVariance = Covariant;
+    //   }
+    //   if (Parent.hasNode(NewKey)) {
+    //     this->PNIVar = Parent.getNode(NewKey).getPNIVar();
+    //     this->PNIVar->addUser(this);
+    //     if (LowType != nullptr) {
+    //       this->PNIVar->updateLowTy(LowType);
+    //     }
+    //   } else {
+    //     // create a new PNINode.
+    //     this->PNIVar = Parent.PG->createPNINode(this, LowType);
+    //   }
+    // }
   }
 }
 
