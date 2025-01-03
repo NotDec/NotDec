@@ -29,7 +29,7 @@ out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
 	/opt/wasi-sdk-16.0/bin/clang -D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined -o ./$@ ./$<
 
 out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
-	clang-14 -O0 -S -emit-llvm -g0 -o ./$@ ./$<
+	clang-14 -D INCLUDEMAIN -O0 -S -emit-llvm -g0 -o ./$@ ./$<
 
 %.dec.ll: %.wasm
 	bash -c '../../build/bin/notdec -o $@ $< 2>&1 | tee $<.log ; exit $${PIPESTATUS[0]}'

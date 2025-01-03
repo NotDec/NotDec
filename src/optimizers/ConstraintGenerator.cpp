@@ -713,7 +713,19 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     if (DebugDir) {
       G2.DebugDir = DebugDir;
     }
+
     G2.eliminateCycle();
+    // ensure lower bound is lower than upper bound
+    G2.CG.linkContraToCovariant();
+
+    if (DebugDir) {
+      std::string Dir = join(DebugDir, "SCC" + std::to_string(i));
+      G2.CG.printGraph(join(Dir, "04-BeforeMerge.dot").c_str());
+    }
+
+    // merge nodes that only subtype to another node
+    G2.mergeOnlySubtype();
+
     G2.determinize();
     assert(G2.PG);
     G2.DebugDir.clear();
@@ -1107,7 +1119,8 @@ void ConstraintsGenerator::eliminateCycle() {
       continue;
     }
     // merge the nodes in the value map:
-    // 1. collect all nodes that maps to nodes in the SCC
+    // 1. collect all nodes that mapped to values in the SCC
+    // these values will be mapped to the single merged node
     std::set<CGNode *> ToMerge;
     std::set<ExtValuePtr> ToMergeVal;
     for (auto *Node : SCC) {
@@ -1121,10 +1134,9 @@ void ConstraintsGenerator::eliminateCycle() {
       }
     }
     // 2. output the merged node name map to txt
-    auto Name = ValueNamer::getName("cycle_");
+    auto &Merged = **ToMerge.begin();
     if (!DebugDir.empty()) {
       std::ofstream Out(join(DebugDir, "Cycles.txt"), std::ios::app);
-      Out << Name << ": ";
       for (auto *Node : ToMerge) {
         Out << toString(Node->key) << ", ";
       }
@@ -1134,17 +1146,22 @@ void ConstraintsGenerator::eliminateCycle() {
 
     auto *OldPN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(ToMerge);
     // 3. make the value map to only one node
-    auto &Merged = CG.createNodeClonePNI(
-        retypd::NodeKey{TypeVariable::CreateDtv(Ctx.TRCtx, Name)}, OldPN);
     // Update value map
     for (auto &Val : ToMergeVal) {
       Val2Node[Val] = &Merged;
     }
+    // ensure other nodes are not in the value map
     for (auto &Ent : Val2Node) {
+      if (Ent.second == &Merged) {
+        continue;
+      }
       assert(ToMerge.count(Ent.second) == 0);
     }
     // move all incoming edges and all outgoing edges to the merged node
     for (auto *Node : ToMerge) {
+      if (Node == &Merged) {
+        continue;
+      }
       for (auto &Edge : Node->outEdges) {
         if (ToMerge.count(&Edge.TargetNode) != 0) {
           CG.removeEdge(*Node, Edge.TargetNode, Edge.Label);
@@ -1155,16 +1172,76 @@ void ConstraintsGenerator::eliminateCycle() {
       }
       for (auto *Edge : Node->inEdges) {
         if (ToMerge.count(&Edge->getSourceNode()) != 0) {
+          CG.removeEdge(Edge->getSourceNode(), *Node, Edge->getLabel());
           continue;
         }
         CG.onlyAddEdge(Edge->getSourceNode(), Merged, Edge->getLabel());
         CG.removeEdge(Edge->getSourceNode(), *Node, Edge->getLabel());
       }
     }
-    // erase all nodes
+    // erase all other nodes
     for (auto *Node : ToMerge) {
+      if (Node == &Merged) {
+        continue;
+      }
       CG.removeNode(Node->key);
     }
+  }
+}
+
+void ConstraintsGenerator::mergeNodeTo(CGNode &From, CGNode &To,
+                                       bool NoSelfLoop) {
+  assert(&From.Parent == &CG && &To.Parent == &CG);
+  // Fix up value map first
+  for (auto &Ent : Val2Node) {
+    if (Ent.second == &From) {
+      Val2Node[Ent.first] = &To;
+    }
+  }
+  CG.mergeNodeTo(From, To, NoSelfLoop);
+}
+
+void ConstraintsGenerator::mergeOnlySubtype() {
+  // perform merging: if node A -> B, and there is no other edge from A to other
+  // node, then merge A to B
+  // for each node and outgoing edge, check if is one edge
+  auto findMergePair = [&]() -> std::pair<CGNode *, CGNode *> {
+    for (auto &Ent : CG.Nodes) {
+      auto &Node = Ent.second;
+      if (&Node == CG.getStartNode() || &Node == CG.getEndNode()) {
+        continue;
+      }
+      if (Node.key.Base.isPrimitive()) {
+        continue;
+      }
+
+      for (auto &Edge : Node.outEdges) {
+        if (!std::holds_alternative<retypd::One>(Edge.getLabel())) {
+          continue;
+        }
+        auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+        if (&Target == CG.getStartNode() || &Target == CG.getEndNode()) {
+          continue;
+        }
+        if (Target.key.Base.isPrimitive()) {
+          continue;
+        }
+        if (Node.outEdges.size() == 1) {
+          assert(Node.getPNIVar() == Target.getPNIVar());
+          return {&Node, &Target};
+        }
+      }
+    }
+    return {nullptr, nullptr};
+  };
+  CGNode *A, *B;
+  std::tie(A, B) = findMergePair();
+  while (A != nullptr && B != nullptr) {
+    // merge A to B
+    mergeNodeTo(*A, *B, true);
+    A = nullptr;
+    B = nullptr;
+    std::tie(A, B) = findMergePair();
   }
 }
 

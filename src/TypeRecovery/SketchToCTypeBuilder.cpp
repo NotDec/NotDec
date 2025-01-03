@@ -153,9 +153,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
           clang::RecordDecl *Decl = createStruct(Ctx);
           NodeTypeMap.emplace(&Node,
                               Ctx.getPointerType(Ctx.getRecordType(Decl)));
-          auto It = FieldMap.emplace(OL->range, visitType(Target, BitSize));
-          assert(It.second && "Duplicate offset edge");
         }
+        auto It = FieldMap.emplace(OL->range, visitType(Target, BitSize));
+        assert(It.second && "Duplicate offset edge");
       } else if (auto *LL = std::get_if<LoadLabel>(&RL->label)) {
         // assert(!Load2Node);
         if (Load2Node) {

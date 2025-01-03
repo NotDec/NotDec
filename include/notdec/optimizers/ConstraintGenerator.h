@@ -191,6 +191,7 @@ struct ConstraintsGenerator {
   std::map<std::set<CGNode *>, CGNode *> DTrans;
   void determinizeStructEqual();
   void eliminateCycle();
+  void mergeOnlySubtype();
   void determinize();
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();
@@ -234,6 +235,7 @@ public:
     }
     CG.addConstraint(SubNode, SupNode);
   }
+  void mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 

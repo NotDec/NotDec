@@ -525,6 +525,9 @@ void PNINode::addUser(CGNode *Node) {
 }
 
 llvm::Type *PNINode::normalizeLowTy(llvm::Type *T) {
+  if (T == nullptr) {
+    return nullptr;
+  }
   // normalize all pointer type.
   if (T->isPointerTy()) {
     T = llvm::Type::getInt8PtrTy(T->getContext());
@@ -548,20 +551,39 @@ PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize) {
   }
 }
 
-void PNINode::updateLowTy(llvm::Type *T) {
+bool isPtrOrNum(llvm::Type *LowTy, long PointerSize) {
+  PtrOrNum PN = fromLLVMTy(LowTy, PointerSize);
+  return PN != Null && PN != NotPN;
+}
+
+bool PNINode::updateLowTy(llvm::Type *T) {
+  bool Ret = false;
   assert(T != nullptr);
   T = normalizeLowTy(T);
 
   if (LowTy == nullptr) {
     LowTy = T;
+    Ret = true;
     setPtrOrNum(fromLLVMTy(LowTy, Parent->PointerSize));
+  } else {
+    if (isPNRelated()) {
+      assert(isPtrOrNum(T, Parent->PointerSize));
+      // Low type is not important, just careful about possible PNI update.
+      if (T->isPointerTy() && !isPointer()) {
+        setPtrOrNum(Pointer);
+        Ret = true;
+      }
+    } else {
+      assert(LowTy == T);
+    }
   }
+  return Ret;
 }
 
 // When LowTy is pointer-sized int, we initialize Ty as Unknown.
 PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
     : node_with_erase(SSG), Id(ValueNamer::getId()),
-      Ty(fromLLVMTy(LowTy, SSG.PointerSize)), LowTy(LowTy) {}
+      Ty(fromLLVMTy(LowTy, SSG.PointerSize)), LowTy(normalizeLowTy(LowTy)) {}
 
 PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
     : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty),

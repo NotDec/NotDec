@@ -24,6 +24,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
@@ -32,6 +33,7 @@
 #include "TypeRecovery/TRContext.h"
 #include "Utils/Range.h"
 #include "optimizers/ConstraintGenerator.h"
+#include "utils.h"
 
 #define DEBUG_TYPE "retypd_graph"
 
@@ -51,6 +53,84 @@ EdgeLabel2Offset(const EdgeLabel &E) {
   }
   return llvm::None;
 };
+
+void ConstraintGraph::lowTypeToSubType() {
+  // Check the low type of each node.
+  // If non-PNI related, add subtype relation.
+  // if number, add subtype relation.
+  // if Unknown/pointer, TODO do nothing for now.
+  // Also check for existing subtypes. Skip if already exists.
+  std::set<CGNode *> Visited;
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    if (Node.key.Base.isPrimitive()) {
+      continue;
+    }
+    if (Visited.count(&Node)) {
+      continue;
+    }
+    if (Node.getPNIVar() == nullptr || Node.getPNIVar()->isNull()) {
+      continue;
+    }
+    if (Node.getPNIVar()->isUnknown() || Node.getPNIVar()->isPointer()) {
+      continue;
+    }
+    std::string LowTyStr = fromLLVMType(Node.getLowTy());
+    if (startswith(LowTyStr, "int")) {
+      // TODO: if already has sint or uint subtype, skip.
+    }
+    auto &Prim = getOrInsertNodeWithPNI(
+        NodeKey(TypeVariable::CreatePrimitive(Ctx, LowTyStr),
+                Node.key.SuffixVariance),
+        Node.getPNIVar());
+    StartNodes.insert(&Prim);
+    EndNodes.insert(&Prim);
+    Visited.insert(&Node);
+    if (Node.key.SuffixVariance == Covariant) {
+      onlyAddEdge(Node, Prim, One{});
+    } else {
+      onlyAddEdge(Prim, Node, One{});
+    }
+  }
+}
+
+void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
+  assert(&From.Parent == this && &To.Parent == this);
+  // Move all edges from From to To
+  for (auto &Edge : From.outEdges) {
+    auto *Target = &Edge.TargetNode;
+    // for self loop
+    if (Target == &To || Target == &From) {
+      // only keep non-one edge
+      if (!std::holds_alternative<retypd::One>(Edge.Label)) {
+        assert(!NoSelfLoop);
+        onlyAddEdge(To, To, Edge.Label);
+      }
+      removeEdge(From, *Target, Edge.Label);
+    } else {
+      onlyAddEdge(To, Edge.TargetNode, Edge.Label);
+      removeEdge(From, Edge.TargetNode, Edge.Label);
+    }
+  }
+  for (auto *Edge : From.inEdges) {
+    auto *Source = &Edge->getSourceNode();
+    if (Source == &From)
+      assert(false); // should be removed
+    if (Source == &To) {
+      // only keep non-one edge
+      if (!std::holds_alternative<retypd::One>(Edge->Label)) {
+        assert(!NoSelfLoop);
+        onlyAddEdge(To, To, Edge->Label);
+      }
+      removeEdge(To, From, Edge->getLabel());
+    } else {
+      onlyAddEdge(Edge->getSourceNode(), To, Edge->getLabel());
+      removeEdge(Edge->getSourceNode(), From, Edge->getLabel());
+    }
+  }
+  // erase the node
+  removeNode(From.key);
+}
 
 void ConstraintGraph::aggressiveSimplify() {
   // do not include path with size 8.
@@ -248,7 +328,25 @@ void ConstraintGraph::instantiate(
     if (Sup.hasInstanceId()) {
       Sup.setInstanceId(ID);
     }
-    // TODO save LowTy in summary.
+    // TODO set PtrOrNum.
+    if (LLCtx) {
+      if (Sub.isPrimitive()) {
+        if (auto LowTy = ToLLVMType(*LLCtx, Sub.getBaseName())) {
+          assert(!Sup.isPrimitive());
+          auto &SupNode = getOrInsertNode(Sup, nullptr);
+          SupNode.getPNIVar()->updateLowTy(LowTy);
+          continue;
+        }
+      } else if (Sup.isPrimitive()) {
+        if (auto LowTy = ToLLVMType(*LLCtx, Sup.getBaseName())) {
+          assert(!Sub.isPrimitive());
+          auto &SubNode = getOrInsertNode(Sub, nullptr);
+          SubNode.getPNIVar()->updateLowTy(LowTy);
+          continue;
+        }
+      }
+    }
+
     addConstraint(getOrInsertNode(Sub, nullptr), getOrInsertNode(Sup, nullptr));
   }
   // TODO What about PNI
@@ -419,6 +517,25 @@ void ConstraintGraph::contraVariantSplit() {
   }
 }
 
+void ConstraintGraph::linkContraToCovariant() {
+  // add subtype edge from Contravariant nodes to Covariant nodes
+  for (auto &Ent : Nodes) {
+    if (&Ent.second == getStartNode() || &Ent.second == getEndNode()) {
+      continue;
+    }
+    if (Ent.second.key.Base.isPrimitive()) {
+      continue;
+    }
+    if (Ent.second.key.SuffixVariance == retypd::Contravariant) {
+      continue;
+    }
+    auto *Node = &Ent.second;
+    if (Nodes.count(MakeContraVariant(Node->key)) != 0) {
+      onlyAddEdge(Nodes.at(MakeContraVariant(Node->key)), *Node, retypd::One{});
+    }
+  }
+}
+
 /// Mark the variance of the node according to the edges.
 /// DFS traversal.
 void ConstraintGraph::markVariance() {
@@ -573,6 +690,7 @@ ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) const {
   // TODO: eliminate this clone by removing Start and End nodes later.
   std::map<const CGNode *, CGNode *> Old2New;
   auto G = clone(Old2New);
+  G.lowTypeToSubType();
   G.linkVars(InterestingVars);
   auto G2 = G.simplify();
   G2.aggressiveSimplify();

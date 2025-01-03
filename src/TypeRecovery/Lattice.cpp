@@ -2,6 +2,8 @@
 #include "utils.h"
 #include <cassert>
 #include <iostream>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Type.h>
 
 namespace notdec::retypd {
 
@@ -10,6 +12,14 @@ namespace notdec::retypd {
 static bool isFloat(std::string a) { return a == "float" || a == "double"; }
 static bool isInt1(std::string a) {
   return startswith(a, "int") || startswith(a, "sint") || startswith(a, "uint");
+}
+
+bool isLowTyString(std::string a) {
+  return startswith(a, "int") || a == "float" || a == "double" || a == "ptr";
+}
+
+llvm::Type *ToLLVMType(llvm::LLVMContext &Ctx, std::string a) {
+  return nullptr;
 }
 
 std::string fromLLVMType(llvm::Type *T) {

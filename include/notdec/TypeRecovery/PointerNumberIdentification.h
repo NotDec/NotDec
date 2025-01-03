@@ -64,6 +64,7 @@ const unsigned char UniTyMergeMap[][3] = {
 PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right);
 PtrOrNum fromIPChar(char C);
 PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize);
+bool isPtrOrNum(llvm::Type *LowTy, long PointerSize);
 // #endregion PtrOrNum
 
 // PNINode stores low level LLVM type. If the LowTy is pointer or
@@ -99,11 +100,12 @@ public:
     return false;
   }
 
+  unsigned long getId() const { return Id; }
   PtrOrNum getPtrOrNum() const { return Ty; }
   void setConflict() { hasConflict = true; }
   llvm::Type *normalizeLowTy(llvm::Type *T);
   llvm::Type *getLowTy() const { return LowTy; }
-  void updateLowTy(llvm::Type *T);
+  bool updateLowTy(llvm::Type *T);
 
   bool isNumber() const { return getPtrOrNum() == Number; }
   bool isPointer() const { return getPtrOrNum() == Pointer; }

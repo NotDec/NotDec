@@ -221,6 +221,7 @@ struct ConstraintGraph {
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
   void aggressiveSimplify();
+  void lowTypeToSubType();
   ConstraintGraph cloneAndSimplify() const;
   void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
                    size_t ID);
@@ -261,6 +262,7 @@ public:
   getNodeReachableOffset(CGNode &Start);
 
   void markVariance();
+  void linkContraToCovariant();
   /// Focus on the recall subgraph and use forget edge to label nodes. mark all
   /// nodes as accepting by link with `forget #top`.
   void sketchSplit();
@@ -289,6 +291,7 @@ public:
     }
     return it.second;
   }
+  void mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
 
   // Graph related operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
@@ -458,7 +461,10 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
     return Node->key.str() +
            (Node->getLowTy() != nullptr
-                ? "\n" + notdec::retypd::fromLLVMType(Node->getLowTy())
+                ? "\n" + notdec::retypd::fromLLVMType(Node->getLowTy()) +
+                      (Node->getPNIVar() != nullptr
+                           ? " " + std::to_string(Node->getPNIVar()->getId())
+                           : "")
                 : "");
   }
 
