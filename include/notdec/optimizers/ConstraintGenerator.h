@@ -121,6 +121,7 @@ inline void wrapExtValuePtrWithUser(ExtValuePtr &Val, User *User) {
     }
   }
 }
+
 // Check if differentiated constants (especially int32/int64 constants) by User.
 inline bool checkWrapped(ExtValuePtr &Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
@@ -192,6 +193,7 @@ struct ConstraintsGenerator {
   void determinizeStructEqual();
   void eliminateCycle();
   void mergeOnlySubtype();
+  void mergeAfterDeterminize();
   void determinize();
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();

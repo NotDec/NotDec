@@ -1340,6 +1340,80 @@ void ConstraintsGenerator::determinize() {
     }
     Worklist.pop();
   }
+  mergeAfterDeterminize();
+}
+
+void ConstraintsGenerator::mergeAfterDeterminize() {
+  auto CastNode = [&](const CGNode &Node) -> CGNode & {
+    return const_cast<CGNode &>(Node);
+  };
+  auto SameOutEdges = [&](const CGNode &N1, const CGNode &N2) -> bool {
+    assert(&N1 != &N2);
+    if (N1.getPNIVar() != N2.getPNIVar()) {
+      return false;
+    }
+    if (N1.outEdges.size() != N2.outEdges.size()) {
+      return false;
+    }
+    for (auto &Edge1 : N1.outEdges) {
+      retypd::CGEdge ToFind(const_cast<CGNode &>(N2),
+                            const_cast<CGNode &>(Edge1.getTargetNode()),
+                            const_cast<retypd::EdgeLabel &>(Edge1.getLabel()));
+      if (!N2.outEdges.count(ToFind)) {
+        return false;
+      }
+    }
+    for (auto &Edge2 : N2.outEdges) {
+      retypd::CGEdge ToFind(const_cast<CGNode &>(N1),
+                            const_cast<CGNode &>(Edge2.getTargetNode()),
+                            const_cast<retypd::EdgeLabel &>(Edge2.getLabel()));
+      if (!N1.outEdges.count(ToFind)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // if two nodes with same PNI, and same out edges, then merge them.
+  auto findMergePair = [&]() -> std::pair<CGNode *, CGNode *> {
+    for (auto &Ent : CG.Nodes) {
+      auto &Node = Ent.second;
+      if (&Node == CG.getStartNode() || &Node == CG.getEndNode()) {
+        continue;
+      }
+      if (Node.key.Base.isPrimitive()) {
+        assert(false);
+      }
+
+      // check for two edges with same label
+      for (auto *Edge1 : Node.inEdges) {
+        for (auto *Edge2 : Node.inEdges) {
+          auto &N1 = Edge1->getSourceNode();
+          auto &N2 = Edge2->getSourceNode();
+          if (&N1 == &N2) {
+            continue;
+          }
+          if (Edge1->getLabel() != Edge2->getLabel()) {
+            continue;
+          }
+
+          if (SameOutEdges(N1, N2)) {
+            return {&Edge1->getSourceNode(), &Edge2->getSourceNode()};
+          }
+        }
+      }
+    }
+    return {nullptr, nullptr};
+  };
+
+  CGNode *A, *B;
+  std::tie(A, B) = findMergePair();
+  while (A != nullptr && B != nullptr) {
+    // merge A to B
+    mergeNodeTo(*A, *B, true);
+    A = nullptr;
+    B = nullptr;
+    std::tie(A, B) = findMergePair();
+  }
 }
 
 // void ConstraintsGenerator::instantiateSketchAsSub(
