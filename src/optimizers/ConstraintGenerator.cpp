@@ -742,7 +742,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           continue;
         }
       }
-      auto *Node = Ent.second;
+      auto &Key = Ent.second;
+      auto *Node = G2.getNode(Key);
+      assert(Node != nullptr);
       assert(&Node->Parent == &G2.CG &&
              "RetypdGenerator::getTypeVar: Node is not in the graph");
       auto Size = getSize(Ent.first, pointer_size);
@@ -778,9 +780,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
       llvm::errs() << " upper bound: " << CTy.getAsString();
 
-      if (G2.CG.hasNode(retypd::MakeContraVariant(Node->key))) {
-        CTy = TB.buildType(G2.CG.getNode(retypd::MakeContraVariant(Node->key)),
-                           Size);
+      if (auto *N2 = G2.getNode(retypd::MakeContraVariant(Key))) {
+        CTy = TB.buildType(*N2, Size);
 
         if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
           llvm::errs() << " lower bound: " << CTy.getAsString();
@@ -817,7 +818,7 @@ ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
   ConstraintsGenerator G(Ctx, LLCtx, CG.Name);
   ConstraintGraph::clone(Old2New, CG, G.CG);
   for (auto &Ent : Val2Node) {
-    G.Val2Node.emplace(Ent.first, Old2New.at(Ent.second));
+    G.Val2Node.emplace(Ent.first, Ent.second);
   }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
@@ -829,7 +830,7 @@ void ConstraintsGenerator::cloneTo(
     ConstraintsGenerator &G, std::map<const CGNode *, CGNode *> &Old2New) {
   ConstraintGraph::clone(Old2New, CG, G.CG);
   for (auto &Ent : Val2Node) {
-    G.Val2Node.emplace(Ent.first, Old2New.at(Ent.second));
+    G.Val2Node.emplace(Ent.first, Ent.second);
   }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
@@ -842,7 +843,7 @@ void ConstraintsGenerator::removeUnreachable() {
 
   std::queue<CGNode *> Worklist;
   for (auto &Ent : Val2Node) {
-    auto *Node = Ent.second;
+    auto *Node = &CG.getNode(Ent.second);
     Worklist.push(Node);
     // also add contravariant node
     if (auto N = CG.getNodeOrNull(MakeContraVariant(Node->key))) {
@@ -956,129 +957,129 @@ std::set<CGNode *> moveLoadEqStore(const std::set<CGNode *> &N,
 }
 
 // view subtype edges as bidirectional.
-void ConstraintsGenerator::determinizeStructEqual() {
-  // assert(DTrans.empty());
-  DTrans.clear();
-  std::map<const CGNode *, CGNode *> This2Bak;
-  ConstraintGraph Backup = CG.clone(This2Bak, true);
-  // remove all edges in the graph
-  for (auto &Ent : CG) {
-    for (auto &Edge : Ent.second.outEdges) {
-      // TODO optimize:
-      CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
-    }
-  }
-  // remove all node that is not in the value map
-  std::set<CGNode *> Nodes;
-  for (auto &Ent : Val2Node) {
-    Nodes.insert(Ent.second);
-  }
-  for (auto &Ent : CG) {
-    if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
-      continue;
-    }
-    if (Nodes.count(&Ent.second) == 0) {
-      CG.removeNode(Ent.second.key);
-    }
-  }
+// void ConstraintsGenerator::determinizeStructEqual() {
+//   // assert(DTrans.empty());
+//   DTrans.clear();
+//   std::map<const CGNode *, CGNode *> This2Bak;
+//   ConstraintGraph Backup = CG.clone(This2Bak, true);
+//   // remove all edges in the graph
+//   for (auto &Ent : CG) {
+//     for (auto &Edge : Ent.second.outEdges) {
+//       // TODO optimize:
+//       CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+//     }
+//   }
+//   // remove all node that is not in the value map
+//   std::set<CGNode *> Nodes;
+//   for (auto &Ent : Val2Node) {
+//     Nodes.insert(&CG.getNode(Ent.second));
+//   }
+//   for (auto &Ent : CG) {
+//     if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
+//       continue;
+//     }
+//     if (Nodes.count(&Ent.second) == 0) {
+//       CG.removeNode(Ent.second.key);
+//     }
+//   }
 
-  using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
+//   using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
 
-  auto getOrSetNewNode = [this](const std::set<CGNode *> &N) -> EntryTy {
-    if (DTrans.count(N)) {
-      return DTrans.find(N);
-    }
-    auto *OldPN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(N);
-    auto &NewNode =
-        CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
-                                  Ctx.TRCtx, ValueNamer::getName("dtm_"))},
-                              OldPN);
-    auto it = DTrans.emplace(N, &NewNode);
-    assert(it.second);
-    return it.first;
-  };
+//   auto getOrSetNewNode = [this](const std::set<CGNode *> &N) -> EntryTy {
+//     if (DTrans.count(N)) {
+//       return DTrans.find(N);
+//     }
+//     auto *OldPN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(N);
+//     auto &NewNode =
+//         CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
+//                                   Ctx.TRCtx, ValueNamer::getName("dtm_"))},
+//                               OldPN);
+//     auto it = DTrans.emplace(N, &NewNode);
+//     assert(it.second);
+//     return it.first;
+//   };
 
-  // map from replaced node to the new node
-  std::map<CGNode *, CGNode *> ReplaceMap;
-  auto Lookup = [&ReplaceMap](CGNode *Node) -> CGNode * {
-    std::vector<CGNode *> PathNodes;
-    while (ReplaceMap.count(Node)) {
-      PathNodes.push_back(Node);
-      Node = ReplaceMap.at(Node);
-    }
-    for (auto *N : PathNodes) {
-      ReplaceMap[N] = Node;
-    }
-    return Node;
-  };
+//   // map from replaced node to the new node
+//   std::map<CGNode *, CGNode *> ReplaceMap;
+//   auto Lookup = [&ReplaceMap](CGNode *Node) -> CGNode * {
+//     std::vector<CGNode *> PathNodes;
+//     while (ReplaceMap.count(Node)) {
+//       PathNodes.push_back(Node);
+//       Node = ReplaceMap.at(Node);
+//     }
+//     for (auto *N : PathNodes) {
+//       ReplaceMap[N] = Node;
+//     }
+//     return Node;
+//   };
 
-  DTrans[{Backup.getEndNode()}] = CG.getEndNode();
-  std::queue<EntryTy> Worklist;
-  // for each node in the value map
-  for (auto &Ent : Val2Node) {
-    auto *BakNode = This2Bak.at(Ent.second);
-    std::set<CGNode *> StartSet = countClosureStructEq({BakNode});
-    auto pair1 = DTrans.emplace(StartSet, Ent.second);
-    if (pair1.second) {
-      Worklist.push(pair1.first);
-    } else {
-      // Can be a epsilon loop.
-      // TODO merge the node in the value map
-      if (pair1.first->second != Ent.second) {
-        // merge the node in the value map
-        std::cerr
-            << "ConstraintsGenerator::determinizeStructEqual: Merging node "
-            << toString(Ent.second->key) << " to "
-            << toString(pair1.first->second->key) << "\n";
-        // Ent.second = pair1.first->second;
-        // CG.removeNode(Ent.second->key);
-        ReplaceMap.emplace(Ent.second, pair1.first->second);
-        // assert(false);
-      }
-    }
-  }
+//   DTrans[{Backup.getEndNode()}] = CG.getEndNode();
+//   std::queue<EntryTy> Worklist;
+//   // for each node in the value map
+//   for (auto &Ent : Val2Node) {
+//     auto *BakNode = &Backup.getNode(Ent.second);
+//     std::set<CGNode *> StartSet = countClosureStructEq({BakNode});
+//     auto pair1 = DTrans.emplace(StartSet, Ent.second);
+//     if (pair1.second) {
+//       Worklist.push(pair1.first);
+//     } else {
+//       // Can be a epsilon loop.
+//       // TODO merge the node in the value map
+//       if (pair1.first->second != Ent.second) {
+//         // merge the node in the value map
+//         std::cerr
+//             << "ConstraintsGenerator::determinizeStructEqual: Merging node "
+//             << toString(Ent.second->key) << " to "
+//             << toString(pair1.first->second->key) << "\n";
+//         // Ent.second = pair1.first->second;
+//         // CG.removeNode(Ent.second->key);
+//         ReplaceMap.emplace(Ent.second, pair1.first->second);
+//         // assert(false);
+//       }
+//     }
+//   }
 
-  // DSU flatten for Val2Node
-  for (auto &Ent : Val2Node) {
-    if (ReplaceMap.count(Ent.second)) {
-      Ent.second = Lookup(Ent.second);
-    }
-  }
+//   // DSU flatten for Val2Node
+//   for (auto &Ent : Val2Node) {
+//     if (ReplaceMap.count(Ent.second)) {
+//       Ent.second = Lookup(Ent.second);
+//     }
+//   }
 
-  // remove all node that is not in the value map again
-  Nodes.clear();
-  for (auto &Ent : Val2Node) {
-    Nodes.insert(Ent.second);
-  }
-  for (auto &Ent : CG) {
-    if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
-      continue;
-    }
-    if (Nodes.count(&Ent.second) == 0) {
-      CG.removeNode(Ent.second.key);
-    }
-  }
+//   // remove all node that is not in the value map again
+//   Nodes.clear();
+//   for (auto &Ent : Val2Node) {
+//     Nodes.insert(Ent.second);
+//   }
+//   for (auto &Ent : CG) {
+//     if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
+//       continue;
+//     }
+//     if (Nodes.count(&Ent.second) == 0) {
+//       CG.removeNode(Ent.second.key);
+//     }
+//   }
 
-  while (!Worklist.empty()) {
-    auto It = Worklist.front();
-    auto &Node = *It->second;
-    std::set<retypd::EdgeLabel> outLabels =
-        retypd::NFADeterminizer<>::allOutLabels(It->first);
-    for (auto &L : outLabels) {
-      auto S = countClosureStructEq(moveLoadEqStore(It->first, L));
-      if (S.count(Backup.getEndNode())) {
-        assert(S.size() == 1);
-      }
-      if (DTrans.count(S) == 0) {
-        auto NewNodeEnt = getOrSetNewNode(S);
-        Worklist.push(NewNodeEnt);
-      }
-      auto &ToNode = *DTrans.at(S);
-      CG.onlyAddEdge(Node, ToNode, L);
-    }
-    Worklist.pop();
-  }
-}
+//   while (!Worklist.empty()) {
+//     auto It = Worklist.front();
+//     auto &Node = *It->second;
+//     std::set<retypd::EdgeLabel> outLabels =
+//         retypd::NFADeterminizer<>::allOutLabels(It->first);
+//     for (auto &L : outLabels) {
+//       auto S = countClosureStructEq(moveLoadEqStore(It->first, L));
+//       if (S.count(Backup.getEndNode())) {
+//         assert(S.size() == 1);
+//       }
+//       if (DTrans.count(S) == 0) {
+//         auto NewNodeEnt = getOrSetNewNode(S);
+//         Worklist.push(NewNodeEnt);
+//       }
+//       auto &ToNode = *DTrans.at(S);
+//       CG.onlyAddEdge(Node, ToNode, L);
+//     }
+//     Worklist.pop();
+//   }
+// }
 
 void ConstraintsGenerator::eliminateCycle() {
   std::map<const CGNode *, CGNode *> Old2New;
@@ -1102,7 +1103,7 @@ void ConstraintsGenerator::eliminateCycle() {
   all_scc_iterator<ConstraintGraph *> SCCI = notdec::scc_begin(&NewG);
 
   // build the reverse value map: TODO migrate to maintain
-  std::map<const retypd::CGNode *, std::set<ExtValuePtr>> Node2Val;
+  std::map<retypd::NodeKey, std::set<ExtValuePtr>> Node2Val;
   for (auto &Ent : Val2Node) {
     Node2Val[Ent.second].insert(Ent.first);
   }
@@ -1126,10 +1127,10 @@ void ConstraintsGenerator::eliminateCycle() {
     for (auto *Node : SCC) {
       Node = New2Old.at(Node);
       ToMerge.insert(Node);
-      if (Node2Val.count(Node) == 0) {
+      if (Node2Val.count(Node->key) == 0) {
         continue;
       }
-      for (auto &Val : Node2Val.at(Node)) {
+      for (auto &Val : Node2Val.at(Node->key)) {
         ToMergeVal.insert(Val);
       }
     }
@@ -1144,47 +1145,14 @@ void ConstraintsGenerator::eliminateCycle() {
       Out.close();
     }
 
-    auto *OldPN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(ToMerge);
-    // 3. make the value map to only one node
-    // Update value map
-    for (auto &Val : ToMergeVal) {
-      Val2Node[Val] = &Merged;
-    }
-    // ensure other nodes are not in the value map
-    for (auto &Ent : Val2Node) {
-      if (Ent.second == &Merged) {
-        continue;
-      }
-      assert(ToMerge.count(Ent.second) == 0);
-    }
-    // move all incoming edges and all outgoing edges to the merged node
+    // auto *OldPN =
+    notdec::retypd::NFADeterminizer<>::ensureSamePNI(ToMerge);
+    // 3. perform node merging
     for (auto *Node : ToMerge) {
       if (Node == &Merged) {
         continue;
       }
-      for (auto &Edge : Node->outEdges) {
-        if (ToMerge.count(&Edge.TargetNode) != 0) {
-          CG.removeEdge(*Node, Edge.TargetNode, Edge.Label);
-          continue;
-        }
-        CG.onlyAddEdge(Merged, Edge.TargetNode, Edge.Label);
-        CG.removeEdge(*Node, Edge.TargetNode, Edge.Label);
-      }
-      for (auto *Edge : Node->inEdges) {
-        if (ToMerge.count(&Edge->getSourceNode()) != 0) {
-          CG.removeEdge(Edge->getSourceNode(), *Node, Edge->getLabel());
-          continue;
-        }
-        CG.onlyAddEdge(Edge->getSourceNode(), Merged, Edge->getLabel());
-        CG.removeEdge(Edge->getSourceNode(), *Node, Edge->getLabel());
-      }
-    }
-    // erase all other nodes
-    for (auto *Node : ToMerge) {
-      if (Node == &Merged) {
-        continue;
-      }
-      CG.removeNode(Node->key);
+      mergeNodeTo(*Node, Merged, true);
     }
   }
 }
@@ -1192,12 +1160,9 @@ void ConstraintsGenerator::eliminateCycle() {
 void ConstraintsGenerator::mergeNodeTo(CGNode &From, CGNode &To,
                                        bool NoSelfLoop) {
   assert(&From.Parent == &CG && &To.Parent == &CG);
-  // Fix up value map first
-  for (auto &Ent : Val2Node) {
-    if (Ent.second == &From) {
-      Val2Node[Ent.first] = &To;
-    }
-  }
+  // We do not fix value map, instead, check merge map before using nodekey in
+  // Val2Node.
+  addMergeNode(From.key, To);
   CG.mergeNodeTo(From, To, NoSelfLoop);
 }
 
@@ -1259,13 +1224,14 @@ void ConstraintsGenerator::determinize() {
   // remove all node that is not in the value map
   std::set<CGNode *> V2NNodes;
   for (auto &Ent : Val2Node) {
-    V2NNodes.insert(Ent.second);
-    // contravariant nodes.
-    if (CG.Nodes.count(MakeContraVariant(Ent.second->key)) != 0) {
-      V2NNodes.insert(&CG.getNode(MakeContraVariant(Ent.second->key)));
+    if (auto *N = getNode(Ent.second)) {
+      V2NNodes.insert(N);
+    }
+    if (auto *N = getNode(MakeContraVariant(Ent.second))) {
+      V2NNodes.insert(N);
     }
   }
-  for (auto &Ent : CG) {
+  for (auto &Ent : CG.Nodes) {
     if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
       continue;
     }
@@ -1344,9 +1310,6 @@ void ConstraintsGenerator::determinize() {
 }
 
 void ConstraintsGenerator::mergeAfterDeterminize() {
-  auto CastNode = [&](const CGNode &Node) -> CGNode & {
-    return const_cast<CGNode &>(Node);
-  };
   auto SameOutEdges = [&](const CGNode &N1, const CGNode &N2) -> bool {
     assert(&N1 != &N2);
     if (N1.getPNIVar() != N2.getPNIVar()) {
@@ -1465,7 +1428,7 @@ retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val,
   wrapExtValuePtrWithUser(Val, User);
 
   if (Val2Node.count(Val)) {
-    return Val2Node.at(Val);
+    return &CG.getNode(Val2Node.at(Val));
   }
   return nullptr;
 }
@@ -1473,21 +1436,23 @@ retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val,
 retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User) {
   wrapExtValuePtrWithUser(Val, User);
 
-  return *Val2Node.at(Val);
+  return CG.getNode(Val2Node.at(Val));
 }
 
 retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User) {
   wrapExtValuePtrWithUser(Val, User);
   auto Dtv = convertTypeVar(Val, User);
-  auto It = Val2Node.emplace(Val, &CG.createNode(Dtv, getType(Val)));
+  auto &N = CG.createNode(Dtv, getType(Val));
+  assert(N.key.SuffixVariance == retypd::Covariant);
+  auto It = Val2Node.emplace(Val, N.key);
   if (!It.second) {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "setTypeVar: Value already mapped to "
-                 << toString(It.first->second->key.Base) << ", but now set to "
+                 << toString(It.first->second) << ", but now set to "
                  << toString(Dtv) << "\n";
     std::abort();
   }
-  return *It.first->second;
+  return N;
 }
 
 retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,

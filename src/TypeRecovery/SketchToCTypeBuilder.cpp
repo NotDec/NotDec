@@ -154,7 +154,10 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
           NodeTypeMap.emplace(&Node,
                               Ctx.getPointerType(Ctx.getRecordType(Decl)));
         }
-        auto It = FieldMap.emplace(OL->range, visitType(Target, BitSize));
+        auto Ty1 = visitType(Target, BitSize);
+        assert(Ty1->isPointerType() && "Offset edge must be pointer type");
+        // TODO remove a pointer
+        auto It = FieldMap.emplace(OL->range, Ty1->getPointeeType());
         assert(It.second && "Duplicate offset edge");
       } else if (auto *LL = std::get_if<LoadLabel>(&RL->label)) {
         // assert(!Load2Node);

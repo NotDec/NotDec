@@ -170,12 +170,44 @@ struct ConstraintsGenerator {
   TypeRecovery &Ctx;
   // todo refactor to save the target module.
   LLVMContext &LLCtx;
-  std::map<ExtValuePtr, retypd::CGNode *> Val2Node;
+  std::map<ExtValuePtr, retypd::NodeKey> Val2Node;
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
   std::set<llvm::Function *> SCCs;
   std::map<CallBase *, size_t> CallToID;
   std::string DebugDir;
+
+  // a CGNode * corresponds to a set of CGNode *.
+  std::map<retypd::NodeKey, retypd::CGNode *> MergedNodes;
+  std::map<retypd::NodeKey, std::set<retypd::NodeKey>> MergedNodesRev;
+
+  retypd::CGNode *getNode(const retypd::NodeKey &Key) {
+    auto It = MergedNodes.find(Key);
+    if (It != MergedNodes.end()) {
+      return It->second;
+    }
+    auto It2 = CG.Nodes.find(Key);
+    if (It2 != CG.Nodes.end()) {
+      return &It2->second;
+    }
+    return nullptr;
+  }
+  void addMergeNode(const retypd::NodeKey &Key, CGNode &Node) {
+    // if the merged node is a merge target
+    if (MergedNodesRev.count(Key)) {
+      // merge the merged node to the new node
+      for (auto &OldKey : MergedNodesRev.at(Key)) {
+        auto It = MergedNodes.find(OldKey);
+        assert(It != MergedNodes.end());
+        It->second = &Node;
+        MergedNodesRev[Node.key].insert(OldKey);
+      }
+      MergedNodesRev.erase(Key);
+    }
+    auto It = MergedNodes.insert({Key, &Node});
+    assert(It.second && "Merged node already exist?");
+    MergedNodesRev[Node.key].insert(Key);
+  }
 
   std::vector<retypd::SubTypeConstraint> genSummary();
   std::function<const std::vector<retypd::SubTypeConstraint> *(
@@ -190,7 +222,7 @@ struct ConstraintsGenerator {
 
   // for determinization: extended powerset construction
   std::map<std::set<CGNode *>, CGNode *> DTrans;
-  void determinizeStructEqual();
+  // void determinizeStructEqual();
   void eliminateCycle();
   void mergeOnlySubtype();
   void mergeAfterDeterminize();
