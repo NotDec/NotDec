@@ -93,14 +93,16 @@ Variance getVariance(const FieldLabel &f);
 struct BaseConstant {
   OffsetRange Val = {0};
   void *User = nullptr;
+  long OpInd = -1;
   bool operator<(const BaseConstant &rhs) const {
-    return std::tie(Val, User) < std::tie(rhs.Val, rhs.User);
+    return std::tie(Val, User, OpInd) < std::tie(rhs.Val, rhs.User, rhs.OpInd);
   }
   bool operator==(const BaseConstant &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
   std::string str() const {
-    return "#Int#" + toString(Val) + "_" + int_to_hex((unsigned long)User);
+    return "#Int#" + toString(Val) + "_" + int_to_hex((unsigned long)User) +
+           "_" + std::to_string(OpInd);
   }
 };
 
@@ -202,7 +204,7 @@ struct PooledTypeVariable {
                                              DerivedTypeVariable dtv);
 
   static const PooledTypeVariable *
-  CreateIntConstant(TRContext &Ctx, OffsetRange val, void *User);
+  CreateIntConstant(TRContext &Ctx, OffsetRange val, void *User, long OpInd);
 
   const PooledTypeVariable *pushLabel(FieldLabel label) const;
   const PooledTypeVariable *popLabel() const;
@@ -374,8 +376,8 @@ struct TypeVariable {
   }
 
   static TypeVariable CreateIntConstant(TRContext &Ctx, OffsetRange val,
-                                        void *User) {
-    return {&Ctx, PooledTypeVariable::CreateIntConstant(Ctx, val, User)};
+                                        void *User, long OpInd) {
+    return {&Ctx, PooledTypeVariable::CreateIntConstant(Ctx, val, User, OpInd)};
   }
 
   TypeVariable pushLabel(FieldLabel label) const {

@@ -104,9 +104,8 @@ protected:
   friend struct ConstraintGraph;
   void setPNIVar(PNINode *N) { PNIVar = N; }
   void setPNIPointer() {
-    // if (Parent.PG) {
-    //   PNIVar = ;
-    // }
+    assert(PNIVar != nullptr);
+    PNIVar->setPtr();
   }
 
 public:
@@ -193,6 +192,10 @@ struct ConstraintGraph {
     return Ret;
   }
 
+  bool isSpecialNode(const CGNode &N) const {
+    assert(&N.Parent == this);
+    return &N == Start || &N == End || &N == MemoryNode;
+  }
   bool hasNode(const NodeKey &N);
   // must get the node
   CGNode &getNode(const NodeKey &N);
@@ -302,10 +305,6 @@ public:
     From.outEdges.erase(it);
   }
 
-protected:
-  std::pair<std::map<NodeKey, CGNode>::iterator, bool>
-  emplace(const NodeKey &N, llvm::Type *LowTy);
-
   bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
       if (std::holds_alternative<One>(Label)) {
@@ -338,6 +337,11 @@ protected:
     }
     return onlyAddEdge(From, To, Label);
   }
+
+protected:
+  std::pair<std::map<NodeKey, CGNode>::iterator, bool>
+  emplace(const NodeKey &N, llvm::Type *LowTy);
+
   friend struct CGNode;
   template <typename GraphTy, typename NodeTy> friend struct NFADeterminizer;
   void replaceNodeKey(const TypeVariable &Old, const TypeVariable &New);
@@ -356,6 +360,11 @@ std::string toString(const std::set<CGNode *> Set);
 inline NodeKey MakeContraVariant(NodeKey Key) {
   assert(Key.SuffixVariance == Covariant);
   Key.SuffixVariance = Contravariant;
+  return Key;
+}
+
+inline NodeKey MakeReverseVariant(NodeKey Key) {
+  Key.SuffixVariance = !Key.SuffixVariance;
   return Key;
 }
 
@@ -459,13 +468,9 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
   DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
   static std::string getGraphName(GraphRef CG) { return CG->Name; }
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
-    return Node->key.str() +
-           (Node->getLowTy() != nullptr
-                ? "\n" + notdec::retypd::fromLLVMType(Node->getLowTy()) +
-                      (Node->getPNIVar() != nullptr
-                           ? " " + std::to_string(Node->getPNIVar()->getId())
-                           : "")
-                : "");
+    return Node->key.str() + (Node->getPNIVar() != nullptr
+                                  ? "\n" + Node->getPNIVar()->str()
+                                  : "");
   }
 
   std::string getEdgeAttributes(const NodeRef Node,

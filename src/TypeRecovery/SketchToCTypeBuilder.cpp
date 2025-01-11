@@ -1,4 +1,5 @@
 #include "TypeRecovery/SketchToCTypeBuilder.h"
+#include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
@@ -8,6 +9,8 @@
 #include <cassert>
 #include <clang/AST/ASTFwd.h>
 #include <clang/Basic/SourceLocation.h>
+#include <llvm/ADT/APSInt.h>
+#include <optional>
 
 namespace notdec::retypd {
 
@@ -32,7 +35,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(std::string Name,
     return Ctx.DoubleTy;
   }
   if (Name == "ptr") {
-    return Ctx.VoidPtrTy;
+    return Ctx.getPointerType(getUndef(BitSize));
   }
   if (startswith(Name, "int") || startswith(Name, "uint") ||
       startswith(Name, "sint")) {
@@ -74,8 +77,8 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     if (NodeTypeMap.count(&Node)) {
       return NodeTypeMap.at(&Node);
     } else {
-      // Visited, but have not set a type (in progress, i.e. visiting dependency
-      // nodes).
+      // Visited, but have not set a type (in progress, i.e. visiting
+      // dependency nodes).
       // TODO: remove debug output.
       std::cerr << "Cyclic dependency forces the node become struct.\n";
       clang::RecordDecl *Decl = createStruct(Ctx);
@@ -86,16 +89,21 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   }
   Visited.emplace(&Node);
 
-  // no out edges, then it is top
-  if (Node.outEdges.empty()) {
-    // assert(false && "TODO");
-    auto Ret = fromLatticeElem(fromLLVMType(Node.getLowTy()), BitSize);
-    NodeTypeMap.emplace(&Node, Ret);
-    return Ret;
-  }
-
   // 1 Check if pointer type.
   bool isPtrPNI = Node.getPNIVar() != nullptr && Node.getPNIVar()->isPointer();
+
+  // no out edges. Check PNI.
+  if (Node.outEdges.empty()) {
+    if (isPtrPNI) {
+      auto Ret = Ctx.getPointerType(getUndef(BitSize));
+      NodeTypeMap.emplace(&Node, Ret);
+      return Ret;
+    } else {
+      auto Ret = fromLatticeElem(fromLLVMType(Node.getLowTy()), BitSize);
+      NodeTypeMap.emplace(&Node, Ret);
+      return Ret;
+    }
+  }
 
   // if only edges to #End with forget primitive, then it is a simple
   // primitive type
@@ -139,6 +147,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
 
   // std::map<OffsetLabel, SketchNode *> Off2Node;
   std::map<OffsetRange, clang::QualType> FieldMap;
+  clang::QualType ArrayElemTy;
   std::optional<std::pair<LoadLabel, CGNode *>> Load2Node;
   std::optional<std::pair<StoreLabel, CGNode *>> Store2Node;
   // handle all out edges
@@ -146,35 +155,50 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
     if (auto *RL = std::get_if<RecallLabel>(&Edge.getLabel())) {
       if (auto *OL = std::get_if<OffsetLabel>(&RL->label)) {
-        // handle offset edges:
-        // must be struct type. Save to map early.
-        if (!NodeTypeMap.count(&Node)) {
-          // must be struct type
-          clang::RecordDecl *Decl = createStruct(Ctx);
-          NodeTypeMap.emplace(&Node,
-                              Ctx.getPointerType(Ctx.getRecordType(Decl)));
+        // if array, defer struct creation
+        if (OL->range.offset == 0 && OL->range.access.size() > 0) {
+          assert(OL->range.access.size() == 1 && "TODO: multi-dimension array");
+          assert(ArrayElemTy.isNull() && "Multiple array edges?");
+          auto BitSize = OL->range.access[0].Size;
+          ArrayElemTy = visitType(Target, BitSize);
+          assert(ArrayElemTy->isPointerType() &&
+                 "Offset edge must be pointer type");
+          ArrayElemTy = ArrayElemTy->getPointeeType();
+        } else {
+          // must be struct type. Save to map early.
+          if (!NodeTypeMap.count(&Node)) {
+            // must be struct type
+            clang::RecordDecl *Decl = createStruct(Ctx);
+            NodeTypeMap.emplace(&Node,
+                                Ctx.getPointerType(Ctx.getRecordType(Decl)));
+          }
+          auto Ty1 = visitType(Target, BitSize);
+          assert(Ty1->isPointerType() ||
+                 Ty1->isArrayType() &&
+                     "Offset edge must be pointer or array type");
+          if (Ty1->isPointerType()) {
+            Ty1 = Ty1->getPointeeType();
+          }
+          auto It = FieldMap.emplace(OL->range, Ty1);
+          assert(It.second && "Duplicate offset edge");
         }
-        auto Ty1 = visitType(Target, BitSize);
-        assert(Ty1->isPointerType() && "Offset edge must be pointer type");
-        // TODO remove a pointer
-        auto It = FieldMap.emplace(OL->range, Ty1->getPointeeType());
-        assert(It.second && "Duplicate offset edge");
+
       } else if (auto *LL = std::get_if<LoadLabel>(&RL->label)) {
         // assert(!Load2Node);
         if (Load2Node) {
-          llvm::errs()
-              << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
-              << toString(Edge.getLabel()) << " and "
-              << toString(Load2Node->first) << "\n";
+          llvm::errs() << "Warning: TypeBuilderImpl::visitType: multiple "
+                          "load edges: "
+                       << toString(Edge.getLabel()) << " and "
+                       << toString(Load2Node->first) << "\n";
         }
         Load2Node.emplace(*LL, &Target);
       } else if (auto *SL = std::get_if<StoreLabel>(&RL->label)) {
         if (Store2Node) {
           // TODO: create union?
-          llvm::errs()
-              << "Warning: TypeBuilderImpl::visitType: multiple load edges: "
-              << toString(Edge.getLabel()) << " and "
-              << toString(Store2Node->first) << "\n";
+          llvm::errs() << "Warning: TypeBuilderImpl::visitType: multiple "
+                          "load edges: "
+                       << toString(Edge.getLabel()) << " and "
+                       << toString(Store2Node->first) << "\n";
         }
         Store2Node.emplace(*SL, &Target);
       } else {
@@ -204,11 +228,16 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
 
   // 3. has .load / .store edge, then it is a pointer type or struct pointer
   // type.
+  //
   // If inserted ahead of time, it must be a struct pointer type.
   if (NodeTypeMap.count(&Node)) {
     if (!LoadOrStoreTy.isNull()) {
       auto It = FieldMap.emplace(OffsetRange{}, LoadOrStoreTy);
-      assert(It.second && "Duplicate zero offset");
+      assert(It.second && "Duplicate zero offset?");
+    }
+    if (!ArrayElemTy.isNull()) {
+      auto It = FieldMap.emplace(OffsetRange{}, ArrayElemTy);
+      assert(It.second && "Duplicate zero offset?");
     }
 
     // Get previous struct RecordDecl
@@ -217,12 +246,21 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     // add all field into the struct, and finish struct declaration.
     Decl->startDefinition();
     for (auto &Ent : FieldMap) {
-      // TODO add attribute to contain the offset info.
+      auto Ty = Ent.second;
+
+      if (Ent.first.access.size() > 0) {
+        // assert(Ent.first.access.size() == 1);
+        // auto Interval = Ent.first.access[0].Size;
+        // create array type
+        Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, 0), nullptr,
+                                      clang::ArrayType::Star, 0);
+      }
+
       // Generally, a node represents a struct type
       auto *FII = &Ctx.Idents.get(ValueNamer::getName("field_"));
       clang::FieldDecl *Field = clang::FieldDecl::Create(
-          Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII,
-          Ent.second, nullptr, nullptr, false, clang::ICIS_NoInit);
+          Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
+          nullptr, nullptr, false, clang::ICIS_NoInit);
 
       bool useComment = false;
       if (useComment) {
@@ -250,11 +288,23 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     return Ty;
   } else {
     // else it is a simple pointer type
-    assert(!LoadOrStoreTy.isNull());
-
-    auto Ty = Ctx.getPointerType(LoadOrStoreTy);
-    NodeTypeMap.emplace(&Node, Ty);
-    return Ty;
+    assert(!LoadOrStoreTy.isNull() || !ArrayElemTy.isNull());
+    if (!LoadOrStoreTy.isNull() && !ArrayElemTy.isNull()) {
+      llvm::errs() << "Warning: TypeBuilderImpl::visitType: both load/store "
+                      "and array edge present: "
+                   << toString(Node.key) << "\n";
+    }
+    if (!LoadOrStoreTy.isNull()) {
+      auto Ty = Ctx.getPointerType(LoadOrStoreTy);
+      NodeTypeMap.emplace(&Node, Ty);
+      return Ty;
+    } else if (!ArrayElemTy.isNull()) {
+      auto ArrayTy = Ctx.getConstantArrayType(
+          ArrayElemTy, llvm::APInt(32, 0), nullptr, clang::ArrayType::Star, 0);
+      NodeTypeMap.emplace(&Node, ArrayTy);
+      return ArrayTy;
+    }
+    assert(false && "Should not reach here");
   }
 }
 

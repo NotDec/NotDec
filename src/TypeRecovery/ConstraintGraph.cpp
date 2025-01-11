@@ -288,9 +288,11 @@ void CGNode::onUpdatePNType() {
 void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {
   auto TV = Other->key.Base;
   TV = TV.pushLabel(OffsetLabel{Off});
-  auto &PtrAdd = Parent.getOrInsertNode(TV, nullptr);
-  PtrAdd.setPNIPointer();
+  // 这里没有插入反向PNI的图？
+  auto &PtrAdd = Parent.getOrInsertNodeWithPNI(TV, Other->getPNIVar());
+  assert(PtrAdd.getPNIVar() == Other->getPNIVar());
   Parent.addConstraint(PtrAdd, *this);
+  assert(PtrAdd.getPNIVar() == this->getPNIVar());
 }
 
 void ConstraintGraph::solve() { saturate(); }
@@ -531,7 +533,9 @@ void ConstraintGraph::linkContraToCovariant() {
     }
     auto *Node = &Ent.second;
     if (Nodes.count(MakeContraVariant(Node->key)) != 0) {
-      onlyAddEdge(Nodes.at(MakeContraVariant(Node->key)), *Node, retypd::One{});
+      auto &CN = Nodes.at(MakeContraVariant(Node->key));
+      assert(CN.getPNIVar() == Node->getPNIVar());
+      addEdge(CN, *Node, retypd::One{});
     }
   }
 }
@@ -1407,6 +1411,8 @@ ConstraintGraph ConstraintGraph::fromConstraints(TRContext &Ctx,
 /// Interface for initial constraint insertion
 /// Also build the initial graph (Algorithm D.1 Transducer)
 void ConstraintGraph::addConstraint(CGNode &NodeL, CGNode &NodeR) {
+  assert(&NodeL.Parent == this && "addConstraint: NodeL is not in the graph");
+  assert(&NodeR.Parent == this && "addConstraint: NodeR is not in the graph");
   // 1. add 1-labeled edge between them
   if (&NodeL != &NodeR) {
     addEdge(NodeL, NodeR, One{});
@@ -1547,6 +1553,7 @@ CGNode &ConstraintGraph::cloneNode(const CGNode &Other) {
 void ConstraintGraph::removeNode(const NodeKey &N) {
   assert(Nodes.count(N) && "removeNode: node not found");
   auto &Node = Nodes.at(N);
+  assert(!isSpecialNode(Node));
   assert(Node.outEdges.empty() && "removeNode: node has out edges");
   assert(Node.inEdges.empty() && "removeNode: node has in edges");
   PG->markRemoved(Node);
@@ -2157,7 +2164,12 @@ ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy)
     : Parent(Parent), key(key) {
   if (Parent.PG) {
-    PNIVar = Parent.PG->createPNINode(this, LowTy);
+    if (Parent.Nodes.count(MakeReverseVariant(key))) {
+      PNIGraph::addPNINodeTarget(
+          *this, *Parent.Nodes.at(MakeReverseVariant(key)).PNIVar);
+    } else {
+      PNIVar = Parent.PG->createPNINode(this, LowTy);
+    }
   }
 }
 
@@ -2170,6 +2182,8 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
     if (N != nullptr) {
       assert(N->getParent() == Parent.PG.get());
       PNIGraph::addPNINodeTarget(*this, *N);
+    } else if (Parent.Nodes.count(MakeReverseVariant(key))) {
+      PNIVar = Parent.Nodes.at(MakeReverseVariant(key)).PNIVar;
     }
     // // try to reuse the PNINode as possible: other variance or new layer.
     // // for new layer node, non-new-layer node must exist, and reuse the

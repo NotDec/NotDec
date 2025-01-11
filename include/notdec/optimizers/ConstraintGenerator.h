@@ -9,6 +9,7 @@
 #include <deque>
 #include <functional>
 #include <iostream>
+#include <llvm/IR/Constant.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/LLVMContext.h>
@@ -91,33 +92,60 @@ struct CallRet {
 struct UConstant {
   llvm::Constant *Val;
   llvm::User *User;
+  long OpInd = -1;
   bool operator<(const UConstant &rhs) const {
-    return std::tie(Val, User) < std::tie(rhs.Val, rhs.User);
+    return std::tie(Val, User, OpInd) < std::tie(rhs.Val, rhs.User, rhs.OpInd);
   }
   bool operator==(const UConstant &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
 
-// Extend Value* with some special values.
-using ExtValuePtr =
-    std::variant<llvm::Value *, ReturnValue, CallArg, CallRet, UConstant>;
+// Global variable address / constant address pointer
+// To merge different constant expr like (inttoptr i32 1064)
+struct ConstantAddr {
+  llvm::ConstantInt *Val;
+  bool operator<(const ConstantAddr &rhs) const {
+    return std::tie(Val) < std::tie(rhs.Val);
+  }
+  bool operator==(const ConstantAddr &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+};
 
-ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User);
+// Extend Value* with some special values.
+// 1. Differentiate Constants by Users.
+// 2. For some constant expr like (inttoptr i32 1064), the address of the expr
+// is different, but we need to merge them.
+using ExtValuePtr = std::variant<llvm::Value *, ReturnValue, CallArg, CallRet,
+                                 UConstant, ConstantAddr>;
+
+ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User, long OpInd = -1);
 std::string getName(const ExtValuePtr &Val);
 void dump(const ExtValuePtr &Val);
 llvm::Type *getType(const ExtValuePtr &Val);
 unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size);
-inline void wrapExtValuePtrWithUser(ExtValuePtr &Val, User *User) {
+inline void wrapExtValuePtrWithUser(ExtValuePtr &Val, User *User, long OpInd) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    if (!isa<GlobalValue>(*V)) {
-      if (auto CI = dyn_cast<Constant>(*V)) {
-        assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
-        assert(hasUser(*V, User) &&
-               "convertTypeVarVal: constant not used by user");
-        Val = UConstant{.Val = cast<Constant>(*V), .User = User};
+    if (isa<GlobalValue>(*V)) {
+      return;
+    }
+    if (auto CI = dyn_cast<Constant>(*V)) {
+      // Convert inttoptr constant int to ConstantAddr
+      if (auto CExpr = dyn_cast<ConstantExpr>(CI)) {
+        if (CExpr->isCast() && CExpr->getOpcode() == Instruction::IntToPtr) {
+          if (auto CI1 = dyn_cast<ConstantInt>(CExpr->getOperand(0))) {
+            V = nullptr;
+            Val = ConstantAddr{.Val = CI1};
+            return;
+          }
+        }
       }
+      assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
+      assert(hasUser(*V, User) &&
+             "convertTypeVarVal: constant not used by user");
+      Val = UConstant{.Val = cast<Constant>(*V), .User = User, .OpInd = OpInd};
     }
   }
 }
@@ -250,7 +278,7 @@ struct ConstraintsGenerator {
 
 public:
   CGNode &addVarSubtype(llvm::Value *Val, CGNode &dtv) {
-    auto &Node = getOrInsertNode(Val, nullptr);
+    auto &Node = getOrInsertNode(Val, nullptr, -1);
     addSubtype(dtv, Node);
     return Node;
   }
@@ -273,14 +301,16 @@ public:
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
-  retypd::CGNode &getNode(ExtValuePtr Val, User *User);
-  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User);
-  retypd::CGNode &createNode(ExtValuePtr Val, User *User);
-  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User);
+  retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd);
+  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd);
+  retypd::CGNode &createNode(ExtValuePtr Val, User *User, long OpInd);
+  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User, long OpInd);
 
-  const TypeVariable &getTypeVar(ExtValuePtr val, User *User);
-  TypeVariable convertTypeVar(ExtValuePtr Val, User *User = nullptr);
-  TypeVariable convertTypeVarVal(Value *Val, User *User = nullptr);
+  const TypeVariable &getTypeVar(ExtValuePtr val, User *User, long OpInd);
+  TypeVariable convertTypeVar(ExtValuePtr Val, User *User = nullptr,
+                              long OpInd = -1);
+  TypeVariable convertTypeVarVal(Value *Val, User *User = nullptr,
+                                 long OpInd = -1);
   void addAddConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
                         BinaryOperator *Result);
   void addSubConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
@@ -294,7 +324,8 @@ public:
   //                     OffsetRange Offset);
 
   TypeVariable addOffset(TypeVariable &dtv, OffsetRange Offset);
-  TypeVariable deref(Value *Val, User *User, unsigned BitSize, bool isLoad);
+  TypeVariable deref(Value *Val, User *User, long OpInd, unsigned BitSize,
+                     bool isLoad);
   unsigned getPointerElemSize(Type *ty);
   static inline bool is_cast(Value *Val) {
     return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,

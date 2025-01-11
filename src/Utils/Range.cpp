@@ -49,7 +49,7 @@ OffsetRange OffsetRange::operator+(const OffsetRange &rhs) const {
 }
 
 OffsetRange OffsetRange::operator*(const OffsetRange Rhs) const {
-  OffsetRange Ret = *this;
+  OffsetRange Ret;
   Ret.offset = offset * Rhs.offset;
   std::map<uint64_t, uint64_t> Size2Limit;
   for (uint64_t i = 0; i < access.size() + 1; i++) {

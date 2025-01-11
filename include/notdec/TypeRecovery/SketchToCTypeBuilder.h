@@ -16,6 +16,8 @@
 #include <optional>
 #include <string>
 
+#include "notdec-llvm2c/Utils.h"
+
 namespace notdec::retypd {
 
 clang::RecordDecl *createStruct(clang::ASTContext &Ctx);
@@ -69,7 +71,7 @@ struct SketchToCTypeBuilder {
 
   // Todo: Change filename or remove the argument
   SketchToCTypeBuilder(llvm::StringRef FileName)
-      : ASTUnit(clang::tooling::buildASTFromCode("", "decompilation.c")) {}
+      : ASTUnit(llvm2c::buildAST("decompilation.c")) {}
 
   clang::QualType buildType(const CGNode &Root, unsigned BitSize) {
     assert(BitSize > 0);

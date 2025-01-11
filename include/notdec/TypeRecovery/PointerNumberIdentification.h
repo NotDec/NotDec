@@ -19,6 +19,7 @@
 
 #include <llvm/IR/InstrTypes.h>
 
+#include "Lattice.h"
 #include "Utils/Range.h"
 #include "utils.h"
 
@@ -116,7 +117,10 @@ public:
     return getPtrOrNum() != NotPN && getPtrOrNum() != Null;
   }
   char getPNChar() const {
-    if (isUnknown()) {
+    assert(isPNRelated());
+    if (isNull()) {
+      return 'n';
+    } else if (isUnknown()) {
       return 'u';
     } else if (isNumber()) {
       return 'i';
@@ -126,6 +130,20 @@ public:
       return 'o';
     }
     assert(false && "CGNode::getPNChar: unhandled type");
+  }
+  std::string getFullPNName() const {
+    if (isNull()) {
+      return "Null";
+    } else if (isUnknown()) {
+      return "Unknown";
+    } else if (isNumber()) {
+      return "Number";
+    } else if (isPointer()) {
+      return "Pointer";
+    } else if (isNotPN()) {
+      return "Other";
+    }
+    assert(false && "CGNode::getFullPNName: unhandled type");
   }
   /// merge two PNVar into one. Return the unified PNVar.
   PNINode *unify(PNINode &other);
@@ -140,29 +158,12 @@ public:
   }
 
   std::string str() const {
-    if (isNull()) {
-      return "Null";
+    if (!isPNRelated()) {
+      return notdec::retypd::fromLLVMType(getLowTy()) + " " +
+             std::to_string(Id);
+    } else {
+      return getFullPNName() + " " + std::to_string(Id);
     }
-    if (isUnknown()) {
-      return "Unknown";
-    }
-    if (isNumber()) {
-      return "Number";
-    }
-    if (isPointer()) {
-      return "Pointer";
-    }
-    if (isNotPN()) {
-      if (LowTy == nullptr) {
-        return "NotPN";
-      } else {
-        std::string str;
-        llvm::raw_string_ostream rso(str);
-        LowTy->print(rso);
-        return str;
-      }
-    }
-    assert(false && "PNINode::str: unhandled type");
   }
 };
 
@@ -338,8 +339,9 @@ struct PNIGraph {
     }
 
     if (!Left->isUnknown() && Left->getPtrOrNum() == Right->getPtrOrNum()) {
-      // no need to merge
-      return nullptr;
+      // select one arbitrarily
+      mergePNVarTo(Left, Right);
+      return Right;
     }
     if (Left->getPtrOrNum() == Unknown) {
       mergePNVarTo(Left, Right);

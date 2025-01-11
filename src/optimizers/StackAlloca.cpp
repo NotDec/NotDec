@@ -173,11 +173,11 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
     Builder.SetInsertPoint(LoadSP);
     Value *alloc = Builder.CreateAlloca(
         pty->getPointerElementType(),
-        grow_negative ? Builder.CreateNeg(space) : space, "stack_addr");
+        grow_negative ? Builder.CreateNeg(space) : space, "stack");
     cast<Instruction>(alloc)->setMetadata(
         "notdec.stack_direction",
         MDNode::get(M.getContext(), MDString::get(M.getContext(), "negative")));
-    alloc = Builder.CreatePtrToInt(alloc, LoadSP->getType(), "stack");
+    alloc = Builder.CreatePtrToInt(alloc, LoadSP->getType(), "stack_addr");
     Value *alloc_end = Builder.CreateAdd(alloc, space, "stack_end");
 
     // The name is incorrect. high_addr does not mean it will must

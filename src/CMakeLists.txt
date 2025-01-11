@@ -6,6 +6,7 @@ add_library(notdec STATIC
 	optimizers/PointerTypeRecovery.cpp
 	optimizers/StackPointerFinder.cpp
 	optimizers/StackAlloca.cpp
+	optimizers/MemOpMatcher.cpp
 	optimizers/ConstraintGenerator.cpp
 	optimizers/retdec-stack/retdec-abi.cpp
 	optimizers/retdec-stack/retdec-ir-modifier.cpp

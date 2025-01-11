@@ -70,10 +70,11 @@ const PooledTypeVariable *PooledTypeVariable::CreateDtv(TRContext &Ctx,
 
 const PooledTypeVariable *PooledTypeVariable::CreateIntConstant(TRContext &Ctx,
                                                                 OffsetRange val,
-                                                                void *User) {
+                                                                void *User,
+                                                                long OpInd) {
   PooledTypeVariable TV = PooledTypeVariable{
-      &Ctx,
-      DerivedTypeVariable{.Base = BaseConstant{.Val = val, .User = User}}};
+      &Ctx, DerivedTypeVariable{.Base = BaseConstant{
+                                    .Val = val, .User = User, .OpInd = OpInd}}};
   return intern(Ctx, TV);
 }
 

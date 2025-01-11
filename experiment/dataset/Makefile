@@ -13,8 +13,8 @@ SOURCES = $(basename $(wildcard $(FUNCTIONALDIR)/CWE*.c))
 # eg: functional => out_functional
 PREFIXEDS = $(addprefix out_, $(SOURCES))
 
-all: compile wat
-dec: $(addsuffix .dec.ll, $(PREFIXEDS))
+all: compile wat dec
+dec: $(addsuffix .wat.c, $(PREFIXEDS))
 wat: $(addsuffix .wat, $(PREFIXEDS))
 wasm: $(addsuffix .wasm, $(PREFIXEDS))
 compile: $(addsuffix .com.ll, $(PREFIXEDS))
@@ -31,7 +31,7 @@ out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
 out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
 	clang-14 -D INCLUDEMAIN -O0 -S -emit-llvm -g0 -o ./$@ ./$<
 
-%.dec.ll: %.wasm
+%.wat.c: %.wasm
 	bash -c '../../build/bin/notdec -o $@ $< 2>&1 | tee $<.log ; exit $${PIPESTATUS[0]}'
 
 %.wat: %.wasm

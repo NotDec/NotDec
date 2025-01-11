@@ -40,6 +40,7 @@
 #include "TypeRecovery/TRContext.h"
 #include "notdec-wasm2llvm/utils.h"
 #include "optimizers/ConstraintGenerator.h"
+#include "optimizers/MemOpMatcher.h"
 #include "optimizers/PassManager.h"
 #include "optimizers/PointerTypeRecovery.h"
 #include "optimizers/StackAlloca.h"
@@ -412,6 +413,7 @@ void DecompileConfig::run_passes() {
       //     llvm::DebugFlag &&
       //     llvm::isCurrentDebugType("pointer-type-recovery")));
       MPM.addPass(VerifierPass(false));
+      MPM.addPass(createModuleToFunctionPassAdaptor(MemsetMatcher()));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
@@ -443,7 +445,7 @@ llvm::FunctionPassManager buildFunctionOptimizations() {
   FPM.addPass(llvm::GVNPass());
 
   // Specially optimize memory movement as it doesn't look like dataflow in SSA.
-  FPM.addPass(MemCpyOptPass());
+  // FPM.addPass(MemCpyOptPass());
 
   // Sparse conditional constant propagation.
   // FIXME: It isn't clear why we do this *after* loop passes rather than
