@@ -101,31 +101,32 @@ std::set<CGNode *> countClosureFix(const std::set<CGNode *> &N) {
   return Ret;
 }
 
-void dump(const ExtValuePtr &Val) {
+std::string toString(const ExtValuePtr &Val) {
+  std::string Ret;
+  llvm::raw_string_ostream OS(Ret);
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    llvm::errs() << "Value: " << **V << "\n";
-    return;
+    OS << "Value: " << **V;
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    llvm::errs() << "ReturnValue: " + ValueNamer::getName(*F->Func, "func_");
-    return;
+    OS << "ReturnValue: " + ValueNamer::getName(*F->Func, "func_");
   } else if (auto Arg = std::get_if<CallArg>(&Val)) {
-    llvm::errs() << ValueNamer::getName(
-                        *const_cast<llvm::CallBase *>(Arg->Call)) +
-                        "_CallArg_" + std::to_string(Arg->Index);
-    return;
+    OS << ValueNamer::getName(*const_cast<llvm::CallBase *>(Arg->Call)) +
+              "_CallArg_" + std::to_string(Arg->Index);
   } else if (auto Ret = std::get_if<CallRet>(&Val)) {
-    llvm::errs() << ValueNamer::getName(
-                        *const_cast<llvm::CallBase *>(Ret->Call)) +
-                        "_CallRet";
-    return;
+    OS << ValueNamer::getName(*const_cast<llvm::CallBase *>(Ret->Call)) +
+              "_CallRet";
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
-    llvm::errs() << "IntConstant: " << *IC->Val << ", User: " << *IC->User;
-    return;
+    OS << "IntConstant: " << *IC->Val << ", User: " << *IC->User;
+  } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
+    OS << "ConstantAddr: " << *CA->Val;
+  } else {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "ERROR: getName: unhandled type of ExtValPtr\n";
+    std::abort();
   }
-  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getName: unhandled type of ExtValPtr\n";
-  std::abort();
+  return Ret;
 }
+
+void dump(const ExtValuePtr &Val) { llvm::errs() << toString(Val) << "\n"; }
 
 bool mustBePrimitive(const llvm::Type *Ty) {
   if (Ty->isFloatTy() || Ty->isDoubleTy()) {
@@ -262,6 +263,8 @@ std::string getName(const ExtValuePtr &Val) {
     } else {
       return "Constant_" + ValueNamer::getName(*IC->Val, "constant_");
     }
+  } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
+    return "ConstantAddr_" + int_to_hex(CA->Val->getSExtValue());
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "ERROR: getName: unhandled type of ExtValPtr\n";
@@ -273,18 +276,14 @@ inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
                << "\n";
 }
 
-std::string join(std::string path, std::string elem) {
-  return path.back() == '/' ? path + elem : path + "/" + elem;
-}
-
-auto isGV = [](const ExtValuePtr &N) {
-  if (auto V = std::get_if<llvm::Value *>(&N)) {
-    if (llvm::isa<llvm::GlobalValue>(*V)) {
-      return true;
-    }
-  }
-  return false;
-};
+// auto isGV = [](const ExtValuePtr &N) {
+//   if (auto V = std::get_if<llvm::Value *>(&N)) {
+//     if (llvm::isa<llvm::GlobalValue>(*V)) {
+//       return true;
+//     }
+//   }
+//   return false;
+// };
 
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
@@ -304,7 +303,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   }
 
   if (DebugDir) {
-    printModule(M, join(DebugDir, "00-before-TypeRecovery.ll").c_str());
+    printModule(M, join(DebugDir, "01-before-TypeRecovery.ll").c_str());
   }
 
   auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
@@ -423,13 +422,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   }
   if (DebugDir) {
     SCCsCatalog->close();
-    printModule(M, join(DebugDir, "01-BottomUp.ll").c_str());
+    printModule(M, join(DebugDir, "02-BottomUp.ll").c_str());
   }
 
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
 
   if (DebugDir) {
-    printAnnotatedModule(M, join(DebugDir, "01-BottomUp.anno.ll").c_str());
+    printAnnotatedModule(M, join(DebugDir, "02-BottomUp.anno.ll").c_str());
   }
 
   // Top-down Phase: build the result(Map from value to clang C type)
@@ -486,7 +485,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     if (DirPath) {
-      Generator->CG.printGraph(join(*DirPath, "00-Original.dot").c_str());
+      Generator->CG.printGraph(join(*DirPath, "03-Original.dot").c_str());
     }
 
     // check if saturated
@@ -495,16 +494,14 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     Generator->removeUnreachable();
 
     if (DirPath) {
-      Generator->CG.printGraph(join(*DirPath, "01-Original.sks.dot").c_str());
-      // CurrentTypes.CG.printGraph(
-      //     join(*DirPath, "01-Global.before.dot").c_str());
+      Generator->CG.printGraph(join(*DirPath, "03-Original.sks.dot").c_str());
     }
 
     std::map<const CGNode *, CGNode *> Old2New;
     Generator->cloneTo(CurrentTypes, Old2New);
 
     if (DirPath) {
-      CurrentTypes.CG.printGraph(join(*DirPath, "02-Global.added.dot").c_str());
+      CurrentTypes.CG.printGraph(join(*DirPath, "04-Global.added.dot").c_str());
     }
 
     // 2. link the argument/return value subtype relations.
@@ -645,17 +642,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     if (DirPath) {
       CurrentTypes.CG.printGraph(
-          join(*DirPath, "03-CurrentTypes.linked.dot").c_str());
+          join(*DirPath, "05-CurrentTypes.linked.dot").c_str());
     }
 
     // 3. perform quotient equivalence on the graph..?
     // 4. determinize the graph
     // CurrentTypes.determinize();
-
-    // if (DirPath) {
-    //   CurrentTypes.CG.printGraph(
-    //       join(*DirPath, "04-CurrentTypes.dtm.dot").c_str());
-    // }
 
     // 5. maintain reverse call edge map
     for (CallGraphNode *CGN : NodeVec) {
@@ -685,7 +677,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   if (DebugDir) {
     printAnnotatedModule(M,
-                         join(DebugDir, "03-After-BottomUp.anno.ll").c_str());
+                         join(DebugDir, "06-After-BottomUp.anno.ll").c_str());
   }
 
   auto Convert = [&](ExtValuePtr Val) -> llvm2c::WValuePtr {
@@ -698,7 +690,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     } else if (auto Ret = std::get_if<CallRet>(&Val)) {
       assert(false);
     } else if (auto IC = std::get_if<UConstant>(&Val)) {
-      return llvm2c::UsedConstant(IC->Val, IC->User);
+      return llvm2c::UsedConstant(IC->Val, IC->User, IC->OpInd);
+    } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
+      return llvm2c::ConsAddr{.Val = CA->Val};
     }
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "ERROR: getName: unhandled type of ExtValPtr\n";
@@ -725,7 +719,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     if (DebugDir) {
       std::string Dir = join(DebugDir, "SCC" + std::to_string(i));
-      G2.CG.printGraph(join(Dir, "04-BeforeMerge.dot").c_str());
+      G2.CG.printGraph(join(Dir, "07-BeforeMerge.dot").c_str());
     }
 
     // merge nodes that only subtype to another node
@@ -737,7 +731,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     if (DebugDir) {
       std::string Dir = join(DebugDir, "SCC" + std::to_string(i));
-      G2.CG.printGraph(join(Dir, "04-CurrentTypes.dtm.dot").c_str());
+      G2.CG.printGraph(join(Dir, "08-CurrentTypes.dtm.dot").c_str());
     }
 
     for (auto &Ent : G2.Val2Node) {
@@ -779,12 +773,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       clang::QualType CTy = TB.buildType(*Node, Size);
-      if (isGV(Ent.first) && Result.ValueTypes.count(Convert(Ent.first)) != 0) {
-        llvm::errs() << "Warning: TODO handle Global Value type merge: "
-                     << getName(Ent.first) << "\n";
+      if (Result.ValueTypes.count(Convert(Ent.first)) != 0) {
+        llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
+                     << toString(Ent.first) << "\n";
       }
-      assert(Result.ValueTypes.count(Convert(Ent.first)) == 0 ||
-             isGV(Ent.first));
       Result.ValueTypes[Convert(Ent.first)] = CTy;
 
       llvm::errs() << " upper bound: " << CTy.getAsString();
@@ -797,8 +789,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         } else {
           llvm::errs() << " lower bound: " << CTy.getAsString();
         }
-        assert(Result.ValueTypesUpperBound.count(Convert(Ent.first)) == 0 ||
-               isGV(Ent.first));
+        if (Result.ValueTypesUpperBound.count(Convert(Ent.first)) != 0) {
+          llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
+                       << toString(Ent.first) << "\n";
+        }
         Result.ValueTypesUpperBound[Convert(Ent.first)] = CTy;
       } else {
         llvm::errs() << " has no lower bound";
@@ -1434,7 +1428,7 @@ std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
 
 retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
                                                     long OpInd) {
-  wrapExtValuePtrWithUser(Val, User, OpInd);
+  llvmValue2ExtVal(Val, User, OpInd);
 
   if (Val2Node.count(Val)) {
     return &CG.getNode(Val2Node.at(Val));
@@ -1444,14 +1438,14 @@ retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
 
 retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User,
                                               long OpInd) {
-  wrapExtValuePtrWithUser(Val, User, OpInd);
+  llvmValue2ExtVal(Val, User, OpInd);
 
   return CG.getNode(Val2Node.at(Val));
 }
 
 retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User,
                                                  long OpInd) {
-  wrapExtValuePtrWithUser(Val, User, OpInd);
+  llvmValue2ExtVal(Val, User, OpInd);
   auto Dtv = convertTypeVar(Val, User, OpInd);
   auto &N = CG.createNode(Dtv, getType(Val));
   assert(N.key.SuffixVariance == retypd::Covariant);
@@ -1468,7 +1462,7 @@ retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User,
 
 retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
                                                       User *User, long OpInd) {
-  wrapExtValuePtrWithUser(Val, User, OpInd);
+  llvmValue2ExtVal(Val, User, OpInd);
   auto Node = getNodeOrNull(Val, User, OpInd);
   if (Node != nullptr) {
     return *Node;
@@ -1593,6 +1587,8 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
       return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));
       // auto Ty = C->getType();
       // return getLLVMTypeVar(Ctx.TRCtx, Ty);
+    } else if (isa<ConstantPointerNull>(C)) {
+      return makeTv(Ctx.TRCtx, ValueNamer::getName("null_"));
     }
     llvm::errs()
         << __FILE__ << ":" << __LINE__ << ": "
@@ -1872,7 +1868,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
   auto DstVar =
       cg.deref(I.getPointerOperand(), &I, 1,
                cg.getPointerElemSize(I.getPointerOperandType()), false);
-  auto &StoreNode = cg.CG.createNode(
+  auto &StoreNode = cg.CG.getOrInsertNode(
       DstVar, I.getPointerOperandType()->getPointerElementType());
   // actual store -> formal store
   cg.addSubtype(cg.getOrInsertNode(I.getValueOperand(), &I, 0), StoreNode);
@@ -1882,7 +1878,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   auto LoadedVar =
       cg.deref(I.getPointerOperand(), &I, 0,
                cg.getPointerElemSize(I.getPointerOperandType()), true);
-  auto &LoadNode = cg.CG.createNode(LoadedVar, I.getType());
+  auto &LoadNode = cg.CG.getOrInsertNode(LoadedVar, I.getType());
   // formal load -> actual load
   cg.addSubtype(LoadNode, cg.createNode(&I, nullptr, -1));
 }
@@ -1916,10 +1912,11 @@ TypeVariable ConstraintsGenerator::addOffset(TypeVariable &dtv,
 // Special logics for load and store when generating type variables.
 TypeVariable ConstraintsGenerator::deref(Value *Val, User *User, long OpInd,
                                          unsigned BitSize, bool isLoadOrStore) {
-  setPointer(getOrInsertNode(Val, User, OpInd));
+  auto &Node = getOrInsertNode(Val, User, OpInd);
+  setPointer(Node);
   assert(BitSize != 0 && "RetypdGenerator::deref: zero size!?");
   // from the offset, generate a loaded type variable.
-  auto DstVar = getTypeVar(Val, User, OpInd);
+  auto DstVar = Node.key.Base;
   assert(BitSize % 8 == 0 && "size is not byte aligned!?");
   if (isLoadOrStore) {
     DstVar = DstVar.pushLabel(retypd::LoadLabel{.Size = BitSize});

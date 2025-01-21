@@ -13,7 +13,7 @@ SOURCES = $(basename $(wildcard $(FUNCTIONALDIR)/CWE*.c))
 # eg: functional => out_functional
 PREFIXEDS = $(addprefix out_, $(SOURCES))
 
-all: compile wat dec
+all: wasm wat dec
 dec: $(addsuffix .wat.c, $(PREFIXEDS))
 wat: $(addsuffix .wat, $(PREFIXEDS))
 wasm: $(addsuffix .wasm, $(PREFIXEDS))
@@ -26,7 +26,7 @@ svf_dec: $(addsuffix .dec.ll.svf, $(PREFIXEDS))
 out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
 # -fno-builtin -fno-lto -Wl,--lto-O0 -I. -g -O0 --no-standard-libraries -Wl,--entry=main -lc -Wl,--allow-undefined
 # /opt/wasi-sdk-20.0/bin/clang -fno-builtin -fno-lto -Wl,--lto-O0 -I. -g -O0 --no-standard-libraries -Wl,--entry=main -lc -Wl,--allow-undefined -o ${out}.wasm $file
-	/opt/wasi-sdk-16.0/bin/clang -D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined -o ./$@ ./$<
+	/opt/wasi-sdk-16.0/bin/clang -D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined dataset-SAC-2022/src/io.c -o ./$@ ./$<
 
 out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
 	clang-14 -D INCLUDEMAIN -O0 -S -emit-llvm -g0 -o ./$@ ./$<

@@ -122,10 +122,11 @@ using ExtValuePtr = std::variant<llvm::Value *, ReturnValue, CallArg, CallRet,
 
 ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User, long OpInd = -1);
 std::string getName(const ExtValuePtr &Val);
+std::string toString(const ExtValuePtr &Val);
 void dump(const ExtValuePtr &Val);
 llvm::Type *getType(const ExtValuePtr &Val);
 unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size);
-inline void wrapExtValuePtrWithUser(ExtValuePtr &Val, User *User, long OpInd) {
+inline void llvmValue2ExtVal(ExtValuePtr &Val, User *User, long OpInd) {
   // Differentiate int32/int64 by User.
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     if (isa<GlobalValue>(*V)) {

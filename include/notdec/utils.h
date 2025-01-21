@@ -105,6 +105,8 @@ public:
   }
 };
 
+std::string join(std::string path, std::string elem);
+
 } // namespace notdec
 
 #endif

@@ -11,6 +11,10 @@ std::string getSuffix(std::string fname) {
 }
 namespace notdec {
 
+std::string join(std::string path, std::string elem) {
+  return path.back() == '/' ? path + elem : path + "/" + elem;
+}
+
 [[nodiscard]] bool printModule(llvm::Module &M, const char *path) {
   std::error_code EC;
   llvm::raw_fd_ostream os(path, EC);

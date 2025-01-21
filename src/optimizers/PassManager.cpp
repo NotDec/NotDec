@@ -338,6 +338,12 @@ void DecompileConfig::find_special_gv() {
 }
 
 void DecompileConfig::run_passes() {
+  const char *DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
+  if (DebugDir) {
+    llvm::sys::fs::create_directories(DebugDir);
+    printModule(Mod, join(DebugDir, "00-lifted.ll").c_str());
+  }
+
   // Create the analysis managers.
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
@@ -439,6 +445,8 @@ llvm::FunctionPassManager buildFunctionOptimizations() {
       FPM; // = PB.buildFunctionSimplificationPipeline(OptimizationLevel::O1,
            // ThinOrFullLTOPhase::None);
 
+  FPM.addPass(VerifierPass());
+  FPM.addPass(InstCombinePass());
   FPM.addPass(SimplifyCFGPass(SimplifyCFGOptions()));
   FPM.addPass(InstCombinePass());
   FPM.addPass(llvm::PromotePass());
