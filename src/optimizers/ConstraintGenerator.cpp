@@ -540,13 +540,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               CallerGenerator->getOrInsertNode(Call->getArgOperand(i), Call, i);
           ArgNodes[i].insert(&NFrom);
           ArgNodesContra[i].insert(
-              &CallerGenerator->CG.getNode(MakeContraVariant(NFrom.key)));
+              &CallerGenerator->getNode(MakeContraVariant(NFrom.key)));
         }
         if (!Current->getReturnType()->isVoidTy()) {
           auto &NFrom = CallerGenerator->getOrInsertNode(Call, nullptr, -1);
           RetNodes.insert(&NFrom);
           RetNodesContra.insert(
-              &CallerGenerator->CG.getNode(MakeContraVariant(NFrom.key)));
+              &CallerGenerator->getNode(MakeContraVariant(NFrom.key)));
         }
       }
 
@@ -732,9 +732,18 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     if (DebugDir) {
       std::string Dir = join(DebugDir, "SCC" + std::to_string(i));
       G2.CG.printGraph(join(Dir, "08-CurrentTypes.dtm.dot").c_str());
+      // TODO refactor to annotated function
+      // print val2node here
+      std::ofstream Val2NodeFile(join(Dir, "08-Val2Node.txt"));
+      for (auto &Ent : G2.V2N) {
+        auto& N = G2.getNode(Ent.first, nullptr, -1);
+        Val2NodeFile << getName(Ent.first) << " -> " << toString(N.key)
+                     << "\n";
+      }
+      Val2NodeFile.close();
     }
 
-    for (auto &Ent : G2.Val2Node) {
+    for (auto &Ent : G2.V2N) {
       // TODO support function type.
       if (std::holds_alternative<llvm::Value *>(Ent.first)) {
         if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
@@ -742,7 +751,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
       }
       auto &Key = Ent.second;
-      auto *Node = G2.getNode(Key);
+      auto *Node = G2.getNodeOrNull(Key);
       assert(Node != nullptr);
       assert(&Node->Parent == &G2.CG &&
              "RetypdGenerator::getTypeVar: Node is not in the graph");
@@ -750,10 +759,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       assert(Size > 0);
 
       if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-        // DEBUG
-        if ((*V)->getName() == "stack26") {
-          llvm::errs() << "here";
-        }
         llvm::errs() << "  Value: " << **V;
         llvm::Function *F = nullptr;
         if (auto I = llvm::dyn_cast<Instruction>(*V)) {
@@ -765,6 +770,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         if (F) {
           llvm::errs() << " (In Func: " << F->getName() << ")";
         }
+        // DEBUG
+        // if ((*V)->getName() == "stack31") {
+        //   llvm::errs() << "here";
+        // }
       } else {
         llvm::errs() << "  Special Value: " << getName(Ent.first);
         if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
@@ -781,7 +790,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
       llvm::errs() << " upper bound: " << CTy.getAsString();
 
-      if (auto *N2 = G2.getNode(retypd::MakeContraVariant(Key))) {
+      if (auto *N2 = G2.getNodeOrNull(retypd::MakeContraVariant(Key))) {
         CTy = TB.buildType(*N2, Size);
 
         if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
@@ -820,8 +829,8 @@ ConstraintsGenerator
 ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
   ConstraintsGenerator G(Ctx, LLCtx, CG.Name);
   ConstraintGraph::clone(Old2New, CG, G.CG);
-  for (auto &Ent : Val2Node) {
-    G.Val2Node.emplace(Ent.first, Ent.second);
+  for (auto &Ent : V2N) {
+    G.V2N.insert(Ent.first, Ent.second);
   }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
@@ -832,8 +841,8 @@ ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
 void ConstraintsGenerator::cloneTo(
     ConstraintsGenerator &G, std::map<const CGNode *, CGNode *> &Old2New) {
   ConstraintGraph::clone(Old2New, CG, G.CG);
-  for (auto &Ent : Val2Node) {
-    G.Val2Node.emplace(Ent.first, Ent.second);
+  for (auto &Ent : V2N) {
+    G.V2N.insert(Ent.first, Ent.second);
   }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
@@ -845,7 +854,7 @@ void ConstraintsGenerator::removeUnreachable() {
   std::set<CGNode *> ReachableNodes;
 
   std::queue<CGNode *> Worklist;
-  for (auto &Ent : Val2Node) {
+  for (auto &Ent : V2N) {
     auto *Node = &CG.getNode(Ent.second);
     Worklist.push(Node);
     // also add contravariant node
@@ -1110,7 +1119,7 @@ void ConstraintsGenerator::eliminateCycle() {
 
   // build the reverse value map: TODO migrate to maintain
   std::map<retypd::NodeKey, std::set<ExtValuePtr>> Node2Val;
-  for (auto &Ent : Val2Node) {
+  for (auto &Ent : V2N) {
     Node2Val[Ent.second].insert(Ent.first);
   }
 
@@ -1166,9 +1175,9 @@ void ConstraintsGenerator::eliminateCycle() {
 void ConstraintsGenerator::mergeNodeTo(CGNode &From, CGNode &To,
                                        bool NoSelfLoop) {
   assert(&From.Parent == &CG && &To.Parent == &CG);
-  // We do not fix value map, instead, check merge map before using nodekey in
-  // Val2Node.
-  addMergeNode(From.key, To);
+  // update the value map
+  addMergeNode(From.key, To.key);
+  // update the graph
   CG.mergeNodeTo(From, To, NoSelfLoop);
 }
 
@@ -1229,11 +1238,11 @@ void ConstraintsGenerator::determinize() {
   }
   // remove all node that is not in the value map
   std::set<CGNode *> V2NNodes;
-  for (auto &Ent : Val2Node) {
-    if (auto *N = getNode(Ent.second)) {
+  for (auto &Ent : V2N) {
+    if (auto *N = getNodeOrNull(Ent.second)) {
       V2NNodes.insert(N);
     }
-    if (auto *N = getNode(MakeContraVariant(Ent.second))) {
+    if (auto *N = getNodeOrNull(MakeContraVariant(Ent.second))) {
       V2NNodes.insert(N);
     }
   }
@@ -1430,8 +1439,8 @@ retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
                                                     long OpInd) {
   llvmValue2ExtVal(Val, User, OpInd);
 
-  if (Val2Node.count(Val)) {
-    return &CG.getNode(Val2Node.at(Val));
+  if (V2N.count(Val)) {
+    return getNodeOrNull(V2N.at(Val));
   }
   return nullptr;
 }
@@ -1439,8 +1448,8 @@ retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
 retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User,
                                               long OpInd) {
   llvmValue2ExtVal(Val, User, OpInd);
-
-  return CG.getNode(Val2Node.at(Val));
+  // ?? check the merge map
+  return getNode(V2N.at(Val));
 }
 
 retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User,
@@ -1449,7 +1458,7 @@ retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User,
   auto Dtv = convertTypeVar(Val, User, OpInd);
   auto &N = CG.createNode(Dtv, getType(Val));
   assert(N.key.SuffixVariance == retypd::Covariant);
-  auto It = Val2Node.emplace(Val, N.key);
+  auto It = V2N.insert(Val, N.key);
   if (!It.second) {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "setTypeVar: Value already mapped to "

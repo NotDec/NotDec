@@ -57,6 +57,9 @@ struct NodeKey {
     return std::tie(Base, SuffixVariance, IsNewLayer) <
            std::tie(rhs.Base, rhs.SuffixVariance, rhs.IsNewLayer);
   }
+  bool operator==(const NodeKey &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
 };
 
 std::string toString(const NodeKey &K);

@@ -34,6 +34,7 @@
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/TRContext.h"
+#include "Utils/DSUMap.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
 
@@ -113,7 +114,9 @@ struct ConstantAddr {
   }
 };
 
-// Extend Value* with some special values.
+// We cannot directly map llvm::Value* to Node, because we need to
+// differentiate/merge different constants. Extend Value* with some special
+// values.
 // 1. Differentiate Constants by Users.
 // 2. For some constant expr like (inttoptr i32 1064), the address of the expr
 // is different, but we need to merge them.
@@ -193,49 +196,37 @@ public:
 };
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
-/// The ConstraintGraph/StorageShapeGraph is expected to be able to print to a
-/// readable format. (TODO)
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
   // todo refactor to save the target module.
   LLVMContext &LLCtx;
-  std::map<ExtValuePtr, retypd::NodeKey> Val2Node;
+
+  // LLVM值到那边节点的映射关系由转TypeVar的函数决定。这里其实只需要保证不重复，其次是保留名字的意义？
+  // 因为转换过程有临时变量参与，所以这里到Key的映射要缓存。这里使用的就是Val2Node做缓存
+  // std::map<ExtValuePtr, retypd::NodeKey> Val2Node;
+  DSUMap<ExtValuePtr, retypd::NodeKey> V2N;
+
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
   std::set<llvm::Function *> SCCs;
   std::map<CallBase *, size_t> CallToID;
   std::string DebugDir;
 
-  // a CGNode * corresponds to a set of CGNode *.
-  std::map<retypd::NodeKey, retypd::CGNode *> MergedNodes;
-  std::map<retypd::NodeKey, std::set<retypd::NodeKey>> MergedNodesRev;
+  retypd::CGNode &getNode(const retypd::NodeKey &Key) {
+    auto *N = getNodeOrNull(Key);
+    assert(N != nullptr && "getNode: Node not found");
+    return *N;
+  }
 
-  retypd::CGNode *getNode(const retypd::NodeKey &Key) {
-    auto It = MergedNodes.find(Key);
-    if (It != MergedNodes.end()) {
-      return It->second;
-    }
+  retypd::CGNode *getNodeOrNull(const retypd::NodeKey &Key) {
     auto It2 = CG.Nodes.find(Key);
     if (It2 != CG.Nodes.end()) {
       return &It2->second;
     }
     return nullptr;
   }
-  void addMergeNode(const retypd::NodeKey &Key, CGNode &Node) {
-    // if the merged node is a merge target
-    if (MergedNodesRev.count(Key)) {
-      // merge the merged node to the new node
-      for (auto &OldKey : MergedNodesRev.at(Key)) {
-        auto It = MergedNodes.find(OldKey);
-        assert(It != MergedNodes.end());
-        It->second = &Node;
-        MergedNodesRev[Node.key].insert(OldKey);
-      }
-      MergedNodesRev.erase(Key);
-    }
-    auto It = MergedNodes.insert({Key, &Node});
-    assert(It.second && "Merged node already exist?");
-    MergedNodesRev[Node.key].insert(Key);
+  void addMergeNode(const retypd::NodeKey &From, const retypd::NodeKey &To) {
+    V2N.merge(From, To);
   }
 
   std::vector<retypd::SubTypeConstraint> genSummary();
