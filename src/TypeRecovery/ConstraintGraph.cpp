@@ -519,27 +519,6 @@ void ConstraintGraph::contraVariantSplit() {
   }
 }
 
-void ConstraintGraph::linkContraToCovariant() {
-  // add subtype edge from Contravariant nodes to Covariant nodes
-  for (auto &Ent : Nodes) {
-    if (&Ent.second == getStartNode() || &Ent.second == getEndNode()) {
-      continue;
-    }
-    if (Ent.second.key.Base.isPrimitive()) {
-      continue;
-    }
-    if (Ent.second.key.SuffixVariance == retypd::Contravariant) {
-      continue;
-    }
-    auto *Node = &Ent.second;
-    if (Nodes.count(MakeContraVariant(Node->key)) != 0) {
-      auto &CN = Nodes.at(MakeContraVariant(Node->key));
-      assert(CN.getPNIVar() == Node->getPNIVar());
-      addEdge(CN, *Node, retypd::One{});
-    }
-  }
-}
-
 /// Mark the variance of the node according to the edges.
 /// DFS traversal.
 void ConstraintGraph::markVariance() {
@@ -1533,7 +1512,6 @@ CGNode &ConstraintGraph::createNodeWithPNI(const NodeKey &N, PNINode *PNI) {
 
 CGNode &ConstraintGraph::createNodeClonePNI(const NodeKey &N, PNINode *ON) {
   CGNode *NewN;
-  assert(PG != nullptr);
   if (ON != nullptr) {
     NewN = &createNodeWithPNI(N, nullptr);
     auto PN = PG->clonePNINode(*ON);

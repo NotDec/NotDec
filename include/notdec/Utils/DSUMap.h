@@ -25,6 +25,7 @@ public:
     }
     Rev.erase(From);
   }
+  const std::map<V, std::vector<K>>& rev() const { return Rev; }
 
   template <class... Args>
   auto emplace(Args &&...args)

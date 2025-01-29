@@ -268,7 +268,6 @@ public:
   getNodeReachableOffset(CGNode &Start);
 
   void markVariance();
-  void linkContraToCovariant();
   /// Focus on the recall subgraph and use forget edge to label nodes. mark all
   /// nodes as accepting by link with `forget #top`.
   void sketchSplit();
@@ -360,11 +359,11 @@ public:
 std::vector<SubTypeConstraint> expToConstraints(TRContext &Ctx, rexp::PRExp E);
 std::string toString(const std::set<CGNode *> Set);
 
-inline NodeKey MakeContraVariant(NodeKey Key) {
-  assert(Key.SuffixVariance == Covariant);
-  Key.SuffixVariance = Contravariant;
-  return Key;
-}
+// inline NodeKey MakeContraVariant(NodeKey Key) {
+//   assert(Key.SuffixVariance == Covariant);
+//   Key.SuffixVariance = Contravariant;
+//   return Key;
+// }
 
 inline NodeKey MakeReverseVariant(NodeKey Key) {
   Key.SuffixVariance = !Key.SuffixVariance;

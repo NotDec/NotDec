@@ -536,17 +536,20 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             std::get<1>(AllSCCs.at(Func2SCCIndex.at(Elem.second)));
 
         for (int i = 0; i < Call->arg_size(); i++) {
-          auto &NFrom =
-              CallerGenerator->getOrInsertNode(Call->getArgOperand(i), Call, i);
-          ArgNodes[i].insert(&NFrom);
-          ArgNodesContra[i].insert(
-              &CallerGenerator->getNode(MakeContraVariant(NFrom.key)));
+          auto &N = CallerGenerator->getOrInsertNode(
+              Call->getArgOperand(i), Call, i, retypd::Covariant);
+          ArgNodes[i].insert(&N);
+          auto &NC = CallerGenerator->getOrInsertNode(
+              Call->getArgOperand(i), Call, i, retypd::Contravariant);
+          ArgNodesContra[i].insert(&NC);
         }
         if (!Current->getReturnType()->isVoidTy()) {
-          auto &NFrom = CallerGenerator->getOrInsertNode(Call, nullptr, -1);
-          RetNodes.insert(&NFrom);
-          RetNodesContra.insert(
-              &CallerGenerator->getNode(MakeContraVariant(NFrom.key)));
+          auto &N = CallerGenerator->getOrInsertNode(Call, nullptr, -1,
+                                                     retypd::Covariant);
+          RetNodes.insert(&N);
+          auto &NC = CallerGenerator->getOrInsertNode(Call, nullptr, -1,
+                                                      retypd::Contravariant);
+          RetNodesContra.insert(&NC);
         }
       }
 
@@ -615,25 +618,31 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         auto Prefix = ("argd_" + std::to_string(i));
         auto &ArgSet = ArgNodes[i];
         auto *D = determinizeTo(ArgSet, Prefix.c_str());
-        auto &To =
-            CurrentTypes.getOrInsertNode(Current->getArg(i), nullptr, -1);
-        CurrentTypes.CG.addEdge(*D, To, retypd::One{});
+        auto *To = CurrentTypes.getNodeOrNull(Current->getArg(i), nullptr, -1,
+                                              retypd::Covariant);
+        if (To != nullptr) {
+          CurrentTypes.CG.addEdge(*D, *To, retypd::One{});
+        }
+
         auto &ArgSetContra = ArgNodesContra[i];
         auto *DContra = determinizeTo(ArgSetContra, Prefix.c_str());
-        auto *ToContra =
-            CurrentTypes.CG.getNodeOrNull(MakeContraVariant(To.key));
+        auto *ToContra = CurrentTypes.getNodeOrNull(Current->getArg(i), nullptr,
+                                                    -1, retypd::Contravariant);
         if (ToContra != nullptr) {
           CurrentTypes.CG.addEdge(*ToContra, *DContra, retypd::One{});
         }
       }
       if (!Current->getReturnType()->isVoidTy()) {
         auto *D = determinizeTo(RetNodes, "retd");
-        auto &From = CurrentTypes.getOrInsertNode(ReturnValue{.Func = Current},
-                                                  nullptr, -1);
-        CurrentTypes.CG.addEdge(From, *D, retypd::One{});
+        auto *From = CurrentTypes.getNodeOrNull(ReturnValue{.Func = Current},
+                                                nullptr, -1, retypd::Covariant);
+        if (From != nullptr) {
+          CurrentTypes.CG.addEdge(*From, *D, retypd::One{});
+        }
+
         auto *DContra = determinizeTo(RetNodesContra, "retd");
-        auto *FromContra =
-            CurrentTypes.CG.getNodeOrNull(MakeContraVariant(From.key));
+        auto *FromContra = CurrentTypes.getNodeOrNull(
+            ReturnValue{.Func = Current}, nullptr, -1, retypd::Contravariant);
         if (FromContra != nullptr) {
           CurrentTypes.CG.addEdge(*DContra, *FromContra, retypd::One{});
         }
@@ -715,7 +724,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     G2.eliminateCycle();
     // ensure lower bound is lower than upper bound
-    G2.CG.linkContraToCovariant();
+    G2.linkContraToCovariant();
 
     if (DebugDir) {
       std::string Dir = join(DebugDir, "SCC" + std::to_string(i));
@@ -735,10 +744,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       // TODO refactor to annotated function
       // print val2node here
       std::ofstream Val2NodeFile(join(Dir, "08-Val2Node.txt"));
+      // TODO!!!!
       for (auto &Ent : G2.V2N) {
-        auto& N = G2.getNode(Ent.first, nullptr, -1);
-        Val2NodeFile << getName(Ent.first) << " -> " << toString(N.key)
-                     << "\n";
+        auto &N = G2.getNode(Ent.first, nullptr, -1, retypd::Covariant);
+        auto &NC = G2.getNode(Ent.first, nullptr, -1, retypd::Contravariant);
+        Val2NodeFile << getName(Ent.first) << ", " << toString(N.key) << ", " << toString(NC.key) << "\n";
       }
       Val2NodeFile.close();
     }
@@ -752,57 +762,96 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       }
       auto &Key = Ent.second;
       auto *Node = G2.getNodeOrNull(Key);
-      assert(Node != nullptr);
-      assert(&Node->Parent == &G2.CG &&
-             "RetypdGenerator::getTypeVar: Node is not in the graph");
-      auto Size = getSize(Ent.first, pointer_size);
-      assert(Size > 0);
+      if (Node != nullptr) {
+        assert(&Node->Parent == &G2.CG &&
+               "RetypdGenerator::getTypeVar: Node is not in the graph");
+        auto Size = getSize(Ent.first, pointer_size);
+        assert(Size > 0);
 
-      if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-        llvm::errs() << "  Value: " << **V;
-        llvm::Function *F = nullptr;
-        if (auto I = llvm::dyn_cast<Instruction>(*V)) {
-          F = I->getFunction();
-
-        } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
-          F = Arg->getParent();
-        }
-        if (F) {
-          llvm::errs() << " (In Func: " << F->getName() << ")";
-        }
-        // DEBUG
-        // if ((*V)->getName() == "stack31") {
-        //   llvm::errs() << "here";
-        // }
-      } else {
-        llvm::errs() << "  Special Value: " << getName(Ent.first);
-        if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
-          llvm::errs() << " User: " << *UC->User;
-        }
-      }
-
-      clang::QualType CTy = TB.buildType(*Node, Size);
-      if (Result.ValueTypes.count(Convert(Ent.first)) != 0) {
-        llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
-                     << toString(Ent.first) << "\n";
-      }
-      Result.ValueTypes[Convert(Ent.first)] = CTy;
-
-      llvm::errs() << " upper bound: " << CTy.getAsString();
-
-      if (auto *N2 = G2.getNodeOrNull(retypd::MakeContraVariant(Key))) {
-        CTy = TB.buildType(*N2, Size);
-
+        // print the current value
         if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-          llvm::errs() << " lower bound: " << CTy.getAsString();
+          llvm::errs() << "  Value: " << **V;
+          llvm::Function *F = nullptr;
+          if (auto I = llvm::dyn_cast<Instruction>(*V)) {
+            F = I->getFunction();
+
+          } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
+            F = Arg->getParent();
+          }
+          if (F) {
+            llvm::errs() << " (In Func: " << F->getName() << ")";
+          }
+          // DEBUG
+          // if ((*V)->getName() == "stack31") {
+          //   llvm::errs() << "here";
+          // }
         } else {
-          llvm::errs() << " lower bound: " << CTy.getAsString();
+          llvm::errs() << "  Special Value: " << getName(Ent.first);
+          if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
+            llvm::errs() << " User: " << *UC->User;
+          }
         }
-        if (Result.ValueTypesUpperBound.count(Convert(Ent.first)) != 0) {
+
+        clang::QualType CTy = TB.buildType(*Node, Size);
+
+        if (Result.ValueTypes.count(Convert(Ent.first)) != 0) {
+          llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
+                       << toString(Ent.first) << "\n";
+        }
+        Result.ValueTypes[Convert(Ent.first)] = CTy;
+
+        llvm::errs() << " upper bound: " << CTy.getAsString();
+      } else {
+        llvm::errs() << " has no upper bound";
+      }
+    }
+
+    for (auto &Ent : G2.V2NContra) {
+      // TODO support function type.
+      if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+        if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+          continue;
+        }
+      }
+      auto &Key = Ent.second;
+      auto *Node = G2.getNodeOrNull(Key);
+      if (Node != nullptr) {
+        assert(&Node->Parent == &G2.CG &&
+               "RetypdGenerator::getTypeVar: Node is not in the graph");
+        auto Size = getSize(Ent.first, pointer_size);
+        assert(Size > 0);
+        // print the current value
+        if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
+          llvm::errs() << "  Value: " << **V;
+          llvm::Function *F = nullptr;
+          if (auto I = llvm::dyn_cast<Instruction>(*V)) {
+            F = I->getFunction();
+
+          } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
+            F = Arg->getParent();
+          }
+          if (F) {
+            llvm::errs() << " (In Func: " << F->getName() << ")";
+          }
+          // DEBUG
+          // if ((*V)->getName() == "stack31") {
+          //   llvm::errs() << "here";
+          // }
+        } else {
+          llvm::errs() << "  Special Value: " << getName(Ent.first);
+          if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
+            llvm::errs() << " User: " << *UC->User;
+          }
+        }
+
+        clang::QualType CTy = TB.buildType(*Node, Size);
+
+        if (Result.ValueTypesLowerBound.count(Convert(Ent.first)) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
                        << toString(Ent.first) << "\n";
         }
-        Result.ValueTypesUpperBound[Convert(Ent.first)] = CTy;
+        Result.ValueTypesLowerBound[Convert(Ent.first)] = CTy;
+        llvm::errs() << " lower bound: " << CTy.getAsString();
       } else {
         llvm::errs() << " has no lower bound";
       }
@@ -832,6 +881,9 @@ ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
   for (auto &Ent : V2N) {
     G.V2N.insert(Ent.first, Ent.second);
   }
+  for (auto &Ent : V2NContra) {
+    G.V2NContra.insert(Ent.first, Ent.second);
+  }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
   G.CallToID = CallToID;
@@ -843,6 +895,9 @@ void ConstraintsGenerator::cloneTo(
   ConstraintGraph::clone(Old2New, CG, G.CG);
   for (auto &Ent : V2N) {
     G.V2N.insert(Ent.first, Ent.second);
+  }
+  for (auto &Ent : V2NContra) {
+    G.V2NContra.insert(Ent.first, Ent.second);
   }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
@@ -857,10 +912,11 @@ void ConstraintsGenerator::removeUnreachable() {
   for (auto &Ent : V2N) {
     auto *Node = &CG.getNode(Ent.second);
     Worklist.push(Node);
-    // also add contravariant node
-    if (auto N = CG.getNodeOrNull(MakeContraVariant(Node->key))) {
-      Worklist.push(N);
-    }
+  }
+  // also add contravariant node
+  for (auto &Ent : V2NContra) {
+    auto *Node = &CG.getNode(Ent.second);
+    Worklist.push(Node);
   }
   Worklist.push(CG.getStartNode());
   Worklist.push(CG.getEndNode());
@@ -893,6 +949,18 @@ void ConstraintsGenerator::removeUnreachable() {
   }
   for (auto *Node : ToErase) {
     CG.removeNode(Node->key);
+  }
+}
+
+void ConstraintsGenerator::linkContraToCovariant() {
+  for (auto &Ent : V2N) {
+    auto *N = &CG.getNode(Ent.second);
+    if (V2NContra.count(Ent.first) == 0) {
+      continue;
+    }
+    auto *CN = &CG.getNode(V2NContra.at(Ent.first));
+    assert(CN->getPNIVar() == N->getPNIVar());
+    CG.addEdge(*CN, *N, retypd::One{});
   }
 }
 
@@ -1117,12 +1185,6 @@ void ConstraintsGenerator::eliminateCycle() {
   // get scc iterator
   all_scc_iterator<ConstraintGraph *> SCCI = notdec::scc_begin(&NewG);
 
-  // build the reverse value map: TODO migrate to maintain
-  std::map<retypd::NodeKey, std::set<ExtValuePtr>> Node2Val;
-  for (auto &Ent : V2N) {
-    Node2Val[Ent.second].insert(Ent.first);
-  }
-
   // build New2Old map
   std::map<CGNode *, CGNode *> New2Old;
   for (auto &Ent : Old2New) {
@@ -1142,10 +1204,10 @@ void ConstraintsGenerator::eliminateCycle() {
     for (auto *Node : SCC) {
       Node = New2Old.at(Node);
       ToMerge.insert(Node);
-      if (Node2Val.count(Node->key) == 0) {
+      if (V2N.rev().count(Node->key) == 0) {
         continue;
       }
-      for (auto &Val : Node2Val.at(Node->key)) {
+      for (auto &Val : V2N.rev().at(Node->key)) {
         ToMergeVal.insert(Val);
       }
     }
@@ -1242,7 +1304,9 @@ void ConstraintsGenerator::determinize() {
     if (auto *N = getNodeOrNull(Ent.second)) {
       V2NNodes.insert(N);
     }
-    if (auto *N = getNodeOrNull(MakeContraVariant(Ent.second))) {
+  }
+  for (auto &Ent : V2NContra) {
+    if (auto *N = getNodeOrNull(Ent.second)) {
       V2NNodes.insert(N);
     }
   }
@@ -1436,28 +1500,39 @@ std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
 }
 
 retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
-                                                    long OpInd) {
+                                                    long OpInd,
+                                                    retypd::Variance V) {
   llvmValue2ExtVal(Val, User, OpInd);
 
-  if (V2N.count(Val)) {
-    return getNodeOrNull(V2N.at(Val));
+  if (V == retypd::Covariant) {
+    if (V2N.count(Val)) {
+      return getNodeOrNull(V2N.at(Val));
+    }
+    return nullptr;
+  } else {
+    if (V2NContra.count(Val)) {
+      return getNodeOrNull(V2NContra.at(Val));
+    }
+    return nullptr;
   }
-  return nullptr;
 }
 
 retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User,
-                                              long OpInd) {
+                                              long OpInd, retypd::Variance V) {
   llvmValue2ExtVal(Val, User, OpInd);
-  // ?? check the merge map
-  return getNode(V2N.at(Val));
+  if (V == retypd::Covariant) {
+    return getNode(V2N.at(Val));
+  } else {
+    return getNode(V2NContra.at(Val));
+  }
 }
 
-retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User,
-                                                 long OpInd) {
+std::pair<retypd::CGNode &, retypd::CGNode &>
+ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
   llvmValue2ExtVal(Val, User, OpInd);
   auto Dtv = convertTypeVar(Val, User, OpInd);
-  auto &N = CG.createNode(Dtv, getType(Val));
-  assert(N.key.SuffixVariance == retypd::Covariant);
+  retypd::NodeKey K(Dtv, retypd::Covariant);
+  auto &N = CG.createNode(K, getType(Val));
   auto It = V2N.insert(Val, N.key);
   if (!It.second) {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -1466,22 +1541,38 @@ retypd::CGNode &ConstraintsGenerator::createNode(ExtValuePtr Val, User *User,
                  << toString(Dtv) << "\n";
     std::abort();
   }
-  return N;
+  K.SuffixVariance = retypd::Contravariant;
+  auto &NContra = CG.createNode(K, getType(Val));
+  auto It2 = V2NContra.insert(Val, NContra.key);
+  if (!It2.second) {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "setTypeVar: Value already mapped to "
+                 << toString(It2.first->second) << ", but now set to "
+                 << toString(Dtv) << "\n";
+    std::abort();
+  }
+  return {N, NContra};
 }
 
 retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
-                                                      User *User, long OpInd) {
+                                                      User *User, long OpInd,
+                                                      retypd::Variance V) {
   llvmValue2ExtVal(Val, User, OpInd);
-  auto Node = getNodeOrNull(Val, User, OpInd);
+  auto Node = getNodeOrNull(Val, User, OpInd, V);
   if (Node != nullptr) {
     return *Node;
   }
-  return createNode(Val, User, OpInd);
+  auto [N, NC] = createNode(Val, User, OpInd);
+  if (V == retypd::Covariant) {
+    return N;
+  } else {
+    return NC;
+  }
 }
 
 const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,
                                                      User *User, long OpInd) {
-  return getOrInsertNode(Val, User, OpInd).key.Base;
+  return getOrInsertNode(Val, User, OpInd, retypd::Covariant).key.Base;
 }
 
 TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User,
@@ -1661,8 +1752,9 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
   if (Src == nullptr) { // ret void.
     return;
   }
-  auto &SrcVar = cg.getOrInsertNode(Src, &I, 0);
-  auto &DstVar = cg.createNode(ReturnValue{.Func = I.getFunction()}, &I, 0);
+  auto &SrcVar = cg.getOrInsertNode(Src, &I, 0, retypd::Covariant);
+  auto &DstVar =
+      cg.createNodeCovariant(ReturnValue{.Func = I.getFunction()}, &I, 0);
   // src is a subtype of dest
   cg.addSubtype(SrcVar, DstVar);
 }
@@ -1732,7 +1824,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
     SelectInst &I) {
-  auto &DstVar = cg.createNode(&I, nullptr, -1);
+  auto &DstVar = cg.createNodeCovariant(&I, nullptr, -1);
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
   auto &Src1Var = cg.getOrInsertNode(Src1, &I, 0);
@@ -1744,7 +1836,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitSelectInst(
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
     AllocaInst &I) {
-  auto &Node = cg.createNode(&I, nullptr, -1);
+  auto &Node = cg.createNodeCovariant(&I, nullptr, -1);
   // set as pointer type
   cg.setPointer(Node);
 }
@@ -1756,7 +1848,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::handlePHINodes() {
   for (auto I : phiNodes) {
-    auto &DstVar = cg.getNode(I, nullptr, -1);
+    auto &DstVar = cg.getNode(I, nullptr, -1, retypd::Covariant);
     for (long i = 0; i < I->getNumIncomingValues(); i++) {
       auto *Src = I->getIncomingValue(i);
       auto &SrcVar = cg.getOrInsertNode(Src, I, i);
@@ -1889,7 +1981,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
                cg.getPointerElemSize(I.getPointerOperandType()), true);
   auto &LoadNode = cg.CG.getOrInsertNode(LoadedVar, I.getType());
   // formal load -> actual load
-  cg.addSubtype(LoadNode, cg.createNode(&I, nullptr, -1));
+  cg.addSubtype(LoadNode, cg.createNodeCovariant(&I, nullptr, -1));
 }
 
 std::string ConstraintsGenerator::offset(APInt Offset, int Count) {
@@ -2097,7 +2189,7 @@ bool strEq(const char *S1, const char *S2) { return strcmp(S1, S2) == 0; }
 
 bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     Instruction *I, ConstraintsGenerator &cg) const {
-  auto &N = cg.createNode(I, nullptr, -1);
+  auto &N = cg.createNodeCovariant(I, nullptr, -1);
   if (I->getType()->isVoidTy()) {
     return false;
   }
@@ -2255,9 +2347,11 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
       OS << "(";
       for (long i = 0; i < Instr->getNumOperands(); i++) {
         Value *Op = Instr->getOperand(i);
-        auto *Node =
-            CG->getNodeOrNull(Op, const_cast<llvm::Instruction *>(Instr), i);
-        OS << (Node == nullptr ? "null" : Node->str()) << ", ";
+        auto *Node = CG->getNodeOrNull(
+            Op, const_cast<llvm::Instruction *>(Instr), i, retypd::Covariant);
+        auto *NodeC = CG->getNodeOrNull(Op,
+                                     const_cast<llvm::Instruction *>(Instr), i, retypd::Contravariant);
+        OS << (Node == nullptr ? "null" : Node->str()) << "/" << (NodeC == nullptr ? "null" : NodeC->str()) << ", ";
       }
       OS << ")";
     }

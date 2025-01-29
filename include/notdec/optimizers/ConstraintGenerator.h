@@ -205,6 +205,7 @@ struct ConstraintsGenerator {
   // 因为转换过程有临时变量参与，所以这里到Key的映射要缓存。这里使用的就是Val2Node做缓存
   // std::map<ExtValuePtr, retypd::NodeKey> Val2Node;
   DSUMap<ExtValuePtr, retypd::NodeKey> V2N;
+  DSUMap<ExtValuePtr, retypd::NodeKey> V2NContra;
 
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
@@ -227,6 +228,7 @@ struct ConstraintsGenerator {
   }
   void addMergeNode(const retypd::NodeKey &From, const retypd::NodeKey &To) {
     V2N.merge(From, To);
+    V2NContra.merge(From, To);
   }
 
   std::vector<retypd::SubTypeConstraint> genSummary();
@@ -249,6 +251,7 @@ struct ConstraintsGenerator {
   void determinize();
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();
+  void linkContraToCovariant();
 
   void run();
   // clone CG and maintain value map.
@@ -293,12 +296,18 @@ public:
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
-  retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd);
-  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd);
-  retypd::CGNode &createNode(ExtValuePtr Val, User *User, long OpInd);
-  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User, long OpInd);
+  retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd, retypd::Variance V);
+  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd, retypd::Variance V);
+  // Create Node of both variance
+  std::pair<retypd::CGNode &, retypd::CGNode &> createNode(ExtValuePtr Val, User *User, long OpInd);
+  retypd::CGNode & createNodeCovariant(ExtValuePtr Val, User *User, long OpInd) {
+    auto [N, NC] = createNode(Val, User, OpInd);
+    return N;
+  }
+  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User, long OpInd, retypd::Variance V = retypd::Covariant);
 
   const TypeVariable &getTypeVar(ExtValuePtr val, User *User, long OpInd);
+  // convert the value to a type variable.
   TypeVariable convertTypeVar(ExtValuePtr Val, User *User = nullptr,
                               long OpInd = -1);
   TypeVariable convertTypeVarVal(Value *Val, User *User = nullptr,
