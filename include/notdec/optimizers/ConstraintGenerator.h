@@ -181,6 +181,7 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   TRContext &TRCtx;
   llvm::Value *StackPointer;
   std::string data_layout;
+  std::shared_ptr<ConstraintsGenerator> Global;
   // Map from SCC to initial constraint graph.
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
@@ -296,15 +297,19 @@ public:
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
-  retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd, retypd::Variance V);
-  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd, retypd::Variance V);
+  retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd,
+                          retypd::Variance V);
+  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd,
+                                retypd::Variance V);
   // Create Node of both variance
-  std::pair<retypd::CGNode &, retypd::CGNode &> createNode(ExtValuePtr Val, User *User, long OpInd);
-  retypd::CGNode & createNodeCovariant(ExtValuePtr Val, User *User, long OpInd) {
+  std::pair<retypd::CGNode &, retypd::CGNode &>
+  createNode(ExtValuePtr Val, User *User, long OpInd);
+  retypd::CGNode &createNodeCovariant(ExtValuePtr Val, User *User, long OpInd) {
     auto [N, NC] = createNode(Val, User, OpInd);
     return N;
   }
-  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User, long OpInd, retypd::Variance V = retypd::Covariant);
+  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User, long OpInd,
+                                  retypd::Variance V = retypd::Covariant);
 
   const TypeVariable &getTypeVar(ExtValuePtr val, User *User, long OpInd);
   // convert the value to a type variable.
@@ -416,17 +421,16 @@ std::string inline getFuncTvName(llvm::Function *Func) {
   return ValueNamer::getName(*Func, ValueNamer::FuncPrefix);
 }
 
-inline TypeVariable getCallArgTV(retypd::TRContext &Ctx, llvm::Function *Target,
-                                 size_t InstanceId, int32_t Index) {
-  auto TargetName = getFuncTvName(Target);
-  TypeVariable TV = TypeVariable::CreateDtv(Ctx, TargetName, InstanceId);
+inline TypeVariable getCallArgTV(CGNode &Target, size_t InstanceId,
+                                 int32_t Index) {
+  TypeVariable TV = Target.key.Base;
+  TV.instanceId = InstanceId;
   return TV.pushLabel(retypd::InLabel{std::to_string(Index)});
 }
 
-inline TypeVariable getCallRetTV(retypd::TRContext &Ctx, llvm::Function *Target,
-                                 size_t InstanceId) {
-  auto TargetName = getFuncTvName(Target);
-  TypeVariable TV = TypeVariable::CreateDtv(Ctx, TargetName, InstanceId);
+inline TypeVariable getCallRetTV(CGNode &Target, size_t InstanceId) {
+  TypeVariable TV = Target.key.Base;
+  TV.instanceId = InstanceId;
   return TV.pushLabel(retypd::OutLabel{});
 }
 

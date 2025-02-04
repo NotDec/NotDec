@@ -20,7 +20,7 @@
 
 namespace notdec::retypd {
 
-clang::RecordDecl *createStruct(clang::ASTContext &Ctx);
+clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix = "struct_");
 
 struct SketchToCTypeBuilder {
   struct TypeBuilderImpl {
@@ -76,7 +76,7 @@ struct SketchToCTypeBuilder {
   clang::QualType buildType(const CGNode &Root, unsigned BitSize) {
     assert(BitSize > 0);
     return Builder.visitType(Root, BitSize);
-  }
+  } 
 };
 
 } // namespace notdec::retypd

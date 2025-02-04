@@ -61,8 +61,8 @@ SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(std::string Name,
   assert(false && "TODO: fromLatticeElem: Unknown lattice element");
 }
 
-clang::RecordDecl *createStruct(clang::ASTContext &Ctx) {
-  auto *II = &Ctx.Idents.get(ValueNamer::getName("struct_"));
+clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix) {
+  auto *II = &Ctx.Idents.get(ValueNamer::getName(prefix));
   // Create a Struct type for it.
   clang::RecordDecl *decl = clang::RecordDecl::Create(
       Ctx, clang::TagDecl::TagKind::TTK_Struct, Ctx.getTranslationUnitDecl(),
@@ -73,6 +73,10 @@ clang::RecordDecl *createStruct(clang::ASTContext &Ctx) {
 clang::QualType
 SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
                                                  unsigned BitSize) {
+  const char* prefix = "struct_";
+  if (&Node == Node.Parent.getMemoryNode()) {
+    prefix = "MEMORY_";
+  }
   if (Visited.count(&Node)) {
     if (NodeTypeMap.count(&Node)) {
       return NodeTypeMap.at(&Node);
@@ -81,7 +85,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
       // dependency nodes).
       // TODO: remove debug output.
       std::cerr << "Cyclic dependency forces the node become struct.\n";
-      clang::RecordDecl *Decl = createStruct(Ctx);
+      clang::RecordDecl *Decl = createStruct(Ctx, prefix);
       clang::QualType Ret = Ctx.getPointerType(Ctx.getRecordType(Decl));
       NodeTypeMap.emplace(&Node, Ret);
       return Ret;
