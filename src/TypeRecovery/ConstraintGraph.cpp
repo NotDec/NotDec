@@ -1230,8 +1230,8 @@ toString(const std::set<std::pair<FieldLabel, CGNode *>> &S) {
 
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
-  bool DenseSubtype = false;
-  if (const char *val = std::getenv("NOTDEC_SAT_DENSESUBTYPE")) {
+  bool DenseSubtype = true;
+  if (const char *val = std::getenv("NOTDEC_SAT_NO_DENSESUBTYPE")) {
     if ((std::strcmp(val, "1") == 0)) {
       DenseSubtype = true;
     }
