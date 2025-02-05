@@ -121,6 +121,12 @@ public:
   void onUpdatePNType();
   void setAsPtrAdd(CGNode *Other, OffsetRange Off);
   TypeVariable getTypeVar() { return key.Base; }
+  bool hasPointerEdge() const;
+  // Some sanity check
+  bool isPNIAndEdgeMatch() const;
+  bool isPNIPointer() const {
+    return getPNIVar() != nullptr && getPNIVar()->isPointer();
+  }
 };
 
 struct CGEdge {

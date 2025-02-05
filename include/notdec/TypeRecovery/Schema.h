@@ -526,6 +526,17 @@ inline TypeVariable getBase(EdgeLabel label) {
     assert(false && "getBase: Not a ForgetBase or RecallBase");
   }
 }
+inline bool isLoadOrStore(const EdgeLabel& label) {
+  if (auto* RL = std::get_if<RecallLabel>(&label)) {
+    return std::holds_alternative<LoadLabel>(RL->label) ||
+           std::holds_alternative<StoreLabel>(RL->label);
+  } else if (auto* FL = std::get_if<ForgetLabel>(&label)) {
+    return std::holds_alternative<LoadLabel>(FL->label) ||
+           std::holds_alternative<StoreLabel>(FL->label);
+  } else {
+    return false;
+  }
+}
 
 inline FieldLabel getLabel(EdgeLabel label) {
   if (auto *fl = std::get_if<ForgetLabel>(&label)) {

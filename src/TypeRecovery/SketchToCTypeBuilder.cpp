@@ -1,9 +1,4 @@
-#include "TypeRecovery/SketchToCTypeBuilder.h"
-#include "TypeRecovery/ConstraintGraph.h"
-#include "TypeRecovery/Lattice.h"
-#include "TypeRecovery/Schema.h"
-#include "Utils/Range.h"
-#include "utils.h"
+
 #include "clang/AST/Attr.h"
 #include "clang/AST/Comment.h"
 #include <cassert>
@@ -11,6 +6,14 @@
 #include <clang/Basic/SourceLocation.h>
 #include <llvm/ADT/APSInt.h>
 #include <optional>
+
+#include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/SketchToCTypeBuilder.h"
+#include "Utils/Range.h"
+#include "optimizers/ConstraintGenerator.h"
+#include "utils.h"
 
 namespace notdec::retypd {
 
@@ -73,7 +76,7 @@ clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix) {
 clang::QualType
 SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
                                                  unsigned BitSize) {
-  const char* prefix = "struct_";
+  const char *prefix = "struct_";
   if (&Node == Node.Parent.getMemoryNode()) {
     prefix = "MEMORY_";
   }
@@ -93,223 +96,138 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   }
   Visited.emplace(&Node);
 
-  // 1 Check if pointer type.
-  bool isPtrPNI = Node.getPNIVar() != nullptr && Node.getPNIVar()->isPointer();
+  // 1. validate: if number, must have no offset/load/store edge.
+  assert(Node.isPNIAndEdgeMatch());
 
-  // no out edges. Check PNI.
+  bool isPNIPtr = Node.isPNIPointer();
+
+  // No out edges.
   if (Node.outEdges.empty()) {
-    if (isPtrPNI) {
+    // If is pointer, use undef*
+    if (isPNIPtr) {
       auto Ret = Ctx.getPointerType(getUndef(BitSize));
       NodeTypeMap.emplace(&Node, Ret);
       return Ret;
     } else {
+      // no info from graph, just use LLVM type.
       auto Ret = fromLatticeElem(fromLLVMType(Node.getLowTy()), BitSize);
       NodeTypeMap.emplace(&Node, Ret);
       return Ret;
     }
   }
 
-  // if only edges to #End with forget primitive, then it is a simple
-  // primitive type
-  std::string Var;
-  bool AllForgetPrim = true;
-  for (auto &Edge : Node.outEdges) {
-    bool IsForgetPrim = false;
-    if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
-      if (FB->Base.isPrimitive()) {
-        IsForgetPrim = true;
-        if (Var.empty()) {
-          Var = FB->Base.getPrimitiveName();
-        } else {
-          if (Node.key.SuffixVariance == Covariant) {
-            Var = meet(Var, FB->Base.getPrimitiveName());
+  if (!isPNIPtr) {
+    // 2. if only edges
+    // if only edges to #End with forget primitive, then it is a simple
+    // primitive type.
+    std::string Var;
+    for (auto &Edge : Node.outEdges) {
+      if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
+        if (FB->Base.isPrimitive()) {
+          if (Var.empty()) {
+            Var = FB->Base.getPrimitiveName();
           } else {
-            Var = join(Var, FB->Base.getPrimitiveName());
+            if (Node.key.SuffixVariance == Covariant) {
+              Var = meet(Var, FB->Base.getPrimitiveName());
+            } else {
+              Var = join(Var, FB->Base.getPrimitiveName());
+            }
           }
         }
       }
     }
-    AllForgetPrim &= IsForgetPrim;
-  }
 
-  if (isPtrPNI && AllForgetPrim) {
-    assert(false && "PNI is pointer type, but all edges are forget primitive");
-  }
-
-  if (!isPtrPNI && AllForgetPrim) {
     if (Node.key.SuffixVariance == Covariant) {
       Var = meet(Var, fromLLVMType(Node.getLowTy()));
     } else {
       Var = join(Var, fromLLVMType(Node.getLowTy()));
     }
-  }
-  if (AllForgetPrim) {
     auto Ret = fromLatticeElem(Var, BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }
 
-  // std::map<OffsetLabel, SketchNode *> Off2Node;
-  std::map<OffsetRange, clang::QualType> FieldMap;
-  clang::QualType ArrayElemTy;
-  std::optional<std::pair<LoadLabel, CGNode *>> Load2Node;
-  std::optional<std::pair<StoreLabel, CGNode *>> Store2Node;
-  // handle all out edges
-  for (auto &Edge : Node.outEdges) {
-    auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-    if (auto *RL = std::get_if<RecallLabel>(&Edge.getLabel())) {
-      if (auto *OL = std::get_if<OffsetLabel>(&RL->label)) {
-        // if array, defer struct creation
-        if (OL->range.offset == 0 && OL->range.access.size() > 0) {
-          assert(OL->range.access.size() == 1 && "TODO: multi-dimension array");
-          assert(ArrayElemTy.isNull() && "Multiple array edges?");
-          auto BitSize = OL->range.access[0].Size;
-          ArrayElemTy = visitType(Target, BitSize);
-          assert(ArrayElemTy->isPointerType() &&
-                 "Offset edge must be pointer type");
-          ArrayElemTy = ArrayElemTy->getPointeeType();
-        } else {
-          // must be struct type. Save to map early.
-          if (!NodeTypeMap.count(&Node)) {
-            // must be struct type
-            clang::RecordDecl *Decl = createStruct(Ctx);
-            NodeTypeMap.emplace(&Node,
-                                Ctx.getPointerType(Ctx.getRecordType(Decl)));
-          }
-          auto Ty1 = visitType(Target, BitSize);
-          assert(Ty1->isPointerType() ||
-                 Ty1->isArrayType() &&
-                     "Offset edge must be pointer or array type");
-          if (Ty1->isPointerType()) {
-            Ty1 = Ty1->getPointeeType();
-          }
-          auto It = FieldMap.emplace(OL->range, Ty1);
-          assert(It.second && "Duplicate offset edge");
-        }
-
-      } else if (auto *LL = std::get_if<LoadLabel>(&RL->label)) {
-        // assert(!Load2Node);
-        if (Load2Node) {
-          llvm::errs() << "Warning: TypeBuilderImpl::visitType: multiple "
-                          "load edges: "
-                       << toString(Edge.getLabel()) << " and "
-                       << toString(Load2Node->first) << "\n";
-        }
-        Load2Node.emplace(*LL, &Target);
-      } else if (auto *SL = std::get_if<StoreLabel>(&RL->label)) {
-        if (Store2Node) {
-          // TODO: create union?
-          llvm::errs() << "Warning: TypeBuilderImpl::visitType: multiple "
-                          "load edges: "
-                       << toString(Edge.getLabel()) << " and "
-                       << toString(Store2Node->first) << "\n";
-        }
-        Store2Node.emplace(*SL, &Target);
+  auto FI = ConstraintsGenerator::getFieldInfo(Node);
+  // Check for simple pointer type and array type
+  if (FI.Fields.size() == 1) {
+    auto &Field = FI.Fields[0];
+    if (Field.Start.offset == 0) {
+      if (Field.Start.access.size() == 0) {
+        // simple pointer type
+        auto PointeeTy = visitType(Field.OutEdge->getTargetNode(), BitSize);
+        auto Ty = Ctx.getPointerType(PointeeTy);
+        NodeTypeMap.emplace(&Node, Ty);
+        return Ty;
       } else {
-        assert(false && "Unknown edge type");
+        auto ElemTy = visitType(Field.OutEdge->getTargetNode(), BitSize);
+        auto ArrayTy = Ctx.getConstantArrayType(
+            ElemTy, llvm::APInt(32, 0), nullptr, clang::ArrayType::Star, 0);
+        NodeTypeMap.emplace(&Node, ArrayTy);
+        return ArrayTy;
       }
     }
   }
 
-  // handle load/store edges
-  clang::QualType LoadOrStoreTy;
-  if (Load2Node && !Store2Node) {
-    // assert(Node.V == Covariant);
-    LoadOrStoreTy = visitType(*Load2Node->second, Load2Node->first.Size);
-  } else if (!Load2Node && Store2Node) {
-    // assert(Node.V == Contravariant);
-    LoadOrStoreTy = visitType(*Store2Node->second, Store2Node->first.Size);
-  } else if (Load2Node && Store2Node) {
-    // assert(false && "Is this case really exist?");
-    // both load and store present, prefer load when covariant,
-    if (Node.key.SuffixVariance == Covariant) {
-      LoadOrStoreTy = visitType(*Load2Node->second, Load2Node->first.Size);
-    } else {
-      // prefer store when contravariant
-      LoadOrStoreTy = visitType(*Store2Node->second, Store2Node->first.Size);
-    }
-  }
-
-  // 3. has .load / .store edge, then it is a pointer type or struct pointer
-  // type.
-  //
-  // If inserted ahead of time, it must be a struct pointer type.
+  // Create struct type.
+  clang::QualType Ret;
+  clang::RecordDecl *Decl;
   if (NodeTypeMap.count(&Node)) {
-    if (!LoadOrStoreTy.isNull()) {
-      auto It = FieldMap.emplace(OffsetRange{}, LoadOrStoreTy);
-      assert(It.second && "Duplicate zero offset?");
-    }
-    if (!ArrayElemTy.isNull()) {
-      auto It = FieldMap.emplace(OffsetRange{}, ArrayElemTy);
-      assert(It.second && "Duplicate zero offset?");
-    }
-
-    // Get previous struct RecordDecl
-    clang::QualType Ty = NodeTypeMap.at(&Node);
-    clang::RecordDecl *Decl = Ty->getPointeeType()->getAsRecordDecl();
-    // add all field into the struct, and finish struct declaration.
-    Decl->startDefinition();
-    for (auto &Ent : FieldMap) {
-      auto Ty = Ent.second;
-
-      if (Ent.first.access.size() > 0) {
-        // assert(Ent.first.access.size() == 1);
-        // auto Interval = Ent.first.access[0].Size;
-        // create array type
-        Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, 0), nullptr,
-                                      clang::ArrayType::Star, 0);
-      }
-
-      // Generally, a node represents a struct type
-      auto *FII = &Ctx.Idents.get(ValueNamer::getName("field_"));
-      clang::FieldDecl *Field = clang::FieldDecl::Create(
-          Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
-          nullptr, nullptr, false, clang::ICIS_NoInit);
-
-      bool useComment = false;
-      if (useComment) {
-        // TODO support comment. ASTWriter does not support comment?
-        clang::comments::TextComment *TC =
-            new (Ctx.getAllocator()) clang::comments::TextComment(
-                clang::SourceLocation(), clang::SourceLocation(),
-                "off:" + std::to_string(Ent.first.offset));
-        clang::comments::ParagraphComment *PC =
-            new (Ctx.getAllocator()) clang::comments::ParagraphComment(
-                clang::ArrayRef<clang::comments::InlineContentComment *>(TC));
-        clang::comments::FullComment *FC = new (Ctx.getAllocator())
-            clang::comments::FullComment({PC}, nullptr);
-        Ctx.ParsedComments[Field] = FC;
-      } else {
-        Field->addAttr(clang::AnnotateAttr::Create(
-            Ctx, "off:" + std::to_string(Ent.first.offset), nullptr, 0,
-            clang::AttributeCommonInfo(clang::SourceRange())));
-      }
-
-      Decl->addDecl(Field);
-    }
-    Decl->completeDefinition();
-    Ctx.getTranslationUnitDecl()->addDecl(Decl);
-    return Ty;
+    Ret = NodeTypeMap.at(&Node);
+    Decl = Ret->getPointeeType()->getAsRecordDecl();
   } else {
-    // else it is a simple pointer type
-    assert(!LoadOrStoreTy.isNull() || !ArrayElemTy.isNull());
-    if (!LoadOrStoreTy.isNull() && !ArrayElemTy.isNull()) {
-      llvm::errs() << "Warning: TypeBuilderImpl::visitType: both load/store "
-                      "and array edge present: "
-                   << toString(Node.key) << "\n";
-    }
-    if (!LoadOrStoreTy.isNull()) {
-      auto Ty = Ctx.getPointerType(LoadOrStoreTy);
-      NodeTypeMap.emplace(&Node, Ty);
-      return Ty;
-    } else if (!ArrayElemTy.isNull()) {
-      auto ArrayTy = Ctx.getConstantArrayType(
-          ArrayElemTy, llvm::APInt(32, 0), nullptr, clang::ArrayType::Star, 0);
-      NodeTypeMap.emplace(&Node, ArrayTy);
-      return ArrayTy;
-    }
-    assert(false && "Should not reach here");
+    Decl = createStruct(Ctx);
+    NodeTypeMap.emplace(&Node, Ctx.getPointerType(Ctx.getRecordType(Decl)));
+    Ret = Ctx.getPointerType(Ctx.getRecordType(Decl));
   }
+  Decl->startDefinition();
+  for (auto &Ent : FI.Fields) {
+    auto Ty = visitType(Ent.OutEdge->getTargetNode(), BitSize);
+    assert(Ty->isPointerType() ||
+           Ty->isArrayType() && "Offset edge must be pointer or array type");
+    if (Ty->isPointerType()) {
+      // the node is a field pointer type. get the field type.
+      Ty = Ty->getPointeeType();
+    } else if (Ty->isArrayType()) {
+      // do nothing. Keep array type.
+    } else {
+      assert(false && "Offset edge must be pointer or array type");
+    }
+    if (Ent.Start.access.size() > 0) {
+      // create array type
+      Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, 0), nullptr,
+                                    clang::ArrayType::Star, 0);
+    }
+
+    auto *FII = &Ctx.Idents.get(ValueNamer::getName("field_"));
+    clang::FieldDecl *Field = clang::FieldDecl::Create(
+        Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
+        nullptr, nullptr, false, clang::ICIS_NoInit);
+
+    bool useComment = false;
+    if (useComment) {
+      // // TODO support comment. ASTWriter does not support comment?
+      // clang::comments::TextComment *TC =
+      //     new (Ctx.getAllocator()) clang::comments::TextComment(
+      //         clang::SourceLocation(), clang::SourceLocation(),
+      //         "off:" + std::to_string(Ent.first.offset));
+      // clang::comments::ParagraphComment *PC =
+      //     new (Ctx.getAllocator()) clang::comments::ParagraphComment(
+      //         clang::ArrayRef<clang::comments::InlineContentComment *>(TC));
+      // clang::comments::FullComment *FC =
+      //     new (Ctx.getAllocator()) clang::comments::FullComment({PC},
+      //     nullptr);
+      // Ctx.ParsedComments[Field] = FC;
+    } else {
+      Field->addAttr(clang::AnnotateAttr::Create(
+          Ctx, "off:" + std::to_string(Ent.Start.offset), nullptr, 0,
+          clang::AttributeCommonInfo(clang::SourceRange())));
+    }
+
+    Decl->addDecl(Field);
+  }
+  Decl->completeDefinition();
+  Ctx.getTranslationUnitDecl()->addDecl(Decl);
+  return Ret;
 }
 
 } // namespace notdec::retypd

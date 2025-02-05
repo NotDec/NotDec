@@ -2408,4 +2408,49 @@ void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path) {
   M.print(os, &AW);
 }
 
+void ConstraintsGenerator::analyzeFieldRange() {
+  // iterate as if trying to convert to AST.
+  // assert(FieldInfoCache.empty());
+  // std::set<CGNode *> Visited;
+}
+
+ConstraintsGenerator::FieldInfo
+ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
+  // auto It = FieldInfoCache.find(&Node);
+  // if (It != FieldInfoCache.end()) {
+  //   return It->second;
+  // }
+
+  FieldInfo Ret;
+  for (auto &Edge : Node.outEdges) {
+    auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+    assert(&Target != &Node && "Self loop should not exist");
+    // for load/store edges, just return pointer size.
+    if (retypd::isLoadOrStore(Edge.getLabel())) {
+      Ret.Fields.push_back(FieldEntry{.Start = OffsetRange(), .Size = Node.Parent.PointerSize, .OutEdge = &const_cast<CGEdge&>(Edge)});
+    }
+    // for subtype/offset edges, start offset should be the start(Or the edge
+    // should be updated). recursive to calc size.
+    llvm::Optional<OffsetRange> BaseOff;
+    if (std::holds_alternative<retypd::One>(Edge.getLabel())) {
+      BaseOff.emplace();
+    } else if (auto* RL = std::get_if<retypd::RecallLabel>(&Edge.getLabel())) {
+      if (auto *Off = std::get_if<OffsetLabel>(&RL->label)) {
+        BaseOff = Off->range;
+      }
+    } else if (auto FL = std::get_if<retypd::ForgetLabel>(&Edge.getLabel())) {
+      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                   << "ERROR: ForgetLabel should not exist?: " << toString(Edge.getLabel()) << "\n";
+      std::abort();
+    }
+    assert(BaseOff.hasValue() && "Base offset not set");
+    auto Fields = getFieldInfo(Target);
+    auto MaxOff = Fields.getMaxOffset();
+    Ret.Fields.push_back(FieldEntry{.Start = *BaseOff, .Size = MaxOff, .OutEdge = &const_cast<CGEdge&>(Edge)});
+  }
+
+  // FieldInfoCache[&Node] = Ret;
+  return Ret;
+}
+
 } // namespace notdec

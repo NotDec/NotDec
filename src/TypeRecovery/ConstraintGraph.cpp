@@ -2195,4 +2195,76 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
   }
 }
 
+bool isPointerRelated(const FieldLabel &FL) {
+  if (auto *OL = std::get_if<OffsetLabel>(&FL)) {
+    return true;
+  } else if (auto *LL = std::get_if<LoadLabel>(&FL)) {
+    return true;
+  } else if (auto *SL = std::get_if<StoreLabel>(&FL)) {
+    return true;
+  }
+  return false;
+}
+
+bool CGNode::hasPointerEdge() const {
+  for (auto &Edge : outEdges) {
+    if (auto *FL = std::get_if<ForgetLabel>(&Edge.getLabel())) {
+      if (isPointerRelated(FL->label)) {
+        return true;
+      }
+    } else if (auto *RL = std::get_if<RecallLabel>(&Edge.getLabel())) {
+      if (isPointerRelated(RL->label)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool CGNode::isPNIAndEdgeMatch() const {
+  if (!getPNIVar()) {
+    return true;
+  }
+  auto &PN = *getPNIVar();
+  auto Ty = PN.getPtrOrNum();
+  switch (Ty) {
+  case Number:
+    if (hasPointerEdge()) {
+      assert(false && "PNI is number type, but has pointer edge");
+    }
+    return true;
+  case Pointer: { // error if all edges are forget prim.
+    bool AllForgetPrim = true;
+    // bool hasPrim = false;
+    for (auto &Edge : outEdges) {
+      bool IsForgetPrim = false;
+      if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
+        if (FB->Base.isPrimitive()) {
+          IsForgetPrim = true;
+        }
+      }
+      AllForgetPrim &= IsForgetPrim;
+      // hasPrim |= IsForgetPrim;
+    }
+    if (AllForgetPrim) {
+      assert(false &&
+             "PNI is pointer type, but all edges are forget primitive");
+    }
+    // warn if there is forget primitive
+    for (auto &Edge : outEdges) {
+      if (auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
+        if (FB->Base.isPrimitive()) {
+          llvm::errs() << "Warning: TypeBuilderImpl::visitType: Pointer node "
+                          "has forget primitive edge.: "
+                       << toString(Edge.getLabel()) << "\n";
+        }
+      }
+    }
+    return true;
+  }
+  default:
+    return true;
+  }
+}
+
 } // namespace notdec::retypd

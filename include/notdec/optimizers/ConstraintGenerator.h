@@ -254,6 +254,29 @@ struct ConstraintsGenerator {
   void removeUnreachable();
   void linkContraToCovariant();
 
+  using IndexTy = OffsetRange;
+  struct FieldEntry {
+    IndexTy Start;
+    long Size;
+    CGEdge *OutEdge;
+  };
+  struct FieldInfo {
+    std::vector<FieldEntry> Fields;
+    // long TotalSize;
+    long getMaxOffset() {
+      long Max = 0;
+      for (auto &Ent : Fields) {
+        Max = std::max(Max, Ent.Start.offset + Ent.Size);
+      }
+      return Max;
+    }
+  };
+  // Map from (Node, Range) to Edge, FieldDecl*
+  std::map<CGNode *, FieldInfo> FieldInfoCache;
+  // struct field range analysis.
+  void analyzeFieldRange();
+  static FieldInfo getFieldInfo(const CGNode &Node);
+
   void run();
   // clone CG and maintain value map.
   ConstraintsGenerator clone(std::map<const CGNode *, CGNode *> &Old2New);
