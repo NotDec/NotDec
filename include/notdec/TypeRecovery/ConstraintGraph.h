@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <list>
+#include <llvm/ADT/Optional.h>
 #include <llvm/IR/Type.h>
 #include <map>
 #include <memory>
@@ -100,6 +101,7 @@ struct CGNode {
       return nullptr;
     }
   }
+  bool isSpecial() const;
   bool hasNoPNI() const { return PNIVar == nullptr || PNIVar->isNull(); }
 
 protected:
@@ -224,7 +226,7 @@ struct ConstraintGraph {
   bool empty() { return Nodes.empty(); }
 
   // Interface for initial constraint insertion
-  void addConstraint(CGNode &NodeL, CGNode &NodeR);
+  void addConstraint(CGNode &NodeL, CGNode &NodeR, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>> GetLowTy = llvm::None);
 
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
@@ -235,8 +237,8 @@ struct ConstraintGraph {
   void aggressiveSimplify();
   void lowTypeToSubType();
   ConstraintGraph cloneAndSimplify() const;
-  void instantiate(const std::vector<retypd::SubTypeConstraint> &Sum,
-                   size_t ID);
+  void instantiate(llvm::Function* Target, const std::vector<retypd::SubTypeConstraint> &Sum,
+                   size_t ID, std::function<llvm::Type *(const TypeVariable &)> GetLowTy);
   // CGNode &instantiateSketch(std::shared_ptr<retypd::Sketch> Sk);
 
 public:
@@ -278,8 +280,8 @@ public:
   /// nodes as accepting by link with `forget #top`.
   void sketchSplit();
   std::vector<SubTypeConstraint> solve_constraints_between();
-  void addRecalls(CGNode &N);
-  void addForgets(CGNode &N);
+  void addRecalls(CGNode &N, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>> GetLowTy = llvm::None);
+  void addForgets(CGNode &N, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>> GetLowTy = llvm::None);
   void printGraph(const char *DotFile) const;
   ConstraintGraph getSubGraph(const std::set<const CGNode *> &Roots,
                               bool AllReachable) const;

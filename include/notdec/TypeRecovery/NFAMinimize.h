@@ -130,6 +130,9 @@ struct NFADeterminizer {
         }
       }
     }
+    if(PN == nullptr) {
+      llvm::errs() << "here\n";
+    }
     return PN;
   }
 

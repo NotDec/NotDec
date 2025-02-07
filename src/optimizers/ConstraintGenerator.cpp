@@ -218,9 +218,8 @@ llvm::Type *getType(const ExtValuePtr &Val) {
   std::abort();
 }
 
-unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
+unsigned int getSize(llvm::Type *Ty, unsigned int pointer_size) {
   assert(pointer_size != 0);
-  auto Ty = getType(Val);
   if (Ty->isPointerTy()) {
     return pointer_size;
   }
@@ -230,6 +229,10 @@ unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "ERROR: getSize: unhandled llvm type: " << *Ty << "\n";
   std::abort();
+}
+
+unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
+  return getSize(getType(Val), pointer_size);
 }
 
 // TODO refactor: increase code reusability
@@ -380,10 +383,24 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     std::shared_ptr<ConstraintsGenerator> Generator =
         std::make_shared<ConstraintsGenerator>(
-            *this, M.getContext(), Name, SCCs,
-            [&](auto *F) { return &FuncSummaries.at(F); });
+            *this, M.getContext(), Name, SCCs, [&](auto *F) {
+              return std::make_pair(&FuncSummaries.at(F), FuncCtxs.at(F));
+            });
 
     Generator->run();
+
+    for (auto &Ent : Generator->CG.Nodes) {
+      if (Ent.second.isSpecial()) {
+        continue;
+      }
+      if (Ent.second.key.Base.isPrimitive()) {
+        continue;
+      }
+      if (Ent.second.getLowTy() == nullptr) {
+        llvm::errs() << "Node: " << toString(Ent.first) << " has no LowType";
+        llvm::errs() << "\n";
+      }
+    }
 
     // TODO: If the SCC is not called by any other function out of the SCC, we
     // can skip summary generation. Even start Top-down phase.
@@ -465,12 +482,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         return DTrans.find(N);
       }
       bool hasEnd = false;
-      bool allEnd = true;
+      // bool allEnd = true;
       for (auto *Node : N) {
         if (Node->key.Base.isEnd()) {
           hasEnd = true;
         } else {
-          allEnd = false;
+          // allEnd = false;
         }
       }
       // assert(hasEnd == allEnd);
@@ -479,6 +496,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         NewNode = CG.getEndNode();
       } else {
         auto *PN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(N);
+        // assert(PN->getLowTy() != nullptr);
         NewNode = &CG.createNodeClonePNI(
             retypd::NodeKey{TypeVariable::CreateDtv(
                 CG.Ctx, ValueNamer::getName(NamePrefix))},
@@ -683,6 +701,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     // TODO further merge and simplify the graph?
+    
   }
 
   // Create type for memory node
@@ -766,6 +785,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     auto &G = SCCGraphs[i];
     assert(G.PG);
     std::map<const CGNode *, CGNode *> Old2New;
+    for (auto &Ent : G.CG.Nodes) {
+      if (Ent.second.isSpecial()) {
+        continue;
+      }
+      if (Ent.second.getLowTy() == nullptr) {
+        llvm::errs() << "Node: " << toString(Ent.first) << " has no LowType";
+        llvm::errs() << "\n";
+      }
+    }
     ConstraintsGenerator G2 = postProcess(G, Old2New);
 
     if (DebugDir) {
@@ -822,7 +850,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           }
         }
 
-        clang::QualType CTy = TB.buildType(*Node, Size);
+        clang::QualType CTy = TB.buildType(*Node);
 
         if (Result.ValueTypes.count(Convert(Ent.first)) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
@@ -874,7 +902,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           }
         }
 
-        clang::QualType CTy = TB.buildType(*Node, Size);
+        clang::QualType CTy = TB.buildType(*Node);
 
         if (Result.ValueTypesLowerBound.count(Convert(Ent.first)) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
@@ -893,8 +921,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   }
 
   // build AST type for memory node
-  auto Size = pointer_size;
-  clang::QualType CTy = TB.buildType(*MemNode, Size);
+  clang::QualType CTy = TB.buildType(*MemNode);
   Result.MemoryType = CTy;
 
   // move the ASTUnit to result
@@ -1517,8 +1544,37 @@ void ConstraintsGenerator::run() {
 
 void ConstraintsGenerator::instantiateSummary(llvm::Function *Target,
                                               size_t InstanceId) {
-  const std::vector<retypd::SubTypeConstraint> *Sum = GetSummary(Target);
-  CG.instantiate(*Sum, InstanceId);
+  auto [Sum, Gen1] = GetSummary(Target);
+  auto &Gen = Gen1;
+  std::function<llvm::Type *(const TypeVariable &)> GetLowTy =
+      [&Gen, Target](const TypeVariable &TV) -> llvm::Type * {
+    auto TV1 = TV;
+    if (TV1.instanceId != 0) {
+      TV1.instanceId = 0;
+    }
+    auto *Node = Gen->getNodeOrNull(TV1);
+    if (Node != nullptr && Node->getLowTy() != nullptr) {
+      return Node->getLowTy();
+    }
+    // try to fix, using load label
+    if (TV1.hasLabel()) {
+      auto last = TV1.getLabels().back();
+      if (auto *LL = std::get_if<retypd::LoadLabel>(&last)) {
+        return llvm::Type::getIntNTy(Target->getContext(), LL->Size);
+      } else if (auto *LL = std::get_if<retypd::StoreLabel>(&last)) {
+        return llvm::Type::getIntNTy(Target->getContext(), LL->Size);
+      }
+    }
+    if (TV1.isPrimitive()) {
+      auto Ret =
+          retypd::ToLLVMType(Target->getContext(), TV1.getPrimitiveName());
+      if (Ret != nullptr) {
+        return Ret;
+      }
+    }
+    return nullptr;
+  };
+  CG.instantiate(Target, *Sum, InstanceId, GetLowTy);
 }
 
 std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
@@ -1716,7 +1772,8 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
     // Consistent with Call handling
-    TypeVariable tv = getTypeVar(arg->getParent(), nullptr, -1);
+    auto &N = getOrInsertNode(arg->getParent(), nullptr, -1);
+    auto tv = N.key.Base;
     tv = tv.pushLabel(retypd::InLabel{std::to_string(arg->getArgNo())});
     return tv;
   }
@@ -1823,8 +1880,15 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
       cg.instantiateSummary(Target, InstanceId);
     }
     cg.CallToID.emplace(&I, InstanceId);
+
+    // Create target func instance node with low type.
+    auto FuncVar = TargetNode.key.Base;
+    FuncVar.instanceId = InstanceId;
+    auto &FuncNode = cg.CG.getOrInsertNode(FuncVar, Target->getFunctionType());
+    cg.CG.getOrInsertNode(retypd::NodeKey(FuncVar, retypd::Contravariant),
+                          Target->getFunctionType());
     for (int i = 0; i < I.arg_size(); i++) {
-      auto ArgVar = getCallArgTV(TargetNode, InstanceId, i);
+      auto ArgVar = getCallArgTV(FuncNode, i);
       auto &ValVar = cg.getOrInsertNode(I.getArgOperand(i), &I, i);
       auto &ArgNode =
           cg.CG.getOrInsertNode(ArgVar, I.getArgOperand(i)->getType());
@@ -1833,7 +1897,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     }
     if (!I.getType()->isVoidTy()) {
       // for return value
-      auto FormalRetVar = getCallRetTV(TargetNode, InstanceId);
+      auto FormalRetVar = getCallRetTV(FuncNode);
       auto &ValVar = cg.getOrInsertNode(&I, nullptr, -1);
       auto &RetNode = cg.CG.getOrInsertNode(FormalRetVar, I.getType());
       // formal return -> actual return
@@ -1889,7 +1953,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
     // ignore cast, view as assignment.
     auto *Src = I.getOperand(0);
     auto &SrcVar = cg.getOrInsertNode(Src, &I, 0);
-    /*auto &Node = */ cg.addVarSubtype(&I, SrcVar);
+    /* auto &Node = */ cg.addVarSubtype(&I, SrcVar);
     // cg.setPointer(Node);
     return;
   }
@@ -2427,26 +2491,32 @@ ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
     assert(&Target != &Node && "Self loop should not exist");
     // for load/store edges, just return pointer size.
     if (retypd::isLoadOrStore(Edge.getLabel())) {
-      Ret.Fields.push_back(FieldEntry{.Start = OffsetRange(), .Size = Node.Parent.PointerSize, .OutEdge = &const_cast<CGEdge&>(Edge)});
+      Ret.Fields.push_back(FieldEntry{.Start = OffsetRange(),
+                                      .Size = Node.Parent.PointerSize,
+                                      .OutEdge = &const_cast<CGEdge &>(Edge)});
+      continue;
     }
     // for subtype/offset edges, start offset should be the start(Or the edge
     // should be updated). recursive to calc size.
     llvm::Optional<OffsetRange> BaseOff;
     if (std::holds_alternative<retypd::One>(Edge.getLabel())) {
       BaseOff.emplace();
-    } else if (auto* RL = std::get_if<retypd::RecallLabel>(&Edge.getLabel())) {
+    } else if (auto *RL = std::get_if<retypd::RecallLabel>(&Edge.getLabel())) {
       if (auto *Off = std::get_if<OffsetLabel>(&RL->label)) {
         BaseOff = Off->range;
       }
     } else if (auto FL = std::get_if<retypd::ForgetLabel>(&Edge.getLabel())) {
       llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "ERROR: ForgetLabel should not exist?: " << toString(Edge.getLabel()) << "\n";
+                   << "ERROR: ForgetLabel should not exist?: "
+                   << toString(Edge.getLabel()) << "\n";
       std::abort();
     }
     assert(BaseOff.hasValue() && "Base offset not set");
     auto Fields = getFieldInfo(Target);
     auto MaxOff = Fields.getMaxOffset();
-    Ret.Fields.push_back(FieldEntry{.Start = *BaseOff, .Size = MaxOff, .OutEdge = &const_cast<CGEdge&>(Edge)});
+    Ret.Fields.push_back(FieldEntry{.Start = *BaseOff,
+                                    .Size = MaxOff,
+                                    .OutEdge = &const_cast<CGEdge &>(Edge)});
   }
 
   // FieldInfoCache[&Node] = Ret;

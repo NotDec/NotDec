@@ -567,7 +567,7 @@ bool PNINode::updateLowTy(llvm::Type *T) {
     setPtrOrNum(fromLLVMTy(LowTy, Parent->PointerSize));
   } else {
     if (isPNRelated()) {
-      assert(isPtrOrNum(T, Parent->PointerSize));
+      // assert(isPtrOrNum(T, Parent->PointerSize));
       // Low type is not important, just careful about possible PNI update.
       if (T->isPointerTy() && !isPointer()) {
         setPtrOrNum(Pointer);

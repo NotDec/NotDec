@@ -128,6 +128,7 @@ std::string getName(const ExtValuePtr &Val);
 std::string toString(const ExtValuePtr &Val);
 void dump(const ExtValuePtr &Val);
 llvm::Type *getType(const ExtValuePtr &Val);
+unsigned int getSize(llvm::Type *Ty, unsigned int pointer_size);
 unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size);
 inline void llvmValue2ExtVal(ExtValuePtr &Val, User *User, long OpInd) {
   // Differentiate int32/int64 by User.
@@ -233,7 +234,8 @@ struct ConstraintsGenerator {
   }
 
   std::vector<retypd::SubTypeConstraint> genSummary();
-  std::function<const std::vector<retypd::SubTypeConstraint> *(
+  std::function<std::pair<const std::vector<retypd::SubTypeConstraint> *,
+                          std::shared_ptr<ConstraintsGenerator>>(
       llvm::Function *)>
       GetSummary;
   void instantiateSummary(llvm::Function *Target, size_t instanceId);
@@ -286,7 +288,8 @@ struct ConstraintsGenerator {
       TypeRecovery &Ctx, LLVMContext &LLCtx, std::string Name,
       std::set<llvm::Function *> SCCs,
       std::function<
-          const std::vector<retypd::SubTypeConstraint> *(llvm::Function *)>
+          std::pair<const std::vector<retypd::SubTypeConstraint> *,
+                    std::shared_ptr<ConstraintsGenerator>>(llvm::Function *)>
           GetSummary)
       : Ctx(Ctx), LLCtx(LLCtx),
         CG(Ctx.TRCtx, &LLCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
@@ -444,16 +447,13 @@ std::string inline getFuncTvName(llvm::Function *Func) {
   return ValueNamer::getName(*Func, ValueNamer::FuncPrefix);
 }
 
-inline TypeVariable getCallArgTV(CGNode &Target, size_t InstanceId,
-                                 int32_t Index) {
+inline TypeVariable getCallArgTV(CGNode &Target, int32_t Index) {
   TypeVariable TV = Target.key.Base;
-  TV.instanceId = InstanceId;
   return TV.pushLabel(retypd::InLabel{std::to_string(Index)});
 }
 
-inline TypeVariable getCallRetTV(CGNode &Target, size_t InstanceId) {
+inline TypeVariable getCallRetTV(CGNode &Target) {
   TypeVariable TV = Target.key.Base;
-  TV.instanceId = InstanceId;
   return TV.pushLabel(retypd::OutLabel{});
 }
 

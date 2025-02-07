@@ -75,6 +75,9 @@ void ConstraintGraph::lowTypeToSubType() {
     if (Node.getPNIVar()->isUnknown() || Node.getPNIVar()->isPointer()) {
       continue;
     }
+    if (Node.getLowTy()->isFunctionTy()) {
+      continue;
+    }
     std::string LowTyStr = fromLLVMType(Node.getLowTy());
     if (startswith(LowTyStr, "int")) {
       // TODO: if already has sint or uint subtype, skip.
@@ -319,7 +322,8 @@ std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
 }
 
 void ConstraintGraph::instantiate(
-    const std::vector<retypd::SubTypeConstraint> &Sum, size_t ID) {
+    llvm::Function *Target, const std::vector<retypd::SubTypeConstraint> &Sum,
+    size_t ID, std::function<llvm::Type *(const TypeVariable &)> GetLowTy) {
   assert(ID > 0);
   for (auto &C : Sum) {
     auto Sub = C.sub;
@@ -335,21 +339,21 @@ void ConstraintGraph::instantiate(
       if (Sub.isPrimitive()) {
         if (auto LowTy = ToLLVMType(*LLCtx, Sub.getBaseName())) {
           assert(!Sup.isPrimitive());
-          auto &SupNode = getOrInsertNode(Sup, nullptr);
+          auto &SupNode = getOrInsertNode(Sup, GetLowTy(Sup));
           SupNode.getPNIVar()->updateLowTy(LowTy);
           continue;
         }
       } else if (Sup.isPrimitive()) {
         if (auto LowTy = ToLLVMType(*LLCtx, Sup.getBaseName())) {
           assert(!Sub.isPrimitive());
-          auto &SubNode = getOrInsertNode(Sub, nullptr);
+          auto &SubNode = getOrInsertNode(Sub, GetLowTy(Sub));
           SubNode.getPNIVar()->updateLowTy(LowTy);
           continue;
         }
       }
     }
 
-    addConstraint(getOrInsertNode(Sub, nullptr), getOrInsertNode(Sup, nullptr));
+    addConstraint(getOrInsertNode(Sub, GetLowTy(Sub)), getOrInsertNode(Sup, GetLowTy(Sup)), GetLowTy);
   }
   // TODO What about PNI
 }
@@ -1389,7 +1393,10 @@ ConstraintGraph ConstraintGraph::fromConstraints(TRContext &Ctx,
 
 /// Interface for initial constraint insertion
 /// Also build the initial graph (Algorithm D.1 Transducer)
-void ConstraintGraph::addConstraint(CGNode &NodeL, CGNode &NodeR) {
+void ConstraintGraph::addConstraint(
+    CGNode &NodeL, CGNode &NodeR,
+    llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
+        GetLowTy) {
   assert(&NodeL.Parent == this && "addConstraint: NodeL is not in the graph");
   assert(&NodeR.Parent == this && "addConstraint: NodeR is not in the graph");
   // 1. add 1-labeled edge between them
@@ -1398,11 +1405,11 @@ void ConstraintGraph::addConstraint(CGNode &NodeL, CGNode &NodeR) {
   }
   // 2. add each sub var node and edges.
   // 2.1 left
-  addRecalls(NodeL);
-  addForgets(NodeL);
+  addRecalls(NodeL, GetLowTy);
+  addForgets(NodeL, GetLowTy);
   // 2.2 right
-  addForgets(NodeR);
-  addRecalls(NodeR);
+  addForgets(NodeR, GetLowTy);
+  addRecalls(NodeR, GetLowTy);
 
   // 3-4 the inverse of the above
   // 3. inverse node and 1-labeled edge
@@ -1413,11 +1420,11 @@ void ConstraintGraph::addConstraint(CGNode &NodeL, CGNode &NodeR) {
   // add 1-labeled edge between them
   addEdge(RNodeR, RNodeL, One{});
   // 4.1 inverse left
-  addRecalls(RNodeL);
-  addForgets(RNodeL);
+  addRecalls(RNodeL, GetLowTy);
+  addForgets(RNodeL, GetLowTy);
   // 4.2 inverse right
-  addForgets(RNodeR);
-  addRecalls(RNodeR);
+  addForgets(RNodeR, GetLowTy);
+  addRecalls(RNodeR, GetLowTy);
 }
 
 std::optional<std::pair<FieldLabel, NodeKey>> NodeKey::forgetOnce() const {
@@ -1431,12 +1438,18 @@ std::optional<std::pair<FieldLabel, NodeKey>> NodeKey::forgetOnce() const {
   return std::make_pair(Label, NewKey);
 }
 
-void ConstraintGraph::addRecalls(CGNode &N) {
+void ConstraintGraph::addRecalls(
+    CGNode &N, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
+                   GetLowTy) {
   CGNode *T = &N;
   auto V1 = T->key.forgetOnce();
   while (V1.has_value()) {
     auto [Cap, Next] = V1.value();
-    auto &NNext = getOrInsertNode(Next, nullptr);
+    auto &NNext =
+        getOrInsertNode(Next, GetLowTy ? (*GetLowTy)(Next.Base) : nullptr);
+    if (NNext.getLowTy() == nullptr && !GetLowTy) {
+      llvm::errs() << "here";
+    }
     addEdge(NNext, *T, RecallLabel{Cap});
     V1 = Next.forgetOnce();
     T = &NNext;
@@ -1447,12 +1460,18 @@ void ConstraintGraph::addRecalls(CGNode &N) {
   // }
 }
 
-void ConstraintGraph::addForgets(CGNode &N) {
+void ConstraintGraph::addForgets(
+    CGNode &N, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
+                   GetLowTy) {
   CGNode *T = &N;
   auto V1 = T->key.forgetOnce();
   while (V1.has_value()) {
     auto [Cap, Next] = V1.value();
-    auto &NNext = getOrInsertNode(Next, nullptr);
+    auto &NNext =
+        getOrInsertNode(Next, GetLowTy ? (*GetLowTy)(Next.Base) : nullptr);
+    if (NNext.getLowTy() == nullptr && !GetLowTy) {
+      llvm::errs() << "here";
+    }
     addEdge(*T, NNext, ForgetLabel{Cap});
     V1 = Next.forgetOnce();
     T = &NNext;
@@ -1474,7 +1493,7 @@ CGNode &ConstraintGraph::getOrInsertNodeWithPNI(const NodeKey &N, PNINode *PN) {
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N,
                                          llvm::Type *LowType) {
   auto [it, inserted] = Nodes.try_emplace(N, *this, N, (llvm::Type *)nullptr);
-  if (!inserted) {
+  if (it->second.getLowTy() == nullptr) {
     if (LowType != nullptr) {
       it->second.getPNIVar()->updateLowTy(LowType);
     }
@@ -2219,6 +2238,11 @@ bool CGNode::hasPointerEdge() const {
     }
   }
   return false;
+}
+
+bool CGNode::isSpecial() const {
+  return this == Parent.getStartNode() || this == Parent.getEndNode() ||
+         this == Parent.getMemoryNode();
 }
 
 bool CGNode::isPNIAndEdgeMatch() const {

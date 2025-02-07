@@ -19,7 +19,22 @@ bool isLowTyString(std::string a) {
 }
 
 llvm::Type *ToLLVMType(llvm::LLVMContext &Ctx, std::string a) {
-  return nullptr;
+  // if (a == "top") {
+  //   return nullptr;
+  // }
+  if (startswith(a, "int")) {
+    return llvm::Type::getIntNTy(Ctx, std::stoi(a.substr(3)));
+  }
+  if (a == "float") {
+    return llvm::Type::getFloatTy(Ctx);
+  }
+  if (a == "double") {
+    return llvm::Type::getDoubleTy(Ctx);
+  }
+  if (a == "ptr") {
+    return llvm::Type::getInt8PtrTy(Ctx);
+  }
+  assert(false && "TODO: unhandled type");
 }
 
 std::string fromLLVMType(llvm::Type *T) {
@@ -37,6 +52,9 @@ std::string fromLLVMType(llvm::Type *T) {
   }
   if (T->isPointerTy()) {
     return "ptr";
+  }
+  if (T->isFunctionTy()) {
+    return "func";
   }
   assert(false && "TODO: unhandled LLVM type");
 }

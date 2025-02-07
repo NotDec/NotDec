@@ -28,7 +28,7 @@ struct SketchToCTypeBuilder {
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
     // Main interface: recursively visit the node and build the type
-    clang::QualType visitType(const CGNode &Node, unsigned BitSize);
+    clang::QualType visitType(const CGNode &Node);
     TypeBuilderImpl(clang::ASTContext &Ctx) : Ctx(Ctx) {}
 
     std::map<std::string, clang::QualType> TypeDefs;
@@ -73,9 +73,8 @@ struct SketchToCTypeBuilder {
   SketchToCTypeBuilder(llvm::StringRef FileName)
       : ASTUnit(llvm2c::buildAST("decompilation.c")) {}
 
-  clang::QualType buildType(const CGNode &Root, unsigned BitSize) {
-    assert(BitSize > 0);
-    return Builder.visitType(Root, BitSize);
+  clang::QualType buildType(const CGNode &Root) {
+    return Builder.visitType(Root);
   } 
 };
 

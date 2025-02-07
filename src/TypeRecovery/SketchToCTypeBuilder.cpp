@@ -74,8 +74,13 @@ clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix) {
 }
 
 clang::QualType
-SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
-                                                 unsigned BitSize) {
+SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
+  unsigned BitSize;
+  if (Node.isPNIPointer() || Node.hasPointerEdge()) {
+    BitSize = Node.Parent.PointerSize;
+  } else {
+    BitSize = getSize(Node.getLowTy(), Node.Parent.PointerSize);
+  }
   const char *prefix = "struct_";
   if (&Node == Node.Parent.getMemoryNode()) {
     prefix = "MEMORY_";
@@ -154,12 +159,12 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     if (Field.Start.offset == 0) {
       if (Field.Start.access.size() == 0) {
         // simple pointer type
-        auto PointeeTy = visitType(Field.OutEdge->getTargetNode(), BitSize);
+        auto PointeeTy = visitType(Field.OutEdge->getTargetNode());
         auto Ty = Ctx.getPointerType(PointeeTy);
         NodeTypeMap.emplace(&Node, Ty);
         return Ty;
       } else {
-        auto ElemTy = visitType(Field.OutEdge->getTargetNode(), BitSize);
+        auto ElemTy = visitType(Field.OutEdge->getTargetNode());
         auto ArrayTy = Ctx.getConstantArrayType(
             ElemTy, llvm::APInt(32, 0), nullptr, clang::ArrayType::Star, 0);
         NodeTypeMap.emplace(&Node, ArrayTy);
@@ -181,7 +186,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   }
   Decl->startDefinition();
   for (auto &Ent : FI.Fields) {
-    auto Ty = visitType(Ent.OutEdge->getTargetNode(), BitSize);
+    auto Ty = visitType(Ent.OutEdge->getTargetNode());
     assert(Ty->isPointerType() ||
            Ty->isArrayType() && "Offset edge must be pointer or array type");
     if (Ty->isPointerType()) {
