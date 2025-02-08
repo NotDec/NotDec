@@ -177,9 +177,9 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Specify the result type of this analysis pass.
   using Result = ::notdec::llvm2c::HighTypes;
 
-  TypeRecovery(TRContext &TRCtx) : TRCtx(TRCtx) {}
+  TypeRecovery(std::shared_ptr<retypd::TRContext>TRCtx) : TRCtx(TRCtx) {}
 
-  TRContext &TRCtx;
+  std::shared_ptr<retypd::TRContext>TRCtx;
   llvm::Value *StackPointer;
   std::string data_layout;
   std::shared_ptr<ConstraintsGenerator> Global;
@@ -233,7 +233,8 @@ struct ConstraintsGenerator {
     V2NContra.merge(From, To);
   }
 
-  std::vector<retypd::SubTypeConstraint> genSummary();
+  std::vector<retypd::SubTypeConstraint> genSummaryOld();
+  ConstraintsGenerator genSummary();
   std::function<std::pair<const std::vector<retypd::SubTypeConstraint> *,
                           std::shared_ptr<ConstraintsGenerator>>(
       llvm::Function *)>

@@ -346,17 +346,6 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
   return Changed;
 }
 
-PtrOrNum fromIPChar(char C) {
-  switch (C) {
-  case 'I':
-    return Number;
-  case 'P':
-    return Pointer;
-  default:
-    assert(false && "fromIPChar: unhandled char");
-  }
-}
-
 // overload with check
 llvm::iplist<PNINode>::iterator PNINode::eraseFromParent() {
   // Check links before destruction. Should be replaced beforehand.
@@ -369,66 +358,6 @@ void PNIGraph::onUpdatePNType(PNINode *N) {
   if (PNIToNode.count(N) > 0) {
     for (auto *Node : PNIToNode[N]) {
       Node->onUpdatePNType();
-    }
-  }
-}
-
-// return if updated.
-bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
-  assert(NewTy != Null);
-  if (Ty == Null) {
-    Ty = NewTy;
-    return true;
-  }
-
-  if (Ty == NotPN) {
-    assert(NewTy == NotPN);
-    return false;
-  }
-  assert(NewTy != NotPN);
-
-  assert(isPNRelated() && NewTy != NotPN && NewTy != Null);
-  if (Ty == NewTy) {
-    return false;
-  }
-  if ((Ty == Number && NewTy == Pointer) ||
-      (Ty == Pointer && NewTy == Number)) {
-    std::cerr << "Warning: PNINode::setPtrOrNum: Pointer and NonPtr merge\n";
-    hasConflict = true;
-    if (Ty == Number && NewTy == Pointer) {
-      Ty = Pointer;
-      Parent->onUpdatePNType(this);
-      return true;
-    } else {
-      return false;
-    }
-  }
-  assert(Ty == Unknown);
-  Ty = NewTy;
-  Parent->onUpdatePNType(this);
-  return true;
-}
-
-// Like a operator
-PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right) {
-  // this type enum is determined when creating the node by inspecting the LLVM
-  // Type
-  if (Left == NotPN) {
-    assert(Right == NotPN);
-  }
-  if (Right == NotPN) {
-    assert(Left == NotPN);
-  }
-
-  if (Left == Right) { // same inner type
-    return Left;
-  } else {
-    unsigned char Val = UniTyMergeMap[Left][Right];
-    assert(Val != 2);
-    if (Val != 0) {
-      return Left;
-    } else {
-      return Right;
     }
   }
 }
@@ -538,56 +467,46 @@ llvm::Type *PNINode::normalizeLowTy(llvm::Type *T) {
   return T;
 }
 
-PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize) {
-  assert(PointerSize == 32 || PointerSize == 64);
-  if (LowTy == nullptr) {
-    return Null;
-  } else if (LowTy->isPointerTy()) {
-    return Pointer;
-  } else if (LowTy->isIntegerTy(PointerSize)) {
-    return Unknown;
-  } else {
-    return NotPN;
+
+
+bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
+  bool Updated = Ty.setPtrOrNum(NewTy);
+  if (Updated) {
+    Parent->onUpdatePNType(this);
   }
+  return Updated;
 }
 
-bool isPtrOrNum(llvm::Type *LowTy, long PointerSize) {
-  PtrOrNum PN = fromLLVMTy(LowTy, PointerSize);
-  return PN != Null && PN != NotPN;
-}
+// bool PNINode::updateLowTy(std::string T) {
+//   bool Ret = false;
+//   assert(!T.empty());
 
-bool PNINode::updateLowTy(llvm::Type *T) {
-  bool Ret = false;
-  assert(T != nullptr);
-  T = normalizeLowTy(T);
-
-  if (LowTy == nullptr) {
-    LowTy = T;
-    Ret = true;
-    setPtrOrNum(fromLLVMTy(LowTy, Parent->PointerSize));
-  } else {
-    if (isPNRelated()) {
-      // assert(isPtrOrNum(T, Parent->PointerSize));
-      // Low type is not important, just careful about possible PNI update.
-      if (T->isPointerTy() && !isPointer()) {
-        setPtrOrNum(Pointer);
-        Ret = true;
-      }
-    } else {
-      assert(LowTy == T);
-    }
-  }
-  return Ret;
-}
+//   if (LowTy.empty()) {
+//     LowTy = T;
+//     Ret = true;
+//     setPtrOrNum(fromLLVMTy(LowTy, Parent->PointerSize));
+//   } else {
+//     if (isPNRelated()) {
+//       // assert(isPtrOrNum(T, Parent->PointerSize));
+//       // Low type is not important, just careful about possible PNI update.
+//       if (T->isPointerTy() && !isPointer()) {
+//         setPtrOrNum(Pointer);
+//         Ret = true;
+//       }
+//     } else {
+//       assert(LowTy == T);
+//     }
+//   }
+//   return Ret;
+// }
 
 // When LowTy is pointer-sized int, we initialize Ty as Unknown.
 PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
     : node_with_erase(SSG), Id(ValueNamer::getId()),
-      Ty(fromLLVMTy(LowTy, SSG.PointerSize)), LowTy(normalizeLowTy(LowTy)) {}
+      Ty(LowTy, SSG.PointerSize) {}
 
 PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
-    : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty),
-      LowTy(OtherGraphNode.LowTy), hasConflict(OtherGraphNode.hasConflict) {}
+    : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty) {}
 
 void PNIGraph::cloneFrom(const PNIGraph &G,
                          std::map<const CGNode *, CGNode *> Old2New) {

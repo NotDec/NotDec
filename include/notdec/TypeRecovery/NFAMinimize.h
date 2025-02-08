@@ -123,7 +123,7 @@ struct NFADeterminizer {
         PN = GT::getInner(N1)->getPNIVar();
       } else {
         auto *PN1 = GT::getInner(N1)->getPNIVar();
-        if (PN1 != nullptr && !PN1->isNull() && !PN->equal(*PN1)) {
+        if (PN1 != nullptr && !PN1->isNull() && !PN->tyEqual(*PN1)) {
           llvm::errs() << "Error: Different PNI in a set of nodes!\n";
           printPNDiffSet(N);
           return nullptr;
@@ -142,7 +142,7 @@ struct NFADeterminizer {
     }
     auto *OldPN = ensureSamePNI(N);
     auto &NewNode = NewG->createNodeClonePNI(
-        NodeKey{TypeVariable::CreateDtv(NewG->Ctx, NewVN.getNewName("dfa_"))},
+        NodeKey{TypeVariable::CreateDtv(*NewG->Ctx, NewVN.getNewName("dfa_"))},
         OldPN);
 
     auto it = DTrans.emplace(N, &NewNode);

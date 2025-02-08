@@ -32,41 +32,7 @@ struct PNIGraph;
 struct CGNode;
 
 OffsetRange matchOffsetRange(llvm::Value *I);
-
-// #region PtrOrNum
-
-enum PtrOrNum {
-  Unknown = 0,
-  Number = 1,
-  Pointer = 2,
-  Null = 3,
-  NotPN = 4,
-};
-
 bool isUnknown(const CGNode *N);
-inline PtrOrNum inverse(PtrOrNum Ty) {
-  if (Ty == Number) {
-    return Pointer;
-  } else if (Ty == Pointer) {
-    return Number;
-  } else {
-    assert(false && "inverse: Unknown type");
-  }
-}
-
-// mergeMap[left index][right index] = isPreserveLeft
-// column -> right index, row -> left index
-const unsigned char UniTyMergeMap[][3] = {
-    {2, 0, 0},
-    {1, 2, 0},
-    {1, 1, 2},
-};
-
-PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right);
-PtrOrNum fromIPChar(char C);
-PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize);
-bool isPtrOrNum(llvm::Type *LowTy, long PointerSize);
-// #endregion PtrOrNum
 
 // PNINode stores low level LLVM type. If the LowTy is pointer or
 // pointer-sized int, we use PtrOrNum to further distinguish.
@@ -77,23 +43,16 @@ protected:
   // clone constructor for PNIGraph::cloneFrom
   PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode);
   unsigned long Id = 0;
-  PtrOrNum Ty = Null;
-  llvm::Type *LowTy = nullptr;
-  bool hasConflict = false;
+  LatticeTy Ty;
 
 public:
   llvm::iplist<PNINode>::iterator eraseFromParent();
 
+  unsigned getSize() const { return Ty.getSize(); }
   /// Convenient method to set the type of the PNVar.
   bool setPtr() { return setPtrOrNum(Pointer); }
   bool setNonPtr() { return setPtrOrNum(Number); }
   bool setPtrOrNum(PtrOrNum NewTy);
-  bool setPtrIfRelated() {
-    if (isPNRelated()) {
-      return setPtrOrNum(Pointer);
-    }
-    return false;
-  }
   bool setNonPtrIfRelated() {
     if (isPNRelated()) {
       return setPtrOrNum(Number);
@@ -102,11 +61,11 @@ public:
   }
 
   unsigned long getId() const { return Id; }
-  PtrOrNum getPtrOrNum() const { return Ty; }
-  void setConflict() { hasConflict = true; }
+  PtrOrNum getPtrOrNum() const { return Ty.getPtrOrNum(); }
+  void setConflict() { Ty.setConflict(); }
   llvm::Type *normalizeLowTy(llvm::Type *T);
-  llvm::Type *getLowTy() const { return LowTy; }
-  bool updateLowTy(llvm::Type *T);
+  std::string getLowTy() const { return Ty.str(); }
+  // bool updateLowTy(llvm::Type *T);
 
   bool isNumber() const { return getPtrOrNum() == Number; }
   bool isPointer() const { return getPtrOrNum() == Pointer; }
@@ -114,56 +73,25 @@ public:
   bool isNull() const { return getPtrOrNum() == Null; }
   bool isNotPN() const { return getPtrOrNum() == NotPN; }
   bool isPNRelated() const {
-    return getPtrOrNum() != NotPN && getPtrOrNum() != Null;
+    return Ty.isPNRelated();
   }
   char getPNChar() const {
-    assert(isPNRelated());
-    if (isNull()) {
-      return 'n';
-    } else if (isUnknown()) {
-      return 'u';
-    } else if (isNumber()) {
-      return 'i';
-    } else if (isPointer()) {
-      return 'p';
-    } else if (isNotPN()) {
-      return 'o';
-    }
-    assert(false && "CGNode::getPNChar: unhandled type");
-  }
-  std::string getFullPNName() const {
-    if (isNull()) {
-      return "Null";
-    } else if (isUnknown()) {
-      return "Unknown";
-    } else if (isNumber()) {
-      return "Number";
-    } else if (isPointer()) {
-      return "Pointer";
-    } else if (isNotPN()) {
-      return "Other";
-    }
-    assert(false && "CGNode::getFullPNName: unhandled type");
+    return Ty.getPNChar();
   }
   /// merge two PNVar into one. Return the unified PNVar.
   PNINode *unify(PNINode &other);
   static llvm::Type *mergeLowTy(llvm::Type *T, llvm::Type *O);
   void addUser(CGNode *Node);
 
-  bool equal(const PNINode &Other) const {
-    if (Ty == Other.Ty && Ty == NotPN) {
-      return LowTy == Other.LowTy;
-    }
+  LatticeTy& getLatticeTy() { return Ty; }
+  const LatticeTy& getLatticeTy() const { return Ty; }
+
+  bool tyEqual(const PNINode &Other) const {
     return Ty == Other.Ty;
   }
 
   std::string str() const {
-    if (!isPNRelated()) {
-      return notdec::retypd::fromLLVMType(getLowTy()) + " " +
-             std::to_string(Id);
-    } else {
-      return getFullPNName() + " " + std::to_string(Id);
-    }
+    return Ty.str();
   }
 };
 
@@ -307,64 +235,9 @@ struct PNIGraph {
                   llvm::BinaryOperator *Inst);
 
   PNINode *mergePNINodes(PNINode *Left, PNINode *Right) {
-    if (Left == Right) {
-      return Left;
-    }
-    if (Left->isNull()) {
-      mergePNVarTo(Left, Right);
-      return Right;
-    } else if (Right->isNull()) {
-      mergePNVarTo(Right, Left);
-      return Left;
-    }
-
-    if (Left->isNotPN()) {
-      assert(Right->isNotPN());
-    }
-    if (Right->isNotPN()) {
-      assert(Left->isNotPN());
-    }
-    if (Left->isNotPN() || Right->isNotPN()) {
-      if (Left->LowTy == nullptr) {
-        mergePNVarTo(Left, Right);
-        return Right;
-      } else if (Right->LowTy == nullptr) {
-        mergePNVarTo(Right, Left);
-        return Left;
-      } else {
-        assert(Left->LowTy == Right->LowTy);
-        mergePNVarTo(Left, Right);
-        return Right;
-      }
-    }
-
-    if (!Left->isUnknown() && Left->getPtrOrNum() == Right->getPtrOrNum()) {
-      // select one arbitrarily
-      mergePNVarTo(Left, Right);
-      return Right;
-    }
-    if (Left->getPtrOrNum() == Unknown) {
-      mergePNVarTo(Left, Right);
-      return Right;
-    } else if (Right->getPtrOrNum() == Unknown) {
-      mergePNVarTo(Right, Left);
-      return Left;
-    } else {
-      if (Left->getPtrOrNum() == Number && Right->getPtrOrNum() == Pointer) {
-        std::cerr << "Warning: mergePNINodes: Pointer and NonPtr merge\n";
-        mergePNVarTo(Left, Right);
-        Right->setConflict();
-        return Right;
-      } else if ((Left->getPtrOrNum() == Pointer &&
-                  Right->getPtrOrNum() == Number)) {
-        std::cerr << "Warning: mergePNINodes: Pointer and NonPtr merge\n";
-        mergePNVarTo(Right, Left);
-        Left->setConflict();
-        return Left;
-      } else {
-        assert(false && "should be unreachable");
-      }
-    }
+    Left->Ty.merge(Right->Ty);
+    mergePNVarTo(Right, Left);
+    return Left;
   }
   void eraseConstraint(ConsNode *Cons);
   bool solve();

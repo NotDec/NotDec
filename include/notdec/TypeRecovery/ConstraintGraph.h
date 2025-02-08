@@ -70,7 +70,9 @@ struct CGEdge;
 
 struct CGNode {
   ConstraintGraph &Parent;
+  unsigned long Id = 0;
   const NodeKey key;
+  unsigned Size;
   std::set<CGEdge *> inEdges;
   std::set<CGEdge> outEdges;
 
@@ -87,20 +89,6 @@ struct CGNode {
   PNINode *PNIVar = nullptr;
   PNINode *getPNIVar() { return PNIVar; }
   const PNINode *getPNIVar() const { return PNIVar; }
-  llvm::Type *getLowTy() const {
-    if (PNIVar) {
-      return PNIVar->getLowTy();
-    } else {
-      return nullptr;
-    }
-  }
-  llvm::Type *getLowTy() {
-    if (PNIVar) {
-      return PNIVar->getLowTy();
-    } else {
-      return nullptr;
-    }
-  }
   bool isSpecial() const;
   bool hasNoPNI() const { return PNIVar == nullptr || PNIVar->isNull(); }
 
@@ -115,6 +103,7 @@ protected:
 
 public:
   CGNode(const CGNode &) = delete;
+  CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size);
   CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy);
   // Creating a new node with low type and set PNI accordingly.
   CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N);
@@ -129,6 +118,7 @@ public:
   bool isPNIPointer() const {
     return getPNIVar() != nullptr && getPNIVar()->isPointer();
   }
+  unsigned getSize() const { return Size; }
 };
 
 struct CGEdge {
@@ -165,7 +155,7 @@ struct RevEdge {
 };
 
 struct ConstraintGraph {
-  TRContext &Ctx;
+  std::shared_ptr<retypd::TRContext>Ctx;
   llvm::LLVMContext *LLCtx;
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
@@ -188,7 +178,7 @@ struct ConstraintGraph {
   // TODO replace with datalayout?
   long PointerSize = 0;
 
-  ConstraintGraph(TRContext &Ctx, llvm::LLVMContext *LLCtx, long PointerSize,
+  ConstraintGraph(std::shared_ptr<retypd::TRContext>Ctx, llvm::LLVMContext *LLCtx, long PointerSize,
                   std::string Name, bool disablePNI = false);
   static void clone(std::map<const CGNode *, CGNode *> &Old2New,
                     const ConstraintGraph &From, ConstraintGraph &To,
@@ -199,7 +189,7 @@ struct ConstraintGraph {
 
   CGNode &getOrCreatePrim(std::string Name, llvm::Type *LowType) {
     auto &Ret =
-        getOrInsertNode(TypeVariable::CreatePrimitive(Ctx, Name), LowType);
+        getOrInsertNode(TypeVariable::CreatePrimitive(*Ctx, Name), LowType);
     return Ret;
   }
 
@@ -220,7 +210,7 @@ struct ConstraintGraph {
   CGNode &getOrInsertNode(const NodeKey &N, llvm::Type *LowType);
 
   std::string getName() const { return Name; }
-  using iterator = std::map<NodeKey, CGNode>::iterator;
+  using iterator = decltype(Nodes)::iterator;
   iterator begin() { return Nodes.begin(); }
   iterator end() { return Nodes.end(); }
   bool empty() { return Nodes.empty(); }
@@ -235,7 +225,7 @@ struct ConstraintGraph {
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
   void aggressiveSimplify();
-  void lowTypeToSubType();
+  // void lowTypeToSubType();
   ConstraintGraph cloneAndSimplify() const;
   void instantiate(llvm::Function* Target, const std::vector<retypd::SubTypeConstraint> &Sum,
                    size_t ID, std::function<llvm::Type *(const TypeVariable &)> GetLowTy);
@@ -292,7 +282,7 @@ public:
   void printEpsilonLoop(const char *DotFile,
                         std::set<const CGNode *> Nodes) const;
   std::vector<SubTypeConstraint> toConstraints();
-  static ConstraintGraph fromConstraints(TRContext &Ctx, std::string FuncName,
+  static ConstraintGraph fromConstraints(std::shared_ptr<retypd::TRContext>Ctx, std::string FuncName,
                                          std::vector<Constraint> &Cons,
                                          long PointerSize = 32);
 
@@ -364,7 +354,7 @@ public:
   }
 };
 
-std::vector<SubTypeConstraint> expToConstraints(TRContext &Ctx, rexp::PRExp E);
+std::vector<SubTypeConstraint> expToConstraints(std::shared_ptr<retypd::TRContext>Ctx, rexp::PRExp E);
 std::string toString(const std::set<CGNode *> Set);
 
 // inline NodeKey MakeContraVariant(NodeKey Key) {

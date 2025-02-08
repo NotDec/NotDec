@@ -54,49 +54,6 @@ EdgeLabel2Offset(const EdgeLabel &E) {
   return llvm::None;
 };
 
-void ConstraintGraph::lowTypeToSubType() {
-  // Check the low type of each node.
-  // If non-PNI related, add subtype relation.
-  // if number, add subtype relation.
-  // if Unknown/pointer, TODO do nothing for now.
-  // Also check for existing subtypes. Skip if already exists.
-  std::set<CGNode *> Visited;
-  for (auto &Ent : Nodes) {
-    auto &Node = Ent.second;
-    if (Node.key.Base.isPrimitive()) {
-      continue;
-    }
-    if (Visited.count(&Node)) {
-      continue;
-    }
-    if (Node.getPNIVar() == nullptr || Node.getPNIVar()->isNull()) {
-      continue;
-    }
-    if (Node.getPNIVar()->isUnknown() || Node.getPNIVar()->isPointer()) {
-      continue;
-    }
-    if (Node.getLowTy()->isFunctionTy()) {
-      continue;
-    }
-    std::string LowTyStr = fromLLVMType(Node.getLowTy());
-    if (startswith(LowTyStr, "int")) {
-      // TODO: if already has sint or uint subtype, skip.
-    }
-    auto &Prim = getOrInsertNodeWithPNI(
-        NodeKey(TypeVariable::CreatePrimitive(Ctx, LowTyStr),
-                Node.key.SuffixVariance),
-        Node.getPNIVar());
-    StartNodes.insert(&Prim);
-    EndNodes.insert(&Prim);
-    Visited.insert(&Node);
-    if (Node.key.SuffixVariance == Covariant) {
-      onlyAddEdge(Node, Prim, One{});
-    } else {
-      onlyAddEdge(Prim, Node, One{});
-    }
-  }
-}
-
 void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   assert(&From.Parent == this && &To.Parent == this);
   // Move all edges from From to To
@@ -273,7 +230,7 @@ void CGNode::onUpdatePNType() {
       std::string name =
           "intptr_" + key.Base.getIntConstant().str().substr(1) + '_';
       TypeVariable NewTV = TypeVariable::CreateDtv(
-          Parent.Ctx, ValueNamer::getName(name.c_str()));
+          *Parent.Ctx, ValueNamer::getName(name.c_str()));
       Parent.replaceNodeKey(this->key.Base, NewTV);
       // keep PNI untouched. Lowtype is still int.
       // this->setPointer();
@@ -337,14 +294,14 @@ void ConstraintGraph::instantiate(
     // TODO set PtrOrNum.
     if (LLCtx) {
       if (Sub.isPrimitive()) {
-        if (auto LowTy = ToLLVMType(*LLCtx, Sub.getBaseName())) {
+        if (auto LowTy = Elem2LLVMType(*LLCtx, Sub.getBaseName())) {
           assert(!Sup.isPrimitive());
           auto &SupNode = getOrInsertNode(Sup, GetLowTy(Sup));
           SupNode.getPNIVar()->updateLowTy(LowTy);
           continue;
         }
       } else if (Sup.isPrimitive()) {
-        if (auto LowTy = ToLLVMType(*LLCtx, Sup.getBaseName())) {
+        if (auto LowTy = Elem2LLVMType(*LLCtx, Sup.getBaseName())) {
           assert(!Sub.isPrimitive());
           auto &SubNode = getOrInsertNode(Sub, GetLowTy(Sub));
           SubNode.getPNIVar()->updateLowTy(LowTy);
@@ -353,7 +310,8 @@ void ConstraintGraph::instantiate(
       }
     }
 
-    addConstraint(getOrInsertNode(Sub, GetLowTy(Sub)), getOrInsertNode(Sup, GetLowTy(Sup)), GetLowTy);
+    addConstraint(getOrInsertNode(Sub, GetLowTy(Sub)),
+                  getOrInsertNode(Sup, GetLowTy(Sup)), GetLowTy);
   }
   // TODO What about PNI
 }
@@ -503,7 +461,7 @@ void ConstraintGraph::contraVariantSplit() {
   for (auto N : toHandle) {
     // duplicate the node that isolate the recall edge.
     auto &NewNode = createNodeWithPNI(
-        NodeKey{TypeVariable::CreateDtv(Ctx, ValueNamer::getName("split_"))},
+        NodeKey{TypeVariable::CreateDtv(*Ctx, ValueNamer::getName("split_"))},
         N->getPNIVar());
     // Move all incoming recall edge to the new node.
     for (auto InEdge2 : N->inEdges) {
@@ -652,7 +610,7 @@ void ConstraintGraph::pushSplit() {
     auto [Current, Recall, Forget] = Ent;
     // duplicate the node that isolate the incoming recall edge.
     auto &NewNode = createNodeWithPNI(
-        NodeKey{TypeVariable::CreateDtv(Ctx, ValueNamer::getName("split_"))},
+        NodeKey{TypeVariable::CreateDtv(*Ctx, ValueNamer::getName("split_"))},
         Current->getPNIVar());
     // copy all out edges except the forget edge.
     for (auto &Edge : Current->outEdges) {
@@ -677,7 +635,7 @@ ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) const {
   // TODO: eliminate this clone by removing Start and End nodes later.
   std::map<const CGNode *, CGNode *> Old2New;
   auto G = clone(Old2New);
-  G.lowTypeToSubType();
+  // G.lowTypeToSubType();
   G.linkVars(InterestingVars);
   auto G2 = G.simplify();
   G2.aggressiveSimplify();
@@ -1374,10 +1332,9 @@ void ConstraintGraph::saturate() {
   }
 }
 
-ConstraintGraph ConstraintGraph::fromConstraints(TRContext &Ctx,
-                                                 std::string FuncName,
-                                                 std::vector<Constraint> &Cons,
-                                                 long PointerSize) {
+ConstraintGraph ConstraintGraph::fromConstraints(
+    std::shared_ptr<retypd::TRContext> Ctx, std::string FuncName,
+    std::vector<Constraint> &Cons, long PointerSize) {
   ConstraintGraph G(Ctx, nullptr, PointerSize, FuncName, true);
   for (auto &C : Cons) {
     if (std::holds_alternative<SubTypeConstraint>(C)) {
@@ -1445,11 +1402,7 @@ void ConstraintGraph::addRecalls(
   auto V1 = T->key.forgetOnce();
   while (V1.has_value()) {
     auto [Cap, Next] = V1.value();
-    auto &NNext =
-        getOrInsertNode(Next, GetLowTy ? (*GetLowTy)(Next.Base) : nullptr);
-    if (NNext.getLowTy() == nullptr && !GetLowTy) {
-      llvm::errs() << "here";
-    }
+    auto &NNext = getNode(Next);
     addEdge(NNext, *T, RecallLabel{Cap});
     V1 = Next.forgetOnce();
     T = &NNext;
@@ -1467,11 +1420,7 @@ void ConstraintGraph::addForgets(
   auto V1 = T->key.forgetOnce();
   while (V1.has_value()) {
     auto [Cap, Next] = V1.value();
-    auto &NNext =
-        getOrInsertNode(Next, GetLowTy ? (*GetLowTy)(Next.Base) : nullptr);
-    if (NNext.getLowTy() == nullptr && !GetLowTy) {
-      llvm::errs() << "here";
-    }
+    auto &NNext = getNode(Next);
     addEdge(*T, NNext, ForgetLabel{Cap});
     V1 = Next.forgetOnce();
     T = &NNext;
@@ -1492,13 +1441,11 @@ CGNode &ConstraintGraph::getOrInsertNodeWithPNI(const NodeKey &N, PNINode *PN) {
 
 CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N,
                                          llvm::Type *LowType) {
-  auto [it, inserted] = Nodes.try_emplace(N, *this, N, (llvm::Type *)nullptr);
-  if (it->second.getLowTy() == nullptr) {
-    if (LowType != nullptr) {
-      it->second.getPNIVar()->updateLowTy(LowType);
-    }
+  auto [It, Inserted] = Nodes.try_emplace(N, *this, N, LowType);
+  if (LowType == nullptr) {
+    assert(!Inserted);
   }
-  return it->second;
+  return It->second;
 }
 
 bool ConstraintGraph::hasNode(const NodeKey &N) { return Nodes.count(N) > 0; }
@@ -1688,7 +1635,7 @@ std::string toString(const std::set<CGNode *> Set) {
 }
 
 struct ExprToConstraintsContext {
-  TRContext &Ctx;
+  std::shared_ptr<retypd::TRContext> Ctx;
   static const char *tempNamePrefix;
   int TempNameIndex = 0;
   // std::function<std::string()> &tempNameGenerator;
@@ -1705,7 +1652,7 @@ struct ExprToConstraintsContext {
       Variance>
   normalizePath(const std::vector<EdgeLabel> &ELs);
   static std::vector<SubTypeConstraint> constraintsSequenceToConstraints(
-      TRContext &Ctx,
+      std::shared_ptr<retypd::TRContext> Ctx,
       const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence);
 };
 
@@ -1864,9 +1811,9 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
 
     // Create recursive constraints.
     auto NewInner =
-        rexp::create(RecallBase{TypeVariable::CreateDtv(Ctx, tempName)}) &
+        rexp::create(RecallBase{TypeVariable::CreateDtv(*Ctx, tempName)}) &
         Inner &
-        rexp::create(ForgetBase{TypeVariable::CreateDtv(Ctx, tempName)});
+        rexp::create(ForgetBase{TypeVariable::CreateDtv(*Ctx, tempName)});
     auto Seq = expToConstraintsSequenceRecursive(NewInner);
     ConstraintsSequence.insert(ConstraintsSequence.end(), Seq.begin(),
                                Seq.end());
@@ -1875,8 +1822,8 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
     // Later in normalizePath, we will detect ForgetBase/RecallBase in the
     // middle.
     std::vector<EdgeLabel> V2;
-    V2.push_back(ForgetBase{TypeVariable::CreateDtv(Ctx, tempName)});
-    V2.push_back(RecallBase{TypeVariable::CreateDtv(Ctx, tempName)});
+    V2.push_back(ForgetBase{TypeVariable::CreateDtv(*Ctx, tempName)});
+    V2.push_back(RecallBase{TypeVariable::CreateDtv(*Ctx, tempName)});
     Result.push_back(V2);
   } else if (std::holds_alternative<rexp::Node>(*E)) {
     std::vector<EdgeLabel> Vec;
@@ -1892,7 +1839,7 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
 
 std::vector<SubTypeConstraint>
 ExprToConstraintsContext::constraintsSequenceToConstraints(
-    TRContext &Ctx,
+    std::shared_ptr<retypd::TRContext> Ctx,
     const std::vector<std::vector<EdgeLabel>> &ConstraintsSequence) {
   std::set<SubTypeConstraint> Ret;
   for (auto &CS : ConstraintsSequence) {
@@ -1916,8 +1863,8 @@ ExprToConstraintsContext::constraintsSequenceToConstraints(
       // if (std::get<1>(Con) != std::get<2>(Con)) {
       //   std::cerr << "Warning:!\n";
       // }
-      TVPair.first.Ctx = &Ctx;
-      TVPair.second.Ctx = &Ctx;
+      TVPair.first.Ctx = Ctx.get();
+      TVPair.second.Ctx = Ctx.get();
       assert(P.second == Covariant);
       if (TVPair.first != TVPair.second) {
         if (TVPair.first.isPrimitive() && TVPair.second.isPrimitive()) {
@@ -1927,8 +1874,8 @@ ExprToConstraintsContext::constraintsSequenceToConstraints(
           continue;
         }
         Ret.insert(SubTypeConstraint{
-            {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.first)},
-            {&Ctx, PooledTypeVariable::intern(Ctx, TVPair.second)}});
+            {Ctx.get(), PooledTypeVariable::intern(*Ctx, TVPair.first)},
+            {Ctx.get(), PooledTypeVariable::intern(*Ctx, TVPair.second)}});
       }
     }
   }
@@ -2038,8 +1985,8 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
 }
 
 /// the pexp must be in (recall _)*(forget _)*
-std::vector<SubTypeConstraint> expToConstraints(TRContext &TRCtx,
-                                                rexp::PRExp E) {
+std::vector<SubTypeConstraint>
+expToConstraints(std::shared_ptr<retypd::TRContext> TRCtx, rexp::PRExp E) {
   if (rexp::isEmpty(E)) {
     assert(false && "pexp_to_constraints: Empty path!");
     // return {};
@@ -2059,7 +2006,7 @@ CGNode *ConstraintGraph::getMemoryNode() {
     return MemoryNode;
   }
   MemoryNode =
-      &createNode(NodeKey{TypeVariable::CreateDtv(Ctx, Memory)}, nullptr);
+      &createNode(NodeKey{TypeVariable::CreateDtv(*Ctx, Memory)}, nullptr);
   if (PG) {
     setPointer(*MemoryNode);
   }
@@ -2070,7 +2017,7 @@ CGNode *ConstraintGraph::getStartNode() {
   if (Start != nullptr) {
     return Start;
   }
-  Start = &createNode(NodeKey{TypeVariable::CreatePrimitive(Ctx, "#Start")},
+  Start = &createNode(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#Start")},
                       nullptr);
   return Start;
 }
@@ -2080,13 +2027,13 @@ CGNode *ConstraintGraph::getEndNode() {
     return End;
   }
   End =
-      &createNode(NodeKey{TypeVariable::CreatePrimitive(Ctx, "#End")}, nullptr);
+      &createNode(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#End")}, nullptr);
   return End;
 }
 
-ConstraintGraph::ConstraintGraph(TRContext &Ctx, llvm::LLVMContext *LLCtx,
-                                 long PointerSize, std::string Name,
-                                 bool disablePNI)
+ConstraintGraph::ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx,
+                                 llvm::LLVMContext *LLCtx, long PointerSize,
+                                 std::string Name, bool disablePNI)
     : Ctx(Ctx), LLCtx(LLCtx), Name(Name), PointerSize(PointerSize) {
   if (!disablePNI) {
     assert(LLCtx != nullptr);
@@ -2158,8 +2105,21 @@ ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
   return G;
 }
 
+CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size)
+    : Parent(Parent), Id(ValueNamer::getId()), key(key), Size(Size) {
+  if (Parent.PG) {
+    if (Parent.Nodes.count(MakeReverseVariant(key))) {
+      PNIGraph::addPNINodeTarget(
+          *this, *Parent.Nodes.at(MakeReverseVariant(key)).PNIVar);
+    } else {
+      assert(false && "TODO");
+      // PNIVar = Parent.PG->createPNINode(this, Size);
+    }
+  }
+}
+
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy)
-    : Parent(Parent), key(key) {
+    : Parent(Parent), Id(ValueNamer::getId()), key(key), Size(::notdec::retypd::getSize(LowTy)) {
   if (Parent.PG) {
     if (Parent.Nodes.count(MakeReverseVariant(key))) {
       PNIGraph::addPNINodeTarget(
@@ -2171,10 +2131,12 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy)
 }
 
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
-    : Parent(Parent), key(key), PNIVar(nullptr) {
+    : Parent(Parent), Id(ValueNamer::getId()), key(key), Size(N->getSize()),
+      PNIVar(nullptr) {
   if (N != nullptr) {
     assert(Parent.PG != nullptr);
   }
+  assert(N != nullptr);
   if (Parent.PG) {
     if (N != nullptr) {
       assert(N->getParent() == Parent.PG.get());

@@ -75,12 +75,7 @@ clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix) {
 
 clang::QualType
 SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
-  unsigned BitSize;
-  if (Node.isPNIPointer() || Node.hasPointerEdge()) {
-    BitSize = Node.Parent.PointerSize;
-  } else {
-    BitSize = getSize(Node.getLowTy(), Node.Parent.PointerSize);
-  }
+  unsigned BitSize = Node.getSize();
   const char *prefix = "struct_";
   if (&Node == Node.Parent.getMemoryNode()) {
     prefix = "MEMORY_";
@@ -115,7 +110,8 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
       return Ret;
     } else {
       // no info from graph, just use LLVM type.
-      auto Ret = fromLatticeElem(fromLLVMType(Node.getLowTy()), BitSize);
+      auto Ret = fromLatticeElem(Node.getPNIVar()->getLatticeTy().latticeStr(),
+                                 BitSize);
       NodeTypeMap.emplace(&Node, Ret);
       return Ret;
     }
@@ -142,10 +138,11 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
       }
     }
 
+    // TODO!! refactor to use latticeTy's meet and join.
     if (Node.key.SuffixVariance == Covariant) {
-      Var = meet(Var, fromLLVMType(Node.getLowTy()));
+      Var = meet(Var, Node.getPNIVar()->getLatticeTy().latticeStr());
     } else {
-      Var = join(Var, fromLLVMType(Node.getLowTy()));
+      Var = join(Var, Node.getPNIVar()->getLatticeTy().latticeStr());
     }
     auto Ret = fromLatticeElem(Var, BitSize);
     NodeTypeMap.emplace(&Node, Ret);

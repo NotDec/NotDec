@@ -166,8 +166,8 @@ bool mustBePrimitive(const llvm::Type *Ty) {
 //   }
 // }
 
-static inline TypeVariable makeTv(retypd::TRContext &Ctx, std::string Name) {
-  return retypd::TypeVariable::CreateDtv(Ctx, Name);
+static inline TypeVariable makeTv(std::shared_ptr<retypd::TRContext>Ctx, std::string Name) {
+  return retypd::TypeVariable::CreateDtv(*Ctx, Name);
 }
 
 // static inline TypeVariable getLLVMTypeVar(retypd::TRContext &Ctx, Type *Ty) {
@@ -317,6 +317,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // get the CallGraph, iterate by topological order of SCC
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
+  // TODO: simplify call graph if one func does not have up constraints.
   std::set<CallGraphNode *> Visited;
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
   // tuple(SCCNodes, ConstraintsGenerator, SCCName)
@@ -334,13 +335,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       SummaryOverride = {
           {std::string("memset"),
            retypd::parse_subtype_constraints(
-               TRCtx, {"memset.in_0 <= memset.out", "memset.in_1 <= #uint"})},
+               *TRCtx, {"memset.in_0 <= memset.out", "memset.in_1 <= #uint"})},
           {std::string("memcpy"),
            retypd::parse_subtype_constraints(
-               TRCtx, {"memcpy.in_1 <= memcpy.in_0",
+               *TRCtx, {"memcpy.in_1 <= memcpy.in_0",
                        "memcpy.in_0 <= memcpy.out", "memcpy.in_2 <= #uint"})},
           {std::string("__memcpy"),
-           retypd::parse_subtype_constraints(TRCtx,
+           retypd::parse_subtype_constraints(*TRCtx,
                                              {"__memcpy.in_1 <= __memcpy.in_0",
                                               "__memcpy.in_0 <= __memcpy.out",
                                               "__memcpy.in_2 <= #uint"})},
@@ -396,10 +397,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       if (Ent.second.key.Base.isPrimitive()) {
         continue;
       }
-      if (Ent.second.getLowTy() == nullptr) {
-        llvm::errs() << "Node: " << toString(Ent.first) << " has no LowType";
-        llvm::errs() << "\n";
-      }
     }
 
     // TODO: If the SCC is not called by any other function out of the SCC, we
@@ -418,7 +415,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       Generator->CG.solve();
     } else {
       std::cerr << "Summary for " << Name << ":\n";
-      Summary = Generator->genSummary();
+      Summary = Generator->genSummaryOld();
     }
 
     for (auto &C : Summary) {
@@ -499,7 +496,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         // assert(PN->getLowTy() != nullptr);
         NewNode = &CG.createNodeClonePNI(
             retypd::NodeKey{TypeVariable::CreateDtv(
-                CG.Ctx, ValueNamer::getName(NamePrefix))},
+                *CG.Ctx, ValueNamer::getName(NamePrefix))},
             PN);
       }
 
@@ -789,10 +786,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       if (Ent.second.isSpecial()) {
         continue;
       }
-      if (Ent.second.getLowTy() == nullptr) {
-        llvm::errs() << "Node: " << toString(Ent.first) << " has no LowType";
-        llvm::errs() << "\n";
-      }
     }
     ConstraintsGenerator G2 = postProcess(G, Old2New);
 
@@ -913,8 +906,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       } else {
         llvm::errs() << " has no lower bound";
       }
-      if (Node->getLowTy() != nullptr) {
-        llvm::errs() << "  LowTy: " << *Node->getLowTy();
+      if (Node->getPNIVar() != nullptr) {
+        llvm::errs() << "  PNI: " << Node->getPNIVar()->str();
       }
       llvm::errs() << "\n";
     }
@@ -1390,7 +1383,7 @@ void ConstraintsGenerator::determinize() {
     auto *OldPN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(N);
     auto &NewNode =
         CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
-                                  Ctx.TRCtx, ValueNamer::getName("dtm_"))},
+                                  *Ctx.TRCtx, ValueNamer::getName("dtm_"))},
                               OldPN);
     auto it = DTrans.emplace(N, &NewNode);
     assert(it.second);
@@ -1553,9 +1546,9 @@ void ConstraintsGenerator::instantiateSummary(llvm::Function *Target,
       TV1.instanceId = 0;
     }
     auto *Node = Gen->getNodeOrNull(TV1);
-    if (Node != nullptr && Node->getLowTy() != nullptr) {
-      return Node->getLowTy();
-    }
+    // if (Node != nullptr && Node->getLowTy() != nullptr) {
+    //   return Node->getLowTy();
+    // }
     // try to fix, using load label
     if (TV1.hasLabel()) {
       auto last = TV1.getLabels().back();
@@ -1567,7 +1560,7 @@ void ConstraintsGenerator::instantiateSummary(llvm::Function *Target,
     }
     if (TV1.isPrimitive()) {
       auto Ret =
-          retypd::ToLLVMType(Target->getContext(), TV1.getPrimitiveName());
+          retypd::Elem2LLVMType(Target->getContext(), TV1.getPrimitiveName());
       if (Ret != nullptr) {
         return Ret;
       }
@@ -1577,7 +1570,26 @@ void ConstraintsGenerator::instantiateSummary(llvm::Function *Target,
   CG.instantiate(Target, *Sum, InstanceId, GetLowTy);
 }
 
-std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummary() {
+ConstraintsGenerator ConstraintsGenerator::genSummary() {
+  CG.solve();
+
+  // summary 的关键是要维护两个variance的函数节点的映射。
+  std::map<const CGNode *, CGNode *> Old2New;
+  auto S = CG.clone(Old2New);
+  std::set<std::string> InterestingVars;
+  for (auto *F : SCCs) {
+    assert(F->hasName());
+    InterestingVars.insert(F->getName().str());
+  }
+  S.linkVars(InterestingVars);
+  auto G2 = S.simplify();
+  ConstraintsGenerator Ret(Ctx, LLCtx, CG.Name);
+  Ret.SCCs = SCCs;
+  Ret.CG = std::move(G2);
+  return Ret;
+}
+
+std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummaryOld() {
   std::set<std::string> InterestingVars;
   for (auto *F : SCCs) {
     assert(F->hasName());
@@ -1681,7 +1693,7 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User,
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
       auto ret = TypeVariable::CreateIntConstant(
-          Ctx.TRCtx, OffsetRange{.offset = CI->getSExtValue()}, User, OpInd);
+          *Ctx.TRCtx, OffsetRange{.offset = CI->getSExtValue()}, User, OpInd);
       return ret;
     }
     return convertTypeVarVal(IC->Val, IC->User, IC->OpInd);

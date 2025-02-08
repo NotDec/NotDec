@@ -374,7 +374,7 @@ void DecompileConfig::run_passes() {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   MAM.registerPass([&]() { return StackPointerFinderAnalysis(); });
-  retypd::TRContext TRCtx;
+  std::shared_ptr<retypd::TRContext> TRCtx = std::make_shared<retypd::TRContext>();
   MAM.registerPass([&]() { return TypeRecovery(TRCtx); });
 
   // Create the pass manager.
