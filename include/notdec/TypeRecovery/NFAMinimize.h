@@ -3,9 +3,11 @@
 #define _NOTDEC_RETYPD_DFA_MIN_H_
 
 #include <cassert>
+#include <functional>
 #include <llvm/IR/Type.h>
 #include <llvm/Support/raw_ostream.h>
 #include <map>
+#include <optional>
 #include <queue>
 
 #include <llvm/ADT/GraphTraits.h>
@@ -80,9 +82,10 @@ struct NFADeterminizer {
     return ret;
   }
 
-  static std::set<NodeTy> countClosure(const std::set<NodeTy> &N) {
+  // Filter: return false to ignore the edges for the node.
+  static std::set<NodeTy> countClosure(const std::set<NodeTy> &N, std::function<bool(const NodeTy&)> Filter = nullptr) {
     // initialize with N
-    std::set<NodeTy> Ret(N);
+    std::set<NodeTy> Ret = N;
     std::queue<NodeTy> Worklist;
     for (auto Node : N) {
       Worklist.push(Node);
@@ -90,6 +93,11 @@ struct NFADeterminizer {
     while (!Worklist.empty()) {
       auto Node = Worklist.front();
       Worklist.pop();
+      if (Filter) {
+        if (!Filter(Node)) {
+          continue;
+        }
+      }
       for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
                                         GT::child_edge_end(Node))) {
         if (std::holds_alternative<One>(Edge->getLabel())) {
@@ -130,7 +138,7 @@ struct NFADeterminizer {
         }
       }
     }
-    if(PN == nullptr) {
+    if (PN == nullptr) {
       llvm::errs() << "here\n";
     }
     return PN;
@@ -150,15 +158,23 @@ struct NFADeterminizer {
     return it.first;
   }
 
-  static std::set<EdgeLabel> allOutLabels(const std::set<NodeTy> &N) {
+  static bool ignoreOne(const EdgeLabel &L) {
+    return !std::holds_alternative<One>(L);
+  }
+
+  static std::set<EdgeLabel>
+  allOutLabels(const std::set<NodeTy> &N,
+               std::function<bool(const EdgeLabel &)> Filter =
+                   ignoreOne) {
     std::set<EdgeLabel> ret;
     for (auto Node : N) {
       for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
                                         GT::child_edge_end(Node))) {
-        if (std::holds_alternative<One>(Edge->getLabel())) {
-          // ignore one edge
-        } else {
+        if (Filter(Edge->getLabel())) {
+          // keep this edge
           ret.insert(Edge->getLabel());
+        } else {
+          // ignore this edge
         }
       }
     }

@@ -7,10 +7,13 @@
 
 namespace notdec::retypd {
 
-unsigned getSize(llvm::Type *Ty) {
+unsigned getSize(llvm::Type *Ty, unsigned PointerSize) {
   auto Size = Ty->getPrimitiveSizeInBits();
   if (Size != 0) {
     return Size;
+  }
+  if (Ty->isPointerTy() || Ty->isFunctionTy()) {
+    return PointerSize;
   }
   assert(false && "TODO: unhandled type");
 }

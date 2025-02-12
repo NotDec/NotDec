@@ -24,6 +24,7 @@
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "Utils/Range.h"
+#include "Utils/ValueNamer.h"
 
 namespace notdec {
 struct ConstraintsGenerator;
@@ -83,6 +84,7 @@ struct CGNode {
   pred_iterator pred_begin() { return inEdges.begin(); }
   pred_iterator pred_end() { return inEdges.end(); }
 
+  unsigned long getId() const { return Id; }
   // Map from CGNode to SSGNode using union-find
   // We will not remove CGNode from the graph, but just update, so it is safe to
   // use raw pointer here.
@@ -103,10 +105,15 @@ protected:
 
 public:
   CGNode(const CGNode &) = delete;
-  CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size);
   CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy);
   // Creating a new node with low type and set PNI accordingly.
   CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N);
+  
+  // Create node with no PNINode, regardless of PG != nullptr.
+  // 1. for special nodes like #Start, #End
+  // 2. for clone
+  CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size);
+
   std::string str() { return key.str() + "-" + PNIVar->str(); }
   // handle update from PNI
   void onUpdatePNType();
@@ -155,7 +162,7 @@ struct RevEdge {
 };
 
 struct ConstraintGraph {
-  std::shared_ptr<retypd::TRContext>Ctx;
+  std::shared_ptr<retypd::TRContext> Ctx;
   llvm::LLVMContext *LLCtx;
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
@@ -178,14 +185,15 @@ struct ConstraintGraph {
   // TODO replace with datalayout?
   long PointerSize = 0;
 
-  ConstraintGraph(std::shared_ptr<retypd::TRContext>Ctx, llvm::LLVMContext *LLCtx, long PointerSize,
-                  std::string Name, bool disablePNI = false);
-  static void clone(std::map<const CGNode *, CGNode *> &Old2New,
-                    const ConstraintGraph &From, ConstraintGraph &To,
-                    bool removePNI = false);
+  ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx,
+                  llvm::LLVMContext *LLCtx, long PointerSize, std::string Name,
+                  bool disablePNI = false);
+  static void
+  clone(std::map<const CGNode *, CGNode *> &Old2New,
+        const ConstraintGraph &From, ConstraintGraph &To,
+        std::function<NodeKey(const NodeKey &)> TransformKey = nullptr);
   // Node map is the core data of cloning.
-  ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New,
-                        bool removePNI = false) const;
+  ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 
   CGNode &getOrCreatePrim(std::string Name, llvm::Type *LowType) {
     auto &Ret =
@@ -201,6 +209,7 @@ struct ConstraintGraph {
   // must get the node
   CGNode &getNode(const NodeKey &N);
   CGNode *getNodeOrNull(const NodeKey &N);
+  CGNode &createNodeNoPNI(const NodeKey &N, unsigned Size);
   CGNode &createNode(const NodeKey &N, llvm::Type *LowType);
   CGNode &createNodeWithPNI(const NodeKey &N, PNINode *PNI);
   CGNode &createNodeClonePNI(const NodeKey &N, PNINode *ON);
@@ -216,7 +225,10 @@ struct ConstraintGraph {
   bool empty() { return Nodes.empty(); }
 
   // Interface for initial constraint insertion
-  void addConstraint(CGNode &NodeL, CGNode &NodeR, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>> GetLowTy = llvm::None);
+  void addConstraint(
+      CGNode &NodeL, CGNode &NodeR,
+      llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
+          GetLowTy = llvm::None);
 
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
@@ -227,9 +239,6 @@ struct ConstraintGraph {
   void aggressiveSimplify();
   // void lowTypeToSubType();
   ConstraintGraph cloneAndSimplify() const;
-  void instantiate(llvm::Function* Target, const std::vector<retypd::SubTypeConstraint> &Sum,
-                   size_t ID, std::function<llvm::Type *(const TypeVariable &)> GetLowTy);
-  // CGNode &instantiateSketch(std::shared_ptr<retypd::Sketch> Sk);
 
 public:
   void solve();
@@ -270,8 +279,14 @@ public:
   /// nodes as accepting by link with `forget #top`.
   void sketchSplit();
   std::vector<SubTypeConstraint> solve_constraints_between();
-  void addRecalls(CGNode &N, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>> GetLowTy = llvm::None);
-  void addForgets(CGNode &N, llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>> GetLowTy = llvm::None);
+  void
+  addRecalls(CGNode &N,
+             llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
+                 GetLowTy = llvm::None);
+  void
+  addForgets(CGNode &N,
+             llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
+                 GetLowTy = llvm::None);
   void printGraph(const char *DotFile) const;
   ConstraintGraph getSubGraph(const std::set<const CGNode *> &Roots,
                               bool AllReachable) const;
@@ -282,12 +297,23 @@ public:
   void printEpsilonLoop(const char *DotFile,
                         std::set<const CGNode *> Nodes) const;
   std::vector<SubTypeConstraint> toConstraints();
-  static ConstraintGraph fromConstraints(std::shared_ptr<retypd::TRContext>Ctx, std::string FuncName,
+  static ConstraintGraph fromConstraints(std::shared_ptr<retypd::TRContext> Ctx,
+                                         std::string FuncName,
                                          std::vector<Constraint> &Cons,
                                          long PointerSize = 32);
 
+  bool hasEdge(const CGNode &From, const CGNode &To, EdgeLabel Label) const {
+    assert(&From.Parent == this && &To.Parent == this);
+    return From.outEdges.count(
+        CGEdge(const_cast<CGNode &>(From), const_cast<CGNode &>(To), Label));
+  }
   bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(&From.Parent == this && &To.Parent == this);
+    if (TraceIds.count(From.getId()) || TraceIds.count(To.getId())) {
+      std::cerr << "Add edge: " << From.str() << "(ID=" << From.getId()
+                << ") -> " << To.str() << "(ID=" << From.getId()
+                << ") Label: " << toString(Label) << "\n";
+    }
     auto it = From.outEdges.emplace(From, To, Label);
     if (it.second) {
       To.inEdges.insert(const_cast<CGEdge *>(&*it.first));
@@ -296,7 +322,7 @@ public:
   }
   void mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
 
-  // Graph related operations
+  // Graph operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(&From.Parent == this && &To.Parent == this);
     auto it = From.outEdges.find(CGEdge(From, To, Label));
@@ -354,7 +380,8 @@ public:
   }
 };
 
-std::vector<SubTypeConstraint> expToConstraints(std::shared_ptr<retypd::TRContext>Ctx, rexp::PRExp E);
+std::vector<SubTypeConstraint>
+expToConstraints(std::shared_ptr<retypd::TRContext> Ctx, rexp::PRExp E);
 std::string toString(const std::set<CGNode *> Set);
 
 // inline NodeKey MakeContraVariant(NodeKey Key) {

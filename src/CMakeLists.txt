@@ -25,6 +25,7 @@ add_library(notdec STATIC
 	TypeRecovery/Lattice.cpp
 	TypeRecovery/SketchToCTypeBuilder.cpp
 	Utils/Range.cpp
+	Utils/ValueNamer.cpp
 	utils.cpp
 )
 

@@ -339,6 +339,9 @@ struct TypeVariable {
   const PooledTypeVariable *Var;
   // differentiate Nodes from summary instantiation
   size_t instanceId = 0;
+  // differentiate formal and actual parameter/return values
+  // Used in summary instantiation
+  bool IsActual = false;
 
   bool hasInstanceId() const {
     return std::holds_alternative<DerivedTypeVariable>(Var->Inner);
@@ -367,8 +370,9 @@ struct TypeVariable {
   }
 
   static TypeVariable CreateDtv(TRContext &Ctx, std::string name,
-                                size_t InstanceId = 0) {
-    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, name), InstanceId};
+                                size_t InstanceId = 0, bool IsActual = false) {
+    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, name), InstanceId,
+            IsActual};
   }
 
   static TypeVariable CreateDtv(TRContext &Ctx, DerivedTypeVariable dtv) {
@@ -381,9 +385,21 @@ struct TypeVariable {
   }
 
   TypeVariable pushLabel(FieldLabel label) const {
-    return {Ctx, Var->pushLabel(label), instanceId};
+    TypeVariable Ret = *this;
+    Ret.Var = Var->pushLabel(label);
+    return Ret;
   }
-  TypeVariable popLabel() const { return {Ctx, Var->popLabel(), instanceId}; }
+  TypeVariable popLabel() const {
+    TypeVariable Ret = *this;
+    Ret.Var = Var->popLabel();
+    return Ret;
+  }
+  TypeVariable markActual() const {
+    assert(!IsActual);
+    TypeVariable Ret = *this;
+    Ret.IsActual = true;
+    return Ret;
+  }
 
   Variance pathVariance() const { return Var->pathVariance(); }
 
@@ -410,12 +426,17 @@ struct TypeVariable {
     return Var->isPrimitive() && Var->getPrimitiveName() == "#End";
   }
 
+  bool isActual() const { return IsActual; }
+
   std::string str() const {
     std::string Ret = Var->str();
     if (std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
       if (getInstanceId() > 0) {
         Ret += "#" + std::to_string(getInstanceId());
       }
+    }
+    if (IsActual) {
+      Ret += "#Actual";
     }
     return Ret;
   }
@@ -426,7 +447,8 @@ struct TypeVariable {
     if (!std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
       assert(instanceId == 0);
     }
-    return std::tie(Var, instanceId) < std::tie(rhs.Var, rhs.instanceId);
+    return std::tie(Var, instanceId, IsActual) <
+           std::tie(rhs.Var, rhs.instanceId, rhs.IsActual);
   }
 
   bool operator==(const TypeVariable &rhs) const {
@@ -526,11 +548,11 @@ inline TypeVariable getBase(EdgeLabel label) {
     assert(false && "getBase: Not a ForgetBase or RecallBase");
   }
 }
-inline bool isLoadOrStore(const EdgeLabel& label) {
-  if (auto* RL = std::get_if<RecallLabel>(&label)) {
+inline bool isLoadOrStore(const EdgeLabel &label) {
+  if (auto *RL = std::get_if<RecallLabel>(&label)) {
     return std::holds_alternative<LoadLabel>(RL->label) ||
            std::holds_alternative<StoreLabel>(RL->label);
-  } else if (auto* FL = std::get_if<ForgetLabel>(&label)) {
+  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
     return std::holds_alternative<LoadLabel>(FL->label) ||
            std::holds_alternative<StoreLabel>(FL->label);
   } else {

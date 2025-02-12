@@ -177,15 +177,15 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Specify the result type of this analysis pass.
   using Result = ::notdec::llvm2c::HighTypes;
 
-  TypeRecovery(std::shared_ptr<retypd::TRContext>TRCtx) : TRCtx(TRCtx) {}
+  TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx) : TRCtx(TRCtx) {}
 
-  std::shared_ptr<retypd::TRContext>TRCtx;
+  std::shared_ptr<retypd::TRContext> TRCtx;
   llvm::Value *StackPointer;
   std::string data_layout;
   std::shared_ptr<ConstraintsGenerator> Global;
   // Map from SCC to initial constraint graph.
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
-  std::map<llvm::Function *, std::vector<retypd::SubTypeConstraint>>
+  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>>
       FuncSummaries;
   unsigned pointer_size = 0;
 
@@ -234,12 +234,9 @@ struct ConstraintsGenerator {
   }
 
   std::vector<retypd::SubTypeConstraint> genSummaryOld();
-  ConstraintsGenerator genSummary();
-  std::function<std::pair<const std::vector<retypd::SubTypeConstraint> *,
-                          std::shared_ptr<ConstraintsGenerator>>(
-      llvm::Function *)>
-      GetSummary;
-  void instantiateSummary(llvm::Function *Target, size_t instanceId);
+  std::shared_ptr<ConstraintsGenerator> genSummary();
+  void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
+                          const ConstraintsGenerator &Summary);
   // std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);
   // void instantiateSketchAsSub(ExtValuePtr Val,
   //                             std::shared_ptr<retypd::Sketch> Sk);
@@ -256,6 +253,8 @@ struct ConstraintsGenerator {
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();
   void linkContraToCovariant();
+
+  bool checkSymmetry();
 
   using IndexTy = OffsetRange;
   struct FieldEntry {
@@ -285,19 +284,11 @@ struct ConstraintsGenerator {
   ConstraintsGenerator clone(std::map<const CGNode *, CGNode *> &Old2New);
   void cloneTo(ConstraintsGenerator &Target,
                std::map<const CGNode *, CGNode *> &Old2New);
-  ConstraintsGenerator(
-      TypeRecovery &Ctx, LLVMContext &LLCtx, std::string Name,
-      std::set<llvm::Function *> SCCs,
-      std::function<
-          std::pair<const std::vector<retypd::SubTypeConstraint> *,
-                    std::shared_ptr<ConstraintsGenerator>>(llvm::Function *)>
-          GetSummary)
+  ConstraintsGenerator(TypeRecovery &Ctx, LLVMContext &LLCtx, std::string Name,
+                       std::set<llvm::Function *> SCCs = {})
       : Ctx(Ctx), LLCtx(LLCtx),
         CG(Ctx.TRCtx, &LLCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
-        SCCs(SCCs), GetSummary(GetSummary) {}
-  ConstraintsGenerator(TypeRecovery &Ctx, LLVMContext &LLCtx, std::string Name)
-      : Ctx(Ctx), LLCtx(LLCtx),
-        CG(Ctx.TRCtx, &LLCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()) {}
+        SCCs(SCCs) {}
 
 public:
   CGNode &addVarSubtype(llvm::Value *Val, CGNode &dtv) {
@@ -326,6 +317,11 @@ public:
 
   retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd,
                           retypd::Variance V);
+  const retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd,
+                                retypd::Variance V) const {
+    return const_cast<ConstraintsGenerator *>(this)->getNode(Val, User, OpInd,
+                                                             V);
+  }
   retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd,
                                 retypd::Variance V);
   // Create Node of both variance

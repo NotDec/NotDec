@@ -278,44 +278,6 @@ std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
   return ret;
 }
 
-void ConstraintGraph::instantiate(
-    llvm::Function *Target, const std::vector<retypd::SubTypeConstraint> &Sum,
-    size_t ID, std::function<llvm::Type *(const TypeVariable &)> GetLowTy) {
-  assert(ID > 0);
-  for (auto &C : Sum) {
-    auto Sub = C.sub;
-    auto Sup = C.sup;
-    if (Sub.hasInstanceId()) {
-      Sub.setInstanceId(ID);
-    }
-    if (Sup.hasInstanceId()) {
-      Sup.setInstanceId(ID);
-    }
-    // TODO set PtrOrNum.
-    if (LLCtx) {
-      if (Sub.isPrimitive()) {
-        if (auto LowTy = Elem2LLVMType(*LLCtx, Sub.getBaseName())) {
-          assert(!Sup.isPrimitive());
-          auto &SupNode = getOrInsertNode(Sup, GetLowTy(Sup));
-          SupNode.getPNIVar()->updateLowTy(LowTy);
-          continue;
-        }
-      } else if (Sup.isPrimitive()) {
-        if (auto LowTy = Elem2LLVMType(*LLCtx, Sup.getBaseName())) {
-          assert(!Sub.isPrimitive());
-          auto &SubNode = getOrInsertNode(Sub, GetLowTy(Sub));
-          SubNode.getPNIVar()->updateLowTy(LowTy);
-          continue;
-        }
-      }
-    }
-
-    addConstraint(getOrInsertNode(Sub, GetLowTy(Sub)),
-                  getOrInsertNode(Sup, GetLowTy(Sup)), GetLowTy);
-  }
-  // TODO What about PNI
-}
-
 std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 
   std::map<std::pair<CGNode *, CGNode *>, rexp::PRExp> P =
@@ -961,7 +923,7 @@ void ConstraintGraph::layerSplit() {
     auto &Source = Ent.second;
     NodeKey NewSrc = Source.key;
     NewSrc.IsNewLayer = true;
-    auto &New = createNodeWithPNI(NewSrc, Source.getPNIVar());
+    auto &New = &Ent.second != End ? createNodeWithPNI(NewSrc, Source.getPNIVar()) : createNodeNoPNI(NewSrc, End->getSize());
     Old2New.insert({&Source, &New});
   }
 
@@ -1195,7 +1157,7 @@ void ConstraintGraph::saturate() {
   bool DenseSubtype = true;
   if (const char *val = std::getenv("NOTDEC_SAT_NO_DENSESUBTYPE")) {
     if ((std::strcmp(val, "1") == 0)) {
-      DenseSubtype = true;
+      DenseSubtype = false;
     }
   }
 
@@ -1204,7 +1166,6 @@ void ConstraintGraph::saturate() {
   if (PG) {
     PG->solve();
   }
-  // Initial reaching push set is maintained during edge insertion.
   // 1. add forget edges to reaching set
   for (auto &Ent : Nodes) {
     auto &Source = Ent.second;
@@ -1439,13 +1400,13 @@ CGNode &ConstraintGraph::getOrInsertNodeWithPNI(const NodeKey &N, PNINode *PN) {
   }
 }
 
-CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &N,
+CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &K,
                                          llvm::Type *LowType) {
-  auto [It, Inserted] = Nodes.try_emplace(N, *this, N, LowType);
-  if (LowType == nullptr) {
-    assert(!Inserted);
+  auto *N = getNodeOrNull(K);
+  if (N != nullptr) {
+    return *N;
   }
-  return It->second;
+  return createNode(K, LowType);
 }
 
 bool ConstraintGraph::hasNode(const NodeKey &N) { return Nodes.count(N) > 0; }
@@ -1461,6 +1422,13 @@ std::pair<std::map<NodeKey, CGNode>::iterator, bool>
 ConstraintGraph::emplace(const NodeKey &N, llvm::Type *LowType) {
   return Nodes.emplace(std::piecewise_construct, std::forward_as_tuple(N),
                        std::forward_as_tuple(*this, N, LowType));
+}
+
+CGNode &ConstraintGraph::createNodeNoPNI(const NodeKey &N, unsigned Size) {
+  auto It = Nodes.emplace(std::piecewise_construct, std::forward_as_tuple(N),
+                          std::forward_as_tuple(*this, N, Size));
+  assert(It.second && "createNode failed: node already exists");
+  return It.first->second;
 }
 
 CGNode &ConstraintGraph::createNode(const NodeKey &N, llvm::Type *LowType) {
@@ -1479,9 +1447,8 @@ CGNode &ConstraintGraph::createNodeWithPNI(const NodeKey &N, PNINode *PNI) {
 CGNode &ConstraintGraph::createNodeClonePNI(const NodeKey &N, PNINode *ON) {
   CGNode *NewN;
   if (ON != nullptr) {
-    NewN = &createNodeWithPNI(N, nullptr);
     auto PN = PG->clonePNINode(*ON);
-    PNIGraph::addPNINodeTarget(*NewN, *PN);
+    NewN = &createNodeWithPNI(N, PN);
   } else {
     NewN = &createNode(N, nullptr);
   }
@@ -2005,8 +1972,8 @@ CGNode *ConstraintGraph::getMemoryNode() {
   if (MemoryNode != nullptr) {
     return MemoryNode;
   }
-  MemoryNode =
-      &createNode(NodeKey{TypeVariable::CreateDtv(*Ctx, Memory)}, nullptr);
+  MemoryNode = &createNode(NodeKey{TypeVariable::CreateDtv(*Ctx, Memory)},
+                           Type::getInt8PtrTy(*LLCtx));
   if (PG) {
     setPointer(*MemoryNode);
   }
@@ -2017,8 +1984,8 @@ CGNode *ConstraintGraph::getStartNode() {
   if (Start != nullptr) {
     return Start;
   }
-  Start = &createNode(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#Start")},
-                      nullptr);
+  Start =
+      &createNodeNoPNI(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#Start")}, 0);
   return Start;
 }
 
@@ -2026,8 +1993,7 @@ CGNode *ConstraintGraph::getEndNode() {
   if (End != nullptr) {
     return End;
   }
-  End =
-      &createNode(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#End")}, nullptr);
+  End = &createNodeNoPNI(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#End")}, 0);
   return End;
 }
 
@@ -2041,19 +2007,19 @@ ConstraintGraph::ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx,
   }
 }
 
-void ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
-                            const ConstraintGraph &From, ConstraintGraph &To,
-                            bool removePNI) {
+void ConstraintGraph::clone(
+    std::map<const CGNode *, CGNode *> &Old2New, const ConstraintGraph &From,
+    ConstraintGraph &To, std::function<NodeKey(const NodeKey &)> TransformKey) {
   assert(Old2New.empty() && "clone: Old2New is not empty!");
-  assert(&From.Ctx == &To.Ctx && "clone: Ctx mismatch!");
-  // loses CG pointer when cloning.
-  removePNI = (!(bool)From.PG) || removePNI;
+  assert(From.Ctx.get() == To.Ctx.get() && "clone: Ctx mismatch!");
+  assert(From.PointerSize == To.PointerSize);
   To.Name = From.Name;
 
-  // clone all nodes
+  // clone all nodes. Clone PNINodes later.
   for (auto &Ent : From.Nodes) {
     auto &Node = Ent.second;
-    auto &NewNode = To.createNodeWithPNI(Node.key, (PNINode *)nullptr);
+    NodeKey NewKey = TransformKey ? TransformKey(Node.key) : Node.key;
+    auto &NewNode = To.createNodeNoPNI(NewKey, Node.Size);
     auto Pair = Old2New.insert({&Node, &NewNode});
     assert(Pair.second && "clone: Node already cloned!?");
   }
@@ -2070,10 +2036,12 @@ void ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
   }
 
   // clone PNI Graph
-  if (From.PG && !removePNI) {
+  if (From.PG) {
+    assert(From.PointerSize == From.PG->PointerSize);
     assert(From.LLCtx != nullptr);
-    To.PG = std::make_unique<PNIGraph>(To, *From.LLCtx, From.PG->Name,
-                                       From.PG->PointerSize);
+    assert(To.PG);
+    assert(To.PointerSize == To.PG->PointerSize);
+    assert(&From.PG->LLCtx == &To.PG->LLCtx);
     To.PG->cloneFrom(*From.PG, Old2New);
   }
 
@@ -2098,32 +2066,22 @@ void ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
 }
 
 ConstraintGraph
-ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New,
-                       bool removePNI) const {
-  ConstraintGraph G(Ctx, LLCtx, PointerSize, Name, (!(bool)PG) || removePNI);
-  clone(Old2New, *this, G, removePNI);
+ConstraintGraph::clone(std::map<const CGNode *, CGNode *> &Old2New) const {
+  ConstraintGraph G(Ctx, LLCtx, PointerSize, Name);
+  clone(Old2New, *this, G);
   return G;
 }
 
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size)
-    : Parent(Parent), Id(ValueNamer::getId()), key(key), Size(Size) {
-  if (Parent.PG) {
-    if (Parent.Nodes.count(MakeReverseVariant(key))) {
-      PNIGraph::addPNINodeTarget(
-          *this, *Parent.Nodes.at(MakeReverseVariant(key)).PNIVar);
-    } else {
-      assert(false && "TODO");
-      // PNIVar = Parent.PG->createPNINode(this, Size);
-    }
-  }
-}
+    : Parent(Parent), Id(ValueNamer::getId()), key(key), Size(Size) {}
 
 CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy)
-    : Parent(Parent), Id(ValueNamer::getId()), key(key), Size(::notdec::retypd::getSize(LowTy)) {
+    : Parent(Parent), Id(ValueNamer::getId()), key(key),
+      Size(::notdec::retypd::getSize(LowTy, Parent.PointerSize)) {
   if (Parent.PG) {
     if (Parent.Nodes.count(MakeReverseVariant(key))) {
       PNIGraph::addPNINodeTarget(
-          *this, *Parent.Nodes.at(MakeReverseVariant(key)).PNIVar);
+          *this, *Parent.Nodes.at(MakeReverseVariant(key)).getPNIVar());
     } else {
       PNIVar = Parent.PG->createPNINode(this, LowTy);
     }
@@ -2142,7 +2100,8 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
       assert(N->getParent() == Parent.PG.get());
       PNIGraph::addPNINodeTarget(*this, *N);
     } else if (Parent.Nodes.count(MakeReverseVariant(key))) {
-      PNIVar = Parent.Nodes.at(MakeReverseVariant(key)).PNIVar;
+      PNIGraph::addPNINodeTarget(
+          *this, *Parent.Nodes.at(MakeReverseVariant(key)).getPNIVar());
     }
     // // try to reuse the PNINode as possible: other variance or new layer.
     // // for new layer node, non-new-layer node must exist, and reuse the
@@ -2203,8 +2162,8 @@ bool CGNode::hasPointerEdge() const {
 }
 
 bool CGNode::isSpecial() const {
-  return this == Parent.getStartNode() || this == Parent.getEndNode() ||
-         this == Parent.getMemoryNode();
+  return this == Parent.Start || this == Parent.End ||
+         this == Parent.MemoryNode;
 }
 
 bool CGNode::isPNIAndEdgeMatch() const {

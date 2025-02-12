@@ -19,8 +19,9 @@ namespace notdec::retypd {
 
 // TODO a better lattice representation
 clang::QualType
-SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(std::string Name,
+SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(LatticeTy LTy,
                                                        unsigned BitSize) {
+  auto Name = LTy.latticeStr();
   if (BitSize == 1 || Name == "bool") {
     return Ctx.BoolTy;
   }
@@ -40,19 +41,11 @@ SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(std::string Name,
   if (Name == "ptr") {
     return Ctx.getPointerType(getUndef(BitSize));
   }
-  if (startswith(Name, "int") || startswith(Name, "uint") ||
-      startswith(Name, "sint")) {
+  if (Name == "int" || Name == "uint" || Name == "sint") {
     bool Signed = false;
-    if (startswith(Name, "sint")) {
+    if (Name == "sint") {
       Signed = true;
     }
-    int BitSize1;
-    if (startswith(Name, "int")) {
-      BitSize1 = std::stoi(Name.substr(3));
-    } else {
-      BitSize1 = std::stoi(Name.substr(4));
-    }
-    assert(BitSize1 == BitSize && "BitSize mismatch");
     auto ret = Ctx.getIntTypeForBitwidth(BitSize, Signed);
     if (ret.isNull()) {
       llvm::errs() << "Warning: cannot find exact type for Int of size "
@@ -101,50 +94,31 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
 
   bool isPNIPtr = Node.isPNIPointer();
 
+  auto ETy = Node.getPNIVar()->getLatticeTy();
   // No out edges.
   if (Node.outEdges.empty()) {
-    // If is pointer, use undef*
-    if (isPNIPtr) {
-      auto Ret = Ctx.getPointerType(getUndef(BitSize));
-      NodeTypeMap.emplace(&Node, Ret);
-      return Ret;
-    } else {
-      // no info from graph, just use LLVM type.
-      auto Ret = fromLatticeElem(Node.getPNIVar()->getLatticeTy().latticeStr(),
-                                 BitSize);
-      NodeTypeMap.emplace(&Node, Ret);
-      return Ret;
-    }
+    // no info from graph, just use LatticeTy.
+    auto Ret = fromLatticeElem(Node.getPNIVar()->getLatticeTy(), BitSize);
+    NodeTypeMap.emplace(&Node, Ret);
+    return Ret;
   }
 
   if (!isPNIPtr) {
-    // 2. if only edges
     // if only edges to #End with forget primitive, then it is a simple
     // primitive type.
-    std::string Var;
     for (auto &Edge : Node.outEdges) {
       if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
         if (FB->Base.isPrimitive()) {
-          if (Var.empty()) {
-            Var = FB->Base.getPrimitiveName();
+          if (Node.key.SuffixVariance == Covariant) {
+            ETy.merge(Node.getPNIVar()->getLatticeTy(), false);
           } else {
-            if (Node.key.SuffixVariance == Covariant) {
-              Var = meet(Var, FB->Base.getPrimitiveName());
-            } else {
-              Var = join(Var, FB->Base.getPrimitiveName());
-            }
+            ETy.merge(Node.getPNIVar()->getLatticeTy(), true);
           }
         }
       }
     }
 
-    // TODO!! refactor to use latticeTy's meet and join.
-    if (Node.key.SuffixVariance == Covariant) {
-      Var = meet(Var, Node.getPNIVar()->getLatticeTy().latticeStr());
-    } else {
-      Var = join(Var, Node.getPNIVar()->getLatticeTy().latticeStr());
-    }
-    auto Ret = fromLatticeElem(Var, BitSize);
+    auto Ret = fromLatticeElem(ETy, BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }
@@ -205,21 +179,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
         Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
         nullptr, nullptr, false, clang::ICIS_NoInit);
 
-    bool useComment = false;
-    if (useComment) {
-      // // TODO support comment. ASTWriter does not support comment?
-      // clang::comments::TextComment *TC =
-      //     new (Ctx.getAllocator()) clang::comments::TextComment(
-      //         clang::SourceLocation(), clang::SourceLocation(),
-      //         "off:" + std::to_string(Ent.first.offset));
-      // clang::comments::ParagraphComment *PC =
-      //     new (Ctx.getAllocator()) clang::comments::ParagraphComment(
-      //         clang::ArrayRef<clang::comments::InlineContentComment *>(TC));
-      // clang::comments::FullComment *FC =
-      //     new (Ctx.getAllocator()) clang::comments::FullComment({PC},
-      //     nullptr);
-      // Ctx.ParsedComments[Field] = FC;
-    } else {
+    Parent.DeclComments[Field] = "at offset: " + std::to_string(Ent.Start.offset);
+    bool addAttr = true;
+    if (addAttr) {
       Field->addAttr(clang::AnnotateAttr::Create(
           Ctx, "off:" + std::to_string(Ent.Start.offset), nullptr, 0,
           clang::AttributeCommonInfo(clang::SourceRange())));

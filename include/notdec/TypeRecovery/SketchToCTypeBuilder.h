@@ -24,12 +24,13 @@ clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix = "st
 
 struct SketchToCTypeBuilder {
   struct TypeBuilderImpl {
+    SketchToCTypeBuilder& Parent;
     clang::ASTContext &Ctx;
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
     // Main interface: recursively visit the node and build the type
     clang::QualType visitType(const CGNode &Node);
-    TypeBuilderImpl(clang::ASTContext &Ctx) : Ctx(Ctx) {}
+    TypeBuilderImpl(SketchToCTypeBuilder& Parent) :Parent(Parent), Ctx(Parent.ASTUnit->getASTContext()) {}
 
     std::map<std::string, clang::QualType> TypeDefs;
     clang::QualType getUndef(unsigned BitSize) {
@@ -64,18 +65,19 @@ struct SketchToCTypeBuilder {
       return Ret;
     }
 
-    clang::QualType fromLatticeElem(std::string Name, unsigned BitSize);
+    clang::QualType fromLatticeElem(LatticeTy LTy, unsigned BitSize);
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
-  TypeBuilderImpl Builder{ASTUnit->getASTContext()};
+  std::map<clang::Decl *, std::string> DeclComments;
+  TypeBuilderImpl Builder;
 
   // Todo: Change filename or remove the argument
   SketchToCTypeBuilder(llvm::StringRef FileName)
-      : ASTUnit(llvm2c::buildAST("decompilation.c")) {}
+      : ASTUnit(llvm2c::buildAST("decompilation.c")), Builder(*this) {}
 
   clang::QualType buildType(const CGNode &Root) {
     return Builder.visitType(Root);
-  } 
+  }
 };
 
 } // namespace notdec::retypd

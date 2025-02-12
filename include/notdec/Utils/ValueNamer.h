@@ -2,6 +2,7 @@
 #define _NOTDEC_UTILS_VALUENAMER_H_
 
 #include <cstddef>
+#include <set>
 #include <string>
 
 #include <llvm/ADT/Twine.h>
@@ -10,6 +11,8 @@
 namespace notdec {
 
 using llvm::Value;
+
+extern std::set<size_t> TraceIds;
 
 struct ValueNamer {
 protected:

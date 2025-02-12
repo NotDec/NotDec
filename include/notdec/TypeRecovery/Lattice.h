@@ -7,7 +7,7 @@
 
 namespace notdec::retypd {
 
-unsigned getSize(llvm::Type *Ty);
+unsigned getSize(llvm::Type *Ty, unsigned PointerSize);
 
 std::string join(std::string a, std::string b);
 std::string meet(std::string a, std::string b);
@@ -59,7 +59,7 @@ struct LatticeTy {
 
   LatticeTy() = default;
   LatticeTy(llvm::Type *Ty, unsigned PointerSize)
-      : Size(::notdec::retypd::getSize(Ty)), Ty(fromLLVMTy(Ty, PointerSize)) {}
+      : Size(::notdec::retypd::getSize(Ty, PointerSize)), Ty(fromLLVMTy(Ty, PointerSize)) {}
 
   unsigned getSize() const { return Size; }
   std::string getElem() const { return Elem; }

@@ -235,6 +235,9 @@ struct PNIGraph {
                   llvm::BinaryOperator *Inst);
 
   PNINode *mergePNINodes(PNINode *Left, PNINode *Right) {
+    if (Left == Right) {
+      return Left;
+    }
     Left->Ty.merge(Right->Ty);
     mergePNVarTo(Right, Left);
     return Left;

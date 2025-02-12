@@ -1,5 +1,6 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/ConstraintGraph.h"
+#include "Utils/ValueNamer.h"
 #include "optimizers/ConstraintGenerator.h"
 #include <cassert>
 #include <iostream>
@@ -75,6 +76,7 @@ bool PNIGraph::solve() {
 
 void PNIGraph::addPNINodeTarget(CGNode &To, PNINode &N) {
   assert(To.getPNIVar() == nullptr);
+  assert(N.Parent == To.Parent.PG.get());
   To.setPNIVar(&N);
   N.Parent->PNIToNode[&N].insert(&To);
 }
@@ -350,6 +352,10 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
 llvm::iplist<PNINode>::iterator PNINode::eraseFromParent() {
   // Check links before destruction. Should be replaced beforehand.
   assert(Parent->PNIToNode.count(this) == 0);
+  if (TraceIds.count(getId())) {
+    llvm::errs() << "TraceID=" << getId() << " PNINode=" << str()
+                 << ": PNINode::eraseFromParent: Erasing node\n";
+  }
   return node_with_erase<PNINode, PNIGraph>::eraseFromParent();
 }
 
@@ -374,6 +380,10 @@ llvm::Type *PNINode::mergeLowTy(llvm::Type *T, llvm::Type *O) {
 }
 
 PNINode *PNINode::unify(PNINode &other) {
+  assert(Parent == other.Parent);
+  if (this == &other) {
+    return this;
+  }
   auto *Node = Parent->mergePNINodes(this, &other);
   return Node;
 }
@@ -424,6 +434,10 @@ void PNIGraph::markChanged(PNINode *N, ConsNode *Except) {
 }
 
 void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
+  assert(Var->Parent == Target->Parent);
+  if (Var == Target) {
+    return;
+  }
   // maintain PNIToNode
   if (PNIToNode.count(Var)) {
     for (auto *N : PNIToNode[Var]) {
@@ -467,8 +481,6 @@ llvm::Type *PNINode::normalizeLowTy(llvm::Type *T) {
   return T;
 }
 
-
-
 bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   bool Updated = Ty.setPtrOrNum(NewTy);
   if (Updated) {
@@ -503,7 +515,11 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
 // When LowTy is pointer-sized int, we initialize Ty as Unknown.
 PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
     : node_with_erase(SSG), Id(ValueNamer::getId()),
-      Ty(LowTy, SSG.PointerSize) {}
+      Ty(LowTy, SSG.PointerSize) {
+  if (TraceIds.count(Id)) {
+    std::cerr << "PNINode::PNINode(" << Id << "): " << str() << "\n";
+  }
+}
 
 PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
     : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty) {}
