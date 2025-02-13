@@ -51,6 +51,7 @@ public:
   auto count(K Key) -> decltype(M.count(Key)) { return M.count(Key); }
   auto at(K Key) -> decltype(M.at(Key)) { return M.at(Key); }
   auto at(K Key) const -> const decltype(M.at(Key)) { return M.at(Key); }
+  auto size() const -> decltype(M.size()) { return M.size(); }
 };
 
 } // namespace notdec

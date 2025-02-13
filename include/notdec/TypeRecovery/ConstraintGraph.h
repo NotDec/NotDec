@@ -92,7 +92,9 @@ struct CGNode {
   PNINode *getPNIVar() { return PNIVar; }
   const PNINode *getPNIVar() const { return PNIVar; }
   bool isSpecial() const;
+  bool isStartOrEnd() const;
   bool hasNoPNI() const { return PNIVar == nullptr || PNIVar->isNull(); }
+  bool isTop() const { return key.Base.isTop(); }
 
 protected:
   friend struct PNIGraph;
@@ -108,7 +110,7 @@ public:
   CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy);
   // Creating a new node with low type and set PNI accordingly.
   CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N);
-  
+
   // Create node with no PNINode, regardless of PG != nullptr.
   // 1. for special nodes like #Start, #End
   // 2. for clone
@@ -191,7 +193,7 @@ struct ConstraintGraph {
   static void
   clone(std::map<const CGNode *, CGNode *> &Old2New,
         const ConstraintGraph &From, ConstraintGraph &To,
-        std::function<NodeKey(const NodeKey &)> TransformKey = nullptr);
+        std::function<NodeKey(const NodeKey &)> TransformKey = nullptr, bool Partial = false);
   // Node map is the core data of cloning.
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 
@@ -201,10 +203,6 @@ struct ConstraintGraph {
     return Ret;
   }
 
-  bool isSpecialNode(const CGNode &N) const {
-    assert(&N.Parent == this);
-    return &N == Start || &N == End || &N == MemoryNode;
-  }
   bool hasNode(const NodeKey &N);
   // must get the node
   CGNode &getNode(const NodeKey &N);
@@ -236,9 +234,10 @@ struct ConstraintGraph {
   void linkVars(std::set<std::string> &InterestingVars);
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
+  void recoverBaseVars();
+  void removeTopNodes();
   void aggressiveSimplify();
   // void lowTypeToSubType();
-  ConstraintGraph cloneAndSimplify() const;
 
 public:
   void solve();
@@ -247,6 +246,8 @@ public:
   CGNode *getStartNode();
   CGNode *getEndNode();
   CGNode *getMemoryNode();
+  CGNode *getTopNode(Variance V);
+  CGNode *getTopNodeOrNull(Variance V);
 
   // void solveSketchQueries(
   //     const std::vector<std::pair<
@@ -258,8 +259,8 @@ public:
   // internal steps
   void saturate();
   void layerSplit();
-  /// Intersect the language, that disallow recall and forget the same thing.
-  /// Must not have null/epsilon moves.
+  /// Intersect the language, that disallow recall and forget the same thing,
+  /// which is a no-op. Must not have null/epsilon moves.
   void pushSplit();
   /// Intersect the language, that disallow contravariant node have both recall
   /// in and forget out. Only care about the relation where the recall and
@@ -274,6 +275,7 @@ public:
   std::set<std::pair<CGNode *, OffsetRange>>
   getNodeReachableOffset(CGNode &Start);
 
+  void linkLoadStoreToTop();
   void markVariance();
   /// Focus on the recall subgraph and use forget edge to label nodes. mark all
   /// nodes as accepting by link with `forget #top`.
@@ -495,9 +497,11 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
   DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
   static std::string getGraphName(GraphRef CG) { return CG->Name; }
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
-    return Node->key.str() + (Node->getPNIVar() != nullptr
-                                  ? "\n" + Node->getPNIVar()->str()
-                                  : "");
+    return Node->key.str() +
+           (Node->getPNIVar() != nullptr
+                ? "\n" + Node->getPNIVar()->str() + "  #" +
+                      std::to_string(Node->getPNIVar()->getId())
+                : "");
   }
 
   std::string getEdgeAttributes(const NodeRef Node,

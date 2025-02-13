@@ -212,7 +212,10 @@ struct ConstraintsGenerator {
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
   std::set<llvm::Function *> SCCs;
-  std::map<CallBase *, size_t> CallToID;
+  std::map<CallBase *, std::pair<CGNode *, CGNode *>> CallToInstance;
+  // unhandled due to not having function body.
+  // TODO: If reachable from function node, then it makes summary incorrect.
+  std::map<CallBase *, std::pair<CGNode *, CGNode *>> UnhandledCalls;
   std::string DebugDir;
 
   retypd::CGNode &getNode(const retypd::NodeKey &Key) {
@@ -255,6 +258,7 @@ struct ConstraintsGenerator {
   void linkContraToCovariant();
 
   bool checkSymmetry();
+  void makeSymmetry();
 
   using IndexTy = OffsetRange;
   struct FieldEntry {
@@ -324,6 +328,11 @@ public:
   }
   retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd,
                                 retypd::Variance V);
+  const retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd,
+                                      retypd::Variance V) const {
+    return const_cast<ConstraintsGenerator *>(this)->getNodeOrNull(Val, User,
+                                                                   OpInd, V);
+  }
   // Create Node of both variance
   std::pair<retypd::CGNode &, retypd::CGNode &>
   createNode(ExtValuePtr Val, User *User, long OpInd);

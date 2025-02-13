@@ -316,11 +316,17 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
 }
 
 void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
+  // mark load/store as accepting.
+  linkLoadStoreToTop();
   // Link nodes to "#Start"
-  for (auto N : StartNodes) {
+  for (auto &Ent : Nodes) {
+    auto *N = &Ent.second;
+    if (N->isStartOrEnd()) {
+      continue;
+    }
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
-        (N->key.Base.hasBaseName() &&
+        (!N->key.Base.hasLabel() && N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       // LLVM_DEBUG(llvm::dbgs()
       //            << "Adding an edge from #Start to " << N->key.str() <<
@@ -335,10 +341,14 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
 
 void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
   // Link nodes to "#End"
-  for (auto N : EndNodes) {
+  for (auto &Ent : Nodes) {
+    auto *N = &Ent.second;
+    if (N->isStartOrEnd()) {
+      continue;
+    }
     // is an interesting var or is a primitive type
     if (N->key.Base.isPrimitive() ||
-        (N->key.Base.hasBaseName() &&
+        (!N->key.Base.hasLabel() && N->key.Base.hasBaseName() &&
          InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
       // LLVM_DEBUG(llvm::dbgs()
       //            << "Adding an edge from " << N->key.str() << " to #End\n");
@@ -349,27 +359,67 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
   }
 }
 
-ConstraintGraph ConstraintGraph::cloneAndSimplify() const {
-  std::map<const CGNode *, CGNode *> Old2New;
-  auto G = clone(Old2New);
-  return G.simplify();
+void ConstraintGraph::recoverBaseVars() {
+  // Fix RecallBase and ForgetBase edges
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::rexp::EdgeLabel>> toRemove;
+  for (auto &OE : Start->outEdges) {
+    assert(std::holds_alternative<retypd::RecallBase>(OE.getLabel()));
+    auto &RE = std::get<retypd::RecallBase>(OE.getLabel());
+    auto &Target = const_cast<CGNode &>(OE.getTargetNode());
+    if (std::make_tuple(Target.key.Base, Target.key.SuffixVariance) !=
+        std::make_tuple(RE.Base, RE.V)) {
+      retypd::NodeKey NewKey(RE.Base, RE.V);
+      auto &NewTarget = getOrInsertNodeWithPNI(NewKey, Target.getPNIVar());
+      addEdge(NewTarget, Target, retypd::One{});
+      toRemove.push_back(std::make_tuple(Start, &Target, OE.getLabel()));
+    }
+  }
+  for (auto IE : End->inEdges) {
+    assert(std::holds_alternative<retypd::ForgetBase>(IE->getLabel()));
+    auto &FB = std::get<retypd::ForgetBase>(IE->getLabel());
+    auto &Source = const_cast<CGNode &>(IE->getSourceNode());
+    if (std::make_tuple(Source.key.Base, Source.key.SuffixVariance) !=
+        std::make_tuple(FB.Base, FB.V)) {
+      retypd::NodeKey NewKey(FB.Base, FB.V);
+      auto &NewSource = getOrInsertNodeWithPNI(NewKey, Source.getPNIVar());
+      addEdge(Source, NewSource, retypd::One{});
+      toRemove.push_back(std::make_tuple(&Source, End, IE->getLabel()));
+    }
+  }
+  for (auto &[From, To, Label] : toRemove) {
+    removeEdge(*From, *To, Label);
+  }
+}
+
+void ConstraintGraph::removeTopNodes() {
+  if (auto TN = getTopNode(Covariant)) {
+    for (auto E : TN->inEdges) {
+      removeEdge(E->getSourceNode(), *TN, E->getLabel());
+    }
+    removeNode(TN->key);
+  }
+  if (auto TN = getTopNode(Contravariant)) {
+    for (auto &E : TN->outEdges) {
+      removeEdge(*TN, const_cast<CGNode &>(E.getTargetNode()), E.getLabel());
+    }
+    removeNode(TN->key);
+  }
 }
 
 ConstraintGraph ConstraintGraph::simplify() {
+  assert(Start != nullptr && Start->outEdges.size() > 0);
   layerSplit();
 
-  // auto G2 = minimize(this);
+  auto G2 = minimize(this);
 
-  // // G2.printGraph("trans_before_push_split.dot");
+  G2.pushSplit();
+  if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
+    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+      G2.printGraph("trans_push_split.dot");
+    }
+  }
 
-  // G2.pushSplit();
-  // if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
-  //   if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-  //     G2.printGraph("trans_push_split.dot");
-  //   }
-  // }
-
-  auto G3 = minimize(this);
+  auto G3 = minimize(&G2);
 
   G3.contraVariantSplit();
   if (const char *path = std::getenv("DEBUG_TRANS_CV_SPLIT_GRAPH")) {
@@ -383,6 +433,10 @@ ConstraintGraph ConstraintGraph::simplify() {
       G4.printGraph("trans_min.dot");
     }
   }
+
+  G4.markVariance();
+  G4.recoverBaseVars();
+  G4.removeTopNodes();
 
   return G4;
 }
@@ -517,10 +571,14 @@ void ConstraintGraph::markVariance() {
   return;
 }
 
+// disallow recall and forget the same thing, which is a no-op.
+// for each node, create a duplicate node, move all non-forget edge to the new
 void ConstraintGraph::pushSplit() {
   std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
   std::set<std::tuple<CGNode *, EdgeLabel, EdgeLabel>> toIsolate;
 
+  // first scan all nodes with only useless path, delete them.
+  // and find nodes to isolate.
   for (auto &Ent : Nodes) {
     if (&Ent.second == Start || &Ent.second == End) {
       continue;
@@ -923,7 +981,9 @@ void ConstraintGraph::layerSplit() {
     auto &Source = Ent.second;
     NodeKey NewSrc = Source.key;
     NewSrc.IsNewLayer = true;
-    auto &New = &Ent.second != End ? createNodeWithPNI(NewSrc, Source.getPNIVar()) : createNodeNoPNI(NewSrc, End->getSize());
+    auto &New = (&Ent.second != End && !Ent.second.isTop())
+                    ? createNodeWithPNI(NewSrc, Source.getPNIVar())
+                    : createNodeNoPNI(NewSrc, End->getSize());
     Old2New.insert({&Source, &New});
   }
 
@@ -989,16 +1049,62 @@ void ConstraintGraph::layerSplit() {
     }
   }
   // Update the end node to the new layer.
+  // Because there will only be forget base to End, old end node must has no in
+  // edges, which is moved to new end node in new layer.
   if (End != nullptr) {
+    auto *OldEnd = End;
+    assert(OldEnd->inEdges.size() == 0);
     NodeKey NewKey = End->key;
     NewKey.IsNewLayer = true;
     auto &NewNode = getNode(NewKey);
     End = &NewNode;
+    // remove the old end node.
+    removeNode(OldEnd->key);
   }
 
   if (const char *path = std::getenv("DEBUG_TRANS_LAYER_SPLIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
       printGraph("trans_layerSplit.dot");
+    }
+  }
+}
+
+void ConstraintGraph::linkLoadStoreToTop() {
+  for (auto &Ent : Nodes) {
+    auto &Source = Ent.second;
+    if (Source.isStartOrEnd()) {
+      continue;
+    }
+    // for load/store nodes, if has not forget prim edge, add one to top.
+    if (Source.key.Base.hasLabel()) {
+      auto &Back = Source.key.Base.getLabels().back();
+      if (std::holds_alternative<LoadLabel>(Back)) {
+        if (Source.key.SuffixVariance == Covariant) {
+          // covariant load can only have subtype (one) edge out
+          onlyAddEdge(Source, *getTopNode(Covariant), One{});
+        } else {
+          onlyAddEdge(*getTopNode(Contravariant), Source, One{});
+        }
+        // bool HasForgetPrim = false;
+        // for (auto &Edge : Source.outEdges) {
+        //   if (std::holds_alternative<ForgetBase>(Edge.Label)) {
+        //     if (std::get<ForgetBase>(Edge.Label).Base.isPrimitive()) {
+        //       HasForgetPrim = true;
+        //       break;
+        //     }
+        //   }
+        // }
+        // if (!HasForgetPrim) {
+
+        // }
+      } else if (std::holds_alternative<StoreLabel>(Back)) {
+        if (Source.key.SuffixVariance == Covariant) {
+          // covariant store can only have subtype (one) edge in
+          onlyAddEdge(*getTopNode(Covariant), Source, One{});
+        } else {
+          onlyAddEdge(Source, *getTopNode(Contravariant), One{});
+        }
+      }
     }
   }
 }
@@ -1015,24 +1121,9 @@ void ConstraintGraph::sketchSplit() {
         removeEdge(Source, Target, Edge.Label);
       }
     }
-    if (&Source == Start || &Source == End) {
+    if (Source.isStartOrEnd()) {
       continue;
     }
-    // 1.2 if the node has not forget prim edge, add one to top.
-    // bool HasForgetPrim = false;
-    // for (auto &Edge : Source.outEdges) {
-    //   if (std::holds_alternative<ForgetBase>(Edge.Label)) {
-    //     if (std::get<ForgetBase>(Edge.Label).Base.isPrimitive()) {
-    //       HasForgetPrim = true;
-    //       break;
-    //     }
-    //   }
-    // }
-    // if (!HasForgetPrim && !Source.key.Base.isPrimitive()) {
-    //   addEdge(Source, *getEndNode(),
-    //           ForgetBase{.Base = TypeVariable::CreatePrimitive(Ctx, "top"),
-    //                      .V = Source.key.SuffixVariance});
-    // }
   }
   // 2. Link vars from primitives to #End.
   std::set<std::string> Vars = {};
@@ -1239,9 +1330,9 @@ void ConstraintGraph::saturate() {
           if (ReachingSet.count(&Source)) {
             for (auto &Reach : ReachingSet[&Source]) {
               if (Reach.first == Capa.label && Reach.second != &Target) {
-                // LLVM_DEBUG(llvm::dbgs()
-                //            << "Adding Edge From " << Reach.second->key.str()
-                //            << " to " << Target.key.str() << " with _1_ \n");
+                LLVM_DEBUG(llvm::dbgs()
+                           << "Adding Edge From " << Reach.second->key.str()
+                           << " to " << Target.key.str() << " with _1_ \n");
                 // We are iterating through Recall edges, and we insert One
                 // edge, so it is ok to modify edge during iterating.
                 Changed |= addEdge(*Reach.second, Target, One{});
@@ -1319,6 +1410,9 @@ void ConstraintGraph::addConstraint(
   assert(&NodeR.Parent == this && "addConstraint: NodeR is not in the graph");
   // 1. add 1-labeled edge between them
   if (&NodeL != &NodeR) {
+    // LLVM_DEBUG(llvm::dbgs()
+    //            << "addConstraint: Adding Edge From " << NodeL.key.str()
+    //            << " to " << NodeR.key.str() << " with _1_ \n");
     addEdge(NodeL, NodeR, One{});
   }
   // 2. add each sub var node and edges.
@@ -1331,11 +1425,14 @@ void ConstraintGraph::addConstraint(
 
   // 3-4 the inverse of the above
   // 3. inverse node and 1-labeled edge
-  auto &RNodeL = getOrInsertNodeWithPNI(NodeKey(NodeL.key.Base, Contravariant),
-                                        NodeL.getPNIVar());
-  auto &RNodeR = getOrInsertNodeWithPNI(NodeKey(NodeR.key.Base, Contravariant),
-                                        NodeR.getPNIVar());
+  auto &RNodeL =
+      getOrInsertNodeWithPNI(MakeReverseVariant(NodeL.key), NodeL.getPNIVar());
+  auto &RNodeR =
+      getOrInsertNodeWithPNI(MakeReverseVariant(NodeR.key), NodeR.getPNIVar());
   // add 1-labeled edge between them
+  // LLVM_DEBUG(llvm::dbgs()
+  //           << "addConstraint: Adding Edge From " << RNodeR.key.str()
+  //           << " to " << RNodeL.key.str() << " with _1_ \n");
   addEdge(RNodeR, RNodeL, One{});
   // 4.1 inverse left
   addRecalls(RNodeL, GetLowTy);
@@ -1370,7 +1467,7 @@ void ConstraintGraph::addRecalls(
   }
   // We do not really link the node to #Start
   // if (N.key.SuffixVariance == Covariant) {
-  StartNodes.insert(T);
+  // StartNodes.insert(T);
   // }
 }
 
@@ -1388,7 +1485,7 @@ void ConstraintGraph::addForgets(
   }
   // We do not really link the node to #Start
   // if (N.key.SuffixVariance == Covariant) {
-  EndNodes.insert(T);
+  // EndNodes.insert(T);
   // }
 }
 
@@ -1450,7 +1547,7 @@ CGNode &ConstraintGraph::createNodeClonePNI(const NodeKey &N, PNINode *ON) {
     auto PN = PG->clonePNINode(*ON);
     NewN = &createNodeWithPNI(N, PN);
   } else {
-    NewN = &createNode(N, nullptr);
+    NewN = &createNodeNoPNI(N, 0);
   }
   return *NewN;
 }
@@ -1464,7 +1561,7 @@ CGNode &ConstraintGraph::cloneNode(const CGNode &Other) {
 void ConstraintGraph::removeNode(const NodeKey &N) {
   assert(Nodes.count(N) && "removeNode: node not found");
   auto &Node = Nodes.at(N);
-  assert(!isSpecialNode(Node));
+  assert(!Node.isSpecial());
   assert(Node.outEdges.empty() && "removeNode: node has out edges");
   assert(Node.inEdges.empty() && "removeNode: node has in edges");
   PG->markRemoved(Node);
@@ -1968,6 +2065,19 @@ expToConstraints(std::shared_ptr<retypd::TRContext> TRCtx, rexp::PRExp E) {
   return Ctx.constraintsSequenceToConstraints(TRCtx, Ctx.ConstraintsSequence);
 }
 
+CGNode *ConstraintGraph::getTopNodeOrNull(Variance V) {
+  return getNodeOrNull(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top"), V});
+}
+
+CGNode *ConstraintGraph::getTopNode(Variance V) {
+  auto Node = getTopNodeOrNull(V);
+  if (Node == nullptr) {
+    Node = &createNodeNoPNI(
+        NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top"), V}, 0);
+  }
+  return Node;
+}
+
 CGNode *ConstraintGraph::getMemoryNode() {
   if (MemoryNode != nullptr) {
     return MemoryNode;
@@ -1984,8 +2094,8 @@ CGNode *ConstraintGraph::getStartNode() {
   if (Start != nullptr) {
     return Start;
   }
-  Start =
-      &createNodeNoPNI(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#Start")}, 0);
+  Start = &createNodeNoPNI(
+      NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#Start")}, 0);
   return Start;
 }
 
@@ -1993,7 +2103,8 @@ CGNode *ConstraintGraph::getEndNode() {
   if (End != nullptr) {
     return End;
   }
-  End = &createNodeNoPNI(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#End")}, 0);
+  End =
+      &createNodeNoPNI(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "#End")}, 0);
   return End;
 }
 
@@ -2009,19 +2120,42 @@ ConstraintGraph::ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx,
 
 void ConstraintGraph::clone(
     std::map<const CGNode *, CGNode *> &Old2New, const ConstraintGraph &From,
-    ConstraintGraph &To, std::function<NodeKey(const NodeKey &)> TransformKey) {
+    ConstraintGraph &To, std::function<NodeKey(const NodeKey &)> TransformKey,
+    bool Partial) {
   assert(Old2New.empty() && "clone: Old2New is not empty!");
   assert(From.Ctx.get() == To.Ctx.get() && "clone: Ctx mismatch!");
   assert(From.PointerSize == To.PointerSize);
-  To.Name = From.Name;
+  if (!Partial) {
+    To.Name = From.Name;
+  }
+
+  // handle fields
+  if (!Partial) {
+    To.isLayerSplit = From.isLayerSplit;
+    To.isSketchSplit = From.isSketchSplit;
+  }
+
+  if (From.Start) {
+    Old2New.insert({From.Start, To.getStartNode()});
+  }
+  if (From.End) {
+    Old2New.insert({From.End, To.getEndNode()});
+  }
 
   // clone all nodes. Clone PNINodes later.
   for (auto &Ent : From.Nodes) {
+    if (Ent.second.isStartOrEnd()) {
+      continue;
+    }
     auto &Node = Ent.second;
     NodeKey NewKey = TransformKey ? TransformKey(Node.key) : Node.key;
     auto &NewNode = To.createNodeNoPNI(NewKey, Node.Size);
     auto Pair = Old2New.insert({&Node, &NewNode});
     assert(Pair.second && "clone: Node already cloned!?");
+    if (&Ent.second == From.MemoryNode) {
+      assert(!Partial && "clone: TODO handle multiple MemoryNode PNI problem");
+      To.MemoryNode = &NewNode;
+    }
   }
 
   // clone all edges
@@ -2045,18 +2179,6 @@ void ConstraintGraph::clone(
     To.PG->cloneFrom(*From.PG, Old2New);
   }
 
-  // handle fields
-  To.isLayerSplit = From.isLayerSplit;
-  To.isSketchSplit = From.isSketchSplit;
-  if (From.MemoryNode) {
-    To.MemoryNode = Old2New.at(From.MemoryNode);
-  }
-  if (From.Start) {
-    To.Start = Old2New.at(From.Start);
-  }
-  if (From.End) {
-    To.End = Old2New.at(From.End);
-  }
   for (auto &N : From.StartNodes) {
     To.StartNodes.insert(Old2New.at(N));
   }
@@ -2162,8 +2284,11 @@ bool CGNode::hasPointerEdge() const {
 }
 
 bool CGNode::isSpecial() const {
-  return this == Parent.Start || this == Parent.End ||
-         this == Parent.MemoryNode;
+  return isStartOrEnd() || this == Parent.MemoryNode;
+}
+
+bool CGNode::isStartOrEnd() const {
+  return this == Parent.Start || this == Parent.End;
 }
 
 bool CGNode::isPNIAndEdgeMatch() const {
@@ -2181,6 +2306,9 @@ bool CGNode::isPNIAndEdgeMatch() const {
   case Pointer: { // error if all edges are forget prim.
     bool AllForgetPrim = true;
     // bool hasPrim = false;
+    if (outEdges.empty()) {
+      AllForgetPrim = false;
+    }
     for (auto &Edge : outEdges) {
       bool IsForgetPrim = false;
       if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {

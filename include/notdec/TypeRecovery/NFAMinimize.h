@@ -83,7 +83,9 @@ struct NFADeterminizer {
   }
 
   // Filter: return false to ignore the edges for the node.
-  static std::set<NodeTy> countClosure(const std::set<NodeTy> &N, std::function<bool(const NodeTy&)> Filter = nullptr) {
+  static std::set<NodeTy>
+  countClosure(const std::set<NodeTy> &N,
+               std::function<bool(const NodeTy &)> Filter = nullptr) {
     // initialize with N
     std::set<NodeTy> Ret = N;
     std::queue<NodeTy> Worklist;
@@ -115,9 +117,9 @@ struct NFADeterminizer {
   static void printPNDiffSet(const std::set<NodeTy> &N) {
     llvm::errs() << "  Different low type in a set of nodes: \n";
     for (auto Node : N) {
+      auto PNI = GT::getInner(Node)->getPNIVar();
       llvm::errs() << "    Node: " << GT::toString(Node)
-                   << " PNI: " << GT::getInner(Node)->getPNIVar()->str()
-                   << "\n";
+                   << " PNI: " << (PNI == nullptr ? "" : PNI->str()) << "\n";
     }
     llvm::errs() << "  End of different low type set.\n";
   }
@@ -138,13 +140,24 @@ struct NFADeterminizer {
         }
       }
     }
-    if (PN == nullptr) {
-      llvm::errs() << "here\n";
-    }
+    // if (PN == nullptr) {
+    //   llvm::errs() << "here\n";
+    //   printPNDiffSet(N);
+    // }
     return PN;
   }
 
+  static std::string toString(const std::set<NodeTy> &N) {
+    std::string ret = "{";
+    for (auto Node : N) {
+      ret += GT::toString(Node) + ", ";
+    }
+    ret += "}";
+    return ret;
+  }
+
   EntryTy getOrSetNewNode(const std::set<NodeTy> &N) {
+    std::string Name = toString(N);
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
@@ -164,8 +177,7 @@ struct NFADeterminizer {
 
   static std::set<EdgeLabel>
   allOutLabels(const std::set<NodeTy> &N,
-               std::function<bool(const EdgeLabel &)> Filter =
-                   ignoreOne) {
+               std::function<bool(const EdgeLabel &)> Filter = ignoreOne) {
     std::set<EdgeLabel> ret;
     for (auto Node : N) {
       for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),

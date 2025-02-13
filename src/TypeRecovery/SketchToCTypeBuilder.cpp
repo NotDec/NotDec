@@ -23,9 +23,10 @@ SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(LatticeTy LTy,
                                                        unsigned BitSize) {
   auto Name = LTy.latticeStr();
   if (BitSize == 1 || Name == "bool") {
+    assert(BitSize == 1);
     return Ctx.BoolTy;
   }
-  if (Name == "top") {
+  if (Name == "top" || Name == "unk") {
     // TODO create typedef to unsigned int. e.g., typedef top32 uint32_t
     return getUndef(BitSize);
   }

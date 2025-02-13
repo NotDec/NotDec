@@ -415,6 +415,8 @@ struct TypeVariable {
 
   std::string getBaseName() const { return Var->getBaseName(); }
 
+  bool isTop() const { return Var->isPrimitive() && Var->getPrimitiveName() == "top"; }
+
   DerivedTypeVariable::BaseTy getBase() const { return Var->getBase(); }
 
   bool isPrimitive() const { return Var->isPrimitive(); }

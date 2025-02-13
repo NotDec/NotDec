@@ -93,6 +93,7 @@ std::string toString(PtrOrNum Ty) {
 // #endregion PtrOrNum
 
 bool LatticeTy::setPtrOrNum(PtrOrNum NewTy) {
+  auto OldTy = Ty;
   assert(NewTy != Null);
   if (Ty == Null) {
     Ty = NewTy;
@@ -108,6 +109,12 @@ bool LatticeTy::setPtrOrNum(PtrOrNum NewTy) {
   assert(isPNRelated() && NewTy != NotPN && NewTy != Null);
   if (Ty == NewTy) {
     return false;
+  }
+  if (NewTy == Unknown) {
+    return false;
+  } else if (Ty == Unknown) {
+    Ty = NewTy;
+    return true;
   }
   if ((Ty == Number && NewTy == Pointer) ||
       (Ty == Pointer && NewTy == Number)) {

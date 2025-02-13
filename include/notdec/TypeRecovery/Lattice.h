@@ -59,7 +59,12 @@ struct LatticeTy {
 
   LatticeTy() = default;
   LatticeTy(llvm::Type *Ty, unsigned PointerSize)
-      : Size(::notdec::retypd::getSize(Ty, PointerSize)), Ty(fromLLVMTy(Ty, PointerSize)) {}
+      : Size(::notdec::retypd::getSize(Ty, PointerSize)),
+        Ty(fromLLVMTy(Ty, PointerSize)) {
+    if (isNotPN()) {
+      Elem = llvmType2Elem(Ty);
+    }
+  }
 
   unsigned getSize() const { return Size; }
   std::string getElem() const { return Elem; }
@@ -97,6 +102,7 @@ struct LatticeTy {
 
   std::string latticeStr() const {
     if (Ty == NotPN) {
+      assert(!Elem.empty());
       return Elem;
     }
     return toString(Ty);

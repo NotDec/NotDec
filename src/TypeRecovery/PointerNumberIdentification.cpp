@@ -526,7 +526,7 @@ PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
 
 void PNIGraph::cloneFrom(const PNIGraph &G,
                          std::map<const CGNode *, CGNode *> Old2New) {
-  assert(PNINodes.size() == 0);
+  // assert(PNINodes.size() == 0);
   assert(Constraints.size() == 0);
   // clone PNINodes
   for (auto &N : G.PNINodes) {
