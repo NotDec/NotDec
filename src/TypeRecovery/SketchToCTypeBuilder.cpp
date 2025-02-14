@@ -71,7 +71,7 @@ clang::QualType
 SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
   unsigned BitSize = Node.getSize();
   const char *prefix = "struct_";
-  if (&Node == Node.Parent.getMemoryNode()) {
+  if (Node.isMemory()) {
     prefix = "MEMORY_";
   }
   if (Visited.count(&Node)) {

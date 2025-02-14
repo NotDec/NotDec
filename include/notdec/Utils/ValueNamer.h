@@ -14,6 +14,9 @@ using llvm::Value;
 
 extern std::set<size_t> TraceIds;
 
+#define PRINT_TRACE(ID)                                                   \
+  llvm::errs() << "TraceID=" << ID << " " << __FUNCTION__ << ": "
+
 struct ValueNamer {
 protected:
   static ValueNamer Instance;

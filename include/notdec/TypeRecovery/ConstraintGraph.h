@@ -62,6 +62,16 @@ struct NodeKey {
   bool operator==(const NodeKey &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
+  
+  static NodeKey fromLabel(const EdgeLabel &L) {
+    if (auto FB = std::get_if<ForgetBase>(&L)) {
+      return NodeKey(FB->Base, FB->V);
+    } else if (auto RB = std::get_if<RecallBase>(&L)) {
+      return NodeKey(RB->Base, RB->V);
+    } else {
+      assert(false && "fromLabel: Not a ForgetBase or RecallBase");
+    }
+  }
 };
 
 std::string toString(const NodeKey &K);
@@ -95,6 +105,7 @@ struct CGNode {
   bool isStartOrEnd() const;
   bool hasNoPNI() const { return PNIVar == nullptr || PNIVar->isNull(); }
   bool isTop() const { return key.Base.isTop(); }
+  bool isMemory() const { return key.Base.isMemory(); }
 
 protected:
   friend struct PNIGraph;
@@ -181,9 +192,6 @@ struct ConstraintGraph {
   // If the graph has eliminated the forget-label edges for building sketches.
   // TODO: update set and check of the flag, or use a enum for state.
   bool isSketchSplit = false;
-  // TODO prevent name collision
-  static const char *Memory;
-  CGNode *MemoryNode = nullptr;
   // TODO replace with datalayout?
   long PointerSize = 0;
 
@@ -193,7 +201,8 @@ struct ConstraintGraph {
   static void
   clone(std::map<const CGNode *, CGNode *> &Old2New,
         const ConstraintGraph &From, ConstraintGraph &To,
-        std::function<NodeKey(const NodeKey &)> TransformKey = nullptr, bool Partial = false);
+        std::function<NodeKey(const NodeKey &)> TransformKey = nullptr,
+        bool Partial = false);
   // Node map is the core data of cloning.
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 
@@ -223,10 +232,7 @@ struct ConstraintGraph {
   bool empty() { return Nodes.empty(); }
 
   // Interface for initial constraint insertion
-  void addConstraint(
-      CGNode &NodeL, CGNode &NodeR,
-      llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
-          GetLowTy = llvm::None);
+  void addConstraint(CGNode &NodeL, CGNode &NodeR);
 
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
@@ -235,7 +241,6 @@ struct ConstraintGraph {
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
   void recoverBaseVars();
-  void removeTopNodes();
   void aggressiveSimplify();
   // void lowTypeToSubType();
 
@@ -245,7 +250,8 @@ public:
   // Lazy initialization of special nodes.
   CGNode *getStartNode();
   CGNode *getEndNode();
-  CGNode *getMemoryNode();
+  CGNode *getMemoryNodeOrNull(Variance V);
+  CGNode *getMemoryNode(Variance V /*= Covariant*/);
   CGNode *getTopNode(Variance V);
   CGNode *getTopNodeOrNull(Variance V);
 
@@ -275,20 +281,14 @@ public:
   std::set<std::pair<CGNode *, OffsetRange>>
   getNodeReachableOffset(CGNode &Start);
 
-  void linkLoadStoreToTop();
+  void linkLoadStore();
   void markVariance();
   /// Focus on the recall subgraph and use forget edge to label nodes. mark all
   /// nodes as accepting by link with `forget #top`.
   void sketchSplit();
   std::vector<SubTypeConstraint> solve_constraints_between();
-  void
-  addRecalls(CGNode &N,
-             llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
-                 GetLowTy = llvm::None);
-  void
-  addForgets(CGNode &N,
-             llvm::Optional<std::function<llvm::Type *(const TypeVariable &)>>
-                 GetLowTy = llvm::None);
+  void addRecalls(CGNode &N);
+  void addForgets(CGNode &N);
   void printGraph(const char *DotFile) const;
   ConstraintGraph getSubGraph(const std::set<const CGNode *> &Roots,
                               bool AllReachable) const;

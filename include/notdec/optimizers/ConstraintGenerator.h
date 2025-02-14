@@ -236,7 +236,6 @@ struct ConstraintsGenerator {
     V2NContra.merge(From, To);
   }
 
-  std::vector<retypd::SubTypeConstraint> genSummaryOld();
   std::shared_ptr<ConstraintsGenerator> genSummary();
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);

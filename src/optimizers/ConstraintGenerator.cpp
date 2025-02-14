@@ -61,7 +61,6 @@ namespace notdec {
 using retypd::OffsetLabel;
 
 ValueNamer ValueNamer::Instance = ValueNamer();
-const char *ConstraintGraph::Memory = "MEMORY";
 const char *ValueNamer::DefaultPrefix = "v_";
 const char *ValueNamer::FuncPrefix = "func_";
 const char *ValueNamer::PhiPrefix = "phi_";
@@ -276,6 +275,18 @@ inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
+  const char *Traces = std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS");
+  if (Traces) {
+    std::string TraceStr(Traces);
+    llvm::errs() << "Tracing: ";
+    // split by ','
+    for (auto &Id : llvm::split(TraceStr, ',')) {
+      llvm::errs() << Id << ", ";
+      TraceIds.insert(std::stoul(Id.str()));
+    }
+    llvm::errs() << "\n";
+  }
+
   const char *DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   if (DebugDir) {
@@ -347,8 +358,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     AllSCCs.push_back(SCCData{NodeVec, nullptr, "", nullptr});
     size_t SCCIndex = AllSCCs.size() - 1;
     llvm::Optional<std::string> DirPath;
+    std::string SCCName = "SCC" + std::to_string(SCCIndex);
     if (DebugDir) {
-      std::string SCCName = "SCC" + std::to_string(SCCIndex);
       DirPath.emplace(join(DebugDir, SCCName));
       llvm::sys::fs::create_directories(*DirPath);
     }
@@ -665,23 +676,41 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   Global =
       std::make_shared<ConstraintsGenerator>(*this, M.getContext(), "Global");
   std::set<CGNode *> MemoryNodes;
+  std::set<CGNode *> MemoryNodesC;
   for (auto &Ent : AllSCCs) {
     auto &G = *(Ent.TopDownGenerator);
-    if (auto *M = G.CG.getMemoryNode()) {
+    if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Covariant)) {
       if (M->outEdges.empty()) {
         continue;
       }
       MemoryNodes.insert(M);
     }
+    if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Contravariant)) {
+      if (M->outEdges.empty()) {
+        continue;
+      }
+      MemoryNodesC.insert(M);
+    }
   }
   CGNode *MemNode = nullptr;
   if (MemoryNodes.empty()) {
     llvm::errs() << "No memory node found\n";
-    MemNode = Global->CG.getMemoryNode();
+    MemNode = Global->CG.getMemoryNode(retypd::Covariant);
   } else {
-    MemNode = determinizeTo(*Global, MemoryNodes, ConstraintGraph::Memory);
+    MemNode = determinizeTo(*Global, MemoryNodes, retypd::TypeVariable::Memory);
     // Global->mergeAfterDeterminize();
   }
+  CGNode *MemNodeC = nullptr;
+  if (MemoryNodesC.empty()) {
+    llvm::errs() << "No memory node found\n";
+    MemNodeC = Global->CG.getMemoryNode(retypd::Contravariant);
+  } else {
+    MemNodeC =
+        determinizeTo(*Global, MemoryNodesC, retypd::TypeVariable::Memory);
+    // Global->mergeAfterDeterminize();
+  }
+  Global->V2N.insert(ConstantAddr(), MemNode->key);
+  Global->V2NContra.insert(ConstantAddr(), MemNodeC->key);
 
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
 
@@ -876,8 +905,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
+  std::map<const CGNode *, CGNode *> Old2NewGlobal;
+  ConstraintsGenerator Global2 = postProcess(*Global, Old2NewGlobal);
+  CGNode *MemNode2 = Global2.CG.getMemoryNode(retypd::Covariant);
   // build AST type for memory node
-  clang::QualType CTy = TB.buildType(*MemNode);
+  clang::QualType CTy = TB.buildType(*MemNode2);
   Result.MemoryType = CTy;
 
   // move the ASTUnit to result
@@ -999,7 +1031,12 @@ void ConstraintsGenerator::removeUnreachable() {
   }
   Worklist.push(CG.getStartNode());
   Worklist.push(CG.getEndNode());
-  Worklist.push(CG.getMemoryNode());
+  if (auto N = CG.getMemoryNodeOrNull(retypd::Covariant)) {
+    Worklist.push(N);
+  }
+  if (auto N = CG.getMemoryNodeOrNull(retypd::Contravariant)) {
+    Worklist.push(N);
+  }
   while (!Worklist.empty()) {
     auto *Node = Worklist.front();
     if (ReachableNodes.count(Node) == 0) {
@@ -1035,7 +1072,7 @@ void ConstraintsGenerator::linkContraToCovariant() {
   for (auto &Ent : V2N) {
     auto *N = &CG.getNode(Ent.second);
     if (V2NContra.count(Ent.first) == 0) {
-      continue;
+      assert(false);
     }
     auto *CN = &CG.getNode(V2NContra.at(Ent.first));
     assert(CN->getPNIVar() == N->getPNIVar());
@@ -1499,6 +1536,10 @@ void ConstraintsGenerator::mergeAfterDeterminize() {
 
 void ConstraintsGenerator::run() {
   for (llvm::Function *Func : SCCs) {
+    // create function nodes
+    getOrInsertNode(Func, nullptr, -1, retypd::Covariant);
+    // assert convariant node is created
+    getNode(Func, nullptr, -1, retypd::Contravariant);
     RetypdGeneratorVisitor Visitor(*this);
     Visitor.visit(Func);
     Visitor.handlePHINodes();
@@ -1559,6 +1600,11 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
     InterestingVars.insert(F->getName().str());
   }
   S.linkVars(InterestingVars);
+  // if (S.getStartNode()->outEdges.size() == 0) {
+  //   llvm::errs() << "Warning: No func nodes, No meaningful types for "
+  //                << CG.getName() << "\n";
+  //   return nullptr;
+  // }
   auto G2 = S.simplify();
   std::shared_ptr<ConstraintsGenerator> Ret =
       std::make_shared<ConstraintsGenerator>(Ctx, LLCtx, CG.Name);
@@ -1593,19 +1639,6 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
     return nullptr;
   }
   return Ret;
-}
-
-std::vector<retypd::SubTypeConstraint> ConstraintsGenerator::genSummaryOld() {
-  std::set<std::string> InterestingVars;
-  for (auto *F : SCCs) {
-    assert(F->hasName());
-    InterestingVars.insert(F->getName().str());
-  }
-  if (CG.MemoryNode != nullptr) {
-    InterestingVars.insert(CG.Memory);
-  }
-  CG.solve();
-  return CG.simplifiedExpr(InterestingVars);
 }
 
 retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
@@ -1704,7 +1737,7 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User,
     }
     return convertTypeVarVal(IC->Val, IC->User, IC->OpInd);
   } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
-    auto tv = CG.getMemoryNode()->key.Base;
+    auto tv = CG.getMemoryNode(retypd::Covariant)->key.Base;
     tv = addOffset(tv, OffsetRange{.offset = CA->Val->getSExtValue()});
     return tv;
   }

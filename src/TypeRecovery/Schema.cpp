@@ -8,6 +8,8 @@
 
 namespace notdec::retypd {
 
+const char *TypeVariable::Memory = "MEMORY";
+
 // TODO: two insertion and one allocation.
 // Optimize to one insertion and no allocation using several separate map.
 // Map String base -> TV

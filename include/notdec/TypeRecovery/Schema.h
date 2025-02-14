@@ -287,6 +287,10 @@ struct PooledTypeVariable {
     return std::holds_alternative<PrimitiveTypeVariable>(Inner);
   }
 
+  bool isDtv() const {
+    return std::holds_alternative<DerivedTypeVariable>(Inner);
+  }
+
   bool isIntConstant() const {
     return std::holds_alternative<DerivedTypeVariable>(Inner) &&
            std::get<DerivedTypeVariable>(Inner).isIntConstant();
@@ -415,7 +419,13 @@ struct TypeVariable {
 
   std::string getBaseName() const { return Var->getBaseName(); }
 
-  bool isTop() const { return Var->isPrimitive() && Var->getPrimitiveName() == "top"; }
+  bool isTop() const {
+    return Var->isPrimitive() && Var->getPrimitiveName() == "top";
+  }
+
+  // TODO prevent name collision
+  static const char *Memory;
+  bool isMemory() const { return Var->isDtv() && Var->getBaseName() == Memory; }
 
   DerivedTypeVariable::BaseTy getBase() const { return Var->getBase(); }
 
@@ -536,7 +546,7 @@ struct RecallBase {
 using EdgeLabel =
     std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase>;
 
-std::string toString(const EdgeLabel &label);
+[[nodiscard]] std::string toString(const EdgeLabel &label);
 inline bool isBase(EdgeLabel label) {
   return std::holds_alternative<ForgetBase>(label) ||
          std::holds_alternative<RecallBase>(label);
