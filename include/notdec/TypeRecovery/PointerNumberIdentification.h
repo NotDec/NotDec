@@ -62,6 +62,7 @@ public:
 
   unsigned long getId() const { return Id; }
   PtrOrNum getPtrOrNum() const { return Ty.getPtrOrNum(); }
+  bool isConflict() const { return Ty.isConflict(); }
   void setConflict() { Ty.setConflict(); }
   llvm::Type *normalizeLowTy(llvm::Type *T);
   std::string getLowTy() const { return Ty.str(); }
@@ -85,6 +86,7 @@ public:
 
   LatticeTy& getLatticeTy() { return Ty; }
   const LatticeTy& getLatticeTy() const { return Ty; }
+  void merge(LatticeTy &Other) { Ty.merge(Other); }
 
   bool tyEqual(const PNINode &Other) const {
     return Ty == Other.Ty;

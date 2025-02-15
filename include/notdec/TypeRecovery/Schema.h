@@ -425,7 +425,7 @@ struct TypeVariable {
 
   // TODO prevent name collision
   static const char *Memory;
-  bool isMemory() const { return Var->isDtv() && Var->getBaseName() == Memory; }
+  bool isMemory() const { return Var->hasBaseName() && Var->getBaseName() == Memory; }
 
   DerivedTypeVariable::BaseTy getBase() const { return Var->getBase(); }
 

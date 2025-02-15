@@ -7,20 +7,38 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "decompile SimpleRecursive2.ll",
+      "name": "decompile",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
-        "test/backend/SimpleRecursive2.ll",
+        "${file}",
         "-o",
-        "test/backend/SimpleRecursive2.c",
+        "${file}.c",
+        // "-debug-only=retypd_graph",
+        // "--print-before=type-recovery"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "CMake: build",
+      "env": {
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
+        // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "345"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "decompile StackArray.ll",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "test/backend/StackArray.ll",
+        "-o",
+        "test/backend/StackArray.ll.c",
         "-debug-only=type-recovery",
         "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "DEBUG_TRANS_MIN_GRAPH": "1",
-        "DEBUG_TRANS_SAT_GRAPH": "1"
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir"
       }
     },
     {
@@ -32,14 +50,12 @@
         "test/backend/BottomUp1.ll",
         "-o",
         "test/backend/BottomUp1.c",
-        "-debug-only=type-recovery",
         "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "DEBUG_TRANS_MIN_GRAPH": "1",
-        "DEBUG_TRANS_SAT_GRAPH": "1"
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
       }
     },
     {
@@ -57,24 +73,14 @@
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "decompile",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "${file}",
-        "-o",
-        "${file}.c",
-        "-debug-only=type-recovery",
-        "--print-before=type-recovery"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "CMake: build",
       "env": {
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
+        "DEBUG_TRANS_INIT_GRAPH": "1",
+        "DEBUG_TRANS_SAT_GRAPH": "1",
+        "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1",
+        "DEBUG_TRANS_CV_SPLIT_GRAPH": "1",
         "DEBUG_TRANS_MIN_GRAPH": "1",
-        "DEBUG_TRANS_SAT_GRAPH": "1"
+        "DEBUG_TRANS_LAYER_SPLIT_GRAPH": "1",
       }
     },
     {
@@ -97,18 +103,20 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "GraphTest PtrSet1",
+      "name": "GraphTest",
       "program": "${workspaceFolder}/build/bin/GraphTest",
       "args": [
-        "--gtest_filter=Retypd.PtrSet1",
+        // "--gtest_filter=Retypd.SaturationOffsetTest",
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "DEBUG_TRANS_LAYER_SPLIT_GRAPH": "1",
-        "DEBUG_TRANS_MIN_GRAPH": "1",
+        "NOTDEC_SAT_DENSESUBTYPE": "1",
+        "DEBUG_TRANS_SAT_GRAPH": "1",
+        "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1",
         "DEBUG_TRANS_CV_SPLIT_GRAPH": "1",
-        "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1"
+        "DEBUG_TRANS_MIN_GRAPH": "1",
+        "DEBUG_TRANS_LAYER_SPLIT_GRAPH": "1",
       }
     }
   ]

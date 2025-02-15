@@ -78,7 +78,7 @@ std::string toString(PtrOrNum Ty) {
   case Unknown:
     return "unk";
   case Number:
-    return "num";
+    return "int";
   case Pointer:
     return "ptr";
   case Null:

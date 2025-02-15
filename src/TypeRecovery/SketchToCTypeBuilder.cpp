@@ -6,6 +6,7 @@
 #include <clang/Basic/SourceLocation.h>
 #include <llvm/ADT/APSInt.h>
 #include <optional>
+#include <variant>
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
@@ -159,20 +160,25 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
   Decl->startDefinition();
   for (auto &Ent : FI.Fields) {
     auto Ty = visitType(Ent.OutEdge->getTargetNode());
-    assert(Ty->isPointerType() ||
-           Ty->isArrayType() && "Offset edge must be pointer or array type");
-    if (Ty->isPointerType()) {
-      // the node is a field pointer type. get the field type.
-      Ty = Ty->getPointeeType();
-    } else if (Ty->isArrayType()) {
-      // do nothing. Keep array type.
+    if (isLoadOrStore(Ent.OutEdge->getLabel())) {
+
     } else {
-      assert(false && "Offset edge must be pointer or array type");
-    }
-    if (Ent.Start.access.size() > 0) {
-      // create array type
-      Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, 0), nullptr,
-                                    clang::ArrayType::Star, 0);
+      // assert(Ty->isPointerType() ||
+      //        Ty->isArrayType() && "Offset edge must be pointer or array
+      //        type");
+      if (Ty->isPointerType()) {
+        // the node is a field pointer type. get the field type.
+        Ty = Ty->getPointeeType();
+      } else if (Ty->isArrayType()) {
+        // do nothing. Keep array type.
+      } else {
+        assert(false && "Offset edge must be pointer or array type");
+      }
+      if (Ent.Start.access.size() > 0) {
+        // create array type
+        Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, 0), nullptr,
+                                      clang::ArrayType::Star, 0);
+      }
     }
 
     auto *FII = &Ctx.Idents.get(ValueNamer::getName("field_"));
@@ -180,7 +186,8 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
         Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
         nullptr, nullptr, false, clang::ICIS_NoInit);
 
-    Parent.DeclComments[Field] = "at offset: " + std::to_string(Ent.Start.offset);
+    Parent.DeclComments[Field] =
+        "at offset: " + std::to_string(Ent.Start.offset);
     bool addAttr = true;
     if (addAttr) {
       Field->addAttr(clang::AnnotateAttr::Create(

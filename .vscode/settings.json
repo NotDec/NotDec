@@ -75,6 +75,7 @@
   "cSpell.words": [
     "decompilation",
     "Decompiler",
+    "determinize",
     "endregion",
     "notdec",
     "Preds",
@@ -86,11 +87,11 @@
     "worklist"
   ],
   "cmake.generator": "Ninja",
-  "editor.formatOnSave": true,
+  "editor.formatOnSave": false,
   // https://stackoverflow.com/questions/43632700/clang-and-fuse-ld-gold-results-in-many-unused-option-warnings
   "cmake.configureArgs": [
     "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
-    "-DCMAKE_CXX_FLAGS=-fsanitize=address -idirafter /usr/lib/llvm-14/lib/clang/14.0.0/include"
+    "-DCMAKE_CXX_FLAGS=-fdebug-default-version=4 -fsanitize=address -idirafter /usr/lib/llvm-14/lib/clang/14.0.0/include"
   ],
   "maptz.regionfolder": {
     "[cpp]": {

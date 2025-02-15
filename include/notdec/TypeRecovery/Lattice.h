@@ -92,6 +92,7 @@ struct LatticeTy {
     }
     assert(false && "CGNode::getPNChar: unhandled type");
   }
+  bool isConflict() const { return hasConflict; }
   void setConflict() { hasConflict = true; }
 
   // return true if updated.

@@ -536,12 +536,18 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       if (hasEnd) {
         NewNode = CG.getEndNode();
       } else {
-        auto *PN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(N);
+        // auto *PN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(N);
         // assert(PN->getLowTy() != nullptr);
         NewNode = &CG.createNodeClonePNI(
             retypd::NodeKey{TypeVariable::CreateDtv(
                 *CG.Ctx, ValueNamer::getName(NamePrefix))},
-            PN);
+            (*N.begin())->getPNIVar());
+        for (auto N1 : N) {
+          NewNode->getPNIVar()->merge(N1->getPNIVar()->getLatticeTy());
+        }
+        if (NewNode->getPNIVar()->isConflict()) {
+          notdec::retypd::NFADeterminizer<>::printPNDiffSet(N);
+        }
       }
 
       auto it = DTrans.emplace(N, NewNode);
