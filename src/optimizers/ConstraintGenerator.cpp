@@ -407,11 +407,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   std::vector<SCCData> AllSCCs;
   std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
 
-  bool DisableOverride = false;
-  if (DisableOverride) {
-    SummaryOverride = {};
-  }
-
   // Walk the callgraph in bottom-up SCC order.
   for (; !CGI.isAtEnd(); ++CGI) {
     const std::vector<CallGraphNode *> &NodeVec = *CGI;
@@ -429,8 +424,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::set<llvm::Function *> SCCs;
     for (auto CGN : NodeVec) {
       Visited.insert(CGN);
-      if (CGN->getFunction() == nullptr ||
-          CGN->getFunction()->isDeclaration()) {
+      if (CGN->getFunction() == nullptr) {
         continue;
       }
       if (!Name.empty()) {
@@ -445,11 +439,25 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     std::cerr << "(Bottom-Up) Processing SCC: " << Name << "\n";
+    std::shared_ptr<ConstraintsGenerator> Generator;
 
-    std::shared_ptr<ConstraintsGenerator> Generator =
-        std::make_shared<ConstraintsGenerator>(*this, Name, SCCs);
-
-    Generator->run();
+    bool isDeclaration = SCCs.size() == 1 && (*SCCs.begin())->isDeclaration();
+    if (isDeclaration) {
+      if (SummaryOverride.count(SCCs)) {
+        std::cerr << "Override summary for external function: " << Name
+                  << ":\n";
+        Generator = SummaryOverride.at(SCCs);
+        Generator->checkSymmetry();
+      } else {
+        llvm::errs() << "Warning: Summary and result may be incorrect due to "
+                        "external function: "
+                     << Name << "\n";
+        continue;
+      }
+    } else {
+      Generator = std::make_shared<ConstraintsGenerator>(*this, Name, SCCs);
+      Generator->run();
+    }
 
     // TODO: If the SCC/func is not called by any other function out of the SCC,
     // we can skip summary generation.
@@ -465,9 +473,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       std::shared_ptr<ConstraintsGenerator> TargetSummary;
       if (Target->isDeclaration()) {
         if (SummaryOverride.count({Target})) {
-          std::cerr << "Override summary for external function: " << Name << ":\n";
+          std::cerr << "Override summary for external function: " << Name
+                    << ":\n";
           TargetSummary = SummaryOverride.at({Target});
-          assert (TargetSummary->CG.PG->Constraints.size() == 0);
+          assert(TargetSummary->CG.PG->Constraints.size() == 0);
         } else {
           llvm::errs() << "Warning: Summary and result may be incorrect due to "
                           "external call: "
@@ -493,7 +502,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     std::shared_ptr<ConstraintsGenerator> Summary;
-    if (SummaryOverride.count(SCCs)) {
+    if (isDeclaration) {
+      Summary = Generator;
+    } else if (SummaryOverride.count(SCCs)) {
       std::cerr << "Summary Overriden: " << Name << ":\n";
       Summary = SummaryOverride.at(SCCs);
     } else {
@@ -1684,9 +1695,49 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
     // insert to value map
     if (Node != nullptr) {
       V2N.insert(F, Node->key);
+      // Fix return mapping
+      if (!F->getFunctionType()->getReturnType()->isVoidTy()) {
+        auto RetKey = Node->key;
+        RetKey.Base = RetKey.Base.pushLabel(retypd::OutLabel{});
+        auto *RetNode = getNodeOrNull(RetKey);
+        if (RetNode) {
+          V2N.insert(ReturnValue{.Func = F}, RetNode->key);
+        }
+      }
+      // Fix argument mapping
+      for (int i = 0; i < F->arg_size(); i++) {
+        auto Arg = F->getArg(i);
+        auto ArgKey = Node->key;
+        ArgKey.Base = ArgKey.Base.pushLabel(
+            retypd::InLabel{std::to_string(Arg->getArgNo())});
+        auto *ArgNode = getNodeOrNull(ArgKey);
+        if (ArgNode) {
+          V2N.insert(Arg, ArgNode->key);
+        }
+      }
     }
     if (NodeC != nullptr) {
       V2NContra.insert(F, NodeC->key);
+      // Fix return mapping
+      if (!F->getFunctionType()->getReturnType()->isVoidTy()) {
+        auto RetKey = NodeC->key;
+        RetKey.Base = RetKey.Base.pushLabel(retypd::OutLabel{});
+        auto *RetNodeC = getNodeOrNull(RetKey);
+        if (RetNodeC) {
+          V2NContra.insert(ReturnValue{.Func = F}, RetNodeC->key);
+        }
+      }
+      // Fix argument mapping
+      for (int i = 0; i < F->arg_size(); i++) {
+        auto Arg = F->getArg(i);
+        auto ArgKey = NodeC->key;
+        ArgKey.Base = ArgKey.Base.pushLabel(
+            retypd::InLabel{std::to_string(Arg->getArgNo())});
+        auto *ArgNodeC = getNodeOrNull(ArgKey);
+        if (ArgNodeC) {
+          V2NContra.insert(Arg, ArgNodeC->key);
+        }
+      }
     }
   }
 }

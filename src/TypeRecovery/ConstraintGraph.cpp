@@ -1441,6 +1441,7 @@ void ConstraintGraph::saturate() {
 
 void ConstraintGraph::instantiateConstraints(const ConstraintSummary &Summary) {
   std::map<size_t, PNINode *> ID2PNI;
+  std::map<size_t, std::string> ID2PNIStr;
   for (auto &Ent : *Summary.PNIMap) {
     std::string &SerializedPNI = Ent.second;
     auto Pos = SerializedPNI.rfind(" ");
@@ -1451,9 +1452,11 @@ void ConstraintGraph::instantiateConstraints(const ConstraintSummary &Summary) {
     PNINode *PN = nullptr;
     if (ID2PNI.count(ID)) {
       PN = ID2PNI[ID];
+      assert(ID2PNIStr[ID] == SerializedPNI && "Inconsistent PNI!");
     } else {
       PN = PG->createPNINode(SerializedPNI.substr(0, Pos));
       ID2PNI[ID] = PN;
+      ID2PNIStr[ID] = SerializedPNI;
     }
     createNodeWithPNI(Ent.first, PN);
     createNodeWithPNI(MakeReverseVariant(Ent.first), PN);
