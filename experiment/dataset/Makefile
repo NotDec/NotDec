@@ -58,6 +58,9 @@ out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
 %.wasmdec: %.wasm
 	LD_LIBRARY_PATH=./wasmdec ./wasmdec/wasmdec ./$< -o ./$@
 
+cleandec:
+	rm ./out_$(FUNCTIONALDIR)/*.c
+
 clean:
 	rm ./out_$(FUNCTIONALDIR)/*
 # rm *.wasm *.wat *.ll # *.clif *.wavm.ll *.wasm-decompile *.wasmdec

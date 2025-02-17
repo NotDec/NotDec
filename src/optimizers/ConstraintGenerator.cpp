@@ -275,6 +275,13 @@ inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
+  const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
+  if (SummaryFile) {
+    std::string content = readFileToString(SummaryFile);
+    auto Summaries = retypd::parseDotSummary(content);
+  }
+  const char *SigFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
+
   const char *Traces = std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS");
   if (Traces) {
     std::string TraceStr(Traces);
@@ -387,8 +394,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::cerr << "(Bottom-Up) Processing SCC: " << Name << "\n";
 
     std::shared_ptr<ConstraintsGenerator> Generator =
-        std::make_shared<ConstraintsGenerator>(*this, M.getContext(), Name,
-                                               SCCs);
+        std::make_shared<ConstraintsGenerator>(*this, Name, SCCs);
 
     Generator->run();
 
@@ -586,8 +592,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::size_t SCCIndex = Index1 - 1;
     auto &Data = AllSCCs[SCCIndex];
     std::string SCCDebugFolderName = "SCC" + std::to_string(SCCIndex);
-    Data.TopDownGenerator = std::make_shared<ConstraintsGenerator>(
-        *this, M.getContext(), Data.SCCName);
+    Data.TopDownGenerator =
+        std::make_shared<ConstraintsGenerator>(*this, Data.SCCName);
     auto &CurrentTypes = *(Data.TopDownGenerator);
     assert(CurrentTypes.PG);
 
@@ -680,7 +686,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // Create type for memory node
   Global =
-      std::make_shared<ConstraintsGenerator>(*this, M.getContext(), "Global");
+      std::make_shared<ConstraintsGenerator>(*this, "Global");
   std::set<CGNode *> MemoryNodes;
   std::set<CGNode *> MemoryNodesC;
   for (auto &Ent : AllSCCs) {
@@ -711,8 +717,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     llvm::errs() << "No memory node found\n";
     MemNodeC = Global->CG.getMemoryNode(retypd::Contravariant);
   } else {
-    MemNodeC =
-        determinizeTo(*Global, MemoryNodesC, "mdtmc");
+    MemNodeC = determinizeTo(*Global, MemoryNodesC, "mdtmc");
     // Global->mergeAfterDeterminize();
   }
   // a special value to represent the memory node
@@ -991,7 +996,7 @@ bool ConstraintsGenerator::checkSymmetry() {
 
 ConstraintsGenerator
 ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
-  ConstraintsGenerator G(Ctx, LLCtx, CG.Name);
+  ConstraintsGenerator G(Ctx, CG.Name);
   cloneTo(G, Old2New);
   return G;
 }
@@ -1000,7 +1005,6 @@ void ConstraintsGenerator::cloneTo(
     ConstraintsGenerator &G, std::map<const CGNode *, CGNode *> &Old2New) {
   ConstraintGraph::clone(Old2New, CG, G.CG);
   assert(&Ctx == &G.Ctx);
-  assert(&LLCtx == &G.LLCtx);
   for (auto &Ent : V2N) {
     // this is NodeKey, no need to map.
     G.V2N.insert(Ent.first, Ent.second);
@@ -1599,6 +1603,31 @@ void ConstraintsGenerator::instantiateSummary(
   makeSymmetry();
 }
 
+void ConstraintsGenerator::fixSCCFuncMappings() {
+  for (auto F : SCCs) {
+    // create node key
+    auto Dtv = TypeVariable::CreateDtv(*Ctx.TRCtx, F->getName().str());
+    retypd::NodeKey K(Dtv, retypd::Covariant);
+    retypd::NodeKey KC(Dtv, retypd::Contravariant);
+    // find the node
+    auto *Node = CG.getNodeOrNull(K);
+    // assert(Node != nullptr);
+    auto *NodeC = CG.getNodeOrNull(KC);
+    // assert(NodeC != nullptr);
+    if (Node == nullptr && NodeC == nullptr) {
+      llvm::errs() << "Warning: No useful summary for " << F->getName() << "\n";
+      continue;
+    }
+    // insert to value map
+    if (Node != nullptr) {
+      V2N.insert(F, Node->key);
+    }
+    if (NodeC != nullptr) {
+      V2NContra.insert(F, NodeC->key);
+    }
+  }
+}
+
 std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
   std::map<const CGNode *, CGNode *> Old2New;
   auto S = CG.clone(Old2New);
@@ -1614,35 +1643,16 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
   //   return nullptr;
   // }
   auto G2 = S.simplify();
+
+  // Wrap the graph as a ConstraintsGenerator, Fix mappings
   std::shared_ptr<ConstraintsGenerator> Ret =
-      std::make_shared<ConstraintsGenerator>(Ctx, LLCtx, CG.Name);
+      std::make_shared<ConstraintsGenerator>(Ctx, CG.Name);
   Ret->SCCs = SCCs;
   std::map<const CGNode *, CGNode *> Tmp;
   ConstraintGraph::clone(Tmp, G2, Ret->CG);
 
   // summary 的关键是要维护两个variance的函数节点的映射。
-  for (auto F : SCCs) {
-    // create node key
-    auto Dtv = TypeVariable::CreateDtv(*Ctx.TRCtx, F->getName().str());
-    retypd::NodeKey K(Dtv, retypd::Covariant);
-    retypd::NodeKey KC(Dtv, retypd::Contravariant);
-    // find the node
-    auto *Node = Ret->CG.getNodeOrNull(K);
-    // assert(Node != nullptr);
-    auto *NodeC = Ret->CG.getNodeOrNull(KC);
-    // assert(NodeC != nullptr);
-    if (Node == nullptr && NodeC == nullptr) {
-      llvm::errs() << "Warning: No useful summary for " << F->getName() << "\n";
-      continue;
-    }
-    // insert to value map
-    if (Node != nullptr) {
-      Ret->V2N.insert(F, Node->key);
-    }
-    if (NodeC != nullptr) {
-      Ret->V2NContra.insert(F, NodeC->key);
-    }
-  }
+  Ret->fixSCCFuncMappings();
   if (Ret->V2N.size() == 0 && Ret->V2NContra.size() == 0) {
     return nullptr;
   }
@@ -2588,6 +2598,42 @@ ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
   }
 
   // FieldInfoCache[&Node] = Ret;
+  return Ret;
+}
+
+std::shared_ptr<ConstraintsGenerator>
+fromConstraints(TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
+                const retypd::ConstraintSummary &Summary) {
+  if (Summary.Cons.empty()) {
+    return nullptr;
+  }
+  std::string SCCNames;
+  for (auto *F : SCCs) {
+    if (!SCCNames.empty()) {
+      SCCNames += ",";
+    }
+    auto FName = F->getName().str();
+    assert(!FName.empty());
+    SCCNames += FName;
+  }
+  auto Ret = std::make_shared<ConstraintsGenerator>(Ctx, SCCNames, SCCs);
+  Ret->CG.fromConstraints(Ctx.TRCtx, SCCNames, Summary);
+  Ret->fixSCCFuncMappings();
+  if (Ret->V2N.size() == 0 && Ret->V2NContra.size() == 0) {
+    assert(false && "Empty constraints?");
+  }
+  return Ret;
+}
+
+std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::fromDotSummary(
+    TypeRecovery &Ctx, std::set<llvm::Function *> SCCs, retypd::DotGraph &G) {
+  auto Ret = std::make_shared<ConstraintsGenerator>(Ctx, G.name, SCCs);
+  // Ret->CG.fromDotSummary(G);
+  assert(false && "TODO!");
+  Ret->fixSCCFuncMappings();
+  if (Ret->V2N.size() == 0 && Ret->V2NContra.size() == 0) {
+    return nullptr;
+  }
   return Ret;
 }
 

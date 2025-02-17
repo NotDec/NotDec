@@ -1,6 +1,9 @@
 
 #include <iostream>
 #include <llvm/IR/Module.h>
+#include <string>
+#include <fstream>
+#include <sstream>
 
 std::string getSuffix(std::string fname) {
   std::size_t ind = fname.find_last_of('.');
@@ -10,6 +13,13 @@ std::string getSuffix(std::string fname) {
   return std::string();
 }
 namespace notdec {
+
+std::string readFileToString(const char* path) {
+  std::ifstream t(path);
+  std::stringstream buffer;
+  buffer << t.rdbuf();
+  return buffer.str();
+}
 
 std::string join(std::string path, std::string elem) {
   return path.back() == '/' ? path + elem : path + "/" + elem;

@@ -42,6 +42,7 @@ protected:
   PNINode(PNIGraph &SSG, llvm::Type *LowTy);
   // clone constructor for PNIGraph::cloneFrom
   PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode);
+  PNINode(PNIGraph &SSG, std::string SerializedTy);
   unsigned long Id = 0;
   LatticeTy Ty;
 
@@ -64,7 +65,6 @@ public:
   PtrOrNum getPtrOrNum() const { return Ty.getPtrOrNum(); }
   bool isConflict() const { return Ty.isConflict(); }
   void setConflict() { Ty.setConflict(); }
-  llvm::Type *normalizeLowTy(llvm::Type *T);
   std::string getLowTy() const { return Ty.str(); }
   // bool updateLowTy(llvm::Type *T);
 
@@ -73,28 +73,22 @@ public:
   bool isUnknown() const { return getPtrOrNum() == Unknown; }
   bool isNull() const { return getPtrOrNum() == Null; }
   bool isNotPN() const { return getPtrOrNum() == NotPN; }
-  bool isPNRelated() const {
-    return Ty.isPNRelated();
-  }
-  char getPNChar() const {
-    return Ty.getPNChar();
-  }
+  bool isPNRelated() const { return Ty.isPNRelated(); }
+  char getPNChar() const { return Ty.getPNChar(); }
   /// merge two PNVar into one. Return the unified PNVar.
   PNINode *unify(PNINode &other);
   static llvm::Type *mergeLowTy(llvm::Type *T, llvm::Type *O);
   void addUser(CGNode *Node);
 
-  LatticeTy& getLatticeTy() { return Ty; }
-  const LatticeTy& getLatticeTy() const { return Ty; }
+  LatticeTy &getLatticeTy() { return Ty; }
+  const LatticeTy &getLatticeTy() const { return Ty; }
   void merge(LatticeTy &Other) { Ty.merge(Other); }
 
-  bool tyEqual(const PNINode &Other) const {
-    return Ty == Other.Ty;
-  }
+  bool tyEqual(const PNINode &Other) const { return Ty == Other.Ty; }
 
-  std::string str() const {
-    return Ty.str();
-  }
+  std::string str() const { return Ty.str(); }
+
+  std::string serialize() const { return Ty.str() + " #" + std::to_string(Id); }
 };
 
 struct AddNodeCons {
@@ -185,7 +179,6 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
 
 struct PNIGraph {
   ConstraintGraph &CG;
-  llvm::LLVMContext &LLCtx;
   llvm::FunctionType *FuncTy = nullptr;
   std::string Name;
   std::set<ConsNode *> Worklist;
@@ -209,10 +202,14 @@ struct PNIGraph {
   const std::set<CGNode *> &getNodeSet(PNINode *Cons) {
     return PNIToNode[Cons];
   }
-  PNINode *createPNINode(CGNode *To, llvm::Type *LowTy) {
+  PNINode *createPNINode(std::string SerializedTy) {
+    auto *N = new PNINode(*this, SerializedTy);
+    PNINodes.push_back(N);
+    return N;
+  }
+  PNINode *createPNINode(llvm::Type *LowTy) {
     auto *N = new PNINode(*this, LowTy);
     PNINodes.push_back(N);
-    PNIToNode[N].insert(To);
     return N;
   }
   PNINode *clonePNINode(const PNINode &OGN) {
@@ -223,11 +220,8 @@ struct PNIGraph {
   static void addPNINodeTarget(CGNode &To, PNINode &N);
   void markRemoved(CGNode &N);
 
-  PNIGraph(ConstraintGraph &CG, llvm::LLVMContext &LLCtx, std::string Name,
-           long PointerSize)
-      : CG(CG), LLCtx(LLCtx),
-        FuncTy(llvm::FunctionType::get(llvm::Type::getInt8PtrTy(LLCtx), false)),
-        Name(Name), PointerSize(PointerSize) {}
+  PNIGraph(ConstraintGraph &CG, std::string Name, long PointerSize)
+      : CG(CG), Name(Name), PointerSize(PointerSize) {}
   void cloneFrom(const PNIGraph &G, std::map<const CGNode *, CGNode *> Old2New);
 
   void addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,

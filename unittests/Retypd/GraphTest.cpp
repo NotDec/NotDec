@@ -6,12 +6,26 @@
 #include <gtest/gtest.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Support/Debug.h>
+#include <memory>
 #include <string>
 #include <vector>
 
 using notdec::retypd::Constraint;
 using notdec::retypd::ConstraintGraph;
+using notdec::retypd::ConstraintSummary;
 using notdec::retypd::TRContext;
+using notdec::retypd::TypeVariable;
+
+TypeVariable parseTV(TRContext &Ctx, llvm::StringRef str) {
+  std::vector<Constraint> ret;
+  auto res = notdec::retypd::parseTypeVariable(Ctx, str);
+  EXPECT_EQ(res.first.size(), 0);
+  EXPECT_TRUE(res.second.isOk());
+  if (res.second.isErr()) {
+    std::cerr << res.second.msg().str() << "\n";
+  }
+  return res.second.get();
+}
 
 std::vector<Constraint> parse_constraints(TRContext &Ctx,
                                           std::vector<const char *> cons_str) {
@@ -41,13 +55,23 @@ bool check(std::vector<notdec::retypd::SubTypeConstraint> &Cons,
 
 // A simple example from the paper.
 TEST(Retypd, SaturationPaperTest) {
-  TRContext Ctx;
+  std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
   llvm::DebugFlag = true;
   llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons = parse_constraints(
-      Ctx, {"y <= p", "p <= x", "A <= x.store4", "y.load4 <= B"});
+      *Ctx, {"y <= p", "p <= x", "A <= x.store4", "y.load4 <= B"});
+  std::map<TypeVariable, std::string> PNIMap = {
+      {parseTV(*Ctx, "x"), "ptr 32 #1"},
+      {parseTV(*Ctx, "y"), "ptr 32 #2"},
+      {parseTV(*Ctx, "p"), "ptr 32 #3"},
+      {parseTV(*Ctx, "A"), "int 4 #4"},
+      {parseTV(*Ctx, "B"), "int 4 #5"},
+      {parseTV(*Ctx, "x.store4"), "int 4 #6"},
+      {parseTV(*Ctx, "y.load4"), "int 4 #7"},
+  };
+  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = &PNIMap};
   ConstraintGraph CG =
-      ConstraintGraph::fromConstraints(Ctx, "SaturationPaper", cons);
+      ConstraintGraph::fromConstraints(Ctx, "SaturationPaper", Sum);
 
   std::set<std::string> InterestingVars = {"A", "B"};
   CG.solve();
@@ -63,14 +87,29 @@ TEST(Retypd, SaturationPaperTest) {
 
 // A simple example from the paper.
 TEST(Retypd, SaturationOffsetTest) {
-  TRContext Ctx;
+  std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
   llvm::DebugFlag = true;
   llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons =
-      parse_constraints(Ctx, {"x.@2 <= C", "C.@2 <= D", "D <= y.@4",
-                              "A <= x.load4", "y.load4 <= B"});
+      parse_constraints(*Ctx, {"x.@2 <= C", "C.@2 <= D", "D <= y.@4",
+                               "A <= x.load4", "y.load4 <= B"});
+  std::map<TypeVariable, std::string> PNIMap = {
+      {parseTV(*Ctx, "x"), "ptr 32 #1"},
+      {parseTV(*Ctx, "x.@2"), "ptr 32 #1"},
+      {parseTV(*Ctx, "C"), "ptr 32 #1"},
+      {parseTV(*Ctx, "C.@2"), "ptr 32 #1"},
+      {parseTV(*Ctx, "D"), "ptr 32 #1"},
+      {parseTV(*Ctx, "y"), "ptr 32 #1"},
+      {parseTV(*Ctx, "y.@4"), "ptr 32 #1"},
+      {parseTV(*Ctx, "x.load4"), "int 4 #2"},
+      {parseTV(*Ctx, "y.load4"), "int 4 #2"},
+      {parseTV(*Ctx, "A"), "int 4 #2"},
+      {parseTV(*Ctx, "B"), "int 4 #2"},
+  };
+  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = &PNIMap};
+
   ConstraintGraph CG =
-      ConstraintGraph::fromConstraints(Ctx, "SaturationOffsetTest", cons);
+      ConstraintGraph::fromConstraints(Ctx, "SaturationOffsetTest", Sum);
 
   std::set<std::string> InterestingVars = {"A", "B"};
   CG.solve();
@@ -86,23 +125,40 @@ TEST(Retypd, SaturationOffsetTest) {
 
 // A simple example from the paper.
 TEST(Retypd, SlidesExampleTest) {
-  TRContext Ctx;
+  std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
   llvm::DebugFlag = true;
   llvm::setCurrentDebugType("retypd_graph");
   std::vector<Constraint> cons =
-      parse_constraints(Ctx, {
-                                 "F.in_stack0 <= 𝛿",
-                                 "𝛼 <= 𝜑",
-                                 "𝛿 <= 𝜑",
-                                 "𝜑.load4 <= 𝛼",
-                                 "𝜑.load4.@4 <= 𝛼'",
-                                 "𝛼' <= close.in_stack0",
-                                 "close.out_eax <= F.out_eax",
-                                 "close.in_stack0 <= #FileDescriptor",
-                                 "#SuccessZ <= close.out_eax",
-                             });
+      parse_constraints(*Ctx, {
+                                  "F.in_stack0 <= 𝛿",
+                                  "𝛼 <= 𝜑",
+                                  "𝛿 <= 𝜑",
+                                  "𝜑.load4 <= 𝛼",
+                                  "𝜑.load4.@4 <= 𝛼'",
+                                  "𝛼' <= close.in_stack0",
+                                  "close.out_eax <= F.out_eax",
+                                  "close.in_stack0 <= #FileDescriptor",
+                                  "#SuccessZ <= close.out_eax",
+                              });
+  std::map<TypeVariable, std::string> PNIMap = {
+      {parseTV(*Ctx, "F"), "func 32 #1"},
+      {parseTV(*Ctx, "F.in_stack0"), "ptr 32 #2"},
+      {parseTV(*Ctx, "F.out_eax"), "int 32 #3"},
+      {parseTV(*Ctx, "𝛼"), "ptr 32 #2"},
+      {parseTV(*Ctx, "𝛿"), "ptr 32 #2"},
+      {parseTV(*Ctx, "𝜑"), "ptr 32 #2"},
+      {parseTV(*Ctx, "𝜑.load4"), "ptr 32 #2"},
+      {parseTV(*Ctx, "𝜑.load4.@4"), "ptr 32 #2"},
+      {parseTV(*Ctx, "𝛼'"), "ptr 32 #2"},
+      {parseTV(*Ctx, "close"), "func 32 #1"},
+      {parseTV(*Ctx, "close.in_stack0"), "ptr 32 #2"},
+      {parseTV(*Ctx, "close.out_eax"), "int 32 #3"},
+      {parseTV(*Ctx, "#FileDescriptor"), "ptr 32 #2"},
+      {parseTV(*Ctx, "#SuccessZ"), "int 32 #3"},
+  };
+  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = &PNIMap};
   ConstraintGraph CG =
-      ConstraintGraph::fromConstraints(Ctx, "SlideExample", cons);
+      ConstraintGraph::fromConstraints(Ctx, "SlideExample", Sum);
   std::set<std::string> InterestingVars;
   InterestingVars.insert("F");
   CG.solve();
@@ -130,9 +186,9 @@ void printConstraints(
 TEST(Retypd, ExpToConstraint1Test) {
   using namespace notdec::retypd::rexp;
   using namespace notdec::retypd;
-  TRContext Ctx;
-  auto Prefix = create(RecallBase{TypeVariable::CreateDtv(Ctx, "alpha")});
-  auto Suffix = create(ForgetBase{TypeVariable::CreateDtv(Ctx, "beta")});
+  std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
+  auto Prefix = create(RecallBase{TypeVariable::CreateDtv(*Ctx, "alpha")});
+  auto Suffix = create(ForgetBase{TypeVariable::CreateDtv(*Ctx, "beta")});
 
   auto StarForget1 =
       Prefix & createStar(create(ForgetLabel{LoadLabel{}})) & Suffix;
@@ -149,12 +205,12 @@ TEST(Retypd, ExpToConstraint1Test) {
 TEST(Retypd, EdgeLabel1) {
   using notdec::retypd::EdgeLabel;
   using notdec::retypd::TRContext;
-  TRContext Ctx;
+  std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
   auto EL1 = notdec::retypd::RecallBase{
-      .Base = notdec::retypd::TypeVariable::CreateDtv(Ctx, "alpha"),
+      .Base = notdec::retypd::TypeVariable::CreateDtv(*Ctx, "alpha"),
       .V = notdec::retypd::Covariant};
   auto EL2 = notdec::retypd::RecallBase{
-      .Base = notdec::retypd::TypeVariable::CreateDtv(Ctx, "alpha"),
+      .Base = notdec::retypd::TypeVariable::CreateDtv(*Ctx, "alpha"),
       .V = notdec::retypd::Contravariant};
   EXPECT_TRUE(EL1 != EL2);
   EXPECT_FALSE(EL1 == EL2);

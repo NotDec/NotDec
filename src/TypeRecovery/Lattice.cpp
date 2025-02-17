@@ -73,6 +73,22 @@ bool isPtrOrNum(llvm::Type *LowTy, long PointerSize) {
   return PN != Null && PN != NotPN;
 }
 
+PtrOrNum str2PtrOrNum(std::string Str) {
+  if (Str == "int" || Str == "num") {
+    return Number;
+  } else if (Str == "ptr") {
+    return Pointer;
+  } else if (Str == "null") {
+    return Null;
+  } else if (Str == "notPN") {
+    return NotPN;
+  } else if (Str == "unk") {
+    return Unknown;
+  } else {
+    return NotPN;
+  }
+}
+
 std::string toString(PtrOrNum Ty) {
   switch (Ty) {
   case Unknown:

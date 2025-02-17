@@ -29,6 +29,7 @@
 #include <llvm/Support/FormattedStream.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/DotSummaryParser.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
@@ -200,8 +201,6 @@ public:
 /// The ConstraintsGenerator class is responsible for generating constraints.
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
-  // todo refactor to save the target module.
-  LLVMContext &LLCtx;
 
   // LLVM值到那边节点的映射关系由转TypeVar的函数决定。这里其实只需要保证不重复，其次是保留名字的意义？
   // 因为转换过程有临时变量参与，所以这里到Key的映射要缓存。这里使用的就是Val2Node做缓存
@@ -237,6 +236,13 @@ struct ConstraintsGenerator {
   }
 
   std::shared_ptr<ConstraintsGenerator> genSummary();
+  void fixSCCFuncMappings();
+  static std::shared_ptr<ConstraintsGenerator>
+  fromDotSummary(TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
+                 retypd::DotGraph &G);
+  static std::shared_ptr<ConstraintsGenerator>
+  fromConstraints(TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
+                  retypd::ConstraintSummary &Summary);
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);
   // std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);
@@ -287,10 +293,9 @@ struct ConstraintsGenerator {
   ConstraintsGenerator clone(std::map<const CGNode *, CGNode *> &Old2New);
   void cloneTo(ConstraintsGenerator &Target,
                std::map<const CGNode *, CGNode *> &Old2New);
-  ConstraintsGenerator(TypeRecovery &Ctx, LLVMContext &LLCtx, std::string Name,
+  ConstraintsGenerator(TypeRecovery &Ctx, std::string Name,
                        std::set<llvm::Function *> SCCs = {})
-      : Ctx(Ctx), LLCtx(LLCtx),
-        CG(Ctx.TRCtx, &LLCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
+      : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
         SCCs(SCCs) {}
 
 public:

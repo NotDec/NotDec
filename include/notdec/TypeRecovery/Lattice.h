@@ -1,6 +1,7 @@
 #ifndef _NOTDEC_RETYPD_LATTICE_H
 #define _NOTDEC_RETYPD_LATTICE_H
 
+#include <cassert>
 #include <iostream>
 #include <llvm/IR/Type.h>
 #include <string>
@@ -47,6 +48,7 @@ PtrOrNum fromIPChar(char C);
 PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize);
 bool isPtrOrNum(llvm::Type *LowTy, long PointerSize);
 std::string toString(PtrOrNum Ty);
+PtrOrNum str2PtrOrNum(std::string Str);
 
 // #endregion PtrOrNum
 
@@ -64,6 +66,19 @@ struct LatticeTy {
     if (isNotPN()) {
       Elem = llvmType2Elem(Ty);
     }
+  }
+
+  LatticeTy(std::string Str, unsigned Size)
+      : Size(Size),
+        Ty(str2PtrOrNum(Str)) {
+    if (isNotPN()) {
+      Elem = Str;
+    }
+  }
+
+  LatticeTy(std::string Serialized): LatticeTy(Serialized.substr(0, Serialized.find(" ")), std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
+    assert(Serialized.find(" ") != std::string::npos);
+    assert(this->str() == Serialized);    
   }
 
   unsigned getSize() const { return Size; }
@@ -108,7 +123,7 @@ struct LatticeTy {
     }
     return toString(Ty);
   }
-  std::string str() const { return latticeStr() + std::to_string(Size); }
+  std::string str() const { return latticeStr() + " " + std::to_string(Size); }
   bool operator==(const LatticeTy &rhs) const {
     if (rhs.Size != Size) {
       return false;

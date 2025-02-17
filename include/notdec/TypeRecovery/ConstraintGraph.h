@@ -36,6 +36,12 @@ template <class GraphType> struct OffsetOnly;
 
 namespace notdec::retypd {
 
+struct ConstraintSummary {
+  std::vector<Constraint> &Cons;
+  long PointerSize = 0;
+  std::map<TypeVariable, std::string> *PNIMap = nullptr;
+};
+
 struct CGNode;
 struct ConstraintGraph;
 
@@ -62,7 +68,7 @@ struct NodeKey {
   bool operator==(const NodeKey &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
-  
+
   static NodeKey fromLabel(const EdgeLabel &L) {
     if (auto FB = std::get_if<ForgetBase>(&L)) {
       return NodeKey(FB->Base, FB->V);
@@ -176,7 +182,6 @@ struct RevEdge {
 
 struct ConstraintGraph {
   std::shared_ptr<retypd::TRContext> Ctx;
-  llvm::LLVMContext *LLCtx;
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
   std::map<NodeKey, CGNode> Nodes;
@@ -195,8 +200,7 @@ struct ConstraintGraph {
   // TODO replace with datalayout?
   long PointerSize = 0;
 
-  ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx,
-                  llvm::LLVMContext *LLCtx, long PointerSize, std::string Name,
+  ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx, long PointerSize, std::string Name,
                   bool disablePNI = false);
   static void
   clone(std::map<const CGNode *, CGNode *> &Old2New,
@@ -299,10 +303,12 @@ public:
   void printEpsilonLoop(const char *DotFile,
                         std::set<const CGNode *> Nodes) const;
   std::vector<SubTypeConstraint> toConstraints();
-  static ConstraintGraph fromConstraints(std::shared_ptr<retypd::TRContext> Ctx,
-                                         std::string FuncName,
-                                         std::vector<Constraint> &Cons,
-                                         long PointerSize = 32);
+
+  void instantiateConstraints(const ConstraintSummary& Summary);
+
+  static ConstraintGraph
+  fromConstraints(std::shared_ptr<retypd::TRContext> Ctx, std::string FuncName,
+                  const ConstraintSummary& Summary);
 
   bool hasEdge(const CGNode &From, const CGNode &To, EdgeLabel Label) const {
     assert(&From.Parent == this && &To.Parent == this);
@@ -499,7 +505,7 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
     return Node->key.str() +
            (Node->getPNIVar() != nullptr
-                ? "\n" + Node->getPNIVar()->str() + "  #" +
+                ? "\n" + Node->getPNIVar()->str() + " #" +
                       std::to_string(Node->getPNIVar()->getId())
                 : "");
   }

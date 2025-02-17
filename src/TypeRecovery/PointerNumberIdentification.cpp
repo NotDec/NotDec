@@ -467,20 +467,6 @@ void PNINode::addUser(CGNode *Node) {
   Parent->PNIToNode[this].insert(Node);
 }
 
-llvm::Type *PNINode::normalizeLowTy(llvm::Type *T) {
-  if (T == nullptr) {
-    return nullptr;
-  }
-  // normalize all pointer type.
-  if (T->isPointerTy()) {
-    T = llvm::Type::getInt8PtrTy(T->getContext());
-  } else if (T->isFunctionTy()) {
-    // TODO pass llvmContext and create basic type as PNIGraph member
-    T = Parent->FuncTy;
-  }
-  return T;
-}
-
 bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   bool Updated = Ty.setPtrOrNum(NewTy);
   if (Updated) {
@@ -523,6 +509,9 @@ PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
 
 PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
     : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty) {}
+
+PNINode::PNINode(PNIGraph &SSG, std::string SerializedTy)
+    : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(SerializedTy) {}
 
 void PNIGraph::cloneFrom(const PNIGraph &G,
                          std::map<const CGNode *, CGNode *> Old2New) {

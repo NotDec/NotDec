@@ -27,6 +27,8 @@ extern llvm::cl::opt<log_level> logLevel;
 
 namespace notdec {
 
+std::string readFileToString(const char *path);
+
 bool inline startswith(std::string str, const char *prefix) {
   return str.rfind(prefix, 0) == 0;
 }
