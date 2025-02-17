@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <queue>
+#include <set>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -72,6 +73,19 @@ const char *ValueNamer::StackPrefix = "stack_";
 const char *ValueNamer::AllocaPrefix = "alloca_";
 const char *ValueNamer::LoadPrefix = "load_";
 const char *ValueNamer::StorePrefix = "store_";
+
+std::string getName(const std::set<llvm::Function *> &SCC) {
+  std::string SCCNames;
+  for (auto *F : SCC) {
+    if (!SCCNames.empty()) {
+      SCCNames += ",";
+    }
+    auto FName = F->getName().str();
+    assert(!FName.empty());
+    SCCNames += FName;
+  }
+  return SCCNames;
+}
 
 // When encountered a primitive node, ignore its edges.
 std::set<CGNode *> countClosureFix(const std::set<CGNode *> &N) {
@@ -275,12 +289,76 @@ inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
+  auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
+  this->StackPointer = SP.result;
+
+  data_layout = std::move(M.getDataLayoutStr());
+  pointer_size = M.getDataLayout().getPointerSizeInBits();
+
+  std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
+      SummaryOverride;
+
   const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
   if (SummaryFile) {
-    std::string content = readFileToString(SummaryFile);
-    auto Summaries = retypd::parseDotSummary(content);
+    if (getSuffix(SummaryFile) == ".json") {
+      llvm::errs() << "Loading summary from: " << SummaryFile << "\n";
+      auto ValE = json::parse(readFileToString(SummaryFile));
+      assert(ValE && "JSON parse failed");
+      auto Val = ValE->getAsObject();
+      for (auto &Ent : *Val) {
+        std::set<Function *> FSet;
+        for (auto Str : split(Ent.first, ',')) {
+          auto *F = M.getFunction(Str);
+          if (F == nullptr) {
+            llvm::errs() << "Warning: Function not found: " << Ent.first.str()
+                         << "\n";
+            continue;
+          }
+          FSet.insert(F);
+        }
+        std::vector<retypd::Constraint> Constraints;
+        std::map<TypeVariable, std::string> PNIMap;
+        retypd::ConstraintSummary Summary{Constraints, pointer_size, &PNIMap};
+        Summary.fromJSON(*TRCtx, *Ent.second.getAsObject());
+        auto CG = ConstraintsGenerator::fromConstraints(*this, FSet, Summary);
+        SummaryOverride[FSet] = CG;
+      }
+    } else if (getSuffix(SummaryFile) == ".dot") {
+      assert(false && "TODO");
+    }
   }
+
+  std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
+      SignatureOverride;
   const char *SigFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
+  if (SigFile) {
+    if (getSuffix(SigFile) == ".json") {
+      llvm::errs() << "Loading summary from: " << SigFile << "\n";
+      auto ValE = json::parse(readFileToString(SigFile));
+      assert(ValE && "JSON parse failed");
+      auto Val = ValE->getAsObject();
+      for (auto &Ent : *Val) {
+        std::set<Function *> FSet;
+        for (auto Str : split(Ent.first, ',')) {
+          auto *F = M.getFunction(Str);
+          if (F == nullptr) {
+            llvm::errs() << "Warning: Function not found: " << Ent.first.str()
+                         << "\n";
+            continue;
+          }
+          FSet.insert(F);
+        }
+        std::vector<retypd::Constraint> Constraints;
+        std::map<TypeVariable, std::string> PNIMap;
+        retypd::ConstraintSummary Summary{Constraints, pointer_size, &PNIMap};
+        Summary.fromJSON(*TRCtx, *Ent.second.getAsObject());
+        auto CG = ConstraintsGenerator::fromConstraints(*this, FSet, Summary);
+        SignatureOverride[FSet] = CG;
+      }
+    } else if (getSuffix(SigFile) == ".dot") {
+      assert(false && "TODO");
+    }
+  }
 
   const char *Traces = std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS");
   if (Traces) {
@@ -312,12 +390,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     printModule(M, join(DebugDir, "01-Original.ll").c_str());
   }
 
-  auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
-  this->StackPointer = SP.result;
-
-  data_layout = std::move(M.getDataLayoutStr());
-  pointer_size = M.getDataLayout().getPointerSizeInBits();
-
   // get the CallGraph, iterate by topological order of SCC
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
   // TODO: simplify call graph if one func does not have up constraints.
@@ -334,25 +406,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // tuple(SCCNodes, ConstraintsGenerator, SCCName, TopDownGenerator)
   std::vector<SCCData> AllSCCs;
   std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
-
-  std::map<std::string, std::vector<retypd::SubTypeConstraint>>
-      SummaryOverride = {
-          {std::string("memset"),
-           retypd::parse_subtype_constraints(
-               *TRCtx, {"memset.in_0 <= memset.out", "memset.in_1 <= #uint"})},
-          {std::string("memcpy"),
-           retypd::parse_subtype_constraints(
-               *TRCtx, {"memcpy.in_1 <= memcpy.in_0",
-                        "memcpy.in_0 <= memcpy.out", "memcpy.in_2 <= #uint"})},
-          {std::string("__memcpy"),
-           retypd::parse_subtype_constraints(*TRCtx,
-                                             {"__memcpy.in_1 <= __memcpy.in_0",
-                                              "__memcpy.in_0 <= __memcpy.out",
-                                              "__memcpy.in_2 <= #uint"})},
-          {std::string("memchr"), {}},
-          {std::string("pop_arg"), {}},
-          {std::string("fmt_fp"), {}},
-      };
 
   bool DisableOverride = false;
   if (DisableOverride) {
@@ -405,39 +458,45 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       Generator->CG.printGraph(join(*DirPath, "00-Generated.dot").c_str());
     }
 
-    std::shared_ptr<ConstraintsGenerator> Summary;
-    if (SummaryOverride.count(Name)) {
-      assert(false && "TODO");
-      // std::cerr << "Summary Overriden: " << Name << ":\n";
-      // Summary = SummaryOverride.at(Name);
-      // Generator->CG.solve();
-    } else {
-      // 1. instantiate the summaries for each call.
-      for (auto &Ent : Generator->CallToInstance) {
-        auto *Call = Ent.first;
-        auto *Target = Call->getCalledFunction();
-        if (Target->isDeclaration()) {
+    // 1. instantiate the summaries for each call.
+    for (auto &Ent : Generator->CallToInstance) {
+      auto *Call = Ent.first;
+      auto *Target = Call->getCalledFunction();
+      std::shared_ptr<ConstraintsGenerator> TargetSummary;
+      if (Target->isDeclaration()) {
+        if (SummaryOverride.count({Target})) {
+          std::cerr << "Override summary for external function: " << Name << ":\n";
+          TargetSummary = SummaryOverride.at({Target});
+          assert (TargetSummary->CG.PG->Constraints.size() == 0);
+        } else {
           llvm::errs() << "Warning: Summary and result may be incorrect due to "
                           "external call: "
                        << *Call << "\n";
           Generator->UnhandledCalls.insert(Ent);
           continue;
         }
-        std::shared_ptr<ConstraintsGenerator> TargetSummary =
-            FuncSummaries.at(Target);
-        if (TargetSummary != nullptr) {
-          Generator->instantiateSummary(Call, Target, *TargetSummary);
-        }
+      } else {
+        TargetSummary = FuncSummaries.at(Target);
       }
-      if (DirPath) {
-        Generator->CG.printGraph(
-            join(*DirPath, "01-InstantiateSummary.dot").c_str());
+      if (TargetSummary != nullptr) {
+        Generator->instantiateSummary(Call, Target, *TargetSummary);
       }
-      Generator->CG.solve();
-      if (DirPath) {
-        Generator->CG.printGraph(
-            join(*DirPath, "01-InstantiateSummary.sat.dot").c_str());
-      }
+    }
+    if (DirPath) {
+      Generator->CG.printGraph(
+          join(*DirPath, "01-InstantiateSummary.dot").c_str());
+    }
+    Generator->CG.solve();
+    if (DirPath) {
+      Generator->CG.printGraph(
+          join(*DirPath, "01-InstantiateSummary.sat.dot").c_str());
+    }
+
+    std::shared_ptr<ConstraintsGenerator> Summary;
+    if (SummaryOverride.count(SCCs)) {
+      std::cerr << "Summary Overriden: " << Name << ":\n";
+      Summary = SummaryOverride.at(SCCs);
+    } else {
       std::cerr << "Generating Summary for " << Name << "\n";
       Summary = Generator->genSummary();
     }
@@ -634,31 +693,47 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       if (Current == nullptr) {
         continue;
       }
-      if (FuncCallers.count(CGN) == 0) {
-        continue;
-      }
-      auto &Callers = FuncCallers.at(CGN);
-      if (Callers.empty()) {
-        std::cerr << "No actual param types for " << Current->getName().str()
-                  << "\n";
-      }
-      if (Current->isVarArg()) {
-        std::cerr << "TODO: Support vararg function: "
-                  << Current->getName().str() << "\n";
-        std::abort();
-      }
 
       std::set<CGNode *> FuncNodes;
       std::set<CGNode *> FuncNodesContra;
 
-      for (auto &Elem : Callers) {
-        auto *Call = Elem.first;
-        auto &CallerGenerator =
-            AllSCCs.at(Func2SCCIndex.at(Elem.second)).TopDownGenerator;
-        auto [FN, FNC] = CallerGenerator->CallToInstance.at(Call);
+      if (SignatureOverride.count(SCCSet)) {
+        std::cerr << "Function Signature Overriden: " << Name << "\n";
+        auto &SigGen = SignatureOverride.at(SCCSet);
+        auto SigNode =
+            SigGen->getNodeOrNull(Current, nullptr, -1, retypd::Covariant);
+        auto SigNodeC =
+            SigGen->getNodeOrNull(Current, nullptr, -1, retypd::Contravariant);
+        assert(SigNode || SigNodeC);
+        if (SigNode) {
+          FuncNodes.insert(SigNode);
+        }
+        if (SigNodeC) {
+          FuncNodesContra.insert(SigNodeC);
+        }
+      } else {
+        if (FuncCallers.count(CGN) == 0) {
+          continue;
+        }
+        auto &Callers = FuncCallers.at(CGN);
+        if (Callers.empty()) {
+          std::cerr << "No actual param types for " << Current->getName().str()
+                    << "\n";
+        }
+        if (Current->isVarArg()) {
+          std::cerr << "TODO: Support vararg function: "
+                    << Current->getName().str() << "\n";
+          std::abort();
+        }
+        for (auto &Elem : Callers) {
+          auto *Call = Elem.first;
+          auto &CallerGenerator =
+              AllSCCs.at(Func2SCCIndex.at(Elem.second)).TopDownGenerator;
+          auto [FN, FNC] = CallerGenerator->CallToInstance.at(Call);
 
-        FuncNodes.insert(FN);
-        FuncNodesContra.insert(FNC);
+          FuncNodes.insert(FN);
+          FuncNodesContra.insert(FNC);
+        }
       }
 
       auto *D = determinizeTo(CurrentTypes, FuncNodes, "act_");
@@ -672,6 +747,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
       CurrentTypes.makeSymmetry();
     }
+
     if (DirPath) {
       CurrentTypes.CG.printGraph(join(*DirPath, "05-CurrentTypes.dot").c_str());
     }
@@ -685,8 +761,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   }
 
   // Create type for memory node
-  Global =
-      std::make_shared<ConstraintsGenerator>(*this, "Global");
+  Global = std::make_shared<ConstraintsGenerator>(*this, "Global");
   std::set<CGNode *> MemoryNodes;
   std::set<CGNode *> MemoryNodesC;
   for (auto &Ent : AllSCCs) {
@@ -1533,18 +1608,6 @@ void ConstraintsGenerator::mergeAfterDeterminize() {
     std::tie(A, B) = findMergePair();
   }
 }
-
-// void ConstraintsGenerator::instantiateSketchAsSub(
-//     ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
-//   CGNode &Root = CG.instantiateSketch(Sk);
-//   addSubtype(Root.key.Base, getTypeVar(Val, nullptr));
-// }
-
-// void ConstraintsGenerator::instantiateSketchAsSup(
-//     ExtValuePtr Val, std::shared_ptr<retypd::Sketch> Sk) {
-//   CGNode &Root = CG.instantiateSketch(Sk);
-//   addSubtype(getTypeVar(Val, nullptr), Root.key.Base);
-// }
 
 void ConstraintsGenerator::run() {
   for (llvm::Function *Func : SCCs) {
@@ -2601,23 +2664,15 @@ ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
   return Ret;
 }
 
-std::shared_ptr<ConstraintsGenerator>
-fromConstraints(TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
-                const retypd::ConstraintSummary &Summary) {
+std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::fromConstraints(
+    TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
+    const retypd::ConstraintSummary &Summary) {
   if (Summary.Cons.empty()) {
     return nullptr;
   }
-  std::string SCCNames;
-  for (auto *F : SCCs) {
-    if (!SCCNames.empty()) {
-      SCCNames += ",";
-    }
-    auto FName = F->getName().str();
-    assert(!FName.empty());
-    SCCNames += FName;
-  }
+  std::string SCCNames = getName(SCCs);
   auto Ret = std::make_shared<ConstraintsGenerator>(Ctx, SCCNames, SCCs);
-  Ret->CG.fromConstraints(Ctx.TRCtx, SCCNames, Summary);
+  Ret->CG.instantiateConstraints(Summary);
   Ret->fixSCCFuncMappings();
   if (Ret->V2N.size() == 0 && Ret->V2NContra.size() == 0) {
     assert(false && "Empty constraints?");

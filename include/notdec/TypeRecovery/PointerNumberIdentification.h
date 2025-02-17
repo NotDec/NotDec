@@ -159,19 +159,21 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
     }
     assert(false && "PNIConsNode::getInst: unhandled variant");
   }
-  void cloneFrom(ConsNode &N, std::map<const CGNode *, CGNode *> Old2New) {
+  void cloneFrom(const ConsNode &N, std::map<const CGNode *, CGNode *> Old2New) {
     if (auto *Add = std::get_if<AddNodeCons>(&N.C)) {
       auto *NewLeft = Old2New[Add->LeftNode];
       auto *NewRight = Old2New[Add->RightNode];
       auto *NewResult = Old2New[Add->ResultNode];
       auto *NewInst = Add->Inst;
       C = AddNodeCons{NewLeft, NewRight, NewResult, NewInst};
+      return;
     } else if (auto *Sub = std::get_if<SubNodeCons>(&N.C)) {
       auto *NewLeft = Old2New[Sub->LeftNode];
       auto *NewRight = Old2New[Sub->RightNode];
       auto *NewResult = Old2New[Sub->ResultNode];
       auto *NewInst = Sub->Inst;
       C = SubNodeCons{NewLeft, NewRight, NewResult, NewInst};
+      return;
     }
     assert(false && "PNIConsNode::cloneFrom: unhandled variant");
   }

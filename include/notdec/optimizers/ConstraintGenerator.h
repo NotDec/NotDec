@@ -17,6 +17,7 @@
 #include <llvm/Support/Casting.h>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <variant>
 #include <vector>
@@ -44,6 +45,8 @@
 #endif
 
 namespace notdec {
+
+std::string getName(const std::set<llvm::Function *> &SCC);
 
 using namespace llvm;
 using retypd::DerivedTypeVariable;
@@ -242,7 +245,7 @@ struct ConstraintsGenerator {
                  retypd::DotGraph &G);
   static std::shared_ptr<ConstraintsGenerator>
   fromConstraints(TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
-                  retypd::ConstraintSummary &Summary);
+                  const retypd::ConstraintSummary &Summary);
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);
   // std::shared_ptr<retypd::Sketch> solveType(const TypeVariable &Node);

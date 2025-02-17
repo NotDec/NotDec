@@ -26,6 +26,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/NFAMinimize.h"
+#include "TypeRecovery/Parser.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
@@ -39,6 +40,42 @@
 #define DEBUG_TYPE "retypd_graph"
 
 namespace notdec::retypd {
+
+void ConstraintSummary::fromJSON(TRContext &Ctx,
+                                 const llvm::json::Object &Obj) {
+  for (auto &Ent : Obj) {
+    if (Ent.first == "constraints") {
+      std::vector<const char *> cons_str;
+      for (auto &Ent2 : *Ent.second.getAsArray()) {
+        auto res = notdec::retypd::parseSubTypeConstraint(
+            Ctx, Ent2.getAsString().getValue());
+        assert(res.first.size() == 0);
+        assert(res.second.isOk());
+        if (res.second.isErr()) {
+          std::cerr << res.second.msg().str() << "\n";
+          std::abort();
+        }
+        Cons.push_back(res.second.get());
+      }
+    } else if (Ent.first == "pni_map") {
+      PNIMap = new std::map<TypeVariable, std::string>();
+      for (auto &Ent2 : *Ent.second.getAsObject()) {
+        auto res = notdec::retypd::parseTypeVariable(Ctx, Ent2.first.str());
+        assert(res.first.size() == 0);
+        assert(res.second.isOk());
+        if (res.second.isErr()) {
+          std::cerr << res.second.msg().str() << "\n";
+          std::abort();
+        }
+        (*PNIMap)[res.second.get()] = Ent2.second.getAsString()->str();
+      }
+    } else {
+      llvm::errs() << "ConstraintSummary::fromJSON: Unknown key: " << Ent.first
+                   << "\n";
+      std::abort();
+    }
+  }
+}
 
 llvm::Optional<std::pair<bool, OffsetRange>>
 EdgeLabel2Offset(const EdgeLabel &E) {
@@ -1408,7 +1445,7 @@ void ConstraintGraph::instantiateConstraints(const ConstraintSummary &Summary) {
     std::string &SerializedPNI = Ent.second;
     auto Pos = SerializedPNI.rfind(" ");
     assert(Pos != std::string::npos);
-    auto IDStr = SerializedPNI.substr(Pos+1);
+    auto IDStr = SerializedPNI.substr(Pos + 1);
     assert(IDStr.front() == '#');
     auto ID = std::stoul(IDStr.substr(1));
     PNINode *PN = nullptr;

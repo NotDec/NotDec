@@ -17,6 +17,7 @@
 #include <llvm/ADT/simple_ilist.h>
 #include <llvm/IR/AssemblyAnnotationWriter.h>
 #include <llvm/Support/GraphWriter.h>
+#include <llvm/Support/JSON.h>
 
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
@@ -40,6 +41,8 @@ struct ConstraintSummary {
   std::vector<Constraint> &Cons;
   long PointerSize = 0;
   std::map<TypeVariable, std::string> *PNIMap = nullptr;
+
+  void fromJSON(TRContext &Ctx, const llvm::json::Object &Obj);
 };
 
 struct CGNode;
@@ -200,8 +203,8 @@ struct ConstraintGraph {
   // TODO replace with datalayout?
   long PointerSize = 0;
 
-  ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx, long PointerSize, std::string Name,
-                  bool disablePNI = false);
+  ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx, long PointerSize,
+                  std::string Name, bool disablePNI = false);
   static void
   clone(std::map<const CGNode *, CGNode *> &Old2New,
         const ConstraintGraph &From, ConstraintGraph &To,
@@ -304,11 +307,11 @@ public:
                         std::set<const CGNode *> Nodes) const;
   std::vector<SubTypeConstraint> toConstraints();
 
-  void instantiateConstraints(const ConstraintSummary& Summary);
+  void instantiateConstraints(const ConstraintSummary &Summary);
 
-  static ConstraintGraph
-  fromConstraints(std::shared_ptr<retypd::TRContext> Ctx, std::string FuncName,
-                  const ConstraintSummary& Summary);
+  static ConstraintGraph fromConstraints(std::shared_ptr<retypd::TRContext> Ctx,
+                                         std::string FuncName,
+                                         const ConstraintSummary &Summary);
 
   bool hasEdge(const CGNode &From, const CGNode &To, EdgeLabel Label) const {
     assert(&From.Parent == this && &To.Parent == this);

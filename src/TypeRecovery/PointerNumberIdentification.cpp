@@ -6,6 +6,7 @@
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Type.h>
+#include <string>
 
 namespace notdec::retypd {
 
@@ -511,12 +512,22 @@ PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
     : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty) {}
 
 PNINode::PNINode(PNIGraph &SSG, std::string SerializedTy)
-    : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(SerializedTy) {}
+    : node_with_erase(SSG), Id(ValueNamer::getId()),
+      Ty(SerializedTy.substr(0, SerializedTy.find(" ")), ({
+           auto Pos = SerializedTy.find(" ");
+           unsigned long Size;
+           if (SerializedTy.substr(Pos + 1) == "p") {
+            Size = SSG.PointerSize;
+           } else {
+            Size = std::stoul(SerializedTy.substr(Pos + 1));
+           }
+           Size;
+         })) {}
 
 void PNIGraph::cloneFrom(const PNIGraph &G,
                          std::map<const CGNode *, CGNode *> Old2New) {
   // assert(PNINodes.size() == 0);
-  assert(Constraints.size() == 0);
+  // assert(Constraints.size() == 0);
   // clone PNINodes
   for (auto &N : G.PNINodes) {
     auto *NewNode = clonePNINode(N);
@@ -530,14 +541,14 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
     }
   }
   // clone Constraints
-  for (auto &C : Constraints) {
+  for (auto &C : G.Constraints) {
     auto *NewNode = new ConsNode(*this, AddNodeCons{});
     NewNode->cloneFrom(C, Old2New);
     Constraints.push_back(NewNode);
     NodeToCons[NewNode->getNodes()[0]].insert(NewNode);
     NodeToCons[NewNode->getNodes()[1]].insert(NewNode);
     NodeToCons[NewNode->getNodes()[2]].insert(NewNode);
-    if (G.Worklist.count(&C)) {
+    if (G.Worklist.count(const_cast<ConsNode*>(&C))) {
       Worklist.insert(NewNode);
     }
   }

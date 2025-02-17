@@ -1,0 +1,12 @@
+{
+  "main": {
+    "constraints": [
+      "main.out <= #sint"
+    ],
+    "pni_map": {
+      "main": "func p #1",
+      "main.out": "int p #2",
+      "#sint": "int p #2" 
+    }
+  }
+}

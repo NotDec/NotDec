@@ -17,7 +17,6 @@ using notdec::retypd::TRContext;
 using notdec::retypd::TypeVariable;
 
 TypeVariable parseTV(TRContext &Ctx, llvm::StringRef str) {
-  std::vector<Constraint> ret;
   auto res = notdec::retypd::parseTypeVariable(Ctx, str);
   EXPECT_EQ(res.first.size(), 0);
   EXPECT_TRUE(res.second.isOk());

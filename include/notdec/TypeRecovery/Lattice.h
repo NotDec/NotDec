@@ -69,16 +69,17 @@ struct LatticeTy {
   }
 
   LatticeTy(std::string Str, unsigned Size)
-      : Size(Size),
-        Ty(str2PtrOrNum(Str)) {
+      : Size(Size), Ty(str2PtrOrNum(Str)) {
     if (isNotPN()) {
       Elem = Str;
     }
   }
 
-  LatticeTy(std::string Serialized): LatticeTy(Serialized.substr(0, Serialized.find(" ")), std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
+  LatticeTy(std::string Serialized)
+      : LatticeTy(Serialized.substr(0, Serialized.find(" ")),
+                  std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
     assert(Serialized.find(" ") != std::string::npos);
-    assert(this->str() == Serialized);    
+    assert(this->str() == Serialized);
   }
 
   unsigned getSize() const { return Size; }

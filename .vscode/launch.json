@@ -20,7 +20,8 @@
       "preLaunchTask": "CMake: build",
       "env": {
         "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
-        // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "345"
+        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
+        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
       }
     },
     {
@@ -106,7 +107,7 @@
       "name": "GraphTest",
       "program": "${workspaceFolder}/build/bin/GraphTest",
       "args": [
-        // "--gtest_filter=Retypd.SaturationOffsetTest",
+        // "--gtest_filter=Retypd.SaturationPaperTest",
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
