@@ -703,7 +703,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     llvm::errs() << "No memory node found\n";
     MemNode = Global->CG.getMemoryNode(retypd::Covariant);
   } else {
-    MemNode = determinizeTo(*Global, MemoryNodes, retypd::TypeVariable::Memory);
+    MemNode = determinizeTo(*Global, MemoryNodes, "mdtm");
     // Global->mergeAfterDeterminize();
   }
   CGNode *MemNodeC = nullptr;
@@ -712,11 +712,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     MemNodeC = Global->CG.getMemoryNode(retypd::Contravariant);
   } else {
     MemNodeC =
-        determinizeTo(*Global, MemoryNodesC, retypd::TypeVariable::Memory);
+        determinizeTo(*Global, MemoryNodesC, "mdtmc");
     // Global->mergeAfterDeterminize();
   }
+  // a special value to represent the memory node
   Global->V2N.insert(ConstantAddr(), MemNode->key);
   Global->V2NContra.insert(ConstantAddr(), MemNodeC->key);
+  MemNode->getPNIVar()->unify(*MemNodeC->getPNIVar());
 
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
 

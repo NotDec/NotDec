@@ -127,7 +127,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
 
   auto FI = ConstraintsGenerator::getFieldInfo(Node);
   // Check for simple pointer type and array type
-  if (FI.Fields.size() == 1) {
+  if (!Node.isMemory() && FI.Fields.size() == 1) {
     auto &Field = FI.Fields[0];
     if (Field.Start.offset == 0) {
       if (Field.Start.access.size() == 0) {
@@ -153,7 +153,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
     Ret = NodeTypeMap.at(&Node);
     Decl = Ret->getPointeeType()->getAsRecordDecl();
   } else {
-    Decl = createStruct(Ctx);
+    Decl = createStruct(Ctx, prefix);
     NodeTypeMap.emplace(&Node, Ctx.getPointerType(Ctx.getRecordType(Decl)));
     Ret = Ctx.getPointerType(Ctx.getRecordType(Decl));
   }

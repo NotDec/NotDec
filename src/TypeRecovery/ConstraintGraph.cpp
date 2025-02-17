@@ -2101,9 +2101,9 @@ CGNode *ConstraintGraph::getMemoryNode(Variance V) {
         NodeKey{TypeVariable::CreateDtv(*Ctx, TypeVariable::Memory), V},
         Type::getInt8PtrTy(*LLCtx));
     // create both nodes together.
-    /*auto NodeC = &*/ createNode(
+    /*auto NodeC = &*/ createNodeWithPNI(
         NodeKey{TypeVariable::CreateDtv(*Ctx, TypeVariable::Memory), !V},
-        Type::getInt8PtrTy(*LLCtx));
+        Node->getPNIVar());
   }
   return Node;
 }
