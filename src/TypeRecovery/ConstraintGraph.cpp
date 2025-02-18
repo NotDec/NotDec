@@ -130,6 +130,21 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   removeNode(From.key);
 }
 
+void ConstraintGraph::linkConstantPtr2Memory() {
+  // for each node, if it is a constant pointer, link it to memory.
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    if (Node.key.Base.isIntConstant() && Node.getPNIVar()->isPointer()) {
+      auto MN = getMemoryNode(Covariant);
+      auto TV = MN->key;
+      auto Label = OffsetLabel{Node.key.Base.getIntConstant()};
+      TV = TV.Base.pushLabel(Label);
+      auto& MON = getOrInsertNodeWithPNI(TV, MN->getPNIVar());
+      addConstraint(MON, Node);
+    }
+  }
+}
+
 void ConstraintGraph::aggressiveSimplify() {
   // do not include path with size 8.
   // 1. remove all load8/store8 edges.
@@ -259,28 +274,28 @@ void ConstraintGraph::replaceNodeKeyImpl(const CGNode &Node,
 }
 
 void CGNode::onUpdatePNType() {
-  if (this->key.Base.isIntConstant()) {
-    if (getPNIVar()->isPointer()) {
-      // convert to offset of memory
-      auto TV = Parent.getMemoryNode(Covariant)->key.Base;
-      auto Label = OffsetLabel{key.Base.getIntConstant()};
-      TV = TV.pushLabel(Label);
-      std::string name =
-          "intptr_" + key.Base.getIntConstant().str().substr(1) + '_';
-      TypeVariable NewTV = TypeVariable::CreateDtv(
-          *Parent.Ctx, ValueNamer::getName(name.c_str()));
-      Parent.replaceNodeKey(this->key.Base, NewTV);
-      // keep PNI untouched. Lowtype is still int.
-      // this->setPointer();
-      // Fix links with memory node.
-      Parent.addConstraint(*this, *this);
-    } else if (getPNIVar()->isNumber()) {
-      // do nothing in case of conflict
-      // view as int later lazily.
-    } else {
-      assert(false && "onUpdatePNType: Unknown PNType");
-    }
-  }
+  // if (this->key.Base.isIntConstant()) {
+  //   if (getPNIVar()->isPointer()) {
+  //     // convert to offset of memory
+  //     auto TV = Parent.getMemoryNode(Covariant)->key.Base;
+  //     auto Label = OffsetLabel{key.Base.getIntConstant()};
+  //     TV = TV.pushLabel(Label);
+  //     std::string name =
+  //         "intptr_" + key.Base.getIntConstant().str().substr(1) + '_';
+  //     TypeVariable NewTV = TypeVariable::CreateDtv(
+  //         *Parent.Ctx, ValueNamer::getName(name.c_str()));
+  //     Parent.replaceNodeKey(this->key.Base, NewTV);
+  //     // keep PNI untouched. Lowtype is still int.
+  //     // this->setPointer();
+  //     // Fix links with memory node.
+  //     Parent.addConstraint(*this, *this);
+  //   } else if (getPNIVar()->isNumber()) {
+  //     // do nothing in case of conflict
+  //     // view as int later lazily.
+  //   } else {
+  //     assert(false && "onUpdatePNType: Unknown PNType");
+  //   }
+  // }
 }
 
 void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {

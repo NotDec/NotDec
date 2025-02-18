@@ -316,6 +316,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           }
           FSet.insert(F);
         }
+        // Summary func not in this module.
+        if (FSet.empty()) {
+          continue;
+        }
         std::vector<retypd::Constraint> Constraints;
         std::map<TypeVariable, std::string> PNIMap;
         retypd::ConstraintSummary Summary{Constraints, pointer_size, &PNIMap};
@@ -347,6 +351,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             continue;
           }
           FSet.insert(F);
+        }
+        // Sig func not in this module.
+        if (FSet.empty()) {
+          continue;
         }
         std::vector<retypd::Constraint> Constraints;
         std::map<TypeVariable, std::string> PNIMap;
@@ -764,6 +772,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     CurrentTypes.CG.solve();
+    CurrentTypes.CG.linkConstantPtr2Memory();
 
     if (DirPath) {
       CurrentTypes.CG.printGraph(
@@ -807,9 +816,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // Global->mergeAfterDeterminize();
   }
   // a special value to represent the memory node
-  Global->V2N.insert(ConstantAddr(), MemNode->key);
-  Global->V2NContra.insert(ConstantAddr(), MemNodeC->key);
   MemNode->getPNIVar()->unify(*MemNodeC->getPNIVar());
+  Global->CG.onlyAddEdge(*Global->CG.getMemoryNode(retypd::Covariant), *MemNode,
+                         retypd::One{});
+  Global->CG.onlyAddEdge(*MemNodeC,
+                         *Global->CG.getMemoryNode(retypd::Contravariant),
+                         retypd::One{});
+  // keep node in val2node map for post process
+  Global->V2N.insert(ConstantAddr(), Global->CG.getMemoryNode(retypd::Covariant)->key);
+  Global->V2NContra.insert(ConstantAddr(), Global->CG.getMemoryNode(retypd::Contravariant)->key);
 
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
 
@@ -874,7 +889,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     assert(G.PG);
     std::map<const CGNode *, CGNode *> Old2New;
     for (auto &Ent : G.CG.Nodes) {
-      if (Ent.second.isSpecial()) {
+      if (Ent.second.isStartOrEnd() || Ent.second.isMemory()) {
         continue;
       }
     }
@@ -1006,9 +1021,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   std::map<const CGNode *, CGNode *> Old2NewGlobal;
   ConstraintsGenerator Global2 = postProcess(*Global, Old2NewGlobal);
+  // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
+  // retypd::Covariant);
   CGNode *MemNode2 = Global2.CG.getMemoryNode(retypd::Covariant);
   // build AST type for memory node
   clang::QualType CTy = TB.buildType(*MemNode2);
+  llvm::errs() << "Memory Type: " << CTy.getAsString();
   Result.MemoryType = CTy;
 
   // move the ASTUnit to result
@@ -1476,7 +1494,7 @@ void ConstraintsGenerator::determinize() {
     }
   }
   for (auto &Ent : CG.Nodes) {
-    if (&Ent.second == CG.getStartNode() || &Ent.second == CG.getEndNode()) {
+    if (Ent.second.isStartOrEnd()) {
       continue;
     }
     if (!Ent.second.isSpecial() && V2NNodes.count(&Ent.second) == 0) {
@@ -1511,18 +1529,8 @@ void ConstraintsGenerator::determinize() {
     if (pair1.second) {
       Worklist.push(pair1.first);
     } else {
-      // Can be a epsilon loop.
-      // TODO merge the node in the value map
-      if (pair1.first->second != Node) {
-        Backup.printEpsilonLoop(
-            "debugloop",
-            *reinterpret_cast<std::set<const CGNode *> *>(&StartSet));
-        Backup
-            .getSubGraph(
-                *reinterpret_cast<std::set<const CGNode *> *>(&StartSet), false)
-            .printGraph("debug_sub.dot");
+      // Can be a epsilon loop. should be removed earlier
         assert(false);
-      }
     }
   }
 
@@ -1584,7 +1592,7 @@ void ConstraintsGenerator::mergeAfterDeterminize() {
   auto findMergePair = [&]() -> std::pair<CGNode *, CGNode *> {
     for (auto &Ent : CG.Nodes) {
       auto &Node = Ent.second;
-      if (&Node == CG.getStartNode() || &Node == CG.getEndNode()) {
+      if (Node.isStartOrEnd()) {
         continue;
       }
 
@@ -1593,6 +1601,9 @@ void ConstraintsGenerator::mergeAfterDeterminize() {
         for (auto *Edge2 : Node.inEdges) {
           auto &N1 = Edge1->getSourceNode();
           auto &N2 = Edge2->getSourceNode();
+          if (N1.isMemory() || N2.isMemory()) {
+            continue;
+          }
           if (&N1 == &N2) {
             continue;
           }

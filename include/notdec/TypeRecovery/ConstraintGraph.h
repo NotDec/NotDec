@@ -249,6 +249,7 @@ struct ConstraintGraph {
   ConstraintGraph simplify();
   void recoverBaseVars();
   void aggressiveSimplify();
+  void linkConstantPtr2Memory();
   // void lowTypeToSubType();
 
 public:
