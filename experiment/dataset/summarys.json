@@ -12,5 +12,65 @@
       "printf.out": "int 32 #4",
       "#sint": "int 32 #4"
     }
+  },
+  "memset": {
+    "constraints": [
+      "memset.in_0.load8 <= #char",
+      "memset.in_0 <= memset.out",
+      "memset.in_1 <= #uint"
+    ],
+    "pni_map": {
+      "memset": "func p #1",
+      "memset.in_0": "ptr p #2",
+      "memset.out": "ptr p #2",
+      "memset.in_0.load8": "int 8 #3",
+      "#char": "int 8 #3"
+    }
+  },
+  "memcpy": {
+    "constraints": [
+      "memcpy.in_1 <= memcpy.in_0",
+      "memcpy.in_0 <= memcpy.out",
+      "memcpy.in_2 <= #uint"
+    ],
+    "pni_map": {
+      "memcpy": "func p #1",
+      "memcpy.in_0": "ptr p #2",
+      "memcpy.in_1": "ptr p #2",
+      "memcpy.out": "ptr p #2",
+      "memcpy.in_2": "int p #6",
+      "#uint": "int p #6"
+    }
+  },
+  "__memcpy": {
+    "constraints": [
+      "__memcpy.in_1 <= __memcpy.in_0",
+      "__memcpy.in_0 <= __memcpy.out",
+      "__memcpy.in_2 <= #uint"
+    ],
+    "pni_map": {
+      "__memcpy": "func p #1",
+      "__memcpy.in_0": "ptr p #2",
+      "__memcpy.in_1": "ptr p #2",
+      "__memcpy.out": "ptr p #2",
+      "__memcpy.in_2": "int p #6",
+      "#uint": "int p #6"
+    }
+  },
+  "memmove": {
+    "constraints": [
+      "memmove.in_1 <= memmove.in_0",
+      "memmove.in_0 <= memmove.out",
+      "memmove.in_2 <= #uint"
+    ],
+    "pni_map": {
+      "memmove": "func p #1",
+      "memmove.in_0": "ptr p #2",
+      "memmove.in_1": "ptr p #2",
+      "memmove.out": "ptr p #2",
+      "memmove.in_2": "int p #6",
+      "#uint": "int p #6"
+    }
   }
 }
+ 
