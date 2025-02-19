@@ -19,7 +19,7 @@
 
 #include <llvm/IR/InstrTypes.h>
 
-#include "Lattice.h"
+#include "LowTy.h"
 #include "Utils/Range.h"
 #include "utils.h"
 
@@ -44,7 +44,7 @@ protected:
   PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode);
   PNINode(PNIGraph &SSG, std::string SerializedTy);
   unsigned long Id = 0;
-  LatticeTy Ty;
+  LowTy Ty;
 
 public:
   llvm::iplist<PNINode>::iterator eraseFromParent();
@@ -80,9 +80,9 @@ public:
   static llvm::Type *mergeLowTy(llvm::Type *T, llvm::Type *O);
   void addUser(CGNode *Node);
 
-  LatticeTy &getLatticeTy() { return Ty; }
-  const LatticeTy &getLatticeTy() const { return Ty; }
-  void merge(LatticeTy &Other) { Ty.merge(Other); }
+  LowTy &getLatticeTy() { return Ty; }
+  const LowTy &getLatticeTy() const { return Ty; }
+  void merge(LowTy &Other) { Ty.merge(Other); }
 
   bool tyEqual(const PNINode &Other) const { return Ty == Other.Ty; }
 

@@ -9,7 +9,7 @@
 #include <variant>
 
 #include "TypeRecovery/ConstraintGraph.h"
-#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/Range.h"
@@ -20,7 +20,7 @@ namespace notdec::retypd {
 
 // TODO a better lattice representation
 clang::QualType
-SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(LatticeTy LTy,
+SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(LowTy LTy,
                                                        unsigned BitSize) {
   auto Name = LTy.latticeStr();
   if (BitSize == 1 || Name == "bool") {

@@ -1,5 +1,5 @@
-#ifndef _NOTDEC_RETYPD_LATTICE_H
-#define _NOTDEC_RETYPD_LATTICE_H
+#ifndef _NOTDEC_RETYPD_LOWTY_H
+#define _NOTDEC_RETYPD_LOWTY_H
 
 #include <cassert>
 #include <iostream>
@@ -53,14 +53,14 @@ PtrOrNum str2PtrOrNum(std::string Str);
 // #endregion PtrOrNum
 
 // Only when Ty is NotPN, Elem is meaningful.
-struct LatticeTy {
+struct LowTy {
   unsigned Size;
   PtrOrNum Ty = Null;
   std::string Elem;
   bool hasConflict = false;
 
-  LatticeTy() = default;
-  LatticeTy(llvm::Type *Ty, unsigned PointerSize)
+  LowTy() = default;
+  LowTy(llvm::Type *Ty, unsigned PointerSize)
       : Size(::notdec::retypd::getSize(Ty, PointerSize)),
         Ty(fromLLVMTy(Ty, PointerSize)) {
     if (isNotPN()) {
@@ -68,15 +68,15 @@ struct LatticeTy {
     }
   }
 
-  LatticeTy(std::string Str, unsigned Size)
+  LowTy(std::string Str, unsigned Size)
       : Size(Size), Ty(str2PtrOrNum(Str)) {
     if (isNotPN()) {
       Elem = Str;
     }
   }
 
-  LatticeTy(std::string Serialized)
-      : LatticeTy(Serialized.substr(0, Serialized.find(" ")),
+  LowTy(std::string Serialized)
+      : LowTy(Serialized.substr(0, Serialized.find(" ")),
                   std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
     assert(Serialized.find(" ") != std::string::npos);
     assert(this->str() == Serialized);
@@ -115,7 +115,7 @@ struct LatticeTy {
   bool setPtrOrNum(PtrOrNum NewTy);
 
   // return if updated
-  bool merge(LatticeTy Other, bool joinOrMeet = false);
+  bool merge(LowTy Other, bool joinOrMeet = false);
 
   std::string latticeStr() const {
     if (Ty == NotPN) {
@@ -125,7 +125,7 @@ struct LatticeTy {
     return toString(Ty);
   }
   std::string str() const { return latticeStr() + " " + std::to_string(Size); }
-  bool operator==(const LatticeTy &rhs) const {
+  bool operator==(const LowTy &rhs) const {
     if (rhs.Size != Size) {
       return false;
     }

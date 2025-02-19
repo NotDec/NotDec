@@ -1,4 +1,4 @@
-#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/LowTy.h"
 #include "utils.h"
 #include <cassert>
 #include <iostream>
@@ -108,7 +108,7 @@ std::string toString(PtrOrNum Ty) {
 
 // #endregion PtrOrNum
 
-bool LatticeTy::setPtrOrNum(PtrOrNum NewTy) {
+bool LowTy::setPtrOrNum(PtrOrNum NewTy) {
   auto OldTy = Ty;
   assert(NewTy != Null);
   if (Ty == Null) {
@@ -148,7 +148,7 @@ bool LatticeTy::setPtrOrNum(PtrOrNum NewTy) {
   return true;
 }
 
-bool LatticeTy::merge(LatticeTy Other, bool joinOrMeet) {
+bool LowTy::merge(LowTy Other, bool joinOrMeet) {
   bool Updated = setPtrOrNum(Other.Ty);
   if (isNotPN() && !Other.Elem.empty()) {
     std::string NewElem;

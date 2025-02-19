@@ -65,7 +65,7 @@ struct SketchToCTypeBuilder {
       return Ret;
     }
 
-    clang::QualType fromLatticeElem(LatticeTy LTy, unsigned BitSize);
+    clang::QualType fromLatticeElem(LowTy LTy, unsigned BitSize);
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   std::map<clang::Decl *, std::string> DeclComments;

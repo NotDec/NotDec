@@ -3,6 +3,7 @@
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/TRContext.h"
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Support/Debug.h>
@@ -16,8 +17,8 @@ using notdec::retypd::ConstraintSummary;
 using notdec::retypd::TRContext;
 using notdec::retypd::TypeVariable;
 
-TypeVariable parseTV(TRContext &Ctx, llvm::StringRef str) {
-  auto res = notdec::retypd::parseTypeVariable(Ctx, str);
+TypeVariable parseTV(TRContext &Ctx, llvm::StringRef str, size_t PointerSize = 32) {
+  auto res = notdec::retypd::parseTypeVariable(Ctx, str, PointerSize);
   EXPECT_EQ(res.first.size(), 0);
   EXPECT_TRUE(res.second.isOk());
   if (res.second.isErr()) {
@@ -27,10 +28,10 @@ TypeVariable parseTV(TRContext &Ctx, llvm::StringRef str) {
 }
 
 std::vector<Constraint> parse_constraints(TRContext &Ctx,
-                                          std::vector<const char *> cons_str) {
+                                          std::vector<const char *> cons_str, uint32_t PointerSize) {
   std::vector<Constraint> ret;
   for (const char *con : cons_str) {
-    auto res = notdec::retypd::parseSubTypeConstraint(Ctx, con);
+    auto res = notdec::retypd::parseSubTypeConstraint(Ctx, con, PointerSize);
     EXPECT_EQ(res.first.size(), 0);
     EXPECT_TRUE(res.second.isOk());
     if (res.second.isErr()) {
@@ -58,7 +59,7 @@ TEST(Retypd, SaturationPaperTest) {
   llvm::DebugFlag = true;
   llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons = parse_constraints(
-      *Ctx, {"y <= p", "p <= x", "A <= x.store4", "y.load4 <= B"});
+      *Ctx, {"y <= p", "p <= x", "A <= x.store4", "y.load4 <= B"}, 32);
   std::map<TypeVariable, std::string> PNIMap = {
       {parseTV(*Ctx, "x"), "ptr 32 #1"},
       {parseTV(*Ctx, "y"), "ptr 32 #2"},
@@ -91,7 +92,7 @@ TEST(Retypd, SaturationOffsetTest) {
   llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons =
       parse_constraints(*Ctx, {"x.@2 <= C", "C.@2 <= D", "D <= y.@4",
-                               "A <= x.load4", "y.load4 <= B"});
+                               "A <= x.load4", "y.load4 <= B"}, 32);
   std::map<TypeVariable, std::string> PNIMap = {
       {parseTV(*Ctx, "x"), "ptr 32 #1"},
       {parseTV(*Ctx, "x.@2"), "ptr 32 #1"},
@@ -138,7 +139,7 @@ TEST(Retypd, SlidesExampleTest) {
                                   "close.out_eax <= F.out_eax",
                                   "close.in_stack0 <= #FileDescriptor",
                                   "#SuccessZ <= close.out_eax",
-                              });
+                              }, 32);
   std::map<TypeVariable, std::string> PNIMap = {
       {parseTV(*Ctx, "F"), "func 32 #1"},
       {parseTV(*Ctx, "F.in_stack0"), "ptr 32 #2"},

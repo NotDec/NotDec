@@ -19,7 +19,7 @@
 #include <llvm/Support/GraphWriter.h>
 #include <llvm/Support/JSON.h>
 
-#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"

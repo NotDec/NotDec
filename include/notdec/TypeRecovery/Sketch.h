@@ -1,7 +1,7 @@
 #ifndef _NOTDEC_RETYPD_SKETCH_H
 #define _NOTDEC_RETYPD_SKETCH_H
 
-#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/Schema.h"
 #include <cassert>
 #include <llvm/ADT/ilist_node.h>

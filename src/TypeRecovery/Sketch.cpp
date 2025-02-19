@@ -1,6 +1,6 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/ConstraintGraph.h"
-#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/Schema.h"
 #include <cassert>
 #include <map>
