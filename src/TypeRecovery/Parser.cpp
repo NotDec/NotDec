@@ -174,33 +174,40 @@ ParseResultT<OffsetLabel> parseOffsetLabel(llvm::StringRef str) {
   return {rest, OffsetLabel{.range = ret}};
 }
 
-ParseResultT<LoadLabel> parseLoad(llvm::StringRef str) {
+ParseResultT<LoadLabel> parseLoad(llvm::StringRef str, uint32_t PointerSize) {
   str = skipWhitespace(str);
   if (!str.consume_front("load")) {
     return {str, "parseLoad: Expect load: " + str.substr(0, 10)};
   }
   auto [rest, RSize] = parseU32(str);
-  if (!RSize.isOk()) {
-    return {str, RSize.msg()};
+  if (RSize.isOk()) {
+    str = rest;
+    return {str, LoadLabel{.Size = RSize.get()}};
   }
-  str = rest;
-  return {str, LoadLabel{.Size = RSize.get()}};
+  if (str.consume_front("p")) {
+    return {str, LoadLabel{.Size = PointerSize}};
+  }
+  return {str, RSize.msg()};
 }
 
-ParseResultT<StoreLabel> parseStore(llvm::StringRef str) {
+ParseResultT<StoreLabel> parseStore(llvm::StringRef str, uint32_t PointerSize) {
   str = skipWhitespace(str);
   if (!str.consume_front("store")) {
     return {str, "parseLoad: Expect store: " + str.substr(0, 10)};
   }
   auto [rest, RSize] = parseU32(str);
-  if (!RSize.isOk()) {
-    return {str, RSize.msg()};
+  if (RSize.isOk()) {
+    str = rest;
+    return {str, StoreLabel{.Size = RSize.get()}};
   }
-  str = rest;
-  return {str, StoreLabel{.Size = RSize.get()}};
+  if (str.consume_front("p")) {
+    return {str, StoreLabel{.Size = PointerSize}};
+  }
+  return {str, RSize.msg()};
 }
 
-ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str) {
+ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str,
+                                         uint32_t PointerSize) {
   str = skipWhitespace(str);
   auto [rest, RIn] = parseInLabel(str);
   if (RIn.isOk()) {
@@ -214,11 +221,11 @@ ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str) {
   if (RDeref.isOk()) {
     return {rest2, FieldLabel{RDeref.get()}};
   }
-  auto [rest3, RLoad] = parseLoad(str);
+  auto [rest3, RLoad] = parseLoad(str, PointerSize);
   if (RLoad.isOk()) {
     return {rest3, FieldLabel{RLoad.get()}};
   }
-  auto [rest4, RStore] = parseStore(str);
+  auto [rest4, RStore] = parseStore(str, PointerSize);
   if (RStore.isOk()) {
     return {rest4, FieldLabel{RStore.get()}};
   }
@@ -226,7 +233,7 @@ ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str) {
 }
 
 ParseResultT<DerivedTypeVariable>
-parseDerivedTypeVariable(llvm::StringRef str) {
+parseDerivedTypeVariable(llvm::StringRef str, uint32_t PointerSize) {
   str = skipWhitespace(str);
   auto [rest, RName] = mustParseIdentifier(str);
   if (!RName.isOk()) {
@@ -240,7 +247,7 @@ parseDerivedTypeVariable(llvm::StringRef str) {
       return {rest,
               "parseDerivedTypeVariable: Expect .: " + rest.substr(0, 10)};
     }
-    auto [rest1, RField] = parseFieldLabel(rest);
+    auto [rest1, RField] = parseFieldLabel(rest, PointerSize);
     if (!RField.isOk()) {
       return {rest, RField.msg()};
     }
@@ -252,8 +259,8 @@ parseDerivedTypeVariable(llvm::StringRef str) {
   return {rest, DerivedTypeVariable{{Name.str()}, labels}};
 }
 
-ParseResultT<TypeVariable> parseTypeVariable(TRContext &Ctx,
-                                             llvm::StringRef str) {
+ParseResultT<TypeVariable>
+parseTypeVariable(TRContext &Ctx, llvm::StringRef str, uint32_t PointerSize) {
   str = skipWhitespace(str);
   if (str.consume_front("#Int#")) {
     assert(false && "Not implemented");
@@ -264,7 +271,7 @@ ParseResultT<TypeVariable> parseTypeVariable(TRContext &Ctx,
     }
     return {rest, TypeVariable::CreatePrimitive(Ctx, RName.get().str())};
   } else {
-    auto [rest, RDtv] = parseDerivedTypeVariable(str);
+    auto [rest, RDtv] = parseDerivedTypeVariable(str, PointerSize);
     if (!RDtv.isOk()) {
       return {rest, RDtv.msg()};
     }
@@ -273,9 +280,10 @@ ParseResultT<TypeVariable> parseTypeVariable(TRContext &Ctx,
 }
 
 ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
-                                                       llvm::StringRef str) {
+                                                       llvm::StringRef str,
+                                                       uint32_t PointerSize) {
   str = skipWhitespace(str);
-  auto [rest, RSub] = parseTypeVariable(Ctx, str);
+  auto [rest, RSub] = parseTypeVariable(Ctx, str, PointerSize);
   if (!RSub.isOk()) {
     return {rest, RSub.msg()};
   }
@@ -284,7 +292,7 @@ ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
     return {rest, "parseSubTypeConstraint: Expect <= :" + rest.substr(0, 10)};
   }
   rest = skipWhitespace(rest);
-  auto [rest1, RSup] = parseTypeVariable(Ctx, rest);
+  auto [rest1, RSup] = parseTypeVariable(Ctx, rest, PointerSize);
   if (!RSup.isOk()) {
     return {rest, RSup.msg()};
   }
@@ -292,10 +300,11 @@ ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
 }
 
 std::vector<SubTypeConstraint>
-parse_subtype_constraints(TRContext &Ctx, std::vector<const char *> cons_str) {
+parse_subtype_constraints(TRContext &Ctx, std::vector<const char *> cons_str,
+                          uint32_t PointerSize) {
   std::vector<SubTypeConstraint> ret;
   for (const char *con : cons_str) {
-    auto res = notdec::retypd::parseSubTypeConstraint(Ctx, con);
+    auto res = notdec::retypd::parseSubTypeConstraint(Ctx, con, PointerSize);
     assert(res.first.size() == 0);
     assert(res.second.isOk());
     if (res.second.isErr()) {

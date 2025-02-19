@@ -43,12 +43,13 @@ namespace notdec::retypd {
 
 void ConstraintSummary::fromJSON(TRContext &Ctx,
                                  const llvm::json::Object &Obj) {
+  assert(PointerSize != 0);
   for (auto &Ent : Obj) {
     if (Ent.first == "constraints") {
       std::vector<const char *> cons_str;
       for (auto &Ent2 : *Ent.second.getAsArray()) {
         auto res = notdec::retypd::parseSubTypeConstraint(
-            Ctx, Ent2.getAsString().getValue());
+            Ctx, Ent2.getAsString().getValue(), PointerSize);
         assert(res.first.size() == 0);
         assert(res.second.isOk());
         if (res.second.isErr()) {
@@ -60,7 +61,7 @@ void ConstraintSummary::fromJSON(TRContext &Ctx,
     } else if (Ent.first == "pni_map") {
       PNIMap = new std::map<TypeVariable, std::string>();
       for (auto &Ent2 : *Ent.second.getAsObject()) {
-        auto res = notdec::retypd::parseTypeVariable(Ctx, Ent2.first.str());
+        auto res = notdec::retypd::parseTypeVariable(Ctx, Ent2.first.str(), PointerSize);
         assert(res.first.size() == 0);
         assert(res.second.isOk());
         if (res.second.isErr()) {
@@ -139,7 +140,7 @@ void ConstraintGraph::linkConstantPtr2Memory() {
       auto TV = MN->key;
       auto Label = OffsetLabel{Node.key.Base.getIntConstant()};
       TV = TV.Base.pushLabel(Label);
-      auto& MON = getOrInsertNodeWithPNI(TV, MN->getPNIVar());
+      auto &MON = getOrInsertNodeWithPNI(TV, MN->getPNIVar());
       addConstraint(MON, Node);
     }
   }

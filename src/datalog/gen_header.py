@@ -63,6 +63,7 @@ for line in rules:
         facts.append(f"  {mat},")
     facts.append("};")
 
+os.makedirs(target_folder, exist_ok=True)
 with open(f"{target_folder}/fact-names.h", "w") as f:
     f.write('namespace notdec::datalog {\n')
     f.write('\n'.join(facts))

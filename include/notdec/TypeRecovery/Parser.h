@@ -36,16 +36,16 @@ ParseResultT<int32_t> parseI32(llvm::StringRef str);
 ParseResultT<InLabel> parseInLabel(llvm::StringRef str);
 ParseResultT<OutLabel> parseOutLabel(llvm::StringRef str);
 ParseResultT<OffsetLabel> parseOffsetLabel(llvm::StringRef str);
-ParseResultT<LoadLabel> parseLoad(llvm::StringRef str);
-ParseResultT<StoreLabel> parseStore(llvm::StringRef str);
-ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str);
-ParseResultT<DerivedTypeVariable> parseDerivedTypeVariable(llvm::StringRef str);
+ParseResultT<LoadLabel> parseLoad(llvm::StringRef str, uint32_t PointerSize);
+ParseResultT<StoreLabel> parseStore(llvm::StringRef str, uint32_t PointerSize);
+ParseResultT<FieldLabel> parseFieldLabel(llvm::StringRef str, uint32_t PointerSize);
+ParseResultT<DerivedTypeVariable> parseDerivedTypeVariable(llvm::StringRef str, uint32_t PointerSize);
 ParseResultT<TypeVariable> parseTypeVariable(TRContext &Ctx,
-                                             llvm::StringRef str);
+                                             llvm::StringRef str, uint32_t PointerSize);
 ParseResultT<SubTypeConstraint> parseSubTypeConstraint(TRContext &Ctx,
-                                                       llvm::StringRef str);
+                                                       llvm::StringRef str, uint32_t PointerSize);
 std::vector<SubTypeConstraint>
-parse_subtype_constraints(TRContext &Ctx, std::vector<const char *> cons_str);
+parse_subtype_constraints(TRContext &Ctx, std::vector<const char *> cons_str, uint32_t PointerSize);
 
 } // namespace notdec::retypd
 
