@@ -260,6 +260,7 @@ struct ConstraintsGenerator {
   void eliminateCycle();
   void mergeOnlySubtype();
   void mergeAfterDeterminize();
+  // determinization algorithm from all v2n nodes that keeps all reachable nodes.
   void determinize();
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();

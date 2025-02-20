@@ -307,6 +307,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto Val = ValE->getAsObject();
       for (auto &Ent : *Val) {
         std::set<Function *> FSet;
+        llvm::errs() << "Loading summary for function: " << Ent.first << "\n";
         for (auto Str : split(Ent.first, ',')) {
           auto *F = M.getFunction(Str);
           if (F == nullptr) {
@@ -337,12 +338,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   const char *SigFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
   if (SigFile) {
     if (getSuffix(SigFile) == ".json") {
-      llvm::errs() << "Loading summary from: " << SigFile << "\n";
+      llvm::errs() << "Loading signature from: " << SigFile << "\n";
       auto ValE = json::parse(readFileToString(SigFile));
       assert(ValE && "JSON parse failed");
       auto Val = ValE->getAsObject();
       for (auto &Ent : *Val) {
         std::set<Function *> FSet;
+        llvm::errs() << "Loading signature for function: " << Ent.first << "\n";
         for (auto Str : split(Ent.first, ',')) {
           auto *F = M.getFunction(Str);
           if (F == nullptr) {
@@ -361,6 +363,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         retypd::ConstraintSummary Summary{Constraints, pointer_size, &PNIMap};
         Summary.fromJSON(*TRCtx, *Ent.second.getAsObject());
         auto CG = ConstraintsGenerator::fromConstraints(*this, FSet, Summary);
+        CG->CG.linkPrimitives();
         SignatureOverride[FSet] = CG;
       }
     } else if (getSuffix(SigFile) == ".dot") {
@@ -656,10 +659,21 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           Worklist.push(NewNodeEnt);
         }
         auto &ToNode = *DTrans.at(S);
-        assert(std::holds_alternative<retypd::RecallLabel>(L));
-        CG.addEdge(Node, ToNode, L);
-        CG.addEdge(ToNode, Node,
-                   retypd::ForgetLabel{std::get<retypd::RecallLabel>(L).label});
+        assert(std::holds_alternative<retypd::RecallLabel>(L) ||
+               std::holds_alternative<retypd::ForgetBase>(L));
+        if (std::holds_alternative<retypd::RecallLabel>(L)) {
+          CG.addEdge(Node, ToNode, L);
+          CG.addEdge(
+              ToNode, Node,
+              retypd::ForgetLabel{std::get<retypd::RecallLabel>(L).label});
+        } else if (std::holds_alternative<retypd::ForgetBase>(L)) {
+          assert(&ToNode == CG.getEndNode());
+          CG.addEdge(Node, ToNode, L);
+          CG.addEdge(
+              ToNode, Node,
+              retypd::RecallBase{.Base = std::get<retypd::ForgetBase>(L).Base,
+                                 .V = std::get<retypd::ForgetBase>(L).V});
+        }
       }
       Worklist.pop();
     }
@@ -719,6 +733,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       if (SignatureOverride.count(SCCSet)) {
         std::cerr << "Function Signature Overriden: " << Name << "\n";
         auto &SigGen = SignatureOverride.at(SCCSet);
+        SigGen->CG.linkPrimitives();
+
         auto SigNode =
             SigGen->getNodeOrNull(Current, nullptr, -1, retypd::Covariant);
         auto SigNodeC =
@@ -760,9 +776,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           CurrentTypes.getNode(Current, nullptr, -1, retypd::Covariant), *D);
 
       auto *DC = determinizeTo(CurrentTypes, FuncNodes, "actc_");
-      CurrentTypes.addSubtype(
-          CurrentTypes.getNode(Current, nullptr, -1, retypd::Contravariant),
-          *DC);
+      CurrentTypes.addSubtype(*DC, CurrentTypes.getNode(Current, nullptr, -1,
+                                                        retypd::Contravariant));
 
       CurrentTypes.makeSymmetry();
     }
@@ -773,6 +788,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     CurrentTypes.CG.solve();
     CurrentTypes.CG.linkConstantPtr2Memory();
+    // link primitives for all Graphs in TopDownGenerator.
+    // 1. later postProcess will also do this.
+    // 2. our determinization for actual params need this.
+    CurrentTypes.CG.linkPrimitives();
 
     if (DirPath) {
       CurrentTypes.CG.printGraph(
@@ -823,8 +842,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
                          *Global->CG.getMemoryNode(retypd::Contravariant),
                          retypd::One{});
   // keep node in val2node map for post process
-  Global->V2N.insert(ConstantAddr(), Global->CG.getMemoryNode(retypd::Covariant)->key);
-  Global->V2NContra.insert(ConstantAddr(), Global->CG.getMemoryNode(retypd::Contravariant)->key);
+  Global->V2N.insert(ConstantAddr(),
+                     Global->CG.getMemoryNode(retypd::Covariant)->key);
+  Global->V2NContra.insert(
+      ConstantAddr(), Global->CG.getMemoryNode(retypd::Contravariant)->key);
 
   std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
 
@@ -867,6 +888,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     G2.eliminateCycle();
     // ensure lower bound is lower than upper bound
+    // TODO what about link this earlier?
     G2.linkContraToCovariant();
 
     // if (DebugDir) {
@@ -1051,6 +1073,10 @@ void ConstraintsGenerator::makeSymmetry() {
     auto &NC = CG.getOrInsertNodeWithPNI(retypd::MakeReverseVariant(N.key),
                                          N.getPNIVar());
     for (auto &Edge : N.outEdges) {
+      if (std::holds_alternative<retypd::RecallBase>(Edge.getLabel()) ||
+          std::holds_alternative<retypd::ForgetBase>(Edge.getLabel())) {
+        continue;
+      }
       auto &T = const_cast<CGNode &>(Edge.getTargetNode());
       auto &TC = CG.getOrInsertNodeWithPNI(retypd::MakeReverseVariant(T.key),
                                            T.getPNIVar());
@@ -1530,7 +1556,7 @@ void ConstraintsGenerator::determinize() {
       Worklist.push(pair1.first);
     } else {
       // Can be a epsilon loop. should be removed earlier
-        assert(false);
+      assert(false);
     }
   }
 
@@ -2736,6 +2762,14 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::fromConstraints(
   auto Ret = std::make_shared<ConstraintsGenerator>(Ctx, SCCNames, SCCs);
   Ret->CG.instantiateConstraints(Summary);
   Ret->fixSCCFuncMappings();
+  // std::map<CGNode*,  retypd::Variance> Initial;
+  // for (auto &Ent : Ret->V2N) {
+  //   Initial[&Ret->getNode(Ent.second)] = retypd::Covariant;
+  // }
+  // for (auto &Ent : Ret->V2NContra) {
+  //   Initial[&Ret->getNode(Ent.second)] = retypd::Contravariant;
+  // }
+  // Ret->CG.markVariance(&Initial);
   if (Ret->V2N.size() == 0 && Ret->V2NContra.size() == 0) {
     assert(false && "Empty constraints?");
   }

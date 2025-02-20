@@ -2,6 +2,7 @@
 #define _NOTDEC_RETYPD_SK2C_H
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
 #include "Utils/ValueNamer.h"
@@ -65,7 +66,8 @@ struct SketchToCTypeBuilder {
       return Ret;
     }
 
-    clang::QualType fromLatticeElem(LowTy LTy, unsigned BitSize);
+    clang::QualType fromLowTy(LowTy LTy, unsigned BitSize);
+    clang::QualType fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy, unsigned BitSize);
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   std::map<clang::Decl *, std::string> DeclComments;

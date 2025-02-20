@@ -3,7 +3,7 @@
     "constraints": [
       "main.out <= #sint",
       "main.in_0 <= #sint",
-      "main.in_1.loadp.loadp <= #char"
+      "main.in_1.loadp.load8 <= #char"
     ],
     "pni_map": {
       "main": "func p #1",

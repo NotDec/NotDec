@@ -61,7 +61,8 @@ void ConstraintSummary::fromJSON(TRContext &Ctx,
     } else if (Ent.first == "pni_map") {
       PNIMap = new std::map<TypeVariable, std::string>();
       for (auto &Ent2 : *Ent.second.getAsObject()) {
-        auto res = notdec::retypd::parseTypeVariable(Ctx, Ent2.first.str(), PointerSize);
+        auto res = notdec::retypd::parseTypeVariable(Ctx, Ent2.first.str(),
+                                                     PointerSize);
         assert(res.first.size() == 0);
         assert(res.second.isOk());
         if (res.second.isErr()) {
@@ -377,9 +378,8 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
       continue;
     }
     // is an interesting var or is a primitive type
-    if (N->key.Base.isPrimitive() ||
-        (!N->key.Base.hasLabel() && N->key.Base.hasBaseName() &&
-         InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
+    if (!N->key.Base.hasLabel() && N->key.Base.hasBaseName() &&
+        InterestingVars.count(N->key.Base.getBaseName()) != 0) {
       // LLVM_DEBUG(llvm::dbgs()
       //            << "Adding an edge from #Start to " << N->key.str() <<
       //            "\n");
@@ -400,6 +400,7 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
               RecallBase{.Base = N->key.Base, .V = N->key.SuffixVariance});
     }
   }
+  linkPrimitives();
   linkEndVars(InterestingVars);
   // mark load/store as accepting.
   linkLoadStore();
@@ -413,9 +414,64 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
       continue;
     }
     // is an interesting var or is a primitive type
-    if (N->key.Base.isPrimitive() ||
-        (!N->key.Base.hasLabel() && N->key.Base.hasBaseName() &&
-         InterestingVars.count(N->key.Base.getBaseName()) != 0)) {
+    if (!N->key.Base.hasLabel() && N->key.Base.hasBaseName() &&
+        InterestingVars.count(N->key.Base.getBaseName()) != 0) {
+      // LLVM_DEBUG(llvm::dbgs()
+      //            << "Adding an edge from " << N->key.str() << " to #End\n");
+      auto &From = *N;
+      auto &To = *getEndNode();
+      if (TraceIds.count(From.getId())) {
+        PRINT_TRACE(From.getId())
+            << "Adding edge " << From.key.str() << "(ID=" << From.getId()
+            << ") to " << toString(To.key) << "(ID=" << To.getId() << ")\n";
+      }
+      if (TraceIds.count(To.getId())) {
+        PRINT_TRACE(To.getId())
+            << "Adding edge " << From.key.str() << "(ID=" << From.getId()
+            << ") to " << toString(To.key) << "(ID=" << To.getId() << ")\n";
+      }
+      addEdge(
+          *N, *getEndNode(),
+          ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
+    }
+  }
+}
+
+void ConstraintGraph::linkPrimitives() {
+  // Link primitive nodes to "#Start"
+  for (auto &Ent : Nodes) {
+    auto *N = &Ent.second;
+    if (N->isStartOrEnd()) {
+      continue;
+    }
+    if (N->key.Base.isPrimitive()) {
+      // LLVM_DEBUG(llvm::dbgs()
+      //            << "Adding an edge from #Start to " << N->key.str() <<
+      //            "\n");
+      auto &From = *getStartNode();
+      auto &To = *N;
+      if (TraceIds.count(From.getId())) {
+        PRINT_TRACE(From.getId())
+            << "Adding edge #Start(ID=" << From.getId() << ") to "
+            << To.key.str() << "(ID=" << To.getId() << ")\n";
+      }
+      if (TraceIds.count(To.getId())) {
+        PRINT_TRACE(To.getId())
+            << "Adding edge #Start(ID=" << From.getId() << ") to "
+            << To.key.str() << "(ID=" << To.getId() << ")\n";
+      }
+      assert(!To.key.Base.hasLabel());
+      addEdge(From, To,
+              RecallBase{.Base = N->key.Base, .V = N->key.SuffixVariance});
+    }
+  }
+  // Link primitive nodes to "#End"
+  for (auto &Ent : Nodes) {
+    auto *N = &Ent.second;
+    if (N->isStartOrEnd()) {
+      continue;
+    }
+    if (N->key.Base.isPrimitive()) {
       // LLVM_DEBUG(llvm::dbgs()
       //            << "Adding an edge from " << N->key.str() << " to #End\n");
       auto &From = *N;
@@ -573,10 +629,16 @@ void ConstraintGraph::contraVariantSplit() {
 
 /// Mark the variance of the node according to the edges.
 /// DFS traversal.
-void ConstraintGraph::markVariance() {
+void ConstraintGraph::markVariance(std::map<CGNode *, Variance> *Initial) {
   std::map<CGNode *, Variance> Visited;
   std::queue<std::pair<CGNode *, Variance>> Worklist;
-  Worklist.push(std::make_pair(getStartNode(), Covariant));
+  if (Initial) {
+    for (auto &Ent : *Initial) {
+      Worklist.push(Ent);
+    }
+  } else {
+    Worklist.push(std::make_pair(getStartNode(), Covariant));
+  }
 
   while (!Worklist.empty()) {
     auto N = Worklist.front();
@@ -1150,7 +1212,7 @@ void ConstraintGraph::linkLoadStore() {
     if (Source.isStartOrEnd()) {
       continue;
     }
-    // for load/store nodes, if has not forget prim edge, add one to top.
+    // for load/store nodes, add forget base or recall base.
     if (Source.key.Base.hasLabel()) {
       auto &Back = Source.key.Base.getLabels().back();
       if (std::holds_alternative<LoadLabel>(Back)) {
@@ -1181,44 +1243,25 @@ void ConstraintGraph::linkLoadStore() {
 }
 
 void ConstraintGraph::sketchSplit() {
-  // 1. make all nodes accepting. focus on the recall subgraph, but allow recall
-  // base primitive.
+  linkPrimitives();
+  // 1. focus on the recall subgraph, but allow ForgetBase edge.
   for (auto &Ent : Nodes) {
     auto &Source = Ent.second;
-    // 1.1 remove all forget label edge
+    // 1.1 remove all forgetLabel and RecallBase edge
     for (auto &Edge : Source.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
       if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
         removeEdge(Source, Target, Edge.Label);
+        continue;
+      } else if (std::holds_alternative<RecallBase>(Edge.Label)) {
+        removeEdge(Source, Target, Edge.Label);
+        continue;
       }
     }
     if (Source.isStartOrEnd()) {
       continue;
     }
   }
-  // 2. Link vars from primitives to #End.
-  std::set<std::string> Vars = {};
-  linkEndVars(Vars);
-
-  // // 3. remove edge that is parent type of primitives.
-  // for (auto &Ent : Nodes) {
-  //   if (&Ent.second == Start || &Ent.second == End) {
-  //     continue;
-  //   }
-  //   if (Ent.second.key.Base.isPrimitive()) {
-  //     assert(!Ent.second.key.Base.hasLabel());
-  //     std::vector<CGEdge *> toRemove;
-  //     for (auto &Edge : Ent.second.outEdges) {
-  //       if (std::holds_alternative<One>(Edge.Label)) {
-  //         toRemove.push_back(const_cast<CGEdge *>(&Edge));
-  //       }
-  //     }
-  //     for (auto Edge : toRemove) {
-  //       removeEdge(Edge->getSourceNode(), Edge->getTargetNode(),
-  //       Edge->Label);
-  //     }
-  //   }
-  // }
 }
 
 // std::shared_ptr<Sketch> ConstraintGraph::solveSketch(CGNode &N) const {
@@ -1596,7 +1639,12 @@ CGNode &ConstraintGraph::getOrInsertNode(const NodeKey &K,
 }
 
 bool ConstraintGraph::hasNode(const NodeKey &N) { return Nodes.count(N) > 0; }
-CGNode &ConstraintGraph::getNode(const NodeKey &N) { return Nodes.at(N); }
+CGNode &ConstraintGraph::getNode(const NodeKey &N) {
+  if (!hasNode(N)) {
+    llvm::errs() << "Node not found: " << N.str() << "\n";
+  }
+  return Nodes.at(N);
+}
 CGNode *ConstraintGraph::getNodeOrNull(const NodeKey &N) {
   if (Nodes.count(N)) {
     return &Nodes.at(N);

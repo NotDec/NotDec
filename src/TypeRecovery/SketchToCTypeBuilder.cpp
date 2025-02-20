@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
@@ -18,14 +19,22 @@
 
 namespace notdec::retypd {
 
-// TODO a better lattice representation
+clang::QualType SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy, unsigned BitSize) {
+  if (!LTy.has_value()) {
+    return fromLowTy(Low, BitSize);
+  }
+  return LTy->buildType(Ctx);
+}
+
 clang::QualType
-SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(LowTy LTy,
-                                                       unsigned BitSize) {
+SketchToCTypeBuilder::TypeBuilderImpl::fromLowTy(LowTy LTy, unsigned BitSize) {
   auto Name = LTy.latticeStr();
   if (BitSize == 1 || Name == "bool") {
     assert(BitSize == 1);
     return Ctx.BoolTy;
+  }
+  if (BitSize == 8 || Name == "char") {
+    return Ctx.CharTy;
   }
   if (Name == "top" || Name == "unk") {
     // TODO create typedef to unsigned int. e.g., typedef top32 uint32_t
@@ -44,9 +53,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeElem(LowTy LTy,
     return Ctx.getPointerType(getUndef(BitSize));
   }
   if (Name == "int" || Name == "uint" || Name == "sint") {
-    bool Signed = false;
-    if (Name == "sint") {
-      Signed = true;
+    bool Signed = true;
+    if (Name == "uint") {
+      Signed = false;
     }
     auto ret = Ctx.getIntTypeForBitwidth(BitSize, Signed);
     if (ret.isNull()) {
@@ -100,7 +109,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
   // No out edges.
   if (Node.outEdges.empty()) {
     // no info from graph, just use LatticeTy.
-    auto Ret = fromLatticeElem(Node.getPNIVar()->getLatticeTy(), BitSize);
+    auto Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }
@@ -108,19 +117,23 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
   if (!isPNIPtr) {
     // if only edges to #End with forget primitive, then it is a simple
     // primitive type.
+    std::optional<LatticeTy> LT = createLatticeTy(ETy, "");
     for (auto &Edge : Node.outEdges) {
       if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
         if (FB->Base.isPrimitive()) {
+          auto L1 =
+              createLatticeTy(ETy,
+                              FB->Base.getPrimitiveName());
           if (Node.key.SuffixVariance == Covariant) {
-            ETy.merge(Node.getPNIVar()->getLatticeTy(), false);
+            meet(LT, L1);
           } else {
-            ETy.merge(Node.getPNIVar()->getLatticeTy(), true);
+            join(LT, L1);
           }
         }
       }
     }
 
-    auto Ret = fromLatticeElem(ETy, BitSize);
+    auto Ret = fromLatticeTy(ETy, LT, BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }

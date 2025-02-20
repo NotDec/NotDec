@@ -244,6 +244,7 @@ struct ConstraintGraph {
   // Main interface for constraint simplification
   std::vector<SubTypeConstraint>
   simplifiedExpr(std::set<std::string> &InterestingVars) const;
+  void linkPrimitives();
   void linkVars(std::set<std::string> &InterestingVars);
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
@@ -290,9 +291,10 @@ public:
   getNodeReachableOffset(CGNode &Start);
 
   void linkLoadStore();
-  void markVariance();
-  /// Focus on the recall subgraph and use forget edge to label nodes. mark all
-  /// nodes as accepting by link with `forget #top`.
+  void markVariance(std::map<CGNode *, Variance> *Initial = nullptr);
+  /// Focus on the recall subgraph and use forgetBase to mark primitives. all
+  /// nodes as accepting because our determinization algorithm keeps all
+  /// reachable nodes.
   void sketchSplit();
   std::vector<SubTypeConstraint> solve_constraints_between();
   void addRecalls(CGNode &N);
