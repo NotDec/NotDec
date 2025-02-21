@@ -1,7 +1,7 @@
 #ifndef _NOTDEC_RETYPD_SCHEMA_H_
 #define _NOTDEC_RETYPD_SCHEMA_H_
 
-#include "Utils/Range.h"
+#include "notdec-llvm2c/Range.h"
 #include "utils.h"
 #include <cassert>
 #include <cstdint>

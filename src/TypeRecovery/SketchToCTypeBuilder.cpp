@@ -14,8 +14,8 @@
 #include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
-#include "Utils/Range.h"
-#include "Utils/StructManager.h"
+#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/StructManager.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "utils.h"
 
@@ -215,13 +215,14 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
 
     Parent.DeclComments[Field] =
         "at offset: " + std::to_string(Ent.R.Start.offset);
-    bool addAttr = true;
-    if (addAttr) {
+    bool useAnno = false;
+    if (useAnno) {
       Field->addAttr(clang::AnnotateAttr::Create(
           Ctx, "off:" + std::to_string(Ent.R.Start.offset), nullptr, 0,
           clang::AttributeCommonInfo(clang::SourceRange())));
     }
 
+    Ent.Decl = Field;
     Decl->addDecl(Field);
   }
   Decl->completeDefinition();

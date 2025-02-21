@@ -4,10 +4,10 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
-#include "Utils/Range.h"
-#include "Utils/StructManager.h"
+#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/StructManager.h"
 #include "Utils/ValueNamer.h"
-#include <clang/AST/ASTContext.h>
+#include <clang/AST/ASTContext.h> 
 #include <clang/AST/Decl.h>
 #include <clang/AST/Type.h>
 #include <clang/Frontend/ASTUnit.h>

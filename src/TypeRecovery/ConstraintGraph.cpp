@@ -32,7 +32,7 @@
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/TRContext.h"
-#include "Utils/Range.h"
+#include "notdec-llvm2c/Range.h"
 #include "Utils/ValueNamer.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "utils.h"
@@ -40,6 +40,87 @@
 #define DEBUG_TYPE "retypd_graph"
 
 namespace notdec::retypd {
+
+std::vector<std::string> decodeFmtStr(llvm::StringRef Format) {
+  std::vector<std::string> Ret;
+  const char *fmt = Format.data();
+  const char *end = fmt + Format.size();
+  char ch;
+
+  while (fmt < end && (ch = *fmt++)) {
+    if ('%' == ch) {
+      switch (ch = *fmt++) {
+      /* %% - print out a single %    */
+      case '%':
+        break;
+      /* %c: print out a character    */
+      case 'c':
+        Ret.push_back("#char");
+        break;
+
+      /* %s: print out a string       */
+      case 's':
+        Ret.push_back("cstr");
+        break;
+
+      /* %d: print out an int         */
+      case 'd':
+        Ret.push_back("#sint");
+        break;
+
+      /* %x: print out an int in hex  */
+      case 'x':
+        Ret.push_back("#sint");
+        break;
+
+      case 'f':
+        Ret.push_back("#double");
+        break;
+
+      case 'e':
+        Ret.push_back("#double");
+        break;
+      }
+    }
+  }
+  return Ret;
+}
+
+std::shared_ptr<retypd::ConstraintSummary>
+buildPrintfSummary(TRContext &Ctx, uint32_t PointerSize,
+                   llvm::StringRef FormatStr) {
+  std::shared_ptr<retypd::ConstraintSummary> Ret =
+      std::make_shared<retypd::ConstraintSummary>();
+  Ret->PointerSize = PointerSize;
+
+  auto JO = json::Object(
+      {{"constraints", json::Array({json::Value("printf.in_0 <= cstr"),
+                                    json::Value("cstr.load8 <= #char"),
+                                    json::Value("printf.out <= #sint")})},
+       {"pni_map", json::Object({{"printf", "func p #1"},
+                                 {"printf.in_0", "ptr p #2"},
+                                 {"cstr", "ptr p #2"},
+                                 {"cstr.load8", "int 8 #3"},
+                                 {"#char", "int 8 #3"},
+                                 {"printf.out", "int 32 #4"},
+                                 {"#sint", "int 32 #4"},
+                                 {"#double", "float 64 #5"}})}});
+  json::Array *Constraints = JO.getArray("constraints");
+  json::Object *PNIMap = JO.getObject("pni_map");
+  // Gen json
+  std::vector<std::string> Args = decodeFmtStr(FormatStr);
+  for (size_t i = 0; i < Args.size(); i++) {
+    auto Arg = Args[i];
+    Constraints->push_back(
+        json::Value("printf.in_" + std::to_string(i + 1) + " <= " + Arg));
+    PNIMap->insert(
+        {"printf.in_" + std::to_string(i + 1), *PNIMap->getString(Arg)});
+  }
+
+  // create summary from json
+  Ret->fromJSON(Ctx, JO);
+  return Ret;
+}
 
 void ConstraintSummary::fromJSON(TRContext &Ctx,
                                  const llvm::json::Object &Obj) {

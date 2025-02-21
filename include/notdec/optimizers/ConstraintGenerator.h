@@ -37,11 +37,11 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/TRContext.h"
 #include "Utils/DSUMap.h"
-#include "Utils/Range.h"
-#include "Utils/StructManager.h"
 #include "Utils/ValueNamer.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
+#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/StructManager.h"
 #include "notdec-llvm2c/Interface.h"
 #endif
 

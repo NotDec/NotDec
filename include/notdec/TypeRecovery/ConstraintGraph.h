@@ -24,7 +24,7 @@
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
-#include "Utils/Range.h"
+#include "notdec-llvm2c/Range.h"
 #include "Utils/ValueNamer.h"
 
 namespace notdec {
@@ -44,6 +44,10 @@ struct ConstraintSummary {
 
   void fromJSON(TRContext &Ctx, const llvm::json::Object &Obj);
 };
+
+std::shared_ptr<retypd::ConstraintSummary>
+buildPrintfSummary(retypd::TRContext &Ctx, uint32_t PointerSize,
+                   llvm::StringRef FormatStr);
 
 struct CGNode;
 struct ConstraintGraph;
