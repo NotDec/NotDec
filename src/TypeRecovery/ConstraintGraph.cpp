@@ -59,7 +59,6 @@ void ConstraintSummary::fromJSON(TRContext &Ctx,
         Cons.push_back(res.second.get());
       }
     } else if (Ent.first == "pni_map") {
-      PNIMap = new std::map<TypeVariable, std::string>();
       for (auto &Ent2 : *Ent.second.getAsObject()) {
         auto res = notdec::retypd::parseTypeVariable(Ctx, Ent2.first.str(),
                                                      PointerSize);
@@ -69,7 +68,7 @@ void ConstraintSummary::fromJSON(TRContext &Ctx,
           std::cerr << res.second.msg().str() << "\n";
           std::abort();
         }
-        (*PNIMap)[res.second.get()] = Ent2.second.getAsString()->str();
+        PNIMap[res.second.get()] = Ent2.second.getAsString()->str();
       }
     } else {
       llvm::errs() << "ConstraintSummary::fromJSON: Unknown key: " << Ent.first
@@ -96,6 +95,9 @@ EdgeLabel2Offset(const EdgeLabel &E) {
 
 void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   assert(&From.Parent == this && &To.Parent == this);
+  if (PG) {
+    PG->mergePNINodes(To.getPNIVar(), From.getPNIVar());
+  }
   // Move all edges from From to To
   for (auto &Edge : From.outEdges) {
     auto *Target = &Edge.TargetNode;
@@ -147,7 +149,56 @@ void ConstraintGraph::linkConstantPtr2Memory() {
   }
 }
 
+void ConstraintGraph::changeStoreToLoad() {
+  // for every recall store, add recall load.
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    for (auto &Edge : Node.outEdges) {
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
+        if (std::holds_alternative<StoreLabel>(Rec->label)) {
+          auto &Store = std::get<StoreLabel>(Rec->label);
+          addEdge(Node, Target, RecallLabel{LoadLabel{Store.Size}});
+        }
+      }
+    }
+  }
+  // remove every recall store.
+  std::vector<CGEdge *> toRemove;
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    for (auto &Edge : Node.outEdges) {
+      if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
+        if (std::holds_alternative<StoreLabel>(Rec->label)) {
+          toRemove.push_back(&const_cast<CGEdge &>(Edge));
+        }
+      }
+    }
+  }
+  for (auto Edge : toRemove) {
+    removeEdge(Edge->getSourceNode(), Edge->getTargetNode(), Edge->getLabel());
+  }
+}
+
 void ConstraintGraph::aggressiveSimplify() {
+  // remove dup load store
+  for (auto &Ent : Nodes) {
+    auto &Node = Ent.second;
+    for (auto &Edge : Node.outEdges) {
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      if (std::holds_alternative<RecallLabel>(Edge.getLabel())) {
+        auto &Recall = std::get<RecallLabel>(Edge.getLabel());
+        if (std::holds_alternative<LoadLabel>(Recall.label)) {
+          auto &Load = std::get<LoadLabel>(Recall.label);
+          if (hasEdge(Node, Target, RecallLabel{StoreLabel{Load.Size}})) {
+            removeEdge(Node, Target, RecallLabel{StoreLabel{Load.Size}});
+            continue;
+          }
+        }
+      }
+    }
+  }
+
   // do not include path with size 8.
   // 1. remove all load8/store8 edges.
   // for (auto &Ent : Nodes) {
@@ -1501,8 +1552,8 @@ void ConstraintGraph::saturate() {
 void ConstraintGraph::instantiateConstraints(const ConstraintSummary &Summary) {
   std::map<size_t, PNINode *> ID2PNI;
   std::map<size_t, std::string> ID2PNIStr;
-  for (auto &Ent : *Summary.PNIMap) {
-    std::string &SerializedPNI = Ent.second;
+  for (auto &Ent : Summary.PNIMap) {
+    const std::string &SerializedPNI = Ent.second;
     auto Pos = SerializedPNI.rfind(" ");
     assert(Pos != std::string::npos);
     auto IDStr = SerializedPNI.substr(Pos + 1);
@@ -2284,6 +2335,9 @@ void ConstraintGraph::clone(
     Old2New.insert({From.End, To.getEndNode()});
   }
 
+  // for partial cloning, we need to merge the primitive nodes.
+  std::vector<std::pair<CGNode *, CGNode *>> toMerge;
+
   // clone all nodes. Clone PNINodes later.
   for (auto &Ent : From.Nodes) {
     if (Ent.second.isStartOrEnd()) {
@@ -2291,8 +2345,17 @@ void ConstraintGraph::clone(
     }
     auto &Node = Ent.second;
     NodeKey NewKey = TransformKey ? TransformKey(Node.key) : Node.key;
-    auto &NewNode = To.createNodeNoPNI(NewKey, Node.Size);
-    auto Pair = Old2New.insert({&Node, &NewNode});
+    CGNode *NewNode;
+    // merge primitive node when partial cloning
+    if (Partial && NewKey.Base.isPrimitive() && To.hasNode(NewKey)) {
+      NewNode = &To.createNodeNoPNI(
+          TypeVariable::CreateDtv(*To.Ctx, ValueNamer::getName("tmp_")),
+          Node.Size);
+      toMerge.push_back({NewNode, &To.getNode(NewKey)});
+    } else {
+      NewNode = &To.createNodeNoPNI(NewKey, Node.Size);
+    }
+    auto Pair = Old2New.insert({&Node, NewNode});
     assert(Pair.second && "clone: Node already cloned!?");
   }
 
@@ -2313,6 +2376,11 @@ void ConstraintGraph::clone(
     assert(To.PG);
     assert(To.PointerSize == To.PG->PointerSize);
     To.PG->cloneFrom(*From.PG, Old2New);
+  }
+
+  // merge primitive nodes
+  for (auto &Ent : toMerge) {
+    To.mergeNodeTo(*Ent.first, *Ent.second);
   }
 
   for (auto &N : From.StartNodes) {

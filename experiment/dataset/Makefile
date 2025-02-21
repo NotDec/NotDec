@@ -26,13 +26,13 @@ svf_dec: $(addsuffix .dec.ll.svf, $(PREFIXEDS))
 out_$(FUNCTIONALDIR)/%.wasm: $(FUNCTIONALDIR)/%.c
 # -fno-builtin -fno-lto -Wl,--lto-O0 -I. -g -O0 --no-standard-libraries -Wl,--entry=main -lc -Wl,--allow-undefined
 # /opt/wasi-sdk-20.0/bin/clang -fno-builtin -fno-lto -Wl,--lto-O0 -I. -g -O0 --no-standard-libraries -Wl,--entry=main -lc -Wl,--allow-undefined -o ${out}.wasm $file
-	/opt/wasi-sdk-16.0/bin/clang -D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined dataset-SAC-2022/src/io.c -o ./$@ ./$<
+	/opt/wasi-sdk-16.0/bin/clang -D INCLUDEMAIN -I. -g -O0 --no-standard-libraries -Wl,--entry=__main_argc_argv -fno-builtin -Wl,--allow-undefined dataset-SAC-2022/src/io2.c -o ./$@ ./$<
 
 out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
 	clang-14 -D INCLUDEMAIN -O0 -S -emit-llvm -g0 -o ./$@ ./$<
 
 %.wat.c: %.wasm
-	bash -c '../../build/bin/notdec -o $@ $< 2>&1 | tee $<.log ; exit $${PIPESTATUS[0]}'
+	bash -c 'NOTDEC_SUMMARY_OVERRIDE=/sn640/NotDec/experiment/dataset/summarys.json NOTDEC_SIGNATURE_OVERRIDE=/sn640/NotDec/experiment/dataset/signatures.json ../../build/bin/notdec -o $@ $< 2>&1 | tee $<.log ; exit $${PIPESTATUS[0]}'
 
 %.wat: %.wasm
 	wasm2wat -f --enable-all $< > $@

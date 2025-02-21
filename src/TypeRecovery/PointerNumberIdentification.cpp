@@ -7,6 +7,8 @@
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Type.h>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace notdec::retypd {
 

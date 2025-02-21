@@ -38,9 +38,9 @@ template <class GraphType> struct OffsetOnly;
 namespace notdec::retypd {
 
 struct ConstraintSummary {
-  std::vector<Constraint> &Cons;
+  std::vector<Constraint> Cons;
   long PointerSize = 0;
-  std::map<TypeVariable, std::string> *PNIMap = nullptr;
+  std::map<TypeVariable, std::string> PNIMap;
 
   void fromJSON(TRContext &Ctx, const llvm::json::Object &Obj);
 };
@@ -251,6 +251,7 @@ struct ConstraintGraph {
   void recoverBaseVars();
   void aggressiveSimplify();
   void linkConstantPtr2Memory();
+  void changeStoreToLoad();
   // void lowTypeToSubType();
 
 public:

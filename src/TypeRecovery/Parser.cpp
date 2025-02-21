@@ -136,15 +136,15 @@ ParseResultT<ArrayOffset> parseArrayOffset(llvm::StringRef str) {
   if (!RSize.isOk()) {
     return {str, RSize.msg()};
   }
-  auto Limit = decltype(ArrayOffset::Count)(-1);
+  auto Count = decltype(ArrayOffset::Count)(0);
   if (rest1.consume_front("[")) {
     auto [rest2, RLimit] = parseI32(rest1);
     if (!RLimit.isOk()) {
       return {str, RLimit.msg()};
     }
-    Limit = RLimit.get();
+    Count = RLimit.get();
   }
-  return {rest1, ArrayOffset{RSize.get(), Limit}};
+  return {rest1, ArrayOffset{RSize.get(), Count}};
 }
 
 ParseResultT<OffsetLabel> parseOffsetLabel(llvm::StringRef str) {

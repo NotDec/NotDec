@@ -38,6 +38,7 @@
 #include "TypeRecovery/TRContext.h"
 #include "Utils/DSUMap.h"
 #include "Utils/Range.h"
+#include "Utils/StructManager.h"
 #include "Utils/ValueNamer.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
@@ -269,28 +270,28 @@ struct ConstraintsGenerator {
   bool checkSymmetry();
   void makeSymmetry();
 
-  using IndexTy = OffsetRange;
-  struct FieldEntry {
-    IndexTy Start;
-    long Size;
-    CGEdge *OutEdge;
-  };
-  struct FieldInfo {
-    std::vector<FieldEntry> Fields;
-    // long TotalSize;
-    long getMaxOffset() {
-      long Max = 0;
-      for (auto &Ent : Fields) {
-        Max = std::max(Max, Ent.Start.offset + Ent.Size);
-      }
-      return Max;
-    }
-  };
+  // using IndexTy = OffsetRange;
+  // struct FieldEntry {
+  //   IndexTy Start;
+  //   long Size;
+  //   CGEdge *OutEdge;
+  // };
+  // struct FieldInfo {
+  //   std::vector<FieldEntry> Fields;
+  //   // long TotalSize;
+  //   long getMaxOffset() {
+  //     long Max = 0;
+  //     for (auto &Ent : Fields) {
+  //       Max = std::max(Max, Ent.Start.offset + Ent.Size);
+  //     }
+  //     return Max;
+  //   }
+  // };
   // Map from (Node, Range) to Edge, FieldDecl*
-  std::map<CGNode *, FieldInfo> FieldInfoCache;
+  // std::map<CGNode *, FieldInfo> FieldInfoCache;
   // struct field range analysis.
   void analyzeFieldRange();
-  static FieldInfo getFieldInfo(const CGNode &Node);
+  static StructInfo getFieldInfo(const CGNode &Node);
 
   void run();
   // clone CG and maintain value map.

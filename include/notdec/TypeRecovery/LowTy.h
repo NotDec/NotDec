@@ -137,6 +137,7 @@ struct LowTy {
     }
     return true;
   }
+  bool operator!=(const LowTy &rhs) const { return !(*this == rhs); }
 };
 
 } // namespace notdec::retypd

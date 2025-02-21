@@ -3,6 +3,7 @@
 #include "clang/AST/Comment.h"
 #include <cassert>
 #include <clang/AST/ASTFwd.h>
+#include <clang/AST/Type.h>
 #include <clang/Basic/SourceLocation.h>
 #include <llvm/ADT/APSInt.h>
 #include <optional>
@@ -14,12 +15,14 @@
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/Range.h"
+#include "Utils/StructManager.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "utils.h"
 
 namespace notdec::retypd {
 
-clang::QualType SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy, unsigned BitSize) {
+clang::QualType SketchToCTypeBuilder::TypeBuilderImpl::fromLatticeTy(
+    LowTy Low, std::optional<LatticeTy> LTy, unsigned BitSize) {
   if (!LTy.has_value()) {
     return fromLowTy(Low, BitSize);
   }
@@ -121,9 +124,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
     for (auto &Edge : Node.outEdges) {
       if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
         if (FB->Base.isPrimitive()) {
-          auto L1 =
-              createLatticeTy(ETy,
-                              FB->Base.getPrimitiveName());
+          auto L1 = createLatticeTy(ETy, FB->Base.getPrimitiveName());
           if (Node.key.SuffixVariance == Covariant) {
             meet(LT, L1);
           } else {
@@ -142,15 +143,15 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
   // Check for simple pointer type and array type
   if (!Node.isMemory() && FI.Fields.size() == 1) {
     auto &Field = FI.Fields[0];
-    if (Field.Start.offset == 0) {
-      if (Field.Start.access.size() == 0) {
+    if (Field.R.Start.offset == 0) {
+      if (Field.R.Start.access.size() == 0) {
         // simple pointer type
-        auto PointeeTy = visitType(Field.OutEdge->getTargetNode());
+        auto PointeeTy = visitType(Field.Edge->getTargetNode());
         auto Ty = Ctx.getPointerType(PointeeTy);
         NodeTypeMap.emplace(&Node, Ty);
         return Ty;
       } else {
-        auto ElemTy = visitType(Field.OutEdge->getTargetNode());
+        auto ElemTy = visitType(Field.Edge->getTargetNode());
         auto ArrayTy = Ctx.getConstantArrayType(
             ElemTy, llvm::APInt(32, 0), nullptr, clang::ArrayType::Star, 0);
         NodeTypeMap.emplace(&Node, ArrayTy);
@@ -170,41 +171,54 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
     NodeTypeMap.emplace(&Node, Ctx.getPointerType(Ctx.getRecordType(Decl)));
     Ret = Ctx.getPointerType(Ctx.getRecordType(Decl));
   }
+  Parent.DeclInfo.insert_or_assign(Decl, FI);
+  auto &Info = Parent.DeclInfo.at(Decl);
+  Info.Decl = Decl;
+  Info.addPaddings();
   Decl->startDefinition();
-  for (auto &Ent : FI.Fields) {
-    auto Ty = visitType(Ent.OutEdge->getTargetNode());
-    if (isLoadOrStore(Ent.OutEdge->getLabel())) {
-
+  for (auto &Ent : Info.Fields) {
+    clang::QualType Ty;
+    if (Ent.isPadding) {
+      Ty = Ctx.getConstantArrayType(Ctx.CharTy, llvm::APInt(32, Ent.R.Size),
+                                    nullptr, clang::ArrayType::Star, 0);
     } else {
-      // assert(Ty->isPointerType() ||
-      //        Ty->isArrayType() && "Offset edge must be pointer or array
-      //        type");
-      if (Ty->isPointerType()) {
-        // the node is a field pointer type. get the field type.
-        Ty = Ty->getPointeeType();
-      } else if (Ty->isArrayType()) {
-        // do nothing. Keep array type.
+      Ty = visitType(Ent.Edge->getTargetNode());
+
+      if (isLoadOrStore(Ent.Edge->getLabel())) {
+        // no operation
       } else {
-        assert(false && "Offset edge must be pointer or array type");
-      }
-      if (Ent.Start.access.size() > 0) {
-        // create array type
-        Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, 0), nullptr,
-                                      clang::ArrayType::Star, 0);
+        // assert(Ty->isPointerType() ||
+        //        Ty->isArrayType() && "Offset edge must be pointer or array
+        //        type");
+        if (Ty->isPointerType()) {
+          // the node is a field pointer type. get the field type.
+          Ty = Ty->getPointeeType();
+        } else if (Ty->isArrayType()) {
+          // do nothing. Keep array type.
+        } else {
+          assert(false && "Offset edge must be pointer or array type");
+        }
+        if (Ent.R.Start.access.size() > 0) {
+          auto Count = Ent.R.Size / Ent.R.Start.access.at(0).Size;
+          // create array type
+          Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, Count), nullptr,
+                                        clang::ArrayType::Star, 0);
+        }
       }
     }
 
-    auto *FII = &Ctx.Idents.get(ValueNamer::getName("field_"));
+    auto *FII = &Ctx.Idents.get(
+        ValueNamer::getName(!Ent.isPadding ? "field_" : "padding_"));
     clang::FieldDecl *Field = clang::FieldDecl::Create(
         Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
         nullptr, nullptr, false, clang::ICIS_NoInit);
 
     Parent.DeclComments[Field] =
-        "at offset: " + std::to_string(Ent.Start.offset);
+        "at offset: " + std::to_string(Ent.R.Start.offset);
     bool addAttr = true;
     if (addAttr) {
       Field->addAttr(clang::AnnotateAttr::Create(
-          Ctx, "off:" + std::to_string(Ent.Start.offset), nullptr, 0,
+          Ctx, "off:" + std::to_string(Ent.R.Start.offset), nullptr, 0,
           clang::AttributeCommonInfo(clang::SourceRange())));
     }
 

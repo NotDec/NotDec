@@ -5,6 +5,7 @@
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/Range.h"
+#include "Utils/StructManager.h"
 #include "Utils/ValueNamer.h"
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -71,6 +72,7 @@ struct SketchToCTypeBuilder {
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   std::map<clang::Decl *, std::string> DeclComments;
+  std::map<clang::Decl *, StructInfo> DeclInfo;
   TypeBuilderImpl Builder;
 
   // Todo: Change filename or remove the argument

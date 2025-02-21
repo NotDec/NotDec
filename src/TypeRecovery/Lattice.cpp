@@ -60,6 +60,8 @@ LatticeTy LatticeTy::create(LowTy LTy, std::string Name) {
   } else if (LTy.isNotPN()) {
     if (Name == "float") {
       return FloatLattice::create(LTy, Name);
+    } else if (Name == "double") {
+      return FloatLattice::create(LTy, Name);
     }
   }
   assert(false && "LatticeTy::create: Unhandled LowTy");

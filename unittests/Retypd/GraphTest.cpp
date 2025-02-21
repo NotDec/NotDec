@@ -69,7 +69,7 @@ TEST(Retypd, SaturationPaperTest) {
       {parseTV(*Ctx, "x.store4"), "int 4 #6"},
       {parseTV(*Ctx, "y.load4"), "int 4 #7"},
   };
-  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = &PNIMap};
+  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = PNIMap};
   ConstraintGraph CG =
       ConstraintGraph::fromConstraints(Ctx, "SaturationPaper", Sum);
 
@@ -106,7 +106,7 @@ TEST(Retypd, SaturationOffsetTest) {
       {parseTV(*Ctx, "A"), "int 4 #2"},
       {parseTV(*Ctx, "B"), "int 4 #2"},
   };
-  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = &PNIMap};
+  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = PNIMap};
 
   ConstraintGraph CG =
       ConstraintGraph::fromConstraints(Ctx, "SaturationOffsetTest", Sum);
@@ -156,7 +156,7 @@ TEST(Retypd, SlidesExampleTest) {
       {parseTV(*Ctx, "#FileDescriptor"), "ptr 32 #2"},
       {parseTV(*Ctx, "#SuccessZ"), "int 32 #3"},
   };
-  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = &PNIMap};
+  ConstraintSummary Sum{.Cons = cons, .PointerSize = 32, .PNIMap = PNIMap};
   ConstraintGraph CG =
       ConstraintGraph::fromConstraints(Ctx, "SlideExample", Sum);
   std::set<std::string> InterestingVars;

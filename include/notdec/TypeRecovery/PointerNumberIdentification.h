@@ -232,13 +232,13 @@ struct PNIGraph {
   void addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
                   llvm::BinaryOperator *Inst);
 
-  PNINode *mergePNINodes(PNINode *Left, PNINode *Right) {
-    if (Left == Right) {
-      return Left;
+  PNINode *mergePNINodes(PNINode *To, PNINode *From) {
+    if (To == From) {
+      return To;
     }
-    Left->Ty.merge(Right->Ty);
-    mergePNVarTo(Right, Left);
-    return Left;
+    To->Ty.merge(From->Ty);
+    mergePNVarTo(From, To);
+    return To;
   }
   void eraseConstraint(ConsNode *Cons);
   bool solve();

@@ -49,6 +49,7 @@
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
 #include "Utils/Range.h"
+#include "Utils/StructManager.h"
 #include "Utils/ValueNamer.h"
 #include "notdec-llvm2c/Interface.h"
 #include "optimizers/ConstraintGenerator.h"
@@ -295,9 +296,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   data_layout = std::move(M.getDataLayoutStr());
   pointer_size = M.getDataLayout().getPointerSizeInBits();
 
+  std::shared_ptr<BytesManager> MemoryBytes = BytesManager::create(M);
+
   std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
       SummaryOverride;
 
+  std::map<CallBase *, std::shared_ptr<ConstraintsGenerator>>
+      CallsiteSummaryOverride;
+
+  // load summary file
   const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
   if (SummaryFile) {
     if (getSuffix(SummaryFile) == ".json") {
@@ -321,9 +328,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         if (FSet.empty()) {
           continue;
         }
-        std::vector<retypd::Constraint> Constraints;
-        std::map<TypeVariable, std::string> PNIMap;
-        retypd::ConstraintSummary Summary{Constraints, pointer_size, &PNIMap};
+        retypd::ConstraintSummary Summary{{}, pointer_size, {}};
         Summary.fromJSON(*TRCtx, *Ent.second.getAsObject());
         auto CG = ConstraintsGenerator::fromConstraints(*this, FSet, Summary);
         SummaryOverride[FSet] = CG;
@@ -333,6 +338,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
+  // load signature file
   std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
       SignatureOverride;
   const char *SigFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
@@ -358,9 +364,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         if (FSet.empty()) {
           continue;
         }
-        std::vector<retypd::Constraint> Constraints;
-        std::map<TypeVariable, std::string> PNIMap;
-        retypd::ConstraintSummary Summary{Constraints, pointer_size, &PNIMap};
+        retypd::ConstraintSummary Summary{{}, pointer_size, {}};
         Summary.fromJSON(*TRCtx, *Ent.second.getAsObject());
         auto CG = ConstraintsGenerator::fromConstraints(*this, FSet, Summary);
         CG->CG.linkPrimitives();
@@ -391,7 +395,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
     if (EC) {
       std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Cannot open output json file." << std::endl;
+                << "Cannot open output file SCCs.txt." << std::endl;
       std::cerr << EC.message() << std::endl;
       std::abort();
     }
@@ -403,6 +407,38 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // get the CallGraph, iterate by topological order of SCC
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
+
+  // override summary for printf
+  if (auto PF = M.getFunction("printf")) {
+    auto N1 = CG[PF];
+    // for each call, check if target is printf
+    for (auto &Ent : CG) {
+      auto Caller = Ent.first;
+      CallGraphNode &CallerNode = *Ent.second;
+      for (auto &CallEdge : *Ent.second) {
+        if (!CallEdge.first.hasValue()) {
+          continue;
+        }
+        CallBase *I =
+            llvm::cast_or_null<llvm::CallBase>(&*CallEdge.first.getValue());
+        auto *TargetNode = CallEdge.second;
+        if (I && TargetNode->getFunction() == PF) {
+          if (auto *CI = dyn_cast<ConstantInt>(I->getArgOperand(0))) {
+            auto Format = CI->getValue().getZExtValue();
+            StringRef FormatStr = MemoryBytes->decodeCStr(Format);
+            if (!FormatStr.empty()) {
+              std::shared_ptr<retypd::ConstraintSummary> Summary =
+                  buildPrintfSummary(*TRCtx, pointer_size, FormatStr);
+              auto CG =
+                  ConstraintsGenerator::fromConstraints(*this, {PF}, *Summary);
+              CallsiteSummaryOverride[I] = CG;
+            }
+          }
+        }
+      }
+    }
+  }
+
   // TODO: simplify call graph if one func does not have up constraints.
   std::set<CallGraphNode *> Visited;
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
@@ -483,9 +519,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto *Target = Call->getCalledFunction();
       std::shared_ptr<ConstraintsGenerator> TargetSummary;
       if (Target->isDeclaration()) {
-        if (SummaryOverride.count({Target})) {
+        if (CallsiteSummaryOverride.count(Call)) {
+          llvm::errs() << "Override summary for callsite: " << *Call << "\n";
+          TargetSummary = CallsiteSummaryOverride.at(Call);
+        } else if (SummaryOverride.count({Target})) {
           std::cerr << "Override summary for external function: " << Name
-                    << ":\n";
+                    << "\n";
           TargetSummary = SummaryOverride.at({Target});
           assert(TargetSummary->CG.PG->Constraints.size() == 0);
         } else {
@@ -670,7 +709,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           assert(&ToNode == CG.getEndNode());
           CG.addEdge(Node, ToNode, L);
           CG.addEdge(
-              ToNode, Node,
+              *CG.getStartNode(), Node,
               retypd::RecallBase{.Base = std::get<retypd::ForgetBase>(L).Base,
                                  .V = std::get<retypd::ForgetBase>(L).V});
         }
@@ -786,6 +825,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       CurrentTypes.CG.printGraph(join(*DirPath, "05-CurrentTypes.dot").c_str());
     }
 
+    // ensure lower bound is lower than upper bound
+    CurrentTypes.linkContraToCovariant();
     CurrentTypes.CG.solve();
     CurrentTypes.CG.linkConstantPtr2Memory();
     // link primitives for all Graphs in TopDownGenerator.
@@ -873,9 +914,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::abort();
   };
 
-  auto postProcess =
-      [&](ConstraintsGenerator &G,
-          std::map<const CGNode *, CGNode *> &Old2New) -> ConstraintsGenerator {
+  auto postProcess = [&](ConstraintsGenerator &G,
+                         std::map<const CGNode *, CGNode *> &Old2New,
+                         std::string DebugDir) -> ConstraintsGenerator {
     ConstraintsGenerator G2 = G.clone(Old2New);
     assert(G2.PG);
     std::string Name = G2.CG.Name;
@@ -887,23 +928,41 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     G2.CG.sketchSplit();
 
     G2.eliminateCycle();
-    // ensure lower bound is lower than upper bound
-    // TODO what about link this earlier?
-    G2.linkContraToCovariant();
 
-    // if (DebugDir) {
-    //   std::string Dir = join(DebugDir, "SCC" + std::to_string(i));
-    //   G2.CG.printGraph(join(Dir, "07-BeforeMerge.dot").c_str());
-    // }
+    if (!DebugDir.empty()) {
+      G2.CG.printGraph(join(DebugDir, "06-BeforeMerge.dot").c_str());
+    }
 
     // merge nodes that only subtype to another node
     G2.mergeOnlySubtype();
 
+    if (!DebugDir.empty()) {
+      G2.CG.printGraph(join(DebugDir, "07-BeforeDtm.dot").c_str());
+    }
+
     G2.determinize();
+    G2.CG.aggressiveSimplify();
+
+    if (!DebugDir.empty()) {
+      G2.CG.printGraph(join(DebugDir, "08-Final.dot").c_str());
+    }
+
     assert(G2.PG);
     // G2.DebugDir.clear();
     return G2;
   };
+
+  llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
+  if (DebugDir) {
+    std::error_code EC;
+    ValueTypesFile.emplace(join(DebugDir, "ValueTypes.txt"), EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output file ValueTypes.txt." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+  }
 
   // build AST type for each value in value map
   for (int i = 0; i < AllSCCs.size(); i++) {
@@ -915,14 +974,18 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         continue;
       }
     }
-    ConstraintsGenerator G2 = postProcess(G, Old2New);
-
+    std::string Dir;
     if (DebugDir) {
-      std::string Dir = join(DebugDir, "SCC" + std::to_string(i));
-      G2.CG.printGraph(join(Dir, "08-CurrentTypes.dtm.dot").c_str());
+      Dir = join(DebugDir, "SCC" + std::to_string(i));
+    }
+
+    ConstraintsGenerator G2 = postProcess(G, Old2New, Dir);
+
+    if (!Dir.empty()) {
+      G2.CG.printGraph(join(Dir, "09-CurrentTypes.dtm.dot").c_str());
       // TODO refactor to annotated function
       // print val2node here
-      std::ofstream Val2NodeFile(join(Dir, "08-Val2Node.txt"));
+      std::ofstream Val2NodeFile(join(Dir, "09-Val2Node.txt"));
       for (auto &Ent : G2.V2N) {
         auto &N = G2.getNode(Ent.first, nullptr, -1, retypd::Covariant);
         auto &NC = G2.getNode(Ent.first, nullptr, -1, retypd::Contravariant);
@@ -947,27 +1010,29 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         auto Size = getSize(Ent.first, pointer_size);
         assert(Size > 0);
 
-        // print the current value
-        if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-          llvm::errs() << "  Value: " << **V;
-          llvm::Function *F = nullptr;
-          if (auto I = llvm::dyn_cast<Instruction>(*V)) {
-            F = I->getFunction();
+        if (ValueTypesFile) {
+          // print the current value
+          if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
+            *ValueTypesFile << "  Value: " << **V;
+            llvm::Function *F = nullptr;
+            if (auto I = llvm::dyn_cast<Instruction>(*V)) {
+              F = I->getFunction();
 
-          } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
-            F = Arg->getParent();
-          }
-          if (F) {
-            llvm::errs() << " (In Func: " << F->getName() << ")";
-          }
-          // DEBUG
-          // if ((*V)->getName() == "stack31") {
-          //   llvm::errs() << "here";
-          // }
-        } else {
-          llvm::errs() << "  Special Value: " << getName(Ent.first);
-          if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
-            llvm::errs() << " User: " << *UC->User;
+            } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
+              F = Arg->getParent();
+            }
+            if (F) {
+              *ValueTypesFile << " (In Func: " << F->getName() << ")";
+            }
+            // DEBUG
+            // if ((*V)->getName() == "stack31") {
+            //   *ValueTypesFile << "here";
+            // }
+          } else {
+            *ValueTypesFile << "  Special Value: " << getName(Ent.first);
+            if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
+              *ValueTypesFile << " User: " << *UC->User;
+            }
           }
         }
 
@@ -977,11 +1042,22 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
                        << toString(Ent.first) << "\n";
         }
+
         Result.ValueTypes[Convert(Ent.first)] = CTy;
 
-        llvm::errs() << " upper bound: " << CTy.getAsString();
+        if (ValueTypesFile) {
+          *ValueTypesFile << " upper bound: " << CTy.getAsString();
+        }
       } else {
-        llvm::errs() << " has no upper bound";
+        if (ValueTypesFile) {
+          *ValueTypesFile << " has no upper bound";
+        }
+      }
+      if (ValueTypesFile) {
+        if (Node->getPNIVar() != nullptr) {
+          *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+        }
+        *ValueTypesFile << "\n";
       }
     }
 
@@ -999,27 +1075,30 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
                "RetypdGenerator::getTypeVar: Node is not in the graph");
         auto Size = getSize(Ent.first, pointer_size);
         assert(Size > 0);
-        // print the current value
-        if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-          llvm::errs() << "  Value: " << **V;
-          llvm::Function *F = nullptr;
-          if (auto I = llvm::dyn_cast<Instruction>(*V)) {
-            F = I->getFunction();
 
-          } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
-            F = Arg->getParent();
-          }
-          if (F) {
-            llvm::errs() << " (In Func: " << F->getName() << ")";
-          }
-          // DEBUG
-          // if ((*V)->getName() == "stack31") {
-          //   llvm::errs() << "here";
-          // }
-        } else {
-          llvm::errs() << "  Special Value: " << getName(Ent.first);
-          if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
-            llvm::errs() << " User: " << *UC->User;
+        if (ValueTypesFile) {
+          // print the current value
+          if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
+            *ValueTypesFile << "  Value: " << **V;
+            llvm::Function *F = nullptr;
+            if (auto I = llvm::dyn_cast<Instruction>(*V)) {
+              F = I->getFunction();
+
+            } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
+              F = Arg->getParent();
+            }
+            if (F) {
+              *ValueTypesFile << " (In Func: " << F->getName() << ")";
+            }
+            // DEBUG
+            // if ((*V)->getName() == "stack31") {
+            //   *ValueTypesFile << "here";
+            // }
+          } else {
+            *ValueTypesFile << "  Special Value: " << getName(Ent.first);
+            if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
+              *ValueTypesFile << " User: " << *UC->User;
+            }
           }
         }
 
@@ -1030,19 +1109,25 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
                        << toString(Ent.first) << "\n";
         }
         Result.ValueTypesLowerBound[Convert(Ent.first)] = CTy;
-        llvm::errs() << " lower bound: " << CTy.getAsString();
+        if (ValueTypesFile) {
+          *ValueTypesFile << " lower bound: " << CTy.getAsString();
+        }
       } else {
-        llvm::errs() << " has no lower bound";
+        if (ValueTypesFile) {
+          *ValueTypesFile << " has no lower bound";
+        }
       }
-      if (Node->getPNIVar() != nullptr) {
-        llvm::errs() << "  PNI: " << Node->getPNIVar()->str();
+      if (ValueTypesFile) {
+        if (Node->getPNIVar() != nullptr) {
+          *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+        }
+        *ValueTypesFile << "\n";
       }
-      llvm::errs() << "\n";
     }
   }
 
   std::map<const CGNode *, CGNode *> Old2NewGlobal;
-  ConstraintsGenerator Global2 = postProcess(*Global, Old2NewGlobal);
+  ConstraintsGenerator Global2 = postProcess(*Global, Old2NewGlobal, "");
   // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
   // retypd::Covariant);
   CGNode *MemNode2 = Global2.CG.getMemoryNode(retypd::Covariant);
@@ -1489,6 +1574,8 @@ void ConstraintsGenerator::mergeOnlySubtype() {
   std::tie(A, B) = findMergePair();
   while (A != nullptr && B != nullptr) {
     // merge A to B
+    llvm::errs() << "Merge: " << toString(A->key) << " to " << toString(B->key)
+                 << "\n";
     mergeNodeTo(*A, *B, true);
     A = nullptr;
     B = nullptr;
@@ -1501,6 +1588,7 @@ void ConstraintsGenerator::determinize() {
   DTrans.clear();
   std::map<const CGNode *, CGNode *> This2Bak;
   ConstraintGraph Backup = CG.clone(This2Bak);
+  Backup.changeStoreToLoad();
   // remove all edges in the graph
   for (auto &Ent : CG) {
     for (auto &Edge : Ent.second.outEdges) {
@@ -1590,7 +1678,7 @@ void ConstraintsGenerator::determinize() {
 void ConstraintsGenerator::mergeAfterDeterminize() {
   auto SameOutEdges = [&](const CGNode &N1, const CGNode &N2) -> bool {
     assert(&N1 != &N2);
-    if (N1.getPNIVar() != N2.getPNIVar()) {
+    if (N1.getPNIVar()->getLatticeTy() != N2.getPNIVar()->getLatticeTy()) {
       return false;
     }
     if (N1.outEdges.size() != N2.outEdges.size()) {
@@ -2707,22 +2795,21 @@ void ConstraintsGenerator::analyzeFieldRange() {
   // std::set<CGNode *> Visited;
 }
 
-ConstraintsGenerator::FieldInfo
-ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
+StructInfo ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
   // auto It = FieldInfoCache.find(&Node);
   // if (It != FieldInfoCache.end()) {
   //   return It->second;
   // }
 
-  FieldInfo Ret;
+  StructInfo Ret;
   for (auto &Edge : Node.outEdges) {
     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
     assert(&Target != &Node && "Self loop should not exist");
     // for load/store edges, just return pointer size.
     if (retypd::isLoadOrStore(Edge.getLabel())) {
-      Ret.Fields.push_back(FieldEntry{.Start = OffsetRange(),
-                                      .Size = Node.Parent.PointerSize,
-                                      .OutEdge = &const_cast<CGEdge &>(Edge)});
+      Ret.addField(FieldEntry{
+          .R = {.Start = OffsetRange(), .Size = Node.Parent.PointerSize},
+          .Edge = &const_cast<CGEdge &>(Edge)});
       continue;
     }
     // for subtype/offset edges, start offset should be the start(Or the edge
@@ -2743,9 +2830,8 @@ ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
     assert(BaseOff.hasValue() && "Base offset not set");
     auto Fields = getFieldInfo(Target);
     auto MaxOff = Fields.getMaxOffset();
-    Ret.Fields.push_back(FieldEntry{.Start = *BaseOff,
-                                    .Size = MaxOff,
-                                    .OutEdge = &const_cast<CGEdge &>(Edge)});
+    Ret.addField(FieldEntry{.R = {.Start = *BaseOff, .Size = MaxOff},
+                                    .Edge = &const_cast<CGEdge &>(Edge)});
   }
 
   // FieldInfoCache[&Node] = Ret;
