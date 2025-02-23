@@ -93,11 +93,10 @@
         "${file}",
         "-o",
         "${file}.ll",
-        "--log-level",
-        "debug",
-        "--compat-mode",
-        "--recompile",
-        "--expand-mem=false"
+        "--disable-all-pass",
+        "--wasm2llvm-log-level=debug",
+        // "--no-mem-initializer",
+        "--fix-names"
       ],
       "cwd": "${workspaceFolder}"
     },

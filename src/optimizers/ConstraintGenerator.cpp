@@ -409,35 +409,35 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
 
   // override summary for printf
-  if (auto PF = M.getFunction("printf")) {
-    auto N1 = CG[PF];
-    // for each call, check if target is printf
-    for (auto &Ent : CG) {
-      auto Caller = Ent.first;
-      CallGraphNode &CallerNode = *Ent.second;
-      for (auto &CallEdge : *Ent.second) {
-        if (!CallEdge.first.hasValue()) {
-          continue;
-        }
-        CallBase *I =
-            llvm::cast_or_null<llvm::CallBase>(&*CallEdge.first.getValue());
-        auto *TargetNode = CallEdge.second;
-        if (I && TargetNode->getFunction() == PF) {
-          if (auto *CI = dyn_cast<ConstantInt>(I->getArgOperand(0))) {
-            auto Format = CI->getValue().getZExtValue();
-            StringRef FormatStr = MemoryBytes->decodeCStr(Format);
-            if (!FormatStr.empty()) {
-              std::shared_ptr<retypd::ConstraintSummary> Summary =
-                  buildPrintfSummary(*TRCtx, pointer_size, FormatStr);
-              auto CG =
-                  ConstraintsGenerator::fromConstraints(*this, {PF}, *Summary);
-              CallsiteSummaryOverride[I] = CG;
-            }
-          }
-        }
-      }
-    }
-  }
+  // if (auto PF = M.getFunction("printf")) {
+  //   auto N1 = CG[PF];
+  //   // for each call, check if target is printf
+  //   for (auto &Ent : CG) {
+  //     auto Caller = Ent.first;
+  //     CallGraphNode &CallerNode = *Ent.second;
+  //     for (auto &CallEdge : *Ent.second) {
+  //       if (!CallEdge.first.hasValue()) {
+  //         continue;
+  //       }
+  //       CallBase *I =
+  //           llvm::cast_or_null<llvm::CallBase>(&*CallEdge.first.getValue());
+  //       auto *TargetNode = CallEdge.second;
+  //       if (I && TargetNode->getFunction() == PF) {
+  //         if (auto *CI = dyn_cast<ConstantInt>(I->getArgOperand(0))) {
+  //           auto Format = CI->getValue().getZExtValue();
+  //           StringRef FormatStr = MemoryBytes->decodeCStr(Format);
+  //           if (!FormatStr.empty()) {
+  //             std::shared_ptr<retypd::ConstraintSummary> Summary =
+  //                 buildPrintfSummary(*TRCtx, pointer_size, FormatStr);
+  //             auto CG =
+  //                 ConstraintsGenerator::fromConstraints(*this, {PF}, *Summary);
+  //             CallsiteSummaryOverride[I] = CG;
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 
   // TODO: simplify call graph if one func does not have up constraints.
   std::set<CallGraphNode *> Visited;
@@ -1134,11 +1134,18 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // build AST type for memory node
   clang::QualType CTy = TB.buildType(*MemNode2);
   llvm::errs() << "Memory Type: " << CTy.getAsString();
-  Result.MemoryType = CTy;
+
+  clang::RecordDecl* Mem = CTy->getPointeeType()->getAs<clang::RecordType>()->getDecl();
+  auto& Info = TB.StructInfos[Mem];
+  Info.Bytes = MemoryBytes;
+  Info.resolveInitialValue();
+
+  Result.MemoryType = CTy->getPointeeType();
 
   // move the ASTUnit to result
   Result.ASTUnit = std::move(TB.ASTUnit);
   Result.DeclComments = std::move(TB.DeclComments);
+  Result.StructInfos = std::move(TB.StructInfos);
 
   // gen_json("retypd-constrains.json");
 

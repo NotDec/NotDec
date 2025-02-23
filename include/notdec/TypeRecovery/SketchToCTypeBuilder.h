@@ -31,7 +31,7 @@ struct SketchToCTypeBuilder {
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
     // Main interface: recursively visit the node and build the type
-    clang::QualType visitType(const CGNode &Node);
+    clang::QualType visitType(const CGNode &Node, unsigned ArraySize = 0);
     TypeBuilderImpl(SketchToCTypeBuilder& Parent) :Parent(Parent), Ctx(Parent.ASTUnit->getASTContext()) {}
 
     std::map<std::string, clang::QualType> TypeDefs;
@@ -72,7 +72,7 @@ struct SketchToCTypeBuilder {
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   std::map<clang::Decl *, std::string> DeclComments;
-  std::map<clang::Decl *, StructInfo> DeclInfo;
+  std::map<clang::Decl *, StructInfo> StructInfos;
   TypeBuilderImpl Builder;
 
   // Todo: Change filename or remove the argument

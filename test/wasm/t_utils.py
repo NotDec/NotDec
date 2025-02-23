@@ -8,7 +8,7 @@ NC='\033[0m' # No Color
 
 def get_decompile_commands(wasm_path, out_path):
     cwd = os.path.dirname(os.path.realpath(__file__))
-    return [f'{cwd}/../../build/bin/notdec', wasm_path, '-o', out_path, "--only-opt"]
+    return [f'{cwd}/../../build/bin/notdec', wasm_path, '-o', out_path, "--disable-all-pass", "--fix-names"]
 
 def get_run_commands(ir_path):
     # cwd = os.path.dirname(os.path.realpath(__file__))

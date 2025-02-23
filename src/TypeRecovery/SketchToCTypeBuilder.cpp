@@ -3,8 +3,10 @@
 #include "clang/AST/Comment.h"
 #include <cassert>
 #include <clang/AST/ASTFwd.h>
+#include <clang/AST/Expr.h>
 #include <clang/AST/Type.h>
 #include <clang/Basic/SourceLocation.h>
+#include <clang/Basic/Specifiers.h>
 #include <llvm/ADT/APSInt.h>
 #include <optional>
 #include <variant>
@@ -81,7 +83,8 @@ clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix) {
 }
 
 clang::QualType
-SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
+SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
+                                                 unsigned ArraySize) {
   unsigned BitSize = Node.getSize();
   const char *prefix = "struct_";
   if (Node.isMemory()) {
@@ -151,9 +154,14 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
         NodeTypeMap.emplace(&Node, Ty);
         return Ty;
       } else {
-        auto ElemTy = visitType(Field.Edge->getTargetNode());
+        auto Count = ArraySize / Field.R.Start.access.at(0).Size;
+        auto ElemTy = visitType(Field.Edge->getTargetNode(),
+                                Field.R.Start.access.at(0).Size);
         auto ArrayTy = Ctx.getConstantArrayType(
-            ElemTy, llvm::APInt(32, 0), nullptr, clang::ArrayType::Star, 0);
+            ElemTy->getPointeeType(), llvm::APInt(32, Count),
+            clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, Count),
+                                          Ctx.IntTy, clang::SourceLocation()),
+            Count == 0 ? clang::ArrayType::Star : clang::ArrayType::Normal, 0);
         NodeTypeMap.emplace(&Node, ArrayTy);
         return ArrayTy;
       }
@@ -171,19 +179,27 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
     NodeTypeMap.emplace(&Node, Ctx.getPointerType(Ctx.getRecordType(Decl)));
     Ret = Ctx.getPointerType(Ctx.getRecordType(Decl));
   }
-  Parent.DeclInfo.insert_or_assign(Decl, FI);
-  auto &Info = Parent.DeclInfo.at(Decl);
+  Parent.StructInfos.insert_or_assign(Decl, FI);
+  auto &Info = Parent.StructInfos.at(Decl);
   Info.Decl = Decl;
   Info.addPaddings();
   Decl->startDefinition();
   for (auto &Ent : Info.Fields) {
     clang::QualType Ty;
+    // for each field/edge
     if (Ent.isPadding) {
-      Ty = Ctx.getConstantArrayType(Ctx.CharTy, llvm::APInt(32, Ent.R.Size),
-                                    nullptr, clang::ArrayType::Star, 0);
+      if (Ent.R.Size != 0) {
+        Ty = Ctx.getConstantArrayType(
+            Ctx.CharTy, llvm::APInt(32, Ent.R.Size),
+            clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, Ent.R.Size),
+                                          Ctx.IntTy, clang::SourceLocation()),
+            clang::ArrayType::Normal, 0);
+      } else {
+        Ty = Ctx.getConstantArrayType(Ctx.CharTy, llvm::APInt(32, 0), nullptr,
+                                      clang::ArrayType::Star, 0);
+      }
     } else {
-      Ty = visitType(Ent.Edge->getTargetNode());
-
+      Ty = visitType(Ent.Edge->getTargetNode(), Ent.R.Size);
       if (isLoadOrStore(Ent.Edge->getLabel())) {
         // no operation
       } else {
@@ -202,7 +218,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
           auto Count = Ent.R.Size / Ent.R.Start.access.at(0).Size;
           // create array type
           Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, Count), nullptr,
-                                        clang::ArrayType::Star, 0);
+                                        Count == 0 ? clang::ArrayType::Star
+                                                   : clang::ArrayType::Normal,
+                                        0);
         }
       }
     }
@@ -211,7 +229,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node) {
         ValueNamer::getName(!Ent.isPadding ? "field_" : "padding_"));
     clang::FieldDecl *Field = clang::FieldDecl::Create(
         Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
-        nullptr, nullptr, false, clang::ICIS_NoInit);
+        nullptr, nullptr, false, clang::ICIS_CopyInit);
 
     Parent.DeclComments[Field] =
         "at offset: " + std::to_string(Ent.R.Start.offset);
