@@ -1151,6 +1151,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   Result.ASTUnit = std::move(TB.ASTUnit);
   Result.DeclComments = std::move(TB.DeclComments);
   Result.StructInfos = std::move(TB.StructInfos);
+  Result.AllDecls = std::move(TB.AllDecls);
 
   // gen_json("retypd-constrains.json");
 

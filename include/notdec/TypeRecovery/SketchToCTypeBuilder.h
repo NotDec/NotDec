@@ -9,6 +9,7 @@
 #include "notdec-llvm2c/StructManager.h"
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
+#include <clang/AST/DeclBase.h>
 #include <clang/AST/Type.h>
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/Tooling.h>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "notdec-llvm2c/StructuralAnalysis.h"
 #include "notdec-llvm2c/Utils.h"
@@ -33,7 +35,6 @@ struct SketchToCTypeBuilder {
     clang::ASTContext &Ctx;
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
-
 
     // Main interface: recursively visit the node and build the type
     clang::QualType visitType(const CGNode &Node, unsigned ArraySize = 0);
@@ -84,6 +85,7 @@ struct SketchToCTypeBuilder {
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   std::map<clang::Decl *, std::string> DeclComments;
   std::map<clang::Decl *, StructInfo> StructInfos;
+  std::set<clang::Decl *> AllDecls;
   TypeBuilderImpl Builder;
 
   // Todo: Change filename or remove the argument

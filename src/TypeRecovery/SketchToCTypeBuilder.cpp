@@ -270,7 +270,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     }
   }
   Decl->completeDefinition();
-  Ctx.getTranslationUnitDecl()->addDecl(Decl);
+  // Let backend to insert into the translation unit.
+  Parent.AllDecls.insert(Decl);
+  // Ctx.getTranslationUnitDecl()->addDecl(Decl);
   return Ret;
 }
 
