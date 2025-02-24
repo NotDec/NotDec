@@ -5,6 +5,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
 
 #ifdef NOTDEC_ENABLE_WASM
 #include "notdec-wasm2llvm/interface.h"
@@ -132,7 +133,7 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "Loading Wasm: " << inputFilename << std::endl;
     notdec::frontend::parse_wasm(Ctx.context, Ctx.getModule(), WasmOpts,
-                                 inputFilename);
+                                        inputFilename);
   } else if (insuffix == ".wat") {
     notdec::frontend::wasm::Options WasmOpts;
     // use decompiler config if decompilation is enabled
@@ -147,7 +148,7 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "Loading Wat: " << inputFilename << std::endl;
     notdec::frontend::parse_wat(Ctx.context, Ctx.getModule(), WasmOpts,
-                                inputFilename);
+                                       inputFilename);
   }
 #endif
   else {
@@ -161,7 +162,32 @@ int main(int argc, char *argv[]) {
     notdec::optimizers::DecompileConfig conf(Ctx.getModule(), outputFilename,
                                              Ctx.opt, getLLVM2COptions());
     conf.run_passes();
+  } else {
+    auto &M = Ctx.getModule();
+    std::string outsuffix = getSuffix(outputFilename);
+    if (outsuffix == ".ll") {
+      std::error_code EC;
+      llvm::raw_fd_ostream os(outputFilename, EC);
+      if (EC) {
+        std::cerr << "Cannot open output file." << std::endl;
+        std::cerr << EC.message() << std::endl;
+        std::abort();
+      }
+      M.print(os, nullptr);
+      std::cout << "IR dumped to " << outputFilename << std::endl;
+    } else if (outsuffix == ".bc") {
+      std::error_code EC;
+      llvm::raw_fd_ostream os(outputFilename, EC);
+      if (EC) {
+        std::cerr << "Cannot open output file." << std::endl;
+        std::cerr << EC.message() << std::endl;
+        std::abort();
+      }
+      llvm::WriteBitcodeToFile(M, os);
+      std::cout << "Bitcode dumped to " << outputFilename << std::endl;
+    }
   }
 
+  notdec::frontend::free_buffer();
   return 0;
 }

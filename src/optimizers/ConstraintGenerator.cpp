@@ -926,8 +926,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // }
 
     G2.CG.sketchSplit();
+    // G2.CG.ensureNoForgetLabel();
 
     G2.eliminateCycle();
+    // G2.CG.ensureNoForgetLabel();
 
     if (!DebugDir.empty()) {
       G2.CG.printGraph(join(DebugDir, "06-BeforeMerge.dot").c_str());
@@ -935,13 +937,16 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     // merge nodes that only subtype to another node
     G2.mergeOnlySubtype();
+    // G2.CG.ensureNoForgetLabel();
 
     if (!DebugDir.empty()) {
       G2.CG.printGraph(join(DebugDir, "07-BeforeDtm.dot").c_str());
     }
 
     G2.determinize();
+    // G2.CG.ensureNoForgetLabel();
     G2.CG.aggressiveSimplify();
+    // G2.CG.ensureNoForgetLabel();
 
     if (!DebugDir.empty()) {
       G2.CG.printGraph(join(DebugDir, "08-Final.dot").c_str());
@@ -2815,7 +2820,7 @@ StructInfo ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
     // for load/store edges, just return pointer size.
     if (retypd::isLoadOrStore(Edge.getLabel())) {
       Ret.addField(FieldEntry{
-          .R = {.Start = OffsetRange(), .Size = Node.Parent.PointerSize},
+          .R = {.Start = OffsetRange(), .Size = (Node.Parent.PointerSize / 8)},
           .Edge = &const_cast<CGEdge &>(Edge)});
       continue;
     }

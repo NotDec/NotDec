@@ -1056,7 +1056,7 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
 
 bool isOffsetRelated(CGNode &Start) {
   // fast path, if there is no outgoing or incoming offset edge, only consider
-  // one edge.
+  // one(subtype) edge.
   bool HasOffset = false;
   // Outgoing
   for (auto &Edge : Start.outEdges) {
@@ -1374,8 +1374,26 @@ void ConstraintGraph::linkLoadStore() {
   }
 }
 
+void ConstraintGraph::ensureNoForgetLabel() {
+  for (auto &Ent : Nodes) {
+    auto &Source = Ent.second;
+    if (Source.isStartOrEnd()) {
+      continue;
+    }
+    for (auto &Edge : Source.outEdges) {
+      if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
+        std::cerr << "Error: ensureNoForgetLabel: forget label found: "
+                  << toString(Source.key) << " -> "
+                  << toString(Edge.getTargetNode().key) << "\n";
+        std::abort();
+      }
+    }
+  }
+}
+
 void ConstraintGraph::sketchSplit() {
   linkPrimitives();
+  std::vector<const CGEdge*> toRemove;
   // 1. focus on the recall subgraph, but allow ForgetBase edge.
   for (auto &Ent : Nodes) {
     auto &Source = Ent.second;
@@ -1383,16 +1401,18 @@ void ConstraintGraph::sketchSplit() {
     for (auto &Edge : Source.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
       if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
-        removeEdge(Source, Target, Edge.Label);
-        continue;
+        toRemove.push_back(&Edge);
+        // removeEdge(Source, Target, Edge.Label);
+        // continue;
       } else if (std::holds_alternative<RecallBase>(Edge.Label)) {
-        removeEdge(Source, Target, Edge.Label);
-        continue;
+        toRemove.push_back(&Edge);
+        // removeEdge(Source, Target, Edge.Label);
+        // continue;
       }
     }
-    if (Source.isStartOrEnd()) {
-      continue;
-    }
+  }
+  for (auto &Edge : toRemove) {
+    removeEdge(const_cast<CGNode&>(Edge->getSourceNode()), const_cast<CGNode&>(Edge->getTargetNode()), Edge->getLabel());
   }
 }
 
@@ -1491,10 +1511,10 @@ toString(const std::set<std::pair<FieldLabel, CGNode *>> &S) {
 
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
-  bool DenseSubtype = true;
-  if (const char *val = std::getenv("NOTDEC_SAT_NO_DENSESUBTYPE")) {
+  bool DenseSubtype = false;
+  if (const char *val = std::getenv("NOTDEC_SAT_DENSESUBTYPE")) {
     if ((std::strcmp(val, "1") == 0)) {
-      DenseSubtype = false;
+      DenseSubtype = true;
     }
   }
 

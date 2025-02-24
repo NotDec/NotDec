@@ -7,6 +7,7 @@
 #include <clang/AST/Type.h>
 #include <clang/Basic/SourceLocation.h>
 #include <clang/Basic/Specifiers.h>
+#include <cstddef>
 #include <llvm/ADT/APSInt.h>
 #include <optional>
 #include <variant>
@@ -18,6 +19,7 @@
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "notdec-llvm2c/Range.h"
 #include "notdec-llvm2c/StructManager.h"
+#include "notdec-llvm2c/StructuralAnalysis.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "utils.h"
 
@@ -113,14 +115,14 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
 
   auto ETy = Node.getPNIVar()->getLatticeTy();
   // No out edges.
-  if (Node.outEdges.empty()) {
+  if (!Node.isMemory() && Node.outEdges.empty()) {
     // no info from graph, just use LatticeTy.
     auto Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
     NodeTypeMap.emplace(&Node, Ret);
     return Ret;
   }
 
-  if (!isPNIPtr) {
+  if (!Node.isMemory() && !isPNIPtr) {
     // if only edges to #End with forget primitive, then it is a simple
     // primitive type.
     std::optional<LatticeTy> LT = createLatticeTy(ETy, "");
@@ -162,8 +164,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
             clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, Count),
                                           Ctx.IntTy, clang::SourceLocation()),
             Count == 0 ? clang::ArrayType::Star : clang::ArrayType::Normal, 0);
-        NodeTypeMap.emplace(&Node, ArrayTy);
-        return ArrayTy;
+        auto FinalTy = Ctx.getPointerType(ArrayTy);
+        NodeTypeMap.emplace(&Node, FinalTy);
+        return FinalTy;
       }
     }
   }
@@ -182,66 +185,89 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   Parent.StructInfos.insert_or_assign(Decl, FI);
   auto &Info = Parent.StructInfos.at(Decl);
   Info.Decl = Decl;
-  Info.addPaddings();
+  // Info.addPaddings();
   Decl->startDefinition();
-  for (auto &Ent : Info.Fields) {
-    clang::QualType Ty;
-    // for each field/edge
-    if (Ent.isPadding) {
-      if (Ent.R.Size != 0) {
-        Ty = Ctx.getConstantArrayType(
-            Ctx.CharTy, llvm::APInt(32, Ent.R.Size),
-            clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, Ent.R.Size),
-                                          Ctx.IntTy, clang::SourceLocation()),
-            clang::ArrayType::Normal, 0);
-      } else {
-        Ty = Ctx.getConstantArrayType(Ctx.CharTy, llvm::APInt(32, 0), nullptr,
-                                      clang::ArrayType::Star, 0);
-      }
-    } else {
-      Ty = visitType(Ent.Edge->getTargetNode(), Ent.R.Size);
-      if (isLoadOrStore(Ent.Edge->getLabel())) {
-        // no operation
-      } else {
-        // assert(Ty->isPointerType() ||
-        //        Ty->isArrayType() && "Offset edge must be pointer or array
-        //        type");
-        if (Ty->isPointerType()) {
-          // the node is a field pointer type. get the field type.
-          Ty = Ty->getPointeeType();
-        } else if (Ty->isArrayType()) {
-          // do nothing. Keep array type.
-        } else {
-          assert(false && "Offset edge must be pointer or array type");
-        }
-        if (Ent.R.Start.access.size() > 0) {
-          auto Count = Ent.R.Size / Ent.R.Start.access.at(0).Size;
-          // create array type
-          Ty = Ctx.getConstantArrayType(Ty, llvm::APInt(32, Count), nullptr,
-                                        Count == 0 ? clang::ArrayType::Star
-                                                   : clang::ArrayType::Normal,
-                                        0);
-        }
-      }
+  for (size_t i = 0; i < Info.Fields.size(); i++) {
+    auto &Ent = Info.Fields[i];
+
+    // add padding, expand array accordingly
+    FieldEntry *Next = nullptr;
+    if (i + 1 < Info.Fields.size()) {
+      Next = &Info.Fields[i + 1];
     }
 
-    auto *FII = &Ctx.Idents.get(
-        ValueNamer::getName(!Ent.isPadding ? "field_" : "padding_"));
+    clang::QualType Ty;
+    auto ArraySize = Ent.R.Size;
+    // expand the array size to fill up the padding
+    // set to Ent.R.Size later if this is really an array.
+    if (Next != nullptr &&
+        Ent.R.Start.offset + Ent.R.Size < Next->R.Start.offset) {
+      ArraySize = Next->R.Start.offset - Ent.R.Start.offset;
+    }
+    // for each field/edge
+    Ty = visitType(Ent.Edge->getTargetNode(), ArraySize);
+    if (isLoadOrStore(Ent.Edge->getLabel())) {
+      // no operation
+    } else {
+      // assert(Ty->isPointerType() ||
+      //        Ty->isArrayType() && "Offset edge must be pointer or array
+      //        type");
+      if (Ty->isPointerType()) {
+        // the node is a field pointer type. get the field type.
+        Ty = Ty->getPointeeType();
+      } else {
+        assert(false && "Offset edge must be pointer type");
+      }
+      if (Ent.R.Start.access.size() > 0) {
+        auto Count = ArraySize / Ent.R.Start.access.at(0).Size;
+        // create array type
+        Ty = Ctx.getConstantArrayType(
+            Ty, llvm::APInt(32, Count), nullptr,
+            Count == 0 ? clang::ArrayType::Star : clang::ArrayType::Normal, 0);
+      }
+    }
+    // set to Ent.R.Size if this is really an array.
+    if (Ty->isArrayType()) {
+      Ent.R.Size = ArraySize;
+    }
+
+    auto *FII = &Ctx.Idents.get(ValueNamer::getName("field_"));
     clang::FieldDecl *Field = clang::FieldDecl::Create(
-        Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, Ty,
+        Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, llvm2c::toLValueType(Ctx, Ty),
         nullptr, nullptr, false, clang::ICIS_CopyInit);
 
     Parent.DeclComments[Field] =
         "at offset: " + std::to_string(Ent.R.Start.offset);
-    bool useAnno = false;
-    if (useAnno) {
-      Field->addAttr(clang::AnnotateAttr::Create(
-          Ctx, "off:" + std::to_string(Ent.R.Start.offset), nullptr, 0,
-          clang::AttributeCommonInfo(clang::SourceRange())));
-    }
+    // bool useAnno = false;
+    // if (useAnno) {
+    //   Field->addAttr(clang::AnnotateAttr::Create(
+    //       Ctx, "off:" + std::to_string(Ent.R.Start.offset), nullptr, 0,
+    //       clang::AttributeCommonInfo(clang::SourceRange())));
+    // }
 
     Ent.Decl = Field;
     Decl->addDecl(Field);
+
+    // add padding?
+    auto End = Ent.R.Start.offset + Ent.R.Size;
+    if (Next != nullptr && End < Next->R.Start.offset) {
+      auto PaddingSize = Next->R.Start.offset - End;
+      if (PaddingSize != 0) {
+        Ty = Ctx.getConstantArrayType(
+            Ctx.CharTy, llvm::APInt(32, PaddingSize),
+            clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, PaddingSize),
+                                          Ctx.IntTy, clang::SourceLocation()),
+            clang::ArrayType::Normal, 0);
+
+        auto *FII = &Ctx.Idents.get(ValueNamer::getName("padding_"));
+        clang::FieldDecl *Field = clang::FieldDecl::Create(
+            Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII,
+            Ty, nullptr, nullptr, false, clang::ICIS_CopyInit);
+
+        Parent.DeclComments[Field] = "at offset: " + std::to_string(End);
+        Decl->addDecl(Field);
+      }
+    }
   }
   Decl->completeDefinition();
   Ctx.getTranslationUnitDecl()->addDecl(Decl);

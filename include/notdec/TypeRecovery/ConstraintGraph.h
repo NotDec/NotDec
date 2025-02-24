@@ -301,6 +301,7 @@ public:
   /// nodes as accepting because our determinization algorithm keeps all
   /// reachable nodes.
   void sketchSplit();
+  void ensureNoForgetLabel();
   std::vector<SubTypeConstraint> solve_constraints_between();
   void addRecalls(CGNode &N);
   void addForgets(CGNode &N);

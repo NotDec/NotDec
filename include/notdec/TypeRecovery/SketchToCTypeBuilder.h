@@ -4,35 +4,45 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
+#include "Utils/ValueNamer.h"
 #include "notdec-llvm2c/Range.h"
 #include "notdec-llvm2c/StructManager.h"
-#include "Utils/ValueNamer.h"
-#include <clang/AST/ASTContext.h> 
+#include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Type.h>
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 
+#include "notdec-llvm2c/StructuralAnalysis.h"
 #include "notdec-llvm2c/Utils.h"
 
 namespace notdec::retypd {
 
-clang::RecordDecl *createStruct(clang::ASTContext &Ctx, const char *prefix = "struct_");
+clang::RecordDecl *createStruct(clang::ASTContext &Ctx,
+                                const char *prefix = "struct_");
 
 struct SketchToCTypeBuilder {
   struct TypeBuilderImpl {
-    SketchToCTypeBuilder& Parent;
+    SketchToCTypeBuilder &Parent;
     clang::ASTContext &Ctx;
     std::map<const CGNode *, clang::QualType> NodeTypeMap;
     std::set<const CGNode *> Visited;
+
+
     // Main interface: recursively visit the node and build the type
     clang::QualType visitType(const CGNode &Node, unsigned ArraySize = 0);
-    TypeBuilderImpl(SketchToCTypeBuilder& Parent) :Parent(Parent), Ctx(Parent.ASTUnit->getASTContext()) {}
+    clang::QualType visitTypeL(const CGNode &Node, unsigned ArraySize = 0) {
+      return llvm2c::toLValueType(Ctx, visitType(Node, ArraySize));
+    }
+
+    TypeBuilderImpl(SketchToCTypeBuilder &Parent)
+        : Parent(Parent), Ctx(Parent.ASTUnit->getASTContext()) {}
 
     std::map<std::string, clang::QualType> TypeDefs;
     clang::QualType getUndef(unsigned BitSize) {
@@ -68,7 +78,8 @@ struct SketchToCTypeBuilder {
     }
 
     clang::QualType fromLowTy(LowTy LTy, unsigned BitSize);
-    clang::QualType fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy, unsigned BitSize);
+    clang::QualType fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy,
+                                  unsigned BitSize);
   };
   std::unique_ptr<clang::ASTUnit> ASTUnit;
   std::map<clang::Decl *, std::string> DeclComments;
