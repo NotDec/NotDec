@@ -16,6 +16,7 @@
 
 namespace notdec {
 PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
+  // try to match the operand of store, return the base value and offset 
   std::function<Optional<std::pair<Value *, int64_t>>(
       Value *, std::set<Instruction *> &)>
       MatchOffset = [&](Value *StoreOp, std::set<Instruction *> &Visited)
@@ -98,18 +99,19 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
                   NextBeginOff +
                   SI2->getValueOperand()->getType()->getPrimitiveSizeInBits() /
                       8;
-              if (NextBeginOff == EndOffset->second) {
-                EndOffset->second += SI2->getValueOperand()
-                                         ->getType()
-                                         ->getPrimitiveSizeInBits() /
-                                     8;
+              // Current range: [BeginOffset, EndOffset]
+              // Next range: [NextBeginOff, NextEndOff]
+              // case 1: equal: BeginOffset < EndOffset == NextBeginOff < NextEndOff
+              // case 2: overlap: BeginOffset < NextBeginOff < EndOffset < NextEndOff
+              if (NextBeginOff <= EndOffset->second && EndOffset->second < NextEndOff) {
+                EndOffset->second = NextEndOff;
                 TotalStoreCount++;
                 continue;
-              } else if (NextEndOff == BeginOffset->second) {
-                BeginOffset->second -= SI2->getValueOperand()
-                                           ->getType()
-                                           ->getPrimitiveSizeInBits() /
-                                       8;
+                // Extend the begin of offset
+                // case 3: equal: NextBeginOff < NextEndOff == BeginOffset < EndOffset
+                // case 4: overlap: NextBeginOff < BeginOffset < NextEndOff < EndOffset
+              } else if (NextEndOff >= BeginOffset->second && NextBeginOff < BeginOffset->second ) {
+                BeginOffset->second = NextBeginOff;
                 TotalStoreCount++;
                 continue;
               }

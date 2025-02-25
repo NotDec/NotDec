@@ -118,7 +118,7 @@ struct CGNode {
   bool isStartOrEnd() const;
   bool hasNoPNI() const { return PNIVar == nullptr || PNIVar->isNull(); }
   bool isTop() const { return key.Base.isTop(); }
-  bool isMemory() const { return key.Base.isMemory(); }
+  bool isMemory() const { return !key.Base.hasLabel() && key.Base.isMemory(); }
 
 protected:
   friend struct PNIGraph;

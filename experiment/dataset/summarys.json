@@ -13,6 +13,147 @@
       "#char": "int 8 #3"
     }
   },
+  "printWLine": {
+    "constraints": [
+      "printWLine.in_0 <= wcstr",
+      "wcstr.@0+4.load32 <= #int"
+    ],
+    "pni_map": {
+      "printWLine": "func p #1",
+      "printWLine.in_0": "ptr p #2",
+      "wcstr": "ptr p #2",
+      "wcstr.@0+4": "ptr p #2",
+      "wcstr.@0+4.load32": "int 32 #3",
+      "#int": "int 32 #3"
+    }
+  },
+  "printIntLine": {
+    "constraints": [
+      "printIntLine.in_0 <= #sint"
+    ],
+    "pni_map": {
+      "printIntLine": "func p #1",
+      "printIntLine.in_0": "int 32 #2",
+      "#sint": "int 32 #2"
+    }
+  },
+  "printShortLine": {
+    "constraints": [
+      "printShortLine.in_0 <= #short"
+    ],
+    "pni_map": {
+      "printShortLine": "func p #1",
+      "printShortLine.in_0": "int 16 #2",
+      "#short": "int 16 #2"
+    }
+  },
+  "printFloatLine": {
+    "constraints": [
+      "printFloatLine.in_0 <= #float"
+    ],
+    "pni_map": {
+      "printFloatLine": "func p #1",
+      "printFloatLine.in_0": "float 32 #2",
+      "#float": "float 32 #2"
+    }
+  },
+  "printDoubleLine": {
+    "constraints": [
+      "printDoubleLine.in_0 <= #double"
+    ],
+    "pni_map": {
+      "printDoubleLine": "func p #1",
+      "printDoubleLine.in_0": "float 64 #2",
+      "#double": "float 64 #2"
+    }
+  },
+  "printLongLine": {
+    "constraints": [
+      "printLongLine.in_0 <= #long"
+    ],
+    "pni_map": {
+      "printLongLine": "func p #1",
+      "printLongLine.in_0": "int p #2",
+      "#long": "int p #2"
+    }
+  },
+  "printLongLongLine": {
+    "constraints": [
+      "printLongLongLine.in_0 <= #longlong"
+    ],
+    "pni_map": {
+      "printLongLongLine": "func p #1",
+      "printLongLongLine.in_0": "int 64 #2",
+      "#longlong": "int 64 #2"
+    }
+  },
+  "printSizeTLine": {
+    "constraints": [
+      "printSizeTLine.in_0 <= #size_t"
+    ],
+    "pni_map": {
+      "printSizeTLine": "func p #1",
+      "printSizeTLine.in_0": "int p #2",
+      "#size_t": "int p #2"
+    }
+  },
+  "printHexCharLine": {
+    "constraints": [
+      "printHexCharLine.in_0 <= #char"
+    ],
+    "pni_map": {
+      "printHexCharLine": "func p #1",
+      "printHexCharLine.in_0": "int 8 #2",
+      "#char": "int 8 #2"
+    }
+  },
+  "printWcharLine": {
+    "constraints": [
+      "printWcharLine.in_0 <= #int"
+    ],
+    "pni_map": {
+      "printWcharLine": "func p #1",
+      "printWcharLine.in_0": "int 32 #2",
+      "#int": "int 32 #2"
+    }
+  },
+  "printUnsignedLine": {
+    "constraints": [
+      "printUnsignedLine.in_0 <= #uint"
+    ],
+    "pni_map": {
+      "printUnsignedLine": "func p #1",
+      "printUnsignedLine.in_0": "int 32 #2",
+      "#uint": "int 32 #2"
+    }
+  },
+  "printHexUnsignedCharLine": {
+    "constraints": [
+      "printHexUnsignedCharLine.in_0 <= #char"
+    ],
+    "pni_map": {
+      "printHexUnsignedCharLine": "func p #1",
+      "printHexUnsignedCharLine.in_0": "int 8 #2",
+      "#char": "int 8 #2"
+    }
+  },
+  "printBytesLine": {
+    "constraints": [
+      "printBytesLine.in_0 <= bytes",
+      "bytes.@0+1.load8 <= #char",
+      "printBytesLine.in_1 <= #uint"
+    ],
+    "pni_map": {
+      "printBytesLine": "func p #1",
+      "printBytesLine.in_0": "ptr p #2",
+      "cstr": "ptr p #2",
+      "cstr.@0+1": "ptr p #2",
+      "cstr.@0+1.load8": "int 8 #3",
+      "#char": "int 8 #3",
+      "printBytesLine.in_1": "int p #3",
+      "#uint": "int p #3"
+    }
+  },
   "memset": {
     "constraints": [
       "memset.in_0.load8 <= #char",
@@ -70,6 +211,52 @@
       "memmove.out": "ptr p #2",
       "memmove.in_2": "int p #6",
       "#uint": "int p #6"
+    }
+  },
+  "srand": {
+    "constraints": [
+      "srand.in_0 <= #uint"
+    ],
+    "pni_map": {
+      "srand": "func p #1",
+      "srand.in_0": "int 32 #2",
+      "#uint": "int 32 #2"
+    }
+  },
+  "atoi": {
+    "constraints": [
+      "atoi.in_0 <= cstr",
+      "cstr.@0+1.load8 <= #char",
+      "atoi.out <= #int"
+    ],
+    "pni_map": {
+      "atoi": "func p #1",
+      "atoi.in_0": "ptr p #2",
+      "cstr": "ptr p #2",
+      "cstr.@0+1": "ptr p #2",
+      "cstr.@0+1.load8": "int 8 #3",
+      "#char": "int 8 #3",
+      "atoi.out": "int 32 #4",
+      "#int": "int 32 #4"
+    }
+  },
+  "fgets": {
+    "constraints": [
+      "fgets.in_0 <= cstr",
+      "cstr.@0+1.load8 <= #char",
+      "fgets.in_1 <= #int",
+      "fgets.out <= cstr"
+    ],
+    "pni_map": {
+      "fgets": "func p #1",
+      "fgets.in_0": "ptr p #2",
+      "cstr": "ptr p #2",
+      "cstr.@0+1": "ptr p #2",
+      "cstr.@0+1.load8": "int 8 #3",
+      "#char": "int 8 #3",
+      "fgets.in_1": "int 32 #4",
+      "#int": "int 32 #4",
+      "fgets.out": "ptr p #2"
     }
   }
 }

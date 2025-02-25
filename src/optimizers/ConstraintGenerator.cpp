@@ -12,6 +12,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Debug.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -48,10 +49,10 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
-#include "notdec-llvm2c/Range.h"
-#include "notdec-llvm2c/StructManager.h"
 #include "Utils/ValueNamer.h"
 #include "notdec-llvm2c/Interface.h"
+#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/StructManager.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "optimizers/StackPointerFinder.h"
 #include "utils.h"
@@ -430,7 +431,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   //             std::shared_ptr<retypd::ConstraintSummary> Summary =
   //                 buildPrintfSummary(*TRCtx, pointer_size, FormatStr);
   //             auto CG =
-  //                 ConstraintsGenerator::fromConstraints(*this, {PF}, *Summary);
+  //                 ConstraintsGenerator::fromConstraints(*this, {PF},
+  //                 *Summary);
   //             CallsiteSummaryOverride[I] = CG;
   //           }
   //         }
@@ -1140,8 +1142,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   clang::QualType CTy = TB.buildType(*MemNode2);
   llvm::errs() << "Memory Type: " << CTy.getAsString();
 
-  clang::RecordDecl* Mem = CTy->getPointeeType()->getAs<clang::RecordType>()->getDecl();
-  auto& Info = TB.StructInfos[Mem];
+  clang::RecordDecl *Mem =
+      CTy->getPointeeType()->getAs<clang::RecordType>()->getDecl();
+  auto &Info = TB.StructInfos[Mem];
   Info.Bytes = MemoryBytes;
   Info.resolveInitialValue();
 
@@ -1587,8 +1590,8 @@ void ConstraintsGenerator::mergeOnlySubtype() {
   std::tie(A, B) = findMergePair();
   while (A != nullptr && B != nullptr) {
     // merge A to B
-    llvm::errs() << "Merge: " << toString(A->key) << " to " << toString(B->key)
-                 << "\n";
+    LLVM_DEBUG(llvm::dbgs() << "Merge: " << toString(A->key) << " to "
+                            << toString(B->key) << "\n");
     mergeNodeTo(*A, *B, true);
     A = nullptr;
     B = nullptr;
@@ -2844,7 +2847,7 @@ StructInfo ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
     auto Fields = getFieldInfo(Target);
     auto MaxOff = Fields.getMaxOffset();
     Ret.addField(FieldEntry{.R = {.Start = *BaseOff, .Size = MaxOff},
-                                    .Edge = &const_cast<CGEdge &>(Edge)});
+                            .Edge = &const_cast<CGEdge &>(Edge)});
   }
 
   // FieldInfoCache[&Node] = Ret;
