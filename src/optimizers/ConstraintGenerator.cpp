@@ -974,6 +974,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // build AST type for each value in value map
   for (int i = 0; i < AllSCCs.size(); i++) {
     auto &G = *AllSCCs[i].TopDownGenerator;
+    auto SCCName = AllSCCs[i].SCCName;
     assert(G.PG);
     std::map<const CGNode *, CGNode *> Old2New;
     for (auto &Ent : G.CG.Nodes) {
@@ -989,7 +990,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     ConstraintsGenerator G2 = postProcess(G, Old2New, Dir);
 
     if (!Dir.empty()) {
-      G2.CG.printGraph(join(Dir, "09-CurrentTypes.dtm.dot").c_str());
+      G2.CG.printGraph(join(Dir, "09-PostProcess.dtm.dot").c_str());
       // TODO refactor to annotated function
       // print val2node here
       std::ofstream Val2NodeFile(join(Dir, "09-Val2Node.txt"));
@@ -1000,6 +1001,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
                      << toString(NC.key) << "\n";
       }
       Val2NodeFile.close();
+    }
+
+    if (ValueTypesFile) {
+      *ValueTypesFile << "UpperBounds:\n";
     }
 
     for (auto &Ent : G2.V2N) {
@@ -1041,8 +1046,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               *ValueTypesFile << " User: " << *UC->User;
             }
           }
+          *ValueTypesFile << "  Node: " << toString(Node->key);
+          if (Node->getPNIVar() != nullptr) {
+            *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+          }
         }
 
+        if (ValueTypesFile) {
+          ValueTypesFile->flush();
+        }
         clang::QualType CTy = TB.buildType(*Node);
 
         if (Result.ValueTypes.count(Convert(Ent.first)) != 0) {
@@ -1061,11 +1073,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
       }
       if (ValueTypesFile) {
-        if (Node->getPNIVar() != nullptr) {
-          *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
-        }
         *ValueTypesFile << "\n";
       }
+    }
+
+    if (ValueTypesFile) {
+      *ValueTypesFile << "LowerBounds:\n";
     }
 
     for (auto &Ent : G2.V2NContra) {
@@ -1107,8 +1120,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               *ValueTypesFile << " User: " << *UC->User;
             }
           }
+          *ValueTypesFile << "  Node: " << toString(Node->key);
+          if (Node->getPNIVar() != nullptr) {
+            *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+          }
         }
 
+        if (ValueTypesFile) {
+          ValueTypesFile->flush();
+        }
         clang::QualType CTy = TB.buildType(*Node);
 
         if (Result.ValueTypesLowerBound.count(Convert(Ent.first)) != 0) {
@@ -1125,9 +1145,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
       }
       if (ValueTypesFile) {
-        if (Node->getPNIVar() != nullptr) {
-          *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
-        }
         *ValueTypesFile << "\n";
       }
     }
@@ -1592,7 +1609,7 @@ void ConstraintsGenerator::mergeOnlySubtype() {
     // merge A to B
     LLVM_DEBUG(llvm::dbgs() << "Merge: " << toString(A->key) << " to "
                             << toString(B->key) << "\n");
-    mergeNodeTo(*A, *B, true);
+    mergeNodeTo(*A, *B, false);
     A = nullptr;
     B = nullptr;
     std::tie(A, B) = findMergePair();
@@ -1754,7 +1771,8 @@ void ConstraintsGenerator::mergeAfterDeterminize() {
   std::tie(A, B) = findMergePair();
   while (A != nullptr && B != nullptr) {
     // merge A to B
-    mergeNodeTo(*A, *B, true);
+    // TODO eliminate offset loop earlier
+    mergeNodeTo(*A, *B, false);
     A = nullptr;
     B = nullptr;
     std::tie(A, B) = findMergePair();
@@ -1765,6 +1783,13 @@ void ConstraintsGenerator::run() {
   for (llvm::Function *Func : SCCs) {
     // create function nodes
     getOrInsertNode(Func, nullptr, -1, retypd::Covariant);
+    for (int i = 0; i < Func->arg_size(); i++) {
+      getOrInsertNode(Func->getArg(i), nullptr, i, retypd::Covariant);
+    }
+    if (!Func->getReturnType()->isVoidTy()) {
+      getOrInsertNode(ReturnValue{.Func = Func}, nullptr, -1,
+                      retypd::Covariant);
+    }
     // assert convariant node is created
     getNode(Func, nullptr, -1, retypd::Contravariant);
     RetypdGeneratorVisitor Visitor(*this);
@@ -1948,6 +1973,8 @@ ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
   auto Dtv = convertTypeVar(Val, User, OpInd);
   retypd::NodeKey K(Dtv, retypd::Covariant);
   auto &N = CG.createNode(K, getType(Val));
+  CG.addRecalls(N);
+  CG.addForgets(N);
   auto It = V2N.insert(Val, N.key);
   if (!It.second) {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -1958,6 +1985,8 @@ ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
   }
   K.SuffixVariance = retypd::Contravariant;
   auto &NContra = CG.createNode(K, getType(Val));
+  CG.addRecalls(NContra);
+  CG.addForgets(NContra);
   auto It2 = V2NContra.insert(Val, NContra.key);
   if (!It2.second) {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -2153,8 +2182,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
     return;
   }
   auto &SrcVar = cg.getOrInsertNode(Src, &I, 0, retypd::Covariant);
-  auto &DstVar =
-      cg.createNodeCovariant(ReturnValue{.Func = I.getFunction()}, &I, 0);
+  auto &DstVar = cg.getNode(ReturnValue{.Func = I.getFunction()}, &I, 0,
+                            retypd::Covariant);
   // src is a subtype of dest
   cg.addSubtype(SrcVar, DstVar);
 }
@@ -2817,15 +2846,31 @@ StructInfo ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
   //   return It->second;
   // }
 
+  OffsetRange SelfLoopBaseOff;
   StructInfo Ret;
   for (auto &Edge : Node.outEdges) {
     auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-    assert(&Target != &Node && "Self loop should not exist");
+    // assert(&Target != &Node && "Self loop should not exist");
+    if (&Target == &Node) {
+      // for self loop with offset edge
+      if (std::holds_alternative<retypd::RecallLabel>(Edge.getLabel())) {
+        auto *RL = std::get_if<retypd::RecallLabel>(&Edge.getLabel());
+        if (auto *Off = std::get_if<OffsetLabel>(&RL->label)) {
+          assert(SelfLoopBaseOff.isZero() && "Self loop offset already set");
+          SelfLoopBaseOff = Off->range.mulx();
+          continue;
+        }
+      }
+      // self loop with other edge?
+      assert(false && "TODO: how to handle self loop");
+    }
+
     // for load/store edges, just return pointer size.
-    if (retypd::isLoadOrStore(Edge.getLabel())) {
-      Ret.addField(FieldEntry{
-          .R = {.Start = OffsetRange(), .Size = (Node.Parent.PointerSize / 8)},
-          .Edge = &const_cast<CGEdge &>(Edge)});
+    if (isLoadOrStore(Edge.getLabel())) {
+      Ret.addField(
+          FieldEntry{.R = {.Start = SelfLoopBaseOff,
+                           .Size = (getLoadOrStoreSize(Edge.getLabel()) / 8)},
+                     .Edge = &const_cast<CGEdge &>(Edge)});
       continue;
     }
     // for subtype/offset edges, start offset should be the start(Or the edge
@@ -2843,11 +2888,12 @@ StructInfo ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
                    << toString(Edge.getLabel()) << "\n";
       std::abort();
     }
-    assert(BaseOff.hasValue() && "Base offset not set");
+    // assert(BaseOff.hasValue() && "Base offset not set");
     auto Fields = getFieldInfo(Target);
     auto MaxOff = Fields.getMaxOffset();
-    Ret.addField(FieldEntry{.R = {.Start = *BaseOff, .Size = MaxOff},
-                            .Edge = &const_cast<CGEdge &>(Edge)});
+    Ret.addField(
+        FieldEntry{.R = {.Start = SelfLoopBaseOff + *BaseOff, .Size = MaxOff},
+                   .Edge = &const_cast<CGEdge &>(Edge)});
   }
 
   // FieldInfoCache[&Node] = Ret;

@@ -572,6 +572,28 @@ inline bool isLoadOrStore(const EdgeLabel &label) {
   }
 }
 
+inline uint32_t getLoadOrStoreSize(const EdgeLabel &label) {
+  if (auto *RL = std::get_if<RecallLabel>(&label)) {
+    if (auto *LL = std::get_if<LoadLabel>(&RL->label)) {
+      return LL->Size;
+    } else if (auto *SL = std::get_if<StoreLabel>(&RL->label)) {
+      return SL->Size;
+    } else {
+      assert(false && "getLoadOrStoreSize: Not a LoadLabel or StoreLabel");
+    }
+  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
+    if (auto *LL = std::get_if<LoadLabel>(&FL->label)) {
+      return LL->Size;
+    } else if (auto *SL = std::get_if<StoreLabel>(&FL->label)) {
+      return SL->Size;
+    } else {
+      assert(false && "getLoadOrStoreSize: Not a LoadLabel or StoreLabel");
+    }
+  } else {
+    assert(false && "getLoadOrStoreSize: Not a ForgetLabel or RecallLabel");
+  }
+}
+
 inline FieldLabel getLabel(EdgeLabel label) {
   if (auto *fl = std::get_if<ForgetLabel>(&label)) {
     return fl->label;
