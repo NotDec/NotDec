@@ -275,7 +275,7 @@ public:
   //         std::function<void(std::shared_ptr<retypd::Sketch>)>>> &Queries)
   //         const;
   // std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
-
+  
   // internal steps
   void saturate();
   void layerSplit();

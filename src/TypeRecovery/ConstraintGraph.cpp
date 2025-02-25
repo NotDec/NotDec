@@ -32,8 +32,8 @@
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/TRContext.h"
-#include "notdec-llvm2c/Range.h"
 #include "Utils/ValueNamer.h"
+#include "notdec-llvm2c/Range.h"
 #include "optimizers/ConstraintGenerator.h"
 #include "utils.h"
 
@@ -1393,7 +1393,7 @@ void ConstraintGraph::ensureNoForgetLabel() {
 
 void ConstraintGraph::sketchSplit() {
   linkPrimitives();
-  std::vector<const CGEdge*> toRemove;
+  std::vector<const CGEdge *> toRemove;
   // 1. focus on the recall subgraph, but allow ForgetBase edge.
   for (auto &Ent : Nodes) {
     auto &Source = Ent.second;
@@ -1412,7 +1412,8 @@ void ConstraintGraph::sketchSplit() {
     }
   }
   for (auto &Edge : toRemove) {
-    removeEdge(const_cast<CGNode&>(Edge->getSourceNode()), const_cast<CGNode&>(Edge->getTargetNode()), Edge->getLabel());
+    removeEdge(const_cast<CGNode &>(Edge->getSourceNode()),
+               const_cast<CGNode &>(Edge->getTargetNode()), Edge->getLabel());
   }
 }
 
@@ -1509,6 +1510,52 @@ toString(const std::set<std::pair<FieldLabel, CGNode *>> &S) {
   return ret;
 }
 
+std::set<CGNode *> getOneReachable(CGNode &N) {
+  std::set<CGNode *> Visited;
+  std::queue<CGNode *> Q;
+  Q.push(&N);
+  while (!Q.empty()) {
+    auto *Current = Q.front();
+    Q.pop();
+    if (Visited.count(Current) > 0) {
+      continue;
+    }
+    Visited.insert(Current);
+    for (auto &Edge : Current->outEdges) {
+      if (std::holds_alternative<One>(Edge.Label)) {
+        Q.push(const_cast<CGNode *>(&Edge.getTargetNode()));
+      }
+    }
+  }
+  return Visited;
+}
+
+bool canReach(CGNode &From, CGNode &To) {
+  if (&From == &To) {
+    return true;
+  }
+  std::set<CGNode *> Visited;
+  std::queue<CGNode *> Q;
+  Q.push(&From);
+  while (!Q.empty()) {
+    auto *Current = Q.front();
+    Q.pop();
+    if (Visited.count(Current) > 0) {
+      continue;
+    }
+    Visited.insert(Current);
+    if (Current == &To) {
+      return true;
+    }
+    for (auto &Edge : Current->outEdges) {
+      if (std::holds_alternative<One>(Edge.Label)) {
+        Q.push(const_cast<CGNode *>(&Edge.getTargetNode()));
+      }
+    }
+  }
+  return false;
+}
+
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
   bool DenseSubtype = false;
@@ -1559,12 +1606,15 @@ void ConstraintGraph::saturate() {
               continue;
             }
             if (Ent.second.isZero()) {
-              bool Added = addEdge(Source, *Ent.first, One{});
-              if (Added) {
-                LLVM_DEBUG(llvm::dbgs()
-                           << "(Off) Adding Edge From " << Source.key.str()
-                           << " to " << Ent.first->key.str() << " with _1_ \n");
-                Changed |= Added;
+              if (!canReach(Source, *Ent.first)) {
+                bool Added = addEdge(Source, *Ent.first, One{});
+                if (Added) {
+                  LLVM_DEBUG(llvm::dbgs()
+                             << "(Off) Adding Edge From " << Source.key.str()
+                             << " to " << Ent.first->key.str()
+                             << " with _1_ \n");
+                  Changed |= Added;
+                }
               }
             }
           }
@@ -1596,12 +1646,14 @@ void ConstraintGraph::saturate() {
           if (ReachingSet.count(&Source)) {
             for (auto &Reach : ReachingSet[&Source]) {
               if (Reach.first == Capa.label && Reach.second != &Target) {
-                LLVM_DEBUG(llvm::dbgs()
-                           << "Adding Edge From " << Reach.second->key.str()
-                           << " to " << Target.key.str() << " with _1_ \n");
                 // We are iterating through Recall edges, and we insert One
                 // edge, so it is ok to modify edge during iterating.
-                Changed |= addEdge(*Reach.second, Target, One{});
+                if (!canReach(*Reach.second, Target)) {
+                  LLVM_DEBUG(llvm::dbgs()
+                             << "Adding Edge From " << Reach.second->key.str()
+                             << " to " << Target.key.str() << " with _1_ \n");
+                  Changed |= addEdge(*Reach.second, Target, One{});
+                }
               }
             }
           }
