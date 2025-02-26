@@ -41,9 +41,9 @@
 
 #ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-llvm2c/Interface.h"
+#include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
-#include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #endif
 
 namespace notdec {
@@ -74,12 +74,30 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>>
       FuncSummaries;
+
+  std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
+      SummaryOverride;
+  std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
+      SignatureOverride;
+  std::map<CallBase *, std::shared_ptr<ConstraintsGenerator>>
+      CallsiteSummaryOverride;
+  char *DebugDir = nullptr;
+
   unsigned pointer_size = 0;
 
   Result run(Module &M, ModuleAnalysisManager &);
   void gen_json(std::string OutputFilename);
 
 public:
+  static ConstraintsGenerator postProcess(ConstraintsGenerator &G,
+                                   std::map<const CGNode *, CGNode *> &Old2New,
+                                   std::string DebugDir);
+  // merge nodes to current graph by determinize.
+  static CGNode *multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
+                                  std::set<CGNode *> &StartNodes,
+                                  const char *NamePrefix);
+  void loadSummaryFile(Module &M, const char *path);
+  void loadSignatureFile(Module &M, const char *path);
   void print(Module &M, std::string path);
   void printAnnotatedModule(Module &M, std::string path);
 };
