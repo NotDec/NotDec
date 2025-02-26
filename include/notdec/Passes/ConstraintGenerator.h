@@ -40,9 +40,9 @@
 #include "Utils/ValueNamer.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
+#include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
-#include "notdec-llvm2c/Interface.h"
 #endif
 
 namespace notdec {
@@ -52,12 +52,7 @@ using retypd::DerivedTypeVariable;
 using retypd::TRContext;
 using retypd::TypeVariable;
 
-
 struct ConstraintsGenerator;
-
-// When solving inter-procedurally, link CallArg (caller) with Argument*
-// (callee) link CallRet (caller) with ReturnValue (callee) Separate
-// representation because you need to handle instance id anyway.
 
 struct ReturnValue {
   llvm::Function *Func;
@@ -66,25 +61,6 @@ struct ReturnValue {
     return std::tie(Func, Index) < std::tie(rhs.Func, rhs.Index);
   }
   bool operator==(const ReturnValue &rhs) const {
-    return !(*this < rhs) && !(rhs < *this);
-  }
-};
-struct CallArg {
-  llvm::CallBase *Call;
-  int32_t Index;
-  bool operator<(const CallArg &rhs) const {
-    return std::tie(Call, Index) < std::tie(rhs.Call, rhs.Index);
-  }
-  bool operator==(const CallArg &rhs) const {
-    return !(*this < rhs) && !(rhs < *this);
-  }
-};
-struct CallRet {
-  llvm::CallBase *Call;
-  bool operator<(const CallRet &rhs) const {
-    return std::tie(Call) < std::tie(rhs.Call);
-  }
-  bool operator==(const CallRet &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
 };
@@ -120,8 +96,8 @@ struct ConstantAddr {
 // 1. Differentiate Constants by Users.
 // 2. For some constant expr like (inttoptr i32 1064), the address of the expr
 // is different, but we need to merge them.
-using ExtValuePtr = std::variant<llvm::Value *, ReturnValue, CallArg, CallRet,
-                                 UConstant, ConstantAddr>;
+using ExtValuePtr =
+    std::variant<llvm::Value *, ReturnValue, UConstant, ConstantAddr>;
 
 ExtValuePtr getExtValuePtr(llvm::Value *Val, User *User, long OpInd = -1);
 std::string getName(const ExtValuePtr &Val);
@@ -256,7 +232,8 @@ struct ConstraintsGenerator {
   void eliminateCycle();
   void mergeOnlySubtype();
   void mergeAfterDeterminize();
-  // determinization algorithm from all v2n nodes that keeps all reachable nodes.
+  // determinization algorithm from all v2n nodes that keeps all reachable
+  // nodes.
   void determinize();
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();

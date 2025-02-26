@@ -17,6 +17,8 @@
 #include <variant>
 #include <vector>
 
+#include <clang/AST/Type.h>
+#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/SCCIterator.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Analysis/CallGraph.h>
@@ -27,20 +29,20 @@
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/Support/Casting.h>
-#include <llvm/Support/FileSystem.h>
-#include <llvm/Support/JSON.h>
-#include <llvm/Support/raw_ostream.h>
-#include <clang/AST/Type.h>
-#include <llvm/ADT/Optional.h>
-#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Casting.h>
 #include <llvm/Support/Debug.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/JSON.h>
+#include <llvm/Support/raw_ostream.h>
 
+#include "Passes/ConstraintGenerator.h"
+#include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/Parser.h"
@@ -49,20 +51,17 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
+#include "Utils/Utils.h"
 #include "Utils/ValueNamer.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
-#include "Passes/ConstraintGenerator.h"
-#include "Passes/StackPointerFinder.h"
-#include "Utils/Utils.h"
 
 #define DEBUG_TYPE "type-recovery"
 
 namespace notdec {
 
 using retypd::OffsetLabel;
-
 
 std::string toString(const ExtValuePtr &Val) {
   std::string Ret;
@@ -71,12 +70,6 @@ std::string toString(const ExtValuePtr &Val) {
     OS << "Value: " << **V;
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     OS << "ReturnValue: " + ValueNamer::getName(*F->Func, "func_");
-  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
-    OS << ValueNamer::getName(*const_cast<llvm::CallBase *>(Arg->Call)) +
-              "_CallArg_" + std::to_string(Arg->Index);
-  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
-    OS << ValueNamer::getName(*const_cast<llvm::CallBase *>(Ret->Call)) +
-              "_CallRet";
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     OS << "IntConstant: " << *IC->Val << ", User: " << *IC->User;
   } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
@@ -104,10 +97,6 @@ llvm::Type *getType(const ExtValuePtr &Val) {
     return (*V)->getType();
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     return F->Func->getReturnType();
-  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
-    return Arg->Call->getArgOperand(Arg->Index)->getType();
-  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
-    return Ret->Call->getType();
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     return IC->Val->getType();
   } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
@@ -154,12 +143,6 @@ std::string getName(const ExtValuePtr &Val) {
     return ValueNamer::getName(**V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     return "ReturnValue_" + ValueNamer::getName(*F->Func, "func_");
-  } else if (auto Arg = std::get_if<CallArg>(&Val)) {
-    return ValueNamer::getName(*const_cast<llvm::CallBase *>(Arg->Call)) +
-           "_CallArg_" + std::to_string(Arg->Index);
-  } else if (auto Ret = std::get_if<CallRet>(&Val)) {
-    return ValueNamer::getName(*const_cast<llvm::CallBase *>(Ret->Call)) +
-           "_CallRet";
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
       return "IntConstant_" + int_to_hex(CI->getSExtValue());
@@ -594,7 +577,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           retypd::NFADeterminizer<>::allOutLabels(It->first,
                                                   ignoreForgetAndOne);
       for (auto &L : outLabels) {
-        auto S = countClosureNoPrimitiveEdges(retypd::NFADeterminizer<>::move(It->first, L));
+        auto S = countClosureNoPrimitiveEdges(
+            retypd::NFADeterminizer<>::move(It->first, L));
         if (DTrans.count(S) == 0) {
           auto NewNodeEnt = getOrSetNewNode(S);
           Worklist.push(NewNodeEnt);
@@ -802,10 +786,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       return *V;
     } else if (auto F = std::get_if<ReturnValue>(&Val)) {
       return llvm2c::RetVal{.Func = F->Func, .Index = F->Index};
-    } else if (auto Arg = std::get_if<CallArg>(&Val)) {
-      assert(false);
-    } else if (auto Ret = std::get_if<CallRet>(&Val)) {
-      assert(false);
     } else if (auto IC = std::get_if<UConstant>(&Val)) {
       return llvm2c::UsedConstant(IC->Val, IC->User, IC->OpInd);
     } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
@@ -1571,7 +1551,8 @@ void ConstraintsGenerator::determinize() {
   // for each node in the value map
   for (auto *Node : V2NNodes) {
     auto *BakNode = This2Bak.at(Node);
-    std::set<CGNode *> StartSet = retypd::countClosureNoPrimitiveEdges({BakNode});
+    std::set<CGNode *> StartSet =
+        retypd::countClosureNoPrimitiveEdges({BakNode});
     auto pair1 = DTrans.emplace(StartSet, Node);
     if (pair1.second) {
       Worklist.push(pair1.first);
@@ -1587,7 +1568,8 @@ void ConstraintsGenerator::determinize() {
     std::set<retypd::EdgeLabel> outLabels =
         retypd::NFADeterminizer<>::allOutLabels(It->first);
     for (auto &L : outLabels) {
-      auto S = countClosureNoPrimitiveEdges(retypd::NFADeterminizer<>::move(It->first, L));
+      auto S = countClosureNoPrimitiveEdges(
+          retypd::NFADeterminizer<>::move(It->first, L));
       if (S.count(Backup.getEndNode())) {
         if (S.size() > 1) {
           for (auto *Node : S) {
@@ -1926,10 +1908,6 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User,
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     auto tv = getTypeVar(F->Func, nullptr, -1);
     return tv.pushLabel(retypd::OutLabel{});
-  } else if (auto Arg = std::get_if<CallArg>(&Val)) { // TODO: deprecated
-    assert(false);
-  } else if (auto Ret = std::get_if<CallRet>(&Val)) { // TODO: deprecated
-    assert(false);
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
@@ -2656,24 +2634,6 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
 
   void printInfoComment(const llvm::Value &V,
                         llvm::formatted_raw_ostream &OS) override {
-
-    // TODO: print CallArg and CallRet
-    // if (auto Call = llvm::dyn_cast<CallBase>(&V)) {
-    //   OS << " ; ";
-    //   if (!Call->getType()->isVoidTy()) {
-    //     OS << CG.getNode(CallArg{.Func = const_cast<llvm::Function *>(F)},
-    //                      nullptr)
-    //               .str();
-    //     OS << " -> ";
-    //   }
-    //   OS << "(";
-    //   for (auto &Arg : F->args()) {
-    //     OS << CG.getNode(CallRet{.Call = Call, .Index = }, nullptr).str()
-    //        << ", ";
-    //   }
-    //   OS << ")";
-    //   OS << "\n";
-    // }
 
     const Instruction *Instr = dyn_cast<Instruction>(&V);
     if (Instr == nullptr) {
