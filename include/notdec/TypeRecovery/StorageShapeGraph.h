@@ -21,7 +21,7 @@
 #include <llvm/IR/Value.h>
 
 #include "TypeRecovery/Schema.h"
-#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/Interface/Range.h"
 #include "Utils/Utils.h"
 
 namespace notdec {

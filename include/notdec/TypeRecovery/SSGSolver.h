@@ -2,7 +2,7 @@
 #define _NOTDEC_SSGSOLVER_H_
 
 #include "TypeRecovery/StorageShapeGraph.h"
-#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/Interface/Range.h"
 #include "Passes/ConstraintGenerator.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstVisitor.h>

@@ -40,8 +40,8 @@
 #include "Utils/ValueNamer.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
-#include "notdec-llvm2c/Range.h"
-#include "notdec-llvm2c/StructManager.h"
+#include "notdec-llvm2c/Interface/Range.h"
+#include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Interface.h"
 #endif
 

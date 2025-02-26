@@ -33,7 +33,7 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/TRContext.h"
 #include "Utils/ValueNamer.h"
-#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/Interface/Range.h"
 #include "Passes/ConstraintGenerator.h"
 #include "Utils/Utils.h"
 

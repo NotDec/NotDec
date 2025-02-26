@@ -5,8 +5,8 @@
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
 #include "Utils/ValueNamer.h"
-#include "notdec-llvm2c/Range.h"
-#include "notdec-llvm2c/StructManager.h"
+#include "notdec-llvm2c/Interface/Range.h"
+#include "notdec-llvm2c/Interface/StructManager.h"
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclBase.h>

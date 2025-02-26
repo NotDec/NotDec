@@ -20,7 +20,7 @@
 #include <llvm/IR/InstrTypes.h>
 
 #include "LowTy.h"
-#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/Interface/Range.h"
 #include "Utils/Utils.h"
 
 namespace notdec::retypd {

@@ -1,5 +1,5 @@
 #include "TypeRecovery/StorageShapeGraph.h"
-#include "notdec-llvm2c/Range.h"
+#include "notdec-llvm2c/Interface/Range.h"
 #include "Passes/ConstraintGenerator.h"
 #include <cassert>
 #include <cctype>
