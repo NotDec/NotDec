@@ -14,7 +14,7 @@
 
 #include <llvm/IR/Operator.h>
 
-#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "Passes/retdec-stack/retdec-symbolic-tree.h"
 
 namespace retdec {
 namespace bin2llvmir {

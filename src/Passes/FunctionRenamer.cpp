@@ -6,7 +6,7 @@
 #include <llvm/Support/raw_ostream.h>
 using namespace llvm;
 
-namespace notdec::frontend::optimizers {
+namespace notdec::frontend::passes {
 
 /// Find some stub function calls. rename jmp_XXX.
 class FunctionRenamer : public PassInfoMixin<FunctionRenamer> {
@@ -40,4 +40,4 @@ public:
   }
 };
 
-} // namespace notdec::frontend::optimizers
+} // namespace notdec::frontend::passes

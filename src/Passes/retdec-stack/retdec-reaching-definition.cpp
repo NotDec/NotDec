@@ -18,7 +18,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 // #include "retdec/utils/time.h"
-#include "optimizers/retdec-stack/retdec-reaching-definition.h"
+#include "Passes/retdec-stack/retdec-reaching-definition.h"
 // #include "retdec/bin2llvmir/providers/asm_instruction.h"
 // #include "retdec/bin2llvmir/providers/names.h"
 // #include "retdec/bin2llvmir/utils/llvm.h"

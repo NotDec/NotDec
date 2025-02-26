@@ -3,7 +3,7 @@
 
 #include "TypeRecovery/StorageShapeGraph.h"
 #include "notdec-llvm2c/Range.h"
-#include "optimizers/ConstraintGenerator.h"
+#include "Passes/ConstraintGenerator.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstVisitor.h>
 #include <llvm/IR/InstrTypes.h>

@@ -1,7 +1,7 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "Utils/ValueNamer.h"
-#include "optimizers/ConstraintGenerator.h"
+#include "Passes/ConstraintGenerator.h"
 #include <cassert>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>

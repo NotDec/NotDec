@@ -14,7 +14,7 @@
 // #include "retdec/bin2llvmir/providers/asm_instruction.h"
 // #include "retdec/bin2llvmir/providers/names.h"
 // #include "retdec/bin2llvmir/utils/debug.h"
-#include "optimizers/retdec-stack/retdec-ir-modifier.h"
+#include "Passes/retdec-stack/retdec-ir-modifier.h"
 // #include "retdec/bin2llvmir/utils/llvm.h"
 
 using namespace llvm;

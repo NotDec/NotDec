@@ -1,7 +1,7 @@
 
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/Schema.h"
-#include "optimizers/ConstraintGenerator.h"
+#include "Passes/ConstraintGenerator.h"
 #include <cassert>
 #include <llvm/ADT/iterator_range.h>
 #include <queue>

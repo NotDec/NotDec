@@ -1,6 +1,6 @@
 #include "TypeRecovery/SSGSolver.h"
 #include "TypeRecovery/StorageShapeGraph.h"
-#include "optimizers/ConstraintGenerator.h"
+#include "Passes/ConstraintGenerator.h"
 
 namespace notdec::retypd {
 

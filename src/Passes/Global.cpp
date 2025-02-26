@@ -18,7 +18,7 @@
 using namespace llvm;
 //TOOD 如何化简临时变量为实际的esp偏移量
 // 如果存的是动态的指针怎么办
-namespace notdec::frontend::optimizers
+namespace notdec::frontend::passes
 {
 
   struct stack : PassInfoMixin<stack>

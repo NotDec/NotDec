@@ -15,7 +15,7 @@
 #include "notdec-llvm2c/Interface.h"
 #endif
 
-#include "optimizers/PassManager.h"
+#include "Passes/PassManager.h"
 #include "Utils/Utils.h"
 
 using namespace llvm;
@@ -159,7 +159,7 @@ int main(int argc, char *argv[]) {
 
   // run passes and dump IR
   if (!opts.disableAllPasses) {
-    notdec::optimizers::DecompileConfig conf(Ctx.getModule(), outputFilename,
+    notdec::passes::DecompileConfig conf(Ctx.getModule(), outputFilename,
                                              Ctx.opt, getLLVM2COptions());
     conf.run_passes();
   } else {

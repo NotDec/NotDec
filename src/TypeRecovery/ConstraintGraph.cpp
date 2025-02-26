@@ -34,7 +34,7 @@
 #include "TypeRecovery/TRContext.h"
 #include "Utils/ValueNamer.h"
 #include "notdec-llvm2c/Range.h"
-#include "optimizers/ConstraintGenerator.h"
+#include "Passes/ConstraintGenerator.h"
 #include "Utils/Utils.h"
 
 #define DEBUG_TYPE "retypd_graph"

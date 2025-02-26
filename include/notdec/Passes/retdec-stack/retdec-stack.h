@@ -13,7 +13,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
 
-#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "Passes/retdec-stack/retdec-symbolic-tree.h"
 // #include "retdec/bin2llvmir/analyses/symbolic_tree.h"
 // #include "retdec/bin2llvmir/providers/abi/abi.h"
 // #include "retdec/bin2llvmir/providers/config.h"

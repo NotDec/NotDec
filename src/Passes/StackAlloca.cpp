@@ -1,5 +1,5 @@
-#include "optimizers/StackAlloca.h"
-#include "optimizers/StackPointerFinder.h"
+#include "Passes/StackAlloca.h"
+#include "Passes/StackPointerFinder.h"
 #include <cassert>
 #include <cstdint>
 #include <llvm/ADT/STLExtras.h>

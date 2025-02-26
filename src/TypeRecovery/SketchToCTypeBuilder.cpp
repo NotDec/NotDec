@@ -20,7 +20,7 @@
 #include "notdec-llvm2c/Range.h"
 #include "notdec-llvm2c/StructManager.h"
 #include "notdec-llvm2c/StructuralAnalysis.h"
-#include "optimizers/ConstraintGenerator.h"
+#include "Passes/ConstraintGenerator.h"
 #include "Utils/Utils.h"
 
 namespace notdec::retypd {

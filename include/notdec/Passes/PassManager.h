@@ -1,5 +1,5 @@
-#ifndef _NOTDEC_OPTIMIZERS_OPTMANAGER_H_
-#define _NOTDEC_OPTIMIZERS_OPTMANAGER_H_
+#ifndef _NOTDEC_PASSES_OPTMANAGER_H_
+#define _NOTDEC_PASSES_OPTMANAGER_H_
 
 #include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/StringMap.h>
@@ -20,7 +20,7 @@
 #include "DecompilerContext.h"
 #include "notdec-llvm2c/Interface.h"
 
-namespace notdec::optimizers {
+namespace notdec::passes {
 
 struct DecompileConfig {
 
@@ -41,6 +41,6 @@ struct DecompileConfig {
 
 llvm::FunctionPassManager buildFunctionOptimizations();
 
-} // namespace notdec::optimizers
+} // namespace notdec::passes
 
 #endif

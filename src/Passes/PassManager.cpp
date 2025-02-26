@@ -39,23 +39,23 @@
 
 #include "TypeRecovery/TRContext.h"
 #include "notdec-wasm2llvm/utils.h"
-#include "optimizers/ConstraintGenerator.h"
-#include "optimizers/MemOpMatcher.h"
-#include "optimizers/PassManager.h"
-#include "optimizers/PointerTypeRecovery.h"
-#include "optimizers/StackAlloca.h"
-#include "optimizers/StackPointerFinder.h"
-#include "optimizers/retdec-stack/retdec-abi.h"
-#include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
-#include "optimizers/retdec-stack/retdec-stack.h"
-#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "Passes/ConstraintGenerator.h"
+#include "Passes/MemOpMatcher.h"
+#include "Passes/PassManager.h"
+#include "Passes/PointerTypeRecovery.h"
+#include "Passes/StackAlloca.h"
+#include "Passes/StackPointerFinder.h"
+#include "Passes/retdec-stack/retdec-abi.h"
+#include "Passes/retdec-stack/retdec-stack-pointer-op-remove.h"
+#include "Passes/retdec-stack/retdec-stack.h"
+#include "Passes/retdec-stack/retdec-symbolic-tree.h"
 #include "Utils/Utils.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-llvm2c/Interface.h"
 #endif
 
-namespace notdec::optimizers {
+namespace notdec::passes {
 
 using notdec::frontend::wasm::MEM_NAME;
 
@@ -479,4 +479,4 @@ llvm::FunctionPassManager buildFunctionOptimizations() {
   return FPM;
 }
 
-} // namespace notdec::optimizers
+} // namespace notdec::passes

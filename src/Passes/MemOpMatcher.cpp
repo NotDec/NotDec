@@ -1,6 +1,6 @@
 
-#include "optimizers/MemOpMatcher.h"
-#include "optimizers/ConstraintGenerator.h"
+#include "Passes/MemOpMatcher.h"
+#include "Passes/ConstraintGenerator.h"
 #include <cstdint>
 #include <functional>
 #include <llvm/ADT/Optional.h>

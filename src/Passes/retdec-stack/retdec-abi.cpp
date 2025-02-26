@@ -4,7 +4,7 @@
  * @copyright (c) 2017 Avast Software, licensed under the MIT license
  */
 
-#include "optimizers/retdec-stack/retdec-abi.h"
+#include "Passes/retdec-stack/retdec-abi.h"
 #include <cstdlib>
 #include <iostream>
 // #include "retdec/bin2llvmir/providers/abi/arm.h"

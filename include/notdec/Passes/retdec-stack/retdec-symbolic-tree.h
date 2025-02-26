@@ -20,7 +20,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 
-#include "optimizers/retdec-stack/retdec-reaching-definition.h"
+#include "Passes/retdec-stack/retdec-reaching-definition.h"
 // #include "retdec/bin2llvmir/analyses/reaching_definitions.h"
 // #include "retdec/bin2llvmir/providers/fileimage.h"
 

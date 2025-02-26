@@ -12,10 +12,10 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 
-#include "optimizers/retdec-stack/retdec-abi.h"
-#include "optimizers/retdec-stack/retdec-utils.h"
+#include "Passes/retdec-stack/retdec-abi.h"
+#include "Passes/retdec-stack/retdec-utils.h"
 // #include "retdec/utils/string.h"
-#include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
+#include "Passes/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "Utils/Utils.h"
 // #include "retdec/bin2llvmir/utils/debug.h"
 

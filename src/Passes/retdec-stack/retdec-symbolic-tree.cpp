@@ -15,12 +15,12 @@
 #include <llvm/IR/Operator.h>
 
 // #include "retdec/utils/string.h"
-#include "optimizers/retdec-stack/retdec-symbolic-tree.h"
+#include "Passes/retdec-stack/retdec-symbolic-tree.h"
 // #include "retdec/bin2llvmir/utils/llvm.h"
 // #include "retdec/bin2llvmir/providers/asm_instruction.h"
 // #include "retdec/bin2llvmir/providers/config.h"
-// #include "optimizers/retdec-stack/retdec-utils.h"
-#include "optimizers/retdec-stack/retdec-symbolic-tree-match.h"
+// #include "Passes/retdec-stack/retdec-utils.h"
+#include "Passes/retdec-stack/retdec-symbolic-tree-match.h"
 
 using namespace llvm;
 using namespace retdec::bin2llvmir::st_match;

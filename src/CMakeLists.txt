@@ -2,19 +2,19 @@ add_subdirectory(datalog)
 
 add_library(notdec STATIC
 	# source files that are common to all frontend
-	optimizers/PassManager.cpp
-	optimizers/PointerTypeRecovery.cpp
-	optimizers/StackPointerFinder.cpp
-	optimizers/StackAlloca.cpp
-	optimizers/MemOpMatcher.cpp
-	optimizers/ConstraintGenerator.cpp
-	optimizers/retdec-stack/retdec-abi.cpp
-	optimizers/retdec-stack/retdec-ir-modifier.cpp
-	optimizers/retdec-stack/retdec-reaching-definition.cpp
-	optimizers/retdec-stack/retdec-stack.cpp
-	optimizers/retdec-stack/retdec-stack-pointer-op-remove.cpp
-	optimizers/retdec-stack/retdec-symbolic-tree.cpp
-	optimizers/retdec-stack/retdec-utils.cpp
+	Passes/PassManager.cpp
+	Passes/PointerTypeRecovery.cpp
+	Passes/StackPointerFinder.cpp
+	Passes/StackAlloca.cpp
+	Passes/MemOpMatcher.cpp
+	Passes/ConstraintGenerator.cpp
+	Passes/retdec-stack/retdec-abi.cpp
+	Passes/retdec-stack/retdec-ir-modifier.cpp
+	Passes/retdec-stack/retdec-reaching-definition.cpp
+	Passes/retdec-stack/retdec-stack.cpp
+	Passes/retdec-stack/retdec-stack-pointer-op-remove.cpp
+	Passes/retdec-stack/retdec-symbolic-tree.cpp
+	Passes/retdec-stack/retdec-utils.cpp
 	TypeRecovery/Lattice.cpp
 	TypeRecovery/DotSummaryParser.cpp
 	TypeRecovery/Parser.cpp

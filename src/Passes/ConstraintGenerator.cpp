@@ -53,8 +53,8 @@
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Range.h"
 #include "notdec-llvm2c/StructManager.h"
-#include "optimizers/ConstraintGenerator.h"
-#include "optimizers/StackPointerFinder.h"
+#include "Passes/ConstraintGenerator.h"
+#include "Passes/StackPointerFinder.h"
 #include "Utils/Utils.h"
 
 #define DEBUG_TYPE "type-recovery"

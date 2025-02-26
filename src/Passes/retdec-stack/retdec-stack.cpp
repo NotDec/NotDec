@@ -20,13 +20,13 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/Support/Casting.h>
 
-#include "optimizers/retdec-stack/retdec-abi.h"
-#include "optimizers/retdec-stack/retdec-stack.h"
+#include "Passes/retdec-stack/retdec-abi.h"
+#include "Passes/retdec-stack/retdec-stack.h"
 
 // #include "retdec/bin2llvmir/analyses/reaching_definitions.h"
 // #include "retdec/bin2llvmir/optimizations/stack/stack.h"
 // #include "retdec/bin2llvmir/providers/asm_instruction.h"
-#include "optimizers/retdec-stack/retdec-ir-modifier.h"
+#include "Passes/retdec-stack/retdec-ir-modifier.h"
 
 using namespace llvm;
 

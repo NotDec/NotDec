@@ -1,5 +1,5 @@
-#ifndef _NOTDEC_OPTIMIZERS_STACK_ALLOCA_H_
-#define _NOTDEC_OPTIMIZERS_STACK_ALLOCA_H_
+#ifndef _NOTDEC_PASSES_STACK_ALLOCA_H_
+#define _NOTDEC_PASSES_STACK_ALLOCA_H_
 
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/PassManager.h>
