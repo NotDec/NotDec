@@ -2,7 +2,7 @@
 #define _NOTDEC_RETYPD_SCHEMA_H_
 
 #include "notdec-llvm2c/Range.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 #include <cassert>
 #include <cstdint>
 #include <deque>

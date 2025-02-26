@@ -16,7 +16,7 @@
 #include "optimizers/retdec-stack/retdec-utils.h"
 // #include "retdec/utils/string.h"
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 // #include "retdec/bin2llvmir/utils/debug.h"
 
 

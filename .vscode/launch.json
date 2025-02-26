@@ -13,7 +13,8 @@
         "${file}",
         "-o",
         "${file}.c",
-        // "-debug-only=retypd_graph",
+        // "-debug-only=type-recovery",
+        "-debug-only=retypd_graph",
         // "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
@@ -111,7 +112,7 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "NOTDEC_SAT_DENSESUBTYPE": "1",
+        // "NOTDEC_SAT_DENSESUBTYPE": "1",
         "DEBUG_TRANS_SAT_GRAPH": "1",
         "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1",
         "DEBUG_TRANS_CV_SPLIT_GRAPH": "1",

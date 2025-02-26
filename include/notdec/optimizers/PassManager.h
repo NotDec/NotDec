@@ -17,7 +17,7 @@
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/Mem2Reg.h>
 
-#include "context.h"
+#include "DecompilerContext.h"
 #include "notdec-llvm2c/Interface.h"
 
 namespace notdec::optimizers {

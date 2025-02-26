@@ -27,7 +27,7 @@ add_library(notdec STATIC
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/SketchToCTypeBuilder.cpp
 	Utils/ValueNamer.cpp
-	utils.cpp
+	Utils/Utils.cpp
 )
 
 # include直接在外部设置了src目录。
@@ -65,7 +65,7 @@ set_target_properties(notdec
 # 添加可执行文件
 
 add_executable(notdec-decompile 
-	notdec.cpp
+	NotDec.cpp
 )
 
 # target_compile_features(bin2pat PUBLIC cxx_std_17)

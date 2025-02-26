@@ -36,7 +36,7 @@
 #include "datalog/fact-generator.h"
 #include "optimizers/PointerTypeRecovery.h"
 #include "optimizers/StackPointerFinder.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 
 #define DEBUG_TYPE "pointer-type-recovery"
 

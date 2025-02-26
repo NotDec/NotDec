@@ -1,5 +1,5 @@
 #include "TypeRecovery/LowTy.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 #include <cassert>
 #include <iostream>
 #include <llvm/IR/LLVMContext.h>

@@ -21,7 +21,7 @@
 
 #include "LowTy.h"
 #include "notdec-llvm2c/Range.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 
 namespace notdec::retypd {
 

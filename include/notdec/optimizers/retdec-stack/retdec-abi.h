@@ -15,7 +15,7 @@
 
 #include <llvm/IR/Module.h>
 
-#include "utils.h"
+#include "Utils/Utils.h"
 // #include "retdec/bin2llvmir/providers/asm_instruction.h"
 // #include "retdec/bin2llvmir/providers/config.h"
 // #include

@@ -22,7 +22,7 @@
 
 #include "TypeRecovery/Schema.h"
 #include "notdec-llvm2c/Range.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 
 namespace notdec {
 struct ConstraintsGenerator;

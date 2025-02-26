@@ -35,7 +35,7 @@
 #include "Utils/ValueNamer.h"
 #include "notdec-llvm2c/Range.h"
 #include "optimizers/ConstraintGenerator.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 
 #define DEBUG_TYPE "retypd_graph"
 

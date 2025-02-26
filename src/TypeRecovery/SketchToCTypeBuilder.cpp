@@ -21,7 +21,7 @@
 #include "notdec-llvm2c/StructManager.h"
 #include "notdec-llvm2c/StructuralAnalysis.h"
 #include "optimizers/ConstraintGenerator.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 
 namespace notdec::retypd {
 

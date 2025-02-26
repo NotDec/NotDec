@@ -49,7 +49,7 @@
 #include "optimizers/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "optimizers/retdec-stack/retdec-stack.h"
 #include "optimizers/retdec-stack/retdec-symbolic-tree.h"
-#include "utils.h"
+#include "Utils/Utils.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-llvm2c/Interface.h"
