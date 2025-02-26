@@ -15,7 +15,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/Schema.h"
-#include "Utils/ValueNamer.h"
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 
 namespace notdec::retypd {
 

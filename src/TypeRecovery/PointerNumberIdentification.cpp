@@ -1,6 +1,6 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/ConstraintGraph.h"
-#include "Utils/ValueNamer.h"
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 #include "Passes/ConstraintGenerator.h"
 #include <cassert>
 #include <iostream>

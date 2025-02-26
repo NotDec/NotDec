@@ -25,7 +25,7 @@
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "notdec-llvm2c/Interface/Range.h"
-#include "Utils/ValueNamer.h"
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 
 namespace notdec {
 struct ConstraintsGenerator;

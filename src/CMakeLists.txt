@@ -26,7 +26,6 @@ add_library(notdec STATIC
 	TypeRecovery/Sketch.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/SketchToCTypeBuilder.cpp
-	Utils/ValueNamer.cpp
 	Utils/Utils.cpp
 )
 

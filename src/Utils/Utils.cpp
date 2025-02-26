@@ -14,15 +14,6 @@ std::string getSuffix(std::string fname) {
 }
 namespace notdec {
 
-bool hasUser(const llvm::Value *Val, const llvm::User *User) {
-  for (auto U : Val->users()) {
-    if (U == User) {
-      return true;
-    }
-  }
-  return false;
-}
-
 std::string getFuncSetName(const std::set<llvm::Function *> &SCC) {
   std::string SCCNames;
   for (auto *F : SCC) {

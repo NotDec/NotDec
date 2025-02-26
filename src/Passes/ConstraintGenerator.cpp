@@ -52,10 +52,10 @@
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
 #include "Utils/Utils.h"
-#include "Utils/ValueNamer.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 
 #define DEBUG_TYPE "type-recovery"
 
@@ -63,113 +63,15 @@ namespace notdec {
 
 using retypd::OffsetLabel;
 
-std::string toString(const ExtValuePtr &Val) {
-  std::string Ret;
-  llvm::raw_string_ostream OS(Ret);
-  if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    OS << "Value: " << **V;
-  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    OS << "ReturnValue: " + ValueNamer::getName(*F->Func, "func_");
-  } else if (auto IC = std::get_if<UConstant>(&Val)) {
-    OS << "IntConstant: " << *IC->Val << ", User: " << *IC->User;
-  } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
-    OS << "ConstantAddr: " << *CA->Val;
-  } else {
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "ERROR: getName: unhandled type of ExtValPtr\n";
-    std::abort();
-  }
-  return Ret;
-}
-
-void dump(const ExtValuePtr &Val) { llvm::errs() << toString(Val) << "\n"; }
-
 static inline TypeVariable makeTv(std::shared_ptr<retypd::TRContext> Ctx,
                                   std::string Name) {
   return retypd::TypeVariable::CreateDtv(*Ctx, Name);
-}
-
-llvm::Type *getType(const ExtValuePtr &Val) {
-  if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    if (auto F = dyn_cast<Function>(*V)) {
-      return F->getFunctionType();
-    }
-    return (*V)->getType();
-  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    return F->Func->getReturnType();
-  } else if (auto IC = std::get_if<UConstant>(&Val)) {
-    return IC->Val->getType();
-  } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
-    return CA->Val->getType();
-  }
-  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getType: unhandled type of ExtValPtr\n";
-  std::abort();
-}
-
-unsigned int getSize(llvm::Type *Ty, unsigned int pointer_size) {
-  assert(pointer_size != 0);
-  if (Ty->isPointerTy()) {
-    return pointer_size;
-  }
-  if (!Ty->isAggregateType() && !Ty->isVectorTy()) {
-    return Ty->getScalarSizeInBits();
-  }
-  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getSize: unhandled llvm type: " << *Ty << "\n";
-  std::abort();
-}
-
-unsigned int getSize(const ExtValuePtr &Val, unsigned int pointer_size) {
-  return getSize(getType(Val), pointer_size);
-}
-
-// TODO refactor: increase code reusability
-ExtValuePtr getExtValuePtr(llvm::Value *V, User *User, long OpInd) {
-  ExtValuePtr Val = V;
-  if (!isa<GlobalValue>(*V)) {
-    if (auto CI = dyn_cast<Constant>(V)) {
-      assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
-      assert(hasUser(V, User) &&
-             "convertTypeVarVal: constant not used by user");
-      Val = UConstant{.Val = cast<Constant>(V), .User = User, .OpInd = OpInd};
-    }
-  }
-  return Val;
-}
-
-std::string getName(const ExtValuePtr &Val) {
-  if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    return ValueNamer::getName(**V);
-  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    return "ReturnValue_" + ValueNamer::getName(*F->Func, "func_");
-  } else if (auto IC = std::get_if<UConstant>(&Val)) {
-    if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
-      return "IntConstant_" + int_to_hex(CI->getSExtValue());
-    } else {
-      return "Constant_" + ValueNamer::getName(*IC->Val, "constant_");
-    }
-  } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
-    return "ConstantAddr_" + int_to_hex(CA->Val->getSExtValue());
-  }
-  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: getName: unhandled type of ExtValPtr\n";
-  std::abort();
 }
 
 inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
   llvm::errs() << "  Value: " << *V << " has type: " << CTy.getAsString()
                << "\n";
 }
-
-// auto isGV = [](const ExtValuePtr &N) {
-//   if (auto V = std::get_if<llvm::Value *>(&N)) {
-//     if (llvm::isa<llvm::GlobalValue>(*V)) {
-//       return true;
-//     }
-//   }
-//   return false;
-// };
 
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
@@ -781,21 +683,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     printAnnotatedModule(M, join(DebugDir, "02-AfterBottomUp.anno.ll").c_str());
   }
 
-  auto Convert = [&](ExtValuePtr Val) -> llvm2c::WValuePtr {
-    if (auto V = std::get_if<llvm::Value *>(&Val)) {
-      return *V;
-    } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-      return llvm2c::RetVal{.Func = F->Func, .Index = F->Index};
-    } else if (auto IC = std::get_if<UConstant>(&Val)) {
-      return llvm2c::UsedConstant(IC->Val, IC->User, IC->OpInd);
-    } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
-      return llvm2c::ConsAddr{.Val = CA->Val};
-    }
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "ERROR: getName: unhandled type of ExtValPtr\n";
-    std::abort();
-  };
-
   auto postProcess = [&](ConstraintsGenerator &G,
                          std::map<const CGNode *, CGNode *> &Old2New,
                          std::string DebugDir) -> ConstraintsGenerator {
@@ -937,12 +824,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
         clang::QualType CTy = TB.buildType(*Node);
 
-        if (Result.ValueTypes.count(Convert(Ent.first)) != 0) {
+        if (Result.ValueTypes.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
                        << toString(Ent.first) << "\n";
         }
 
-        Result.ValueTypes[Convert(Ent.first)] = CTy;
+        Result.ValueTypes[Ent.first] = CTy;
 
         if (ValueTypesFile) {
           *ValueTypesFile << " upper bound: " << CTy.getAsString();
@@ -1011,11 +898,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
         clang::QualType CTy = TB.buildType(*Node);
 
-        if (Result.ValueTypesLowerBound.count(Convert(Ent.first)) != 0) {
+        if (Result.ValueTypesLowerBound.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
                        << toString(Ent.first) << "\n";
         }
-        Result.ValueTypesLowerBound[Convert(Ent.first)] = CTy;
+        Result.ValueTypesLowerBound[Ent.first] = CTy;
         if (ValueTypesFile) {
           *ValueTypesFile << " lower bound: " << CTy.getAsString();
         }
