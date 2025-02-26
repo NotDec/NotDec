@@ -1,5 +1,4 @@
 #include <cassert>
-#include <clang/AST/Type.h>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -7,12 +6,6 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <llvm/ADT/Optional.h>
-#include <llvm/IR/InstrTypes.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
-#include <llvm/IR/Value.h>
-#include <llvm/Support/Debug.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -21,6 +14,8 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include <llvm/ADT/SCCIterator.h>
 #include <llvm/ADT/StringExtras.h>
@@ -38,8 +33,13 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
-#include <variant>
-#include <vector>
+#include <clang/AST/Type.h>
+#include <llvm/ADT/Optional.h>
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
+#include <llvm/Support/Debug.h>
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/NFAMinimize.h"
@@ -63,39 +63,6 @@ namespace notdec {
 
 using retypd::OffsetLabel;
 
-ValueNamer ValueNamer::Instance = ValueNamer();
-const char *ValueNamer::DefaultPrefix = "v_";
-const char *ValueNamer::FuncPrefix = "func_";
-const char *ValueNamer::PhiPrefix = "phi_";
-const char *ValueNamer::SelectPrefix = "select_";
-const char *ValueNamer::NewPrefix = "new_";
-const char *ValueNamer::AddPrefix = "add_";
-const char *ValueNamer::SubPrefix = "sub_";
-const char *ValueNamer::StackPrefix = "stack_";
-const char *ValueNamer::AllocaPrefix = "alloca_";
-const char *ValueNamer::LoadPrefix = "load_";
-const char *ValueNamer::StorePrefix = "store_";
-
-std::string getName(const std::set<llvm::Function *> &SCC) {
-  std::string SCCNames;
-  for (auto *F : SCC) {
-    if (!SCCNames.empty()) {
-      SCCNames += ",";
-    }
-    auto FName = F->getName().str();
-    assert(!FName.empty());
-    SCCNames += FName;
-  }
-  return SCCNames;
-}
-
-// When encountered a primitive node, ignore its edges.
-std::set<CGNode *> countClosureFix(const std::set<CGNode *> &N) {
-  auto isNotPrimitive = [](const CGNode *Node) {
-    return !Node->key.Base.isPrimitive();
-  };
-  return retypd::NFADeterminizer<>::countClosure(N, isNotPrimitive);
-}
 
 std::string toString(const ExtValuePtr &Val) {
   std::string Ret;
@@ -124,76 +91,9 @@ std::string toString(const ExtValuePtr &Val) {
 
 void dump(const ExtValuePtr &Val) { llvm::errs() << toString(Val) << "\n"; }
 
-bool mustBePrimitive(const llvm::Type *Ty) {
-  if (Ty->isFloatTy() || Ty->isDoubleTy()) {
-    return true;
-  }
-  if (Ty->isIntegerTy()) {
-    return Ty->getIntegerBitWidth() < 32;
-  }
-  if (Ty->isPointerTy()) {
-    return false;
-  }
-  return false;
-}
-
-// static std::string getLLVMTypeBase(Type *Ty) {
-//   if (Ty->isPointerTy()) {
-//     // 20231122 why there is pointer constant(not inttoptr constant expr)
-//     assert(false && "TODO can this be pointer?");
-//     return getLLVMTypeBase(Ty->getPointerElementType()) + "*";
-//   }
-//   if (Ty->isFloatTy()) {
-//     return "float";
-//   } else if (Ty->isDoubleTy()) {
-//     return "double";
-//   } else if (Ty->isIntegerTy()) {
-//     if (Ty->getIntegerBitWidth() == 1)
-//       return "bool";
-//     else
-//       return "int";
-//     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-//                  << "Warn: unknown integer type: " << *Ty << "\n";
-//     assert(false && "unknown integer type");
-//   } else {
-//     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-//                  << "Warn: unknown constant type: " << *Ty << "\n";
-//     assert(false && "unknown constant type");
-//   }
-// }
-
 static inline TypeVariable makeTv(std::shared_ptr<retypd::TRContext> Ctx,
                                   std::string Name) {
   return retypd::TypeVariable::CreateDtv(*Ctx, Name);
-}
-
-// static inline TypeVariable getLLVMTypeVar(retypd::TRContext &Ctx, Type *Ty) {
-//   return retypd::TypeVariable::CreatePrimitive(Ctx, getLLVMTypeBase(Ty));
-// }
-
-// static bool is32Or64Int(const Type *Ty) {
-//   if (Ty->isIntegerTy()) {
-//     return Ty->getIntegerBitWidth() == 32 || Ty->getIntegerBitWidth() == 64;
-//   }
-//   return false;
-// }
-
-// Check if a primitive type is final. Currently only int is not final for
-// unknown signedness.
-bool isFinal(const std::string &Name) {
-  if (Name == "int") {
-    return false;
-  }
-  return true;
-}
-
-bool hasUser(const Value *Val, const User *User) {
-  for (auto U : Val->users()) {
-    if (U == User) {
-      return true;
-    }
-  }
-  return false;
 }
 
 llvm::Type *getType(const ExtValuePtr &Val) {
@@ -684,7 +584,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     };
 
     std::queue<EntryTy> Worklist;
-    Worklist.push(getOrSetNewNode(countClosureFix(StartNodes)));
+    Worklist.push(getOrSetNewNode(countClosureNoPrimitiveEdges(StartNodes)));
     auto *Ret = Worklist.front()->second;
 
     while (!Worklist.empty()) {
@@ -694,7 +594,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           retypd::NFADeterminizer<>::allOutLabels(It->first,
                                                   ignoreForgetAndOne);
       for (auto &L : outLabels) {
-        auto S = countClosureFix(retypd::NFADeterminizer<>::move(It->first, L));
+        auto S = countClosureNoPrimitiveEdges(retypd::NFADeterminizer<>::move(It->first, L));
         if (DTrans.count(S) == 0) {
           auto NewNodeEnt = getOrSetNewNode(S);
           Worklist.push(NewNodeEnt);
@@ -1671,7 +1571,7 @@ void ConstraintsGenerator::determinize() {
   // for each node in the value map
   for (auto *Node : V2NNodes) {
     auto *BakNode = This2Bak.at(Node);
-    std::set<CGNode *> StartSet = countClosureFix({BakNode});
+    std::set<CGNode *> StartSet = retypd::countClosureNoPrimitiveEdges({BakNode});
     auto pair1 = DTrans.emplace(StartSet, Node);
     if (pair1.second) {
       Worklist.push(pair1.first);
@@ -1687,7 +1587,7 @@ void ConstraintsGenerator::determinize() {
     std::set<retypd::EdgeLabel> outLabels =
         retypd::NFADeterminizer<>::allOutLabels(It->first);
     for (auto &L : outLabels) {
-      auto S = countClosureFix(retypd::NFADeterminizer<>::move(It->first, L));
+      auto S = countClosureNoPrimitiveEdges(retypd::NFADeterminizer<>::move(It->first, L));
       if (S.count(Backup.getEndNode())) {
         if (S.size() > 1) {
           for (auto *Node : S) {
@@ -2906,7 +2806,7 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::fromConstraints(
   if (Summary.Cons.empty()) {
     return nullptr;
   }
-  std::string SCCNames = getName(SCCs);
+  std::string SCCNames = getFuncSetName(SCCs);
   auto Ret = std::make_shared<ConstraintsGenerator>(Ctx, SCCNames, SCCs);
   Ret->CG.instantiateConstraints(Summary);
   Ret->fixSCCFuncMappings();

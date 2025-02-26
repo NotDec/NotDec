@@ -47,16 +47,11 @@
 
 namespace notdec {
 
-std::string getName(const std::set<llvm::Function *> &SCC);
-
 using namespace llvm;
 using retypd::DerivedTypeVariable;
 using retypd::TRContext;
 using retypd::TypeVariable;
 
-bool hasUser(const Value *Val, const User *User);
-bool isFinal(const std::string &Name);
-bool mustBePrimitive(const llvm::Type *Ty);
 
 struct ConstraintsGenerator;
 

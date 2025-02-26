@@ -1,9 +1,9 @@
 
+#include <fstream>
 #include <iostream>
 #include <llvm/IR/Module.h>
-#include <string>
-#include <fstream>
 #include <sstream>
+#include <string>
 
 std::string getSuffix(std::string fname) {
   std::size_t ind = fname.find_last_of('.');
@@ -14,7 +14,29 @@ std::string getSuffix(std::string fname) {
 }
 namespace notdec {
 
-std::string readFileToString(const char* path) {
+bool hasUser(const llvm::Value *Val, const llvm::User *User) {
+  for (auto U : Val->users()) {
+    if (U == User) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string getFuncSetName(const std::set<llvm::Function *> &SCC) {
+  std::string SCCNames;
+  for (auto *F : SCC) {
+    if (!SCCNames.empty()) {
+      SCCNames += ",";
+    }
+    auto FName = F->getName().str();
+    assert(!FName.empty());
+    SCCNames += FName;
+  }
+  return SCCNames;
+}
+
+std::string readFileToString(const char *path) {
   std::ifstream t(path);
   std::stringstream buffer;
   buffer << t.rdbuf();

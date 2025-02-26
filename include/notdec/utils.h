@@ -27,6 +27,8 @@ extern llvm::cl::opt<log_level> logLevel;
 
 namespace notdec {
 
+bool hasUser(const llvm::Value *Val, const llvm::User *User);
+std::string getFuncSetName(const std::set<llvm::Function *> &SCC);
 std::string readFileToString(const char *path);
 
 bool inline startswith(std::string str, const char *prefix) {

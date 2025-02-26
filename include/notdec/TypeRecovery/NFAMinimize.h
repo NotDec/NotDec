@@ -205,6 +205,8 @@ ConstraintGraph
 minimizeWithMap(const ConstraintGraph *G,
                 std::map<std::set<CGNode *>, CGNode *> &NodeMap);
 
+std::set<CGNode *> countClosureNoPrimitiveEdges(const std::set<CGNode *> &N);
+
 } // namespace notdec::retypd
 
 #endif

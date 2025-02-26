@@ -88,4 +88,13 @@ determinizeWithMap(const ConstraintGraph *G,
   return NewG;
 }
 
+// When encountered a primitive node, ignore its edges.
+std::set<CGNode *> countClosureNoPrimitiveEdges(const std::set<CGNode *> &N) {
+  auto isNotPrimitive = [](const CGNode *Node) {
+    return !Node->key.Base.isPrimitive();
+  };
+  return retypd::NFADeterminizer<>::countClosure(N, isNotPrimitive);
+}
+
+
 } // namespace notdec::retypd
