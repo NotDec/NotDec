@@ -17,7 +17,6 @@
 #include <variant>
 #include <vector>
 
-#include <clang/AST/Type.h>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/SCCIterator.h>
 #include <llvm/ADT/StringExtras.h>
@@ -138,9 +137,10 @@ void TypeRecovery::loadSignatureFile(Module &M, const char *SigFile) {
   }
 }
 
-CGNode *TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
-                                std::set<CGNode *> &StartNodes,
-                                const char *NamePrefix) {
+CGNode *
+TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
+                                      std::set<CGNode *> &StartNodes,
+                                      const char *NamePrefix) {
   auto &CG = CurrentTypes.CG;
   std::map<std::set<CGNode *>, CGNode *> DTrans;
   using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
@@ -228,9 +228,10 @@ CGNode *TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes
   return Ret;
 }
 
-ConstraintsGenerator TypeRecovery::postProcess(ConstraintsGenerator &G,
-                                 std::map<const CGNode *, CGNode *> &Old2New,
-                                 std::string DebugDir) {
+ConstraintsGenerator
+TypeRecovery::postProcess(ConstraintsGenerator &G,
+                          std::map<const CGNode *, CGNode *> &Old2New,
+                          std::string DebugDir) {
   ConstraintsGenerator G2 = G.clone(Old2New);
   assert(G2.PG);
   std::string Name = G2.CG.Name;
@@ -1241,11 +1242,39 @@ void ConstraintsGenerator::mergeOnlySubtype() {
     // merge A to B
     LLVM_DEBUG(llvm::dbgs() << "Merge: " << toString(A->key) << " to "
                             << toString(B->key) << "\n");
-    mergeNodeTo(*A, *B, false);
+    mergeNodeTo(*A, *B, true);
     A = nullptr;
     B = nullptr;
     std::tie(A, B) = findMergePair();
   }
+}
+
+std::map<std::pair<OffsetRange, retypd::EdgeLabel>, std::set<CGNode *>>
+allOutOffLabels(std::set<CGNode *> StartSet) {
+  std::map<std::pair<OffsetRange, retypd::EdgeLabel>, std::set<CGNode *>>
+      Result;
+  for (auto *Node : StartSet) {
+    // 1. non offset edges
+    for (auto &Edge : Node->outEdges) {
+      if (retypd::isOffsetOrOne(Edge)) {
+        continue;
+      }
+      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      Result[{OffsetRange(), Edge.getLabel()}].insert(&Target);
+    }
+    for (auto &Ent : Node->Parent.getNodeReachableOffset(*Node)) {
+      auto &Target = Ent.first;
+      auto &Offset = Ent.second;
+      for (auto &Edge : Target->outEdges) {
+        if (retypd::isOffsetOrOne(Edge)) {
+          continue;
+        }
+        auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+        Result[{Offset, Edge.getLabel()}].insert(&Target);
+      }
+    }
+  }
+  return Result;
 }
 
 void ConstraintsGenerator::determinize() {
@@ -1304,7 +1333,7 @@ void ConstraintsGenerator::determinize() {
   for (auto *Node : V2NNodes) {
     auto *BakNode = This2Bak.at(Node);
     std::set<CGNode *> StartSet =
-        retypd::countClosureNoPrimitiveEdges({BakNode});
+        retypd::NFADeterminizer<>::countClosure({BakNode});
     auto pair1 = DTrans.emplace(StartSet, Node);
     if (pair1.second) {
       Worklist.push(pair1.first);
@@ -1317,11 +1346,9 @@ void ConstraintsGenerator::determinize() {
   while (!Worklist.empty()) {
     auto It = Worklist.front();
     auto &Node = *It->second;
-    std::set<retypd::EdgeLabel> outLabels =
-        retypd::NFADeterminizer<>::allOutLabels(It->first);
-    for (auto &L : outLabels) {
-      auto S = countClosureNoPrimitiveEdges(
-          retypd::NFADeterminizer<>::move(It->first, L));
+    auto outLabelsMap = allOutOffLabels(It->first);
+    for (auto &L : outLabelsMap) {
+      auto& S = L.second;
       if (S.count(Backup.getEndNode())) {
         if (S.size() > 1) {
           for (auto *Node : S) {
@@ -1335,7 +1362,17 @@ void ConstraintsGenerator::determinize() {
         Worklist.push(NewNodeEnt);
       }
       auto &ToNode = *DTrans.at(S);
-      CG.onlyAddEdge(Node, ToNode, L);
+
+      auto *FromNode = &Node;
+      if (!L.first.first.isZero()) {
+        auto* TmpNode = &CG.createNodeClonePNI(
+            retypd::NodeKey{TypeVariable::CreateDtv(
+                *Ctx.TRCtx, ValueNamer::getName("offtmp_"))},
+            FromNode->getPNIVar());
+        CG.addEdge(*FromNode, *TmpNode, retypd::RecallLabel{OffsetLabel{L.first.first}});
+        FromNode = TmpNode;
+      }
+      CG.onlyAddEdge(*FromNode, ToNode, L.first.second);
     }
     Worklist.pop();
   }
@@ -1406,7 +1443,7 @@ void ConstraintsGenerator::mergeAfterDeterminize() {
   while (A != nullptr && B != nullptr) {
     // merge A to B
     // TODO eliminate offset loop earlier
-    mergeNodeTo(*A, *B, false);
+    mergeNodeTo(*A, *B, true);
     A = nullptr;
     B = nullptr;
     std::tie(A, B) = findMergePair();

@@ -12,16 +12,16 @@
 #include <optional>
 #include <variant>
 
+#include "Passes/ConstraintGenerator.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
+#include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/StructuralAnalysis.h"
-#include "Passes/ConstraintGenerator.h"
-#include "Utils/Utils.h"
 
 namespace notdec::retypd {
 
@@ -190,6 +190,12 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   for (size_t i = 0; i < Info.Fields.size(); i++) {
     auto &Ent = Info.Fields[i];
 
+    // for merging elem to prev array
+    FieldEntry *Prev = nullptr;
+    if (i > 0) {
+      Prev = &Info.Fields[i - 1];
+    }
+
     // add padding, expand array accordingly
     FieldEntry *Next = nullptr;
     if (i + 1 < Info.Fields.size()) {
@@ -231,10 +237,34 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
       Ent.R.Size = ArraySize;
     }
 
+    // if prev is array
+    if (Prev != nullptr && Prev->Decl != nullptr &&
+        Prev->Decl->getType()->isArrayType()) {
+      auto ElemTy = Prev->Decl->getType()->getArrayElementTypeNoTypeQual();
+      // if current ty is char
+      if (ElemTy == Ty.getTypePtr() && Ty->isCharType()) {
+        if (Prev->R.Start.offset + Prev->R.Size == Ent.R.Start.offset) {
+          // merge to prev
+          Prev->R.Size += Ent.R.Size;
+          // Update array Size
+          Prev->Decl->setType(Ctx.getConstantArrayType(
+              Ty, llvm::APInt(32, Prev->R.Size),
+              clang::IntegerLiteral::Create(Ctx, llvm::APInt(32, Prev->R.Size),
+                                            Ctx.IntTy, clang::SourceLocation()),
+              clang::ArrayType::Normal, 0));
+          Info.Fields.erase(Info.Fields.begin() + i);
+          i--;
+          continue;
+        }
+        // merge to prev
+      }
+    }
+
     auto *FII = &Ctx.Idents.get(ValueNamer::getName("field_"));
     clang::FieldDecl *Field = clang::FieldDecl::Create(
-        Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII, llvm2c::toLValueType(Ctx, Ty),
-        nullptr, nullptr, false, clang::ICIS_CopyInit);
+        Ctx, Decl, clang::SourceLocation(), clang::SourceLocation(), FII,
+        llvm2c::toLValueType(Ctx, Ty), nullptr, nullptr, false,
+        clang::ICIS_CopyInit);
 
     Parent.DeclComments[Field] =
         "at offset: " + std::to_string(Ent.R.Start.offset);

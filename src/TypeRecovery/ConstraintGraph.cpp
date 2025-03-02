@@ -1088,21 +1088,6 @@ std::string toString(const std::set<OffsetRange> &S) {
 std::set<std::pair<CGNode *, OffsetRange>>
 ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
   std::set<std::pair<CGNode *, OffsetRange>> Ret;
-  // fast path, if there is no outgoing or incoming offset edge, only consider
-  // one edge.
-  bool HasOffset = isOffsetRelated(Start);
-
-  if (!HasOffset) {
-    // only check for outgoing one edge
-    for (auto &Edge : Start.outEdges) {
-      if (std::holds_alternative<One>(Edge.Label)) {
-        auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-        Ret.emplace(&Target, OffsetRange());
-      }
-    }
-    return Ret;
-  }
-  // Has at least one offset edge.
   std::vector<std::tuple<CGNode *, CGNode *, rexp::PRExp>> PathSeq;
 
   // Focus on the offset edge and one edge, first build pathseq by iterating the

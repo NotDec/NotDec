@@ -426,6 +426,8 @@ inline bool isOffsetOrOne(const CGEdge &E) {
   return false;
 }
 
+bool isOffsetRelated(CGNode &Start);
+
 } // namespace notdec::retypd
 
 namespace llvm {
