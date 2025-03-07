@@ -426,7 +426,9 @@ inline bool isOffsetOrOne(const CGEdge &E) {
   return false;
 }
 
-bool isOffsetRelated(CGNode &Start);
+
+
+bool hasOffsetEdge(CGNode &Start);
 
 } // namespace notdec::retypd
 

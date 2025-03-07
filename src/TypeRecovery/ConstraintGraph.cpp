@@ -23,6 +23,7 @@
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "Passes/ConstraintGenerator.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/NFAMinimize.h"
@@ -32,10 +33,9 @@
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/TRContext.h"
-#include "notdec-llvm2c/Interface/ValueNamer.h"
-#include "notdec-llvm2c/Interface/Range.h"
-#include "Passes/ConstraintGenerator.h"
 #include "Utils/Utils.h"
+#include "notdec-llvm2c/Interface/Range.h"
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 
 #define DEBUG_TYPE "retypd_graph"
 
@@ -958,6 +958,7 @@ mergeOffsetLabels(const std::vector<std::pair<bool, OffsetRange>> &V) {
   return Val;
 }
 
+// convert a rexp of offset range to a final offset range
 std::set<OffsetRange> calcOffset(rexp::PRExp E) {
   if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
     return {OffsetRange()};
@@ -1054,7 +1055,7 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
   return Ret;
 }
 
-bool isOffsetRelated(CGNode &Start) {
+bool hasOffsetEdge(CGNode &Start) {
   // fast path, if there is no outgoing or incoming offset edge, only consider
   // one(subtype) edge.
   bool HasOffset = false;
@@ -1584,7 +1585,9 @@ void ConstraintGraph::saturate() {
 
       if (DenseSubtype) {
         // Add transitive subtypeing and cancel out offset edges.
-        if (isOffsetRelated(Source)) {
+        // TODO: fix probably has one edge and is still offset related
+        assert(false && "TODO");
+        if (hasOffsetEdge(Source)) {
           auto Re = getNodeReachableOffset(Source);
           for (auto &Ent : Re) {
             if (Ent.first == &Source) {

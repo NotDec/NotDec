@@ -1,9 +1,9 @@
 #ifndef _NOTDEC_RETYPD_SCHEMA_H_
 #define _NOTDEC_RETYPD_SCHEMA_H_
 
+#include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/Utils.h"
-#include "Utils/Utils.h"
 #include <cassert>
 #include <cstdint>
 #include <deque>
@@ -426,7 +426,9 @@ struct TypeVariable {
 
   // TODO prevent name collision
   static const char *Memory;
-  bool isMemory() const { return Var->hasBaseName() && Var->getBaseName() == Memory; }
+  bool isMemory() const {
+    return Var->hasBaseName() && Var->getBaseName() == Memory;
+  }
 
   DerivedTypeVariable::BaseTy getBase() const { return Var->getBase(); }
 
@@ -561,6 +563,17 @@ inline TypeVariable getBase(EdgeLabel label) {
     assert(false && "getBase: Not a ForgetBase or RecallBase");
   }
 }
+
+inline bool isStore(const EdgeLabel &label) {
+  if (auto *RL = std::get_if<RecallLabel>(&label)) {
+    return std::holds_alternative<StoreLabel>(RL->label);
+  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
+    return std::holds_alternative<StoreLabel>(FL->label);
+  } else {
+    return false;
+  }
+}
+
 inline bool isLoadOrStore(const EdgeLabel &label) {
   if (auto *RL = std::get_if<RecallLabel>(&label)) {
     return std::holds_alternative<LoadLabel>(RL->label) ||
@@ -605,19 +618,38 @@ inline FieldLabel getLabel(EdgeLabel label) {
   }
 }
 
-inline bool isLabel(EdgeLabel label) {
+inline bool isLabel(const EdgeLabel &label) {
   return std::holds_alternative<ForgetLabel>(label) ||
          std::holds_alternative<RecallLabel>(label);
 }
 
-inline bool isForget(EdgeLabel label) {
+inline bool isForget(const EdgeLabel &label) {
   return std::holds_alternative<ForgetLabel>(label) ||
          std::holds_alternative<ForgetBase>(label);
 }
 
-inline bool isRecall(EdgeLabel label) {
+inline bool isRecall(const EdgeLabel &label) {
   return std::holds_alternative<RecallLabel>(label) ||
          std::holds_alternative<RecallBase>(label);
+}
+
+inline bool isRecallOffset(const EdgeLabel &label) {
+  if (auto *RL = std::get_if<RecallLabel>(&label)) {
+    return std::holds_alternative<OffsetLabel>(RL->label);
+  } else {
+    return false;
+  }
+}
+
+inline const notdec::retypd::OffsetLabel *
+getOffsetLabel(const EdgeLabel &label) {
+  if (auto *RL = std::get_if<RecallLabel>(&label)) {
+    return std::get_if<OffsetLabel>(&RL->label);
+  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
+    return std::get_if<OffsetLabel>(&FL->label);
+  } else {
+    return nullptr;
+  }
 }
 
 inline bool hasSameBaseOrLabel(EdgeLabel a, EdgeLabel b) {

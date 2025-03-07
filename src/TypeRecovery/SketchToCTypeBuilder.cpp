@@ -148,7 +148,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
   // Check for simple pointer type and array type
   if (!Node.isMemory() && FI.Fields.size() == 1) {
     auto &Field = FI.Fields[0];
-    if (Field.R.Start.offset == 0) {
+    if (Field.R.Start == 0) {
       if (Field.R.Start.access.size() == 0) {
         // simple pointer type
         auto PointeeTy = visitType(Field.Edge->getTargetNode());
@@ -207,8 +207,8 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     // expand the array size to fill up the padding
     // set to Ent.R.Size later if this is really an array.
     if (Next != nullptr &&
-        Ent.R.Start.offset + Ent.R.Size < Next->R.Start.offset) {
-      ArraySize = Next->R.Start.offset - Ent.R.Start.offset;
+        Ent.R.Start + Ent.R.Size < Next->R.Start) {
+      ArraySize = Next->R.Start - Ent.R.Start;
     }
     // for each field/edge
     Ty = visitType(Ent.Edge->getTargetNode(), ArraySize);
@@ -243,7 +243,7 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
       auto ElemTy = Prev->Decl->getType()->getArrayElementTypeNoTypeQual();
       // if current ty is char
       if (ElemTy == Ty.getTypePtr() && Ty->isCharType()) {
-        if (Prev->R.Start.offset + Prev->R.Size == Ent.R.Start.offset) {
+        if (Prev->R.Start + Prev->R.Size == Ent.R.Start) {
           // merge to prev
           Prev->R.Size += Ent.R.Size;
           // Update array Size
@@ -267,11 +267,11 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
         clang::ICIS_CopyInit);
 
     Parent.DeclComments[Field] =
-        "at offset: " + std::to_string(Ent.R.Start.offset);
+        "at offset: " + std::to_string(Ent.R.Start);
     // bool useAnno = false;
     // if (useAnno) {
     //   Field->addAttr(clang::AnnotateAttr::Create(
-    //       Ctx, "off:" + std::to_string(Ent.R.Start.offset), nullptr, 0,
+    //       Ctx, "off:" + std::to_string(Ent.R.Start), nullptr, 0,
     //       clang::AttributeCommonInfo(clang::SourceRange())));
     // }
 
@@ -279,9 +279,9 @@ SketchToCTypeBuilder::TypeBuilderImpl::visitType(const CGNode &Node,
     Decl->addDecl(Field);
 
     // add padding?
-    auto End = Ent.R.Start.offset + Ent.R.Size;
-    if (Next != nullptr && End < Next->R.Start.offset) {
-      auto PaddingSize = Next->R.Start.offset - End;
+    auto End = Ent.R.Start + Ent.R.Size;
+    if (Next != nullptr && End < Next->R.Start) {
+      auto PaddingSize = Next->R.Start - End;
       if (PaddingSize != 0) {
         Ty = Ctx.getConstantArrayType(
             Ctx.CharTy, llvm::APInt(32, PaddingSize),

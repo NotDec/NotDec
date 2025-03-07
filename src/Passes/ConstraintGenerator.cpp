@@ -228,6 +228,266 @@ TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
   return Ret;
 }
 
+std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
+  assert(TypeInfos.empty());
+  // after post process, organize the node with offset edges.
+  // Requirement 1. the graph has only recall, has no one edge.(after
+  // determinize)
+  for (auto &Ent : CG.Nodes) {
+    auto &N = Ent.second;
+    for (auto &E : N.outEdges) {
+      if (std::holds_alternative<retypd::One>(E.Label)) {
+        llvm::errs() << "organizeTypes: Node " << N.key.str()
+                     << " has one edge, should not exist\n";
+        std::abort();
+      }
+      if (std::holds_alternative<retypd::ForgetLabel>(E.Label)) {
+        llvm::errs() << "organizeTypes: Node " << N.key.str()
+                     << " has forget label, should not exist\n";
+        std::abort();
+      }
+      if (retypd::isStore(E.Label)) {
+        llvm::errs() << "organizeTypes: Node " << N.key.str()
+                     << " has store label, should not exist\n";
+        std::abort();
+      }
+    }
+  }
+  // We consider Pointer related edges: subtype(one), offset, load/store.
+  // after determinize, there are only load and recall offset.
+
+  // Requirement 2. require the graph is acyclic in subtype and offset edges.
+  // Requirement 3. load and store edges are merged. there are only load edges.
+
+  // auxiliary function, split in the middle
+  auto splitEdge = [&](const retypd::CGEdge &E, retypd::EdgeLabel E1,
+                       retypd::EdgeLabel E2, std::string Name) -> CGNode & {
+    auto &Source = const_cast<CGNode &>(E.getSourceNode());
+    auto &Target = const_cast<CGNode &>(E.getTargetNode());
+
+    auto *NewNode = &CG.createNodeClonePNI(
+        retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, Name)},
+        Source.getPNIVar());
+    CG.addEdge(Source, *NewNode, E1);
+    CG.addEdge(*NewNode, Target, E2);
+    // remove old edge.
+    CG.removeEdge(Source, Target, E.Label);
+    return *NewNode;
+  };
+
+  // Step 1. separate arrays.
+  // After this step, all nodes with stride access, has only this stride edge
+  // and offset is zero For all edges with stride access, if parent has only
+  // this edge, and the offset is zero, then OK, else, split the edge in the
+  // middle.
+  std::vector<const retypd::CGEdge *> TargetEdges;
+  for (auto &Ent : CG.Nodes) {
+    auto &Source = Ent.second;
+    // Start of End should not have offset edge. So no need to check.
+    bool hasOffset = retypd::hasOffsetEdge(Source);
+    if (!hasOffset) {
+      continue;
+    }
+    bool onlyOneEdge = Source.outEdges.size() == 1;
+    for (auto &E : Source.outEdges) {
+      auto &Target = const_cast<CGNode &>(E.getTargetNode());
+      if (auto *OL = retypd::getOffsetLabel(E.Label)) {
+        // for each offset with access
+        if (OL->range.access.size() == 0) {
+          continue;
+        }
+        if (onlyOneEdge && OL->range.offset == 0) {
+          continue;
+        }
+        // need to split the edge in the middle.
+        TargetEdges.push_back(&E);
+      }
+    }
+  }
+  // split the edge in the middle.
+  for (auto *E : TargetEdges) {
+    auto &Source = const_cast<CGNode &>(E->getSourceNode());
+    auto &Target = const_cast<CGNode &>(E->getTargetNode());
+    auto *OL = retypd::getOffsetLabel(E->Label);
+    assert(OL);
+    auto Off1 = OL->range;
+    Off1.access.clear();
+    auto Off2 = OL->range;
+    Off2.offset = 0;
+    auto &NewNode =
+        splitEdge(*E, retypd::RecallLabel{retypd::OffsetLabel{Off1}},
+                  retypd::RecallLabel{retypd::OffsetLabel{Off2}},
+                  ValueNamer::getName("Arr_"));
+    // mark this node as array..? no handle this later.
+    // auto It = TypeInfos.insert({NewNode, TypeInfo{ArrayInfo{}}});
+    // assert(It.second);
+  }
+
+  std::set<CGNode *> Visited;
+  // Step 2. depth first search to calc pointer range and organize the edges.
+  std::function<void(CGNode &)> doDFS = [&](CGNode &N) {
+    if (!N.getPNIVar()->isPointer()) {
+      return;
+    }
+    // Use TypeInfos as finished set.
+    if (TypeInfos.count(&N)) {
+      return;
+    }
+
+    if (Visited.count(&N)) {
+      llvm::errs() << "Cycle detected in organizeTypes!!\n";
+      std::abort();
+    }
+    Visited.insert(&N);
+
+    // if no offset edge, this is a simple pointer
+    if (!retypd::hasOffsetEdge(N)) {
+      // Check for load or store edge
+      std::optional<unsigned> LoadSize;
+      for (auto &Edge : N.outEdges) {
+        if (retypd::isLoadOrStore(Edge.Label)) {
+          assert(!LoadSize.has_value());
+          LoadSize = retypd::getLoadOrStoreSize(Edge.Label);
+        }
+      }
+      if (!LoadSize.has_value()) {
+        // Is this case really possible?
+        std::cerr << "TODO: handle this case";
+        std::abort();
+      }
+      TypeInfos[&N] =
+          TypeInfo{.Size = LoadSize.value(), .Info = SimpleTypeInfo{}};
+      return;
+    }
+    // check if it is array. If there is only one offset edge.
+    unsigned edgeCount = 0;
+    const CGEdge *OffsetEdge = nullptr;
+    for (auto &Edge : N.outEdges) {
+      if (retypd::getOffsetLabel(Edge.Label)) {
+        edgeCount++;
+        OffsetEdge = &Edge;
+      } else if (retypd::isLoadOrStore(Edge.Label)) {
+        edgeCount++;
+      }
+    }
+    if (edgeCount == 1 && OffsetEdge != nullptr) {
+      auto &Target = const_cast<CGNode &>(OffsetEdge->getTargetNode());
+      if (auto *OL = retypd::getOffsetLabel(OffsetEdge->Label)) {
+        if (OL->range.offset == 0 && OL->range.access.size() > 0) {
+          // this is an array, but we assume element count = 1
+          doDFS(Target);
+          TypeInfos[&N] =
+              TypeInfo{.Size = TypeInfos.at(&Target).Size, .Info = ArrayInfo{}};
+          return;
+        }
+      }
+    }
+    // this is a struct or union.
+    std::vector<FieldEntry> Fields;
+    for (auto &E : N.outEdges) {
+      auto &Target = const_cast<CGNode &>(E.getTargetNode());
+      if (retypd::isLoadOrStore(E.Label)) {
+        // separate the load/store edge as a simple pointer node.
+        auto &New =
+            splitEdge(E, retypd::RecallLabel{OffsetLabel{OffsetRange()}},
+                      E.Label, ValueNamer::getName("F0_"));
+        doDFS(New);
+        auto &TI = TypeInfos.at(&New);
+        assert(TI.Size == retypd::getLoadOrStoreSize(E.Label));
+        Fields.push_back(
+            FieldEntry{.R = SimpleRange{.Start = 0, .Size = TI.Size},
+                       .Edge = &E,
+                       .Target = &New});
+      } else if (auto *OL = retypd::getOffsetLabel(E.Label)) {
+        assert(OL->range.access.size() ==
+               0); // should handled by previous array pass
+        doDFS(Target);
+        auto &TI = TypeInfos.at(&Target);
+        Fields.push_back(FieldEntry{
+            .R = SimpleRange{.Start = OL->range.offset, .Size = TI.Size},
+            .Edge = &E,
+            .Target = &Target});
+      }
+    }
+    // sort the entry by end offset.
+    std::sort(Fields.begin(), Fields.end(),
+              [](const FieldEntry &A, const FieldEntry &B) {
+                return A.R.Start + A.R.Size < B.R.Start + B.R.Size;
+              });
+    // use std::min to find the min start offset.
+    auto MinStartOff =
+        std::min_element(Fields.begin(), Fields.end(),
+                         [](const FieldEntry &A, const FieldEntry &B) {
+                           return A.R.Start < B.R.Start;
+                         })
+            ->R.Start;
+    auto MaxOff = Fields.back().R.Start + Fields.back().R.Size;
+    // after determinize, there will not be nested struct. We assume Offset to
+    // struct == Min Start Offset. So set size as MaxOff - MinStartOff.
+    auto OurSize = MaxOff - MinStartOff;
+
+    std::vector<std::vector<FieldEntry>> UnionPanels;
+    for (auto &F : Fields) {
+      bool inserted = false;
+      for (auto &Panel : UnionPanels) {
+        if (Panel.back().R.Start + Panel.back().R.Size <= F.R.Start) {
+          Panel.push_back(F);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) {
+        UnionPanels.push_back({F});
+      }
+    }
+    // if there is only one panel, this is a struct.
+    if (UnionPanels.size() == 1) {
+      TypeInfos[&N] =
+          TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Fields}};
+      return;
+    }
+    // make previous node a union node.
+    // create new node for each panel struct.
+    std::vector<const retypd::CGEdge *> Members;
+    for (auto &Panel : UnionPanels) {
+      std::string Name = ValueNamer::getName("Us_");
+      auto NN = &CG.createNodeClonePNI(
+          retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, Name)},
+          N.getPNIVar());
+      for (auto &F : Panel) {
+        CG.addEdge(*NN, *F.Target, F.Edge->Label);
+        CG.removeEdge(N, *F.Target, F.Edge->Label);
+      }
+      TypeInfos[NN] =
+          TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Panel}};
+      CG.addEdge(
+          N, *NN,
+          retypd::RecallLabel{OffsetLabel{OffsetRange{.offset = MinStartOff}}});
+      // find the edge to NN and insert to Members.
+      auto It =
+          N.outEdges.find(CGEdge(N, *NN,
+                                 retypd::RecallLabel{OffsetLabel{
+                                     OffsetRange{.offset = MinStartOff}}}));
+      assert(It != N.outEdges.end());
+      Members.push_back(&*It);
+    }
+    TypeInfos[&N] = TypeInfo{
+        .Size = OurSize,
+        .Info = UnionInfo{.R = {MinStartOff, OurSize}, .Members = Members}};
+    return;
+  };
+
+  for (auto &Ent : CG.Nodes) {
+    auto &N = Ent.second;
+    // only consider pointer node.
+    if (!N.getPNIVar()->isPointer()) {
+      continue;
+    }
+    doDFS(N);
+  }
+  return TypeInfos;
+}
+
 ConstraintsGenerator
 TypeRecovery::postProcess(ConstraintsGenerator &G,
                           std::map<const CGNode *, CGNode *> &Old2New,
@@ -266,6 +526,8 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   if (!DebugDir.empty()) {
     G2.CG.printGraph(join(DebugDir, "08-Final.dot").c_str());
   }
+
+  G2.organizeTypes();
 
   assert(G2.PG);
   // G2.DebugDir.clear();
@@ -1348,7 +1610,7 @@ void ConstraintsGenerator::determinize() {
     auto &Node = *It->second;
     auto outLabelsMap = allOutOffLabels(It->first);
     for (auto &L : outLabelsMap) {
-      auto& S = L.second;
+      auto &S = L.second;
       if (S.count(Backup.getEndNode())) {
         if (S.size() > 1) {
           for (auto *Node : S) {
@@ -1365,11 +1627,12 @@ void ConstraintsGenerator::determinize() {
 
       auto *FromNode = &Node;
       if (!L.first.first.isZero()) {
-        auto* TmpNode = &CG.createNodeClonePNI(
+        auto *TmpNode = &CG.createNodeClonePNI(
             retypd::NodeKey{TypeVariable::CreateDtv(
                 *Ctx.TRCtx, ValueNamer::getName("offtmp_"))},
             FromNode->getPNIVar());
-        CG.addEdge(*FromNode, *TmpNode, retypd::RecallLabel{OffsetLabel{L.first.first}});
+        CG.addEdge(*FromNode, *TmpNode,
+                   retypd::RecallLabel{OffsetLabel{L.first.first}});
         FromNode = TmpNode;
       }
       CG.onlyAddEdge(*FromNode, ToNode, L.first.second);

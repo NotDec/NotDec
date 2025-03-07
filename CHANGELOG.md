@@ -23,6 +23,10 @@
 
 ## Changelog
 
+**2025-03-06**
+
+https://stackoverflow.com/questions/67712376/after-updating-gcc-clang-cant-find-libstdc-anymore
+
 **2024-09-06**
 
 InstCombine transforms `add` instructions to `or`, this is ridiculous... In [here](https://github.com/llvm/llvm-project/blob/f15014ff549a8686671a599f7b49ce9963769eaf/llvm/lib/Transforms/InstCombine/InstCombineAddSub.cpp#L1379), If the two number have no common bits set in common, LLVM transforms it into a or instruction. However, or instruction is generally less useful in type recovery, we still need to consider it as an add.

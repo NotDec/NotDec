@@ -171,6 +171,9 @@ struct ConstraintsGenerator {
   bool checkSymmetry();
   void makeSymmetry();
 
+  std::map<CGNode *, TypeInfo> TypeInfos;
+  std::map<CGNode *, TypeInfo> organizeTypes();
+
   // using IndexTy = OffsetRange;
   // struct FieldEntry {
   //   IndexTy Start;
@@ -183,7 +186,7 @@ struct ConstraintsGenerator {
   //   long getMaxOffset() {
   //     long Max = 0;
   //     for (auto &Ent : Fields) {
-  //       Max = std::max(Max, Ent.Start.offset + Ent.Size);
+  //       Max = std::max(Max, Ent.Start + Ent.Size);
   //     }
   //     return Max;
   //   }
