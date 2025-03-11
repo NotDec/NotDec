@@ -52,6 +52,7 @@
 #include "Utils/AllSCCIterator.h"
 #include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface.h"
+#include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
@@ -67,10 +68,7 @@ static inline TypeVariable makeTv(std::shared_ptr<retypd::TRContext> Ctx,
   return retypd::TypeVariable::CreateDtv(*Ctx, Name);
 }
 
-inline void dumpTypes(llvm::Value *V, clang::QualType CTy) {
-  llvm::errs() << "  Value: " << *V << " has type: " << CTy.getAsString()
-               << "\n";
-}
+// #region TypeRecovery
 
 void TypeRecovery::loadSummaryFile(Module &M, const char *SummaryFile) {
   if (getSuffix(SummaryFile) == ".json") {
@@ -228,6 +226,19 @@ TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
   return Ret;
 }
 
+// #endregion TypeRecovery
+
+void ConstraintsGenerator::dumpV2N() {
+  llvm::errs() << CG.getName() << " V2N:\n";
+  for (auto &Ent : V2N) {
+    llvm::errs() << toString(Ent.first) << " -> " << Ent.second.str() << "\n";
+  }
+  llvm::errs() << "V2NContra:\n";
+  for (auto &Ent : V2NContra) {
+    llvm::errs() << toString(Ent.first) << " -> " << Ent.second.str() << "\n";
+  }
+}
+
 std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   assert(TypeInfos.empty());
   // after post process, organize the node with offset edges.
@@ -290,7 +301,6 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     }
     bool onlyOneEdge = Source.outEdges.size() == 1;
     for (auto &E : Source.outEdges) {
-      auto &Target = const_cast<CGNode &>(E.getTargetNode());
       if (auto *OL = retypd::getOffsetLabel(E.Label)) {
         // for each offset with access
         if (OL->range.access.size() == 0) {
@@ -306,18 +316,15 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   }
   // split the edge in the middle.
   for (auto *E : TargetEdges) {
-    auto &Source = const_cast<CGNode &>(E->getSourceNode());
-    auto &Target = const_cast<CGNode &>(E->getTargetNode());
     auto *OL = retypd::getOffsetLabel(E->Label);
     assert(OL);
     auto Off1 = OL->range;
     Off1.access.clear();
     auto Off2 = OL->range;
     Off2.offset = 0;
-    auto &NewNode =
-        splitEdge(*E, retypd::RecallLabel{retypd::OffsetLabel{Off1}},
-                  retypd::RecallLabel{retypd::OffsetLabel{Off2}},
-                  ValueNamer::getName("Arr_"));
+    splitEdge(*E, retypd::RecallLabel{retypd::OffsetLabel{Off1}},
+              retypd::RecallLabel{retypd::OffsetLabel{Off2}},
+              ValueNamer::getName("Arr_"));
     // mark this node as array..? no handle this later.
     // auto It = TypeInfos.insert({NewNode, TypeInfo{ArrayInfo{}}});
     // assert(It.second);
@@ -326,7 +333,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   std::set<CGNode *> Visited;
   // Step 2. depth first search to calc pointer range and organize the edges.
   std::function<void(CGNode &)> doDFS = [&](CGNode &N) {
-    if (!N.getPNIVar()->isPointer()) {
+    if (!N.isPNIPointer()) {
       return;
     }
     // Use TypeInfos as finished set.
@@ -343,20 +350,23 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     // if no offset edge, this is a simple pointer
     if (!retypd::hasOffsetEdge(N)) {
       // Check for load or store edge
-      std::optional<unsigned> LoadSize;
+      std::optional<const retypd::CGEdge *> LoadEdge;
       for (auto &Edge : N.outEdges) {
         if (retypd::isLoadOrStore(Edge.Label)) {
-          assert(!LoadSize.has_value());
-          LoadSize = retypd::getLoadOrStoreSize(Edge.Label);
+          assert(!LoadEdge.has_value());
+          LoadEdge = &Edge;
         }
       }
-      if (!LoadSize.has_value()) {
-        // Is this case really possible?
-        std::cerr << "TODO: handle this case";
-        std::abort();
+      unsigned LoadSize = 0;
+      if (!LoadEdge.has_value()) {
+        // has no edge, a void pointer?
+        LoadEdge = nullptr;
+      } else {
+        LoadSize = retypd::getLoadOrStoreSize((*LoadEdge)->Label);
       }
-      TypeInfos[&N] =
-          TypeInfo{.Size = LoadSize.value(), .Info = SimpleTypeInfo{}};
+      assert(LoadSize % 8 == 0);
+      TypeInfos[&N] = TypeInfo{.Size = LoadSize / 8,
+                               .Info = SimpleTypeInfo{.Edge = *LoadEdge}};
       return;
     }
     // check if it is array. If there is only one offset edge.
@@ -376,8 +386,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         if (OL->range.offset == 0 && OL->range.access.size() > 0) {
           // this is an array, but we assume element count = 1
           doDFS(Target);
-          TypeInfos[&N] =
-              TypeInfo{.Size = TypeInfos.at(&Target).Size, .Info = ArrayInfo{}};
+          TypeInfos[&N] = TypeInfo{.Size = TypeInfos.at(&Target).Size,
+                                   .Info = ArrayInfo{OffsetEdge}};
           return;
         }
       }
@@ -480,7 +490,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   for (auto &Ent : CG.Nodes) {
     auto &N = Ent.second;
     // only consider pointer node.
-    if (!N.getPNIVar()->isPointer()) {
+    if (!N.isPNIPointer()) {
       continue;
     }
     doDFS(N);
@@ -815,9 +825,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // We have a big global type graph, corresponds to C AST that link the
   // declared struct type to the real definition to form a graph.
 
-  TypeRecovery::Result Result;
-  retypd::SketchToCTypeBuilder TB(M.getName());
-
   for (std::size_t Index1 = AllSCCs.size(); Index1 > 0; --Index1) {
     std::size_t SCCIndex = Index1 - 1;
     auto &Data = AllSCCs[SCCIndex];
@@ -1010,6 +1017,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
+  TypeRecovery::Result Result;
+  auto HTCtx = std::make_shared<ast::HTypeContext>();
+  retypd::TypeBuilderContext TBC(*HTCtx, M.getName(), M.getDataLayout());
+  using notdec::ast::HType;
+  using notdec::ast::HTypeContext;
+
   // 3 build AST type for each value in value map
   for (int i = 0; i < AllSCCs.size(); i++) {
     auto &G = *AllSCCs[i].TopDownGenerator;
@@ -1043,6 +1056,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       }
       Val2NodeFile.close();
     }
+
+    retypd::TypeBuilder TB(TBC, G2.TypeInfos);
 
     if (ValueTypesFile) {
       *ValueTypesFile << "UpperBounds:\n";
@@ -1098,7 +1113,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           ValueTypesFile->flush();
         }
         //!! build AST type for the node
-        clang::QualType CTy = TB.buildType(*Node);
+        HType *CTy = TB.buildType(*Node);
 
         if (Result.ValueTypes.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
@@ -1108,7 +1123,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         Result.ValueTypes[Ent.first] = CTy;
 
         if (ValueTypesFile) {
-          *ValueTypesFile << " upper bound: " << CTy.getAsString();
+          *ValueTypesFile << " upper bound: " << CTy->getAsString();
         }
       } else {
         if (ValueTypesFile) {
@@ -1173,7 +1188,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           ValueTypesFile->flush();
         }
         //!! build AST type for the node
-        clang::QualType CTy = TB.buildType(*Node);
+        HType *CTy = TB.buildType(*Node);
 
         if (Result.ValueTypesLowerBound.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
@@ -1181,7 +1196,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         }
         Result.ValueTypesLowerBound[Ent.first] = CTy;
         if (ValueTypesFile) {
-          *ValueTypesFile << " lower bound: " << CTy.getAsString();
+          *ValueTypesFile << " lower bound: " << CTy->getAsString();
         }
       } else {
         if (ValueTypesFile) {
@@ -1200,29 +1215,32 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
   // retypd::Covariant);
   CGNode *MemNode2 = Global2.CG.getMemoryNode(retypd::Covariant);
-  // build AST type for memory node
-  clang::QualType CTy = TB.buildType(*MemNode2);
-  llvm::errs() << "Memory Type: " << CTy.getAsString();
+  retypd::TypeBuilder TBG(TBC, Global2.TypeInfos);
 
-  clang::RecordDecl *Mem =
-      CTy->getPointeeType()->getAs<clang::RecordType>()->getDecl();
-  auto &Info = TB.StructInfos[Mem];
-  Info.Bytes = MemoryBytes;
-  Info.resolveInitialValue();
+  // build AST type for memory node
+  HType *CTy = TBG.buildType(*MemNode2);
+  llvm::errs() << "Memory Type: " << CTy->getAsString() << "\n";
+
+  using notdec::ast::RecordDecl;
+  using notdec::ast::RecordType;
+  RecordDecl *Mem = CTy->getPointeeType()->getAs<RecordType>()->getDecl();
+  // auto &Info = TBC.StructInfos[Mem];
+  // Info.Bytes = MemoryBytes;
+  // Info.resolveInitialValue();
+  Mem->setBytesManager(MemoryBytes);
+  Mem->resolveInitialValue();
 
   // 4 Save the result
   Result.MemoryType = CTy->getPointeeType();
+  Result.MemoryDecl = Mem;
 
   // move the ASTUnit to result
-  Result.ASTUnit = std::move(TB.ASTUnit);
-  Result.DeclComments = std::move(TB.DeclComments);
-  Result.StructInfos = std::move(TB.StructInfos);
-  Result.AllDecls = std::move(TB.AllDecls);
+  Result.HTCtx = HTCtx;
 
   // gen_json("retypd-constrains.json");
 
-  // TODO convert the type back to LLVM IR
-  // print(M, "after-TypeRecovery.ll");
+  // TODO convert the type back to LLVM IR??
+  print(M, "after-TypeRecovery.ll");
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
   return Result;
@@ -1356,6 +1374,7 @@ void ConstraintsGenerator::removeUnreachable() {
 
   // remove all unreachable nodes
   std::vector<CGNode *> ToErase;
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
   for (auto &Ent : CG) {
     auto *Node = &Ent.second;
     if (Node == CG.getStartNode() || Node == CG.getEndNode()) {
@@ -1365,9 +1384,13 @@ void ConstraintsGenerator::removeUnreachable() {
       ToErase.push_back(Node);
       // erase all out edges
       for (auto &Edge : Ent.second.outEdges) {
-        CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+        // CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+        ToRemove.emplace_back(&Edge.FromNode, &Edge.TargetNode, Edge.Label);
       }
     }
+  }
+  for (auto &Ent : ToRemove) {
+    CG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
   }
   for (auto *Node : ToErase) {
     CG.removeNode(Node->key);
@@ -1391,6 +1414,7 @@ void ConstraintsGenerator::eliminateCycle() {
   ConstraintGraph NewG = CG.clone(Old2New);
 
   // remove all edges except one edge, also remove one edge to primitive nodes
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
   for (auto &Ent : NewG) {
     for (auto &Edge : Ent.second.outEdges) {
       if (std::holds_alternative<retypd::One>(Edge.Label)) {
@@ -1399,8 +1423,12 @@ void ConstraintsGenerator::eliminateCycle() {
         }
       }
 
-      NewG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+      // NewG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+      ToRemove.emplace_back(&Edge.FromNode, &Edge.TargetNode, Edge.Label);
     }
+  }
+  for (auto &Ent : ToRemove) {
+    NewG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
   }
 
   // detect loops and merge them
@@ -1546,10 +1574,15 @@ void ConstraintsGenerator::determinize() {
   ConstraintGraph Backup = CG.clone(This2Bak);
   Backup.changeStoreToLoad();
   // remove all edges in the graph
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
   for (auto &Ent : CG) {
     for (auto &Edge : Ent.second.outEdges) {
-      CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+      // CG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
+      ToRemove.push_back({&Edge.FromNode, &Edge.TargetNode, Edge.Label});
     }
+  }
+  for (auto &Ent : ToRemove) {
+    CG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
   }
   // remove all node that is not in the value map
   std::set<CGNode *> V2NNodes;
@@ -1563,13 +1596,18 @@ void ConstraintsGenerator::determinize() {
       V2NNodes.insert(N);
     }
   }
+  std::vector<retypd::NodeKey> ToRemove1;
   for (auto &Ent : CG.Nodes) {
     if (Ent.second.isStartOrEnd()) {
       continue;
     }
     if (!Ent.second.isSpecial() && V2NNodes.count(&Ent.second) == 0) {
-      CG.removeNode(Ent.second.key);
+      // CG.removeNode(Ent.second.key);
+      ToRemove1.push_back(Ent.second.key);
     }
+  }
+  for (auto &Key : ToRemove1) {
+    CG.removeNode(Key);
   }
 
   using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
@@ -1810,6 +1848,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
         auto ArgKey = Node->key;
         ArgKey.Base = ArgKey.Base.pushLabel(
             retypd::InLabel{std::to_string(Arg->getArgNo())});
+        ArgKey.SuffixVariance = !ArgKey.SuffixVariance;
         auto *ArgNode = getNodeOrNull(ArgKey);
         if (ArgNode) {
           V2N.insert(Arg, ArgNode->key);
@@ -1833,6 +1872,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
         auto ArgKey = NodeC->key;
         ArgKey.Base = ArgKey.Base.pushLabel(
             retypd::InLabel{std::to_string(Arg->getArgNo())});
+        ArgKey.SuffixVariance = !ArgKey.SuffixVariance;
         auto *ArgNodeC = getNodeOrNull(ArgKey);
         if (ArgNodeC) {
           V2NContra.insert(Arg, ArgNodeC->key);
@@ -1840,6 +1880,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
       }
     }
   }
+  // dumpV2N();
 }
 
 std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
@@ -2744,72 +2785,6 @@ void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path) {
   }
   CGAnnotationWriter AW((FuncCtxs));
   M.print(os, &AW);
-}
-
-void ConstraintsGenerator::analyzeFieldRange() {
-  // iterate as if trying to convert to AST.
-  // assert(FieldInfoCache.empty());
-  // std::set<CGNode *> Visited;
-}
-
-StructInfo ConstraintsGenerator::getFieldInfo(const CGNode &Node) {
-  // auto It = FieldInfoCache.find(&Node);
-  // if (It != FieldInfoCache.end()) {
-  //   return It->second;
-  // }
-
-  OffsetRange SelfLoopBaseOff;
-  StructInfo Ret;
-  for (auto &Edge : Node.outEdges) {
-    auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-    // assert(&Target != &Node && "Self loop should not exist");
-    if (&Target == &Node) {
-      // for self loop with offset edge
-      if (std::holds_alternative<retypd::RecallLabel>(Edge.getLabel())) {
-        auto *RL = std::get_if<retypd::RecallLabel>(&Edge.getLabel());
-        if (auto *Off = std::get_if<OffsetLabel>(&RL->label)) {
-          assert(SelfLoopBaseOff.isZero() && "Self loop offset already set");
-          SelfLoopBaseOff = Off->range.mulx();
-          continue;
-        }
-      }
-      // self loop with other edge?
-      assert(false && "TODO: how to handle self loop");
-    }
-
-    // for load/store edges, just return pointer size.
-    if (isLoadOrStore(Edge.getLabel())) {
-      Ret.addField(
-          FieldEntry{.R = {.Start = SelfLoopBaseOff,
-                           .Size = (getLoadOrStoreSize(Edge.getLabel()) / 8)},
-                     .Edge = &const_cast<CGEdge &>(Edge)});
-      continue;
-    }
-    // for subtype/offset edges, start offset should be the start(Or the edge
-    // should be updated). recursive to calc size.
-    llvm::Optional<OffsetRange> BaseOff;
-    if (std::holds_alternative<retypd::One>(Edge.getLabel())) {
-      BaseOff.emplace();
-    } else if (auto *RL = std::get_if<retypd::RecallLabel>(&Edge.getLabel())) {
-      if (auto *Off = std::get_if<OffsetLabel>(&RL->label)) {
-        BaseOff = Off->range;
-      }
-    } else if (auto FL = std::get_if<retypd::ForgetLabel>(&Edge.getLabel())) {
-      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "ERROR: ForgetLabel should not exist?: "
-                   << toString(Edge.getLabel()) << "\n";
-      std::abort();
-    }
-    // assert(BaseOff.hasValue() && "Base offset not set");
-    auto Fields = getFieldInfo(Target);
-    auto MaxOff = Fields.getMaxOffset();
-    Ret.addField(
-        FieldEntry{.R = {.Start = SelfLoopBaseOff + *BaseOff, .Size = MaxOff},
-                   .Edge = &const_cast<CGEdge &>(Edge)});
-  }
-
-  // FieldInfoCache[&Node] = Ret;
-  return Ret;
 }
 
 std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::fromConstraints(

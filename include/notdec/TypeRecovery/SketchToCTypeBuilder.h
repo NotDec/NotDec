@@ -4,16 +4,12 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/Schema.h"
-#include "notdec-llvm2c/Interface/ValueNamer.h"
+#include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
-#include <clang/AST/ASTContext.h>
-#include <clang/AST/Decl.h>
-#include <clang/AST/DeclBase.h>
-#include <clang/AST/Type.h>
-#include <clang/Frontend/ASTUnit.h>
-#include <clang/Tooling/Tooling.h>
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 #include <llvm/ADT/StringRef.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <map>
 #include <memory>
@@ -26,75 +22,76 @@
 
 namespace notdec::retypd {
 
-clang::RecordDecl *createStruct(clang::ASTContext &Ctx,
-                                const char *prefix = "struct_");
+using notdec::ast::HType;
+using notdec::ast::HTypeContext;
+using notdec::ast::TypedefDecl;
 
-struct SketchToCTypeBuilder {
-  struct TypeBuilderImpl {
-    SketchToCTypeBuilder &Parent;
-    clang::ASTContext &Ctx;
-    std::map<const CGNode *, clang::QualType> NodeTypeMap;
-    std::set<const CGNode *> Visited;
+struct TypeBuilderContext {
+  // Contains build-specific data like map of CGNode.
 
-    // Main interface: recursively visit the node and build the type
-    clang::QualType visitType(const CGNode &Node, unsigned ArraySize = 0);
-    clang::QualType visitTypeL(const CGNode &Node, unsigned ArraySize = 0) {
-      return llvm2c::toLValueType(Ctx, visitType(Node, ArraySize));
-    }
-
-    TypeBuilderImpl(SketchToCTypeBuilder &Parent)
-        : Parent(Parent), Ctx(Parent.ASTUnit->getASTContext()) {}
-
-    std::map<std::string, clang::QualType> TypeDefs;
-    clang::QualType getUndef(unsigned BitSize) {
-      assert(BitSize > 0);
-      std::string Name = "undef" + std::to_string(BitSize);
-      if (TypeDefs.count(Name)) {
-        return TypeDefs.at(Name);
-      }
-      auto Decl = clang::TypedefDecl::Create(
-          Ctx, Ctx.getTranslationUnitDecl(), clang::SourceLocation(),
-          clang::SourceLocation(), &Ctx.Idents.get(Name),
-          Ctx.CreateTypeSourceInfo(Ctx.getIntTypeForBitwidth(BitSize, false)));
-      Ctx.getTranslationUnitDecl()->addDecl(Decl);
-      auto Ret = Ctx.getTypedefType(Decl);
-      TypeDefs.emplace(Name, Ret);
-      return Ret;
-    }
-
-    clang::QualType getBot(unsigned BitSize) {
-      assert(BitSize > 0);
-      std::string Name = "bottom" + std::to_string(BitSize);
-      if (TypeDefs.count(Name)) {
-        return TypeDefs.at(Name);
-      }
-      auto Decl = clang::TypedefDecl::Create(
-          Ctx, Ctx.getTranslationUnitDecl(), clang::SourceLocation(),
-          clang::SourceLocation(), &Ctx.Idents.get(Name),
-          Ctx.CreateTypeSourceInfo(Ctx.getIntTypeForBitwidth(BitSize, false)));
-      Ctx.getTranslationUnitDecl()->addDecl(Decl);
-      auto Ret = Ctx.getTypedefType(Decl);
-      TypeDefs.emplace(Name, Ret);
-      return Ret;
-    }
-
-    clang::QualType fromLowTy(LowTy LTy, unsigned BitSize);
-    clang::QualType fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy,
-                                  unsigned BitSize);
-  };
-  std::unique_ptr<clang::ASTUnit> ASTUnit;
-  std::map<clang::Decl *, std::string> DeclComments;
-  std::map<clang::Decl *, StructInfo> StructInfos;
-  std::set<clang::Decl *> AllDecls;
-  TypeBuilderImpl Builder;
+  // std::map<clang::Decl *, std::string> DeclComments;
+  // std::map<clang::Decl *, StructInfo> StructInfos;
+  // std::set<clang::Decl *> AllDecls;
+  // TypeBuilder Builder;
+  HTypeContext &Ctx;
+  const llvm::DataLayout &DL;
+  const unsigned PointerSize;
 
   // Todo: Change filename or remove the argument
-  SketchToCTypeBuilder(llvm::StringRef FileName)
-      : ASTUnit(llvm2c::buildAST("decompilation.c")), Builder(*this) {}
+  TypeBuilderContext(HTypeContext &Ctx, llvm::StringRef FileName, const llvm::DataLayout &DL)
+      : Ctx(Ctx), DL(DL),
+        PointerSize(DL.getPointerSize()) {}
+};
 
-  clang::QualType buildType(const CGNode &Root) {
-    return Builder.visitType(Root);
+struct TypeBuilder {
+  TypeBuilderContext &Parent;
+  HTypeContext &Ctx;
+  std::map<const CGNode *, HType *> NodeTypeMap;
+  std::set<const CGNode *> Visited;
+  std::map<CGNode *, TypeInfo> TypeInfos;
+
+  // Main interface: recursively visit the node and build the type
+  HType *buildType(const CGNode &Node, unsigned ArraySize = 0);
+
+  TypeBuilder(TypeBuilderContext &Parent,
+              std::map<CGNode *, TypeInfo> TypeInfos)
+      : Parent(Parent), Ctx(Parent.Ctx), TypeInfos(TypeInfos) {}
+
+  HType *getUndef(unsigned BitSize) {
+    assert(BitSize > 0);
+    std::string Name = "undef" + std::to_string(BitSize);
+    if (auto *Decl = Ctx.getDecl(Name)) {
+      return Ctx.getTypedefType(false, llvm::cast<TypedefDecl>(Decl));
+    }
+
+    // not exist, create it
+    auto Decl = TypedefDecl::Create(Ctx, Name,
+                                    Ctx.getIntegerType(false, BitSize, false));
+    auto Ret = Ctx.getTypedefType(false, Decl);
+    return Ret;
   }
+
+  HType *getBot(unsigned BitSize) {
+    assert(BitSize > 0);
+    std::string Name = "bottom" + std::to_string(BitSize);
+    if (auto *Decl = Ctx.getDecl(Name)) {
+      return Ctx.getTypedefType(false, llvm::cast<TypedefDecl>(Decl));
+    }
+
+    // not exist, create it
+    auto Decl = TypedefDecl::Create(Ctx, Name,
+                                    Ctx.getIntegerType(false, BitSize, false));
+    auto Ret = Ctx.getTypedefType(false, Decl);
+    return Ret;
+  }
+
+  HType *getPtrTy(HType *Pointee) {
+    return Ctx.getPointerType(false, Parent.PointerSize, Pointee);
+  }
+
+  HType *fromLowTy(LowTy LTy, unsigned BitSize);
+  HType *fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy,
+                       unsigned BitSize);
 };
 
 } // namespace notdec::retypd

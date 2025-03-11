@@ -2,11 +2,15 @@
 #define _NOTDEC_RETYPD_LATTICE_H
 
 #include "TypeRecovery/LowTy.h"
+#include "notdec-llvm2c/Interface/HType.h"
 #include <cassert>
 #include <clang/AST/Type.h>
 #include <cstddef>
 #include <optional>
 namespace notdec::retypd {
+
+using notdec::ast::HType;
+using notdec::ast::HTypeContext;
 
 class LatticeTy {
 public:
@@ -24,7 +28,7 @@ public:
   // const LowTy &getLowTy() const;
   bool join(const LatticeTy &other);
   bool meet(const LatticeTy &other);
-  clang::QualType buildType(clang::ASTContext &ctx) const;
+  HType * buildType(HTypeContext &ctx) const;
 
   LatticeTy(LatticeTyKind Kind, unsigned Size) : kind(Kind), Size(Size){};
   LatticeTyKind getKind() const { return kind; }
@@ -44,7 +48,7 @@ public:
   static LatticeTy create(LowTy LTy, std::string TyName);
   bool join(const IntLattice &Other);
   bool meet(const IntLattice &Other);
-  clang::QualType buildType(clang::ASTContext &ctx) const;
+  HType * buildType(HTypeContext &ctx) const;
 
   auto getSign() const { return Sign; }
   bool setSign(Signedness NewSign) {

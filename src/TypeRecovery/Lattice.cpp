@@ -1,12 +1,17 @@
-#include "TypeRecovery/Lattice.h"
-#include "TypeRecovery/LowTy.h"
+
 #include <cassert>
 #include <clang/AST/ASTContext.h>
 #include <llvm/Support/Casting.h>
 
+#include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/LowTy.h"
+#include "notdec-llvm2c/Interface/HType.h"
+
 namespace notdec::retypd {
 
-clang::QualType LatticeTy::buildType(clang::ASTContext &ctx) const {
+
+  
+HType *LatticeTy::buildType(HTypeContext &ctx) const {
   switch (kind) {
   case LK_Int:
     return llvm::cast<IntLattice>(this)->buildType(ctx);
@@ -146,18 +151,18 @@ bool IntLattice::meet(const IntLattice &Other) {
   return false;
 }
 
-clang::QualType IntLattice::buildType(clang::ASTContext &ctx) const {
+HType *  IntLattice::buildType(HTypeContext &Ctx) const {
   assert(getSize() != 0);
   if (getSize() == 8) {
-    return ctx.CharTy;
+    return Ctx.getChar();
   }
   if (Sign == SI_SIGNED) {
-    return ctx.getIntTypeForBitwidth(getSize(), true);
+    return Ctx.getIntegerType(false, getSize(), true);
   } else if (Sign == SI_UNSIGNED) {
-    return ctx.getIntTypeForBitwidth(getSize(), false);
+    return Ctx.getIntegerType(false, getSize(), false);
   }
   // Default to signed? TODO
-  return ctx.getIntTypeForBitwidth(getSize(), true);
+  return Ctx.getIntegerType(false, getSize(), true);
 }
 
 } // namespace notdec::retypd

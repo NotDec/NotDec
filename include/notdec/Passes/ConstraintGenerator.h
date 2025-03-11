@@ -62,7 +62,7 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   friend llvm::AnalysisInfoMixin<TypeRecovery>;
 
   // Specify the result type of this analysis pass.
-  using Result = ::notdec::llvm2c::HighTypes;
+  using Result = ::notdec::llvm2c::HTypeResult;
 
   TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx) : TRCtx(TRCtx) {}
 
@@ -89,13 +89,14 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   void gen_json(std::string OutputFilename);
 
 public:
-  static ConstraintsGenerator postProcess(ConstraintsGenerator &G,
-                                   std::map<const CGNode *, CGNode *> &Old2New,
-                                   std::string DebugDir);
+  static ConstraintsGenerator
+  postProcess(ConstraintsGenerator &G,
+              std::map<const CGNode *, CGNode *> &Old2New,
+              std::string DebugDir);
   // merge nodes to current graph by determinize.
   static CGNode *multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
-                                  std::set<CGNode *> &StartNodes,
-                                  const char *NamePrefix);
+                                         std::set<CGNode *> &StartNodes,
+                                         const char *NamePrefix);
   void loadSummaryFile(Module &M, const char *path);
   void loadSignatureFile(Module &M, const char *path);
   void print(Module &M, std::string path);
@@ -171,31 +172,10 @@ struct ConstraintsGenerator {
   bool checkSymmetry();
   void makeSymmetry();
 
+  void dumpV2N();
+
   std::map<CGNode *, TypeInfo> TypeInfos;
   std::map<CGNode *, TypeInfo> organizeTypes();
-
-  // using IndexTy = OffsetRange;
-  // struct FieldEntry {
-  //   IndexTy Start;
-  //   long Size;
-  //   CGEdge *OutEdge;
-  // };
-  // struct FieldInfo {
-  //   std::vector<FieldEntry> Fields;
-  //   // long TotalSize;
-  //   long getMaxOffset() {
-  //     long Max = 0;
-  //     for (auto &Ent : Fields) {
-  //       Max = std::max(Max, Ent.Start + Ent.Size);
-  //     }
-  //     return Max;
-  //   }
-  // };
-  // Map from (Node, Range) to Edge, FieldDecl*
-  // std::map<CGNode *, FieldInfo> FieldInfoCache;
-  // struct field range analysis.
-  void analyzeFieldRange();
-  static StructInfo getFieldInfo(const CGNode &Node);
 
   void run();
   // clone CG and maintain value map.

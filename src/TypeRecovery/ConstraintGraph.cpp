@@ -180,6 +180,7 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
     PG->mergePNINodes(To.getPNIVar(), From.getPNIVar());
   }
   // Move all edges from From to To
+  std::vector<std::tuple<CGNode*, CGNode*, EdgeLabel>> toRemove;
   for (auto &Edge : From.outEdges) {
     auto *Target = &Edge.TargetNode;
     // for self loop
@@ -189,10 +190,12 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
         assert(!NoSelfLoop);
         onlyAddEdge(To, To, Edge.Label);
       }
-      removeEdge(From, *Target, Edge.Label);
+      // removeEdge(From, *Target, Edge.Label);
+      toRemove.push_back({&From, Target, Edge.Label});
     } else {
       onlyAddEdge(To, Edge.TargetNode, Edge.Label);
-      removeEdge(From, Edge.TargetNode, Edge.Label);
+      // removeEdge(From, Edge.TargetNode, Edge.Label);
+      toRemove.push_back({&From, &Edge.TargetNode, Edge.Label});
     }
   }
   for (auto *Edge : From.inEdges) {
@@ -205,11 +208,16 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
         assert(!NoSelfLoop);
         onlyAddEdge(To, To, Edge->Label);
       }
-      removeEdge(To, From, Edge->getLabel());
+      // removeEdge(To, From, Edge->getLabel());
+      toRemove.push_back({Source, &From, Edge->Label});
     } else {
       onlyAddEdge(Edge->getSourceNode(), To, Edge->getLabel());
-      removeEdge(Edge->getSourceNode(), From, Edge->getLabel());
+      // removeEdge(Edge->getSourceNode(), From, Edge->getLabel());
+      toRemove.push_back({&Edge->getSourceNode(), &From, Edge->Label});
     }
+  }
+  for (auto &[From, Target, Label] : toRemove) {
+    removeEdge(*From, *Target, Label);
   }
   // erase the node
   removeNode(From.key);
@@ -272,8 +280,9 @@ void ConstraintGraph::aggressiveSimplify() {
         if (std::holds_alternative<LoadLabel>(Recall.label)) {
           auto &Load = std::get<LoadLabel>(Recall.label);
           if (hasEdge(Node, Target, RecallLabel{StoreLabel{Load.Size}})) {
+            // break, no need to defer the removal out of the loop.
             removeEdge(Node, Target, RecallLabel{StoreLabel{Load.Size}});
-            continue;
+            break;
           }
         }
       }
@@ -742,10 +751,12 @@ void ConstraintGraph::contraVariantSplit() {
         NodeKey{TypeVariable::CreateDtv(*Ctx, ValueNamer::getName("split_"))},
         N->getPNIVar());
     // Move all incoming recall edge to the new node.
+    std::vector<std::tuple<CGNode*, CGNode*, EdgeLabel>> toRemove;
     for (auto InEdge2 : N->inEdges) {
       if (isRecall(InEdge2->Label)) {
         addEdge(InEdge2->getSourceNode(), NewNode, InEdge2->Label);
-        removeEdge(InEdge2->getSourceNode(), *N, InEdge2->Label);
+        // removeEdge(InEdge2->getSourceNode(), *N, InEdge2->Label);
+        toRemove.push_back({&InEdge2->getSourceNode(), N, InEdge2->Label});
       }
     }
     // Move all outgoing recall edge to the new node.
@@ -753,8 +764,12 @@ void ConstraintGraph::contraVariantSplit() {
       if (isRecall(Edge.Label)) {
         auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
         addEdge(NewNode, Target2, Edge.Label);
-        removeEdge(*N, Target2, Edge.Label);
+        // removeEdge(*N, Target2, Edge.Label);
+        toRemove.push_back({N, &Target2, Edge.Label});
       }
+    }
+    for (auto &[From, To, Label] : toRemove) {
+      removeEdge(*From, *To, Label);
     }
   }
 }
@@ -908,11 +923,17 @@ void ConstraintGraph::pushSplit() {
       }
     }
     // Move all same recall edge to the new node.
+    std::vector<std::tuple<CGNode*, CGNode*, EdgeLabel>> toRemove;
     for (auto InEdge2 : Current->inEdges) {
       if (InEdge2->getLabel() == Recall) {
         addEdge(InEdge2->getSourceNode(), NewNode, InEdge2->getLabel());
-        removeEdge(InEdge2->getSourceNode(), *Current, InEdge2->getLabel());
+        // removeEdge(InEdge2->getSourceNode(), *Current, InEdge2->getLabel());
+        toRemove.emplace_back(&InEdge2->getSourceNode(), Current, InEdge2->getLabel());
       }
+    }
+    for (auto &Ent : toRemove) {
+      auto [Source, Target, Label] = Ent;
+      removeEdge(*Source, *Target, Label);
     }
   }
 }

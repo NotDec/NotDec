@@ -142,9 +142,8 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
           std::make_unique<TypeRecovery::Result>(
               std::move(MAM.getResult<TypeRecovery>(M)));
 
-      std::cerr << "Current Type definitions:\n";
-      HighTypes->ASTUnit->getASTContext().getTranslationUnitDecl()->print(
-          llvm::errs(), 2);
+      
+      HighTypes->dump();
 
       std::error_code EC;
       llvm::raw_fd_ostream os(OutFilePath, EC);
