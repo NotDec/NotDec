@@ -1,5 +1,6 @@
 #include "TypeRecovery/LowTy.h"
 #include "Utils/Utils.h"
+#include "notdec-llvm2c/Interface/Utils.h"
 #include <cassert>
 #include <iostream>
 #include <llvm/IR/LLVMContext.h>

@@ -30,10 +30,6 @@ namespace notdec {
 std::string getFuncSetName(const std::set<llvm::Function *> &SCC);
 std::string readFileToString(const char *path);
 
-bool inline startswith(std::string str, const char *prefix) {
-  return str.rfind(prefix, 0) == 0;
-}
-
 bool inline is_size_t(llvm::Type *ty, llvm::Module &M) {
   return ty->isIntegerTy(M.getDataLayout().getPointerSizeInBits());
 }
