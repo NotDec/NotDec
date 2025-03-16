@@ -82,13 +82,13 @@ HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
   assert(false && "TODO: fromLatticeElem: Unknown lattice element");
 }
 
-static bool isRecordOrUnionPointer(HType *Ty) {
-  if (!Ty->isPointerType()) {
-    return false;
-  }
-  auto Pointee = Ty->getPointeeType();
-  return Pointee->isRecordType() || Pointee->isUnionType();
-}
+// static bool isRecordOrUnionPointer(HType *Ty) {
+//   if (!Ty->isPointerType()) {
+//     return false;
+//   }
+//   auto Pointee = Ty->getPointeeType();
+//   return Pointee->isRecordType() || Pointee->isUnionType();
+// }
 
 HType *TypeBuilder::buildType(const CGNode &Node, unsigned ArraySize) {
   unsigned BitSize = Node.getSize();

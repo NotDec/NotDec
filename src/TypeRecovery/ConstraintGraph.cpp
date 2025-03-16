@@ -1406,7 +1406,7 @@ void ConstraintGraph::sketchSplit() {
     auto &Source = Ent.second;
     // 1.1 remove all forgetLabel and RecallBase edge
     for (auto &Edge : Source.outEdges) {
-      auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+      // auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
       if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
         toRemove.push_back(&Edge);
         // removeEdge(Source, Target, Edge.Label);
