@@ -2,15 +2,15 @@
 #include <cassert>
 #include <clang/AST/ASTContext.h>
 #include <llvm/Support/Casting.h>
+#include <memory>
 
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/LowTy.h"
+#include "TypeRecovery/Schema.h"
 #include "notdec-llvm2c/Interface/HType.h"
 
 namespace notdec::retypd {
 
-
-  
 HType *LatticeTy::buildType(HTypeContext &ctx) const {
   switch (kind) {
   case LK_Int:
@@ -23,7 +23,7 @@ HType *LatticeTy::buildType(HTypeContext &ctx) const {
   assert(false && "LatticeTy::buildType: Unhandled kind");
 }
 
-bool join(std::optional<LatticeTy> &L1, const std::optional<LatticeTy> &L2) {
+bool join(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2) {
   if (!L1.has_value()) {
     L1 = L2;
     return L2.has_value();
@@ -31,42 +31,43 @@ bool join(std::optional<LatticeTy> &L1, const std::optional<LatticeTy> &L2) {
   if (!L2.has_value()) {
     return false;
   }
-  return L1->join(*L2);
+  return (*L1)->join(**L2);
 }
 
-bool meet(std::optional<LatticeTy> &L1, const std::optional<LatticeTy> &L2) {
+bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2) {
   if (!L1.has_value()) {
-    return false;
+    L1 = L2;
+    return L2.has_value();
   }
   if (!L2.has_value()) {
-    L1.reset();
     return true;
   }
-  return L1->meet(*L2);
+  return (*L1)->meet(**L2);
 }
 
-std::optional<LatticeTy> createLatticeTy(LowTy LTy, std::string Name) {
+std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
+                                         std::string Name) {
   if (LTy.isUnknown() || LTy.isNull()) {
     return std::nullopt;
   }
   // TODO implement other types
   if (LTy.isNumber()) {
-    return LatticeTy::create(LTy, Name);
+    return LatticeTy::create(LTy, V, Name);
   }
   return std::nullopt;
 }
 
-LatticeTy LatticeTy::create(LowTy LTy, std::string Name) {
+std::shared_ptr<LatticeTy> LatticeTy::create(LowTy LTy, Variance V, std::string Name) {
   assert(!LTy.isUnknown());
   if (LTy.isNumber()) {
-    return IntLattice::create(LTy, Name);
+    return IntLattice::create(LTy, V, Name);
   } else if (LTy.isPointer()) {
-    return PointerLattice::create(LTy, Name);
+    return PointerLattice::create(LTy, V, Name);
   } else if (LTy.isNotPN()) {
     if (Name == "float") {
-      return FloatLattice::create(LTy, Name);
+      return FloatLattice::create(LTy, V, Name);
     } else if (Name == "double") {
-      return FloatLattice::create(LTy, Name);
+      return FloatLattice::create(LTy, V, Name);
     }
   }
   assert(false && "LatticeTy::create: Unhandled LowTy");
@@ -100,15 +101,17 @@ bool LatticeTy::meet(const LatticeTy &other) {
   assert(false && "LatticeTy::meet: Unhandled kind");
 }
 
-LatticeTy IntLattice::create(LowTy LTy, std::string TyName) {
+std::shared_ptr<IntLattice> IntLattice::create(LowTy LTy, Variance V, std::string TyName) {
   assert(LTy.isNumber());
-  IntLattice IL(LTy.getSize());
+  std::shared_ptr<IntLattice> IL = std::make_shared<IntLattice>(LTy.getSize(), V);
   if (TyName == "") {
     return IL;
-  } else if (TyName == "sint" || TyName == "char") {
-    IL.Sign = SI_SIGNED;
+  } else if (TyName == "char") {
+    IL->Sign = SI_SIGNED;
+  } else if (TyName == "sint") {
+    IL->Sign = SI_SIGNED;
   } else if (TyName == "uint") {
-    IL.Sign = SI_UNSIGNED;
+    IL->Sign = SI_UNSIGNED;
   } else if (TyName == "int") {
     // do nothing
   } else {
@@ -151,15 +154,15 @@ bool IntLattice::meet(const IntLattice &Other) {
   return false;
 }
 
-HType *  IntLattice::buildType(HTypeContext &Ctx) const {
+HType *IntLattice::buildType(HTypeContext &Ctx) const {
   assert(getSize() != 0);
   if (getSize() == 8) {
     return Ctx.getChar();
   }
   if (Sign == SI_SIGNED) {
-    return Ctx.getIntegerType(false, getSize(), true);
-  } else if (Sign == SI_UNSIGNED) {
     return Ctx.getIntegerType(false, getSize(), false);
+  } else if (Sign == SI_UNSIGNED) {
+    return Ctx.getIntegerType(false, getSize(), true);
   }
   // Default to signed? TODO
   return Ctx.getIntegerType(false, getSize(), true);

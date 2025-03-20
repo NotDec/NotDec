@@ -27,14 +27,13 @@
 
 namespace notdec::retypd {
 
+using notdec::ast::FieldDecl;
 using notdec::ast::HType;
 using notdec::ast::RecordDecl;
-using notdec::ast::FieldDecl;
 using notdec::ast::UnionDecl;
 
-HType *TypeBuilder::fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy,
-                                  unsigned BitSize) {
-  if (!LTy.has_value()) {
+HType *TypeBuilder::fromLatticeTy(LowTy Low, LatticeTy *LTy, unsigned BitSize) {
+  if (!LTy) {
     return fromLowTy(Low, BitSize);
   }
   return LTy->buildType(Ctx);
@@ -90,7 +89,8 @@ HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
 //   return Pointee->isRecordType() || Pointee->isUnionType();
 // }
 
-HType *TypeBuilder::buildType(const CGNode &Node, unsigned ArraySize) {
+HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
+                              unsigned ArraySize) {
   unsigned BitSize = Node.getSize();
   const char *prefix = "struct_";
   if (Node.isMemory()) {
@@ -131,12 +131,12 @@ HType *TypeBuilder::buildType(const CGNode &Node, unsigned ArraySize) {
     Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
   } else if (!Node.isPNIPointer()) {
     // No out edges.
-    std::optional<LatticeTy> LT = createLatticeTy(ETy, "");
+    std::optional<std::shared_ptr<LatticeTy>> LT;
     for (auto &Edge : Node.outEdges) {
       if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
         if (FB->Base.isPrimitive()) {
-          auto L1 = createLatticeTy(ETy, FB->Base.getPrimitiveName());
-          if (Node.key.SuffixVariance == Covariant) {
+          auto L1 = createLatticeTy(ETy, V, FB->Base.getPrimitiveName());
+          if (V == Covariant) {
             meet(LT, L1);
           } else {
             join(LT, L1);
@@ -144,15 +144,18 @@ HType *TypeBuilder::buildType(const CGNode &Node, unsigned ArraySize) {
         }
       }
     }
+    if (!LT) {
+      LT = createLatticeTy(ETy, V, "");
+    }
 
-    Ret = fromLatticeTy(ETy, LT, BitSize);
+    Ret = fromLatticeTy(ETy, &**LT, BitSize);
   } else {
     auto &TI = TypeInfos.at(const_cast<CGNode *>(&Node));
     if (std::holds_alternative<SimpleTypeInfo>(TI.Info)) {
       auto &Info = std::get<SimpleTypeInfo>(TI.Info);
       assert(Info.Edge != nullptr && "TODO");
       // simple pointer type
-      auto PointeeTy = buildType(Info.Edge->getTargetNode(), TI.Size);
+      auto PointeeTy = buildType(Info.Edge->getTargetNode(), V, TI.Size);
       Ret = getPtrTy(PointeeTy);
     } else if (std::holds_alternative<ArrayInfo>(TI.Info)) {
       auto &Info = std::get<ArrayInfo>(TI.Info);
@@ -160,7 +163,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, unsigned ArraySize) {
       assert(EdgeOff->range.offset == 0);
       auto EdgeAcc = EdgeOff->range.access.front();
 
-      auto ElemTy = buildType(Info.Edge->getTargetNode(), EdgeAcc.Size);
+      auto ElemTy = buildType(Info.Edge->getTargetNode(), V, EdgeAcc.Size);
       if (!ElemTy->isPointerType()) {
         assert(false && "Array out edge must be pointer type");
       }
@@ -192,7 +195,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, unsigned ArraySize) {
         HType *Ty;
 
         // for each field/edge
-        Ty = buildType(*Target, Ent.R.Size);
+        Ty = buildType(*Target, V, Ent.R.Size);
 
         if (!Ty->isPointerType()) {
           assert(false && "Offset edge must be pointer type");
@@ -232,7 +235,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, unsigned ArraySize) {
         HType *Ty;
 
         // for each field/edge
-        Ty = buildType(Target, R.Size);
+        Ty = buildType(Target, V, R.Size);
 
         if (!Ty->isPointerType()) {
           assert(false && "Offset edge must be pointer type");

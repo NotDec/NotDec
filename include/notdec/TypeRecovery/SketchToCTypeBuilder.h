@@ -38,9 +38,9 @@ struct TypeBuilderContext {
   const unsigned PointerSize;
 
   // Todo: Change filename or remove the argument
-  TypeBuilderContext(HTypeContext &Ctx, llvm::StringRef FileName, const llvm::DataLayout &DL)
-      : Ctx(Ctx), DL(DL),
-        PointerSize(DL.getPointerSize()) {}
+  TypeBuilderContext(HTypeContext &Ctx, llvm::StringRef FileName,
+                     const llvm::DataLayout &DL)
+      : Ctx(Ctx), DL(DL), PointerSize(DL.getPointerSize()) {}
 };
 
 struct TypeBuilder {
@@ -51,7 +51,7 @@ struct TypeBuilder {
   std::map<CGNode *, TypeInfo> TypeInfos;
 
   // Main interface: recursively visit the node and build the type
-  HType *buildType(const CGNode &Node, unsigned ArraySize = 0);
+  HType *buildType(const CGNode &Node, Variance V, unsigned ArraySize = 0);
 
   TypeBuilder(TypeBuilderContext &Parent,
               std::map<CGNode *, TypeInfo> TypeInfos)
@@ -90,8 +90,7 @@ struct TypeBuilder {
   }
 
   HType *fromLowTy(LowTy LTy, unsigned BitSize);
-  HType *fromLatticeTy(LowTy Low, std::optional<LatticeTy> LTy,
-                       unsigned BitSize);
+  HType *fromLatticeTy(LowTy Low, LatticeTy *LTy, unsigned BitSize);
 };
 
 } // namespace notdec::retypd

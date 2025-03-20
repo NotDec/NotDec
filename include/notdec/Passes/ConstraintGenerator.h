@@ -9,6 +9,7 @@
 #include <deque>
 #include <functional>
 #include <iostream>
+#include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
@@ -31,6 +32,7 @@
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/DotSummaryParser.h"
+#include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
@@ -55,6 +57,21 @@ using retypd::TypeVariable;
 
 struct ConstraintsGenerator;
 
+struct SCCData {
+  std::vector<CallGraphNode *> Nodes;
+  std::shared_ptr<ConstraintsGenerator> SummaryGenerator;
+  std::string SCCName;
+  std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
+  std::shared_ptr<ConstraintsGenerator> SketchGenerator;
+};
+
+struct AllGraphs {
+  std::vector<SCCData> AllSCCs;
+  std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
+  std::shared_ptr<ConstraintsGenerator> Global;
+  std::shared_ptr<ConstraintsGenerator> GlobalSketch;
+};
+
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   // Provide a unique key, i.e., memory address to be used by the LLVM's pass
   // infrastructure.
@@ -69,11 +86,13 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   std::shared_ptr<retypd::TRContext> TRCtx;
   llvm::Value *StackPointer;
   std::string data_layout;
-  std::shared_ptr<ConstraintsGenerator> Global;
+
   // Map from SCC to initial constraint graph.
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>>
       FuncSummaries;
+
+  AllGraphs AG;
 
   std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
       SummaryOverride;
@@ -89,10 +108,8 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   void gen_json(std::string OutputFilename);
 
 public:
-  static ConstraintsGenerator
-  postProcess(ConstraintsGenerator &G,
-              std::map<const CGNode *, CGNode *> &Old2New,
-              std::string DebugDir);
+  static std::shared_ptr<ConstraintsGenerator>
+  postProcess(ConstraintsGenerator &G, std::string DebugDir);
   // merge nodes to current graph by determinize.
   static CGNode *multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
                                          std::set<CGNode *> &StartNodes,
@@ -104,6 +121,8 @@ public:
 };
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
+/// It represents a constraint graph and mappings from LLVM values to nodes in
+/// the graph.
 struct ConstraintsGenerator {
   TypeRecovery &Ctx;
 
@@ -182,6 +201,8 @@ struct ConstraintsGenerator {
   ConstraintsGenerator clone(std::map<const CGNode *, CGNode *> &Old2New);
   void cloneTo(ConstraintsGenerator &Target,
                std::map<const CGNode *, CGNode *> &Old2New);
+  std::shared_ptr<ConstraintsGenerator>
+  cloneShared(std::map<const CGNode *, CGNode *> &Old2New);
   ConstraintsGenerator(TypeRecovery &Ctx, std::string Name,
                        std::set<llvm::Function *> SCCs = {})
       : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
@@ -355,6 +376,9 @@ inline TypeVariable getCallRetTV(CGNode &Target) {
   TypeVariable TV = Target.key.Base;
   return TV.pushLabel(retypd::OutLabel{});
 }
+
+// ================ type generator ======================
+
 
 } // namespace notdec
 

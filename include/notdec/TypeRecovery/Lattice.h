@@ -2,6 +2,7 @@
 #define _NOTDEC_RETYPD_LATTICE_H
 
 #include "TypeRecovery/LowTy.h"
+#include "TypeRecovery/Schema.h"
 #include "notdec-llvm2c/Interface/HType.h"
 #include <cassert>
 #include <clang/AST/Type.h>
@@ -28,13 +29,14 @@ public:
   // const LowTy &getLowTy() const;
   bool join(const LatticeTy &other);
   bool meet(const LatticeTy &other);
-  HType * buildType(HTypeContext &ctx) const;
+  HType *buildType(HTypeContext &ctx) const;
 
   LatticeTy(LatticeTyKind Kind, unsigned Size) : kind(Kind), Size(Size){};
+  LatticeTy(const LatticeTy &Other) = delete;
   LatticeTyKind getKind() const { return kind; }
   unsigned getSize() const { return Size; }
 
-  static LatticeTy create(LowTy LTy, std::string TyName);
+  static std::shared_ptr<LatticeTy> create(LowTy LTy, Variance V, std::string TyName);
 };
 
 enum Signedness { SI_UNKNOW, SI_SIGNED, SI_UNSIGNED, SI_CONFLICT };
@@ -43,12 +45,14 @@ class IntLattice : public LatticeTy {
   Signedness Sign = SI_UNKNOW;
 
 public:
-  IntLattice(unsigned Size) : LatticeTy(LK_Int, Size) {}
+  IntLattice(unsigned Size, Variance V)
+      : LatticeTy(LK_Int, Size),
+        Sign(V == Covariant ? SI_UNKNOW : SI_CONFLICT) {}
   static bool classof(const LatticeTy *S) { return S->getKind() == LK_Int; }
-  static LatticeTy create(LowTy LTy, std::string TyName);
+  static std::shared_ptr<IntLattice> create(LowTy LTy, Variance V, std::string TyName);
   bool join(const IntLattice &Other);
   bool meet(const IntLattice &Other);
-  HType * buildType(HTypeContext &ctx) const;
+  HType *buildType(HTypeContext &ctx) const;
 
   auto getSign() const { return Sign; }
   bool setSign(Signedness NewSign) {
@@ -64,8 +68,8 @@ class FloatLattice : public LatticeTy {
 public:
   FloatLattice(unsigned Size) : LatticeTy(LK_Float, Size) {}
   static bool classof(const LatticeTy *S) { return S->getKind() == LK_Float; }
-  static LatticeTy create(LowTy LTy, std::string TyName) {
-    return FloatLattice(LTy.getSize());
+  static std::shared_ptr<FloatLattice> create(LowTy LTy, Variance V, std::string TyName) {
+    return std::make_shared<FloatLattice>(LTy.getSize());
   }
   bool join(const FloatLattice &Other) { return false; }
   bool meet(const FloatLattice &Other) { return false; }
@@ -75,16 +79,17 @@ class PointerLattice : public LatticeTy {
 public:
   PointerLattice(unsigned Size) : LatticeTy(LK_Pointer, Size) {}
   static bool classof(const LatticeTy *S) { return S->getKind() == LK_Pointer; }
-  static LatticeTy create(LowTy LTy, std::string TyName) {
-    return PointerLattice(LTy.getSize());
+  static std::shared_ptr<PointerLattice> create(LowTy LTy, Variance V, std::string TyName) {
+    return std::make_shared<PointerLattice>(LTy.getSize());
   }
   bool join(const PointerLattice &Other) { return false; }
   bool meet(const PointerLattice &Other) { return false; }
 };
 
-std::optional<LatticeTy> createLatticeTy(LowTy LTy, std::string Name);
-bool join(std::optional<LatticeTy> &L1, const std::optional<LatticeTy> &L2);
-bool meet(std::optional<LatticeTy> &L1, const std::optional<LatticeTy> &L2);
+std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
+                                         std::string Name);
+bool join(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2);
+bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2);
 
 } // namespace notdec::retypd
 

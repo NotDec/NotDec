@@ -498,11 +498,12 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   return TypeInfos;
 }
 
-ConstraintsGenerator
+std::shared_ptr<ConstraintsGenerator>
 TypeRecovery::postProcess(ConstraintsGenerator &G,
-                          std::map<const CGNode *, CGNode *> &Old2New,
                           std::string DebugDir) {
-  ConstraintsGenerator G2 = G.clone(Old2New);
+                            std::map<const CGNode *, CGNode *> Old2New;
+                            std::shared_ptr<ConstraintsGenerator> G2S = G.cloneShared(Old2New);
+  ConstraintsGenerator &G2 = *G2S;
   assert(G2.PG);
   std::string Name = G2.CG.Name;
   G2.CG.Name += "-dtm";
@@ -541,7 +542,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
 
   assert(G2.PG);
   // G2.DebugDir.clear();
-  return G2;
+  return G2S;
 }
 
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
@@ -634,16 +635,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   std::set<CallGraphNode *> Visited;
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
 
-  struct SCCData {
-    std::vector<CallGraphNode *> Nodes;
-    std::shared_ptr<ConstraintsGenerator> Generator;
-    std::string SCCName;
-    std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
-  };
 
-  // tuple(SCCNodes, ConstraintsGenerator, SCCName, TopDownGenerator)
-  std::vector<SCCData> AllSCCs;
-  std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
+  std::vector<SCCData>& AllSCCs = AG.AllSCCs;
+  std::map<CallGraphNode *, std::size_t>& Func2SCCIndex = AG.Func2SCCIndex;
 
   // 1 Bottom-up Phase: build the summary
   // Walk the callgraph in bottom-up SCC order.
@@ -771,7 +765,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       auto It2 = FuncSummaries.emplace(F, Summary);
       assert(It2.second && "Function summary already exist?");
     }
-    AllSCCs.back().Generator = Generator;
+    AllSCCs.back().SummaryGenerator = Generator;
     AllSCCs.back().SCCName = Name;
     // write the SCC index to file
     if (SCCsCatalog) {
@@ -841,10 +835,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     const std::vector<CallGraphNode *> &NodeVec = Data.Nodes;
-    if (Data.Generator == nullptr) {
+    if (Data.SummaryGenerator == nullptr) {
       continue;
     }
-    std::shared_ptr<ConstraintsGenerator> &Generator = Data.Generator;
+    std::shared_ptr<ConstraintsGenerator> &Generator = Data.SummaryGenerator;
     auto &Name = Data.SCCName;
 
     std::cerr << "(Top-Down) Processing Func: " << Name << "\n";
@@ -951,6 +945,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // 2.4 solve the global memory node
   // Create type for memory node
+  std::shared_ptr<ConstraintsGenerator>& Global = AG.Global;
   Global = std::make_shared<ConstraintsGenerator>(*this, "Global");
   std::set<CGNode *> MemoryNodes;
   std::set<CGNode *> MemoryNodesC;
@@ -1028,7 +1023,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     auto &G = *AllSCCs[i].TopDownGenerator;
     auto SCCName = AllSCCs[i].SCCName;
     assert(G.PG);
-    std::map<const CGNode *, CGNode *> Old2New;
     for (auto &Ent : G.CG.Nodes) {
       if (Ent.second.isStartOrEnd() || Ent.second.isMemory()) {
         continue;
@@ -1040,7 +1034,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     //!! 3.1 post process the graph for type generation
-    ConstraintsGenerator G2 = postProcess(G, Old2New, Dir);
+    AllSCCs[i].SketchGenerator = postProcess(G, Dir);
+    ConstraintsGenerator &G2 = *AllSCCs[i].SketchGenerator;
 
     // 3.2 print the graph for debugging
     if (!Dir.empty()) {
@@ -1113,7 +1108,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           ValueTypesFile->flush();
         }
         //!! build AST type for the node
-        HType *CTy = TB.buildType(*Node);
+        HType *CTy = TB.buildType(*Node, retypd::Covariant);
 
         if (Result.ValueTypes.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
@@ -1188,7 +1183,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           ValueTypesFile->flush();
         }
         //!! build AST type for the node
-        HType *CTy = TB.buildType(*Node);
+        HType *CTy = TB.buildType(*Node, retypd::Contravariant);
 
         if (Result.ValueTypesLowerBound.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
@@ -1210,15 +1205,16 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   }
 
   // 3.4 build AST type for memory node
-  std::map<const CGNode *, CGNode *> Old2NewGlobal;
-  ConstraintsGenerator Global2 = postProcess(*Global, Old2NewGlobal, "");
+  std::shared_ptr<ConstraintsGenerator>& GlobalSkS = AG.GlobalSketch;
+  GlobalSkS = postProcess(*Global, "");
+  ConstraintsGenerator &GlobalSk = *GlobalSkS;
   // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
   // retypd::Covariant);
-  CGNode *MemNode2 = Global2.CG.getMemoryNode(retypd::Covariant);
-  retypd::TypeBuilder TBG(TBC, Global2.TypeInfos);
+  CGNode *MemNode2 = GlobalSk.CG.getMemoryNode(retypd::Covariant);
+  retypd::TypeBuilder TBG(TBC, GlobalSk.TypeInfos);
 
   // build AST type for memory node
-  HType *CTy = TBG.buildType(*MemNode2);
+  HType *CTy = TBG.buildType(*MemNode2, retypd::Covariant);
   llvm::errs() << "Memory Type: " << CTy->getAsString() << "\n";
 
   using notdec::ast::RecordDecl;
@@ -1228,7 +1224,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // Info.Bytes = MemoryBytes;
   // Info.resolveInitialValue();
   Mem->setBytesManager(MemoryBytes);
-  Mem->resolveInitialValue();
+
+  // analyze the signed/unsigned info
+  // Framework: 
+  // 1. 我可能需要增加跨图，跨函数的PNI节点的关系。一边传入所有的sketches图，一边传入Result。然后首先处理所有的有primitive类型的节点，给PNI打标签。然后根据标签修改类型。
+  // analyzeSignedness(AG, Mem);
 
   // 4 Save the result
   Result.MemoryType = CTy->getPointeeType();
@@ -1310,6 +1310,13 @@ ConstraintsGenerator
 ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
   ConstraintsGenerator G(Ctx, CG.Name);
   cloneTo(G, Old2New);
+  return G;
+}
+
+std::shared_ptr<ConstraintsGenerator>
+ConstraintsGenerator::cloneShared(std::map<const CGNode *, CGNode *> &Old2New) {
+  auto G = std::make_shared<ConstraintsGenerator>(Ctx, CG.Name);
+  cloneTo(*G, Old2New);
   return G;
 }
 
