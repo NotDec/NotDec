@@ -328,7 +328,7 @@ public:
     return From.outEdges.count(
         CGEdge(const_cast<CGNode &>(From), const_cast<CGNode &>(To), Label));
   }
-  bool onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+  const CGEdge* onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(&From.Parent == this && &To.Parent == this);
     if (TraceIds.count(From.getId()) || TraceIds.count(To.getId())) {
       std::cerr << "Add edge: " << From.str() << "(ID=" << From.getId()
@@ -339,7 +339,7 @@ public:
     if (it.second) {
       To.inEdges.insert(const_cast<CGEdge *>(&*it.first));
     }
-    return it.second;
+    return &*it.first;
   }
   void mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
 
@@ -352,10 +352,10 @@ public:
     From.outEdges.erase(it);
   }
 
-  bool addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+  const CGEdge* addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
       if (std::holds_alternative<One>(Label)) {
-        return false;
+        return nullptr;
       }
       std::cerr << "Warning: Non-null self edge: " << toString(From.key)
                 << " To " << toString(To.key) << " Label: " << toString(Label)

@@ -155,7 +155,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       auto &Info = std::get<SimpleTypeInfo>(TI.Info);
       assert(Info.Edge != nullptr && "TODO");
       // simple pointer type
-      auto PointeeTy = buildType(Info.Edge->getTargetNode(), V, TI.Size);
+      auto PointeeTy = buildType(Info.Edge->getTargetNode(), V, *TI.Size);
       Ret = getPtrTy(PointeeTy);
     } else if (std::holds_alternative<ArrayInfo>(TI.Info)) {
       auto &Info = std::get<ArrayInfo>(TI.Info);
@@ -169,7 +169,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       }
       ElemTy = ElemTy->getPointeeType();
 
-      auto Count = TI.Size / EdgeAcc.Size;
+      auto Count = *TI.Size / EdgeAcc.Size;
       assert(Count >= 1);
       auto ArrayTy = Ctx.getArrayType(false, ElemTy, Count);
       Ret = getPtrTy(ArrayTy);

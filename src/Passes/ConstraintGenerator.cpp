@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -269,6 +271,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
 
   // Requirement 2. require the graph is acyclic in subtype and offset edges.
   // Requirement 3. load and store edges are merged. there are only load edges.
+  // Requirement 4. determinize: only one layer of offset edge.
 
   // auxiliary function, split in the middle
   auto splitEdge = [&](const retypd::CGEdge &E, retypd::EdgeLabel E1,
@@ -291,48 +294,48 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   // and offset is zero For all edges with stride access, if parent has only
   // this edge, and the offset is zero, then OK, else, split the edge in the
   // middle.
-  std::vector<const retypd::CGEdge *> TargetEdges;
-  for (auto &Ent : CG.Nodes) {
-    auto &Source = Ent.second;
-    // Start of End should not have offset edge. So no need to check.
-    bool hasOffset = retypd::hasOffsetEdge(Source);
-    if (!hasOffset) {
-      continue;
-    }
-    bool onlyOneEdge = Source.outEdges.size() == 1;
-    for (auto &E : Source.outEdges) {
-      if (auto *OL = retypd::getOffsetLabel(E.Label)) {
-        // for each offset with access
-        if (OL->range.access.size() == 0) {
-          continue;
-        }
-        if (onlyOneEdge && OL->range.offset == 0) {
-          continue;
-        }
-        // need to split the edge in the middle.
-        TargetEdges.push_back(&E);
-      }
-    }
-  }
-  // split the edge in the middle.
-  for (auto *E : TargetEdges) {
-    auto *OL = retypd::getOffsetLabel(E->Label);
-    assert(OL);
-    auto Off1 = OL->range;
-    Off1.access.clear();
-    auto Off2 = OL->range;
-    Off2.offset = 0;
-    splitEdge(*E, retypd::RecallLabel{retypd::OffsetLabel{Off1}},
-              retypd::RecallLabel{retypd::OffsetLabel{Off2}},
-              ValueNamer::getName("Arr_"));
-    // mark this node as array..? no handle this later.
-    // auto It = TypeInfos.insert({NewNode, TypeInfo{ArrayInfo{}}});
-    // assert(It.second);
-  }
+  // std::vector<const retypd::CGEdge *> TargetEdges;
+  // for (auto &Ent : CG.Nodes) {
+  //   auto &Source = Ent.second;
+  //   // Start of End should not have offset edge. So no need to check.
+  //   bool hasOffset = retypd::hasOffsetEdge(Source);
+  //   if (!hasOffset) {
+  //     continue;
+  //   }
+  //   bool onlyOneEdge = Source.outEdges.size() == 1;
+  //   for (auto &E : Source.outEdges) {
+  //     if (auto *OL = retypd::getOffsetLabel(E.Label)) {
+  //       // for each offset with access
+  //       if (OL->range.access.size() == 0) {
+  //         continue;
+  //       }
+  //       if (onlyOneEdge && OL->range.offset == 0) {
+  //         continue;
+  //       }
+  //       // need to split the edge in the middle.
+  //       TargetEdges.push_back(&E);
+  //     }
+  //   }
+  // }
+  // // split the edge in the middle.
+  // for (auto *E : TargetEdges) {
+  //   auto *OL = retypd::getOffsetLabel(E->Label);
+  //   assert(OL);
+  //   auto Off1 = OL->range;
+  //   Off1.access.clear();
+  //   auto Off2 = OL->range;
+  //   Off2.offset = 0;
+  //   splitEdge(*E, retypd::RecallLabel{retypd::OffsetLabel{Off1}},
+  //             retypd::RecallLabel{retypd::OffsetLabel{Off2}},
+  //             ValueNamer::getName("Arr_"));
+  //   // mark this node as array..? no handle this later.
+  //   // auto It = TypeInfos.insert({NewNode, TypeInfo{ArrayInfo{}}});
+  //   // assert(It.second);
+  // }
 
   std::set<CGNode *> Visited;
   // Step 2. depth first search to calc pointer range and organize the edges.
-  std::function<void(CGNode &)> doDFS = [&](CGNode &N) {
+  std::function<void(CGNode &)> doBuild = [&](CGNode &N) {
     if (!N.isPNIPointer()) {
       return;
     }
@@ -369,7 +372,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                                .Info = SimpleTypeInfo{.Edge = *LoadEdge}};
       return;
     }
-    // check if it is array. If there is only one offset edge.
+    // check if it is a simple array. If there is only one offset edge.
     unsigned edgeCount = 0;
     const CGEdge *OffsetEdge = nullptr;
     for (auto &Edge : N.outEdges) {
@@ -383,17 +386,20 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     if (edgeCount == 1 && OffsetEdge != nullptr) {
       auto &Target = const_cast<CGNode &>(OffsetEdge->getTargetNode());
       if (auto *OL = retypd::getOffsetLabel(OffsetEdge->Label)) {
-        if (OL->range.offset == 0 && OL->range.access.size() > 0) {
+        if (OL->range.offset == 0 && OL->range.access.size() == 1) {
           // this is an array, but we assume element count = 1
-          doDFS(Target);
-          TypeInfos[&N] = TypeInfo{.Size = TypeInfos.at(&Target).Size,
-                                   .Info = ArrayInfo{OffsetEdge}};
+          auto AccessSize = OL->range.access.begin()->Size;
+          TypeInfos[&N] =
+              TypeInfo{.Size = AccessSize, .Info = ArrayInfo{OffsetEdge}};
+          doBuild(Target);
           return;
         }
       }
     }
     // this is a struct or union.
     std::vector<FieldEntry> Fields;
+
+    // normalize load edge as zero offset
     for (auto &E : N.outEdges) {
       auto &Target = const_cast<CGNode &>(E.getTargetNode());
       if (retypd::isLoadOrStore(E.Label)) {
@@ -401,23 +407,171 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         auto &New =
             splitEdge(E, retypd::RecallLabel{OffsetLabel{OffsetRange()}},
                       E.Label, ValueNamer::getName("F0_"));
-        doDFS(New);
-        auto &TI = TypeInfos.at(&New);
-        assert(TI.Size == retypd::getLoadOrStoreSize(E.Label));
-        Fields.push_back(
-            FieldEntry{.R = SimpleRange{.Start = 0, .Size = TI.Size},
-                       .Edge = &E,
-                       .Target = &New});
-      } else if (auto *OL = retypd::getOffsetLabel(E.Label)) {
-        assert(OL->range.access.size() ==
-               0); // should handled by previous array pass
-        doDFS(Target);
-        auto &TI = TypeInfos.at(&Target);
-        Fields.push_back(FieldEntry{
-            .R = SimpleRange{.Start = OL->range.offset, .Size = TI.Size},
-            .Edge = &E,
-            .Target = &Target});
+        break;
       }
+    }
+
+    // 处理所有数组类型的成员
+    // 提取所有乘数项
+    std::set<int64_t> AllStrides;
+    std::set<const CGEdge *> RemainingOffsetEdges;
+    for (auto &E : N.outEdges) {
+      if (auto *OL = retypd::getOffsetLabel(E.Label)) {
+        RemainingOffsetEdges.insert(&E);
+        for (auto &A : OL->range.access) {
+          AllStrides.insert(A.Size);
+        }
+      }
+    }
+
+    while (!AllStrides.empty()) {
+      auto MaxStride = *AllStrides.rbegin();
+      assert(MaxStride > 0);
+      AllStrides.erase(MaxStride);
+
+      // 提取包含max_stride的模式
+      std::vector<const CGEdge *> HasStrideOffsetEdges;
+      for (auto *Edge : RemainingOffsetEdges) {
+        auto *OL = retypd::getOffsetLabel(Edge->Label);
+        assert(OL != nullptr);
+        if (std::find(OL->range.access.begin(), OL->range.access.end(),
+                      MaxStride) != OL->range.access.end()) {
+          HasStrideOffsetEdges.push_back(Edge);
+        }
+      }
+      for (auto *Edge : HasStrideOffsetEdges) {
+        RemainingOffsetEdges.erase(Edge);
+      }
+
+      // 按基址从小到大排序
+      std::sort(HasStrideOffsetEdges.begin(), HasStrideOffsetEdges.end(),
+                [](const CGEdge *E1, const CGEdge *E2) {
+                  auto *OL1 = retypd::getOffsetLabel(E1->Label);
+                  auto *OL2 = retypd::getOffsetLabel(E2->Label);
+                  return OL1->range.offset < OL2->range.offset;
+                });
+
+      while (!HasStrideOffsetEdges.empty()) {
+        auto FrontLabel =
+            retypd::getOffsetLabel(HasStrideOffsetEdges.front()->getLabel());
+        auto RangeStart = FrontLabel->range.offset;
+        auto RangeEnd = FrontLabel->range.offset + MaxStride;
+
+        // 提取当前组中Base在当前范围内的模式
+        auto InitialSize = HasStrideOffsetEdges.size();
+        std::vector<const CGEdge *> InRangeEdges;
+        std::optional<size_t> RemoveStart = std::nullopt;
+        std::optional<size_t> RemoveEnd = HasStrideOffsetEdges.size();
+        for (size_t I = 0; I < HasStrideOffsetEdges.size(); I++) {
+          auto *Edge = HasStrideOffsetEdges.at(I);
+          auto CurrentLabel = retypd::getOffsetLabel(Edge->getLabel());
+          if (CurrentLabel->range.offset >= RangeStart &&
+              CurrentLabel->range.offset < RangeEnd) {
+            InRangeEdges.push_back(Edge);
+            if (!RemoveStart) {
+              RemoveStart = I;
+            }
+          } else {
+            RemoveEnd = I;
+            break;
+          }
+        }
+        assert(RemoveStart);
+        HasStrideOffsetEdges.erase(HasStrideOffsetEdges.begin() + *RemoveStart,
+                                   HasStrideOffsetEdges.begin() + *RemoveEnd);
+        assert(InitialSize ==
+               (HasStrideOffsetEdges.size() + InRangeEdges.size()));
+
+        // 处理子问题仅有一条offset=0的边的简单情况
+        if (InRangeEdges.size() == 1) {
+          if (auto Acc =
+                  retypd::getOffsetLabel((*InRangeEdges.begin())->getLabel())) {
+            if (Acc->range.offset == RangeStart &&
+                Acc->range.access.size() == 1) {
+              auto &TargetNode = const_cast<CGNode &>(
+                  (*InRangeEdges.begin())->getTargetNode());
+              auto &NewFieldNode = CG.createNodeClonePNI(
+                  retypd::NodeKey{TypeVariable::CreateDtv(
+                      *CG.Ctx, ValueNamer::getName("Field_"))},
+                  N.getPNIVar());
+              auto FieldEdge =
+                  CG.addEdge(N, NewFieldNode,
+                             retypd::RecallLabel{
+                                 OffsetLabel{.range = {.offset = RangeStart}}});
+              auto ArrEdge =
+                  CG.addEdge(NewFieldNode, TargetNode,
+                             retypd::RecallLabel{OffsetLabel{
+                                 OffsetRange{.access = {MaxStride}}}});
+              Fields.push_back(FieldEntry{
+                  .R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
+                  .Edge = FieldEdge,
+                  .Target = &NewFieldNode});
+              doBuild(NewFieldNode);
+              for (auto *Edge : InRangeEdges) {
+                auto &From = const_cast<CGNode &>(Edge->getSourceNode());
+                auto &To = const_cast<CGNode &>(Edge->getTargetNode());
+                CG.removeEdge(From, To, Edge->getLabel());
+              }
+              continue;
+            }
+          }
+        }
+
+        // 转换为子问题的数组节点
+        auto &NewArrNode =
+            CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
+                                      *CG.Ctx, ValueNamer::getName("Arr_"))},
+                                  N.getPNIVar());
+        for (auto *Edge : InRangeEdges) {
+          auto &Target = const_cast<CGNode &>(Edge->getTargetNode());
+          auto NewRange = retypd::getOffsetLabel(Edge->getLabel())->range;
+          NewRange.access.erase(std::remove(NewRange.access.begin(),
+                                            NewRange.access.end(), MaxStride),
+                                NewRange.access.end());
+          NewRange.offset = NewRange.offset - RangeStart;
+          assert(NewRange.offset >= 0);
+          CG.addEdge(NewArrNode, Target,
+                     retypd::RecallLabel{OffsetLabel{.range = NewRange}});
+        }
+        for (auto *Edge : InRangeEdges) {
+          auto &From = const_cast<CGNode &>(Edge->getSourceNode());
+          auto &To = const_cast<CGNode &>(Edge->getTargetNode());
+          CG.removeEdge(From, To, Edge->getLabel());
+        }
+
+        auto &NewFieldNode =
+            CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
+                                      *CG.Ctx, ValueNamer::getName("Field_"))},
+                                  N.getPNIVar());
+        auto FieldEdge = CG.addEdge(
+            N, NewFieldNode,
+            retypd::RecallLabel{OffsetLabel{.range = {.offset = RangeStart}}});
+        auto ArrEdge = CG.addEdge(NewFieldNode, NewArrNode,
+                                  retypd::RecallLabel{OffsetLabel{
+                                      OffsetRange{.access = {MaxStride}}}});
+        Fields.push_back(
+            FieldEntry{.R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
+                       .Edge = FieldEdge,
+                       .Target = &NewFieldNode});
+        doBuild(NewFieldNode);
+        // TypeInfos[&NewArrNode] =
+        //     TypeInfo{.Size = MaxStride, .Info = ArrayInfo{.Edge = ArrEdge}};
+      }
+    }
+
+    for (auto *EP : RemainingOffsetEdges) {
+      auto &E = *EP;
+      auto &Target = const_cast<CGNode &>(E.getTargetNode());
+      auto *OL = retypd::getOffsetLabel(E.Label);
+      assert(OL && "Other kinds of Edge should already be eliminated!");
+      assert(OL->range.access.size() == 0 &&
+             "should be handled by previous array pass");
+      doBuild(Target);
+      auto &TI = TypeInfos.at(&Target);
+      Fields.push_back(FieldEntry{
+          .R = SimpleRange{.Start = OL->range.offset, .Size = *TI.Size},
+          .Edge = &E,
+          .Target = &Target});
     }
     // sort the entry by end offset.
     std::sort(Fields.begin(), Fields.end(),
@@ -456,7 +610,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
           TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Fields}};
       return;
     }
-    // make previous node a union node.
+    // make N a union node.
     // create new node for each panel struct.
     std::vector<const retypd::CGEdge *> Members;
     for (auto &Panel : UnionPanels) {
@@ -493,16 +647,15 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     if (!N.isPNIPointer()) {
       continue;
     }
-    doDFS(N);
+    doBuild(N);
   }
   return TypeInfos;
 }
 
 std::shared_ptr<ConstraintsGenerator>
-TypeRecovery::postProcess(ConstraintsGenerator &G,
-                          std::string DebugDir) {
-                            std::map<const CGNode *, CGNode *> Old2New;
-                            std::shared_ptr<ConstraintsGenerator> G2S = G.cloneShared(Old2New);
+TypeRecovery::postProcess(ConstraintsGenerator &G, std::string DebugDir) {
+  std::map<const CGNode *, CGNode *> Old2New;
+  std::shared_ptr<ConstraintsGenerator> G2S = G.cloneShared(Old2New);
   ConstraintsGenerator &G2 = *G2S;
   assert(G2.PG);
   std::string Name = G2.CG.Name;
@@ -635,9 +788,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   std::set<CallGraphNode *> Visited;
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
 
-
-  std::vector<SCCData>& AllSCCs = AG.AllSCCs;
-  std::map<CallGraphNode *, std::size_t>& Func2SCCIndex = AG.Func2SCCIndex;
+  std::vector<SCCData> &AllSCCs = AG.AllSCCs;
+  std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
 
   // 1 Bottom-up Phase: build the summary
   // Walk the callgraph in bottom-up SCC order.
@@ -945,7 +1097,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // 2.4 solve the global memory node
   // Create type for memory node
-  std::shared_ptr<ConstraintsGenerator>& Global = AG.Global;
+  std::shared_ptr<ConstraintsGenerator> &Global = AG.Global;
   Global = std::make_shared<ConstraintsGenerator>(*this, "Global");
   std::set<CGNode *> MemoryNodes;
   std::set<CGNode *> MemoryNodesC;
@@ -1205,7 +1357,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   }
 
   // 3.4 build AST type for memory node
-  std::shared_ptr<ConstraintsGenerator>& GlobalSkS = AG.GlobalSketch;
+  std::shared_ptr<ConstraintsGenerator> &GlobalSkS = AG.GlobalSketch;
   GlobalSkS = postProcess(*Global, "");
   ConstraintsGenerator &GlobalSk = *GlobalSkS;
   // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
@@ -1225,9 +1377,18 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // Info.resolveInitialValue();
   Mem->setBytesManager(MemoryBytes);
 
+  // 3.5 analyze and refine HTypes
+  for (auto &Ent : HTCtx->getDecls()) {
+    auto *Decl = Ent.second.get();
+    if (auto *RD = llvm::dyn_cast<RecordDecl>(Decl)) {
+      RD->addPaddings();
+    }
+  }
+
   // analyze the signed/unsigned info
-  // Framework: 
-  // 1. 我可能需要增加跨图，跨函数的PNI节点的关系。一边传入所有的sketches图，一边传入Result。然后首先处理所有的有primitive类型的节点，给PNI打标签。然后根据标签修改类型。
+  // Framework:
+  // 1.
+  // 我可能需要增加跨图，跨函数的PNI节点的关系。一边传入所有的sketches图，一边传入Result。然后首先处理所有的有primitive类型的节点，给PNI打标签。然后根据标签修改类型。
   // analyzeSignedness(AG, Mem);
 
   // 4 Save the result

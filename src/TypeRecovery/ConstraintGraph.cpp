@@ -1661,7 +1661,7 @@ void ConstraintGraph::saturate() {
                   LLVM_DEBUG(llvm::dbgs()
                              << "Adding Edge From " << Reach.second->key.str()
                              << " to " << Target.key.str() << " with _1_ \n");
-                  Changed |= addEdge(*Reach.second, Target, One{});
+                  Changed |= (addEdge(*Reach.second, Target, One{}) != nullptr);
                 }
               }
             }
