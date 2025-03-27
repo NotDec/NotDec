@@ -289,52 +289,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     return *NewNode;
   };
 
-  // Step 1. separate arrays.
-  // After this step, all nodes with stride access, has only this stride edge
-  // and offset is zero For all edges with stride access, if parent has only
-  // this edge, and the offset is zero, then OK, else, split the edge in the
-  // middle.
-  // std::vector<const retypd::CGEdge *> TargetEdges;
-  // for (auto &Ent : CG.Nodes) {
-  //   auto &Source = Ent.second;
-  //   // Start of End should not have offset edge. So no need to check.
-  //   bool hasOffset = retypd::hasOffsetEdge(Source);
-  //   if (!hasOffset) {
-  //     continue;
-  //   }
-  //   bool onlyOneEdge = Source.outEdges.size() == 1;
-  //   for (auto &E : Source.outEdges) {
-  //     if (auto *OL = retypd::getOffsetLabel(E.Label)) {
-  //       // for each offset with access
-  //       if (OL->range.access.size() == 0) {
-  //         continue;
-  //       }
-  //       if (onlyOneEdge && OL->range.offset == 0) {
-  //         continue;
-  //       }
-  //       // need to split the edge in the middle.
-  //       TargetEdges.push_back(&E);
-  //     }
-  //   }
-  // }
-  // // split the edge in the middle.
-  // for (auto *E : TargetEdges) {
-  //   auto *OL = retypd::getOffsetLabel(E->Label);
-  //   assert(OL);
-  //   auto Off1 = OL->range;
-  //   Off1.access.clear();
-  //   auto Off2 = OL->range;
-  //   Off2.offset = 0;
-  //   splitEdge(*E, retypd::RecallLabel{retypd::OffsetLabel{Off1}},
-  //             retypd::RecallLabel{retypd::OffsetLabel{Off2}},
-  //             ValueNamer::getName("Arr_"));
-  //   // mark this node as array..? no handle this later.
-  //   // auto It = TypeInfos.insert({NewNode, TypeInfo{ArrayInfo{}}});
-  //   // assert(It.second);
-  // }
-
   std::set<CGNode *> Visited;
-  // Step 2. depth first search to calc pointer range and organize the edges.
+  // See test/Access2Struct/main.py
   std::function<void(CGNode &)> doBuild = [&](CGNode &N) {
     if (!N.isPNIPointer()) {
       return;
@@ -387,10 +343,11 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
       auto &Target = const_cast<CGNode &>(OffsetEdge->getTargetNode());
       if (auto *OL = retypd::getOffsetLabel(OffsetEdge->Label)) {
         if (OL->range.offset == 0 && OL->range.access.size() == 1) {
-          // this is an array, but we assume element count = 1
+          // this is an array, but we first assume element count = 1
           auto AccessSize = OL->range.access.begin()->Size;
-          TypeInfos[&N] =
-              TypeInfo{.Size = AccessSize, .Info = ArrayInfo{OffsetEdge}};
+          TypeInfos[&N] = TypeInfo{
+              .Size = AccessSize,
+              .Info = ArrayInfo{.Edge = OffsetEdge, .ElemSize = AccessSize}};
           doBuild(Target);
           return;
         }
@@ -554,6 +511,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                        .Edge = FieldEdge,
                        .Target = &NewFieldNode});
         doBuild(NewFieldNode);
+        // reduced to simple array, so we set array info in recursive call.
         // TypeInfos[&NewArrNode] =
         //     TypeInfo{.Size = MaxStride, .Info = ArrayInfo{.Edge = ArrEdge}};
       }
@@ -1376,14 +1334,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // Info.Bytes = MemoryBytes;
   // Info.resolveInitialValue();
   Mem->setBytesManager(MemoryBytes);
-
-  // 3.5 analyze and refine HTypes
-  for (auto &Ent : HTCtx->getDecls()) {
-    auto *Decl = Ent.second.get();
-    if (auto *RD = llvm::dyn_cast<RecordDecl>(Decl)) {
-      RD->addPaddings();
-    }
-  }
 
   // analyze the signed/unsigned info
   // Framework:

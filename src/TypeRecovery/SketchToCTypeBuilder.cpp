@@ -23,6 +23,7 @@
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 #include "notdec-llvm2c/StructuralAnalysis.h"
 
 namespace notdec::retypd {
@@ -90,7 +91,7 @@ HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
 // }
 
 HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
-                              unsigned ArraySize) {
+                              std::optional<unsigned> ExpectedSize) {
   unsigned BitSize = Node.getSize();
   const char *prefix = "struct_";
   if (Node.isMemory()) {
@@ -100,7 +101,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
     if (NodeTypeMap.count(&Node)) {
       return NodeTypeMap.at(&Node);
     } else {
-      // Visited, but have not set a type (in progress, i.e. visiting
+      // Visited, but have not set a type (in DFS progress, i.e. visiting
       // dependency nodes).
       // TODO: remove debug output.
       std::cerr << "Cyclic dependency forces the node become struct/union.\n";
@@ -126,12 +127,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
   bool hasSetNodeMap = false;
   auto ETy = Node.getPNIVar()->getLatticeTy();
 
-  if (Node.outEdges.empty()) {
-    // no info from graph, just use LatticeTy.
-    Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
-  } else if (!Node.isPNIPointer()) {
+  if (!Node.isPNIPointer()) {
     // No out edges.
-    std::optional<std::shared_ptr<LatticeTy>> LT;
+    std::optional<std::shared_ptr<LatticeTy>> LT = std::nullopt;
     for (auto &Edge : Node.outEdges) {
       if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
         if (FB->Base.isPrimitive()) {
@@ -148,12 +146,19 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       LT = createLatticeTy(ETy, V, "");
     }
 
-    Ret = fromLatticeTy(ETy, &**LT, BitSize);
+    if (LT) {
+      Ret = fromLatticeTy(ETy, &**LT, BitSize);
+    } else {
+      Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
+    }
+  } else if (Node.outEdges.empty()) {
+    // no info from graph, just use LatticeTy.
+    Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
   } else {
     auto &TI = TypeInfos.at(const_cast<CGNode *>(&Node));
     if (std::holds_alternative<SimpleTypeInfo>(TI.Info)) {
       auto &Info = std::get<SimpleTypeInfo>(TI.Info);
-      assert(Info.Edge != nullptr && "TODO");
+      assert(Info.Edge != nullptr); // or should be handled in prev if
       // simple pointer type
       auto PointeeTy = buildType(Info.Edge->getTargetNode(), V, *TI.Size);
       Ret = getPtrTy(PointeeTy);
@@ -161,15 +166,14 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       auto &Info = std::get<ArrayInfo>(TI.Info);
       auto EdgeOff = getOffsetLabel(Info.Edge->getLabel());
       assert(EdgeOff->range.offset == 0);
-      auto EdgeAcc = EdgeOff->range.access.front();
 
-      auto ElemTy = buildType(Info.Edge->getTargetNode(), V, EdgeAcc.Size);
+      auto ElemTy = buildType(Info.Edge->getTargetNode(), V, *Info.ElemSize);
       if (!ElemTy->isPointerType()) {
         assert(false && "Array out edge must be pointer type");
       }
       ElemTy = ElemTy->getPointeeType();
 
-      auto Count = *TI.Size / EdgeAcc.Size;
+      auto Count = *TI.Size / *Info.ElemSize;
       assert(Count >= 1);
       auto ArrayTy = Ctx.getArrayType(false, ElemTy, Count);
       Ret = getPtrTy(ArrayTy);
@@ -189,6 +193,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       }
       hasSetNodeMap = true;
 
+      std::map<FieldEntry *, FieldDecl *> E2D;
       for (size_t i = 0; i < Info.Fields.size(); i++) {
         auto &Ent = Info.Fields[i];
         auto Target = const_cast<CGNode *>(Ent.Target);
@@ -203,14 +208,98 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         // the node is a field pointer type. get the field type.
         Ty = Ty->getPointeeType();
 
+        // merge the char with previous char array
+        // because this requires array expanding, cannot be separated to a new
+        // pass.
+        // FieldEntry *Prev = nullptr;
+        // if (i > 0) {
+        //   Prev = &Info.Fields[i - 1];
+        // }
+        // if (Prev != nullptr && Ty->isCharType() &&
+        //     Decl->getFields().size() > 0) {
+        //   auto &LastField = Decl->getFields().back();
+        //   if (!LastField.isPadding && LastField.Type->isCharArrayType()) {
+        //     if (LastField.R.end() == Ent.R.Start) {
+        //       // merge into prev field
+        //       LastField.R.Size += Ent.R.Size;
+        //       auto* OldArrTy = llvm::cast<ArrayType>(LastField.Type);
+        //       auto NewCount = LastField.R.Size /
+        //       auto NewArrTy = OldArrTy.withSize(Ctx,);
+
+        //     }
+        //   }
+        // }
+
         auto FieldName = ValueNamer::getName("field_");
-        Decl->addField(
+        auto CurrentDecl =
             FieldDecl{.R = Ent.R,
                       .Type = Ty,
                       .Name = FieldName,
-                      .Comment = "at offset: " + std::to_string(Ent.R.Start)});
+                      .Comment = "at offset: " + std::to_string(Ent.R.Start)};
+        std::optional<FieldDecl> PaddingDecl = std::nullopt;
 
-        // Ent.Decl = Field;
+        // Try to calc expand end:
+        auto ExpandEnd = Ent.R.end();
+        // if there is space to next field
+        if (i + 1 < Info.Fields.size()) {
+          auto &Next = Info.Fields.at(i + 1);
+          if (Ent.R.end() < Next.R.Start) {
+            // calculate the range to be expand to.
+            ExpandEnd = Next.R.Start;
+          }
+        }
+        // if it is char array and merge with elem
+        if (Ty->isCharArrayType()) {
+          auto j = i + 1;
+          for (; j < Info.Fields.size(); j++) {
+            auto &EntJ = Info.Fields[j];
+            auto TargetJ = const_cast<CGNode *>(EntJ.Target);
+            auto TyJ = buildType(*TargetJ, V, EntJ.R.Size);
+            TyJ = TyJ->getPointeeType();
+            if (!TyJ->isCharType()) {
+              break;
+            }
+            // merge to prev array.
+            ExpandEnd = EntJ.R.end();
+            
+            if (j + 1 < Info.Fields.size()) {
+              auto &NextJ = Info.Fields.at(j + 1);
+              if (EntJ.R.end() < NextJ.R.Start) {
+                // calculate the range to be expand to.
+                ExpandEnd = NextJ.R.Start;
+              }
+            }
+          }
+          // adjust i to skip some field
+          i = j - 1;
+        }
+
+        // Try to expand: 1 expand array size. or 2 add padding.
+        if (Ty->isArrayType()) {
+          ArrayInfo &TInfo = std::get<ArrayInfo>(TypeInfos.at(Target).Info);
+          // expand the array size to the range
+          assert(TInfo.ElemSize);
+          auto ElemSize = *TInfo.ElemSize;
+          auto NewCount = (ExpandEnd - Ent.R.Start) / ElemSize;
+          CurrentDecl.R.Size = NewCount * ElemSize;
+          auto OldArrTy = llvm::cast<ast::ArrayType>(CurrentDecl.Type);
+          CurrentDecl.Type = OldArrTy->withSize(Ctx, NewCount);
+        }
+        // add padding if there is space
+        if (CurrentDecl.R.end() < ExpandEnd) {
+          auto PaddingSize = ExpandEnd - Ent.R.end();
+          PaddingDecl = FieldDecl{
+              .R = SimpleRange{.Start = Ent.R.end(), .Size = PaddingSize},
+              .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+              .Name = ValueNamer::getName("padding_"),
+              .Comment = "at offset: " + std::to_string(Ent.R.end()),
+              .isPadding = true,
+          };
+        }
+        Decl->addField(CurrentDecl);
+        if (PaddingDecl) {
+          Decl->addField(*PaddingDecl);
+        }
       }
     } else if (std::holds_alternative<UnionInfo>(TI.Info)) {
       auto &Info = std::get<UnionInfo>(TI.Info);

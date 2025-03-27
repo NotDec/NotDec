@@ -51,7 +51,7 @@ struct TypeBuilder {
   std::map<CGNode *, TypeInfo> TypeInfos;
 
   // Main interface: recursively visit the node and build the type
-  HType *buildType(const CGNode &Node, Variance V, unsigned ArraySize = 0);
+  HType *buildType(const CGNode &Node, Variance V, std::optional<unsigned> ExpectedSize = std::nullopt);
 
   TypeBuilder(TypeBuilderContext &Parent,
               std::map<CGNode *, TypeInfo> TypeInfos)
