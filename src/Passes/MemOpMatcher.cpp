@@ -66,6 +66,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
         }
 
         std::set<Instruction *> Visited;
+
         Optional<std::pair<Value *, int64_t>> BeginOffset = None;
         Optional<std::pair<Value *, int64_t>> EndOffset = None;
 
@@ -79,7 +80,9 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
         EndOffset->second +=
             SI->getValueOperand()->getType()->getPrimitiveSizeInBits() / 8;
         // check for the same store backwards.
-        long TotalStoreCount = 1;
+        // long TotalStoreCount = 1;
+        std::set<Instruction *> Stores;
+        Stores.insert(SI);
         for (auto II = std::next(I); II != E; ++II) {
           if (Visited.count(&*II)) {
             continue;
@@ -115,14 +118,14 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
               // case 2: overlap: BeginOffset < NextBeginOff < EndOffset < NextEndOff
               if (NextBeginOff <= EndOffset->second && EndOffset->second < NextEndOff) {
                 EndOffset->second = NextEndOff;
-                TotalStoreCount++;
+                Stores.insert(SI2);
                 continue;
                 // Extend the begin of offset
                 // case 3: equal: NextBeginOff < NextEndOff == BeginOffset < EndOffset
                 // case 4: overlap: NextBeginOff < BeginOffset < NextEndOff < EndOffset
               } else if (NextEndOff >= BeginOffset->second && NextBeginOff < BeginOffset->second ) {
                 BeginOffset->second = NextBeginOff;
-                TotalStoreCount++;
+                Stores.insert(SI2);
                 continue;
               }
             }
@@ -130,7 +133,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
           // failed to match
           break;
         }
-        if (TotalStoreCount > 1) {
+        if (Stores.size() > 1) {
           // found a memset
           // create a IRBuilder
           IRBuilder<> Builder(SI);
@@ -148,7 +151,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
                                             Type::getInt8PtrTy(F.getContext()));
             }
           }
-          llvm::errs() << "Merging " << std::to_string(TotalStoreCount)
+          llvm::errs() << "Merging " << std::to_string(Stores.size())
                        << " stores in func " << F.getName()
                        << " into memset at " << *Base << ": " << *SI << "\n";
           auto *SetValByte =
@@ -158,10 +161,8 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
                                EndOffset->second - BeginOffset->second,
                                MaybeAlign());
           // remove all visited insts
-          for (auto *I1 : Visited) {
-            if (I1->getNumUses() == 0) {
-              I1->eraseFromParent();
-            }
+          for (auto *I1 : Stores) {
+            I1->eraseFromParent();
           }
           // revisit the basic block
           --BB;
