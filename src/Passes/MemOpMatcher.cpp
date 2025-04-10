@@ -86,6 +86,16 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
           }
           if (auto *SI2 = dyn_cast<StoreInst>(&*II)) {
             Visited.insert(SI2);
+
+            // memset must set a cyclic constant
+            if (!isa<ConstantInt>(SI2->getValueOperand())) {
+              continue;
+            }
+            auto *SetVal2 = dyn_cast<ConstantInt>(SI2->getValueOperand());
+            if (SetVal2->getZExtValue() != SetVal->getZExtValue()) {
+              continue;
+            }
+
             Optional<std::pair<Value *, int64_t>> NextBegin =
                 MatchOffset(SI2->getPointerOperand(), Visited);
             // failed to match: stores must be in sequence

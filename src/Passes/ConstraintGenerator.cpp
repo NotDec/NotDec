@@ -657,6 +657,15 @@ TypeRecovery::postProcess(ConstraintsGenerator &G, std::string DebugDir) {
   return G2S;
 }
 
+bool isFuncPtr(ExtValuePtr Val) {
+  if (auto Ty = getType(Val)) {
+    if (Ty->isPointerTy() && Ty->getPointerElementType()->isFunctionTy()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
@@ -704,7 +713,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // 0.5 print module for debugging
   if (DebugDir) {
-    printModule(M, join(DebugDir, "01-Original.ll").c_str());
+    printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
   }
 
   // 0.6 get the CallGraph, iterate by topological order of SCC
@@ -1199,10 +1208,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             if (F) {
               *ValueTypesFile << " (In Func: " << F->getName() << ")";
             }
-            // DEBUG
-            // if ((*V)->getName() == "stack31") {
-            //   *ValueTypesFile << "here";
-            // }
           } else {
             *ValueTypesFile << "  Special Value: " << getName(Ent.first);
             if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
@@ -1226,7 +1231,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
                        << toString(Ent.first) << "\n";
         }
 
-        Result.ValueTypes[Ent.first] = CTy;
+        if (!isFuncPtr(Ent.first)) {
+          Result.ValueTypes[Ent.first] = CTy;
+        }
 
         if (ValueTypesFile) {
           *ValueTypesFile << " upper bound: " << CTy->getAsString();
@@ -1274,10 +1281,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
             if (F) {
               *ValueTypesFile << " (In Func: " << F->getName() << ")";
             }
-            // DEBUG
-            // if ((*V)->getName() == "stack31") {
-            //   *ValueTypesFile << "here";
-            // }
           } else {
             *ValueTypesFile << "  Special Value: " << getName(Ent.first);
             if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
@@ -1300,7 +1303,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
                        << toString(Ent.first) << "\n";
         }
-        Result.ValueTypesLowerBound[Ent.first] = CTy;
+        if (!isFuncPtr(Ent.first)) {
+          Result.ValueTypesLowerBound[Ent.first] = CTy;
+        }
         if (ValueTypesFile) {
           *ValueTypesFile << " lower bound: " << CTy->getAsString();
         }
