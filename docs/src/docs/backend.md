@@ -376,6 +376,39 @@ struct st {
 | `-FieldDecl 0x558470 <line:9:3, col:14> col:14 d 'struct st *'
 ```
 
+### unnamed struct 
+
+匿名结构体不能随意出现在任何类型出现的地方，比如函数参数。（暂时认为）匿名结构体只能在变量定义的时候出现。Clang AST对它的表示有两种情况。
+
+1 如果是全局变量[创建一个匿名结构体](https://lists.llvm.org/pipermail/cfe-dev/2021-February/067631.html)，首先创建RecordDecl，并且设置free standing属性（通过`decl->setFreeStanding(false);`）然后在为这个Decl创建ElaboratedType，让后面的变量定义使用这个类型。
+
+```cpp
+// 创建ElaboratedType的代码
+auto ElabTy = Ctx.getElaboratedType(clang::ETK_Struct, nullptr,
+                                        Ctx.getRecordType(decl), decl);
+```
+
+Clang AST dump得到的结构如下：
+
+```
+|-RecordDecl 0x3bcf2b00 <./hw.c:1:1, col:15> col:1 struct definition
+| `-FieldDecl 0x3bcf2bb8 <col:9, col:13> col:13 c 'int'
+|-VarDecl 0x3bcf2c68 <col:1, col:17> col:17 d 'struct (unnamed struct at ./hw.c:1:1)':'struct (unnamed at ./hw.c:1:1)'
+```
+
+2 如果是函数内，则需要创建DeclStmt，内部包含RecordDecl和VarDecl。
+
+```
+`-FunctionDecl 0x1386cd80 <line:2:1, line:6:1> line:2:5 main 'int ()'
+  `-CompoundStmt 0x1386d050 <col:12, line:6:1>
+    |-DeclStmt 0x1386d008 <line:4:3, col:20>
+    | |-RecordDecl 0x1386ce20 <col:3, col:17> col:3 struct definition
+    | | `-FieldDecl 0x1386ced8 <col:11, col:15> col:15 a 'int'
+    | `-VarDecl 0x1386cf88 <col:3, col:19> col:19 b 'struct (unnamed struct at ./hw.c:4:3)':'struct (unnamed at ./hw.c:4:3)'
+    `-ReturnStmt 0x1386d040 <line:5:3, col:10>
+      `-IntegerLiteral 0x1386d020 <col:10> 'int' 0
+```
+
 ## 高层类型信息相关
 
 ### 指针加法转表达式

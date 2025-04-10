@@ -358,12 +358,12 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
 
     // normalize load edge as zero offset
     for (auto &E : N.outEdges) {
-      auto &Target = const_cast<CGNode &>(E.getTargetNode());
+      // auto &Target = const_cast<CGNode &>(E.getTargetNode());
       if (retypd::isLoadOrStore(E.Label)) {
         // separate the load/store edge as a simple pointer node.
-        auto &New =
-            splitEdge(E, retypd::RecallLabel{OffsetLabel{OffsetRange()}},
-                      E.Label, ValueNamer::getName("F0_"));
+        // auto &New =
+        splitEdge(E, retypd::RecallLabel{OffsetLabel{OffsetRange()}}, E.Label,
+                  ValueNamer::getName("F0_"));
         break;
       }
     }
@@ -455,10 +455,10 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                   CG.addEdge(N, NewFieldNode,
                              retypd::RecallLabel{
                                  OffsetLabel{.range = {.offset = RangeStart}}});
-              auto ArrEdge =
-                  CG.addEdge(NewFieldNode, TargetNode,
-                             retypd::RecallLabel{OffsetLabel{
-                                 OffsetRange{.access = {MaxStride}}}});
+              // auto ArrEdge =
+              CG.addEdge(NewFieldNode, TargetNode,
+                         retypd::RecallLabel{
+                             OffsetLabel{OffsetRange{.access = {MaxStride}}}});
               Fields.push_back(FieldEntry{
                   .R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
                   .Edge = FieldEdge,
@@ -503,9 +503,10 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         auto FieldEdge = CG.addEdge(
             N, NewFieldNode,
             retypd::RecallLabel{OffsetLabel{.range = {.offset = RangeStart}}});
-        auto ArrEdge = CG.addEdge(NewFieldNode, NewArrNode,
-                                  retypd::RecallLabel{OffsetLabel{
-                                      OffsetRange{.access = {MaxStride}}}});
+        /*auto ArrEdge = */ CG.addEdge(
+            NewFieldNode, NewArrNode,
+            retypd::RecallLabel{
+                OffsetLabel{OffsetRange{.access = {MaxStride}}}});
         Fields.push_back(
             FieldEntry{.R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
                        .Edge = FieldEdge,

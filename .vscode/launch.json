@@ -20,6 +20,7 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
+        "NOTDEC_DEBUG_DIR": "debug_dir",
         "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
@@ -107,7 +108,7 @@
       "name": "GraphTest",
       "program": "${workspaceFolder}/build/bin/GraphTest",
       "args": [
-        // "--gtest_filter=Retypd.SaturationPaperTest",
+        "--gtest_filter=Retypd.SaturationPaperTest",
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
@@ -119,6 +120,14 @@
         "DEBUG_TRANS_MIN_GRAPH": "1",
         "DEBUG_TRANS_LAYER_SPLIT_GRAPH": "1",
       }
+    },
+    {
+      "name": "Python Debugger: Current File with Arguments",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "args": "TestAccess.test_4"
     }
   ]
 }
