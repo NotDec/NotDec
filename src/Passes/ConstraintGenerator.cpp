@@ -1335,11 +1335,15 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   using notdec::ast::RecordDecl;
   using notdec::ast::RecordType;
-  RecordDecl *Mem = CTy->getPointeeType()->getAs<RecordType>()->getDecl();
-  // auto &Info = TBC.StructInfos[Mem];
-  // Info.Bytes = MemoryBytes;
-  // Info.resolveInitialValue();
-  Mem->setBytesManager(MemoryBytes);
+  RecordDecl *Mem = nullptr;
+  // if Memory type is not void
+  if (auto MTy = CTy->getPointeeType()) {
+    Mem = CTy->getPointeeType()->getAs<RecordType>()->getDecl();
+    // auto &Info = TBC.StructInfos[Mem];
+    // Info.Bytes = MemoryBytes;
+    // Info.resolveInitialValue();
+    Mem->setBytesManager(MemoryBytes);
+  }
 
   // analyze the signed/unsigned info
   // Framework:

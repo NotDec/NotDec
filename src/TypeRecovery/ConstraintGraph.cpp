@@ -1181,9 +1181,9 @@ ConstraintGraph::getNodeReachableOffset(CGNode &Start) {
     auto &Exp = Ent.second;
     std::set<OffsetRange> Calced = calcOffset(Exp);
     // debug print
-    LLVM_DEBUG(llvm::dbgs()
-               << "  can reach " << toString(TargetN->key) << " With "
-               << toString(Exp) << ": " << toString(Calced) << "\n");
+    // LLVM_DEBUG(llvm::dbgs()
+    //            << "  can reach " << toString(TargetN->key) << " With "
+    //            << toString(Exp) << ": " << toString(Calced) << "\n");
     for (auto &R : Calced) {
       Ret.emplace(TargetN, R);
     }

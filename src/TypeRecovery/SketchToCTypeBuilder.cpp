@@ -158,7 +158,10 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
     auto &TI = TypeInfos.at(const_cast<CGNode *>(&Node));
     if (std::holds_alternative<SimpleTypeInfo>(TI.Info)) {
       auto &Info = std::get<SimpleTypeInfo>(TI.Info);
-      assert(Info.Edge != nullptr); // or should be handled in prev if
+      if (Info.Edge == nullptr) {
+        // void pointer?
+        return getPtrTy(nullptr);
+      }
       // simple pointer type
       auto PointeeTy = buildType(Info.Edge->getTargetNode(), V, *TI.Size);
       Ret = getPtrTy(PointeeTy);

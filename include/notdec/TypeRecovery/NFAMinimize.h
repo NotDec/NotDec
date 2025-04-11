@@ -136,6 +136,7 @@ struct NFADeterminizer {
         if (PN1 != nullptr && !PN1->isNull() && !PN->tyEqual(*PN1)) {
           llvm::errs() << "Error: Different PNI in a set of nodes!\n";
           printPNDiffSet(N);
+          std::abort();
           return nullptr;
         }
       }

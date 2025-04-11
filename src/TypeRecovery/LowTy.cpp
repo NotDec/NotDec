@@ -118,10 +118,14 @@ bool LowTy::setPtrOrNum(PtrOrNum NewTy) {
   }
 
   if (Ty == NotPN) {
-    assert(NewTy == NotPN);
+    if (NewTy != NotPN) {
+      std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
+    }
+    return false;
+  } else if (NewTy == NotPN) {
+    std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
     return false;
   }
-  assert(NewTy != NotPN);
 
   assert(isPNRelated() && NewTy != NotPN && NewTy != Null);
   if (Ty == NewTy) {
