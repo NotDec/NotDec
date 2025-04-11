@@ -1036,9 +1036,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       CurrentTypes.addSubtype(
           CurrentTypes.getNode(Current, nullptr, -1, retypd::Covariant), *D);
 
-      auto *DC = multiGraphDeterminizeTo(CurrentTypes, FuncNodes, "actc_");
-      CurrentTypes.addSubtype(*DC, CurrentTypes.getNode(Current, nullptr, -1,
-                                                        retypd::Contravariant));
+      // We do not need to do it again for Contravariant because it is
+      // symmetric?
+
+      // auto *DC = multiGraphDeterminizeTo(CurrentTypes, FuncNodesContra,
+      // "actc_"); CurrentTypes.addSubtype(*DC, CurrentTypes.getNode(Current,
+      // nullptr, -1, retypd::Contravariant));
 
       CurrentTypes.makeSymmetry();
     }
@@ -1092,22 +1095,24 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     MemNode = multiGraphDeterminizeTo(*Global, MemoryNodes, "mdtm");
     // Global->mergeAfterDeterminize();
   }
-  CGNode *MemNodeC = nullptr;
-  if (MemoryNodesC.empty()) {
-    llvm::errs() << "No memory node found\n";
-    MemNodeC = Global->CG.getMemoryNode(retypd::Contravariant);
-  } else {
-    MemNodeC = multiGraphDeterminizeTo(*Global, MemoryNodesC, "mdtmc");
-    // Global->mergeAfterDeterminize();
-  }
-  // a special value to represent the memory node
-  MemNode->getPNIVar()->unify(*MemNodeC->getPNIVar());
+  // CGNode *MemNodeC = nullptr;
+  // if (MemoryNodesC.empty()) {
+  //   llvm::errs() << "No memory node found\n";
+  //   MemNodeC = Global->CG.getMemoryNode(retypd::Contravariant);
+  // } else {
+  //   MemNodeC = multiGraphDeterminizeTo(*Global, MemoryNodesC, "mdtmc");
+  //   // Global->mergeAfterDeterminize();
+  // }
+  // // a special value to represent the memory node
+  // MemNode->getPNIVar()->unify(*MemNodeC->getPNIVar());
   Global->CG.onlyAddEdge(*Global->CG.getMemoryNode(retypd::Covariant), *MemNode,
                          retypd::One{});
-  Global->CG.onlyAddEdge(*MemNodeC,
-                         *Global->CG.getMemoryNode(retypd::Contravariant),
-                         retypd::One{});
+  // Global->CG.onlyAddEdge(*MemNodeC,
+  //                        *Global->CG.getMemoryNode(retypd::Contravariant),
+  //                        retypd::One{});
   // keep node in val2node map for post process
+  Global->makeSymmetry();
+  Global->CG.solve();
   Global->V2N.insert(ConstantAddr(),
                      Global->CG.getMemoryNode(retypd::Covariant)->key);
   Global->V2NContra.insert(
@@ -1338,11 +1343,19 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   RecordDecl *Mem = nullptr;
   // if Memory type is not void
   if (auto MTy = CTy->getPointeeType()) {
-    Mem = CTy->getPointeeType()->getAs<RecordType>()->getDecl();
+    if (auto RD = CTy->getPointeeType()->getAs<RecordType>()) {
+      Mem = RD->getDecl();
+      Mem->setBytesManager(MemoryBytes);
+    } else {
+      llvm::errs() << "ERROR: Memory Type is not struct type: " << CTy->getAsString()
+                   << "\n";
+    }
     // auto &Info = TBC.StructInfos[Mem];
     // Info.Bytes = MemoryBytes;
     // Info.resolveInitialValue();
-    Mem->setBytesManager(MemoryBytes);
+  } else {
+    llvm::errs() << "ERROR: Memory Type is void!" << CTy->getAsString()
+                   << "\n";
   }
 
   // analyze the signed/unsigned info
@@ -1387,13 +1400,28 @@ void ConstraintsGenerator::makeSymmetry() {
       if (std::holds_alternative<retypd::One>(Label)) {
         addSubtype(N, T);
       } else if (auto RL = std::get_if<retypd::RecallLabel>(&Label)) {
-        CG.addEdge(T, N, retypd::ForgetLabel{RL->label});
-        CG.addEdge(NC, TC, retypd::RecallLabel{RL->label});
-        CG.addEdge(TC, NC, retypd::ForgetLabel{RL->label});
+        auto FL = toForget(*RL);
+        CG.addEdge(T, N, FL);
+        CG.addEdge(NC, TC, *RL);
+        CG.addEdge(TC, NC, FL);
       } else if (auto FL = std::get_if<retypd::ForgetLabel>(&Label)) {
-        CG.addEdge(T, N, retypd::RecallLabel{FL->label});
-        CG.addEdge(NC, TC, retypd::ForgetLabel{FL->label});
-        CG.addEdge(TC, NC, retypd::RecallLabel{FL->label});
+        auto RL = toRecall(*FL);
+        CG.addEdge(T, N, RL);
+        CG.addEdge(NC, TC, *FL);
+        CG.addEdge(TC, NC, RL);
+      } else if (auto RB = std::get_if<retypd::RecallBase>(&Label)) {
+        auto FB = retypd::toForget(*RB);
+        CG.addEdge(T, N, FB);
+        CG.addEdge(NC, TC, *RB);
+        CG.addEdge(TC, NC, FB);
+      } else if (auto FB = std::get_if<retypd::ForgetBase>(&Label)) {
+        auto RB = retypd::toRecall(*FB);
+        CG.addEdge(T, N, RB);
+        CG.addEdge(NC, TC, *FB);
+        CG.addEdge(TC, NC, RB);
+      } else {
+        std::cerr << "Unhandled type!";
+        std::abort();
       }
     }
   }

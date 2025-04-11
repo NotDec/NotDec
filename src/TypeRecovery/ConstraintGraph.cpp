@@ -1653,6 +1653,11 @@ void ConstraintGraph::saturate() {
           auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
           // end: for each recall edge.
           if (ReachingSet.count(&Source)) {
+            // non-lazy rule: if it is recall load, we allow forget store.
+            std::optional<FieldLabel> RecallStore = std::nullopt;
+            if (auto* Load = std::get_if<LoadLabel>(&Capa.label)) {
+              RecallStore = toStore(*Load);
+            }
             for (auto &Reach : ReachingSet[&Source]) {
               if (Reach.first == Capa.label && Reach.second != &Target) {
                 // We are iterating through Recall edges, and we insert One
@@ -1663,6 +1668,13 @@ void ConstraintGraph::saturate() {
                              << " to " << Target.key.str() << " with _1_ \n");
                   Changed |= (addEdge(*Reach.second, Target, One{}) != nullptr);
                 }
+              }
+              // non-lazy rule: if it is recall load, we allow forget store.
+              if (RecallStore && (Reach.first == *RecallStore) && Reach.second != &Target) {
+                // Changed |= (addEdge(*Reach.second, Target, One{}) != nullptr);
+                auto& From = *Reach.second;
+                auto& To = Target;
+                From.getPNIVar()->unify(*To.getPNIVar());
               }
             }
           }
