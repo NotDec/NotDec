@@ -89,6 +89,10 @@ using FieldLabel =
 
 std::string toString(const FieldLabel &f);
 
+inline StoreLabel toStore(LoadLabel L) {
+  return StoreLabel{.Size = L.Size};
+}
+
 Variance getVariance(const FieldLabel &f);
 
 struct BaseConstant {
@@ -640,6 +644,23 @@ inline bool isRecallOffset(const EdgeLabel &label) {
     return false;
   }
 }
+
+inline ForgetLabel toForget(RecallLabel L) {
+  return ForgetLabel{.label = L.label};
+}
+
+inline RecallLabel toRecall(ForgetLabel L) {
+  return RecallLabel{.label = L.label};
+}
+
+inline ForgetBase toForget(RecallBase L) {
+  return ForgetBase{.Base = L.Base, .V = L.V};
+}
+
+inline RecallBase toRecall(ForgetBase L) {
+  return RecallBase{.Base = L.Base, .V = L.V};
+}
+
 
 inline const notdec::retypd::OffsetLabel *
 getOffsetLabel(const EdgeLabel &label) {
