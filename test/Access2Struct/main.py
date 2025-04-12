@@ -1,18 +1,28 @@
+from typing import List
+
+
 class Type:
     pass
 
 class StructType(Type):
     def __init__(self):
-        self.members = {}  # offset: (type, size)
+        self.members = []  # offset, size, type
 
     def __str__(self):
-        return 'StructType(%s)' % ', '.join('%d-%s: %s' % (offset, offset+size, type) for offset, (type, size) in self.members.items())
+        return 'StructType(%s)' % ', '.join('%d-%s: %s' % (offset, offset+size, type) for offset, size, type in self.members)
+
+class UnionType(Type):
+    def __init__(self):
+        self.members = []  # offset, size, type
+
+    def __str__(self):
+        return 'UnionType(%s)' % ', '.join(str(type) for type in self.members)
 
 class ArrayType(Type):
     def __init__(self, element_type, stride):
         self.element_type = element_type
         self.stride = stride
-        
+
     def __str__(self):
         return 'ArrayType(%s, %d)' % (self.element_type, self.stride)
 
@@ -23,13 +33,44 @@ class BasicType(Type):
     def __str__(self):
         return 'BasicType(%d)' % self.size
 
+
+def create_struct(members):
+    # 如果仅有一个off=0的成员，则为简单的内部类型
+    if (len(members) == 1) and (0 == members[0][0]):
+        return members[0][2]
+    r = StructType()
+    r.members = members
+    return r
+    
+def create_union(members):
+    # 根据结束偏移贪心
+    members = sorted(members, key=lambda x:x[0] + x[1])
+    union_panels = [] # type: List[List]
+    for mb in members:
+        for panel in union_panels:
+            if panel[-1][0] + panel[-1][1] <= mb[0]:
+                panel.append(mb)
+                break
+        else:
+            union_panels.append([mb])    
+
+    # 仅有一个union成员，则是普通结构体
+    if len(union_panels) == 1:
+        return create_struct(union_panels[0])
+    else:
+        r = UnionType()
+        for panel in union_panels:
+            r.members.append(create_struct(panel))
+        return r
+
+
 def infer_type(patterns):
     if not patterns:
         return StructType()  # 默认为空结构体
 
-    struct = StructType()
+    members = []
 
-    if len(pattern) == 1 and pattern[0]['base'] == 0 and len(pattern[0]['strides']) == 0:
+    if len(patterns) == 1 and patterns[0]['base'] == 0 and len(patterns[0]['strides']) == 0:
         # 简单结构体类型
         return BasicType(size=patterns[0]['access_size'])
 
@@ -84,19 +125,72 @@ def infer_type(patterns):
                 sub_array_patterns.append(sub_pattern)
             member_type = ArrayType(infer_type(sub_array_patterns), max_stride)
             # 添加成员到结构体
-            struct.members[range_start] = (member_type, max_stride)
+            members.append((range_start, max_stride, member_type))
 
     if len(remaining_patterns) > 0:
         # 处理剩余的基本类型
         for pattern in remaining_patterns:
             assert len(pattern['strides']) == 0
-            struct.members[pattern['base']] = (BasicType(pattern['access_size']), pattern['access_size'])
+            members.append((pattern['base'], pattern['access_size'], BasicType(pattern['access_size'])))
 
-    if (len(struct.members) == 1) and (0 in struct.members):
-        return struct.members[0][0]
+    def is_overlap(range1, range2):
+        s1, e1 = range1
+        s2, e2 = range2
+        assert(s1 <= e1)
+        assert(s2 <= e2)
+        return max(s1, s2) < min(e1, e2)
 
-    # 返回外层数组类型
-    return struct
+    def filter_in_range(members, start, end):
+        in_range_members = []
+        for mb in members:
+            if is_overlap((start, end), (mb[0], mb[0]+mb[1])):
+                in_range_members.append(mb)
+        return in_range_members
+
+    # 根据成员创建结构体和union类型
+    # member: (start, size, type)
+
+    while True:
+        # 收集所有分割点
+        all_index = set()
+        for mb in members:
+            all_index.add(mb[0])
+            all_index.add(mb[0] + mb[1])
+        all_index = list(sorted(list(all_index)))
+        
+        # 遍历所有最小范围区间，如果出现重叠则以此开始创建union类型。
+        for i in range(len(all_index) - 1):
+            start = all_index[i]
+            end = all_index[i+1]
+            in_range_members = filter_in_range(members, start, end)
+            if len(in_range_members) <= 1:
+                continue
+            # try to create union
+            old_len = 1
+            new_len = len(in_range_members)
+            while new_len > old_len:
+                old_len = new_len
+                start = min([start for start, size, ty in in_range_members])
+                end = max([start+size for start, size, ty in in_range_members])
+                in_range_members = filter_in_range(members, start, end)
+                new_len = len(in_range_members)
+            # replace member in in_range_members to a union member.
+            non_overlap_members = []
+            union_start = start
+            union_end = end
+            overlap_members = []
+            for mb in members:
+                if is_overlap((start, end), (mb[0], mb[0]+mb[1])):
+                    overlap_members.append((mb[0] - union_start, mb[1], mb[2]))
+                else:
+                    non_overlap_members.append(mb)
+            non_overlap_members.append((union_start, union_end - union_start, create_union(overlap_members)))
+            members = non_overlap_members
+        else:
+            break
+
+    # 返回结构体类型
+    return create_struct(members)
 
 import unittest
 
@@ -142,6 +236,15 @@ class TestAccess(unittest.TestCase):
             {'base': 0, 'strides': set(), 'access_size': 4},
             {'base': 4, 'strides': set(), 'access_size': 4},
             {'base': 8, 'strides': set(), 'access_size': 4},
+        ]
+        type = infer_type(patterns)
+        # self.assertEqual(str(type), 'ArrayType(StructType(0: BasicType(4)<4>, 4: BasicType(4)<4>, 8: BasicType(4)<4>, 12: BasicType(4)<4>), 8)')
+        print(type)
+
+    def test_6_Merge(self):
+        patterns = [
+            {'base': 0, 'strides': set(), 'access_size': 4},
+            {'base': 0, 'strides': {4}, 'access_size': 4},
         ]
         type = infer_type(patterns)
         # self.assertEqual(str(type), 'ArrayType(StructType(0: BasicType(4)<4>, 4: BasicType(4)<4>, 8: BasicType(4)<4>, 12: BasicType(4)<4>), 8)')

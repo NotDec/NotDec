@@ -241,6 +241,10 @@ void ConstraintsGenerator::dumpV2N() {
   }
 }
 
+inline CGNode &getTarget(FieldEntry &F) {
+  return const_cast<CGNode &>(F.Edge->getTargetNode());
+}
+
 std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   assert(TypeInfos.empty());
   // after post process, organize the node with offset edges.
@@ -291,7 +295,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
 
   std::set<CGNode *> Visited;
   // See test/Access2Struct/main.py
-  std::function<void(CGNode &)> doBuild = [&](CGNode &N) {
+  std::function<void(CGNode &, bool)> doBuild = [&](CGNode &N,
+                                                    bool mustBeStruct = false) {
     if (!N.isPNIPointer()) {
       return;
     }
@@ -307,7 +312,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     Visited.insert(&N);
 
     // if no offset edge, this is a simple pointer
-    if (!retypd::hasOffsetEdge(N)) {
+    if (!mustBeStruct && !retypd::hasOffsetEdge(N)) {
       // Check for load or store edge
       std::optional<const retypd::CGEdge *> LoadEdge;
       for (auto &Edge : N.outEdges) {
@@ -339,7 +344,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         edgeCount++;
       }
     }
-    if (edgeCount == 1 && OffsetEdge != nullptr) {
+    if (!mustBeStruct && edgeCount == 1 && OffsetEdge != nullptr) {
       auto &Target = const_cast<CGNode &>(OffsetEdge->getTargetNode());
       if (auto *OL = retypd::getOffsetLabel(OffsetEdge->Label)) {
         if (OL->range.offset == 0 && OL->range.access.size() == 1) {
@@ -348,7 +353,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
           TypeInfos[&N] = TypeInfo{
               .Size = AccessSize,
               .Info = ArrayInfo{.Edge = OffsetEdge, .ElemSize = AccessSize}};
-          doBuild(Target);
+          doBuild(Target, false);
           return;
         }
       }
@@ -461,9 +466,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                              OffsetLabel{OffsetRange{.access = {MaxStride}}}});
               Fields.push_back(FieldEntry{
                   .R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
-                  .Edge = FieldEdge,
-                  .Target = &NewFieldNode});
-              doBuild(NewFieldNode);
+                  .Edge = FieldEdge});
+              doBuild(NewFieldNode, false);
               for (auto *Edge : InRangeEdges) {
                 auto &From = const_cast<CGNode &>(Edge->getSourceNode());
                 auto &To = const_cast<CGNode &>(Edge->getTargetNode());
@@ -509,9 +513,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                 OffsetLabel{OffsetRange{.access = {MaxStride}}}});
         Fields.push_back(
             FieldEntry{.R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
-                       .Edge = FieldEdge,
-                       .Target = &NewFieldNode});
-        doBuild(NewFieldNode);
+                       .Edge = FieldEdge});
+        doBuild(NewFieldNode, false);
         // reduced to simple array, so we set array info in recursive call.
         // TypeInfos[&NewArrNode] =
         //     TypeInfo{.Size = MaxStride, .Info = ArrayInfo{.Edge = ArrEdge}};
@@ -525,78 +528,224 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
       assert(OL && "Other kinds of Edge should already be eliminated!");
       assert(OL->range.access.size() == 0 &&
              "should be handled by previous array pass");
-      doBuild(Target);
+      doBuild(Target, false);
       auto &TI = TypeInfos.at(&Target);
       Fields.push_back(FieldEntry{
           .R = SimpleRange{.Start = OL->range.offset, .Size = *TI.Size},
-          .Edge = &E,
-          .Target = &Target});
+          .Edge = &E});
     }
-    // sort the entry by end offset.
-    std::sort(Fields.begin(), Fields.end(),
-              [](const FieldEntry &A, const FieldEntry &B) {
-                return A.R.Start + A.R.Size < B.R.Start + B.R.Size;
-              });
-    // use std::min to find the min start offset.
-    auto MinStartOff =
-        std::min_element(Fields.begin(), Fields.end(),
-                         [](const FieldEntry &A, const FieldEntry &B) {
-                           return A.R.Start < B.R.Start;
-                         })
-            ->R.Start;
-    auto MaxOff = Fields.back().R.Start + Fields.back().R.Size;
-    // after determinize, there will not be nested struct. We assume Offset to
-    // struct == Min Start Offset. So set size as MaxOff - MinStartOff.
-    auto OurSize = MaxOff - MinStartOff;
 
-    std::vector<std::vector<FieldEntry>> UnionPanels;
-    for (auto &F : Fields) {
-      bool inserted = false;
-      for (auto &Panel : UnionPanels) {
-        if (Panel.back().R.Start + Panel.back().R.Size <= F.R.Start) {
-          Panel.push_back(F);
-          inserted = true;
-          break;
+    auto IsOverlap = [](OffsetTy S1, OffsetTy E1, OffsetTy S2, OffsetTy E2) {
+      assert(S1 < E1);
+      assert(S2 < E2);
+      if (std::max(S1, S2) < std::min(E1, E2)) {
+        return true;
+      }
+      return false;
+    };
+
+    // Fields should not be mutated during the lifetime of ret vector
+    auto FilterInRange = [&](const std::vector<FieldEntry> &Fields,
+                             OffsetTy Start,
+                             OffsetTy End) -> std::vector<size_t> {
+      std::vector<size_t> Ret;
+      for (size_t I = 0; I < Fields.size(); I++) {
+        auto &F = Fields.at(I);
+        auto FS = F.R.Start;
+        auto FE = F.R.Size + FS;
+        // overlaps
+        if (IsOverlap(Start, End, FS, FE)) {
+          Ret.push_back(I);
         }
       }
-      if (!inserted) {
-        UnionPanels.push_back({F});
+      return Ret;
+    };
+
+    while (true) {
+      // 收集所有分割点
+      std::set<OffsetTy> AllIndex;
+      for (auto &F : Fields) {
+        AllIndex.insert(F.R.Start);
+        AllIndex.insert(F.R.end());
       }
-    }
-    // if there is only one panel, this is a struct.
-    if (UnionPanels.size() == 1) {
-      TypeInfos[&N] =
-          TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Fields}};
+
+      // 遍历所有最小范围区间，如果出现重叠则以此开始创建union类型。
+      bool NoUpdate = true;
+      for (auto It = AllIndex.begin(); It != AllIndex.end(); ++It) {
+        auto NextIt = std::next(It);
+        if (NextIt == AllIndex.end()) {
+          break;
+        }
+        auto Start = *It;
+        auto End = *NextIt;
+        auto InRangeFieldIndex = FilterInRange(Fields, Start, End);
+        if (InRangeFieldIndex.size() <= 1) {
+          continue;
+        }
+        NoUpdate = false;
+
+        // create a union here.
+        auto OldSize = 1;
+        auto NewSize = InRangeFieldIndex.size();
+        while (NewSize > OldSize) {
+          OldSize = NewSize;
+          for (auto Ind : InRangeFieldIndex) {
+            auto &F = Fields.at(Ind);
+            Start = std::min(Start, F.R.Start);
+            End = std::max(End, F.R.end());
+          }
+          InRangeFieldIndex = FilterInRange(Fields, Start, End);
+          NewSize = InRangeFieldIndex.size();
+          assert(NewSize >= 2);
+        }
+
+        auto UnionStart = Start;
+        auto UnionEnd = End;
+        std::vector<FieldEntry> OtherFields;
+        std::vector<FieldEntry> OverlapFields;
+        for (auto &F : Fields) {
+          if (IsOverlap(Start, End, F.R.Start, F.R.end())) {
+            OverlapFields.push_back(FieldEntry{
+                .R = {.Start = F.R.Start - UnionStart, .Size = F.R.Size},
+                .Edge = F.Edge});
+          } else {
+            OtherFields.push_back(F);
+          }
+        }
+        // #region build members using OverlapFields;
+
+        // sort the entry by end offset.
+        std::sort(OverlapFields.begin(), OverlapFields.end(),
+                  [](const FieldEntry &A, const FieldEntry &B) {
+                    return A.R.end() < B.R.end();
+                  });
+        // use std::min to find the min start offset.
+        auto MinStartOff =
+            std::min_element(OverlapFields.begin(), OverlapFields.end(),
+                             [](const FieldEntry &A, const FieldEntry &B) {
+                               return A.R.Start < B.R.Start;
+                             })
+                ->R.Start;
+        auto MaxOff = OverlapFields.back().R.end();
+        // unified start to 0
+        assert(MinStartOff == 0);
+        assert(MaxOff == (UnionEnd - UnionStart));
+        // after determinize, there will not be nested struct. We assume Offset
+        // to struct == Min Start Offset. So set size as MaxOff - MinStartOff.
+        auto OurSize = MaxOff - MinStartOff;
+
+        std::vector<std::vector<FieldEntry>> UnionPanels;
+        for (auto &F : OverlapFields) {
+          bool inserted = false;
+          for (auto &Panel : UnionPanels) {
+            if (Panel.back().R.Start + Panel.back().R.Size <= F.R.Start) {
+              Panel.push_back(F);
+              inserted = true;
+              break;
+            }
+          }
+          if (!inserted) {
+            UnionPanels.push_back({F});
+          }
+        }
+        assert(UnionPanels.size() > 1);
+        // if there is only one field and off=0, make N a union node.
+        CGNode *UN = nullptr;
+        const CGEdge *UE = nullptr;
+        if (!mustBeStruct && OtherFields.size() == 0 && UnionStart == 0) {
+          UN = &N;
+        } else {
+          std::string Name = ValueNamer::getName("Un_");
+          UN = &CG.createNodeClonePNI(
+              retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, Name)},
+              N.getPNIVar());
+          // move all related edge under UN
+          for (auto &Panel : UnionPanels) {
+            for (auto &F : Panel) {
+              // subtract by UnionStart
+              auto Off = *retypd::getOffsetLabel(F.Edge->Label);
+              Off.range.offset -= UnionStart;
+              auto *NE =
+                  CG.addEdge(*UN, getTarget(F), retypd::RecallLabel{Off});
+              CG.removeEdge(N, getTarget(F), F.Edge->Label);
+              F.Edge = NE;
+            }
+          }
+          UE = CG.addEdge(N, *UN,
+                          retypd::RecallLabel{
+                              OffsetLabel{OffsetRange{.offset = UnionStart}}});
+        }
+        // create new node for each panel struct.
+        std::vector<const retypd::CGEdge *> Members;
+        for (auto &Panel : UnionPanels) {
+          if (Panel.size() == 1) {
+            // we do not need to create a struct
+            Members.push_back(Panel.front().Edge);
+            continue;
+          }
+          // create a struct here
+          std::string Name = ValueNamer::getName("Us_");
+          auto NN = &CG.createNodeClonePNI(
+              retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, Name)},
+              UN->getPNIVar());
+          // move edges under the struct
+          for (auto &F : Panel) {
+            CG.addEdge(*NN, getTarget(F), F.Edge->Label);
+            CG.removeEdge(*UN, getTarget(F), F.Edge->Label);
+          }
+          TypeInfos[NN] =
+              TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Panel}};
+          auto *E1 = CG.addEdge(*UN, *NN,
+                                retypd::RecallLabel{OffsetLabel{
+                                    OffsetRange{.offset = MinStartOff}}});
+          Members.push_back(E1);
+        }
+        TypeInfos[UN] =
+            TypeInfo{.Size = OurSize, .Info = UnionInfo{.Members = Members}};
+
+        if (UN == &N) {
+          assert(OtherFields.empty());
+          // already set typeinfo for N, so we are done
+          return;
+        }
+        // push the merged union back to fields, and iterate again
+        OtherFields.push_back(
+            FieldEntry{.R = SimpleRange{.Start = MinStartOff, .Size = OurSize},
+                       .Edge = UE});
+        assert(NoUpdate == false);
+        // #endregion build members using OverlapFields;
+
+        // reiterate with merged fields.
+        Fields = OtherFields;
+        break;
+      }
+      // no overlap, cannot create unions
+      if (NoUpdate) {
+        break;
+      }
+    } // end of while true
+
+    // Now there is no overlap, create struct for Fields.
+    // sort the entry by start offset.
+    if (Fields.empty()) {
+      TypeInfos[&N] = TypeInfo{.Size = 0, .Info = StructInfo{}};
       return;
     }
-    // make N a union node.
-    // create new node for each panel struct.
-    std::vector<const retypd::CGEdge *> Members;
-    for (auto &Panel : UnionPanels) {
-      std::string Name = ValueNamer::getName("Us_");
-      auto NN = &CG.createNodeClonePNI(
-          retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, Name)},
-          N.getPNIVar());
-      for (auto &F : Panel) {
-        CG.addEdge(*NN, *F.Target, F.Edge->Label);
-        CG.removeEdge(N, *F.Target, F.Edge->Label);
-      }
-      TypeInfos[NN] =
-          TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Panel}};
-      CG.addEdge(
-          N, *NN,
-          retypd::RecallLabel{OffsetLabel{OffsetRange{.offset = MinStartOff}}});
-      // find the edge to NN and insert to Members.
-      auto It =
-          N.outEdges.find(CGEdge(N, *NN,
-                                 retypd::RecallLabel{OffsetLabel{
-                                     OffsetRange{.offset = MinStartOff}}}));
-      assert(It != N.outEdges.end());
-      Members.push_back(&*It);
-    }
-    TypeInfos[&N] = TypeInfo{
-        .Size = OurSize,
-        .Info = UnionInfo{.R = {MinStartOff, OurSize}, .Members = Members}};
+    std::sort(Fields.begin(), Fields.end(),
+              [](const FieldEntry &A, const FieldEntry &B) {
+                return A.R.Start < B.R.Start;
+              });
+    auto MaxEndOff =
+        std::max_element(Fields.begin(), Fields.end(),
+                         [](const FieldEntry &A, const FieldEntry &B) {
+                           return A.R.end() < B.R.end();
+                         })
+            ->R.end();
+    auto Size = MaxEndOff - Fields.front().R.Start;
+    assert(Size >= 0);
+    TypeInfos[&N] =
+        TypeInfo{.Size = Size, .Info = StructInfo{.Fields = Fields}};
+
     return;
   };
 
@@ -606,7 +755,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     if (!N.isPNIPointer()) {
       continue;
     }
-    doBuild(N);
+    bool mustStruct = N.isMemory();
+    doBuild(N, mustStruct);
   }
   return TypeInfos;
 }
@@ -1347,15 +1497,16 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       Mem = RD->getDecl();
       Mem->setBytesManager(MemoryBytes);
     } else {
-      llvm::errs() << "ERROR: Memory Type is not struct type: " << CTy->getAsString()
-                   << "\n";
+      llvm::errs() << "ERROR: Memory Type is not struct type: "
+                   << CTy->getAsString() << "\n";
+      std::abort();
     }
     // auto &Info = TBC.StructInfos[Mem];
     // Info.Bytes = MemoryBytes;
     // Info.resolveInitialValue();
   } else {
-    llvm::errs() << "ERROR: Memory Type is void!" << CTy->getAsString()
-                   << "\n";
+    llvm::errs() << "ERROR: Memory Type is void!" << CTy->getAsString() << "\n";
+    std::abort();
   }
 
   // analyze the signed/unsigned info

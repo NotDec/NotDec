@@ -199,7 +199,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       std::map<FieldEntry *, FieldDecl *> E2D;
       for (size_t i = 0; i < Info.Fields.size(); i++) {
         auto &Ent = Info.Fields[i];
-        auto Target = const_cast<CGNode *>(Ent.Target);
+        auto Target = const_cast<CGNode *>(&Ent.Edge->getTargetNode());
         HType *Ty;
 
         // for each field/edge
@@ -256,7 +256,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           auto j = i + 1;
           for (; j < Info.Fields.size(); j++) {
             auto &EntJ = Info.Fields[j];
-            auto TargetJ = const_cast<CGNode *>(EntJ.Target);
+            auto TargetJ = const_cast<CGNode *>(&EntJ.Edge->getTargetNode());
             auto TyJ = buildType(*TargetJ, V, EntJ.R.Size);
             TyJ = TyJ->getPointeeType();
             if (!TyJ->isCharType()) {
@@ -320,14 +320,14 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       }
       hasSetNodeMap = true;
 
-      auto R = Info.R;
+      auto Size = TI.Size;
       for (size_t i = 0; i < Info.Members.size(); i++) {
         auto &Edge = Info.Members[i];
         auto &Target = const_cast<CGNode &>(Edge->getTargetNode());
         HType *Ty;
 
         // for each field/edge
-        Ty = buildType(Target, V, R.Size);
+        Ty = buildType(Target, V, Size);
 
         if (!Ty->isPointerType()) {
           assert(false && "Offset edge must be pointer type");
@@ -337,10 +337,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
         auto FieldName = ValueNamer::getName("field_");
         Decl->addMember(
-            FieldDecl{.R = R,
+            FieldDecl{.R = {.Start=0, .Size = *Size},
                       .Type = Ty,
-                      .Name = FieldName,
-                      .Comment = "at offset: " + std::to_string(0)});
+                      .Name = FieldName});
       }
     } else {
       assert(false && "Unknown TypeInfo");
