@@ -93,7 +93,7 @@ HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
 HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
                               std::optional<unsigned> ExpectedSize) {
   unsigned BitSize = Node.getSize();
-  const char *prefix = "struct_";
+  const char *prefix = nullptr;
   if (Node.isMemory()) {
     prefix = "MEMORY_";
   }
@@ -107,13 +107,13 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       std::cerr << "Cyclic dependency forces the node become struct/union.\n";
       if (std::holds_alternative<UnionInfo>(
               TypeInfos.at(const_cast<CGNode *>(&Node)).Info)) {
-        UnionDecl *Decl = UnionDecl::Create(Ctx, ValueNamer::getName(prefix));
+        UnionDecl *Decl = UnionDecl::Create(Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "union_"));
         HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
                                         Ctx.getUnionType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);
         return Ret;
       } else {
-        RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName(prefix));
+        RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "struct_"));
         HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
                                         Ctx.getRecordType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);
@@ -189,7 +189,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         Ret = NodeTypeMap.at(&Node);
         Decl = Ret->getPointeeType()->getAsRecordDecl();
       } else {
-        auto Name = ValueNamer::getName(prefix);
+        auto Name = ValueNamer::getName(prefix != nullptr ? prefix : "struct_");
         Decl = RecordDecl::Create(Ctx, Name);
         Ret = getPtrTy(Ctx.getRecordType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);
@@ -313,7 +313,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         Ret = NodeTypeMap.at(&Node);
         Decl = Ret->getPointeeType()->getAsUnionDecl();
       } else {
-        auto Name = ValueNamer::getName(prefix);
+        auto Name = ValueNamer::getName(prefix != nullptr ? prefix : "union_");
         Decl = UnionDecl::Create(Ctx, Name);
         Ret = getPtrTy(Ctx.getUnionType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);

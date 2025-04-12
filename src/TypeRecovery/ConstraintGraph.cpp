@@ -227,7 +227,7 @@ void ConstraintGraph::linkConstantPtr2Memory() {
   // for each node, if it is a constant pointer, link it to memory.
   for (auto &Ent : Nodes) {
     auto &Node = Ent.second;
-    if (Node.key.Base.isIntConstant() && Node.getPNIVar()->isPointer()) {
+    if (Node.key.Base.isIntConstant() && Node.key.Base.getIntConstant().offset != 0 && Node.getPNIVar()->isPointer()) {
       auto MN = getMemoryNode(Covariant);
       auto TV = MN->key;
       auto Label = OffsetLabel{Node.key.Base.getIntConstant()};
