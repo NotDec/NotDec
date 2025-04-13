@@ -1358,22 +1358,22 @@ void ConstraintGraph::linkLoadStore() {
         if (Source.key.SuffixVariance == Covariant) {
           // covariant load can only have subtype (one) edge out
           onlyAddEdge(Source, *getEndNode(),
-                      ForgetBase{.Base = Source.key.Base.toBase(),
+                      ForgetBase{.Base = Source.key.Base,
                                  .V = Source.key.SuffixVariance});
         } else {
           onlyAddEdge(*getStartNode(), Source,
-                      RecallBase{.Base = Source.key.Base.toBase(),
+                      RecallBase{.Base = Source.key.Base,
                                  .V = Source.key.SuffixVariance});
         }
       } else if (std::holds_alternative<StoreLabel>(Back)) {
         if (Source.key.SuffixVariance == Covariant) {
           // covariant store can only have subtype (one) edge in
           onlyAddEdge(*getStartNode(), Source,
-                      RecallBase{.Base = Source.key.Base.toBase(),
+                      RecallBase{.Base = Source.key.Base,
                                  .V = Source.key.SuffixVariance});
         } else {
           onlyAddEdge(Source, *getEndNode(),
-                      ForgetBase{.Base = Source.key.Base.toBase(),
+                      ForgetBase{.Base = Source.key.Base,
                                  .V = Source.key.SuffixVariance});
         }
       }

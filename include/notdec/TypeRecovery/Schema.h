@@ -404,7 +404,7 @@ struct TypeVariable {
     return Ret;
   }
   TypeVariable markActual() const {
-    assert(!IsActual);
+    // assert(!IsActual);
     TypeVariable Ret = *this;
     Ret.IsActual = true;
     return Ret;

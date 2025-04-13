@@ -1549,7 +1549,9 @@ void ConstraintsGenerator::makeSymmetry() {
                                            T.getPNIVar());
       auto &Label = Edge.getLabel();
       if (std::holds_alternative<retypd::One>(Label)) {
-        addSubtype(N, T);
+        // 这里不一定要recall labels forget labels。因为summary里面可能有特殊的节点。
+        // addSubtype(N, T);
+        CG.addEdge(TC, NC, retypd::One{});
       } else if (auto RL = std::get_if<retypd::RecallLabel>(&Label)) {
         auto FL = toForget(*RL);
         CG.addEdge(T, N, FL);
@@ -2955,16 +2957,12 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     N.getPNIVar()->setNonPtrIfRelated();
-    auto &SintNode = cg.CG.getOrCreatePrim(
-        "sint" + std::to_string(Op->getType()->getIntegerBitWidth()),
-        Op->getType());
+    auto &SintNode = cg.CG.getOrCreatePrim("sint", Op->getType());
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
     N.getPNIVar()->setNonPtrIfRelated();
-    auto &UintNode = cg.CG.getOrCreatePrim(
-        "uint" + std::to_string(Op->getType()->getIntegerBitWidth()),
-        Op->getType());
+    auto &UintNode = cg.CG.getOrCreatePrim("uint", Op->getType());
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {

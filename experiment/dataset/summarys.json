@@ -156,16 +156,17 @@
   },
   "memset": {
     "constraints": [
-      "memset.in_0.load8 <= #char",
       "memset.in_0 <= memset.out",
-      "memset.in_1 <= #uint"
+      "memset.in_1 <= #uint",
+      "memset.in_2 <= #uint"
     ],
     "pni_map": {
       "memset": "func p #1",
-      "memset.in_0": "ptr p #2",
       "memset.out": "ptr p #2",
-      "memset.in_0.load8": "int 8 #3",
-      "#char": "int 8 #3"
+      "memset.in_0": "ptr p #2",
+      "memset.in_1": "int 32 #4",
+      "memset.in_2": "int p #5",
+      "#uint": "int p #5"
     }
   },
   "memcpy": {
