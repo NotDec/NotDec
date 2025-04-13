@@ -108,11 +108,11 @@ std::shared_ptr<IntLattice> IntLattice::create(LowTy LTy, Variance V, std::strin
     return IL;
   } else if (TyName == "char") {
     IL->Sign = SI_SIGNED;
-  } else if (TyName == "sint") {
+  } else if (TyName == "sint" || TyName == "slonglong") {
     IL->Sign = SI_SIGNED;
-  } else if (TyName == "uint") {
+  } else if (TyName == "uint" || TyName == "ulonglong") {
     IL->Sign = SI_UNSIGNED;
-  } else if (TyName == "int") {
+  } else if (TyName == "int" || TyName == "longlong") {
     // do nothing
   } else {
     assert(false && "IntLattice::create: Unhandled type");

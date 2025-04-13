@@ -690,8 +690,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
               UN->getPNIVar());
           // move edges under the struct
           for (auto &F : Panel) {
-            CG.addEdge(*NN, getTarget(F), F.Edge->Label);
+            auto* NE = CG.addEdge(*NN, getTarget(F), F.Edge->Label);
             CG.removeEdge(*UN, getTarget(F), F.Edge->Label);
+            F.Edge = NE;
           }
           TypeInfos[NN] =
               TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Panel}};

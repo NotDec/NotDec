@@ -290,12 +290,12 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         }
         // add padding if there is space
         if (CurrentDecl.R.end() < ExpandEnd) {
-          auto PaddingSize = ExpandEnd - Ent.R.end();
+          auto PaddingSize = ExpandEnd - CurrentDecl.R.end();
           PaddingDecl = FieldDecl{
-              .R = SimpleRange{.Start = Ent.R.end(), .Size = PaddingSize},
+              .R = SimpleRange{.Start = CurrentDecl.R.end(), .Size = PaddingSize},
               .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
               .Name = ValueNamer::getName("padding_"),
-              .Comment = "at offset: " + std::to_string(Ent.R.end()),
+              .Comment = "at offset: " + std::to_string(CurrentDecl.R.end()),
               .isPadding = true,
           };
         }
