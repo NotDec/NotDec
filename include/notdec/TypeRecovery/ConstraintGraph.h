@@ -430,6 +430,8 @@ inline bool isOffsetOrOne(const CGEdge &E) {
 
 
 bool hasOffsetEdge(CGNode &Start);
+const CGEdge *getOnlyLoadOrStoreEdge(CGNode &N);
+unsigned countLoadOrStoreEdge(CGNode &N);
 
 } // namespace notdec::retypd
 

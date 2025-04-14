@@ -119,7 +119,8 @@ struct NFADeterminizer {
     for (auto Node : N) {
       auto PNI = GT::getInner(Node)->getPNIVar();
       llvm::errs() << "    Node: " << GT::toString(Node)
-                   << " PNI: " << (PNI == nullptr ? "" : PNI->str()) << "\n";
+                   << " PNI: " << (PNI == nullptr ? "" : PNI->serialize())
+                   << "\n";
     }
     llvm::errs() << "  End of different low type set.\n";
   }
@@ -162,10 +163,18 @@ struct NFADeterminizer {
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
-    auto *OldPN = ensureSamePNI(N);
+    // auto *OldPN = ensureSamePNI(N);
     auto &NewNode = NewG->createNodeClonePNI(
         NodeKey{TypeVariable::CreateDtv(*NewG->Ctx, NewVN.getNewName("dfa_"))},
-        OldPN);
+        GT::getInner(*N.begin())->getPNIVar());
+
+    for (auto N1 : N) {
+      GT::getInner(&NewNode)->getPNIVar()->merge(GT::getInner(N1)->getPNIVar()->getLatticeTy());
+    }
+    if (GT::getInner(&NewNode)->getPNIVar()->isConflict()) {
+      printPNDiffSet(N);
+      std::abort();
+    }
 
     auto it = DTrans.emplace(N, &NewNode);
     assert(it.second);

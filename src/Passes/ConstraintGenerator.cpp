@@ -311,8 +311,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     }
     Visited.insert(&N);
 
-    // if no offset edge, this is a simple pointer
-    if (!mustBeStruct && !retypd::hasOffsetEdge(N)) {
+    // if no offset edge, only load edge, this is a simple pointer
+    if (!mustBeStruct && !retypd::hasOffsetEdge(N) && retypd::countLoadOrStoreEdge(N) <= 1) {
       // Check for load or store edge
       std::optional<const retypd::CGEdge *> LoadEdge;
       for (auto &Edge : N.outEdges) {

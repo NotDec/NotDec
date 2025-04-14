@@ -180,7 +180,7 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
     PG->mergePNINodes(To.getPNIVar(), From.getPNIVar());
   }
   // Move all edges from From to To
-  std::vector<std::tuple<CGNode*, CGNode*, EdgeLabel>> toRemove;
+  std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
   for (auto &Edge : From.outEdges) {
     auto *Target = &Edge.TargetNode;
     // for self loop
@@ -227,7 +227,9 @@ void ConstraintGraph::linkConstantPtr2Memory() {
   // for each node, if it is a constant pointer, link it to memory.
   for (auto &Ent : Nodes) {
     auto &Node = Ent.second;
-    if (Node.key.Base.isIntConstant() && Node.key.Base.getIntConstant().offset != 0 && Node.getPNIVar()->isPointer()) {
+    if (Node.key.Base.isIntConstant() &&
+        Node.key.Base.getIntConstant().offset != 0 &&
+        Node.getPNIVar()->isPointer()) {
       auto MN = getMemoryNode(Covariant);
       auto TV = MN->key;
       auto Label = OffsetLabel{Node.key.Base.getIntConstant()};
@@ -751,7 +753,7 @@ void ConstraintGraph::contraVariantSplit() {
         NodeKey{TypeVariable::CreateDtv(*Ctx, ValueNamer::getName("split_"))},
         N->getPNIVar());
     // Move all incoming recall edge to the new node.
-    std::vector<std::tuple<CGNode*, CGNode*, EdgeLabel>> toRemove;
+    std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
     for (auto InEdge2 : N->inEdges) {
       if (isRecall(InEdge2->Label)) {
         addEdge(InEdge2->getSourceNode(), NewNode, InEdge2->Label);
@@ -923,12 +925,13 @@ void ConstraintGraph::pushSplit() {
       }
     }
     // Move all same recall edge to the new node.
-    std::vector<std::tuple<CGNode*, CGNode*, EdgeLabel>> toRemove;
+    std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
     for (auto InEdge2 : Current->inEdges) {
       if (InEdge2->getLabel() == Recall) {
         addEdge(InEdge2->getSourceNode(), NewNode, InEdge2->getLabel());
         // removeEdge(InEdge2->getSourceNode(), *Current, InEdge2->getLabel());
-        toRemove.emplace_back(&InEdge2->getSourceNode(), Current, InEdge2->getLabel());
+        toRemove.emplace_back(&InEdge2->getSourceNode(), Current,
+                              InEdge2->getLabel());
       }
     }
     for (auto &Ent : toRemove) {
@@ -1074,6 +1077,27 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
     Ret.insert(Val);
   }
   return Ret;
+}
+
+unsigned countLoadOrStoreEdge(CGNode &N) {
+  unsigned Count = 0;
+  for (auto &Edge : N.outEdges) {
+    if (retypd::isLoadOrStore(Edge.Label)) {
+      Count += 1;
+    }
+  }
+  return Count;
+}
+
+const CGEdge *getOnlyLoadOrStoreEdge(CGNode &N) {
+  const retypd::CGEdge * LoadEdge = nullptr;
+  for (auto &Edge : N.outEdges) {
+    if (retypd::isLoadOrStore(Edge.Label)) {
+      assert(LoadEdge == nullptr);
+      LoadEdge = &Edge;
+    }
+  }
+  return LoadEdge;
 }
 
 bool hasOffsetEdge(CGNode &Start) {
@@ -1655,7 +1679,7 @@ void ConstraintGraph::saturate() {
           if (ReachingSet.count(&Source)) {
             // non-lazy rule: if it is recall load, we allow forget store.
             std::optional<FieldLabel> RecallStore = std::nullopt;
-            if (auto* Load = std::get_if<LoadLabel>(&Capa.label)) {
+            if (auto *Load = std::get_if<LoadLabel>(&Capa.label)) {
               RecallStore = toStore(*Load);
             }
             for (auto &Reach : ReachingSet[&Source]) {
@@ -1670,10 +1694,12 @@ void ConstraintGraph::saturate() {
                 }
               }
               // non-lazy rule: if it is recall load, we allow forget store.
-              if (RecallStore && (Reach.first == *RecallStore) && Reach.second != &Target) {
-                // Changed |= (addEdge(*Reach.second, Target, One{}) != nullptr);
-                auto& From = *Reach.second;
-                auto& To = Target;
+              if (RecallStore && (Reach.first == *RecallStore) &&
+                  Reach.second != &Target) {
+                // Changed |= (addEdge(*Reach.second, Target, One{}) !=
+                // nullptr);
+                auto &From = *Reach.second;
+                auto &To = Target;
                 From.getPNIVar()->unify(*To.getPNIVar());
               }
             }
