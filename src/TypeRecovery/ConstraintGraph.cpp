@@ -179,7 +179,7 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   if (PG) {
     PG->mergePNINodes(To.getPNIVar(), From.getPNIVar());
   }
-  // Move all edges from From to To
+  // Move all out edges from From to To
   std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
   for (auto &Edge : From.outEdges) {
     auto *Target = &Edge.TargetNode;
@@ -198,11 +198,10 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
       toRemove.push_back({&From, &Edge.TargetNode, Edge.Label});
     }
   }
+  // Move all in edges
   for (auto *Edge : From.inEdges) {
     auto *Source = &Edge->getSourceNode();
-    if (Source == &From)
-      assert(false); // should be removed
-    if (Source == &To) {
+    if (Source == &From || Source == &To) {
       // only keep non-one edge
       if (!std::holds_alternative<retypd::One>(Edge->Label)) {
         assert(!NoSelfLoop);
@@ -217,7 +216,9 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
     }
   }
   for (auto &[From, Target, Label] : toRemove) {
-    removeEdge(*From, *Target, Label);
+    if (hasEdge(*From, *Target, Label)) {
+      removeEdge(*From, *Target, Label);
+    }
   }
   // erase the node
   removeNode(From.key);
@@ -1090,7 +1091,7 @@ unsigned countLoadOrStoreEdge(CGNode &N) {
 }
 
 const CGEdge *getOnlyLoadOrStoreEdge(CGNode &N) {
-  const retypd::CGEdge * LoadEdge = nullptr;
+  const retypd::CGEdge *LoadEdge = nullptr;
   for (auto &Edge : N.outEdges) {
     if (retypd::isLoadOrStore(Edge.Label)) {
       assert(LoadEdge == nullptr);

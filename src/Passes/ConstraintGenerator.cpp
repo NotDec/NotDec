@@ -2054,7 +2054,7 @@ void ConstraintsGenerator::mergeAfterDeterminize() {
   while (A != nullptr && B != nullptr) {
     // merge A to B
     // TODO eliminate offset loop earlier
-    mergeNodeTo(*A, *B, true);
+    mergeNodeTo(*A, *B, false);
     A = nullptr;
     B = nullptr;
     std::tie(A, B) = findMergePair();

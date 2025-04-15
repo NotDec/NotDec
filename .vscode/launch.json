@@ -122,12 +122,12 @@
       }
     },
     {
-      "name": "Python Debugger: Current File with Arguments",
+      "name": "Python Access2Struct",
       "type": "debugpy",
       "request": "launch",
-      "program": "${file}",
+      "program": "${workspaceFolder}/test/Access2Struct/main.py",
       "console": "integratedTerminal",
-      "args": "TestAccess.test_4"
+      "args": "TestAccess.test_6_Merge"
     }
   ]
 }
