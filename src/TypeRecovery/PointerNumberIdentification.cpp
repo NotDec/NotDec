@@ -437,6 +437,7 @@ void PNIGraph::markChanged(PNINode *N, ConsNode *Except) {
 }
 
 void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
+  assert(Var->getSize() == Target->getSize());
   assert(Var->Parent == Target->Parent);
   if (Var == Target) {
     return;

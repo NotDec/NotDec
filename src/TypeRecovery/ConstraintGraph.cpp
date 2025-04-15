@@ -2454,15 +2454,15 @@ expToConstraints(std::shared_ptr<retypd::TRContext> TRCtx, rexp::PRExp E) {
   return Ctx.constraintsSequenceToConstraints(TRCtx, Ctx.ConstraintsSequence);
 }
 
-CGNode *ConstraintGraph::getTopNodeOrNull(Variance V) {
-  return getNodeOrNull(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top"), V});
+CGNode *ConstraintGraph::getTopNodeOrNull(Variance V, unsigned Size) {
+  return getNodeOrNull(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top" + std::to_string(Size)), V});
 }
 
-CGNode *ConstraintGraph::getTopNode(Variance V) {
-  auto Node = getTopNodeOrNull(V);
+CGNode *ConstraintGraph::getTopNode(Variance V, unsigned Size) {
+  auto Node = getTopNodeOrNull(V, Size);
   if (Node == nullptr) {
     Node = &createNodeNoPNI(
-        NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top"), V}, 0);
+        NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top"+ std::to_string(Size)), V}, 0);
   }
   return Node;
 }

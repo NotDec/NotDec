@@ -219,8 +219,10 @@ struct ConstraintGraph {
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 
   CGNode &getOrCreatePrim(std::string Name, llvm::Type *LowType) {
-    auto &Ret =
-        getOrInsertNode(TypeVariable::CreatePrimitive(*Ctx, Name), LowType);
+    auto &Ret = getOrInsertNode(
+        TypeVariable::CreatePrimitive(
+            *Ctx, Name), // if int type, add size suffix.
+        LowType);
     return Ret;
   }
 
@@ -267,8 +269,8 @@ public:
   CGNode *getEndNode();
   CGNode *getMemoryNodeOrNull(Variance V);
   CGNode *getMemoryNode(Variance V /*= Covariant*/);
-  CGNode *getTopNode(Variance V);
-  CGNode *getTopNodeOrNull(Variance V);
+  CGNode *getTopNode(Variance V, unsigned Size);
+  CGNode *getTopNodeOrNull(Variance V, unsigned Size);
 
   // void solveSketchQueries(
   //     const std::vector<std::pair<
@@ -276,7 +278,7 @@ public:
   //         std::function<void(std::shared_ptr<retypd::Sketch>)>>> &Queries)
   //         const;
   // std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
-  
+
   // internal steps
   void saturate();
   void layerSplit();
@@ -328,7 +330,7 @@ public:
     return From.outEdges.count(
         CGEdge(const_cast<CGNode &>(From), const_cast<CGNode &>(To), Label));
   }
-  const CGEdge* onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+  const CGEdge *onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(&From.Parent == this && &To.Parent == this);
     if (TraceIds.count(From.getId()) || TraceIds.count(To.getId())) {
       std::cerr << "Add edge: " << From.str() << "(ID=" << From.getId()
@@ -352,7 +354,7 @@ public:
     From.outEdges.erase(it);
   }
 
-  const CGEdge* addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+  const CGEdge *addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
       if (std::holds_alternative<One>(Label)) {
         return nullptr;
@@ -426,8 +428,6 @@ inline bool isOffsetOrOne(const CGEdge &E) {
   }
   return false;
 }
-
-
 
 bool hasOffsetEdge(CGNode &Start);
 const CGEdge *getOnlyLoadOrStoreEdge(CGNode &N);

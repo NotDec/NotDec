@@ -1,13 +1,17 @@
 
 #include <cassert>
 #include <clang/AST/ASTContext.h>
+#include <cstdlib>
 #include <llvm/Support/Casting.h>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/Schema.h"
 #include "notdec-llvm2c/Interface/HType.h"
+#include "notdec-llvm2c/Interface/Utils.h"
 
 namespace notdec::retypd {
 
@@ -23,7 +27,8 @@ HType *LatticeTy::buildType(HTypeContext &ctx) const {
   assert(false && "LatticeTy::buildType: Unhandled kind");
 }
 
-bool join(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2) {
+bool join(std::optional<std::shared_ptr<LatticeTy>> &L1,
+          const std::optional<std::shared_ptr<LatticeTy>> &L2) {
   if (!L1.has_value()) {
     L1 = L2;
     return L2.has_value();
@@ -34,7 +39,8 @@ bool join(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std
   return (*L1)->join(**L2);
 }
 
-bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2) {
+bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1,
+          const std::optional<std::shared_ptr<LatticeTy>> &L2) {
   if (!L1.has_value()) {
     L1 = L2;
     return L2.has_value();
@@ -46,7 +52,7 @@ bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std
 }
 
 std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
-                                         std::string Name) {
+                                                          std::string Name) {
   if (LTy.isUnknown() || LTy.isNull()) {
     return std::nullopt;
   }
@@ -57,7 +63,8 @@ std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
   return std::nullopt;
 }
 
-std::shared_ptr<LatticeTy> LatticeTy::create(LowTy LTy, Variance V, std::string Name) {
+std::shared_ptr<LatticeTy> LatticeTy::create(LowTy LTy, Variance V,
+                                             std::string Name) {
   assert(!LTy.isUnknown());
   if (LTy.isNumber()) {
     return IntLattice::create(LTy, V, Name);
@@ -101,18 +108,44 @@ bool LatticeTy::meet(const LatticeTy &other) {
   assert(false && "LatticeTy::meet: Unhandled kind");
 }
 
-std::shared_ptr<IntLattice> IntLattice::create(LowTy LTy, Variance V, std::string TyName) {
+std::optional<unsigned> strToUl(std::string s) {
+  char *pEnd = nullptr;
+  unsigned long num = strtoul(s.c_str(), &pEnd, 10);
+  if (pEnd == (s.c_str() + s.size())) {
+    return num;
+  }
+  return std::nullopt;
+}
+
+std::optional<unsigned> decodeSi(std::string s) {
+  if (s.front() == 'i') {
+    return strToUl(s.substr(1));
+  }
+  return std::nullopt;
+}
+
+std::optional<unsigned> decodeui(std::string s) {
+  if (s.front() == 'u') {
+    return strToUl(s.substr(1));
+  }
+  return std::nullopt;
+}
+
+std::shared_ptr<IntLattice> IntLattice::create(LowTy LTy, Variance V,
+                                               std::string TyName) {
   assert(LTy.isNumber());
-  std::shared_ptr<IntLattice> IL = std::make_shared<IntLattice>(LTy.getSize(), V);
+  std::shared_ptr<IntLattice> IL =
+      std::make_shared<IntLattice>(LTy.getSize(), V);
   if (TyName == "") {
     return IL;
-  } else if (TyName == "char") {
+
+  } else if (startswith(TyName, "char")) {
     IL->Sign = SI_SIGNED;
-  } else if (TyName == "sint" || TyName == "slonglong") {
+  } else if (startswith(TyName, "sint") || decodeSi(TyName) || startswith(TyName, "slonglong")) {
     IL->Sign = SI_SIGNED;
-  } else if (TyName == "uint" || TyName == "ulonglong") {
+  } else if (startswith(TyName, "uint") || decodeui(TyName) || startswith(TyName, "ulonglong")) {
     IL->Sign = SI_UNSIGNED;
-  } else if (TyName == "int" || TyName == "longlong") {
+  } else if (startswith(TyName, "int") || startswith(TyName, "longlong")) {
     // do nothing
   } else {
     assert(false && "IntLattice::create: Unhandled type");
@@ -167,5 +200,36 @@ HType *IntLattice::buildType(HTypeContext &Ctx) const {
   // Default to signed? TODO
   return Ctx.getIntegerType(false, getSize(), true);
 }
+
+std::string getNameForInt(std::string Name, llvm::Type *Ty) {
+  if (startswith(Name, "int") || startswith(Name, "uint") ||
+      startswith(Name, "sint")) {
+    assert(Ty->isIntegerTy());
+    // default to signed
+    bool Signed = true;
+    if (startswith(Name, "uint")) {
+      Signed = false;
+    }
+    if (Ty->isIntegerTy(1)) {
+      return "bool";
+    } else if (Ty->isIntegerTy(8)) {
+      return "char";
+    } else if (Ty->isIntegerTy(16)) {
+      if (Signed) {
+        return "short";
+      } else {
+        return "ushort";
+      }
+    } else {
+      if (Signed) {
+        return "u" + std::to_string(Ty->getPrimitiveSizeInBits());
+      } else {
+        return "i" + std::to_string(Ty->getPrimitiveSizeInBits());
+      }
+    }
+  }
+  return Name;
+}
+// std::string getNameForInt(std::string Name, unsigned Size) {}
 
 } // namespace notdec::retypd

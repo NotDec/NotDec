@@ -91,6 +91,9 @@ std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
 bool join(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2);
 bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2);
 
+std::string getNameForInt(std::string Name, llvm::Type* Ty);
+// std::string getNameForInt(std::string Name, unsigned Size);
+
 } // namespace notdec::retypd
 
 #endif

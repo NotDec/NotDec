@@ -42,33 +42,33 @@ HType *TypeBuilder::fromLatticeTy(LowTy Low, LatticeTy *LTy, unsigned BitSize) {
 
 HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
   auto Name = LTy.latticeStr();
-  if (BitSize == 1 || Name == "bool") {
+  if (BitSize == 1 || startswith(Name, "bool")) {
     assert(BitSize == 1);
     return Ctx.getBool();
   }
-  if (BitSize == 8 || Name == "char") {
+  if (BitSize == 8 || startswith(Name, "char")) {
     return Ctx.getChar();
   }
-  if (Name == "top" || Name == "unk") {
+  if (startswith(Name, "top") || startswith(Name, "unk")) {
     // TODO create typedef to unsigned int. e.g., typedef top32 uint32_t
     return getUndef(BitSize);
   }
-  if (Name == "bottom") {
+  if (startswith(Name, "bottom")) {
     return getBot(BitSize);
   }
-  if (Name == "float") {
+  if (startswith(Name, "float")) {
     return Ctx.getFloatType(false, 32);
   }
-  if (Name == "double") {
+  if (startswith(Name, "double")) {
     return Ctx.getFloatType(false, 64);
   }
-  if (Name == "ptr") {
+  if (startswith(Name, "ptr")) {
     return Ctx.getPointerType(false, Parent.PointerSize, nullptr);
   }
-  if (Name == "int" || Name == "uint" || Name == "sint") {
+  if (startswith(Name, "int") || startswith(Name, "uint") || startswith(Name, "sint")) {
     // default to signed
     bool Signed = true;
-    if (Name == "uint") {
+    if (startswith(Name, "uint")) {
       Signed = false;
     }
     auto ret = Ctx.getIntegerType(false, BitSize, Signed);

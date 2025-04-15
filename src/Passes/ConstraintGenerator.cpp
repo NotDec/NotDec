@@ -45,6 +45,7 @@
 #include "Passes/ConstraintGenerator.h"
 #include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/ConstraintGraph.h"
+#include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
@@ -312,7 +313,8 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     Visited.insert(&N);
 
     // if no offset edge, only load edge, this is a simple pointer
-    if (!mustBeStruct && !retypd::hasOffsetEdge(N) && retypd::countLoadOrStoreEdge(N) <= 1) {
+    if (!mustBeStruct && !retypd::hasOffsetEdge(N) &&
+        retypd::countLoadOrStoreEdge(N) <= 1) {
       // Check for load or store edge
       std::optional<const retypd::CGEdge *> LoadEdge;
       for (auto &Edge : N.outEdges) {
@@ -690,7 +692,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
               UN->getPNIVar());
           // move edges under the struct
           for (auto &F : Panel) {
-            auto* NE = CG.addEdge(*NN, getTarget(F), F.Edge->Label);
+            auto *NE = CG.addEdge(*NN, getTarget(F), F.Edge->Label);
             CG.removeEdge(*UN, getTarget(F), F.Edge->Label);
             F.Edge = NE;
           }
@@ -1550,8 +1552,8 @@ void ConstraintsGenerator::makeSymmetry() {
                                            T.getPNIVar());
       auto &Label = Edge.getLabel();
       if (std::holds_alternative<retypd::One>(Label)) {
-        // 这里不一定要recall labels forget labels。因为summary里面可能有特殊的节点。
-        // addSubtype(N, T);
+        // 这里不一定要recall labels forget
+        // labels。因为summary里面可能有特殊的节点。 addSubtype(N, T);
         CG.addEdge(TC, NC, retypd::One{});
       } else if (auto RL = std::get_if<retypd::RecallLabel>(&Label)) {
         auto FL = toForget(*RL);
@@ -2834,15 +2836,23 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitInstruction(
 void ConstraintsGenerator::addAddConstraint(const ExtValuePtr LHS,
                                             const ExtValuePtr RHS,
                                             BinaryOperator *I) {
-  PG->addAddCons(&getOrInsertNode(LHS, I, 0), &getOrInsertNode(RHS, I, 1),
-                 &getOrInsertNode(I, nullptr, -1), I);
+  auto Left = &getOrInsertNode(LHS, I, 0);
+  auto Right = &getOrInsertNode(RHS, I, 1);
+  auto Res = &getOrInsertNode(I, nullptr, -1);
+  if (Left->getPNIVar()->isPNRelated() || Right->getPNIVar()->isPNRelated()) {
+    PG->addAddCons(Left, Right, Res, I);
+  }
 }
 
 void ConstraintsGenerator::addSubConstraint(const ExtValuePtr LHS,
                                             const ExtValuePtr RHS,
                                             BinaryOperator *I) {
-  PG->addSubCons(&getOrInsertNode(LHS, I, 0), &getOrInsertNode(RHS, I, 1),
-                 &getOrInsertNode(I, nullptr, -1), I);
+  auto Left = &getOrInsertNode(LHS, I, 0);
+  auto Right = &getOrInsertNode(RHS, I, 1);
+  auto Res = &getOrInsertNode(I, nullptr, -1);
+  if (Left->getPNIVar()->isPNRelated() || Right->getPNIVar()->isPNRelated()) {
+    PG->addAddCons(Left, Right, Res, I);
+  }
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitAdd(BinaryOperator &I) {
@@ -2929,12 +2939,12 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     N.getPNIVar()->setNonPtr();
-    auto &SintNode = cg.CG.getOrCreatePrim("sint", I->getType());
+    auto &SintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("sint", I->getType()), I->getType());
     cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
     N.getPNIVar()->setNonPtr();
-    auto &UintNode = cg.CG.getOrCreatePrim("uint", I->getType());
+    auto &UintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("uint", I->getType()), I->getType());
     cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
@@ -2958,12 +2968,12 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     N.getPNIVar()->setNonPtrIfRelated();
-    auto &SintNode = cg.CG.getOrCreatePrim("sint", Op->getType());
+    auto &SintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("sint", Op->getType()), Op->getType());
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
     N.getPNIVar()->setNonPtrIfRelated();
-    auto &UintNode = cg.CG.getOrCreatePrim("uint", Op->getType());
+    auto &UintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("uint", Op->getType()), Op->getType());
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {
