@@ -772,9 +772,9 @@ TypeRecovery::postProcess(ConstraintsGenerator &G, std::string DebugDir) {
   assert(G2.PG);
   std::string Name = G2.CG.Name;
   G2.CG.Name += "-dtm";
-  // if (DebugDir) {
-  //   G2.DebugDir = DebugDir;
-  // }
+  if (!DebugDir.empty()) {
+    G2.DebugDir = DebugDir;
+  }
 
   G2.CG.sketchSplit();
   // G2.CG.ensureNoForgetLabel();
@@ -1944,12 +1944,18 @@ void ConstraintsGenerator::determinize() {
   // for each node in the value map
   for (auto *Node : V2NNodes) {
     auto *BakNode = This2Bak.at(Node);
-    std::set<CGNode *> StartSet =
-        retypd::NFADeterminizer<>::countClosure({BakNode});
+    std::set<CGNode *> StartSet = retypd::NFADeterminizer<>::countClosure(
+        {BakNode},
+        [](const CGNode *Node) { return !Node->key.Base.isPrimitive(); });
     auto pair1 = DTrans.emplace(StartSet, Node);
     if (pair1.second) {
       Worklist.push(pair1.first);
     } else {
+      llvm::errs() << "Node: " << toString(Node->key) << "\n";
+      llvm::errs() << "StartSet: " << toString(StartSet) << "\n";
+      llvm::errs() << "Prev Set: " << toString(pair1.first->first) << "\n";
+      llvm::errs() << "Prev Node: " << toString(pair1.first->second->key)
+                   << "\n";
       // Can be a epsilon loop. should be removed earlier
       assert(false);
     }
@@ -2939,12 +2945,14 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     N.getPNIVar()->setNonPtr();
-    auto &SintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("sint", I->getType()), I->getType());
+    auto &SintNode = cg.CG.getOrCreatePrim(
+        retypd::getNameForInt("sint", I->getType()), I->getType());
     cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
     N.getPNIVar()->setNonPtr();
-    auto &UintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("uint", I->getType()), I->getType());
+    auto &UintNode = cg.CG.getOrCreatePrim(
+        retypd::getNameForInt("uint", I->getType()), I->getType());
     cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
@@ -2968,12 +2976,14 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     N.getPNIVar()->setNonPtrIfRelated();
-    auto &SintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("sint", Op->getType()), Op->getType());
+    auto &SintNode = cg.CG.getOrCreatePrim(
+        retypd::getNameForInt("sint", Op->getType()), Op->getType());
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
     N.getPNIVar()->setNonPtrIfRelated();
-    auto &UintNode = cg.CG.getOrCreatePrim(retypd::getNameForInt("uint", Op->getType()), Op->getType());
+    auto &UintNode = cg.CG.getOrCreatePrim(
+        retypd::getNameForInt("uint", Op->getType()), Op->getType());
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {
