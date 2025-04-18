@@ -1965,6 +1965,7 @@ void ConstraintsGenerator::determinize() {
     auto It = Worklist.front();
     auto &Node = *It->second;
     auto outLabelsMap = allOutOffLabels(It->first);
+    std::map<OffsetRange, CGNode *> OfftmpNodes;
     for (auto &L : outLabelsMap) {
       auto &S = L.second;
       if (S.count(Backup.getEndNode())) {
@@ -1983,12 +1984,18 @@ void ConstraintsGenerator::determinize() {
 
       auto *FromNode = &Node;
       if (!L.first.first.isZero()) {
-        auto *TmpNode = &CG.createNodeClonePNI(
-            retypd::NodeKey{TypeVariable::CreateDtv(
-                *Ctx.TRCtx, ValueNamer::getName("offtmp_"))},
-            FromNode->getPNIVar());
-        CG.addEdge(*FromNode, *TmpNode,
-                   retypd::RecallLabel{OffsetLabel{L.first.first}});
+        CGNode *TmpNode;
+        if (OfftmpNodes.count(L.first.first)) {
+          TmpNode = OfftmpNodes.at(L.first.first);
+        } else {
+          TmpNode = &CG.createNodeClonePNI(
+              retypd::NodeKey{TypeVariable::CreateDtv(
+                  *Ctx.TRCtx, ValueNamer::getName("offtmp_"))},
+              FromNode->getPNIVar());
+          CG.addEdge(*FromNode, *TmpNode,
+                     retypd::RecallLabel{OffsetLabel{L.first.first}});
+          OfftmpNodes.insert({L.first.first, TmpNode});
+        }
         FromNode = TmpNode;
       }
       CG.onlyAddEdge(*FromNode, ToNode, L.first.second);
