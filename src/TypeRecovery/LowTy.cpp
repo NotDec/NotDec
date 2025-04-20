@@ -5,6 +5,7 @@
 #include <iostream>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
+#include <string>
 
 namespace notdec::retypd {
 
@@ -194,12 +195,31 @@ llvm::Type *ToLLVMType(llvm::LLVMContext &Ctx, std::string a, unsigned Size) {
   assert(false && "TODO: unhandled type");
 }
 
+/*
+整数这一块规划：
+- int就表示普通int，不用加size后缀。sint就表示signed int。uint就表示unsigned int，都不加后缀，而是根据ModuleLayout来。
+- 部分特殊整数类型也不加后缀，比如short，char，long，longlong。
+- 加后缀的以i或者u为后缀。i8 i16 i32 u32。
+*/
+
 std::string llvmType2Elem(llvm::Type *T) {
   if (T == nullptr) {
     return "top";
   }
+  if (T->isIntegerTy(1)) {
+    return "bool";
+  }
+  if (T->isIntegerTy(8)) {
+    return "char";
+  }
+  if (T->isIntegerTy(16)) {
+    return "short";
+  }
+  if (T->isIntegerTy(64)) {
+    return "longlong";
+  }
   if (T->isIntegerTy()) {
-    return "int";
+    return "i" + std::to_string(T->getIntegerBitWidth());
   }
   if (T->isFloatTy()) {
     return "float";

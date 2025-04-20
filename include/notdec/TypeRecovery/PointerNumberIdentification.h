@@ -31,6 +31,7 @@ struct ConstraintGraph;
 struct PNIGraph;
 struct CGNode;
 
+OffsetRange matchOffsetRangeNoNegativeAccess(llvm::Value *I);
 OffsetRange matchOffsetRange(llvm::Value *I);
 bool isUnknown(const CGNode *N);
 

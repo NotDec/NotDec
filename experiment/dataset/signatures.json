@@ -1,15 +1,15 @@
 {
   "main": {
     "constraints": [
-      "main.out <= #sint",
-      "#sint <= main.in_0",
+      "main.out <= #sint32",
+      "#sint32 <= main.in_0",
       "main.in_1.loadp.load8 <= #char"
     ],
     "pni_map": {
       "main": "func p #1",
       "main.out": "int p #2",
       "main.in_0": "int p #2",
-      "#sint": "int p #2",
+      "#sint32": "int p #2",
       "main.in_1": "ptr p #3",
       "main.in_1.loadp": "ptr p #4",
       "main.in_1.loadp.load8": "int 8 #5",

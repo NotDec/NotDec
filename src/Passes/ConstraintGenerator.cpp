@@ -383,7 +383,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
       if (auto *OL = retypd::getOffsetLabel(E.Label)) {
         RemainingOffsetEdges.insert(&E);
         for (auto &A : OL->range.access) {
-          AllStrides.insert(A.Size);
+          if (A.Size > 0) {
+            AllStrides.insert(A.Size);
+          }
         }
       }
     }
@@ -1791,7 +1793,7 @@ void ConstraintsGenerator::eliminateCycle() {
       if (Node == &Merged) {
         continue;
       }
-      mergeNodeTo(*Node, Merged, true);
+      mergeNodeTo(*Node, Merged, false);
     }
   }
 }

@@ -39,12 +39,12 @@
   },
   "printShortLine": {
     "constraints": [
-      "printShortLine.in_0 <= #short"
+      "printShortLine.in_0 <= #int"
     ],
     "pni_map": {
       "printShortLine": "func p #1",
-      "printShortLine.in_0": "int 16 #2",
-      "#short": "int 16 #2"
+      "printShortLine.in_0": "int 32 #2",
+      "#int": "int 32 #2"
     }
   },
   "printFloatLine": {
@@ -63,8 +63,8 @@
     ],
     "pni_map": {
       "printDoubleLine": "func p #1",
-      "printDoubleLine.in_0": "float 64 #2",
-      "#double": "float 64 #2"
+      "printDoubleLine.in_0": "double 64 #2",
+      "#double": "double 64 #2"
     }
   },
   "printLongLine": {
@@ -83,8 +83,8 @@
     ],
     "pni_map": {
       "printLongLongLine": "func p #1",
-      "printLongLongLine.in_0": "int 64 #2",
-      "#longlong": "int 64 #2"
+      "printLongLongLine.in_0": "longlong 64 #2",
+      "#longlong": "longlong 64 #2"
     }
   },
   "printSizeTLine": {
@@ -99,12 +99,12 @@
   },
   "printHexCharLine": {
     "constraints": [
-      "printHexCharLine.in_0 <= #char"
+      "printHexCharLine.in_0 <= #int"
     ],
     "pni_map": {
       "printHexCharLine": "func p #1",
-      "printHexCharLine.in_0": "int 8 #2",
-      "#char": "int 8 #2"
+      "printHexCharLine.in_0": "int 32 #2",
+      "#int": "int 32 #2"
     }
   },
   "printWcharLine": {

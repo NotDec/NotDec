@@ -124,7 +124,7 @@ std::optional<unsigned> decodeSi(std::string s) {
   return std::nullopt;
 }
 
-std::optional<unsigned> decodeui(std::string s) {
+std::optional<unsigned> decodeUi(std::string s) {
   if (s.front() == 'u') {
     return strToUl(s.substr(1));
   }
@@ -143,7 +143,7 @@ std::shared_ptr<IntLattice> IntLattice::create(LowTy LTy, Variance V,
     IL->Sign = SI_SIGNED;
   } else if (startswith(TyName, "sint") || decodeSi(TyName) || startswith(TyName, "slonglong")) {
     IL->Sign = SI_SIGNED;
-  } else if (startswith(TyName, "uint") || decodeui(TyName) || startswith(TyName, "ulonglong")) {
+  } else if (startswith(TyName, "uint") || decodeUi(TyName) || startswith(TyName, "ulonglong")) {
     IL->Sign = SI_UNSIGNED;
   } else if (startswith(TyName, "int") || startswith(TyName, "longlong")) {
     // do nothing

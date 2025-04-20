@@ -65,6 +65,7 @@ struct LowTy {
         Ty(fromLLVMTy(Ty, PointerSize)) {
     if (isNotPN()) {
       Elem = llvmType2Elem(Ty);
+      assert(Elem != "int");
     }
   }
 
@@ -72,6 +73,7 @@ struct LowTy {
       : Size(Size), Ty(str2PtrOrNum(Str)) {
     if (isNotPN()) {
       Elem = Str;
+      assert(Elem != "int");
     }
   }
 

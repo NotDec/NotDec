@@ -13,6 +13,10 @@ namespace notdec::retypd {
 using notdec::ast::HType;
 using notdec::ast::HTypeContext;
 
+std::optional<unsigned> strToUl(std::string s);
+std::optional<unsigned> decodeSi(std::string s);
+std::optional<unsigned> decodeUi(std::string s);
+
 class LatticeTy {
 public:
   enum LatticeTyKind {

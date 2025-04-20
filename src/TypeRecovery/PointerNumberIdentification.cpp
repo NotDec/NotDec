@@ -1,7 +1,8 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
-#include "TypeRecovery/ConstraintGraph.h"
-#include "notdec-llvm2c/Interface/ValueNamer.h"
 #include "Passes/ConstraintGenerator.h"
+#include "TypeRecovery/ConstraintGraph.h"
+#include "notdec-llvm2c/Interface/Range.h"
+#include "notdec-llvm2c/Interface/ValueNamer.h"
 #include <cassert>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
@@ -11,6 +12,14 @@
 #include <vector>
 
 namespace notdec::retypd {
+
+// remove and ignore all negative access.
+OffsetRange matchOffsetRangeNoNegativeAccess(llvm::Value *I) {
+  auto R = matchOffsetRange(I);
+  R.access.erase(std::remove_if(R.access.begin(), R.access.end(),
+                             [](ArrayOffset Val) { return Val.Size < 0; }), R.access.end());
+  return R;
+}
 
 /// Visit Add/Mul/shl chain, add the results to OffsetRange.
 OffsetRange matchOffsetRange(llvm::Value *I) {
@@ -94,11 +103,11 @@ void PNIGraph::eraseConstraint(ConsNode *Cons) {
     OffsetRange Off;
     if (Left->getPNIVar()->getPtrOrNum() == retypd::Number &&
         Right->getPNIVar()->getPtrOrNum() == retypd::Pointer) {
-      Off = matchOffsetRange(LeftVal);
+      Off = matchOffsetRangeNoNegativeAccess(LeftVal);
       Result->setAsPtrAdd(Right, Off);
     } else if (Left->getPNIVar()->getPtrOrNum() == retypd::Pointer &&
                Right->getPNIVar()->getPtrOrNum() == retypd::Number) {
-      Off = matchOffsetRange(RightVal);
+      Off = matchOffsetRangeNoNegativeAccess(RightVal);
       Result->setAsPtrAdd(Left, Off);
     }
   }
@@ -520,9 +529,9 @@ PNINode::PNINode(PNIGraph &SSG, std::string SerializedTy)
            auto Pos = SerializedTy.find(" ");
            unsigned long Size;
            if (SerializedTy.substr(Pos + 1) == "p") {
-            Size = SSG.PointerSize;
+             Size = SSG.PointerSize;
            } else {
-            Size = std::stoul(SerializedTy.substr(Pos + 1));
+             Size = std::stoul(SerializedTy.substr(Pos + 1));
            }
            Size;
          })) {}
@@ -551,7 +560,7 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
     NodeToCons[NewNode->getNodes()[0]].insert(NewNode);
     NodeToCons[NewNode->getNodes()[1]].insert(NewNode);
     NodeToCons[NewNode->getNodes()[2]].insert(NewNode);
-    if (G.Worklist.count(const_cast<ConsNode*>(&C))) {
+    if (G.Worklist.count(const_cast<ConsNode *>(&C))) {
       Worklist.insert(NewNode);
     }
   }

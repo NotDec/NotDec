@@ -65,10 +65,12 @@ HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
   if (startswith(Name, "ptr")) {
     return Ctx.getPointerType(false, Parent.PointerSize, nullptr);
   }
-  if (startswith(Name, "int") || startswith(Name, "uint") || startswith(Name, "sint")) {
+  if (startswith(Name, "int") || startswith(Name, "short") ||
+      startswith(Name, "longlong") || startswith(Name, "uint") ||
+      startswith(Name, "sint") || decodeSi(Name) || decodeUi(Name)) {
     // default to signed
     bool Signed = true;
-    if (startswith(Name, "uint")) {
+    if (startswith(Name, "uint") || decodeUi(Name)) {
       Signed = false;
     }
     auto ret = Ctx.getIntegerType(false, BitSize, Signed);
@@ -107,13 +109,15 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       std::cerr << "Cyclic dependency forces the node become struct/union.\n";
       if (std::holds_alternative<UnionInfo>(
               TypeInfos.at(const_cast<CGNode *>(&Node)).Info)) {
-        UnionDecl *Decl = UnionDecl::Create(Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "union_"));
+        UnionDecl *Decl = UnionDecl::Create(
+            Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "union_"));
         HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
                                         Ctx.getUnionType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);
         return Ret;
       } else {
-        RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "struct_"));
+        RecordDecl *Decl = RecordDecl::Create(
+            Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "struct_"));
         HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
                                         Ctx.getRecordType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);
@@ -264,7 +268,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
             }
             // merge to prev array.
             ExpandEnd = EntJ.R.end();
-            
+
             if (j + 1 < Info.Fields.size()) {
               auto &NextJ = Info.Fields.at(j + 1);
               if (EntJ.R.end() < NextJ.R.Start) {
@@ -292,7 +296,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         if (CurrentDecl.R.end() < ExpandEnd) {
           auto PaddingSize = ExpandEnd - CurrentDecl.R.end();
           PaddingDecl = FieldDecl{
-              .R = SimpleRange{.Start = CurrentDecl.R.end(), .Size = PaddingSize},
+              .R = SimpleRange{.Start = CurrentDecl.R.end(),
+                               .Size = PaddingSize},
               .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
               .Name = ValueNamer::getName("padding_"),
               .Comment = "at offset: " + std::to_string(CurrentDecl.R.end()),
@@ -336,10 +341,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         Ty = Ty->getPointeeType();
 
         auto FieldName = ValueNamer::getName("field_");
-        Decl->addMember(
-            FieldDecl{.R = {.Start=0, .Size = *Size},
-                      .Type = Ty,
-                      .Name = FieldName});
+        Decl->addMember(FieldDecl{
+            .R = {.Start = 0, .Size = *Size}, .Type = Ty, .Name = FieldName});
       }
     } else {
       assert(false && "Unknown TypeInfo");
