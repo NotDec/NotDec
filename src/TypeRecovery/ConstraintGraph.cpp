@@ -754,12 +754,12 @@ void ConstraintGraph::contraVariantSplit() {
         NodeKey{TypeVariable::CreateDtv(*Ctx, ValueNamer::getName("split_"))},
         N->getPNIVar());
     // Move all incoming recall edge to the new node.
-    std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
+    std::set<std::tuple<CGNode *, CGNode *, EdgeLabel>> toRemove;
     for (auto InEdge2 : N->inEdges) {
       if (isRecall(InEdge2->Label)) {
         addEdge(InEdge2->getSourceNode(), NewNode, InEdge2->Label);
         // removeEdge(InEdge2->getSourceNode(), *N, InEdge2->Label);
-        toRemove.push_back({&InEdge2->getSourceNode(), N, InEdge2->Label});
+        toRemove.insert({&InEdge2->getSourceNode(), N, InEdge2->Label});
       }
     }
     // Move all outgoing recall edge to the new node.
@@ -768,7 +768,7 @@ void ConstraintGraph::contraVariantSplit() {
         auto &Target2 = const_cast<CGNode &>(Edge.getTargetNode());
         addEdge(NewNode, Target2, Edge.Label);
         // removeEdge(*N, Target2, Edge.Label);
-        toRemove.push_back({N, &Target2, Edge.Label});
+        toRemove.insert({N, &Target2, Edge.Label});
       }
     }
     for (auto &[From, To, Label] : toRemove) {
