@@ -918,7 +918,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // Walk the callgraph in bottom-up SCC order.
   for (; !CGI.isAtEnd(); ++CGI) {
     const std::vector<CallGraphNode *> &NodeVec = *CGI;
-    AllSCCs.push_back(SCCData{NodeVec, nullptr, "", nullptr});
+    AllSCCs.push_back(SCCData{NodeVec, nullptr, "", nullptr, {}});
     size_t SCCIndex = AllSCCs.size() - 1;
     llvm::Optional<std::string> DirPath;
     std::string SCCName = "SCC" + std::to_string(SCCIndex);
@@ -1119,7 +1119,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::cerr << "(Top-Down) Processing Func: " << Name << "\n";
 
     // Collect all functions for SCC checking
-    std::set<llvm::Function *> SCCSet;
+    std::set<llvm::Function *> &SCCSet = Data.SCCSet;
     for (auto CGN : NodeVec) {
       if (CGN->getFunction() == nullptr) {
         continue;
@@ -1177,13 +1177,18 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
           std::abort();
         }
         for (auto &Elem : Callers) {
+
           auto *Call = Elem.first;
           auto &CallerGenerator =
               AllSCCs.at(Func2SCCIndex.at(Elem.second)).TopDownGenerator;
-          auto [FN, FNC] = CallerGenerator->CallToInstance.at(Call);
+          if (CallerGenerator->CallToInstance.count(Call)) {
+            auto [FN, FNC] = CallerGenerator->CallToInstance.at(Call);
 
-          FuncNodes.insert(FN);
-          FuncNodesContra.insert(FNC);
+            FuncNodes.insert(FN);
+            FuncNodesContra.insert(FNC);
+          } else {
+            assert(Data.SCCSet.count(Elem.second->getFunction()));
+          }
         }
       }
 
@@ -1199,6 +1204,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       // nullptr, -1, retypd::Contravariant));
 
       CurrentTypes.makeSymmetry();
+      // Run saturation again
+      CurrentTypes.CG.solve();
     }
 
     if (DirPath) {
@@ -1930,12 +1937,20 @@ void ConstraintsGenerator::determinize() {
     if (DTrans.count(N)) {
       return DTrans.find(N);
     }
-    auto *OldPN = notdec::retypd::NFADeterminizer<>::ensureSamePNI(N);
-    auto &NewNode =
-        CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
-                                  *Ctx.TRCtx, ValueNamer::getName("dtm_"))},
-                              OldPN);
-    auto it = DTrans.emplace(N, &NewNode);
+
+    CGNode *NewNode;
+    NewNode =
+        &CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
+                                   *Ctx.TRCtx, ValueNamer::getName("dtm_"))},
+                               (*N.begin())->getPNIVar());
+
+    for (auto N1 : N) {
+      NewNode->getPNIVar()->merge(N1->getPNIVar()->getLatticeTy());
+    }
+    if (NewNode->getPNIVar()->isConflict()) {
+      notdec::retypd::NFADeterminizer<>::printPNDiffSet(N);
+    }
+    auto it = DTrans.emplace(N, NewNode);
     assert(it.second);
     return it.first;
   };

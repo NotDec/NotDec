@@ -63,6 +63,7 @@ struct SCCData {
   std::string SCCName;
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
+  std::set<llvm::Function *> SCCSet;
 };
 
 struct AllGraphs {

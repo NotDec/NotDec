@@ -145,7 +145,7 @@ std::shared_ptr<IntLattice> IntLattice::create(LowTy LTy, Variance V,
     IL->Sign = SI_SIGNED;
   } else if (startswith(TyName, "uint") || decodeUi(TyName) || startswith(TyName, "ulonglong")) {
     IL->Sign = SI_UNSIGNED;
-  } else if (startswith(TyName, "int") || startswith(TyName, "longlong")) {
+  } else if (startswith(TyName, "int") || startswith(TyName, "longlong") || startswith(TyName, "long")) {
     // do nothing
   } else {
     assert(false && "IntLattice::create: Unhandled type");
