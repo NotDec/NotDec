@@ -12,6 +12,10 @@ struct MemsetMatcher : PassInfoMixin<MemsetMatcher> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &);
 };
 
+struct MemcpyMatcher : PassInfoMixin<MemcpyMatcher> {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &);
+};
+
 } // namespace notdec
 
 #endif

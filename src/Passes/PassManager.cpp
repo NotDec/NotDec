@@ -419,6 +419,7 @@ void DecompileConfig::run_passes() {
       //     llvm::isCurrentDebugType("pointer-type-recovery")));
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(MemsetMatcher()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(MemcpyMatcher()));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
