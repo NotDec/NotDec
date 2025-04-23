@@ -64,6 +64,7 @@ llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
     Base = Builder.CreateIntToPtr(
         Builder.getIntN(DL.getPointerSizeInBits(), Offset),
         Type::getInt8PtrTy(Builder.getContext()));
+    return Base;
   } else if (Offset == 0) {
     // do nothing
   } else {
@@ -77,6 +78,8 @@ llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
     }
     Base = Builder.CreateAdd(
         Base, Builder.getIntN(Base->getType()->getIntegerBitWidth(), Offset));
+  }
+  if (Base->getType()->isIntegerTy()) {
     Base =
         Builder.CreateIntToPtr(Base, Type::getInt8PtrTy(Builder.getContext()));
   }
