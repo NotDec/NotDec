@@ -71,6 +71,7 @@ struct AllGraphs {
   std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
   std::shared_ptr<ConstraintsGenerator> Global;
   std::shared_ptr<ConstraintsGenerator> GlobalSketch;
+  CallGraph* CG;
 };
 
 struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
@@ -89,7 +90,6 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
   std::string data_layout;
 
   // Map from SCC to initial constraint graph.
-  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> FuncCtxs;
   std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>>
       FuncSummaries;
 
@@ -118,7 +118,7 @@ public:
   void loadSummaryFile(Module &M, const char *path);
   void loadSignatureFile(Module &M, const char *path);
   void print(Module &M, std::string path);
-  void printAnnotatedModule(Module &M, std::string path);
+  void printAnnotatedModule(Module &M, std::string path, int level);
 };
 
 /// The ConstraintsGenerator class is responsible for generating constraints.

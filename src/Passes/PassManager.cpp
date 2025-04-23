@@ -420,9 +420,9 @@ void DecompileConfig::run_passes() {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(MemsetMatcher()));
       MPM.addPass(createModuleToFunctionPassAdaptor(MemcpyMatcher()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
-      // MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
 
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(LoopRotatePass())));

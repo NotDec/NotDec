@@ -58,6 +58,7 @@
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
+#include "notdec-llvm2c/Interface/Utils.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 
 #define DEBUG_TYPE "type-recovery"
@@ -311,6 +312,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
       std::abort();
     }
     Visited.insert(&N);
+    if (startswith(toString(N.key), "new_1164")) {
+      llvm::errs() << "here";
+    }
 
     // if no offset edge, only load edge, this is a simple pointer
     if (!mustBeStruct && !retypd::hasOffsetEdge(N) &&
@@ -371,7 +375,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         // auto &New =
         splitEdge(E, retypd::RecallLabel{OffsetLabel{OffsetRange()}}, E.Label,
                   ValueNamer::getName("F0_"));
-        break;
+        // break;
       }
     }
 
@@ -873,6 +877,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // 0.6 get the CallGraph, iterate by topological order of SCC
   CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
+  AG.CG = &CG;
 
   // 0.7
   // override summary for printf
@@ -1035,8 +1040,6 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
     // 1.5 save the summary
     for (auto F : SCCs) {
-      auto It = FuncCtxs.emplace(F, Generator);
-      assert(It.second && "Function already in FuncCtxs?");
       auto It2 = FuncSummaries.emplace(F, Summary);
       assert(It2.second && "Function summary already exist?");
     }
@@ -1284,7 +1287,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   if (DebugDir) {
     Global->CG.printGraph(join(DebugDir, "GlobalMemory.dot").c_str());
-    printAnnotatedModule(M, join(DebugDir, "02-AfterBottomUp.anno.ll").c_str());
+    printAnnotatedModule(M, join(DebugDir, "02-AfterBottomUp.anno1.ll").c_str(), 1);
   }
 
   llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
@@ -1537,7 +1540,9 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // gen_json("retypd-constrains.json");
 
   // TODO convert the type back to LLVM IR??
-  print(M, "after-TypeRecovery.ll");
+  if (DebugDir) {
+    printAnnotatedModule(M, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
+  }
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
   return Result;
@@ -3020,6 +3025,7 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
 // =========== end: other insts ===========
 
 void TypeRecovery::gen_json(std::string OutputFilename) {
+  assert(false && "depricated");
   // json::Object Root({{"data_layout", data_layout}});
 
   // json::Object Constraints;
@@ -3049,14 +3055,33 @@ void TypeRecovery::gen_json(std::string OutputFilename) {
 
 class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
   // ConstraintsGenerator &CG;
-  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>> &FuncCtxs;
+  AllGraphs &AG;
+  int Level = 0;
+
+  std::shared_ptr<ConstraintsGenerator> getFuncCG(const llvm::Function *F) {
+    auto CGN = AG.CG->getOrInsertFunction(F);
+    if (!AG.Func2SCCIndex.count(CGN)) {
+      return nullptr;
+    }
+    std::shared_ptr<ConstraintsGenerator> CG = nullptr;
+    auto Ind = AG.Func2SCCIndex.at(CGN);
+    if (Level == 0) {
+      CG = AG.AllSCCs.at(Ind).SummaryGenerator;
+    } else if(Level == 1) {
+      CG = AG.AllSCCs.at(Ind).TopDownGenerator;
+    } else if (Level == 2) {
+      CG = AG.AllSCCs.at(Ind).SketchGenerator;
+    }
+    return CG;
+  }
 
   void emitFunctionAnnot(const llvm::Function *F,
                          llvm::formatted_raw_ostream &OS) override {
-    if (FuncCtxs.count(const_cast<llvm::Function *>(F)) == 0) {
+    auto F1 = const_cast<llvm::Function *>(F);
+    std::shared_ptr<ConstraintsGenerator> CG = getFuncCG(F);
+    if (!CG) {
       return;
     }
-    auto &CG = FuncCtxs.at(const_cast<llvm::Function *>(F));
     OS << "; ";
     if (!F->getReturnType()->isVoidTy()) {
       OS << CG->getOrInsertNode(
@@ -3082,7 +3107,11 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
     if (Instr == nullptr) {
       return;
     }
-    auto &CG = FuncCtxs.at(const_cast<llvm::Function *>(Instr->getFunction()));
+    auto F = Instr->getFunction();
+    std::shared_ptr<ConstraintsGenerator> CG = getFuncCG(F);
+    if (!CG) {
+      return;
+    }
 
     OS << "; ";
     if (!V.getType()->isVoidTy()) {
@@ -3110,9 +3139,8 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
   }
 
 public:
-  CGAnnotationWriter(std::map<llvm::Function *,
-                              std::shared_ptr<ConstraintsGenerator>> &func_ctxs)
-      : FuncCtxs(func_ctxs) {}
+  CGAnnotationWriter(AllGraphs &AG, int Level)
+      : AG(AG), Level(Level) {}
 };
 
 void TypeRecovery::print(llvm::Module &M, std::string path) {
@@ -3125,7 +3153,7 @@ void TypeRecovery::print(llvm::Module &M, std::string path) {
   }
 }
 
-void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path) {
+void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path, int level) {
   std::error_code EC;
   llvm::raw_fd_ostream os(path, EC);
   if (EC) {
@@ -3133,7 +3161,7 @@ void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path) {
     std::cerr << EC.message() << std::endl;
     std::abort();
   }
-  CGAnnotationWriter AW((FuncCtxs));
+  CGAnnotationWriter AW(AG, level);
   M.print(os, &AW);
 }
 

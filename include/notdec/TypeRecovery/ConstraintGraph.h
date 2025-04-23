@@ -141,7 +141,7 @@ public:
   // 2. for clone
   CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size);
 
-  std::string str() { return key.str() + "-" + PNIVar->str(); }
+  std::string str() { return key.str() + "-" + PNIVar->serialize(); }
   // handle update from PNI
   void onUpdatePNType();
   void setAsPtrAdd(CGNode *Other, OffsetRange Off);
@@ -524,8 +524,7 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
     return Node->key.str() +
            (Node->getPNIVar() != nullptr
-                ? "\n" + Node->getPNIVar()->str() + " #" +
-                      std::to_string(Node->getPNIVar()->getId())
+                ? "\n" + Node->getPNIVar()->serialize()
                 : "");
   }
 

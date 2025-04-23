@@ -84,6 +84,8 @@ llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
 }
 
 PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
+  auto PointerSizeInBytes = F.getParent()->getDataLayout().getPointerSize();
+
   auto isCyclicConstant = [](int64_t Val) {
     auto Low = Val & 0xFF;
     if ((Val & 0xFF00) == (Low << 8)) {
@@ -182,7 +184,9 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
             continue;
           }
         }
-        if (Stores.size() > 1) {
+
+        auto Size = EndOffset->second - BeginOffset->second;
+        if (Size > PointerSizeInBytes) {
           // found a memset
           // create a IRBuilder
           IRBuilder<> Builder(SI);
@@ -195,7 +199,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
           auto *SetValByte =
               ConstantInt::get(IntegerType::get(F.getContext(), 8),
                                SetVal->getZExtValue() & 0xFF);
-          auto Size = EndOffset->second - BeginOffset->second;
+
           assert(Size > 0);
           Builder.CreateMemSet(Base, SetValByte, Size, MaybeAlign());
           // remove all visited insts
@@ -214,6 +218,8 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
 }
 
 PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
+  auto PointerSizeInBytes = F.getParent()->getDataLayout().getPointerSize();
+
   for (auto BB = F.begin(), E = F.end(); BB != E; ++BB) {
     // Reverse iteration to find store sequences
     for (auto I = BB->rbegin(), E = BB->rend(); I != E; ++I) {
@@ -305,7 +311,10 @@ PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
           }
         }
 
-        if (Cluster.size() > 1) {
+        auto Size = SrcEnd - SrcStart;
+        assert(Size == (DestEnd - DestStart));
+
+        if (Size > PointerSizeInBytes) {
           IRBuilder<> Builder(SI);
           // Create source pointer
           Value *SrcPtr = addOffset(Builder, F.getParent()->getDataLayout(),
@@ -316,9 +325,6 @@ PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
                                      DestBase, DestStart);
 
           // Create memcpy
-          auto Size = SrcEnd - SrcStart;
-          assert(Size == (DestEnd - DestStart));
-
           auto MS = Builder.CreateMemCpy(DestPtr, MaybeAlign(), SrcPtr,
                                          MaybeAlign(), Size);
           llvm::errs() << "Merging " << std::to_string(Cluster.size())
