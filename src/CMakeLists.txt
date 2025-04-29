@@ -8,6 +8,7 @@ add_library(notdec STATIC
 	Passes/StackAlloca.cpp
 	Passes/MemOpMatcher.cpp
 	Passes/ConstraintGenerator.cpp
+	Passes/ReorderBasicblock.cpp
 	Passes/retdec-stack/retdec-abi.cpp
 	Passes/retdec-stack/retdec-ir-modifier.cpp
 	Passes/retdec-stack/retdec-reaching-definition.cpp

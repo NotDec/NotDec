@@ -2455,14 +2455,17 @@ expToConstraints(std::shared_ptr<retypd::TRContext> TRCtx, rexp::PRExp E) {
 }
 
 CGNode *ConstraintGraph::getTopNodeOrNull(Variance V, unsigned Size) {
-  return getNodeOrNull(NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top" + std::to_string(Size)), V});
+  return getNodeOrNull(NodeKey{
+      TypeVariable::CreatePrimitive(*Ctx, "top" + std::to_string(Size)), V});
 }
 
 CGNode *ConstraintGraph::getTopNode(Variance V, unsigned Size) {
   auto Node = getTopNodeOrNull(V, Size);
   if (Node == nullptr) {
-    Node = &createNodeNoPNI(
-        NodeKey{TypeVariable::CreatePrimitive(*Ctx, "top"+ std::to_string(Size)), V}, 0);
+    Node = &createNodeNoPNI(NodeKey{TypeVariable::CreatePrimitive(
+                                        *Ctx, "top" + std::to_string(Size)),
+                                    V},
+                            0);
   }
   return Node;
 }
@@ -2554,7 +2557,14 @@ void ConstraintGraph::clone(
           Node.Size);
       toMerge.push_back({NewNode, &To.getNode(NewKey)});
     } else {
-      NewNode = &To.createNodeNoPNI(NewKey, Node.Size);
+      if (To.hasNode(NewKey)) {
+        // key conflict. TODO
+        NewNode = &To.createNodeNoPNI(
+            TypeVariable::CreateDtv(*To.Ctx, ValueNamer::getName("conflict_")),
+            Node.Size);
+      } else {
+        NewNode = &To.createNodeNoPNI(NewKey, Node.Size);
+      }
     }
     auto Pair = Old2New.insert({&Node, NewNode});
     assert(Pair.second && "clone: Node already cloned!?");

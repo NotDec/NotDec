@@ -37,6 +37,7 @@
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
+#include "Passes/ReorderBasicblock.h"
 #include "TypeRecovery/TRContext.h"
 #include "notdec-wasm2llvm/utils.h"
 #include "Passes/ConstraintGenerator.h"
@@ -382,6 +383,7 @@ void DecompileConfig::run_passes() {
   // ModulePassManager MPM =
   // PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
   ModulePassManager MPM;
+  MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
 
   // bool onlyRunTypeRecovery = getenv("NOTDEC_ONLY_TYPEREC") != nullptr;
   // if (onlyRunTypeRecovery) {

@@ -168,10 +168,14 @@ struct NFADeterminizer {
         NodeKey{TypeVariable::CreateDtv(*NewG->Ctx, NewVN.getNewName("dfa_"))},
         GT::getInner(*N.begin())->getPNIVar());
 
+    bool alreadyConflict = GT::getInner(&NewNode)->getPNIVar()->isConflict();
     for (auto N1 : N) {
+      if (GT::getInner(N1)->getPNIVar()->isConflict()) {
+        alreadyConflict = true;
+      }
       GT::getInner(&NewNode)->getPNIVar()->merge(GT::getInner(N1)->getPNIVar()->getLatticeTy());
     }
-    if (GT::getInner(&NewNode)->getPNIVar()->isConflict()) {
+    if (GT::getInner(&NewNode)->getPNIVar()->isConflict() && !alreadyConflict) {
       printPNDiffSet(N);
       std::abort();
     }

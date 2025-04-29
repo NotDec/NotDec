@@ -2129,6 +2129,7 @@ void ConstraintsGenerator::instantiateSummary(
   auto [FI, FIC] = CallToInstance.at(Inst);
   auto InstanceId = FI->key.Base.getInstanceId();
   assert(InstanceId != 0);
+  auto NKN = FI->key.Base.getBaseName();
 
   // copy the whole graph into it. and add subtype relation
   std::map<const CGNode *, CGNode *> Old2New;
@@ -2140,7 +2141,10 @@ void ConstraintsGenerator::instantiateSummary(
         }
         retypd::NodeKey Ret = N;
         // 这里即使有了InstanceId，在函数节点和参数节点还是会重复，所以再设置actual标志。
-        auto Base = N.Base.markActual();
+        auto Base = N.Base;
+        if (N.Base.hasBaseName() && N.Base.getBaseName() == NKN) {
+          Base = Base.markActual();
+        }
         Base.instanceId = InstanceId;
         Ret.Base = Base;
         return Ret;
@@ -2328,6 +2332,19 @@ retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
   if (Node != nullptr) {
     return *Node;
   }
+  // temporary allow by key for ConstantExpr
+  if (auto UC = std::get_if<UConstant>(&Val)) {
+    if (auto CE = llvm::dyn_cast<ConstantExpr>(UC->Val)) {
+      auto Dtv = convertTypeVar(Val, User, OpInd);
+      retypd::NodeKey K(Dtv, V);
+      auto Node1 = getNodeOrNull(K);
+      if (Node1) {
+        V2N.insert(Val, retypd::NodeKey(Dtv, retypd::Covariant));
+        V2N.insert(Val, retypd::NodeKey(Dtv, retypd::Contravariant));
+        return *Node1;
+      }
+    }
+  }
   auto [N, NC] = createNode(Val, User, OpInd);
   if (V == retypd::Covariant) {
     return N;
@@ -2402,7 +2419,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
                   auto tv = getTypeVar(GV, nullptr, -1);
                   tv = tv.pushLabel(retypd::OffsetLabel{
                       .range = OffsetRange{.offset = CI->getSExtValue() *
-                                                     Ctx.pointer_size}});
+                                                     (Ctx.pointer_size / 8)}});
                   return tv;
                 }
               }
@@ -2601,7 +2618,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::handlePHINodes() {
   for (auto I : phiNodes) {
-    auto &DstVar = cg.getNode(I, nullptr, -1, retypd::Covariant);
+    auto &DstVar = cg.getOrInsertNode(I, nullptr, -1, retypd::Covariant);
     for (long i = 0; i < I->getNumIncomingValues(); i++) {
       auto *Src = I->getIncomingValue(i);
       auto &SrcVar = cg.getOrInsertNode(Src, I, i);
