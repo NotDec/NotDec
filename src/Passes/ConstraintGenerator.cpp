@@ -932,6 +932,17 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       DirPath.emplace(join(DebugDir, SCCName));
       llvm::sys::fs::create_directories(*DirPath);
     }
+    llvm::Optional<llvm::raw_fd_ostream> SCCsPerf;
+    if (DirPath) {
+      std::error_code EC;
+      SCCsPerf.emplace(join(*DirPath, "Perf.txt"), EC); // , sys::fs::OF_Append
+      if (EC) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                  << "Cannot open output file Perf.txt." << std::endl;
+        std::cerr << EC.message() << std::endl;
+        std::abort();
+      }
+    }
 
     // Calc name for current SCC
     std::string Name;
@@ -955,6 +966,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     std::cerr << "(Bottom-Up) Processing SCC: " << Name << "\n";
     std::shared_ptr<ConstraintsGenerator> Generator;
 
+    auto Start1 = std::chrono::steady_clock::now();
     // 1.1 Check for Summary override.
     // for external function(isDeclaration), Use the summary as graph.
     // for non-external but summary overriden, still build the graph but
@@ -1039,6 +1051,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       Summary = Generator->genSummary();
     }
 
+    if (SCCsPerf) {
+      *SCCsPerf << "01 SummaryGen Elapsed: " << since(Start1).count() << " ms\n";
+      SCCsPerf->close();
+    }
+
     // 1.5 save the summary
     for (auto F : SCCs) {
       auto It2 = FuncSummaries.emplace(F, Summary);
@@ -1112,6 +1129,17 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
       DirPath.emplace(join(DebugDir, SCCDebugFolderName));
       // llvm::sys::fs::create_directories(*DirPath);
     }
+    llvm::Optional<llvm::raw_fd_ostream> SCCsPerf;
+    if (DirPath) {
+      std::error_code EC;
+      SCCsPerf.emplace(join(*DirPath, "Perf.txt"), EC, sys::fs::OF_Append);
+      if (EC) {
+        std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                  << "Cannot open output file Perf.txt." << std::endl;
+        std::cerr << EC.message() << std::endl;
+        std::abort();
+      }
+    }
 
     const std::vector<CallGraphNode *> &NodeVec = Data.Nodes;
     if (Data.SummaryGenerator == nullptr) {
@@ -1121,6 +1149,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     auto &Name = Data.SCCName;
 
     std::cerr << "(Top-Down) Processing Func: " << Name << "\n";
+    auto Start2 = std::chrono::steady_clock::now();
 
     // Collect all functions for SCC checking
     std::set<llvm::Function *> &SCCSet = Data.SCCSet;
@@ -1229,6 +1258,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     if (DirPath) {
       CurrentTypes.CG.printGraph(
           join(*DirPath, "05-CurrentTypes.sat.dot").c_str());
+    }
+    if (SCCsPerf) {
+      *SCCsPerf << "02 TopDown Elapsed: " << since(Start2).count() << " ms\n";
+      SCCsPerf->close();
     }
   }
 

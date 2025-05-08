@@ -1,6 +1,7 @@
 #ifndef _NOTDEC_UTILS_H_
 #define _NOTDEC_UTILS_H_
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -97,6 +98,16 @@ public:
 };
 
 std::string join(std::string path, std::string elem);
+
+template <
+    class result_t   = std::chrono::milliseconds,
+    class clock_t    = std::chrono::steady_clock,
+    class duration_t = std::chrono::milliseconds
+>
+auto since(std::chrono::time_point<clock_t, duration_t> const& start)
+{
+    return std::chrono::duration_cast<result_t>(clock_t::now() - start);
+}
 
 } // namespace notdec
 
