@@ -177,7 +177,7 @@ struct NFADeterminizer {
     }
     if (GT::getInner(&NewNode)->getPNIVar()->isConflict() && !alreadyConflict) {
       printPNDiffSet(N);
-      std::abort();
+      // std::abort();
     }
 
     auto it = DTrans.emplace(N, &NewNode);

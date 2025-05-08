@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <llvm/IR/Intrinsics.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1287,7 +1288,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   if (DebugDir) {
     Global->CG.printGraph(join(DebugDir, "GlobalMemory.dot").c_str());
-    printAnnotatedModule(M, join(DebugDir, "02-AfterBottomUp.anno1.ll").c_str(), 1);
+    printAnnotatedModule(M, join(DebugDir, "02-AfterBottomUp.anno1.ll").c_str(),
+                         1);
   }
 
   llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
@@ -2534,6 +2536,80 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitReturnInst(
 //   return CG.solveSketch(CGNode);
 // }
 
+bool isWithOverflowIntrinsicSigned(llvm::Intrinsic::ID ID) {
+  if (ID == Intrinsic::sadd_with_overflow ||
+      ID == Intrinsic::ssub_with_overflow ||
+      ID == Intrinsic::smul_with_overflow) {
+    return true;
+  }
+  return false;
+}
+
+bool isWithOverflowIntrinsicUnsigned(llvm::Intrinsic::ID ID) {
+  if (ID == Intrinsic::uadd_with_overflow ||
+      ID == Intrinsic::usub_with_overflow ||
+      ID == Intrinsic::umul_with_overflow) {
+    return true;
+  }
+  return false;
+}
+
+void ConstraintsGenerator::RetypdGeneratorVisitor::visitExtractValueInst(
+    ExtractValueInst &I) {
+  if (auto Call = dyn_cast<CallBase>(I.getAggregateOperand())) {
+    if (auto Target = Call->getCalledFunction()) {
+      if (Target->isIntrinsic()) {
+        // 这里判断返回值是不是那种extract
+        // value的东西，根据llvm类型直接设置为数字类型
+        auto Ind = I.getIndices()[0];
+        if (Ind == 0) {
+          if (isWithOverflowIntrinsicSigned(Target->getIntrinsicID())) {
+            auto &N = cg.createNodeCovariant(&I, nullptr, -1);
+            if (N.getPNIVar()->isPNRelated()) {
+              N.getPNIVar()->setNonPtr();
+            }
+            auto &SintNode = cg.CG.getOrCreatePrim(
+                retypd::getNameForInt("sint", I.getType()), I.getType());
+            cg.addSubtype(SintNode, N);
+            return;
+          } else if (isWithOverflowIntrinsicUnsigned(
+                         Target->getIntrinsicID())) {
+            auto &N = cg.createNodeCovariant(&I, nullptr, -1);
+            if (N.getPNIVar()->isPNRelated()) {
+              N.getPNIVar()->setNonPtr();
+            }
+            auto &UintNode = cg.CG.getOrCreatePrim(
+                retypd::getNameForInt("uint", I.getType()), I.getType());
+            cg.addSubtype(UintNode, N);
+            return;
+          }
+        } else if (Ind == 1) {
+          assert(I.getType()->isIntegerTy(1));
+          auto &N = cg.createNodeCovariant(&I, nullptr, -1);
+
+          return;
+        }
+      }
+    }
+  }
+  llvm::errs() << "Unable to handle ExtractValueInst.";
+  std::abort();
+}
+
+bool ConstraintsGenerator::RetypdGeneratorVisitor::handleIntrinsicCall(
+    CallBase &I) {
+  auto Target = I.getCalledFunction();
+  if (!Target->isIntrinsic()) {
+    return false;
+  }
+  auto ID = Target->getIntrinsicID();
+  if (I.getType()->isAggregateType()) {
+    // ignore this call and handle the value in visitExtractValue
+    return true;
+  }
+  return false;
+}
+
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   auto Target = I.getCalledFunction();
   if (Target == nullptr) {
@@ -2542,9 +2618,10 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
               << "Warn: RetypdGenerator: indirect call not supported yet\n";
     return;
   }
-  auto &TargetNode = cg.getOrInsertNode(Target, nullptr, -1);
 
-  if (cg.SCCs.count(Target)) {
+  if (handleIntrinsicCall(I)) {
+    return;
+  } else if (cg.SCCs.count(Target)) {
     // Call within the SCC:
     // directly link to the function tv.
     for (int i = 0; i < I.arg_size(); i++) {
@@ -2562,6 +2639,9 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
       cg.addSubtype(FormalRetVar, ValVar);
     }
   } else {
+    // create and save to CallToInstance map.
+    auto &TargetNode = cg.getOrInsertNode(Target, nullptr, -1);
+
     // differentiate different call instances in the same function
     size_t InstanceId = ValueNamer::getId();
 
@@ -2990,19 +3070,25 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   if (ty == nullptr) { // no action
     return true;
   } else if (strEq(ty, "sint")) {
-    N.getPNIVar()->setNonPtr();
+    if (N.getPNIVar()->isPNRelated()) {
+      N.getPNIVar()->setNonPtr();
+    }
     auto &SintNode = cg.CG.getOrCreatePrim(
         retypd::getNameForInt("sint", I->getType()), I->getType());
     cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
-    N.getPNIVar()->setNonPtr();
+    if (N.getPNIVar()->isPNRelated()) {
+      N.getPNIVar()->setNonPtr();
+    }
     auto &UintNode = cg.CG.getOrCreatePrim(
         retypd::getNameForInt("uint", I->getType()), I->getType());
     cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
-    N.getPNIVar()->setNonPtr();
+    if (N.getPNIVar()->isPNRelated()) {
+      N.getPNIVar()->setNonPtr();
+    }
     return true;
   }
 
@@ -3084,7 +3170,7 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
     auto Ind = AG.Func2SCCIndex.at(CGN);
     if (Level == 0) {
       CG = AG.AllSCCs.at(Ind).SummaryGenerator;
-    } else if(Level == 1) {
+    } else if (Level == 1) {
       CG = AG.AllSCCs.at(Ind).TopDownGenerator;
     } else if (Level == 2) {
       CG = AG.AllSCCs.at(Ind).SketchGenerator;
@@ -3156,8 +3242,7 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
   }
 
 public:
-  CGAnnotationWriter(AllGraphs &AG, int Level)
-      : AG(AG), Level(Level) {}
+  CGAnnotationWriter(AllGraphs &AG, int Level) : AG(AG), Level(Level) {}
 };
 
 void TypeRecovery::print(llvm::Module &M, std::string path) {
@@ -3170,7 +3255,8 @@ void TypeRecovery::print(llvm::Module &M, std::string path) {
   }
 }
 
-void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path, int level) {
+void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path,
+                                        int level) {
   std::error_code EC;
   llvm::raw_fd_ostream os(path, EC);
   if (EC) {

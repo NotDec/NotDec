@@ -320,7 +320,10 @@ protected:
 
   public:
     RetypdGeneratorVisitor(ConstraintsGenerator &cg) : cg(cg) {}
+
+    bool handleIntrinsicCall(CallBase &I);
     // overloaded visit functions
+    void visitExtractValueInst(ExtractValueInst &I);
     void visitCastInst(CastInst &I);
     void visitCallBase(CallBase &I);
     void visitReturnInst(ReturnInst &I);
