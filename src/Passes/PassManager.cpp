@@ -37,20 +37,20 @@
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
-#include "Passes/ReorderBasicblock.h"
-#include "TypeRecovery/TRContext.h"
-#include "notdec-wasm2llvm/utils.h"
 #include "Passes/ConstraintGenerator.h"
 #include "Passes/MemOpMatcher.h"
 #include "Passes/PassManager.h"
 #include "Passes/PointerTypeRecovery.h"
+#include "Passes/ReorderBasicblock.h"
 #include "Passes/StackAlloca.h"
 #include "Passes/StackPointerFinder.h"
 #include "Passes/retdec-stack/retdec-abi.h"
 #include "Passes/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "Passes/retdec-stack/retdec-stack.h"
 #include "Passes/retdec-stack/retdec-symbolic-tree.h"
+#include "TypeRecovery/TRContext.h"
 #include "Utils/Utils.h"
+#include "notdec-wasm2llvm/utils.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-llvm2c/Interface.h"
@@ -109,9 +109,12 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
 
   std::string OutFilePath;
   ::notdec::llvm2c::Options llvm2cOpt;
+  bool disableTypeRecovery = false;
 
-  NotdecLLVM2C(std::string outFilePath, ::notdec::llvm2c::Options &llvm2cOpt)
-      : OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)) {}
+  NotdecLLVM2C(std::string outFilePath, ::notdec::llvm2c::Options &llvm2cOpt,
+               bool disableTypeRecovery)
+      : OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
+        disableTypeRecovery(disableTypeRecovery) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
 
@@ -139,12 +142,12 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
     } else if (outsuffix == ".c") {
       // notdec::llvm2c::demoteSSA(M);
       // Run type recovery.
-      std::unique_ptr<TypeRecovery::Result> HighTypes =
-          std::make_unique<TypeRecovery::Result>(
-              std::move(MAM.getResult<TypeRecovery>(M)));
-
-
-      HighTypes->dump();
+      std::unique_ptr<TypeRecovery::Result> HighTypes;
+      if (!disableTypeRecovery) {
+        HighTypes = std::make_unique<TypeRecovery::Result>(
+            std::move(MAM.getResult<TypeRecovery>(M)));
+        HighTypes->dump();
+      }
 
       std::error_code EC;
       llvm::raw_fd_ostream os(OutFilePath, EC);
@@ -374,7 +377,8 @@ void DecompileConfig::run_passes() {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   MAM.registerPass([&]() { return StackPointerFinderAnalysis(); });
-  std::shared_ptr<retypd::TRContext> TRCtx = std::make_shared<retypd::TRContext>();
+  std::shared_ptr<retypd::TRContext> TRCtx =
+      std::make_shared<retypd::TRContext>();
   MAM.registerPass([&]() { return TypeRecovery(TRCtx); });
 
   // Create the pass manager.
@@ -437,7 +441,7 @@ void DecompileConfig::run_passes() {
       std::abort();
     }
   }
-  MPM.addPass(NotdecLLVM2C(OutFilePath, llvm2cOpt));
+  MPM.addPass(NotdecLLVM2C(OutFilePath, llvm2cOpt, Opts.onlyOptimize));
   MPM.run(Mod, MAM);
 }
 
