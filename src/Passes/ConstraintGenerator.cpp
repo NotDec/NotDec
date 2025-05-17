@@ -1052,7 +1052,8 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     if (SCCsPerf) {
-      *SCCsPerf << "01 SummaryGen Elapsed: " << since(Start1).count() << " ms\n";
+      *SCCsPerf << "01 SummaryGen Elapsed: " << since(Start1).count()
+                << " ms\n";
       SCCsPerf->close();
     }
 
@@ -1401,35 +1402,25 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
         if (ValueTypesFile) {
           // print the current value
-          if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-            *ValueTypesFile << "  Value: " << **V;
-            llvm::Function *F = nullptr;
-            if (auto I = llvm::dyn_cast<Instruction>(*V)) {
-              F = I->getFunction();
-
-            } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
-              F = Arg->getParent();
-            }
-            if (F) {
-              *ValueTypesFile << " (In Func: " << F->getName() << ")";
-            }
-          } else {
-            *ValueTypesFile << "  Special Value: " << getName(Ent.first);
-            if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
-              *ValueTypesFile << " User: " << *UC->User;
-            }
-          }
+          *ValueTypesFile << "  " << toString(Ent.first, true);
           *ValueTypesFile << "  Node: " << toString(Node->key);
           if (Node->getPNIVar() != nullptr) {
             *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
           }
-        }
-
-        if (ValueTypesFile) {
           ValueTypesFile->flush();
         }
+
+        if (TraceIds.count(Node->getId())) {
+          PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
+        }
+
         //!! build AST type for the node
         HType *CTy = TB.buildType(*Node, retypd::Covariant);
+
+        if (TraceIds.count(Node->getId())) {
+          PRINT_TRACE(Node->getId())
+              << ": Type is " << CTy->getAsString() << "\n";
+        }
 
         if (Result.ValueTypes.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
@@ -1473,36 +1464,25 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
         assert(Size > 0);
 
         if (ValueTypesFile) {
-          // print the current value
-          if (auto *V = std::get_if<llvm::Value *>(&Ent.first)) {
-            *ValueTypesFile << "  Value: " << **V;
-            llvm::Function *F = nullptr;
-            if (auto I = llvm::dyn_cast<Instruction>(*V)) {
-              F = I->getFunction();
-
-            } else if (auto Arg = llvm::dyn_cast<Argument>(*V)) {
-              F = Arg->getParent();
-            }
-            if (F) {
-              *ValueTypesFile << " (In Func: " << F->getName() << ")";
-            }
-          } else {
-            *ValueTypesFile << "  Special Value: " << getName(Ent.first);
-            if (auto *UC = std::get_if<UConstant>(&Ent.first)) {
-              *ValueTypesFile << " User: " << *UC->User;
-            }
-          }
+          *ValueTypesFile << "  " << toString(Ent.first, true);
           *ValueTypesFile << "  Node: " << toString(Node->key);
           if (Node->getPNIVar() != nullptr) {
             *ValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
           }
-        }
-
-        if (ValueTypesFile) {
           ValueTypesFile->flush();
         }
+
+        if (TraceIds.count(Node->getId())) {
+          PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
+        }
+
         //!! build AST type for the node
         HType *CTy = TB.buildType(*Node, retypd::Contravariant);
+
+        if (TraceIds.count(Node->getId())) {
+          PRINT_TRACE(Node->getId())
+              << ": Type is " << CTy->getAsString() << "\n";
+        }
 
         if (Result.ValueTypesLowerBound.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "

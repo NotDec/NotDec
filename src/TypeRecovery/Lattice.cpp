@@ -198,7 +198,7 @@ HType *IntLattice::buildType(HTypeContext &Ctx) const {
     return Ctx.getIntegerType(false, getSize(), true);
   }
   // Default to signed? TODO
-  return Ctx.getIntegerType(false, getSize(), true);
+  return Ctx.getIntegerType(false, getSize(), false);
 }
 
 std::string getNameForInt(std::string Name, llvm::Type *Ty) {

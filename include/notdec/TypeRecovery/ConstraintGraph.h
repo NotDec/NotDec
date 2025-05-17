@@ -141,7 +141,9 @@ public:
   // 2. for clone
   CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size);
 
-  std::string str() { return key.str() + "-" + PNIVar->serialize(); }
+  std::string str() {
+    return key.str() + (PNIVar != nullptr ? "-" + PNIVar->serialize() : "");
+  }
   // handle update from PNI
   void onUpdatePNType();
   void setAsPtrAdd(CGNode *Other, OffsetRange Off);
@@ -219,10 +221,10 @@ struct ConstraintGraph {
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 
   CGNode &getOrCreatePrim(std::string Name, llvm::Type *LowType) {
-    auto &Ret = getOrInsertNode(
-        TypeVariable::CreatePrimitive(
-            *Ctx, Name), // if int type, add size suffix.
-        LowType);
+    auto &Ret =
+        getOrInsertNode(TypeVariable::CreatePrimitive(
+                            *Ctx, Name), // if int type, add size suffix.
+                        LowType);
     return Ret;
   }
 
@@ -522,10 +524,9 @@ struct DOTGraphTraits<ConstraintGraph *> : public DefaultDOTGraphTraits {
   DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
   static std::string getGraphName(GraphRef CG) { return CG->Name; }
   static std::string getNodeLabel(const NodeRef Node, GraphRef CG) {
-    return Node->key.str() +
-           (Node->getPNIVar() != nullptr
-                ? "\n" + Node->getPNIVar()->serialize()
-                : "");
+    return Node->key.str() + " #" + std::to_string(Node->Id) +
+           (Node->getPNIVar() != nullptr ? "\n" + Node->getPNIVar()->serialize()
+                                         : "");
   }
 
   std::string getEdgeAttributes(const NodeRef Node,
