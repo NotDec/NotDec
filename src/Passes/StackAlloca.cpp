@@ -13,9 +13,47 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace notdec {
+
+void LinearAllocationRecovery::matchAllocas(Function &F, Value *SP) {
+  using namespace llvm::PatternMatch;
+  Value *OldStackEnd = nullptr;
+  Value *Size = nullptr;
+
+  // %sub = sub i32 %OldStackEnd, %Size
+  // store i32 %sub, i32* @__stack_pointer
+  auto pat_alloca =
+      m_Store(m_Sub(m_Value(OldStackEnd), m_Value(Size)), m_Specific(SP));
+
+  // replace %sub with alloca i8, %Size
+  // remove store
+  std::vector<llvm::Instruction *> toRemove;
+  std::vector<std::pair<llvm::Instruction *, llvm::Instruction *>> toReplace;
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      if (PatternMatch::match(&I, pat_alloca)) {
+        auto Sub = llvm::cast<Instruction>(I.getOperand(0));
+        IRBuilder<> Builder(I.getParent());
+        Builder.SetInsertPoint(&I);
+        llvm::errs() << "stack alloca: " << *Size << "\n";
+        Instruction* Alloca = Builder.CreateAlloca(Type::getInt8Ty(F.getContext()), Size, "alloca");
+        Alloca = llvm::cast<Instruction>(Builder.CreatePtrToInt(Alloca, Sub->getType()));
+        // create a alloca inst with arg Size.
+        toRemove.push_back(&I);
+        toReplace.push_back(std::make_pair(Sub, Alloca));
+      }
+    }
+  }
+  for (auto I: toRemove) {
+    I->eraseFromParent();
+  }
+  for (auto P: toReplace) {
+    P.first->replaceAllUsesWith(P.second);
+  }
+}
 
 /// Scan for stack pointer subtraction and convert to alloca.
 /// Uses ptrtoint to ensure type correctness.
@@ -155,6 +193,7 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         continue;
       }
     }
+    matchAllocas(*F, sp);
 
     // replace the stack allocation with alloca.
     bool grow_negative = sp_result.direction == 0;

@@ -2,6 +2,7 @@
 #define _NOTDEC_PASSES_STACK_ALLOCA_H_
 
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
 #include <vector>
 
@@ -14,7 +15,9 @@ struct LinearAllocationRecovery : PassInfoMixin<LinearAllocationRecovery> {
     return offset < 0 ? "N" + std::to_string(-offset) : std::to_string(offset);
   }
 
-  PreservedAnalyses run(Module &F, ModuleAnalysisManager &);
+  static void matchAllocas(Function &F, Value* SP);
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
 };
 
 // struct Range {

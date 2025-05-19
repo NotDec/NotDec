@@ -7,6 +7,23 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "decompile no-tr",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "${file}",
+        "-o",
+        "${file}.c",
+        // "-debug-only=type-recovery",
+        "--only-opt",
+        "-debug-only=retypd_graph",
+        // "--print-before=type-recovery"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "CMake: build",
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "decompile",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
@@ -18,12 +35,13 @@
         // "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "CMake: build",
+      "preLaunchTask": "Clean and Build",
       "env": {
         "NOTDEC_DEBUG_DIR": "debug_dir",
         "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
+        // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "6772",
       }
     },
     {
@@ -127,7 +145,7 @@
       "request": "launch",
       "program": "${workspaceFolder}/test/Access2Struct/main.py",
       "console": "integratedTerminal",
-      "args": "TestAccess.test_6_Merge"
+      "args": "TestAccess.test_7_Negative"
     }
   ]
 }
