@@ -39,7 +39,7 @@ void LinearAllocationRecovery::matchAllocas(Function &F, Value *SP) {
         IRBuilder<> Builder(I.getParent());
         Builder.SetInsertPoint(&I);
         llvm::errs() << "stack alloca: " << *Size << "\n";
-        Instruction* Alloca = Builder.CreateAlloca(Type::getInt8Ty(F.getContext()), Size, "alloca");
+        Instruction* Alloca = Builder.CreateAlloca(Type::getInt8Ty(F.getContext()), Size, "alloc_mem");
         Alloca = llvm::cast<Instruction>(Builder.CreatePtrToInt(Alloca, Sub->getType()));
         // create a alloca inst with arg Size.
         toRemove.push_back(&I);
