@@ -395,6 +395,10 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
       }
     }
 
+    if (CG.getName() == "goodG2B-dtm") {
+      llvm::errs() << "here";
+    }
+
     while (!AllStrides.empty()) {
       auto MaxStride = *AllStrides.rbegin();
       assert(MaxStride > 0);
@@ -596,7 +600,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         // create a union here.
         auto OldSize = 1;
         auto NewSize = InRangeFieldIndex.size();
-        while (NewSize > OldSize) {
+        while (NewSize > OldSize) {// 根据小的重叠区域，左右拓展找到需要处理创建union的所有Fields。
           OldSize = NewSize;
           for (auto Ind : InRangeFieldIndex) {
             auto &F = Fields.at(Ind);
@@ -720,7 +724,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         }
         // push the merged union back to fields, and iterate again
         OtherFields.push_back(
-            FieldEntry{.R = SimpleRange{.Start = MinStartOff, .Size = OurSize},
+            FieldEntry{.R = SimpleRange{.Start = UnionStart + MinStartOff, .Size = OurSize},
                        .Edge = UE});
         assert(NoUpdate == false);
         // #endregion build members using OverlapFields;
@@ -1536,7 +1540,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     // Info.resolveInitialValue();
   } else {
     llvm::errs() << "ERROR: Memory Type is void!" << CTy->getAsString() << "\n";
-    std::abort();
+    // std::abort();
   }
 
   // analyze the signed/unsigned info
