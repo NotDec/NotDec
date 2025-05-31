@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -149,8 +150,8 @@ TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
   using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;
 
   auto ignoreForgetAndOne = [](const retypd::EdgeLabel &L) {
-    auto isForget = std::holds_alternative<retypd::ForgetLabel>(L);
-    auto isOne = std::holds_alternative<retypd::One>(L);
+    auto isForget = L.isForgetLabel();
+    auto isOne = L.isOne();
     if (isForget || isOne) {
       return false;
     }
@@ -211,19 +212,15 @@ TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
         Worklist.push(NewNodeEnt);
       }
       auto &ToNode = *DTrans.at(S);
-      assert(std::holds_alternative<retypd::RecallLabel>(L) ||
-             std::holds_alternative<retypd::ForgetBase>(L));
-      if (std::holds_alternative<retypd::RecallLabel>(L)) {
+      assert(L.isRecallLabel() || L.isForgetBase());
+      if (auto RL = L.getAs<retypd::RecallLabel>()) {
         CG.addEdge(Node, ToNode, L);
-        CG.addEdge(ToNode, Node,
-                   retypd::ForgetLabel{std::get<retypd::RecallLabel>(L).label});
-      } else if (std::holds_alternative<retypd::ForgetBase>(L)) {
+        CG.addEdge(ToNode, Node, {retypd::ForgetLabel{RL->label}});
+      } else if (auto FB = L.getAs<retypd::ForgetBase>()) {
         assert(&ToNode == CG.getEndNode());
         CG.addEdge(Node, ToNode, L);
-        CG.addEdge(
-            *CG.getStartNode(), Node,
-            retypd::RecallBase{.Base = std::get<retypd::ForgetBase>(L).Base,
-                               .V = std::get<retypd::ForgetBase>(L).V});
+        CG.addEdge(*CG.getStartNode(), Node,
+                   {retypd::RecallBase{.Base = FB->Base, .V = FB->V}});
       }
     }
     Worklist.pop();
@@ -256,12 +253,12 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   for (auto &Ent : CG.Nodes) {
     auto &N = Ent.second;
     for (auto &E : N.outEdges) {
-      if (std::holds_alternative<retypd::One>(E.Label)) {
+      if (E.Label.isOne()) {
         llvm::errs() << "organizeTypes: Node " << N.key.str()
                      << " has one edge, should not exist\n";
         std::abort();
       }
-      if (std::holds_alternative<retypd::ForgetLabel>(E.Label)) {
+      if (E.Label.isForgetLabel()) {
         llvm::errs() << "organizeTypes: Node " << N.key.str()
                      << " has forget label, should not exist\n";
         std::abort();
@@ -313,9 +310,6 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
       std::abort();
     }
     Visited.insert(&N);
-    if (startswith(toString(N.key), "new_1164")) {
-      llvm::errs() << "here";
-    }
 
     // if no offset edge, only load edge, this is a simple pointer
     if (!mustBeStruct && !retypd::hasOffsetEdge(N) &&
@@ -374,7 +368,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
       if (retypd::isLoadOrStore(E.Label)) {
         // separate the load/store edge as a simple pointer node.
         // auto &New =
-        splitEdge(E, retypd::RecallLabel{OffsetLabel{OffsetRange()}}, E.Label,
+        splitEdge(E, {retypd::RecallLabel{OffsetLabel{OffsetRange()}}}, E.Label,
                   ValueNamer::getName("F0_"));
         // break;
       }
@@ -393,10 +387,6 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
           }
         }
       }
-    }
-
-    if (CG.getName() == "goodG2B-dtm") {
-      llvm::errs() << "here";
     }
 
     while (!AllStrides.empty()) {
@@ -505,7 +495,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
           NewRange.offset = NewRange.offset - RangeStart;
           assert(NewRange.offset >= 0);
           CG.addEdge(NewArrNode, Target,
-                     retypd::RecallLabel{OffsetLabel{.range = NewRange}});
+                     {retypd::RecallLabel{OffsetLabel{.range = NewRange}}});
         }
         for (auto *Edge : InRangeEdges) {
           auto &From = const_cast<CGNode &>(Edge->getSourceNode());
@@ -517,9 +507,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
             CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
                                       *CG.Ctx, ValueNamer::getName("Field_"))},
                                   N.getPNIVar());
-        auto FieldEdge = CG.addEdge(
-            N, NewFieldNode,
-            retypd::RecallLabel{OffsetLabel{.range = {.offset = RangeStart}}});
+        auto FieldEdge = CG.addEdge(N, NewFieldNode,
+                                    {retypd::RecallLabel{OffsetLabel{
+                                        .range = {.offset = RangeStart}}}});
         /*auto ArrEdge = */ CG.addEdge(
             NewFieldNode, NewArrNode,
             retypd::RecallLabel{
@@ -1308,10 +1298,10 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // // a special value to represent the memory node
   // MemNode->getPNIVar()->unify(*MemNodeC->getPNIVar());
   Global->CG.onlyAddEdge(*Global->CG.getMemoryNode(retypd::Covariant), *MemNode,
-                         retypd::One{});
+                         {retypd::One{}});
   // Global->CG.onlyAddEdge(*MemNodeC,
   //                        *Global->CG.getMemoryNode(retypd::Contravariant),
-  //                        retypd::One{});
+  //                        {retypd::One{}});
   // keep node in val2node map for post process
   Global->makeSymmetry();
   Global->CG.solve();
@@ -1574,38 +1564,37 @@ void ConstraintsGenerator::makeSymmetry() {
     auto &NC = CG.getOrInsertNodeWithPNI(retypd::MakeReverseVariant(N.key),
                                          N.getPNIVar());
     for (auto &Edge : N.outEdges) {
-      if (std::holds_alternative<retypd::RecallBase>(Edge.getLabel()) ||
-          std::holds_alternative<retypd::ForgetBase>(Edge.getLabel())) {
+      if (Edge.getLabel().isRecallBase() || Edge.getLabel().isForgetBase()) {
         continue;
       }
       auto &T = const_cast<CGNode &>(Edge.getTargetNode());
       auto &TC = CG.getOrInsertNodeWithPNI(retypd::MakeReverseVariant(T.key),
                                            T.getPNIVar());
       auto &Label = Edge.getLabel();
-      if (std::holds_alternative<retypd::One>(Label)) {
+      if (Label.isOne()) {
         // 这里不一定要recall labels forget
         // labels。因为summary里面可能有特殊的节点。 addSubtype(N, T);
-        CG.addEdge(TC, NC, retypd::One{});
-      } else if (auto RL = std::get_if<retypd::RecallLabel>(&Label)) {
+        CG.addEdge(TC, NC, {retypd::One{}});
+      } else if (auto RL = Label.getAs<retypd::RecallLabel>()) {
         auto FL = toForget(*RL);
-        CG.addEdge(T, N, FL);
-        CG.addEdge(NC, TC, *RL);
-        CG.addEdge(TC, NC, FL);
-      } else if (auto FL = std::get_if<retypd::ForgetLabel>(&Label)) {
+        CG.addEdge(T, N, {FL});
+        CG.addEdge(NC, TC, {*RL});
+        CG.addEdge(TC, NC, {FL});
+      } else if (auto FL = Label.getAs<retypd::ForgetLabel>()) {
         auto RL = toRecall(*FL);
-        CG.addEdge(T, N, RL);
-        CG.addEdge(NC, TC, *FL);
-        CG.addEdge(TC, NC, RL);
-      } else if (auto RB = std::get_if<retypd::RecallBase>(&Label)) {
+        CG.addEdge(T, N, {RL});
+        CG.addEdge(NC, TC, {*FL});
+        CG.addEdge(TC, NC, {RL});
+      } else if (auto RB = Label.getAs<retypd::RecallBase>()) {
         auto FB = retypd::toForget(*RB);
-        CG.addEdge(T, N, FB);
-        CG.addEdge(NC, TC, *RB);
-        CG.addEdge(TC, NC, FB);
-      } else if (auto FB = std::get_if<retypd::ForgetBase>(&Label)) {
+        CG.addEdge(T, N, {FB});
+        CG.addEdge(NC, TC, {*RB});
+        CG.addEdge(TC, NC, {FB});
+      } else if (auto FB = Label.getAs<retypd::ForgetBase>()) {
         auto RB = retypd::toRecall(*FB);
-        CG.addEdge(T, N, RB);
-        CG.addEdge(NC, TC, *FB);
-        CG.addEdge(TC, NC, RB);
+        CG.addEdge(T, N, {RB});
+        CG.addEdge(NC, TC, {*FB});
+        CG.addEdge(TC, NC, {RB});
       } else {
         std::cerr << "Unhandled type!";
         std::abort();
@@ -1625,17 +1614,17 @@ bool ConstraintsGenerator::checkSymmetry() {
       auto &T = const_cast<CGNode &>(Edge.getTargetNode());
       auto &TC = getNode(retypd::MakeReverseVariant(T.key));
       auto &Label = Edge.getLabel();
-      if (std::holds_alternative<retypd::One>(Label)) {
+      if (Label.isOne()) {
         // ensure there is a edge for the contra node.
-        assert(CG.hasEdge(TC, NC, retypd::One{}) && "Symmetry check failed");
-      } else if (auto RL = std::get_if<retypd::RecallLabel>(&Label)) {
-        assert(CG.hasEdge(T, N, retypd::ForgetLabel{RL->label}));
-        assert(CG.hasEdge(NC, TC, retypd::RecallLabel{RL->label}));
-        assert(CG.hasEdge(TC, NC, retypd::ForgetLabel{RL->label}));
-      } else if (auto FL = std::get_if<retypd::ForgetLabel>(&Label)) {
-        assert(CG.hasEdge(T, N, retypd::RecallLabel{FL->label}));
-        assert(CG.hasEdge(NC, TC, retypd::ForgetLabel{FL->label}));
-        assert(CG.hasEdge(TC, NC, retypd::RecallLabel{FL->label}));
+        assert(CG.hasEdge(TC, NC, {retypd::One{}}) && "Symmetry check failed");
+      } else if (auto RL = Label.getAs<retypd::RecallLabel>()) {
+        assert(CG.hasEdge(T, N, {retypd::ForgetLabel{RL->label}}));
+        assert(CG.hasEdge(NC, TC, {retypd::RecallLabel{RL->label}}));
+        assert(CG.hasEdge(TC, NC, {retypd::ForgetLabel{RL->label}}));
+      } else if (auto FL = Label.getAs<retypd::ForgetLabel>()) {
+        assert(CG.hasEdge(T, N, {retypd::RecallLabel{FL->label}}));
+        assert(CG.hasEdge(NC, TC, {retypd::ForgetLabel{FL->label}}));
+        assert(CG.hasEdge(TC, NC, {retypd::RecallLabel{FL->label}}));
       }
     }
   }
@@ -1748,7 +1737,7 @@ void ConstraintsGenerator::linkContraToCovariant() {
     }
     auto *CN = &CG.getNode(V2NContra.at(Ent.first));
     assert(CN->getPNIVar() == N->getPNIVar());
-    CG.addEdge(*CN, *N, retypd::One{});
+    CG.addEdge(*CN, *N, {retypd::One{}});
   }
 }
 
@@ -1760,7 +1749,7 @@ void ConstraintsGenerator::eliminateCycle() {
   std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
   for (auto &Ent : NewG) {
     for (auto &Edge : Ent.second.outEdges) {
-      if (std::holds_alternative<retypd::One>(Edge.Label)) {
+      if (Edge.Label.isOne()) {
         if (!Edge.TargetNode.key.Base.isPrimitive()) {
           continue;
         }
@@ -1851,7 +1840,7 @@ void ConstraintsGenerator::mergeOnlySubtype() {
       }
 
       for (auto &Edge : Node.outEdges) {
-        if (!std::holds_alternative<retypd::One>(Edge.getLabel())) {
+        if (!Edge.getLabel().isOne()) {
           continue;
         }
         auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
@@ -2032,7 +2021,7 @@ void ConstraintsGenerator::determinize() {
                   *Ctx.TRCtx, ValueNamer::getName("offtmp_"))},
               FromNode->getPNIVar());
           CG.addEdge(*FromNode, *TmpNode,
-                     retypd::RecallLabel{OffsetLabel{L.first.first}});
+                     {retypd::RecallLabel{OffsetLabel{L.first.first}}});
           OfftmpNodes.insert({L.first.first, TmpNode});
         }
         FromNode = TmpNode;
@@ -2204,7 +2193,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
       // Fix return mapping
       if (!F->getFunctionType()->getReturnType()->isVoidTy()) {
         auto RetKey = Node->key;
-        RetKey.Base = RetKey.Base.pushLabel(retypd::OutLabel{});
+        RetKey.Base = RetKey.Base.pushLabel({retypd::OutLabel{}});
         auto *RetNode = getNodeOrNull(RetKey);
         if (RetNode) {
           V2N.insert(ReturnValue{.Func = F}, RetNode->key);
@@ -2215,7 +2204,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
         auto Arg = F->getArg(i);
         auto ArgKey = Node->key;
         ArgKey.Base = ArgKey.Base.pushLabel(
-            retypd::InLabel{std::to_string(Arg->getArgNo())});
+            {retypd::InLabel{std::to_string(Arg->getArgNo())}});
         ArgKey.SuffixVariance = !ArgKey.SuffixVariance;
         auto *ArgNode = getNodeOrNull(ArgKey);
         if (ArgNode) {
@@ -2228,7 +2217,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
       // Fix return mapping
       if (!F->getFunctionType()->getReturnType()->isVoidTy()) {
         auto RetKey = NodeC->key;
-        RetKey.Base = RetKey.Base.pushLabel(retypd::OutLabel{});
+        RetKey.Base = RetKey.Base.pushLabel({retypd::OutLabel{}});
         auto *RetNodeC = getNodeOrNull(RetKey);
         if (RetNodeC) {
           V2NContra.insert(ReturnValue{.Func = F}, RetNodeC->key);
@@ -2239,7 +2228,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
         auto Arg = F->getArg(i);
         auto ArgKey = NodeC->key;
         ArgKey.Base = ArgKey.Base.pushLabel(
-            retypd::InLabel{std::to_string(Arg->getArgNo())});
+            {retypd::InLabel{std::to_string(Arg->getArgNo())}});
         ArgKey.SuffixVariance = !ArgKey.SuffixVariance;
         auto *ArgNodeC = getNodeOrNull(ArgKey);
         if (ArgNodeC) {
@@ -2381,7 +2370,7 @@ TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User,
     return convertTypeVarVal(*V, User, OpInd);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
     auto tv = getTypeVar(F->Func, nullptr, -1);
-    return tv.pushLabel(retypd::OutLabel{});
+    return tv.pushLabel({retypd::OutLabel{}});
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
@@ -2434,9 +2423,9 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
               if (CI1->isZero()) {
                 if (auto CI = dyn_cast<ConstantInt>(CE->getOperand(2))) {
                   auto tv = getTypeVar(GV, nullptr, -1);
-                  tv = tv.pushLabel(retypd::OffsetLabel{
+                  tv = tv.pushLabel({retypd::OffsetLabel{
                       .range = OffsetRange{.offset = CI->getSExtValue() *
-                                                     (Ctx.pointer_size / 8)}});
+                                                     (Ctx.pointer_size / 8)}}});
                   return tv;
                 }
               }
@@ -2479,7 +2468,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
     // Consistent with Call handling
     auto &N = getOrInsertNode(arg->getParent(), nullptr, -1);
     auto tv = N.key.Base;
-    tv = tv.pushLabel(retypd::InLabel{std::to_string(arg->getArgNo())});
+    tv = tv.pushLabel({retypd::InLabel{std::to_string(arg->getArgNo())}});
     return tv;
   }
 
@@ -2879,13 +2868,12 @@ std::string ConstraintsGenerator::offset(APInt Offset, int Count) {
 
 TypeVariable ConstraintsGenerator::addOffset(TypeVariable &dtv,
                                              OffsetRange Offset) {
-  if (!dtv.getLabels().empty() &&
-      std::holds_alternative<OffsetLabel>(dtv.getLabels().back())) {
-    OffsetLabel LastLabel = std::get<OffsetLabel>(dtv.getLabels().back());
+  if (!dtv.getLabels().empty() && dtv.getLabels().back().isOffset()) {
+    OffsetLabel LastLabel = *dtv.getLabels().back().getAs<OffsetLabel>();
     LastLabel.range = LastLabel.range + Offset;
-    return dtv.popLabel().pushLabel(LastLabel);
+    return dtv.popLabel().pushLabel({LastLabel});
   } else {
-    return dtv.pushLabel(OffsetLabel{.range = Offset});
+    return dtv.pushLabel({OffsetLabel{.range = Offset}});
   }
 }
 
@@ -2899,9 +2887,9 @@ TypeVariable ConstraintsGenerator::deref(Value *Val, User *User, long OpInd,
   auto DstVar = Node.key.Base;
   assert(BitSize % 8 == 0 && "size is not byte aligned!?");
   if (isLoadOrStore) {
-    DstVar = DstVar.pushLabel(retypd::LoadLabel{.Size = BitSize});
+    DstVar = DstVar.pushLabel({retypd::LoadLabel{.Size = BitSize}});
   } else {
-    DstVar = DstVar.pushLabel(retypd::StoreLabel{.Size = BitSize});
+    DstVar = DstVar.pushLabel({retypd::StoreLabel{.Size = BitSize}});
   }
   return DstVar;
 }

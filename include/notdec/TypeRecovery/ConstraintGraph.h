@@ -77,9 +77,9 @@ struct NodeKey {
   }
 
   static NodeKey fromLabel(const EdgeLabel &L) {
-    if (auto FB = std::get_if<ForgetBase>(&L)) {
+    if (auto FB = L.getAs<ForgetBase>()) {
       return NodeKey(FB->Base, FB->V);
-    } else if (auto RB = std::get_if<RecallBase>(&L)) {
+    } else if (auto RB = L.getAs<RecallBase>()) {
       return NodeKey(RB->Base, RB->V);
     } else {
       assert(false && "fromLabel: Not a ForgetBase or RecallBase");
@@ -360,7 +360,7 @@ public:
 
   const CGEdge *addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     if (&From == &To) {
-      if (std::holds_alternative<One>(Label)) {
+      if (Label.isOne()) {
         return nullptr;
       }
       std::cerr << "Warning: Non-null self edge: " << toString(From.key)
@@ -369,21 +369,21 @@ public:
     }
     // do not maintain PNI during layer split.
     if (PG && !isLayerSplit) {
-      if (auto F = std::get_if<ForgetLabel>(&Label)) {
-        if (auto O = std::get_if<OffsetLabel>(&F->label)) {
+      if (auto F = Label.getAs<ForgetLabel>()) {
+        if (auto O = F->label.getAs<OffsetLabel>()) {
           // unify PN
           From.getPNIVar()->unify(*To.getPNIVar());
           // also should be pointer, TODO: set or assert?
           assert(From.getPNIVar()->isPointer());
         }
-      } else if (auto R = std::get_if<RecallLabel>(&Label)) {
-        if (auto O = std::get_if<OffsetLabel>(&R->label)) {
+      } else if (auto R = Label.getAs<RecallLabel>()) {
+        if (auto O = R->label.getAs<OffsetLabel>()) {
           // unify PN
           From.getPNIVar()->unify(*To.getPNIVar());
           // also should be pointer, TODO: set or assert?
           assert(From.getPNIVar()->isPointer());
         }
-      } else if (std::holds_alternative<One>(Label)) {
+      } else if (Label.isOne()) {
         // unify PN
         From.getPNIVar()->unify(*To.getPNIVar());
       }
@@ -423,11 +423,11 @@ inline NodeKey MakeReverseVariant(NodeKey Key) {
 }
 
 inline bool isOffsetOrOne(const CGEdge &E) {
-  if (auto Rec = std::get_if<notdec::retypd::RecallLabel>(&E.Label)) {
-    return std::holds_alternative<notdec::retypd::OffsetLabel>(Rec->label);
-  } else if (auto Rec = std::get_if<notdec::retypd::ForgetLabel>(&E.Label)) {
-    return std::holds_alternative<notdec::retypd::OffsetLabel>(Rec->label);
-  } else if (std::holds_alternative<notdec::retypd::One>(E.Label)) {
+  if (auto Rec = E.Label.getAs<RecallLabel>()) {
+    return Rec->label.isOffset();
+  } else if (auto Rec = E.Label.getAs<ForgetLabel>()) {
+    return Rec->label.isOffset();
+  } else if (E.Label.isOne()) {
     return true;
   }
   return false;

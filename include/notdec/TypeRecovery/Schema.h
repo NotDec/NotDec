@@ -84,8 +84,26 @@ struct StoreLabel {
   }
 };
 
-using FieldLabel =
-    std::variant<InLabel, OutLabel, OffsetLabel, LoadLabel, StoreLabel>;
+// using FieldLabel =
+//     std::variant<InLabel, OutLabel, OffsetLabel, LoadLabel, StoreLabel>;
+struct FieldLabel {
+  std::variant<InLabel, OutLabel, OffsetLabel, LoadLabel, StoreLabel> L;
+  bool operator<(const FieldLabel &rhs) const {
+    return std::tie(L) < std::tie(rhs.L);
+  }
+  bool operator==(const FieldLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+
+  bool isIn() const { return std::holds_alternative<InLabel>(L); }
+  bool isOut() const { return std::holds_alternative<OutLabel>(L); }
+  bool isOffset() const { return std::holds_alternative<OffsetLabel>(L); }
+  bool isLoad() const { return std::holds_alternative<LoadLabel>(L); }
+  bool isStore() const { return std::holds_alternative<StoreLabel>(L); }
+
+  template <typename T> T *getAs() { return std::get_if<T>(&L); }
+  template <typename T> const T *getAs() const { return std::get_if<T>(&L); }
+};
 
 std::string toString(const FieldLabel &f);
 
@@ -549,19 +567,39 @@ struct RecallBase {
   bool operator==(const RecallBase &rhs) const {
     return !(*this < rhs) && !(rhs < *this);
   }
+  bool operator!=(const RecallBase &rhs) const { return !(*this == rhs); }
 };
-using EdgeLabel =
-    std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase>;
+// using EdgeLabel = std::variant<One, ForgetLabel, ForgetBase, RecallLabel,
+// RecallBase>;
+struct EdgeLabel {
+  std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase> L;
+  
+  bool operator<(const EdgeLabel &rhs) const {
+    return std::tie(L) < std::tie(rhs.L);
+  }
+  bool operator==(const EdgeLabel &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+
+  bool isOne() const { return std::holds_alternative<One>(L); }
+  bool isForgetBase() const { return std::holds_alternative<ForgetBase>(L); }
+  bool isRecallBase() const { return std::holds_alternative<RecallBase>(L); }
+  bool isForgetLabel() const { return std::holds_alternative<ForgetLabel>(L); }
+  bool isRecallLabel() const { return std::holds_alternative<RecallLabel>(L); }
+
+  template <typename T> T *getAs() { return std::get_if<T>(&L); }
+  template <typename T> const T *getAs() const { return std::get_if<T>(&L); }
+};
 
 [[nodiscard]] std::string toString(const EdgeLabel &label);
 inline bool isBase(EdgeLabel label) {
-  return std::holds_alternative<ForgetBase>(label) ||
-         std::holds_alternative<RecallBase>(label);
+  return label.isForgetBase() ||
+         label.isRecallBase();
 }
 inline TypeVariable getBase(EdgeLabel label) {
-  if (auto *fb = std::get_if<ForgetBase>(&label)) {
+  if (auto *fb = label.getAs<ForgetBase>()) {
     return fb->Base;
-  } else if (auto *rb = std::get_if<RecallBase>(&label)) {
+  } else if (auto *rb = label.getAs<RecallBase>()) {
     return rb->Base;
   } else {
     assert(false && "getBase: Not a ForgetBase or RecallBase");
@@ -569,40 +607,40 @@ inline TypeVariable getBase(EdgeLabel label) {
 }
 
 inline bool isStore(const EdgeLabel &label) {
-  if (auto *RL = std::get_if<RecallLabel>(&label)) {
-    return std::holds_alternative<StoreLabel>(RL->label);
-  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
-    return std::holds_alternative<StoreLabel>(FL->label);
+  if (auto *RL = label.getAs<RecallLabel>()) {
+    return RL->label.isStore();
+  } else if (auto *FL = label.getAs<ForgetLabel>()) {
+    return FL->label.isStore();
   } else {
     return false;
   }
 }
 
 inline bool isLoadOrStore(const EdgeLabel &label) {
-  if (auto *RL = std::get_if<RecallLabel>(&label)) {
-    return std::holds_alternative<LoadLabel>(RL->label) ||
-           std::holds_alternative<StoreLabel>(RL->label);
-  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
-    return std::holds_alternative<LoadLabel>(FL->label) ||
-           std::holds_alternative<StoreLabel>(FL->label);
+  if (auto *RL = label.getAs<RecallLabel>()) {
+    return RL->label.isLoad() ||
+           RL->label.isStore();
+  } else if (auto *FL = label.getAs<ForgetLabel>()) {
+    return FL->label.isLoad() ||
+           FL->label.isStore();
   } else {
     return false;
   }
 }
 
 inline uint32_t getLoadOrStoreSize(const EdgeLabel &label) {
-  if (auto *RL = std::get_if<RecallLabel>(&label)) {
-    if (auto *LL = std::get_if<LoadLabel>(&RL->label)) {
+  if (auto *RL = label.getAs<RecallLabel>()) {
+    if (auto *LL = RL->label.getAs<LoadLabel>()) {
       return LL->Size;
-    } else if (auto *SL = std::get_if<StoreLabel>(&RL->label)) {
+    } else if (auto *SL = RL->label.getAs<StoreLabel>()) {
       return SL->Size;
     } else {
       assert(false && "getLoadOrStoreSize: Not a LoadLabel or StoreLabel");
     }
-  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
-    if (auto *LL = std::get_if<LoadLabel>(&FL->label)) {
+  } else if (auto *FL = label.getAs<ForgetLabel>()) {
+    if (auto *LL = FL->label.getAs<LoadLabel>()) {
       return LL->Size;
-    } else if (auto *SL = std::get_if<StoreLabel>(&FL->label)) {
+    } else if (auto *SL = FL->label.getAs<StoreLabel>()) {
       return SL->Size;
     } else {
       assert(false && "getLoadOrStoreSize: Not a LoadLabel or StoreLabel");
@@ -613,9 +651,9 @@ inline uint32_t getLoadOrStoreSize(const EdgeLabel &label) {
 }
 
 inline FieldLabel getLabel(EdgeLabel label) {
-  if (auto *fl = std::get_if<ForgetLabel>(&label)) {
+  if (auto *fl = label.getAs<ForgetLabel>()) {
     return fl->label;
-  } else if (auto *rl = std::get_if<RecallLabel>(&label)) {
+  } else if (auto *rl = label.getAs<RecallLabel>()) {
     return rl->label;
   } else {
     assert(false && "getLabel: Not a ForgetLabel or RecallLabel");
@@ -623,23 +661,23 @@ inline FieldLabel getLabel(EdgeLabel label) {
 }
 
 inline bool isLabel(const EdgeLabel &label) {
-  return std::holds_alternative<ForgetLabel>(label) ||
-         std::holds_alternative<RecallLabel>(label);
+  return label.isForgetLabel() ||
+         label.isRecallLabel();
 }
 
 inline bool isForget(const EdgeLabel &label) {
-  return std::holds_alternative<ForgetLabel>(label) ||
-         std::holds_alternative<ForgetBase>(label);
+  return label.isForgetLabel() ||
+         label.isForgetBase();
 }
 
 inline bool isRecall(const EdgeLabel &label) {
-  return std::holds_alternative<RecallLabel>(label) ||
-         std::holds_alternative<RecallBase>(label);
+  return label.isRecallLabel() ||
+         label.isRecallBase();
 }
 
 inline bool isRecallOffset(const EdgeLabel &label) {
-  if (auto *RL = std::get_if<RecallLabel>(&label)) {
-    return std::holds_alternative<OffsetLabel>(RL->label);
+  if (auto *RL = label.getAs<RecallLabel>()) {
+    return RL->label.isOffset();
   } else {
     return false;
   }
@@ -664,10 +702,10 @@ inline RecallBase toRecall(ForgetBase L) {
 
 inline const notdec::retypd::OffsetLabel *
 getOffsetLabel(const EdgeLabel &label) {
-  if (auto *RL = std::get_if<RecallLabel>(&label)) {
-    return std::get_if<OffsetLabel>(&RL->label);
-  } else if (auto *FL = std::get_if<ForgetLabel>(&label)) {
-    return std::get_if<OffsetLabel>(&FL->label);
+  if (auto *RL = label.getAs<RecallLabel>()) {
+    return RL->label.getAs<OffsetLabel>();
+  } else if (auto *FL = label.getAs<ForgetLabel>()) {
+    return FL->label.getAs<OffsetLabel>();
   } else {
     return nullptr;
   }

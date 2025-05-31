@@ -377,12 +377,12 @@ std::string inline getFuncTvName(llvm::Function *Func) {
 
 inline TypeVariable getCallArgTV(CGNode &Target, int32_t Index) {
   TypeVariable TV = Target.key.Base;
-  return TV.pushLabel(retypd::InLabel{std::to_string(Index)});
+  return TV.pushLabel({retypd::InLabel{std::to_string(Index)}});
 }
 
 inline TypeVariable getCallRetTV(CGNode &Target) {
   TypeVariable TV = Target.key.Base;
-  return TV.pushLabel(retypd::OutLabel{});
+  return TV.pushLabel({retypd::OutLabel{}});
 }
 
 // ================ type generator ======================

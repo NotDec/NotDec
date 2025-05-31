@@ -102,7 +102,7 @@ struct NFADeterminizer {
       }
       for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
                                         GT::child_edge_end(Node))) {
-        if (std::holds_alternative<One>(Edge->getLabel())) {
+        if (Edge->getLabel().isOne()) {
           auto &Target = const_cast<CGNode &>(Edge->getTargetNode());
           if (Ret.count(&Target) == 0) {
             Ret.insert(&Target);
@@ -186,7 +186,7 @@ struct NFADeterminizer {
   }
 
   static bool ignoreOne(const EdgeLabel &L) {
-    return !std::holds_alternative<One>(L);
+    return !L.isOne();
   }
 
   static std::set<EdgeLabel>
