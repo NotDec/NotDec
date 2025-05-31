@@ -81,18 +81,18 @@ const PooledTypeVariable *PooledTypeVariable::CreateIntConstant(TRContext &Ctx,
 }
 
 std::string toString(const EdgeLabel &label) {
-  if (std::holds_alternative<One>(label)) {
+  if (label.isOne()) {
     return "_1_";
-  } else if (std::holds_alternative<ForgetLabel>(label)) {
-    return "forget " + toString(std::get<ForgetLabel>(label).label);
-  } else if (std::holds_alternative<ForgetBase>(label)) {
-    return "forget " + toString(std::get<ForgetBase>(label).Base) +
-           toString(std::get<ForgetBase>(label).V);
-  } else if (std::holds_alternative<RecallLabel>(label)) {
-    return "recall " + toString(std::get<RecallLabel>(label).label);
-  } else if (std::holds_alternative<RecallBase>(label)) {
-    return "recall " + toString(std::get<RecallBase>(label).Base) +
-           toString(std::get<RecallBase>(label).V);
+  } else if (auto FL = label.getAs<ForgetLabel>()) {
+    return "forget " + toString(FL->label);
+  } else if (auto FB = label.getAs<ForgetBase>()) {
+    return "forget " + toString(FB->Base) +
+           toString(FB->V);
+  } else if (auto RL = label.getAs<RecallLabel>()) {
+    return "recall " + toString(RL->label);
+  } else if (auto RB = label.getAs<RecallBase>()) {
+    return "recall " + toString(RB->Base) +
+           toString(RB->V);
   }
   assert(false && "Unknown FieldLabel!");
 }
@@ -112,34 +112,33 @@ std::string toString(const Bound &b) {
 }
 
 std::string toString(const FieldLabel &f) {
-  if (std::holds_alternative<InLabel>(f)) {
-    return "in_" + std::get<InLabel>(f).name;
-  } else if (std::holds_alternative<OutLabel>(f)) {
-    return std::get<OutLabel>(f).name.empty()
+  if (auto *In = f.getAs<InLabel>()) {
+    return "in_" + In->name;
+  } else if (auto *Out = f.getAs<OutLabel>()) {
+    return Out->name.empty()
                ? "out"
-               : "out_" + std::get<OutLabel>(f).name;
-  } else if (std::holds_alternative<OffsetLabel>(f)) {
-    auto d = std::get<OffsetLabel>(f);
-    return toString(d.range);
-  } else if (std::holds_alternative<LoadLabel>(f)) {
-    return "load" + std::to_string(std::get<LoadLabel>(f).Size);
-  } else if (std::holds_alternative<StoreLabel>(f)) {
-    return "store" + std::to_string(std::get<StoreLabel>(f).Size);
+               : "out_" + Out->name;
+  } else if (auto *O = f.getAs<OffsetLabel>()) {
+    return toString(O->range);
+  } else if (auto *L = f.getAs<LoadLabel>()) {
+    return "load" + std::to_string(L->Size);
+  } else if (auto *S = f.getAs<StoreLabel>()) {
+    return "store" + std::to_string(S->Size);
   } else {
     assert(false && "unknown FieldLabel");
   }
 }
 
 Variance getVariance(const FieldLabel &f) {
-  if (std::holds_alternative<InLabel>(f)) {
+  if (f.isIn()) {
     return Contravariant;
-  } else if (std::holds_alternative<OutLabel>(f)) {
+  } else if (f.isOut()) {
     return Covariant;
-  } else if (std::holds_alternative<OffsetLabel>(f)) {
+  } else if (f.isOffset()) {
     return Covariant;
-  } else if (std::holds_alternative<LoadLabel>(f)) {
+  } else if (f.isLoad()) {
     return Covariant;
-  } else if (std::holds_alternative<StoreLabel>(f)) {
+  } else if (f.isStore()) {
     return Contravariant;
   } else {
     assert(false && "unknown FieldLabel");

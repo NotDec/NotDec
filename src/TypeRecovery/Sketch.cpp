@@ -211,15 +211,15 @@ std::shared_ptr<Sketch> Sketch::fromConstraintGraph(const ConstraintGraph &CG1,
       auto &Target = Edge.getTargetNode();
 
       auto &Label = Edge.getLabel();
-      if (std::holds_alternative<RecallBase, One, ForgetLabel>(Label)) {
+      if (std::holds_alternative<RecallBase, One, ForgetLabel>(Label.L)) {
         assert(
             false &&
             "Sketch::fromConstraintGraph: unexpected RecallBase or One edge");
-      } else if (auto *L = std::get_if<RecallLabel>(&Label)) {
+      } else if (auto *L = Label.getAs<RecallLabel>()) {
         auto *SN = getNode(Node);
         auto *TN = getNode(Target);
         S->addEdge(*SN, *TN, L->label);
-      } else if (auto *B = std::get_if<ForgetBase>(&Label)) {
+      } else if (auto *B = Label.getAs<ForgetBase>()) {
         assert(&Target == CG.getEndNode());
         assert(B->Base.isPrimitive());
         auto *SN = getNode(Node);

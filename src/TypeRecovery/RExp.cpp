@@ -20,7 +20,7 @@ PRExp createStar(const PRExp &EL) { return std::make_shared<RExp>(Star{EL}); }
 
 PRExp create(const EdgeLabel &EL) {
   // ignore one edge.
-  if (std::holds_alternative<One>(EL)) {
+  if (EL.isOne()) {
     return createEmpty();
   }
   return std::make_shared<RExp>(Node{EL});
@@ -126,12 +126,12 @@ PRExp simplifyOnce(const PRExp &Original) {
             std::holds_alternative<Node>(*E2)) {
           auto &N1 = std::get<Node>(*E1).E;
           auto &N2 = std::get<Node>(*E2).E;
-          if (std::holds_alternative<ForgetLabel>(N1) &&
-              std::holds_alternative<RecallLabel>(N2)) {
-            auto &F1 = std::get<ForgetLabel>(N1).label;
-            auto &R2 = std::get<RecallLabel>(N2).label;
-            if ((!std::holds_alternative<OffsetLabel>(F1)) &&
-                (!std::holds_alternative<OffsetLabel>(R2))) {
+          if (N1.isForgetLabel() &&
+              N2.isRecallLabel()) {
+            auto &F1 = N1.getAs<ForgetLabel>()->label;
+            auto &R2 = N2.getAs<RecallLabel>()->label;
+            if ((!F1.isOffset()) &&
+                (!R2.isOffset())) {
               // this path is invalid.
               return createNull();
             }
@@ -151,24 +151,24 @@ PRExp simplifyOnce(const PRExp &Original) {
               std::holds_alternative<Node>(*E2)) {
             auto &N1 = std::get<Node>(*E1).E;
             auto &N2 = std::get<Node>(*E2).E;
-            if (std::holds_alternative<RecallLabel>(N1) &&
-                std::holds_alternative<ForgetLabel>(N2)) {
-              if (std::get<RecallLabel>(N1).label ==
-                  std::get<ForgetLabel>(N2).label) {
+            if (N1.isRecallLabel() &&
+                N2.isForgetLabel()) {
+              if (N1.getAs<RecallLabel>()->label ==
+                  N2.getAs<ForgetLabel>()->label) {
                 // skip these two elements
                 Ind2++;
                 continue;
               }
             }
             // eliminate Forget+Recall the same offset.
-            if (std::holds_alternative<ForgetLabel>(N1) &&
-                std::holds_alternative<RecallLabel>(N2)) {
-              auto &F1 = std::get<ForgetLabel>(N1).label;
-              auto &R2 = std::get<RecallLabel>(N2).label;
-              if (std::holds_alternative<OffsetLabel>(F1) &&
-                  std::holds_alternative<OffsetLabel>(R2)) {
-                if (std::get<OffsetLabel>(F1).range ==
-                    std::get<OffsetLabel>(R2).range) {
+            if (N1.isForgetLabel() &&
+                N2.isRecallLabel()) {
+              auto &F1 = N1.getAs<ForgetLabel>()->label;
+              auto &R2 = N2.getAs<RecallLabel>()->label;
+              if (F1.isOffset() &&
+                  R2.isOffset()) {
+                if (F1.getAs<OffsetLabel>()->range ==
+                    R2.getAs<OffsetLabel>()->range) {
                   // skip these two elements
                   Ind2++;
                   continue;

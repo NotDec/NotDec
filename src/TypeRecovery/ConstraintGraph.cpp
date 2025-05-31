@@ -161,13 +161,13 @@ void ConstraintSummary::fromJSON(TRContext &Ctx,
 
 llvm::Optional<std::pair<bool, OffsetRange>>
 EdgeLabel2Offset(const EdgeLabel &E) {
-  if (auto OL = std::get_if<ForgetLabel>(&E)) {
-    if (auto OL2 = std::get_if<OffsetLabel>(&OL->label)) {
+  if (auto OL = E.getAs<ForgetLabel>()) {
+    if (auto OL2 = OL->label.getAs<OffsetLabel>()) {
       return std::make_pair(false, OL2->range);
     }
   }
-  if (auto OL = std::get_if<RecallLabel>(&E)) {
-    if (auto OL2 = std::get_if<OffsetLabel>(&OL->label)) {
+  if (auto OL = E.getAs<RecallLabel>()) {
+    if (auto OL2 = OL->label.getAs<OffsetLabel>()) {
       return std::make_pair(true, OL2->range);
     }
   }
@@ -186,7 +186,7 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
     // for self loop
     if (Target == &To || Target == &From) {
       // only keep non-one edge
-      if (!std::holds_alternative<retypd::One>(Edge.Label)) {
+      if (!Edge.Label.isOne()) {
         assert(!NoSelfLoop);
         onlyAddEdge(To, To, Edge.Label);
       }
@@ -203,7 +203,7 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
     auto *Source = &Edge->getSourceNode();
     if (Source == &From || Source == &To) {
       // only keep non-one edge
-      if (!std::holds_alternative<retypd::One>(Edge->Label)) {
+      if (!Edge->Label.isOne()) {
         assert(!NoSelfLoop);
         onlyAddEdge(To, To, Edge->Label);
       }
@@ -245,7 +245,7 @@ void ConstraintGraph::linkConstantPtr2Memory() {
       auto MN = getMemoryNode(Covariant);
       auto TV = MN->key;
       auto Label = OffsetLabel{Node.key.Base.getIntConstant()};
-      TV = TV.Base.pushLabel(Label);
+      TV = TV.Base.pushLabel({Label});
       auto &MON = getOrInsertNodeWithPNI(TV, MN->getPNIVar());
       addConstraint(MON, Node);
     }
@@ -258,10 +258,9 @@ void ConstraintGraph::changeStoreToLoad() {
     auto &Node = Ent.second;
     for (auto &Edge : Node.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-      if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
-        if (std::holds_alternative<StoreLabel>(Rec->label)) {
-          auto &Store = std::get<StoreLabel>(Rec->label);
-          addEdge(Node, Target, RecallLabel{LoadLabel{Store.Size}});
+      if (auto Rec = Edge.getLabel().getAs<RecallLabel>()) {
+        if (auto Store = Rec->label.getAs<StoreLabel>()) {
+          addEdge(Node, Target, {RecallLabel{LoadLabel{Store->Size}}});
         }
       }
     }
@@ -271,8 +270,8 @@ void ConstraintGraph::changeStoreToLoad() {
   for (auto &Ent : Nodes) {
     auto &Node = Ent.second;
     for (auto &Edge : Node.outEdges) {
-      if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
-        if (std::holds_alternative<StoreLabel>(Rec->label)) {
+      if (auto Rec = Edge.getLabel().getAs<RecallLabel>()) {
+        if (Rec->label.isStore()) {
           toRemove.push_back(&const_cast<CGEdge &>(Edge));
         }
       }
@@ -289,13 +288,11 @@ void ConstraintGraph::aggressiveSimplify() {
     auto &Node = Ent.second;
     for (auto &Edge : Node.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-      if (std::holds_alternative<RecallLabel>(Edge.getLabel())) {
-        auto &Recall = std::get<RecallLabel>(Edge.getLabel());
-        if (std::holds_alternative<LoadLabel>(Recall.label)) {
-          auto &Load = std::get<LoadLabel>(Recall.label);
-          if (hasEdge(Node, Target, RecallLabel{StoreLabel{Load.Size}})) {
+      if (auto Recall = Edge.getLabel().getAs<RecallLabel>()) {
+        if (auto Load = Recall->label.getAs<LoadLabel>()) {
+          if (hasEdge(Node, Target, {RecallLabel{StoreLabel{Load->Size}}})) {
             // break, no need to defer the removal out of the loop.
-            removeEdge(Node, Target, RecallLabel{StoreLabel{Load.Size}});
+            removeEdge(Node, Target, {RecallLabel{StoreLabel{Load->Size}}});
             break;
           }
         }
@@ -309,20 +306,20 @@ void ConstraintGraph::aggressiveSimplify() {
   //   auto &Node = Ent.second;
   //   std::vector<const CGEdge *> toRemove;
   //   for (auto &Edge : Node.outEdges) {
-  //     if (auto Rec = std::get_if<RecallLabel>(&Edge.getLabel())) {
-  //       if (std::holds_alternative<LoadLabel>(Rec->label) &&
+  //     if (auto Rec = Edge.getLabel().getAs<RecallLabel>()) {
+  //       if (Rec->label.isLoad() &&
   //           std::get<LoadLabel>(Rec->label).Size == 8) {
   //         toRemove.push_back(&Edge);
-  //       } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
+  //       } else if (Rec->label.isStore() &&
   //                  std::get<StoreLabel>(Rec->label).Size == 8) {
   //         toRemove.push_back(&Edge);
   //       }
   //     }
-  //     if (auto Rec = std::get_if<ForgetLabel>(&Edge.getLabel())) {
-  //       if (std::holds_alternative<LoadLabel>(Rec->label) &&
+  //     if (auto Rec = Edge.getLabel().getAs<ForgetLabel>()) {
+  //       if (Rec->label.isLoad() &&
   //           std::get<LoadLabel>(Rec->label).Size == 8) {
   //         toRemove.push_back(&Edge);
-  //       } else if (std::holds_alternative<StoreLabel>(Rec->label) &&
+  //       } else if (Rec->label.isStore() &&
   //                  std::get<StoreLabel>(Rec->label).Size == 8) {
   //         toRemove.push_back(&Edge);
   //       }
@@ -379,29 +376,6 @@ void ConstraintGraph::aggressiveSimplify() {
   // }
 }
 
-// CGNode &ConstraintGraph::instantiateSketch(std::shared_ptr<retypd::Sketch>
-// Sk) {
-//   std::map<retypd::SketchNode *, CGNode *> NodeMap;
-//   // 1. clone the graph nodes
-//   for (auto &Node : llvm::make_range(Sk->begin(), Sk->end())) {
-//     auto &NewNode = getOrInsertNode(NodeKey(
-//         TypeVariable::CreateDtv(Ctx, ValueNamer::getName("sketch_")),
-//         Node.V));
-//     NodeMap.emplace(&Node, &NewNode);
-//   }
-//   // 2. clone all edges as recall edges. Also add reverse forget edges.
-//   for (auto &Node : llvm::make_range(Sk->begin(), Sk->end())) {
-//     auto *Source = NodeMap[&Node];
-//     for (auto &Edge : Node) {
-//       auto &TargetSk = const_cast<SketchNode &>(Edge.getTargetNode());
-//       auto *Target = NodeMap.at(&TargetSk);
-//       addEdge(*Source, *Target, RecallLabel{Edge.getLabel()});
-//       addEdge(*Target, *Source, ForgetLabel{Edge.getLabel()});
-//     }
-//   }
-//   return *NodeMap.at(Sk->getRoot());
-// }
-
 void ConstraintGraph::replaceNodeKey(const TypeVariable &Old,
                                      const TypeVariable &New) {
   TypeVariable IC = Old;
@@ -421,7 +395,7 @@ void ConstraintGraph::replaceNodeKeyImpl(const CGNode &Node,
   // assert(Node.key.Base.isIntConstant());
   // assert(TV.getBase() == getMemoryNode()->key.Base.getBase());
   // assert(TV1.getLabels().size() == 1);
-  // assert(std::holds_alternative<OffsetLabel>(TV1.getLabels().back()));
+  // assert(TV1.getLabels().back().isOffset());
 
   auto Ent = Nodes.extract(Node.key);
   const_cast<NodeKey &>(Ent.mapped().key) = Key;
@@ -457,7 +431,7 @@ void CGNode::onUpdatePNType() {
 
 void CGNode::setAsPtrAdd(CGNode *Other, OffsetRange Off) {
   auto TV = Other->key.Base;
-  TV = TV.pushLabel(OffsetLabel{Off});
+  TV = TV.pushLabel({OffsetLabel{Off}});
   // 这里没有插入反向PNI的图？
   auto &PtrAdd = Parent.getOrInsertNodeWithPNI(TV, Other->getPNIVar());
   assert(PtrAdd.getPNIVar() == Other->getPNIVar());
@@ -479,7 +453,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::toConstraints() {
     auto &Source = Ent.second;
     for (auto &Edge : Source.outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-      if (std::holds_alternative<One>(Edge.Label)) {
+      if (Edge.Label.isOne()) {
         ret.push_back(SubTypeConstraint{.sub = Ent.second.key.Base,
                                         .sup = Target.key.Base});
       }
@@ -552,7 +526,7 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
       }
       assert(!To.key.Base.hasLabel());
       addEdge(From, To,
-              RecallBase{.Base = N->key.Base, .V = N->key.SuffixVariance});
+              {RecallBase{.Base = N->key.Base, .V = N->key.SuffixVariance}});
     }
   }
   linkPrimitives();
@@ -587,7 +561,7 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
       }
       addEdge(
           *N, *getEndNode(),
-          ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
+          {ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance}});
     }
   }
 }
@@ -617,7 +591,7 @@ void ConstraintGraph::linkPrimitives() {
       }
       assert(!To.key.Base.hasLabel());
       addEdge(From, To,
-              RecallBase{.Base = N->key.Base, .V = N->key.SuffixVariance});
+              {RecallBase{.Base = N->key.Base, .V = N->key.SuffixVariance}});
     }
   }
   // Link primitive nodes to "#End"
@@ -643,7 +617,7 @@ void ConstraintGraph::linkPrimitives() {
       }
       addEdge(
           *N, *getEndNode(),
-          ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance});
+          {ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance}});
     }
   }
 }
@@ -652,26 +626,26 @@ void ConstraintGraph::recoverBaseVars() {
   // Fix RecallBase and ForgetBase edges
   std::vector<std::tuple<CGNode *, CGNode *, retypd::rexp::EdgeLabel>> toRemove;
   for (auto &OE : Start->outEdges) {
-    assert(std::holds_alternative<retypd::RecallBase>(OE.getLabel()));
-    auto &RE = std::get<retypd::RecallBase>(OE.getLabel());
+    auto RE = OE.getLabel().getAs<RecallBase>();
+    assert(RE !=nullptr);
     auto &Target = const_cast<CGNode &>(OE.getTargetNode());
     if (std::make_tuple(Target.key.Base, Target.key.SuffixVariance) !=
-        std::make_tuple(RE.Base, RE.V)) {
-      retypd::NodeKey NewKey(RE.Base, RE.V);
+        std::make_tuple(RE->Base, RE->V)) {
+      retypd::NodeKey NewKey(RE->Base, RE->V);
       auto &NewTarget = getOrInsertNodeWithPNI(NewKey, Target.getPNIVar());
-      addEdge(NewTarget, Target, retypd::One{});
+      addEdge(NewTarget, Target, {retypd::One{}});
       toRemove.push_back(std::make_tuple(Start, &Target, OE.getLabel()));
     }
   }
   for (auto IE : End->inEdges) {
-    assert(std::holds_alternative<retypd::ForgetBase>(IE->getLabel()));
-    auto &FB = std::get<retypd::ForgetBase>(IE->getLabel());
+    auto FB = IE->getLabel().getAs<retypd::ForgetBase>();
+    assert(FB != nullptr);
     auto &Source = const_cast<CGNode &>(IE->getSourceNode());
     if (std::make_tuple(Source.key.Base, Source.key.SuffixVariance) !=
-        std::make_tuple(FB.Base, FB.V)) {
-      retypd::NodeKey NewKey(FB.Base, FB.V);
+        std::make_tuple(FB->Base, FB->V)) {
+      retypd::NodeKey NewKey(FB->Base, FB->V);
       auto &NewSource = getOrInsertNodeWithPNI(NewKey, Source.getPNIVar());
-      addEdge(Source, NewSource, retypd::One{});
+      addEdge(Source, NewSource, {retypd::One{}});
       toRemove.push_back(std::make_tuple(&Source, End, IE->getLabel()));
     }
   }
@@ -817,17 +791,17 @@ void ConstraintGraph::markVariance(std::map<CGNode *, Variance> *Initial) {
     for (auto &Edge : N.first->outEdges) {
       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
       auto &Label = Edge.getLabel();
-      if (std::holds_alternative<One>(Label)) {
+      if (Label.isOne()) {
         Worklist.push(std::make_pair(&Target, N.second));
-      } else if (auto *RL = std::get_if<RecallLabel>(&Label)) {
+      } else if (auto *RL = Label.getAs<RecallLabel>()) {
         Worklist.push(
             std::make_pair(&Target, combine(N.second, getVariance(RL->label))));
-      } else if (auto *FL = std::get_if<ForgetLabel>(&Label)) {
+      } else if (auto *FL = Label.getAs<ForgetLabel>()) {
         Worklist.push(
             std::make_pair(&Target, combine(N.second, getVariance(FL->label))));
-      } else if (auto *RB = std::get_if<RecallBase>(&Label)) {
+      } else if (auto *RB = Label.getAs<RecallBase>()) {
         Worklist.push(std::make_pair(&Target, combine(N.second, RB->V)));
-      } else if (auto *FB = std::get_if<ForgetBase>(&Label)) {
+      } else if (auto *FB = Label.getAs<ForgetBase>()) {
         // Worklist.push(std::make_pair(&Target, ));
         assert(&Target == getEndNode() && "ForgetBase should only target End");
         if (N.second != FB->V) {
@@ -882,7 +856,7 @@ void ConstraintGraph::pushSplit() {
     }
     CGNode *Current = &Ent.second;
     for (auto InEdge : Current->inEdges) {
-      if (std::holds_alternative<One>(InEdge->getLabel())) {
+      if (InEdge->getLabel().isOne()) {
         std::cerr
             << __FILE__ << ":" << __LINE__ << ": "
             << " Error: pushSplit: epsilon/null move is not supported!! \n";
@@ -1027,12 +1001,12 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
       for (auto &Inner : And->E) {
         if (auto *N1 = std::get_if<rexp::Node>(&*Inner)) {
           // handle forget offset and recall offset
-          if (auto *RL = std::get_if<RecallLabel>(&N1->E)) {
-            if (auto OL1 = std::get_if<OffsetLabel>(&RL->label)) {
+          if (auto *RL = N1->E.getAs<RecallLabel>()) {
+            if (auto OL1 = RL->label.getAs<OffsetLabel>()) {
               Recalls.push_back({true, {OL1->range}});
             }
-          } else if (auto *FL = std::get_if<ForgetLabel>(&N1->E)) {
-            if (auto OL2 = std::get_if<OffsetLabel>(&FL->label)) {
+          } else if (auto *FL = N1->E.getAs<ForgetLabel>()) {
+            if (auto OL2 = FL->label.getAs<OffsetLabel>()) {
               Recalls.push_back({false, {OL2->range}});
             }
           }
@@ -1059,13 +1033,13 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
       Ret = std::move(Results);
     } else if (auto *Node = std::get_if<rexp::Node>(&*E)) {
       // handle forget offset and recall offset
-      if (auto *RL = std::get_if<RecallLabel>(&Node->E)) {
-        if (auto OL1 = std::get_if<OffsetLabel>(&RL->label)) {
+      if (auto *RL = Node->E.getAs<RecallLabel>()) {
+        if (auto OL1 = RL->label.getAs<OffsetLabel>()) {
           Ret.push_back({{true, OL1->range}});
         }
         return Ret;
-      } else if (auto *FL = std::get_if<ForgetLabel>(&Node->E)) {
-        if (auto OL2 = std::get_if<OffsetLabel>(&FL->label)) {
+      } else if (auto *FL = Node->E.getAs<ForgetLabel>()) {
+        if (auto OL2 = FL->label.getAs<OffsetLabel>()) {
           Ret.push_back({{false, OL2->range}});
         }
         return Ret;
@@ -1118,13 +1092,13 @@ bool hasOffsetEdge(CGNode &Start) {
   bool HasOffset = false;
   // Outgoing
   for (auto &Edge : Start.outEdges) {
-    if (auto EL1 = std::get_if<RecallLabel>(&Edge.Label)) {
-      if (std::holds_alternative<OffsetLabel>(EL1->label)) {
+    if (auto EL1 = Edge.Label.getAs<RecallLabel>()) {
+      if (EL1->label.isOffset()) {
         HasOffset = true;
         break;
       }
-    } else if (auto EL2 = std::get_if<ForgetLabel>(&Edge.Label)) {
-      if (std::holds_alternative<OffsetLabel>(EL2->label)) {
+    } else if (auto EL2 = Edge.Label.getAs<ForgetLabel>()) {
+      if (EL2->label.isOffset()) {
         HasOffset = true;
         break;
       }
@@ -1390,27 +1364,27 @@ void ConstraintGraph::linkLoadStore() {
     // for load/store nodes, add forget base or recall base.
     if (Source.key.Base.hasLabel()) {
       auto &Back = Source.key.Base.getLabels().back();
-      if (std::holds_alternative<LoadLabel>(Back)) {
+      if (Back.isLoad()) {
         if (Source.key.SuffixVariance == Covariant) {
           // covariant load can only have subtype (one) edge out
           onlyAddEdge(Source, *getEndNode(),
-                      ForgetBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance});
+                      {ForgetBase{.Base = Source.key.Base,
+                                 .V = Source.key.SuffixVariance}});
         } else {
           onlyAddEdge(*getStartNode(), Source,
-                      RecallBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance});
+                      {RecallBase{.Base = Source.key.Base,
+                                 .V = Source.key.SuffixVariance}});
         }
-      } else if (std::holds_alternative<StoreLabel>(Back)) {
+      } else if (Back.isStore()) {
         if (Source.key.SuffixVariance == Covariant) {
           // covariant store can only have subtype (one) edge in
           onlyAddEdge(*getStartNode(), Source,
-                      RecallBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance});
+                      {RecallBase{.Base = Source.key.Base,
+                                 .V = Source.key.SuffixVariance}});
         } else {
           onlyAddEdge(Source, *getEndNode(),
-                      ForgetBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance});
+                      {ForgetBase{.Base = Source.key.Base,
+                                 .V = Source.key.SuffixVariance}});
         }
       }
     }
@@ -1424,7 +1398,7 @@ void ConstraintGraph::ensureNoForgetLabel() {
       continue;
     }
     for (auto &Edge : Source.outEdges) {
-      if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
+      if (Edge.Label.isForgetLabel()) {
         std::cerr << "Error: ensureNoForgetLabel: forget label found: "
                   << toString(Source.key) << " -> "
                   << toString(Edge.getTargetNode().key) << "\n";
@@ -1443,11 +1417,11 @@ void ConstraintGraph::sketchSplit() {
     // 1.1 remove all forgetLabel and RecallBase edge
     for (auto &Edge : Source.outEdges) {
       // auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-      if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
+      if (Edge.Label.isForgetLabel()) {
         toRemove.push_back(&Edge);
         // removeEdge(Source, Target, Edge.Label);
         // continue;
-      } else if (std::holds_alternative<RecallBase>(Edge.Label)) {
+      } else if (Edge.Label.isRecallBase()) {
         toRemove.push_back(&Edge);
         // removeEdge(Source, Target, Edge.Label);
         // continue;
@@ -1520,7 +1494,7 @@ void ConstraintGraph::sketchSplit() {
 //     bool found = false;
 //     for (auto &Edge : G3.getStartNode()->outEdges) {
 //       auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-//       if (auto *RB = std::get_if<RecallBase>(&Edge.Label)) {
+//       if (auto *RB = Edge.Label.getAs<RecallBase>()) {
 //         if (RB->Base == Ent.first) {
 //           found = true;
 //           continue;
@@ -1565,7 +1539,7 @@ std::set<CGNode *> getOneReachable(CGNode &N) {
     }
     Visited.insert(Current);
     for (auto &Edge : Current->outEdges) {
-      if (std::holds_alternative<One>(Edge.Label)) {
+      if (Edge.Label.isOne()) {
         Q.push(const_cast<CGNode *>(&Edge.getTargetNode()));
       }
     }
@@ -1591,7 +1565,7 @@ bool canReach(CGNode &From, CGNode &To) {
       return true;
     }
     for (auto &Edge : Current->outEdges) {
-      if (std::holds_alternative<One>(Edge.Label)) {
+      if (Edge.Label.isOne()) {
         Q.push(const_cast<CGNode *>(&Edge.getTargetNode()));
       }
     }
@@ -1618,16 +1592,15 @@ void ConstraintGraph::saturate() {
     auto &Source = Ent.second;
     for (auto &Edge : Source.outEdges) {
       // For each edge, check if is forget edge.
-      if (std::holds_alternative<ForgetLabel>(Edge.Label)) {
+      if (auto Capa = Edge.Label.getAs<ForgetLabel>()) {
         auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-        auto Capa = std::get<ForgetLabel>(Edge.Label);
         if (DenseSubtype) {
-          if (!std::holds_alternative<OffsetLabel>(Capa.label)) {
-            auto Res = ReachingSet[&Target].insert({Capa.label, &Source});
+          if (!Capa->label.isOffset()) {
+            auto Res = ReachingSet[&Target].insert({Capa->label, &Source});
             Changed |= Res.second;
           }
         } else {
-          auto Res = ReachingSet[&Target].insert({Capa.label, &Source});
+          auto Res = ReachingSet[&Target].insert({Capa->label, &Source});
           Changed |= Res.second;
         }
       }
@@ -1652,7 +1625,7 @@ void ConstraintGraph::saturate() {
             }
             if (Ent.second.isZero()) {
               if (!canReach(Source, *Ent.first)) {
-                bool Added = addEdge(Source, *Ent.first, One{});
+                bool Added = addEdge(Source, *Ent.first, {One{}});
                 if (Added) {
                   LLVM_DEBUG(llvm::dbgs()
                              << "(Off) Adding Edge From " << Source.key.str()
@@ -1667,7 +1640,7 @@ void ConstraintGraph::saturate() {
       }
 
       for (auto &Edge : Source.outEdges) {
-        if (std::holds_alternative<One>(Edge.Label)) {
+        if (Edge.Label.isOne()) {
           auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
           // For each One edge.
           if (ReachingSet.count(&Source)) {
@@ -1684,31 +1657,30 @@ void ConstraintGraph::saturate() {
     for (auto &Ent : Nodes) {
       auto &Source = Ent.second;
       for (auto &Edge : Source.outEdges) {
-        if (std::holds_alternative<RecallLabel>(Edge.Label)) {
-          auto Capa = std::get<RecallLabel>(Edge.Label);
+        if (auto Capa = Edge.Label.getAs<RecallLabel>()) {
           auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
           // end: for each recall edge.
           if (ReachingSet.count(&Source)) {
             // non-lazy rule: if it is recall load, we allow forget store.
             std::optional<FieldLabel> RecallStore = std::nullopt;
-            if (auto *Load = std::get_if<LoadLabel>(&Capa.label)) {
-              RecallStore = toStore(*Load);
+            if (auto *Load = Capa->label.getAs<LoadLabel>()) {
+              RecallStore = {toStore(*Load)};
             }
             for (auto &Reach : ReachingSet[&Source]) {
-              if (Reach.first == Capa.label && Reach.second != &Target) {
+              if (Reach.first == Capa->label && Reach.second != &Target) {
                 // We are iterating through Recall edges, and we insert One
                 // edge, so it is ok to modify edge during iterating.
                 if (!canReach(*Reach.second, Target)) {
                   LLVM_DEBUG(llvm::dbgs()
                              << "Adding Edge From " << Reach.second->key.str()
                              << " to " << Target.key.str() << " with _1_ \n");
-                  Changed |= (addEdge(*Reach.second, Target, One{}) != nullptr);
+                  Changed |= (addEdge(*Reach.second, Target, {One{}}) != nullptr);
                 }
               }
               // non-lazy rule: if it is recall load, we allow forget store.
               if (RecallStore && (Reach.first == *RecallStore) &&
                   Reach.second != &Target) {
-                // Changed |= (addEdge(*Reach.second, Target, One{}) !=
+                // Changed |= (addEdge(*Reach.second, Target, {One{}}) !=
                 // nullptr);
                 auto &From = *Reach.second;
                 auto &To = Target;
@@ -1725,16 +1697,16 @@ void ConstraintGraph::saturate() {
       if (Ent.first->key.SuffixVariance == Contravariant) {
         for (auto &Reach : Ent.second) {
           std::optional<FieldLabel> Label;
-          if (std::holds_alternative<StoreLabel>(Reach.first)) {
+          if (auto S = Reach.first.getAs<StoreLabel>()) {
             // LLVM_DEBUG(llvm::dbgs()
             //            << "node " << Reach.second->key.str() << " can reach "
             //            << Ent.first->key.str() << " with \".store\" \n");
-            Label = LoadLabel{.Size = std::get<StoreLabel>(Reach.first).Size};
-          } else if (std::holds_alternative<LoadLabel>(Reach.first)) {
+            Label = {LoadLabel{.Size = S->Size}};
+          } else if (auto L = Reach.first.getAs<LoadLabel>()) {
             // LLVM_DEBUG(llvm::dbgs()
             //            << "node " << Reach.second->key.str() << " can reach "
             //            << Ent.first->key.str() << " with \".load\" \n");
-            Label = StoreLabel{.Size = std::get<LoadLabel>(Reach.first).Size};
+            Label = {StoreLabel{.Size = L->Size}};
           } else {
             continue;
           }
@@ -1812,7 +1784,7 @@ void ConstraintGraph::addConstraint(CGNode &NodeL, CGNode &NodeR) {
     // LLVM_DEBUG(llvm::dbgs()
     //            << "addConstraint: Adding Edge From " << NodeL.key.str()
     //            << " to " << NodeR.key.str() << " with _1_ \n");
-    addEdge(NodeL, NodeR, One{});
+    addEdge(NodeL, NodeR, {One{}});
   }
   // 2. add each sub var node and edges.
   // 2.1 left
@@ -1832,7 +1804,7 @@ void ConstraintGraph::addConstraint(CGNode &NodeL, CGNode &NodeR) {
   // LLVM_DEBUG(llvm::dbgs()
   //           << "addConstraint: Adding Edge From " << RNodeR.key.str()
   //           << " to " << RNodeL.key.str() << " with _1_ \n");
-  addEdge(RNodeR, RNodeL, One{});
+  addEdge(RNodeR, RNodeL, {One{}});
   // 4.1 inverse left
   addRecalls(RNodeL);
   addForgets(RNodeL);
@@ -1858,7 +1830,7 @@ void ConstraintGraph::addRecalls(CGNode &N) {
   while (V1.has_value()) {
     auto [Cap, Next] = V1.value();
     auto &NNext = getNode(Next);
-    addEdge(NNext, *T, RecallLabel{Cap});
+    addEdge(NNext, *T, {RecallLabel{Cap}});
     V1 = Next.forgetOnce();
     T = &NNext;
   }
@@ -1874,7 +1846,7 @@ void ConstraintGraph::addForgets(CGNode &N) {
   while (V1.has_value()) {
     auto [Cap, Next] = V1.value();
     auto &NNext = getNode(Next);
-    addEdge(*T, NNext, ForgetLabel{Cap});
+    addEdge(*T, NNext, {ForgetLabel{Cap}});
     V1 = Next.forgetOnce();
     T = &NNext;
   }
@@ -2163,8 +2135,8 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
           auto &E1 = V[Ind2];
           auto &E2 = V[Ind2 + 1];
           // simplify adjacent Recall/Forget
-          if (auto RL = std::get_if<RecallLabel>(&E1)) {
-            if (auto FL = std::get_if<ForgetLabel>(&E2)) {
+          if (auto RL = E1.getAs<RecallLabel>()) {
+            if (auto FL = E2.getAs<ForgetLabel>()) {
               if (RL->label == FL->label) {
                 // skip these two elements
                 Ind2++;
@@ -2172,8 +2144,8 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
               }
             }
           }
-          if (auto RL = std::get_if<RecallBase>(&E1)) {
-            if (auto FL = std::get_if<ForgetBase>(&E2)) {
+          if (auto RL = E1.getAs<RecallBase>()) {
+            if (auto FL = E2.getAs<ForgetBase>()) {
               if (RL->Base == FL->Base) {
                 // skip these two elements
                 Ind2++;
@@ -2182,12 +2154,12 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
             }
           }
           // eliminate Forget+Recall the same offset.
-          if (auto RL = std::get_if<ForgetLabel>(&E1)) {
-            if (auto FL = std::get_if<RecallLabel>(&E2)) {
-              if (std::holds_alternative<OffsetLabel>(RL->label) &&
-                  std::holds_alternative<OffsetLabel>(FL->label)) {
-                if (std::get<OffsetLabel>(RL->label).range ==
-                    std::get<OffsetLabel>(FL->label).range) {
+          if (auto RL = E1.getAs<ForgetLabel>()) {
+            if (auto FL = E2.getAs<RecallLabel>()) {
+              if (RL->label.isOffset() &&
+                  FL->label.isOffset()) {
+                if (RL->label.getAs<OffsetLabel>()->range ==
+                    FL->label.getAs<OffsetLabel>()->range) {
                   // skip these two elements
                   Ind2++;
                   continue;
@@ -2223,9 +2195,9 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
             // merge the offset edges.
             OffsetRange R = mergeOffsetLabels(OffsetBuffer);
             if (OffsetBuffer.front().first) {
-              NewV.push_back(RecallLabel{OffsetLabel{R}});
+              NewV.push_back({RecallLabel{OffsetLabel{R}}});
             } else {
-              NewV.push_back(ForgetLabel{OffsetLabel{-R}});
+              NewV.push_back({ForgetLabel{OffsetLabel{-R}}});
             }
           } else if (OffsetBuffer.size() == 1) {
             NewV.push_back(OffsetBufferL[0]);
@@ -2240,9 +2212,9 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
           // merge the offset edges.
           OffsetRange R = mergeOffsetLabels(OffsetBuffer);
           if (OffsetBuffer.front().first) {
-            NewV.push_back(RecallLabel{OffsetLabel{R}});
+            NewV.push_back({RecallLabel{OffsetLabel{R}}});
           } else {
-            NewV.push_back(ForgetLabel{OffsetLabel{-R}});
+            NewV.push_back({ForgetLabel{OffsetLabel{-R}}});
           }
         } else if (OffsetBuffer.size() == 1) {
           NewV.push_back(OffsetBufferL[0]);
@@ -2269,15 +2241,15 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
     auto Inner = std::get<rexp::Star>(*E).E;
     std::string tempName = genTempName();
 
-    assert((*rexp::firstNode(Inner))->index() ==
-               (*rexp::lastNode(Inner))->index() &&
+    assert((*rexp::firstNode(Inner))->L.index() ==
+               (*rexp::lastNode(Inner))->L.index() &&
            "Star with mixed recall and forget!");
 
     // Create recursive constraints.
     auto NewInner =
-        rexp::create(RecallBase{TypeVariable::CreateDtv(*Ctx, tempName)}) &
+        rexp::create({RecallBase{TypeVariable::CreateDtv(*Ctx, tempName)}}) &
         Inner &
-        rexp::create(ForgetBase{TypeVariable::CreateDtv(*Ctx, tempName)});
+        rexp::create({ForgetBase{TypeVariable::CreateDtv(*Ctx, tempName)}});
     auto Seq = expToConstraintsSequenceRecursive(NewInner);
     ConstraintsSequence.insert(ConstraintsSequence.end(), Seq.begin(),
                                Seq.end());
@@ -2286,8 +2258,8 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
     // Later in normalizePath, we will detect ForgetBase/RecallBase in the
     // middle.
     std::vector<EdgeLabel> V2;
-    V2.push_back(ForgetBase{TypeVariable::CreateDtv(*Ctx, tempName)});
-    V2.push_back(RecallBase{TypeVariable::CreateDtv(*Ctx, tempName)});
+    V2.push_back({ForgetBase{TypeVariable::CreateDtv(*Ctx, tempName)}});
+    V2.push_back({RecallBase{TypeVariable::CreateDtv(*Ctx, tempName)}});
     Result.push_back(V2);
   } else if (std::holds_alternative<rexp::Node>(*E)) {
     std::vector<EdgeLabel> Vec;
@@ -2368,7 +2340,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
     assert(false && "normalize_path: path size < 2!");
   }
   auto &First = ELs[0];
-  if (!std::holds_alternative<RecallBase>(First)) {
+  if (!First.isRecallBase()) {
     assert(false && "normalize_path: first label is not RecallBase!");
   }
   Ret.emplace_back();
@@ -2377,11 +2349,11 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
   bool isForget = false;
   for (std::size_t Ind = 0; Ind < ELs.size(); Ind++) {
     auto &EL = ELs[Ind];
-    if (std::holds_alternative<RecallBase>(EL)) {
-      auto Name = std::get<RecallBase>(EL).Base;
+    if (auto RB = EL.getAs<RecallBase>()) {
+      auto Name = RB->Base;
       if (Ind == 0) {
         // OK
-        std::get<1>(Ret.back()) = std::get<RecallBase>(EL).V;
+        std::get<1>(Ret.back()) = RB->V;
       } else {
         assert(Back->first.getBaseName().empty());
         assert(!Back->first.hasLabel());
@@ -2389,8 +2361,8 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
         assert(!Back->second.hasLabel());
       }
       Back->first = *Name.Var;
-    } else if (std::holds_alternative<ForgetBase>(EL)) {
-      auto Name = std::get<ForgetBase>(EL).Base;
+    } else if (auto FB = EL.getAs<ForgetBase>()) {
+      auto Name = FB->Base;
       if (Back->second.hasLabel()) {
         Back->second.setBase(Name.getBase());
       } else {
@@ -2405,7 +2377,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
         }
         isForget = true;
         // OK
-        std::get<2>(Ret.back()) = std::get<ForgetBase>(EL).V;
+        std::get<2>(Ret.back()) = FB->V;
       } else {
         // Must be a temp name.
         // https://stackoverflow.com/a/40441240/13798540
@@ -2420,12 +2392,12 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
         Back = &std::get<0>(Ret.back());
         std::get<1>(Ret.back()) = Current;
       }
-    } else if (std::holds_alternative<RecallLabel>(EL)) {
+    } else if (auto RL = EL.getAs<RecallLabel>()) {
       if (isForget) {
         assert(false && "normalize_path: Path has Recall after Forget!");
       }
-      Back->first.getLabels().push_back(std::get<RecallLabel>(EL).label);
-    } else if (std::holds_alternative<ForgetLabel>(EL)) {
+      Back->first.getLabels().push_back(RL->label);
+    } else if (auto FL = EL.getAs<ForgetLabel>()) {
       // Collect the variance between recalls and forgets.
       if (!isForget) {
         assert(!PathVariance);
@@ -2433,7 +2405,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
             combine(std::get<1>(Ret.back()), Back->first.pathVariance());
       }
       isForget = true;
-      Back->second.getLabels().push_front(std::get<ForgetLabel>(EL).label);
+      Back->second.getLabels().push_front(FL->label);
     } else {
       assert(false && "normalize_path: Base label type in the middle!");
     }
@@ -2657,11 +2629,11 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
 }
 
 bool isPointerRelated(const FieldLabel &FL) {
-  if (auto *OL = std::get_if<OffsetLabel>(&FL)) {
+  if (auto *OL = FL.getAs<OffsetLabel>()) {
     return true;
-  } else if (auto *LL = std::get_if<LoadLabel>(&FL)) {
+  } else if (auto *LL = FL.getAs<LoadLabel>()) {
     return true;
-  } else if (auto *SL = std::get_if<StoreLabel>(&FL)) {
+  } else if (auto *SL = FL.getAs<StoreLabel>()) {
     return true;
   }
   return false;
@@ -2669,11 +2641,11 @@ bool isPointerRelated(const FieldLabel &FL) {
 
 bool CGNode::hasPointerEdge() const {
   for (auto &Edge : outEdges) {
-    if (auto *FL = std::get_if<ForgetLabel>(&Edge.getLabel())) {
+    if (auto *FL = Edge.getLabel().getAs<ForgetLabel>()) {
       if (isPointerRelated(FL->label)) {
         return true;
       }
-    } else if (auto *RL = std::get_if<RecallLabel>(&Edge.getLabel())) {
+    } else if (auto *RL = Edge.getLabel().getAs<RecallLabel>()) {
       if (isPointerRelated(RL->label)) {
         return true;
       }
@@ -2708,7 +2680,7 @@ bool CGNode::isPNIAndEdgeMatch() const {
     }
     for (auto &Edge : outEdges) {
       bool IsForgetPrim = false;
-      if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
+      if (const auto *FB = Edge.getLabel().getAs<ForgetBase>()) {
         if (FB->Base.isPrimitive()) {
           IsForgetPrim = true;
         }
@@ -2722,7 +2694,7 @@ bool CGNode::isPNIAndEdgeMatch() const {
     }
     // warn if there is forget primitive
     for (auto &Edge : outEdges) {
-      if (auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
+      if (auto *FB = Edge.getLabel().getAs<ForgetBase>()) {
         if (FB->Base.isPrimitive()) {
           llvm::errs() << "Warning: TypeBuilderImpl::visitType: Pointer node "
                           "has forget primitive edge.: "
