@@ -107,8 +107,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       // dependency nodes).
       // TODO: remove debug output.
       std::cerr << "Cyclic dependency forces the node become struct/union.\n";
-      if (std::holds_alternative<UnionInfo>(
-              TypeInfos.at(const_cast<CGNode *>(&Node)).Info)) {
+      if (TypeInfos.at(const_cast<CGNode *>(&Node)).isUnion()) {
         UnionDecl *Decl = UnionDecl::Create(
             Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "union_"));
         HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
@@ -135,7 +134,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
     // No out edges.
     std::optional<std::shared_ptr<LatticeTy>> LT = std::nullopt;
     for (auto &Edge : Node.outEdges) {
-      if (const auto *FB = std::get_if<ForgetBase>(&Edge.getLabel())) {
+      if (const auto *FB = Edge.getLabel().getAs<ForgetBase>()) {
         if (FB->Base.isPrimitive()) {
           auto L1 = createLatticeTy(ETy, V, FB->Base.getPrimitiveName());
           if (V == Covariant) {
@@ -160,32 +159,29 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
     Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
   } else {
     auto &TI = TypeInfos.at(const_cast<CGNode *>(&Node));
-    if (std::holds_alternative<SimpleTypeInfo>(TI.Info)) {
-      auto &Info = std::get<SimpleTypeInfo>(TI.Info);
-      if (Info.Edge == nullptr) {
+    if (auto Info = TI.getAs<SimpleTypeInfo<>>()) {
+      if (!Info->L.has_value()) {
         // void pointer?
         return getPtrTy(nullptr);
       }
       // simple pointer type
-      auto PointeeTy = buildType(Info.Edge->getTargetNode(), V, *TI.Size);
+      auto PointeeTy = buildType(*Node.getLabelTarget(*Info->L), V, *TI.Size);
       Ret = getPtrTy(PointeeTy);
-    } else if (std::holds_alternative<ArrayInfo>(TI.Info)) {
-      auto &Info = std::get<ArrayInfo>(TI.Info);
-      auto EdgeOff = getOffsetLabel(Info.Edge->getLabel());
+    } else if (auto *Info = TI.getAs<ArrayInfo<>>()) {
+      auto EdgeOff = getOffsetLabel(*Info->L);
       assert(EdgeOff->range.offset == 0);
 
-      auto ElemTy = buildType(Info.Edge->getTargetNode(), V, *Info.ElemSize);
+      auto ElemTy = buildType(*Node.getLabelTarget(*Info->L), V, *Info->ElemSize);
       if (!ElemTy->isPointerType()) {
         assert(false && "Array out edge must be pointer type");
       }
       ElemTy = ElemTy->getPointeeType();
 
-      auto Count = *TI.Size / *Info.ElemSize;
+      auto Count = *TI.Size / *Info->ElemSize;
       assert(Count >= 1);
       auto ArrayTy = Ctx.getArrayType(false, ElemTy, Count);
       Ret = getPtrTy(ArrayTy);
-    } else if (std::holds_alternative<StructInfo>(TI.Info)) {
-      auto &Info = std::get<StructInfo>(TI.Info);
+    } else if (auto * Info = TI.getAs<StructInfo<>>()) {
 
       // forward declare struct type, by inserting into the map.
       RecordDecl *Decl;
@@ -200,10 +196,10 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       }
       hasSetNodeMap = true;
 
-      std::map<FieldEntry *, FieldDecl *> E2D;
-      for (size_t i = 0; i < Info.Fields.size(); i++) {
-        auto &Ent = Info.Fields[i];
-        auto Target = const_cast<CGNode *>(&Ent.Edge->getTargetNode());
+      std::map<FieldEntry<> *, FieldDecl *> E2D;
+      for (size_t i = 0; i < Info->Fields.size(); i++) {
+        auto &Ent = Info->Fields[i];
+        auto Target = Node.getLabelTarget(*Ent.L);
         HType *Ty;
 
         // for each field/edge
@@ -248,8 +244,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         // Try to calc expand end:
         auto ExpandEnd = Ent.R.end();
         // if there is space to next field
-        if (i + 1 < Info.Fields.size()) {
-          auto &Next = Info.Fields.at(i + 1);
+        if (i + 1 < Info->Fields.size()) {
+          auto &Next = Info->Fields.at(i + 1);
           if (Ent.R.end() < Next.R.Start) {
             // calculate the range to be expand to.
             ExpandEnd = Next.R.Start;
@@ -258,9 +254,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         // if it is char array and merge with elem
         if (Ty->isCharArrayType()) {
           auto j = i + 1;
-          for (; j < Info.Fields.size(); j++) {
-            auto &EntJ = Info.Fields[j];
-            auto TargetJ = const_cast<CGNode *>(&EntJ.Edge->getTargetNode());
+          for (; j < Info->Fields.size(); j++) {
+            auto &EntJ = Info->Fields[j];
+            auto TargetJ = Node.getLabelTarget(*EntJ.L);
             auto TyJ = buildType(*TargetJ, V, EntJ.R.Size);
             TyJ = TyJ->getPointeeType();
             if (!TyJ->isCharType()) {
@@ -269,8 +265,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
             // merge to prev array.
             ExpandEnd = EntJ.R.end();
 
-            if (j + 1 < Info.Fields.size()) {
-              auto &NextJ = Info.Fields.at(j + 1);
+            if (j + 1 < Info->Fields.size()) {
+              auto &NextJ = Info->Fields.at(j + 1);
               if (EntJ.R.end() < NextJ.R.Start) {
                 // calculate the range to be expand to.
                 ExpandEnd = NextJ.R.Start;
@@ -283,10 +279,10 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
         // Try to expand: 1 expand array size. or 2 add padding.
         if (Ty->isArrayType()) {
-          ArrayInfo &TInfo = std::get<ArrayInfo>(TypeInfos.at(Target).Info);
+          auto TInfo = TypeInfos.at(Target).getAs<ArrayInfo<>>();
           // expand the array size to the range
-          assert(TInfo.ElemSize);
-          auto ElemSize = *TInfo.ElemSize;
+          assert(TInfo->ElemSize);
+          auto ElemSize = *TInfo->ElemSize;
           auto NewCount = (ExpandEnd - Ent.R.Start) / ElemSize;
           CurrentDecl.R.Size = NewCount * ElemSize;
           auto OldArrTy = llvm::cast<ast::ArrayType>(CurrentDecl.Type);
@@ -309,9 +305,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           Decl->addField(*PaddingDecl);
         }
       }
-    } else if (std::holds_alternative<UnionInfo>(TI.Info)) {
-      auto &Info = std::get<UnionInfo>(TI.Info);
-
+    } else if (auto Info = TI.getAs<UnionInfo<>>()) {
       // forward declare union type, by inserting into the map, in case of
       // cyclic dependency
       UnionDecl *Decl;
@@ -327,13 +321,13 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       hasSetNodeMap = true;
 
       auto Size = TI.Size;
-      for (size_t i = 0; i < Info.Members.size(); i++) {
-        auto &Edge = Info.Members[i];
-        auto &Target = const_cast<CGNode &>(Edge->getTargetNode());
+      for (size_t i = 0; i < Info->MemberLabels.size(); i++) {
+        auto &EdgeLabel = Info->MemberLabels[i];
+        auto Target = Node.getLabelTarget(EdgeLabel);
         HType *Ty;
 
         // for each field/edge
-        Ty = buildType(Target, V, Size);
+        Ty = buildType(*Target, V, Size);
 
         if (!Ty->isPointerType()) {
           assert(false && "Offset edge must be pointer type");
