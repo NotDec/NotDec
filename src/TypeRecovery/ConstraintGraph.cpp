@@ -224,6 +224,17 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   removeNode(From.key);
 }
 
+CGNode* CGNode::getLabelTarget(const EdgeLabel& L) const {
+  CGNode* Ret = nullptr;
+  for (auto& E: outEdges) {
+    if (E.getLabel() == L) {
+      assert(Ret == nullptr && "Multiple possible target");
+      Ret = const_cast<CGNode*>(&E.getTargetNode());
+    }
+  }
+  return Ret;
+}
+
 void ConstraintGraph::linkConstantPtr2Memory() {
   // for each node, if it is a constant pointer, link it to memory.
   for (auto &Ent : Nodes) {

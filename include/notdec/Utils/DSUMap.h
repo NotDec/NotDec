@@ -49,6 +49,7 @@ public:
   auto end() { return M.end(); }
 
   auto count(K Key) -> decltype(M.count(Key)) { return M.count(Key); }
+  auto count(V Val) -> decltype(Rev.count(Val)) { return Rev.count(Val); }
   auto at(K Key) -> decltype(M.at(Key)) { return M.at(Key); }
   auto at(K Key) const -> const decltype(M.at(Key)) { return M.at(Key); }
   auto size() const -> decltype(M.size()) { return M.size(); }

@@ -528,9 +528,6 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
             FieldEntry{.R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
                        .Edge = FieldEdge});
         doBuild(NewFieldNode, false);
-        // reduced to simple array, so we set array info in recursive call.
-        // TypeInfos[&NewArrNode] =
-        //     TypeInfo{.Size = MaxStride, .Info = ArrayInfo{.Edge = ArrEdge}};
       }
     }
 
@@ -689,11 +686,11 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                               OffsetLabel{OffsetRange{.offset = UnionStart}}});
         }
         // create new node for each panel struct.
-        std::vector<const retypd::CGEdge *> Members;
+        std::vector<retypd::EdgeLabel> Members;
         for (auto &Panel : UnionPanels) {
           if (Panel.size() == 1) {
             // we do not need to create a struct
-            Members.push_back(Panel.front().Edge);
+            Members.push_back(Panel.front().Edge->getLabel());
             continue;
           }
           // create a struct here
@@ -712,10 +709,10 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
           auto *E1 = CG.addEdge(*UN, *NN,
                                 retypd::RecallLabel{OffsetLabel{
                                     OffsetRange{.offset = MinStartOff}}});
-          Members.push_back(E1);
+          Members.push_back(E1->getLabel());
         }
         TypeInfos[UN] =
-            TypeInfo{.Size = OurSize, .Info = UnionInfo{.Members = Members}};
+            TypeInfo{.Size = OurSize, .Info = UnionInfo{.MemberLabels = Members}};
 
         if (UN == &N) {
           assert(OtherFields.empty());
@@ -815,6 +812,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G, std::string DebugDir) {
   }
 
   G2.organizeTypes();
+  G2.mergeArrayUnions();
 
   assert(G2.PG);
   // G2.DebugDir.clear();
@@ -1738,7 +1736,7 @@ void ConstraintsGenerator::removeUnreachable() {
     CG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
   }
   for (auto *Node : ToErase) {
-    CG.removeNode(Node->key);
+    removeNode(*Node);
   }
 }
 
@@ -1947,12 +1945,12 @@ void ConstraintsGenerator::determinize() {
       continue;
     }
     if (!Ent.second.isSpecial() && V2NNodes.count(&Ent.second) == 0) {
-      // CG.removeNode(Ent.second.key);
+      // removeNode(Ent.second.key);
       ToRemove1.push_back(Ent.second.key);
     }
   }
   for (auto &Key : ToRemove1) {
-    CG.removeNode(Key);
+    removeNode(Key);
   }
 
   using EntryTy = typename std::map<std::set<CGNode *>, CGNode *>::iterator;

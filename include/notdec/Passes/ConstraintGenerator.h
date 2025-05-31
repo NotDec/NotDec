@@ -132,6 +132,8 @@ struct ConstraintsGenerator {
   // std::map<ExtValuePtr, retypd::NodeKey> Val2Node;
   DSUMap<ExtValuePtr, retypd::NodeKey> V2N;
   DSUMap<ExtValuePtr, retypd::NodeKey> V2NContra;
+  void removeNode(retypd::CGNode &N);
+  void removeNode(const retypd::NodeKey &K);
 
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
@@ -194,8 +196,10 @@ struct ConstraintsGenerator {
 
   void dumpV2N();
 
-  std::map<CGNode *, TypeInfo> TypeInfos;
-  std::map<CGNode *, TypeInfo> organizeTypes();
+  std::map<CGNode *, TypeInfo<>> TypeInfos;
+  std::map<CGNode *, TypeInfo<>> organizeTypes();
+  void mergeArrayUnions();
+  void mergeDeterminize(CGNode &From, CGNode &To);
 
   void run();
   // clone CG and maintain value map.

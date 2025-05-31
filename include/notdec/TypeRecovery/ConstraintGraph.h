@@ -155,6 +155,8 @@ public:
     return getPNIVar() != nullptr && getPNIVar()->isPointer();
   }
   unsigned getSize() const { return Size; }
+  // after determinization, can get single outEdge target node by EdgeLabel
+  CGNode* getLabelTarget(const EdgeLabel& L) const;
 };
 
 struct CGEdge {

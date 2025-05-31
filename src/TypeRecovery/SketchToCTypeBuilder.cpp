@@ -312,7 +312,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
     } else if (std::holds_alternative<UnionInfo>(TI.Info)) {
       auto &Info = std::get<UnionInfo>(TI.Info);
 
-      // forward declare union type, by inserting into the map.
+      // forward declare union type, by inserting into the map, in case of
+      // cyclic dependency
       UnionDecl *Decl;
       if (NodeTypeMap.count(&Node)) {
         Ret = NodeTypeMap.at(&Node);
