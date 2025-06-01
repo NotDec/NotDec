@@ -48,13 +48,13 @@ struct TypeBuilder {
   HTypeContext &Ctx;
   std::map<const CGNode *, HType *> NodeTypeMap;
   std::set<const CGNode *> Visited;
-  std::map<CGNode *, TypeInfo<>> TypeInfos;
+  std::map<CGNode *, TypeInfo> TypeInfos;
 
   // Main interface: recursively visit the node and build the type
   HType *buildType(const CGNode &Node, Variance V, std::optional<unsigned> ExpectedSize = std::nullopt);
 
   TypeBuilder(TypeBuilderContext &Parent,
-              std::map<CGNode *, TypeInfo<>> TypeInfos)
+              std::map<CGNode *, TypeInfo> TypeInfos)
       : Parent(Parent), Ctx(Parent.Ctx), TypeInfos(TypeInfos) {}
 
   HType *getUndef(unsigned BitSize) {

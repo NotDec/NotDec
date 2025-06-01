@@ -241,9 +241,9 @@ void ConstraintsGenerator::dumpV2N() {
   }
 }
 
-// inline CGNode &getTarget(FieldEntry<> &F) {
-//   return const_cast<CGNode &>(F.Edge->getTargetNode());
-// }
+inline CGNode &getTarget(FieldEntry &F) {
+  return const_cast<CGNode &>(F.Edge->getTargetNode());
+}
 
 void ConstraintsGenerator::removeNode(const retypd::NodeKey &K) {
   assert(!V2N.count(K));
@@ -256,25 +256,55 @@ void ConstraintsGenerator::removeNode(retypd::CGNode &N) {
   removeNode(N.key);
 }
 
-void ConstraintsGenerator::mergeDeterminize(CGNode &From, CGNode &To) {
+void ConstraintsGenerator::mergeFixTypeInfo(CGNode &From, CGNode &To) {
+  std::vector<const CGNode *> RelatedNodes;
+  for (auto N : std::vector<CGNode*>{&From, &To}) {
+    for (auto Ent : N->inEdges) {
+      RelatedNodes.push_back(&Ent->getSourceNode());
+    }
+    for (auto &Ent : N->outEdges) {
+      RelatedNodes.push_back(&Ent.getTargetNode());
+    }
+  }
+
+  auto EdgeMap = mergeNodeTo(From, To);
+
+  for (auto CN : RelatedNodes) {
+    auto N = const_cast<CGNode *>(CN);
+    if (TypeInfos.count(N)) {
+      TypeInfos.at(N).fixEdge(EdgeMap);
+    }
+  }
+}
+
+void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
   if (&From == &To) {
     return;
   }
-  mergeNodeTo(From, To);
-  std::set<retypd::EdgeLabel> outLabels =
-      retypd::NFADeterminizer<>::allOutLabels({&To});
-  for (auto &L : outLabels) {
-    auto S = retypd::NFADeterminizer<>::move({&To}, L);
-    if (S.size() > 1) {
-      CGNode *To = nullptr;
-      for (auto N : S) {
-        if (To == nullptr) {
-          To = N;
-        } else {
-          mergeDeterminize(*N, *To);
+  if (TypeInfos.count(&From) == 0 && TypeInfos.count(&To) == 0) {
+    assert(From.getPNIVar()->getSize() == To.getPNIVar()->getSize());
+    // 如果是两个常量类型，直接合并
+    mergeFixTypeInfo(From,To);
+  } else if (TypeInfos.at(&From).isSimple() && TypeInfos.at(&To).isSimple()) {
+    // 如果是两个simple Type，则直接合并。
+    mergeFixTypeInfo(From, To);
+    std::set<retypd::EdgeLabel> outLabels =
+        retypd::NFADeterminizer<>::allOutLabels({&To});
+    for (auto &L : outLabels) {
+      auto S = retypd::NFADeterminizer<>::move({&To}, L);
+      if (S.size() > 1) {
+        CGNode *To = nullptr;
+        for (auto N : S) {
+          if (To == nullptr) {
+            To = N;
+          } else {
+            mergeNodeAndType(*N, *To);
+          }
         }
       }
     }
+  } else {
+    assert(false && "TODO");
   }
 }
 
@@ -288,22 +318,28 @@ void ConstraintsGenerator::mergeArrayUnions() {
     for (auto &Ent : ToRemove) {
       CG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
     }
-    // 2. move all incoming edges to the array node. erase the union node.
     ToRemove.clear();
-    for (auto Edge : UN.inEdges) {
-      // // TypeInfos may be invalidated. Or we should update the edge pointer?
-      // TypeInfos.erase(&Edge->FromNode);
-      ToRemove.emplace_back(&Edge->FromNode, &Edge->TargetNode, Edge->Label);
-      CG.addEdge(Edge->FromNode, Arr, Edge->Label);
-    }
-    for (auto &Ent : ToRemove) {
-      CG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
-    }
-    removeNode(UN);
+    // 2. move all incoming edges to the array node. erase the union node.
     TypeInfos.erase(&UN);
-    // 3. merge Other with array member.
+    mergeFixTypeInfo(UN, Arr);
+    // std::map<const retypd::CGEdge *, const retypd::CGEdge *> EdgeMap;
+    // for (auto Edge : UN.inEdges) {
+    //   // // TypeInfos may be invalidated. Or we should update the edge pointer?
+    //   // TypeInfos.erase(&Edge->FromNode);
+    //   ToRemove.emplace_back(&Edge->FromNode, &Edge->TargetNode, Edge->Label);
+    //   auto NewEdge = CG.addEdge(Edge->FromNode, Arr, Edge->Label);
+    //   EdgeMap.emplace(Edge, NewEdge);
+    // }
+    // for (auto &Ent : ToRemove) {
+    //   CG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
+    //   // edge change may invalidate relevant type infos.
+    //   TypeInfos.at(std::get<0>(Ent)).fixEdge(EdgeMap);
+    // }
+    // TypeInfos.erase(&UN);
+    // mergeNodeTo(UN, Arr);
+    // 3. merge Other node with array member node.
     auto &AM = (*Arr.outEdges.begin()).getTargetNode();
-    mergeDeterminize(Other, const_cast<CGNode &>(AM));
+    mergeNodeAndType(Other, const_cast<CGNode &>(AM));
   };
 
   // 如果存在union里面一个array和一个大小完全相等的成员，那么就合并这个union。
@@ -311,24 +347,24 @@ void ConstraintsGenerator::mergeArrayUnions() {
     auto &N = Ent.second;
     if (TypeInfos.count(&N)) {
       auto &Info = TypeInfos.at(&N);
-      if (auto UInfo = Info.getAs<UnionInfo<>>()) {
-        if (UInfo->MemberLabels.size() == 2) {
-          auto L0 = UInfo->MemberLabels.at(0);
-          auto L1 = UInfo->MemberLabels.at(1);
-          auto N0 = N.getLabelTarget(L0);
-          auto N1 = N.getLabelTarget(L1);
+      if (auto UInfo = Info.getAs<UnionInfo>()) {
+        if (UInfo->Members.size() == 2) {
+          auto L0 = UInfo->Members.at(0);
+          auto L1 = UInfo->Members.at(1);
+          auto N0 = const_cast<CGNode *>(&L0->getTargetNode());
+          auto N1 = const_cast<CGNode *>(&L1->getTargetNode());
           auto N0Info = TypeInfos.at(N0);
           auto N1Info = TypeInfos.at(N1);
           assert(!(N0Info.isArray() && N1Info.isArray()) &&
                  "How to handle two array type?");
-          if (auto AI = N0Info.getAs<ArrayInfo<>>()) {
+          if (auto AI = N0Info.getAs<ArrayInfo>()) {
             auto ElemSize = AI->ElemSize.value();
             auto OtherSize = N1Info.Size.value();
             if (ElemSize == OtherSize) {
               doMerge(N, *N0, *N1);
             }
           }
-          if (auto AI = N1Info.getAs<ArrayInfo<>>()) {
+          if (auto AI = N1Info.getAs<ArrayInfo>()) {
             auto ElemSize = AI->ElemSize.value();
             auto OtherSize = N0Info.Size.value();
             if (ElemSize == OtherSize) {
@@ -341,7 +377,7 @@ void ConstraintsGenerator::mergeArrayUnions() {
   }
 }
 
-std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
+std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   assert(TypeInfos.empty());
   // after post process, organize the node with offset edges.
   // Requirement 1. the graph has only recall, has no one edge.(after
@@ -426,9 +462,8 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
         LoadSize = retypd::getLoadOrStoreSize((*LoadEdge)->Label);
       }
       assert(LoadSize % 8 == 0);
-      TypeInfos[&N] =
-          TypeInfo<>{.Size = LoadSize / 8,
-                     .Info = SimpleTypeInfo<>{.L = (*LoadEdge)->getLabel()}};
+      TypeInfos[&N] = TypeInfo{.Size = LoadSize / 8,
+                               .Info = SimpleTypeInfo{.Edge = *LoadEdge}};
       return;
     }
     // check if it is a simple array. If there is only one offset edge.
@@ -448,17 +483,16 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
         if (OL->range.offset == 0 && OL->range.access.size() == 1) {
           // this is an array, but we first assume element count = 1
           auto AccessSize = OL->range.access.begin()->Size;
-          TypeInfos[&N] =
-              TypeInfo<>{.Size = AccessSize,
-                         .Info = ArrayInfo<>{.L = OffsetEdge->getLabel(),
-                                             .ElemSize = AccessSize}};
+          TypeInfos[&N] = TypeInfo{
+              .Size = AccessSize,
+              .Info = ArrayInfo{.Edge = OffsetEdge, .ElemSize = AccessSize}};
           doBuild(Target, false);
           return;
         }
       }
     }
     // this is a struct or union.
-    std::vector<std::pair<FieldEntry<>, CGEdge *>> Fields;
+    std::vector<FieldEntry> Fields;
 
     // normalize load edge as zero offset
     for (auto &E : N.outEdges) {
@@ -550,34 +584,25 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
           if (auto Acc =
                   retypd::getOffsetLabel((*InRangeEdges.begin())->getLabel())) {
             if (Acc->range.offset == RangeStart &&
-                Acc->range.access.size() == 1 && RangeStart != 0) {
-              // 分割开，转化为offset=0的情况处理。
+                Acc->range.access.size() == 1) {
               auto &TargetNode = const_cast<CGNode &>(
                   (*InRangeEdges.begin())->getTargetNode());
-              CGNode *NewFieldNode = nullptr;
-              // if (auto Field = N.getLabelTarget({retypd::RecallLabel{
-              //         OffsetLabel{.range = {.offset = RangeStart}}}})) {
-              //   NewFieldNode = Field;
-              // } else {
-              NewFieldNode = &CG.createNodeClonePNI(
+              auto &NewFieldNode = CG.createNodeClonePNI(
                   retypd::NodeKey{TypeVariable::CreateDtv(
                       *CG.Ctx, ValueNamer::getName("Field_"))},
                   N.getPNIVar());
-              // }
               auto FieldEdge =
-                  CG.addEdge(N, *NewFieldNode,
+                  CG.addEdge(N, NewFieldNode,
                              {retypd::RecallLabel{OffsetLabel{
                                  .range = {.offset = RangeStart}}}});
               // auto ArrEdge =
-              CG.addEdge(*NewFieldNode, TargetNode,
+              CG.addEdge(NewFieldNode, TargetNode,
                          {retypd::RecallLabel{
                              OffsetLabel{OffsetRange{.access = {MaxStride}}}}});
-              Fields.push_back(
-                  {FieldEntry<>{
-                       .R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
-                       .L = FieldEdge->getLabel()},
-                   const_cast<CGEdge *>(FieldEdge)});
-              doBuild(*NewFieldNode, false);
+              Fields.push_back(FieldEntry{
+                  .R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
+                  .Edge = FieldEdge});
+              doBuild(NewFieldNode, false);
               for (auto *Edge : InRangeEdges) {
                 auto &From = const_cast<CGNode &>(Edge->getSourceNode());
                 auto &To = const_cast<CGNode &>(Edge->getTargetNode());
@@ -621,11 +646,13 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
             NewFieldNode, NewArrNode,
             {retypd::RecallLabel{
                 OffsetLabel{OffsetRange{.access = {MaxStride}}}}});
-        Fields.push_back({FieldEntry<>{.R = SimpleRange{.Start = RangeStart,
-                                                        .Size = MaxStride},
-                                       .L = FieldEdge->getLabel()},
-                          const_cast<CGEdge *>(FieldEdge)});
+        Fields.push_back(
+            FieldEntry{.R = SimpleRange{.Start = RangeStart, .Size = MaxStride},
+                       .Edge = FieldEdge});
         doBuild(NewFieldNode, false);
+        // reduced to simple array, so we set array info in recursive call.
+        // TypeInfos[&NewArrNode] =
+        //     TypeInfo{.Size = MaxStride, .Info = ArrayInfo{.Edge = ArrEdge}};
       }
     }
 
@@ -638,10 +665,9 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
              "should be handled by previous array pass");
       doBuild(Target, false);
       auto &TI = TypeInfos.at(&Target);
-      Fields.push_back({FieldEntry<>{.R = SimpleRange{.Start = OL->range.offset,
-                                                      .Size = *TI.Size},
-                                     .L = E.getLabel()},
-                        const_cast<CGEdge *>(&E)});
+      Fields.push_back(FieldEntry{
+          .R = SimpleRange{.Start = OL->range.offset, .Size = *TI.Size},
+          .Edge = &E});
     }
 
     auto IsOverlap = [](OffsetTy S1, OffsetTy E1, OffsetTy S2, OffsetTy E2) {
@@ -654,14 +680,14 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
     };
 
     // Fields should not be mutated during the lifetime of ret vector
-    auto FilterInRange =
-        [&](const std::vector<std::pair<FieldEntry<>, CGEdge *>> &Fields,
-            OffsetTy Start, OffsetTy End) -> std::vector<size_t> {
+    auto FilterInRange = [&](const std::vector<FieldEntry> &Fields,
+                             OffsetTy Start,
+                             OffsetTy End) -> std::vector<size_t> {
       std::vector<size_t> Ret;
       for (size_t I = 0; I < Fields.size(); I++) {
         auto &F = Fields.at(I);
-        auto FS = F.first.R.Start;
-        auto FE = F.first.R.Size + FS;
+        auto FS = F.R.Start;
+        auto FE = F.R.Size + FS;
         // overlaps
         if (IsOverlap(Start, End, FS, FE)) {
           Ret.push_back(I);
@@ -670,20 +696,12 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
       return Ret;
     };
 
-    auto convert = [](const std::vector<std::pair<FieldEntry<>, CGEdge *>>& V1) -> std::vector<FieldEntry<>> {
-      std::vector<FieldEntry<>> Ret;
-      for (auto &Ent: V1 ) {
-        Ret.push_back(Ent.first);
-      }
-      return Ret;
-    };
-
     while (true) {
       // 收集所有分割点
       std::set<OffsetTy> AllIndex;
       for (auto &F : Fields) {
-        AllIndex.insert(F.first.R.Start);
-        AllIndex.insert(F.first.R.end());
+        AllIndex.insert(F.R.Start);
+        AllIndex.insert(F.R.end());
       }
 
       // 遍历所有最小范围区间，如果出现重叠则以此开始创建union类型。
@@ -710,8 +728,8 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
           OldSize = NewSize;
           for (auto Ind : InRangeFieldIndex) {
             auto &F = Fields.at(Ind);
-            Start = std::min(Start, F.first.R.Start);
-            End = std::max(End, F.first.R.end());
+            Start = std::min(Start, F.R.Start);
+            End = std::max(End, F.R.end());
           }
           InRangeFieldIndex = FilterInRange(Fields, Start, End);
           NewSize = InRangeFieldIndex.size();
@@ -720,15 +738,13 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
 
         auto UnionStart = Start;
         auto UnionEnd = End;
-        std::vector<std::pair<FieldEntry<>, CGEdge *>> OtherFields;
-        std::vector<std::pair<FieldEntry<>, CGEdge *>> OverlapFields;
+        std::vector<FieldEntry> OtherFields;
+        std::vector<FieldEntry> OverlapFields;
         for (auto &F : Fields) {
-          if (IsOverlap(Start, End, F.first.R.Start, F.first.R.end())) {
-            OverlapFields.push_back(
-                {FieldEntry<>{.R = {.Start = F.first.R.Start - UnionStart,
-                                    .Size = F.first.R.Size},
-                              .L = F.first.L},
-                 F.second});
+          if (IsOverlap(Start, End, F.R.Start, F.R.end())) {
+            OverlapFields.push_back(FieldEntry{
+                .R = {.Start = F.R.Start - UnionStart, .Size = F.R.Size},
+                .Edge = F.Edge});
           } else {
             OtherFields.push_back(F);
           }
@@ -737,19 +753,17 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
 
         // sort the entry by end offset.
         std::sort(OverlapFields.begin(), OverlapFields.end(),
-                  [](const std::pair<FieldEntry<>, CGEdge *> &A,
-                     const std::pair<FieldEntry<>, CGEdge *> &B) {
-                    return A.first.R.end() < B.first.R.end();
+                  [](const FieldEntry &A, const FieldEntry &B) {
+                    return A.R.end() < B.R.end();
                   });
         // use std::min to find the min start offset.
         auto MinStartOff =
             std::min_element(OverlapFields.begin(), OverlapFields.end(),
-                             [](const std::pair<FieldEntry<>, CGEdge *> &A,
-                                const std::pair<FieldEntry<>, CGEdge *> &B) {
-                               return A.first.R.Start < B.first.R.Start;
+                             [](const FieldEntry &A, const FieldEntry &B) {
+                               return A.R.Start < B.R.Start;
                              })
-                ->first.R.Start;
-        auto MaxOff = OverlapFields.back().first.R.end();
+                ->R.Start;
+        auto MaxOff = OverlapFields.back().R.end();
         // unified start to 0
         assert(MinStartOff == 0);
         assert(MaxOff == (UnionEnd - UnionStart));
@@ -757,12 +771,11 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
         // to struct == Min Start Offset. So set size as MaxOff - MinStartOff.
         auto OurSize = MaxOff - MinStartOff;
 
-        std::vector<std::vector<std::pair<FieldEntry<>, CGEdge *>>> UnionPanels;
+        std::vector<std::vector<FieldEntry>> UnionPanels;
         for (auto &F : OverlapFields) {
           bool inserted = false;
           for (auto &Panel : UnionPanels) {
-            if (Panel.back().first.R.Start + Panel.back().first.R.Size <=
-                F.first.R.Start) {
+            if (Panel.back().R.Start + Panel.back().R.Size <= F.R.Start) {
               Panel.push_back(F);
               inserted = true;
               break;
@@ -787,12 +800,12 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
           for (auto &Panel : UnionPanels) {
             for (auto &F : Panel) {
               // subtract by UnionStart
-              auto Off = *retypd::getOffsetLabel(*F.first.L);
-              auto To = &F.second->getTargetNode();
+              auto Off = *retypd::getOffsetLabel(F.Edge->Label);
               Off.range.offset -= UnionStart;
-              auto *NE = CG.addEdge(*UN, *To, {retypd::RecallLabel{Off}});
-              CG.removeEdge(N, *To, *F.first.L);
-              F.second = const_cast<CGEdge*>(NE);
+              auto *NE =
+                  CG.addEdge(*UN, getTarget(F), {retypd::RecallLabel{Off}});
+              CG.removeEdge(N, getTarget(F), F.Edge->Label);
+              F.Edge = NE;
             }
           }
           UE = CG.addEdge(N, *UN,
@@ -800,11 +813,11 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
                               OffsetLabel{OffsetRange{.offset = UnionStart}}}});
         }
         // create new node for each panel struct.
-        std::vector<retypd::EdgeLabel> Members;
+        std::vector<const retypd::CGEdge *> Members;
         for (auto &Panel : UnionPanels) {
           if (Panel.size() == 1) {
             // we do not need to create a struct
-            Members.push_back(*Panel.front().first.L);
+            Members.push_back(Panel.front().Edge);
             continue;
           }
           // create a struct here
@@ -814,19 +827,19 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
               UN->getPNIVar());
           // move edges under the struct
           for (auto &F : Panel) {
-            auto To = &F.second->getTargetNode();
-            auto *NE = CG.addEdge(*NN, *To, *F.first.L);
-            CG.removeEdge(*UN, *To, *F.first.L);
+            auto *NE = CG.addEdge(*NN, getTarget(F), F.Edge->Label);
+            CG.removeEdge(*UN, getTarget(F), F.Edge->Label);
+            F.Edge = NE;
           }
-          TypeInfos[NN] = TypeInfo<>{.Size = OurSize,
-                                     .Info = StructInfo<>{.Fields = convert(Panel)}};
+          TypeInfos[NN] =
+              TypeInfo{.Size = OurSize, .Info = StructInfo{.Fields = Panel}};
           auto *E1 = CG.addEdge(*UN, *NN,
                                 {retypd::RecallLabel{OffsetLabel{
                                     OffsetRange{.offset = MinStartOff}}}});
-          Members.push_back(E1->getLabel());
+          Members.push_back(E1);
         }
-        TypeInfos[UN] = TypeInfo<>{
-            .Size = OurSize, .Info = UnionInfo<>{.MemberLabels = Members}};
+        TypeInfos[UN] =
+            TypeInfo{.Size = OurSize, .Info = UnionInfo{.Members = Members}};
 
         if (UN == &N) {
           assert(OtherFields.empty());
@@ -835,9 +848,9 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
         }
         // push the merged union back to fields, and iterate again
         OtherFields.push_back(
-            {FieldEntry<>{.R = SimpleRange{.Start = UnionStart + MinStartOff,
-                                          .Size = OurSize},
-                         .L = UE->getLabel()}, const_cast<CGEdge*>(UE)});
+            {FieldEntry{.R = SimpleRange{.Start = UnionStart + MinStartOff,
+                                         .Size = OurSize},
+                        .Edge = UE}});
         assert(NoUpdate == false);
         // #endregion build members using OverlapFields;
 
@@ -854,23 +867,23 @@ std::map<CGNode *, TypeInfo<>> ConstraintsGenerator::organizeTypes() {
     // Now there is no overlap, create struct for Fields.
     // sort the entry by start offset.
     if (Fields.empty()) {
-      TypeInfos[&N] = TypeInfo<>{.Size = 0, .Info = StructInfo<>{}};
+      TypeInfos[&N] = TypeInfo{.Size = 0, .Info = StructInfo{}};
       return;
     }
     std::sort(Fields.begin(), Fields.end(),
-              [](const std::pair<FieldEntry<>, CGEdge *> &A, const std::pair<FieldEntry<>, CGEdge *> &B) {
-                return A.first.R.Start < B.first.R.Start;
+              [](const FieldEntry &A, const FieldEntry &B) {
+                return A.R.Start < B.R.Start;
               });
     auto MaxEndOff =
         std::max_element(Fields.begin(), Fields.end(),
-                         [](const std::pair<FieldEntry<>, CGEdge *> &A, const std::pair<FieldEntry<>, CGEdge *> &B) {
-                           return A.first.R.end() < B.first.R.end();
+                         [](const FieldEntry &A, const FieldEntry &B) {
+                           return A.R.end() < B.R.end();
                          })
-            ->first.R.end();
-    auto Size = MaxEndOff - Fields.front().first.R.Start;
+            ->R.end();
+    auto Size = MaxEndOff - Fields.front().R.Start;
     assert(Size >= 0);
     TypeInfos[&N] =
-        TypeInfo<>{.Size = Size, .Info = StructInfo<>{.Fields = convert(Fields)}};
+        TypeInfo{.Size = Size, .Info = StructInfo{.Fields = Fields}};
 
     return;
   };
@@ -1941,13 +1954,13 @@ void ConstraintsGenerator::eliminateCycle() {
   }
 }
 
-void ConstraintsGenerator::mergeNodeTo(CGNode &From, CGNode &To,
-                                       bool NoSelfLoop) {
+std::map<const CGEdge *, const CGEdge *>
+ConstraintsGenerator::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   assert(&From.Parent == &CG && &To.Parent == &CG);
   // update the value map
   addMergeNode(From.key, To.key);
   // update the graph
-  CG.mergeNodeTo(From, To, NoSelfLoop);
+  return CG.mergeNodeTo(From, To, NoSelfLoop);
 }
 
 void ConstraintsGenerator::mergeOnlySubtype() {

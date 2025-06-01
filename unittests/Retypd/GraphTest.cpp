@@ -187,16 +187,16 @@ TEST(Retypd, ExpToConstraint1Test) {
   using namespace notdec::retypd::rexp;
   using namespace notdec::retypd;
   std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
-  auto Prefix = create(RecallBase{TypeVariable::CreateDtv(*Ctx, "alpha")});
-  auto Suffix = create(ForgetBase{TypeVariable::CreateDtv(*Ctx, "beta")});
+  auto Prefix = create({RecallBase{TypeVariable::CreateDtv(*Ctx, "alpha")}});
+  auto Suffix = create({ForgetBase{TypeVariable::CreateDtv(*Ctx, "beta")}});
 
   auto StarForget1 =
-      Prefix & createStar(create(ForgetLabel{LoadLabel{}})) & Suffix;
+      Prefix & createStar(create({ForgetLabel{LoadLabel{}}})) & Suffix;
   std::cerr << "Converting Expr: " << toString(StarForget1) << std::endl;
   printConstraints(expToConstraints(Ctx, StarForget1));
 
   auto StarRecall1 =
-      Prefix & createStar(create(RecallLabel{LoadLabel{}})) & Suffix;
+      Prefix & createStar(create({RecallLabel{LoadLabel{}}})) & Suffix;
   std::cerr << "Converting Expr: " << toString(StarRecall1) << std::endl;
   printConstraints(expToConstraints(Ctx, StarRecall1));
 }

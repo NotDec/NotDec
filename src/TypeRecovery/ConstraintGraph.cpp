@@ -174,7 +174,8 @@ EdgeLabel2Offset(const EdgeLabel &E) {
   return llvm::None;
 };
 
-void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
+std::map<const CGEdge*,const CGEdge*> ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
+  std::map<const CGEdge*,const CGEdge*> EdgeMap;
   assert(&From.Parent == this && &To.Parent == this);
   if (PG) {
     PG->mergePNINodes(To.getPNIVar(), From.getPNIVar());
@@ -188,12 +189,14 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
       // only keep non-one edge
       if (!Edge.Label.isOne()) {
         assert(!NoSelfLoop);
-        onlyAddEdge(To, To, Edge.Label);
+        auto NE = onlyAddEdge(To, To, Edge.Label);
+        EdgeMap.emplace(&Edge, NE);
       }
       // removeEdge(From, *Target, Edge.Label);
       toRemove.push_back({&From, Target, Edge.Label});
     } else {
-      onlyAddEdge(To, Edge.TargetNode, Edge.Label);
+      auto NE = onlyAddEdge(To, Edge.TargetNode, Edge.Label);
+      EdgeMap.emplace(&Edge, NE);
       // removeEdge(From, Edge.TargetNode, Edge.Label);
       toRemove.push_back({&From, &Edge.TargetNode, Edge.Label});
     }
@@ -205,12 +208,14 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
       // only keep non-one edge
       if (!Edge->Label.isOne()) {
         assert(!NoSelfLoop);
-        onlyAddEdge(To, To, Edge->Label);
+        auto NE = onlyAddEdge(To, To, Edge->Label);
+        EdgeMap.emplace(Edge, NE);
       }
       // removeEdge(To, From, Edge->getLabel());
       toRemove.push_back({Source, &From, Edge->Label});
     } else {
-      onlyAddEdge(Edge->getSourceNode(), To, Edge->getLabel());
+      auto NE = onlyAddEdge(Edge->getSourceNode(), To, Edge->getLabel());
+      EdgeMap.emplace(Edge, NE);
       // removeEdge(Edge->getSourceNode(), From, Edge->getLabel());
       toRemove.push_back({&Edge->getSourceNode(), &From, Edge->Label});
     }
@@ -222,6 +227,7 @@ void ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   }
   // erase the node
   removeNode(From.key);
+  return EdgeMap;
 }
 
 CGNode* CGNode::getLabelTarget(const EdgeLabel& L) const {

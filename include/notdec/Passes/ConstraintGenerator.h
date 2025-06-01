@@ -196,10 +196,11 @@ struct ConstraintsGenerator {
 
   void dumpV2N();
 
-  std::map<CGNode *, TypeInfo<>> TypeInfos;
-  std::map<CGNode *, TypeInfo<>> organizeTypes();
+  std::map<CGNode *, TypeInfo> TypeInfos;
+  std::map<CGNode *, TypeInfo> organizeTypes();
   void mergeArrayUnions();
-  void mergeDeterminize(CGNode &From, CGNode &To);
+  void mergeNodeAndType(CGNode &From, CGNode &To);
+  void mergeFixTypeInfo(CGNode &From, CGNode &To);
 
   void run();
   // clone CG and maintain value map.
@@ -234,7 +235,7 @@ public:
     }
     CG.addConstraint(SubNode, SupNode);
   }
-  void mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
+  std::map<const CGEdge *, const CGEdge *> mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 

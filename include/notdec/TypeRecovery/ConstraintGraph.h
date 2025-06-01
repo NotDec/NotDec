@@ -347,7 +347,7 @@ public:
     }
     return &*it.first;
   }
-  void mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
+  std::map<const CGEdge*,const CGEdge*> mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
 
   // Graph operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
