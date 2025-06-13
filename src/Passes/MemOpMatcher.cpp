@@ -1,6 +1,7 @@
 
 #include "Passes/MemOpMatcher.h"
 #include "Passes/ConstraintGenerator.h"
+#include "notdec-llvm2c/Utils.h"
 #include <cstdint>
 #include <functional>
 #include <llvm/ADT/Optional.h>
@@ -9,6 +10,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Alignment.h>
 #include <llvm/Support/raw_ostream.h>
@@ -88,6 +90,9 @@ llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
 
 PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
   auto PointerSizeInBytes = F.getParent()->getDataLayout().getPointerSize();
+  auto getTypeSize = [=](llvm::Type *Ty) {
+    return llvm2c::getLLVMTypeSize(Ty, PointerSizeInBytes * 8);
+  };
 
   auto isCyclicConstant = [](int64_t Val) {
     auto Low = Val & 0xFF;
@@ -125,8 +130,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
         if (!BeginOffset) {
           continue;
         }
-        auto AccessSize =
-            SI->getValueOperand()->getType()->getPrimitiveSizeInBits() / 8;
+        auto AccessSize = getTypeSize(SI->getValueOperand()->getType()) / 8;
         EndOffset = BeginOffset;
         EndOffset->second += AccessSize;
         // check for the same store backwards.
@@ -164,8 +168,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
           }
           int64_t NextBeginOff = NextBegin->second;
           int64_t NextEndOff =
-              NextBeginOff +
-              SI2->getValueOperand()->getType()->getPrimitiveSizeInBits() / 8;
+              NextBeginOff + getTypeSize(SI2->getValueOperand()->getType()) / 8;
           // Current range: [BeginOffset, EndOffset]
           // Next range: [NextBeginOff, NextEndOff]
           // case 1: equal: BeginOffset < EndOffset == NextBeginOff <
@@ -222,6 +225,9 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
 
 PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
   auto PointerSizeInBytes = F.getParent()->getDataLayout().getPointerSize();
+  auto getTypeSize = [=](llvm::Type *Ty) {
+    return llvm2c::getLLVMTypeSize(Ty, PointerSizeInBytes * 8);
+  };
 
   for (auto BB = F.begin(), E = F.end(); BB != E; ++BB) {
     // Reverse iteration to find store sequences
@@ -249,7 +255,7 @@ PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
         auto [DestBase, DestStart] = *DestAddr;
 
         // Calculate access size
-        uint64_t AccessSize = LI->getType()->getPrimitiveSizeInBits() / 8;
+        uint64_t AccessSize = getTypeSize(LI->getType()) / 8;
 
         // Collect continuous accesses
         int64_t DestEnd = DestStart + AccessSize;
@@ -290,7 +296,7 @@ PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
             // 3. 检查是否和之前的范围贴着
             // TODO 是否要改成支持overlap的？
             int64_t NextAccessSize =
-                NextLI->getType()->getPrimitiveSizeInBits() / 8;
+                getTypeSize(NextLI->getType()) / 8;
             auto NextSrcEnd = NextSrcStart + NextAccessSize;
             auto NextDestEnd = NextDestStart + NextAccessSize;
             // Update expected addresses if OK

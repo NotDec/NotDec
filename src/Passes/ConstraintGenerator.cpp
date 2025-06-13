@@ -62,6 +62,7 @@
 #include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Interface/Utils.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
+#include "notdec-llvm2c/Utils.h"
 
 #define DEBUG_TYPE "type-recovery"
 
@@ -2951,16 +2952,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitICmpInst(ICmpInst &I) {
 
 unsigned ConstraintsGenerator::getPointerElemSize(Type *ty) {
   Type *Elem = ty->getPointerElementType();
-  if (Elem->isPointerTy()) {
-    assert(Ctx.pointer_size != 0 &&
-           "RetypdGenerator: pointer size not initialized");
-    return Ctx.pointer_size;
-  }
-  unsigned Size = Elem->getPrimitiveSizeInBits();
-  if (Size != 0) {
-    return Size;
-  }
-  assert(false && "unknown pointer type");
+  return llvm2c::getLLVMTypeSize(Elem, Ctx.pointer_size);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
