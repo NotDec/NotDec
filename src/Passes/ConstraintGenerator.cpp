@@ -17,6 +17,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -286,9 +287,12 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
     assert(From.getPNIVar()->getSize() == To.getPNIVar()->getSize());
     // 如果是两个常量类型，直接合并
     mergeFixTypeInfo(From, To);
-  } else if ((TypeInfos.at(&From).isSimple() && TypeInfos.at(&To).isSimple()) ||
+  } else if ((TypeInfos.count(&To) && !TypeInfos.count(&From)) ||
+             (TypeInfos.at(&From).isSimple() && TypeInfos.at(&To).isSimple()) ||
              (TypeInfos.at(&From).isStruct() && TypeInfos.at(&To).isStruct())) {
-    // 如果是两个simple Type，则直接合并。
+    // 如果1. From没有typeinfo，但是To有
+    // 2. 是相同的simple或者struct类型
+    // TODO 重新计算struct的成员！
     mergeFixTypeInfo(From, To);
     std::set<retypd::EdgeLabel> outLabels =
         retypd::NFADeterminizer<>::allOutLabels({&To});
@@ -300,6 +304,10 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
           if (To == nullptr) {
             To = N;
           } else {
+            // do the merge
+            if (TypeInfos.count(N) && !(TypeInfos.count(To))) {
+              std::swap(N, To);
+            }
             mergeNodeAndType(*N, *To);
           }
         }
@@ -981,8 +989,7 @@ void ConstraintsGenerator::elimSingleStruct() {
 void ConstraintsGenerator::mergeArrayWithMember() {}
 
 void ConstraintsGenerator::preSimplify() {
-  // TODO处理PNIGraph的contravariant节点的问题
-  assert(false && "TODO");
+  // 注意维护对称性
 
   // 对简单的顺序子类型关系A -> x -> B可以直接优化：
   // - x节点的下界是A的下界，x节点的上界是B的上界。
@@ -990,52 +997,78 @@ void ConstraintsGenerator::preSimplify() {
   // - 如果x节点在V2N（上界）里面，则将x替换为B
   // - 如果x节点在V2NContra（下界）里面，则将X替换为A。
 
-  // 1 收集所有可能的节点
+  auto MatchCritiria = [](CGNode *N) {
+    if (N->outEdges.size() == 1 && N->inEdges.size() == 1) {
+      auto &O = *N->outEdges.begin();
+      auto I = *N->inEdges.begin();
+      if (O.getLabel().isOne() && I->getLabel().isOne()) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  auto DoSimplify = [&](CGNode *N) {
+    assert(N != nullptr);
+    auto &O = *N->outEdges.begin();
+    auto I = *N->inEdges.begin();
+    // 优化该节点：1 处理V2N，V2NContra。
+    if (V2N.count(N->key)) {
+      V2N.merge(N->key, O.getTargetNode().key);
+    }
+    if (V2NContra.count(N->key)) {
+      V2NContra.merge(N->key, I->getSourceNode().key);
+    }
+    // 2. 直接连接为A->B。
+    CG.addEdge(I->getSourceNode(), const_cast<CGNode &>(O.getTargetNode()),
+               {retypd::One{}});
+    // 3. 移除该节点和相关的两条边
+    CG.removeEdge(const_cast<CGNode &>(O.getSourceNode()),
+                  const_cast<CGNode &>(O.getTargetNode()), O.getLabel());
+    CG.removeEdge(I->getSourceNode(), I->getTargetNode(), I->getLabel());
+    CG.removeNode(N->key);
+  };
+
+  // 1 收集所有可能的节点，主要关注Covariant的
   std::vector<CGNode *> PossibleNodes;
   for (auto &Ent : CG.Nodes) {
     auto &N = Ent.second;
-    if (N.outEdges.size() == 1 && N.inEdges.size() == 1) {
-      auto &O = *N.outEdges.begin();
-      auto I = *N.inEdges.begin();
-      if (O.getLabel().isOne() && I->getLabel().isOne()) {
-        PossibleNodes.push_back(&N);
-      }
+    if (N.isStartOrEnd() || N.isMemory()) {
+      continue;
+    }
+    if (N.key.SuffixVariance == retypd::Contravariant) {
+      continue;
+    }
+    if (MatchCritiria(&N)) {
+      PossibleNodes.push_back(&N);
     }
   }
 
   auto SimplifyCount = 0;
   for (auto N : PossibleNodes) {
+    // 同时找到对称的节点
+    auto NK = N->key;
+    assert(NK.SuffixVariance == retypd::Covariant);
+    NK.SuffixVariance = retypd::invert(NK.SuffixVariance);
+    auto &NC = CG.getNode(NK);
     // 0 如果节点在PNGraph里，即可能之后被增加额外的边，不能被删
     if (CG.PG->NodeToCons.count(N)) {
       continue;
     }
+    if (CG.PG->NodeToCons.count(&NC)) {
+      continue;
+    }
     // 再次检查是否符合条件
-    if (N->outEdges.size() == 1 && N->inEdges.size() == 1) {
-      auto &O = *N->outEdges.begin();
-      auto I = *N->inEdges.begin();
-      if (O.getLabel().isOne() && I->getLabel().isOne()) {
-        // 优化该节点：1 处理V2N，V2NContra。
-        if (V2N.count(N->key)) {
-          V2N.merge(N->key, O.getTargetNode().key);
-        }
-        if (V2NContra.count(N->key)) {
-          V2NContra.merge(N->key, I->getSourceNode().key);
-        }
-        // 2. 直接连接为A->B。
-        CG.addEdge(I->getSourceNode(), const_cast<CGNode &>(O.getTargetNode()),
-                   {retypd::One{}});
-        // 3. 移除该节点和相关的两条边
-        CG.removeEdge(const_cast<CGNode &>(O.getSourceNode()),
-                      const_cast<CGNode &>(O.getTargetNode()), O.getLabel());
-        CG.removeEdge(I->getSourceNode(), I->getTargetNode(), I->getLabel());
-        CG.removeNode(N->key);
-
-        SimplifyCount += 1;
-      }
+    if (MatchCritiria(N)) {
+      assert(MatchCritiria(&NC));
+      DoSimplify(N);
+      DoSimplify(&NC);
+      SimplifyCount += 2;
     }
   }
 
-  llvm::errs() << "preSimplify: linear subtype eliminated " << std::to_string(SimplifyCount) << " Nodes!\n";
+  llvm::errs() << "preSimplify: linear subtype eliminated "
+               << std::to_string(SimplifyCount) << " Nodes!\n";
 }
 
 bool isFuncPtr(ExtValuePtr Val) {
@@ -2350,9 +2383,8 @@ void ConstraintsGenerator::run() {
     Visitor.visit(Func);
     Visitor.handlePHINodes();
   }
-  // TODO处理PNIGraph的contravariant节点的问题
-  // CG.PG->solve();
-  // preSimplify();
+  CG.PG->solve();
+  preSimplify();
   if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(CG.Name.c_str(), path))) {
       CG.printGraph("trans_init.dot");
@@ -2363,7 +2395,7 @@ void ConstraintsGenerator::run() {
 void ConstraintsGenerator::instantiateSummary(
     llvm::CallBase *Inst, llvm::Function *Target,
     const ConstraintsGenerator &Summary) {
-  // checkSymmetry();
+  checkSymmetry();
   auto [FI, FIC] = CallToInstance.at(Inst);
   auto InstanceId = FI->key.Base.getInstanceId();
   assert(InstanceId != 0);
