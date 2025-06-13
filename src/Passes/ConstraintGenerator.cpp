@@ -258,7 +258,7 @@ void ConstraintsGenerator::removeNode(retypd::CGNode &N) {
 
 void ConstraintsGenerator::mergeFixTypeInfo(CGNode &From, CGNode &To) {
   std::vector<const CGNode *> RelatedNodes;
-  for (auto N : std::vector<CGNode*>{&From, &To}) {
+  for (auto N : std::vector<CGNode *>{&From, &To}) {
     for (auto Ent : N->inEdges) {
       RelatedNodes.push_back(&Ent->getSourceNode());
     }
@@ -284,8 +284,9 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
   if (TypeInfos.count(&From) == 0 && TypeInfos.count(&To) == 0) {
     assert(From.getPNIVar()->getSize() == To.getPNIVar()->getSize());
     // 如果是两个常量类型，直接合并
-    mergeFixTypeInfo(From,To);
-  } else if (TypeInfos.at(&From).isSimple() && TypeInfos.at(&To).isSimple()) {
+    mergeFixTypeInfo(From, To);
+  } else if ((TypeInfos.at(&From).isSimple() && TypeInfos.at(&To).isSimple()) ||
+             (TypeInfos.at(&From).isStruct() && TypeInfos.at(&To).isStruct())) {
     // 如果是两个simple Type，则直接合并。
     mergeFixTypeInfo(From, To);
     std::set<retypd::EdgeLabel> outLabels =
@@ -303,6 +304,12 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
         }
       }
     }
+  } else if (TypeInfos.at(&From).isArray() && TypeInfos.at(&To).isArray()) {
+    // TODO merge if the access range in edge label is different
+    assert(false && "TODO");
+  } else if (TypeInfos.at(&From).isUnion() && TypeInfos.at(&To).isUnion()) {
+    // TODO merge all union members to one.
+    assert(false && "TODO");
   } else {
     assert(false && "TODO");
   }
@@ -614,9 +621,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         }
 
         // 转换为子问题的数组节点
-        auto &NewArrNode =
+        auto &NewArrElemNode =
             CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
-                                      *CG.Ctx, ValueNamer::getName("Arr_"))},
+                                      *CG.Ctx, ValueNamer::getName("ArrElem_"))},
                                   N.getPNIVar());
         for (auto *Edge : InRangeEdges) {
           auto &Target = const_cast<CGNode &>(Edge->getTargetNode());
@@ -626,7 +633,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                                 NewRange.access.end());
           NewRange.offset = NewRange.offset - RangeStart;
           assert(NewRange.offset >= 0);
-          CG.addEdge(NewArrNode, Target,
+          CG.addEdge(NewArrElemNode, Target,
                      {retypd::RecallLabel{OffsetLabel{.range = NewRange}}});
         }
         for (auto *Edge : InRangeEdges) {
@@ -643,7 +650,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                                     {retypd::RecallLabel{OffsetLabel{
                                         .range = {.offset = RangeStart}}}});
         /*auto ArrEdge = */ CG.addEdge(
-            NewFieldNode, NewArrNode,
+            NewFieldNode, NewArrElemNode,
             {retypd::RecallLabel{
                 OffsetLabel{OffsetRange{.access = {MaxStride}}}}});
         Fields.push_back(

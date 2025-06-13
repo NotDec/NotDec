@@ -1645,6 +1645,7 @@ void ConstraintGraph::saturate() {
         }
       }
 
+      // 传递ReachingSet
       for (auto &Edge : Source.outEdges) {
         if (Edge.Label.isOne()) {
           auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
@@ -1673,6 +1674,7 @@ void ConstraintGraph::saturate() {
               RecallStore = {toStore(*Load)};
             }
             for (auto &Reach : ReachingSet[&Source]) {
+              // 相同的label，增加subtype
               if (Reach.first == Capa->label && Reach.second != &Target) {
                 // We are iterating through Recall edges, and we insert One
                 // edge, so it is ok to modify edge during iterating.
@@ -1683,7 +1685,7 @@ void ConstraintGraph::saturate() {
                   Changed |= (addEdge(*Reach.second, Target, {One{}}) != nullptr);
                 }
               }
-              // non-lazy rule: if it is recall load, we allow forget store.
+              // non-lazy rule: if it is recall load, we also allow forget store.
               if (RecallStore && (Reach.first == *RecallStore) &&
                   Reach.second != &Target) {
                 // Changed |= (addEdge(*Reach.second, Target, {One{}}) !=
