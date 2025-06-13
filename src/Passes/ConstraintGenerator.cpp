@@ -332,7 +332,8 @@ void ConstraintsGenerator::mergeArrayUnions() {
     mergeFixTypeInfo(UN, Arr);
     // std::map<const retypd::CGEdge *, const retypd::CGEdge *> EdgeMap;
     // for (auto Edge : UN.inEdges) {
-    //   // // TypeInfos may be invalidated. Or we should update the edge pointer?
+    //   // // TypeInfos may be invalidated. Or we should update the edge
+    //   pointer?
     //   // TypeInfos.erase(&Edge->FromNode);
     //   ToRemove.emplace_back(&Edge->FromNode, &Edge->TargetNode, Edge->Label);
     //   auto NewEdge = CG.addEdge(Edge->FromNode, Arr, Edge->Label);
@@ -622,10 +623,10 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         }
 
         // 转换为子问题的数组节点
-        auto &NewArrElemNode =
-            CG.createNodeClonePNI(retypd::NodeKey{TypeVariable::CreateDtv(
-                                      *CG.Ctx, ValueNamer::getName("ArrElem_"))},
-                                  N.getPNIVar());
+        auto &NewArrElemNode = CG.createNodeClonePNI(
+            retypd::NodeKey{TypeVariable::CreateDtv(
+                *CG.Ctx, ValueNamer::getName("ArrElem_"))},
+            N.getPNIVar());
         for (auto *Edge : InRangeEdges) {
           auto &Target = const_cast<CGNode &>(Edge->getTargetNode());
           auto NewRange = retypd::getOffsetLabel(Edge->getLabel())->range;
@@ -910,6 +911,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
 
 std::shared_ptr<ConstraintsGenerator>
 TypeRecovery::postProcess(ConstraintsGenerator &G, std::string DebugDir) {
+  if (G.PG) {
+    G.PG->clearConstraints();
+  }
   std::map<const CGNode *, CGNode *> Old2New;
   std::shared_ptr<ConstraintsGenerator> G2S = G.cloneShared(Old2New);
   ConstraintsGenerator &G2 = *G2S;
@@ -947,12 +951,91 @@ TypeRecovery::postProcess(ConstraintsGenerator &G, std::string DebugDir) {
     G2.CG.printGraph(join(DebugDir, "08-Final.dot").c_str());
   }
 
+  // Graph Pass
   G2.organizeTypes();
   G2.mergeArrayUnions();
+
+  // G2.mergeArrayWithMember();
+  // G2.elimSingleStruct();
 
   assert(G2.PG);
   // G2.DebugDir.clear();
   return G2S;
+}
+
+void ConstraintsGenerator::elimSingleStruct() {
+  assert(false && "TODO");
+  // 如果存在一个只有一个成员的struct，那么就消除它。
+  for (auto &Ent : CG.Nodes) {
+    auto &N = Ent.second;
+    if (TypeInfos.count(&N)) {
+      auto &Info = TypeInfos.at(&N);
+      if (auto SInfo = Info.getAs<StructInfo>()) {
+        if (SInfo->Fields.size() == 1) {
+        }
+      }
+    }
+  }
+}
+
+void ConstraintsGenerator::mergeArrayWithMember() {}
+
+void ConstraintsGenerator::preSimplify() {
+  // TODO处理PNIGraph的contravariant节点的问题
+  assert(false && "TODO");
+
+  // 对简单的顺序子类型关系A -> x -> B可以直接优化：
+  // - x节点的下界是A的下界，x节点的上界是B的上界。
+  // 具体操作：
+  // - 如果x节点在V2N（上界）里面，则将x替换为B
+  // - 如果x节点在V2NContra（下界）里面，则将X替换为A。
+
+  // 1 收集所有可能的节点
+  std::vector<CGNode *> PossibleNodes;
+  for (auto &Ent : CG.Nodes) {
+    auto &N = Ent.second;
+    if (N.outEdges.size() == 1 && N.inEdges.size() == 1) {
+      auto &O = *N.outEdges.begin();
+      auto I = *N.inEdges.begin();
+      if (O.getLabel().isOne() && I->getLabel().isOne()) {
+        PossibleNodes.push_back(&N);
+      }
+    }
+  }
+
+  auto SimplifyCount = 0;
+  for (auto N : PossibleNodes) {
+    // 0 如果节点在PNGraph里，即可能之后被增加额外的边，不能被删
+    if (CG.PG->NodeToCons.count(N)) {
+      continue;
+    }
+    // 再次检查是否符合条件
+    if (N->outEdges.size() == 1 && N->inEdges.size() == 1) {
+      auto &O = *N->outEdges.begin();
+      auto I = *N->inEdges.begin();
+      if (O.getLabel().isOne() && I->getLabel().isOne()) {
+        // 优化该节点：1 处理V2N，V2NContra。
+        if (V2N.count(N->key)) {
+          V2N.merge(N->key, O.getTargetNode().key);
+        }
+        if (V2NContra.count(N->key)) {
+          V2NContra.merge(N->key, I->getSourceNode().key);
+        }
+        // 2. 直接连接为A->B。
+        CG.addEdge(I->getSourceNode(), const_cast<CGNode &>(O.getTargetNode()),
+                   {retypd::One{}});
+        // 3. 移除该节点和相关的两条边
+        CG.removeEdge(const_cast<CGNode &>(O.getSourceNode()),
+                      const_cast<CGNode &>(O.getTargetNode()), O.getLabel());
+        CG.removeEdge(I->getSourceNode(), I->getTargetNode(), I->getLabel());
+        CG.removeNode(N->key);
+
+        SimplifyCount += 1;
+      }
+    }
+  }
+
+  llvm::errs() << "preSimplify: linear subtype eliminated " << std::to_string(SimplifyCount) << " Nodes!\n";
 }
 
 bool isFuncPtr(ExtValuePtr Val) {
@@ -2267,6 +2350,9 @@ void ConstraintsGenerator::run() {
     Visitor.visit(Func);
     Visitor.handlePHINodes();
   }
+  // TODO处理PNIGraph的contravariant节点的问题
+  // CG.PG->solve();
+  // preSimplify();
   if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(CG.Name.c_str(), path))) {
       CG.printGraph("trans_init.dot");
@@ -2277,7 +2363,7 @@ void ConstraintsGenerator::run() {
 void ConstraintsGenerator::instantiateSummary(
     llvm::CallBase *Inst, llvm::Function *Target,
     const ConstraintsGenerator &Summary) {
-  checkSymmetry();
+  // checkSymmetry();
   auto [FI, FIC] = CallToInstance.at(Inst);
   auto InstanceId = FI->key.Base.getInstanceId();
   assert(InstanceId != 0);
@@ -2394,7 +2480,7 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
     assert(F->hasName());
     InterestingVars.insert(F->getName().str());
   }
-  S.linkVars(InterestingVars);
+  S.linkVars(InterestingVars, true);
   // if (S.getStartNode()->outEdges.size() == 0) {
   //   llvm::errs() << "Warning: No func nodes, No meaningful types for "
   //                << CG.getName() << "\n";

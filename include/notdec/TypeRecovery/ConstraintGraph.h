@@ -256,7 +256,7 @@ struct ConstraintGraph {
   std::vector<SubTypeConstraint>
   simplifiedExpr(std::set<std::string> &InterestingVars) const;
   void linkPrimitives();
-  void linkVars(std::set<std::string> &InterestingVars);
+  void linkVars(std::set<std::string> &InterestingVars, bool LinkLoadStores = true);
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify();
   void recoverBaseVars();

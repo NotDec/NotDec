@@ -465,6 +465,7 @@ void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
 }
 
 void PNIGraph::markRemoved(CGNode &Node) {
+  assert(!NodeToCons.count(&Node));
   if (auto *P = Node.getPNIVar()) {
     PNIToNode[P].erase(&Node);
     if (PNIToNode[P].empty()) {

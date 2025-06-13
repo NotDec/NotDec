@@ -289,7 +289,7 @@ void ConstraintGraph::changeStoreToLoad() {
 }
 
 void ConstraintGraph::aggressiveSimplify() {
-  // remove dup load store
+  // if has recall load N and recall store N, then remove recall store N.
   for (auto &Ent : Nodes) {
     auto &Node = Ent.second;
     for (auto &Edge : Node.outEdges) {
@@ -505,7 +505,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
   return ret;
 }
 
-void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
+void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars, bool LinkLoadStores) {
   // Link nodes to "#Start"
   for (auto &Ent : Nodes) {
     auto *N = &Ent.second;
@@ -537,8 +537,10 @@ void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars) {
   }
   linkPrimitives();
   linkEndVars(InterestingVars);
-  // mark load/store as accepting.
-  linkLoadStore();
+  if (LinkLoadStores) {
+    // mark load/store as accepting.
+    linkLoadStore();
+  }
 }
 
 void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
@@ -940,11 +942,11 @@ ConstraintGraph::simplifiedExpr(std::set<std::string> &InterestingVars) const {
   std::map<const CGNode *, CGNode *> Old2New;
   auto G = clone(Old2New);
   // G.lowTypeToSubType();
-  G.linkVars(InterestingVars);
+  G.linkVars(InterestingVars, false);
   auto G2 = G.simplify();
   G2.aggressiveSimplify();
 
-  G2.linkVars(InterestingVars);
+  G2.linkVars(InterestingVars, false);
   G2.buildPathSequence();
   return G2.solve_constraints_between();
 }
@@ -2425,6 +2427,7 @@ ExprToConstraintsContext::normalizePath(const std::vector<EdgeLabel> &ELs) {
     std::get<1>(Ent) = combine(std::get<1>(Ent), Con.first.pathVariance());
     std::get<2>(Ent) = combine(std::get<2>(Ent), Con.second.pathVariance());
   }
+  assert(PathVariance.has_value());
   return std::make_pair(Ret, PathVariance.value());
 }
 

@@ -222,6 +222,11 @@ struct PNIGraph {
   }
   static void addPNINodeTarget(CGNode &To, PNINode &N);
   void markRemoved(CGNode &N);
+  void clearConstraints() {
+    NodeToCons.clear();
+    Constraints.clear();
+    Worklist.clear();
+  }
 
   PNIGraph(ConstraintGraph &CG, std::string Name, long PointerSize)
       : CG(CG), Name(Name), PointerSize(PointerSize) {}

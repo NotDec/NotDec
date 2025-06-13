@@ -180,6 +180,8 @@ struct ConstraintsGenerator {
 
   // for determinization: extended powerset construction
   std::map<std::set<CGNode *>, CGNode *> DTrans;
+  
+  void preSimplify();
   // void determinizeStructEqual();
   void eliminateCycle();
   void mergeOnlySubtype();
@@ -199,6 +201,8 @@ struct ConstraintsGenerator {
   std::map<CGNode *, TypeInfo> TypeInfos;
   std::map<CGNode *, TypeInfo> organizeTypes();
   void mergeArrayUnions();
+  void elimSingleStruct();
+  void mergeArrayWithMember();
   void mergeNodeAndType(CGNode &From, CGNode &To);
   void mergeFixTypeInfo(CGNode &From, CGNode &To);
 
