@@ -325,7 +325,10 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
 }
 
 void ConstraintsGenerator::mergeArrayUnions() {
+  size_t MergeCount = 0;
+
   auto doMerge = [&](CGNode &UN, CGNode &Arr, CGNode &Other) {
+    MergeCount += 1;
     // 1. remove all(two) outgoing edges for UN
     std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
     for (auto &Edge : UN.outEdges) {
@@ -354,43 +357,61 @@ void ConstraintsGenerator::mergeArrayUnions() {
     // }
     // TypeInfos.erase(&UN);
     // mergeNodeTo(UN, Arr);
-    // 3. merge Other node with array member node.
-    auto &AM = (*Arr.outEdges.begin()).getTargetNode();
-    mergeNodeAndType(Other, const_cast<CGNode &>(AM));
+    // 3. merge Other node with array element node.
+    auto &AE = (*Arr.outEdges.begin()).getTargetNode();
+    mergeNodeAndType(Other, const_cast<CGNode &>(AE));
   };
 
   // 如果存在union里面一个array和一个大小完全相等的成员，那么就合并这个union。
-  for (auto &Ent : CG.Nodes) {
-    auto &N = Ent.second;
-    if (TypeInfos.count(&N)) {
-      auto &Info = TypeInfos.at(&N);
-      if (auto UInfo = Info.getAs<UnionInfo>()) {
-        if (UInfo->Members.size() == 2) {
-          auto L0 = UInfo->Members.at(0);
-          auto L1 = UInfo->Members.at(1);
-          auto N0 = const_cast<CGNode *>(&L0->getTargetNode());
-          auto N1 = const_cast<CGNode *>(&L1->getTargetNode());
-          auto N0Info = TypeInfos.at(N0);
-          auto N1Info = TypeInfos.at(N1);
-          assert(!(N0Info.isArray() && N1Info.isArray()) &&
-                 "How to handle two array type?");
-          if (auto AI = N0Info.getAs<ArrayInfo>()) {
-            auto ElemSize = AI->ElemSize.value();
-            auto OtherSize = N1Info.Size.value();
-            if (ElemSize == OtherSize) {
-              doMerge(N, *N0, *N1);
-            }
-          }
-          if (auto AI = N1Info.getAs<ArrayInfo>()) {
-            auto ElemSize = AI->ElemSize.value();
-            auto OtherSize = N0Info.Size.value();
-            if (ElemSize == OtherSize) {
-              doMerge(N, *N1, *N0);
+  bool Changed = false;
+  do {
+    Changed = false;
+    for (auto &Ent : CG.Nodes) {
+      auto &N = Ent.second;
+      if (TypeInfos.count(&N)) {
+        auto &Info = TypeInfos.at(&N);
+        if (auto UInfo = Info.getAs<UnionInfo>()) {
+          if (UInfo->Members.size() == 2) {
+            auto L0 = UInfo->Members.at(0);
+            auto L1 = UInfo->Members.at(1);
+            auto N0 = const_cast<CGNode *>(&L0->getTargetNode());
+            auto N1 = const_cast<CGNode *>(&L1->getTargetNode());
+            auto N0Info = TypeInfos.at(N0);
+            auto N1Info = TypeInfos.at(N1);
+            if (N0Info.isArray() && N1Info.isArray()) {
+              // TODO: "How to handle two array type?");
+              break;
+            } else if (auto AI = N0Info.getAs<ArrayInfo>()) {
+              auto ElemSize = AI->ElemSize.value();
+              auto OtherSize = N1Info.Size.value();
+              if (ElemSize == OtherSize) {
+                doMerge(N, *N0, *N1);
+                Changed = true;
+                // because we will remove node within the loop, we cannot
+                // continue the loop.
+                break;
+              }
+            } else if (auto AI = N1Info.getAs<ArrayInfo>()) {
+              auto ElemSize = AI->ElemSize.value();
+              auto OtherSize = N0Info.Size.value();
+              if (ElemSize == OtherSize) {
+                doMerge(N, *N1, *N0);
+                Changed = true;
+                // because we will remove node within the loop, we cannot
+                // continue the loop.
+                break;
+              }
             }
           }
         }
       }
     }
+  } while (Changed);
+
+  if (MergeCount > 0) {
+    llvm::errs() << "SCC " << CG.Name << ": Merged "
+                 << std::to_string(MergeCount)
+                 << " unions with element and array!\n";
   }
 }
 

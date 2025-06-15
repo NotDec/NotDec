@@ -1,4 +1,4 @@
-.PHONY: all clean wat wasm dec compile svf_com svf_dec
+.PHONY: all clean wat wasm dec compile svf_com svf_dec deco
 
 FUNCTIONALDIR = dataset-SAC-2022/src
 
@@ -15,6 +15,7 @@ PREFIXEDS = $(addprefix out_, $(SOURCES))
 
 all: wasm wat dec
 dec: $(addsuffix .wat.c, $(PREFIXEDS))
+deco: $(addsuffix .wat.o, $(PREFIXEDS))
 wat: $(addsuffix .wat, $(PREFIXEDS))
 wasm: $(addsuffix .wasm, $(PREFIXEDS))
 compile: $(addsuffix .com.ll, $(PREFIXEDS))
@@ -33,6 +34,9 @@ out_$(FUNCTIONALDIR)/%.com.ll: $(FUNCTIONALDIR)/%.c
 
 %.wat.c: %.wasm
 	bash -c 'NOTDEC_SUMMARY_OVERRIDE=/sn640/NotDec/experiment/dataset/summarys.json NOTDEC_SIGNATURE_OVERRIDE=/sn640/NotDec/experiment/dataset/signatures.json ../../build/bin/notdec -o $@ $< 2>&1 | tee $<.log ; exit $${PIPESTATUS[0]}'
+
+%.wat.o: %.wat.c
+	gcc -m32 --no-standard-libraries -Werror=implicit-function-declaration -g -c ./$< -o ./$@ 2>&1 | tee ./$@.log ; exit ${PIPESTATUS[0]}
 
 %.wat: %.wasm
 	wasm2wat -f --enable-all $< > $@
