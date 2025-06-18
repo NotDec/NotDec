@@ -141,11 +141,14 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
       std::cout << "Bitcode dumped to " << OutFilePath << std::endl;
     } else if (outsuffix == ".c") {
       // notdec::llvm2c::demoteSSA(M);
+
       // Run type recovery.
       std::unique_ptr<TypeRecovery::Result> HighTypes;
+      std::shared_ptr<retypd::TRContext> TRCtx =
+          std::make_shared<retypd::TRContext>();
+      auto TR = TypeRecovery(TRCtx);
       if (!disableTypeRecovery) {
-        HighTypes = std::make_unique<TypeRecovery::Result>(
-            std::move(MAM.getResult<TypeRecovery>(M)));
+        HighTypes = TR.run(M, MAM);
         HighTypes->dump();
       }
 
@@ -377,9 +380,6 @@ void DecompileConfig::run_passes() {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   MAM.registerPass([&]() { return StackPointerFinderAnalysis(); });
-  std::shared_ptr<retypd::TRContext> TRCtx =
-      std::make_shared<retypd::TRContext>();
-  MAM.registerPass([&]() { return TypeRecovery(TRCtx); });
 
   // Create the pass manager.
   // Optimize the IR!

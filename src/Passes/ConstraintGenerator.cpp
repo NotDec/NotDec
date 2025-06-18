@@ -1101,7 +1101,7 @@ bool isFuncPtr(ExtValuePtr Val) {
   return false;
 }
 
-TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
+std::unique_ptr<TypeRecovery::Result> TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
   auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
@@ -1613,7 +1613,7 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
-  TypeRecovery::Result Result;
+  std::unique_ptr<TypeRecovery::Result> Result = std::make_unique<TypeRecovery::Result>();
   auto HTCtx = std::make_shared<ast::HTypeContext>();
   retypd::TypeBuilderContext TBC(*HTCtx, M.getName(), M.getDataLayout());
   using notdec::ast::HType;
@@ -1697,13 +1697,13 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               << ": Type is " << CTy->getAsString() << "\n";
         }
 
-        if (Result.ValueTypes.count(Ent.first) != 0) {
+        if (Result->ValueTypes.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
                        << toString(Ent.first) << "\n";
         }
 
         if (!isFuncPtr(Ent.first)) {
-          Result.ValueTypes[Ent.first] = CTy;
+          Result->ValueTypes[Ent.first] = CTy;
         }
 
         if (ValueTypesFile) {
@@ -1759,12 +1759,12 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               << ": Type is " << CTy->getAsString() << "\n";
         }
 
-        if (Result.ValueTypesLowerBound.count(Ent.first) != 0) {
+        if (Result->ValueTypesLowerBound.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
                        << toString(Ent.first) << "\n";
         }
         if (!isFuncPtr(Ent.first)) {
-          Result.ValueTypesLowerBound[Ent.first] = CTy;
+          Result->ValueTypesLowerBound[Ent.first] = CTy;
         }
         if (ValueTypesFile) {
           *ValueTypesFile << " lower bound: " << CTy->getAsString();
@@ -1821,11 +1821,11 @@ TypeRecovery::Result TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // analyzeSignedness(AG, Mem);
 
   // 4 Save the result
-  Result.MemoryType = CTy->getPointeeType();
-  Result.MemoryDecl = Mem;
+  Result->MemoryType = CTy->getPointeeType();
+  Result->MemoryDecl = Mem;
 
   // move the ASTUnit to result
-  Result.HTCtx = HTCtx;
+  Result->HTCtx = HTCtx;
 
   // gen_json("retypd-constrains.json");
 

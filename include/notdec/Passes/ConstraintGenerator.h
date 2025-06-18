@@ -71,15 +71,10 @@ struct AllGraphs {
   std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
   std::shared_ptr<ConstraintsGenerator> Global;
   std::shared_ptr<ConstraintsGenerator> GlobalSketch;
-  CallGraph* CG;
+  CallGraph *CG;
 };
 
-struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
-  // Provide a unique key, i.e., memory address to be used by the LLVM's pass
-  // infrastructure.
-  static inline llvm::AnalysisKey Key; // NOLINT
-  friend llvm::AnalysisInfoMixin<TypeRecovery>;
-
+struct TypeRecovery {
   // Specify the result type of this analysis pass.
   using Result = ::notdec::llvm2c::HTypeResult;
 
@@ -105,7 +100,7 @@ struct TypeRecovery : public AnalysisInfoMixin<TypeRecovery> {
 
   unsigned pointer_size = 0;
 
-  Result run(Module &M, ModuleAnalysisManager &);
+  std::unique_ptr<Result> run(Module &M, ModuleAnalysisManager &);
   void gen_json(std::string OutputFilename);
 
 public:
@@ -180,7 +175,7 @@ struct ConstraintsGenerator {
 
   // for determinization: extended powerset construction
   std::map<std::set<CGNode *>, CGNode *> DTrans;
-  
+
   void preSimplify();
   // void determinizeStructEqual();
   void eliminateCycle();
@@ -239,7 +234,8 @@ public:
     }
     CG.addConstraint(SubNode, SupNode);
   }
-  std::map<const CGEdge *, const CGEdge *> mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
+  std::map<const CGEdge *, const CGEdge *> mergeNodeTo(CGNode &From, CGNode &To,
+                                                       bool NoSelfLoop = false);
 
   void setPointer(CGNode &Node) { CG.setPointer(Node); }
 
@@ -391,7 +387,6 @@ inline TypeVariable getCallRetTV(CGNode &Target) {
 }
 
 // ================ type generator ======================
-
 
 } // namespace notdec
 
