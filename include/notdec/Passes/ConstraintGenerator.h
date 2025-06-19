@@ -78,8 +78,6 @@ struct TypeRecovery {
   // Specify the result type of this analysis pass.
   using Result = ::notdec::llvm2c::HTypeResult;
 
-  TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx) : TRCtx(TRCtx) {}
-
   std::shared_ptr<retypd::TRContext> TRCtx;
   llvm::Value *StackPointer;
   std::string data_layout;
@@ -96,14 +94,29 @@ struct TypeRecovery {
       SignatureOverride;
   std::map<CallBase *, std::shared_ptr<ConstraintsGenerator>>
       CallsiteSummaryOverride;
-  char *DebugDir = nullptr;
 
   unsigned pointer_size = 0;
 
   std::unique_ptr<Result> run(Module &M, ModuleAnalysisManager &);
+  void bottomUpPhase();
   void gen_json(std::string OutputFilename);
 
-public:
+  // NOTDEC_TYPE_RECOVERY_DEBUG_DIR
+  const char *DebugDir;
+  // NOTDEC_SUMMARY_OVERRIDE
+  const char *SummaryFile;
+  // NOTDEC_SIGNATURE_OVERRIDE
+  const char *SigFile;
+  // NOTDEC_TYPE_RECOVERY_TRACE_IDS
+  const char *Traces;
+  llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
+
+  TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx)
+      : TRCtx(TRCtx), DebugDir(std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")),
+        SummaryFile(std::getenv("NOTDEC_SUMMARY_OVERRIDE")),
+        SigFile(std::getenv("NOTDEC_SIGNATURE_OVERRIDE")),
+        Traces(std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS")) {}
+
   static std::shared_ptr<ConstraintsGenerator>
   postProcess(ConstraintsGenerator &G, std::string DebugDir);
   // merge nodes to current graph by determinize.

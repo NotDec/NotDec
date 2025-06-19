@@ -1101,96 +1101,11 @@ bool isFuncPtr(ExtValuePtr Val) {
   return false;
 }
 
-std::unique_ptr<TypeRecovery::Result> TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
-  LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
-
-  auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
-  this->StackPointer = SP.result;
-
-  data_layout = std::move(M.getDataLayoutStr());
-  pointer_size = M.getDataLayout().getPointerSizeInBits();
-
-  std::shared_ptr<BytesManager> MemoryBytes = BytesManager::create(M);
-
-  // 0 Preparation
-  // 0.1 load summary file
-  const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
-  if (SummaryFile) {
-    loadSummaryFile(M, SummaryFile);
-  }
-
-  // 0.2 load signature file
-  const char *SigFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
-  if (SigFile) {
-    loadSignatureFile(M, SigFile);
-  }
-
-  // 0.3 load trace ids
-  const char *Traces = std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS");
-  if (Traces) {
-    loadTraceStr(Traces);
-  }
-
-  // 0.4 prepare debug dir and SCCsCatalog
-  DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
-  llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
-  if (DebugDir) {
-    llvm::sys::fs::create_directories(DebugDir);
-    std::error_code EC;
-    SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
-    if (EC) {
-      std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Cannot open output file SCCs.txt." << std::endl;
-      std::cerr << EC.message() << std::endl;
-      std::abort();
-    }
-  }
-
-  // 0.5 print module for debugging
-  if (DebugDir) {
-    printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
-  }
-
-  // 0.6 get the CallGraph, iterate by topological order of SCC
-  CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
-  AG.CG = &CG;
-
-  // 0.7
-  // override summary for printf
-  // if (auto PF = M.getFunction("printf")) {
-  //   auto N1 = CG[PF];
-  //   // for each call, check if target is printf
-  //   for (auto &Ent : CG) {
-  //     auto Caller = Ent.first;
-  //     CallGraphNode &CallerNode = *Ent.second;
-  //     for (auto &CallEdge : *Ent.second) {
-  //       if (!CallEdge.first.hasValue()) {
-  //         continue;
-  //       }
-  //       CallBase *I =
-  //           llvm::cast_or_null<llvm::CallBase>(&*CallEdge.first.getValue());
-  //       auto *TargetNode = CallEdge.second;
-  //       if (I && TargetNode->getFunction() == PF) {
-  //         if (auto *CI = dyn_cast<ConstantInt>(I->getArgOperand(0))) {
-  //           auto Format = CI->getValue().getZExtValue();
-  //           StringRef FormatStr = MemoryBytes->decodeCStr(Format);
-  //           if (!FormatStr.empty()) {
-  //             std::shared_ptr<retypd::ConstraintSummary> Summary =
-  //                 buildPrintfSummary(*TRCtx, pointer_size, FormatStr);
-  //             auto CG =
-  //                 ConstraintsGenerator::fromConstraints(*this, {PF},
-  //                 *Summary);
-  //             CallsiteSummaryOverride[I] = CG;
-  //           }
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
-
+void TypeRecovery::bottomUpPhase() {
+  assert(AG.CG != nullptr);
   // TODO: simplify call graph if one func does not have up constraints.
   std::set<CallGraphNode *> Visited;
-  all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(&CG);
+  all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(AG.CG);
 
   std::vector<SCCData> &AllSCCs = AG.AllSCCs;
   std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
@@ -1356,6 +1271,59 @@ std::unique_ptr<TypeRecovery::Result> TypeRecovery::run(Module &M, ModuleAnalysi
       }
     }
   }
+}
+
+std::unique_ptr<TypeRecovery::Result>
+TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
+  LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
+
+  auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
+  this->StackPointer = SP.result;
+
+  data_layout = std::move(M.getDataLayoutStr());
+  pointer_size = M.getDataLayout().getPointerSizeInBits();
+
+  std::shared_ptr<BytesManager> MemoryBytes = BytesManager::create(M);
+
+  // 0 Preparation
+  // 0.1 load summary file
+  if (SummaryFile) {
+    loadSummaryFile(M, SummaryFile);
+  }
+
+  // 0.2 load signature file
+  if (SigFile) {
+    loadSignatureFile(M, SigFile);
+  }
+
+  // 0.3 load trace ids
+  if (Traces) {
+    loadTraceStr(Traces);
+  }
+
+  // 0.4 prepare debug dir and SCCsCatalog
+  if (DebugDir) {
+    llvm::sys::fs::create_directories(DebugDir);
+    std::error_code EC;
+    SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output file SCCs.txt." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+  }
+
+  // 0.5 print module for debugging
+  if (DebugDir) {
+    printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
+  }
+
+  // 0.6 get the CallGraph, iterate by topological order of SCC
+  CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
+  AG.CG = &CG;
+
+  bottomUpPhase();
 
   if (DebugDir) {
     SCCsCatalog->close();
@@ -1391,6 +1359,7 @@ std::unique_ptr<TypeRecovery::Result> TypeRecovery::run(Module &M, ModuleAnalysi
   // We have a big global type graph, corresponds to C AST that link the
   // declared struct type to the real definition to form a graph.
 
+  auto &AllSCCs = AG.AllSCCs;
   for (std::size_t Index1 = AllSCCs.size(); Index1 > 0; --Index1) {
     std::size_t SCCIndex = Index1 - 1;
     auto &Data = AllSCCs[SCCIndex];
@@ -1489,7 +1458,7 @@ std::unique_ptr<TypeRecovery::Result> TypeRecovery::run(Module &M, ModuleAnalysi
 
           auto *Call = Elem.first;
           auto &CallerGenerator =
-              AllSCCs.at(Func2SCCIndex.at(Elem.second)).TopDownGenerator;
+              AllSCCs.at(AG.Func2SCCIndex.at(Elem.second)).TopDownGenerator;
           if (CallerGenerator->CallToInstance.count(Call)) {
             auto [FN, FNC] = CallerGenerator->CallToInstance.at(Call);
 
@@ -1613,7 +1582,8 @@ std::unique_ptr<TypeRecovery::Result> TypeRecovery::run(Module &M, ModuleAnalysi
     }
   }
 
-  std::unique_ptr<TypeRecovery::Result> Result = std::make_unique<TypeRecovery::Result>();
+  std::unique_ptr<TypeRecovery::Result> Result =
+      std::make_unique<TypeRecovery::Result>();
   auto HTCtx = std::make_shared<ast::HTypeContext>();
   retypd::TypeBuilderContext TBC(*HTCtx, M.getName(), M.getDataLayout());
   using notdec::ast::HType;
