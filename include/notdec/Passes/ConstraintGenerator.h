@@ -71,7 +71,10 @@ struct AllGraphs {
   std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
   std::shared_ptr<ConstraintsGenerator> Global;
   std::shared_ptr<ConstraintsGenerator> GlobalSketch;
-  CallGraph *CG;
+  std::map<CallGraphNode *,
+           std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
+      FuncCallers;
+  CallGraph *CG = nullptr;
 };
 
 struct TypeRecovery {
@@ -99,6 +102,8 @@ struct TypeRecovery {
 
   std::unique_ptr<Result> run(Module &M, ModuleAnalysisManager &);
   void bottomUpPhase();
+  void topDownPhase();
+  void handleGlobals();
   void gen_json(std::string OutputFilename);
 
   // NOTDEC_TYPE_RECOVERY_DEBUG_DIR
@@ -110,6 +115,7 @@ struct TypeRecovery {
   // NOTDEC_TYPE_RECOVERY_TRACE_IDS
   const char *Traces;
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
+  llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
 
   TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx)
       : TRCtx(TRCtx), DebugDir(std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")),

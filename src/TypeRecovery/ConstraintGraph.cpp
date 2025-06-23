@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/STLExtras.h>
@@ -174,8 +175,9 @@ EdgeLabel2Offset(const EdgeLabel &E) {
   return llvm::None;
 };
 
-std::map<const CGEdge*,const CGEdge*> ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
-  std::map<const CGEdge*,const CGEdge*> EdgeMap;
+std::map<const CGEdge *, const CGEdge *>
+ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
+  std::map<const CGEdge *, const CGEdge *> EdgeMap;
   assert(&From.Parent == this && &To.Parent == this);
   if (PG) {
     PG->mergePNINodes(To.getPNIVar(), From.getPNIVar());
@@ -230,12 +232,12 @@ std::map<const CGEdge*,const CGEdge*> ConstraintGraph::mergeNodeTo(CGNode &From,
   return EdgeMap;
 }
 
-CGNode* CGNode::getLabelTarget(const EdgeLabel& L) const {
-  CGNode* Ret = nullptr;
-  for (auto& E: outEdges) {
+CGNode *CGNode::getLabelTarget(const EdgeLabel &L) const {
+  CGNode *Ret = nullptr;
+  for (auto &E : outEdges) {
     if (E.getLabel() == L) {
       assert(Ret == nullptr && "Multiple possible target");
-      Ret = const_cast<CGNode*>(&E.getTargetNode());
+      Ret = const_cast<CGNode *>(&E.getTargetNode());
     }
   }
   return Ret;
@@ -505,7 +507,8 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
   return ret;
 }
 
-void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars, bool LinkLoadStores) {
+void ConstraintGraph::linkVars(std::set<std::string> &InterestingVars,
+                               bool LinkLoadStores) {
   // Link nodes to "#Start"
   for (auto &Ent : Nodes) {
     auto *N = &Ent.second;
@@ -567,9 +570,9 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
             << "Adding edge " << From.key.str() << "(ID=" << From.getId()
             << ") to " << toString(To.key) << "(ID=" << To.getId() << ")\n";
       }
-      addEdge(
-          *N, *getEndNode(),
-          {ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance}});
+      addEdge(*N, *getEndNode(),
+              {ForgetBase{.Base = N->key.Base.toBase(),
+                          .V = N->key.SuffixVariance}});
     }
   }
 }
@@ -623,9 +626,9 @@ void ConstraintGraph::linkPrimitives() {
             << "Adding edge " << From.key.str() << "(ID=" << From.getId()
             << ") to " << toString(To.key) << "(ID=" << To.getId() << ")\n";
       }
-      addEdge(
-          *N, *getEndNode(),
-          {ForgetBase{.Base = N->key.Base.toBase(), .V = N->key.SuffixVariance}});
+      addEdge(*N, *getEndNode(),
+              {ForgetBase{.Base = N->key.Base.toBase(),
+                          .V = N->key.SuffixVariance}});
     }
   }
 }
@@ -635,7 +638,7 @@ void ConstraintGraph::recoverBaseVars() {
   std::vector<std::tuple<CGNode *, CGNode *, retypd::rexp::EdgeLabel>> toRemove;
   for (auto &OE : Start->outEdges) {
     auto RE = OE.getLabel().getAs<RecallBase>();
-    assert(RE !=nullptr);
+    assert(RE != nullptr);
     auto &Target = const_cast<CGNode &>(OE.getTargetNode());
     if (std::make_tuple(Target.key.Base, Target.key.SuffixVariance) !=
         std::make_tuple(RE->Base, RE->V)) {
@@ -1377,22 +1380,22 @@ void ConstraintGraph::linkLoadStore() {
           // covariant load can only have subtype (one) edge out
           onlyAddEdge(Source, *getEndNode(),
                       {ForgetBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance}});
+                                  .V = Source.key.SuffixVariance}});
         } else {
           onlyAddEdge(*getStartNode(), Source,
                       {RecallBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance}});
+                                  .V = Source.key.SuffixVariance}});
         }
       } else if (Back.isStore()) {
         if (Source.key.SuffixVariance == Covariant) {
           // covariant store can only have subtype (one) edge in
           onlyAddEdge(*getStartNode(), Source,
                       {RecallBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance}});
+                                  .V = Source.key.SuffixVariance}});
         } else {
           onlyAddEdge(Source, *getEndNode(),
                       {ForgetBase{.Base = Source.key.Base,
-                                 .V = Source.key.SuffixVariance}});
+                                  .V = Source.key.SuffixVariance}});
         }
       }
     }
@@ -1583,6 +1586,13 @@ bool canReach(CGNode &From, CGNode &To) {
 
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
+
+  long Timeout = 0;
+  if (const char *val = std::getenv("NOTDEC_SAT_TIMEOUT")) {
+    Timeout = std::stol(val);
+  }
+  const clock_t begin_time = clock();
+
   bool DenseSubtype = false;
   if (const char *val = std::getenv("NOTDEC_SAT_DENSESUBTYPE")) {
     if ((std::strcmp(val, "1") == 0)) {
@@ -1660,6 +1670,14 @@ void ConstraintGraph::saturate() {
           }
         }
       }
+
+      if (Timeout) {
+        auto DurationMS = (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
+        if (DurationMS > Timeout) {
+          std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
+          goto end;
+        }
+      }
     }
     // The standard saturation rule.
     // begin: For each recall edge,
@@ -1684,10 +1702,12 @@ void ConstraintGraph::saturate() {
                   LLVM_DEBUG(llvm::dbgs()
                              << "Adding Edge From " << Reach.second->key.str()
                              << " to " << Target.key.str() << " with _1_ \n");
-                  Changed |= (addEdge(*Reach.second, Target, {One{}}) != nullptr);
+                  Changed |=
+                      (addEdge(*Reach.second, Target, {One{}}) != nullptr);
                 }
               }
-              // non-lazy rule: if it is recall load, we also allow forget store.
+              // non-lazy rule: if it is recall load, we also allow forget
+              // store.
               if (RecallStore && (Reach.first == *RecallStore) &&
                   Reach.second != &Target) {
                 // Changed |= (addEdge(*Reach.second, Target, {One{}}) !=
@@ -1697,6 +1717,15 @@ void ConstraintGraph::saturate() {
                 From.getPNIVar()->unify(*To.getPNIVar());
               }
             }
+          }
+        }
+
+        if (Timeout) {
+          auto DurationMS =
+              (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
+          if (DurationMS > Timeout) {
+            std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
+            goto end;
           }
         }
       }
@@ -1727,6 +1756,15 @@ void ConstraintGraph::saturate() {
           auto Res =
               ReachingSet[&OppositeNode].insert({Label.value(), Reach.second});
           Changed |= Res.second;
+
+          if (Timeout) {
+            auto DurationMS =
+                (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
+            if (DurationMS > Timeout) {
+              std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
+              goto end;
+            }
+          }
         }
       }
     }
@@ -1734,7 +1772,17 @@ void ConstraintGraph::saturate() {
     if (PG) {
       Changed |= PG->solve();
     }
+
+    if (Timeout) {
+      auto DurationMS = (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
+      if (DurationMS > Timeout) {
+        std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
+        break;
+      }
+    }
   }
+
+end:
 
   if (const char *path = std::getenv("DEBUG_TRANS_SAT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
@@ -2166,8 +2214,7 @@ ExprToConstraintsContext::expToConstraintsSequenceRecursive(rexp::PRExp E) {
           // eliminate Forget+Recall the same offset.
           if (auto RL = E1.getAs<ForgetLabel>()) {
             if (auto FL = E2.getAs<RecallLabel>()) {
-              if (RL->label.isOffset() &&
-                  FL->label.isOffset()) {
+              if (RL->label.isOffset() && FL->label.isOffset()) {
                 if (RL->label.getAs<OffsetLabel>()->range ==
                     FL->label.getAs<OffsetLabel>()->range) {
                   // skip these two elements

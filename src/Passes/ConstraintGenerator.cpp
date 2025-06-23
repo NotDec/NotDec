@@ -1273,92 +1273,13 @@ void TypeRecovery::bottomUpPhase() {
   }
 }
 
-std::unique_ptr<TypeRecovery::Result>
-TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
-  LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
-
-  auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
-  this->StackPointer = SP.result;
-
-  data_layout = std::move(M.getDataLayoutStr());
-  pointer_size = M.getDataLayout().getPointerSizeInBits();
-
-  std::shared_ptr<BytesManager> MemoryBytes = BytesManager::create(M);
-
-  // 0 Preparation
-  // 0.1 load summary file
-  if (SummaryFile) {
-    loadSummaryFile(M, SummaryFile);
-  }
-
-  // 0.2 load signature file
-  if (SigFile) {
-    loadSignatureFile(M, SigFile);
-  }
-
-  // 0.3 load trace ids
-  if (Traces) {
-    loadTraceStr(Traces);
-  }
-
-  // 0.4 prepare debug dir and SCCsCatalog
-  if (DebugDir) {
-    llvm::sys::fs::create_directories(DebugDir);
-    std::error_code EC;
-    SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
-    if (EC) {
-      std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Cannot open output file SCCs.txt." << std::endl;
-      std::cerr << EC.message() << std::endl;
-      std::abort();
-    }
-  }
-
-  // 0.5 print module for debugging
-  if (DebugDir) {
-    printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
-  }
-
-  // 0.6 get the CallGraph, iterate by topological order of SCC
-  CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
-  AG.CG = &CG;
-
-  bottomUpPhase();
-
-  if (DebugDir) {
-    SCCsCatalog->close();
-    printModule(M, join(DebugDir, "02-AfterBottomUp.ll").c_str());
-  }
-
-  // 1.6 calc reverse call edge map
-  // map from function to all its callers
-  std::map<CallGraphNode *,
-           std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
-      FuncCallers;
-  for (auto &Ent : CG) {
-    CallGraphNode *CallerN = Ent.second.get();
-    if (CallerN == nullptr) {
-      continue;
-    }
-    auto *Current = CallerN->getFunction();
-    if (Current == nullptr) {
-      continue;
-    }
-    for (auto &Edge : *CallerN) {
-      auto *CalleeN = Edge.second;
-      if (!Edge.first.hasValue()) {
-        continue;
-      }
-      CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
-      auto &CallVec = FuncCallers[CalleeN];
-      CallVec.emplace_back(I, CallerN);
-    }
-  }
+void TypeRecovery::topDownPhase() {
+  assert(AG.CG != nullptr);
 
   // 2 Top-down Phase: build the result(Map from value to clang C type)
   // We have a big global type graph, corresponds to C AST that link the
   // declared struct type to the real definition to form a graph.
-
+  auto &FuncCallers = AG.FuncCallers;
   auto &AllSCCs = AG.AllSCCs;
   for (std::size_t Index1 = AllSCCs.size(); Index1 > 0; --Index1) {
     std::size_t SCCIndex = Index1 - 1;
@@ -1510,12 +1431,17 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
+  handleGlobals();
+}
+
+void TypeRecovery::handleGlobals() {
   // 2.4 solve the global memory node
   // Create type for memory node
   std::shared_ptr<ConstraintsGenerator> &Global = AG.Global;
   Global = std::make_shared<ConstraintsGenerator>(*this, "Global");
   std::set<CGNode *> MemoryNodes;
   std::set<CGNode *> MemoryNodesC;
+  auto &AllSCCs = AG.AllSCCs;
   for (auto &Ent : AllSCCs) {
     auto &G = *(Ent.TopDownGenerator);
     if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Covariant)) {
@@ -1561,16 +1487,100 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
                      Global->CG.getMemoryNode(retypd::Covariant)->key);
   Global->V2NContra.insert(
       ConstantAddr(), Global->CG.getMemoryNode(retypd::Contravariant)->key);
+}
 
-  std::cerr << "Bottom up phase done! SCC count:" << AllSCCs.size() << "\n";
+std::unique_ptr<TypeRecovery::Result>
+TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
+  LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
+
+  auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
+  this->StackPointer = SP.result;
+
+  data_layout = std::move(M.getDataLayoutStr());
+  pointer_size = M.getDataLayout().getPointerSizeInBits();
+
+  std::shared_ptr<BytesManager> MemoryBytes = BytesManager::create(M);
+
+  // 0 Preparation
+  // 0.1 load summary file
+  if (SummaryFile) {
+    loadSummaryFile(M, SummaryFile);
+  }
+
+  // 0.2 load signature file
+  if (SigFile) {
+    loadSignatureFile(M, SigFile);
+  }
+
+  // 0.3 load trace ids
+  if (Traces) {
+    loadTraceStr(Traces);
+  }
+
+  // 0.4 prepare debug dir and SCCsCatalog
+  if (DebugDir) {
+    llvm::sys::fs::create_directories(DebugDir);
+    std::error_code EC;
+    SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output file SCCs.txt." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+  }
+
+  // 0.5 print module for debugging
+  if (DebugDir) {
+    printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
+  }
+
+  // 0.6 get the CallGraph, iterate by topological order of SCC
+  CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
+  AG.CG = &CG;
+
+  bottomUpPhase();
 
   if (DebugDir) {
-    Global->CG.printGraph(join(DebugDir, "GlobalMemory.dot").c_str());
+    SCCsCatalog->close();
+    printModule(M, join(DebugDir, "02-AfterBottomUp.ll").c_str());
+  }
+
+  // 1.6 calc reverse call edge map
+  // map from function to all its callers
+  std::map<CallGraphNode *,
+           std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
+      &FuncCallers = AG.FuncCallers;
+  for (auto &Ent : CG) {
+    CallGraphNode *CallerN = Ent.second.get();
+    if (CallerN == nullptr) {
+      continue;
+    }
+    auto *Current = CallerN->getFunction();
+    if (Current == nullptr) {
+      continue;
+    }
+    for (auto &Edge : *CallerN) {
+      auto *CalleeN = Edge.second;
+      if (!Edge.first.hasValue()) {
+        continue;
+      }
+      CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
+      auto &CallVec = FuncCallers[CalleeN];
+      CallVec.emplace_back(I, CallerN);
+    }
+  }
+
+  topDownPhase();
+
+  std::cerr << "Bottom up phase done! SCC count:" << AG.AllSCCs.size() << "\n";
+
+  if (DebugDir) {
+    AG.Global->CG.printGraph(join(DebugDir, "GlobalMemory.dot").c_str());
     printAnnotatedModule(M, join(DebugDir, "02-AfterBottomUp.anno1.ll").c_str(),
                          1);
   }
 
-  llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
   if (DebugDir) {
     std::error_code EC;
     ValueTypesFile.emplace(join(DebugDir, "ValueTypes.txt"), EC);
@@ -1590,6 +1600,7 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   using notdec::ast::HTypeContext;
 
   // 3 build AST type for each value in value map
+  auto &AllSCCs = AG.AllSCCs;
   for (int i = 0; i < AllSCCs.size(); i++) {
     auto &G = *AllSCCs[i].TopDownGenerator;
     auto SCCName = AllSCCs[i].SCCName;
@@ -1752,7 +1763,7 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
 
   // 3.4 build AST type for memory node
   std::shared_ptr<ConstraintsGenerator> &GlobalSkS = AG.GlobalSketch;
-  GlobalSkS = postProcess(*Global, "");
+  GlobalSkS = postProcess(*AG.Global, "");
   ConstraintsGenerator &GlobalSk = *GlobalSkS;
   // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
   // retypd::Covariant);
