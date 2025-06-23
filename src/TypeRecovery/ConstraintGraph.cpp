@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <deque>
 #include <iostream>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/STLExtras.h>
@@ -1605,6 +1606,62 @@ void ConstraintGraph::saturate() {
   if (PG) {
     PG->solve();
   }
+
+  std::set<CGNode *> WorklistSet;
+  std::deque<CGNode *> Worklist;
+  auto AddWorklist = [&](CGNode *N) {
+    auto Ent = WorklistSet.insert(N);
+    if (Ent.second) {
+      Worklist.push_back(N);
+    }
+  };
+  auto PopWorklist = [&]() -> CGNode * {
+    auto N = Worklist.front();
+    Worklist.pop_front();
+    WorklistSet.erase(N);
+    return N;
+  };
+  auto SolveWorklist = [&]() -> bool {
+    bool Changed = false;
+    if (DenseSubtype) {
+      // Add transitive subtypeing and cancel out offset edges.
+      // TODO: fix probably has one edge and is still offset related
+      assert(false && "TODO");
+    }
+    while (!Worklist.empty()) {
+      auto N = PopWorklist();
+      // 传递ReachingSet
+      for (auto &Edge : N->outEdges) {
+        if (Edge.Label.isOne()) {
+          auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
+          // For each One edge.
+          if (ReachingSet.count(N)) {
+            for (auto &Reach : ReachingSet[N]) {
+              auto Res = ReachingSet[&Target].insert(Reach);
+              // 如果更新了set，加入Worklist
+              if (Res.second) {
+                Changed = true;
+                AddWorklist(&Target);
+              }
+            }
+          }
+        }
+      }
+    }
+    return Changed;
+  };
+  auto HandleNewSubtype = [&](CGNode *From, CGNode *To) {
+    if (ReachingSet.count(From)) {
+      for (auto &Reach : ReachingSet[From]) {
+        auto Res = ReachingSet[To].insert(Reach);
+        // 如果更新了set，加入Worklist
+        if (Res.second) {
+          AddWorklist(To);
+        }
+      }
+    }
+  };
+
   // 1. add forget edges to reaching set
   for (auto &Ent : Nodes) {
     auto &Source = Ent.second;
@@ -1615,70 +1672,24 @@ void ConstraintGraph::saturate() {
         if (DenseSubtype) {
           if (!Capa->label.isOffset()) {
             auto Res = ReachingSet[&Target].insert({Capa->label, &Source});
-            Changed |= Res.second;
+            if (Res.second) {
+              AddWorklist(&Target);
+            }
           }
         } else {
           auto Res = ReachingSet[&Target].insert({Capa->label, &Source});
-          Changed |= Res.second;
+          if (Res.second) {
+            AddWorklist(&Target);
+          }
         }
       }
     }
   }
+  Changed |= SolveWorklist();
 
   while (Changed) {
     Changed = false;
-    // For each edge, if it is One edge, add reaching set.
-    for (auto &Ent : Nodes) {
-      auto &Source = Ent.second;
 
-      if (DenseSubtype) {
-        // Add transitive subtypeing and cancel out offset edges.
-        // TODO: fix probably has one edge and is still offset related
-        assert(false && "TODO");
-        if (hasOffsetEdge(Source)) {
-          auto Re = getNodeReachableOffset(Source);
-          for (auto &Ent : Re) {
-            if (Ent.first == &Source) {
-              continue;
-            }
-            if (Ent.second.isZero()) {
-              if (!canReach(Source, *Ent.first)) {
-                bool Added = addEdge(Source, *Ent.first, {One{}});
-                if (Added) {
-                  LLVM_DEBUG(llvm::dbgs()
-                             << "(Off) Adding Edge From " << Source.key.str()
-                             << " to " << Ent.first->key.str()
-                             << " with _1_ \n");
-                  Changed |= Added;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // 传递ReachingSet
-      for (auto &Edge : Source.outEdges) {
-        if (Edge.Label.isOne()) {
-          auto &Target = const_cast<CGNode &>(Edge.getTargetNode());
-          // For each One edge.
-          if (ReachingSet.count(&Source)) {
-            for (auto &Reach : ReachingSet[&Source]) {
-              auto Res = ReachingSet[&Target].insert(Reach);
-              Changed |= Res.second;
-            }
-          }
-        }
-      }
-
-      if (Timeout) {
-        auto DurationMS = (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
-        if (DurationMS > Timeout) {
-          std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
-          goto end;
-        }
-      }
-    }
     // The standard saturation rule.
     // begin: For each recall edge,
     for (auto &Ent : Nodes) {
@@ -1702,8 +1713,11 @@ void ConstraintGraph::saturate() {
                   LLVM_DEBUG(llvm::dbgs()
                              << "Adding Edge From " << Reach.second->key.str()
                              << " to " << Target.key.str() << " with _1_ \n");
-                  Changed |=
-                      (addEdge(*Reach.second, Target, {One{}}) != nullptr);
+                  auto NewEdge = addEdge(*Reach.second, Target, {One{}});
+                  if (NewEdge) {
+                    HandleNewSubtype(Reach.second, &Target);
+                  }
+                  Changed |= (NewEdge != nullptr);
                 }
               }
               // non-lazy rule: if it is recall load, we also allow forget
@@ -1717,6 +1731,8 @@ void ConstraintGraph::saturate() {
                 From.getPNIVar()->unify(*To.getPNIVar());
               }
             }
+            // solve outside of the ReachingSet loop
+            Changed |= SolveWorklist();
           }
         }
 
@@ -1724,7 +1740,6 @@ void ConstraintGraph::saturate() {
           auto DurationMS =
               (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
           if (DurationMS > Timeout) {
-            std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
             goto end;
           }
         }
@@ -1755,19 +1770,23 @@ void ConstraintGraph::saturate() {
           auto &OppositeNode = getNode(Opposite);
           auto Res =
               ReachingSet[&OppositeNode].insert({Label.value(), Reach.second});
-          Changed |= Res.second;
+          // Changed |= Res.second;
+          if (Res.second) {
+            AddWorklist(&OppositeNode);
+          }
 
           if (Timeout) {
             auto DurationMS =
                 (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
             if (DurationMS > Timeout) {
-              std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
               goto end;
             }
           }
         }
       }
     }
+    // solve outside of the ReachingSet loop
+    Changed |= SolveWorklist();
     // Run PNI solving again.
     if (PG) {
       Changed |= PG->solve();
@@ -1776,13 +1795,21 @@ void ConstraintGraph::saturate() {
     if (Timeout) {
       auto DurationMS = (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
       if (DurationMS > Timeout) {
-        std::cerr << "Saturation timed out: " << DurationMS << "ms.\n";
         break;
       }
     }
   }
 
 end:
+
+  auto DurationMS = (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
+  if (Timeout && DurationMS > Timeout) {
+    std::cerr << "ConstraintGraph::saturate: " << DurationMS << "ms for "
+              << Name << ".(Timed out)\n";
+  } else {
+    std::cerr << "ConstraintGraph::saturate: " << DurationMS << "ms for "
+              << Name << ".\n";
+  }
 
   if (const char *path = std::getenv("DEBUG_TRANS_SAT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
