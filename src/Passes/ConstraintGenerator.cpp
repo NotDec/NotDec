@@ -1104,18 +1104,17 @@ bool isFuncPtr(ExtValuePtr Val) {
 void TypeRecovery::bottomUpPhase() {
   assert(AG.CG != nullptr);
   // TODO: simplify call graph if one func does not have up constraints.
-  std::set<CallGraphNode *> Visited;
-  all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(AG.CG);
-
   std::vector<SCCData> &AllSCCs = AG.AllSCCs;
-  std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
 
   // 1 Bottom-up Phase: build the summary
   // Walk the callgraph in bottom-up SCC order.
-  for (; !CGI.isAtEnd(); ++CGI) {
-    const std::vector<CallGraphNode *> &NodeVec = *CGI;
-    AllSCCs.push_back(SCCData{NodeVec, nullptr, "", nullptr, {}});
-    size_t SCCIndex = AllSCCs.size() - 1;
+  for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
+    SCCData &Data = AllSCCs.at(SCCIndex);
+    const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
+    if (SCCSet.empty()) {
+      continue;
+    }
+
     llvm::Optional<std::string> DirPath;
     std::string SCCName = "SCC" + std::to_string(SCCIndex);
     if (DebugDir) {
@@ -1134,25 +1133,7 @@ void TypeRecovery::bottomUpPhase() {
       }
     }
 
-    // Calc name for current SCC
-    std::string Name;
-    std::set<llvm::Function *> SCCs;
-    for (auto CGN : NodeVec) {
-      Visited.insert(CGN);
-      if (CGN->getFunction() == nullptr) {
-        continue;
-      }
-      if (!Name.empty()) {
-        Name += ",";
-      }
-      Name += CGN->getFunction()->getName().str();
-      SCCs.insert(CGN->getFunction());
-      Func2SCCIndex[CGN] = SCCIndex;
-    }
-    if (SCCs.empty()) {
-      continue;
-    }
-
+    auto Name = Data.SCCName;
     std::cerr << "(Bottom-Up) Processing SCC: " << Name << "\n";
     std::shared_ptr<ConstraintsGenerator> Generator;
 
@@ -1161,12 +1142,13 @@ void TypeRecovery::bottomUpPhase() {
     // for external function(isDeclaration), Use the summary as graph.
     // for non-external but summary overriden, still build the graph but
     // override summary. nomal: build the graph and summary.
-    bool isDeclaration = SCCs.size() == 1 && (*SCCs.begin())->isDeclaration();
+    bool isDeclaration =
+        SCCSet.size() == 1 && (*SCCSet.begin())->isDeclaration();
     if (isDeclaration) {
-      if (SummaryOverride.count(SCCs)) {
+      if (SummaryOverride.count(SCCSet)) {
         std::cerr << "Override summary for external function: " << Name
                   << ":\n";
-        Generator = SummaryOverride.at(SCCs);
+        Generator = SummaryOverride.at(SCCSet);
         Generator->checkSymmetry();
       } else {
         llvm::errs() << "Warning: Summary and result may be incorrect due to "
@@ -1176,7 +1158,7 @@ void TypeRecovery::bottomUpPhase() {
       }
     } else {
       //!! normal case, create the initial constraint graph
-      Generator = std::make_shared<ConstraintsGenerator>(*this, Name, SCCs);
+      Generator = std::make_shared<ConstraintsGenerator>(*this, Name, SCCSet);
       Generator->run();
     }
 
@@ -1231,10 +1213,10 @@ void TypeRecovery::bottomUpPhase() {
     // for declaration, summary is already overriden
     if (isDeclaration) {
       Summary = Generator;
-    } else if (SummaryOverride.count(SCCs)) {
+    } else if (SummaryOverride.count(SCCSet)) {
       // Non-declaration, but summary overriden
       std::cerr << "Summary Overriden: " << Name << ":\n";
-      Summary = SummaryOverride.at(SCCs);
+      Summary = SummaryOverride.at(SCCSet);
     } else {
       //!! normal case, generate summary
       std::cerr << "Generating Summary for " << Name << "\n";
@@ -1248,12 +1230,12 @@ void TypeRecovery::bottomUpPhase() {
     }
 
     // 1.5 save the summary
-    for (auto F : SCCs) {
+    for (auto F : SCCSet) {
       auto It2 = FuncSummaries.emplace(F, Summary);
       assert(It2.second && "Function summary already exist?");
     }
-    AllSCCs.back().SummaryGenerator = Generator;
-    AllSCCs.back().SCCName = Name;
+    Data.SummaryGenerator = Generator;
+    Data.SCCName = Name;
     // write the SCC index to file
     if (SCCsCatalog) {
       *SCCsCatalog << "SCC" << SCCIndex << "," << Name << "\n";
@@ -1318,13 +1300,7 @@ void TypeRecovery::topDownPhase() {
     auto Start2 = std::chrono::steady_clock::now();
 
     // Collect all functions for SCC checking
-    std::set<llvm::Function *> &SCCSet = Data.SCCSet;
-    for (auto CGN : NodeVec) {
-      if (CGN->getFunction() == nullptr) {
-        continue;
-      }
-      SCCSet.insert(CGN->getFunction());
-    }
+    const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
 
     if (DirPath) {
       Generator->CG.printGraph(join(*DirPath, "03-Original.dot").c_str());
@@ -1489,6 +1465,67 @@ void TypeRecovery::handleGlobals() {
       ConstantAddr(), Global->CG.getMemoryNode(retypd::Contravariant)->key);
 }
 
+void TypeRecovery::prepareSCC(CallGraph &CG) {
+  AG.CG = &CG;
+
+  all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(AG.CG);
+  std::vector<SCCData> &AllSCCs = AG.AllSCCs;
+  std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
+  std::set<CallGraphNode *> Visited;
+
+  // Split by SCC post order
+  for (; !CGI.isAtEnd(); ++CGI) {
+    const std::vector<CallGraphNode *> &NodeVec = *CGI;
+    AllSCCs.push_back(SCCData{.Nodes = NodeVec});
+    size_t SCCIndex = AllSCCs.size() - 1;
+    SCCData &Data = AllSCCs.back();
+
+    // Calc name and SCCSet
+    std::set<llvm::Function *> &SCCSet = Data.SCCSet;
+    std::string Name;
+    for (auto CGN : NodeVec) {
+      Visited.insert(CGN);
+      if (CGN->getFunction() == nullptr) {
+        continue;
+      }
+      if (!Name.empty()) {
+        Name += ",";
+      }
+      Name += CGN->getFunction()->getName().str();
+      SCCSet.insert(CGN->getFunction());
+      Func2SCCIndex[CGN] = SCCIndex;
+    }
+    if (!Name.empty()) {
+      Data.SCCName = Name;
+    }
+  }
+
+  // 2. calc reverse call edge map
+  // map from function to all its callers
+  std::map<CallGraphNode *,
+           std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
+      &FuncCallers = AG.FuncCallers;
+  for (auto &Ent : CG) {
+    CallGraphNode *CallerN = Ent.second.get();
+    if (CallerN == nullptr) {
+      continue;
+    }
+    auto *Current = CallerN->getFunction();
+    if (Current == nullptr) {
+      continue;
+    }
+    for (auto &Edge : *CallerN) {
+      auto *CalleeN = Edge.second;
+      if (!Edge.first.hasValue()) {
+        continue;
+      }
+      CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
+      auto &CallVec = FuncCallers[CalleeN];
+      CallVec.emplace_back(I, CallerN);
+    }
+  }
+}
+
 std::unique_ptr<TypeRecovery::Result>
 TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
@@ -1535,40 +1572,13 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
   }
 
-  // 0.6 get the CallGraph, iterate by topological order of SCC
-  CallGraph &CG = MAM.getResult<CallGraphAnalysis>(M);
-  AG.CG = &CG;
+  prepareSCC(MAM.getResult<CallGraphAnalysis>(M));
 
   bottomUpPhase();
 
   if (DebugDir) {
     SCCsCatalog->close();
     printModule(M, join(DebugDir, "02-AfterBottomUp.ll").c_str());
-  }
-
-  // 1.6 calc reverse call edge map
-  // map from function to all its callers
-  std::map<CallGraphNode *,
-           std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
-      &FuncCallers = AG.FuncCallers;
-  for (auto &Ent : CG) {
-    CallGraphNode *CallerN = Ent.second.get();
-    if (CallerN == nullptr) {
-      continue;
-    }
-    auto *Current = CallerN->getFunction();
-    if (Current == nullptr) {
-      continue;
-    }
-    for (auto &Edge : *CallerN) {
-      auto *CalleeN = Edge.second;
-      if (!Edge.first.hasValue()) {
-        continue;
-      }
-      CallBase *I = llvm::cast<llvm::CallBase>(&*Edge.first.getValue());
-      auto &CallVec = FuncCallers[CalleeN];
-      CallVec.emplace_back(I, CallerN);
-    }
   }
 
   topDownPhase();

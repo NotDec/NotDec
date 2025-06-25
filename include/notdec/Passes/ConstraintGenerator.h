@@ -59,11 +59,11 @@ struct ConstraintsGenerator;
 
 struct SCCData {
   std::vector<CallGraphNode *> Nodes;
-  std::shared_ptr<ConstraintsGenerator> SummaryGenerator;
   std::string SCCName;
+  std::set<llvm::Function *> SCCSet;
+  std::shared_ptr<ConstraintsGenerator> SummaryGenerator;
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
-  std::set<llvm::Function *> SCCSet;
 };
 
 struct AllGraphs {
@@ -101,6 +101,8 @@ struct TypeRecovery {
   unsigned pointer_size = 0;
 
   std::unique_ptr<Result> run(Module &M, ModuleAnalysisManager &);
+  // Prepare topological order of SCC in AG.AllSCCs
+  void prepareSCC(CallGraph &CG);
   void bottomUpPhase();
   void topDownPhase();
   void handleGlobals();
