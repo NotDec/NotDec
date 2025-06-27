@@ -81,6 +81,7 @@ struct TypeRecovery {
   // Specify the result type of this analysis pass.
   using Result = ::notdec::llvm2c::HTypeResult;
 
+  const Module &Mod;
   std::shared_ptr<retypd::TRContext> TRCtx;
   llvm::Value *StackPointer;
   std::string data_layout;
@@ -100,7 +101,16 @@ struct TypeRecovery {
 
   unsigned pointer_size = 0;
 
-  std::unique_ptr<Result> run(Module &M, ModuleAnalysisManager &);
+  std::unique_ptr<Result> ResultVal;
+  void run(Module &M1, ModuleAnalysisManager &MAM);
+  // on demand running
+  std::unique_ptr<Result> &getResult(Module &M1, ModuleAnalysisManager &MAM) {
+    if (AG.AllSCCs.empty()) {
+      run(M1, MAM);
+    }
+    assert(ResultVal != nullptr);
+    return ResultVal;
+  }
   // Prepare topological order of SCC in AG.AllSCCs
   void prepareSCC(CallGraph &CG);
   void bottomUpPhase();
@@ -121,8 +131,9 @@ struct TypeRecovery {
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
 
-  TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx)
-      : TRCtx(TRCtx), DebugDir(std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")),
+  TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx, Module &M)
+      : Mod(M), TRCtx(TRCtx),
+        DebugDir(std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")),
         SummaryFile(std::getenv("NOTDEC_SUMMARY_OVERRIDE")),
         SigFile(std::getenv("NOTDEC_SIGNATURE_OVERRIDE")),
         Traces(std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS")) {
@@ -416,7 +427,38 @@ inline TypeVariable getCallRetTV(CGNode &Target) {
   return TV.pushLabel({retypd::OutLabel{}});
 }
 
-// ================ type generator ======================
+// #region FunctionTypeRecovery
+
+struct TypeRecoveryMain : PassInfoMixin<TypeRecoveryMain> {
+
+  TypeRecovery &TR;
+  TypeRecoveryMain(TypeRecovery &TR) : TR(TR) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    TR.run(M, MAM);
+    return PreservedAnalyses::all();
+  }
+};
+
+struct FunctionTypeRecovery : AnalysisInfoMixin<FunctionTypeRecovery> {
+
+  struct FuncTypeResult{};
+
+  // TODO
+  using Result = FuncTypeResult;
+  static inline llvm::AnalysisKey Key; // NOLINT
+  friend llvm::AnalysisInfoMixin<FunctionTypeRecovery>;
+
+  TypeRecovery &TR;
+  FunctionTypeRecovery(TypeRecovery &TR) : TR(TR) {}
+
+  Result run(Function &F, FunctionAnalysisManager &FAM) {
+    // TODO, if function generator is not invalidated.
+    return {};
+  }
+};
+
+// #endregion FunctionTypeRecovery
 
 } // namespace notdec
 

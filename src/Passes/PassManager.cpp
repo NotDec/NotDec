@@ -107,13 +107,14 @@ struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
 // A Pass that convert module to C.
 struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
 
+  TypeRecovery &TR;
   std::string OutFilePath;
   ::notdec::llvm2c::Options llvm2cOpt;
   bool disableTypeRecovery = false;
 
-  NotdecLLVM2C(std::string outFilePath, ::notdec::llvm2c::Options &llvm2cOpt,
-               bool disableTypeRecovery)
-      : OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
+  NotdecLLVM2C(TypeRecovery &TR, std::string outFilePath,
+               ::notdec::llvm2c::Options &llvm2cOpt, bool disableTypeRecovery)
+      : TR(TR), OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
         disableTypeRecovery(disableTypeRecovery) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
@@ -144,11 +145,8 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
 
       // Run type recovery.
       std::unique_ptr<TypeRecovery::Result> HighTypes;
-      std::shared_ptr<retypd::TRContext> TRCtx =
-          std::make_shared<retypd::TRContext>();
-      auto TR = TypeRecovery(TRCtx);
       if (!disableTypeRecovery) {
-        HighTypes = TR.run(M, MAM);
+        HighTypes = std::move(TR.getResult(M, MAM));
         HighTypes->dump();
       }
 
@@ -350,10 +348,15 @@ void DecompileConfig::run_passes() {
     printModule(Mod, join(DebugDir, "00-lifted.ll").c_str());
   }
 
+  // Type recovery context for the module
+  std::shared_ptr<retypd::TRContext> TRCtx =
+      std::make_shared<retypd::TRContext>();
+  auto TR = TypeRecovery(TRCtx, Mod);
+
   // Create the analysis managers.
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
-  CGSCCAnalysisManager CGAM;
+  CGSCCAnalysisManager SCCAM;
   ModuleAnalysisManager MAM;
 
   // add instrumentations.
@@ -375,11 +378,12 @@ void DecompileConfig::run_passes() {
 
   // Register all the basic analyses with the managers.
   PB.registerModuleAnalyses(MAM);
-  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerCGSCCAnalyses(SCCAM);
   PB.registerFunctionAnalyses(FAM);
   PB.registerLoopAnalyses(LAM);
-  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  PB.crossRegisterProxies(LAM, FAM, SCCAM, MAM);
   MAM.registerPass([&]() { return StackPointerFinderAnalysis(); });
+  FAM.registerPass([&]() { return FunctionTypeRecovery(TR); });
 
   // Create the pass manager.
   // Optimize the IR!
@@ -441,7 +445,7 @@ void DecompileConfig::run_passes() {
       std::abort();
     }
   }
-  MPM.addPass(NotdecLLVM2C(OutFilePath, llvm2cOpt, Opts.onlyOptimize));
+  MPM.addPass(NotdecLLVM2C(TR, OutFilePath, llvm2cOpt, Opts.onlyOptimize));
   MPM.run(Mod, MAM);
 }
 

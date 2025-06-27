@@ -1118,6 +1118,7 @@ void TypeRecovery::bottomUpPhase() {
       continue;
     }
 
+    // Print for debug dir
     llvm::Optional<std::string> DirPath;
     std::string SCCName = "SCC" + std::to_string(SCCIndex);
     if (DebugDir) {
@@ -1533,10 +1534,11 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
   }
 }
 
-std::unique_ptr<TypeRecovery::Result>
-TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
+void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
 
+  assert(&M1 == &Mod);
+  auto &M = const_cast<Module &>(Mod);
   auto SP = MAM.getResult<StackPointerFinderAnalysis>(M);
   this->StackPointer = SP.result;
 
@@ -1609,14 +1611,13 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
-  std::unique_ptr<TypeRecovery::Result> Result =
-      std::make_unique<TypeRecovery::Result>();
+  // 3 build AST type for each value in value map
+  ResultVal = std::make_unique<TypeRecovery::Result>();
   auto HTCtx = std::make_shared<ast::HTypeContext>();
   retypd::TypeBuilderContext TBC(*HTCtx, M.getName(), M.getDataLayout());
   using notdec::ast::HType;
   using notdec::ast::HTypeContext;
-
-  // 3 build AST type for each value in value map
+  
   auto &AllSCCs = AG.AllSCCs;
   for (int i = 0; i < AllSCCs.size(); i++) {
     auto &G = *AllSCCs[i].TopDownGenerator;
@@ -1695,13 +1696,13 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               << ": Type is " << CTy->getAsString() << "\n";
         }
 
-        if (Result->ValueTypes.count(Ent.first) != 0) {
+        if (ResultVal->ValueTypes.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
                        << toString(Ent.first) << "\n";
         }
 
         if (!isFuncPtr(Ent.first)) {
-          Result->ValueTypes[Ent.first] = CTy;
+          ResultVal->ValueTypes[Ent.first] = CTy;
         }
 
         if (ValueTypesFile) {
@@ -1757,12 +1758,12 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
               << ": Type is " << CTy->getAsString() << "\n";
         }
 
-        if (Result->ValueTypesLowerBound.count(Ent.first) != 0) {
+        if (ResultVal->ValueTypesLowerBound.count(Ent.first) != 0) {
           llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
                        << toString(Ent.first) << "\n";
         }
         if (!isFuncPtr(Ent.first)) {
-          Result->ValueTypesLowerBound[Ent.first] = CTy;
+          ResultVal->ValueTypesLowerBound[Ent.first] = CTy;
         }
         if (ValueTypesFile) {
           *ValueTypesFile << " lower bound: " << CTy->getAsString();
@@ -1819,11 +1820,11 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   // analyzeSignedness(AG, Mem);
 
   // 4 Save the result
-  Result->MemoryType = CTy->getPointeeType();
-  Result->MemoryDecl = Mem;
+  ResultVal->MemoryType = CTy->getPointeeType();
+  ResultVal->MemoryDecl = Mem;
 
   // move the ASTUnit to result
-  Result->HTCtx = HTCtx;
+  ResultVal->HTCtx = HTCtx;
 
   // gen_json("retypd-constrains.json");
 
@@ -1833,7 +1834,7 @@ TypeRecovery::run(Module &M, ModuleAnalysisManager &MAM) {
   }
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
-  return Result;
+  // return Result;
 }
 
 void ConstraintsGenerator::makeSymmetry() {

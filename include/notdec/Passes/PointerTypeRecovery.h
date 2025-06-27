@@ -16,7 +16,7 @@ using namespace llvm;
 struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding  pass manager (to be queried if need be)
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &mam);
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 
   // Without isRequired returning true, this pass will be skipped for functions
   // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
