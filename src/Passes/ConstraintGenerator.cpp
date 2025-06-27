@@ -118,26 +118,18 @@ void TypeRecovery::loadSignatureFile(Module &M, const char *SigFile) {
     assert(ValE && "JSON parse failed");
     auto Val = ValE->getAsObject();
     for (auto &Ent : *Val) {
-      std::set<Function *> FSet;
       llvm::errs() << "Loading signature for function: " << Ent.first << "\n";
-      for (auto Str : split(Ent.first, ',')) {
-        auto *F = M.getFunction(Str);
-        if (F == nullptr) {
-          llvm::errs() << "Warning: Function not found: " << Ent.first.str()
-                       << "\n";
-          continue;
-        }
-        FSet.insert(F);
-      }
-      // Sig func not in this module.
-      if (FSet.empty()) {
+      auto *F = M.getFunction(Ent.first);
+      if (F == nullptr) {
+        llvm::errs() << "Warning: Function not found: " << Ent.first.str()
+                     << "\n";
         continue;
       }
       retypd::ConstraintSummary Summary{{}, pointer_size, {}};
       Summary.fromJSON(*TRCtx, *Ent.second.getAsObject());
-      auto CG = ConstraintsGenerator::fromConstraints(*this, FSet, Summary);
+      auto CG = ConstraintsGenerator::fromConstraints(*this, {F}, Summary);
       CG->CG.linkPrimitives();
-      SignatureOverride[FSet] = CG;
+      SignatureOverride[F] = CG;
     }
   } else if (getSuffix(SigFile) == ".dot") {
     assert(false && "TODO");
@@ -1271,11 +1263,29 @@ void TypeRecovery::topDownPhase() {
     std::size_t SCCIndex = Index1 - 1;
     auto &Data = AllSCCs[SCCIndex];
     std::string SCCDebugFolderName = "SCC" + std::to_string(SCCIndex);
+    const std::vector<CallGraphNode *> &NodeVec = Data.Nodes;
+    const std::shared_ptr<ConstraintsGenerator> &Generator =
+        Data.BottomUpGenerator;
+    auto &Name = Data.SCCName;
+    // Collect all functions for SCC checking
+    const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
+
+    if (Data.BottomUpGenerator == nullptr) {
+      continue;
+    }
+
     Data.TopDownGenerator =
         std::make_shared<ConstraintsGenerator>(*this, Data.SCCName);
     auto &CurrentTypes = *(Data.TopDownGenerator);
     assert(CurrentTypes.PG);
 
+    SCCSignatureTypes &SigTy = Data.SigTy;
+    SigTy.SignatureGenerator =
+        std::make_shared<ConstraintsGenerator>(*this, Data.SCCName + "-sig");
+    auto &SigTypes = *(SigTy.SignatureGenerator);
+    assert(SigTypes.PG);
+
+    // for debug print
     llvm::Optional<std::string> DirPath;
     if (DebugDir) {
       DirPath.emplace(join(DebugDir, SCCDebugFolderName));
@@ -1294,18 +1304,8 @@ void TypeRecovery::topDownPhase() {
       }
     }
 
-    const std::vector<CallGraphNode *> &NodeVec = Data.Nodes;
-    if (Data.BottomUpGenerator == nullptr) {
-      continue;
-    }
-    std::shared_ptr<ConstraintsGenerator> &Generator = Data.BottomUpGenerator;
-    auto &Name = Data.SCCName;
-
     std::cerr << "(Top-Down) Processing Func: " << Name << "\n";
     auto Start2 = std::chrono::steady_clock::now();
-
-    // Collect all functions for SCC checking
-    const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
 
     if (DirPath) {
       Generator->CG.printGraph(join(*DirPath, "03-Original.dot").c_str());
@@ -1326,9 +1326,9 @@ void TypeRecovery::topDownPhase() {
       std::set<CGNode *> FuncNodes;
       std::set<CGNode *> FuncNodesContra;
 
-      if (SignatureOverride.count(SCCSet)) {
+      if (SignatureOverride.count(Current)) {
         std::cerr << "Function Signature Overriden: " << Name << "\n";
-        auto &SigGen = SignatureOverride.at(SCCSet);
+        auto &SigGen = SignatureOverride.at(Current);
         SigGen->CG.linkPrimitives();
 
         auto SigNode =
@@ -1372,9 +1372,9 @@ void TypeRecovery::topDownPhase() {
         }
       }
 
-      auto *D = multiGraphDeterminizeTo(CurrentTypes, FuncNodes, "act_");
-      CurrentTypes.addSubtype(
-          CurrentTypes.getNode(Current, nullptr, -1, retypd::Covariant), *D);
+      // auto *D = multiGraphDeterminizeTo(CurrentTypes, FuncNodes, "act_");
+      auto *D = multiGraphDeterminizeTo(SigTypes, FuncNodes, "act_");
+      SigTy.FuncNodeMap.insert({Current, D});
 
       // We do not need to do it again for Contravariant because it is
       // symmetric?
@@ -1382,11 +1382,12 @@ void TypeRecovery::topDownPhase() {
       // auto *DC = multiGraphDeterminizeTo(CurrentTypes, FuncNodesContra,
       // "actc_"); CurrentTypes.addSubtype(*DC, CurrentTypes.getNode(Current,
       // nullptr, -1, retypd::Contravariant));
-
-      CurrentTypes.makeSymmetry();
-      // Run saturation again
-      CurrentTypes.CG.solve();
     }
+
+    SigTy.instantiate(CurrentTypes);
+
+    // Run saturation again
+    CurrentTypes.CG.solve();
 
     if (DirPath) {
       CurrentTypes.CG.printGraph(join(*DirPath, "05-CurrentTypes.dot").c_str());
@@ -1416,6 +1417,17 @@ void TypeRecovery::topDownPhase() {
   handleGlobals();
 }
 
+void SCCSignatureTypes::instantiate(ConstraintsGenerator &To) {
+  std::map<const CGNode *, CGNode *> Old2New;
+  SignatureGenerator->cloneTo(To, Old2New);
+  for (auto Ent : FuncNodeMap) {
+    Function *Current = Ent.first;
+    To.addSubtype(To.getNode(Current, nullptr, -1, retypd::Covariant),
+                  *Old2New.at(Ent.second));
+  }
+  To.makeSymmetry();
+}
+
 void TypeRecovery::handleGlobals() {
   // 2.4 solve the global memory node
   // Create type for memory node
@@ -1425,6 +1437,8 @@ void TypeRecovery::handleGlobals() {
   std::set<CGNode *> MemoryNodesC;
   auto &AllSCCs = AG.AllSCCs;
   for (auto &Ent : AllSCCs) {
+    if (!Ent.TopDownGenerator)
+      continue;
     auto &G = *(Ent.TopDownGenerator);
     if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Covariant)) {
       if (M->outEdges.empty()) {
@@ -1545,7 +1559,7 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
   data_layout = std::move(M.getDataLayoutStr());
   pointer_size = M.getDataLayout().getPointerSizeInBits();
 
-  std::shared_ptr<BytesManager> MemoryBytes = BytesManager::create(M);
+  MemoryBytes = BytesManager::create(M);
 
   // 0 Preparation
   // 0.1 load summary file
@@ -1610,16 +1624,20 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
       std::abort();
     }
   }
+}
 
+void TypeRecovery::genASTTypes() {
   // 3 build AST type for each value in value map
   ResultVal = std::make_unique<TypeRecovery::Result>();
   auto HTCtx = std::make_shared<ast::HTypeContext>();
-  retypd::TypeBuilderContext TBC(*HTCtx, M.getName(), M.getDataLayout());
+  retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
   using notdec::ast::HType;
   using notdec::ast::HTypeContext;
-  
+
   auto &AllSCCs = AG.AllSCCs;
   for (int i = 0; i < AllSCCs.size(); i++) {
+    if (!AllSCCs[i].TopDownGenerator)
+      continue;
     auto &G = *AllSCCs[i].TopDownGenerator;
     auto SCCName = AllSCCs[i].SCCName;
     assert(G.PG);
@@ -1830,11 +1848,16 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
 
   // TODO convert the type back to LLVM IR??
   if (DebugDir) {
-    printAnnotatedModule(M, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
+    printAnnotatedModule(Mod, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
   }
 
   LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
-  // return Result;
+}
+
+PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
+
+  // TODO
+  return PreservedAnalyses::all();
 }
 
 void ConstraintsGenerator::makeSymmetry() {
@@ -3535,7 +3558,7 @@ void TypeRecovery::print(llvm::Module &M, std::string path) {
   }
 }
 
-void TypeRecovery::printAnnotatedModule(llvm::Module &M, std::string path,
+void TypeRecovery::printAnnotatedModule(const llvm::Module &M, std::string path,
                                         int level) {
   std::error_code EC;
   llvm::raw_fd_ostream os(path, EC);

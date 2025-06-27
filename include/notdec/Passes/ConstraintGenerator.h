@@ -57,10 +57,18 @@ using retypd::TypeVariable;
 
 struct ConstraintsGenerator;
 
+struct SCCSignatureTypes {
+  std::shared_ptr<ConstraintsGenerator> SignatureGenerator;
+  std::map<llvm::Function *, CGNode *> FuncNodeMap;
+
+  void instantiate(ConstraintsGenerator &To);
+};
+
 struct SCCData {
   std::vector<CallGraphNode *> Nodes;
   std::string SCCName;
   std::set<llvm::Function *> SCCSet;
+  SCCSignatureTypes SigTy;
   std::shared_ptr<ConstraintsGenerator> BottomUpGenerator;
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
@@ -92,10 +100,10 @@ struct TypeRecovery {
 
   AllGraphs AG;
 
+  std::shared_ptr<BytesManager> MemoryBytes;
   std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
       SummaryOverride;
-  std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
-      SignatureOverride;
+  std::map<Function *, std::shared_ptr<ConstraintsGenerator>> SignatureOverride;
   std::map<CallBase *, std::shared_ptr<ConstraintsGenerator>>
       CallsiteSummaryOverride;
 
@@ -105,10 +113,10 @@ struct TypeRecovery {
   void run(Module &M1, ModuleAnalysisManager &MAM);
   // on demand running
   std::unique_ptr<Result> &getResult(Module &M1, ModuleAnalysisManager &MAM) {
-    if (AG.AllSCCs.empty()) {
-      run(M1, MAM);
+    assert((!AG.AllSCCs.empty()) && "function run() is not called!");
+    if (ResultVal == nullptr) {
+      genASTTypes();
     }
-    assert(ResultVal != nullptr);
     return ResultVal;
   }
   // Prepare topological order of SCC in AG.AllSCCs
@@ -116,6 +124,7 @@ struct TypeRecovery {
   void bottomUpPhase();
   void topDownPhase();
   void handleGlobals();
+  void genASTTypes();
   void gen_json(std::string OutputFilename);
 
   // NOTDEC_TYPE_RECOVERY_DEBUG_DIR
@@ -154,7 +163,7 @@ struct TypeRecovery {
   void loadSummaryFile(Module &M, const char *path);
   void loadSignatureFile(Module &M, const char *path);
   void print(Module &M, std::string path);
-  void printAnnotatedModule(Module &M, std::string path, int level);
+  void printAnnotatedModule(const Module &M, std::string path, int level);
 };
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
@@ -440,9 +449,17 @@ struct TypeRecoveryMain : PassInfoMixin<TypeRecoveryMain> {
   }
 };
 
+struct TypeRecoveryOpt : PassInfoMixin<TypeRecoveryOpt> {
+
+  TypeRecovery &TR;
+  TypeRecoveryOpt(TypeRecovery &TR) : TR(TR) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
+};
+
 struct FunctionTypeRecovery : AnalysisInfoMixin<FunctionTypeRecovery> {
 
-  struct FuncTypeResult{};
+  struct FuncTypeResult {};
 
   // TODO
   using Result = FuncTypeResult;

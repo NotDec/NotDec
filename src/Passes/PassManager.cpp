@@ -445,6 +445,14 @@ void DecompileConfig::run_passes() {
       std::abort();
     }
   }
+
+  bool isC = getSuffix(OutFilePath) == ".c";
+
+  if (isC && !Opts.onlyOptimize) {
+    MPM.addPass(TypeRecoveryMain(TR));
+    // MPM.addPass(TypeRecoveryOpt());
+  }
+
   MPM.addPass(NotdecLLVM2C(TR, OutFilePath, llvm2cOpt, Opts.onlyOptimize));
   MPM.run(Mod, MAM);
 }
