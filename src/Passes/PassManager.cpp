@@ -450,7 +450,7 @@ void DecompileConfig::run_passes() {
 
   if (isC && !Opts.onlyOptimize) {
     MPM.addPass(TypeRecoveryMain(TR));
-    // MPM.addPass(TypeRecoveryOpt());
+    MPM.addPass(TypeRecoveryOpt(TR));
   }
 
   MPM.addPass(NotdecLLVM2C(TR, OutFilePath, llvm2cOpt, Opts.onlyOptimize));

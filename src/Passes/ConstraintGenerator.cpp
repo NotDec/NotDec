@@ -1549,7 +1549,7 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
 }
 
 void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
-  LLVM_DEBUG(errs() << " ============== RetypdGenerator  ===============\n");
+  LLVM_DEBUG(errs() << " ============== TypeRecovery::run  ===============\n");
 
   assert(&M1 == &Mod);
   auto &M = const_cast<Module &>(Mod);
@@ -1624,6 +1624,9 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
       std::abort();
     }
   }
+
+  LLVM_DEBUG(
+      errs() << " ============== TypeRecovery::run End ===============\n");
 }
 
 void TypeRecovery::genASTTypes() {
@@ -1850,14 +1853,32 @@ void TypeRecovery::genASTTypes() {
   if (DebugDir) {
     printAnnotatedModule(Mod, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
   }
-
-  LLVM_DEBUG(errs() << " ============== RetypdGenerator End ===============\n");
 }
 
 PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
 
+  std::vector<SCCData> &AllSCCs = TR.AG.AllSCCs;
+
+  for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
+    SCCData &Data = AllSCCs.at(SCCIndex);
+
+    bool Changed = true;
+    do {
+      Changed = false;
+
+      // 现计算当前SCC的HType类型
+      if (Data.TopDownGenerator == nullptr) {
+        // recalc TopDown graph
+      }
+      // do post process and gen HType.
+
+      // 然后像那个LLVM2C的一样弄一个Visitor
+
+    } while (Changed);
+  }
+
   // TODO
-  return PreservedAnalyses::all();
+  return PreservedAnalyses::none();
 }
 
 void ConstraintsGenerator::makeSymmetry() {
