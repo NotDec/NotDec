@@ -56,6 +56,7 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
+#include "Utils/SingleNodeSCCIterator.h"
 #include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/HType.h"
@@ -1088,8 +1089,10 @@ void ConstraintsGenerator::preSimplify() {
     }
   }
 
-  llvm::errs() << "preSimplify: linear subtype eliminated "
-               << std::to_string(SimplifyCount) << " Nodes!\n";
+  if (SimplifyCount > 0) {
+    llvm::errs() << "preSimplify: linear subtype eliminated "
+                 << std::to_string(SimplifyCount) << " Nodes!\n";
+  }
 }
 
 bool isFuncPtr(ExtValuePtr Val) {
@@ -1234,7 +1237,7 @@ void TypeRecovery::bottomUpPhase() {
       auto It2 = FuncSummaries.emplace(F, Summary);
       assert(It2.second && "Function summary already exist?");
     }
-    Data.SummaryGenerator = Generator;
+    Data.BottomUpGenerator = Generator;
     Data.SCCName = Name;
     // write the SCC index to file
     if (SCCsCatalog) {
@@ -1275,7 +1278,7 @@ void TypeRecovery::topDownPhase() {
     llvm::Optional<std::string> DirPath;
     if (DebugDir) {
       DirPath.emplace(join(DebugDir, SCCDebugFolderName));
-      // llvm::sys::fs::create_directories(*DirPath);
+      llvm::sys::fs::create_directories(*DirPath);
     }
     llvm::Optional<llvm::raw_fd_ostream> SCCsPerf;
     if (DirPath) {
@@ -1283,17 +1286,18 @@ void TypeRecovery::topDownPhase() {
       SCCsPerf.emplace(join(*DirPath, "Perf.txt"), EC, sys::fs::OF_Append);
       if (EC) {
         std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                  << "Cannot open output file Perf.txt." << std::endl;
+                  << "Cannot open output file " << *DirPath << "/Perf.txt."
+                  << std::endl;
         std::cerr << EC.message() << std::endl;
         std::abort();
       }
     }
 
     const std::vector<CallGraphNode *> &NodeVec = Data.Nodes;
-    if (Data.SummaryGenerator == nullptr) {
+    if (Data.BottomUpGenerator == nullptr) {
       continue;
     }
-    std::shared_ptr<ConstraintsGenerator> &Generator = Data.SummaryGenerator;
+    std::shared_ptr<ConstraintsGenerator> &Generator = Data.BottomUpGenerator;
     auto &Name = Data.SCCName;
 
     std::cerr << "(Top-Down) Processing Func: " << Name << "\n";
@@ -1389,6 +1393,7 @@ void TypeRecovery::topDownPhase() {
 
     // 2.3 solve again and fixups
     // ensure lower bound is lower than upper bound
+    // CurrentTypes.makeSymmetry();
     CurrentTypes.linkContraToCovariant();
     CurrentTypes.CG.solve();
     CurrentTypes.CG.linkConstantPtr2Memory();
@@ -1469,13 +1474,15 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
   AG.CG = &CG;
 
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(AG.CG);
+  SingleNodeSCCIterator SNI(notdec::scc_begin(AG.CG));
+
   std::vector<SCCData> &AllSCCs = AG.AllSCCs;
   std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
   std::set<CallGraphNode *> Visited;
 
   // Split by SCC post order
-  for (; !CGI.isAtEnd(); ++CGI) {
-    const std::vector<CallGraphNode *> &NodeVec = *CGI;
+  for (; (NoSCC ? !SNI.isAtEnd() : !CGI.isAtEnd()); (NoSCC ? ++SNI : ++CGI)) {
+    const std::vector<CallGraphNode *> &NodeVec = (NoSCC ? *SNI : *CGI);
     AllSCCs.push_back(SCCData{.Nodes = NodeVec});
     size_t SCCIndex = AllSCCs.size() - 1;
     SCCData &Data = AllSCCs.back();
@@ -2007,7 +2014,9 @@ void ConstraintsGenerator::linkContraToCovariant() {
   for (auto &Ent : V2N) {
     auto *N = &CG.getNode(Ent.second);
     if (V2NContra.count(Ent.first) == 0) {
-      assert(false);
+      llvm::errs() << "Error: Cannot find " << toString(Ent.second) << "\n";
+      // assert(false);
+      continue;
     }
     auto *CN = &CG.getNode(V2NContra.at(Ent.first));
     assert(CN->getPNIVar() == N->getPNIVar());
@@ -2138,7 +2147,7 @@ void ConstraintsGenerator::mergeOnlySubtype() {
     // merge A to B
     LLVM_DEBUG(llvm::dbgs() << "Merge: " << toString(A->key) << " to "
                             << toString(B->key) << "\n");
-    mergeNodeTo(*A, *B, true);
+    mergeNodeTo(*A, *B, false);
     A = nullptr;
     B = nullptr;
     std::tie(A, B) = findMergePair();
@@ -3439,7 +3448,7 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
     std::shared_ptr<ConstraintsGenerator> CG = nullptr;
     auto Ind = AG.Func2SCCIndex.at(CGN);
     if (Level == 0) {
-      CG = AG.AllSCCs.at(Ind).SummaryGenerator;
+      CG = AG.AllSCCs.at(Ind).BottomUpGenerator;
     } else if (Level == 1) {
       CG = AG.AllSCCs.at(Ind).TopDownGenerator;
     } else if (Level == 2) {

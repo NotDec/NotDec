@@ -363,9 +363,9 @@ public:
       if (Label.isOne()) {
         return nullptr;
       }
-      std::cerr << "Warning: Non-null self edge: " << toString(From.key)
-                << " To " << toString(To.key) << " Label: " << toString(Label)
-                << "\n";
+      // std::cerr << "Warning: Non-null self edge: " << toString(From.key)
+      //           << " To " << toString(To.key) << " Label: " << toString(Label)
+      //           << "\n";
     }
     // do not maintain PNI during layer split.
     if (PG && !isLayerSplit) {

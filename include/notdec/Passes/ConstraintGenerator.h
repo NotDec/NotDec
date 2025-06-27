@@ -61,7 +61,7 @@ struct SCCData {
   std::vector<CallGraphNode *> Nodes;
   std::string SCCName;
   std::set<llvm::Function *> SCCSet;
-  std::shared_ptr<ConstraintsGenerator> SummaryGenerator;
+  std::shared_ptr<ConstraintsGenerator> BottomUpGenerator;
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
 };
@@ -116,6 +116,8 @@ struct TypeRecovery {
   const char *SigFile;
   // NOTDEC_TYPE_RECOVERY_TRACE_IDS
   const char *Traces;
+  // NOTDEC_TYPE_RECOVERY_NO_SCC
+  bool NoSCC = false;
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
 
@@ -123,7 +125,14 @@ struct TypeRecovery {
       : TRCtx(TRCtx), DebugDir(std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")),
         SummaryFile(std::getenv("NOTDEC_SUMMARY_OVERRIDE")),
         SigFile(std::getenv("NOTDEC_SIGNATURE_OVERRIDE")),
-        Traces(std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS")) {}
+        Traces(std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS")) {
+    if (const char *path = std::getenv("NOTDEC_TYPE_RECOVERY_NO_SCC")) {
+      if ((std::strcmp(path, "1") == 0)) {
+        llvm::errs() << "Warning: Splitting SCCs to single function!\n";
+        NoSCC = true;
+      }
+    }
+  }
 
   static std::shared_ptr<ConstraintsGenerator>
   postProcess(ConstraintsGenerator &G, std::string DebugDir);
