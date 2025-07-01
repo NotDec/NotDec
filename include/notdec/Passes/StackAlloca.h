@@ -15,7 +15,7 @@ struct LinearAllocationRecovery : PassInfoMixin<LinearAllocationRecovery> {
     return offset < 0 ? "N" + std::to_string(-offset) : std::to_string(offset);
   }
 
-  static void matchAllocas(Function &F, Value* SP);
+  static void matchDynamicAllocas(Function &F, Value* SP);
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
 };

@@ -1,6 +1,7 @@
 #include "Passes/StackAlloca.h"
 #include "Passes/StackPointerFinder.h"
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
@@ -18,7 +19,18 @@
 
 namespace notdec {
 
-void LinearAllocationRecovery::matchAllocas(Function &F, Value *SP) {
+Instruction* createAllocaWithSize(IRBuilder<>& Builder, Value* Size, const Twine &Name) {
+  auto i8 = IntegerType::get(Builder.getContext(), 8);
+  if (auto C = dyn_cast<ConstantInt>(Size)) {
+    auto si8 = ArrayType::get(i8, C->getSExtValue());
+    return Builder.CreateAlloca(si8, nullptr, Name);
+  }
+  return Builder.CreateAlloca(
+        i8,
+        Size, Name);
+}
+
+void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP) {
   using namespace llvm::PatternMatch;
   Value *OldStackEnd = nullptr;
   Value *Size = nullptr;
@@ -39,7 +51,7 @@ void LinearAllocationRecovery::matchAllocas(Function &F, Value *SP) {
         IRBuilder<> Builder(I.getParent());
         Builder.SetInsertPoint(&I);
         llvm::errs() << "stack alloca: " << *Size << "\n";
-        Instruction* Alloca = Builder.CreateAlloca(Type::getInt8Ty(F.getContext()), Size, "alloc_mem");
+        Instruction* Alloca = createAllocaWithSize(Builder, Size, "alloc_mem");
         Alloca = llvm::cast<Instruction>(Builder.CreatePtrToInt(Alloca, Sub->getType()));
         // create a alloca inst with arg Size.
         toRemove.push_back(&I);
@@ -193,11 +205,10 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         continue;
       }
     }
-    matchAllocas(*F, sp);
+    matchDynamicAllocas(*F, sp);
 
     // replace the stack allocation with alloca.
     bool grow_negative = sp_result.direction == 0;
-    auto pty = PointerType::get(IntegerType::get(M.getContext(), 8), 0);
     auto SizeTy = IntegerType::get(M.getContext(),
                                    M.getDataLayout().getPointerSizeInBits());
     // TODO handle positive grow direction.
@@ -210,9 +221,7 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
     //   space = Builder.CreateNeg(space);
     // }
     Builder.SetInsertPoint(LoadSP);
-    Value *alloc = Builder.CreateAlloca(
-        pty->getPointerElementType(),
-        grow_negative ? Builder.CreateNeg(space) : space, "stack");
+    Value *alloc = createAllocaWithSize(Builder, grow_negative ? Builder.CreateNeg(space) : space, "stack");
     cast<Instruction>(alloc)->setMetadata(
         "notdec.stack_direction",
         MDNode::get(M.getContext(), MDString::get(M.getContext(), "negative")));
