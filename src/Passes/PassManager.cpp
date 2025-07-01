@@ -351,7 +351,8 @@ void DecompileConfig::run_passes() {
   // Type recovery context for the module
   std::shared_ptr<retypd::TRContext> TRCtx =
       std::make_shared<retypd::TRContext>();
-  auto TR = TypeRecovery(TRCtx, Mod);
+  std::shared_ptr<ast::HTypeContext> HTCtx = std::make_shared<ast::HTypeContext>();
+  auto TR = TypeRecovery(TRCtx, HTCtx, Mod);
 
   // Create the analysis managers.
   LoopAnalysisManager LAM;

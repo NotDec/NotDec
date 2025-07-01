@@ -39,6 +39,7 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/TRContext.h"
 #include "Utils/DSUMap.h"
+#include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
@@ -64,6 +65,11 @@ struct SCCSignatureTypes {
   void instantiate(ConstraintsGenerator &To);
 };
 
+struct SCCTypeResult {
+  std::map<ExtValuePtr, ast::HType *> ValueTypes;
+  std::map<ExtValuePtr, ast::HType *> ValueTypesLowerBound;
+};
+
 struct SCCData {
   std::vector<CallGraphNode *> Nodes;
   std::string SCCName;
@@ -72,6 +78,7 @@ struct SCCData {
   std::shared_ptr<ConstraintsGenerator> BottomUpGenerator;
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
+  std::shared_ptr<SCCTypeResult> TypeResult;
 };
 
 struct AllGraphs {
@@ -91,6 +98,8 @@ struct TypeRecovery {
 
   const Module &Mod;
   std::shared_ptr<retypd::TRContext> TRCtx;
+  std::shared_ptr<ast::HTypeContext> HTCtx;
+
   llvm::Value *StackPointer;
   std::string data_layout;
 
@@ -122,6 +131,10 @@ struct TypeRecovery {
   // Prepare topological order of SCC in AG.AllSCCs
   void prepareSCC(CallGraph &CG);
   void bottomUpPhase();
+  std::shared_ptr<ConstraintsGenerator>
+  getBottomUpGraph(SCCData &Data, const char *OriginalGraphPath = nullptr);
+  std::shared_ptr<ConstraintsGenerator> getTopDownGraph(SCCData &Data);
+  std::shared_ptr<SCCTypeResult> getASTTypes(SCCData &Data, std::string DebugDir = "");
   void topDownPhase();
   void handleGlobals();
   void genASTTypes();
@@ -140,8 +153,9 @@ struct TypeRecovery {
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
 
-  TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx, Module &M)
-      : Mod(M), TRCtx(TRCtx),
+  TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx,
+               std::shared_ptr<ast::HTypeContext> HTCtx, Module &M)
+      : Mod(M), TRCtx(TRCtx), HTCtx(HTCtx),
         DebugDir(std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")),
         SummaryFile(std::getenv("NOTDEC_SUMMARY_OVERRIDE")),
         SigFile(std::getenv("NOTDEC_SIGNATURE_OVERRIDE")),

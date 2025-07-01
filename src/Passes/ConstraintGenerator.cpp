@@ -1154,45 +1154,10 @@ void TypeRecovery::bottomUpPhase() {
       }
     } else {
       //!! normal case, create the initial constraint graph
-      Generator = std::make_shared<ConstraintsGenerator>(*this, Name, SCCSet);
-      Generator->run();
+      Generator = getBottomUpGraph(
+          Data, DirPath ? join(*DirPath, "00-Generated.dot").c_str() : nullptr);
     }
 
-    // TODO: If the SCC/func is not called by any other function out of the SCC,
-    // we can skip summary generation.
-
-    if (DirPath) {
-      Generator->CG.printGraph(join(*DirPath, "00-Generated.dot").c_str());
-    }
-
-    // 1.2 instantiate the summaries for each call.
-    for (auto &Ent : Generator->CallToInstance) {
-      auto *Call = Ent.first;
-      auto *Target = Call->getCalledFunction();
-      std::shared_ptr<ConstraintsGenerator> TargetSummary;
-      if (Target->isDeclaration()) {
-        if (CallsiteSummaryOverride.count(Call)) {
-          llvm::errs() << "Override summary for callsite: " << *Call << "\n";
-          TargetSummary = CallsiteSummaryOverride.at(Call);
-        } else if (SummaryOverride.count({Target})) {
-          std::cerr << "Override summary for external function: " << Name
-                    << "\n";
-          TargetSummary = SummaryOverride.at({Target});
-          assert(TargetSummary->CG.PG->Constraints.size() == 0);
-        } else {
-          llvm::errs() << "Warning: Summary and result may be incorrect due to "
-                          "external call: "
-                       << *Call << "\n";
-          Generator->UnhandledCalls.insert(Ent);
-          continue;
-        }
-      } else {
-        TargetSummary = FuncSummaries.at(Target);
-      }
-      if (TargetSummary != nullptr) {
-        Generator->instantiateSummary(Call, Target, *TargetSummary);
-      }
-    }
     if (DirPath) {
       Generator->CG.printGraph(
           join(*DirPath, "01-InstantiateSummary.dot").c_str());
@@ -1230,7 +1195,7 @@ void TypeRecovery::bottomUpPhase() {
       auto It2 = FuncSummaries.emplace(F, Summary);
       assert(It2.second && "Function summary already exist?");
     }
-    Data.BottomUpGenerator = Generator;
+
     Data.SCCName = Name;
     // write the SCC index to file
     if (SCCsCatalog) {
@@ -1251,6 +1216,51 @@ void TypeRecovery::bottomUpPhase() {
   }
 }
 
+std::shared_ptr<ConstraintsGenerator>
+TypeRecovery::getBottomUpGraph(SCCData &Data, const char *OriginalGraphPath) {
+  if (Data.BottomUpGenerator) {
+    return Data.BottomUpGenerator;
+  }
+
+  auto Generator =
+      std::make_shared<ConstraintsGenerator>(*this, Data.SCCName, Data.SCCSet);
+  Data.BottomUpGenerator = Generator;
+  Generator->run();
+
+  if (OriginalGraphPath) {
+    Generator->CG.printGraph(OriginalGraphPath);
+  }
+
+  // 1.2 instantiate the summaries for each call.
+  for (auto &Ent : Generator->CallToInstance) {
+    auto *Call = Ent.first;
+    auto *Target = Call->getCalledFunction();
+    std::shared_ptr<ConstraintsGenerator> TargetSummary;
+    if (Target->isDeclaration()) {
+      if (CallsiteSummaryOverride.count(Call)) {
+        llvm::errs() << "Override summary for callsite: " << *Call << "\n";
+        TargetSummary = CallsiteSummaryOverride.at(Call);
+      } else if (SummaryOverride.count({Target})) {
+        llvm::errs() << "Override summary for external function call: " << *Call << "\n";
+        TargetSummary = SummaryOverride.at({Target});
+        assert(TargetSummary->CG.PG->Constraints.size() == 0);
+      } else {
+        llvm::errs() << "Warning: Summary and result may be incorrect due to "
+                        "external call: "
+                     << *Call << "\n";
+        Generator->UnhandledCalls.insert(Ent);
+        continue;
+      }
+    } else {
+      TargetSummary = FuncSummaries.at(Target);
+    }
+    if (TargetSummary != nullptr) {
+      Generator->instantiateSummary(Call, Target, *TargetSummary);
+    }
+  }
+  return Data.BottomUpGenerator;
+}
+
 void TypeRecovery::topDownPhase() {
   assert(AG.CG != nullptr);
 
@@ -1264,26 +1274,9 @@ void TypeRecovery::topDownPhase() {
     auto &Data = AllSCCs[SCCIndex];
     std::string SCCDebugFolderName = "SCC" + std::to_string(SCCIndex);
     const std::vector<CallGraphNode *> &NodeVec = Data.Nodes;
-    const std::shared_ptr<ConstraintsGenerator> &Generator =
-        Data.BottomUpGenerator;
     auto &Name = Data.SCCName;
     // Collect all functions for SCC checking
     const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
-
-    if (Data.BottomUpGenerator == nullptr) {
-      continue;
-    }
-
-    Data.TopDownGenerator =
-        std::make_shared<ConstraintsGenerator>(*this, Data.SCCName);
-    auto &CurrentTypes = *(Data.TopDownGenerator);
-    assert(CurrentTypes.PG);
-
-    SCCSignatureTypes &SigTy = Data.SigTy;
-    SigTy.SignatureGenerator =
-        std::make_shared<ConstraintsGenerator>(*this, Data.SCCName + "-sig");
-    auto &SigTypes = *(SigTy.SignatureGenerator);
-    assert(SigTypes.PG);
 
     // for debug print
     llvm::Optional<std::string> DirPath;
@@ -1307,16 +1300,19 @@ void TypeRecovery::topDownPhase() {
     std::cerr << "(Top-Down) Processing Func: " << Name << "\n";
     auto Start2 = std::chrono::steady_clock::now();
 
-    if (DirPath) {
-      Generator->CG.printGraph(join(*DirPath, "03-Original.dot").c_str());
-    }
+    // 2.1 Calc SignatureTypes
+    SCCSignatureTypes &SigTy = Data.SigTy;
+    SigTy.SignatureGenerator =
+        std::make_shared<ConstraintsGenerator>(*this, Data.SCCName + "-sig");
+    auto &SigTypes = *(SigTy.SignatureGenerator);
+    assert(SigTypes.PG);
 
-    // 2.1 clone the graph to CurrentTypes. Previous graph is for summary.
-    // CurrentTypes is temporary for build types for internal variables.
-    std::map<const CGNode *, CGNode *> Old2New;
-    Generator->cloneTo(CurrentTypes, Old2New);
+    // if (DirPath) {
+    //   Data.BottomUpGenerator->CG.printGraph(
+    //       join(*DirPath, "03-BeforeTopDown.dot").c_str());
+    // }
 
-    // 2.2 collect and merge actual params
+    // 2.1 collect and merge actual params
     for (CallGraphNode *CGN : NodeVec) {
       auto *Current = CGN->getFunction();
       if (Current == nullptr) {
@@ -1384,29 +1380,10 @@ void TypeRecovery::topDownPhase() {
       // nullptr, -1, retypd::Contravariant));
     }
 
-    SigTy.instantiate(CurrentTypes);
-
-    // Run saturation again
-    CurrentTypes.CG.solve();
+    auto TDG = getTopDownGraph(Data);
 
     if (DirPath) {
-      CurrentTypes.CG.printGraph(join(*DirPath, "05-CurrentTypes.dot").c_str());
-    }
-
-    // 2.3 solve again and fixups
-    // ensure lower bound is lower than upper bound
-    // CurrentTypes.makeSymmetry();
-    CurrentTypes.linkContraToCovariant();
-    CurrentTypes.CG.solve();
-    CurrentTypes.CG.linkConstantPtr2Memory();
-    // link primitives for all Graphs in TopDownGenerator.
-    // 1. later postProcess will also do this.
-    // 2. our determinization for actual params need this.
-    CurrentTypes.CG.linkPrimitives();
-
-    if (DirPath) {
-      CurrentTypes.CG.printGraph(
-          join(*DirPath, "05-CurrentTypes.sat.dot").c_str());
+      TDG->CG.printGraph(join(*DirPath, "05-CurrentTypes.sat.dot").c_str());
     }
     if (SCCsPerf) {
       *SCCsPerf << "02 TopDown Elapsed: " << since(Start2).count() << " ms\n";
@@ -1415,6 +1392,43 @@ void TypeRecovery::topDownPhase() {
   }
 
   handleGlobals();
+}
+
+std::shared_ptr<ConstraintsGenerator>
+TypeRecovery::getTopDownGraph(SCCData &Data) {
+  if (Data.TopDownGenerator) {
+    return Data.TopDownGenerator;
+  }
+  const std::shared_ptr<ConstraintsGenerator> &Generator =
+      getBottomUpGraph(Data);
+
+  Data.TopDownGenerator =
+      std::make_shared<ConstraintsGenerator>(*this, Data.SCCName);
+  auto &CurrentTypes = *(Data.TopDownGenerator);
+  assert(CurrentTypes.PG);
+
+  assert(Data.SigTy.SignatureGenerator);
+  std::map<const CGNode *, CGNode *> Old2New;
+  Generator->cloneTo(CurrentTypes, Old2New);
+
+  Data.SigTy.instantiate(CurrentTypes);
+
+  // if (DirPath) {
+  //   CurrentTypes.CG.printGraph(join(*DirPath,
+  //   "05-CurrentTypes.dot").c_str());
+  // }
+
+  // 2.3 solve again and fixups
+  // ensure lower bound is lower than upper bound
+  // CurrentTypes.makeSymmetry();
+  CurrentTypes.linkContraToCovariant();
+  CurrentTypes.CG.solve();
+  CurrentTypes.CG.linkConstantPtr2Memory();
+  // link primitives for all Graphs in TopDownGenerator.
+  // 1. later postProcess will also do this.
+  // 2. our determinization for actual params need this.
+  CurrentTypes.CG.linkPrimitives();
+  return Data.TopDownGenerator;
 }
 
 void SCCSignatureTypes::instantiate(ConstraintsGenerator &To) {
@@ -1632,17 +1646,15 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
 void TypeRecovery::genASTTypes() {
   // 3 build AST type for each value in value map
   ResultVal = std::make_unique<TypeRecovery::Result>();
-  auto HTCtx = std::make_shared<ast::HTypeContext>();
-  retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
+  assert(HTCtx != nullptr);
   using notdec::ast::HType;
   using notdec::ast::HTypeContext;
 
   auto &AllSCCs = AG.AllSCCs;
   for (int i = 0; i < AllSCCs.size(); i++) {
-    if (!AllSCCs[i].TopDownGenerator)
-      continue;
-    auto &G = *AllSCCs[i].TopDownGenerator;
-    auto SCCName = AllSCCs[i].SCCName;
+    auto &Data = AllSCCs[i];
+    auto &G = *Data.TopDownGenerator;
+    auto SCCName = Data.SCCName;
     assert(G.PG);
     for (auto &Ent : G.CG.Nodes) {
       if (Ent.second.isStartOrEnd() || Ent.second.isMemory()) {
@@ -1654,9 +1666,9 @@ void TypeRecovery::genASTTypes() {
       Dir = join(DebugDir, "SCC" + std::to_string(i));
     }
 
-    //!! 3.1 post process the graph for type generation
-    AllSCCs[i].SketchGenerator = postProcess(G, Dir);
-    ConstraintsGenerator &G2 = *AllSCCs[i].SketchGenerator;
+    auto SCCTypes = getASTTypes(Data, Dir);
+
+    ConstraintsGenerator &G2 = *Data.SketchGenerator;
 
     // 3.2 print the graph for debugging
     if (!Dir.empty()) {
@@ -1672,8 +1684,6 @@ void TypeRecovery::genASTTypes() {
       }
       Val2NodeFile.close();
     }
-
-    retypd::TypeBuilder TB(TBC, G2.TypeInfos);
 
     if (ValueTypesFile) {
       *ValueTypesFile << "UpperBounds:\n";
@@ -1692,8 +1702,6 @@ void TypeRecovery::genASTTypes() {
       if (Node != nullptr) {
         assert(&Node->Parent == &G2.CG &&
                "RetypdGenerator::getTypeVar: Node is not in the graph");
-        auto Size = getSize(Ent.first, pointer_size);
-        assert(Size > 0);
 
         if (ValueTypesFile) {
           // print the current value
@@ -1705,26 +1713,9 @@ void TypeRecovery::genASTTypes() {
           ValueTypesFile->flush();
         }
 
-        if (TraceIds.count(Node->getId())) {
-          PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
-        }
-
         //!! build AST type for the node
-        HType *CTy = TB.buildType(*Node, retypd::Covariant);
-
-        if (TraceIds.count(Node->getId())) {
-          PRINT_TRACE(Node->getId())
-              << ": Type is " << CTy->getAsString() << "\n";
-        }
-
-        if (ResultVal->ValueTypes.count(Ent.first) != 0) {
-          llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
-                       << toString(Ent.first) << "\n";
-        }
-
-        if (!isFuncPtr(Ent.first)) {
-          ResultVal->ValueTypes[Ent.first] = CTy;
-        }
+        HType *CTy = SCCTypes->ValueTypes.at(Ent.first);
+        ResultVal->ValueTypes[Ent.first] = CTy;
 
         if (ValueTypesFile) {
           *ValueTypesFile << " upper bound: " << CTy->getAsString();
@@ -1755,8 +1746,6 @@ void TypeRecovery::genASTTypes() {
       if (Node != nullptr) {
         assert(&Node->Parent == &G2.CG &&
                "RetypdGenerator::getTypeVar: Node is not in the graph");
-        auto Size = getSize(Ent.first, pointer_size);
-        assert(Size > 0);
 
         if (ValueTypesFile) {
           *ValueTypesFile << "  " << toString(Ent.first, true);
@@ -1767,25 +1756,10 @@ void TypeRecovery::genASTTypes() {
           ValueTypesFile->flush();
         }
 
-        if (TraceIds.count(Node->getId())) {
-          PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
-        }
-
         //!! build AST type for the node
-        HType *CTy = TB.buildType(*Node, retypd::Contravariant);
+        HType *CTy = SCCTypes->ValueTypesLowerBound.at(Ent.first);
+        ResultVal->ValueTypesLowerBound[Ent.first] = CTy;
 
-        if (TraceIds.count(Node->getId())) {
-          PRINT_TRACE(Node->getId())
-              << ": Type is " << CTy->getAsString() << "\n";
-        }
-
-        if (ResultVal->ValueTypesLowerBound.count(Ent.first) != 0) {
-          llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
-                       << toString(Ent.first) << "\n";
-        }
-        if (!isFuncPtr(Ent.first)) {
-          ResultVal->ValueTypesLowerBound[Ent.first] = CTy;
-        }
         if (ValueTypesFile) {
           *ValueTypesFile << " lower bound: " << CTy->getAsString();
         }
@@ -1807,6 +1781,8 @@ void TypeRecovery::genASTTypes() {
   // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
   // retypd::Covariant);
   CGNode *MemNode2 = GlobalSk.CG.getMemoryNode(retypd::Covariant);
+
+  retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
   retypd::TypeBuilder TBG(TBC, GlobalSk.TypeInfos);
 
   // build AST type for memory node
@@ -1855,6 +1831,105 @@ void TypeRecovery::genASTTypes() {
   }
 }
 
+std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
+                                                         std::string DebugDir) {
+  if (Data.TypeResult) {
+    return Data.TypeResult;
+  }
+  Data.TypeResult = std::make_shared<SCCTypeResult>();
+  const std::shared_ptr<ConstraintsGenerator> &G = getTopDownGraph(Data);
+
+  auto ResultVal = Data.TypeResult;
+
+  //!! 3.1 post process the graph for type generation
+  Data.SketchGenerator = postProcess(*G, DebugDir);
+  ConstraintsGenerator &G2 = *Data.SketchGenerator;
+
+  retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
+  retypd::TypeBuilder TB(TBC, G2.TypeInfos);
+
+  using notdec::ast::HType;
+  using notdec::ast::HTypeContext;
+
+  // 3.3 build type for each value
+  for (auto &Ent : G2.V2N) {
+    // TODO support function type.
+    if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+      if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+        continue;
+      }
+    }
+    auto &Key = Ent.second;
+    auto *Node = G2.getNodeOrNull(Key);
+    if (Node != nullptr) {
+      assert(&Node->Parent == &G2.CG &&
+             "RetypdGenerator::getTypeVar: Node is not in the graph");
+      auto Size = getSize(Ent.first, pointer_size);
+      assert(Size > 0);
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
+      }
+
+      //!! build AST type for the node
+      HType *CTy = TB.buildType(*Node, retypd::Covariant);
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId())
+            << ": Type is " << CTy->getAsString() << "\n";
+      }
+
+      if (ResultVal->ValueTypes.count(Ent.first) != 0) {
+        llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
+                     << toString(Ent.first) << "\n";
+      }
+
+      if (!isFuncPtr(Ent.first)) {
+        ResultVal->ValueTypes[Ent.first] = CTy;
+      }
+    }
+  }
+
+  for (auto &Ent : G2.V2NContra) {
+    // TODO support function type.
+    if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+      if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+        continue;
+      }
+    }
+    auto &Key = Ent.second;
+    auto *Node = G2.getNodeOrNull(Key);
+    if (Node != nullptr) {
+      assert(&Node->Parent == &G2.CG &&
+             "RetypdGenerator::getTypeVar: Node is not in the graph");
+      auto Size = getSize(Ent.first, pointer_size);
+      assert(Size > 0);
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
+      }
+
+      //!! build AST type for the node
+      HType *CTy = TB.buildType(*Node, retypd::Contravariant);
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId())
+            << ": Type is " << CTy->getAsString() << "\n";
+      }
+
+      if (ResultVal->ValueTypesLowerBound.count(Ent.first) != 0) {
+        llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
+                     << toString(Ent.first) << "\n";
+      }
+      if (!isFuncPtr(Ent.first)) {
+        ResultVal->ValueTypesLowerBound[Ent.first] = CTy;
+      }
+    }
+  }
+
+  return Data.TypeResult;
+}
+
 PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
 
   std::vector<SCCData> &AllSCCs = TR.AG.AllSCCs;
@@ -1866,19 +1941,17 @@ PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
     do {
       Changed = false;
 
-      // 现计算当前SCC的HType类型
-      if (Data.TopDownGenerator == nullptr) {
-        // recalc TopDown graph
-      }
-      // do post process and gen HType.
-
-      // 然后像那个LLVM2C的一样弄一个Visitor
+      auto SCCTys = TR.getASTTypes(Data);
+      
+      // 处理entry块中确定大小的alloca指令。
+      
 
     } while (Changed);
   }
 
-  // TODO
-  return PreservedAnalyses::none();
+  auto PA = PreservedAnalyses::none();
+  PA.preserve<CallGraphAnalysis>();
+  return PA;
 }
 
 void ConstraintsGenerator::makeSymmetry() {
