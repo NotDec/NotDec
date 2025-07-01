@@ -79,6 +79,13 @@ struct SCCData {
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
   std::shared_ptr<SCCTypeResult> TypeResult;
+
+  void onIRChanged() {
+    BottomUpGenerator.reset();
+    TopDownGenerator.reset();
+    SketchGenerator.reset();
+    TypeResult.reset();
+  }
 };
 
 struct AllGraphs {

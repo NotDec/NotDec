@@ -46,6 +46,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "Passes/ConstraintGenerator.h"
+#include "Passes/DSROA.h"
 #include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
@@ -1241,7 +1242,8 @@ TypeRecovery::getBottomUpGraph(SCCData &Data, const char *OriginalGraphPath) {
         llvm::errs() << "Override summary for callsite: " << *Call << "\n";
         TargetSummary = CallsiteSummaryOverride.at(Call);
       } else if (SummaryOverride.count({Target})) {
-        llvm::errs() << "Override summary for external function call: " << *Call << "\n";
+        llvm::errs() << "Override summary for external function call: " << *Call
+                     << "\n";
         TargetSummary = SummaryOverride.at({Target});
         assert(TargetSummary->CG.PG->Constraints.size() == 0);
       } else {
@@ -1653,7 +1655,7 @@ void TypeRecovery::genASTTypes() {
   auto &AllSCCs = AG.AllSCCs;
   for (int i = 0; i < AllSCCs.size(); i++) {
     auto &Data = AllSCCs[i];
-    auto &G = *Data.TopDownGenerator;
+    auto &G = *getTopDownGraph(Data);
     auto SCCName = Data.SCCName;
     assert(G.PG);
     for (auto &Ent : G.CG.Nodes) {
@@ -1931,22 +1933,39 @@ std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
 }
 
 PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
+  FunctionAnalysisManager &FAM =
+      MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
   std::vector<SCCData> &AllSCCs = TR.AG.AllSCCs;
 
   for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
     SCCData &Data = AllSCCs.at(SCCIndex);
+    bool SCCChanged = false;
+    auto SCCTys = TR.getASTTypes(Data);
 
-    bool Changed = true;
-    do {
-      Changed = false;
+    for (auto F : Data.SCCSet) {
+      if (F->isDeclaration()) {
+        continue;
+      }
+      // bool Changed = true;
+      // do {
+      //   Changed = false;
 
-      auto SCCTys = TR.getASTTypes(Data);
-      
       // 处理entry块中确定大小的alloca指令。
-      
+      DSROAPass SP;
+      PreservedAnalyses PassPA = SP.run(*F, FAM);
+      if (!PassPA.areAllPreserved()) {
+        // Changed |= true;
+        SCCChanged |= true;
+      }
 
-    } while (Changed);
+      // } while (Changed);
+    }
+
+    if (SCCChanged) {
+      // invalidate all passes
+      Data.onIRChanged();
+    }
   }
 
   auto PA = PreservedAnalyses::none();
