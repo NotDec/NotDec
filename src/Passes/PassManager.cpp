@@ -73,7 +73,7 @@ struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
 
     for (BasicBlock &BB : F) {
       for (Instruction &I : BB) {
-        // A+B --> A|B iff A and B have no bits set in common.
+        // revert: A+B --> A|B iff A and B have no bits set in common.
         if (BinaryOperator *BO = dyn_cast<BinaryOperator>(&I)) {
           if (BO->getOpcode() == Instruction::Or) {
             Value *LHS = BO->getOperand(0);
@@ -351,7 +351,8 @@ void DecompileConfig::run_passes() {
   // Type recovery context for the module
   std::shared_ptr<retypd::TRContext> TRCtx =
       std::make_shared<retypd::TRContext>();
-  std::shared_ptr<ast::HTypeContext> HTCtx = std::make_shared<ast::HTypeContext>();
+  std::shared_ptr<ast::HTypeContext> HTCtx =
+      std::make_shared<ast::HTypeContext>();
   auto TR = TypeRecovery(TRCtx, HTCtx, Mod);
 
   // Create the analysis managers.
@@ -412,8 +413,9 @@ void DecompileConfig::run_passes() {
 
   // if not recompile then decompile.
   if (!Opts.onlyOptimize) {
-
-    if (Opts.stackRec == "retdec") {
+    if (Opts.stackRec == "none") {
+      // do nothing
+    } else if (Opts.stackRec == "retdec") {
       find_special_gv();
       retdec::bin2llvmir::Abi abi(&Mod);
       abi.setStackPointer(SP);
@@ -434,11 +436,19 @@ void DecompileConfig::run_passes() {
       // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(LoopRotatePass())));
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
+      MPM.addPass(TypeRecoveryMain(TR));
+      MPM.addPass(TypeRecoveryOpt(TR));
+      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(SimplifyCFGOptions())));
+      MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec
@@ -447,12 +457,7 @@ void DecompileConfig::run_passes() {
     }
   }
 
-  bool isC = getSuffix(OutFilePath) == ".c";
-
-  if (isC && !Opts.onlyOptimize) {
-    MPM.addPass(TypeRecoveryMain(TR));
-    MPM.addPass(TypeRecoveryOpt(TR));
-  }
+  // bool isC = getSuffix(OutFilePath) == ".c";
 
   MPM.addPass(NotdecLLVM2C(TR, OutFilePath, llvm2cOpt, Opts.onlyOptimize));
   MPM.run(Mod, MAM);

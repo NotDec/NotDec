@@ -6,6 +6,7 @@ add_library(notdec STATIC
 	Passes/PointerTypeRecovery.cpp
 	Passes/StackPointerFinder.cpp
 	Passes/StackAlloca.cpp
+	Passes/StackBreaker.cpp
 	Passes/MemOpMatcher.cpp
 	Passes/ConstraintGenerator.cpp
 	Passes/ReorderBasicblock.cpp

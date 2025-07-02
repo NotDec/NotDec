@@ -47,6 +47,7 @@
 
 #include "Passes/ConstraintGenerator.h"
 #include "Passes/DSROA.h"
+#include "Passes/StackBreaker.h"
 #include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
@@ -72,6 +73,21 @@
 namespace notdec {
 
 using retypd::OffsetLabel;
+
+// NOTDEC_TYPE_RECOVERY_DEBUG_DIR
+const char *getTRDebugDir() {
+  return std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
+}
+
+llvm::Optional<std::string> getSCCDebugDir(std::size_t SCCIndex) {
+  const char *DebugDir = getTRDebugDir();
+  if (DebugDir) {
+    std::string DirPath = join(DebugDir, "SCC" + std::to_string(SCCIndex));
+    llvm::sys::fs::create_directories(DirPath);
+    return DirPath;
+  }
+  return llvm::Optional<std::string>();
+}
 
 static inline TypeVariable makeTv(std::shared_ptr<retypd::TRContext> Ctx,
                                   std::string Name) {
@@ -1112,12 +1128,7 @@ void TypeRecovery::bottomUpPhase() {
     }
 
     // Print for debug dir
-    llvm::Optional<std::string> DirPath;
-    std::string SCCName = "SCC" + std::to_string(SCCIndex);
-    if (DebugDir) {
-      DirPath.emplace(join(DebugDir, SCCName));
-      llvm::sys::fs::create_directories(*DirPath);
-    }
+    llvm::Optional<std::string> DirPath = getSCCDebugDir(SCCIndex);
     llvm::Optional<llvm::raw_fd_ostream> SCCsPerf;
     if (DirPath) {
       std::error_code EC;
@@ -1281,11 +1292,7 @@ void TypeRecovery::topDownPhase() {
     const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
 
     // for debug print
-    llvm::Optional<std::string> DirPath;
-    if (DebugDir) {
-      DirPath.emplace(join(DebugDir, SCCDebugFolderName));
-      llvm::sys::fs::create_directories(*DirPath);
-    }
+    llvm::Optional<std::string> DirPath = getSCCDebugDir(SCCIndex);
     llvm::Optional<llvm::raw_fd_ostream> SCCsPerf;
     if (DirPath) {
       std::error_code EC;
@@ -1594,7 +1601,8 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
   }
 
   // 0.4 prepare debug dir and SCCsCatalog
-  if (DebugDir) {
+  auto DebugDir = getTRDebugDir();
+  if (getTRDebugDir()) {
     llvm::sys::fs::create_directories(DebugDir);
     std::error_code EC;
     SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
@@ -1655,7 +1663,13 @@ void TypeRecovery::genASTTypes() {
   auto &AllSCCs = AG.AllSCCs;
   for (int i = 0; i < AllSCCs.size(); i++) {
     auto &Data = AllSCCs[i];
+
+    llvm::Optional<std::string> SCCDebugDir = getSCCDebugDir(i);
+    bool PrevEmpty = Data.TopDownGenerator == nullptr;
     auto &G = *getTopDownGraph(Data);
+    if (PrevEmpty && SCCDebugDir) {
+      G.CG.printGraph(join(*SCCDebugDir, "09-NewTopDown.dot").c_str());
+    }
     auto SCCName = Data.SCCName;
     assert(G.PG);
     for (auto &Ent : G.CG.Nodes) {
@@ -1663,21 +1677,18 @@ void TypeRecovery::genASTTypes() {
         continue;
       }
     }
-    std::string Dir;
-    if (DebugDir) {
-      Dir = join(DebugDir, "SCC" + std::to_string(i));
-    }
+    auto Dir = getSCCDebugDir(i);
 
-    auto SCCTypes = getASTTypes(Data, Dir);
+    auto SCCTypes = getASTTypes(Data, *Dir);
 
     ConstraintsGenerator &G2 = *Data.SketchGenerator;
 
     // 3.2 print the graph for debugging
-    if (!Dir.empty()) {
-      G2.CG.printGraph(join(Dir, "09-PostProcess.dtm.dot").c_str());
+    if (Dir) {
+      G2.CG.printGraph(join(*Dir, "10-PostProcess.dtm.dot").c_str());
       // TODO refactor to annotated function
       // print val2node here
-      std::ofstream Val2NodeFile(join(Dir, "09-Val2Node.txt"));
+      std::ofstream Val2NodeFile(join(*Dir, "10-Val2Node.txt"));
       for (auto &Ent : G2.V2N) {
         auto &N = G2.getNode(Ent.first, nullptr, -1, retypd::Covariant);
         auto &NC = G2.getNode(Ent.first, nullptr, -1, retypd::Contravariant);
@@ -1828,6 +1839,7 @@ void TypeRecovery::genASTTypes() {
   // gen_json("retypd-constrains.json");
 
   // TODO convert the type back to LLVM IR??
+  auto DebugDir = getTRDebugDir();
   if (DebugDir) {
     printAnnotatedModule(Mod, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
   }
@@ -1936,36 +1948,48 @@ PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
   FunctionAnalysisManager &FAM =
       MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
+  const char *DebugDir = getTRDebugDir();
   std::vector<SCCData> &AllSCCs = TR.AG.AllSCCs;
 
   for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
     SCCData &Data = AllSCCs.at(SCCIndex);
     bool SCCChanged = false;
     auto SCCTys = TR.getASTTypes(Data);
+    auto SCCDebugDir = getSCCDebugDir(SCCIndex);
 
     for (auto F : Data.SCCSet) {
       if (F->isDeclaration()) {
         continue;
       }
-      // bool Changed = true;
-      // do {
-      //   Changed = false;
 
-      // 处理entry块中确定大小的alloca指令。
-      DSROAPass SP;
-      PreservedAnalyses PassPA = SP.run(*F, FAM);
-      if (!PassPA.areAllPreserved()) {
-        // Changed |= true;
-        SCCChanged |= true;
+      AllocaInst *Stack = nullptr;
+      BasicBlock &EntryBB = F->getEntryBlock();
+      for (BasicBlock::iterator I = EntryBB.begin(),
+                                E = std::prev(EntryBB.end());
+           I != E; ++I) {
+        if (AllocaInst *AI = dyn_cast<AllocaInst>(I)) {
+          if (AI->getName() == "stack") {
+            Stack = AI;
+          }
+        }
+      }
+      if (Stack == nullptr) {
+        continue;
       }
 
-      // } while (Changed);
+      // 处理entry块中确定大小的alloca指令。
+      StackBreaker SB;
+      SCCChanged |= SB.runOnAlloca(*Stack, *SCCTys);
     }
 
     if (SCCChanged) {
       // invalidate all passes
       Data.onIRChanged();
     }
+  }
+
+  if (DebugDir) {
+    printModule(M, join(DebugDir, "TROpt.ll").c_str());
   }
 
   auto PA = PreservedAnalyses::none();

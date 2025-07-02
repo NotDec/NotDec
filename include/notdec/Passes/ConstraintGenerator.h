@@ -58,6 +58,9 @@ using retypd::TypeVariable;
 
 struct ConstraintsGenerator;
 
+const char *getTRDebugDir();
+llvm::Optional<std::string> getSCCDebugDir(std::size_t SCCIndex);
+
 struct SCCSignatureTypes {
   std::shared_ptr<ConstraintsGenerator> SignatureGenerator;
   std::map<llvm::Function *, CGNode *> FuncNodeMap;
@@ -147,8 +150,6 @@ struct TypeRecovery {
   void genASTTypes();
   void gen_json(std::string OutputFilename);
 
-  // NOTDEC_TYPE_RECOVERY_DEBUG_DIR
-  const char *DebugDir;
   // NOTDEC_SUMMARY_OVERRIDE
   const char *SummaryFile;
   // NOTDEC_SIGNATURE_OVERRIDE
@@ -163,7 +164,6 @@ struct TypeRecovery {
   TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx,
                std::shared_ptr<ast::HTypeContext> HTCtx, Module &M)
       : Mod(M), TRCtx(TRCtx), HTCtx(HTCtx),
-        DebugDir(std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")),
         SummaryFile(std::getenv("NOTDEC_SUMMARY_OVERRIDE")),
         SigFile(std::getenv("NOTDEC_SIGNATURE_OVERRIDE")),
         Traces(std::getenv("NOTDEC_TYPE_RECOVERY_TRACE_IDS")) {
