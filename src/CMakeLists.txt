@@ -11,6 +11,7 @@ add_library(notdec STATIC
 	Passes/ConstraintGenerator.cpp
 	Passes/ReorderBasicblock.cpp
 	Passes/DSROA.cpp
+	Passes/AllocAnnotator.cpp
 	Passes/retdec-stack/retdec-abi.cpp
 	Passes/retdec-stack/retdec-ir-modifier.cpp
 	Passes/retdec-stack/retdec-reaching-definition.cpp

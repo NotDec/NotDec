@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <llvm/IR/Intrinsics.h>
 #include <map>
 #include <memory>
@@ -45,8 +46,10 @@
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "Passes/AllocAnnotator.h"
 #include "Passes/ConstraintGenerator.h"
 #include "Passes/DSROA.h"
+#include "Passes/StackAlloca.h"
 #include "Passes/StackBreaker.h"
 #include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/ConstraintGraph.h"
@@ -1845,6 +1848,56 @@ void TypeRecovery::genASTTypes() {
   }
 }
 
+bool isGrowNegative(Instruction *Inst) {
+  if (llvm::MDNode *MD = Inst->getMetadata(KIND_STACK_DIRECTION)) {
+    // 验证元数据格式：应该包含一个MDString元素
+    if (MD->getNumOperands() > 0) {
+      if (auto *MDS = llvm::dyn_cast<llvm::MDString>(MD->getOperand(0))) {
+        // 尝试将字符串转换为整数
+        llvm::StringRef MDSRef = MDS->getString();
+        if (MDSRef == KIND_STACK_DIRECTION_NEGATIVE) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+std::optional<int64_t> getAllocSize(ExtValuePtr Val) {
+  auto *V = std::get_if<llvm::Value *>(&Val);
+  if (V == nullptr) {
+    return std::nullopt;
+  }
+  if (auto Inst = dyn_cast<Instruction>(*V)) {
+    // 检查指令是否包含目标元数据
+    std::optional<uint64_t> SizeRet;
+    if (llvm::MDNode *MD = Inst->getMetadata(KIND_ALLOC_SIZE)) {
+      // 验证元数据格式：应该包含一个MDString元素
+      if (MD->getNumOperands() > 0) {
+        if (auto *SizeMD = llvm::dyn_cast<llvm::MDString>(MD->getOperand(0))) {
+          // 尝试将字符串转换为整数
+          llvm::StringRef SizeStr = SizeMD->getString();
+          uint64_t Size = 0;
+          if (!SizeStr.getAsInteger(10, Size)) {
+            SizeRet = Size;
+          }
+        }
+      }
+    }
+    if (SizeRet) {
+      assert(*SizeRet < (uint64_t)std::numeric_limits<int64_t>::max());
+      if (isGrowNegative(Inst)) {
+        return -*SizeRet;
+      } else {
+        return *SizeRet;
+      }
+    }
+  }
+
+  return std::nullopt;
+}
+
 std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
                                                          std::string DebugDir) {
   if (Data.TypeResult) {
@@ -1864,6 +1917,8 @@ std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
 
   using notdec::ast::HType;
   using notdec::ast::HTypeContext;
+
+  TB.buildNodeSizeHintMap(G2);
 
   // 3.3 build type for each value
   for (auto &Ent : G2.V2N) {
@@ -1886,7 +1941,8 @@ std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
       }
 
       //!! build AST type for the node
-      HType *CTy = TB.buildType(*Node, retypd::Covariant);
+      HType *CTy =
+          TB.buildType(*Node, retypd::Covariant);
 
       if (TraceIds.count(Node->getId())) {
         PRINT_TRACE(Node->getId())
@@ -1924,7 +1980,8 @@ std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
       }
 
       //!! build AST type for the node
-      HType *CTy = TB.buildType(*Node, retypd::Contravariant);
+      HType *CTy =
+          TB.buildType(*Node, retypd::Contravariant);
 
       if (TraceIds.count(Node->getId())) {
         PRINT_TRACE(Node->getId())
@@ -1945,8 +2002,8 @@ std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
 }
 
 PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
-  FunctionAnalysisManager &FAM =
-      MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
+  // FunctionAnalysisManager &FAM =
+  //     MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
   const char *DebugDir = getTRDebugDir();
   std::vector<SCCData> &AllSCCs = TR.AG.AllSCCs;
@@ -3035,7 +3092,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitExtractValueInst(
           }
         } else if (Ind == 1) {
           assert(I.getType()->isIntegerTy(1));
-          auto &N = cg.createNodeCovariant(&I, nullptr, -1);
+          // auto &N =
+          cg.createNodeCovariant(&I, nullptr, -1);
 
           return;
         }
@@ -3052,7 +3110,7 @@ bool ConstraintsGenerator::RetypdGeneratorVisitor::handleIntrinsicCall(
   if (!Target->isIntrinsic()) {
     return false;
   }
-  auto ID = Target->getIntrinsicID();
+  // auto ID = Target->getIntrinsicID();
   if (I.getType()->isAggregateType()) {
     // ignore this call and handle the value in visitExtractValue
     return true;
@@ -3620,7 +3678,7 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
 
   void emitFunctionAnnot(const llvm::Function *F,
                          llvm::formatted_raw_ostream &OS) override {
-    auto F1 = const_cast<llvm::Function *>(F);
+    // auto F1 = const_cast<llvm::Function *>(F);
     std::shared_ptr<ConstraintsGenerator> CG = getFuncCG(F);
     if (!CG) {
       return;

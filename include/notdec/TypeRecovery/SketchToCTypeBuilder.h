@@ -8,6 +8,7 @@
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
+#include <cstdint>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -48,13 +49,24 @@ struct TypeBuilder {
   HTypeContext &Ctx;
   std::map<const CGNode *, HType *> NodeTypeMap;
   std::set<const CGNode *> Visited;
-  std::map<CGNode *, TypeInfo> TypeInfos;
+  const std::map<CGNode *, TypeInfo>& TypeInfos;
+  std::unique_ptr<std::map<const CGNode *, uint64_t>> NodeSizeHint;
 
   // Main interface: recursively visit the node and build the type
-  HType *buildType(const CGNode &Node, Variance V, std::optional<unsigned> ExpectedSize = std::nullopt);
+  HType *buildType(const CGNode &Node, Variance V, std::optional<int64_t> PointeeSize = std::nullopt);
+  void buildNodeSizeHintMap(ConstraintsGenerator &G2);
+  std::optional<int64_t> getNodeSizeHint(const CGNode *N) {
+    if (NodeSizeHint) {
+      auto M = *NodeSizeHint;
+      if (M.count(N)) {
+        return M.at(N);
+      }
+    }
+    return std::nullopt;
+  }
 
   TypeBuilder(TypeBuilderContext &Parent,
-              std::map<CGNode *, TypeInfo> TypeInfos)
+              const std::map<CGNode *, TypeInfo>& TypeInfos)
       : Parent(Parent), Ctx(Parent.Ctx), TypeInfos(TypeInfos) {}
 
   HType *getUndef(unsigned BitSize) {

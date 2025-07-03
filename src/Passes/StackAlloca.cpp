@@ -19,15 +19,17 @@
 
 namespace notdec {
 
-Instruction* createAllocaWithSize(IRBuilder<>& Builder, Value* Size, const Twine &Name) {
+const char *KIND_STACK_DIRECTION = "notdec.stack_direction";
+const char *KIND_STACK_DIRECTION_NEGATIVE = "negative";
+
+Instruction *createAllocaWithSize(IRBuilder<> &Builder, Value *Size,
+                                  const Twine &Name) {
   auto i8 = IntegerType::get(Builder.getContext(), 8);
   if (auto C = dyn_cast<ConstantInt>(Size)) {
     auto si8 = ArrayType::get(i8, C->getSExtValue());
     return Builder.CreateAlloca(si8, nullptr, Name);
   }
-  return Builder.CreateAlloca(
-        i8,
-        Size, Name);
+  return Builder.CreateAlloca(i8, Size, Name);
 }
 
 void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP) {
@@ -51,18 +53,19 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP) {
         IRBuilder<> Builder(I.getParent());
         Builder.SetInsertPoint(&I);
         llvm::errs() << "stack alloca: " << *Size << "\n";
-        Instruction* Alloca = createAllocaWithSize(Builder, Size, "alloc_mem");
-        Alloca = llvm::cast<Instruction>(Builder.CreatePtrToInt(Alloca, Sub->getType()));
+        Instruction *Alloca = createAllocaWithSize(Builder, Size, "alloc_mem");
+        Alloca = llvm::cast<Instruction>(
+            Builder.CreatePtrToInt(Alloca, Sub->getType()));
         // create a alloca inst with arg Size.
         toRemove.push_back(&I);
         toReplace.push_back(std::make_pair(Sub, Alloca));
       }
     }
   }
-  for (auto I: toRemove) {
+  for (auto I : toRemove) {
     I->eraseFromParent();
   }
-  for (auto P: toReplace) {
+  for (auto P : toReplace) {
     P.first->replaceAllUsesWith(P.second);
   }
 }
@@ -221,10 +224,13 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
     //   space = Builder.CreateNeg(space);
     // }
     Builder.SetInsertPoint(LoadSP);
-    Value *alloc = createAllocaWithSize(Builder, grow_negative ? Builder.CreateNeg(space) : space, "stack");
+    Value *alloc = createAllocaWithSize(
+        Builder, grow_negative ? Builder.CreateNeg(space) : space, "stack");
     cast<Instruction>(alloc)->setMetadata(
-        "notdec.stack_direction",
-        MDNode::get(M.getContext(), MDString::get(M.getContext(), "negative")));
+        KIND_STACK_DIRECTION,
+        MDNode::get(
+            M.getContext(),
+            MDString::get(M.getContext(), KIND_STACK_DIRECTION_NEGATIVE)));
     alloc = Builder.CreatePtrToInt(alloc, LoadSP->getType(), "stack_addr");
     Value *alloc_end = Builder.CreateAdd(alloc, space, "stack_end");
 

@@ -9,6 +9,8 @@
 namespace notdec {
 
 using namespace llvm;
+extern const char* KIND_STACK_DIRECTION;
+extern const char* KIND_STACK_DIRECTION_NEGATIVE;
 
 struct LinearAllocationRecovery : PassInfoMixin<LinearAllocationRecovery> {
   static std::string offsetStr(int64_t offset) {

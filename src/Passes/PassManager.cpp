@@ -37,6 +37,7 @@
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
+#include "Passes/AllocAnnotator.h"
 #include "Passes/ConstraintGenerator.h"
 #include "Passes/MemOpMatcher.h"
 #include "Passes/PassManager.h"
@@ -449,6 +450,7 @@ void DecompileConfig::run_passes() {
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(SimplifyCFGOptions())));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec

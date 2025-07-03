@@ -8,9 +8,12 @@
 #include <clang/Basic/SourceLocation.h>
 #include <clang/Basic/Specifiers.h>
 #include <cstddef>
+#include <cstdint>
 #include <llvm/ADT/APSInt.h>
+#include <llvm/Support/Debug.h>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <variant>
 
 #include "Passes/ConstraintGenerator.h"
@@ -25,6 +28,8 @@
 #include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 #include "notdec-llvm2c/StructuralAnalysis.h"
+
+#define DEBUG_TYPE "sketchtypebuilder"
 
 namespace notdec::retypd {
 
@@ -92,8 +97,36 @@ HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
 //   return Pointee->isRecordType() || Pointee->isUnionType();
 // }
 
-HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
-                              std::optional<unsigned> ExpectedSize) {
+void TypeBuilder::buildNodeSizeHintMap(ConstraintsGenerator &G2) {
+  NodeSizeHint = std::make_unique<std::map<const CGNode *, uint64_t>>();
+  for (auto &Ent : G2.V2N) {
+    auto &Key = Ent.second;
+    auto *Node = G2.getNodeOrNull(Key);
+    if (Node == nullptr) {
+      continue;
+    }
+    auto AS = getAllocSize(Ent.first);
+    if (AS) {
+      (*NodeSizeHint)[Node] = *AS;
+    }
+  }
+  for (auto &Ent : G2.V2NContra) {
+    if (G2.V2N.count(Ent.first)) {
+      continue;
+    }
+    auto &Key = Ent.second;
+    auto *Node = G2.getNodeOrNull(Key);
+    if (Node == nullptr) {
+      continue;
+    }
+    auto AS = getAllocSize(Ent.first);
+    if (AS) {
+      (*NodeSizeHint)[Node] = *AS;
+    }
+  }
+}
+
+HType *TypeBuilder::buildType(const CGNode &Node, Variance V, std::optional<int64_t> PointeeSize) {
   unsigned BitSize = Node.getSize();
   const char *prefix = nullptr;
   if (Node.isMemory()) {
@@ -127,11 +160,21 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
   }
   Visited.emplace(&Node);
 
+  // get from previous size hint map.
+  std::optional<int64_t> PointeeSize2 = getNodeSizeHint(&Node);
+  if (PointeeSize && PointeeSize2) {
+    assert(*PointeeSize == PointeeSize2);
+  }
+  if (!PointeeSize) {
+    PointeeSize = PointeeSize2;
+  }
+
   HType *Ret = nullptr;
   bool hasSetNodeMap = false;
   auto ETy = Node.getPNIVar()->getLatticeTy();
 
   if (!Node.isPNIPointer()) {
+    assert(!PointeeSize);
     // No out edges.
     std::optional<std::shared_ptr<LatticeTy>> LT = std::nullopt;
     for (auto &Edge : Node.outEdges) {
@@ -156,6 +199,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
     }
   } else if (Node.outEdges.empty()) {
+    assert(!PointeeSize);
     // no info from graph, just use LatticeTy.
     Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
   } else {
@@ -166,8 +210,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         // void pointer?
         return getPtrTy(nullptr);
       }
+      assert(!PointeeSize || ((*PointeeSize) == *TI.Size));
       // simple pointer type
-      auto PointeeTy = buildType(Info.Edge->getTargetNode(), V, *TI.Size);
+      auto PointeeTy = buildType(Info.Edge->getTargetNode(), V);
       Ret = getPtrTy(PointeeTy);
     } else if (std::holds_alternative<ArrayInfo>(TI.Info)) {
       auto &Info = std::get<ArrayInfo>(TI.Info);
@@ -182,10 +227,27 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
       auto Count = *TI.Size / *Info.ElemSize;
       assert(Count >= 1);
+
+      if (PointeeSize) {
+        assert((*PointeeSize % *Info.ElemSize) == 0 &&
+               "TODO support non aligned array type?");
+        Count = *PointeeSize / *Info.ElemSize;
+      }
+
       auto ArrayTy = Ctx.getArrayType(false, ElemTy, Count);
       Ret = getPtrTy(ArrayTy);
     } else if (std::holds_alternative<StructInfo>(TI.Info)) {
       auto &Info = std::get<StructInfo>(TI.Info);
+
+      std::optional<SimpleRange> ValidRange;
+      if (PointeeSize) {
+        if (*PointeeSize > 0) {
+          ValidRange = {0, *PointeeSize};
+        } else {
+          assert(*PointeeSize != 0);
+          ValidRange = {*PointeeSize, -*PointeeSize};
+        }
+      }
 
       // forward declare struct type, by inserting into the map.
       RecordDecl *Decl;
@@ -202,7 +264,14 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
       std::map<FieldEntry *, FieldDecl *> E2D;
       for (size_t i = 0; i < Info.Fields.size(); i++) {
-        auto &Ent = Info.Fields[i];
+        auto Ent = Info.Fields[i];
+        if (ValidRange) {
+          Ent.R = Ent.R.intersect(*ValidRange);
+        }
+        if (Ent.R.Size == 0) {
+          LLVM_DEBUG(dbgs() << "Warning: Skip field because of size or range");
+          continue;
+        }
         auto Target = const_cast<CGNode *>(&Ent.Edge->getTargetNode());
         HType *Ty;
 
@@ -246,15 +315,22 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         std::optional<FieldDecl> PaddingDecl = std::nullopt;
 
         // Try to calc expand end:
+        // if no ValidRange, no next ent: ent.end()
+        // if no valid range, has next ent: max(next.start, ent.end())
+        // if has valid range, no next ent: max(ValidRang, ent.end())
+        // if has valid range, has next end: min(ValidRange, next.start)
         auto ExpandEnd = Ent.R.end();
         // if there is space to next field
         if (i + 1 < Info.Fields.size()) {
           auto &Next = Info.Fields.at(i + 1);
-          if (Ent.R.end() < Next.R.Start) {
-            // calculate the range to be expand to.
-            ExpandEnd = Next.R.Start;
+          ExpandEnd = std::max(ExpandEnd, Next.R.Start);
+        } else {
+          // if no next field, use valid range.
+          if (ValidRange) {
+            ExpandEnd = ValidRange->end();
           }
         }
+
         // if it is char array and merge with elem
         if (Ty->isCharArrayType()) {
           auto j = i + 1;
@@ -271,19 +347,24 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
             if (j + 1 < Info.Fields.size()) {
               auto &NextJ = Info.Fields.at(j + 1);
-              if (EntJ.R.end() < NextJ.R.Start) {
-                // calculate the range to be expand to.
-                ExpandEnd = NextJ.R.Start;
+              ExpandEnd = std::max(ExpandEnd, NextJ.R.Start);
+            } else {
+              if (ValidRange) {
+                ExpandEnd = ValidRange->end();
               }
             }
           }
           // adjust i to skip some field
           i = j - 1;
         }
+        // must less than valid range.
+        if (ValidRange) {
+          ExpandEnd = std::min(ExpandEnd, ValidRange->end());
+        }
 
         // Try to expand: 1 expand array size. or 2 add padding.
         if (Ty->isArrayType()) {
-          ArrayInfo &TInfo = std::get<ArrayInfo>(TypeInfos.at(Target).Info);
+          const ArrayInfo &TInfo = std::get<ArrayInfo>(TypeInfos.at(Target).Info);
           // expand the array size to the range
           assert(TInfo.ElemSize);
           auto ElemSize = *TInfo.ElemSize;
@@ -326,7 +407,11 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       }
       hasSetNodeMap = true;
 
-      auto Size = TI.Size;
+      auto Size = TI.Size ? TI.Size : PointeeSize;
+      if (TI.Size && PointeeSize) {
+        assert(*PointeeSize > 0);
+        assert(*TI.Size == *PointeeSize);
+      }
       for (size_t i = 0; i < Info.Members.size(); i++) {
         auto &Edge = Info.Members[i];
         auto &Target = const_cast<CGNode &>(Edge->getTargetNode());

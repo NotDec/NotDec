@@ -60,6 +60,7 @@ struct ConstraintsGenerator;
 
 const char *getTRDebugDir();
 llvm::Optional<std::string> getSCCDebugDir(std::size_t SCCIndex);
+std::optional<int64_t> getAllocSize(ExtValuePtr Val);
 
 struct SCCSignatureTypes {
   std::shared_ptr<ConstraintsGenerator> SignatureGenerator;
