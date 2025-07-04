@@ -142,7 +142,6 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
       llvm::WriteBitcodeToFile(M, os);
       std::cout << "Bitcode dumped to " << OutFilePath << std::endl;
     } else if (outsuffix == ".c") {
-      // notdec::llvm2c::demoteSSA(M);
 
       // Run type recovery.
       std::unique_ptr<TypeRecovery::Result> HighTypes;
@@ -158,9 +157,8 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
         std::cerr << EC.message() << std::endl;
         std::abort();
       }
-      // TODO do tr after SSA demotion.
       // llvm2cOpt.noDemoteSSA = true;
-      notdec::llvm2c::decompileModule(M, os, llvm2cOpt, std::move(HighTypes));
+      notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt, std::move(HighTypes));
       std::cout << "Decompile result: " << OutFilePath << std::endl;
     }
 
@@ -448,7 +446,8 @@ void DecompileConfig::run_passes() {
       MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass(SimplifyCFGOptions())));
+      MPM.addPass(createModuleToFunctionPassAdaptor(
+          SimplifyCFGPass(SimplifyCFGOptions())));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
     } else {
