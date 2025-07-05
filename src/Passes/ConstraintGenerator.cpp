@@ -1657,7 +1657,9 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
     printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
   }
 
-  prepareSCC(MAM.getResult<CallGraphAnalysis>(M));
+  CallGraphAnalysis Ana;
+  CallG = std::make_unique<CallGraph>(std::move(Ana.run(M, MAM)));
+  prepareSCC(*CallG);
 
   bottomUpPhase();
 
@@ -3265,15 +3267,19 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
   if (isa<BitCastInst>(I)) {
     // ignore cast, propagate the type of the operand.
     auto *Src = I.getOperand(0);
-    auto &SrcVar = cg.getOrInsertNode(Src, &I, 0);
-    cg.addVarSubtype(&I, SrcVar);
+    auto SrcNode = cg.getNodeOrNull(Src, &I, 0, retypd::Covariant);
+    if (SrcNode) {
+      cg.addVarSubtype(&I, *SrcNode);
+    }
     return;
   } else if (isa<PtrToIntInst, IntToPtrInst, BitCastInst>(I)) {
     // ignore cast, view as assignment.
     auto *Src = I.getOperand(0);
-    auto &SrcVar = cg.getOrInsertNode(Src, &I, 0);
-    /* auto &Node = */ cg.addVarSubtype(&I, SrcVar);
-    // cg.setPointer(Node);
+    auto SrcNode = cg.getNodeOrNull(Src, &I, 0, retypd::Covariant);
+    if (SrcNode) {
+      cg.addVarSubtype(&I, *SrcNode);
+    }
+    // cg.setPointer(SrcNode);
     return;
   }
   // // Override implementation for TruncInst, ZExtInst here
@@ -3360,6 +3366,12 @@ unsigned ConstraintsGenerator::getPointerElemSize(Type *ty) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
     StoreInst &I) {
+  // if this is access to table, then we ignore the type, and return func ptr.
+  auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0, retypd::Covariant);
+  if (!Node) {
+    return;
+  }
+
   auto DstVar =
       cg.deref(I.getPointerOperand(), &I, 1,
                cg.getPointerElemSize(I.getPointerOperandType()), false);
@@ -3370,6 +3382,12 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
+  // if this is access to table, then we ignore the type, and return func ptr.
+  auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0, retypd::Covariant);
+  if (!Node) {
+    return;
+  }
+
   auto LoadedVar =
       cg.deref(I.getPointerOperand(), &I, 0,
                cg.getPointerElemSize(I.getPointerOperandType()), true);
@@ -3730,17 +3748,17 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
     }
     OS << "; ";
     if (!F->getReturnType()->isVoidTy()) {
-      OS << CG->getOrInsertNode(
-                  ReturnValue{.Func = const_cast<llvm::Function *>(F)}, nullptr,
-                  -1)
-                .str();
+      auto N = CG->getNodeOrNull(
+          ReturnValue{.Func = const_cast<llvm::Function *>(F)}, nullptr, -1,
+          retypd::Covariant);
+      OS << (N ? N->str() : "none");
       OS << " <- ";
     }
     OS << "(";
     for (auto &Arg : F->args()) {
-      OS << CG->getOrInsertNode(const_cast<llvm::Argument *>(&Arg), nullptr, -1)
-                .str()
-         << ", ";
+      auto N = CG->getNodeOrNull(const_cast<llvm::Argument *>(&Arg), nullptr,
+                                 -1, retypd::Covariant);
+      OS << (N ? N->str() : "none") << ", ";
     }
     OS << ")";
     OS << "\n";
@@ -3761,8 +3779,9 @@ class CGAnnotationWriter : public llvm::AssemblyAnnotationWriter {
 
     OS << "; ";
     if (!V.getType()->isVoidTy()) {
-      OS << CG->getOrInsertNode(const_cast<llvm::Value *>(&V), nullptr, -1)
-                .str();
+      auto N = CG->getNodeOrNull(const_cast<llvm::Value *>(&V), nullptr, -1,
+                                 retypd::Covariant);
+      OS << (N ? N->str() : "none");
       if (Instr != nullptr) {
         OS << " <- ";
       }

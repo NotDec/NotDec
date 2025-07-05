@@ -128,6 +128,7 @@ struct TypeRecovery {
   std::map<Function *, std::shared_ptr<ConstraintsGenerator>> SignatureOverride;
   std::map<CallBase *, std::shared_ptr<ConstraintsGenerator>>
       CallsiteSummaryOverride;
+  std::unique_ptr<CallGraph> CallG;
 
   unsigned pointer_size = 0;
 

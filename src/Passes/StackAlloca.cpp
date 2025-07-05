@@ -32,15 +32,28 @@ Instruction *createAllocaWithSize(IRBuilder<> &Builder, Value *Size,
   return Builder.CreateAlloca(i8, Size, Name);
 }
 
-void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP) {
+// match dynamic stack allocation (optimized)
+void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
+                                                   Instruction *LoadSP,
+                                                   Instruction *add_load_sp,
+                                                   Value *space,
+                                                   bool isGrowNegative) {
   using namespace llvm::PatternMatch;
-  Value *OldStackEnd = nullptr;
-  Value *Size = nullptr;
+  Value *StackLoc = nullptr;
+  Value *SizeVal = nullptr;
 
   // %sub = sub i32 %OldStackEnd, %Size
   // store i32 %sub, i32* @__stack_pointer
-  auto pat_alloca =
-      m_Store(m_Sub(m_Value(OldStackEnd), m_Value(Size)), m_Specific(SP));
+  // instcombine will convert sub to add generally.
+  auto pat_alloca_sub =
+      m_Store(m_Sub(m_Value(StackLoc), m_Value(SizeVal)), m_Specific(SP));
+
+  // %sub = add i32 %OldStackEnd, %Size
+  // store i32 %sub, i32* @__stack_pointer
+  // sub的值可能是原始的sp,也可能是sub之后的sp.
+  // 如果是原始的sp，就需要调整为相对于栈顶的大小
+  auto pat_alloca_add =
+      m_Store(m_Add(m_Value(StackLoc), m_Value(SizeVal)), m_Specific(SP));
 
   // replace %sub with alloca i8, %Size
   // remove store
@@ -48,12 +61,39 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP) {
   std::vector<std::pair<llvm::Instruction *, llvm::Instruction *>> toReplace;
   for (auto &BB : F) {
     for (auto &I : BB) {
-      if (PatternMatch::match(&I, pat_alloca)) {
+      if (PatternMatch::match(&I, pat_alloca_add)) {
+        auto Add = llvm::cast<Instruction>(I.getOperand(0));
+        IRBuilder<> Builder(I.getParent());
+        Builder.SetInsertPoint(&I);
+        auto AllocaSize = SizeVal;
+        if (StackLoc == LoadSP) {
+          AllocaSize = Builder.CreateSub(AllocaSize, space);
+        } else if (StackLoc == add_load_sp) {
+          // relative to the top of the stack
+        } else {
+          // assert(false && "unrecognized modification?");
+          llvm::errs() << "Error: unrecognized modification: " << I << "\n";
+          continue;
+        }
+        if (isGrowNegative) {
+          AllocaSize = Builder.CreateNeg(AllocaSize);
+        }
+        Instruction *Alloca =
+            createAllocaWithSize(Builder, AllocaSize, "alloc_mem");
+        Alloca = llvm::cast<Instruction>(
+            Builder.CreatePtrToInt(Alloca, Add->getType()));
+        // create a alloca inst with arg Size.
+        toRemove.push_back(&I);
+        toReplace.push_back(std::make_pair(Add, Alloca));
+      } else if (PatternMatch::match(&I, pat_alloca_sub)) {
+        assert(false && "instcombine should convert sub to add?");
+        // todo check for
         auto Sub = llvm::cast<Instruction>(I.getOperand(0));
         IRBuilder<> Builder(I.getParent());
         Builder.SetInsertPoint(&I);
-        llvm::errs() << "stack alloca: " << *Size << "\n";
-        Instruction *Alloca = createAllocaWithSize(Builder, Size, "alloc_mem");
+        llvm::errs() << "stack alloca: " << *SizeVal << "\n";
+        Instruction *Alloca =
+            createAllocaWithSize(Builder, SizeVal, "alloc_mem");
         Alloca = llvm::cast<Instruction>(
             Builder.CreatePtrToInt(Alloca, Sub->getType()));
         // create a alloca inst with arg Size.
@@ -75,8 +115,8 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP) {
 ///
 /// Typical case:
 /// entry:
-/// %0 = load i32, i32* @__stack_pointer, align 4
-/// %1 = add i32 %0, -16
+/// %LoadSP = load i32, i32* @__stack_pointer, align 4
+/// %add_load_sp = add i32 %0, -16 ; %space
 /// store i32 %1, i32* @__stack_pointer, align 4 ; update the stack pointer
 /// ... ; real function body
 /// return_block:
@@ -208,10 +248,19 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         continue;
       }
     }
-    matchDynamicAllocas(*F, sp);
 
     // replace the stack allocation with alloca.
     bool grow_negative = sp_result.direction == 0;
+
+    // remove prologue store in case matched by dynamic alloca matching
+    if (match_level == 2) {
+      prologue_store->eraseFromParent();
+    }
+
+    if (match_level == 2) {
+      matchDynamicAllocas(*F, sp, LoadSP, add_load_sp, space, grow_negative);
+    }
+
     auto SizeTy = IntegerType::get(M.getContext(),
                                    M.getDataLayout().getPointerSizeInBits());
     // TODO handle positive grow direction.
@@ -247,10 +296,6 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
       assert(match_level == 2);
       high_addr->replaceAllUsesWith(alloc_end);
       high_addr->eraseFromParent();
-    }
-
-    if (match_level == 2) {
-      prologue_store->eraseFromParent();
     }
   }
   // perform the transformation:
