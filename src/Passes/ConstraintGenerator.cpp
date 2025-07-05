@@ -1682,7 +1682,7 @@ void TypeRecovery::genASTTypes() {
     }
     auto Dir = getSCCDebugDir(i);
 
-    auto SCCTypes = getASTTypes(Data, *Dir);
+    auto SCCTypes = getASTTypes(Data, Dir ? *Dir : "");
 
     ConstraintsGenerator &G2 = *Data.SketchGenerator;
 
@@ -1941,8 +1941,7 @@ std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
       }
 
       //!! build AST type for the node
-      HType *CTy =
-          TB.buildType(*Node, retypd::Covariant);
+      HType *CTy = TB.buildType(*Node, retypd::Covariant);
 
       if (TraceIds.count(Node->getId())) {
         PRINT_TRACE(Node->getId())
@@ -1980,8 +1979,7 @@ std::shared_ptr<SCCTypeResult> TypeRecovery::getASTTypes(SCCData &Data,
       }
 
       //!! build AST type for the node
-      HType *CTy =
-          TB.buildType(*Node, retypd::Contravariant);
+      HType *CTy = TB.buildType(*Node, retypd::Contravariant);
 
       if (TraceIds.count(Node->getId())) {
         PRINT_TRACE(Node->getId())
