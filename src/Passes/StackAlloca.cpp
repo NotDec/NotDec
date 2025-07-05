@@ -71,8 +71,7 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
         } else if (StackLoc == add_load_sp) {
           // relative to the top of the stack
         } else {
-          // assert(false && "unrecognized modification?");
-          llvm::errs() << "Error: unrecognized modification: " << I << "\n";
+          llvm::errs() << "Error: unrecognized sp modification: " << I << "\n";
           continue;
         }
         if (isGrowNegative) {
@@ -86,14 +85,25 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
         toRemove.push_back(&I);
         toReplace.push_back(std::make_pair(Add, Alloca));
       } else if (PatternMatch::match(&I, pat_alloca_sub)) {
-        assert(false && "instcombine should convert sub to add?");
         // todo check for
         auto Sub = llvm::cast<Instruction>(I.getOperand(0));
         IRBuilder<> Builder(I.getParent());
         Builder.SetInsertPoint(&I);
-        llvm::errs() << "stack alloca: " << *SizeVal << "\n";
+        auto AllocaSize = SizeVal;
+        if (StackLoc == LoadSP) {
+          AllocaSize = Builder.CreateSub(AllocaSize, space);
+        } else if (StackLoc == add_load_sp) {
+          // relative to the top of the stack
+        } else {
+          llvm::errs() << "Error: unrecognized sp modification: " << I << "\n";
+          continue;
+        }
+        if (!isGrowNegative) {
+          AllocaSize = Builder.CreateNeg(AllocaSize);
+        }
+        // llvm::errs() << "stack alloca: " << *SizeVal << "\n";
         Instruction *Alloca =
-            createAllocaWithSize(Builder, SizeVal, "alloc_mem");
+            createAllocaWithSize(Builder, AllocaSize, "alloc_mem");
         Alloca = llvm::cast<Instruction>(
             Builder.CreatePtrToInt(Alloca, Sub->getType()));
         // create a alloca inst with arg Size.

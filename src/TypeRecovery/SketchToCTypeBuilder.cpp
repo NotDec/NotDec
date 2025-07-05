@@ -200,9 +200,13 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
     }
   } else if (Node.outEdges.empty()) {
-    assert(!PointeeSize);
-    // no info from graph, just use LatticeTy.
-    Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
+    assert(BitSize == (Parent.PointerSize * 8));
+    if (!PointeeSize) {
+      // no info from graph, just use LatticeTy. (void pointer)
+      Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
+    } else {
+      Ret = Ctx.getArrayType(false, Ctx.getChar(), PointeeSize);
+    }
   } else {
     auto &TI = TypeInfos.at(const_cast<CGNode *>(&Node));
     if (std::holds_alternative<SimpleTypeInfo>(TI.Info)) {

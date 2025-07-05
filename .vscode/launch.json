@@ -49,8 +49,8 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
       "env": {
-        // "NOTDEC_DEBUG_DIR": "debug_dir",
-        // "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
+        "NOTDEC_DEBUG_DIR": "debug_dir",
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
         // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "6772",

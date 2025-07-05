@@ -1,6 +1,7 @@
 
 
 #include "Passes/StackBreaker.h"
+#include "notdec-llvm2c/Interface/StructManager.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -99,7 +100,19 @@ bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
     return ArrayType::get(Builder.getInt8Ty(), Size);
   };
 
+  auto Current = StartOffset;
+  // Fields' offset are in increasing order
   for (auto Field : RD->getFields()) {
+    // add paddings begin
+    if (Current < Field.R.Start) {
+      auto R1 = SimpleRange{.Start = Current, .Size = Field.R.Start - Current};
+      // Create NewAllocaInst and insert into NAs
+      auto NewAlloca = Builder.CreateAlloca(getArrayBySize(R1.Size), nullptr,
+                                            "stack_" + std::to_string(Current));
+      // TODO add debug info to prevent from deleting.
+      NAs.push_back({.R = R1, .NewAI = NewAlloca});
+      Current = Field.R.Start;
+    }
     // if field is fully contained in the range.
     if (Field.R.Start >= StartOffset && Field.R.end() <= EndOffset) {
       // Create NewAllocaInst and insert into NAs
@@ -108,7 +121,23 @@ bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
                                "stack_" + std::to_string(Field.R.Start));
       // TODO add debug info to prevent from deleting.
       NAs.push_back({.R = Field.R, .NewAI = NewAlloca});
+      Current = Field.R.end();
+    } else if (Field.R.end() <= StartOffset || Field.R.Start > EndOffset) {
+      // fully out of the range.
+      // do nothing, skip
+    } else {
+      assert(false && "intersecting field?");
     }
+  }
+  // Add padding in the end
+  if (Current < EndOffset) {
+    auto R1 = SimpleRange{.Start = Current, .Size = EndOffset - Current};
+    // Create NewAllocaInst and insert into NAs
+    auto NewAlloca = Builder.CreateAlloca(getArrayBySize(R1.Size), nullptr,
+                                          "stack_" + std::to_string(Current));
+    // TODO add debug info to prevent from deleting.
+    NAs.push_back({.R = R1, .NewAI = NewAlloca});
+    Current = EndOffset;
   }
 
   // Use rewriter to rewrite all accesses.
