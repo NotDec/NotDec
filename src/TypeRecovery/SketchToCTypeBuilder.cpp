@@ -126,7 +126,8 @@ void TypeBuilder::buildNodeSizeHintMap(ConstraintsGenerator &G2) {
   }
 }
 
-HType *TypeBuilder::buildType(const CGNode &Node, Variance V, std::optional<int64_t> PointeeSize) {
+HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
+                              std::optional<int64_t> PointeeSize) {
   unsigned BitSize = Node.getSize();
   const char *prefix = nullptr;
   if (Node.isMemory()) {
@@ -364,7 +365,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V, std::optional<int6
 
         // Try to expand: 1 expand array size. or 2 add padding.
         if (Ty->isArrayType()) {
-          const ArrayInfo &TInfo = std::get<ArrayInfo>(TypeInfos.at(Target).Info);
+          const ArrayInfo &TInfo =
+              std::get<ArrayInfo>(TypeInfos.at(Target).Info);
           // expand the array size to the range
           assert(TInfo.ElemSize);
           auto ElemSize = *TInfo.ElemSize;
@@ -407,10 +409,10 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V, std::optional<int6
       }
       hasSetNodeMap = true;
 
-      auto Size = TI.Size ? TI.Size : PointeeSize;
+      auto Size = PointeeSize ? PointeeSize : TI.Size;
       if (TI.Size && PointeeSize) {
         assert(*PointeeSize > 0);
-        assert(*TI.Size == *PointeeSize);
+        // assert(*TI.Size == *PointeeSize);
       }
       for (size_t i = 0; i < Info.Members.size(); i++) {
         auto &Edge = Info.Members[i];

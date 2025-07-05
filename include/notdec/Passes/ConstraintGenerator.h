@@ -479,6 +479,18 @@ struct TypeRecoveryOpt : PassInfoMixin<TypeRecoveryOpt> {
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
+struct InvalidateAllTypes : PassInfoMixin<InvalidateAllTypes> {
+  TypeRecovery &TR;
+  InvalidateAllTypes(TypeRecovery &TR) : TR(TR) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    for (auto &Data: TR.AG.AllSCCs) {
+      Data.onIRChanged();
+    }
+    return PreservedAnalyses::all();
+  }
+};
+
 struct FunctionTypeRecovery : AnalysisInfoMixin<FunctionTypeRecovery> {
 
   struct FuncTypeResult {};

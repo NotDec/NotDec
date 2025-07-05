@@ -1,4 +1,6 @@
 
+#include <clang/AST/ASTDumper.h>
+#include <clang/AST/Type.h>
 #include <fstream>
 #include <iostream>
 #include <llvm/IR/Module.h>
@@ -48,6 +50,14 @@ std::string join(std::string path, std::string elem) {
   }
   M.print(os, nullptr);
   return true;
+}
+
+[[nodiscard]] std::string toString(const clang::QualType &QT) {
+  std::string Out;
+  llvm::raw_string_ostream SS(Out);
+  clang::ASTDumper Dumper(llvm::errs(), /*ShowColors=*/false);
+  Dumper.Visit(QT);
+  return Out;
 }
 
 } // namespace notdec

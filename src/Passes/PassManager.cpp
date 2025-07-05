@@ -450,6 +450,7 @@ void DecompileConfig::run_passes() {
           SimplifyCFGPass(SimplifyCFGOptions())));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
+      MPM.addPass(InvalidateAllTypes(TR));
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec
