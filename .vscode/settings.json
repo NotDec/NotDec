@@ -76,6 +76,7 @@
     "decompilation",
     "Decompiler",
     "determinize",
+    "DSROA",
     "endregion",
     "notdec",
     "Preds",

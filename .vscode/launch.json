@@ -5,6 +5,18 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Replay",
+      "type": "lldb",
+      "request": "attach",
+      "targetCreateCommands": [
+        "target create ${workspaceFolder}/build/bin/notdec"
+      ],
+      "processCreateCommands": [
+        "gdb-remote 127.0.0.1:12345"
+      ],
+      "reverseDebugging": true
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "decompile no-tr",
@@ -31,17 +43,19 @@
         "-o",
         "${file}.c",
         // "-debug-only=type-recovery",
-        "-debug-only=retypd_graph",
+        // "-debug-only=retypd_graph",
         // "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
       "env": {
-        "NOTDEC_DEBUG_DIR": "debug_dir",
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
+        // "NOTDEC_DEBUG_DIR": "debug_dir",
+        // "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
         // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "6772",
+        // "NOTDEC_SAT_TIMEOUT": "5000",
+        // "NOTDEC_TYPE_RECOVERY_NO_SCC": "1",
       }
     },
     {
