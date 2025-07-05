@@ -341,7 +341,7 @@ void DecompileConfig::find_special_gv() {
 }
 
 void DecompileConfig::run_passes() {
-  const char *DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
+  const char *DebugDir = getTRDebugDir();
   if (DebugDir) {
     llvm::sys::fs::create_directories(DebugDir);
     printModule(Mod, join(DebugDir, "00-lifted.ll").c_str());

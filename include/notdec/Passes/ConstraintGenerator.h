@@ -18,6 +18,7 @@
 #include <llvm/Support/Casting.h>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <variant>
@@ -59,8 +60,9 @@ using retypd::TypeVariable;
 struct ConstraintsGenerator;
 
 const char *getTRDebugDir();
-llvm::Optional<std::string> getSCCDebugDir(std::size_t SCCIndex);
+std::optional<std::string> getSCCDebugDir(std::size_t SCCIndex);
 std::optional<int64_t> getAllocSize(ExtValuePtr Val);
+std::string getUniquePath(const std::string &basePath, const char *suffix);
 
 struct SCCSignatureTypes {
   std::shared_ptr<ConstraintsGenerator> SignatureGenerator;
@@ -143,9 +145,10 @@ struct TypeRecovery {
   void prepareSCC(CallGraph &CG);
   void bottomUpPhase();
   std::shared_ptr<ConstraintsGenerator>
-  getBottomUpGraph(SCCData &Data, const char *OriginalGraphPath = nullptr);
-  std::shared_ptr<ConstraintsGenerator> getTopDownGraph(SCCData &Data);
-  std::shared_ptr<SCCTypeResult> getASTTypes(SCCData &Data, std::string DebugDir = "");
+  getBottomUpGraph(SCCData &Data, std::optional<std::string> SCCDebugPath = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator> getTopDownGraph(SCCData &Data, std::optional<std::string> SCCDebugPath = std::nullopt);
+  std::shared_ptr<SCCTypeResult> getASTTypes(SCCData &Data,
+                                             std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
   void handleGlobals();
   void genASTTypes();
@@ -177,7 +180,7 @@ struct TypeRecovery {
   }
 
   static std::shared_ptr<ConstraintsGenerator>
-  postProcess(ConstraintsGenerator &G, std::string DebugDir);
+  postProcess(ConstraintsGenerator &G, std::optional<std::string> DebugDir = std::nullopt);
   // merge nodes to current graph by determinize.
   static CGNode *multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
                                          std::set<CGNode *> &StartNodes,
@@ -484,7 +487,7 @@ struct InvalidateAllTypes : PassInfoMixin<InvalidateAllTypes> {
   InvalidateAllTypes(TypeRecovery &TR) : TR(TR) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
-    for (auto &Data: TR.AG.AllSCCs) {
+    for (auto &Data : TR.AG.AllSCCs) {
       Data.onIRChanged();
     }
     return PreservedAnalyses::all();
