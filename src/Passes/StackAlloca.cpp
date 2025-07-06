@@ -96,7 +96,8 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
           // relative to the top of the stack
         } else {
           llvm::errs() << "Error: unrecognized sp modification: " << I << "\n";
-          continue;
+          // continue;
+          // assume as stack top for sub
         }
         if (!isGrowNegative) {
           AllocaSize = Builder.CreateNeg(AllocaSize);

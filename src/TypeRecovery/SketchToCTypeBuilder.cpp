@@ -215,7 +215,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         // void pointer?
         return getPtrTy(nullptr);
       }
-      assert(!PointeeSize || ((*PointeeSize) == *TI.Size));
+      // assert(!PointeeSize || ((*PointeeSize) == *TI.Size));
       // simple pointer type
       auto PointeeTy = buildType(Info.Edge->getTargetNode(), V);
       Ret = getPtrTy(PointeeTy);

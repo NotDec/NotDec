@@ -3008,6 +3008,8 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
       // return getLLVMTypeVar(Ctx.TRCtx, Ty);
     } else if (isa<ConstantPointerNull>(C)) {
       return makeTv(Ctx.TRCtx, ValueNamer::getName("null_"));
+    } else if (isa<UndefValue>(C)) {
+      return makeTv(Ctx.TRCtx, ValueNamer::getName("undef_"));
     }
     llvm::errs()
         << __FILE__ << ":" << __LINE__ << ": "
@@ -3369,7 +3371,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
   // if this is access to table, then we ignore the type, and return func ptr.
   auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0, retypd::Covariant);
   if (!Node) {
-    return;
+    if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
+      if (CE->getOpcode() == Instruction::GetElementPtr) {
+        return;
+      }
+    }
   }
 
   auto DstVar =
@@ -3385,7 +3391,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   // if this is access to table, then we ignore the type, and return func ptr.
   auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0, retypd::Covariant);
   if (!Node) {
-    return;
+    if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
+      if (CE->getOpcode() == Instruction::GetElementPtr) {
+        return;
+      }
+    }
   }
 
   auto LoadedVar =
