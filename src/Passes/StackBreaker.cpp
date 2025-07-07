@@ -122,7 +122,7 @@ bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
       // TODO add debug info to prevent from deleting.
       NAs.push_back({.R = Field.R, .NewAI = NewAlloca});
       Current = Field.R.end();
-    } else if (Field.R.end() <= StartOffset || Field.R.Start > EndOffset) {
+    } else if (Field.R.end() <= StartOffset || Field.R.Start >= EndOffset) {
       // fully out of the range.
       // do nothing, skip
     } else {

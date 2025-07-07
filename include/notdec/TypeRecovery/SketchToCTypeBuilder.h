@@ -69,10 +69,6 @@ struct TypeBuilder {
               const std::map<CGNode *, TypeInfo>& TypeInfos)
       : Parent(Parent), Ctx(Parent.Ctx), TypeInfos(TypeInfos) {}
 
-  HType* getBool() {
-    
-  }
-
   HType *getUndef(unsigned BitSize) {
     assert(BitSize > 0);
     std::string Name = "undef" + std::to_string(BitSize);

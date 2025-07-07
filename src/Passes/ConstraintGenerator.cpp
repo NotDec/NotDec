@@ -1658,7 +1658,7 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
   }
 
   CallGraphAnalysis Ana;
-  CallG = std::make_unique<CallGraph>(std::move(Ana.run(M, MAM)));
+  CallG = std::make_unique<CallGraph>(Ana.run(M, MAM));
   prepareSCC(*CallG);
 
   bottomUpPhase();
@@ -1908,10 +1908,10 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
     std::ofstream Val2NodeFile(
         getUniquePath(join(*DebugDir, "10-Val2Node"), ".txt"));
     for (auto &Ent : G2.V2N) {
-      auto &N = G2.getNode(Ent.first, nullptr, -1, retypd::Covariant);
-      auto &NC = G2.getNode(Ent.first, nullptr, -1, retypd::Contravariant);
-      Val2NodeFile << getName(Ent.first) << ", " << toString(N.key) << ", "
-                   << toString(NC.key) << "\n";
+      auto N = G2.getNodeOrNull(Ent.first, nullptr, -1, retypd::Covariant);
+      auto NC = G2.getNodeOrNull(Ent.first, nullptr, -1, retypd::Contravariant);
+      Val2NodeFile << getName(Ent.first) << ", " << (N ? toString(N->key) : "none") << ", "
+                   << (NC ? toString(NC->key) : "none") << "\n";
     }
     Val2NodeFile.close();
   }
@@ -1947,7 +1947,7 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
       }
 
       if (TraceIds.count(Node->getId())) {
-        PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
+        PRINT_TRACE(Node->getId()) << ": Generating Type for " << toString(Node->key) <<"...\n";
       }
 
       //!! build AST type for the node

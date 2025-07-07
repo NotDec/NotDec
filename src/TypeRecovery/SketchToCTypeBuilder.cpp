@@ -205,7 +205,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       // no info from graph, just use LatticeTy. (void pointer)
       Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
     } else {
+      // Array type always cannot exist alone, only array pointer type.
       Ret = Ctx.getArrayType(false, Ctx.getChar(), PointeeSize);
+      Ret = Ctx.getPointerType(false, Parent.PointerSize, Ret);
     }
   } else {
     auto &TI = TypeInfos.at(const_cast<CGNode *>(&Node));
@@ -234,8 +236,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       assert(Count >= 1);
 
       if (PointeeSize) {
-        assert((*PointeeSize % *Info.ElemSize) == 0 &&
-               "TODO support non aligned array type?");
+        if((*PointeeSize % *Info.ElemSize) != 0)  {
+          llvm::errs() << "Warning: Non-aligned array type?\n";
+        }
         Count = *PointeeSize / *Info.ElemSize;
       }
 
