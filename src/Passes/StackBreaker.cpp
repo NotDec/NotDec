@@ -15,10 +15,17 @@
 namespace notdec {
 
 const NewAllocas *StackBreakerRewriter::getNA(OffsetTy Off) {
+  assert(!NAs.empty());
+  if (Off < NAs.front().R.Start) {
+    return &NAs.front();
+  }
   for (auto &NA : NAs) {
     if (NA.R.containsOffset(Off)) {
       return &NA;
     }
+  }
+  if (Off > NAs.back().R.end()) {
+    return &NAs.back();
   }
   return nullptr;
 }
@@ -30,6 +37,7 @@ void StackBreakerRewriter::visitBinaryOperator(BinaryOperator &I) {
   if (I.getOpcode() == BinaryOperator::BinaryOps::Add) {
     auto L = I.getOperand(0);
     auto R = I.getOperand(1);
+    assert(U->get() == L);
     assert(!isa<ConstantInt>(L));
     // If not constant, then the offset is unknown
     if (!isa<ConstantInt>(R)) {
@@ -49,7 +57,9 @@ void StackBreakerRewriter::visitBinaryOperator(BinaryOperator &I) {
 
     // replace left op
     auto NewLeft = Builder.CreatePtrToInt(NewAI, I.getType());
-    auto NewRight = Builder.CreateSub(R, ConstantInt::get(I.getType(), Offset));
+    auto NewRight = Builder.CreateSub(
+        R, ConstantInt::get(I.getType(),
+                            APInt(Offset.getBitWidth(), Entry->R.Start, true)));
     auto NewAdd = Builder.CreateAdd(NewLeft, NewRight, I.getName());
 
     I.replaceAllUsesWith(NewAdd);
@@ -126,7 +136,14 @@ bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
       // fully out of the range.
       // do nothing, skip
     } else {
-      assert(false && "intersecting field?");
+      auto Intersecting = Field.R.intersect(
+          SimpleRange{.Start = StartOffset, .Size = EndOffset - StartOffset});
+      auto NewAlloca =
+          Builder.CreateAlloca(getArrayBySize(Intersecting.Size), nullptr,
+                               "stack_" + std::to_string(Intersecting.Start));
+      // TODO add debug info to prevent from deleting.
+      NAs.push_back({.R = Intersecting, .NewAI = NewAlloca});
+      Current = Intersecting.end();
     }
   }
   // Add padding in the end

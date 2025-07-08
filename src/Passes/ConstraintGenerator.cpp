@@ -1132,6 +1132,15 @@ bool isFuncPtr(ExtValuePtr Val) {
   return false;
 }
 
+bool isSPGlobal(ExtValuePtr Val) {
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    if (auto GV = dyn_cast<GlobalVariable>(*V)) {
+      return llvm2c::isSPByMetadata(GV);
+    }
+  }
+  return false;
+}
+
 void TypeRecovery::bottomUpPhase() {
   assert(AG.CG != nullptr);
   // TODO: simplify call graph if one func does not have up constraints.
@@ -1321,7 +1330,7 @@ void TypeRecovery::topDownPhase() {
     const std::vector<CallGraphNode *> &NodeVec = Data.Nodes;
     auto &Name = Data.SCCName;
     // Collect all functions for SCC checking
-    const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
+    // const std::set<llvm::Function *> &SCCSet = Data.SCCSet;
 
     // for debug print
     std::optional<std::string> DirPath = getSCCDebugDir(SCCIndex);
@@ -1673,27 +1682,23 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
   std::cerr << "Bottom up phase done! SCC count:" << AG.AllSCCs.size() << "\n";
 
   if (DebugDir) {
-    AG.Global->CG.printGraph(join(DebugDir, "GlobalMemory.dot").c_str());
     printAnnotatedModule(M, join(DebugDir, "02-AfterBottomUp.anno1.ll").c_str(),
                          1);
-  }
-
-  if (DebugDir) {
-    std::error_code EC;
-    ValueTypesFile.emplace(join(DebugDir, "ValueTypes.txt"), EC);
-    if (EC) {
-      std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Cannot open output file ValueTypes.txt." << std::endl;
-      std::cerr << EC.message() << std::endl;
-      std::abort();
-    }
+    // std::error_code EC;
+    // ValueTypesFile.emplace(join(DebugDir, "ValueTypes.txt"), EC);
+    // if (EC) {
+    //   std::cerr << __FILE__ << ":" << __LINE__ << ": "
+    //             << "Cannot open output file ValueTypes.txt." << std::endl;
+    //   std::cerr << EC.message() << std::endl;
+    //   std::abort();
+    // }
   }
 
   LLVM_DEBUG(
       errs() << " ============== TypeRecovery::run End ===============\n");
 }
 
-void TypeRecovery::genASTTypes() {
+void TypeRecovery::genASTTypes(Module &M) {
   // 3 build AST type for each value in value map
   ResultVal = std::make_unique<TypeRecovery::Result>();
   assert(HTCtx != nullptr);
@@ -1761,7 +1766,20 @@ void TypeRecovery::genASTTypes() {
 
   // 3.4 build AST type for memory node
   std::shared_ptr<ConstraintsGenerator> &GlobalSkS = AG.GlobalSketch;
-  GlobalSkS = postProcess(*AG.Global, "");
+  GlobalSkS = postProcess(*AG.Global);
+
+  auto DebugDir = getTRDebugDir();
+  if (DebugDir) {
+    printAnnotatedModule(
+        M,
+        getUniquePath(join(DebugDir, "02-AfterBottomUp.anno1"), ".ll").c_str(),
+        1);
+    AG.Global->CG.printGraph(
+        getUniquePath(join(DebugDir, "Global"), ".dot").c_str());
+    AG.GlobalSketch->CG.printGraph(
+        getUniquePath(join(DebugDir, "GlobalSketch"), ".dot").c_str());
+  }
+
   ConstraintsGenerator &GlobalSk = *GlobalSkS;
   // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
   // retypd::Covariant);
@@ -1810,8 +1828,6 @@ void TypeRecovery::genASTTypes() {
 
   // gen_json("retypd-constrains.json");
 
-  // TODO convert the type back to LLVM IR??
-  auto DebugDir = getTRDebugDir();
   if (DebugDir) {
     printAnnotatedModule(Mod, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
   }
@@ -1910,7 +1926,8 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
     for (auto &Ent : G2.V2N) {
       auto N = G2.getNodeOrNull(Ent.first, nullptr, -1, retypd::Covariant);
       auto NC = G2.getNodeOrNull(Ent.first, nullptr, -1, retypd::Contravariant);
-      Val2NodeFile << getName(Ent.first) << ", " << (N ? toString(N->key) : "none") << ", "
+      Val2NodeFile << getName(Ent.first) << ", "
+                   << (N ? toString(N->key) : "none") << ", "
                    << (NC ? toString(NC->key) : "none") << "\n";
     }
     Val2NodeFile.close();
@@ -1947,15 +1964,15 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
       }
 
       if (TraceIds.count(Node->getId())) {
-        PRINT_TRACE(Node->getId()) << ": Generating Type for " << toString(Node->key) <<"...\n";
+        PRINT_TRACE(Node->getId())
+            << "Generating Type for " << toString(Node->key) << "...\n";
       }
 
       //!! build AST type for the node
       HType *CTy = TB.buildType(*Node, retypd::Covariant);
 
       if (TraceIds.count(Node->getId())) {
-        PRINT_TRACE(Node->getId())
-            << ": Type is " << CTy->getAsString() << "\n";
+        PRINT_TRACE(Node->getId()) << "Type is " << CTy->getAsString() << "\n";
       }
 
       if (SCCTypes->ValueTypes.count(Ent.first) != 0) {
@@ -1964,7 +1981,7 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
       }
 
       // save the result
-      if (!isFuncPtr(Ent.first)) {
+      if (!isFuncPtr(Ent.first) && !isSPGlobal(Ent.first)) {
         SCCTypes->ValueTypes[Ent.first] = CTy;
       }
 
@@ -2011,15 +2028,14 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
       }
 
       if (TraceIds.count(Node->getId())) {
-        PRINT_TRACE(Node->getId()) << ": Generating Type...\n";
+        PRINT_TRACE(Node->getId()) << "Generating Type...\n";
       }
 
       //!! build AST type for the node
       HType *CTy = TB.buildType(*Node, retypd::Contravariant);
 
       if (TraceIds.count(Node->getId())) {
-        PRINT_TRACE(Node->getId())
-            << ": Type is " << CTy->getAsString() << "\n";
+        PRINT_TRACE(Node->getId()) << "Type is " << CTy->getAsString() << "\n";
       }
 
       if (SCCTypes->ValueTypesLowerBound.count(Ent.first) != 0) {
@@ -2027,7 +2043,7 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
                      << toString(Ent.first) << "\n";
       }
       // save the result
-      if (!isFuncPtr(Ent.first)) {
+      if (!isFuncPtr(Ent.first) && !isSPGlobal(Ent.first)) {
         SCCTypes->ValueTypesLowerBound[Ent.first] = CTy;
       }
 

@@ -3,6 +3,7 @@
 #include <clang/AST/Type.h>
 #include <fstream>
 #include <iostream>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Module.h>
 #include <sstream>
 #include <string>
@@ -38,6 +39,10 @@ std::string readFileToString(const char *path) {
 
 std::string join(std::string path, std::string elem) {
   return path.back() == '/' ? path + elem : path + "/" + elem;
+}
+
+[[nodiscard]] bool equal(llvm::StringRef S1, const char* S2) {
+  return S1 == S2;
 }
 
 [[nodiscard]] bool printModule(llvm::Module &M, const char *path) {

@@ -2035,7 +2035,8 @@ void ConstraintGraph::printGraph(const char *DotFile) const {
   std::error_code EC;
   llvm::raw_fd_ostream OutStream(DotFile, EC);
   if (EC) {
-    llvm::errs() << "Error: " << EC.message() << "\n";
+    llvm::errs() << "ConstraintGraph::printGraph: Error printing to " << DotFile << ", " << EC.message()
+                 << "\n";
     return;
   }
   llvm::WriteGraph(OutStream, const_cast<ConstraintGraph *>(this), false);

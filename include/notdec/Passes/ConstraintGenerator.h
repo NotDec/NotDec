@@ -138,7 +138,7 @@ struct TypeRecovery {
   std::unique_ptr<Result> &getResult(Module &M1, ModuleAnalysisManager &MAM) {
     assert((!AG.AllSCCs.empty()) && "function run() is not called!");
     if (ResultVal == nullptr) {
-      genASTTypes();
+      genASTTypes(M1);
     }
     return ResultVal;
   }
@@ -152,7 +152,7 @@ struct TypeRecovery {
                                              std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
   void handleGlobals();
-  void genASTTypes();
+  void genASTTypes(Module &M);
   void gen_json(std::string OutputFilename);
 
   // NOTDEC_SUMMARY_OVERRIDE
@@ -164,7 +164,6 @@ struct TypeRecovery {
   // NOTDEC_TYPE_RECOVERY_NO_SCC
   bool NoSCC = false;
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
-  llvm::Optional<llvm::raw_fd_ostream> ValueTypesFile;
 
   TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx,
                std::shared_ptr<ast::HTypeContext> HTCtx, Module &M)

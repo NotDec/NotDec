@@ -14,6 +14,7 @@
 namespace notdec {
 
 using namespace llvm;
+void addSPMetadata(GlobalVariable *GV);
 
 /// Match the following pattern:
 /// store (add (load sp) space) sp

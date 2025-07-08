@@ -126,6 +126,27 @@ void TypeBuilder::buildNodeSizeHintMap(ConstraintsGenerator &G2) {
   }
 }
 
+std::pair<HType *, SimpleRange> cutType(ast::HTypeContext &Ctx, HType *HT,
+                                        OffsetTy OldSize, SimpleRange R) {
+  std::pair<HType *, SimpleRange> Ret = {
+      nullptr, SimpleRange{.Start = R.Start, .Size = 0}};
+  if (HT->isIntType() || HT->isFloatType()) {
+    return Ret;
+  } else if (auto AT = HT->getAs<ast::ArrayType>()) {
+    assert(AT->getNumElements() && "TODO: How to get array size?");
+    auto ElemSize = OldSize / *AT->getNumElements();
+    auto ElemCount = R.Size / ElemSize;
+    // round up to array border
+    auto Start = (R.Start + (ElemSize - 1)) / ElemSize * ElemSize;
+    return {AT->withSize(Ctx, ElemCount),
+            SimpleRange{.Start = Start, .Size = ElemCount * ElemSize}};
+  } else {
+    assert(false && "TODO");
+  }
+
+  return Ret;
+}
+
 HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
                               std::optional<int64_t> PointeeSize) {
   unsigned BitSize = Node.getSize();
@@ -140,7 +161,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       // Visited, but have not set a type (in DFS progress, i.e. visiting
       // dependency nodes).
       // TODO: remove debug output.
-      std::cerr << "Cyclic dependency forces the node become struct/union.\n";
+      std::cerr << "Cyclic dependency forces the node become struct/union: "
+                << toString(Node.key) << "\n";
       if (std::holds_alternative<UnionInfo>(
               TypeInfos.at(const_cast<CGNode *>(&Node)).Info)) {
         UnionDecl *Decl = UnionDecl::Create(
@@ -161,6 +183,11 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
   }
   Visited.emplace(&Node);
 
+  if (TraceIds.count(Node.getId())) {
+    PRINT_TRACE(Node.getId())
+        << "Building HType for " << toString(Node.key) << "...\n";
+  }
+
   // get from previous size hint map.
   std::optional<int64_t> PointeeSize2 = getNodeSizeHint(&Node);
   if (PointeeSize && PointeeSize2) {
@@ -175,29 +202,36 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
   auto ETy = Node.getPNIVar()->getLatticeTy();
 
   if (!Node.isPNIPointer()) {
-    assert(!PointeeSize);
-    // No out edges.
-    std::optional<std::shared_ptr<LatticeTy>> LT = std::nullopt;
-    for (auto &Edge : Node.outEdges) {
-      if (const auto *FB = Edge.getLabel().getAs<ForgetBase>()) {
-        if (FB->Base.isPrimitive()) {
-          auto L1 = createLatticeTy(ETy, V, FB->Base.getPrimitiveName());
-          if (V == Covariant) {
-            meet(LT, L1);
-          } else {
-            join(LT, L1);
+    if (!PointeeSize) {
+      // No out edges.
+      std::optional<std::shared_ptr<LatticeTy>> LT = std::nullopt;
+      for (auto &Edge : Node.outEdges) {
+        if (const auto *FB = Edge.getLabel().getAs<ForgetBase>()) {
+          if (FB->Base.isPrimitive()) {
+            auto L1 = createLatticeTy(ETy, V, FB->Base.getPrimitiveName());
+            if (V == Covariant) {
+              meet(LT, L1);
+            } else {
+              join(LT, L1);
+            }
           }
         }
       }
-    }
-    if (!LT) {
-      LT = createLatticeTy(ETy, V, "");
-    }
+      if (!LT) {
+        LT = createLatticeTy(ETy, V, "");
+      }
 
-    if (LT) {
-      Ret = fromLatticeTy(ETy, &**LT, BitSize);
+      if (LT) {
+        Ret = fromLatticeTy(ETy, &**LT, BitSize);
+      } else {
+        Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
+      }
     } else {
-      Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
+      assert(BitSize == (Parent.PointerSize * 8));
+      // force as pointer.
+      // Array type always cannot exist alone, only array pointer type.
+      Ret = Ctx.getArrayType(false, Ctx.getChar(), PointeeSize);
+      Ret = Ctx.getPointerType(false, Parent.PointerSize, Ret);
     }
   } else if (Node.outEdges.empty()) {
     assert(BitSize == (Parent.PointerSize * 8));
@@ -236,7 +270,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       assert(Count >= 1);
 
       if (PointeeSize) {
-        if((*PointeeSize % *Info.ElemSize) != 0)  {
+        if ((*PointeeSize % *Info.ElemSize) != 0) {
           llvm::errs() << "Warning: Non-aligned array type?\n";
         }
         Count = *PointeeSize / *Info.ElemSize;
@@ -271,17 +305,25 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       hasSetNodeMap = true;
 
       std::map<FieldEntry *, FieldDecl *> E2D;
+      auto Current = Info.Fields.front().R.Start;
+      if (ValidRange) {
+        Current = ValidRange->Start;
+      }
       for (size_t i = 0; i < Info.Fields.size(); i++) {
+        // copy the entry
         auto Ent = Info.Fields[i];
         if (ValidRange) {
-          Ent.R = Ent.R.intersect(*ValidRange);
+          auto IR = Ent.R.intersect(*ValidRange);
+          if (IR.Size == 0) {
+            // fully out of the range.
+            LLVM_DEBUG(dbgs()
+                       << "Warning: Skip field because of size or range");
+            continue;
+          }
         }
-        if (Ent.R.Size == 0) {
-          LLVM_DEBUG(dbgs() << "Warning: Skip field because of size or range");
-          continue;
-        }
+
         auto Target = const_cast<CGNode *>(&Ent.Edge->getTargetNode());
-        HType *Ty;
+        HType *Ty = nullptr;
 
         // for each field/edge
         Ty = buildType(*Target, V, Ent.R.Size);
@@ -320,7 +362,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
                       .Type = Ty,
                       .Name = FieldName,
                       .Comment = "at offset: " + std::to_string(Ent.R.Start)};
-        std::optional<FieldDecl> PaddingDecl = std::nullopt;
+        std::optional<FieldDecl> PaddingAfter = std::nullopt;
 
         // Try to calc expand end:
         // if no ValidRange, no next ent: ent.end()
@@ -370,7 +412,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           ExpandEnd = std::min(ExpandEnd, ValidRange->end());
         }
 
-        // Try to expand: 1 expand array size. or 2 add padding.
+        // Try to expand array size.
         if (Ty->isArrayType()) {
           const ArrayInfo &TInfo =
               std::get<ArrayInfo>(TypeInfos.at(Target).Info);
@@ -382,10 +424,47 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           auto OldArrTy = llvm::cast<ast::ArrayType>(CurrentDecl.Type);
           CurrentDecl.Type = OldArrTy->withSize(Ctx, NewCount);
         }
-        // add padding if there is space
+
+        // crop the type if intersecting
+        if (ValidRange) {
+          auto IR = Ent.R.intersect(*ValidRange);
+          // intersecting member?
+          if (IR.Size < Ent.R.Size) {
+            LLVM_DEBUG(dbgs() << "Warning: Field intersect with PointeeSize!! "
+                              << Decl->getName() << Ent.R.str());
+            std::pair<HType *, SimpleRange> Ent1 = cutType(
+                Ctx, Ty, Ent.R.Size,
+                SimpleRange{.Start = IR.Start - Ent.R.Start, .Size = IR.Size});
+            if (Ent1.second.Size == 0) {
+              LLVM_DEBUG(dbgs() << "Warning: Crop field failed, Skipping: "
+                                << Decl->getName() << Ent.R.str());
+              continue;
+            }
+            Ent.R = Ent1.second;
+            Ty = Ent1.first;
+          }
+        }
+
+        std::optional<FieldDecl> PaddingBefore = std::nullopt;
+        // Add padding at the beginning
+        if (Current < CurrentDecl.R.Start) {
+          auto PaddingSize = CurrentDecl.R.Start - Current;
+          PaddingBefore = FieldDecl{
+              .R = SimpleRange{.Start = Current, .Size = PaddingSize},
+              .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+              .Name = ValueNamer::getName("padding_"),
+              .Comment = "at offset: " + std::to_string(Current),
+              .isPadding = true,
+          };
+          Current = CurrentDecl.R.Start;
+        }
+
+        Current = CurrentDecl.R.end();
+
+        // add padding after if there is space
         if (CurrentDecl.R.end() < ExpandEnd) {
           auto PaddingSize = ExpandEnd - CurrentDecl.R.end();
-          PaddingDecl = FieldDecl{
+          PaddingAfter = FieldDecl{
               .R = SimpleRange{.Start = CurrentDecl.R.end(),
                                .Size = PaddingSize},
               .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
@@ -393,10 +472,46 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
               .Comment = "at offset: " + std::to_string(CurrentDecl.R.end()),
               .isPadding = true,
           };
+          Current = ExpandEnd;
+        }
+        if (PaddingBefore) {
+          Decl->addField(*PaddingBefore);
         }
         Decl->addField(CurrentDecl);
-        if (PaddingDecl) {
-          Decl->addField(*PaddingDecl);
+        if (PaddingAfter) {
+          Decl->addField(*PaddingAfter);
+        }
+      }
+      if (Decl->getFields().size() == 0) {
+        // add only padding
+        if (ValidRange) {
+          if (Current < ValidRange->end()) {
+            auto PaddingSize = ValidRange->end() - Current;
+            auto PaddingOnly = FieldDecl{
+                .R = SimpleRange{.Start = Current,
+                                 .Size = PaddingSize},
+                .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+                .Name = ValueNamer::getName("padding_"),
+                .Comment = "at offset: " + std::to_string(Current),
+                .isPadding = true,
+            };
+            Current = ValidRange->end();
+            Decl->addField(PaddingOnly);
+          }
+        }
+      }
+
+      // if there is only one field, return the field's type
+      if (Decl->getFields().size() == 0) {
+        Ret = getPtrTy(nullptr);
+        if (hasSetNodeMap) {
+          NodeTypeMap.insert_or_assign(&Node, Ret);
+        }
+      } else if (Decl->getFields().size() == 1 &&
+                 Decl->getFields().front().R.Start == 0) {
+        Ret = getPtrTy(Decl->getFields().front().Type);
+        if (hasSetNodeMap) {
+          NodeTypeMap.insert_or_assign(&Node, Ret);
         }
       }
     } else if (std::holds_alternative<UnionInfo>(TI.Info)) {
@@ -412,7 +527,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         auto Name = ValueNamer::getName(prefix != nullptr ? prefix : "union_");
         Decl = UnionDecl::Create(Ctx, Name);
         Ret = getPtrTy(Ctx.getUnionType(false, Decl));
-        NodeTypeMap.emplace(&Node, Ret);
+        auto It = NodeTypeMap.emplace(&Node, Ret);
+        assert(It.second);
       }
       hasSetNodeMap = true;
 
@@ -444,6 +560,11 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
     }
   }
 
+  if (TraceIds.count(Node.getId())) {
+    PRINT_TRACE(Node.getId()) << "HType for " << toString(Node.key) << ": "
+                              << Ret->getAsString() << "\n";
+  }
+
   assert(Ret != nullptr);
   // // force the node to be struct type.
   // if (Node.isMemory() && !isRecordOrUnionPointer(Ret)) {
@@ -458,7 +579,28 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
   // }
 
   if (!hasSetNodeMap) {
-    NodeTypeMap.emplace(&Node, Ret);
+    // not struct or union
+    if (Ret->isPointerType()) {
+      if (Ret->getPointeeType()) {
+        assert(!Ret->getPointeeType()->isRecordType());
+        assert(!Ret->getPointeeType()->isUnionType());
+      }
+    }
+    if (NodeTypeMap.count(&Node)) {
+      // if forced to be a struct
+      auto StructPtrTy = NodeTypeMap.at(&Node);
+      RecordDecl *Decl = StructPtrTy->getPointeeType()->getAsRecordDecl();
+      assert(BitSize % 8 == 0);
+      Decl->addField(FieldDecl{
+          .R = SimpleRange{.Start = 0, .Size = BitSize / 8},
+          .Type = Ret,
+          .Name = ValueNamer::getName("field_"),
+          .Comment = "at offset: 0",
+      });
+    } else {
+      auto It = NodeTypeMap.emplace(&Node, Ret);
+      assert(It.second);
+    }
   }
   return Ret;
 }

@@ -1,13 +1,23 @@
-#include "Passes/StackPointerFinder.h"
+
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/PatternMatch.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "Passes/StackPointerFinder.h"
+#include "notdec-llvm2c/Utils.h"
+
 namespace notdec {
 
 using namespace llvm;
+
+void addSPMetadata(GlobalVariable *GV) {
+  LLVMContext &Context = GV->getContext();
+  MDString *SizeMD = MDString::get(Context, "true");
+  MDNode *Node = MDNode::get(Context, {SizeMD});
+  GV->setMetadata(llvm2c::KIND_STACK_POINTER, Node);
+}
 
 // Commutable add matcher
 template <typename LHS, typename RHS>
@@ -116,6 +126,8 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
     // find the most voted stack pointer.
     sp = max_sp;
   }
+
+  addSPMetadata(sp);
 
   Result ret;
   ret.result = sp;

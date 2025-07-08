@@ -432,6 +432,7 @@ void DecompileConfig::run_passes() {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(createModuleToFunctionPassAdaptor(MemsetMatcher()));
       MPM.addPass(createModuleToFunctionPassAdaptor(MemcpyMatcher()));
+      // instcombine will revert matched memset and memcpy!!!
       // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
       MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
@@ -441,11 +442,11 @@ void DecompileConfig::run_passes() {
       //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
       MPM.addPass(TypeRecoveryMain(TR));
       MPM.addPass(TypeRecoveryOpt(TR));
-      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(
           SimplifyCFGPass(SimplifyCFGOptions())));
       MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
