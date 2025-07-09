@@ -1400,9 +1400,10 @@ void TypeRecovery::topDownPhase() {
         for (auto &Elem : Callers) {
 
           auto *Call = Elem.first;
-          auto &CallerGenerator =
-              AllSCCs.at(AG.Func2SCCIndex.at(Elem.second)).TopDownGenerator;
-          if (CallerGenerator->CallToInstance.count(Call)) {
+          auto CallerInd = AG.Func2SCCIndex.at(Elem.second);
+          auto &CallerData = AllSCCs.at(CallerInd);
+          auto &CallerGenerator = CallerData.TopDownGenerator;
+          if (CallerGenerator && CallerGenerator->CallToInstance.count(Call)) {
             auto [FN, FNC] = CallerGenerator->CallToInstance.at(Call);
 
             FuncNodes.insert(FN);
@@ -1831,22 +1832,6 @@ void TypeRecovery::genASTTypes(Module &M) {
   if (DebugDir) {
     printAnnotatedModule(Mod, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
   }
-}
-
-bool isGrowNegative(Instruction *Inst) {
-  if (llvm::MDNode *MD = Inst->getMetadata(KIND_STACK_DIRECTION)) {
-    // 验证元数据格式：应该包含一个MDString元素
-    if (MD->getNumOperands() > 0) {
-      if (auto *MDS = llvm::dyn_cast<llvm::MDString>(MD->getOperand(0))) {
-        // 尝试将字符串转换为整数
-        llvm::StringRef MDSRef = MDS->getString();
-        if (MDSRef == KIND_STACK_DIRECTION_NEGATIVE) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
 }
 
 std::optional<int64_t> getAllocSize(ExtValuePtr Val) {

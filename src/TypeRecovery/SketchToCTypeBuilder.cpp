@@ -228,6 +228,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       }
     } else {
       assert(BitSize == (Parent.PointerSize * 8));
+      assert(PointeeSize > 0);
       // force as pointer.
       // Array type always cannot exist alone, only array pointer type.
       Ret = Ctx.getArrayType(false, Ctx.getChar(), PointeeSize);
@@ -239,6 +240,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       // no info from graph, just use LatticeTy. (void pointer)
       Ret = fromLowTy(Node.getPNIVar()->getLatticeTy(), BitSize);
     } else {
+      assert(PointeeSize > 0);
       // Array type always cannot exist alone, only array pointer type.
       Ret = Ctx.getArrayType(false, Ctx.getChar(), PointeeSize);
       Ret = Ctx.getPointerType(false, Parent.PointerSize, Ret);
@@ -270,6 +272,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       assert(Count >= 1);
 
       if (PointeeSize) {
+        assert(PointeeSize > 0);
         if ((*PointeeSize % *Info.ElemSize) != 0) {
           llvm::errs() << "Warning: Non-aligned array type?\n";
         }
@@ -533,9 +536,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       hasSetNodeMap = true;
 
       auto Size = PointeeSize ? PointeeSize : TI.Size;
-      if (TI.Size && PointeeSize) {
+      if (PointeeSize) {
         assert(*PointeeSize > 0);
-        // assert(*TI.Size == *PointeeSize);
       }
       for (size_t i = 0; i < Info.Members.size(); i++) {
         auto &Edge = Info.Members[i];

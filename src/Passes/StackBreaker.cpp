@@ -1,6 +1,7 @@
 
 
 #include "Passes/StackBreaker.h"
+#include "Passes/StackAlloca.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DebugInfo.h>
@@ -83,21 +84,12 @@ bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
 
   auto StackHT = HT.ValueTypes.at(&AI);
 
-  // skip if alloca is not a struct
-  if (!StackHT->isPointerType()) {
-    return false;
-  }
-  if (!StackHT->getPointeeType()->isRecordType()) {
-    return false;
-  }
-  auto RD = StackHT->getPointeeType()->getAsRecordDecl();
-
   // break alloca inst according to HType.
   IRBuilder<> Builder(M->getContext());
   Builder.SetInsertPoint(AI.getNextNode());
 
   std::vector<NewAllocas> NAs;
-  bool isNegative = true;
+  bool isNegative = isGrowNegative(&AI);
   auto StartOffset = 0;
   auto EndOffset = 0;
   if (isNegative) {
@@ -110,51 +102,66 @@ bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
     return ArrayType::get(Builder.getInt8Ty(), Size);
   };
 
-  auto Current = StartOffset;
-  // Fields' offset are in increasing order
-  for (auto Field : RD->getFields()) {
-    // add paddings begin
-    if (Current < Field.R.Start) {
-      auto R1 = SimpleRange{.Start = Current, .Size = Field.R.Start - Current};
+  // skip if alloca is not a struct
+  if (!StackHT->isPointerType() || !StackHT->getPointeeType() ||
+      !StackHT->getPointeeType()->isRecordType()) {
+    // return false;
+    // view as a whole block.
+    auto NewAlloca =
+        Builder.CreateAlloca(getArrayBySize(EndOffset - StartOffset), nullptr,
+                             "stack_" + std::to_string(StartOffset));
+    NAs.push_back({.R = {.Start = StartOffset, .Size = EndOffset - StartOffset},
+                   .NewAI = NewAlloca});
+  } else {
+    auto RD = StackHT->getPointeeType()->getAsRecordDecl();
+    auto Current = StartOffset;
+    // Fields' offset are in increasing order
+    for (auto Field : RD->getFields()) {
+      // add paddings begin
+      if (Current < Field.R.Start) {
+        auto R1 =
+            SimpleRange{.Start = Current, .Size = Field.R.Start - Current};
+        // Create NewAllocaInst and insert into NAs
+        auto NewAlloca =
+            Builder.CreateAlloca(getArrayBySize(R1.Size), nullptr,
+                                 "stack_" + std::to_string(Current));
+        // TODO add debug info to prevent from deleting.
+        NAs.push_back({.R = R1, .NewAI = NewAlloca});
+        Current = Field.R.Start;
+      }
+      // if field is fully contained in the range.
+      if (Field.R.Start >= StartOffset && Field.R.end() <= EndOffset) {
+        // Create NewAllocaInst and insert into NAs
+        auto NewAlloca =
+            Builder.CreateAlloca(getArrayBySize(Field.R.Size), nullptr,
+                                 "stack_" + std::to_string(Field.R.Start));
+        // TODO add debug info to prevent from deleting.
+        NAs.push_back({.R = Field.R, .NewAI = NewAlloca});
+        Current = Field.R.end();
+      } else if (Field.R.end() <= StartOffset || Field.R.Start >= EndOffset) {
+        // fully out of the range.
+        // do nothing, skip
+      } else {
+        auto Intersecting = Field.R.intersect(
+            SimpleRange{.Start = StartOffset, .Size = EndOffset - StartOffset});
+        auto NewAlloca =
+            Builder.CreateAlloca(getArrayBySize(Intersecting.Size), nullptr,
+                                 "stack_" + std::to_string(Intersecting.Start));
+        // TODO add debug info to prevent from deleting.
+        NAs.push_back({.R = Intersecting, .NewAI = NewAlloca});
+        Current = Intersecting.end();
+      }
+    }
+    // Add padding in the end
+    if (Current < EndOffset) {
+      auto R1 = SimpleRange{.Start = Current, .Size = EndOffset - Current};
       // Create NewAllocaInst and insert into NAs
       auto NewAlloca = Builder.CreateAlloca(getArrayBySize(R1.Size), nullptr,
                                             "stack_" + std::to_string(Current));
       // TODO add debug info to prevent from deleting.
       NAs.push_back({.R = R1, .NewAI = NewAlloca});
-      Current = Field.R.Start;
+      Current = EndOffset;
     }
-    // if field is fully contained in the range.
-    if (Field.R.Start >= StartOffset && Field.R.end() <= EndOffset) {
-      // Create NewAllocaInst and insert into NAs
-      auto NewAlloca =
-          Builder.CreateAlloca(getArrayBySize(Field.R.Size), nullptr,
-                               "stack_" + std::to_string(Field.R.Start));
-      // TODO add debug info to prevent from deleting.
-      NAs.push_back({.R = Field.R, .NewAI = NewAlloca});
-      Current = Field.R.end();
-    } else if (Field.R.end() <= StartOffset || Field.R.Start >= EndOffset) {
-      // fully out of the range.
-      // do nothing, skip
-    } else {
-      auto Intersecting = Field.R.intersect(
-          SimpleRange{.Start = StartOffset, .Size = EndOffset - StartOffset});
-      auto NewAlloca =
-          Builder.CreateAlloca(getArrayBySize(Intersecting.Size), nullptr,
-                               "stack_" + std::to_string(Intersecting.Start));
-      // TODO add debug info to prevent from deleting.
-      NAs.push_back({.R = Intersecting, .NewAI = NewAlloca});
-      Current = Intersecting.end();
-    }
-  }
-  // Add padding in the end
-  if (Current < EndOffset) {
-    auto R1 = SimpleRange{.Start = Current, .Size = EndOffset - Current};
-    // Create NewAllocaInst and insert into NAs
-    auto NewAlloca = Builder.CreateAlloca(getArrayBySize(R1.Size), nullptr,
-                                          "stack_" + std::to_string(Current));
-    // TODO add debug info to prevent from deleting.
-    NAs.push_back({.R = R1, .NewAI = NewAlloca});
-    Current = EndOffset;
   }
 
   // Use rewriter to rewrite all accesses.

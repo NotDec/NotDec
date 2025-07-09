@@ -9,6 +9,7 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/PatternMatch.h>
 #include <llvm/IR/Value.h>
@@ -22,6 +23,22 @@ namespace notdec {
 const char *KIND_STACK_DIRECTION = "notdec.stack_direction";
 const char *KIND_STACK_DIRECTION_NEGATIVE = "negative";
 
+bool isGrowNegative(Instruction *Inst) {
+  if (llvm::MDNode *MD = Inst->getMetadata(KIND_STACK_DIRECTION)) {
+    // 验证元数据格式：应该包含一个MDString元素
+    if (MD->getNumOperands() > 0) {
+      if (auto *MDS = llvm::dyn_cast<llvm::MDString>(MD->getOperand(0))) {
+        // 尝试将字符串转换为整数
+        llvm::StringRef MDSRef = MDS->getString();
+        if (MDSRef == KIND_STACK_DIRECTION_NEGATIVE) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 Instruction *createAllocaWithSize(IRBuilder<> &Builder, Value *Size,
                                   const Twine &Name) {
   auto i8 = IntegerType::get(Builder.getContext(), 8);
@@ -30,6 +47,19 @@ Instruction *createAllocaWithSize(IRBuilder<> &Builder, Value *Size,
     return Builder.CreateAlloca(si8, nullptr, Name);
   }
   return Builder.CreateAlloca(i8, Size, Name);
+}
+
+void getPhiClosure(std::set<Value *> &Ret, PHINode *P) {
+  if (!Ret.count(P)) {
+    Ret.insert(P);
+    for (auto &U : P->incoming_values()) {
+      if (auto P = dyn_cast<PHINode>(U.get())) {
+        getPhiClosure(Ret, P);
+      } else {
+        Ret.insert(U.get());
+      }
+    }
+  }
 }
 
 // match dynamic stack allocation (optimized)
@@ -66,9 +96,14 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
         IRBuilder<> Builder(I.getParent());
         Builder.SetInsertPoint(&I);
         auto AllocaSize = SizeVal;
-        if (StackLoc == LoadSP) {
+        std::set<Value *> PhiClosure;
+        if (auto Phi = dyn_cast<PHINode>(StackLoc)) {
+          getPhiClosure(PhiClosure, Phi);
+        }
+        if (StackLoc == LoadSP || PhiClosure.count(LoadSP)) {
+          assert(!PhiClosure.count(add_load_sp));
           AllocaSize = Builder.CreateSub(AllocaSize, space);
-        } else if (StackLoc == add_load_sp) {
+        } else if (StackLoc == add_load_sp || PhiClosure.count(add_load_sp)) {
           // relative to the top of the stack
         } else {
           llvm::errs() << "Error: unrecognized sp modification: " << I << "\n";
