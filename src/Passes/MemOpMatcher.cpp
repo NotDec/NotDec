@@ -207,7 +207,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
                                SetVal->getZExtValue() & 0xFF);
 
           assert(Size > 0);
-          Builder.CreateMemSet(Base, SetValByte, Size, MaybeAlign());
+          Builder.CreateMemSet(Base, SetValByte, Size, MaybeAlign(), true);
           // remove all visited insts
           for (auto *I1 : Stores) {
             I1->eraseFromParent();
@@ -335,7 +335,7 @@ PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
 
           // Create memcpy
           auto MS = Builder.CreateMemCpy(DestPtr, MaybeAlign(), SrcPtr,
-                                         MaybeAlign(), Size);
+                                         MaybeAlign(), Size, true);
           llvm::errs() << "Merging " << std::to_string(Cluster.size())
                        << " stores in func " << F.getName()
                        << " into memset: " << *MS << "\n";

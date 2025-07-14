@@ -474,6 +474,7 @@ struct TypeRecoveryMain : PassInfoMixin<TypeRecoveryMain> {
   }
 };
 
+// Currently only break stack.
 struct TypeRecoveryOpt : PassInfoMixin<TypeRecoveryOpt> {
 
   TypeRecovery &TR;
