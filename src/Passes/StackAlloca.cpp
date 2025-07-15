@@ -1,5 +1,4 @@
-#include "Passes/StackAlloca.h"
-#include "Passes/StackPointerFinder.h"
+
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -17,6 +16,10 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include "Passes/StackAlloca.h"
+#include "Passes/StackPointerFinder.h"
+#include "Utils/Utils.h"
 
 namespace notdec {
 
@@ -183,6 +186,11 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
 PreservedAnalyses LinearAllocationRecovery::run(Module &M,
                                                 ModuleAnalysisManager &MAM) {
   errs() << " ============== LinearAllocationRecovery  ===============\n";
+  auto DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
+  if (DebugDir) {
+    printModule(M, notdec::join(DebugDir, "01-1-BeforeStackAlloca.ll").c_str());
+  }
+
   auto sp_result = MAM.getResult<StackPointerFinderAnalysis>(M);
   auto sp = sp_result.result;
   if (sp == nullptr) {

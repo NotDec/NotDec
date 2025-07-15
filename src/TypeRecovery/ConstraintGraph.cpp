@@ -717,11 +717,16 @@ ConstraintGraph ConstraintGraph::simplify(std::optional<std::string> DebugDir) {
   //   }
   // }
 
+  if (DebugDir) {
+    auto Out = getUniquePath(notdec::join(*DebugDir, "02-4-trans_min"), ".dot");
+    G4.printGraph(Out.c_str());
+  }
+
   G4.markVariance();
   G4.recoverBaseVars();
 
   if (DebugDir) {
-    auto Out = getUniquePath(notdec::join(*DebugDir, "02-4-trans_min"), ".dot");
+    auto Out = getUniquePath(notdec::join(*DebugDir, "02-4-trans_min2"), ".dot");
     G4.printGraph(Out.c_str());
   }
 
