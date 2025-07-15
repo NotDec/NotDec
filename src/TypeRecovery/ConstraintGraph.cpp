@@ -678,36 +678,52 @@ void ConstraintGraph::recoverBaseVars() {
   // }
 }
 
-ConstraintGraph ConstraintGraph::simplify() {
+ConstraintGraph ConstraintGraph::simplify(std::optional<std::string> DebugDir) {
   assert(Start != nullptr && Start->outEdges.size() > 0);
   layerSplit();
 
   auto G2 = minimize(this);
 
   G2.pushSplit();
-  if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      G2.printGraph("trans_push_split.dot");
-    }
+  if (DebugDir) {
+    auto Out =
+        getUniquePath(notdec::join(*DebugDir, "02-2-trans_push_split"), ".dot");
+    G2.printGraph(Out.c_str());
   }
+  // if (const char *path = std::getenv("DEBUG_TRANS_PUSH_SPLIT_GRAPH")) {
+  //   if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+  //     G2.printGraph("trans_push_split.dot");
+  //   }
+  // }
 
   auto G3 = minimize(&G2);
 
   G3.contraVariantSplit();
-  if (const char *path = std::getenv("DEBUG_TRANS_CV_SPLIT_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      G3.printGraph("trans_cv_split.dot");
-    }
+
+  if (DebugDir) {
+    auto Out =
+        getUniquePath(notdec::join(*DebugDir, "02-3-trans_cv_split"), ".dot");
+    G3.printGraph(Out.c_str());
   }
+  // if (const char *path = std::getenv("DEBUG_TRANS_CV_SPLIT_GRAPH")) {
+  //   if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+  //     G3.printGraph("trans_cv_split.dot");
+  //   }
+  // }
   auto G4 = minimize(&G3);
-  if (const char *path = std::getenv("DEBUG_TRANS_MIN_GRAPH")) {
-    if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
-      G4.printGraph("trans_min.dot");
-    }
-  }
+  // if (const char *path = std::getenv("DEBUG_TRANS_MIN_GRAPH")) {
+  //   if ((std::strcmp(path, "1") == 0) || (std::strstr(path, Name.c_str()))) {
+  //     G4.printGraph("trans_min.dot");
+  //   }
+  // }
 
   G4.markVariance();
   G4.recoverBaseVars();
+
+  if (DebugDir) {
+    auto Out = getUniquePath(notdec::join(*DebugDir, "02-4-trans_min"), ".dot");
+    G4.printGraph(Out.c_str());
+  }
 
   return G4;
 }
@@ -1585,6 +1601,21 @@ bool canReach(CGNode &From, CGNode &To) {
   return false;
 }
 
+void ConstraintGraph::applyPNIPolicy() {
+  for (auto &Ent : Nodes) {
+    auto &N = Ent.second;
+    if (!N.isPNIUnknown()) {
+      continue;
+    }
+    if (N.key.Base.isIntConstant()) {
+      auto C = N.key.Base.getIntConstant();
+      if (C.offset != 0 && C.offset < 900 && C.offset > -900) {
+        N.setPNINonPtr();
+      }
+    }
+  }
+}
+
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
 
@@ -2035,8 +2066,8 @@ void ConstraintGraph::printGraph(const char *DotFile) const {
   std::error_code EC;
   llvm::raw_fd_ostream OutStream(DotFile, EC);
   if (EC) {
-    llvm::errs() << "ConstraintGraph::printGraph: Error printing to " << DotFile << ", " << EC.message()
-                 << "\n";
+    llvm::errs() << "ConstraintGraph::printGraph: Error printing to " << DotFile
+                 << ", " << EC.message() << "\n";
     return;
   }
   llvm::WriteGraph(OutStream, const_cast<ConstraintGraph *>(this), false);

@@ -975,14 +975,11 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   assert(G2.PG);
   std::string Name = G2.CG.Name;
   G2.CG.Name += "-dtm";
-  if (DebugDir) {
-    G2.DebugDir = *DebugDir;
-  }
 
   G2.CG.sketchSplit();
   // G2.CG.ensureNoForgetLabel();
 
-  G2.eliminateCycle();
+  G2.eliminateCycle(DebugDir);
   // G2.CG.ensureNoForgetLabel();
 
   if (DebugDir) {
@@ -1017,7 +1014,6 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   // G2.elimSingleStruct();
 
   assert(G2.PG);
-  G2.DebugDir.clear();
   return G2S;
 }
 
@@ -1179,6 +1175,11 @@ void TypeRecovery::bottomUpPhase() {
     // 1.3 solve more subtype relations
     Generator->CG.solve();
 
+    if (DirPath) {
+      auto SatOut = getUniquePath(join(*DirPath, "01-InstantiateSummary"), ".sat.dot");
+      Generator->CG.printGraph(SatOut.c_str());
+    }
+
     // 1.4 generate summary
     std::shared_ptr<ConstraintsGenerator> Summary;
     bool isDeclaration =
@@ -1193,7 +1194,7 @@ void TypeRecovery::bottomUpPhase() {
     } else {
       //!! normal case, generate summary
       std::cerr << "Generating Summary for " << Name << "\n";
-      Summary = Generator->genSummary();
+      Summary = Generator->genSummary(DirPath);
     }
 
     if (SCCsPerf) {
@@ -2204,7 +2205,6 @@ void ConstraintsGenerator::cloneTo(
   }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
-  G.DebugDir = DebugDir;
   for (auto &Ent : CallToInstance) {
     G.CallToInstance.insert(
         {Ent.first,
@@ -2289,7 +2289,7 @@ void ConstraintsGenerator::linkContraToCovariant() {
   }
 }
 
-void ConstraintsGenerator::eliminateCycle() {
+void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
   std::map<const CGNode *, CGNode *> Old2New;
   ConstraintGraph NewG = CG.clone(Old2New);
 
@@ -2343,8 +2343,8 @@ void ConstraintsGenerator::eliminateCycle() {
     }
     // 2. output the merged node name map to txt
     auto &Merged = **ToMerge.begin();
-    if (!this->DebugDir.empty()) {
-      auto P1 = getUniquePath(join(DebugDir, "Cycles"), ".txt");
+    if (DebugDir) {
+      auto P1 = getUniquePath(join(*DebugDir, "Cycles"), ".txt");
       std::ofstream Out(P1, std::ios::app);
       for (auto *Node : ToMerge) {
         Out << toString(Node->key) << ", ";
@@ -2791,7 +2791,8 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
   // dumpV2N();
 }
 
-std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
+std::shared_ptr<ConstraintsGenerator>
+ConstraintsGenerator::genSummary(std::optional<std::string> DebugDir) {
   std::map<const CGNode *, CGNode *> Old2New;
   auto S = CG.clone(Old2New);
   std::set<std::string> InterestingVars;
@@ -2805,7 +2806,13 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::genSummary() {
   //                << CG.getName() << "\n";
   //   return nullptr;
   // }
-  auto G2 = S.simplify();
+
+  if (DebugDir) {
+    auto SatOut = getUniquePath(join(*DebugDir, "02-1-Linked"), ".dot");
+    S.printGraph(SatOut.c_str());
+  }
+
+  auto G2 = S.simplify(DebugDir);
 
   // Wrap the graph as a ConstraintsGenerator, Fix mappings
   std::shared_ptr<ConstraintsGenerator> Ret =

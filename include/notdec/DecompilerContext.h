@@ -11,6 +11,7 @@ namespace notdec {
 
 // sync with cmdline default value.
 struct Options {
+  bool expandStack = true;
   /// Disable decompilation passes.
   bool onlyOptimize = false;
   /// Directly output the LLVM IR, Disable all passes in the middle end.

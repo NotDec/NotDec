@@ -120,6 +120,7 @@ struct CGNode {
   bool isTop() const { return key.Base.isTop(); }
   bool isMemory() const { return !key.Base.hasLabel() && key.Base.isMemory(); }
   bool isPNIPtr() const { return PNIVar != nullptr && PNIVar->isPointer(); }
+  bool isPNIUnknown() const { return PNIVar != nullptr && PNIVar->isUnknown(); }
 
 protected:
   friend struct PNIGraph;
@@ -128,6 +129,10 @@ protected:
   void setPNIPointer() {
     assert(PNIVar != nullptr);
     PNIVar->setPtr();
+  }
+  void setPNINonPtr() {
+    assert(PNIVar != nullptr);
+    PNIVar->setNonPtr();
   }
 
 public:
@@ -258,7 +263,7 @@ struct ConstraintGraph {
   void linkPrimitives();
   void linkVars(std::set<std::string> &InterestingVars, bool LinkLoadStores = true);
   void linkEndVars(std::set<std::string> &InterestingVars);
-  ConstraintGraph simplify();
+  ConstraintGraph simplify(std::optional<std::string> DebugDir = std::nullopt);
   void recoverBaseVars();
   void aggressiveSimplify();
   void linkConstantPtr2Memory();
@@ -284,6 +289,7 @@ public:
   // std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
 
   // internal steps
+  void applyPNIPolicy();
   void saturate();
   void layerSplit();
   /// Intersect the language, that disallow recall and forget the same thing,

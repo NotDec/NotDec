@@ -212,7 +212,6 @@ struct ConstraintsGenerator {
   // unhandled due to not having function body.
   // TODO: If reachable from function node, then it makes summary incorrect.
   std::map<CallBase *, std::pair<CGNode *, CGNode *>> UnhandledCalls;
-  std::string DebugDir;
 
   retypd::CGNode &getNode(const retypd::NodeKey &Key) {
     auto *N = getNodeOrNull(Key);
@@ -232,7 +231,7 @@ struct ConstraintsGenerator {
     V2NContra.merge(From, To);
   }
 
-  std::shared_ptr<ConstraintsGenerator> genSummary();
+  std::shared_ptr<ConstraintsGenerator> genSummary(std::optional<std::string> DebugDir = std::nullopt);
   void fixSCCFuncMappings();
   static std::shared_ptr<ConstraintsGenerator>
   fromDotSummary(TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
@@ -253,7 +252,7 @@ struct ConstraintsGenerator {
 
   void preSimplify();
   // void determinizeStructEqual();
-  void eliminateCycle();
+  void eliminateCycle(std::optional<std::string> DebugDir = std::nullopt);
   void mergeOnlySubtype();
   void mergeAfterDeterminize();
   // determinization algorithm from all v2n nodes that keeps all reachable

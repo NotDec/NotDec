@@ -66,6 +66,8 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
 }
 
 bool PNIGraph::solve() {
+  CG.applyPNIPolicy();
+
   bool AnyChanged = false;
   while (!Worklist.empty()) {
     ConsNode *C = *Worklist.begin();

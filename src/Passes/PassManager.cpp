@@ -158,7 +158,8 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
         std::abort();
       }
       // llvm2cOpt.noDemoteSSA = true;
-      notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt, std::move(HighTypes));
+      notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt,
+                                      std::move(HighTypes));
       std::cout << "Decompile result: " << OutFilePath << std::endl;
     }
 
@@ -441,17 +442,19 @@ void DecompileConfig::run_passes() {
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
       MPM.addPass(TypeRecoveryMain(TR));
-      MPM.addPass(TypeRecoveryOpt(TR));
-      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(
-          SimplifyCFGPass(SimplifyCFGOptions())));
-      MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
-      MPM.addPass(InvalidateAllTypes(TR));
+      if (Opts.expandStack) {
+        MPM.addPass(TypeRecoveryOpt(TR));
+        MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+        MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+        MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
+        MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+        MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+        MPM.addPass(createModuleToFunctionPassAdaptor(
+            SimplifyCFGPass(SimplifyCFGOptions())));
+        MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
+        MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
+        MPM.addPass(InvalidateAllTypes(TR));
+      }
     } else {
       std::cerr << __FILE__ << ":" << __LINE__
                 << ": unknown stack recovery method: " << Opts.stackRec

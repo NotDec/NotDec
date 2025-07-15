@@ -85,6 +85,11 @@ static cl::opt<bool>
                      cl::desc("Disable all passes in the middle end"),
                      cl::init(false), cl::cat(NotdecCat));
 
+static cl::opt<bool>
+    expandStack("expand-stack",
+                     cl::desc("Break stack and reoptimize in the middle end"),
+                     cl::init(true), cl::cat(NotdecCat));
+
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
 // -debug-only option
@@ -97,6 +102,7 @@ int main(int argc, char *argv[]) {
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
   notdec::Options opts{
+      .expandStack = expandStack,
       .onlyOptimize = onlyOpt,
       .disableAllPasses = disableAllPasses,
       .stackRec = stackRec,
