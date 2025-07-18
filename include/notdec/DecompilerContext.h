@@ -11,11 +11,7 @@ namespace notdec {
 
 // sync with cmdline default value.
 struct Options {
-  bool expandStack = true;
-  /// Disable decompilation passes.
-  bool onlyOptimize = false;
-  /// Directly output the LLVM IR, Disable all passes in the middle end.
-  bool disableAllPasses = false;
+  int trLevel = 3;
   /// the stack recovery algorithm to use: retdec or notdec. default: notdec
   std::string stackRec = "notdec";
   int log_level = 5; // default log level = level_notice

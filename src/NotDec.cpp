@@ -1,11 +1,11 @@
 #include <iostream>
 #include <string>
 
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/Bitcode/BitcodeWriter.h>
 
 #ifdef NOTDEC_ENABLE_WASM
 #include "notdec-wasm2llvm/interface.h"
@@ -74,21 +74,11 @@ static cl::opt<std::string> stackRec(
         "stack recovery algorithm to use: retdec or notdec. default: notdec"),
     cl::init("notdec"), cl::value_desc("sta-algo"), cl::Optional,
     cl::cat(NotdecCat));
-static cl::opt<bool> onlyOpt(
-    "only-opt",
-    cl::desc(
-        "Disable decompilation passes. Only perform some optimization passes."),
-    cl::init(false), cl::cat(NotdecCat));
 
-static cl::opt<bool>
-    disableAllPasses("disable-all-pass",
-                     cl::desc("Disable all passes in the middle end"),
-                     cl::init(false), cl::cat(NotdecCat));
-
-static cl::opt<bool>
-    expandStack("expand-stack",
-                     cl::desc("Break stack and reoptimize in the middle end"),
-                     cl::init(true), cl::cat(NotdecCat));
+static cl::opt<int>
+    trLevel("tr-level",
+                cl::desc("Type recovery level: 0: disable, 1: simple opt, 2: type recovery without breaking stack, 3: full type recovery"),
+                cl::init(3), cl::cat(NotdecCat));
 
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
@@ -102,9 +92,7 @@ int main(int argc, char *argv[]) {
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
   notdec::Options opts{
-      .expandStack = expandStack,
-      .onlyOptimize = onlyOpt,
-      .disableAllPasses = disableAllPasses,
+      .trLevel = trLevel,
       .stackRec = stackRec,
       .log_level = LogLevel,
   };
@@ -127,8 +115,8 @@ int main(int argc, char *argv[]) {
 #ifdef NOTDEC_ENABLE_WASM
   else if (insuffix == ".wasm") {
     notdec::frontend::wasm::Options WasmOpts;
-    // use decompiler config if decompilation is enabled
-    if (!opts.disableAllPasses) {
+    // override frontend config if decompilation is enabled
+    if (trLevel >= 2) {
       WasmOpts = notdec::frontend::wasm::Options{
           .GenIntToPtr = true,
           .SplitMem = true,
@@ -139,11 +127,11 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "Loading Wasm: " << inputFilename << std::endl;
     notdec::frontend::parse_wasm(Ctx.context, Ctx.getModule(), WasmOpts,
-                                        inputFilename);
+                                 inputFilename);
   } else if (insuffix == ".wat") {
     notdec::frontend::wasm::Options WasmOpts;
-    // use decompiler config if decompilation is enabled
-    if (!opts.disableAllPasses) {
+    // override frontend config if decompilation is enabled
+    if (trLevel >= 2) {
       WasmOpts = notdec::frontend::wasm::Options{
           .GenIntToPtr = true,
           .SplitMem = true,
@@ -154,7 +142,7 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "Loading Wat: " << inputFilename << std::endl;
     notdec::frontend::parse_wat(Ctx.context, Ctx.getModule(), WasmOpts,
-                                       inputFilename);
+                                inputFilename);
   }
 #endif
   else {
@@ -163,35 +151,39 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  // run passes and dump IR
-  if (!opts.disableAllPasses) {
-    notdec::passes::DecompileConfig conf(Ctx.getModule(), outputFilename,
-                                             Ctx.opt, getLLVM2COptions());
-    conf.run_passes();
-  } else {
-    auto &M = Ctx.getModule();
-    std::string outsuffix = getSuffix(outputFilename);
-    if (outsuffix == ".ll") {
-      std::error_code EC;
-      llvm::raw_fd_ostream os(outputFilename, EC);
-      if (EC) {
-        std::cerr << "Cannot open output file." << std::endl;
-        std::cerr << EC.message() << std::endl;
-        std::abort();
-      }
-      M.print(os, nullptr);
-      std::cout << "IR dumped to " << outputFilename << std::endl;
-    } else if (outsuffix == ".bc") {
-      std::error_code EC;
-      llvm::raw_fd_ostream os(outputFilename, EC);
-      if (EC) {
-        std::cerr << "Cannot open output file." << std::endl;
-        std::cerr << EC.message() << std::endl;
-        std::abort();
-      }
-      llvm::WriteBitcodeToFile(M, os);
-      std::cout << "Bitcode dumped to " << outputFilename << std::endl;
+  auto &M = Ctx.getModule();
+  notdec::passes::DecompileConfig conf(M, outputFilename, Ctx.opt,
+                                       getLLVM2COptions());
+  conf.build_passes(trLevel);
+  conf.run_passes();
+
+  std::string outsuffix = getSuffix(outputFilename);
+  if (outsuffix == ".c") {
+    // do nothing, because we will add llvm2c pass
+  } else if (outsuffix == ".ll") {
+    std::error_code EC;
+    llvm::raw_fd_ostream os(outputFilename, EC);
+    if (EC) {
+      std::cerr << "Cannot open output file." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
     }
+    M.print(os, nullptr);
+    std::cout << "IR dumped to " << outputFilename << std::endl;
+  } else if (outsuffix == ".bc") {
+    std::error_code EC;
+    llvm::raw_fd_ostream os(outputFilename, EC);
+    if (EC) {
+      std::cerr << "Cannot open output file." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    llvm::WriteBitcodeToFile(M, os);
+    std::cout << "Bitcode dumped to " << outputFilename << std::endl;
+  } else {
+    std::cout << "Error: Unknown suffix to output " << outputFilename
+              << std::endl;
+    std::abort();
   }
 
   notdec::frontend::free_buffer();

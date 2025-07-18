@@ -129,6 +129,21 @@ struct TypeRecovery {
   std::map<CallBase *, std::shared_ptr<ConstraintsGenerator>>
       CallsiteSummaryOverride;
   std::unique_ptr<CallGraph> CallG;
+  // for recreating alloca range that is eliminated as dead code.
+  std::unique_ptr<std::map<llvm::Function *,
+                           std::vector<std::pair<SimpleRange, std::string>>>>
+      AllocaRanges;
+  bool hasAllocaRanges() { return AllocaRanges != nullptr; }
+  std::vector<std::pair<SimpleRange, std::string>> &
+  getOrCreateFuncAllocaRange(llvm::Function *Func) {
+    assert(Func != nullptr);
+    if (AllocaRanges == nullptr) {
+      AllocaRanges = std::make_unique<
+          std::map<llvm::Function *,
+                   std::vector<std::pair<SimpleRange, std::string>>>>();
+    }
+    return (*AllocaRanges)[Func];
+  }
 
   unsigned pointer_size = 0;
 
@@ -146,10 +161,14 @@ struct TypeRecovery {
   void prepareSCC(CallGraph &CG);
   void bottomUpPhase();
   std::shared_ptr<ConstraintsGenerator>
-  getBottomUpGraph(SCCData &Data, std::optional<std::string> SCCDebugPath = std::nullopt);
-  std::shared_ptr<ConstraintsGenerator> getTopDownGraph(SCCData &Data, std::optional<std::string> SCCDebugPath = std::nullopt);
-  std::shared_ptr<SCCTypeResult> getASTTypes(SCCData &Data,
-                                             std::optional<std::string> DebugDir = std::nullopt);
+  getBottomUpGraph(SCCData &Data,
+                   std::optional<std::string> SCCDebugPath = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator>
+  getTopDownGraph(SCCData &Data,
+                  std::optional<std::string> SCCDebugPath = std::nullopt);
+  std::shared_ptr<SCCTypeResult>
+  getASTTypes(SCCData &Data,
+              std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
   void handleGlobals();
   void genASTTypes(Module &M);
@@ -180,7 +199,8 @@ struct TypeRecovery {
   }
 
   static std::shared_ptr<ConstraintsGenerator>
-  postProcess(ConstraintsGenerator &G, std::optional<std::string> DebugDir = std::nullopt);
+  postProcess(ConstraintsGenerator &G,
+              std::optional<std::string> DebugDir = std::nullopt);
   // merge nodes to current graph by determinize.
   static CGNode *multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
                                          std::set<CGNode *> &StartNodes,
@@ -231,7 +251,8 @@ struct ConstraintsGenerator {
     V2NContra.merge(From, To);
   }
 
-  std::shared_ptr<ConstraintsGenerator> genSummary(std::optional<std::string> DebugDir = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator>
+  genSummary(std::optional<std::string> DebugDir = std::nullopt);
   void fixSCCFuncMappings();
   static std::shared_ptr<ConstraintsGenerator>
   fromDotSummary(TypeRecovery &Ctx, std::set<llvm::Function *> SCCs,
@@ -480,6 +501,16 @@ struct TypeRecoveryOpt : PassInfoMixin<TypeRecoveryOpt> {
   TypeRecoveryOpt(TypeRecovery &TR) : TR(TR) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
+};
+
+// re-create alloca according to data in TR.
+struct RecoverDeadAlloca : PassInfoMixin<RecoverDeadAlloca> {
+
+  TypeRecovery &TR;
+  RecoverDeadAlloca(TypeRecovery &TR) : TR(TR) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
+  void recoverAlloca(Function &F, std::vector<std::pair<SimpleRange, std::string>>& Vec);
 };
 
 struct InvalidateAllTypes : PassInfoMixin<InvalidateAllTypes> {

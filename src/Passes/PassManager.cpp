@@ -21,7 +21,6 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Pass.h>
-#include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
@@ -38,13 +37,11 @@
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
 #include "Passes/AllocAnnotator.h"
-#include "Passes/ConstraintGenerator.h"
 #include "Passes/MemOpMatcher.h"
 #include "Passes/PassManager.h"
 #include "Passes/PointerTypeRecovery.h"
 #include "Passes/ReorderBasicblock.h"
 #include "Passes/StackAlloca.h"
-#include "Passes/StackPointerFinder.h"
 #include "Passes/retdec-stack/retdec-abi.h"
 #include "Passes/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "Passes/retdec-stack/retdec-stack.h"
@@ -119,49 +116,27 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
         disableTypeRecovery(disableTypeRecovery) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
-
     std::string outsuffix = getSuffix(OutFilePath);
-    if (outsuffix == ".ll") {
-      std::error_code EC;
-      llvm::raw_fd_ostream os(OutFilePath, EC);
-      if (EC) {
-        std::cerr << "Cannot open output file." << std::endl;
-        std::cerr << EC.message() << std::endl;
-        std::abort();
-      }
-      M.print(os, nullptr);
-      std::cout << "IR dumped to " << OutFilePath << std::endl;
-    } else if (outsuffix == ".bc") {
-      std::error_code EC;
-      llvm::raw_fd_ostream os(OutFilePath, EC);
-      if (EC) {
-        std::cerr << "Cannot open output file." << std::endl;
-        std::cerr << EC.message() << std::endl;
-        std::abort();
-      }
-      llvm::WriteBitcodeToFile(M, os);
-      std::cout << "Bitcode dumped to " << OutFilePath << std::endl;
-    } else if (outsuffix == ".c") {
+    assert(outsuffix == ".c");
 
-      // Run type recovery.
-      std::unique_ptr<TypeRecovery::Result> HighTypes;
-      if (!disableTypeRecovery) {
-        HighTypes = std::move(TR.getResult(M, MAM));
-        HighTypes->dump();
-      }
-
-      std::error_code EC;
-      llvm::raw_fd_ostream os(OutFilePath, EC);
-      if (EC) {
-        std::cerr << "Cannot open output file." << std::endl;
-        std::cerr << EC.message() << std::endl;
-        std::abort();
-      }
-      // llvm2cOpt.noDemoteSSA = true;
-      notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt,
-                                      std::move(HighTypes));
-      std::cout << "Decompile result: " << OutFilePath << std::endl;
+    // Run type recovery.
+    std::unique_ptr<TypeRecovery::Result> HighTypes;
+    if (!disableTypeRecovery) {
+      HighTypes = std::move(TR.getResult(M, MAM));
+      HighTypes->dump();
     }
+
+    std::error_code EC;
+    llvm::raw_fd_ostream os(OutFilePath, EC);
+    if (EC) {
+      std::cerr << "Cannot open output file." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    // llvm2cOpt.noDemoteSSA = true;
+    notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt,
+                                    std::move(HighTypes));
+    std::cout << "Decompile result: " << OutFilePath << std::endl;
 
     return PreservedAnalyses::all();
   }
@@ -341,90 +316,22 @@ void DecompileConfig::find_special_gv() {
   SP = StackPointerFinderAnalysis::find_stack_ptr(Mod);
 }
 
-void DecompileConfig::run_passes() {
-  const char *DebugDir = getTRDebugDir();
-  if (DebugDir) {
-    llvm::sys::fs::create_directories(DebugDir);
-    printModule(Mod, join(DebugDir, "00-lifted.ll").c_str());
-  }
+void PassEnv::build_passes(int level) {
+  // level 1 only optimizations
+  if (level >= 1) {
+    MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
 
-  // Type recovery context for the module
-  std::shared_ptr<retypd::TRContext> TRCtx =
-      std::make_shared<retypd::TRContext>();
-  std::shared_ptr<ast::HTypeContext> HTCtx =
-      std::make_shared<ast::HTypeContext>();
-  auto TR = TypeRecovery(TRCtx, HTCtx, Mod);
+    FunctionPassManager FPM = buildFunctionOptimizations();
+    // MPM.addPass(FunctionRenamer());
+    // MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
+    // MPM.addPass(createModuleToFunctionPassAdaptor(llvm::DCEPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
 
-  // Create the analysis managers.
-  LoopAnalysisManager LAM;
-  FunctionAnalysisManager FAM;
-  CGSCCAnalysisManager SCCAM;
-  ModuleAnalysisManager MAM;
+    // level 2 no stack breaking
+    if (level >= 2) {
+      prepareTypeRecoveryContext();
+      FAM.registerPass([&]() { return FunctionTypeRecovery(*TR); });
 
-  // add instrumentations.
-  PassInstrumentationCallbacks PIC;
-  StandardInstrumentations SI(::llvm::DebugFlag, false,
-                              PrintPassOptions{.SkipAnalyses = true});
-  SI.registerCallbacks(PIC, &FAM);
-  PIC.addClassToPassName("notdec::LinearAllocationRecovery",
-                         "linear-allocation-recovery");
-  PIC.addClassToPassName("notdec::PointerTypeRecovery",
-                         "pointer-type-recovery");
-  PIC.addClassToPassName("notdec::TypeRecovery", "type-recovery");
-
-  // Create the new pass manager builder.
-  // Take a look at the PassBuilder constructor parameters for more
-  // customization, e.g. specifying a TargetMachine or various debugging
-  // options.
-  PassBuilder PB(nullptr, PipelineTuningOptions(), None, &PIC);
-
-  // Register all the basic analyses with the managers.
-  PB.registerModuleAnalyses(MAM);
-  PB.registerCGSCCAnalyses(SCCAM);
-  PB.registerFunctionAnalyses(FAM);
-  PB.registerLoopAnalyses(LAM);
-  PB.crossRegisterProxies(LAM, FAM, SCCAM, MAM);
-  MAM.registerPass([&]() { return StackPointerFinderAnalysis(); });
-  FAM.registerPass([&]() { return FunctionTypeRecovery(TR); });
-
-  // Create the pass manager.
-  // Optimize the IR!
-  // This one corresponds to a typical -O2 optimization pipeline.
-  // ModulePassManager MPM =
-  // PB.buildPerModuleDefaultPipeline(llvm::PassBuilder::OptimizationLevel::O2);
-  ModulePassManager MPM;
-  MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
-
-  // bool onlyRunTypeRecovery = getenv("NOTDEC_ONLY_TYPEREC") != nullptr;
-  // if (onlyRunTypeRecovery) {
-  //   MPM.addPass(TypeRecovery());
-  //   MPM.run(Mod, MAM);
-  //   return;
-  // }
-
-  FunctionPassManager FPM = buildFunctionOptimizations();
-  // MPM.addPass(FunctionRenamer());
-  // MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
-  // MPM.addPass(createModuleToFunctionPassAdaptor(llvm::DCEPass()));
-  MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
-
-  // debug
-  // MPM.addPass(createModuleToFunctionPassAdaptor(HelloWorld()));
-
-  // if not recompile then decompile.
-  if (!Opts.onlyOptimize) {
-    if (Opts.stackRec == "none") {
-      // do nothing
-    } else if (Opts.stackRec == "retdec") {
-      find_special_gv();
-      retdec::bin2llvmir::Abi abi(&Mod);
-      abi.setStackPointer(SP);
-      abi.setMemory(Mem);
-      abi.setLogLevel(Opts.log_level);
-      retdec::bin2llvmir::SymbolicTree::setAbi(&abi);
-      MPM.addPass(retdec::bin2llvmir::StackAnalysis(&abi));
-      MPM.addPass(retdec::bin2llvmir::StackPointerOpsRemove(&abi));
-    } else if (Opts.stackRec == "notdec") {
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
       // MPM.addPass(PointerTypeRecovery(
@@ -441,9 +348,11 @@ void DecompileConfig::run_passes() {
       //     createFunctionToLoopPassAdaptor(LoopRotatePass())));
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
-      MPM.addPass(TypeRecoveryMain(TR));
-      if (Opts.expandStack) {
-        MPM.addPass(TypeRecoveryOpt(TR));
+      MPM.addPass(TypeRecoveryMain(*TR));
+
+      // level 3 with TypeRecoveryOpt and stack breaking.
+      if (level >= 3) {
+        MPM.addPass(TypeRecoveryOpt(*TR));
         MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
@@ -453,19 +362,26 @@ void DecompileConfig::run_passes() {
             SimplifyCFGPass(SimplifyCFGOptions())));
         MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
         MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
-        MPM.addPass(InvalidateAllTypes(TR));
+        MPM.addPass(RecoverDeadAlloca(*TR));
+        MPM.addPass(InvalidateAllTypes(*TR));
       }
-    } else {
-      std::cerr << __FILE__ << ":" << __LINE__
-                << ": unknown stack recovery method: " << Opts.stackRec
-                << std::endl;
-      std::abort();
     }
   }
+}
 
-  // bool isC = getSuffix(OutFilePath) == ".c";
+void PassEnv::add_llvm2c(std::string OutFilePath,
+                         ::notdec::llvm2c::Options llvm2cOpt,
+                         bool disableTypeRecovery) {
+  MPM.addPass(NotdecLLVM2C(*TR, OutFilePath, llvm2cOpt, disableTypeRecovery));
+}
 
-  MPM.addPass(NotdecLLVM2C(TR, OutFilePath, llvm2cOpt, Opts.onlyOptimize));
+void PassEnv::run_passes() {
+  const char *DebugDir = getTRDebugDir();
+  if (DebugDir) {
+    llvm::sys::fs::create_directories(DebugDir);
+    printModule(Mod, join(DebugDir, "00-lifted.ll").c_str());
+  }
+
   MPM.run(Mod, MAM);
 }
 

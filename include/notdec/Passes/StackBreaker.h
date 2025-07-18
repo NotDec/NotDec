@@ -21,7 +21,7 @@ struct NewAllocas {
 };
 
 struct StackBreaker {
-  bool runOnAlloca(AllocaInst &AI, SCCTypeResult &HT);
+  bool runOnAlloca(AllocaInst &AI, SCCTypeResult &HT, std::vector<std::pair<SimpleRange, std::string>>* Vec);
 };
 
 class StackBreakerRewriter : public PtrUseVisitor<StackBreakerRewriter> {

@@ -71,7 +71,9 @@ void StackBreakerRewriter::visitBinaryOperator(BinaryOperator &I) {
   }
 }
 
-bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
+bool StackBreaker::runOnAlloca(
+    AllocaInst &AI, SCCTypeResult &HT,
+    std::vector<std::pair<SimpleRange, std::string>> *Vec) {
   auto M = AI.getModule();
   auto &DL = M->getDataLayout();
   // Skip alloca forms that this analysis can't handle.
@@ -169,6 +171,12 @@ bool StackBreaker::runOnAlloca(AllocaInst &AI, SCCTypeResult &HT) {
   auto PI = SBR.visitPtr(AI);
   assert(!PI.isAborted());
   assert(!PI.isEscaped());
+
+  if (Vec) {
+    for (auto &Ent : NAs) {
+      Vec->push_back({Ent.R, Ent.NewAI->getName().str()});
+    }
+  }
 
   assert(AI.getNumUses() == 0);
   AI.eraseFromParent();

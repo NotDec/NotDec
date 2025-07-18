@@ -10,6 +10,7 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Intrinsics.h>
 #include <map>
 #include <memory>
@@ -1176,7 +1177,8 @@ void TypeRecovery::bottomUpPhase() {
     Generator->CG.solve();
 
     if (DirPath) {
-      auto SatOut = getUniquePath(join(*DirPath, "01-InstantiateSummary"), ".sat.dot");
+      auto SatOut =
+          getUniquePath(join(*DirPath, "01-InstantiateSummary"), ".sat.dot");
       Generator->CG.printGraph(SatOut.c_str());
     }
 
@@ -2049,6 +2051,48 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
   return Data.TypeResult;
 }
 
+static AllocaInst *findAllocaWithName(llvm::BasicBlock &BB, std::string Name) {
+  for (auto &I : BB) {
+    if (auto AI = dyn_cast<AllocaInst>(&I)) {
+      if (AI->getName() == Name) {
+        return AI;
+      }
+    }
+  }
+  return nullptr;
+}
+
+void RecoverDeadAlloca::recoverAlloca(
+    Function &F, std::vector<std::pair<SimpleRange, std::string>> &Vec) {
+  auto &Entry = F.getEntryBlock();
+  IRBuilder<> Builder(F.getContext());
+  Builder.SetInsertPoint(&Entry.front());
+  for (auto &Ent : Vec) {
+    if (auto AI = findAllocaWithName(Entry, Ent.second)) {
+      Builder.SetInsertPoint(AI->getNextNode());
+    } else {
+      auto &R1 = Ent.first;
+      // auto NewAlloca =
+      Builder.CreateAlloca(ArrayType::get(Builder.getInt8Ty(), R1.Size),
+                           nullptr, Ent.second);
+    }
+  }
+}
+
+PreservedAnalyses RecoverDeadAlloca::run(Module &M,
+                                         ModuleAnalysisManager &MAM) {
+  if (!TR.hasAllocaRanges()) {
+    return PreservedAnalyses::all();
+  }
+  for (auto &F : M) {
+    if (F.isDeclaration()) {
+      continue;
+    }
+    recoverAlloca(F, TR.getOrCreateFuncAllocaRange(&F));
+  }
+  return PreservedAnalyses::all();
+}
+
 PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
   // FunctionAnalysisManager &FAM =
   //     MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
@@ -2084,7 +2128,8 @@ PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
 
       // 处理entry块中确定大小的alloca指令。
       StackBreaker SB;
-      SCCChanged |= SB.runOnAlloca(*Stack, *SCCTys);
+      SCCChanged |=
+          SB.runOnAlloca(*Stack, *SCCTys, &TR.getOrCreateFuncAllocaRange(F));
     }
 
     if (SCCChanged) {
@@ -3177,6 +3222,13 @@ bool ConstraintsGenerator::RetypdGeneratorVisitor::handleIntrinsicCall(
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
   auto Target = I.getCalledFunction();
+  if (Target) {
+    if (Target->getName().startswith("llvm.dbg") ||
+        Target->getName().startswith("llvm.lifetime")) {
+      return;
+    }
+  }
+
   if (Target == nullptr) {
     // TODO indirect call
     std::cerr << __FILE__ << ":" << __LINE__ << ": "
@@ -3338,6 +3390,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
     GetElementPtrInst &Gep) {
+  // TODO supress warnings for table gep
   std::cerr << "Warning: RetypdGeneratorVisitor::visitGetElementPtrInst: "
                "Gep should not exist before this pass!\n";
   // But if we really want to support this, handle it the same way as AddInst.
