@@ -161,7 +161,7 @@ public:
   }
   unsigned getSize() const { return Size; }
   // after determinization, can get single outEdge target node by EdgeLabel
-  CGNode* getLabelTarget(const EdgeLabel& L) const;
+  CGNode *getLabelTarget(const EdgeLabel &L) const;
 };
 
 struct CGEdge {
@@ -261,7 +261,8 @@ struct ConstraintGraph {
   std::vector<SubTypeConstraint>
   simplifiedExpr(std::set<std::string> &InterestingVars) const;
   void linkPrimitives();
-  void linkVars(std::set<std::string> &InterestingVars, bool LinkLoadStores = true);
+  void linkVars(std::set<std::string> &InterestingVars,
+                bool LinkLoadStores = true);
   void linkEndVars(std::set<std::string> &InterestingVars);
   ConstraintGraph simplify(std::optional<std::string> DebugDir = std::nullopt);
   void recoverBaseVars();
@@ -353,7 +354,8 @@ public:
     }
     return &*it.first;
   }
-  std::map<const CGEdge*,const CGEdge*> mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop = false);
+  std::map<const CGEdge *, const CGEdge *> mergeNodeTo(CGNode &From, CGNode &To,
+                                                       bool NoSelfLoop = false);
 
   // Graph operations
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
@@ -370,7 +372,8 @@ public:
         return nullptr;
       }
       // std::cerr << "Warning: Non-null self edge: " << toString(From.key)
-      //           << " To " << toString(To.key) << " Label: " << toString(Label)
+      //           << " To " << toString(To.key) << " Label: " <<
+      //           toString(Label)
       //           << "\n";
     }
     // do not maintain PNI during layer split.

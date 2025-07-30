@@ -6,15 +6,15 @@
 
 namespace notdec {
 
-using namespace llvm;
+extern const char *KIND_ALLOC_SIZE;
 
-extern const char* KIND_ALLOC_SIZE;
+struct AllocAnnotator : llvm::PassInfoMixin<AllocAnnotator> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
 
-struct AllocAnnotator : PassInfoMixin<AllocAnnotator> {
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &);
-  private:
+private:
   // 添加大小元数据的辅助函数
-  void addSizeMetadata(Instruction *I, uint64_t Size);
+  void addSizeMetadata(llvm::Instruction *I, uint64_t Size);
 };
 
 } // namespace notdec

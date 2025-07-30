@@ -17,6 +17,8 @@
 #include <string>
 #include <utility>
 
+using namespace llvm;
+
 namespace notdec {
 
 // Helper to decompose a value into base + offset

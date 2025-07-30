@@ -3,14 +3,12 @@
 
 #include "Utils/AllSCCIterator.h"
 
-using namespace llvm;
-
 namespace notdec {
 
 class SingleNodeSCCIterator {
 public:
-  using NodeVector = std::vector<CallGraphNode *>;
-  using SCCIteratorType = all_scc_iterator<CallGraph *>;
+  using NodeVector = std::vector<llvm::CallGraphNode *>;
+  using SCCIteratorType = all_scc_iterator<llvm::CallGraph *>;
 
   SingleNodeSCCIterator(SCCIteratorType It) : SCCIt(It), CurrentSCCPos(0) {
     advanceToNextNonEmptySCC();

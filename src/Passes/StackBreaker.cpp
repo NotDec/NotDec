@@ -13,6 +13,8 @@
 
 #define DEBUG_TYPE "stackbreaker"
 
+using namespace llvm;
+
 namespace notdec {
 
 const NewAllocas *StackBreakerRewriter::getNA(OffsetTy Off) {

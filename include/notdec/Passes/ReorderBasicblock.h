@@ -5,19 +5,18 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/Pass.h>
 
-using namespace llvm;
-
-
 namespace notdec::passes {
-struct ReorderBlocksPass : public PassInfoMixin<ReorderBlocksPass> {
+struct ReorderBlocksPass : public llvm::PassInfoMixin<ReorderBlocksPass> {
   // 收集支配顺序的基本块列表（入口块优先）
-  SmallVector<BasicBlock *, 32> getDomOrder(Function &F);
+  llvm::SmallVector<llvm::BasicBlock *, 32> getDomOrder(llvm::Function &F);
 
-  void traverseDomTree(DomTreeNode *node, SmallVectorImpl<BasicBlock *> &blocks,
-                       SmallPtrSetImpl<BasicBlock *> &visited);
+  void traverseDomTree(llvm::DomTreeNode *node,
+                       llvm::SmallVectorImpl<llvm::BasicBlock *> &blocks,
+                       llvm::SmallPtrSetImpl<llvm::BasicBlock *> &visited);
 
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &AM);
 };
-} // namespace notdec::frontend::passes
+} // namespace notdec::passes
 
 #endif

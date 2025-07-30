@@ -18,8 +18,8 @@ ConstraintGraph determinize(const ConstraintGraph *G) {
 }
 
 std::map<std::set<CGNode *>, CGNode *>
-combineDFAMap(const std::map<std::set<InverseVal<CGNode *>>, CGNode *> &M1,
-              const std::map<std::set<InverseVal<CGNode *>>, CGNode *> &M2,
+combineDFAMap(const std::map<std::set<llvm::InverseVal<CGNode *>>, CGNode *> &M1,
+              const std::map<std::set<llvm::InverseVal<CGNode *>>, CGNode *> &M2,
               ConstraintGraph *G2) {
   std::map<std::set<CGNode *>, CGNode *> Result;
 

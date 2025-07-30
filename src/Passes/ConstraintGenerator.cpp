@@ -74,6 +74,8 @@
 
 #define DEBUG_TYPE "type-recovery"
 
+using namespace llvm;
+
 namespace notdec {
 
 using retypd::OffsetLabel;

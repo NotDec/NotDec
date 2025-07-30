@@ -319,7 +319,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           auto IR = Ent.R.intersect(*ValidRange);
           if (IR.Size == 0) {
             // fully out of the range.
-            LLVM_DEBUG(dbgs()
+            LLVM_DEBUG(llvm::dbgs()
                        << "Warning: Skip field because of size or range");
             continue;
           }
@@ -433,13 +433,13 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           auto IR = Ent.R.intersect(*ValidRange);
           // intersecting member?
           if (IR.Size < Ent.R.Size) {
-            LLVM_DEBUG(dbgs() << "Warning: Field intersect with PointeeSize!! "
+            LLVM_DEBUG(llvm::dbgs() << "Warning: Field intersect with PointeeSize!! "
                               << Decl->getName() << Ent.R.str());
             std::pair<HType *, SimpleRange> Ent1 = cutType(
                 Ctx, Ty, Ent.R.Size,
                 SimpleRange{.Start = IR.Start - Ent.R.Start, .Size = IR.Size});
             if (Ent1.second.Size == 0) {
-              LLVM_DEBUG(dbgs() << "Warning: Crop field failed, Skipping: "
+              LLVM_DEBUG(llvm::dbgs() << "Warning: Crop field failed, Skipping: "
                                 << Decl->getName() << Ent.R.str());
               continue;
             }

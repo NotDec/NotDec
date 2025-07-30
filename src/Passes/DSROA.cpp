@@ -22,6 +22,8 @@
 
 #define DEBUG_TYPE "dsroa"
 
+using namespace llvm;
+
 namespace notdec {
 
 /// A custom IRBuilder inserter which prefixes all names, but only in

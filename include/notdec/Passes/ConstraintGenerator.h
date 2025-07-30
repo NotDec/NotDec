@@ -52,7 +52,8 @@
 
 namespace notdec {
 
-using namespace llvm;
+using retypd::CGEdge;
+using retypd::CGNode;
 using retypd::DerivedTypeVariable;
 using retypd::TRContext;
 using retypd::TypeVariable;
@@ -66,7 +67,7 @@ std::string getUniquePath(const std::string &basePath, const char *suffix);
 
 struct SCCSignatureTypes {
   std::shared_ptr<ConstraintsGenerator> SignatureGenerator;
-  std::map<llvm::Function *, CGNode *> FuncNodeMap;
+  std::map<llvm::Function *, retypd::CGNode *> FuncNodeMap;
 
   void instantiate(ConstraintsGenerator &To);
 };
@@ -77,7 +78,7 @@ struct SCCTypeResult {
 };
 
 struct SCCData {
-  std::vector<CallGraphNode *> Nodes;
+  std::vector<llvm::CallGraphNode *> Nodes;
   std::string SCCName;
   std::set<llvm::Function *> SCCSet;
   SCCSignatureTypes SigTy;
@@ -96,20 +97,20 @@ struct SCCData {
 
 struct AllGraphs {
   std::vector<SCCData> AllSCCs;
-  std::map<CallGraphNode *, std::size_t> Func2SCCIndex;
+  std::map<llvm::CallGraphNode *, std::size_t> Func2SCCIndex;
   std::shared_ptr<ConstraintsGenerator> Global;
   std::shared_ptr<ConstraintsGenerator> GlobalSketch;
-  std::map<CallGraphNode *,
-           std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
+  std::map<llvm::CallGraphNode *,
+           std::vector<std::pair<llvm::CallBase *, llvm::CallGraphNode *>>>
       FuncCallers;
-  CallGraph *CG = nullptr;
+  llvm::CallGraph *CG = nullptr;
 };
 
 struct TypeRecovery {
   // Specify the result type of this analysis pass.
   using Result = ::notdec::llvm2c::HTypeResult;
 
-  const Module &Mod;
+  const llvm::Module &Mod;
   std::shared_ptr<retypd::TRContext> TRCtx;
   std::shared_ptr<ast::HTypeContext> HTCtx;
 
@@ -123,12 +124,13 @@ struct TypeRecovery {
   AllGraphs AG;
 
   std::shared_ptr<BytesManager> MemoryBytes;
-  std::map<std::set<Function *>, std::shared_ptr<ConstraintsGenerator>>
+  std::map<std::set<llvm::Function *>, std::shared_ptr<ConstraintsGenerator>>
       SummaryOverride;
-  std::map<Function *, std::shared_ptr<ConstraintsGenerator>> SignatureOverride;
-  std::map<CallBase *, std::shared_ptr<ConstraintsGenerator>>
+  std::map<llvm::Function *, std::shared_ptr<ConstraintsGenerator>>
+      SignatureOverride;
+  std::map<llvm::CallBase *, std::shared_ptr<ConstraintsGenerator>>
       CallsiteSummaryOverride;
-  std::unique_ptr<CallGraph> CallG;
+  std::unique_ptr<llvm::CallGraph> CallG;
   // for recreating alloca range that is eliminated as dead code.
   std::unique_ptr<std::map<llvm::Function *,
                            std::vector<std::pair<SimpleRange, std::string>>>>
@@ -148,9 +150,10 @@ struct TypeRecovery {
   unsigned pointer_size = 0;
 
   std::unique_ptr<Result> ResultVal;
-  void run(Module &M1, ModuleAnalysisManager &MAM);
+  void run(llvm::Module &M1, llvm::ModuleAnalysisManager &MAM);
   // on demand running
-  std::unique_ptr<Result> &getResult(Module &M1, ModuleAnalysisManager &MAM) {
+  std::unique_ptr<Result> &getResult(llvm::Module &M1,
+                                     llvm::ModuleAnalysisManager &MAM) {
     assert((!AG.AllSCCs.empty()) && "function run() is not called!");
     if (ResultVal == nullptr) {
       genASTTypes(M1);
@@ -158,7 +161,7 @@ struct TypeRecovery {
     return ResultVal;
   }
   // Prepare topological order of SCC in AG.AllSCCs
-  void prepareSCC(CallGraph &CG);
+  void prepareSCC(llvm::CallGraph &CG);
   void bottomUpPhase();
   std::shared_ptr<ConstraintsGenerator>
   getBottomUpGraph(SCCData &Data,
@@ -171,7 +174,7 @@ struct TypeRecovery {
               std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
   void handleGlobals();
-  void genASTTypes(Module &M);
+  void genASTTypes(llvm::Module &M);
   void gen_json(std::string OutputFilename);
 
   // NOTDEC_SUMMARY_OVERRIDE
@@ -185,7 +188,7 @@ struct TypeRecovery {
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
 
   TypeRecovery(std::shared_ptr<retypd::TRContext> TRCtx,
-               std::shared_ptr<ast::HTypeContext> HTCtx, Module &M)
+               std::shared_ptr<ast::HTypeContext> HTCtx, llvm::Module &M)
       : Mod(M), TRCtx(TRCtx), HTCtx(HTCtx),
         SummaryFile(std::getenv("NOTDEC_SUMMARY_OVERRIDE")),
         SigFile(std::getenv("NOTDEC_SIGNATURE_OVERRIDE")),
@@ -202,13 +205,14 @@ struct TypeRecovery {
   postProcess(ConstraintsGenerator &G,
               std::optional<std::string> DebugDir = std::nullopt);
   // merge nodes to current graph by determinize.
-  static CGNode *multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
-                                         std::set<CGNode *> &StartNodes,
-                                         const char *NamePrefix);
-  void loadSummaryFile(Module &M, const char *path);
-  void loadSignatureFile(Module &M, const char *path);
-  void print(Module &M, std::string path);
-  void printAnnotatedModule(const Module &M, std::string path, int level);
+  static retypd::CGNode *
+  multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
+                          std::set<retypd::CGNode *> &StartNodes,
+                          const char *NamePrefix);
+  void loadSummaryFile(llvm::Module &M, const char *path);
+  void loadSignatureFile(llvm::Module &M, const char *path);
+  void print(llvm::Module &M, std::string path);
+  void printAnnotatedModule(const llvm::Module &M, std::string path, int level);
 };
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
@@ -228,10 +232,12 @@ struct ConstraintsGenerator {
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
   std::set<llvm::Function *> SCCs;
-  std::map<CallBase *, std::pair<CGNode *, CGNode *>> CallToInstance;
+  std::map<llvm::CallBase *, std::pair<retypd::CGNode *, retypd::CGNode *>>
+      CallToInstance;
   // unhandled due to not having function body.
   // TODO: If reachable from function node, then it makes summary incorrect.
-  std::map<CallBase *, std::pair<CGNode *, CGNode *>> UnhandledCalls;
+  std::map<llvm::CallBase *, std::pair<retypd::CGNode *, retypd::CGNode *>>
+      UnhandledCalls;
 
   retypd::CGNode &getNode(const retypd::NodeKey &Key) {
     auto *N = getNodeOrNull(Key);
@@ -269,7 +275,7 @@ struct ConstraintsGenerator {
   //                             std::shared_ptr<retypd::Sketch> Sk);
 
   // for determinization: extended powerset construction
-  std::map<std::set<CGNode *>, CGNode *> DTrans;
+  std::map<std::set<retypd::CGNode *>, retypd::CGNode *> DTrans;
 
   void preSimplify();
   // void determinizeStructEqual();
@@ -288,33 +294,34 @@ struct ConstraintsGenerator {
 
   void dumpV2N();
 
-  std::map<CGNode *, TypeInfo> TypeInfos;
-  std::map<CGNode *, TypeInfo> organizeTypes();
+  std::map<retypd::CGNode *, TypeInfo> TypeInfos;
+  std::map<retypd::CGNode *, TypeInfo> organizeTypes();
   void mergeArrayUnions();
   void elimSingleStruct();
   void mergeArrayWithMember();
-  void mergeNodeAndType(CGNode &From, CGNode &To);
-  void mergeFixTypeInfo(CGNode &From, CGNode &To);
+  void mergeNodeAndType(retypd::CGNode &From, retypd::CGNode &To);
+  void mergeFixTypeInfo(retypd::CGNode &From, retypd::CGNode &To);
 
   void run();
   // clone CG and maintain value map.
-  ConstraintsGenerator clone(std::map<const CGNode *, CGNode *> &Old2New);
+  ConstraintsGenerator
+  clone(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
   void cloneTo(ConstraintsGenerator &Target,
-               std::map<const CGNode *, CGNode *> &Old2New);
+               std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
   std::shared_ptr<ConstraintsGenerator>
-  cloneShared(std::map<const CGNode *, CGNode *> &Old2New);
+  cloneShared(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
   ConstraintsGenerator(TypeRecovery &Ctx, std::string Name,
                        std::set<llvm::Function *> SCCs = {})
       : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
         SCCs(SCCs) {}
 
 public:
-  CGNode &addVarSubtype(llvm::Value *Val, CGNode &dtv) {
+  retypd::CGNode &addVarSubtype(llvm::Value *Val, retypd::CGNode &dtv) {
     auto &Node = getOrInsertNode(Val, nullptr, -1);
     addSubtype(dtv, Node);
     return Node;
   }
-  void addSubtype(CGNode &SubNode, CGNode &SupNode) {
+  void addSubtype(retypd::CGNode &SubNode, retypd::CGNode &SupNode) {
     auto &Sub = SubNode.key.Base;
     auto &Sup = SupNode.key.Base;
     if (Sub.isPrimitive() && Sup.isPrimitive()) {
@@ -329,47 +336,49 @@ public:
     }
     CG.addConstraint(SubNode, SupNode);
   }
-  std::map<const CGEdge *, const CGEdge *> mergeNodeTo(CGNode &From, CGNode &To,
-                                                       bool NoSelfLoop = false);
+  std::map<const retypd::CGEdge *, const retypd::CGEdge *>
+  mergeNodeTo(retypd::CGNode &From, retypd::CGNode &To,
+              bool NoSelfLoop = false);
 
-  void setPointer(CGNode &Node) { CG.setPointer(Node); }
+  void setPointer(retypd::CGNode &Node) { CG.setPointer(Node); }
 
-  retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd,
+  retypd::CGNode &getNode(ExtValuePtr Val, llvm::User *User, long OpInd,
                           retypd::Variance V);
-  const retypd::CGNode &getNode(ExtValuePtr Val, User *User, long OpInd,
+  const retypd::CGNode &getNode(ExtValuePtr Val, llvm::User *User, long OpInd,
                                 retypd::Variance V) const {
     return const_cast<ConstraintsGenerator *>(this)->getNode(Val, User, OpInd,
                                                              V);
   }
-  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd,
+  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd,
                                 retypd::Variance V);
-  const retypd::CGNode *getNodeOrNull(ExtValuePtr Val, User *User, long OpInd,
-                                      retypd::Variance V) const {
+  const retypd::CGNode *getNodeOrNull(ExtValuePtr Val, llvm::User *User,
+                                      long OpInd, retypd::Variance V) const {
     return const_cast<ConstraintsGenerator *>(this)->getNodeOrNull(Val, User,
                                                                    OpInd, V);
   }
   // Create Node of both variance
   std::pair<retypd::CGNode &, retypd::CGNode &>
-  createNode(ExtValuePtr Val, User *User, long OpInd);
-  retypd::CGNode &createNodeCovariant(ExtValuePtr Val, User *User, long OpInd) {
+  createNode(ExtValuePtr Val, llvm::User *User, long OpInd);
+  retypd::CGNode &createNodeCovariant(ExtValuePtr Val, llvm::User *User,
+                                      long OpInd) {
     auto [N, NC] = createNode(Val, User, OpInd);
     return N;
   }
-  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, User *User, long OpInd,
+  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, llvm::User *User, long OpInd,
                                   retypd::Variance V = retypd::Covariant);
 
-  const TypeVariable &getTypeVar(ExtValuePtr val, User *User, long OpInd);
+  const TypeVariable &getTypeVar(ExtValuePtr val, llvm::User *User, long OpInd);
   // convert the value to a type variable.
-  TypeVariable convertTypeVar(ExtValuePtr Val, User *User = nullptr,
+  TypeVariable convertTypeVar(ExtValuePtr Val, llvm::User *User = nullptr,
                               long OpInd = -1);
-  TypeVariable convertTypeVarVal(Value *Val, User *User = nullptr,
+  TypeVariable convertTypeVarVal(Value *Val, llvm::User *User = nullptr,
                                  long OpInd = -1);
   void addAddConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
-                        BinaryOperator *Result);
+                        llvm::BinaryOperator *Result);
   void addSubConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
-                        BinaryOperator *Result);
+                        llvm::BinaryOperator *Result);
   void addCmpConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
-                        ICmpInst *I);
+                        llvm::ICmpInst *I);
   // void onEraseConstraint(const retypd::ConsNode *Cons);
   // void addSubTypeCons(retypd::SSGNode *LHS, retypd::SSGNode *RHS,
   //                     OffsetRange Offset);
@@ -377,14 +386,14 @@ public:
   //                     OffsetRange Offset);
 
   TypeVariable addOffset(TypeVariable &dtv, OffsetRange Offset);
-  TypeVariable deref(Value *Val, User *User, long OpInd, unsigned BitSize,
+  TypeVariable deref(Value *Val, llvm::User *User, long OpInd, unsigned BitSize,
                      bool isLoad);
-  unsigned getPointerElemSize(Type *ty);
+  unsigned getPointerElemSize(llvm::Type *ty);
   static inline bool is_cast(Value *Val) {
-    return llvm::isa<AddrSpaceCastInst, BitCastInst, PtrToIntInst,
-                     IntToPtrInst>(Val);
+    return llvm::isa<llvm::AddrSpaceCastInst, llvm::BitCastInst,
+                     llvm::PtrToIntInst, llvm::IntToPtrInst>(Val);
   }
-  static std::string offset(APInt Offset, int Count = 0);
+  static std::string offset(llvm::APInt Offset, int Count = 0);
 
 public:
   struct PcodeOpType {
@@ -399,8 +408,8 @@ public:
   public:
     PcodeOpType(const char *output, int size, const char *inputs[])
         : output(output), size(size), inputs(inputs) {}
-    bool addRetConstraint(Instruction *I, ConstraintsGenerator &cg) const;
-    bool addOpConstraint(unsigned Index, Instruction *I,
+    bool addRetConstraint(llvm::Instruction *I, ConstraintsGenerator &cg) const;
+    bool addOpConstraint(unsigned Index, llvm::Instruction *I,
                          ConstraintsGenerator &cg) const;
   };
 
@@ -421,45 +430,47 @@ protected:
   public:
     RetypdGeneratorVisitor(ConstraintsGenerator &cg) : cg(cg) {}
 
-    bool handleIntrinsicCall(CallBase &I);
+    bool handleIntrinsicCall(llvm::CallBase &I);
     // overloaded visit functions
-    void visitExtractValueInst(ExtractValueInst &I);
-    void visitCastInst(CastInst &I);
-    void visitCallBase(CallBase &I);
-    void visitReturnInst(ReturnInst &I);
-    void visitPHINode(PHINode &I);
-    void visitLoadInst(LoadInst &I);
-    void visitStoreInst(StoreInst &I);
-    void visitAllocaInst(AllocaInst &I);
-    void visitGetElementPtrInst(GetElementPtrInst &I);
-    void visitICmpInst(ICmpInst &I);
-    void visitSelectInst(SelectInst &I);
+    void visitExtractValueInst(llvm::ExtractValueInst &I);
+    void visitCastInst(llvm::CastInst &I);
+    void visitCallBase(llvm::CallBase &I);
+    void visitReturnInst(llvm::ReturnInst &I);
+    void visitPHINode(llvm::PHINode &I);
+    void visitLoadInst(llvm::LoadInst &I);
+    void visitStoreInst(llvm::StoreInst &I);
+    void visitAllocaInst(llvm::AllocaInst &I);
+    void visitGetElementPtrInst(llvm::GetElementPtrInst &I);
+    void visitICmpInst(llvm::ICmpInst &I);
+    void visitSelectInst(llvm::SelectInst &I);
 
-    void visitAdd(BinaryOperator &I);
-    void visitSub(BinaryOperator &I);
+    void visitAdd(llvm::BinaryOperator &I);
+    void visitSub(llvm::BinaryOperator &I);
 
     // handle sth like
     // 1. Alignment/ Use lowest bits in pointer: And %x, 0xfffffff0.
     // 2. set lowest bits in the pointer: Or %x, 0x7
-    void visitAnd(BinaryOperator &I);
-    void visitOr(BinaryOperator &I);
+    void visitAnd(llvm::BinaryOperator &I);
+    void visitOr(llvm::BinaryOperator &I);
 
     // ignore control flow related instructions
-    void visitUnreachableInst(UnreachableInst &I) {}
-    void visitBranchInst(BranchInst &I) {}
-    void visitSwitchInst(SwitchInst &I) {}
+    void visitUnreachableInst(llvm::UnreachableInst &I) {}
+    void visitBranchInst(llvm::BranchInst &I) {}
+    void visitSwitchInst(llvm::SwitchInst &I) {}
 
     void handlePHINodes();
     // use opTypes to handle other insts.
-    void visitInstruction(Instruction &I);
+    void visitInstruction(llvm::Instruction &I);
   };
 };
 
 void inline ensureSequence(Value *&Src1, Value *&Src2) {
-  if (isa<ConstantInt>(Src1) && isa<ConstantInt>(Src2)) {
+  if (llvm::isa<llvm::ConstantInt>(Src1) &&
+      llvm::isa<llvm::ConstantInt>(Src2)) {
     assert(false && "Constant at both sides. Run Optimization first!");
   }
-  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2)) {
+  if (llvm::isa<llvm::ConstantInt>(Src1) &&
+      !llvm::isa<llvm::ConstantInt>(Src2)) {
     // because of InstCombine canonical form, this should not happen?
     assert(false &&
            "Constant cannot be at the left side. Run InstCombine first.");
@@ -483,49 +494,54 @@ inline TypeVariable getCallRetTV(CGNode &Target) {
 
 // #region FunctionTypeRecovery
 
-struct TypeRecoveryMain : PassInfoMixin<TypeRecoveryMain> {
+struct TypeRecoveryMain : llvm::PassInfoMixin<TypeRecoveryMain> {
 
   TypeRecovery &TR;
   TypeRecoveryMain(TypeRecovery &TR) : TR(TR) {}
 
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM) {
     TR.run(M, MAM);
-    return PreservedAnalyses::all();
+    return llvm::PreservedAnalyses::all();
   }
 };
 
 // Currently only break stack.
-struct TypeRecoveryOpt : PassInfoMixin<TypeRecoveryOpt> {
+struct TypeRecoveryOpt : llvm::PassInfoMixin<TypeRecoveryOpt> {
 
   TypeRecovery &TR;
   TypeRecoveryOpt(TypeRecovery &TR) : TR(TR) {}
 
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM);
 };
 
 // re-create alloca according to data in TR.
-struct RecoverDeadAlloca : PassInfoMixin<RecoverDeadAlloca> {
+struct RecoverDeadAlloca : llvm::PassInfoMixin<RecoverDeadAlloca> {
 
   TypeRecovery &TR;
   RecoverDeadAlloca(TypeRecovery &TR) : TR(TR) {}
 
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
-  void recoverAlloca(Function &F, std::vector<std::pair<SimpleRange, std::string>>& Vec);
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM);
+  void recoverAlloca(llvm::Function &F,
+                     std::vector<std::pair<SimpleRange, std::string>> &Vec);
 };
 
-struct InvalidateAllTypes : PassInfoMixin<InvalidateAllTypes> {
+struct InvalidateAllTypes : llvm::PassInfoMixin<InvalidateAllTypes> {
   TypeRecovery &TR;
   InvalidateAllTypes(TypeRecovery &TR) : TR(TR) {}
 
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM) {
     for (auto &Data : TR.AG.AllSCCs) {
       Data.onIRChanged();
     }
-    return PreservedAnalyses::all();
+    return llvm::PreservedAnalyses::all();
   }
 };
 
-struct FunctionTypeRecovery : AnalysisInfoMixin<FunctionTypeRecovery> {
+struct FunctionTypeRecovery : llvm::AnalysisInfoMixin<FunctionTypeRecovery> {
 
   struct FuncTypeResult {};
 
@@ -537,7 +553,7 @@ struct FunctionTypeRecovery : AnalysisInfoMixin<FunctionTypeRecovery> {
   TypeRecovery &TR;
   FunctionTypeRecovery(TypeRecovery &TR) : TR(TR) {}
 
-  Result run(Function &F, FunctionAnalysisManager &FAM) {
+  Result run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
     // TODO, if function generator is not invalidated.
     return {};
   }

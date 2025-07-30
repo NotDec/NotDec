@@ -11,8 +11,6 @@
 
 namespace notdec {
 
-using namespace llvm;
-
 struct PointerTypeRecovery : PassInfoMixin<PointerTypeRecovery> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding  pass manager (to be queried if need be)

@@ -41,6 +41,8 @@
 
 #define DEBUG_TYPE "retypd_graph"
 
+using namespace llvm;
+
 namespace notdec::retypd {
 
 std::vector<std::string> decodeFmtStr(llvm::StringRef Format) {
@@ -726,7 +728,8 @@ ConstraintGraph ConstraintGraph::simplify(std::optional<std::string> DebugDir) {
   G4.recoverBaseVars();
 
   if (DebugDir) {
-    auto Out = getUniquePath(notdec::join(*DebugDir, "02-4-trans_min2"), ".dot");
+    auto Out =
+        getUniquePath(notdec::join(*DebugDir, "02-4-trans_min2"), ".dot");
     G4.printGraph(Out.c_str());
   }
 

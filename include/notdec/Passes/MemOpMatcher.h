@@ -6,14 +6,14 @@
 
 namespace notdec {
 
-using namespace llvm;
-
-struct MemsetMatcher : PassInfoMixin<MemsetMatcher> {
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &);
+struct MemsetMatcher : llvm::PassInfoMixin<MemsetMatcher> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
 };
 
-struct MemcpyMatcher : PassInfoMixin<MemcpyMatcher> {
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &);
+struct MemcpyMatcher : llvm::PassInfoMixin<MemcpyMatcher> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
 };
 
 } // namespace notdec

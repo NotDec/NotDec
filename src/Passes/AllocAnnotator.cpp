@@ -1,6 +1,8 @@
 #include "Passes/AllocAnnotator.h"
 #include <llvm/IR/Instructions.h>
 
+using namespace llvm;
+
 namespace notdec {
 
 const char *KIND_ALLOC_SIZE = "notdec.alloc_size";

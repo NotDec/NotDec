@@ -8,21 +8,22 @@
 
 namespace notdec {
 
-using namespace llvm;
 extern const char *KIND_STACK_DIRECTION;
 extern const char *KIND_STACK_DIRECTION_NEGATIVE;
-bool isGrowNegative(Instruction *Inst);
+bool isGrowNegative(llvm::Instruction *Inst);
 
-struct LinearAllocationRecovery : PassInfoMixin<LinearAllocationRecovery> {
+struct LinearAllocationRecovery
+    : llvm::PassInfoMixin<LinearAllocationRecovery> {
   static std::string offsetStr(int64_t offset) {
     return offset < 0 ? "N" + std::to_string(-offset) : std::to_string(offset);
   }
 
-  static void matchDynamicAllocas(Function &F, Value *SP, Instruction *LoadSP,
-                                  Instruction *add_load_sp, Value *space,
-                                  bool isGrowNegative);
+  static void matchDynamicAllocas(llvm::Function &F, llvm::Value *SP,
+                                  llvm::Instruction *LoadSP,
+                                  llvm::Instruction *add_load_sp,
+                                  llvm::Value *space, bool isGrowNegative);
 
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 };
 
 // struct Range {

@@ -21,6 +21,8 @@
 #include "Passes/StackPointerFinder.h"
 #include "Utils/Utils.h"
 
+using namespace llvm;
+
 namespace notdec {
 
 const char *KIND_STACK_DIRECTION = "notdec.stack_direction";

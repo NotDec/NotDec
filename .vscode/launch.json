@@ -50,6 +50,23 @@
       "preLaunchTask": "CMake: build",
     },
     {
+      "type": "lldb",
+      "request": "launch",
+      "name": "llvm2c",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "${file}",
+        "-o",
+        "${file}.c",
+        "--tr-level=0"
+        // "-debug-only=type-recovery",
+        // "-debug-only=retypd_graph",
+        // "--print-before=type-recovery"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Clean and Build",
+    },
+    {
       "name": "Replay",
       "type": "lldb",
       "request": "attach",
@@ -148,6 +165,8 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
+        "NOTDEC_DEBUG_DIR": "debug_dir",
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         // "NOTDEC_SAT_DENSESUBTYPE": "1",
         "DEBUG_TRANS_SAT_GRAPH": "1",
         "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1",

@@ -10,8 +10,6 @@
 
 namespace notdec {
 
-using namespace llvm;
-
 namespace dsroa {
 
 class Partition;
@@ -21,10 +19,10 @@ class AllocaSliceRewriter;
 }; // namespace dsroa
 
 // Decompiler SROA
-struct DSROAPass : PassInfoMixin<DSROAPass> {
-  LLVMContext *C = nullptr;
-  DominatorTree *DT = nullptr;
-  AssumptionCache *AC = nullptr;
+struct DSROAPass : llvm::PassInfoMixin<DSROAPass> {
+  llvm::LLVMContext *C = nullptr;
+  llvm::DominatorTree *DT = nullptr;
+  llvm::AssumptionCache *AC = nullptr;
 
   /// Worklist of alloca instructions to simplify.
   ///
@@ -33,12 +31,12 @@ struct DSROAPass : PassInfoMixin<DSROAPass> {
   /// directly promoted. Finally, each time we rewrite a use of an alloca other
   /// the one being actively rewritten, we add it back onto the list if not
   /// already present to ensure it is re-visited.
-  SetVector<AllocaInst *, SmallVector<AllocaInst *, 16>> Worklist;
+  llvm::SetVector<llvm::AllocaInst *, llvm::SmallVector<llvm::AllocaInst *, 16>> Worklist;
 
   /// A collection of instructions to delete.
   /// We try to batch deletions to simplify code and make things a bit more
   /// efficient. We also make sure there is no dangling pointers.
-  SmallVector<WeakVH, 8> DeadInsts;
+  llvm::SmallVector<llvm::WeakVH, 8> DeadInsts;
 
   /// Post-promotion worklist.
   ///
@@ -48,17 +46,19 @@ struct DSROAPass : PassInfoMixin<DSROAPass> {
   ///
   /// Note that we have to be very careful to clear allocas out of this list in
   /// the event they are deleted.
-  SetVector<AllocaInst *, SmallVector<AllocaInst *, 16>> PostPromotionWorklist;
+  llvm::SetVector<llvm::AllocaInst *, llvm::SmallVector<llvm::AllocaInst *, 16>>
+      PostPromotionWorklist;
 
   /// A collection of alloca instructions we can directly promote.
-  std::vector<AllocaInst *> PromotableAllocas;
+  std::vector<llvm::AllocaInst *> PromotableAllocas;
 
   /// A worklist of PHIs to speculate prior to promoting allocas.
   ///
   /// All of these PHIs have been checked for the safety of speculation and by
   /// being speculated will allow promoting allocas currently in the promotable
   /// queue.
-  SetVector<PHINode *, SmallVector<PHINode *, 2>> SpeculatablePHIs;
+  llvm::SetVector<llvm::PHINode *, llvm::SmallVector<llvm::PHINode *, 2>>
+      SpeculatablePHIs;
 
   /// A worklist of select instructions to speculate prior to promoting
   /// allocas.
@@ -66,7 +66,8 @@ struct DSROAPass : PassInfoMixin<DSROAPass> {
   /// All of these select instructions have been checked for the safety of
   /// speculation and by being speculated will allow promoting allocas
   /// currently in the promotable queue.
-  SetVector<SelectInst *, SmallVector<SelectInst *, 2>> SpeculatableSelects;
+  llvm::SetVector<llvm::SelectInst *, llvm::SmallVector<llvm::SelectInst *, 2>>
+      SpeculatableSelects;
 
   long NumPromoted = 0;
   long NumDeleted = 0;
@@ -80,19 +81,22 @@ struct DSROAPass : PassInfoMixin<DSROAPass> {
 public:
   DSROAPass() = default;
 
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &AM);
 
 private:
   friend class dsroa::AllocaSliceRewriter;
 
-  bool presplitLoadsAndStores(AllocaInst &AI, dsroa::AllocaSlices &AS);
-  AllocaInst *rewritePartition(AllocaInst &AI, dsroa::AllocaSlices &AS,
-                               dsroa::Partition &P);
-  bool splitAlloca(AllocaInst &AI, dsroa::AllocaSlices &AS);
-  bool runOnAlloca(AllocaInst &AI);
-  void clobberUse(Use &U);
-  bool deleteDeadInstructions(SmallPtrSetImpl<AllocaInst *> &DeletedAllocas);
-  bool promoteAllocas(Function &F);
+  bool presplitLoadsAndStores(llvm::AllocaInst &AI, dsroa::AllocaSlices &AS);
+  llvm::AllocaInst *rewritePartition(llvm::AllocaInst &AI,
+                                     dsroa::AllocaSlices &AS,
+                                     dsroa::Partition &P);
+  bool splitAlloca(llvm::AllocaInst &AI, dsroa::AllocaSlices &AS);
+  bool runOnAlloca(llvm::AllocaInst &AI);
+  void clobberUse(llvm::Use &U);
+  bool deleteDeadInstructions(
+      llvm::SmallPtrSetImpl<llvm::AllocaInst *> &DeletedAllocas);
+  bool promoteAllocas(llvm::Function &F);
 };
 
 } // namespace notdec

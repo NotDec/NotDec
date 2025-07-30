@@ -13,30 +13,31 @@
 
 namespace notdec {
 
-using namespace llvm;
-void addSPMetadata(GlobalVariable *GV);
+void addSPMetadata(llvm::GlobalVariable *GV);
 
 /// Match the following pattern:
 /// store (add (load sp) space) sp
 /// If specific_sp is not null, then specifically match sp as specific_sp.
 /// For tail function, there is no store to the stack pointer.
 struct StackPointerMatcher {
-  Value *&sp;
-  Value *&space;
-  Instruction *&load;
-  Instruction *&add;
-  Value *specific_sp = nullptr;
+  llvm::Value *&sp;
+  llvm::Value *&space;
+  llvm::Instruction *&load;
+  llvm::Instruction *&add;
+  llvm::Value *specific_sp = nullptr;
 
-  StackPointerMatcher(Value *&sp, Value *&space, Instruction *&load,
-                      Instruction *&add)
+  StackPointerMatcher(llvm::Value *&sp, llvm::Value *&space,
+                      llvm::Instruction *&load, llvm::Instruction *&add)
       : sp(sp), space(space), load(load), add(add) {}
 
-  StackPointerMatcher(Value *&sp, Value *&space, Instruction *&load,
-                      Instruction *&add, Value *specific_sp)
+  StackPointerMatcher(llvm::Value *&sp, llvm::Value *&space,
+                      llvm::Instruction *&load, llvm::Instruction *&add,
+                      llvm::Value *specific_sp)
       : sp(sp), space(space), load(load), add(add), specific_sp(specific_sp) {}
 
-  bool match(Instruction *I) {
+  bool match(llvm::Instruction *I) {
     using namespace llvm::PatternMatch;
+    using namespace llvm;
     auto pat_alloc1 =
         m_Store(m_Add(m_Load(m_Value(sp)), m_Value(space)), m_Deferred(sp));
     auto pat_alloc2 =
@@ -44,8 +45,8 @@ struct StackPointerMatcher {
     auto pat_alloc_sub =
         m_Store(m_Sub(m_Load(m_Value(sp)), m_Value(space)), m_Deferred(sp));
 
-    if (PatternMatch::match(I, pat_alloc1) ||
-        PatternMatch::match(I, pat_alloc_sub)) {
+    if (llvm::PatternMatch::match(I, pat_alloc1) ||
+        llvm::PatternMatch::match(I, pat_alloc_sub)) {
       if (specific_sp != nullptr && sp != specific_sp) {
         return false;
       }
@@ -69,12 +70,12 @@ struct StackPointerMatcher {
 };
 
 struct StackPointerFinderResult {
-  GlobalVariable *result;
+  llvm::GlobalVariable *result;
   long direction; // 0 for down, 1 for up.
 };
 
 class StackPointerFinderAnalysis
-    : public AnalysisInfoMixin<StackPointerFinderAnalysis> {
+    : public llvm::AnalysisInfoMixin<StackPointerFinderAnalysis> {
 public:
   static const char *StackPointerNames[];
 
@@ -89,13 +90,13 @@ public:
   using Result = StackPointerFinderResult;
 
   // the number of functions that vote for the stack pointer.
-  std::map<GlobalVariable *, size_t> sp_count;
+  std::map<llvm::GlobalVariable *, size_t> sp_count;
   // the number of functions that vote for the stack direction.
   std::map<long, size_t> direction_count;
-  static GlobalVariable *find_stack_ptr(Module &mod);
+  static llvm::GlobalVariable *find_stack_ptr(llvm::Module &mod);
   // GlobalVariable *find_stack_ptr(Module &mod);
-  GlobalVariable *find_stack_ptr(Function &f);
-  GlobalVariable *find_stack_ptr(BasicBlock &entryBlock);
+  llvm::GlobalVariable *find_stack_ptr(llvm::Function &f);
+  llvm::GlobalVariable *find_stack_ptr(llvm::BasicBlock &entryBlock);
 
   Result run(llvm::Module &M);
 

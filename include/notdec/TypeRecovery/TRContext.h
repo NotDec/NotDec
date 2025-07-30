@@ -11,8 +11,6 @@
 
 namespace notdec::retypd {
 
-using namespace llvm;
-
 struct PTVCmp {
 
   bool operator()(PooledTypeVariable *const &a,

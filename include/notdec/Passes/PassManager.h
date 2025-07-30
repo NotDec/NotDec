@@ -25,26 +25,24 @@
 
 namespace notdec::passes {
 
-using namespace llvm;
-
 struct PassEnv {
   // 目前和module耦合。因为类型恢复和模块也耦合
   llvm::Module &Mod;
   // Create the analysis managers.
-  LoopAnalysisManager LAM;
-  FunctionAnalysisManager FAM;
-  CGSCCAnalysisManager SCCAM;
-  ModuleAnalysisManager MAM;
+  llvm::LoopAnalysisManager LAM;
+  llvm::FunctionAnalysisManager FAM;
+  llvm::CGSCCAnalysisManager SCCAM;
+  llvm::ModuleAnalysisManager MAM;
   // add instrumentations.
-  PassInstrumentationCallbacks PIC;
-  StandardInstrumentations SI;
-  PassBuilder PB;
-  ModulePassManager MPM;
+  llvm::PassInstrumentationCallbacks PIC;
+  llvm::StandardInstrumentations SI;
+  llvm::PassBuilder PB;
+  llvm::ModulePassManager MPM;
 
   PassEnv(llvm::Module &Mod)
-      : Mod(Mod),
-        SI(::llvm::DebugFlag, false, PrintPassOptions{.SkipAnalyses = true}),
-        PB(nullptr, PipelineTuningOptions(), None, &PIC) {
+      : Mod(Mod), SI(::llvm::DebugFlag, false,
+                     llvm::PrintPassOptions{.SkipAnalyses = true}),
+        PB(nullptr, llvm::PipelineTuningOptions(), llvm::None, &PIC) {
     SI.registerCallbacks(PIC, &FAM);
     PIC.addClassToPassName("notdec::LinearAllocationRecovery",
                            "linear-allocation-recovery");
