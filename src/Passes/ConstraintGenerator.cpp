@@ -1725,8 +1725,10 @@ void TypeRecovery::genASTTypes(Module &M) {
       }
     }
 
+    // do getASTTypes for each SCC
     auto SCCTypes = getASTTypes(Data, Dir);
 
+    // put the result into ResultVal
     ConstraintsGenerator &G2 = *Data.SketchGenerator;
 
     for (auto &Ent : G2.V2N) {
@@ -1873,19 +1875,31 @@ std::optional<int64_t> getAllocSize(ExtValuePtr Val) {
   return std::nullopt;
 }
 
+std::shared_ptr<ConstraintsGenerator>
+TypeRecovery::getSketchGraph(SCCData &Data,
+                             std::optional<std::string> DebugDir) {
+  //!! 3.1 post process the graph for type generation
+  if (Data.SketchGenerator) {
+    return Data.SketchGenerator;
+  }
+
+  const std::shared_ptr<ConstraintsGenerator> &G = getTopDownGraph(Data);
+  Data.SketchGenerator = postProcess(*G, DebugDir);
+  return Data.SketchGenerator;
+}
+
 std::shared_ptr<SCCTypeResult>
 TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
   if (Data.TypeResult) {
     return Data.TypeResult;
   }
   Data.TypeResult = std::make_shared<SCCTypeResult>();
-  const std::shared_ptr<ConstraintsGenerator> &G = getTopDownGraph(Data);
 
   auto SCCTypes = Data.TypeResult;
 
   //!! 3.1 post process the graph for type generation
-  Data.SketchGenerator = postProcess(*G, DebugDir);
-  ConstraintsGenerator &G2 = *Data.SketchGenerator;
+  auto SkG = getSketchGraph(Data, DebugDir);
+  ConstraintsGenerator &G2 = *SkG;
 
   retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
   retypd::TypeBuilder TB(TBC, G2.TypeInfos);
@@ -1895,14 +1909,14 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
 
   TB.buildNodeSizeHintMap(G2);
 
-  llvm::Optional<llvm::raw_fd_ostream> LocaValueTypesFile;
+  llvm::Optional<llvm::raw_fd_ostream> LocalValueTypesFile;
   // 3.2 print the graph for debugging
   if (DebugDir) {
     G2.CG.printGraph(
         getUniquePath(join(*DebugDir, "10-PostProcess.dtm"), ".dot").c_str());
     std::error_code EC;
     auto VTFP = getUniquePath(join(*DebugDir, "10-ValueTypes"), ".txt");
-    LocaValueTypesFile.emplace(VTFP, EC);
+    LocalValueTypesFile.emplace(VTFP, EC);
     if (EC) {
       std::cerr << __FILE__ << ":" << __LINE__ << ": "
                 << "Cannot open output file " << VTFP << "." << std::endl;
@@ -1923,8 +1937,8 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
     Val2NodeFile.close();
   }
 
-  if (LocaValueTypesFile) {
-    *LocaValueTypesFile << "UpperBounds:\n";
+  if (LocalValueTypesFile) {
+    *LocalValueTypesFile << "UpperBounds:\n";
   }
 
   // 3.3 build type for each value
@@ -1943,14 +1957,14 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
       auto Size = getSize(Ent.first, pointer_size);
       assert(Size > 0);
 
-      if (LocaValueTypesFile) {
+      if (LocalValueTypesFile) {
         // print the current value
-        *LocaValueTypesFile << "  " << toString(Ent.first, true);
-        *LocaValueTypesFile << "  Node: " << toString(Node->key);
+        *LocalValueTypesFile << "  " << toString(Ent.first, true);
+        *LocalValueTypesFile << "  Node: " << toString(Node->key);
         if (Node->getPNIVar() != nullptr) {
-          *LocaValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+          *LocalValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
         }
-        LocaValueTypesFile->flush();
+        LocalValueTypesFile->flush();
       }
 
       if (TraceIds.count(Node->getId())) {
@@ -1975,22 +1989,22 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
         SCCTypes->ValueTypes[Ent.first] = CTy;
       }
 
-      if (LocaValueTypesFile) {
-        *LocaValueTypesFile << " upper bound: " << CTy->getAsString();
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " upper bound: " << CTy->getAsString();
       }
 
     } else {
-      if (LocaValueTypesFile) {
-        *LocaValueTypesFile << " has no upper bound";
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " has no upper bound";
       }
     }
-    if (LocaValueTypesFile) {
-      *LocaValueTypesFile << "\n";
+    if (LocalValueTypesFile) {
+      *LocalValueTypesFile << "\n";
     }
   }
 
-  if (LocaValueTypesFile) {
-    *LocaValueTypesFile << "LowerBounds:\n";
+  if (LocalValueTypesFile) {
+    *LocalValueTypesFile << "LowerBounds:\n";
   }
 
   for (auto &Ent : G2.V2NContra) {
@@ -2008,13 +2022,13 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
       auto Size = getSize(Ent.first, pointer_size);
       assert(Size > 0);
 
-      if (LocaValueTypesFile) {
-        *LocaValueTypesFile << "  " << toString(Ent.first, true);
-        *LocaValueTypesFile << "  Node: " << toString(Node->key);
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << "  " << toString(Ent.first, true);
+        *LocalValueTypesFile << "  Node: " << toString(Node->key);
         if (Node->getPNIVar() != nullptr) {
-          *LocaValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+          *LocalValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
         }
-        LocaValueTypesFile->flush();
+        LocalValueTypesFile->flush();
       }
 
       if (TraceIds.count(Node->getId())) {
@@ -2037,16 +2051,16 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
         SCCTypes->ValueTypesLowerBound[Ent.first] = CTy;
       }
 
-      if (LocaValueTypesFile) {
-        *LocaValueTypesFile << " lower bound: " << CTy->getAsString();
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " lower bound: " << CTy->getAsString();
       }
     } else {
-      if (LocaValueTypesFile) {
-        *LocaValueTypesFile << " has no lower bound";
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " has no lower bound";
       }
     }
-    if (LocaValueTypesFile) {
-      *LocaValueTypesFile << "\n";
+    if (LocalValueTypesFile) {
+      *LocalValueTypesFile << "\n";
     }
   }
 

@@ -169,6 +169,9 @@ struct TypeRecovery {
   std::shared_ptr<ConstraintsGenerator>
   getTopDownGraph(SCCData &Data,
                   std::optional<std::string> SCCDebugPath = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator>
+  getSketchGraph(SCCData &Data,
+                 std::optional<std::string> SCCDebugPath = std::nullopt);
   std::shared_ptr<SCCTypeResult>
   getASTTypes(SCCData &Data,
               std::optional<std::string> DebugDir = std::nullopt);
