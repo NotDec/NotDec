@@ -2626,16 +2626,16 @@ ConstraintGraph::ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx,
 void ConstraintGraph::clone(
     std::map<const CGNode *, CGNode *> &Old2New, const ConstraintGraph &From,
     ConstraintGraph &To, std::function<NodeKey(const NodeKey &)> TransformKey,
-    bool Partial) {
+    bool isMergeClone) {
   assert(Old2New.empty() && "clone: Old2New is not empty!");
   assert(From.Ctx.get() == To.Ctx.get() && "clone: Ctx mismatch!");
   assert(From.PointerSize == To.PointerSize);
-  if (!Partial) {
+  if (!isMergeClone) {
     To.Name = From.Name;
   }
 
   // handle fields
-  if (!Partial) {
+  if (!isMergeClone) {
     To.isLayerSplit = From.isLayerSplit;
     To.isSketchSplit = From.isSketchSplit;
   }
@@ -2658,22 +2658,30 @@ void ConstraintGraph::clone(
     auto &Node = Ent.second;
     NodeKey NewKey = TransformKey ? TransformKey(Node.key) : Node.key;
     CGNode *NewNode;
-    // merge primitive node when partial cloning
-    if (Partial && NewKey.Base.isPrimitive() && To.hasNode(NewKey)) {
-      NewNode = &To.createNodeNoPNI(
-          TypeVariable::CreateDtv(*To.Ctx, ValueNamer::getName("tmp_")),
-          Node.Size);
-      toMerge.push_back({NewNode, &To.getNode(NewKey)});
-    } else {
-      if (To.hasNode(NewKey)) {
-        // key conflict. TODO
+    // key conflict.
+    if (To.hasNode(NewKey)) {
+      // cannot be cloning to empty graph.
+      assert(isMergeClone);
+      // merge primitive node
+      if (NewKey.Base.isPrimitive() || (!NewKey.Base.hasLabel() && NewKey.Base.isMemory())) {
+        // NewNode = &To.createNodeNoPNI(
+        //     TypeVariable::CreateDtv(*To.Ctx, ValueNamer::getName("tmp_")),
+        //     Node.Size);
+        // toMerge.push_back({NewNode, &To.getNode(NewKey)});
+        // Cannot replace because of PNINode handling?
+        NewNode = To.getNodeOrNull(NewKey);
+      } else {
+        llvm::errs() << "Key conflict: " << toString(NewKey) << "\n";
+        assert(false && "Why key conflict?");
+        // TODO what can I do?
         NewNode = &To.createNodeNoPNI(
             TypeVariable::CreateDtv(*To.Ctx, ValueNamer::getName("conflict_")),
             Node.Size);
-      } else {
-        NewNode = &To.createNodeNoPNI(NewKey, Node.Size);
       }
+    } else {
+      NewNode = &To.createNodeNoPNI(NewKey, Node.Size);
     }
+
     auto Pair = Old2New.insert({&Node, NewNode});
     assert(Pair.second && "clone: Node already cloned!?");
   }

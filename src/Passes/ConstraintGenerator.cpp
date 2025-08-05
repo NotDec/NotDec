@@ -974,6 +974,8 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   }
   std::map<const CGNode *, CGNode *> Old2New;
   std::shared_ptr<ConstraintsGenerator> G2S = G.cloneShared(Old2New);
+  G2S->CallToInstance.clear();
+  G2S->UnhandledCalls.clear();
   ConstraintsGenerator &G2 = *G2S;
   assert(G2.PG);
   std::string Name = G2.CG.Name;
@@ -1447,6 +1449,12 @@ void TypeRecovery::topDownPhase() {
   }
 
   handleGlobals();
+
+  const char *DebugDir = getTRDebugDir();
+  if (DebugDir) {
+    AG.Global->CG.printGraph(
+        getUniquePath(join(DebugDir, "Global"), ".dot").c_str());
+  }
 }
 
 std::shared_ptr<ConstraintsGenerator>
@@ -1704,77 +1712,250 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
       errs() << " ============== TypeRecovery::run End ===============\n");
 }
 
+std::shared_ptr<ConstraintsGenerator>
+TypeRecovery::getGlobalSketchGraph(std::optional<std::string> DebugDir) {
+  if (AG.GlobalSketch) {
+    return AG.GlobalSketch;
+  }
+  assert(AG.Global != nullptr &&
+         "AG.Global missing, not created by getTopDownGraph?");
+  // 2 merge global memory into the big graph.
+  AG.GlobalSketch = postProcess(*AG.Global);
+
+  if (DebugDir) {
+    AG.GlobalSketch->CG.printGraph(
+        getUniquePath(join(*DebugDir, "GlobalVarSketch"), ".dot").c_str());
+  }
+
+  return AG.GlobalSketch;
+}
+
+std::shared_ptr<ConstraintsGenerator>
+TypeRecovery::getAllSketchGraph(std::optional<std::string> DebugDir) {
+  if (AG.AllSketch) {
+    return AG.AllSketch;
+  }
+
+  std::shared_ptr<ConstraintsGenerator> Merged =
+      std::make_shared<ConstraintsGenerator>(*this, "AllSketch");
+
+  // 1 merge global memory into the big graph.
+  std::map<const retypd::CGNode *, retypd::CGNode *> Old2NewGS;
+  std::shared_ptr<ConstraintsGenerator> GlobalSkS = getGlobalSketchGraph();
+  GlobalSkS->cloneTo(*Merged, Old2NewGS);
+
+  // 2 merge all SCC into a big graph.
+  for (int i = 0; i < AG.AllSCCs.size(); i++) {
+    auto &Data = AG.AllSCCs[i];
+
+    auto SCCDebugDir = getSCCDebugDir(i);
+    auto SkG = getSketchGraph(Data, SCCDebugDir);
+    std::map<const retypd::CGNode *, retypd::CGNode *> Old2New;
+    // 解决V2N冲突：增加子类型关系。。
+    for (auto Ent: SkG->V2N) {
+      if (Merged->V2N.count(Ent.second)) {
+        
+      }
+    }
+    SkG->cloneTo(*Merged, Old2New, true);
+  }
+
+  AG.AllSketch = postProcess(*Merged);
+
+  if (DebugDir) {
+    AG.GlobalSketch->CG.printGraph(
+        getUniquePath(join(*DebugDir, "AllSketch"), ".dot").c_str());
+  }
+
+  return AG.AllSketch;
+}
+
+std::shared_ptr<SCCTypeResult>
+TypeRecovery::getAllASTTypes(std::optional<std::string> DebugDir) {
+  if (AG.AllTypeResult) {
+    return AG.AllTypeResult;
+  }
+  AG.AllTypeResult = std::make_shared<SCCTypeResult>();
+  auto ASTTypes = AG.AllTypeResult;
+  
+  auto SkG = getAllSketchGraph(DebugDir);
+  ConstraintsGenerator &G2 = *SkG;
+
+  retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
+  retypd::TypeBuilder TB(TBC, G2.TypeInfos);
+
+  using notdec::ast::HType;
+  using notdec::ast::HTypeContext;
+
+  TB.buildNodeSizeHintMap(G2);
+
+  // TODO is this a good idea?
+  CGNode *MemNode = G2.CG.getMemoryNode(retypd::Covariant);
+  CGNode *MemNodeC = G2.CG.getMemoryNode(retypd::Contravariant);
+  G2.V2N.insert(nullptr, MemNode->key);
+  G2.V2NContra.insert(nullptr, MemNodeC->key);
+
+  llvm::Optional<llvm::raw_fd_ostream> LocalValueTypesFile;
+  // 3.2 print the graph for debugging
+  if (DebugDir) {
+    std::error_code EC;
+    auto VTFP = getUniquePath(join(*DebugDir, "AllValueTypes"), ".txt");
+    LocalValueTypesFile.emplace(VTFP, EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output file " << VTFP << "." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    // TODO refactor to annotated function
+    // print val2node here
+    std::ofstream Val2NodeFile(
+        getUniquePath(join(*DebugDir, "AllVal2Node"), ".txt"));
+    for (auto &Ent : G2.V2N) {
+      auto N = G2.getNodeOrNull(Ent.first, nullptr, -1, retypd::Covariant);
+      auto NC = G2.getNodeOrNull(Ent.first, nullptr, -1, retypd::Contravariant);
+      Val2NodeFile << getName(Ent.first) << ", "
+                   << (N ? toString(N->key) : "none") << ", "
+                   << (NC ? toString(NC->key) : "none") << "\n";
+    }
+    Val2NodeFile.close();
+  }
+
+  if (LocalValueTypesFile) {
+    *LocalValueTypesFile << "UpperBounds:\n";
+  }
+
+  // 3.3 build type for each value
+  for (auto &Ent : G2.V2N) {
+    // TODO support function type.
+    if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+      if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+        continue;
+      }
+    }
+    auto &Key = Ent.second;
+    auto *Node = G2.getNodeOrNull(Key);
+    if (Node != nullptr) {
+      assert(&Node->Parent == &G2.CG &&
+             "RetypdGenerator::getTypeVar: Node is not in the graph");
+      auto Size = getSize(Ent.first, pointer_size);
+      assert(Size > 0);
+
+      if (LocalValueTypesFile) {
+        // print the current value
+        *LocalValueTypesFile << "  " << toString(Ent.first, true);
+        *LocalValueTypesFile << "  Node: " << toString(Node->key);
+        if (Node->getPNIVar() != nullptr) {
+          *LocalValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+        }
+        LocalValueTypesFile->flush();
+      }
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId())
+            << "Generating Type for " << toString(Node->key) << "...\n";
+      }
+
+      //!! build AST type for the node
+      HType *CTy = TB.buildType(*Node, retypd::Covariant);
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId()) << "Type is " << CTy->getAsString() << "\n";
+      }
+
+      if (ASTTypes->ValueTypes.count(Ent.first) != 0) {
+        llvm::errs() << "Warning: TODO handle Value type merge (LowerBound): "
+                     << toString(Ent.first) << "\n";
+      }
+
+      // save the result
+      if (!isFuncPtr(Ent.first) && !isSPGlobal(Ent.first)) {
+        ASTTypes->ValueTypes[Ent.first] = CTy;
+      }
+
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " upper bound: " << CTy->getAsString();
+      }
+
+    } else {
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " has no upper bound";
+      }
+    }
+    if (LocalValueTypesFile) {
+      *LocalValueTypesFile << "\n";
+    }
+  }
+
+  if (LocalValueTypesFile) {
+    *LocalValueTypesFile << "LowerBounds:\n";
+  }
+
+  for (auto &Ent : G2.V2NContra) {
+    // TODO support function type.
+    if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+      if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+        continue;
+      }
+    }
+    auto &Key = Ent.second;
+    auto *Node = G2.getNodeOrNull(Key);
+    if (Node != nullptr) {
+      assert(&Node->Parent == &G2.CG &&
+             "RetypdGenerator::getTypeVar: Node is not in the graph");
+      auto Size = getSize(Ent.first, pointer_size);
+      assert(Size > 0);
+
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << "  " << toString(Ent.first, true);
+        *LocalValueTypesFile << "  Node: " << toString(Node->key);
+        if (Node->getPNIVar() != nullptr) {
+          *LocalValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
+        }
+        LocalValueTypesFile->flush();
+      }
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId()) << "Generating Type...\n";
+      }
+
+      //!! build AST type for the node
+      HType *CTy = TB.buildType(*Node, retypd::Contravariant);
+
+      if (TraceIds.count(Node->getId())) {
+        PRINT_TRACE(Node->getId()) << "Type is " << CTy->getAsString() << "\n";
+      }
+
+      if (ASTTypes->ValueTypesLowerBound.count(Ent.first) != 0) {
+        llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
+                     << toString(Ent.first) << "\n";
+      }
+      // save the result
+      if (!isFuncPtr(Ent.first) && !isSPGlobal(Ent.first)) {
+        ASTTypes->ValueTypesLowerBound[Ent.first] = CTy;
+      }
+
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " lower bound: " << CTy->getAsString();
+      }
+    } else {
+      if (LocalValueTypesFile) {
+        *LocalValueTypesFile << " has no lower bound";
+      }
+    }
+    if (LocalValueTypesFile) {
+      *LocalValueTypesFile << "\n";
+    }
+  }
+
+  return AG.AllTypeResult;
+}
+
 void TypeRecovery::genASTTypes(Module &M) {
-  // 3 build AST type for each value in value map
   ResultVal = std::make_unique<TypeRecovery::Result>();
   assert(HTCtx != nullptr);
   using notdec::ast::HType;
   using notdec::ast::HTypeContext;
-
-  auto &AllSCCs = AG.AllSCCs;
-  for (int i = 0; i < AllSCCs.size(); i++) {
-    auto &Data = AllSCCs[i];
-
-    auto Dir = getSCCDebugDir(i);
-    auto &G = *getTopDownGraph(Data, Dir);
-    auto SCCName = Data.SCCName;
-    assert(G.PG);
-    for (auto &Ent : G.CG.Nodes) {
-      if (Ent.second.isStartOrEnd() || Ent.second.isMemory()) {
-        continue;
-      }
-    }
-
-    // do getASTTypes for each SCC
-    auto SCCTypes = getASTTypes(Data, Dir);
-
-    // put the result into ResultVal
-    ConstraintsGenerator &G2 = *Data.SketchGenerator;
-
-    for (auto &Ent : G2.V2N) {
-      // TODO support function type.
-      if (std::holds_alternative<llvm::Value *>(Ent.first)) {
-        if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
-          continue;
-        }
-      }
-      auto &Key = Ent.second;
-      auto *Node = G2.getNodeOrNull(Key);
-      if (Node != nullptr) {
-        assert(&Node->Parent == &G2.CG &&
-               "RetypdGenerator::getTypeVar: Node is not in the graph");
-        // merge AST type
-        if (SCCTypes->ValueTypes.count(Ent.first)) {
-          HType *CTy = SCCTypes->ValueTypes.at(Ent.first);
-          ResultVal->ValueTypes[Ent.first] = CTy;
-        }
-      }
-    }
-
-    for (auto &Ent : G2.V2NContra) {
-      // TODO support function type.
-      if (std::holds_alternative<llvm::Value *>(Ent.first)) {
-        if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
-          continue;
-        }
-      }
-      auto &Key = Ent.second;
-      auto *Node = G2.getNodeOrNull(Key);
-      if (Node != nullptr) {
-        assert(&Node->Parent == &G2.CG &&
-               "RetypdGenerator::getTypeVar: Node is not in the graph");
-        //!! build AST type for the node
-        if (SCCTypes->ValueTypesLowerBound.count(Ent.first)) {
-          HType *CTy = SCCTypes->ValueTypesLowerBound.at(Ent.first);
-          ResultVal->ValueTypesLowerBound[Ent.first] = CTy;
-        }
-      }
-    }
-  }
-
-  // 3.4 build AST type for memory node
-  std::shared_ptr<ConstraintsGenerator> &GlobalSkS = AG.GlobalSketch;
-  GlobalSkS = postProcess(*AG.Global);
 
   auto DebugDir = getTRDebugDir();
   if (DebugDir) {
@@ -1782,23 +1963,84 @@ void TypeRecovery::genASTTypes(Module &M) {
         M,
         getUniquePath(join(DebugDir, "02-AfterBottomUp.anno1"), ".ll").c_str(),
         1);
-    AG.Global->CG.printGraph(
-        getUniquePath(join(DebugDir, "Global"), ".dot").c_str());
-    AG.GlobalSketch->CG.printGraph(
-        getUniquePath(join(DebugDir, "GlobalSketch"), ".dot").c_str());
   }
 
-  ConstraintsGenerator &GlobalSk = *GlobalSkS;
-  // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
-  // retypd::Covariant);
-  CGNode *MemNode2 = GlobalSk.CG.getMemoryNode(retypd::Covariant);
+  // auto &AllSCCs = AG.AllSCCs;
+  // for (int i = 0; i < AllSCCs.size(); i++) {
+  //   auto &Data = AllSCCs[i];
 
-  retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
-  retypd::TypeBuilder TBG(TBC, GlobalSk.TypeInfos);
+  //   auto Dir = getSCCDebugDir(i);
+  //   auto &G = *getTopDownGraph(Data, Dir);
+  //   auto SCCName = Data.SCCName;
+  //   assert(G.PG);
+  //   for (auto &Ent : G.CG.Nodes) {
+  //     if (Ent.second.isStartOrEnd() || Ent.second.isMemory()) {
+  //       continue;
+  //     }
+  //   }
 
-  // build AST type for memory node
-  HType *CTy = TBG.buildType(*MemNode2, retypd::Covariant);
-  llvm::errs() << "Memory Type: " << CTy->getAsString() << "\n";
+  //   // put the result into ResultVal
+  //   ConstraintsGenerator &G2 = *Data.SketchGenerator;
+
+  //   for (auto &Ent : G2.V2N) {
+  //     // TODO support function type.
+  //     if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+  //       if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+  //         continue;
+  //       }
+  //     }
+  //     auto &Key = Ent.second;
+  //     auto *Node = G2.getNodeOrNull(Key);
+  //     if (Node != nullptr) {
+  //       assert(&Node->Parent == &G2.CG &&
+  //              "RetypdGenerator::getTypeVar: Node is not in the graph");
+  //       // merge AST type
+  //       if (SCCTypes->ValueTypes.count(Ent.first)) {
+  //         HType *CTy = SCCTypes->ValueTypes.at(Ent.first);
+  //         ResultVal->ValueTypes[Ent.first] = CTy;
+  //       }
+  //     }
+  //   }
+
+  //   for (auto &Ent : G2.V2NContra) {
+  //     // TODO support function type.
+  //     if (std::holds_alternative<llvm::Value *>(Ent.first)) {
+  //       if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
+  //         continue;
+  //       }
+  //     }
+  //     auto &Key = Ent.second;
+  //     auto *Node = G2.getNodeOrNull(Key);
+  //     if (Node != nullptr) {
+  //       assert(&Node->Parent == &G2.CG &&
+  //              "RetypdGenerator::getTypeVar: Node is not in the graph");
+  //       //!! build AST type for the node
+  //       if (SCCTypes->ValueTypesLowerBound.count(Ent.first)) {
+  //         HType *CTy = SCCTypes->ValueTypesLowerBound.at(Ent.first);
+  //         ResultVal->ValueTypesLowerBound[Ent.first] = CTy;
+  //       }
+  //     }
+  //   }
+  // }
+
+  // ConstraintsGenerator &GlobalSk = *GlobalSkS;
+  // // CGNode &MemNode2 = Global2.getNode(ConstantAddr(), nullptr, -1,
+  // // retypd::Covariant);
+  // CGNode *MemNode2 = GlobalSk.CG.getMemoryNode(retypd::Covariant);
+
+  auto AllTypes = getAllASTTypes(DebugDir);
+  ResultVal->ValueTypes = AllTypes->ValueTypes;
+  ResultVal->ValueTypesLowerBound = AllTypes->ValueTypesLowerBound;
+
+  // retypd::TypeBuilderContext TBC(*HTCtx, Mod.getName(), Mod.getDataLayout());
+  // retypd::TypeBuilder TBG(TBC, AllSk->TypeInfos);
+
+  // // build AST type for memory node
+  // HType *CTy = TBG.buildType(*MemNode2, retypd::Covariant);
+  // llvm::errs() << "Memory Type: " << CTy->getAsString() << "\n";
+
+  // TODO 获取内存的类型。
+  HType *CTy = AllTypes->ValueTypes.at(nullptr);
 
   using notdec::ast::RecordDecl;
   using notdec::ast::RecordType;
@@ -1888,6 +2130,7 @@ TypeRecovery::getSketchGraph(SCCData &Data,
   return Data.SketchGenerator;
 }
 
+// Deprecated
 std::shared_ptr<SCCTypeResult>
 TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
   if (Data.TypeResult) {
@@ -2239,30 +2482,32 @@ bool ConstraintsGenerator::checkSymmetry() {
   return true;
 }
 
-ConstraintsGenerator
-ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
-  ConstraintsGenerator G(Ctx, CG.Name);
-  cloneTo(G, Old2New);
-  return G;
-}
+// ConstraintsGenerator
+// ConstraintsGenerator::clone(std::map<const CGNode *, CGNode *> &Old2New) {
+//   ConstraintsGenerator G(Ctx, CG.Name);
+//   cloneTo(G, Old2New);
+//   return G;
+// }
 
 std::shared_ptr<ConstraintsGenerator>
-ConstraintsGenerator::cloneShared(std::map<const CGNode *, CGNode *> &Old2New) {
+ConstraintsGenerator::cloneShared(std::map<const CGNode *, CGNode *> &Old2New, bool isMergeClone) {
   auto G = std::make_shared<ConstraintsGenerator>(Ctx, CG.Name);
-  cloneTo(*G, Old2New);
+  cloneTo(*G, Old2New, isMergeClone);
   return G;
 }
 
 void ConstraintsGenerator::cloneTo(
-    ConstraintsGenerator &G, std::map<const CGNode *, CGNode *> &Old2New) {
-  ConstraintGraph::clone(Old2New, CG, G.CG);
+    ConstraintsGenerator &G, std::map<const CGNode *, CGNode *> &Old2New, bool isMergeClone) {
+  ConstraintGraph::clone(Old2New, CG, G.CG, nullptr, isMergeClone);
   assert(&Ctx == &G.Ctx);
   for (auto &Ent : V2N) {
     // this is NodeKey, no need to map.
-    G.V2N.insert(Ent.first, Ent.second);
+    auto It = G.V2N.insert(Ent.first, Ent.second);
+    assert(It.second);
   }
   for (auto &Ent : V2NContra) {
-    G.V2NContra.insert(Ent.first, Ent.second);
+    auto It = G.V2NContra.insert(Ent.first, Ent.second);
+    assert(It.second);
   }
   G.PG = G.CG.PG.get();
   G.SCCs = SCCs;

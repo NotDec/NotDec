@@ -219,11 +219,13 @@ struct ConstraintGraph {
 
   ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx, long PointerSize,
                   std::string Name, bool disablePNI = false);
+
+  // isMergeClone: merge the graph to another graph.
   static void
   clone(std::map<const CGNode *, CGNode *> &Old2New,
         const ConstraintGraph &From, ConstraintGraph &To,
         std::function<NodeKey(const NodeKey &)> TransformKey = nullptr,
-        bool Partial = false);
+        bool isMergeClone = false);
   // Node map is the core data of cloning.
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 

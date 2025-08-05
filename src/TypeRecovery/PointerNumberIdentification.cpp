@@ -543,6 +543,8 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
                          std::map<const CGNode *, CGNode *> Old2New) {
   // assert(PNINodes.size() == 0);
   // assert(Constraints.size() == 0);
+
+  std::set<std::pair<PNINode *, PNINode *>> toMerge;
   // clone PNINodes
   for (auto &N : G.PNINodes) {
     auto *NewNode = clonePNINode(N);
@@ -552,7 +554,12 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
         std::cerr << toString(OldCGNode->key) << "\n";
       }
       auto *NewCGNode = Old2New.at(OldCGNode);
-      addPNINodeTarget(*NewCGNode, *NewNode);
+      if (NewCGNode->getPNIVar() == nullptr) {
+        addPNINodeTarget(*NewCGNode, *NewNode);
+      } else {
+        // merge with that node.
+        toMerge.insert({NewCGNode->getPNIVar(), NewNode});
+      }
     }
   }
   // clone Constraints
@@ -566,6 +573,9 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
     if (G.Worklist.count(const_cast<ConsNode *>(&C))) {
       Worklist.insert(NewNode);
     }
+  }
+  for (auto Ent: toMerge) {
+    Ent.first->unify(*Ent.second);
   }
 }
 

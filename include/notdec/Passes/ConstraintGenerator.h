@@ -13,6 +13,7 @@
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Support/Casting.h>
@@ -85,6 +86,7 @@ struct SCCData {
   std::shared_ptr<ConstraintsGenerator> BottomUpGenerator;
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
+  // Deprecated
   std::shared_ptr<SCCTypeResult> TypeResult;
 
   void onIRChanged() {
@@ -98,8 +100,13 @@ struct SCCData {
 struct AllGraphs {
   std::vector<SCCData> AllSCCs;
   std::map<llvm::CallGraphNode *, std::size_t> Func2SCCIndex;
+  // Graph for global variables.
   std::shared_ptr<ConstraintsGenerator> Global;
+  // Sketch graph for global variables.
   std::shared_ptr<ConstraintsGenerator> GlobalSketch;
+  // Final big graph for final types.
+  std::shared_ptr<ConstraintsGenerator> AllSketch;
+  std::shared_ptr<SCCTypeResult> AllTypeResult;
   std::map<llvm::CallGraphNode *,
            std::vector<std::pair<llvm::CallBase *, llvm::CallGraphNode *>>>
       FuncCallers;
@@ -172,9 +179,15 @@ struct TypeRecovery {
   std::shared_ptr<ConstraintsGenerator>
   getSketchGraph(SCCData &Data,
                  std::optional<std::string> SCCDebugPath = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator>
+  getGlobalSketchGraph(std::optional<std::string> DebugDir = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator>
+  getAllSketchGraph(std::optional<std::string> DebugDir = std::nullopt);
   std::shared_ptr<SCCTypeResult>
   getASTTypes(SCCData &Data,
               std::optional<std::string> DebugDir = std::nullopt);
+  std::shared_ptr<SCCTypeResult>
+  getAllASTTypes(std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
   void handleGlobals();
   void genASTTypes(llvm::Module &M);
@@ -307,12 +320,14 @@ struct ConstraintsGenerator {
 
   void run();
   // clone CG and maintain value map.
-  ConstraintsGenerator
-  clone(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
+  // ConstraintsGenerator
+  // clone(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
   void cloneTo(ConstraintsGenerator &Target,
-               std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
+               std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
+               bool isMergeClone = false);
   std::shared_ptr<ConstraintsGenerator>
-  cloneShared(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
+  cloneShared(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
+              bool isMergeClone = false);
   ConstraintsGenerator(TypeRecovery &Ctx, std::string Name,
                        std::set<llvm::Function *> SCCs = {})
       : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),
@@ -482,6 +497,9 @@ void inline ensureSequence(Value *&Src1, Value *&Src2) {
 }
 
 std::string inline getFuncTvName(llvm::Function *Func) {
+  if (Func->isIntrinsic()) {
+    return llvm::Intrinsic::getBaseName(Func->getIntrinsicID()).str();
+  }
   return ValueNamer::getName(*Func, ValueNamer::FuncPrefix);
 }
 
