@@ -220,12 +220,22 @@ struct ConstraintGraph {
   ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx, long PointerSize,
                   std::string Name, bool disablePNI = false);
 
+  enum SubtypeRelation {
+    SR_Equal,
+    SR_Sub,    // new node subtype to old node.
+    SR_Parent, // old node subtype to new node.
+    SR_None,
+  };
+
   // isMergeClone: merge the graph to another graph.
+  // TransformKey: 主要针对不冲突的情况，也转换NodeKey。
+  // ConflictKeyRelation: 处理冲突，看看怎么连子类型边。
   static void
   clone(std::map<const CGNode *, CGNode *> &Old2New,
         const ConstraintGraph &From, ConstraintGraph &To,
+        bool isMergeClone = false,
         std::function<NodeKey(const NodeKey &)> TransformKey = nullptr,
-        bool isMergeClone = false);
+      std::function<SubtypeRelation(CGNode &, CGNode &)> ConflictKeyRelation = nullptr);
   // Node map is the core data of cloning.
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 

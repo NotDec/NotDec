@@ -2625,8 +2625,9 @@ ConstraintGraph::ConstraintGraph(std::shared_ptr<retypd::TRContext> Ctx,
 
 void ConstraintGraph::clone(
     std::map<const CGNode *, CGNode *> &Old2New, const ConstraintGraph &From,
-    ConstraintGraph &To, std::function<NodeKey(const NodeKey &)> TransformKey,
-    bool isMergeClone) {
+    ConstraintGraph &To, bool isMergeClone,
+    std::function<NodeKey(const NodeKey &)> TransformKey,
+    std::function<SubtypeRelation(CGNode &, CGNode &)> ConflictKeyRelation) {
   assert(Old2New.empty() && "clone: Old2New is not empty!");
   assert(From.Ctx.get() == To.Ctx.get() && "clone: Ctx mismatch!");
   assert(From.PointerSize == To.PointerSize);
@@ -2655,7 +2656,7 @@ void ConstraintGraph::clone(
     if (Ent.second.isStartOrEnd()) {
       continue;
     }
-    auto &Node = Ent.second;
+    auto &Node = const_cast<CGNode &>(Ent.second);
     NodeKey NewKey = TransformKey ? TransformKey(Node.key) : Node.key;
     CGNode *NewNode;
     // key conflict.
@@ -2663,7 +2664,8 @@ void ConstraintGraph::clone(
       // cannot be cloning to empty graph.
       assert(isMergeClone);
       // merge primitive node
-      if (NewKey.Base.isPrimitive() || (!NewKey.Base.hasLabel() && NewKey.Base.isMemory())) {
+      if (NewKey.Base.isPrimitive() ||
+          (!NewKey.Base.hasLabel() && NewKey.Base.isMemory())) {
         // NewNode = &To.createNodeNoPNI(
         //     TypeVariable::CreateDtv(*To.Ctx, ValueNamer::getName("tmp_")),
         //     Node.Size);
@@ -2671,12 +2673,24 @@ void ConstraintGraph::clone(
         // Cannot replace because of PNINode handling?
         NewNode = To.getNodeOrNull(NewKey);
       } else {
-        llvm::errs() << "Key conflict: " << toString(NewKey) << "\n";
-        assert(false && "Why key conflict?");
-        // TODO what can I do?
-        NewNode = &To.createNodeNoPNI(
-            TypeVariable::CreateDtv(*To.Ctx, ValueNamer::getName("conflict_")),
-            Node.Size);
+        auto ExistingNode = To.getNodeOrNull(NewKey);
+        assert(ConflictKeyRelation != nullptr);
+        auto Relation = ConflictKeyRelation(Node, *ExistingNode);
+        if (Relation == SR_Equal) {
+          NewNode = ExistingNode;
+        } else {
+          NewNode = &To.createNodeNoPNI(
+              TypeVariable::CreateDtv(*To.Ctx,
+                                      ValueNamer::getName("conflict_")),
+              Node.Size);
+          if (Relation == SR_Sub) {
+            To.onlyAddEdge(*NewNode, *ExistingNode, EdgeLabel{One{}});
+          } else if (Relation == SR_Parent) {
+            To.onlyAddEdge(*ExistingNode, *NewNode, EdgeLabel{One{}});
+          } else if (Relation == SR_None) {
+            // do nothing
+          }
+        }
       }
     } else {
       NewNode = &To.createNodeNoPNI(NewKey, Node.Size);

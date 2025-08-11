@@ -1752,12 +1752,16 @@ TypeRecovery::getAllSketchGraph(std::optional<std::string> DebugDir) {
     auto SkG = getSketchGraph(Data, SCCDebugDir);
     std::map<const retypd::CGNode *, retypd::CGNode *> Old2New;
     // 解决V2N冲突：增加子类型关系。。
-    for (auto Ent: SkG->V2N) {
+    for (auto Ent : SkG->V2N) {
       if (Merged->V2N.count(Ent.second)) {
-        
       }
     }
-    SkG->cloneTo(*Merged, Old2New, true);
+    SkG->cloneTo(*Merged, Old2New, true,
+                 [](CGNode &Old,
+                    CGNode &New) -> retypd::ConstraintGraph::SubtypeRelation {
+                      // for external function, use 
+                      assert(false && "TODO");
+                 });
   }
 
   AG.AllSketch = postProcess(*Merged);
@@ -1777,7 +1781,7 @@ TypeRecovery::getAllASTTypes(std::optional<std::string> DebugDir) {
   }
   AG.AllTypeResult = std::make_shared<SCCTypeResult>();
   auto ASTTypes = AG.AllTypeResult;
-  
+
   auto SkG = getAllSketchGraph(DebugDir);
   ConstraintsGenerator &G2 = *SkG;
 
@@ -2490,15 +2494,21 @@ bool ConstraintsGenerator::checkSymmetry() {
 // }
 
 std::shared_ptr<ConstraintsGenerator>
-ConstraintsGenerator::cloneShared(std::map<const CGNode *, CGNode *> &Old2New, bool isMergeClone) {
+ConstraintsGenerator::cloneShared(std::map<const CGNode *, CGNode *> &Old2New,
+                                  bool isMergeClone) {
   auto G = std::make_shared<ConstraintsGenerator>(Ctx, CG.Name);
   cloneTo(*G, Old2New, isMergeClone);
   return G;
 }
 
 void ConstraintsGenerator::cloneTo(
-    ConstraintsGenerator &G, std::map<const CGNode *, CGNode *> &Old2New, bool isMergeClone) {
-  ConstraintGraph::clone(Old2New, CG, G.CG, nullptr, isMergeClone);
+    ConstraintsGenerator &G, std::map<const CGNode *, CGNode *> &Old2New,
+    bool isMergeClone,
+    std::function<retypd::ConstraintGraph::SubtypeRelation(retypd::CGNode &,
+                                                           retypd::CGNode &)>
+        ConflictKeyRelation) {
+  ConstraintGraph::clone(Old2New, CG, G.CG, isMergeClone, nullptr,
+                         ConflictKeyRelation);
   assert(&Ctx == &G.Ctx);
   for (auto &Ent : V2N) {
     // this is NodeKey, no need to map.
@@ -2997,8 +3007,7 @@ void ConstraintsGenerator::instantiateSummary(
   // copy the whole graph into it. and add subtype relation
   std::map<const CGNode *, CGNode *> Old2New;
   ConstraintGraph::clone(
-      Old2New, Summary.CG, CG,
-      [&](const retypd::NodeKey &N) {
+      Old2New, Summary.CG, CG, true, [&](const retypd::NodeKey &N) {
         if (N.Base.isPrimitive()) {
           return N;
         }
@@ -3011,8 +3020,7 @@ void ConstraintsGenerator::instantiateSummary(
         Base.instanceId = InstanceId;
         Ret.Base = Base;
         return Ret;
-      },
-      true);
+      });
   // find two function nodes.
   auto OF = Summary.getNodeOrNull(Target, nullptr, -1, retypd::Covariant);
   auto OFC = Summary.getNodeOrNull(Target, nullptr, -1, retypd::Contravariant);

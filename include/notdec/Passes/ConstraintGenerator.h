@@ -322,9 +322,12 @@ struct ConstraintsGenerator {
   // clone CG and maintain value map.
   // ConstraintsGenerator
   // clone(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
-  void cloneTo(ConstraintsGenerator &Target,
-               std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
-               bool isMergeClone = false);
+  void
+  cloneTo(ConstraintsGenerator &Target,
+          std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
+          bool isMergeClone = false,
+          std::function<retypd::ConstraintGraph::SubtypeRelation(retypd::CGNode &, retypd::CGNode &)>
+              ConflictKeyRelation = nullptr);
   std::shared_ptr<ConstraintsGenerator>
   cloneShared(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
               bool isMergeClone = false);
