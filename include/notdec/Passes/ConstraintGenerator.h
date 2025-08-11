@@ -86,7 +86,6 @@ struct SCCData {
   std::shared_ptr<ConstraintsGenerator> BottomUpGenerator;
   std::shared_ptr<ConstraintsGenerator> TopDownGenerator;
   std::shared_ptr<ConstraintsGenerator> SketchGenerator;
-  // Deprecated
   std::shared_ptr<SCCTypeResult> TypeResult;
 
   void onIRChanged() {
@@ -104,9 +103,6 @@ struct AllGraphs {
   std::shared_ptr<ConstraintsGenerator> Global;
   // Sketch graph for global variables.
   std::shared_ptr<ConstraintsGenerator> GlobalSketch;
-  // Final big graph for final types.
-  std::shared_ptr<ConstraintsGenerator> AllSketch;
-  std::shared_ptr<SCCTypeResult> AllTypeResult;
   std::map<llvm::CallGraphNode *,
            std::vector<std::pair<llvm::CallBase *, llvm::CallGraphNode *>>>
       FuncCallers;
@@ -179,15 +175,9 @@ struct TypeRecovery {
   std::shared_ptr<ConstraintsGenerator>
   getSketchGraph(SCCData &Data,
                  std::optional<std::string> SCCDebugPath = std::nullopt);
-  std::shared_ptr<ConstraintsGenerator>
-  getGlobalSketchGraph(std::optional<std::string> DebugDir = std::nullopt);
-  std::shared_ptr<ConstraintsGenerator>
-  getAllSketchGraph(std::optional<std::string> DebugDir = std::nullopt);
   std::shared_ptr<SCCTypeResult>
   getASTTypes(SCCData &Data,
               std::optional<std::string> DebugDir = std::nullopt);
-  std::shared_ptr<SCCTypeResult>
-  getAllASTTypes(std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
   void handleGlobals();
   void genASTTypes(llvm::Module &M);
