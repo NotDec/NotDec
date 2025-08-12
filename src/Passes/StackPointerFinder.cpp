@@ -127,7 +127,9 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
     sp = max_sp;
   }
 
-  addSPMetadata(sp);
+  if (sp != nullptr) {
+    addSPMetadata(sp);
+  }
 
   Result ret;
   ret.result = sp;
