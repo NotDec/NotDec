@@ -1216,10 +1216,6 @@ void TypeRecovery::bottomUpPhase() {
     }
 
     Data.SCCName = Name;
-    // write the SCC index to file
-    if (SCCsCatalog) {
-      *SCCsCatalog << "SCC" << SCCIndex << "," << Name << "\n";
-    }
     // print summary
     if (DirPath) {
       auto SummaryOut = getUniquePath(join(*DirPath, "02-Summary"), ".dot");
@@ -1260,9 +1256,13 @@ TypeRecovery::getBottomUpGraph(SCCData &Data,
       Generator->checkSymmetry();
       isOverride = true;
     } else {
-      llvm::errs() << "Warning: Summary and result may be incorrect due to "
-                      "external function: "
-                   << Data.SCCName << "\n";
+      static std::set<std::string> Dedup;
+      if (!Dedup.count(Data.SCCName)) {
+        Dedup.emplace(Data.SCCName);
+        llvm::errs() << "Warning: Summary and result may be incorrect due to "
+                        "external function: "
+                     << Data.SCCName << "\n";
+      }
       // empty graph
       Generator = std::make_shared<ConstraintsGenerator>(*this, Data.SCCName,
                                                          Data.SCCSet);
@@ -1299,9 +1299,9 @@ TypeRecovery::getBottomUpGraph(SCCData &Data,
         TargetSummary = SummaryOverride.at({Target});
         assert(TargetSummary->CG.PG->Constraints.size() == 0);
       } else {
-        llvm::errs() << "Warning: Summary and result may be incorrect due to "
-                        "external call: "
-                     << *Call << "\n";
+        // llvm::errs() << "Warning: Summary and result may be incorrect due to "
+        //                 "external call: "
+        //              << *Call << "\n";
         Generator->UnhandledCalls.insert(Ent);
         continue;
       }
@@ -1604,6 +1604,10 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
     if (!Name.empty()) {
       Data.SCCName = Name;
     }
+    // write the SCC index to file
+    if (SCCsCatalog) {
+      *SCCsCatalog << "SCC" << SCCIndex << "," << Name << "\n";
+    }
   }
 
   // 2. calc reverse call edge map
@@ -1682,12 +1686,22 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
 
   CallGraphAnalysis Ana;
   CallG = std::make_unique<CallGraph>(Ana.run(M, MAM));
+
+  if (DebugDir) {
+    std::error_code EC;
+    llvm::raw_fd_ostream CGDot(join(DebugDir, "CallGraph.dot"), EC);
+    CallG->print(CGDot);
+  }
+
   prepareSCC(*CallG);
+
+  if (DebugDir) {
+    SCCsCatalog->close();
+  }
 
   bottomUpPhase();
 
   if (DebugDir) {
-    SCCsCatalog->close();
     printModule(M, join(DebugDir, "02-AfterBottomUp.ll").c_str());
   }
 
