@@ -64,6 +64,7 @@
 #include "Utils/AllSCCIterator.h"
 #include "Utils/SingleNodeSCCIterator.h"
 #include "Utils/Utils.h"
+#include "Utils/CallGraphDotInfo.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
@@ -1299,7 +1300,8 @@ TypeRecovery::getBottomUpGraph(SCCData &Data,
         TargetSummary = SummaryOverride.at({Target});
         assert(TargetSummary->CG.PG->Constraints.size() == 0);
       } else {
-        // llvm::errs() << "Warning: Summary and result may be incorrect due to "
+        // llvm::errs() << "Warning: Summary and result may be incorrect due to
+        // "
         //                 "external call: "
         //              << *Call << "\n";
         Generator->UnhandledCalls.insert(Ent);
@@ -1689,8 +1691,24 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
 
   if (DebugDir) {
     std::error_code EC;
-    llvm::raw_fd_ostream CGDot(join(DebugDir, "CallGraph.dot"), EC);
-    CallG->print(CGDot);
+    auto Path = join(DebugDir, "CallGraph.txt");
+    llvm::raw_fd_ostream CGTxt(Path, EC);
+    if (EC) {
+      llvm::errs() << "Error printing to " << Path
+                   << ", " << EC.message() << "\n";
+    }
+    CallG->print(CGTxt);
+    CGTxt.close();
+    // print dot
+    Path = join(DebugDir, "CallGraph.dot");
+    llvm::raw_fd_ostream CGDot(Path, EC);
+    if (EC) {
+      llvm::errs() << "Error printing to "
+                   << Path << ", " << EC.message() << "\n";
+    }
+    notdec::utils::CallGraphDOTInfo CFGInfo(&M, &*CallG, nullptr);
+    llvm::WriteGraph(CGDot, &CFGInfo, false);
+    CGDot.close();
   }
 
   prepareSCC(*CallG);
