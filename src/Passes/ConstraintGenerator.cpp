@@ -2794,8 +2794,8 @@ void ConstraintsGenerator::instantiateSummary(
     const ConstraintsGenerator &Summary) {
   checkSymmetry();
   auto [FI, FIC] = CallToInstance.at(Inst);
-  auto InstanceId = FI->key.Base.getInstanceId();
-  assert(InstanceId != 0);
+  auto ContextId = FI->key.Base.getContextId();
+  assert(ContextId != 0);
   auto NKN = FI->key.Base.getBaseName();
 
   // copy the whole graph into it. and add subtype relation
@@ -2806,12 +2806,12 @@ void ConstraintsGenerator::instantiateSummary(
           return N;
         }
         retypd::NodeKey Ret = N;
-        // 这里即使有了InstanceId，在函数节点和参数节点还是会重复，所以再设置actual标志。
+        // 这里即使有了ContextId，在函数节点和参数节点还是会重复，所以再设置actual标志。
         auto Base = N.Base;
         if (N.Base.hasBaseName() && N.Base.getBaseName() == NKN) {
           Base = Base.markActual();
         }
-        Base.instanceId = InstanceId;
+        Base.ContextId = ContextId;
         Ret.Base = Base;
         return Ret;
       });
@@ -3323,11 +3323,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     auto &TargetNode = cg.getOrInsertNode(Target, nullptr, -1);
 
     // differentiate different call instances in the same function
-    size_t InstanceId = ValueNamer::getId();
+    size_t ContextId = ValueNamer::getId();
 
     // Create target func instance node with low type.
     auto FuncVar = TargetNode.key.Base;
-    FuncVar.instanceId = InstanceId;
+    FuncVar.ContextId = ContextId;
     auto &FuncNode = cg.CG.getOrInsertNode(FuncVar, Target->getFunctionType());
     auto &FNC =
         cg.CG.getOrInsertNode(retypd::NodeKey(FuncVar, retypd::Contravariant),

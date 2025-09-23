@@ -365,30 +365,30 @@ struct TypeVariable {
   TRContext *Ctx;
   const PooledTypeVariable *Var;
   // differentiate Nodes from summary instantiation
-  size_t instanceId = 0;
+  size_t ContextId = 0;
   // differentiate formal and actual parameter/return values
   // Used in summary instantiation
   bool IsActual = false;
 
-  bool hasInstanceId() const {
+  bool hasContextId() const {
     return std::holds_alternative<DerivedTypeVariable>(Var->Inner);
   }
 
-  size_t getInstanceId() const {
-    if (hasInstanceId()) {
-      return instanceId;
+  size_t getContextId() const {
+    if (hasContextId()) {
+      return ContextId;
     } else {
-      assert(instanceId == 0);
-      assert(false && "getInstanceId: No instanceId.");
+      assert(ContextId == 0);
+      assert(false && "getContextId: No ContextId.");
     }
   }
 
-  void setInstanceId(size_t id) {
-    if (hasInstanceId()) {
-      instanceId = id;
+  void setContextId(size_t id) {
+    if (hasContextId()) {
+      ContextId = id;
     } else {
-      assert(instanceId == 0);
-      assert(false && "setInstanceId: Not a DerivedTypeVariable");
+      assert(ContextId == 0);
+      assert(false && "setContextId: Not a DerivedTypeVariable");
     }
   }
 
@@ -397,8 +397,8 @@ struct TypeVariable {
   }
 
   static TypeVariable CreateDtv(TRContext &Ctx, std::string name,
-                                size_t InstanceId = 0, bool IsActual = false) {
-    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, name), InstanceId,
+                                size_t ContextId = 0, bool IsActual = false) {
+    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, name), ContextId,
             IsActual};
   }
 
@@ -430,7 +430,7 @@ struct TypeVariable {
 
   Variance pathVariance() const { return Var->pathVariance(); }
 
-  TypeVariable toBase() const { return {Ctx, Var->toBase(), instanceId}; }
+  TypeVariable toBase() const { return {Ctx, Var->toBase(), ContextId}; }
 
   bool hasLabel() const { return Var->hasLabel(); }
 
@@ -468,8 +468,8 @@ struct TypeVariable {
   std::string str() const {
     std::string Ret = Var->str();
     if (std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
-      if (getInstanceId() > 0) {
-        Ret += "#" + std::to_string(getInstanceId());
+      if (getContextId() > 0) {
+        Ret += "#" + std::to_string(getContextId());
       }
     }
     if (IsActual) {
@@ -482,10 +482,10 @@ struct TypeVariable {
   // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
   bool operator<(const TypeVariable &rhs) const {
     if (!std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
-      assert(instanceId == 0);
+      assert(ContextId == 0);
     }
-    return std::tie(Var, instanceId, IsActual) <
-           std::tie(rhs.Var, rhs.instanceId, rhs.IsActual);
+    return std::tie(Var, ContextId, IsActual) <
+           std::tie(rhs.Var, rhs.ContextId, rhs.IsActual);
   }
 
   bool operator==(const TypeVariable &rhs) const {

@@ -107,6 +107,17 @@ auto since(std::chrono::time_point<clock_t, duration_t> const &start) {
   return std::chrono::duration_cast<result_t>(clock_t::now() - start);
 }
 
+// string pool.
+// https://stackoverflow.com/a/20961180/13798540
+template <typename... Args>
+typename std::enable_if<
+    std::is_constructible<std::string, Args...>::value, const char*
+>::type emplace_atom(Args&&... args)
+{
+    static std::set<std::string> interned;
+    return interned.emplace(std::forward<Args>(args)...).first->c_str();
+}
+
 } // namespace notdec
 
 #endif
