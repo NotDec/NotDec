@@ -2794,8 +2794,8 @@ void ConstraintsGenerator::instantiateSummary(
     const ConstraintsGenerator &Summary) {
   checkSymmetry();
   auto [FI, FIC] = CallToInstance.at(Inst);
-  auto ContextId = FI->key.Base.getContextId();
-  assert(ContextId != 0);
+  assert(FI->key.Base.getContextId().size() == 1);
+  auto CurrentId = FI->key.Base.getContextId().front();
   auto NKN = FI->key.Base.getBaseName();
 
   // copy the whole graph into it. and add subtype relation
@@ -2811,7 +2811,7 @@ void ConstraintsGenerator::instantiateSummary(
         if (N.Base.hasBaseName() && N.Base.getBaseName() == NKN) {
           Base = Base.markActual();
         }
-        Base.ContextId = ContextId;
+        Base.pushContextId(CurrentId);
         Ret.Base = Base;
         return Ret;
       });
@@ -3327,7 +3327,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
 
     // Create target func instance node with low type.
     auto FuncVar = TargetNode.key.Base;
-    FuncVar.ContextId = ContextId;
+    FuncVar.pushContextId(ContextId);
     auto &FuncNode = cg.CG.getOrInsertNode(FuncVar, Target->getFunctionType());
     auto &FNC =
         cg.CG.getOrInsertNode(retypd::NodeKey(FuncVar, retypd::Contravariant),

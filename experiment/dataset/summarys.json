@@ -1,4 +1,18 @@
 {
+  "puts": {
+    "constraints": [
+      "puts.in_0 <= cstr",
+      "cstr.@0+1.load8 <= #char"
+    ],
+    "pni_map": {
+      "puts": "func p #1",
+      "puts.in_0": "ptr p #2",
+      "cstr": "ptr p #2",
+      "cstr.@0+1": "ptr p #2",
+      "cstr.@0+1.load8": "int 8 #3",
+      "#char": "int 8 #3"
+    }
+  },
   "printLine": {
     "constraints": [
       "printLine.in_0 <= cstr",

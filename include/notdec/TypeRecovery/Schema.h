@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <deque>
 #include <llvm/ADT/Optional.h>
+#include <llvm/ADT/SmallVector.h>
 #include <string>
 #include <variant>
 
@@ -107,9 +108,7 @@ struct FieldLabel {
 
 std::string toString(const FieldLabel &f);
 
-inline StoreLabel toStore(LoadLabel L) {
-  return StoreLabel{.Size = L.Size};
-}
+inline StoreLabel toStore(LoadLabel L) { return StoreLabel{.Size = L.Size}; }
 
 Variance getVariance(const FieldLabel &f);
 
@@ -362,10 +361,12 @@ struct PooledTypeVariable {
 std::string toString(const PooledTypeVariable *dtv);
 
 struct TypeVariable {
+  using ContextIdTy = uintptr_t;
+  using ContextIdListTy = llvm::SmallVector<ContextIdTy, 1>;
   TRContext *Ctx;
   const PooledTypeVariable *Var;
   // differentiate Nodes from summary instantiation
-  size_t ContextId = 0;
+  ContextIdListTy ContextId = {};
   // differentiate formal and actual parameter/return values
   // Used in summary instantiation
   bool IsActual = false;
@@ -374,32 +375,39 @@ struct TypeVariable {
     return std::holds_alternative<DerivedTypeVariable>(Var->Inner);
   }
 
-  size_t getContextId() const {
+  const ContextIdListTy &getContextId() const {
     if (hasContextId()) {
       return ContextId;
     } else {
-      assert(ContextId == 0);
+      assert(ContextId.size() == 0);
       assert(false && "getContextId: No ContextId.");
     }
   }
 
-  void setContextId(size_t id) {
-    if (hasContextId()) {
-      ContextId = id;
-    } else {
-      assert(ContextId == 0);
-      assert(false && "setContextId: Not a DerivedTypeVariable");
-    }
-  }
+  void pushContextId(ContextIdTy Id) { ContextId.push_back(Id); }
+
+  // void setContextId(size_t id) {
+  //   if (hasContextId()) {
+  //     ContextId = id;
+  //   } else {
+  //     assert(ContextId == 0);
+  //     assert(false && "setContextId: Not a DerivedTypeVariable");
+  //   }
+  // }
 
   static TypeVariable CreatePrimitive(TRContext &Ctx, std::string name) {
     return {&Ctx, PooledTypeVariable::CreatePrimitive(Ctx, name)};
   }
 
   static TypeVariable CreateDtv(TRContext &Ctx, std::string name,
-                                size_t ContextId = 0, bool IsActual = false) {
-    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, name), ContextId,
-            IsActual};
+                                bool IsActual = false) {
+    return {&Ctx, PooledTypeVariable::CreateDtv(Ctx, name), {}, IsActual};
+  }
+
+  static TypeVariable CreateDtv(TRContext &Ctx, std::string name,
+                                size_t ContextId, bool IsActual = false) {
+    return {
+        &Ctx, PooledTypeVariable::CreateDtv(Ctx, name), {ContextId}, IsActual};
   }
 
   static TypeVariable CreateDtv(TRContext &Ctx, DerivedTypeVariable dtv) {
@@ -468,8 +476,8 @@ struct TypeVariable {
   std::string str() const {
     std::string Ret = Var->str();
     if (std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
-      if (getContextId() > 0) {
-        Ret += "#" + std::to_string(getContextId());
+      for (auto CId : getContextId()) {
+        Ret += "#" + std::to_string(CId);
       }
     }
     if (IsActual) {
@@ -482,7 +490,7 @@ struct TypeVariable {
   // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
   bool operator<(const TypeVariable &rhs) const {
     if (!std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
-      assert(ContextId == 0);
+      assert(ContextId.size() == 0);
     }
     return std::tie(Var, ContextId, IsActual) <
            std::tie(rhs.Var, rhs.ContextId, rhs.IsActual);
@@ -573,7 +581,7 @@ struct RecallBase {
 // RecallBase>;
 struct EdgeLabel {
   std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase> L;
-  
+
   bool operator<(const EdgeLabel &rhs) const {
     return std::tie(L) < std::tie(rhs.L);
   }
@@ -593,8 +601,7 @@ struct EdgeLabel {
 
 [[nodiscard]] std::string toString(const EdgeLabel &label);
 inline bool isBase(EdgeLabel label) {
-  return label.isForgetBase() ||
-         label.isRecallBase();
+  return label.isForgetBase() || label.isRecallBase();
 }
 inline TypeVariable getBase(EdgeLabel label) {
   if (auto *fb = label.getAs<ForgetBase>()) {
@@ -618,11 +625,9 @@ inline bool isStore(const EdgeLabel &label) {
 
 inline bool isLoadOrStore(const EdgeLabel &label) {
   if (auto *RL = label.getAs<RecallLabel>()) {
-    return RL->label.isLoad() ||
-           RL->label.isStore();
+    return RL->label.isLoad() || RL->label.isStore();
   } else if (auto *FL = label.getAs<ForgetLabel>()) {
-    return FL->label.isLoad() ||
-           FL->label.isStore();
+    return FL->label.isLoad() || FL->label.isStore();
   } else {
     return false;
   }
@@ -661,18 +666,15 @@ inline FieldLabel getLabel(EdgeLabel label) {
 }
 
 inline bool isLabel(const EdgeLabel &label) {
-  return label.isForgetLabel() ||
-         label.isRecallLabel();
+  return label.isForgetLabel() || label.isRecallLabel();
 }
 
 inline bool isForget(const EdgeLabel &label) {
-  return label.isForgetLabel() ||
-         label.isForgetBase();
+  return label.isForgetLabel() || label.isForgetBase();
 }
 
 inline bool isRecall(const EdgeLabel &label) {
-  return label.isRecallLabel() ||
-         label.isRecallBase();
+  return label.isRecallLabel() || label.isRecallBase();
 }
 
 inline bool isRecallOffset(const EdgeLabel &label) {
@@ -698,7 +700,6 @@ inline ForgetBase toForget(RecallBase L) {
 inline RecallBase toRecall(ForgetBase L) {
   return RecallBase{.Base = L.Base, .V = L.V};
 }
-
 
 inline const notdec::retypd::OffsetLabel *
 getOffsetLabel(const EdgeLabel &label) {
