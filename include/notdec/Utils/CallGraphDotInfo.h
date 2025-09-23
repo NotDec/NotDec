@@ -1,17 +1,17 @@
 #ifndef _NOTDEC_UTILS_CG_DOT_H_
 #define _NOTDEC_UTILS_CG_DOT_H_
 
-
+#include "llvm/Support/DOTGraphTraits.h"
 #include <llvm/ADT/SmallSet.h>
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/HeatUtils.h>
-#include "llvm/Support/DOTGraphTraits.h"
 
 namespace notdec::utils {
 
 const bool CallMultiGraph = false;
 const bool ShowEdgeWeight = true;
 const bool ShowHeatColors = true;
+const bool HideExternalFuncs = true;
 
 class CallGraphDOTInfo {
 private:
@@ -25,7 +25,8 @@ public:
 
   CallGraphDOTInfo(
       llvm::Module *M, llvm::CallGraph *CG,
-      llvm::function_ref<llvm::BlockFrequencyInfo *(llvm::Function &)> LookupBFI)
+      llvm::function_ref<llvm::BlockFrequencyInfo *(llvm::Function &)>
+          LookupBFI)
       : M(M), CG(CG), LookupBFI(LookupBFI) {
     MaxFreq = 0;
 
@@ -74,14 +75,15 @@ private:
   }
 };
 
-} // namespace notdec
+} // namespace notdec::utils
 
 namespace llvm {
 
 using notdec::utils::CallGraphDOTInfo;
 using notdec::utils::CallMultiGraph;
-using notdec::utils::ShowHeatColors;
+using notdec::utils::HideExternalFuncs;
 using notdec::utils::ShowEdgeWeight;
+using notdec::utils::ShowHeatColors;
 
 template <>
 struct GraphTraits<CallGraphDOTInfo *>
@@ -121,6 +123,10 @@ struct DOTGraphTraits<CallGraphDOTInfo *> : public DefaultDOTGraphTraits {
 
   static bool isNodeHidden(const CallGraphNode *Node,
                            const CallGraphDOTInfo *CGInfo) {
+    if (HideExternalFuncs && Node->getFunction() &&
+        Node->getFunction()->isDeclaration()) {
+      return true;
+    }
     if (CallMultiGraph || Node->getFunction())
       return false;
     return true;
