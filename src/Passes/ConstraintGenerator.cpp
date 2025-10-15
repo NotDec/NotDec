@@ -1393,6 +1393,7 @@ void TypeRecovery::topDownPhase() {
           FuncNodesContra.insert(SigNodeC);
         }
       } else {
+        // find all caller's function instance, then merge to get the final signature
         if (FuncCallers.count(CGN) == 0) {
           continue;
         }
