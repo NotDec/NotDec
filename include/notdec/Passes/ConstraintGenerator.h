@@ -150,6 +150,10 @@ struct TypeRecovery {
     return (*AllocaRanges)[Func];
   }
 
+  std::function<bool (llvm::Function*)> isPolymorphic = [](llvm::Function* F) {
+    return false;
+  };
+
   unsigned pointer_size = 0;
 
   std::unique_ptr<Result> ResultVal;

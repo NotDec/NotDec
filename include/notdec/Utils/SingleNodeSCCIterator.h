@@ -5,6 +5,7 @@
 
 namespace notdec {
 
+// Iterate the function one by one from SCCIterator.
 class SingleNodeSCCIterator {
 public:
   using NodeVector = std::vector<llvm::CallGraphNode *>;

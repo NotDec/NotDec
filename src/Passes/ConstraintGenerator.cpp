@@ -62,9 +62,9 @@
 #include "TypeRecovery/Sketch.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
+#include "Utils/CallGraphDotInfo.h"
 #include "Utils/SingleNodeSCCIterator.h"
 #include "Utils/Utils.h"
-#include "Utils/CallGraphDotInfo.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
@@ -1157,6 +1157,11 @@ void TypeRecovery::bottomUpPhase() {
       continue;
     }
 
+    if (SCCIndex == (AllSCCs.size() - 1)) {
+      // no need to generate summary for last node in SCC
+      continue;
+    }
+
     // Print for debug dir
     std::optional<std::string> DirPath = getSCCDebugDir(SCCIndex);
     llvm::Optional<llvm::raw_fd_ostream> SCCsPerf;
@@ -1393,7 +1398,8 @@ void TypeRecovery::topDownPhase() {
           FuncNodesContra.insert(SigNodeC);
         }
       } else {
-        // find all caller's function instance, then merge to get the final signature
+        // find all caller's function instance, then merge to get the final
+        // signature
         if (FuncCallers.count(CGN) == 0) {
           continue;
         }
@@ -1425,8 +1431,10 @@ void TypeRecovery::topDownPhase() {
       }
 
       // auto *D = multiGraphDeterminizeTo(CurrentTypes, FuncNodes, "act_");
-      auto *D = multiGraphDeterminizeTo(SigTypes, FuncNodes, "act_");
-      SigTy.FuncNodeMap.insert({Current, D});
+      if (FuncNodes.size() > 0) {
+        auto *D = multiGraphDeterminizeTo(SigTypes, FuncNodes, "act_");
+        SigTy.FuncNodeMap.insert({Current, D});
+      }
 
       // We do not need to do it again for Contravariant because it is
       // symmetric?
@@ -1580,28 +1588,50 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
 
   std::vector<SCCData> &AllSCCs = AG.AllSCCs;
   std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
-  std::set<CallGraphNode *> Visited;
 
-  // Split by SCC post order
+  // TODO assign a level to each SCC node by walking the call tree.
+  // 1. Split by SCC post order
   for (; (NoSCC ? !SNI.isAtEnd() : !CGI.isAtEnd()); (NoSCC ? ++SNI : ++CGI)) {
     const std::vector<CallGraphNode *> &NodeVec = (NoSCC ? *SNI : *CGI);
-    AllSCCs.push_back(SCCData{.Nodes = NodeVec});
-    size_t SCCIndex = AllSCCs.size() - 1;
-    SCCData &Data = AllSCCs.back();
+    bool HasPolymorphic = false;
+    bool AllDeclaration = true;
+    for (auto *CGN : NodeVec) {
+      if (auto *Fn = CGN->getFunction()) {
+        if (!Fn->isDeclaration()) {
+          AllDeclaration = false;
+        }
+        if (isPolymorphic(Fn)) {
+          HasPolymorphic = true;
+          break;
+        }
+      }
+    }
+    if (!AllSCCs.empty() && !HasPolymorphic && !AllDeclaration) {
+      auto &PrevNodes = AllSCCs.back().Nodes;
+      PrevNodes.insert(PrevNodes.end(), NodeVec.begin(), NodeVec.end());
+    } else {
+      AllSCCs.push_back(SCCData{.Nodes = NodeVec});
+    }
+  }
 
-    // Calc name and SCCSet
+  Func2SCCIndex.clear();
+  // 2. Calc name and SCCSet
+  for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
+    SCCData &Data = AllSCCs[SCCIndex];
     std::set<llvm::Function *> &SCCSet = Data.SCCSet;
+    SCCSet.clear();
+
     std::string Name;
-    for (auto CGN : NodeVec) {
-      Visited.insert(CGN);
-      if (CGN->getFunction() == nullptr) {
+    for (auto *CGN : Data.Nodes) {
+      auto *Fn = CGN->getFunction();
+      if (Fn == nullptr) {
         continue;
       }
       if (!Name.empty()) {
         Name += ",";
       }
-      Name += CGN->getFunction()->getName().str();
-      SCCSet.insert(CGN->getFunction());
+      Name += Fn->getName().str();
+      SCCSet.insert(Fn);
       Func2SCCIndex[CGN] = SCCIndex;
     }
     if (!Name.empty()) {
@@ -1613,7 +1643,7 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
     }
   }
 
-  // 2. calc reverse call edge map
+  // 3. calc reverse call edge map
   // map from function to all its callers
   std::map<CallGraphNode *,
            std::vector<std::pair<llvm::CallBase *, CallGraphNode *>>>
@@ -1695,8 +1725,8 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
     auto Path = join(DebugDir, "CallGraph.txt");
     llvm::raw_fd_ostream CGTxt(Path, EC);
     if (EC) {
-      llvm::errs() << "Error printing to " << Path
-                   << ", " << EC.message() << "\n";
+      llvm::errs() << "Error printing to " << Path << ", " << EC.message()
+                   << "\n";
     }
     CallG->print(CGTxt);
     CGTxt.close();
@@ -1704,8 +1734,8 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
     Path = join(DebugDir, "CallGraph.dot");
     llvm::raw_fd_ostream CGDot(Path, EC);
     if (EC) {
-      llvm::errs() << "Error printing to "
-                   << Path << ", " << EC.message() << "\n";
+      llvm::errs() << "Error printing to " << Path << ", " << EC.message()
+                   << "\n";
     }
     notdec::utils::CallGraphDOTInfo CFGInfo(&M, &*CallG, nullptr);
     llvm::WriteGraph(CGDot, &CFGInfo, false);
