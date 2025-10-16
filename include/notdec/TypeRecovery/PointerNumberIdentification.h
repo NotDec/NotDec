@@ -43,7 +43,7 @@ struct PNINode {
 
 protected:
   unsigned long Id = 0;
-  LowTy Ty;
+  PNTy Ty;
 
 public:
   using iteratorTy = std::list<PNINode>::iterator;
@@ -87,9 +87,9 @@ public:
   static llvm::Type *mergeLowTy(llvm::Type *T, llvm::Type *O);
   void addUser(CGNode *Node);
 
-  LowTy &getLatticeTy() { return Ty; }
-  const LowTy &getLatticeTy() const { return Ty; }
-  void merge(LowTy &Other) { Ty.merge(Other); }
+  PNTy &getLatticeTy() { return Ty; }
+  const PNTy &getLatticeTy() const { return Ty; }
+  void merge(PNTy &Other) { Ty.merge(Other); }
 
   bool tyEqual(const PNINode &Other) const { return Ty == Other.Ty; }
 

@@ -110,7 +110,7 @@ std::string toString(PtrOrNum Ty) {
 
 // #endregion PtrOrNum
 
-bool LowTy::setPtrOrNum(PtrOrNum NewTy) {
+bool PNTy::setPtrOrNum(PtrOrNum NewTy) {
   auto OldTy = Ty;
   assert(NewTy != Null);
   if (Ty == Null) {
@@ -154,7 +154,7 @@ bool LowTy::setPtrOrNum(PtrOrNum NewTy) {
   return true;
 }
 
-bool LowTy::merge(LowTy Other, bool joinOrMeet) {
+bool PNTy::merge(PNTy Other, bool joinOrMeet) {
   bool Updated = setPtrOrNum(Other.Ty);
   if (isNotPN() && !Other.Elem.empty()) {
     std::string NewElem;

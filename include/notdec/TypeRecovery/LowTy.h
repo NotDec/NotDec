@@ -53,14 +53,14 @@ PtrOrNum str2PtrOrNum(std::string Str);
 // #endregion PtrOrNum
 
 // Only when Ty is NotPN, Elem is meaningful.
-struct LowTy {
+struct PNTy {
   unsigned Size;
   PtrOrNum Ty = Null;
   std::string Elem;
   bool hasConflict = false;
 
-  LowTy() = default;
-  LowTy(llvm::Type *Ty, unsigned PointerSize)
+  PNTy() = default;
+  PNTy(llvm::Type *Ty, unsigned PointerSize)
       : Size(::notdec::retypd::getSize(Ty, PointerSize)),
         Ty(fromLLVMTy(Ty, PointerSize)) {
     if (isNotPN()) {
@@ -69,7 +69,7 @@ struct LowTy {
     }
   }
 
-  LowTy(std::string Str, unsigned Size)
+  PNTy(std::string Str, unsigned Size)
       : Size(Size), Ty(str2PtrOrNum(Str)) {
     if (isNotPN()) {
       Elem = Str;
@@ -77,8 +77,8 @@ struct LowTy {
     }
   }
 
-  LowTy(std::string Serialized)
-      : LowTy(Serialized.substr(0, Serialized.find(" ")),
+  PNTy(std::string Serialized)
+      : PNTy(Serialized.substr(0, Serialized.find(" ")),
                   std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
     assert(Serialized.find(" ") != std::string::npos);
     assert(this->str() == Serialized);
@@ -117,7 +117,7 @@ struct LowTy {
   bool setPtrOrNum(PtrOrNum NewTy);
 
   // return if updated
-  bool merge(LowTy Other, bool joinOrMeet = false);
+  bool merge(PNTy Other, bool joinOrMeet = false);
 
   std::string latticeStr() const {
     if (Ty == NotPN) {
@@ -127,7 +127,7 @@ struct LowTy {
     return toString(Ty);
   }
   std::string str() const { return latticeStr() + " " + std::to_string(Size); }
-  bool operator==(const LowTy &rhs) const {
+  bool operator==(const PNTy &rhs) const {
     if (rhs.Size != Size) {
       return false;
     }
@@ -139,7 +139,7 @@ struct LowTy {
     }
     return true;
   }
-  bool operator!=(const LowTy &rhs) const { return !(*this == rhs); }
+  bool operator!=(const PNTy &rhs) const { return !(*this == rhs); }
 };
 
 } // namespace notdec::retypd

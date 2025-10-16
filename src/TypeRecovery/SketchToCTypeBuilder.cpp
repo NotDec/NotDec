@@ -38,14 +38,14 @@ using notdec::ast::HType;
 using notdec::ast::RecordDecl;
 using notdec::ast::UnionDecl;
 
-HType *TypeBuilder::fromLatticeTy(LowTy Low, LatticeTy *LTy, unsigned BitSize) {
+HType *TypeBuilder::fromLatticeTy(PNTy Low, LatticeTy *LTy, unsigned BitSize) {
   if (!LTy) {
     return fromLowTy(Low, BitSize);
   }
   return LTy->buildType(Ctx);
 }
 
-HType *TypeBuilder::fromLowTy(LowTy LTy, unsigned BitSize) {
+HType *TypeBuilder::fromLowTy(PNTy LTy, unsigned BitSize) {
   auto Name = LTy.latticeStr();
   if (BitSize == 1 || startswith(Name, "bool")) {
     assert(BitSize == 1);

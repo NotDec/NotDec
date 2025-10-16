@@ -51,7 +51,7 @@ bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1,
   return (*L1)->meet(**L2);
 }
 
-std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
+std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(PNTy LTy, Variance V,
                                                           std::string Name) {
   if (LTy.isUnknown() || LTy.isNull()) {
     return std::nullopt;
@@ -63,7 +63,7 @@ std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
   return std::nullopt;
 }
 
-std::shared_ptr<LatticeTy> LatticeTy::create(LowTy LTy, Variance V,
+std::shared_ptr<LatticeTy> LatticeTy::create(PNTy LTy, Variance V,
                                              std::string Name) {
   assert(!LTy.isUnknown());
   if (LTy.isNumber()) {
@@ -131,7 +131,7 @@ std::optional<unsigned> decodeUi(std::string s) {
   return std::nullopt;
 }
 
-std::shared_ptr<IntLattice> IntLattice::create(LowTy LTy, Variance V,
+std::shared_ptr<IntLattice> IntLattice::create(PNTy LTy, Variance V,
                                                std::string TyName) {
   assert(LTy.isNumber());
   std::shared_ptr<IntLattice> IL =

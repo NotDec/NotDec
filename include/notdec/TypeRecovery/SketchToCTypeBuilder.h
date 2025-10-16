@@ -101,8 +101,8 @@ struct TypeBuilder {
     return Ctx.getPointerType(false, Parent.PointerSize, Pointee);
   }
 
-  HType *fromLowTy(LowTy LTy, unsigned BitSize);
-  HType *fromLatticeTy(LowTy Low, LatticeTy *LTy, unsigned BitSize);
+  HType *fromLowTy(PNTy LTy, unsigned BitSize);
+  HType *fromLatticeTy(PNTy Low, LatticeTy *LTy, unsigned BitSize);
 };
 
 } // namespace notdec::retypd

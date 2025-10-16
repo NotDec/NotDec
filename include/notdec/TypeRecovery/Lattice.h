@@ -40,7 +40,7 @@ public:
   LatticeTyKind getKind() const { return kind; }
   unsigned getSize() const { return Size; }
 
-  static std::shared_ptr<LatticeTy> create(LowTy LTy, Variance V, std::string TyName);
+  static std::shared_ptr<LatticeTy> create(PNTy LTy, Variance V, std::string TyName);
 };
 
 enum Signedness { SI_UNKNOW, SI_SIGNED, SI_UNSIGNED, SI_CONFLICT };
@@ -53,7 +53,7 @@ public:
       : LatticeTy(LK_Int, Size),
         Sign(V == Covariant ? SI_UNKNOW : SI_CONFLICT) {}
   static bool classof(const LatticeTy *S) { return S->getKind() == LK_Int; }
-  static std::shared_ptr<IntLattice> create(LowTy LTy, Variance V, std::string TyName);
+  static std::shared_ptr<IntLattice> create(PNTy LTy, Variance V, std::string TyName);
   bool join(const IntLattice &Other);
   bool meet(const IntLattice &Other);
   HType *buildType(HTypeContext &ctx) const;
@@ -72,7 +72,7 @@ class FloatLattice : public LatticeTy {
 public:
   FloatLattice(unsigned Size) : LatticeTy(LK_Float, Size) {}
   static bool classof(const LatticeTy *S) { return S->getKind() == LK_Float; }
-  static std::shared_ptr<FloatLattice> create(LowTy LTy, Variance V, std::string TyName) {
+  static std::shared_ptr<FloatLattice> create(PNTy LTy, Variance V, std::string TyName) {
     return std::make_shared<FloatLattice>(LTy.getSize());
   }
   bool join(const FloatLattice &Other) { return false; }
@@ -83,14 +83,14 @@ class PointerLattice : public LatticeTy {
 public:
   PointerLattice(unsigned Size) : LatticeTy(LK_Pointer, Size) {}
   static bool classof(const LatticeTy *S) { return S->getKind() == LK_Pointer; }
-  static std::shared_ptr<PointerLattice> create(LowTy LTy, Variance V, std::string TyName) {
+  static std::shared_ptr<PointerLattice> create(PNTy LTy, Variance V, std::string TyName) {
     return std::make_shared<PointerLattice>(LTy.getSize());
   }
   bool join(const PointerLattice &Other) { return false; }
   bool meet(const PointerLattice &Other) { return false; }
 };
 
-std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(LowTy LTy, Variance V,
+std::optional<std::shared_ptr<LatticeTy>> createLatticeTy(PNTy LTy, Variance V,
                                          std::string Name);
 bool join(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2);
 bool meet(std::optional<std::shared_ptr<LatticeTy>> &L1, const std::optional<std::shared_ptr<LatticeTy>> &L2);
