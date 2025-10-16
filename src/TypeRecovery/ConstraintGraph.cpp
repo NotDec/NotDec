@@ -2766,7 +2766,7 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
   if (Parent.PG) {
     assert(N != nullptr);
     if (N != nullptr) {
-      assert(N->getParent() == Parent.PG.get());
+      assert(&N->getParent() == Parent.PG.get());
       PNIGraph::addPNINodeTarget(*this, *N);
     } else if (Parent.Nodes.count(MakeReverseVariant(key))) {
       PNIGraph::addPNINodeTarget(

@@ -3,20 +3,20 @@
 
 #include <array>
 #include <cassert>
-#include <llvm/IR/DerivedTypes.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Type.h>
+#include <list>
 #include <map>
 #include <set>
 #include <string>
 #include <variant>
 
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Type.h>
 
 #include "LowTy.h"
 #include "notdec-llvm2c/Interface/Range.h"
-#include "Utils/Utils.h"
 
 namespace notdec::retypd {
 
@@ -32,18 +32,29 @@ bool isUnknown(const CGNode *N);
 
 // PNINode stores low level LLVM type. If the LowTy is pointer or
 // pointer-sized int, we use PtrOrNum to further distinguish.
-struct PNINode : public node_with_erase<PNINode, PNIGraph> {
-protected:
+struct PNINode {
+  PNIGraph &Parent;
+
   friend struct PNIGraph;
   PNINode(PNIGraph &SSG, llvm::Type *LowTy);
   // clone constructor for PNIGraph::cloneFrom
   PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode);
   PNINode(PNIGraph &SSG, std::string SerializedTy);
+
+protected:
   unsigned long Id = 0;
   LowTy Ty;
 
 public:
-  llvm::iplist<PNINode>::iterator eraseFromParent();
+  using iteratorTy = std::list<PNINode>::iterator;
+  iteratorTy getIterator() {
+    size_t iterOffset = (size_t)&(*((iteratorTy) nullptr));
+    iteratorTy iter;
+    *(intptr_t *)&iter = (intptr_t)this - iterOffset;
+    return iter;
+  }
+  iteratorTy eraseFromParent();
+  PNIGraph &getParent() { return Parent; }
 
   unsigned getSize() const { return Ty.getSize(); }
   /// Convenient method to set the type of the PNVar.
@@ -113,8 +124,9 @@ struct SubNodeCons {
 
 using NodeCons = std::variant<AddNodeCons, SubNodeCons>;
 
-struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
-  ConsNode(PNIGraph &SSG, NodeCons C) : node_with_erase(SSG), C(C) {}
+struct ConsNode {
+  PNIGraph &Parent;
+  ConsNode(PNIGraph &SSG, NodeCons C) : Parent(SSG), C(C) {}
   NodeCons C;
   llvm::SmallVector<PNINode *, 3> solve() {
     // call solve according to the variant
@@ -155,7 +167,8 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
     }
     assert(false && "PNIConsNode::getInst: unhandled variant");
   }
-  void cloneFrom(const ConsNode &N, std::map<const CGNode *, CGNode *> Old2New) {
+  void cloneFrom(const ConsNode &N,
+                 std::map<const CGNode *, CGNode *> Old2New) {
     if (auto *Add = std::get_if<AddNodeCons>(&N.C)) {
       auto *NewLeft = Old2New[Add->LeftNode];
       auto *NewRight = Old2New[Add->RightNode];
@@ -173,6 +186,15 @@ struct ConsNode : node_with_erase<ConsNode, PNIGraph> {
     }
     assert(false && "PNIConsNode::cloneFrom: unhandled variant");
   }
+
+  using iteratorTy = std::list<ConsNode>::iterator;
+  iteratorTy getIterator() {
+    size_t iterOffset = (size_t)&(*((iteratorTy) nullptr));
+    iteratorTy iter;
+    *(intptr_t *)&iter = (intptr_t)this - iterOffset;
+    return iter;
+  }
+  iteratorTy eraseFromParent();
 };
 
 struct PNIGraph {
@@ -183,37 +205,30 @@ struct PNIGraph {
   long PointerSize = 0;
 
   // list for ConstraintNode
-  using ConstraintsType = llvm::ilist<ConsNode>;
+  using ConstraintsType = std::list<ConsNode>;
   ConstraintsType Constraints;
-  static ConstraintsType PNIGraph::*getSublistAccess(ConsNode *) {
-    return &PNIGraph::Constraints;
-  }
+
   std::map<CGNode *, std::set<ConsNode *>> NodeToCons;
 
   // list for PNINode
-  using PNINodesType = llvm::ilist<PNINode>;
+  using PNINodesType = std::list<PNINode>;
   PNINodesType PNINodes;
-  static PNINodesType PNIGraph::*getSublistAccess(PNINode *) {
-    return &PNIGraph::PNINodes;
-  }
+
   std::map<PNINode *, std::set<CGNode *>> PNIToNode;
   const std::set<CGNode *> &getNodeSet(PNINode *Cons) {
     return PNIToNode[Cons];
   }
   PNINode *createPNINode(std::string SerializedTy) {
-    auto *N = new PNINode(*this, SerializedTy);
-    PNINodes.push_back(N);
-    return N;
+    auto &It = PNINodes.emplace_back(*this, SerializedTy);
+    return &It;
   }
   PNINode *createPNINode(llvm::Type *LowTy) {
-    auto *N = new PNINode(*this, LowTy);
-    PNINodes.push_back(N);
-    return N;
+    auto &It = PNINodes.emplace_back(*this, LowTy);
+    return &It;
   }
   PNINode *clonePNINode(const PNINode &OGN) {
-    auto *N = new PNINode(*this, OGN);
-    PNINodes.push_back(N);
-    return N;
+    auto &It = PNINodes.emplace_back(*this, OGN);
+    return &It;
   }
   static void addPNINodeTarget(CGNode &To, PNINode &N);
   void markRemoved(CGNode &N);

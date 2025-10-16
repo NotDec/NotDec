@@ -17,7 +17,8 @@ namespace notdec::retypd {
 OffsetRange matchOffsetRangeNoNegativeAccess(llvm::Value *I) {
   auto R = matchOffsetRange(I);
   R.access.erase(std::remove_if(R.access.begin(), R.access.end(),
-                             [](ArrayOffset Val) { return Val.Size < 0; }), R.access.end());
+                                [](ArrayOffset Val) { return Val.Size < 0; }),
+                 R.access.end());
   return R;
 }
 
@@ -90,9 +91,9 @@ bool PNIGraph::solve() {
 
 void PNIGraph::addPNINodeTarget(CGNode &To, PNINode &N) {
   assert(To.getPNIVar() == nullptr);
-  assert(N.Parent == To.Parent.PG.get());
+  assert(&N.Parent == To.Parent.PG.get());
   To.setPNIVar(&N);
-  N.Parent->PNIToNode[&N].insert(&To);
+  N.Parent.PNIToNode[&N].insert(&To);
 }
 
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
@@ -362,15 +363,19 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
   return Changed;
 }
 
+ConsNode::iteratorTy ConsNode::eraseFromParent() {
+  return Parent.Constraints.erase(getIterator());
+}
+
 // overload with check
-llvm::iplist<PNINode>::iterator PNINode::eraseFromParent() {
+PNINode::iteratorTy PNINode::eraseFromParent() {
   // Check links before destruction. Should be replaced beforehand.
-  assert(Parent->PNIToNode.count(this) == 0);
+  assert(Parent.PNIToNode.count(this) == 0);
   if (TraceIds.count(getId())) {
     llvm::errs() << "TraceID=" << getId() << " PNINode=" << str()
                  << ": PNINode::eraseFromParent: Erasing node\n";
   }
-  return node_with_erase<PNINode, PNIGraph>::eraseFromParent();
+  return Parent.PNINodes.erase(getIterator());
 }
 
 // Notify CGNode that it becomes a pointer.
@@ -394,11 +399,11 @@ llvm::Type *PNINode::mergeLowTy(llvm::Type *T, llvm::Type *O) {
 }
 
 PNINode *PNINode::unify(PNINode &other) {
-  assert(Parent == other.Parent);
+  assert(&Parent == &other.Parent);
   if (this == &other) {
     return this;
   }
-  auto *Node = Parent->mergePNINodes(this, &other);
+  auto *Node = Parent.mergePNINodes(this, &other);
   return Node;
 }
 
@@ -409,12 +414,11 @@ void PNIGraph::addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
   assert(Result->getPNIVar()->isPNRelated());
   AddNodeCons C = {
       .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
-  auto *Node = new ConsNode(*this, C);
-  NodeToCons[Left].insert(Node);
-  NodeToCons[Right].insert(Node);
-  NodeToCons[Result].insert(Node);
-  Constraints.push_back(Node);
-  Worklist.insert(Node);
+  auto &Node = Constraints.emplace_back(*this, C);
+  NodeToCons[Left].insert(&Node);
+  NodeToCons[Right].insert(&Node);
+  NodeToCons[Result].insert(&Node);
+  Worklist.insert(&Node);
 }
 
 void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
@@ -424,12 +428,11 @@ void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
   assert(Result->getPNIVar()->isPNRelated());
   SubNodeCons C = {
       .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
-  auto *Node = new ConsNode(*this, C);
-  NodeToCons[Left].insert(Node);
-  NodeToCons[Right].insert(Node);
-  NodeToCons[Result].insert(Node);
-  Constraints.push_back(Node);
-  Worklist.insert(Node);
+  auto &Node = Constraints.emplace_back(*this, C);
+  NodeToCons[Left].insert(&Node);
+  NodeToCons[Right].insert(&Node);
+  NodeToCons[Result].insert(&Node);
+  Worklist.insert(&Node);
 }
 
 void PNIGraph::markChanged(PNINode *N, ConsNode *Except) {
@@ -449,7 +452,7 @@ void PNIGraph::markChanged(PNINode *N, ConsNode *Except) {
 
 void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
   assert(Var->getSize() == Target->getSize());
-  assert(Var->Parent == Target->Parent);
+  assert(&Var->Parent == &Target->Parent);
   if (Var == Target) {
     return;
   }
@@ -479,14 +482,14 @@ void PNIGraph::markRemoved(CGNode &Node) {
 }
 
 void PNINode::addUser(CGNode *Node) {
-  assert(&Node->Parent == &Parent->CG);
-  Parent->PNIToNode[this].insert(Node);
+  assert(&Node->Parent == &Parent.CG);
+  Parent.PNIToNode[this].insert(Node);
 }
 
 bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   bool Updated = Ty.setPtrOrNum(NewTy);
   if (Updated) {
-    Parent->onUpdatePNType(this);
+    Parent.onUpdatePNType(this);
   }
   return Updated;
 }
@@ -516,18 +519,17 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
 
 // When LowTy is pointer-sized int, we initialize Ty as Unknown.
 PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
-    : node_with_erase(SSG), Id(ValueNamer::getId()),
-      Ty(LowTy, SSG.PointerSize) {
+    : Parent(SSG), Id(ValueNamer::getId()), Ty(LowTy, SSG.PointerSize) {
   if (TraceIds.count(Id)) {
     std::cerr << "PNINode::PNINode(" << Id << "): " << str() << "\n";
   }
 }
 
 PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
-    : node_with_erase(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty) {}
+    : Parent(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty) {}
 
 PNINode::PNINode(PNIGraph &SSG, std::string SerializedTy)
-    : node_with_erase(SSG), Id(ValueNamer::getId()),
+    : Parent(SSG), Id(ValueNamer::getId()),
       Ty(SerializedTy.substr(0, SerializedTy.find(" ")), ({
            auto Pos = SerializedTy.find(" ");
            unsigned long Size;
@@ -564,17 +566,16 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
   }
   // clone Constraints
   for (auto &C : G.Constraints) {
-    auto *NewNode = new ConsNode(*this, AddNodeCons{});
-    NewNode->cloneFrom(C, Old2New);
-    Constraints.push_back(NewNode);
-    NodeToCons[NewNode->getNodes()[0]].insert(NewNode);
-    NodeToCons[NewNode->getNodes()[1]].insert(NewNode);
-    NodeToCons[NewNode->getNodes()[2]].insert(NewNode);
+    auto &NewNode = Constraints.emplace_back(*this, AddNodeCons{});
+    NewNode.cloneFrom(C, Old2New);
+    NodeToCons[NewNode.getNodes()[0]].insert(&NewNode);
+    NodeToCons[NewNode.getNodes()[1]].insert(&NewNode);
+    NodeToCons[NewNode.getNodes()[2]].insert(&NewNode);
     if (G.Worklist.count(const_cast<ConsNode *>(&C))) {
-      Worklist.insert(NewNode);
+      Worklist.insert(&NewNode);
     }
   }
-  for (auto Ent: toMerge) {
+  for (auto Ent : toMerge) {
     Ent.first->unify(*Ent.second);
   }
 }
