@@ -3477,8 +3477,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
   }
 
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-               << "ERROR: RetypdGenerator::getTypeVar unhandled CastInst: " << I
-               << "\n";
+               << "ERROR: unhandled CastInst: " << I << "\n";
   std::abort();
 }
 

@@ -3,19 +3,14 @@
 
 #include <array>
 #include <cassert>
-#include <cstdint>
-#include <list>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
 #include <map>
-#include <memory>
 #include <set>
 #include <string>
-#include <utility>
 #include <variant>
-#include <vector>
 
 #include <llvm/IR/InstrTypes.h>
 
