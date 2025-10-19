@@ -1,9 +1,7 @@
-add_subdirectory(datalog)
 
 add_library(notdec STATIC
 	# source files that are common to all frontend
 	Passes/PassManager.cpp
-	Passes/PointerTypeRecovery.cpp
 	Passes/StackPointerFinder.cpp
 	Passes/StackAlloca.cpp
 	Passes/StackBreaker.cpp
@@ -33,14 +31,6 @@ add_library(notdec STATIC
 )
 
 # include直接在外部设置了src目录。
-
-target_link_libraries(notdec
-	PUBLIC
-	LLVMCore LLVMIRReader LLVMSupport LLVMPasses
-	clangAST clangTooling
-	notdec-datalog
-	${Boost_LIBRARIES}
-)
 
 if (NOTDEC_ENABLE_WASM)
 	target_link_libraries(notdec
@@ -91,11 +81,3 @@ if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
 	# # enable retdec interface in notdec
 	# target_compile_definitions(notdec PUBLIC ENABLE_RETDEC_LLVMIR2HLL)
 endif()
-
-add_dependencies(notdec souffle_cpp)
-set_property(SOURCE ${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp PROPERTY GENERATED 1)
-
-# TODO
-target_sources(notdec PRIVATE
-	${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp)
-set_source_files_properties(${CMAKE_BINARY_DIR}/datalog/pointer_main.cpp PROPERTIES COMPILE_FLAGS "-frtti -w -D__EMBEDDED_SOUFFLE__")

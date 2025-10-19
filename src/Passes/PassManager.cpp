@@ -39,7 +39,6 @@
 #include "Passes/AllocAnnotator.h"
 #include "Passes/MemOpMatcher.h"
 #include "Passes/PassManager.h"
-#include "Passes/PointerTypeRecovery.h"
 #include "Passes/ReorderBasicblock.h"
 #include "Passes/StackAlloca.h"
 #include "Passes/retdec-stack/retdec-abi.h"
