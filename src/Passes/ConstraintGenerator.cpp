@@ -1701,12 +1701,17 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
   // 0.4 prepare debug dir and SCCsCatalog
   auto DebugDir = getTRDebugDir();
   if (getTRDebugDir()) {
-    llvm::sys::fs::create_directories(DebugDir);
-    std::error_code EC;
+    std::error_code EC = llvm::sys::fs::create_directories(DebugDir);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open create directory " << DebugDir << ": ";
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
     SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
     if (EC) {
       std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Cannot open output file SCCs.txt." << std::endl;
+                << "Cannot open output file SCCs.txt: ";
       std::cerr << EC.message() << std::endl;
       std::abort();
     }
