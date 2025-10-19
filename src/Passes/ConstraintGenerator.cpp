@@ -89,7 +89,13 @@ std::optional<std::string> getSCCDebugDir(std::size_t SCCIndex) {
   const char *DebugDir = getTRDebugDir();
   if (DebugDir) {
     std::string DirPath = join(DebugDir, "SCC" + std::to_string(SCCIndex));
-    llvm::sys::fs::create_directories(DirPath);
+    auto EC = llvm::sys::fs::create_directories(DirPath);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open create directory " << DirPath << ": ";
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
     return DirPath;
   }
   return std::nullopt;
