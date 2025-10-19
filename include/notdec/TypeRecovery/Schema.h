@@ -2,6 +2,7 @@
 #define _NOTDEC_RETYPD_SCHEMA_H_
 
 #include "Utils/Utils.h"
+#include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/Utils.h"
 #include <cassert>
@@ -23,6 +24,8 @@ const Variance Contravariant = true;
 inline const char *toString(Variance v) { return v ? "⊖" : "⊕"; }
 inline Variance invert(Variance v) { return !v; }
 inline Variance combine(Variance a, Variance b) { return a != b; }
+
+bool getPreferredVariance(ExtValuePtr &Val);
 
 // Field labels
 

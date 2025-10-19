@@ -86,13 +86,11 @@ std::string toString(const EdgeLabel &label) {
   } else if (auto FL = label.getAs<ForgetLabel>()) {
     return "forget " + toString(FL->label);
   } else if (auto FB = label.getAs<ForgetBase>()) {
-    return "forget " + toString(FB->Base) +
-           toString(FB->V);
+    return "forget " + toString(FB->Base) + toString(FB->V);
   } else if (auto RL = label.getAs<RecallLabel>()) {
     return "recall " + toString(RL->label);
   } else if (auto RB = label.getAs<RecallBase>()) {
-    return "recall " + toString(RB->Base) +
-           toString(RB->V);
+    return "recall " + toString(RB->Base) + toString(RB->V);
   }
   assert(false && "Unknown FieldLabel!");
 }
@@ -115,9 +113,7 @@ std::string toString(const FieldLabel &f) {
   if (auto *In = f.getAs<InLabel>()) {
     return "in_" + In->name;
   } else if (auto *Out = f.getAs<OutLabel>()) {
-    return Out->name.empty()
-               ? "out"
-               : "out_" + Out->name;
+    return Out->name.empty() ? "out" : "out_" + Out->name;
   } else if (auto *O = f.getAs<OffsetLabel>()) {
     return toString(O->range);
   } else if (auto *L = f.getAs<LoadLabel>()) {
@@ -183,6 +179,29 @@ std::string toString(const Constraint &c) {
     return toStringImpl(std::get<SubConstraint>(c));
   } else {
     assert(false && "unknown Constraint");
+  }
+}
+
+bool getPreferredVariance(ExtValuePtr &Val) {
+  using namespace llvm;
+  if (auto V = std::get_if<llvm::Value *>(&Val)) {
+    if (auto Arg = dyn_cast<Argument>(*V)) {
+      return Contravariant;
+    } else {
+      return Covariant;
+    }
+  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+    return Covariant;
+  } else if (auto IC = std::get_if<UConstant>(&Val)) {
+    return Covariant;
+  } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
+    return Covariant;
+  } else if (auto SO = std::get_if<StackObject>(&Val)) {
+    return Covariant;
+  } else if (auto HO = std::get_if<HeapObject>(&Val)) {
+    return Covariant;
+  } else {
+    assert(false && "unhandled ExtValuePtr Kind");
   }
 }
 
