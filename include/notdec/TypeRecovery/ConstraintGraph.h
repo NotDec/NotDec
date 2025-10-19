@@ -23,7 +23,6 @@
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
-#include "TypeRecovery/Sketch.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 

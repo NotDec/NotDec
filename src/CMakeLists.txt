@@ -27,7 +27,6 @@ add_library(notdec STATIC
 	TypeRecovery/RExp.cpp
 	TypeRecovery/PointerNumberIdentification.cpp
 	TypeRecovery/NFAMinimize.cpp
-	TypeRecovery/Sketch.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/SketchToCTypeBuilder.cpp
 	Utils/Utils.cpp
