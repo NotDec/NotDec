@@ -3,6 +3,7 @@
 #include <variant>
 
 #include "TypeRecovery/TRContext.h"
+#include "notdec-llvm2c/Interface/Utils.h"
 
 #include "TypeRecovery/Schema.h"
 
@@ -91,6 +92,10 @@ std::string toString(const EdgeLabel &label) {
     return "recall " + toString(RL->label);
   } else if (auto RB = label.getAs<RecallBase>()) {
     return "recall " + toString(RB->Base) + toString(RB->V);
+  } else if (auto RN = label.getAs<RecallNode>()) {
+    return "recall node " + int_to_hex(RN->Base);
+  } else if (auto FN = label.getAs<ForgetNode>()) {
+    return "recall " + int_to_hex(FN->Base);
   }
   assert(false && "Unknown FieldLabel!");
 }

@@ -580,10 +580,35 @@ struct RecallBase {
   }
   bool operator!=(const RecallBase &rhs) const { return !(*this == rhs); }
 };
+
+struct RecallNode {
+  CGNode *Base;
+  bool operator<(const RecallNode &rhs) const {
+    return std::tie(Base) < std::tie(rhs.Base);
+  }
+  bool operator==(const RecallNode &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  bool operator!=(const RecallNode &rhs) const { return !(*this == rhs); }
+};
+
+struct ForgetNode {
+  CGNode *Base;
+  bool operator<(const ForgetNode &rhs) const {
+    return std::tie(Base) < std::tie(rhs.Base);
+  }
+  bool operator==(const ForgetNode &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  bool operator!=(const ForgetNode &rhs) const { return !(*this == rhs); }
+};
+
 // using EdgeLabel = std::variant<One, ForgetLabel, ForgetBase, RecallLabel,
 // RecallBase>;
 struct EdgeLabel {
-  std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase> L;
+  std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase,
+               RecallNode, ForgetNode>
+      L;
 
   bool operator<(const EdgeLabel &rhs) const {
     return std::tie(L) < std::tie(rhs.L);
@@ -597,6 +622,8 @@ struct EdgeLabel {
   bool isRecallBase() const { return std::holds_alternative<RecallBase>(L); }
   bool isForgetLabel() const { return std::holds_alternative<ForgetLabel>(L); }
   bool isRecallLabel() const { return std::holds_alternative<RecallLabel>(L); }
+  bool isForgetNode() const { return std::holds_alternative<ForgetNode>(L); }
+  bool isRecallNode() const { return std::holds_alternative<RecallNode>(L); }
 
   template <typename T> T *getAs() { return std::get_if<T>(&L); }
   template <typename T> const T *getAs() const { return std::get_if<T>(&L); }
@@ -606,6 +633,11 @@ struct EdgeLabel {
 inline bool isBase(EdgeLabel label) {
   return label.isForgetBase() || label.isRecallBase();
 }
+
+inline bool isNodeLabel(EdgeLabel label) {
+  return label.isForgetNode() || label.isRecallNode();
+}
+
 inline TypeVariable getBase(EdgeLabel label) {
   if (auto *fb = label.getAs<ForgetBase>()) {
     return fb->Base;
@@ -613,6 +645,16 @@ inline TypeVariable getBase(EdgeLabel label) {
     return rb->Base;
   } else {
     assert(false && "getBase: Not a ForgetBase or RecallBase");
+  }
+}
+
+inline CGNode *getNode(EdgeLabel L) {
+  if (auto *fb = L.getAs<ForgetNode>()) {
+    return fb->Base;
+  } else if (auto *rb = L.getAs<RecallNode>()) {
+    return rb->Base;
+  } else {
+    assert(false && "getBase: Not a isForgetNode or isRecallNode");
   }
 }
 
@@ -673,11 +715,11 @@ inline bool isLabel(const EdgeLabel &label) {
 }
 
 inline bool isForget(const EdgeLabel &label) {
-  return label.isForgetLabel() || label.isForgetBase();
+  return label.isForgetLabel() || label.isForgetBase() || label.isForgetNode();
 }
 
 inline bool isRecall(const EdgeLabel &label) {
-  return label.isRecallLabel() || label.isRecallBase();
+  return label.isRecallLabel() || label.isRecallBase() || label.isRecallNode();
 }
 
 inline bool isRecallOffset(const EdgeLabel &label) {
@@ -720,6 +762,8 @@ inline bool hasSameBaseOrLabel(EdgeLabel a, EdgeLabel b) {
     return getBase(a) == getBase(b);
   } else if (isLabel(a) && isLabel(b)) {
     return getLabel(a) == getLabel(b);
+  } else if (isNodeLabel(a) && isNodeLabel(b)) {
+    return getNode(a) == getNode(b);
   } else {
     return false;
   }
