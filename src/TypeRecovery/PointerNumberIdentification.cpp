@@ -107,11 +107,11 @@ void PNIGraph::eraseConstraint(ConsNode *Cons) {
     if (Left->getPNIVar()->getPtrOrNum() == retypd::Number &&
         Right->getPNIVar()->getPtrOrNum() == retypd::Pointer) {
       Off = matchOffsetRangeNoNegativeAccess(LeftVal);
-      Result->setAsPtrAdd(Right, Off);
+      Result->setAsPtrAdd(*Right, Off);
     } else if (Left->getPNIVar()->getPtrOrNum() == retypd::Pointer &&
                Right->getPNIVar()->getPtrOrNum() == retypd::Number) {
       Off = matchOffsetRangeNoNegativeAccess(RightVal);
-      Result->setAsPtrAdd(Left, Off);
+      Result->setAsPtrAdd(*Left, Off);
     }
   }
   for (auto *N : Cons->getNodes()) {

@@ -25,7 +25,7 @@
         "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
-        "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "9125",
+        // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "9125",
         // "NOTDEC_SAT_TIMEOUT": "5000",
         // "NOTDEC_TYPE_RECOVERY_NO_SCC": "1",
       }
@@ -99,43 +99,22 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "decompile BottomUp1.ll",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "test/backend/BottomUp1.ll",
-        "-o",
-        "test/backend/BottomUp1.c",
-        "--print-before=type-recovery"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "CMake: build",
-      "env": {
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
-      }
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
       "name": "decompile emcc-print",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
         "${workspaceFolder}/test/wasm/emcc-print.wat",
         "-o",
         "${workspaceFolder}/test/wasm/emcc-print.wat.c",
+        "--tr-level=3",
         // "--log-level=debug",
-        "-debug-only=structural-analysis",
-        "--split-mem",
       ],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "CMake: build",
+      "preLaunchTask": "Clean and Build",
       "env": {
+        "NOTDEC_DEBUG_DIR": "debug_dir",
         "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
-        "DEBUG_TRANS_INIT_GRAPH": "1",
-        "DEBUG_TRANS_SAT_GRAPH": "1",
-        "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1",
-        "DEBUG_TRANS_CV_SPLIT_GRAPH": "1",
-        "DEBUG_TRANS_MIN_GRAPH": "1",
-        "DEBUG_TRANS_LAYER_SPLIT_GRAPH": "1",
+        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
+        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
       }
     },
     {

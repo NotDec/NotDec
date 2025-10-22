@@ -114,7 +114,7 @@ TEST(Retypd, SaturationOffsetTest) {
   std::set<std::string> InterestingVars = {"A", "B"};
   CG.solve();
   auto Cons = CG.simplifiedExpr(InterestingVars);
-  CG.printGraph("SaturationOffsetTest.dot");
+  // CG.printGraph("SaturationOffsetTest.dot");
   std::cerr << "Simplified Constraints:" << std::endl;
   for (auto &C : Cons) {
     std::cerr << notdec::retypd::toString(C) << "\n";

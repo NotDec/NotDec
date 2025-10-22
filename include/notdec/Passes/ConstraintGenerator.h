@@ -22,6 +22,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -55,6 +56,7 @@ namespace notdec {
 using retypd::CGEdge;
 using retypd::CGNode;
 using retypd::DerivedTypeVariable;
+using retypd::FieldLabel;
 using retypd::TRContext;
 using retypd::TypeVariable;
 
@@ -149,7 +151,7 @@ struct TypeRecovery {
     return (*AllocaRanges)[Func];
   }
 
-  std::function<bool (llvm::Function*)> isPolymorphic = [](llvm::Function* F) {
+  std::function<bool(llvm::Function *)> isPolymorphic = [](llvm::Function *F) {
     return false;
   };
 
@@ -184,7 +186,6 @@ struct TypeRecovery {
   void topDownPhase();
   void handleGlobals();
   void genASTTypes(llvm::Module &M);
-  void gen_json(std::string OutputFilename);
 
   // NOTDEC_SUMMARY_OVERRIDE
   const char *SummaryFile;
@@ -233,10 +234,12 @@ struct ConstraintsGenerator {
   // LLVM值到那边节点的映射关系由转TypeVar的函数决定。这里其实只需要保证不重复，其次是保留名字的意义？
   // 因为转换过程有临时变量参与，所以这里到Key的映射要缓存。这里使用的就是Val2Node做缓存
   // std::map<ExtValuePtr, retypd::NodeKey> Val2Node;
-  DSUMap<ExtValuePtr, retypd::NodeKey> V2N;
-  DSUMap<ExtValuePtr, retypd::NodeKey> V2NContra;
+  // TODO
+  // 使用getPreferredVariance合并两个map。key是ExtValuePtr带上variance的pair。
+  DSUMap<ExtValuePtr, CGNode *> V2N;
+  DSUMap<ExtValuePtr, CGNode *> V2NContra;
   void removeNode(retypd::CGNode &N);
-  void removeNode(const retypd::NodeKey &K);
+  // void removeNode(const retypd::NodeKey &K);
 
   retypd::ConstraintGraph CG;
   retypd::PNIGraph *PG;
@@ -248,22 +251,32 @@ struct ConstraintsGenerator {
   std::map<llvm::CallBase *, std::pair<retypd::CGNode *, retypd::CGNode *>>
       UnhandledCalls;
 
-  retypd::CGNode &getNode(const retypd::NodeKey &Key) {
-    auto *N = getNodeOrNull(Key);
-    assert(N != nullptr && "getNode: Node not found");
-    return *N;
+  std::map<std::pair<std::string, llvm::Type *>, CGNode *> PrimMap;
+
+  CGNode &getOrCreatePrim(std::string Name, llvm::Type *LowType) {
+    auto Key = std::make_pair(Name, LowType);
+    auto It = PrimMap.find(Key);
+    if (It != PrimMap.end()) {
+      return *It->second;
+    } else {
+      auto [N, NC] = CG.createNodePair(
+          retypd::NodeKey(TypeVariable::CreatePrimitive(*CG.Ctx, Name),
+                          retypd::Covariant),
+          LowType);
+      PrimMap.insert(std::make_pair(Key, &N));
+      return N;
+    }
   }
 
-  retypd::CGNode *getNodeOrNull(const retypd::NodeKey &Key) {
-    auto It2 = CG.Nodes.find(Key);
-    if (It2 != CG.Nodes.end()) {
-      return &It2->second;
-    }
-    return nullptr;
-  }
-  void addMergeNode(const retypd::NodeKey &From, const retypd::NodeKey &To) {
-    V2N.merge(From, To);
-    V2NContra.merge(From, To);
+  // retypd::CGNode &getNode(const retypd::NodeKey &Key) {
+  //   auto *N = getNodeOrNull(Key);
+  //   assert(N != nullptr && "getNode: Node not found");
+  //   return *N;
+  // }
+
+  void addMergeNode(CGNode &From, CGNode &To) {
+    V2N.merge(&From, &To);
+    V2NContra.merge(&From, &To);
   }
 
   std::shared_ptr<ConstraintsGenerator>
@@ -299,7 +312,7 @@ struct ConstraintsGenerator {
   void linkContraToCovariant();
 
   bool checkSymmetry();
-  void makeSymmetry();
+  // void makeSymmetry();
 
   void dumpV2N();
 
@@ -315,12 +328,12 @@ struct ConstraintsGenerator {
   // clone CG and maintain value map.
   // ConstraintsGenerator
   // clone(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
-  void
-  cloneTo(ConstraintsGenerator &Target,
-          std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
-          bool isMergeClone = false,
-          std::function<retypd::ConstraintGraph::SubtypeRelation(retypd::CGNode &, retypd::CGNode &)>
-              ConflictKeyRelation = nullptr);
+  void cloneTo(ConstraintsGenerator &Target,
+               std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
+               bool isMergeClone = false,
+               std::function<retypd::ConstraintGraph::SubtypeRelation(
+                   retypd::CGNode &, retypd::CGNode &)>
+                   ConflictKeyRelation = nullptr);
   std::shared_ptr<ConstraintsGenerator>
   cloneShared(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
               bool isMergeClone = false);
@@ -335,7 +348,14 @@ public:
     addSubtype(dtv, Node);
     return Node;
   }
+
+  const CGEdge *addConstraint(CGNode &From, CGNode &To,
+                              retypd::FieldLabel Label) {
+    return CG.addRecallEdge(From, To, Label);
+  }
+
   void addSubtype(retypd::CGNode &SubNode, retypd::CGNode &SupNode) {
+    assert(SubNode.getVariance() == SupNode.getVariance());
     auto &Sub = SubNode.key.Base;
     auto &Sup = SupNode.key.Base;
     if (Sub.isPrimitive() && Sup.isPrimitive()) {
@@ -348,13 +368,8 @@ public:
       }
       return;
     }
-    CG.addConstraint(SubNode, SupNode);
+    CG.addEdgeDualVariance(SubNode, SupNode, {retypd::One{}});
   }
-  std::map<const retypd::CGEdge *, const retypd::CGEdge *>
-  mergeNodeTo(retypd::CGNode &From, retypd::CGNode &To,
-              bool NoSelfLoop = false);
-
-  void setPointer(retypd::CGNode &Node) { CG.setPointer(Node); }
 
   retypd::CGNode &getNode(ExtValuePtr Val, llvm::User *User, long OpInd,
                           retypd::Variance V);
@@ -363,6 +378,7 @@ public:
     return const_cast<ConstraintsGenerator *>(this)->getNode(Val, User, OpInd,
                                                              V);
   }
+
   retypd::CGNode *getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd,
                                 retypd::Variance V);
   const retypd::CGNode *getNodeOrNull(ExtValuePtr Val, llvm::User *User,
@@ -370,6 +386,7 @@ public:
     return const_cast<ConstraintsGenerator *>(this)->getNodeOrNull(Val, User,
                                                                    OpInd, V);
   }
+
   // Create Node of both variance
   std::pair<retypd::CGNode &, retypd::CGNode &>
   createNode(ExtValuePtr Val, llvm::User *User, long OpInd);
@@ -378,6 +395,7 @@ public:
     auto [N, NC] = createNode(Val, User, OpInd);
     return N;
   }
+
   retypd::CGNode &getOrInsertNode(ExtValuePtr Val, llvm::User *User, long OpInd,
                                   retypd::Variance V = retypd::Covariant);
 
@@ -393,21 +411,19 @@ public:
                         llvm::BinaryOperator *Result);
   void addCmpConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
                         llvm::ICmpInst *I);
-  // void onEraseConstraint(const retypd::ConsNode *Cons);
-  // void addSubTypeCons(retypd::SSGNode *LHS, retypd::SSGNode *RHS,
-  //                     OffsetRange Offset);
-  // void addSubTypeCons(llvm::Value *LHS, llvm::BinaryOperator *RHS,
-  //                     OffsetRange Offset);
 
   TypeVariable addOffset(TypeVariable &dtv, OffsetRange Offset);
-  TypeVariable deref(Value *Val, llvm::User *User, long OpInd, unsigned BitSize,
-                     bool isLoad);
   unsigned getPointerElemSize(llvm::Type *ty);
   static inline bool is_cast(Value *Val) {
     return llvm::isa<llvm::AddrSpaceCastInst, llvm::BitCastInst,
                      llvm::PtrToIntInst, llvm::IntToPtrInst>(Val);
   }
-  static std::string offset(llvm::APInt Offset, int Count = 0);
+
+  std::map<const retypd::CGEdge *, const retypd::CGEdge *>
+  mergeNodeTo(retypd::CGNode &From, retypd::CGNode &To,
+              bool NoSelfLoop = false);
+
+  void setPointer(retypd::CGNode &Node) { CG.setPointer(Node); }
 
 public:
   struct PcodeOpType {
@@ -499,15 +515,19 @@ std::string inline getFuncTvName(llvm::Function *Func) {
   return ValueNamer::getName(*Func, ValueNamer::FuncPrefix);
 }
 
-inline TypeVariable getCallArgTV(CGNode &Target, int32_t Index) {
-  TypeVariable TV = Target.key.Base;
+inline TypeVariable getCallArgTV(TypeVariable &TV, int32_t Index) {
   return TV.pushLabel({retypd::InLabel{std::to_string(Index)}});
 }
 
-inline TypeVariable getCallRetTV(CGNode &Target) {
-  TypeVariable TV = Target.key.Base;
+inline TypeVariable getCallRetTV(TypeVariable &TV) {
   return TV.pushLabel({retypd::OutLabel{}});
 }
+
+inline FieldLabel getCallArgLabel(int32_t Index) {
+  return {retypd::InLabel{std::to_string(Index)}};
+}
+
+inline FieldLabel getCallRetLabel() { return {retypd::OutLabel{}}; }
 
 // #region FunctionTypeRecovery
 

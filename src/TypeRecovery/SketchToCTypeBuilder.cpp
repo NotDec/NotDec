@@ -100,8 +100,7 @@ HType *TypeBuilder::fromLowTy(PNTy LTy, unsigned BitSize) {
 void TypeBuilder::buildNodeSizeHintMap(ConstraintsGenerator &G2) {
   NodeSizeHint = std::make_unique<std::map<const CGNode *, uint64_t>>();
   for (auto &Ent : G2.V2N) {
-    auto &Key = Ent.second;
-    auto *Node = G2.getNodeOrNull(Key);
+    auto *Node = Ent.second;
     if (Node == nullptr) {
       continue;
     }
@@ -114,8 +113,7 @@ void TypeBuilder::buildNodeSizeHintMap(ConstraintsGenerator &G2) {
     if (G2.V2N.count(Ent.first)) {
       continue;
     }
-    auto &Key = Ent.second;
-    auto *Node = G2.getNodeOrNull(Key);
+    auto *Node = Ent.second;
     if (Node == nullptr) {
       continue;
     }
@@ -433,14 +431,16 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           auto IR = Ent.R.intersect(*ValidRange);
           // intersecting member?
           if (IR.Size < Ent.R.Size) {
-            LLVM_DEBUG(llvm::dbgs() << "Warning: Field intersect with PointeeSize!! "
-                              << Decl->getName() << Ent.R.str());
+            LLVM_DEBUG(llvm::dbgs()
+                       << "Warning: Field intersect with PointeeSize!! "
+                       << Decl->getName() << Ent.R.str());
             std::pair<HType *, SimpleRange> Ent1 = cutType(
                 Ctx, Ty, Ent.R.Size,
                 SimpleRange{.Start = IR.Start - Ent.R.Start, .Size = IR.Size});
             if (Ent1.second.Size == 0) {
-              LLVM_DEBUG(llvm::dbgs() << "Warning: Crop field failed, Skipping: "
-                                << Decl->getName() << Ent.R.str());
+              LLVM_DEBUG(llvm::dbgs()
+                         << "Warning: Crop field failed, Skipping: "
+                         << Decl->getName() << Ent.R.str());
               continue;
             }
             Ent.R = Ent1.second;
@@ -491,8 +491,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           if (Current < ValidRange->end()) {
             auto PaddingSize = ValidRange->end() - Current;
             auto PaddingOnly = FieldDecl{
-                .R = SimpleRange{.Start = Current,
-                                 .Size = PaddingSize},
+                .R = SimpleRange{.Start = Current, .Size = PaddingSize},
                 .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
                 .Name = ValueNamer::getName("padding_"),
                 .Comment = "at offset: " + std::to_string(Current),
