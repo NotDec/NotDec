@@ -96,6 +96,10 @@ std::string toString(const EdgeLabel &label) {
     return "recall node " + int_to_hex(RN->Base);
   } else if (auto FN = label.getAs<ForgetNode>()) {
     return "recall " + int_to_hex(FN->Base);
+  } else if (auto RN = label.getAs<RecallString>()) {
+    return "recall str " + RN->Base;
+  } else if (auto FN = label.getAs<ForgetString>()) {
+    return "recall str" + FN->Base;
   }
   assert(false && "Unknown FieldLabel!");
 }

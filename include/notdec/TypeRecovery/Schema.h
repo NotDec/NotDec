@@ -603,11 +603,33 @@ struct ForgetNode {
   bool operator!=(const ForgetNode &rhs) const { return !(*this == rhs); }
 };
 
+struct RecallString {
+  std::string Base;
+  bool operator<(const RecallString &rhs) const {
+    return std::tie(Base) < std::tie(rhs.Base);
+  }
+  bool operator==(const RecallString &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  bool operator!=(const RecallString &rhs) const { return !(*this == rhs); }
+};
+
+struct ForgetString {
+  std::string Base;
+  bool operator<(const ForgetString &rhs) const {
+    return std::tie(Base) < std::tie(rhs.Base);
+  }
+  bool operator==(const ForgetString &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  bool operator!=(const ForgetString &rhs) const { return !(*this == rhs); }
+};
+
 // using EdgeLabel = std::variant<One, ForgetLabel, ForgetBase, RecallLabel,
 // RecallBase>;
 struct EdgeLabel {
   std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase,
-               RecallNode, ForgetNode>
+               RecallNode, ForgetNode, RecallString, ForgetString>
       L;
 
   bool operator<(const EdgeLabel &rhs) const {
@@ -624,6 +646,8 @@ struct EdgeLabel {
   bool isRecallLabel() const { return std::holds_alternative<RecallLabel>(L); }
   bool isForgetNode() const { return std::holds_alternative<ForgetNode>(L); }
   bool isRecallNode() const { return std::holds_alternative<RecallNode>(L); }
+  bool isForgetString() const { return std::holds_alternative<ForgetString>(L); }
+  bool isRecallString() const { return std::holds_alternative<RecallString>(L); }
 
   template <typename T> T *getAs() { return std::get_if<T>(&L); }
   template <typename T> const T *getAs() const { return std::get_if<T>(&L); }
@@ -654,7 +678,17 @@ inline CGNode *getNode(EdgeLabel L) {
   } else if (auto *rb = L.getAs<RecallNode>()) {
     return rb->Base;
   } else {
-    assert(false && "getBase: Not a isForgetNode or isRecallNode");
+    assert(false && "getNode: Not a isForgetNode or isRecallNode");
+  }
+}
+
+inline std::string getString(EdgeLabel L) {
+  if (auto *fb = L.getAs<ForgetString>()) {
+    return fb->Base;
+  } else if (auto *rb = L.getAs<RecallString>()) {
+    return rb->Base;
+  } else {
+    assert(false && "getString: Not a ForgetString or RecallString");
   }
 }
 
@@ -715,11 +749,11 @@ inline bool isLabel(const EdgeLabel &label) {
 }
 
 inline bool isForget(const EdgeLabel &label) {
-  return label.isForgetLabel() || label.isForgetBase() || label.isForgetNode();
+  return label.isForgetLabel() || label.isForgetBase() || label.isForgetNode() || label.isForgetString();
 }
 
 inline bool isRecall(const EdgeLabel &label) {
-  return label.isRecallLabel() || label.isRecallBase() || label.isRecallNode();
+  return label.isRecallLabel() || label.isRecallBase() || label.isRecallNode() || label.isRecallString();
 }
 
 inline bool isRecallOffset(const EdgeLabel &label) {
