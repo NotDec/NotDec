@@ -177,6 +177,36 @@ EdgeLabel2Offset(const EdgeLabel &E) {
   return llvm::None;
 };
 
+void CGNode::removeInEdges() {
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
+  for (auto E : inEdges) {
+    ToRemove.push_back(std::make_tuple(&E->getSourceNode(), &E->getTargetNode(),
+                                       E->getLabel()));
+  }
+  for (auto &Ent : ToRemove) {
+    auto [Source, Target, Label] = Ent;
+    Parent.removeEdge(*Source, *Target, Label);
+  }
+}
+
+void CGNode::removeOutEdges() {
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
+  for (auto &E : outEdges) {
+    ToRemove.push_back(std::make_tuple(const_cast<CGNode *>(&E.getSourceNode()),
+                                       const_cast<CGNode *>(&E.getTargetNode()),
+                                       E.getLabel()));
+  }
+  for (auto &Ent : ToRemove) {
+    auto [Source, Target, Label] = Ent;
+    Parent.removeEdge(*Source, *Target, Label);
+  }
+}
+
+void CGNode::removeAllEdges() {
+  removeOutEdges();
+  removeInEdges();
+}
+
 std::map<const CGEdge *, const CGEdge *>
 ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   std::map<const CGEdge *, const CGEdge *> EdgeMap;
@@ -558,33 +588,33 @@ void ConstraintGraph::linkEndVars(std::set<std::string> &InterestingVars) {
 }
 
 void ConstraintGraph::linkPrimitives() {
-  // Link primitive nodes to "#Start"
-  for (auto &Node : Nodes) {
-    auto *N = &Node;
-    if (N->isStartOrEnd()) {
-      continue;
-    }
-    if (N->key.Base.isPrimitive()) {
-      // LLVM_DEBUG(llvm::dbgs()
-      //            << "Adding an edge from #Start to " << N->key.str() <<
-      //            "\n");
-      auto &From = *getStartNode();
-      auto &To = *N;
-      if (TraceIds.count(From.getId())) {
-        PRINT_TRACE(From.getId())
-            << "Adding edge #Start(ID=" << From.getId() << ") to "
-            << To.key.str() << "(ID=" << To.getId() << ")\n";
-      }
-      if (TraceIds.count(To.getId())) {
-        PRINT_TRACE(To.getId())
-            << "Adding edge #Start(ID=" << From.getId() << ") to "
-            << To.key.str() << "(ID=" << To.getId() << ")\n";
-      }
-      assert(!To.key.Base.hasLabel());
-      addEdge(From, To,
-              {RecallBase{.Base = N->key.Base, .V = N->getVariance()}});
-    }
-  }
+  // // Link primitive nodes to "#Start"
+  // for (auto &Node : Nodes) {
+  //   auto *N = &Node;
+  //   if (N->isStartOrEnd()) {
+  //     continue;
+  //   }
+  //   if (N->key.Base.isPrimitive()) {
+  //     // LLVM_DEBUG(llvm::dbgs()
+  //     //            << "Adding an edge from #Start to " << N->key.str() <<
+  //     //            "\n");
+  //     auto &From = *getStartNode();
+  //     auto &To = *N;
+  //     if (TraceIds.count(From.getId())) {
+  //       PRINT_TRACE(From.getId())
+  //           << "Adding edge #Start(ID=" << From.getId() << ") to "
+  //           << To.key.str() << "(ID=" << To.getId() << ")\n";
+  //     }
+  //     if (TraceIds.count(To.getId())) {
+  //       PRINT_TRACE(To.getId())
+  //           << "Adding edge #Start(ID=" << From.getId() << ") to "
+  //           << To.key.str() << "(ID=" << To.getId() << ")\n";
+  //     }
+  //     assert(!To.key.Base.hasLabel());
+  //     addEdge(From, To,
+  //             {RecallBase{.Base = N->key.Base, .V = N->getVariance()}});
+  //   }
+  // }
   // Link primitive nodes to "#End"
   for (auto &Node : Nodes) {
     auto *N = &Node;
@@ -1430,6 +1460,7 @@ void ConstraintGraph::sketchSplit() {
     removeEdge(const_cast<CGNode &>(Edge->getSourceNode()),
                const_cast<CGNode &>(Edge->getTargetNode()), Edge->getLabel());
   }
+  isSketchSplit = true;
 }
 
 // utility function for debugging
@@ -2437,17 +2468,10 @@ expToConstraints(std::shared_ptr<retypd::TRContext> TRCtx, rexp::PRExp E) {
 }
 
 CGNode *ConstraintGraph::getMemoryNodeOrNull(Variance V) {
-  bool hasMemory = Memory != nullptr;
-  bool hasMemoryC = MemoryC != nullptr;
-  assert(hasMemory == hasMemoryC);
-  if (hasMemory) {
-    if (V == Covariant) {
-      return Memory;
-    } else {
-      return MemoryC;
-    }
+  if (V == Covariant) {
+    return Memory;
   } else {
-    return nullptr;
+    return MemoryC;
   }
 }
 
@@ -2619,6 +2643,15 @@ bool isPointerRelated(const FieldLabel &FL) {
     return true;
   } else if (auto *SL = FL.getAs<StoreLabel>()) {
     return true;
+  }
+  return false;
+}
+
+bool CGNode::hasIncomingLoadOrStore() const {
+  for (auto *Edge : inEdges) {
+    if (isLoadOrStore(Edge->getLabel())) {
+      return true;
+    }
   }
   return false;
 }

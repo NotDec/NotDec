@@ -251,7 +251,7 @@ struct ConstraintsGenerator {
   std::map<llvm::CallBase *, std::pair<retypd::CGNode *, retypd::CGNode *>>
       UnhandledCalls;
 
-  std::map<std::pair<std::string, llvm::Type *>, CGNode *> PrimMap;
+  DSUMap<std::pair<std::string, llvm::Type *>, CGNode *> PrimMap;
 
   CGNode &getOrCreatePrim(std::string Name, llvm::Type *LowType) {
     auto Key = std::make_pair(Name, LowType);
@@ -263,9 +263,14 @@ struct ConstraintsGenerator {
           retypd::NodeKey(TypeVariable::CreatePrimitive(*CG.Ctx, Name),
                           retypd::Covariant),
           LowType);
-      PrimMap.insert(std::make_pair(Key, &N));
+      PrimMap.insert(Key, &N);
       return N;
     }
+  }
+
+  bool isPrimitive(const CGNode &N) const {
+    return const_cast<ConstraintsGenerator *>(this)->PrimMap.count(
+        const_cast<CGNode *>(&N));
   }
 
   // retypd::CGNode &getNode(const retypd::NodeKey &Key) {
@@ -307,6 +312,13 @@ struct ConstraintsGenerator {
   // determinization algorithm from all v2n nodes that keeps all reachable
   // nodes.
   void determinize();
+  // minimize to reduce type node count after determinization.
+  std::shared_ptr<ConstraintsGenerator>
+  minimizeShared(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
+  void minimizeTo(ConstraintsGenerator &Target,
+                  std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
+  void linkNodes();
+  void recoverNodes(ConstraintsGenerator& From);
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();
   void linkContraToCovariant();

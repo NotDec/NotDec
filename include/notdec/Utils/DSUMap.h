@@ -45,6 +45,9 @@ public:
     return {It, Success};
   }
 
+  auto find(K Key) -> decltype(M.find(Key)) {return M.find(Key);}
+  auto find(V Val) -> decltype(Rev.find(Val)) {return Rev.find(Val);}
+
   auto begin() { return M.begin(); }
   auto end() { return M.end(); }
 

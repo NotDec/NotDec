@@ -55,6 +55,7 @@
 #include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
+#include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
@@ -78,6 +79,7 @@ using namespace llvm;
 
 namespace notdec {
 
+using retypd::NodeKey;
 using retypd::OffsetLabel;
 
 // NOTDEC_TYPE_RECOVERY_DEBUG_DIR
@@ -361,7 +363,7 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
 void ConstraintsGenerator::mergeArrayUnions() {
   size_t MergeCount = 0;
 
-  auto doMerge = [&](CGNode &UN, CGNode &Arr, CGNode &Other) {
+  auto doMerge = [&](CGNode &UN, CGNode &Arr, CGNode &Other) -> bool {
     MergeCount += 1;
     // 1. remove all(two) outgoing edges for UN
     std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
@@ -561,6 +563,62 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         }
       }
     }
+    // TODO if there is self offset loop. introduce a array node.
+    std::set<const CGEdge *> SelfEdges;
+    std::vector<uint64_t> SelfAccesses;
+    for (auto &E : N.outEdges) {
+      if (&E.getTargetNode() == &N) {
+        if (auto *OL = retypd::getOffsetLabel(E.Label)) {
+          SelfEdges.insert(&E);
+          if (OL->range.offset != 0) {
+            SelfAccesses.push_back(std::abs(OL->range.offset));
+          }
+          for (auto A : OL->range.access) {
+            if (A.Size != 0) {
+              SelfAccesses.push_back(std::abs(A.Size));
+            }
+          }
+        }
+      }
+    }
+    if (!SelfEdges.empty()) {
+      if (!!SelfAccesses.empty()) {
+
+        // create a array node, move all outgoing edge to that node.
+        auto AccessSize =
+            *std::min_element(SelfAccesses.begin(), SelfAccesses.end());
+        TypeInfos[&N] = TypeInfo{
+            .Size = AccessSize,
+            .Info = ArrayInfo{.Edge = OffsetEdge, .ElemSize = AccessSize}};
+        auto &NewNode = CG.createNodeClonePNI(
+            retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, "SArr")},
+            N.getPNIVar());
+        std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToMove;
+        for (auto &E : N.outEdges) {
+          if (!SelfEdges.count(&E)) {
+            ToMove.push_back({&E.getTargetNode(), E.getLabel()});
+          }
+        }
+        for (auto Ent : ToMove) {
+          auto &ToN = *const_cast<CGNode *>(Ent.first);
+          CG.removeEdge(N, ToN, Ent.second);
+          CG.addEdge(NewNode, ToN, Ent.second);
+        }
+        assert(!mustBeStruct);
+        doBuild(NewNode, false);
+        return;
+      } else {
+        // just remove all self edges
+        std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToRemove;
+        for (auto E : SelfEdges) {
+          ToRemove.push_back({&E->getTargetNode(), E->getLabel()});
+        }
+        for (auto Ent : ToRemove) {
+          CG.removeEdge(N, *const_cast<CGNode *>(Ent.first), Ent.second);
+        }
+      }
+    }
+
     // this is a struct or union.
     std::vector<FieldEntry> Fields;
 
@@ -735,9 +793,11 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
              "should be handled by previous array pass");
       doBuild(Target, false);
       auto &TI = TypeInfos.at(&Target);
-      Fields.push_back(FieldEntry{
-          .R = SimpleRange{.Start = OL->range.offset, .Size = *TI.Size},
-          .Edge = &E});
+      if (*TI.Size != 0) {
+        Fields.push_back(FieldEntry{
+            .R = SimpleRange{.Start = OL->range.offset, .Size = *TI.Size},
+            .Edge = &E});
+      }
     }
 
     auto IsOverlap = [](OffsetTy S1, OffsetTy E1, OffsetTy S2, OffsetTy E2) {
@@ -990,44 +1050,49 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   G2.CG.Name += "-dtm";
 
   G2.CG.sketchSplit();
+
   // G2.CG.ensureNoForgetLabel();
 
   G2.eliminateCycle(DebugDir);
-  // G2.CG.ensureNoForgetLabel();
+  // // G2.CG.ensureNoForgetLabel();
+
+  // if (DebugDir) {
+  //   G2.CG.printGraph(
+  //       getUniquePath(join(*DebugDir, "06-BeforeMerge"), ".dot").c_str());
+  // }
+
+  // // merge nodes that only subtype to another node
+  // G2.mergeOnlySubtype();
+  // // G2.CG.ensureNoForgetLabel();
+
+  // if (DebugDir) {
+  //   G2.CG.printGraph(
+  //       getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
+  // }
+
+  // G2.determinize();
+  // // G2.CG.ensureNoForgetLabel();
+  // G2.CG.aggressiveSimplify();
+  // // G2.CG.ensureNoForgetLabel();
+
+  std::map<const CGNode *, CGNode *> Old2New2;
+  auto G3S = G2.minimizeShared(Old2New2);
+  auto &G3 = *G3S;
 
   if (DebugDir) {
-    G2.CG.printGraph(
-        getUniquePath(join(*DebugDir, "06-BeforeMerge"), ".dot").c_str());
-  }
-
-  // merge nodes that only subtype to another node
-  G2.mergeOnlySubtype();
-  // G2.CG.ensureNoForgetLabel();
-
-  if (DebugDir) {
-    G2.CG.printGraph(
-        getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
-  }
-
-  G2.determinize();
-  // G2.CG.ensureNoForgetLabel();
-  G2.CG.aggressiveSimplify();
-  // G2.CG.ensureNoForgetLabel();
-
-  if (DebugDir) {
-    G2.CG.printGraph(
+    G3.CG.printGraph(
         getUniquePath(join(*DebugDir, "08-Final"), ".dot").c_str());
   }
 
   // Graph Pass
-  G2.organizeTypes();
-  G2.mergeArrayUnions();
+  G3.organizeTypes();
+  G3.mergeArrayUnions();
 
-  // G2.mergeArrayWithMember();
-  // G2.elimSingleStruct();
+  // G3.mergeArrayWithMember();
+  // G3.elimSingleStruct();
 
-  assert(G2.PG);
-  return G2S;
+  assert(G3.PG);
+  return G3S;
 }
 
 void ConstraintsGenerator::elimSingleStruct() {
@@ -1535,7 +1600,7 @@ void TypeRecovery::handleGlobals() {
   std::shared_ptr<ConstraintsGenerator> &Global = AG.Global;
   Global = std::make_shared<ConstraintsGenerator>(*this, "Global");
   std::set<CGNode *> MemoryNodes;
-  std::set<CGNode *> MemoryNodesC;
+  // std::set<CGNode *> MemoryNodesC;
   auto &AllSCCs = AG.AllSCCs;
   for (auto &Ent : AllSCCs) {
     if (!Ent.TopDownGenerator)
@@ -1547,12 +1612,12 @@ void TypeRecovery::handleGlobals() {
       }
       MemoryNodes.insert(M);
     }
-    if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Contravariant)) {
-      if (M->outEdges.empty()) {
-        continue;
-      }
-      MemoryNodesC.insert(M);
-    }
+    // if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Contravariant)) {
+    //   if (M->outEdges.empty()) {
+    //     continue;
+    //   }
+    //   MemoryNodesC.insert(M);
+    // }
   }
   CGNode *MemNode = nullptr;
   if (MemoryNodes.empty()) {
@@ -1580,10 +1645,6 @@ void TypeRecovery::handleGlobals() {
   // keep node in val2node map for post process
   // Global->makeSymmetry();
   Global->CG.solve();
-  Global->V2N.insert(ConstantAddr(),
-                     Global->CG.getMemoryNode(retypd::Covariant));
-  Global->V2NContra.insert(ConstantAddr(),
-                           Global->CG.getMemoryNode(retypd::Contravariant));
 }
 
 void TypeRecovery::prepareSCC(CallGraph &CG) {
@@ -2302,7 +2363,6 @@ void ConstraintsGenerator::cloneTo(
     auto It = G.V2NContra.insert(Ent.first, Old2New.at(Ent.second));
     assert(It.second);
   }
-  G.PG = G.CG.PG.get();
   G.SCCs = SCCs;
   for (auto &Ent : CallToInstance) {
     G.CallToInstance.insert(
@@ -2544,6 +2604,235 @@ allOutOffLabels(std::set<CGNode *> StartSet) {
     }
   }
   return Result;
+}
+
+std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::minimizeShared(
+    std::map<const CGNode *, CGNode *> &Old2New) {
+  auto G = std::make_shared<ConstraintsGenerator>(Ctx, CG.Name);
+  minimizeTo(*G, Old2New);
+  return G;
+}
+
+void ConstraintsGenerator::minimizeTo(
+    ConstraintsGenerator &Target, std::map<const CGNode *, CGNode *> &Old2New) {
+
+  assert(CG.isNotSymmetry && CG.isSketchSplit);
+  Target.CG.isNotSymmetry = true;
+  Target.CG.isSketchSplit = true;
+
+  CG.changeStoreToLoad();
+  // link all V2N Nodes.
+  linkNodes();
+  std::map<std::set<CGNode *>, CGNode *> NodeMap;
+  retypd::minimizeTo(&CG, &Target.CG, &NodeMap);
+
+  // maintain V2N.
+  Target.recoverNodes(*this);
+
+  Target.SCCs = SCCs;
+}
+
+void ConstraintsGenerator::recoverNodes(ConstraintsGenerator &From) {
+  // use with linkNodes.
+  std::set<CGNode *> Updated;
+  // // For a old node in label, to the set of new nodes.
+  // std::vector<std::pair<CGNode *, std::set<CGNode *> *>> Node2Nodes;
+  std::map<CGNode *, CGNode *> V2NMap;
+
+  std::map<retypd::EdgeLabel, std::set<CGNode *>> StartEdgeMap;
+  for (auto &OE : CG.Start->outEdges) {
+    StartEdgeMap[OE.getLabel()].insert(
+        const_cast<CGNode *>(&OE.getTargetNode()));
+  }
+
+  auto UpdateKey = [&](NodeKey &NK, CGNode &N) {
+    if (!Updated.count(&N)) {
+      Updated.insert(&N);
+      N.key = NK;
+      return true;
+    }
+    return false;
+  };
+
+  // 1 in edges
+  std::map<retypd::EdgeLabel, std::set<CGNode *>> EndEdgeMap;
+  for (auto *IE : CG.End->inEdges) {
+    EndEdgeMap[IE->getLabel()].insert(
+        const_cast<CGNode *>(&IE->getSourceNode()));
+  }
+
+  // handle primitive ForgetNode and ForgetString
+  for (auto Ent : EndEdgeMap) {
+    if (auto FN = Ent.first.getAs<retypd::ForgetNode>()) {
+      auto OldN = FN->Base;
+      // auto &NewN = CG.createNodeClonePNI(OldN->key, OldN->getPNIVar());
+      for (auto N : Ent.second) {
+        // CG.addEdge(*N, NewN, {retypd::One{}});
+        N->getPNIVar()->merge(OldN->getPNIVar()->getLatticeTy());
+      }
+    } else if (auto FS = Ent.first.getAs<retypd::ForgetString>()) {
+      auto OldPNTy = FS->Base;
+      retypd::PNTy NewPN(OldPNTy);
+      for (auto N : Ent.second) {
+        N->getPNIVar()->merge(NewPN);
+      }
+    } else if (auto FB = Ent.first.getAs<retypd::ForgetBase>()) {
+      // assert(Ent.second.size() == 1);
+      // auto NewN = *Ent.second.begin();
+      // auto NewKey = NodeKey{FB->Base, FB->V};
+      // auto isUpdated = UpdateKey(NewKey, *NewN);
+      // assert(isUpdated);
+    } else {
+      assert(false);
+    }
+  }
+
+  // 2 handle memory nodes.
+  for (auto &Ent : StartEdgeMap) {
+    auto RN = Ent.first.getAs<retypd::RecallNode>();
+    auto OldN = RN->Base;
+    // handle memory nodes first
+    if (OldN->isMemory()) {
+      assert(CG.getMemoryNodeOrNull(OldN->getVariance()) == nullptr);
+      if (Ent.second.size() == 1) {
+        auto NewN = const_cast<CGNode *>(*Ent.second.begin());
+        // just set the node as memory
+        auto NewKey =
+            NodeKey{TypeVariable::CreateDtv(*CG.Ctx, TypeVariable::Memory),
+                    OldN->getVariance()};
+        auto isUpdated = UpdateKey(NewKey, *NewN);
+        // assert(isUpdated);
+        if (OldN->getVariance() == retypd::Covariant) {
+          CG.Memory = NewN;
+        } else {
+          CG.MemoryC = NewN;
+        }
+      } else {
+        assert(false);
+        // create new mem node, and add subtype edges.
+        // auto Mem = CG.getMemoryNode(OldN->getVariance());
+        // for (auto NewN : Ent.second) {
+        //   // no longer symmetry, so no need to consider contravariant reverse
+        //   // direction.
+        //   CG.addEdge(*Mem, *NewN, {retypd::One{}});
+        // }
+      }
+    }
+  }
+
+  // 2 handle other V2N recall nodes edges.
+  for (auto &Ent : StartEdgeMap) {
+    auto RN = Ent.first.getAs<retypd::RecallNode>();
+    auto OldN = RN->Base;
+    // handle memory nodes first
+    if (OldN->isMemory()) {
+      continue;
+    }
+    // must be v2n or v2n contra node. add to node map.
+    CGNode *NewN = nullptr;
+    if (Ent.second.size() == 1) {
+      NewN = const_cast<CGNode *>(*Ent.second.begin());
+      auto isUpdated = UpdateKey(OldN->key, *NewN);
+      V2NMap.insert({OldN, NewN});
+    } else {
+      assert(false);
+      // defer in Node2Nodes
+      // Node2Nodes.push_back({OldN, &Ent.second});
+    }
+  }
+
+  // // handle Node2Nodes
+  // std::sort(Node2Nodes.begin(), Node2Nodes.end(),
+  //           [](const auto &a, const auto &b) {
+  //             return a.second->size() < b.second->size();
+  //           });
+  // for (long I = 0; I < Node2Nodes.size(); I++) {
+  //   auto &Ent = Node2Nodes.at(I);
+  //   auto OldN = Ent.first;
+  //   // create new node that represent target nodes' merge.
+  //   auto &NewN = CG.createNodeClonePNI(OldN->key, OldN->getPNIVar());
+  //   auto NodeSet = *Ent.second;
+  //   // reverse iterate each entry in Node2Nodes
+  //   for (long J = I - 1; J >= 0; J--) {
+  //     auto &CurrentEnt = Node2Nodes.at(J);
+  //     bool AllContains = true;
+  //     for (auto Elem : *CurrentEnt.second) {
+  //       if (!NodeSet.count(Elem)) {
+  //         AllContains = false;
+  //       }
+  //     }
+  //     if (AllContains) {
+  //       for (auto Elem : *CurrentEnt.second) {
+  //         NodeSet.erase(Elem);
+  //       }
+  //       CG.addEdge(NewN, *V2NMap.at(CurrentEnt.first), {retypd::One{}});
+  //     }
+  //   }
+  //   // handle left nodes
+  //   for (auto N : NodeSet) {
+  //     assert(false);
+  //     CG.addEdge(NewN, *N, {retypd::One{}});
+  //   }
+  //   V2NMap.insert({OldN, &NewN});
+  // }
+
+  // recover V2N Maps
+  for (auto &Ent : From.V2N) {
+    V2N.insert(Ent.first, V2NMap.at(Ent.second));
+  }
+  for (auto &Ent : From.V2NContra) {
+    V2NContra.insert(Ent.first, V2NMap.at(Ent.second));
+  }
+
+  // remove all start and end edges.
+  CG.Start->removeOutEdges();
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
+  for (auto E : CG.End->inEdges) {
+    // keep forget primitive edges.
+    if (!E->getLabel().isForgetBase()) {
+      ToRemove.push_back(std::make_tuple(&E->getSourceNode(),
+                                         &E->getTargetNode(), E->getLabel()));
+    }
+  }
+  for (auto &Ent : ToRemove) {
+    auto [Source, Target, Label] = Ent;
+    CG.removeEdge(*Source, *Target, Label);
+  }
+}
+
+void ConstraintsGenerator::linkNodes() {
+  // Run sketchSplit first!
+  // link V2N nodes
+  auto Start = CG.getStartNode();
+  auto End = CG.getEndNode();
+  for (auto Ent : V2N) {
+    CG.addEdge(*Start, *Ent.second, {retypd::RecallNode{.Base = Ent.second}});
+    // CG.addEdge(*Ent.second, *End, {retypd::ForgetNode{.Base = Ent.second}});
+  }
+  for (auto Ent : V2NContra) {
+    CG.addEdge(*Start, *Ent.second, {retypd::RecallNode{.Base = Ent.second}});
+    // CG.addEdge(*Ent.second, *End, {retypd::ForgetNode{.Base = Ent.second}});
+  }
+  // link prim or memory or load/store
+  for (auto &Node : CG) {
+    if (Node.isStartOrEnd()) {
+      continue;
+    }
+    if (Node.isMemory()) {
+      CG.addEdge(*Start, Node, {retypd::RecallNode{.Base = &Node}});
+      // CG.addEdge(Node, *End, {retypd::ForgetNode{.Base = &Node}});
+    } else if (isPrimitive(Node)) {
+      // CG.addEdge(*Start, Node, {retypd::RecallNode{.Base = &Node}});
+      CG.addEdge(Node, *End, {retypd::ForgetNode{.Base = &Node}});
+    } else if (Node.outEdges.empty()) {
+      // Link by PNI type.
+      // CG.addEdge(*Start, Node, {retypd::RecallString{.Base =
+      // Node.getPNIVar()->getLatticeTy().str()}});
+      CG.addEdge(Node, *End,
+                 {retypd::ForgetString{
+                     .Base = Node.getPNIVar()->getLatticeTy().str()}});
+    }
+  }
 }
 
 void ConstraintsGenerator::determinize() {

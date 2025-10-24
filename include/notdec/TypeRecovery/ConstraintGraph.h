@@ -10,6 +10,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -155,6 +156,7 @@ public:
   void setAsPtrAdd(CGNode &Other, OffsetRange Off);
   TypeVariable getTypeVar() { return key.Base; }
   bool hasPointerEdge() const;
+  bool hasIncomingLoadOrStore() const;
   // Some sanity check
   bool isPNIAndEdgeMatch() const;
   bool isPNIPointer() const {
@@ -172,6 +174,9 @@ public:
     *(intptr_t *)&iter = (intptr_t)this - iterOffset;
     return iter;
   }
+  void removeAllEdges();
+  void removeInEdges();
+  void removeOutEdges();
 };
 
 struct CGEdge {
@@ -326,9 +331,7 @@ public:
 
   void linkLoadStore();
   void markVariance(std::map<CGNode *, Variance> *Initial = nullptr);
-  /// Focus on the recall subgraph and use forgetBase to mark primitives. all
-  /// nodes as accepting because our determinization algorithm keeps all
-  /// reachable nodes.
+  /// Focus on the recall subgraph, remove all forget label edges.
   void sketchSplit();
   void ensureNoForgetLabel();
   std::vector<SubTypeConstraint> solve_constraints_between();

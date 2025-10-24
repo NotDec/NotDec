@@ -99,7 +99,7 @@ std::string toString(const EdgeLabel &label) {
   } else if (auto RN = label.getAs<RecallString>()) {
     return "recall str " + RN->Base;
   } else if (auto FN = label.getAs<ForgetString>()) {
-    return "recall str" + FN->Base;
+    return "recall str " + FN->Base;
   }
   assert(false && "Unknown FieldLabel!");
 }

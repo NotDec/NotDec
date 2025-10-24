@@ -173,7 +173,8 @@ struct NFADeterminizer {
       if (GT::getInner(N1)->getPNIVar()->isConflict()) {
         alreadyConflict = true;
       }
-      GT::getInner(&NewNode)->getPNIVar()->merge(GT::getInner(N1)->getPNIVar()->getLatticeTy());
+      GT::getInner(&NewNode)->getPNIVar()->merge(
+          GT::getInner(N1)->getPNIVar()->getLatticeTy());
     }
     if (GT::getInner(&NewNode)->getPNIVar()->isConflict() && !alreadyConflict) {
       printPNDiffSet(N);
@@ -185,9 +186,7 @@ struct NFADeterminizer {
     return it.first;
   }
 
-  static bool ignoreOne(const EdgeLabel &L) {
-    return !L.isOne();
-  }
+  static bool ignoreOne(const EdgeLabel &L) { return !L.isOne(); }
 
   static std::set<EdgeLabel>
   allOutLabels(const std::set<NodeTy> &N,
@@ -215,9 +214,9 @@ ConstraintGraph
 determinizeWithMap(const ConstraintGraph *G,
                    std::map<std::set<CGNode *>, CGNode *> &NodeMap);
 ConstraintGraph minimize(const ConstraintGraph *G);
-ConstraintGraph
-minimizeWithMap(const ConstraintGraph *G,
-                std::map<std::set<CGNode *>, CGNode *> &NodeMap);
+
+void minimizeTo(const ConstraintGraph *G, ConstraintGraph *To,
+                std::map<std::set<CGNode *>, CGNode *> *NodeMap);
 
 std::set<CGNode *> countClosureNoPrimitiveEdges(const std::set<CGNode *> &N);
 

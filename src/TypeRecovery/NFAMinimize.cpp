@@ -1,7 +1,7 @@
 
 #include "TypeRecovery/NFAMinimize.h"
-#include "TypeRecovery/Schema.h"
 #include "Passes/ConstraintGenerator.h"
+#include "TypeRecovery/Schema.h"
 #include <cassert>
 #include <llvm/ADT/iterator_range.h>
 #include <queue>
@@ -17,10 +17,10 @@ ConstraintGraph determinize(const ConstraintGraph *G) {
   return NewG;
 }
 
-std::map<std::set<CGNode *>, CGNode *>
-combineDFAMap(const std::map<std::set<llvm::InverseVal<CGNode *>>, CGNode *> &M1,
-              const std::map<std::set<llvm::InverseVal<CGNode *>>, CGNode *> &M2,
-              ConstraintGraph *G2) {
+std::map<std::set<CGNode *>, CGNode *> combineDFAMap(
+    const std::map<std::set<llvm::InverseVal<CGNode *>>, CGNode *> &M1,
+    const std::map<std::set<llvm::InverseVal<CGNode *>>, CGNode *> &M2,
+    ConstraintGraph *G2) {
   std::map<std::set<CGNode *>, CGNode *> Result;
 
   // build a reverse map of M1
@@ -48,40 +48,38 @@ combineDFAMap(const std::map<std::set<llvm::InverseVal<CGNode *>>, CGNode *> &M1
 }
 
 ConstraintGraph minimize(const ConstraintGraph *G) {
-  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(),
-                       G->PG == nullptr);
+  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), G->PG == nullptr);
   NFAInvDeterminizer D(G, &NewG);
   D.run();
-  ConstraintGraph NewG2(G->Ctx, G->PointerSize, G->getName(),
-                        G->PG == nullptr);
+  ConstraintGraph NewG2(G->Ctx, G->PointerSize, G->getName(), G->PG == nullptr);
   NFAInvDeterminizer D2(&NewG, &NewG2);
   D2.run();
   return NewG2;
 }
 
-ConstraintGraph
-minimizeWithMap(const ConstraintGraph *G,
-                std::map<std::set<CGNode *>, CGNode *> &NodeMap) {
-  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(),
-                       G->PG == nullptr);
+void minimizeTo(const ConstraintGraph *G, ConstraintGraph *To,
+                std::map<std::set<CGNode *>, CGNode *> *NodeMap) {
+  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), G->PG == nullptr);
   NFAInvDeterminizer D(G, &NewG);
   D.run();
-  ConstraintGraph NewG2(G->Ctx, G->PointerSize, G->getName(),
-                        G->PG == nullptr);
-  NFAInvDeterminizer D2(&NewG, &NewG2);
-
-  // Combine two map
-  NodeMap = combineDFAMap(D.DTrans, D2.DTrans, &NewG2);
-
+  // ConstraintGraph NewG2(G->Ctx, G->PointerSize, G->getName(), G->PG ==
+  // nullptr);
+  assert(To->Ctx == G->Ctx && To->PointerSize == G->PointerSize &&
+         (bool)To->PG == (bool)G->PG);
+  NFAInvDeterminizer D2(&NewG, To);
   D2.run();
-  return NewG2;
+
+  if (NodeMap) {
+    // Combine two map
+    assert(NodeMap->empty());
+    *NodeMap = combineDFAMap(D.DTrans, D2.DTrans, To);
+  }
 }
 
 ConstraintGraph
 determinizeWithMap(const ConstraintGraph *G,
                    std::map<std::set<CGNode *>, CGNode *> &NodeMap) {
-  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(),
-                       G->PG == nullptr);
+  ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), G->PG == nullptr);
   NFADeterminizer D(G, &NewG);
   D.run();
   NodeMap = D.DTrans;
@@ -95,6 +93,5 @@ std::set<CGNode *> countClosureNoPrimitiveEdges(const std::set<CGNode *> &N) {
   };
   return retypd::NFADeterminizer<>::countClosure(N, isNotPrimitive);
 }
-
 
 } // namespace notdec::retypd

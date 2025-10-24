@@ -15,5 +15,14 @@
       "main.in_1.loadp.load8": "int 8 #5",
       "#char": "int 8 #5"
     }
+  },
+  "free": {
+    "constraints": [
+      "free.in_0 <= free.in_0"
+    ],
+    "pni_map": {
+      "free": "func p #1",
+      "free.in_0": "ptr p #2"
+    }
   }
 }

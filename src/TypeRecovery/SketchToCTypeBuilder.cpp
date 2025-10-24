@@ -138,8 +138,11 @@ std::pair<HType *, SimpleRange> cutType(ast::HTypeContext &Ctx, HType *HT,
     auto Start = (R.Start + (ElemSize - 1)) / ElemSize * ElemSize;
     return {AT->withSize(Ctx, ElemCount),
             SimpleRange{.Start = Start, .Size = ElemCount * ElemSize}};
+  } else if (R.Size == 1) {
+    return {Ctx.getChar(), R};
   } else {
-    assert(false && "TODO");
+    // TODO assert(false && "TODO");
+    return {nullptr, {}};
   }
 
   return Ret;
@@ -265,6 +268,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         assert(false && "Array out edge must be pointer type");
       }
       ElemTy = ElemTy->getPointeeType();
+      if (ElemTy == nullptr) {
+        return getUndef(*Info.ElemSize);
+      }
 
       auto Count = *TI.Size / *Info.ElemSize;
       assert(Count >= 1);
@@ -279,6 +285,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
       auto ArrayTy = Ctx.getArrayType(false, ElemTy, Count);
       Ret = getPtrTy(ArrayTy);
+
     } else if (std::holds_alternative<StructInfo>(TI.Info)) {
       auto &Info = std::get<StructInfo>(TI.Info);
 
@@ -290,6 +297,10 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           assert(*PointeeSize != 0);
           ValidRange = {*PointeeSize, -*PointeeSize};
         }
+      }
+
+      if (Info.Fields.size() == 0) {
+        return getUndef(BitSize);
       }
 
       // forward declare struct type, by inserting into the map.
@@ -438,9 +449,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
                 Ctx, Ty, Ent.R.Size,
                 SimpleRange{.Start = IR.Start - Ent.R.Start, .Size = IR.Size});
             if (Ent1.second.Size == 0) {
-              LLVM_DEBUG(llvm::dbgs()
-                         << "Warning: Crop field failed, Skipping: "
-                         << Decl->getName() << Ent.R.str());
+              llvm::dbgs() << "Warning: Crop field failed, Skipping: "
+                           << Decl->getName() << Ent.R.str();
               continue;
             }
             Ent.R = Ent1.second;
