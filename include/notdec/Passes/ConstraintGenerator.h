@@ -318,7 +318,7 @@ struct ConstraintsGenerator {
   void minimizeTo(ConstraintsGenerator &Target,
                   std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New);
   void linkNodes();
-  void recoverNodes(ConstraintsGenerator& From);
+  void recoverNodes(ConstraintsGenerator &From);
   // remove nodes that is unreachable from nodes in Val2Node map.
   void removeUnreachable();
   void linkContraToCovariant();
@@ -609,6 +609,10 @@ struct FunctionTypeRecovery : llvm::AnalysisInfoMixin<FunctionTypeRecovery> {
 };
 
 // #endregion FunctionTypeRecovery
+
+inline CGNode &getTarget(FieldEntry &F) {
+  return const_cast<CGNode &>(F.Edge->getTargetNode());
+}
 
 } // namespace notdec
 

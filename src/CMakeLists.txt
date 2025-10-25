@@ -7,6 +7,7 @@ add_library(notdec STATIC
 	Passes/StackBreaker.cpp
 	Passes/MemOpMatcher.cpp
 	Passes/ConstraintGenerator.cpp
+	Passes/GraphTypePass.cpp
 	Passes/ReorderBasicblock.cpp
 	Passes/DSROA.cpp
 	Passes/AllocAnnotator.cpp
