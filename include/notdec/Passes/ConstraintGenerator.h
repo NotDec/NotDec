@@ -586,6 +586,10 @@ struct InvalidateAllTypes : llvm::PassInfoMixin<InvalidateAllTypes> {
     for (auto &Data : TR.AG.AllSCCs) {
       Data.onIRChanged();
     }
+    const char *DebugDir = getTRDebugDir();
+    if (DebugDir) {
+      printModule(M, join(DebugDir, "TRFinal-InvalidateAllTypes.ll").c_str());
+    }
     return llvm::PreservedAnalyses::all();
   }
 };

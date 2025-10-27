@@ -311,9 +311,9 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   std::string Name = G2.CG.Name;
   G2.CG.Name += "-dtm";
 
-  if (G2.CG.Name == "strlen-sig-dtm") {
-    std::cerr << "here\n";
-  }
+  // if (G2.CG.Name == "strlen-sig-dtm") {
+  //   std::cerr << "here\n";
+  // }
 
   G2.CG.sketchSplit();
 
@@ -352,7 +352,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
 
   // Graph Pass
   G3.organizeTypes();
-  G3.mergeArrayUnions();
+  // G3.mergeArrayUnions();
 
   // G3.mergeArrayWithMember();
   // G3.elimSingleStruct();
@@ -938,8 +938,9 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
   }
 
   // TODO assign a level to each SCC node by walking the call tree.
-  // For polymorphic and non polymorphic funcs, we can only merge consecutive non-poly funcs.
-  // maintain a bool var PrevNotPolymorphic, if prev SCC is poly, we cannot merge.
+  // For polymorphic and non polymorphic funcs, we can only merge consecutive
+  // non-poly funcs. maintain a bool var PrevNotPolymorphic, if prev SCC is
+  // poly, we cannot merge.
   bool HasPolymorphic;
   bool PrevPolymorphic = true;
   // 1. Split by SCC post order
@@ -965,7 +966,8 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
       }
     }
 
-    if (!AllSCCs.empty() && !HasPolymorphic && !AllDeclaration && !PrevPolymorphic) {
+    if (!AllSCCs.empty() && !HasPolymorphic && !AllDeclaration &&
+        !PrevPolymorphic) {
       auto &PrevNodes = AllSCCs.back().Nodes;
       PrevNodes.insert(PrevNodes.end(), NodeVec.begin(), NodeVec.end());
     } else {
@@ -1917,7 +1919,7 @@ void ConstraintsGenerator::minimizeTo(
   // link all V2N Nodes.
   linkNodes();
   std::map<std::set<CGNode *>, CGNode *> NodeMap;
-  retypd::minimizeTo(&CG, &Target.CG, &NodeMap);
+  retypd::minimizeTo(&CG, &Target.CG, &NodeMap, true);
 
   // maintain V2N.
   Target.recoverNodes(*this);
@@ -2946,16 +2948,17 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
+  auto &Node = cg.createNodeCovariant(&I, nullptr, -1);
   // Defer constraints generation (and unification) to handlePHINodes
   phiNodes.push_back(&I);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::handlePHINodes() {
   for (auto I : phiNodes) {
-    auto &DstVar = cg.getOrInsertNode(I, nullptr, -1, retypd::Covariant);
+    auto &DstVar = cg.getNode(I, nullptr, -1, retypd::Covariant);
     for (long i = 0; i < I->getNumIncomingValues(); i++) {
       auto *Src = I->getIncomingValue(i);
-      auto &SrcVar = cg.getOrInsertNode(Src, I, i);
+      auto &SrcVar = cg.getOrInsertNode(Src, I, i, retypd::Covariant);
       // src is a subtype of dest
       cg.addSubtype(SrcVar, DstVar);
     }

@@ -177,6 +177,7 @@ public:
   void removeAllEdges();
   void removeInEdges();
   void removeOutEdges();
+  void remapLabel(std::map<EdgeLabel, EdgeLabel> &Map);
 };
 
 struct CGEdge {
@@ -497,6 +498,7 @@ namespace llvm {
 using notdec::retypd::CGEdge;
 using notdec::retypd::CGNode;
 using notdec::retypd::ConstraintGraph;
+using notdec::retypd::EdgeLabel;
 using notdec::retypd::RevEdge;
 
 template <> struct GraphTraits<CGNode *> {
@@ -566,6 +568,9 @@ struct GraphTraits<ConstraintGraph *> : public GraphTraits<CGNode *> {
   }
   static std::string toString(NodeRef N) {
     return notdec::retypd::toString(N->key);
+  }
+  static void remap_label(NodeRef N, std::map<EdgeLabel, EdgeLabel> Map) {
+    N->remapLabel(Map);
   }
 };
 
@@ -649,6 +654,10 @@ struct GraphTraits<InverseVal<ConstraintGraph *>>
 
   static NodeRef getEntryNode(InverseVal<ConstraintGraph *> G) {
     return G.Graph->getEndNode();
+  }
+
+  static void remap_label(NodeRef N, std::map<EdgeLabel, EdgeLabel> Map) {
+    N.Graph->remapLabel(Map);
   }
 };
 

@@ -207,6 +207,20 @@ void CGNode::removeAllEdges() {
   removeInEdges();
 }
 
+void CGNode::remapLabel(std::map<EdgeLabel, EdgeLabel> &Map) {
+  std::vector<CGEdge> Edges;
+  for (auto It = outEdges.begin(); It != outEdges.end();) {
+    if (Map.count(It->Label)) {
+      auto Ent = outEdges.extract(It++);
+      assert(!Ent.empty());
+      Ent.value().Label = Map.at(It->Label);
+      outEdges.insert(std::move(Ent));
+    } else {
+      It++;
+    }
+  }
+}
+
 std::map<const CGEdge *, const CGEdge *>
 ConstraintGraph::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   std::map<const CGEdge *, const CGEdge *> EdgeMap;

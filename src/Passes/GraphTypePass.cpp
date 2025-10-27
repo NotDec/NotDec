@@ -708,6 +708,7 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
   if (&From == &To) {
     return;
   }
+
   if (TypeInfos.count(&From) == 0 && TypeInfos.count(&To) == 0) {
     assert(From.getPNIVar()->getSize() == To.getPNIVar()->getSize());
     // 如果是两个常量类型，直接合并
@@ -738,14 +739,19 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
         }
       }
     }
-  } else if (TypeInfos.at(&From).isArray() && TypeInfos.at(&To).isArray()) {
-    // TODO merge if the access range in edge label is different
-    assert(false && "TODO");
-  } else if (TypeInfos.at(&From).isUnion() && TypeInfos.at(&To).isUnion()) {
-    // TODO merge all union members to one.
-    assert(false && "TODO");
   } else {
-    assert(false && "TODO");
+    // has type infos
+    TypeInfo &FTI = TypeInfos.at(&From);
+    TypeInfo &TTI = TypeInfos.at(&To);
+    if (TypeInfos.at(&From).isArray() && TypeInfos.at(&To).isArray()) {
+      // TODO merge if the access range in edge label is different
+      assert(false && "TODO");
+    } else if (TypeInfos.at(&From).isUnion() && TypeInfos.at(&To).isUnion()) {
+      // TODO merge all union members to one.
+      assert(false && "TODO");
+    } else {
+      assert(false && "TODO");
+    }
   }
 }
 

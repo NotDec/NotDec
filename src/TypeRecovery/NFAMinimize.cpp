@@ -10,6 +10,19 @@
 
 namespace notdec::retypd {
 
+std::map<OffsetRange, OffsetRange>
+normalizeOffsets(std::set<OffsetRange> Input) {
+  std::map<OffsetRange, OffsetRange> Ret;
+  for (auto Off : Input) {
+    // if minimum access, then remove the single offset
+    if (Off.access.size() == 1 && Off.offset == 0) {
+      auto SingleOff = Off.access.front();
+      Ret.insert({Off, OffsetRange{.offset = SingleOff.Size}});
+    }
+  }
+  return Ret;
+}
+
 ConstraintGraph determinize(const ConstraintGraph *G) {
   ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), true);
   NFADeterminizer D(G, &NewG);
@@ -58,15 +71,15 @@ ConstraintGraph minimize(const ConstraintGraph *G) {
 }
 
 void minimizeTo(const ConstraintGraph *G, ConstraintGraph *To,
-                std::map<std::set<CGNode *>, CGNode *> *NodeMap) {
+                std::map<std::set<CGNode *>, CGNode *> *NodeMap, bool normalizeEdges) {
   ConstraintGraph NewG(G->Ctx, G->PointerSize, G->getName(), G->PG == nullptr);
-  NFAInvDeterminizer D(G, &NewG);
+  NFAInvDeterminizer D(G, &NewG, normalizeEdges);
   D.run();
   // ConstraintGraph NewG2(G->Ctx, G->PointerSize, G->getName(), G->PG ==
   // nullptr);
   assert(To->Ctx == G->Ctx && To->PointerSize == G->PointerSize &&
          (bool)To->PG == (bool)G->PG);
-  NFAInvDeterminizer D2(&NewG, To);
+  NFAInvDeterminizer D2(&NewG, To, normalizeEdges);
   D2.run();
 
   if (NodeMap) {

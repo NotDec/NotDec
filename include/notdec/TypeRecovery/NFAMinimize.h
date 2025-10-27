@@ -19,6 +19,10 @@
 
 namespace notdec::retypd {
 
+// Optimization strategy that map offset edge to existing offset edges.
+std::map<OffsetRange, OffsetRange>
+normalizeOffsets(std::set<OffsetRange> Input);
+
 /// Minimize a NFA
 /// only single #Start and #End node because of the property of the
 /// ConstraintGraph.
@@ -36,9 +40,13 @@ struct NFADeterminizer {
   GraphTy OldG;
   ConstraintGraph *NewG;
   std::map<std::set<NodeTy>, CGNode *> DTrans;
+  bool normalizeEdges = false;
+
   using EntryTy = typename std::map<std::set<NodeTy>, CGNode *>::iterator;
-  NFADeterminizer(const ConstraintGraph *Old, ConstraintGraph *New)
-      : OldG(const_cast<ConstraintGraph *>(Old)), NewG(New) {}
+  NFADeterminizer(const ConstraintGraph *Old, ConstraintGraph *New,
+                  bool normalizeEdges = false)
+      : OldG(const_cast<ConstraintGraph *>(Old)), NewG(New),
+        normalizeEdges(normalizeEdges) {}
   void run() {
     std::queue<EntryTy> Worklist;
     auto OldGStart = GT::getEntryNode(OldG);
@@ -188,18 +196,70 @@ struct NFADeterminizer {
 
   static bool ignoreOne(const EdgeLabel &L) { return !L.isOne(); }
 
+  void doNormalizeEdges(const std::set<NodeTy> &N,
+                        std::function<bool(const EdgeLabel &)> Filter) {
+    std::set<OffsetRange> OffSet;
+    for (auto Node : N) {
+      for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
+                                        GT::child_edge_end(Node))) {
+        if (Filter && !Filter(Edge->getLabel())) {
+          // ignore this edge
+        } else {
+          EdgeLabel L = Edge->getLabel();
+          if (auto OffL = getOffsetLabel(L)) {
+            OffSet.insert(OffL->range);
+          }
+        }
+      }
+    }
+    std::map<OffsetRange, OffsetRange> Ret = normalizeOffsets(OffSet);
+    std::map<EdgeLabel, EdgeLabel> LabelMap;
+    for (auto Node : N) {
+      for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
+                                        GT::child_edge_end(Node))) {
+        if (Filter && !Filter(Edge->getLabel())) {
+          // ignore this edge
+        } else {
+          EdgeLabel L = Edge->getLabel();
+          if (auto OffL = getOffsetLabel(L)) {
+            if (Ret.count(OffL->range)) {
+              if (isRecall(L)) {
+                LabelMap.insert({L, EdgeLabel{RecallLabel{OffsetLabel{
+                                        .range = Ret.at(OffL->range)}}}});
+              } else {
+                LabelMap.insert({L, EdgeLabel{ForgetLabel{OffsetLabel{
+                                        .range = Ret.at(OffL->range)}}}});
+              }
+            }
+          }
+        }
+      }
+    }
+    GT::remap_label(N, LabelMap);
+  }
+
+  std::set<EdgeLabel>
+  doAllOutLabels(const std::set<NodeTy> &N,
+                 std::function<bool(const EdgeLabel &)> Filter = ignoreOne) {
+    if (normalizeEdges) {
+      doNormalizeEdges(N, Filter);
+    }
+    return allOutLabels(N, Filter);
+  }
+
   static std::set<EdgeLabel>
   allOutLabels(const std::set<NodeTy> &N,
                std::function<bool(const EdgeLabel &)> Filter = ignoreOne) {
+    // input node set is already a epsilon closure collect labels.
     std::set<EdgeLabel> ret;
     for (auto Node : N) {
       for (auto Edge : llvm::make_range(GT::child_edge_begin(Node),
                                         GT::child_edge_end(Node))) {
-        if (Filter(Edge->getLabel())) {
+        if (Filter && !Filter(Edge->getLabel())) {
+          // ignore this edge
+        } else {
           // keep this edge
           ret.insert(Edge->getLabel());
-        } else {
-          // ignore this edge
         }
       }
     }
@@ -216,7 +276,8 @@ determinizeWithMap(const ConstraintGraph *G,
 ConstraintGraph minimize(const ConstraintGraph *G);
 
 void minimizeTo(const ConstraintGraph *G, ConstraintGraph *To,
-                std::map<std::set<CGNode *>, CGNode *> *NodeMap);
+                std::map<std::set<CGNode *>, CGNode *> *NodeMap,
+                bool normalizeEdges);
 
 std::set<CGNode *> countClosureNoPrimitiveEdges(const std::set<CGNode *> &N);
 
