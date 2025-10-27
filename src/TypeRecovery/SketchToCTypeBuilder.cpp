@@ -263,13 +263,17 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       auto EdgeOff = getOffsetLabel(Info.Edge->getLabel());
       assert(EdgeOff->range.offset == 0);
 
-      auto ElemTy = buildType(Info.Edge->getTargetNode(), V, *Info.ElemSize);
+      auto ElemTy = buildType(Info.Edge->getTargetNode(), V, Info.ElemSize);
       if (!ElemTy->isPointerType()) {
+        llvm::errs() << "Warning: Array out edge is not pointer type! Guessing elem type\n";
+        if (Info.ElemSize) {
+          return getPtrTy(getUndef(*Info.ElemSize * 8));
+        }
         assert(false && "Array out edge must be pointer type");
       }
       ElemTy = ElemTy->getPointeeType();
       if (ElemTy == nullptr) {
-        return getUndef(*Info.ElemSize);
+        return getUndef(*Info.ElemSize * 8);
       }
 
       auto Count = *TI.Size / *Info.ElemSize;
@@ -425,7 +429,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         }
 
         // Try to expand array size.
-        if (Ty->isArrayType()) {
+        if (Ty->isArrayType() && std::holds_alternative<ArrayInfo>(TypeInfos.at(Target).Info)) {
           const ArrayInfo &TInfo =
               std::get<ArrayInfo>(TypeInfos.at(Target).Info);
           // expand the array size to the range

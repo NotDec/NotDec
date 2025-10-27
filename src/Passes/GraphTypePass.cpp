@@ -125,72 +125,23 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         }
       }
     }
-    // if there is self offset loop. introduce a array node.
+    // if there is self offset loop, ignore.
     std::set<const CGEdge *> SelfEdges;
-    std::vector<uint64_t> SelfAccesses;
     for (auto &E : N.outEdges) {
       if (&E.getTargetNode() == &N) {
         if (auto *OL = retypd::getOffsetLabel(E.Label)) {
           SelfEdges.insert(&E);
-          if (OL->range.offset != 0) {
-            SelfAccesses.push_back(std::abs(OL->range.offset));
-          }
-          for (auto A : OL->range.access) {
-            if (A.Size != 0) {
-              SelfAccesses.push_back(std::abs(A.Size));
-            }
-          }
         }
       }
     }
-    if (!SelfEdges.empty()) {
-      if (!SelfAccesses.empty()) {
-
-        // create a array node, move all outgoing edge to that node.
-        auto AccessSize =
-            *std::min_element(SelfAccesses.begin(), SelfAccesses.end());
-
-        // if meaningful offset edges.
-        if (AccessSize > CG.PointerSize) {
-          auto &NewNode = CG.createNodeClonePNI(
-              retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, "SArr")},
-              N.getPNIVar());
-          auto NewE = CG.addEdge(
-              N, NewNode,
-              {retypd::RecallLabel{retypd::FieldLabel{OffsetLabel{
-                  .range = OffsetRange{
-                      .offset = 0, .access = {ArrayOffset(AccessSize)}}}}}});
-          TypeInfos[&N] =
-              TypeInfo{.Size = AccessSize,
-                       .Info = ArrayInfo{.Edge = NewE, .ElemSize = AccessSize}};
-
-          std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToMove;
-          for (auto &E : N.outEdges) {
-            if ((&E != NewE) && !SelfEdges.count(&E) &&
-                (&E.getTargetNode() != &N)) {
-              ToMove.push_back({&E.getTargetNode(), E.getLabel()});
-            }
-          }
-          for (auto Ent : ToMove) {
-            auto &ToN = *const_cast<CGNode *>(Ent.first);
-            CG.removeEdge(N, ToN, Ent.second);
-            CG.addEdge(NewNode, ToN, Ent.second);
-          }
-          assert(!mustBeStruct);
-          doBuild(NewNode, false);
-          return;
-        }
-      }
-      // remove all self edges
-      std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToRemove;
-      for (auto E : SelfEdges) {
-        ToRemove.push_back({&E->getTargetNode(), E->getLabel()});
-      }
-      for (auto Ent : ToRemove) {
-        CG.removeEdge(N, *const_cast<CGNode *>(Ent.first), Ent.second);
-      }
+    // remove all self offset loop
+    std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToRemove;
+    for (auto E : SelfEdges) {
+      ToRemove.push_back({&E->getTargetNode(), E->getLabel()});
     }
-
+    for (auto Ent : ToRemove) {
+      CG.removeEdge(N, *const_cast<CGNode *>(Ent.first), Ent.second);
+    }
     // this is a struct or union.
     std::vector<FieldEntry> Fields;
 
