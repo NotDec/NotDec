@@ -1,5 +1,7 @@
 #include "Passes/ConstraintGenerator.h"
 #include "TypeRecovery/NFAMinimize.h"
+#include "TypeRecovery/Schema.h"
+#include "notdec-llvm2c/Interface/Range.h"
 
 #define DEBUG_TYPE "graph-pass"
 
@@ -150,15 +152,22 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
 
         // if meaningful offset edges.
         if (AccessSize > CG.PointerSize) {
-          TypeInfos[&N] = TypeInfo{
-              .Size = AccessSize,
-              .Info = ArrayInfo{.Edge = OffsetEdge, .ElemSize = AccessSize}};
           auto &NewNode = CG.createNodeClonePNI(
               retypd::NodeKey{TypeVariable::CreateDtv(*CG.Ctx, "SArr")},
               N.getPNIVar());
+          auto NewE = CG.addEdge(
+              N, NewNode,
+              {retypd::RecallLabel{retypd::FieldLabel{OffsetLabel{
+                  .range = OffsetRange{
+                      .offset = 0, .access = {ArrayOffset(AccessSize)}}}}}});
+          TypeInfos[&N] =
+              TypeInfo{.Size = AccessSize,
+                       .Info = ArrayInfo{.Edge = NewE, .ElemSize = AccessSize}};
+
           std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToMove;
           for (auto &E : N.outEdges) {
-            if (!SelfEdges.count(&E)) {
+            if ((&E != NewE) && !SelfEdges.count(&E) &&
+                (&E.getTargetNode() != &N)) {
               ToMove.push_back({&E.getTargetNode(), E.getLabel()});
             }
           }
