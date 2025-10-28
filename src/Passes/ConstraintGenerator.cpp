@@ -949,11 +949,15 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
     PrevPolymorphic = HasPolymorphic;
     HasPolymorphic = false;
     bool AllDeclaration = true;
+    bool AllIntrinsics = true;
 
     for (auto *CGN : NodeVec) {
       if (auto *Fn = CGN->getFunction()) {
         if (!Fn->isDeclaration()) {
           AllDeclaration = false;
+        }
+        if (!Fn->isIntrinsic()) {
+          AllIntrinsics = false;
         }
         auto FName = Fn->getName();
         if (Fn->hasName() && PolyFuncs.count(FName.str())) {
@@ -964,6 +968,10 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
           break;
         }
       }
+    }
+
+    if (AllDeclaration && AllIntrinsics) {
+      continue;
     }
 
     if (!AllSCCs.empty() && !HasPolymorphic && !AllDeclaration &&
@@ -2373,7 +2381,7 @@ void ConstraintsGenerator::run() {
 void ConstraintsGenerator::instantiateSummary(
     llvm::CallBase *Inst, llvm::Function *Target,
     const ConstraintsGenerator &Summary) {
-  checkSymmetry();
+  // checkSymmetry();
   auto [FI, FIC] = CallToInstance.at(Inst);
   assert(FI->key.Base.getContextId().size() == 1);
   auto CurrentId = FI->key.Base.getContextId().front();

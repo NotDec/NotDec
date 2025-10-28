@@ -48,7 +48,11 @@ struct PassEnv {
                            "linear-allocation-recovery");
     PIC.addClassToPassName("notdec::PointerTypeRecovery",
                            "pointer-type-recovery");
-    PIC.addClassToPassName("notdec::TypeRecovery", "type-recovery");
+
+    // llvm2c passes
+    PIC.addClassToPassName("notdec::llvm2c::AdjustCFGPass", "adjustcfg");
+    PIC.addClassToPassName("notdec::llvm2c::RetDupPass", "retdup");
+    PIC.addClassToPassName("notdec::llvm2c::DemotePhiPass", "demote-phi");
 
     // Register all the basic analyses with the managers.
     PB.registerModuleAnalyses(MAM);
