@@ -3085,12 +3085,29 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
       }
     }
   }
+  if (!Node) {
+    Node = &cg.getOrInsertNode(I.getPointerOperand(), &I, 0, retypd::Covariant);
+  }
 
   auto &PtrVal = cg.getOrInsertNode(I.getPointerOperand(), &I, 1);
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
   auto &StoreVal =
       cg.getOrInsertNode(I.getValueOperand(), &I, 0, retypd::Contravariant);
-  cg.addConstraint(PtrVal, StoreVal, {retypd::StoreLabel{.Size = BitSize}});
+
+  retypd::EdgeLabel SL = {
+      retypd::RecallLabel{retypd::StoreLabel{.Size = BitSize}}};
+  auto StoreNode = PtrVal.getLabelTarget(SL);
+  if (StoreNode == nullptr) {
+    auto NewKey = PtrVal.key;
+    NewKey.Base.pushLabel({retypd::StoreLabel{.Size = BitSize}});
+    NewKey.SuffixVariance = !NewKey.SuffixVariance;
+    auto [SN, SNC] = cg.CG.createNodePairWithPNI(NewKey, StoreVal.getPNIVar());
+    StoreNode = &SN;
+    cg.addConstraint(PtrVal, *StoreNode, {retypd::StoreLabel{.Size = BitSize}});
+    assert(PtrVal.getLabelTarget(SL) == StoreNode);
+  }
+
+  cg.addSubtype(StoreVal, *StoreNode);
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
