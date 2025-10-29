@@ -60,7 +60,7 @@ struct NFADeterminizer {
     while (!Worklist.empty()) {
       auto It = Worklist.front();
       auto &Node = *It->second;
-      std::set<EdgeLabel> outLabels = allOutLabels(It->first);
+      std::set<EdgeLabel> outLabels = doAllOutLabels(It->first);
       for (auto &L : outLabels) {
         auto S = countClosure(move(It->first, L));
         if (S.count(OldGEnd)) {
@@ -235,7 +235,9 @@ struct NFADeterminizer {
         }
       }
     }
-    GT::remap_label(N, LabelMap);
+    for (auto Node : N) {
+      GT::remap_label(Node, LabelMap);
+    }
   }
 
   std::set<EdgeLabel>

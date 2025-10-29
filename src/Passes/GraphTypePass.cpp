@@ -77,6 +77,24 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     }
     Visited.insert(&N);
 
+    // if there is self offset loop, ignore.
+    std::set<const CGEdge *> SelfEdges;
+    for (auto &E : N.outEdges) {
+      if (&E.getTargetNode() == &N) {
+        if (auto *OL = retypd::getOffsetLabel(E.Label)) {
+          SelfEdges.insert(&E);
+        }
+      }
+    }
+    // remove all self offset loop
+    std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToRemove;
+    for (auto E : SelfEdges) {
+      ToRemove.push_back({&E->getTargetNode(), E->getLabel()});
+    }
+    for (auto Ent : ToRemove) {
+      CG.removeEdge(N, *const_cast<CGNode *>(Ent.first), Ent.second);
+    }
+
     // if no offset edge, only load edge, this is a simple pointer
     if (!mustBeStruct && !retypd::hasOffsetEdge(N) &&
         retypd::countLoadOrStoreEdge(N) <= 1) {
@@ -100,6 +118,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                                .Info = SimpleTypeInfo{.Edge = *LoadEdge}};
       return;
     }
+
     // check if it is a simple array. If there is only one offset edge.
     unsigned edgeCount = 0;
     const CGEdge *OffsetEdge = nullptr;
@@ -125,23 +144,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         }
       }
     }
-    // if there is self offset loop, ignore.
-    std::set<const CGEdge *> SelfEdges;
-    for (auto &E : N.outEdges) {
-      if (&E.getTargetNode() == &N) {
-        if (auto *OL = retypd::getOffsetLabel(E.Label)) {
-          SelfEdges.insert(&E);
-        }
-      }
-    }
-    // remove all self offset loop
-    std::vector<std::pair<const CGNode *, retypd::EdgeLabel>> ToRemove;
-    for (auto E : SelfEdges) {
-      ToRemove.push_back({&E->getTargetNode(), E->getLabel()});
-    }
-    for (auto Ent : ToRemove) {
-      CG.removeEdge(N, *const_cast<CGNode *>(Ent.first), Ent.second);
-    }
+
     // this is a struct or union.
     std::vector<FieldEntry> Fields;
 

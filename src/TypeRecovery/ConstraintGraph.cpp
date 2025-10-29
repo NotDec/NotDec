@@ -210,10 +210,11 @@ void CGNode::removeAllEdges() {
 void CGNode::remapLabel(std::map<EdgeLabel, EdgeLabel> &Map) {
   std::vector<CGEdge> Edges;
   for (auto It = outEdges.begin(); It != outEdges.end();) {
-    if (Map.count(It->Label)) {
+    auto Label = It->Label;
+    if (Map.count(Label)) {
       auto Ent = outEdges.extract(It++);
       assert(!Ent.empty());
-      Ent.value().Label = Map.at(It->Label);
+      Ent.value().Label = Map.at(Label);
       outEdges.insert(std::move(Ent));
     } else {
       It++;

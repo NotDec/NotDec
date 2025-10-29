@@ -65,6 +65,7 @@ using retypd::TypeVariable;
 struct ConstraintsGenerator;
 
 const char *getTRDebugDir();
+bool isDisableInterFunction();
 std::optional<std::string> getSCCDebugDir(std::size_t SCCIndex);
 std::optional<int64_t> getAllocSize(ExtValuePtr Val);
 std::string getUniquePath(const std::string &basePath, const char *suffix);
@@ -110,6 +111,11 @@ struct AllGraphs {
            std::vector<std::pair<llvm::CallBase *, llvm::CallGraphNode *>>>
       FuncCallers;
   llvm::CallGraph *CG = nullptr;
+
+  void onIRChanged() {
+    Global = nullptr;
+    GlobalSketch = nullptr;
+  }
 };
 
 struct TypeRecovery {
@@ -155,7 +161,7 @@ struct TypeRecovery {
 
   std::function<bool(llvm::Function *)> isPolymorphic = [](llvm::Function *F) {
     if (auto Env = std::getenv("NOTDEC_DEFAULT_POLY")) {
-      if (std::strcmp(Env, "1")) {
+      if (std::strcmp(Env, "1") == 0) {
         return true;
       }
     }
@@ -190,8 +196,9 @@ struct TypeRecovery {
   std::shared_ptr<SCCTypeResult>
   getASTTypes(SCCData &Data,
               std::optional<std::string> DebugDir = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator> getGlobalGraph(std::optional<std::string> DebugDir = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator> getGlobalSketchGraph(std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
-  void handleGlobals();
   void genASTTypes(llvm::Module &M);
 
   // NOTDEC_SUMMARY_OVERRIDE

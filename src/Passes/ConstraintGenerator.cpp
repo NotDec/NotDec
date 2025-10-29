@@ -88,6 +88,16 @@ const char *getTRDebugDir() {
   return std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
 }
 
+bool isDisableInterFunction() {
+  bool DisableInterFunction = false;
+  if (auto E1 = std::getenv("NOTDEC_DISABLE_INTERPROC")) {
+    if (std::strcmp(E1, "1") == 0) {
+      DisableInterFunction = true;
+    }
+  }
+  return DisableInterFunction;
+}
+
 std::optional<std::string> getSCCDebugDir(std::size_t SCCIndex) {
   const char *DebugDir = getTRDebugDir();
   if (DebugDir) {
@@ -587,26 +597,24 @@ TypeRecovery::getBottomUpGraph(SCCData &Data,
   bool isExternalFunc =
       SCCSet.size() == 1 && (*SCCSet.begin())->isDeclaration();
   bool isOverride = false;
-  if (isExternalFunc) {
-    if (SummaryOverride.count(SCCSet)) {
-      std::cerr << "Override summary for external function: " << Data.SCCName
-                << ":\n";
-      Generator = SummaryOverride.at(SCCSet);
-      Generator->checkSymmetry();
-      isOverride = true;
-    } else {
-      static std::set<std::string> Dedup;
-      if (!Dedup.count(Data.SCCName)) {
-        Dedup.emplace(Data.SCCName);
-        llvm::errs() << "Warning: Summary and result may be incorrect due to "
-                        "external function: "
-                     << Data.SCCName << "\n";
-      }
-      // empty graph
-      Generator = std::make_shared<ConstraintsGenerator>(*this, Data.SCCName,
-                                                         Data.SCCSet);
-      Generator->run();
+  if (SummaryOverride.count(SCCSet)) {
+    std::cerr << "Override summary for external function: " << Data.SCCName
+              << ":\n";
+    Generator = SummaryOverride.at(SCCSet);
+    Generator->checkSymmetry();
+    isOverride = true;
+  } else if (isExternalFunc) {
+    static std::set<std::string> Dedup;
+    if (!Dedup.count(Data.SCCName)) {
+      Dedup.emplace(Data.SCCName);
+      llvm::errs() << "Warning: Summary and result may be incorrect due to "
+                      "external function: "
+                   << Data.SCCName << "\n";
     }
+    // empty graph
+    Generator = std::make_shared<ConstraintsGenerator>(*this, Data.SCCName,
+                                                       Data.SCCSet);
+    Generator->run();
   } else {
     //!! normal case, create the initial constraint graph
     Generator = std::make_shared<ConstraintsGenerator>(*this, Data.SCCName,
@@ -614,6 +622,7 @@ TypeRecovery::getBottomUpGraph(SCCData &Data,
     Data.BottomUpGenerator = Generator;
     Generator->run();
   }
+
   assert(Generator != nullptr);
 
   if (SCCDebugPath) {
@@ -625,30 +634,38 @@ TypeRecovery::getBottomUpGraph(SCCData &Data,
   }
 
   // 1.2 instantiate the summaries for each call.
+  bool DisableInterFunc = isDisableInterFunction();
   for (auto &Ent : Generator->CallToInstance) {
     auto *Call = Ent.first;
     auto *Target = Call->getCalledFunction();
     std::shared_ptr<ConstraintsGenerator> TargetSummary;
-    if (Target->isDeclaration()) {
-      if (CallsiteSummaryOverride.count(Call)) {
-        llvm::errs() << "Override summary for callsite: " << *Call << "\n";
-        TargetSummary = CallsiteSummaryOverride.at(Call);
-      } else if (SummaryOverride.count({Target})) {
-        llvm::errs() << "Override summary for external function call: " << *Call
-                     << "\n";
-        TargetSummary = SummaryOverride.at({Target});
-        assert(TargetSummary->CG.PG->Constraints.size() == 0);
+
+    if (CallsiteSummaryOverride.count(Call)) {
+      llvm::errs() << "Override summary for callsite: " << *Call << "\n";
+      TargetSummary = CallsiteSummaryOverride.at(Call);
+    } else if (SummaryOverride.count({Target})) {
+      llvm::errs() << "Override summary for external function call: " << *Call
+                   << "\n";
+      TargetSummary = SummaryOverride.at({Target});
+      assert(TargetSummary->CG.PG->Constraints.size() == 0);
+    } else if (DisableInterFunc) {
+      // inter function type recovery disabled !
+      // only use if there is summary.
+      if (FuncSummaries.count(Target)) {
+        TargetSummary = FuncSummaries.at(Target);
       } else {
-        // llvm::errs() << "Warning: Summary and result may be incorrect due to
-        // "
-        //                 "external call: "
-        //              << *Call << "\n";
         Generator->UnhandledCalls.insert(Ent);
-        continue;
       }
-    } else {
+    } else if (!Target->isDeclaration()) {
+      // should have summary.
       TargetSummary = FuncSummaries.at(Target);
+    } else {
+      // llvm::errs() << "Warning: Summary and result may be incorrect due
+      // to external call: " << *Call << "\n";
+      Generator->UnhandledCalls.insert(Ent);
+      continue;
     }
+
     if (TargetSummary != nullptr) {
       Generator->instantiateSummary(Call, Target, *TargetSummary);
     }
@@ -795,8 +812,6 @@ void TypeRecovery::topDownPhase() {
     }
   }
 
-  handleGlobals();
-
   const char *DebugDir = getTRDebugDir();
   if (DebugDir) {
     AG.Global->CG.printGraph(
@@ -818,13 +833,17 @@ TypeRecovery::getTopDownGraph(SCCData &Data,
   auto &CurrentTypes = *(Data.TopDownGenerator);
   assert(CurrentTypes.PG);
 
-  assert(Data.SigTy.SignatureGenerator);
   std::map<const CGNode *, CGNode *> Old2New;
   if (Generator) {
     Generator->cloneTo(CurrentTypes, Old2New);
   }
 
-  Data.SigTy.instantiate(CurrentTypes);
+  bool DisableInterFunc = isDisableInterFunction();
+  if (!DisableInterFunc) {
+    assert(Data.SigTy.SignatureGenerator);
+    // enable inter function type recovery
+    Data.SigTy.instantiate(CurrentTypes);
+  }
 
   if (SCCDebugPath) {
     CurrentTypes.CG.printGraph(
@@ -860,59 +879,6 @@ void SCCSignatureTypes::instantiate(ConstraintsGenerator &To) {
   }
 }
 
-void TypeRecovery::handleGlobals() {
-  // 2.4 solve the global memory node
-  // Create type for memory node
-  std::shared_ptr<ConstraintsGenerator> &Global = AG.Global;
-  Global = std::make_shared<ConstraintsGenerator>(*this, "Global");
-  std::set<CGNode *> MemoryNodes;
-  // std::set<CGNode *> MemoryNodesC;
-  auto &AllSCCs = AG.AllSCCs;
-  for (auto &Ent : AllSCCs) {
-    if (!Ent.TopDownGenerator)
-      continue;
-    auto &G = *(Ent.TopDownGenerator);
-    if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Covariant)) {
-      if (M->outEdges.empty()) {
-        continue;
-      }
-      MemoryNodes.insert(M);
-    }
-    // if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Contravariant)) {
-    //   if (M->outEdges.empty()) {
-    //     continue;
-    //   }
-    //   MemoryNodesC.insert(M);
-    // }
-  }
-  CGNode *MemNode = nullptr;
-  if (MemoryNodes.empty()) {
-    llvm::errs() << "No memory node found\n";
-    MemNode = Global->CG.getMemoryNode(retypd::Covariant);
-  } else {
-    MemNode = multiGraphDeterminizeTo(*Global, MemoryNodes, "mdtm");
-    // Global->mergeAfterDeterminize();
-  }
-  // CGNode *MemNodeC = nullptr;
-  // if (MemoryNodesC.empty()) {
-  //   llvm::errs() << "No memory node found\n";
-  //   MemNodeC = Global->CG.getMemoryNode(retypd::Contravariant);
-  // } else {
-  //   MemNodeC = multiGraphDeterminizeTo(*Global, MemoryNodesC, "mdtmc");
-  //   // Global->mergeAfterDeterminize();
-  // }
-  // // a special value to represent the memory node
-  // MemNode->getPNIVar()->unify(*MemNodeC->getPNIVar());
-  Global->CG.addEdge(*Global->CG.getMemoryNode(retypd::Covariant), *MemNode,
-                     {retypd::One{}});
-  // Global->CG.onlyAddEdge(*MemNodeC,
-  //                        *Global->CG.getMemoryNode(retypd::Contravariant),
-  //                        {retypd::One{}});
-  // keep node in val2node map for post process
-  // Global->makeSymmetry();
-  Global->CG.solve();
-}
-
 void TypeRecovery::prepareSCC(CallGraph &CG) {
   AG.CG = &CG;
 
@@ -941,8 +907,13 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
   // For polymorphic and non polymorphic funcs, we can only merge consecutive
   // non-poly funcs. maintain a bool var PrevNotPolymorphic, if prev SCC is
   // poly, we cannot merge.
-  bool HasPolymorphic;
+  bool HasPolymorphic = false;
   bool PrevPolymorphic = true;
+  bool NoSCC = this->NoSCC;
+  bool DisableInterFunc = isDisableInterFunction();
+  if (DisableInterFunc) {
+    NoSCC = true;
+  }
   // 1. Split by SCC post order
   for (; (NoSCC ? !SNI.isAtEnd() : !CGI.isAtEnd()); (NoSCC ? ++SNI : ++CGI)) {
     const std::vector<CallGraphNode *> &NodeVec = (NoSCC ? *SNI : *CGI);
@@ -974,8 +945,8 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
       continue;
     }
 
-    if (!AllSCCs.empty() && !HasPolymorphic && !AllDeclaration &&
-        !PrevPolymorphic) {
+    if (!AllSCCs.empty() && !DisableInterFunc && !HasPolymorphic &&
+        !AllDeclaration && !PrevPolymorphic) {
       auto &PrevNodes = AllSCCs.back().Nodes;
       PrevNodes.insert(PrevNodes.end(), NodeVec.begin(), NodeVec.end());
     } else {
@@ -1041,6 +1012,8 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
 
 void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
   LLVM_DEBUG(errs() << " ============== TypeRecovery::run  ===============\n");
+
+  bool DisableInterFunction = isDisableInterFunction();
 
   assert(&M1 == &Mod);
   auto &M = const_cast<Module &>(Mod);
@@ -1123,6 +1096,10 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
     SCCsCatalog->close();
   }
 
+  if (DisableInterFunction) {
+    return;
+  }
+
   bottomUpPhase();
 
   if (DebugDir) {
@@ -1148,6 +1125,85 @@ void TypeRecovery::run(Module &M1, ModuleAnalysisManager &MAM) {
 
   LLVM_DEBUG(
       errs() << " ============== TypeRecovery::run End ===============\n");
+}
+
+std::shared_ptr<ConstraintsGenerator>
+TypeRecovery::getGlobalGraph(std::optional<std::string> DebugDir) {
+  if (AG.Global) {
+    return AG.Global;
+  }
+
+  // 2.4 solve the global memory node
+  // Create type for memory node
+  std::shared_ptr<ConstraintsGenerator> &Global = AG.Global;
+  Global = std::make_shared<ConstraintsGenerator>(*this, "Global");
+  std::set<CGNode *> MemoryNodes;
+  // std::set<CGNode *> MemoryNodesC;
+  auto &AllSCCs = AG.AllSCCs;
+  for (auto &Ent : AllSCCs) {
+    if (!Ent.TopDownGenerator)
+      continue;
+    auto &G = *(Ent.TopDownGenerator);
+    if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Covariant)) {
+      if (M->outEdges.empty()) {
+        continue;
+      }
+      MemoryNodes.insert(M);
+    }
+    // if (auto *M = G.CG.getMemoryNodeOrNull(retypd::Contravariant)) {
+    //   if (M->outEdges.empty()) {
+    //     continue;
+    //   }
+    //   MemoryNodesC.insert(M);
+    // }
+  }
+  CGNode *MemNode = nullptr;
+  if (MemoryNodes.empty()) {
+    llvm::errs() << "No memory node found\n";
+    MemNode = Global->CG.getMemoryNode(retypd::Covariant);
+  } else {
+    MemNode = multiGraphDeterminizeTo(*Global, MemoryNodes, "mdtm");
+    // Global->mergeAfterDeterminize();
+  }
+  // CGNode *MemNodeC = nullptr;
+  // if (MemoryNodesC.empty()) {
+  //   llvm::errs() << "No memory node found\n";
+  //   MemNodeC = Global->CG.getMemoryNode(retypd::Contravariant);
+  // } else {
+  //   MemNodeC = multiGraphDeterminizeTo(*Global, MemoryNodesC, "mdtmc");
+  //   // Global->mergeAfterDeterminize();
+  // }
+  // // a special value to represent the memory node
+  // MemNode->getPNIVar()->unify(*MemNodeC->getPNIVar());
+  Global->CG.addEdge(*Global->CG.getMemoryNode(retypd::Covariant), *MemNode,
+                     {retypd::One{}});
+  // Global->CG.onlyAddEdge(*MemNodeC,
+  //                        *Global->CG.getMemoryNode(retypd::Contravariant),
+  //                        {retypd::One{}});
+  // keep node in val2node map for post process
+  // Global->makeSymmetry();
+  Global->CG.solve();
+
+  if (DebugDir) {
+    AG.Global->CG.printGraph(
+        getUniquePath(join(*DebugDir, "Global"), ".dot").c_str());
+  }
+  return AG.Global;
+}
+std::shared_ptr<ConstraintsGenerator>
+TypeRecovery::getGlobalSketchGraph(std::optional<std::string> DebugDir) {
+  if (AG.GlobalSketch) {
+    return AG.GlobalSketch;
+  }
+  std::shared_ptr<ConstraintsGenerator> Global = getGlobalGraph(DebugDir);
+  std::shared_ptr<ConstraintsGenerator> &GlobalSkS = AG.GlobalSketch;
+  GlobalSkS = postProcess(*AG.Global);
+
+  if (DebugDir) {
+    AG.GlobalSketch->CG.printGraph(
+        getUniquePath(join(*DebugDir, "GlobalSketch"), ".dot").c_str());
+  }
+  return AG.GlobalSketch;
 }
 
 void TypeRecovery::genASTTypes(Module &M) {
@@ -1217,19 +1273,15 @@ void TypeRecovery::genASTTypes(Module &M) {
   }
 
   // 3.4 build AST type for memory node
-  std::shared_ptr<ConstraintsGenerator> &GlobalSkS = AG.GlobalSketch;
-  GlobalSkS = postProcess(*AG.Global);
-
   auto DebugDir = getTRDebugDir();
+  std::shared_ptr<ConstraintsGenerator> GlobalSkS =
+      getGlobalSketchGraph(DebugDir);
+
   if (DebugDir) {
     printAnnotatedModule(
         M,
         getUniquePath(join(DebugDir, "02-AfterBottomUp.anno1"), ".ll").c_str(),
         1);
-    AG.Global->CG.printGraph(
-        getUniquePath(join(DebugDir, "Global"), ".dot").c_str());
-    AG.GlobalSketch->CG.printGraph(
-        getUniquePath(join(DebugDir, "GlobalSketch"), ".dot").c_str());
   }
 
   ConstraintsGenerator &GlobalSk = *GlobalSkS;
@@ -1327,7 +1379,8 @@ TypeRecovery::getSketchGraph(SCCData &Data,
     return Data.SketchGenerator;
   }
 
-  const std::shared_ptr<ConstraintsGenerator> &G = getTopDownGraph(Data);
+  const std::shared_ptr<ConstraintsGenerator> &G =
+      getTopDownGraph(Data, DebugDir);
   Data.SketchGenerator = postProcess(*G, DebugDir);
   return Data.SketchGenerator;
 }
@@ -1562,8 +1615,9 @@ PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
   for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
     SCCData &Data = AllSCCs.at(SCCIndex);
     bool SCCChanged = false;
-    auto SCCTys = TR.getASTTypes(Data);
+
     auto SCCDebugDir = getSCCDebugDir(SCCIndex);
+    auto SCCTys = TR.getASTTypes(Data, SCCDebugDir);
 
     for (auto F : Data.SCCSet) {
       if (F->isDeclaration()) {
@@ -1596,6 +1650,8 @@ PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
       Data.onIRChanged();
     }
   }
+
+  TR.AG.onIRChanged();
 
   if (DebugDir) {
     printModule(M, join(DebugDir, "TROpt.ll").c_str());
@@ -2134,6 +2190,62 @@ void ConstraintsGenerator::linkNodes() {
       CG.addEdge(Node, *End,
                  {retypd::ForgetString{
                      .Base = Node.getPNIVar()->getLatticeTy().str()}});
+    }
+  }
+
+  // find unreachablenodes and add forget string edges.
+
+  std::set<CGNode *> UnreachableNodes;
+  for (auto &Node : CG) {
+    if (Node.isStartOrEnd()) {
+      continue;
+    }
+    UnreachableNodes.insert(&Node);
+  }
+
+  auto NewReachable = [&](CGNode *New) {
+    // traverse start from #End, find all reverse unreachable nodes.
+    std::queue<CGNode *> Queue;
+    if (UnreachableNodes.count(New)) {
+      UnreachableNodes.erase(New);
+      Queue.push(New);
+    }
+    while (!Queue.empty()) {
+      auto Front = Queue.front();
+      Queue.pop();
+      for (auto E : Front->inEdges) {
+        auto Src = &E->getSourceNode();
+        if (UnreachableNodes.count(Src)) {
+          UnreachableNodes.erase(Src);
+          Queue.push(Src);
+        }
+      }
+    }
+  };
+
+  UnreachableNodes.insert(End);
+  NewReachable(End);
+
+  while (!UnreachableNodes.empty()) {
+    // if there is still unreachable nodes, we find node with incoming
+    // load/store, add forgetString edge, and update the reachable node map.
+    for (auto N : UnreachableNodes) {
+      if (N->hasIncomingLoadOrStore()) {
+        CG.addEdge(*N, *End,
+                   {retypd::ForgetString{
+                       .Base = N->getPNIVar()->getLatticeTy().str()}});
+        NewReachable(N);
+        break;
+      }
+    }
+
+    // if not working, just link with forgetString
+    for (auto N : UnreachableNodes) {
+      CG.addEdge(
+          *N, *End,
+          {retypd::ForgetString{.Base = N->getPNIVar()->getLatticeTy().str()}});
+      NewReachable(N);
+      break;
     }
   }
 }
@@ -2956,7 +3068,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
-  auto &Node = cg.createNodeCovariant(&I, nullptr, -1);
+  // auto &Node =
+  cg.createNodeCovariant(&I, nullptr, -1);
   // Defer constraints generation (and unification) to handlePHINodes
   phiNodes.push_back(&I);
 }
