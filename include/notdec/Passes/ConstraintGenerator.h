@@ -6,6 +6,8 @@
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/Tooling.h>
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <iostream>
@@ -152,6 +154,11 @@ struct TypeRecovery {
   }
 
   std::function<bool(llvm::Function *)> isPolymorphic = [](llvm::Function *F) {
+    if (auto Env = std::getenv("NOTDEC_DEFAULT_POLY")) {
+      if (std::strcmp(Env, "1")) {
+        return true;
+      }
+    }
     return false;
   };
 
