@@ -120,11 +120,11 @@ bool PNTy::setPtrOrNum(PtrOrNum NewTy) {
 
   if (Ty == NotPN) {
     if (NewTy != NotPN) {
-      std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
+      // std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
     }
     return false;
   } else if (NewTy == NotPN) {
-    std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
+    // std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
     return false;
   }
 
@@ -140,7 +140,7 @@ bool PNTy::setPtrOrNum(PtrOrNum NewTy) {
   }
   if ((Ty == Number && NewTy == Pointer) ||
       (Ty == Pointer && NewTy == Number)) {
-    std::cerr << "Warning: PNINode::setPtrOrNum: Pointer and NonPtr merge\n";
+    // std::cerr << "Warning: PNINode::setPtrOrNum: Pointer and NonPtr merge\n";
     hasConflict = true;
     if (Ty == Number && NewTy == Pointer) {
       Ty = Pointer;

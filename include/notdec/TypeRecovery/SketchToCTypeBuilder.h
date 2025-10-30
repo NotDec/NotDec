@@ -50,20 +50,9 @@ struct TypeBuilder {
   std::map<const CGNode *, HType *> NodeTypeMap;
   std::set<const CGNode *> Visited;
   const std::map<CGNode *, TypeInfo>& TypeInfos;
-  std::unique_ptr<std::map<const CGNode *, uint64_t>> NodeSizeHint;
 
   // Main interface: recursively visit the node and build the type
   HType *buildType(const CGNode &Node, Variance V, std::optional<int64_t> PointeeSize = std::nullopt);
-  void buildNodeSizeHintMap(ConstraintsGenerator &G2);
-  std::optional<int64_t> getNodeSizeHint(const CGNode *N) {
-    if (NodeSizeHint) {
-      auto M = *NodeSizeHint;
-      if (M.count(N)) {
-        return M.at(N);
-      }
-    }
-    return std::nullopt;
-  }
 
   TypeBuilder(TypeBuilderContext &Parent,
               const std::map<CGNode *, TypeInfo>& TypeInfos)

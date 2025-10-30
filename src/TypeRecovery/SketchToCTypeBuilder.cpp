@@ -89,41 +89,6 @@ HType *TypeBuilder::fromLowTy(PNTy LTy, unsigned BitSize) {
   assert(false && "TODO: fromLatticeElem: Unknown lattice element");
 }
 
-// static bool isRecordOrUnionPointer(HType *Ty) {
-//   if (!Ty->isPointerType()) {
-//     return false;
-//   }
-//   auto Pointee = Ty->getPointeeType();
-//   return Pointee->isRecordType() || Pointee->isUnionType();
-// }
-
-void TypeBuilder::buildNodeSizeHintMap(ConstraintsGenerator &G2) {
-  NodeSizeHint = std::make_unique<std::map<const CGNode *, uint64_t>>();
-  for (auto &Ent : G2.V2N) {
-    auto *Node = Ent.second;
-    if (Node == nullptr) {
-      continue;
-    }
-    auto AS = getAllocSize(Ent.first);
-    if (AS) {
-      (*NodeSizeHint)[Node] = *AS;
-    }
-  }
-  for (auto &Ent : G2.V2NContra) {
-    if (G2.V2N.count(Ent.first)) {
-      continue;
-    }
-    auto *Node = Ent.second;
-    if (Node == nullptr) {
-      continue;
-    }
-    auto AS = getAllocSize(Ent.first);
-    if (AS) {
-      (*NodeSizeHint)[Node] = *AS;
-    }
-  }
-}
-
 std::pair<HType *, SimpleRange> cutType(ast::HTypeContext &Ctx, HType *HT,
                                         OffsetTy OldSize, SimpleRange R) {
   std::pair<HType *, SimpleRange> Ret = {
@@ -189,9 +154,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         << "Building HType for " << toString(Node.key) << "...\n";
   }
 
-  // 20251030 size hint should be scoped for a ExtValPtr.
-  // get from previous size hint map.
-  std::optional<int64_t> PointeeSize2 = getNodeSizeHint(&Node);
+  std::optional<int64_t> PointeeSize2 = Node.getSizeHint();
   if (PointeeSize && PointeeSize2) {
     assert(*PointeeSize == *PointeeSize2);
   }
@@ -407,6 +370,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
             auto &EntJ = Info.Fields[j];
             auto TargetJ = const_cast<CGNode *>(&EntJ.Edge->getTargetNode());
             auto TyJ = buildType(*TargetJ, V, EntJ.R.Size);
+            if (!TyJ->isPointerType()) {
+              break;
+            }
             TyJ = TyJ->getPointeeType();
             if (!TyJ->isCharType()) {
               break;
@@ -452,13 +418,13 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           if (IR.Size < Ent.R.Size) {
             LLVM_DEBUG(llvm::dbgs()
                        << "Warning: Field intersect with PointeeSize!! "
-                       << Decl->getName() << Ent.R.str());
+                       << Decl->getName() << Ent.R.str() << "\n");
             std::pair<HType *, SimpleRange> Ent1 = cutType(
                 Ctx, Ty, Ent.R.Size,
                 SimpleRange{.Start = IR.Start - Ent.R.Start, .Size = IR.Size});
             if (Ent1.second.Size == 0) {
               llvm::dbgs() << "Warning: Crop field failed, Skipping: "
-                           << Decl->getName() << Ent.R.str();
+                           << Decl->getName() << Ent.R.str() << "\n";
               continue;
             }
             Ent.R = Ent1.second;

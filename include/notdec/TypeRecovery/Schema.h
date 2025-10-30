@@ -625,11 +625,22 @@ struct ForgetString {
   bool operator!=(const ForgetString &rhs) const { return !(*this == rhs); }
 };
 
+struct ForgetSize {
+  int64_t Base;
+  bool operator<(const ForgetSize &rhs) const {
+    return std::tie(Base) < std::tie(rhs.Base);
+  }
+  bool operator==(const ForgetSize &rhs) const {
+    return !(*this < rhs) && !(rhs < *this);
+  }
+  bool operator!=(const ForgetSize &rhs) const { return !(*this == rhs); }
+};
+
 // using EdgeLabel = std::variant<One, ForgetLabel, ForgetBase, RecallLabel,
 // RecallBase>;
 struct EdgeLabel {
   std::variant<One, ForgetLabel, ForgetBase, RecallLabel, RecallBase,
-               RecallNode, ForgetNode, RecallString, ForgetString>
+               RecallNode, ForgetNode, RecallString, ForgetString, ForgetSize>
       L;
 
   bool operator<(const EdgeLabel &rhs) const {
@@ -648,6 +659,7 @@ struct EdgeLabel {
   bool isRecallNode() const { return std::holds_alternative<RecallNode>(L); }
   bool isForgetString() const { return std::holds_alternative<ForgetString>(L); }
   bool isRecallString() const { return std::holds_alternative<RecallString>(L); }
+  bool isForgetSize() const { return std::holds_alternative<ForgetSize>(L); }
 
   template <typename T> T *getAs() { return std::get_if<T>(&L); }
   template <typename T> const T *getAs() const { return std::get_if<T>(&L); }

@@ -166,6 +166,7 @@ public:
   // after determinization, can get single outEdge target node by EdgeLabel
   CGNode *getLabelTarget(const EdgeLabel &L) const;
   CGNode *getLabelSource(const EdgeLabel &L) const;
+  std::optional<int64_t> getSizeHint() const;
 
   using iteratorTy = std::list<CGNode>::iterator;
   iteratorTy getIterator() {

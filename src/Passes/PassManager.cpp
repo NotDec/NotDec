@@ -351,6 +351,7 @@ void PassEnv::build_passes(int level) {
 
       // level 3 with TypeRecoveryOpt and stack breaking.
       if (level >= 3) {
+        MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
         MPM.addPass(TypeRecoveryOpt(*TR));
         MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));

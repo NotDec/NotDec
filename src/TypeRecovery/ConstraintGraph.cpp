@@ -301,6 +301,17 @@ CGNode *CGNode::getLabelSource(const EdgeLabel &L) const {
   return Ret;
 }
 
+std::optional<int64_t> CGNode::getSizeHint() const {
+  std::optional<int64_t> Ret = std::nullopt;
+  for (auto &E : outEdges) {
+    if (auto FS = std::get_if<ForgetSize>(&E.getLabel().L)) {
+      assert(!Ret.has_value());
+      Ret = FS->Base;
+    }
+  }
+  return Ret;
+}
+
 void ConstraintGraph::linkConstantPtr2Memory() {
   // for each node, if it is a constant pointer, link it to memory.
   for (auto &Node : Nodes) {
@@ -1766,7 +1777,7 @@ end:
   if (Timeout && DurationMS > Timeout) {
     std::cerr << "ConstraintGraph::saturate: " << DurationMS << "ms for "
               << Name << ".(Timed out)\n";
-  } else {
+  } else if (DurationMS > 100) {
     std::cerr << "ConstraintGraph::saturate: " << DurationMS << "ms for "
               << Name << ".\n";
   }

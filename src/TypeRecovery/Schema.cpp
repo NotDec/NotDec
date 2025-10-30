@@ -100,6 +100,8 @@ std::string toString(const EdgeLabel &label) {
     return "recall str " + RN->Base;
   } else if (auto FN = label.getAs<ForgetString>()) {
     return "recall str " + FN->Base;
+  } else if (auto L = label.getAs<ForgetSize>()) {
+    return "forget size " + std::to_string(L->Base);
   }
   assert(false && "Unknown FieldLabel!");
 }

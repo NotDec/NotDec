@@ -372,8 +372,10 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   assert(G3.PG);
 
   auto DurationMS = (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
-  std::cerr << "TypeRecovery::postProcess: " << DurationMS << "ms for "
-            << G3.CG.Name << ".\n";
+  if (DurationMS > 100) {
+    std::cerr << "TypeRecovery::postProcess: " << DurationMS << "ms for "
+              << G3.CG.Name << ".\n";
+  }
 
   return G3S;
 }
@@ -817,12 +819,6 @@ void TypeRecovery::topDownPhase() {
       *SCCsPerf << "02 TopDown Elapsed: " << since(Start2).count() << " ms\n";
       SCCsPerf->close();
     }
-  }
-
-  const char *DebugDir = getTRDebugDir();
-  if (DebugDir) {
-    AG.Global->CG.printGraph(
-        getUniquePath(join(DebugDir, "Global"), ".dot").c_str());
   }
 }
 
@@ -1415,8 +1411,6 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
   if (SkG->CG.Name == "regex_compile-dtm") {
     llvm::errs() << "here\n";
   }
-
-  TB.buildNodeSizeHintMap(G2);
 
   llvm::Optional<llvm::raw_fd_ostream> LocalValueTypesFile;
   // 3.2 print the graph for debugging
@@ -2200,6 +2194,8 @@ void ConstraintsGenerator::recoverNodes(ConstraintsGenerator &From) {
       // auto NewKey = NodeKey{FB->Base, FB->V};
       // auto isUpdated = UpdateKey(NewKey, *NewN);
       // assert(isUpdated);
+    } else if (auto FS = Ent.first.getAs<retypd::ForgetSize>()) {
+      // skip
     } else {
       assert(false);
     }
@@ -2306,11 +2302,16 @@ void ConstraintsGenerator::recoverNodes(ConstraintsGenerator &From) {
   CG.Start->removeOutEdges();
   std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
   for (auto E : CG.End->inEdges) {
-    // keep forget primitive edges.
-    if (!E->getLabel().isForgetBase()) {
-      ToRemove.push_back(std::make_tuple(&E->getSourceNode(),
-                                         &E->getTargetNode(), E->getLabel()));
+    // TODO Debug: try to early detect that one node have conflicting size hint.
+    if (E->getLabel().isForgetSize()) {
+      E->getSourceNode().getSizeHint();
     }
+    // keep forget primitive and size hint edges.
+    if (E->getLabel().isForgetBase() || E->getLabel().isForgetSize()) {
+      continue;
+    }
+    ToRemove.push_back(std::make_tuple(&E->getSourceNode(), &E->getTargetNode(),
+                                       E->getLabel()));
   }
   for (auto &Ent : ToRemove) {
     auto [Source, Target, Label] = Ent;
@@ -2320,6 +2321,7 @@ void ConstraintsGenerator::recoverNodes(ConstraintsGenerator &From) {
 
 void ConstraintsGenerator::linkNodes() {
   // Run sketchSplit first!
+  assert(CG.isSketchSplit);
   // link V2N nodes
   auto Start = CG.getStartNode();
   auto End = CG.getEndNode();
@@ -2352,6 +2354,7 @@ void ConstraintsGenerator::linkNodes() {
     }
   }
 
+  // To preserve all possible paths,
   // find unreachablenodes and add forget string edges.
 
   std::set<CGNode *> UnreachableNodes;
@@ -2641,7 +2644,7 @@ void ConstraintsGenerator::run() {
     Visitor.handlePHINodes();
   }
   CG.PG->solve();
-  preSimplify();
+  // preSimplify();
   if (const char *path = std::getenv("DEBUG_TRANS_INIT_GRAPH")) {
     if ((std::strcmp(path, "1") == 0) || (std::strstr(CG.Name.c_str(), path))) {
       CG.printGraph("trans_init.dot");
@@ -2845,7 +2848,7 @@ ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
   if (!It.second) {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "setTypeVar: Value already mapped to "
-                 << toString(It.first->second) << ", but now set to "
+                 << toString(It.first->second->key) << ", but now set to "
                  << toString(Dtv) << "\n";
     std::abort();
   }
@@ -2853,7 +2856,7 @@ ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
   if (!It2.second) {
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "setTypeVar: Value already mapped to "
-                 << toString(It2.first->second) << ", but now set to "
+                 << toString(It2.first->second->key) << ", but now set to "
                  << toString(Dtv) << "\n";
     std::abort();
   }
@@ -3224,6 +3227,13 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAllocaInst(
   auto &Node = cg.createNodeCovariant(&I, nullptr, -1);
   // set as pointer type
   cg.setPointer(Node);
+  // if has size hint, then we add forget size edge.
+  auto AS = getAllocSize(&I);
+  if (AS) {
+    cg.CG.addEdge(Node, *cg.CG.getEndNode(), {retypd::ForgetSize{.Base = *AS}});
+    cg.CG.addEdge(cg.CG.getReverseVariant(Node), *cg.CG.getEndNode(),
+                  {retypd::ForgetSize{.Base = *AS}});
+  }
 }
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitPHINode(PHINode &I) {
@@ -3547,8 +3557,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitAnd(BinaryOperator &I) {
       return;
     }
   } else {
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "Warn: And op without constant: " << I << "\n";
+    // llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+    //              << "Warn: And op without constant: " << I << "\n";
   }
   // view as numeric operation?
   Src1Node.getPNIVar()->setNonPtr();
@@ -3575,8 +3585,8 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitOr(BinaryOperator &I) {
       return;
     }
   } else {
-    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "Warn: Or op without constant: " << I << "\n";
+    // llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+    //              << "Warn: Or op without constant: " << I << "\n";
   }
   // view as numeric operation?
   Src1Node.getPNIVar()->setNonPtrIfRelated();
