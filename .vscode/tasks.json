@@ -22,10 +22,23 @@
       "args": ["-rf", "${workspaceFolder}/debug_dir"]
     },
     {
+      "label": "Remove debug dir2",
+      "type": "shell",
+      "command": "/usr/bin/rm",
+      "args": ["-rf", "${workspaceFolder}/debug_dir2"]
+    },
+    {
         "label": "Clean and Build",
         "dependsOn": [
             "CMake: build",
             "Remove debug dir"
+        ]
+    },
+    {
+        "label": "Clean and Build2",
+        "dependsOn": [
+            "CMake: build",
+            "Remove debug dir2"
         ]
     }
   ]

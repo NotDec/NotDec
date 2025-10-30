@@ -348,15 +348,17 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   //       getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
   // }
 
-  // G2.determinize();
+  G2.determinize();
   // // G2.CG.ensureNoForgetLabel();
   // G2.CG.aggressiveSimplify();
   // // G2.CG.ensureNoForgetLabel();
 
-  std::map<const CGNode *, CGNode *> Old2New2;
-  auto G3S = G2.minimizeShared(Old2New2);
-  auto &G3 = *G3S;
+  // std::map<const CGNode *, CGNode *> Old2New2;
+  // auto G3S = G2.minimizeShared(Old2New2);
+  // auto &G3 = *G3S;
 
+  auto& G3 = G2;
+  auto& G3S = G2S;
   if (DebugDir) {
     G3.CG.printGraph(
         getUniquePath(join(*DebugDir, "08-Final"), ".dot").c_str());
@@ -2542,7 +2544,7 @@ void ConstraintsGenerator::determinize() {
     }
     Worklist.pop();
   }
-  mergeAfterDeterminize();
+  // mergeAfterDeterminize();
 }
 
 void ConstraintsGenerator::mergeAfterDeterminize() {

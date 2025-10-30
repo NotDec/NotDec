@@ -1,4 +1,18 @@
 {
+  "do_malloc": {
+    "constraints": [
+      "do_malloc.out <= do_malloc.out",
+      "do_malloc.in_0 <= #char"
+    ],
+    "pni_map": {
+      "puts": "func p #1",
+      "puts.in_0": "ptr p #2",
+      "cstr": "ptr p #2",
+      "cstr.@0+1": "ptr p #2",
+      "cstr.@0+1.load8": "int 8 #3",
+      "#char": "int 8 #3"
+    }
+  },
   "puts": {
     "constraints": [
       "puts.in_0 <= cstr",

@@ -122,7 +122,7 @@ struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
     std::unique_ptr<TypeRecovery::Result> HighTypes;
     if (!disableTypeRecovery) {
       HighTypes = std::move(TR.getResult(M, MAM));
-      HighTypes->dump();
+      // HighTypes->dump();
     }
 
     std::error_code EC;

@@ -31,4 +31,5 @@ llvm-14.0.6.obj.tar.xz
 tmp.md
 mytest/
 debug_dir/
+debug_dir2/
 experiment/197.parser/

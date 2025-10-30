@@ -7,7 +7,7 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "decompile",
+      "name": "dec",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
         "${file}",
@@ -21,13 +21,15 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
       "env": {
-        "NOTDEC_DEBUG_DIR": "debug_dir",
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
-        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
-        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
-        // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "9125",
-        // "NOTDEC_SAT_TIMEOUT": "5000",
-        // "NOTDEC_TYPE_RECOVERY_NO_SCC": "1",
+        // "NOTDEC_DEBUG_DIR": "debug_dir",
+        // "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
+        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
+        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
+        "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
+        // "NOTDEC_SAT_TIMEOUT": "120000",
+        "NOTDEC_DISABLE_INTERPROC": "1",
+        // "NOTDEC_DEFAULT_POLY": "1"
+        "NOTDEC_SAT_DISABLE": "1"
       }
     },
     {
@@ -40,14 +42,43 @@
         "-o",
         "${file}.c",
         // "-debug-only=type-recovery",
-        "--tr-level=0",
+        "--tr-level=1",
         "--split-mem",
-        "--gen-int-to-ptr"
+        "--gen-int-to-ptr",
         // "-debug-only=retypd_graph",
         // "--print-before=type-recovery"
+        // "--print-after-all"
       ],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "CMake: build",
+      "preLaunchTask": "Clean and Build",
+      "env": {
+        "NOTDEC_DEBUG_DIR": "debug_dir",
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "dec debug_dir2",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "${file}",
+        "-o",
+        "${file}.c",
+        "--tr-level=3"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Clean and Build2",
+      "env": {
+        "NOTDEC_DEBUG_DIR": "debug_dir2",
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir2",
+        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
+        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
+        "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
+        // "NOTDEC_SAT_TIMEOUT": "120000",
+        // "NOTDEC_DISABLE_INTERPROC": "1"
+        // "NOTDEC_DEFAULT_POLY": "1"
+      }
     },
     {
       "type": "lldb",
@@ -77,24 +108,6 @@
         "gdb-remote 127.0.0.1:12345"
       ],
       "reverseDebugging": true
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "decompile StackArray.ll",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "test/backend/StackArray.ll",
-        "-o",
-        "test/backend/StackArray.ll.c",
-        "-debug-only=type-recovery",
-        "--print-before=type-recovery"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "CMake: build",
-      "env": {
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir"
-      }
     },
     {
       "type": "lldb",
