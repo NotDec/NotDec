@@ -791,6 +791,16 @@ getOffsetLabel(const EdgeLabel &label) {
   }
 }
 
+inline OffsetRange&
+getLabelOffsetRef(EdgeLabel &label) {
+  if (auto *RL = label.getAs<RecallLabel>()) {
+    return RL->label.getAs<OffsetLabel>()->range;
+  } else if (auto *FL = label.getAs<ForgetLabel>()) {
+    return FL->label.getAs<OffsetLabel>()->range;
+  }
+  assert(false);
+}
+
 inline bool hasSameBaseOrLabel(EdgeLabel a, EdgeLabel b) {
   if (isBase(a) && isBase(b)) {
     return getBase(a) == getBase(b);

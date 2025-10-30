@@ -189,10 +189,11 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         << "Building HType for " << toString(Node.key) << "...\n";
   }
 
+  // 20251030 size hint should be scoped for a ExtValPtr.
   // get from previous size hint map.
   std::optional<int64_t> PointeeSize2 = getNodeSizeHint(&Node);
   if (PointeeSize && PointeeSize2) {
-    assert(*PointeeSize == PointeeSize2);
+    assert(*PointeeSize == *PointeeSize2);
   }
   if (!PointeeSize) {
     PointeeSize = PointeeSize2;
@@ -265,7 +266,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
       auto ElemTy = buildType(Info.Edge->getTargetNode(), V, Info.ElemSize);
       if (!ElemTy->isPointerType()) {
-        llvm::errs() << "Warning: Array out edge is not pointer type! Guessing elem type\n";
+        llvm::errs() << "Warning: Array out edge is not pointer type! Guessing "
+                        "elem type\n";
         if (Info.ElemSize) {
           return getPtrTy(getUndef(*Info.ElemSize * 8));
         }
@@ -430,7 +432,8 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         }
 
         // Try to expand array size.
-        if (Ty->isArrayType() && std::holds_alternative<ArrayInfo>(TypeInfos.at(Target).Info)) {
+        if (Ty->isArrayType() &&
+            std::holds_alternative<ArrayInfo>(TypeInfos.at(Target).Info)) {
           const ArrayInfo &TInfo =
               std::get<ArrayInfo>(TypeInfos.at(Target).Info);
           // expand the array size to the range
