@@ -1563,6 +1563,12 @@ void ConstraintGraph::applyPNIPolicy() {
 /// Algorithm D.2 Saturation algorithm
 void ConstraintGraph::saturate() {
 
+  if (const char *val = std::getenv("NOTDEC_SAT_DISABLE")) {
+    if ((std::strcmp(val, "1") == 0)) {
+      return;
+    }
+  }
+
   long Timeout = 0;
   if (const char *val = std::getenv("NOTDEC_SAT_TIMEOUT")) {
     Timeout = std::stol(val);
@@ -1573,6 +1579,13 @@ void ConstraintGraph::saturate() {
   if (const char *val = std::getenv("NOTDEC_SAT_DENSESUBTYPE")) {
     if ((std::strcmp(val, "1") == 0)) {
       DenseSubtype = true;
+    }
+  }
+
+  bool NoPtrRule = false;
+  if (const char *val = std::getenv("NOTDEC_SAT_NOPTRRULE")) {
+    if ((std::strcmp(val, "1") == 0)) {
+      NoPtrRule = true;
     }
   }
 
@@ -1720,42 +1733,47 @@ void ConstraintGraph::saturate() {
     }
 
     // Lazily apply saturation rules corresponding to S-POINTER.
-    for (auto &Ent : ReachingSet) {
-      if (Ent.first->getVariance() == Contravariant) {
-        for (auto &Reach : Ent.second) {
-          std::optional<FieldLabel> Label;
-          if (auto S = Reach.first.getAs<StoreLabel>()) {
-            // LLVM_DEBUG(llvm::dbgs()
-            //            << "node " << Reach.second->key.str() << " can reach "
-            //            << Ent.first->key.str() << " with \".store\" \n");
-            Label = {LoadLabel{.Size = S->Size}};
-          } else if (auto L = Reach.first.getAs<LoadLabel>()) {
-            // LLVM_DEBUG(llvm::dbgs()
-            //            << "node " << Reach.second->key.str() << " can reach "
-            //            << Ent.first->key.str() << " with \".load\" \n");
-            Label = {StoreLabel{.Size = L->Size}};
-          } else {
-            continue;
-          }
-          // find the node with opposite variance.
-          auto &OppositeNode = getReverseVariant(*Ent.first);
-          auto Res =
-              ReachingSet[&OppositeNode].insert({Label.value(), Reach.second});
-          // Changed |= Res.second;
-          if (Res.second) {
-            AddWorklist(&OppositeNode);
-          }
+    if (!NoPtrRule) {
+      for (auto &Ent : ReachingSet) {
+        if (Ent.first->getVariance() == Contravariant) {
+          for (auto &Reach : Ent.second) {
+            std::optional<FieldLabel> Label;
+            if (auto S = Reach.first.getAs<StoreLabel>()) {
+              // LLVM_DEBUG(llvm::dbgs()
+              //            << "node " << Reach.second->key.str() << " can reach
+              //            "
+              //            << Ent.first->key.str() << " with \".store\" \n");
+              Label = {LoadLabel{.Size = S->Size}};
+            } else if (auto L = Reach.first.getAs<LoadLabel>()) {
+              // LLVM_DEBUG(llvm::dbgs()
+              //            << "node " << Reach.second->key.str() << " can reach
+              //            "
+              //            << Ent.first->key.str() << " with \".load\" \n");
+              Label = {StoreLabel{.Size = L->Size}};
+            } else {
+              continue;
+            }
+            // find the node with opposite variance.
+            auto &OppositeNode = getReverseVariant(*Ent.first);
+            auto Res = ReachingSet[&OppositeNode].insert(
+                {Label.value(), Reach.second});
+            // Changed |= Res.second;
+            if (Res.second) {
+              AddWorklist(&OppositeNode);
+            }
 
-          if (Timeout) {
-            auto DurationMS =
-                (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
-            if (DurationMS > Timeout) {
-              goto end;
+            if (Timeout) {
+              auto DurationMS =
+                  (float(clock() - begin_time) * 1000 / CLOCKS_PER_SEC);
+              if (DurationMS > Timeout) {
+                goto end;
+              }
             }
           }
         }
       }
     }
+
     // solve outside of the ReachingSet loop
     Changed |= SolveWorklist();
     // Run PNI solving again.

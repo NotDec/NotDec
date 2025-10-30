@@ -1276,14 +1276,17 @@ void TypeRecovery::genASTTypes(Module &M) {
   }
 
   // 3.4 build AST type for memory node
-  auto DebugDir = getTRDebugDir();
+  std::optional<std::string> DebugDir;
+  if (auto D = getTRDebugDir()) {
+    DebugDir.emplace(D);
+  }
   std::shared_ptr<ConstraintsGenerator> GlobalSkS =
       getGlobalSketchGraph(DebugDir);
 
   if (DebugDir) {
     printAnnotatedModule(
         M,
-        getUniquePath(join(DebugDir, "02-AfterBottomUp.anno1"), ".ll").c_str(),
+        getUniquePath(join(*DebugDir, "02-AfterBottomUp.anno1"), ".ll").c_str(),
         1);
   }
 
@@ -1336,7 +1339,7 @@ void TypeRecovery::genASTTypes(Module &M) {
   // gen_json("retypd-constrains.json");
 
   if (DebugDir) {
-    printAnnotatedModule(Mod, join(DebugDir, "03-Final.anno2.ll").c_str(), 2);
+    printAnnotatedModule(Mod, join(*DebugDir, "03-Final.anno2.ll").c_str(), 2);
   }
 }
 
@@ -1407,10 +1410,6 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
 
   using notdec::ast::HType;
   using notdec::ast::HTypeContext;
-
-  if (SkG->CG.Name == "regex_compile-dtm") {
-    llvm::errs() << "here\n";
-  }
 
   llvm::Optional<llvm::raw_fd_ostream> LocalValueTypesFile;
   // 3.2 print the graph for debugging
