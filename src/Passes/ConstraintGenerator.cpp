@@ -331,6 +331,8 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
 
   // G2.CG.ensureNoForgetLabel();
 
+  G2.makePointerEqual(DebugDir);
+
   G2.eliminateCycle(DebugDir);
   // // G2.CG.ensureNoForgetLabel();
 
@@ -348,7 +350,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   //       getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
   // }
 
-  G2.determinize();
+  // G2.determinize();
   // // G2.CG.ensureNoForgetLabel();
   // G2.CG.aggressiveSimplify();
   // // G2.CG.ensureNoForgetLabel();
@@ -357,8 +359,8 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   // auto G3S = G2.minimizeShared(Old2New2);
   // auto &G3 = *G3S;
 
-  auto& G3 = G2;
-  auto& G3S = G2S;
+  auto &G3 = G2;
+  auto &G3S = G2S;
   if (DebugDir) {
     G3.CG.printGraph(
         getUniquePath(join(*DebugDir, "08-Final"), ".dot").c_str());
@@ -1810,6 +1812,27 @@ void ConstraintsGenerator::linkContraToCovariant() {
     auto *CN = V2NContra.at(Ent.first);
     assert(CN->getPNIVar() == N->getPNIVar());
     CG.addEdge(*CN, *N, {retypd::One{}});
+  }
+}
+
+void ConstraintsGenerator::makePointerEqual(
+    std::optional<std::string> DebugDir) {
+  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToAdd;
+  for (auto &N : CG) {
+    if (N.isStartOrEnd()) {
+      continue;
+    }
+    if (!N.isPNIPointer()) {
+      continue;
+    }
+    for (auto &Edge : N.outEdges) {
+      if (Edge.Label.isOne()) {
+        ToAdd.emplace_back(&Edge.TargetNode, &Edge.FromNode, Edge.Label);
+      }
+    }
+  }
+  for (auto &Ent : ToAdd) {
+    CG.addEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
   }
 }
 

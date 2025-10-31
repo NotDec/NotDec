@@ -321,6 +321,7 @@ struct ConstraintsGenerator {
   void preSimplify();
   // void determinizeStructEqual();
   void eliminateCycle(std::optional<std::string> DebugDir = std::nullopt);
+  void makePointerEqual(std::optional<std::string> DebugDir = std::nullopt);
   void mergeOnlySubtype();
   void mergeAfterDeterminize();
   // determinization algorithm from all v2n nodes that keeps all reachable
