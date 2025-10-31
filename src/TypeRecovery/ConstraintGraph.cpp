@@ -1479,10 +1479,13 @@ void ConstraintGraph::sketchSplit() {
         toRemove.push_back(&Edge);
         // removeEdge(Source, Target, Edge.Label);
         // continue;
+      } else if (Edge.Label.isOne() && Node.key.Base.isPrimitive() && Edge.getTargetNode().key.Base.isPrimitive()) {
+        // one edge between primitive is invalid.
+        toRemove.push_back(&Edge);
       }
     }
   }
-  for (auto &Edge : toRemove) {
+  for (auto Edge : toRemove) {
     removeEdge(const_cast<CGNode &>(Edge->getSourceNode()),
                const_cast<CGNode &>(Edge->getTargetNode()), Edge->getLabel());
   }

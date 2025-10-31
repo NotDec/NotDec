@@ -327,40 +327,45 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   //   std::cerr << "here\n";
   // }
 
-  G2.CG.sketchSplit();
+  if (Name == "build_charclass") {
+    llvm::errs() << "here\n";
+  }
 
+  G2.CG.sketchSplit();
+  G2.CG.changeStoreToLoad();
   // G2.CG.ensureNoForgetLabel();
 
-  G2.makePointerEqual(DebugDir);
+  if (DebugDir) {
+    G2.CG.printGraph(
+        getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
+  }
 
-  G2.eliminateCycle(DebugDir);
-  // // G2.CG.ensureNoForgetLabel();
+  std::shared_ptr<ConstraintsGenerator> G3S;
+  int Level = 0;
 
-  // if (DebugDir) {
-  //   G2.CG.printGraph(
-  //       getUniquePath(join(*DebugDir, "06-BeforeMerge"), ".dot").c_str());
-  // }
+  // level 0: subtype equal
+  // level 1: determinize.
+  // level 2: minimize.
+  if (Level == 0) {
+    G2.makePointerEqual(DebugDir);
+    G2.eliminateCycle(DebugDir);
+    G3S = G2S;
+  } else if (Level == 1) {
+    // // merge nodes that only subtype to another node
+    // G2.mergeOnlySubtype();
+    // // G2.CG.ensureNoForgetLabel();
+    G2.determinize();
+    // G2.CG.aggressiveSimplify();
+    G3S = G2S;
+  } else if (Level == 2) {
+    std::map<const CGNode *, CGNode *> Old2New2;
+    G3S = G2.minimizeShared(Old2New2);
+    auto &G3 = *G3S;
+  } else {
+    assert(false);
+  }
 
-  // // merge nodes that only subtype to another node
-  // G2.mergeOnlySubtype();
-  // // G2.CG.ensureNoForgetLabel();
-
-  // if (DebugDir) {
-  //   G2.CG.printGraph(
-  //       getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
-  // }
-
-  // G2.determinize();
-  // // G2.CG.ensureNoForgetLabel();
-  // G2.CG.aggressiveSimplify();
-  // // G2.CG.ensureNoForgetLabel();
-
-  // std::map<const CGNode *, CGNode *> Old2New2;
-  // auto G3S = G2.minimizeShared(Old2New2);
-  // auto &G3 = *G3S;
-
-  auto &G3 = G2;
-  auto &G3S = G2S;
+  auto &G3 = *G3S;
   if (DebugDir) {
     G3.CG.printGraph(
         getUniquePath(join(*DebugDir, "08-Final"), ".dot").c_str());
@@ -368,8 +373,8 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
 
   // Graph Pass
   G3.organizeTypes();
-  // G3.mergeArrayUnions();
 
+  // G3.mergeArrayUnions();
   // G3.mergeArrayWithMember();
   // G3.elimSingleStruct();
 
@@ -1822,9 +1827,9 @@ void ConstraintsGenerator::makePointerEqual(
     if (N.isStartOrEnd()) {
       continue;
     }
-    if (!N.isPNIPointer()) {
-      continue;
-    }
+    // if (N.isPNIPointer() || N.getPNIVar().isFunc()) {
+    //   continue;
+    // }
     for (auto &Edge : N.outEdges) {
       if (Edge.Label.isOne()) {
         ToAdd.emplace_back(&Edge.TargetNode, &Edge.FromNode, Edge.Label);
@@ -1850,9 +1855,7 @@ void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
   for (auto &N : NewG) {
     for (auto &Edge : N.outEdges) {
       if (Edge.Label.isOne()) {
-        if (!Edge.TargetNode.key.Base.isPrimitive()) {
-          continue;
-        }
+        continue;
       } else if (Edge.Label.isRecallLabel()) {
         if (auto Off = retypd::getOffsetLabel(Edge.Label)) {
           continue;
@@ -2156,7 +2159,6 @@ void ConstraintsGenerator::minimizeTo(
   Target.CG.isNotSymmetry = true;
   Target.CG.isSketchSplit = true;
 
-  CG.changeStoreToLoad();
   // link all V2N Nodes.
   linkNodes();
   std::map<std::set<CGNode *>, CGNode *> NodeMap;
@@ -2441,7 +2443,7 @@ void ConstraintsGenerator::determinize() {
   DTrans.clear();
   std::map<const CGNode *, CGNode *> This2Bak;
   ConstraintGraph Backup = CG.clone(This2Bak);
-  Backup.changeStoreToLoad();
+
   // remove all edges in the graph
   std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
   for (auto &N : CG) {
