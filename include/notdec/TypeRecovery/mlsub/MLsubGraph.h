@@ -56,60 +56,19 @@ struct ConstraintSummary {
   void fromJSON(TRContext &Ctx, const llvm::json::Object &Obj);
 };
 
-std::shared_ptr<retypd::ConstraintSummary>
-buildPrintfSummary(retypd::TRContext &Ctx, uint32_t PointerSize,
-                   llvm::StringRef FormatStr);
-
-struct CGNode;
-struct ConstraintGraph;
-
-struct NodeKey {
-  TypeVariable Base;
-  Variance SuffixVariance = Covariant;
-  bool IsNewLayer = false;
-  NodeKey(const TypeVariable &Base) : Base(Base) {}
-  NodeKey(const TypeVariable &Base, Variance V)
-      : Base(Base), SuffixVariance(V) {}
-
-  std::optional<std::pair<FieldLabel, NodeKey>> forgetOnce() const;
-  std::string str() const {
-    return (IsNewLayer ? "F: " : "") + toString(Base) +
-           toString(SuffixVariance);
-  }
-
-  // Comparator for stored in a std::map
-  // https://stackoverflow.com/questions/26918912/efficient-operator-with-multiple-members
-  bool operator<(const NodeKey &rhs) const {
-    return std::tie(Base, SuffixVariance, IsNewLayer) <
-           std::tie(rhs.Base, rhs.SuffixVariance, rhs.IsNewLayer);
-  }
-  bool operator==(const NodeKey &rhs) const {
-    return !(*this < rhs) && !(rhs < *this);
-  }
-
-  static NodeKey fromLabel(const EdgeLabel &L) {
-    if (auto FB = L.getAs<ForgetBase>()) {
-      return NodeKey(FB->Base, FB->V);
-    } else if (auto RB = L.getAs<RecallBase>()) {
-      return NodeKey(RB->Base, RB->V);
-    } else {
-      assert(false && "fromLabel: Not a ForgetBase or RecallBase");
-    }
-  }
-};
-
-std::string toString(const NodeKey &K);
-
 struct CGNode;
 struct CGEdge;
+struct ConstraintGraph;
 
 struct CGNode {
   ConstraintGraph &Parent;
   unsigned long Id = 0;
-  NodeKey key;
+  Variance Vari = Covariant;
   unsigned Size;
   std::set<CGEdge *> inEdges;
   std::set<CGEdge> outEdges;
+  std::set<CGNode *> flowEdgesOut;
+  std::set<CGNode *> flowEdgesIn;
 
   using iterator = std::set<CGEdge>::iterator;
   using pred_iterator = std::set<CGEdge *>::iterator;
@@ -128,10 +87,9 @@ struct CGNode {
   bool isSpecial() const;
   bool isStartOrEnd() const;
   bool hasNoPNI() const { return PNIVar == nullptr || PNIVar->isNull(); }
-  bool isTop() const { return key.Base.isTop(); }
-  bool isMemory() const;
   bool isPNIPtr() const { return PNIVar != nullptr && PNIVar->isPointer(); }
   bool isPNIUnknown() const { return PNIVar != nullptr && PNIVar->isUnknown(); }
+  bool isMemory() const;
 
 protected:
   friend struct PNIGraph;
@@ -148,24 +106,24 @@ protected:
 
 public:
   CGNode(const CGNode &) = delete;
-  CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy);
+  CGNode(ConstraintGraph &Parent, Variance V, llvm::Type *LowTy);
   // Creating a new node with low type and set PNI accordingly.
-  CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N);
+  CGNode(ConstraintGraph &Parent, Variance V, PNINode *N);
 
   // Create node with no PNINode, regardless of PG != nullptr.
   // 1. for special nodes like #Start, #End
   // 2. for clone
-  CGNode(ConstraintGraph &Parent, NodeKey key, unsigned Size);
+  CGNode(ConstraintGraph &Parent, Variance V, unsigned Size);
 
-  std::string str() {
-    return key.str() + (PNIVar != nullptr ? "-" + PNIVar->serialize() : "");
+  std::string str() const {
+    return std::to_string(Id) + toString(Vari) +
+           (PNIVar != nullptr ? "-" + PNIVar->serialize() : "");
   }
 
-  Variance getVariance() const { return key.SuffixVariance; }
+  Variance getVariance() const { return Vari; }
   // handle update from PNI
   void onUpdatePNType();
   void setAsPtrAdd(CGNode &Other, OffsetRange Off);
-  TypeVariable getTypeVar() { return key.Base; }
   bool hasPointerEdge() const;
   bool hasIncomingLoadOrStore() const;
   // Some sanity check
@@ -189,7 +147,6 @@ public:
   void removeAllEdges();
   void removeInEdges();
   void removeOutEdges();
-  void remapLabel(std::map<EdgeLabel, EdgeLabel> &Map);
 };
 
 struct CGEdge {
@@ -265,7 +222,6 @@ struct ConstraintGraph {
   clone(std::map<const CGNode *, CGNode *> &Old2New,
         const ConstraintGraph &From, ConstraintGraph &To,
         bool isMergeClone = false,
-        std::function<NodeKey(const NodeKey &)> TransformKey = nullptr,
         std::function<SubtypeRelation(CGNode &, CGNode &)> ConflictKeyRelation =
             nullptr);
   // Node map is the core data of cloning.
