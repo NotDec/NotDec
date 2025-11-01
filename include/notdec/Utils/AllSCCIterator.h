@@ -157,8 +157,8 @@ void all_scc_iterator<GraphT, GT>::GetNextSCC() {
   CurrentSCC.clear(); // Prepare to compute the next SCC
   if (VisitStack.empty()) {
     // find a node that has not been visited yet
-    for (auto N : llvm::make_range(GT::nodes_begin(const_cast<GraphT>(G)),
-                                   GT::nodes_end(const_cast<GraphT>(G)))) {
+    for (auto N : llvm::make_range(GT::nodes_begin(G),
+                                   GT::nodes_end(G))) {
       if (nodeVisitNumbers.find(N) == nodeVisitNumbers.end()) {
         DFSVisitOne(N);
         break;

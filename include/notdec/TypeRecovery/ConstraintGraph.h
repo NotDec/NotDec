@@ -765,6 +765,34 @@ template <> struct GraphTraits<OffsetOnly<CGNode *>> {
   static NodeRef getEntryNode(OffsetOnly<NodeRef> G) { return G.Graph; }
 };
 
+template <>
+struct GraphTraits<OffsetOnly<ConstraintGraph *>>
+    : public GraphTraits<OffsetOnly<CGNode *>> {
+  using GraphRef = OffsetOnly<ConstraintGraph *>;
+  static NodeRef getExitNode(OffsetOnly<ConstraintGraph *> G) {
+    return G.Graph->getEndNode();
+  }
+
+  static NodeRef getEntryNode(OffsetOnly<ConstraintGraph *> G) {
+    return G.Graph->getStartNode();
+  }
+
+  static CGNode *CGGetNode(ConstraintGraph::iterator::reference Entry) {
+    return &Entry;
+  }
+
+  using nodes_iterator =
+      mapped_iterator<ConstraintGraph::iterator, decltype(&CGGetNode)>;
+
+  static nodes_iterator nodes_begin(GraphRef DG) {
+    return nodes_iterator(DG.Graph->begin(), &CGGetNode);
+  }
+
+  static nodes_iterator nodes_end(GraphRef DG) {
+    return nodes_iterator(DG.Graph->end(), &CGGetNode);
+  }
+};
+
 inline bool operator<(const OffsetOnly<CGNode *> &N1,
                       const OffsetOnly<CGNode *> &N2) {
   return N1.Graph < N2.Graph;

@@ -156,7 +156,11 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
 
   std::optional<int64_t> PointeeSize2 = Node.getSizeHint();
   if (PointeeSize && PointeeSize2) {
-    assert(*PointeeSize == *PointeeSize2);
+    if (*PointeeSize != *PointeeSize2) {
+      std::cerr
+          << "Warning: Node size hint not the same as incoming array range: "
+          << toString(Node.key) << "\n";
+    }
   }
   if (!PointeeSize) {
     PointeeSize = PointeeSize2;

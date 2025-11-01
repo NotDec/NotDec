@@ -480,7 +480,7 @@ struct TypeVariable {
     std::string Ret = Var->str();
     if (std::holds_alternative<DerivedTypeVariable>(Var->Inner)) {
       for (auto CId : getContextId()) {
-        Ret += "#" + std::to_string(CId);
+        Ret += "#" + int_to_hex<decltype(CId)>(CId);
       }
     }
     if (IsActual) {

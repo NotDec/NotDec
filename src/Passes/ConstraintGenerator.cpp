@@ -296,6 +296,31 @@ void ConstraintsGenerator::dumpV2N() {
 //   return CG.removeNode(K);
 // }
 
+void ConstraintsGenerator::offZeroToOne() {
+  for (auto &N : CG) {
+    if (N.isStartOrEnd()) {
+      continue;
+    }
+    std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToUpdate;
+    for (auto &Edge : N.outEdges) {
+      auto Source = const_cast<CGNode *>(&Edge.getSourceNode());
+      auto Target = const_cast<CGNode *>(&Edge.getTargetNode());
+      if (auto Off = retypd::getOffsetLabel(Edge.getLabel())) {
+        if (Off->range.access.empty() && Off->range.offset == 0) {
+          ToUpdate.push_back(std::make_tuple(Source, Target, Edge.getLabel()));
+        }
+      }
+    }
+    for (auto &Ent: ToUpdate) {
+      auto Source = std::get<0>(Ent);
+      auto Target = std::get<1>(Ent);
+      auto &Label = std::get<2>(Ent);
+      CG.removeEdge(*Source, *Target, Label);
+      CG.addEdge(*Source, *Target, {retypd::One{}});
+    }
+  }
+}
+
 void ConstraintsGenerator::removeNode(retypd::CGNode &N) {
   assert(!TypeInfos.count(&N));
   CG.removeNode(N);
@@ -327,10 +352,6 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   //   std::cerr << "here\n";
   // }
 
-  if (Name == "build_charclass") {
-    llvm::errs() << "here\n";
-  }
-
   G2.CG.sketchSplit();
   G2.CG.changeStoreToLoad();
   // G2.CG.ensureNoForgetLabel();
@@ -347,8 +368,10 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   // level 1: determinize.
   // level 2: minimize.
   if (Level == 0) {
+    G2.offZeroToOne();
     G2.makePointerEqual(DebugDir);
     G2.eliminateCycle(DebugDir);
+    G2.hasNoOnes();
     G3S = G2S;
   } else if (Level == 1) {
     // // merge nodes that only subtype to another node
@@ -360,7 +383,6 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   } else if (Level == 2) {
     std::map<const CGNode *, CGNode *> Old2New2;
     G3S = G2.minimizeShared(Old2New2);
-    auto &G3 = *G3S;
   } else {
     assert(false);
   }
@@ -1822,7 +1844,7 @@ void ConstraintsGenerator::linkContraToCovariant() {
 
 void ConstraintsGenerator::makePointerEqual(
     std::optional<std::string> DebugDir) {
-  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToAdd;
+  // std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToAdd;
   for (auto &N : CG) {
     if (N.isStartOrEnd()) {
       continue;
@@ -1830,69 +1852,54 @@ void ConstraintsGenerator::makePointerEqual(
     // if (N.isPNIPointer() || N.getPNIVar().isFunc()) {
     //   continue;
     // }
-    for (auto &Edge : N.outEdges) {
-      if (Edge.Label.isOne()) {
-        ToAdd.emplace_back(&Edge.TargetNode, &Edge.FromNode, Edge.Label);
+    bool Merged = false;
+    do {
+      Merged = false;
+      std::set<CGNode *> ToMerge;
+      for (auto &Edge : N.outEdges) {
+        auto Target = const_cast<CGNode *>(&Edge.getTargetNode());
+        if (Edge.Label.isOne() && Target != &N) {
+          // ToAdd.emplace_back(&Edge.TargetNode, &Edge.FromNode, Edge.Label);
+          ToMerge.insert(Target);
+        }
       }
-    }
+      for (auto T : ToMerge) {
+        if (TraceIds.count(T->getId())) {
+          llvm::errs()
+              << "ConstraintsGenerator::makePointerEqual: Merging Node "
+              << toString(T->key) << " into " << toString(N.key) << "\n";
+        }
+        mergeNodeTo(*T, N);
+        Merged = true;
+      }
+    } while (Merged);
   }
-  for (auto &Ent : ToAdd) {
-    CG.addEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
-  }
+  // for (auto &Ent : ToAdd) {
+  //   CG.addEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
+  // }
 }
 
 void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
-  std::map<const CGNode *, CGNode *> Old2New;
-  ConstraintGraph NewG = CG.clone(Old2New);
   std::optional<std::string> CycleFile;
   if (DebugDir) {
     CycleFile = getUniquePath(join(*DebugDir, "Cycles"), ".txt");
   }
 
-  // remove all edges except one or recall offset edge, also remove one edge to
-  // primitive nodes
-  std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToRemove;
-  for (auto &N : NewG) {
-    for (auto &Edge : N.outEdges) {
-      if (Edge.Label.isOne()) {
-        continue;
-      } else if (Edge.Label.isRecallLabel()) {
-        if (auto Off = retypd::getOffsetLabel(Edge.Label)) {
-          continue;
-        }
-      }
-
-      // NewG.removeEdge(Edge.FromNode, Edge.TargetNode, Edge.Label);
-      ToRemove.emplace_back(&Edge.FromNode, &Edge.TargetNode, Edge.Label);
-    }
-  }
-  for (auto &Ent : ToRemove) {
-    NewG.removeEdge(*std::get<0>(Ent), *std::get<1>(Ent), std::get<2>(Ent));
-  }
-
   // detect loops and merge them
   // get scc iterator
-  all_scc_iterator<ConstraintGraph *> SCCI = notdec::scc_begin(&NewG);
+  all_scc_iterator<OffsetOnly<ConstraintGraph *>> SCCI =
+      notdec::scc_begin(OffsetOnly<ConstraintGraph *>(&CG));
 
-  // build New2Old map
-  std::map<CGNode *, CGNode *> New2Old;
-  for (auto &Ent : Old2New) {
-    New2Old.emplace(Ent.second, const_cast<CGNode *>(Ent.first));
-  }
-  // all_scc_iterator will create start node.
-  New2Old.emplace(NewG.getStartNode(), CG.getStartNode());
-  New2Old.emplace(NewG.getEndNode(), CG.getEndNode());
-
+  std::vector<std::set<CGNode *>> SCCs;
   for (; !SCCI.isAtEnd(); ++SCCI) {
-    const std::vector<CGNode *> &SCC = *SCCI;
-
-    // convert the node set to our graph. All node ptr will be of our graph
-    // after this
-    std::set<CGNode *> SCCSet;
-    for (auto N : SCC) {
-      SCCSet.insert(New2Old.at(N));
+    SCCs.emplace_back();
+    auto &SCCSet = SCCs.back();
+    for (auto N : *SCCI) {
+      SCCSet.insert(N.Graph);
     }
+  }
 
+  for (const auto &SCCSet : SCCs) {
     std::set<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> inSCCEdges;
     std::set<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> outSCCEdges;
     std::set<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>>
@@ -1902,7 +1909,6 @@ void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
     for (auto N : SCCSet) {
       for (auto E : N->inEdges) {
         bool SourceInSCC = SCCSet.count(&E->getSourceNode());
-        bool TargetInSCC = true;
         if (SourceInSCC) {
           InternalSCCEdges.insert(std::make_tuple(
               &E->getSourceNode(), &E->getTargetNode(), E->getLabel()));
@@ -1915,7 +1921,6 @@ void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
         auto Src = const_cast<CGNode *>(&E.getSourceNode());
         auto Dst = const_cast<CGNode *>(&E.getTargetNode());
 
-        bool SourceInSCC = true;
         bool TargetInSCC = SCCSet.count(Dst);
         if (TargetInSCC) {
           InternalSCCEdges.insert(std::make_tuple(Src, Dst, E.getLabel()));
@@ -2024,32 +2029,45 @@ void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
         auto Dst = std::get<1>(Ent);
         auto L = std::get<2>(Ent);
         CG.removeEdge(*Src, *Dst, L);
+
+        auto LinkTo = N1;
         if (auto Off = retypd::getOffsetLabel(L)) {
           if (Off->range.access.empty() && Off->range.offset == *MinOffset) {
-            L = {retypd::One{}};
+            LinkTo = N2;
+            L = L1;
           } else if (Off->range.access.size() == 1 &&
                      Off->range.access.front() == MinOffset) {
-            auto &OffRef = retypd::getLabelOffsetRef(L);
-            OffRef.access.clear();
+            if (Off->range.offset == 0) {
+              LinkTo = N2;
+            } else {
+              auto &OffRef = retypd::getLabelOffsetRef(L);
+              OffRef.access.clear();
+            }
           }
         }
-        CG.addEdge(*Src, *N1, L);
+        CG.addEdge(*Src, *LinkTo, L);
       }
       for (auto Ent : outSCCEdges) {
         auto Src = std::get<0>(Ent);
         auto Dst = std::get<1>(Ent);
         auto L = std::get<2>(Ent);
         CG.removeEdge(*Src, *Dst, L);
+        auto LinkFrom = N2;
         if (auto Off = retypd::getOffsetLabel(L)) {
           if (Off->range.access.empty() && Off->range.offset == *MinOffset) {
-            L = {retypd::One{}};
+            LinkFrom = N1;
+            L = L1;
           } else if (Off->range.access.size() == 1 &&
                      Off->range.access.front() == MinOffset) {
-            auto &OffRef = retypd::getLabelOffsetRef(L);
-            OffRef.access.clear();
+            if (Off->range.offset == 0) {
+              LinkFrom = N1;
+            } else {
+              auto &OffRef = retypd::getLabelOffsetRef(L);
+              OffRef.access.clear();
+            }
           }
         }
-        CG.addEdge(*N2, *Dst, L);
+        CG.addEdge(*LinkFrom, *Dst, L);
       }
       notdec::retypd::NFADeterminizer<>::ensureSamePNI(SCCSet);
       // merge all node to src

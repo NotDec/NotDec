@@ -12,6 +12,20 @@ namespace notdec {
 using retypd::NodeKey;
 using retypd::OffsetLabel;
 
+bool ConstraintsGenerator::hasNoOnes() {
+  for (auto &N : CG) {
+    for (auto &E : N.outEdges) {
+      if (E.Label.isOne()) {
+        llvm::errs() << "organizeTypes: Node " << N.key.str()
+                     << " has one edge, should not exist\n";
+        std::abort();
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
   assert(TypeInfos.empty());
   // after post process, organize the node with offset edges.

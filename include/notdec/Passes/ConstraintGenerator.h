@@ -322,6 +322,7 @@ struct ConstraintsGenerator {
   // void determinizeStructEqual();
   void eliminateCycle(std::optional<std::string> DebugDir = std::nullopt);
   void makePointerEqual(std::optional<std::string> DebugDir = std::nullopt);
+  void offZeroToOne();
   void mergeOnlySubtype();
   void mergeAfterDeterminize();
   // determinization algorithm from all v2n nodes that keeps all reachable
@@ -345,6 +346,7 @@ struct ConstraintsGenerator {
 
   std::map<retypd::CGNode *, TypeInfo> TypeInfos;
   std::map<retypd::CGNode *, TypeInfo> organizeTypes();
+  bool hasNoOnes();
   void mergeArrayUnions();
   void elimSingleStruct();
   void mergeArrayWithMember();
