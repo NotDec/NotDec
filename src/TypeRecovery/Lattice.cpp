@@ -176,6 +176,7 @@ bool IntLattice::meet(const IntLattice &Other) {
     return setSign(SI_CONFLICT);
   } else if (Other.Sign == SI_UNKNOW) {
     // do nothing
+    return false;
   } else if (Sign == SI_UNKNOW) {
     return setSign(Other.Sign);
   }

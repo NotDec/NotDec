@@ -311,7 +311,7 @@ void ConstraintsGenerator::offZeroToOne() {
         }
       }
     }
-    for (auto &Ent: ToUpdate) {
+    for (auto &Ent : ToUpdate) {
       auto Source = std::get<0>(Ent);
       auto Target = std::get<1>(Ent);
       auto &Label = std::get<2>(Ent);
@@ -355,6 +355,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
   G2.CG.sketchSplit();
   G2.CG.changeStoreToLoad();
   // G2.CG.ensureNoForgetLabel();
+  G2.offZeroToOne();
 
   if (DebugDir) {
     G2.CG.printGraph(
@@ -363,17 +364,33 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
 
   std::shared_ptr<ConstraintsGenerator> G3S;
   int Level = 0;
+  if (auto S = std::getenv("NOTDEC_POSTPROCESS_LEVEL")) {
+    if (strlen(S) > 0) {
+      if (S[0] == '0') {
+        Level = 0;
+      } else if (S[0] == '1') {
+        Level = 1;
+      } else if (S[0] == '2') {
+        Level = 2;
+      } else {
+        std::cerr << "Error: Unrecognized value in NOTDEC_POSTPROCESS_LEVEL: "
+                  << S << "\n";
+      }
+    }
+  }
 
   // level 0: subtype equal
   // level 1: determinize.
   // level 2: minimize.
   if (Level == 0) {
-    G2.offZeroToOne();
+    G2.eliminateCycle(DebugDir);
     G2.makePointerEqual(DebugDir);
+    G2.quotientMerge();
     G2.eliminateCycle(DebugDir);
     G2.hasNoOnes();
     G3S = G2S;
   } else if (Level == 1) {
+    G2.eliminateCycle(DebugDir);
     // // merge nodes that only subtype to another node
     // G2.mergeOnlySubtype();
     // // G2.CG.ensureNoForgetLabel();
@@ -381,6 +398,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
     // G2.CG.aggressiveSimplify();
     G3S = G2S;
   } else if (Level == 2) {
+    G2.eliminateCycle(DebugDir);
     std::map<const CGNode *, CGNode *> Old2New2;
     G3S = G2.minimizeShared(Old2New2);
   } else {
@@ -1842,9 +1860,113 @@ void ConstraintsGenerator::linkContraToCovariant() {
   }
 }
 
+void ConstraintsGenerator::quotientMerge() {
+  // 基于图上的等价关系，合并节点。
+  // 子类型边已经被之前的算法处理了。现在只需要处理非子类型边。
+  // 核心规则：如果某个节点在相同的出边下指向了两个不同的节点，则合并这两个节点。不断重复直到不再能合并节点
+  // TODO
+  bool changed = true;
+
+  while (changed) {
+    changed = false;
+
+    // 遍历所有节点
+    for (auto &Node : CG) {
+      if (Node.isStartOrEnd()) {
+        continue;
+      }
+
+      // 收集所有需要合并的节点对
+      // std::vector<std::pair<CGNode*, CGNode*>> toMerge;
+      std::map<CGNode *, CGNode *> toMerge;
+
+      // 查找根节点（路径压缩）
+      std::function<CGNode *(CGNode *)> Find = [&](CGNode *node) -> CGNode * {
+        auto It = toMerge.find(node);
+        if (It == toMerge.end()) {
+          // 如果节点不在并查集中，即表示没有被合并
+          return node;
+        }
+
+        if (It->second == node) {
+          return node;
+        }
+
+        // 路径压缩
+        auto To = Find(It->second);
+        if (To != It->second) {
+          It->second = To;
+        }
+        return To;
+      };
+
+      auto Merge = [&](CGNode *From, CGNode *To) {
+        CGNode *rootA = Find(From);
+        CGNode *rootB = Find(To);
+
+        if (rootA != rootB) {
+          // 总是合并到较小的节点（避免非确定性）
+          if (rootA->getId() < rootB->getId()) {
+            toMerge[rootB] = rootA;
+          } else {
+            toMerge[rootA] = rootB;
+          }
+        }
+      };
+
+      // 按出边标签分组，检查相同标签是否指向不同节点
+      std::map<retypd::EdgeLabel, std::set<CGNode *>> outEdgesByLabel;
+
+      for (auto &edge : Node.outEdges) {
+        CGNode *target = const_cast<CGNode *>(&edge.getTargetNode());
+        // 跳过指向自己的边（自环）
+        if (target == &Node) {
+          continue;
+        }
+        outEdgesByLabel[edge.getLabel()].insert(target);
+      }
+
+      // 对于每个标签，如果指向多个不同节点，则这些目标节点应该合并
+      for (auto &entry : outEdgesByLabel) {
+        auto &targets = entry.second;
+        if (targets.size() > 1) {
+          // 找到所有需要合并的节点对
+          auto it = targets.begin();
+          CGNode *firstTarget = *it;
+          ++it;
+
+          for (; it != targets.end(); ++it) {
+            CGNode *currentTarget = *it;
+            Merge(firstTarget, currentTarget);
+          }
+        }
+      }
+
+      // 执行合并
+      for (auto &mergePair : toMerge) {
+        CGNode *from = mergePair.first;
+        CGNode *to = Find(mergePair.second);
+
+        // 确保两个节点都还存在且不同
+        if (from != to) {
+          if (TraceIds.count(from->getId()) || TraceIds.count(to->getId())) {
+            llvm::errs() << "quotientMerge: Merging Node "
+                         << toString(from->key) << " into " << toString(to->key)
+                         << "\n";
+          }
+
+          mergeNodeTo(*from, *to, false);
+          changed = true;
+        }
+      }
+    }
+  }
+}
+
 void ConstraintsGenerator::makePointerEqual(
     std::optional<std::string> DebugDir) {
   // std::vector<std::tuple<CGNode *, CGNode *, retypd::EdgeLabel>> ToAdd;
+  // the iteration is safe as long as we keep N exist.
   for (auto &N : CG) {
     if (N.isStartOrEnd()) {
       continue;
@@ -2084,6 +2206,7 @@ void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
 std::map<const CGEdge *, const CGEdge *>
 ConstraintsGenerator::mergeNodeTo(CGNode &From, CGNode &To, bool NoSelfLoop) {
   assert(&From.Parent == &CG && &To.Parent == &CG);
+  assert(&From != CG.Start && &To != CG.End);
   // update the value map
   addMergeNode(From, To);
   // update the graph
@@ -3363,7 +3486,12 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCastInst(CastInst &I) {
 
 void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
     GetElementPtrInst &Gep) {
-  // TODO supress warnings for table gep
+  // supress warnings for table gep
+  if (Gep.getPointerOperand()->getName().startswith("table_")) {
+    return;
+  } else if (Gep.hasAllZeroIndices()) {
+    
+  }
   std::cerr << "Warning: RetypdGeneratorVisitor::visitGetElementPtrInst: "
                "Gep should not exist before this pass!\n";
   // But if we really want to support this, handle it the same way as AddInst.
@@ -3441,6 +3569,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitLoadInst(LoadInst &I) {
   auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0, retypd::Covariant);
   if (!Node) {
     if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
+      if (CE->getOpcode() == Instruction::BitCast) {
+        if (auto CE2 = dyn_cast<ConstantExpr>(CE->getOperand(0))) {
+          CE = CE2;
+        }
+      }
       if (CE->getOpcode() == Instruction::GetElementPtr) {
         return;
       }

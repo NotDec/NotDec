@@ -322,6 +322,7 @@ struct ConstraintsGenerator {
   // void determinizeStructEqual();
   void eliminateCycle(std::optional<std::string> DebugDir = std::nullopt);
   void makePointerEqual(std::optional<std::string> DebugDir = std::nullopt);
+  void quotientMerge();
   void offZeroToOne();
   void mergeOnlySubtype();
   void mergeAfterDeterminize();

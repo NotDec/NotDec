@@ -364,6 +364,7 @@ void PassEnv::build_passes(int level) {
         MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
         MPM.addPass(RecoverDeadAlloca(*TR));
         MPM.addPass(InvalidateAllTypes(*TR));
+        MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
       }
     }
   }
