@@ -360,6 +360,7 @@ void PassEnv::build_passes(int level) {
         MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(
             SimplifyCFGPass(SimplifyCFGOptions())));
+        MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
         MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
         MPM.addPass(RecoverDeadAlloca(*TR));

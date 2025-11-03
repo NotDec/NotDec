@@ -46,7 +46,8 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
   if (isa<ConstantInt>(Src1) && isa<ConstantInt>(Src2)) {
     assert(false && "Constant at both sides. Run Optimization first!");
   }
-  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2)) {
+  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2) &&
+      BinOp->getOpcode() != llvm::Instruction::Shl) {
     // because of InstCombine canonical form, this should not happen?
     assert(false &&
            "Constant cannot be at the left side. Run InstCombine first.");

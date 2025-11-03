@@ -68,8 +68,8 @@ void StackBreakerRewriter::visitBinaryOperator(BinaryOperator &I) {
     I.replaceAllUsesWith(NewAdd);
     markAsDead(I);
   } else {
-    llvm::errs() << "No rewriting rule for this inst: " << I << "\n";
-    assert(false && "No rewriting rule for this inst");
+    llvm::errs() << "Error: StackBreakerRewriter: No rewriting rule for this inst: " << I << "\n";
+    // assert(false && "No rewriting rule for this inst");
   }
 }
 
@@ -192,7 +192,6 @@ bool StackBreakerRewriter::deleteDeadInstructions() {
     Instruction *I = dyn_cast_or_null<Instruction>(DeadInsts.pop_back_val());
     if (!I)
       continue;
-    llvm::errs() << "Deleting dead instruction: " << *I << "\n";
     LLVM_DEBUG(dbgs() << "Deleting dead instruction: " << *I << "\n");
 
     // If the instruction is an alloca, find the possible dbg.declare connected
