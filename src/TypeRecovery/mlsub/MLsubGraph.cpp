@@ -58,109 +58,31 @@ using retypd::combine;
 using retypd::OffsetLabel;
 using retypd::OffsetLabel;
 
-std::vector<std::string> decodeFmtStr(llvm::StringRef Format) {
-  std::vector<std::string> Ret;
-  const char *fmt = Format.data();
-  const char *end = fmt + Format.size();
-  char ch;
 
-  while (fmt < end && (ch = *fmt++)) {
-    if ('%' == ch) {
-      switch (ch = *fmt++) {
-      /* %% - print out a single %    */
-      case '%':
-        break;
-      /* %c: print out a character    */
-      case 'c':
-        Ret.push_back("#char");
-        break;
-
-      /* %s: print out a string       */
-      case 's':
-        Ret.push_back("cstr");
-        break;
-
-      /* %d: print out an int         */
-      case 'd':
-        Ret.push_back("#sint");
-        break;
-
-      /* %x: print out an int in hex  */
-      case 'x':
-        Ret.push_back("#sint");
-        break;
-
-      case 'f':
-        Ret.push_back("#double");
-        break;
-
-      case 'e':
-        Ret.push_back("#double");
-        break;
+const CGEdge *ConstraintGraph::addEdge(CGNode &From, CGNode &To,
+                                       FieldLabel Label) {
+  // do not maintain PNI during layer split.
+  if (PG && !isNotSymmetry) {
+    if (auto F = Label.getAs<ForgetLabel>()) {
+      if (auto O = F->label.getAs<OffsetLabel>()) {
+        // unify PN
+        From.getPNIVar()->unify(*To.getPNIVar());
+        // also should be pointer, TODO: set or assert?
+        assert(From.getPNIVar()->isPointer());
       }
+    } else if (auto R = Label.getAs<RecallLabel>()) {
+      if (auto O = R->label.getAs<OffsetLabel>()) {
+        // unify PN
+        From.getPNIVar()->unify(*To.getPNIVar());
+        // also should be pointer, TODO: set or assert?
+        assert(From.getPNIVar()->isPointer());
+      }
+    } else if (Label.isOne()) {
+      // unify PN
+      From.getPNIVar()->unify(*To.getPNIVar());
     }
   }
-  return Ret;
-}
-
-llvm::Optional<std::pair<bool, OffsetRange>>
-EdgeLabel2Offset(const EdgeLabel &E) {
-  if (auto OL = E.getAs<ForgetLabel>()) {
-    if (auto OL2 = OL->label.getAs<OffsetLabel>()) {
-      return std::make_pair(false, OL2->range);
-    }
-  }
-  if (auto OL = E.getAs<RecallLabel>()) {
-    if (auto OL2 = OL->label.getAs<OffsetLabel>()) {
-      return std::make_pair(true, OL2->range);
-    }
-  }
-  return llvm::None;
-};
-
-void CGNode::removeInEdges() {
-  std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> ToRemove;
-  for (auto E : inEdges) {
-    ToRemove.push_back(std::make_tuple(&E->getSourceNode(), &E->getTargetNode(),
-                                       E->getLabel()));
-  }
-  for (auto &Ent : ToRemove) {
-    auto [Source, Target, Label] = Ent;
-    Parent.removeEdge(*Source, *Target, Label);
-  }
-}
-
-void CGNode::removeOutEdges() {
-  std::vector<std::tuple<CGNode *, CGNode *, EdgeLabel>> ToRemove;
-  for (auto &E : outEdges) {
-    ToRemove.push_back(std::make_tuple(const_cast<CGNode *>(&E.getSourceNode()),
-                                       const_cast<CGNode *>(&E.getTargetNode()),
-                                       E.getLabel()));
-  }
-  for (auto &Ent : ToRemove) {
-    auto [Source, Target, Label] = Ent;
-    Parent.removeEdge(*Source, *Target, Label);
-  }
-}
-
-void CGNode::removeAllEdges() {
-  removeOutEdges();
-  removeInEdges();
-}
-
-void CGNode::remapLabel(std::map<EdgeLabel, EdgeLabel> &Map) {
-  std::vector<CGEdge> Edges;
-  for (auto It = outEdges.begin(); It != outEdges.end();) {
-    auto Label = It->Label;
-    if (Map.count(Label)) {
-      auto Ent = outEdges.extract(It++);
-      assert(!Ent.empty());
-      Ent.value().Label = Map.at(Label);
-      outEdges.insert(std::move(Ent));
-    } else {
-      It++;
-    }
-  }
+  return onlyAddEdge(From, To, Label);
 }
 
 std::map<const CGEdge *, const CGEdge *>
@@ -1565,31 +1487,6 @@ const CGEdge *ConstraintGraph::addEdgeDualVariance(CGNode &From, CGNode &To,
   return Ret;
 }
 
-const CGEdge *ConstraintGraph::addEdge(CGNode &From, CGNode &To,
-                                       EdgeLabel Label) {
-  // do not maintain PNI during layer split.
-  if (PG && !isNotSymmetry) {
-    if (auto F = Label.getAs<ForgetLabel>()) {
-      if (auto O = F->label.getAs<OffsetLabel>()) {
-        // unify PN
-        From.getPNIVar()->unify(*To.getPNIVar());
-        // also should be pointer, TODO: set or assert?
-        assert(From.getPNIVar()->isPointer());
-      }
-    } else if (auto R = Label.getAs<RecallLabel>()) {
-      if (auto O = R->label.getAs<OffsetLabel>()) {
-        // unify PN
-        From.getPNIVar()->unify(*To.getPNIVar());
-        // also should be pointer, TODO: set or assert?
-        assert(From.getPNIVar()->isPointer());
-      }
-    } else if (Label.isOne()) {
-      // unify PN
-      From.getPNIVar()->unify(*To.getPNIVar());
-    }
-  }
-  return onlyAddEdge(From, To, Label);
-}
 
 CGNode &ConstraintGraph::emplace(const NodeKey &N, llvm::Type *LowType) {
   return Nodes.emplace_back(*this, N, LowType);

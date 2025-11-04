@@ -24,6 +24,7 @@
 #include "TypeRecovery/RExp.h"
 #include "TypeRecovery/Schema.h"
 #include "TypeRecovery/mlsub/PNDiff.h"
+#include "TypeRecovery/mlsub/Schema.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 
@@ -34,19 +35,17 @@ struct ConstraintsGenerator;
 namespace notdec::mlsub {
 
 using retypd::Constraint;
-using retypd::TypeVariable;
-using retypd::TRContext;
-using retypd::Variance;
 using retypd::Covariant;
-using retypd::FieldLabel;
-using retypd::toString;
-using retypd::EdgeLabel;
 using retypd::ForgetBase;
-using retypd::RecallBase;
-using retypd::rexp::PRExp;
-using retypd::SubTypeConstraint;
-using retypd::RecallLabel;
 using retypd::ForgetLabel;
+using retypd::RecallBase;
+using retypd::RecallLabel;
+using retypd::SubTypeConstraint;
+using retypd::toString;
+using retypd::TRContext;
+using retypd::TypeVariable;
+using retypd::Variance;
+using retypd::rexp::PRExp;
 
 struct ConstraintSummary {
   std::vector<Constraint> Cons;
@@ -132,9 +131,6 @@ public:
     return getPNIVar() != nullptr && getPNIVar()->isPointer();
   }
   unsigned getSize() const { return Size; }
-  // after determinization, can get single outEdge target node by EdgeLabel
-  CGNode *getLabelTarget(const EdgeLabel &L) const;
-  CGNode *getLabelSource(const EdgeLabel &L) const;
   std::optional<int64_t> getSizeHint() const;
 
   using iteratorTy = std::list<CGNode>::iterator;
@@ -144,9 +140,6 @@ public:
     *(intptr_t *)&iter = (intptr_t)this - iterOffset;
     return iter;
   }
-  void removeAllEdges();
-  void removeInEdges();
-  void removeOutEdges();
 };
 
 struct CGEdge {
@@ -193,7 +186,7 @@ struct ConstraintGraph {
   std::set<CGNode *> StartNodes;
   std::set<CGNode *> EndNodes;
   std::vector<std::tuple<CGNode *, CGNode *, PRExp>> PathSeq;
-  std::map<CGNode *, std::set<std::pair<FieldLabel, CGNode *>>> ReachingSet;
+  std::map<CGNode *, std::set<std::pair<EdgeLabel, CGNode *>>> ReachingSet;
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
   CGNode *Memory = nullptr;
@@ -205,8 +198,7 @@ struct ConstraintGraph {
   // TODO replace with datalayout?
   long PointerSize = 0;
 
-  ConstraintGraph(std::shared_ptr<TRContext> Ctx, long PointerSize,
-                  std::string Name, bool disablePNI = false);
+  ConstraintGraph(long PointerSize, std::string Name, bool disablePNI = false);
 
   enum SubtypeRelation {
     SR_Equal,
@@ -218,26 +210,25 @@ struct ConstraintGraph {
   // isMergeClone: merge the graph to another graph.
   // TransformKey: 主要针对不冲突的情况，也转换NodeKey。
   // ConflictKeyRelation: 处理冲突，看看怎么连子类型边。
-  static void
-  clone(std::map<const CGNode *, CGNode *> &Old2New,
-        const ConstraintGraph &From, ConstraintGraph &To,
-        bool isMergeClone = false,
-        std::function<SubtypeRelation(CGNode &, CGNode &)> ConflictKeyRelation =
-            nullptr);
+  static void clone(std::map<const CGNode *, CGNode *> &Old2New,
+                    const ConstraintGraph &From, ConstraintGraph &To,
+                    bool isMergeClone = false,
+                    std::function<SubtypeRelation(CGNode &, CGNode &)>
+                        ConflictKeyRelation = nullptr);
   // Node map is the core data of cloning.
   ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
 
   CGNode &getReverseVariant(CGNode &N) { return *RevVariance.at(&N); }
 
-  CGNode &createNodeNoPNI(const NodeKey &N, unsigned Size);
-  CGNode &createNode(const NodeKey &N, llvm::Type *LowType);
-  CGNode &createNodeWithPNI(const NodeKey &N, PNINode *PNI);
-  CGNode &createNodeClonePNI(const NodeKey &N, PNINode *ON);
+  CGNode &createNodeNoPNI(unsigned long N, unsigned Size);
+  CGNode &createNode(unsigned long N, llvm::Type *LowType);
+  CGNode &createNodeWithPNI(unsigned long N, PNINode *PNI);
+  CGNode &createNodeClonePNI(unsigned long N, PNINode *ON);
 
-  std::pair<CGNode &, CGNode &>
-  createNodePair(NodeKey K, llvm::Type *LowType);
-  std::pair<CGNode &, CGNode &>
-  createNodePairWithPNI(NodeKey K, PNINode *PNI);
+  std::pair<CGNode &, CGNode &> createNodePair(unsigned long K,
+                                               llvm::Type *LowType);
+  std::pair<CGNode &, CGNode &> createNodePairWithPNI(unsigned long K,
+                                                      PNINode *PNI);
 
   CGNode &cloneNode(const CGNode &Other);
   void removeNode(CGNode &N);
@@ -248,74 +239,26 @@ struct ConstraintGraph {
   iterator end() { return Nodes.end(); }
   bool empty() { return Nodes.empty(); }
 
-  // Main interface for constraint simplification
-  std::vector<SubTypeConstraint>
-  simplifiedExpr(std::set<std::string> &InterestingVars) const;
-  void linkPrimitives();
-  void linkVars(std::set<std::string> &InterestingVars,
-                bool LinkLoadStores = true);
-  void linkEndVars(std::set<std::string> &InterestingVars);
-  ConstraintGraph simplify(std::optional<std::string> DebugDir = std::nullopt);
-  void recoverBaseVars();
-  void aggressiveSimplify();
-  void linkConstantPtr2Memory();
-  void changeStoreToLoad();
-  // void lowTypeToSubType();
-
 public:
-  void solve();
-
   // Lazy initialization of special nodes.
   CGNode *getStartNode();
   CGNode *getEndNode();
   CGNode *getMemoryNodeOrNull(Variance V);
   CGNode *getMemoryNode(Variance V /*= Covariant*/);
 
-  // void solveSketchQueries(
-  //     const std::vector<std::pair<
-  //         TypeVariable,
-  //         std::function<void(std::shared_ptr<Sketch>)>>> &Queries)
-  //         const;
-  // std::shared_ptr<Sketch> solveSketch(CGNode &N) const;
-
-  // internal steps
   void applyPNIPolicy();
-  void saturate();
-  void layerSplit();
-  /// Intersect the language, that disallow recall and forget the same thing,
-  /// which is a no-op. Must not have null/epsilon moves.
-  void pushSplit();
-  /// Intersect the language, that disallow contravariant node have both recall
-  /// in and forget out. Only care about the relation where the recall and
-  /// forget conjunction is covariant.
-  void contraVariantSplit();
-  void buildPathSequence();
 
-  std::set<std::pair<CGNode *, OffsetRange>>
-  getNodeReachableOffset(CGNode &Start);
-
-  void linkLoadStore();
-  void markVariance(std::map<CGNode *, Variance> *Initial = nullptr);
-  /// Focus on the recall subgraph, remove all forget label edges.
-  void sketchSplit();
-  void ensureNoForgetLabel();
-  std::vector<SubTypeConstraint> solve_constraints_between();
   void printGraph(const char *DotFile) const;
-  ConstraintGraph getSubGraph(const std::set<const CGNode *> &Roots,
-                              bool AllReachable) const;
-  std::set<const CGNode *>
-  getReachableNodes(std::set<const CGNode *> Initial) const;
-  void printSubGraph(const char *DotFile, std::set<const CGNode *> Roots) const;
-  void printSubGraph(const char *DotFile, const CGNode *Root) const;
-  void printEpsilonLoop(const char *DotFile,
-                        std::set<const CGNode *> Nodes) const;
-  std::vector<SubTypeConstraint> toConstraints();
 
-  void instantiateConstraints(const ConstraintSummary &Summary);
+  void instantiateConstraints(const ConstraintSummary &Summary) {
+    assert(false && "TODO");
+  }
 
   static ConstraintGraph fromConstraints(std::shared_ptr<TRContext> Ctx,
                                          std::string FuncName,
-                                         const ConstraintSummary &Summary);
+                                         const ConstraintSummary &Summary) {
+    assert(false && "TODO");
+  }
 
   bool hasEdge(const CGNode &From, const CGNode &To, EdgeLabel Label) const {
     assert(&From.Parent == this && &To.Parent == this);
@@ -326,37 +269,8 @@ public:
   std::map<const CGEdge *, const CGEdge *> mergeNodeTo(CGNode &From, CGNode &To,
                                                        bool NoSelfLoop = false);
 
-  const CGEdge *addRecallEdge(CGNode &From, CGNode &To, FieldLabel Label) {
-    assert(!isNotSymmetry && "addEdgeDualVariance: not symmetry!");
-    if (Label.isStore() || Label.isIn()) {
-      assert(From.getVariance() != To.getVariance());
-    } else {
-      assert(From.getVariance() == To.getVariance());
-    }
-    auto Ret = addEdgeDualVariance(From, To, {RecallLabel{.label = Label}});
-    addEdgeDualVariance(To, From, {ForgetLabel{.label = Label}});
-    return Ret;
-  }
-
-  const CGEdge *addEdgeDualVariance(CGNode &From, CGNode &To, EdgeLabel Label);
-
   const CGEdge *addEdge(CGNode &From, CGNode &To, EdgeLabel Label);
-
-  void removeEdgeDual(CGNode &From, CGNode &To, EdgeLabel Label) {
-    assert(&From.Parent == this && &To.Parent == this);
-    if (&From == &To) {
-      removeEdge(From, To, Label);
-      auto &CN = getReverseVariant(From);
-      removeEdge(CN, CN, Label);
-      return;
-    }
-    removeEdge(From, To, Label);
-    if (Label.isOne()) {
-      removeEdge(getReverseVariant(To), getReverseVariant(From), Label);
-    } else {
-      removeEdge(getReverseVariant(From), getReverseVariant(To), Label);
-    }
-  }
+  const CGEdge *addFlowEdge(CGNode &From, CGNode &To);
 
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(&From.Parent == this && &To.Parent == this);
@@ -382,75 +296,12 @@ public:
   }
 
 protected:
-  CGNode &emplace(const NodeKey &N, llvm::Type *LowTy);
-
-  friend struct CGNode;
-  template <typename GraphTy, typename NodeTy> friend struct NFADeterminizer;
+  CGNode &emplace(unsigned long N, llvm::Type *LowTy);
 
 public:
   // void reTagBaseTV();
-  void setPointer(CGNode &Node) {
-    Node.getPNIVar()->setPtrOrNum(Pointer);
-  }
+  void setPointer(CGNode &Node) { Node.getPNIVar()->setPtrOrNum(Pointer); }
 };
-
-struct ConstraintSummaryInstance {
-  ConstraintGraph &CG;
-  const ConstraintSummary &Summary;
-  std::map<NodeKey, CGNode *> NodeMap;
-  std::map<size_t, PNINode *> ID2PNI;
-  std::map<size_t, std::string> ID2PNIStr;
-
-  CGNode &getNode(NodeKey Key) { return *NodeMap.at(Key); }
-
-  CGNode &getOrInsertNodeWithPNI(NodeKey Key, PNINode *PN) {
-    auto It = NodeMap.find(Key);
-    if (It != NodeMap.end()) {
-      return *It->second;
-    } else {
-      auto [N, NC] = CG.createNodePairWithPNI(Key, PN);
-      NodeMap.emplace(N.key, &N);
-      NodeMap.emplace(NC.key, &NC);
-      return N;
-    }
-  }
-
-  void addRecalls(CGNode &N);
-  void addForgets(CGNode &N);
-  void addConstraint(CGNode &From, CGNode &To);
-
-  void instantiateConstraints();
-};
-
-std::vector<SubTypeConstraint>
-expToConstraints(std::shared_ptr<TRContext> Ctx, PRExp E);
-std::string toString(const std::set<CGNode *> Set);
-
-// inline NodeKey MakeContraVariant(NodeKey Key) {
-//   assert(Key.SuffixVariance == Covariant);
-//   Key.SuffixVariance = Contravariant;
-//   return Key;
-// }
-
-inline NodeKey MakeReverseVariant(NodeKey Key) {
-  Key.SuffixVariance = !Key.SuffixVariance;
-  return Key;
-}
-
-inline bool isOffsetOrOne(const CGEdge &E) {
-  if (auto Rec = E.Label.getAs<RecallLabel>()) {
-    return Rec->label.isOffset();
-  } else if (auto Rec = E.Label.getAs<ForgetLabel>()) {
-    return Rec->label.isOffset();
-  } else if (E.Label.isOne()) {
-    return true;
-  }
-  return false;
-}
-
-bool hasOffsetEdge(CGNode &Start);
-const CGEdge *getOnlyLoadOrStoreEdge(CGNode &N);
-unsigned countLoadOrStoreEdge(CGNode &N);
 
 } // namespace notdec::mlsub
 
