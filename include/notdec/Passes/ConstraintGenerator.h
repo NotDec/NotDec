@@ -369,6 +369,8 @@ struct ConstraintsGenerator {
   std::shared_ptr<ConstraintsGenerator>
   cloneShared(std::map<const retypd::CGNode *, retypd::CGNode *> &Old2New,
               bool isMergeClone = false);
+  std::shared_ptr<ConstraintsGenerator> genSketch(std::map<const CGNode *, CGNode *>& Old2New);
+
   ConstraintsGenerator(TypeRecovery &Ctx, std::string Name,
                        std::set<llvm::Function *> SCCs = {})
       : Ctx(Ctx), CG(Ctx.TRCtx, Ctx.pointer_size, Name, false), PG(CG.PG.get()),

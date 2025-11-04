@@ -331,38 +331,6 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
                           std::optional<std::string> DebugDir) {
   const clock_t begin_time = clock();
 
-  if (G.PG) {
-    G.PG->clearConstraints();
-  }
-  std::map<const CGNode *, CGNode *> Old2New;
-  std::shared_ptr<ConstraintsGenerator> G2S = G.cloneShared(Old2New);
-
-  assert(!G2S->CG.isNotSymmetry && "postProcess: already not Symmetry?");
-  G2S->CG.isNotSymmetry = true;
-
-  G2S->CallToInstance.clear();
-  G2S->UnhandledCalls.clear();
-
-  ConstraintsGenerator &G2 = *G2S;
-  assert(G2.PG);
-  std::string Name = G2.CG.Name;
-  G2.CG.Name += "-dtm";
-
-  // if (G2.CG.Name == "strlen-sig-dtm") {
-  //   std::cerr << "here\n";
-  // }
-
-  G2.CG.sketchSplit();
-  G2.CG.changeStoreToLoad();
-  // G2.CG.ensureNoForgetLabel();
-  G2.offZeroToOne();
-
-  if (DebugDir) {
-    G2.CG.printGraph(
-        getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
-  }
-
-  std::shared_ptr<ConstraintsGenerator> G3S;
   int Level = 0;
   if (auto S = std::getenv("NOTDEC_POSTPROCESS_LEVEL")) {
     if (strlen(S) > 0) {
@@ -379,17 +347,59 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
     }
   }
 
+  if (G.PG) {
+    G.PG->clearConstraints();
+  }
+  std::map<const CGNode *, CGNode *> Old2New;
+
+  std::shared_ptr<ConstraintsGenerator> G2S;
+  if (Level != 0) {
+    G2S = G.cloneShared(Old2New);
+
+    assert(!G2S->CG.isNotSymmetry && "postProcess: already not Symmetry?");
+    G2S->CG.isNotSymmetry = true;
+
+    G2S->CallToInstance.clear();
+    G2S->UnhandledCalls.clear();
+
+    ConstraintsGenerator &G2 = *G2S;
+    assert(G2.PG);
+    std::string Name = G2.CG.Name;
+    G2.CG.Name += "-dtm";
+
+    // if (G2.CG.Name == "strlen-sig-dtm") {
+    //   std::cerr << "here\n";
+    // }
+
+    G2.CG.sketchSplit();
+    G2.CG.changeStoreToLoad();
+    // G2.CG.ensureNoForgetLabel();
+    G2.offZeroToOne();
+
+    if (DebugDir) {
+      G2.CG.printGraph(
+          getUniquePath(join(*DebugDir, "07-BeforeDtm"), ".dot").c_str());
+    }
+  }
+
+  std::shared_ptr<ConstraintsGenerator> G3S;
+
   // level 0: subtype equal
   // level 1: determinize.
   // level 2: minimize.
   if (Level == 0) {
-    G2.eliminateCycle(DebugDir);
-    G2.makePointerEqual(DebugDir);
-    G2.quotientMerge();
+
+    // G2.eliminateCycle(DebugDir);
+    // G2.makePointerEqual(DebugDir);
+    // G2.quotientMerge();
+
+    G2S = G.genSketch(Old2New);
+    ConstraintsGenerator &G2 = *G2S;
     G2.eliminateCycle(DebugDir);
     G2.hasNoOnes();
     G3S = G2S;
   } else if (Level == 1) {
+    ConstraintsGenerator &G2 = *G2S;
     G2.eliminateCycle(DebugDir);
     // // merge nodes that only subtype to another node
     // G2.mergeOnlySubtype();
@@ -398,6 +408,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
     // G2.CG.aggressiveSimplify();
     G3S = G2S;
   } else if (Level == 2) {
+    ConstraintsGenerator &G2 = *G2S;
     G2.eliminateCycle(DebugDir);
     std::map<const CGNode *, CGNode *> Old2New2;
     G3S = G2.minimizeShared(Old2New2);
@@ -1750,6 +1761,277 @@ bool ConstraintsGenerator::checkSymmetry() {
 // }
 
 std::shared_ptr<ConstraintsGenerator>
+ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New) {
+  // 为了提升效率，不要调用clone方法，而是直接：
+  // 1. 忽视部分边，仿佛sketch split过。
+  // 2. 把store和load看作相同边。
+  // 3. 把offset 0 看作子类型边
+
+  // 2. DSU构建，在当前图上构建等价类关系。
+  // 子类型关系看作等价关系的合并，以及同一等价类的相同出边合并
+
+  // 使用并查集来管理等价类，但是直接维护每个节点映射到的等价类集合。
+  // 直接在堆上分配std::set<CGNode *>对象。
+  struct DSUSet {
+    std::set<CGNode *> Set;
+    CGNode *R = nullptr;
+
+    using iteratorTy = std::list<DSUSet>::iterator;
+    iteratorTy getIterator() {
+      size_t iterOffset = (size_t)&(*((iteratorTy) nullptr));
+      iteratorTy iter;
+      *(intptr_t *)&iter = (intptr_t)this - iterOffset;
+      return iter;
+    }
+  };
+  std::map<CGNode *, DSUSet *> equivalenceClasses;
+  std::list<DSUSet> groups;
+  // 无需初始化，如果节点不在parent map中，则默认它映射到自己。
+
+  // 查找根节点的函数
+  std::function<CGNode *(CGNode *)> find = [&](CGNode *node) -> CGNode * {
+    auto It = equivalenceClasses.find(node);
+    if (It == equivalenceClasses.end()) {
+      return node;
+    } else {
+      return It->second->R;
+    }
+  };
+
+  // 合并两个等价类
+  auto unionNodes = [&](CGNode *a, CGNode *b) -> bool {
+    DSUSet *setA = nullptr;
+    DSUSet *setB = nullptr;
+
+    // 获取节点a的集合
+    auto itA = equivalenceClasses.find(a);
+    if (itA == equivalenceClasses.end()) {
+      // 节点a不在任何集合中，创建新集合
+      setA = &groups.emplace_back();
+      setA->Set.insert(a);
+      setA->R = a;
+      equivalenceClasses.insert({a, setA});
+    } else {
+      setA = itA->second;
+    }
+
+    // 获取节点b的集合
+    auto itB = equivalenceClasses.find(b);
+    if (itB == equivalenceClasses.end()) {
+      // 节点b不在任何集合中，创建新集合
+      setB = &groups.emplace_back();
+      setB->Set.insert(b);
+      setB->R = b;
+      equivalenceClasses.insert({b, setB});
+    } else {
+      setB = itB->second;
+    }
+
+    // 如果已经在同一个集合中，直接返回
+    if (setA != nullptr && setA == setB)
+      return false;
+
+    // 选择id较小的节点作为新的代表节点
+    bool isASmaller = setA->R->getId() < setB->R->getId();
+    CGNode *newRep = isASmaller ? setA->R : setB->R;
+    // 合并集合：将setB合并到setA中
+    DSUSet *targetSet = isASmaller ? setA : setB;
+    DSUSet *sourceSet = isASmaller ? setB : setA;
+
+    // 将源集合的所有节点添加到目标集合
+    targetSet->Set.insert(sourceSet->Set.begin(), sourceSet->Set.end());
+
+    // 更新所有源集合节点的映射指向目标集合
+    for (CGNode *node : sourceSet->Set) {
+      equivalenceClasses[node] = targetSet;
+    }
+
+    // 更新目标集合的代表节点
+    targetSet->R = newRep;
+
+    // 删除源集合（避免内存泄漏）
+    groups.erase(sourceSet->getIterator());
+    return true;
+  };
+
+  // 3 根据DSU关系，构建等价类，然后将所有等价类映射为单个新的图中的节点。
+  // 等价类内部的边，子类型的话就去掉，其他的变成自己指向自己。
+  // 2. DSU构建，在当前图上构建等价类关系
+
+  // 3. 根据规则合并等价类
+  // 规则1: 子类型关系看作等价关系的合并
+  for (auto &node : CG) {
+    for (auto &edge : node.outEdges) {
+      CGNode *source = const_cast<CGNode *>(&edge.getSourceNode());
+      CGNode *target = const_cast<CGNode *>(&edge.getTargetNode());
+      if (edge.getLabel().isOne()) {
+        // 子类型边，合并源节点和目标节点
+        unionNodes(source, target);
+      } else if (edge.getLabel().isRecallLabel()) { // offset 0 也看作子类型边。
+        if (auto Off = retypd::getOffsetLabel(edge.getLabel())) {
+          if (Off->range.isZero()) {
+            unionNodes(source, target);
+          }
+        }
+      }
+    }
+  }
+
+  // 规则2: 同一等价组内，相同出边的节点合并。load边看作store边。
+  bool Changed = true;
+  while (Changed) {
+    Changed = false;
+    // TODO
+    // 遍历所有等价组，遍历所有离开等价组的RecallLabel边，整理从边label到目标节点的集合
+    // 复制当前的groups
+    std::map<retypd::FieldLabel, std::set<CGNode *>> labelToNodes;
+    for (auto &group : groups) {
+      for (auto N : group.Set) {
+        for (auto &E : N->outEdges) {
+          auto Target = const_cast<CGNode *>(&E.getTargetNode());
+          if (group.Set.count(Target)) {
+            continue;
+          }
+          if (auto RL = E.getLabel().getAs<retypd::RecallLabel>()) {
+            // normalize store and load.
+            auto Label = RL->label;
+            if (auto S = Label.getAs<retypd::StoreLabel>()) {
+              Label = FieldLabel{retypd::LoadLabel{.Size = S->Size}};
+            }
+            labelToNodes[Label].insert(Target);
+          }
+        }
+      }
+    }
+    // 遍历得到的集合，大小大于1的执行合并。
+    for (auto Ent : labelToNodes) {
+      if (Ent.second.size() > 1) {
+        auto It = Ent.second.begin();
+        auto Rep = *It;
+        It++;
+        for (; It != Ent.second.end(); It++) {
+          auto Updated = unionNodes(Rep, *It);
+          if (Updated) {
+            Changed = true;
+          }
+        }
+      }
+    }
+  };
+
+  // 5. 创建新的shared_ptr ConstraintsGenerator，复制关键节点，start end memory
+  auto To = std::make_shared<ConstraintsGenerator>(Ctx, CG.Name + "-sketch");
+  if (CG.Start) {
+    Old2New.insert({CG.Start, To->CG.getStartNode()});
+  }
+  if (CG.End) {
+    Old2New.insert({CG.End, To->CG.getEndNode()});
+  }
+
+  std::function<CGNode *(CGNode *)> doMap = [&](CGNode *N) -> CGNode * {
+    auto It = Old2New.find(N);
+    if (It != Old2New.end()) {
+      return It->second;
+    }
+    assert(!N->isStartOrEnd());
+    auto It2 = equivalenceClasses.find(N);
+    CGNode *NewNode = nullptr;
+    if (It2 == equivalenceClasses.end()) {
+      NewNode = &To->CG.createNodeNoPNI(N->key, N->Size);
+    } else {
+      auto Rep = It2->second->R;
+      if (N == Rep) {
+        NewNode = &To->CG.createNodeNoPNI(N->key, N->Size);
+      } else {
+        NewNode = doMap(Rep);
+      }
+    }
+    assert(NewNode != nullptr);
+    auto It3 = Old2New.insert({N, NewNode});
+    assert(It3.second && "clone: Node already cloned!?");
+    return NewNode;
+  };
+
+  // 创建新节点
+  for (auto &N : CG) {
+    if (N.isStartOrEnd()) {
+      continue;
+    }
+    doMap(&N);
+  }
+
+  // clone all edges
+  for (auto &Node : CG.Nodes) {
+    auto NewNode = Old2New.at(&Node);
+    for (auto &Edge : Node.outEdges) {
+      // sketchSplit
+      if (Edge.getLabel().isForgetLabel() || Edge.getLabel().isRecallBase()) {
+        continue;
+      }
+      if (Edge.Label.isOne() && Node.key.Base.isPrimitive() &&
+          Edge.getTargetNode().key.Base.isPrimitive()) {
+        // one edge between primitive is invalid.
+        continue;
+      }
+      auto &Target = Edge.getTargetNode();
+      auto NewTarget = Old2New.at(&Target);
+      auto Label = Edge.Label;
+      if (retypd::isStore(Label)) {
+        Label = retypd::toLoad(Label);
+      }
+      if (NewNode == NewTarget) {
+        // filter self edge
+        if (Label.isOne()) {
+          continue;
+        }
+        if (auto Off = retypd::getOffsetLabel(Label)) {
+          if (Off->range.isZero()) {
+            continue;
+          }
+        }
+      }
+      To->CG.onlyAddEdge(*NewNode, *NewTarget, Label);
+    }
+  }
+
+  // clone PNI Graph
+  if (CG.PG) {
+    To->CG.PG->cloneFrom(*CG.PG, Old2New);
+  }
+
+  if (CG.Memory) {
+    To->CG.Memory = Old2New.at(CG.Memory);
+    if (To->CG.Memory->key.Base.getBaseName() != "MEMORY") {
+      To->CG.Memory->key = CG.Memory->key;
+    }
+  }
+  if (CG.MemoryC) {
+    To->CG.MemoryC = Old2New.at(CG.MemoryC);
+    if (To->CG.MemoryC->key.Base.getBaseName() != "MEMORY") {
+      To->CG.MemoryC->key = CG.MemoryC->key;
+    }
+  }
+
+  // 更新V2N映射
+  for (auto &Ent : V2N) {
+    // this is NodeKey, no need to map.
+    auto It = To->V2N.insert(Ent.first, Old2New.at(Ent.second));
+    assert(It.second);
+  }
+  for (auto &Ent : V2NContra) {
+    auto It = To->V2NContra.insert(Ent.first, Old2New.at(Ent.second));
+    assert(It.second);
+  }
+
+  // 复制其他必要的信息
+  To->SCCs = SCCs;
+  // skip CallToInstance UnhandledCalls
+  To->CG.isNotSymmetry = true;
+  To->CG.isSketchSplit = true;
+  return To;
+}
+
+std::shared_ptr<ConstraintsGenerator>
 ConstraintsGenerator::cloneShared(std::map<const CGNode *, CGNode *> &Old2New,
                                   bool isMergeClone) {
   auto G = std::make_shared<ConstraintsGenerator>(Ctx, CG.Name);
@@ -2075,8 +2357,8 @@ void ConstraintsGenerator::eliminateCycle(std::optional<std::string> DebugDir) {
         };
 
     for (auto &Ent : InternalSCCEdges) {
-      auto Src = std::get<0>(Ent);
-      auto Dst = std::get<1>(Ent);
+      // auto Src = std::get<0>(Ent);
+      // auto Dst = std::get<1>(Ent);
       auto &L = std::get<2>(Ent);
       if (auto Off = retypd::getOffsetLabel(L)) {
         VisitOffset(Off->range.offset, Ent);
@@ -2381,7 +2663,8 @@ void ConstraintsGenerator::recoverNodes(ConstraintsGenerator &From) {
         auto NewKey =
             NodeKey{TypeVariable::CreateDtv(*CG.Ctx, TypeVariable::Memory),
                     OldN->getVariance()};
-        auto isUpdated = UpdateKey(NewKey, *NewN);
+        // auto isUpdated =
+        UpdateKey(NewKey, *NewN);
         // assert(isUpdated);
         if (OldN->getVariance() == retypd::Covariant) {
           CG.Memory = NewN;
@@ -2413,7 +2696,8 @@ void ConstraintsGenerator::recoverNodes(ConstraintsGenerator &From) {
     CGNode *NewN = nullptr;
     if (Ent.second.size() == 1) {
       NewN = const_cast<CGNode *>(*Ent.second.begin());
-      auto isUpdated = UpdateKey(OldN->key, *NewN);
+      // auto isUpdated =
+      UpdateKey(OldN->key, *NewN);
       V2NMap.insert({OldN, NewN});
     } else {
       assert(false);
@@ -3490,7 +3774,6 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
   if (Gep.getPointerOperand()->getName().startswith("table_")) {
     return;
   } else if (Gep.hasAllZeroIndices()) {
-    
   }
   std::cerr << "Warning: RetypdGeneratorVisitor::visitGetElementPtrInst: "
                "Gep should not exist before this pass!\n";
