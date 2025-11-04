@@ -196,8 +196,10 @@ struct TypeRecovery {
   std::shared_ptr<SCCTypeResult>
   getASTTypes(SCCData &Data,
               std::optional<std::string> DebugDir = std::nullopt);
-  std::shared_ptr<ConstraintsGenerator> getGlobalGraph(std::optional<std::string> DebugDir = std::nullopt);
-  std::shared_ptr<ConstraintsGenerator> getGlobalSketchGraph(std::optional<std::string> DebugDir = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator>
+  getGlobalGraph(std::optional<std::string> DebugDir = std::nullopt);
+  std::shared_ptr<ConstraintsGenerator>
+  getGlobalSketchGraph(std::optional<std::string> DebugDir = std::nullopt);
   void topDownPhase();
   void genASTTypes(llvm::Module &M);
 

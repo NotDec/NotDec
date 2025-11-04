@@ -547,7 +547,41 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
   // assert(PNINodes.size() == 0);
   // assert(Constraints.size() == 0);
 
-  std::set<std::pair<PNINode *, PNINode *>> toMerge;
+  std::map<PNINode *, PNINode *> toMerge;
+
+  std::function<PNINode *(PNINode *)> Find = [&](PNINode *node) -> PNINode * {
+    auto It = toMerge.find(node);
+    if (It == toMerge.end()) {
+      // 如果节点不在并查集中，即表示没有被合并
+      return node;
+    }
+
+    if (It->second == node) {
+      return node;
+    }
+
+    // 路径压缩
+    auto To = Find(It->second);
+    if (To != It->second) {
+      It->second = To;
+    }
+    return To;
+  };
+
+  auto Merge = [&](PNINode *N1, PNINode *N2) {
+    PNINode *rootA = Find(N1);
+    PNINode *rootB = Find(N2);
+
+    if (rootA != rootB) {
+      // 总是合并到较小的节点（避免非确定性）
+      if (rootA->getId() < rootB->getId()) {
+        toMerge[rootB] = rootA;
+      } else {
+        toMerge[rootA] = rootB;
+      }
+    }
+  };
+
   // clone PNINodes
   for (auto &N : G.PNINodes) {
     auto *NewNode = clonePNINode(N);
@@ -561,7 +595,7 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
         addPNINodeTarget(*NewCGNode, *NewNode);
       } else {
         // merge with that node.
-        toMerge.insert({NewCGNode->getPNIVar(), NewNode});
+        Merge(NewCGNode->getPNIVar(), NewNode);
       }
     }
   }
@@ -577,7 +611,8 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
     }
   }
   for (auto Ent : toMerge) {
-    Ent.first->unify(*Ent.second);
+    auto Target = Find(Ent.first);
+    Target->unify(*Ent.first);
   }
 }
 

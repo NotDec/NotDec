@@ -714,6 +714,19 @@ inline bool isStore(const EdgeLabel &label) {
   }
 }
 
+inline EdgeLabel toLoad(const EdgeLabel &label) {
+  if (auto *RL = label.getAs<RecallLabel>()) {
+    if (auto S = RL->label.getAs<StoreLabel>()) {
+      return {RecallLabel{LoadLabel{.Size=S->Size}}};
+    }
+  } else if (auto *FL = label.getAs<ForgetLabel>()) {
+    if (auto S = RL->label.getAs<StoreLabel>()) {
+      return {ForgetLabel{LoadLabel{.Size=S->Size}}};
+    }
+  }
+  assert(false && "toLoad: Not a ForgetStore or RecallStore");
+}
+
 inline bool isLoadOrStore(const EdgeLabel &label) {
   if (auto *RL = label.getAs<RecallLabel>()) {
     return RL->label.isLoad() || RL->label.isStore();
