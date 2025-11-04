@@ -57,7 +57,7 @@ bool check(std::vector<notdec::retypd::SubTypeConstraint> &Cons,
 TEST(Retypd, SaturationPaperTest) {
   std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
   llvm::DebugFlag = true;
-  llvm::setCurrentDebugType("retypd_graph");
+  // llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons = parse_constraints(
       *Ctx, {"y <= p", "p <= x", "A <= x.store4", "y.load4 <= B"}, 32);
   std::map<TypeVariable, std::string> PNIMap = {
@@ -89,7 +89,7 @@ TEST(Retypd, SaturationPaperTest) {
 TEST(Retypd, SaturationOffsetTest) {
   std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
   llvm::DebugFlag = true;
-  llvm::setCurrentDebugType("retypd_graph");
+  // llvm::setCurrentDebugType("retypd_graph");
   std::vector<notdec::retypd::Constraint> cons =
       parse_constraints(*Ctx, {"x.@2 <= C", "C.@2 <= D", "D <= y.@4",
                                "A <= x.load4", "y.load4 <= B"}, 32);
@@ -127,7 +127,7 @@ TEST(Retypd, SaturationOffsetTest) {
 TEST(Retypd, SlidesExampleTest) {
   std::shared_ptr<TRContext> Ctx = std::make_shared<TRContext>();
   llvm::DebugFlag = true;
-  llvm::setCurrentDebugType("retypd_graph");
+  // llvm::setCurrentDebugType("retypd_graph");
   std::vector<Constraint> cons =
       parse_constraints(*Ctx, {
                                   "F.in_stack0 <= 𝛿",

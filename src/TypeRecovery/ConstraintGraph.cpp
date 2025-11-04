@@ -523,6 +523,8 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
     }
   };
   auto finalExp = getPexp(getStartNode(), getEndNode());
+
+#ifndef NDEBUG
   if ((::llvm::DebugFlag && ::llvm::isCurrentDebugType(DEBUG_TYPE))) {
     // flatten the outer most Or
     if (std::holds_alternative<rexp::Or>(*finalExp)) {
@@ -535,6 +537,7 @@ std::vector<SubTypeConstraint> ConstraintGraph::solve_constraints_between() {
       llvm::dbgs() << "Final Expression: " << toString(finalExp) << "\n";
     }
   }
+#endif
 
   // 2. adjust the expr to create type schemes.
   auto ret = expToConstraints(Ctx, finalExp);
@@ -1479,7 +1482,8 @@ void ConstraintGraph::sketchSplit() {
         toRemove.push_back(&Edge);
         // removeEdge(Source, Target, Edge.Label);
         // continue;
-      } else if (Edge.Label.isOne() && Node.key.Base.isPrimitive() && Edge.getTargetNode().key.Base.isPrimitive()) {
+      } else if (Edge.Label.isOne() && Node.key.Base.isPrimitive() &&
+                 Edge.getTargetNode().key.Base.isPrimitive()) {
         // one edge between primitive is invalid.
         toRemove.push_back(&Edge);
       }
