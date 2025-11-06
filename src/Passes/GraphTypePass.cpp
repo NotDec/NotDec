@@ -162,16 +162,16 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     // this is a struct or union.
     std::vector<FieldEntry> Fields;
 
-    // normalize load edge as zero offset
-    for (auto &E : N.outEdges) {
-      // auto &Target = const_cast<CGNode &>(E.getTargetNode());
-      if (retypd::isLoadOrStore(E.Label)) {
-        // separate the load/store edge as a simple pointer node.
-        // auto &New =
-        splitEdge(E, {retypd::RecallLabel{OffsetLabel{OffsetRange()}}}, E.Label,
-                  ValueNamer::getName("F0_"));
-        // break;
+    std::vector<CGEdge> OE1;
+    for (auto &Edge : N.outEdges) {
+      if (retypd::isLoadOrStore(Edge.Label)) {
+        OE1.emplace_back(Edge);
       }
+    }
+    // normalize load edge as zero offset
+    for (auto &E : OE1) {
+      splitEdge(E, {retypd::RecallLabel{OffsetLabel{OffsetRange()}}}, E.Label,
+                ValueNamer::getName("F0_"));
     }
 
     // 处理所有数组类型的成员

@@ -68,7 +68,7 @@ public:
     return false;
   }
 
-  unsigned long getId() const { return Id; }
+  [[nodiscard]] unsigned long getId() const { return Id; }
   PtrOrNum getPtrOrNum() const { return Ty.getPtrOrNum(); }
   bool isConflict() const { return Ty.isConflict(); }
   void setConflict() { Ty.setConflict(); }

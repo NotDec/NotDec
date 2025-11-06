@@ -708,6 +708,18 @@ void ConstraintGraph::recoverBaseVars() {
     addEdge(Source, *NewSource, {retypd::One{}});
     toRemove.push_back(std::make_tuple(&Source, End, IE->getLabel()));
   }
+
+  // 恢复rev variance map.
+  for (auto &Ent : RecNodeMap) {
+    auto RevKey = MakeReverseVariant(Ent.first);
+    auto It = RecNodeMap.find(RevKey);
+    if (It != RecNodeMap.end()) {
+      auto RevN = It->second;
+      RevVariance.insert({Ent.second, RevN});
+      RevVariance.insert({RevN, Ent.second});
+    }
+  }
+
   for (auto &[From, To, Label] : toRemove) {
     removeEdge(*From, *To, Label);
   }

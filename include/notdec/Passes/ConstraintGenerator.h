@@ -343,7 +343,7 @@ struct ConstraintsGenerator {
   void linkContraToCovariant();
 
   bool checkSymmetry();
-  // void makeSymmetry();
+  void makeSymmetry();
 
   void dumpV2N();
 

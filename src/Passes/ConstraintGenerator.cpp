@@ -608,13 +608,12 @@ void TypeRecovery::bottomUpPhase() {
     std::shared_ptr<ConstraintsGenerator> Summary;
     bool isDeclaration =
         SCCSet.size() == 1 && (*SCCSet.begin())->isDeclaration();
-    // for declaration, summary is already overriden
-    if (isDeclaration) {
-      Summary = Generator;
-    } else if (SummaryOverride.count(SCCSet)) {
-      // Non-declaration, but summary overriden
+    if (SummaryOverride.count(SCCSet)) {
+      // summary overriden
       std::cerr << "Summary Overriden: " << Name << ":\n";
       Summary = SummaryOverride.at(SCCSet);
+    } else if (isDeclaration) {
+      Summary = Generator;
     } else {
       //!! normal case, generate summary
       std::cerr << "Generating Summary for " << Name << "\n";
@@ -666,7 +665,7 @@ TypeRecovery::getBottomUpGraph(SCCData &Data,
   bool isExternalFunc =
       SCCSet.size() == 1 && (*SCCSet.begin())->isDeclaration();
   bool isOverride = false;
-  if (SummaryOverride.count(SCCSet)) {
+  if (isExternalFunc && SummaryOverride.count(SCCSet)) {
     std::cerr << "Override summary for external function: " << Data.SCCName
               << ":\n";
     Generator = SummaryOverride.at(SCCSet);
@@ -1016,7 +1015,7 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
       AllSCCs.push_back(SCCData{.Nodes = NodeVec});
     }
   }
-  assert(HasPolymorphic == false && "Last SCC cannot be polymorphic!");
+  // assert(HasPolymorphic == false && "Last SCC cannot be polymorphic!");
 
   Func2SCCIndex.clear();
   // 2. Calc name and SCCSet
@@ -1253,6 +1252,7 @@ TypeRecovery::getGlobalGraph(std::optional<std::string> DebugDir) {
   }
   return AG.Global;
 }
+
 std::shared_ptr<ConstraintsGenerator>
 TypeRecovery::getGlobalSketchGraph(std::optional<std::string> DebugDir) {
   if (AG.GlobalSketch) {
@@ -1803,6 +1803,10 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New) {
     DSUSet *setA = nullptr;
     DSUSet *setB = nullptr;
 
+    if (a->getPNIVar()->getSize() != b->getPNIVar()->getSize()) {
+      return false;
+    }
+
     // 获取节点a的集合
     auto itA = equivalenceClasses.find(a);
     if (itA == equivalenceClasses.end()) {
@@ -1830,6 +1834,10 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New) {
     // 如果已经在同一个集合中，直接返回
     if (setA != nullptr && setA == setB)
       return false;
+
+    if (setA->R->getPNIVar()->getSize() != setB->R->getPNIVar()->getSize()) {
+      return false;
+    }
 
     // 选择id较小的节点作为新的代表节点
     bool isASmaller = setA->R->getId() < setB->R->getId();
@@ -3252,6 +3260,7 @@ ConstraintsGenerator::genSummary(std::optional<std::string> DebugDir) {
   Ret->SCCs = SCCs;
   std::map<const CGNode *, CGNode *> Tmp;
   ConstraintGraph::clone(Tmp, G2, Ret->CG);
+  Ret->makeSymmetry();
 
   // summary 的关键是要维护两个variance的函数节点的映射。
   Ret->fixSCCFuncMappings();
@@ -4248,14 +4257,15 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::fromConstraints(
   auto Ret = std::make_shared<ConstraintsGenerator>(Ctx, SCCNames, SCCs);
   Ret->CG.instantiateConstraints(Summary);
   Ret->fixSCCFuncMappings();
-  // std::map<CGNode*,  retypd::Variance> Initial;
+  // std::map<CGNode *, retypd::Variance> Initial;
   // for (auto &Ent : Ret->V2N) {
-  //   Initial[&Ret->getNode(Ent.second)] = retypd::Covariant;
+  //   Initial[Ent.second] = retypd::Covariant;
   // }
   // for (auto &Ent : Ret->V2NContra) {
-  //   Initial[&Ret->getNode(Ent.second)] = retypd::Contravariant;
+  //   Initial[Ent.second] = retypd::Contravariant;
   // }
   // Ret->CG.markVariance(&Initial);
+  // Ret->makeSymmetry();
   if (Ret->V2N.size() == 0 && Ret->V2NContra.size() == 0) {
     assert(false && "Empty constraints?");
   }
@@ -4272,6 +4282,64 @@ std::shared_ptr<ConstraintsGenerator> ConstraintsGenerator::fromDotSummary(
     return nullptr;
   }
   return Ret;
+}
+
+void ConstraintsGenerator::makeSymmetry() {
+  // Fix node symmetry.
+  for (auto &N : CG.Nodes) {
+    if (N.isStartOrEnd()) {
+      continue;
+    }
+    CGNode *NC = nullptr;
+    if (CG.RevVariance.count(&N)) {
+      NC = &CG.getReverseVariant(N);
+    } else {
+      NC = &CG.createNodeWithPNI(retypd::MakeReverseVariant(N.key),
+                                 N.getPNIVar());
+      CG.RevVariance.insert({&N, NC});
+      CG.RevVariance.insert({NC, &N});
+    }
+  }
+  // Fix edge symmetry
+  for (auto &N : CG.Nodes) {
+    for (auto &Edge : N.outEdges) {
+      if (Edge.getLabel().isRecallBase() || Edge.getLabel().isForgetBase()) {
+        continue;
+      }
+      auto &NC = CG.getReverseVariant(N);
+      auto &T = const_cast<CGNode &>(Edge.getTargetNode());
+      auto &TC = CG.getReverseVariant(T);
+      auto &Label = Edge.getLabel();
+      if (Label.isOne()) {
+        // 这里不一定要recall labels forget
+        // labels。因为summary里面可能有特殊的节点。 addSubtype(N, T);
+        CG.addEdge(TC, NC, {retypd::One{}});
+      } else if (auto RL = Label.getAs<retypd::RecallLabel>()) {
+        auto FL = toForget(*RL);
+        CG.addEdge(T, N, {FL});
+        CG.addEdge(NC, TC, {*RL});
+        CG.addEdge(TC, NC, {FL});
+      } else if (auto FL = Label.getAs<retypd::ForgetLabel>()) {
+        auto RL = toRecall(*FL);
+        CG.addEdge(T, N, {RL});
+        CG.addEdge(NC, TC, {*FL});
+        CG.addEdge(TC, NC, {RL});
+      } else if (auto RB = Label.getAs<retypd::RecallBase>()) {
+        auto FB = retypd::toForget(*RB);
+        CG.addEdge(T, N, {FB});
+        CG.addEdge(NC, TC, {*RB});
+        CG.addEdge(TC, NC, {FB});
+      } else if (auto FB = Label.getAs<retypd::ForgetBase>()) {
+        auto RB = retypd::toRecall(*FB);
+        CG.addEdge(T, N, {RB});
+        CG.addEdge(NC, TC, {*FB});
+        CG.addEdge(TC, NC, {RB});
+      } else {
+        std::cerr << "Unhandled type!";
+        std::abort();
+      }
+    }
+  }
 }
 
 } // namespace notdec

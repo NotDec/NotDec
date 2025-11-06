@@ -314,7 +314,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         Ty = buildType(*Target, V, Ent.R.Size);
 
         if (!Ty->isPointerType()) {
-          llvm::errs() << "Warning: Offset edge is not pointer type!";
+          llvm::errs() << "Warning: Offset edge is not pointer type!\n";
           continue;
         }
         // the node is a field pointer type. get the field type.
@@ -535,7 +535,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         Ty = buildType(Target, V, Size);
 
         if (!Ty->isPointerType()) {
-          llvm::errs() << "Warning: Offset edge is not pointer type";
+          llvm::errs() << "Warning: Offset edge is not pointer type\n";
           continue;
         }
         // the node is a field pointer type. get the field type.

@@ -363,7 +363,16 @@ void PassEnv::build_passes(int level) {
         MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
         MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
-        MPM.addPass(RecoverDeadAlloca(*TR));
+
+        bool RunDeadAllocaRec = false;
+        if (const char *val = std::getenv("NOTDEC_KEEP_DEAD_STACK")) {
+          if ((std::strcmp(val, "1") == 0)) {
+            RunDeadAllocaRec = true;
+          }
+        }
+        if (RunDeadAllocaRec) {
+          MPM.addPass(RecoverDeadAlloca(*TR));
+        }
         MPM.addPass(InvalidateAllTypes(*TR));
         MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
       }
