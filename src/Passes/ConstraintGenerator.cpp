@@ -393,7 +393,7 @@ TypeRecovery::postProcess(ConstraintsGenerator &G,
     // G2.makePointerEqual(DebugDir);
     // G2.quotientMerge();
 
-    G2S = G.genSketch(Old2New);
+    G2S = G.genSketch(Old2New, DebugDir);
     ConstraintsGenerator &G2 = *G2S;
     G2.eliminateCycle(DebugDir);
     G2.hasNoOnes();
@@ -915,7 +915,7 @@ TypeRecovery::getTopDownGraph(SCCData &Data,
   // 2.3 solve again and fixups
   // ensure lower bound is lower than upper bound
   // CurrentTypes.makeSymmetry();
-  CurrentTypes.linkContraToCovariant();
+  // CurrentTypes.linkContraToCovariant();
   CurrentTypes.CG.solve();
   CurrentTypes.CG.linkConstantPtr2Memory();
   // link primitives for all Graphs in TopDownGenerator.
@@ -1761,7 +1761,8 @@ bool ConstraintsGenerator::checkSymmetry() {
 // }
 
 std::shared_ptr<ConstraintsGenerator>
-ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New) {
+ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New,
+                                std::optional<std::string> DebugDir) {
   // 为了提升效率，不要调用clone方法，而是直接：
   // 1. 忽视部分边，仿佛sketch split过。
   // 2. 把store和load看作相同边。
@@ -1885,6 +1886,27 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New) {
     }
   }
 
+  if (DebugDir) {
+    std::string SketchMergeFile =
+        getUniquePath(join(*DebugDir, "SketchMerge1"), ".txt");
+    std::ofstream Out(SketchMergeFile);
+    // TODO 打印
+    for (auto &Ent : groups) {
+      Out << toString(Ent.R->key) << ": ";
+      for (auto N : Ent.Set) {
+        Out << toString(N->key) << ", ";
+      }
+      Out << "\n";
+    }
+    Out.close();
+  }
+
+  std::optional<std::ofstream> MergeLog;
+  if (DebugDir) {
+    std::string File = getUniquePath(join(*DebugDir, "SketchMergeLog"), ".txt");
+    MergeLog.emplace(File);
+  }
+
   // 规则2: 同一等价组内，相同出边的节点合并。load边看作store边。
   bool Changed = true;
   while (Changed) {
@@ -1892,8 +1914,8 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New) {
     // TODO
     // 遍历所有等价组，遍历所有离开等价组的RecallLabel边，整理从边label到目标节点的集合
     // 复制当前的groups
-    std::map<retypd::FieldLabel, std::set<CGNode *>> labelToNodes;
     for (auto &group : groups) {
+      std::map<retypd::FieldLabel, std::set<CGNode *>> labelToNodes;
       for (auto N : group.Set) {
         for (auto &E : N->outEdges) {
           auto Target = const_cast<CGNode *>(&E.getTargetNode());
@@ -1910,22 +1932,42 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New) {
           }
         }
       }
-    }
-    // 遍历得到的集合，大小大于1的执行合并。
-    for (auto Ent : labelToNodes) {
-      if (Ent.second.size() > 1) {
-        auto It = Ent.second.begin();
-        auto Rep = *It;
-        It++;
-        for (; It != Ent.second.end(); It++) {
-          auto Updated = unionNodes(Rep, *It);
-          if (Updated) {
-            Changed = true;
+      // 遍历得到的集合，大小大于1的执行合并。
+      for (auto Ent : labelToNodes) {
+        if (Ent.second.size() > 1) {
+          auto It = Ent.second.begin();
+          auto Rep = *It;
+          It++;
+          for (; It != Ent.second.end(); It++) {
+            auto Updated = unionNodes(Rep, *It);
+            if (Updated) {
+              if (MergeLog) {
+                *MergeLog << "Merging node " << toString(Rep->key) << " with "
+                          << toString((*It)->key) << ": because of Label "
+                          << toString(Ent.first) << "\n";
+              }
+              Changed = true;
+            }
           }
         }
       }
     }
   };
+
+  if (DebugDir) {
+    std::string SketchMergeFile =
+        getUniquePath(join(*DebugDir, "SketchMerge2"), ".txt");
+    std::ofstream Out(SketchMergeFile);
+    // TODO 打印
+    for (auto &Ent : groups) {
+      Out << toString(Ent.R->key) << ": ";
+      for (auto N : Ent.Set) {
+        Out << toString(N->key) << ", ";
+      }
+      Out << "\n";
+    }
+    Out.close();
+  }
 
   // 5. 创建新的shared_ptr ConstraintsGenerator，复制关键节点，start end memory
   auto To = std::make_shared<ConstraintsGenerator>(Ctx, CG.Name + "-sketch");
@@ -3826,6 +3868,11 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
   auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0, retypd::Covariant);
   if (!Node) {
     if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
+      if (CE->getOpcode() == Instruction::BitCast) {
+        if (auto CE2 = dyn_cast<ConstantExpr>(CE->getOperand(0))) {
+          CE = CE2;
+        }
+      }
       if (CE->getOpcode() == Instruction::GetElementPtr) {
         return;
       }
@@ -3845,7 +3892,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitStoreInst(
   auto StoreNode = PtrVal.getLabelTarget(SL);
   if (StoreNode == nullptr) {
     auto NewKey = PtrVal.key;
-    NewKey.Base.pushLabel({retypd::StoreLabel{.Size = BitSize}});
+    NewKey.Base = NewKey.Base.pushLabel({retypd::StoreLabel{.Size = BitSize}});
     NewKey.SuffixVariance = !NewKey.SuffixVariance;
     auto [SN, SNC] = cg.CG.createNodePairWithPNI(NewKey, StoreVal.getPNIVar());
     StoreNode = &SN;

@@ -318,8 +318,6 @@ void DecompileConfig::find_special_gv() {
 void PassEnv::build_passes(int level) {
   // level 1 only optimizations
   if (level >= 1) {
-    MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
-
     FunctionPassManager FPM = buildFunctionOptimizations();
     // MPM.addPass(FunctionRenamer());
     // MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
@@ -347,6 +345,7 @@ void PassEnv::build_passes(int level) {
       //     createFunctionToLoopPassAdaptor(LoopRotatePass())));
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
+      MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
       MPM.addPass(TypeRecoveryMain(*TR));
 
       // level 3 with TypeRecoveryOpt and stack breaking.
