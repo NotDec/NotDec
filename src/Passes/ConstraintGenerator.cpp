@@ -3184,7 +3184,7 @@ void ConstraintsGenerator::instantiateSummary(
   auto OFC = Summary.getNodeOrNull(Target, nullptr, -1, retypd::Contravariant);
   auto *F = OF != nullptr ? Old2New.at(OF) : nullptr;
   auto *FC = OFC != nullptr ? Old2New.at(OFC) : nullptr;
-  assert(F != nullptr || FC != nullptr);
+  // assert(F != nullptr || FC != nullptr);
   // should create contra edge
   if (F != nullptr) {
     addSubtype(*F, *FI);

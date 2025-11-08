@@ -144,7 +144,7 @@ struct NFADeterminizer {
         auto *PN1 = GT::getInner(N1)->getPNIVar();
         if (PN1 != nullptr && !PN1->isNull() && !PN->tyEqual(*PN1)) {
           llvm::errs() << "Error: Different PNI in a set of nodes!\n";
-          printPNDiffSet(N);
+          // printPNDiffSet(N);
           std::abort();
           return nullptr;
         }
@@ -185,7 +185,7 @@ struct NFADeterminizer {
           GT::getInner(N1)->getPNIVar()->getLatticeTy());
     }
     if (GT::getInner(&NewNode)->getPNIVar()->isConflict() && !alreadyConflict) {
-      printPNDiffSet(N);
+      // printPNDiffSet(N);
       // std::abort();
     }
 
