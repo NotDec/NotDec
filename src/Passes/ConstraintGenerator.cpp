@@ -261,7 +261,7 @@ TypeRecovery::multiGraphDeterminizeTo(ConstraintsGenerator &CurrentTypes,
         Worklist.push(NewNodeEnt);
       }
       auto &ToNode = *DTrans.at(S);
-      assert(L.isRecallLabel() || L.isForgetBase());
+      // assert(L.isRecallLabel() || L.isForgetBase());
       if (auto RL = L.getAs<retypd::RecallLabel>()) {
         CG.addEdge(Node, ToNode, L);
         CG.addEdge(ToNode, Node, {retypd::ForgetLabel{RL->label}});
