@@ -1366,7 +1366,7 @@ void TypeRecovery::genASTTypes(Module &M) {
   using notdec::ast::RecordType;
   RecordDecl *Mem = nullptr;
   // if Memory type is not void
-  if (auto MTy = CTy->getPointeeType()) {
+  if (CTy->isPointerType() && CTy->getPointeeType() != nullptr && CTy->getPointeeType()->isRecordType()) {
     if (auto RD = CTy->getPointeeType()->getAs<RecordType>()) {
       Mem = RD->getDecl();
       Mem->setBytesManager(MemoryBytes);
@@ -1378,6 +1378,9 @@ void TypeRecovery::genASTTypes(Module &M) {
     // auto &Info = TBC.StructInfos[Mem];
     // Info.Bytes = MemoryBytes;
     // Info.resolveInitialValue();
+    // 4 Save the result
+    ResultVal->MemoryType = CTy->getPointeeType();
+    ResultVal->MemoryDecl = Mem;
   } else {
     llvm::errs() << "ERROR: Memory Type is void!" << CTy->getAsString() << "\n";
     // std::abort();
@@ -1388,10 +1391,6 @@ void TypeRecovery::genASTTypes(Module &M) {
   // 1.
   // 我可能需要增加跨图，跨函数的PNI节点的关系。一边传入所有的sketches图，一边传入Result。然后首先处理所有的有primitive类型的节点，给PNI打标签。然后根据标签修改类型。
   // analyzeSignedness(AG, Mem);
-
-  // 4 Save the result
-  ResultVal->MemoryType = CTy->getPointeeType();
-  ResultVal->MemoryDecl = Mem;
 
   // move the ASTUnit to result
   ResultVal->HTCtx = HTCtx;
