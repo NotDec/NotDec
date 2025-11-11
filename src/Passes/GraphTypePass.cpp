@@ -508,6 +508,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
                                     OffsetRange{.offset = MinStartOff}}}});
           Members.push_back(E1);
         }
+        if (Members.empty()) {
+          llvm::errs() << "Warning: Empty union!\n";
+        }
         TypeInfos[UN] =
             TypeInfo{.Size = OurSize, .Info = UnionInfo{.Members = Members}};
 
@@ -552,6 +555,9 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
             ->R.end();
     auto Size = MaxEndOff - Fields.front().R.Start;
     assert(Size >= 0);
+    if (Fields.empty()) {
+      llvm::errs() << "Warning: Empty struct!\n";
+    }
     TypeInfos[&N] =
         TypeInfo{.Size = Size, .Info = StructInfo{.Fields = Fields}};
 

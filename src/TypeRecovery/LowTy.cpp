@@ -294,7 +294,7 @@ std::string meet(std::string a, std::string b) {
     }
   }
 
-  std::cerr << "unable to handle meet: " << a << " with " << b << "\n";
+  std::cerr << "Error: unable to handle meet: " << a << " with " << b << "\n";
   // std::abort();
   return a;
 }

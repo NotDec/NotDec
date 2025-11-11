@@ -545,6 +545,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         Decl->addMember(FieldDecl{
             .R = {.Start = 0, .Size = *Size}, .Type = Ty, .Name = FieldName});
       }
+      if (Decl->getMembers().size() == 0) {
+        llvm::errs() << "Error: Empty Union?\n";
+      }
     } else {
       assert(false && "Unknown TypeInfo");
     }
