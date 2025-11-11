@@ -26,6 +26,7 @@
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"
+#include "notdec-llvm2c/Interface/Utils.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 #include "notdec-llvm2c/StructuralAnalysis.h"
 
@@ -162,9 +163,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
   //         << toString(Node.key) << "\n";
   //   }
   // }
-  // if (!PointeeSize) {
-  //   PointeeSize = PointeeSize2;
-  // }
+  if (!PointeeSize) {
+    PointeeSize = Node.getSizeHint();
+  }
 
   HType *Ret = nullptr;
   bool hasSetNodeMap = false;
@@ -219,13 +220,41 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
     if (std::holds_alternative<SimpleTypeInfo>(TI.Info)) {
       auto &Info = std::get<SimpleTypeInfo>(TI.Info);
       if (Info.Edge == nullptr) {
-        // void pointer?
-        return getPtrTy(nullptr);
+        if (PointeeSize) {
+          auto PS = *PointeeSize;
+          if (PS == 1 || PS == 2 || PS == 4 || PS == 8) {
+            Ret = getPtrTy(getUndef(PS * 8));
+            goto epilogue;
+          }
+          // just create a char array
+          Ret = Ctx.getArrayType(false, Ctx.getChar(), PS);
+          // // create a struct with only padding:
+          // auto Name =
+          //     ValueNamer::getName(prefix != nullptr ? prefix : "struct_");
+          // RecordDecl *Decl = RecordDecl::Create(Ctx, Name);
+          // Ret = getPtrTy(Ctx.getRecordType(false, Decl));
+          // auto FieldName = ValueNamer::getName("field_");
+          // auto CurrentDecl =
+          //     FieldDecl{.R = SimpleRange{.Start = 0, .Size = PS},
+          //               .Type = Ctx.getArrayType(false, Ctx.getChar(), PS),
+          //               .Name = FieldName,
+          //               .Comment = "padding"};
+          // Decl->addField(CurrentDecl);
+          // NodeTypeMap.emplace(&Node, Ret);
+          // hasSetNodeMap = true;
+          goto epilogue;
+        } else {
+          // void pointer?
+          Ret = getPtrTy(nullptr);
+          goto epilogue;
+        }
+      } else {
+        // assert(!PointeeSize || ((*PointeeSize) == *TI.Size));
+        // simple pointer type
+        auto PointeeTy = buildType(Info.Edge->getTargetNode(), V);
+        Ret = getPtrTy(PointeeTy);
+        goto epilogue;
       }
-      // assert(!PointeeSize || ((*PointeeSize) == *TI.Size));
-      // simple pointer type
-      auto PointeeTy = buildType(Info.Edge->getTargetNode(), V);
-      Ret = getPtrTy(PointeeTy);
     } else if (std::holds_alternative<ArrayInfo>(TI.Info)) {
       auto &Info = std::get<ArrayInfo>(TI.Info);
       auto EdgeOff = getOffsetLabel(Info.Edge->getLabel());
@@ -236,13 +265,15 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         llvm::errs() << "Warning: Array out edge is not pointer type! Guessing "
                         "elem type\n";
         if (Info.ElemSize) {
-          return getPtrTy(getUndef(*Info.ElemSize * 8));
+          Ret = getPtrTy(getUndef(*Info.ElemSize * 8));
+          goto epilogue;
         }
         assert(false && "Array out edge must be pointer type");
       }
       ElemTy = ElemTy->getPointeeType();
       if (ElemTy == nullptr) {
-        return getUndef(*Info.ElemSize * 8);
+        Ret = getUndef(*Info.ElemSize * 8);
+        goto epilogue;
       }
 
       auto Count = *TI.Size / *Info.ElemSize;
@@ -272,8 +303,9 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         }
       }
 
-      if (Info.Fields.size() == 0) {
-        return getUndef(BitSize);
+      if (!ValidRange && Info.Fields.size() == 0) {
+        Ret = getUndef(BitSize);
+        goto epilogue;
       }
 
       // forward declare struct type, by inserting into the map.
@@ -491,6 +523,10 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         }
       }
 
+      if (Decl->getFields().size() == 0) {
+        llvm::errs() << "Error: Empty Struct?\n";
+      }
+
       // if there is only one field, return the field's type
       if (Decl->getFields().size() == 0) {
         Ret = getPtrTy(nullptr);
@@ -552,6 +588,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       assert(false && "Unknown TypeInfo");
     }
   }
+epilogue:
 
   if (TraceIds.count(Node.getId())) {
     PRINT_TRACE(Node.getId()) << "HType for " << toString(Node.key) << ": "

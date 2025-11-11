@@ -1366,7 +1366,8 @@ void TypeRecovery::genASTTypes(Module &M) {
   using notdec::ast::RecordType;
   RecordDecl *Mem = nullptr;
   // if Memory type is not void
-  if (CTy->isPointerType() && CTy->getPointeeType() != nullptr && CTy->getPointeeType()->isRecordType()) {
+  if (CTy->isPointerType() && CTy->getPointeeType() != nullptr &&
+      CTy->getPointeeType()->isRecordType()) {
     if (auto RD = CTy->getPointeeType()->getAs<RecordType>()) {
       Mem = RD->getDecl();
       Mem->setBytesManager(MemoryBytes);
@@ -3824,6 +3825,10 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitGetElementPtrInst(
   if (Gep.getPointerOperand()->getName().startswith("table_")) {
     return;
   } else if (Gep.hasAllZeroIndices()) {
+    auto &SrcNode =
+        cg.getOrInsertNode(Gep.getPointerOperand(), &Gep, 0, retypd::Covariant);
+    cg.addVarSubtype(&Gep, SrcNode);
+    return;
   }
   std::cerr << "Warning: RetypdGeneratorVisitor::visitGetElementPtrInst: "
                "Gep should not exist before this pass!\n";
