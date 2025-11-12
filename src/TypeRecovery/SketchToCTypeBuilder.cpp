@@ -303,9 +303,27 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         }
       }
 
-      if (!ValidRange && Info.Fields.size() == 0) {
-        Ret = getUndef(BitSize);
-        goto epilogue;
+      if (Info.Fields.size() == 0) {
+        if (!ValidRange) {
+          Ret = getUndef(BitSize);
+          goto epilogue;
+        } else {
+          // create a struct with only padding:
+          auto Name =
+              ValueNamer::getName(prefix != nullptr ? prefix : "struct_");
+          RecordDecl *Decl = RecordDecl::Create(Ctx, Name);
+          Ret = getPtrTy(Ctx.getRecordType(false, Decl));
+          auto FieldName = ValueNamer::getName("field_");
+          auto CurrentDecl = FieldDecl{
+              .R = *ValidRange,
+              .Type = Ctx.getArrayType(false, Ctx.getChar(), ValidRange->Size),
+              .Name = FieldName,
+              .Comment = "at offset: " + std::to_string(ValidRange->Start)};
+          Decl->addField(CurrentDecl);
+          NodeTypeMap.emplace(&Node, Ret);
+          hasSetNodeMap = true;
+          goto epilogue;
+        }
       }
 
       // forward declare struct type, by inserting into the map.

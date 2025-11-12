@@ -1787,7 +1787,16 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New,
   };
   std::map<CGNode *, DSUSet *> equivalenceClasses;
   std::list<DSUSet> groups;
-  // 无需初始化，如果节点不在parent map中，则默认它映射到自己。
+  // 还是要初始化，每个节点映射到自己。否则后续遍历不完全。
+  for (auto &N : CG) {
+    if (N.isStartOrEnd()) {
+      continue;
+    }
+    DSUSet *setA = &groups.emplace_back();
+    setA->Set.insert(&N);
+    setA->R = &N;
+    equivalenceClasses.insert({&N, setA});
+  }
 
   // 查找根节点的函数
   std::function<CGNode *(CGNode *)> find = [&](CGNode *node) -> CGNode * {
@@ -1811,6 +1820,7 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New,
     // 获取节点a的集合
     auto itA = equivalenceClasses.find(a);
     if (itA == equivalenceClasses.end()) {
+      assert(false);
       // 节点a不在任何集合中，创建新集合
       setA = &groups.emplace_back();
       setA->Set.insert(a);
@@ -1823,6 +1833,7 @@ ConstraintsGenerator::genSketch(std::map<const CGNode *, CGNode *> &Old2New,
     // 获取节点b的集合
     auto itB = equivalenceClasses.find(b);
     if (itB == equivalenceClasses.end()) {
+      assert(false);
       // 节点b不在任何集合中，创建新集合
       setB = &groups.emplace_back();
       setB->Set.insert(b);
@@ -3361,6 +3372,14 @@ ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
                  << toString(It2.first->second->key) << ", but now set to "
                  << toString(Dtv) << "\n";
     std::abort();
+  }
+
+  // if the value is constant addr, we set ptr and link to memory
+  if (auto CA = std::get_if<ConstantAddr>(&Val)) {
+    assert(N.key.SuffixVariance == retypd::Covariant);
+    N.getPNIVar()->setPtr();
+    N.setAsPtrAdd(*CG.getMemoryNode(retypd::Covariant),
+                  OffsetRange{.offset = CA->Val->getSExtValue()});
   }
   return {N, NContra};
 }
