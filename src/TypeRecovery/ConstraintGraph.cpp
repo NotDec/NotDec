@@ -305,7 +305,10 @@ std::optional<int64_t> CGNode::getSizeHint() const {
   std::optional<int64_t> Ret = std::nullopt;
   for (auto &E : outEdges) {
     if (auto FS = std::get_if<ForgetSize>(&E.getLabel().L)) {
-      assert(!Ret.has_value());
+      if (Ret.has_value() && *Ret != FS->Base) {
+        llvm::errs() << "Error: CGNode::getSizeHint: Multiple hint found!\n";
+        return std::nullopt;
+      }
       Ret = FS->Base;
     }
   }

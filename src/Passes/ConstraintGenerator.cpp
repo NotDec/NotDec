@@ -1383,7 +1383,7 @@ void TypeRecovery::genASTTypes(Module &M) {
     ResultVal->MemoryType = CTy->getPointeeType();
     ResultVal->MemoryDecl = Mem;
   } else {
-    llvm::errs() << "ERROR: Memory Type is void!" << CTy->getAsString() << "\n";
+    llvm::errs() << "ERROR: Memory Type is void!: " << CTy->getAsString() << "\n";
     // std::abort();
   }
 
