@@ -1,5 +1,5 @@
 #include "TypeRecovery/mlsub/PNDiff.h"
-#include "TypeRecovery/mlsub/MLsubGenerator.h"
+// #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "TypeRecovery/mlsub/MLsubGraph.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
@@ -69,7 +69,7 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
 }
 
 bool PNIGraph::solve() {
-  CG.applyPNIPolicy();
+  // CG.applyPNIPolicy();
 
   bool AnyChanged = false;
   while (!Worklist.empty()) {
@@ -109,11 +109,13 @@ void PNIGraph::eraseConstraint(ConsNode *Cons) {
     if (Left->getPNIVar()->getPtrOrNum() == retypd::Number &&
         Right->getPNIVar()->getPtrOrNum() == retypd::Pointer) {
       Off = matchOffsetRangeNoNegativeAccess(LeftVal);
-      Result->setAsPtrAdd(*Right, Off);
+      assert(false && "TODO");
+      // Result->setAsPtrAdd(*Right, Off);
     } else if (Left->getPNIVar()->getPtrOrNum() == retypd::Pointer &&
                Right->getPNIVar()->getPtrOrNum() == retypd::Number) {
       Off = matchOffsetRangeNoNegativeAccess(RightVal);
-      Result->setAsPtrAdd(*Left, Off);
+      assert(false && "TODO");
+      // Result->setAsPtrAdd(*Left, Off);
     }
   }
   for (auto *N : Cons->getNodes()) {
@@ -384,7 +386,8 @@ PNINode::iteratorTy PNINode::eraseFromParent() {
 void PNIGraph::onUpdatePNType(PNINode *N) {
   if (PNIToNode.count(N) > 0) {
     for (auto *Node : PNIToNode[N]) {
-      Node->onUpdatePNType();
+      assert(false && "TODO");
+      // Node->onUpdatePNType();
     }
   }
 }
@@ -554,9 +557,6 @@ void PNIGraph::cloneFrom(const PNIGraph &G,
     auto *NewNode = clonePNINode(N);
     // maintain PNIToNode
     for (const auto *OldCGNode : G.PNIToNode.at(const_cast<PNINode *>(&N))) {
-      if (Old2New.count(OldCGNode) == 0) {
-        std::cerr << toString(OldCGNode->key) << "\n";
-      }
       auto *NewCGNode = Old2New.at(OldCGNode);
       if (NewCGNode->getPNIVar() == nullptr) {
         addPNINodeTarget(*NewCGNode, *NewNode);

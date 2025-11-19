@@ -5,14 +5,10 @@
 #include <list>
 #include <llvm/ADT/Optional.h>
 #include <llvm/IR/Type.h>
-#include <map>
 #include <memory>
-#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
-#include <variant>
-#include <vector>
 
 #include <llvm/ADT/ilist.h>
 #include <llvm/ADT/simple_ilist.h>
@@ -22,10 +18,9 @@
 
 #include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/RExp.h"
-#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/mlsub/PNDiff.h"
 #include "TypeRecovery/mlsub/Schema.h"
-#include "notdec-llvm2c/Interface/Range.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 
 namespace notdec::mlsub {
@@ -34,26 +29,10 @@ struct ConstraintsGenerator;
 
 namespace notdec::mlsub {
 
-using retypd::Constraint;
-using retypd::Covariant;
-using retypd::ForgetBase;
-using retypd::ForgetLabel;
-using retypd::RecallBase;
-using retypd::RecallLabel;
-using retypd::SubTypeConstraint;
 using retypd::toString;
-using retypd::TRContext;
-using retypd::TypeVariable;
+using retypd::Contravariant;
+using retypd::Covariant;
 using retypd::Variance;
-using retypd::rexp::PRExp;
-
-struct ConstraintSummary {
-  std::vector<Constraint> Cons;
-  long PointerSize = 0;
-  std::map<TypeVariable, std::string> PNIMap;
-
-  void fromJSON(TRContext &Ctx, const llvm::json::Object &Obj);
-};
 
 struct CGNode;
 struct CGEdge;
@@ -63,11 +42,12 @@ struct CGNode {
   ConstraintGraph &Parent;
   unsigned long Id = 0;
   Variance Vari = Covariant;
-  unsigned Size;
+  unsigned Size = 0;
   std::set<CGEdge *> inEdges;
   std::set<CGEdge> outEdges;
-  std::set<CGNode *> flowEdgesOut;
-  std::set<CGNode *> flowEdgesIn;
+  // For Contravariant, it is outgoing edges.
+  // For Covariant, it is incoming edges.
+  std::set<CGNode *> flowEdges;
 
   using iterator = std::set<CGEdge>::iterator;
   using pred_iterator = std::set<CGEdge *>::iterator;
@@ -83,12 +63,9 @@ struct CGNode {
   PNINode *PNIVar = nullptr;
   PNINode *getPNIVar() { return PNIVar; }
   const PNINode *getPNIVar() const { return PNIVar; }
-  bool isSpecial() const;
-  bool isStartOrEnd() const;
   bool hasNoPNI() const { return PNIVar == nullptr || PNIVar->isNull(); }
   bool isPNIPtr() const { return PNIVar != nullptr && PNIVar->isPointer(); }
   bool isPNIUnknown() const { return PNIVar != nullptr && PNIVar->isUnknown(); }
-  bool isMemory() const;
 
 protected:
   friend struct PNIGraph;
@@ -105,14 +82,12 @@ protected:
 
 public:
   CGNode(const CGNode &) = delete;
+  // Create node with no PNINode, regardless of PG != nullptr.
+  CGNode(ConstraintGraph &Parent, Variance V, unsigned Size)
+      : Parent(Parent), Id(ValueNamer::getId()), Size(Size) {}
   CGNode(ConstraintGraph &Parent, Variance V, llvm::Type *LowTy);
   // Creating a new node with low type and set PNI accordingly.
   CGNode(ConstraintGraph &Parent, Variance V, PNINode *N);
-
-  // Create node with no PNINode, regardless of PG != nullptr.
-  // 1. for special nodes like #Start, #End
-  // 2. for clone
-  CGNode(ConstraintGraph &Parent, Variance V, unsigned Size);
 
   std::string str() const {
     return std::to_string(Id) + toString(Vari) +
@@ -120,18 +95,10 @@ public:
   }
 
   Variance getVariance() const { return Vari; }
-  // handle update from PNI
-  void onUpdatePNType();
-  void setAsPtrAdd(CGNode &Other, OffsetRange Off);
-  bool hasPointerEdge() const;
-  bool hasIncomingLoadOrStore() const;
-  // Some sanity check
-  bool isPNIAndEdgeMatch() const;
   bool isPNIPointer() const {
     return getPNIVar() != nullptr && getPNIVar()->isPointer();
   }
   unsigned getSize() const { return Size; }
-  std::optional<int64_t> getSizeHint() const;
 
   using iteratorTy = std::list<CGNode>::iterator;
   iteratorTy getIterator() {
@@ -163,74 +130,23 @@ struct CGEdge {
   }
 };
 
-struct RevEdge {
-  CGEdge &Edge;
-  RevEdge(CGEdge &E) : Edge(E) {}
-  CGNode &getTargetNode() { return Edge.getSourceNode(); }
-  CGNode &getSourceNode() { return Edge.getTargetNode(); }
-  const EdgeLabel &getLabel() const { return Edge.getLabel(); }
-
-  // Act as a pointer
-  RevEdge &operator*() { return *this; }
-  RevEdge *operator->() { return this; }
-};
-
 struct ConstraintGraph {
-  std::shared_ptr<TRContext> Ctx;
   std::string Name;
   std::unique_ptr<PNIGraph> PG;
   std::list<CGNode> Nodes;
-  std::map<CGNode *, CGNode *> RevVariance;
-  // TODO split constraint generation and solving
-  // std::vector<Constraint> AddConstraints;
-  std::set<CGNode *> StartNodes;
-  std::set<CGNode *> EndNodes;
-  std::vector<std::tuple<CGNode *, CGNode *, PRExp>> PathSeq;
-  std::map<CGNode *, std::set<std::pair<EdgeLabel, CGNode *>>> ReachingSet;
   CGNode *Start = nullptr;
   CGNode *End = nullptr;
-  CGNode *Memory = nullptr;
-  CGNode *MemoryC = nullptr;
-  bool isNotSymmetry = false;
-  // If the graph has eliminated the forget-label edges for building sketches.
-  // TODO: update set and check of the flag, or use a enum for state.
-  bool isSketchSplit = false;
-  // TODO replace with datalayout?
   long PointerSize = 0;
 
   ConstraintGraph(long PointerSize, std::string Name, bool disablePNI = false);
 
-  enum SubtypeRelation {
-    SR_Equal,
-    SR_Sub,    // new node subtype to old node.
-    SR_Parent, // old node subtype to new node.
-    SR_None,
-  };
+  CGNode &createNodeNoPNI(Variance V, unsigned Size);
+  CGNode &createNode(Variance V, llvm::Type *LowType);
+  CGNode &createNodeWithPNI(Variance V, PNINode *PNI);
 
-  // isMergeClone: merge the graph to another graph.
-  // TransformKey: 主要针对不冲突的情况，也转换NodeKey。
-  // ConflictKeyRelation: 处理冲突，看看怎么连子类型边。
-  static void clone(std::map<const CGNode *, CGNode *> &Old2New,
-                    const ConstraintGraph &From, ConstraintGraph &To,
-                    bool isMergeClone = false,
-                    std::function<SubtypeRelation(CGNode &, CGNode &)>
-                        ConflictKeyRelation = nullptr);
-  // Node map is the core data of cloning.
-  ConstraintGraph clone(std::map<const CGNode *, CGNode *> &Old2New) const;
+  std::pair<CGNode &, CGNode &> createNodePair(llvm::Type *LowType);
+  std::pair<CGNode &, CGNode &> createNodePairWithPNI(PNINode *PNI);
 
-  CGNode &getReverseVariant(CGNode &N) { return *RevVariance.at(&N); }
-
-  CGNode &createNodeNoPNI(unsigned long N, unsigned Size);
-  CGNode &createNode(unsigned long N, llvm::Type *LowType);
-  CGNode &createNodeWithPNI(unsigned long N, PNINode *PNI);
-  CGNode &createNodeClonePNI(unsigned long N, PNINode *ON);
-
-  std::pair<CGNode &, CGNode &> createNodePair(unsigned long K,
-                                               llvm::Type *LowType);
-  std::pair<CGNode &, CGNode &> createNodePairWithPNI(unsigned long K,
-                                                      PNINode *PNI);
-
-  CGNode &cloneNode(const CGNode &Other);
   void removeNode(CGNode &N);
 
   std::string getName() const { return Name; }
@@ -246,31 +162,13 @@ public:
   CGNode *getMemoryNodeOrNull(Variance V);
   CGNode *getMemoryNode(Variance V /*= Covariant*/);
 
-  void applyPNIPolicy();
-
   void printGraph(const char *DotFile) const;
-
-  void instantiateConstraints(const ConstraintSummary &Summary) {
-    assert(false && "TODO");
-  }
-
-  static ConstraintGraph fromConstraints(std::shared_ptr<TRContext> Ctx,
-                                         std::string FuncName,
-                                         const ConstraintSummary &Summary) {
-    assert(false && "TODO");
-  }
 
   bool hasEdge(const CGNode &From, const CGNode &To, EdgeLabel Label) const {
     assert(&From.Parent == this && &To.Parent == this);
     return From.outEdges.count(
         CGEdge(const_cast<CGNode &>(From), const_cast<CGNode &>(To), Label));
   }
-
-  std::map<const CGEdge *, const CGEdge *> mergeNodeTo(CGNode &From, CGNode &To,
-                                                       bool NoSelfLoop = false);
-
-  const CGEdge *addEdge(CGNode &From, CGNode &To, EdgeLabel Label);
-  const CGEdge *addFlowEdge(CGNode &From, CGNode &To);
 
   void removeEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
     assert(&From.Parent == this && &To.Parent == this);
@@ -280,9 +178,9 @@ public:
     From.outEdges.erase(it);
   }
 
-  const CGEdge *onlyAddEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
-    assert(&From.Parent == this && "onlyAddEdge: NodeFrom is not in the graph");
-    assert(&To.Parent == this && "onlyAddEdge: NodeTo is not in the graph");
+  const CGEdge *addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    assert(&From.Parent == this && "addEdge: NodeFrom is not in the graph");
+    assert(&To.Parent == this && "addEdge: NodeTo is not in the graph");
     if (TraceIds.count(From.getId()) || TraceIds.count(To.getId())) {
       std::cerr << "Add edge: " << From.str() << "(ID=" << From.getId()
                 << ") -> " << To.str() << "(ID=" << From.getId()
@@ -295,8 +193,24 @@ public:
     return &*it.first;
   }
 
+  bool addFlowEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
+    assert(&From.Parent == this && "addFlowEdge: NodeFrom is not in the graph");
+    assert(&To.Parent == this && "addFlowEdge: NodeTo is not in the graph");
+    assert(From.Vari == Contravariant);
+    assert(To.Vari == Covariant);
+    auto It = From.flowEdges.insert(&To);
+    if (It.second) {
+      To.flowEdges.insert(&From);
+    } else {
+      assert(To.flowEdges.count(&From) > 0);
+    }
+    return It.second;
+  }
+
+  const CGEdge *addFlowEdge(CGNode &From, CGNode &To);
+
 protected:
-  CGNode &emplace(unsigned long N, llvm::Type *LowTy);
+  CGNode &emplace(Variance V, llvm::Type *LowTy);
 
 public:
   // void reTagBaseTV();

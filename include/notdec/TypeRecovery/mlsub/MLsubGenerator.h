@@ -55,15 +55,6 @@
 
 namespace notdec::mlsub {
 
-using retypd::DerivedTypeVariable;
-using retypd::DotGraph;
-using retypd::FieldLabel;
-using retypd::InLabel;
-using retypd::One;
-using retypd::OutLabel;
-using retypd::TRContext;
-using retypd::TypeVariable;
-
 struct ConstraintsGenerator;
 
 /// The ConstraintsGenerator class is responsible for generating constraints.
@@ -116,7 +107,7 @@ struct ConstraintsGenerator {
 
 public:
 
-  const CGEdge *addConstraint(CGNode &From, CGNode &To, FieldLabel Label) {
+  const CGEdge *addConstraint(CGNode &From, CGNode &To, EdgeLabel Label) {
     return CG.addRecallEdge(From, To, Label);
   }
 
