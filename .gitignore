@@ -33,3 +33,7 @@ mytest/
 debug_dir/
 debug_dir2/
 experiment/197.parser/
+build-release/
+*.ll
+*.ll.c
+*.dot
