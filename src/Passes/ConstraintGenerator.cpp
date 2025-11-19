@@ -60,7 +60,7 @@
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/AllSCCIterator.h"
 #include "Utils/CallGraphDotInfo.h"

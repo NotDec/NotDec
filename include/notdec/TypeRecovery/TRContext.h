@@ -7,7 +7,7 @@
 #include <llvm/Support/Allocator.h>
 #include <utility>
 
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 
 namespace notdec::retypd {
 

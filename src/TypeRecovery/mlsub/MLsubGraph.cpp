@@ -29,7 +29,7 @@
 #include "TypeRecovery/NFAMinimize.h"
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/RExp.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/TRContext.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "TypeRecovery/mlsub/MLsubGraph.h"

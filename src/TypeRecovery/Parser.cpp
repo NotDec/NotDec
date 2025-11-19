@@ -1,6 +1,6 @@
 
 #include "TypeRecovery/Parser.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include <cassert>
 #include <iostream>

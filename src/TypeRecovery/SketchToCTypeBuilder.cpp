@@ -20,7 +20,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/LowTy.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/SketchToCTypeBuilder.h"
 #include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface/HType.h"

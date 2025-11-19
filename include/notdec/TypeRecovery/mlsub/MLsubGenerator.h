@@ -38,7 +38,7 @@
 #include "TypeRecovery/DotSummaryParser.h"
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/RExp.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/TRContext.h"
 #include "TypeRecovery/mlsub/MLsubGraph.h"
 #include "TypeRecovery/mlsub/PNDiff.h"

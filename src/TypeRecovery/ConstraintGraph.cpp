@@ -32,7 +32,7 @@
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/PointerNumberIdentification.h"
 #include "TypeRecovery/RExp.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/TRContext.h"
 #include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface/Range.h"

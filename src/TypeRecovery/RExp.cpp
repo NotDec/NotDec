@@ -5,7 +5,7 @@
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/RExp.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 
 namespace notdec::retypd::rexp {
 

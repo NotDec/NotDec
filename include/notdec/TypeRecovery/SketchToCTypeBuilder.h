@@ -3,7 +3,7 @@
 
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/StructManager.h"

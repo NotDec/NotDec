@@ -1,7 +1,7 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/RExp.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/TRContext.h"
 #include <cstddef>
 #include <gtest/gtest.h>

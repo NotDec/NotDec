@@ -22,7 +22,7 @@
 
 #include "TypeRecovery/LowTy.h"
 #include "TypeRecovery/RExp.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/mlsub/PNDiff.h"
 #include "TypeRecovery/mlsub/Schema.h"
 #include "notdec-llvm2c/Interface/Range.h"

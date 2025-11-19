@@ -1,6 +1,6 @@
 #include "Passes/ConstraintGenerator.h"
 #include "TypeRecovery/NFAMinimize.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "notdec-llvm2c/Interface/Range.h"
 
 #define DEBUG_TYPE "graph-pass"

@@ -1,7 +1,7 @@
 #ifndef _NOTDEC_RETYPD_PARSER_H_
 #define _NOTDEC_RETYPD_PARSER_H_
 
-#include "Schema.h"
+#include "retypd/Schema.h"
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <utility>

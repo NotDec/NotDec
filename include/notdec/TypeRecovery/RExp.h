@@ -1,7 +1,7 @@
 #ifndef _NOTDEC_RETYPD_REXP_H_
 #define _NOTDEC_RETYPD_REXP_H_
 
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include <llvm/ADT/GraphTraits.h>
 #include <llvm/ADT/iterator_range.h>
 #include <memory>

@@ -22,12 +22,12 @@ add_library(notdec STATIC
 	TypeRecovery/DotSummaryParser.cpp
 	TypeRecovery/Parser.cpp
 	TypeRecovery/ConstraintGraph.cpp
-	TypeRecovery/Schema.cpp
 	TypeRecovery/RExp.cpp
 	TypeRecovery/PointerNumberIdentification.cpp
 	TypeRecovery/NFAMinimize.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/SketchToCTypeBuilder.cpp
+	TypeRecovery/retypd/Schema.cpp
 	Utils/Utils.cpp
 )
 

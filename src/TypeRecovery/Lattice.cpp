@@ -9,7 +9,7 @@
 
 #include "TypeRecovery/Lattice.h"
 #include "TypeRecovery/LowTy.h"
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Utils.h"
 

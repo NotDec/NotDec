@@ -5,7 +5,7 @@
 #include "TypeRecovery/TRContext.h"
 #include "notdec-llvm2c/Interface/Utils.h"
 
-#include "TypeRecovery/Schema.h"
+#include "TypeRecovery/retypd/Schema.h"
 
 namespace notdec::retypd {
 
