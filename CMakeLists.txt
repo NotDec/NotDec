@@ -4,6 +4,9 @@ project(notdec
 	VERSION 0.0.1
 )
 
+# Enable assertions in RelWithDebInfo build
+string( REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+
 # https://github.com/banach-space/llvm-tutor/blob/main/CMakeLists.txt
 #===============================================================================
 # 1. VERIFY LLVM INSTALLATION DIR
