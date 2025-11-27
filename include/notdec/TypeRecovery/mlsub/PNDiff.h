@@ -15,6 +15,8 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
 
+#include "Passes/ConstraintGenerator.h"
+#include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec/TypeRecovery/LowTy.h"
 
@@ -32,11 +34,9 @@ struct ConstraintGraph;
 
 // Forward Declaration
 struct PNIGraph;
-struct CGNode;
 
 OffsetRange matchOffsetRangeNoNegativeAccess(llvm::Value *I);
 OffsetRange matchOffsetRange(llvm::Value *I);
-bool isUnknown(const CGNode *N);
 
 // PNINode stores low level LLVM type. If the LowTy is pointer or
 // pointer-sized int, we use PtrOrNum to further distinguish.
@@ -93,7 +93,7 @@ public:
   /// merge two PNVar into one. Return the unified PNVar.
   PNINode *unify(PNINode &other);
   static llvm::Type *mergeLowTy(llvm::Type *T, llvm::Type *O);
-  void addUser(CGNode *Node);
+  // void addUser(ExtValuePtr Node);
 
   PNTy &getLatticeTy() { return Ty; }
   const PNTy &getLatticeTy() const { return Ty; }
@@ -107,27 +107,27 @@ public:
 };
 
 struct AddNodeCons {
-  CGNode *LeftNode = nullptr;
-  CGNode *RightNode = nullptr;
-  CGNode *ResultNode = nullptr;
+  ExtValuePtr LeftNode = nullptr;
+  ExtValuePtr RightNode = nullptr;
+  ExtValuePtr ResultNode = nullptr;
   llvm::BinaryOperator *Inst;
 
   static const char Rules[][3];
   // return a list of changed nodes and whether the constraint is fully
   // solved.
-  llvm::SmallVector<PNINode *, 3> solve();
-  bool isFullySolved();
+  llvm::SmallVector<PNINode *, 3> solve(PNIGraph &G);
+  bool isFullySolved(PNIGraph &G);
 };
 
 struct SubNodeCons {
-  CGNode *LeftNode = nullptr;
-  CGNode *RightNode = nullptr;
-  CGNode *ResultNode = nullptr;
+  ExtValuePtr LeftNode = nullptr;
+  ExtValuePtr RightNode = nullptr;
+  ExtValuePtr ResultNode = nullptr;
   llvm::BinaryOperator *Inst;
 
   static const char Rules[][3];
-  llvm::SmallVector<PNINode *, 3> solve();
-  bool isFullySolved();
+  llvm::SmallVector<PNINode *, 3> solve(PNIGraph &G);
+  bool isFullySolved(PNIGraph &G);
 };
 
 using NodeCons = std::variant<AddNodeCons, SubNodeCons>;
@@ -139,25 +139,25 @@ struct ConsNode {
   llvm::SmallVector<PNINode *, 3> solve() {
     // call solve according to the variant
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
-      return Add->solve();
+      return Add->solve(Parent);
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
-      return Sub->solve();
+      return Sub->solve(Parent);
     }
     assert(false && "PNIConsNode::solve: unhandled variant");
   }
   bool isFullySolved() {
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
-      return Add->isFullySolved();
+      return Add->isFullySolved(Parent);
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
-      return Sub->isFullySolved();
+      return Sub->isFullySolved(Parent);
     }
     assert(false && "PNIConsNode::isFullySolved: unhandled variant");
   }
-  std::array<const CGNode *, 3> getNodes() const {
+  std::array<ExtValuePtr, 3> getNodes() const {
     auto ret = const_cast<ConsNode *>(this)->getNodes();
     return {ret[0], ret[1], ret[2]};
   }
-  std::array<CGNode *, 3> getNodes() {
+  std::array<ExtValuePtr, 3> getNodes() {
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
       return {Add->LeftNode, Add->RightNode, Add->ResultNode};
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
@@ -174,25 +174,6 @@ struct ConsNode {
       return Sub->Inst;
     }
     assert(false && "PNIConsNode::getInst: unhandled variant");
-  }
-  void cloneFrom(const ConsNode &N,
-                 std::map<const CGNode *, CGNode *> Old2New) {
-    if (auto *Add = std::get_if<AddNodeCons>(&N.C)) {
-      auto *NewLeft = Old2New[Add->LeftNode];
-      auto *NewRight = Old2New[Add->RightNode];
-      auto *NewResult = Old2New[Add->ResultNode];
-      auto *NewInst = Add->Inst;
-      C = AddNodeCons{NewLeft, NewRight, NewResult, NewInst};
-      return;
-    } else if (auto *Sub = std::get_if<SubNodeCons>(&N.C)) {
-      auto *NewLeft = Old2New[Sub->LeftNode];
-      auto *NewRight = Old2New[Sub->RightNode];
-      auto *NewResult = Old2New[Sub->ResultNode];
-      auto *NewInst = Sub->Inst;
-      C = SubNodeCons{NewLeft, NewRight, NewResult, NewInst};
-      return;
-    }
-    assert(false && "PNIConsNode::cloneFrom: unhandled variant");
   }
 
   using iteratorTy = std::list<ConsNode>::iterator;
@@ -216,16 +197,27 @@ struct PNIGraph {
   using ConstraintsType = std::list<ConsNode>;
   ConstraintsType Constraints;
 
-  std::map<CGNode *, std::set<ConsNode *>> NodeToCons;
+  std::map<ExtValuePtr, std::set<ConsNode *>> NodeToCons;
 
   // list for PNINode
   using PNINodesType = std::list<PNINode>;
   PNINodesType PNINodes;
 
-  std::map<PNINode *, std::set<CGNode *>> PNIToNode;
-  const std::set<CGNode *> &getNodeSet(PNINode *Cons) {
-    return PNIToNode[Cons];
+  DSUMap<ExtValuePtr, PNINode *> PNIMap;
+  // std::map<PNINode *, std::set<ExtValuePtr>> PNIToNode;
+  PNINode *getPNIVarOrNull(ExtValuePtr N) {
+    auto It = PNIMap.find(N);
+    if (It == PNIMap.end()) {
+      return nullptr;
+    }
+    return It->second;
   }
+  PNINode &getPNIVar(ExtValuePtr N) {
+    auto Ret = getPNIVarOrNull(N);
+    assert(Ret != nullptr);
+    return *Ret;
+  }
+
   PNINode *createPNINode(std::string SerializedTy) {
     auto &It = PNINodes.emplace_back(*this, SerializedTy);
     return &It;
@@ -234,12 +226,7 @@ struct PNIGraph {
     auto &It = PNINodes.emplace_back(*this, LowTy);
     return &It;
   }
-  PNINode *clonePNINode(const PNINode &OGN) {
-    auto &It = PNINodes.emplace_back(*this, OGN);
-    return &It;
-  }
-  static void addPNINodeTarget(CGNode &To, PNINode &N);
-  void markRemoved(CGNode &N);
+  void addPNINodeTarget(ExtValuePtr To, PNINode &N);
   void clearConstraints() {
     NodeToCons.clear();
     Constraints.clear();
@@ -248,12 +235,11 @@ struct PNIGraph {
 
   PNIGraph(ConstraintGraph &CG, std::string Name, long PointerSize)
       : CG(CG), Name(Name), PointerSize(PointerSize) {}
-  void cloneFrom(const PNIGraph &G, std::map<const CGNode *, CGNode *> Old2New);
 
-  void addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
+  void addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
                   llvm::BinaryOperator *Inst);
 
-  void addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
+  void addSubCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
                   llvm::BinaryOperator *Inst);
 
   PNINode *mergePNINodes(PNINode *To, PNINode *From) {
