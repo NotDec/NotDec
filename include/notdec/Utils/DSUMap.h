@@ -25,7 +25,7 @@ public:
     }
     Rev.erase(From);
   }
-  const std::map<V, std::vector<K>>& rev() const { return Rev; }
+  const std::map<V, std::vector<K>> &rev() const { return Rev; }
 
   template <class... Args>
   auto emplace(Args &&...args)
@@ -45,8 +45,19 @@ public:
     return {It, Success};
   }
 
-  auto find(K Key) -> decltype(M.find(Key)) {return M.find(Key);}
-  auto find(V Val) -> decltype(Rev.find(Val)) {return Rev.find(Val);}
+  // auto erase(K Key) -> decltype(M.erase(Key)) {
+  //   auto It = M.find(Key);
+  //   if (It == M.end()) {
+  //     return M.end();
+  //   }
+  //   for (auto V2: It->second) {
+
+  //   }
+  //   return M.erase(It);
+  // }
+
+  auto find(K Key) -> decltype(M.find(Key)) { return M.find(Key); }
+  auto find(V Val) -> decltype(Rev.find(Val)) { return Rev.find(Val); }
 
   auto begin() { return M.begin(); }
   auto end() { return M.end(); }
