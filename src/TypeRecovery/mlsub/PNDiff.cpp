@@ -91,11 +91,13 @@ bool PNIGraph::solve() {
   return AnyChanged;
 }
 
-void PNIGraph::addPNINodeTarget(CGNode &To, PNINode &N) {
-  assert(To.getPNIVar() == nullptr);
-  assert(&N.Parent == To.Parent.PG.get());
-  To.setPNIVar(&N);
-  N.Parent.PNIToNode[&N].insert(&To);
+void PNIGraph::addPNINodeTarget(ExtValuePtr To, PNINode &N) {
+  // assert(To.getPNIVar() == nullptr);
+  assert(PNIMap.count(To) == 0);
+  assert(&N.Parent == this);
+  // To.setPNIVar(&N);
+  // N.Parent.PNIToNode[&N].insert(&To);
+  PNIMap.insert(To, &N);
 }
 
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
@@ -106,20 +108,19 @@ void PNIGraph::eraseConstraint(ConsNode *Cons) {
     auto *LeftVal = BinOp->getOperand(0);
     auto *RightVal = BinOp->getOperand(1);
     OffsetRange Off;
-    if (Left->getPNIVar()->getPtrOrNum() == retypd::Number &&
-        Right->getPNIVar()->getPtrOrNum() == retypd::Pointer) {
+    if (getPNIVar(Left).getPtrOrNum() == retypd::Number &&
+        getPNIVar(Right).getPtrOrNum() == retypd::Pointer) {
       Off = matchOffsetRangeNoNegativeAccess(LeftVal);
       assert(false && "TODO");
       // Result->setAsPtrAdd(*Right, Off);
-    } else if (Left->getPNIVar()->getPtrOrNum() == retypd::Pointer &&
-               Right->getPNIVar()->getPtrOrNum() == retypd::Number) {
+    } else if (getPNIVar(Left).getPtrOrNum() == retypd::Pointer &&
+               getPNIVar(Right).getPtrOrNum() == retypd::Number) {
       Off = matchOffsetRangeNoNegativeAccess(RightVal);
       assert(false && "TODO");
       // Result->setAsPtrAdd(*Left, Off);
     }
   }
-  for (auto *N : Cons->getNodes()) {
-    assert(N != nullptr);
+  for (auto N : Cons->getNodes()) {
     NodeToCons[N].erase(Cons);
   }
 
@@ -143,24 +144,24 @@ const char SubNodeCons::Rules[][3] = {
     {'i', 'I', 'I'}, {'I', 'i', 'i'}, {'P', 'i', 'p'}, {'P', 'p', 'I'},
     {'p', 'P', 'i'}, {'p', 'i', 'P'}, {'p', 'I', 'p'}};
 
-bool AddNodeCons::isFullySolved() {
-  PNINode *Left = this->LeftNode->getPNIVar();
-  PNINode *Right = this->RightNode->getPNIVar();
-  PNINode *Result = this->ResultNode->getPNIVar();
+bool AddNodeCons::isFullySolved(PNIGraph &G) {
+  PNINode *Left = &G.getPNIVar(LeftNode);
+  PNINode *Right = &G.getPNIVar(RightNode);
+  PNINode *Result = &G.getPNIVar(ResultNode);
   return !Left->isUnknown() && !Right->isUnknown() && !Result->isUnknown();
 }
 
-bool SubNodeCons::isFullySolved() {
-  PNINode *Left = this->LeftNode->getPNIVar();
-  PNINode *Right = this->RightNode->getPNIVar();
-  PNINode *Result = this->ResultNode->getPNIVar();
+bool SubNodeCons::isFullySolved(PNIGraph &G) {
+  PNINode *Left = &G.getPNIVar(LeftNode);
+  PNINode *Right = &G.getPNIVar(RightNode);
+  PNINode *Result = &G.getPNIVar(ResultNode);
   return !Left->isUnknown() && !Right->isUnknown() && !Result->isUnknown();
 }
 
-llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
-  PNINode *Left = this->LeftNode->getPNIVar();
-  PNINode *Right = this->RightNode->getPNIVar();
-  PNINode *Result = this->ResultNode->getPNIVar();
+llvm::SmallVector<PNINode *, 3> AddNodeCons::solve(PNIGraph &G) {
+  PNINode *Left = &G.getPNIVar(LeftNode);
+  PNINode *Right = &G.getPNIVar(RightNode);
+  PNINode *Result = &G.getPNIVar(ResultNode);
   assert(Left->isPNRelated());
   assert(Right->isPNRelated());
   assert(Result->isPNRelated());
@@ -262,10 +263,10 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve() {
   return Changed;
 }
 
-llvm::SmallVector<PNINode *, 3> SubNodeCons::solve() {
-  PNINode *Left = this->LeftNode->getPNIVar();
-  PNINode *Right = this->RightNode->getPNIVar();
-  PNINode *Result = this->ResultNode->getPNIVar();
+llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
+  PNINode *Left = &G.getPNIVar(LeftNode);
+  PNINode *Right = &G.getPNIVar(RightNode);
+  PNINode *Result = &G.getPNIVar(ResultNode);
   assert(Left->isPNRelated());
   assert(Right->isPNRelated());
   assert(Result->isPNRelated());
@@ -374,7 +375,7 @@ ConsNode::iteratorTy ConsNode::eraseFromParent() {
 // overload with check
 PNINode::iteratorTy PNINode::eraseFromParent() {
   // Check links before destruction. Should be replaced beforehand.
-  assert(Parent.PNIToNode.count(this) == 0);
+  assert(Parent.PNIMap.count(this) == 0);
   if (TraceIds.count(getId())) {
     llvm::errs() << "TraceID=" << getId() << " PNINode=" << str()
                  << ": PNINode::eraseFromParent: Erasing node\n";
@@ -384,8 +385,8 @@ PNINode::iteratorTy PNINode::eraseFromParent() {
 
 // Notify CGNode that it becomes a pointer.
 void PNIGraph::onUpdatePNType(PNINode *N) {
-  if (PNIToNode.count(N) > 0) {
-    for (auto *Node : PNIToNode[N]) {
+  if (PNIMap.count(N) > 0) {
+    for (auto Node : PNIMap.rev().at(N)) {
       assert(false && "TODO");
       // Node->onUpdatePNType();
     }
@@ -412,11 +413,11 @@ PNINode *PNINode::unify(PNINode &other) {
   return Node;
 }
 
-void PNIGraph::addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
+void PNIGraph::addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
                           llvm::BinaryOperator *Inst) {
-  assert(Left->getPNIVar()->isPNRelated());
-  assert(Right->getPNIVar()->isPNRelated());
-  assert(Result->getPNIVar()->isPNRelated());
+  assert(getPNIVar(Left).isPNRelated());
+  assert(getPNIVar(Right).isPNRelated());
+  assert(getPNIVar(Result).isPNRelated());
   AddNodeCons C = {
       .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
   auto &Node = Constraints.emplace_back(*this, C);
@@ -426,11 +427,11 @@ void PNIGraph::addAddCons(CGNode *Left, CGNode *Right, CGNode *Result,
   Worklist.insert(&Node);
 }
 
-void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
+void PNIGraph::addSubCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
                           llvm::BinaryOperator *Inst) {
-  assert(Left->getPNIVar()->isPNRelated());
-  assert(Right->getPNIVar()->isPNRelated());
-  assert(Result->getPNIVar()->isPNRelated());
+  assert(getPNIVar(Left).isPNRelated());
+  assert(getPNIVar(Right).isPNRelated());
+  assert(getPNIVar(Result).isPNRelated());
   SubNodeCons C = {
       .LeftNode = Left, .RightNode = Right, .ResultNode = Result, .Inst = Inst};
   auto &Node = Constraints.emplace_back(*this, C);
@@ -443,7 +444,7 @@ void PNIGraph::addSubCons(CGNode *Left, CGNode *Right, CGNode *Result,
 void PNIGraph::markChanged(PNINode *N, ConsNode *Except) {
   // worklist algorithm.
   // When a var changed, add all constraints that use this var.
-  for (auto *N2 : PNIToNode[N]) {
+  for (auto N2 : PNIMap.rev().at(N)) {
     if (NodeToCons.count(N2)) {
       for (auto *C2 : NodeToCons[N2]) {
         if (C2 == Except) {
@@ -461,35 +462,16 @@ void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
   if (Var == Target) {
     return;
   }
-  // maintain PNIToNode
-  if (PNIToNode.count(Var)) {
-    for (auto *N : PNIToNode[Var]) {
-      N->setPNIVar(Target);
-      PNIToNode[Target].insert(N);
-    }
-    PNIToNode.erase(Var);
-  }
+  // maintain PNIMap
+  PNIMap.merge(Var, Target);
   Var->eraseFromParent();
   // Target is Changed, add related cons to worklist
   markChanged(Target);
 }
 
-void PNIGraph::markRemoved(CGNode &Node) {
-  assert(!NodeToCons.count(&Node));
-  if (auto *P = Node.getPNIVar()) {
-    PNIToNode[P].erase(&Node);
-    if (PNIToNode[P].empty()) {
-      PNIToNode.erase(P);
-      P->eraseFromParent();
-    }
-    Node.setPNIVar(nullptr);
-  }
-}
-
-void PNINode::addUser(CGNode *Node) {
-  assert(&Node->Parent == &Parent.CG);
-  Parent.PNIToNode[this].insert(Node);
-}
+// void PNINode::addUser(ExtValuePtr Node) {
+//   Parent.PNIMap.insert(Node, this);
+// }
 
 bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   bool Updated = Ty.setPtrOrNum(NewTy);
@@ -498,29 +480,6 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   }
   return Updated;
 }
-
-// bool PNINode::updateLowTy(std::string T) {
-//   bool Ret = false;
-//   assert(!T.empty());
-
-//   if (LowTy.empty()) {
-//     LowTy = T;
-//     Ret = true;
-//     setPtrOrNum(fromLLVMTy(LowTy, Parent->PointerSize));
-//   } else {
-//     if (isPNRelated()) {
-//       // assert(isPtrOrNum(T, Parent->PointerSize));
-//       // Low type is not important, just careful about possible PNI update.
-//       if (T->isPointerTy() && !isPointer()) {
-//         setPtrOrNum(Pointer);
-//         Ret = true;
-//       }
-//     } else {
-//       assert(LowTy == T);
-//     }
-//   }
-//   return Ret;
-// }
 
 // When LowTy is pointer-sized int, we initialize Ty as Unknown.
 PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
@@ -545,41 +504,5 @@ PNINode::PNINode(PNIGraph &SSG, std::string SerializedTy)
            }
            Size;
          })) {}
-
-void PNIGraph::cloneFrom(const PNIGraph &G,
-                         std::map<const CGNode *, CGNode *> Old2New) {
-  // assert(PNINodes.size() == 0);
-  // assert(Constraints.size() == 0);
-
-  std::set<std::pair<PNINode *, PNINode *>> toMerge;
-  // clone PNINodes
-  for (auto &N : G.PNINodes) {
-    auto *NewNode = clonePNINode(N);
-    // maintain PNIToNode
-    for (const auto *OldCGNode : G.PNIToNode.at(const_cast<PNINode *>(&N))) {
-      auto *NewCGNode = Old2New.at(OldCGNode);
-      if (NewCGNode->getPNIVar() == nullptr) {
-        addPNINodeTarget(*NewCGNode, *NewNode);
-      } else {
-        // merge with that node.
-        toMerge.insert({NewCGNode->getPNIVar(), NewNode});
-      }
-    }
-  }
-  // clone Constraints
-  for (auto &C : G.Constraints) {
-    auto &NewNode = Constraints.emplace_back(*this, AddNodeCons{});
-    NewNode.cloneFrom(C, Old2New);
-    NodeToCons[NewNode.getNodes()[0]].insert(&NewNode);
-    NodeToCons[NewNode.getNodes()[1]].insert(&NewNode);
-    NodeToCons[NewNode.getNodes()[2]].insert(&NewNode);
-    if (G.Worklist.count(const_cast<ConsNode *>(&C))) {
-      Worklist.insert(&NewNode);
-    }
-  }
-  for (auto Ent : toMerge) {
-    Ent.first->unify(*Ent.second);
-  }
-}
 
 } // namespace notdec::mlsub

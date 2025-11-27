@@ -495,29 +495,6 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   return Updated;
 }
 
-// bool PNINode::updateLowTy(std::string T) {
-//   bool Ret = false;
-//   assert(!T.empty());
-
-//   if (LowTy.empty()) {
-//     LowTy = T;
-//     Ret = true;
-//     setPtrOrNum(fromLLVMTy(LowTy, Parent->PointerSize));
-//   } else {
-//     if (isPNRelated()) {
-//       // assert(isPtrOrNum(T, Parent->PointerSize));
-//       // Low type is not important, just careful about possible PNI update.
-//       if (T->isPointerTy() && !isPointer()) {
-//         setPtrOrNum(Pointer);
-//         Ret = true;
-//       }
-//     } else {
-//       assert(LowTy == T);
-//     }
-//   }
-//   return Ret;
-// }
-
 // When LowTy is pointer-sized int, we initialize Ty as Unknown.
 PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
     : Parent(SSG), Id(ValueNamer::getId()), Ty(LowTy, SSG.PointerSize) {
