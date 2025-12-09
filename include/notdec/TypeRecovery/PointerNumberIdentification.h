@@ -230,7 +230,7 @@ struct PNIGraph {
     auto &It = PNINodes.emplace_back(*this, OGN);
     return &It;
   }
-  static void addPNINodeTarget(CGNode &To, PNINode &N);
+  void addPNINodeTarget(CGNode &To, PNINode &N);
   void markRemoved(CGNode &N);
   void clearConstraints() {
     NodeToCons.clear();

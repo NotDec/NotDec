@@ -35,7 +35,7 @@ CGNode::CGNode(ConstraintGraph &Parent, Variance V, llvm::Type *LowTy)
       Size(Parent.PG ? ::notdec::getSize(LowTy, Parent.PointerSize) : 0) {
   if (Parent.PG) {
     auto N = Parent.PG->createPNINode(LowTy);
-    PNIGraph::addPNINodeTarget(*this, *N);
+    Parent.PG->addPNINodeTarget(*this, *N);
   }
 }
 
@@ -49,7 +49,7 @@ CGNode::CGNode(ConstraintGraph &Parent, Variance V, PNINode *N)
     assert(N != nullptr);
     if (N != nullptr) {
       assert(&N->getParent() == Parent.PG.get());
-      PNIGraph::addPNINodeTarget(*this, *N);
+      Parent.PG->addPNINodeTarget(*this, *N);
     }
   }
 }
@@ -95,7 +95,7 @@ void ConstraintGraph::removeNode(CGNode &Node) {
   assert(Node.outEdges.empty() && "removeNode: node has out edges");
   assert(Node.inEdges.empty() && "removeNode: node has in edges");
   assert(Node.flowEdges.empty() && "removeNode: node has flow edges");
-  PG->markRemoved(Node);
+  // PG->markRemoved(Node);
   Nodes.erase(Node.getIterator());
 }
 
