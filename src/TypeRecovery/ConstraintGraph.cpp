@@ -2683,7 +2683,7 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, llvm::Type *LowTy)
                      : 0) {
   if (Parent.PG) {
     auto N = Parent.PG->createPNINode(LowTy);
-    PNIGraph::addPNINodeTarget(*this, *N);
+    Parent.PG->addPNINodeTarget(*this, *N);
   }
 }
 
@@ -2697,7 +2697,7 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
     assert(N != nullptr);
     if (N != nullptr) {
       assert(&N->getParent() == Parent.PG.get());
-      PNIGraph::addPNINodeTarget(*this, *N);
+      Parent.PG->addPNINodeTarget(*this, *N);
     }
   }
 }
