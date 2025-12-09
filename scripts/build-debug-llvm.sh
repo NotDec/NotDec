@@ -28,7 +28,8 @@ mkdir "$LLVMHome"
 
 if [ ! -e "llvm-source" ]; then
     echo "Cloning LLVM source..."
-    git clone https://github.com/NotDec/llvm-project.git
+    git clone https://github.com/NotDec/llvm-project.git llvm-source
+    git -C llvm-source checkout llvmorg-14.0.6
 fi
 
 echo "Building LLVM..."
