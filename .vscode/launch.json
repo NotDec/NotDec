@@ -13,23 +13,25 @@
         "${file}",
         "-o",
         "${file}.c",
-        "--tr-level=3"
-        // "-debug-only=type-recovery",
-        // "-debug-only=retypd_graph",
+        "--tr-level=3",
+        // "-debug-only=structural-analysis",
+        // "-debug-only=structural-goto",
         // "--print-before=type-recovery"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
       "env": {
-        // "NOTDEC_DEBUG_DIR": "debug_dir",
-        // "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
+        "NOTDEC_DEBUG_DIR": "debug_dir",
+        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
         "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
         // "NOTDEC_SAT_TIMEOUT": "120000",
         "NOTDEC_DISABLE_INTERPROC": "1",
-        // "NOTDEC_DEFAULT_POLY": "1"
-        "NOTDEC_SAT_DISABLE": "1"
+        "NOTDEC_SAT_DISABLE": "1",
+        // "NOTDEC_SAT_NOPTRRULE": "1",
+        // "NOTDEC_DEFAULT_POLY": "1",
+        // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "9728",
       }
     },
     {
@@ -75,8 +77,9 @@
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
         "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
+        "NOTDEC_SAT_DISABLE": "1",
         // "NOTDEC_SAT_TIMEOUT": "120000",
-        // "NOTDEC_DISABLE_INTERPROC": "1"
+        "NOTDEC_DISABLE_INTERPROC": "1"
         // "NOTDEC_DEFAULT_POLY": "1"
       }
     },

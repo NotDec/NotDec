@@ -1,6 +1,6 @@
 # NotDec: WebAssembly Decompiler and Static Analysis Framework
 
-[Website](https://notdec.github.io/NotDec/)
+[Doc Website](https://notdec.github.io/NotDec/)
 
 [中文](#中文)
 
@@ -9,6 +9,8 @@ NotDec is
 1. A webassembly decompiler that can experiment with new decompiler techniques.
    - Variable Recovery
    - Structual Analysis
+
+We are still actively experimenting with and improving the type recovery algorithms (on another branch).
 
 Keywords: Reverse LLVM, LLVM C Backend / llvm-cbe.
 
@@ -19,7 +21,7 @@ Based on Ubuntu 22.04
 1. Install dependencies
    - Use `apt`
       ```
-      sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++ ninja-build
+      sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++ ninja-build libboost-all-dev
       ```
    - Install `wasi-sdk` to `/opt`
       ```
@@ -29,10 +31,16 @@ Based on Ubuntu 22.04
 1. clone this repo
 1. Install LLVM 14
    - Execute `scripts/build-debug-llvm.sh` to download and build LLVM. You may encounter errors about no memory during linking, just decrease the parallel number to 1.
-1. Install Souffle
-   - https://souffle-lang.github.io/build and set `SOUFFLE_DOMAIN_64BIT=ON`
-1. cmake build
+1. cmake build, but use clang as the compiler.
+    ```
+    cmake -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/clang-14 -DCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++-14 -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld --no-warn-unused-cli -S . -B ./build -G Ninja
+    ```
 
+### Notice
+
+- It is recommended to set `--tr-level=3` and provide environment variables `NOTDEC_DISABLE_INTERPROC=1` (disable inter-procedural type recovery) and `NOTDEC_SAT_DISABLE=1` (disable complex type propagation) to reduce the time spent on type analysis.
+- Setting the environment variables `NOTDEC_DEBUG_DIR=debug_dir` and `NOTDEC_TYPE_RECOVERY_DEBUG_DIR=debug_dir` will print detailed intermediate results of type recovery to `debug_dir/`, facilitating debugging of the type recovery algorithm.
+- The robustness of the backend in generating C code may be insufficient; encountering complex statements may still cause errors or generate syntax errors.
 
 # 中文
 
@@ -44,18 +52,41 @@ Based on Ubuntu 22.04
 1. 学习现有反编译器的原理，系统地总结现有反编译器的工作，算法
 1. 选择合适的算法，尝试实现自己的反编译器
 
+#### 开发环境 - Linux
+
+基于Ubuntu 22.04系统
+
+1. 安装依赖项
+   - 使用 `apt` 包管理器
+      ```
+      sudo apt install wabt python-is-python3 clang-14 cmake zlib1g-dev g++ ninja-build libboost-all-dev
+      ```
+   - 将 `wasi-sdk` 安装至 `/opt` 目录
+      ```
+      wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sdk-20.0-linux.tar.gz -P /tmp
+      sudo tar xf /tmp/wasi-sdk-20.0-linux.tar.gz -C /opt
+      ```
+2. 克隆此代码仓库
+3. 安装 LLVM 14
+   - 执行 `scripts/build-debug-llvm.sh` 以下载并构建 LLVM。链接过程中可能出现内存不足的错误，只需将并行编译数降至 1 即可。
+4. 使用 CMake 进行构建（需指定 clang 作为编译器）
+    ```
+    cmake -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/clang-14 -DCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++-14 -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld --no-warn-unused-cli -S . -B ./build -G Ninja
+    ```
+
+### Notice
+
+- 推荐设置`--tr-level=3`，并提供环境变量`NOTDEC_DISABLE_INTERPROC=1`（禁用跨函数的类型恢复）和`NOTDEC_SAT_DISABLE=1`（禁用复杂的类型传播），减少类型分析耗时。
+- 设置环境变量`NOTDEC_DEBUG_DIR=debug_dir`和`NOTDEC_TYPE_RECOVERY_DEBUG_DIR=debug_dir`会将类型恢复的详细中间结果打印到`debug_dir/`里，方便debug类型恢复算法。
+- 后端生成C代码的鲁棒性可能不足，遇到复杂的语句可能依然会报错或产生语法错误。
 
 ### 资料收集
 
-学习阶段：
-
-1. LLVM IR基础：只要达到能手写LLVM IR的程度就行。即主要理解各种语言特性对应的是什么样的LLVM IR代码。同时理解带alloca的半SSA形式，即alloca里的变量是非SSA，外面的是SSA。
+1. LLVM IR基础：主要理解各种语言特性对应的是什么样的LLVM IR代码。同时理解带alloca的半SSA形式，即alloca里的变量是非SSA，外面的是SSA。
    - llvm-tutor 
    - ollvm源码
 2. SSA与编译优化基础
-   - [《Engineering a compiler》](https://book.douban.com/subject/20436488/) 上来先看9.3章，深入研读。其他的章节没那么重要
-   - 再找找其他讲过SSA的中文书？
-
+   - [《Engineering a compiler》](https://book.douban.com/subject/20436488/) 上来先看9.3章
    关于SSA的实验
    - [mem2reg 实验指导 · GitBook (buaa-se-compiling.github.io)](https://buaa-se-compiling.github.io/miniSysY-tutorial/challenge/mem2reg/help.html)
    - [Lv9+.4. SSA 形式 - 北京大学编译实践课程在线文档 | 北大编译实践在线文档 (pku-minic.github.io)](https://pku-minic.github.io/online-doc/#/lv9p-reincarnation/ssa-form)
@@ -65,27 +96,13 @@ Based on Ubuntu 22.04
    - [《simple and efficient ssa construction》](https://pp.info.uni-karlsruhe.de/uploads/publikationen/braun13cc.pdf)
 
 3. 反编译
-   - [代码优化](docs/optimizers.md) 和 [变量恢复](docs/variable_recovery.md)
-   - [控制流结构恢复](docs/backend.md)
+   - 详见[文档站](https://notdec.github.io/NotDec/)
 
 #### 资料
 
-[现有的反编译器和资料](papers.md)
+[现有的反编译器和资料](https://notdec.github.io/NotDec/papers.html)
 
-### 规划：基于LLVM IR的反编译
-
-为什么要使用LLVM IR？
-
-1. 之后可以直接对接SVF，得到较好的指针分析结果。
-
-优先实现wasm的反编译。
-
-1. Wasm转LLVM IR
-   1. WAVM是一个基于LLVM的wasm的JIT，有部分逻辑是WASM转 LLVM IR
-      1. 生成的IR不够简洁，有很多为了编译到汇编的冗余的内容
-2. TODO
-
-### 规划：反编译阶段
+## 反编译阶段
 
 ![反编译的各个阶段](docs/src/imgs/decompiler-architecture.png)
 
@@ -107,32 +124,16 @@ Based on Ubuntu 22.04
 
 开发环境：VSCode + CMake。将Wabt，LLVM等作为CMake的外部依赖。
 
-#### 开发环境搭建 - DevContainer
-
-2023年9月7日注：由于对LLVM的调试需求越来越多，项目转为使用本地源码编译的LLVM（RelWithDebInfo或Debug build），且编译得到的二进制文件过大，因此不再推荐使用DevContainer。
-
-VSCode DevContainer。出于[性能考虑](https://code.visualstudio.com/remote/advancedcontainers/improve-performance)，在clone时可以直接clone到wsl的ext4文件系统里。
-
-1. 安装Docker Desktop on Windows： https://docs.docker.com/desktop/install/windows-install/ （无论是家庭版还是专业版均可）
-   1. 其他系统直接安装docker
-1. 用vscode打开代码，安装Dev Containers插件，按Ctrl-Shift-P 然后输入查找 `Remote-Containers: Rebuild and Reopen in container`.
-1. 等待构建，构建完成后会直接进入开发环境中。
-1. 安装CMake相关插件，toolkit选clang。
-
-如果出现了无法使用windows侧的ssh-agent提供的ssh key的forward功能：
-https://stackoverflow.com/questions/72293035/error-communication-with-agent-failed-when-ssh-auth-sock-is-set-but-ssh-agent 
+由于对LLVM的调试需求越来越多，项目转为使用本地源码编译的LLVM（RelWithDebInfo或Debug build）
 
 #### 代码调试
 
-直接使用自带的C/C++调试，不知道为什么会非常慢，gdb执行backtrace要卡3秒，各种step命令要卡5-6秒。因此安装使用vscode的CodeLLDB插件。
-
-代码补全使用clangd插件。根据提示禁用Intellisense，然后根据插件提示确认下载clangd。
+使用vscode的CodeLLDB插件。代码补全使用clangd插件。根据提示禁用Intellisense，然后根据插件提示确认下载clangd。
 
 ### 提交代码前
 
 1. 写好commit message，简要概况所有的修改。
 2. 检查添加的代码的注释和文档是否充足。
-
 
 ## TODO
 
