@@ -10,7 +10,7 @@ NotDec is
    - Variable Recovery
    - Structual Analysis
 
-We are still actively experimenting with and improving the type recovery algorithms (on another branch).
+We are still actively experimenting with and improving the type recovery algorithms (on another branch). We will be back soon with a much better and more efficient type recovery algorithm!
 
 Keywords: Reverse LLVM, LLVM C Backend / llvm-cbe.
 
