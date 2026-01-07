@@ -18,6 +18,8 @@ Keywords: Reverse LLVM, LLVM C Backend / llvm-cbe.
 
 Based on Ubuntu 22.04
 
+1. Clone this repo, use recursive clone
+    `git clone --recursive`
 1. Install dependencies
    - Use `apt`
       ```
@@ -34,6 +36,7 @@ Based on Ubuntu 22.04
 1. cmake build, but use clang as the compiler.
     ```
     cmake -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/clang-14 -DCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++-14 -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld --no-warn-unused-cli -S . -B ./build -G Ninja
+    cmake --build ./build --target all --
     ```
 
 ### Notice
