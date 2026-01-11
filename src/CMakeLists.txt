@@ -52,6 +52,11 @@ if (NOTDEC_ENABLE_LLVM2C)
 	)
 endif()
 
+target_link_libraries(notdec
+	PUBLIC
+	binarysub_lib
+)
+
 set_target_properties(notdec
 	PROPERTIES
 		OUTPUT_NAME "notdec"

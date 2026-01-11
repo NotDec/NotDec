@@ -4,3 +4,6 @@
 [submodule "external/NotDec-llvm2c"]
 	path = external/NotDec-llvm2c
 	url = https://github.com/NotDec/NotDec-llvm2c
+[submodule "external/binarysub"]
+	path = external/binarysub
+	url = git@github.com:am009/binarysub-private.git

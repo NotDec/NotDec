@@ -154,6 +154,8 @@ if (NOTDEC_ENABLE_LLVM2C)
 	add_compile_definitions(NOTDEC_ENABLE_LLVM2C)
 endif ()
 
+add_subdirectory(external/binarysub)
+
 include_directories(${PROJECT_SOURCE_DIR}/include/notdec)
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${CMAKE_BINARY_DIR})
