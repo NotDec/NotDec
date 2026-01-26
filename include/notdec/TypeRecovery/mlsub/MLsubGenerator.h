@@ -49,7 +49,9 @@ struct ConstraintsGenerator;
 struct ConstraintsGenerator {
   DSUMap<ExtValuePtr, SimpleType> V2N;
 
-  ConstraintGraph CG;
+  long PointerSize = 0;
+  std::string Name;
+  // ConstraintGraph CG;
   PNIGraph PG;
   std::set<const llvm::Function *> SCCs;
   int lvl = 0;
@@ -62,7 +64,8 @@ struct ConstraintsGenerator {
   ConstraintsGenerator(std::string Name, unsigned int pointer_size,
                        const std::set<const llvm::Function *> &SCCs = {},
                        int lvl = 0)
-      : CG(pointer_size, Name), PG(Name, pointer_size), SCCs(SCCs), lvl(lvl) {}
+      : PointerSize(pointer_size), Name(Name), PG(Name, pointer_size),
+        SCCs(SCCs), lvl(lvl) {}
 
   void run() {
     for (const llvm::Function *Func1 : SCCs) {
@@ -109,11 +112,13 @@ public:
     auto It = V2N.insert(Val, N);
     if (!It.second) {
       llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "setTypeVar: Value already mapped to "
+                   << "createNode: Value already mapped to "
                    << It.first->second->str() << ", but now set to "
                    << toString(Val) << "\n";
       std::abort();
     }
+    // Create PNI
+    PG.getOrInsertPNINode(Val, User, OpInd);
     // if the value is constant addr, we set ptr and link to memory
     if (auto CA = std::get_if<ConstantAddr>(&Val)) {
       assert(false && "TODO");
@@ -177,15 +182,24 @@ public:
                      llvm::PtrToIntInst, llvm::IntToPtrInst>(Val);
   }
 
-  void addAddConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
+  void addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
                         llvm::BinaryOperator *Result);
-  void addSubConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
+  void addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
                         llvm::BinaryOperator *Result);
   void addCmpConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
                         llvm::ICmpInst *I);
 
   void setPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    assert(false && "TODO");
+    llvmValue2ExtVal(Val, User, OpInd);
+    if (auto N = PG.getPNIVarOrNull(Val)) {
+      N->setPtr();
+    }
+  }
+  void setNonPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    llvmValue2ExtVal(Val, User, OpInd);
+    if (auto N = PG.getPNIVarOrNull(Val)) {
+      N->setNonPtrIfRelated();
+    }
   }
 
 public:

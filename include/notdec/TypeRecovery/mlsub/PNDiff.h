@@ -202,6 +202,22 @@ struct PNIGraph {
 
   DSUMap<ExtValuePtr, PNINode *> PNIMap;
   // std::map<PNINode *, std::set<ExtValuePtr>> PNIToNode;
+
+  PNINode &createPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    llvmValue2ExtVal(Val, User, OpInd);
+    auto N = createPNINode(getType(Val));
+    auto It = PNIMap.insert(Val, N);
+    if (!It.second) {
+      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                   << "createPNINode: Value already mapped to "
+                   << It.first->second->str() << ", but now set to "
+                   << toString(Val) << "\n";
+      std::abort();
+    }
+    return *N;
+  }
+
+
   PNINode *getPNIVarOrNull(ExtValuePtr N) {
     auto It = PNIMap.find(N);
     if (It == PNIMap.end()) {
@@ -219,15 +235,23 @@ struct PNIGraph {
     auto &It = PNINodes.emplace_back(*this, SerializedTy);
     return &It;
   }
-  PNINode *createPNINode(llvm::Type *LowTy) {
-    auto &It = PNINodes.emplace_back(*this, LowTy);
-    return &It;
+
+  PNINode& getOrInsertPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    llvmValue2ExtVal(Val, User, OpInd);
+    auto N = getPNIVarOrNull(Val);
+    if (N != nullptr) {
+      return *N;
+    }
+    return createPNINode(Val, User, OpInd);
   }
-  void addPNINodeTarget(ExtValuePtr To, PNINode &N);
   void clearConstraints() {
     NodeToCons.clear();
     Constraints.clear();
     Worklist.clear();
+  }
+
+  void unifyVar(ExtValuePtr V1, ExtValuePtr V2) {
+    getPNIVar(V1).unify(getPNIVar(V2));
   }
 
   PNIGraph(std::string Name, long PointerSize)
@@ -252,6 +276,10 @@ struct PNIGraph {
   void onUpdatePNType(PNINode *N);
 
 protected:
+  PNINode *createPNINode(llvm::Type *LowTy) {
+    auto &It = PNINodes.emplace_back(*this, LowTy);
+    return &It;
+  }
   void markChanged(PNINode *N, ConsNode *Except = nullptr);
   void mergePNVarTo(PNINode *Var, PNINode *Target);
 };

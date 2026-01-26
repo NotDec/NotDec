@@ -2,6 +2,7 @@
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
 #include "binarysub/binarysub-core.h"
 #include "notdec-llvm2c/Utils.h"
+#include "notdec/TypeRecovery/Lattice.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
@@ -18,6 +19,7 @@ namespace notdec::mlsub {
 SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
                                                    llvm::User *User,
                                                    long OpInd) {
+  llvmValue2ExtVal(Val, User, OpInd);
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertSimpleTypeVal(*V, User, OpInd);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
@@ -40,6 +42,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
   if (Val->getType()->isIntegerTy(1)) {
     return binarysub::make_primitive("bool");
   } else if (Val->getType()->isFloatingPointTy()) {
+    return binarysub::make_primitive("float");
   }
 
   if (Constant *C = dyn_cast<Constant>(Val)) {
@@ -311,7 +314,7 @@ void ConstraintsGenerator::MLsubVisitor::handlePHINodes() {
 
 unsigned ConstraintsGenerator::getPointerElemSize(Type *ty) {
   Type *Elem = ty->getPointerElementType();
-  return llvm2c::getLLVMTypeSize(Elem, CG.PointerSize);
+  return llvm2c::getLLVMTypeSize(Elem, PointerSize);
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
@@ -334,9 +337,7 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
 
   auto LoadNode = cg.createNode(&I, nullptr, -1);
-  cg.addRemapType(&I, nullptr, -1,
-                  binarysub::make_record({{"@" + std::to_string(BitSize),
-                                           binarysub::make_ptr_load(PtrVal)}}));
+  cg.addRemapType(&I, nullptr, -1, binarysub::make_ptr_load(PtrVal));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
@@ -359,9 +360,7 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
   auto StoreVal = cg.getOrInsertNode(I.getValueOperand(), &I, 0);
 
-  cg.addSubtype(StoreVal,
-                binarysub::make_record({{"@" + std::to_string(BitSize),
-                                         binarysub::make_ptr_store(PtrVal)}}));
+  cg.addSubtype(StoreVal, binarysub::make_ptr_store(PtrVal));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
@@ -390,20 +389,30 @@ void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(
 void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,
                                             const ExtValuePtr RHS,
                                             llvm::ICmpInst *I) {
-  assert(false && "TODO");
-  // getOrInsertNode(LHS, I, 0).getPNIVar()->unify(
-  //     *getOrInsertNode(RHS, I, 1).getPNIVar());
+  PG.unifyVar(LHS, RHS);
 }
 
-void ConstraintsGenerator::addAddConstraint(const ExtValuePtr LHS,
-                                            const ExtValuePtr RHS,
-                                            llvm::BinaryOperator *Result) {
-  assert(false && "TODO");
+void ConstraintsGenerator::addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
+                                            llvm::BinaryOperator *I) {
+  llvmValue2ExtVal(LHS, I, 0);
+  llvmValue2ExtVal(RHS, I, 1);
+  auto Left = &PG.getOrInsertPNINode(LHS, I, 0);
+  auto Right = &PG.getOrInsertPNINode(RHS, I, 1);
+  auto Res = &PG.getOrInsertPNINode(I, nullptr, -1);
+  if (Left->isPNRelated() || Right->isPNRelated()) {
+    PG.addAddCons(LHS, RHS, I, I);
+  }
 }
-void ConstraintsGenerator::addSubConstraint(const ExtValuePtr LHS,
-                                            const ExtValuePtr RHS,
-                                            llvm::BinaryOperator *Result) {
-  assert(false && "TODO");
+void ConstraintsGenerator::addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
+                                            llvm::BinaryOperator *I) {
+  llvmValue2ExtVal(LHS, I, 0);
+  llvmValue2ExtVal(RHS, I, 1);
+  auto Left = &PG.getOrInsertPNINode(LHS, I, 0);
+  auto Right = &PG.getOrInsertPNINode(RHS, I, 1);
+  auto Res = &PG.getOrInsertPNINode(I, nullptr, -1);
+  if (Left->isPNRelated() || Right->isPNRelated()) {
+    PG.addAddCons(LHS, RHS, I, I);
+  }
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitICmpInst(ICmpInst &I) {
@@ -421,8 +430,11 @@ void ConstraintsGenerator::MLsubVisitor::visitSelectInst(SelectInst &I) {
   auto DstVar = cg.createNode(&I, nullptr, -1);
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
-  assert(false && "TODO: getOrInsertNode for select operands");
-  assert(false && "TODO: addSubtype for select");
+  auto Src1Var = cg.getOrInsertNode(Src1, &I, 0);
+  auto Src2Var = cg.getOrInsertNode(Src2, &I, 1);
+  // Not generate boolean constraints. Because it must be i1.
+  cg.addSubtype(Src1Var, DstVar);
+  cg.addSubtype(Src2Var, DstVar);
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAdd(BinaryOperator &I) {
@@ -445,22 +457,24 @@ void ConstraintsGenerator::MLsubVisitor::visitAnd(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);
 
-  assert(false && "TODO: getOrInsertNode for And operands");
-  assert(false && "TODO: getOrInsertNode for And result");
+  auto Src1Node = cg.getOrInsertNode(Src1, &I, 0);
+  auto Src2Node = cg.getOrInsertNode(Src2, &I, 1);
+  auto RetNode = cg.getOrInsertNode(&I, nullptr, -1);
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
     if ((CI->getZExtValue() & 0x3fffff00) == 0x3fffff00) {
       // act as simple assignment
-      assert(false && "TODO: addSubtype");
+      cg.addSubtype(RetNode, Src1Node);
       return;
     }
   } else {
     // llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
     //              << "Warn: And op without constant: " << I << "\n";
   }
-  // view as numeric operation?
-  assert(false && "TODO: PNI setNonPtr");
+  cg.setNonPointer(Src1, &I, 0);
+  cg.setNonPointer(Src2, &I, 1);
+  cg.setNonPointer(&I, nullptr, -1);
   return;
 }
 
@@ -470,14 +484,15 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);
 
-  assert(false && "TODO: getOrInsertNode for Or operands");
-  assert(false && "TODO: getOrInsertNode for Or result");
+  auto Src1Node = cg.getOrInsertNode(Src1, &I, 0);
+  auto Src2Node = cg.getOrInsertNode(Src2, &I, 1);
+  auto RetNode = cg.getOrInsertNode(&I, nullptr, -1);
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
     if ((CI->getZExtValue() & 0x3fffff00) == 0) {
       // act as simple assignment
-      assert(false && "TODO: addSubtype");
+      cg.addSubtype(RetNode, Src1Node);
       return;
     }
   } else {
@@ -485,7 +500,9 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
     //              << "Warn: Or op without constant: " << I << "\n";
   }
   // view as numeric operation?
-  assert(false && "TODO: PNI setNonPtrIfRelated");
+  cg.setNonPointer(Src1, &I, 0);
+  cg.setNonPointer(Src2, &I, 1);
+  cg.setNonPointer(&I, nullptr, -1);
   return;
 }
 
@@ -534,17 +551,19 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   if (ty == nullptr) { // no action
     return true;
   } else if (strEq(ty, "sint")) {
-    assert(false && "TODO: PNI isPNRelated");
-    assert(false && "TODO: getOrCreatePrim");
-    assert(false && "TODO: addSubtype");
+    cg.setNonPointer(I, nullptr, -1);
+    auto SintNode = binarysub::make_primitive(
+        retypd::getNameForInt("sint", I->getType()));
+    cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
-    assert(false && "TODO: PNI isPNRelated");
-    assert(false && "TODO: getOrCreatePrim");
-    assert(false && "TODO: addSubtype");
+    cg.setNonPointer(I, nullptr, -1);
+    auto UintNode = binarysub::make_primitive(
+        retypd::getNameForInt("uint", I->getType()));
+    cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
-    assert(false && "TODO: PNI isPNRelated");
+    cg.setNonPointer(I, nullptr, -1);
     return true;
   }
 
@@ -558,22 +577,24 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
   if (Op->getType()->isVoidTy()) {
     return false;
   }
-  assert(false && "TODO: getOrInsertNode");
+  auto N = cg.getOrInsertNode(Op, I, Index);
   const char *ty = inputs[Index];
   if (ty == nullptr) {
     return true;
   } else if (strEq(ty, "sint")) {
-    assert(false && "TODO: PNI setNonPtrIfRelated");
-    assert(false && "TODO: getOrCreatePrim");
-    assert(false && "TODO: addSubtype");
+    cg.setNonPointer(Op, I, Index);
+    auto SintNode = binarysub::make_primitive(
+        retypd::getNameForInt("sint", Op->getType()));
+    cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
-    assert(false && "TODO: PNI setNonPtrIfRelated");
-    assert(false && "TODO: getOrCreatePrim");
-    assert(false && "TODO: addSubtype");
+    cg.setNonPointer(Op, I, Index);
+    auto UintNode = binarysub::make_primitive(
+        retypd::getNameForInt("uint", Op->getType()));
+    cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {
-    assert(false && "TODO: PNI setNonPtrIfRelated");
+    cg.setNonPointer(Op, I, Index);
     return true;
   }
   return false;

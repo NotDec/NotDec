@@ -92,15 +92,6 @@ bool PNIGraph::solve() {
   return AnyChanged;
 }
 
-void PNIGraph::addPNINodeTarget(ExtValuePtr To, PNINode &N) {
-  // assert(To.getPNIVar() == nullptr);
-  assert(PNIMap.count(To) == 0);
-  assert(&N.Parent == this);
-  // To.setPNIVar(&N);
-  // N.Parent.PNIToNode[&N].insert(&To);
-  PNIMap.insert(To, &N);
-}
-
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
   // Check if the constraint should be converted
   if (Cons->isAdd()) {
