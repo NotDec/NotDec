@@ -46,6 +46,7 @@
 #include "Passes/retdec-stack/retdec-stack.h"
 #include "Passes/retdec-stack/retdec-symbolic-tree.h"
 #include "TypeRecovery/TRContext.h"
+#include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/Utils.h"
 #include "notdec-wasm2llvm/utils.h"
 
@@ -327,7 +328,7 @@ void PassEnv::build_passes(int level) {
     // level 2 no stack breaking
     if (level >= 2) {
       prepareTypeRecoveryContext();
-      FAM.registerPass([&]() { return FunctionTypeRecovery(*TR); });
+      // FAM.registerPass([&]() { return FunctionTypeRecovery(*TR); });
 
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
@@ -346,12 +347,12 @@ void PassEnv::build_passes(int level) {
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
       MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
-      MPM.addPass(TypeRecoveryMain(*TR));
+      MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
 
       // level 3 with TypeRecoveryOpt and stack breaking.
       if (level >= 3) {
         MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
-        MPM.addPass(TypeRecoveryOpt(*TR));
+        MPM.addPass(mlsub::MLsubRecoveryOpt(*TR));
         MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
         MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
@@ -369,10 +370,11 @@ void PassEnv::build_passes(int level) {
             RunDeadAllocaRec = true;
           }
         }
-        if (RunDeadAllocaRec) {
-          MPM.addPass(RecoverDeadAlloca(*TR));
-        }
-        MPM.addPass(InvalidateAllTypes(*TR));
+        // TODO MLSUB: Fix
+        // if (RunDeadAllocaRec) {
+        //   MPM.addPass(RecoverDeadAlloca(*TR));
+        // }
+        // MPM.addPass(InvalidateAllTypes(*TR));
         MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
       }
     }
@@ -382,7 +384,8 @@ void PassEnv::build_passes(int level) {
 void PassEnv::add_llvm2c(std::string OutFilePath,
                          ::notdec::llvm2c::Options llvm2cOpt,
                          bool disableTypeRecovery) {
-  MPM.addPass(NotdecLLVM2C(*TR, OutFilePath, llvm2cOpt, disableTypeRecovery));
+  assert(false && "TODO");
+  // MPM.addPass(NotdecLLVM2C(*TR, OutFilePath, llvm2cOpt, disableTypeRecovery));
 }
 
 void PassEnv::run_passes() {

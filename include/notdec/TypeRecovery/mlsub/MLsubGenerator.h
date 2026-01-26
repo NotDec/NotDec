@@ -2,101 +2,94 @@
 #define _BINARYSUB_MLSUBGENERATOR_H_
 
 #include <cassert>
-#include <clang/AST/Type.h>
-#include <clang/Frontend/ASTUnit.h>
-#include <clang/Tooling/Tooling.h>
-#include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <deque>
-#include <functional>
-#include <iostream>
-#include <llvm/Analysis/CallGraph.h>
-#include <llvm/IR/Constant.h>
-#include <llvm/IR/InstrTypes.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Intrinsics.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Type.h>
-#include <llvm/Support/Casting.h>
 #include <map>
 #include <memory>
-#include <optional>
 #include <set>
 #include <string>
-#include <utility>
 #include <variant>
 #include <vector>
 
+#include <llvm/Analysis/CallGraph.h>
+#include <llvm/IR/Constant.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstVisitor.h>
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/PassManager.h>
+#include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Casting.h>
 #include <llvm/Support/FormattedStream.h>
 
-#include "TypeRecovery/DotSummaryParser.h"
+#include <clang/AST/Type.h>
+#include <clang/Frontend/ASTUnit.h>
+#include <clang/Tooling/Tooling.h>
+
 #include "TypeRecovery/mlsub/MLsubGraph.h"
 #include "TypeRecovery/mlsub/PNDiff.h"
-#include "TypeRecovery/retypd/Schema.h"
-#include "Utils/DSUMap.h"
+#include "binarysub/binarysub-core.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/ExtValuePtr.h"
-#include "notdec-llvm2c/Interface/HType.h"
-#include "notdec-llvm2c/Interface/Range.h"
-#include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 #endif
 
 namespace notdec::mlsub {
 
+using binarysub::SimpleType;
+
 struct ConstraintsGenerator;
 
 struct ConstraintsGenerator {
-  DSUMap<ExtValuePtr, CGNode *> V2N;
-  DSUMap<ExtValuePtr, CGNode *> V2NContra;
-  void removeNode(CGNode &N);
+  DSUMap<ExtValuePtr, SimpleType> V2N;
 
   ConstraintGraph CG;
-  PNIGraph *PG;
-  std::set<llvm::Function *> SCCs;
-  // std::map<llvm::CallBase *, std::pair<CGNode *, CGNode *>> CallToInstance;
-  // std::map<llvm::CallBase *, std::pair<CGNode *, CGNode *>> UnhandledCalls;
+  PNIGraph PG;
+  std::set<const llvm::Function *> SCCs;
+  int lvl = 0;
 
-  DSUMap<std::pair<std::string, llvm::Type *>, CGNode *> PrimMap;
-
-  void addMergeNode(CGNode &From, CGNode &To) { V2N.merge(&From, &To); }
+  void addMergeNode(SimpleType From, SimpleType To) { V2N.merge(From, To); }
 
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);
 
-  // void dumpV2N();
   ConstraintsGenerator(std::string Name, unsigned int pointer_size,
-                       const std::set<llvm::Function *> &SCCs = {})
-      : CG(pointer_size, Name, false), PG(CG.PG.get()), SCCs(SCCs) {}
+                       const std::set<const llvm::Function *> &SCCs = {},
+                       int lvl = 0)
+      : CG(pointer_size, Name), PG(Name, pointer_size), SCCs(SCCs), lvl(lvl) {}
 
   void run() {
-    for (llvm::Function *Func : SCCs) {
+    for (const llvm::Function *Func1 : SCCs) {
+      auto Func = const_cast<llvm::Function *>(Func1);
       // create function nodes
-      auto [F, FC] = createNode(Func, nullptr, -1);
+      auto F = createNode(Func, nullptr, -1);
+      std::vector<SimpleType> Args;
       for (int i = 0; i < Func->arg_size(); i++) {
-        auto [Arg, ArgC] = createNode(Func->getArg(i), nullptr, i);
+        auto Arg = createNode(Func->getArg(i), nullptr, i);
         // Contra-variant.
-        addEdge(F, ArgC, {InLabel{.name = std::to_string(i)}});
-        addEdge(FC, Arg, {InLabel{.name = std::to_string(i)}});
+        Args.push_back(Arg);
       }
+      SimpleType Ret = nullptr;
       if (!Func->getReturnType()->isVoidTy()) {
-        auto [Ret, RetC] = createNode(ReturnValue{.Func = Func}, nullptr, -1);
-        addEdge(F, Ret, {OutLabel{}});
-        addEdge(FC, RetC, {OutLabel{}});
+        Ret = createNode(ReturnValue{.Func = Func}, nullptr, -1);
       }
+      addSubtype(binarysub::make_function(Args, Ret), F);
     }
-    for (llvm::Function *Func : SCCs) {
+    for (const llvm::Function *Func : SCCs) {
       MLsubVisitor Visitor(*this);
-      Visitor.visit(Func);
+      Visitor.visit(const_cast<llvm::Function *>(Func));
       Visitor.handlePHINodes();
+    }
+    for (const llvm::Function *Func1 : SCCs) {
+      auto Func = const_cast<llvm::Function *>(Func1);
+      auto F = getNodeOrNull(Func, nullptr, -1);
+      assert(F->getAsVariableState()->upperBounds.empty());
     }
   }
   void cloneTo(ConstraintsGenerator &Target,
@@ -104,17 +97,16 @@ struct ConstraintsGenerator {
   std::shared_ptr<ConstraintsGenerator>
   cloneShared(std::map<const CGNode *, CGNode *> &Old2New);
 
-public:
-  const CGEdge *addEdge(CGNode &From, CGNode &To, EdgeLabel Label) {
-    return CG.addEdge(From, To, Label);
-  }
+  SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd);
+  SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
 
+public:
   // Create Node of both variance
-  std::pair<CGNode &, CGNode &> createNode(ExtValuePtr Val, llvm::User *User,
-                                           long OpInd) {
+  SimpleType createNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
     llvmValue2ExtVal(Val, User, OpInd);
-    auto [N, NContra] = CG.createNodePair(getType(Val));
-    auto It = V2N.insert(Val, &N);
+    // auto N = binarysub::make_variable(lvl);
+    auto N = convertSimpleType(Val, User, OpInd);
+    auto It = V2N.insert(Val, N);
     if (!It.second) {
       llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                    << "setTypeVar: Value already mapped to "
@@ -122,36 +114,61 @@ public:
                    << toString(Val) << "\n";
       std::abort();
     }
-    auto It2 = V2NContra.insert(Val, &NContra);
-    if (!It2.second) {
-      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "setTypeVar: Value already mapped to "
-                   << It2.first->second->str() << ", but now set to "
-                   << toString(Val) << "\n";
-      std::abort();
-    }
     // if the value is constant addr, we set ptr and link to memory
     if (auto CA = std::get_if<ConstantAddr>(&Val)) {
       assert(false && "TODO");
     }
-    return {N, NContra};
+    return N;
   }
 
-  CGNode *getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd,
-                        Variance V) {
+  SimpleType getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd) {
     llvmValue2ExtVal(Val, User, OpInd);
 
-    if (V == Covariant) {
-      if (V2N.count(Val)) {
-        return V2N.at(Val);
-      }
-      return nullptr;
-    } else {
-      if (V2NContra.count(Val)) {
-        return V2NContra.at(Val);
-      }
-      return nullptr;
+    if (V2N.count(Val)) {
+      return V2N.at(Val);
     }
+    return nullptr;
+  }
+
+  SimpleType getOrInsertNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    llvmValue2ExtVal(Val, User, OpInd);
+    auto Node = getNodeOrNull(Val, User, OpInd);
+    if (Node != nullptr) {
+      return Node;
+    }
+    auto N = createNode(Val, User, OpInd);
+    return N;
+  }
+
+  void addSubtype(SimpleType lhs, SimpleType rhs) {
+    assert(lhs != nullptr);
+    assert(rhs != nullptr);
+    binarysub::Cache cache;
+    binarysub::constrain(lhs, rhs, cache);
+  }
+
+  SimpleType addVarSubtype(llvm::Value *Val, SimpleType dtv) {
+    auto Node = getOrInsertNode(Val, nullptr, -1);
+    addSubtype(dtv, Node);
+    return Node;
+  }
+
+  SimpleType addRemapType(ExtValuePtr Val, llvm::User *User, long OpInd,
+                          SimpleType ty) {
+    assert(ty != nullptr);
+    auto N = getNodeOrNull(Val, User, OpInd);
+    if (N == ty) {
+      return N;
+    }
+    auto It = V2N.insert(Val, N);
+    if (!It.second) {
+      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                   << "setTypeVar: Value already mapped to "
+                   << It.first->second->str() << ", but now set to "
+                   << toString(Val) << "\n";
+      std::abort();
+    }
+    return It.first->second;
   }
 
   unsigned getPointerElemSize(llvm::Type *ty);
@@ -167,7 +184,9 @@ public:
   void addCmpConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
                         llvm::ICmpInst *I);
 
-  void setPointer(CGNode &Node) { CG.setPointer(Node); }
+  void setPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    assert(false && "TODO");
+  }
 
 public:
   struct PcodeOpType {
@@ -195,8 +214,7 @@ protected:
   // After visiting each instruction, it must be assigned a type variable.
   // Often visitor will immediately add a subtype constraint. If the primitive
   // type is final, then it will directly map as the known type.
-  class MLsubVisitor
-      : public llvm::InstVisitor<MLsubVisitor> {
+  class MLsubVisitor : public llvm::InstVisitor<MLsubVisitor> {
     ConstraintsGenerator &cg;
     // defer phi node constraints
     std::vector<llvm::PHINode *> phiNodes;
@@ -204,14 +222,12 @@ protected:
   public:
     MLsubVisitor(ConstraintsGenerator &cg) : cg(cg) {}
 
-    // bool handleIntrinsicCall(llvm::CallBase &I);
+    bool handleIntrinsicCall(llvm::CallBase &I);
     // overloaded visit functions
     void visitExtractValueInst(llvm::ExtractValueInst &I);
     void visitCastInst(llvm::CastInst &I);
     void visitCallBase(llvm::CallBase &I);
-    void visitReturnInst(llvm::ReturnInst &I) {
-      assert(false && "TODO");
-    }
+    void visitReturnInst(llvm::ReturnInst &I);
     void visitPHINode(llvm::PHINode &I);
     void visitLoadInst(llvm::LoadInst &I);
     void visitStoreInst(llvm::StoreInst &I);
@@ -234,9 +250,7 @@ protected:
     void visitBranchInst(llvm::BranchInst &I) {}
     void visitSwitchInst(llvm::SwitchInst &I) {}
 
-    void handlePHINodes() {
-      assert(false && "TODO");
-    }
+    void handlePHINodes();
     // use opTypes to handle other insts.
     void visitInstruction(llvm::Instruction &I);
   };
@@ -245,13 +259,14 @@ protected:
 class MLsubRecovery {
   const llvm::Module &Mod;
   llvm::ModuleAnalysisManager &MAM;
-  MLsubRecovery(llvm::Module &Mod, llvm::ModuleAnalysisManager &MAM)
-      : Mod(Mod), MAM(MAM) {}
 
   unsigned int PointerSize = Mod.getDataLayout().getPointerSizeInBits();
   std::shared_ptr<ConstraintsGenerator> Main;
 
 public:
+  MLsubRecovery(llvm::Module &Mod, llvm::ModuleAnalysisManager &MAM)
+      : Mod(Mod), MAM(MAM) {}
+
   void run() {
     // TODO: prepareSCC, mark levels
     // 遍历调用图，然后根据用户提供的多台函数标记，将SCC标记为高一个level。
@@ -260,9 +275,11 @@ public:
 
     // 当前简化情况：先假设所有函数都是同一个generator
     // 把所有函数加入SCC，然后构造Generator。
-    std::set<llvm::Function *> SCCs(Mod.getFunctionList().begin(),
-                                    Mod.getFunctionList().end());
-    Main = std::make_shared<ConstraintsGenerator>("Main", PointerSize, SCCs);
+    std::set<const llvm::Function *> SCCs;
+    for (auto &F : Mod.getFunctionList()) {
+      SCCs.insert(&F);
+    }
+    Main = std::make_shared<ConstraintsGenerator>("Main", PointerSize, SCCs, 0);
     Main->run();
   }
 };
@@ -276,6 +293,18 @@ struct MLsubRecoveryMain : llvm::PassInfoMixin<MLsubRecoveryMain> {
                               llvm::ModuleAnalysisManager &MAM) {
     TR.run();
     return llvm::PreservedAnalyses::all();
+  }
+};
+
+// Currently only break stack.
+struct MLsubRecoveryOpt : llvm::PassInfoMixin<MLsubRecoveryOpt> {
+
+  MLsubRecovery &TR;
+  MLsubRecoveryOpt(MLsubRecovery &TR) : TR(TR) {}
+
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM) {
+    assert(false && "TODO");
   }
 };
 

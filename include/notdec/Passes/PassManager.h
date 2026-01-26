@@ -21,6 +21,7 @@
 #include "DecompilerContext.h"
 #include "Passes/ConstraintGenerator.h"
 #include "Passes/StackPointerFinder.h"
+#include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "notdec-llvm2c/Interface.h"
 
 namespace notdec::passes {
@@ -65,13 +66,13 @@ struct PassEnv {
 
   std::shared_ptr<retypd::TRContext> TRCtx;
   std::shared_ptr<ast::HTypeContext> HTCtx;
-  std::shared_ptr<TypeRecovery> TR;
+  std::shared_ptr<mlsub::MLsubRecovery> TR;
 
   void prepareTypeRecoveryContext() {
     if (TRCtx == nullptr && HTCtx == nullptr && TR == nullptr) {
       TRCtx = std::make_shared<retypd::TRContext>();
       HTCtx = std::make_shared<ast::HTypeContext>();
-      TR = std::make_shared<TypeRecovery>(TRCtx, HTCtx, Mod);
+      TR = std::make_shared<mlsub::MLsubRecovery>(Mod, MAM);
     }
   }
 

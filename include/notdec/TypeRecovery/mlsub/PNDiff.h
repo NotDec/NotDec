@@ -30,8 +30,6 @@ using retypd::Pointer;
 using retypd::PtrOrNum;
 using retypd::Unknown;
 
-struct ConstraintGraph;
-
 // Forward Declaration
 struct PNIGraph;
 
@@ -187,7 +185,6 @@ struct ConsNode {
 };
 
 struct PNIGraph {
-  ConstraintGraph &CG;
   llvm::FunctionType *FuncTy = nullptr;
   std::string Name;
   std::set<ConsNode *> Worklist;
@@ -233,8 +230,8 @@ struct PNIGraph {
     Worklist.clear();
   }
 
-  PNIGraph(ConstraintGraph &CG, std::string Name, long PointerSize)
-      : CG(CG), Name(Name), PointerSize(PointerSize) {}
+  PNIGraph(std::string Name, long PointerSize)
+      : Name(Name), PointerSize(PointerSize) {}
 
   void addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
                   llvm::BinaryOperator *Inst);

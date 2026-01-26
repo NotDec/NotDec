@@ -28,8 +28,10 @@ add_library(notdec STATIC
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/SketchToCTypeBuilder.cpp
 	TypeRecovery/retypd/Schema.cpp
-	# TypeRecovery/mlsub/PNDiff.cpp
+	TypeRecovery/mlsub/PNDiff.cpp
 	# TypeRecovery/mlsub/MLsubGraph.cpp
+	TypeRecovery/mlsub/MLsubGenerator.cpp
+	TypeRecovery/mlsub/Schema.cpp
 	Utils/Utils.cpp
 )
 

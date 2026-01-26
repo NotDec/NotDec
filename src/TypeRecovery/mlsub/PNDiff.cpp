@@ -69,6 +69,7 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
 }
 
 bool PNIGraph::solve() {
+  assert(false && "TODO");
   // CG.applyPNIPolicy();
 
   bool AnyChanged = false;
@@ -383,7 +384,7 @@ PNINode::iteratorTy PNINode::eraseFromParent() {
   return Parent.PNINodes.erase(getIterator());
 }
 
-// Notify CGNode that it becomes a pointer.
+// Notify Node that it becomes a pointer.
 void PNIGraph::onUpdatePNType(PNINode *N) {
   if (PNIMap.count(N) > 0) {
     for (auto Node : PNIMap.rev().at(N)) {
