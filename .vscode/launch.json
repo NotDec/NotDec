@@ -13,7 +13,7 @@
         "${file}",
         "-o",
         "${file}.c",
-        "--tr-level=3",
+        "--tr-level=2",
         // "-debug-only=structural-analysis",
         // "-debug-only=structural-goto",
         // "--print-before=type-recovery"

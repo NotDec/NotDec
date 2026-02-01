@@ -7,7 +7,9 @@
   - src/Passes/PassManager.cpp 里面是运行Pass的入口。已经改好了，会自动运行Pass。
   - 其他地方的无关代码太多，最好不要阅读。而且最好不要使用搜索功能，而是阅读整个文件。
 
-MVP阶段：当前需要解决代码报错，先在输入上一个最简单的只有空的main函数的情况下跑起来。
+现在的主要执行路径：MLsubRecoveryMain.run -> MLsubRecovery.run -> mlsub::ConstraintsGenerator.run 
+
+MVP阶段：当前需要解决代码报错，先在输入上一个最简单的只有return语句的main函数的情况下跑起来。你需要完善MLsubVisitor的代码，解决报错。
 
 
 代码构建使用的命令： 

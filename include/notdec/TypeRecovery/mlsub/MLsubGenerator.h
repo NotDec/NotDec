@@ -47,14 +47,17 @@ using binarysub::SimpleType;
 struct ConstraintsGenerator;
 
 struct ConstraintsGenerator {
-  DSUMap<ExtValuePtr, SimpleType> V2N;
-
   long PointerSize = 0;
   std::string Name;
   // ConstraintGraph CG;
   PNIGraph PG;
-  std::set<const llvm::Function *> SCCs;
+  const std::set<llvm::Function *> &SCCs;
   int lvl = 0;
+  SimpleType MemoryType = nullptr;
+
+  DSUMap<ExtValuePtr, SimpleType> V2N;
+  std::map<ExtValuePtr, ast::HType *> ValueTypes;
+  std::map<llvm::CallBase*, SimpleType> unhandledCalls;
 
   void addMergeNode(SimpleType From, SimpleType To) { V2N.merge(From, To); }
 
@@ -62,10 +65,10 @@ struct ConstraintsGenerator {
                           const ConstraintsGenerator &Summary);
 
   ConstraintsGenerator(std::string Name, unsigned int pointer_size,
-                       const std::set<const llvm::Function *> &SCCs = {},
-                       int lvl = 0)
-      : PointerSize(pointer_size), Name(Name), PG(Name, pointer_size),
-        SCCs(SCCs), lvl(lvl) {}
+                       const std::set<llvm::Function *> &SCCs,
+                       SimpleType MemoryType, int lvl = 0)
+      : PointerSize(pointer_size), Name(Name), PG(*this, Name, pointer_size),
+        SCCs(SCCs), lvl(lvl), MemoryType(MemoryType) {}
 
   void run() {
     for (const llvm::Function *Func1 : SCCs) {
@@ -95,10 +98,7 @@ struct ConstraintsGenerator {
       assert(F->getAsVariableState()->upperBounds.empty());
     }
   }
-  void cloneTo(ConstraintsGenerator &Target,
-               std::map<const CGNode *, CGNode *> &Old2New);
-  std::shared_ptr<ConstraintsGenerator>
-  cloneShared(std::map<const CGNode *, CGNode *> &Old2New);
+  void genTypes();
 
   SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd);
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
@@ -182,6 +182,8 @@ public:
                      llvm::PtrToIntInst, llvm::IntToPtrInst>(Val);
   }
 
+  // Interface functions for module interaction
+
   void addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
                         llvm::BinaryOperator *Result);
   void addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
@@ -201,6 +203,8 @@ public:
       N->setNonPtrIfRelated();
     }
   }
+
+  void onUpdatePNType(ExtValuePtr Val) {}
 
 public:
   struct PcodeOpType {
@@ -270,32 +274,65 @@ protected:
   };
 };
 
+struct SCCData {
+  std::vector<llvm::CallGraphNode *> Nodes;
+  std::string SCCName;
+  std::set<llvm::Function *> SCCSet;
+  std::shared_ptr<ConstraintsGenerator> Generator;
+  unsigned int level = 0;
+
+  void onIRChanged() { Generator.reset(); }
+  // TODO disable copy constructor
+};
+
+struct AllGraphs {
+  std::vector<SCCData> AllSCCs;
+  std::map<llvm::CallGraphNode *, std::size_t> Func2SCCIndex;
+  llvm::CallGraph *CG = nullptr;
+};
+
 class MLsubRecovery {
   const llvm::Module &Mod;
   llvm::ModuleAnalysisManager &MAM;
 
+  std::string data_layout = Mod.getDataLayoutStr();
   unsigned int PointerSize = Mod.getDataLayout().getPointerSizeInBits();
-  std::shared_ptr<ConstraintsGenerator> Main;
+
+  AllGraphs AG;
+  std::unique_ptr<llvm::CallGraph> CallG;
+  llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
+  // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
+  SimpleType MemoryType = binarysub::make_variable(0);
+
+  std::function<bool(llvm::Function *)> isPolymorphic = [](llvm::Function *F) {
+    if (auto Env = std::getenv("NOTDEC_DEFAULT_POLY")) {
+      if (std::strcmp(Env, "1") == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
 
 public:
   MLsubRecovery(llvm::Module &Mod, llvm::ModuleAnalysisManager &MAM)
       : Mod(Mod), MAM(MAM) {}
 
-  void run() {
-    // TODO: prepareSCC, mark levels
-    // 遍历调用图，然后根据用户提供的多台函数标记，将SCC标记为高一个level。
-    // 处理SCC的call的时候，直接看目标函数的level是不是更高，是则多态实例化。
-    // 调用图上可达的相同level的函数，可以放到同一个Generator？尤其是顶层的要尽量大，不然不好弄。
+  void run();
+  // 形成单独分析的SCC群。（按需复制多态函数）
+  void prepareSCC(llvm::CallGraph &CG);
+  void bottomUpPhase();
+  void topDownPhase();
 
-    // 当前简化情况：先假设所有函数都是同一个generator
-    // 把所有函数加入SCC，然后构造Generator。
-    std::set<const llvm::Function *> SCCs;
-    for (auto &F : Mod.getFunctionList()) {
-      SCCs.insert(&F);
+  using Result = ::notdec::llvm2c::HTypeResult;
+  std::unique_ptr<Result> ResultVal;
+  std::unique_ptr<Result> &getResult(llvm::Module &M1,
+                                     llvm::ModuleAnalysisManager &MAM) {
+    if (ResultVal == nullptr) {
+      genASTTypes(M1);
     }
-    Main = std::make_shared<ConstraintsGenerator>("Main", PointerSize, SCCs, 0);
-    Main->run();
+    return ResultVal;
   }
+  void genASTTypes(llvm::Module &M);
 };
 
 struct MLsubRecoveryMain : llvm::PassInfoMixin<MLsubRecoveryMain> {

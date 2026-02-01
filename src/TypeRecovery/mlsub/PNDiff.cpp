@@ -1,6 +1,5 @@
 #include "TypeRecovery/mlsub/PNDiff.h"
-// #include "TypeRecovery/mlsub/MLsubGenerator.h"
-#include "TypeRecovery/mlsub/MLsubGraph.h"
+#include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 #include <cassert>
@@ -379,8 +378,7 @@ PNINode::iteratorTy PNINode::eraseFromParent() {
 void PNIGraph::onUpdatePNType(PNINode *N) {
   if (PNIMap.count(N) > 0) {
     for (auto Node : PNIMap.rev().at(N)) {
-      assert(false && "TODO");
-      // Node->onUpdatePNType();
+      Parent.onUpdatePNType(Node);
     }
   }
 }

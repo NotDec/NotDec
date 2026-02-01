@@ -184,7 +184,10 @@ struct ConsNode {
   iteratorTy eraseFromParent();
 };
 
+struct ConstraintsGenerator;
+
 struct PNIGraph {
+  ConstraintsGenerator &Parent;
   llvm::FunctionType *FuncTy = nullptr;
   std::string Name;
   std::set<ConsNode *> Worklist;
@@ -217,7 +220,6 @@ struct PNIGraph {
     return *N;
   }
 
-
   PNINode *getPNIVarOrNull(ExtValuePtr N) {
     auto It = PNIMap.find(N);
     if (It == PNIMap.end()) {
@@ -236,7 +238,7 @@ struct PNIGraph {
     return &It;
   }
 
-  PNINode& getOrInsertPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+  PNINode &getOrInsertPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
     llvmValue2ExtVal(Val, User, OpInd);
     auto N = getPNIVarOrNull(Val);
     if (N != nullptr) {
@@ -254,8 +256,8 @@ struct PNIGraph {
     getPNIVar(V1).unify(getPNIVar(V2));
   }
 
-  PNIGraph(std::string Name, long PointerSize)
-      : Name(Name), PointerSize(PointerSize) {}
+  PNIGraph(ConstraintsGenerator &Parent, std::string Name, long PointerSize)
+      : Parent(Parent), Name(Name), PointerSize(PointerSize) {}
 
   void addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
                   llvm::BinaryOperator *Inst);

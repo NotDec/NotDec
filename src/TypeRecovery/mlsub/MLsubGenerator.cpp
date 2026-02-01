@@ -1,13 +1,23 @@
 
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
+#include "Utils/CallGraphDotInfo.h"
 #include "binarysub/binarysub-core.h"
+#include "binarysub/binarysub-infer.h"
+#include "binarysub/binarysub.h"
+#include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Utils.h"
 #include "notdec/TypeRecovery/Lattice.h"
+#include "notdec/Utils/AllSCCIterator.h"
+#include "notdec/Utils/SingleNodeSCCIterator.h"
+#include "notdec/Utils/Utils.h"
 
+#include <cassert>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/JSON.h>
 #include <string>
 
 using namespace llvm;
@@ -15,6 +25,308 @@ using namespace llvm;
 #define DEBUG_TYPE "mlsub_generator"
 
 namespace notdec::mlsub {
+
+void MLsubRecovery::run() {
+  auto &M = const_cast<llvm::Module &>(Mod);
+
+  // 0.4 prepare debug dir and SCCsCatalog
+  auto DebugDir = getTRDebugDir();
+  if (getTRDebugDir()) {
+    std::error_code EC = llvm::sys::fs::create_directories(DebugDir);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open create directory " << DebugDir << ": ";
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output file SCCs.txt: ";
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+  }
+
+  // 0.5 print module for debugging
+  if (DebugDir) {
+    printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
+  }
+
+  CallGraphAnalysis Ana;
+  CallG = std::make_unique<CallGraph>(Ana.run(M, MAM));
+
+  if (DebugDir) {
+    std::error_code EC;
+    auto Path = join(DebugDir, "CallGraph.txt");
+    llvm::raw_fd_ostream CGTxt(Path, EC);
+    if (EC) {
+      llvm::errs() << "Error printing to " << Path << ", " << EC.message()
+                   << "\n";
+    }
+    CallG->print(CGTxt);
+    CGTxt.close();
+    // print dot
+    Path = join(DebugDir, "CallGraph.dot");
+    llvm::raw_fd_ostream CGDot(Path, EC);
+    if (EC) {
+      llvm::errs() << "Error printing to " << Path << ", " << EC.message()
+                   << "\n";
+    }
+    notdec::utils::CallGraphDOTInfo CFGInfo(&M, &*CallG, nullptr);
+    llvm::WriteGraph(CGDot, &CFGInfo, false);
+    CGDot.close();
+  }
+
+  prepareSCC(*CallG);
+
+  bottomUpPhase();
+
+  topDownPhase();
+
+  std::cerr << "Constraint generation done! SCC count:" << AG.AllSCCs.size()
+            << "\n";
+}
+
+void MLsubRecovery::bottomUpPhase() {
+  // Iterate bottom up.
+  for (long Ind = AG.AllSCCs.size() - 1; Ind >= 0; --Ind) {
+    auto &Data = AG.AllSCCs.at(Ind);
+    Data.Generator = std::make_shared<ConstraintsGenerator>(
+        Data.SCCName, PointerSize, Data.SCCSet, MemoryType, Data.level);
+    Data.Generator->run();
+    // create poly schemes and instantiate for unhandled calls.
+    for (auto &Ent : Data.Generator->unhandledCalls) {
+      auto F = Ent.first->getCalledFunction();
+      auto Ind2 = AG.Func2SCCIndex.at(AG.CG->getOrInsertFunction(F));
+      assert(Ind2 > Ind);
+      auto& TData = AG.AllSCCs.at(Ind2);
+      auto TargetG = TData.Generator;
+      auto TargetFTy = TargetG->getNodeOrNull(F, nullptr, -1);
+      auto PolyScheme = binarysub::TypeScheme(binarysub::PolymorphicType(TData.level, TargetFTy));
+      assert(TData.level == binarysub::level_of(TargetFTy));
+      assert(TData.level >= Data.level);
+      auto InsFunc = PolyScheme.instantiate(Data.level);
+      Data.Generator->addSubtype(InsFunc, Ent.second);
+    }
+    Data.Generator->unhandledCalls.clear();
+  }
+}
+
+void ConstraintsGenerator::genTypes() {
+  binarysub::TypeSimplifier Ts;
+  std::set<SimpleType> Tys;
+  for (auto& Ent: V2N) {
+    Tys.insert(Ent.second);
+  }
+  std::map<SimpleType, binarysub::UTypePtr> Res = Ts.bulkSimplify(Tys, false);
+  // TODO 实现一个TypeBuilder, 将 binarysub::UTypePtr 转换为 ast::HType *.
+  for (auto& Ent: V2N) {
+    ast::HType* Converted = nullptr;
+    ValueTypes.insert({Ent.first, Converted});
+  }
+}
+
+void MLsubRecovery::topDownPhase() {
+  // 尝试运行简化算法，保存到ValueTypes里面。
+  auto &Data = AG.AllSCCs.at(0);
+  Data.Generator->genTypes();
+
+
+  for (long Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
+    auto &Data = AG.AllSCCs.at(Ind);
+    if (Data.level == 0) {
+      continue;
+    }
+    // 对于每个SCCData的所有Caller，都instantiate到 -x level，然后尝试
+  }
+  
+}
+
+
+void MLsubRecovery::prepareSCC(CallGraph &CG) {
+  AG.CG = &CG;
+
+  auto PolyFuncFiles = std::getenv("NOTDEC_POLY_FUNCS");
+  std::set<std::string> PolyFuncs;
+  if (PolyFuncFiles) {
+    auto Content = readFileToString(PolyFuncFiles);
+    auto ValE = json::parse(Content);
+    if (!ValE) {
+      assert(false && "JSON parse failed, invalid NOTDEC_POLY_FUNCS content");
+    }
+    auto ValArr = ValE->getAsArray();
+    assert(ValArr != nullptr);
+    for (auto S : *ValArr) {
+      PolyFuncs.insert(S.getAsString()->str());
+    }
+  }
+
+  all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(AG.CG);
+  // 把CGI遍历的结果都顺序保存到vector里
+  std::vector<std::vector<CallGraphNode *>> SCCResults;
+  for (; !CGI.isAtEnd(); ++CGI) {
+    SCCResults.push_back(*CGI);
+  }
+  // 遍历所有的CallGraphNode，然后构建一个反向的，从callee到所有caller的map
+  std::map<CallGraphNode *, std::set<CallGraphNode *>> Callee2Callers;
+  for (auto &KV : *AG.CG) {
+    CallGraphNode *Caller = KV.second.get();
+    for (auto &CallRecord : *Caller) {
+      CallGraphNode *Callee = CallRecord.second;
+      Callee2Callers[Callee].insert(Caller);
+    }
+  }
+
+  std::vector<SCCData> &AllSCCs = AG.AllSCCs;
+  std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
+
+  auto isAllDeclarationAndIntrinsics =
+      [](const std::vector<CallGraphNode *> &NodeVec) -> bool {
+    for (auto *CGN : NodeVec) {
+      if (auto *Fn = CGN->getFunction()) {
+        if (!Fn->isDeclaration() || !Fn->isIntrinsic()) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  auto hasPolymorphic =
+      [&](const std::vector<CallGraphNode *> &NodeVec) -> bool {
+    for (auto *CGN : NodeVec) {
+      if (auto *Fn = CGN->getFunction()) {
+        if (Fn->hasName() && PolyFuncs.count(Fn->getName().str())) {
+          return true;
+        }
+        if (isPolymorphic(Fn)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Iterate Top-down (from main to lib func) (reverse post order)
+  // 数据结构：从level映射到SCCData的索引数组
+  std::map<unsigned int, std::vector<std::size_t>> Level2SCCIndices;
+  // 数据结构：从CallGraphNode* 反向映射到SCCData索引
+  std::map<CallGraphNode *, std::size_t> Node2SCCIndex;
+
+  for (auto It = SCCResults.rbegin(); It != SCCResults.rend(); ++It) {
+    const std::vector<CallGraphNode *> &NodeVec = *It;
+    bool CurPolymorphic = hasPolymorphic(NodeVec);
+
+    // 跳过intrinsic函数
+    if (isAllDeclarationAndIntrinsics(NodeVec)) {
+      continue;
+    }
+
+    // 计算所有caller的level的最大值，以及最大level对应的SCCData索引
+    unsigned int maxCallerLevel = 0;
+    std::set<std::size_t> maxLevelSCCIndices;
+    for (auto *Node : NodeVec) {
+      auto CallerIt = Callee2Callers.find(Node);
+      if (CallerIt != Callee2Callers.end()) {
+        for (auto *Caller : CallerIt->second) {
+          auto IndexIt = Node2SCCIndex.find(Caller);
+          if (IndexIt != Node2SCCIndex.end()) {
+            unsigned int callerLevel = AllSCCs[IndexIt->second].level;
+            if (callerLevel > maxCallerLevel) {
+              maxCallerLevel = callerLevel;
+              maxLevelSCCIndices.clear();
+              maxLevelSCCIndices.insert(IndexIt->second);
+            } else if (callerLevel == maxCallerLevel) {
+              maxLevelSCCIndices.insert(IndexIt->second);
+            }
+          }
+        }
+      }
+    }
+
+    if (CurPolymorphic) {
+      // 多态函数：单独开辟一个SCCData，level等于所有caller的level的最大值+1
+      unsigned int newLevel = maxCallerLevel + 1;
+      AllSCCs.push_back(SCCData{.Nodes = NodeVec, .level = newLevel});
+      std::size_t newIndex = AllSCCs.size() - 1;
+      Level2SCCIndices[newLevel].push_back(newIndex);
+      for (auto *Node : NodeVec) {
+        Node2SCCIndex[Node] = newIndex;
+      }
+    } else {
+      // 非多态函数：level等于所有caller的level的最大值
+      // 直接合并到最大值的来源SCCData里面
+      if (maxLevelSCCIndices.empty()) {
+        // 没有caller，level=0，合并到level=0的唯一SCCData
+        auto &level0SCCs = Level2SCCIndices[0];
+        if (level0SCCs.empty()) {
+          // 创建level=0的第一个SCCData
+          AllSCCs.push_back(SCCData{.Nodes = NodeVec, .level = 0});
+          std::size_t newIndex = AllSCCs.size() - 1;
+          level0SCCs.push_back(newIndex);
+          for (auto *Node : NodeVec) {
+            Node2SCCIndex[Node] = newIndex;
+          }
+        } else {
+          // 合并到level=0的唯一SCCData
+          std::size_t targetIndex = level0SCCs[0];
+          auto &targetNodes = AllSCCs[targetIndex].Nodes;
+          targetNodes.insert(targetNodes.end(), NodeVec.begin(), NodeVec.end());
+          for (auto *Node : NodeVec) {
+            Node2SCCIndex[Node] = targetIndex;
+          }
+        }
+      } else {
+        assert(false && "TODO merge?"); // 考虑直接合并这几个SCCData。
+        // 合并到所有最大level的SCCData
+        for (std::size_t targetIndex : maxLevelSCCIndices) {
+          auto &targetNodes = AllSCCs[targetIndex].Nodes;
+          targetNodes.insert(targetNodes.end(), NodeVec.begin(), NodeVec.end());
+        }
+        // Node2SCCIndex只记录第一个（任选一个即可）
+        std::size_t firstIndex = *maxLevelSCCIndices.begin();
+        for (auto *Node : NodeVec) {
+          Node2SCCIndex[Node] = firstIndex;
+        }
+      }
+    }
+  }
+
+  Func2SCCIndex.clear();
+  // 2. Calc name and SCCSet
+  for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
+    SCCData &Data = AllSCCs[SCCIndex];
+    std::set<llvm::Function *> &SCCSet = Data.SCCSet;
+    SCCSet.clear();
+
+    std::string Name;
+    for (auto *CGN : Data.Nodes) {
+      auto *Fn = CGN->getFunction();
+      if (Fn == nullptr) {
+        continue;
+      }
+      if (!Name.empty()) {
+        Name += ",";
+      }
+      Name += Fn->getName().str();
+      SCCSet.insert(Fn);
+      Func2SCCIndex[CGN] = SCCIndex;
+    }
+    if (!Name.empty()) {
+      Data.SCCName = Name;
+    }
+    // write the SCC index to file
+    if (SCCsCatalog) {
+      *SCCsCatalog << "SCC" << SCCIndex << "," << Name
+                   << " (level = " << Data.level << ")" << "\n";
+    }
+  }
+}
+
+void MLsubRecovery::genASTTypes(llvm::Module &M) {
+  ResultVal = std::make_unique<TypeRecovery::Result>();
+}
 
 SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
                                                    llvm::User *User,
@@ -88,7 +400,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
                      << *C << "\n";
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
-      assert(false && "TODO");
+      return binarysub::make_variable(lvl);
       // if (gv == Ctx.StackPointer) {
       //   std::cerr
       //       << "Error: convertTypeVarVal: direct use of stack pointer?,
@@ -102,7 +414,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       // return makeTv(Ctx.TRCtx, gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
       if (auto CI = dyn_cast<ConstantInt>(C)) {
-        assert(false && "Should be converted earlier");
+        return binarysub::make_variable(lvl);
       }
       assert(false && "TODO");
       // return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));
@@ -265,9 +577,9 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
 
   if (handleIntrinsicCall(I)) {
     return;
-  } else if (cg.SCCs.count(Target)) { // Call within the SCC:
+  } else {
+    // Call within the SCC:
     auto Func = Target;
-    auto F = cg.getNodeOrNull(Func, nullptr, -1);
     std::vector<SimpleType> Args;
     for (int i = 0; i < I.arg_size(); i++) {
       auto ValVar = cg.getOrInsertNode(I.getArgOperand(i), &I, i);
@@ -277,10 +589,15 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     if (!I.getType()->isVoidTy()) {
       Ret = cg.getOrInsertNode(&I, nullptr, -1);
     }
-    cg.addSubtype(F, binarysub::make_function(Args, Ret));
-  } else {
-    // create and save to CallToInstance map. instance with summary later
-    assert(false && "TODO");
+    auto ActualFunc = binarysub::make_function(Args, Ret);
+    if (cg.SCCs.count(Target)) {
+      auto F = cg.getNodeOrNull(Func, nullptr, -1);
+      cg.addSubtype(F, ActualFunc);
+    } else {
+      // create and save to CallToInstance map. instance with summary later
+      auto It = cg.unhandledCalls.insert({&I, ActualFunc});
+      assert(It.second && "Insert unhandledCalls failed!");
+    }
   }
 }
 
@@ -337,7 +654,7 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
 
   auto LoadNode = cg.createNode(&I, nullptr, -1);
-  cg.addRemapType(&I, nullptr, -1, binarysub::make_ptr_load(PtrVal));
+  cg.addRemapType(&I, nullptr, -1, binarysub::make_ptr_load(PtrVal, BitSize));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
@@ -360,7 +677,7 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
   auto StoreVal = cg.getOrInsertNode(I.getValueOperand(), &I, 0);
 
-  cg.addSubtype(StoreVal, binarysub::make_ptr_store(PtrVal));
+  cg.addSubtype(StoreVal, binarysub::make_ptr_store(PtrVal, BitSize));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
@@ -398,7 +715,8 @@ void ConstraintsGenerator::addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
   llvmValue2ExtVal(RHS, I, 1);
   auto Left = &PG.getOrInsertPNINode(LHS, I, 0);
   auto Right = &PG.getOrInsertPNINode(RHS, I, 1);
-  auto Res = &PG.getOrInsertPNINode(I, nullptr, -1);
+  // auto Res = &
+  PG.getOrInsertPNINode(I, nullptr, -1);
   if (Left->isPNRelated() || Right->isPNRelated()) {
     PG.addAddCons(LHS, RHS, I, I);
   }
@@ -409,7 +727,8 @@ void ConstraintsGenerator::addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
   llvmValue2ExtVal(RHS, I, 1);
   auto Left = &PG.getOrInsertPNINode(LHS, I, 0);
   auto Right = &PG.getOrInsertPNINode(RHS, I, 1);
-  auto Res = &PG.getOrInsertPNINode(I, nullptr, -1);
+  // auto Res = &
+  PG.getOrInsertPNINode(I, nullptr, -1);
   if (Left->isPNRelated() || Right->isPNRelated()) {
     PG.addAddCons(LHS, RHS, I, I);
   }
@@ -552,14 +871,14 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     cg.setNonPointer(I, nullptr, -1);
-    auto SintNode = binarysub::make_primitive(
-        retypd::getNameForInt("sint", I->getType()));
+    auto SintNode =
+        binarysub::make_primitive(retypd::getNameForInt("sint", I->getType()));
     cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(I, nullptr, -1);
-    auto UintNode = binarysub::make_primitive(
-        retypd::getNameForInt("uint", I->getType()));
+    auto UintNode =
+        binarysub::make_primitive(retypd::getNameForInt("uint", I->getType()));
     cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
@@ -583,14 +902,14 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     cg.setNonPointer(Op, I, Index);
-    auto SintNode = binarysub::make_primitive(
-        retypd::getNameForInt("sint", Op->getType()));
+    auto SintNode =
+        binarysub::make_primitive(retypd::getNameForInt("sint", Op->getType()));
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(Op, I, Index);
-    auto UintNode = binarysub::make_primitive(
-        retypd::getNameForInt("uint", Op->getType()));
+    auto UintNode =
+        binarysub::make_primitive(retypd::getNameForInt("uint", Op->getType()));
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {

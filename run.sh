@@ -17,6 +17,6 @@ export NOTDEC_SAT_NOPTRRULE=1
 # time perf record
 # rr record
 
-$SCRIPTPATH/build/bin/notdec $1 -o $1.c --tr-level=3
+$SCRIPTPATH/build/bin/notdec $1 -o $1.c --tr-level=2
 
 # rr replay -s 12345

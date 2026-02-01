@@ -102,6 +102,48 @@ struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
   static bool isRequired() { return true; }
 };
 
+
+// A Pass that convert module to C.
+struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
+
+  mlsub::MLsubRecovery &TR;
+  std::string OutFilePath;
+  ::notdec::llvm2c::Options llvm2cOpt;
+  bool disableTypeRecovery = false;
+
+  MLsubNotdecLLVM2C(mlsub::MLsubRecovery &TR, std::string outFilePath,
+               ::notdec::llvm2c::Options &llvm2cOpt, bool disableTypeRecovery)
+      : TR(TR), OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
+        disableTypeRecovery(disableTypeRecovery) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    std::string outsuffix = getSuffix(OutFilePath);
+    assert(outsuffix == ".c");
+
+    // Run type recovery.
+    std::unique_ptr<TypeRecovery::Result> HighTypes;
+    if (!disableTypeRecovery) {
+      HighTypes = std::move(TR.getResult(M, MAM));
+      // HighTypes->dump();
+    }
+
+    std::error_code EC;
+    llvm::raw_fd_ostream os(OutFilePath, EC);
+    if (EC) {
+      std::cerr << "Cannot open output file." << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    // llvm2cOpt.noDemoteSSA = true;
+    notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt,
+                                    std::move(HighTypes));
+    std::cout << "Decompile result: " << OutFilePath << std::endl;
+
+    return PreservedAnalyses::all();
+  }
+  static bool isRequired() { return true; }
+};
+
 // A Pass that convert module to C.
 struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
 
@@ -384,8 +426,8 @@ void PassEnv::build_passes(int level) {
 void PassEnv::add_llvm2c(std::string OutFilePath,
                          ::notdec::llvm2c::Options llvm2cOpt,
                          bool disableTypeRecovery) {
-  assert(false && "TODO");
-  // MPM.addPass(NotdecLLVM2C(*TR, OutFilePath, llvm2cOpt, disableTypeRecovery));
+  // assert(false && "TODO");
+  MPM.addPass(MLsubNotdecLLVM2C(*TR, OutFilePath, llvm2cOpt, disableTypeRecovery));
 }
 
 void PassEnv::run_passes() {
