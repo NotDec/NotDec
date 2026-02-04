@@ -32,6 +32,7 @@ add_library(notdec STATIC
 	# TypeRecovery/mlsub/MLsubGraph.cpp
 	TypeRecovery/mlsub/MLsubGenerator.cpp
 	TypeRecovery/mlsub/Schema.cpp
+	TypeRecovery/mlsub/TypeBuilder.cpp
 	Utils/Utils.cpp
 )
 

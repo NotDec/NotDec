@@ -1,4 +1,4 @@
-### 重构类型推理Pass
+### 类型推理Pass
 
 - external/binarysub 这个目录下有核心类型推理算法文件。但是里面使用的是自定义的函数式语言。需要模仿里面语言的处理，但是使用类型推理的核心接口，比如constraint函数等，基于LLVM IR Visitor去进行类型推理。
 - src/TypeRecovery/mlsub 这个目录下是核心的pass相关文件。头文件在 include/notdec/TypeRecovery/mlsub
@@ -8,9 +8,6 @@
   - 其他地方的无关代码太多，最好不要阅读。而且最好不要使用搜索功能，而是阅读整个文件。
 
 现在的主要执行路径：MLsubRecoveryMain.run -> MLsubRecovery.run -> mlsub::ConstraintsGenerator.run 
-
-MVP阶段：当前需要解决代码报错，先在输入上一个最简单的只有return语句的main函数的情况下跑起来。你需要完善MLsubVisitor的代码，解决报错。
-
 
 代码构建使用的命令： 
 

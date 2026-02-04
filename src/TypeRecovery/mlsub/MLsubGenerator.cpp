@@ -7,6 +7,7 @@
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Utils.h"
 #include "notdec/TypeRecovery/Lattice.h"
+#include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
 #include "notdec/Utils/AllSCCIterator.h"
 #include "notdec/Utils/SingleNodeSCCIterator.h"
 #include "notdec/Utils/Utils.h"
@@ -18,6 +19,7 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/JSON.h>
+#include <memory>
 #include <string>
 
 using namespace llvm;
@@ -100,10 +102,11 @@ void MLsubRecovery::bottomUpPhase() {
       auto F = Ent.first->getCalledFunction();
       auto Ind2 = AG.Func2SCCIndex.at(AG.CG->getOrInsertFunction(F));
       assert(Ind2 > Ind);
-      auto& TData = AG.AllSCCs.at(Ind2);
+      auto &TData = AG.AllSCCs.at(Ind2);
       auto TargetG = TData.Generator;
       auto TargetFTy = TargetG->getNodeOrNull(F, nullptr, -1);
-      auto PolyScheme = binarysub::TypeScheme(binarysub::PolymorphicType(TData.level, TargetFTy));
+      auto PolyScheme = binarysub::TypeScheme(
+          binarysub::PolymorphicType(TData.level, TargetFTy));
       assert(TData.level == binarysub::level_of(TargetFTy));
       assert(TData.level >= Data.level);
       auto InsFunc = PolyScheme.instantiate(Data.level);
@@ -113,36 +116,68 @@ void MLsubRecovery::bottomUpPhase() {
   }
 }
 
-void ConstraintsGenerator::genTypes() {
+void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
+                                    const llvm::DataLayout &DL, bool SolveMemory) {
   binarysub::TypeSimplifier Ts;
   std::set<SimpleType> Tys;
-  for (auto& Ent: V2N) {
+  for (auto &Ent : V2N) {
     Tys.insert(Ent.second);
   }
+  if (SolveMemory) {
+    Tys.insert(MemoryType);
+  }
   std::map<SimpleType, binarysub::UTypePtr> Res = Ts.bulkSimplify(Tys, false);
-  // TODO 实现一个TypeBuilder, 将 binarysub::UTypePtr 转换为 ast::HType *.
-  for (auto& Ent: V2N) {
-    ast::HType* Converted = nullptr;
+
+  // Create TypeBuilder context and builder
+  TypeBuilderContext TBCtx(HCtx, DL);
+  TypeBuilder TB(TBCtx);
+
+  for (auto &Ent : V2N) {
+    auto It = Res.find(Ent.second);
+    ast::HType *Converted = nullptr;
+    if (It != Res.end() && It->second) {
+      Converted = TB.convert(It->second);
+    }
     ValueTypes.insert({Ent.first, Converted});
+  }
+  if (SolveMemory) {
+    ValueTypes.insert({nullptr, TB.convert(Res.at(MemoryType))});
+  }
+}
+
+void MLsubRecovery::genASTTypes(llvm::Module &M) {
+  ResultVal = std::make_unique<TypeRecovery::Result>();
+  // 合并所有类型到一个大的ValueTypes里面。
+  for (long Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
+    auto &Data = AG.AllSCCs.at(Ind);
+    for (auto &Ent : Data.Generator->ValueTypes) {
+      auto It = ResultVal->ValueTypes.insert(Ent);
+      assert(It.second && "Duplicated Entry?");
+    }
+  }
+  ResultVal->HTCtx = HCtx;
+  // handle Memory type.
+  ResultVal->MemoryType = AG.AllSCCs.at(0).Generator->ValueTypes.at(nullptr);
+  if (ResultVal->MemoryType->isRecordType()) {
+    ResultVal->MemoryDecl = ResultVal->MemoryType->getAsRecordDecl();
   }
 }
 
 void MLsubRecovery::topDownPhase() {
-  // 尝试运行简化算法，保存到ValueTypes里面。
-  auto &Data = AG.AllSCCs.at(0);
-  Data.Generator->genTypes();
+  // TODO 怎么处理TopDown的类型传递？设置多态参数的类型？
+  // TODO 对于每个SCCData的所有Caller，都instantiate到 -x level？
+  // 也许我该基于最后都优化完毕之后的CompactType？？
 
-
+  if (!HCtx) {
+    HCtx = std::make_shared<ast::HTypeContext>();
+  }
   for (long Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
-    if (Data.level == 0) {
-      continue;
-    }
-    // 对于每个SCCData的所有Caller，都instantiate到 -x level，然后尝试
+    // 尝试运行简化算法，保存到ValueTypes里面。
+    // solve memory if ind == 0
+    Data.Generator->genTypes(*HCtx, Mod.getDataLayout(), Ind == 0);
   }
-  
 }
-
 
 void MLsubRecovery::prepareSCC(CallGraph &CG) {
   AG.CG = &CG;
@@ -322,10 +357,6 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
                    << " (level = " << Data.level << ")" << "\n";
     }
   }
-}
-
-void MLsubRecovery::genASTTypes(llvm::Module &M) {
-  ResultVal = std::make_unique<TypeRecovery::Result>();
 }
 
 SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,

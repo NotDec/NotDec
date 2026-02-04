@@ -98,7 +98,7 @@ struct ConstraintsGenerator {
       assert(F->getAsVariableState()->upperBounds.empty());
     }
   }
-  void genTypes();
+  void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL, bool SolveMemory = false);
 
   SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd);
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
@@ -303,6 +303,9 @@ class MLsubRecovery {
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
   SimpleType MemoryType = binarysub::make_variable(0);
+
+  // HTypeContext for type building
+  std::shared_ptr<ast::HTypeContext> HCtx;
 
   std::function<bool(llvm::Function *)> isPolymorphic = [](llvm::Function *F) {
     if (auto Env = std::getenv("NOTDEC_DEFAULT_POLY")) {
