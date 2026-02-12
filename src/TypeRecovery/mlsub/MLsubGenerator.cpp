@@ -4,7 +4,9 @@
 #include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub-infer.h"
 #include "binarysub/binarysub.h"
+#include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/HType.h"
+#include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Utils.h"
 #include "notdec/TypeRecovery/Lattice.h"
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
@@ -96,7 +98,35 @@ void MLsubRecovery::bottomUpPhase() {
     auto &Data = AG.AllSCCs.at(Ind);
     Data.Generator = std::make_shared<ConstraintsGenerator>(
         Data.SCCName, PointerSize, Data.SCCSet, MemoryType, Data.level);
-    Data.Generator->run();
+    auto &G = Data.Generator;
+    // insert ContraVariantValues
+    if (Ind == 0) {
+      // // add main arguments
+      // if (auto Main = Mod.getFunction("main")) {
+      //   for (auto &Arg: Main->args()) {
+      //     G->ContraVariantValues.insert(&Arg);
+      //   }
+      // }
+      // TODO parameters with unknown type
+    } else {
+      // find SCC interface functions.
+      for (auto N : Data.Nodes) {
+        if (AG.Callee2Callers.count(N) == 0) {
+          continue;
+        }
+        bool isInterface = false;
+        for (auto Caller : AG.Callee2Callers[N]) {
+          if (auto F = Caller->getFunction()) {
+            for (auto &Arg : F->args()) {
+              G->ContraVariantValues.insert(&Arg);
+            }
+          }
+        }
+      }
+    }
+
+    G->run();
+
     // create poly schemes and instantiate for unhandled calls.
     for (auto &Ent : Data.Generator->unhandledCalls) {
       auto F = Ent.first->getCalledFunction();
@@ -117,23 +147,29 @@ void MLsubRecovery::bottomUpPhase() {
 }
 
 void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
-                                    const llvm::DataLayout &DL, bool SolveMemory) {
+                                    const llvm::DataLayout &DL,
+                                    bool SolveMemory) {
   binarysub::TypeSimplifier Ts;
-  std::set<SimpleType> Tys;
+  using binarysub::PolarVar;
+  std::set<PolarVar> Tys;
+  auto getPol = [&](ExtValuePtr V) {
+    return !ContraVariantValues.count(V);
+  };
   for (auto &Ent : V2N) {
-    Tys.insert(Ent.second);
+    Tys.insert(PolarVar{.var = Ent.second, .pos = getPol(Ent.first)});
   }
+  auto PolMem = PolarVar{.var = MemoryType, .pos = false};
   if (SolveMemory) {
-    Tys.insert(MemoryType);
+    Tys.insert(PolMem);
   }
-  std::map<SimpleType, binarysub::UTypePtr> Res = Ts.bulkSimplify(Tys, false);
+  std::map<PolarVar, binarysub::UTypePtr> Res = Ts.bulkSimplify(Tys, false);
 
   // Create TypeBuilder context and builder
   TypeBuilderContext TBCtx(HCtx, DL);
   TypeBuilder TB(TBCtx);
 
   for (auto &Ent : V2N) {
-    auto It = Res.find(Ent.second);
+    auto It = Res.find(PolarVar{.var=Ent.second, .pos=getPol(Ent.first)});
     ast::HType *Converted = nullptr;
     if (It != Res.end() && It->second) {
       Converted = TB.convert(It->second);
@@ -141,7 +177,8 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     ValueTypes.insert({Ent.first, Converted});
   }
   if (SolveMemory) {
-    ValueTypes.insert({nullptr, TB.convert(Res.at(MemoryType))});
+    auto MemUTy = Res.at(PolMem);
+    ValueTypes.insert({nullptr, TB.convert(MemUTy)});
   }
 }
 
@@ -204,12 +241,11 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     SCCResults.push_back(*CGI);
   }
   // 遍历所有的CallGraphNode，然后构建一个反向的，从callee到所有caller的map
-  std::map<CallGraphNode *, std::set<CallGraphNode *>> Callee2Callers;
   for (auto &KV : *AG.CG) {
     CallGraphNode *Caller = KV.second.get();
     for (auto &CallRecord : *Caller) {
       CallGraphNode *Callee = CallRecord.second;
-      Callee2Callers[Callee].insert(Caller);
+      AG.Callee2Callers[Callee].insert(Caller);
     }
   }
 
@@ -262,8 +298,8 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     unsigned int maxCallerLevel = 0;
     std::set<std::size_t> maxLevelSCCIndices;
     for (auto *Node : NodeVec) {
-      auto CallerIt = Callee2Callers.find(Node);
-      if (CallerIt != Callee2Callers.end()) {
+      auto CallerIt = AG.Callee2Callers.find(Node);
+      if (CallerIt != AG.Callee2Callers.end()) {
         for (auto *Caller : CallerIt->second) {
           auto IndexIt = Node2SCCIndex.find(Caller);
           if (IndexIt != Node2SCCIndex.end()) {
@@ -371,7 +407,13 @@ SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     return convertSimpleTypeVal(IC->Val, IC->User, IC->OpInd);
   } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
-    assert(false && "TODO!");
+    // as field access.
+    auto res = binarysub::fresh_variable(lvl);
+    std::vector<std::pair<std::string, SimpleType>> fields;
+    fields.push_back(
+        {OffsetRange{.offset = CA->Val->getSExtValue()}.str(), res});
+    addSubtype(MemoryType, binarysub::make_record(std::move(fields)));
+    return res;
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                << "ERROR: ConstraintsGenerator::convertSimpleType unhandled "
@@ -575,6 +617,17 @@ void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
   std::abort();
 }
 
+bool ConstraintsGenerator::MLsubVisitor::isHeapAllocationCall(
+    llvm::CallBase &I) {
+  // TODO add more func names
+  if (auto F = I.getCalledFunction()) {
+    if (F->getName() == "malloc") {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
     llvm::CallBase &I) {
   auto Target = I.getCalledFunction();
@@ -606,7 +659,13 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     return;
   }
 
-  if (handleIntrinsicCall(I)) {
+  // TODO if is allocation function, treat as alloca inst
+  if (isHeapAllocationCall(I)) {
+    auto Node = cg.createNode(&I, nullptr, -1);
+    // set as pointer type
+    cg.setPointer(&I, nullptr, -1);
+    cg.ContraVariantValues.insert(&I);
+  } else if (handleIntrinsicCall(I)) {
     return;
   } else {
     // Call within the SCC:
@@ -684,7 +743,6 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   auto PtrVal = cg.getOrInsertNode(I.getPointerOperand(), &I, 0);
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
 
-  auto LoadNode = cg.createNode(&I, nullptr, -1);
   cg.addRemapType(&I, nullptr, -1, binarysub::make_ptr_load(PtrVal, BitSize));
 }
 
@@ -715,6 +773,7 @@ void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
   auto Node = cg.createNode(&I, nullptr, -1);
   // set as pointer type
   cg.setPointer(&I, nullptr, -1);
+  cg.ContraVariantValues.insert(&I);
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(

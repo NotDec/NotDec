@@ -57,7 +57,8 @@ struct ConstraintsGenerator {
 
   DSUMap<ExtValuePtr, SimpleType> V2N;
   std::map<ExtValuePtr, ast::HType *> ValueTypes;
-  std::map<llvm::CallBase*, SimpleType> unhandledCalls;
+  std::map<llvm::CallBase *, SimpleType> unhandledCalls;
+  std::set<ExtValuePtr> ContraVariantValues;
 
   void addMergeNode(SimpleType From, SimpleType To) { V2N.merge(From, To); }
 
@@ -98,7 +99,8 @@ struct ConstraintsGenerator {
       assert(F->getAsVariableState()->upperBounds.empty());
     }
   }
-  void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL, bool SolveMemory = false);
+  void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL,
+                bool SolveMemory = false);
 
   SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd);
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
@@ -121,7 +123,7 @@ public:
     PG.getOrInsertPNINode(Val, User, OpInd);
     // if the value is constant addr, we set ptr and link to memory
     if (auto CA = std::get_if<ConstantAddr>(&Val)) {
-      assert(false && "TODO");
+      setPointer(Val, User, OpInd);
     }
     return N;
   }
@@ -165,7 +167,7 @@ public:
     if (N == ty) {
       return N;
     }
-    auto It = V2N.insert(Val, N);
+    auto It = V2N.insert(Val, ty);
     if (!It.second) {
       llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                    << "setTypeVar: Value already mapped to "
@@ -205,6 +207,7 @@ public:
   }
 
   void onUpdatePNType(ExtValuePtr Val) {}
+  void setAsPtrAdd(SimpleType addend, SimpleType result, OffsetRange Off) {}
 
 public:
   struct PcodeOpType {
@@ -240,6 +243,7 @@ protected:
   public:
     MLsubVisitor(ConstraintsGenerator &cg) : cg(cg) {}
 
+    static bool isHeapAllocationCall(llvm::CallBase &I);
     bool handleIntrinsicCall(llvm::CallBase &I);
     // overloaded visit functions
     void visitExtractValueInst(llvm::ExtractValueInst &I);
@@ -288,6 +292,8 @@ struct SCCData {
 struct AllGraphs {
   std::vector<SCCData> AllSCCs;
   std::map<llvm::CallGraphNode *, std::size_t> Func2SCCIndex;
+  std::map<llvm::CallGraphNode *, std::set<llvm::CallGraphNode *>>
+      Callee2Callers;
   llvm::CallGraph *CG = nullptr;
 };
 
