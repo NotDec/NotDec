@@ -37,19 +37,12 @@ public:
   TypeBuilder(TypeBuilderContext &Parent);
 
   // Main conversion entry point
-  HType *convert(binarysub::UTypePtr Ty);
-
-private:
-  // Handlers for each UType variant
-  HType *convertTop(const binarysub::UTop &T);
-  HType *convertBot(const binarysub::UBot &T);
-  HType *convertPrimitive(const binarysub::UPrimitiveType &T);
-  HType *convertPointer(const binarysub::UPointerType &T);
-  HType *convertFunction(const binarysub::UFunctionType &T);
-  HType *convertRecord(const binarysub::URecordType &T);
-  HType *convertUnion(const binarysub::UUnion &T);
-  HType *convertInter(const binarysub::UInter &T);
-  HType *convertRecursive(const binarysub::URecursiveType &T);
+  HType *convert(binarysub::UTypePtr Ty, std::optional<int64_t> PointeeSize = std::nullopt);
+  
+  private:
+  HType *convertRecord(const binarysub::URecordType &T, std::optional<int64_t> PointeeSize = std::nullopt);
+  HType *doUnion(HType *Lhs, HType *Rhs);
+  HType *doInter(HType *Lhs, HType *Rhs);
   HType *convertVariable(const binarysub::UTypeVariable &T);
 
   // Helper to get void pointer
