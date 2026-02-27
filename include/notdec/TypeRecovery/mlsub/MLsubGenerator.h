@@ -205,6 +205,10 @@ public:
       N->setNonPtrIfRelated();
     }
   }
+  unsigned getSize(ExtValuePtr Val, llvm::User *User = nullptr, long OpInd = -1) {
+    llvmValue2ExtVal(Val, User, OpInd);
+    return notdec::getSize(Val, PointerSize);
+  }
 
   void onUpdatePNType(ExtValuePtr Val) {}
   void setAsPtrAdd(SimpleType addend, SimpleType result, OffsetRange Off) {}

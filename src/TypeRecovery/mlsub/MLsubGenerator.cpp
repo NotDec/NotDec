@@ -172,13 +172,13 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     auto It = Res.find(PolarVar{.var=Ent.second, .pos=getPol(Ent.first)});
     ast::HType *Converted = nullptr;
     if (It != Res.end() && It->second) {
-      Converted = TB.convert(It->second);
+      Converted = TB.convert(It->second, getSize(Ent.first));
     }
     ValueTypes.insert({Ent.first, Converted});
   }
   if (SolveMemory) {
     auto MemUTy = Res.at(PolMem);
-    ValueTypes.insert({nullptr, TB.convert(MemUTy)});
+    ValueTypes.insert({nullptr, TB.convert(MemUTy, PointerSize)});
   }
 }
 

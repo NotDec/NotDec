@@ -374,7 +374,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         AllIndex.insert(F.R.end());
       }
 
-      // 遍历所有最小范围区间，如果出现重叠则以此开始创建union类型。
+      // 合并所有重叠：遍历所有最小范围区间，如果出现重叠则以此开始创建union类型。
       bool NoUpdate = true;
       for (auto It = AllIndex.begin(); It != AllIndex.end(); ++It) {
         auto NextIt = std::next(It);
@@ -538,11 +538,11 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     } // end of while true
 
     // Now there is no overlap, create struct for Fields.
-    // sort the entry by start offset.
     if (Fields.empty()) {
       TypeInfos[&N] = TypeInfo{.Size = 0, .Info = StructInfo{}};
       return;
     }
+    // sort the entry by start offset.
     std::sort(Fields.begin(), Fields.end(),
               [](const FieldEntry &A, const FieldEntry &B) {
                 return A.R.Start < B.R.Start;
