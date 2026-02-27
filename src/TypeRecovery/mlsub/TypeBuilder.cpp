@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <llvm/Support/Debug.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -149,6 +150,8 @@ HType *TypeBuilder::convert(UTypePtr Ty, unsigned ObjSize) {
     Result = parsePrimitiveName(V->name);
   } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
     assert(false && "TODO support function type");
+    // 最后返回函数指针类型
+    // Result = getPtrTy(FPtr);
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
     // TODO
     // 也搞个recursive类型？比如有一个函数，返回函数指针类型，函数的类型也是自己。
@@ -222,19 +225,225 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
   if (!Name) {
     Name = ValueNamer::getName("struct_");
   }
+  RecordDecl *Decl = nullptr;
   if (!RDecl) {
-    auto Decl = ast::RecordDecl::Create(Ctx, Name.value());
+    Decl = ast::RecordDecl::Create(Ctx, Name.value());
+  } else {
+    Decl = RDecl.value();
   }
+
+  assert(Decl->getFields().empty());
   // 保证结构体的范围是从0到PointeeSize
-  // TODO 处理Padding和
-  for (auto &Field : Fields) {
-    RDecl.value()->addField(
-        ast::FieldDecl{.R = Field.first,
-                       .Type = Field.second,
-                       .Name = ValueNamer::getName("field_"),
-                       .Comment = ""});
+  std::optional<SimpleRange> ValidRange;
+  if (PointeeSize) {
+    if (*PointeeSize > 0) {
+      ValidRange = {0, *PointeeSize};
+    } else {
+      assert(*PointeeSize != 0);
+      ValidRange = {*PointeeSize, -*PointeeSize};
+    }
   }
-  return Ctx.getRecordType(false, RDecl.value());
+
+  if (Fields.size() == 0) {
+    if (!ValidRange) {
+      assert(false);
+    } else {
+      // create a struct with only padding:
+      auto FieldName = ValueNamer::getName("padding_");
+      auto CurrentDecl = FieldDecl{
+          .R = *ValidRange,
+          .Type = Ctx.getArrayType(false, Ctx.getChar(), ValidRange->Size),
+          .Name = FieldName,
+          .Comment = "at offset: " + std::to_string(ValidRange->Start)};
+      Decl->addField(CurrentDecl);
+      return getPtrTy(Ctx.getRecordType(false, Decl));
+    }
+  }
+
+  auto Current = Fields.front().first.Start;
+  if (ValidRange) {
+    Current = ValidRange->Start;
+  }
+
+  for (size_t i = 0; i < Fields.size(); i++) {
+    auto &Ent = Fields[i];
+    if (ValidRange) {
+      auto IR = Ent.first.intersect(*ValidRange);
+      if (IR.Size == 0) {
+        assert(false);
+        // fully out of the range.
+        llvm::errs() << "Warning: Skip field because of size or range";
+        continue;
+      }
+    }
+
+    HType *Ty = Ent.second;
+    if (!Ty->isPointerType()) {
+      assert(false);
+      llvm::errs() << "Warning: Offset edge is not pointer type!\n";
+      continue;
+    }
+    // the node is a field pointer type. get the field type.
+    Ty = Ty->getPointeeType();
+
+    auto FieldName = ValueNamer::getName("field_");
+    auto CurrentDecl =
+        FieldDecl{.R = Ent.first,
+                  .Type = Ty,
+                  .Name = FieldName,
+                  .Comment = "at offset: " + std::to_string(Ent.first.Start)};
+    std::optional<FieldDecl> PaddingAfter = std::nullopt;
+
+    // Try to calc expand end:
+    // if no ValidRange, no next ent: ent.end()
+    // if no valid range, has next ent: max(next.start, ent.end())
+    // if has valid range, no next ent: max(ValidRang, ent.end())
+    // if has valid range, has next end: min(ValidRange, next.start)
+    auto ExpandEnd = Ent.first.end();
+    // if there is space to next field
+    if (i + 1 < Fields.size()) {
+      auto &Next = Fields.at(i + 1);
+      ExpandEnd = std::max(ExpandEnd, Next.first.Start);
+    } else {
+      // if no next field, use valid range.
+      if (ValidRange) {
+        ExpandEnd = ValidRange->end();
+      }
+    }
+
+    // if it is char array, merge with elem
+    if (Ty->isCharArrayType()) {
+      auto j = i + 1;
+      for (; j < Fields.size(); j++) {
+        auto &EntJ = Fields[j];
+        auto TyJ = EntJ.second;
+        if (!TyJ->isPointerType()) {
+          break;
+        }
+        TyJ = TyJ->getPointeeType();
+        if (!TyJ->isCharType()) {
+          break;
+        }
+        // merge to prev array.
+        ExpandEnd = EntJ.first.end();
+
+        if (j + 1 < Fields.size()) {
+          auto &NextJ = Fields.at(j + 1);
+          ExpandEnd = std::max(ExpandEnd, NextJ.first.Start);
+        } else {
+          if (ValidRange) {
+            ExpandEnd = ValidRange->end();
+          }
+        }
+      }
+      // adjust i to skip some field
+      i = j - 1;
+    }
+    // must less than valid range.
+    if (ValidRange) {
+      ExpandEnd = std::min(ExpandEnd, ValidRange->end());
+    }
+
+    // Try to expand array size.
+    if (Ty->isArrayType()) {
+      // TODO 检查ElemSize对不对。
+      auto ElemSize = Ent.first.Size /
+                      Ty->getAs<ast::ArrayType>()->getNumElements().value();
+      auto NewCount = (ExpandEnd - Ent.first.Start) / ElemSize;
+      CurrentDecl.R.Size = NewCount * ElemSize;
+      auto OldArrTy = llvm::cast<ast::ArrayType>(CurrentDecl.Type);
+      CurrentDecl.Type = OldArrTy->withSize(Ctx, NewCount);
+    }
+
+    // crop the type if intersecting
+    if (ValidRange) {
+      auto IR = Ent.first.intersect(*ValidRange);
+      // intersecting member?
+      if (IR.Size < Ent.first.Size) {
+        assert(false && "TODO: intersecting member?");
+        // llvm::errs() << "Warning: Field intersect with PointeeSize!! "
+        //              << Decl->getName() << Ent.first.str() << "\n";
+        // std::pair<HType *, SimpleRange> Ent1 = cutType(
+        //     Ctx, Ty, Ent.first.Size,
+        //     SimpleRange{.Start = IR.Start - Ent.first.Start, .Size =
+        //     IR.Size});
+        // if (Ent1.second.Size == 0) {
+        //   llvm::dbgs() << "Warning: Crop field failed, Skipping: "
+        //                << Decl->getName() << Ent.first.str() << "\n";
+        //   continue;
+        // }
+        // Ent.first = Ent1.second;
+        // Ty = Ent1.first;
+      }
+    }
+
+    std::optional<FieldDecl> PaddingBefore = std::nullopt;
+    // Add padding at the beginning
+    if (Current < CurrentDecl.R.Start) {
+      auto PaddingSize = CurrentDecl.R.Start - Current;
+      PaddingBefore = FieldDecl{
+          .R = SimpleRange{.Start = Current, .Size = PaddingSize},
+          .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+          .Name = ValueNamer::getName("padding_"),
+          .Comment = "at offset: " + std::to_string(Current),
+          .isPadding = true,
+      };
+      Current = CurrentDecl.R.Start;
+    }
+
+    Current = CurrentDecl.R.end();
+
+    // add padding after if there is space
+    if (CurrentDecl.R.end() < ExpandEnd) {
+      auto PaddingSize = ExpandEnd - CurrentDecl.R.end();
+      PaddingAfter = FieldDecl{
+          .R = SimpleRange{.Start = CurrentDecl.R.end(), .Size = PaddingSize},
+          .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+          .Name = ValueNamer::getName("padding_"),
+          .Comment = "at offset: " + std::to_string(CurrentDecl.R.end()),
+          .isPadding = true,
+      };
+      Current = ExpandEnd;
+    }
+    if (PaddingBefore) {
+      Decl->addField(*PaddingBefore);
+    }
+    Decl->addField(CurrentDecl);
+    if (PaddingAfter) {
+      Decl->addField(*PaddingAfter);
+    }
+  }
+  if (Decl->getFields().size() == 0) {
+    // add only padding
+    if (ValidRange) {
+      if (Current < ValidRange->end()) {
+        auto PaddingSize = ValidRange->end() - Current;
+        auto PaddingOnly = FieldDecl{
+            .R = SimpleRange{.Start = Current, .Size = PaddingSize},
+            .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+            .Name = ValueNamer::getName("padding_"),
+            .Comment = "at offset: " + std::to_string(Current),
+            .isPadding = true,
+        };
+        Current = ValidRange->end();
+        Decl->addField(PaddingOnly);
+      }
+    }
+  }
+
+  if (Decl->getFields().size() == 0) {
+    llvm::errs() << "Error: Empty Struct?\n";
+  }
+
+  // if there is only one field, return the field's type
+  if (!RDecl.has_value() && Decl->getFields().size() == 0) {
+    return getVoidPtr();
+  } else if (!RDecl.has_value() && Decl->getFields().size() == 1 &&
+             Decl->getFields().front().R.Start == 0) {
+    return getPtrTy(Decl->getFields().front().Type);
+  } else {
+    return getPtrTy(Ctx.getRecordType(false, RDecl.value()));
+  }
 }
 
 HType *TypeBuilder::convertStruct(
@@ -243,301 +452,288 @@ HType *TypeBuilder::convertStruct(
     std::optional<int64_t> PointeeSize) {
   HType *Result = nullptr;
 
-  auto isSimpleArray = [&]() -> std::pair<bool, uint64_t> {
-    assert(false && "TODO");
-  };
+  std::vector<FieldEntry> Fields;
 
-  auto [isArray, SizeHint] = isSimpleArray();
-  // 仅有一条offset=0的简单情况：等价于成员类型
-  if (RawFields.size() == 1 && RawFields.begin()->first.isZero()) {
-    Result = convertPointer(RawFields.begin()->second);
-  } else if (isArray) { // 处理是简单的数组的情况
-    // merge all elements
-    assert(false && "TODO");
-  } else { // this is a struct or union.
-    std::vector<FieldEntry> Fields;
+  // 1 处理所有数组类型的成员
+  // 提取所有乘数项
+  std::set<int64_t> AllStrides;
+  std::vector<std::pair<OffsetRange, UTypePtr>> RemainingEntries = RawFields;
+  for (auto &E : RawFields) {
+    for (auto &A : E.first.access) {
+      if (A.Size > 0) {
+        AllStrides.insert(A.Size);
+      }
+    }
+  }
 
-    // 1 处理所有数组类型的成员
-    // 提取所有乘数项
-    std::set<int64_t> AllStrides;
-    std::vector<std::pair<OffsetRange, UTypePtr>> RemainingEntries = RawFields;
-    for (auto &E : RawFields) {
-      for (auto &A : E.first.access) {
-        if (A.Size > 0) {
-          AllStrides.insert(A.Size);
-        }
+  while (!AllStrides.empty()) {
+    // TODO 改成Vector
+    auto MaxStride = *AllStrides.rbegin();
+    assert(MaxStride > 0);
+    AllStrides.erase(MaxStride);
+
+    std::vector<std::pair<OffsetRange, UTypePtr>> HasStrideEntries;
+    for (auto It = RemainingEntries.begin(); It != RemainingEntries.end();
+         ++It) {
+      if (std::find(It->first.access.begin(), It->first.access.end(),
+                    MaxStride) != It->first.access.end()) {
+        // move from RemainingEntries to HasStrideEntries
+        HasStrideEntries.emplace(HasStrideEntries.end(), *It);
+        RemainingEntries.erase(It);
       }
     }
 
-    while (!AllStrides.empty()) {
-      // TODO 改成Vector
-      auto MaxStride = *AllStrides.rbegin();
-      assert(MaxStride > 0);
-      AllStrides.erase(MaxStride);
+    // 按基址从小到大排序
+    std::sort(HasStrideEntries.begin(), HasStrideEntries.end(),
+              [](const std::pair<OffsetRange, UTypePtr> &E1,
+                 const std::pair<OffsetRange, UTypePtr> &E2) {
+                return E1.first.offset < E2.first.offset;
+              });
+    while (!HasStrideEntries.empty()) {
+      auto &FrontOffset = HasStrideEntries.front().first;
+      auto RangeStart = FrontOffset.offset;
+      auto RangeEnd = FrontOffset.offset + MaxStride;
 
-      std::vector<std::pair<OffsetRange, UTypePtr>> HasStrideEntries;
-      for (auto It = RemainingEntries.begin(); It != RemainingEntries.end();
-           ++It) {
-        if (std::find(It->first.access.begin(), It->first.access.end(),
-                      MaxStride) != It->first.access.end()) {
-          // move from RemainingEntries to HasStrideEntries
-          HasStrideEntries.emplace(HasStrideEntries.end(), *It);
-          RemainingEntries.erase(It);
+      // 提取当前组中Base在当前范围内的模式 InRangeEnts
+      auto InitialSize = HasStrideEntries.size();
+      std::vector<std::pair<OffsetRange, UTypePtr>> InRangeEnts;
+      std::optional<size_t> RemoveStart = std::nullopt;
+      std::optional<size_t> RemoveEnd = HasStrideEntries.size();
+      for (size_t I = 0; I < HasStrideEntries.size(); I++) {
+        auto &Ent = HasStrideEntries.at(I);
+        auto &CurrentOffset = Ent.first;
+        if (CurrentOffset.offset >= RangeStart &&
+            CurrentOffset.offset < RangeEnd) {
+          InRangeEnts.push_back(Ent);
+          if (!RemoveStart) {
+            RemoveStart = I;
+          }
+        } else {
+          RemoveEnd = I;
+          break;
         }
       }
 
-      // 按基址从小到大排序
-      std::sort(HasStrideEntries.begin(), HasStrideEntries.end(),
-                [](const std::pair<OffsetRange, UTypePtr> &E1,
-                   const std::pair<OffsetRange, UTypePtr> &E2) {
-                  return E1.first.offset < E2.first.offset;
-                });
-      while (!HasStrideEntries.empty()) {
-        auto &FrontOffset = HasStrideEntries.front().first;
-        auto RangeStart = FrontOffset.offset;
-        auto RangeEnd = FrontOffset.offset + MaxStride;
+      assert(RemoveStart);
+      HasStrideEntries.erase(HasStrideEntries.begin() + RemoveStart.value(),
+                             HasStrideEntries.begin() + RemoveEnd.value());
+      assert(InitialSize == (HasStrideEntries.size() + InRangeEnts.size()));
 
-        // 提取当前组中Base在当前范围内的模式 InRangeEnts
-        auto InitialSize = HasStrideEntries.size();
-        std::vector<std::pair<OffsetRange, UTypePtr>> InRangeEnts;
-        std::optional<size_t> RemoveStart = std::nullopt;
-        std::optional<size_t> RemoveEnd = HasStrideEntries.size();
-        for (size_t I = 0; I < HasStrideEntries.size(); I++) {
-          auto &Ent = HasStrideEntries.at(I);
-          auto &CurrentOffset = Ent.first;
-          if (CurrentOffset.offset >= RangeStart &&
-              CurrentOffset.offset < RangeEnd) {
-            InRangeEnts.push_back(Ent);
-            if (!RemoveStart) {
-              RemoveStart = I;
-            }
-          } else {
-            RemoveEnd = I;
+      // 去掉所有的最大stride，转换为子问题，递归处理，作为数组类型
+      std::vector<std::pair<OffsetRange, UTypePtr>> SubProblem;
+      for (auto Ent : InRangeEnts) {
+        auto NewOffsetRange = Ent.first;
+        NewOffsetRange.offset -= RangeStart;
+        auto &AccArr = NewOffsetRange.access;
+        AccArr.erase(std::remove(AccArr.begin(), AccArr.end(), MaxStride),
+                     AccArr.end());
+        SubProblem.push_back({NewOffsetRange, Ent.second});
+      }
+      // 因为是数组，必须得是这个大小
+      auto MemberTy = convertStruct(T, SubProblem, MaxStride);
+      auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
+      Fields.push_back(
+          {SimpleRange{.Start = RangeStart, .Size = MaxStride}, ArrTy});
+    }
+  }
+  // 已经没有任何数组访问模式，接下来创建结构体和union类型
+  if (RemainingEntries.size() > 0) {
+    for (auto &Ent : RemainingEntries) {
+      // 肯定是非数组
+      assert(Ent.first.access.empty());
+      auto Size = accessedPointeeSize(Ent.second);
+      Fields.push_back({SimpleRange{.Start = Ent.first.offset, .Size = Size},
+                        convertPointer(Ent.second, Size)});
+    }
+  }
+
+  auto IsOverlap = [](OffsetTy S1, OffsetTy E1, OffsetTy S2, OffsetTy E2) {
+    assert(S1 < E1);
+    assert(S2 < E2);
+    if (std::max(S1, S2) < std::min(E1, E2)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Fields should not be mutated during the lifetime of ret vector
+  auto FilterInRange =
+      [&](const std::vector<std::pair<SimpleRange, HType *>> &Fields,
+          OffsetTy Start, OffsetTy End) -> std::vector<size_t> {
+    std::vector<size_t> Ret;
+    for (size_t I = 0; I < Fields.size(); I++) {
+      auto &F = Fields.at(I);
+      auto FS = F.first.Start;
+      auto FE = F.first.Size + FS;
+      // overlaps
+      if (IsOverlap(Start, End, FS, FE)) {
+        Ret.push_back(I);
+      }
+    }
+    return Ret;
+  };
+
+  while (true) {
+    // 收集所有分割点
+    std::set<OffsetTy> AllIndex;
+    for (auto &F : Fields) {
+      AllIndex.insert(F.first.Start);
+      AllIndex.insert(F.first.end());
+    }
+    // 合并所有重叠：遍历所有最小范围区间，如果出现重叠则以此开始创建union类型。
+    bool NoUpdate = true;
+    for (auto It = AllIndex.begin(); It != AllIndex.end(); ++It) {
+      auto NextIt = std::next(It);
+      if (NextIt == AllIndex.end()) {
+        break;
+      }
+      auto Start = *It;
+      auto End = *NextIt;
+      auto InRangeFieldIndex = FilterInRange(Fields, Start, End);
+      if (InRangeFieldIndex.size() <= 1) {
+        continue;
+      }
+      NoUpdate = false;
+
+      // create a union here.
+      auto OldSize = 1;
+      auto NewSize = InRangeFieldIndex.size();
+      while (
+          NewSize >
+          OldSize) { // 根据小的重叠区域，左右拓展找到需要处理创建union的所有Fields。
+        OldSize = NewSize;
+        for (auto Ind : InRangeFieldIndex) {
+          auto &F = Fields.at(Ind);
+          Start = std::min(Start, F.first.Start);
+          End = std::max(End, F.first.end());
+        }
+        InRangeFieldIndex = FilterInRange(Fields, Start, End);
+        NewSize = InRangeFieldIndex.size();
+        assert(NewSize >= 2);
+      }
+
+      auto UnionStart = Start;
+      auto UnionEnd = End;
+      std::vector<FieldEntry> OtherFields;
+      std::vector<FieldEntry> OverlapFields;
+      for (auto &F : Fields) {
+        if (IsOverlap(Start, End, F.first.Start, F.first.end())) {
+          OverlapFields.push_back(FieldEntry{
+              {.Start = F.first.Start - UnionStart, .Size = F.first.Size},
+              F.second});
+        } else {
+          OtherFields.push_back(F);
+        }
+      }
+
+      // #region build members using OverlapFields;
+      // sort the entry by end offset.
+      std::sort(OverlapFields.begin(), OverlapFields.end(),
+                [](const FieldEntry &A, const FieldEntry &B) {
+                  return A.first.end() < B.first.end();
+                });
+      // use std::min to find the min start offset.
+      auto MinStartOff =
+          std::min_element(OverlapFields.begin(), OverlapFields.end(),
+                           [](const FieldEntry &A, const FieldEntry &B) {
+                             return A.first.Start < B.first.Start;
+                           })
+              ->first.Start;
+      auto MaxOff = OverlapFields.back().first.end();
+      // unified start to 0
+      assert(MinStartOff == 0);
+      assert(MaxOff == (UnionEnd - UnionStart));
+      // after determinize, there will not be nested struct. We assume
+      // Offset
+      // to struct == Min Start Offset. So set size as MaxOff - MinStartOff.
+      auto OurSize = MaxOff - MinStartOff;
+      std::vector<std::vector<FieldEntry>> UnionPanels;
+      for (auto &F : OverlapFields) {
+        bool inserted = false;
+        for (auto &Panel : UnionPanels) {
+          if (Panel.back().first.Start + Panel.back().first.Size <=
+              F.first.Start) {
+            Panel.push_back(F);
+            inserted = true;
             break;
           }
         }
-
-        assert(RemoveStart);
-        HasStrideEntries.erase(HasStrideEntries.begin() + RemoveStart.value(),
-                               HasStrideEntries.begin() + RemoveEnd.value());
-        assert(InitialSize == (HasStrideEntries.size() + InRangeEnts.size()));
-
-        // 去掉所有的最大stride，转换为子问题，递归处理，作为数组类型
-        std::vector<std::pair<OffsetRange, UTypePtr>> SubProblem;
-        for (auto Ent : InRangeEnts) {
-          auto NewOffsetRange = Ent.first;
-          NewOffsetRange.offset -= RangeStart;
-          auto &AccArr = NewOffsetRange.access;
-          AccArr.erase(std::remove(AccArr.begin(), AccArr.end(), MaxStride),
-                       AccArr.end());
-          SubProblem.push_back({NewOffsetRange, Ent.second});
-        }
-        // 因为是数组，必须得是这个大小
-        auto MemberTy = convertStruct(T, SubProblem, MaxStride);
-        auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
-        Fields.push_back(
-            {SimpleRange{.Start = RangeStart, .Size = MaxStride}, ArrTy});
-      }
-    }
-    // 已经没有任何数组访问模式，接下来创建结构体和union类型
-    if (RemainingEntries.size() > 0) {
-      for (auto &Ent : RemainingEntries) {
-        // 肯定是非数组
-        assert(Ent.first.access.empty());
-        auto Size = accessedPointeeSize(Ent.second);
-        Fields.push_back({SimpleRange{.Start = Ent.first.offset, .Size = Size},
-                          convertPointer(Ent.second, Size)});
-      }
-    }
-
-    auto IsOverlap = [](OffsetTy S1, OffsetTy E1, OffsetTy S2, OffsetTy E2) {
-      assert(S1 < E1);
-      assert(S2 < E2);
-      if (std::max(S1, S2) < std::min(E1, E2)) {
-        return true;
-      }
-      return false;
-    };
-
-    // Fields should not be mutated during the lifetime of ret vector
-    auto FilterInRange =
-        [&](const std::vector<std::pair<SimpleRange, HType *>> &Fields,
-            OffsetTy Start, OffsetTy End) -> std::vector<size_t> {
-      std::vector<size_t> Ret;
-      for (size_t I = 0; I < Fields.size(); I++) {
-        auto &F = Fields.at(I);
-        auto FS = F.first.Start;
-        auto FE = F.first.Size + FS;
-        // overlaps
-        if (IsOverlap(Start, End, FS, FE)) {
-          Ret.push_back(I);
+        if (!inserted) {
+          UnionPanels.push_back({F});
         }
       }
-      return Ret;
-    };
-
-    while (true) {
-      // 收集所有分割点
-      std::set<OffsetTy> AllIndex;
-      for (auto &F : Fields) {
-        AllIndex.insert(F.first.Start);
-        AllIndex.insert(F.first.end());
-      }
-      // 合并所有重叠：遍历所有最小范围区间，如果出现重叠则以此开始创建union类型。
-      bool NoUpdate = true;
-      for (auto It = AllIndex.begin(); It != AllIndex.end(); ++It) {
-        auto NextIt = std::next(It);
-        if (NextIt == AllIndex.end()) {
-          break;
-        }
-        auto Start = *It;
-        auto End = *NextIt;
-        auto InRangeFieldIndex = FilterInRange(Fields, Start, End);
-        if (InRangeFieldIndex.size() <= 1) {
+      assert(UnionPanels.size() > 1);
+      // create new node for each panel struct.
+      std::vector<HType *> Members;
+      for (auto &Panel : UnionPanels) {
+        if (Panel.size() == 1) {
+          // we do not need to create a struct
+          Members.push_back(Panel.front().second);
           continue;
         }
-        NoUpdate = false;
-
-        // create a union here.
-        auto OldSize = 1;
-        auto NewSize = InRangeFieldIndex.size();
-        while (
-            NewSize >
-            OldSize) { // 根据小的重叠区域，左右拓展找到需要处理创建union的所有Fields。
-          OldSize = NewSize;
-          for (auto Ind : InRangeFieldIndex) {
-            auto &F = Fields.at(Ind);
-            Start = std::min(Start, F.first.Start);
-            End = std::max(End, F.first.end());
-          }
-          InRangeFieldIndex = FilterInRange(Fields, Start, End);
-          NewSize = InRangeFieldIndex.size();
-          assert(NewSize >= 2);
-        }
-
-        auto UnionStart = Start;
-        auto UnionEnd = End;
-        std::vector<FieldEntry> OtherFields;
-        std::vector<FieldEntry> OverlapFields;
-        for (auto &F : Fields) {
-          if (IsOverlap(Start, End, F.first.Start, F.first.end())) {
-            OverlapFields.push_back(FieldEntry{
-                {.Start = F.first.Start - UnionStart, .Size = F.first.Size},
-                F.second});
-          } else {
-            OtherFields.push_back(F);
-          }
-        }
-
-        // #region build members using OverlapFields;
-        // sort the entry by end offset.
-        std::sort(OverlapFields.begin(), OverlapFields.end(),
-                  [](const FieldEntry &A, const FieldEntry &B) {
-                    return A.first.end() < B.first.end();
-                  });
-        // use std::min to find the min start offset.
-        auto MinStartOff =
-            std::min_element(OverlapFields.begin(), OverlapFields.end(),
-                             [](const FieldEntry &A, const FieldEntry &B) {
-                               return A.first.Start < B.first.Start;
-                             })
-                ->first.Start;
-        auto MaxOff = OverlapFields.back().first.end();
-        // unified start to 0
-        assert(MinStartOff == 0);
-        assert(MaxOff == (UnionEnd - UnionStart));
-        // after determinize, there will not be nested struct. We assume
-        // Offset
-        // to struct == Min Start Offset. So set size as MaxOff - MinStartOff.
-        auto OurSize = MaxOff - MinStartOff;
-        std::vector<std::vector<FieldEntry>> UnionPanels;
-        for (auto &F : OverlapFields) {
-          bool inserted = false;
-          for (auto &Panel : UnionPanels) {
-            if (Panel.back().first.Start + Panel.back().first.Size <=
-                F.first.Start) {
-              Panel.push_back(F);
-              inserted = true;
-              break;
-            }
-          }
-          if (!inserted) {
-            UnionPanels.push_back({F});
-          }
-        }
-        assert(UnionPanels.size() > 1);
-        // create new node for each panel struct.
-        std::vector<HType *> Members;
-        for (auto &Panel : UnionPanels) {
-          if (Panel.size() == 1) {
-            // we do not need to create a struct
-            Members.push_back(Panel.front().second);
-            continue;
-          }
-          // directly create a struct here
-          std::string Name = ValueNamer::getName("Us_");
-          auto E1 = craftStruct(Panel, OurSize, Name, std::nullopt);
-          Members.push_back(E1);
-        }
-        if (Members.empty()) {
-          llvm::errs() << "Warning: Empty union!\n";
-        }
-        // create union
-        auto Name = ValueNamer::getName("union_");
-        auto Decl = UnionDecl::Create(Ctx, Name);
-        for (auto Ent : Members) {
-          auto FieldName = ValueNamer::getName("field_");
-          // Union需要起始大小是0，然后每一项大小都是OurSize。
-          Decl->addMember(ast::FieldDecl{.R = {.Start = 0, .Size = OurSize},
-                                         .Type = Ent,
-                                         .Name = FieldName});
-        }
-        // push the merged union back to fields, and iterate again
-        OtherFields.push_back({FieldEntry{
-            SimpleRange{.Start = UnionStart + MinStartOff, .Size = OurSize},
-            getPtrTy(Ctx.getUnionType(false, Decl))}});
-        assert(NoUpdate == false);
-        // #endregion build members using OverlapFields;
-        // reiterate with merged fields.
-        Fields = OtherFields;
-        break;
+        // directly create a struct here
+        std::string Name = ValueNamer::getName("Us_");
+        auto E1 = craftStruct(Panel, OurSize, Name, std::nullopt);
+        Members.push_back(E1);
       }
-      // no overlap, cannot create unions
-      if (NoUpdate) {
-        break;
+      if (Members.empty()) {
+        llvm::errs() << "Warning: Empty union!\n";
       }
-    } // end of while true
-    // Now there is no overlap, create struct for Fields.
-    if (Fields.empty()) {
-      // TODO create empty struct?
-    }
-    // sort the entry by start offset.
-    std::sort(Fields.begin(), Fields.end(),
-              [](const FieldEntry &A, const FieldEntry &B) {
-                return A.first.Start < B.first.Start;
-              });
-    auto MaxEndOff =
-        std::max_element(Fields.begin(), Fields.end(),
-                         [](const FieldEntry &A, const FieldEntry &B) {
-                           return A.first.end() < B.first.end();
-                         })
-            ->first.end();
-    // TODO
-    // 是否会在递归的时候，要求当前大小？下面的大小就当做不知道多大的时候猜测出来的值。
-    auto Size = MaxEndOff - Fields.front().first.Start;
-    assert(Size >= 0);
-    if (PointeeSize) {
-      if (PointeeSize.value() > Size) {
-        Size = PointeeSize.value();
+      // create union
+      auto Name = ValueNamer::getName("union_");
+      auto Decl = UnionDecl::Create(Ctx, Name);
+      for (auto Ent : Members) {
+        auto FieldName = ValueNamer::getName("field_");
+        // Union需要起始大小是0，然后每一项大小都是OurSize。
+        Decl->addMember(ast::FieldDecl{.R = {.Start = 0, .Size = OurSize},
+                                       .Type = Ent,
+                                       .Name = FieldName});
       }
-      assert(!(PointeeSize.value() < Size) && "TODO");
+      // push the merged union back to fields, and iterate again
+      OtherFields.push_back({FieldEntry{
+          SimpleRange{.Start = UnionStart + MinStartOff, .Size = OurSize},
+          getPtrTy(Ctx.getUnionType(false, Decl))}});
+      assert(NoUpdate == false);
+      // #endregion build members using OverlapFields;
+      // reiterate with merged fields.
+      Fields = OtherFields;
+      break;
     }
-    if (Fields.empty()) {
-      llvm::errs() << "Warning: Empty struct!\n";
+    // no overlap, cannot create unions
+    if (NoUpdate) {
+      break;
     }
-
-    Result = craftStruct(Fields, Size, std::nullopt, getStructOrNull(T));
+  } // end of while true
+  // Now there is no overlap, create struct for Fields.
+  if (Fields.empty()) {
+    // TODO create empty struct?
   }
+  // sort the entry by start offset.
+  std::sort(Fields.begin(), Fields.end(),
+            [](const FieldEntry &A, const FieldEntry &B) {
+              return A.first.Start < B.first.Start;
+            });
+  auto MaxEndOff =
+      std::max_element(Fields.begin(), Fields.end(),
+                       [](const FieldEntry &A, const FieldEntry &B) {
+                         return A.first.end() < B.first.end();
+                       })
+          ->first.end();
+  // TODO
+  // 是否会在递归的时候，要求当前大小？下面的大小就当做不知道多大的时候猜测出来的值。
+  auto Size = MaxEndOff - Fields.front().first.Start;
+  assert(Size >= 0);
+  if (PointeeSize) {
+    if (PointeeSize.value() > Size) {
+      Size = PointeeSize.value();
+    }
+    assert(!(PointeeSize.value() < Size) && "TODO");
+  }
+  if (Fields.empty()) {
+    llvm::errs() << "Warning: Empty struct!\n";
+  }
+
+  Result = craftStruct(Fields, Size, std::nullopt, getStructOrNull(T));
   return Result;
 }
 
