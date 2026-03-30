@@ -726,10 +726,10 @@ void ConstraintsGenerator::mergeNodeAndType(CGNode &From, CGNode &To) {
     // has type infos
     TypeInfo &FTI = TypeInfos.at(&From);
     TypeInfo &TTI = TypeInfos.at(&To);
-    if (TypeInfos.at(&From).isArray() && TypeInfos.at(&To).isArray()) {
+    if (FTI.isArray() && TTI.isArray()) {
       // TODO merge if the access range in edge label is different
       assert(false && "TODO");
-    } else if (TypeInfos.at(&From).isUnion() && TypeInfos.at(&To).isUnion()) {
+    } else if (FTI.isUnion() && TTI.isUnion()) {
       // TODO merge all union members to one.
       assert(false && "TODO");
     } else {

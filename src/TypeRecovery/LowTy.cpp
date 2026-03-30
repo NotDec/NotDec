@@ -111,7 +111,6 @@ std::string toString(PtrOrNum Ty) {
 // #endregion PtrOrNum
 
 bool PNTy::setPtrOrNum(PtrOrNum NewTy) {
-  auto OldTy = Ty;
   assert(NewTy != Null);
   if (Ty == Null) {
     Ty = NewTy;
