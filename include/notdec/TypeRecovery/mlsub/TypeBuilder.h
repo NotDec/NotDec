@@ -53,11 +53,12 @@ protected:
   // 如果结构体成员已经递归转换为HType
   // *且处理了重叠问题，这个方法处理padding和size。
   HType *craftStruct(const std::vector<std::pair<SimpleRange, HType *>> &Fields,
-                     std::optional<int64_t> PointeeSize,
+                     std::optional<SimpleRange> ValidRange,
                      std::optional<std::string> Name,
-                     std::optional<ast::RecordDecl *> RDecl);
+                     const binarysub::UTypePtr *T);
   std::optional<ast::RecordDecl *> getStructOrNull(binarysub::UTypePtr Ty);
-  int64_t accessedPointeeSize(const binarysub::UTypePtr &Ty);
+  ast::RecordDecl *getOrCreateStruct(binarysub::UTypePtr Ty);
+  int64_t accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty);
   HType *doUnion(HType *Lhs, HType *Rhs);
   HType *doInter(HType *Lhs, HType *Rhs);
   HType *convertVariable(const binarysub::UTypeVariable &T);

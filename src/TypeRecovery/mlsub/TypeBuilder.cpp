@@ -99,6 +99,19 @@ TypeBuilder::getStructOrNull(binarysub::UTypePtr Ty) {
   return std::nullopt;
 }
 
+ast::RecordDecl *TypeBuilder::getOrCreateStruct(binarysub::UTypePtr Ty) {
+  auto It = getStructOrNull(Ty);
+  // create as struct ptr, if not in type cache
+  if (!It.has_value()) {
+    RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("struct_"));
+    HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
+                                    Ctx.getRecordType(false, Decl));
+    TypeCache[Ty] = Ret;
+    It = Decl;
+  }
+  return *It;
+}
+
 HType *TypeBuilder::convert(UTypePtr Ty) {
 
   // Check cache first
@@ -168,12 +181,11 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   return Result;
 }
 
-int64_t TypeBuilder::accessedPointeeSize(const binarysub::UTypePtr &Ty) {
+int64_t TypeBuilder::accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty) {
   if (auto *V = std::get_if<UTop>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<UBot>(&Ty->v)) {
-    // assert(false && "Impossible UType variant");
-    return 0;
+    return V->size;
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
@@ -182,13 +194,15 @@ int64_t TypeBuilder::accessedPointeeSize(const binarysub::UTypePtr &Ty) {
   } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
-    return accessedPointeeSize(V->body);
+    return accessedPointeeSizeInBits(V->body);
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
-    return 0;
+    return V->size;
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    return std::max(accessedPointeeSize(V->lhs), accessedPointeeSize(V->rhs));
+    return std::max(accessedPointeeSizeInBits(V->lhs),
+                    accessedPointeeSizeInBits(V->rhs));
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    return std::max(accessedPointeeSize(V->lhs), accessedPointeeSize(V->rhs));
+    return std::max(accessedPointeeSizeInBits(V->lhs),
+                    accessedPointeeSizeInBits(V->rhs));
   } else if (auto *V = std::get_if<URecordType>(&Ty->v)) {
     auto MaxElem = 0;
     for (const auto &field : V->fields) {
@@ -204,32 +218,29 @@ int64_t TypeBuilder::accessedPointeeSize(const binarysub::UTypePtr &Ty) {
   }
 }
 
+// 根据要求的range创建结构体，按需插入padding。
+// 1. 创建union panel的时候，创建匿名结构体。此时T==nullptr
+// 2. 最后构造结构体的时候，按照range构造。此时T!=nullptr
+// 如果指定了T，则会存入TypeCache。
 HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
-                                std::optional<int64_t> PointeeSize,
+                                std::optional<SimpleRange> ValidRange,
                                 std::optional<std::string> Name,
-                                std::optional<ast::RecordDecl *> RDecl) {
+                                const binarysub::UTypePtr *T) {
   if (!Name) {
     Name = ValueNamer::getName("struct_");
   }
-  RecordDecl *Decl = nullptr;
-  if (!RDecl) {
-    Decl = ast::RecordDecl::Create(Ctx, Name.value());
-  } else {
-    Decl = RDecl.value();
+  RecordDecl *PrevDecl = nullptr;
+  if (T) {
+    PrevDecl = getStructOrNull(*T).value_or(nullptr);
   }
+  RecordDecl *Decl = PrevDecl;
+  if (Decl == nullptr) {
+    // 临时的结构体
+    Decl = ast::RecordDecl::Create(Ctx, Name.value());
+  }
+  assert(Decl != nullptr);
 
   assert(Decl->getFields().empty());
-  // 保证结构体的范围是从0到PointeeSize
-  std::optional<SimpleRange> ValidRange;
-  if (PointeeSize) {
-    if (*PointeeSize >= 0) {
-      // assert(*PointeeSize != 0);
-      ValidRange = {0, *PointeeSize};
-    } else {
-      ValidRange = {*PointeeSize, -*PointeeSize};
-    }
-  }
-
   if (Fields.size() == 0) {
     if (!ValidRange) {
       assert(false);
@@ -429,14 +440,15 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     llvm::errs() << "Error: Empty Struct?\n";
   }
 
+  // if no prevDecl, we may simplify wrapper struct 
   // if there is only one field, return the field's type
-  if (!RDecl.has_value() && Decl->getFields().size() == 0) {
+  if (!PrevDecl && Decl->getFields().size() == 0) {
     return getVoidPtr();
-  } else if (!RDecl.has_value() && Decl->getFields().size() == 1 &&
+  } else if (!PrevDecl && Decl->getFields().size() == 1 &&
              Decl->getFields().front().R.Start == 0) {
     return getPtrTy(Decl->getFields().front().Type);
   } else {
-    return getPtrTy(Ctx.getRecordType(false, RDecl.value()));
+    return getPtrTy(Ctx.getRecordType(false, Decl));
   }
 }
 
@@ -535,7 +547,8 @@ HType *TypeBuilder::convertStruct(
     for (auto &Ent : RemainingEntries) {
       // 肯定是非数组
       assert(Ent.first.access.empty());
-      auto Size = accessedPointeeSize(Ent.second);
+      auto SizeInBits = accessedPointeeSizeInBits(Ent.second);
+      auto Size = SizeInBits <= 0 ? 0 : (SizeInBits + 7) / 8;
       Fields.push_back({SimpleRange{.Start = Ent.first.offset, .Size = Size},
                         convertPointer(Ent.second, Size)});
     }
@@ -667,7 +680,8 @@ HType *TypeBuilder::convertStruct(
         }
         // directly create a struct here
         std::string Name = ValueNamer::getName("Us_");
-        auto E1 = craftStruct(Panel, OurSize, Name, std::nullopt);
+        auto E1 = craftStruct(Panel, SimpleRange{.Start = 0, .Size = OurSize},
+                              Name, nullptr);
         Members.push_back(E1);
       }
       if (Members.empty()) {
@@ -727,7 +741,9 @@ HType *TypeBuilder::convertStruct(
     llvm::errs() << "Warning: Empty struct!\n";
   }
 
-  Result = craftStruct(Fields, Size, std::nullopt, getStructOrNull(T));
+  Result = craftStruct(
+      Fields, SimpleRange{.Start = Fields.front().first.Start, .Size = Size},
+      std::nullopt, &T);
   return Result;
 }
 

@@ -154,9 +154,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
   std::set<PolarVar> Tys;
-  auto getPol = [&](ExtValuePtr V) {
-    return !ContraVariantValues.count(V);
-  };
+  auto getPol = [&](ExtValuePtr V) { return !ContraVariantValues.count(V); };
   for (auto &Ent : V2N) {
     Tys.insert(PolarVar{.var = Ent.second, .pos = getPol(Ent.first)});
   }
@@ -171,7 +169,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   TypeBuilder TB(TBCtx);
 
   for (auto &Ent : V2N) {
-    auto It = Res.find(PolarVar{.var=Ent.second, .pos=getPol(Ent.first)});
+    auto It = Res.find(PolarVar{.var = Ent.second, .pos = getPol(Ent.first)});
     ast::HType *Converted = nullptr;
     if (It != Res.end() && It->second) {
       Converted = TB.convert(It->second);
@@ -196,9 +194,15 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   }
   ResultVal->HTCtx = HCtx;
   // handle Memory type.
-  ResultVal->MemoryType = AG.AllSCCs.at(0).Generator->ValueTypes.at(nullptr);
-  if (ResultVal->MemoryType->isRecordType()) {
-    ResultVal->MemoryDecl = ResultVal->MemoryType->getAsRecordDecl();
+  auto Mem = AG.AllSCCs.at(0).Generator->ValueTypes.at(nullptr);
+  ResultVal->MemoryType = Mem;
+  if (Mem->isPointerType() && Mem->getPointeeType() &&
+      Mem->getPointeeType()->isRecordType()) {
+    ResultVal->MemoryDecl = Mem->getPointeeType()->getAsRecordDecl();
+  }
+  // HType还是按照结构体指针类型来，下面的分支作为兼容性保留
+  else if (Mem->isRecordType()) {
+    ResultVal->MemoryDecl = Mem->getAsRecordDecl();
   }
 }
 
@@ -963,14 +967,12 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     cg.setNonPointer(I, nullptr, -1);
-    auto SintNode =
-        binarysub::make_primitive("sint", cg.getSize(I));
+    auto SintNode = binarysub::make_primitive("sint", cg.getSize(I));
     cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(I, nullptr, -1);
-    auto UintNode =
-        binarysub::make_primitive("uint", cg.getSize(I));
+    auto UintNode = binarysub::make_primitive("uint", cg.getSize(I));
     cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
@@ -994,14 +996,12 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     cg.setNonPointer(Op, I, Index);
-    auto SintNode =
-        binarysub::make_primitive("sint", cg.getSize(Op));
+    auto SintNode = binarysub::make_primitive("sint", cg.getSize(Op));
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(Op, I, Index);
-    auto UintNode =
-        binarysub::make_primitive("uint", cg.getSize(Op));
+    auto UintNode = binarysub::make_primitive("uint", cg.getSize(Op));
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {

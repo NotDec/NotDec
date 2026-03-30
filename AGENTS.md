@@ -246,10 +246,6 @@ cmake --build ./build --target all
 4. 如果问题表现为变量/内存恢复错误，优先排查
    - `src/Passes/`
    - `src/TypeRecovery/`
-5. 修改后至少做一轮最小验证
-   - 能编译
-   - 能运行一个 `.ll` 或 `.wat` 输入
-   - 输出文件后缀与行为一致
 
 ## 11. 本文件维护原则
 
@@ -259,8 +255,6 @@ cmake --build ./build --target all
 - pass pipeline 分层发生变化
 - 构建依赖版本发生变化
 - 推荐运行方式或测试入口发生变化
-
-如果仓库未来引入正式的 `AGENTS.md`，应决定是否保留本文件名 `AGNENTS.md`，或迁移并删除该文件以避免重复。
 
 # Repository Notes
 
