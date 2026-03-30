@@ -9,3 +9,7 @@ popd
 pushd external/NotDec-wasm2llvm
 git push
 popd
+
+pushd external/binarysub
+git push
+popd

@@ -32,6 +32,8 @@ namespace notdec::mlsub {
 
 void MLsubRecovery::run() {
   auto &M = const_cast<llvm::Module &>(Mod);
+  // set global pointer size variable for binarysub
+  binarysub::pointer_size = PointerSize;
 
   // 0.4 prepare debug dir and SCCsCatalog
   auto DebugDir = getTRDebugDir();
@@ -172,13 +174,13 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     auto It = Res.find(PolarVar{.var=Ent.second, .pos=getPol(Ent.first)});
     ast::HType *Converted = nullptr;
     if (It != Res.end() && It->second) {
-      Converted = TB.convert(It->second, getSize(Ent.first));
+      Converted = TB.convert(It->second);
     }
     ValueTypes.insert({Ent.first, Converted});
   }
   if (SolveMemory) {
     auto MemUTy = Res.at(PolMem);
-    ValueTypes.insert({nullptr, TB.convert(MemUTy, PointerSize)});
+    ValueTypes.insert({nullptr, TB.convert(MemUTy)});
   }
 }
 
@@ -402,13 +404,13 @@ SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertSimpleTypeVal(*V, User, OpInd);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    return binarysub::make_variable(lvl);
+    return binarysub::make_variable(lvl, getSize(Val));
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     return convertSimpleTypeVal(IC->Val, IC->User, IC->OpInd);
   } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
     // as field access.
-    auto res = binarysub::fresh_variable(lvl);
+    auto res = binarysub::fresh_variable(lvl, getSize(Val));
     std::vector<std::pair<std::string, SimpleType>> fields;
     fields.push_back(
         {OffsetRange{.offset = CA->Val->getSExtValue()}.str(), res});
@@ -425,9 +427,9 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
                                                       llvm::User *User,
                                                       long OpInd) {
   if (Val->getType()->isIntegerTy(1)) {
-    return binarysub::make_primitive("bool");
+    return binarysub::make_primitive("bool", 1);
   } else if (Val->getType()->isFloatingPointTy()) {
-    return binarysub::make_primitive("float");
+    return binarysub::make_primitive("float", getSize(Val));
   }
 
   if (Constant *C = dyn_cast<Constant>(Val)) {
@@ -473,7 +475,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
                      << *C << "\n";
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
-      return binarysub::make_variable(lvl);
+      return binarysub::make_variable(lvl, getSize(gv));
       // if (gv == Ctx.StackPointer) {
       //   std::cerr
       //       << "Error: convertTypeVarVal: direct use of stack pointer?,
@@ -487,7 +489,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       // return makeTv(Ctx.TRCtx, gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
       if (auto CI = dyn_cast<ConstantInt>(C)) {
-        return binarysub::make_variable(lvl);
+        return binarysub::make_variable(lvl, getSize(CI));
       }
       assert(false && "TODO");
       // return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));
@@ -506,17 +508,17 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
                  << *C << "\n";
     std::abort();
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
-    return binarysub::make_variable(lvl);
+    return binarysub::make_variable(lvl, getSize(arg));
   }
 
   if (auto *I = dyn_cast<Instruction>(Val)) {
-    return binarysub::make_variable(lvl);
+    return binarysub::make_variable(lvl, getSize(I));
   }
   llvm::errs()
       << __FILE__ << ":" << __LINE__ << ": "
       << "WARN: ConstraintsGenerator::convertSimpleTypeVal unhandled value: "
       << *Val << "\n";
-  return binarysub::make_variable(lvl);
+  return binarysub::make_variable(lvl, getSize(Val));
 }
 
 // #region ConstraintsGenerator::MLsubVisitor
@@ -962,13 +964,13 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   } else if (strEq(ty, "sint")) {
     cg.setNonPointer(I, nullptr, -1);
     auto SintNode =
-        binarysub::make_primitive(retypd::getNameForInt("sint", I->getType()));
+        binarysub::make_primitive("sint", cg.getSize(I));
     cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(I, nullptr, -1);
     auto UintNode =
-        binarysub::make_primitive(retypd::getNameForInt("uint", I->getType()));
+        binarysub::make_primitive("uint", cg.getSize(I));
     cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
@@ -993,13 +995,13 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
   } else if (strEq(ty, "sint")) {
     cg.setNonPointer(Op, I, Index);
     auto SintNode =
-        binarysub::make_primitive(retypd::getNameForInt("sint", Op->getType()));
+        binarysub::make_primitive("sint", cg.getSize(Op));
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(Op, I, Index);
     auto UintNode =
-        binarysub::make_primitive(retypd::getNameForInt("uint", Op->getType()));
+        binarysub::make_primitive("uint", cg.getSize(Op));
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {

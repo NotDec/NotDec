@@ -38,7 +38,7 @@ public:
   TypeBuilder(TypeBuilderContext &Parent);
 
   // Main conversion entry point
-  HType *convert(binarysub::UTypePtr Ty, unsigned ObjSize);
+  HType *convert(binarysub::UTypePtr Ty);
 
 protected:
   // 转换所有的Pointer类型
@@ -66,7 +66,7 @@ protected:
   HType *getVoidPtr();
   HType *getIntPtr();
   // Helper to parse primitive type name
-  HType *parsePrimitiveName(const std::string &name);
+  HType *parsePrimitiveName(const std::string &Name, std::uint32_t BitSize);
 
   HType *getPtrTy(HType *Pointee) {
     return Ctx.getPointerType(false, Parent.PointerSize, Pointee);

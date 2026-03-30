@@ -104,5 +104,6 @@
       "foldStartRegex": "//[\\s]*[#]?region[\\s]*(.*)",
       "disableFolding": false
     }
-  }
+  },
+  "debugmcp.serverPort": 3002
 }

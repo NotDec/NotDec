@@ -312,7 +312,7 @@ class MLsubRecovery {
   std::unique_ptr<llvm::CallGraph> CallG;
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
-  SimpleType MemoryType = binarysub::make_variable(0);
+  SimpleType MemoryType = binarysub::make_variable(0, PointerSize);
 
   // HTypeContext for type building
   std::shared_ptr<ast::HTypeContext> HCtx;

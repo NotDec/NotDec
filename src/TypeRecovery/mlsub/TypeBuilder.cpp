@@ -1,4 +1,5 @@
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
+#include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub.h"
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
@@ -50,48 +51,32 @@ HType *TypeBuilder::getIntPtr() {
   return Ctx.getIntegerType(false, Parent.PointerSize, false);
 }
 
-HType *TypeBuilder::parsePrimitiveName(const std::string &name) {
+HType *TypeBuilder::parsePrimitiveName(const std::string &Name,
+                                       std::uint32_t BitSize) {
   // Integer types: "i8", "i16", "i32", "i64"
-  if (name == "i8" || name == "sint8") {
-    return Ctx.getIntegerType(false, 8, false);
-  }
-  if (name == "i16" || name == "sint16") {
-    return Ctx.getIntegerType(false, 16, false);
-  }
-  if (name == "i32" || name == "sint32" || name == "sint" || name == "int") {
-    return Ctx.getIntegerType(false, 32, false);
-  }
-  if (name == "i64" || name == "sint64") {
-    return Ctx.getIntegerType(false, 64, false);
+  if (Name == "sint") {
+    return Ctx.getIntegerType(false, BitSize, false);
   }
 
   // Unsigned integer types: "u8", "u16", "u32", "u64"
-  if (name == "u8" || name == "uint8") {
-    return Ctx.getIntegerType(false, 8, true);
-  }
-  if (name == "u16" || name == "uint16") {
-    return Ctx.getIntegerType(false, 16, true);
-  }
-  if (name == "u32" || name == "uint32" || name == "uint") {
-    return Ctx.getIntegerType(false, 32, true);
-  }
-  if (name == "u64" || name == "uint64") {
-    return Ctx.getIntegerType(false, 64, true);
+  if (Name == "uint") {
+    return Ctx.getIntegerType(false, BitSize, true);
   }
 
   // Floating point types
-  if (name == "f32" || name == "float") {
-    return Ctx.getFloatType(false, 32);
+  if (Name == "float") {
+    return Ctx.getFloatType(false, BitSize);
   }
-  if (name == "f64" || name == "double") {
-    return Ctx.getFloatType(false, 64);
+  if (Name == "double") {
+    assert(BitSize == 64);
+    return Ctx.getFloatType(false, BitSize);
   }
 
   // Char and bool
-  if (name == "char") {
+  if (Name == "char") {
     return Ctx.getChar();
   }
-  if (name == "bool") {
+  if (Name == "bool") {
     return Ctx.getBool();
   }
 
@@ -114,10 +99,7 @@ TypeBuilder::getStructOrNull(binarysub::UTypePtr Ty) {
   return std::nullopt;
 }
 
-HType *TypeBuilder::convert(UTypePtr Ty, unsigned ObjSize) {
-  if (!Ty) {
-    Ty = binarysub::make_utop();
-  }
+HType *TypeBuilder::convert(UTypePtr Ty) {
 
   // Check cache first
   auto CacheIt = TypeCache.find(Ty);
@@ -147,32 +129,35 @@ HType *TypeBuilder::convert(UTypePtr Ty, unsigned ObjSize) {
     Result = getIntPtr();
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
     // TODO 这里是不是应该用到ObjSize大小。而不是名字里面带大小。
-    Result = parsePrimitiveName(V->name);
+    Result = parsePrimitiveName(V->name, binarysub::get_size(Ty));
   } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
-    assert(false && "TODO support function type");
     // 最后返回函数指针类型
-    // Result = getPtrTy(FPtr);
+    std::vector<HType *> Params;
+    for (auto &P : V->args) {
+      Params.push_back(convert(P));
+    }
+    HType *RetTy = convert(V->result);
+    auto FTy = Ctx.getFunctionType(false, {RetTy}, Params);
+    Result = getPtrTy(FTy);
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
     // TODO
     // 也搞个recursive类型？比如有一个函数，返回函数指针类型，函数的类型也是自己。
-    Result = convert(V->body, ObjSize);
+    Result = convert(V->body);
     NameHint = V->name;
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
     Result = convertVariable(*V);
     NameHint = V->name;
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs, ObjSize);
-    HType *RhsTy = convert(V->rhs, ObjSize);
+    HType *LhsTy = convert(V->lhs);
+    HType *RhsTy = convert(V->rhs);
     Result = doUnion(LhsTy, RhsTy);
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs, ObjSize);
-    HType *RhsTy = convert(V->rhs, ObjSize);
+    HType *LhsTy = convert(V->lhs);
+    HType *RhsTy = convert(V->rhs);
     Result = doInter(LhsTy, RhsTy);
   } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
-    assert(ObjSize == Parent.PointerSize);
     Result = convertPointer(Ty);
   } else if (auto *V = std::get_if<URecordType>(&Ty->v)) {
-    assert(ObjSize == Parent.PointerSize);
     Result = convertPointer(Ty);
   } else {
     assert(false && "Unhandled UType variant");
@@ -187,12 +172,13 @@ int64_t TypeBuilder::accessedPointeeSize(const binarysub::UTypePtr &Ty) {
   if (auto *V = std::get_if<UTop>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<UBot>(&Ty->v)) {
-    assert(false && "Impossible UType variant");
+    // assert(false && "Impossible UType variant");
+    return 0;
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
     // Stop recursive at the pointer type.
-    return V->size;
+    return V->psize;
   } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
@@ -236,10 +222,10 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
   // 保证结构体的范围是从0到PointeeSize
   std::optional<SimpleRange> ValidRange;
   if (PointeeSize) {
-    if (*PointeeSize > 0) {
+    if (*PointeeSize >= 0) {
+      // assert(*PointeeSize != 0);
       ValidRange = {0, *PointeeSize};
     } else {
-      assert(*PointeeSize != 0);
       ValidRange = {*PointeeSize, -*PointeeSize};
     }
   }
@@ -267,9 +253,14 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
 
   for (size_t i = 0; i < Fields.size(); i++) {
     auto &Ent = Fields[i];
+    if (Ent.first.Size == 0) {
+      llvm::errs() << "Warning: Skip zero sized field at offset: "
+                   << Ent.first.Start << "\n";
+      continue;
+    }
     if (ValidRange) {
       auto IR = Ent.first.intersect(*ValidRange);
-      if (IR.Size == 0) {
+      if (IR != Ent.first && IR.Size == 0) {
         assert(false);
         // fully out of the range.
         llvm::errs() << "Warning: Skip field because of size or range";
@@ -285,6 +276,9 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
     // the node is a field pointer type. get the field type.
     Ty = Ty->getPointeeType();
+    if (Ty == nullptr) {
+      Ty = Ctx.getIntegerType(false, Ent.first.Size, true);
+    }
 
     auto FieldName = ValueNamer::getName("field_");
     auto CurrentDecl =
@@ -741,14 +735,17 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
                                    std::optional<int64_t> PointeeSize) {
 
   HType *Ret = nullptr;
-  if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
+  if (std::holds_alternative<UBot>(Ty->v) ||
+      std::holds_alternative<UTop>(Ty->v)) {
+    return getVoidPtr();
+  } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
     HType *PteTy = getVoidPtr();
     // TODO HType里也同时展示load类型和store类型
     if (V->store) {
-      PteTy = convert(V->store, V->size);
+      PteTy = convert(V->store);
     }
     if ((PteTy == nullptr || PteTy->isVoidPtrType()) && V->load) {
-      PteTy = convert(V->load, V->size);
+      PteTy = convert(V->load);
     }
     Ret = Ctx.getPointerType(false, Parent.PointerSize, PteTy);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
@@ -764,12 +761,12 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     }
     Ret = convertStruct(Ty, RawFields, PointeeSize);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs, Parent.PointerSize);
-    HType *RhsTy = convert(V->rhs, Parent.PointerSize);
+    HType *LhsTy = convert(V->lhs);
+    HType *RhsTy = convert(V->rhs);
     Ret = doUnion(LhsTy, RhsTy);
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs, Parent.PointerSize);
-    HType *RhsTy = convert(V->rhs, Parent.PointerSize);
+    HType *LhsTy = convert(V->lhs);
+    HType *RhsTy = convert(V->rhs);
     Ret = doInter(LhsTy, RhsTy);
   } else {
     assert(false && "Unhandled Pointer UType variant");
