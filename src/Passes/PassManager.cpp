@@ -267,7 +267,7 @@ struct FuncSigModify : PassInfoMixin<FuncSigModify> {
     builder.SetInsertPoint(call);
     Function *called = call->getCalledFunction();
     // 为参数创建bitcast
-    for (int i = 0; i < called->arg_size(); i++) {
+    for (unsigned i = 0; i < called->arg_size(); ++i) {
       const Argument *current = called->getArg(i);
       const Argument *target = to->getArg(i);
       if (current->getType() != target->getType()) {
@@ -406,10 +406,9 @@ void PassEnv::build_passes(int level) {
         MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
         MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
 
-        bool RunDeadAllocaRec = false;
         if (const char *val = std::getenv("NOTDEC_KEEP_DEAD_STACK")) {
           if ((std::strcmp(val, "1") == 0)) {
-            RunDeadAllocaRec = true;
+            // TODO MLSUB: support dead stack recovery in the new pipeline.
           }
         }
         // TODO MLSUB: Fix

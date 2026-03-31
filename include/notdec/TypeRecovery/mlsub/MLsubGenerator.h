@@ -77,7 +77,7 @@ struct ConstraintsGenerator {
       // create function nodes
       auto F = createNode(Func, nullptr, -1);
       std::vector<SimpleType> Args;
-      for (int i = 0; i < Func->arg_size(); i++) {
+      for (unsigned i = 0; i < Func->arg_size(); ++i) {
         auto Arg = createNode(Func->getArg(i), nullptr, i);
         // Contra-variant.
         Args.push_back(Arg);
@@ -122,7 +122,7 @@ public:
     // Create PNI
     PG.getOrInsertPNINode(Val, User, OpInd);
     // if the value is constant addr, we set ptr and link to memory
-    if (auto CA = std::get_if<ConstantAddr>(&Val)) {
+    if (std::get_if<ConstantAddr>(&Val)) {
       setPointer(Val, User, OpInd);
     }
     return N;

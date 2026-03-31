@@ -1055,7 +1055,7 @@ mergeOffsetLabels(const std::vector<std::pair<bool, OffsetRange>> &V) {
 
 // convert a rexp of offset range to a final offset range
 std::set<OffsetRange> calcOffset(rexp::PRExp E) {
-  if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
+  if (std::get_if<rexp::Empty>(&*E)) {
     return {OffsetRange()};
   }
   std::function<std::vector<std::vector<std::pair<bool, OffsetRange>>>(
@@ -1063,9 +1063,9 @@ std::set<OffsetRange> calcOffset(rexp::PRExp E) {
       FlattenRec = [&](rexp::PRExp E)
       -> std::vector<std::vector<std::pair<bool, OffsetRange>>> {
     std::vector<std::vector<std::pair<bool, OffsetRange>>> Ret;
-    if (auto *Null = std::get_if<rexp::Null>(&*E)) {
+    if (std::get_if<rexp::Null>(&*E)) {
       assert(false);
-    } else if (auto *Empty = std::get_if<rexp::Empty>(&*E)) {
+    } else if (std::get_if<rexp::Empty>(&*E)) {
       return {{{false, OffsetRange()}}};
     } else if (auto *Or = std::get_if<rexp::Or>(&*E)) {
       for (auto &Inner : Or->E) {
@@ -1945,14 +1945,14 @@ const CGEdge *ConstraintGraph::addEdge(CGNode &From, CGNode &To,
   // do not maintain PNI during layer split.
   if (PG && !isNotSymmetry) {
     if (auto F = Label.getAs<ForgetLabel>()) {
-      if (auto O = F->label.getAs<OffsetLabel>()) {
+      if (F->label.getAs<OffsetLabel>()) {
         // unify PN
         From.getPNIVar()->unify(*To.getPNIVar());
         // also should be pointer, TODO: set or assert?
         assert(From.getPNIVar()->isPointer());
       }
     } else if (auto R = Label.getAs<RecallLabel>()) {
-      if (auto O = R->label.getAs<OffsetLabel>()) {
+      if (R->label.getAs<OffsetLabel>()) {
         // unify PN
         From.getPNIVar()->unify(*To.getPNIVar());
         // also should be pointer, TODO: set or assert?
@@ -2703,11 +2703,11 @@ CGNode::CGNode(ConstraintGraph &Parent, NodeKey key, PNINode *N)
 }
 
 bool isPointerRelated(const FieldLabel &FL) {
-  if (auto *OL = FL.getAs<OffsetLabel>()) {
+  if (FL.getAs<OffsetLabel>()) {
     return true;
-  } else if (auto *LL = FL.getAs<LoadLabel>()) {
+  } else if (FL.getAs<LoadLabel>()) {
     return true;
-  } else if (auto *SL = FL.getAs<StoreLabel>()) {
+  } else if (FL.getAs<StoreLabel>()) {
     return true;
   }
   return false;

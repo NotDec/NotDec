@@ -196,20 +196,20 @@ std::string toString(const Constraint &c) {
 bool getPreferredVariance(ExtValuePtr &Val) {
   using namespace llvm;
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    if (auto Arg = dyn_cast<Argument>(*V)) {
+    if (dyn_cast<Argument>(*V)) {
       return Contravariant;
     } else {
       return Covariant;
     }
-  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+  } else if (std::get_if<ReturnValue>(&Val)) {
     return Covariant;
-  } else if (auto IC = std::get_if<UConstant>(&Val)) {
+  } else if (std::get_if<UConstant>(&Val)) {
     return Covariant;
-  } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
+  } else if (std::get_if<ConstantAddr>(&Val)) {
     return Covariant;
-  } else if (auto SO = std::get_if<StackObject>(&Val)) {
+  } else if (std::get_if<StackObject>(&Val)) {
     return Covariant;
-  } else if (auto HO = std::get_if<HeapObject>(&Val)) {
+  } else if (std::get_if<HeapObject>(&Val)) {
     return Covariant;
   } else {
     assert(false && "unhandled ExtValuePtr Kind");

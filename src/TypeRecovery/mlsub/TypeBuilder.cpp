@@ -136,9 +136,9 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
 
   HType *Result = nullptr;
   // 先处理非指针类型
-  if (auto *V = std::get_if<UTop>(&Ty->v)) {
+  if (std::get_if<UTop>(&Ty->v)) {
     Result = getIntPtr();
-  } else if (auto *V = std::get_if<UBot>(&Ty->v)) {
+  } else if (std::get_if<UBot>(&Ty->v)) {
     Result = getIntPtr();
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
     // TODO 这里是不是应该用到ObjSize大小。而不是名字里面带大小。
@@ -168,9 +168,9 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
     HType *LhsTy = convert(V->lhs);
     HType *RhsTy = convert(V->rhs);
     Result = doInter(LhsTy, RhsTy);
-  } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
+  } else if (std::get_if<UPointerType>(&Ty->v)) {
     Result = convertPointer(Ty);
-  } else if (auto *V = std::get_if<URecordType>(&Ty->v)) {
+  } else if (std::get_if<URecordType>(&Ty->v)) {
     Result = convertPointer(Ty);
   } else {
     assert(false && "Unhandled UType variant");
@@ -182,16 +182,16 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
 }
 
 int64_t TypeBuilder::accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty) {
-  if (auto *V = std::get_if<UTop>(&Ty->v)) {
+  if (std::get_if<UTop>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<UBot>(&Ty->v)) {
     return V->size;
-  } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
+  } else if (std::get_if<UPrimitiveType>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
     // Stop recursive at the pointer type.
     return V->psize;
-  } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
+  } else if (std::get_if<UFunctionType>(&Ty->v)) {
     assert(false && "Impossible UType variant");
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
     return accessedPointeeSizeInBits(V->body);
@@ -603,7 +603,7 @@ HType *TypeBuilder::convertStruct(
       NoUpdate = false;
 
       // create a union here.
-      auto OldSize = 1;
+      decltype(InRangeFieldIndex.size()) OldSize = 1;
       auto NewSize = InRangeFieldIndex.size();
       while (
           NewSize >

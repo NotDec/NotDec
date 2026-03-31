@@ -95,7 +95,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
     std::set<const CGEdge *> SelfEdges;
     for (auto &E : N.outEdges) {
       if (&E.getTargetNode() == &N) {
-        if (auto *OL = retypd::getOffsetLabel(E.Label)) {
+        if (retypd::getOffsetLabel(E.Label)) {
           SelfEdges.insert(&E);
         }
       }
@@ -390,7 +390,7 @@ std::map<CGNode *, TypeInfo> ConstraintsGenerator::organizeTypes() {
         NoUpdate = false;
 
         // create a union here.
-        auto OldSize = 1;
+        decltype(InRangeFieldIndex.size()) OldSize = 1;
         auto NewSize = InRangeFieldIndex.size();
         while (
             NewSize >

@@ -1277,7 +1277,7 @@ void TypeRecovery::genASTTypes(Module &M) {
   using notdec::ast::HTypeContext;
 
   auto &AllSCCs = AG.AllSCCs;
-  for (int i = 0; i < AllSCCs.size(); i++) {
+  for (std::size_t i = 0; i < AllSCCs.size(); ++i) {
     auto &Data = AllSCCs[i];
 
     auto Dir = getSCCDebugDir(i);
@@ -2698,13 +2698,13 @@ void ConstraintsGenerator::recoverNodes(ConstraintsGenerator &From) {
       for (auto N : Ent.second) {
         N->getPNIVar()->merge(NewPN);
       }
-    } else if (auto FB = Ent.first.getAs<retypd::ForgetBase>()) {
+    } else if (Ent.first.getAs<retypd::ForgetBase>()) {
       // assert(Ent.second.size() == 1);
       // auto NewN = *Ent.second.begin();
       // auto NewKey = NodeKey{FB->Base, FB->V};
       // auto isUpdated = UpdateKey(NewKey, *NewN);
       // assert(isUpdated);
-    } else if (auto FS = Ent.first.getAs<retypd::ForgetSize>()) {
+    } else if (Ent.first.getAs<retypd::ForgetSize>()) {
       // skip
     } else {
       assert(false);
@@ -3139,7 +3139,7 @@ void ConstraintsGenerator::run() {
   for (llvm::Function *Func : SCCs) {
     // create function nodes
     auto &F = getOrInsertNode(Func, nullptr, -1, retypd::Covariant);
-    for (int i = 0; i < Func->arg_size(); i++) {
+    for (unsigned i = 0; i < Func->arg_size(); ++i) {
       auto &Arg =
           getOrInsertNode(Func->getArg(i), nullptr, i, retypd::Contravariant);
       addConstraint(F, Arg, {retypd::InLabel{.name = std::to_string(i)}});
@@ -3248,7 +3248,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
         }
       }
       // Fix argument mapping
-      for (int i = 0; i < F->arg_size(); i++) {
+      for (unsigned i = 0; i < F->arg_size(); ++i) {
         auto Arg = F->getArg(i);
         retypd::EdgeLabel ArgLabel = {retypd::RecallLabel{
             retypd::InLabel{std::to_string(Arg->getArgNo())}}};
@@ -3270,7 +3270,7 @@ void ConstraintsGenerator::fixSCCFuncMappings() {
         }
       }
       // Fix argument mapping
-      for (int i = 0; i < F->arg_size(); i++) {
+      for (unsigned i = 0; i < F->arg_size(); ++i) {
         auto Arg = F->getArg(i);
         retypd::EdgeLabel ArgLabel = {retypd::RecallLabel{
             retypd::InLabel{std::to_string(Arg->getArgNo())}}};
@@ -3453,7 +3453,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
       if (CE->getOpcode() == Instruction::BitCast) {
         return getTypeVar(CE->getOperand(0), CE, 0);
       } else if (CE->getOpcode() == Instruction::IntToPtr) {
-        if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
+        if (isa<ConstantInt>(CE->getOperand(0))) {
           assert(false && "Should be converted earlier");
         }
       } else if (CE->getOpcode() == Instruction::GetElementPtr) {
@@ -3504,7 +3504,7 @@ TypeVariable ConstraintsGenerator::convertTypeVarVal(Value *Val, User *User,
       }
       return makeTv(Ctx.TRCtx, gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
-      if (auto CI = dyn_cast<ConstantInt>(C)) {
+      if (isa<ConstantInt>(C)) {
         assert(false && "Should be converted earlier");
       }
       return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));
@@ -3681,7 +3681,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
     return;
   } else if (cg.SCCs.count(Target)) { // Call within the SCC:
     // directly link to the function tv.
-    for (int i = 0; i < I.arg_size(); i++) {
+    for (unsigned i = 0; i < I.arg_size(); ++i) {
       auto &ArgVar = cg.getNode(Target->getArg(i), &I, i, retypd::Covariant);
       auto &ValVar =
           cg.getOrInsertNode(I.getArgOperand(i), &I, i, retypd::Covariant);
@@ -3707,7 +3707,7 @@ void ConstraintsGenerator::RetypdGeneratorVisitor::visitCallBase(CallBase &I) {
         cg.CG.createNodePair(FuncVar, Target->getFunctionType());
     cg.CallToInstance.emplace(&I, std::make_pair(&FuncNode, &FNC));
 
-    for (int i = 0; i < I.arg_size(); i++) {
+    for (unsigned i = 0; i < I.arg_size(); ++i) {
       auto ArgVar = getCallArgTV(FuncVar, i);
       auto [ArgNode, ANC] =
           cg.CG.createNodePair(ArgVar, I.getArgOperand(i)->getType());
@@ -4174,7 +4174,8 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
 
 bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     unsigned Index, Instruction *I, ConstraintsGenerator &cg) const {
-  assert(size == I->getNumOperands() && "input size not match");
+  assert(size >= 0 && static_cast<unsigned>(size) == I->getNumOperands() &&
+         "input size not match");
   auto Op = I->getOperand(Index);
   if (Op->getType()->isVoidTy()) {
     return false;

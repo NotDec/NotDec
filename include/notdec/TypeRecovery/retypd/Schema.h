@@ -720,7 +720,7 @@ inline EdgeLabel toLoad(const EdgeLabel &label) {
       return {RecallLabel{LoadLabel{.Size=S->Size}}};
     }
   } else if (auto *FL = label.getAs<ForgetLabel>()) {
-    if (auto S = RL->label.getAs<StoreLabel>()) {
+    if (auto S = FL->label.getAs<StoreLabel>()) {
       return {ForgetLabel{LoadLabel{.Size=S->Size}}};
     }
   }

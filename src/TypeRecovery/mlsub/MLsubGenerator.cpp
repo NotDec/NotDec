@@ -96,7 +96,7 @@ void MLsubRecovery::run() {
 
 void MLsubRecovery::bottomUpPhase() {
   // Iterate bottom up.
-  for (long Ind = AG.AllSCCs.size() - 1; Ind >= 0; --Ind) {
+  for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
     auto &Data = AG.AllSCCs.at(Ind);
     Data.Generator = std::make_shared<ConstraintsGenerator>(
         Data.SCCName, PointerSize, Data.SCCSet, MemoryType, Data.level);
@@ -116,7 +116,6 @@ void MLsubRecovery::bottomUpPhase() {
         if (AG.Callee2Callers.count(N) == 0) {
           continue;
         }
-        bool isInterface = false;
         for (auto Caller : AG.Callee2Callers[N]) {
           if (auto F = Caller->getFunction()) {
             for (auto &Arg : F->args()) {
@@ -139,7 +138,9 @@ void MLsubRecovery::bottomUpPhase() {
       auto TargetFTy = TargetG->getNodeOrNull(F, nullptr, -1);
       auto PolyScheme = binarysub::TypeScheme(
           binarysub::PolymorphicType(TData.level, TargetFTy));
-      assert(TData.level == binarysub::level_of(TargetFTy));
+      auto TargetLevel = binarysub::level_of(TargetFTy);
+      assert(TargetLevel >= 0);
+      assert(TData.level == static_cast<unsigned int>(TargetLevel));
       assert(TData.level >= Data.level);
       auto InsFunc = PolyScheme.instantiate(Data.level);
       Data.Generator->addSubtype(InsFunc, Ent.second);
@@ -185,7 +186,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
 void MLsubRecovery::genASTTypes(llvm::Module &M) {
   ResultVal = std::make_unique<TypeRecovery::Result>();
   // 合并所有类型到一个大的ValueTypes里面。
-  for (long Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
+  for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
     for (auto &Ent : Data.Generator->ValueTypes) {
       auto It = ResultVal->ValueTypes.insert(Ent);
@@ -214,7 +215,7 @@ void MLsubRecovery::topDownPhase() {
   if (!HCtx) {
     HCtx = std::make_shared<ast::HTypeContext>();
   }
-  for (long Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
+  for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
     // 尝试运行简化算法，保存到ValueTypes里面。
     // solve memory if ind == 0
@@ -407,7 +408,7 @@ SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
   llvmValue2ExtVal(Val, User, OpInd);
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
     return convertSimpleTypeVal(*V, User, OpInd);
-  } else if (auto F = std::get_if<ReturnValue>(&Val)) {
+  } else if (std::get_if<ReturnValue>(&Val)) {
     return binarysub::make_variable(lvl, getSize(Val));
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
     assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
@@ -443,7 +444,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       if (CE->getOpcode() == Instruction::BitCast) {
         return convertSimpleType(CE->getOperand(0), CE, 0);
       } else if (CE->getOpcode() == Instruction::IntToPtr) {
-        if (auto Addr = dyn_cast<ConstantInt>(CE->getOperand(0))) {
+        if (isa<ConstantInt>(CE->getOperand(0))) {
           assert(false && "Should be converted earlier");
         }
       } else if (CE->getOpcode() == Instruction::GetElementPtr) {
@@ -465,7 +466,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
             // if constant offset
             if (auto CI1 = dyn_cast<ConstantInt>(CE->getOperand(1))) {
               if (CI1->isZero()) {
-                if (auto CI = dyn_cast<ConstantInt>(CE->getOperand(2))) {
+                if (isa<ConstantInt>(CE->getOperand(2))) {
                   assert(false && "TODO");
                 }
               }
@@ -677,7 +678,7 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     // Call within the SCC:
     auto Func = Target;
     std::vector<SimpleType> Args;
-    for (int i = 0; i < I.arg_size(); i++) {
+    for (unsigned i = 0; i < I.arg_size(); ++i) {
       auto ValVar = cg.getOrInsertNode(I.getArgOperand(i), &I, i);
       Args.push_back(ValVar);
     }
@@ -985,7 +986,8 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
 
 bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     unsigned Index, Instruction *I, ConstraintsGenerator &cg) const {
-  assert(size == I->getNumOperands() && "input size not match");
+  assert(size >= 0 && static_cast<unsigned>(size) == I->getNumOperands() &&
+         "input size not match");
   auto Op = I->getOperand(Index);
   if (Op->getType()->isVoidTy()) {
     return false;
