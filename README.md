@@ -33,9 +33,9 @@ Based on Ubuntu 22.04
 1. clone this repo
 1. Install LLVM 14
    - Execute `scripts/build-debug-llvm.sh` to download and build LLVM. You may encounter errors about no memory during linking, just decrease the parallel number to 1.
-1. cmake build, but use clang as the compiler.
+1. cmake build.
     ```
-    cmake -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/clang-14 -DCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++-14 -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld --no-warn-unused-cli -S . -B ./build -G Ninja
+    cmake -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE --no-warn-unused-cli -S . -B ./build -G Ninja
     cmake --build ./build --target all --
     ```
 
@@ -72,9 +72,9 @@ Based on Ubuntu 22.04
 2. 克隆此代码仓库
 3. 安装 LLVM 14
    - 执行 `scripts/build-debug-llvm.sh` 以下载并构建 LLVM。链接过程中可能出现内存不足的错误，只需将并行编译数降至 1 即可。
-4. 使用 CMake 进行构建（需指定 clang 作为编译器）
+4. 使用 CMake 进行构建
     ```
-    cmake -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/clang-14 -DCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++-14 -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld --no-warn-unused-cli -S . -B ./build -G Ninja
+    cmake -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE --no-warn-unused-cli -S . -B ./build -G Ninja
     ```
 
 ### Notice

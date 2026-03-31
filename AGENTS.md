@@ -2,6 +2,10 @@
 
 本文件面向在 `NotDec` 仓库内工作的自动化 agent / 开发者，目标是帮助快速定位入口、理解主流程，并在不破坏现有实验环境的前提下进行修改。
 
+## 0. Git 与 external/ 子模块
+
+仓库的 `external/NotDec-wasm2llvm`、`external/NotDec-llvm2c`、`external/binarysub` 是 git submodule。检查工作树时需要注意：如果要看子模块内部的真实状态，使用`git -C external/binarysub status --short`
+
 ## 1. 项目概览
 
 `NotDec` 是一个以 LLVM IR 为中间表示的 WebAssembly 反编译与静态分析框架。当前仓库的主链路可以概括为：
@@ -133,9 +137,6 @@ pass 管线的核心实现位于：
 
 ```bash
 cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE \
-  -DCMAKE_C_COMPILER=/usr/bin/clang-14 \
-  -DCMAKE_CXX_COMPILER=/usr/bin/clang++-14 \
-  -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld \
   -S . -B ./build -G Ninja
 
 cmake --build ./build --target all
