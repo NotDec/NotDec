@@ -16,6 +16,7 @@ using notdec::ast::HTypeContext;
 struct TypeBuilderContext {
   HTypeContext &Ctx;
   const llvm::DataLayout &DL;
+  // Stored in bytes to match DataLayout and memory ranges.
   const unsigned PointerSize;
 
   TypeBuilderContext(HTypeContext &Ctx, const llvm::DataLayout &DL)
@@ -70,7 +71,7 @@ protected:
   HType *parsePrimitiveName(const std::string &Name, std::uint32_t BitSize);
 
   HType *getPtrTy(HType *Pointee) {
-    return Ctx.getPointerType(false, Parent.PointerSize, Pointee);
+    return Ctx.getPointerType(false, Parent.PointerSize * 8, Pointee);
   }
 };
 

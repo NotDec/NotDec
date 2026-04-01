@@ -28,6 +28,12 @@
       "args": ["-rf", "${workspaceFolder}/debug_dir2"]
     },
     {
+      "label": "build binarysub",
+      "type": "shell",
+      "command": "/usr/bin/bash",
+      "args": ["-c", "cd ${workspaceFolder}/external/binarysub/; cmake --build build"]
+    },
+    {
         "label": "Clean and Build",
         "dependsOn": [
             "CMake: build",

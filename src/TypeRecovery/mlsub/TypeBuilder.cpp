@@ -44,11 +44,11 @@ TypeBuilder::TypeBuilder(TypeBuilderContext &Parent)
     : Parent(Parent), Ctx(Parent.Ctx) {}
 
 HType *TypeBuilder::getVoidPtr() {
-  return Ctx.getPointerType(false, Parent.PointerSize, nullptr);
+  return Ctx.getPointerType(false, Parent.PointerSize * 8, nullptr);
 }
 
 HType *TypeBuilder::getIntPtr() {
-  return Ctx.getIntegerType(false, Parent.PointerSize, false);
+  return Ctx.getIntegerType(false, Parent.PointerSize * 8, false);
 }
 
 HType *TypeBuilder::parsePrimitiveName(const std::string &Name,
@@ -104,7 +104,7 @@ ast::RecordDecl *TypeBuilder::getOrCreateStruct(binarysub::UTypePtr Ty) {
   // create as struct ptr, if not in type cache
   if (!It.has_value()) {
     RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("struct_"));
-    HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
+    HType *Ret = Ctx.getPointerType(false, Parent.PointerSize * 8,
                                     Ctx.getRecordType(false, Decl));
     TypeCache[Ty] = Ret;
     It = Decl;
@@ -124,7 +124,7 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   if (InProgress.count(Ty)) {
     // TODO 单独搞一个recursive类型怎么样？
     RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("struct_"));
-    HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
+    HType *Ret = Ctx.getPointerType(false, Parent.PointerSize * 8,
                                     Ctx.getRecordType(false, Decl));
     TypeCache[Ty] = Ret;
     // Return a type variable for cyclic types
@@ -291,7 +291,8 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     // the node is a field pointer type. get the field type.
     Ty = Ty->getPointeeType();
     if (Ty == nullptr) {
-      Ty = Ctx.getIntegerType(false, Ent.first.Size, true);
+      // Ent.first.Size is tracked in bytes, while HType integer widths are bits.
+      Ty = Ctx.getIntegerType(false, Ent.first.Size * 8, true);
     }
 
     auto FieldName = ValueNamer::getName("field_");
@@ -766,7 +767,7 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     if ((PteTy == nullptr || PteTy->isVoidPtrType()) && V->load) {
       PteTy = convert(V->load);
     }
-    Ret = Ctx.getPointerType(false, Parent.PointerSize, PteTy);
+    Ret = Ctx.getPointerType(false, Parent.PointerSize * 8, PteTy);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
     auto &T = *PT;
     if (T.fields.empty()) {

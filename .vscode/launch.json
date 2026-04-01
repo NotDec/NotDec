@@ -5,6 +5,16 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "binarysub",
+      "type": "cppdbg",
+      "MIMode": "gdb",
+      "request": "launch",
+      "preLaunchTask": "build binarysub",
+      "program": "${workspaceFolder}/external/binarysub/build/binarysub",
+      "args": [],
+      "cwd": "${workspaceFolder}/external/binarysub"
+    },
+    {
       "name": "dec",
       "type": "cppdbg",
       "MIMode": "gdb",
@@ -45,7 +55,7 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "dec",
+      "name": "dec lldb",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
         "${file}",
