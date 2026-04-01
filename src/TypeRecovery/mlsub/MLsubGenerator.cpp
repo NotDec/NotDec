@@ -420,6 +420,7 @@ SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
     fields.push_back(
         {OffsetRange{.offset = CA->Val->getSExtValue()}.str(), res});
     addSubtype(MemoryType, binarysub::make_record(std::move(fields)));
+    addSubtype(res, binarysub::make_record({}));
     return res;
   }
   llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -748,9 +749,10 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   }
 
   auto PtrVal = cg.getOrInsertNode(I.getPointerOperand(), &I, 0);
+  auto RetVal = cg.getOrInsertNode(&I, nullptr, -1);
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
 
-  cg.addRemapType(&I, nullptr, -1, binarysub::make_ptr_load(PtrVal, BitSize));
+  cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
@@ -773,7 +775,7 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
   auto StoreVal = cg.getOrInsertNode(I.getValueOperand(), &I, 0);
 
-  cg.addSubtype(StoreVal, binarysub::make_ptr_store(PtrVal, BitSize));
+  cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {

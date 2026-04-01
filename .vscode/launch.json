@@ -5,6 +5,44 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "dec",
+      "type": "cppdbg",
+      "MIMode": "gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "${workspaceFolder}/test/backend/02_ConstantAddr1.ll",
+        "-o",
+        "${workspaceFolder}/test/backend/02_ConstantAddr1.ll.c",
+        "--tr-level=2",
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Clean and Build",
+      "environment": [
+        {
+          "name": "NOTDEC_DEBUG_DIR",
+          "value": "debug_dir"
+        },
+        {
+          "name": "NOTDEC_TYPE_RECOVERY_DEBUG_DIR",
+          "value": "debug_dir"
+        },
+        {
+          "name": "NOTDEC_SUMMARY_OVERRIDE",
+          "value": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json"
+        },
+        {
+          "name": "NOTDEC_SIGNATURE_OVERRIDE",
+          "value": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json"
+        },
+        {
+          "name": "NOTDEC_POLY_FUNCS",
+          "value": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json"
+        }
+      ],
+      // "setupCommands": [{"text": "set auto-solib-add off"}]
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "dec",

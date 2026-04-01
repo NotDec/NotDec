@@ -12,6 +12,7 @@ CTestTestfile.cmake
 _deps
 
 build/
+build-gcc14/
 
 __pycache__/
 .cache/
@@ -22,6 +23,7 @@ llvmorg-*.zip
 llvm-source/
 llvm-build/
 *.obj/
+*.obj.old/
 
 notdec-facts/
 notdec-outs/

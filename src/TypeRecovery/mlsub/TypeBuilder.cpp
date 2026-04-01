@@ -207,7 +207,10 @@ int64_t TypeBuilder::accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty) {
     auto MaxElem = 0;
     for (const auto &field : V->fields) {
       auto OR = OffsetRange::fromStr(field.first);
-      auto Size = OR.maxAccess();
+      auto PointeeSizeInBits = accessedPointeeSizeInBits(field.second);
+      auto Size =
+          OR.access.empty() ? OR.offset * 8 + PointeeSizeInBits
+                            : OR.maxAccess() * 8;
       if (Size > MaxElem) {
         MaxElem = Size;
       }
@@ -822,7 +825,7 @@ HType *TypeBuilder::doUnion(HType *LhsTy, HType *RhsTy) {
 
   assert(false && "unimplemented union");
   // Otherwise, return void* as the common supertype
-  // return getVoidPtr();
+  return getVoidPtr();
 }
 
 HType *TypeBuilder::doInter(HType *LhsTy, HType *RhsTy) {

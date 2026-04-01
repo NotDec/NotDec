@@ -256,7 +256,3 @@ cmake --build ./build --target all
 - pass pipeline 分层发生变化
 - 构建依赖版本发生变化
 - 推荐运行方式或测试入口发生变化
-
-# Repository Notes
-
-- See [DEBUG.md](/sn640/NotDec/DEBUG.md) for repository-specific notes on using `debugmcp`, including breakpoint strategy and `evaluate_expression` usage with `expr` / `expr --`.
