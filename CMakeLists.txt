@@ -4,6 +4,8 @@ project(notdec
 	VERSION 0.0.1
 )
 
+include(CTest)
+
 # Enable assertions in RelWithDebInfo build
 string( REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
@@ -161,4 +163,8 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${CMAKE_BINARY_DIR})
 
 add_subdirectory(src)
-add_subdirectory(unittests)
+
+if (BUILD_TESTING)
+	add_subdirectory(unittests)
+	add_subdirectory(test)
+endif ()

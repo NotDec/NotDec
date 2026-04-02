@@ -107,11 +107,11 @@ pass 管线的核心实现位于：
 - `external/NotDec-llvm2c/`
   - C backend
 - `external/binarysub/`
-  - 外部类型/分析依赖
+  - 类型推理核心算法
 - `test/`
-  - wasm 样例、功能测试数据
+  - 集成测试、回归样例、功能测试数据
 - `unittests/`
-  - 当前已接入的 CMake 单测
+  - GoogleTest / CMake 单测
 - `docs/`
   - 文档站与设计说明
 - `scripts/`
@@ -178,16 +178,80 @@ cmake --build ./build --target all
 
 1. CMake 单测
    - `unittests/Retypd/GraphTest.cpp`
-2. shell 脚本
+2. CTest 集成测试
+   - `test/CMakeLists.txt`
+   - 当前已接入：
+     - `notdec.decompile.llvm_ir.tr_level_2`
+3. shell 脚本
    - `test.sh`
-3. 大量样例/实验脚本
+4. 大量样例/实验脚本
    - `test/`
    - `experiment/`
+
+### 当前推荐理解方式
+
+- `unittests/`
+  - 放 library / pass 级别的 GoogleTest
+- `test/`
+  - 放可由 `ctest` 驱动的集成测试和 golden regression
+
+这比旧的“样例堆放目录”更接近 LLVM 常见习惯：
+
+- `unittests/` 负责细粒度逻辑
+- `test/` 负责端到端行为、回归基线、已知失败跟踪
+
+### `test/decompile/llvm-ir/` 目录约定
+
+该目录用于基于 LLVM IR 输入的反编译回归测试。
+
+- `cases/`
+  - 输入样例（当前主要是 `.ll`，也可能保留相关 `.wat` 辅助输入）
+- `expected/tr-level-2/`
+  - `notdec --tr-level=2` 的 golden 输出
+- `legacy/`
+  - 历史实验产物、旧 backend 输出、迁移阶段参考文件
+  - 默认不作为当前权威 oracle
+
+当前 suite manifest 为：
+
+- `test/decompile/llvm-ir/tr-level-2.json`
+
+当前 suite runner 为：
+
+- `test/tools/run_decompile_suite.py`
+
+runner 支持的 case 状态：
+
+- `pass`
+  - 必须成功运行，并与 golden 输出一致
+- `xfail`
+  - 当前已知失败，先保留为回归跟踪点
+- `skip`
+  - 暂时登记但不执行
+
+### 运行方式
+
+推荐优先使用 CTest，而不是直接手工遍历样例目录。
+
+典型命令：
+
+```bash
+ctest --test-dir build -R notdec.decompile.llvm_ir.tr_level_2 --output-on-failure
+```
+
+当前 `tr-level=2` 的 LLVM IR 集成测试 runner 默认会设置：
+
+```bash
+ASAN_OPTIONS=detect_leaks=0
+```
+
+目的是先聚焦功能回归，避免 LeakSanitizer 把“已产出结果但存在泄漏”的 case 统一判成失败。
 
 注意：
 
 - `test.sh` 中存在 `--only-opt` 调用，但当前 `src/NotDec.cpp` 里没有对应命令行参数定义；修改测试或文档时不要假设这个选项仍然有效
 - 仓库中有大量实验数据和外部子模块，跑全量测试前先确认依赖和数据路径是否可用
+- `test/decompile/llvm-ir/legacy/` 下的文件主要用于迁移参考，不要默认把它们当成当前 golden
 
 ## 8. 修改代码时的建议
 
@@ -256,3 +320,4 @@ cmake --build ./build --target all
 - pass pipeline 分层发生变化
 - 构建依赖版本发生变化
 - 推荐运行方式或测试入口发生变化
+- `test/` 下 suite 的目录组织、manifest 约定、golden 策略发生变化

@@ -495,7 +495,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       // return makeTv(Ctx.TRCtx, gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
       if (auto CI = dyn_cast<ConstantInt>(C)) {
-        return binarysub::make_variable(lvl, getSize(CI));
+        return binarysub::make_variable(lvl, getSize(CI, User, OpInd));
       }
       assert(false && "TODO");
       // return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));

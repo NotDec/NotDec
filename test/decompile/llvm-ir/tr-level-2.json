@@ -1,0 +1,125 @@
+{
+  "suite": "notdec decompile llvm ir tr-level=2",
+  "default_args": [
+    "--tr-level=2"
+  ],
+  "env": {
+    "ASAN_OPTIONS": "detect_leaks=0"
+  },
+  "cases": [
+    {
+      "name": "01_Simple1",
+      "input": "cases/01_Simple1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "02_ConstantAddr1",
+      "input": "cases/02_ConstantAddr1.ll",
+      "expected": "expected/tr-level-2/02_ConstantAddr1.c",
+      "status": "pass"
+    },
+    {
+      "name": "03_LoadUpdateGood",
+      "input": "cases/03_LoadUpdateGood.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "04_LoadUpdate",
+      "input": "cases/04_LoadUpdate.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "05_MultiOffset",
+      "input": "cases/05_MultiOffset.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "06_SimpleRecursive2",
+      "input": "cases/06_SimpleRecursive2.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "07_PassStack1",
+      "input": "cases/07_PassStack1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "08_Memory1",
+      "input": "cases/08_Memory1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "09_OffsetLoop",
+      "input": "cases/09_OffsetLoop.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "10_BottomUp1",
+      "input": "cases/10_BottomUp1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "11_SimpleRecursive1",
+      "input": "cases/11_SimpleRecursive1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "12_Stack1",
+      "input": "cases/12_Stack1.ll",
+      "expected": "expected/tr-level-2/12_Stack1.c",
+      "status": "pass"
+    },
+    {
+      "name": "13_stack_variable_alloc",
+      "input": "cases/13_stack_variable_alloc.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "14_Equality1",
+      "input": "cases/14_Equality1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "15_signed1",
+      "input": "cases/15_signed1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "16_Poly1",
+      "input": "cases/16_Poly1.ll",
+      "status": "xfail",
+      "reason": "type recovery TODO assertion"
+    },
+    {
+      "name": "17_StackArray",
+      "input": "cases/17_StackArray.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "18_offset1",
+      "input": "cases/18_offset1.ll",
+      "status": "xfail",
+      "reason": "llvm2c constant-user assertion"
+    },
+    {
+      "name": "19_PtrPtr",
+      "input": "cases/19_PtrPtr.ll",
+      "status": "xfail",
+      "reason": "invalid LLVM IR currently parses as success without output"
+    }
+  ]
+}
