@@ -1,0 +1,135 @@
+# DEBUG.md
+
+本文档集中说明 `NotDec` 当前调试流程里与 `debug_dir/` 相关的环境变量和中间产物，方便在使用 `debugmcp`、`launch.json` 或手工命令行调试时快速定位问题。
+
+## 1. `debug_dir` 的基本用法
+
+仓库当前默认调试习惯是把中间产物统一落到一个目录，例如根目录下的 `debug_dir/`。
+
+常见做法：
+
+```bash
+export NOTDEC_DEBUG_DIR=debug_dir
+export NOTDEC_TYPE_RECOVERY_DEBUG_DIR=debug_dir
+```
+
+也可以分别设置成不同目录；但目前仓库内的 `run.sh` 和 `.vscode/launch.json` 里的常用配置都默认把它们指向同一个 `debug_dir/`，这样最方便对照各阶段输出。
+
+## 2. 两个核心环境变量
+
+### `NOTDEC_DEBUG_DIR`
+
+这是通用调试输出目录，主要覆盖：
+
+- 主 pass pipeline 初始 IR dump
+- `llvm2c` 后端在 demote SSA 前后的 IR dump
+
+如果只关心“反编译前后 LLVM IR 长什么样”，优先看这个目录对应的输出。
+
+### `NOTDEC_TYPE_RECOVERY_DEBUG_DIR`
+
+这是类型恢复与相关分析的调试输出目录，主要覆盖：
+
+- stack / memory recovery 前的 IR dump
+- 类型恢复阶段的优化后 IR
+- CallGraph 文本与 dot
+- SCC 划分信息
+- binarysub trace
+- 最终 `IR Value -> binarysub UType` 对照表
+
+如果问题表现为：
+
+- 类型恢复异常
+- 某个值被推成了奇怪的类型
+- binarysub 约束传播/简化结果不对
+
+那么优先看这个目录。
+
+## 3. `debug_dir/` 里常见文件及作用
+
+下面按当前仓库里实际会出现的文件说明。不是每次运行都会生成全部文件；是否出现取决于输入、`tr-level`、是否走到 `llvm2c`、以及具体 pass 是否执行到对应阶段。
+
+### `00-lifted.ll`
+
+- 来源：主 pass pipeline 早期 dump
+- 作用：看“输入被载入/提升后”的 LLVM IR 初始状态
+- 典型用途：确认前端读入 `.ll` / `.bc` / `.wasm` 后，IR 是否已经在最开始就有问题
+
+### `01-1-BeforeStackAlloca.ll`
+
+- 来源：`LinearAllocationRecovery`
+- 作用：看 stack alloca 恢复前的模块状态
+- 典型用途：排查 stack pointer 识别失败、栈增长方向判断异常、stack rewrite 前后差异
+
+### `01-Optimized.ll`
+
+- 来源：类型恢复入口处的优化后 dump
+- 作用：看 `mlsub` / 类型恢复真正吃到的 LLVM IR
+- 典型用途：判断问题是在更早的优化/恢复阶段就产生了，还是在类型恢复阶段才出现
+
+### `CallGraph.txt`
+
+- 来源：类型恢复阶段构造 CallGraph 后导出
+- 作用：文本形式查看调用图
+- 典型用途：排查函数是否被识别为直接调用、某条调用边是否存在、某个函数是否被纳入分析
+
+### `CallGraph.dot`
+
+- 来源：类型恢复阶段构造 CallGraph 后导出
+- 作用：Graphviz dot 格式的调用图
+- 典型用途：把调用关系可视化，快速看 SCC、递归、调用边结构
+
+### `SCCs.txt`
+
+- 来源：类型恢复阶段的 SCC 划分逻辑
+- 作用：记录类型恢复按什么 SCC 顺序/分组进行分析
+- 典型用途：排查多态函数复制、bottom-up / top-down 分析边界、某个函数为什么被分到当前 SCC
+
+### `ValueTypes.txt`
+
+- 来源：类型恢复阶段 `bulkSimplify` 结束后导出
+- 作用：记录最终的 `IR Value -> binarysub UType` 映射
+- 典型用途：直接看某个 LLVM Value 最后对应的 `UType` 是什么，适合调试“为什么这个值被推成这个类型”
+
+当前格式特点：
+
+- 以 `## SCC: ...` 分块，便于按 SCC 查看
+- `"[+]"` / `"[-]"` 表示当前条目在 binarysub 简化时采用的极性
+- `[memory] <memory> => ...` 表示 memory 总类型
+
+### `binarysub-trace.log`
+
+- 来源：`external/binarysub`
+- 作用：记录 binarysub 内部约束、extrude、simplify 等 trace
+- 典型用途：当 `ValueTypes.txt` 只能看到“结果不对”，但还不知道“约束传播过程中哪一步歪了”时，继续往这个文件追
+
+### `llvm2c-before-demotessa.ll`
+
+- 来源：`llvm2c` 后端
+- 作用：看 `llvm2c` 在 demote SSA 之前收到的模块
+- 典型用途：排查“类型恢复输出正常，但 C 后端行为异常”的问题
+
+### `llvm2c-after-demotessa.ll`
+
+- 来源：`llvm2c` 后端
+- 作用：看 `llvm2c` 执行 reg2mem / demote SSA 之后的模块
+- 典型用途：排查 phi、局部变量重建、SSA 降级后导致的结构恢复问题
+
+## 4. 推荐阅读顺序
+
+如果遇到反编译问题，通常可以按下面顺序看：
+
+1. `00-lifted.ll`
+   - 确认输入 IR 是否一开始就异常
+2. `01-1-BeforeStackAlloca.ll`
+   - 如果问题与栈/内存恢复相关，先看这里
+3. `01-Optimized.ll`
+   - 确认类型恢复实际输入
+4. `CallGraph.txt` / `SCCs.txt`
+   - 确认分析范围、递归分组、多态边界
+5. `ValueTypes.txt`
+   - 直接看某个值最后被推成什么 `UType`
+6. `binarysub-trace.log`
+   - 继续追 binarysub 内部传播细节
+7. `llvm2c-before-demotessa.ll` / `llvm2c-after-demotessa.ll`
+   - 如果 `.ll` 看起来正常，但 `.c` 输出异常，再看这里

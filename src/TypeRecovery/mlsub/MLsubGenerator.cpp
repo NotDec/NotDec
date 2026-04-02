@@ -20,6 +20,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/JSON.h>
 #include <algorithm>
 #include <memory>
@@ -30,6 +31,64 @@ using namespace llvm;
 #define DEBUG_TYPE "mlsub_generator"
 
 namespace notdec::mlsub {
+
+namespace {
+
+constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
+
+void appendDebugValueTypes(
+    llvm::StringRef DebugDir, llvm::StringRef SCCName,
+    DSUMap<ExtValuePtr, SimpleType> &V2N,
+    const std::set<ExtValuePtr> &ContraVariantValues,
+    const std::map<binarysub::PolarVar, binarysub::UTypePtr> &Res,
+    bool SolveMemory, const binarysub::PolarVar &PolMem) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(join(DebugDir.str(), kValueTypesFile.str()), EC,
+                           llvm::sys::fs::OF_Append);
+  if (EC) {
+    llvm::errs() << "Error printing to " << kValueTypesFile << ", "
+                 << EC.message() << "\n";
+    return;
+  }
+
+  auto getPol = [&](ExtValuePtr V) { return !ContraVariantValues.count(V); };
+  std::vector<std::string> Lines;
+  Lines.reserve(V2N.size() + (SolveMemory ? 1 : 0));
+
+  for (const auto &Ent : V2N) {
+    bool Pol = getPol(Ent.first);
+    auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pol});
+    std::string UTypeStr = "<null>";
+    if (It != Res.end() && It->second) {
+      UTypeStr = binarysub::printType(It->second);
+    }
+    std::string Line = Pol ? "[+]" : "[-]";
+    Line += " ";
+    Line += toString(Ent.first, true);
+    Line += " => ";
+    Line += UTypeStr;
+    Lines.push_back(std::move(Line));
+  }
+
+  if (SolveMemory) {
+    auto It = Res.find(PolMem);
+    std::string UTypeStr = "<null>";
+    if (It != Res.end() && It->second) {
+      UTypeStr = binarysub::printType(It->second);
+    }
+    Lines.push_back("[memory] <memory> => " + UTypeStr);
+  }
+
+  std::sort(Lines.begin(), Lines.end());
+
+  Out << "## SCC: " << SCCName << "\n";
+  for (const auto &Line : Lines) {
+    Out << Line << "\n";
+  }
+  Out << "\n";
+}
+
+} // namespace
 
 void MLsubRecovery::run() {
   auto &M = const_cast<llvm::Module &>(Mod);
@@ -53,6 +112,15 @@ void MLsubRecovery::run() {
       std::cerr << EC.message() << std::endl;
       std::abort();
     }
+
+    llvm::raw_fd_ostream ValueTypes(join(DebugDir, kValueTypesFile.str()), EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output file " << kValueTypesFile.str() << ": ";
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    ValueTypes << "# Final Value -> binarysub UType mapping\n\n";
   }
 
   // 0.5 print module for debugging
@@ -181,6 +249,11 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   if (SolveMemory) {
     auto MemUTy = Res.at(PolMem);
     ValueTypes.insert({nullptr, TB.convert(MemUTy)});
+  }
+
+  if (auto DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")) {
+    appendDebugValueTypes(DebugDir, Name, V2N, ContraVariantValues, Res,
+                          SolveMemory, PolMem);
   }
 }
 

@@ -153,6 +153,8 @@ cmake --build ./build --target all
 
 ## 6. 运行与调试约定
 
+进行代码调试前，建议先阅读仓库根目录的 `DEBUG.md`。该文件集中说明了调试环境变量、`debug_dir/` 中间产物及其用途。
+
 仓库内现有 `run.sh` 体现了一组常用调试环境变量：
 
 - `NOTDEC_DEBUG_DIR`
