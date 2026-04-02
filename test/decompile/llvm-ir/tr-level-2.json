@@ -10,8 +10,8 @@
     {
       "name": "01_Simple1",
       "input": "cases/01_Simple1.ll",
-      "status": "xfail",
-      "reason": "llvm2c constant-user assertion"
+      "expected": "expected/tr-level-2/01_Simple1.c",
+      "status": "pass"
     },
     {
       "name": "02_ConstantAddr1",
@@ -22,20 +22,20 @@
     {
       "name": "03_LoadUpdateGood",
       "input": "cases/03_LoadUpdateGood.ll",
-      "status": "xfail",
-      "reason": "llvm2c constant-user assertion"
+      "expected": "expected/tr-level-2/03_LoadUpdateGood.c",
+      "status": "pass"
     },
     {
       "name": "04_LoadUpdate",
       "input": "cases/04_LoadUpdate.ll",
-      "status": "xfail",
-      "reason": "llvm2c constant-user assertion"
+      "expected": "expected/tr-level-2/04_LoadUpdate.c",
+      "status": "pass"
     },
     {
       "name": "05_MultiOffset",
       "input": "cases/05_MultiOffset.ll",
-      "status": "xfail",
-      "reason": "llvm2c constant-user assertion"
+      "expected": "expected/tr-level-2/05_MultiOffset.c",
+      "status": "pass"
     },
     {
       "name": "06_SimpleRecursive2",
@@ -58,8 +58,8 @@
     {
       "name": "09_OffsetLoop",
       "input": "cases/09_OffsetLoop.ll",
-      "status": "xfail",
-      "reason": "llvm2c constant-user assertion"
+      "expected": "expected/tr-level-2/09_OffsetLoop.c",
+      "status": "pass"
     },
     {
       "name": "10_BottomUp1",

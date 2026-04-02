@@ -21,10 +21,10 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
-        "${workspaceFolder}/test/backend/02_ConstantAddr1.ll",
+        "${file}",
         "-o",
-        "${workspaceFolder}/test/backend/02_ConstantAddr1.ll.c",
-        "--tr-level=2",
+        "${file}.c",
+        "--tr-level=2"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
@@ -48,6 +48,18 @@
         {
           "name": "NOTDEC_POLY_FUNCS",
           "value": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json"
+        },
+        {
+          "name": "NOTDEC_DISABLE_INTERPROC",
+          "value": "1"
+        },
+        {
+          "name": "NOTDEC_SAT_DISABLE",
+          "value": "1"
+        },
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0"
         }
       ],
       // "setupCommands": [{"text": "set auto-solib-add off"}]

@@ -1,6 +1,11 @@
 # AGNENTS.md
 
-本文件面向在 `NotDec` 仓库内工作的自动化 agent / 开发者，目标是帮助快速定位入口、理解主流程，并在不破坏现有实验环境的前提下进行修改。
+## 当前任务
+
+当前阶段的首要任务是：让仓库中的 notdec.decompile.llvm_ir.tr_level_2 测试用例全部通过。
+
+1. 使用debugmcp，从 `launch.json` 中与 `dec` 相关的调试配置入手。
+2. 每解决一批稳定复现的问题后，整理变更并提交（commit）。
 
 ## 0. Git 与 external/ 子模块
 
