@@ -21,6 +21,7 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/JSON.h>
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -225,6 +226,9 @@ void MLsubRecovery::topDownPhase() {
 
 void MLsubRecovery::prepareSCC(CallGraph &CG) {
   AG.CG = &CG;
+  AG.AllSCCs.clear();
+  AG.Func2SCCIndex.clear();
+  AG.Callee2Callers.clear();
 
   auto PolyFuncFiles = std::getenv("NOTDEC_POLY_FUNCS");
   std::set<std::string> PolyFuncs;
@@ -238,6 +242,27 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     assert(ValArr != nullptr);
     for (auto S : *ValArr) {
       PolyFuncs.insert(S.getAsString()->str());
+    }
+  }
+
+  auto LevelOverrideFile = std::getenv("NOTDEC_LEVEL_OVERRIDE");
+  std::map<std::string, unsigned int> LevelOverrides;
+  if (LevelOverrideFile) {
+    // The override file provides per-function lower bounds. We still solve for
+    // the minimal valid level that satisfies call-graph and polymorphism
+    // constraints, so overly small user values are automatically raised.
+    auto Content = readFileToString(LevelOverrideFile);
+    auto ValE = json::parse(Content);
+    if (!ValE) {
+      assert(false && "JSON parse failed, invalid NOTDEC_LEVEL_OVERRIDE content");
+    }
+    auto ValObj = ValE->getAsObject();
+    assert(ValObj != nullptr);
+    for (auto &Ent : *ValObj) {
+      auto Level = Ent.second.getAsInteger();
+      assert(Level && *Level >= 0 &&
+             "NOTDEC_LEVEL_OVERRIDE values must be non-negative integers");
+      LevelOverrides[Ent.first.str()] = static_cast<unsigned int>(*Level);
     }
   }
 
@@ -255,9 +280,6 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
       AG.Callee2Callers[Callee].insert(Caller);
     }
   }
-
-  std::vector<SCCData> &AllSCCs = AG.AllSCCs;
-  std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
 
   auto isAllDeclarationAndIntrinsics =
       [](const std::vector<CallGraphNode *> &NodeVec) -> bool {
@@ -286,92 +308,194 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     return false;
   };
 
-  // Iterate Top-down (from main to lib func) (reverse post order)
-  // 数据结构：从level映射到SCCData的索引数组
-  std::map<unsigned int, std::vector<std::size_t>> Level2SCCIndices;
-  // 数据结构：从CallGraphNode* 反向映射到SCCData索引
-  std::map<CallGraphNode *, std::size_t> Node2SCCIndex;
+  struct RawSCCInfo {
+    std::vector<CallGraphNode *> Nodes;
+    std::set<std::size_t> Preds;
+    std::set<std::size_t> Succs;
+    bool IsPolymorphic = false;
+    unsigned int UserLevelLowerBound = 0;
+    unsigned int Level = 0;
+    std::size_t TopoPosition = 0;
+  };
 
+  // Phase 1: work on the original call-graph SCC DAG first. Levels are solved
+  // on raw SCCs before any same-level groups are merged.
+  std::vector<RawSCCInfo> RawSCCs;
+  std::map<CallGraphNode *, std::size_t> Node2RawSCCIndex;
   for (auto It = SCCResults.rbegin(); It != SCCResults.rend(); ++It) {
     const std::vector<CallGraphNode *> &NodeVec = *It;
-    bool CurPolymorphic = hasPolymorphic(NodeVec);
-
-    // 跳过intrinsic函数
     if (isAllDeclarationAndIntrinsics(NodeVec)) {
       continue;
     }
-
-    // 计算所有caller的level的最大值，以及最大level对应的SCCData索引
-    unsigned int maxCallerLevel = 0;
-    std::set<std::size_t> maxLevelSCCIndices;
+    std::size_t RawIndex = RawSCCs.size();
+    RawSCCs.push_back(RawSCCInfo{.Nodes = NodeVec});
     for (auto *Node : NodeVec) {
-      auto CallerIt = AG.Callee2Callers.find(Node);
-      if (CallerIt != AG.Callee2Callers.end()) {
-        for (auto *Caller : CallerIt->second) {
-          auto IndexIt = Node2SCCIndex.find(Caller);
-          if (IndexIt != Node2SCCIndex.end()) {
-            unsigned int callerLevel = AllSCCs[IndexIt->second].level;
-            if (callerLevel > maxCallerLevel) {
-              maxCallerLevel = callerLevel;
-              maxLevelSCCIndices.clear();
-              maxLevelSCCIndices.insert(IndexIt->second);
-            } else if (callerLevel == maxCallerLevel) {
-              maxLevelSCCIndices.insert(IndexIt->second);
-            }
-          }
-        }
-      }
+      Node2RawSCCIndex[Node] = RawIndex;
     }
+  }
 
-    if (CurPolymorphic) {
-      // 多态函数：单独开辟一个SCCData，level等于所有caller的level的最大值+1
-      unsigned int newLevel = maxCallerLevel + 1;
-      AllSCCs.push_back(SCCData{.Nodes = NodeVec, .level = newLevel});
-      std::size_t newIndex = AllSCCs.size() - 1;
-      Level2SCCIndices[newLevel].push_back(newIndex);
-      for (auto *Node : NodeVec) {
-        Node2SCCIndex[Node] = newIndex;
+  for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
+    auto &Raw = RawSCCs[RawIndex];
+    Raw.IsPolymorphic = hasPolymorphic(Raw.Nodes);
+    for (auto *Node : Raw.Nodes) {
+      auto *Fn = Node->getFunction();
+      if (Fn == nullptr || !Fn->hasName()) {
+        continue;
       }
-    } else {
-      // 非多态函数：level等于所有caller的level的最大值
-      // 直接合并到最大值的来源SCCData里面
-      if (maxLevelSCCIndices.empty()) {
-        // 没有caller，level=0，合并到level=0的唯一SCCData
-        auto &level0SCCs = Level2SCCIndices[0];
-        if (level0SCCs.empty()) {
-          // 创建level=0的第一个SCCData
-          AllSCCs.push_back(SCCData{.Nodes = NodeVec, .level = 0});
-          std::size_t newIndex = AllSCCs.size() - 1;
-          level0SCCs.push_back(newIndex);
-          for (auto *Node : NodeVec) {
-            Node2SCCIndex[Node] = newIndex;
-          }
-        } else {
-          // 合并到level=0的唯一SCCData
-          std::size_t targetIndex = level0SCCs[0];
-          auto &targetNodes = AllSCCs[targetIndex].Nodes;
-          targetNodes.insert(targetNodes.end(), NodeVec.begin(), NodeVec.end());
-          for (auto *Node : NodeVec) {
-            Node2SCCIndex[Node] = targetIndex;
-          }
-        }
-      } else {
-        assert(false && "TODO merge?"); // 考虑直接合并这几个SCCData。
-        // 合并到所有最大level的SCCData
-        for (std::size_t targetIndex : maxLevelSCCIndices) {
-          auto &targetNodes = AllSCCs[targetIndex].Nodes;
-          targetNodes.insert(targetNodes.end(), NodeVec.begin(), NodeVec.end());
-        }
-        // Node2SCCIndex只记录第一个（任选一个即可）
-        std::size_t firstIndex = *maxLevelSCCIndices.begin();
-        for (auto *Node : NodeVec) {
-          Node2SCCIndex[Node] = firstIndex;
-        }
+      auto It = LevelOverrides.find(Fn->getName().str());
+      if (It != LevelOverrides.end()) {
+        Raw.UserLevelLowerBound =
+            std::max(Raw.UserLevelLowerBound, It->second);
       }
     }
   }
 
-  Func2SCCIndex.clear();
+  for (auto &[Callee, Callers] : AG.Callee2Callers) {
+    auto CalleeIt = Node2RawSCCIndex.find(Callee);
+    if (CalleeIt == Node2RawSCCIndex.end()) {
+      continue;
+    }
+    std::size_t CalleeIndex = CalleeIt->second;
+    for (auto *Caller : Callers) {
+      auto CallerIt = Node2RawSCCIndex.find(Caller);
+      if (CallerIt == Node2RawSCCIndex.end()) {
+        continue;
+      }
+      std::size_t CallerIndex = CallerIt->second;
+      if (CallerIndex == CalleeIndex) {
+        continue;
+      }
+      RawSCCs[CallerIndex].Succs.insert(CalleeIndex);
+      RawSCCs[CalleeIndex].Preds.insert(CallerIndex);
+    }
+  }
+
+  // Topologically order the SCC DAG so every caller level is known before its
+  // callees are processed.
+  std::vector<std::size_t> TopoOrder;
+  std::vector<unsigned int> InDegree(RawSCCs.size(), 0);
+  std::set<std::size_t> Ready;
+  for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
+    InDegree[RawIndex] = RawSCCs[RawIndex].Preds.size();
+    if (InDegree[RawIndex] == 0) {
+      Ready.insert(RawIndex);
+    }
+  }
+  while (!Ready.empty()) {
+    std::size_t RawIndex = *Ready.begin();
+    Ready.erase(Ready.begin());
+    RawSCCs[RawIndex].TopoPosition = TopoOrder.size();
+    TopoOrder.push_back(RawIndex);
+    for (std::size_t SuccIndex : RawSCCs[RawIndex].Succs) {
+      assert(InDegree[SuccIndex] > 0);
+      --InDegree[SuccIndex];
+      if (InDegree[SuccIndex] == 0) {
+        Ready.insert(SuccIndex);
+      }
+    }
+  }
+  assert(TopoOrder.size() == RawSCCs.size() &&
+         "SCC condensation graph must be a DAG");
+
+  for (std::size_t RawIndex : TopoOrder) {
+    auto &Raw = RawSCCs[RawIndex];
+    unsigned int BaseLevel = 0;
+    for (std::size_t PredIndex : Raw.Preds) {
+      BaseLevel = std::max(BaseLevel, RawSCCs[PredIndex].Level);
+    }
+    // Polymorphic SCCs force a summary boundary, so calls into them instantiate
+    // from one level below.
+    if (Raw.IsPolymorphic) {
+      ++BaseLevel;
+    }
+    Raw.Level = std::max(BaseLevel, Raw.UserLevelLowerBound);
+  }
+
+  // Phase 2: collapse the maximal same-level regions. We union along same-level
+  // edges only; after that, inter-group edges always go from lower to higher
+  // levels, so the merged graph remains a DAG.
+  std::vector<std::size_t> Parent(RawSCCs.size());
+  for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
+    Parent[RawIndex] = RawIndex;
+  }
+  auto FindRoot = [&](std::size_t Index) {
+    std::size_t Root = Index;
+    while (Parent[Root] != Root) {
+      Root = Parent[Root];
+    }
+    while (Parent[Index] != Index) {
+      std::size_t Next = Parent[Index];
+      Parent[Index] = Root;
+      Index = Next;
+    }
+    return Root;
+  };
+  auto Union = [&](std::size_t LHS, std::size_t RHS) {
+    LHS = FindRoot(LHS);
+    RHS = FindRoot(RHS);
+    if (LHS == RHS) {
+      return;
+    }
+    if (LHS > RHS) {
+      std::swap(LHS, RHS);
+    }
+    Parent[RHS] = LHS;
+  };
+  for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
+    for (std::size_t SuccIndex : RawSCCs[RawIndex].Succs) {
+      if (RawSCCs[RawIndex].Level == RawSCCs[SuccIndex].Level) {
+        Union(RawIndex, SuccIndex);
+      }
+    }
+  }
+
+  struct GroupInfo {
+    std::size_t Root = 0;
+    unsigned int Level = 0;
+    std::size_t FirstTopoPosition = 0;
+  };
+
+  std::map<std::size_t, std::vector<std::size_t>> Groups;
+  std::map<std::size_t, std::size_t> FirstTopoPosition;
+  for (std::size_t RawIndex : TopoOrder) {
+    std::size_t Root = FindRoot(RawIndex);
+    Groups[Root].push_back(RawIndex);
+    if (!FirstTopoPosition.count(Root)) {
+      FirstTopoPosition[Root] = RawSCCs[RawIndex].TopoPosition;
+    }
+  }
+
+  std::vector<GroupInfo> OrderedGroups;
+  OrderedGroups.reserve(Groups.size());
+  for (auto &[Root, Members] : Groups) {
+    (void)Members;
+    OrderedGroups.push_back(GroupInfo{
+        .Root = Root,
+        .Level = RawSCCs[Root].Level,
+        .FirstTopoPosition = FirstTopoPosition.at(Root),
+    });
+  }
+  std::sort(OrderedGroups.begin(), OrderedGroups.end(),
+            [](const GroupInfo &LHS, const GroupInfo &RHS) {
+              if (LHS.Level != RHS.Level) {
+                return LHS.Level < RHS.Level;
+              }
+              return LHS.FirstTopoPosition < RHS.FirstTopoPosition;
+            });
+
+  std::vector<SCCData> &AllSCCs = AG.AllSCCs;
+  std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
+  for (const auto &Group : OrderedGroups) {
+    SCCData Data;
+    Data.level = Group.Level;
+    for (std::size_t RawIndex : Groups.at(Group.Root)) {
+      assert(RawSCCs[RawIndex].Level == Data.level);
+      Data.Nodes.insert(Data.Nodes.end(), RawSCCs[RawIndex].Nodes.begin(),
+                        RawSCCs[RawIndex].Nodes.end());
+    }
+    AllSCCs.push_back(Data);
+  }
+
   // 2. Calc name and SCCSet
   for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
     SCCData &Data = AllSCCs[SCCIndex];

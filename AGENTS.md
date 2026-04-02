@@ -4,7 +4,7 @@
 
 当前阶段的首要任务是：让仓库中的 notdec.decompile.llvm_ir.tr_level_2 测试用例全部通过。
 
-1. 使用debugmcp，从 `launch.json` 中与 `dec` 相关的调试配置入手。
+1. 使用debugmcp，从 `launch.json` 中的 `dec` 配置入手。启动前修改里面的参数指向想要反编译的IR，启动的时候必须指定具体配置
 2. 每解决一批稳定复现的问题后，整理变更并提交（commit）。
 
 ## 0. Git 与 external/ 子模块

@@ -21,9 +21,9 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
-        "${file}",
+        "${workspaceFolder}/test/decompile/llvm-ir/cases/06_SimpleRecursive2.ll",
         "-o",
-        "${file}.c",
+        "/tmp/06_SimpleRecursive2.c",
         "--tr-level=2"
       ],
       "cwd": "${workspaceFolder}",
