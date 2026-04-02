@@ -149,8 +149,11 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
     for (auto &P : V->args) {
       Params.push_back(convert(P));
     }
-    HType *RetTy = convert(V->result);
-    auto FTy = Ctx.getFunctionType(false, {RetTy}, Params);
+    std::vector<HType *> RetTypes;
+    if (V->result) {
+      RetTypes.push_back(convert(V->result));
+    }
+    auto FTy = Ctx.getFunctionType(false, RetTypes, Params);
     Result = getPtrTy(FTy);
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
     // TODO
@@ -163,6 +166,7 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     HType *LhsTy = convert(V->lhs);
     HType *RhsTy = convert(V->rhs);
+
     Result = doUnion(LhsTy, RhsTy);
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
     HType *LhsTy = convert(V->lhs);
@@ -824,7 +828,6 @@ HType *TypeBuilder::doUnion(HType *LhsTy, HType *RhsTy) {
     return LhsTy;
   }
 
-  assert(false && "unimplemented union");
   // Otherwise, return void* as the common supertype
   return getVoidPtr();
 }

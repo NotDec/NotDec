@@ -13,39 +13,63 @@
         "isDefault": true
       },
       "problemMatcher": [],
-      "detail": "CMake template build task"
+      "detail": "CMake template build task",
+      "presentation": {
+        "reveal": "silent",
+        "revealProblems": "onProblem",
+        "close": true
+      }
     },
     {
       "label": "Remove debug dir",
       "type": "shell",
       "command": "/usr/bin/rm",
-      "args": ["-rf", "${workspaceFolder}/debug_dir"]
+      "args": [
+        "-rf",
+        "${workspaceFolder}/debug_dir"
+      ],
+      "presentation": {
+        "reveal": "silent",
+        "revealProblems": "onProblem",
+        "close": true
+      }
     },
     {
       "label": "Remove debug dir2",
       "type": "shell",
       "command": "/usr/bin/rm",
-      "args": ["-rf", "${workspaceFolder}/debug_dir2"]
+      "args": [
+        "-rf",
+        "${workspaceFolder}/debug_dir2"
+      ],
+      "presentation": {
+        "reveal": "silent",
+        "revealProblems": "onProblem",
+        "close": true
+      }
     },
     {
       "label": "build binarysub",
       "type": "shell",
       "command": "/usr/bin/bash",
-      "args": ["-c", "cd ${workspaceFolder}/external/binarysub/; cmake --build build"]
+      "args": [
+        "-c",
+        "cd ${workspaceFolder}/external/binarysub/; cmake --build build"
+      ]
     },
     {
-        "label": "Clean and Build",
-        "dependsOn": [
-            "CMake: build",
-            "Remove debug dir"
-        ]
+      "label": "Clean and Build",
+      "dependsOn": [
+        "CMake: build",
+        "Remove debug dir"
+      ]
     },
     {
-        "label": "Clean and Build2",
-        "dependsOn": [
-            "CMake: build",
-            "Remove debug dir2"
-        ]
+      "label": "Clean and Build2",
+      "dependsOn": [
+        "CMake: build",
+        "Remove debug dir2"
+      ]
     }
   ]
 }

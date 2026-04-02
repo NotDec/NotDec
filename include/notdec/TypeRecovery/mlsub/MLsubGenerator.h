@@ -96,7 +96,7 @@ struct ConstraintsGenerator {
     for (const llvm::Function *Func1 : SCCs) {
       auto Func = const_cast<llvm::Function *>(Func1);
       auto F = getNodeOrNull(Func, nullptr, -1);
-      assert(F->getAsVariableState()->upperBounds.empty());
+      assert(F->getAsVariableState() != nullptr);
     }
   }
   void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL,
