@@ -884,39 +884,39 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
 }
 
 HType *TypeBuilder::doUnion(HType *LhsTy, HType *RhsTy) {
-  // If both are the same type, return it
+  // Keep obvious identities collapsed, but otherwise preserve the
+  // set-theoretic union in HType instead of forcing an early backend-oriented
+  // approximation.
   if (LhsTy == RhsTy) {
     return LhsTy;
   }
-
-  // If one is void*, return the other
-  if (LhsTy->isPointerType() && LhsTy->getPointeeType() == nullptr) {
-    return RhsTy;
-  }
-  if (RhsTy->isPointerType() && RhsTy->getPointeeType() == nullptr) {
-    return LhsTy;
+  if (LhsTy->getCanonicalType() == RhsTy->getCanonicalType()) {
+    return LhsTy->getCanonicalType();
   }
 
-  // Otherwise, return void* as the common supertype
-  return getVoidPtr();
+  // Canonicalize operand order so semantically identical unions unique to the
+  // same HType node.
+  if (std::less<HType *>{}(RhsTy->getCanonicalType(),
+                           LhsTy->getCanonicalType())) {
+    std::swap(LhsTy, RhsTy);
+  }
+  return Ctx.getSetUnionType(false, LhsTy, RhsTy);
 }
 
 HType *TypeBuilder::doInter(HType *LhsTy, HType *RhsTy) {
-
-  // If both are the same type, return it
+  // Same rationale as doUnion(): preserve semantic information unless the
+  // intersection is trivially identical.
   if (LhsTy == RhsTy) {
     return LhsTy;
   }
-
-  // If one is void*, return the other (more specific)
-  if (LhsTy->isPointerType() && LhsTy->getPointeeType() == nullptr) {
-    return RhsTy;
+  if (LhsTy->getCanonicalType() == RhsTy->getCanonicalType()) {
+    return LhsTy->getCanonicalType();
   }
-  if (RhsTy->isPointerType() && RhsTy->getPointeeType() == nullptr) {
-    return LhsTy;
+  if (std::less<HType *>{}(RhsTy->getCanonicalType(),
+                           LhsTy->getCanonicalType())) {
+    std::swap(LhsTy, RhsTy);
   }
-
-  assert(false && "unimplemented type intersection");
+  return Ctx.getSetInterType(false, LhsTy, RhsTy);
 }
 
 HType *TypeBuilder::convertVariable(const binarysub::UTypeVariable &T) {

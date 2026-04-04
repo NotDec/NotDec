@@ -524,86 +524,40 @@ TODO，设计一下打印的格式。
 
 - 这一步本质上是“语义层保真”，和“如何打印成 C”是两件事，强行捆在一起会让问题来源不清楚
 
+当前完成情况：
+
+- WIP
+  - `TypeBuilder::doUnion()` / `doInter()` 已从“优先拍扁成 backend type”改成“只折叠平凡相等情况，其余直接保留为 `SetUnionType` / `SetInterType`”
+  - 当前这一步仍主要停留在语义层；`llvm2c` 后端还没有为这些类型提供最终降级策略
+  - 因此目前更适合用编译通过和调试打印来验证 `Union/Inter` 是否进入 `HType`，而不是要求当前 C 输出路径立刻稳定
+
 ### commit 5: 建立 `HType -> Clang/C 输出` 的降级边界与注释策略
 
 目标：
 
-- 明确哪些 `HType` 能直接转成 `clang::QualType`
-- 明确哪些 `HType` 只能降级成 carrier type，并把 richer info 挂到注释里
-
-建议改动：
+- 为当前新版 `HType` 建立一套稳定的 `llvm2c` lowering plan
 
 - 重构 `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp` 的 `ClangTypeResult::convertType(HType *T)`
-- 增加一个“可直接 lower 到 Clang”的判定层
-  - integer / float / pointer / array / record / layout union / typedef 仍走现有逻辑
-  - `TypeVariable` / `DualPointer` / `SetUnion` / `SetInter` 统一走受控降级
-- 降级策略单独集中，不要散在各个 case 里
-  - 例如降级成 `void *`
-  - 或降级成承载它的 record / typedef
-- 同时定义注释格式，把 richer type 信息挂到
-  - `TypedDecl::Comment`
-  - `FieldDecl::Comment`
-  - 必要时某些 value decl comment
 
-建议的输出格式可以先从简单版本开始：
+- `IntegerType`
+- `FloatingType`
+- 普通 `PointerType`
+- `ArrayType`
+- `RecordPtrType`
+  - 注意这里已经不是旧的 `PointerType<RecordType>` 语义，而是新版单层结构体指针语义
+  - 也就是说，`RecordPtrType` 在这里应直接 lower 成 `pointer-to-record`
+- `UnionType`
+  - 仍表示 layout union，直接 lower
+- `TypedefType`
+- `FunctionType`
+  - 如果当前 `llvm2c` 的函数指针路径已经稳定，就继续直接 lower
+  - 如果新版 `RecordPtrType` 会影响函数参数/返回值，也统一在这一层处理
 
-- `mlsub: 'a`
-- `mlsub: load=..., store=...`
-- `mlsub: (A | B)`
-- `mlsub: (A & B)`
+- `SetUnionType`、`SetInterType`、`TypeVariableType`
+  - 对于包含类型变量的set union和intersection，仅转换非类型变量部分，类型变量仅增加标注，即用 `/* var: <id> */` 这种形式的注释表示。可能要改动ASTPrinter，允许类型增加标注。可以assert连续被union或者inter的多个类型，除开类型变量部分，不会有冲突的类型，但是多个Primitive类型可以合并。如果只有类型变量部分，则可以看作top或者bottom，弄成简单整数或者void*这种无hint下的默认类型。
+- `DualPointerType`
+  - 可以先随便选比如load类型跑通。后续考察能否引入一个C++ Template Union的全局类型，即`template<typename T1, T2> union Ptr { T1 load; T2 store; }` 然后打印每个DualPointer为它的实例 `Ptr<T1, T2>`。
 
-不要在这一提交一开始就追求特别复杂的人类可读格式，先保证：
-
-- 稳定
-- 可 grep
-- 能和 golden 一起回归
-
-验收标准：
-
-- 新增 semantic HType 后，`llvm2c` 仍能产出合法 C/C++
-- richer info 不再靠隐式丢失，而是显式降级 + comment 保留
-
-这样拆的原因：
-
-- 这是 backend 行为变化最大的提交，单独拿出来最利于回归测试和 golden 更新
-
-### commit 6: 清理遗留近似逻辑，补测试与 golden
-
-目标：
-
-- 把前面几批留下的旧 fallback 彻底收口
-- 用测试把新分层固定下来
-
-建议改动：
-
-- 删除旧的近似分支
-  - 指针优先 `store/load` 的 fallback
-  - `doUnion()` / `doInter()` 里无依据的拍扁逻辑
-  - 非显式递归导致的隐式 struct 兜底
-- 增加或更新测试
-  - `notdec.decompile.llvm_ir.tr_level_2`
-  - 如果已有针对 `llvm2c` 的更小粒度测试入口，也补上针对新注释/新打印的回归
-- 只在这里统一更新 golden，避免前几个提交每次都大面积刷新输出
-
-验收标准：
-
-- 旧近似逻辑只剩明确保留的受控降级点
-- 集成测试能够反映新的输出策略
-
-这样拆的原因：
-
-- 清理和 golden 更新通常噪音最大，单独放最后一批，便于审查前面几次提交真正的语义变化
-
-## 一个更现实的提交合并方案
-
-如果实际开发过程中发现 6 个提交过细，可以合并成下面 4 批，仍然比较稳：
-
-1. `HType` 扩展 + 基础打印
-2. 递归类型重构 + `DualPointer`
-3. set-theoretic `Union/Inter` 接入 `TypeBuilder`
-4. Clang/C 降级输出 + comments + 测试/golden
-
-不建议再往更粗合并，尤其不要把“语义层扩展”和“backend 输出变更”放进同一个首提交里；那样一旦测试炸掉，很难判断问题出在类型表示、builder 缓存，还是 C backend 降级策略。
 
 ## 文档记录约定
 
