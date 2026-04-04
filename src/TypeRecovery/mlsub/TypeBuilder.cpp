@@ -141,6 +141,15 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     auto SizeBytes = FieldSizeBytes.value_or(Parent.PointerSize);
     return Ctx.getIntegerType(false, SizeBytes * 8, true);
   };
+  auto convertPointerSide = [&](const UTypePtr &Side) -> HType * {
+    if (!Side) {
+      return nullptr;
+    }
+    if (std::get_if<UTop>(&Side->v) || std::get_if<UBot>(&Side->v)) {
+      return nullptr;
+    }
+    return convertFieldType(Side, std::nullopt);
+  };
 
   if (std::get_if<UTop>(&Ty->v) || std::get_if<UBot>(&Ty->v)) {
     return getIntegerCarrier();
@@ -160,37 +169,15 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     auto FTy = Ctx.getFunctionType(false, RetTypes, Params);
     return getPtrTy(FTy);
   } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
-    auto convertSide = [&](const UTypePtr &Side) -> HType * {
-      if (!Side) {
-        return nullptr;
-      }
-      if (std::get_if<UTop>(&Side->v) || std::get_if<UBot>(&Side->v)) {
-        return nullptr;
-      }
-      return convertFieldType(Side, std::nullopt);
-    };
-    HType *LoadTy = convertSide(V->load);
-    HType *StoreTy = convertSide(V->store);
-    if (LoadTy && StoreTy) {
-      if (LoadTy == StoreTy ||
-          LoadTy->getCanonicalType() == StoreTy->getCanonicalType()) {
-        return LoadTy->getCanonicalType();
-      }
-      if (LoadTy->isVoidPtrType()) {
-        return StoreTy;
-      }
-      if (StoreTy->isVoidPtrType()) {
-        return LoadTy;
-      }
-      return doUnion(LoadTy, StoreTy);
-    }
-    if (LoadTy) {
-      return LoadTy;
-    }
-    if (StoreTy) {
-      return StoreTy;
-    }
-    return getIntegerCarrier();
+    // Preserve leaf pointer load/store semantics instead of approximating them
+    // into a single member type. Under the current single-layer RecordPtr model,
+    // plain PointerType still means "the field value is a normal C-like
+    // pointer", while DualPointerType means "the field value is an address-like
+    // object with separate load/store views".
+    HType *LoadTy = convertPointerSide(V->load);
+    HType *StoreTy = convertPointerSide(V->store);
+    return Ctx.getDualPointerType(false, Parent.PointerSize * 8, LoadTy,
+                                  StoreTy);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
     auto &T = *PT;
     std::vector<std::pair<OffsetRange, UTypePtr>> RawFields;
@@ -854,15 +841,19 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
       std::holds_alternative<UTop>(Ty->v)) {
     return getVoidPtr();
   } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
-    HType *PteTy = getVoidPtr();
-    // TODO HType里也同时展示load类型和store类型
-    if (V->store) {
-      PteTy = convert(V->store);
-    }
-    if ((PteTy == nullptr || PteTy->isVoidPtrType()) && V->load) {
-      PteTy = convert(V->load);
-    }
-    Ret = Ctx.getPointerType(false, Parent.PointerSize * 8, PteTy);
+    auto convertPointerSide = [&](const UTypePtr &Side) -> HType * {
+      if (!Side) {
+        return nullptr;
+      }
+      if (std::get_if<UTop>(&Side->v) || std::get_if<UBot>(&Side->v)) {
+        return nullptr;
+      }
+      return convert(Side);
+    };
+    HType *LoadTy = convertPointerSide(V->load);
+    HType *StoreTy = convertPointerSide(V->store);
+    Ret =
+        Ctx.getDualPointerType(false, Parent.PointerSize * 8, LoadTy, StoreTy);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
     auto &T = *PT;
     if (T.fields.empty()) {

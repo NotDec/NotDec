@@ -480,6 +480,16 @@ TODO，设计一下打印的格式。
 
 - DualPointer 是语义保真最核心的一块，但它对 C backend 的影响也最大，所以要先完成内部表示，再单独做输出策略
 
+当前完成情况：
+
+- WIP
+  - `TypeBuilder::convertPointer()` 已改为对顶层 `UPointerType` 统一生成 `DualPointerType`
+  - `TypeBuilder::convertFieldType()` 也已开始对叶子位置的 `UPointerType` 保留 `DualPointerType`，不再在 builder 阶段优先选 `store/load` 并拍扁成单一类型
+  - 当前仍未打通的边界：
+    - `llvm2c::TypeManager::convertType()` 还没有为 `DualPointerType` 提供受控降级
+    - 因此这一步目前仍是“语义层已保留，但后端输出未完全接上”的中间态
+  - 这一阶段如果单独提交，应继续以 `WIP:` 前缀标记，直到 `DualPointerType` 至少能在当前测试路径上被稳定降级或绕开
+
 ### commit 4: 引入 set-theoretic `Union/Inter`，先保留语义，不急于落 C 类型
 
 目标：
