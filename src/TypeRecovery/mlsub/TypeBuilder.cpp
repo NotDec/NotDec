@@ -858,7 +858,7 @@ HType *TypeBuilder::convertVariable(const binarysub::UTypeVariable &T) {
   }
 
   // Otherwise, create a TypeVariableType to preserve the semantic information
-  return Ctx.getTypeVariableType(false, T.name);
+  return Ctx.getTypeVariableType(false, T.name, T.size);
 }
 
 } // namespace notdec::mlsub
