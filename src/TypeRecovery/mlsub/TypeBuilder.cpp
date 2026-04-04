@@ -137,7 +137,7 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
 
 HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
                                      std::optional<int64_t> FieldSizeBytes) {
-  auto getIntegerCarrier = [&]() -> HType * {
+  auto getIntegerFallback = [&]() -> HType * {
     auto SizeBytes = FieldSizeBytes.value_or(Parent.PointerSize);
     return Ctx.getIntegerType(false, SizeBytes * 8, true);
   };
@@ -152,7 +152,7 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
   };
 
   if (std::get_if<UTop>(&Ty->v) || std::get_if<UBot>(&Ty->v)) {
-    return getIntegerCarrier();
+    return getIntegerFallback();
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
     return parsePrimitiveName(V->name, binarysub::get_size(Ty));
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {

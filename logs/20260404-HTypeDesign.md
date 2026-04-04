@@ -558,6 +558,21 @@ TODO，设计一下打印的格式。
 - `DualPointerType`
   - 可以先随便选比如load类型跑通。后续考察能否引入一个C++ Template Union的全局类型，即`template<typename T1, T2> union Ptr { T1 load; T2 store; }` 然后打印每个DualPointer为它的实例 `Ptr<T1, T2>`。
 
+当前完成情况：
+
+- WIP
+  - `ClangTypeResult::convertType(HType *T)` 已补上新版 `HType` 的第一批受控降级路径：
+    - `FunctionType` 现在可以直接 lower 到 Clang function type
+    - `DualPointerType` 当前按 `load` 优先、`store` 兜底的策略降级成普通 C 指针
+    - `SetUnionType` / `SetInterType` 会先拍平并剔除 `TypeVariableType`
+      - 若只剩一个确定类型，则直接采用该类型
+      - 若只剩 primitive 整型或浮点型集合，则按“合并成一个可表示 primitive”处理
+      - 若只剩类型变量，则先回退到简单整数 fallback，完全无 size hint 时退回 `void *`
+    - `RecordPtrType` 继续按新版单层语义直接 lower 成 `pointer-to-record`
+  - 当前仍未完成的边界：
+    - 还没有把“被剔除的类型变量信息”真正打印成 `/* var: ... */` 这类注释
+    - `DualPointerType` 目前仍是受控降级，不是最终的语义保真输出方案
+
 
 ## 文档记录约定
 
