@@ -411,6 +411,16 @@ TODO，设计一下打印的格式。
 - 不再依赖 “InProgress 命中后临时造 struct*” 的隐式行为
 - 至少能稳定覆盖当前几个已知 recursive shape
 
+当前完成情况：
+
+- 已完成
+  - `mlsub::TypeBuilder` 新增 `convertRecursive()` 和 `finalizeRecursiveType()`，把递归类型处理拆成“先建 anchor，再转 body，最后收束”的显式路径
+  - `URecursiveType` 进入转换时会立即创建并缓存对应的 struct carrier，后续统一通过 `TypeCache` 复用这类 recursive anchor
+  - `RecursiveTypeNames` 现在在递归转换期间显式绑定到 anchor，`UTypeVariable` 命中同名递归变量时可以直接回到该 anchor
+  - `convert(UTypePtr Ty)` 不再在 `InProgress` 命中时静默创建匿名 `struct*` 兜底；现在要求环必须由显式 `URecursiveType` 锚定，否则直接报错
+  - `convertPointer()` 末尾原先那段“如果缓存里已经有 struct，就把当前具体类型强制塞成该 struct 唯一成员”的补丁式逻辑已经移除，统一交给 `finalizeRecursiveType()` 处理
+  - 对“递归体最终不是 struct*”的情况，会把最终具体类型作为 anchor struct 的唯一字段收束进去；如果 body 本身已经是同一个 struct pointer，则直接复用，不再额外包一层
+
 这样拆的原因：
 
 - 递归类型和缓存策略是 `TypeBuilder` 的地基。如果它还在变，后面的 pointer / union/inter 重构都很容易反复返工

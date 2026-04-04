@@ -42,6 +42,9 @@ public:
   HType *convert(binarysub::UTypePtr Ty);
 
 protected:
+  HType *convertRecursive(const binarysub::UTypePtr &Ty,
+                          const binarysub::URecursiveType &T);
+  HType *finalizeRecursiveType(const binarysub::UTypePtr &Ty, HType *Result);
   // 转换所有的Pointer类型
   // PointeeSize是专属于指针类型的，而且仅局限于指针类型的递归范围内。一旦指针被load或者store，PointeeSize就不再传递。
   HType *convertPointer(const binarysub::UTypePtr &T,

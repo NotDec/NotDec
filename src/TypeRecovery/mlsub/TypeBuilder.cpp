@@ -112,6 +112,54 @@ ast::RecordDecl *TypeBuilder::getOrCreateStruct(binarysub::UTypePtr Ty) {
   return *It;
 }
 
+HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
+                                          HType *Result) {
+  auto ForceStructDecl = getStructOrNull(Ty);
+  if (!ForceStructDecl) {
+    return Result;
+  }
+
+  auto *Decl = ForceStructDecl.value();
+  if (Result->isPointerType() && Result->getPointeeType() != nullptr &&
+      Result->getPointeeType()->isRecordType() &&
+      Result->getPointeeType()->getAsRecordDecl() == Decl) {
+    return Result;
+  }
+
+  assert(Decl->getFields().empty());
+  auto SizeBits = binarysub::get_size(Ty);
+  auto SizeBytes = SizeBits == 0 ? 0 : (SizeBits + 7) / 8;
+  if (SizeBytes == 0) {
+    SizeBytes = Parent.PointerSize;
+  }
+  Decl->addField(ast::FieldDecl{
+      .R = {.Start = 0, .Size = static_cast<OffsetTy>(SizeBytes)},
+      .Type = Result,
+      .Name = ValueNamer::getName("rec_"),
+  });
+  return TypeCache.at(Ty);
+}
+
+HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
+                                     const binarysub::URecursiveType &T) {
+  getOrCreateStruct(Ty);
+  HType *Anchor = TypeCache.at(Ty);
+
+  auto NameIt = RecursiveTypeNames.find(T.name);
+  assert((NameIt == RecursiveTypeNames.end() || NameIt->second == Anchor) &&
+         "Recursive type name rebound to a different anchor");
+  RecursiveTypeNames[T.name] = Anchor;
+
+  auto [_, Inserted] = InProgress.insert(Ty);
+  assert(Inserted && "Recursive type should not be re-entered before caching");
+
+  HType *Body = convert(T.body);
+
+  InProgress.erase(Ty);
+  RecursiveTypeNames.erase(T.name);
+  return finalizeRecursiveType(Ty, Body);
+}
+
 HType *TypeBuilder::convert(UTypePtr Ty) {
 
   // Check cache first
@@ -120,19 +168,19 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
     return CacheIt->second;
   }
 
-  // In progress, but not in type cache
+  if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
+    return convertRecursive(Ty, *V);
+  }
+
+  // Cycles must be anchored by an explicit URecursiveType.
   if (InProgress.count(Ty)) {
-    // TODO 单独搞一个recursive类型怎么样？
-    RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("struct_"));
-    HType *Ret = Ctx.getPointerType(false, Parent.PointerSize * 8,
-                                    Ctx.getRecordType(false, Decl));
-    TypeCache[Ty] = Ret;
-    // Return a type variable for cyclic types
-    return Ret;
+    llvm::errs() << "Unexpected recursive UType without URecursiveType: "
+                 << binarysub::printType(Ty) << "\n";
+    assert(false &&
+           "Unexpected recursive UType without explicit URecursiveType");
   }
 
   InProgress.insert(Ty);
-  std::optional<std::string> NameHint;
 
   HType *Result = nullptr;
   // 先处理非指针类型
@@ -155,14 +203,8 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
     }
     auto FTy = Ctx.getFunctionType(false, RetTypes, Params);
     Result = getPtrTy(FTy);
-  } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
-    // TODO
-    // 也搞个recursive类型？比如有一个函数，返回函数指针类型，函数的类型也是自己。
-    Result = convert(V->body);
-    NameHint = V->name;
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
     Result = convertVariable(*V);
-    NameHint = V->name;
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     HType *LhsTy = convert(V->lhs);
     HType *RhsTy = convert(V->rhs);
@@ -796,22 +838,7 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     assert(false && "Unhandled Pointer UType variant");
   }
   assert(Ret->isPointerType());
-  // if cached in map, then is recursive type.
-  auto ForceStructDecl = getStructOrNull(Ty);
-  if (!ForceStructDecl) {
-    return Ret;
-  } else if (Ret->getPointeeType()->isRecordType()) {
-    assert(Ret->getPointeeType()->getAsRecordDecl() == ForceStructDecl);
-    return Ret;
-  } else {
-    // forced to be wrapped in a struct.
-    assert(ForceStructDecl.value()->getFields().empty());
-    ForceStructDecl.value()->addField(
-        ast::FieldDecl{.R = {.Start = 0, .Size = Parent.PointerSize},
-                       .Type = Ret,
-                       .Name = ValueNamer::getName("rec_")});
-    return TypeCache.at(Ty);
-  }
+  return Ret;
 }
 
 HType *TypeBuilder::doUnion(HType *LhsTy, HType *RhsTy) {
