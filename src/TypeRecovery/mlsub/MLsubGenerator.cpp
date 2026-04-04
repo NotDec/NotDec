@@ -271,12 +271,7 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   // handle Memory type.
   auto Mem = AG.AllSCCs.at(0).Generator->ValueTypes.at(nullptr);
   ResultVal->MemoryType = Mem;
-  if (Mem->isPointerType() && Mem->getPointeeType() &&
-      Mem->getPointeeType()->isRecordType()) {
-    ResultVal->MemoryDecl = Mem->getPointeeType()->getAsRecordDecl();
-  }
-  // HType还是按照结构体指针类型来，下面的分支作为兼容性保留
-  else if (Mem->isRecordType()) {
+  if (Mem->isRecordType()) {
     ResultVal->MemoryDecl = Mem->getAsRecordDecl();
   }
 }

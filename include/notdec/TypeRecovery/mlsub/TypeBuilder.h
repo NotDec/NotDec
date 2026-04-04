@@ -63,6 +63,8 @@ protected:
   std::optional<ast::RecordDecl *> getStructOrNull(binarysub::UTypePtr Ty);
   ast::RecordDecl *getOrCreateStruct(binarysub::UTypePtr Ty);
   int64_t accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty);
+  HType *convertFieldType(const binarysub::UTypePtr &Ty,
+                          std::optional<int64_t> FieldSizeBytes);
   HType *doUnion(HType *Lhs, HType *Rhs);
   HType *doInter(HType *Lhs, HType *Rhs);
   HType *convertVariable(const binarysub::UTypeVariable &T);

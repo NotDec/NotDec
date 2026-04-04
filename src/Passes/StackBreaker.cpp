@@ -107,8 +107,7 @@ bool StackBreaker::runOnAlloca(
   };
 
   // skip if alloca is not a struct
-  if (!StackHT->isPointerType() || !StackHT->getPointeeType() ||
-      !StackHT->getPointeeType()->isRecordType()) {
+  if (!StackHT->isRecordType()) {
     // return false;
     // view as a whole block.
     auto NewAlloca =
@@ -117,7 +116,7 @@ bool StackBreaker::runOnAlloca(
     NAs.push_back({.R = {.Start = StartOffset, .Size = EndOffset - StartOffset},
                    .NewAI = NewAlloca});
   } else {
-    auto RD = StackHT->getPointeeType()->getAsRecordDecl();
+    auto RD = StackHT->getAsRecordDecl();
     auto Current = StartOffset;
     // Fields' offset are in increasing order
     for (auto Field : RD->getFields()) {

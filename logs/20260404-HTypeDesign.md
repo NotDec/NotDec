@@ -425,6 +425,27 @@ TODO，设计一下打印的格式。
 
 - 递归类型和缓存策略是 `TypeBuilder` 的地基。如果它还在变，后面的 pointer / union/inter 重构都很容易反复返工
 
+在继续推进 commit 3 之前，先记录一个更直接的结构体建模方向，后续实现优先评估是否能按这套方式收敛：
+
+- 尽量让 `HType` 的结构体语义更贴近当前 `UType`
+- `HType` 里的“结构体类型”直接表示最终会交给 Clang/llvm2c 的结构体指针语义
+  - 也就是说，不再强依赖“`PointerType<RecordType>` 才表示结构体指针”这层额外 carrier
+- 如果某个结构体成员本身仍然是“结构体类型”，则把它解释为内嵌结构体
+  - 这里的含义更接近 layout / field tree，而不是再次额外解引用一层
+- 真正的叶子节点上，如果出现普通 `PointerType`，则表示在这个位置 `load/store` 之后得到的成员值类型
+  - 也就是字段值本身是指针，而不是外层结构体 carrier
+- 按这个方向，结构体层和叶子 pointer 层的职责会更清楚：
+  - 结构体类型负责描述内存布局和字段树
+  - 叶子指针负责描述字段值在解引用后的类型
+- 如果这条路可行，后续应优先减少“先把结构体表示成 pointer carrier，再从 pointer carrier 反推出字段值类型”的中间层
+- commit 3 的实现需要重点重新评估下面几处：
+  - `TypeBuilder::getStructOrNull()` / `getOrCreateStruct()` / `finalizeRecursiveType()` 对 recursive anchor 的假设
+  - `craftStruct()` 对字段类型的处理是否还能直接使用结构体类型本身，而不是先假设 offset edge 一定是 pointer-to-field
+  - `HType::RecordType`、`DualPointerType`、普通 `PointerType` 三者的边界
+  - `llvm2c` 当前 `convertType()` 对 `RecordType` 的解释是否需要配套调整
+
+如果最后发现“让 `RecordType` 直接承担结构体指针语义”会把现有 Clang type 约定打穿，再退回到当前的双层方案；但实现时应优先验证这条更简单的模型，而不是默认维持现有复杂投影层。
+
 ### commit 3: 引入 DualPointer，完整保留 `UPointerType { load, store, psize }`
 
 目标：

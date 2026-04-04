@@ -142,7 +142,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
         RecordDecl *Decl = RecordDecl::Create(
             Ctx, ValueNamer::getName(prefix != nullptr ? prefix : "struct_"));
         HType *Ret = Ctx.getPointerType(false, Parent.PointerSize,
-                                        Ctx.getRecordType(false, Decl));
+                                        Ctx.getRecordPtrType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);
         return Ret;
       }
@@ -312,7 +312,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
           auto Name =
               ValueNamer::getName(prefix != nullptr ? prefix : "struct_");
           RecordDecl *Decl = RecordDecl::Create(Ctx, Name);
-          Ret = getPtrTy(Ctx.getRecordType(false, Decl));
+          Ret = getPtrTy(Ctx.getRecordPtrType(false, Decl));
           auto FieldName = ValueNamer::getName("field_");
           auto CurrentDecl = FieldDecl{
               .R = *ValidRange,
@@ -334,7 +334,7 @@ HType *TypeBuilder::buildType(const CGNode &Node, Variance V,
       } else {
         auto Name = ValueNamer::getName(prefix != nullptr ? prefix : "struct_");
         Decl = RecordDecl::Create(Ctx, Name);
-        Ret = getPtrTy(Ctx.getRecordType(false, Decl));
+        Ret = getPtrTy(Ctx.getRecordPtrType(false, Decl));
         NodeTypeMap.emplace(&Node, Ret);
       }
       hasSetNodeMap = true;

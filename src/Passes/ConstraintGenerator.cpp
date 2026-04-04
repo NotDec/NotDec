@@ -1363,12 +1363,11 @@ void TypeRecovery::genASTTypes(Module &M) {
   llvm::errs() << "Memory Type: " << CTy->getAsString() << "\n";
 
   using notdec::ast::RecordDecl;
-  using notdec::ast::RecordType;
+  using notdec::ast::RecordPtrType;
   RecordDecl *Mem = nullptr;
   // if Memory type is not void
-  if (CTy->isPointerType() && CTy->getPointeeType() != nullptr &&
-      CTy->getPointeeType()->isRecordType()) {
-    if (auto RD = CTy->getPointeeType()->getAs<RecordType>()) {
+  if (CTy->isRecordType()) {
+    if (auto RD = CTy->getAs<RecordPtrType>()) {
       Mem = RD->getDecl();
       Mem->setBytesManager(MemoryBytes);
     } else {
@@ -1380,7 +1379,7 @@ void TypeRecovery::genASTTypes(Module &M) {
     // Info.Bytes = MemoryBytes;
     // Info.resolveInitialValue();
     // 4 Save the result
-    ResultVal->MemoryType = CTy->getPointeeType();
+    ResultVal->MemoryType = CTy;
     ResultVal->MemoryDecl = Mem;
   } else {
     llvm::errs() << "ERROR: Memory Type is void!: " << CTy->getAsString() << "\n";

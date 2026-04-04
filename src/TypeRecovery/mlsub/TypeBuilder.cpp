@@ -93,8 +93,6 @@ TypeBuilder::getStructOrNull(binarysub::UTypePtr Ty) {
   auto *HTy = CacheIt->second;
   if (HTy->isRecordType()) {
     return HTy->getAsRecordDecl();
-  } else if (HTy->isPointerType() && HTy->getPointeeType()->isRecordType()) {
-    return HTy->getPointeeType()->getAsRecordDecl();
   }
   return std::nullopt;
 }
@@ -104,8 +102,7 @@ ast::RecordDecl *TypeBuilder::getOrCreateStruct(binarysub::UTypePtr Ty) {
   // create as struct ptr, if not in type cache
   if (!It.has_value()) {
     RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("struct_"));
-    HType *Ret = Ctx.getPointerType(false, Parent.PointerSize * 8,
-                                    Ctx.getRecordType(false, Decl));
+    HType *Ret = Ctx.getRecordPtrType(false, Decl);
     TypeCache[Ty] = Ret;
     It = Decl;
   }
@@ -120,9 +117,7 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
   }
 
   auto *Decl = ForceStructDecl.value();
-  if (Result->isPointerType() && Result->getPointeeType() != nullptr &&
-      Result->getPointeeType()->isRecordType() &&
-      Result->getPointeeType()->getAsRecordDecl() == Decl) {
+  if (Result->isRecordType() && Result->getAsRecordDecl() == Decl) {
     return Result;
   }
 
@@ -138,6 +133,81 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
       .Name = ValueNamer::getName("rec_"),
   });
   return TypeCache.at(Ty);
+}
+
+HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
+                                     std::optional<int64_t> FieldSizeBytes) {
+  auto getIntegerCarrier = [&]() -> HType * {
+    auto SizeBytes = FieldSizeBytes.value_or(Parent.PointerSize);
+    return Ctx.getIntegerType(false, SizeBytes * 8, true);
+  };
+
+  if (std::get_if<UTop>(&Ty->v) || std::get_if<UBot>(&Ty->v)) {
+    return getIntegerCarrier();
+  } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
+    return parsePrimitiveName(V->name, binarysub::get_size(Ty));
+  } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
+    return convertVariable(*V);
+  } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
+    std::vector<HType *> Params;
+    for (auto &P : V->args) {
+      Params.push_back(convertFieldType(P, std::nullopt));
+    }
+    std::vector<HType *> RetTypes;
+    if (V->result) {
+      RetTypes.push_back(convertFieldType(V->result, std::nullopt));
+    }
+    auto FTy = Ctx.getFunctionType(false, RetTypes, Params);
+    return getPtrTy(FTy);
+  } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
+    auto convertSide = [&](const UTypePtr &Side) -> HType * {
+      if (!Side) {
+        return nullptr;
+      }
+      if (std::get_if<UTop>(&Side->v) || std::get_if<UBot>(&Side->v)) {
+        return nullptr;
+      }
+      return convertFieldType(Side, std::nullopt);
+    };
+    HType *LoadTy = convertSide(V->load);
+    HType *StoreTy = convertSide(V->store);
+    if (LoadTy && StoreTy) {
+      if (LoadTy == StoreTy ||
+          LoadTy->getCanonicalType() == StoreTy->getCanonicalType()) {
+        return LoadTy->getCanonicalType();
+      }
+      if (LoadTy->isVoidPtrType()) {
+        return StoreTy;
+      }
+      if (StoreTy->isVoidPtrType()) {
+        return LoadTy;
+      }
+      return doUnion(LoadTy, StoreTy);
+    }
+    if (LoadTy) {
+      return LoadTy;
+    }
+    if (StoreTy) {
+      return StoreTy;
+    }
+    return getIntegerCarrier();
+  } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
+    auto &T = *PT;
+    std::vector<std::pair<OffsetRange, UTypePtr>> RawFields;
+    for (const auto &field : T.fields) {
+      RawFields.push_back({OffsetRange::fromStr(field.first), field.second});
+    }
+    return convertStruct(Ty, RawFields, FieldSizeBytes);
+  } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
+    return doUnion(convertFieldType(V->lhs, FieldSizeBytes),
+                   convertFieldType(V->rhs, FieldSizeBytes));
+  } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
+    return doInter(convertFieldType(V->lhs, FieldSizeBytes),
+                   convertFieldType(V->rhs, FieldSizeBytes));
+  } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
+    return convertRecursive(Ty, *V);
+  }
+  assert(false && "Unhandled field UType variant");
 }
 
 HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
@@ -302,7 +372,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
           .Name = FieldName,
           .Comment = "at offset: " + std::to_string(ValidRange->Start)};
       Decl->addField(CurrentDecl);
-      return getPtrTy(Ctx.getRecordType(false, Decl));
+      return Ctx.getRecordPtrType(false, Decl);
     }
   }
 
@@ -329,17 +399,6 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
 
     HType *Ty = Ent.second;
-    if (!Ty->isPointerType()) {
-      assert(false);
-      llvm::errs() << "Warning: Offset edge is not pointer type!\n";
-      continue;
-    }
-    // the node is a field pointer type. get the field type.
-    Ty = Ty->getPointeeType();
-    if (Ty == nullptr) {
-      // Ent.first.Size is tracked in bytes, while HType integer widths are bits.
-      Ty = Ctx.getIntegerType(false, Ent.first.Size * 8, true);
-    }
 
     auto FieldName = ValueNamer::getName("field_");
     auto CurrentDecl =
@@ -372,10 +431,6 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
       for (; j < Fields.size(); j++) {
         auto &EntJ = Fields[j];
         auto TyJ = EntJ.second;
-        if (!TyJ->isPointerType()) {
-          break;
-        }
-        TyJ = TyJ->getPointeeType();
         if (!TyJ->isCharType()) {
           break;
         }
@@ -490,16 +545,10 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     llvm::errs() << "Error: Empty Struct?\n";
   }
 
-  // if no prevDecl, we may simplify wrapper struct 
-  // if there is only one field, return the field's type
   if (!PrevDecl && Decl->getFields().size() == 0) {
     return getVoidPtr();
-  } else if (!PrevDecl && Decl->getFields().size() == 1 &&
-             Decl->getFields().front().R.Start == 0) {
-    return getPtrTy(Decl->getFields().front().Type);
-  } else {
-    return getPtrTy(Ctx.getRecordType(false, Decl));
   }
+  return Ctx.getRecordPtrType(false, Decl);
 }
 
 HType *TypeBuilder::convertStruct(
@@ -600,7 +649,7 @@ HType *TypeBuilder::convertStruct(
       auto SizeInBits = accessedPointeeSizeInBits(Ent.second);
       auto Size = SizeInBits <= 0 ? 0 : (SizeInBits + 7) / 8;
       Fields.push_back({SimpleRange{.Start = Ent.first.offset, .Size = Size},
-                        convertPointer(Ent.second, Size)});
+                        convertFieldType(Ent.second, Size)});
     }
   }
 
@@ -750,7 +799,7 @@ HType *TypeBuilder::convertStruct(
       // push the merged union back to fields, and iterate again
       OtherFields.push_back({FieldEntry{
           SimpleRange{.Start = UnionStart + MinStartOff, .Size = OurSize},
-          getPtrTy(Ctx.getUnionType(false, Decl))}});
+          Ctx.getUnionType(false, Decl)}});
       assert(NoUpdate == false);
       // #endregion build members using OverlapFields;
       // reiterate with merged fields.
@@ -837,7 +886,9 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
   } else {
     assert(false && "Unhandled Pointer UType variant");
   }
-  assert(Ret->isPointerType());
+  assert((Ret->isPointerType() || Ret->isDualPointerType() ||
+          Ret->isRecordType()) &&
+         "Pointer conversion must preserve address-like semantics");
   return Ret;
 }
 
