@@ -101,6 +101,7 @@ struct ConstraintsGenerator {
   }
   void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL,
                 bool SolveMemory = false);
+  void releaseBinarysubState();
 
   SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd);
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);

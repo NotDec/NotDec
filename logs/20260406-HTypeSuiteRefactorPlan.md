@@ -86,6 +86,26 @@
 - 还没有做稳定排序、stable key、canonical HType 文本
 - 还不能直接作为长期 golden，需要继续完成第 2～4 步
 
+补充处理（2026-04-07）：
+
+- 修复了 `--dump-htypes` 路径上一处稳定复现的 LSAN 泄漏
+- 复现命令：
+
+```bash
+./build/bin/notdec test/decompile/llvm-ir/cases/01_Simple1.ll \
+  -o /tmp/01_Simple1.pass1.ll \
+  --tr-level=2 \
+  --dump-htypes /tmp/01_Simple1.pass1.htypes
+```
+
+- 根因是 `binarysub::TypeNode` 约束图中 `VariableState.lowerBounds/upperBounds`
+  等强引用边会形成环；`genTypes()` 完成后虽然只保留 `HType` 结果，但旧的
+  binarysub 图仍留在 `ConstraintsGenerator` 里，导致进程退出时被 LSAN 识别
+- 当前修复策略是在所有 SCC 完成 `genTypes()` 之后，统一递归释放
+  binarysub 类型图中的强引用边，再丢弃 `V2N` / `unhandledCalls` 等中间状态
+- 这一步只针对类型恢复中间图的生命周期管理，不改变 HType 推理结果
+- 已完成本地验证：上述命令现在可稳定退出且不再报 LSAN
+
 建议本批提交 message：
 
 ```text

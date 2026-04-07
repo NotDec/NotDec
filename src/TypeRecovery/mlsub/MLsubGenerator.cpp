@@ -257,6 +257,16 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   }
 }
 
+void ConstraintsGenerator::releaseBinarysubState() {
+  for (auto &Ent : V2N) {
+    binarysub::release_type_graph(Ent.second);
+  }
+  binarysub::release_type_graph(MemoryType);
+  V2N = {};
+  ContraVariantValues.clear();
+  unhandledCalls.clear();
+}
+
 void MLsubRecovery::genASTTypes(llvm::Module &M) {
   ResultVal = std::make_unique<TypeRecovery::Result>();
   // 合并所有类型到一个大的ValueTypes里面。
@@ -289,6 +299,9 @@ void MLsubRecovery::topDownPhase() {
     // 尝试运行简化算法，保存到ValueTypes里面。
     // solve memory if ind == 0
     Data.Generator->genTypes(*HCtx, Mod.getDataLayout(), Ind == 0);
+  }
+  for (auto &Data : AG.AllSCCs) {
+    Data.Generator->releaseBinarysubState();
   }
 }
 
