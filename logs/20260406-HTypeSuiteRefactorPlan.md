@@ -352,6 +352,77 @@ main::%p => struct_0*
 
 但如果当前 `getAsString()` 已经足够稳定，则尽量少改。
 
+### 第 4 步完成情况（2026-04-07）
+
+结论：
+
+- `HType::getAsString()` 不足以直接作为长期 golden
+- 主要不稳定源不是基础类型语法本身，而是它会直接引用类型恢复阶段通过
+  `ValueNamer` 生成的声明名 / 字段名，例如 `struct_7`、`field_8`
+- 这会让右侧 type 文本与 `[decls]` 一起受到中间构造顺序影响，不适合作为
+  snapshot oracle
+
+已完成的改动：
+
+- 在 `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/HType.h`
+  与 `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/HType.cpp`
+  中新增 `HTypeSnapshotFormatter`
+- snapshot formatter 会为声明分配独立 canonical 名：
+  - `struct_0`
+  - `union_0`
+  - `typedef_0`
+- 字段名也改为打印期现算的 canonical 名：
+  - `field_0`
+  - `padding_0`
+- `HTypeResult::print()` 已改为复用同一个 formatter 来同时打印：
+  - `[decls]`
+  - `[upper]`
+  - `[lower]`
+  - `[memory]`
+- value 侧 record/union/typedef type 现在不再泄漏内部声明文本，而是引用
+  canonical 名，例如：
+  - `main::%p => struct_0*`
+- `SetUnionType` / `SetInterType` 的打印已按左右子表达式文本排序，
+  避免 `(A | B)` 与 `(B | A)` 在 snapshot 中来回翻转
+- 指针 / dual-pointer / function type 继续沿用现有语法，但其子类型会先经过
+  canonical print
+
+当前取舍：
+
+- `getAsString()` 仍保留原行为，继续服务调试和其他非 snapshot 路径
+- canonical 化只作用于 HType snapshot 导出路径，不主动扩大影响面
+- `TypeVariableType` 当前仍沿用现有名字（如 `'c:32`），本步未额外重命名
+
+本地验证：
+
+- 已重新构建 `build/bin/notdec`
+- `02_ConstantAddr1.ll` 的导出已从：
+  - `struct struct_7*`
+  变为：
+  - `struct_0*`
+- `[decls]` 中对应声明现在固定为：
+
+```text
+struct struct_0 {
+  ptr<load=void, store=void, psize=32> field_0; /* at offset: 1024 */
+};
+```
+
+- 对 `02_ConstantAddr1.ll`、`11_SimpleRecursive1.ll` 各重复跑两次，
+  `.htypes` diff 结果为空，确认当前 canonical print 至少在本地重复执行下稳定
+
+补充说明：
+
+- `06_SimpleRecursive2.ll` 在本地验证时出现长时间未结束现象，当前看起来更像
+  现有类型恢复/样例层面的独立问题，不是本步 canonical print 引入的新回归；
+  第 4 步先不扩大处理范围
+
+建议本批提交 message：
+
+```text
+Canonicalize HType snapshot printing
+```
+
 ---
 
 ## 第 5 步：实现 CLI 导出文件写入
