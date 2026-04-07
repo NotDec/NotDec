@@ -62,45 +62,6 @@ using notdec::frontend::wasm::MEM_NAME;
 
 using namespace llvm;
 
-namespace {
-
-void printHTypeMap(raw_ostream &OS,
-                   const std::map<notdec::ExtValuePtr, notdec::ast::HType *> &Map) {
-  for (const auto &VT : Map) {
-    OS << "  ";
-    if (auto Val = std::get_if<llvm::Value *>(&VT.first)) {
-      if (*Val == nullptr) {
-        OS << "<null-value>: ";
-      } else if (auto Arg = llvm::dyn_cast<llvm::Argument>(*Val)) {
-        OS << Arg->getParent()->getName() << ": ";
-      } else if (auto Inst = llvm::dyn_cast<llvm::Instruction>(*Val)) {
-        OS << Inst->getParent()->getParent()->getName() << ": ";
-      }
-      if (*Val != nullptr) {
-        OS << **Val << ": ";
-      }
-    } else if (auto Ret = std::get_if<notdec::ReturnValue>(&VT.first)) {
-      OS << Ret->Func->getName() << " ReturnValue: ";
-    } else if (auto IC = std::get_if<notdec::UConstant>(&VT.first)) {
-      OS << *IC->Val << " -> ";
-    } else if (auto CA = std::get_if<notdec::ConstantAddr>(&VT.first)) {
-      OS << "ConstantAddr: " << *CA->Val << " -> ";
-    } else if (auto SO = std::get_if<notdec::StackObject>(&VT.first)) {
-      OS << "StackObject: " << *SO->Allocator << " -> ";
-    } else if (auto HO = std::get_if<notdec::HeapObject>(&VT.first)) {
-      OS << "HeapObject: " << *HO->Allocator << " -> ";
-    }
-    if (VT.second != nullptr) {
-      OS << VT.second->getAsString();
-    } else {
-      OS << "<null>";
-    }
-    OS << "\n";
-  }
-}
-
-} // namespace
-
 // A Pass that undo some optimizations of the InstCombinePass.
 struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
@@ -504,15 +465,7 @@ void PassEnv::dump_htypes(const std::string &OutputPath) {
     std::abort();
   }
 
-  OS << "Current Type definitions:\n";
-  if (HighTypes->HTCtx != nullptr) {
-    HighTypes->HTCtx->printDecls(OS);
-  }
-  OS << "\n";
-  OS << "HighTypes.ValueTypes:\n";
-  printHTypeMap(OS, HighTypes->ValueTypes);
-  OS << "HighTypes.ValueTypesUpperBound:\n";
-  printHTypeMap(OS, HighTypes->ValueTypesLowerBound);
+  HighTypes->print(OS);
 }
 
 // 需要去掉尾递归等优化，因此需要构建自己的Pass。

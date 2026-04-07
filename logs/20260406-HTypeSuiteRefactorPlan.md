@@ -161,6 +161,34 @@ Add initial --dump-htypes export path for recovered HTypes
 
 这样格式固定，便于 diff。
 
+### 第 2 步完成情况（2026-04-07）
+
+已完成的改动：
+
+- 在 `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h` 中为 `HTypeResult` 增加 `print(llvm::raw_ostream &OS) const`
+- 保留 `dump()`，但改为直接复用 `print(llvm::errs())`
+- 将输出格式固定为：
+  - `# HTypeResult`
+  - `[decls]`
+  - `[upper]`
+  - `[lower]`
+  - `[memory]`
+- `decls` 与 value/type 条目现在都会先转成文本，再按字典序稳定排序
+- 空段也会保留段头，避免快照格式随内容缺失而漂移
+- `PassEnv::dump_htypes()` 已改为复用 `HTypeResult::print()`，CLI 导出与调试导出走同一份格式
+
+当前仍是过渡态：
+
+- 左侧 key 仍暂时依赖现有 `ExtValuePtr::toString(..., true)`，还不是长期稳定 key
+- 这部分会在第 3 步单独替换为 `toStableString(...)`
+- 右侧 `HType` 文本仍沿用 `getAsString()`，是否需要 canonical print 留给第 4 步评估
+
+建议本批提交 message：
+
+```text
+Stabilize HTypeResult snapshot formatting
+```
+
 ---
 
 ## 第 3 步：为 `ExtValuePtr` 增加 stable 文本格式
