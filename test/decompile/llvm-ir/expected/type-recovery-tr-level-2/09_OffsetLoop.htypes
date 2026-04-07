@@ -1,0 +1,24 @@
+# HTypeResult
+
+[decls]
+
+[upper]
+<null-value> => i32
+@main => i32 (*)('c:32, 'd:32)*
+const(i32 0)@main::%bb.exit.i0:0 => i32
+const(i32 0)@main::%bb.loop.i3:0 => i32
+main::%cmp => i1
+main::%new_9 => i32
+main::%p1 => i32
+main::%p2 => i32
+main::%stack1 => i32
+main::%stack1p => i32
+main::<ret> => i32
+main::arg0 => 'c:32
+main::arg1 => 'd:32
+
+[lower]
+
+[memory]
+type => i32
+

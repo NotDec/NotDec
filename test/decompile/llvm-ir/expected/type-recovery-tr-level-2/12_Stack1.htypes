@@ -1,0 +1,27 @@
+# HTypeResult
+
+[decls]
+
+[upper]
+<null-value> => i32
+@main => i32 (*)('c:32, 'd:32)*
+main::%. => i32
+main::%eq1 => i1
+main::%eq2 => i1
+main::%eq3 => i1
+main::%fval2 => f32
+main::%ptr1 => i32
+main::%ptr2 => i32
+main::%stack => i32
+main::%stackPtr => i32
+main::%val1 => i32
+main::%val2 => i32
+main::<ret> => i32
+main::arg0 => 'c:32
+main::arg1 => 'd:32
+
+[lower]
+
+[memory]
+type => i32
+

@@ -1,11 +1,11 @@
-## LLVM IR Decompiler Cases
+## LLVM IR Type Recovery Cases
 
-This suite stores LLVM IR driven decompiler regression tests.
+This suite stores LLVM IR driven type recovery regression tests.
 
 - `cases/`
-  - Checked-in inputs for the decompiler.
-- `expected/tr-level-2/`
-  - Golden outputs for `notdec --tr-level=2`.
+  - Checked-in LLVM IR inputs for `notdec`.
+- `expected/type-recovery-tr-level-2/`
+  - Golden HType snapshots for `notdec --tr-level=2 --dump-htypes`.
 - `legacy/`
   - Older backend artifacts kept for reference while the suite is being
     normalized.
@@ -23,11 +23,13 @@ inputs, expected outputs, and legacy references separate.
 
 ## Manifest Conventions
 
-`tr-level-2.json` is the authoritative list of cases in the current suite.
+`type-recovery-tr-level-2.json` is the authoritative list of cases in the
+current suite.
 
 - `pass`
-  - The case must decompile successfully and match the checked-in golden file.
+  - The case must recover HTypes successfully and match the checked-in golden
+    snapshot.
 - `xfail`
-  - The case is a known failure at `tr-level=2`.
+  - The case is a known type recovery failure at `tr-level=2`.
 - `skip`
   - The case is tracked but not executed.

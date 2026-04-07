@@ -32,13 +32,18 @@ def load_manifest(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
-def command_succeeded(process: subprocess.CompletedProcess[str], output_path: Path) -> bool:
+def command_succeeded(
+    process: subprocess.CompletedProcess[str],
+    ir_output_path: Path,
+    snapshot_path: Path,
+) -> bool:
     if process.returncode != 0:
-        return False
-    if not output_path.exists() or output_path.stat().st_size == 0:
         return False
     if "IR parsing failed:" in process.stdout:
         return False
+    for path in (ir_output_path, snapshot_path):
+        if not path.exists() or path.stat().st_size == 0:
+            return False
     return True
 
 
@@ -86,7 +91,8 @@ def main() -> int:
         status = case.get("status", "pass")
         input_path = resolve_path(manifest_dir, case["input"])
         expected_path = resolve_path(manifest_dir, case.get("expected"))
-        output_path = workdir / f"{name}.out.c"
+        output_path = workdir / f"{name}.out.ll"
+        snapshot_path = workdir / f"{name}.out.htypes"
         log_path = workdir / f"{name}.log"
 
         if status == "skip":
@@ -94,8 +100,9 @@ def main() -> int:
             print(f"[SKIP ] {name}")
             continue
 
-        if output_path.exists():
-            output_path.unlink()
+        for path in (output_path, snapshot_path):
+            if path.exists():
+                path.unlink()
 
         command = [
             args.binary,
@@ -104,6 +111,8 @@ def main() -> int:
             str(output_path),
             *default_args,
             *case.get("args", []),
+            "--dump-htypes",
+            str(snapshot_path),
         ]
 
         process = subprocess.run(
@@ -116,11 +125,11 @@ def main() -> int:
         )
         write_log(log_path, command, process)
 
-        succeeded = command_succeeded(process, output_path)
+        succeeded = command_succeeded(process, output_path, snapshot_path)
         matches_expected = False
 
         if succeeded and expected_path is not None:
-            actual = normalize_text(output_path.read_text())
+            actual = normalize_text(snapshot_path.read_text())
             expected = normalize_text(expected_path.read_text())
             matches_expected = actual == expected
         elif succeeded and expected_path is None:
@@ -137,7 +146,7 @@ def main() -> int:
             print(f"        log: {log_path}")
             if expected_path is not None and succeeded and not matches_expected:
                 print(f"        expected: {expected_path}")
-                print(f"        actual:   {output_path}")
+                print(f"        actual:   {snapshot_path}")
             continue
 
         if status == "xfail":

@@ -190,7 +190,7 @@ cmake --build ./build --target all
 2. CTest 集成测试
    - `test/CMakeLists.txt`
    - 当前已接入：
-     - `notdec.decompile.llvm_ir.tr_level_2`
+     - `notdec.type_recovery.llvm_ir.tr_level_2`
 3. shell 脚本
    - `test.sh`
 4. 大量样例/实验脚本
@@ -211,30 +211,30 @@ cmake --build ./build --target all
 
 ### `test/decompile/llvm-ir/` 目录约定
 
-该目录用于基于 LLVM IR 输入的反编译回归测试。
+该目录用于基于 LLVM IR 输入的类型恢复回归测试。
 
 - `cases/`
   - 输入样例（当前主要是 `.ll`，也可能保留相关 `.wat` 辅助输入）
-- `expected/tr-level-2/`
-  - `notdec --tr-level=2` 的 golden 输出
+- `expected/type-recovery-tr-level-2/`
+  - `notdec --tr-level=2 --dump-htypes` 的 golden snapshot 输出
 - `legacy/`
   - 历史实验产物、旧 backend 输出、迁移阶段参考文件
   - 默认不作为当前权威 oracle
 
 当前 suite manifest 为：
 
-- `test/decompile/llvm-ir/tr-level-2.json`
+- `test/decompile/llvm-ir/type-recovery-tr-level-2.json`
 
 当前 suite runner 为：
 
-- `test/tools/run_decompile_suite.py`
+- `test/tools/run_type_recovery_suite.py`
 
 runner 支持的 case 状态：
 
 - `pass`
-  - 必须成功运行，并与 golden 输出一致
+  - 必须成功运行，并与 `.htypes` golden snapshot 一致
 - `xfail`
-  - 当前已知失败，先保留为回归跟踪点
+  - 当前已知类型恢复失败，先保留为回归跟踪点
 - `skip`
   - 暂时登记但不执行
 
@@ -245,7 +245,7 @@ runner 支持的 case 状态：
 典型命令：
 
 ```bash
-ctest --test-dir build -R notdec.decompile.llvm_ir.tr_level_2 --output-on-failure
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
 ```
 
 当前 `tr-level=2` 的 LLVM IR 集成测试 runner 默认会设置：

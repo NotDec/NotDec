@@ -1,0 +1,27 @@
+# HTypeResult
+
+[decls]
+struct struct_0 {
+  ptr<load=void, store='j:32, psize=32> field_0; /* at offset: 1024 */
+}; /*  */
+
+
+[upper]
+<null-value> => struct_0*
+@main => 'j:32 (*)('e:32, 'f:32)*
+@passMem1 => 'j:32 (*)()*
+addr(0x400) => i32
+const(i32 0)@main::%bb.allocator.i0:0 => 'j:32
+main::%r => 'j:32
+main::<ret> => 'j:32
+main::arg0 => 'e:32
+main::arg1 => 'f:32
+passMem1::%f1 => 'j:32
+passMem1::<ret> => 'j:32
+
+[lower]
+
+[memory]
+decl => struct_0
+type => struct_0*
+

@@ -564,6 +564,30 @@ Finalize CLI HType snapshot export for all output modes
 
 这样遇到失败时还能顺手看最终 IR。
 
+### 第 6 步完成情况（2026-04-07）
+
+已完成的改动：
+
+- 将 `test/tools/run_decompile_suite.py` 重命名为
+  `test/tools/run_type_recovery_suite.py`
+- runner 现在统一执行：
+  - `notdec input.ll -o <case>.out.ll --tr-level=2 --dump-htypes <case>.out.htypes`
+- 成功条件已切换为：
+  - 返回码为 0
+  - `.out.ll` 存在且非空
+  - `.out.htypes` 存在且非空
+  - 日志中不包含 `IR parsing failed:`
+- golden 比较对象已从 `.c` 输出切换为 `.htypes`
+- 失败时会保留：
+  - `<case>.out.ll`
+  - `<case>.out.htypes`
+  - `<case>.log`
+
+当前取舍：
+
+- runner 仍保留“manifest + pass/xfail/skip”语义，尽量减少测试框架层面的额外改造
+- 只切换比较目标，不引入新的测试 DSL，便于继续沿用现有回归工作流
+
 ---
 
 ## 第 7 步：直接把现有 suite 改名并迁移用途
@@ -617,6 +641,23 @@ Finalize CLI HType snapshot export for all output modes
 
 - `expected/type-recovery-tr-level-2/*.htypes`
 
+### 第 7 步完成情况（2026-04-07）
+
+已完成的改动：
+
+- `test/CMakeLists.txt` 中的 CTest 名称已改为：
+  - `notdec.type_recovery.llvm_ir.tr_level_2`
+- manifest 已改名为：
+  - `test/decompile/llvm-ir/type-recovery-tr-level-2.json`
+- suite 元信息已同步改成 “notdec type recovery llvm ir tr-level=2”
+- 新 golden 目录已切换为：
+  - `test/decompile/llvm-ir/expected/type-recovery-tr-level-2/`
+
+说明：
+
+- 旧的 `.c` 期望文件不再被当前 suite 引用
+- 当前权威 oracle 已正式切换为 `.htypes` snapshot
+
 ---
 
 ## 第 8 步：生成第一批 `.htypes` golden
@@ -662,6 +703,46 @@ notdec case.ll -o /tmp/x.ll --tr-level=2 --dump-htypes /tmp/x.htypes
 
 所以不要原样保留旧的 xfail reason，要重新分类。
 
+### 第 8 步完成情况（2026-04-07）
+
+已导入第一批 `.htypes` golden：
+
+- `01_Simple1`
+- `02_ConstantAddr1`
+- `03_LoadUpdateGood`
+- `04_LoadUpdate`
+- `05_MultiOffset`
+- `07_PassStack1`
+- `08_Memory1`
+- `09_OffsetLoop`
+- `10_BottomUp1`
+- `11_SimpleRecursive1`
+- `12_Stack1`
+- `16_Poly1`
+
+其中原本因为 `llvm2c` 路径失败而标成 `xfail`，但迁移到 HType snapshot 后
+已转为 `pass` 的 case 包括：
+
+- `07_PassStack1`
+- `08_Memory1`
+- `10_BottomUp1`
+- `11_SimpleRecursive1`
+- `16_Poly1`
+
+保留 `xfail` 的 case 现已按类型恢复层面的真实失败重分类：
+
+- `06_SimpleRecursive2`
+  - 类型恢复长时间未结束，当前按 timeout 跟踪
+- `13_stack_variable_alloc`
+- `15_signed1`
+  - `MLsubGenerator` 尚不能处理字符串 `getelementptr` 常量
+- `14_Equality1`
+- `17_StackArray`
+- `18_offset1`
+  - `PNDiff` 在 `getPNIVar` 上触发断言
+- `19_PtrPtr`
+  - 输入 LLVM IR 本身无法通过 parser，因而不会生成 `.htypes`
+
 ---
 
 ## 第 9 步：调整 manifest 字段与 case 语义
@@ -693,6 +774,21 @@ notdec case.ll -o /tmp/x.ll --tr-level=2 --dump-htypes /tmp/x.htypes
 - missing lower bound for stack object
 
 避免继续保留“llvm2c assertion”这类已经不相关的说明。
+
+### 第 9 步完成情况（2026-04-07）
+
+已完成的改动：
+
+- manifest 中所有 `pass` case 的 `expected` 已改为指向 `.htypes`
+- `status` 仍保留 `pass` / `xfail` / `skip`
+- 旧的 `llvm2c constant-user assertion`、`type recovery TODO assertion`
+  等原因已被替换为当前真实可复现的失败描述
+
+结果：
+
+- manifest 语义已与 “类型恢复 snapshot suite” 对齐
+- 后续再处理失败 case 时，可以直接依据现有 `reason` 和日志定位到
+  类型恢复链路中的具体断点
 
 ---
 
@@ -734,6 +830,25 @@ notdec case.ll -o /tmp/x.ll --tr-level=2 --dump-htypes /tmp/x.htypes
 - stable key 的生成规则
 - golden 更新方式
 
+### 第 10 步完成情况（2026-04-07）
+
+已完成的文档同步：
+
+- 更新 `AGENTS.md`
+  - 当前 CTest suite 名称
+  - manifest 路径
+  - runner 路径
+  - `expected/type-recovery-tr-level-2/` 目录约定
+  - `ctest` 运行命令
+- 更新 `test/decompile/llvm-ir/README.md`
+  - 明确该目录当前承载的是 LLVM IR 类型恢复回归
+  - 说明 golden 现为 `.htypes` snapshot
+
+当前文档口径已经切换为：
+
+- 当前 suite 检查的是 `Value -> HType`
+- 不再以 `.c` 输出作为权威 oracle
+
 ---
 
 ## 第 11 步：回归检查与稳定性清理
@@ -771,6 +886,43 @@ notdec case.ll -o /tmp/x.ll --tr-level=2 --dump-htypes /tmp/x.htypes
 - 临时编号
 - 调试 trace
 - 输出时机相关文本
+
+### 第 11 步完成情况（2026-04-07）
+
+已完成的稳定性检查：
+
+- 对以下 12 个 `pass` case 各重复运行两次：
+  - `01_Simple1`
+  - `02_ConstantAddr1`
+  - `03_LoadUpdateGood`
+  - `04_LoadUpdate`
+  - `05_MultiOffset`
+  - `07_PassStack1`
+  - `08_Memory1`
+  - `09_OffsetLoop`
+  - `10_BottomUp1`
+  - `11_SimpleRecursive1`
+  - `12_Stack1`
+  - `16_Poly1`
+- 两次导出的 `.htypes` 文本均完全一致
+- 新 suite 继续保留：
+  - `ASAN_OPTIONS=detect_leaks=0`
+- 当前 `.htypes` 文件中未观察到地址、临时编号、trace 日志等非稳定噪声
+
+最终回归结果：
+
+- 已重新配置工程并运行：
+
+```bash
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+```
+
+- 当前结果为：
+  - `12 passed`
+  - `7 xfailed`
+  - `0 skipped`
+  - `0 xpassed`
+  - `0 failed`
 
 ---
 

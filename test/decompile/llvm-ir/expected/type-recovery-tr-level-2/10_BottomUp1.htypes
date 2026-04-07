@@ -1,0 +1,25 @@
+# HTypeResult
+
+[decls]
+
+[upper]
+<null-value> => i32
+@isFloat => void (*)(f32)*
+@main => i32 (*)('f:32, 'g:32)*
+@ptrFloat => void (*)(('d:32 & ptr<load=f32, store=void, psize=32>))*
+const(i32 0)@main::%bb.allocator.i3:0 => i32
+isFloat::arg0 => f32
+main::%stack => i32
+main::%stackPtr => ('d:32 | ptr<load=f32, store=void, psize=32>)
+main::<ret> => i32
+main::arg0 => 'f:32
+main::arg1 => 'g:32
+ptrFloat::%f1 => f32
+ptrFloat::%v_12 => 'd:32
+ptrFloat::arg0 => 'd:32
+
+[lower]
+
+[memory]
+type => i32
+
