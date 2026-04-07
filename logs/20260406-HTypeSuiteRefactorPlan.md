@@ -261,6 +261,59 @@ Stabilize HTypeResult snapshot formatting
 
 这样以后调整 debug 文本不会把 golden 全部打爆。
 
+### 第 3 步完成情况（2026-04-07）
+
+已完成的改动：
+
+- 在 `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/ExtValuePtr.h`
+  中新增 `toStableString(const ExtValuePtr &)`
+- 在 `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp`
+  中为 `llvm::Value *`、`ReturnValue`、`UConstant`、`ConstantAddr`、
+  `StackObject`、`HeapObject` 实现了独立的 stable formatter
+- `HTypeResult::print()` 的左侧 key 已切换为 `toStableString(...)`，
+  不再复用偏调试用途的 `toString(..., true)`
+- 本次 stable key 的主要规则为：
+  - 函数参数：`main::arg0`
+  - 返回值：`main::<ret>`
+  - 命名指令值：`main::%foo`
+  - 未命名指令值：`main::%bb0.i3`
+  - 常量 use-site：`const(i32 0)@main::%bb0.i3:1`
+  - 常量地址：`addr(0x400)`
+  - 全局/函数值：`@g`、`@main`
+- 这一步刻意没有修改 `toString()`，调试文本与测试快照格式已解耦
+
+当前状态说明：
+
+- unnamed value 的 stable key 现在优先依据函数内 block/instruction 位置生成，
+  避免因 map 指针顺序不同而通过 `ValueNamer` 产生漂移
+- 右侧 `HType` 文本仍沿用 `getAsString()`，canonical type print 留给第 4 步
+
+本地验证：
+
+- 已重新构建 `build/bin/notdec`
+- 已用以下命令验证快照左侧 key 生效：
+
+```bash
+./build/bin/notdec test/decompile/llvm-ir/cases/01_Simple1.ll \
+  -o /tmp/01_Simple1.step3.ll \
+  --tr-level=2 \
+  --dump-htypes /tmp/01_Simple1.step3.htypes
+
+./build/bin/notdec test/decompile/llvm-ir/cases/02_ConstantAddr1.ll \
+  -o /tmp/02_ConstantAddr1.step3.ll \
+  --tr-level=2 \
+  --dump-htypes /tmp/02_ConstantAddr1.step3.htypes
+```
+
+- 观察到输出 key 已变为 `main::arg0`、`main::<ret>`、`addr(0x400)`、
+  `const(i32 0)@...` 等 stable 形式
+
+建议本批提交 message：
+
+```text
+Add stable ExtValuePtr snapshot keys for HType dumps
+```
+
 ---
 
 ## 第 4 步：检查 HType 文本表示是否足够稳定
