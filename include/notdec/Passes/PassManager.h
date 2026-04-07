@@ -39,6 +39,8 @@ struct PassEnv {
   llvm::StandardInstrumentations SI;
   llvm::PassBuilder PB;
   llvm::ModulePassManager MPM;
+  std::string CachedHTypeSnapshot;
+  bool HasCachedHTypeSnapshot = false;
 
   PassEnv(llvm::Module &Mod)
       : Mod(Mod), SI(::llvm::DebugFlag, false,
@@ -78,7 +80,8 @@ struct PassEnv {
 
   void build_passes(int level);
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
-                  bool disableTypeRecovery);
+                  bool disableTypeRecovery,
+                  bool captureHTypeSnapshot = false);
   void run_passes();
   void dump_htypes(const std::string &OutputPath);
 };
@@ -106,7 +109,8 @@ struct DecompileConfig {
     PE.build_passes(level);
     bool isC = getSuffix(OutFilePath) == ".c";
     if (isC) {
-      PE.add_llvm2c(OutFilePath, llvm2cOpt, Opts.trLevel < 2);
+      PE.add_llvm2c(OutFilePath, llvm2cOpt, Opts.trLevel < 2,
+                    !HTypeDumpPath.empty());
     }
   }
   void run_passes() {

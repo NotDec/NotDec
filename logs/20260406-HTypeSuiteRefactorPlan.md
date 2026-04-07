@@ -467,6 +467,48 @@ Canonicalize HType snapshot printing
 - 明确报错并退出非零
 - 不要写空文件冒充成功
 
+### 第 5 步完成情况（2026-04-07）
+
+已完成的改动：
+
+- `--dump-htypes` 现在会在主流程结束后稳定写出 `.htypes` 文件
+- 对 `.ll/.bc` 输出路径，仍然直接复用 `PassEnv::dump_htypes()` 从
+  `MLsubRecovery` 中取回 `HTypeResult` 并打印
+- 对 `.c` 输出路径，`MLsubNotdecLLVM2C` 在把 `HTypeResult` 交给 llvm2c 之前，
+  会先把 snapshot 文本缓存到 `PassEnv`，后续 `dump_htypes()` 直接写这个缓存，
+  不再在 llvm2c 改写 IR 之后重新跑一遍 `getResult()`
+- 因此 `.c + --dump-htypes` 现在满足：
+  - 不重复 materialize HType 结果
+  - 不依赖 llvm2c 之后被 demote SSA 改写过的模块重新推类型
+  - 导出的 snapshot 与 llvm2c 实际消费的那份 HTypeResult 保持一致
+- 若 `tr-level < 2` 或类型恢复未初始化，仍会明确报错并终止，不会生成空文件
+
+本地验证：
+
+```bash
+cmake --build ./build --target notdec-decompile
+
+./build/bin/notdec test/decompile/llvm-ir/cases/01_Simple1.ll \
+  -o /tmp/01_Simple1.step5.ll \
+  --tr-level=2 \
+  --dump-htypes /tmp/01_Simple1.step5.ll.htypes
+
+./build/bin/notdec test/decompile/llvm-ir/cases/01_Simple1.ll \
+  -o /tmp/01_Simple1.step5.c \
+  --tr-level=2 \
+  --dump-htypes /tmp/01_Simple1.step5.c.htypes
+```
+
+- 两条命令都可成功生成非空 `.htypes`
+- `.c` 路径下导出的 snapshot 与 `.ll` 路径一致，确认没有因 llvm2c 的
+  demote SSA 改写而产生额外漂移
+
+建议本批提交 message：
+
+```text
+Finalize CLI HType snapshot export for all output modes
+```
+
 ---
 
 ## 第 6 步：把测试 runner 从 `.c` 比较改成 `.htypes` 比较

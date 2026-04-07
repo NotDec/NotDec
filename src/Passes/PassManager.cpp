@@ -112,11 +112,17 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
   std::string OutFilePath;
   ::notdec::llvm2c::Options llvm2cOpt;
   bool disableTypeRecovery = false;
+  std::string *CachedHTypeSnapshot = nullptr;
+  bool *HasCachedHTypeSnapshot = nullptr;
 
   MLsubNotdecLLVM2C(mlsub::MLsubRecovery &TR, std::string outFilePath,
-               ::notdec::llvm2c::Options &llvm2cOpt, bool disableTypeRecovery)
+               ::notdec::llvm2c::Options &llvm2cOpt, bool disableTypeRecovery,
+               std::string *CachedHTypeSnapshot = nullptr,
+               bool *HasCachedHTypeSnapshot = nullptr)
       : TR(TR), OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
-        disableTypeRecovery(disableTypeRecovery) {}
+        disableTypeRecovery(disableTypeRecovery),
+        CachedHTypeSnapshot(CachedHTypeSnapshot),
+        HasCachedHTypeSnapshot(HasCachedHTypeSnapshot) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
     std::string outsuffix = getSuffix(OutFilePath);
@@ -126,7 +132,14 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
     std::unique_ptr<TypeRecovery::Result> HighTypes;
     if (!disableTypeRecovery) {
       HighTypes = std::move(TR.getResult(M, MAM));
-      // HighTypes->dump();
+      if (HighTypes != nullptr && CachedHTypeSnapshot != nullptr &&
+          HasCachedHTypeSnapshot != nullptr) {
+        CachedHTypeSnapshot->clear();
+        llvm::raw_string_ostream SnapshotOS(*CachedHTypeSnapshot);
+        HighTypes->print(SnapshotOS);
+        SnapshotOS.flush();
+        *HasCachedHTypeSnapshot = true;
+      }
     }
 
     std::error_code EC;
@@ -426,9 +439,14 @@ void PassEnv::build_passes(int level) {
 
 void PassEnv::add_llvm2c(std::string OutFilePath,
                          ::notdec::llvm2c::Options llvm2cOpt,
-                         bool disableTypeRecovery) {
-  // assert(false && "TODO");
-  MPM.addPass(MLsubNotdecLLVM2C(*TR, OutFilePath, llvm2cOpt, disableTypeRecovery));
+                         bool disableTypeRecovery,
+                         bool captureHTypeSnapshot) {
+  CachedHTypeSnapshot.clear();
+  HasCachedHTypeSnapshot = false;
+  MPM.addPass(MLsubNotdecLLVM2C(
+      *TR, OutFilePath, llvm2cOpt, disableTypeRecovery,
+      captureHTypeSnapshot ? &CachedHTypeSnapshot : nullptr,
+      captureHTypeSnapshot ? &HasCachedHTypeSnapshot : nullptr));
 }
 
 void PassEnv::run_passes() {
@@ -445,6 +463,19 @@ void PassEnv::dump_htypes(const std::string &OutputPath) {
   if (OutputPath.empty()) {
     return;
   }
+
+  if (HasCachedHTypeSnapshot) {
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(OutputPath, EC, llvm::sys::fs::OF_Text);
+    if (EC) {
+      llvm::errs() << "Cannot open HType dump output file " << OutputPath
+                   << ": " << EC.message() << "\n";
+      std::abort();
+    }
+    OS << CachedHTypeSnapshot;
+    return;
+  }
+
   if (TR == nullptr) {
     llvm::errs() << "Error: --dump-htypes requires type recovery to be "
                     "initialized (tr-level >= 2).\n";
