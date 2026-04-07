@@ -43,6 +43,8 @@ if(NOT ${LT_VALID_INSTALLATION})
 		find LLVMConfig.cmake.")
 endif()
 
+set(NOTDEC_LLVM_INSTALL_DIR "${LT_LLVM_INSTALL_DIR}" CACHE PATH "LLVM installation directory for NotDec subprojects" FORCE)
+
 #===============================================================================
 # 2. LOAD LLVM CONFIGURATION
 #    For more: http://llvm.org/docs/CMake.html#embedding-llvm-in-your-project
@@ -75,6 +77,45 @@ message("LLVM STATUS:
 	Libraries   ${LLVM_LIBRARY_DIRS}
 	Targets     ${LLVM_TARGETS_TO_BUILD}"
 )
+
+option(NOTDEC_PREFER_SHARED_LLVM "Prefer linking against shared LLVM/Clang libraries when available." ON)
+
+find_library(NOTDEC_LLVM_DYLIB
+	NAMES LLVM LLVM-14
+	HINTS ${LLVM_LIBRARY_DIRS} "${LT_LLVM_INSTALL_DIR}/lib" "${LT_LLVM_INSTALL_DIR}/lib64"
+	NO_DEFAULT_PATH
+)
+find_library(NOTDEC_CLANG_CPP_LIBRARY
+	NAMES clang-cpp
+	HINTS ${CLANG_LIBRARY_DIRS} "${LT_LLVM_INSTALL_DIR}/lib" "${LT_LLVM_INSTALL_DIR}/lib64"
+	NO_DEFAULT_PATH
+)
+
+set(NOTDEC_HAVE_SHARED_LLVM OFF)
+if (NOTDEC_PREFER_SHARED_LLVM AND NOTDEC_LLVM_DYLIB)
+	set(NOTDEC_HAVE_SHARED_LLVM ON)
+endif ()
+
+set(NOTDEC_HAVE_SHARED_CLANG OFF)
+if (NOTDEC_PREFER_SHARED_LLVM AND NOTDEC_CLANG_CPP_LIBRARY)
+	set(NOTDEC_HAVE_SHARED_CLANG ON)
+endif ()
+
+add_library(notdec_llvm_deps INTERFACE)
+if (NOTDEC_HAVE_SHARED_LLVM)
+	target_link_libraries(notdec_llvm_deps INTERFACE ${NOTDEC_LLVM_DYLIB})
+	message(STATUS "NotDec will prefer shared LLVM: ${NOTDEC_LLVM_DYLIB}")
+else ()
+	message(STATUS "NotDec will use LLVM component libraries")
+endif ()
+
+add_library(notdec_clang_deps INTERFACE)
+if (NOTDEC_HAVE_SHARED_CLANG)
+	target_link_libraries(notdec_clang_deps INTERFACE ${NOTDEC_CLANG_CPP_LIBRARY})
+	message(STATUS "NotDec will prefer shared Clang: ${NOTDEC_CLANG_CPP_LIBRARY}")
+else ()
+	message(STATUS "NotDec will use Clang component libraries")
+endif ()
 
 # Set the LLVM header and library paths
 include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
@@ -125,13 +166,23 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 #===============================================================================
 
 include(FetchContent)
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
-)
-# For Windows: Prevent overriding the parent project's compiler/linker settings
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+if(NOT TARGET gtest AND NOT TARGET GTest::gtest)
+	FetchContent_Declare(
+	  googletest
+	  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+	)
+	# For Windows: Prevent overriding the parent project's compiler/linker settings
+	set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+	FetchContent_MakeAvailable(googletest)
+endif()
+
+if(TARGET gtest AND NOT TARGET GTest::gtest)
+	add_library(GTest::gtest ALIAS gtest)
+endif()
+
+if(TARGET gtest_main AND NOT TARGET GTest::gtest_main)
+	add_library(GTest::gtest_main ALIAS gtest_main)
+endif()
 
 find_package(Boost REQUIRED COMPONENTS system)
 include_directories( ${Boost_INCLUDE_DIR} )

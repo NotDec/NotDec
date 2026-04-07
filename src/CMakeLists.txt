@@ -57,6 +57,7 @@ endif()
 
 target_link_libraries(notdec
 	PUBLIC
+	notdec_llvm_deps
 	binarysub_lib
 )
 
