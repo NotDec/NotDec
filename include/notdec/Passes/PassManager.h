@@ -80,17 +80,20 @@ struct PassEnv {
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
                   bool disableTypeRecovery);
   void run_passes();
+  void dump_htypes(const std::string &OutputPath);
 };
 
 struct DecompileConfig {
 
   DecompileConfig(llvm::Module &Mod, std::string OutFilePath,
-                  notdec::Options opt, ::notdec::llvm2c::Options llvm2cOpt)
-      : Mod(Mod), OutFilePath(OutFilePath), Opts(opt), llvm2cOpt(llvm2cOpt),
-        PE(Mod) {}
+                  std::string HTypeDumpPath, notdec::Options opt,
+                  ::notdec::llvm2c::Options llvm2cOpt)
+      : Mod(Mod), OutFilePath(OutFilePath), HTypeDumpPath(HTypeDumpPath),
+        Opts(opt), llvm2cOpt(llvm2cOpt), PE(Mod) {}
 
   llvm::Module &Mod;
   std::string OutFilePath;
+  std::string HTypeDumpPath;
   notdec::Options Opts;
   ::notdec::llvm2c::Options llvm2cOpt;
   llvm::GlobalVariable *SP = nullptr;
@@ -106,7 +109,12 @@ struct DecompileConfig {
       PE.add_llvm2c(OutFilePath, llvm2cOpt, Opts.trLevel < 2);
     }
   }
-  void run_passes() { PE.run_passes(); }
+  void run_passes() {
+    PE.run_passes();
+    if (!HTypeDumpPath.empty()) {
+      PE.dump_htypes(HTypeDumpPath);
+    }
+  }
 };
 
 llvm::FunctionPassManager buildFunctionOptimizations();

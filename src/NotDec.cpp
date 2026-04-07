@@ -80,6 +80,12 @@ static cl::opt<int>
                 cl::desc("Type recovery level: 0: disable, 1: simple opt, 2: type recovery without breaking stack, 3: full type recovery"),
                 cl::init(3), cl::cat(NotdecCat));
 
+static cl::opt<std::string> dumpHTypes(
+    "dump-htypes",
+    cl::desc("Dump recovered HType results to the specified file."),
+    cl::init(""), cl::value_desc("output.htypes"), cl::Optional,
+    cl::cat(NotdecCat));
+
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
 // -debug-only option
@@ -152,7 +158,7 @@ int main(int argc, char *argv[]) {
   }
 
   auto &M = Ctx.getModule();
-  notdec::passes::DecompileConfig conf(M, outputFilename, Ctx.opt,
+  notdec::passes::DecompileConfig conf(M, outputFilename, dumpHTypes, Ctx.opt,
                                        getLLVM2COptions());
   conf.build_passes(trLevel);
   conf.run_passes();
