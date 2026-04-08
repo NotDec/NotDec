@@ -4,7 +4,6 @@ add_library(notdec STATIC
 	Passes/PassManager.cpp
 	Passes/StackPointerFinder.cpp
 	Passes/StackAlloca.cpp
-	Passes/StackBreaker.cpp
 	Passes/MemOpMatcher.cpp
 	Passes/ConstraintGenerator.cpp
 	Passes/GraphTypePass.cpp

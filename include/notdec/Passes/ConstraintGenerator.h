@@ -142,21 +142,6 @@ struct TypeRecovery {
   std::map<llvm::CallBase *, std::shared_ptr<ConstraintsGenerator>>
       CallsiteSummaryOverride;
   std::unique_ptr<llvm::CallGraph> CallG;
-  // for recreating alloca range that is eliminated as dead code.
-  std::unique_ptr<std::map<llvm::Function *,
-                           std::vector<std::pair<SimpleRange, std::string>>>>
-      AllocaRanges;
-  bool hasAllocaRanges() { return AllocaRanges != nullptr; }
-  std::vector<std::pair<SimpleRange, std::string>> &
-  getOrCreateFuncAllocaRange(llvm::Function *Func) {
-    assert(Func != nullptr);
-    if (AllocaRanges == nullptr) {
-      AllocaRanges = std::make_unique<
-          std::map<llvm::Function *,
-                   std::vector<std::pair<SimpleRange, std::string>>>>();
-    }
-    return (*AllocaRanges)[Func];
-  }
 
   std::function<bool(llvm::Function *)> isPolymorphic = [](llvm::Function *F) {
     if (auto Env = std::getenv("NOTDEC_DEFAULT_POLY")) {
@@ -561,79 +546,6 @@ inline FieldLabel getCallArgLabel(int32_t Index) {
 }
 
 inline FieldLabel getCallRetLabel() { return {retypd::OutLabel{}}; }
-
-// #region FunctionTypeRecovery
-
-struct TypeRecoveryMain : llvm::PassInfoMixin<TypeRecoveryMain> {
-
-  TypeRecovery &TR;
-  TypeRecoveryMain(TypeRecovery &TR) : TR(TR) {}
-
-  llvm::PreservedAnalyses run(llvm::Module &M,
-                              llvm::ModuleAnalysisManager &MAM) {
-    TR.run(M, MAM);
-    return llvm::PreservedAnalyses::all();
-  }
-};
-
-// Currently only break stack.
-struct TypeRecoveryOpt : llvm::PassInfoMixin<TypeRecoveryOpt> {
-
-  TypeRecovery &TR;
-  TypeRecoveryOpt(TypeRecovery &TR) : TR(TR) {}
-
-  llvm::PreservedAnalyses run(llvm::Module &M,
-                              llvm::ModuleAnalysisManager &MAM);
-};
-
-// re-create alloca according to data in TR.
-struct RecoverDeadAlloca : llvm::PassInfoMixin<RecoverDeadAlloca> {
-
-  TypeRecovery &TR;
-  RecoverDeadAlloca(TypeRecovery &TR) : TR(TR) {}
-
-  llvm::PreservedAnalyses run(llvm::Module &M,
-                              llvm::ModuleAnalysisManager &MAM);
-  void recoverAlloca(llvm::Function &F,
-                     std::vector<std::pair<SimpleRange, std::string>> &Vec);
-};
-
-struct InvalidateAllTypes : llvm::PassInfoMixin<InvalidateAllTypes> {
-  TypeRecovery &TR;
-  InvalidateAllTypes(TypeRecovery &TR) : TR(TR) {}
-
-  llvm::PreservedAnalyses run(llvm::Module &M,
-                              llvm::ModuleAnalysisManager &MAM) {
-    for (auto &Data : TR.AG.AllSCCs) {
-      Data.onIRChanged();
-    }
-    const char *DebugDir = getTRDebugDir();
-    if (DebugDir) {
-      printModule(M, join(DebugDir, "TRFinal-InvalidateAllTypes.ll").c_str());
-    }
-    return llvm::PreservedAnalyses::all();
-  }
-};
-
-struct FunctionTypeRecovery : llvm::AnalysisInfoMixin<FunctionTypeRecovery> {
-
-  struct FuncTypeResult {};
-
-  // TODO
-  using Result = FuncTypeResult;
-  static inline llvm::AnalysisKey Key; // NOLINT
-  friend llvm::AnalysisInfoMixin<FunctionTypeRecovery>;
-
-  TypeRecovery &TR;
-  FunctionTypeRecovery(TypeRecovery &TR) : TR(TR) {}
-
-  Result run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
-    // TODO, if function generator is not invalidated.
-    return {};
-  }
-};
-
-// #endregion FunctionTypeRecovery
 
 inline CGNode &getTarget(FieldEntry &F) {
   return const_cast<CGNode &>(F.Edge->getTargetNode());

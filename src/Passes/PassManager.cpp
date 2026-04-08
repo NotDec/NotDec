@@ -343,7 +343,6 @@ void PassEnv::build_passes(int level) {
     // level 2 no stack breaking
     if (level >= 2) {
       prepareTypeRecoveryContext();
-      // FAM.registerPass([&]() { return FunctionTypeRecovery(*TR); });
 
       MPM.addPass(VerifierPass(false));
       MPM.addPass(LinearAllocationRecovery());
@@ -364,7 +363,7 @@ void PassEnv::build_passes(int level) {
       MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
       MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
 
-      // level 3 with TypeRecoveryOpt and stack breaking.
+      // level 3 with additional optimization and cleanup.
       if (level >= 3) {
         MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
         MPM.addPass(mlsub::MLsubRecoveryOpt(*TR));
@@ -384,11 +383,6 @@ void PassEnv::build_passes(int level) {
             // TODO MLSUB: support dead stack recovery in the new pipeline.
           }
         }
-        // TODO MLSUB: Fix
-        // if (RunDeadAllocaRec) {
-        //   MPM.addPass(RecoverDeadAlloca(*TR));
-        // }
-        // MPM.addPass(InvalidateAllTypes(*TR));
         MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
       }
     }

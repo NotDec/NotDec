@@ -52,7 +52,6 @@
 #include "Passes/ConstraintGenerator.h"
 #include "Passes/DSROA.h"
 #include "Passes/StackAlloca.h"
-#include "Passes/StackBreaker.h"
 #include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Lattice.h"
@@ -1546,105 +1545,6 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
   }
 
   return Data.TypeResult;
-}
-
-static AllocaInst *findAllocaWithName(llvm::BasicBlock &BB, std::string Name) {
-  for (auto &I : BB) {
-    if (auto AI = dyn_cast<AllocaInst>(&I)) {
-      if (AI->getName() == Name) {
-        return AI;
-      }
-    }
-  }
-  return nullptr;
-}
-
-void RecoverDeadAlloca::recoverAlloca(
-    Function &F, std::vector<std::pair<SimpleRange, std::string>> &Vec) {
-  auto &Entry = F.getEntryBlock();
-  IRBuilder<> Builder(F.getContext());
-  Builder.SetInsertPoint(&Entry.front());
-  for (auto &Ent : Vec) {
-    if (auto AI = findAllocaWithName(Entry, Ent.second)) {
-      Builder.SetInsertPoint(AI->getNextNode());
-    } else {
-      auto &R1 = Ent.first;
-      // auto NewAlloca =
-      Builder.CreateAlloca(ArrayType::get(Builder.getInt8Ty(), R1.Size),
-                           nullptr, Ent.second);
-    }
-  }
-}
-
-PreservedAnalyses RecoverDeadAlloca::run(Module &M,
-                                         ModuleAnalysisManager &MAM) {
-  if (!TR.hasAllocaRanges()) {
-    return PreservedAnalyses::all();
-  }
-  for (auto &F : M) {
-    if (F.isDeclaration()) {
-      continue;
-    }
-    recoverAlloca(F, TR.getOrCreateFuncAllocaRange(&F));
-  }
-  return PreservedAnalyses::all();
-}
-
-PreservedAnalyses TypeRecoveryOpt::run(Module &M, ModuleAnalysisManager &MAM) {
-  // FunctionAnalysisManager &FAM =
-  //     MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
-
-  const char *DebugDir = getTRDebugDir();
-  std::vector<SCCData> &AllSCCs = TR.AG.AllSCCs;
-
-  for (size_t SCCIndex = 0; SCCIndex < AllSCCs.size(); ++SCCIndex) {
-    SCCData &Data = AllSCCs.at(SCCIndex);
-    bool SCCChanged = false;
-
-    auto SCCDebugDir = getSCCDebugDir(SCCIndex);
-    auto SCCTys = TR.getASTTypes(Data, SCCDebugDir);
-
-    for (auto F : Data.SCCSet) {
-      if (F->isDeclaration()) {
-        continue;
-      }
-
-      AllocaInst *Stack = nullptr;
-      BasicBlock &EntryBB = F->getEntryBlock();
-      for (BasicBlock::iterator I = EntryBB.begin(),
-                                E = std::prev(EntryBB.end());
-           I != E; ++I) {
-        if (AllocaInst *AI = dyn_cast<AllocaInst>(I)) {
-          if (AI->getName() == "stack") {
-            Stack = AI;
-          }
-        }
-      }
-      if (Stack == nullptr) {
-        continue;
-      }
-
-      // 处理entry块中确定大小的alloca指令。
-      StackBreaker SB;
-      SCCChanged |=
-          SB.runOnAlloca(*Stack, *SCCTys, &TR.getOrCreateFuncAllocaRange(F));
-    }
-
-    if (SCCChanged) {
-      // invalidate all passes
-      Data.onIRChanged();
-    }
-  }
-
-  TR.AG.onIRChanged();
-
-  if (DebugDir) {
-    printModule(M, join(DebugDir, "TROpt.ll").c_str());
-  }
-
-  auto PA = PreservedAnalyses::none();
-  PA.preserve<CallGraphAnalysis>();
-  return PA;
 }
 
 bool ConstraintsGenerator::checkSymmetry() {
