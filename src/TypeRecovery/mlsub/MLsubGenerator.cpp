@@ -711,11 +711,9 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       // auto Ty = C->getType();
       // return getLLVMTypeVar(Ctx.TRCtx, Ty);
     } else if (isa<ConstantPointerNull>(C)) {
-      assert(false && "TODO");
-      // return makeTv(Ctx.TRCtx, ValueNamer::getName("null_"));
+      return binarysub::make_variable(lvl, getSize(C, User, OpInd));
     } else if (isa<UndefValue>(C)) {
-      assert(false && "TODO");
-      // return makeTv(Ctx.TRCtx, ValueNamer::getName("undef_"));
+      return binarysub::make_variable(lvl, getSize(C, User, OpInd));
     }
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "ERROR: ConstraintsGenerator::convertSimpleTypeVal "
@@ -850,6 +848,14 @@ bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
   auto Target = I.getCalledFunction();
   if (!Target->isIntrinsic()) {
     return false;
+  }
+  switch (Target->getIntrinsicID()) {
+  case Intrinsic::memset:
+  case Intrinsic::memcpy:
+  case Intrinsic::memmove:
+    return true;
+  default:
+    break;
   }
   // auto ID = Target->getIntrinsicID();
   if (I.getType()->isAggregateType()) {
@@ -1014,7 +1020,13 @@ void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(
 void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,
                                             const ExtValuePtr RHS,
                                             llvm::ICmpInst *I) {
-  PG.unifyVar(LHS, RHS);
+  auto Left = LHS;
+  auto Right = RHS;
+  llvmValue2ExtVal(Left, I, 0);
+  llvmValue2ExtVal(Right, I, 1);
+  getOrInsertNode(Left, I, 0);
+  getOrInsertNode(Right, I, 1);
+  PG.getPNIVar(Left).unify(PG.getPNIVar(Right));
 }
 
 void ConstraintsGenerator::addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
@@ -1209,12 +1221,12 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     return true;
   } else if (strEq(ty, "sint")) {
     cg.setNonPointer(Op, I, Index);
-    auto SintNode = binarysub::make_primitive("sint", cg.getSize(Op));
+    auto SintNode = binarysub::make_primitive("sint", cg.getSize(Op, I, Index));
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(Op, I, Index);
-    auto UintNode = binarysub::make_primitive("uint", cg.getSize(Op));
+    auto UintNode = binarysub::make_primitive("uint", cg.getSize(Op, I, Index));
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {
