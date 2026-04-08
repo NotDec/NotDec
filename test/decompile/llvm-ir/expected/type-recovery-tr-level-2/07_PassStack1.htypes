@@ -2,7 +2,7 @@
 
 [decls]
 
-[upper]
+[types]
 <null-value> => i32
 @fun_1 => ('i:32 | ('c:32 | 'd:32)) (*)((('c:32 & 'd:32) & ptr<load=void, store=('c:32 | 'i:32), psize=32>))*
 @main => ('i:32 | ('c:32 | 'd:32)) (*)('f:32, 'g:32)*
@@ -15,8 +15,6 @@ main::%stacki => 'i:32
 main::<ret> => ('i:32 | ('c:32 | 'd:32))
 main::arg0 => 'f:32
 main::arg1 => 'g:32
-
-[lower]
 
 [memory]
 type => i32

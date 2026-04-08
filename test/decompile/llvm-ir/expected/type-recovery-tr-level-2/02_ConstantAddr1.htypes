@@ -6,7 +6,7 @@ struct struct_0 {
 }; /*  */
 
 
-[upper]
+[types]
 <null-value> => struct_0*
 @main => i32 (*)('c:32, 'd:32)*
 addr(0x400) => i32
@@ -14,8 +14,6 @@ main::%b => i32
 main::<ret> => i32
 main::arg0 => 'c:32
 main::arg1 => 'd:32
-
-[lower]
 
 [memory]
 decl => struct_0

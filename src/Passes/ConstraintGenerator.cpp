@@ -1315,24 +1315,6 @@ void TypeRecovery::genASTTypes(Module &M) {
       }
     }
 
-    for (auto &Ent : G2.V2NContra) {
-      // TODO support function type.
-      if (std::holds_alternative<llvm::Value *>(Ent.first)) {
-        if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
-          continue;
-        }
-      }
-      auto *Node = Ent.second;
-      if (Node != nullptr) {
-        assert(&Node->Parent == &G2.CG &&
-               "RetypdGenerator::getTypeVar: Node is not in the graph");
-        //!! build AST type for the node
-        if (SCCTypes->ValueTypesLowerBound.count(Ent.first)) {
-          HType *CTy = SCCTypes->ValueTypesLowerBound.at(Ent.first);
-          ResultVal->ValueTypesLowerBound[Ent.first] = CTy;
-        }
-      }
-    }
   }
 
   // 3.4 build AST type for memory node
@@ -1556,66 +1538,6 @@ TypeRecovery::getASTTypes(SCCData &Data, std::optional<std::string> DebugDir) {
     } else {
       if (LocalValueTypesFile) {
         *LocalValueTypesFile << " has no upper bound";
-      }
-    }
-    if (LocalValueTypesFile) {
-      *LocalValueTypesFile << "\n";
-    }
-  }
-
-  if (LocalValueTypesFile) {
-    *LocalValueTypesFile << "LowerBounds:\n";
-  }
-
-  for (auto &Ent : G2.V2NContra) {
-    // TODO support function type.
-    if (std::holds_alternative<llvm::Value *>(Ent.first)) {
-      if (llvm::isa<llvm::Function>(std::get<llvm::Value *>(Ent.first))) {
-        continue;
-      }
-    }
-    auto *Node = Ent.second;
-    if (Node != nullptr) {
-      assert(&Node->Parent == &G2.CG &&
-             "RetypdGenerator::getTypeVar: Node is not in the graph");
-      auto Size = getSize(Ent.first, pointer_size);
-      assert(Size > 0);
-
-      if (LocalValueTypesFile) {
-        *LocalValueTypesFile << "  " << toString(Ent.first, true);
-        *LocalValueTypesFile << "  Node: " << toString(Node->key);
-        if (Node->getPNIVar() != nullptr) {
-          *LocalValueTypesFile << "  PNI: " << Node->getPNIVar()->str();
-        }
-        LocalValueTypesFile->flush();
-      }
-
-      if (TraceIds.count(Node->getId())) {
-        PRINT_TRACE(Node->getId()) << "Generating Type...\n";
-      }
-
-      //!! build AST type for the node
-      HType *CTy = TB.buildType(*Node, retypd::Contravariant);
-
-      if (TraceIds.count(Node->getId())) {
-        PRINT_TRACE(Node->getId()) << "Type is " << CTy->getAsString() << "\n";
-      }
-
-      if (SCCTypes->ValueTypesLowerBound.count(Ent.first) != 0) {
-        llvm::errs() << "Warning: TODO handle Value type merge (UpperBound): "
-                     << toString(Ent.first) << "\n";
-      }
-      // save the result
-      if (!isFuncPtr(Ent.first) && !isSPGlobal(Ent.first)) {
-        SCCTypes->ValueTypesLowerBound[Ent.first] = CTy;
-      }
-
-      if (LocalValueTypesFile) {
-        *LocalValueTypesFile << " lower bound: " << CTy->getAsString();
-      }
-    } else {
-      if (LocalValueTypesFile) {
-        *LocalValueTypesFile << " has no lower bound";
       }
     }
     if (LocalValueTypesFile) {

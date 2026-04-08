@@ -47,7 +47,6 @@
 #include "Passes/retdec-stack/retdec-stack-pointer-op-remove.h"
 #include "Passes/retdec-stack/retdec-stack.h"
 #include "Passes/retdec-stack/retdec-symbolic-tree.h"
-#include "TypeRecovery/TRContext.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/Utils.h"
 #include "notdec-wasm2llvm/utils.h"
@@ -129,7 +128,7 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
     assert(outsuffix == ".c");
 
     // Run type recovery.
-    std::unique_ptr<TypeRecovery::Result> HighTypes;
+    std::unique_ptr<mlsub::MLsubRecovery::Result> HighTypes;
     if (!disableTypeRecovery) {
       HighTypes = std::move(TR.getResult(M, MAM));
       if (HighTypes != nullptr && CachedHTypeSnapshot != nullptr &&
@@ -140,47 +139,6 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
         SnapshotOS.flush();
         *HasCachedHTypeSnapshot = true;
       }
-    }
-
-    std::error_code EC;
-    llvm::raw_fd_ostream os(OutFilePath, EC);
-    if (EC) {
-      std::cerr << "Cannot open output file." << std::endl;
-      std::cerr << EC.message() << std::endl;
-      std::abort();
-    }
-    // llvm2cOpt.noDemoteSSA = true;
-    notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt,
-                                    std::move(HighTypes));
-    std::cout << "Decompile result: " << OutFilePath << std::endl;
-
-    return PreservedAnalyses::all();
-  }
-  static bool isRequired() { return true; }
-};
-
-// A Pass that convert module to C.
-struct NotdecLLVM2C : PassInfoMixin<NotdecLLVM2C> {
-
-  TypeRecovery &TR;
-  std::string OutFilePath;
-  ::notdec::llvm2c::Options llvm2cOpt;
-  bool disableTypeRecovery = false;
-
-  NotdecLLVM2C(TypeRecovery &TR, std::string outFilePath,
-               ::notdec::llvm2c::Options &llvm2cOpt, bool disableTypeRecovery)
-      : TR(TR), OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
-        disableTypeRecovery(disableTypeRecovery) {}
-
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
-    std::string outsuffix = getSuffix(OutFilePath);
-    assert(outsuffix == ".c");
-
-    // Run type recovery.
-    std::unique_ptr<TypeRecovery::Result> HighTypes;
-    if (!disableTypeRecovery) {
-      HighTypes = std::move(TR.getResult(M, MAM));
-      // HighTypes->dump();
     }
 
     std::error_code EC;
@@ -482,7 +440,8 @@ void PassEnv::dump_htypes(const std::string &OutputPath) {
     std::abort();
   }
 
-  std::unique_ptr<TypeRecovery::Result> &HighTypes = TR->getResult(Mod, MAM);
+  std::unique_ptr<mlsub::MLsubRecovery::Result> &HighTypes =
+      TR->getResult(Mod, MAM);
   if (HighTypes == nullptr) {
     llvm::errs() << "Error: failed to materialize HType results for dump.\n";
     std::abort();

@@ -268,7 +268,7 @@ void ConstraintsGenerator::releaseBinarysubState() {
 }
 
 void MLsubRecovery::genASTTypes(llvm::Module &M) {
-  ResultVal = std::make_unique<TypeRecovery::Result>();
+  ResultVal = std::make_unique<Result>();
   // 合并所有类型到一个大的ValueTypes里面。
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);

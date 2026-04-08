@@ -2,15 +2,13 @@
 
 [decls]
 
-[upper]
+[types]
 <null-value> => i32
 @main => i32 (*)('c:32, 'd:32)*
 const(i32 0)@main::%bb.allocator.i0:0 => i32
 main::<ret> => i32
 main::arg0 => 'c:32
 main::arg1 => 'd:32
-
-[lower]
 
 [memory]
 type => i32

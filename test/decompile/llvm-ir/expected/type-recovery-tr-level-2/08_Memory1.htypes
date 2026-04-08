@@ -6,7 +6,7 @@ struct struct_0 {
 }; /*  */
 
 
-[upper]
+[types]
 <null-value> => struct_0*
 @main => 'j:32 (*)('e:32, 'f:32)*
 @passMem1 => 'j:32 (*)()*
@@ -18,8 +18,6 @@ main::arg0 => 'e:32
 main::arg1 => 'f:32
 passMem1::%f1 => 'j:32
 passMem1::<ret> => 'j:32
-
-[lower]
 
 [memory]
 decl => struct_0

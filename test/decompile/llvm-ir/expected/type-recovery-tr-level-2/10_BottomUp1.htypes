@@ -2,7 +2,7 @@
 
 [decls]
 
-[upper]
+[types]
 <null-value> => i32
 @isFloat => void (*)(f32)*
 @main => i32 (*)('f:32, 'g:32)*
@@ -17,8 +17,6 @@ main::arg1 => 'g:32
 ptrFloat::%f1 => f32
 ptrFloat::%v_12 => 'd:32
 ptrFloat::arg0 => 'd:32
-
-[lower]
 
 [memory]
 type => i32

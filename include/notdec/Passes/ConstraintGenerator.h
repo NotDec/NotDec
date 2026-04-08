@@ -79,7 +79,6 @@ struct SCCSignatureTypes {
 
 struct SCCTypeResult {
   std::map<ExtValuePtr, ast::HType *> ValueTypes;
-  std::map<ExtValuePtr, ast::HType *> ValueTypesLowerBound;
 };
 
 struct SCCData {
