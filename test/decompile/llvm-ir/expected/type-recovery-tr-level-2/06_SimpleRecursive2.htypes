@@ -2,12 +2,12 @@
 
 [decls]
 struct struct_0 {
-  (('c:32 & 'h:32) & ptr<load=struct_0*, store=void, psize=32>) field_0; /*  */
-}; /*  */
+  (('c:32 & 'h:32) & ptr<load=struct_0*, store=void, psize=32>) field_0;
+};
 
 struct struct_1 {
-  (('c:32 | 'h:32) | ptr<load=struct_1*, store=void, psize=32>) field_0; /*  */
-}; /*  */
+  (('c:32 | 'h:32) | ptr<load=struct_1*, store=void, psize=32>) field_0;
+};
 
 
 [types]

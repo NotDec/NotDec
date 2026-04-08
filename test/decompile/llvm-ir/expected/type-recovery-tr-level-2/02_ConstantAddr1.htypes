@@ -3,7 +3,7 @@
 [decls]
 struct struct_0 {
   ptr<load=bottom:32, store=top:32, psize=32> field_0; /* at offset: 1024 */
-}; /*  */
+};
 
 
 [types]
