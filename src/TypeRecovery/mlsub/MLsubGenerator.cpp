@@ -644,7 +644,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
   if (Val->getType()->isIntegerTy(1)) {
     return binarysub::make_primitive("bool", 1);
   } else if (Val->getType()->isFloatingPointTy()) {
-    return binarysub::make_primitive("float", getSize(Val));
+    return binarysub::make_primitive("float", getSize(Val, User, OpInd));
   }
 
   if (Constant *C = dyn_cast<Constant>(Val)) {
@@ -706,10 +706,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       if (auto CI = dyn_cast<ConstantInt>(C)) {
         return binarysub::make_variable(lvl, getSize(CI, User, OpInd));
       }
-      assert(false && "TODO");
-      // return makeTv(Ctx.TRCtx, ValueNamer::getName("constant_"));
-      // auto Ty = C->getType();
-      // return getLLVMTypeVar(Ctx.TRCtx, Ty);
+      return binarysub::make_primitive("float", getSize(C, User, OpInd));
     } else if (isa<ConstantPointerNull>(C)) {
       return binarysub::make_variable(lvl, getSize(C, User, OpInd));
     } else if (isa<UndefValue>(C)) {
@@ -1202,6 +1199,10 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   } else if (strEq(ty, "int")) {
     cg.setNonPointer(I, nullptr, -1);
     return true;
+  } else if (strEq(ty, "float")) {
+    auto FloatNode = binarysub::make_primitive("float", cg.getSize(I));
+    cg.addSubtype(FloatNode, N);
+    return true;
   }
 
   return false;
@@ -1232,6 +1233,11 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
   } else if (strEq(ty, "int")) {
     cg.setNonPointer(Op, I, Index);
     return true;
+  } else if (strEq(ty, "float")) {
+    auto FloatNode =
+        binarysub::make_primitive("float", cg.getSize(Op, I, Index));
+    cg.addSubtype(N, FloatNode);
+    return true;
   }
   return false;
 }
@@ -1249,6 +1255,10 @@ const std::map<unsigned, ConstraintsGenerator::PcodeOpType>
         {Instruction::FPToSI, {"sint", 1, (const char *[1]){nullptr}}},
         {Instruction::UIToFP, {nullptr, 1, (const char *[1]){"uint"}}},
         {Instruction::SIToFP, {nullptr, 1, (const char *[1]){"sint"}}},
+        {Instruction::FAdd, {"float", 2, (const char *[2]){"float", "float"}}},
+        {Instruction::FSub, {"float", 2, (const char *[2]){"float", "float"}}},
+        {Instruction::FMul, {"float", 2, (const char *[2]){"float", "float"}}},
+        {Instruction::FDiv, {"float", 2, (const char *[2]){"float", "float"}}},
 
         {Instruction::UDiv, {"uint", 2, (const char *[2]){"uint", "uint"}}},
         {Instruction::SDiv, {"sint", 2, (const char *[2]){"sint", "sint"}}},

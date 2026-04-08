@@ -156,3 +156,35 @@ HOWARD 前沿 case 从“稳定崩溃”推进到“能够产出 HType snapshot�
 2. 基于当前三个已跑通 case 补 `expected/tr-level-2/*.htypes`
 3. 再把 manifest 中前几个 `fortune` case 从 `skip` 提升为
    `pass` 或 `xfail`
+
+### 3.5 Float Arithmetic Follow-up
+
+随后继续按“尽量复用 `visitInstruction`”的方向处理前面日志里的浮点 warning。
+
+本次补充调整为：
+
+- 将 `FAdd` / `FSub` / `FMul` / `FDiv` 接入
+  `ConstraintsGenerator::opTypes`
+- 在 `PcodeOpType::addRetConstraint()` /
+  `PcodeOpType::addOpConstraint()` 中增加 `"float"` 分支
+- 补齐 `convertSimpleTypeVal()` 对 `ConstantFP` 的处理
+- 修复浮点常量走 `Val->getType()->isFloatingPointTy()` 快路径时，
+  `getSize()` 丢失 `User/OpInd` 的问题
+
+这样之后：
+
+- 这些浮点二元算术不再走 `WARN: MLsubGenerator: unhandled instruction`
+- `100.0` 这类 `ConstantFP` operand 也能在 `mlsub` 中稳定建点
+
+复跑结果：
+
+- `fortune.o3.wasm.1` 成功
+- `fortune.o3.wasm.2` 成功
+- `fortune.o3.wasm.3` 成功
+
+且运行日志中原先稳定出现的 `fsub` / `fmul` / `fdiv` warning 已不再出现。
+
+这意味着前几个 HOWARD case 的剩余问题，已经进一步从
+“浮点算术缺少最小建模”
+收敛到
+“类型结果是否足够好、哪些 case 应该先升为 pass/xfail”。
