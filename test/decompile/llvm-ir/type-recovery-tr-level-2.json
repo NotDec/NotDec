@@ -40,8 +40,8 @@
     {
       "name": "06_SimpleRecursive2",
       "input": "cases/06_SimpleRecursive2.ll",
-      "status": "xfail",
-      "reason": "type recovery times out after stack recovery cannot proceed"
+      "expected": "expected/type-recovery-tr-level-2/06_SimpleRecursive2.htypes",
+      "status": "pass"
     },
     {
       "name": "07_PassStack1",

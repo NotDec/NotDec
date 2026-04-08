@@ -413,9 +413,9 @@ struct struct_0 {
 
 补充说明：
 
-- `06_SimpleRecursive2.ll` 在本地验证时出现长时间未结束现象，当前看起来更像
-  现有类型恢复/样例层面的独立问题，不是本步 canonical print 引入的新回归；
-  第 4 步先不扩大处理范围
+- `06_SimpleRecursive2.ll` 曾在本地验证时出现长时间未结束现象；后续定位发现
+  实际卡点在 `HTypeSnapshotFormatter` 对递归声明做 snapshot collect 时无限递归，
+  修复后已可稳定导出 `.htypes`
 
 建议本批提交 message：
 
@@ -731,8 +731,6 @@ notdec case.ll -o /tmp/x.ll --tr-level=2 --dump-htypes /tmp/x.htypes
 
 保留 `xfail` 的 case 现已按类型恢复层面的真实失败重分类：
 
-- `06_SimpleRecursive2`
-  - 类型恢复长时间未结束，当前按 timeout 跟踪
 - `13_stack_variable_alloc`
 - `15_signed1`
   - `MLsubGenerator` 尚不能处理字符串 `getelementptr` 常量
