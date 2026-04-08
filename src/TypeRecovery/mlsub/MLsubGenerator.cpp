@@ -96,16 +96,16 @@ void MLsubRecovery::run() {
   binarysub::pointer_size = PointerSize;
 
   // 0.4 prepare debug dir and SCCsCatalog
-  auto DebugDir = getTRDebugDir();
-  if (getTRDebugDir()) {
-    std::error_code EC = llvm::sys::fs::create_directories(DebugDir);
+  auto WorkDir = notdec::getWorkDirOpt();
+  if (WorkDir) {
+    std::error_code EC = llvm::sys::fs::create_directories(*WorkDir);
     if (EC) {
       std::cerr << __FILE__ << ":" << __LINE__ << ": "
-                << "Cannot open create directory " << DebugDir << ": ";
+                << "Cannot open create directory " << *WorkDir << ": ";
       std::cerr << EC.message() << std::endl;
       std::abort();
     }
-    SCCsCatalog.emplace(join(DebugDir, "SCCs.txt"), EC);
+    SCCsCatalog.emplace(join(*WorkDir, "SCCs.txt"), EC);
     if (EC) {
       std::cerr << __FILE__ << ":" << __LINE__ << ": "
                 << "Cannot open output file SCCs.txt: ";
@@ -113,7 +113,7 @@ void MLsubRecovery::run() {
       std::abort();
     }
 
-    llvm::raw_fd_ostream ValueTypes(join(DebugDir, kValueTypesFile.str()), EC);
+    llvm::raw_fd_ostream ValueTypes(join(*WorkDir, kValueTypesFile.str()), EC);
     if (EC) {
       std::cerr << __FILE__ << ":" << __LINE__ << ": "
                 << "Cannot open output file " << kValueTypesFile.str() << ": ";
@@ -124,16 +124,16 @@ void MLsubRecovery::run() {
   }
 
   // 0.5 print module for debugging
-  if (DebugDir) {
-    printModule(M, join(DebugDir, "01-Optimized.ll").c_str());
+  if (WorkDir) {
+    printModule(M, join(*WorkDir, "01-Optimized.ll").c_str());
   }
 
   CallGraphAnalysis Ana;
   CallG = std::make_unique<CallGraph>(Ana.run(M, MAM));
 
-  if (DebugDir) {
+  if (WorkDir) {
     std::error_code EC;
-    auto Path = join(DebugDir, "CallGraph.txt");
+    auto Path = join(*WorkDir, "CallGraph.txt");
     llvm::raw_fd_ostream CGTxt(Path, EC);
     if (EC) {
       llvm::errs() << "Error printing to " << Path << ", " << EC.message()
@@ -142,7 +142,7 @@ void MLsubRecovery::run() {
     CallG->print(CGTxt);
     CGTxt.close();
     // print dot
-    Path = join(DebugDir, "CallGraph.dot");
+    Path = join(*WorkDir, "CallGraph.dot");
     llvm::raw_fd_ostream CGDot(Path, EC);
     if (EC) {
       llvm::errs() << "Error printing to " << Path << ", " << EC.message()
@@ -252,8 +252,8 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     ValueTypes.insert({nullptr, TB.convert(MemUTy)});
   }
 
-  if (auto DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR")) {
-    appendDebugValueTypes(DebugDir, Name, V2N, ContraVariantValues, Res,
+  if (auto WorkDir = notdec::getWorkDirOpt()) {
+    appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
                           SolveMemory, PolMem);
   }
 }

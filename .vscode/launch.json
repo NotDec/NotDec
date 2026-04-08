@@ -21,22 +21,16 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
-        "${workspaceFolder}/test/decompile/llvm-ir/cases/06_SimpleRecursive2.ll",
+        "${workspaceFolder}/test/type-recovery/llvm-ir/cases/06_SimpleRecursive2.ll",
         "-o",
         "/tmp/06_SimpleRecursive2.c",
-        "--tr-level=2"
+        "--tr-level=2",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
       "environment": [
-        {
-          "name": "NOTDEC_DEBUG_DIR",
-          "value": "debug_dir"
-        },
-        {
-          "name": "NOTDEC_TYPE_RECOVERY_DEBUG_DIR",
-          "value": "debug_dir"
-        },
         {
           "name": "NOTDEC_SUMMARY_OVERRIDE",
           "value": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json"
@@ -74,6 +68,8 @@
         "-o",
         "${file}.c",
         "--tr-level=2",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir",
         // "-debug-only=structural-analysis",
         // "-debug-only=structural-goto",
         // "--print-before=type-recovery"
@@ -81,8 +77,6 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
       "env": {
-        "NOTDEC_DEBUG_DIR": "debug_dir",
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
         "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
@@ -105,6 +99,8 @@
         "${file}.c",
         // "-debug-only=type-recovery",
         "--tr-level=1",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir",
         "--split-mem",
         "--gen-int-to-ptr",
         // "-debug-only=retypd_graph",
@@ -112,28 +108,24 @@
         // "--print-after-all"
       ],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Clean and Build",
-      "env": {
-        "NOTDEC_DEBUG_DIR": "debug_dir",
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
-      }
+      "preLaunchTask": "Clean and Build"
     },
     {
       "type": "lldb",
       "request": "launch",
-      "name": "dec debug_dir2",
+      "name": "dec work_dir2",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
         "${file}",
         "-o",
         "${file}.c",
-        "--tr-level=3"
+        "--tr-level=3",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir2"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build2",
       "env": {
-        "NOTDEC_DEBUG_DIR": "debug_dir2",
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir2",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
         "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
@@ -182,13 +174,13 @@
         "-o",
         "${workspaceFolder}/test/wasm/emcc-print.wat.c",
         "--tr-level=3",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir",
         // "--log-level=debug",
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Clean and Build",
       "env": {
-        "NOTDEC_DEBUG_DIR": "debug_dir",
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
         "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
       }
@@ -220,8 +212,6 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "CMake: build",
       "env": {
-        "NOTDEC_DEBUG_DIR": "debug_dir",
-        "NOTDEC_TYPE_RECOVERY_DEBUG_DIR": "debug_dir",
         // "NOTDEC_SAT_DENSESUBTYPE": "1",
         "DEBUG_TRANS_SAT_GRAPH": "1",
         "DEBUG_TRANS_PUSH_SPLIT_GRAPH": "1",

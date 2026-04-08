@@ -82,9 +82,11 @@ namespace notdec {
 using retypd::NodeKey;
 using retypd::OffsetLabel;
 
-// NOTDEC_TYPE_RECOVERY_DEBUG_DIR
 const char *getTRDebugDir() {
-  return std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
+  if (!notdec::hasWorkDir()) {
+    return nullptr;
+  }
+  return notdec::getWorkDir().data();
 }
 
 bool isDisableInterFunction() {

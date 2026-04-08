@@ -188,9 +188,10 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
 PreservedAnalyses LinearAllocationRecovery::run(Module &M,
                                                 ModuleAnalysisManager &MAM) {
   errs() << " ============== LinearAllocationRecovery  ===============\n";
-  auto DebugDir = std::getenv("NOTDEC_TYPE_RECOVERY_DEBUG_DIR");
-  if (DebugDir) {
-    printModule(M, notdec::join(DebugDir, "01-1-BeforeStackAlloca.ll").c_str());
+  auto WorkDir = notdec::getWorkDirOpt();
+  if (WorkDir) {
+    printModule(M,
+                notdec::join(*WorkDir, "01-1-BeforeStackAlloca.ll").c_str());
   }
 
   auto sp_result = MAM.getResult<StackPointerFinderAnalysis>(M);

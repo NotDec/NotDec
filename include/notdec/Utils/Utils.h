@@ -7,6 +7,7 @@
 #include <iostream>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <variant>
@@ -27,6 +28,12 @@ enum log_level {
 extern llvm::cl::opt<log_level> logLevel;
 
 namespace notdec {
+
+std::string getDefaultWorkDir(const std::string &inputPath);
+void setWorkDir(std::string path);
+llvm::StringRef getWorkDir();
+bool hasWorkDir();
+std::optional<std::string> getWorkDirOpt();
 
 std::string getFuncSetName(const std::set<llvm::Function *> &SCC);
 std::string readFileToString(const char *path);

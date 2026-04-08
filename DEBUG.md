@@ -1,41 +1,41 @@
 # DEBUG.md
 
-本文档集中说明 `NotDec` 当前调试流程里与 `debug_dir/` 相关的环境变量和中间产物，方便在使用 `debugmcp`、`launch.json` 或手工命令行调试时快速定位问题。
+本文档集中说明 `NotDec` 当前调试流程里的工作文件夹和中间产物，方便在使用 `debugmcp`、`launch.json` 或手工命令行调试时快速定位问题。
 
-## 1. `debug_dir` 的基本用法
+## 1. 工作文件夹的基本用法
 
-仓库当前默认调试习惯是把中间产物统一落到一个目录，例如根目录下的 `debug_dir/`。
+工作文件夹由命令行选项开启，不再由环境变量控制。
 
 常见做法：
 
 ```bash
-export NOTDEC_DEBUG_DIR=debug_dir
-export NOTDEC_TYPE_RECOVERY_DEBUG_DIR=debug_dir
+./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 --gen-work-dir
+./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=work_dir
 ```
 
-也可以分别设置成不同目录；但目前仓库内的 `run.sh` 和 `.vscode/launch.json` 里的常用配置都默认把它们指向同一个 `debug_dir/`，这样最方便对照各阶段输出。
+其中：
 
-## 2. 两个核心环境变量
+- `--gen-work-dir` / `-g`
+  - 开启工作文件夹输出
+- 默认路径
+  - 使用输入文件同名并追加 `.notdec`，例如 `cases/foo.ll.notdec/`
+- `--work-dir=<path>`
+  - 用于覆盖默认工作文件夹路径
 
-### `NOTDEC_DEBUG_DIR`
+仓库内的 `run.sh` 和 `.vscode/launch.json` 里的常用配置现在也统一走这套命令行参数。
 
-这是通用调试输出目录，主要覆盖：
+## 2. 工作文件夹里的主要内容
+
+工作文件夹统一承载原先两类中间产物，主要覆盖：
 
 - 主 pass pipeline 初始 IR dump
-- `llvm2c` 后端在 demote SSA 前后的 IR dump
-
-如果只关心“反编译前后 LLVM IR 长什么样”，优先看这个目录对应的输出。
-
-### `NOTDEC_TYPE_RECOVERY_DEBUG_DIR`
-
-这是类型恢复与相关分析的调试输出目录，主要覆盖：
-
 - stack / memory recovery 前的 IR dump
 - 类型恢复阶段的优化后 IR
 - CallGraph 文本与 dot
 - SCC 划分信息
 - binarysub trace
 - 最终 `IR Value -> binarysub UType` 对照表
+- `llvm2c` 后端在 demote SSA 前后的 IR dump
 
 如果问题表现为：
 
@@ -45,7 +45,7 @@ export NOTDEC_TYPE_RECOVERY_DEBUG_DIR=debug_dir
 
 那么优先看这个目录。
 
-## 3. `debug_dir/` 里常见文件及作用
+## 3. 工作文件夹里常见文件及作用
 
 下面按当前仓库里实际会出现的文件说明。不是每次运行都会生成全部文件；是否出现取决于输入、`tr-level`、是否走到 `llvm2c`、以及具体 pass 是否执行到对应阶段。
 

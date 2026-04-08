@@ -86,6 +86,21 @@ static cl::opt<std::string> dumpHTypes(
     cl::init(""), cl::value_desc("output.htypes"), cl::Optional,
     cl::cat(NotdecCat));
 
+static cl::opt<bool> genWorkDir(
+    "gen-work-dir",
+    cl::desc("Generate intermediate work files in a work directory."),
+    cl::init(false), cl::cat(NotdecCat));
+
+static cl::alias genWorkDirShort(
+    "g", cl::desc("Alias for --gen-work-dir"), cl::aliasopt(genWorkDir),
+    cl::cat(NotdecCat));
+
+static cl::opt<std::string> workDirOverride(
+    "work-dir",
+    cl::desc("Override the generated work directory path. Requires "
+             "--gen-work-dir."),
+    cl::init(""), cl::value_desc("path"), cl::Optional, cl::cat(NotdecCat));
+
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
 // -debug-only option
@@ -97,11 +112,21 @@ int main(int argc, char *argv[]) {
   // initDebugOptions();
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
+  if (!workDirOverride.empty() && !genWorkDir) {
+    llvm::errs() << "Error: --work-dir requires --gen-work-dir.\n";
+    return 1;
+  }
   notdec::Options opts{
       .trLevel = trLevel,
       .stackRec = stackRec,
       .log_level = LogLevel,
   };
+  if (genWorkDir) {
+    opts.workDir = workDirOverride.empty()
+                       ? notdec::getDefaultWorkDir(inputFilename)
+                       : workDirOverride;
+  }
+  notdec::setWorkDir(opts.workDir);
 
   std::string insuffix = getSuffix(inputFilename);
   notdec::DecompilerContext Ctx(inputFilename, opts);
@@ -158,8 +183,10 @@ int main(int argc, char *argv[]) {
   }
 
   auto &M = Ctx.getModule();
+  auto llvm2cOpts = getLLVM2COptions();
+  llvm2cOpts.workDir = Ctx.opt.workDir;
   notdec::passes::DecompileConfig conf(M, outputFilename, dumpHTypes, Ctx.opt,
-                                       getLLVM2COptions());
+                                       llvm2cOpts);
   conf.build_passes(trLevel);
   conf.run_passes();
 

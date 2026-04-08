@@ -5,6 +5,7 @@
 #include <iostream>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Module.h>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -16,6 +17,27 @@ std::string getSuffix(std::string fname) {
   return std::string();
 }
 namespace notdec {
+
+namespace {
+std::string CurrentWorkDir;
+}
+
+std::string getDefaultWorkDir(const std::string &inputPath) {
+  return inputPath + ".notdec";
+}
+
+void setWorkDir(std::string path) { CurrentWorkDir = std::move(path); }
+
+llvm::StringRef getWorkDir() { return CurrentWorkDir; }
+
+bool hasWorkDir() { return !CurrentWorkDir.empty(); }
+
+std::optional<std::string> getWorkDirOpt() {
+  if (!hasWorkDir()) {
+    return std::nullopt;
+  }
+  return CurrentWorkDir;
+}
 
 std::string getFuncSetName(const std::set<llvm::Function *> &SCC) {
   std::string SCCNames;
