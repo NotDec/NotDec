@@ -33,6 +33,10 @@ This mirrors the usual LLVM split:
   - Handwritten LLVM IR type recovery regression cases.
 - `test/type-recovery/sysy/`
   - SysY source cases compiled to LLVM IR before type recovery checks.
+- `test/type-recovery/howard-o3-split/`
+  - Imported O3 split LLVM IR corpus from the HOWARD experiment workspace.
+  - Currently checked in as a full in-tree corpus and staged as `skip` until
+    cases are triaged into `xfail` and `pass`.
 
 ## Adding New Integration Tests
 

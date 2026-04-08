@@ -192,6 +192,7 @@ cmake --build ./build --target all
    - 当前已接入：
      - `notdec.type_recovery.llvm_ir.tr_level_2`
      - `notdec.type_recovery.sysy.tr_level_2`
+     - `notdec.type_recovery.howard_o3_split.tr_level_2`
 3. shell 脚本
    - `test.sh`
 4. 大量样例/实验脚本
@@ -230,6 +231,7 @@ cmake --build ./build --target all
 
 - `test/type-recovery/llvm-ir/manifest.json`
 - `test/type-recovery/sysy/manifest.json`
+- `test/type-recovery/howard-o3-split/manifest.json`
 
 当前 suite runner 为：
 
@@ -242,6 +244,11 @@ cmake --build ./build --target all
 - `test/type-recovery/sysy/`
   - SysY 源码输入；runner 会先用 `clang-14` 编译为 LLVM IR，再执行
     `notdec --dump-htypes`
+- `test/type-recovery/howard-o3-split/`
+  - 从 `/sn640/NotDec-Exp/ICSE-HOWARD/splited/splitted_irs` 导入的
+    `*.o3*.ll` 语料
+  - 当前先全量入库并在 manifest 中标记为 `skip`，后续再逐步提升为
+    `xfail/pass`
 - `test/legacy/wasm/`
   - 旧的 wasm 实验脚本、数据集与生成产物
   - 默认不作为当前主测试布局或 golden oracle
@@ -264,6 +271,7 @@ runner 支持的 case 状态：
 ```bash
 ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
 ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --output-on-failure
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy|howard_o3_split).tr_level_2' --output-on-failure
 ```
 
 当前 `tr-level=2` 的 LLVM IR 集成测试 runner 默认会设置：

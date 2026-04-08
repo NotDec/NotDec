@@ -26,3 +26,8 @@ add_type_recovery_suite(
 	notdec.type_recovery.sysy.tr_level_2
 	type-recovery/sysy/manifest.json
 )
+
+add_type_recovery_suite(
+	notdec.type_recovery.howard_o3_split.tr_level_2
+	type-recovery/howard-o3-split/manifest.json
+)
