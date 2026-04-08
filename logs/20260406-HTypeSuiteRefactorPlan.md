@@ -994,3 +994,18 @@ Add HType golden snapshots for LLVM IR tr-level-2 cases
 - `AGENTS.md`
 - `README.md`（若涉及）
 - 本文件
+
+---
+
+## 2026-04-08 Follow-up
+
+后续清理中，测试布局进一步统一为：
+
+- `test/type-recovery/llvm-ir/`
+- `test/type-recovery/sysy/`
+- `test/run_type_recovery_suite.py`
+- `test/legacy/wasm/`
+
+其中 `sysy` suite 通过 manifest 驱动，先把 `cases/*.c` 编译为 LLVM IR，
+再复用同一套 HType snapshot runner。旧的 `test/wasm/` 工作区迁入
+`test/legacy/wasm/`，避免继续与当前权威回归布局混放。

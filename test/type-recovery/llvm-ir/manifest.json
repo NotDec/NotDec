@@ -10,73 +10,73 @@
     {
       "name": "01_Simple1",
       "input": "cases/01_Simple1.ll",
-      "expected": "expected/type-recovery-tr-level-2/01_Simple1.htypes",
+      "expected": "expected/tr-level-2/01_Simple1.htypes",
       "status": "pass"
     },
     {
       "name": "02_ConstantAddr1",
       "input": "cases/02_ConstantAddr1.ll",
-      "expected": "expected/type-recovery-tr-level-2/02_ConstantAddr1.htypes",
+      "expected": "expected/tr-level-2/02_ConstantAddr1.htypes",
       "status": "pass"
     },
     {
       "name": "03_LoadUpdateGood",
       "input": "cases/03_LoadUpdateGood.ll",
-      "expected": "expected/type-recovery-tr-level-2/03_LoadUpdateGood.htypes",
+      "expected": "expected/tr-level-2/03_LoadUpdateGood.htypes",
       "status": "pass"
     },
     {
       "name": "04_LoadUpdate",
       "input": "cases/04_LoadUpdate.ll",
-      "expected": "expected/type-recovery-tr-level-2/04_LoadUpdate.htypes",
+      "expected": "expected/tr-level-2/04_LoadUpdate.htypes",
       "status": "pass"
     },
     {
       "name": "05_MultiOffset",
       "input": "cases/05_MultiOffset.ll",
-      "expected": "expected/type-recovery-tr-level-2/05_MultiOffset.htypes",
+      "expected": "expected/tr-level-2/05_MultiOffset.htypes",
       "status": "pass"
     },
     {
       "name": "06_SimpleRecursive2",
       "input": "cases/06_SimpleRecursive2.ll",
-      "expected": "expected/type-recovery-tr-level-2/06_SimpleRecursive2.htypes",
+      "expected": "expected/tr-level-2/06_SimpleRecursive2.htypes",
       "status": "pass"
     },
     {
       "name": "07_PassStack1",
       "input": "cases/07_PassStack1.ll",
-      "expected": "expected/type-recovery-tr-level-2/07_PassStack1.htypes",
+      "expected": "expected/tr-level-2/07_PassStack1.htypes",
       "status": "pass"
     },
     {
       "name": "08_Memory1",
       "input": "cases/08_Memory1.ll",
-      "expected": "expected/type-recovery-tr-level-2/08_Memory1.htypes",
+      "expected": "expected/tr-level-2/08_Memory1.htypes",
       "status": "pass"
     },
     {
       "name": "09_OffsetLoop",
       "input": "cases/09_OffsetLoop.ll",
-      "expected": "expected/type-recovery-tr-level-2/09_OffsetLoop.htypes",
+      "expected": "expected/tr-level-2/09_OffsetLoop.htypes",
       "status": "pass"
     },
     {
       "name": "10_BottomUp1",
       "input": "cases/10_BottomUp1.ll",
-      "expected": "expected/type-recovery-tr-level-2/10_BottomUp1.htypes",
+      "expected": "expected/tr-level-2/10_BottomUp1.htypes",
       "status": "pass"
     },
     {
       "name": "11_SimpleRecursive1",
       "input": "cases/11_SimpleRecursive1.ll",
-      "expected": "expected/type-recovery-tr-level-2/11_SimpleRecursive1.htypes",
+      "expected": "expected/tr-level-2/11_SimpleRecursive1.htypes",
       "status": "pass"
     },
     {
       "name": "12_Stack1",
       "input": "cases/12_Stack1.ll",
-      "expected": "expected/type-recovery-tr-level-2/12_Stack1.htypes",
+      "expected": "expected/tr-level-2/12_Stack1.htypes",
       "status": "pass"
     },
     {
@@ -100,7 +100,7 @@
     {
       "name": "16_Poly1",
       "input": "cases/16_Poly1.ll",
-      "expected": "expected/type-recovery-tr-level-2/16_Poly1.htypes",
+      "expected": "expected/tr-level-2/16_Poly1.htypes",
       "status": "pass"
     },
     {

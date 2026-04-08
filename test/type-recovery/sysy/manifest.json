@@ -1,0 +1,80 @@
+{
+  "suite": "notdec type recovery sysy tr-level=2",
+  "default_args": [
+    "--tr-level=2"
+  ],
+  "env": {
+    "ASAN_OPTIONS": "detect_leaks=0"
+  },
+  "source_prep": {
+    "kind": "clang-ir",
+    "binary": "clang-14",
+    "args": [
+      "-opaque-pointers=0",
+      "-S",
+      "-emit-llvm",
+      "-O0",
+      "-Xclang",
+      "-disable-O0-optnone",
+      "-fno-builtin",
+      "-I",
+      "{manifest_dir}/support"
+    ]
+  },
+  "cases": [
+    {
+      "name": "00_main",
+      "input": "cases/00_main.c",
+      "expected": "expected/tr-level-2/00_main.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "03_arr_defn2",
+      "input": "cases/03_arr_defn2.c",
+      "expected": "expected/tr-level-2/03_arr_defn2.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "09_func_defn",
+      "input": "cases/09_func_defn.c",
+      "expected": "expected/tr-level-2/09_func_defn.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "11_add2",
+      "input": "cases/11_add2.c",
+      "expected": "expected/tr-level-2/11_add2.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "21_if_test2",
+      "input": "cases/21_if_test2.c",
+      "expected": "expected/tr-level-2/21_if_test2.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "26_while_test1",
+      "input": "cases/26_while_test1.c",
+      "status": "xfail",
+      "reason": "PNDiff assertion while lowering loop-carried stack values from SysY IR"
+    },
+    {
+      "name": "34_arr_expr_len",
+      "input": "cases/34_arr_expr_len.c",
+      "status": "xfail",
+      "reason": "PNDiff assertion while recovering array-heavy SysY control flow"
+    },
+    {
+      "name": "40_unary_op",
+      "input": "cases/40_unary_op.c",
+      "expected": "expected/tr-level-2/40_unary_op.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "73_int_io",
+      "input": "cases/73_int_io.c",
+      "status": "xfail",
+      "reason": "PNDiff assertion while propagating SysY runtime I/O values"
+    }
+  ]
+}

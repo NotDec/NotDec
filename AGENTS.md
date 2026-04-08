@@ -191,6 +191,7 @@ cmake --build ./build --target all
    - `test/CMakeLists.txt`
    - 当前已接入：
      - `notdec.type_recovery.llvm_ir.tr_level_2`
+     - `notdec.type_recovery.sysy.tr_level_2`
 3. shell 脚本
    - `test.sh`
 4. 大量样例/实验脚本
@@ -209,25 +210,41 @@ cmake --build ./build --target all
 - `unittests/` 负责细粒度逻辑
 - `test/` 负责端到端行为、回归基线、已知失败跟踪
 
-### `test/decompile/llvm-ir/` 目录约定
+### `test/type-recovery/<suite>/` 目录约定
 
-该目录用于基于 LLVM IR 输入的类型恢复回归测试。
+当前类型恢复回归测试统一放在 `test/type-recovery/` 下，每个 suite 自带：
 
+- `manifest.json`
+  - suite 的权威 case 清单与默认运行配置
 - `cases/`
-  - 输入样例（当前主要是 `.ll`，也可能保留相关 `.wat` 辅助输入）
-- `expected/type-recovery-tr-level-2/`
-  - `notdec --tr-level=2 --dump-htypes` 的 golden snapshot 输出
-- `legacy/`
+  - 输入样例
+- `expected/`
+  - golden snapshot 输出
+- `support/`（可选）
+  - suite 局部依赖，比如编译 SysY 到 LLVM IR 所需头文件
+- `legacy/`（可选）
   - 历史实验产物、旧 backend 输出、迁移阶段参考文件
   - 默认不作为当前权威 oracle
 
-当前 suite manifest 为：
+当前已接入的 suite 包括：
 
-- `test/decompile/llvm-ir/type-recovery-tr-level-2.json`
+- `test/type-recovery/llvm-ir/manifest.json`
+- `test/type-recovery/sysy/manifest.json`
 
 当前 suite runner 为：
 
-- `test/tools/run_type_recovery_suite.py`
+- `test/run_type_recovery_suite.py`
+
+其中：
+
+- `test/type-recovery/llvm-ir/`
+  - 手写 LLVM IR 输入的类型恢复回归
+- `test/type-recovery/sysy/`
+  - SysY 源码输入；runner 会先用 `clang-14` 编译为 LLVM IR，再执行
+    `notdec --dump-htypes`
+- `test/legacy/wasm/`
+  - 旧的 wasm 实验脚本、数据集与生成产物
+  - 默认不作为当前主测试布局或 golden oracle
 
 runner 支持的 case 状态：
 
@@ -246,6 +263,7 @@ runner 支持的 case 状态：
 
 ```bash
 ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --output-on-failure
 ```
 
 当前 `tr-level=2` 的 LLVM IR 集成测试 runner 默认会设置：
@@ -260,7 +278,7 @@ ASAN_OPTIONS=detect_leaks=0
 
 - `test.sh` 中存在 `--only-opt` 调用，但当前 `src/NotDec.cpp` 里没有对应命令行参数定义；修改测试或文档时不要假设这个选项仍然有效
 - 仓库中有大量实验数据和外部子模块，跑全量测试前先确认依赖和数据路径是否可用
-- `test/decompile/llvm-ir/legacy/` 下的文件主要用于迁移参考，不要默认把它们当成当前 golden
+- `test/type-recovery/*/legacy/` 和 `test/legacy/` 下的文件主要用于迁移参考，不要默认把它们当成当前 golden
 
 ## 8. 修改代码时的建议
 

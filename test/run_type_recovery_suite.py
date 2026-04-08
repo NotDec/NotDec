@@ -32,6 +32,26 @@ def load_manifest(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
+def expand_template(value: str, manifest_dir: Path, project_root: Path, workdir: Path) -> str:
+    return value.format(
+        manifest_dir=str(manifest_dir),
+        project_root=str(project_root),
+        workdir=str(workdir),
+    )
+
+
+def expand_args(
+    raw_args: list[str],
+    manifest_dir: Path,
+    project_root: Path,
+    workdir: Path,
+) -> list[str]:
+    return [
+        expand_template(arg, manifest_dir=manifest_dir, project_root=project_root, workdir=workdir)
+        for arg in raw_args
+    ]
+
+
 def command_succeeded(
     process: subprocess.CompletedProcess[str],
     ir_output_path: Path,
@@ -47,12 +67,62 @@ def command_succeeded(
     return True
 
 
-def write_log(log_path: Path, command: list[str], process: subprocess.CompletedProcess[str]) -> None:
-    log_path.write_text(
+def format_log_section(
+    title: str,
+    command: list[str],
+    process: subprocess.CompletedProcess[str],
+) -> str:
+    return (
+        f"## {title}\n"
         f"$ {format_command(command)}\n"
         f"exit={process.returncode}\n\n"
         f"{process.stdout}"
     )
+
+
+def write_log(log_path: Path, sections: list[str]) -> None:
+    log_path.write_text("\n\n".join(sections) + "\n")
+
+
+def prepare_case_input(
+    *,
+    case: dict,
+    manifest: dict,
+    manifest_dir: Path,
+    project_root: Path,
+    workdir: Path,
+    env: dict[str, str],
+) -> tuple[Path, list[str], bool]:
+    input_path = resolve_path(manifest_dir, case["input"])
+    prep = case.get("source_prep", manifest.get("source_prep"))
+    if prep is None:
+        return input_path, [], True
+
+    kind = prep.get("kind")
+    if kind != "clang-ir":
+        raise ValueError(f"unsupported source_prep kind: {kind}")
+
+    compiler = prep["binary"]
+    compiler_args = expand_args(
+        prep.get("args", []),
+        manifest_dir=manifest_dir,
+        project_root=project_root,
+        workdir=workdir,
+    )
+    prepared_input = workdir / f"{case['name']}.input.ll"
+    command = [compiler, *compiler_args, str(input_path), "-o", str(prepared_input)]
+    process = subprocess.run(
+        command,
+        cwd=project_root,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    sections = [format_log_section("prepare", command, process)]
+    if process.returncode != 0:
+        return prepared_input, sections, False
+    return prepared_input, sections, True
 
 
 def main() -> int:
@@ -100,9 +170,38 @@ def main() -> int:
             print(f"[SKIP ] {name}")
             continue
 
-        for path in (output_path, snapshot_path):
+        for path in (output_path, snapshot_path, workdir / f"{name}.input.ll"):
             if path.exists():
                 path.unlink()
+
+        try:
+            input_path, log_sections, prepared_ok = prepare_case_input(
+                case=case,
+                manifest=manifest,
+                manifest_dir=manifest_dir,
+                project_root=project_root,
+                workdir=workdir,
+                env=env,
+            )
+        except Exception as exc:
+            counters["fail"] += 1
+            log_path.write_text(f"prepare exception: {exc}\n")
+            print(f"[FAIL ] {name}")
+            print(f"        log: {log_path}")
+            continue
+
+        if not prepared_ok:
+            write_log(log_path, log_sections)
+            if status == "xfail":
+                counters["xfail"] += 1
+                reason = case.get("reason")
+                suffix = f" ({reason})" if reason else ""
+                print(f"[XFAIL] {name}{suffix}")
+            else:
+                counters["fail"] += 1
+                print(f"[FAIL ] {name}")
+                print(f"        log: {log_path}")
+            continue
 
         command = [
             args.binary,
@@ -123,7 +222,8 @@ def main() -> int:
             stderr=subprocess.STDOUT,
             text=True,
         )
-        write_log(log_path, command, process)
+        log_sections.append(format_log_section("notdec", command, process))
+        write_log(log_path, log_sections)
 
         succeeded = command_succeeded(process, output_path, snapshot_path)
         matches_expected = False
