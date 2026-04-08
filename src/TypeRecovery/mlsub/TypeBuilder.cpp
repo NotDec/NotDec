@@ -47,8 +47,12 @@ HType *TypeBuilder::getVoidPtr() {
   return Ctx.getPointerType(false, Parent.PointerSize * 8, nullptr);
 }
 
-HType *TypeBuilder::getIntPtr() {
-  return Ctx.getIntegerType(false, Parent.PointerSize * 8, false);
+HType *TypeBuilder::getTopType(std::uint32_t BitSize) {
+  return Ctx.getTopType(false, BitSize);
+}
+
+HType *TypeBuilder::getBottomType(std::uint32_t BitSize) {
+  return Ctx.getBottomType(false, BitSize);
 }
 
 HType *TypeBuilder::parsePrimitiveName(const std::string &Name,
@@ -137,22 +141,23 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
 
 HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
                                      std::optional<int64_t> FieldSizeBytes) {
-  auto getIntegerFallback = [&]() -> HType * {
-    auto SizeBytes = FieldSizeBytes.value_or(Parent.PointerSize);
-    return Ctx.getIntegerType(false, SizeBytes * 8, true);
+  auto getFallbackBitSize = [&]() -> std::uint32_t {
+    if (FieldSizeBytes.has_value()) {
+      return static_cast<std::uint32_t>(*FieldSizeBytes * 8);
+    }
+    return binarysub::get_size(Ty);
   };
   auto convertPointerSide = [&](const UTypePtr &Side) -> HType * {
     if (!Side) {
       return nullptr;
     }
-    if (std::get_if<UTop>(&Side->v) || std::get_if<UBot>(&Side->v)) {
-      return nullptr;
-    }
     return convertFieldType(Side, std::nullopt);
   };
 
-  if (std::get_if<UTop>(&Ty->v) || std::get_if<UBot>(&Ty->v)) {
-    return getIntegerFallback();
+  if (std::get_if<UTop>(&Ty->v)) {
+    return getTopType(getFallbackBitSize());
+  } else if (std::get_if<UBot>(&Ty->v)) {
+    return getBottomType(getFallbackBitSize());
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
     return parsePrimitiveName(V->name, binarysub::get_size(Ty));
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
@@ -242,9 +247,9 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   HType *Result = nullptr;
   // 先处理非指针类型
   if (std::get_if<UTop>(&Ty->v)) {
-    Result = getIntPtr();
+    Result = getTopType(binarysub::get_size(Ty));
   } else if (std::get_if<UBot>(&Ty->v)) {
-    Result = getIntPtr();
+    Result = getBottomType(binarysub::get_size(Ty));
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
     // TODO 这里是不是应该用到ObjSize大小。而不是名字里面带大小。
     Result = parsePrimitiveName(V->name, binarysub::get_size(Ty));

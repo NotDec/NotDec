@@ -2,16 +2,16 @@
 
 [decls]
 struct struct_0 {
-  ptr<load=void, store=void, psize=32> field_0; /* at offset: 1024 */
+  ptr<load=bottom:32, store=top:32, psize=32> field_0; /* at offset: 1024 */
 }; /*  */
 
 
 [types]
 <null-value> => struct_0*
-@main => i32 (*)('c:32, 'd:32)*
-addr(0x400) => i32
-main::%b => i32
-main::<ret> => i32
+@main => bottom:32 (*)('c:32, 'd:32)*
+addr(0x400) => bottom:32
+main::%b => bottom:32
+main::<ret> => bottom:32
 main::arg0 => 'c:32
 main::arg1 => 'd:32
 

@@ -3,13 +3,13 @@
 [decls]
 
 [types]
-<null-value> => i32
-@main => i32 (*)('c:32, 'd:32)*
-const(i32 0)@main::%bb.allocator.i0:0 => i32
-main::<ret> => i32
+<null-value> => bottom:32
+@main => bottom:32 (*)('c:32, 'd:32)*
+const(i32 0)@main::%bb.allocator.i0:0 => bottom:32
+main::<ret> => bottom:32
 main::arg0 => 'c:32
 main::arg1 => 'd:32
 
 [memory]
-type => i32
+type => bottom:32
 

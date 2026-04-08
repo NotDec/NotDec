@@ -11,13 +11,13 @@ struct struct_1 {
 
 
 [types]
-<null-value> => i32
-@main => i32 (*)('e:32, 'f:32)*
+<null-value> => bottom:32
+@main => bottom:32 (*)('e:32, 'f:32)*
 @rec1 => void (*)(('c:32 & ptr<load=struct_0*, store=void, psize=32>))*
-const(i32 0)@main::%bb.allocator.i3:0 => i32
+const(i32 0)@main::%bb.allocator.i3:0 => bottom:32
 main::%bb.allocator.i0 => ('c:32 | ptr<load=struct_1*, store=void, psize=32>)
-main::%bb.allocator.i1 => i32
-main::<ret> => i32
+main::%bb.allocator.i1 => bottom:32
+main::<ret> => bottom:32
 main::arg0 => 'e:32
 main::arg1 => 'f:32
 rec1::%bb.allocator.i0 => ('c:32 | 'h:32)
@@ -25,5 +25,5 @@ rec1::%bb.allocator.i1 => 'h:32
 rec1::arg0 => ('c:32 | 'h:32)
 
 [memory]
-type => i32
+type => bottom:32
 

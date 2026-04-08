@@ -71,7 +71,8 @@ protected:
 
   // Helper to get void pointer
   HType *getVoidPtr();
-  HType *getIntPtr();
+  HType *getTopType(std::uint32_t BitSize);
+  HType *getBottomType(std::uint32_t BitSize);
   // Helper to parse primitive type name
   HType *parsePrimitiveName(const std::string &Name, std::uint32_t BitSize);
 
