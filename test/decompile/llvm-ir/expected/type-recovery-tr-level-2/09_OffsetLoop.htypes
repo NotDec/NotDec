@@ -3,19 +3,19 @@
 [decls]
 
 [types]
-<null-value> => bottom:32
-@main => bottom:32 (*)('c:32, 'd:32)*
-const(i32 0)@main::%bb.exit.i0:0 => bottom:32
-const(i32 0)@main::%bb.loop.i3:0 => bottom:32
-main::%cmp => i1
-main::%new_9 => bottom:32
-main::%p1 => bottom:32
-main::%p2 => bottom:32
-main::%stack1 => bottom:32
-main::%stack1p => bottom:32
-main::<ret> => bottom:32
-main::arg0 => 'c:32
-main::arg1 => 'd:32
+[+] <null-value> => bottom:32
+[+] @main => bottom:32 (*)('c:32, 'd:32)*
+[+] const(i32 0)@main::%bb.exit.i0:0 => bottom:32
+[+] const(i32 0)@main::%bb.loop.i3:0 => bottom:32
+[+] main::%cmp => i1
+[+] main::%new_9 => bottom:32
+[+] main::%p1 => bottom:32
+[+] main::%p2 => bottom:32
+[-] main::%stack1 => bottom:32
+[+] main::%stack1p => bottom:32
+[+] main::<ret> => bottom:32
+[+] main::arg0 => 'c:32
+[+] main::arg1 => 'd:32
 
 [memory]
 type => bottom:32

@@ -223,6 +223,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                                     bool SolveMemory) {
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
+  SnapshotContraVariantValues = ContraVariantValues;
   std::set<PolarVar> Tys;
   auto getPol = [&](ExtValuePtr V) { return !ContraVariantValues.count(V); };
   for (auto &Ent : V2N) {
@@ -276,6 +277,9 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
       auto It = ResultVal->ValueTypes.insert(Ent);
       assert(It.second && "Duplicated Entry?");
     }
+    ResultVal->ContraVariantValues.insert(
+        Data.Generator->SnapshotContraVariantValues.begin(),
+        Data.Generator->SnapshotContraVariantValues.end());
   }
   ResultVal->HTCtx = HCtx;
   // handle Memory type.

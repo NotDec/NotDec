@@ -59,6 +59,7 @@ struct ConstraintsGenerator {
   std::map<ExtValuePtr, ast::HType *> ValueTypes;
   std::map<llvm::CallBase *, SimpleType> unhandledCalls;
   std::set<ExtValuePtr> ContraVariantValues;
+  std::set<ExtValuePtr> SnapshotContraVariantValues;
 
   void addMergeNode(SimpleType From, SimpleType To) { V2N.merge(From, To); }
 

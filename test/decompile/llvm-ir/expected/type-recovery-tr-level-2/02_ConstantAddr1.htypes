@@ -7,13 +7,13 @@ struct struct_0 {
 
 
 [types]
-<null-value> => struct_0*
-@main => bottom:32 (*)('c:32, 'd:32)*
-addr(0x400) => bottom:32
-main::%b => bottom:32
-main::<ret> => bottom:32
-main::arg0 => 'c:32
-main::arg1 => 'd:32
+[+] <null-value> => struct_0*
+[+] @main => bottom:32 (*)('c:32, 'd:32)*
+[+] addr(0x400) => bottom:32
+[+] main::%b => bottom:32
+[+] main::<ret> => bottom:32
+[+] main::arg0 => 'c:32
+[+] main::arg1 => 'd:32
 
 [memory]
 decl => struct_0

@@ -3,22 +3,22 @@
 [decls]
 
 [types]
-<null-value> => bottom:32
-@main => i32 (*)('c:32, 'd:32)*
-main::%. => i32
-main::%eq1 => i1
-main::%eq2 => i1
-main::%eq3 => i1
-main::%fval2 => f32
-main::%ptr1 => bottom:32
-main::%ptr2 => bottom:32
-main::%stack => bottom:32
-main::%stackPtr => bottom:32
-main::%val1 => bottom:32
-main::%val2 => i32
-main::<ret> => i32
-main::arg0 => 'c:32
-main::arg1 => 'd:32
+[+] <null-value> => bottom:32
+[+] @main => i32 (*)('c:32, 'd:32)*
+[+] main::%. => i32
+[+] main::%eq1 => i1
+[+] main::%eq2 => i1
+[+] main::%eq3 => i1
+[+] main::%fval2 => f32
+[+] main::%ptr1 => bottom:32
+[+] main::%ptr2 => bottom:32
+[-] main::%stack => bottom:32
+[+] main::%stackPtr => bottom:32
+[+] main::%val1 => bottom:32
+[+] main::%val2 => i32
+[+] main::<ret> => i32
+[+] main::arg0 => 'c:32
+[+] main::arg1 => 'd:32
 
 [memory]
 type => bottom:32
