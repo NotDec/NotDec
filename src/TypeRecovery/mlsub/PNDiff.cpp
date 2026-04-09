@@ -1,11 +1,17 @@
 #include "TypeRecovery/mlsub/PNDiff.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
+#include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface/Range.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 #include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Type.h>
+#include <llvm/Support/JSON.h>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,6 +19,71 @@
 namespace notdec::mlsub {
 
 using retypd::fromIPChar;
+
+namespace {
+
+struct PNDiffPolicy {
+  int64_t nonPointerAbsLt = 900;
+  bool excludeZero = true;
+};
+
+std::optional<int64_t> getIntConstantValue(const ExtValuePtr &Val) {
+  if (auto *V = std::get_if<llvm::Value *>(&Val)) {
+    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(*V)) {
+      return CI->getSExtValue();
+    }
+    return std::nullopt;
+  }
+  if (auto *C = std::get_if<UConstant>(&Val)) {
+    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(C->Val)) {
+      return CI->getSExtValue();
+    }
+  }
+  return std::nullopt;
+}
+
+PNDiffPolicy loadPNDiffPolicy() {
+  PNDiffPolicy Policy;
+  auto *OverridePath = std::getenv("NOTDEC_PNDIFF_POLICY_OVERRIDE");
+  if (OverridePath == nullptr || std::strlen(OverridePath) == 0) {
+    return Policy;
+  }
+
+  auto Parsed = llvm::json::parse(notdec::readFileToString(OverridePath));
+  if (!Parsed) {
+    llvm::errs() << "Error: failed to parse NOTDEC_PNDIFF_POLICY_OVERRIDE '"
+                 << OverridePath << "' as JSON.\n";
+    std::abort();
+  }
+
+  auto *Root = Parsed->getAsObject();
+  if (Root == nullptr) {
+    llvm::errs() << "Error: NOTDEC_PNDIFF_POLICY_OVERRIDE must be a JSON "
+                    "object.\n";
+    std::abort();
+  }
+
+  if (auto Version = Root->getInteger("version")) {
+    if (*Version != 1) {
+      llvm::errs() << "Error: unsupported PNDiff policy version " << *Version
+                   << ".\n";
+      std::abort();
+    }
+  }
+
+  if (auto *IntConstantPolicy = Root->getObject("int_constant_policy")) {
+    if (auto Threshold = IntConstantPolicy->getInteger("non_pointer_abs_lt")) {
+      Policy.nonPointerAbsLt = *Threshold;
+    }
+    if (auto ExcludeZero = IntConstantPolicy->getBoolean("exclude_zero")) {
+      Policy.excludeZero = *ExcludeZero;
+    }
+  }
+
+  return Policy;
+}
+
+} // namespace
 
 // remove and ignore all negative access.
 OffsetRange matchOffsetRangeNoNegativeAccess(llvm::Value *I) {
@@ -47,7 +118,8 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
   if (isa<ConstantInt>(Src1) && isa<ConstantInt>(Src2)) {
     assert(false && "Constant at both sides. Run Optimization first!");
   }
-  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2)) {
+  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2) &&
+      BinOp->getOpcode() != llvm::Instruction::Shl) {
     // because of InstCombine canonical form, this should not happen?
     assert(false &&
            "Constant cannot be at the left side. Run InstCombine first.");
@@ -68,10 +140,7 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
 }
 
 bool PNIGraph::solve() {
-  assert(false && "TODO");
-  // CG.applyPNIPolicy();
-
-  bool AnyChanged = false;
+  bool AnyChanged = applyPNIPolicy();
   while (!Worklist.empty()) {
     ConsNode *C = *Worklist.begin();
     Worklist.erase(C);
@@ -91,24 +160,52 @@ bool PNIGraph::solve() {
   return AnyChanged;
 }
 
+bool PNIGraph::applyPNIPolicy() {
+  // TODO 默认的policy，仅在架构是webassembly的时候开启。
+  const PNDiffPolicy Policy = loadPNDiffPolicy();
+  if (Policy.nonPointerAbsLt <= 0) {
+    return false;
+  }
+
+  bool AnyChanged = false;
+  for (const auto &Ent : PNIMap.rev()) {
+    auto *Node = Ent.first;
+    if (!Node->isUnknown()) {
+      continue;
+    }
+    for (const auto &Val : Ent.second) {
+      auto ConstantValue = getIntConstantValue(Val);
+      if (!ConstantValue) {
+        continue;
+      }
+      if (Policy.excludeZero && *ConstantValue == 0) {
+        continue;
+      }
+      if (std::llabs(*ConstantValue) < Policy.nonPointerAbsLt) {
+        AnyChanged |= Node->setNonPtr();
+        break;
+      }
+    }
+  }
+  return AnyChanged;
+}
+
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
-  // Check if the constraint should be converted
+  // Reify solved ptradd-style information back into the mlsub graph. This
+  // keeps offset-derived pointer structure available to later type building.
   if (Cons->isAdd()) {
     auto [Left, Right, Result] = Cons->getNodes();
-    auto BinOp = const_cast<llvm::BinaryOperator *>(Cons->getInst());
+    auto *BinOp = const_cast<llvm::BinaryOperator *>(Cons->getInst());
     auto *LeftVal = BinOp->getOperand(0);
     auto *RightVal = BinOp->getOperand(1);
-    OffsetRange Off;
     if (getPNIVar(Left).getPtrOrNum() == retypd::Number &&
         getPNIVar(Right).getPtrOrNum() == retypd::Pointer) {
-      Off = matchOffsetRangeNoNegativeAccess(LeftVal);
-      assert(false && "TODO");
-      // Result->setAsPtrAdd(*Right, Off);
+      auto Off = matchOffsetRangeNoNegativeAccess(LeftVal);
+      Parent.setAsPtrAdd(Right, Result, Off);
     } else if (getPNIVar(Left).getPtrOrNum() == retypd::Pointer &&
                getPNIVar(Right).getPtrOrNum() == retypd::Number) {
-      Off = matchOffsetRangeNoNegativeAccess(RightVal);
-      assert(false && "TODO");
-      // Result->setAsPtrAdd(*Left, Off);
+      auto Off = matchOffsetRangeNoNegativeAccess(RightVal);
+      Parent.setAsPtrAdd(Left, Result, Off);
     }
   }
   for (auto N : Cons->getNodes()) {

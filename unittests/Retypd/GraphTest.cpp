@@ -1,13 +1,20 @@
 #include "TypeRecovery/ConstraintGraph.h"
 #include "TypeRecovery/Parser.h"
 #include "TypeRecovery/RExp.h"
+#include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/TRContext.h"
+#include "binarysub/binarysub-core.h"
 #include <cstddef>
 #include <gtest/gtest.h>
+#include <llvm/IR/Argument.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Support/Debug.h>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -16,6 +23,30 @@ using notdec::retypd::ConstraintGraph;
 using notdec::retypd::ConstraintSummary;
 using notdec::retypd::TRContext;
 using notdec::retypd::TypeVariable;
+
+static notdec::mlsub::ConstraintsGenerator
+makeMLsubGeneratorForFunctionArgs(llvm::LLVMContext &Ctx,
+                                  std::unique_ptr<llvm::Module> &M,
+                                  llvm::Argument *&Arg0,
+                                  llvm::Argument *&Arg1) {
+  M = std::make_unique<llvm::Module>("mlsub-test", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *FTy = llvm::FunctionType::get(llvm::Type::getVoidTy(Ctx), {I32, I32},
+                                      false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
+                                   M.get());
+  auto It = F->arg_begin();
+  Arg0 = &*It++;
+  Arg0->setName("arg0");
+  Arg1 = &*It++;
+  Arg1->setName("arg1");
+
+  static std::set<llvm::Function *> SCCs;
+  SCCs.clear();
+  SCCs.insert(F);
+  return notdec::mlsub::ConstraintsGenerator(
+      "mlsub-test", 32, SCCs, binarysub::make_variable(0, 32));
+}
 
 TypeVariable parseTV(TRContext &Ctx, llvm::StringRef str, size_t PointerSize = 32) {
   auto res = notdec::retypd::parseTypeVariable(Ctx, str, PointerSize);
@@ -214,4 +245,41 @@ TEST(Retypd, EdgeLabel1) {
       .V = notdec::retypd::Contravariant};
   EXPECT_TRUE(EL1 != EL2);
   EXPECT_FALSE(EL1 == EL2);
+}
+
+TEST(MLsub, PNDiffUnifiesRecursiveVariablePairsByDefault) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto LhsTy = CG.createNode(Arg0, nullptr, 0);
+  auto RhsTy = CG.createNode(Arg1, nullptr, 1);
+  auto *LhsPNI = &CG.PG.getPNIVar(Arg0);
+  auto *RhsPNI = &CG.PG.getPNIVar(Arg1);
+
+  EXPECT_NE(LhsPNI, RhsPNI);
+
+  CG.addSubtype(binarysub::make_function({LhsTy}, nullptr),
+                binarysub::make_function({RhsTy}, nullptr));
+
+  EXPECT_EQ(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
+}
+
+TEST(MLsub, PNDiffRecursiveVariablePairUnificationCanBeDisabled) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+  CG.EnablePNDiffTypeVariableClosureUnification = false;
+
+  auto LhsTy = CG.createNode(Arg0, nullptr, 0);
+  auto RhsTy = CG.createNode(Arg1, nullptr, 1);
+
+  CG.addSubtype(binarysub::make_function({LhsTy}, nullptr),
+                binarysub::make_function({RhsTy}, nullptr));
+
+  EXPECT_NE(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
 }

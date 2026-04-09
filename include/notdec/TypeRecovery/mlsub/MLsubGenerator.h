@@ -60,6 +60,7 @@ struct ConstraintsGenerator {
   std::map<llvm::CallBase *, SimpleType> unhandledCalls;
   std::set<ExtValuePtr> ContraVariantValues;
   std::set<ExtValuePtr> SnapshotContraVariantValues;
+  bool EnablePNDiffTypeVariableClosureUnification = true;
 
   void addMergeNode(SimpleType From, SimpleType To) { V2N.merge(From, To); }
 
@@ -99,6 +100,7 @@ struct ConstraintsGenerator {
       auto F = getNodeOrNull(Func, nullptr, -1);
       assert(F->getAsVariableState() != nullptr);
     }
+    PG.solve();
   }
   void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL,
                 bool SolveMemory = false);
@@ -106,6 +108,8 @@ struct ConstraintsGenerator {
 
   SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd);
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
+  void maybeUnifyPNDiffTypeVariablePair(const SimpleType &Lhs,
+                                        const SimpleType &Rhs);
 
 public:
   // Create Node of both variance
@@ -153,7 +157,10 @@ public:
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     binarysub::Cache cache;
-    binarysub::constrain(lhs, rhs, cache);
+    binarysub::constrain(lhs, rhs, cache,
+                         [this](const SimpleType &Lhs, const SimpleType &Rhs) {
+                           maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
+                         });
   }
 
   SimpleType addVarSubtype(llvm::Value *Val, SimpleType dtv) {
@@ -213,7 +220,15 @@ public:
   }
 
   void onUpdatePNType(ExtValuePtr Val) {}
-  void setAsPtrAdd(SimpleType addend, SimpleType result, OffsetRange Off) {}
+  void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off) {
+    auto BaseNode = getOrInsertNode(basePtr, nullptr, -1);
+    auto ResultNode = getOrInsertNode(result, nullptr, -1);
+    std::vector<std::pair<std::string, SimpleType>> fields;
+    fields.push_back({Off.str(), ResultNode});
+    addSubtype(BaseNode, binarysub::make_record(std::move(fields)));
+    addSubtype(ResultNode, binarysub::make_record({}));
+    PG.unifyVar(basePtr, result);
+  }
 
 public:
   struct PcodeOpType {

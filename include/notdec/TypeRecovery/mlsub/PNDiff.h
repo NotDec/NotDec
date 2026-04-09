@@ -259,6 +259,7 @@ struct PNIGraph {
   PNIGraph(ConstraintsGenerator &Parent, std::string Name, long PointerSize)
       : Parent(Parent), Name(Name), PointerSize(PointerSize) {}
 
+  bool applyPNIPolicy();
   void addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
                   llvm::BinaryOperator *Inst);
 

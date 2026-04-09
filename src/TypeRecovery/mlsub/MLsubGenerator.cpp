@@ -638,6 +638,51 @@ SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
   std::abort();
 }
 
+void ConstraintsGenerator::maybeUnifyPNDiffTypeVariablePair(
+    const SimpleType &Lhs, const SimpleType &Rhs) {
+  if (!EnablePNDiffTypeVariableClosureUnification || !Lhs || !Rhs) {
+    return;
+  }
+  if (!Lhs->isVariableState() || !Rhs->isVariableState()) {
+    return;
+  }
+
+  auto gatherMappedValues = [&](const SimpleType &Ty) {
+    std::vector<ExtValuePtr> Values;
+    const auto &Reverse = V2N.rev();
+    auto It = Reverse.find(Ty);
+    if (It == Reverse.end()) {
+      return Values;
+    }
+    Values.assign(It->second.begin(), It->second.end());
+    return Values;
+  };
+
+  auto LeftValues = gatherMappedValues(Lhs);
+  auto RightValues = gatherMappedValues(Rhs);
+  if (LeftValues.empty() || RightValues.empty()) {
+    return;
+  }
+
+  PNINode *Leader = nullptr;
+  auto unifyMappedValues = [&](const std::vector<ExtValuePtr> &Values) {
+    for (const auto &Val : Values) {
+      auto *Node = PG.getPNIVarOrNull(Val);
+      if (Node == nullptr) {
+        continue;
+      }
+      if (Leader == nullptr) {
+        Leader = Node;
+      } else {
+        Leader = Leader->unify(*Node);
+      }
+    }
+  };
+
+  unifyMappedValues(LeftValues);
+  unifyMappedValues(RightValues);
+}
+
 SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
                                                       llvm::User *User,
                                                       long OpInd) {
@@ -1047,7 +1092,7 @@ void ConstraintsGenerator::addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
   // auto Res = &
   PG.getOrInsertPNINode(I, nullptr, -1);
   if (Left->isPNRelated() || Right->isPNRelated()) {
-    PG.addAddCons(LHS, RHS, I, I);
+    PG.addSubCons(LHS, RHS, I, I);
   }
 }
 
