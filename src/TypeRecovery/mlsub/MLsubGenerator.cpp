@@ -20,10 +20,13 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/FormattedStream.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/JSON.h>
 #include <algorithm>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 
 using namespace llvm;
@@ -35,6 +38,8 @@ namespace notdec::mlsub {
 namespace {
 
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
+constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
+constexpr llvm::StringLiteral kPNDiffAnnotatedFile = "03-pndiff-final.ll";
 
 void appendDebugValueTypes(
     llvm::StringRef DebugDir, llvm::StringRef SCCName,
@@ -86,6 +91,190 @@ void appendDebugValueTypes(
     Out << Line << "\n";
   }
   Out << "\n";
+}
+
+std::shared_ptr<ConstraintsGenerator> getFuncCG(AllGraphs &AG,
+                                                const llvm::Function *F) {
+  auto *CGN = AG.CG->getOrInsertFunction(const_cast<llvm::Function *>(F));
+  if (!AG.Func2SCCIndex.count(CGN)) {
+    return nullptr;
+  }
+  return AG.AllSCCs.at(AG.Func2SCCIndex.at(CGN)).Generator;
+}
+
+std::optional<std::string> getPNDiffState(ConstraintsGenerator &CG,
+                                          ExtValuePtr Val) {
+  auto *Node = CG.PG.getPNIVarOrNull(Val);
+  if (Node == nullptr || !Node->isPNRelated()) {
+    return std::nullopt;
+  }
+  if (Node->isPointer() || Node->isNull()) {
+    return "ptr";
+  }
+  if (Node->isNumber()) {
+    return "num";
+  }
+  return "unknown";
+}
+
+std::string joinParts(const std::vector<std::string> &Parts) {
+  std::string Result;
+  for (size_t I = 0; I < Parts.size(); ++I) {
+    if (I != 0) {
+      Result += ", ";
+    }
+    Result += Parts[I];
+  }
+  return Result;
+}
+
+std::optional<std::string>
+formatInstructionPNDiffComment(ConstraintsGenerator &CG,
+                               const llvm::Instruction &Inst) {
+  std::vector<std::string> Parts;
+  if (!Inst.getType()->isVoidTy()) {
+    if (auto State =
+            getPNDiffState(CG, const_cast<llvm::Instruction *>(&Inst))) {
+      Parts.push_back("result=" + *State);
+    }
+  }
+  for (unsigned I = 0; I < Inst.getNumOperands(); ++I) {
+    ExtValuePtr Op = Inst.getOperand(I);
+    llvmValue2ExtVal(Op, const_cast<llvm::Instruction *>(&Inst), I);
+    if (auto State = getPNDiffState(CG, Op)) {
+      Parts.push_back("op" + std::to_string(I) + "=" + *State);
+    }
+  }
+  if (Parts.empty()) {
+    return std::nullopt;
+  }
+  return "pndiff: " + joinParts(Parts);
+}
+
+std::optional<std::string>
+formatFunctionPNDiffComment(ConstraintsGenerator &CG, const llvm::Function &F) {
+  std::vector<std::string> Parts;
+  if (!F.getReturnType()->isVoidTy()) {
+    if (auto State =
+            getPNDiffState(CG, ReturnValue{.Func = const_cast<llvm::Function *>(&F)})) {
+      Parts.push_back("ret=" + *State);
+    }
+  }
+  unsigned ArgIndex = 0;
+  for (auto &Arg : F.args()) {
+    if (auto State =
+            getPNDiffState(CG, const_cast<llvm::Argument *>(&Arg))) {
+      Parts.push_back("arg" + std::to_string(ArgIndex) + "=" + *State);
+    }
+    ++ArgIndex;
+  }
+  if (Parts.empty()) {
+    return std::nullopt;
+  }
+  return "pndiff: " + joinParts(Parts);
+}
+
+std::string formatInstructionText(const llvm::Instruction &Inst) {
+  std::string S;
+  llvm::raw_string_ostream OS(S);
+  Inst.print(OS);
+  return OS.str();
+}
+
+std::string formatConstraintStateSummary(ConstraintsGenerator &CG,
+                                         const ConsNode &Cons) {
+  auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
+  auto ResultState = getPNDiffState(CG, Nodes[2]).value_or("unknown");
+  auto LeftState = getPNDiffState(CG, Nodes[0]).value_or("unknown");
+  auto RightState = getPNDiffState(CG, Nodes[1]).value_or("unknown");
+  return "result=" + ResultState + ", op0=" + LeftState +
+         ", op1=" + RightState;
+}
+
+void writePNDiffWarnings(const std::string &Path, AllGraphs &AG) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Cannot open PNDiff warning output file " << Path << ": "
+                 << EC.message() << "\n";
+    std::abort();
+  }
+
+  Out << "# Residual PNDiff constraints after solve\n\n";
+  bool AnyResidual = false;
+
+  for (auto &Data : AG.AllSCCs) {
+    if (!Data.Generator || Data.Generator->PG.Constraints.empty()) {
+      continue;
+    }
+
+    AnyResidual = true;
+    auto &CG = *Data.Generator;
+    Out << "## SCC: " << Data.SCCName << "\n";
+    for (const auto &Cons : CG.PG.Constraints) {
+      auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
+      Out << "kind: " << (Cons.isAdd() ? "Add" : "Sub") << "\n";
+      Out << "inst: " << formatInstructionText(*Cons.getInst()) << "\n";
+      Out << "result: " << toStableString(Nodes[2]) << "\n";
+      Out << "op0: " << toStableString(Nodes[0]) << "\n";
+      Out << "op1: " << toStableString(Nodes[1]) << "\n";
+      Out << "state: " << formatConstraintStateSummary(CG, Cons) << "\n\n";
+    }
+  }
+
+  if (!AnyResidual) {
+    Out << "No residual Add/Sub constraints after solve.\n";
+  }
+}
+
+class PNDiffAnnotationWriter : public llvm::AssemblyAnnotationWriter {
+  AllGraphs &AG;
+
+public:
+  explicit PNDiffAnnotationWriter(AllGraphs &AG) : AG(AG) {}
+
+  void emitFunctionAnnot(const llvm::Function *F,
+                         llvm::formatted_raw_ostream &OS) override {
+    auto CG = getFuncCG(AG, F);
+    if (!CG) {
+      return;
+    }
+    auto Comment = formatFunctionPNDiffComment(*CG, *F);
+    if (!Comment) {
+      return;
+    }
+    OS << "; " << *Comment << "\n";
+  }
+
+  void printInfoComment(const llvm::Value &V,
+                        llvm::formatted_raw_ostream &OS) override {
+    auto *Inst = llvm::dyn_cast<llvm::Instruction>(&V);
+    if (Inst == nullptr) {
+      return;
+    }
+    auto CG = getFuncCG(AG, Inst->getFunction());
+    if (!CG) {
+      return;
+    }
+    auto Comment = formatInstructionPNDiffComment(*CG, *Inst);
+    if (!Comment) {
+      return;
+    }
+    OS << "; " << *Comment;
+  }
+};
+
+void writePNDiffAnnotatedModule(const llvm::Module &M, const std::string &Path,
+                                AllGraphs &AG) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Cannot open PNDiff annotated IR output file " << Path
+                 << ": " << EC.message() << "\n";
+    std::abort();
+  }
+  PNDiffAnnotationWriter Writer(AG);
+  M.print(Out, &Writer);
 }
 
 } // namespace
@@ -158,6 +347,12 @@ void MLsubRecovery::run() {
   bottomUpPhase();
 
   topDownPhase();
+
+  if (WorkDir) {
+    writePNDiffWarnings(join(*WorkDir, kPNDiffWarnFile.str()), AG);
+    writePNDiffAnnotatedModule(
+        M, join(*WorkDir, kPNDiffAnnotatedFile.str()), AG);
+  }
 
   std::cerr << "Constraint generation done! SCC count:" << AG.AllSCCs.size()
             << "\n";
