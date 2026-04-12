@@ -868,13 +868,13 @@ notdec case.ll -o /tmp/x.ll --tr-level=2 --dump-htypes /tmp/x.htypes
 
 #### 11.2 检查 ASAN 泄漏对测试结果的影响
 
-当前 suite 已设置：
+2026-04-07 当时的 suite 曾设置：
 
 ```json
 "ASAN_OPTIONS": "detect_leaks=0"
 ```
 
-新的类型恢复 suite 应继续保留这一设置，避免“产物正确但 leak 失败”干扰功能回归。
+这是为了先隔离功能回归与 LeakSanitizer 噪声。该临时要求已在 2026-04-12 移除，后续不应再把它作为默认配置。
 
 #### 11.3 确认 `.htypes` 文件没有掺杂非稳定日志
 
@@ -903,8 +903,9 @@ notdec case.ll -o /tmp/x.ll --tr-level=2 --dump-htypes /tmp/x.htypes
   - `12_Stack1`
   - `16_Poly1`
 - 两次导出的 `.htypes` 文本均完全一致
-- 新 suite 继续保留：
+- 当时的 suite 仍保留：
   - `ASAN_OPTIONS=detect_leaks=0`
+- 该临时设置已在 2026-04-12 清理，不再作为当前要求
 - 当前 `.htypes` 文件中未观察到地址、临时编号、trace 日志等非稳定噪声
 
 最终回归结果：

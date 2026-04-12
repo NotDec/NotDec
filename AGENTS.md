@@ -269,14 +269,6 @@ ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --out
 ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy|howard_o3_split).tr_level_2' --output-on-failure
 ```
 
-当前 `tr-level=2` 的 LLVM IR 集成测试 runner 默认会设置：
-
-```bash
-ASAN_OPTIONS=detect_leaks=0
-```
-
-目的是先聚焦功能回归，避免 LeakSanitizer 把“已产出结果但存在泄漏”的 case 统一判成失败。
-
 注意：
 
 - `test.sh` 中存在 `--only-opt` 调用，但当前 `src/NotDec.cpp` 里没有对应命令行参数定义；修改测试或文档时不要假设这个选项仍然有效
@@ -351,3 +343,4 @@ ASAN_OPTIONS=detect_leaks=0
 - 构建依赖版本发生变化
 - 推荐运行方式或测试入口发生变化
 - `test/` 下 suite 的目录组织、manifest 约定、golden 策略发生变化
+- 保持内容只描述当前有效、可执行的事实；对已失效的临时说明优先直接删除，把历史背景放到 `logs/` 或其他文档，不要继续堆在本文件里

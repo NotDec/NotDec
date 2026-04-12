@@ -50,10 +50,6 @@
         {
           "name": "NOTDEC_SAT_DISABLE",
           "value": "1"
-        },
-        {
-          "name": "ASAN_OPTIONS",
-          "value": "detect_leaks=0"
         }
       ],
       // "setupCommands": [{"text": "set auto-solib-add off"}]

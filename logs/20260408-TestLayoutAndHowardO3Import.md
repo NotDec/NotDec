@@ -81,12 +81,13 @@ env \
   NOTDEC_POLY_FUNCS=/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json \
   NOTDEC_DISABLE_INTERPROC=1 \
   NOTDEC_SAT_DISABLE=1 \
-  ASAN_OPTIONS=detect_leaks=0 \
   ./build/bin/notdec test/type-recovery/howard-o3-split/cases/fortune.o3.wasm.N.ll \
     -o /tmp/notdec-howard-caseX/out.ll \
     --tr-level=2 \
     --dump-htypes /tmp/notdec-howard-caseX/out.htypes
 ```
+
+注：2026-04-12 起不再要求额外设置 `ASAN_OPTIONS=detect_leaks=0`；如果复现时出现 LeakSanitizer 报错，应直接按真实问题处理。
 
 ### 3.1 初始稳定复现问题
 

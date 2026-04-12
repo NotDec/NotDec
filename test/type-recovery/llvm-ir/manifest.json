@@ -3,9 +3,6 @@
   "default_args": [
     "--tr-level=2"
   ],
-  "env": {
-    "ASAN_OPTIONS": "detect_leaks=0"
-  },
   "cases": [
     {
       "name": "01_Simple1",
