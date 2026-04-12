@@ -39,3 +39,4 @@ build-release/
 /*.ll
 *.ll.c
 *.dot
+Prompts.md

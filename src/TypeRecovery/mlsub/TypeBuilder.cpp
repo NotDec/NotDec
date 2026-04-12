@@ -55,6 +55,29 @@ HType *TypeBuilder::getBottomType(std::uint32_t BitSize) {
   return Ctx.getBottomType(false, BitSize);
 }
 
+namespace {
+
+// binarysub may materialize empty records as internal placeholders while it is
+// normalizing recursive or compound shapes. They should stay transparent to the
+// final HType layer instead of surfacing as user-visible empty aggregates.
+bool isZeroSizedRecordMarker(const binarysub::UTypePtr &Ty) {
+  if (Ty == nullptr) {
+    return false;
+  }
+  if (auto *Record = std::get_if<binarysub::URecordType>(&Ty->v)) {
+    if (Record->fields.empty()) {
+      return true;
+    }
+    return std::all_of(Record->fields.begin(), Record->fields.end(),
+                       [](const auto &Field) {
+                         return isZeroSizedRecordMarker(Field.second);
+                       });
+  }
+  return false;
+}
+
+} // namespace
+
 HType *TypeBuilder::parsePrimitiveName(const std::string &Name,
                                        std::uint32_t BitSize) {
   // Integer types: "i8", "i16", "i32", "i64"
@@ -191,9 +214,23 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     }
     return convertStruct(Ty, RawFields, FieldSizeBytes);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
+    // Collapse away marker-only sides so field payload types do not inherit
+    // binarysub's empty-record sentinel as part of the visible union shape.
+    if (isZeroSizedRecordMarker(V->lhs)) {
+      return convertFieldType(V->rhs, FieldSizeBytes);
+    }
+    if (isZeroSizedRecordMarker(V->rhs)) {
+      return convertFieldType(V->lhs, FieldSizeBytes);
+    }
     return doUnion(convertFieldType(V->lhs, FieldSizeBytes),
                    convertFieldType(V->rhs, FieldSizeBytes));
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
+    if (isZeroSizedRecordMarker(V->lhs)) {
+      return convertFieldType(V->rhs, FieldSizeBytes);
+    }
+    if (isZeroSizedRecordMarker(V->rhs)) {
+      return convertFieldType(V->lhs, FieldSizeBytes);
+    }
     return doInter(convertFieldType(V->lhs, FieldSizeBytes),
                    convertFieldType(V->rhs, FieldSizeBytes));
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
@@ -268,14 +305,27 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
     Result = convertVariable(*V);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs);
-    HType *RhsTy = convert(V->rhs);
-
-    Result = doUnion(LhsTy, RhsTy);
+    // Top-level conversion follows the same rule: once one branch is only a
+    // zero-sized marker, the other branch already captures the meaningful type.
+    if (isZeroSizedRecordMarker(V->lhs)) {
+      Result = convert(V->rhs);
+    } else if (isZeroSizedRecordMarker(V->rhs)) {
+      Result = convert(V->lhs);
+    } else {
+      HType *LhsTy = convert(V->lhs);
+      HType *RhsTy = convert(V->rhs);
+      Result = doUnion(LhsTy, RhsTy);
+    }
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs);
-    HType *RhsTy = convert(V->rhs);
-    Result = doInter(LhsTy, RhsTy);
+    if (isZeroSizedRecordMarker(V->lhs)) {
+      Result = convert(V->rhs);
+    } else if (isZeroSizedRecordMarker(V->rhs)) {
+      Result = convert(V->lhs);
+    } else {
+      HType *LhsTy = convert(V->lhs);
+      HType *RhsTy = convert(V->rhs);
+      Result = doInter(LhsTy, RhsTy);
+    }
   } else if (std::get_if<UPointerType>(&Ty->v)) {
     Result = convertPointer(Ty);
   } else if (std::get_if<URecordType>(&Ty->v)) {
@@ -533,10 +583,6 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
   }
 
-  if (Decl->getFields().size() == 0) {
-    llvm::errs() << "Error: Empty Struct?\n";
-  }
-
   if (!PrevDecl && Decl->getFields().size() == 0) {
     return getVoidPtr();
   }
@@ -636,6 +682,10 @@ HType *TypeBuilder::convertStruct(
   // 已经没有任何数组访问模式，接下来创建结构体和union类型
   if (RemainingEntries.size() > 0) {
     for (auto &Ent : RemainingEntries) {
+      // Marker entries represent bookkeeping nodes, not material storage.
+      if (isZeroSizedRecordMarker(Ent.second)) {
+        continue;
+      }
       // 肯定是非数组
       assert(Ent.first.access.empty());
       auto SizeInBits = accessedPointeeSizeInBits(Ent.second);
@@ -644,6 +694,14 @@ HType *TypeBuilder::convertStruct(
                         convertFieldType(Ent.second, Size)});
     }
   }
+
+  // A marker can still collapse into a zero-sized range after normalization, so
+  // prune such entries before overlap analysis and layout synthesis.
+  Fields.erase(std::remove_if(Fields.begin(), Fields.end(),
+                              [](const FieldEntry &F) {
+                                return F.first.Size == 0;
+                              }),
+               Fields.end());
 
   auto IsOverlap = [](OffsetTy S1, OffsetTy E1, OffsetTy S2, OffsetTy E2) {
     assert(S1 < E1);
@@ -805,7 +863,13 @@ HType *TypeBuilder::convertStruct(
   } // end of while true
   // Now there is no overlap, create struct for Fields.
   if (Fields.empty()) {
-    // TODO create empty struct?
+    // Keep a sized shell when the pointee extent is known, otherwise callers
+    // would lose the aggregate boundary and degrade to void* too early.
+    if (PointeeSize && *PointeeSize > 0) {
+      return craftStruct(
+          {}, SimpleRange{.Start = 0, .Size = *PointeeSize}, std::nullopt, &T);
+    }
+    return getVoidPtr();
   }
   // sort the entry by start offset.
   std::sort(Fields.begin(), Fields.end(),
@@ -872,13 +936,25 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     }
     Ret = convertStruct(Ty, RawFields, PointeeSize);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs);
-    HType *RhsTy = convert(V->rhs);
-    Ret = doUnion(LhsTy, RhsTy);
+    if (isZeroSizedRecordMarker(V->lhs)) {
+      Ret = convert(V->rhs);
+    } else if (isZeroSizedRecordMarker(V->rhs)) {
+      Ret = convert(V->lhs);
+    } else {
+      HType *LhsTy = convert(V->lhs);
+      HType *RhsTy = convert(V->rhs);
+      Ret = doUnion(LhsTy, RhsTy);
+    }
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    HType *LhsTy = convert(V->lhs);
-    HType *RhsTy = convert(V->rhs);
-    Ret = doInter(LhsTy, RhsTy);
+    if (isZeroSizedRecordMarker(V->lhs)) {
+      Ret = convert(V->rhs);
+    } else if (isZeroSizedRecordMarker(V->rhs)) {
+      Ret = convert(V->lhs);
+    } else {
+      HType *LhsTy = convert(V->lhs);
+      HType *RhsTy = convert(V->rhs);
+      Ret = doInter(LhsTy, RhsTy);
+    }
   } else {
     assert(false && "Unhandled Pointer UType variant");
   }
