@@ -16,11 +16,13 @@ This mirrors the usual LLVM split:
 
 - `test/run_type_recovery_suite.py`
   - Shared manifest-driven runner for HType regression suites.
+  - Supports `htype-snapshot` and `debug-struct-compare` oracle kinds.
 - `test/type-recovery/<suite>/`
   - Self-contained type recovery suites.
   - `manifest.json` defines the checked cases and per-suite setup.
   - `cases/` stores checked-in source inputs.
-  - `expected/` stores golden HType snapshots.
+  - `expected/` stores golden HType snapshots for snapshot-oracle suites.
+  - `truth/` stores checked-in debug-info LLVM IR for debug-ground-truth suites.
   - `support/` is optional for suite-local headers or helper inputs.
   - `legacy/` is optional for migrated artifacts that are reference-only.
 - `test/legacy/`
@@ -37,6 +39,9 @@ This mirrors the usual LLVM split:
   - Imported O3 split LLVM IR corpus from the HOWARD experiment workspace.
   - Currently checked in as a full in-tree corpus and staged as `skip` until
     cases are triaged into `xfail` and `pass`.
+- `test/type-recovery/debug-info-c/`
+  - C-authored struct-layout recovery cases with checked-in debug-info LLVM IR
+    ground truth.
 
 ## Adding New Integration Tests
 
@@ -44,8 +49,12 @@ This mirrors the usual LLVM split:
 2. Add suite-local support files under `support/` only if the case cannot be
    prepared without them.
 3. Add or update the expected output under `expected/`.
+   For debug-info suites, refresh the checked-in `truth/*.dbg.ll` instead.
 4. Register the case in the suite manifest.
 5. Run the suite through `ctest`.
 
 The type recovery runner currently supports `pass`, `xfail`, and `skip` states
-so known bugs can be tracked without pretending they are fixed.
+so known bugs can be tracked without pretending they are fixed. Snapshot suites
+still compare `.htypes` text directly, while debug-ground-truth suites extract
+truth from debug metadata and compare it semantically against the recovered
+`.htypes`.

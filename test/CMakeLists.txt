@@ -31,3 +31,8 @@ add_type_recovery_suite(
 	notdec.type_recovery.howard_o3_split.tr_level_2
 	type-recovery/howard-o3-split/manifest.json
 )
+
+add_type_recovery_suite(
+	notdec.type_recovery.debug_info_c.tr_level_2
+	type-recovery/debug-info-c/manifest.json
+)

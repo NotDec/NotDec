@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -52,7 +54,7 @@ def expand_args(
     ]
 
 
-def command_succeeded(
+def notdec_command_succeeded(
     process: subprocess.CompletedProcess[str],
     ir_output_path: Path,
     snapshot_path: Path,
@@ -84,6 +86,31 @@ def write_log(log_path: Path, sections: list[str]) -> None:
     log_path.write_text("\n\n".join(sections) + "\n")
 
 
+def run_command(
+    *,
+    title: str,
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    process = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return process, format_log_section(title, command, process)
+
+
+def resolve_oracle(manifest: dict, case: dict) -> dict:
+    oracle = dict(manifest.get("oracle", {}))
+    oracle.update(case.get("oracle", {}))
+    oracle.setdefault("kind", "htype-snapshot")
+    return oracle
+
+
 def prepare_case_input(
     *,
     case: dict,
@@ -99,30 +126,138 @@ def prepare_case_input(
         return input_path, [], True
 
     kind = prep.get("kind")
-    if kind != "clang-ir":
+    prepared_input = workdir / f"{case['name']}.input.ll"
+
+    if kind == "clang-ir":
+        command = [
+            prep["binary"],
+            *expand_args(
+                prep.get("args", []),
+                manifest_dir=manifest_dir,
+                project_root=project_root,
+                workdir=workdir,
+            ),
+            str(input_path),
+            "-o",
+            str(prepared_input),
+        ]
+    elif kind == "strip-debug":
+        command = [
+            prep.get("binary", "opt-14"),
+            *expand_args(
+                prep.get("args", ["-strip-debug", "-S"]),
+                manifest_dir=manifest_dir,
+                project_root=project_root,
+                workdir=workdir,
+            ),
+            str(input_path),
+            "-o",
+            str(prepared_input),
+        ]
+    else:
         raise ValueError(f"unsupported source_prep kind: {kind}")
 
-    compiler = prep["binary"]
-    compiler_args = expand_args(
-        prep.get("args", []),
-        manifest_dir=manifest_dir,
-        project_root=project_root,
-        workdir=workdir,
+    process, section = run_command(title="prepare", command=command, cwd=project_root, env=env)
+    return prepared_input, [section], process.returncode == 0
+
+
+def prepare_truth(
+    *,
+    case: dict,
+    oracle: dict,
+    manifest_dir: Path,
+    project_root: Path,
+    workdir: Path,
+    env: dict[str, str],
+) -> tuple[Path | None, list[str], bool]:
+    if oracle.get("kind") != "debug-struct-compare":
+        return None, [], True
+
+    ground_truth = resolve_path(manifest_dir, case.get("ground_truth", case.get("input")))
+    if ground_truth is None:
+        raise ValueError("debug-struct-compare requires ground_truth or input")
+
+    truth_path = workdir / f"{case['name']}.truth.json"
+    extractor = project_root / "test/tools/extract_debug_type_truth.py"
+    command = [
+        sys.executable,
+        str(extractor),
+        "--input",
+        str(ground_truth),
+        "--output",
+        str(truth_path),
+    ]
+    process, section = run_command(title="prepare_truth", command=command, cwd=project_root, env=env)
+    return truth_path, [section], process.returncode == 0 and truth_path.exists()
+
+
+def compare_snapshot(snapshot_path: Path, expected_path: Path | None) -> tuple[bool, dict]:
+    if expected_path is None:
+        return True, {}
+    actual = normalize_text(snapshot_path.read_text())
+    expected = normalize_text(expected_path.read_text())
+    return actual == expected, {"expected": expected_path, "actual": snapshot_path}
+
+
+def compare_oracle(
+    *,
+    case: dict,
+    oracle: dict,
+    project_root: Path,
+    workdir: Path,
+    env: dict[str, str],
+    snapshot_path: Path,
+    expected_path: Path | None,
+    truth_path: Path | None,
+) -> tuple[bool, list[str], dict]:
+    kind = oracle.get("kind", "htype-snapshot")
+
+    if kind == "htype-snapshot":
+        matches, details = compare_snapshot(snapshot_path, expected_path)
+        return matches, [], details
+
+    if kind != "debug-struct-compare":
+        raise ValueError(f"unsupported oracle kind: {kind}")
+
+    if truth_path is None:
+        raise ValueError("debug-struct-compare requires truth_path")
+
+    compare_cfg_path = workdir / f"{case['name']}.compare.config.json"
+    compare_json_path = workdir / f"{case['name']}.compare.json"
+    compare_txt_path = workdir / f"{case['name']}.compare.txt"
+    compare_cfg_path.write_text(
+        json.dumps(
+            {
+                "roots": case.get("roots", []),
+                "oracle": oracle,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
     )
-    prepared_input = workdir / f"{case['name']}.input.ll"
-    command = [compiler, *compiler_args, str(input_path), "-o", str(prepared_input)]
-    process = subprocess.run(
-        command,
-        cwd=project_root,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    sections = [format_log_section("prepare", command, process)]
-    if process.returncode != 0:
-        return prepared_input, sections, False
-    return prepared_input, sections, True
+
+    comparator = project_root / "test/tools/compare_htypes_with_debug_truth.py"
+    command = [
+        sys.executable,
+        str(comparator),
+        "--htypes",
+        str(snapshot_path),
+        "--truth",
+        str(truth_path),
+        "--config",
+        str(compare_cfg_path),
+        "--report-json",
+        str(compare_json_path),
+        "--report-text",
+        str(compare_txt_path),
+    ]
+    process, section = run_command(title="compare_oracle", command=command, cwd=project_root, env=env)
+    passed = process.returncode == 0 and compare_json_path.exists() and compare_txt_path.exists()
+    return passed, [section], {
+        "report_json": compare_json_path,
+        "report_text": compare_txt_path,
+    }
 
 
 def main() -> int:
@@ -159,10 +294,11 @@ def main() -> int:
     for case in manifest["cases"]:
         name = case["name"]
         status = case.get("status", "pass")
-        input_path = resolve_path(manifest_dir, case["input"])
+        oracle = resolve_oracle(manifest, case)
         expected_path = resolve_path(manifest_dir, case.get("expected"))
         output_path = workdir / f"{name}.out.ll"
         snapshot_path = workdir / f"{name}.out.htypes"
+        truth_path = workdir / f"{name}.truth.json"
         log_path = workdir / f"{name}.log"
 
         if status == "skip":
@@ -170,7 +306,16 @@ def main() -> int:
             print(f"[SKIP ] {name}")
             continue
 
-        for path in (output_path, snapshot_path, workdir / f"{name}.input.ll"):
+        cleanup_paths = [
+            output_path,
+            snapshot_path,
+            truth_path,
+            workdir / f"{name}.input.ll",
+            workdir / f"{name}.compare.config.json",
+            workdir / f"{name}.compare.json",
+            workdir / f"{name}.compare.txt",
+        ]
+        for path in cleanup_paths:
             if path.exists():
                 path.unlink()
 
@@ -183,6 +328,15 @@ def main() -> int:
                 workdir=workdir,
                 env=env,
             )
+            prepared_truth_path, truth_sections, truth_ok = prepare_truth(
+                case=case,
+                oracle=oracle,
+                manifest_dir=manifest_dir,
+                project_root=project_root,
+                workdir=workdir,
+                env=env,
+            )
+            log_sections.extend(truth_sections)
         except Exception as exc:
             counters["fail"] += 1
             log_path.write_text(f"prepare exception: {exc}\n")
@@ -190,7 +344,7 @@ def main() -> int:
             print(f"        log: {log_path}")
             continue
 
-        if not prepared_ok:
+        if not prepared_ok or not truth_ok:
             write_log(log_path, log_sections)
             if status == "xfail":
                 counters["xfail"] += 1
@@ -214,29 +368,30 @@ def main() -> int:
             str(snapshot_path),
         ]
 
-        process = subprocess.run(
-            command,
-            cwd=project_root,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        log_sections.append(format_log_section("notdec", command, process))
+        process, section = run_command(title="notdec", command=command, cwd=project_root, env=env)
+        log_sections.append(section)
+
+        notdec_ok = notdec_command_succeeded(process, output_path, snapshot_path)
+        compare_ok = False
+        compare_details: dict = {}
+        if notdec_ok:
+            compare_ok, compare_sections, compare_details = compare_oracle(
+                case=case,
+                oracle=oracle,
+                project_root=project_root,
+                workdir=workdir,
+                env=env,
+                snapshot_path=snapshot_path,
+                expected_path=expected_path,
+                truth_path=prepared_truth_path,
+            )
+            log_sections.extend(compare_sections)
+
         write_log(log_path, log_sections)
-
-        succeeded = command_succeeded(process, output_path, snapshot_path)
-        matches_expected = False
-
-        if succeeded and expected_path is not None:
-            actual = normalize_text(snapshot_path.read_text())
-            expected = normalize_text(expected_path.read_text())
-            matches_expected = actual == expected
-        elif succeeded and expected_path is None:
-            matches_expected = True
+        succeeded = notdec_ok and compare_ok
 
         if status == "pass":
-            if succeeded and matches_expected:
+            if succeeded:
                 counters["pass"] += 1
                 print(f"[PASS ] {name}")
                 continue
@@ -244,13 +399,15 @@ def main() -> int:
             counters["fail"] += 1
             print(f"[FAIL ] {name}")
             print(f"        log: {log_path}")
-            if expected_path is not None and succeeded and not matches_expected:
-                print(f"        expected: {expected_path}")
-                print(f"        actual:   {snapshot_path}")
+            if oracle.get("kind") == "htype-snapshot" and notdec_ok and not compare_ok:
+                print(f"        expected: {compare_details['expected']}")
+                print(f"        actual:   {compare_details['actual']}")
+            if oracle.get("kind") == "debug-struct-compare" and notdec_ok and not compare_ok:
+                print(f"        compare:  {compare_details['report_text']}")
             continue
 
         if status == "xfail":
-            if succeeded and matches_expected:
+            if succeeded:
                 counters["xpass"] += 1
                 print(f"[XPASS] {name}")
                 print(f"        log: {log_path}")

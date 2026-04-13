@@ -21,9 +21,9 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
-        "${workspaceFolder}/test/type-recovery/llvm-ir/cases/06_SimpleRecursive2.ll",
+        "${file}",
         "-o",
-        "/tmp/06_SimpleRecursive2.c",
+        "/tmp/${file}.c",
         "--tr-level=2",
         "-g",
         "--work-dir=${workspaceFolder}/work_dir"
@@ -53,124 +53,6 @@
         }
       ],
       // "setupCommands": [{"text": "set auto-solib-add off"}]
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "dec lldb",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "${file}",
-        "-o",
-        "${file}.c",
-        "--tr-level=2",
-        "-g",
-        "--work-dir=${workspaceFolder}/work_dir",
-        // "-debug-only=structural-analysis",
-        // "-debug-only=structural-goto",
-        // "--print-before=type-recovery"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Clean and Build",
-      "env": {
-        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
-        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
-        "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
-        // "NOTDEC_SAT_TIMEOUT": "120000",
-        "NOTDEC_DISABLE_INTERPROC": "1",
-        "NOTDEC_SAT_DISABLE": "1",
-        // "NOTDEC_SAT_NOPTRRULE": "1",
-        // "NOTDEC_DEFAULT_POLY": "1",
-        // "NOTDEC_TYPE_RECOVERY_TRACE_IDS": "9728",
-      }
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "no-tr",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "${file}",
-        "-o",
-        "${file}.c",
-        // "-debug-only=type-recovery",
-        "--tr-level=1",
-        "-g",
-        "--work-dir=${workspaceFolder}/work_dir",
-        "--split-mem",
-        "--gen-int-to-ptr",
-        // "-debug-only=retypd_graph",
-        // "--print-before=type-recovery"
-        // "--print-after-all"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Clean and Build"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "llvm2c",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "${file}",
-        "-o",
-        "${file}.c",
-        "--tr-level=0"
-        // "-debug-only=type-recovery",
-        // "-debug-only=retypd_graph",
-        // "--print-before=type-recovery"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Clean and Build",
-    },
-    {
-      "name": "Replay",
-      "type": "lldb",
-      "request": "attach",
-      "targetCreateCommands": [
-        "target create ${workspaceFolder}/build/bin/notdec"
-      ],
-      "processCreateCommands": [
-        "gdb-remote 127.0.0.1:12345"
-      ],
-      "reverseDebugging": true
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "decompile emcc-print",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "${workspaceFolder}/test/wasm/emcc-print.wat",
-        "-o",
-        "${workspaceFolder}/test/wasm/emcc-print.wat.c",
-        "--tr-level=3",
-        "-g",
-        "--work-dir=${workspaceFolder}/work_dir",
-        // "--log-level=debug",
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Clean and Build",
-      "env": {
-        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec/experiment/dataset/summarys.json",
-        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec/experiment/dataset/signatures.json",
-      }
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "recompile",
-      "program": "${command:cmake.launchTargetPath}",
-      "args": [
-        "${file}",
-        "-o",
-        "${file}.ll",
-        "--disable-all-pass",
-        "--wasm2llvm-log-level=debug",
-        // "--no-mem-initializer",
-        "--fix-names"
-      ],
-      "cwd": "${workspaceFolder}"
     },
     {
       "type": "lldb",
