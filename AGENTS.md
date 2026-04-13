@@ -150,12 +150,25 @@ cmake --build ./build --target all
 
 ## 6. 运行与调试约定
 
-进行代码调试前，建议先阅读仓库根目录的 `DEBUG.md`。该文件集中说明了调试环境变量、`debug_dir/` 中间产物及其用途。
+进行代码调试前，建议先阅读仓库根目录的 `DEBUG.md`。该文件集中说明了当前
+workdir 机制和中间产物的用途。
 
-仓库内现有 `run.sh` 体现了一组常用调试环境变量：
+当前中间产物目录由命令行 workdir 机制控制，而不是旧的环境变量：
+
+- `--gen-work-dir` / `-g`
+  - 开启工作目录输出
+- `--work-dir=<path>`
+  - 覆盖默认工作目录；仅在开启 `--gen-work-dir` 时有效
+
+旧环境变量：
 
 - `NOTDEC_DEBUG_DIR`
 - `NOTDEC_TYPE_RECOVERY_DEBUG_DIR`
+
+已被 workdir 机制替代，文档层面应视为弃用，不再作为当前推荐调试入口。
+
+其余仍常用的调试/分析环境变量包括：
+
 - `NOTDEC_SUMMARY_OVERRIDE`
 - `NOTDEC_SIGNATURE_OVERRIDE`
 - `NOTDEC_SAT_DISABLE`
@@ -164,7 +177,8 @@ cmake --build ./build --target all
 
 其中：
 
-- 设置 `NOTDEC_DEBUG_DIR` / `NOTDEC_TYPE_RECOVERY_DEBUG_DIR` 后，pass 运行前会把 `00-lifted.ll` 等中间结果落到对应目录
+- 开启 `--gen-work-dir` 后，pass 运行前会把 `00-lifted.ll`、`01-Optimized.ll`
+  等中间结果落到工作目录
 - README 明确建议在类型恢复较重时启用
   - `NOTDEC_DISABLE_INTERPROC=1`
   - `NOTDEC_SAT_DISABLE=1`
@@ -172,8 +186,8 @@ cmake --build ./build --target all
 典型执行方式：
 
 ```bash
-./build/bin/notdec input.wat -o /tmp/out.c --tr-level=2
-./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3
+./build/bin/notdec input.wat -o /tmp/out.c --tr-level=2 --gen-work-dir
+./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=/tmp/notdec-work
 ```
 
 ## 7. 测试现状
