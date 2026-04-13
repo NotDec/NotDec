@@ -4,7 +4,7 @@
 
 继续承接：
 
-- `logs/20260408-PNDiffWarnAndAnnoPlan.md`
+- `logs/20260408-03-PNDiffWarnAndAnnoPlan.md`
 
 本次没有再改 `PNDiff` 求解规则本身，而是把计划中的 work dir 输出真正接到当前主用的 `MLsub` 路径上。
 
@@ -135,4 +135,3 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
   - `09_OffsetLoop` 仍然存在 `.htypes` diff
 
 这批失败日志里没有看到本次新增 writer 相关的断言或文件输出错误，当前更像是仓库已有的类型恢复回归现状，而不是这次 work dir 输出挂接直接引入的新崩溃。
-

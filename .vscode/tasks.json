@@ -26,21 +26,7 @@
       "command": "/usr/bin/rm",
       "args": [
         "-rf",
-        "${workspaceFolder}/debug_dir"
-      ],
-      "presentation": {
-        "reveal": "silent",
-        "revealProblems": "onProblem",
-        "close": true
-      }
-    },
-    {
-      "label": "Remove debug dir2",
-      "type": "shell",
-      "command": "/usr/bin/rm",
-      "args": [
-        "-rf",
-        "${workspaceFolder}/debug_dir2"
+        "${workspaceFolder}/work_dir"
       ],
       "presentation": {
         "reveal": "silent",
@@ -62,13 +48,6 @@
       "dependsOn": [
         "CMake: build",
         "Remove debug dir"
-      ]
-    },
-    {
-      "label": "Clean and Build2",
-      "dependsOn": [
-        "CMake: build",
-        "Remove debug dir2"
       ]
     }
   ]

@@ -415,7 +415,7 @@ assert(false && "TODO");
 
 文档与记录：
 
-- `logs/20260408-PNDiffSolvePlan.md`
+- `logs/20260408-02-PNDiffSolveHookPlan.md`
 - 后续实现完成后再补新的 `logs/` 记录
 
 ## 八、当前结论

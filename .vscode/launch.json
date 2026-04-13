@@ -109,31 +109,6 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "dec work_dir2",
-      "program": "${workspaceFolder}/build/bin/notdec",
-      "args": [
-        "${file}",
-        "-o",
-        "${file}.c",
-        "--tr-level=3",
-        "-g",
-        "--work-dir=${workspaceFolder}/work_dir2"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Clean and Build2",
-      "env": {
-        "NOTDEC_SUMMARY_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json",
-        "NOTDEC_SIGNATURE_OVERRIDE": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json",
-        "NOTDEC_POLY_FUNCS": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json",
-        "NOTDEC_SAT_DISABLE": "1",
-        // "NOTDEC_SAT_TIMEOUT": "120000",
-        "NOTDEC_DISABLE_INTERPROC": "1"
-        // "NOTDEC_DEFAULT_POLY": "1"
-      }
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
       "name": "llvm2c",
       "program": "${workspaceFolder}/build/bin/notdec",
       "args": [
