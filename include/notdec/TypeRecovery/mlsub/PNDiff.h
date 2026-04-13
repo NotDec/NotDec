@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cassert>
+#include <iosfwd>
 #include <list>
 #include <map>
 #include <set>
@@ -277,6 +278,8 @@ struct PNIGraph {
   void eraseConstraint(ConsNode *Cons);
   bool solve();
   void onUpdatePNType(PNINode *N);
+  bool traceEnabled() const { return TraceStream != nullptr; }
+  void trace(const std::string &message);
 
 protected:
   PNINode *createPNINode(llvm::Type *LowTy) {
@@ -285,6 +288,9 @@ protected:
   }
   void markChanged(PNINode *N, ConsNode *Except = nullptr);
   void mergePNVarTo(PNINode *Var, PNINode *Target);
+
+public:
+  std::ostream *TraceStream = nullptr;
 };
 
 } // namespace notdec::mlsub

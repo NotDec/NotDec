@@ -40,3 +40,4 @@ build-release/
 *.ll.c
 *.dot
 Prompts.md
+work_dir/

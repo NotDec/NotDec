@@ -40,6 +40,13 @@ namespace {
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
 constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
 constexpr llvm::StringLiteral kPNDiffAnnotatedFile = "03-pndiff-final.ll";
+constexpr llvm::StringLiteral kBinarysubTraceFile = "binarysub-trace.log";
+constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
+
+bool envFlagEnabled(llvm::StringRef Name) {
+  auto *Value = std::getenv(Name.data());
+  return Value != nullptr && llvm::StringRef(Value) == "1";
+}
 
 void appendDebugValueTypes(
     llvm::StringRef DebugDir, llvm::StringRef SCCName,
@@ -281,9 +288,6 @@ void writePNDiffAnnotatedModule(const llvm::Module &M, const std::string &Path,
 
 void MLsubRecovery::run() {
   auto &M = const_cast<llvm::Module &>(Mod);
-  // set global pointer size variable for binarysub
-  binarysub::pointer_size = PointerSize;
-
   // 0.4 prepare debug dir and SCCsCatalog
   auto WorkDir = notdec::getWorkDirOpt();
   if (WorkDir) {
@@ -311,6 +315,37 @@ void MLsubRecovery::run() {
     }
     ValueTypes << "# Final Value -> binarysub UType mapping\n\n";
   }
+
+  if (envFlagEnabled(kBinarysubTraceEnv)) {
+    if (!WorkDir) {
+      llvm::errs() << "Warning: " << kBinarysubTraceEnv
+                   << "=1 but no workdir is configured; skip "
+                   << kBinarysubTraceFile << ".\n";
+    } else {
+      BinarysubTraceFile = std::make_unique<std::ofstream>(
+          join(*WorkDir, kBinarysubTraceFile.str()), std::ios::trunc);
+      if (!*BinarysubTraceFile) {
+        llvm::errs() << "Cannot open " << kBinarysubTraceFile << " in "
+                     << *WorkDir << ".\n";
+        std::abort();
+      }
+      *BinarysubTraceFile << "# binarysub / pndiff trace\n";
+      *BinarysubTraceFile << "# enabled by " << kBinarysubTraceEnv.str()
+                          << "=1\n";
+      BinarysubTraceFile->flush();
+    }
+  } else {
+    BinarysubTraceFile.reset();
+  }
+
+  binarysub::binarysub_set_trace_stream(BinarysubTraceFile.get());
+
+  if (!MemoryType) {
+    MemoryType = binarysub::make_variable(0, PointerSize);
+  }
+
+  // set global pointer size variable for binarysub
+  binarysub::pointer_size = PointerSize;
 
   // 0.5 print module for debugging
   if (WorkDir) {
@@ -356,6 +391,12 @@ void MLsubRecovery::run() {
 
   std::cerr << "Constraint generation done! SCC count:" << AG.AllSCCs.size()
             << "\n";
+
+  binarysub::binarysub_set_trace_stream(nullptr);
+  if (BinarysubTraceFile) {
+    BinarysubTraceFile->flush();
+    BinarysubTraceFile.reset();
+  }
 }
 
 void MLsubRecovery::bottomUpPhase() {
@@ -363,7 +404,8 @@ void MLsubRecovery::bottomUpPhase() {
   for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
     auto &Data = AG.AllSCCs.at(Ind);
     Data.Generator = std::make_shared<ConstraintsGenerator>(
-        Data.SCCName, PointerSize, Data.SCCSet, MemoryType, Data.level);
+        Data.SCCName, PointerSize, Data.SCCSet, MemoryType, Data.level,
+        BinarysubTraceFile.get());
     auto &G = Data.Generator;
     // insert ContraVariantValues
     if (Ind == 0) {
@@ -876,6 +918,13 @@ void ConstraintsGenerator::maybeUnifyPNDiffTypeVariablePair(
 
   unifyMappedValues(LeftValues);
   unifyMappedValues(RightValues);
+  if (Leader != nullptr && PG.traceEnabled()) {
+    std::ostringstream OS;
+    OS << "[pndiff:closure-unify] lhs=" << binarysub::debug_string(Lhs)
+       << " rhs=" << binarysub::debug_string(Rhs)
+       << " leader=" << Leader->serialize();
+    PG.trace(OS.str());
+  }
 }
 
 SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,

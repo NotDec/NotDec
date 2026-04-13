@@ -100,7 +100,9 @@
 ### `binarysub-trace.log`
 
 - 来源：`external/binarysub`
-- 作用：记录 binarysub 内部约束、extrude、simplify 等 trace
+- 生成条件：仅当 `NOTDEC_BINARYSUB_TRACE=1` 且启用了 `--gen-work-dir` 时生成
+- 作用：记录 binarysub 与 `PNDiff` 的内部事件流，包含约束、extrude、simplify、
+  `PNDiff` 加减法求解、unify 等 trace
 - 典型用途：当 `ValueTypes.txt` 只能看到“结果不对”，但还不知道“约束传播过程中哪一步歪了”时，继续往这个文件追
 
 ### `llvm2c-before-demotessa.ll`

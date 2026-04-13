@@ -4,8 +4,10 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <memory>
+#include <ostream>
 #include <set>
 #include <string>
 #include <variant>
@@ -61,6 +63,7 @@ struct ConstraintsGenerator {
   std::set<ExtValuePtr> ContraVariantValues;
   std::set<ExtValuePtr> SnapshotContraVariantValues;
   bool EnablePNDiffTypeVariableClosureUnification = true;
+  std::ostream *TraceStream = nullptr;
 
   void addMergeNode(SimpleType From, SimpleType To) { V2N.merge(From, To); }
 
@@ -69,9 +72,13 @@ struct ConstraintsGenerator {
 
   ConstraintsGenerator(std::string Name, unsigned int pointer_size,
                        const std::set<llvm::Function *> &SCCs,
-                       SimpleType MemoryType, int lvl = 0)
+                       SimpleType MemoryType, int lvl = 0,
+                       std::ostream *TraceStream = nullptr)
       : PointerSize(pointer_size), Name(Name), PG(*this, Name, pointer_size),
-        SCCs(SCCs), lvl(lvl), MemoryType(MemoryType) {}
+        SCCs(SCCs), lvl(lvl), MemoryType(MemoryType),
+        TraceStream(TraceStream) {
+    PG.TraceStream = TraceStream;
+  }
 
   void run() {
     for (const llvm::Function *Func1 : SCCs) {
@@ -328,8 +335,9 @@ class MLsubRecovery {
   AllGraphs AG;
   std::unique_ptr<llvm::CallGraph> CallG;
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
+  std::unique_ptr<std::ofstream> BinarysubTraceFile;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
-  SimpleType MemoryType = binarysub::make_variable(0, PointerSize);
+  SimpleType MemoryType = nullptr;
 
   // HTypeContext for type building
   std::shared_ptr<ast::HTypeContext> HCtx;
