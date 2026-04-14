@@ -47,6 +47,14 @@ std::string formatPNINodeForTrace(const PNINode &Node) {
   return Node.serialize();
 }
 
+OffsetRange getUnknownOffsetRange() {
+  return OffsetRange{.offset = 0, .access = {{1, 0}}};
+}
+
+bool isUnknownOffsetRange(const OffsetRange &Range) {
+  return Range == getUnknownOffsetRange();
+}
+
 char formatPtrOrNumChar(PtrOrNum Ty) {
   switch (Ty) {
   case Pointer:
@@ -151,29 +159,32 @@ PNDiffPolicy loadPNDiffPolicy() {
 } // namespace
 
 // remove and ignore all negative access.
-OffsetRange matchOffsetRangeNoNegativeAccess(llvm::Value *I) {
+std::optional<OffsetRange> matchOffsetRangeNoNegativeAccess(llvm::Value *I) {
   auto R = matchOffsetRange(I);
-  R.access.erase(std::remove_if(R.access.begin(), R.access.end(),
-                                [](ArrayOffset Val) { return Val.Size < 0; }),
-                 R.access.end());
+  if (!R) {
+    return std::nullopt;
+  }
+  R->access.erase(std::remove_if(R->access.begin(), R->access.end(),
+                                 [](ArrayOffset Val) { return Val.Size < 0; }),
+                  R->access.end());
   return R;
 }
 
 /// Visit Add/Mul/shl chain, add the results to OffsetRange.
-OffsetRange matchOffsetRange(llvm::Value *I) {
+std::optional<OffsetRange> matchOffsetRange(llvm::Value *I) {
   using namespace llvm;
   assert(I->getType()->isIntegerTy());
   if (auto *CI = dyn_cast<llvm::ConstantInt>(I)) {
     return OffsetRange{.offset = CI->getSExtValue()};
   }
-  // unknown value = 1*x
+  // Unknown or unsupported shape no longer pretends to be 1*x.
   if (!isa<llvm::BinaryOperator>(I)) {
-    return OffsetRange{.offset = 0, .access = {{1, 0}}};
+    return std::nullopt;
   } else {
     auto Opcode = cast<BinaryOperator>(I)->getOpcode();
     if (Opcode != Instruction::Add && Opcode != Instruction::Mul &&
         Opcode != Instruction::Shl) {
-      return OffsetRange{.offset = 0, .access = {{1, 0}}};
+      return std::nullopt;
     }
   }
   // is Add, Mul, Shl
@@ -192,15 +203,30 @@ OffsetRange matchOffsetRange(llvm::Value *I) {
   }
   // check if add or mul
   if (BinOp->getOpcode() == llvm::Instruction::Add) {
-    return matchOffsetRange(Src1) + matchOffsetRange(Src2);
+    auto Result = matchOffsetRange(Src1).value_or(getUnknownOffsetRange()) +
+                  matchOffsetRange(Src2).value_or(getUnknownOffsetRange());
+    if (isUnknownOffsetRange(Result)) {
+      return std::nullopt;
+    }
+    return Result;
   } else if (BinOp->getOpcode() == llvm::Instruction::Mul) {
-    return matchOffsetRange(Src1) * matchOffsetRange(Src2);
+    auto Result = matchOffsetRange(Src1).value_or(getUnknownOffsetRange()) *
+                  matchOffsetRange(Src2).value_or(getUnknownOffsetRange());
+    if (isUnknownOffsetRange(Result)) {
+      return std::nullopt;
+    }
+    return Result;
   } else if (BinOp->getOpcode() == llvm::Instruction::Shl &&
              llvm::isa<ConstantInt>(Src2)) {
-    return matchOffsetRange(Src1) *
-           (1 << llvm::cast<ConstantInt>(Src2)->getSExtValue());
+    auto Result =
+        matchOffsetRange(Src1).value_or(getUnknownOffsetRange()) *
+        (1 << llvm::cast<ConstantInt>(Src2)->getSExtValue());
+    if (isUnknownOffsetRange(Result)) {
+      return std::nullopt;
+    }
+    return Result;
   } else {
-    return OffsetRange{.offset = 0, .access = {{1, 0}}};
+    return std::nullopt;
   }
 }
 
@@ -281,17 +307,21 @@ void PNIGraph::eraseConstraint(ConsNode *Cons) {
     if (getPNIVar(Left).getPtrOrNum() == retypd::Number &&
         getPNIVar(Right).getPtrOrNum() == retypd::Pointer) {
       auto Off = matchOffsetRangeNoNegativeAccess(LeftVal);
-      trace("[pndiff:ptradd-reify] base=" + formatExtValueForTrace(Right) +
-            " result=" + formatExtValueForTrace(Result) +
-            " offset=" + Off.str());
-      Parent.setAsPtrAdd(Right, Result, Off);
+      if (Off) {
+        trace("[pndiff:ptradd-reify] base=" + formatExtValueForTrace(Right) +
+              " result=" + formatExtValueForTrace(Result) +
+              " offset=" + Off->str());
+        Parent.setAsPtrAdd(Right, Result, *Off);
+      }
     } else if (getPNIVar(Left).getPtrOrNum() == retypd::Pointer &&
                getPNIVar(Right).getPtrOrNum() == retypd::Number) {
       auto Off = matchOffsetRangeNoNegativeAccess(RightVal);
-      trace("[pndiff:ptradd-reify] base=" + formatExtValueForTrace(Left) +
-            " result=" + formatExtValueForTrace(Result) +
-            " offset=" + Off.str());
-      Parent.setAsPtrAdd(Left, Result, Off);
+      if (Off) {
+        trace("[pndiff:ptradd-reify] base=" + formatExtValueForTrace(Left) +
+              " result=" + formatExtValueForTrace(Result) +
+              " offset=" + Off->str());
+        Parent.setAsPtrAdd(Left, Result, *Off);
+      }
     }
   }
   for (auto N : Cons->getNodes()) {

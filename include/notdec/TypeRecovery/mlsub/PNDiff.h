@@ -6,6 +6,7 @@
 #include <iosfwd>
 #include <list>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <variant>
@@ -34,8 +35,8 @@ using retypd::Unknown;
 // Forward Declaration
 struct PNIGraph;
 
-OffsetRange matchOffsetRangeNoNegativeAccess(llvm::Value *I);
-OffsetRange matchOffsetRange(llvm::Value *I);
+std::optional<OffsetRange> matchOffsetRangeNoNegativeAccess(llvm::Value *I);
+std::optional<OffsetRange> matchOffsetRange(llvm::Value *I);
 
 // PNINode stores low level LLVM type. If the LowTy is pointer or
 // pointer-sized int, we use PtrOrNum to further distinguish.
