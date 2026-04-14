@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <llvm/Support/Debug.h>
 #include <optional>
@@ -15,6 +16,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#define DEBUG_TYPE "mlsub_typebuilder"
 
 namespace notdec::mlsub {
 
@@ -43,6 +46,10 @@ using FieldEntry = std::pair<SimpleRange, HType *>;
 TypeBuilder::TypeBuilder(TypeBuilderContext &Parent)
     : Parent(Parent), Ctx(Parent.Ctx) {}
 
+void TypeBuilder::setDebugRootLabel(std::optional<std::string> Label) {
+  CurrentRootDebugLabel = std::move(Label);
+}
+
 HType *TypeBuilder::getVoidPtr() {
   return Ctx.getPointerType(false, Parent.PointerSize * 8, nullptr);
 }
@@ -56,6 +63,21 @@ HType *TypeBuilder::getBottomType(std::uint32_t BitSize) {
 }
 
 namespace {
+
+constexpr llvm::StringLiteral kTraceConvertStructEnv =
+    "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT";
+
+bool envFlagEnabled(llvm::StringRef Name) {
+  auto *Value = std::getenv(Name.data());
+  return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
+}
+
+bool shouldTraceConvertStruct() {
+  if (envFlagEnabled(kTraceConvertStructEnv)) {
+    return true;
+  }
+  return ::llvm::DebugFlag && ::llvm::isCurrentDebugType(DEBUG_TYPE);
+}
 
 // binarysub may materialize empty records as internal placeholders while it is
 // normalizing recursive or compound shapes. They should stay transparent to the
@@ -497,14 +519,16 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
 
     // Try to expand array size.
-    if (Ty->isArrayType()) {
-      // TODO 检查ElemSize对不对。
-      auto ElemSize = Ent.first.Size /
-                      Ty->getAs<ast::ArrayType>()->getNumElements().value();
-      auto NewCount = (ExpandEnd - Ent.first.Start) / ElemSize;
-      CurrentDecl.R.Size = NewCount * ElemSize;
-      auto OldArrTy = llvm::cast<ast::ArrayType>(CurrentDecl.Type);
-      CurrentDecl.Type = OldArrTy->withSize(Ctx, NewCount);
+    if (auto *ArrTy = Ty->getAs<ast::ArrayType>()) {
+      if (auto NumElements = ArrTy->getNumElements();
+          NumElements && *NumElements != 0) {
+        // Keep unsized arrays unsized here. We can only expand arrays when an
+        // existing element count gives us a reliable element size.
+        auto ElemSize = Ent.first.Size / *NumElements;
+        auto NewCount = (ExpandEnd - Ent.first.Start) / ElemSize;
+        CurrentDecl.R.Size = NewCount * ElemSize;
+        CurrentDecl.Type = ArrTy->withSize(Ctx, NewCount);
+      }
     }
 
     // crop the type if intersecting
@@ -595,6 +619,41 @@ HType *TypeBuilder::convertStruct(
     std::optional<int64_t> PointeeSize) {
   HType *Result = nullptr;
 
+  if (shouldTraceConvertStruct()) {
+    llvm::dbgs() << "[TypeBuilder::convertStruct] begin"
+                 << " root=";
+    if (CurrentRootDebugLabel) {
+      llvm::dbgs() << *CurrentRootDebugLabel;
+    } else {
+      llvm::dbgs() << "<unknown>";
+    }
+    llvm::dbgs() << " pointee_size=";
+    if (PointeeSize) {
+      llvm::dbgs() << *PointeeSize;
+    } else {
+      llvm::dbgs() << "<none>";
+    }
+    llvm::dbgs() << " raw_fields=" << RawFields.size() << "\n";
+    for (size_t I = 0; I < RawFields.size(); ++I) {
+      const auto &Ent = RawFields[I];
+      int64_t AccessedBits = accessedPointeeSizeInBits(Ent.second);
+      int64_t AccessedBytes = AccessedBits <= 0 ? 0 : (AccessedBits + 7) / 8;
+      llvm::dbgs() << "  [" << I << "] range=" << Ent.first.str()
+                   << " offset=" << Ent.first.offset << " access=[";
+      for (size_t J = 0; J < Ent.first.access.size(); ++J) {
+        const auto &Access = Ent.first.access[J];
+        if (J != 0) {
+          llvm::dbgs() << ", ";
+        }
+        llvm::dbgs() << "{size=" << Access.Size << ", count=" << Access.Count
+                     << "}";
+      }
+      llvm::dbgs() << "] accessed_bits=" << AccessedBits
+                   << " accessed_bytes=" << AccessedBytes
+                   << " utype=" << binarysub::printType(Ent.second) << "\n";
+    }
+  }
+
   std::vector<FieldEntry> Fields;
 
   // 1 处理所有数组类型的成员
@@ -616,14 +675,19 @@ HType *TypeBuilder::convertStruct(
     AllStrides.erase(MaxStride);
 
     std::vector<std::pair<OffsetRange, UTypePtr>> HasStrideEntries;
-    for (auto It = RemainingEntries.begin(); It != RemainingEntries.end();
-         ++It) {
-      if (std::find(It->first.access.begin(), It->first.access.end(),
-                    MaxStride) != It->first.access.end()) {
-        // move from RemainingEntries to HasStrideEntries
-        HasStrideEntries.emplace(HasStrideEntries.end(), *It);
-        RemainingEntries.erase(It);
+    for (auto It = RemainingEntries.begin(); It != RemainingEntries.end();) {
+      auto HasStride = std::any_of(
+          It->first.access.begin(), It->first.access.end(),
+          [MaxStride](const ArrayOffset &Access) {
+            return Access.Size == MaxStride;
+          });
+      if (HasStride) {
+        // Move matching entries out while keeping the iterator valid.
+        HasStrideEntries.emplace_back(*It);
+        It = RemainingEntries.erase(It);
+        continue;
       }
+      ++It;
     }
 
     // 按基址从小到大排序
@@ -887,10 +951,33 @@ HType *TypeBuilder::convertStruct(
   auto Size = MaxEndOff - Fields.front().first.Start;
   assert(Size >= 0);
   if (PointeeSize) {
+    if (PointeeSize.value() < Size) {
+      if (shouldTraceConvertStruct()) {
+        llvm::dbgs()
+            << "[TypeBuilder::convertStruct] pointee/layout mismatch"
+            << " root=";
+        if (CurrentRootDebugLabel) {
+          llvm::dbgs() << *CurrentRootDebugLabel;
+        } else {
+          llvm::dbgs() << "<unknown>";
+        }
+        llvm::dbgs() << " pointee_size=" << PointeeSize.value()
+                     << " synthesized_size=" << Size
+                     << " first_field_start=" << Fields.front().first.Start
+                     << " first_field_size=" << Fields.front().first.Size
+                     << " field_count=" << Fields.size() << "\n";
+      }
+      // Some byte-stride recursive subproblems still carry a wider payload
+      // type after we strip the array access. Preserve the element boundary
+      // instead of materializing an impossible over-wide member layout.
+      // return craftStruct({}, SimpleRange{.Start = Fields.front().first.Start,
+      //                                    .Size = PointeeSize.value()},
+      //                    std::nullopt, &T);
+    }
+    assert(!(PointeeSize.value() < Size) && "TODO");
     if (PointeeSize.value() > Size) {
       Size = PointeeSize.value();
     }
-    assert(!(PointeeSize.value() < Size) && "TODO");
   }
   if (Fields.empty()) {
     llvm::errs() << "Warning: Empty struct!\n";

@@ -39,3 +39,4 @@ build-release/
 *.dot
 Prompts.md
 work_dir/
+.codex

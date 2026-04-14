@@ -144,7 +144,7 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
     std::error_code EC;
     llvm::raw_fd_ostream os(OutFilePath, EC);
     if (EC) {
-      std::cerr << "Cannot open output file." << std::endl;
+      std::cerr << "Cannot open output file: " << OutFilePath << std::endl;
       std::cerr << EC.message() << std::endl;
       std::abort();
     }

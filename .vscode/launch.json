@@ -23,7 +23,7 @@
       "args": [
         "${file}",
         "-o",
-        "/tmp/${file}.c",
+        "/tmp/${fileBasename}.c",
         "--tr-level=2",
         "-g",
         "--work-dir=${workspaceFolder}/work_dir"
@@ -44,11 +44,7 @@
           "value": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json"
         },
         {
-          "name": "NOTDEC_DISABLE_INTERPROC",
-          "value": "1"
-        },
-        {
-          "name": "NOTDEC_SAT_DISABLE",
+          "name": "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT",
           "value": "1"
         }
       ],

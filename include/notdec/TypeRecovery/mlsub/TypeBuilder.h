@@ -34,9 +34,11 @@ class TypeBuilder {
   // Handle recursive types
   std::map<std::string, HType *> RecursiveTypeNames;
   std::set<binarysub::UTypePtr> InProgress; // cycle detection
+  std::optional<std::string> CurrentRootDebugLabel;
 
 public:
   TypeBuilder(TypeBuilderContext &Parent);
+  void setDebugRootLabel(std::optional<std::string> Label);
 
   // Main conversion entry point
   HType *convert(binarysub::UTypePtr Ty);

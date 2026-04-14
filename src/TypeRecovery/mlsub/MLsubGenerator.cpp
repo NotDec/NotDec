@@ -480,13 +480,17 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     auto It = Res.find(PolarVar{.var = Ent.second, .pos = getPol(Ent.first)});
     ast::HType *Converted = nullptr;
     if (It != Res.end() && It->second) {
+      TB.setDebugRootLabel(toString(Ent.first, true));
       Converted = TB.convert(It->second);
+      TB.setDebugRootLabel(std::nullopt);
     }
     ValueTypes.insert({Ent.first, Converted});
   }
   if (SolveMemory) {
     auto MemUTy = Res.at(PolMem);
+    TB.setDebugRootLabel(std::string("<memory>"));
     ValueTypes.insert({nullptr, TB.convert(MemUTy)});
+    TB.setDebugRootLabel(std::nullopt);
   }
 
   if (auto WorkDir = notdec::getWorkDirOpt()) {
