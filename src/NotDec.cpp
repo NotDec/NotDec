@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IRReader/IRReader.h>
@@ -15,6 +16,7 @@
 #include "notdec-llvm2c/Interface.h"
 #endif
 
+#include "binarysub/binarysub-primitive-semantics.h"
 #include "Passes/PassManager.h"
 #include "Utils/Utils.h"
 
@@ -86,6 +88,12 @@ static cl::opt<std::string> dumpHTypes(
     cl::init(""), cl::value_desc("output.htypes"), cl::Optional,
     cl::cat(NotdecCat));
 
+static cl::list<std::string> primitiveSemanticLatticeFiles(
+    "primitive-semantic-lattice",
+    cl::desc("Load a primitive semantic lattice family definition from a DOT "
+             "file. May be specified multiple times."),
+    cl::value_desc("path.dot"), cl::ZeroOrMore, cl::cat(NotdecCat));
+
 static cl::opt<bool> genWorkDir(
     "gen-work-dir",
     cl::desc("Generate intermediate work files in a work directory."),
@@ -108,6 +116,25 @@ namespace llvm {
 void initDebugOptions();
 }
 
+namespace {
+
+binarysub::expected<void, binarysub::Error>
+configurePrimitiveSemanticRegistry(const notdec::Options &Opts) {
+  binarysub::clearGlobalPrimitiveSemanticRegistry();
+  auto &Registry = binarysub::globalPrimitiveSemanticRegistry();
+
+  for (const auto &Path : Opts.primitiveSemanticLatticeFiles) {
+    auto Family = Registry.registerFamilyFromDotFile(Path);
+    if (!Family) {
+      return binarysub::make_unexpected(Family.error());
+    }
+  }
+
+  return {};
+}
+
+} // namespace
+
 int main(int argc, char *argv[]) {
   // initDebugOptions();
   // parse cmdline
@@ -120,12 +147,23 @@ int main(int argc, char *argv[]) {
       .trLevel = trLevel,
       .stackRec = stackRec,
       .log_level = LogLevel,
+      .primitiveSemanticLatticeFiles =
+          std::vector<std::string>(primitiveSemanticLatticeFiles.begin(),
+                                   primitiveSemanticLatticeFiles.end()),
   };
   if (genWorkDir) {
     opts.workDir = workDirOverride.empty()
                        ? notdec::getDefaultWorkDir(inputFilename)
                        : workDirOverride;
   }
+
+  if (auto RegistrySetup = configurePrimitiveSemanticRegistry(opts);
+      !RegistrySetup) {
+    llvm::errs() << "Error: failed to configure primitive semantic lattice: "
+                 << RegistrySetup.error().msg << "\n";
+    return 1;
+  }
+
   notdec::setWorkDir(opts.workDir);
 
   std::string insuffix = getSuffix(inputFilename);

@@ -2,6 +2,7 @@
 #define _NOTDEC_CONTEXT_H_
 
 #include <map>
+#include <vector>
 
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
@@ -16,6 +17,7 @@ struct Options {
   std::string stackRec = "notdec";
   int log_level = 5; // default log level = level_notice
   std::string workDir;
+  std::vector<std::string> primitiveSemanticLatticeFiles;
 };
 
 struct DecompilerContext {

@@ -1,5 +1,6 @@
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
 #include "binarysub/binarysub-core.h"
+#include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
 #include "notdec-llvm2c/Interface/HType.h"
 #include "notdec-llvm2c/Interface/Range.h"
@@ -7,6 +8,7 @@
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -26,6 +28,7 @@ using notdec::ValueNamer;
 using notdec::ast::FieldDecl;
 using notdec::ast::HType;
 using notdec::ast::RecordDecl;
+using notdec::ast::TypedefDecl;
 using notdec::ast::UnionDecl;
 
 using binarysub::UBot;
@@ -98,6 +101,29 @@ bool isZeroSizedRecordMarker(const binarysub::UTypePtr &Ty) {
   return false;
 }
 
+char hexDigit(unsigned Value) {
+  assert(Value < 16);
+  return Value < 10 ? static_cast<char>('0' + Value)
+                    : static_cast<char>('A' + (Value - 10));
+}
+
+// Semantic primitive canonical names may contain '.' and other separators that
+// are not valid C typedef identifiers, so encode them into a stable alias.
+std::string makeSemanticPrimitiveTypedefName(const std::string &CanonicalName) {
+  std::string Result = "notdec_sem_";
+  Result.reserve(Result.size() + CanonicalName.size() * 3);
+  for (unsigned char Ch : CanonicalName) {
+    if (std::isalnum(Ch) || Ch == '_') {
+      Result.push_back(static_cast<char>(Ch));
+      continue;
+    }
+    Result.push_back('_');
+    Result.push_back(hexDigit((Ch >> 4) & 0xF));
+    Result.push_back(hexDigit(Ch & 0xF));
+  }
+  return Result;
+}
+
 } // namespace
 
 HType *TypeBuilder::parsePrimitiveName(const std::string &Name,
@@ -127,6 +153,25 @@ HType *TypeBuilder::parsePrimitiveName(const std::string &Name,
   }
   if (Name == "bool") {
     return Ctx.getBool();
+  }
+
+  auto &Registry = binarysub::globalPrimitiveSemanticRegistry();
+  if (const auto *Family = Registry.findFamilyByCanonicalName(Name)) {
+    assert(Family->bits == BitSize &&
+           "semantic primitive bit width must match registered family");
+    HType *BaseType = parsePrimitiveName(Family->base, Family->bits);
+    std::string TypedefName = makeSemanticPrimitiveTypedefName(Name);
+    auto *ExistingDecl = Ctx.getDecl(TypedefName);
+    TypedefDecl *Decl = nullptr;
+    if (ExistingDecl != nullptr) {
+      Decl = llvm::dyn_cast<TypedefDecl>(ExistingDecl);
+      assert(Decl != nullptr &&
+             "semantic primitive typedef name collided with non-typedef decl");
+    } else {
+      Decl = TypedefDecl::Create(Ctx, TypedefName, BaseType);
+      Decl->setComment("semantic primitive lattice node: " + Name);
+    }
+    return Ctx.getTypedefType(false, Decl);
   }
 
   assert(false && "Unknown primitive type!");
