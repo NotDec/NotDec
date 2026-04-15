@@ -5,6 +5,7 @@
 #include "TypeRecovery/mlsub/TypeBuilder.h"
 #include "TypeRecovery/retypd/Schema.h"
 #include "TypeRecovery/TRContext.h"
+#include "binarysub/binarysub.h"
 #include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub-primitive-semantics.h"
 #include <cstddef>
@@ -93,6 +94,34 @@ TEST(Retypd, TypeBuilderSemanticPrimitiveAliasTest) {
   EXPECT_TRUE(IntTy->isUnsigned());
 
   binarysub::clearGlobalPrimitiveSemanticRegistry();
+}
+
+TEST(Retypd, TypeBuilderTopFieldRecordLayoutTest) {
+  llvm::LLVMContext LLVMCtx;
+  auto M = std::make_unique<llvm::Module>("typebuilder-top-field-layout",
+                                          LLVMCtx);
+  M->setDataLayout("e-p:32:32");
+
+  notdec::ast::HTypeContext HCtx;
+  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilder TB(TBParent);
+
+  auto RecordTy = binarysub::make_urecordtype({
+      {"@0", binarysub::make_utop(32)},
+      {"@4", binarysub::make_uprimitivetype("uint", 32)},
+  });
+
+  auto *HTy = TB.convert(RecordTy);
+  ASSERT_NE(HTy, nullptr);
+  ASSERT_TRUE(HTy->isRecordType());
+
+  auto *Decl = HTy->getAsRecordDecl();
+  ASSERT_NE(Decl, nullptr);
+  ASSERT_EQ(Decl->getFields().size(), 2u);
+  EXPECT_EQ(Decl->getFields()[0].R.Start, 0);
+  ASSERT_NE(Decl->getFields()[0].Type, nullptr);
+  EXPECT_TRUE(Decl->getFields()[0].Type->isTopType());
+  EXPECT_EQ(Decl->getFields()[1].R.Start, 4);
 }
 
 TypeVariable parseTV(TRContext &Ctx, llvm::StringRef str, size_t PointerSize = 32) {

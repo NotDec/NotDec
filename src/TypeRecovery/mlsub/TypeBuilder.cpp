@@ -407,17 +407,17 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
 }
 
 int64_t TypeBuilder::accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty) {
-  if (std::get_if<UTop>(&Ty->v)) {
-    assert(false && "Impossible UType variant");
+  if (auto *V = std::get_if<UTop>(&Ty->v)) {
+    return V->size;
   } else if (auto *V = std::get_if<UBot>(&Ty->v)) {
     return V->size;
-  } else if (std::get_if<UPrimitiveType>(&Ty->v)) {
-    assert(false && "Impossible UType variant");
+  } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
+    return V->size;
   } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
     // Stop recursive at the pointer type.
     return V->psize;
   } else if (std::get_if<UFunctionType>(&Ty->v)) {
-    assert(false && "Impossible UType variant");
+    return binarysub::get_size(Ty);
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
     return accessedPointeeSizeInBits(V->body);
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
