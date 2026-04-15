@@ -2,7 +2,7 @@
 
 1. 调试可以使用debugmcp，也可以使用gdb直接调试，从 `launch.json` 中的 `dec` 配置入手。启动前修改里面的参数指向想要反编译的IR。启动的时候必须指定具体配置。
 3. 如果某一批提交是刻意允许暂时不可运行的中间态，commit message 以 `WIP:` 开头；这类提交也要在对应设计/日志文档里注明当前是 WIP，以及尚未打通的边界
-4. 每次完成任务后可以在`logs/`文件夹下记录相关修改，并commit。
+4. 每次完成任务后可以在`logs/`文件夹下记录相关修改，并commit。可以直接带上已有的文档修改。
 5. 调试时，每解决完一个小问题就可以把当前修改先写到日志，但是还没有完全解决的问题这种不确定的内容就不需要提前写入。
 6. 写修改日志时，必须要明确指出具体修改的哪个文件的哪一行，涉及哪些函数。
 
@@ -173,9 +173,6 @@ workdir 机制和中间产物的用途。
 
 - `NOTDEC_SUMMARY_OVERRIDE`
 - `NOTDEC_SIGNATURE_OVERRIDE`
-- `NOTDEC_SAT_DISABLE`
-- `NOTDEC_DISABLE_INTERPROC`
-- `NOTDEC_SAT_NOPTRRULE`
 
 其中：
 
