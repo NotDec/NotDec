@@ -176,6 +176,15 @@ workdir 机制和中间产物的用途。
 
 其中：
 
+- `NOTDEC_SUMMARY_OVERRIDE`
+  - 用于 summary / lower-bound override
+  - 在 MLsub 路径里约束方向是 `OverrideTy <: F`
+  - 默认 builtin libc / POSIX / regex JSON 也归到这一路
+- `NOTDEC_SIGNATURE_OVERRIDE`
+  - 用于函数自身签名的 upper-bound override
+  - 在 MLsub 路径里约束方向是 `F <: OverrideTy`
+  - 第一版只接受有函数体的函数，不用于 declaration-only 外部函数
+
 - 开启 `--gen-work-dir` 后，pass 运行前会把 `00-lifted.ll`、`01-Optimized.ll`
   等中间结果落到工作目录
 - README 明确建议在类型恢复较重时启用

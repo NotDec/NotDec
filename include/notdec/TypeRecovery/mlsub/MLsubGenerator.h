@@ -337,7 +337,10 @@ class MLsubRecovery {
   std::unique_ptr<llvm::CallGraph> CallG;
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   std::unique_ptr<std::ofstream> BinarysubTraceFile;
-  const char *SigFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
+  const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
+  const char *SignatureFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
+  llvm::json::Value SummaryOverrideDoc = nullptr;
+  std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
   std::set<llvm::Function *> SignatureOverrideFuncs;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
@@ -372,8 +375,12 @@ public:
       : Mod(Mod), MAM(MAM) {}
 
   void run();
+  void loadSummaryFile(llvm::Module &M, const char *path,
+                       bool StrictValidation = true);
   void loadSignatureFile(llvm::Module &M, const char *path,
                          bool StrictValidation = true);
+  const llvm::json::Value *getSummaryOverrideSpec(
+      const llvm::Function &Func) const;
   const llvm::json::Value *getSignatureOverrideSpec(
       const llvm::Function &Func) const;
   OverrideTypeRecipe buildOverrideType(const llvm::json::Value &Expr,
@@ -382,8 +389,11 @@ public:
                                        bool AllowNull = false);
   void applyOverrideRecipe(ConstraintsGenerator &G,
                            const OverrideTypeRecipe &Recipe);
-  void applySignatureOverride(ConstraintsGenerator &G, llvm::Function &Func,
-                              const llvm::json::Value &Spec);
+  void applySummaryOverride(ConstraintsGenerator &G, llvm::Function &Func,
+                            const llvm::json::Value &Spec);
+  void applyUpperBoundSignatureOverride(ConstraintsGenerator &G,
+                                        llvm::Function &Func,
+                                        const llvm::json::Value &Spec);
   // 形成单独分析的SCC群。（按需复制多态函数）
   void prepareSCC(llvm::CallGraph &CG);
   void bottomUpPhase();

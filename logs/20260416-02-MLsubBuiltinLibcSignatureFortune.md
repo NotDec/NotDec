@@ -1,30 +1,30 @@
-# MLsub Default Builtin Signature JSON For Fortune
+# MLsub Default Builtin Summary JSON For Fortune
 
 日期：2026-04-16
 
 ## 本次目标
 
-把上一版直接写在 `MLsubGenerator.cpp` 里的 builtin libc / POSIX / regex 签名，改成仓库内默认加载的 JSON 资源文件。
+把上一版直接写在 `MLsubGenerator.cpp` 里的 builtin libc / POSIX / regex summary，改成仓库内默认加载的 JSON 资源文件。
 
 目标语义：
 
-1. 默认情况下自动加载这份 builtin signature JSON
-2. 显式 `NOTDEC_SIGNATURE_OVERRIDE` 仍然保留，并覆盖同名 builtin 签名
+1. 默认情况下自动加载这份 builtin summary JSON
+2. 显式 `NOTDEC_SUMMARY_OVERRIDE` 仍然保留，并覆盖同名 builtin summary
 3. builtin 资源文件校验采用宽松模式
    - 函数不存在：跳过
    - 参数个数不匹配：警告并跳过
    - vararg：警告并跳过
-4. 显式 `NOTDEC_SIGNATURE_OVERRIDE` 继续保持严格校验
+4. 显式 `NOTDEC_SUMMARY_OVERRIDE` 继续保持严格校验
 
 ## 代码修改
 
-### 1. 新增默认 builtin signature JSON 资源文件
+### 1. 新增默认 builtin summary JSON 资源文件
 
 文件：
 
-- [resources/mlsub_builtin_signatures.json](/sn640/NotDec/resources/mlsub_builtin_signatures.json)
+- [resources/mlsub_builtin_summaries.json](/sn640/NotDec/resources/mlsub_builtin_summaries.json)
 
-这份 JSON 直接采用上一批已经实现的 MLsub signature schema：
+这份 JSON 直接采用上一批已经实现的 MLsub override schema：
 
 - 顶层 `version=1`
 - 顶层 `functions`
@@ -97,15 +97,15 @@
 
 这里新增了：
 
-1. `resources/mlsub_builtin_signatures.json`
+1. `resources/mlsub_builtin_summaries.json`
    复制到
-   `build/share/notdec/mlsub_builtin_signatures.json`
+   `build/share/notdec/mlsub_builtin_summaries.json`
 2. 通过 `target_compile_definitions()` 把默认路径编译为：
-   - `NOTDEC_DEFAULT_MLSUB_SIGNATURE_OVERRIDE_PATH`
+   - `NOTDEC_DEFAULT_MLSUB_SUMMARY_OVERRIDE_PATH`
 
 因此当前开发构建里，`build/bin/notdec` 无需额外环境变量，也会自动加载这份默认资源。
 
-### 3. MLsubRecovery 支持“默认资源 + 显式 override”合并加载
+### 3. MLsubRecovery 支持“默认 summary 资源 + 显式 summary override”合并加载
 
 文件：
 
@@ -121,7 +121,7 @@
 涉及函数：
 
 - `MLsubRecovery::run()`
-- `MLsubRecovery::loadSignatureFile()`
+- `MLsubRecovery::loadSummaryFile()`
 
 主要变化：
 
@@ -130,17 +130,17 @@
 2. 若默认 JSON 资源路径存在：
    - 先加载 builtin 资源
    - 使用 `StrictValidation=false`
-3. 若环境变量 `NOTDEC_SIGNATURE_OVERRIDE` 存在：
+3. 若环境变量 `NOTDEC_SUMMARY_OVERRIDE` 存在：
    - 再加载显式 override
    - 使用 `StrictValidation=true`
-4. `loadSignatureFile()` 不再直接替换整份文档，而是把命中的函数条目 merge 到当前 `functions` map 中
+4. `loadSummaryFile()` 不再直接替换整份文档，而是把命中的函数条目 merge 到当前 `functions` map 中
 
 因此同名函数的最终优先级为：
 
-1. 显式 `NOTDEC_SIGNATURE_OVERRIDE`
-2. 默认 builtin signature JSON
+1. 显式 `NOTDEC_SUMMARY_OVERRIDE`
+2. 默认 builtin summary JSON
 
-### 4. 删除上一版 C++ 代码内硬编码的 builtin signature 构造逻辑
+### 4. 删除上一版 C++ 代码内硬编码的 builtin summary 构造逻辑
 
 文件：
 
@@ -157,9 +157,9 @@
 - `functionSpecExpr()`
 - `buildBuiltinSignatureOverrideSpec()`
 
-现在 builtin 只保留为数据文件。
+现在 builtin summary 只保留为数据文件。
 
-### 5. bottom-up 应用点恢复成统一 override 应用逻辑
+### 5. bottom-up 应用点恢复成统一 summary override 应用逻辑
 
 文件：
 
@@ -173,10 +173,10 @@
 
 这里已经不再区分“显式 override”和“builtin override”的不同调用路径，而是统一走：
 
-1. `getSignatureOverrideSpec()`
-2. `applySignatureOverride()`
+1. `getSummaryOverrideSpec()`
+2. `applySummaryOverride()`
 
-builtin 是否生效，完全取决于默认 JSON 是否已经在 `run()` 里 merge 进当前文档。
+builtin summary 是否生效，完全取决于默认 JSON 是否已经在 `run()` 里 merge 进当前文档。
 
 ## 验证
 
@@ -185,7 +185,7 @@ builtin 是否生效，完全取决于默认 JSON 是否已经在 `run()` 里 me
 运行：
 
 ```bash
-python3 -m json.tool resources/mlsub_builtin_signatures.json >/tmp/mlsub_builtin_signatures.pretty.json
+python3 -m json.tool resources/mlsub_builtin_summaries.json >/tmp/mlsub_builtin_summaries.pretty.json
 ```
 
 结果：通过。
@@ -240,7 +240,7 @@ baseline 中外部函数签名几乎都是纯 `32-bit` 变量，例如：
   --work-dir=/tmp/fortune-builtin-work
 ```
 
-注意：这里没有设置 `NOTDEC_SIGNATURE_OVERRIDE`。
+注意：这里没有设置 `NOTDEC_SUMMARY_OVERRIDE`。
 
 `/tmp/fortune-builtin.htypes` 中对应签名已经明显收敛，例如：
 
@@ -257,13 +257,13 @@ baseline 中外部函数签名几乎都是纯 `32-bit` 变量，例如：
 
 ## 当前结论
 
-这次已经把 builtin signature 从“代码硬编码”切到了“默认加载的 JSON 资源”。
+这次已经把 builtin summary 从“代码硬编码”切到了“默认加载的 JSON 资源”。
 
 对 `fortune.o3.wasm.1.ll` 来说，效果和上一版内嵌实现保持一致，但现在的维护方式更合适：
 
-1. builtin 签名可以直接在 JSON 里增删改
+1. builtin summary 可以直接在 JSON 里增删改
 2. `MLsubGenerator.cpp` 不再承载一大段 hardcoded builtin schema 构造器
-3. 显式 `NOTDEC_SIGNATURE_OVERRIDE` 仍然可继续覆盖默认 builtin
+3. 显式 `NOTDEC_SUMMARY_OVERRIDE` 仍然可继续覆盖默认 builtin
 4. 默认 builtin 对别的模块采用宽松匹配，不会因为同名库函数参数个数不同而直接把整个运行打断
 
 ## 还没做的
@@ -271,3 +271,9 @@ baseline 中外部函数签名几乎都是纯 `32-bit` 变量，例如：
 1. `FILE*` / `DIR*` / `regex_t*` 当前仍统一走 `ptr<load=void*, store=void*>` 风格的 opaque handle
 2. 默认 builtin JSON 目前还是手工维护，没有再做 schema validator 或注释生成工具
 3. 如果后续 builtin 集合继续扩大，可以考虑再把资源路径和安装规则补齐到 install / package 层
+4. `perror` 仍存在一处残留偏差：
+   - 资源文件 [resources/mlsub_builtin_summaries.json](/sn640/NotDec/resources/mlsub_builtin_summaries.json) 里已经把 `perror` 的 `ret` 改成了 `null`
+   - `fortune.o3.wasm.1.ll` 里也确实是 `declare void @perror(i32)`
+   - 但最新一次验证生成的 `/tmp/fortune-builtin.htypes` 里仍显示：
+     - `@perror => i32 (*)(('z6:32 & ptr<load=i8, store=i8, psize=32>))*`
+   - 这说明当前除了 summary JSON 本身之外，后面仍有一层函数签名约束汇总、求解或打印路径把它保守提升回了 `i32` 风格；该问题尚未在本批次继续深挖

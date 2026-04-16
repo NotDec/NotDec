@@ -35,8 +35,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "mlsub_generator"
 
-#ifndef NOTDEC_DEFAULT_MLSUB_SIGNATURE_OVERRIDE_PATH
-#define NOTDEC_DEFAULT_MLSUB_SIGNATURE_OVERRIDE_PATH ""
+#ifndef NOTDEC_DEFAULT_MLSUB_SUMMARY_OVERRIDE_PATH
+#define NOTDEC_DEFAULT_MLSUB_SUMMARY_OVERRIDE_PATH ""
 #endif
 
 namespace notdec::mlsub {
@@ -56,7 +56,7 @@ bool envFlagEnabled(llvm::StringRef Name) {
 
 [[noreturn]] void failSignatureOverride(llvm::StringRef Path,
                                         llvm::StringRef Message) {
-  llvm::errs() << "Error: invalid MLsub signature override";
+  llvm::errs() << "Error: invalid MLsub override";
   if (!Path.empty()) {
     llvm::errs() << " at " << Path;
   }
@@ -120,8 +120,119 @@ void appendOverrideConstraints(
                           From.Constraints.begin(), From.Constraints.end());
 }
 
-constexpr llvm::StringLiteral kDefaultMLsubBuiltinSignatureOverridePath(
-    NOTDEC_DEFAULT_MLSUB_SIGNATURE_OVERRIDE_PATH);
+constexpr llvm::StringLiteral kDefaultMLsubBuiltinSummaryOverridePath(
+    NOTDEC_DEFAULT_MLSUB_SUMMARY_OVERRIDE_PATH);
+
+llvm::json::Value makeEmptyOverrideDoc() {
+  return llvm::json::Object{{"version", int64_t(1)},
+                            {"functions", llvm::json::Object{}}};
+}
+
+llvm::StringRef getOverrideKindLabel(bool RequireDefinition) {
+  return RequireDefinition ? "signature" : "summary";
+}
+
+void loadOverrideFileImpl(llvm::Module &M, const char *Path,
+                          llvm::json::Value &Doc,
+                          std::set<llvm::Function *> &Funcs,
+                          bool StrictValidation, bool RequireDefinition) {
+  llvm::StringRef Kind = getOverrideKindLabel(RequireDefinition);
+  llvm::errs() << "Loading MLsub " << Kind << " override from: " << Path
+               << "\n";
+  auto Parsed = llvm::json::parse(readFileToString(Path));
+  if (!Parsed) {
+    failSignatureOverride("",
+                          ("JSON parse failed for " + std::string(Path)).c_str());
+  }
+
+  const auto &Root = requireObject(*Parsed, "<root>");
+  auto Version = Root.getInteger("version");
+  if (!Version || *Version != 1) {
+    failSignatureOverride("<root>", "expected version = 1");
+  }
+
+  const auto *Functions = Root.getObject("functions");
+  if (Functions == nullptr) {
+    failSignatureOverride("<root>", "missing object field 'functions'");
+  }
+
+  for (const auto &Ent : *Functions) {
+    std::string FuncPath = appendJSONPath("functions", Ent.first);
+    auto *Func = M.getFunction(Ent.first);
+    if (Func == nullptr) {
+      llvm::errs() << "Warning: MLsub " << Kind
+                   << " override function not found: " << Ent.first << "\n";
+      continue;
+    }
+
+    const auto &Spec = requireObject(Ent.second, FuncPath);
+    auto *Args = Spec.getArray("args");
+    if (Args == nullptr) {
+      failSignatureOverride(FuncPath, "missing array field 'args'");
+    }
+    if (Func->isVarArg()) {
+      if (StrictValidation) {
+        failSignatureOverride(FuncPath,
+                              "vararg functions are not supported yet");
+      }
+      llvm::errs() << "Warning: skip MLsub " << Kind
+                   << " override for vararg " << Func->getName() << "\n";
+      continue;
+    }
+    if (Args->size() != Func->arg_size()) {
+      if (StrictValidation) {
+        failSignatureOverride(
+            FuncPath,
+            ("override arg count does not match LLVM function '"
+             + Func->getName().str() + "'")
+                .c_str());
+      }
+      llvm::errs() << "Warning: skip MLsub " << Kind << " override for "
+                   << Func->getName() << " because arg count mismatched\n";
+      continue;
+    }
+    if (RequireDefinition && Func->isDeclaration()) {
+      if (StrictValidation) {
+        failSignatureOverride(FuncPath,
+                              "signature override requires a function definition");
+      }
+      llvm::errs() << "Warning: skip MLsub signature override for declaration "
+                   << Func->getName() << "\n";
+      continue;
+    }
+    if (Spec.get("ret") == nullptr) {
+      failSignatureOverride(FuncPath, "missing field 'ret'");
+    }
+    if (auto *Constraints = Spec.get("constraints")) {
+      requireArray(*Constraints, appendJSONPath(FuncPath, "constraints"));
+    }
+
+    auto *DocRoot = Doc.getAsObject();
+    assert(DocRoot != nullptr);
+    auto *DocFunctions = DocRoot->getObject("functions");
+    assert(DocFunctions != nullptr);
+    (*DocFunctions)[Ent.first] = Ent.second;
+    Funcs.insert(Func);
+  }
+}
+
+const llvm::json::Value *getOverrideSpecImpl(
+    const llvm::json::Value &Doc, const std::set<llvm::Function *> &Funcs,
+    const llvm::Function &Func) {
+  if (Funcs.count(const_cast<llvm::Function *>(&Func)) == 0) {
+    return nullptr;
+  }
+
+  const auto *Root = Doc.getAsObject();
+  if (Root == nullptr) {
+    return nullptr;
+  }
+  const auto *Functions = Root->getObject("functions");
+  if (Functions == nullptr) {
+    return nullptr;
+  }
+  return Functions->get(Func.getName());
+}
 
 void appendDebugValueTypes(
     llvm::StringRef DebugDir, llvm::StringRef SCCName,
@@ -419,17 +530,19 @@ void MLsubRecovery::run() {
     MemoryType = binarysub::make_variable(0, PointerSize);
   }
 
+  SummaryOverrideFuncs.clear();
+  SummaryOverrideDoc = makeEmptyOverrideDoc();
   SignatureOverrideFuncs.clear();
-  SignatureOverrideDoc =
-      llvm::json::Object{{"version", int64_t(1)},
-                         {"functions", llvm::json::Object{}}};
-  if (!kDefaultMLsubBuiltinSignatureOverridePath.empty() &&
-      llvm::sys::fs::exists(kDefaultMLsubBuiltinSignatureOverridePath)) {
-    loadSignatureFile(M, kDefaultMLsubBuiltinSignatureOverridePath.data(),
-                      false);
+  SignatureOverrideDoc = makeEmptyOverrideDoc();
+  if (!kDefaultMLsubBuiltinSummaryOverridePath.empty() &&
+      llvm::sys::fs::exists(kDefaultMLsubBuiltinSummaryOverridePath)) {
+    loadSummaryFile(M, kDefaultMLsubBuiltinSummaryOverridePath.data(), false);
   }
-  if (SigFile != nullptr) {
-    loadSignatureFile(M, SigFile, true);
+  if (SummaryFile != nullptr) {
+    loadSummaryFile(M, SummaryFile, true);
+  }
+  if (SignatureFile != nullptr) {
+    loadSignatureFile(M, SignatureFile, true);
   }
 
   // set global pointer size variable for binarysub
@@ -487,92 +600,27 @@ void MLsubRecovery::run() {
   }
 }
 
+void MLsubRecovery::loadSummaryFile(llvm::Module &M, const char *Path,
+                                    bool StrictValidation) {
+  loadOverrideFileImpl(M, Path, SummaryOverrideDoc, SummaryOverrideFuncs,
+                       StrictValidation, false);
+}
+
 void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path,
                                       bool StrictValidation) {
-  llvm::errs() << "Loading MLsub signature override from: " << Path << "\n";
-  auto Parsed = llvm::json::parse(readFileToString(Path));
-  if (!Parsed) {
-    failSignatureOverride("",
-                          ("JSON parse failed for " + std::string(Path)).c_str());
-  }
+  loadOverrideFileImpl(M, Path, SignatureOverrideDoc, SignatureOverrideFuncs,
+                       StrictValidation, true);
+}
 
-  const auto &Root = requireObject(*Parsed, "<root>");
-  auto Version = Root.getInteger("version");
-  if (!Version || *Version != 1) {
-    failSignatureOverride("<root>", "expected version = 1");
-  }
-
-  const auto *Functions = Root.getObject("functions");
-  if (Functions == nullptr) {
-    failSignatureOverride("<root>", "missing object field 'functions'");
-  }
-
-  for (const auto &Ent : *Functions) {
-    std::string FuncPath = appendJSONPath("functions", Ent.first);
-    auto *Func = M.getFunction(Ent.first);
-    if (Func == nullptr) {
-      llvm::errs() << "Warning: MLsub signature override function not found: "
-                   << Ent.first << "\n";
-      continue;
-    }
-
-    const auto &Spec = requireObject(Ent.second, FuncPath);
-    auto *Args = Spec.getArray("args");
-    if (Args == nullptr) {
-      failSignatureOverride(FuncPath, "missing array field 'args'");
-    }
-    if (Func->isVarArg()) {
-      if (StrictValidation) {
-        failSignatureOverride(FuncPath,
-                              "vararg functions are not supported yet");
-      }
-      llvm::errs() << "Warning: skip MLsub signature override for vararg "
-                   << Func->getName() << "\n";
-      continue;
-    }
-    if (Args->size() != Func->arg_size()) {
-      if (StrictValidation) {
-        failSignatureOverride(
-            FuncPath,
-            ("override arg count does not match LLVM function '"
-             + Func->getName().str() + "'")
-                .c_str());
-      }
-      llvm::errs() << "Warning: skip MLsub signature override for "
-                   << Func->getName() << " because arg count mismatched\n";
-      continue;
-    }
-    if (Spec.get("ret") == nullptr) {
-      failSignatureOverride(FuncPath, "missing field 'ret'");
-    }
-    if (auto *Constraints = Spec.get("constraints")) {
-      requireArray(*Constraints, appendJSONPath(FuncPath, "constraints"));
-    }
-
-    auto *DocRoot = SignatureOverrideDoc.getAsObject();
-    assert(DocRoot != nullptr);
-    auto *DocFunctions = DocRoot->getObject("functions");
-    assert(DocFunctions != nullptr);
-    (*DocFunctions)[Ent.first] = Ent.second;
-    SignatureOverrideFuncs.insert(Func);
-  }
+const llvm::json::Value *
+MLsubRecovery::getSummaryOverrideSpec(const llvm::Function &Func) const {
+  return getOverrideSpecImpl(SummaryOverrideDoc, SummaryOverrideFuncs, Func);
 }
 
 const llvm::json::Value *
 MLsubRecovery::getSignatureOverrideSpec(const llvm::Function &Func) const {
-  if (SignatureOverrideFuncs.count(const_cast<llvm::Function *>(&Func)) == 0) {
-    return nullptr;
-  }
-
-  const auto *Root = SignatureOverrideDoc.getAsObject();
-  if (Root == nullptr) {
-    return nullptr;
-  }
-  const auto *Functions = Root->getObject("functions");
-  if (Functions == nullptr) {
-    return nullptr;
-  }
-  return Functions->get(Func.getName());
+  return getOverrideSpecImpl(SignatureOverrideDoc, SignatureOverrideFuncs,
+                             Func);
 }
 
 MLsubRecovery::OverrideTypeRecipe
@@ -714,9 +762,9 @@ void MLsubRecovery::applyOverrideRecipe(ConstraintsGenerator &G,
   }
 }
 
-void MLsubRecovery::applySignatureOverride(ConstraintsGenerator &G,
-                                           llvm::Function &Func,
-                                           const llvm::json::Value &Spec) {
+void MLsubRecovery::applySummaryOverride(ConstraintsGenerator &G,
+                                         llvm::Function &Func,
+                                         const llvm::json::Value &Spec) {
   const auto &Obj = requireObject(Spec, Func.getName());
   OverrideBuildContext Ctx{.Generator = G, .Func = Func};
 
@@ -776,6 +824,68 @@ void MLsubRecovery::applySignatureOverride(ConstraintsGenerator &G,
   G.addSubtype(binarysub::make_function(Args, RetRecipe.Root), FuncNode);
 }
 
+void MLsubRecovery::applyUpperBoundSignatureOverride(
+    ConstraintsGenerator &G, llvm::Function &Func,
+    const llvm::json::Value &Spec) {
+  const auto &Obj = requireObject(Spec, Func.getName());
+  OverrideBuildContext Ctx{.Generator = G, .Func = Func};
+
+  const auto &ArgsValue =
+      requireArray(*Obj.get("args"), appendJSONPath(Func.getName(), "args"));
+  std::vector<SimpleType> Args;
+  Args.reserve(ArgsValue.size());
+  OverrideTypeRecipe Aggregate;
+  for (size_t Index = 0; Index < ArgsValue.size(); ++Index) {
+    auto ArgPath = appendJSONIndexPath(appendJSONPath(Func.getName(), "args"),
+                                       Index);
+    auto ArgRecipe = buildOverrideType(ArgsValue[Index], Ctx, ArgPath, false);
+    appendOverrideConstraints(Aggregate, std::move(ArgRecipe));
+    Args.push_back(ArgRecipe.Root);
+  }
+
+  auto *RetValue = Obj.get("ret");
+  assert(RetValue != nullptr);
+  auto RetRecipe = buildOverrideType(*RetValue, Ctx,
+                                     appendJSONPath(Func.getName(), "ret"),
+                                     true);
+  appendOverrideConstraints(Aggregate, std::move(RetRecipe));
+
+  if (auto *ConstraintsValue = Obj.get("constraints")) {
+    const auto &Constraints = requireArray(
+        *ConstraintsValue, appendJSONPath(Func.getName(), "constraints"));
+    for (size_t Index = 0; Index < Constraints.size(); ++Index) {
+      auto ConstraintPath = appendJSONIndexPath(
+          appendJSONPath(Func.getName(), "constraints"), Index);
+      const auto &ConstraintObj = requireObject(Constraints[Index],
+                                                ConstraintPath);
+      auto Kind = requireString(ConstraintObj, "kind", ConstraintPath);
+      if (Kind != "subtype") {
+        failSignatureOverride(ConstraintPath,
+                              "only subtype constraints are supported");
+      }
+      auto *LHSValue = ConstraintObj.get("lhs");
+      auto *RHSValue = ConstraintObj.get("rhs");
+      if (LHSValue == nullptr || RHSValue == nullptr) {
+        failSignatureOverride(ConstraintPath,
+                              "constraint requires lhs and rhs");
+      }
+      auto LHSRecipe = buildOverrideType(
+          *LHSValue, Ctx, appendJSONPath(ConstraintPath, "lhs"), false);
+      auto RHSRecipe = buildOverrideType(
+          *RHSValue, Ctx, appendJSONPath(ConstraintPath, "rhs"), false);
+      appendOverrideConstraints(Aggregate, std::move(LHSRecipe));
+      appendOverrideConstraints(Aggregate, std::move(RHSRecipe));
+      Aggregate.Constraints.push_back({LHSRecipe.Root, RHSRecipe.Root});
+    }
+  }
+
+  applyOverrideRecipe(G, Aggregate);
+
+  auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
+  assert(FuncNode != nullptr);
+  G.addSubtype(FuncNode, binarysub::make_function(Args, RetRecipe.Root));
+}
+
 void MLsubRecovery::bottomUpPhase() {
   // Iterate bottom up.
   for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
@@ -812,13 +922,20 @@ void MLsubRecovery::bottomUpPhase() {
     G->run();
 
     for (auto *Func : Data.SCCSet) {
+      if (auto *SummarySpec = getSummaryOverrideSpec(*Func)) {
+        llvm::errs() << "Applying MLsub summary override to "
+                     << Func->getName() << "\n";
+        applySummaryOverride(*G, *Func, *SummarySpec);
+      }
       auto *Spec = getSignatureOverrideSpec(*Func);
       if (Spec == nullptr) {
         continue;
       }
+      assert(!Func->isDeclaration() &&
+             "signature overrides are validated to require definitions");
       llvm::errs() << "Applying MLsub signature override to "
                    << Func->getName() << "\n";
-      applySignatureOverride(*G, *Func, *Spec);
+      applyUpperBoundSignatureOverride(*G, *Func, *Spec);
     }
 
     // create poly schemes and instantiate for unhandled calls.
