@@ -3,6 +3,7 @@
 #include "Utils/CallGraphDotInfo.h"
 #include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub-infer.h"
+#include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/HType.h"
@@ -46,6 +47,72 @@ constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
 bool envFlagEnabled(llvm::StringRef Name) {
   auto *Value = std::getenv(Name.data());
   return Value != nullptr && llvm::StringRef(Value) == "1";
+}
+
+[[noreturn]] void failSignatureOverride(llvm::StringRef Path,
+                                        llvm::StringRef Message) {
+  llvm::errs() << "Error: invalid MLsub signature override";
+  if (!Path.empty()) {
+    llvm::errs() << " at " << Path;
+  }
+  llvm::errs() << ": " << Message << "\n";
+  std::abort();
+}
+
+const llvm::json::Object &requireObject(const llvm::json::Value &Value,
+                                        llvm::StringRef Path) {
+  if (const auto *Obj = Value.getAsObject()) {
+    return *Obj;
+  }
+  failSignatureOverride(Path, "expected object");
+}
+
+const llvm::json::Array &requireArray(const llvm::json::Value &Value,
+                                      llvm::StringRef Path) {
+  if (const auto *Arr = Value.getAsArray()) {
+    return *Arr;
+  }
+  failSignatureOverride(Path, "expected array");
+}
+
+llvm::StringRef requireString(const llvm::json::Object &Obj,
+                              llvm::StringRef Key, llvm::StringRef Path) {
+  if (auto Value = Obj.getString(Key)) {
+    return *Value;
+  }
+  failSignatureOverride(
+      Path,
+      ("missing or invalid string field '" + Key.str() + "'").c_str());
+}
+
+int64_t requireInteger(const llvm::json::Object &Obj, llvm::StringRef Key,
+                       llvm::StringRef Path) {
+  if (auto Value = Obj.getInteger(Key)) {
+    return *Value;
+  }
+  failSignatureOverride(
+      Path,
+      ("missing or invalid integer field '" + Key.str() + "'").c_str());
+}
+
+std::string appendJSONPath(llvm::StringRef Base, llvm::StringRef Suffix) {
+  std::string Result = Base.str();
+  if (!Result.empty()) {
+    Result += ".";
+  }
+  Result += Suffix.str();
+  return Result;
+}
+
+std::string appendJSONIndexPath(llvm::StringRef Base, size_t Index) {
+  return Base.str() + "[" + std::to_string(Index) + "]";
+}
+
+void appendOverrideConstraints(
+    notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &Into,
+    const notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &From) {
+  Into.Constraints.insert(Into.Constraints.end(),
+                          From.Constraints.begin(), From.Constraints.end());
 }
 
 void appendDebugValueTypes(
@@ -344,6 +411,12 @@ void MLsubRecovery::run() {
     MemoryType = binarysub::make_variable(0, PointerSize);
   }
 
+  SignatureOverrideFuncs.clear();
+  SignatureOverrideDoc = nullptr;
+  if (SigFile != nullptr) {
+    loadSignatureFile(M, SigFile);
+  }
+
   // set global pointer size variable for binarysub
   binarysub::pointer_size = PointerSize;
 
@@ -399,6 +472,281 @@ void MLsubRecovery::run() {
   }
 }
 
+void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path) {
+  llvm::errs() << "Loading MLsub signature override from: " << Path << "\n";
+  auto Parsed = llvm::json::parse(readFileToString(Path));
+  if (!Parsed) {
+    failSignatureOverride("",
+                          ("JSON parse failed for " + std::string(Path)).c_str());
+  }
+
+  const auto &Root = requireObject(*Parsed, "<root>");
+  auto Version = Root.getInteger("version");
+  if (!Version || *Version != 1) {
+    failSignatureOverride("<root>", "expected version = 1");
+  }
+
+  const auto *Functions = Root.getObject("functions");
+  if (Functions == nullptr) {
+    failSignatureOverride("<root>", "missing object field 'functions'");
+  }
+
+  for (const auto &Ent : *Functions) {
+    std::string FuncPath = appendJSONPath("functions", Ent.first);
+    auto *Func = M.getFunction(Ent.first);
+    if (Func == nullptr) {
+      llvm::errs() << "Warning: MLsub signature override function not found: "
+                   << Ent.first << "\n";
+      continue;
+    }
+
+    const auto &Spec = requireObject(Ent.second, FuncPath);
+    auto *Args = Spec.getArray("args");
+    if (Args == nullptr) {
+      failSignatureOverride(FuncPath, "missing array field 'args'");
+    }
+    if (Func->isVarArg()) {
+      failSignatureOverride(FuncPath,
+                            "vararg functions are not supported yet");
+    }
+    if (Args->size() != Func->arg_size()) {
+      failSignatureOverride(
+          FuncPath,
+          ("override arg count does not match LLVM function '"
+           + Func->getName().str() + "'")
+              .c_str());
+    }
+    if (Spec.get("ret") == nullptr) {
+      failSignatureOverride(FuncPath, "missing field 'ret'");
+    }
+    if (auto *Constraints = Spec.get("constraints")) {
+      requireArray(*Constraints, appendJSONPath(FuncPath, "constraints"));
+    }
+
+    SignatureOverrideFuncs.insert(Func);
+  }
+
+  SignatureOverrideDoc = std::move(*Parsed);
+}
+
+const llvm::json::Value *
+MLsubRecovery::getSignatureOverrideSpec(const llvm::Function &Func) const {
+  if (SignatureOverrideFuncs.count(const_cast<llvm::Function *>(&Func)) == 0) {
+    return nullptr;
+  }
+
+  const auto *Root = SignatureOverrideDoc.getAsObject();
+  if (Root == nullptr) {
+    return nullptr;
+  }
+  const auto *Functions = Root->getObject("functions");
+  if (Functions == nullptr) {
+    return nullptr;
+  }
+  return Functions->get(Func.getName());
+}
+
+MLsubRecovery::OverrideTypeRecipe
+MLsubRecovery::buildOverrideType(const llvm::json::Value &Expr,
+                                 OverrideBuildContext &Ctx,
+                                 llvm::StringRef Path, bool AllowNull) {
+  OverrideTypeRecipe Recipe;
+  if (Expr.getAsNull()) {
+    if (!AllowNull) {
+      failSignatureOverride(Path, "null is only allowed for function return");
+    }
+    return Recipe;
+  }
+
+  const auto &Obj = requireObject(Expr, Path);
+  auto Kind = Obj.getString("kind");
+  if (!Kind) {
+    failSignatureOverride(Path, "missing string field 'kind'");
+  }
+
+  if (*Kind == "primitive") {
+    auto Name = requireString(Obj, "name", Path);
+    auto Bits = requireInteger(Obj, "bits", Path);
+    if (Bits <= 0) {
+      failSignatureOverride(Path, "primitive bits must be positive");
+    }
+
+    auto &Registry = binarysub::globalPrimitiveSemanticRegistry();
+    if (const auto *Family = Registry.findFamilyByCanonicalName(Name)) {
+      if (Family->bits != static_cast<std::uint32_t>(Bits)) {
+        failSignatureOverride(Path,
+                              "semantic primitive bit width mismatch");
+      }
+    } else if (Name != "bool" && Name != "sint" && Name != "uint" &&
+               Name != "float" && Name != "double" && Name != "char") {
+      failSignatureOverride(Path, "unknown primitive name");
+    }
+
+    Recipe.Root =
+        binarysub::make_primitive(Name.str(), static_cast<std::uint32_t>(Bits));
+    return Recipe;
+  }
+
+  if (*Kind == "var") {
+    auto ID = requireInteger(Obj, "id", Path);
+    auto Bits = requireInteger(Obj, "bits", Path);
+    if (ID < 0 || Bits <= 0) {
+      failSignatureOverride(Path, "var id/bits must be positive");
+    }
+    auto Width = static_cast<std::uint32_t>(Bits);
+    auto WidthIt = Ctx.VarBitWidths.find(ID);
+    if (WidthIt != Ctx.VarBitWidths.end() && WidthIt->second != Width) {
+      failSignatureOverride(Path, "var bits mismatch for reused id");
+    }
+    auto It = Ctx.Vars.find(ID);
+    if (It == Ctx.Vars.end()) {
+      auto Ty = binarysub::make_variable(Ctx.Generator.lvl, Width);
+      Ctx.Vars.insert({ID, Ty});
+      Ctx.VarBitWidths.insert({ID, Width});
+      Recipe.Root = Ty;
+    } else {
+      Recipe.Root = It->second;
+    }
+    return Recipe;
+  }
+
+  if (*Kind == "ref") {
+    auto ID = requireInteger(Obj, "id", Path);
+    if (ID < 0) {
+      failSignatureOverride(Path, "ref id must be non-negative");
+    }
+    auto It = Ctx.Vars.find(ID);
+    if (It == Ctx.Vars.end()) {
+      failSignatureOverride(Path, "ref points to an undefined var id");
+    }
+    Recipe.Root = It->second;
+    return Recipe;
+  }
+
+  if (*Kind == "ptr") {
+    Recipe.Root = binarysub::fresh_variable(Ctx.Generator.lvl,
+                                            Ctx.Generator.PointerSize);
+    if (auto *Load = Obj.get("load")) {
+      auto LoadRecipe = buildOverrideType(
+          *Load, Ctx, appendJSONPath(Path, "load"), false);
+      appendOverrideConstraints(Recipe, std::move(LoadRecipe));
+      auto AccessBits = binarysub::get_size(LoadRecipe.Root);
+      Recipe.Constraints.push_back(
+          {Recipe.Root, binarysub::make_ptr_load(LoadRecipe.Root, AccessBits)});
+    }
+    if (auto *Store = Obj.get("store")) {
+      auto StoreRecipe = buildOverrideType(
+          *Store, Ctx, appendJSONPath(Path, "store"), false);
+      appendOverrideConstraints(Recipe, std::move(StoreRecipe));
+      auto AccessBits = binarysub::get_size(StoreRecipe.Root);
+      Recipe.Constraints.push_back({Recipe.Root,
+                                    binarysub::make_ptr_store(StoreRecipe.Root,
+                                                              AccessBits)});
+    }
+    if (Obj.get("load") == nullptr && Obj.get("store") == nullptr) {
+      failSignatureOverride(Path, "ptr requires at least one of load/store");
+    }
+    return Recipe;
+  }
+
+  if (*Kind == "record") {
+    const auto *FieldsValue = Obj.get("fields");
+    if (FieldsValue == nullptr) {
+      failSignatureOverride(Path, "missing array field 'fields'");
+    }
+    const auto &FieldsArray =
+        requireArray(*FieldsValue, appendJSONPath(Path, "fields"));
+    std::vector<std::pair<std::string, SimpleType>> Fields;
+    Fields.reserve(FieldsArray.size());
+    for (size_t Index = 0; Index < FieldsArray.size(); ++Index) {
+      auto EntryPath = appendJSONIndexPath(appendJSONPath(Path, "fields"), Index);
+      const auto &FieldObj = requireObject(FieldsArray[Index], EntryPath);
+      auto Offset = requireString(FieldObj, "offset", EntryPath);
+      auto *TypeValue = FieldObj.get("type");
+      if (TypeValue == nullptr) {
+        failSignatureOverride(EntryPath, "missing field 'type'");
+      }
+      auto FieldRecipe = buildOverrideType(
+          *TypeValue, Ctx, appendJSONPath(EntryPath, "type"), false);
+      appendOverrideConstraints(Recipe, std::move(FieldRecipe));
+      Fields.push_back({Offset.str(), FieldRecipe.Root});
+    }
+    Recipe.Root = binarysub::make_record(std::move(Fields));
+    return Recipe;
+  }
+
+  failSignatureOverride(Path, "unsupported override type kind");
+}
+
+void MLsubRecovery::applyOverrideRecipe(ConstraintsGenerator &G,
+                                        const OverrideTypeRecipe &Recipe) {
+  for (const auto &[LHS, RHS] : Recipe.Constraints) {
+    G.addSubtype(LHS, RHS);
+  }
+}
+
+void MLsubRecovery::applySignatureOverride(ConstraintsGenerator &G,
+                                           llvm::Function &Func,
+                                           const llvm::json::Value &Spec) {
+  const auto &Obj = requireObject(Spec, Func.getName());
+  OverrideBuildContext Ctx{.Generator = G, .Func = Func};
+
+  const auto &ArgsValue =
+      requireArray(*Obj.get("args"), appendJSONPath(Func.getName(), "args"));
+  std::vector<SimpleType> Args;
+  Args.reserve(ArgsValue.size());
+  OverrideTypeRecipe Aggregate;
+  for (size_t Index = 0; Index < ArgsValue.size(); ++Index) {
+    auto ArgPath = appendJSONIndexPath(appendJSONPath(Func.getName(), "args"),
+                                       Index);
+    auto ArgRecipe = buildOverrideType(ArgsValue[Index], Ctx, ArgPath, false);
+    appendOverrideConstraints(Aggregate, std::move(ArgRecipe));
+    Args.push_back(ArgRecipe.Root);
+  }
+
+  auto *RetValue = Obj.get("ret");
+  assert(RetValue != nullptr);
+  auto RetRecipe = buildOverrideType(*RetValue, Ctx,
+                                     appendJSONPath(Func.getName(), "ret"),
+                                     true);
+  appendOverrideConstraints(Aggregate, std::move(RetRecipe));
+
+  if (auto *ConstraintsValue = Obj.get("constraints")) {
+    const auto &Constraints = requireArray(
+        *ConstraintsValue, appendJSONPath(Func.getName(), "constraints"));
+    for (size_t Index = 0; Index < Constraints.size(); ++Index) {
+      auto ConstraintPath = appendJSONIndexPath(
+          appendJSONPath(Func.getName(), "constraints"), Index);
+      const auto &ConstraintObj = requireObject(Constraints[Index],
+                                                ConstraintPath);
+      auto Kind = requireString(ConstraintObj, "kind", ConstraintPath);
+      if (Kind != "subtype") {
+        failSignatureOverride(ConstraintPath,
+                              "only subtype constraints are supported");
+      }
+      auto *LHSValue = ConstraintObj.get("lhs");
+      auto *RHSValue = ConstraintObj.get("rhs");
+      if (LHSValue == nullptr || RHSValue == nullptr) {
+        failSignatureOverride(ConstraintPath,
+                              "constraint requires lhs and rhs");
+      }
+      auto LHSRecipe = buildOverrideType(
+          *LHSValue, Ctx, appendJSONPath(ConstraintPath, "lhs"), false);
+      auto RHSRecipe = buildOverrideType(
+          *RHSValue, Ctx, appendJSONPath(ConstraintPath, "rhs"), false);
+      appendOverrideConstraints(Aggregate, std::move(LHSRecipe));
+      appendOverrideConstraints(Aggregate, std::move(RHSRecipe));
+      Aggregate.Constraints.push_back({LHSRecipe.Root, RHSRecipe.Root});
+    }
+  }
+
+  applyOverrideRecipe(G, Aggregate);
+
+  auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
+  assert(FuncNode != nullptr);
+  G.addSubtype(binarysub::make_function(Args, RetRecipe.Root), FuncNode);
+}
+
 void MLsubRecovery::bottomUpPhase() {
   // Iterate bottom up.
   for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
@@ -433,6 +781,16 @@ void MLsubRecovery::bottomUpPhase() {
     }
 
     G->run();
+
+    for (auto *Func : Data.SCCSet) {
+      auto *Spec = getSignatureOverrideSpec(*Func);
+      if (Spec == nullptr) {
+        continue;
+      }
+      llvm::errs() << "Applying MLsub signature override to "
+                   << Func->getName() << "\n";
+      applySignatureOverride(*G, *Func, *Spec);
+    }
 
     // create poly schemes and instantiate for unhandled calls.
     for (auto &Ent : Data.Generator->unhandledCalls) {

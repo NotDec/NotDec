@@ -27,6 +27,7 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FormattedStream.h>
+#include <llvm/Support/JSON.h>
 
 #include <clang/AST/Type.h>
 #include <clang/Frontend/ASTUnit.h>
@@ -336,6 +337,9 @@ class MLsubRecovery {
   std::unique_ptr<llvm::CallGraph> CallG;
   llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
   std::unique_ptr<std::ofstream> BinarysubTraceFile;
+  const char *SigFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
+  llvm::json::Value SignatureOverrideDoc = nullptr;
+  std::set<llvm::Function *> SignatureOverrideFuncs;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
   SimpleType MemoryType = nullptr;
 
@@ -352,10 +356,33 @@ class MLsubRecovery {
   };
 
 public:
+  struct OverrideTypeRecipe {
+    SimpleType Root = nullptr;
+    std::vector<std::pair<SimpleType, SimpleType>> Constraints;
+  };
+
+  struct OverrideBuildContext {
+    ConstraintsGenerator &Generator;
+    llvm::Function &Func;
+    std::map<int64_t, SimpleType> Vars;
+    std::map<int64_t, std::uint32_t> VarBitWidths;
+  };
+
   MLsubRecovery(llvm::Module &Mod, llvm::ModuleAnalysisManager &MAM)
       : Mod(Mod), MAM(MAM) {}
 
   void run();
+  void loadSignatureFile(llvm::Module &M, const char *path);
+  const llvm::json::Value *getSignatureOverrideSpec(
+      const llvm::Function &Func) const;
+  OverrideTypeRecipe buildOverrideType(const llvm::json::Value &Expr,
+                                       OverrideBuildContext &Ctx,
+                                       llvm::StringRef Path,
+                                       bool AllowNull = false);
+  void applyOverrideRecipe(ConstraintsGenerator &G,
+                           const OverrideTypeRecipe &Recipe);
+  void applySignatureOverride(ConstraintsGenerator &G, llvm::Function &Func,
+                              const llvm::json::Value &Spec);
   // 形成单独分析的SCC群。（按需复制多态函数）
   void prepareSCC(llvm::CallGraph &CG);
   void bottomUpPhase();
