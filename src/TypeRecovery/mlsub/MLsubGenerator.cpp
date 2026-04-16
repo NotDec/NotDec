@@ -21,9 +21,11 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/FormattedStream.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/JSON.h>
+#include <llvm/Support/MD5.h>
 #include <algorithm>
 #include <memory>
 #include <optional>
@@ -45,6 +47,9 @@ namespace {
 
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
 constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
+constexpr llvm::StringLiteral kMLsubInputIRFile = "02-mlsub-input.ll";
+constexpr llvm::StringLiteral kMLsubInputAnchorFile =
+    "02-mlsub-input.anchor.json";
 constexpr llvm::StringLiteral kPNDiffAnnotatedFile = "03-pndiff-final.ll";
 constexpr llvm::StringLiteral kBinarysubTraceFile = "binarysub-trace.log";
 constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
@@ -136,6 +141,48 @@ constexpr llvm::StringLiteral kDefaultMLsubBuiltinSummaryOverridePath(
 llvm::json::Value makeEmptyOverrideDoc() {
   return llvm::json::Object{{"version", int64_t(1)},
                             {"functions", llvm::json::Object{}}};
+}
+
+std::string computeFileMD5Hex(llvm::StringRef Path) {
+  auto DigestOrErr = llvm::sys::fs::md5_contents(Path);
+  if (!DigestOrErr) {
+    llvm::errs() << "Cannot hash " << Path << ": "
+                 << DigestOrErr.getError().message() << "\n";
+    std::abort();
+  }
+
+  llvm::MD5::MD5Result Digest = *DigestOrErr;
+  llvm::SmallString<32> Hex;
+  llvm::MD5::stringifyResult(Digest, Hex);
+  return Hex.str().str();
+}
+
+void writeJSONFile(llvm::StringRef Path, const llvm::json::Value &Doc) {
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(Path, EC, llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Cannot open output file " << Path << ": "
+                 << EC.message() << "\n";
+    std::abort();
+  }
+  OS << llvm::formatv("{0:2}", Doc) << "\n";
+}
+
+void writeMLsubInputAnchor(const llvm::Module &M, llvm::StringRef IRPath,
+                           llvm::StringRef AnchorPath) {
+  llvm::json::Object ContentHash{
+      {"algorithm", "md5"},
+      {"value", computeFileMD5Hex(IRPath)},
+  };
+  llvm::json::Object Anchor{
+      {"version", int64_t(1)},
+      {"stage", "mlsub-input"},
+      {"ir_file", kMLsubInputIRFile.str()},
+      {"content_hash", std::move(ContentHash)},
+      {"data_layout", M.getDataLayout().getStringRepresentation()},
+      {"target_triple", M.getTargetTriple()},
+  };
+  writeJSONFile(AnchorPath, llvm::json::Value(std::move(Anchor)));
 }
 
 llvm::StringRef getOverrideKindLabel(bool RequireDefinition) {
@@ -680,7 +727,10 @@ void MLsubRecovery::run() {
 
   // 0.5 print module for debugging
   if (WorkDir) {
-    printModule(M, join(*WorkDir, "01-Optimized.ll").c_str());
+    auto MLsubInputPath = join(*WorkDir, kMLsubInputIRFile.str());
+    printModule(M, MLsubInputPath.c_str());
+    writeMLsubInputAnchor(M, MLsubInputPath,
+                          join(*WorkDir, kMLsubInputAnchorFile.str()));
   }
 
   CallGraphAnalysis Ana;

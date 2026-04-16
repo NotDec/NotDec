@@ -61,11 +61,19 @@
 - 作用：看 stack alloca 恢复前的模块状态
 - 典型用途：排查 stack pointer 识别失败、栈增长方向判断异常、stack rewrite 前后差异
 
-### `01-Optimized.ll`
+### `02-mlsub-input.ll`
 
-- 来源：类型恢复入口处的优化后 dump
-- 作用：看 `mlsub` / 类型恢复真正吃到的 LLVM IR
+- 来源：`MLsubRecovery::run()` 入口处的模块 dump
+- 作用：看 `mlsub` 真正吃到的 LLVM IR
 - 典型用途：判断问题是在更早的优化/恢复阶段就产生了，还是在类型恢复阶段才出现
+- 备注：如果后续 JSON 约束注入要绑定某个固定 IR，这份文件比泛化的 “Optimized” 更接近实际锚点
+
+### `02-mlsub-input.anchor.json`
+
+- 来源：`MLsubRecovery::run()` 在导出 `02-mlsub-input.ll` 后同步生成
+- 作用：记录当前 `mlsub` 输入 IR 的阶段名、数据布局、target triple 和内容摘要
+- 典型用途：给后续约束文件或调试脚本提供机器可读的 IR 锚点，快速确认 selector 是否仍对着同一份冻结 IR
+- 备注：当前内容摘要字段会显式写出算法，便于后续从 `md5` 平滑升级到更强的 hash
 
 ### `CallGraph.txt`
 
@@ -125,13 +133,15 @@
    - 确认输入 IR 是否一开始就异常
 2. `01-1-BeforeStackAlloca.ll`
    - 如果问题与栈/内存恢复相关，先看这里
-3. `01-Optimized.ll`
+3. `02-mlsub-input.ll`
    - 确认类型恢复实际输入
-4. `CallGraph.txt` / `SCCs.txt`
+4. `02-mlsub-input.anchor.json`
+   - 确认当前 workdir 里的 `mlsub` 输入 IR 身份信息
+5. `CallGraph.txt` / `SCCs.txt`
    - 确认分析范围、递归分组、多态边界
-5. `ValueTypes.txt`
+6. `ValueTypes.txt`
    - 直接看某个值最后被推成什么 `UType`
-6. `binarysub-trace.log`
+7. `binarysub-trace.log`
    - 继续追 binarysub 内部传播细节
-7. `llvm2c-before-demotessa.ll` / `llvm2c-after-demotessa.ll`
+8. `llvm2c-before-demotessa.ll` / `llvm2c-after-demotessa.ll`
    - 如果 `.ll` 看起来正常，但 `.c` 输出异常，再看这里
