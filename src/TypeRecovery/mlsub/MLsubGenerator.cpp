@@ -215,6 +215,21 @@ OverridePNDiffState parsePNDiffState(const llvm::json::Object &Obj,
   failSignatureOverride(Path, "pndiff state must be 'ptr' or 'number'");
 }
 
+OverridePNDiffState parseExtraConstraintPNDiffState(const llvm::json::Object &Obj,
+                                                    llvm::StringRef Path) {
+  auto State = Obj.getString("state");
+  if (!State) {
+    failExtraConstraints(Path, "missing or invalid string field 'state'");
+  }
+  if (*State == "ptr") {
+    return OverridePNDiffState::Ptr;
+  }
+  if (*State == "number" || *State == "num") {
+    return OverridePNDiffState::Number;
+  }
+  failExtraConstraints(Path, "pndiff state must be 'ptr' or 'number'");
+}
+
 ResolvedPNDiffTarget resolvePNDiffTarget(const llvm::json::Object &Obj,
                                         llvm::Function &Func,
                                         llvm::StringRef Path) {
@@ -248,6 +263,49 @@ ResolvedPNDiffTarget resolvePNDiffTarget(const llvm::json::Object &Obj,
     };
   }
   failSignatureOverride(TargetPath, "pndiff target kind must be 'arg' or 'ret'");
+}
+
+ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
+    const llvm::json::Object &Obj, llvm::Function &Func, llvm::StringRef Path) {
+  auto *TargetValue = Obj.get("target");
+  if (TargetValue == nullptr) {
+    failExtraConstraints(Path, "missing field 'target'");
+  }
+  const auto *TargetObj = TargetValue->getAsObject();
+  auto TargetPath = appendJSONPath(Path, "target");
+  if (TargetObj == nullptr) {
+    failExtraConstraints(TargetPath, "expected object");
+  }
+  auto Kind = TargetObj->getString("kind");
+  if (!Kind) {
+    failExtraConstraints(TargetPath, "missing or invalid string field 'kind'");
+  }
+  if (*Kind == "ret") {
+    if (Func.getReturnType()->isVoidTy()) {
+      failExtraConstraints(TargetPath, "ret target requires non-void function");
+    }
+    return {
+        .Value = ReturnValue{.Func = &Func},
+        .Key = "ret",
+    };
+  }
+  if (*Kind == "arg") {
+    auto Index = TargetObj->getInteger("index");
+    if (!Index) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid integer field 'index'");
+    }
+    if (*Index < 0 || *Index >= static_cast<int64_t>(Func.arg_size())) {
+      failExtraConstraints(TargetPath, "arg target index out of range");
+    }
+    auto *Arg = Func.getArg(static_cast<unsigned>(*Index));
+    assert(Arg != nullptr);
+    return {
+        .Value = Arg,
+        .Key = "arg:" + std::to_string(*Index),
+    };
+  }
+  failExtraConstraints(TargetPath, "pndiff target kind must be 'arg' or 'ret'");
 }
 
 void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
@@ -288,6 +346,73 @@ void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
     if (!Node->isPNRelated()) {
       failSignatureOverride(
           EntryPath,
+          ("pndiff target '" + Target.Key +
+           "' is not pointer-sized int or pointer")
+              .c_str());
+    }
+
+    switch (State) {
+    case OverridePNDiffState::Ptr:
+      Node->setPtr();
+      break;
+    case OverridePNDiffState::Number:
+      Node->setNonPtr();
+      break;
+    }
+  }
+}
+
+void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
+                                 const llvm::json::Object &Spec,
+                                 llvm::StringRef FuncPath) {
+  auto *ActionsValue = Spec.get("actions");
+  if (ActionsValue == nullptr) {
+    return;
+  }
+  const auto *Actions = ActionsValue->getAsArray();
+  if (Actions == nullptr) {
+    failExtraConstraints(appendJSONPath(FuncPath, "actions"), "expected array");
+  }
+
+  std::map<std::string, OverridePNDiffState> SeenTargets;
+  for (size_t Index = 0; Index < Actions->size(); ++Index) {
+    auto ActionPath =
+        appendJSONIndexPath(appendJSONPath(FuncPath, "actions"), Index);
+    const auto *ActionObj = (*Actions)[Index].getAsObject();
+    if (ActionObj == nullptr) {
+      failExtraConstraints(ActionPath, "expected object");
+    }
+    auto Kind = ActionObj->getString("kind");
+    if (!Kind) {
+      failExtraConstraints(ActionPath, "missing or invalid string field 'kind'");
+    }
+    if (*Kind != "pndiff") {
+      failExtraConstraints(ActionPath,
+                           "only actions.kind = 'pndiff' is supported currently");
+    }
+
+    auto Target = resolveExtraConstraintPNDiffTarget(*ActionObj, Func, ActionPath);
+    auto State = parseExtraConstraintPNDiffState(*ActionObj, ActionPath);
+    auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
+    if (!Inserted && It->second != State) {
+      failExtraConstraints(
+          ActionPath,
+          ("conflicting duplicate pndiff target '" + Target.Key + "'").c_str());
+    }
+    if (!Inserted) {
+      continue;
+    }
+
+    auto *Node = G.PG.getPNIVarOrNull(Target.Value);
+    if (Node == nullptr) {
+      failExtraConstraints(
+          ActionPath,
+          ("pndiff target '" + Target.Key + "' has no corresponding node")
+              .c_str());
+    }
+    if (!Node->isPNRelated()) {
+      failExtraConstraints(
+          ActionPath,
           ("pndiff target '" + Target.Key +
            "' is not pointer-sized int or pointer")
               .c_str());
@@ -477,7 +602,10 @@ void validateExtraConstraintsAnchor(const llvm::json::Object &Root,
   }
 }
 
-void validateUnsupportedExtraConstraintBodies(const llvm::json::Object &Root) {
+void validateExtraConstraintFunctions(const llvm::json::Object &Root,
+                                      llvm::Module &M,
+                                      llvm::json::Value &Doc,
+                                      std::set<llvm::Function *> &Funcs) {
   auto *FunctionsValue = Root.get("functions");
   if (FunctionsValue == nullptr) {
     return;
@@ -486,10 +614,63 @@ void validateUnsupportedExtraConstraintBodies(const llvm::json::Object &Root) {
   if (Functions == nullptr) {
     failExtraConstraints("functions", "expected object");
   }
-  if (!Functions->empty()) {
-    failExtraConstraints(
-        "functions",
-        "function-level actions are not implemented yet; only ir_anchor is supported");
+
+  for (const auto &Ent : *Functions) {
+    std::string FuncPath = appendJSONPath("functions", Ent.first);
+    auto *Func = M.getFunction(Ent.first);
+    if (Func == nullptr) {
+      llvm::errs() << "Warning: MLsub extra constraints function not found: "
+                   << Ent.first << "\n";
+      continue;
+    }
+
+    const auto *Spec = Ent.second.getAsObject();
+    if (Spec == nullptr) {
+      failExtraConstraints(FuncPath, "expected object");
+    }
+    auto *ActionsValue = Spec->get("actions");
+    if (ActionsValue == nullptr) {
+      failExtraConstraints(FuncPath, "missing field 'actions'");
+    }
+    const auto *Actions = ActionsValue->getAsArray();
+    if (Actions == nullptr) {
+      failExtraConstraints(appendJSONPath(FuncPath, "actions"), "expected array");
+    }
+
+    std::map<std::string, OverridePNDiffState> SeenTargets;
+    for (size_t Index = 0; Index < Actions->size(); ++Index) {
+      auto ActionPath =
+          appendJSONIndexPath(appendJSONPath(FuncPath, "actions"), Index);
+      const auto *ActionObj = (*Actions)[Index].getAsObject();
+      if (ActionObj == nullptr) {
+        failExtraConstraints(ActionPath, "expected object");
+      }
+      auto Kind = ActionObj->getString("kind");
+      if (!Kind) {
+        failExtraConstraints(ActionPath,
+                             "missing or invalid string field 'kind'");
+      }
+      if (*Kind != "pndiff") {
+        failExtraConstraints(
+            ActionPath,
+            "only actions.kind = 'pndiff' is supported currently");
+      }
+      auto Target = resolveExtraConstraintPNDiffTarget(*ActionObj, *Func, ActionPath);
+      auto State = parseExtraConstraintPNDiffState(*ActionObj, ActionPath);
+      auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
+      if (!Inserted && It->second != State) {
+        failExtraConstraints(
+            ActionPath,
+            ("conflicting duplicate pndiff target '" + Target.Key + "'").c_str());
+      }
+    }
+
+    auto *DocRoot = Doc.getAsObject();
+    assert(DocRoot != nullptr);
+    auto *DocFunctions = DocRoot->getObject("functions");
+    assert(DocFunctions != nullptr);
+    (*DocFunctions)[Ent.first] = Ent.second;
+    Funcs.insert(Func);
   }
 }
 
@@ -885,6 +1066,8 @@ void MLsubRecovery::validateExtraConstraintsFile(llvm::Module &M,
                                                  const char *Path,
                                                  llvm::StringRef ModuleDigestHex) {
   llvm::errs() << "Loading MLsub extra constraints from: " << Path << "\n";
+  ExtraConstraintsDoc = makeEmptyOverrideDoc();
+  ExtraConstraintsFuncs.clear();
   auto Parsed = llvm::json::parse(readFileToString(Path));
   if (!Parsed) {
     failExtraConstraints("",
@@ -902,7 +1085,13 @@ void MLsubRecovery::validateExtraConstraintsFile(llvm::Module &M,
   }
 
   validateExtraConstraintsAnchor(*Root, M, ModuleDigestHex);
-  validateUnsupportedExtraConstraintBodies(*Root);
+  validateExtraConstraintFunctions(*Root, M, ExtraConstraintsDoc,
+                                   ExtraConstraintsFuncs);
+}
+
+const llvm::json::Value *
+MLsubRecovery::getExtraConstraintsSpec(const llvm::Function &Func) const {
+  return getOverrideSpecImpl(ExtraConstraintsDoc, ExtraConstraintsFuncs, Func);
 }
 
 const llvm::json::Value *
@@ -1181,6 +1370,16 @@ void MLsubRecovery::applyUpperBoundSignatureOverride(
   applyPNDiffOverrides(G, Func, Obj, FuncPath);
 }
 
+void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
+                                          llvm::Function &Func,
+                                          const llvm::json::Value &Spec) {
+  const auto *Obj = Spec.getAsObject();
+  if (Obj == nullptr) {
+    failExtraConstraints(Func.getName(), "expected object");
+  }
+  applyExtraConstraintPNDiffs(G, Func, *Obj, Func.getName());
+}
+
 void MLsubRecovery::bottomUpPhase() {
   // Iterate bottom up.
   for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
@@ -1217,6 +1416,11 @@ void MLsubRecovery::bottomUpPhase() {
     G->run();
 
     for (auto *Func : Data.SCCSet) {
+      if (auto *ExtraSpec = getExtraConstraintsSpec(*Func)) {
+        llvm::errs() << "Applying MLsub extra constraints to "
+                     << Func->getName() << "\n";
+        applyExtraConstraints(*G, *Func, *ExtraSpec);
+      }
       if (auto *SummarySpec = getSummaryOverrideSpec(*Func)) {
         llvm::errs() << "Applying MLsub summary override to "
                      << Func->getName() << "\n";

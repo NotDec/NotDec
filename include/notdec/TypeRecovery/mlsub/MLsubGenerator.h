@@ -344,6 +344,8 @@ class MLsubRecovery {
   std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
   std::set<llvm::Function *> SignatureOverrideFuncs;
+  llvm::json::Value ExtraConstraintsDoc = nullptr;
+  std::set<llvm::Function *> ExtraConstraintsFuncs;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
   SimpleType MemoryType = nullptr;
 
@@ -382,6 +384,8 @@ public:
                          bool StrictValidation = true);
   void validateExtraConstraintsFile(llvm::Module &M, const char *Path,
                                     llvm::StringRef ModuleDigestHex);
+  const llvm::json::Value *getExtraConstraintsSpec(
+      const llvm::Function &Func) const;
   const llvm::json::Value *getSummaryOverrideSpec(
       const llvm::Function &Func) const;
   const llvm::json::Value *getSignatureOverrideSpec(
@@ -397,6 +401,8 @@ public:
   void applyUpperBoundSignatureOverride(ConstraintsGenerator &G,
                                         llvm::Function &Func,
                                         const llvm::json::Value &Spec);
+  void applyExtraConstraints(ConstraintsGenerator &G, llvm::Function &Func,
+                             const llvm::json::Value &Spec);
   // 形成单独分析的SCC群。（按需复制多态函数）
   void prepareSCC(llvm::CallGraph &CG);
   void bottomUpPhase();

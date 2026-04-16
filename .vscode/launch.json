@@ -32,14 +32,6 @@
       "preLaunchTask": "Clean and Build",
       "environment": [
         {
-          "name": "NOTDEC_SUMMARY_OVERRIDE",
-          "value": "/sn640/NotDec-Exp/ICSE-HOWARD/summarys.json"
-        },
-        {
-          "name": "NOTDEC_SIGNATURE_OVERRIDE",
-          "value": "/sn640/NotDec-Exp/ICSE-HOWARD/signatures.json"
-        },
-        {
           "name": "NOTDEC_POLY_FUNCS",
           "value": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json"
         },
