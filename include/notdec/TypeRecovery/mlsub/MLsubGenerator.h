@@ -372,7 +372,8 @@ public:
       : Mod(Mod), MAM(MAM) {}
 
   void run();
-  void loadSignatureFile(llvm::Module &M, const char *path);
+  void loadSignatureFile(llvm::Module &M, const char *path,
+                         bool StrictValidation = true);
   const llvm::json::Value *getSignatureOverrideSpec(
       const llvm::Function &Func) const;
   OverrideTypeRecipe buildOverrideType(const llvm::json::Value &Expr,

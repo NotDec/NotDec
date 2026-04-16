@@ -1,0 +1,344 @@
+{
+  "version": 1,
+  "functions": {
+    "__assert_fail": {
+      "ret": null,
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "access": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "primitive", "name": "sint", "bits": 32 }
+      ]
+    },
+    "atoi": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "atol": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "close": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 }
+      ]
+    },
+    "closedir": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "fclose": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "fdopen": {
+      "ret": { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "fflush": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "fgets": {
+      "ret": { "kind": "ref", "id": 0 },
+      "args": [
+        { "kind": "var", "id": 0, "bits": 32 },
+        { "kind": "primitive", "name": "sint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "constraints": [
+        {
+          "kind": "subtype",
+          "lhs": { "kind": "ref", "id": 0 },
+          "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+        }
+      ]
+    },
+    "fopen": {
+      "ret": { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "fprintf": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "var", "id": 2, "bits": 32 }
+      ]
+    },
+    "fputs": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "fread": {
+      "ret": { "kind": "primitive", "name": "uint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "free": {
+      "ret": null,
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } }
+      ]
+    },
+    "getenv": {
+      "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "getopt": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 },
+        {
+          "kind": "ptr",
+          "load": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+        },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "malloc": {
+      "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } },
+      "args": [
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ]
+    },
+    "open": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ]
+    },
+    "opendir": {
+      "ret": { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "perror": {
+      "ret": null,
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "printf": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "var", "id": 1, "bits": 32 }
+      ]
+    },
+    "putc": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "qsort": {
+      "ret": null,
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "read": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ]
+    },
+    "readdir": {
+      "ret": { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "realloc": {
+      "ret": { "kind": "ref", "id": 0 },
+      "args": [
+        { "kind": "var", "id": 0, "bits": 32 },
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "constraints": [
+        {
+          "kind": "subtype",
+          "lhs": { "kind": "ref", "id": 0 },
+          "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } }
+        }
+      ]
+    },
+    "regcomp": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ]
+    },
+    "regexec": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ]
+    },
+    "regfree": {
+      "ret": null,
+      "args": [
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "setlocale": {
+      "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "snprintf": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "var", "id": 3, "bits": 32 }
+      ]
+    },
+    "stat": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ]
+    },
+    "strchr": {
+      "ret": { "kind": "ref", "id": 0 },
+      "args": [
+        { "kind": "var", "id": 0, "bits": 32 },
+        { "kind": "primitive", "name": "sint", "bits": 32 }
+      ],
+      "constraints": [
+        {
+          "kind": "subtype",
+          "lhs": { "kind": "ref", "id": 0 },
+          "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+        }
+      ]
+    },
+    "strcmp": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "strdup": {
+      "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "strlen": {
+      "ret": { "kind": "primitive", "name": "uint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ]
+    },
+    "strncmp": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ]
+    },
+    "strncpy": {
+      "ret": { "kind": "ref", "id": 0 },
+      "args": [
+        { "kind": "var", "id": 0, "bits": 32 },
+        { "kind": "var", "id": 1, "bits": 32 },
+        { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "constraints": [
+        {
+          "kind": "subtype",
+          "lhs": { "kind": "ref", "id": 0 },
+          "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+        },
+        {
+          "kind": "subtype",
+          "lhs": { "kind": "ref", "id": 1 },
+          "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+        }
+      ]
+    },
+    "strrchr": {
+      "ret": { "kind": "ref", "id": 0 },
+      "args": [
+        { "kind": "var", "id": 0, "bits": 32 },
+        { "kind": "primitive", "name": "sint", "bits": 32 }
+      ],
+      "constraints": [
+        {
+          "kind": "subtype",
+          "lhs": { "kind": "ref", "id": 0 },
+          "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+        }
+      ]
+    },
+    "tolower": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 }
+      ]
+    },
+    "toupper": {
+      "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
+      "args": [
+        { "kind": "primitive", "name": "sint", "bits": 32 }
+      ]
+    }
+  }
+}

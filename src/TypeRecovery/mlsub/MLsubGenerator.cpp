@@ -29,10 +29,15 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "mlsub_generator"
+
+#ifndef NOTDEC_DEFAULT_MLSUB_SIGNATURE_OVERRIDE_PATH
+#define NOTDEC_DEFAULT_MLSUB_SIGNATURE_OVERRIDE_PATH ""
+#endif
 
 namespace notdec::mlsub {
 
@@ -114,6 +119,9 @@ void appendOverrideConstraints(
   Into.Constraints.insert(Into.Constraints.end(),
                           From.Constraints.begin(), From.Constraints.end());
 }
+
+constexpr llvm::StringLiteral kDefaultMLsubBuiltinSignatureOverridePath(
+    NOTDEC_DEFAULT_MLSUB_SIGNATURE_OVERRIDE_PATH);
 
 void appendDebugValueTypes(
     llvm::StringRef DebugDir, llvm::StringRef SCCName,
@@ -412,9 +420,16 @@ void MLsubRecovery::run() {
   }
 
   SignatureOverrideFuncs.clear();
-  SignatureOverrideDoc = nullptr;
+  SignatureOverrideDoc =
+      llvm::json::Object{{"version", int64_t(1)},
+                         {"functions", llvm::json::Object{}}};
+  if (!kDefaultMLsubBuiltinSignatureOverridePath.empty() &&
+      llvm::sys::fs::exists(kDefaultMLsubBuiltinSignatureOverridePath)) {
+    loadSignatureFile(M, kDefaultMLsubBuiltinSignatureOverridePath.data(),
+                      false);
+  }
   if (SigFile != nullptr) {
-    loadSignatureFile(M, SigFile);
+    loadSignatureFile(M, SigFile, true);
   }
 
   // set global pointer size variable for binarysub
@@ -472,7 +487,8 @@ void MLsubRecovery::run() {
   }
 }
 
-void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path) {
+void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path,
+                                      bool StrictValidation) {
   llvm::errs() << "Loading MLsub signature override from: " << Path << "\n";
   auto Parsed = llvm::json::parse(readFileToString(Path));
   if (!Parsed) {
@@ -506,15 +522,25 @@ void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path) {
       failSignatureOverride(FuncPath, "missing array field 'args'");
     }
     if (Func->isVarArg()) {
-      failSignatureOverride(FuncPath,
-                            "vararg functions are not supported yet");
+      if (StrictValidation) {
+        failSignatureOverride(FuncPath,
+                              "vararg functions are not supported yet");
+      }
+      llvm::errs() << "Warning: skip MLsub signature override for vararg "
+                   << Func->getName() << "\n";
+      continue;
     }
     if (Args->size() != Func->arg_size()) {
-      failSignatureOverride(
-          FuncPath,
-          ("override arg count does not match LLVM function '"
-           + Func->getName().str() + "'")
-              .c_str());
+      if (StrictValidation) {
+        failSignatureOverride(
+            FuncPath,
+            ("override arg count does not match LLVM function '"
+             + Func->getName().str() + "'")
+                .c_str());
+      }
+      llvm::errs() << "Warning: skip MLsub signature override for "
+                   << Func->getName() << " because arg count mismatched\n";
+      continue;
     }
     if (Spec.get("ret") == nullptr) {
       failSignatureOverride(FuncPath, "missing field 'ret'");
@@ -523,10 +549,13 @@ void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path) {
       requireArray(*Constraints, appendJSONPath(FuncPath, "constraints"));
     }
 
+    auto *DocRoot = SignatureOverrideDoc.getAsObject();
+    assert(DocRoot != nullptr);
+    auto *DocFunctions = DocRoot->getObject("functions");
+    assert(DocFunctions != nullptr);
+    (*DocFunctions)[Ent.first] = Ent.second;
     SignatureOverrideFuncs.insert(Func);
   }
-
-  SignatureOverrideDoc = std::move(*Parsed);
 }
 
 const llvm::json::Value *
