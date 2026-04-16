@@ -113,6 +113,16 @@ std::string appendJSONIndexPath(llvm::StringRef Base, size_t Index) {
   return Base.str() + "[" + std::to_string(Index) + "]";
 }
 
+enum class OverridePNDiffState {
+  Ptr,
+  Number,
+};
+
+struct ResolvedPNDiffTarget {
+  ExtValuePtr Value;
+  std::string Key;
+};
+
 void appendOverrideConstraints(
     notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &Into,
     const notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &From) {
@@ -130,6 +140,107 @@ llvm::json::Value makeEmptyOverrideDoc() {
 
 llvm::StringRef getOverrideKindLabel(bool RequireDefinition) {
   return RequireDefinition ? "signature" : "summary";
+}
+
+OverridePNDiffState parsePNDiffState(const llvm::json::Object &Obj,
+                                     llvm::StringRef Path) {
+  auto State = requireString(Obj, "state", Path);
+  if (State == "ptr") {
+    return OverridePNDiffState::Ptr;
+  }
+  if (State == "number" || State == "num") {
+    return OverridePNDiffState::Number;
+  }
+  failSignatureOverride(Path, "pndiff state must be 'ptr' or 'number'");
+}
+
+ResolvedPNDiffTarget resolvePNDiffTarget(const llvm::json::Object &Obj,
+                                        llvm::Function &Func,
+                                        llvm::StringRef Path) {
+  auto *TargetValue = Obj.get("target");
+  if (TargetValue == nullptr) {
+    failSignatureOverride(Path, "missing field 'target'");
+  }
+  const auto &TargetObj =
+      requireObject(*TargetValue, appendJSONPath(Path, "target"));
+  auto TargetPath = appendJSONPath(Path, "target");
+  auto Kind = requireString(TargetObj, "kind", TargetPath);
+  if (Kind == "ret") {
+    if (Func.getReturnType()->isVoidTy()) {
+      failSignatureOverride(TargetPath, "ret target requires non-void function");
+    }
+    return {
+        .Value = ReturnValue{.Func = &Func},
+        .Key = "ret",
+    };
+  }
+  if (Kind == "arg") {
+    auto Index = requireInteger(TargetObj, "index", TargetPath);
+    if (Index < 0 || Index >= static_cast<int64_t>(Func.arg_size())) {
+      failSignatureOverride(TargetPath, "arg target index out of range");
+    }
+    auto *Arg = Func.getArg(static_cast<unsigned>(Index));
+    assert(Arg != nullptr);
+    return {
+        .Value = Arg,
+        .Key = "arg:" + std::to_string(Index),
+    };
+  }
+  failSignatureOverride(TargetPath, "pndiff target kind must be 'arg' or 'ret'");
+}
+
+void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
+                          const llvm::json::Object &Spec,
+                          llvm::StringRef FuncPath) {
+  auto *PNDiffValue = Spec.get("pndiff");
+  if (PNDiffValue == nullptr) {
+    return;
+  }
+
+  const auto &PNDiffArray =
+      requireArray(*PNDiffValue, appendJSONPath(FuncPath, "pndiff"));
+  std::map<std::string, OverridePNDiffState> SeenTargets;
+  for (size_t Index = 0; Index < PNDiffArray.size(); ++Index) {
+    auto EntryPath =
+        appendJSONIndexPath(appendJSONPath(FuncPath, "pndiff"), Index);
+    const auto &EntryObj = requireObject(PNDiffArray[Index], EntryPath);
+    auto Target = resolvePNDiffTarget(EntryObj, Func, EntryPath);
+    auto State = parsePNDiffState(EntryObj, EntryPath);
+
+    auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
+    if (!Inserted && It->second != State) {
+      failSignatureOverride(
+          EntryPath,
+          ("conflicting duplicate pndiff target '" + Target.Key + "'").c_str());
+    }
+    if (!Inserted) {
+      continue;
+    }
+
+    auto *Node = G.PG.getPNIVarOrNull(Target.Value);
+    if (Node == nullptr) {
+      failSignatureOverride(
+          EntryPath,
+          ("pndiff target '" + Target.Key + "' has no corresponding node")
+              .c_str());
+    }
+    if (!Node->isPNRelated()) {
+      failSignatureOverride(
+          EntryPath,
+          ("pndiff target '" + Target.Key +
+           "' is not pointer-sized int or pointer")
+              .c_str());
+    }
+
+    switch (State) {
+    case OverridePNDiffState::Ptr:
+      Node->setPtr();
+      break;
+    case OverridePNDiffState::Number:
+      Node->setNonPtr();
+      break;
+    }
+  }
 }
 
 void loadOverrideFileImpl(llvm::Module &M, const char *Path,
@@ -205,6 +316,25 @@ void loadOverrideFileImpl(llvm::Module &M, const char *Path,
     }
     if (auto *Constraints = Spec.get("constraints")) {
       requireArray(*Constraints, appendJSONPath(FuncPath, "constraints"));
+    }
+    if (auto *PNDiff = Spec.get("pndiff")) {
+      const auto &PNDiffArray =
+          requireArray(*PNDiff, appendJSONPath(FuncPath, "pndiff"));
+      std::map<std::string, OverridePNDiffState> SeenTargets;
+      for (size_t Index = 0; Index < PNDiffArray.size(); ++Index) {
+        auto EntryPath =
+            appendJSONIndexPath(appendJSONPath(FuncPath, "pndiff"), Index);
+        const auto &EntryObj = requireObject(PNDiffArray[Index], EntryPath);
+        auto Target = resolvePNDiffTarget(EntryObj, *Func, EntryPath);
+        auto State = parsePNDiffState(EntryObj, EntryPath);
+        auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
+        if (!Inserted && It->second != State) {
+          failSignatureOverride(
+              EntryPath,
+              ("conflicting duplicate pndiff target '" + Target.Key + "'")
+                  .c_str());
+        }
+      }
     }
 
     auto *DocRoot = Doc.getAsObject();
@@ -766,15 +896,16 @@ void MLsubRecovery::applySummaryOverride(ConstraintsGenerator &G,
                                          llvm::Function &Func,
                                          const llvm::json::Value &Spec) {
   const auto &Obj = requireObject(Spec, Func.getName());
+  std::string FuncPath = Func.getName().str();
   OverrideBuildContext Ctx{.Generator = G, .Func = Func};
 
   const auto &ArgsValue =
-      requireArray(*Obj.get("args"), appendJSONPath(Func.getName(), "args"));
+      requireArray(*Obj.get("args"), appendJSONPath(FuncPath, "args"));
   std::vector<SimpleType> Args;
   Args.reserve(ArgsValue.size());
   OverrideTypeRecipe Aggregate;
   for (size_t Index = 0; Index < ArgsValue.size(); ++Index) {
-    auto ArgPath = appendJSONIndexPath(appendJSONPath(Func.getName(), "args"),
+    auto ArgPath = appendJSONIndexPath(appendJSONPath(FuncPath, "args"),
                                        Index);
     auto ArgRecipe = buildOverrideType(ArgsValue[Index], Ctx, ArgPath, false);
     appendOverrideConstraints(Aggregate, std::move(ArgRecipe));
@@ -783,17 +914,16 @@ void MLsubRecovery::applySummaryOverride(ConstraintsGenerator &G,
 
   auto *RetValue = Obj.get("ret");
   assert(RetValue != nullptr);
-  auto RetRecipe = buildOverrideType(*RetValue, Ctx,
-                                     appendJSONPath(Func.getName(), "ret"),
-                                     true);
+  auto RetRecipe =
+      buildOverrideType(*RetValue, Ctx, appendJSONPath(FuncPath, "ret"), true);
   appendOverrideConstraints(Aggregate, std::move(RetRecipe));
 
   if (auto *ConstraintsValue = Obj.get("constraints")) {
     const auto &Constraints = requireArray(
-        *ConstraintsValue, appendJSONPath(Func.getName(), "constraints"));
+        *ConstraintsValue, appendJSONPath(FuncPath, "constraints"));
     for (size_t Index = 0; Index < Constraints.size(); ++Index) {
       auto ConstraintPath = appendJSONIndexPath(
-          appendJSONPath(Func.getName(), "constraints"), Index);
+          appendJSONPath(FuncPath, "constraints"), Index);
       const auto &ConstraintObj = requireObject(Constraints[Index],
                                                 ConstraintPath);
       auto Kind = requireString(ConstraintObj, "kind", ConstraintPath);
@@ -822,21 +952,23 @@ void MLsubRecovery::applySummaryOverride(ConstraintsGenerator &G,
   auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
   assert(FuncNode != nullptr);
   G.addSubtype(binarysub::make_function(Args, RetRecipe.Root), FuncNode);
+  applyPNDiffOverrides(G, Func, Obj, FuncPath);
 }
 
 void MLsubRecovery::applyUpperBoundSignatureOverride(
     ConstraintsGenerator &G, llvm::Function &Func,
     const llvm::json::Value &Spec) {
   const auto &Obj = requireObject(Spec, Func.getName());
+  std::string FuncPath = Func.getName().str();
   OverrideBuildContext Ctx{.Generator = G, .Func = Func};
 
   const auto &ArgsValue =
-      requireArray(*Obj.get("args"), appendJSONPath(Func.getName(), "args"));
+      requireArray(*Obj.get("args"), appendJSONPath(FuncPath, "args"));
   std::vector<SimpleType> Args;
   Args.reserve(ArgsValue.size());
   OverrideTypeRecipe Aggregate;
   for (size_t Index = 0; Index < ArgsValue.size(); ++Index) {
-    auto ArgPath = appendJSONIndexPath(appendJSONPath(Func.getName(), "args"),
+    auto ArgPath = appendJSONIndexPath(appendJSONPath(FuncPath, "args"),
                                        Index);
     auto ArgRecipe = buildOverrideType(ArgsValue[Index], Ctx, ArgPath, false);
     appendOverrideConstraints(Aggregate, std::move(ArgRecipe));
@@ -845,17 +977,16 @@ void MLsubRecovery::applyUpperBoundSignatureOverride(
 
   auto *RetValue = Obj.get("ret");
   assert(RetValue != nullptr);
-  auto RetRecipe = buildOverrideType(*RetValue, Ctx,
-                                     appendJSONPath(Func.getName(), "ret"),
-                                     true);
+  auto RetRecipe =
+      buildOverrideType(*RetValue, Ctx, appendJSONPath(FuncPath, "ret"), true);
   appendOverrideConstraints(Aggregate, std::move(RetRecipe));
 
   if (auto *ConstraintsValue = Obj.get("constraints")) {
     const auto &Constraints = requireArray(
-        *ConstraintsValue, appendJSONPath(Func.getName(), "constraints"));
+        *ConstraintsValue, appendJSONPath(FuncPath, "constraints"));
     for (size_t Index = 0; Index < Constraints.size(); ++Index) {
       auto ConstraintPath = appendJSONIndexPath(
-          appendJSONPath(Func.getName(), "constraints"), Index);
+          appendJSONPath(FuncPath, "constraints"), Index);
       const auto &ConstraintObj = requireObject(Constraints[Index],
                                                 ConstraintPath);
       auto Kind = requireString(ConstraintObj, "kind", ConstraintPath);
@@ -884,6 +1015,7 @@ void MLsubRecovery::applyUpperBoundSignatureOverride(
   auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
   assert(FuncNode != nullptr);
   G.addSubtype(FuncNode, binarysub::make_function(Args, RetRecipe.Root));
+  applyPNDiffOverrides(G, Func, Obj, FuncPath);
 }
 
 void MLsubRecovery::bottomUpPhase() {

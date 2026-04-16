@@ -8,6 +8,12 @@
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 3 }, "state": "ptr" }
       ]
     },
     "access": {
@@ -15,36 +21,61 @@
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "primitive", "name": "sint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" }
       ]
     },
     "atoi": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "atol": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "close": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "primitive", "name": "sint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" }
       ]
     },
     "closedir": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "fclose": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "fdopen": {
@@ -52,12 +83,21 @@
       "args": [
         { "kind": "primitive", "name": "sint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "fflush": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "fgets": {
@@ -73,6 +113,12 @@
           "lhs": { "kind": "ref", "id": 0 },
           "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
         }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "ptr" }
       ]
     },
     "fopen": {
@@ -80,6 +126,11 @@
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "fprintf": {
@@ -88,6 +139,11 @@
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "var", "id": 2, "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "fputs": {
@@ -95,6 +151,11 @@
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "fread": {
@@ -104,18 +165,32 @@
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 3 }, "state": "ptr" }
       ]
     },
     "free": {
       "ret": null,
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "getenv": {
       "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "getopt": {
@@ -127,12 +202,22 @@
           "load": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
         },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "ptr" }
       ]
     },
     "malloc": {
       "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } },
       "args": [
         { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" }
       ]
     },
     "open": {
@@ -141,18 +226,31 @@
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" }
       ]
     },
     "opendir": {
       "ret": { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "perror": {
       "ret": null,
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "printf": {
@@ -160,6 +258,10 @@
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "var", "id": 1, "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "putc": {
@@ -167,6 +269,11 @@
       "args": [
         { "kind": "primitive", "name": "sint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "qsort": {
@@ -176,6 +283,12 @@
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 3 }, "state": "ptr" }
       ]
     },
     "read": {
@@ -184,12 +297,22 @@
         { "kind": "primitive", "name": "sint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } },
         { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" }
       ]
     },
     "readdir": {
       "ret": { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
       "args": [
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "realloc": {
@@ -204,6 +327,11 @@
           "lhs": { "kind": "ref", "id": 0 },
           "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } }
         }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" }
       ]
     },
     "regcomp": {
@@ -212,6 +340,12 @@
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" }
       ]
     },
     "regexec": {
@@ -222,12 +356,23 @@
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } },
         { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 3 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 4 }, "state": "number" }
       ]
     },
     "regfree": {
       "ret": null,
       "args": [
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "setlocale": {
@@ -235,6 +380,11 @@
       "args": [
         { "kind": "primitive", "name": "sint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "snprintf": {
@@ -244,6 +394,12 @@
         { "kind": "primitive", "name": "uint", "bits": 32 },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "var", "id": 3, "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "ptr" }
       ]
     },
     "stat": {
@@ -251,6 +407,11 @@
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "ptr", "load": { "kind": "record", "fields": [] }, "store": { "kind": "record", "fields": [] } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "strchr": {
@@ -265,6 +426,11 @@
           "lhs": { "kind": "ref", "id": 0 },
           "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
         }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" }
       ]
     },
     "strcmp": {
@@ -272,18 +438,31 @@
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" }
       ]
     },
     "strdup": {
       "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "strlen": {
       "ret": { "kind": "primitive", "name": "uint", "bits": 32 },
       "args": [
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
     "strncmp": {
@@ -292,6 +471,12 @@
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } },
         { "kind": "primitive", "name": "uint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" }
       ]
     },
     "strncpy": {
@@ -312,6 +497,12 @@
           "lhs": { "kind": "ref", "id": 1 },
           "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
         }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" }
       ]
     },
     "strrchr": {
@@ -326,18 +517,31 @@
           "lhs": { "kind": "ref", "id": 0 },
           "rhs": { "kind": "ptr", "load": { "kind": "primitive", "name": "char", "bits": 8 }, "store": { "kind": "primitive", "name": "char", "bits": 8 } }
         }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" }
       ]
     },
     "tolower": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "primitive", "name": "sint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" }
       ]
     },
     "toupper": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [
         { "kind": "primitive", "name": "sint", "bits": 32 }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "number" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" }
       ]
     }
   }
