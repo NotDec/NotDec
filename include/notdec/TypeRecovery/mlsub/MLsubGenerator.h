@@ -339,6 +339,7 @@ class MLsubRecovery {
   std::unique_ptr<std::ofstream> BinarysubTraceFile;
   const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
   const char *SignatureFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
+  const char *ExtraConstraintsFile = std::getenv("NOTDEC_EXTRA_CONSTRAINTS");
   llvm::json::Value SummaryOverrideDoc = nullptr;
   std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
@@ -379,6 +380,8 @@ public:
                        bool StrictValidation = true);
   void loadSignatureFile(llvm::Module &M, const char *path,
                          bool StrictValidation = true);
+  void validateExtraConstraintsFile(llvm::Module &M, const char *Path,
+                                    llvm::StringRef ModuleDigestHex);
   const llvm::json::Value *getSummaryOverrideSpec(
       const llvm::Function &Func) const;
   const llvm::json::Value *getSignatureOverrideSpec(

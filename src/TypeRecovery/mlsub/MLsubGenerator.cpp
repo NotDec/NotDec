@@ -69,6 +69,16 @@ bool envFlagEnabled(llvm::StringRef Name) {
   std::abort();
 }
 
+[[noreturn]] void failExtraConstraints(llvm::StringRef Path,
+                                       llvm::StringRef Message) {
+  llvm::errs() << "Error: invalid MLsub extra constraints";
+  if (!Path.empty()) {
+    llvm::errs() << " at " << Path;
+  }
+  llvm::errs() << ": " << Message << "\n";
+  std::abort();
+}
+
 const llvm::json::Object &requireObject(const llvm::json::Value &Value,
                                         llvm::StringRef Path) {
   if (const auto *Obj = Value.getAsObject()) {
@@ -143,18 +153,22 @@ llvm::json::Value makeEmptyOverrideDoc() {
                             {"functions", llvm::json::Object{}}};
 }
 
-std::string computeFileMD5Hex(llvm::StringRef Path) {
-  auto DigestOrErr = llvm::sys::fs::md5_contents(Path);
-  if (!DigestOrErr) {
-    llvm::errs() << "Cannot hash " << Path << ": "
-                 << DigestOrErr.getError().message() << "\n";
-    std::abort();
-  }
-
-  llvm::MD5::MD5Result Digest = *DigestOrErr;
+std::string computeMD5Hex(llvm::StringRef Content) {
+  llvm::MD5 Hash;
+  Hash.update(Content);
+  llvm::MD5::MD5Result Digest;
   llvm::SmallString<32> Hex;
+  Hash.final(Digest);
   llvm::MD5::stringifyResult(Digest, Hex);
   return Hex.str().str();
+}
+
+std::string renderModuleToString(const llvm::Module &M) {
+  std::string Buffer;
+  llvm::raw_string_ostream OS(Buffer);
+  M.print(OS, nullptr);
+  OS.flush();
+  return Buffer;
 }
 
 void writeJSONFile(llvm::StringRef Path, const llvm::json::Value &Doc) {
@@ -168,11 +182,11 @@ void writeJSONFile(llvm::StringRef Path, const llvm::json::Value &Doc) {
   OS << llvm::formatv("{0:2}", Doc) << "\n";
 }
 
-void writeMLsubInputAnchor(const llvm::Module &M, llvm::StringRef IRPath,
-                           llvm::StringRef AnchorPath) {
+void writeMLsubInputAnchor(const llvm::Module &M, llvm::StringRef AnchorPath,
+                           llvm::StringRef ModuleDigestHex) {
   llvm::json::Object ContentHash{
       {"algorithm", "md5"},
-      {"value", computeFileMD5Hex(IRPath)},
+      {"value", ModuleDigestHex},
   };
   llvm::json::Object Anchor{
       {"version", int64_t(1)},
@@ -409,6 +423,74 @@ const llvm::json::Value *getOverrideSpecImpl(
     return nullptr;
   }
   return Functions->get(Func.getName());
+}
+
+void validateExtraConstraintsAnchor(const llvm::json::Object &Root,
+                                    const llvm::Module &M,
+                                    llvm::StringRef ModuleDigestHex) {
+  auto *AnchorValue = Root.get("ir_anchor");
+  if (AnchorValue == nullptr) {
+    return;
+  }
+  const auto *Anchor = AnchorValue->getAsObject();
+  if (Anchor == nullptr) {
+    failExtraConstraints("ir_anchor", "expected object");
+  }
+
+  auto Stage = requireString(*Anchor, "stage", "ir_anchor");
+  if (Stage != "mlsub-input") {
+    failExtraConstraints("ir_anchor.stage",
+                         "expected stage = 'mlsub-input'");
+  }
+
+  if (auto *ContentHash = Anchor->getObject("content_hash")) {
+    auto Algo =
+        requireString(*ContentHash, "algorithm", "ir_anchor.content_hash");
+    auto Value =
+        requireString(*ContentHash, "value", "ir_anchor.content_hash");
+    if (Algo != "md5") {
+      failExtraConstraints("ir_anchor.content_hash.algorithm",
+                           "only md5 is supported currently");
+    }
+    if (Value != ModuleDigestHex) {
+      failExtraConstraints(
+          "ir_anchor.content_hash.value",
+          ("content hash mismatch: expected " + ModuleDigestHex.str()).c_str());
+    }
+  }
+
+  if (auto DataLayout = Anchor->getString("data_layout")) {
+    auto Current = M.getDataLayout().getStringRepresentation();
+    if (*DataLayout != Current) {
+      failExtraConstraints("ir_anchor.data_layout",
+                           ("data layout mismatch: expected " + Current).c_str());
+    }
+  }
+
+  if (auto TargetTriple = Anchor->getString("target_triple")) {
+    auto Current = M.getTargetTriple();
+    if (*TargetTriple != Current) {
+      failExtraConstraints(
+          "ir_anchor.target_triple",
+          ("target triple mismatch: expected " + Current).c_str());
+    }
+  }
+}
+
+void validateUnsupportedExtraConstraintBodies(const llvm::json::Object &Root) {
+  auto *FunctionsValue = Root.get("functions");
+  if (FunctionsValue == nullptr) {
+    return;
+  }
+  const auto *Functions = FunctionsValue->getAsObject();
+  if (Functions == nullptr) {
+    failExtraConstraints("functions", "expected object");
+  }
+  if (!Functions->empty()) {
+    failExtraConstraints(
+        "functions",
+        "function-level actions are not implemented yet; only ir_anchor is supported");
+  }
 }
 
 void appendDebugValueTypes(
@@ -725,12 +807,19 @@ void MLsubRecovery::run() {
   // set global pointer size variable for binarysub
   binarysub::pointer_size = PointerSize;
 
+  auto MLsubInputText = renderModuleToString(M);
+  auto ModuleDigestHex = computeMD5Hex(MLsubInputText);
+
   // 0.5 print module for debugging
   if (WorkDir) {
     auto MLsubInputPath = join(*WorkDir, kMLsubInputIRFile.str());
     printModule(M, MLsubInputPath.c_str());
-    writeMLsubInputAnchor(M, MLsubInputPath,
-                          join(*WorkDir, kMLsubInputAnchorFile.str()));
+    writeMLsubInputAnchor(M, join(*WorkDir, kMLsubInputAnchorFile.str()),
+                          ModuleDigestHex);
+  }
+
+  if (ExtraConstraintsFile != nullptr) {
+    validateExtraConstraintsFile(M, ExtraConstraintsFile, ModuleDigestHex);
   }
 
   CallGraphAnalysis Ana;
@@ -790,6 +879,30 @@ void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path,
                                       bool StrictValidation) {
   loadOverrideFileImpl(M, Path, SignatureOverrideDoc, SignatureOverrideFuncs,
                        StrictValidation, true);
+}
+
+void MLsubRecovery::validateExtraConstraintsFile(llvm::Module &M,
+                                                 const char *Path,
+                                                 llvm::StringRef ModuleDigestHex) {
+  llvm::errs() << "Loading MLsub extra constraints from: " << Path << "\n";
+  auto Parsed = llvm::json::parse(readFileToString(Path));
+  if (!Parsed) {
+    failExtraConstraints("",
+                         ("JSON parse failed for " + std::string(Path)).c_str());
+  }
+
+  const auto *Root = Parsed->getAsObject();
+  if (Root == nullptr) {
+    failExtraConstraints("<root>", "expected object");
+  }
+
+  auto Version = Root->getInteger("version");
+  if (!Version || *Version != 1) {
+    failExtraConstraints("<root>", "expected version = 1");
+  }
+
+  validateExtraConstraintsAnchor(*Root, M, ModuleDigestHex);
+  validateUnsupportedExtraConstraintBodies(*Root);
 }
 
 const llvm::json::Value *
