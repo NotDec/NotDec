@@ -136,6 +136,42 @@ enum class OverridePNDiffState {
   Number,
 };
 
+llvm::StringRef getOverridePNDiffStateName(OverridePNDiffState State) {
+  switch (State) {
+  case OverridePNDiffState::Ptr:
+    return "ptr";
+  case OverridePNDiffState::Number:
+    return "number";
+  }
+  llvm_unreachable("unhandled OverridePNDiffState");
+}
+
+std::string formatLLVMType(llvm::Type *Ty) {
+  std::string Buffer;
+  llvm::raw_string_ostream OS(Buffer);
+  if (Ty == nullptr) {
+    OS << "<null>";
+  } else {
+    Ty->print(OS);
+  }
+  return Buffer;
+}
+
+void warnIgnoredPNDiffOverride(llvm::StringRef Kind, llvm::StringRef Path,
+                               llvm::StringRef TargetKey,
+                               OverridePNDiffState State,
+                               const ExtValuePtr &Value) {
+  llvm::errs() << "Warning: skip MLsub " << Kind << " pndiff";
+  if (!Path.empty()) {
+    llvm::errs() << " at " << Path;
+  }
+  llvm::errs() << ": target '" << TargetKey << "' has non-PNDiff LLVM type '"
+               << formatLLVMType(getType(Value))
+               << "'; requested state '"
+               << getOverridePNDiffStateName(State)
+               << "' will be ignored\n";
+}
+
 struct ResolvedPNDiffTarget {
   ExtValuePtr Value;
   std::string Key;
@@ -687,6 +723,11 @@ void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
               .c_str());
     }
     if (!Node->isPNRelated()) {
+      if (State == OverridePNDiffState::Number) {
+        warnIgnoredPNDiffOverride("override", EntryPath, Target.Key, State,
+                                  Target.Value);
+        continue;
+      }
       failSignatureOverride(
           EntryPath,
           ("pndiff target '" + Target.Key +
@@ -755,6 +796,11 @@ void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
               .c_str());
     }
     if (!Node->isPNRelated()) {
+      if (State == OverridePNDiffState::Number) {
+        warnIgnoredPNDiffOverride("extra constraints", ActionPath, Target.Key,
+                                  State, Target.Value);
+        continue;
+      }
       failExtraConstraints(
           ActionPath,
           ("pndiff target '" + Target.Key +
