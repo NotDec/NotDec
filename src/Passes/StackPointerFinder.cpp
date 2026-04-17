@@ -6,6 +6,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "Passes/StackPointerFinder.h"
+#include "Utils/Utils.h"
 #include "notdec-llvm2c/Utils.h"
 
 namespace notdec {
@@ -93,6 +94,8 @@ static inline bool isStackPointerName(const StringRef &Name) {
 
 StackPointerFinderAnalysis::Result
 StackPointerFinderAnalysis::run(llvm::Module &mod) {
+  notdec::appendRecoveryPassLog(
+      " ============== StackPointerFinderAnalysis ===============\n");
   GlobalVariable *sp = nullptr;
   for (GlobalVariable &gv : mod.getGlobalList()) {
     if (isStackPointerName(gv.getName())) {
@@ -106,21 +109,31 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
     }
   }
   size_t max = 0;
-  std::cerr << "Try to guess stack pointer:" << std::endl;
+  notdec::appendRecoveryPassLog("Try to guess stack pointer:\n");
   for (auto pair : sp_count) {
-    llvm::errs() << *pair.first << "(score: " << pair.second << ")\n";
+    std::string Message;
+    llvm::raw_string_ostream OS(Message);
+    OS << *pair.first << "(score: " << pair.second << ")\n";
+    notdec::appendRecoveryPassLog(OS.str());
     if (pair.second > max) {
       max = pair.second;
       max_sp = pair.first;
     }
   }
   if (max_sp != nullptr) {
-    llvm::errs() << "Selected stack pointer: " << *max_sp << "\n";
+    std::string Message;
+    llvm::raw_string_ostream OS(Message);
+    OS << "Selected stack pointer: " << *max_sp << "\n";
+    notdec::appendRecoveryPassLog(OS.str());
   }
   if (sp != nullptr) {
-    errs() << "Select stack pointer because of its NAME: " << *sp << "\n";
+    std::string Message;
+    llvm::raw_string_ostream OS(Message);
+    OS << "Select stack pointer because of its NAME: " << *sp << "\n";
+    notdec::appendRecoveryPassLog(OS.str());
     if (sp != max_sp && max_sp != nullptr) {
-      errs() << "WARNING: Stack pointer mismatch! (Name vs Analysis)\n";
+      notdec::appendRecoveryPassLog(
+          "WARNING: Stack pointer mismatch! (Name vs Analysis)\n");
     }
   } else {
     // find the most voted stack pointer.
@@ -134,12 +147,14 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
   Result ret;
   ret.result = sp;
   ret.direction = direction_count[0] >= direction_count[1] ? 0 : 1;
-  std::cerr << "stack direction: "
-            << (ret.direction == 0 ? "negative" : "positive") << " ("
-            << direction_count[ret.direction] << ")" << std::endl;
+  std::string DirectionMessage =
+      "stack direction: " +
+      std::string(ret.direction == 0 ? "negative" : "positive") + " (" +
+      std::to_string(direction_count[ret.direction]) + ")\n";
+  notdec::appendRecoveryPassLog(DirectionMessage);
   if (direction_count[ret.direction] == 0) {
-    errs()
-        << "WARNING: Stack direction is not determined! Default to negative.\n";
+    notdec::appendRecoveryPassLog(
+        "WARNING: Stack direction is not determined! Default to negative.\n");
   }
   return ret;
 }

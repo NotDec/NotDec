@@ -13,6 +13,7 @@
 #include <llvm/IR/PatternMatch.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/raw_ostream.h>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -111,7 +112,10 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
         } else if (StackLoc == add_load_sp || PhiClosure.count(add_load_sp)) {
           // relative to the top of the stack
         } else {
-          llvm::errs() << "Error: unrecognized sp modification: " << I << "\n";
+          std::string Message;
+          llvm::raw_string_ostream OS(Message);
+          OS << "Error: unrecognized sp modification: " << I << "\n";
+          notdec::appendRecoveryPassLog(OS.str());
           continue;
         }
         if (isGrowNegative) {
@@ -135,7 +139,10 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
         } else if (StackLoc == add_load_sp) {
           // relative to the top of the stack
         } else {
-          llvm::errs() << "Error: unrecognized sp modification: " << I << "\n";
+          std::string Message;
+          llvm::raw_string_ostream OS(Message);
+          OS << "Error: unrecognized sp modification: " << I << "\n";
+          notdec::appendRecoveryPassLog(OS.str());
           // continue;
           // assume as stack top for sub
         }
@@ -187,7 +194,8 @@ void LinearAllocationRecovery::matchDynamicAllocas(Function &F, Value *SP,
 /// will also be negative. But in the alloca, the size is still positive.
 PreservedAnalyses LinearAllocationRecovery::run(Module &M,
                                                 ModuleAnalysisManager &MAM) {
-  errs() << " ============== LinearAllocationRecovery  ===============\n";
+  notdec::appendRecoveryPassLog(
+      " ============== LinearAllocationRecovery  ===============\n");
   auto WorkDir = notdec::getWorkDirOpt();
   if (WorkDir) {
     printModule(M,
@@ -197,8 +205,9 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
   auto sp_result = MAM.getResult<StackPointerFinderAnalysis>(M);
   auto sp = sp_result.result;
   if (sp == nullptr) {
-    std::cerr << "ERROR: Stack pointer is not found!!";
-    std::cerr << "LinearAllocationRecovery cannot proceed!\n";
+    notdec::appendRecoveryPassLog(
+        "ERROR: Stack pointer is not found!!LinearAllocationRecovery cannot "
+        "proceed!\n");
     return PreservedAnalyses::all();
   }
   // iterate each use of sp, collect a list of functions to process.
@@ -211,8 +220,9 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
   }
 
   if (worklist.empty()) {
-    std::cerr << "ERROR: The stack pointer is not used in any function?";
-    std::cerr << "LinearAllocationRecovery cannot proceed!\n";
+    notdec::appendRecoveryPassLog(
+        "ERROR: The stack pointer is not used in any "
+        "function?LinearAllocationRecovery cannot proceed!\n");
     return PreservedAnalyses::all();
   }
 
@@ -268,15 +278,21 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         }
       }
       if (match_level == 0 && has_load_sp) {
-        llvm::errs() << "ERROR: No pattern matched but the stack pointer is "
-                        "accessed in func: "
-                     << F->getName() << "!\n";
+        std::string Message;
+        llvm::raw_string_ostream OS(Message);
+        OS << "ERROR: No pattern matched but the stack pointer is accessed in "
+              "func: "
+           << F->getName() << "!\n";
+        notdec::appendRecoveryPassLog(OS.str());
       }
     }
     // 1.3 Failed to match any stack allocation.
     if (match_level == 0) {
-      llvm::errs() << "ERROR: cannot find stack allocation in func: "
-                   << F->getName() << "\n";
+      std::string Message;
+      llvm::raw_string_ostream OS(Message);
+      OS << "ERROR: cannot find stack allocation in func: " << F->getName()
+         << "\n";
+      notdec::appendRecoveryPassLog(OS.str());
       continue;
     }
     // For normal stack allocation (level = 2): Remove epilogue that restore the
@@ -300,8 +316,10 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         }
       }
       if (!removed) {
-        llvm::errs() << "ERROR: Cannot find sp restore? func: " << F->getName()
-                     << "\n";
+        std::string Message;
+        llvm::raw_string_ostream OS(Message);
+        OS << "ERROR: Cannot find sp restore? func: " << F->getName() << "\n";
+        notdec::appendRecoveryPassLog(OS.str());
         continue;
       }
     }

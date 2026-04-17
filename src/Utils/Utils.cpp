@@ -1,10 +1,14 @@
 
+#include "Utils/Utils.h"
+
 #include <clang/AST/ASTDumper.h>
 #include <clang/AST/Type.h>
 #include <fstream>
 #include <iostream>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/raw_ostream.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -37,6 +41,27 @@ std::optional<std::string> getWorkDirOpt() {
     return std::nullopt;
   }
   return CurrentWorkDir;
+}
+
+void appendWorkDirLog(llvm::StringRef fileName, llvm::StringRef content) {
+  auto WorkDir = getWorkDirOpt();
+  if (!WorkDir) {
+    return;
+  }
+
+  std::error_code EC = llvm::sys::fs::create_directories(*WorkDir);
+  if (EC) {
+    return;
+  }
+
+  auto Path = join(*WorkDir, fileName.str());
+  llvm::raw_fd_ostream OS(
+      Path, EC, llvm::sys::fs::OF_Text | llvm::sys::fs::OF_Append);
+  if (EC) {
+    return;
+  }
+
+  OS << content;
 }
 
 std::string getFuncSetName(const std::set<llvm::Function *> &SCC) {

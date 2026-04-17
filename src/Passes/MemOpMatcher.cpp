@@ -1,6 +1,7 @@
 
 #include "Passes/MemOpMatcher.h"
 #include "Passes/ConstraintGenerator.h"
+#include "Utils/Utils.h"
 #include "notdec-llvm2c/Utils.h"
 #include <cstdint>
 #include <functional>
@@ -20,6 +21,21 @@
 using namespace llvm;
 
 namespace notdec {
+
+namespace {
+
+void appendMemOpPassBanner(llvm::StringRef PassName, llvm::StringRef FuncName) {
+  std::string Message;
+  llvm::raw_string_ostream OS(Message);
+  OS << " ============== " << PassName;
+  if (!FuncName.empty()) {
+    OS << " [" << FuncName << "]";
+  }
+  OS << " ===============\n";
+  notdec::appendRecoveryPassLog(OS.str());
+}
+
+} // namespace
 
 // Helper to decompose a value into base + offset
 Optional<std::pair<Value *, int64_t>>
@@ -92,6 +108,7 @@ llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
 
 PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
   auto PointerSizeInBytes = F.getParent()->getDataLayout().getPointerSize();
+  bool LoggedBanner = false;
   auto getTypeSize = [=](llvm::Type *Ty) {
     return llvm2c::getLLVMTypeSize(Ty, PointerSizeInBytes * 8);
   };
@@ -201,9 +218,16 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
           Builder.SetInsertPoint(SI);
           auto *Base = addOffset(Builder, F.getParent()->getDataLayout(),
                                  BeginOffset->first, BeginOffset->second);
-          llvm::errs() << "Merging " << std::to_string(Stores.size())
-                       << " stores in func " << F.getName()
-                       << " into memset at " << *Base << ": " << *SI << "\n";
+          std::string Message;
+          llvm::raw_string_ostream OS(Message);
+          if (!LoggedBanner) {
+            appendMemOpPassBanner("MemsetMatcher", F.getName());
+            LoggedBanner = true;
+          }
+          OS << "Merging " << std::to_string(Stores.size())
+             << " stores in func " << F.getName() << " into memset at "
+             << *Base << ": " << *SI << "\n";
+          notdec::appendRecoveryPassLog(OS.str());
           auto *SetValByte =
               ConstantInt::get(IntegerType::get(F.getContext(), 8),
                                SetVal->getZExtValue() & 0xFF);
@@ -227,6 +251,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
 
 PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
   auto PointerSizeInBytes = F.getParent()->getDataLayout().getPointerSize();
+  bool LoggedBanner = false;
   auto getTypeSize = [=](llvm::Type *Ty) {
     return llvm2c::getLLVMTypeSize(Ty, PointerSizeInBytes * 8);
   };
@@ -338,9 +363,16 @@ PreservedAnalyses MemcpyMatcher::run(Function &F, FunctionAnalysisManager &) {
           // Create memcpy
           auto MS = Builder.CreateMemCpy(DestPtr, MaybeAlign(), SrcPtr,
                                          MaybeAlign(), Size, true);
-          llvm::errs() << "Merging " << std::to_string(Cluster.size())
-                       << " stores in func " << F.getName()
-                       << " into memset: " << *MS << "\n";
+          std::string Message;
+          llvm::raw_string_ostream OS(Message);
+          if (!LoggedBanner) {
+            appendMemOpPassBanner("MemcpyMatcher", F.getName());
+            LoggedBanner = true;
+          }
+          OS << "Merging " << std::to_string(Cluster.size())
+             << " stores in func " << F.getName() << " into memcpy: " << *MS
+             << "\n";
+          notdec::appendRecoveryPassLog(OS.str());
 
           // Remove original instructions
           for (auto *SI : Cluster) {

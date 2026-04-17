@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
 #include <optional>
@@ -34,6 +35,10 @@ void setWorkDir(std::string path);
 llvm::StringRef getWorkDir();
 bool hasWorkDir();
 std::optional<std::string> getWorkDirOpt();
+void appendWorkDirLog(llvm::StringRef fileName, llvm::StringRef content);
+inline void appendRecoveryPassLog(llvm::StringRef content) {
+  appendWorkDirLog("01-recovery-passes.log", content);
+}
 
 std::string getFuncSetName(const std::set<llvm::Function *> &SCC);
 std::string readFileToString(const char *path);
