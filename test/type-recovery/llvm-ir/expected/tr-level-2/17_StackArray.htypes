@@ -1,0 +1,49 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => top:32
+[+] @goodG2B => void (*)()*
+[+] @printIntLine => void (*)('e:32)*
+[+] @printLine => void (*)('c:32)*
+[+] const(i32 -1)@goodG2B::%brif_val.not:1 => bottom:32
+[+] const(i32 0)@goodG2B::%storemerge:0 => bottom:32
+[+] const(i32 1)@goodG2B::%bb.brif_next.i3:0 => bottom:32
+[+] const(i32 1060)@goodG2B::%bb.blk_exit8.i0:0 => bottom:32
+[+] const(i32 2)@goodG2B::%new_63:1 => bottom:32
+[+] const(i32 2)@goodG2B::%new_83:1 => bottom:32
+[+] const(i32 7)@goodG2B::%bb.allocator.i5:0 => bottom:32
+[+] const(i32 9)@goodG2B::%new_81:1 => bottom:32
+[+] const(i64 0)@goodG2B::%bb.allocator.i10:0 => bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i13:0 => bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i16:0 => bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i19:0 => bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i7:0 => bottom:64
+[+] goodG2B::%brif_val.not => i1
+[+] goodG2B::%loadResult => bottom:32
+[+] goodG2B::%loadResult21 => bottom:32
+[+] goodG2B::%loadResult23 => bottom:32
+[+] goodG2B::%new_101 => bottom:32
+[+] goodG2B::%new_11 => bottom:32
+[+] goodG2B::%new_15 => bottom:32
+[+] goodG2B::%new_22 => bottom:32
+[+] goodG2B::%new_29 => bottom:32
+[+] goodG2B::%new_36 => bottom:32
+[+] goodG2B::%new_43 => bottom:32
+[+] goodG2B::%new_50 => bottom:32
+[+] goodG2B::%new_63 => bottom:32
+[+] goodG2B::%new_68 => bottom:32
+[+] goodG2B::%new_75 => bottom:32
+[+] goodG2B::%new_81 => i1
+[+] goodG2B::%new_83 => bottom:32
+[+] goodG2B::%new_88 => bottom:32
+[-] goodG2B::%stack26 => top:32
+[+] goodG2B::%stack_addr => bottom:32
+[+] goodG2B::%storemerge => bottom:32
+[+] printIntLine::arg0 => 'e:32
+[+] printLine::arg0 => 'c:32
+
+[memory]
+type => top:32
+

@@ -3,43 +3,44 @@
 [decls]
 
 [types]
-[+] <null-value> => bottom:32
+[+] <null-value> => top:32
 [+] @isFloat => void (*)(f32)*
 [+] @isInt => void (*)('d:32)*
-[+] @main => i32 (*)('i:32, 'j:32)*
-[+] @pass => ('m:32 | ('f:32 | 'g:32)) (*)('g:32)*
-[+] @ptrFloat => ('m:32 | ('f:32 | 'g:32)) (*)((('f:32 & 'g:32) & ptr<load=f32, store=void, psize=32>))*
-[+] @ptrInt => ('m:32 | ('f:32 | 'g:32)) (*)((('g:32 & 'm:32) & ptr<load='x:32, store=void, psize=32>))*
+[+] @main => bottom:32 (*)('o:32, 'p:32)*
+[+] @pass => ('i:32 | ('f:32 | 'g:32)) (*)('g:32)*
+[+] @ptrFloat => ('i:32 | ('f:32 | 'g:32)) (*)((('f:32 & 'g:32) & ptr<load=f32, store=void, psize=32>))*
+[+] @ptrInt => ('i:32 | ('f:32 | 'g:32)) (*)((('g:32 & 'i:32) & ptr<load='s:32, store=void, psize=32>))*
+[+] const(i32 0)@main::%bb.if_false.i0:0 => bottom:32
+[+] const(i32 1)@main::%bb.if_true.i0:0 => bottom:32
 [+] const(i32 5)@ptrInt::%int2:1 => bottom:32
 [+] isFloat::arg0 => f32
 [+] isInt::arg0 => 'd:32
-[+] main::%. => i32
 [+] main::%eq1 => i1
 [+] main::%eq2 => i1
 [+] main::%eq3 => i1
 [+] main::%stack1 => bottom:32
 [+] main::%stack2 => bottom:32
-[-] main::%stackPtr1 => (('f:32 | 'g:32) | ptr<load=f32, store=void, psize=32>)
-[-] main::%stackPtr2 => (('g:32 | 'm:32) | ptr<load='x:32, store=void, psize=32>)
-[+] main::%val1 => ('m:32 | ('f:32 | 'g:32))
-[+] main::%val2 => ('n:32 | ('f:32 | 'm:32))
-[+] main::<ret> => i32
-[+] main::arg0 => 'i:32
-[+] main::arg1 => 'j:32
-[+] pass::<ret> => ('p:32 | ('f:32 | 'm:32))
-[+] pass::arg0 => ('p:32 | ('f:32 | 'm:32))
+[-] main::%stackPtr1 => (('f:32 & 'g:32) & ptr<load=f32, store=void, psize=32>)
+[-] main::%stackPtr2 => (('g:32 & 'i:32) & ptr<load='s:32, store=void, psize=32>)
+[+] main::%val1 => ('i:32 | ('f:32 | 'g:32))
+[+] main::%val2 => ('j:32 | ('f:32 | 'i:32))
+[+] main::<ret> => bottom:32
+[+] main::arg0 => 'o:32
+[+] main::arg1 => 'p:32
+[+] pass::<ret> => ('l:32 | ('f:32 | 'i:32))
+[+] pass::arg0 => ('l:32 | ('f:32 | 'i:32))
 [+] ptrFloat::%f1 => f32
 [+] ptrFloat::%v_122 => 'f:32
-[+] ptrFloat::%vret1 => ('p:32 | ('f:32 | 'm:32))
-[+] ptrFloat::<ret> => ('m:32 | ('f:32 | 'g:32))
+[+] ptrFloat::%vret1 => ('l:32 | ('f:32 | 'i:32))
+[+] ptrFloat::<ret> => ('i:32 | ('f:32 | 'g:32))
 [+] ptrFloat::arg0 => 'f:32
-[+] ptrInt::%int1 => 'x:32
+[+] ptrInt::%int1 => 's:32
 [+] ptrInt::%int2 => bottom:32
-[+] ptrInt::%v_121 => 'm:32
-[+] ptrInt::%vret2 => ('p:32 | ('f:32 | 'm:32))
-[+] ptrInt::<ret> => ('n:32 | ('f:32 | 'm:32))
-[+] ptrInt::arg0 => 'm:32
+[+] ptrInt::%v_121 => 'i:32
+[+] ptrInt::%vret2 => ('l:32 | ('f:32 | 'i:32))
+[+] ptrInt::<ret> => ('j:32 | ('f:32 | 'i:32))
+[+] ptrInt::arg0 => 'i:32
 
 [memory]
-type => bottom:32
+type => top:32
 

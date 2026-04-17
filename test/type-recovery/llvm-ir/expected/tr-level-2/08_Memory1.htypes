@@ -1,25 +1,21 @@
 # HTypeResult
 
 [decls]
-struct struct_0 {
-  ptr<load=bottom:32, store='j:32, psize=32> field_0; /* at offset: 1024 */
-};
-
 
 [types]
-[+] <null-value> => struct_0*
-[+] @main => 'j:32 (*)('e:32, 'f:32)*
-[+] @passMem1 => 'j:32 (*)()*
-[+] addr(0x400) => bottom:32
-[+] const(i32 0)@main::%bb.allocator.i0:0 => 'j:32
-[+] main::%r => 'j:32
-[+] main::<ret> => 'j:32
+[+] <null-value> => top:32
+[+] @main => bottom:32 (*)('e:32, 'f:32)*
+[+] @passMem1 => bottom:32 (*)()*
+[+] const(i32 0)@main::%bb.allocator.i1:0 => bottom:32
+[+] main::%memptr1 => bottom:32
+[+] main::%r => bottom:32
+[+] main::<ret> => bottom:32
 [+] main::arg0 => 'e:32
 [+] main::arg1 => 'f:32
-[+] passMem1::%f1 => 'j:32
-[+] passMem1::<ret> => 'j:32
+[+] passMem1::%f1 => bottom:32
+[+] passMem1::%memptr1 => bottom:32
+[+] passMem1::<ret> => bottom:32
 
 [memory]
-decl => struct_0
-type => struct_0*
+type => top:32
 

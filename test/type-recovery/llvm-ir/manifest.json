@@ -1,7 +1,8 @@
 {
-  "suite": "notdec type recovery llvm ir tr-level=2",
+  "suite": "notdec type recovery llvm ir frozen stage-b tr-level=2",
   "default_args": [
-    "--tr-level=2"
+    "--tr-level=2",
+    "--frozen-tr-input-ir"
   ],
   "cases": [
     {
@@ -85,8 +86,8 @@
     {
       "name": "14_Equality1",
       "input": "cases/14_Equality1.ll",
-      "status": "xfail",
-      "reason": "PNDiff assertion while looking up PNI variable"
+      "expected": "expected/tr-level-2/14_Equality1.htypes",
+      "status": "pass"
     },
     {
       "name": "15_signed1",
@@ -103,14 +104,14 @@
     {
       "name": "17_StackArray",
       "input": "cases/17_StackArray.ll",
-      "status": "xfail",
-      "reason": "PNDiff assertion while looking up PNI variable"
+      "expected": "expected/tr-level-2/17_StackArray.htypes",
+      "status": "pass"
     },
     {
       "name": "18_offset1",
       "input": "cases/18_offset1.ll",
-      "status": "xfail",
-      "reason": "PNDiff assertion while looking up PNI variable"
+      "expected": "expected/tr-level-2/18_offset1.htypes",
+      "status": "pass"
     },
     {
       "name": "19_PtrPtr",

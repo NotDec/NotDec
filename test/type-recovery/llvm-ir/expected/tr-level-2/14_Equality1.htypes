@@ -7,8 +7,13 @@
 [+] @isFloat => void (*)(f32)*
 [+] @main => bottom:32 (*)('f:32, 'g:32)*
 [+] @ptrFloat => void (*)(('d:32 & ptr<load=f32, store=void, psize=32>))*
-[+] const(i32 0)@main::%bb.allocator.i3:0 => bottom:32
+[+] const(i32 0)@main::%bb.END.i0:0 => bottom:32
+[+] const(i32 0)@main::%cond:1 => bottom:32
+[+] const(i32 1)@main::%eq1:0 => bottom:32
 [+] isFloat::arg0 => f32
+[+] main::%cond => i1
+[+] main::%eq0 => bottom:32
+[+] main::%eq1 => bottom:32
 [+] main::%stack => bottom:32
 [-] main::%stackPtr => ('d:32 & ptr<load=f32, store=void, psize=32>)
 [+] main::<ret> => bottom:32

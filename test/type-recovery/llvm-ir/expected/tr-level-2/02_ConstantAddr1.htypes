@@ -1,21 +1,16 @@
 # HTypeResult
 
 [decls]
-struct struct_0 {
-  ptr<load=bottom:32, store=top:32, psize=32> field_0; /* at offset: 1024 */
-};
-
 
 [types]
-[+] <null-value> => struct_0*
+[+] <null-value> => top:32
 [+] @main => bottom:32 (*)('c:32, 'd:32)*
-[+] addr(0x400) => bottom:32
+[+] main::%a => bottom:32
 [+] main::%b => bottom:32
 [+] main::<ret> => bottom:32
 [+] main::arg0 => 'c:32
 [+] main::arg1 => 'd:32
 
 [memory]
-decl => struct_0
-type => struct_0*
+type => top:32
 

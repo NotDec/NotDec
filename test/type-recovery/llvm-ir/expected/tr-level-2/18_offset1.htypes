@@ -1,0 +1,77 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => top:32
+[+] @__original_main => bottom:32 (*)()*
+[+] @do_printf => void (*)('g:32)*
+[+] @env.printf => bottom:32 (*)('c:32, 'd:32)*
+[+] @get_s => bottom:32 (*)('i:32, 'j:32)*
+[+] @test1 => void (*)()*
+[+] @test2 => void (*)()*
+[+] __original_main::<ret> => bottom:32
+[+] const(i32 0)@__original_main::%bb.allocator.i2:0 => bottom:32
+[+] const(i32 0)@do_printf::%bb.allocator.i8:0 => bottom:32
+[+] const(i32 0)@test1::%bb.allocator.i8:0 => bottom:32
+[+] const(i32 0)@test1::%loadResult39:0 => bottom:32
+[+] const(i32 0)@test2::%bb.allocator.i8:0 => bottom:32
+[+] const(i32 0)@test2::%loadResult39:0 => bottom:32
+[+] const(i32 1)@test1::%bb.brif_next.i9:1 => bottom:32
+[+] const(i32 1)@test2::%bb.brif_next.i8:1 => bottom:32
+[+] const(i32 2)@get_s::%bb.allocator.i15:1 => bottom:32
+[+] const(i32 2)@test1::%bb.brif_next.i2:1 => bottom:32
+[+] do_printf::%bb.allocator.i8 => bottom:32
+[+] do_printf::%calcOffset => bottom:32
+[+] do_printf::%stack => bottom:32
+[-] do_printf::%stack_addr2 => top:32
+[+] do_printf::%stack_end => bottom:32
+[+] do_printf::%v_12 => bottom:32
+[+] do_printf::%v_17 => bottom:32
+[+] do_printf::arg0 => 'g:32
+[+] env.printf::<ret> => bottom:32
+[+] env.printf::arg0 => 'c:32
+[+] env.printf::arg1 => 'd:32
+[+] get_s::%add_107 => bottom:32
+[+] get_s::%bb.allocator.i15 => bottom:32
+[+] get_s::%loadResult => bottom:32
+[+] get_s::%loadResult4 => bottom:32
+[+] get_s::%stack => bottom:32
+[-] get_s::%stack_addr5 => top:32
+[+] get_s::%v_103 => bottom:32
+[+] get_s::%v_81 => bottom:32
+[+] get_s::%v_89 => bottom:32
+[+] get_s::%v_95 => bottom:32
+[+] get_s::<ret> => bottom:32
+[+] get_s::arg0 => 'i:32
+[+] get_s::arg1 => 'j:32
+[+] test1::%add_184 => bottom:32
+[+] test1::%add_193 => bottom:32
+[+] test1::%add_215 => bottom:32
+[+] test1::%add_219 => bottom:32
+[+] test1::%bb.brif_next.i2 => bottom:32
+[+] test1::%bb.brif_next.i9 => i1
+[+] test1::%loadResult.pre => bottom:32
+[+] test1::%loadResult39 => bottom:32
+[+] test1::%loadResult5 => bottom:32
+[+] test1::%stack => bottom:32
+[-] test1::%stack_addr8 => top:32
+[+] test1::%v_200 => bottom:32
+[+] test1::%v_206 => bottom:32
+[+] test2::%add_310 => bottom:32
+[+] test2::%add_319 => bottom:32
+[+] test2::%add_336 => bottom:32
+[+] test2::%add_352 => bottom:32
+[+] test2::%bb.brif_next.i2 => bottom:32
+[+] test2::%bb.brif_next.i8 => i1
+[+] test2::%loadResult.pre => bottom:32
+[+] test2::%loadResult39 => bottom:32
+[+] test2::%loadResult5 => bottom:32
+[+] test2::%stack => bottom:32
+[-] test2::%stack_addr8 => top:32
+[+] test2::%v_326 => bottom:32
+[+] test2::%v_332 => bottom:32
+
+[memory]
+type => top:32
+

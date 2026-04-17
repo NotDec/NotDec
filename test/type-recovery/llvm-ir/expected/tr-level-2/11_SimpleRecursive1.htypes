@@ -1,24 +1,33 @@
 # HTypeResult
 
 [decls]
+struct struct_0 {
+  'l:32 field_0; /* at offset: 4 */
+};
+
+struct struct_1 {
+  'l:32 field_0; /* at offset: 4 */
+};
+
 
 [types]
-[+] <null-value> => bottom:32
+[+] <null-value> => top:32
 [+] @isFloat => void (*)(f32)*
 [+] @main => bottom:32 (*)('f:32, 'g:32)*
-[+] @ptrFloat => void (*)(('d:32 & ptr<load=void, store=('d:32 | 'j:32), psize=32>))*
+[+] @ptrFloat => void (*)((('d:32 & struct_0*) & ptr<load=void, store=('d:32 | 'j:32), psize=32>))*
 [+] const(i32 0)@main::%bb.allocator.i3:0 => bottom:32
 [+] isFloat::arg0 => f32
 [+] main::%stack => 'j:32
-[-] main::%stackPtr => (('d:32 | 'j:32) | ptr<load=void, store=('d:32 & 'j:32), psize=32>)
+[-] main::%stackPtr => ((('d:32 & 'j:32) & struct_1*) & ptr<load=void, store=('d:32 | 'j:32), psize=32>)
 [+] main::<ret> => bottom:32
 [+] main::arg0 => 'f:32
 [+] main::arg1 => 'g:32
 [+] ptrFloat::%f1 => f32
+[+] ptrFloat::%v1 => 'l:32
 [+] ptrFloat::%v2 => bottom:32
 [+] ptrFloat::%v3 => ('d:32 | 'j:32)
 [+] ptrFloat::arg0 => ('d:32 | 'j:32)
 
 [memory]
-type => bottom:32
+type => top:32
 
