@@ -1,4 +1,5 @@
 
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/CallGraphDotInfo.h"
 #include "binarysub/binarysub-core.h"
@@ -292,6 +293,29 @@ void writeMLsubInputAnchor(const llvm::Module &M, llvm::StringRef AnchorPath,
       {"target_triple", M.getTargetTriple()},
   };
   writeJSONFile(AnchorPath, llvm::json::Value(std::move(Anchor)));
+}
+
+void writeTRInputModule(llvm::Module &M, llvm::StringRef OutputPath) {
+  auto Suffix = getSuffix(OutputPath.str());
+  if (Suffix == ".ll") {
+    printModule(M, OutputPath.str().c_str());
+    return;
+  }
+  if (Suffix == ".bc") {
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(OutputPath, EC);
+    if (EC) {
+      llvm::errs() << "Cannot open TR input IR output file " << OutputPath
+                   << ": " << EC.message() << "\n";
+      std::abort();
+    }
+    llvm::WriteBitcodeToFile(M, OS);
+    return;
+  }
+  llvm::errs() << "Error: --emit-tr-input-ir expects output suffix .ll or .bc, "
+                  "got "
+               << OutputPath << "\n";
+  std::abort();
 }
 
 void writeSelectableValues(const llvm::Module &M, llvm::StringRef Path) {
@@ -1376,13 +1400,7 @@ void MLsubRecovery::run() {
   auto ModuleSHA256Hex = computeSHA256Hex(MLsubInputText);
 
   // 0.5 print module for debugging
-  if (WorkDir) {
-    auto MLsubInputPath = join(*WorkDir, kMLsubInputIRFile.str());
-    printModule(M, MLsubInputPath.c_str());
-    writeMLsubInputAnchor(M, join(*WorkDir, kMLsubInputAnchorFile.str()),
-                          ModuleSHA256Hex);
-    writeSelectableValues(M, join(*WorkDir, kSelectableValuesFile.str()));
-  }
+  emitTRInputArtifacts(M, "");
 
   if (ExtraConstraintsFile != nullptr) {
     validateExtraConstraintsFile(M, ExtraConstraintsFile, ModuleSHA256Hex);
@@ -1472,6 +1490,25 @@ void MLsubRecovery::validateExtraConstraintsFile(llvm::Module &M,
   validateExtraConstraintsAnchor(*Root, M, ModuleSHA256Hex);
   validateExtraConstraintFunctions(*Root, M, ExtraConstraintsDoc,
                                    ExtraConstraintsFuncs);
+}
+
+void MLsubRecovery::emitTRInputArtifacts(llvm::Module &M,
+                                         llvm::StringRef OutputPath) {
+  auto MLsubInputText = renderModuleToString(M);
+  auto ModuleSHA256Hex = computeSHA256Hex(MLsubInputText);
+
+  if (auto WorkDir = notdec::getWorkDirOpt()) {
+    auto MLsubInputPath = join(*WorkDir, kMLsubInputIRFile.str());
+    printModule(M, MLsubInputPath.c_str());
+    writeMLsubInputAnchor(M, join(*WorkDir, kMLsubInputAnchorFile.str()),
+                          ModuleSHA256Hex);
+    writeSelectableValues(M, join(*WorkDir, kSelectableValuesFile.str()));
+  }
+
+  if (!OutputPath.empty()) {
+    writeTRInputModule(M, OutputPath);
+    llvm::errs() << "TR input IR emitted to " << OutputPath << "\n";
+  }
 }
 
 const llvm::json::Value *

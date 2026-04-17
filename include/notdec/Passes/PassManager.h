@@ -73,12 +73,13 @@ struct PassEnv {
     }
   }
 
-  void build_passes(int level);
+  void build_passes(int level, bool stopBeforeTypeRecovery = false);
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
                   bool disableTypeRecovery,
                   bool captureHTypeSnapshot = false);
   void run_passes();
   void dump_htypes(const std::string &OutputPath);
+  void emit_tr_input_ir(const std::string &OutputPath);
 };
 
 struct DecompileConfig {
@@ -101,7 +102,12 @@ struct DecompileConfig {
 
   void find_special_gv();
   void build_passes(int level) {
-    PE.build_passes(level);
+    bool EmitTRInputIR = !Opts.emitTRInputIR.empty();
+    int EffectiveLevel = EmitTRInputIR ? std::max(level, 2) : level;
+    PE.build_passes(EffectiveLevel, EmitTRInputIR);
+    if (EmitTRInputIR) {
+      return;
+    }
     bool isC = getSuffix(OutFilePath) == ".c";
     if (isC) {
       PE.add_llvm2c(OutFilePath, llvm2cOpt, Opts.trLevel < 2,
@@ -114,6 +120,7 @@ struct DecompileConfig {
       PE.dump_htypes(HTypeDumpPath);
     }
   }
+  void emit_tr_input_ir() { PE.emit_tr_input_ir(Opts.emitTRInputIR); }
 };
 
 llvm::FunctionPassManager buildFunctionOptimizations();

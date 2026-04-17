@@ -17,6 +17,7 @@ struct Options {
   std::string stackRec = "notdec";
   int log_level = 5; // default log level = level_notice
   std::string workDir;
+  std::string emitTRInputIR;
   std::vector<std::string> primitiveSemanticLatticeFiles;
 };
 

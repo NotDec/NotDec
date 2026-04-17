@@ -109,6 +109,13 @@ static cl::opt<std::string> workDirOverride(
              "--gen-work-dir."),
     cl::init(""), cl::value_desc("path"), cl::Optional, cl::cat(NotdecCat));
 
+static cl::opt<std::string> emitTRInputIR(
+    "emit-tr-input-ir",
+    cl::desc("Run the pre-type-recovery normalization pipeline, emit the "
+             "resulting LLVM IR (.ll/.bc), and exit before type recovery."),
+    cl::init(""), cl::value_desc("output.ll"), cl::Optional,
+    cl::cat(NotdecCat));
+
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
 // -debug-only option
@@ -143,6 +150,15 @@ int main(int argc, char *argv[]) {
     llvm::errs() << "Error: --work-dir requires --gen-work-dir.\n";
     return 1;
   }
+  if (!emitTRInputIR.empty() && !outputFilename.empty()) {
+    llvm::errs() << "Error: --emit-tr-input-ir cannot be combined with -o.\n";
+    return 1;
+  }
+  if (!emitTRInputIR.empty() && !dumpHTypes.empty()) {
+    llvm::errs() << "Error: --emit-tr-input-ir cannot be combined with "
+                    "--dump-htypes.\n";
+    return 1;
+  }
   notdec::Options opts{
       .trLevel = trLevel,
       .stackRec = stackRec,
@@ -151,6 +167,7 @@ int main(int argc, char *argv[]) {
           std::vector<std::string>(primitiveSemanticLatticeFiles.begin(),
                                    primitiveSemanticLatticeFiles.end()),
   };
+  opts.emitTRInputIR = emitTRInputIR;
   if (genWorkDir) {
     opts.workDir = workDirOverride.empty()
                        ? notdec::getDefaultWorkDir(inputFilename)
@@ -227,6 +244,11 @@ int main(int argc, char *argv[]) {
                                        llvm2cOpts);
   conf.build_passes(trLevel);
   conf.run_passes();
+
+  if (!emitTRInputIR.empty()) {
+    conf.emit_tr_input_ir();
+    return 0;
+  }
 
   std::string outsuffix = getSuffix(outputFilename);
   if (outsuffix == ".c") {

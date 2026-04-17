@@ -25,6 +25,7 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FormattedStream.h>
 #include <llvm/Support/JSON.h>
@@ -384,6 +385,7 @@ public:
                          bool StrictValidation = true);
   void validateExtraConstraintsFile(llvm::Module &M, const char *Path,
                                     llvm::StringRef ModuleSHA256Hex);
+  void emitTRInputArtifacts(llvm::Module &M, llvm::StringRef OutputPath);
   const llvm::json::Value *getExtraConstraintsSpec(
       const llvm::Function &Func) const;
   const llvm::json::Value *getSummaryOverrideSpec(

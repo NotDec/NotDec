@@ -331,7 +331,7 @@ void DecompileConfig::find_special_gv() {
   SP = StackPointerFinderAnalysis::find_stack_ptr(Mod);
 }
 
-void PassEnv::build_passes(int level) {
+void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery) {
   // level 1 only optimizations
   if (level >= 1) {
     FunctionPassManager FPM = buildFunctionOptimizations();
@@ -361,6 +361,9 @@ void PassEnv::build_passes(int level) {
       // MPM.addPass(createModuleToFunctionPassAdaptor(
       //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
       MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
+      if (stopBeforeTypeRecovery) {
+        return;
+      }
       MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
 
       // level 3 with additional optimization and cleanup.
@@ -409,6 +412,15 @@ void PassEnv::run_passes() {
   }
 
   MPM.run(Mod, MAM);
+}
+
+void PassEnv::emit_tr_input_ir(const std::string &OutputPath) {
+  if (TR == nullptr) {
+    llvm::errs() << "Error: --emit-tr-input-ir requires the pre-type-recovery "
+                    "pipeline to be initialized.\n";
+    std::abort();
+  }
+  TR->emitTRInputArtifacts(Mod, OutputPath);
 }
 
 void PassEnv::dump_htypes(const std::string &OutputPath) {

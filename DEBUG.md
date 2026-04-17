@@ -11,6 +11,7 @@
 ```bash
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 --gen-work-dir
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=work_dir
+./build/bin/notdec input.bc --emit-tr-input-ir=/tmp/tr-input.ll -g --work-dir=work_dir
 ```
 
 其中：
@@ -21,6 +22,10 @@
   - 使用输入文件同名并追加 `.notdec`，例如 `cases/foo.ll.notdec/`
 - `--work-dir=<path>`
   - 用于覆盖默认工作文件夹路径
+- `--emit-tr-input-ir=<path>`
+  - 跑完 pre-type-recovery 标准化 pass，导出类型恢复真正消费的输入 IR
+  - 支持输出到 `.ll` 或 `.bc`
+  - 导出后直接退出，不进入 `MLsubRecoveryMain`
 
 仓库内的 `run.sh` 和 `.vscode/launch.json` 里的常用配置现在也统一走这套命令行参数。
 
@@ -63,7 +68,9 @@
 
 ### `02-mlsub-input.ll`
 
-- 来源：`MLsubRecovery::run()` 入口处的模块 dump
+- 来源：
+  - `MLsubRecovery::run()` 入口处的模块 dump
+  - 或 `--emit-tr-input-ir=<path>` 对应的导出内容
 - 作用：看 `mlsub` 真正吃到的 LLVM IR
 - 典型用途：判断问题是在更早的优化/恢复阶段就产生了，还是在类型恢复阶段才出现
 - 备注：如果后续 JSON 约束注入要绑定某个固定 IR，这份文件比泛化的 “Optimized” 更接近实际锚点

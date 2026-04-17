@@ -538,16 +538,19 @@
 
 ### 10.3 第三步：新增阶段 A 专用 CLI
 
-建议新增显式接口，例如：
+这一步现在已经完成，当前 CLI 采用更偏用户语义的名字：
 
-1. `--emit-mlsub-input-ir=<path>`
-2. 或 `--stop-before-mlsub`
+1. `--emit-tr-input-ir=<path>`
 
-并在实现上明确：
+当前行为：
 
 1. 跑完 pre-MLsub 标准化 pass
-2. 写出冻结 IR
+2. 写出冻结 IR 到用户指定的 `.ll/.bc`
 3. 不进入 `MLsubRecoveryMain`
+4. 如果同时开启 `--gen-work-dir`，则继续导出：
+   - `02-mlsub-input.ll`
+   - `02-mlsub-input.anchor.json`
+   - `SelectableValues.txt`
 
 ### 10.4 第四步：让阶段 B 只接受冻结 IR
 
