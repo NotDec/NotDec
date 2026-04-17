@@ -35,6 +35,7 @@ class TypeBuilder {
   std::map<std::string, HType *> RecursiveTypeNames;
   std::set<binarysub::UTypePtr> InProgress; // cycle detection
   std::optional<std::string> CurrentRootDebugLabel;
+  unsigned ConvertStructTraceDepth = 0;
 
 public:
   TypeBuilder(TypeBuilderContext &Parent);

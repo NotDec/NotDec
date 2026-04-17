@@ -1,4 +1,5 @@
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
+#include "notdec/Utils/Utils.h"
 #include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
@@ -13,6 +14,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <llvm/Support/Debug.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/raw_ostream.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -69,6 +72,8 @@ namespace {
 
 constexpr llvm::StringLiteral kTraceConvertStructEnv =
     "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT";
+constexpr llvm::StringLiteral kTraceConvertStructLogFile =
+    "04-typebuilder-convertstruct.log";
 
 bool envFlagEnabled(llvm::StringRef Name) {
   auto *Value = std::getenv(Name.data());
@@ -81,6 +86,43 @@ bool shouldTraceConvertStruct() {
   }
   return ::llvm::DebugFlag && ::llvm::isCurrentDebugType(DEBUG_TYPE);
 }
+
+void emitConvertStructTrace(llvm::StringRef Content) {
+  static bool ResetLogFile = false;
+  if (auto WorkDir = notdec::getWorkDirOpt()) {
+    if (!ResetLogFile) {
+      if (std::error_code EC = llvm::sys::fs::create_directories(*WorkDir)) {
+        llvm::dbgs() << Content;
+        return;
+      }
+      llvm::sys::fs::remove(
+          notdec::join(*WorkDir, kTraceConvertStructLogFile.str()));
+      ResetLogFile = true;
+    }
+    notdec::appendWorkDirLog(kTraceConvertStructLogFile, Content);
+    return;
+  }
+  llvm::dbgs() << Content;
+}
+
+void appendCurrentRootLabel(llvm::raw_ostream &OS,
+                            const std::optional<std::string> &Label) {
+  if (Label) {
+    OS << *Label;
+    return;
+  }
+  OS << "<unknown>";
+}
+
+struct ConvertStructTraceDepthScope {
+  unsigned &Depth;
+
+  explicit ConvertStructTraceDepthScope(unsigned &Depth) : Depth(Depth) {
+    ++Depth;
+  }
+
+  ~ConvertStructTraceDepthScope() { --Depth; }
+};
 
 // binarysub may materialize empty records as internal placeholders while it is
 // normalizing recursive or compound shapes. They should stay transparent to the
@@ -663,40 +705,43 @@ HType *TypeBuilder::convertStruct(
     std::vector<std::pair<OffsetRange, UTypePtr>> &RawFields,
     std::optional<int64_t> PointeeSize) {
   HType *Result = nullptr;
+  auto TraceDepth = ConvertStructTraceDepth;
+  ConvertStructTraceDepthScope TraceDepthScope(ConvertStructTraceDepth);
 
   if (shouldTraceConvertStruct()) {
-    llvm::dbgs() << "[TypeBuilder::convertStruct] begin"
-                 << " root=";
-    if (CurrentRootDebugLabel) {
-      llvm::dbgs() << *CurrentRootDebugLabel;
-    } else {
-      llvm::dbgs() << "<unknown>";
-    }
-    llvm::dbgs() << " pointee_size=";
+    std::string Trace;
+    llvm::raw_string_ostream OS(Trace);
+    OS.indent(TraceDepth * 2);
+    OS << "[TypeBuilder::convertStruct] begin"
+       << " root=";
+    appendCurrentRootLabel(OS, CurrentRootDebugLabel);
+    OS << " pointee_size=";
     if (PointeeSize) {
-      llvm::dbgs() << *PointeeSize;
+      OS << *PointeeSize;
     } else {
-      llvm::dbgs() << "<none>";
+      OS << "<none>";
     }
-    llvm::dbgs() << " raw_fields=" << RawFields.size() << "\n";
+    OS << " raw_fields=" << RawFields.size() << "\n";
     for (size_t I = 0; I < RawFields.size(); ++I) {
       const auto &Ent = RawFields[I];
       int64_t AccessedBits = accessedPointeeSizeInBits(Ent.second);
       int64_t AccessedBytes = AccessedBits <= 0 ? 0 : (AccessedBits + 7) / 8;
-      llvm::dbgs() << "  [" << I << "] range=" << Ent.first.str()
-                   << " offset=" << Ent.first.offset << " access=[";
+      OS.indent((TraceDepth + 1) * 2);
+      OS << "[" << I << "] range=" << Ent.first.str()
+         << " offset=" << Ent.first.offset << " access=[";
       for (size_t J = 0; J < Ent.first.access.size(); ++J) {
         const auto &Access = Ent.first.access[J];
         if (J != 0) {
-          llvm::dbgs() << ", ";
+          OS << ", ";
         }
-        llvm::dbgs() << "{size=" << Access.Size << ", count=" << Access.Count
-                     << "}";
+        OS << "{size=" << Access.Size << ", count=" << Access.Count << "}";
       }
-      llvm::dbgs() << "] accessed_bits=" << AccessedBits
-                   << " accessed_bytes=" << AccessedBytes
-                   << " utype=" << binarysub::printType(Ent.second) << "\n";
+      OS << "] accessed_bits=" << AccessedBits
+         << " accessed_bytes=" << AccessedBytes
+         << " utype=" << binarysub::printType(Ent.second) << "\n";
     }
+    OS.flush();
+    emitConvertStructTrace(Trace);
   }
 
   std::vector<FieldEntry> Fields;
@@ -998,19 +1043,19 @@ HType *TypeBuilder::convertStruct(
   if (PointeeSize) {
     if (PointeeSize.value() < Size) {
       if (shouldTraceConvertStruct()) {
-        llvm::dbgs()
-            << "[TypeBuilder::convertStruct] pointee/layout mismatch"
-            << " root=";
-        if (CurrentRootDebugLabel) {
-          llvm::dbgs() << *CurrentRootDebugLabel;
-        } else {
-          llvm::dbgs() << "<unknown>";
-        }
-        llvm::dbgs() << " pointee_size=" << PointeeSize.value()
-                     << " synthesized_size=" << Size
-                     << " first_field_start=" << Fields.front().first.Start
-                     << " first_field_size=" << Fields.front().first.Size
-                     << " field_count=" << Fields.size() << "\n";
+        std::string Trace;
+        llvm::raw_string_ostream OS(Trace);
+        OS.indent(TraceDepth * 2);
+        OS << "[TypeBuilder::convertStruct] pointee/layout mismatch"
+           << " root=";
+        appendCurrentRootLabel(OS, CurrentRootDebugLabel);
+        OS << " pointee_size=" << PointeeSize.value()
+           << " synthesized_size=" << Size
+           << " first_field_start=" << Fields.front().first.Start
+           << " first_field_size=" << Fields.front().first.Size
+           << " field_count=" << Fields.size() << "\n";
+        OS.flush();
+        emitConvertStructTrace(Trace);
       }
       // Some byte-stride recursive subproblems still carry a wider payload
       // type after we strip the array access. Preserve the element boundary
