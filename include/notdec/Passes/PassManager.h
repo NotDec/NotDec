@@ -73,7 +73,10 @@ struct PassEnv {
     }
   }
 
-  void build_passes(int level, bool stopBeforeTypeRecovery = false);
+  void add_pre_type_recovery_passes();
+  void add_type_recovery_passes(int level);
+  void build_passes(int level, bool stopBeforeTypeRecovery = false,
+                    bool frozenTRInputIR = false);
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
                   bool disableTypeRecovery,
                   bool captureHTypeSnapshot = false);
@@ -103,14 +106,16 @@ struct DecompileConfig {
   void find_special_gv();
   void build_passes(int level) {
     bool EmitTRInputIR = !Opts.emitTRInputIR.empty();
-    int EffectiveLevel = EmitTRInputIR ? std::max(level, 2) : level;
-    PE.build_passes(EffectiveLevel, EmitTRInputIR);
+    bool FrozenTRInputIR = Opts.frozenTRInputIR;
+    int EffectiveLevel =
+        (EmitTRInputIR || FrozenTRInputIR) ? std::max(level, 2) : level;
+    PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR);
     if (EmitTRInputIR) {
       return;
     }
     bool isC = getSuffix(OutFilePath) == ".c";
     if (isC) {
-      PE.add_llvm2c(OutFilePath, llvm2cOpt, Opts.trLevel < 2,
+      PE.add_llvm2c(OutFilePath, llvm2cOpt, EffectiveLevel < 2,
                     !HTypeDumpPath.empty());
     }
   }

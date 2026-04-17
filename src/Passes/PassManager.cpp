@@ -331,65 +331,79 @@ void DecompileConfig::find_special_gv() {
   SP = StackPointerFinderAnalysis::find_stack_ptr(Mod);
 }
 
-void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery) {
-  // level 1 only optimizations
-  if (level >= 1) {
-    FunctionPassManager FPM = buildFunctionOptimizations();
-    // MPM.addPass(FunctionRenamer());
-    // MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
-    // MPM.addPass(createModuleToFunctionPassAdaptor(llvm::DCEPass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+void PassEnv::add_pre_type_recovery_passes() {
+  FunctionPassManager FPM = buildFunctionOptimizations();
+  // MPM.addPass(FunctionRenamer());
+  // MPM.addPass(createModuleToFunctionPassAdaptor(stack()));
+  // MPM.addPass(createModuleToFunctionPassAdaptor(llvm::DCEPass()));
+  MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
 
-    // level 2 no stack breaking
-    if (level >= 2) {
-      prepareTypeRecoveryContext();
+  MPM.addPass(VerifierPass(false));
+  MPM.addPass(LinearAllocationRecovery());
+  // MPM.addPass(PointerTypeRecovery(
+  //     llvm::DebugFlag &&
+  //     llvm::isCurrentDebugType("pointer-type-recovery")));
+  MPM.addPass(VerifierPass(false));
+  MPM.addPass(createModuleToFunctionPassAdaptor(MemsetMatcher()));
+  MPM.addPass(createModuleToFunctionPassAdaptor(MemcpyMatcher()));
+  // instcombine will revert matched memset and memcpy!!!
+  // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+  MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
+  MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+  // MPM.addPass(createModuleToFunctionPassAdaptor(
+  //     createFunctionToLoopPassAdaptor(LoopRotatePass())));
+  // MPM.addPass(createModuleToFunctionPassAdaptor(
+  //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
+  MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
+}
 
-      MPM.addPass(VerifierPass(false));
-      MPM.addPass(LinearAllocationRecovery());
-      // MPM.addPass(PointerTypeRecovery(
-      //     llvm::DebugFlag &&
-      //     llvm::isCurrentDebugType("pointer-type-recovery")));
-      MPM.addPass(VerifierPass(false));
-      MPM.addPass(createModuleToFunctionPassAdaptor(MemsetMatcher()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(MemcpyMatcher()));
-      // instcombine will revert matched memset and memcpy!!!
-      // MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-      // MPM.addPass(createModuleToFunctionPassAdaptor(
-      //     createFunctionToLoopPassAdaptor(LoopRotatePass())));
-      // MPM.addPass(createModuleToFunctionPassAdaptor(
-      //     createFunctionToLoopPassAdaptor(IndVarSimplifyPass())));
-      MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
+void PassEnv::add_type_recovery_passes(int level) {
+  MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
+
+  // level 3 with additional optimization and cleanup.
+  if (level >= 3) {
+    MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
+    MPM.addPass(mlsub::MLsubRecoveryOpt(*TR));
+    MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(
+        SimplifyCFGPass(SimplifyCFGOptions())));
+    MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
+
+    if (const char *val = std::getenv("NOTDEC_KEEP_DEAD_STACK")) {
+      if ((std::strcmp(val, "1") == 0)) {
+        // TODO MLSUB: support dead stack recovery in the new pipeline.
+      }
+    }
+    MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
+  }
+}
+
+void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
+                           bool frozenTRInputIR) {
+  if (level < 1) {
+    return;
+  }
+
+  if (level >= 2) {
+    prepareTypeRecoveryContext();
+    if (!frozenTRInputIR) {
+      add_pre_type_recovery_passes();
       if (stopBeforeTypeRecovery) {
         return;
       }
-      MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
-
-      // level 3 with additional optimization and cleanup.
-      if (level >= 3) {
-        MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
-        MPM.addPass(mlsub::MLsubRecoveryOpt(*TR));
-        MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-        MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
-        MPM.addPass(createModuleToFunctionPassAdaptor(GVNPass()));
-        MPM.addPass(createModuleToFunctionPassAdaptor(BDCEPass()));
-        MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-        MPM.addPass(createModuleToFunctionPassAdaptor(
-            SimplifyCFGPass(SimplifyCFGOptions())));
-        MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
-        MPM.addPass(createModuleToFunctionPassAdaptor(UndoInstCombine()));
-        MPM.addPass(createModuleToFunctionPassAdaptor(AllocAnnotator()));
-
-        if (const char *val = std::getenv("NOTDEC_KEEP_DEAD_STACK")) {
-          if ((std::strcmp(val, "1") == 0)) {
-            // TODO MLSUB: support dead stack recovery in the new pipeline.
-          }
-        }
-        MPM.addPass(createModuleToFunctionPassAdaptor(ReorderBlocksPass()));
-      }
     }
+    add_type_recovery_passes(level);
+    return;
   }
+
+  FunctionPassManager FPM = buildFunctionOptimizations();
+  MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
 }
 
 void PassEnv::add_llvm2c(std::string OutFilePath,

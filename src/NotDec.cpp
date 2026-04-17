@@ -116,6 +116,12 @@ static cl::opt<std::string> emitTRInputIR(
     cl::init(""), cl::value_desc("output.ll"), cl::Optional,
     cl::cat(NotdecCat));
 
+static cl::opt<bool> frozenTRInputIR(
+    "frozen-tr-input-ir",
+    cl::desc("Treat the input module as a frozen pre-type-recovery IR emitted "
+             "by --emit-tr-input-ir. This is the explicit stage-B mode."),
+    cl::init(false), cl::cat(NotdecCat));
+
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
 // -debug-only option
@@ -146,6 +152,7 @@ int main(int argc, char *argv[]) {
   // initDebugOptions();
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
+  const char *ExtraConstraintsFile = std::getenv("NOTDEC_EXTRA_CONSTRAINTS");
   if (!workDirOverride.empty() && !genWorkDir) {
     llvm::errs() << "Error: --work-dir requires --gen-work-dir.\n";
     return 1;
@@ -159,6 +166,25 @@ int main(int argc, char *argv[]) {
                     "--dump-htypes.\n";
     return 1;
   }
+  if (frozenTRInputIR && !emitTRInputIR.empty()) {
+    llvm::errs() << "Error: --frozen-tr-input-ir cannot be combined with "
+                    "--emit-tr-input-ir.\n";
+    return 1;
+  }
+  if (ExtraConstraintsFile != nullptr && !frozenTRInputIR) {
+    llvm::errs()
+        << "Error: NOTDEC_EXTRA_CONSTRAINTS requires --frozen-tr-input-ir.\n"
+        << "Hint: first run --emit-tr-input-ir=<path>, then rerun notdec on "
+           "that frozen .ll/.bc with --frozen-tr-input-ir.\n";
+    return 1;
+  }
+  if (ExtraConstraintsFile != nullptr && !emitTRInputIR.empty()) {
+    llvm::errs() << "Error: NOTDEC_EXTRA_CONSTRAINTS cannot be combined with "
+                    "--emit-tr-input-ir.\n"
+                 << "Hint: use the two-step workflow: export frozen TR input "
+                    "IR first, then run the stage-B command separately.\n";
+    return 1;
+  }
   notdec::Options opts{
       .trLevel = trLevel,
       .stackRec = stackRec,
@@ -168,6 +194,7 @@ int main(int argc, char *argv[]) {
                                    primitiveSemanticLatticeFiles.end()),
   };
   opts.emitTRInputIR = emitTRInputIR;
+  opts.frozenTRInputIR = frozenTRInputIR;
   if (genWorkDir) {
     opts.workDir = workDirOverride.empty()
                        ? notdec::getDefaultWorkDir(inputFilename)
@@ -184,6 +211,12 @@ int main(int argc, char *argv[]) {
   notdec::setWorkDir(opts.workDir);
 
   std::string insuffix = getSuffix(inputFilename);
+  if (frozenTRInputIR && insuffix != ".ll" && insuffix != ".bc") {
+    llvm::errs() << "Error: --frozen-tr-input-ir requires a .ll or .bc input, "
+                    "got "
+                 << insuffix << ".\n";
+    return 1;
+  }
   notdec::DecompilerContext Ctx(inputFilename, opts);
   if (insuffix.size() == 0) {
     std::cout << "no extension for input file. exiting." << std::endl;

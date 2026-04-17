@@ -18,6 +18,7 @@ struct Options {
   int log_level = 5; // default log level = level_notice
   std::string workDir;
   std::string emitTRInputIR;
+  bool frozenTRInputIR = false;
   std::vector<std::string> primitiveSemanticLatticeFiles;
 };
 

@@ -12,6 +12,7 @@
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 --gen-work-dir
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=work_dir
 ./build/bin/notdec input.bc --emit-tr-input-ir=/tmp/tr-input.ll -g --work-dir=work_dir
+./build/bin/notdec /tmp/tr-input.ll -o /tmp/out.ll --tr-level=2 --frozen-tr-input-ir
 ```
 
 其中：
@@ -26,6 +27,11 @@
   - 跑完 pre-type-recovery 标准化 pass，导出类型恢复真正消费的输入 IR
   - 支持输出到 `.ll` 或 `.bc`
   - 导出后直接退出，不进入 `MLsubRecoveryMain`
+- `--frozen-tr-input-ir`
+  - 声明当前输入已经是 `--emit-tr-input-ir` 导出的冻结 IR
+  - 用于显式进入阶段 B 语义
+  - 当前会跳过 pre-type-recovery 标准化 pass，直接进入 `MLsub`
+  - 当前启用 `NOTDEC_EXTRA_CONSTRAINTS` 时必须同时传入
 
 仓库内的 `run.sh` 和 `.vscode/launch.json` 里的常用配置现在也统一走这套命令行参数。
 
@@ -83,6 +89,9 @@
 - 当前摘要字段：只保留 `ir_anchor.sha256`
 - 当前校验规则：`NOTDEC_EXTRA_CONSTRAINTS` 要求 `ir_anchor.sha256` 与当前
   `02-mlsub-input.ll` 的 SHA-256 一致
+- 当前阶段约束：`NOTDEC_EXTRA_CONSTRAINTS` 还要求命令行显式传入
+  `--frozen-tr-input-ir`，表示当前运行是“冻结 IR + MLsub”的阶段 B 模式；
+  该环境变量不能与 `--emit-tr-input-ir` 同时使用
 - 相关环境变量：`NOTDEC_EXTRA_CONSTRAINTS` 当前已经支持读取一个 JSON 文件，并在 `MLsub` 开始前校验其中的 `ir_anchor` 是否匹配当前冻结 IR；函数级 `actions` 已支持 `kind = "pndiff" | "subtype" | "equal"`，`target` 当前支持 `arg` / `ret` / `named_value` / `inst` / `operand` / `binding`；其中 `named_value` 表示当前函数里第一个同名非 `void` instruction result，`inst` 的 `id` 和 `operand.inst` 都使用 `toStableString()` 风格的指令 id，`operand` 现在支持两种 instruction 定位方式：
   - `operand(inst="main::%foo", index=N)`：按 stable id 定位
   - `operand(name="foo", index=N)`：按当前函数里第一个同名非 `void` instruction result 定位
