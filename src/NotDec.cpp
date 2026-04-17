@@ -119,7 +119,8 @@ static cl::opt<std::string> emitTRInputIR(
 static cl::opt<bool> frozenTRInputIR(
     "frozen-tr-input-ir",
     cl::desc("Treat the input module as a frozen pre-type-recovery IR emitted "
-             "by --emit-tr-input-ir. This is the explicit stage-B mode."),
+             "by --emit-tr-input-ir. This is the explicit stage-B mode and "
+             "requires --tr-level >= 2."),
     cl::init(false), cl::cat(NotdecCat));
 
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
@@ -251,6 +252,15 @@ int main(int argc, char *argv[]) {
                  << ".\n"
                  << "Reason: stage B runs directly on frozen LLVM IR rather "
                     "than on raw frontend input.\n";
+    printFrozenTRInputWorkflowHint(inputFilename);
+    return 1;
+  }
+  if (frozenTRInputIR && trLevel < 2) {
+    llvm::errs() << "Error: --frozen-tr-input-ir requires --tr-level >= 2, "
+                    "but current value is "
+                 << trLevel << ".\n"
+                 << "Reason: stage B means running type recovery on frozen "
+                    "LLVM IR, so levels 0/1 are not valid in this mode.\n";
     printFrozenTRInputWorkflowHint(inputFilename);
     return 1;
   }

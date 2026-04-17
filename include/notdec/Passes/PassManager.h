@@ -107,8 +107,7 @@ struct DecompileConfig {
   void build_passes(int level) {
     bool EmitTRInputIR = !Opts.emitTRInputIR.empty();
     bool FrozenTRInputIR = Opts.frozenTRInputIR;
-    int EffectiveLevel =
-        (EmitTRInputIR || FrozenTRInputIR) ? std::max(level, 2) : level;
+    int EffectiveLevel = EmitTRInputIR ? std::max(level, 2) : level;
     PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR);
     if (EmitTRInputIR) {
       return;
