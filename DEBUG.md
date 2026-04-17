@@ -73,7 +73,9 @@
 - 来源：`MLsubRecovery::run()` 在导出 `02-mlsub-input.ll` 后同步生成
 - 作用：记录当前 `mlsub` 输入 IR 的阶段名、数据布局、target triple 和内容摘要
 - 典型用途：给后续约束文件或调试脚本提供机器可读的 IR 锚点，快速确认 selector 是否仍对着同一份冻结 IR
-- 备注：当前内容摘要字段会显式写出算法，便于后续从 `md5` 平滑升级到更强的 hash
+- 当前摘要字段：只保留 `ir_anchor.sha256`
+- 当前校验规则：`NOTDEC_EXTRA_CONSTRAINTS` 要求 `ir_anchor.sha256` 与当前
+  `02-mlsub-input.ll` 的 SHA-256 一致
 - 相关环境变量：`NOTDEC_EXTRA_CONSTRAINTS` 当前已经支持读取一个 JSON 文件，并在 `MLsub` 开始前校验其中的 `ir_anchor` 是否匹配当前冻结 IR；函数级 `actions` 已支持 `kind = "pndiff" | "subtype" | "equal"`，`target` 当前支持 `arg` / `ret` / `named_value` / `inst` / `operand` / `binding`；其中 `named_value` 表示当前函数里第一个同名非 `void` instruction result，`inst` 的 `id` 和 `operand.inst` 都使用 `toStableString()` 风格的指令 id，`operand` 现在支持两种 instruction 定位方式：
   - `operand(inst="main::%foo", index=N)`：按 stable id 定位
   - `operand(name="foo", index=N)`：按当前函数里第一个同名非 `void` instruction result 定位

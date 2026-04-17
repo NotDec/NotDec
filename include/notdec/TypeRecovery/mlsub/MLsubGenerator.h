@@ -383,7 +383,7 @@ public:
   void loadSignatureFile(llvm::Module &M, const char *path,
                          bool StrictValidation = true);
   void validateExtraConstraintsFile(llvm::Module &M, const char *Path,
-                                    llvm::StringRef ModuleDigestHex);
+                                    llvm::StringRef ModuleSHA256Hex);
   const llvm::json::Value *getExtraConstraintsSpec(
       const llvm::Function &Func) const;
   const llvm::json::Value *getSummaryOverrideSpec(

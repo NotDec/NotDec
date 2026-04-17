@@ -16,6 +16,7 @@
 #include "notdec/Utils/Utils.h"
 
 #include <cassert>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
@@ -25,7 +26,7 @@
 #include <llvm/Support/FormattedStream.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/JSON.h>
-#include <llvm/Support/MD5.h>
+#include <llvm/Support/SHA256.h>
 #include <algorithm>
 #include <memory>
 #include <optional>
@@ -255,14 +256,10 @@ llvm::json::Value makeEmptyOverrideDoc() {
                             {"functions", llvm::json::Object{}}};
 }
 
-std::string computeMD5Hex(llvm::StringRef Content) {
-  llvm::MD5 Hash;
+std::string computeSHA256Hex(llvm::StringRef Content) {
+  llvm::SHA256 Hash;
   Hash.update(Content);
-  llvm::MD5::MD5Result Digest;
-  llvm::SmallString<32> Hex;
-  Hash.final(Digest);
-  llvm::MD5::stringifyResult(Digest, Hex);
-  return Hex.str().str();
+  return llvm::toHex(Hash.final(), true);
 }
 
 std::string renderModuleToString(const llvm::Module &M) {
@@ -285,16 +282,12 @@ void writeJSONFile(llvm::StringRef Path, const llvm::json::Value &Doc) {
 }
 
 void writeMLsubInputAnchor(const llvm::Module &M, llvm::StringRef AnchorPath,
-                           llvm::StringRef ModuleDigestHex) {
-  llvm::json::Object ContentHash{
-      {"algorithm", "md5"},
-      {"value", ModuleDigestHex},
-  };
+                           llvm::StringRef ModuleSHA256Hex) {
   llvm::json::Object Anchor{
       {"version", int64_t(1)},
       {"stage", "mlsub-input"},
       {"ir_file", kMLsubInputIRFile.str()},
-      {"content_hash", std::move(ContentHash)},
+      {"sha256", ModuleSHA256Hex},
       {"data_layout", M.getDataLayout().getStringRepresentation()},
       {"target_triple", M.getTargetTriple()},
   };
@@ -879,7 +872,7 @@ const llvm::json::Value *getOverrideSpecImpl(
 
 void validateExtraConstraintsAnchor(const llvm::json::Object &Root,
                                     const llvm::Module &M,
-                                    llvm::StringRef ModuleDigestHex) {
+                                    llvm::StringRef ModuleSHA256Hex) {
   auto *AnchorValue = Root.get("ir_anchor");
   if (AnchorValue == nullptr) {
     return;
@@ -895,20 +888,16 @@ void validateExtraConstraintsAnchor(const llvm::json::Object &Root,
                          "expected stage = 'mlsub-input'");
   }
 
-  if (auto *ContentHash = Anchor->getObject("content_hash")) {
-    auto Algo =
-        requireString(*ContentHash, "algorithm", "ir_anchor.content_hash");
-    auto Value =
-        requireString(*ContentHash, "value", "ir_anchor.content_hash");
-    if (Algo != "md5") {
-      failExtraConstraints("ir_anchor.content_hash.algorithm",
-                           "only md5 is supported currently");
-    }
-    if (Value != ModuleDigestHex) {
-      failExtraConstraints(
-          "ir_anchor.content_hash.value",
-          ("content hash mismatch: expected " + ModuleDigestHex.str()).c_str());
-    }
+  auto SHA256 = Anchor->getString("sha256");
+  if (!SHA256) {
+    failExtraConstraints("ir_anchor.sha256",
+                         "missing or invalid string field 'sha256'");
+  }
+  if (*SHA256 != ModuleSHA256Hex) {
+    failExtraConstraints("ir_anchor.sha256",
+                         ("sha256 mismatch: expected " +
+                          ModuleSHA256Hex.str())
+                             .c_str());
   }
 
   if (auto DataLayout = Anchor->getString("data_layout")) {
@@ -1384,19 +1373,19 @@ void MLsubRecovery::run() {
   binarysub::pointer_size = PointerSize;
 
   auto MLsubInputText = renderModuleToString(M);
-  auto ModuleDigestHex = computeMD5Hex(MLsubInputText);
+  auto ModuleSHA256Hex = computeSHA256Hex(MLsubInputText);
 
   // 0.5 print module for debugging
   if (WorkDir) {
     auto MLsubInputPath = join(*WorkDir, kMLsubInputIRFile.str());
     printModule(M, MLsubInputPath.c_str());
     writeMLsubInputAnchor(M, join(*WorkDir, kMLsubInputAnchorFile.str()),
-                          ModuleDigestHex);
+                          ModuleSHA256Hex);
     writeSelectableValues(M, join(*WorkDir, kSelectableValuesFile.str()));
   }
 
   if (ExtraConstraintsFile != nullptr) {
-    validateExtraConstraintsFile(M, ExtraConstraintsFile, ModuleDigestHex);
+    validateExtraConstraintsFile(M, ExtraConstraintsFile, ModuleSHA256Hex);
   }
 
   CallGraphAnalysis Ana;
@@ -1460,7 +1449,7 @@ void MLsubRecovery::loadSignatureFile(llvm::Module &M, const char *Path,
 
 void MLsubRecovery::validateExtraConstraintsFile(llvm::Module &M,
                                                  const char *Path,
-                                                 llvm::StringRef ModuleDigestHex) {
+                                                 llvm::StringRef ModuleSHA256Hex) {
   llvm::errs() << "Loading MLsub extra constraints from: " << Path << "\n";
   ExtraConstraintsDoc = makeEmptyOverrideDoc();
   ExtraConstraintsFuncs.clear();
@@ -1480,7 +1469,7 @@ void MLsubRecovery::validateExtraConstraintsFile(llvm::Module &M,
     failExtraConstraints("<root>", "expected version = 1");
   }
 
-  validateExtraConstraintsAnchor(*Root, M, ModuleDigestHex);
+  validateExtraConstraintsAnchor(*Root, M, ModuleSHA256Hex);
   validateExtraConstraintFunctions(*Root, M, ExtraConstraintsDoc,
                                    ExtraConstraintsFuncs);
 }
