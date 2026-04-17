@@ -53,6 +53,9 @@
    - `ir_anchor.sha256`
    - `ir_anchor.data_layout`
    - `ir_anchor.target_triple`
+8. 当前已经有正式的阶段 A 导出入口：
+   - `--emit-tr-input-ir=<path>`
+   - 可直接导出后续 extra constraints 应绑定的冻结 IR
 
 当前仍未实现的部分包括：
 
@@ -62,9 +65,10 @@
 当前判断：
 
 1. selector 的基础可用链路已经基本齐备
-2. 近期不建议继续深挖 selector 本身
-3. 除非后续真实用例再次暴露缺口，否则先把这块视为“够用”
-4. 后续更适合把精力转回其他 recovery / typing 问题
+2. 阶段 A 的冻结 IR 导出入口也已经具备
+3. 近期不建议继续深挖 selector 本身
+4. 除非后续真实用例再次暴露缺口，否则先把这块视为“够用”
+5. 后续更适合把精力转回其他 recovery / typing 问题
 
 相关实现日志：
 
@@ -76,6 +80,7 @@
 6. [logs/20260417-04-MLsubExtraConstraintsInstOperand.md](/sn640/NotDec/logs/20260417-04-MLsubExtraConstraintsInstOperand.md)
 7. [logs/20260417-05-MLsubNamedOperandAndSelectableValues.md](/sn640/NotDec/logs/20260417-05-MLsubNamedOperandAndSelectableValues.md)
 8. [logs/20260417-07-MLsubAnchorSHA256Only.md](/sn640/NotDec/logs/20260417-07-MLsubAnchorSHA256Only.md)
+9. [logs/20260417-08-EmitTRInputIRCLI.md](/sn640/NotDec/logs/20260417-08-EmitTRInputIRCLI.md)
 
 ## 2. 当前代码证据
 

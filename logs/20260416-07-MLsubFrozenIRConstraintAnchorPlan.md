@@ -43,6 +43,9 @@
    - `ir_anchor.sha256`
    - `ir_anchor.data_layout`
    - `ir_anchor.target_triple`
+4. 当前已经新增正式的阶段 A CLI：
+   - `--emit-tr-input-ir=<path>`
+   - 可在不进入 `MLsubRecoveryMain` 的情况下直接导出冻结 IR
 
 同时结合后续实现，当前还需要补的一点是：
 
@@ -50,15 +53,16 @@
 2. 当前 `extra constraints` 的 `target.kind` 已支持 `arg` / `ret` /
    `named_value` / `inst` / `operand` / `binding`
 3. `operand` 当前同时支持 stable-id 和 name 两条 instruction 定位入口
-4. 当前更适合继续补 selector discoverability，比如 `SelectableValues.txt`
+4. `SelectableValues.txt` 也已落地，可直接辅助手写 selector
 5. 即便走这条轻量路线，`ir_anchor` 仍然是必要的
 
 当前判断：
 
 1. selector 这一层已经达到“能写、能查、能调”的基础可用状态
-2. 近期不建议继续深挖 selector 语法或再扩新种类
-3. 这份 anchor 方案后续也不需要再围着 selector 展开
-4. 更适合把后续实现重心转回其他主链路问题
+2. 阶段 A 的冻结 IR 现在也已经有正式 CLI，而不再只是完整类型恢复流程里的副产物
+3. 近期不建议继续深挖 selector 语法或再扩新种类
+4. 这份 anchor 方案后续也不需要再围着 selector 展开
+5. 更适合把后续实现重心转回其他主链路问题
 
 这份计划里原本保留的 `md5/content_hash` 过渡层现在已经收掉，当前 workdir
 与 `NOTDEC_EXTRA_CONSTRAINTS` 都统一只使用：
