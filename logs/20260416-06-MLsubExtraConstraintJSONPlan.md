@@ -41,17 +41,16 @@
 2. 已支持在 `MLsubRecovery::run()` 中读取 JSON 并校验 `ir_anchor`
 3. 已支持最小函数级 action 子集：
    - `functions.<name>.actions[*].kind = "pndiff" | "subtype" | "equal"`
-   - `target.kind = "arg" | "ret" | "named_value"`
+   - `target.kind = "arg" | "ret" | "named_value" | "binding"`
    - `state = "ptr" | "number"`
 4. 已在 `MLsubRecovery::bottomUpPhase()` 中于 `G->run()` 之后真正应用这批
    extra constraints
 
 当前仍未实现的部分包括：
 
-1. `bindings`
-2. `target.kind = "inst" | "operand" | "binding"`
-3. 更完整的函数内 value selector
-4. `SelectableValues.txt`
+1. `target.kind = "inst" | "operand"`
+2. 更完整的函数内 value selector
+3. `SelectableValues.txt`
 
 相关实现日志：
 

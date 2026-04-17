@@ -143,6 +143,27 @@ struct ResolvedConstraintTarget {
   std::string Key;
 };
 
+const llvm::json::Object *
+getExtraConstraintBindings(const llvm::json::Object &Spec,
+                           llvm::StringRef FuncPath) {
+  auto *BindingsValue = Spec.get("bindings");
+  if (BindingsValue == nullptr) {
+    return nullptr;
+  }
+  const auto *Bindings = BindingsValue->getAsObject();
+  if (Bindings == nullptr) {
+    failExtraConstraints(appendJSONPath(FuncPath, "bindings"), "expected object");
+  }
+  for (const auto &Ent : *Bindings) {
+    auto BindingPath =
+        appendJSONPath(appendJSONPath(FuncPath, "bindings"), Ent.first);
+    if (Ent.second.getAsObject() == nullptr) {
+      failExtraConstraints(BindingPath, "expected object");
+    }
+  }
+  return Bindings;
+}
+
 llvm::Instruction *findFirstNamedInstruction(llvm::Function &Func,
                                              llvm::StringRef Name) {
   for (llvm::BasicBlock &BB : Func) {
@@ -288,18 +309,11 @@ ResolvedPNDiffTarget resolvePNDiffTarget(const llvm::json::Object &Obj,
   failSignatureOverride(TargetPath, "pndiff target kind must be 'arg' or 'ret'");
 }
 
-ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
-    const llvm::json::Object &Obj, llvm::Function &Func, llvm::StringRef Path) {
-  auto *TargetValue = Obj.get("target");
-  if (TargetValue == nullptr) {
-    failExtraConstraints(Path, "missing field 'target'");
-  }
-  const auto *TargetObj = TargetValue->getAsObject();
-  auto TargetPath = appendJSONPath(Path, "target");
-  if (TargetObj == nullptr) {
-    failExtraConstraints(TargetPath, "expected object");
-  }
-  auto Kind = TargetObj->getString("kind");
+ResolvedConstraintTarget resolveExtraConstraintTargetSelector(
+    const llvm::json::Object &TargetObj, llvm::Function &Func,
+    const llvm::json::Object *Bindings, llvm::StringRef TargetPath,
+    bool ForPNDiff, std::set<std::string> &ResolvingBindings) {
+  auto Kind = TargetObj.getString("kind");
   if (!Kind) {
     failExtraConstraints(TargetPath, "missing or invalid string field 'kind'");
   }
@@ -313,7 +327,7 @@ ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
     };
   }
   if (*Kind == "arg") {
-    auto Index = TargetObj->getInteger("index");
+    auto Index = TargetObj.getInteger("index");
     if (!Index) {
       failExtraConstraints(TargetPath,
                            "missing or invalid integer field 'index'");
@@ -329,7 +343,7 @@ ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
     };
   }
   if (*Kind == "named_value") {
-    auto Name = TargetObj->getString("name");
+    auto Name = TargetObj.getString("name");
     if (!Name) {
       failExtraConstraints(TargetPath,
                            "missing or invalid string field 'name'");
@@ -347,12 +361,71 @@ ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
         .Key = "named_value:" + Name->str(),
     };
   }
-  failExtraConstraints(TargetPath,
-                       "pndiff target kind must be 'arg', 'ret', or 'named_value'");
+  if (*Kind == "binding") {
+    auto Name = TargetObj.getString("name");
+    if (!Name) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid string field 'name'");
+    }
+    if (Bindings == nullptr) {
+      failExtraConstraints(TargetPath,
+                           "binding target requires function-level 'bindings'");
+    }
+    std::string BindingName = Name->str();
+    if (!ResolvingBindings.insert(BindingName).second) {
+      failExtraConstraints(TargetPath,
+                           ("binding cycle detected for '" + BindingName + "'")
+                               .c_str());
+    }
+    auto *BindingValue = Bindings->get(*Name);
+    if (BindingValue == nullptr) {
+      failExtraConstraints(
+          TargetPath, ("binding '" + BindingName + "' not found").c_str());
+    }
+    auto BindingPath = appendJSONPath("bindings", *Name);
+    const auto *BindingObj = BindingValue->getAsObject();
+    if (BindingObj == nullptr) {
+      failExtraConstraints(BindingPath, "expected object");
+    }
+    auto Resolved = resolveExtraConstraintTargetSelector(
+        *BindingObj, Func, Bindings, BindingPath, ForPNDiff, ResolvingBindings);
+    ResolvingBindings.erase(BindingName);
+    return Resolved;
+  }
+  if (ForPNDiff) {
+    failExtraConstraints(
+        TargetPath,
+        "pndiff target kind must be 'arg', 'ret', 'named_value', or 'binding'");
+  }
+  failExtraConstraints(
+      TargetPath,
+      "target kind must be 'arg', 'ret', 'named_value', or 'binding' currently");
+}
+
+ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
+    const llvm::json::Object &Obj, llvm::Function &Func,
+    const llvm::json::Object *Bindings, llvm::StringRef Path) {
+  auto *TargetValue = Obj.get("target");
+  if (TargetValue == nullptr) {
+    failExtraConstraints(Path, "missing field 'target'");
+  }
+  const auto *TargetObj = TargetValue->getAsObject();
+  auto TargetPath = appendJSONPath(Path, "target");
+  if (TargetObj == nullptr) {
+    failExtraConstraints(TargetPath, "expected object");
+  }
+  std::set<std::string> ResolvingBindings;
+  auto Resolved = resolveExtraConstraintTargetSelector(
+      *TargetObj, Func, Bindings, TargetPath, true, ResolvingBindings);
+  return {
+      .Value = Resolved.Value,
+      .Key = Resolved.Key,
+  };
 }
 
 ResolvedConstraintTarget resolveExtraConstraintTarget(
-    const llvm::json::Object &Obj, llvm::Function &Func, llvm::StringRef Path) {
+    const llvm::json::Object &Obj, llvm::Function &Func,
+    const llvm::json::Object *Bindings, llvm::StringRef Path) {
   auto *TargetValue = Obj.get("target");
   if (TargetValue == nullptr) {
     failExtraConstraints(Path, "missing field 'target'");
@@ -362,60 +435,15 @@ ResolvedConstraintTarget resolveExtraConstraintTarget(
   if (TargetObj == nullptr) {
     failExtraConstraints(TargetPath, "expected object");
   }
-  auto Kind = TargetObj->getString("kind");
-  if (!Kind) {
-    failExtraConstraints(TargetPath, "missing or invalid string field 'kind'");
-  }
-  if (*Kind == "ret") {
-    if (Func.getReturnType()->isVoidTy()) {
-      failExtraConstraints(TargetPath, "ret target requires non-void function");
-    }
-    return {
-        .Value = ReturnValue{.Func = &Func},
-        .Key = "ret",
-    };
-  }
-  if (*Kind == "arg") {
-    auto Index = TargetObj->getInteger("index");
-    if (!Index) {
-      failExtraConstraints(TargetPath,
-                           "missing or invalid integer field 'index'");
-    }
-    if (*Index < 0 || *Index >= static_cast<int64_t>(Func.arg_size())) {
-      failExtraConstraints(TargetPath, "arg target index out of range");
-    }
-    auto *Arg = Func.getArg(static_cast<unsigned>(*Index));
-    assert(Arg != nullptr);
-    return {
-        .Value = Arg,
-        .Key = "arg:" + std::to_string(*Index),
-    };
-  }
-  if (*Kind == "named_value") {
-    auto Name = TargetObj->getString("name");
-    if (!Name) {
-      failExtraConstraints(TargetPath,
-                           "missing or invalid string field 'name'");
-    }
-    auto *Inst = findFirstNamedInstruction(Func, *Name);
-    if (Inst == nullptr) {
-      failExtraConstraints(
-          TargetPath,
-          ("named_value target '" + Name->str() +
-           "' not found as a non-void instruction in function")
-              .c_str());
-    }
-    return {
-        .Value = Inst,
-        .Key = "named_value:" + Name->str(),
-    };
-  }
-  failExtraConstraints(TargetPath,
-                       "target kind must be 'arg', 'ret', or 'named_value' currently");
+  std::set<std::string> ResolvingBindings;
+  return resolveExtraConstraintTargetSelector(*TargetObj, Func, Bindings,
+                                              TargetPath, false,
+                                              ResolvingBindings);
 }
 
 void validateExtraConstraintOperand(const llvm::json::Value &Value,
                                     llvm::Function &Func,
+                                    const llvm::json::Object *Bindings,
                                     llvm::StringRef Path) {
   const auto *Obj = Value.getAsObject();
   if (Obj == nullptr) {
@@ -428,7 +456,7 @@ void validateExtraConstraintOperand(const llvm::json::Value &Value,
         Path, "operand must contain exactly one of 'type' or 'target'");
   }
   if (HasTarget) {
-    resolveExtraConstraintTarget(*Obj, Func, Path);
+    resolveExtraConstraintTarget(*Obj, Func, Bindings, Path);
     return;
   }
   if (Obj->get("type")->getAsObject() == nullptr &&
@@ -440,15 +468,16 @@ void validateExtraConstraintOperand(const llvm::json::Value &Value,
 notdec::mlsub::MLsubRecovery::OverrideTypeRecipe buildExtraConstraintOperand(
     notdec::mlsub::MLsubRecovery &Recovery, ConstraintsGenerator &G,
     notdec::mlsub::MLsubRecovery::OverrideBuildContext &Ctx,
-    llvm::Function &Func, const llvm::json::Value &Value, llvm::StringRef Path) {
-  validateExtraConstraintOperand(Value, Func, Path);
+    llvm::Function &Func, const llvm::json::Object *Bindings,
+    const llvm::json::Value &Value, llvm::StringRef Path) {
+  validateExtraConstraintOperand(Value, Func, Bindings, Path);
   const auto &Obj = *Value.getAsObject();
   if (auto *TypeValue = Obj.get("type")) {
     return Recovery.buildOverrideType(*TypeValue, Ctx,
                                       appendJSONPath(Path, "type"), false);
   }
 
-  auto Target = resolveExtraConstraintTarget(Obj, Func, Path);
+  auto Target = resolveExtraConstraintTarget(Obj, Func, Bindings, Path);
   auto Node = G.getNodeOrNull(Target.Value, nullptr, -1);
   if (Node == nullptr) {
     failExtraConstraints(
@@ -516,6 +545,7 @@ void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
 void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
                                  const llvm::json::Object &Spec,
                                  llvm::StringRef FuncPath) {
+  auto *Bindings = getExtraConstraintBindings(Spec, FuncPath);
   auto *ActionsValue = Spec.get("actions");
   if (ActionsValue == nullptr) {
     return;
@@ -541,7 +571,8 @@ void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
       continue;
     }
 
-    auto Target = resolveExtraConstraintPNDiffTarget(*ActionObj, Func, ActionPath);
+    auto Target = resolveExtraConstraintPNDiffTarget(*ActionObj, Func, Bindings,
+                                                     ActionPath);
     auto State = parseExtraConstraintPNDiffState(*ActionObj, ActionPath);
     auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
     if (!Inserted && It->second != State) {
@@ -786,6 +817,7 @@ void validateExtraConstraintFunctions(const llvm::json::Object &Root,
     if (Actions == nullptr) {
       failExtraConstraints(appendJSONPath(FuncPath, "actions"), "expected array");
     }
+    auto *Bindings = getExtraConstraintBindings(*Spec, FuncPath);
 
     std::map<std::string, OverridePNDiffState> SeenTargets;
     for (size_t Index = 0; Index < Actions->size(); ++Index) {
@@ -801,8 +833,8 @@ void validateExtraConstraintFunctions(const llvm::json::Object &Root,
                              "missing or invalid string field 'kind'");
       }
       if (*Kind == "pndiff") {
-        auto Target =
-            resolveExtraConstraintPNDiffTarget(*ActionObj, *Func, ActionPath);
+        auto Target = resolveExtraConstraintPNDiffTarget(*ActionObj, *Func,
+                                                         Bindings, ActionPath);
         auto State = parseExtraConstraintPNDiffState(*ActionObj, ActionPath);
         auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
         if (!Inserted && It->second != State) {
@@ -820,9 +852,9 @@ void validateExtraConstraintFunctions(const llvm::json::Object &Root,
           failExtraConstraints(ActionPath, "constraint action requires lhs and rhs");
         }
         validateExtraConstraintOperand(
-            *LHSValue, *Func, appendJSONPath(ActionPath, "lhs"));
+            *LHSValue, *Func, Bindings, appendJSONPath(ActionPath, "lhs"));
         validateExtraConstraintOperand(
-            *RHSValue, *Func, appendJSONPath(ActionPath, "rhs"));
+            *RHSValue, *Func, Bindings, appendJSONPath(ActionPath, "rhs"));
         continue;
       }
       failExtraConstraints(
@@ -844,6 +876,7 @@ void applyExtraConstraintSubtypeActions(notdec::mlsub::MLsubRecovery &Recovery,
                                         llvm::Function &Func,
                                         const llvm::json::Object &Spec,
                                         llvm::StringRef FuncPath) {
+  auto *Bindings = getExtraConstraintBindings(Spec, FuncPath);
   auto *ActionsValue = Spec.get("actions");
   if (ActionsValue == nullptr) {
     return;
@@ -876,10 +909,10 @@ void applyExtraConstraintSubtypeActions(notdec::mlsub::MLsubRecovery &Recovery,
       failExtraConstraints(ActionPath, "constraint action requires lhs and rhs");
     }
     auto LHSRecipe =
-        buildExtraConstraintOperand(Recovery, G, Ctx, Func, *LHSValue,
+        buildExtraConstraintOperand(Recovery, G, Ctx, Func, Bindings, *LHSValue,
                                     appendJSONPath(ActionPath, "lhs"));
     auto RHSRecipe =
-        buildExtraConstraintOperand(Recovery, G, Ctx, Func, *RHSValue,
+        buildExtraConstraintOperand(Recovery, G, Ctx, Func, Bindings, *RHSValue,
                                     appendJSONPath(ActionPath, "rhs"));
     Recovery.applyOverrideRecipe(G, LHSRecipe);
     Recovery.applyOverrideRecipe(G, RHSRecipe);

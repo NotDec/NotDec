@@ -48,8 +48,9 @@
 同时结合后续实现，当前还需要补的一点是：
 
 1. 具体函数内 value selector 仍未完整落地
-2. 当前 `extra constraints` 的 `target.kind` 已支持 `arg` / `ret`，并开始支持轻量级的 `named_value`
-3. 如果近期还要继续往前推，一条更轻量的路线是先沿着“函数内有名字的 instruction result”继续扩
+2. 当前 `extra constraints` 的 `target.kind` 已支持 `arg` / `ret` /
+   `named_value` / `binding`
+3. 如果近期还要继续往前推，一条更轻量的路线是先沿着“函数内有名字的 instruction result”和函数级局部 selector 别名继续扩
 4. 即便走这条轻量路线，`ir_anchor` 仍然是必要的
 
 和原计划不同的是，当前实现为了先把接口打通，摘要字段暂时不是
