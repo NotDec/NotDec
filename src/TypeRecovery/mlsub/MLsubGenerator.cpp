@@ -138,6 +138,11 @@ struct ResolvedPNDiffTarget {
   std::string Key;
 };
 
+struct ResolvedConstraintTarget {
+  ExtValuePtr Value;
+  std::string Key;
+};
+
 void appendOverrideConstraints(
     notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &Into,
     const notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &From) {
@@ -308,6 +313,95 @@ ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
   failExtraConstraints(TargetPath, "pndiff target kind must be 'arg' or 'ret'");
 }
 
+ResolvedConstraintTarget resolveExtraConstraintTarget(
+    const llvm::json::Object &Obj, llvm::Function &Func, llvm::StringRef Path) {
+  auto *TargetValue = Obj.get("target");
+  if (TargetValue == nullptr) {
+    failExtraConstraints(Path, "missing field 'target'");
+  }
+  const auto *TargetObj = TargetValue->getAsObject();
+  auto TargetPath = appendJSONPath(Path, "target");
+  if (TargetObj == nullptr) {
+    failExtraConstraints(TargetPath, "expected object");
+  }
+  auto Kind = TargetObj->getString("kind");
+  if (!Kind) {
+    failExtraConstraints(TargetPath, "missing or invalid string field 'kind'");
+  }
+  if (*Kind == "ret") {
+    if (Func.getReturnType()->isVoidTy()) {
+      failExtraConstraints(TargetPath, "ret target requires non-void function");
+    }
+    return {
+        .Value = ReturnValue{.Func = &Func},
+        .Key = "ret",
+    };
+  }
+  if (*Kind == "arg") {
+    auto Index = TargetObj->getInteger("index");
+    if (!Index) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid integer field 'index'");
+    }
+    if (*Index < 0 || *Index >= static_cast<int64_t>(Func.arg_size())) {
+      failExtraConstraints(TargetPath, "arg target index out of range");
+    }
+    auto *Arg = Func.getArg(static_cast<unsigned>(*Index));
+    assert(Arg != nullptr);
+    return {
+        .Value = Arg,
+        .Key = "arg:" + std::to_string(*Index),
+    };
+  }
+  failExtraConstraints(TargetPath,
+                       "target kind must be 'arg' or 'ret' currently");
+}
+
+void validateExtraConstraintOperand(const llvm::json::Value &Value,
+                                    llvm::Function &Func,
+                                    llvm::StringRef Path) {
+  const auto *Obj = Value.getAsObject();
+  if (Obj == nullptr) {
+    failExtraConstraints(Path, "expected object");
+  }
+  bool HasType = Obj->get("type") != nullptr;
+  bool HasTarget = Obj->get("target") != nullptr;
+  if (HasType == HasTarget) {
+    failExtraConstraints(
+        Path, "operand must contain exactly one of 'type' or 'target'");
+  }
+  if (HasTarget) {
+    resolveExtraConstraintTarget(*Obj, Func, Path);
+    return;
+  }
+  if (Obj->get("type")->getAsObject() == nullptr &&
+      !Obj->get("type")->getAsNull()) {
+    failExtraConstraints(appendJSONPath(Path, "type"), "expected object");
+  }
+}
+
+notdec::mlsub::MLsubRecovery::OverrideTypeRecipe buildExtraConstraintOperand(
+    notdec::mlsub::MLsubRecovery &Recovery, ConstraintsGenerator &G,
+    notdec::mlsub::MLsubRecovery::OverrideBuildContext &Ctx,
+    llvm::Function &Func, const llvm::json::Value &Value, llvm::StringRef Path) {
+  validateExtraConstraintOperand(Value, Func, Path);
+  const auto &Obj = *Value.getAsObject();
+  if (auto *TypeValue = Obj.get("type")) {
+    return Recovery.buildOverrideType(*TypeValue, Ctx,
+                                      appendJSONPath(Path, "type"), false);
+  }
+
+  auto Target = resolveExtraConstraintTarget(Obj, Func, Path);
+  auto Node = G.getNodeOrNull(Target.Value, nullptr, -1);
+  if (Node == nullptr) {
+    failExtraConstraints(
+        Path, ("target '" + Target.Key + "' has no corresponding node").c_str());
+  }
+  notdec::mlsub::MLsubRecovery::OverrideTypeRecipe Recipe;
+  Recipe.Root = Node;
+  return Recipe;
+}
+
 void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
                           const llvm::json::Object &Spec,
                           llvm::StringRef FuncPath) {
@@ -387,8 +481,7 @@ void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
       failExtraConstraints(ActionPath, "missing or invalid string field 'kind'");
     }
     if (*Kind != "pndiff") {
-      failExtraConstraints(ActionPath,
-                           "only actions.kind = 'pndiff' is supported currently");
+      continue;
     }
 
     auto Target = resolveExtraConstraintPNDiffTarget(*ActionObj, Func, ActionPath);
@@ -650,19 +743,34 @@ void validateExtraConstraintFunctions(const llvm::json::Object &Root,
         failExtraConstraints(ActionPath,
                              "missing or invalid string field 'kind'");
       }
-      if (*Kind != "pndiff") {
-        failExtraConstraints(
-            ActionPath,
-            "only actions.kind = 'pndiff' is supported currently");
+      if (*Kind == "pndiff") {
+        auto Target =
+            resolveExtraConstraintPNDiffTarget(*ActionObj, *Func, ActionPath);
+        auto State = parseExtraConstraintPNDiffState(*ActionObj, ActionPath);
+        auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
+        if (!Inserted && It->second != State) {
+          failExtraConstraints(
+              ActionPath,
+              ("conflicting duplicate pndiff target '" + Target.Key + "'")
+                  .c_str());
+        }
+        continue;
       }
-      auto Target = resolveExtraConstraintPNDiffTarget(*ActionObj, *Func, ActionPath);
-      auto State = parseExtraConstraintPNDiffState(*ActionObj, ActionPath);
-      auto [It, Inserted] = SeenTargets.insert({Target.Key, State});
-      if (!Inserted && It->second != State) {
-        failExtraConstraints(
-            ActionPath,
-            ("conflicting duplicate pndiff target '" + Target.Key + "'").c_str());
+      if (*Kind == "subtype" || *Kind == "equal") {
+        auto *LHSValue = ActionObj->get("lhs");
+        auto *RHSValue = ActionObj->get("rhs");
+        if (LHSValue == nullptr || RHSValue == nullptr) {
+          failExtraConstraints(ActionPath, "constraint action requires lhs and rhs");
+        }
+        validateExtraConstraintOperand(
+            *LHSValue, *Func, appendJSONPath(ActionPath, "lhs"));
+        validateExtraConstraintOperand(
+            *RHSValue, *Func, appendJSONPath(ActionPath, "rhs"));
+        continue;
       }
+      failExtraConstraints(
+          ActionPath,
+          "only actions.kind = 'pndiff', 'subtype', or 'equal' is supported currently");
     }
 
     auto *DocRoot = Doc.getAsObject();
@@ -671,6 +779,57 @@ void validateExtraConstraintFunctions(const llvm::json::Object &Root,
     assert(DocFunctions != nullptr);
     (*DocFunctions)[Ent.first] = Ent.second;
     Funcs.insert(Func);
+  }
+}
+
+void applyExtraConstraintSubtypeActions(notdec::mlsub::MLsubRecovery &Recovery,
+                                        ConstraintsGenerator &G,
+                                        llvm::Function &Func,
+                                        const llvm::json::Object &Spec,
+                                        llvm::StringRef FuncPath) {
+  auto *ActionsValue = Spec.get("actions");
+  if (ActionsValue == nullptr) {
+    return;
+  }
+  const auto *Actions = ActionsValue->getAsArray();
+  if (Actions == nullptr) {
+    failExtraConstraints(appendJSONPath(FuncPath, "actions"), "expected array");
+  }
+
+  notdec::mlsub::MLsubRecovery::OverrideBuildContext Ctx{
+      .Generator = G, .Func = Func};
+  for (size_t Index = 0; Index < Actions->size(); ++Index) {
+    auto ActionPath =
+        appendJSONIndexPath(appendJSONPath(FuncPath, "actions"), Index);
+    const auto *ActionObj = (*Actions)[Index].getAsObject();
+    if (ActionObj == nullptr) {
+      failExtraConstraints(ActionPath, "expected object");
+    }
+    auto Kind = ActionObj->getString("kind");
+    if (!Kind) {
+      failExtraConstraints(ActionPath, "missing or invalid string field 'kind'");
+    }
+    if (*Kind != "subtype" && *Kind != "equal") {
+      continue;
+    }
+
+    auto *LHSValue = ActionObj->get("lhs");
+    auto *RHSValue = ActionObj->get("rhs");
+    if (LHSValue == nullptr || RHSValue == nullptr) {
+      failExtraConstraints(ActionPath, "constraint action requires lhs and rhs");
+    }
+    auto LHSRecipe =
+        buildExtraConstraintOperand(Recovery, G, Ctx, Func, *LHSValue,
+                                    appendJSONPath(ActionPath, "lhs"));
+    auto RHSRecipe =
+        buildExtraConstraintOperand(Recovery, G, Ctx, Func, *RHSValue,
+                                    appendJSONPath(ActionPath, "rhs"));
+    Recovery.applyOverrideRecipe(G, LHSRecipe);
+    Recovery.applyOverrideRecipe(G, RHSRecipe);
+    G.addSubtype(LHSRecipe.Root, RHSRecipe.Root);
+    if (*Kind == "equal") {
+      G.addSubtype(RHSRecipe.Root, LHSRecipe.Root);
+    }
   }
 }
 
@@ -1377,6 +1536,7 @@ void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
   if (Obj == nullptr) {
     failExtraConstraints(Func.getName(), "expected object");
   }
+  applyExtraConstraintSubtypeActions(*this, G, Func, *Obj, Func.getName());
   applyExtraConstraintPNDiffs(G, Func, *Obj, Func.getName());
 }
 

@@ -74,7 +74,7 @@
 - 作用：记录当前 `mlsub` 输入 IR 的阶段名、数据布局、target triple 和内容摘要
 - 典型用途：给后续约束文件或调试脚本提供机器可读的 IR 锚点，快速确认 selector 是否仍对着同一份冻结 IR
 - 备注：当前内容摘要字段会显式写出算法，便于后续从 `md5` 平滑升级到更强的 hash
-- 相关环境变量：`NOTDEC_EXTRA_CONSTRAINTS` 当前已经支持读取一个 JSON 文件，并在 `MLsub` 开始前校验其中的 `ir_anchor` 是否匹配当前冻结 IR；函数级 `actions` 已支持最小子集 `kind = "pndiff"`，目标当前只支持 `arg` / `ret`
+- 相关环境变量：`NOTDEC_EXTRA_CONSTRAINTS` 当前已经支持读取一个 JSON 文件，并在 `MLsub` 开始前校验其中的 `ir_anchor` 是否匹配当前冻结 IR；函数级 `actions` 已支持 `kind = "pndiff" | "subtype" | "equal"`，但 `target` 当前仍只支持 `arg` / `ret`
 
 ### `CallGraph.txt`
 
