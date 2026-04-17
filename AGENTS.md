@@ -6,7 +6,7 @@
 5. 调试时，每解决完一个小问题就可以把当前进展先写到日志中，比如对应的计划日志附近。
 6. 写修改日志时，必须要明确指出具体修改的哪个文件的哪一行，涉及哪些函数。
 
-当前关注的测试用例： test/type-recovery/howard-o3-split/cases/fortune.o3.wasm.1.ll
+当前关注的测试用例： test/type-recovery/howard-o3-split/cases/fortune.o3.wasm.4.ll
 当前正在执行的计划：
 - logs/20260416-06-MLsubExtraConstraintJSONPlan.md
 - logs/20260416-07-MLsubFrozenIRConstraintAnchorPlan.md
