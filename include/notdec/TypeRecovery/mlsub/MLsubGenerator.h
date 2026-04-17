@@ -347,6 +347,7 @@ class MLsubRecovery {
   std::set<llvm::Function *> SignatureOverrideFuncs;
   llvm::json::Value ExtraConstraintsDoc = nullptr;
   std::set<llvm::Function *> ExtraConstraintsFuncs;
+  bool WrotePNDiffOverrideWarningHeader = false;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
   SimpleType MemoryType = nullptr;
 

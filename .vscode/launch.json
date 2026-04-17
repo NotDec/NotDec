@@ -43,6 +43,62 @@
       // "setupCommands": [{"text": "set auto-solib-add off"}]
     },
     {
+      "name": "dec emit pre-TR IR",
+      "type": "cppdbg",
+      "MIMode": "gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "${file}",
+        "--emit-tr-input-ir=${workspaceFolder}/work_dir/02-mlsub-input.ll",
+        "--tr-level=2",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Clean and Build",
+      "environment": [
+        {
+          "name": "NOTDEC_POLY_FUNCS",
+          "value": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json"
+        },
+        {
+          "name": "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT",
+          "value": "1"
+        }
+      ],
+      // "setupCommands": [{"text": "set auto-solib-add off"}]
+    },
+    {
+      "name": "dec frozen TR only",
+      "type": "cppdbg",
+      "MIMode": "gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "${workspaceFolder}/work_dir/02-mlsub-input.ll",
+        "-o",
+        "${workspaceFolder}/work_dir/04-stage-b.out.ll",
+        "--tr-level=2",
+        "--frozen-tr-input-ir",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Clean and Build",
+      "environment": [
+        {
+          "name": "NOTDEC_POLY_FUNCS",
+          "value": "/sn640/NotDec-Exp/ICSE-HOWARD/polymorphic_funcs.json"
+        },
+        {
+          "name": "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT",
+          "value": "1"
+        }
+      ],
+      // "setupCommands": [{"text": "set auto-solib-add off"}]
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "GraphTest",

@@ -160,16 +160,33 @@ std::string formatLLVMType(llvm::Type *Ty) {
 void warnIgnoredPNDiffOverride(llvm::StringRef Kind, llvm::StringRef Path,
                                llvm::StringRef TargetKey,
                                OverridePNDiffState State,
-                               const ExtValuePtr &Value) {
-  llvm::errs() << "Warning: skip MLsub " << Kind << " pndiff";
+                               const ExtValuePtr &Value,
+                               bool *WroteHeader) {
+  std::string Message;
+  llvm::raw_string_ostream OS(Message);
+  OS << "Warning: skip MLsub " << Kind << " pndiff";
   if (!Path.empty()) {
-    llvm::errs() << " at " << Path;
+    OS << " at " << Path;
   }
-  llvm::errs() << ": target '" << TargetKey << "' has non-PNDiff LLVM type '"
-               << formatLLVMType(getType(Value))
-               << "'; requested state '"
-               << getOverridePNDiffStateName(State)
-               << "' will be ignored\n";
+  OS << ": target '" << TargetKey << "' has non-PNDiff LLVM type '"
+     << formatLLVMType(getType(Value))
+     << "'; requested state '"
+     << getOverridePNDiffStateName(State)
+     << "' will be ignored\n";
+  OS.flush();
+
+  if (WroteHeader != nullptr && notdec::hasWorkDir()) {
+    if (!*WroteHeader) {
+      notdec::appendWorkDirLog(
+          kPNDiffWarnFile,
+          "# Override / validation warnings\n\n");
+      *WroteHeader = true;
+    }
+    notdec::appendWorkDirLog(kPNDiffWarnFile, Message);
+    return;
+  }
+
+  llvm::errs() << Message;
 }
 
 struct ResolvedPNDiffTarget {
@@ -689,7 +706,7 @@ notdec::mlsub::MLsubRecovery::OverrideTypeRecipe buildExtraConstraintOperand(
 
 void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
                           const llvm::json::Object &Spec,
-                          llvm::StringRef FuncPath) {
+                          llvm::StringRef FuncPath, bool *WroteHeader) {
   auto *PNDiffValue = Spec.get("pndiff");
   if (PNDiffValue == nullptr) {
     return;
@@ -725,7 +742,7 @@ void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
     if (!Node->isPNRelated()) {
       if (State == OverridePNDiffState::Number) {
         warnIgnoredPNDiffOverride("override", EntryPath, Target.Key, State,
-                                  Target.Value);
+                                  Target.Value, WroteHeader);
         continue;
       }
       failSignatureOverride(
@@ -748,7 +765,8 @@ void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
 
 void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
                                  const llvm::json::Object &Spec,
-                                 llvm::StringRef FuncPath) {
+                                 llvm::StringRef FuncPath,
+                                 bool *WroteHeader) {
   auto *Bindings = getExtraConstraintBindings(Spec, FuncPath);
   auto *ActionsValue = Spec.get("actions");
   if (ActionsValue == nullptr) {
@@ -798,7 +816,7 @@ void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
     if (!Node->isPNRelated()) {
       if (State == OverridePNDiffState::Number) {
         warnIgnoredPNDiffOverride("extra constraints", ActionPath, Target.Key,
-                                  State, Target.Value);
+                                  State, Target.Value, WroteHeader);
         continue;
       }
       failExtraConstraints(
@@ -1278,15 +1296,20 @@ std::string formatConstraintStateSummary(ConstraintsGenerator &CG,
          ", op1=" + RightState;
 }
 
-void writePNDiffWarnings(const std::string &Path, AllGraphs &AG) {
+void writePNDiffWarnings(const std::string &Path, AllGraphs &AG,
+                         bool PrependBlankLine = false) {
   std::error_code EC;
-  llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+  llvm::raw_fd_ostream Out(Path, EC,
+                           llvm::sys::fs::OF_Text | llvm::sys::fs::OF_Append);
   if (EC) {
     llvm::errs() << "Cannot open PNDiff warning output file " << Path << ": "
                  << EC.message() << "\n";
     std::abort();
   }
 
+  if (PrependBlankLine) {
+    Out << "\n";
+  }
   Out << "# Residual PNDiff constraints after solve\n\n";
   bool AnyResidual = false;
 
@@ -1394,7 +1417,10 @@ void MLsubRecovery::run() {
       std::abort();
     }
     ValueTypes << "# Final Value -> binarysub UType mapping\n\n";
+    llvm::sys::fs::remove(join(*WorkDir, kPNDiffWarnFile.str()));
   }
+
+  WrotePNDiffOverrideWarningHeader = false;
 
   if (envFlagEnabled(kBinarysubTraceEnv)) {
     if (!WorkDir) {
@@ -1484,7 +1510,8 @@ void MLsubRecovery::run() {
   topDownPhase();
 
   if (WorkDir) {
-    writePNDiffWarnings(join(*WorkDir, kPNDiffWarnFile.str()), AG);
+    writePNDiffWarnings(join(*WorkDir, kPNDiffWarnFile.str()), AG,
+                        WrotePNDiffOverrideWarningHeader);
     writePNDiffAnnotatedModule(
         M, join(*WorkDir, kPNDiffAnnotatedFile.str()), AG);
   }
@@ -1772,7 +1799,8 @@ void MLsubRecovery::applySummaryOverride(ConstraintsGenerator &G,
   auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
   assert(FuncNode != nullptr);
   G.addSubtype(binarysub::make_function(Args, RetRecipe.Root), FuncNode);
-  applyPNDiffOverrides(G, Func, Obj, FuncPath);
+  applyPNDiffOverrides(G, Func, Obj, FuncPath,
+                       &WrotePNDiffOverrideWarningHeader);
 }
 
 void MLsubRecovery::applyUpperBoundSignatureOverride(
@@ -1835,7 +1863,8 @@ void MLsubRecovery::applyUpperBoundSignatureOverride(
   auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
   assert(FuncNode != nullptr);
   G.addSubtype(FuncNode, binarysub::make_function(Args, RetRecipe.Root));
-  applyPNDiffOverrides(G, Func, Obj, FuncPath);
+  applyPNDiffOverrides(G, Func, Obj, FuncPath,
+                       &WrotePNDiffOverrideWarningHeader);
 }
 
 void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
@@ -1846,7 +1875,8 @@ void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
     failExtraConstraints(Func.getName(), "expected object");
   }
   applyExtraConstraintSubtypeActions(*this, G, Func, *Obj, Func.getName());
-  applyExtraConstraintPNDiffs(G, Func, *Obj, Func.getName());
+  applyExtraConstraintPNDiffs(G, Func, *Obj, Func.getName(),
+                              &WrotePNDiffOverrideWarningHeader);
 }
 
 void MLsubRecovery::bottomUpPhase() {
