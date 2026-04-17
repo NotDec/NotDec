@@ -31,6 +31,7 @@
   - 声明当前输入已经是 `--emit-tr-input-ir` 导出的冻结 IR
   - 用于显式进入阶段 B 语义
   - 当前会跳过 pre-type-recovery 标准化 pass，直接进入 `MLsub`
+  - 只接受 `.ll` / `.bc` 输入
   - 当前启用 `NOTDEC_EXTRA_CONSTRAINTS` 时必须同时传入
 
 仓库内的 `run.sh` 和 `.vscode/launch.json` 里的常用配置现在也统一走这套命令行参数。

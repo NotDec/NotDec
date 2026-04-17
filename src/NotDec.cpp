@@ -146,6 +146,22 @@ configurePrimitiveSemanticRegistry(const notdec::Options &Opts) {
   return {};
 }
 
+std::string describeInputSuffix(llvm::StringRef Suffix) {
+  return Suffix.empty() ? std::string("<no extension>") : Suffix.str();
+}
+
+void printFrozenTRInputWorkflowHint(llvm::StringRef InputPath) {
+  llvm::errs() << "Hint: stage B expects frozen .ll/.bc from "
+                  "--emit-tr-input-ir.\n"
+               << "Example stage A:\n"
+               << "  ./build/bin/notdec " << InputPath
+               << " --emit-tr-input-ir=/tmp/notdec-tr-input.ll --tr-level=2\n"
+               << "Example stage B:\n"
+               << "  NOTDEC_EXTRA_CONSTRAINTS=<constraints.json> "
+                  "./build/bin/notdec /tmp/notdec-tr-input.ll --tr-level=2 "
+                  "--frozen-tr-input-ir -o /tmp/out.ll\n";
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -153,6 +169,8 @@ int main(int argc, char *argv[]) {
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
   const char *ExtraConstraintsFile = std::getenv("NOTDEC_EXTRA_CONSTRAINTS");
+  std::string insuffix = getSuffix(inputFilename);
+  std::string InputSuffixDesc = describeInputSuffix(insuffix);
   if (!workDirOverride.empty() && !genWorkDir) {
     llvm::errs() << "Error: --work-dir requires --gen-work-dir.\n";
     return 1;
@@ -171,18 +189,34 @@ int main(int argc, char *argv[]) {
                     "--emit-tr-input-ir.\n";
     return 1;
   }
-  if (ExtraConstraintsFile != nullptr && !frozenTRInputIR) {
-    llvm::errs()
-        << "Error: NOTDEC_EXTRA_CONSTRAINTS requires --frozen-tr-input-ir.\n"
-        << "Hint: first run --emit-tr-input-ir=<path>, then rerun notdec on "
-           "that frozen .ll/.bc with --frozen-tr-input-ir.\n";
-    return 1;
-  }
   if (ExtraConstraintsFile != nullptr && !emitTRInputIR.empty()) {
     llvm::errs() << "Error: NOTDEC_EXTRA_CONSTRAINTS cannot be combined with "
                     "--emit-tr-input-ir.\n"
-                 << "Hint: use the two-step workflow: export frozen TR input "
-                    "IR first, then run the stage-B command separately.\n";
+                 << "Reason: --emit-tr-input-ir is stage A, while "
+                    "NOTDEC_EXTRA_CONSTRAINTS is stage B.\n";
+    printFrozenTRInputWorkflowHint(inputFilename);
+    return 1;
+  }
+  if (ExtraConstraintsFile != nullptr &&
+      insuffix != ".ll" && insuffix != ".bc") {
+    llvm::errs() << "Error: NOTDEC_EXTRA_CONSTRAINTS only supports frozen "
+                    ".ll/.bc stage-B inputs, but current input "
+                 << inputFilename << " has suffix " << InputSuffixDesc
+                 << ".\n"
+                 << "Reason: extra-constraint selectors and ir_anchor are "
+                    "interpreted against frozen pre-type-recovery LLVM IR, "
+                    "not against raw frontend input.\n";
+    printFrozenTRInputWorkflowHint(inputFilename);
+    return 1;
+  }
+  if (ExtraConstraintsFile != nullptr && !frozenTRInputIR) {
+    llvm::errs() << "Error: NOTDEC_EXTRA_CONSTRAINTS requires "
+                    "--frozen-tr-input-ir even when the input is "
+                 << InputSuffixDesc << ".\n"
+                 << "Reason: the flag makes stage-B semantics explicit and "
+                    "ensures the pre-type-recovery normalization pipeline is "
+                    "not rerun.\n";
+    printFrozenTRInputWorkflowHint(inputFilename);
     return 1;
   }
   notdec::Options opts{
@@ -210,11 +244,14 @@ int main(int argc, char *argv[]) {
 
   notdec::setWorkDir(opts.workDir);
 
-  std::string insuffix = getSuffix(inputFilename);
   if (frozenTRInputIR && insuffix != ".ll" && insuffix != ".bc") {
     llvm::errs() << "Error: --frozen-tr-input-ir requires a .ll or .bc input, "
-                    "got "
-                 << insuffix << ".\n";
+                    "but current input "
+                 << inputFilename << " has suffix " << InputSuffixDesc
+                 << ".\n"
+                 << "Reason: stage B runs directly on frozen LLVM IR rather "
+                    "than on raw frontend input.\n";
+    printFrozenTRInputWorkflowHint(inputFilename);
     return 1;
   }
   notdec::DecompilerContext Ctx(inputFilename, opts);
