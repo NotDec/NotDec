@@ -32,7 +32,7 @@
 
 ## 1.1 当前进展
 
-截至 2026-04-16，这份计划里已有两块基础设施落地：
+截至 2026-04-17，这份计划里最初设想的 anchor 基础设施已经基本落地：
 
 1. `MLsub` 入口 IR dump 已统一更名为 `02-mlsub-input.ll`
 2. `MLsubRecovery::run()` 已同步导出
@@ -40,8 +40,7 @@
 3. `NOTDEC_EXTRA_CONSTRAINTS` 已开始消费这份锚点信息，并会在 `MLsub`
    开始前严格校验：
    - `ir_anchor.stage`
-   - `ir_anchor.content_hash.algorithm`
-   - `ir_anchor.content_hash.value`
+   - `ir_anchor.sha256`
    - `ir_anchor.data_layout`
    - `ir_anchor.target_triple`
 
@@ -61,19 +60,20 @@
 3. 这份 anchor 方案后续也不需要再围着 selector 展开
 4. 更适合把后续实现重心转回其他主链路问题
 
-和原计划不同的是，当前实现为了先把接口打通，摘要字段暂时不是
-`sha256`，而是：
+这份计划里原本保留的 `md5/content_hash` 过渡层现在已经收掉，当前 workdir
+与 `NOTDEC_EXTRA_CONSTRAINTS` 都统一只使用：
 
 ```json
 {
-  "content_hash": {
-    "algorithm": "md5",
-    "value": "..."
+  "ir_anchor": {
+    "stage": "mlsub-input",
+    "sha256": "..."
   }
 }
 ```
 
-也就是说，当前已经把“锚点校验链路”打通，但 hash 算法还保留升级空间。
+也就是说，当前“冻结 IR 锚点校验链路”不仅已经打通，而且已经和原始设计里的
+`sha256` 方向重新对齐。
 
 ## 2. 当前代码证据
 
@@ -199,25 +199,21 @@
 
 当前实现状态：
 
-1. provenance/anchor 字段已落地，但命名略有调整
-2. 当前不是单独的 `sha256` 字段，而是：
+1. provenance/anchor 字段已落地
+2. 当前已经重新收敛回原设计里的单字段 `sha256`：
 
 ```json
 {
   "ir_anchor": {
     "stage": "mlsub-input",
-    "content_hash": {
-      "algorithm": "md5",
-      "value": "..."
-    },
+    "sha256": "...",
     "data_layout": "...",
     "target_triple": "..."
   }
 }
 ```
 
-3. 这样做是为了先把锚点校验和算法标识一起打通，后续再把
-   `algorithm/value` 升级为 `sha256` 或兼容双格式
+3. 旧的 `content_hash/md5` 过渡格式已经不再保留
 
 ### 3.3 `sha256` 应该 hash 什么
 
@@ -246,19 +242,19 @@
 3. 它依然是在某一份冻结 IR 上解释的
 4. 因此 anchor 方案并不会因为 selector 先走轻量版而失去意义
 
-当前实现已经完成“对 `MLsub` 当前输入模块文本求摘要”这一步，只是算法暂时为
-`md5`：
+当前实现已经完成“对 `MLsub` 当前输入模块文本求 `sha256` 摘要”这一步：
 
-1. 在 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:153](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L153)
-   到 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:170](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L153)
+1. 在 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:259](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L259)
+   到 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:294](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L259)
    新增：
-   - `computeMD5Hex()`
+   - `computeSHA256Hex()`
    - `renderModuleToString()`
-2. 在 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:885](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L885)
-   到 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:893](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L885)
+   - `writeMLsubInputAnchor()`
+2. 在 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:1375](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L1375)
+   到 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:1388](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L1375)
    的 `MLsubRecovery::run()` 中：
    - 先把当前模块打印成文本
-   - 再对文本求 `md5`
+   - 再对文本求 `sha256`
 
 ## 4. 应该怎样重新切分阶段
 
@@ -535,11 +531,10 @@
    的 `MLsubRecovery::validateExtraConstraintsFile()` 中接入严格校验
 3. 当前已严格校验：
    - `ir_anchor.stage`
-   - `ir_anchor.content_hash.algorithm`
-   - `ir_anchor.content_hash.value`
+   - `ir_anchor.sha256`
    - `ir_anchor.data_layout`
    - `ir_anchor.target_triple`
-4. 当前未完成的只剩“把摘要算法从 `md5` 升级到计划里的 `sha256`”
+4. 这一步现在已经完成，不再保留 `md5` 兼容层
 
 ### 10.3 第三步：新增阶段 A 专用 CLI
 

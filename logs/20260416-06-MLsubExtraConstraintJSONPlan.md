@@ -35,7 +35,7 @@
 
 ## 1.1 当前进展
 
-截至 2026-04-16，这份方案里已经有一部分最小实现落地：
+截至 2026-04-17，这份方案里最初规划的最小可用链路已经基本落地：
 
 1. 已新增环境变量入口 `NOTDEC_EXTRA_CONSTRAINTS`
 2. 已支持在 `MLsubRecovery::run()` 中读取 JSON 并校验 `ir_anchor`
@@ -49,6 +49,10 @@
 5. 已在 `MLsubRecovery::bottomUpPhase()` 中于 `G->run()` 之后真正应用这批
    extra constraints
 6. workdir 中已开始导出 `SelectableValues.txt`
+7. 冻结 IR 锚点当前已经统一收敛到：
+   - `ir_anchor.sha256`
+   - `ir_anchor.data_layout`
+   - `ir_anchor.target_triple`
 
 当前仍未实现的部分包括：
 
@@ -66,6 +70,12 @@
 
 1. [logs/20260416-09-MLsubExtraConstraintsAnchorValidation.md](/sn640/NotDec/logs/20260416-09-MLsubExtraConstraintsAnchorValidation.md)
 2. [logs/20260416-10-MLsubExtraConstraintsPndiffActions.md](/sn640/NotDec/logs/20260416-10-MLsubExtraConstraintsPndiffActions.md)
+3. [logs/20260417-01-MLsubExtraConstraintsSubtypeEqualActions.md](/sn640/NotDec/logs/20260417-01-MLsubExtraConstraintsSubtypeEqualActions.md)
+4. [logs/20260417-02-MLsubExtraConstraintsNamedValue.md](/sn640/NotDec/logs/20260417-02-MLsubExtraConstraintsNamedValue.md)
+5. [logs/20260417-03-MLsubExtraConstraintsBindings.md](/sn640/NotDec/logs/20260417-03-MLsubExtraConstraintsBindings.md)
+6. [logs/20260417-04-MLsubExtraConstraintsInstOperand.md](/sn640/NotDec/logs/20260417-04-MLsubExtraConstraintsInstOperand.md)
+7. [logs/20260417-05-MLsubNamedOperandAndSelectableValues.md](/sn640/NotDec/logs/20260417-05-MLsubNamedOperandAndSelectableValues.md)
+8. [logs/20260417-07-MLsubAnchorSHA256Only.md](/sn640/NotDec/logs/20260417-07-MLsubAnchorSHA256Only.md)
 
 ## 2. 当前代码证据
 
@@ -681,13 +691,10 @@ main::%bb.entry.i7:operand:1 -> main::arg1
 当前状态：
 
 1. 这一阶段已经落地
-2. 已落地：
-   - `NOTDEC_EXTRA_CONSTRAINTS`
-   - `target.kind = "arg" | "ret"`
-   - `subtype`
-   - `equal`
-   - `pndiff`
-   - `buildOverrideType()` 在 extra constraints 中的复用
+2. 对应的函数边界能力已经稳定可用
+3. 当前实现实际上已经继续超出了这个阶段：
+   - `target.kind` 不再只限于 `arg | ret`
+   - 函数内 selector 与 `bindings` 也已接通
 
 ### 阶段 1.5：先补轻量级函数内 value selector
 
@@ -705,9 +712,13 @@ main::%bb.entry.i7:operand:1 -> main::arg1
 
 当前状态：
 
-1. 这一阶段已经开始落地
-2. 已支持 `named_value`
+1. 这一阶段已经完成
+2. `named_value` 已稳定可用
 3. 当前语义是“当前函数内第一个同名非 `void` instruction result”
+4. 后续没有继续把主要精力停留在这条轻量路径上，而是已经继续接到了：
+   - `inst`
+   - `operand`
+   - `binding`
 
 ### 阶段 2：调试辅助与 selector 可发现性
 
@@ -722,7 +733,8 @@ main::%bb.entry.i7:operand:1 -> main::arg1
 1. `SelectableValues.txt` 已落地
 2. `operand` 已同时支持 `inst` / `name`
 3. selector 基础链路已经够用
-4. 这部分暂时不再继续深挖，先作为已打通能力保留
+4. `binding` 与 stable-id instruction selector 也已落地
+5. 这部分暂时不再继续深挖，先作为已打通能力保留
 
 ### 阶段 3：再考虑扩展 selector
 
