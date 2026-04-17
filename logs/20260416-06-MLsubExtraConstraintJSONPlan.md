@@ -40,8 +40,8 @@
 1. 已新增环境变量入口 `NOTDEC_EXTRA_CONSTRAINTS`
 2. 已支持在 `MLsubRecovery::run()` 中读取 JSON 并校验 `ir_anchor`
 3. 已支持最小函数级 action 子集：
-   - `functions.<name>.actions[*].kind = "pndiff"`
-   - `target.kind = "arg" | "ret"`
+   - `functions.<name>.actions[*].kind = "pndiff" | "subtype" | "equal"`
+   - `target.kind = "arg" | "ret" | "named_value"`
    - `state = "ptr" | "number"`
 4. 已在 `MLsubRecovery::bottomUpPhase()` 中于 `G->run()` 之后真正应用这批
    extra constraints
@@ -50,7 +50,7 @@
 
 1. `bindings`
 2. `target.kind = "inst" | "operand" | "binding"`
-3. `actions.kind = "subtype" | "equal"`
+3. 更完整的函数内 value selector
 4. `SelectableValues.txt`
 
 相关实现日志：
@@ -121,6 +121,19 @@
 
 所以新 schema 不应该依赖 `ValueNamer` 生成的运行期临时名，而应该直接复用 `toStableString()` 一致的外显格式。
 
+不过从近期实现复杂度看，可以接受一条更轻量的过渡路线：
+
+1. 第一小步先只支持“函数内有名字的非 `void` instruction result”
+2. 通过 `Value::getName()` 在当前函数线性扫描
+3. 找到第一个同名 instruction 就返回
+4. 等这条路径证明有价值后，再补 `toStableString()` 风格的正式 selector
+
+也就是说：
+
+1. `toStableString()` 仍然是长期更稳的正式方向
+2. 但短期实现不一定要一开始就把 stable-id / operand / binding 全做完
+3. 可以先用“named value selector”把函数内 value 注入路径打通
+
 ### 2.4 operand/use-site 是必须支持的
 
 当前 `ConstraintsGenerator` 内部不是直接用 `llvm::Value *` 做 key，而是用：
@@ -158,6 +171,12 @@
 3. 基于 `ValueNamer` 的临时名 selector
 4. union / intersection / recursive type expr
 5. 自动重写 IR
+
+补充说明：
+
+1. 这里“不建议支持”的是 `ValueNamer` 这类运行期补名
+2. 不是 LLVM IR 自身已经存在的 `%foo` 这类有名 SSA value
+3. 如果近期为了快速落地先支持函数内有名 instruction，仍然和这里的非目标不冲突
 
 ## 4. 推荐的顶层结构
 
@@ -208,9 +227,51 @@
 
 ## 5. selector 设计
 
-### 5.1 第一版支持的 `target.kind`
+### 5.1 近期轻量版
 
-第一版建议只支持：
+如果目标是尽快把“函数内具体 value 定位”这条路径打通，我现在更倾向于先支持：
+
+1. `arg`
+2. `ret`
+3. `named_value`
+
+分别表示：
+
+1. 当前函数的第 `index` 个参数
+2. 当前函数返回值
+3. 当前函数里“第一个名字等于给定字符串”的非 `void` instruction result
+
+推荐格式：
+
+```json
+{ "kind": "arg", "index": 0 }
+{ "kind": "ret" }
+{ "kind": "named_value", "name": "len_add" }
+```
+
+其中 `named_value` 的近期语义建议定成：
+
+1. 只在当前函数内找
+2. 只匹配 `Instruction`
+3. 只接受有结果值的 instruction
+4. 按函数内遍历顺序找第一个 `I.getName() == name` 的结果
+
+这一版的优点是：
+
+1. 不需要先把 stable-id formatter / parser 全部接回 `MLsub`
+2. 不需要马上处理 `operand` 的 use-site 常量包装
+3. 可以先把“局部 value 约束注入”从函数边界扩出去
+
+这一版的局限是：
+
+1. 只能覆盖“有名字的 instruction result”
+2. 无法定位匿名 instruction
+3. 无法直接定位 use-site 常量
+4. 仍然不适合长期作为唯一 selector 方案
+
+### 5.2 长期正式版（先不实现）
+
+长期仍建议把 `target.kind` 扩到：
 
 1. `arg`
 2. `ret`
@@ -226,7 +287,13 @@
 4. 某条指令的第 `index` 个 operand，在内部解析成 use-site 级 `ExtValuePtr`
 5. 引用 `bindings` 里的局部别名
 
-### 5.2 推荐格式
+但当前阶段我建议明确把这部分标成：
+
+1. 设计保留
+2. 近期先不实现
+3. 等轻量版 `named_value` 证明不够用，再继续往这套正式 selector 演进
+
+### 5.3 长期版推荐格式
 
 #### 参数和返回值
 
@@ -263,7 +330,7 @@
 { "kind": "binding", "name": "len_add" }
 ```
 
-### 5.3 为什么不建议用 `ValueNamer`
+### 5.4 为什么不建议用 `ValueNamer`
 
 `ValueNamer` 的名字来自运行期补名，适合打印，不适合长期 JSON 配置。
 
@@ -274,7 +341,11 @@
 3. 无名 instruction
 4. use-site 包装常量
 
-所以 selector 应统一以 `toStableString()` 风格为权威外显 id。
+所以：
+
+1. 长期正式 selector 应统一以 `toStableString()` 风格为权威外显 id
+2. 近期轻量版如果先支持 `named_value`，也应当明确它只是过渡入口
+3. 不应把 `named_value` 和 `ValueNamer` 混为一谈
 
 ## 6. action 设计
 
@@ -499,15 +570,13 @@
 2. 当前 loader 已支持：
    - `functions` 顶层对象
    - `functions.<name>.actions` 数组
-   - `actions[*].kind = "pndiff"`
-   - `target.kind = "arg" | "ret"`
+   - `actions[*].kind = "pndiff" | "subtype" | "equal"`
+   - `target.kind = "arg" | "ret" | "named_value"`
 3. 当前仍未支持：
    - `bindings`
    - `inst`
    - `operand`
    - `binding`
-   - `subtype`
-   - `equal`
 
 ### 9.2 应用阶段
 
@@ -535,7 +604,14 @@
 2. 在 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:1370](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L1370)
    到 [src/TypeRecovery/mlsub/MLsubGenerator.cpp:1377](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp#L1370)
    实现 `MLsubRecovery::applyExtraConstraints()`
-3. 当前应用阶段只会处理 `pndiff`
+3. 当前应用阶段已经支持：
+   - `pndiff`
+   - `subtype`
+   - `equal`
+4. 当前仍未支持具体函数内 value selector：
+   - `inst`
+   - `operand`
+   - `binding`
 
 ### 9.3 selector 解析失败策略
 
@@ -571,49 +647,70 @@ main::%bb.entry.i7:operand:1 -> main::arg1
 
 这能显著降低用户手写 selector 的成本，也便于回归测试。
 
+如果近期先走轻量版，我建议这个文件的第一阶段内容可以更简单：
+
+1. 先列出每个函数内所有“有名字的非 `void` instruction result”
+2. 格式直接和 JSON 的 `named_value.name` 对齐
+3. 等后续接上 stable-id / operand 后，再扩成完整 selector 清单
+
 ## 11. 分阶段实施建议
 
-### 阶段 1：最小可用版
+### 阶段 1：当前已落地的函数边界版
 
-先支持：
+已支持：
 
 1. 新环境变量 `NOTDEC_EXTRA_CONSTRAINTS`
 2. `target.kind`
    - `arg`
    - `ret`
-   - `inst`
-   - `operand`
-   - `binding`
 3. `action.kind`
    - `subtype`
    - `equal`
    - `pndiff`
 4. 复用现有 `buildOverrideType()`
 
-这是最有价值、也最贴合当前架构的一版。
+当前状态：
+
+1. 这一阶段已经落地
+2. 已落地：
+   - `NOTDEC_EXTRA_CONSTRAINTS`
+   - `target.kind = "arg" | "ret"`
+   - `subtype`
+   - `equal`
+   - `pndiff`
+   - `buildOverrideType()` 在 extra constraints 中的复用
+
+### 阶段 1.5：先补轻量级函数内 value selector
+
+先支持：
+
+1. `target.kind = "named_value"`
+2. 只匹配当前函数内有名字的非 `void` instruction result
+3. 继续让 `subtype/equal/pndiff` 共享这一条 selector 解析路径
+
+这样做的目的不是替代长期 schema，而是：
+
+1. 先把“函数体内具体 value 注入”打通
+2. 把实现复杂度控制在 `inst/operand/binding` 之前
+3. 给后续是否值得继续做稳定 selector 一个更早的反馈点
 
 当前状态：
 
-1. 这一阶段已完成其中一半左右
-2. 已落地：
-   - `NOTDEC_EXTRA_CONSTRAINTS`
-   - `pndiff`
-   - `target.kind = "arg" | "ret"`
-3. 尚未落地：
+1. 这一阶段已经开始落地
+2. 已支持 `named_value`
+3. 当前语义是“当前函数内第一个同名非 `void` instruction result”
+
+### 阶段 2：正式 selector 与调试辅助（先不实现）
+
+再支持：
+
+1. `target.kind`
    - `inst`
    - `operand`
    - `binding`
-   - `subtype`
-   - `equal`
-   - `buildOverrideType()` 在 extra constraints 中的复用
-
-### 阶段 2：调试辅助
-
-增加：
-
-1. `SelectableValues.txt`
-2. selector 冲突与解析失败的更明确报错
-3. 在 stderr 中打印 `Applying MLsub extra constraints to ...`
+2. `bindings`
+3. `SelectableValues.txt`
+4. selector 冲突与解析失败的更明确报错
 
 ### 阶段 3：再考虑扩展 selector
 
@@ -636,7 +733,13 @@ main::%bb.entry.i7:operand:1 -> main::arg1
 2. 报错难以理解
 3. JSON 很难长期维护
 
-所以第一版必须统一用 stable id。
+所以长期看仍然应该统一到 stable id。
+
+但从近期实现节奏看：
+
+1. 可以先接受 `named_value` 这类过渡 selector
+2. 前提是文档里明确它不是最终格式
+3. 并继续把 `operand` / stable-id 作为后续正式目标
 
 ### 12.2 operand selector 是必要但实现要谨慎
 

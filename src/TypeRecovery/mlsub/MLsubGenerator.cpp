@@ -143,6 +143,24 @@ struct ResolvedConstraintTarget {
   std::string Key;
 };
 
+llvm::Instruction *findFirstNamedInstruction(llvm::Function &Func,
+                                             llvm::StringRef Name) {
+  for (llvm::BasicBlock &BB : Func) {
+    for (llvm::Instruction &I : BB) {
+      if (I.getType()->isVoidTy()) {
+        continue;
+      }
+      if (!I.hasName()) {
+        continue;
+      }
+      if (I.getName() == Name) {
+        return &I;
+      }
+    }
+  }
+  return nullptr;
+}
+
 void appendOverrideConstraints(
     notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &Into,
     const notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &From) {
@@ -310,7 +328,27 @@ ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(
         .Key = "arg:" + std::to_string(*Index),
     };
   }
-  failExtraConstraints(TargetPath, "pndiff target kind must be 'arg' or 'ret'");
+  if (*Kind == "named_value") {
+    auto Name = TargetObj->getString("name");
+    if (!Name) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid string field 'name'");
+    }
+    auto *Inst = findFirstNamedInstruction(Func, *Name);
+    if (Inst == nullptr) {
+      failExtraConstraints(
+          TargetPath,
+          ("named_value target '" + Name->str() +
+           "' not found as a non-void instruction in function")
+              .c_str());
+    }
+    return {
+        .Value = Inst,
+        .Key = "named_value:" + Name->str(),
+    };
+  }
+  failExtraConstraints(TargetPath,
+                       "pndiff target kind must be 'arg', 'ret', or 'named_value'");
 }
 
 ResolvedConstraintTarget resolveExtraConstraintTarget(
@@ -353,8 +391,27 @@ ResolvedConstraintTarget resolveExtraConstraintTarget(
         .Key = "arg:" + std::to_string(*Index),
     };
   }
+  if (*Kind == "named_value") {
+    auto Name = TargetObj->getString("name");
+    if (!Name) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid string field 'name'");
+    }
+    auto *Inst = findFirstNamedInstruction(Func, *Name);
+    if (Inst == nullptr) {
+      failExtraConstraints(
+          TargetPath,
+          ("named_value target '" + Name->str() +
+           "' not found as a non-void instruction in function")
+              .c_str());
+    }
+    return {
+        .Value = Inst,
+        .Key = "named_value:" + Name->str(),
+    };
+  }
   failExtraConstraints(TargetPath,
-                       "target kind must be 'arg' or 'ret' currently");
+                       "target kind must be 'arg', 'ret', or 'named_value' currently");
 }
 
 void validateExtraConstraintOperand(const llvm::json::Value &Value,

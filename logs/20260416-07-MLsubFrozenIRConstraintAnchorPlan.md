@@ -45,6 +45,13 @@
    - `ir_anchor.data_layout`
    - `ir_anchor.target_triple`
 
+同时结合后续实现，当前还需要补的一点是：
+
+1. 具体函数内 value selector 仍未完整落地
+2. 当前 `extra constraints` 的 `target.kind` 已支持 `arg` / `ret`，并开始支持轻量级的 `named_value`
+3. 如果近期还要继续往前推，一条更轻量的路线是先沿着“函数内有名字的 instruction result”继续扩
+4. 即便走这条轻量路线，`ir_anchor` 仍然是必要的
+
 和原计划不同的是，当前实现为了先把接口打通，摘要字段暂时不是
 `sha256`，而是：
 
@@ -223,6 +230,13 @@
 
 这样 hash 对 selector 才有真正约束意义。
 
+这里补一个我现在更明确的判断：
+
+1. 即使近期 selector 不直接使用 `toStableString()`
+2. 而是先用“函数内有名字的 value”
+3. 它依然是在某一份冻结 IR 上解释的
+4. 因此 anchor 方案并不会因为 selector 先走轻量版而失去意义
+
 当前实现已经完成“对 `MLsub` 当前输入模块文本求摘要”这一步，只是算法暂时为
 `md5`：
 
@@ -279,6 +293,13 @@
 5. 继续 top-down / dump-htypes / llvm2c 等后续流程
 
 在这一阶段里，原则上不应再运行任何会改写 selector 锚点结构的 pre-MLsub pass。
+
+如果近期 selector 先采用更轻量的“函数内有名字的 instruction result”方案，
+这一点反而更重要，因为：
+
+1. 名字同样会受 IR 改写影响
+2. 甚至比 stable-id 更依赖“当前看到的正是当时写 JSON 的那份 IR”
+3. 所以锚点校验和冻结 IR 仍然应当先于 selector 解析
 
 ## 5. “只允许 LLVM IR 输入”应该怎么理解
 
@@ -543,6 +564,15 @@
 4. JSON selector 与 `ir_anchor.sha256` 统一绑定 `02-mlsub-input.ll`
 5. 启用 JSON 约束注入时，阶段 B 只接受冻结后的 `.ll/.bc`
 6. 不再把 `tr-level=1` 视为阶段 A 的替代品
+
+如果把“近期能更快落地”也考虑进去，我会把第 4 步再细分成两层：
+
+1. 近期先支持函数内有名字的 value selector
+   - 例如只匹配当前函数内第一个 `I.getName() == name` 的非 `void`
+     instruction result
+2. 长期再把 selector 统一收敛到 stable-id / operand / binding
+   - 这一层当前先不实现，只作为后续正式方向保留
+3. 但这两层都继续绑定同一份 `02-mlsub-input.ll` 的 `ir_anchor`
 
 这样既能把长期方向定住，也能把阶段职责切得更清楚。
 
