@@ -182,6 +182,18 @@ llvm::Instruction *findFirstNamedInstruction(llvm::Function &Func,
   return nullptr;
 }
 
+llvm::Instruction *findInstructionByStableId(llvm::Function &Func,
+                                             llvm::StringRef StableId) {
+  for (llvm::BasicBlock &BB : Func) {
+    for (llvm::Instruction &I : BB) {
+      if (toStableString(ExtValuePtr(&I)) == StableId) {
+        return &I;
+      }
+    }
+  }
+  return nullptr;
+}
+
 void appendOverrideConstraints(
     notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &Into,
     const notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &From) {
@@ -361,6 +373,56 @@ ResolvedConstraintTarget resolveExtraConstraintTargetSelector(
         .Key = "named_value:" + Name->str(),
     };
   }
+  if (*Kind == "inst") {
+    auto Id = TargetObj.getString("id");
+    if (!Id) {
+      failExtraConstraints(TargetPath, "missing or invalid string field 'id'");
+    }
+    auto *Inst = findInstructionByStableId(Func, *Id);
+    if (Inst == nullptr) {
+      failExtraConstraints(
+          TargetPath,
+          ("inst target '" + Id->str() + "' not found in function").c_str());
+    }
+    if (Inst->getType()->isVoidTy()) {
+      failExtraConstraints(TargetPath,
+                           "inst target requires non-void instruction");
+    }
+    return {
+        .Value = Inst,
+        .Key = "inst:" + Id->str(),
+    };
+  }
+  if (*Kind == "operand") {
+    auto InstId = TargetObj.getString("inst");
+    if (!InstId) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid string field 'inst'");
+    }
+    auto Index = TargetObj.getInteger("index");
+    if (!Index) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid integer field 'index'");
+    }
+    auto *Inst = findInstructionByStableId(Func, *InstId);
+    if (Inst == nullptr) {
+      failExtraConstraints(
+          TargetPath,
+          ("operand target instruction '" + InstId->str() +
+           "' not found in function")
+              .c_str());
+    }
+    if (*Index < 0 ||
+        *Index >= static_cast<int64_t>(Inst->getNumOperands())) {
+      failExtraConstraints(TargetPath, "operand target index out of range");
+    }
+    auto OpIndex = static_cast<unsigned>(*Index);
+    auto *Operand = Inst->getOperand(OpIndex);
+    return {
+        .Value = getExtValuePtr(Operand, Inst, *Index),
+        .Key = "operand:" + InstId->str() + ":" + std::to_string(OpIndex),
+    };
+  }
   if (*Kind == "binding") {
     auto Name = TargetObj.getString("name");
     if (!Name) {
@@ -395,11 +457,11 @@ ResolvedConstraintTarget resolveExtraConstraintTargetSelector(
   if (ForPNDiff) {
     failExtraConstraints(
         TargetPath,
-        "pndiff target kind must be 'arg', 'ret', 'named_value', or 'binding'");
+        "pndiff target kind must be 'arg', 'ret', 'named_value', 'inst', 'operand', or 'binding'");
   }
   failExtraConstraints(
       TargetPath,
-      "target kind must be 'arg', 'ret', 'named_value', or 'binding' currently");
+      "target kind must be 'arg', 'ret', 'named_value', 'inst', 'operand', or 'binding' currently");
 }
 
 ResolvedPNDiffTarget resolveExtraConstraintPNDiffTarget(

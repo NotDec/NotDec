@@ -41,16 +41,15 @@
 2. 已支持在 `MLsubRecovery::run()` 中读取 JSON 并校验 `ir_anchor`
 3. 已支持最小函数级 action 子集：
    - `functions.<name>.actions[*].kind = "pndiff" | "subtype" | "equal"`
-   - `target.kind = "arg" | "ret" | "named_value" | "binding"`
+   - `target.kind = "arg" | "ret" | "named_value" | "inst" | "operand" | "binding"`
    - `state = "ptr" | "number"`
 4. 已在 `MLsubRecovery::bottomUpPhase()` 中于 `G->run()` 之后真正应用这批
    extra constraints
 
 当前仍未实现的部分包括：
 
-1. `target.kind = "inst" | "operand"`
-2. 更完整的函数内 value selector
-3. `SelectableValues.txt`
+1. `SelectableValues.txt`
+2. 更完整的 selector 可发现性与调试导出
 
 相关实现日志：
 
@@ -607,7 +606,7 @@
    - `pndiff`
    - `subtype`
    - `equal`
-4. 当前仍未支持具体函数内 value selector：
+4. 当前已经支持具体函数内 value selector：
    - `inst`
    - `operand`
    - `binding`
@@ -699,17 +698,13 @@ main::%bb.entry.i7:operand:1 -> main::arg1
 2. 已支持 `named_value`
 3. 当前语义是“当前函数内第一个同名非 `void` instruction result”
 
-### 阶段 2：正式 selector 与调试辅助（先不实现）
+### 阶段 2：调试辅助与 selector 可发现性
 
-再支持：
+继续补：
 
-1. `target.kind`
-   - `inst`
-   - `operand`
-   - `binding`
-2. `bindings`
-3. `SelectableValues.txt`
-4. selector 冲突与解析失败的更明确报错
+1. `SelectableValues.txt`
+2. selector 冲突与解析失败的更明确报错
+3. 面向手写 JSON 的 selector discoverability 改善
 
 ### 阶段 3：再考虑扩展 selector
 
