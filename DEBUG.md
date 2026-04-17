@@ -74,7 +74,10 @@
 - 作用：记录当前 `mlsub` 输入 IR 的阶段名、数据布局、target triple 和内容摘要
 - 典型用途：给后续约束文件或调试脚本提供机器可读的 IR 锚点，快速确认 selector 是否仍对着同一份冻结 IR
 - 备注：当前内容摘要字段会显式写出算法，便于后续从 `md5` 平滑升级到更强的 hash
-- 相关环境变量：`NOTDEC_EXTRA_CONSTRAINTS` 当前已经支持读取一个 JSON 文件，并在 `MLsub` 开始前校验其中的 `ir_anchor` 是否匹配当前冻结 IR；函数级 `actions` 已支持 `kind = "pndiff" | "subtype" | "equal"`，`target` 当前支持 `arg` / `ret` / `named_value` / `inst` / `operand` / `binding`；其中 `named_value` 表示当前函数里第一个同名非 `void` instruction result，`inst` 的 `id` 和 `operand.inst` 都使用 `toStableString()` 风格的指令 id，`operand` 表示某条 instruction 的第 `index` 个 operand use-site，`binding` 表示引用当前函数 `bindings` 段里的局部 selector 别名
+- 相关环境变量：`NOTDEC_EXTRA_CONSTRAINTS` 当前已经支持读取一个 JSON 文件，并在 `MLsub` 开始前校验其中的 `ir_anchor` 是否匹配当前冻结 IR；函数级 `actions` 已支持 `kind = "pndiff" | "subtype" | "equal"`，`target` 当前支持 `arg` / `ret` / `named_value` / `inst` / `operand` / `binding`；其中 `named_value` 表示当前函数里第一个同名非 `void` instruction result，`inst` 的 `id` 和 `operand.inst` 都使用 `toStableString()` 风格的指令 id，`operand` 现在支持两种 instruction 定位方式：
+  - `operand(inst="main::%foo", index=N)`：按 stable id 定位
+  - `operand(name="foo", index=N)`：按当前函数里第一个同名非 `void` instruction result 定位
+  `binding` 表示引用当前函数 `bindings` 段里的局部 selector 别名
 
 ### `CallGraph.txt`
 
@@ -105,6 +108,18 @@
 - 以 `## SCC: ...` 分块，便于按 SCC 查看
 - `"[+]"` / `"[-]"` 表示当前条目在 binarysub 简化时采用的极性
 - `[memory] <memory> => ...` 表示 memory 总类型
+
+### `SelectableValues.txt`
+
+- 来源：`MLsubRecovery::run()` 在导出 `02-mlsub-input.ll` 后同步生成
+- 作用：列出当前冻结 IR 上可直接写进 `NOTDEC_EXTRA_CONSTRAINTS` 的 selector 提示
+- 典型用途：手写 `inst` / `operand` / `named_value` / `arg` / `ret` selector 时直接抄 workdir 里的示例
+- 当前格式特点：
+  - 每个函数以 `## Function: ...` 分块
+  - 直接列出 `arg` / `ret` / instruction stable id
+  - 对有名非 `void` instruction 额外列出 `named_value(...) -> ...`
+  - 对每条 instruction 列出 `operand(inst="...", index=N)` 示例
+  - 对有名非 `void` instruction 额外列出 `operand(name="...", index=N)` 示例
 
 ### `binarysub-trace.log`
 

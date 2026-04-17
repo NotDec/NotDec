@@ -47,11 +47,19 @@
 
 同时结合后续实现，当前还需要补的一点是：
 
-1. 具体函数内 value selector 仍未完整落地
+1. 具体函数内 value selector 的基础链路已经落地
 2. 当前 `extra constraints` 的 `target.kind` 已支持 `arg` / `ret` /
    `named_value` / `inst` / `operand` / `binding`
-3. 如果近期还要继续往前推，一条更轻量的路线是继续补 selector discoverability，比如导出 `SelectableValues.txt`
-4. 即便走这条轻量路线，`ir_anchor` 仍然是必要的
+3. `operand` 当前同时支持 stable-id 和 name 两条 instruction 定位入口
+4. 当前更适合继续补 selector discoverability，比如 `SelectableValues.txt`
+5. 即便走这条轻量路线，`ir_anchor` 仍然是必要的
+
+当前判断：
+
+1. selector 这一层已经达到“能写、能查、能调”的基础可用状态
+2. 近期不建议继续深挖 selector 语法或再扩新种类
+3. 这份 anchor 方案后续也不需要再围着 selector 展开
+4. 更适合把后续实现重心转回其他主链路问题
 
 和原计划不同的是，当前实现为了先把接口打通，摘要字段暂时不是
 `sha256`，而是：
@@ -572,8 +580,14 @@
    - 例如只匹配当前函数内第一个 `I.getName() == name` 的非 `void`
      instruction result
 2. 长期再把 selector 统一收敛到 stable-id / operand / binding
-   - 这一层当前先不实现，只作为后续正式方向保留
+   - 这一层当前已经基本落地，并补上了 `SelectableValues.txt`
 3. 但这两层都继续绑定同一份 `02-mlsub-input.ll` 的 `ir_anchor`
+
+当前状态更新：
+
+1. 这两层 selector 现在都已经接通到可用程度
+2. 后续暂时不再继续深挖 selector 本身
+3. 这份文档后面如果继续改，重点也应当回到 anchor / 冻结 IR 语义，而不是 selector 细节
 
 这样既能把长期方向定住，也能把阶段职责切得更清楚。
 

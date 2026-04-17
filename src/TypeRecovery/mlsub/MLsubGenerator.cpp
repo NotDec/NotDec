@@ -46,6 +46,7 @@ namespace notdec::mlsub {
 namespace {
 
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
+constexpr llvm::StringLiteral kSelectableValuesFile = "SelectableValues.txt";
 constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
 constexpr llvm::StringLiteral kMLsubInputIRFile = "02-mlsub-input.ll";
 constexpr llvm::StringLiteral kMLsubInputAnchorFile =
@@ -194,6 +195,51 @@ llvm::Instruction *findInstructionByStableId(llvm::Function &Func,
   return nullptr;
 }
 
+llvm::Instruction *resolveOperandInstructionSelector(
+    const llvm::json::Object &TargetObj, llvm::Function &Func,
+    llvm::StringRef TargetPath, std::string &SelectorLabel) {
+  bool HasInst = TargetObj.get("inst") != nullptr;
+  bool HasName = TargetObj.get("name") != nullptr;
+  if (HasInst == HasName) {
+    failExtraConstraints(
+        TargetPath,
+        "operand target must contain exactly one of 'inst' or 'name'");
+  }
+
+  if (HasInst) {
+    auto InstId = TargetObj.getString("inst");
+    if (!InstId) {
+      failExtraConstraints(TargetPath,
+                           "missing or invalid string field 'inst'");
+    }
+    auto *Inst = findInstructionByStableId(Func, *InstId);
+    if (Inst == nullptr) {
+      failExtraConstraints(
+          TargetPath,
+          ("operand target instruction '" + InstId->str() +
+           "' not found in function")
+              .c_str());
+    }
+    SelectorLabel = InstId->str();
+    return Inst;
+  }
+
+  auto Name = TargetObj.getString("name");
+  if (!Name) {
+    failExtraConstraints(TargetPath, "missing or invalid string field 'name'");
+  }
+  auto *Inst = findFirstNamedInstruction(Func, *Name);
+  if (Inst == nullptr) {
+    failExtraConstraints(
+        TargetPath,
+        ("operand target name '" + Name->str() +
+         "' not found as a non-void instruction in function")
+            .c_str());
+  }
+  SelectorLabel = "name:" + Name->str();
+  return Inst;
+}
+
 void appendOverrideConstraints(
     notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &Into,
     const notdec::mlsub::MLsubRecovery::OverrideTypeRecipe &From) {
@@ -253,6 +299,54 @@ void writeMLsubInputAnchor(const llvm::Module &M, llvm::StringRef AnchorPath,
       {"target_triple", M.getTargetTriple()},
   };
   writeJSONFile(AnchorPath, llvm::json::Value(std::move(Anchor)));
+}
+
+void writeSelectableValues(const llvm::Module &M, llvm::StringRef Path) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Cannot open output file " << Path << ": "
+                 << EC.message() << "\n";
+    std::abort();
+  }
+
+  Out << "# Selectable MLsub extra-constraint targets\n\n";
+  for (const llvm::Function &Func : M) {
+    if (Func.isDeclaration()) {
+      continue;
+    }
+    Out << "## Function: " << Func.getName() << "\n";
+    for (const llvm::Argument &Arg : Func.args()) {
+      Out << toStableString(ExtValuePtr(const_cast<llvm::Argument *>(&Arg)))
+          << "\n";
+    }
+    if (!Func.getReturnType()->isVoidTy()) {
+      Out << toStableString(ReturnValue{
+                 .Func = const_cast<llvm::Function *>(&Func)})
+          << "\n";
+    }
+    for (const llvm::BasicBlock &BB : Func) {
+      for (const llvm::Instruction &I : BB) {
+        auto InstId =
+            toStableString(ExtValuePtr(const_cast<llvm::Instruction *>(&I)));
+        Out << InstId << "\n";
+        if (!I.getType()->isVoidTy() && I.hasName()) {
+          Out << "named_value(" << I.getName() << ") -> " << InstId << "\n";
+        }
+        for (unsigned Index = 0; Index < I.getNumOperands(); ++Index) {
+          auto OperandStable = toStableString(getExtValuePtr(
+              I.getOperand(Index), const_cast<llvm::Instruction *>(&I), Index));
+          Out << "operand(inst=\"" << InstId << "\", index=" << Index
+              << ") -> " << OperandStable << "\n";
+          if (!I.getType()->isVoidTy() && I.hasName()) {
+            Out << "operand(name=\"" << I.getName() << "\", index=" << Index
+                << ") -> " << OperandStable << "\n";
+          }
+        }
+      }
+    }
+    Out << "\n";
+  }
 }
 
 llvm::StringRef getOverrideKindLabel(bool RequireDefinition) {
@@ -394,24 +488,14 @@ ResolvedConstraintTarget resolveExtraConstraintTargetSelector(
     };
   }
   if (*Kind == "operand") {
-    auto InstId = TargetObj.getString("inst");
-    if (!InstId) {
-      failExtraConstraints(TargetPath,
-                           "missing or invalid string field 'inst'");
-    }
     auto Index = TargetObj.getInteger("index");
     if (!Index) {
       failExtraConstraints(TargetPath,
                            "missing or invalid integer field 'index'");
     }
-    auto *Inst = findInstructionByStableId(Func, *InstId);
-    if (Inst == nullptr) {
-      failExtraConstraints(
-          TargetPath,
-          ("operand target instruction '" + InstId->str() +
-           "' not found in function")
-              .c_str());
-    }
+    std::string SelectorLabel;
+    auto *Inst = resolveOperandInstructionSelector(TargetObj, Func, TargetPath,
+                                                   SelectorLabel);
     if (*Index < 0 ||
         *Index >= static_cast<int64_t>(Inst->getNumOperands())) {
       failExtraConstraints(TargetPath, "operand target index out of range");
@@ -420,7 +504,7 @@ ResolvedConstraintTarget resolveExtraConstraintTargetSelector(
     auto *Operand = Inst->getOperand(OpIndex);
     return {
         .Value = getExtValuePtr(Operand, Inst, *Index),
-        .Key = "operand:" + InstId->str() + ":" + std::to_string(OpIndex),
+        .Key = "operand:" + SelectorLabel + ":" + std::to_string(OpIndex),
     };
   }
   if (*Kind == "binding") {
@@ -1308,6 +1392,7 @@ void MLsubRecovery::run() {
     printModule(M, MLsubInputPath.c_str());
     writeMLsubInputAnchor(M, join(*WorkDir, kMLsubInputAnchorFile.str()),
                           ModuleDigestHex);
+    writeSelectableValues(M, join(*WorkDir, kSelectableValuesFile.str()));
   }
 
   if (ExtraConstraintsFile != nullptr) {

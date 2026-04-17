@@ -43,13 +43,24 @@
    - `functions.<name>.actions[*].kind = "pndiff" | "subtype" | "equal"`
    - `target.kind = "arg" | "ret" | "named_value" | "inst" | "operand" | "binding"`
    - `state = "ptr" | "number"`
-4. 已在 `MLsubRecovery::bottomUpPhase()` 中于 `G->run()` 之后真正应用这批
+4. `operand` 当前已同时支持：
+   - `operand.inst = "<stable instruction id>"`
+   - `operand.name = "<named_value name>"`
+5. 已在 `MLsubRecovery::bottomUpPhase()` 中于 `G->run()` 之后真正应用这批
    extra constraints
+6. workdir 中已开始导出 `SelectableValues.txt`
 
 当前仍未实现的部分包括：
 
-1. `SelectableValues.txt`
-2. 更完整的 selector 可发现性与调试导出
+1. 更丰富的 selector discoverability / 调试导出 polish
+2. 如有需要再补更正式的 stable-id parser
+
+当前判断：
+
+1. selector 的基础可用链路已经基本齐备
+2. 近期不建议继续深挖 selector 本身
+3. 除非后续真实用例再次暴露缺口，否则先把这块视为“够用”
+4. 后续更适合把精力转回其他 recovery / typing 问题
 
 相关实现日志：
 
@@ -705,6 +716,13 @@ main::%bb.entry.i7:operand:1 -> main::arg1
 1. `SelectableValues.txt`
 2. selector 冲突与解析失败的更明确报错
 3. 面向手写 JSON 的 selector discoverability 改善
+
+当前状态更新：
+
+1. `SelectableValues.txt` 已落地
+2. `operand` 已同时支持 `inst` / `name`
+3. selector 基础链路已经够用
+4. 这部分暂时不再继续深挖，先作为已打通能力保留
 
 ### 阶段 3：再考虑扩展 selector
 
