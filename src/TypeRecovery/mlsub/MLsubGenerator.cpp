@@ -47,6 +47,11 @@ namespace notdec::mlsub {
 
 namespace {
 
+struct PolyPolicyConfig {
+  std::set<std::string> PolyFuncs;
+  std::map<std::string, unsigned int> LevelOverrides;
+};
+
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
 constexpr llvm::StringLiteral kSelectableValuesFile = "SelectableValues.txt";
 constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
@@ -75,6 +80,16 @@ bool envFlagEnabled(llvm::StringRef Name) {
 [[noreturn]] void failExtraConstraints(llvm::StringRef Path,
                                        llvm::StringRef Message) {
   llvm::errs() << "Error: invalid MLsub extra constraints";
+  if (!Path.empty()) {
+    llvm::errs() << " at " << Path;
+  }
+  llvm::errs() << ": " << Message << "\n";
+  std::abort();
+}
+
+[[noreturn]] void failPolyPolicy(llvm::StringRef Path,
+                                 llvm::StringRef Message) {
+  llvm::errs() << "Error: invalid NOTDEC_POLY_FUNCS policy";
   if (!Path.empty()) {
     llvm::errs() << " at " << Path;
   }
@@ -129,6 +144,52 @@ std::string appendJSONPath(llvm::StringRef Base, llvm::StringRef Suffix) {
 
 std::string appendJSONIndexPath(llvm::StringRef Base, size_t Index) {
   return Base.str() + "[" + std::to_string(Index) + "]";
+}
+
+PolyPolicyConfig loadPolyPolicyConfig() {
+  PolyPolicyConfig Config;
+  auto *PolicyFile = std::getenv("NOTDEC_POLY_FUNCS");
+  if (PolicyFile == nullptr) {
+    return Config;
+  }
+
+  auto Content = readFileToString(PolicyFile);
+  auto ValE = json::parse(Content);
+  if (!ValE) {
+    failPolyPolicy(PolicyFile, "JSON parse failed");
+  }
+
+  auto *Obj = ValE->getAsObject();
+  if (Obj == nullptr) {
+    failPolyPolicy(PolicyFile, "expected top-level object");
+  }
+
+  auto *PolyArray = Obj->getArray("poly_funcs");
+  if (PolyArray == nullptr) {
+    failPolyPolicy(PolicyFile, "missing array field 'poly_funcs'");
+  }
+  for (size_t Index = 0; Index < PolyArray->size(); ++Index) {
+    auto Name = (*PolyArray)[Index].getAsString();
+    if (!Name) {
+      failPolyPolicy(appendJSONIndexPath("poly_funcs", Index),
+                     "expected string");
+    }
+    Config.PolyFuncs.insert(Name->str());
+  }
+
+  if (auto *LevelObj = Obj->getObject("level_override")) {
+    for (auto &Ent : *LevelObj) {
+      auto Level = Ent.second.getAsInteger();
+      if (!Level || *Level < 0) {
+        failPolyPolicy(appendJSONPath("level_override", Ent.first),
+                       "expected non-negative integer");
+      }
+      Config.LevelOverrides[Ent.first.str()] =
+          static_cast<unsigned int>(*Level);
+    }
+  }
+
+  return Config;
 }
 
 enum class OverridePNDiffState {
@@ -2058,41 +2119,9 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
   AG.Func2SCCIndex.clear();
   AG.Callee2Callers.clear();
 
-  auto PolyFuncFiles = std::getenv("NOTDEC_POLY_FUNCS");
-  std::set<std::string> PolyFuncs;
-  if (PolyFuncFiles) {
-    auto Content = readFileToString(PolyFuncFiles);
-    auto ValE = json::parse(Content);
-    if (!ValE) {
-      assert(false && "JSON parse failed, invalid NOTDEC_POLY_FUNCS content");
-    }
-    auto ValArr = ValE->getAsArray();
-    assert(ValArr != nullptr);
-    for (auto S : *ValArr) {
-      PolyFuncs.insert(S.getAsString()->str());
-    }
-  }
-
-  auto LevelOverrideFile = std::getenv("NOTDEC_LEVEL_OVERRIDE");
-  std::map<std::string, unsigned int> LevelOverrides;
-  if (LevelOverrideFile) {
-    // The override file provides per-function lower bounds. We still solve for
-    // the minimal valid level that satisfies call-graph and polymorphism
-    // constraints, so overly small user values are automatically raised.
-    auto Content = readFileToString(LevelOverrideFile);
-    auto ValE = json::parse(Content);
-    if (!ValE) {
-      assert(false && "JSON parse failed, invalid NOTDEC_LEVEL_OVERRIDE content");
-    }
-    auto ValObj = ValE->getAsObject();
-    assert(ValObj != nullptr);
-    for (auto &Ent : *ValObj) {
-      auto Level = Ent.second.getAsInteger();
-      assert(Level && *Level >= 0 &&
-             "NOTDEC_LEVEL_OVERRIDE values must be non-negative integers");
-      LevelOverrides[Ent.first.str()] = static_cast<unsigned int>(*Level);
-    }
-  }
+  auto PolyPolicy = loadPolyPolicyConfig();
+  const auto &PolyFuncs = PolyPolicy.PolyFuncs;
+  const auto &LevelOverrides = PolyPolicy.LevelOverrides;
 
   all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(AG.CG);
   // 把CGI遍历的结果都顺序保存到vector里

@@ -79,6 +79,36 @@ using namespace llvm;
 
 namespace notdec {
 
+namespace {
+
+std::set<std::string> loadPolyFuncs() {
+  std::set<std::string> PolyFuncs;
+  auto *PolicyFile = std::getenv("NOTDEC_POLY_FUNCS");
+  if (PolicyFile == nullptr) {
+    return PolyFuncs;
+  }
+
+  auto Content = readFileToString(PolicyFile);
+  auto ValE = json::parse(Content);
+  if (!ValE) {
+    assert(false && "JSON parse failed, invalid NOTDEC_POLY_FUNCS policy");
+  }
+  auto *Obj = ValE->getAsObject();
+  assert(Obj != nullptr && "NOTDEC_POLY_FUNCS must be a JSON object");
+  auto *PolyArray = Obj->getArray("poly_funcs");
+  assert(PolyArray != nullptr &&
+         "NOTDEC_POLY_FUNCS missing 'poly_funcs' array");
+  for (auto &Entry : *PolyArray) {
+    auto Name = Entry.getAsString();
+    assert(Name &&
+           "NOTDEC_POLY_FUNCS.poly_funcs entries must be strings");
+    PolyFuncs.insert(Name->str());
+  }
+  return PolyFuncs;
+}
+
+} // namespace
+
 using retypd::NodeKey;
 using retypd::OffsetLabel;
 
@@ -951,20 +981,7 @@ void TypeRecovery::prepareSCC(CallGraph &CG) {
   std::vector<SCCData> &AllSCCs = AG.AllSCCs;
   std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
 
-  auto PolyFuncFiles = std::getenv("NOTDEC_POLY_FUNCS");
-  std::set<std::string> PolyFuncs;
-  if (PolyFuncFiles) {
-    auto Content = readFileToString(PolyFuncFiles);
-    auto ValE = json::parse(Content);
-    if (!ValE) {
-      assert(false && "JSON parse failed, invalid NOTDEC_POLY_FUNCS content");
-    }
-    auto ValArr = ValE->getAsArray();
-    assert(ValArr != nullptr);
-    for (auto S : *ValArr) {
-      PolyFuncs.insert(S.getAsString()->str());
-    }
-  }
+  std::set<std::string> PolyFuncs = loadPolyFuncs();
 
   // TODO assign a level to each SCC node by walking the call tree.
   // For polymorphic and non polymorphic funcs, we can only merge consecutive
