@@ -1463,6 +1463,17 @@ std::string formatConstraintStateSummary(ConstraintsGenerator &CG,
          ", op1=" + RightState;
 }
 
+bool constraintHasUnknownState(ConstraintsGenerator &CG, const ConsNode &Cons) {
+  auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
+  for (ExtValuePtr Val : Nodes) {
+    auto State = getPNDiffStateInfo(CG, Val);
+    if (!State || State->State == "unknown") {
+      return true;
+    }
+  }
+  return false;
+}
+
 void writePNDiffWarnings(const std::string &Path, AllGraphs &AG,
                          bool PrependBlankLine = false) {
   std::error_code EC;
@@ -1485,10 +1496,17 @@ void writePNDiffWarnings(const std::string &Path, AllGraphs &AG,
       continue;
     }
 
-    AnyResidual = true;
     auto &CG = *Data.Generator;
-    Out << "## SCC: " << Data.SCCName << "\n";
+    bool WroteSCCHeader = false;
     for (const auto &Cons : CG.PG.Constraints) {
+      if (!constraintHasUnknownState(CG, Cons)) {
+        continue;
+      }
+      if (!WroteSCCHeader) {
+        AnyResidual = true;
+        WroteSCCHeader = true;
+        Out << "## SCC: " << Data.SCCName << "\n";
+      }
       auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
       Out << "kind: " << (Cons.isAdd() ? "Add" : "Sub") << "\n";
       Out << "inst: " << formatInstructionText(*Cons.getInst()) << "\n";
@@ -1500,7 +1518,7 @@ void writePNDiffWarnings(const std::string &Path, AllGraphs &AG,
   }
 
   if (!AnyResidual) {
-    Out << "No residual Add/Sub constraints after solve.\n";
+    Out << "No residual Add/Sub constraints with unknown state after solve.\n";
   }
 }
 
