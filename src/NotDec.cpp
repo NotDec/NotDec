@@ -6,6 +6,7 @@
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 
 #ifdef NOTDEC_ENABLE_WASM
@@ -163,6 +164,42 @@ void printFrozenTRInputWorkflowHint(llvm::StringRef InputPath) {
                   "--frozen-tr-input-ir -o /tmp/out.ll\n";
 }
 
+void configureWorkDirLLVMReports(const notdec::Options &Opts) {
+  if (Opts.workDir.empty()) {
+    return;
+  }
+
+  auto &RegisteredOptions = llvm::cl::getRegisteredOptions();
+  auto *TimePasses = RegisteredOptions.lookup("time-passes");
+  auto *TimePassesPerRun = RegisteredOptions.lookup("time-passes-per-run");
+  auto *InfoOutputFile = RegisteredOptions.lookup("info-output-file");
+  if (TimePasses == nullptr || TimePassesPerRun == nullptr ||
+      InfoOutputFile == nullptr) {
+    return;
+  }
+
+  const bool WantsTimingReport =
+      TimePasses->getNumOccurrences() > 0 ||
+      TimePassesPerRun->getNumOccurrences() > 0;
+  if (!WantsTimingReport || InfoOutputFile->getNumOccurrences() > 0) {
+    return;
+  }
+
+  std::error_code EC = llvm::sys::fs::create_directories(Opts.workDir);
+  if (EC) {
+    llvm::errs() << "Warning: failed to create work dir for LLVM timing "
+                    "report: "
+                 << Opts.workDir << ": " << EC.message() << "\n";
+    return;
+  }
+
+  auto ReportPath = notdec::join(Opts.workDir, "02-time-passes.txt");
+  if (InfoOutputFile->addOccurrence(0, "info-output-file", ReportPath)) {
+    llvm::errs() << "Warning: failed to route LLVM timing report to "
+                 << ReportPath << "\n";
+  }
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -244,6 +281,7 @@ int main(int argc, char *argv[]) {
   }
 
   notdec::setWorkDir(opts.workDir);
+  configureWorkDirLLVMReports(opts);
 
   if (frozenTRInputIR && insuffix != ".ll" && insuffix != ".bc") {
     llvm::errs() << "Error: --frozen-tr-input-ir requires a .ll or .bc input, "
