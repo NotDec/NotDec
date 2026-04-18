@@ -2757,6 +2757,10 @@ void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
     auto *Src = I.getOperand(0);
     auto SrcVal = getExtValuePtr(Src, &I, 0);
     if (cg.PG.getPNIVarOrNull(SrcVal) != nullptr) {
+      // Materialize the cast result first so its LLVM low type participates in
+      // the merge; otherwise inttoptr can lose the result-side pointer hint and
+      // collapse to the source's unknown node.
+      cg.PG.getOrInsertPNINode(&I);
       cg.PG.remapPNIVar(&I, SrcVal);
     }
     if (cg.getNodeOrNull(SrcVal) != nullptr) {
