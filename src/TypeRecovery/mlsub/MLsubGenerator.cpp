@@ -2733,20 +2733,16 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
-  if (isa<BitCastInst>(I)) {
-    // ignore cast, propagate the type of the operand.
+  if (isa<BitCastInst, PtrToIntInst, IntToPtrInst>(I)) {
+    // Treat pointer/int casts as aliases for PNDiff even when the source
+    // hasn't been materialized as a MLsub type variable yet.
     auto *Src = I.getOperand(0);
-    auto SrcNode = cg.getNodeOrNull(getExtValuePtr(Src, &I, 0));
-    if (SrcNode) {
-      cg.addRemapType(&I, getExtValuePtr(Src, &I, 0));
+    auto SrcVal = getExtValuePtr(Src, &I, 0);
+    if (cg.PG.getPNIVarOrNull(SrcVal) != nullptr) {
+      cg.PG.remapPNIVar(&I, SrcVal);
     }
-    return;
-  } else if (isa<PtrToIntInst, IntToPtrInst, BitCastInst>(I)) {
-    // ignore cast, view as assignment.
-    auto *Src = I.getOperand(0);
-    auto SrcNode = cg.getNodeOrNull(getExtValuePtr(Src, &I, 0));
-    if (SrcNode) {
-      cg.addRemapType(&I, getExtValuePtr(Src, &I, 0));
+    if (cg.getNodeOrNull(SrcVal) != nullptr) {
+      cg.addRemapType(&I, SrcVal);
     }
     return;
   } else if (isa<TruncInst, ZExtInst, SExtInst, FPToUIInst, FPToSIInst,
