@@ -362,7 +362,7 @@ struct ConstraintsGenerator {
 
 public:
   retypd::CGNode &addVarSubtype(llvm::Value *Val, retypd::CGNode &dtv) {
-    auto &Node = getOrInsertNode(Val, nullptr, -1);
+    auto &Node = getOrInsertNode(Val);
     addSubtype(dtv, Node);
     return Node;
   }
@@ -390,67 +390,29 @@ public:
   }
 
   retypd::CGNode &getNode(ExtValuePtr Val, retypd::Variance V);
-  retypd::CGNode &getNode(ExtValuePtr Val, llvm::User *User, long OpInd,
-                          retypd::Variance V) {
-    return getNode(canonicalizeExtValue(Val, User, OpInd), V);
-  }
   const retypd::CGNode &getNode(ExtValuePtr Val, retypd::Variance V) const {
     return const_cast<ConstraintsGenerator *>(this)->getNode(Val, V);
   }
-  const retypd::CGNode &getNode(ExtValuePtr Val, llvm::User *User, long OpInd,
-                                retypd::Variance V) const {
-    return const_cast<ConstraintsGenerator *>(this)->getNode(
-        canonicalizeExtValue(Val, User, OpInd), V);
-  }
 
   retypd::CGNode *getNodeOrNull(ExtValuePtr Val, retypd::Variance V);
-  retypd::CGNode *getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd,
-                                retypd::Variance V) {
-    return getNodeOrNull(canonicalizeExtValue(Val, User, OpInd), V);
-  }
   const retypd::CGNode *getNodeOrNull(ExtValuePtr Val,
                                       retypd::Variance V) const {
     return const_cast<ConstraintsGenerator *>(this)->getNodeOrNull(Val, V);
   }
-  const retypd::CGNode *getNodeOrNull(ExtValuePtr Val, llvm::User *User,
-                                      long OpInd, retypd::Variance V) const {
-    return const_cast<ConstraintsGenerator *>(this)->getNodeOrNull(
-        canonicalizeExtValue(Val, User, OpInd), V);
-  }
 
   // Create Node of both variance
   std::pair<retypd::CGNode &, retypd::CGNode &> createNode(ExtValuePtr Val);
-  std::pair<retypd::CGNode &, retypd::CGNode &>
-  createNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return createNode(canonicalizeExtValue(Val, User, OpInd));
-  }
   retypd::CGNode &createNodeCovariant(ExtValuePtr Val) {
     auto [N, NC] = createNode(Val);
     return N;
   }
-  retypd::CGNode &createNodeCovariant(ExtValuePtr Val, llvm::User *User,
-                                      long OpInd) {
-    return createNodeCovariant(canonicalizeExtValue(Val, User, OpInd));
-  }
 
   retypd::CGNode &getOrInsertNode(ExtValuePtr Val,
                                   retypd::Variance V = retypd::Covariant);
-  retypd::CGNode &getOrInsertNode(ExtValuePtr Val, llvm::User *User, long OpInd,
-                                  retypd::Variance V = retypd::Covariant) {
-    return getOrInsertNode(canonicalizeExtValue(Val, User, OpInd), V);
-  }
 
   const TypeVariable &getTypeVar(ExtValuePtr val);
-  const TypeVariable &getTypeVar(ExtValuePtr val, llvm::User *User,
-                                 long OpInd) {
-    return getTypeVar(canonicalizeExtValue(val, User, OpInd));
-  }
   // convert the value to a type variable.
   TypeVariable convertTypeVar(ExtValuePtr Val);
-  TypeVariable convertTypeVar(ExtValuePtr Val, llvm::User *User,
-                              long OpInd) {
-    return convertTypeVar(canonicalizeExtValue(Val, User, OpInd));
-  }
   TypeVariable convertTypeVarVal(Value *Val, llvm::User *User = nullptr,
                                  long OpInd = -1);
   void addAddConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,

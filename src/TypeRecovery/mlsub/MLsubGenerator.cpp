@@ -828,7 +828,7 @@ notdec::mlsub::MLsubRecovery::OverrideTypeRecipe buildExtraConstraintOperand(
   }
 
   auto Target = resolveExtraConstraintTarget(Obj, Func, Bindings, Path);
-  auto Node = G.getNodeOrNull(Target.Value, nullptr, -1);
+  auto Node = G.getNodeOrNull(Target.Value);
   if (Node == nullptr) {
     failExtraConstraints(
         Path, ("target '" + Target.Key + "' has no corresponding node").c_str());
@@ -1936,7 +1936,7 @@ void MLsubRecovery::applySummaryOverride(ConstraintsGenerator &G,
 
   applyOverrideRecipe(G, Aggregate);
 
-  auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
+  auto FuncNode = G.getNodeOrNull(&Func);
   assert(FuncNode != nullptr);
   G.addSubtype(binarysub::make_function(Args, RetRecipe.Root), FuncNode);
   applyPNDiffOverrides(G, Func, Obj, FuncPath,
@@ -2000,7 +2000,7 @@ void MLsubRecovery::applyUpperBoundSignatureOverride(
 
   applyOverrideRecipe(G, Aggregate);
 
-  auto FuncNode = G.getNodeOrNull(&Func, nullptr, -1);
+  auto FuncNode = G.getNodeOrNull(&Func);
   assert(FuncNode != nullptr);
   G.addSubtype(FuncNode, binarysub::make_function(Args, RetRecipe.Root));
   applyPNDiffOverrides(G, Func, Obj, FuncPath,
@@ -2083,7 +2083,7 @@ void MLsubRecovery::bottomUpPhase() {
       assert(Ind2 > Ind);
       auto &TData = AG.AllSCCs.at(Ind2);
       auto TargetG = TData.Generator;
-      auto TargetFTy = TargetG->getNodeOrNull(F, nullptr, -1);
+      auto TargetFTy = TargetG->getNodeOrNull(F);
       auto PolyScheme = binarysub::TypeScheme(
           binarysub::PolymorphicType(TData.level, TargetFTy));
       auto TargetLevel = binarysub::level_of(TargetFTy);
@@ -2543,7 +2543,8 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
   if (Val->getType()->isIntegerTy(1)) {
     return binarysub::make_primitive("bool", 1);
   } else if (Val->getType()->isFloatingPointTy()) {
-    return binarysub::make_primitive("float", getSize(Val, User, OpInd));
+    return binarysub::make_primitive(
+        "float", getSize(getExtValuePtr(Val, User, OpInd)));
   }
 
   if (Constant *C = dyn_cast<Constant>(Val)) {
@@ -2551,7 +2552,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
     if (auto CE = dyn_cast<ConstantExpr>(C)) {
       // ignore bitcast ConstantExpr
       if (CE->getOpcode() == Instruction::BitCast) {
-        return convertSimpleType(CE->getOperand(0), CE, 0);
+        return convertSimpleType(getExtValuePtr(CE->getOperand(0), CE, 0));
       } else if (CE->getOpcode() == Instruction::IntToPtr) {
         if (isa<ConstantInt>(CE->getOperand(0))) {
           assert(false && "Should be converted earlier");
@@ -2603,13 +2604,17 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       // return makeTv(Ctx.TRCtx, gv->getName().str());
     } else if (isa<ConstantInt>(C) || isa<ConstantFP>(C)) {
       if (auto CI = dyn_cast<ConstantInt>(C)) {
-        return binarysub::make_variable(lvl, getSize(CI, User, OpInd));
+        return binarysub::make_variable(
+            lvl, getSize(getExtValuePtr(CI, User, OpInd)));
       }
-      return binarysub::make_primitive("float", getSize(C, User, OpInd));
+      return binarysub::make_primitive(
+          "float", getSize(getExtValuePtr(C, User, OpInd)));
     } else if (isa<ConstantPointerNull>(C)) {
-      return binarysub::make_variable(lvl, getSize(C, User, OpInd));
+      return binarysub::make_variable(
+          lvl, getSize(getExtValuePtr(C, User, OpInd)));
     } else if (isa<UndefValue>(C)) {
-      return binarysub::make_variable(lvl, getSize(C, User, OpInd));
+      return binarysub::make_variable(
+          lvl, getSize(getExtValuePtr(C, User, OpInd)));
     }
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                  << "ERROR: ConstraintsGenerator::convertSimpleTypeVal "
@@ -2676,14 +2681,14 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
         auto Ind = I.getIndices()[0];
         if (Ind == 0) {
           if (isWithOverflowIntrinsicSigned(Target->getIntrinsicID())) {
-            auto N = cg.createNode(&I, nullptr, -1);
+            auto N = cg.createNode(&I);
             assert(false && "TODO: PNI setNonPtr");
             assert(false && "TODO: getOrCreatePrim");
             assert(false && "TODO: addSubtype");
             return;
           } else if (isWithOverflowIntrinsicUnsigned(
                          Target->getIntrinsicID())) {
-            auto N = cg.createNode(&I, nullptr, -1);
+            auto N = cg.createNode(&I);
             assert(false && "TODO: PNI setNonPtr");
             assert(false && "TODO: getOrCreatePrim");
             assert(false && "TODO: addSubtype");
@@ -2691,7 +2696,7 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
           }
         } else if (Ind == 1) {
           assert(I.getType()->isIntegerTy(1));
-          cg.createNode(&I, nullptr, -1);
+          cg.createNode(&I);
           return;
         }
       }
@@ -2704,17 +2709,17 @@ void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
   if (isa<BitCastInst>(I)) {
     // ignore cast, propagate the type of the operand.
     auto *Src = I.getOperand(0);
-    auto SrcNode = cg.getNodeOrNull(Src, &I, 0);
+    auto SrcNode = cg.getNodeOrNull(getExtValuePtr(Src, &I, 0));
     if (SrcNode) {
-      cg.addRemapType(&I, nullptr, -1, SrcNode);
+      cg.addRemapType(&I, getExtValuePtr(Src, &I, 0));
     }
     return;
   } else if (isa<PtrToIntInst, IntToPtrInst, BitCastInst>(I)) {
     // ignore cast, view as assignment.
     auto *Src = I.getOperand(0);
-    auto SrcNode = cg.getNodeOrNull(Src, &I, 0);
+    auto SrcNode = cg.getNodeOrNull(getExtValuePtr(Src, &I, 0));
     if (SrcNode) {
-      cg.addRemapType(&I, nullptr, -1, SrcNode);
+      cg.addRemapType(&I, getExtValuePtr(Src, &I, 0));
     }
     return;
   } else if (isa<TruncInst, ZExtInst, SExtInst, FPToUIInst, FPToSIInst,
@@ -2780,9 +2785,9 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
 
   // TODO if is allocation function, treat as alloca inst
   if (isHeapAllocationCall(I)) {
-    auto Node = cg.createNode(&I, nullptr, -1);
+    auto Node = cg.createNode(&I);
     // set as pointer type
-    cg.setPointer(&I, nullptr, -1);
+    cg.setPointer(&I);
     cg.ContraVariantValues.insert(&I);
   } else if (handleIntrinsicCall(I)) {
     return;
@@ -2791,16 +2796,16 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     auto Func = Target;
     std::vector<SimpleType> Args;
     for (unsigned i = 0; i < I.arg_size(); ++i) {
-      auto ValVar = cg.getOrInsertNode(I.getArgOperand(i), &I, i);
+      auto ValVar = cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(i), &I, i));
       Args.push_back(ValVar);
     }
     SimpleType Ret = nullptr;
     if (!I.getType()->isVoidTy()) {
-      Ret = cg.getOrInsertNode(&I, nullptr, -1);
+      Ret = cg.getOrInsertNode(&I);
     }
     auto ActualFunc = binarysub::make_function(Args, Ret);
     if (cg.SCCs.count(Target)) {
-      auto F = cg.getNodeOrNull(Func, nullptr, -1);
+      auto F = cg.getNodeOrNull(Func);
       cg.addSubtype(F, ActualFunc);
     } else {
       // create and save to CallToInstance map. instance with summary later
@@ -2815,24 +2820,24 @@ void ConstraintsGenerator::MLsubVisitor::visitReturnInst(ReturnInst &I) {
   if (SrcVal == nullptr) { // ret void.
     return;
   }
-  auto Src = cg.getOrInsertNode(SrcVal, &I, 0);
-  auto Dst = cg.getNodeOrNull(ReturnValue{.Func = I.getFunction()}, &I, 0);
+  auto Src = cg.getOrInsertNode(getExtValuePtr(SrcVal, &I, 0));
+  auto Dst = cg.getNodeOrNull(ReturnValue{.Func = I.getFunction()});
   // src is a subtype of dest
   cg.addSubtype(Src, Dst);
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitPHINode(PHINode &I) {
-  cg.createNode(&I, nullptr, -1);
+  cg.createNode(&I);
   // Defer constraints generation (and unification) to handlePHINodes
   phiNodes.push_back(&I);
 }
 
 void ConstraintsGenerator::MLsubVisitor::handlePHINodes() {
   for (auto I : phiNodes) {
-    auto P = cg.getNodeOrNull(I, nullptr, -1);
+    auto P = cg.getNodeOrNull(I);
     for (long i = 0; i < I->getNumIncomingValues(); i++) {
       auto *Src = I->getIncomingValue(i);
-      auto SrcVar = cg.getOrInsertNode(Src, I, i);
+      auto SrcVar = cg.getOrInsertNode(getExtValuePtr(Src, I, i));
       cg.addSubtype(SrcVar, P);
     }
   }
@@ -2845,7 +2850,7 @@ unsigned ConstraintsGenerator::getPointerElemSize(Type *ty) {
 
 void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   // if this is access to table, then we ignore the type, and return func ptr.
-  auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0);
+  auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 0));
   if (!Node) {
     if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
       if (CE->getOpcode() == Instruction::BitCast) {
@@ -2859,8 +2864,8 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
     }
   }
 
-  auto PtrVal = cg.getOrInsertNode(I.getPointerOperand(), &I, 0);
-  auto RetVal = cg.getOrInsertNode(&I, nullptr, -1);
+  auto PtrVal = cg.getOrInsertNode(getExtValuePtr(I.getPointerOperand(), &I, 0));
+  auto RetVal = cg.getOrInsertNode(&I);
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
 
   cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
@@ -2868,7 +2873,7 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   // if this is access to table, then we ignore the type, and return func ptr.
-  auto Node = cg.getNodeOrNull(I.getPointerOperand(), &I, 0);
+  auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 0));
   if (!Node) {
     if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
       if (CE->getOpcode() == Instruction::BitCast) {
@@ -2882,17 +2887,17 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
     }
   }
 
-  auto PtrVal = cg.getOrInsertNode(I.getPointerOperand(), &I, 1);
+  auto PtrVal = cg.getOrInsertNode(getExtValuePtr(I.getPointerOperand(), &I, 1));
   auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
-  auto StoreVal = cg.getOrInsertNode(I.getValueOperand(), &I, 0);
+  auto StoreVal = cg.getOrInsertNode(getExtValuePtr(I.getValueOperand(), &I, 0));
 
   cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
-  auto Node = cg.createNode(&I, nullptr, -1);
+  auto Node = cg.createNode(&I);
   // set as pointer type
-  cg.setPointer(&I, nullptr, -1);
+  cg.setPointer(&I);
   cg.ContraVariantValues.insert(&I);
 }
 
@@ -2902,8 +2907,9 @@ void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(
   if (Gep.getPointerOperand()->getName().startswith("table_")) {
     return;
   } else if (Gep.hasAllZeroIndices()) {
-    auto SrcNode = cg.getOrInsertNode(Gep.getPointerOperand(), &Gep, 0);
-    cg.addRemapType(&Gep, nullptr, -1, SrcNode);
+    auto Src = getExtValuePtr(Gep.getPointerOperand(), &Gep, 0);
+    cg.getOrInsertNode(Src);
+    cg.addRemapType(&Gep, Src);
     return;
   }
   std::cerr << "Warning: MLsubVisitor::visitGetElementPtrInst: "
@@ -2920,8 +2926,8 @@ void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,
   auto Right = RHS;
   llvmValue2ExtVal(Left, I, 0);
   llvmValue2ExtVal(Right, I, 1);
-  getOrInsertNode(Left, I, 0);
-  getOrInsertNode(Right, I, 1);
+  getOrInsertNode(Left);
+  getOrInsertNode(Right);
   PG.getPNIVar(Left).unify(PG.getPNIVar(Right));
 }
 
@@ -2929,10 +2935,10 @@ void ConstraintsGenerator::addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
                                             llvm::BinaryOperator *I) {
   llvmValue2ExtVal(LHS, I, 0);
   llvmValue2ExtVal(RHS, I, 1);
-  auto Left = &PG.getOrInsertPNINode(LHS, I, 0);
-  auto Right = &PG.getOrInsertPNINode(RHS, I, 1);
+  auto Left = &PG.getOrInsertPNINode(LHS);
+  auto Right = &PG.getOrInsertPNINode(RHS);
   // auto Res = &
-  PG.getOrInsertPNINode(I, nullptr, -1);
+  PG.getOrInsertPNINode(I);
   if (Left->isPNRelated() || Right->isPNRelated()) {
     PG.addAddCons(LHS, RHS, I, I);
   }
@@ -2941,10 +2947,10 @@ void ConstraintsGenerator::addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
                                             llvm::BinaryOperator *I) {
   llvmValue2ExtVal(LHS, I, 0);
   llvmValue2ExtVal(RHS, I, 1);
-  auto Left = &PG.getOrInsertPNINode(LHS, I, 0);
-  auto Right = &PG.getOrInsertPNINode(RHS, I, 1);
+  auto Left = &PG.getOrInsertPNINode(LHS);
+  auto Right = &PG.getOrInsertPNINode(RHS);
   // auto Res = &
-  PG.getOrInsertPNINode(I, nullptr, -1);
+  PG.getOrInsertPNINode(I);
   if (Left->isPNRelated() || Right->isPNRelated()) {
     PG.addSubCons(LHS, RHS, I, I);
   }
@@ -2958,15 +2964,15 @@ void ConstraintsGenerator::MLsubVisitor::visitICmpInst(ICmpInst &I) {
 
   // type the inst as bool?
   assert(I.getType()->isIntegerTy(1));
-  cg.createNode(&I, nullptr, -1);
+  cg.createNode(&I);
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitSelectInst(SelectInst &I) {
-  auto DstVar = cg.createNode(&I, nullptr, -1);
+  auto DstVar = cg.createNode(&I);
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
-  auto Src1Var = cg.getOrInsertNode(Src1, &I, 0);
-  auto Src2Var = cg.getOrInsertNode(Src2, &I, 1);
+  auto Src1Var = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 0));
+  auto Src2Var = cg.getOrInsertNode(getExtValuePtr(Src2, &I, 1));
   // Not generate boolean constraints. Because it must be i1.
   cg.addSubtype(Src1Var, DstVar);
   cg.addSubtype(Src2Var, DstVar);
@@ -2992,9 +2998,9 @@ void ConstraintsGenerator::MLsubVisitor::visitAnd(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);
 
-  auto Src1Node = cg.getOrInsertNode(Src1, &I, 0);
-  auto Src2Node = cg.getOrInsertNode(Src2, &I, 1);
-  auto RetNode = cg.getOrInsertNode(&I, nullptr, -1);
+  auto Src1Node = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 0));
+  auto Src2Node = cg.getOrInsertNode(getExtValuePtr(Src2, &I, 1));
+  auto RetNode = cg.getOrInsertNode(&I);
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
@@ -3007,9 +3013,9 @@ void ConstraintsGenerator::MLsubVisitor::visitAnd(BinaryOperator &I) {
     // llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
     //              << "Warn: And op without constant: " << I << "\n";
   }
-  cg.setNonPointer(Src1, &I, 0);
-  cg.setNonPointer(Src2, &I, 1);
-  cg.setNonPointer(&I, nullptr, -1);
+  cg.setNonPointer(getExtValuePtr(Src1, &I, 0));
+  cg.setNonPointer(getExtValuePtr(Src2, &I, 1));
+  cg.setNonPointer(&I);
   return;
 }
 
@@ -3019,9 +3025,9 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
   auto *Src2 = I.getOperand(1);
   ensureSequence(Src1, Src2);
 
-  auto Src1Node = cg.getOrInsertNode(Src1, &I, 0);
-  auto Src2Node = cg.getOrInsertNode(Src2, &I, 1);
-  auto RetNode = cg.getOrInsertNode(&I, nullptr, -1);
+  auto Src1Node = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 0));
+  auto Src2Node = cg.getOrInsertNode(getExtValuePtr(Src2, &I, 1));
+  auto RetNode = cg.getOrInsertNode(&I);
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
@@ -3035,9 +3041,9 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
     //              << "Warn: Or op without constant: " << I << "\n";
   }
   // view as numeric operation?
-  cg.setNonPointer(Src1, &I, 0);
-  cg.setNonPointer(Src2, &I, 1);
-  cg.setNonPointer(&I, nullptr, -1);
+  cg.setNonPointer(getExtValuePtr(Src1, &I, 0));
+  cg.setNonPointer(getExtValuePtr(Src2, &I, 1));
+  cg.setNonPointer(&I);
   return;
 }
 
@@ -3078,7 +3084,7 @@ static bool strEq(const char *S1, const char *S2) {
 bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     Instruction *I, ConstraintsGenerator &cg) const {
   // only create Covariant constraints, use addSubtype to handle contra-variant.
-  auto N = cg.createNode(I, nullptr, -1);
+  auto N = cg.createNode(I);
   if (I->getType()->isVoidTy()) {
     return false;
   }
@@ -3086,17 +3092,17 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
   if (ty == nullptr) { // no action
     return true;
   } else if (strEq(ty, "sint")) {
-    cg.setNonPointer(I, nullptr, -1);
+    cg.setNonPointer(I);
     auto SintNode = binarysub::make_primitive("sint", cg.getSize(I));
     cg.addSubtype(SintNode, N);
     return true;
   } else if (strEq(ty, "uint")) {
-    cg.setNonPointer(I, nullptr, -1);
+    cg.setNonPointer(I);
     auto UintNode = binarysub::make_primitive("uint", cg.getSize(I));
     cg.addSubtype(UintNode, N);
     return true;
   } else if (strEq(ty, "int")) {
-    cg.setNonPointer(I, nullptr, -1);
+    cg.setNonPointer(I);
     return true;
   } else if (strEq(ty, "float")) {
     auto FloatNode = binarysub::make_primitive("float", cg.getSize(I));
@@ -3115,26 +3121,29 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
   if (Op->getType()->isVoidTy()) {
     return false;
   }
-  auto N = cg.getOrInsertNode(Op, I, Index);
+  auto N = cg.getOrInsertNode(getExtValuePtr(Op, I, Index));
   const char *ty = inputs[Index];
   if (ty == nullptr) {
     return true;
   } else if (strEq(ty, "sint")) {
-    cg.setNonPointer(Op, I, Index);
-    auto SintNode = binarysub::make_primitive("sint", cg.getSize(Op, I, Index));
+    cg.setNonPointer(getExtValuePtr(Op, I, Index));
+    auto SintNode = binarysub::make_primitive(
+        "sint", cg.getSize(getExtValuePtr(Op, I, Index)));
     cg.addSubtype(N, SintNode);
     return true;
   } else if (strEq(ty, "uint")) {
-    cg.setNonPointer(Op, I, Index);
-    auto UintNode = binarysub::make_primitive("uint", cg.getSize(Op, I, Index));
+    cg.setNonPointer(getExtValuePtr(Op, I, Index));
+    auto UintNode = binarysub::make_primitive(
+        "uint", cg.getSize(getExtValuePtr(Op, I, Index)));
     cg.addSubtype(N, UintNode);
     return true;
   } else if (strEq(ty, "int")) {
-    cg.setNonPointer(Op, I, Index);
+    cg.setNonPointer(getExtValuePtr(Op, I, Index));
     return true;
   } else if (strEq(ty, "float")) {
     auto FloatNode =
-        binarysub::make_primitive("float", cg.getSize(Op, I, Index));
+        binarysub::make_primitive("float",
+                                  cg.getSize(getExtValuePtr(Op, I, Index)));
     cg.addSubtype(N, FloatNode);
     return true;
   }

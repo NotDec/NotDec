@@ -86,16 +86,16 @@ struct ConstraintsGenerator {
     for (const llvm::Function *Func1 : SCCs) {
       auto Func = const_cast<llvm::Function *>(Func1);
       // create function nodes
-      auto F = createNode(Func, nullptr, -1);
+      auto F = createNode(Func);
       std::vector<SimpleType> Args;
       for (unsigned i = 0; i < Func->arg_size(); ++i) {
-        auto Arg = createNode(Func->getArg(i), nullptr, i);
+        auto Arg = createNode(Func->getArg(i));
         // Contra-variant.
         Args.push_back(Arg);
       }
       SimpleType Ret = nullptr;
       if (!Func->getReturnType()->isVoidTy()) {
-        Ret = createNode(ReturnValue{.Func = Func}, nullptr, -1);
+        Ret = createNode(ReturnValue{.Func = Func});
       }
       addSubtype(binarysub::make_function(Args, Ret), F);
     }
@@ -106,7 +106,7 @@ struct ConstraintsGenerator {
     }
     for (const llvm::Function *Func1 : SCCs) {
       auto Func = const_cast<llvm::Function *>(Func1);
-      auto F = getNodeOrNull(Func, nullptr, -1);
+      auto F = getNodeOrNull(Func);
       assert(F->getAsVariableState() != nullptr);
     }
     PG.solve();
@@ -116,14 +116,11 @@ struct ConstraintsGenerator {
   void releaseBinarysubState();
 
   SimpleType convertSimpleType(ExtValuePtr Val);
-  SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return convertSimpleType(canonicalizeExtValue(Val, User, OpInd));
-  }
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
   void maybeUnifyPNDiffTypeVariablePair(const SimpleType &Lhs,
                                         const SimpleType &Rhs);
 
-public:
+  public:
   // Create Node of both variance
   SimpleType createNode(ExtValuePtr Val) {
     // auto N = binarysub::make_variable(lvl);
@@ -144,18 +141,12 @@ public:
     }
     return N;
   }
-  SimpleType createNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return createNode(canonicalizeExtValue(Val, User, OpInd));
-  }
 
   SimpleType getNodeOrNull(ExtValuePtr Val) {
     if (V2N.count(Val)) {
       return V2N.at(Val);
     }
     return nullptr;
-  }
-  SimpleType getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return getNodeOrNull(canonicalizeExtValue(Val, User, OpInd));
   }
 
   SimpleType getOrInsertNode(ExtValuePtr Val) {
@@ -165,9 +156,6 @@ public:
     }
     auto N = createNode(Val);
     return N;
-  }
-  SimpleType getOrInsertNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return getOrInsertNode(canonicalizeExtValue(Val, User, OpInd));
   }
 
   void addSubtype(SimpleType lhs, SimpleType rhs) {
@@ -181,12 +169,13 @@ public:
   }
 
   SimpleType addVarSubtype(llvm::Value *Val, SimpleType dtv) {
-    auto Node = getOrInsertNode(Val, nullptr, -1);
+    auto Node = getOrInsertNode(Val);
     addSubtype(dtv, Node);
     return Node;
   }
 
-  SimpleType addRemapType(ExtValuePtr Val, SimpleType ty) {
+  SimpleType addRemapType(ExtValuePtr Val, ExtValuePtr Target) {
+    auto ty = getNodeOrNull(Target);
     assert(ty != nullptr);
     auto N = getNodeOrNull(Val);
     if (N == ty) {
@@ -201,10 +190,6 @@ public:
       std::abort();
     }
     return It.first->second;
-  }
-  SimpleType addRemapType(ExtValuePtr Val, llvm::User *User, long OpInd,
-                          SimpleType ty) {
-    return addRemapType(canonicalizeExtValue(Val, User, OpInd), ty);
   }
 
   unsigned getPointerElemSize(llvm::Type *ty);
@@ -227,30 +212,21 @@ public:
       N->setPtr();
     }
   }
-  void setPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    setPointer(canonicalizeExtValue(Val, User, OpInd));
-  }
   void setNonPointer(ExtValuePtr Val) {
     if (auto N = PG.getPNIVarOrNull(Val)) {
       N->setNonPtrIfRelated();
     }
   }
-  void setNonPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    setNonPointer(canonicalizeExtValue(Val, User, OpInd));
-  }
   unsigned getSize(ExtValuePtr Val) {
     return notdec::getSize(Val, PointerSize);
-  }
-  unsigned getSize(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return getSize(canonicalizeExtValue(Val, User, OpInd));
   }
 
   void onUpdatePNType(ExtValuePtr Val) {}
   void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off) {
-    auto BaseNode = getOrInsertNode(basePtr, nullptr, -1);
-    auto ResultNode = getOrInsertNode(result, nullptr, -1);
+    auto BaseNode = getOrInsertNode(basePtr);
+    auto ResultNode = getOrInsertNode(result);
     std::vector<std::pair<std::string, SimpleType>> fields;
-    fields.push_back({Off.str(), ResultNode});
+    fields.emplace_back(Off.str(), ResultNode);
     addSubtype(BaseNode, binarysub::make_record(std::move(fields)));
     addSubtype(ResultNode, binarysub::make_record({}));
     PG.unifyVar(basePtr, result);

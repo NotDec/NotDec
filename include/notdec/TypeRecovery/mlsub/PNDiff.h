@@ -220,9 +220,6 @@ struct PNIGraph {
     }
     return *N;
   }
-  PNINode &createPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return createPNINode(canonicalizeExtValue(Val, User, OpInd));
-  }
 
   PNINode *getPNIVarOrNull(ExtValuePtr N) {
     auto It = PNIMap.find(N);
@@ -248,9 +245,6 @@ struct PNIGraph {
       return *N;
     }
     return createPNINode(Val);
-  }
-  PNINode &getOrInsertPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    return getOrInsertPNINode(canonicalizeExtValue(Val, User, OpInd));
   }
   void clearConstraints() {
     NodeToCons.clear();
