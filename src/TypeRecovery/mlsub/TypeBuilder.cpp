@@ -201,6 +201,45 @@ bool isZeroSizedRecordMarker(const binarysub::UTypePtr &Ty) {
   return false;
 }
 
+std::pair<HType *, SimpleRange>
+cropFieldTypeToRange(notdec::ast::HTypeContext &Ctx, HType *HT,
+                     notdec::OffsetTy OldSize, SimpleRange RelativeRange) {
+  if (RelativeRange.Size <= 0) {
+    return {nullptr, {.Start = RelativeRange.Start, .Size = 0}};
+  }
+  if (RelativeRange.Start == 0 && RelativeRange.Size == OldSize) {
+    return {HT, RelativeRange};
+  }
+
+  if (auto *AT = HT->getAs<ast::ArrayType>()) {
+    if (auto NumElements = AT->getNumElements();
+        NumElements && *NumElements != 0 && OldSize > 0 &&
+        OldSize % *NumElements == 0) {
+      auto ElemSize = OldSize / static_cast<notdec::OffsetTy>(*NumElements);
+      if (ElemSize > 0) {
+        auto Start =
+            ((RelativeRange.Start + ElemSize - 1) / ElemSize) * ElemSize;
+        auto End = (RelativeRange.end() / ElemSize) * ElemSize;
+        if (End > Start) {
+          auto NewCount = (End - Start) / ElemSize;
+          return {AT->withSize(Ctx, static_cast<unsigned>(NewCount)),
+                  {.Start = Start, .Size = End - Start}};
+        }
+      }
+    }
+  }
+
+  if (RelativeRange.Size == 1) {
+    return {Ctx.getChar(), RelativeRange};
+  }
+
+  // Fall back to a byte blob when we cannot preserve the original aggregate
+  // shape after clipping. This keeps the enclosing layout within bounds.
+  return {Ctx.getArrayType(false, Ctx.getChar(),
+                           static_cast<unsigned>(RelativeRange.Size)),
+          RelativeRange};
+}
+
 char hexDigit(unsigned Value) {
   assert(Value < 16);
   return Value < 10 ? static_cast<char>('0' + Value)
@@ -603,24 +642,36 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
                    << Ent.first.Start << "\n";
       continue;
     }
+    auto EffectiveRange = Ent.first;
     if (ValidRange) {
       auto IR = Ent.first.intersect(*ValidRange);
-      if (IR != Ent.first && IR.Size == 0) {
-        assert(false);
-        // fully out of the range.
-        llvm::errs() << "Warning: Skip field because of size or range";
+      if (IR.Size == 0) {
         continue;
       }
+      EffectiveRange = IR;
     }
 
     HType *Ty = Ent.second;
+    if (EffectiveRange != Ent.first) {
+      auto Cropped = cropFieldTypeToRange(
+          Ctx, Ty, Ent.first.Size,
+          SimpleRange{.Start = EffectiveRange.Start - Ent.first.Start,
+                      .Size = EffectiveRange.Size});
+      if (Cropped.first == nullptr || Cropped.second.Size == 0) {
+        continue;
+      }
+      EffectiveRange = {.Start = Ent.first.Start + Cropped.second.Start,
+                        .Size = Cropped.second.Size};
+      Ty = Cropped.first;
+    }
 
     auto FieldName = ValueNamer::getName("field_");
     auto CurrentDecl =
-        FieldDecl{.R = Ent.first,
+        FieldDecl{.R = EffectiveRange,
                   .Type = Ty,
                   .Name = FieldName,
-                  .Comment = "at offset: " + std::to_string(Ent.first.Start)};
+                  .Comment =
+                      "at offset: " + std::to_string(EffectiveRange.Start)};
     std::optional<FieldDecl> PaddingAfter = std::nullopt;
 
     // Try to calc expand end:
@@ -675,32 +726,12 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
           NumElements && *NumElements != 0) {
         // Keep unsized arrays unsized here. We can only expand arrays when an
         // existing element count gives us a reliable element size.
-        auto ElemSize = Ent.first.Size / *NumElements;
-        auto NewCount = (ExpandEnd - Ent.first.Start) / ElemSize;
-        CurrentDecl.R.Size = NewCount * ElemSize;
-        CurrentDecl.Type = ArrTy->withSize(Ctx, NewCount);
-      }
-    }
-
-    // crop the type if intersecting
-    if (ValidRange) {
-      auto IR = Ent.first.intersect(*ValidRange);
-      // intersecting member?
-      if (IR.Size < Ent.first.Size) {
-        assert(false && "TODO: intersecting member?");
-        // llvm::errs() << "Warning: Field intersect with PointeeSize!! "
-        //              << Decl->getName() << Ent.first.str() << "\n";
-        // std::pair<HType *, SimpleRange> Ent1 = cutType(
-        //     Ctx, Ty, Ent.first.Size,
-        //     SimpleRange{.Start = IR.Start - Ent.first.Start, .Size =
-        //     IR.Size});
-        // if (Ent1.second.Size == 0) {
-        //   llvm::dbgs() << "Warning: Crop field failed, Skipping: "
-        //                << Decl->getName() << Ent.first.str() << "\n";
-        //   continue;
-        // }
-        // Ent.first = Ent1.second;
-        // Ty = Ent1.first;
+        auto ElemSize = CurrentDecl.R.Size / *NumElements;
+        if (ElemSize > 0) {
+          auto NewCount = (ExpandEnd - CurrentDecl.R.Start) / ElemSize;
+          CurrentDecl.R.Size = NewCount * ElemSize;
+          CurrentDecl.Type = ArrTy->withSize(Ctx, NewCount);
+        }
       }
     }
 
@@ -858,6 +889,21 @@ HType *TypeBuilder::convertStruct(
       auto &FrontOffset = HasStrideEntries.front().first;
       auto RangeStart = FrontOffset.offset;
       auto RangeEnd = FrontOffset.offset + MaxStride;
+      auto FieldSize = MaxStride;
+      if (PointeeSize) {
+        if (RangeStart >= PointeeSize.value()) {
+          HasStrideEntries.erase(HasStrideEntries.begin());
+          continue;
+        }
+        if (RangeStart >= 0 && RangeEnd > PointeeSize.value()) {
+          FieldSize = PointeeSize.value() - RangeStart;
+          RangeEnd = RangeStart + FieldSize;
+        }
+      }
+      if (FieldSize <= 0) {
+        HasStrideEntries.erase(HasStrideEntries.begin());
+        continue;
+      }
 
       // 提取当前组中Base在当前范围内的模式 InRangeEnts
       auto InitialSize = HasStrideEntries.size();
@@ -899,10 +945,15 @@ HType *TypeBuilder::convertStruct(
                               std::to_string(RangeStart) + ".." +
                               std::to_string(RangeEnd) + ")";
       DebugPathScope PathScope(*this, std::move(PathFrame));
-      auto MemberTy = convertStruct(T, SubProblem, MaxStride);
-      auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
-      Fields.push_back(
-          {SimpleRange{.Start = RangeStart, .Size = MaxStride}, ArrTy});
+      auto MemberTy = convertStruct(T, SubProblem, FieldSize);
+      if (FieldSize == MaxStride) {
+        auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
+        Fields.push_back(
+            {SimpleRange{.Start = RangeStart, .Size = MaxStride}, ArrTy});
+      } else {
+        Fields.push_back(
+            {SimpleRange{.Start = RangeStart, .Size = FieldSize}, MemberTy});
+      }
     }
   }
   // 已经没有任何数组访问模式，接下来创建结构体和union类型
@@ -916,6 +967,18 @@ HType *TypeBuilder::convertStruct(
       assert(Ent.first.access.empty());
       auto SizeInBits = accessedPointeeSizeInBits(Ent.second);
       auto Size = SizeInBits <= 0 ? 0 : (SizeInBits + 7) / 8;
+      if (PointeeSize) {
+        if (Ent.first.offset >= PointeeSize.value()) {
+          continue;
+        }
+        if (Ent.first.offset >= 0 &&
+            Ent.first.offset + Size > PointeeSize.value()) {
+          Size = PointeeSize.value() - Ent.first.offset;
+        }
+      }
+      if (Size <= 0) {
+        continue;
+      }
       std::string PathFrame = "field(" + Ent.first.str() + ", bytes=" +
                               std::to_string(Size) + ")";
       DebugPathScope PathScope(*this, std::move(PathFrame));
@@ -1137,14 +1200,8 @@ HType *TypeBuilder::convertStruct(
         OS.flush();
         emitConvertStructTrace(Trace);
       }
-      // Some byte-stride recursive subproblems still carry a wider payload
-      // type after we strip the array access. Preserve the element boundary
-      // instead of materializing an impossible over-wide member layout.
-      // return craftStruct({}, SimpleRange{.Start = Fields.front().first.Start,
-      //                                    .Size = PointeeSize.value()},
-      //                    std::nullopt, &T);
+      Size = PointeeSize.value();
     }
-    assert(!(PointeeSize.value() < Size) && "TODO");
     if (PointeeSize.value() > Size) {
       Size = PointeeSize.value();
     }
