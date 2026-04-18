@@ -179,6 +179,7 @@ struct ConstraintsGenerator {
     assert(ty != nullptr);
     auto N = getNodeOrNull(Val);
     if (N == ty) {
+      PG.remapPNIVar(Val, Target);
       return N;
     }
     auto It = V2N.insert(Val, ty);
@@ -189,6 +190,7 @@ struct ConstraintsGenerator {
                    << toString(Val) << "\n";
       std::abort();
     }
+    PG.remapPNIVar(Val, Target);
     return It.first->second;
   }
 

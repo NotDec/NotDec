@@ -246,6 +246,26 @@ struct PNIGraph {
     }
     return createPNINode(Val);
   }
+  PNINode &remapPNIVar(ExtValuePtr Val, ExtValuePtr Target) {
+    auto *TargetNode = getPNIVarOrNull(Target);
+    assert(TargetNode != nullptr);
+    auto *ValNode = getPNIVarOrNull(Val);
+    if (ValNode == TargetNode) {
+      return *TargetNode;
+    }
+    if (ValNode != nullptr) {
+      return *TargetNode->unify(*ValNode);
+    }
+    auto It = PNIMap.insert(Val, TargetNode);
+    if (!It.second) {
+      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                   << "remapPNIVar: Value already mapped to "
+                   << It.first->second->str() << ", but now set to "
+                   << toString(Val) << "\n";
+      std::abort();
+    }
+    return *TargetNode;
+  }
   void clearConstraints() {
     NodeToCons.clear();
     Constraints.clear();

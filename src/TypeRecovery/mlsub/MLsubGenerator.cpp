@@ -1347,19 +1347,37 @@ std::shared_ptr<ConstraintsGenerator> getFuncCG(AllGraphs &AG,
   return AG.AllSCCs.at(AG.Func2SCCIndex.at(CGN)).Generator;
 }
 
-std::optional<std::string> getPNDiffState(ConstraintsGenerator &CG,
-                                          ExtValuePtr Val) {
+struct PNDiffStateInfo {
+  std::string State;
+  unsigned long NodeId = 0;
+};
+
+std::string formatPNDiffStateInfo(const PNDiffStateInfo &Info) {
+  return Info.State + "#" + std::to_string(Info.NodeId);
+}
+
+std::optional<PNDiffStateInfo> getPNDiffStateInfo(ConstraintsGenerator &CG,
+                                                  ExtValuePtr Val) {
   auto *Node = CG.PG.getPNIVarOrNull(Val);
   if (Node == nullptr || !Node->isPNRelated()) {
     return std::nullopt;
   }
   if (Node->isPointer() || Node->isNull()) {
-    return "ptr";
+    return PNDiffStateInfo{
+        .State = "ptr",
+        .NodeId = Node->getId(),
+    };
   }
   if (Node->isNumber()) {
-    return "num";
+    return PNDiffStateInfo{
+        .State = "num",
+        .NodeId = Node->getId(),
+    };
   }
-  return "unknown";
+  return PNDiffStateInfo{
+      .State = "unknown",
+      .NodeId = Node->getId(),
+  };
 }
 
 std::string joinParts(const std::vector<std::string> &Parts) {
@@ -1378,16 +1396,17 @@ formatInstructionPNDiffComment(ConstraintsGenerator &CG,
                                const llvm::Instruction &Inst) {
   std::vector<std::string> Parts;
   if (!Inst.getType()->isVoidTy()) {
-    if (auto State =
-            getPNDiffState(CG, const_cast<llvm::Instruction *>(&Inst))) {
-      Parts.push_back("result=" + *State);
+    if (auto State = getPNDiffStateInfo(
+            CG, const_cast<llvm::Instruction *>(&Inst))) {
+      Parts.push_back("result=" + formatPNDiffStateInfo(*State));
     }
   }
   for (unsigned I = 0; I < Inst.getNumOperands(); ++I) {
     ExtValuePtr Op = Inst.getOperand(I);
     llvmValue2ExtVal(Op, const_cast<llvm::Instruction *>(&Inst), I);
-    if (auto State = getPNDiffState(CG, Op)) {
-      Parts.push_back("op" + std::to_string(I) + "=" + *State);
+    if (auto State = getPNDiffStateInfo(CG, Op)) {
+      Parts.push_back("op" + std::to_string(I) + "=" +
+                      formatPNDiffStateInfo(*State));
     }
   }
   if (Parts.empty()) {
@@ -1400,16 +1419,17 @@ std::optional<std::string>
 formatFunctionPNDiffComment(ConstraintsGenerator &CG, const llvm::Function &F) {
   std::vector<std::string> Parts;
   if (!F.getReturnType()->isVoidTy()) {
-    if (auto State =
-            getPNDiffState(CG, ReturnValue{.Func = const_cast<llvm::Function *>(&F)})) {
-      Parts.push_back("ret=" + *State);
+    if (auto State = getPNDiffStateInfo(
+            CG, ReturnValue{.Func = const_cast<llvm::Function *>(&F)})) {
+      Parts.push_back("ret=" + formatPNDiffStateInfo(*State));
     }
   }
   unsigned ArgIndex = 0;
   for (auto &Arg : F.args()) {
     if (auto State =
-            getPNDiffState(CG, const_cast<llvm::Argument *>(&Arg))) {
-      Parts.push_back("arg" + std::to_string(ArgIndex) + "=" + *State);
+            getPNDiffStateInfo(CG, const_cast<llvm::Argument *>(&Arg))) {
+      Parts.push_back("arg" + std::to_string(ArgIndex) + "=" +
+                      formatPNDiffStateInfo(*State));
     }
     ++ArgIndex;
   }
@@ -1429,9 +1449,16 @@ std::string formatInstructionText(const llvm::Instruction &Inst) {
 std::string formatConstraintStateSummary(ConstraintsGenerator &CG,
                                          const ConsNode &Cons) {
   auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
-  auto ResultState = getPNDiffState(CG, Nodes[2]).value_or("unknown");
-  auto LeftState = getPNDiffState(CG, Nodes[0]).value_or("unknown");
-  auto RightState = getPNDiffState(CG, Nodes[1]).value_or("unknown");
+  auto formatStateOrUnknown = [&](ExtValuePtr Val) {
+    auto State = getPNDiffStateInfo(CG, Val);
+    if (!State) {
+      return std::string("unknown");
+    }
+    return formatPNDiffStateInfo(*State);
+  };
+  auto ResultState = formatStateOrUnknown(Nodes[2]);
+  auto LeftState = formatStateOrUnknown(Nodes[0]);
+  auto RightState = formatStateOrUnknown(Nodes[1]);
   return "result=" + ResultState + ", op0=" + LeftState +
          ", op1=" + RightState;
 }
