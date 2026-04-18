@@ -250,6 +250,79 @@ void warnIgnoredPNDiffOverride(llvm::StringRef Kind, llvm::StringRef Path,
   llvm::errs() << Message;
 }
 
+bool isPointerSizedNumberProjection(const llvm::Value &Source,
+                                    const llvm::Instruction &User,
+                                    unsigned PointerSize) {
+  auto *SourceTy = llvm::dyn_cast<llvm::IntegerType>(Source.getType());
+  auto *UserTy = llvm::dyn_cast<llvm::IntegerType>(User.getType());
+  if (SourceTy == nullptr || UserTy == nullptr) {
+    return false;
+  }
+
+  auto SourceBits = SourceTy->getBitWidth();
+  auto UserBits = UserTy->getBitWidth();
+  if (UserBits != PointerSize || SourceBits == PointerSize) {
+    return false;
+  }
+
+  if (SourceBits > PointerSize) {
+    return llvm::isa<llvm::TruncInst>(User);
+  }
+  return llvm::isa<llvm::ZExtInst, llvm::SExtInst>(User);
+}
+
+llvm::SmallVector<llvm::Value *, 4>
+collectNumberOverrideUserScanSeeds(const ExtValuePtr &Value) {
+  llvm::SmallVector<llvm::Value *, 4> Seeds;
+  if (auto *V = std::get_if<llvm::Value *>(&Value)) {
+    if (*V != nullptr) {
+      Seeds.push_back(*V);
+    }
+    return Seeds;
+  }
+
+  auto *Ret = std::get_if<ReturnValue>(&Value);
+  if (Ret == nullptr || Ret->Func == nullptr) {
+    return Seeds;
+  }
+
+  for (auto *User : Ret->Func->users()) {
+    auto *Call = llvm::dyn_cast<llvm::CallBase>(User);
+    if (Call == nullptr || Call->getCalledFunction() != Ret->Func ||
+        Call->getType()->isVoidTy()) {
+      continue;
+    }
+    Seeds.push_back(Call);
+  }
+  return Seeds;
+}
+
+bool applyNumberOverrideToCompatibleCastUsers(ConstraintsGenerator &G,
+                                              const ExtValuePtr &Value) {
+  bool Applied = false;
+  llvm::SmallPtrSet<llvm::Instruction *, 8> Seen;
+  auto Seeds = collectNumberOverrideUserScanSeeds(Value);
+  for (auto *Seed : Seeds) {
+    if (Seed == nullptr || !Seed->getType()->isIntegerTy()) {
+      continue;
+    }
+    for (auto *User : Seed->users()) {
+      auto *Inst = llvm::dyn_cast<llvm::Instruction>(User);
+      if (Inst == nullptr || !Seen.insert(Inst).second ||
+          !isPointerSizedNumberProjection(*Seed, *Inst, G.PointerSize)) {
+        continue;
+      }
+      auto *Node = G.PG.getPNIVarOrNull(Inst);
+      if (Node == nullptr || !Node->isPNRelated()) {
+        continue;
+      }
+      Node->setNonPtr();
+      Applied = true;
+    }
+  }
+  return Applied;
+}
+
 struct ResolvedPNDiffTarget {
   ExtValuePtr Value;
   std::string Key;
@@ -802,6 +875,9 @@ void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
     }
     if (!Node->isPNRelated()) {
       if (State == OverridePNDiffState::Number) {
+        if (applyNumberOverrideToCompatibleCastUsers(G, Target.Value)) {
+          continue;
+        }
         warnIgnoredPNDiffOverride("override", EntryPath, Target.Key, State,
                                   Target.Value, WroteHeader);
         continue;
@@ -876,6 +952,9 @@ void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
     }
     if (!Node->isPNRelated()) {
       if (State == OverridePNDiffState::Number) {
+        if (applyNumberOverrideToCompatibleCastUsers(G, Target.Value)) {
+          continue;
+        }
         warnIgnoredPNDiffOverride("extra constraints", ActionPath, Target.Key,
                                   State, Target.Value, WroteHeader);
         continue;
