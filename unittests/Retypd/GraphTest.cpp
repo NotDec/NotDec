@@ -330,15 +330,18 @@ TEST(MLsub, PNDiffUnifiesRecursiveVariablePairsByDefault) {
   llvm::Argument *Arg1 = nullptr;
   auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
 
-  auto LhsTy = CG.createNode(Arg0, nullptr, 0);
-  auto RhsTy = CG.createNode(Arg1, nullptr, 1);
+  auto LhsTy = CG.createNode(Arg0);
+  auto RhsTy = CG.createNode(Arg1);
   auto *LhsPNI = &CG.PG.getPNIVar(Arg0);
   auto *RhsPNI = &CG.PG.getPNIVar(Arg1);
 
   EXPECT_NE(LhsPNI, RhsPNI);
 
-  CG.addSubtype(binarysub::make_function({LhsTy}, nullptr),
-                binarysub::make_function({RhsTy}, nullptr));
+  CG.addSubtype(
+      binarysub::make_function(std::vector<binarysub::SimpleType>{LhsTy},
+                               nullptr),
+      binarysub::make_function(std::vector<binarysub::SimpleType>{RhsTy},
+                               nullptr));
 
   EXPECT_EQ(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
 }
@@ -351,11 +354,14 @@ TEST(MLsub, PNDiffRecursiveVariablePairUnificationCanBeDisabled) {
   auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
   CG.EnablePNDiffTypeVariableClosureUnification = false;
 
-  auto LhsTy = CG.createNode(Arg0, nullptr, 0);
-  auto RhsTy = CG.createNode(Arg1, nullptr, 1);
+  auto LhsTy = CG.createNode(Arg0);
+  auto RhsTy = CG.createNode(Arg1);
 
-  CG.addSubtype(binarysub::make_function({LhsTy}, nullptr),
-                binarysub::make_function({RhsTy}, nullptr));
+  CG.addSubtype(
+      binarysub::make_function(std::vector<binarysub::SimpleType>{LhsTy},
+                               nullptr),
+      binarysub::make_function(std::vector<binarysub::SimpleType>{RhsTy},
+                               nullptr));
 
   EXPECT_NE(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
 }
