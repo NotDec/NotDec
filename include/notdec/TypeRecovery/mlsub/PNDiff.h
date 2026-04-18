@@ -208,8 +208,7 @@ struct PNIGraph {
   DSUMap<ExtValuePtr, PNINode *> PNIMap;
   // std::map<PNINode *, std::set<ExtValuePtr>> PNIToNode;
 
-  PNINode &createPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    llvmValue2ExtVal(Val, User, OpInd);
+  PNINode &createPNINode(ExtValuePtr Val) {
     auto N = createPNINode(getType(Val));
     auto It = PNIMap.insert(Val, N);
     if (!It.second) {
@@ -220,6 +219,9 @@ struct PNIGraph {
       std::abort();
     }
     return *N;
+  }
+  PNINode &createPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    return createPNINode(canonicalizeExtValue(Val, User, OpInd));
   }
 
   PNINode *getPNIVarOrNull(ExtValuePtr N) {
@@ -240,13 +242,15 @@ struct PNIGraph {
     return &It;
   }
 
-  PNINode &getOrInsertPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    llvmValue2ExtVal(Val, User, OpInd);
+  PNINode &getOrInsertPNINode(ExtValuePtr Val) {
     auto N = getPNIVarOrNull(Val);
     if (N != nullptr) {
       return *N;
     }
-    return createPNINode(Val, User, OpInd);
+    return createPNINode(Val);
+  }
+  PNINode &getOrInsertPNINode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    return getOrInsertPNINode(canonicalizeExtValue(Val, User, OpInd));
   }
   void clearConstraints() {
     NodeToCons.clear();

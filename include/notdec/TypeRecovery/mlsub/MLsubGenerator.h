@@ -115,17 +115,19 @@ struct ConstraintsGenerator {
                 bool SolveMemory = false);
   void releaseBinarysubState();
 
-  SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd);
+  SimpleType convertSimpleType(ExtValuePtr Val);
+  SimpleType convertSimpleType(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    return convertSimpleType(canonicalizeExtValue(Val, User, OpInd));
+  }
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
   void maybeUnifyPNDiffTypeVariablePair(const SimpleType &Lhs,
                                         const SimpleType &Rhs);
 
 public:
   // Create Node of both variance
-  SimpleType createNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    llvmValue2ExtVal(Val, User, OpInd);
+  SimpleType createNode(ExtValuePtr Val) {
     // auto N = binarysub::make_variable(lvl);
-    auto N = convertSimpleType(Val, User, OpInd);
+    auto N = convertSimpleType(Val);
     auto It = V2N.insert(Val, N);
     if (!It.second) {
       llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
@@ -135,31 +137,37 @@ public:
       std::abort();
     }
     // Create PNI
-    PG.getOrInsertPNINode(Val, User, OpInd);
+    PG.getOrInsertPNINode(Val);
     // if the value is constant addr, we set ptr and link to memory
     if (std::get_if<ConstantAddr>(&Val)) {
-      setPointer(Val, User, OpInd);
+      setPointer(Val);
     }
     return N;
   }
+  SimpleType createNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    return createNode(canonicalizeExtValue(Val, User, OpInd));
+  }
 
-  SimpleType getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    llvmValue2ExtVal(Val, User, OpInd);
-
+  SimpleType getNodeOrNull(ExtValuePtr Val) {
     if (V2N.count(Val)) {
       return V2N.at(Val);
     }
     return nullptr;
   }
+  SimpleType getNodeOrNull(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    return getNodeOrNull(canonicalizeExtValue(Val, User, OpInd));
+  }
 
-  SimpleType getOrInsertNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    llvmValue2ExtVal(Val, User, OpInd);
-    auto Node = getNodeOrNull(Val, User, OpInd);
+  SimpleType getOrInsertNode(ExtValuePtr Val) {
+    auto Node = getNodeOrNull(Val);
     if (Node != nullptr) {
       return Node;
     }
-    auto N = createNode(Val, User, OpInd);
+    auto N = createNode(Val);
     return N;
+  }
+  SimpleType getOrInsertNode(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    return getOrInsertNode(canonicalizeExtValue(Val, User, OpInd));
   }
 
   void addSubtype(SimpleType lhs, SimpleType rhs) {
@@ -178,10 +186,9 @@ public:
     return Node;
   }
 
-  SimpleType addRemapType(ExtValuePtr Val, llvm::User *User, long OpInd,
-                          SimpleType ty) {
+  SimpleType addRemapType(ExtValuePtr Val, SimpleType ty) {
     assert(ty != nullptr);
-    auto N = getNodeOrNull(Val, User, OpInd);
+    auto N = getNodeOrNull(Val);
     if (N == ty) {
       return N;
     }
@@ -194,6 +201,10 @@ public:
       std::abort();
     }
     return It.first->second;
+  }
+  SimpleType addRemapType(ExtValuePtr Val, llvm::User *User, long OpInd,
+                          SimpleType ty) {
+    return addRemapType(canonicalizeExtValue(Val, User, OpInd), ty);
   }
 
   unsigned getPointerElemSize(llvm::Type *ty);
@@ -211,21 +222,27 @@ public:
   void addCmpConstraint(const ExtValuePtr LHS, const ExtValuePtr RHS,
                         llvm::ICmpInst *I);
 
-  void setPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    llvmValue2ExtVal(Val, User, OpInd);
+  void setPointer(ExtValuePtr Val) {
     if (auto N = PG.getPNIVarOrNull(Val)) {
       N->setPtr();
     }
   }
-  void setNonPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
-    llvmValue2ExtVal(Val, User, OpInd);
+  void setPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    setPointer(canonicalizeExtValue(Val, User, OpInd));
+  }
+  void setNonPointer(ExtValuePtr Val) {
     if (auto N = PG.getPNIVarOrNull(Val)) {
       N->setNonPtrIfRelated();
     }
   }
-  unsigned getSize(ExtValuePtr Val, llvm::User *User = nullptr, long OpInd = -1) {
-    llvmValue2ExtVal(Val, User, OpInd);
+  void setNonPointer(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    setNonPointer(canonicalizeExtValue(Val, User, OpInd));
+  }
+  unsigned getSize(ExtValuePtr Val) {
     return notdec::getSize(Val, PointerSize);
+  }
+  unsigned getSize(ExtValuePtr Val, llvm::User *User, long OpInd) {
+    return getSize(canonicalizeExtValue(Val, User, OpInd));
   }
 
   void onUpdatePNType(ExtValuePtr Val) {}

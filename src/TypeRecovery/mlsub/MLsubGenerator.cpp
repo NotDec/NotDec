@@ -2462,16 +2462,12 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
   }
 }
 
-SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val,
-                                                   llvm::User *User,
-                                                   long OpInd) {
-  llvmValue2ExtVal(Val, User, OpInd);
+SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    return convertSimpleTypeVal(*V, User, OpInd);
+    return convertSimpleTypeVal(*V, nullptr, -1);
   } else if (std::get_if<ReturnValue>(&Val)) {
     return binarysub::make_variable(lvl, getSize(Val));
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
-    assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     return convertSimpleTypeVal(IC->Val, IC->User, IC->OpInd);
   } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
     // as field access.

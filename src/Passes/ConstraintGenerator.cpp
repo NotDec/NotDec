@@ -3163,11 +3163,8 @@ ConstraintsGenerator::genSummary(std::optional<std::string> DebugDir) {
   return Ret;
 }
 
-retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
-                                                    long OpInd,
+retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val,
                                                     retypd::Variance V) {
-  llvmValue2ExtVal(Val, User, OpInd);
-
   if (V == retypd::Covariant) {
     if (V2N.count(Val)) {
       return V2N.at(Val);
@@ -3181,9 +3178,8 @@ retypd::CGNode *ConstraintsGenerator::getNodeOrNull(ExtValuePtr Val, User *User,
   }
 }
 
-retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User,
-                                              long OpInd, retypd::Variance V) {
-  llvmValue2ExtVal(Val, User, OpInd);
+retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val,
+                                              retypd::Variance V) {
   if (V == retypd::Covariant) {
     return *V2N.at(Val);
   } else {
@@ -3192,9 +3188,8 @@ retypd::CGNode &ConstraintsGenerator::getNode(ExtValuePtr Val, User *User,
 }
 
 std::pair<retypd::CGNode &, retypd::CGNode &>
-ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
-  llvmValue2ExtVal(Val, User, OpInd);
-  auto Dtv = convertTypeVar(Val, User, OpInd);
+ConstraintsGenerator::createNode(ExtValuePtr Val) {
+  auto Dtv = convertTypeVar(Val);
   retypd::NodeKey K(Dtv, retypd::Covariant);
   auto [N, NContra] = CG.createNodePair(K, getType(Val));
   auto It = V2N.insert(Val, &N);
@@ -3225,10 +3220,8 @@ ConstraintsGenerator::createNode(ExtValuePtr Val, User *User, long OpInd) {
 }
 
 retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
-                                                      User *User, long OpInd,
                                                       retypd::Variance V) {
-  llvmValue2ExtVal(Val, User, OpInd);
-  auto Node = getNodeOrNull(Val, User, OpInd, V);
+  auto Node = getNodeOrNull(Val, V);
   if (Node != nullptr) {
     return *Node;
   }
@@ -3245,7 +3238,7 @@ retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
   //     }
   //   }
   // }
-  auto [N, NC] = createNode(Val, User, OpInd);
+  auto [N, NC] = createNode(Val);
   if (V == retypd::Covariant) {
     return N;
   } else {
@@ -3253,23 +3246,21 @@ retypd::CGNode &ConstraintsGenerator::getOrInsertNode(ExtValuePtr Val,
   }
 }
 
-const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val,
-                                                     User *User, long OpInd) {
-  return getOrInsertNode(Val, User, OpInd, retypd::Covariant).key.Base;
+const TypeVariable &ConstraintsGenerator::getTypeVar(ExtValuePtr Val) {
+  return getOrInsertNode(Val, retypd::Covariant).key.Base;
 }
 
-TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val, User *User,
-                                                  long OpInd) {
+TypeVariable ConstraintsGenerator::convertTypeVar(ExtValuePtr Val) {
   if (auto V = std::get_if<llvm::Value *>(&Val)) {
-    return convertTypeVarVal(*V, User, OpInd);
+    return convertTypeVarVal(*V);
   } else if (auto F = std::get_if<ReturnValue>(&Val)) {
-    auto tv = getTypeVar(F->Func, nullptr, -1);
+    auto tv = getTypeVar(F->Func);
     return tv.pushLabel({retypd::OutLabel{}});
   } else if (auto IC = std::get_if<UConstant>(&Val)) {
-    assert(User != nullptr && "RetypdGenerator::getTypeVar: User is Null!");
     if (auto CI = dyn_cast<ConstantInt>(IC->Val)) {
       auto ret = TypeVariable::CreateIntConstant(
-          *Ctx.TRCtx, OffsetRange{.offset = CI->getSExtValue()}, User, OpInd);
+          *Ctx.TRCtx, OffsetRange{.offset = CI->getSExtValue()}, IC->User,
+          IC->OpInd);
       return ret;
     }
     return convertTypeVarVal(IC->Val, IC->User, IC->OpInd);
