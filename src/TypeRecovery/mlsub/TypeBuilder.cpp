@@ -54,6 +54,16 @@ TypeBuilder::TypeBuilder(TypeBuilderContext &Parent)
 
 void TypeBuilder::setDebugRootLabel(std::optional<std::string> Label) {
   CurrentRootDebugLabel = std::move(Label);
+  CurrentDebugPath.clear();
+}
+
+void TypeBuilder::pushDebugPath(std::string Frame) {
+  CurrentDebugPath.push_back(std::move(Frame));
+}
+
+void TypeBuilder::popDebugPath() {
+  assert(!CurrentDebugPath.empty() && "debug path underflow");
+  CurrentDebugPath.pop_back();
 }
 
 HType *TypeBuilder::getVoidPtr() {
@@ -114,6 +124,22 @@ void appendCurrentRootLabel(llvm::raw_ostream &OS,
   OS << "<unknown>";
 }
 
+void appendCurrentDebugContext(
+    llvm::raw_ostream &OS, const std::optional<std::string> &RootLabel,
+    const std::vector<std::string> &DebugPath) {
+  appendCurrentRootLabel(OS, RootLabel);
+  if (DebugPath.empty()) {
+    return;
+  }
+  OS << " path=";
+  for (size_t I = 0; I < DebugPath.size(); ++I) {
+    if (I != 0) {
+      OS << " -> ";
+    }
+    OS << DebugPath[I];
+  }
+}
+
 struct ConvertStructTraceDepthScope {
   unsigned &Depth;
 
@@ -122,6 +148,24 @@ struct ConvertStructTraceDepthScope {
   }
 
   ~ConvertStructTraceDepthScope() { --Depth; }
+};
+
+struct DebugPathScope {
+  TypeBuilder &TB;
+  bool Active = false;
+
+  DebugPathScope(TypeBuilder &TB, std::string Frame)
+      : TB(TB), Active(!Frame.empty()) {
+    if (Active) {
+      TB.pushDebugPath(std::move(Frame));
+    }
+  }
+
+  ~DebugPathScope() {
+    if (Active) {
+      TB.popDebugPath();
+    }
+  }
 };
 
 // binarysub may materialize empty records as internal placeholders while it is
@@ -321,6 +365,12 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     for (const auto &field : T.fields) {
       RawFields.push_back({OffsetRange::fromStr(field.first), field.second});
     }
+    std::string PathFrame = "record(fields=" + std::to_string(T.fields.size()) +
+                            ", field_bytes=" +
+                            (FieldSizeBytes ? std::to_string(*FieldSizeBytes)
+                                            : std::string("<none>")) +
+                            ")";
+    DebugPathScope PathScope(*this, std::move(PathFrame));
     return convertStruct(Ty, RawFields, FieldSizeBytes);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     // Collapse away marker-only sides so field payload types do not inherit
@@ -714,7 +764,7 @@ HType *TypeBuilder::convertStruct(
     OS.indent(TraceDepth * 2);
     OS << "[TypeBuilder::convertStruct] begin"
        << " root=";
-    appendCurrentRootLabel(OS, CurrentRootDebugLabel);
+    appendCurrentDebugContext(OS, CurrentRootDebugLabel, CurrentDebugPath);
     OS << " pointee_size=";
     if (PointeeSize) {
       OS << *PointeeSize;
@@ -827,6 +877,10 @@ HType *TypeBuilder::convertStruct(
         SubProblem.push_back({NewOffsetRange, Ent.second});
       }
       // 因为是数组，必须得是这个大小
+      std::string PathFrame = "stride(" + std::to_string(MaxStride) + ", " +
+                              std::to_string(RangeStart) + ".." +
+                              std::to_string(RangeEnd) + ")";
+      DebugPathScope PathScope(*this, std::move(PathFrame));
       auto MemberTy = convertStruct(T, SubProblem, MaxStride);
       auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
       Fields.push_back(
@@ -844,6 +898,9 @@ HType *TypeBuilder::convertStruct(
       assert(Ent.first.access.empty());
       auto SizeInBits = accessedPointeeSizeInBits(Ent.second);
       auto Size = SizeInBits <= 0 ? 0 : (SizeInBits + 7) / 8;
+      std::string PathFrame = "field(" + Ent.first.str() + ", bytes=" +
+                              std::to_string(Size) + ")";
+      DebugPathScope PathScope(*this, std::move(PathFrame));
       Fields.push_back({SimpleRange{.Start = Ent.first.offset, .Size = Size},
                         convertFieldType(Ent.second, Size)});
     }
@@ -1048,7 +1105,8 @@ HType *TypeBuilder::convertStruct(
         OS.indent(TraceDepth * 2);
         OS << "[TypeBuilder::convertStruct] pointee/layout mismatch"
            << " root=";
-        appendCurrentRootLabel(OS, CurrentRootDebugLabel);
+        appendCurrentDebugContext(OS, CurrentRootDebugLabel,
+                                  CurrentDebugPath);
         OS << " pointee_size=" << PointeeSize.value()
            << " synthesized_size=" << Size
            << " first_field_start=" << Fields.front().first.Start
@@ -1111,6 +1169,12 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     for (const auto &field : T.fields) {
       RawFields.push_back({OffsetRange::fromStr(field.first), field.second});
     }
+    std::string PathFrame =
+        "pointer-record(fields=" + std::to_string(T.fields.size()) +
+        ", pointee_size=" +
+        (PointeeSize ? std::to_string(*PointeeSize) : std::string("<none>")) +
+        ")";
+    DebugPathScope PathScope(*this, std::move(PathFrame));
     Ret = convertStruct(Ty, RawFields, PointeeSize);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     if (isZeroSizedRecordMarker(V->lhs)) {

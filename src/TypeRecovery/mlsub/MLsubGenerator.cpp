@@ -1338,6 +1338,15 @@ void appendDebugValueTypes(
   Out << "\n";
 }
 
+std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
+  std::string Label = toString(Value, true);
+  std::string Stable = toStableString(Value);
+  if (!Stable.empty()) {
+    Label += " [stable=" + Stable + "]";
+  }
+  return Label;
+}
+
 std::shared_ptr<ConstraintsGenerator> getFuncCG(AllGraphs &AG,
                                                 const llvm::Function *F) {
   auto *CGN = AG.CG->getOrInsertFunction(const_cast<llvm::Function *>(F));
@@ -2167,7 +2176,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     auto It = Res.find(PolarVar{.var = Ent.second, .pos = getPol(Ent.first)});
     ast::HType *Converted = nullptr;
     if (It != Res.end() && It->second) {
-      TB.setDebugRootLabel(toString(Ent.first, true));
+      TB.setDebugRootLabel(formatTypeBuilderRootLabel(Ent.first));
       Converted = TB.convert(It->second);
       TB.setDebugRootLabel(std::nullopt);
     }
