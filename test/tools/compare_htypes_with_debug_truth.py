@@ -328,6 +328,7 @@ class Comparator:
             {"kind": "memory_root", "base_offset_bytes": base_offset_bytes},
             path=truth_key,
             visited=set(),
+            field_allowlist=self._field_allowlist(root),
         )
         return {
             "truth": truth_key,
@@ -337,6 +338,12 @@ class Comparator:
             "mismatches": mismatches,
         }
 
+    def _field_allowlist(self, root: dict) -> set[str] | None:
+        raw = root.get("field_allowlist")
+        if raw is None:
+            return None
+        return {str(item) for item in raw}
+
     def compare_type(
         self,
         truth_type: dict,
@@ -344,6 +351,7 @@ class Comparator:
         *,
         path: str,
         visited: set[tuple[str, int]],
+        field_allowlist: set[str] | None = None,
     ) -> list[str]:
         kind = truth_type["kind"]
         if kind == "pointer":
@@ -353,6 +361,7 @@ class Comparator:
                     recovered,
                     path=path + "->*",
                     visited=visited,
+                    field_allowlist=field_allowlist,
                 )
             if recovered["kind"] == "memory_slot":
                 return self.compare_pointer_slot(truth_type, recovered, path=path, visited=visited)
@@ -361,7 +370,13 @@ class Comparator:
         if kind == "record_ref":
             if recovered["kind"] != "memory_root":
                 return [f"{path}: record comparison only supports recovered memory roots for now"]
-            return self.compare_record(truth_type["name"], recovered["base_offset_bytes"], path, visited)
+            return self.compare_record(
+                truth_type["name"],
+                recovered["base_offset_bytes"],
+                path,
+                visited,
+                field_allowlist=field_allowlist,
+            )
 
         if kind == "primitive":
             return self.compare_primitive(truth_type, recovered, path)
@@ -374,6 +389,8 @@ class Comparator:
         base_offset_bytes: int,
         path: str,
         visited: set[tuple[str, int]],
+        *,
+        field_allowlist: set[str] | None = None,
     ) -> list[str]:
         marker = (record_name, base_offset_bytes)
         if marker in visited:
@@ -386,6 +403,8 @@ class Comparator:
 
         mismatches: list[str] = []
         for field in record["fields"]:
+            if field_allowlist is not None and field["name"] not in field_allowlist:
+                continue
             expected_offset = base_offset_bytes + field["offset_bits"] // 8
             recovered_field = self.htypes.memory_fields_by_offset.get(expected_offset)
             if recovered_field is None:
@@ -403,6 +422,7 @@ class Comparator:
                     },
                     path=f"{path}.{field['name']}",
                     visited=visited,
+                    field_allowlist=None,
                 )
             )
         return mismatches

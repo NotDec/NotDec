@@ -1,0 +1,15 @@
+{
+  "suite": "notdec lifting wasm fortune",
+  "default_args": [
+    "--tr-level=0"
+  ],
+  "cases": [
+    {
+      "name": "fortune.o3.wasm",
+      "input": "cases/fortune.o3.wasm",
+      "expected": "expected/fortune.o3.wasm.summary.json",
+      "ground_truth": "truth/fortune.ll",
+      "status": "pass"
+    }
+  ]
+}

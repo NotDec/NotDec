@@ -1,0 +1,65 @@
+{
+  "suite": "notdec type recovery realworld fortune tr-level=2",
+  "default_args": [
+    "--tr-level=2"
+  ],
+  "oracle": {
+    "kind": "debug-struct-compare"
+  },
+  "cases": [
+    {
+      "name": "fortune.o3.wasm",
+      "input": "cases/fortune.o3.wasm.ll",
+      "ground_truth": "truth/fortune.ll",
+      "status": "pass",
+      "roots": [
+        {
+          "truth": "@Re_pat",
+          "recovered": "memory",
+          "base_offset_bytes": 2224,
+          "field_allowlist": [
+            "re_nsub",
+            "__opaque"
+          ]
+        },
+        {
+          "truth": "add_file::head",
+          "recovered": "memory",
+          "base_offset_bytes": 2268,
+          "field_allowlist": [
+            "percent",
+            "datfd",
+            "inf",
+            "name",
+            "path",
+            "datfile"
+          ]
+        },
+        {
+          "truth": "add_file::tail",
+          "recovered": "memory",
+          "base_offset_bytes": 3328,
+          "field_allowlist": [
+            "percent",
+            "fd",
+            "pos",
+            "inf",
+            "name",
+            "path",
+            "datfile",
+            "posfile"
+          ]
+        },
+        {
+          "truth": "@Noprob_tbl",
+          "recovered": "memory",
+          "base_offset_bytes": 3360,
+          "field_allowlist": [
+            "str_version",
+            "str_numstr"
+          ]
+        }
+      ]
+    }
+  ]
+}

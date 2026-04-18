@@ -17,6 +17,28 @@ function(add_type_recovery_suite test_name manifest_relpath)
 	)
 endfunction()
 
+function(add_lifting_suite test_name manifest_relpath)
+	add_test(
+		NAME ${test_name}
+		COMMAND
+			${Python3_EXECUTABLE}
+			${CMAKE_CURRENT_SOURCE_DIR}/run_lifting_suite.py
+			--binary
+			$<TARGET_FILE:notdec-decompile>
+			--manifest
+			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
+			--project-root
+			${PROJECT_SOURCE_DIR}
+			--workdir
+			${CMAKE_CURRENT_BINARY_DIR}/artifacts/${test_name}
+	)
+endfunction()
+
+add_lifting_suite(
+	notdec.lifting.wasm
+	lifting/wasm/manifest.json
+)
+
 add_type_recovery_suite(
 	notdec.type_recovery.llvm_ir.tr_level_2
 	type-recovery/llvm-ir/manifest.json
@@ -28,8 +50,8 @@ add_type_recovery_suite(
 )
 
 add_type_recovery_suite(
-	notdec.type_recovery.howard_o3_split.tr_level_2
-	type-recovery/howard-o3-split/manifest.json
+	notdec.type_recovery.realworld.tr_level_2
+	type-recovery/realworld/manifest.json
 )
 
 add_type_recovery_suite(

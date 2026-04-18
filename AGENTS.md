@@ -6,7 +6,7 @@
 5. 调试时，每解决完一个小问题就可以把当前进展先写到日志中，比如对应的计划日志附近。
 6. 写修改日志时，必须要明确指出具体修改的哪个文件的哪一行，涉及哪些函数。
 
-当前关注的测试用例： test/type-recovery/howard-o3-split/cases/fortune.o3.wasm.4.ll
+当前关注的测试用例： test/type-recovery/realworld/cases/fortune.o3.wasm.ll
 当前正在执行的计划：
 - logs/20260416-06-MLsubExtraConstraintJSONPlan.md
 - logs/20260416-07-MLsubFrozenIRConstraintAnchorPlan.md
@@ -248,26 +248,33 @@ workdir 机制和中间产物的用途。
 
 当前已接入的 suite 包括：
 
+- `test/lifting/wasm/manifest.json`
 - `test/type-recovery/llvm-ir/manifest.json`
 - `test/type-recovery/sysy/manifest.json`
-- `test/type-recovery/howard-o3-split/manifest.json`
+- `test/type-recovery/realworld/manifest.json`
+- `test/type-recovery/debug-info-c/manifest.json`
 
 当前 suite runner 为：
 
 - `test/run_type_recovery_suite.py`
+- `test/run_lifting_suite.py`
 
 其中：
 
+- `test/lifting/wasm/`
+  - 原始 WebAssembly lifting 回归
+  - 当前收录 `fortune.o3.wasm`
+  - 先用 module-summary oracle 约束 frontend 输出骨架
 - `test/type-recovery/llvm-ir/`
   - 手写 LLVM IR 输入的类型恢复回归
 - `test/type-recovery/sysy/`
   - SysY 源码输入；runner 会先用 `clang-14` 编译为 LLVM IR，再执行
     `notdec --dump-htypes`
-- `test/type-recovery/howard-o3-split/`
-  - 从 `/sn640/NotDec-Exp/ICSE-HOWARD/splited/splitted_irs` 导入的
-    `*.o3*.ll` 语料
-  - 当前先全量入库并在 manifest 中标记为 `skip`，后续再逐步提升为
-    `xfail/pass`
+- `test/type-recovery/realworld/`
+  - 面向真实项目的较大型类型恢复回归
+  - 当前只保留 `fortune.o3.wasm.ll`
+  - 使用相邻的 `truth/fortune.ll` 作为 debug-info ground truth
+  - manifest 中可通过 `field_allowlist` 只比较当前稳定恢复出的结构字段
 - `test/legacy/wasm/`
   - 旧的 wasm 实验脚本、数据集与生成产物
   - 默认不作为当前主测试布局或 golden oracle
@@ -275,7 +282,7 @@ workdir 机制和中间产物的用途。
 runner 支持的 case 状态：
 
 - `pass`
-  - 必须成功运行，并与 `.htypes` golden snapshot 一致
+  - 必须成功运行，并与该 suite 配置的 oracle 一致
 - `xfail`
   - 当前已知类型恢复失败，先保留为回归跟踪点
 - `skip`
