@@ -1347,6 +1347,28 @@ std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
   return Label;
 }
 
+std::string sanitizeTraceText(llvm::StringRef Text) {
+  std::string Result = Text.str();
+  for (char &Ch : Result) {
+    if (Ch == '\n' || Ch == '\r' || Ch == '\t') {
+      Ch = ' ';
+    }
+  }
+  return Result;
+}
+
+std::string formatExtValueMappingLabel(ExtValuePtr Value) {
+  std::string Stable = toStableString(Value);
+  std::string Verbose = sanitizeTraceText(toString(Value, true));
+  if (Stable.empty()) {
+    return Verbose;
+  }
+  if (Verbose.empty() || Verbose == Stable) {
+    return Stable;
+  }
+  return Stable + " (" + Verbose + ")";
+}
+
 std::shared_ptr<ConstraintsGenerator> getFuncCG(AllGraphs &AG,
                                                 const llvm::Function *F) {
   auto *CGN = AG.CG->getOrInsertFunction(const_cast<llvm::Function *>(F));
@@ -1583,6 +1605,109 @@ void writePNDiffAnnotatedModule(const llvm::Module &M, const std::string &Path,
 
 } // namespace
 
+void ConstraintsGenerator::emitMappingTrace(llvm::StringRef Event,
+                                            ExtValuePtr Val,
+                                            const SimpleType &Ty) {
+  if (TraceStream == nullptr) {
+    return;
+  }
+  std::ostringstream OS;
+  OS << "[mapping:" << Event.str() << "] value="
+     << formatExtValueMappingLabel(Val) << " simple="
+     << binarysub::debug_string(Ty);
+  binarysub::binarysub_trace(OS.str());
+}
+
+void ConstraintsGenerator::emitRemapTrace(llvm::StringRef Event, ExtValuePtr Val,
+                                          ExtValuePtr Target,
+                                          const SimpleType &Ty) {
+  if (TraceStream == nullptr) {
+    return;
+  }
+  std::ostringstream OS;
+  OS << "[mapping:" << Event.str() << "] value="
+     << formatExtValueMappingLabel(Val) << " target="
+     << formatExtValueMappingLabel(Target) << " simple="
+     << binarysub::debug_string(Ty);
+  binarysub::binarysub_trace(OS.str());
+}
+
+void ConstraintsGenerator::emitMergeTrace(llvm::StringRef Event, SimpleType From,
+                                          SimpleType To,
+                                          llvm::ArrayRef<ExtValuePtr> MovedValues) {
+  if (TraceStream == nullptr) {
+    return;
+  }
+  std::ostringstream OS;
+  OS << "[mapping:" << Event.str() << "] from="
+     << binarysub::debug_string(From) << " to=" << binarysub::debug_string(To);
+  if (MovedValues.empty()) {
+    OS << " values=<none>";
+  } else {
+    OS << " values=";
+    for (size_t I = 0; I < MovedValues.size(); ++I) {
+      if (I != 0) {
+        OS << ", ";
+      }
+      OS << formatExtValueMappingLabel(MovedValues[I]);
+    }
+  }
+  binarysub::binarysub_trace(OS.str());
+}
+
+void ConstraintsGenerator::addMergeNode(SimpleType From, SimpleType To) {
+  if (From == To) {
+    return;
+  }
+  std::vector<ExtValuePtr> MovedValues;
+  if (auto It = V2N.rev().find(From); It != V2N.rev().end()) {
+    MovedValues = It->second;
+  }
+  emitMergeTrace("merge", From, To, MovedValues);
+  V2N.merge(From, To);
+}
+
+SimpleType ConstraintsGenerator::createNode(ExtValuePtr Val) {
+  auto N = convertSimpleType(Val);
+  auto It = V2N.insert(Val, N);
+  if (!It.second) {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "createNode: Value already mapped to "
+                 << It.first->second->str() << ", but now set to "
+                 << toString(Val) << "\n";
+    std::abort();
+  }
+  emitMappingTrace("create", Val, N);
+  PG.getOrInsertPNINode(Val);
+  if (std::get_if<ConstantAddr>(&Val)) {
+    setPointer(Val);
+  }
+  return N;
+}
+
+SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
+                                              ExtValuePtr Target) {
+  auto Ty = getNodeOrNull(Target);
+  assert(Ty != nullptr);
+  auto N = getNodeOrNull(Val);
+  if (N == Ty) {
+    emitRemapTrace("remap-alias", Val, Target, Ty);
+    PG.remapPNIVar(Val, Target);
+    return N;
+  }
+  auto It = V2N.insert(Val, Ty);
+  if (!It.second) {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "setTypeVar: Value already mapped to "
+                 << It.first->second->str() << ", but now set to "
+                 << toString(Val) << "\n";
+    std::abort();
+  }
+  emitRemapTrace("remap", Val, Target, Ty);
+  PG.remapPNIVar(Val, Target);
+  return It.first->second;
+}
+
 void MLsubRecovery::run() {
   auto &M = const_cast<llvm::Module &>(Mod);
   // 0.4 prepare debug dir and SCCsCatalog
@@ -1632,6 +1757,7 @@ void MLsubRecovery::run() {
       *BinarysubTraceFile << "# binarysub / pndiff trace\n";
       *BinarysubTraceFile << "# enabled by " << kBinarysubTraceEnv.str()
                           << "=1\n";
+      *BinarysubTraceFile << "# value/simple-type bindings use [mapping:*]\n";
       BinarysubTraceFile->flush();
     }
   } else {

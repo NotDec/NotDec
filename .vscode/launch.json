@@ -38,6 +38,10 @@
         {
           "name": "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT",
           "value": "1"
+        },
+        {
+          "name": "NOTDEC_BINARYSUB_TRACE",
+          "value": "1"
         }
       ],
       // "setupCommands": [{"text": "set auto-solib-add off"}]

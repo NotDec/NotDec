@@ -25,6 +25,7 @@
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FormattedStream.h>
@@ -67,7 +68,7 @@ struct ConstraintsGenerator {
   bool EnablePNDiffTypeVariableClosureUnification = true;
   std::ostream *TraceStream = nullptr;
 
-  void addMergeNode(SimpleType From, SimpleType To) { V2N.merge(From, To); }
+  void addMergeNode(SimpleType From, SimpleType To);
 
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);
@@ -119,28 +120,16 @@ struct ConstraintsGenerator {
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
   void maybeUnifyPNDiffTypeVariablePair(const SimpleType &Lhs,
                                         const SimpleType &Rhs);
+  void emitMappingTrace(llvm::StringRef Event, ExtValuePtr Val,
+                        const SimpleType &Ty);
+  void emitRemapTrace(llvm::StringRef Event, ExtValuePtr Val,
+                      ExtValuePtr Target, const SimpleType &Ty);
+  void emitMergeTrace(llvm::StringRef Event, SimpleType From, SimpleType To,
+                      llvm::ArrayRef<ExtValuePtr> MovedValues);
 
   public:
   // Create Node of both variance
-  SimpleType createNode(ExtValuePtr Val) {
-    // auto N = binarysub::make_variable(lvl);
-    auto N = convertSimpleType(Val);
-    auto It = V2N.insert(Val, N);
-    if (!It.second) {
-      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "createNode: Value already mapped to "
-                   << It.first->second->str() << ", but now set to "
-                   << toString(Val) << "\n";
-      std::abort();
-    }
-    // Create PNI
-    PG.getOrInsertPNINode(Val);
-    // if the value is constant addr, we set ptr and link to memory
-    if (std::get_if<ConstantAddr>(&Val)) {
-      setPointer(Val);
-    }
-    return N;
-  }
+  SimpleType createNode(ExtValuePtr Val);
 
   SimpleType getNodeOrNull(ExtValuePtr Val) {
     if (V2N.count(Val)) {
@@ -174,25 +163,7 @@ struct ConstraintsGenerator {
     return Node;
   }
 
-  SimpleType addRemapType(ExtValuePtr Val, ExtValuePtr Target) {
-    auto ty = getNodeOrNull(Target);
-    assert(ty != nullptr);
-    auto N = getNodeOrNull(Val);
-    if (N == ty) {
-      PG.remapPNIVar(Val, Target);
-      return N;
-    }
-    auto It = V2N.insert(Val, ty);
-    if (!It.second) {
-      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "setTypeVar: Value already mapped to "
-                   << It.first->second->str() << ", but now set to "
-                   << toString(Val) << "\n";
-      std::abort();
-    }
-    PG.remapPNIVar(Val, Target);
-    return It.first->second;
-  }
+  SimpleType addRemapType(ExtValuePtr Val, ExtValuePtr Target);
 
   unsigned getPointerElemSize(llvm::Type *ty);
   static inline bool is_cast(Value *Val) {
