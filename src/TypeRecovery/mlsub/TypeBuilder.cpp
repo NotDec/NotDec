@@ -140,6 +140,20 @@ void appendCurrentDebugContext(
   }
 }
 
+void appendCurrentDebugPathOnly(llvm::raw_ostream &OS,
+                                const std::vector<std::string> &DebugPath) {
+  if (DebugPath.empty()) {
+    return;
+  }
+  OS << "path=";
+  for (size_t I = 0; I < DebugPath.size(); ++I) {
+    if (I != 0) {
+      OS << " -> ";
+    }
+    OS << DebugPath[I];
+  }
+}
+
 struct ConvertStructTraceDepthScope {
   unsigned &Depth;
 
@@ -762,9 +776,13 @@ HType *TypeBuilder::convertStruct(
     std::string Trace;
     llvm::raw_string_ostream OS(Trace);
     OS.indent(TraceDepth * 2);
-    OS << "[TypeBuilder::convertStruct] begin"
-       << " root=";
-    appendCurrentDebugContext(OS, CurrentRootDebugLabel, CurrentDebugPath);
+    OS << "[TypeBuilder::convertStruct] begin ";
+    if (TraceDepth == 0) {
+      OS << "root=";
+      appendCurrentDebugContext(OS, CurrentRootDebugLabel, CurrentDebugPath);
+    } else {
+      appendCurrentDebugPathOnly(OS, CurrentDebugPath);
+    }
     OS << " pointee_size=";
     if (PointeeSize) {
       OS << *PointeeSize;
@@ -1103,10 +1121,14 @@ HType *TypeBuilder::convertStruct(
         std::string Trace;
         llvm::raw_string_ostream OS(Trace);
         OS.indent(TraceDepth * 2);
-        OS << "[TypeBuilder::convertStruct] pointee/layout mismatch"
-           << " root=";
-        appendCurrentDebugContext(OS, CurrentRootDebugLabel,
-                                  CurrentDebugPath);
+        OS << "[TypeBuilder::convertStruct] pointee/layout mismatch ";
+        if (TraceDepth == 0) {
+          OS << "root=";
+          appendCurrentDebugContext(OS, CurrentRootDebugLabel,
+                                    CurrentDebugPath);
+        } else {
+          appendCurrentDebugPathOnly(OS, CurrentDebugPath);
+        }
         OS << " pointee_size=" << PointeeSize.value()
            << " synthesized_size=" << Size
            << " first_field_start=" << Fields.front().first.Start
