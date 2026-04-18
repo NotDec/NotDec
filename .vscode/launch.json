@@ -128,6 +128,27 @@
       "program": "${workspaceFolder}/test/Access2Struct/main.py",
       "console": "integratedTerminal",
       "args": "TestAccess.test_7_Negative"
+    },
+    {
+      "name": "Python compare fortune debug truth",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/test/tools/compare_htypes_with_debug_truth.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "args": [
+        "--htypes",
+        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.out.htypes",
+        "--truth",
+        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.truth.json",
+        "--config",
+        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.compare.config.json",
+        "--report-json",
+        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.compare.json",
+        "--report-text",
+        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.compare.txt"
+      ]
     }
   ]
 }

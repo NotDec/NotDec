@@ -1,0 +1,16 @@
+{
+  "kind": "workdir-log",
+  "max_residual_pndiff_constraints": 2,
+  "required_stack_pointer_substring": "@__stack_pointer",
+  "max_stack_pointer_errors": 2,
+  "allowed_stack_pointer_error_functions": [
+    "main",
+    "usage"
+  ],
+  "required_memset_functions": [
+    "main",
+    "add_file",
+    "get_tbl"
+  ],
+  "min_memset_merge_count": 20
+}

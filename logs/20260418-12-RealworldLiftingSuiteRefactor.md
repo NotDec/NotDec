@@ -17,28 +17,35 @@
 
 ### 1. 新增 lifting suite
 
-- `test/run_lifting_suite.py:14-155`
-  - 新增 module-summary 解析与比较逻辑。
+- `test/run_lifting_suite.py:53-86`
+  - 新增 `expand_template()` / `expand_args()`，让 lifting suite 可以把
+    `case_workdir` 注入命令行参数。
+- `test/run_lifting_suite.py:146-199`
+  - 新增 workdir log 解析逻辑。
   - 关键函数：
-    - `parse_ir_summary()`
-    - `compare_module_summary()`
-- `test/run_lifting_suite.py:158-278`
-  - 新增 manifest-driven lifting runner 主流程。
-  - 关键函数：
-    - `main()`
-    - `notdec_command_succeeded()`
-    - `run_command()`
-- `test/CMakeLists.txt:20-40`
+    - `parse_pndiff_summary()`
+    - `parse_recovery_pass_summary()`
+- `test/run_lifting_suite.py:266-401`
+  - 新增 `compare_workdir_logs()` 与 `compare_case()`，并把 runner 主流程改成
+    case-local workdir。
+  - `main()` 现在会在每个 case 运行前重建 `workdir/<case>/`，然后让
+    `notdec` 直接把 `PNDiff.warn.txt` / `01-recovery-passes.log` 写进去。
+- `test/CMakeLists.txt:20-30`
   - 新增 `add_lifting_suite()`，并注册 `notdec.lifting.wasm`。
-- `test/lifting/wasm/manifest.json:1-15`
-  - 新增 `fortune.o3.wasm` lifting case。
-- `test/lifting/wasm/expected/fortune.o3.wasm.summary.json:1-34`
-  - 新增 lifting oracle，约束：
-    - `target triple`
-    - 关键 globals
-    - 关键 defines / declares
-- `test/lifting/wasm/README.md:1-20`
-  - 记录 suite 目的、目录约定、以及 `truth/fortune.ll` 的用途。
+- `test/lifting/wasm/manifest.json:1-16`
+  - `fortune.o3.wasm` lifting case 改为：
+    - `--tr-level=2`
+    - `--gen-work-dir`
+    - `--work-dir={case_workdir}`
+- `test/lifting/wasm/expected/fortune.o3.wasm.workdir-log.json:1-16`
+  - lifting oracle 从模块摘要改为 workdir log oracle，约束：
+    - `PNDiff.warn.txt` 中 residual `Add/Sub` 数量上限
+    - `01-recovery-passes.log` 中选中的 stack pointer
+    - stack-pointer recovery 报错数量与允许函数集合
+    - `MemsetMatcher` 命中的函数集合与 merge 次数下限
+- `test/lifting/wasm/README.md:5-23`
+  - 改成记录 lifting suite 当前检查的是 `PNDiff.warn.txt` /
+    `01-recovery-passes.log`，不再写成 module-summary oracle。
 
 ### 2. 重组 realworld 类型恢复 suite
 
@@ -76,9 +83,10 @@
 
 ### 4. 文档与仓库说明同步
 
-- `test/README.md:17-72`
-  - 加入 `test/run_lifting_suite.py`、`test/lifting/wasm/`、
-    `test/type-recovery/realworld/` 的说明。
+- `test/README.md:17-74`
+  - 更新 `test/run_lifting_suite.py` 支持的 oracle 类型，并同步
+    `test/lifting/wasm/` 当前改成检查 `PNDiff.warn.txt` /
+    `01-recovery-passes.log`。
 - `AGENTS.md:9`
   - 当前关注 case 更新为
     `test/type-recovery/realworld/cases/fortune.o3.wasm.ll`
@@ -99,71 +107,74 @@
 
 1. 读取 `test/lifting/wasm/manifest.json`
 2. 对每个 case 调用：
-   - `./build/bin/notdec <input.wasm> -o <workdir>/<case>.out.ll --tr-level=0`
+   - `./build/bin/notdec <input.wasm> -o <case_workdir>/out.ll --tr-level=2 --gen-work-dir --work-dir=<case_workdir>`
 3. 先检查 lifting 是否“基础成功”：
    - `notdec` 返回码必须为 `0`
    - stdout 中不能包含 `IR parsing failed:`
    - 输出 `.ll` 文件必须存在且非空
 4. 如果基础成功，再进入 oracle 比较：
-   - `test/run_lifting_suite.py::parse_ir_summary()`
-     从输出 `.ll` 中提取：
-     - `target triple`
-     - `globals`
-     - `define` 出来的函数名
-     - `declare` 出来的函数名
-   - `test/run_lifting_suite.py::compare_module_summary()`
-     把这些摘要和
-     `test/lifting/wasm/expected/fortune.o3.wasm.summary.json`
-     做结构化比较
-5. 只有当“基础成功”和“摘要比较无 mismatch”同时成立时，这个 case 才算
+   - `test/run_lifting_suite.py::compare_case()`
+     会根据 expected JSON 的 `kind` 分派到
+     `compare_workdir_logs()`
+   - `test/run_lifting_suite.py::parse_pndiff_summary()`
+     读取 `<case_workdir>/PNDiff.warn.txt`，统计：
+     - residual `Add/Sub` 约束数量
+     - override warning 是否存在
+     - 是否命中
+       `No residual Add/Sub constraints with unknown state after solve.`
+   - `test/run_lifting_suite.py::parse_recovery_pass_summary()`
+     读取 `<case_workdir>/01-recovery-passes.log`，提取：
+     - `Selected stack pointer: ...`
+     - `ERROR: ... func: ...` 列表
+     - `MemsetMatcher [func]` 出现的函数名
+     - `Merging ...` 次数
+5. 只有当“基础成功”和“workdir 日志比较无 mismatch”同时成立时，这个 case 才算
    `pass`
 
-当前 `fortune.o3.wasm` 具体比较的是：
+当前 `fortune.o3.wasm` 具体比较的是 `test/lifting/wasm/expected/fortune.o3.wasm.workdir-log.json` 里的这些阈值：
 
-- `target triple`
-  - 必须是 `wasm32-unknown-wasi`
-- `required_globals`
-  - `__stack_pointer`
-  - `__notdec_mem0`
-  - `table_0`
-- `required_defines`
-  - `main`
-  - `program_version`
-  - `usage`
-  - `add_file`
-  - `maxlen_in_list`
-  - `matches_in_list`
-  - `get_tbl`
-  - `print_list`
-  - `free_desc`
-  - `names_compare`
-  - `__main_void`
-- `required_declares`
-  - `getenv`
-  - `getopt`
-  - `malloc`
-  - `printf`
-  - `fprintf`
-  - `stat`
-  - `opendir`
-  - `readdir`
-  - `closedir`
-  - `qsort`
-  - `regexec`
+- `max_residual_pndiff_constraints = 2`
+  - 允许 `PNDiff.warn.txt` 中 residual `Add/Sub` 最多 2 条
+- `required_stack_pointer_substring = "@__stack_pointer"`
+  - `01-recovery-passes.log` 里必须选中 `@__stack_pointer`
+- `max_stack_pointer_errors = 2`
+  - stack-pointer recovery 报错总数不能超过 2
+- `allowed_stack_pointer_error_functions = ["main", "usage"]`
+  - 当前只接受 `main` 和 `usage` 这两个已知 `Cannot find sp restore`
+- `required_memset_functions = ["main", "add_file", "get_tbl"]`
+  - `MemsetMatcher` 必须至少在这 3 个函数出现 section
+- `min_memset_merge_count = 20`
+  - merge 次数至少 20
 
 也就是说，lifting suite 当前不是全文 diff `.ll`，而是检查：
 
-- frontend 能否稳定把 wasm lift 成非空 LLVM IR
-- lift 后的模块骨架里，关键 global / define / declare 是否仍然存在
+- frontend 能否稳定把 wasm 走完整条 lifting + recovery 主链路
+- `PNDiff.warn.txt` 中是否没有或只剩很少的未解决 `Add/Sub`
+- `01-recovery-passes.log` 里的 stack-pointer recovery 报错是否仍在已知边界内
+- `MemsetMatcher` 是否仍然在关键函数上稳定命中
 
 这样做的原因是：
 
 - 对大 case 做全文 `.ll` snapshot 太脆弱
-- 当前更关心 wasm frontend 有没有把模块主骨架 lift 出来
+- 只看 globals / defines / declares 对当前问题过于表层，无法直接反映
+  `PNDiff` 与恢复 pass 的健康度
+- 当前更关心 wasm 输入经过恢复链路后的关键日志信号是否稳定
 
-当前 `ground_truth` 字段虽然指向 `truth/fortune.ll`，但 lifting suite 这版还
-没有把它作为强制比较对象；它现在主要是就地保存 provenance，并给后续更强
-oracle 预留输入。
+按当前代码实际跑出的稳定基线，`fortune.o3.wasm` 这例现在会产出：
+
+- `PNDiff.warn.txt`
+  - residual `Add` 约束 2 条
+- `01-recovery-passes.log`
+  - `Cannot find sp restore` 报错 2 条
+  - 对应函数是 `main`、`usage`
+  - `MemsetMatcher` section 出现在 `main`、`add_file`、`get_tbl`
+  - `Merging ...` 共 23 条
+
+所以当前 oracle 的语义是：
+
+- 允许这批已知残余和已知报错继续作为回归基线存在
+- 但如果 residual `Add/Sub` 明显变多、stack-pointer 报错扩散到新函数、或者
+  `MemsetMatcher` 命中明显退化，就把 case 判成失败
 
 ### 2. `test/type-recovery/realworld/` 现在如何判定 `pass`
 
@@ -271,28 +282,20 @@ python3 test/run_lifting_suite.py \
   --binary ./build/bin/notdec \
   --manifest test/lifting/wasm/manifest.json \
   --project-root /sn640/NotDec \
-  --workdir /tmp/notdec-lifting-suite
-
-python3 test/run_type_recovery_suite.py \
-  --binary ./build/bin/notdec \
-  --manifest test/type-recovery/realworld/manifest.json \
-  --project-root /sn640/NotDec \
-  --workdir /tmp/notdec-realworld-suite
+  --workdir /tmp/notdec-lifting-suite-new
 ```
 
 结果：
 
 - `notdec lifting wasm fortune`：`1 passed`
-- `notdec type recovery realworld fortune tr-level=2`：`1 passed`
 
 ### CTest 验证
 
 ```bash
-cmake -S . -B build -G Ninja
-ctest --test-dir build -R 'notdec\.(lifting\.wasm|type_recovery\.realworld\.tr_level_2)' --output-on-failure
+ctest --test-dir build -R '^notdec\.lifting\.wasm$' --output-on-failure
 ```
 
-结果：两个新测试都通过。
+结果：`notdec.lifting.wasm` 通过。
 
 ## 后续建议
 
@@ -300,7 +303,8 @@ ctest --test-dir build -R 'notdec\.(lifting\.wasm|type_recovery\.realworld\.tr_l
    `test/type-recovery/realworld/manifest.json` 里继续扩对应 root 的
    `field_allowlist`。
 2. 如果 lifting 需要更强语义约束，可以在 `test/run_lifting_suite.py` 的
-   `compare_module_summary()` 基础上继续增加：
-   - 关键 function signature 对比
-   - globals / memory 初始化摘要
+   `compare_workdir_logs()` 基础上继续增加：
+   - `PNDiff.warn.txt` 中按函数或按 SCC 的更细粒度阈值
+   - `01-recovery-passes.log` 里 `MemcpyMatcher` / `LinearAllocationRecovery`
+     的稳定信号
    - 与 `truth/fortune.ll` 的 symbol-level 交叉检查

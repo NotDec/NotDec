@@ -19,7 +19,7 @@ This mirrors the usual LLVM split:
   - Supports `htype-snapshot` and `debug-struct-compare` oracle kinds.
 - `test/run_lifting_suite.py`
   - Shared manifest-driven runner for frontend lifting suites.
-  - Currently supports small module-summary oracles for lifted `.ll` output.
+  - Supports module-summary and workdir-log oracles for frontend + recovery output.
 - `test/lifting/<arch>/`
   - Self-contained lifting suites grouped by frontend/input architecture.
   - `cases/` stores checked-in raw inputs such as `.wasm`.
@@ -41,7 +41,8 @@ This mirrors the usual LLVM split:
 
 - `test/lifting/wasm/`
   - Raw WebAssembly lifting regression cases.
-  - Currently tracks `fortune.o3.wasm` with a module-summary oracle.
+  - Currently tracks `fortune.o3.wasm` with a workdir-log oracle that checks
+    `PNDiff.warn.txt` and `01-recovery-passes.log`.
 - `test/type-recovery/llvm-ir/`
   - Handwritten LLVM IR type recovery regression cases.
 - `test/type-recovery/sysy/`
@@ -69,4 +70,5 @@ so known bugs can be tracked without pretending they are fixed. Snapshot suites
 still compare `.htypes` text directly, while debug-ground-truth suites extract
 truth from debug metadata and compare it semantically against the recovered
 `.htypes`. The lifting runner mirrors the same manifest-driven style, but keeps
-its oracles smaller and more structural than a full-text `.ll` diff.
+its oracles smaller than a full-text `.ll` diff by checking summaries or
+selected workdir logs instead.
