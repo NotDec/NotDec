@@ -192,9 +192,6 @@ workdir 机制和中间产物的用途。
 
 - 开启 `--gen-work-dir` 后，pass 运行前会把 `00-lifted.ll`、`01-Optimized.ll`
   等中间结果落到工作目录
-- README 明确建议在类型恢复较重时启用
-  - `NOTDEC_DISABLE_INTERPROC=1`
-  - `NOTDEC_SAT_DISABLE=1`
 
 典型执行方式：
 

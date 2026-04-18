@@ -41,7 +41,6 @@ Based on Ubuntu 22.04
 
 ### Notice
 
-- It is recommended to set `--tr-level=3` and provide environment variables `NOTDEC_DISABLE_INTERPROC=1` (disable inter-procedural type recovery) and `NOTDEC_SAT_DISABLE=1` (disable complex type propagation) to reduce the time spent on type analysis.
 - Use `--gen-work-dir` (or `-g`) to emit intermediate work files. By default, NotDec writes them to `<input>.notdec/`; use `--work-dir=<path>` to override the directory.
 - The robustness of the backend in generating C code may be insufficient; encountering complex statements may still cause errors or generate syntax errors.
 
@@ -79,7 +78,6 @@ Based on Ubuntu 22.04
 
 ### Notice
 
-- 推荐设置`--tr-level=3`，并提供环境变量`NOTDEC_DISABLE_INTERPROC=1`（禁用跨函数的类型恢复）和`NOTDEC_SAT_DISABLE=1`（禁用复杂的类型传播），减少类型分析耗时。
 - 使用`--gen-work-dir`（或`-g`）可以输出中间工作文件。默认目录是`<input>.notdec/`；如果需要固定路径，可用`--work-dir=<path>`覆盖。
 - 后端生成C代码的鲁棒性可能不足，遇到复杂的语句可能依然会报错或产生语法错误。
 
