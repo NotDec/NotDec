@@ -4,9 +4,6 @@
     "--tr-level=2",
     "--frozen-tr-input-ir"
   ],
-  "env": {
-    "NOTDEC_EXTRA_CONSTRAINTS": "test/type-recovery/realworld/support/fortune.o3.wasm.extra.json"
-  },
   "oracle": {
     "kind": "debug-struct-compare"
   },
@@ -15,6 +12,9 @@
       "name": "fortune.o3.wasm",
       "input": "cases/fortune.o3.wasm.ll",
       "ground_truth": "truth/fortune.ll",
+      "env": {
+        "NOTDEC_EXTRA_CONSTRAINTS": "test/type-recovery/realworld/support/fortune.o3.wasm.extra.json"
+      },
       "status": "pass",
       "roots": [
         {

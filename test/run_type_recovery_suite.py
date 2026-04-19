@@ -54,6 +54,13 @@ def expand_args(
     ]
 
 
+def build_case_env(base_env: dict[str, str], manifest: dict, case: dict) -> dict[str, str]:
+    env = dict(base_env)
+    env.update(manifest.get("env", {}))
+    env.update(case.get("env", {}))
+    return env
+
+
 def notdec_command_succeeded(
     process: subprocess.CompletedProcess[str],
     ir_output_path: Path,
@@ -275,8 +282,7 @@ def main() -> int:
     workdir.mkdir(parents=True, exist_ok=True)
 
     manifest = load_manifest(manifest_path)
-    env = os.environ.copy()
-    env.update(manifest.get("env", {}))
+    base_env = os.environ.copy()
 
     counters = {
         "pass": 0,
@@ -293,6 +299,7 @@ def main() -> int:
 
     for case in manifest["cases"]:
         name = case["name"]
+        env = build_case_env(base_env, manifest, case)
         status = case.get("status", "pass")
         oracle = resolve_oracle(manifest, case)
         expected_path = resolve_path(manifest_dir, case.get("expected"))

@@ -7,6 +7,7 @@
 6. 写修改日志时，必须要明确指出具体修改的哪个文件的哪一行，涉及哪些函数。
 
 当前关注的测试用例： test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+源码在：/sn640/NotDec-Exp/ICSE-HOWARD/fortune-mod
 当前正在执行的计划：
 - logs/20260416-06-MLsubExtraConstraintJSONPlan.md
 - logs/20260416-07-MLsubFrozenIRConstraintAnchorPlan.md
