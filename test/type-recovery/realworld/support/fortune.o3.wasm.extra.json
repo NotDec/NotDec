@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "ir_anchor": {
+    "stage": "mlsub-input",
+    "sha256": "ebb18246a7d2c849aea678b4379399c10143d04dfce136ed3610045981c2c62d",
+    "data_layout": "e-m:e-p:32:32-i64:64-n32:64-S128",
+    "target_triple": "wasm32-unknown-wasi"
+  },
+  "functions": {
+    "add_file": {
+      "actions": [
+        {
+          "kind": "pndiff",
+          "target": {
+            "kind": "inst",
+            "id": "add_file::%bb.brif_next127.i1"
+          },
+          "state": "number"
+        }
+      ]
+    },
+    "get_tbl": {
+      "actions": [
+        {
+          "kind": "pndiff",
+          "target": {
+            "kind": "inst",
+            "id": "get_tbl::%bb.loop_entry.i7"
+          },
+          "state": "number"
+        }
+      ]
+    }
+  }
+}

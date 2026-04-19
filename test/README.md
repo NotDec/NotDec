@@ -50,6 +50,8 @@ This mirrors the usual LLVM split:
 - `test/type-recovery/realworld/`
   - Real-world larger recovery cases grounded by nearby LLVM IR truth modules.
   - Currently keeps only `fortune.o3.wasm.ll` plus `truth/fortune.ll`.
+  - The checked-in `fortune.o3.wasm.ll` is the frozen `mlsub` stage-B input
+    consumed with `--frozen-tr-input-ir`.
 - `test/type-recovery/debug-info-c/`
   - C-authored struct-layout recovery cases with checked-in debug-info LLVM IR
     ground truth.

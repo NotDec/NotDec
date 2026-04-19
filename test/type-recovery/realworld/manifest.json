@@ -1,8 +1,12 @@
 {
   "suite": "notdec type recovery realworld fortune tr-level=2",
   "default_args": [
-    "--tr-level=2"
+    "--tr-level=2",
+    "--frozen-tr-input-ir"
   ],
+  "env": {
+    "NOTDEC_EXTRA_CONSTRAINTS": "test/type-recovery/realworld/support/fortune.o3.wasm.extra.json"
+  },
   "oracle": {
     "kind": "debug-struct-compare"
   },
