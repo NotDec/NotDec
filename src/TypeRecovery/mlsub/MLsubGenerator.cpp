@@ -51,6 +51,7 @@ struct PolyPolicyConfig {
 };
 
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
+constexpr llvm::StringLiteral kVarOriginsFile = "VarOrigins.txt";
 constexpr llvm::StringLiteral kValueHTypesFile = "ValueHTypes.txt";
 constexpr llvm::StringLiteral kSelectableValuesFile = "SelectableValues.txt";
 constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
@@ -1285,11 +1286,32 @@ void applyExtraConstraintSubtypeActions(notdec::mlsub::MLsubRecovery &Recovery,
   }
 }
 
+struct UTypeVariableDetail {
+  std::string Name;
+  std::uint32_t Id = 0;
+  std::uint32_t Size = 0;
+  std::set<std::uint32_t> OriginIds;
+};
+
+struct VarOriginEntry {
+  UTypeVariableDetail Detail;
+  std::set<std::string> RootLabels;
+};
+
+std::string formatExtValueMappingLabel(ExtValuePtr Value);
+std::string formatExtValueList(const std::set<ExtValuePtr> &Values);
+std::string formatOriginIdSummary(const std::set<std::uint32_t> &OriginIds);
+std::string formatInlineUTypeVariableSummary(const binarysub::UTypePtr &Ty);
+void appendVarOriginEntries(std::map<std::uint32_t, VarOriginEntry> &Entries,
+                            const binarysub::UTypePtr &Ty,
+                            llvm::StringRef RootLabel);
+
 void appendDebugValueTypes(
     llvm::StringRef DebugDir, llvm::StringRef SCCName,
     DSUMap<ExtValuePtr, SimpleType> &V2N,
     const std::set<ExtValuePtr> &ContraVariantValues,
     const std::map<binarysub::PolarVar, binarysub::UTypePtr> &Res,
+    const std::map<std::uint32_t, std::set<ExtValuePtr>> &OriginalVariableSources,
     bool SolveMemory, const binarysub::PolarVar &PolMem) {
   std::error_code EC;
   llvm::raw_fd_ostream Out(join(DebugDir.str(), kValueTypesFile.str()), EC,
@@ -1308,24 +1330,29 @@ void appendDebugValueTypes(
     bool Pol = getPol(Ent.first);
     auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pol});
     std::string UTypeStr = "<null>";
+    std::string VarSummary;
     if (It != Res.end() && It->second) {
       UTypeStr = binarysub::printType(It->second);
+      VarSummary = formatInlineUTypeVariableSummary(It->second);
     }
     std::string Line = Pol ? "[+]" : "[-]";
     Line += " ";
-    Line += toString(Ent.first, true);
+    Line += formatExtValueMappingLabel(Ent.first);
     Line += " => ";
     Line += UTypeStr;
+    Line += VarSummary;
     Lines.push_back(std::move(Line));
   }
 
   if (SolveMemory) {
     auto It = Res.find(PolMem);
     std::string UTypeStr = "<null>";
+    std::string VarSummary;
     if (It != Res.end() && It->second) {
       UTypeStr = binarysub::printType(It->second);
+      VarSummary = formatInlineUTypeVariableSummary(It->second);
     }
-    Lines.push_back("[memory] <memory> => " + UTypeStr);
+    Lines.push_back("[memory] <memory> => " + UTypeStr + VarSummary);
   }
 
   std::sort(Lines.begin(), Lines.end());
@@ -1335,6 +1362,65 @@ void appendDebugValueTypes(
     Out << Line << "\n";
   }
   Out << "\n";
+}
+
+void appendDebugVarOrigins(
+    llvm::StringRef DebugDir, llvm::StringRef SCCName,
+    DSUMap<ExtValuePtr, SimpleType> &V2N,
+    const std::set<ExtValuePtr> &ContraVariantValues,
+    const std::map<binarysub::PolarVar, binarysub::UTypePtr> &Res,
+    const std::map<std::uint32_t, std::set<ExtValuePtr>> &OriginalVariableSources,
+    bool SolveMemory, const binarysub::PolarVar &PolMem) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(join(DebugDir.str(), kVarOriginsFile.str()), EC,
+                           llvm::sys::fs::OF_Append);
+  if (EC) {
+    llvm::errs() << "Error printing to " << kVarOriginsFile << ", "
+                 << EC.message() << "\n";
+    return;
+  }
+
+  auto getPol = [&](ExtValuePtr V) { return !ContraVariantValues.count(V); };
+  std::map<std::uint32_t, VarOriginEntry> Entries;
+
+  for (const auto &Ent : V2N) {
+    bool Pol = getPol(Ent.first);
+    auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pol});
+    if (It == Res.end() || !It->second) {
+      continue;
+    }
+    appendVarOriginEntries(Entries, It->second, formatExtValueMappingLabel(Ent.first));
+  }
+  if (SolveMemory) {
+    auto It = Res.find(PolMem);
+    if (It != Res.end() && It->second) {
+      appendVarOriginEntries(Entries, It->second, "<memory>");
+    }
+  }
+
+  Out << "## SCC: " << SCCName << "\n";
+  if (Entries.empty()) {
+    Out << "No UType variables in this SCC.\n\n";
+    return;
+  }
+
+  for (const auto &[Id, Entry] : Entries) {
+    const auto &Detail = Entry.Detail;
+    Out << "ut#" << Id << " " << Detail.Name << " ; size=" << Detail.Size
+        << " ; origins=" << formatOriginIdSummary(Detail.OriginIds) << "\n";
+    Out << "  roots: " << llvm::join(Entry.RootLabels, " | ") << "\n";
+    for (auto OriginId : Detail.OriginIds) {
+      Out << "  vs#" << OriginId << " => ";
+      if (auto It = OriginalVariableSources.find(OriginId);
+          It != OriginalVariableSources.end()) {
+        Out << formatExtValueList(It->second);
+      } else {
+        Out << "<unknown>";
+      }
+      Out << "\n";
+    }
+    Out << "\n";
+  }
 }
 
 void writeDebugValueHTypes(llvm::StringRef DebugDir,
@@ -1379,6 +1465,111 @@ std::string formatExtValueMappingLabel(ExtValuePtr Value) {
     return Stable;
   }
   return Stable + " (" + Verbose + ")";
+}
+
+void collectUTypeVariableDetailsImpl(
+    const binarysub::UTypePtr &Ty, std::map<std::uint32_t, UTypeVariableDetail> &Out,
+    std::set<const binarysub::UType *> &Seen) {
+  if (!Ty || !Seen.insert(Ty.get()).second) {
+    return;
+  }
+
+  std::visit(
+      [&](auto const &Node) {
+        using T = std::decay_t<decltype(Node)>;
+        if constexpr (std::is_same_v<T, binarysub::UTypeVariable>) {
+          auto &Entry = Out[Node.id];
+          Entry.Name = Node.name;
+          Entry.Id = Node.id;
+          Entry.Size = Node.size;
+          Entry.OriginIds.insert(Node.originIds.begin(), Node.originIds.end());
+        } else if constexpr (std::is_same_v<T, binarysub::UFunctionType>) {
+          for (const auto &Arg : Node.args) {
+            collectUTypeVariableDetailsImpl(Arg, Out, Seen);
+          }
+          collectUTypeVariableDetailsImpl(Node.result, Out, Seen);
+        } else if constexpr (std::is_same_v<T, binarysub::UUnion> ||
+                             std::is_same_v<T, binarysub::UInter>) {
+          collectUTypeVariableDetailsImpl(Node.lhs, Out, Seen);
+          collectUTypeVariableDetailsImpl(Node.rhs, Out, Seen);
+        } else if constexpr (std::is_same_v<T, binarysub::URecordType>) {
+          for (const auto &[_, FieldTy] : Node.fields) {
+            collectUTypeVariableDetailsImpl(FieldTy, Out, Seen);
+          }
+        } else if constexpr (std::is_same_v<T, binarysub::URecursiveType>) {
+          collectUTypeVariableDetailsImpl(Node.body, Out, Seen);
+        } else if constexpr (std::is_same_v<T, binarysub::UPointerType>) {
+          collectUTypeVariableDetailsImpl(Node.load, Out, Seen);
+          collectUTypeVariableDetailsImpl(Node.store, Out, Seen);
+        }
+      },
+      Ty->v);
+}
+
+std::map<std::uint32_t, UTypeVariableDetail>
+collectUTypeVariableDetails(const binarysub::UTypePtr &Ty) {
+  std::map<std::uint32_t, UTypeVariableDetail> Details;
+  std::set<const binarysub::UType *> Seen;
+  collectUTypeVariableDetailsImpl(Ty, Details, Seen);
+  return Details;
+}
+
+std::string formatExtValueList(const std::set<ExtValuePtr> &Values) {
+  if (Values.empty()) {
+    return "<none>";
+  }
+  std::vector<std::string> Labels;
+  Labels.reserve(Values.size());
+  for (const auto &Value : Values) {
+    Labels.push_back(formatExtValueMappingLabel(Value));
+  }
+  std::sort(Labels.begin(), Labels.end());
+  return llvm::join(Labels, " | ");
+}
+
+std::string formatOriginIdSummary(const std::set<std::uint32_t> &OriginIds) {
+  std::string Summary;
+  bool First = true;
+  for (auto OriginId : OriginIds) {
+    if (!First) {
+      Summary += ",";
+    }
+    First = false;
+    Summary += "vs#" + std::to_string(OriginId);
+  }
+  if (Summary.empty()) {
+    return "<none>";
+  }
+  return Summary;
+}
+
+std::string formatInlineUTypeVariableSummary(const binarysub::UTypePtr &Ty) {
+  auto Details = collectUTypeVariableDetails(Ty);
+  if (Details.empty()) {
+    return "";
+  }
+
+  std::vector<std::string> Parts;
+  Parts.reserve(Details.size());
+  for (const auto &[_, Detail] : Details) {
+    std::string Part =
+        Detail.Name + "=ut#" + std::to_string(Detail.Id) + "<-" +
+        formatOriginIdSummary(Detail.OriginIds);
+    Parts.push_back(std::move(Part));
+  }
+
+  return " ; vars=" + llvm::join(Parts, "; ");
+}
+
+void appendVarOriginEntries(
+    std::map<std::uint32_t, VarOriginEntry> &Entries, const binarysub::UTypePtr &Ty,
+    llvm::StringRef RootLabel) {
+  auto Details = collectUTypeVariableDetails(Ty);
+  for (const auto &[Id, Detail] : Details) {
+    auto &Entry = Entries[Id];
+    Entry.Detail = Detail;
+    Entry.RootLabels.insert(RootLabel.str());
+  }
 }
 
 std::shared_ptr<ConstraintsGenerator> getFuncCG(AllGraphs &AG,
@@ -1689,6 +1880,9 @@ SimpleType ConstraintsGenerator::createNode(ExtValuePtr Val) {
                  << toString(Val) << "\n";
     std::abort();
   }
+  if (auto *VS = N->getAsVariableState()) {
+    OriginalVariableSources[VS->id].insert(Val);
+  }
   emitMappingTrace("create", Val, N);
   PG.getOrInsertPNINode(Val);
   if (std::get_if<ConstantAddr>(&Val)) {
@@ -1748,6 +1942,15 @@ void MLsubRecovery::run() {
       std::abort();
     }
     ValueTypes << "# Final Value -> binarysub UType mapping\n\n";
+
+    llvm::raw_fd_ostream VarOrigins(join(*WorkDir, kVarOriginsFile.str()), EC);
+    if (EC) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot open output file " << kVarOriginsFile.str() << ": ";
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+    VarOrigins << "# Final UType variable -> original ExtValuePtr mapping\n\n";
     auto PNDiffWarnPath = join(*WorkDir, kPNDiffWarnFile.str());
     if (std::error_code RemoveEC = llvm::sys::fs::remove(PNDiffWarnPath);
         RemoveEC && RemoveEC != std::errc::no_such_file_or_directory) {
@@ -2340,7 +2543,9 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
 
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
-                          SolveMemory, PolMem);
+                          OriginalVariableSources, SolveMemory, PolMem);
+    appendDebugVarOrigins(*WorkDir, Name, V2N, ContraVariantValues, Res,
+                          OriginalVariableSources, SolveMemory, PolMem);
   }
 }
 
@@ -2351,6 +2556,7 @@ void ConstraintsGenerator::releaseBinarysubState() {
   binarysub::release_type_graph(MemoryType);
   V2N = {};
   ContraVariantValues.clear();
+  OriginalVariableSources.clear();
   unhandledCalls.clear();
 }
 

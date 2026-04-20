@@ -65,6 +65,7 @@ struct ConstraintsGenerator {
   std::map<llvm::CallBase *, SimpleType> unhandledCalls;
   std::set<ExtValuePtr> ContraVariantValues;
   std::set<ExtValuePtr> SnapshotContraVariantValues;
+  std::map<std::uint32_t, std::set<ExtValuePtr>> OriginalVariableSources;
   bool EnablePNDiffTypeVariableClosureUnification = true;
   std::ostream *TraceStream = nullptr;
 
