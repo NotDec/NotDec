@@ -419,10 +419,9 @@ void PassEnv::add_llvm2c(std::string OutFilePath,
 }
 
 void PassEnv::run_passes() {
-  const char *DebugDir = getTRDebugDir();
-  if (DebugDir) {
-    llvm::sys::fs::create_directories(DebugDir);
-    printModule(Mod, join(DebugDir, "00-lifted.ll").c_str());
+  if (auto DebugDir = notdec::getWorkDirOpt()) {
+    llvm::sys::fs::create_directories(*DebugDir);
+    printModule(Mod, join(*DebugDir, "00-lifted.ll").c_str());
   }
 
   MPM.run(Mod, MAM);

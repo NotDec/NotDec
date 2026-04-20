@@ -21,6 +21,7 @@
 #include "DecompilerContext.h"
 #include "Passes/StackPointerFinder.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
+#include "Utils/Utils.h"
 #include "notdec-llvm2c/Interface.h"
 
 namespace notdec::passes {

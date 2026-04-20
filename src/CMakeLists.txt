@@ -5,8 +5,6 @@ add_library(notdec STATIC
 	Passes/StackPointerFinder.cpp
 	Passes/StackAlloca.cpp
 	Passes/MemOpMatcher.cpp
-	Passes/ConstraintGenerator.cpp
-	Passes/GraphTypePass.cpp
 	Passes/ReorderBasicblock.cpp
 	Passes/DSROA.cpp
 	Passes/AllocAnnotator.cpp
@@ -17,16 +15,7 @@ add_library(notdec STATIC
 	Passes/retdec-stack/retdec-stack-pointer-op-remove.cpp
 	Passes/retdec-stack/retdec-symbolic-tree.cpp
 	Passes/retdec-stack/retdec-utils.cpp
-	TypeRecovery/Lattice.cpp
-	TypeRecovery/DotSummaryParser.cpp
-	TypeRecovery/Parser.cpp
-	TypeRecovery/ConstraintGraph.cpp
-	TypeRecovery/RExp.cpp
-	TypeRecovery/PointerNumberIdentification.cpp
-	TypeRecovery/NFAMinimize.cpp
 	TypeRecovery/LowTy.cpp
-	TypeRecovery/SketchToCTypeBuilder.cpp
-	TypeRecovery/retypd/Schema.cpp
 	TypeRecovery/mlsub/PNDiff.cpp
 	# TypeRecovery/mlsub/MLsubGraph.cpp
 	TypeRecovery/mlsub/MLsubGenerator.cpp

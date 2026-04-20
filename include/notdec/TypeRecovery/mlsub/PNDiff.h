@@ -16,10 +16,11 @@
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
+#include <llvm/Support/raw_ostream.h>
 
-#include "Passes/ConstraintGenerator.h"
-#include "notdec-llvm2c/Interface.h"
+#include "Utils/DSUMap.h"
 #include "notdec-llvm2c/Interface/Range.h"
+#include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #include "notdec/TypeRecovery/LowTy.h"
 
 namespace notdec::mlsub {
