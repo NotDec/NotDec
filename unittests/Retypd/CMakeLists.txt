@@ -1,14 +1,25 @@
 enable_testing()
 
 add_executable(
-	GraphTest
-	GraphTest.cpp
+	MLsubGeneratorTest
+	MLsubGeneratorTest.cpp
 )
 target_link_libraries(
-	GraphTest
+	MLsubGeneratorTest
+	GTest::gtest_main
+	notdec
+)
+
+add_executable(
+	TypeBuilderTest
+	TypeBuilderTest.cpp
+)
+target_link_libraries(
+	TypeBuilderTest
 	GTest::gtest_main
 	notdec
 )
 
 include(GoogleTest)
-gtest_discover_tests(GraphTest)
+gtest_discover_tests(MLsubGeneratorTest)
+gtest_discover_tests(TypeBuilderTest)
