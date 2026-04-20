@@ -78,3 +78,25 @@ TEST(Retypd, TypeBuilderTopFieldRecordLayoutTest) {
   EXPECT_TRUE(Decl->getFields()[0].Type->isTopType());
   EXPECT_EQ(Decl->getFields()[1].R.Start, 4);
 }
+
+TEST(Retypd, HTypeSetPrettyPrintingFlattensChains) {
+  notdec::ast::HTypeContext HCtx;
+
+  auto *I8 = HCtx.getIntegerType(false, 8, false);
+  auto *I16 = HCtx.getIntegerType(false, 16, false);
+  auto *I32 = HCtx.getIntegerType(false, 32, false);
+  auto *F32 = HCtx.getFloatType(false, 32);
+
+  auto *FlatUnion = HCtx.getSetUnionType(
+      false, HCtx.getSetUnionType(false, I8, I16),
+      HCtx.getSetUnionType(false, I32, F32));
+  EXPECT_EQ(FlatUnion->getAsString(), "i8 | i16 | i32 | f32");
+
+  auto *Mixed =
+      HCtx.getSetInterType(false, HCtx.getSetInterType(false, I8, I16),
+                           HCtx.getSetUnionType(false, I32, F32));
+  EXPECT_EQ(Mixed->getAsString(), "i8 & i16 & (i32 | f32)");
+
+  notdec::ast::HTypeSnapshotFormatter Formatter(&HCtx);
+  EXPECT_EQ(Formatter.formatType(FlatUnion), "f32 | i16 | i32 | i8");
+}

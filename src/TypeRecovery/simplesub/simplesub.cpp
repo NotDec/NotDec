@@ -3,6 +3,52 @@
 
 namespace notdec::simplesub {
 
+namespace {
+
+constexpr int kFunctionPrecedence = 1;
+constexpr int kUnionPrecedence = 3;
+constexpr int kInterPrecedence = 4;
+
+void collectUnionTerms(const UTypePtr &ty, std::vector<UTypePtr> &terms) {
+  if (ty && std::holds_alternative<UUnion>(ty->v)) {
+    auto &node = std::get<UUnion>(ty->v);
+    collectUnionTerms(node.lhs, terms);
+    collectUnionTerms(node.rhs, terms);
+    return;
+  }
+  terms.push_back(ty);
+}
+
+void collectInterTerms(const UTypePtr &ty, std::vector<UTypePtr> &terms) {
+  if (ty && std::holds_alternative<UInter>(ty->v)) {
+    auto &node = std::get<UInter>(ty->v);
+    collectInterTerms(node.lhs, terms);
+    collectInterTerms(node.rhs, terms);
+    return;
+  }
+  terms.push_back(ty);
+}
+
+void printSetTerms(const std::vector<UTypePtr> &terms, std::ostream &os,
+                   int parentPrecedence, int operatorPrecedence,
+                   const char *separator) {
+  bool needParens = parentPrecedence > operatorPrecedence;
+  if (needParens) {
+    os << "(";
+  }
+  for (size_t i = 0; i < terms.size(); ++i) {
+    if (i > 0) {
+      os << separator;
+    }
+    printTypeImpl(terms[i], os, operatorPrecedence);
+  }
+  if (needParens) {
+    os << ")";
+  }
+}
+
+} // namespace
+
 // ======================= Implementation =======================
 
 // VarSupply implementation
@@ -299,32 +345,22 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence) {
         } else if constexpr (std::is_same_v<T, UTypeVariable>) {
           os << n.name;
         } else if constexpr (std::is_same_v<T, UFunctionType>) {
-          bool needParens = precedence > 1;
+          bool needParens = precedence > kFunctionPrecedence;
           if (needParens)
             os << "(";
-          printTypeImpl(n.lhs, os, 2);
+          printTypeImpl(n.lhs, os, kFunctionPrecedence + 1);
           os << " → ";
-          printTypeImpl(n.rhs, os, 1);
+          printTypeImpl(n.rhs, os, kFunctionPrecedence);
           if (needParens)
             os << ")";
         } else if constexpr (std::is_same_v<T, UUnion>) {
-          bool needParens = precedence > 3;
-          if (needParens)
-            os << "(";
-          printTypeImpl(n.lhs, os, 4);
-          os << " ∪ ";
-          printTypeImpl(n.rhs, os, 3);
-          if (needParens)
-            os << ")";
+          std::vector<UTypePtr> terms;
+          collectUnionTerms(ty, terms);
+          printSetTerms(terms, os, precedence, kUnionPrecedence, " ∪ ");
         } else if constexpr (std::is_same_v<T, UInter>) {
-          bool needParens = precedence > 4;
-          if (needParens)
-            os << "(";
-          printTypeImpl(n.lhs, os, 5);
-          os << " ∩ ";
-          printTypeImpl(n.rhs, os, 4);
-          if (needParens)
-            os << ")";
+          std::vector<UTypePtr> terms;
+          collectInterTerms(ty, terms);
+          printSetTerms(terms, os, precedence, kInterPrecedence, " ∩ ");
         } else if constexpr (std::is_same_v<T, URecordType>) {
           os << "{";
           for (size_t i = 0; i < n.fields.size(); ++i) {
