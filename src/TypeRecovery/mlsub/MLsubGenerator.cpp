@@ -8,9 +8,7 @@
 #include "binarysub/binarysub.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/HType.h"
-#include "notdec-llvm2c/Interface/StructManager.h"
 #include "notdec-llvm2c/Utils.h"
-#include "notdec/TypeRecovery/Lattice.h"
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
 #include "notdec/Utils/AllSCCIterator.h"
 #include "notdec/Utils/SingleNodeSCCIterator.h"
@@ -1736,7 +1734,14 @@ void MLsubRecovery::run() {
       std::abort();
     }
     ValueTypes << "# Final Value -> binarysub UType mapping\n\n";
-    llvm::sys::fs::remove(join(*WorkDir, kPNDiffWarnFile.str()));
+    auto PNDiffWarnPath = join(*WorkDir, kPNDiffWarnFile.str());
+    if (std::error_code RemoveEC = llvm::sys::fs::remove(PNDiffWarnPath);
+        RemoveEC && RemoveEC != std::errc::no_such_file_or_directory) {
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "Cannot remove output file " << kPNDiffWarnFile.str()
+                << ": " << RemoveEC.message() << std::endl;
+      std::abort();
+    }
   }
 
   WrotePNDiffOverrideWarningHeader = false;

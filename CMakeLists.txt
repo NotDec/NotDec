@@ -170,6 +170,7 @@ if(NOT TARGET gtest AND NOT TARGET GTest::gtest)
 	FetchContent_Declare(
 	  googletest
 	  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+	  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 	)
 	# For Windows: Prevent overriding the parent project's compiler/linker settings
 	set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -183,9 +184,6 @@ endif()
 if(TARGET gtest_main AND NOT TARGET GTest::gtest_main)
 	add_library(GTest::gtest_main ALIAS gtest_main)
 endif()
-
-find_package(Boost REQUIRED COMPONENTS system)
-include_directories( ${Boost_INCLUDE_DIR} )
 
 #===============================================================================
 # 以下为项目自己的CMake相关配置

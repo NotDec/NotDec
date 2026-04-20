@@ -105,8 +105,15 @@ void emitConvertStructTrace(llvm::StringRef Content) {
         llvm::dbgs() << Content;
         return;
       }
-      llvm::sys::fs::remove(
-          notdec::join(*WorkDir, kTraceConvertStructLogFile.str()));
+      auto TraceLogPath = notdec::join(*WorkDir, kTraceConvertStructLogFile.str());
+      if (std::error_code EC = llvm::sys::fs::remove(TraceLogPath);
+          EC && EC != std::errc::no_such_file_or_directory) {
+        llvm::dbgs() << "Warning: cannot reset(rm) "
+                     << kTraceConvertStructLogFile << " in " << *WorkDir
+                     << ": " << EC.message() << "\n";
+        llvm::dbgs() << Content;
+        return;
+      }
       ResetLogFile = true;
     }
     notdec::appendWorkDirLog(kTraceConvertStructLogFile, Content);
