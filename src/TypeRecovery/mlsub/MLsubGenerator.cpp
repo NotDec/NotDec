@@ -53,6 +53,7 @@ struct PolyPolicyConfig {
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
 constexpr llvm::StringLiteral kVarOriginsFile = "VarOrigins.txt";
 constexpr llvm::StringLiteral kValueHTypesFile = "ValueHTypes.txt";
+constexpr llvm::StringLiteral kImportantHTypesFile = "ImportantHTypes.txt";
 constexpr llvm::StringLiteral kSelectableValuesFile = "SelectableValues.txt";
 constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
 constexpr llvm::StringLiteral kMLsubInputIRFile = "02-mlsub-input.ll";
@@ -1430,6 +1431,137 @@ void writeDebugValueHTypes(llvm::StringRef DebugDir,
   Result.print(Out);
 }
 
+void primeSnapshotFormatter(const llvm2c::HTypeResult &Result,
+                           ast::HTypeSnapshotFormatter &Formatter) {
+  std::vector<std::pair<std::string, const ast::HType *>> Entries;
+  Entries.reserve(Result.ValueTypes.size());
+  for (const auto &Ent : Result.ValueTypes) {
+    Entries.emplace_back(toStableString(Ent.first), Ent.second);
+  }
+  std::sort(Entries.begin(), Entries.end());
+  for (const auto &Ent : Entries) {
+    Formatter.collectType(Ent.second);
+  }
+  if (Result.MemoryType != nullptr) {
+    Formatter.collectType(Result.MemoryType);
+  }
+  if (Result.MemoryDecl != nullptr) {
+    Formatter.collectDecl(*Result.MemoryDecl);
+  }
+}
+
+const ast::FunctionType *unwrapFunctionType(const ast::HType *Ty) {
+  if (Ty == nullptr) {
+    return nullptr;
+  }
+  if (auto *FT = llvm::dyn_cast<ast::FunctionType>(Ty)) {
+    return FT;
+  }
+  if (auto *PT = llvm::dyn_cast<ast::PointerType>(Ty)) {
+    return llvm::dyn_cast_or_null<ast::FunctionType>(PT->getPointeeType());
+  }
+  return nullptr;
+}
+
+std::string formatJoinedHTypes(llvm::ArrayRef<ast::HType *> Types,
+                               ast::HTypeSnapshotFormatter &Formatter) {
+  if (Types.empty()) {
+    return "void";
+  }
+  std::vector<std::string> Parts;
+  Parts.reserve(Types.size());
+  for (auto *Ty : Types) {
+    Parts.push_back(Formatter.formatType(Ty));
+  }
+  return llvm::join(Parts, " | ");
+}
+
+struct ImportantFunctionEntry {
+  std::string Name;
+  std::string StableKey;
+  std::string RawType;
+  std::vector<std::string> Args;
+  std::string ReturnType;
+};
+
+void writeDebugImportantHTypes(llvm::StringRef DebugDir,
+                               const llvm2c::HTypeResult &Result) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(join(DebugDir.str(), kImportantHTypesFile.str()), EC,
+                           llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Error printing to " << kImportantHTypesFile << ", "
+                 << EC.message() << "\n";
+    return;
+  }
+
+  ast::HTypeSnapshotFormatter Formatter(Result.HTCtx.get());
+  primeSnapshotFormatter(Result, Formatter);
+
+  std::vector<ImportantFunctionEntry> Functions;
+
+  for (const auto &Ent : Result.ValueTypes) {
+    auto *Value = std::get_if<llvm::Value *>(&Ent.first);
+    if (Value == nullptr || *Value == nullptr) {
+      continue;
+    }
+    auto *Func = llvm::dyn_cast<llvm::Function>(*Value);
+    if (Func == nullptr) {
+      continue;
+    }
+
+    ImportantFunctionEntry Entry;
+    Entry.Name = Func->hasName() ? Func->getName().str() : toStableString(Ent.first);
+    Entry.StableKey = toStableString(Ent.first);
+    Entry.RawType = Formatter.formatType(Ent.second);
+    Entry.ReturnType = "<unsupported>";
+
+    if (const auto *FT = unwrapFunctionType(Ent.second)) {
+      Entry.ReturnType = formatJoinedHTypes(FT->getReturnType(), Formatter);
+      for (auto *ParamTy : FT->getParamTypes()) {
+        Entry.Args.push_back(Formatter.formatType(ParamTy));
+      }
+    }
+    Functions.push_back(std::move(Entry));
+  }
+
+  std::sort(Functions.begin(), Functions.end(),
+            [](const ImportantFunctionEntry &LHS,
+               const ImportantFunctionEntry &RHS) {
+              return std::tie(LHS.Name, LHS.StableKey) <
+                     std::tie(RHS.Name, RHS.StableKey);
+            });
+
+  Out << "# ImportantHTypes\n\n";
+
+  Out << "[memory]\n";
+  if (Result.MemoryDecl != nullptr) {
+    Out << "decl => " << Formatter.formatDeclName(*Result.MemoryDecl) << "\n";
+  }
+  if (Result.MemoryType != nullptr) {
+    Out << "type => " << Formatter.formatType(Result.MemoryType) << "\n";
+  }
+  Out << "\n";
+
+  Out << "[functions]\n";
+  for (const auto &Entry : Functions) {
+    Out << Entry.StableKey << "\n";
+    Out << "  type => " << Entry.RawType << "\n";
+    Out << "  ret => " << Entry.ReturnType << "\n";
+    for (std::size_t Index = 0; Index < Entry.Args.size(); ++Index) {
+      Out << "  arg" << Index << " => " << Entry.Args[Index] << "\n";
+    }
+    Out << "\n";
+  }
+
+  Out << "[decls]\n";
+  if (Result.HTCtx != nullptr) {
+    for (const auto *Decl : Formatter.getOrderedDecls()) {
+      Out << Formatter.formatDecl(*Decl) << "\n";
+    }
+  }
+}
+
 std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
   std::string Label = toString(Value, true);
   std::string Stable = toStableString(Value);
@@ -2558,6 +2690,7 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   }
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     writeDebugValueHTypes(*WorkDir, *ResultVal);
+    writeDebugImportantHTypes(*WorkDir, *ResultVal);
   }
 }
 

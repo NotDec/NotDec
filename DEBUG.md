@@ -151,6 +151,18 @@
 - `[types]` section 按 stable value key 排序，打印最终 `Value -> HType`
 - `[decls]` / `[memory]` section 会一并输出，方便读 record / memory 的 canonical 名
 
+### `ImportantHTypes.txt`
+
+- 来源：类型恢复阶段 `MLsubRecovery::genASTTypes()` 汇总最终结果后导出
+- 作用：给人工对比用的精简 HType 视图，只保留 memory 大结构体、函数参数/返回值，以及引用到的 `decls`
+- 典型用途：和 `test/tools/extract_wasm_dwarf_truth.py` 产出的文本 truth 并排看，先对齐全局偏移和函数签名，再去后面的 `decls` 查具体字段布局
+
+当前格式特点：
+
+- `[memory]` 只给出 memory 总类型和对应的 memory decl，具体绝对偏移直接去看该 decl 的 field 注释
+- `[functions]` 只列函数 value 的最终类型，按函数名排序，并拆开显示 `ret` / `argN`
+- `[decls]` 仍复用 snapshot formatter 的稳定声明名，方便回查前两部分里出现的 `struct_*`
+
 ### `SelectableValues.txt`
 
 - 来源：`MLsubRecovery::run()` 在导出 `02-mlsub-input.ll` 后同步生成

@@ -18,7 +18,9 @@ Current scope:
     `number`.
 - `../../lifting/wasm/cases/fortune.o3.wasm`
   - The authoritative DWARF source for the oracle.
-  - Parsed at test time into a normalized truth JSON.
+  - Parsed at test time into a normalized truth JSON plus a human-readable
+    text dump with the same memory/functions/decls split used for manual
+    comparison.
 
 The manifest currently mixes three kinds of checks:
 

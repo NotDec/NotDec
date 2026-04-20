@@ -187,6 +187,7 @@ def prepare_truth(
     if dwarf_source is None:
         raise ValueError("wasm-dwarf-compare requires oracle.dwarf_source or case.dwarf_source")
 
+    truth_text_path = workdir / f"{case['name']}.truth.txt"
     truth_path = workdir / f"{case['name']}.truth.json"
     extractor = project_root / "test/tools/extract_wasm_dwarf_truth.py"
     command = [
@@ -195,10 +196,14 @@ def prepare_truth(
         "--input",
         str(dwarf_source),
         "--output",
+        str(truth_text_path),
+        "--json-output",
         str(truth_path),
     ]
     process, section = run_command(title="prepare_truth", command=command, cwd=project_root, env=env)
-    return truth_path, [section], process.returncode == 0 and truth_path.exists()
+    return truth_path, [section], (
+        process.returncode == 0 and truth_path.exists() and truth_text_path.exists()
+    )
 
 
 def compare_snapshot(snapshot_path: Path, expected_path: Path | None) -> tuple[bool, dict]:
@@ -318,6 +323,7 @@ def main() -> int:
         output_path = workdir / f"{name}.out.ll"
         snapshot_path = workdir / f"{name}.out.htypes"
         truth_path = workdir / f"{name}.truth.json"
+        truth_text_path = workdir / f"{name}.truth.txt"
         log_path = workdir / f"{name}.log"
 
         if status == "skip":
@@ -329,6 +335,7 @@ def main() -> int:
             output_path,
             snapshot_path,
             truth_path,
+            truth_text_path,
             workdir / f"{name}.input.ll",
             workdir / f"{name}.compare.config.json",
             workdir / f"{name}.compare.json",
