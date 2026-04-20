@@ -1,7 +1,8 @@
 ## Realworld Type Recovery Suite
 
-This suite keeps larger real-world recovery cases that are grounded by a nearby
-LLVM IR truth module instead of a plain `.htypes` snapshot.
+This suite keeps larger real-world recovery cases whose oracle comes from the
+input wasm's own DWARF instead of a nearby LLVM IR truth module or a plain
+`.htypes` snapshot.
 
 Current scope:
 
@@ -15,10 +16,22 @@ Current scope:
     module text, so it intentionally matches the `ctest` invocation shape.
   - Forces two residual `Add` constraints in `add_file` / `get_tbl` to
     `number`.
-- `truth/fortune.ll`
-  - Copied from `/sn640/NotDec-Exp/ICSE-HOWARD/bin/fortune.ll`.
-  - Used as the debug-info ground truth for semantic comparison.
+- `../../lifting/wasm/cases/fortune.o3.wasm`
+  - The authoritative DWARF source for the oracle.
+  - Parsed at test time into a normalized truth JSON.
 
-The manifest currently compares only whitelisted fields for a few stable roots.
+The manifest currently mixes three kinds of checks:
+
+- global pointer-slot layout checks
+  - The checker looks at the recovered slot at the DWARF absolute address, then
+    compares the pointed-to `struct_*` slice against the DWARF pointee type.
+- global record layout checks
+  - Used for direct aggregate globals such as `Noprob_tbl`.
+- layout-only checks for selected function parameters already recovered as
+  `struct_*` pointers
+
 That keeps the suite useful while `fortune` still has partially recovered large
-records in `ValueTypes.txt` / `.htypes`.
+records in `ValueTypes.txt` / `.htypes`, especially for function-parameter
+struct slices whose field types are not yet stable enough for exact matching.
+Each run now also writes a human-readable `*.compare.md` report beside the JSON
+and text reports to make manual inspection cheaper.

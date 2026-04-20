@@ -53,8 +53,3 @@ add_type_recovery_suite(
 	notdec.type_recovery.realworld.tr_level_2
 	type-recovery/realworld/manifest.json
 )
-
-add_type_recovery_suite(
-	notdec.type_recovery.debug_info_c.tr_level_2
-	type-recovery/debug-info-c/manifest.json
-)

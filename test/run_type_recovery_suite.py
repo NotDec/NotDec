@@ -177,20 +177,23 @@ def prepare_truth(
     workdir: Path,
     env: dict[str, str],
 ) -> tuple[Path | None, list[str], bool]:
-    if oracle.get("kind") != "debug-struct-compare":
+    if oracle.get("kind") != "wasm-dwarf-compare":
         return None, [], True
 
-    ground_truth = resolve_path(manifest_dir, case.get("ground_truth", case.get("input")))
-    if ground_truth is None:
-        raise ValueError("debug-struct-compare requires ground_truth or input")
+    dwarf_source = resolve_path(
+        manifest_dir,
+        oracle.get("dwarf_source", case.get("dwarf_source")),
+    )
+    if dwarf_source is None:
+        raise ValueError("wasm-dwarf-compare requires oracle.dwarf_source or case.dwarf_source")
 
     truth_path = workdir / f"{case['name']}.truth.json"
-    extractor = project_root / "test/tools/extract_debug_type_truth.py"
+    extractor = project_root / "test/tools/extract_wasm_dwarf_truth.py"
     command = [
         sys.executable,
         str(extractor),
         "--input",
-        str(ground_truth),
+        str(dwarf_source),
         "--output",
         str(truth_path),
     ]
@@ -223,15 +226,16 @@ def compare_oracle(
         matches, details = compare_snapshot(snapshot_path, expected_path)
         return matches, [], details
 
-    if kind != "debug-struct-compare":
+    if kind != "wasm-dwarf-compare":
         raise ValueError(f"unsupported oracle kind: {kind}")
 
     if truth_path is None:
-        raise ValueError("debug-struct-compare requires truth_path")
+        raise ValueError("wasm-dwarf-compare requires truth_path")
 
     compare_cfg_path = workdir / f"{case['name']}.compare.config.json"
     compare_json_path = workdir / f"{case['name']}.compare.json"
     compare_txt_path = workdir / f"{case['name']}.compare.txt"
+    compare_md_path = workdir / f"{case['name']}.compare.md"
     compare_cfg_path.write_text(
         json.dumps(
             {
@@ -244,7 +248,7 @@ def compare_oracle(
         + "\n"
     )
 
-    comparator = project_root / "test/tools/compare_htypes_with_debug_truth.py"
+    comparator = project_root / "test/tools/compare_htypes_with_wasm_dwarf.py"
     command = [
         sys.executable,
         str(comparator),
@@ -258,12 +262,20 @@ def compare_oracle(
         str(compare_json_path),
         "--report-text",
         str(compare_txt_path),
+        "--report-markdown",
+        str(compare_md_path),
     ]
     process, section = run_command(title="compare_oracle", command=command, cwd=project_root, env=env)
-    passed = process.returncode == 0 and compare_json_path.exists() and compare_txt_path.exists()
+    passed = (
+        process.returncode == 0
+        and compare_json_path.exists()
+        and compare_txt_path.exists()
+        and compare_md_path.exists()
+    )
     return passed, [section], {
         "report_json": compare_json_path,
         "report_text": compare_txt_path,
+        "report_markdown": compare_md_path,
     }
 
 
@@ -321,6 +333,7 @@ def main() -> int:
             workdir / f"{name}.compare.config.json",
             workdir / f"{name}.compare.json",
             workdir / f"{name}.compare.txt",
+            workdir / f"{name}.compare.md",
         ]
         for path in cleanup_paths:
             if path.exists():
@@ -409,8 +422,9 @@ def main() -> int:
             if oracle.get("kind") == "htype-snapshot" and notdec_ok and not compare_ok:
                 print(f"        expected: {compare_details['expected']}")
                 print(f"        actual:   {compare_details['actual']}")
-            if oracle.get("kind") == "debug-struct-compare" and notdec_ok and not compare_ok:
+            if oracle.get("kind") == "wasm-dwarf-compare" and notdec_ok and not compare_ok:
                 print(f"        compare:  {compare_details['report_text']}")
+                print(f"        detail:   {compare_details['report_markdown']}")
             continue
 
         if status == "xfail":

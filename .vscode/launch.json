@@ -5,6 +5,38 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "fortune",
+      "type": "cppdbg",
+      "MIMode": "gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "--frozen-tr-input-ir",
+        "${workspaceFolder}/test/type-recovery/realworld/cases/fortune.o3.wasm.ll",
+        "-o",
+        "/tmp/fortune.c",
+        "--tr-level=2",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Clean and Build",
+      "environment": [
+        {
+          "name": "NOTDEC_EXTRA_CONSTRAINTS",
+          "value": "test/type-recovery/realworld/support/fortune.o3.wasm.extra.json"
+        },
+        {
+          "name": "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT",
+          "value": "1"
+        },
+        {
+          "name": "NOTDEC_BINARYSUB_TRACE",
+          "value": "1"
+        }
+      ],
+    },
+    {
       "name": "binarysub",
       "type": "cppdbg",
       "MIMode": "gdb",
@@ -44,7 +76,6 @@
           "value": "1"
         }
       ],
-      // "setupCommands": [{"text": "set auto-solib-add off"}]
     },
     {
       "name": "dec emit pre-TR IR",
@@ -130,10 +161,10 @@
       "args": "TestAccess.test_7_Negative"
     },
     {
-      "name": "Python compare fortune debug truth",
+      "name": "Python compare fortune wasm DWARF",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/test/tools/compare_htypes_with_debug_truth.py",
+      "program": "${workspaceFolder}/test/tools/compare_htypes_with_wasm_dwarf.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "justMyCode": false,
@@ -147,7 +178,9 @@
         "--report-json",
         "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.compare.json",
         "--report-text",
-        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.compare.txt"
+        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.compare.txt",
+        "--report-markdown",
+        "${workspaceFolder}/build/test/artifacts/notdec.type_recovery.realworld.tr_level_2/fortune.o3.wasm.compare.md"
       ]
     }
   ]

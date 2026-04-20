@@ -5,62 +5,96 @@
     "--frozen-tr-input-ir"
   ],
   "oracle": {
-    "kind": "debug-struct-compare"
+    "kind": "wasm-dwarf-compare",
+    "dwarf_source": "../../lifting/wasm/cases/fortune.o3.wasm"
   },
   "cases": [
     {
       "name": "fortune.o3.wasm",
       "input": "cases/fortune.o3.wasm.ll",
-      "ground_truth": "truth/fortune.ll",
       "env": {
         "NOTDEC_EXTRA_CONSTRAINTS": "test/type-recovery/realworld/support/fortune.o3.wasm.extra.json"
       },
       "status": "pass",
       "roots": [
         {
-          "truth": "@Re_pat",
-          "recovered": "memory",
-          "base_offset_bytes": 2224,
-          "field_allowlist": [
-            "re_nsub",
-            "__opaque"
-          ]
-        },
-        {
-          "truth": "add_file::head",
-          "recovered": "memory",
-          "base_offset_bytes": 2268,
-          "field_allowlist": [
-            "percent",
-            "datfd",
-            "inf",
-            "name",
-            "path",
-            "datfile"
-          ]
-        },
-        {
-          "truth": "add_file::tail",
-          "recovered": "memory",
-          "base_offset_bytes": 3328,
-          "field_allowlist": [
-            "percent",
+          "binding": "@File_list",
+          "required_fields": [
             "fd",
-            "pos",
             "inf",
             "name",
             "path",
             "datfile",
-            "posfile"
+            "posfile",
+            "child",
+            "next"
           ]
         },
         {
-          "truth": "@Noprob_tbl",
-          "recovered": "memory",
-          "base_offset_bytes": 3360,
-          "field_allowlist": [
+          "binding": "@File_tail",
+          "required_fields": [
+            "prev"
+          ]
+        },
+        {
+          "binding": "@Noprob_tbl",
+          "required_fields": [
             "str_version",
-            "str_numstr"
+            "str_numstr",
+            "str_longlen"
+          ]
+        },
+        {
+          "binding": "free_desc::arg0",
+          "required_fields": [
+            "inf",
+            "name",
+            "path",
+            "datfile",
+            "posfile",
+            "child",
+            "next"
+          ]
+        },
+        {
+          "binding": "get_tbl::arg0",
+          "required_fields": [
+            "path",
+            "datfile",
+            "read_tbl",
+            "tbl",
+            "child"
+          ]
+        },
+        {
+          "binding": "matches_in_list::arg0",
+          "required_fields": [
+            "fd",
+            "inf",
+            "name",
+            "path",
+            "utf8_charset",
+            "child",
+            "next"
+          ]
+        },
+        {
+          "binding": "maxlen_in_list::arg0",
+          "required_fields": [
+            "path",
+            "datfile",
+            "read_tbl",
+            "tbl",
+            "child",
+            "next"
+          ]
+        },
+        {
+          "binding": "print_list::arg0",
+          "required_fields": [
+            "name",
+            "child",
+            "next"
           ]
         }
       ]
