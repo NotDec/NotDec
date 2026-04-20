@@ -68,7 +68,7 @@
 `VarOrigins.txt` 当前按 SCC 输出：
 
 - `ut#id name ; size=... ; origins=vs#...`
-- `roots: ...`
+- `appears-in: ...`
 - 每个 `vs#originId => ExtValuePtr`
 
 如果某个 `originId` 来自 summary/override/其他非 value 创建路径，当前打印
@@ -123,7 +123,7 @@
 - 生成 `/tmp/notdec-varorigins-fortune2/ValueTypes.txt`
 - 生成 `/tmp/notdec-varorigins-fortune2/VarOrigins.txt`
 - `ValueTypes.txt` 在大 case 上保持为紧凑摘要，而不是把完整 origin value 列表塞进每一行
-- `VarOrigins.txt` 能把 `ut#id` 展开到 `roots` 和每个 `vs#originId` 的来源值
+- `VarOrigins.txt` 能把 `ut#id` 展开到 `appears-in` 和每个 `vs#originId` 的来源值
 
 ## 目前边界
 

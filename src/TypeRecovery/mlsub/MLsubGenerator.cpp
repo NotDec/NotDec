@@ -1301,7 +1301,6 @@ struct VarOriginEntry {
 std::string formatExtValueMappingLabel(ExtValuePtr Value);
 std::string formatExtValueList(const std::set<ExtValuePtr> &Values);
 std::string formatOriginIdSummary(const std::set<std::uint32_t> &OriginIds);
-std::string formatInlineUTypeVariableSummary(const binarysub::UTypePtr &Ty);
 void appendVarOriginEntries(std::map<std::uint32_t, VarOriginEntry> &Entries,
                             const binarysub::UTypePtr &Ty,
                             llvm::StringRef RootLabel);
@@ -1330,29 +1329,24 @@ void appendDebugValueTypes(
     bool Pol = getPol(Ent.first);
     auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pol});
     std::string UTypeStr = "<null>";
-    std::string VarSummary;
     if (It != Res.end() && It->second) {
       UTypeStr = binarysub::printType(It->second);
-      VarSummary = formatInlineUTypeVariableSummary(It->second);
     }
     std::string Line = Pol ? "[+]" : "[-]";
     Line += " ";
     Line += formatExtValueMappingLabel(Ent.first);
     Line += " => ";
     Line += UTypeStr;
-    Line += VarSummary;
     Lines.push_back(std::move(Line));
   }
 
   if (SolveMemory) {
     auto It = Res.find(PolMem);
     std::string UTypeStr = "<null>";
-    std::string VarSummary;
     if (It != Res.end() && It->second) {
       UTypeStr = binarysub::printType(It->second);
-      VarSummary = formatInlineUTypeVariableSummary(It->second);
     }
-    Lines.push_back("[memory] <memory> => " + UTypeStr + VarSummary);
+    Lines.push_back("[memory] <memory> => " + UTypeStr);
   }
 
   std::sort(Lines.begin(), Lines.end());
@@ -1408,7 +1402,7 @@ void appendDebugVarOrigins(
     const auto &Detail = Entry.Detail;
     Out << "ut#" << Id << " " << Detail.Name << " ; size=" << Detail.Size
         << " ; origins=" << formatOriginIdSummary(Detail.OriginIds) << "\n";
-    Out << "  roots: " << llvm::join(Entry.RootLabels, " | ") << "\n";
+    Out << "  appears-in: " << llvm::join(Entry.RootLabels, " | ") << "\n";
     for (auto OriginId : Detail.OriginIds) {
       Out << "  vs#" << OriginId << " => ";
       if (auto It = OriginalVariableSources.find(OriginId);
@@ -1541,24 +1535,6 @@ std::string formatOriginIdSummary(const std::set<std::uint32_t> &OriginIds) {
     return "<none>";
   }
   return Summary;
-}
-
-std::string formatInlineUTypeVariableSummary(const binarysub::UTypePtr &Ty) {
-  auto Details = collectUTypeVariableDetails(Ty);
-  if (Details.empty()) {
-    return "";
-  }
-
-  std::vector<std::string> Parts;
-  Parts.reserve(Details.size());
-  for (const auto &[_, Detail] : Details) {
-    std::string Part =
-        Detail.Name + "=ut#" + std::to_string(Detail.Id) + "<-" +
-        formatOriginIdSummary(Detail.OriginIds);
-    Parts.push_back(std::move(Part));
-  }
-
-  return " ; vars=" + llvm::join(Parts, "; ");
 }
 
 void appendVarOriginEntries(

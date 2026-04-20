@@ -128,15 +128,16 @@
 - `"[+]"` / `"[-]"` 表示当前条目在 binarysub 简化时采用的极性
 - value 标签优先打印 stable id，并在括号里补 verbose `ExtValuePtr`
 - `[memory] <memory> => ...` 表示 memory 总类型
-- 若 `UType` 中仍含类型变量，会在行尾追加紧凑摘要：
-  - `name=ut#finalId<-vs#originIds`
-  - 详细的 `vs#originId -> ExtValuePtr` 展开见同目录下的 `VarOrigins.txt`
+- `ValueTypes.txt` 本身只保留 `value => UType`；如果需要继续追某个
+  `UType` 变量对应的 `ut#id / vs#originId / ExtValuePtr`，去同目录下的
+  `VarOrigins.txt`
 
 ### `VarOrigins.txt`
 
 - 来源：类型恢复阶段 `bulkSimplify` 结束后，与 `ValueTypes.txt` 同步导出
 - 作用：把每个最终 `UType` 类型变量展开为 `utype var -> original variable state -> original ExtValuePtr`
 - 典型用途：当 `ValueTypes.txt` 里看到某个 `'a` / `'b` 很难判断“它最早是从哪个 value 长出来的”时，直接在这里查
+- 当前格式里 `appears-in:` 表示这个最终 `ut#id` 出现在哪些顶层结果里，不表示原始来源；真正的原始来源仍看后面的 `vs#originId => ...`
 
 ### `ValueHTypes.txt`
 
