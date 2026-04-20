@@ -417,8 +417,7 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     // object with separate load/store views".
     HType *LoadTy = convertPointerSide(V->load);
     HType *StoreTy = convertPointerSide(V->store);
-    return Ctx.getDualPointerType(false, Parent.PointerSize * 8, LoadTy,
-                                  StoreTy);
+    return Ctx.getDualPointerType(false, V->psize, LoadTy, StoreTy);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
     auto &T = *PT;
     std::vector<std::pair<OffsetRange, UTypePtr>> RawFields;
@@ -1242,8 +1241,7 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     };
     HType *LoadTy = convertPointerSide(V->load);
     HType *StoreTy = convertPointerSide(V->store);
-    Ret =
-        Ctx.getDualPointerType(false, Parent.PointerSize * 8, LoadTy, StoreTy);
+    Ret = Ctx.getDualPointerType(false, V->psize, LoadTy, StoreTy);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
     auto &T = *PT;
     if (T.fields.empty()) {
