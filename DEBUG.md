@@ -128,6 +128,18 @@
 - `"[+]"` / `"[-]"` 表示当前条目在 binarysub 简化时采用的极性
 - `[memory] <memory> => ...` 表示 memory 总类型
 
+### `ValueHTypes.txt`
+
+- 来源：类型恢复阶段 `MLsubRecovery::genASTTypes()` 汇总最终结果后导出
+- 作用：记录最终的 `IR Value -> HType` 映射，以及对应 `decls` / `memory` 快照
+- 典型用途：在 `ValueTypes.txt` 看完 `UType` 后，继续确认最终落到 `HTypeResult` 里的值类型、结构声明名、memory 总类型
+
+当前格式特点：
+
+- 直接复用 `HTypeResult::print()` 的 snapshot 格式
+- `[types]` section 按 stable value key 排序，打印最终 `Value -> HType`
+- `[decls]` / `[memory]` section 会一并输出，方便读 record / memory 的 canonical 名
+
 ### `SelectableValues.txt`
 
 - 来源：`MLsubRecovery::run()` 在导出 `02-mlsub-input.ll` 后同步生成

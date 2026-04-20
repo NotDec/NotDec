@@ -51,6 +51,7 @@ struct PolyPolicyConfig {
 };
 
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
+constexpr llvm::StringLiteral kValueHTypesFile = "ValueHTypes.txt";
 constexpr llvm::StringLiteral kSelectableValuesFile = "SelectableValues.txt";
 constexpr llvm::StringLiteral kPNDiffWarnFile = "PNDiff.warn.txt";
 constexpr llvm::StringLiteral kMLsubInputIRFile = "02-mlsub-input.ll";
@@ -1336,6 +1337,19 @@ void appendDebugValueTypes(
   Out << "\n";
 }
 
+void writeDebugValueHTypes(llvm::StringRef DebugDir,
+                           const llvm2c::HTypeResult &Result) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(join(DebugDir.str(), kValueHTypesFile.str()), EC,
+                           llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Error printing to " << kValueHTypesFile << ", "
+                 << EC.message() << "\n";
+    return;
+  }
+  Result.print(Out);
+}
+
 std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
   std::string Label = toString(Value, true);
   std::string Stable = toStableString(Value);
@@ -1833,6 +1847,10 @@ void MLsubRecovery::run() {
   bottomUpPhase();
 
   topDownPhase();
+
+  if (WorkDir && ResultVal == nullptr) {
+    genASTTypes(M);
+  }
 
   if (WorkDir) {
     writePNDiffWarnings(join(*WorkDir, kPNDiffWarnFile.str()), AG,
@@ -2355,6 +2373,9 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   ResultVal->MemoryType = Mem;
   if (Mem->isRecordType()) {
     ResultVal->MemoryDecl = Mem->getAsRecordDecl();
+  }
+  if (auto WorkDir = notdec::getWorkDirOpt()) {
+    writeDebugValueHTypes(*WorkDir, *ResultVal);
   }
 }
 
