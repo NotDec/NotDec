@@ -198,10 +198,7 @@
       ]
     },
     "free": {
-      "ret": null,
-      "args": [
-        { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } }
-      ],
+      "is_polymorphic": true,
       "pndiff": [
         { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
@@ -255,13 +252,26 @@
       ]
     },
     "malloc": {
-      "ret": { "kind": "ptr", "load": { "kind": "primitive", "name": "uint", "bits": 8 }, "store": { "kind": "primitive", "name": "uint", "bits": 8 } },
-      "args": [
-        { "kind": "primitive", "name": "uint", "bits": 32 }
-      ],
+      "is_polymorphic": true,
       "pndiff": [
         { "target": { "kind": "ret" }, "state": "ptr" },
         { "target": { "kind": "arg", "index": 0 }, "state": "number" }
+      ]
+    },
+    "memcpy": {
+      "is_polymorphic": true,
+      "constraints": [
+        {
+          "kind": "subtype",
+          "lhs": { "kind": "arg", "index": 1 },
+          "rhs": { "kind": "arg", "index": 0 }
+        }
+      ],
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 2 }, "state": "number" }
       ]
     },
     "ntohl": {

@@ -358,6 +358,7 @@ public:
       const llvm::Function &Func) const;
   const llvm::json::Value *getSummaryOverrideSpec(
       const llvm::Function &Func) const;
+  bool isSummaryOverridePolymorphic(const llvm::Function &Func) const;
   const llvm::json::Value *getSignatureOverrideSpec(
       const llvm::Function &Func) const;
   OverrideTypeRecipe buildOverrideType(const llvm::json::Value &Expr,
