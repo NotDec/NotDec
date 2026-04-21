@@ -11,7 +11,6 @@ namespace notdec::utils {
 const bool CallMultiGraph = false;
 const bool ShowEdgeWeight = true;
 const bool ShowHeatColors = true;
-const bool HideExternalFuncs = true;
 
 class CallGraphDOTInfo {
 private:
@@ -19,6 +18,7 @@ private:
   llvm::CallGraph *CG;
   llvm::DenseMap<const llvm::Function *, uint64_t> Freq;
   uint64_t MaxFreq;
+  bool HideExternalFunctions;
 
 public:
   std::function<llvm::BlockFrequencyInfo *(llvm::Function &)> LookupBFI;
@@ -26,8 +26,10 @@ public:
   CallGraphDOTInfo(
       llvm::Module *M, llvm::CallGraph *CG,
       llvm::function_ref<llvm::BlockFrequencyInfo *(llvm::Function &)>
-          LookupBFI)
-      : M(M), CG(CG), LookupBFI(LookupBFI) {
+          LookupBFI,
+      bool HideExternalFunctions = true)
+      : M(M), CG(CG), HideExternalFunctions(HideExternalFunctions),
+        LookupBFI(LookupBFI) {
     MaxFreq = 0;
 
     for (llvm::Function &F : M->getFunctionList()) {
@@ -53,6 +55,8 @@ public:
   uint64_t getFreq(const llvm::Function *F) { return Freq[F]; }
 
   uint64_t getMaxFreq() { return MaxFreq; }
+
+  bool shouldHideExternalFunctions() const { return HideExternalFunctions; }
 
 private:
   void removeParallelEdges() {
@@ -81,7 +85,6 @@ namespace llvm {
 
 using notdec::utils::CallGraphDOTInfo;
 using notdec::utils::CallMultiGraph;
-using notdec::utils::HideExternalFuncs;
 using notdec::utils::ShowEdgeWeight;
 using notdec::utils::ShowHeatColors;
 
@@ -123,7 +126,7 @@ struct DOTGraphTraits<CallGraphDOTInfo *> : public DefaultDOTGraphTraits {
 
   static bool isNodeHidden(const CallGraphNode *Node,
                            const CallGraphDOTInfo *CGInfo) {
-    if (HideExternalFuncs && Node->getFunction() &&
+    if (CGInfo->shouldHideExternalFunctions() && Node->getFunction() &&
         Node->getFunction()->isDeclaration()) {
       return true;
     }
@@ -177,6 +180,8 @@ struct DOTGraphTraits<CallGraphDOTInfo *> : public DefaultDOTGraphTraits {
     Function *F = Node->getFunction();
     if (F == nullptr)
       return "";
+    if (F->isDeclaration())
+      return "style=\"filled,dashed\", fillcolor=\"gray95\", color=\"gray50\"";
     std::string attrs;
     if (ShowHeatColors) {
       uint64_t freq = CGInfo->getFreq(F);

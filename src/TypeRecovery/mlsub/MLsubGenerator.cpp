@@ -2148,9 +2148,19 @@ void MLsubRecovery::run() {
       llvm::errs() << "Error printing to " << Path << ", " << EC.message()
                    << "\n";
     }
-    notdec::utils::CallGraphDOTInfo CFGInfo(&M, &*CallG, nullptr);
+    notdec::utils::CallGraphDOTInfo CFGInfo(&M, &*CallG, nullptr, true);
     llvm::WriteGraph(CGDot, &CFGInfo, false);
     CGDot.close();
+
+    Path = join(*WorkDir, "CallGraphFull.dot");
+    llvm::raw_fd_ostream CGFullDot(Path, EC);
+    if (EC) {
+      llvm::errs() << "Error printing to " << Path << ", " << EC.message()
+                   << "\n";
+    }
+    notdec::utils::CallGraphDOTInfo FullCFGInfo(&M, &*CallG, nullptr, false);
+    llvm::WriteGraph(CGFullDot, &FullCFGInfo, false);
+    CGFullDot.close();
   }
 
   prepareSCC(*CallG);

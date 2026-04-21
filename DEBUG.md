@@ -109,6 +109,14 @@
 - 来源：类型恢复阶段构造 CallGraph 后导出
 - 作用：Graphviz dot 格式的调用图
 - 典型用途：把调用关系可视化，快速看 SCC、递归、调用边结构
+- 特点：默认隐藏没有函数体的 external declaration，便于先看主链路
+
+### `CallGraphFull.dot`
+
+- 来源：类型恢复阶段构造 CallGraph 后导出
+- 作用：Graphviz dot 格式的完整调用图
+- 典型用途：排查对 libc / wasm import / 其他 external declaration 的调用边是否存在
+- 特点：保留没有函数体的 external declaration，并用浅灰虚线节点和有函数体的函数区分
 
 ### `SCCs.txt`
 
