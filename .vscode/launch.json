@@ -37,6 +37,34 @@
       ],
     },
     {
+      "name": "06_SimpleRecursive2",
+      "type": "cppdbg",
+      "MIMode": "gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/notdec",
+      "args": [
+        "--frozen-tr-input-ir",
+        "${workspaceFolder}/test/type-recovery/llvm-ir/cases/06_SimpleRecursive2.ll",
+        "-o",
+        "/tmp/06_SimpleRecursive2.c",
+        "--tr-level=2",
+        "-g",
+        "--work-dir=${workspaceFolder}/work_dir"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Clean and Build",
+      "environment": [
+        {
+          "name": "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT",
+          "value": "1"
+        },
+        {
+          "name": "NOTDEC_BINARYSUB_TRACE",
+          "value": "1"
+        }
+      ],
+    },
+    {
       "name": "binarysub",
       "type": "cppdbg",
       "MIMode": "gdb",
