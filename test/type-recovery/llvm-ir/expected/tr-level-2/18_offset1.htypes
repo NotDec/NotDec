@@ -2,48 +2,27 @@
 
 [decls]
 struct struct_0 {
-  'd:32 field_0; /* at offset: -16 */
-};
-
-struct struct_1 {
   top:32 field_0; /* at offset: -8 */
   top:32 field_1; /* at offset: -4 */
 };
 
+struct struct_1 {
+  top:32 field_0; /* at offset: -24 */
+};
+
 struct struct_2 {
   top:32 field_0; /* at offset: -24 */
-  'g:32 field_1; /* at offset: -20 */
-  i8[2] padding_0; /* at offset: -16 */
-  struct_3* field_2; /* at offset: -14 */
-  i8[6] padding_1; /* at offset: -10 */
-  'g:32 field_3; /* at offset: -4 */
-};
-
-struct struct_3 {
-  struct_4*[] field_0; /* at offset: 0 */
-};
-
-struct struct_4 {
-  'g:32 field_0; /* at offset: 0 */
-};
-
-struct struct_5 {
-  top:32 field_0; /* at offset: -24 */
-  'g:32 field_1; /* at offset: -20 */
-  'i:32 field_2; /* at offset: -16 */
-  i8[8] padding_0; /* at offset: -12 */
-  'g:32 field_3; /* at offset: -4 */
 };
 
 
 [types]
 [+] <null-value> => top:32
-[+] @__original_main => bottom:32 (*)()*
-[+] @do_printf => void (*)('g:32)*
-[+] @env.printf => bottom:32 (*)('c:32, 'd:32)*
-[+] @get_s => bottom:32 (*)('i:32, 'j:32)*
-[+] @test1 => void (*)()*
-[+] @test2 => void (*)()*
+[+] @__original_main => (bottom:32 (*)())*
+[+] @do_printf => (void (*)(top:32))*
+[+] @env.printf => (bottom:32 (*)(top:32, top:32))*
+[+] @get_s => (bottom:32 (*)(top:32, top:32))*
+[+] @test1 => (void (*)())*
+[+] @test2 => (void (*)())*
 [+] __original_main::<ret> => bottom:32
 [+] const(i32 0)@__original_main::%bb.allocator.i2:0 => bottom:32
 [+] const(i32 0)@do_printf::%bb.allocator.i8:0 => bottom:32
@@ -58,14 +37,14 @@ struct struct_5 {
 [+] do_printf::%bb.allocator.i8 => bottom:32
 [+] do_printf::%calcOffset => bottom:32
 [+] do_printf::%stack => bottom:32
-[-] do_printf::%stack_addr2 => struct_0*
+[-] do_printf::%stack_addr2 => void*
 [+] do_printf::%stack_end => bottom:32
 [+] do_printf::%v_12 => bottom:32
 [+] do_printf::%v_17 => bottom:32
-[+] do_printf::arg0 => 'g:32
+[+] do_printf::arg0 => bottom:32
 [+] env.printf::<ret> => bottom:32
-[+] env.printf::arg0 => 'c:32
-[+] env.printf::arg1 => 'd:32
+[+] env.printf::arg0 => bottom:32
+[+] env.printf::arg1 => bottom:32
 [+] get_s::%add_107 => bottom:32
 [+] get_s::%add_98 => bottom:32
 [+] get_s::%bb.allocator.i15 => bottom:32
@@ -76,14 +55,14 @@ struct struct_5 {
 [+] get_s::%loadResult => bottom:32
 [+] get_s::%loadResult4 => bottom:32
 [+] get_s::%stack => bottom:32
-[-] get_s::%stack_addr5 => struct_1*
+[-] get_s::%stack_addr5 => struct_0*
 [+] get_s::%v_103 => bottom:32
 [+] get_s::%v_81 => bottom:32
 [+] get_s::%v_89 => bottom:32
 [+] get_s::%v_95 => bottom:32
 [+] get_s::<ret> => bottom:32
-[+] get_s::arg0 => 'i:32
-[+] get_s::arg1 => 'j:32
+[+] get_s::arg0 => bottom:32
+[+] get_s::arg1 => bottom:32
 [+] test1::%add_184 => bottom:32
 [+] test1::%add_193 => bottom:32
 [+] test1::%add_210 => bottom:32
@@ -97,7 +76,7 @@ struct struct_5 {
 [+] test1::%loadResult39 => bottom:32
 [+] test1::%loadResult5 => bottom:32
 [+] test1::%stack => bottom:32
-[-] test1::%stack_addr8 => struct_2*
+[-] test1::%stack_addr8 => struct_1*
 [+] test1::%v_200 => bottom:32
 [+] test1::%v_206 => bottom:32
 [+] test2::%add_310 => bottom:32
@@ -112,7 +91,7 @@ struct struct_5 {
 [+] test2::%loadResult39 => bottom:32
 [+] test2::%loadResult5 => bottom:32
 [+] test2::%stack => bottom:32
-[-] test2::%stack_addr8 => struct_5*
+[-] test2::%stack_addr8 => struct_2*
 [+] test2::%v_326 => bottom:32
 [+] test2::%v_332 => bottom:32
 

@@ -4,7 +4,7 @@
 
 [types]
 [+] <null-value> => top:32
-[+] @main => bottom:32 (*)('c:32, 'd:32)*
+[+] @main => (bottom:32 (*)(top:32, top:32))*
 [+] const(i32 0)@main::%bb.if_false.i0:0 => bottom:32
 [+] const(i32 1)@main::%bb.if_true.i0:0 => bottom:32
 [+] main::%eq1 => i1
@@ -20,8 +20,8 @@
 [+] main::%var1 => bottom:32
 [+] main::%var2 => bottom:32
 [+] main::<ret> => bottom:32
-[+] main::arg0 => 'c:32
-[+] main::arg1 => 'd:32
+[+] main::arg0 => bottom:32
+[+] main::arg1 => bottom:32
 
 [memory]
 type => top:32

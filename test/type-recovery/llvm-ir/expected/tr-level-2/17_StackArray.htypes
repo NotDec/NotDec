@@ -18,9 +18,9 @@ struct struct_2 {
 
 [types]
 [+] <null-value> => top:32
-[+] @goodG2B => void (*)()*
-[+] @printIntLine => void (*)('e:32)*
-[+] @printLine => void (*)('c:32)*
+[+] @goodG2B => (void (*)())*
+[+] @printIntLine => (void (*)(top:32))*
+[+] @printLine => (void (*)(top:32))*
 [+] const(i32 -1)@goodG2B::%brif_val.not:1 => bottom:32
 [+] const(i32 0)@goodG2B::%storemerge:0 => bottom:32
 [+] const(i32 1)@goodG2B::%bb.brif_next.i3:0 => bottom:32
@@ -65,8 +65,8 @@ struct struct_2 {
 [+] goodG2B::%stack_addr => bottom:32
 [+] goodG2B::%stack_end => bottom:32
 [+] goodG2B::%storemerge => bottom:32
-[+] printIntLine::arg0 => 'e:32
-[+] printLine::arg0 => 'c:32
+[+] printIntLine::arg0 => bottom:32
+[+] printLine::arg0 => bottom:32
 
 [memory]
 type => top:32

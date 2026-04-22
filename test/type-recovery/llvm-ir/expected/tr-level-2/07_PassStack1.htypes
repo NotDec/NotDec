@@ -4,19 +4,19 @@
 
 [types]
 [+] <null-value> => top:32
-[+] @fun_1 => ('j:32 | ('c:32 | 'd:32)) (*)((('c:32 & 'd:32) & ptr<load=void, store=('c:32 | 'j:32), psize=32>))*
-[+] @main => ('j:32 | ('c:32 | 'd:32)) (*)('f:32, 'g:32)*
-[+] fun_1::%addr => ('c:32 | 'j:32)
-[-] fun_1::%stack => ptr<load=void, store=('c:32 | 'j:32), psize=32>
+[+] @fun_1 => ('c:32 (*)('c:32 & ptr<load=void, store='c:32, psize=32>))*
+[+] @main => (bottom:32 (*)(top:32, top:32))*
+[+] fun_1::%addr => bottom:32
+[-] fun_1::%stack => ptr<load=void, store=void, psize=32>
 [+] fun_1::%stack1 => bottom:32
-[+] fun_1::<ret> => ('j:32 | ('c:32 | 'd:32))
-[+] fun_1::arg0 => ('c:32 | 'j:32)
-[+] main::%a => ('j:32 | ('c:32 | 'd:32))
-[-] main::%stack => (('j:32 & ('c:32 & 'd:32)) & ptr<load=void, store=('c:32 | 'j:32), psize=32>)
-[+] main::%stacki => 'j:32
-[+] main::<ret> => ('j:32 | ('c:32 | 'd:32))
-[+] main::arg0 => 'f:32
-[+] main::arg1 => 'g:32
+[+] fun_1::<ret> => bottom:32
+[+] fun_1::arg0 => bottom:32
+[+] main::%a => bottom:32
+[-] main::%stack => 'c:32 & ptr<load=void, store='c:32, psize=32>
+[+] main::%stacki => bottom:32
+[+] main::<ret> => bottom:32
+[+] main::arg0 => bottom:32
+[+] main::arg1 => bottom:32
 
 [memory]
 type => top:32

@@ -4,14 +4,14 @@
 
 [types]
 [+] <null-value> => top:32
-[+] @main => bottom:32 (*)('e:32, 'f:32)*
-[+] @passMem1 => bottom:32 (*)()*
+[+] @main => (bottom:32 (*)(top:32, top:32))*
+[+] @passMem1 => (bottom:32 (*)())*
 [+] const(i32 0)@main::%bb.allocator.i1:0 => bottom:32
 [+] main::%memptr1 => bottom:32
 [+] main::%r => bottom:32
 [+] main::<ret> => bottom:32
-[+] main::arg0 => 'e:32
-[+] main::arg1 => 'f:32
+[+] main::arg0 => bottom:32
+[+] main::arg1 => bottom:32
 [+] passMem1::%f1 => bottom:32
 [+] passMem1::%memptr1 => bottom:32
 [+] passMem1::<ret> => bottom:32
