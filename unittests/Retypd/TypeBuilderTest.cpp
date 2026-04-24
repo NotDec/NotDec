@@ -90,11 +90,17 @@ TEST(Retypd, HTypeSetPrettyPrintingFlattensChains) {
   auto *FlatUnion = HCtx.getSetUnionType(
       false, HCtx.getSetUnionType(false, I8, I16),
       HCtx.getSetUnionType(false, I32, F32));
+  auto *FlatUnionSet = llvm::dyn_cast<notdec::ast::SetUnionType>(FlatUnion);
+  ASSERT_NE(FlatUnionSet, nullptr);
+  EXPECT_EQ(FlatUnionSet->getTypes().size(), 4u);
   EXPECT_EQ(FlatUnion->getAsString(), "i8 | i16 | i32 | f32");
 
   auto *Mixed =
       HCtx.getSetInterType(false, HCtx.getSetInterType(false, I8, I16),
                            HCtx.getSetUnionType(false, I32, F32));
+  auto *MixedSet = llvm::dyn_cast<notdec::ast::SetInterType>(Mixed);
+  ASSERT_NE(MixedSet, nullptr);
+  EXPECT_EQ(MixedSet->getTypes().size(), 3u);
   EXPECT_EQ(Mixed->getAsString(), "i8 & i16 & (i32 | f32)");
 
   notdec::ast::HTypeSnapshotFormatter Formatter(&HCtx);

@@ -11,7 +11,7 @@
 [+] const(i32 0)@main::%cond:1 => lower=top:32 ; upper=bottom:32
 [+] const(i32 1)@main::%eq1:0 => lower=top:32 ; upper=bottom:32
 [+] isFloat::arg0 => lower=f32 ; upper=f32
-[+] main::%cond => lower=i1 ; upper=i1
+[+] main::%cond => lower=bool ; upper=bool
 [+] main::%eq0 => lower=top:32 ; upper=bottom:32
 [+] main::%eq1 => lower=top:32 ; upper=bottom:32
 [+] main::%stack => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
@@ -25,4 +25,3 @@
 
 [memory]
 type => top:32
-

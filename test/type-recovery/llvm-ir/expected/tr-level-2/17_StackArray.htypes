@@ -42,7 +42,7 @@ struct struct_4 {
 [+] const(i64 0)@goodG2B::%bb.allocator.i16:0 => lower=top:64 ; upper=bottom:64
 [+] const(i64 0)@goodG2B::%bb.allocator.i19:0 => lower=top:64 ; upper=bottom:64
 [+] const(i64 0)@goodG2B::%bb.allocator.i7:0 => lower=top:64 ; upper=bottom:64
-[+] goodG2B::%brif_val.not => lower=i1 ; upper=i1
+[+] goodG2B::%brif_val.not => lower=bool ; upper=bool
 [+] goodG2B::%calcOffset => lower=void* ; upper=bottom:32
 [+] goodG2B::%calcOffset12 => lower=void* ; upper=bottom:32
 [+] goodG2B::%calcOffset7 => lower=void* ; upper=bottom:32
@@ -65,7 +65,7 @@ struct struct_4 {
 [+] goodG2B::%new_66 => lower=void* ; upper=bottom:32
 [+] goodG2B::%new_68 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
 [+] goodG2B::%new_75 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
-[+] goodG2B::%new_81 => lower=i1 ; upper=i1
+[+] goodG2B::%new_81 => lower=bool ; upper=bool
 [+] goodG2B::%new_83 => lower=top:32 ; upper=bottom:32
 [+] goodG2B::%new_86 => lower=void* ; upper=bottom:32
 [+] goodG2B::%new_88 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
@@ -78,4 +78,3 @@ struct struct_4 {
 
 [memory]
 type => top:32
-

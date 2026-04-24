@@ -208,6 +208,37 @@ bool isZeroSizedRecordMarker(const binarysub::UTypePtr &Ty) {
   return false;
 }
 
+// UType 的 set 节点已经在上游按同类 flatten 成 vector，这里只需要按顺序
+// 过滤掉 marker 项，再线性 reduce 成 HType set。
+template <typename ConvertFn, typename MergeFn>
+HType *convertVisibleSetTerms(const std::vector<UTypePtr> &Terms,
+                              ConvertFn &&ConvertTerm,
+                              MergeFn &&MergeTerms) {
+  HType *Result = nullptr;
+  for (const auto &Term : Terms) {
+    if (isZeroSizedRecordMarker(Term)) {
+      continue;
+    }
+    auto *Converted = ConvertTerm(Term);
+    Result = Result == nullptr ? Converted : MergeTerms(Result, Converted);
+  }
+  if (Result != nullptr) {
+    return Result;
+  }
+  assert(!Terms.empty() && "set node must contain at least one term");
+  return ConvertTerm(Terms.front());
+}
+
+template <typename MeasureFn>
+int64_t maxSetTermMetric(const std::vector<UTypePtr> &Terms, MeasureFn &&Measure) {
+  assert(!Terms.empty() && "set node must contain at least one term");
+  int64_t MaxValue = Measure(Terms.front());
+  for (size_t I = 1; I < Terms.size(); ++I) {
+    MaxValue = std::max(MaxValue, Measure(Terms[I]));
+  }
+  return MaxValue;
+}
+
 std::pair<HType *, SimpleRange>
 cropFieldTypeToRange(notdec::ast::HTypeContext &Ctx, HType *HT,
                      notdec::OffsetTy OldSize, SimpleRange RelativeRange) {
@@ -432,25 +463,15 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     DebugPathScope PathScope(*this, std::move(PathFrame));
     return convertStruct(Ty, RawFields, FieldSizeBytes);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    // Collapse away marker-only sides so field payload types do not inherit
-    // binarysub's empty-record sentinel as part of the visible union shape.
-    if (isZeroSizedRecordMarker(V->lhs)) {
-      return convertFieldType(V->rhs, FieldSizeBytes);
-    }
-    if (isZeroSizedRecordMarker(V->rhs)) {
-      return convertFieldType(V->lhs, FieldSizeBytes);
-    }
-    return doUnion(convertFieldType(V->lhs, FieldSizeBytes),
-                   convertFieldType(V->rhs, FieldSizeBytes));
+    return convertVisibleSetTerms(
+        V->types,
+        [&](const UTypePtr &Term) { return convertFieldType(Term, FieldSizeBytes); },
+        [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    if (isZeroSizedRecordMarker(V->lhs)) {
-      return convertFieldType(V->rhs, FieldSizeBytes);
-    }
-    if (isZeroSizedRecordMarker(V->rhs)) {
-      return convertFieldType(V->lhs, FieldSizeBytes);
-    }
-    return doInter(convertFieldType(V->lhs, FieldSizeBytes),
-                   convertFieldType(V->rhs, FieldSizeBytes));
+    return convertVisibleSetTerms(
+        V->types,
+        [&](const UTypePtr &Term) { return convertFieldType(Term, FieldSizeBytes); },
+        [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
     return convertRecursive(Ty, *V);
   }
@@ -523,27 +544,13 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
     Result = convertVariable(*V);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    // Top-level conversion follows the same rule: once one branch is only a
-    // zero-sized marker, the other branch already captures the meaningful type.
-    if (isZeroSizedRecordMarker(V->lhs)) {
-      Result = convert(V->rhs);
-    } else if (isZeroSizedRecordMarker(V->rhs)) {
-      Result = convert(V->lhs);
-    } else {
-      HType *LhsTy = convert(V->lhs);
-      HType *RhsTy = convert(V->rhs);
-      Result = doUnion(LhsTy, RhsTy);
-    }
+    Result = convertVisibleSetTerms(
+        V->types, [&](const UTypePtr &Term) { return convert(Term); },
+        [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    if (isZeroSizedRecordMarker(V->lhs)) {
-      Result = convert(V->rhs);
-    } else if (isZeroSizedRecordMarker(V->rhs)) {
-      Result = convert(V->lhs);
-    } else {
-      HType *LhsTy = convert(V->lhs);
-      HType *RhsTy = convert(V->rhs);
-      Result = doInter(LhsTy, RhsTy);
-    }
+    Result = convertVisibleSetTerms(
+        V->types, [&](const UTypePtr &Term) { return convert(Term); },
+        [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });
   } else if (std::get_if<UPointerType>(&Ty->v)) {
     Result = convertPointer(Ty);
   } else if (std::get_if<URecordType>(&Ty->v)) {
@@ -574,11 +581,13 @@ int64_t TypeBuilder::accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty) {
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
     return V->size;
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    return std::max(accessedPointeeSizeInBits(V->lhs),
-                    accessedPointeeSizeInBits(V->rhs));
+    return maxSetTermMetric(
+        V->types,
+        [&](const UTypePtr &Term) { return accessedPointeeSizeInBits(Term); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    return std::max(accessedPointeeSizeInBits(V->lhs),
-                    accessedPointeeSizeInBits(V->rhs));
+    return maxSetTermMetric(
+        V->types,
+        [&](const UTypePtr &Term) { return accessedPointeeSizeInBits(Term); });
   } else if (auto *V = std::get_if<URecordType>(&Ty->v)) {
     auto MaxElem = 0;
     for (const auto &field : V->fields) {
@@ -1261,25 +1270,13 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     DebugPathScope PathScope(*this, std::move(PathFrame));
     Ret = convertStruct(Ty, RawFields, PointeeSize);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
-    if (isZeroSizedRecordMarker(V->lhs)) {
-      Ret = convert(V->rhs);
-    } else if (isZeroSizedRecordMarker(V->rhs)) {
-      Ret = convert(V->lhs);
-    } else {
-      HType *LhsTy = convert(V->lhs);
-      HType *RhsTy = convert(V->rhs);
-      Ret = doUnion(LhsTy, RhsTy);
-    }
+    Ret = convertVisibleSetTerms(
+        V->types, [&](const UTypePtr &Term) { return convert(Term); },
+        [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
-    if (isZeroSizedRecordMarker(V->lhs)) {
-      Ret = convert(V->rhs);
-    } else if (isZeroSizedRecordMarker(V->rhs)) {
-      Ret = convert(V->lhs);
-    } else {
-      HType *LhsTy = convert(V->lhs);
-      HType *RhsTy = convert(V->rhs);
-      Ret = doInter(LhsTy, RhsTy);
-    }
+    Ret = convertVisibleSetTerms(
+        V->types, [&](const UTypePtr &Term) { return convert(Term); },
+        [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });
   } else {
     assert(false && "Unhandled Pointer UType variant");
   }
@@ -1299,13 +1296,6 @@ HType *TypeBuilder::doUnion(HType *LhsTy, HType *RhsTy) {
   if (LhsTy->getCanonicalType() == RhsTy->getCanonicalType()) {
     return LhsTy->getCanonicalType();
   }
-
-  // Canonicalize operand order so semantically identical unions unique to the
-  // same HType node.
-  if (std::less<HType *>{}(RhsTy->getCanonicalType(),
-                           LhsTy->getCanonicalType())) {
-    std::swap(LhsTy, RhsTy);
-  }
   return Ctx.getSetUnionType(false, LhsTy, RhsTy);
 }
 
@@ -1317,10 +1307,6 @@ HType *TypeBuilder::doInter(HType *LhsTy, HType *RhsTy) {
   }
   if (LhsTy->getCanonicalType() == RhsTy->getCanonicalType()) {
     return LhsTy->getCanonicalType();
-  }
-  if (std::less<HType *>{}(RhsTy->getCanonicalType(),
-                           LhsTy->getCanonicalType())) {
-    std::swap(LhsTy, RhsTy);
   }
   return Ctx.getSetInterType(false, LhsTy, RhsTy);
 }

@@ -247,6 +247,9 @@ cmake --build ./build --target all
 ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
 ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --output-on-failure
 ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy|realworld).tr_level_2' --output-on-failure
+cmake --build ./build --target TypeBuilderTest binarysub -j4
+./build/bin/TypeBuilderTest
+./build/binarysub
 ```
 
 注意：

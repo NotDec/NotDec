@@ -23,7 +23,7 @@ struct struct_3 {
 [+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
 [+] const(i32 0)@main::%bb.exit.i0:0 => lower=top:32 ; upper=bottom:32
 [+] const(i32 0)@main::%bb.loop.i3:0 => lower=top:32 ; upper=bottom:32
-[+] main::%cmp => lower=i1 ; upper=i1
+[+] main::%cmp => lower=bool ; upper=bool
 [+] main::%new_9 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
 [+] main::%p1 => lower=struct_0* ; upper=bottom:32
 [+] main::%p2 => lower=struct_1* ; upper=bottom:32
@@ -35,4 +35,3 @@ struct struct_3 {
 
 [memory]
 type => top:32
-

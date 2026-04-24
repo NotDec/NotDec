@@ -1711,8 +1711,9 @@ void collectUTypeVariableDetailsImpl(
           collectUTypeVariableDetailsImpl(Node.result, Out, Seen);
         } else if constexpr (std::is_same_v<T, binarysub::UUnion> ||
                              std::is_same_v<T, binarysub::UInter>) {
-          collectUTypeVariableDetailsImpl(Node.lhs, Out, Seen);
-          collectUTypeVariableDetailsImpl(Node.rhs, Out, Seen);
+          for (const auto &Term : Node.types) {
+            collectUTypeVariableDetailsImpl(Term, Out, Seen);
+          }
         } else if constexpr (std::is_same_v<T, binarysub::URecordType>) {
           for (const auto &[_, FieldTy] : Node.fields) {
             collectUTypeVariableDetailsImpl(FieldTy, Out, Seen);
