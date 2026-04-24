@@ -15,58 +15,66 @@ struct struct_2 {
   top:32 field_0; /* at offset: 0 */
 };
 
+struct struct_3 {
+  struct_4*[] field_0; /* at offset: 0 */
+};
+
+struct struct_4 {
+  top:32 field_0; /* at offset: 0 */
+};
+
 
 [types]
-[+] <null-value> => top:32
-[+] @goodG2B => (void (*)())*
-[+] @printIntLine => (void (*)(top:32))*
-[+] @printLine => (void (*)(top:32))*
-[+] const(i32 -1)@goodG2B::%brif_val.not:1 => bottom:32
-[+] const(i32 0)@goodG2B::%storemerge:0 => bottom:32
-[+] const(i32 1)@goodG2B::%bb.brif_next.i3:0 => bottom:32
-[+] const(i32 1060)@goodG2B::%bb.blk_exit8.i0:0 => bottom:32
-[+] const(i32 2)@goodG2B::%new_63:1 => bottom:32
-[+] const(i32 2)@goodG2B::%new_83:1 => bottom:32
-[+] const(i32 7)@goodG2B::%bb.allocator.i5:0 => bottom:32
-[+] const(i32 9)@goodG2B::%new_81:1 => bottom:32
-[+] const(i64 0)@goodG2B::%bb.allocator.i10:0 => bottom:64
-[+] const(i64 0)@goodG2B::%bb.allocator.i13:0 => bottom:64
-[+] const(i64 0)@goodG2B::%bb.allocator.i16:0 => bottom:64
-[+] const(i64 0)@goodG2B::%bb.allocator.i19:0 => bottom:64
-[+] const(i64 0)@goodG2B::%bb.allocator.i7:0 => bottom:64
-[+] goodG2B::%brif_val.not => i1
-[+] goodG2B::%calcOffset => bottom:32
-[+] goodG2B::%calcOffset12 => bottom:32
-[+] goodG2B::%calcOffset7 => bottom:32
-[+] goodG2B::%loadResult => bottom:32
-[+] goodG2B::%loadResult21 => bottom:32
-[+] goodG2B::%loadResult23 => bottom:32
-[+] goodG2B::%new_101 => bottom:32
-[+] goodG2B::%new_11 => bottom:32
-[+] goodG2B::%new_15 => bottom:32
-[+] goodG2B::%new_20 => bottom:32
-[+] goodG2B::%new_22 => bottom:32
-[+] goodG2B::%new_27 => bottom:32
-[+] goodG2B::%new_29 => bottom:32
-[+] goodG2B::%new_34 => bottom:32
-[+] goodG2B::%new_36 => bottom:32
-[+] goodG2B::%new_41 => bottom:32
-[+] goodG2B::%new_43 => bottom:32
-[+] goodG2B::%new_50 => bottom:32
-[+] goodG2B::%new_63 => bottom:32
-[+] goodG2B::%new_66 => bottom:32
-[+] goodG2B::%new_68 => bottom:32
-[+] goodG2B::%new_75 => bottom:32
-[+] goodG2B::%new_81 => i1
-[+] goodG2B::%new_83 => bottom:32
-[+] goodG2B::%new_86 => bottom:32
-[+] goodG2B::%new_88 => bottom:32
-[-] goodG2B::%stack26 => struct_0*
-[+] goodG2B::%stack_addr => bottom:32
-[+] goodG2B::%stack_end => bottom:32
-[+] goodG2B::%storemerge => bottom:32
-[+] printIntLine::arg0 => bottom:32
-[+] printLine::arg0 => bottom:32
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @goodG2B => lower=top:32 ; upper=(void (*)())*
+[+] @printIntLine => lower=(void (*)(bottom:32))* ; upper=(void (*)(top:32))*
+[+] @printLine => lower=(void (*)(bottom:32))* ; upper=(void (*)(top:32))*
+[+] const(i32 -1)@goodG2B::%brif_val.not:1 => lower=top:32 ; upper=bottom:32
+[+] const(i32 0)@goodG2B::%storemerge:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 1)@goodG2B::%bb.brif_next.i3:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 1060)@goodG2B::%bb.blk_exit8.i0:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 2)@goodG2B::%new_63:1 => lower=top:32 ; upper=bottom:32
+[+] const(i32 2)@goodG2B::%new_83:1 => lower=top:32 ; upper=bottom:32
+[+] const(i32 7)@goodG2B::%bb.allocator.i5:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 9)@goodG2B::%new_81:1 => lower=top:32 ; upper=bottom:32
+[+] const(i64 0)@goodG2B::%bb.allocator.i10:0 => lower=top:64 ; upper=bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i13:0 => lower=top:64 ; upper=bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i16:0 => lower=top:64 ; upper=bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i19:0 => lower=top:64 ; upper=bottom:64
+[+] const(i64 0)@goodG2B::%bb.allocator.i7:0 => lower=top:64 ; upper=bottom:64
+[+] goodG2B::%brif_val.not => lower=i1 ; upper=i1
+[+] goodG2B::%calcOffset => lower=void* ; upper=bottom:32
+[+] goodG2B::%calcOffset12 => lower=void* ; upper=bottom:32
+[+] goodG2B::%calcOffset7 => lower=void* ; upper=bottom:32
+[+] goodG2B::%loadResult => lower=top:32 ; upper=bottom:32
+[+] goodG2B::%loadResult21 => lower=top:32 ; upper=bottom:32
+[+] goodG2B::%loadResult23 => lower=top:32 ; upper=bottom:32
+[+] goodG2B::%new_101 => lower=top:32 ; upper=bottom:32
+[+] goodG2B::%new_11 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] goodG2B::%new_15 => lower=ptr<load=void, store=void, psize=64> ; upper=bottom:32
+[+] goodG2B::%new_20 => lower=void* ; upper=bottom:32
+[+] goodG2B::%new_22 => lower=ptr<load=void, store=void, psize=64> ; upper=bottom:32
+[+] goodG2B::%new_27 => lower=void* ; upper=bottom:32
+[+] goodG2B::%new_29 => lower=ptr<load=void, store=void, psize=64> ; upper=bottom:32
+[+] goodG2B::%new_34 => lower=void* ; upper=bottom:32
+[+] goodG2B::%new_36 => lower=ptr<load=void, store=void, psize=64> ; upper=bottom:32
+[+] goodG2B::%new_41 => lower=void* ; upper=bottom:32
+[+] goodG2B::%new_43 => lower=ptr<load=void, store=void, psize=64> ; upper=bottom:32
+[+] goodG2B::%new_50 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] goodG2B::%new_63 => lower=top:32 ; upper=bottom:32
+[+] goodG2B::%new_66 => lower=void* ; upper=bottom:32
+[+] goodG2B::%new_68 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] goodG2B::%new_75 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] goodG2B::%new_81 => lower=i1 ; upper=i1
+[+] goodG2B::%new_83 => lower=top:32 ; upper=bottom:32
+[+] goodG2B::%new_86 => lower=void* ; upper=bottom:32
+[+] goodG2B::%new_88 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[-] goodG2B::%stack26 => lower=struct_0* ; upper=bottom:32
+[+] goodG2B::%stack_addr => lower=struct_0* ; upper=bottom:32
+[+] goodG2B::%stack_end => lower=struct_3* ; upper=bottom:32
+[+] goodG2B::%storemerge => lower=top:32 ; upper=bottom:32
+[+] printIntLine::arg0 => lower=top:32 ; upper=bottom:32
+[+] printLine::arg0 => lower=top:32 ; upper=bottom:32
 
 [memory]
 type => top:32

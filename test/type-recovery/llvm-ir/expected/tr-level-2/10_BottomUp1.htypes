@@ -3,20 +3,20 @@
 [decls]
 
 [types]
-[+] <null-value> => top:32
-[+] @isFloat => (void (*)(f32))*
-[+] @main => (bottom:32 (*)(top:32, top:32))*
-[+] @ptrFloat => (void (*)(ptr<load=f32, store=void, psize=32>))*
-[+] const(i32 0)@main::%bb.allocator.i3:0 => bottom:32
-[+] isFloat::arg0 => f32
-[+] main::%stack => bottom:32
-[-] main::%stackPtr => ptr<load=f32, store=void, psize=32>
-[+] main::<ret> => bottom:32
-[+] main::arg0 => bottom:32
-[+] main::arg1 => bottom:32
-[+] ptrFloat::%f1 => f32
-[+] ptrFloat::%v_12 => bottom:32
-[+] ptrFloat::arg0 => bottom:32
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @isFloat => lower=(void (*)(f32))* ; upper=(void (*)(f32))*
+[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
+[+] @ptrFloat => lower=(void (*)(bottom:32))* ; upper=(void (*)(ptr<load=f32, store=void, psize=32>))*
+[+] const(i32 0)@main::%bb.allocator.i3:0 => lower=top:32 ; upper=bottom:32
+[+] isFloat::arg0 => lower=f32 ; upper=f32
+[+] main::%stack => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
+[-] main::%stackPtr => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
+[+] main::<ret> => lower=top:32 ; upper=bottom:32
+[+] main::arg0 => lower=top:32 ; upper=bottom:32
+[+] main::arg1 => lower=top:32 ; upper=bottom:32
+[+] ptrFloat::%f1 => lower=f32 ; upper=f32
+[+] ptrFloat::%v_12 => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
+[+] ptrFloat::arg0 => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
 
 [memory]
 type => top:32

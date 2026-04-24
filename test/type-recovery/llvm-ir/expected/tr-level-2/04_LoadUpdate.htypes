@@ -3,15 +3,15 @@
 [decls]
 
 [types]
-[+] <null-value> => top:32
-[+] @main => (bottom:32 (*)(top:32, top:32))*
-[+] const(i32 0)@main::%bb.allocator.i1:0 => bottom:32
-[+] const(i32 1)@main::%bb.allocator.i3:0 => bottom:32
-[+] main::%i1 => bottom:32
-[-] main::%iptr => ptr<load=void, store=void, psize=32>
-[+] main::<ret> => bottom:32
-[+] main::arg0 => bottom:32
-[+] main::arg1 => bottom:32
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
+[+] const(i32 0)@main::%bb.allocator.i1:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 1)@main::%bb.allocator.i3:0 => lower=top:32 ; upper=bottom:32
+[+] main::%i1 => lower=top:32 ; upper=bottom:32
+[-] main::%iptr => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] main::<ret> => lower=top:32 ; upper=bottom:32
+[+] main::arg0 => lower=top:32 ; upper=bottom:32
+[+] main::arg1 => lower=top:32 ; upper=bottom:32
 
 [memory]
 type => top:32

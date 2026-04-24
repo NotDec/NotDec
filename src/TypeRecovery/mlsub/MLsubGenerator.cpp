@@ -1405,22 +1405,24 @@ void appendDebugValueTypes(
     return;
   }
 
-  auto getPol = [&](ExtValuePtr V) { return !ContraVariantValues.count(V); };
   std::vector<std::string> Lines;
   Lines.reserve(V2N.size() + (SolveMemory ? 1 : 0));
 
   for (const auto &Ent : V2N) {
-    bool Pol = getPol(Ent.first);
-    auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pol});
-    std::string UTypeStr = "<null>";
-    if (It != Res.end() && It->second) {
-      UTypeStr = binarysub::printType(It->second);
-    }
-    std::string Line = Pol ? "[+]" : "[-]";
+    auto formatSolvedType = [&](bool Pos) {
+      auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pos});
+      if (It == Res.end() || !It->second) {
+        return std::string("<null>");
+      }
+      return binarysub::printType(It->second);
+    };
+    std::string Line = ContraVariantValues.count(Ent.first) == 0 ? "[+]" : "[-]";
     Line += " ";
     Line += formatExtValueMappingLabel(Ent.first);
-    Line += " => ";
-    Line += UTypeStr;
+    Line += " => lower=";
+    Line += formatSolvedType(false);
+    Line += " ; upper=";
+    Line += formatSolvedType(true);
     Lines.push_back(std::move(Line));
   }
 
@@ -1517,8 +1519,17 @@ void writeDebugValueHTypes(llvm::StringRef DebugDir,
 void primeSnapshotFormatter(const llvm2c::HTypeResult &Result,
                            ast::HTypeSnapshotFormatter &Formatter) {
   std::vector<std::pair<std::string, const ast::HType *>> Entries;
-  Entries.reserve(Result.ValueTypes.size());
+  Entries.reserve(Result.ValueTypes.size() + Result.ValueTypesLower.size());
   for (const auto &Ent : Result.ValueTypes) {
+    if (Ent.second == nullptr) {
+      continue;
+    }
+    Entries.emplace_back(toStableString(Ent.first), Ent.second);
+  }
+  for (const auto &Ent : Result.ValueTypesLower) {
+    if (Ent.second == nullptr) {
+      continue;
+    }
     Entries.emplace_back(toStableString(Ent.first), Ent.second);
   }
   std::sort(Entries.begin(), Entries.end());
@@ -1596,10 +1607,11 @@ void writeDebugImportantHTypes(llvm::StringRef DebugDir,
     ImportantFunctionEntry Entry;
     Entry.Name = Func->hasName() ? Func->getName().str() : toStableString(Ent.first);
     Entry.StableKey = toStableString(Ent.first);
-    Entry.RawType = Formatter.formatType(Ent.second);
+    auto *DefaultTy = Result.getDefaultValueType(Ent.first);
+    Entry.RawType = DefaultTy == nullptr ? "<null>" : Formatter.formatType(DefaultTy);
     Entry.ReturnType = "<unsupported>";
 
-    if (const auto *FT = unwrapFunctionType(Ent.second)) {
+    if (const auto *FT = unwrapFunctionType(DefaultTy)) {
       Entry.ReturnType = formatJoinedHTypes(FT->getReturnType(), Formatter);
       for (auto *ParamTy : FT->getParamTypes()) {
         Entry.Args.push_back(Formatter.formatType(ParamTy));
@@ -2753,9 +2765,9 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   using binarysub::PolarVar;
   SnapshotContraVariantValues = ContraVariantValues;
   std::set<PolarVar> Tys;
-  auto getPol = [&](ExtValuePtr V) { return !ContraVariantValues.count(V); };
   for (auto &Ent : V2N) {
-    Tys.insert(PolarVar{.var = Ent.second, .pos = getPol(Ent.first)});
+    Tys.insert(PolarVar{.var = Ent.second, .pos = true});
+    Tys.insert(PolarVar{.var = Ent.second, .pos = false});
   }
   auto PolMem = PolarVar{.var = MemoryType, .pos = false};
   if (SolveMemory) {
@@ -2767,21 +2779,34 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   TypeBuilderContext TBCtx(HCtx, DL);
   TypeBuilder TB(TBCtx);
 
-  for (auto &Ent : V2N) {
-    auto It = Res.find(PolarVar{.var = Ent.second, .pos = getPol(Ent.first)});
-    ast::HType *Converted = nullptr;
-    if (It != Res.end() && It->second) {
-      TB.setDebugRootLabel(formatTypeBuilderRootLabel(Ent.first));
-      Converted = TB.convert(It->second);
-      TB.setDebugRootLabel(std::nullopt);
+  auto convertSolvedType = [&](const PolarVar &Var, llvm::StringRef RootLabel) {
+    auto It = Res.find(Var);
+    if (It == Res.end() || !It->second) {
+      return static_cast<ast::HType *>(nullptr);
     }
-    ValueTypes.insert({Ent.first, Converted});
+    TB.setDebugRootLabel(RootLabel.str());
+    auto *Converted = TB.convert(It->second);
+    TB.setDebugRootLabel(std::nullopt);
+    return Converted;
+  };
+
+  for (auto &Ent : V2N) {
+    auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
+    auto *Upper = convertSolvedType(
+        PolarVar{.var = Ent.second, .pos = true}, RootLabel + " upper");
+    ValueTypes.insert({Ent.first, Upper});
   }
   if (SolveMemory) {
     auto MemUTy = Res.at(PolMem);
     TB.setDebugRootLabel(std::string("<memory>"));
     ValueTypes.insert({nullptr, TB.convert(MemUTy)});
     TB.setDebugRootLabel(std::nullopt);
+  }
+  for (auto &Ent : V2N) {
+    auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
+    auto *Lower = convertSolvedType(
+        PolarVar{.var = Ent.second, .pos = false}, RootLabel + " lower");
+    ValueTypesLower.insert({Ent.first, Lower});
   }
 
   if (auto WorkDir = notdec::getWorkDirOpt()) {
@@ -2810,6 +2835,10 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
     auto &Data = AG.AllSCCs.at(Ind);
     for (auto &Ent : Data.Generator->ValueTypes) {
       auto It = ResultVal->ValueTypes.insert(Ent);
+      assert(It.second && "Duplicated Entry?");
+    }
+    for (auto &Ent : Data.Generator->ValueTypesLower) {
+      auto It = ResultVal->ValueTypesLower.insert(Ent);
       assert(It.second && "Duplicated Entry?");
     }
     ResultVal->ContraVariantValues.insert(

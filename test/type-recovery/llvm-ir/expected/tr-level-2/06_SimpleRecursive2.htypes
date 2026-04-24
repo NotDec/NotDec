@@ -9,20 +9,28 @@ struct struct_1 {
   ptr<load=struct_1*, store=void, psize=32> field_0;
 };
 
+struct struct_2 {
+  ptr<load=struct_2*, store=void, psize=32> field_0;
+};
+
+struct struct_3 {
+  ptr<load=struct_3*, store=void, psize=32> field_0;
+};
+
 
 [types]
-[+] <null-value> => top:32
-[+] @main => (bottom:32 (*)(top:32, top:32))*
-[+] @rec1 => (void (*)(ptr<load=struct_0*, store=void, psize=32>))*
-[+] const(i32 0)@main::%bb.allocator.i3:0 => bottom:32
-[-] main::%bb.allocator.i0 => struct_1*
-[+] main::%bb.allocator.i1 => bottom:32
-[+] main::<ret> => bottom:32
-[+] main::arg0 => bottom:32
-[+] main::arg1 => bottom:32
-[+] rec1::%bb.allocator.i0 => bottom:32
-[+] rec1::%bb.allocator.i1 => bottom:32
-[+] rec1::arg0 => bottom:32
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
+[+] @rec1 => lower=(void (*)(bottom:32))* ; upper=(void (*)(ptr<load=struct_0*, store=void, psize=32>))*
+[+] const(i32 0)@main::%bb.allocator.i3:0 => lower=top:32 ; upper=bottom:32
+[-] main::%bb.allocator.i0 => lower=struct_1* ; upper=bottom:32
+[+] main::%bb.allocator.i1 => lower=struct_1* ; upper=bottom:32
+[+] main::<ret> => lower=top:32 ; upper=bottom:32
+[+] main::arg0 => lower=top:32 ; upper=bottom:32
+[+] main::arg1 => lower=top:32 ; upper=bottom:32
+[+] rec1::%bb.allocator.i0 => lower=ptr<load=struct_2*, store=void, psize=32> ; upper=bottom:32
+[+] rec1::%bb.allocator.i1 => lower=struct_3* ; upper=bottom:32
+[+] rec1::arg0 => lower=ptr<load=struct_2*, store=void, psize=32> ; upper=bottom:32
 
 [memory]
 type => top:32

@@ -3,20 +3,20 @@
 [decls]
 
 [types]
-[+] <null-value> => top:32
-[+] @fun_1 => ('c:32 (*)('c:32 & ptr<load=void, store='c:32, psize=32>))*
-[+] @main => (bottom:32 (*)(top:32, top:32))*
-[+] fun_1::%addr => bottom:32
-[-] fun_1::%stack => ptr<load=void, store=void, psize=32>
-[+] fun_1::%stack1 => bottom:32
-[+] fun_1::<ret> => bottom:32
-[+] fun_1::arg0 => bottom:32
-[+] main::%a => bottom:32
-[-] main::%stack => 'c:32 & ptr<load=void, store='c:32, psize=32>
-[+] main::%stacki => bottom:32
-[+] main::<ret> => bottom:32
-[+] main::arg0 => bottom:32
-[+] main::arg1 => bottom:32
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @fun_1 => lower=(top:32 (*)(bottom:32))* ; upper=('c:32 (*)('c:32 & ptr<load=void, store='c:32, psize=32>))*
+[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
+[+] fun_1::%addr => lower='c:32 & ptr<load=void, store='c:32, psize=32> ; upper=bottom:32
+[-] fun_1::%stack => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] fun_1::%stack1 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] fun_1::<ret> => lower=top:32 ; upper=bottom:32
+[+] fun_1::arg0 => lower='c:32 & ptr<load=void, store='c:32, psize=32> ; upper=bottom:32
+[+] main::%a => lower=top:32 ; upper=bottom:32
+[-] main::%stack => lower='c:32 & ptr<load=void, store='c:32, psize=32> ; upper=bottom:32
+[+] main::%stacki => lower='c:32 & ptr<load=void, store='c:32, psize=32> ; upper=bottom:32
+[+] main::<ret> => lower=top:32 ; upper=bottom:32
+[+] main::arg0 => lower=top:32 ; upper=bottom:32
+[+] main::arg1 => lower=top:32 ; upper=bottom:32
 
 [memory]
 type => top:32

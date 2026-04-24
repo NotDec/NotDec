@@ -3,11 +3,11 @@
 [decls]
 
 [types]
-[+] <null-value> => bottom:64
-[+] @main => bottom:32 (*)()*
-[+] const(i32 9)@main::%bb0.i0:0 => bottom:32
-[+] main::<ret> => bottom:32
+[+] <null-value> => lower=<null> ; upper=top:64
+[+] @main => lower=top:64 ; upper=(bottom:32 (*)())*
+[+] const(i32 9)@main::%bb0.i0:0 => lower=top:32 ; upper=bottom:32
+[+] main::<ret> => lower=top:32 ; upper=bottom:32
 
 [memory]
-type => bottom:64
+type => top:64
 

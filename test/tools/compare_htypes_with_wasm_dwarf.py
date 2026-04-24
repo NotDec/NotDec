@@ -11,6 +11,9 @@ from pathlib import Path
 
 
 TYPE_LINE_RE = re.compile(r"^\[[+-]\]\s+(.+?)\s+=>\s+(.+)$")
+TYPE_BOUNDS_LINE_RE = re.compile(
+    r"^\[([+-])\]\s+(.+?)\s+=>\s+lower=(.+?)\s+;\s+upper=(.+)$"
+)
 FIELD_LINE_RE = re.compile(
     r"^\s*(.+?)\s+([A-Za-z0-9_]+);\s*(?:/\*\s*at offset:\s*([0-9-]+)\s*\*/)?\s*$"
 )
@@ -152,7 +155,8 @@ def parse_function_pointer_type(raw: str) -> dict | None:
         return None
 
     ret_raw = text[:start].strip()
-    params_raw = text[start + len(marker) : -2].strip()
+    params_end = -3 if text.endswith("))*") else -2
+    params_raw = text[start + len(marker) : params_end].strip()
     if not ret_raw:
         return None
 
@@ -299,11 +303,22 @@ def parse_htypes(path: Path) -> ParsedHTypes:
     types_raw: dict[str, str] = {}
     address_offsets_by_type: dict[str, list[int]] = {}
     for line in type_lines:
-        match = TYPE_LINE_RE.match(line.strip())
-        if not match:
+        stripped = line.strip()
+        bounds_match = TYPE_BOUNDS_LINE_RE.match(stripped)
+        if bounds_match:
+            sign = bounds_match.group(1)
+            key = bounds_match.group(2).strip()
+            lower_raw = bounds_match.group(3).strip()
+            upper_raw = bounds_match.group(4).strip()
+            raw = upper_raw if sign == "+" else lower_raw
+        else:
+            match = TYPE_LINE_RE.match(stripped)
+            if not match:
+                continue
+            key = match.group(1).strip()
+            raw = match.group(2).strip()
+        if not raw:
             continue
-        key = match.group(1).strip()
-        raw = match.group(2).strip()
         types[key] = parse_type_expr(raw)
         types_raw[key] = raw
         address_match = ADDR_KEY_RE.match(key)

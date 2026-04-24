@@ -2,98 +2,114 @@
 
 [decls]
 struct struct_0 {
+  struct_1*[] field_0; /* at offset: 0 */
+};
+
+struct struct_1 {
+  i8[4] field_0; /* at offset: 0 */
+};
+
+struct struct_2 {
   top:32 field_0; /* at offset: -8 */
   top:32 field_1; /* at offset: -4 */
 };
 
-struct struct_1 {
+struct struct_3 {
+  struct_4*[] field_0; /* at offset: 0 */
+};
+
+struct struct_4 {
+  i8[4] field_0; /* at offset: 0 */
+};
+
+struct struct_5 {
   top:32 field_0; /* at offset: -24 */
 };
 
-struct struct_2 {
+struct struct_6 {
   top:32 field_0; /* at offset: -24 */
 };
 
 
 [types]
-[+] <null-value> => top:32
-[+] @__original_main => (bottom:32 (*)())*
-[+] @do_printf => (void (*)(top:32))*
-[+] @env.printf => (bottom:32 (*)(top:32, top:32))*
-[+] @get_s => (bottom:32 (*)(top:32, top:32))*
-[+] @test1 => (void (*)())*
-[+] @test2 => (void (*)())*
-[+] __original_main::<ret> => bottom:32
-[+] const(i32 0)@__original_main::%bb.allocator.i2:0 => bottom:32
-[+] const(i32 0)@do_printf::%bb.allocator.i8:0 => bottom:32
-[+] const(i32 0)@test1::%bb.allocator.i8:0 => bottom:32
-[+] const(i32 0)@test1::%loadResult39:0 => bottom:32
-[+] const(i32 0)@test2::%bb.allocator.i8:0 => bottom:32
-[+] const(i32 0)@test2::%loadResult39:0 => bottom:32
-[+] const(i32 1)@test1::%bb.brif_next.i9:1 => bottom:32
-[+] const(i32 1)@test2::%bb.brif_next.i8:1 => bottom:32
-[+] const(i32 2)@get_s::%bb.allocator.i15:1 => bottom:32
-[+] const(i32 2)@test1::%bb.brif_next.i2:1 => bottom:32
-[+] do_printf::%bb.allocator.i8 => bottom:32
-[+] do_printf::%calcOffset => bottom:32
-[+] do_printf::%stack => bottom:32
-[-] do_printf::%stack_addr2 => void*
-[+] do_printf::%stack_end => bottom:32
-[+] do_printf::%v_12 => bottom:32
-[+] do_printf::%v_17 => bottom:32
-[+] do_printf::arg0 => bottom:32
-[+] env.printf::<ret> => bottom:32
-[+] env.printf::arg0 => bottom:32
-[+] env.printf::arg1 => bottom:32
-[+] get_s::%add_107 => bottom:32
-[+] get_s::%add_98 => bottom:32
-[+] get_s::%bb.allocator.i15 => bottom:32
-[+] get_s::%calcOffset => bottom:32
-[+] get_s::%calcOffset1 => bottom:32
-[+] get_s::%calcOffset2 => bottom:32
-[+] get_s::%calcOffset3 => bottom:32
-[+] get_s::%loadResult => bottom:32
-[+] get_s::%loadResult4 => bottom:32
-[+] get_s::%stack => bottom:32
-[-] get_s::%stack_addr5 => struct_0*
-[+] get_s::%v_103 => bottom:32
-[+] get_s::%v_81 => bottom:32
-[+] get_s::%v_89 => bottom:32
-[+] get_s::%v_95 => bottom:32
-[+] get_s::<ret> => bottom:32
-[+] get_s::arg0 => bottom:32
-[+] get_s::arg1 => bottom:32
-[+] test1::%add_184 => bottom:32
-[+] test1::%add_193 => bottom:32
-[+] test1::%add_210 => bottom:32
-[+] test1::%add_215 => bottom:32
-[+] test1::%add_219 => bottom:32
-[+] test1::%bb.brif_next.i2 => bottom:32
-[+] test1::%bb.brif_next.i9 => i1
-[+] test1::%calcOffset => bottom:32
-[+] test1::%calcOffset1 => bottom:32
-[+] test1::%loadResult.pre => bottom:32
-[+] test1::%loadResult39 => bottom:32
-[+] test1::%loadResult5 => bottom:32
-[+] test1::%stack => bottom:32
-[-] test1::%stack_addr8 => struct_1*
-[+] test1::%v_200 => bottom:32
-[+] test1::%v_206 => bottom:32
-[+] test2::%add_310 => bottom:32
-[+] test2::%add_319 => bottom:32
-[+] test2::%add_336 => bottom:32
-[+] test2::%add_352 => bottom:32
-[+] test2::%bb.brif_next.i2 => bottom:32
-[+] test2::%bb.brif_next.i8 => i1
-[+] test2::%calcOffset => bottom:32
-[+] test2::%calcOffset1 => bottom:32
-[+] test2::%loadResult.pre => bottom:32
-[+] test2::%loadResult39 => bottom:32
-[+] test2::%loadResult5 => bottom:32
-[+] test2::%stack => bottom:32
-[-] test2::%stack_addr8 => struct_2*
-[+] test2::%v_326 => bottom:32
-[+] test2::%v_332 => bottom:32
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @__original_main => lower=top:32 ; upper=(bottom:32 (*)())*
+[+] @do_printf => lower=(void (*)(bottom:32))* ; upper=(void (*)(top:32))*
+[+] @env.printf => lower=(top:32 (*)(bottom:32, bottom:32))* ; upper=(bottom:32 (*)(top:32, top:32))*
+[+] @get_s => lower=(top:32 (*)(bottom:32, bottom:32))* ; upper=(bottom:32 (*)(top:32, top:32))*
+[+] @test1 => lower=(void (*)())* ; upper=(void (*)())*
+[+] @test2 => lower=(void (*)())* ; upper=(void (*)())*
+[+] __original_main::<ret> => lower=top:32 ; upper=bottom:32
+[+] const(i32 0)@__original_main::%bb.allocator.i2:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 0)@do_printf::%bb.allocator.i8:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 0)@test1::%bb.allocator.i8:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 0)@test1::%loadResult39:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 0)@test2::%bb.allocator.i8:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 0)@test2::%loadResult39:0 => lower=top:32 ; upper=bottom:32
+[+] const(i32 1)@test1::%bb.brif_next.i9:1 => lower=top:32 ; upper=bottom:32
+[+] const(i32 1)@test2::%bb.brif_next.i8:1 => lower=top:32 ; upper=bottom:32
+[+] const(i32 2)@get_s::%bb.allocator.i15:1 => lower=top:32 ; upper=bottom:32
+[+] const(i32 2)@test1::%bb.brif_next.i2:1 => lower=top:32 ; upper=bottom:32
+[+] do_printf::%bb.allocator.i8 => lower=top:32 ; upper=bottom:32
+[+] do_printf::%calcOffset => lower=void* ; upper=bottom:32
+[+] do_printf::%stack => lower=void* ; upper=bottom:32
+[-] do_printf::%stack_addr2 => lower=void* ; upper=bottom:32
+[+] do_printf::%stack_end => lower=void* ; upper=bottom:32
+[+] do_printf::%v_12 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] do_printf::%v_17 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] do_printf::arg0 => lower=top:32 ; upper=bottom:32
+[+] env.printf::<ret> => lower=top:32 ; upper=bottom:32
+[+] env.printf::arg0 => lower=top:32 ; upper=bottom:32
+[+] env.printf::arg1 => lower=top:32 ; upper=bottom:32
+[+] get_s::%add_107 => lower=void* ; upper=bottom:32
+[+] get_s::%add_98 => lower=struct_0* ; upper=bottom:32
+[+] get_s::%bb.allocator.i15 => lower=top:32 ; upper=bottom:32
+[+] get_s::%calcOffset => lower=void* ; upper=bottom:32
+[+] get_s::%calcOffset1 => lower=void* ; upper=bottom:32
+[+] get_s::%calcOffset2 => lower=void* ; upper=bottom:32
+[+] get_s::%calcOffset3 => lower=void* ; upper=bottom:32
+[+] get_s::%loadResult => lower=void* ; upper=bottom:32
+[+] get_s::%loadResult4 => lower=top:32 ; upper=bottom:32
+[+] get_s::%stack => lower=struct_2* ; upper=bottom:32
+[-] get_s::%stack_addr5 => lower=struct_2* ; upper=bottom:32
+[+] get_s::%v_103 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] get_s::%v_81 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] get_s::%v_89 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] get_s::%v_95 => lower=ptr<load=void*, store=void, psize=32> ; upper=bottom:32
+[+] get_s::<ret> => lower=top:32 ; upper=bottom:32
+[+] get_s::arg0 => lower=top:32 ; upper=bottom:32
+[+] get_s::arg1 => lower=top:32 ; upper=bottom:32
+[+] test1::%add_184 => lower=void* ; upper=bottom:32
+[+] test1::%add_193 => lower=void* ; upper=bottom:32
+[+] test1::%add_210 => lower=struct_3* ; upper=bottom:32
+[+] test1::%add_215 => lower=void* ; upper=bottom:32
+[+] test1::%add_219 => lower=top:32 ; upper=bottom:32
+[+] test1::%bb.brif_next.i2 => lower=top:32 ; upper=bottom:32
+[+] test1::%bb.brif_next.i9 => lower=i1 ; upper=i1
+[+] test1::%calcOffset => lower=void* ; upper=bottom:32
+[+] test1::%calcOffset1 => lower=void* ; upper=bottom:32
+[+] test1::%loadResult.pre => lower=top:32 ; upper=bottom:32
+[+] test1::%loadResult39 => lower=top:32 ; upper=bottom:32
+[+] test1::%loadResult5 => lower=top:32 ; upper=bottom:32
+[+] test1::%stack => lower=struct_5* ; upper=bottom:32
+[-] test1::%stack_addr8 => lower=struct_5* ; upper=bottom:32
+[+] test1::%v_200 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] test1::%v_206 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] test2::%add_310 => lower=void* ; upper=bottom:32
+[+] test2::%add_319 => lower=void* ; upper=bottom:32
+[+] test2::%add_336 => lower=void* ; upper=bottom:32
+[+] test2::%add_352 => lower=top:32 ; upper=bottom:32
+[+] test2::%bb.brif_next.i2 => lower=top:32 ; upper=bottom:32
+[+] test2::%bb.brif_next.i8 => lower=i1 ; upper=i1
+[+] test2::%calcOffset => lower=void* ; upper=bottom:32
+[+] test2::%calcOffset1 => lower=void* ; upper=bottom:32
+[+] test2::%loadResult.pre => lower=top:32 ; upper=bottom:32
+[+] test2::%loadResult39 => lower=top:32 ; upper=bottom:32
+[+] test2::%loadResult5 => lower=top:32 ; upper=bottom:32
+[+] test2::%stack => lower=struct_6* ; upper=bottom:32
+[-] test2::%stack_addr8 => lower=struct_6* ; upper=bottom:32
+[+] test2::%v_326 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
+[+] test2::%v_332 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
 
 [memory]
 type => top:32
