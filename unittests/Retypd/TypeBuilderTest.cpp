@@ -100,3 +100,25 @@ TEST(Retypd, HTypeSetPrettyPrintingFlattensChains) {
   notdec::ast::HTypeSnapshotFormatter Formatter(&HCtx);
   EXPECT_EQ(Formatter.formatType(FlatUnion), "f32 | i16 | i32 | i8");
 }
+
+TEST(Retypd, TypeBuilderSignedUnsignedByteSetPrinting) {
+  llvm::LLVMContext LLVMCtx;
+  auto M =
+      std::make_unique<llvm::Module>("typebuilder-byte-set-print", LLVMCtx);
+  M->setDataLayout("e-p:32:32");
+
+  notdec::ast::HTypeContext HCtx;
+  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilder TB(TBParent);
+
+  auto ByteSet = binarysub::make_uinter(
+      binarysub::make_uprimitivetype("char", 8),
+      binarysub::make_uprimitivetype("uint", 8));
+  auto *HTy = TB.convert(ByteSet);
+
+  ASSERT_NE(HTy, nullptr);
+  EXPECT_EQ(HTy->getAsString(), "i8 & u8");
+
+  notdec::ast::HTypeSnapshotFormatter Formatter(&HCtx);
+  EXPECT_EQ(Formatter.formatType(HTy), "i8 & u8");
+}
