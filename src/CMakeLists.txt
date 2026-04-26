@@ -17,6 +17,7 @@ add_library(notdec STATIC
 	Passes/retdec-stack/retdec-utils.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/mlsub/PNDiff.cpp
+	TypeRecovery/mlsub/PointerAnalysis.cpp
 	# TypeRecovery/mlsub/MLsubGraph.cpp
 	TypeRecovery/mlsub/MLsubGenerator.cpp
 	TypeRecovery/mlsub/Schema.cpp
