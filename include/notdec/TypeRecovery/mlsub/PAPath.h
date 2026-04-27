@@ -69,6 +69,9 @@ std::string formatPAFieldTag(const PAFieldTag &Tag);
 std::string formatPAPathAtom(const PAPathAtom &Atom);
 std::string formatPAPathElem(const PAPathElem &Elem);
 std::string formatPAPath(const PAPath &Path);
+std::string formatDetailedPAPathAtom(const PAPathAtom &Atom);
+std::string formatDetailedPAPathElem(const PAPathElem &Elem);
+std::string formatDetailedPAPath(const PAPath &Path);
 
 OffsetRange summarizeStarBody(llvm::ArrayRef<PAPathAtom> Body);
 PAPath appendAndNormalize(PAPath Path, PAPathAtom Atom);

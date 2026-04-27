@@ -8,17 +8,18 @@
 namespace {
 
 using notdec::OffsetRange;
-using notdec::ReturnValue;
 using notdec::mlsub::PAFieldTag;
 using notdec::mlsub::PAPath;
 using notdec::mlsub::PAPathAtom;
 using notdec::mlsub::PAPathStar;
 using notdec::mlsub::appendAndNormalize;
+using notdec::mlsub::formatDetailedPAPath;
 using notdec::mlsub::formatPAPath;
 
 PAFieldTag makeTag(int Index) {
-  return PAFieldTag{.K = PAFieldTag::Kind::IRPtrAdd,
-                    .Value = ReturnValue{.Func = nullptr, .Index = Index}};
+  return PAFieldTag{.K = PAFieldTag::Kind::VirtualPtrAdd,
+                    .ContextId = 7,
+                    .VirtualId = static_cast<std::uint64_t>(Index)};
 }
 
 PAPathAtom makeAtom(int Index, int64_t Offset) {
@@ -82,6 +83,15 @@ TEST(Retypd, PAPathDifferentTagsDoNotCollapse) {
 
   ASSERT_EQ(Path.Elems.size(), 2u);
   EXPECT_EQ(formatPAPath(Path), "@1.@1");
+}
+
+TEST(Retypd, PAPathDetailedFormatShowsTags) {
+  PAPath Path;
+  Path = appendAndNormalize(std::move(Path), makeAtom(1, 1));
+  Path = appendAndNormalize(std::move(Path), makeAtom(2, 1));
+
+  EXPECT_EQ(formatDetailedPAPath(Path),
+            "@1{virt:7:1}.@1{virt:7:2}");
 }
 
 TEST(Retypd, PAPathSetDeduplicatesEqualPaths) {

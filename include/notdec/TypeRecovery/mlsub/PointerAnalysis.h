@@ -2,6 +2,7 @@
 #define _NOTDEC_MLSUB_POINTER_ANALYSIS_H_
 
 #include <functional>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
@@ -61,7 +62,26 @@ public:
   using Slot = PointerSlotKey;
   using PointsToDeltaCallback = std::function<void(const PointsToDelta &)>;
 
+  /// One bounded duplicate example in the solve trace. It records which
+  /// slot/loc pair was re-inserted, by which propagation reason, and how many
+  /// times that exact duplicate showed up in the current iteration.
+  struct DuplicateSample {
+    std::string Reason;
+    Slot SlotKey;
+    MemoryLocKey Loc;
+    std::uint64_t Count = 0;
+  };
+
 private:
+  /// These counters are only for aggregated tracing. They let the workdir
+  /// trace show whether PA is doing useful inserts or mostly paying comparison
+  /// cost on duplicate candidates.
+  struct AddPointsToStats {
+    std::uint64_t Attempts = 0;
+    std::uint64_t Inserted = 0;
+    std::uint64_t Duplicates = 0;
+  };
+
   std::map<Slot, std::set<MemoryLocKey>> PointsTo;
   std::vector<std::pair<Slot, Slot>> CopyEdges;
 
@@ -87,8 +107,14 @@ private:
   std::vector<StorePtrEdge> StorePtrEdges;
 
   std::vector<PointsToDeltaCallback> DeltaCallbacks;
+  AddPointsToStats AddStats;
+  std::vector<DuplicateSample> IterDuplicateSamples;
+  std::uint64_t IterDuplicateSampleOverflow = 0;
+  bool CollectIterDuplicateSamples = false;
 
   bool addPointsTo(Slot SlotKey, MemoryLocKey Loc, std::string Reason);
+  void recordDuplicateSample(const Slot &SlotKey, const MemoryLocKey &Loc,
+                             llvm::StringRef Reason);
 
 public:
   Slot valueSlot(ExtValuePtr Value) const { return Slot{Value}; }

@@ -33,6 +33,17 @@ std::string formatPAPathBody(llvm::ArrayRef<PAPathAtom> Body) {
   return OS.str();
 }
 
+std::string formatDetailedPAPathBody(llvm::ArrayRef<PAPathAtom> Body) {
+  std::ostringstream OS;
+  for (size_t I = 0; I < Body.size(); ++I) {
+    if (I != 0) {
+      OS << ".";
+    }
+    OS << formatDetailedPAPathAtom(Body[I]);
+  }
+  return OS.str();
+}
+
 bool absorbTrailingBodyIntoLastStar(PAPath &Path) {
   if (Path.Elems.empty()) {
     return false;
@@ -193,12 +204,24 @@ std::string formatPAFieldTag(const PAFieldTag &Tag) {
 
 std::string formatPAPathAtom(const PAPathAtom &Atom) { return Atom.Offset.str(); }
 
+std::string formatDetailedPAPathAtom(const PAPathAtom &Atom) {
+  return Atom.Offset.str() + "{" + formatPAFieldTag(Atom.Tag) + "}";
+}
+
 std::string formatPAPathElem(const PAPathElem &Elem) {
   if (const auto *Atom = getAtom(Elem)) {
     return formatPAPathAtom(*Atom);
   }
   const auto &Star = std::get<PAPathStar>(Elem);
   return "(" + formatPAPathBody(Star.Body) + ")*";
+}
+
+std::string formatDetailedPAPathElem(const PAPathElem &Elem) {
+  if (const auto *Atom = getAtom(Elem)) {
+    return formatDetailedPAPathAtom(*Atom);
+  }
+  const auto &Star = std::get<PAPathStar>(Elem);
+  return "(" + formatDetailedPAPathBody(Star.Body) + ")*";
 }
 
 std::string formatPAPath(const PAPath &Path) {
@@ -208,6 +231,17 @@ std::string formatPAPath(const PAPath &Path) {
       OS << ".";
     }
     OS << formatPAPathElem(Path.Elems[I]);
+  }
+  return OS.str();
+}
+
+std::string formatDetailedPAPath(const PAPath &Path) {
+  std::ostringstream OS;
+  for (size_t I = 0; I < Path.Elems.size(); ++I) {
+    if (I != 0) {
+      OS << ".";
+    }
+    OS << formatDetailedPAPathElem(Path.Elems[I]);
   }
   return OS.str();
 }
