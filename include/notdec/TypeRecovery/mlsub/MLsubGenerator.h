@@ -76,6 +76,8 @@ struct MemoryAccessRecords {
   std::map<ExtValuePtr, std::vector<RecordedStore>> StoresByAddr;
   std::set<std::pair<MemoryLocKey, SimpleType>> EmittedLoadConstraints;
   std::set<std::pair<SimpleType, MemoryLocKey>> EmittedStoreConstraints;
+  std::set<std::tuple<ExtValuePtr, SimpleType, unsigned>> EmittedLoadViews;
+  std::set<std::tuple<ExtValuePtr, SimpleType, unsigned>> EmittedStoreViews;
   std::set<std::tuple<MemoryLocKey, llvm::Instruction *, llvm::Instruction *>>
       EmittedStoreLoadRelations;
   std::set<std::tuple<SimpleType, SimpleType, unsigned>> ObservedOldRelations;
@@ -281,6 +283,7 @@ struct ConstraintsGenerator {
   void recordStore(ExtValuePtr Addr, SimpleType ValueTy, unsigned BitSize,
                    llvm::Instruction *Source);
   void onPointsToDelta(ExtValuePtr Addr, MemoryLocKey Loc);
+  void addPointerAccessViews();
   void flushPointerDerivedTypeConstraints();
 
   void onUpdatePNType(ExtValuePtr Val) {}

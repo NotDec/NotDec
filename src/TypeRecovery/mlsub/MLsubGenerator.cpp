@@ -2169,6 +2169,47 @@ void ConstraintsGenerator::onPointsToDelta(ExtValuePtr Addr,
   }
 }
 
+void ConstraintsGenerator::addPointerAccessViews() {
+  if (!isPointerAnalysisReplacingBinarysubMemory()) {
+    return;
+  }
+  for (const auto &[Addr, Loads] : MemoryAccesses.LoadsByAddr) {
+    auto PtrTy = getNodeOrNull(Addr);
+    if (PtrTy == nullptr) {
+      continue;
+    }
+    for (const auto &Load : Loads) {
+      auto Key = std::make_tuple(Addr, Load.ResultTy, Load.BitSize);
+      if (!MemoryAccesses.EmittedLoadViews.insert(Key).second) {
+        continue;
+      }
+      emitPointerAnalysisTrace(
+          "[pa:view-load] addr=" + toStableString(Addr) +
+          " ty=" + binarysub::debug_string(Load.ResultTy) +
+          " size=" + std::to_string(Load.BitSize));
+      addSubtype(PtrTy, binarysub::make_ptr_load(Load.ResultTy, Load.BitSize));
+    }
+  }
+  for (const auto &[Addr, Stores] : MemoryAccesses.StoresByAddr) {
+    auto PtrTy = getNodeOrNull(Addr);
+    if (PtrTy == nullptr) {
+      continue;
+    }
+    for (const auto &Store : Stores) {
+      auto Key = std::make_tuple(Addr, Store.ValueTy, Store.BitSize);
+      if (!MemoryAccesses.EmittedStoreViews.insert(Key).second) {
+        continue;
+      }
+      emitPointerAnalysisTrace(
+          "[pa:view-store] addr=" + toStableString(Addr) +
+          " ty=" + binarysub::debug_string(Store.ValueTy) +
+          " size=" + std::to_string(Store.BitSize));
+      addSubtype(PtrTy,
+                 binarysub::make_ptr_store(Store.ValueTy, Store.BitSize));
+    }
+  }
+}
+
 void ConstraintsGenerator::flushPointerDerivedTypeConstraints() {
   std::map<MemoryLocKey, std::vector<const RecordedLoad *>> LoadsByLoc;
   std::map<MemoryLocKey, std::vector<const RecordedStore *>> StoresByLoc;
@@ -2219,6 +2260,7 @@ void ConstraintsGenerator::flushPointerDerivedTypeConstraints() {
       }
     }
   }
+  addPointerAccessViews();
 }
 
 void ConstraintsGenerator::addMergeNode(SimpleType From, SimpleType To) {
