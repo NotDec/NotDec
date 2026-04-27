@@ -13,6 +13,7 @@
 
 #include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #include "notdec-llvm2c/Interface/Range.h"
+#include "notdec/TypeRecovery/mlsub/PAPath.h"
 
 namespace notdec::mlsub {
 
@@ -25,13 +26,13 @@ enum class PointerAnalysisMode {
 /// Explicit memory object identity used by PointerAnalysis.
 ///
 /// Root is the allocation/global/constant-address object. Path keeps every
-/// reified ptradd step instead of folding offsets, so the first version stays
-/// close to PNDiff's current field model and avoids guessing offset
-/// equivalence too early. BitSize is part of the key because different width
-/// accesses to the same path intentionally get separate object-content types.
+/// reified ptradd step, including repeated suffix summaries, so loop-carried
+/// field traversals can converge without losing field order. BitSize is part
+/// of the key because different width accesses to the same path intentionally
+/// get separate object-content types.
 struct MemoryLocKey {
   ExtValuePtr Root = static_cast<llvm::Value *>(nullptr);
-  std::vector<OffsetRange> Path;
+  PAPath Path;
   unsigned BitSize = 0;
 
   bool operator<(const MemoryLocKey &RHS) const {
@@ -68,6 +69,7 @@ private:
     ExtValuePtr Dst;
     ExtValuePtr Base;
     OffsetRange Field;
+    PAFieldTag Tag;
     unsigned BitSize = 0;
   };
   std::vector<FieldEdge> FieldEdges;
@@ -94,6 +96,7 @@ public:
 
   MemoryLocKey getRootObject(ExtValuePtr Root, unsigned BitSize) const;
   MemoryLocKey getFieldObject(MemoryLocKey Base, OffsetRange Field,
+                              PAFieldTag Tag,
                               unsigned BitSize) const;
 
   void addAddrOf(ExtValuePtr Dst, MemoryLocKey Obj);

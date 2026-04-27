@@ -20,6 +20,17 @@ target_link_libraries(
 	notdec
 )
 
+add_executable(
+	PAPathTest
+	PAPathTest.cpp
+)
+target_link_libraries(
+	PAPathTest
+	GTest::gtest_main
+	notdec
+)
+
 include(GoogleTest)
 gtest_discover_tests(MLsubGeneratorTest)
 gtest_discover_tests(TypeBuilderTest)
+gtest_discover_tests(PAPathTest)

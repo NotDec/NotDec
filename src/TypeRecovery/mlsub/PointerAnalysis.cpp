@@ -5,11 +5,20 @@
 
 namespace notdec::mlsub {
 
+namespace {
+
+PAFieldTag makeIRPtrAddTag(ExtValuePtr Value) {
+  return PAFieldTag{.K = PAFieldTag::Kind::IRPtrAdd, .Value = Value};
+}
+
+} // namespace
+
 std::string formatMemoryLocKey(const MemoryLocKey &Loc) {
   std::ostringstream OS;
   OS << toStableString(Loc.Root);
-  for (const auto &Field : Loc.Path) {
-    OS << "." << Field.str();
+  auto Path = formatPAPath(Loc.Path);
+  if (!Path.empty()) {
+    OS << "." << Path;
   }
   if (Loc.BitSize != 0) {
     OS << "[" << Loc.BitSize << "]";
@@ -41,13 +50,16 @@ bool PointerAnalysis::addPointsTo(Slot SlotKey, MemoryLocKey Loc,
 
 MemoryLocKey PointerAnalysis::getRootObject(ExtValuePtr Root,
                                             unsigned BitSize) const {
-  return MemoryLocKey{.Root = Root, .Path = {}, .BitSize = BitSize};
+  return MemoryLocKey{.Root = Root, .Path = PAPath{}, .BitSize = BitSize};
 }
 
 MemoryLocKey PointerAnalysis::getFieldObject(MemoryLocKey Base,
                                              OffsetRange Field,
+                                             PAFieldTag Tag,
                                              unsigned BitSize) const {
-  Base.Path.push_back(std::move(Field));
+  Base.Path = appendAndNormalize(std::move(Base.Path),
+                                 PAPathAtom{.Offset = std::move(Field),
+                                            .Tag = std::move(Tag)});
   Base.BitSize = BitSize;
   return Base;
 }
@@ -62,7 +74,10 @@ void PointerAnalysis::addCopy(ExtValuePtr Dst, ExtValuePtr Src) {
 
 void PointerAnalysis::addField(ExtValuePtr Dst, ExtValuePtr Base,
                                OffsetRange Field, unsigned BitSize) {
-  FieldEdges.push_back(FieldEdge{.Dst = Dst, .Base = Base, .Field = Field,
+  FieldEdges.push_back(FieldEdge{.Dst = Dst,
+                                 .Base = Base,
+                                 .Field = Field,
+                                 .Tag = makeIRPtrAddTag(Dst),
                                  .BitSize = BitSize});
 }
 
@@ -101,7 +116,8 @@ bool PointerAnalysis::solve() {
         continue;
       }
       for (const auto &BaseLoc : It->second) {
-        auto FieldLoc = getFieldObject(BaseLoc, Edge.Field, Edge.BitSize);
+        auto FieldLoc =
+            getFieldObject(BaseLoc, Edge.Field, Edge.Tag, Edge.BitSize);
         IterChanged |= addPointsTo(valueSlot(Edge.Dst), std::move(FieldLoc),
                                    "field");
       }
