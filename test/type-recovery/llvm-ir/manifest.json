@@ -118,6 +118,12 @@
       "input": "cases/19_PtrPtr.ll",
       "status": "xfail",
       "reason": "invalid LLVM IR parse failure prevents HType snapshot output"
+    },
+    {
+      "name": "20_PointerAnalysisFieldCycle",
+      "input": "cases/20_PointerAnalysisFieldCycle.ll",
+      "expected": "expected/tr-level-2/20_PointerAnalysisFieldCycle.htypes",
+      "status": "pass"
     }
   ]
 }
