@@ -52,6 +52,7 @@ struct PolyPolicyConfig {
 
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
 constexpr llvm::StringLiteral kVarOriginsFile = "VarOrigins.txt";
+constexpr llvm::StringLiteral kTypeStructMergeFile = "type-struct-merge.md";
 constexpr llvm::StringLiteral kValueHTypesFile = "ValueHTypes.txt";
 constexpr llvm::StringLiteral kImportantHTypesFile = "ImportantHTypes.txt";
 constexpr llvm::StringLiteral kSelectableValuesFile = "SelectableValues.txt";
@@ -1501,6 +1502,88 @@ void appendDebugVarOrigins(
     }
     Out << "\n";
   }
+}
+
+void appendDebugStructMerge(
+    llvm::StringRef DebugDir, llvm::StringRef SCCName,
+    DSUMap<ExtValuePtr, SimpleType> &V2N,
+    const binarysub::StructMergeInfo &Info, bool SolveMemory,
+    const binarysub::PolarVar &PolMem) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(join(DebugDir.str(), kTypeStructMergeFile.str()), EC,
+                           llvm::sys::fs::OF_Append);
+  if (EC) {
+    llvm::errs() << "Error printing to " << kTypeStructMergeFile << ", "
+                 << EC.message() << "\n";
+    return;
+  }
+
+  std::map<binarysub::PolarVar, std::string> RootLabels;
+  for (const auto &Ent : V2N) {
+    auto Label = formatExtValueMappingLabel(Ent.first);
+    RootLabels[binarysub::PolarVar{.var = Ent.second, .pos = true}] =
+        Label + " upper";
+    RootLabels[binarysub::PolarVar{.var = Ent.second, .pos = false}] =
+        Label + " lower";
+  }
+  if (SolveMemory) {
+    RootLabels[PolMem] = "<memory>";
+  }
+
+  auto FormatRoot = [&](const binarysub::PolarVar &Root) {
+    if (auto It = RootLabels.find(Root); It != RootLabels.end()) {
+      return It->second;
+    }
+    return binarysub::debug_string(Root.var) +
+           (Root.pos ? std::string(" upper") : std::string(" lower"));
+  };
+
+  std::map<std::uint32_t, const binarysub::StructMergeCandidateInfo *>
+      CandidateById;
+  for (const auto &Candidate : Info.candidates) {
+    CandidateById[Candidate.id] = &Candidate;
+  }
+
+  Out << "## SCC: " << SCCName << "\n\n";
+  Out << "Candidates: " << Info.candidates.size() << "\n\n";
+  for (const auto &Candidate : Info.candidates) {
+    Out << "- node#" << Candidate.id << "\n";
+    Out << "  root: " << FormatRoot(Candidate.root) << "\n";
+    Out << "  path: " << Candidate.path << "\n";
+    Out << "  pol: " << (Candidate.pol ? "pos" : "neg") << "\n";
+    Out << "  labels: " << formatOriginIdSummary(Candidate.labelIds) << "\n";
+    Out << "  body: " << Candidate.body << "\n";
+  }
+
+  Out << "\nGroups: " << Info.groups.size() << "\n\n";
+  for (const auto &Group : Info.groups) {
+    Out << "- group#" << Group.id << "\n";
+    Out << "  label: ";
+    if (Group.labelId) {
+      Out << "vs#" << *Group.labelId;
+    } else {
+      Out << "<none>";
+    }
+    Out << "\n";
+    Out << "  nodes:";
+    if (Group.candidateIds.empty()) {
+      Out << " <none>";
+    }
+    for (auto Id : Group.candidateIds) {
+      Out << " node#" << Id;
+    }
+    Out << "\n";
+    for (auto Id : Group.candidateIds) {
+      auto It = CandidateById.find(Id);
+      if (It == CandidateById.end()) {
+        continue;
+      }
+      const auto &Candidate = *It->second;
+      Out << "    - node#" << Id << " " << FormatRoot(Candidate.root)
+          << " " << Candidate.path << "\n";
+    }
+  }
+  Out << "\n";
 }
 
 void writeDebugValueHTypes(llvm::StringRef DebugDir,
@@ -2982,7 +3065,8 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   if (SolveMemory) {
     Tys.insert(PolMem);
   }
-  std::map<PolarVar, binarysub::UTypePtr> Res = Ts.bulkSimplify(Tys, false);
+  auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false);
+  const auto &Res = BulkResult.types;
 
   // Create TypeBuilder context and builder
   TypeBuilderContext TBCtx(HCtx, DL);
@@ -3023,6 +3107,8 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                           OriginalVariableSources, SolveMemory, PolMem);
     appendDebugVarOrigins(*WorkDir, Name, V2N, ContraVariantValues, Res,
                           OriginalVariableSources, SolveMemory, PolMem);
+    appendDebugStructMerge(*WorkDir, Name, V2N, BulkResult.structMerge,
+                           SolveMemory, PolMem);
   }
 }
 
