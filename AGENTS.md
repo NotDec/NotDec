@@ -52,6 +52,7 @@ The test: Every changed line should trace directly to the user's request.
 2. 代码一定要多写注释，特别是新引入的数据结构前，说明背后的设计理念。
 3. 工作流程：收到需求 -> 思考后告诉用户打算怎么更改 -> 讨论一致后再开始实现 -> 实现完后再写文档到logs/
 4. 写修改日志时，必须明确指出修改了哪个文件的哪一行，涉及哪些函数。
+5. 如果当前的任务是对之前的plan日志的实现，则不需要单独创建日志，而是将实现情况写入之前的计划日志，比如将将计划的步骤在标题中标记为已完成，记录实现细节，以及调整计划时考虑不全而实现时有所改变的部分。
 
 当前关注的测试用例： test/type-recovery/realworld/cases/fortune.o3.wasm.ll
 源码在：/sn640/NotDec-Exp/ICSE-HOWARD/fortune-mod
