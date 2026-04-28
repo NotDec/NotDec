@@ -1582,6 +1582,9 @@ void appendDebugStructMerge(
       Out << "    - node#" << Id << " " << FormatRoot(Candidate.root)
           << " " << Candidate.path << "\n";
     }
+    if (!Group.mergedBody.empty()) {
+      Out << "  merged-body: " << Group.mergedBody << "\n";
+    }
   }
   Out << "\n";
 }
