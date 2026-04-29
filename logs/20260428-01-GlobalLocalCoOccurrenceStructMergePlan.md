@@ -21,6 +21,80 @@ revert 后，`TypeSimplifier::bulkSimplify` 又恢复成全局 co-occur：
 2. 在变量较多的 `CompactType` 上做结构体合并。
 3. 再做局部 co-occur，删掉全局阶段为了结构体合并而留下的变量。
 
+## 当前流程
+
+现在的顺序是：
+
+```text
+canonicalize all roots
+-> global co-occur analyze
+-> global simplify
+-> struct merge analysis
+-> per-root local co-occur analyze
+-> per-root local simplify
+-> coalesce UType
+```
+
+也就是说，结构体合并看的是全局 simplify 后、变量还较多的 `CompactType`。
+局部 simplify 放在后面，能删掉的类型变量继续删掉。现在不再单独维护
+`structMergeOnlyVars` plan。
+
+## 已实现
+
+- `external/binarysub/include/binarysub/binarysub.h:329`
+  - 新增 `OccurrenceAnalysisState`，把 co-occur 分析结果显式传递。
+  - 新增 `SimplificationPlan`，当前只记录变量删除/合并计划。
+  - 新增 `StructMergeInfo` / `BulkSimplifyResult`。
+  - 新增 `TypeSimplifier::bulkSimplifyDetailed()`，旧 `bulkSimplify()` 保持兼容。
+- `external/binarysub/src/binarysub.cpp:1793`
+  - 新增结构体候选、冲突判断、贪心分组 helper。
+- `external/binarysub/src/binarysub.cpp:2022`
+  - 从全局 simplify 后的 `CompactType` 抽取结构体候选。
+- `external/binarysub/src/binarysub.cpp:2087`
+  - 构造 `StructMergeInfo`，包括 candidate、group、`mergedBody`。
+- `external/binarysub/src/binarysub.cpp:2184`
+  - `bulkSimplifyDetailed()` 接入 global/local 两阶段 simplify。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:1507`
+  - 新增 `appendDebugStructMerge()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3071`
+  - `ConstraintsGenerator::genTypes()` 改用 `bulkSimplifyDetailed()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3113`
+  - 在 workdir 里写出 `type-struct-merge.md`。
+
+`SimplificationPlan` 的测试在：
+
+- `external/binarysub/src/binarysub-test.cpp:476`
+- `external/binarysub/src/binarysub-test-main.cpp:39`
+
+## 候选抽取
+
+当前只抽取这类节点：
+
+- 当前极性是 `pol == false`，也就是后续会形成顶层交类型的位置。
+- 当前 `CompactType` 有非空 record。
+- 当前 `CompactType` 顶层有非空 `vars`。
+
+节点的 label 只取当前节点顶层 `vars`。字段内部出现同一个变量不算 label，
+避免把只是共享泛型参数的结构体误合并。
+
+## 冲突判断
+
+冲突判断现在只做“能否无损合并”的保守判断：
+
+- 类型变量只当作 label/unknown，本身不制造冲突。
+- 两边都有 size 且不同，则冲突。
+- primitive 同 size 同名不冲突。
+- primitive 属于同一 semantic family，且按当前极性能 join/meet，则不冲突。
+- primitive 和 aggregate 混在一起，视为冲突。
+- function 和 record/pointer 混在一起，视为冲突。
+- record 只递归检查同名字段；不同字段暂时认为可合并。
+- function 参数按反极性递归，返回值按当前极性递归。
+- pointer load 按当前极性递归，store 按反极性递归，access size 不同则冲突。
+
+一个明显的后续改进点是字段冲突：现在只按字段字符串 exact match，
+后面可能需要考虑 offset range overlap。
+
+
 ## 目标
 
 目标不是恢复 `41075f1` 的 per-root 行为，而是同时保留两种分析：
