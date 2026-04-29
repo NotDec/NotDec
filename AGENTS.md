@@ -53,9 +53,14 @@ The test: Every changed line should trace directly to the user's request.
 3. 工作流程：收到需求 -> 思考后告诉用户打算怎么更改 -> 讨论一致后再开始实现 -> 实现完后再写文档到logs/
 4. 写修改日志时，必须明确指出修改了哪个文件的哪一行，涉及哪些函数。
 5. 不要盲目向logs/增加新的日志文件，尽量复用并改进之前的日志，最好每个功能都单独一个日志。如果当前的任务是对之前的plan日志的实现，则不需要单独创建日志，而是将实现情况写入之前的计划日志，比如将将计划的步骤在标题中标记为已完成，记录实现细节，以及调整计划时考虑不全而实现时有所改变的部分。同时也不要使得日志文件过于冗长，简洁一些，包括语言风格上，以及没有真正实现，或者试错的思路都尽量简写。
+6. 每次改动后都要关注是否造成性能下降。涉及类型恢复、结构体合并、pointer analysis、pass pipeline 时，至少对比 fortune 当前关注用例的同口径运行时间。
 
 当前关注的测试用例： test/type-recovery/realworld/cases/fortune.o3.wasm.ll
 源码在：/sn640/NotDec-Exp/ICSE-HOWARD/fortune-mod
+当前参考运行时间：2026-04-29，`NOTDEC_POINTER_ANALYSIS_MODE=original`，
+`--tr-level=2 --frozen-tr-input-ir -g`，
+workdir `/tmp/notdec-fortune-structmerge-hlayout-final`，
+`/usr/bin/time -p` 结果 `real 16.33s`。
 最新的计划需要看 `logs/` 下最新计划和日志。
 
 ## 1. Git 与 external/ 子模块
