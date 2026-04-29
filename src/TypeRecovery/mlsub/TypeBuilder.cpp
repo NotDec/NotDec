@@ -1087,7 +1087,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
 HType *TypeBuilder::convertStruct(
     const binarysub::UTypePtr &T,
     std::vector<std::pair<OffsetRange, UTypePtr>> &RawFields,
-    std::optional<int64_t> PointeeSize) {
+    std::optional<int64_t> PointeeSize, bool PreferElementType) {
   HType *Result = nullptr;
   auto StructMergeGroup = ActiveStructMergeGroup;
   if (!StructMergeGroup) {
@@ -1242,7 +1242,7 @@ HType *TypeBuilder::convertStruct(
                               std::to_string(RangeStart) + ".." +
                               std::to_string(RangeEnd) + ")";
       DebugPathScope PathScope(*this, std::move(PathFrame));
-      auto MemberTy = convertStruct(T, SubProblem, FieldSize);
+      auto MemberTy = convertStruct(T, SubProblem, FieldSize, true);
       if (FieldSize == MaxStride) {
         auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
         Fields.push_back(
@@ -1291,6 +1291,17 @@ HType *TypeBuilder::convertStruct(
                                 return F.first.Size == 0;
                               }),
                Fields.end());
+
+  if (PreferElementType && PointeeSize && *PointeeSize > 0) {
+    if (Fields.empty()) {
+      return Ctx.getArrayType(false, Ctx.getChar(),
+                              static_cast<unsigned>(*PointeeSize));
+    }
+    if (Fields.size() == 1 && Fields.front().first.Start == 0 &&
+        Fields.front().first.Size == *PointeeSize) {
+      return Fields.front().second;
+    }
+  }
 
   auto IsOverlap = [](OffsetTy S1, OffsetTy E1, OffsetTy S2, OffsetTy E2) {
     assert(S1 < E1);

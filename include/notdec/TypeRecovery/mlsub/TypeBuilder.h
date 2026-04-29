@@ -77,10 +77,13 @@ protected:
   HType *convertPointer(const binarysub::UTypePtr &T,
                         std::optional<int64_t> PointeeSize = std::nullopt);
   // 处理结构体指针访问
+  // PreferElementType 只给 stride 数组元素递归使用：元素本身如果只是
+  // offset 0 的单字段 shell，就直接返回字段类型，避免制造无意义结构体。
   HType *convertStruct(
       const binarysub::UTypePtr &T,
       std::vector<std::pair<OffsetRange, binarysub::UTypePtr>> &RawFields,
-      std::optional<int64_t> PointeeSize);
+      std::optional<int64_t> PointeeSize,
+      bool PreferElementType = false);
   // 如果结构体成员已经递归转换为HType
   // *且处理了重叠问题，这个方法处理padding和size。
   HType *craftStruct(const std::vector<std::pair<SimpleRange, HType *>> &Fields,

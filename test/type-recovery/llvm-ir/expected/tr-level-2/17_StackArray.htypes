@@ -8,11 +8,7 @@ struct struct_0 {
 };
 
 struct struct_1 {
-  struct_2*[] field_0; /* at offset: 0 */
-};
-
-struct struct_2 {
-  top:32 field_0; /* at offset: 0 */
+  top:32[] field_0; /* at offset: 0 */
 };
 
 

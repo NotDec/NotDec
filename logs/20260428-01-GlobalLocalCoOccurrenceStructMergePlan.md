@@ -409,6 +409,70 @@ rm -rf /tmp/notdec-fortune-structmerge-hlayout-final \
 `09_OffsetLoop`、`20_PointerAnalysisFieldCycle` 这类小用例从结构体指针退成
 `void*`。这条路已经回退，后续不要按这个方向继续。
 
+## 2026-04-29 实现记录：数组元素单字段 wrapper 消除
+
+问题：fortune 的 `ValueHTypes.txt` 里出现这类结构：
+
+```c
+struct struct_88 {
+  i8[4] field_0; /* at offset: 0 */
+};
+```
+
+trace 确认来源是 `TypeBuilder::convertStruct()` 的 stride 数组分支。原始访问形如
+`@0+4i` / `@4+4i`，递归到数组元素时变成 `@0` + `{}` marker。marker 被过滤后，
+旧逻辑因为 `PointeeSize=4` 创建一个 4 字节 shell，于是得到
+`struct { i8[4] @0 }`，外层再生成 `struct_88*[]`。
+
+本次实现：
+
+- `include/notdec/TypeRecovery/mlsub/TypeBuilder.h:79-86`
+  - `convertStruct()` 增加 `PreferElementType` 参数，默认不改变普通指针记录转换。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1088-1090`
+  - `convertStruct()` 接收 `PreferElementType`。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1245`
+  - stride 递归转换数组元素时传 `PreferElementType=true`。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1295-1303`
+  - 如果数组元素子问题只剩空 marker，就直接返回 `i8[N]`。
+  - 如果只有一个非空字段，且 offset 为 0、大小等于元素大小，就直接返回字段类型。
+  - 普通非数组元素路径仍保留原来的 struct shell。
+
+同步更新了两个 HType snapshot：
+
+- `test/type-recovery/llvm-ir/expected/tr-level-2/17_StackArray.htypes`
+  - `struct_2*[]` 收敛为 `top:32[]`。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/18_offset1.htypes`
+  - `struct_1*[]` / `struct_4*[]` 收敛为 `i8[4][]`。
+
+验证：
+
+```bash
+cmake --build build --target notdec-decompile -j4
+cmake --build build --target TypeBuilderTest binarysub -j4
+./build/bin/TypeBuilderTest
+./build/binarysub
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+
+rm -rf /tmp/notdec-fortune-single-field-element \
+       /tmp/fortune.single-field-element.out.ll
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.single-field-element.out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-single-field-element
+```
+
+结果：
+
+- `TypeBuilderTest` 4 个测试通过。
+- `./build/binarysub` 全部通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune frozen 口径：`real 16.35s`，没有明显性能回退。
+- `ValueHTypes.txt` 从 `structs=147` 降到 `structs=145`。
+- `struct { i8[4] field_0 @0 }` 这类 wrapper 在目标输出中消失。
+- 输出 `.ll` 和 `/tmp/fortune.structmerge-hlayout-final.out.ll` 一致。
+
 ## 候选抽取
 
 当前只抽取这类节点：
