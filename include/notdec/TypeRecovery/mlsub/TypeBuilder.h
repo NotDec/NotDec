@@ -5,8 +5,10 @@
 #include "notdec-llvm2c/Interface/HType.h"
 #include <llvm/IR/DataLayout.h>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace notdec::mlsub {
@@ -19,9 +21,16 @@ struct TypeBuilderContext {
   const llvm::DataLayout &DL;
   // Stored in bytes to match DataLayout and memory ranges.
   const unsigned PointerSize;
+  const binarysub::StructMergeInfo *StructMerge;
+  const std::map<std::string, std::vector<std::uint32_t>>
+      *StructMergeRootGroups;
 
-  TypeBuilderContext(HTypeContext &Ctx, const llvm::DataLayout &DL)
-      : Ctx(Ctx), DL(DL), PointerSize(DL.getPointerSize()) {}
+  TypeBuilderContext(HTypeContext &Ctx, const llvm::DataLayout &DL,
+                     const binarysub::StructMergeInfo *StructMerge = nullptr,
+                     const std::map<std::string, std::vector<std::uint32_t>>
+                         *StructMergeRootGroups = nullptr)
+      : Ctx(Ctx), DL(DL), PointerSize(DL.getPointerSize()),
+        StructMerge(StructMerge), StructMergeRootGroups(StructMergeRootGroups) {}
 };
 
 class TypeBuilder {
@@ -38,6 +47,17 @@ class TypeBuilder {
   std::optional<std::string> CurrentRootDebugLabel;
   std::vector<std::string> CurrentDebugPath;
   unsigned ConvertStructTraceDepth = 0;
+  std::map<std::uint32_t, std::set<std::uint32_t>> StructMergeGroupLabels;
+  std::map<std::uint32_t, std::size_t> StructMergeGroupCandidateCounts;
+  std::map<std::uint32_t, ast::RecordDecl *> StructMergeGroupDecls;
+  std::optional<std::uint32_t> ActiveStructMergeGroup;
+  // Late HType reuse cache. It only keys exact converted layouts, so it can
+  // remove duplicate declarations after UType simplification without guessing
+  // that two different layouts describe the same source struct.
+  using RecordLayoutKey =
+      std::pair<std::optional<SimpleRange>,
+                std::vector<std::tuple<OffsetTy, OffsetTy, HType *>>>;
+  std::map<RecordLayoutKey, ast::RecordDecl *> ExactRecordLayoutDecls;
 
 public:
   TypeBuilder(TypeBuilderContext &Parent);
@@ -69,6 +89,26 @@ protected:
                      const binarysub::UTypePtr *T);
   std::optional<ast::RecordDecl *> getStructOrNull(binarysub::UTypePtr Ty);
   ast::RecordDecl *getOrCreateStruct(binarysub::UTypePtr Ty);
+  void initializeStructMergeInfo();
+  std::optional<std::uint32_t>
+  findStructMergeGroupForOrigins(const std::set<std::uint32_t> &Origins);
+  std::optional<std::uint32_t>
+  findStructMergeGroupForSet(const std::vector<binarysub::UTypePtr> &Terms);
+  std::optional<std::uint32_t>
+  findStructMergeGroupForType(const binarysub::UTypePtr &Ty);
+  std::optional<std::uint32_t> findStructMergeGroupForCurrentRoot();
+  ast::RecordDecl *getOrCreateStructMergeDecl(std::uint32_t GroupId);
+  void bindStructMergeDecl(binarysub::UTypePtr Ty, std::uint32_t GroupId);
+  RecordLayoutKey buildRecordLayoutKey(
+      const std::vector<std::pair<SimpleRange, HType *>> &Fields,
+      std::optional<SimpleRange> ValidRange) const;
+  std::optional<ast::RecordDecl *> findExactRecordLayout(
+      const std::vector<std::pair<SimpleRange, HType *>> &Fields,
+      std::optional<SimpleRange> ValidRange) const;
+  void rememberExactRecordLayout(
+      ast::RecordDecl *Decl,
+      const std::vector<std::pair<SimpleRange, HType *>> &Fields,
+      std::optional<SimpleRange> ValidRange);
   int64_t accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty);
   HType *convertFieldType(const binarysub::UTypePtr &Ty,
                           std::optional<int64_t> FieldSizeBytes);

@@ -332,6 +332,83 @@ rm -rf /tmp/notdec-fortune-final-runtime /tmp/fortune.final-runtime.out.ll
   type sidecar / ValueTypes / ValueHTypes / VarOrigins 都一致；CTest 的 oracle 缺口
   需要按结构体恢复质量另看。
 
+## 2026-04-29 实现记录：HType 侧结构体复用
+
+目的：前面的 sidecar 分组已经合理，但 `ValueHTypes.txt` 里仍有大量最终
+`HType` 层重复声明。原因是 local simplify 后很多记录已经变成普通
+`URecordType`，不再只通过 union/intersection 外层传递分组信息。
+
+本次实现：
+
+- `include/notdec/TypeRecovery/mlsub/TypeBuilder.h:24-33`
+  - `TypeBuilderContext` 增加 `StructMergeInfo` 和 root group map。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3074-3112`
+  - `genTypes()` 从 sidecar candidate/group 建 root label 到 group 的映射，
+    并传给 `TypeBuilder`。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:272-315`
+  - 新增 `collectStructMergeOriginIds()`，递归收集普通 `URecordType` 内仍保留的
+    origin id。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:458-587`
+  - `TypeBuilder` 初始化 group label，按 origin overlap 选 struct-merge group。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1091-1098`
+  - `convertStruct()` 没有外层 active group 时，尝试用当前 record 的 origin id
+    直接命中 sidecar group。
+- `include/notdec/TypeRecovery/mlsub/TypeBuilder.h:54-60`
+  - 新增 exact HType layout cache，只按 `ValidRange + 字段 offset/size/type`
+    复用完全相同的 `RecordDecl`。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:590-622`
+  - 新增 exact layout key 构造、查找和登记。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:876-888`
+  - `craftStruct()` 创建新 `RecordDecl` 前先查 exact layout cache，命中则复用。
+
+同步更新了两个 HType snapshot：
+
+- `test/type-recovery/llvm-ir/expected/tr-level-2/17_StackArray.htypes:3-17`
+  - 去掉重复的 array/end 结构声明。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/17_StackArray.htypes:64-66`
+  - `stack_end` 改指向已存在的 `struct_1*`。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/18_offset1.htypes:25-27`
+  - 去掉重复的 `offset -24` 结构声明。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/18_offset1.htypes:90-106`
+  - `test1/test2` 的 stack 类型统一复用 `struct_5*`。
+
+验证：
+
+```bash
+cmake --build build --target notdec-decompile -j4
+cmake --build build --target TypeBuilderTest binarysub -j4
+./build/bin/TypeBuilderTest
+./build/binarysub
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+
+rm -rf /tmp/notdec-fortune-structmerge-hlayout-final \
+       /tmp/fortune.structmerge-hlayout-final.out.ll
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.structmerge-hlayout-final.out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-structmerge-hlayout-final
+```
+
+结果：
+
+- `TypeBuilderTest` 4 个测试通过。
+- `./build/binarysub` 全部通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune frozen 口径：`real 16.33s`。
+- `/tmp/notdec-fortune-structmerge-hlayout-final/ValueHTypes.txt`：
+  - `structs=147`
+  - `unions=37`
+  - `unique_offset=21`
+  - `unique_exact=79`
+- 输出 `.ll` 和本次改 HType 复用前的
+  `/tmp/fortune.structmerge-typebuilder-root.out.ll` 一致。
+
+注意：尝试过“递归锚点按需创建”，能把 fortune struct 数进一步降到 83，但会让
+`09_OffsetLoop`、`20_PointerAnalysisFieldCycle` 这类小用例从结构体指针退成
+`void*`。这条路已经回退，后续不要按这个方向继续。
+
 ## 候选抽取
 
 当前只抽取这类节点：

@@ -50,7 +50,9 @@ using binarysub::UUnion;
 using FieldEntry = std::pair<SimpleRange, HType *>;
 
 TypeBuilder::TypeBuilder(TypeBuilderContext &Parent)
-    : Parent(Parent), Ctx(Parent.Ctx) {}
+    : Parent(Parent), Ctx(Parent.Ctx) {
+  initializeStructMergeInfo();
+}
 
 void TypeBuilder::setDebugRootLabel(std::optional<std::string> Label) {
   CurrentRootDebugLabel = std::move(Label);
@@ -189,6 +191,34 @@ struct DebugPathScope {
   }
 };
 
+struct StructMergeGroupScope {
+  std::optional<std::uint32_t> &Slot;
+  std::optional<std::uint32_t> Saved;
+
+  StructMergeGroupScope(std::optional<std::uint32_t> &Slot,
+                        std::optional<std::uint32_t> Value)
+      : Slot(Slot), Saved(Slot) {
+    if (Value) {
+      Slot = Value;
+    }
+  }
+
+  ~StructMergeGroupScope() { Slot = Saved; }
+};
+
+struct DisableStructMergeGroupScope {
+  std::optional<std::uint32_t> &Slot;
+  std::optional<std::uint32_t> Saved;
+
+  explicit DisableStructMergeGroupScope(
+      std::optional<std::uint32_t> &Slot)
+      : Slot(Slot), Saved(Slot) {
+    Slot.reset();
+  }
+
+  ~DisableStructMergeGroupScope() { Slot = Saved; }
+};
+
 // binarysub may materialize empty records as internal placeholders while it is
 // normalizing recursive or compound shapes. They should stay transparent to the
 // final HType layer instead of surfacing as user-visible empty aggregates.
@@ -237,6 +267,51 @@ int64_t maxSetTermMetric(const std::vector<UTypePtr> &Terms, MeasureFn &&Measure
     MaxValue = std::max(MaxValue, Measure(Terms[I]));
   }
   return MaxValue;
+}
+
+void collectStructMergeOriginIds(const UTypePtr &Ty,
+                                 std::set<std::uint32_t> &Origins,
+                                 std::set<const UType *> &Seen) {
+  if (!Ty || !Seen.insert(Ty.get()).second) {
+    return;
+  }
+  if (auto *Var = std::get_if<UTypeVariable>(&Ty->v)) {
+    Origins.insert(Var->originIds.begin(), Var->originIds.end());
+    return;
+  }
+  if (auto *Record = std::get_if<URecordType>(&Ty->v)) {
+    for (const auto &Field : Record->fields) {
+      collectStructMergeOriginIds(Field.second, Origins, Seen);
+    }
+    return;
+  }
+  if (auto *Ptr = std::get_if<UPointerType>(&Ty->v)) {
+    collectStructMergeOriginIds(Ptr->load, Origins, Seen);
+    collectStructMergeOriginIds(Ptr->store, Origins, Seen);
+    return;
+  }
+  if (auto *Func = std::get_if<UFunctionType>(&Ty->v)) {
+    for (const auto &Arg : Func->args) {
+      collectStructMergeOriginIds(Arg, Origins, Seen);
+    }
+    collectStructMergeOriginIds(Func->result, Origins, Seen);
+    return;
+  }
+  if (auto *Union = std::get_if<UUnion>(&Ty->v)) {
+    for (const auto &Term : Union->types) {
+      collectStructMergeOriginIds(Term, Origins, Seen);
+    }
+    return;
+  }
+  if (auto *Inter = std::get_if<UInter>(&Ty->v)) {
+    for (const auto &Term : Inter->types) {
+      collectStructMergeOriginIds(Term, Origins, Seen);
+    }
+    return;
+  }
+  if (auto *Rec = std::get_if<URecursiveType>(&Ty->v)) {
+    collectStructMergeOriginIds(Rec->body, Origins, Seen);
+  }
 }
 
 std::pair<HType *, SimpleRange>
@@ -380,6 +455,173 @@ ast::RecordDecl *TypeBuilder::getOrCreateStruct(binarysub::UTypePtr Ty) {
   return *It;
 }
 
+void TypeBuilder::initializeStructMergeInfo() {
+  auto *Info = Parent.StructMerge;
+  if (Info == nullptr) {
+    return;
+  }
+
+  std::map<std::uint32_t, std::set<std::uint32_t>> CandidateLabels;
+  for (const auto &Candidate : Info->candidates) {
+    CandidateLabels[Candidate.id] = Candidate.labelIds;
+  }
+
+  for (const auto &Group : Info->groups) {
+    StructMergeGroupCandidateCounts[Group.id] = Group.candidateIds.size();
+    auto &Labels = StructMergeGroupLabels[Group.id];
+    if (Group.labelId) {
+      Labels.insert(*Group.labelId);
+    }
+    for (auto CandidateId : Group.candidateIds) {
+      auto It = CandidateLabels.find(CandidateId);
+      if (It == CandidateLabels.end()) {
+        continue;
+      }
+      Labels.insert(It->second.begin(), It->second.end());
+    }
+  }
+}
+
+std::optional<std::uint32_t> TypeBuilder::findStructMergeGroupForSet(
+    const std::vector<binarysub::UTypePtr> &Terms) {
+  if (StructMergeGroupLabels.empty()) {
+    return findStructMergeGroupForCurrentRoot();
+  }
+
+  std::set<std::uint32_t> Origins;
+  for (const auto &Term : Terms) {
+    if (auto *Var = std::get_if<UTypeVariable>(&Term->v)) {
+      Origins.insert(Var->originIds.begin(), Var->originIds.end());
+    }
+  }
+  if (Origins.empty()) {
+    return std::nullopt;
+  }
+  return findStructMergeGroupForOrigins(Origins);
+}
+
+std::optional<std::uint32_t> TypeBuilder::findStructMergeGroupForOrigins(
+    const std::set<std::uint32_t> &Origins) {
+  if (StructMergeGroupLabels.empty()) {
+    return findStructMergeGroupForCurrentRoot();
+  }
+  if (Origins.empty()) {
+    return std::nullopt;
+  }
+  std::optional<std::uint32_t> BestGroup;
+  std::size_t BestOverlap = 0;
+  std::size_t BestCandidates = 0;
+  for (const auto &[GroupId, Labels] : StructMergeGroupLabels) {
+    std::size_t Overlap = 0;
+    for (auto Origin : Origins) {
+      if (Labels.count(Origin)) {
+        ++Overlap;
+      }
+    }
+    if (Overlap == 0) {
+      continue;
+    }
+
+    auto CandidateCount = StructMergeGroupCandidateCounts[GroupId];
+    if (!BestGroup || Overlap > BestOverlap ||
+        (Overlap == BestOverlap && CandidateCount > BestCandidates)) {
+      BestGroup = GroupId;
+      BestOverlap = Overlap;
+      BestCandidates = CandidateCount;
+    }
+  }
+  if (BestGroup) {
+    return BestGroup;
+  }
+  return findStructMergeGroupForCurrentRoot();
+}
+
+std::optional<std::uint32_t>
+TypeBuilder::findStructMergeGroupForType(const binarysub::UTypePtr &Ty) {
+  std::set<std::uint32_t> Origins;
+  std::set<const UType *> Seen;
+  collectStructMergeOriginIds(Ty, Origins, Seen);
+  return findStructMergeGroupForOrigins(Origins);
+}
+
+std::optional<std::uint32_t> TypeBuilder::findStructMergeGroupForCurrentRoot() {
+  auto *RootGroups = Parent.StructMergeRootGroups;
+  if (RootGroups == nullptr || !CurrentRootDebugLabel ||
+      !CurrentDebugPath.empty()) {
+    return std::nullopt;
+  }
+  auto It = RootGroups->find(*CurrentRootDebugLabel);
+  if (It == RootGroups->end() || It->second.empty()) {
+    return std::nullopt;
+  }
+
+  std::optional<std::uint32_t> BestGroup;
+  std::size_t BestCandidates = 0;
+  for (auto GroupId : It->second) {
+    auto CandidateCount = StructMergeGroupCandidateCounts[GroupId];
+    if (!BestGroup || CandidateCount > BestCandidates) {
+      BestGroup = GroupId;
+      BestCandidates = CandidateCount;
+    }
+  }
+  return BestGroup;
+}
+
+ast::RecordDecl *
+TypeBuilder::getOrCreateStructMergeDecl(std::uint32_t GroupId) {
+  auto It = StructMergeGroupDecls.find(GroupId);
+  if (It != StructMergeGroupDecls.end()) {
+    return It->second;
+  }
+  auto *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("struct_"));
+  StructMergeGroupDecls[GroupId] = Decl;
+  return Decl;
+}
+
+void TypeBuilder::bindStructMergeDecl(binarysub::UTypePtr Ty,
+                                      std::uint32_t GroupId) {
+  if (TypeCache.find(Ty) != TypeCache.end()) {
+    return;
+  }
+  auto *Decl = getOrCreateStructMergeDecl(GroupId);
+  TypeCache[Ty] = Ctx.getRecordPtrType(false, Decl);
+}
+
+TypeBuilder::RecordLayoutKey TypeBuilder::buildRecordLayoutKey(
+    const std::vector<std::pair<SimpleRange, HType *>> &Fields,
+    std::optional<SimpleRange> ValidRange) const {
+  std::vector<std::tuple<OffsetTy, OffsetTy, HType *>> KeyFields;
+  KeyFields.reserve(Fields.size());
+  for (const auto &Field : Fields) {
+    KeyFields.emplace_back(Field.first.Start, Field.first.Size,
+                           Field.second == nullptr
+                               ? nullptr
+                               : Field.second->getCanonicalType());
+  }
+  std::sort(KeyFields.begin(), KeyFields.end());
+  return {ValidRange, std::move(KeyFields)};
+}
+
+std::optional<ast::RecordDecl *> TypeBuilder::findExactRecordLayout(
+    const std::vector<std::pair<SimpleRange, HType *>> &Fields,
+    std::optional<SimpleRange> ValidRange) const {
+  auto It = ExactRecordLayoutDecls.find(buildRecordLayoutKey(Fields, ValidRange));
+  if (It == ExactRecordLayoutDecls.end()) {
+    return std::nullopt;
+  }
+  return It->second;
+}
+
+void TypeBuilder::rememberExactRecordLayout(
+    ast::RecordDecl *Decl,
+    const std::vector<std::pair<SimpleRange, HType *>> &Fields,
+    std::optional<SimpleRange> ValidRange) {
+  if (Decl == nullptr || Fields.empty()) {
+    return;
+  }
+  ExactRecordLayoutDecls.emplace(buildRecordLayoutKey(Fields, ValidRange), Decl);
+}
+
 HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
                                           HType *Result) {
   auto ForceStructDecl = getStructOrNull(Ty);
@@ -463,11 +705,15 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     DebugPathScope PathScope(*this, std::move(PathFrame));
     return convertStruct(Ty, RawFields, FieldSizeBytes);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
+    StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
+                                           findStructMergeGroupForSet(V->types));
     return convertVisibleSetTerms(
         V->types,
         [&](const UTypePtr &Term) { return convertFieldType(Term, FieldSizeBytes); },
         [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
+    StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
+                                           findStructMergeGroupForSet(V->types));
     return convertVisibleSetTerms(
         V->types,
         [&](const UTypePtr &Term) { return convertFieldType(Term, FieldSizeBytes); },
@@ -544,10 +790,14 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
     Result = convertVariable(*V);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
+    StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
+                                           findStructMergeGroupForSet(V->types));
     Result = convertVisibleSetTerms(
         V->types, [&](const UTypePtr &Term) { return convert(Term); },
         [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
+    StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
+                                           findStructMergeGroupForSet(V->types));
     Result = convertVisibleSetTerms(
         V->types, [&](const UTypePtr &Term) { return convert(Term); },
         [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });
@@ -609,7 +859,8 @@ int64_t TypeBuilder::accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty) {
 // 根据要求的range创建结构体，按需插入padding。
 // 1. 创建union panel的时候，创建匿名结构体。此时T==nullptr
 // 2. 最后构造结构体的时候，按照range构造。此时T!=nullptr
-// 如果指定了T，则会存入TypeCache。
+// TypeCache 仍由外层转换流程维护，避免同一个 URecordType 在不同 PointeeSize
+// 下被裁剪成不同布局时串缓存。
 HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
                                 std::optional<SimpleRange> ValidRange,
                                 std::optional<std::string> Name,
@@ -623,10 +874,33 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
   }
   RecordDecl *Decl = PrevDecl;
   if (Decl == nullptr) {
+    if (auto Existing = findExactRecordLayout(Fields, ValidRange)) {
+      return Ctx.getRecordPtrType(false, *Existing);
+    }
     // 临时的结构体
     Decl = ast::RecordDecl::Create(Ctx, Name.value());
   }
   assert(Decl != nullptr);
+
+  auto FinishRecord = [&](RecordDecl *Record) -> HType * {
+    auto *Ret = Ctx.getRecordPtrType(false, Record);
+    rememberExactRecordLayout(Record, Fields, ValidRange);
+    return Ret;
+  };
+
+  if (PrevDecl != nullptr && !Decl->getFields().empty()) {
+    auto ExistingFieldCount =
+        std::count_if(Decl->getFields().begin(), Decl->getFields().end(),
+                      [](const FieldDecl &Field) { return !Field.isPadding; });
+    if (Fields.empty() ||
+        Fields.size() <= static_cast<std::size_t>(ExistingFieldCount)) {
+      return FinishRecord(Decl);
+    }
+    // A later candidate in the same struct-merge group can carry more fields.
+    // Keep the shared decl identity but rebuild its layout from the richer
+    // candidate.
+    Decl->getFields().clear();
+  }
 
   assert(Decl->getFields().empty());
   if (Fields.size() == 0) {
@@ -641,7 +915,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
           .Name = FieldName,
           .Comment = "at offset: " + std::to_string(ValidRange->Start)};
       Decl->addField(CurrentDecl);
-      return Ctx.getRecordPtrType(false, Decl);
+      return FinishRecord(Decl);
     }
   }
 
@@ -807,7 +1081,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
   if (!PrevDecl && Decl->getFields().size() == 0) {
     return getVoidPtr();
   }
-  return Ctx.getRecordPtrType(false, Decl);
+  return FinishRecord(Decl);
 }
 
 HType *TypeBuilder::convertStruct(
@@ -815,6 +1089,14 @@ HType *TypeBuilder::convertStruct(
     std::vector<std::pair<OffsetRange, UTypePtr>> &RawFields,
     std::optional<int64_t> PointeeSize) {
   HType *Result = nullptr;
+  auto StructMergeGroup = ActiveStructMergeGroup;
+  if (!StructMergeGroup) {
+    StructMergeGroup = findStructMergeGroupForType(T);
+  }
+  DisableStructMergeGroupScope DisableStructMergeScope(ActiveStructMergeGroup);
+  if (StructMergeGroup) {
+    bindStructMergeDecl(T, *StructMergeGroup);
+  }
   auto TraceDepth = ConvertStructTraceDepth;
   ConvertStructTraceDepthScope TraceDepthScope(ConvertStructTraceDepth);
 
@@ -1270,10 +1552,14 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     DebugPathScope PathScope(*this, std::move(PathFrame));
     Ret = convertStruct(Ty, RawFields, PointeeSize);
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
+    StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
+                                           findStructMergeGroupForSet(V->types));
     Ret = convertVisibleSetTerms(
         V->types, [&](const UTypePtr &Term) { return convert(Term); },
         [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
+    StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
+                                           findStructMergeGroupForSet(V->types));
     Ret = convertVisibleSetTerms(
         V->types, [&](const UTypePtr &Term) { return convert(Term); },
         [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });

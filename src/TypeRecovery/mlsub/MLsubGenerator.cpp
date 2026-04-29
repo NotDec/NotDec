@@ -3072,7 +3072,44 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   const auto &Res = BulkResult.types;
 
   // Create TypeBuilder context and builder
-  TypeBuilderContext TBCtx(HCtx, DL);
+  std::map<PolarVar, std::string> TypeBuilderRootLabels;
+  for (const auto &Ent : V2N) {
+    auto Label = formatTypeBuilderRootLabel(Ent.first);
+    TypeBuilderRootLabels[PolarVar{.var = Ent.second, .pos = true}] =
+        Label + " upper";
+    TypeBuilderRootLabels[PolarVar{.var = Ent.second, .pos = false}] =
+        Label + " lower";
+  }
+  if (SolveMemory) {
+    TypeBuilderRootLabels[PolMem] = "<memory>";
+  }
+
+  std::map<std::uint32_t, const binarysub::StructMergeCandidateInfo *>
+      StructMergeCandidateById;
+  for (const auto &Candidate : BulkResult.structMerge.candidates) {
+    StructMergeCandidateById[Candidate.id] = &Candidate;
+  }
+  std::map<std::string, std::vector<std::uint32_t>> StructMergeRootGroups;
+  for (const auto &Group : BulkResult.structMerge.groups) {
+    for (auto CandidateId : Group.candidateIds) {
+      auto CandidateIt = StructMergeCandidateById.find(CandidateId);
+      if (CandidateIt == StructMergeCandidateById.end()) {
+        continue;
+      }
+      const auto &Candidate = *CandidateIt->second;
+      if (Candidate.path != "$") {
+        continue;
+      }
+      auto LabelIt = TypeBuilderRootLabels.find(Candidate.root);
+      if (LabelIt == TypeBuilderRootLabels.end()) {
+        continue;
+      }
+      StructMergeRootGroups[LabelIt->second].push_back(Group.id);
+    }
+  }
+
+  TypeBuilderContext TBCtx(HCtx, DL, &BulkResult.structMerge,
+                           &StructMergeRootGroups);
   TypeBuilder TB(TBCtx);
 
   auto convertSolvedType = [&](const PolarVar &Var, llvm::StringRef RootLabel) {

@@ -26,10 +26,6 @@ struct struct_5 {
   top:32 field_0; /* at offset: -24 */
 };
 
-struct struct_6 {
-  top:32 field_0; /* at offset: -24 */
-};
-
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
@@ -106,8 +102,8 @@ struct struct_6 {
 [+] test2::%loadResult.pre => lower=top:32 ; upper=bottom:32
 [+] test2::%loadResult39 => lower=top:32 ; upper=bottom:32
 [+] test2::%loadResult5 => lower=top:32 ; upper=bottom:32
-[+] test2::%stack => lower=struct_6* ; upper=bottom:32
-[-] test2::%stack_addr8 => lower=struct_6* ; upper=bottom:32
+[+] test2::%stack => lower=struct_5* ; upper=bottom:32
+[-] test2::%stack_addr8 => lower=struct_5* ; upper=bottom:32
 [+] test2::%v_326 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
 [+] test2::%v_332 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
 
