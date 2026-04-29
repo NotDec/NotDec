@@ -72,6 +72,134 @@ canonicalize all roots
 - `external/binarysub/src/binarysub-test.cpp:476`
 - `external/binarysub/src/binarysub-test-main.cpp:39`
 
+## 2026-04-28 后续实现记录合并
+
+原 `20260428-02`、`20260428-03`、`20260428-04` 已合并到本日志，不再单独保留。
+
+### 结构体合并 trace
+
+第一版实现时，结构体合并先只做 trace，不影响最终 `UType` / `HType`。
+
+涉及位置：
+
+- `external/binarysub/src/binarysub.cpp:1791-2141`
+  - 新增结构体候选、冲突判断、贪心分组 helper。
+- `external/binarysub/src/binarysub.cpp:2143-2197`
+  - `TypeSimplifier::bulkSimplify()` 接入当时的 global/local 两阶段流程。
+
+当时流程是：
+
+```text
+canonicalize all roots
+-> global analyzeOccurrences
+-> global simplifyType
+-> trace_struct_merge_analysis
+-> per-root local analyzeOccurrences
+-> per-root local simplifyType
+-> per-root coalesceCompactType
+```
+
+涉及函数和数据结构：
+
+- `CompactConflictResult`
+- `StructCandidateNode`
+- `primitive_merge_conflict()`
+- `compact_merge_conflict_impl()`
+- `collect_struct_candidates_impl()`
+- `trace_struct_merge_analysis()`
+- `TypeSimplifier::bulkSimplify()`
+
+验证过：
+
+```bash
+cmake --build build --target binarysub -j4
+./build/binarysub
+cmake --build build --target notdec-decompile -j4
+NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.global-local-structmerge.out.ll \
+  --tr-level=2 -g \
+  --work-dir=/tmp/notdec-fortune-global-local-structmerge
+```
+
+结果：`binarysub` 自测通过，`notdec-decompile` 编译通过，fortune 用例跑通。
+
+### 结构体合并 sidecar
+
+第二步把 trace 结果变成 `binarysub` 返回值，并在 NotDec workdir 写出：
+
+```text
+type-struct-merge.md
+```
+
+涉及位置：
+
+- `external/binarysub/include/binarysub/binarysub.h:340-363`
+  - 新增 `StructMergeCandidateInfo`、`StructMergeGroupInfo`、`StructMergeInfo`、
+    `BulkSimplifyResult`。
+- `external/binarysub/include/binarysub/binarysub.h:394-396`
+  - 新增 `TypeSimplifier::bulkSimplifyDetailed()`。
+- `external/binarysub/src/binarysub.cpp:2087-2170`
+  - `trace_struct_merge_analysis()` 改成 `build_struct_merge_info()`。
+- `external/binarysub/src/binarysub.cpp:2175-2228`
+  - 新增 `bulkSimplifyDetailed()`，旧 `bulkSimplify()` 改成 wrapper。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:53-56`
+  - 新增 `kTypeStructMergeFile = "type-struct-merge.md"`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:1507-1587`
+  - 新增 `appendDebugStructMerge()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3068-3111`
+  - `genTypes()` 改用详细 API，并把 sidecar 写入 workdir。
+
+验证过：
+
+```bash
+cmake --build build --target binarysub -j4
+cmake --build build --target notdec-decompile -j4
+./build/binarysub
+rm -rf /tmp/notdec-fortune-structmerge-sidecar
+NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.structmerge-sidecar.out.ll \
+  --tr-level=2 -g \
+  --work-dir=/tmp/notdec-fortune-structmerge-sidecar
+```
+
+结果：fortune 用例跑通，`type-struct-merge.md` 输出
+`Candidates: 226 / Groups: 91`。
+
+### group merged-body
+
+第三步给 group sidecar 增加 `merged-body`，方便直接看每组会合成什么结构。
+
+涉及位置：
+
+- `external/binarysub/include/binarysub/binarysub.h:349-353`
+  - `StructMergeGroupInfo` 新增 `std::string mergedBody`。
+- `external/binarysub/src/binarysub.cpp:2156-2170`
+  - `build_struct_merge_info()` 用 `merge_compact_types()` 合并组内候选 body。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:1558-1587`
+  - `appendDebugStructMerge()` 输出每个 group 的 `merged-body`。
+
+验证过：
+
+```bash
+cmake --build build --target binarysub -j4
+./build/binarysub
+cmake --build build --target notdec-decompile -j4
+rm -rf /tmp/notdec-fortune-structmerge-mergedbody
+NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.structmerge-mergedbody.out.ll \
+  --tr-level=2 -g \
+  --work-dir=/tmp/notdec-fortune-structmerge-mergedbody
+```
+
+结果：`binarysub` 自测通过，fortune 用例跑通，workdir sidecar 中出现
+`merged-body:` 行。
+
 ## 2026-04-29 实现记录：去掉 global 预简化
 
 本次只改 `external/binarysub/src/binarysub.cpp:2196-2223` 的
@@ -107,6 +235,102 @@ NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
 - 新 sidecar 主 SCC 从之前的 `Candidates: 226 / Groups: 91` 变为
   `Candidates: 304 / Groups: 109`。
 - 最终 `.ll` 和上一版 `/tmp/fortune.structmerge-mergedbody.out.ll` 相同。
+
+## 2026-04-29 性能调查和优化
+
+问题确认：
+
+- 2026-04-27 日志里，同一 fortune 用例在 `original` 模式、frozen 口径约
+  `12.35s`。
+- 本次优化前，当前代码同一 frozen 口径实测 `real 104.94s`，非 frozen 口径之前
+  记录为 `real 103.52s`。
+- 临时分段计时显示，大 SCC 中：
+  - `canonicalize`: `2.55s`
+  - `struct-merge`: `1.39s`
+  - `local-total`: `91.27s`
+  - `roots=5037`
+  - `simplify=69.74s`
+
+结论：慢点不在结构体合并分组本身。真正的问题是 local simplify 阶段对每个 root
+都复制并遍历整张 SCC 递归变量表和 origin 表。复杂度变成近似：
+
+```text
+roots * full_scc_rec_vars
+```
+
+而不是只处理当前 root 可达的递归变量。
+
+本次只改 `external/binarysub/src/binarysub.cpp` 的
+`TypeSimplifier::bulkSimplifyDetailed()`：
+
+- `external/binarysub/src/binarysub.cpp:2207-2214`
+  - 先从 canonical origin 表计算 synthetic UType id 起点，避免后面只复制 origin
+    子集时改变 `VarOrigins.txt` 里的 synthetic id。
+- `external/binarysub/src/binarysub.cpp:2215-2259`
+  - 新增 `buildLocalVariableOrigins` lambda。
+  - 每个 root 只复制它自身和可达 recursive bindings 中出现的 origin。
+- `external/binarysub/src/binarysub.cpp:2265-2279`
+  - `analyzeOccurrences()` 改为直接用当前 canonical simplifier 运行。
+  - local simplifier 的 `recVars` 改用 `localAnalysis.processedRecVars`。
+  - 不再给每个 root 复制完整 `canonicalRecVars`。
+
+中间计时：
+
+- 只改可达 `recVars` 后，frozen 口径从 `real 104.94s` 降到 `real 33.06s`。
+  - `local-total`: `19.28s`
+  - `simplify`: `0.76s`
+  - 剩下主要是每 root 复制完整 `variableOrigins`，`setup=10.52s`。
+- 再改 origin 子集后，带临时计时的 frozen 口径为 `real 15.27s`。
+  - `canonicalize`: `2.59s`
+  - `struct-merge`: `1.43s`
+  - `local-total`: `1.86s`
+
+最终验证：
+
+```bash
+cmake --build build --target binarysub notdec-decompile -j4
+./build/binarysub
+
+rm -rf /tmp/notdec-fortune-final-frozen /tmp/fortune.final-frozen.out.ll
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.final-frozen.out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-final-frozen
+
+rm -rf /tmp/notdec-fortune-final-runtime /tmp/fortune.final-runtime.out.ll
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.final-runtime.out.ll \
+  --tr-level=2 -g \
+  --work-dir=/tmp/notdec-fortune-final-runtime
+```
+
+结果：
+
+- `./build/binarysub` 全部通过。
+- frozen 口径：`real 15.36s`。
+- 非 frozen 口径：`real 15.49s`。
+- 和优化前 `/tmp/notdec-fortune-phase-current` 对比，下面文件逐字一致：
+  - `/tmp/fortune.*.out.ll`
+  - `type-struct-merge.md`
+  - `ValueTypes.txt`
+  - `ValueHTypes.txt`
+  - `VarOrigins.txt`
+- 额外跑了：
+
+  ```bash
+  ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 \
+    --output-on-failure
+  ```
+
+  结果失败，耗时 `11.74s`。失败点是 fortune oracle 里的 struct.fd 字段恢复
+  缺口，例如 `@File_list.fd`、`get_tbl::arg0.read_tbl`、
+  `maxlen_in_list::arg0.next`。本次性能优化前后在手工 fortune 口径下对比的 `.ll` /
+  type sidecar / ValueTypes / ValueHTypes / VarOrigins 都一致；CTest 的 oracle 缺口
+  需要按结构体恢复质量另看。
 
 ## 候选抽取
 
