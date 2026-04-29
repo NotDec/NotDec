@@ -1,25 +1,33 @@
 # Global/Local Co-Occurrence And Struct Merge Plan
 
-> 2026-04-28 更新：第一、二阶段已完成；第三阶段及以后仍是计划。
+> 2026-04-28 更新：第一、二阶段已完成；后续结构体 sidecar 分阶段实现。
+> 2026-04-29 更新：去掉开头的 global co-occur analyze / global simplify。
+> 结构体合并现在直接看 canonicalize 后的 `CompactType`，最终类型仍走后面的
+> per-root local simplify。
 
 ## 背景
 
-`external/binarysub` 当前 HEAD 是 `cde0e05 Revert "Isolate co-occurrence analysis per root"`。
-revert 后，`TypeSimplifier::bulkSimplify` 又恢复成全局 co-occur：
+这条计划开始时，`external/binarysub` HEAD 是
+`cde0e05 Revert "Isolate co-occurrence analysis per root"`。revert 后，
+`TypeSimplifier::bulkSimplify` 又恢复成全局 co-occur：
 
 1. 所有 root 先 `canonicalizeType`。
 2. 所有 root 一起 `analyzeOccurrences`。
 3. 每个 root 用同一份 co-occur 结果 `simplifyType`。
 4. 最后 `coalesceCompactType` 成 `UType`。
 
-这对当前要做的结构体合并是有用的：全局 co-occur 会保留更多顶层类型变量。
-这些变量可以作为结构体片段之间的合并标签。
+最初的判断是：全局 co-occur 会保留更多顶层类型变量，这些变量可以作为
+结构体片段之间的合并标签。
 
-但最终展示类型不应该保留太多没必要的类型变量。因此需要：
+后面看下来，这个判断不够准确。结构体合并真正需要的是“尽量完整的结构片段和
+标签关系”，不一定需要先经过一轮全局 simplify。全局 simplify 反而可能提前删掉、
+合并或改写一些结构信息，让后面的合并少看到候选。
 
-1. 先做全局 co-occur，保留更多变量。
-2. 在变量较多的 `CompactType` 上做结构体合并。
-3. 再做局部 co-occur，删掉全局阶段为了结构体合并而留下的变量。
+所以当前思路调整为：
+
+1. 所有 root 先 `canonicalizeType`，得到完整的 `CompactType`。
+2. 结构体合并直接看这批 canonical `CompactType`。
+3. 后面的 per-root local simplify 继续负责最终展示类型。
 
 ## 当前流程
 
@@ -27,17 +35,15 @@ revert 后，`TypeSimplifier::bulkSimplify` 又恢复成全局 co-occur：
 
 ```text
 canonicalize all roots
--> global co-occur analyze
--> global simplify
 -> struct merge analysis
 -> per-root local co-occur analyze
 -> per-root local simplify
 -> coalesce UType
 ```
 
-也就是说，结构体合并看的是全局 simplify 后、变量还较多的 `CompactType`。
-局部 simplify 放在后面，能删掉的类型变量继续删掉。现在不再单独维护
-`structMergeOnlyVars` plan。
+也就是说，结构体合并看的是 canonicalize 后的原始 `CompactType`。
+局部 simplify 放在后面，只负责最终展示类型。现在不再单独维护
+`structMergeOnlyVars` plan，也不再用全局 simplify 给结构体合并预处理标签。
 
 ## 已实现
 
@@ -49,11 +55,11 @@ canonicalize all roots
 - `external/binarysub/src/binarysub.cpp:1793`
   - 新增结构体候选、冲突判断、贪心分组 helper。
 - `external/binarysub/src/binarysub.cpp:2022`
-  - 从全局 simplify 后的 `CompactType` 抽取结构体候选。
+  - 从 canonicalize 后的 `CompactType` 抽取结构体候选。
 - `external/binarysub/src/binarysub.cpp:2087`
   - 构造 `StructMergeInfo`，包括 candidate、group、`mergedBody`。
 - `external/binarysub/src/binarysub.cpp:2184`
-  - `bulkSimplifyDetailed()` 接入 global/local 两阶段 simplify。
+  - `bulkSimplifyDetailed()` 接入 canonical struct merge + local simplify 流程。
 - `src/TypeRecovery/mlsub/MLsubGenerator.cpp:1507`
   - 新增 `appendDebugStructMerge()`。
 - `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3071`
@@ -65,6 +71,42 @@ canonicalize all roots
 
 - `external/binarysub/src/binarysub-test.cpp:476`
 - `external/binarysub/src/binarysub-test-main.cpp:39`
+
+## 2026-04-29 实现记录：去掉 global 预简化
+
+本次只改 `external/binarysub/src/binarysub.cpp:2196-2223` 的
+`TypeSimplifier::bulkSimplifyDetailed()`：
+
+- 删除开头的全局 `OccurrenceAnalysisState analysis`。
+- 删除所有 root 共用 `analyzeOccurrences()` 的循环。
+- 删除所有 root 共用同一份 analysis 调 `simplifyType()` 的循环。
+- `build_struct_merge_info()` 改为直接消费 canonicalize 后的 `compactMap`。
+- local simplify 不动，但 worker 的 `recVars` / `variableOrigins` 改为继承
+  canonicalize 阶段产生的状态。
+
+验证：
+
+```bash
+cmake --build build --target binarysub -j4
+./build/binarysub
+cmake --build build --target notdec-decompile -j4
+rm -rf /tmp/notdec-fortune-no-global-presimplify
+NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.no-global-presimplify.out.ll \
+  --tr-level=2 -g \
+  --work-dir=/tmp/notdec-fortune-no-global-presimplify
+```
+
+结果：
+
+- `binarysub` 编译通过。
+- `./build/binarysub` 全部通过。
+- `notdec-decompile` 编译通过。
+- fortune 用例跑通，生成 `/tmp/fortune.no-global-presimplify.out.ll`。
+- 新 sidecar 主 SCC 从之前的 `Candidates: 226 / Groups: 91` 变为
+  `Candidates: 304 / Groups: 109`。
+- 最终 `.ll` 和上一版 `/tmp/fortune.structmerge-mergedbody.out.ll` 相同。
 
 ## 候选抽取
 
@@ -97,25 +139,31 @@ canonicalize all roots
 
 ## 目标
 
-目标不是恢复 `41075f1` 的 per-root 行为，而是同时保留两种分析：
+目标不是恢复 `41075f1` 那种“每个 root 从 canonicalize 开始完全单独跑”的入口。
+当前流程仍然先对所有 root 做 canonicalize，并在同一批 canonical root 上产出
+`StructMergeInfo`。
+
+关键点是：**local simplify 本来就是后半段的 per-root simplify**。本次去掉的是
+结构体合并前面的 global co-occur analyze / global simplify，不是去掉后面的
+local simplify。
+
+当前目标流程是：
 
 ```text
 canonicalize all roots
-  -> global co-occur simplify
-  -> struct merge
-  -> local co-occur simplify
+  -> struct merge on canonical CompactType
+  -> per-root local co-occur simplify
   -> coalesce to UType
 ```
 
-需要额外标记一类变量：
+这里的优先级是：
 
-```text
-全局 co-occur 后仍保留，
-但局部 co-occur 会删除或合并掉的变量。
-```
-
-这类变量暂时叫 `structMergeOnlyVars`。它们不是最终展示给用户的核心变量，
-但在结构体合并阶段很有用。
+1. `StructMergeInfo` / `type-struct-merge.md` 是当前最重要的产物，后面的候选、
+   分组、`mergedBody` 输出逻辑不要动。
+2. global 预简化不是必须步骤，先去掉，让结构体合并看到更原始的结构。
+3. 最终 `UType` 暂时不受结构体合并影响，所以这次改动预期主要影响 sidecar。
+4. `structMergeOnlyVars` 这条计划暂时放弃；不再为了区分“全局保留、局部删除”的
+   变量额外维护标签集合。
 
 ## 当前相关位置
 
@@ -350,9 +398,7 @@ struct CompactProgram {
 ```text
 Input SimpleType roots
   -> CompactProgram compactProgram
-  -> CompactProgram globalProgram
   -> StructMergeInfo
-  -> CompactProgram mergedProgram
   -> CompactProgram localProgram
   -> UType results
 ```
@@ -368,38 +414,34 @@ UTypePtr coalesceCompactType(const CompactTypePtr &Ty,
 
 这样每个阶段读哪份递归绑定会更清楚。
 
-## 第四阶段：全局 co-occur 后标记 structMergeOnlyVars
+## 第四阶段（已调整）：去掉 global 预简化
 
-全局阶段：
+原计划是先跑 global co-occur simplify，再标记 `structMergeOnlyVars`。这个思路现在
+不继续走。
 
-```text
-globalAnalysis = analyze all compact roots
-globalPlan[root] = computeSimplificationPlan(root, globalAnalysis)
-globalProgram[root] = apply globalPlan[root]
-```
+原因：
 
-局部阶段先不应用，只计算 plan：
+1. 后半段 local simplify 已经是每个 root 单独分析，能负责最终类型显示。
+2. 结构体合并当前最需要的是更多候选和更完整的 record 形状。
+3. global simplify 可能提前删掉、合并、改写顶层变量和递归绑定，反而减少后面能
+   合并的信息。
 
-```text
-localAnalysis[root] = analyze globalProgram[root] only
-localPlan[root] = computeSimplificationPlan(globalProgram[root], localAnalysis[root])
-```
-
-然后对每个 root 计算：
+调整后的阶段：
 
 ```text
-globalVars[root] = collect vars from globalProgram[root]
-structMergeOnlyVars[root] =
-  { V in globalVars[root] | localPlan[root] would delete or merge V }
+compactMap[root] = canonicalizeType(root)
+structMerge = build_struct_merge_info(compactMap)
+for root in compactMap:
+  localAnalysis = analyze root only
+  localCompact = simplifyType(root, localAnalysis)
+  result[root] = coalesceCompactType(localCompact)
 ```
 
-这批变量用于调试和结构体合并：
+注意：这不是把整个 `bulkSimplifyDetailed()` 退回旧 per-root 入口。差别在于：
 
-```text
-这些变量在全局阶段存在，
-所以可以作为结构体片段的合并标签；
-但它们不应该强迫最终 UType 继续显示该变量。
-```
+- 仍然先 canonicalize 所有 root。
+- 仍然在这一批 root 上统一构造 `StructMergeInfo`。
+- 只是结构体合并前不再跑全局 co-occur / simplify。
 
 ## 第五阶段：结构体合并建模
 
@@ -415,18 +457,17 @@ struct StructCandidateNode {
   std::string path;
   CompactTypePtr body;
   SimpleTypeSet labels;
-  SimpleTypeSet structMergeOnlyLabels;
 };
 ```
 
 抽取规则：
 
-1. 遍历 `globalProgram.roots`。
+1. 遍历 canonical `compactMap`。
 2. 遇到带 `record` 的 `CompactType` 时，生成一个候选节点。
 3. `labels` 只取当前 `CompactType.vars`，不深入字段内部找变量。
 4. 只有当前位置最终会形成交类型时，`vars` 才作为结构体合并标签。
    在当前 `coalesceCompactType` 规则下，`pol=false` 会合成交类型，`pol=true` 会合成并类型。
-5. `structMergeOnlyLabels = labels ∩ structMergeOnlyVars[root]`。
+5. 不再计算 `structMergeOnlyLabels`。
 
 这和前面讨论的模型对应：
 
@@ -494,14 +535,12 @@ afterwards:
   - root
   - path
   - labels
-  - structMergeOnlyLabels
   - record 摘要
 - 每个分组：
   - group id
   - 共享 label
   - 包含哪些节点
   - 合并后的字段摘要
-- 被局部 co-occur 删除或合并的 label。
 
 建议新日志文件：
 
@@ -543,14 +582,14 @@ workdir/type-struct-merge.md
 
 ### binarysub 单元测试
 
-1. 全局阶段行为不变：
+1. co-occur 状态显式化：
    - 引入 `OccurrenceAnalysisState` 后，现有 `binarysub` 测试输出不变。
 
-2. 全局保留、局部删除变量：
+2. canonical struct merge 输入：
    - 构造两个 root。
-   - 全局 co-occur 下某变量保留。
-   - 单 root 局部 co-occur 下该变量会被删除。
-   - 检查 `structMergeOnlyVars` 包含这个变量。
+   - canonicalize 后先抽取结构体候选。
+   - 再分别做 per-root local simplify。
+   - 检查结构体 sidecar 不依赖 global simplify 的中间结果。
 
 3. 结构体候选抽取：
    - `α ∧ {0: int}` 和 `α ∧ {4: int}` 抽成两个节点，label 都是 `α`。
@@ -592,15 +631,16 @@ ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-
 3. 结构体合并先不要改最终 HType。
    先输出分组调试，确认 `fortune` 上分组合理后再落地。
 
-4. `structMergeOnlyVars` 不能只从最终 `UType` 反推。
-   局部 simplify 后这些变量可能已经消失，必须在 `CompactType` 阶段记录。
+4. 结构体合并 sidecar 不能从最终 `UType` 反推。
+   local simplify 后候选和 label 可能已经消失，必须在 canonical `CompactType`
+   阶段记录。
 
 ## 建议实现顺序
 
 1. 引入 `OccurrenceAnalysisState`，保持当前全局行为不变。
 2. 抽出 `SimplificationPlan`，保持当前 simplify 输出不变。
 3. 显式化 `recVars` 输入/输出，避免双阶段状态串扰。
-4. 在 `bulkSimplify` 内跑全局阶段和局部 plan，先只 debug 输出 `structMergeOnlyVars`。
-5. 在 `CompactType` 上抽取结构体候选节点。
-6. 实现贪心分组，先只 debug 输出。
+4. 去掉结构体合并前的 global co-occur / global simplify。
+5. 在 canonical `CompactType` 上抽取结构体候选节点。
+6. 实现贪心分组和 `mergedBody`，先只输出 sidecar。
 7. 确认分组合理后，再让分组影响 `TypeBuilder` 的结构体声明复用。
