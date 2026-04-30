@@ -23,21 +23,143 @@ lower=<pos=true result> ; upper=<pos=false result>
 - 普通 value 取 lower
 - `ContraVariantValues` 里的 value 取 upper
 
-## 后续 merged 目标
+## 当前 lower/upper 传递路径
 
-下一步再加 `merged` 类型：
+`ConstraintsGenerator::genTypes()` 是现在 lower/upper 结果变成 HType 的出口。
 
-- `ValueHTypes.txt` 显示 `lower`、`upper`、`merged`
-- `llvm2c` 默认用 merged
-- lower/upper 仍可通过接口查询，方便后续特殊逻辑
+当前流程：
 
-初始 merged 策略保持简单：
+1. 对每个 value 把两个 root 放进 `Tys`：
+   - `PolarVar{var, pos=true}`：lower
+   - `PolarVar{var, pos=false}`：upper
+2. 调 `TypeSimplifier::bulkSimplifyDetailed(Tys, false)`，得到
+   `BulkResult.types`
+3. `BulkResult.types` 是 `std::map<PolarVar, UTypePtr>`，里面已经有每个 value
+   的 lower UType 和 upper UType
+4. `genTypes()` 把 lower/upper UType 分别转成 HType，写入
+   `ValueTypesLower` / `ValueTypesUpper`
+5. `.c` 输出时，这份 `HTypeResult` 直接传到 `llvm2c`
 
-1. 如果 lower 存在且不是根 bottom，选 lower
-2. 否则选 upper
-3. 如果只有 lower，即使是 bottom 也先保留
+当前先不在 UType 阶段产出 merged。先在 HTypeResult 里做一个更小的实验：
+默认选出的类型如果是 bottom，就尝试改用 upper。
 
-这一步本次没有实现，只先把 lower/upper 名字纠正。
+## 当前 merged 规划
+
+目标：
+
+- 先不改 `ValueHTypes.txt` 格式
+- 后续默认类型如果落到 bottom，优先试 upper
+- lower/upper 仍保留，后续需要特殊逻辑时还能直接查两边
+
+基本判断：
+
+- 不重新跑求解，只基于已有 lower/upper HType 做轻量选择
+- 本次只处理 bottom 这种明显没有信息的情况
+- 不把字段数量、后端可打印性这类现象当作类型偏序
+
+初版策略：
+
+1. 先按当前逻辑取 default：普通 value 取 lower，
+   `ContraVariantValues` 里的 value 取 upper。
+2. 如果 default 是 root `Bottom`，尝试返回 upper。
+3. 如果 upper 不存在，或者 upper 也是 bottom，保留原 default。
+4. 其他情况不改。
+
+暂时不做：
+
+- 不按字段数量、结构体覆盖范围等“信息量”打分
+- 不用 canonical type 决定 merged
+- 不处理 top fallback
+- 不在 set union/intersection 上补子类型规则
+- 不额外引入一套后端选择逻辑
+
+实现位置：
+
+- 只改 `HTypeResult::getDefaultValueType(Value)`。
+- `getValueType(Value, true/false)` 保持不变，继续专门查 lower/upper。
+
+后续如果要更精确：
+
+- 可以考虑在 UType 或更早的 CompactType 阶段做，因为那里更接近求解结果。
+- 但当前先不做，避免把这一步变成新的类型偏序实现。
+
+风险：
+
+- 这个 fallback 很保守，可能不会改变某些当前不理想的 C 输出。
+- 但它不引入复杂猜测，便于先确认 bottom fallback 是否有实际收益。
+
+判断标准：
+
+- C 输出默认使用 bottom fallback 后的类型。
+- lower/upper 结果仍保留，后续需要特殊逻辑时还能查两边。
+- `llvm-ir`、`sysy` suite 不退化。
+- fortune 当前关注用例同口径计时，不能出现明显性能下降；这一步不重新求解，理论上
+  只增加每个 value 的小常数判断。
+
+## 本次追加实现：default bottom fallback
+
+### `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h`
+
+- `82-91`：`HTypeResult::getDefaultValueType()` 保持原来的默认选择逻辑；
+  如果默认结果是 bottom，则尝试返回 upper-side 类型。upper 不存在时仍返回原结果。
+
+### 追加验证
+
+1. build
+
+```bash
+cmake --build ./build --target notdec-decompile -j4
+```
+
+结果：通过。
+
+2. 小 `.c` 用例
+
+```bash
+./build/bin/notdec test/type-recovery/llvm-ir/cases/01_Simple1.ll \
+  -o /tmp/01.bottom-fallback.out.c --tr-level=2 -g \
+  --work-dir=/tmp/notdec-01-bottom-fallback
+```
+
+结果：跑通。`ValueHTypes.txt` 中多个 value 是 `lower=bottom:32 ; upper=top:32`；
+`ValueCTypes.txt` 里对应默认类型变成 `top:32`，说明 fallback 生效。
+
+3. fortune `.c` 路径
+
+```bash
+NOTDEC_POINTER_ANALYSIS_MODE=original /usr/bin/time -p ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.bottom-fallback.out.c \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-bottom-fallback
+```
+
+结果：跑通，`real 20.54s`。过程中仍有既有 llvm2c pointer arithmetic /
+global offset warning。
+
+4. fortune 当前参考口径 `.ll`
+
+```bash
+NOTDEC_POINTER_ANALYSIS_MODE=original /usr/bin/time -p ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.bottom-fallback.out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-bottom-fallback-ll
+```
+
+结果：跑通，`real 16.44s`。当前参考是 `real 16.33s`，基本同档。
+
+5. `llvm-ir` suite
+
+```bash
+python3 test/run_type_recovery_suite.py \
+  --binary ./build/bin/notdec \
+  --manifest test/type-recovery/llvm-ir/manifest.json \
+  --project-root /sn640/NotDec \
+  --workdir /tmp/notdec-suite-llvm-ir-bottom-fallback
+```
+
+结果：`17 passed, 3 xfailed, 0 failed`。
 
 ## 本次实现
 
