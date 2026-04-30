@@ -4,24 +4,24 @@
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
-[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
-[+] const(i32 0)@main::%bb.if_false.i0:0 => lower=top:32 ; upper=bottom:32
-[+] const(i32 1)@main::%bb.if_true.i0:0 => lower=top:32 ; upper=bottom:32
+[+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
+[+] const(i32 0)@main::%bb.if_false.i0:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 1)@main::%bb.if_true.i0:0 => lower=bottom:32 ; upper=top:32
 [+] main::%eq1 => lower=bool ; upper=bool
 [+] main::%eq2 => lower=bool ; upper=bool
 [+] main::%eq3 => lower=bool ; upper=bool
 [+] main::%fval2 => lower=f32 ; upper=f32
-[+] main::%ptr1 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
-[+] main::%ptr2 => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
-[-] main::%stack => lower=void* ; upper=bottom:32
-[+] main::%stackPtr => lower=void* ; upper=bottom:32
-[+] main::%val1 => lower=top:32 ; upper=bottom:32
-[+] main::%val2 => lower=top:32 ; upper=i32
-[+] main::%var1 => lower=void* ; upper=bottom:32
-[+] main::%var2 => lower=void* ; upper=bottom:32
-[+] main::<ret> => lower=top:32 ; upper=bottom:32
-[+] main::arg0 => lower=top:32 ; upper=bottom:32
-[+] main::arg1 => lower=top:32 ; upper=bottom:32
+[+] main::%ptr1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[+] main::%ptr2 => lower=bottom:32 ; upper=ptr<load=f32, store=void, psize=32>
+[-] main::%stack => lower=bottom:32 ; upper=void*
+[+] main::%stackPtr => lower=bottom:32 ; upper=void*
+[+] main::%val1 => lower=bottom:32 ; upper=top:32
+[+] main::%val2 => lower=i32 ; upper=top:32
+[+] main::%var1 => lower=bottom:32 ; upper=void*
+[+] main::%var2 => lower=bottom:32 ; upper=void*
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] main::arg0 => lower=bottom:32 ; upper=top:32
+[+] main::arg1 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32

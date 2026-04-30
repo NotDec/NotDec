@@ -4,18 +4,17 @@
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
-[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
-[+] @passMem1 => lower=(top:32 (*)())* ; upper=(bottom:32 (*)())*
-[+] const(i32 0)@main::%bb.allocator.i1:0 => lower=top:32 ; upper=bottom:32
-[+] main::%memptr1 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
-[+] main::%r => lower=top:32 ; upper=bottom:32
-[+] main::<ret> => lower=top:32 ; upper=bottom:32
-[+] main::arg0 => lower=top:32 ; upper=bottom:32
-[+] main::arg1 => lower=top:32 ; upper=bottom:32
-[+] passMem1::%f1 => lower=top:32 ; upper=bottom:32
-[+] passMem1::%memptr1 => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
-[+] passMem1::<ret> => lower=top:32 ; upper=bottom:32
+[+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
+[+] @passMem1 => lower=(bottom:32 (*)())* ; upper=(top:32 (*)())*
+[+] const(i32 0)@main::%bb.allocator.i1:0 => lower=bottom:32 ; upper=top:32
+[+] main::%memptr1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[+] main::%r => lower=bottom:32 ; upper=top:32
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] main::arg0 => lower=bottom:32 ; upper=top:32
+[+] main::arg1 => lower=bottom:32 ; upper=top:32
+[+] passMem1::%f1 => lower=bottom:32 ; upper=top:32
+[+] passMem1::%memptr1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[+] passMem1::<ret> => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
-

@@ -98,10 +98,10 @@ struct ConstraintsGenerator {
 
   DSUMap<ExtValuePtr, SimpleType> V2N;
   MemoryAccessRecords MemoryAccesses;
-  std::map<ExtValuePtr, ast::HType *> ValueTypes;
-  // Keep both solved bounds per value. ValueTypes is the covariant upper
-  // bound, and ValueTypesLower is the contravariant lower bound.
   std::map<ExtValuePtr, ast::HType *> ValueTypesLower;
+  // Keep both solved bounds per value. ValueTypesLower is the pos=true result;
+  // ValueTypesUpper is the pos=false result.
+  std::map<ExtValuePtr, ast::HType *> ValueTypesUpper;
   std::map<llvm::CallBase *, SimpleType> unhandledCalls;
   std::set<ExtValuePtr> ContraVariantValues;
   std::set<ExtValuePtr> SnapshotContraVariantValues;

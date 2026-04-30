@@ -310,7 +310,7 @@ def parse_htypes(path: Path) -> ParsedHTypes:
             key = bounds_match.group(2).strip()
             lower_raw = bounds_match.group(3).strip()
             upper_raw = bounds_match.group(4).strip()
-            raw = upper_raw if sign == "+" else lower_raw
+            raw = lower_raw if sign == "+" else upper_raw
         else:
             match = TYPE_LINE_RE.match(stripped)
             if not match:

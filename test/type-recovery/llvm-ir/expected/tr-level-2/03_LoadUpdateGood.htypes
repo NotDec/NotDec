@@ -4,14 +4,13 @@
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
-[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
-[+] const(i32 0)@main::%bb.allocator.i1:0 => lower=top:32 ; upper=bottom:32
-[+] main::%i1 => lower=top:32 ; upper=bottom:32
-[-] main::%iptr => lower=ptr<load=void, store=void, psize=32> ; upper=bottom:32
-[+] main::<ret> => lower=top:32 ; upper=bottom:32
-[+] main::arg0 => lower=top:32 ; upper=bottom:32
-[+] main::arg1 => lower=top:32 ; upper=bottom:32
+[+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
+[+] const(i32 0)@main::%bb.allocator.i1:0 => lower=bottom:32 ; upper=top:32
+[+] main::%i1 => lower=bottom:32 ; upper=top:32
+[-] main::%iptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] main::arg0 => lower=bottom:32 ; upper=top:32
+[+] main::arg1 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
-

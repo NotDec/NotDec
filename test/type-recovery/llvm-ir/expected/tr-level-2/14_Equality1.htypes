@@ -5,23 +5,23 @@
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
 [+] @isFloat => lower=(void (*)(f32))* ; upper=(void (*)(f32))*
-[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32, top:32))*
-[+] @ptrFloat => lower=(void (*)(bottom:32))* ; upper=(void (*)(ptr<load=f32, store=void, psize=32>))*
-[+] const(i32 0)@main::%bb.END.i0:0 => lower=top:32 ; upper=bottom:32
-[+] const(i32 0)@main::%cond:1 => lower=top:32 ; upper=bottom:32
-[+] const(i32 1)@main::%eq1:0 => lower=top:32 ; upper=bottom:32
+[+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
+[+] @ptrFloat => lower=(void (*)(ptr<load=f32, store=void, psize=32>))* ; upper=(void (*)(bottom:32))*
+[+] const(i32 0)@main::%bb.END.i0:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@main::%cond:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 1)@main::%eq1:0 => lower=bottom:32 ; upper=top:32
 [+] isFloat::arg0 => lower=f32 ; upper=f32
 [+] main::%cond => lower=bool ; upper=bool
-[+] main::%eq0 => lower=top:32 ; upper=bottom:32
-[+] main::%eq1 => lower=top:32 ; upper=bottom:32
-[+] main::%stack => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
-[-] main::%stackPtr => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
-[+] main::<ret> => lower=top:32 ; upper=bottom:32
-[+] main::arg0 => lower=top:32 ; upper=bottom:32
-[+] main::arg1 => lower=top:32 ; upper=bottom:32
+[+] main::%eq0 => lower=bottom:32 ; upper=top:32
+[+] main::%eq1 => lower=bottom:32 ; upper=top:32
+[+] main::%stack => lower=bottom:32 ; upper=ptr<load=f32, store=void, psize=32>
+[-] main::%stackPtr => lower=bottom:32 ; upper=ptr<load=f32, store=void, psize=32>
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] main::arg0 => lower=bottom:32 ; upper=top:32
+[+] main::arg1 => lower=bottom:32 ; upper=top:32
 [+] ptrFloat::%f1 => lower=f32 ; upper=f32
-[+] ptrFloat::%v_12 => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
-[+] ptrFloat::arg0 => lower=ptr<load=f32, store=void, psize=32> ; upper=bottom:32
+[+] ptrFloat::%v_12 => lower=bottom:32 ; upper=ptr<load=f32, store=void, psize=32>
+[+] ptrFloat::arg0 => lower=bottom:32 ; upper=ptr<load=f32, store=void, psize=32>
 
 [memory]
 type => top:32

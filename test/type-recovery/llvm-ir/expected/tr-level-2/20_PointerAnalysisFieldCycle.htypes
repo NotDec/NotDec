@@ -25,21 +25,21 @@ struct struct_4 {
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
-[+] @main => lower=top:32 ; upper=(bottom:32 (*)(top:32))*
-[+] const(i32 0)@main::%bb.exit.i0:0 => lower=top:32 ; upper=bottom:32
-[+] const(i32 0)@main::%i:0 => lower=top:32 ; upper=bottom:32
-[+] main::%base => lower=struct_0* ; upper=bottom:32
-[-] main::%buf => lower=struct_0* ; upper=bottom:32
+[+] @main => lower=(bottom:32 (*)(top:32))* ; upper=top:32
+[+] const(i32 0)@main::%bb.exit.i0:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@main::%i:0 => lower=bottom:32 ; upper=top:32
+[+] main::%base => lower=bottom:32 ; upper=struct_0*
+[-] main::%buf => lower=bottom:32 ; upper=struct_0*
 [+] main::%done => lower=bool ; upper=bool
-[+] main::%i => lower=top:32 ; upper=bottom:32
-[+] main::%i.next => lower=top:32 ; upper=bottom:32
-[+] main::%next => lower=struct_2* ; upper=bottom:32
-[+] main::%next.ptr => lower=ptr<load=void, store=void, psize=8> ; upper=bottom:32
-[+] main::%p => lower=struct_4* ; upper=bottom:32
-[+] main::%p.ptr => lower=struct_4* ; upper=bottom:32
-[+] main::%v => lower=top:8 ; upper=bottom:8
-[+] main::<ret> => lower=top:32 ; upper=bottom:32
-[+] main::arg0 => lower=top:32 ; upper=bottom:32
+[+] main::%i => lower=bottom:32 ; upper=top:32
+[+] main::%i.next => lower=bottom:32 ; upper=top:32
+[+] main::%next => lower=bottom:32 ; upper=struct_2*
+[+] main::%next.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
+[+] main::%p => lower=bottom:32 ; upper=struct_4*
+[+] main::%p.ptr => lower=bottom:32 ; upper=struct_4*
+[+] main::%v => lower=bottom:8 ; upper=top:8
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] main::arg0 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
