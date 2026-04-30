@@ -1009,3 +1009,142 @@ ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-
 5. 在 canonical `CompactType` 上抽取结构体候选节点。
 6. 实现贪心分组和 `mergedBody`，先只输出 sidecar。
 7. 确认分组合理后，再让分组影响 `TypeBuilder` 的结构体声明复用。
+
+## 2026-04-30 计划：统一 direct Ptr 和 offset 0 字段
+
+### 背景
+
+当前类型里同一个内存对象可能同时出现两种描述：
+
+```text
+Ptr<L, S>
+{0: T, ...}
+```
+
+`Ptr<L,S>` 表示“这个地址本身被直接 load/store 过”，`{0: T}` 表示“这个地址的
+0 偏移字段被访问过”。对内存布局来说，这两者都在描述 offset 0 的访问。若它们在
+后续流程里一直分开，最终容易出现冗余的交集类型、额外结构体，或者递归类型被拆得
+很碎。
+
+### 目标
+
+让类型恢复的中间表示尽早把“直接指针访问”和“offset 0 字段访问”看成同一类布局信息。
+期望效果是：
+
+- 同一个对象里同时有 direct load/store 和其他字段时，最终更像一个统一 record。
+- 后续结构体候选、递归类型和布局合并看到的是同一种形状，减少末端 HType 展示层的补救。
+- 字符串、字节缓冲区这类 `offset + 1` 递归形状更容易被后续识别成数组或指针。
+- 不改变纯 pointer-only 类型的表达，避免把所有普通 `Ptr<L,S>` 都包装成结构体。
+
+### 技术路线
+
+优先在 `CompactType` 层做归一化，而不是等到最终 `UType` / `HType` 打印阶段。
+原因是 `CompactType` 后面还会经过局部简化、递归变量处理和结构体候选抽取；越早统一，
+后面的分析越能利用这个信息。
+
+路线按保守到激进分阶段：
+
+1. 先只处理“同一个内存对象内部”的情况。
+   如果一个对象同时有普通字段和 direct load/store，把 direct load/store 作为 offset 0
+   的布局信息合进去。
+2. 暂不全局改写任意 `record & Ptr` / `record | Ptr`。
+   这些可能来自不同来源的 bound，语义更复杂，需要看第一阶段效果后再决定。
+3. `void*` 这类无信息指针先作为单独展示优化处理，不和本计划混在一起。
+4. 后续再接 `Ptr<T,T>` 降普通指针、offset+stride 递归数组识别。
+
+### 判断标准
+
+这一步做对后，应能看到：
+
+- `ValueTypes.txt` 里同一对象的 direct pointer 和字段访问更常合成一个 record。
+- 结构体输出里的 `ptr<...> & struct_x*`、`ptr<...> & void*` 这类末端冗余有下降趋势。
+- 字符串类递归形状更集中，例如表现为“offset 0 是字符访问，offset 1 递归到自身”的形式。
+- fortune 当前关注用例的运行时间不能明显变差；如果变慢，优先怀疑递归展开或结构体候选数量增加。
+
+### 风险
+
+- 如果把所有 `record` 和 `Ptr` 都全局折叠，可能把本来只是同一个变量的不同约束误认为同一个
+  物理布局。
+- 如果处理太晚，只能改变打印，不能帮助简化和结构体合并。
+- 如果处理太早且规则过强，可能改变 pointer-only 类型的含义。
+
+因此第一版应只做局部、保守归一化，并保留足够的 debug 输出方便对比。
+
+## 2026-04-30 实现记录：direct Ptr 折到 offset 0
+
+本次按保守规则实现，没有全局改写最终 `UType` / `HType` 的
+`record & Ptr`：
+
+- `external/binarysub/src/binarysub.cpp:482-532`
+  - 新增 `make_direct_pointer_compact()`、`is_plain_zero_field_name()`、
+    `has_non_zero_record_field()`、`fold_direct_pointer_into_zero_field()`。
+  - 规则：同一个 `CompactType` 同时有非空 record 和 direct pointer，且 record
+    里有非 0 字段，且 direct access 小于指针宽度时，才把 direct pointer 合到
+    `0` / `@0` 字段。
+  - 这样避免 `05_MultiOffset`、`11_SimpleRecursive1` 里 32-bit pointer 宽度访问
+    被包装成只有 `field_0` 的结构体。
+- `external/binarysub/src/binarysub.cpp:647`
+  - `merge_compact_types()` 合并完 record / pointer 后执行一次归一化。
+- `external/binarysub/src/binarysub.cpp:1048-1051`
+  - `canonicalizeType()` 直接遇到 raw `TMemObject` 同时有 fields 和 direct access
+    时，也执行同一归一化。
+- `external/binarysub/src/binarysub-test.cpp:402-407`
+  - `test_pointer_record_wrap()` 增加 byte direct load + offset 1 字段用例。
+    期望输出从 `Ptr & {1: ...}` 归一成 `{0: Ptr<...>, 1: Ptr<...>}`。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/20_PointerAnalysisFieldCycle.htypes:4-22`
+  - 更新 snapshot：`ptr<load=..., store=..., psize=8> & struct_*` 变成结构体内部
+    offset 0 字段。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/20_PointerAnalysisFieldCycle.htypes:36-39`
+  - 同步更新受结构体编号变化影响的 `%next` / `%p` 类型。
+
+验证：
+
+```bash
+cmake --build build --target binarysub notdec-decompile -j4
+./build/binarysub
+cmake --build build --target TypeBuilderTest -j4
+./build/bin/TypeBuilderTest
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+
+rm -rf /tmp/notdec-fortune-directptr-zero-field \
+       /tmp/fortune.directptr-zero-field.out.ll
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.directptr-zero-field.out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-directptr-zero-field
+```
+
+结果：
+
+- `./build/binarysub` 通过。
+- `TypeBuilderTest` 4 个测试通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune frozen 口径：`real 16.89s`。当前参考是 `real 16.33s`，有小幅波动，
+  没有数量级性能回退。
+- `/tmp/fortune.directptr-zero-field.out.ll` 和
+  `/tmp/fortune.structmerge-hlayout-final.out.ll` 一致。
+- fortune `ValueHTypes.txt`：
+  - `structs=147`，`unions=37`，和参考一致。
+  - `ptr<...> & struct_* field_0` 从 50 行降到 14 行。
+  - `ptr<...> & void* field_0` 从 37 行降到 1 行。
+  - `ptr<load=void, store=i8, psize=8> & struct_* field_0` 从 7 行降到 0 行。
+- fortune `type-struct-merge.md` 主 SCC：
+  - candidates 仍是 306。
+  - groups 从 109 变为 108。
+
+额外跑了：
+
+```bash
+ctest --test-dir build -R notdec.type_recovery.sysy.tr_level_2 --output-on-failure
+ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-failure
+```
+
+结果：
+
+- sysy 套件没有普通 FAIL，但 `26_while_test1`、`34_arr_expr_len`、`73_int_io`
+  是 XPASS，CTest 因 XPASS 判失败。
+- realworld fortune 仍失败，失败点还是已有 oracle 缺口：
+  `@File_list.fd`、`free_desc::arg0`、`get_tbl::arg0.read_tbl`、
+  `matches_in_list::arg0`、`maxlen_in_list::arg0.next` 等。

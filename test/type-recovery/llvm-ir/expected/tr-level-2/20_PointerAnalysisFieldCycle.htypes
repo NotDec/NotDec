@@ -2,19 +2,24 @@
 
 [decls]
 struct struct_0 {
-  ptr<load=void, store=void, psize=8> & void* field_0;
+  struct_1* field_0;
 };
 
 struct struct_1 {
-  ptr<load=void, store=void, psize=8> & struct_2* field_0;
+  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
 };
 
 struct struct_2 {
-  struct_1* field_0; /* at offset: 1 */
+  struct_3* field_0;
 };
 
 struct struct_3 {
-  ptr<load=void, store=void, psize=8> & void* field_0;
+  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
+  struct_2* field_1; /* at offset: 1 */
+};
+
+struct struct_4 {
+  struct_1* field_0;
 };
 
 
@@ -28,14 +33,13 @@ struct struct_3 {
 [+] main::%done => lower=bool ; upper=bool
 [+] main::%i => lower=top:32 ; upper=bottom:32
 [+] main::%i.next => lower=top:32 ; upper=bottom:32
-[+] main::%next => lower=struct_1* ; upper=bottom:32
+[+] main::%next => lower=struct_2* ; upper=bottom:32
 [+] main::%next.ptr => lower=ptr<load=void, store=void, psize=8> ; upper=bottom:32
-[+] main::%p => lower=struct_3* ; upper=bottom:32
-[+] main::%p.ptr => lower=struct_3* ; upper=bottom:32
+[+] main::%p => lower=struct_4* ; upper=bottom:32
+[+] main::%p.ptr => lower=struct_4* ; upper=bottom:32
 [+] main::%v => lower=top:8 ; upper=bottom:8
 [+] main::<ret> => lower=top:32 ; upper=bottom:32
 [+] main::arg0 => lower=top:32 ; upper=bottom:32
 
 [memory]
 type => top:32
-
