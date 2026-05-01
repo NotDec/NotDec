@@ -471,10 +471,10 @@ TypeBuilder::getStructOrNull(binarysub::UTypePtr Ty) {
 
 ast::RecordDecl *TypeBuilder::getOrCreateStruct(binarysub::UTypePtr Ty) {
   auto It = getStructOrNull(Ty);
-  // create as struct ptr, if not in type cache
+  // create as struct type, if not in type cache
   if (!It.has_value()) {
     RecordDecl *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("struct_"));
-    HType *Ret = Ctx.getRecordPtrType(false, Decl);
+    HType *Ret = Ctx.getRecordType(false, Decl);
     TypeCache[Ty] = Ret;
     It = Decl;
   }
@@ -610,7 +610,7 @@ void TypeBuilder::bindStructMergeDecl(binarysub::UTypePtr Ty,
     return;
   }
   auto *Decl = getOrCreateStructMergeDecl(GroupId);
-  TypeCache[Ty] = Ctx.getRecordPtrType(false, Decl);
+  TypeCache[Ty] = Ctx.getRecordType(false, Decl);
 }
 
 TypeBuilder::RecordLayoutKey TypeBuilder::buildRecordLayoutKey(
@@ -965,7 +965,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
   RecordDecl *Decl = PrevDecl;
   if (Decl == nullptr) {
     if (auto Existing = findExactRecordLayout(Fields, ValidRange)) {
-      return Ctx.getRecordPtrType(false, *Existing);
+      return Ctx.getRecordType(false, *Existing);
     }
     // 临时的结构体
     Decl = ast::RecordDecl::Create(Ctx, Name.value());
@@ -973,7 +973,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
   assert(Decl != nullptr);
 
   auto FinishRecord = [&](RecordDecl *Record) -> HType * {
-    auto *Ret = Ctx.getRecordPtrType(false, Record);
+    auto *Ret = Ctx.getRecordType(false, Record);
     rememberExactRecordLayout(Record, Fields, ValidRange);
     return Ret;
   };

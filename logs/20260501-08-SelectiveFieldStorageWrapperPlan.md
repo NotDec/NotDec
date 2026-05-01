@@ -170,6 +170,22 @@
 
 ### llvm2c TypeManager
 
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/HType.h:80-84`
+  - 在 `FieldDecl::Type` 旁边补充注释：字段类型保存的是字段存储/地址形状，
+    普通 by-value 成员会比真实成员类型多一层 pointer-like wrapper。
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/HType.h:495-503,784-788`
+  - `RecordPtrType` 改名为 `RecordType`。
+  - `getRecordPtrType()` 改名为 `getRecordType()`。
+  - 行为不变，`RecordType` 仍直接表示 `struct X`；结构体指针由
+    `PointerType(RecordType)` 表示。
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/HType.cpp:179-218`
+  - HType 字符串打印和 decl 提取改用 `RecordType` 名字。
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:477,613,968,976`
+  - TypeBuilder 改用 `Ctx.getRecordType(...)` 创建结构体类型。
+
 - `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:203-239`
   - `stripStoredFieldAddressType()` 支持新的顶层字段形状。
   - `PointerType(DualPointerType)` 表示“字段值本身是指针”，剥字段地址层后降成
@@ -274,6 +290,24 @@ ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-
 - `free_desc::arg0`、`matches_in_list::arg0` 仍恢复成 `void**`，没有恢复到 `struct fd*`。
 - `get_tbl::arg0` / `maxlen_in_list::arg0` 的 `read_tbl` 等字段在当前 layout 中被数组/padding 形状覆盖。
 - `@File_list` 能识别到 record pointer，但选到的 recovered decl 仍缺少 `fd` 前半段字段。
+
+6. `RecordPtrType` 命名清理后验证
+
+```bash
+cmake --build ./build --target notdec-decompile -j4
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --output-on-failure
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.recordtype-rename.out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-recordtype-rename
+```
+
+结果：
+
+- build 通过。
+- `llvm_ir` / `sysy` 通过。
+- fortune 跑通，`real 14.99s`，相对参考 `16.33s` 没有性能退化。
 
 ## 当前判断
 
