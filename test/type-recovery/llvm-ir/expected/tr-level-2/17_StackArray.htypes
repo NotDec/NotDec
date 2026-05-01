@@ -3,12 +3,12 @@
 [decls]
 struct struct_0 {
   struct_1* field_0; /* at offset: -48 */
-  i8[40] padding_0; /* at offset: -44 */
-  top:32 field_1; /* at offset: -4 */
+  i8[40]* padding_0; /* at offset: -44 */
+  top:32* field_1; /* at offset: -4 */
 };
 
 struct struct_1 {
-  top:32[] field_0; /* at offset: 0 */
+  top:32[]* field_0; /* at offset: 0 */
 };
 
 
@@ -66,3 +66,4 @@ struct struct_1 {
 
 [memory]
 type => top:32
+

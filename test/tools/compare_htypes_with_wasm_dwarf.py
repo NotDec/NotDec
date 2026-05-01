@@ -196,7 +196,22 @@ def find_record_pointer_targets(node: dict) -> set[str]:
         found: set[str] = set()
         for value in node.values():
             if isinstance(value, dict):
+                found.update(find_record_value_targets(value))
                 found.update(find_record_pointer_targets(value))
+        return found
+    return set()
+
+
+def find_record_value_targets(node: dict) -> set[str]:
+    kind = node["kind"]
+    if kind == "record_ref":
+        return {node["name"]}
+    if kind == "pointer_ref" and node["to"]["kind"] == "record_ref":
+        return {node["to"]["name"]}
+    if kind in {"union", "intersection"}:
+        found: set[str] = set()
+        for item in node["items"]:
+            found.update(find_record_value_targets(item))
         return found
     return set()
 
@@ -336,6 +351,10 @@ def parse_htypes(path: Path) -> ParsedHTypes:
             memory_type_raw = stripped[len("type => ") :].strip()
 
     memory_fields_by_offset: dict[int, FieldDecl] = {}
+    if memory_decl is None and memory_type_raw:
+        targets = sorted(find_record_pointer_targets(parse_type_expr(memory_type_raw)))
+        if len(targets) == 1:
+            memory_decl = targets[0]
     if memory_decl and memory_decl in decls:
         for field in decls[memory_decl].fields:
             if field.offset_bytes is not None:

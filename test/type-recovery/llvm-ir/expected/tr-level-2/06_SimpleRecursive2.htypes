@@ -1,36 +1,37 @@
 # HTypeResult
 
 [decls]
-struct struct_0 {
-  ptr<load=struct_0*, store=void, psize=32> field_0;
+struct rec_13 {
+  ptr<load='k:32, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
 };
 
-struct struct_1 {
-  ptr<load=struct_1*, store=void, psize=32> field_0;
+struct rec_20 {
+  ptr<load=μ0:0, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
 };
 
-struct struct_2 {
-  ptr<load=struct_2*, store=void, psize=32> field_0;
+struct rec_16 {
+  ptr<load='k:32, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
 };
 
-struct struct_3 {
-  ptr<load=struct_3*, store=void, psize=32> field_0;
+struct rec_18 {
+  ptr<load='k:32, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
 };
 
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
 [+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
-[+] @rec1 => lower=(void (*)(ptr<load=struct_0*, store=void, psize=32>))* ; upper=(void (*)(bottom:32))*
+[+] @rec1 => lower=(void (*)(ptr<load=rec_13, store=void, psize=32>))* ; upper=(void (*)(bottom:32))*
 [+] const(i32 0)@main::%bb.allocator.i3:0 => lower=bottom:32 ; upper=top:32
-[-] main::%bb.allocator.i0 => lower=bottom:32 ; upper=struct_1*
-[+] main::%bb.allocator.i1 => lower=bottom:32 ; upper=struct_1*
+[-] main::%bb.allocator.i0 => lower=bottom:32 ; upper=rec_20
+[+] main::%bb.allocator.i1 => lower=bottom:32 ; upper=rec_20
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 [+] main::arg1 => lower=bottom:32 ; upper=top:32
-[+] rec1::%bb.allocator.i0 => lower=bottom:32 ; upper=ptr<load=struct_2*, store=void, psize=32>
-[+] rec1::%bb.allocator.i1 => lower=bottom:32 ; upper=struct_3*
-[+] rec1::arg0 => lower=bottom:32 ; upper=ptr<load=struct_2*, store=void, psize=32>
+[+] rec1::%bb.allocator.i0 => lower=bottom:32 ; upper=ptr<load=rec_16, store=void, psize=32>
+[+] rec1::%bb.allocator.i1 => lower=bottom:32 ; upper=rec_18
+[+] rec1::arg0 => lower=bottom:32 ; upper=ptr<load=rec_16, store=void, psize=32>
 
 [memory]
 type => top:32
+

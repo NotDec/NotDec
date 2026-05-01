@@ -116,6 +116,7 @@ protected:
   int64_t accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty);
   HType *convertFieldType(const binarysub::UTypePtr &Ty,
                           std::optional<int64_t> FieldSizeBytes);
+  HType *getFieldValueTy(HType *FieldTy);
   HType *doUnion(HType *Lhs, HType *Rhs);
   HType *doInter(HType *Lhs, HType *Rhs);
   HType *convertVariable(const binarysub::UTypeVariable &T);

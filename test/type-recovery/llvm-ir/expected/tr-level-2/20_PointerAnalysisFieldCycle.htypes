@@ -1,25 +1,35 @@
 # HTypeResult
 
 [decls]
+struct rec_27 {
+  struct_0* field_0; /* recursive body at offset: 0 */
+};
+
 struct struct_0 {
-  struct_1* field_0;
+  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
+  i8[3]* padding_0; /* at offset: 1 */
+};
+
+struct rec_31 {
+  struct_1* field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_1 {
   ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
+  'n:32* field_1; /* at offset: 1 */
+};
+
+struct rec_20 {
+  struct_0* field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_2 {
-  struct_3* field_0;
+  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
 };
 
 struct struct_3 {
   ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
-  struct_2* field_1; /* at offset: 1 */
-};
-
-struct struct_4 {
-  struct_1* field_0;
+  rec_31* field_1; /* at offset: 1 */
 };
 
 
@@ -28,18 +38,19 @@ struct struct_4 {
 [+] @main => lower=(bottom:32 (*)(top:32))* ; upper=top:32
 [+] const(i32 0)@main::%bb.exit.i0:0 => lower=bottom:32 ; upper=top:32
 [+] const(i32 0)@main::%i:0 => lower=bottom:32 ; upper=top:32
-[+] main::%base => lower=bottom:32 ; upper=struct_0*
-[-] main::%buf => lower=bottom:32 ; upper=struct_0*
+[+] main::%base => lower=bottom:32 ; upper=rec_27
+[-] main::%buf => lower=bottom:32 ; upper=rec_27
 [+] main::%done => lower=bool ; upper=bool
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
-[+] main::%next => lower=bottom:32 ; upper=struct_2*
+[+] main::%next => lower=bottom:32 ; upper=rec_31
 [+] main::%next.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
-[+] main::%p => lower=bottom:32 ; upper=struct_4*
-[+] main::%p.ptr => lower=bottom:32 ; upper=struct_4*
+[+] main::%p => lower=bottom:32 ; upper=rec_20
+[+] main::%p.ptr => lower=bottom:32 ; upper=rec_20
 [+] main::%v => lower=bottom:8 ; upper=top:8
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
+

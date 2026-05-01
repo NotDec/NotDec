@@ -2,16 +2,16 @@
 
 [decls]
 struct struct_0 {
-  i8[4][] field_0; /* at offset: 0 */
+  i8[4][]* field_0; /* at offset: 0 */
 };
 
 struct struct_1 {
-  top:32 field_0; /* at offset: -8 */
-  top:32 field_1; /* at offset: -4 */
+  top:32* field_0; /* at offset: -8 */
+  top:32* field_1; /* at offset: -4 */
 };
 
 struct struct_2 {
-  top:32 field_0; /* at offset: -24 */
+  top:32* field_0; /* at offset: -24 */
 };
 
 
@@ -36,8 +36,8 @@ struct struct_2 {
 [+] const(i32 2)@test1::%bb.brif_next.i2:1 => lower=bottom:32 ; upper=top:32
 [+] do_printf::%bb.allocator.i8 => lower=bottom:32 ; upper=top:32
 [+] do_printf::%calcOffset => lower=bottom:32 ; upper=void*
-[+] do_printf::%stack => lower=bottom:32 ; upper=void*
-[-] do_printf::%stack_addr2 => lower=bottom:32 ; upper=void*
+[+] do_printf::%stack => lower=bottom:32 ; upper=void**
+[-] do_printf::%stack_addr2 => lower=bottom:32 ; upper=void**
 [+] do_printf::%stack_end => lower=bottom:32 ; upper=void*
 [+] do_printf::%v_12 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] do_printf::%v_17 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
@@ -52,14 +52,14 @@ struct struct_2 {
 [+] get_s::%calcOffset1 => lower=bottom:32 ; upper=void*
 [+] get_s::%calcOffset2 => lower=bottom:32 ; upper=void*
 [+] get_s::%calcOffset3 => lower=bottom:32 ; upper=void*
-[+] get_s::%loadResult => lower=bottom:32 ; upper=void*
+[+] get_s::%loadResult => lower=bottom:32 ; upper=void**
 [+] get_s::%loadResult4 => lower=bottom:32 ; upper=top:32
 [+] get_s::%stack => lower=bottom:32 ; upper=struct_1*
 [-] get_s::%stack_addr5 => lower=bottom:32 ; upper=struct_1*
 [+] get_s::%v_103 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] get_s::%v_81 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] get_s::%v_89 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
-[+] get_s::%v_95 => lower=bottom:32 ; upper=ptr<load=void*, store=void, psize=32>
+[+] get_s::%v_95 => lower=bottom:32 ; upper=ptr<load=void**, store=void, psize=32>
 [+] get_s::<ret> => lower=bottom:32 ; upper=top:32
 [+] get_s::arg0 => lower=bottom:32 ; upper=top:32
 [+] get_s::arg1 => lower=bottom:32 ; upper=top:32
@@ -97,3 +97,4 @@ struct struct_2 {
 
 [memory]
 type => top:32
+

@@ -1,0 +1,62 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:64
+[+] @getch => lower=(bottom:32 (*)())* ; upper=(top:32 (*)())*
+[+] @main => lower=(bottom:32 (*)())* ; upper=top:64
+[+] @my_getint => lower=(bottom:32 (*)())* ; upper=(i32 (*)())*
+[+] @my_putint => lower=(void (*)(i32))* ; upper=(void (*)(bottom:32))*
+[+] @putch => lower=(void (*)(top:32))* ; upper=(void (*)(bottom:32))*
+[+] const(i32 -10)@my_getint::%bb1.i2:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@main::%bb1.i1:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@main::%bb3.i0:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@my_putint::%bb1.i2:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@my_putint::%bb3.i1:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@my_putint::%storemerge:0 => lower=bottom:32 ; upper=u32
+[+] const(i32 10)@main::%bb2.i2:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 10)@my_getint::%bb3.i3:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 10)@my_getint::%bb4.i0:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 10)@my_putint::%bb2.i0:1 => lower=bottom:32 ; upper=i32
+[+] const(i32 10)@my_putint::%bb2.i5:1 => lower=bottom:32 ; upper=i32
+[+] getch::<ret> => lower=bottom:32 ; upper=top:32
+[+] main::%bb0.i0 => lower=bottom:32 ; upper=top:32
+[+] main::%bb1.i1 => lower=bool ; upper=bool
+[+] main::%bb2.i0 => lower=bottom:32 ; upper=i32
+[+] main::%bb2.i3 => lower=bottom:32 ; upper=top:32
+[+] main::%storemerge => lower=bottom:32 ; upper=top:32
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] my_getint::%bb1.i0 => lower=bottom:32 ; upper=top:32
+[+] my_getint::%bb1.i1 => lower=bottom:32 ; upper=top:32
+[+] my_getint::%bb1.i2 => lower=bool ; upper=bool
+[+] my_getint::%bb2.i0 => lower=bottom:32 ; upper=i32
+[+] my_getint::%bb3.i1 => lower=bottom:32 ; upper=top:32
+[+] my_getint::%bb3.i2 => lower=bottom:32 ; upper=top:32
+[+] my_getint::%bb3.i3 => lower=bool ; upper=bool
+[+] my_getint::%bb4.i0 => lower=bottom:32 ; upper=top:32
+[+] my_getint::%bb4.i1 => lower=bottom:32 ; upper=i32
+[+] my_getint::%storemerge => lower=bottom:32 ; upper=i32
+[+] my_getint::<ret> => lower=bottom:32 ; upper=i32
+[+] my_putint::%.0 => lower=i32 ; upper=i32
+[+] my_putint::%.01 => lower=bottom:32 ; upper=top:32
+[-] my_putint::%bb0.i0 => lower=bottom:64 ; upper=top:64
+[+] my_putint::%bb1.i2 => lower=bool ; upper=bool
+[+] my_putint::%bb2.i0 => lower=i32 ; upper=top:32
+[+] my_putint::%bb2.i1 => lower=bottom:32 ; upper=top:32
+[+] my_putint::%bb2.i2 => lower=u64 ; upper=top:64
+[+] my_putint::%bb2.i3 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
+[+] my_putint::%bb2.i5 => lower=i32 ; upper=i32
+[+] my_putint::%bb2.i6 => lower=bottom:32 ; upper=u32
+[+] my_putint::%bb3.i1 => lower=bool ; upper=bool
+[+] my_putint::%bb4.i0 => lower=bottom:32 ; upper=i32
+[+] my_putint::%bb4.i1 => lower=i64 ; upper=top:64
+[+] my_putint::%bb4.i2 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
+[+] my_putint::%bb4.i3 => lower=bottom:32 ; upper=top:32
+[+] my_putint::%storemerge => lower=bottom:32 ; upper=u32
+[+] my_putint::arg0 => lower=bottom:32 ; upper=i32
+[+] putch::arg0 => lower=bottom:32 ; upper=top:32
+
+[memory]
+type => top:64
+

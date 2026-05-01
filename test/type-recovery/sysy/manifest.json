@@ -52,14 +52,14 @@
     {
       "name": "26_while_test1",
       "input": "cases/26_while_test1.c",
-      "status": "xfail",
-      "reason": "PNDiff assertion while lowering loop-carried stack values from SysY IR"
+      "expected": "expected/tr-level-2/26_while_test1.htypes",
+      "status": "pass"
     },
     {
       "name": "34_arr_expr_len",
       "input": "cases/34_arr_expr_len.c",
-      "status": "xfail",
-      "reason": "PNDiff assertion while recovering array-heavy SysY control flow"
+      "expected": "expected/tr-level-2/34_arr_expr_len.htypes",
+      "status": "pass"
     },
     {
       "name": "40_unary_op",
@@ -70,8 +70,8 @@
     {
       "name": "73_int_io",
       "input": "cases/73_int_io.c",
-      "status": "xfail",
-      "reason": "PNDiff assertion while propagating SysY runtime I/O values"
+      "expected": "expected/tr-level-2/73_int_io.htypes",
+      "status": "pass"
     }
   ]
 }

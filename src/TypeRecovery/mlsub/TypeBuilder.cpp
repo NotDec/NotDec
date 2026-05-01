@@ -649,6 +649,33 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
   return TypeCache.at(Ty);
 }
 
+HType *TypeBuilder::getFieldValueTy(HType *FieldTy) {
+  assert(FieldTy != nullptr && "field type cannot be null");
+  if (auto *PT = llvm::dyn_cast<ast::PointerType>(FieldTy)) {
+    assert(PT->getPointeeType() != nullptr &&
+           "stored field pointer must have pointee type");
+    return PT->getPointeeType();
+  }
+  if (FieldTy->isDualPointerType()) {
+    return FieldTy;
+  }
+  if (auto *Set = llvm::dyn_cast<ast::SetUnionType>(FieldTy)) {
+    std::vector<HType *> Terms;
+    for (auto *Term : Set->getTypes()) {
+      Terms.push_back(getFieldValueTy(Term));
+    }
+    return Ctx.getSetUnionType(false, std::move(Terms));
+  }
+  if (auto *Set = llvm::dyn_cast<ast::SetInterType>(FieldTy)) {
+    std::vector<HType *> Terms;
+    for (auto *Term : Set->getTypes()) {
+      Terms.push_back(getFieldValueTy(Term));
+    }
+    return Ctx.getSetInterType(false, std::move(Terms));
+  }
+  llvm_unreachable("field type must be pointer-like");
+}
+
 HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
                                      std::optional<int64_t> FieldSizeBytes) {
   auto getFallbackBitSize = [&]() -> std::uint32_t {
@@ -661,25 +688,26 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     if (!Side) {
       return nullptr;
     }
-    return convertFieldType(Side, std::nullopt);
+    return getFieldValueTy(convertFieldType(Side, std::nullopt));
   };
 
   if (std::get_if<UTop>(&Ty->v)) {
-    return getTopType(getFallbackBitSize());
+    return wrapFieldStorageTy(getTopType(getFallbackBitSize()));
   } else if (std::get_if<UBot>(&Ty->v)) {
-    return getBottomType(getFallbackBitSize());
+    return wrapFieldStorageTy(getBottomType(getFallbackBitSize()));
   } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
-    return parsePrimitiveName(V->name, binarysub::get_size(Ty));
+    return wrapFieldStorageTy(
+        parsePrimitiveName(V->name, binarysub::get_size(Ty)));
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
-    return convertVariable(*V);
+    return wrapFieldStorageTy(convertVariable(*V));
   } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
     std::vector<HType *> Params;
     for (auto &P : V->args) {
-      Params.push_back(convertFieldType(P, std::nullopt));
+      Params.push_back(convert(P));
     }
     std::vector<HType *> RetTypes;
     if (V->result) {
-      RetTypes.push_back(convertFieldType(V->result, std::nullopt));
+      RetTypes.push_back(convert(V->result));
     }
     auto FTy = Ctx.getFunctionType(false, RetTypes, Params);
     return getPtrTy(FTy);
@@ -704,23 +732,27 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
                                             : std::string("<none>")) +
                             ")";
     DebugPathScope PathScope(*this, std::move(PathFrame));
-    return convertStruct(Ty, RawFields, FieldSizeBytes);
+    return wrapFieldStorageTy(convertStruct(Ty, RawFields, FieldSizeBytes));
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
                                            findStructMergeGroupForSet(V->types));
     return convertVisibleSetTerms(
         V->types,
-        [&](const UTypePtr &Term) { return convertFieldType(Term, FieldSizeBytes); },
+        [&](const UTypePtr &Term) {
+          return convertFieldType(Term, FieldSizeBytes);
+        },
         [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
     StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
                                            findStructMergeGroupForSet(V->types));
     return convertVisibleSetTerms(
         V->types,
-        [&](const UTypePtr &Term) { return convertFieldType(Term, FieldSizeBytes); },
+        [&](const UTypePtr &Term) {
+          return convertFieldType(Term, FieldSizeBytes);
+        },
         [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
-    return convertRecursive(Ty, *V);
+    return wrapFieldStorageTy(convertRecursive(Ty, *V));
   }
   assert(false && "Unhandled field UType variant");
 }
@@ -764,7 +796,7 @@ HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
   }
   AnchorDecl->addField(ast::FieldDecl{
       .R = {.Start = 0, .Size = static_cast<OffsetTy>(SizeBytes)},
-      .Type = wrapFieldStorageTy(Body),
+      .Type = convertFieldType(T.body, SizeBytes),
       .Name = ValueNamer::getName("field_"),
       .Comment = "recursive body at offset: 0",
   });
@@ -971,8 +1003,9 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
 
     HType *Ty = Ent.second;
     if (EffectiveRange != Ent.first) {
+      auto *ValueTy = getFieldValueTy(Ty);
       auto Cropped = cropFieldTypeToRange(
-          Ctx, Ty, Ent.first.Size,
+          Ctx, ValueTy, Ent.first.Size,
           SimpleRange{.Start = EffectiveRange.Start - Ent.first.Start,
                       .Size = EffectiveRange.Size});
       if (Cropped.first == nullptr || Cropped.second.Size == 0) {
@@ -980,13 +1013,13 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
       }
       EffectiveRange = {.Start = Ent.first.Start + Cropped.second.Start,
                         .Size = Cropped.second.Size};
-      Ty = Cropped.first;
+      Ty = wrapFieldStorageTy(Cropped.first);
     }
 
     auto FieldName = ValueNamer::getName("field_");
     auto CurrentDecl =
         FieldDecl{.R = EffectiveRange,
-                  .Type = wrapFieldStorageTy(Ty),
+                  .Type = Ty,
                   .Name = FieldName,
                   .Comment =
                       "at offset: " + std::to_string(EffectiveRange.Start)};
@@ -1010,12 +1043,13 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
 
     // if it is char array, merge with elem
-    if (Ty->isCharArrayType()) {
+    auto *ValueTy = getFieldValueTy(Ty);
+    if (ValueTy->isCharArrayType()) {
       auto j = i + 1;
       for (; j < Fields.size(); j++) {
         auto &EntJ = Fields[j];
-        auto TyJ = EntJ.second;
-        if (!TyJ->isCharType()) {
+        auto *ValueTyJ = getFieldValueTy(EntJ.second);
+        if (!ValueTyJ->isCharType()) {
           break;
         }
         // merge to prev array.
@@ -1039,7 +1073,8 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
 
     // Try to expand array size.
-    if (auto *ArrTy = Ty->getAs<ast::ArrayType>()) {
+    ValueTy = getFieldValueTy(CurrentDecl.Type);
+    if (auto *ArrTy = ValueTy->getAs<ast::ArrayType>()) {
       if (auto NumElements = ArrTy->getNumElements();
           NumElements && *NumElements != 0) {
         // Keep unsized arrays unsized here. We can only expand arrays when an
@@ -1048,7 +1083,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
         if (ElemSize > 0) {
           auto NewCount = (ExpandEnd - CurrentDecl.R.Start) / ElemSize;
           CurrentDecl.R.Size = NewCount * ElemSize;
-          CurrentDecl.Type = ArrTy->withSize(Ctx, NewCount);
+          CurrentDecl.Type = wrapFieldStorageTy(ArrTy->withSize(Ctx, NewCount));
         }
       }
     }
@@ -1277,11 +1312,11 @@ HType *TypeBuilder::convertStruct(
       auto MemberTy = convertStruct(T, SubProblem, FieldSize, true);
       if (FieldSize == MaxStride) {
         auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
-        Fields.push_back(
-            {SimpleRange{.Start = RangeStart, .Size = MaxStride}, ArrTy});
+        Fields.push_back({SimpleRange{.Start = RangeStart, .Size = MaxStride},
+                          wrapFieldStorageTy(ArrTy)});
       } else {
-        Fields.push_back(
-            {SimpleRange{.Start = RangeStart, .Size = FieldSize}, MemberTy});
+        Fields.push_back({SimpleRange{.Start = RangeStart, .Size = FieldSize},
+                          wrapFieldStorageTy(MemberTy)});
       }
     }
   }
@@ -1331,7 +1366,7 @@ HType *TypeBuilder::convertStruct(
     }
     if (Fields.size() == 1 && Fields.front().first.Start == 0 &&
         Fields.front().first.Size == *PointeeSize) {
-      return Fields.front().second;
+      return getFieldValueTy(Fields.front().second);
     }
   }
 
@@ -1455,7 +1490,8 @@ HType *TypeBuilder::convertStruct(
       std::vector<HType *> Members;
       for (auto &Panel : UnionPanels) {
         if (Panel.size() == 1) {
-          // we do not need to create a struct
+          // One overlapped field can be used as a union member directly. It is
+          // already in final field-storage shape.
           Members.push_back(Panel.front().second);
           continue;
         }
@@ -1463,7 +1499,7 @@ HType *TypeBuilder::convertStruct(
         std::string Name = ValueNamer::getName("Us_");
         auto E1 = craftStruct(Panel, SimpleRange{.Start = 0, .Size = OurSize},
                               Name, nullptr);
-        Members.push_back(E1);
+        Members.push_back(wrapFieldStorageTy(E1));
       }
       if (Members.empty()) {
         llvm::errs() << "Warning: Empty union!\n";
@@ -1475,14 +1511,14 @@ HType *TypeBuilder::convertStruct(
         auto FieldName = ValueNamer::getName("field_");
         // Union需要起始大小是0，然后每一项大小都是OurSize。
         Decl->addMember(ast::FieldDecl{.R = {.Start = 0, .Size = OurSize},
-                                       .Type = wrapFieldStorageTy(Ent),
+                                       .Type = Ent,
                                        .Name = FieldName,
                                        .Comment = "at offset: 0"});
       }
       // push the merged union back to fields, and iterate again
       OtherFields.push_back({FieldEntry{
           SimpleRange{.Start = UnionStart + MinStartOff, .Size = OurSize},
-          Ctx.getUnionType(false, Decl)}});
+          wrapFieldStorageTy(Ctx.getUnionType(false, Decl))}});
       assert(NoUpdate == false);
       // #endregion build members using OverlapFields;
       // reiterate with merged fields.
