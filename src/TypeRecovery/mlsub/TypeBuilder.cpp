@@ -644,6 +644,7 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
       .R = {.Start = 0, .Size = static_cast<OffsetTy>(SizeBytes)},
       .Type = Result,
       .Name = ValueNamer::getName("rec_"),
+      .Comment = "at offset: 0",
   });
   return TypeCache.at(Ty);
 }
@@ -1444,7 +1445,8 @@ HType *TypeBuilder::convertStruct(
         // Union需要起始大小是0，然后每一项大小都是OurSize。
         Decl->addMember(ast::FieldDecl{.R = {.Start = 0, .Size = OurSize},
                                        .Type = Ent,
-                                       .Name = FieldName});
+                                       .Name = FieldName,
+                                       .Comment = "at offset: 0"});
       }
       // push the merged union back to fields, and iterate again
       OtherFields.push_back({FieldEntry{
