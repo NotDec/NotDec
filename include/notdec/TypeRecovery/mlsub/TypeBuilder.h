@@ -41,8 +41,9 @@ class TypeBuilder {
   // Cache to avoid duplicate conversions
   std::map<binarysub::UTypePtr, HType *> TypeCache;
 
-  // Handle recursive types
-  std::map<std::string, HType *> RecursiveTypeNames;
+  // Handle explicit recursive bindings from UType. The binder identity is kept
+  // separate from the C anchor decl so HType can preserve recursive back edges.
+  std::map<std::string, ast::RecursiveBinder *> RecursiveTypeNames;
   std::set<binarysub::UTypePtr> InProgress; // cycle detection
   std::optional<std::string> CurrentRootDebugLabel;
   std::vector<std::string> CurrentDebugPath;

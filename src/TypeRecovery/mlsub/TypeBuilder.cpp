@@ -727,22 +727,43 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
 
 HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
                                      const binarysub::URecursiveType &T) {
-  getOrCreateStruct(Ty);
-  HType *Anchor = TypeCache.at(Ty);
+  auto SizeBits = binarysub::get_size(Ty);
+  auto *Binder = Ctx.createRecursiveBinder(ValueNamer::getName("rec_"),
+                                           SizeBits == 0
+                                               ? std::optional<unsigned>()
+                                               : std::optional<unsigned>(
+                                                     static_cast<unsigned>(
+                                                         SizeBits)));
+  auto *AnchorDecl = RecordDecl::Create(Ctx, Binder->getName());
+  Binder->setAnchorDecl(AnchorDecl);
+  HType *Binding = Ctx.getRecursiveBindingType(false, Binder);
+  TypeCache[Ty] = Binding;
 
   auto NameIt = RecursiveTypeNames.find(T.name);
-  assert((NameIt == RecursiveTypeNames.end() || NameIt->second == Anchor) &&
-         "Recursive type name rebound to a different anchor");
-  RecursiveTypeNames[T.name] = Anchor;
+  assert((NameIt == RecursiveTypeNames.end() || NameIt->second == Binder) &&
+         "Recursive type name rebound to a different binder");
+  RecursiveTypeNames[T.name] = Binder;
 
   auto [_, Inserted] = InProgress.insert(Ty);
   assert(Inserted && "Recursive type should not be re-entered before caching");
 
   HType *Body = convert(T.body);
+  Binder->setBody(Body);
 
   InProgress.erase(Ty);
   RecursiveTypeNames.erase(T.name);
-  return finalizeRecursiveType(Ty, Body);
+
+  auto SizeBytes = SizeBits == 0 ? 0 : (SizeBits + 7) / 8;
+  if (SizeBytes == 0) {
+    SizeBytes = Parent.PointerSize;
+  }
+  AnchorDecl->addField(ast::FieldDecl{
+      .R = {.Start = 0, .Size = static_cast<OffsetTy>(SizeBytes)},
+      .Type = wrapFieldStorageTy(Body),
+      .Name = ValueNamer::getName("field_"),
+      .Comment = "recursive body at offset: 0",
+  });
+  return Binding;
 }
 
 HType *TypeBuilder::convert(UTypePtr Ty) {
@@ -1619,7 +1640,7 @@ HType *TypeBuilder::convertVariable(const binarysub::UTypeVariable &T) {
   // For type variables, check if we have a recursive binding
   auto It = RecursiveTypeNames.find(T.name);
   if (It != RecursiveTypeNames.end()) {
-    return It->second;
+    return Ctx.getRecursiveRefType(false, It->second);
   }
 
   // Otherwise, create a TypeVariableType to preserve the semantic information
