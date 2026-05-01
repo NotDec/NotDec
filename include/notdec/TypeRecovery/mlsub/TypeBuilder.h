@@ -84,13 +84,14 @@ protected:
       const binarysub::UTypePtr &T,
       std::vector<std::pair<OffsetRange, binarysub::UTypePtr>> &RawFields,
       std::optional<int64_t> PointeeSize,
-      bool PreferElementType = false);
+      bool PreferElementType = false, bool IsCovariant = true);
   // 如果结构体成员已经递归转换为HType
   // *且处理了重叠问题，这个方法处理padding和size。
   HType *craftStruct(const std::vector<std::pair<SimpleRange, HType *>> &Fields,
                      std::optional<SimpleRange> ValidRange,
                      std::optional<std::string> Name,
-                     const binarysub::UTypePtr *T);
+                     const binarysub::UTypePtr *T,
+                     bool IsCovariant = true);
   std::optional<ast::RecordDecl *> getStructOrNull(binarysub::UTypePtr Ty);
   ast::RecordDecl *getOrCreateStruct(binarysub::UTypePtr Ty);
   void initializeStructMergeInfo();
@@ -115,8 +116,9 @@ protected:
       std::optional<SimpleRange> ValidRange);
   int64_t accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty);
   HType *convertFieldType(const binarysub::UTypePtr &Ty,
-                          std::optional<int64_t> FieldSizeBytes);
-  HType *getFieldValueTy(HType *FieldTy);
+                          std::optional<int64_t> FieldSizeBytes,
+                          bool IsCovariant = true);
+  HType *getFieldValueTy(HType *FieldTy, bool IsCovariant = true);
   HType *doUnion(HType *Lhs, HType *Rhs);
   HType *doInter(HType *Lhs, HType *Rhs);
   HType *convertVariable(const binarysub::UTypeVariable &T);

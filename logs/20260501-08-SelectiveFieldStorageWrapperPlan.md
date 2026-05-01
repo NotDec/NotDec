@@ -127,35 +127,44 @@
 
 ### TypeBuilder
 
-- `include/notdec/TypeRecovery/mlsub/TypeBuilder.h:117-119`
-  - 增加 `getFieldValueTy()`，用于在 TypeBuilder 内部把最终字段类型还原成字段值类型。
-
-- `src/TypeRecovery/mlsub/TypeBuilder.cpp:652-677`
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:678-703`
   - 新增 `getFieldValueTy()`。
   - 普通 `PointerType(T)` 剥成 `T`。
-  - 顶层 `DualPointerType` 保留原样。
+  - 顶层 `DualPointerType` 不再原样返回，而是按 variance 选成员侧。
+  - 选择规则和 llvm2c 一致：缺一边选另一边；一边是 `top/bottom` 时优先选非
+    `top/bottom`；否则协变选 `store`，逆变选 `load`。
   - `SetUnionType` / `SetInterType` 递归剥每个 term。
 
-- `src/TypeRecovery/mlsub/TypeBuilder.cpp:679-755`
+- `include/notdec/TypeRecovery/mlsub/TypeBuilder.h:83-94,118-121`
+  - `convertStruct()`、`craftStruct()`、`convertFieldType()`、`getFieldValueTy()`
+    增加 `IsCovariant` 参数，默认仍是协变。
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:241-265`
+  - 新增 `chooseDualPointerFieldValueTy()`，照搬 llvm2c 的 top/bottom 例外和
+    协变/逆变选择规则。
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:705-785`
   - `convertFieldType()` 改成直接返回最终字段类型。
   - `top` / `bottom` / primitive / type variable fallback 返回 `PointerType(...)`。
   - `UFunctionType` 返回一层函数指针，参数和返回值仍走普通 `convert()`。
   - `UPointerType` 顶层直接返回 `DualPointerType`。
+  - 转换 `UPointerType` 的 load 侧时按逆变传递，store 侧按协变传递。
   - `URecordType` 返回 `PointerType(convertStruct(...))`。
   - `UUnion` / `UInter` 合并最终字段类型。
 
-- `src/TypeRecovery/mlsub/TypeBuilder.cpp:797-802`
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:827-832`
   - recursive anchor field 改用 `convertFieldType(T.body, SizeBytes)`，不再对 body 统一外包。
 
-- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1004-1087`
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1037-1116`
   - `craftStruct()` 现在认为 `Fields` 里的真实字段已经是最终字段类型。
-  - 裁剪、char array 合并、数组扩展时先用 `getFieldValueTy()` 看字段值，再把裁剪/扩展结果包回字段存储形状。
+  - 裁剪、char array 合并、数组扩展时先用 `getFieldValueTy(IsCovariant)`
+    看字段值，再把裁剪/扩展结果包回字段存储形状。
 
-- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1312-1369`
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1345-1402`
   - stride 数组字段生成 `PointerType(ArrayType(...))`。
-  - `PreferElementType` 返回字段值类型，避免数组元素变成字段地址类型。
+  - `PreferElementType` 返回按当前 variance 选出的字段值类型，避免数组元素变成字段地址类型。
 
-- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1490-1521`
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1525-1554`
   - union member 改成保存最终字段类型。
   - 多字段 panel 先构造成 struct 值，再作为 union member 字段包一层。
 
@@ -163,19 +172,21 @@
 
 - `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:203-239`
   - `stripStoredFieldAddressType()` 支持新的顶层字段形状。
-  - `PointerType(DualPointerType)` 和顶层 `DualPointerType` 都走同一套 `lowerDualPointerView()`。
+  - `PointerType(DualPointerType)` 表示“字段值本身是指针”，剥字段地址层后降成
+    `PointerType(选出的成员侧)`。
+  - 顶层 `DualPointerType` 表示字段地址/读写视图，剥字段地址层时只选成员侧，不再额外降成指针。
   - `SetUnionType` / `SetInterType` 递归剥字段类型。
 
-- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:459-495`
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:455-495`
   - by-value aggregate cycle 检测改为先用 `getStoredFieldValueType()` 取得字段值，再判断直接聚合。
 
-- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:863-893`
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:893-898`
   - `calcUseRelation()` 统计字段 decl usage 时，先剥字段值类型，并递归处理 set term。
 
 - `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:954-970`
   - struct 字段声明继续基于 `getStoredFieldValueType()` 输出 C 字段类型。
 
-- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:986-1012`
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:1028-1038`
   - decl define 顺序遍历补上 set union/intersection 的 term 遍历。
 
 ### 测试和 oracle
@@ -208,57 +219,49 @@ cmake --build ./build --target notdec-decompile -j4
 
 结果：通过。
 
-2. llvm-ir suite
+2. llvm-ir / sysy suite
 
 ```bash
-ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --output-on-failure
 ```
 
-结果：通过。
+结果：`llvm_ir` 和 `sysy` 都通过。
 
-3. sysy suite
-
-```bash
-ctest --test-dir build -R notdec.type_recovery.sysy.tr_level_2 --output-on-failure
-```
-
-结果：通过。
-
-4. fortune 当前关注性能口径
+3. fortune 当前关注性能口径
 
 ```bash
 /usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
   test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
-  -o /tmp/fortune.selective-field-wrapper.final.out.ll \
+  -o /tmp/fortune.selective-field-wrapper.variance.out.ll \
   --tr-level=2 --frozen-tr-input-ir -g \
-  --work-dir=/tmp/notdec-fortune-selective-field-wrapper-final
+  --work-dir=/tmp/notdec-fortune-selective-field-wrapper-variance
 ```
 
 结果：
 
 - 跑通。
-- `real 15.16s`
+- `real 14.87s`
 - 当前参考是 `real 16.33s`，没有性能退化。
-- `/tmp/notdec-fortune-selective-field-wrapper-final/ValueHTypes.txt` 中字段顶层已经能直接看到
+- `/tmp/notdec-fortune-selective-field-wrapper-variance/ValueHTypes.txt` 中字段顶层已经能直接看到
   `ptr<load=..., store=..., psize=...>`，不是统一的 `ptr<...>*`。
 
-5. fortune `.c` 路径
+4. fortune `.c` 路径
 
 ```bash
 /usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
   test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
-  -o /tmp/fortune.selective-field-wrapper.final.out.c \
+  -o /tmp/fortune.selective-field-wrapper.variance.out.c \
   --tr-level=2 --frozen-tr-input-ir -g \
-  --work-dir=/tmp/notdec-fortune-selective-field-wrapper-final-c
+  --work-dir=/tmp/notdec-fortune-selective-field-wrapper-variance-c
 ```
 
 结果：
 
 - 跑通并生成 C。
-- `real 19.05s`
+- `real 19.22s`
 - 仍有较多 llvm2c fallback warning，主要是 pointer arithmetic、global offset 和 set type lossy lowering。
 
-6. realworld oracle
+5. realworld oracle
 
 ```bash
 ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-failure

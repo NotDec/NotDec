@@ -238,6 +238,32 @@ bool isZeroSizedRecordMarker(const binarysub::UTypePtr &Ty) {
   return false;
 }
 
+bool isVagueFieldBoundType(const HType *Ty) {
+  return Ty != nullptr && (Ty->isTopType() || Ty->isBottomType());
+}
+
+HType *chooseDualPointerFieldValueTy(const ast::DualPointerType *Ty,
+                                     bool IsCovariant) {
+  HType *LoadTy = Ty->getLoadType();
+  HType *StoreTy = Ty->getStoreType();
+  assert((LoadTy != nullptr || StoreTy != nullptr) &&
+         "dual pointer field must have at least one side");
+  if (LoadTy == nullptr) {
+    return StoreTy;
+  }
+  if (StoreTy == nullptr) {
+    return LoadTy;
+  }
+
+  bool LoadVague = isVagueFieldBoundType(LoadTy);
+  bool StoreVague = isVagueFieldBoundType(StoreTy);
+  if (LoadVague != StoreVague) {
+    return LoadVague ? StoreTy : LoadTy;
+  }
+
+  return IsCovariant ? StoreTy : LoadTy;
+}
+
 // UType 的 set 节点已经在上游按同类 flatten 成 vector，这里只需要按顺序
 // 过滤掉 marker 项，再线性 reduce 成 HType set。
 template <typename ConvertFn, typename MergeFn>
@@ -649,27 +675,27 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
   return TypeCache.at(Ty);
 }
 
-HType *TypeBuilder::getFieldValueTy(HType *FieldTy) {
+HType *TypeBuilder::getFieldValueTy(HType *FieldTy, bool IsCovariant) {
   assert(FieldTy != nullptr && "field type cannot be null");
   if (auto *PT = llvm::dyn_cast<ast::PointerType>(FieldTy)) {
     assert(PT->getPointeeType() != nullptr &&
            "stored field pointer must have pointee type");
     return PT->getPointeeType();
   }
-  if (FieldTy->isDualPointerType()) {
-    return FieldTy;
+  if (auto *DPT = llvm::dyn_cast<ast::DualPointerType>(FieldTy)) {
+    return chooseDualPointerFieldValueTy(DPT, IsCovariant);
   }
   if (auto *Set = llvm::dyn_cast<ast::SetUnionType>(FieldTy)) {
     std::vector<HType *> Terms;
     for (auto *Term : Set->getTypes()) {
-      Terms.push_back(getFieldValueTy(Term));
+      Terms.push_back(getFieldValueTy(Term, IsCovariant));
     }
     return Ctx.getSetUnionType(false, std::move(Terms));
   }
   if (auto *Set = llvm::dyn_cast<ast::SetInterType>(FieldTy)) {
     std::vector<HType *> Terms;
     for (auto *Term : Set->getTypes()) {
-      Terms.push_back(getFieldValueTy(Term));
+      Terms.push_back(getFieldValueTy(Term, IsCovariant));
     }
     return Ctx.getSetInterType(false, std::move(Terms));
   }
@@ -677,18 +703,21 @@ HType *TypeBuilder::getFieldValueTy(HType *FieldTy) {
 }
 
 HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
-                                     std::optional<int64_t> FieldSizeBytes) {
+                                     std::optional<int64_t> FieldSizeBytes,
+                                     bool IsCovariant) {
   auto getFallbackBitSize = [&]() -> std::uint32_t {
     if (FieldSizeBytes.has_value()) {
       return static_cast<std::uint32_t>(*FieldSizeBytes * 8);
     }
     return binarysub::get_size(Ty);
   };
-  auto convertPointerSide = [&](const UTypePtr &Side) -> HType * {
+  auto convertPointerSide = [&](const UTypePtr &Side, bool SideCovariant)
+      -> HType * {
     if (!Side) {
       return nullptr;
     }
-    return getFieldValueTy(convertFieldType(Side, std::nullopt));
+    return getFieldValueTy(convertFieldType(Side, std::nullopt, SideCovariant),
+                           SideCovariant);
   };
 
   if (std::get_if<UTop>(&Ty->v)) {
@@ -717,8 +746,8 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     // plain PointerType still means "the field value is a normal C-like
     // pointer", while DualPointerType means "the field value is an address-like
     // object with separate load/store views".
-    HType *LoadTy = convertPointerSide(V->load);
-    HType *StoreTy = convertPointerSide(V->store);
+    HType *LoadTy = convertPointerSide(V->load, false);
+    HType *StoreTy = convertPointerSide(V->store, true);
     return Ctx.getDualPointerType(false, V->psize, LoadTy, StoreTy);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
     auto &T = *PT;
@@ -732,14 +761,15 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
                                             : std::string("<none>")) +
                             ")";
     DebugPathScope PathScope(*this, std::move(PathFrame));
-    return wrapFieldStorageTy(convertStruct(Ty, RawFields, FieldSizeBytes));
+    return wrapFieldStorageTy(
+        convertStruct(Ty, RawFields, FieldSizeBytes, false, IsCovariant));
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
                                            findStructMergeGroupForSet(V->types));
     return convertVisibleSetTerms(
         V->types,
         [&](const UTypePtr &Term) {
-          return convertFieldType(Term, FieldSizeBytes);
+          return convertFieldType(Term, FieldSizeBytes, IsCovariant);
         },
         [&](HType *LhsTy, HType *RhsTy) { return doUnion(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<UInter>(&Ty->v)) {
@@ -748,7 +778,7 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     return convertVisibleSetTerms(
         V->types,
         [&](const UTypePtr &Term) {
-          return convertFieldType(Term, FieldSizeBytes);
+          return convertFieldType(Term, FieldSizeBytes, IsCovariant);
         },
         [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });
   } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
@@ -923,7 +953,8 @@ int64_t TypeBuilder::accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty) {
 HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
                                 std::optional<SimpleRange> ValidRange,
                                 std::optional<std::string> Name,
-                                const binarysub::UTypePtr *T) {
+                                const binarysub::UTypePtr *T,
+                                bool IsCovariant) {
   if (!Name) {
     Name = ValueNamer::getName("struct_");
   }
@@ -1003,7 +1034,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
 
     HType *Ty = Ent.second;
     if (EffectiveRange != Ent.first) {
-      auto *ValueTy = getFieldValueTy(Ty);
+      auto *ValueTy = getFieldValueTy(Ty, IsCovariant);
       auto Cropped = cropFieldTypeToRange(
           Ctx, ValueTy, Ent.first.Size,
           SimpleRange{.Start = EffectiveRange.Start - Ent.first.Start,
@@ -1043,12 +1074,12 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
 
     // if it is char array, merge with elem
-    auto *ValueTy = getFieldValueTy(Ty);
+    auto *ValueTy = getFieldValueTy(Ty, IsCovariant);
     if (ValueTy->isCharArrayType()) {
       auto j = i + 1;
       for (; j < Fields.size(); j++) {
         auto &EntJ = Fields[j];
-        auto *ValueTyJ = getFieldValueTy(EntJ.second);
+        auto *ValueTyJ = getFieldValueTy(EntJ.second, IsCovariant);
         if (!ValueTyJ->isCharType()) {
           break;
         }
@@ -1073,7 +1104,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     }
 
     // Try to expand array size.
-    ValueTy = getFieldValueTy(CurrentDecl.Type);
+    ValueTy = getFieldValueTy(CurrentDecl.Type, IsCovariant);
     if (auto *ArrTy = ValueTy->getAs<ast::ArrayType>()) {
       if (auto NumElements = ArrTy->getNumElements();
           NumElements && *NumElements != 0) {
@@ -1154,7 +1185,8 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
 HType *TypeBuilder::convertStruct(
     const binarysub::UTypePtr &T,
     std::vector<std::pair<OffsetRange, UTypePtr>> &RawFields,
-    std::optional<int64_t> PointeeSize, bool PreferElementType) {
+    std::optional<int64_t> PointeeSize, bool PreferElementType,
+    bool IsCovariant) {
   HType *Result = nullptr;
   auto StructMergeGroup = ActiveStructMergeGroup;
   if (!StructMergeGroup) {
@@ -1309,7 +1341,8 @@ HType *TypeBuilder::convertStruct(
                               std::to_string(RangeStart) + ".." +
                               std::to_string(RangeEnd) + ")";
       DebugPathScope PathScope(*this, std::move(PathFrame));
-      auto MemberTy = convertStruct(T, SubProblem, FieldSize, true);
+      auto MemberTy =
+          convertStruct(T, SubProblem, FieldSize, true, IsCovariant);
       if (FieldSize == MaxStride) {
         auto ArrTy = Ctx.getArrayType(false, MemberTy, std::nullopt);
         Fields.push_back({SimpleRange{.Start = RangeStart, .Size = MaxStride},
@@ -1347,7 +1380,7 @@ HType *TypeBuilder::convertStruct(
                               std::to_string(Size) + ")";
       DebugPathScope PathScope(*this, std::move(PathFrame));
       Fields.push_back({SimpleRange{.Start = Ent.first.offset, .Size = Size},
-                        convertFieldType(Ent.second, Size)});
+                        convertFieldType(Ent.second, Size, IsCovariant)});
     }
   }
 
@@ -1366,7 +1399,7 @@ HType *TypeBuilder::convertStruct(
     }
     if (Fields.size() == 1 && Fields.front().first.Start == 0 &&
         Fields.front().first.Size == *PointeeSize) {
-      return getFieldValueTy(Fields.front().second);
+      return getFieldValueTy(Fields.front().second, IsCovariant);
     }
   }
 
@@ -1498,7 +1531,7 @@ HType *TypeBuilder::convertStruct(
         // directly create a struct here
         std::string Name = ValueNamer::getName("Us_");
         auto E1 = craftStruct(Panel, SimpleRange{.Start = 0, .Size = OurSize},
-                              Name, nullptr);
+                              Name, nullptr, IsCovariant);
         Members.push_back(wrapFieldStorageTy(E1));
       }
       if (Members.empty()) {
@@ -1536,7 +1569,8 @@ HType *TypeBuilder::convertStruct(
     // would lose the aggregate boundary and degrade to void* too early.
     if (PointeeSize && *PointeeSize > 0) {
       return craftStruct(
-          {}, SimpleRange{.Start = 0, .Size = *PointeeSize}, std::nullopt, &T);
+          {}, SimpleRange{.Start = 0, .Size = *PointeeSize}, std::nullopt, &T,
+          IsCovariant);
     }
     return getVoidPtr();
   }
@@ -1589,7 +1623,7 @@ HType *TypeBuilder::convertStruct(
 
   Result = craftStruct(
       Fields, SimpleRange{.Start = Fields.front().first.Start, .Size = Size},
-      std::nullopt, &T);
+      std::nullopt, &T, IsCovariant);
   return Result;
 }
 
