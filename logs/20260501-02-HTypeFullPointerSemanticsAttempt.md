@@ -23,7 +23,7 @@
 1. `TypeBuilder`
    - `URecordType` 走 pointer 入口时，先构造 record，再外包一层 pointer
    - `RecordDecl::Field.Type` / `UnionDecl::Member.Type` 对真实成员统一包一层地址类型
-   - `padding_*` 继续保留原样，不包地址层
+  - `padding_*` 也按字段地址语义包一层 pointer
 
 2. `HType` 打印与 lowering
    - `RecordPtrType` 不再打印成 `struct X*`
@@ -186,6 +186,82 @@ NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
    - 对 `PointerType(DualPointerType(...))` 这种 storage-address type，不能只剥一层就直接走通用 `convertType()`
 3. `field offset -> field value` 的统一 helper
    - 避免声明、成员访问、global split 各自写一套剥层逻辑
+
+## 追加实现：严格剥字段地址和 DualPointer 选择
+
+这次把 `stripStoredFieldAddressType()` 从“能剥就剥，不能剥就原样返回”
+改成严格语义：
+
+- 普通 `PointerType` 必须有 pointee，返回 pointee
+- `PointerType(DualPointerType)` 先把 DualPointer 降成一个普通指针视图
+- 直接遇到 `DualPointerType` 时，按成员选择规则返回成员类型
+- 其他类型直接 fatal error，避免静默把字段地址和值类型混用
+
+DualPointer 成员选择规则：
+
+1. load/store 只有一边存在时选存在的一边。
+2. 一边是 top/bottom，另一边不是，选另一边。
+3. 其余按 variance：协变选 store，逆变选 load。
+
+padding 字段也改到 `TypeBuilder` 阶段统一包 storage pointer，所以 llvm2c 不再需要
+padding 例外。普通字段和 padding 字段都必须能剥一层。
+
+### 修改点
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/TypeManager.h:44-51`
+  - `getStoredFieldValueType()` 增加 variance 参数
+  - 保留单一 `HType*` 入口，不再增加字段级 padding 例外
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:157-237`
+  - 新增 fatal helper、DualPointer 成员选择和严格剥离逻辑
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:444-452`
+  - `ClangTypeResult::getStoredFieldValueType()` 改为调用严格 helper
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:692-708`
+  - `calcUseRelation()` 继续通过字段类型剥出字段值类型
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:729-764`
+  - `convertUnion()` / `convertStruct()` 继续通过字段类型剥出字段值类型
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:776-814`
+  - `defineDecls()` 避免对已经转成值类型的字段再次剥离
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:1147-1160`
+  - `createMemoryDecls()` 继续通过字段类型剥出字段值类型
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:912-919`
+  - only-padding struct 字段也改成 `wrapFieldStorageTy(char[N])`
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1032-1078`
+  - padding before / padding after / padding only 都改成 `wrapFieldStorageTy(char[N])`
+
+### 验证
+
+1. build
+
+```bash
+cmake --build ./build --target notdec-decompile -j4
+```
+
+结果：通过。
+
+2. fortune `.c` 路径
+
+```bash
+NOTDEC_POINTER_ANALYSIS_MODE=original /usr/bin/time -p ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.strict-strip-padding-wrapped.out.c \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-strict-strip-padding-wrapped
+```
+
+结果：
+
+- 跑通
+- `real 21.04s`
+- 对比上一轮 `.c` 结果 `21.17s`，同档
+
+中间曾暴露 padding 字段 `i8[1]` 被误传给严格剥离的问题。最终处理方式是：
+在 `TypeBuilder` 的 padding 插入点补上 storage pointer，不在 llvm2c 里加 padding 例外。
+
+### 本次判断
+
+- 实现效果：7/10。真实字段失败路径更明确，DualPointer 不再走旧的 load-first fallback。
+- 复杂度：6/10。新增了几个小 helper，但集中在 TypeManager 局部。
+- 维护成本：7/10。padding 也进入统一字段地址语义后，llvm2c 侧少了特殊分支。
 
 ## 追加说明：旧值语义和新地址语义仍在混用的具体位置
 

@@ -912,9 +912,11 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
       auto FieldName = ValueNamer::getName("padding_");
       auto CurrentDecl = FieldDecl{
           .R = *ValidRange,
-          .Type = Ctx.getArrayType(false, Ctx.getChar(), ValidRange->Size),
+          .Type = wrapFieldStorageTy(
+              Ctx.getArrayType(false, Ctx.getChar(), ValidRange->Size)),
           .Name = FieldName,
-          .Comment = "at offset: " + std::to_string(ValidRange->Start)};
+          .Comment = "at offset: " + std::to_string(ValidRange->Start),
+          .isPadding = true};
       Decl->addField(CurrentDecl);
       return FinishRecord(Decl);
     }
@@ -1031,7 +1033,8 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
       auto PaddingSize = CurrentDecl.R.Start - Current;
       PaddingBefore = FieldDecl{
           .R = SimpleRange{.Start = Current, .Size = PaddingSize},
-          .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+          .Type = wrapFieldStorageTy(
+              Ctx.getArrayType(false, Ctx.getChar(), PaddingSize)),
           .Name = ValueNamer::getName("padding_"),
           .Comment = "at offset: " + std::to_string(Current),
           .isPadding = true,
@@ -1046,7 +1049,8 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
       auto PaddingSize = ExpandEnd - CurrentDecl.R.end();
       PaddingAfter = FieldDecl{
           .R = SimpleRange{.Start = CurrentDecl.R.end(), .Size = PaddingSize},
-          .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+          .Type = wrapFieldStorageTy(
+              Ctx.getArrayType(false, Ctx.getChar(), PaddingSize)),
           .Name = ValueNamer::getName("padding_"),
           .Comment = "at offset: " + std::to_string(CurrentDecl.R.end()),
           .isPadding = true,
@@ -1068,7 +1072,8 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
         auto PaddingSize = ValidRange->end() - Current;
         auto PaddingOnly = FieldDecl{
             .R = SimpleRange{.Start = Current, .Size = PaddingSize},
-            .Type = Ctx.getArrayType(false, Ctx.getChar(), PaddingSize),
+            .Type = wrapFieldStorageTy(
+                Ctx.getArrayType(false, Ctx.getChar(), PaddingSize)),
             .Name = ValueNamer::getName("padding_"),
             .Comment = "at offset: " + std::to_string(Current),
             .isPadding = true,
