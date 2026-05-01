@@ -29,6 +29,24 @@ namespace notdec {
 const char *KIND_STACK_DIRECTION = "notdec.stack_direction";
 const char *KIND_STACK_DIRECTION_NEGATIVE = "negative";
 
+// 有些函数会先建栈帧，再通过 exit()/abort() 之类的 noreturn 路径结束。
+// 这类函数在 IR 里通常只有 unreachable 终点，不会显式把 SP restore 回去。
+// 这种情况下，缺少 restore 不是恢复失败，仍然可以安全地把栈地址改写成 alloca。
+static bool hasOnlyUnreachableExitBlocks(Function &F) {
+  bool SawExitBlock = false;
+  for (auto &BB : F) {
+    auto *Term = BB.getTerminator();
+    if (Term->getNumSuccessors() != 0) {
+      continue;
+    }
+    SawExitBlock = true;
+    if (!isa<UnreachableInst>(Term)) {
+      return false;
+    }
+  }
+  return SawExitBlock;
+}
+
 bool isGrowNegative(Instruction *Inst) {
   if (llvm::MDNode *MD = Inst->getMetadata(KIND_STACK_DIRECTION)) {
     // 验证元数据格式：应该包含一个MDString元素
@@ -316,11 +334,20 @@ PreservedAnalyses LinearAllocationRecovery::run(Module &M,
         }
       }
       if (!removed) {
-        std::string Message;
-        llvm::raw_string_ostream OS(Message);
-        OS << "ERROR: Cannot find sp restore? func: " << F->getName() << "\n";
-        notdec::appendRecoveryPassLog(OS.str());
-        continue;
+        if (hasOnlyUnreachableExitBlocks(*F)) {
+          std::string Message;
+          llvm::raw_string_ostream OS(Message);
+          OS << "NOTE: missing sp restore is allowed for noreturn func: "
+             << F->getName() << "\n";
+          notdec::appendRecoveryPassLog(OS.str());
+        } else {
+          std::string Message;
+          llvm::raw_string_ostream OS(Message);
+          OS << "ERROR: Cannot find sp restore? func: " << F->getName()
+             << "\n";
+          notdec::appendRecoveryPassLog(OS.str());
+          continue;
+        }
       }
     }
 

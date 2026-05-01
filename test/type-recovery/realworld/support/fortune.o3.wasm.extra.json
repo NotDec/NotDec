@@ -2,7 +2,7 @@
   "version": 1,
   "ir_anchor": {
     "stage": "mlsub-input",
-    "sha256": "ebb18246a7d2c849aea678b4379399c10143d04dfce136ed3610045981c2c62d",
+    "sha256": "6620beabc3151befe0fe881ebbd307d42787ffe7a0b738c3ef8f8fe16b527358",
     "data_layout": "e-m:e-p:32:32-i64:64-n32:64-S128",
     "target_triple": "wasm32-unknown-wasi"
   },
