@@ -734,8 +734,6 @@ HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
                                                : std::optional<unsigned>(
                                                      static_cast<unsigned>(
                                                          SizeBits)));
-  auto *AnchorDecl = RecordDecl::Create(Ctx, Binder->getName());
-  Binder->setAnchorDecl(AnchorDecl);
   HType *Binding = Ctx.getRecursiveBindingType(false, Binder);
   TypeCache[Ty] = Binding;
 
@@ -753,6 +751,13 @@ HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
   InProgress.erase(Ty);
   RecursiveTypeNames.erase(T.name);
 
+  if (auto *BodyDecl = Body->getAsRecordOrUnionDecl()) {
+    Binder->setAnchorDecl(BodyDecl);
+    return Binding;
+  }
+
+  auto *AnchorDecl = RecordDecl::Create(Ctx, Binder->getName());
+  Binder->setAnchorDecl(AnchorDecl);
   auto SizeBytes = SizeBits == 0 ? 0 : (SizeBits + 7) / 8;
   if (SizeBytes == 0) {
     SizeBytes = Parent.PointerSize;

@@ -372,3 +372,110 @@ anchor，不再被摊平成普通 `struct_N`。例如 `06_SimpleRecursive2` 从
 
 更好的后续方案：下一步不要直接在 `convertType()` 里硬降级所有递归节点，而是先加
 递归 occurrence 分类 helper，明确区分 pointer recursion 和 embedded recursion。
+
+## 继续实现：llvm2c 降级和 fortune 按值环断环
+
+这次继续接上后端。实现时按新的判断调整了一点策略：按值递归先不降成
+`char[N]`，而是让 Clang AST 内部用指针字段断环，最终打印时恢复成非法但更能
+反映语义的按值字段。这样可以避免 `ASTContext::getASTRecordLayout()` 死循环，
+同时输出类似：
+
+```c
+union union_3642 {
+    struct struct_3621 field_3644 /* at offset: 0 */ ;
+};
+struct struct_3621 {
+    union union_3642 field_3655 /* at offset: -1024 */ ;
+};
+```
+
+### 修改点
+
+1. `src/TypeRecovery/mlsub/TypeBuilder.cpp`
+   - `754-757`：`convertRecursive()` 如果 body 已经是 `RecordDecl/UnionDecl`，
+     binder 的 `AnchorDecl` 直接复用 body decl。
+   - `759-770`：只有 body 不是带 decl 的聚合时，才创建 `rec_` 单字段结构体壳。
+
+2. `external/NotDec-llvm2c/include/notdec-llvm2c/TypeManager.h`
+   - `44-51`：新增 `ForcedFieldTypeStrings` 和 `CyclicByValueFields`。前者用于
+     “Clang AST 内部字段是指针、打印时恢复按值聚合类型”。
+   - `65-68`：声明按值聚合环分析 helper。
+   - `141-147`：给 DeclPrinter 查询强制字段类型文本。
+
+3. `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp`
+   - `324-331`、`393-395`：`canLowerToClangTypeImpl()` 和
+     `estimateTypeWidthBitsImpl()` 支持 `RecursiveBindingType/RecursiveRefType`。
+   - `445-477`：新增 `getDirectAggregateFieldValueDecl()` 和
+     `formatAggregateDeclType()`，剥 storage pointer 后判断字段值是否是直接聚合。
+   - `479-578`：新增 `analyzeByValueAggregateCycles()`，在结构体/union 字段图上找
+     SCC，标记按值聚合环字段，并输出诊断。
+   - `812-821`：`convertType()` 把 recursive binding/ref 降成 binder anchor decl。
+   - `870-891`、`897-925`：`convertUnion()` / `convertStruct()` 遇到按值环字段时，
+     Clang AST 里用指针类型，记录原始 `struct/union` 类型文本供打印恢复。
+   - `947-954`：`defineDecls()` 遍历 recursive binding/ref 的 anchor decl，避免漏定义。
+
+4. `external/NotDec-llvm2c/lib/notdec-llvm2c/ASTPrinter/DeclPrinter.cpp`
+   - `537-543`：字段存在强制类型文本时，优先打印该文本。这个修改已单独提交。
+
+5. `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/HType.cpp`
+   - `176-193`：`getAsRecordDecl()` / `getAsUnionDecl()` /
+     `getAsTypedefDecl()` 改为 `dyn_cast` 失败返回空指针，避免非 decl 类型调用时崩溃。
+
+### 验证
+
+1. build
+
+```bash
+cmake --build ./build --target notdec-decompile -j4
+```
+
+结果：通过。
+
+2. 小递归 `.c` 路径
+
+```bash
+./build/bin/notdec test/type-recovery/llvm-ir/cases/06_SimpleRecursive2.ll \
+  -o /tmp/06.rec-node-reuse.out.c --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-06-rec-node-reuse-c
+```
+
+结果：通过。输出是合法的 `struct rec_... { struct rec_... *field; }` 指针递归。
+
+3. fortune `.c` 路径
+
+```bash
+NOTDEC_POINTER_ANALYSIS_MODE=original /usr/bin/time -p timeout 45s \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.rec-cycle-invalid.out.c \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-rec-cycle-invalid-c
+```
+
+结果：通过，`real 19.23s`，没有再卡在 Clang record layout。输出里确认有
+`struct struct_3621 <-> union union_3642` 的按值环，打印成非法但语义明确的 C。
+
+4. llvm-ir suite
+
+```bash
+python3 test/run_type_recovery_suite.py \
+  --binary ./build/bin/notdec \
+  --manifest test/type-recovery/llvm-ir/manifest.json \
+  --project-root /sn640/NotDec \
+  --workdir /tmp/notdec-suite-llvm-ir-rec-node-lowered
+```
+
+结果：`11 passed, 3 xfailed, 6 failed`。失败仍是 `.htypes` golden mismatch，主要来自
+递归类型现在显式打印 `rec_`。
+
+### 提交
+
+- `external/NotDec-llvm2c` `76355b1`：递归 HType 后端 lowering、anchor decl、
+  按值聚合环检测，以及 Clang AST 内部断环。
+- `external/NotDec-llvm2c` `eb5e941`：单独提交按值递归字段的打印恢复。
+
+### 当前评分
+
+- 实现效果：8/10。fortune `.c` 已不死循环，并能打印出原来的非法按值环。
+- 复杂度：7/10。多了一个字段图 SCC 分析，但范围只在 llvm2c 类型降级里。
+- 维护成本：6/10。内部 AST 类型和最终打印类型不一致，需要后续注意表达式代码是否
+  依赖字段的真实 Clang 类型；目前 fortune 用例可以完成输出。
