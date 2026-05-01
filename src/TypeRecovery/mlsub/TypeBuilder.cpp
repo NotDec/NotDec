@@ -642,7 +642,7 @@ HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
   }
   Decl->addField(ast::FieldDecl{
       .R = {.Start = 0, .Size = static_cast<OffsetTy>(SizeBytes)},
-      .Type = Result,
+      .Type = wrapFieldStorageTy(Result),
       .Name = ValueNamer::getName("rec_"),
       .Comment = "at offset: 0",
   });
@@ -958,7 +958,7 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
     auto FieldName = ValueNamer::getName("field_");
     auto CurrentDecl =
         FieldDecl{.R = EffectiveRange,
-                  .Type = Ty,
+                  .Type = wrapFieldStorageTy(Ty),
                   .Name = FieldName,
                   .Comment =
                       "at offset: " + std::to_string(EffectiveRange.Start)};
@@ -1444,7 +1444,7 @@ HType *TypeBuilder::convertStruct(
         auto FieldName = ValueNamer::getName("field_");
         // Union需要起始大小是0，然后每一项大小都是OurSize。
         Decl->addMember(ast::FieldDecl{.R = {.Start = 0, .Size = OurSize},
-                                       .Type = Ent,
+                                       .Type = wrapFieldStorageTy(Ent),
                                        .Name = FieldName,
                                        .Comment = "at offset: 0"});
       }
@@ -1563,7 +1563,7 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
         (PointeeSize ? std::to_string(*PointeeSize) : std::string("<none>")) +
         ")";
     DebugPathScope PathScope(*this, std::move(PathFrame));
-    Ret = convertStruct(Ty, RawFields, PointeeSize);
+    Ret = getPtrTy(convertStruct(Ty, RawFields, PointeeSize));
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
                                            findStructMergeGroupForSet(V->types));
@@ -1580,7 +1580,7 @@ HType *TypeBuilder::convertPointer(const binarysub::UTypePtr &Ty,
     assert(false && "Unhandled Pointer UType variant");
   }
   assert((Ret->isPointerType() || Ret->isDualPointerType() ||
-          Ret->isRecordType()) &&
+          Ret->isSetUnionType() || Ret->isSetInterType()) &&
          "Pointer conversion must preserve address-like semantics");
   return Ret;
 }

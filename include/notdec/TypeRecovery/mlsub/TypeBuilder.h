@@ -129,6 +129,7 @@ protected:
   HType *getPtrTy(HType *Pointee) {
     return Ctx.getPointerType(false, Parent.PointerSize * 8, Pointee);
   }
+  HType *wrapFieldStorageTy(HType *ValueTy) { return getPtrTy(ValueTy); }
 };
 
 } // namespace notdec::mlsub
