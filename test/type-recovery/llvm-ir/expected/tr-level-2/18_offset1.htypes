@@ -2,16 +2,16 @@
 
 [decls]
 struct struct_0 {
-  i8[4][]* field_0; /* at offset: 0 */
+  i8[4][] field_0; /* at offset: 0 */
 };
 
 struct struct_1 {
-  top:32* field_0; /* at offset: -8 */
-  top:32* field_1; /* at offset: -4 */
+  top:32 field_0; /* at offset: -8 */
+  top:32 field_1; /* at offset: -4 */
 };
 
 struct struct_2 {
-  top:32* field_0; /* at offset: -24 */
+  top:32 field_0; /* at offset: -24 */
 };
 
 

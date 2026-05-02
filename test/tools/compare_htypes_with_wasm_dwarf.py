@@ -352,7 +352,10 @@ def parse_htypes(path: Path) -> ParsedHTypes:
 
     memory_fields_by_offset: dict[int, FieldDecl] = {}
     if memory_decl is None and memory_type_raw:
-        targets = sorted(find_record_pointer_targets(parse_type_expr(memory_type_raw)))
+        memory_expr = parse_type_expr(memory_type_raw)
+        targets = sorted(find_record_pointer_targets(memory_expr))
+        if not targets:
+            targets = sorted(find_record_value_targets(memory_expr))
         if len(targets) == 1:
             memory_decl = targets[0]
     if memory_decl and memory_decl in decls:
@@ -579,7 +582,9 @@ class Comparator:
 
         record_targets = sorted(find_record_pointer_targets(recovered_field.expr))
         if not record_targets:
-            return [f"{binding_key}: recovered slot is not a record pointer: {recovered_field.expr_raw}"], None, []
+            record_targets = sorted(find_record_value_targets(recovered_field.expr))
+        if not record_targets:
+            return [f"{binding_key}: recovered slot has no record target: {recovered_field.expr_raw}"], None, []
         if len(record_targets) != 1:
             return [f"{binding_key}: ambiguous record pointer targets: {', '.join(record_targets)}"], None, []
 

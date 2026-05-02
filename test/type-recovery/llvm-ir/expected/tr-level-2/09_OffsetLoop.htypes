@@ -2,31 +2,31 @@
 
 [decls]
 struct rec_16 {
-  struct_0* field_0; /* recursive body at offset: 0 */
+  struct_0 field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_0 {
-  i8[4]* padding_0; /* at offset: 0 */
+  i8[4] padding_0; /* at offset: 0 */
 };
 
 struct rec_24 {
-  struct_1* field_0; /* recursive body at offset: 0 */
+  struct_1 field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_1 {
-  i8[4]* padding_0; /* at offset: 0 */
+  i8[4] padding_0; /* at offset: 0 */
 };
 
 struct rec_20 {
-  struct_2* field_0; /* recursive body at offset: 0 */
+  struct_2 field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_2 {
-  i8[4]* padding_0; /* at offset: 0 */
+  i8[4] padding_0; /* at offset: 0 */
 };
 
 struct struct_3 {
-  rec_24* field_0; /* at offset: 4 */
+  rec_24 field_0; /* at offset: 4 */
 };
 
 

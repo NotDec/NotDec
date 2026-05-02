@@ -118,7 +118,7 @@ protected:
   HType *convertFieldType(const binarysub::UTypePtr &Ty,
                           std::optional<int64_t> FieldSizeBytes,
                           bool IsCovariant = true);
-  HType *getFieldValueTy(HType *FieldTy, bool IsCovariant = true);
+  HType *getFieldAddressValueTy(HType *FieldTy, bool IsCovariant = true);
   HType *doUnion(HType *Lhs, HType *Rhs);
   HType *doInter(HType *Lhs, HType *Rhs);
   HType *convertVariable(const binarysub::UTypeVariable &T);
@@ -133,7 +133,6 @@ protected:
   HType *getPtrTy(HType *Pointee) {
     return Ctx.getPointerType(false, Parent.PointerSize * 8, Pointee);
   }
-  HType *wrapFieldStorageTy(HType *ValueTy) { return getPtrTy(ValueTy); }
 };
 
 } // namespace notdec::mlsub

@@ -2,19 +2,19 @@
 
 [decls]
 struct rec_13 {
-  ptr<load='k:32, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
+  rec_13 field_0; /* recursive body at offset: 0 */
 };
 
 struct rec_20 {
-  ptr<load=μ0:0, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
+  rec_20 field_0; /* recursive body at offset: 0 */
 };
 
 struct rec_16 {
-  ptr<load='k:32, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
+  rec_16 field_0; /* recursive body at offset: 0 */
 };
 
 struct rec_18 {
-  ptr<load='k:32, store=bottom:32, psize=32> field_0; /* recursive body at offset: 0 */
+  rec_18 field_0; /* recursive body at offset: 0 */
 };
 
 
@@ -34,4 +34,3 @@ struct rec_18 {
 
 [memory]
 type => top:32
-

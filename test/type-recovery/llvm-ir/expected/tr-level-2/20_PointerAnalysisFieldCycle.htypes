@@ -2,34 +2,34 @@
 
 [decls]
 struct rec_27 {
-  struct_0* field_0; /* recursive body at offset: 0 */
+  struct_0 field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_0 {
-  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
-  i8[3]* padding_0; /* at offset: 1 */
+  bottom:8 field_0; /* at offset: 0 */
+  i8[3] padding_0; /* at offset: 1 */
 };
 
 struct rec_31 {
-  struct_1* field_0; /* recursive body at offset: 0 */
+  struct_1 field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_1 {
-  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
-  'n:32* field_1; /* at offset: 1 */
+  bottom:8 field_0; /* at offset: 0 */
+  'n:32 field_1; /* at offset: 1 */
 };
 
 struct rec_20 {
-  struct_0* field_0; /* recursive body at offset: 0 */
+  struct_0 field_0; /* recursive body at offset: 0 */
 };
 
 struct struct_2 {
-  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
+  bottom:8 field_0; /* at offset: 0 */
 };
 
 struct struct_3 {
-  ptr<load=top:8, store=bottom:8, psize=8> field_0; /* at offset: 0 */
-  rec_31* field_1; /* at offset: 1 */
+  bottom:8 field_0; /* at offset: 0 */
+  rec_31 field_1; /* at offset: 1 */
 };
 
 

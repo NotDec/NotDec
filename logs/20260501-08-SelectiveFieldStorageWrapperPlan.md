@@ -334,3 +334,96 @@ ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --out
 1. 给 TypeBuilder 增加明确的“字段最终类型”和“字段值类型”命名边界，减少 `wrap` / `strip` 成对出现的代码。
 2. 单独处理 struct merge 候选选择，不要只按字段数量判断是否复用已有 decl。
 3. 对数组/char padding 扩展加保护，避免覆盖后面有语义的字段 offset。
+
+## 2026-05-02 调整：字段类型改回普通成员类型
+
+### 背景
+
+重新确认 `UPointerType` 的语义后，字段成员不应该靠 `FieldDecl.Type` 外面再包一层指针来表示。`UPointerType(load, store)` 对应 `DualPointerType`，它描述的是同一个字段地址/读写视图；真正落到结构体成员时，要按 variance 从 load/store 里选出成员类型。
+
+所以这一版把 `FieldDecl.Type` 改回普通 C 成员类型：
+
+- 普通标量字段存 `i32`，不是 `i32*`。
+- 数组字段存 `i8[12]`，不是 `i8[12]*`。
+- 结构体字段存 `struct_X`，不是 `struct_X*`。
+- `UPointerType` 作为字段地址/读写视图进入字段时，按现有 top/bottom 例外和
+  协变/逆变规则选一侧。
+- 如果 `FieldDecl.Type` 里最后仍有顶层 `DualPointerType`，它表示成员本身就是
+  pointer-like 成员，llvm2c 不再剥它。
+
+### 实现记录
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:678-697`
+  - `getFieldValueTy()` 改名为 `getFieldAddressValueTy()`。
+  - 这个函数只用于把 `UPointerType` 的字段地址/读写视图选成成员类型。
+  - 普通 `PointerType(T)` 不再剥；顶层 `DualPointerType` 按 variance 选一侧。
+  - set union/intersection 递归处理每个 term。
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:700-774`
+  - `convertFieldType()` 改为返回普通字段成员类型。
+  - primitive / top / bottom / type variable 不再包 `PointerType`。
+  - `UPointerType` 仍先构造 `DualPointerType`，再按 variance 选成员侧。
+  - `URecordType` / `URecursiveType` 不再额外包字段地址层。
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:669-674,1023-1106,1112-1168,1344-1368,1516-1539`
+  - recursive anchor、裁剪、padding、数组扩展、stride 数组、union member 都改为保存普通成员类型。
+
+- `include/notdec/TypeRecovery/mlsub/TypeBuilder.h:132-135`
+  - 删除不再使用的 `wrapFieldStorageTy()`。
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/HType.h:80-82`
+  - 更新 `FieldDecl::Type` 注释：字段类型直接保存 recovered member type；顶层
+    `DualPointerType` 表示 pointer-like 成员，不是要剥掉的存储 wrapper。
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/TypeManager.h:54-56`
+  - 删除 `getStoredFieldValueType()` / `convertStoredFieldType()` 这类字段解包 helper。
+  - 也不保留 identity 版本的 `getFieldMemberType()` / `convertFieldMemberType()`。
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp:407,809,836,867,942,949,1295`
+  - llvm2c 直接使用 `Field.Type` / `Member.Type`。
+  - by-value aggregate cycle 检测、decl usage、struct/union 字段声明、define 顺序、
+    memory global 展开都不再先做字段类型归一化。
+
+- `test/tools/compare_htypes_with_wasm_dwarf.py:354-359,583-586`
+  - realworld oracle 兼容 memory/global slot 里直接出现 `struct_X` 或包含 `struct_X` 的 set type。
+
+- 更新了 5 个 llvm-ir HType golden：
+  - `test/type-recovery/llvm-ir/expected/tr-level-2/06_SimpleRecursive2.htypes`
+  - `test/type-recovery/llvm-ir/expected/tr-level-2/09_OffsetLoop.htypes`
+  - `test/type-recovery/llvm-ir/expected/tr-level-2/17_StackArray.htypes`
+  - `test/type-recovery/llvm-ir/expected/tr-level-2/18_offset1.htypes`
+  - `test/type-recovery/llvm-ir/expected/tr-level-2/20_PointerAnalysisFieldCycle.htypes`
+
+其中 `06_SimpleRecursive2.htypes` 的自递归字段保留 by-value 自递归输出，例如
+`rec_13 field_0`。这符合当前约定：如果 HType 阶段给出的就是 by-value 自递归，
+llvm2c 后续再在 Clang AST 内部用指针字段打断布局问题，打印仍保留 recovered 形状。
+
+### 验证
+
+```bash
+cmake --build ./build --target notdec-decompile -j4
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --output-on-failure
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.plain-field-member-final.out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-plain-field-member-final
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune.plain-field-member-final.out.c \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-plain-field-member-final-c
+ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-failure
+```
+
+结果：
+
+- build 通过。
+- `llvm_ir` / `sysy` 通过。
+- fortune `.ll` 跑通，`real 15.10s`，参考是 `16.33s`，没有性能退化。
+- fortune `.c` 跑通并生成 C，`real 19.22s`。
+- realworld oracle 仍未通过，但现在失败回到质量项：`@File_list` 缺 fd 多数字段，`free_desc` / `matches_in_list` 仍是 `void**`，`get_tbl` / `maxlen_in_list` 缺部分字段。`@File_tail` 已能在新普通字段类型下识别 recovered decl。
+
+### 当前判断
+
+这版语义更简单：`FieldDecl.Type` 就是成员类型，llvm2c 不再需要理解“字段地址 wrapper”。代价是 `UPointerType` 进入字段时会立即选 load/store 一侧；如果字段里还出现顶层 `DualPointerType`，它就按普通 pointer-like 成员处理。当前实现效果 8/10，复杂度 7/10，维护成本 7/10；剩下主要问题仍是 fortune 的 struct merge/layout 质量，不是字段类型外包策略本身。
