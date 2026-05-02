@@ -163,6 +163,39 @@ void appendCurrentDebugPathOnly(llvm::raw_ostream &OS,
   }
 }
 
+ast::TypedDecl *findRecursiveAnchorDecl(HType *Ty) {
+  if (Ty == nullptr) {
+    return nullptr;
+  }
+  if (auto *Decl = Ty->getAsRecordOrUnionDecl()) {
+    return Decl;
+  }
+  // URecordType 的 HType 形态是 struct*；递归打印和降级要锚到 pointee。
+  if (Ty->isPointerType()) {
+    auto *Pointee = Ty->getPointeeType();
+    return Pointee == nullptr ? nullptr : Pointee->getAsRecordOrUnionDecl();
+  }
+  // 递归 body 常见形态是 bottom/top 与 struct* 的交并。anchor 只需要那个
+  // 具体聚合 decl，不能因为外层 set 就退回单字段 fallback 壳。
+  if (auto *Set = llvm::dyn_cast<ast::SetUnionType>(Ty)) {
+    for (auto *Term : Set->getTypes()) {
+      if (auto *Decl = findRecursiveAnchorDecl(Term)) {
+        return Decl;
+      }
+    }
+    return nullptr;
+  }
+  if (auto *Set = llvm::dyn_cast<ast::SetInterType>(Ty)) {
+    for (auto *Term : Set->getTypes()) {
+      if (auto *Decl = findRecursiveAnchorDecl(Term)) {
+        return Decl;
+      }
+    }
+    return nullptr;
+  }
+  return nullptr;
+}
+
 struct ConvertStructTraceDepthScope {
   unsigned &Depth;
 
@@ -465,6 +498,14 @@ TypeBuilder::getStructOrNull(binarysub::UTypePtr Ty) {
   auto *HTy = CacheIt->second;
   if (HTy->isRecordType()) {
     return HTy->getAsRecordDecl();
+  }
+  // URecordType 的普通转换结果是 struct*。结构体布局复用时仍要找到
+  // pointee record，否则字段视角再次转换同一个 URecordType 会重复建 decl。
+  if (HTy->isPointerType()) {
+    auto *Pointee = HTy->getPointeeType();
+    if (Pointee != nullptr && Pointee->isRecordType()) {
+      return Pointee->getAsRecordDecl();
+    }
   }
   return std::nullopt;
 }
@@ -800,7 +841,7 @@ HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
   InProgress.erase(Ty);
   RecursiveTypeNames.erase(T.name);
 
-  if (auto *BodyDecl = Body->getAsRecordOrUnionDecl()) {
+  if (auto *BodyDecl = findRecursiveAnchorDecl(Body)) {
     Binder->setAnchorDecl(BodyDecl);
     return Binding;
   }
@@ -825,6 +866,12 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
   // Check cache first
   auto CacheIt = TypeCache.find(Ty);
   if (CacheIt != TypeCache.end()) {
+    // convertStruct()/struct-merge 会把 URecordType 临时绑定到 RecordType，
+    // 方便复用 decl。但 URecordType 对外仍是地址语义，cache hit 也要返回
+    // struct*，不能泄漏这个内部对象视图。
+    if (std::get_if<URecordType>(&Ty->v) && CacheIt->second->isRecordType()) {
+      return getPtrTy(CacheIt->second);
+    }
     return CacheIt->second;
   }
 

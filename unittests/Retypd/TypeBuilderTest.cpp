@@ -68,15 +68,56 @@ TEST(Retypd, TypeBuilderTopFieldRecordLayoutTest) {
 
   auto *HTy = TB.convert(RecordTy);
   ASSERT_NE(HTy, nullptr);
-  ASSERT_TRUE(HTy->isRecordType());
+  ASSERT_TRUE(HTy->isPointerType());
 
-  auto *Decl = HTy->getAsRecordDecl();
+  auto *Pointee = HTy->getPointeeType();
+  ASSERT_NE(Pointee, nullptr);
+  ASSERT_TRUE(Pointee->isRecordType());
+
+  auto *Decl = Pointee->getAsRecordDecl();
   ASSERT_NE(Decl, nullptr);
   ASSERT_EQ(Decl->getFields().size(), 2u);
   EXPECT_EQ(Decl->getFields()[0].R.Start, 0);
   ASSERT_NE(Decl->getFields()[0].Type, nullptr);
   EXPECT_TRUE(Decl->getFields()[0].Type->isTopType());
   EXPECT_EQ(Decl->getFields()[1].R.Start, 4);
+}
+
+TEST(Retypd, TypeBuilderRecursiveRecordSetAnchorsPointeeRecord) {
+  llvm::LLVMContext LLVMCtx;
+  auto M = std::make_unique<llvm::Module>("typebuilder-recursive-record",
+                                          LLVMCtx);
+  M->setDataLayout("e-p:32:32");
+
+  notdec::ast::HTypeContext HCtx;
+  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilder TB(TBParent);
+
+  auto RecRef = binarysub::make_utypevariable("r", 32, 1);
+  auto RecordTy = binarysub::make_urecordtype({{"@0", RecRef}});
+  auto BodyTy = binarysub::make_uinter(binarysub::make_ubot(32), RecordTy);
+  auto RecursiveTy = binarysub::make_urecursivetype("r", BodyTy);
+
+  auto *HTy = TB.convert(RecursiveTy);
+  ASSERT_NE(HTy, nullptr);
+  ASSERT_TRUE(HTy->isRecursiveBindingType());
+
+  auto *Binding = llvm::cast<notdec::ast::RecursiveBindingType>(HTy);
+  auto *Binder = Binding->getBinder();
+  ASSERT_NE(Binder, nullptr);
+  ASSERT_NE(Binder->getBody(), nullptr);
+  ASSERT_TRUE(Binder->getBody()->isSetInterType());
+
+  auto *BodySet = llvm::cast<notdec::ast::SetInterType>(Binder->getBody());
+  ASSERT_EQ(BodySet->getTypes().size(), 2u);
+  auto *RecordPtr = BodySet->getTypes()[1];
+  ASSERT_TRUE(RecordPtr->isPointerType());
+
+  auto *Pointee = RecordPtr->getPointeeType();
+  ASSERT_NE(Pointee, nullptr);
+  ASSERT_TRUE(Pointee->isRecordType());
+  EXPECT_EQ(Binder->getAnchorDecl(), Pointee->getAsRecordDecl());
+  ASSERT_EQ(Pointee->getAsRecordDecl()->getFields().size(), 1u);
 }
 
 TEST(Retypd, HTypeSetPrettyPrintingFlattensChains) {
