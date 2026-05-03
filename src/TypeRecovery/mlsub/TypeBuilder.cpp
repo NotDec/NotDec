@@ -275,6 +275,46 @@ bool isVagueFieldBoundType(const HType *Ty) {
   return Ty != nullptr && (Ty->isTopType() || Ty->isBottomType());
 }
 
+bool isVagueUnionMemberType(const HType *Ty) {
+  return isVagueFieldBoundType(Ty);
+}
+
+// Union panel simplification stays local to HType lowering:
+// 1. remove exact duplicate member types
+// 2. if this union already has a concrete member, drop pure top/bottom noise
+// 3. if everything is vague, keep one representative per canonical type
+std::vector<HType *> simplifyUnionMembers(const std::vector<HType *> &Members) {
+  bool HasConcreteMember =
+      llvm::any_of(Members, [](const HType *Ty) {
+        return Ty != nullptr && !isVagueUnionMemberType(Ty);
+      });
+
+  std::vector<HType *> Result;
+  for (auto *Member : Members) {
+    if (Member == nullptr) {
+      continue;
+    }
+    if (HasConcreteMember && isVagueUnionMemberType(Member)) {
+      continue;
+    }
+
+    auto *Canon = Member->getCanonicalType();
+    bool AlreadyPresent = llvm::any_of(Result, [&](const HType *Existing) {
+      return Existing == Member || Existing->getCanonicalType() == Canon;
+    });
+    if (AlreadyPresent) {
+      continue;
+    }
+    Result.push_back(Member);
+  }
+
+  if (!Result.empty()) {
+    return Result;
+  }
+  assert(!Members.empty() && "union simplification requires input members");
+  return {Members.front()};
+}
+
 HType *chooseDualPointerFieldValueTy(const ast::DualPointerType *Ty,
                                      bool IsCovariant) {
   HType *LoadTy = Ty->getLoadType();
@@ -1566,21 +1606,27 @@ HType *TypeBuilder::convertStruct(
       if (Members.empty()) {
         llvm::errs() << "Warning: Empty union!\n";
       }
-      // create union
-      auto Name = ValueNamer::getName("union_");
-      auto Decl = UnionDecl::Create(Ctx, Name);
-      for (auto Ent : Members) {
-        auto FieldName = ValueNamer::getName("field_");
-        // Union需要起始大小是0，然后每一项大小都是OurSize。
-        Decl->addMember(ast::FieldDecl{.R = {.Start = 0, .Size = OurSize},
-                                       .Type = Ent,
-                                       .Name = FieldName,
-                                       .Comment = "at offset: 0"});
-      }
+      Members = simplifyUnionMembers(Members);
       // push the merged union back to fields, and iterate again
+      HType *MergedTy = nullptr;
+      if (Members.size() == 1) {
+        MergedTy = Members.front();
+      } else {
+        auto Name = ValueNamer::getName("union_");
+        auto Decl = UnionDecl::Create(Ctx, Name);
+        for (auto Ent : Members) {
+          auto FieldName = ValueNamer::getName("field_");
+          // Union需要起始大小是0，然后每一项大小都是OurSize。
+          Decl->addMember(ast::FieldDecl{.R = {.Start = 0, .Size = OurSize},
+                                         .Type = Ent,
+                                         .Name = FieldName,
+                                         .Comment = "at offset: 0"});
+        }
+        MergedTy = Ctx.getUnionType(false, Decl);
+      }
       OtherFields.push_back({FieldEntry{
           SimpleRange{.Start = UnionStart + MinStartOff, .Size = OurSize},
-          Ctx.getUnionType(false, Decl)}});
+          MergedTy}});
       assert(NoUpdate == false);
       // #endregion build members using OverlapFields;
       // reiterate with merged fields.
