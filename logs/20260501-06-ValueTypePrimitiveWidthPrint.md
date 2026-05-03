@@ -59,3 +59,48 @@ cmake --build ./build --target bin/notdec -j1
 - 效果：9/10。对调试 `ValueTypes` 非常直接，尤其是同名不同位宽 primitive。
 - 复杂度：9/10。只改一行输出格式。
 - 维护成本：9/10。格式简单稳定，下游如果有人依赖 `printType()` 的旧文本，需要同步更新。
+
+## 2026-05-03 收尾
+
+### 测试期望补齐
+
+修改文件：`external/binarysub/src/binarysub-test.cpp`
+
+- 第 235-243 行，函数 `test_parse`
+- 第 269-275 行，函数 `test_mlsub`
+- 第 288-291 行，函数 `test_top_level_polymorphism`
+- 第 317-327 行，函数 `test_rec_producer_consumer`
+- 第 358-364 行，函数 `test_misc`
+- 第 383-400 行，函数 `test_pointer_paper` / `test_pointer_record_wrap`
+- 第 690、699、894、900、908 行附近，函数 `test_utype_pretty_printing` /
+  `test_primitive_semantic_lattice`
+
+本次只改期望字符串，把旧的 `int` / `bool` / `i8` / primitive semantic 名字，
+同步成现在的 `name:size` 打印结果。
+
+### 新发现的卡死点
+
+重跑 `./build/binarysub` 时，前半段字符串比对问题已经消失，但程序会卡在
+`test_compact_recursive_size()` 这条新测试链上。
+
+定位结果：
+
+- 调用点：`external/binarysub/src/binarysub-test.cpp:420`，
+  `TypeSimplifier::coalesceCompactType(root, false, false)`
+- 卡死点：`external/binarysub/src/binarysub.cpp:1743`，
+  `inProcess.find(key)`
+- 根因链：
+  - `PolarCompactTypeMap` 当前 key 是 `std::pair<CompactTypePtr, bool>`
+  - `CompactTypePtr` 是 `value_ptr<CompactType>`
+  - `value_ptr::operator<` 在
+    `external/binarysub/include/binarysub/binarysub-utils.h:170-177`
+    走的是“解引用后按值比较”
+  - `CompactType::operator<` 在
+    `external/binarysub/include/binarysub/binarysub.h:261-266`
+    又会递归比较 `record/function/ptrLoad/ptrStore`
+  - 新测试构造的是 `root->record["4"] = root` 的自环，所以一旦拿这个
+    `CompactType` 去做 `map` 查找，比较器就会沿着自环无限递归
+
+当前判断：后面要修的不是 `printType()`，而是 `coalesceCompactType()`
+这条递归检测表的 key 比较方式。最小方向应当是把这里改成按节点身份比较，
+不要再按 `CompactType` 结构值比较。
