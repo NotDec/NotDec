@@ -387,6 +387,7 @@
       ]
     },
     "realloc": {
+      "is_polymorphic": true,
       "ret": { "kind": "ref", "id": 0 },
       "args": [
         { "kind": "var", "id": 0, "bits": 32 },
