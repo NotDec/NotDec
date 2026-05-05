@@ -115,6 +115,12 @@ protected:
       const std::vector<std::pair<SimpleRange, HType *>> &Fields,
       std::optional<SimpleRange> ValidRange);
   int64_t accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty);
+  // Convert a UType as a struct/union member type. This mostly starts from
+  // convert(Ty), then lowers the value surface to a member surface: object-like
+  // values such as records/functions peel their pointer wrapper, UPointerType
+  // chooses a load/store side, and recursive address values peel rec* back to
+  // embedded rec. URecordType still needs the FieldSizeBytes-aware path before
+  // peeling because a field may only expose part of the pointee layout.
   HType *convertFieldType(const binarysub::UTypePtr &Ty,
                           std::optional<int64_t> FieldSizeBytes,
                           bool IsCovariant = true);

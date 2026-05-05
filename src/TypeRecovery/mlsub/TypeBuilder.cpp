@@ -781,6 +781,19 @@ HType *TypeBuilder::getFieldAddressValueTy(HType *FieldTy, bool IsCovariant) {
 HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
                                      std::optional<int64_t> FieldSizeBytes,
                                      bool IsCovariant) {
+  // Field conversion asks "what C member lives at this offset?". Most cases can
+  // first use the normal value conversion, then lower the value surface into a
+  // member surface:
+  // - URecordType/UFunctionType values are pointers to objects, so members use
+  //   the pointee object shape.
+  // - UPointerType values are DualPointerType; removing one address level means
+  //   choosing the load/store side for this member.
+  // - Address-like URecursiveType values may convert to rec*, but recursive
+  //   members keep the embedded rec so later layout logic can see self-embed.
+  //
+  // The two exceptions are local: set terms must recurse in field context, and
+  // URecordType still calls convertPointer(..., FieldSizeBytes) before peeling
+  // the pointer because field layout may need the containing byte range.
   auto getFallbackBitSize = [&]() -> std::uint32_t {
     if (FieldSizeBytes.has_value()) {
       return static_cast<std::uint32_t>(*FieldSizeBytes * 8);
