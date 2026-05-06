@@ -2,7 +2,7 @@
 
 [decls]
 struct struct_0 {
-  struct_1 field_0; /* at offset: -48 */
+  top:32[] field_0; /* at offset: -48 */
   i8[40] padding_0; /* at offset: -44 */
   top:32 field_1; /* at offset: -4 */
 };
@@ -59,11 +59,10 @@ struct struct_1 {
 [+] goodG2B::%new_88 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [-] goodG2B::%stack26 => lower=bottom:32 ; upper=struct_0*
 [+] goodG2B::%stack_addr => lower=bottom:32 ; upper=struct_0*
-[+] goodG2B::%stack_end => lower=bottom:32 ; upper=struct_1*
+[+] goodG2B::%stack_end => lower=bottom:32 ; upper=top:32[]*
 [+] goodG2B::%storemerge => lower=bottom:32 ; upper=top:32
 [+] printIntLine::arg0 => lower=bottom:32 ; upper=top:32
 [+] printLine::arg0 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
-

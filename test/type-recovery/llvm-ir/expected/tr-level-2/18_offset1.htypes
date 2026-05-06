@@ -2,16 +2,16 @@
 
 [decls]
 struct struct_0 {
-  i8[4][] field_0; /* at offset: 0 */
-};
-
-struct struct_1 {
   top:32 field_0; /* at offset: -8 */
   top:32 field_1; /* at offset: -4 */
 };
 
-struct struct_2 {
+struct struct_1 {
   top:32 field_0; /* at offset: -24 */
+};
+
+struct struct_2 {
+  i8[4][] field_0; /* at offset: 0 */
 };
 
 
@@ -46,7 +46,7 @@ struct struct_2 {
 [+] env.printf::arg0 => lower=bottom:32 ; upper=top:32
 [+] env.printf::arg1 => lower=bottom:32 ; upper=top:32
 [+] get_s::%add_107 => lower=bottom:32 ; upper=void*
-[+] get_s::%add_98 => lower=bottom:32 ; upper=struct_0*
+[+] get_s::%add_98 => lower=bottom:32 ; upper=i8[4][]*
 [+] get_s::%bb.allocator.i15 => lower=bottom:32 ; upper=top:32
 [+] get_s::%calcOffset => lower=bottom:32 ; upper=void*
 [+] get_s::%calcOffset1 => lower=bottom:32 ; upper=void*
@@ -54,8 +54,8 @@ struct struct_2 {
 [+] get_s::%calcOffset3 => lower=bottom:32 ; upper=void*
 [+] get_s::%loadResult => lower=bottom:32 ; upper=void**
 [+] get_s::%loadResult4 => lower=bottom:32 ; upper=top:32
-[+] get_s::%stack => lower=bottom:32 ; upper=struct_1*
-[-] get_s::%stack_addr5 => lower=bottom:32 ; upper=struct_1*
+[+] get_s::%stack => lower=bottom:32 ; upper=struct_0*
+[-] get_s::%stack_addr5 => lower=bottom:32 ; upper=struct_0*
 [+] get_s::%v_103 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] get_s::%v_81 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] get_s::%v_89 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
@@ -65,7 +65,7 @@ struct struct_2 {
 [+] get_s::arg1 => lower=bottom:32 ; upper=top:32
 [+] test1::%add_184 => lower=bottom:32 ; upper=void*
 [+] test1::%add_193 => lower=bottom:32 ; upper=void*
-[+] test1::%add_210 => lower=bottom:32 ; upper=struct_0*
+[+] test1::%add_210 => lower=bottom:32 ; upper=i8[4][]*
 [+] test1::%add_215 => lower=bottom:32 ; upper=void*
 [+] test1::%add_219 => lower=bottom:32 ; upper=top:32
 [+] test1::%bb.brif_next.i2 => lower=bottom:32 ; upper=top:32
@@ -75,8 +75,8 @@ struct struct_2 {
 [+] test1::%loadResult.pre => lower=bottom:32 ; upper=top:32
 [+] test1::%loadResult39 => lower=bottom:32 ; upper=top:32
 [+] test1::%loadResult5 => lower=bottom:32 ; upper=top:32
-[+] test1::%stack => lower=bottom:32 ; upper=struct_2*
-[-] test1::%stack_addr8 => lower=bottom:32 ; upper=struct_2*
+[+] test1::%stack => lower=bottom:32 ; upper=struct_1*
+[-] test1::%stack_addr8 => lower=bottom:32 ; upper=struct_1*
 [+] test1::%v_200 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] test1::%v_206 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] test2::%add_310 => lower=bottom:32 ; upper=void*
@@ -90,11 +90,10 @@ struct struct_2 {
 [+] test2::%loadResult.pre => lower=bottom:32 ; upper=top:32
 [+] test2::%loadResult39 => lower=bottom:32 ; upper=top:32
 [+] test2::%loadResult5 => lower=bottom:32 ; upper=top:32
-[+] test2::%stack => lower=bottom:32 ; upper=struct_2*
-[-] test2::%stack_addr8 => lower=bottom:32 ; upper=struct_2*
+[+] test2::%stack => lower=bottom:32 ; upper=struct_1*
+[-] test2::%stack_addr8 => lower=bottom:32 ; upper=struct_1*
 [+] test2::%v_326 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] test2::%v_332 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 
 [memory]
 type => top:32
-
