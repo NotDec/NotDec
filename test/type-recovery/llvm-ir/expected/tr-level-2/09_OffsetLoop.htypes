@@ -1,32 +1,16 @@
 # HTypeResult
 
 [decls]
-struct rec_16 {
-  struct_0 field_0; /* recursive body at offset: 0 */
-};
-
 struct struct_0 {
-  i8[4] padding_0; /* at offset: 0 */
-};
-
-struct rec_24 {
-  struct_1 field_0; /* recursive body at offset: 0 */
+  struct_0 field_0; /* at offset: 4 */
 };
 
 struct struct_1 {
-  i8[4] padding_0; /* at offset: 0 */
-};
-
-struct rec_20 {
-  struct_2 field_0; /* recursive body at offset: 0 */
+  struct_1 field_0; /* at offset: 4 */
 };
 
 struct struct_2 {
-  i8[4] padding_0; /* at offset: 0 */
-};
-
-struct struct_3 {
-  rec_24 field_0; /* at offset: 4 */
+  struct_2 field_0; /* at offset: 4 */
 };
 
 
@@ -37,10 +21,10 @@ struct struct_3 {
 [+] const(i32 0)@main::%bb.loop.i3:0 => lower=bottom:32 ; upper=top:32
 [+] main::%cmp => lower=bool ; upper=bool
 [+] main::%new_9 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
-[+] main::%p1 => lower=bottom:32 ; upper=rec_16
-[+] main::%p2 => lower=bottom:32 ; upper=rec_24
-[-] main::%stack1 => lower=bottom:32 ; upper=rec_20
-[+] main::%stack1p => lower=bottom:32 ; upper=rec_20
+[+] main::%p1 => lower=bottom:32 ; upper=struct_0*
+[+] main::%p2 => lower=bottom:32 ; upper=struct_1*
+[-] main::%stack1 => lower=bottom:32 ; upper=struct_2*
+[+] main::%stack1p => lower=bottom:32 ; upper=struct_2*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 [+] main::arg1 => lower=bottom:32 ; upper=top:32

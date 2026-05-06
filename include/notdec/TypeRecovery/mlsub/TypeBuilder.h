@@ -72,7 +72,6 @@ public:
 protected:
   HType *convertRecursive(const binarysub::UTypePtr &Ty,
                           const binarysub::URecursiveType &T);
-  HType *finalizeRecursiveType(const binarysub::UTypePtr &Ty, HType *Result);
   // 转换所有的Pointer类型
   // PointeeSize是专属于指针类型的，而且仅局限于指针类型的递归范围内。一旦指针被load或者store，PointeeSize就不再传递。
   HType *convertPointer(const binarysub::UTypePtr &T,
@@ -116,7 +115,7 @@ protected:
       std::optional<SimpleRange> ValidRange);
   int64_t accessedPointeeSizeInBits(const binarysub::UTypePtr &Ty);
   // Convert a UType as a struct/union member type. This mostly starts from
-  // convert(Ty), then lowers the value surface to a member surface: object-like
+  // convert(Ty), then lowers the value type to a member type: object-like
   // values such as records/functions peel their pointer wrapper, UPointerType
   // chooses a load/store side, and recursive address values peel rec* back to
   // embedded rec. URecordType still needs the FieldSizeBytes-aware path before

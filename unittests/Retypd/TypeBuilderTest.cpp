@@ -63,7 +63,9 @@ TEST(Retypd, TypeBuilderTopFieldRecordLayoutTest) {
 
   auto RecordTy = binarysub::make_urecordtype({
       {"@0", binarysub::make_utop(32)},
-      {"@4", binarysub::make_uprimitivetype("uint", 32)},
+      {"@4", binarysub::make_upointertype(
+                 binarysub::make_uprimitivetype("uint", 32),
+                 binarysub::make_uprimitivetype("uint", 32), 32)},
   });
 
   auto *HTy = TB.convert(RecordTy);
@@ -100,9 +102,11 @@ TEST(Retypd, TypeBuilderRecursiveRecordSetAnchorsPointeeRecord) {
 
   auto *HTy = TB.convert(RecursiveTy);
   ASSERT_NE(HTy, nullptr);
-  ASSERT_TRUE(HTy->isRecursiveBindingType());
+  ASSERT_TRUE(HTy->isPointerType());
 
-  auto *Binding = llvm::cast<notdec::ast::RecursiveBindingType>(HTy);
+  auto *Binding =
+      llvm::dyn_cast<notdec::ast::RecursiveBindingType>(HTy->getPointeeType());
+  ASSERT_NE(Binding, nullptr);
   auto *Binder = Binding->getBinder();
   ASSERT_NE(Binder, nullptr);
   ASSERT_NE(Binder->getBody(), nullptr);
@@ -118,6 +122,8 @@ TEST(Retypd, TypeBuilderRecursiveRecordSetAnchorsPointeeRecord) {
   ASSERT_TRUE(Pointee->isRecordType());
   EXPECT_EQ(Binder->getAnchorDecl(), Pointee->getAsRecordDecl());
   ASSERT_EQ(Pointee->getAsRecordDecl()->getFields().size(), 1u);
+  EXPECT_TRUE(
+      Pointee->getAsRecordDecl()->getFields()[0].Type->isRecursiveRefType());
 }
 
 TEST(Retypd, HTypeSetPrettyPrintingFlattensChains) {

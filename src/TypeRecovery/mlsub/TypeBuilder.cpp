@@ -271,12 +271,31 @@ bool isZeroSizedRecordMarker(const binarysub::UTypePtr &Ty) {
   return false;
 }
 
-bool isVagueFieldBoundType(const HType *Ty) {
-  return Ty != nullptr && (Ty->isTopType() || Ty->isBottomType());
+HType *stripRecursiveValuePointer(HType *Ty) {
+  if (Ty == nullptr || !Ty->isPointerType()) {
+    return Ty;
+  }
+  auto *Pointee = Ty->getPointeeType();
+  if (Pointee == nullptr) {
+    return Ty;
+  }
+  if (Pointee->isRecursiveBindingType() || Pointee->isRecursiveRefType()) {
+    return Pointee;
+  }
+  return Ty;
 }
 
-bool isVagueUnionMemberType(const HType *Ty) {
-  return isVagueFieldBoundType(Ty);
+HType *stripObjectValuePointer(HType *Ty) {
+  assert(Ty != nullptr && "object value type cannot be null");
+  assert(Ty->isPointerType() &&
+         "object-shaped UType must convert to an HType pointer value");
+  auto *Pointee = Ty->getPointeeType();
+  assert(Pointee != nullptr && "cannot embed void* as an object field");
+  return Pointee;
+}
+
+bool isVagueFieldBoundType(const HType *Ty) {
+  return Ty != nullptr && (Ty->isTopType() || Ty->isBottomType());
 }
 
 // Union panel simplification stays local to HType lowering:
@@ -286,7 +305,7 @@ bool isVagueUnionMemberType(const HType *Ty) {
 std::vector<HType *> simplifyUnionMembers(const std::vector<HType *> &Members) {
   bool HasConcreteMember =
       llvm::any_of(Members, [](const HType *Ty) {
-        return Ty != nullptr && !isVagueUnionMemberType(Ty);
+        return Ty != nullptr && !isVagueFieldBoundType(Ty);
       });
 
   std::vector<HType *> Result;
@@ -294,7 +313,7 @@ std::vector<HType *> simplifyUnionMembers(const std::vector<HType *> &Members) {
     if (Member == nullptr) {
       continue;
     }
-    if (HasConcreteMember && isVagueUnionMemberType(Member)) {
+    if (HasConcreteMember && isVagueFieldBoundType(Member)) {
       continue;
     }
 
@@ -729,36 +748,12 @@ void TypeBuilder::rememberExactRecordLayout(
   ExactRecordLayoutDecls.emplace(buildRecordLayoutKey(Fields, ValidRange), Decl);
 }
 
-HType *TypeBuilder::finalizeRecursiveType(const binarysub::UTypePtr &Ty,
-                                          HType *Result) {
-  auto ForceStructDecl = getStructOrNull(Ty);
-  if (!ForceStructDecl) {
-    return Result;
-  }
-
-  auto *Decl = ForceStructDecl.value();
-  if (Result->isRecordType() && Result->getAsRecordDecl() == Decl) {
-    return Result;
-  }
-
-  assert(Decl->getFields().empty());
-  auto SizeBits = binarysub::get_size(Ty);
-  auto SizeBytes = SizeBits == 0 ? 0 : (SizeBits + 7) / 8;
-  if (SizeBytes == 0) {
-    SizeBytes = Parent.PointerSize;
-  }
-  Decl->addField(ast::FieldDecl{
-      .R = {.Start = 0, .Size = static_cast<OffsetTy>(SizeBytes)},
-      .Type = Result,
-      .Name = ValueNamer::getName("rec_"),
-      .Comment = "at offset: 0",
-  });
-  return TypeCache.at(Ty);
-}
-
 HType *TypeBuilder::getFieldAddressValueTy(HType *FieldTy, bool IsCovariant) {
   assert(FieldTy != nullptr && "field type cannot be null");
   if (auto *DPT = llvm::dyn_cast<ast::DualPointerType>(FieldTy)) {
+    if (DPT->getLoadType() == nullptr && DPT->getStoreType() == nullptr) {
+      return getTopType(DPT->getAccessSize());
+    }
     return chooseDualPointerFieldValueTy(DPT, IsCovariant);
   }
   if (auto *Set = llvm::dyn_cast<ast::SetUnionType>(FieldTy)) {
@@ -782,8 +777,8 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
                                      std::optional<int64_t> FieldSizeBytes,
                                      bool IsCovariant) {
   // Field conversion asks "what C member lives at this offset?". Most cases can
-  // first use the normal value conversion, then lower the value surface into a
-  // member surface:
+  // first use the normal value conversion, then lower that value type into a
+  // member type:
   // - URecordType/UFunctionType values are pointers to objects, so members use
   //   the pointee object shape.
   // - UPointerType values are DualPointerType; removing one address level means
@@ -800,50 +795,40 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
     }
     return binarysub::get_size(Ty);
   };
-  auto convertPointerSide = [&](const UTypePtr &Side) -> HType * {
-    if (!Side) {
-      return nullptr;
-    }
-    return convert(Side);
-  };
 
   if (std::get_if<UTop>(&Ty->v)) {
     return getTopType(getFallbackBitSize());
   } else if (std::get_if<UBot>(&Ty->v)) {
+    assert(false && "Unexpected Bottom UType as a direct field");
     return getBottomType(getFallbackBitSize());
-  } else if (auto *V = std::get_if<UPrimitiveType>(&Ty->v)) {
-    return parsePrimitiveName(V->name, binarysub::get_size(Ty));
+  } else if (std::get_if<UPrimitiveType>(&Ty->v)) {
+    assert(false && "Unexpected primitive UType as a direct field");
+    return convert(Ty);
   } else if (auto *V = std::get_if<UTypeVariable>(&Ty->v)) {
+    auto It = RecursiveTypeNames.find(V->name);
+    if (It != RecursiveTypeNames.end()) {
+      // Field conversion is member-shaped. Keep recursive back edges embedded
+      // here; value-shaped recursive refs still get their pointer wrapper in
+      // convertVariable().
+      return Ctx.getRecursiveRefType(false, It->second);
+    }
+    // Non-recursive variables can still appear in field layouts as shared tail
+    // shapes such as string-like `{0: Ptr<...>, @1: 'x}` models. Preserve them
+    // instead of forcing an object/member rewrite.
     return convertVariable(*V);
-  } else if (auto *V = std::get_if<UFunctionType>(&Ty->v)) {
-    std::vector<HType *> Params;
-    for (auto &P : V->args) {
-      Params.push_back(convert(P));
-    }
-    std::vector<HType *> RetTypes;
-    if (V->result) {
-      RetTypes.push_back(convert(V->result));
-    }
-    auto FTy = Ctx.getFunctionType(false, RetTypes, Params);
-    return getPtrTy(FTy);
-  } else if (auto *V = std::get_if<UPointerType>(&Ty->v)) {
-    HType *LoadTy = convertPointerSide(V->load);
-    HType *StoreTy = convertPointerSide(V->store);
-    auto *DPT = Ctx.getDualPointerType(false, V->psize, LoadTy, StoreTy);
-    return getFieldAddressValueTy(DPT, IsCovariant);
+  } else if (std::get_if<UFunctionType>(&Ty->v)) {
+    return stripObjectValuePointer(convert(Ty));
+  } else if (std::get_if<UPointerType>(&Ty->v)) {
+    return getFieldAddressValueTy(convert(Ty), IsCovariant);
   } else if (auto *PT = std::get_if<URecordType>(&Ty->v)) {
     auto &T = *PT;
-    std::vector<std::pair<OffsetRange, UTypePtr>> RawFields;
-    for (const auto &field : T.fields) {
-      RawFields.push_back({OffsetRange::fromStr(field.first), field.second});
-    }
     std::string PathFrame = "record(fields=" + std::to_string(T.fields.size()) +
                             ", field_bytes=" +
                             (FieldSizeBytes ? std::to_string(*FieldSizeBytes)
                                             : std::string("<none>")) +
                             ")";
     DebugPathScope PathScope(*this, std::move(PathFrame));
-    return convertStruct(Ty, RawFields, FieldSizeBytes, false, IsCovariant);
+    return stripObjectValuePointer(convertPointer(Ty, FieldSizeBytes));
   } else if (auto *V = std::get_if<UUnion>(&Ty->v)) {
     StructMergeGroupScope StructMergeScope(ActiveStructMergeGroup,
                                            findStructMergeGroupForSet(V->types));
@@ -862,8 +847,8 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
           return convertFieldType(Term, FieldSizeBytes, IsCovariant);
         },
         [&](HType *LhsTy, HType *RhsTy) { return doInter(LhsTy, RhsTy); });
-  } else if (auto *V = std::get_if<URecursiveType>(&Ty->v)) {
-    return convertRecursive(Ty, *V);
+  } else if (std::get_if<URecursiveType>(&Ty->v)) {
+    return stripRecursiveValuePointer(convert(Ty));
   }
   assert(false && "Unhandled field UType variant");
 }
@@ -878,7 +863,12 @@ HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
                                                      static_cast<unsigned>(
                                                          SizeBits)));
   HType *Binding = Ctx.getRecursiveBindingType(false, Binder);
-  TypeCache[Ty] = Binding;
+  // URecordType/UFunctionType are value-side addresses in UType, while HType
+  // keeps the recursive binder on the inner object shape. The public result is
+  // therefore `rec*`; convertFieldType() peels it back to `rec` for embedded
+  // members.
+  HType *Result = getPtrTy(Binding);
+  TypeCache[Ty] = Result;
 
   auto NameIt = RecursiveTypeNames.find(T.name);
   assert((NameIt == RecursiveTypeNames.end() || NameIt->second == Binder) &&
@@ -896,7 +886,7 @@ HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
 
   if (auto *BodyDecl = findRecursiveAnchorDecl(Body)) {
     Binder->setAnchorDecl(BodyDecl);
-    return Binding;
+    return Result;
   }
 
   auto *AnchorDecl = RecordDecl::Create(Ctx, Binder->getName());
@@ -911,7 +901,7 @@ HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
       .Name = ValueNamer::getName("field_"),
       .Comment = "recursive body at offset: 0",
   });
-  return Binding;
+  return Result;
 }
 
 HType *TypeBuilder::convert(UTypePtr Ty) {
@@ -1803,7 +1793,7 @@ HType *TypeBuilder::convertVariable(const binarysub::UTypeVariable &T) {
   // For type variables, check if we have a recursive binding
   auto It = RecursiveTypeNames.find(T.name);
   if (It != RecursiveTypeNames.end()) {
-    return Ctx.getRecursiveRefType(false, It->second);
+    return getPtrTy(Ctx.getRecursiveRefType(false, It->second));
   }
 
   // Otherwise, create a TypeVariableType to preserve the semantic information
