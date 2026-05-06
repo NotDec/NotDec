@@ -20,6 +20,7 @@ add_library(notdec STATIC
 	TypeRecovery/mlsub/PAPath.cpp
 	TypeRecovery/mlsub/PointerAnalysis.cpp
 	# TypeRecovery/mlsub/MLsubGraph.cpp
+	TypeRecovery/mlsub/HTypeDebug.cpp
 	TypeRecovery/mlsub/HTypeNormalize.cpp
 	TypeRecovery/mlsub/MLsubGenerator.cpp
 	TypeRecovery/mlsub/Schema.cpp
