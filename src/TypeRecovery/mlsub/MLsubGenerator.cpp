@@ -1602,6 +1602,73 @@ void writeDebugValueHTypes(llvm::StringRef DebugDir,
   Result.print(Out);
 }
 
+bool isDirectValueSelfRecursiveField(ast::RecordDecl *Owner,
+                                     ast::HType *Ty) {
+  if (Owner == nullptr || Ty == nullptr || Ty->isPointerType() ||
+      Ty->isDualPointerType()) {
+    return false;
+  }
+  if (auto *RT = llvm::dyn_cast<ast::RecordType>(Ty)) {
+    return RT->getDecl() == Owner;
+  }
+  if (auto *RT = llvm::dyn_cast<ast::RecursiveBindingType>(Ty)) {
+    return RT->getBinder()->getAnchorDecl() == Owner;
+  }
+  if (auto *RT = llvm::dyn_cast<ast::RecursiveRefType>(Ty)) {
+    return RT->getBinder()->getAnchorDecl() == Owner;
+  }
+  return false;
+}
+
+bool isUnsizedArrayType(ast::HType *Ty) {
+  if (auto *AT = llvm::dyn_cast_or_null<ast::ArrayType>(Ty)) {
+    return !AT->getNumElements().has_value();
+  }
+  return false;
+}
+
+void normalizeTailValueRecursiveRecords(ast::HTypeContext &Ctx) {
+  // Convert the simplest invalid value-recursive shape into a tail array:
+  //   struct R { T prefix; R tail; }  ->  struct R { T[] prefix; }
+  // This intentionally handles only one real prefix field. Multiple-field
+  // prefixes would need a synthetic array element record, which is riskier for
+  // naming and struct-merge stability.
+  unsigned Changed = 0;
+  for (const auto &Ent : Ctx.getDecls()) {
+    auto *RD = llvm::dyn_cast<ast::RecordDecl>(Ent.second.get());
+    if (RD == nullptr) {
+      continue;
+    }
+    auto &Fields = RD->getFields();
+    auto TailIndex = RD->getLastNonPaddingInd();
+    if (!TailIndex ||
+        !isDirectValueSelfRecursiveField(RD, Fields[*TailIndex].Type)) {
+      continue;
+    }
+
+    if (Fields.size() != 2 || *TailIndex != 1 || Fields[0].isPadding) {
+      continue;
+    }
+
+    auto &Prefix = Fields[0];
+    auto &Tail = Fields[*TailIndex];
+    if (Prefix.R.Start != 0 || Tail.R.Start <= Prefix.R.Start) {
+      continue;
+    }
+    if (!isUnsizedArrayType(Prefix.Type)) {
+      Prefix.Type = Ctx.getArrayType(false, Prefix.Type, std::nullopt);
+    }
+    Prefix.Comment = "tail value recursion normalized to array at offset: " +
+                     std::to_string(Prefix.R.Start);
+    Fields.erase(Fields.begin() + *TailIndex);
+    ++Changed;
+  }
+  if (Changed != 0) {
+    llvm::errs() << "Info: normalized " << Changed
+                 << " tail value-recursive record(s) to arrays\n";
+  }
+}
+
 void primeSnapshotFormatter(const llvm2c::HTypeResult &Result,
                            ast::HTypeSnapshotFormatter &Formatter) {
   std::vector<std::pair<std::string, const ast::HType *>> Entries;
@@ -3181,6 +3248,7 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
         Data.Generator->SnapshotContraVariantValues.end());
   }
   ResultVal->HTCtx = HCtx;
+  normalizeTailValueRecursiveRecords(*ResultVal->HTCtx);
   // handle Memory type.
   auto Mem = AG.AllSCCs.at(0).Generator->ValueTypesUpper.at(nullptr);
   ResultVal->MemoryType = Mem;
