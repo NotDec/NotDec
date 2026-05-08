@@ -349,3 +349,148 @@ cmake --build ./build --target notdec-llvm2c-exe -j4
 
 - 这笔就是标准机械替换，值 7.5/10。
 - 收益不如 dominator 那笔大，但成本很低，清掉了一个确定无争议的阻塞。
+
+## 已完成：llvm2c 二进制重新编通
+
+这轮目标很直接：不再只盯着第一条编译错误，而是把 `external/NotDec-llvm2c`
+整条 `notdec-llvm2c-exe` 构建链打通，先让 LLVM 22 / Clang 22 下的
+`llvm2c` 可执行文件重新出来。
+
+子模块提交计划：
+
+- `external/NotDec-llvm2c`
+  - 本轮会新提交一笔，内容就是下面这批兼容修复。
+
+修改：
+
+1. `external/NotDec-llvm2c/lib/notdec-llvm2c/ASTPrinter/TypePrinter.cpp`
+   - `80-174`：删掉 LLVM 22 已不存在的 `Type::Elaborated` /
+     `Type::DependentTemplateSpecialization` 分支，补上
+     `SubstBuiltinTemplatePack`、`PackIndexing`、`PredefinedSugar`、
+     `HLSL*`、`BTFTagAttributed`、`CountAttributed` 等新 type node。
+   - `365-410`：`MemberPointerType` 改用 `getQualifier()`，数组大小修正为
+     `ArraySizeModifier::Static` 和 `getZExtSize()`。
+   - `470-478`：补 `ArrayParameterType` printer。
+   - `523-667`：向量 kind 全部改成 LLVM 22 的 `VectorKind::*`，顺手补了
+     RVV 分支。
+   - `850-852`：`CC_OpenCLKernel` 改成 `CC_DeviceKernel`。
+   - `925-966`：`UsingType`、`typeof` 打印入口按新 API 改掉。
+   - `1245-1256`：类模板实参从 `getTypeAsWritten()` 改成
+     `getTemplateArgsAsWritten()`。
+   - `1265-1266`：preferred name 改从 `getMostRecentDecl()` 取。
+   - `1326-1419`：`SubstTemplateTypeParmPack`、`TemplateSpecializationType`、
+     `InjectedClassNameType` 改成 LLVM 22 当前接口。
+   - `1457-1550`：删除已经不存在的 `ElaboratedType` /
+     `DependentTemplateSpecializationType` printer，补 `PackIndexing`、
+     `BTFTagAttributed`、`CountAttributed`、`HLSL*`、`PredefinedSugar`
+     的默认实现。
+   - 涉及函数：
+     `canPrefixQualifiers`、`printMemberPointerBefore`、
+     `printConstantArrayAfter`、`printArrayParameterBefore/After`、
+     `printVectorBefore/After`、`printDependentVectorBefore/After`、
+     `printFunctionAfter`、`printUsingBefore`、`printTypeOfExprBefore`、
+     `printTypeOfBefore`、`printTag`、`printRecordBefore`、
+     `printSubstTemplateTypeParmPackBefore/After`、
+     `printSubstBuiltinTemplatePackBefore/After`、`printTemplateId`、
+     `printInjectedClassNameBefore`、`printPackIndexingBefore/After`、
+     `printBTFTagAttributedBefore/After`、`printCountAttributedBefore/After`、
+     `printHLSLAttributedResourceBefore/After`、
+     `printHLSLInlineSpirvBefore/After`、
+     `printPredefinedSugarBefore/After`。
+
+2. `external/NotDec-llvm2c/lib/notdec-llvm2c/ASTPrinter/StmtPrinter.cpp`
+   - `858-928`：给 LLVM 22 新增的 OMP directive 补默认 visitor，统一走
+     `PrintOMPExecutableDirective`。
+   - `1385-1475`：给 `PackIndexingExpr`、`OpenACC*`、`SYCLKernelCallStmt`、
+     `DeferStmt` 等新增节点补保底 visitor，先把链接打通。
+   - 涉及函数：
+     `VisitOMPScopeDirective`、
+     `VisitOMPParallelMaskedDirective`、
+     `VisitOMPTeamsGenericLoopDirective`、
+     `VisitOMPTargetTeamsGenericLoopDirective`、
+     `VisitOMPTargetParallelGenericLoopDirective`、
+     `VisitOMPParallelMaskedTaskLoopSimdDirective`、
+     `VisitOMPParallelMaskedTaskLoopDirective`、
+     `VisitOMPParallelGenericLoopDirective`、
+     `VisitOMPMaskedTaskLoopSimdDirective`、
+     `VisitOMPMaskedTaskLoopDirective`、
+     `VisitOMPStripeDirective`、
+     `VisitOMPReverseDirective`、
+     `VisitOMPInterchangeDirective`、
+     `VisitOMPErrorDirective`、
+     `VisitOMPFuseDirective`、
+     `VisitOMPAssumeDirective`、
+     `VisitPackIndexingExpr`、
+     `VisitOpenACCAsteriskSizeExpr`、
+     `VisitMatrixSingleSubscriptExpr`、
+     `VisitHLSLOutArgExpr`、
+     `VisitEmbedExpr`、
+     `VisitCXXParenListInitExpr`、
+     `VisitArraySectionExpr`、
+     `VisitSYCLKernelCallStmt`、
+     `VisitOpenACCWaitConstruct`、
+     `VisitOpenACCUpdateConstruct`、
+     `VisitOpenACCShutdownConstruct`、
+     `VisitOpenACCSetConstruct`、
+     `VisitOpenACCInitConstruct`、
+     `VisitOpenACCExitDataConstruct`、
+     `VisitOpenACCEnterDataConstruct`、
+     `VisitOpenACCCacheConstruct`、
+     `VisitOpenACCLoopConstruct`、
+     `VisitOpenACCHostDataConstruct`、
+     `VisitOpenACCDataConstruct`、
+     `VisitOpenACCComputeConstruct`、
+     `VisitOpenACCCombinedConstruct`、
+     `VisitOpenACCAtomicConstruct`、
+     `VisitDeferStmt`。
+
+3. `external/NotDec-llvm2c/lib/notdec-llvm2c/ASTPrinter/DeclPrinter.cpp:149-156`
+   - 之前合并匿名 tag 声明时，还是在看已经没了的 `ElaboratedType`。
+   - 现在改成看 `TagType::isTagOwned()` 和 `TagType::getDecl()`。
+   - 涉及函数：`DeclPrinter::VisitDeclContext`。
+
+4. `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp`
+   - `2294-2314`：`getTypeDeclType(TagDecl*)` 全部改成 `getTagType(...)`。
+   - `2621-2629`：`ConstantExpr::getAsInstruction()` 产物不再交给
+     `unique_ptr`，改成手动 `deleteValue()`。
+   - 涉及函数：
+     `TypeBuilder::visitStructType`、
+     `ExprBuilder::visitConstant`。
+
+5. `external/NotDec-llvm2c/lib/notdec-llvm2c/TypeManager.cpp`
+   - `600-602`：`getTemplateSpecializationType` 改成 LLVM 22 新签名。
+   - `744-767`：record / union / recursive anchor 全改 `getTagType(...)`，
+     typedef 改 `getTypedefType(...)` 新签名。
+   - `1055-1056`：`makeArrayRef` 改成 `ArrayRef<uint64_t>(Data)`。
+   - 涉及函数：
+     `ClangTypeResult::convertDualPointerTemplateType`、
+     `ClangTypeResult::convertType`、
+     `stringToAPInt`。
+
+6. `external/NotDec-llvm2c/tools/notdec-llvm2c/notdec-llvm2c.cpp:105-109`
+   - `StandardInstrumentations` 构造函数现在必须显式传 `LLVMContext`。
+   - `registerCallbacks` 第二个参数也改成 `ModuleAnalysisManager *`。
+   - 涉及函数：`main`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+build/external/NotDec-llvm2c/bin/notdec-llvm2c --help
+```
+
+结果：
+
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c` 已经成功链接出来。
+- `--help` 能正常打印 usage，说明不是只停在静态库阶段。
+- 这一轮没有跑 fortune，也没有新的性能数据，因为改动都在 LLVM 22 兼容和
+  AST printer / tool wiring 上，还没碰主链路恢复逻辑。
+
+当前评分：
+
+- 8/10。
+- 收益很大，因为目标从“继续清第一条错误”前进到了“子模块工具重新可构建”。
+- 复杂度中等，主要成本在 `TypePrinter` / `StmtPrinter` 跟 Clang 新 AST 节点
+  的对齐；但这批改动基本都限定在 printer 和类型构造层，没有污染反编译主逻辑。
+- 还可以更好的点在于：`StmtPrinter` 里新加的很多 visitor 只是保底实现，后面如果
+  真要支持 OpenACC / 新 OMP / HLSL 语法，最好再按上游语义补细。
