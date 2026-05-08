@@ -20,7 +20,9 @@ __pycache__/
 libs/
 
 llvmorg-*.zip
+llvm-source-old/
 llvm-source/
+llvm-build-old/
 llvm-build/
 *.obj/
 *.obj.old/
@@ -40,3 +42,4 @@ build-release/
 Prompts.md
 work_dir/
 .codex
+build-main-no-llvm2c/
