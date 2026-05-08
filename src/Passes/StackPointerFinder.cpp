@@ -97,7 +97,7 @@ StackPointerFinderAnalysis::run(llvm::Module &mod) {
   notdec::appendRecoveryPassLog(
       " ============== StackPointerFinderAnalysis ===============\n");
   GlobalVariable *sp = nullptr;
-  for (GlobalVariable &gv : mod.getGlobalList()) {
+  for (GlobalVariable &gv : mod.globals()) {
     if (isStackPointerName(gv.getName())) {
       sp = &gv;
     }

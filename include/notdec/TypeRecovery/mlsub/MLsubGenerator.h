@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -40,12 +41,9 @@
 #include "TypeRecovery/mlsub/PNDiff.h"
 #include "TypeRecovery/mlsub/PointerAnalysis.h"
 #include "binarysub/binarysub-core.h"
-
-#ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
-#endif
 
 namespace notdec::mlsub {
 
@@ -225,7 +223,7 @@ struct ConstraintsGenerator {
   SimpleType addRemapType(ExtValuePtr Val, ExtValuePtr Target);
 
   unsigned getPointerElemSize(llvm::Type *ty);
-  static inline bool is_cast(Value *Val) {
+  static inline bool is_cast(llvm::Value *Val) {
     return llvm::isa<llvm::AddrSpaceCastInst, llvm::BitCastInst,
                      llvm::PtrToIntInst, llvm::IntToPtrInst>(Val);
   }
@@ -397,7 +395,7 @@ class MLsubRecovery {
 
   AllGraphs AG;
   std::unique_ptr<llvm::CallGraph> CallG;
-  llvm::Optional<llvm::raw_fd_ostream> SCCsCatalog;
+  std::optional<llvm::raw_fd_ostream> SCCsCatalog;
   std::unique_ptr<std::ofstream> BinarysubTraceFile;
   const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
   const char *SignatureFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");

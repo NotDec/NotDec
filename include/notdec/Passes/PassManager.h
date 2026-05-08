@@ -9,9 +9,10 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
+#include <optional>
 #include <llvm/Passes/OptimizationLevel.h>
 #include <llvm/Passes/PassBuilder.h>
-#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Plugins/PassPlugin.h>
 #include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
@@ -43,10 +44,10 @@ struct PassEnv {
   bool HasCachedHTypeSnapshot = false;
 
   PassEnv(llvm::Module &Mod)
-      : Mod(Mod), SI(::llvm::DebugFlag, false,
+      : Mod(Mod), SI(Mod.getContext(), ::llvm::DebugFlag, false,
                      llvm::PrintPassOptions{.SkipAnalyses = true}),
-        PB(nullptr, llvm::PipelineTuningOptions(), llvm::None, &PIC) {
-    SI.registerCallbacks(PIC, &FAM);
+        PB(nullptr, llvm::PipelineTuningOptions(), std::nullopt, &PIC) {
+    SI.registerCallbacks(PIC, &MAM);
     PIC.addClassToPassName("notdec::LinearAllocationRecovery",
                            "linear-allocation-recovery");
     PIC.addClassToPassName("notdec::PointerTypeRecovery",

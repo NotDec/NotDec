@@ -3,8 +3,8 @@
 
 #include "binarysub/binarysub-infer.h"
 #include <cassert>
-#include <llvm/ADT/Optional.h>
 #include <llvm/IR/Type.h>
+#include <optional>
 #include <string>
 
 #include <llvm/ADT/ilist.h>

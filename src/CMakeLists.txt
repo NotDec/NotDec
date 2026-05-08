@@ -28,6 +28,13 @@ add_library(notdec STATIC
 	Utils/Utils.cpp
 )
 
+# 主项目源码里有一部分类型恢复和 pass 逻辑直接复用了 llvm2c 的头文件类型，
+# 即使暂时不构建 llvm2c 库，编这些源文件时也仍然需要头文件可见。
+target_include_directories(notdec
+	PUBLIC
+	${PROJECT_SOURCE_DIR}/external/NotDec-llvm2c/include
+)
+
 set(NOTDEC_MLSUB_BUILTIN_SUMMARIES_SOURCE
 	"${PROJECT_SOURCE_DIR}/resources/mlsub_builtin_summaries.json"
 )

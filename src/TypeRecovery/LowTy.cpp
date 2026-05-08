@@ -172,14 +172,16 @@ bool PNTy::merge(PNTy Other, bool joinOrMeet) {
 
 static bool isFloat(std::string a) { return a == "float" || a == "double"; }
 static bool isInt1(std::string a) {
-  return startswith(a, "int") || startswith(a, "sint") || startswith(a, "uint");
+  llvm::StringRef Ref(a);
+  return Ref.starts_with("int") || Ref.starts_with("sint") ||
+         Ref.starts_with("uint");
 }
 
 llvm::Type *ToLLVMType(llvm::LLVMContext &Ctx, std::string a, unsigned Size) {
   // if (a == "top") {
   //   return nullptr;
   // }
-  if (startswith(a, "int")) {
+  if (llvm::StringRef(a).starts_with("int")) {
     return llvm::Type::getIntNTy(Ctx, Size);
   }
   if (a == "float") {
@@ -189,7 +191,7 @@ llvm::Type *ToLLVMType(llvm::LLVMContext &Ctx, std::string a, unsigned Size) {
     return llvm::Type::getDoubleTy(Ctx);
   }
   if (a == "ptr") {
-    return llvm::Type::getInt8PtrTy(Ctx);
+    return llvm::PointerType::get(Ctx, 0);
   }
   assert(false && "TODO: unhandled type");
 }

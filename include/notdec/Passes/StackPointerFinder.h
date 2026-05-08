@@ -35,7 +35,7 @@ struct StackPointerMatcher {
                       llvm::Value *specific_sp)
       : sp(sp), space(space), load(load), add(add), specific_sp(specific_sp) {}
 
-  bool match(llvm::Instruction *I) {
+  bool match(llvm::Instruction *I) const {
     using namespace llvm::PatternMatch;
     using namespace llvm;
     auto pat_alloc1 =

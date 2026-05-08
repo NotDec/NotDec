@@ -14,7 +14,8 @@ string( REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_
 # 1. VERIFY LLVM INSTALLATION DIR
 # This is just a bit of a sanity checking.
 #===============================================================================
-set(LT_LLVM_INSTALL_DIR "${CMAKE_CURRENT_LIST_DIR}/llvm-14.0.6.obj" CACHE PATH "LLVM installation directory")
+set(NOTDEC_LLVM_MAJOR_VERSION "22" CACHE STRING "Expected LLVM major version")
+set(LT_LLVM_INSTALL_DIR "${CMAKE_CURRENT_LIST_DIR}/llvm-22.1.0.obj" CACHE PATH "LLVM installation directory")
 
 # 1.1 Check the "include| directory
 set(LT_LLVM_INCLUDE_DIR "${LT_LLVM_INSTALL_DIR}/include/llvm")
@@ -26,15 +27,18 @@ endif()
 # 1.2 Check that the LLVMConfig.cmake file exists (the location depends on the
 # OS)
 set(LT_VALID_INSTALLATION FALSE)
+set(NOTDEC_LLVM_CMAKE_DIR "")
 
 # Ubuntu + Darwin
 if(EXISTS "${LT_LLVM_INSTALL_DIR}/lib/cmake/llvm/LLVMConfig.cmake")
 	set(LT_VALID_INSTALLATION TRUE)
+	set(NOTDEC_LLVM_CMAKE_DIR "${LT_LLVM_INSTALL_DIR}/lib/cmake/llvm")
 endif()
 
 # Fedora
 if(EXISTS "${LT_LLVM_INSTALL_DIR}/lib64/cmake/llvm/LLVMConfig.cmake")
 	set(LT_VALID_INSTALLATION TRUE)
+	set(NOTDEC_LLVM_CMAKE_DIR "${LT_LLVM_INSTALL_DIR}/lib64/cmake/llvm")
 endif()
 
 if(NOT ${LT_VALID_INSTALLATION})
@@ -55,17 +59,19 @@ set(NOTDEC_LLVM_INSTALL_DIR "${LT_LLVM_INSTALL_DIR}" CACHE PATH "LLVM installati
 # LLVMConfig.cmake is located in "/usr/lib64/cmake/llvm". But this path is
 # among other paths that will be checked by default when using
 # `find_package(llvm)`. So there's no need to add it here.
-list(APPEND CMAKE_PREFIX_PATH "${LT_LLVM_INSTALL_DIR}/lib/cmake/llvm/")
+set(LLVM_DIR "${NOTDEC_LLVM_CMAKE_DIR}" CACHE PATH "LLVM CMake package directory" FORCE)
+list(PREPEND CMAKE_PREFIX_PATH "${NOTDEC_LLVM_CMAKE_DIR}")
 
-find_package(LLVM 14 REQUIRED CONFIG)
+find_package(LLVM REQUIRED CONFIG)
 
 # See: https://stackoverflow.com/questions/55921707/setting-path-to-clang-library-in-cmake
-list(APPEND CMAKE_PREFIX_PATH "${LT_LLVM_INSTALL_DIR}/lib/cmake/clang/")
+set(Clang_DIR "${LT_LLVM_INSTALL_DIR}/lib/cmake/clang" CACHE PATH "Clang CMake package directory" FORCE)
+list(PREPEND CMAKE_PREFIX_PATH "${LT_LLVM_INSTALL_DIR}/lib/cmake/clang/")
 find_package(Clang REQUIRED CONFIG)
 
 # Another sanity check
-if(NOT "14" VERSION_EQUAL "${LLVM_VERSION_MAJOR}")
-	message(FATAL_ERROR "Found LLVM ${LLVM_VERSION_MAJOR}, but need LLVM 14")
+if(NOT "${NOTDEC_LLVM_MAJOR_VERSION}" VERSION_EQUAL "${LLVM_VERSION_MAJOR}")
+	message(FATAL_ERROR "Found LLVM ${LLVM_VERSION_MAJOR}, but need LLVM ${NOTDEC_LLVM_MAJOR_VERSION}")
 endif()
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
@@ -80,11 +86,13 @@ message("LLVM STATUS:
 
 option(NOTDEC_PREFER_SHARED_LLVM "Prefer linking against shared LLVM/Clang libraries when available." ON)
 
+unset(NOTDEC_LLVM_DYLIB CACHE)
 find_library(NOTDEC_LLVM_DYLIB
-	NAMES LLVM LLVM-14
+	NAMES LLVM LLVM-${NOTDEC_LLVM_MAJOR_VERSION}
 	HINTS ${LLVM_LIBRARY_DIRS} "${LT_LLVM_INSTALL_DIR}/lib" "${LT_LLVM_INSTALL_DIR}/lib64"
 	NO_DEFAULT_PATH
 )
+unset(NOTDEC_CLANG_CPP_LIBRARY CACHE)
 find_library(NOTDEC_CLANG_CPP_LIBRARY
 	NAMES clang-cpp
 	HINTS ${CLANG_LIBRARY_DIRS} "${LT_LLVM_INSTALL_DIR}/lib" "${LT_LLVM_INSTALL_DIR}/lib64"

@@ -535,14 +535,13 @@ void writeJSONFile(llvm::StringRef Path, const llvm::json::Value &Doc) {
 
 void writeMLsubInputAnchor(const llvm::Module &M, llvm::StringRef AnchorPath,
                            llvm::StringRef ModuleSHA256Hex) {
-  llvm::json::Object Anchor{
-      {"version", int64_t(1)},
-      {"stage", "mlsub-input"},
-      {"ir_file", kMLsubInputIRFile.str()},
-      {"sha256", ModuleSHA256Hex},
-      {"data_layout", M.getDataLayout().getStringRepresentation()},
-      {"target_triple", M.getTargetTriple()},
-  };
+  llvm::json::Object Anchor;
+  Anchor["version"] = int64_t(1);
+  Anchor["stage"] = "mlsub-input";
+  Anchor["ir_file"] = kMLsubInputIRFile.str();
+  Anchor["sha256"] = ModuleSHA256Hex.str();
+  Anchor["data_layout"] = M.getDataLayout().getStringRepresentation();
+  Anchor["target_triple"] = M.getTargetTriple().str();
   writeJSONFile(AnchorPath, llvm::json::Value(std::move(Anchor)));
 }
 
@@ -1224,7 +1223,7 @@ void validateExtraConstraintsAnchor(const llvm::json::Object &Root,
   }
 
   if (auto TargetTriple = Anchor->getString("target_triple")) {
-    auto Current = M.getTargetTriple();
+    auto Current = M.getTargetTriple().str();
     if (*TargetTriple != Current) {
       failExtraConstraints(
           "ir_anchor.target_triple",
@@ -3641,8 +3640,8 @@ bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
 void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
   auto Target = I.getCalledFunction();
   if (Target) {
-    if (Target->getName().startswith("llvm.dbg") ||
-        Target->getName().startswith("llvm.lifetime")) {
+    if (Target->getName().starts_with("llvm.dbg") ||
+        Target->getName().starts_with("llvm.lifetime")) {
       return;
     }
   }
@@ -3795,7 +3794,7 @@ void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
 void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(
     GetElementPtrInst &Gep) {
   // supress warnings for table gep
-  if (Gep.getPointerOperand()->getName().startswith("table_")) {
+  if (Gep.getPointerOperand()->getName().starts_with("table_")) {
     return;
   } else if (Gep.hasAllZeroIndices()) {
     auto Src = getExtValuePtr(Gep.getPointerOperand(), &Gep, 0);

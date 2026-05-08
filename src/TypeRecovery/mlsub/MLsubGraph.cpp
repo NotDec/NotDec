@@ -2,7 +2,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/iterator_range.h>
 #include <llvm/IR/Type.h>

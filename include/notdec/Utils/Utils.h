@@ -9,6 +9,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <variant>

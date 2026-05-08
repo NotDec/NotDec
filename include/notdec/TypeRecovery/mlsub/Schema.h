@@ -4,8 +4,8 @@
 #include "notdec-llvm2c/Interface/Range.h"
 #include <cassert>
 #include <cstdint>
-#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/SmallVector.h>
+#include <optional>
 #include <string>
 #include <variant>
 

@@ -6,6 +6,7 @@
 
 #include <list>
 
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/InstIterator.h>
 
 
@@ -231,7 +232,7 @@ Value* convertToType(
 				before,
 				after,
 				constExpr));
-		auto* nl = new LoadInst(c->getType(), c, "", c->getNextNonDebugInstruction());
+		auto* nl = new LoadInst(c->getType(), c, "", c->getNextNode());
 		// nl->insertAfter(c);
 		conv = nl;
 	}

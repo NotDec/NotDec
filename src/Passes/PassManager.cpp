@@ -13,6 +13,7 @@
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Analysis/ValueTracking.h>
+#include <llvm/Analysis/SimplifyQuery.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -77,7 +78,8 @@ struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
           if (BO->getOpcode() == Instruction::Or) {
             Value *LHS = BO->getOperand(0);
             Value *RHS = BO->getOperand(1);
-            if (llvm::haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT)) {
+            llvm::SimplifyQuery SQ(DL, &DT, &AC, &I);
+            if (llvm::haveNoCommonBitsSet(LHS, RHS, SQ)) {
               // https://github.com/llvm/llvm-project/blob/e188aae406f3fecaed65a1f7e6562205f0de937e/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp#L4095
               Builder.SetInsertPoint(BO);
               Instruction *Result =
@@ -323,8 +325,8 @@ struct HelloModule : PassInfoMixin<HelloModule> {
 };
 
 void DecompileConfig::find_special_gv() {
-  for (GlobalVariable &gv : Mod.getGlobalList()) {
-    if (gv.getName().equals(MEM_NAME)) {
+  for (GlobalVariable &gv : Mod.globals()) {
+    if (gv.getName() == MEM_NAME) {
       Mem = &gv;
     }
   }

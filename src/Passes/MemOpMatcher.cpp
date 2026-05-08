@@ -4,7 +4,7 @@
 #include "notdec-llvm2c/Utils.h"
 #include <cstdint>
 #include <functional>
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/IRBuilder.h>
@@ -37,7 +37,7 @@ void appendMemOpPassBanner(llvm::StringRef PassName, llvm::StringRef FuncName) {
 } // namespace
 
 // Helper to decompose a value into base + offset
-Optional<std::pair<Value *, int64_t>>
+std::optional<std::pair<Value *, int64_t>>
 matchOffset(Value *V, std::set<Instruction *> &Visited) {
   if (llvm::ConstantExpr *CE = llvm::dyn_cast<llvm::ConstantExpr>(V)) {
     if (CE->getOpcode() == llvm::Instruction::IntToPtr) {
@@ -82,7 +82,7 @@ llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
   if (Base == nullptr) {
     Base = Builder.CreateIntToPtr(
         Builder.getIntN(DL.getPointerSizeInBits(), Offset),
-        Type::getInt8PtrTy(Builder.getContext()));
+        PointerType::get(Builder.getContext(), 0));
     return Base;
   } else if (Offset == 0) {
     // do nothing
@@ -99,8 +99,7 @@ llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
         Base, Builder.getIntN(Base->getType()->getIntegerBitWidth(), Offset));
   }
   if (Base->getType()->isIntegerTy()) {
-    Base =
-        Builder.CreateIntToPtr(Base, Type::getInt8PtrTy(Builder.getContext()));
+    Base = Builder.CreateIntToPtr(Base, PointerType::get(Builder.getContext(), 0));
   }
   return Base;
 }
@@ -139,8 +138,9 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
 
         std::set<Instruction *> Visited;
 
-        Optional<std::pair<Value *, int64_t>> BeginOffset = None;
-        Optional<std::pair<Value *, int64_t>> EndOffset = None;
+        std::optional<std::pair<Value *, int64_t>> BeginOffset =
+            std::nullopt;
+        std::optional<std::pair<Value *, int64_t>> EndOffset = std::nullopt;
 
         // init with match
         Visited.insert(SI);
@@ -174,7 +174,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
             break;
           }
 
-          Optional<std::pair<Value *, int64_t>> NextBegin =
+          std::optional<std::pair<Value *, int64_t>> NextBegin =
               matchOffset(SI2->getPointerOperand(), Visited);
           // failed to match: stores must be in sequence
           if (!NextBegin) {
