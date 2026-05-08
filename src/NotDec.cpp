@@ -71,13 +71,6 @@ static cl::opt<log_level> Wasm2LLVMLogLevel(
 #include "notdec-llvm2c/Commandlines.def"
 #endif
 
-static cl::opt<std::string> stackRec(
-    "stack-recovery-algo",
-    cl::desc(
-        "stack recovery algorithm to use: retdec or notdec. default: notdec"),
-    cl::init("notdec"), cl::value_desc("sta-algo"), cl::Optional,
-    cl::cat(NotdecCat));
-
 static cl::opt<int>
     trLevel("tr-level",
                 cl::desc("Type recovery level: 0: disable, 1: simple opt, 2: type recovery without breaking stack, 3: full type recovery"),
@@ -259,7 +252,6 @@ int main(int argc, char *argv[]) {
   }
   notdec::Options opts{
       .trLevel = trLevel,
-      .stackRec = stackRec,
       .log_level = LogLevel,
       .primitiveSemanticLatticeFiles =
           std::vector<std::string>(primitiveSemanticLatticeFiles.begin(),

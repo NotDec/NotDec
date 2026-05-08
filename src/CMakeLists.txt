@@ -8,13 +8,6 @@ add_library(notdec STATIC
 	Passes/ReorderBasicblock.cpp
 	Passes/DSROA.cpp
 	Passes/AllocAnnotator.cpp
-	Passes/retdec-stack/retdec-abi.cpp
-	Passes/retdec-stack/retdec-ir-modifier.cpp
-	Passes/retdec-stack/retdec-reaching-definition.cpp
-	Passes/retdec-stack/retdec-stack.cpp
-	Passes/retdec-stack/retdec-stack-pointer-op-remove.cpp
-	Passes/retdec-stack/retdec-symbolic-tree.cpp
-	Passes/retdec-stack/retdec-utils.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/mlsub/PNDiff.cpp
 	TypeRecovery/mlsub/PAPath.cpp
