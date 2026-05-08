@@ -263,3 +263,89 @@ cmake --build ./build --target notdec-llvm2c-exe -j4
 - 收益是把真正简单的 LLVM 22 / Clang 22 接口迁移先剥干净了。
 - 风险是后面的阻塞已经不再是“搜索替换”级别，尤其是 visitor 和新 AST 节点那块，
   需要单独决定是补全头文件、裁掉 visitor 覆盖面，还是换一层实现方式。
+
+## 已完成：Dominator / IDF 适配
+
+这轮只动 `external/NotDec-llvm2c/include/notdec-llvm2c/Dominators.h`，目标很窄：
+把 `ChildrenGetterTy` 从“照抄 Clang CFG 版本”改成真正适配
+`notdec::llvm2c::CFGBlock`，先确认是不是当前第一阻塞。
+
+子模块提交：
+
+- `external/NotDec-llvm2c` commit `554b887`
+  - message: `Adapt Dominators for LLVM 22 IDF`
+
+修改：
+
+1. `external/NotDec-llvm2c/include/notdec-llvm2c/Dominators.h:4-13`
+   - 补 `DepthFirstIterator.h`、`GraphTraits.h`、`iterator.h`、
+     `raw_ostream.h`，让这个头直接对齐 Clang 22 当前依赖，不再继续靠传递包含。
+   - 涉及类型：`GraphTraits<DomTreeNode *>`、`nodes_iterator`。
+
+2. `external/NotDec-llvm2c/include/notdec-llvm2c/Dominators.h:170-190`
+   - 把 `IDFCalculatorDetail::ChildrenGetterTy` 的特化对象从
+     `clang::CFGBlock` 改成 `notdec::llvm2c::CFGBlock`。
+   - 不再把 `AdjacentBlock` 迭代器范围直接交给 LLVM 的 IDF 模板，而是显式提取
+     `CFGBlock *`，顺手滤掉 `nullptr`。
+   - 涉及函数：`ChildrenGetterTy<notdec::llvm2c::CFGBlock, IsPostDom>::get`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+```
+
+结果：
+
+- `Dominators.cpp` 现在可以正常开始编译，之前那组
+  `GenericIteratedDominanceFrontier` / `auto *Succ` /
+  `AdjacentBlock` 不匹配错误已经消失。
+- 说明之前判断是对的：真正的问题不是 Phoenix 算法本身，而是
+  `Dominators.h` 里那段从 Clang 抄来的 `ChildrenGetterTy` 没有真正改到
+  自己的 CFG 类型上。
+- 当前新的第一阻塞已经前移到
+  `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/StructManager.cpp:163`
+  的 `Module::getGlobalList()`，属于普通 LLVM 22 API 迁移问题。
+
+当前判断：
+
+- 这轮收益不错，值 8/10。
+- 改动很小，但直接清掉了一个会卡住 `Phoenix.cpp`、`StructuralAnalysis.cpp`、
+  `Dominators.cpp` 多个编译单元的公共模板错误。
+- 复杂度和维护成本都低，因为现在这段逻辑和现有 `CFGBlock::AdjacentBlock`
+  设计是对齐的，没有新引入额外抽象。
+
+## 已完成：StructManager `globals()` 迁移
+
+这轮顺手清一个纯机械 LLVM 22 API 变化，不碰行为。
+
+子模块提交：
+
+- `external/NotDec-llvm2c` commit `61486b7`
+  - message: `Use Module globals in StructManager`
+
+修改：
+
+1. `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/StructManager.cpp:161-163`
+   - `BytesManager::create` 里遍历全局变量的入口从 `M.getGlobalList()` 改成
+     `M.globals()`。
+   - 涉及函数：`BytesManager::create`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+```
+
+结果：
+
+- `StructManager.cpp` 现在可以正常通过。
+- 当前新的最前排失败已经前移到两组更大的问题：
+  1. `ASTPrinter/StmtPrinter.cpp` 上一批 Clang AST printer 接口变化。
+  2. `StructuralAnalysis.cpp` 里剩余的 `ArrayRef`、opaque pointer、Clang AST type
+     构造接口变化。
+
+当前判断：
+
+- 这笔就是标准机械替换，值 7.5/10。
+- 收益不如 dominator 那笔大，但成本很低，清掉了一个确定无争议的阻塞。
