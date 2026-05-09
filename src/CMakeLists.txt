@@ -6,7 +6,6 @@ add_library(notdec STATIC
 	Passes/StackAlloca.cpp
 	Passes/MemOpMatcher.cpp
 	Passes/ReorderBasicblock.cpp
-	Passes/DSROA.cpp
 	Passes/AllocAnnotator.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/mlsub/PNDiff.cpp
