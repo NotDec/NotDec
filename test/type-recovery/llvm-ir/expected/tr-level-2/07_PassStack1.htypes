@@ -8,7 +8,6 @@
 [+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
 [+] fun_1::%addr => lower=bottom:32 ; upper='c:32 & ptr<load=void, store='c:32, psize=32>
 [-] fun_1::%stack => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
-[+] fun_1::%stack1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] fun_1::<ret> => lower=bottom:32 ; upper=top:32
 [+] fun_1::arg0 => lower=bottom:32 ; upper='c:32 & ptr<load=void, store='c:32, psize=32>
 [+] main::%a => lower=bottom:32 ; upper=top:32
@@ -20,3 +19,4 @@
 
 [memory]
 type => top:32
+

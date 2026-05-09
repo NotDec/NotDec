@@ -8,17 +8,17 @@ target triple = "wasm32-unknown-wasi"
 define internal i32 @main(i32 %limit) {
 entry:
   %buf = alloca [16 x i8], align 1
-  %base = ptrtoint [16 x i8]* %buf to i32
+  %base = ptrtoint ptr %buf to i32
   br label %loop
 
 loop:
   %i = phi i32 [ 0, %entry ], [ %i.next, %loop ]
   %p = phi i32 [ %base, %entry ], [ %next, %loop ]
   %next = add i32 %p, 1
-  %p.ptr = inttoptr i32 %p to i8*
-  %next.ptr = inttoptr i32 %next to i8*
-  %v = load i8, i8* %p.ptr, align 1
-  store i8 %v, i8* %next.ptr, align 1
+  %p.ptr = inttoptr i32 %p to ptr
+  %next.ptr = inttoptr i32 %next to ptr
+  %v = load i8, ptr %p.ptr, align 1
+  store i8 %v, ptr %next.ptr, align 1
   %i.next = add i32 %i, 1
   %done = icmp uge i32 %i.next, %limit
   br i1 %done, label %exit, label %loop

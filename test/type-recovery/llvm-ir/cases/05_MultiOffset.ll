@@ -6,11 +6,11 @@ target triple = "wasm32-unknown-wasi"
 define internal i32 @main(i32 %_arg_0, i32 %_arg_1) {
 allocator:
   %stack1 = alloca [8 x i8], align 4
-  %stack_1p = ptrtoint [8 x i8]* %stack1 to i32
+  %stack_1p = ptrtoint ptr %stack1 to i32
   %Off1 = add i32 %stack_1p, 4
-  %mem1 = inttoptr i32 %stack_1p to i32*
-  store i32 0, i32* %mem1, align 4
-  %mem2 = inttoptr i32 %Off1 to i32*
-  store i32 1, i32* %mem2, align 4
+  %mem1 = inttoptr i32 %stack_1p to ptr
+  store i32 0, ptr %mem1, align 4
+  %mem2 = inttoptr i32 %Off1 to ptr
+  store i32 1, ptr %mem2, align 4
   ret i32 %stack_1p
 }

@@ -1,0 +1,18 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
+[+] main::%a => lower=bottom:32 ; upper=ptr<load=ptr<load=void, store=void, psize=32>, store=void, psize=32>
+[+] main::%b => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[+] main::%c => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[+] main::%d => lower=bottom:32 ; upper=top:32
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] main::arg0 => lower=bottom:32 ; upper=top:32
+[+] main::arg1 => lower=bottom:32 ; upper=top:32
+
+[memory]
+type => top:32
+

@@ -21,8 +21,8 @@ loop:
 
 short_step:
   %short.next = add i32 %p, 1
-  %short.ptr = inttoptr i32 %short.next to i8*
-  store i8 1, i8* %short.ptr, align 1
+  %short.ptr = inttoptr i32 %short.next to ptr
+  store i8 1, ptr %short.ptr, align 1
   br label %merge
 
 wide_step:
@@ -30,22 +30,22 @@ wide_step:
 
 wide_left:
   %wide.left.next = add i32 %p, 4
-  %wide.left.ptr = inttoptr i32 %wide.left.next to i8*
-  store i8 4, i8* %wide.left.ptr, align 1
+  %wide.left.ptr = inttoptr i32 %wide.left.next to ptr
+  store i8 4, ptr %wide.left.ptr, align 1
   br label %merge
 
 wide_right:
   %wide.right.next = add i32 %p, 4
-  %wide.right.ptr = inttoptr i32 %wide.right.next to i8*
-  store i8 5, i8* %wide.right.ptr, align 1
+  %wide.right.ptr = inttoptr i32 %wide.right.next to ptr
+  store i8 5, ptr %wide.right.ptr, align 1
   br label %merge
 
 merge:
   %next = phi i32 [ %short.next, %short_step ], [ %wide.left.next, %wide_left ], [ %wide.right.next, %wide_right ]
-  %next.ptr = inttoptr i32 %next to i8*
-  %loaded = load i8, i8* %next.ptr, align 1
-  %echo.ptr = inttoptr i32 %p to i8*
-  store i8 %loaded, i8* %echo.ptr, align 1
+  %next.ptr = inttoptr i32 %next to ptr
+  %loaded = load i8, ptr %next.ptr, align 1
+  %echo.ptr = inttoptr i32 %p to ptr
+  store i8 %loaded, ptr %echo.ptr, align 1
   %i.next = add i32 %i, 1
   %done = icmp uge i32 %i.next, %limit
   br i1 %done, label %exit, label %loop

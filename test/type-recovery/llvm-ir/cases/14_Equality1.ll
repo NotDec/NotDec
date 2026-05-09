@@ -6,8 +6,8 @@ declare void @isFloat(float)
 
 define internal void @ptrFloat(i32 %_arg_0) {
 allocator:
-  %v_12 = inttoptr i32 %_arg_0 to float*
-  %f1 = load float, float* %v_12, align 4
+  %v_12 = inttoptr i32 %_arg_0 to ptr
+  %f1 = load float, ptr %v_12, align 4
   call void @isFloat(float %f1)
   ret void
 }
@@ -15,7 +15,7 @@ allocator:
 define internal i32 @main(i32 %_arg_0, i32 %_arg_1) {
 allocator:
   %stackPtr = alloca [4 x i8]
-  %stack = ptrtoint [4 x i8]* %stackPtr to i32
+  %stack = ptrtoint ptr %stackPtr to i32
   call void @ptrFloat(i32 %stack)
   br label %BB1
 
@@ -31,4 +31,3 @@ BB0:                                              ; preds = %allocator
 END:
   ret i32 0
 }
-

@@ -8,8 +8,8 @@ target triple = "x86_64-pc-linux-gnu"
 ; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @conv_signed(i64 noundef %0) #0 {
   %2 = alloca i64, align 8
-  store i64 %0, i64* %2, align 8
-  %3 = load i64, i64* %2, align 8
+  store i64 %0, ptr %2, align 8
+  %3 = load i64, ptr %2, align 8
   %4 = trunc i64 %3 to i32
   ret i32 %4
 }
@@ -17,8 +17,8 @@ define dso_local i32 @conv_signed(i64 noundef %0) #0 {
 ; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @conv_unsigned(i64 noundef %0) #0 {
   %2 = alloca i64, align 8
-  store i64 %0, i64* %2, align 8
-  %3 = load i64, i64* %2, align 8
+  store i64 %0, ptr %2, align 8
+  %3 = load i64, ptr %2, align 8
   %4 = trunc i64 %3 to i32
   ret i32 %4
 }
@@ -27,15 +27,15 @@ define dso_local i32 @conv_unsigned(i64 noundef %0) #0 {
 define dso_local i32 @main() #0 {
   %1 = alloca i32, align 4
   %2 = alloca i32, align 4
-  store i32 0, i32* %1, align 4
+  store i32 0, ptr %1, align 4
   %3 = call i32 @conv_signed(i64 noundef -68719476737)
-  store i32 %3, i32* %2, align 4
-  %4 = load i32, i32* %2, align 4
-  %5 = call i32 (i8*, ...) @printf(i8* noundef getelementptr inbounds ([4 x i8], [4 x i8]* @.str, i64 0, i64 0), i32 noundef %4)
+  store i32 %3, ptr %2, align 4
+  %4 = load i32, ptr %2, align 4
+  %5 = call i32 (ptr, ...) @printf(ptr noundef getelementptr inbounds ([4 x i8], ptr @.str, i64 0, i64 0), i32 noundef %4)
   ret i32 0
 }
 
-declare i32 @printf(i8* noundef, ...) #1
+declare i32 @printf(ptr noundef, ...) #1
 
 attributes #0 = { noinline nounwind optnone uwtable "frame-pointer"="all" "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "target-features"="+cx8,+fxsr,+mmx,+sse,+sse2,+x87" "tune-cpu"="generic" }
 attributes #1 = { "frame-pointer"="all" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "target-features"="+cx8,+fxsr,+mmx,+sse,+sse2,+x87" "tune-cpu"="generic" }

@@ -1,0 +1,21 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:64
+[+] @.str => lower=bottom:64 ; upper=top:64
+[+] @main => lower=(bottom:32 (*)())* ; upper=top:64
+[+] @printf => lower=(bottom:32 (*)(top:64))* ; upper=(top:32 (*)(bottom:64, bottom:64, bottom:64, bottom:64))*
+[+] const(i32 0)@main::%bb0.i4:0 => lower=bottom:32 ; upper=top:32
+[-] main::%bb0.i0 => lower=bottom:64 ; upper=top:64
+[-] main::%bb0.i1 => lower=bottom:64 ; upper=top:64
+[-] main::%bb0.i2 => lower=bottom:64 ; upper=top:64
+[+] main::%bb0.i3 => lower=bottom:32 ; upper=top:32
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[+] printf::<ret> => lower=bottom:32 ; upper=top:32
+[+] printf::arg0 => lower=bottom:64 ; upper=top:64
+
+[memory]
+type => top:64
+

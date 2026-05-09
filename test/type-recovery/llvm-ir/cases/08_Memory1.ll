@@ -7,15 +7,15 @@ target triple = "wasm32-unknown-wasi"
 
 define internal i32 @passMem1() {
 allocator:
-  %memptr1 = inttoptr i32 1024 to i32*
-  %f1 = load i32, i32* %memptr1, align 4
+  %memptr1 = inttoptr i32 1024 to ptr
+  %f1 = load i32, ptr %memptr1, align 4
   ret i32 %f1
 }
 
 define internal i32 @main(i32 %_arg_0, i32 %_arg_1) {
 allocator:
-  %memptr1 = inttoptr i32 1024 to i32*
-  store i32 0, i32* %memptr1, align 4
+  %memptr1 = inttoptr i32 1024 to ptr
+  store i32 0, ptr %memptr1, align 4
   %r = call i32 @passMem1()
   ret i32 %r
 }

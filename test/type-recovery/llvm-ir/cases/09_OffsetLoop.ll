@@ -6,14 +6,14 @@ target triple = "wasm32-unknown-wasi"
 define internal i32 @main(i32 %_arg_0, i32 %_arg_1) {
 allocator:
   %stack1 = alloca [16 x i8], align 4
-  %stack1p = ptrtoint [16 x i8]* %stack1 to i32
+  %stack1p = ptrtoint ptr %stack1 to i32
   br label %loop
 
 loop:
   %p1 = phi i32 [ %stack1p, %allocator ], [ %p2, %loop ]
   %p2 = add i32 %p1, 4
-  %new_9 = inttoptr i32 %p2 to i32*
-  store i32 0, i32* %new_9, align 4
+  %new_9 = inttoptr i32 %p2 to ptr
+  store i32 0, ptr %new_9, align 4
   %cmp = icmp slt i32 %p2, %_arg_0
   br i1 %cmp, label %loop, label %exit
 

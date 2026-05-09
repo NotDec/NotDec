@@ -80,8 +80,8 @@
     {
       "name": "13_stack_variable_alloc",
       "input": "cases/13_stack_variable_alloc.ll",
-      "status": "xfail",
-      "reason": "MLsubGenerator cannot convert string getelementptr constant"
+      "expected": "expected/tr-level-2/13_stack_variable_alloc.htypes",
+      "status": "pass"
     },
     {
       "name": "14_Equality1",
@@ -92,8 +92,8 @@
     {
       "name": "15_signed1",
       "input": "cases/15_signed1.ll",
-      "status": "xfail",
-      "reason": "MLsubGenerator cannot convert string getelementptr constant"
+      "expected": "expected/tr-level-2/15_signed1.htypes",
+      "status": "pass"
     },
     {
       "name": "16_Poly1",
@@ -116,13 +116,19 @@
     {
       "name": "19_PtrPtr",
       "input": "cases/19_PtrPtr.ll",
-      "status": "xfail",
-      "reason": "invalid LLVM IR parse failure prevents HType snapshot output"
+      "expected": "expected/tr-level-2/19_PtrPtr.htypes",
+      "status": "pass"
     },
     {
       "name": "20_PointerAnalysisFieldCycle",
       "input": "cases/20_PointerAnalysisFieldCycle.ll",
       "expected": "expected/tr-level-2/20_PointerAnalysisFieldCycle.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "21_PointerAnalysisBranchingFieldCycle",
+      "input": "cases/21_PointerAnalysisBranchingFieldCycle.ll",
+      "expected": "expected/tr-level-2/21_PointerAnalysisBranchingFieldCycle.htypes",
       "status": "pass"
     }
   ]
