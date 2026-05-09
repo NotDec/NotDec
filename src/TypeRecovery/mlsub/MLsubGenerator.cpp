@@ -3554,6 +3554,11 @@ static bool isWithOverflowIntrinsicUnsigned(llvm::Intrinsic::ID ID) {
   return false;
 }
 
+static bool isMinMaxIntrinsic(llvm::Intrinsic::ID ID) {
+  return ID == Intrinsic::smax || ID == Intrinsic::smin ||
+         ID == Intrinsic::umax || ID == Intrinsic::umin;
+}
+
 static inline void ensureSequence(Value *&Src1, Value *&Src2) {
   if (llvm::isa<llvm::ConstantInt>(Src1) &&
       llvm::isa<llvm::ConstantInt>(Src2)) {
@@ -3648,13 +3653,30 @@ bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
   if (!Target->isIntrinsic()) {
     return false;
   }
-  switch (Target->getIntrinsicID()) {
+  auto ID = Target->getIntrinsicID();
+  switch (ID) {
   case Intrinsic::memset:
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
     return true;
   default:
     break;
+  }
+  if (isMinMaxIntrinsic(ID)) {
+    assert(I.arg_size() == 2 && "min/max intrinsic must have two operands");
+    auto RetVar = cg.getOrInsertNode(&I);
+    auto Src1 = getExtValuePtr(I.getArgOperand(0), &I, 0);
+    auto Src2 = getExtValuePtr(I.getArgOperand(1), &I, 1);
+    auto Src1Var = cg.getOrInsertNode(Src1);
+    auto Src2Var = cg.getOrInsertNode(Src2);
+    // LLVM 22 folds integer icmp+select into min/max intrinsics. Keep the
+    // old frozen-IR behavior by modeling them as a select-like join.
+    cg.setNonPointer(Src1);
+    cg.setNonPointer(Src2);
+    cg.setNonPointer(&I);
+    cg.addSubtype(Src1Var, RetVar);
+    cg.addSubtype(Src2Var, RetVar);
+    return true;
   }
   // auto ID = Target->getIntrinsicID();
   if (I.getType()->isAggregateType()) {

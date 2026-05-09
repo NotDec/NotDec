@@ -2,34 +2,9 @@
   "version": 1,
   "ir_anchor": {
     "stage": "mlsub-input",
-    "sha256": "6620beabc3151befe0fe881ebbd307d42787ffe7a0b738c3ef8f8fe16b527358",
+    "sha256": "82fd34f662bebeb64f64f633ad56bd153e91182f18d02163de68b167cfa7a2cf",
     "data_layout": "e-m:e-p:32:32-i64:64-n32:64-S128",
     "target_triple": "wasm32-unknown-wasi"
   },
-  "functions": {
-    "add_file": {
-      "actions": [
-        {
-          "kind": "pndiff",
-          "target": {
-            "kind": "inst",
-            "id": "add_file::%bb.brif_next127.i1"
-          },
-          "state": "number"
-        }
-      ]
-    },
-    "get_tbl": {
-      "actions": [
-        {
-          "kind": "pndiff",
-          "target": {
-            "kind": "inst",
-            "id": "get_tbl::%bb.loop_entry.i7"
-          },
-          "state": "number"
-        }
-      ]
-    }
-  }
+  "functions": {}
 }
