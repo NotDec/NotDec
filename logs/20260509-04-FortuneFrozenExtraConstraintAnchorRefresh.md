@@ -203,3 +203,57 @@ ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-
 - 实现效果：8/10。主路径已经跑通，但 warning 和性能还有尾巴。
 - 复杂度：5/10。三处修复都比较局部，基本都对着 LLVM 22 语义差异。
 - 维护成本：5/10。`smax` 和全局/`switch` 修法都偏正路，不是临时绕过。
+
+## PNDiff 约束回补
+
+### 已完成：把 `add_file/get_tbl` 的两个 `number` 约束按新 selector 加回
+
+- 修改文件：
+  - `test/type-recovery/realworld/support/fortune.o3.wasm.extra.json:5-33`
+- 涉及函数：
+  - `add_file`
+  - `get_tbl`
+- 修改内容：
+  - `ir_anchor.sha256` 再刷新到当前 `work_dir/02-mlsub-input.anchor.json`
+    的 `7ccaa0ce7556eb72e00233fcb4ff00882ba5c863b9f529002533a6f24cc56b2c`
+  - 加回：
+    - `add_file::%bb.brif_next127.i1 -> number`
+    - `get_tbl::%bb.loop_entry.i6 -> number`
+
+判断依据：
+
+- `work_dir/PNDiff.warn.txt` 原本只剩这两条 residual
+- 两条都对应明确的整数加法，不是模糊的 pointer-like 值
+
+### 验证
+
+命令：
+
+```bash
+env NOTDEC_EXTRA_CONSTRAINTS=test/type-recovery/realworld/support/fortune.o3.wasm.extra.json \
+    NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT=1 \
+    NOTDEC_BINARYSUB_TRACE=1 \
+    ./build/bin/notdec --frozen-tr-input-ir \
+    test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+    -o /tmp/fortune.c --tr-level=2 -g --work-dir=/sn640/NotDec/work_dir
+```
+
+结果：
+
+- 退出码：`0`
+- `work_dir/` 已覆盖更新
+- 时间：`real 24.22s`、`user 23.48s`、`sys 0.73s`
+- 新的 `work_dir/PNDiff.warn.txt` 里：
+
+```text
+# Residual PNDiff constraints after solve
+
+No residual Add/Sub constraints with unknown state after solve.
+```
+
+剩余 warning 只还有两条旧的 `lseek`：
+
+- `lseek.pndiff[0]`
+- `lseek.pndiff[2]`
+
+它们是 `i64` 非 PNDiff LLVM type，被显式跳过，不是这次 `fortune` 残留点。
