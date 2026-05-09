@@ -313,3 +313,102 @@ cmake --build ./build-main-no-llvm2c --target notdec -j4
 结论：
 
 - 没有观察到性能下降，反而比参考快了约 `0.21s`，可以视为同口径持平。
+
+## 已完成：LLVM 22 deprecated warning 清理
+
+这轮继续收 LLVM 22 下还在冒的 deprecated warning，只做接口替换，不改行为。
+
+### 修改
+
+1. `external/NotDec-wasm2llvm/include/notdec-wasm2llvm/parser.h:56-58`
+   - `Context::getFuncPointerType()` 不再构造带 pointee 的函数指针，
+     改成默认地址空间的 opaque `ptr`。
+   - 涉及函数：`Context::getFuncPointerType`。
+
+2. `external/NotDec-wasm2llvm/lib/notdec-wasm2llvm/parser-block.cpp:34,53,457`
+   - `getFirstNonPHI()` 改成 `getFirstNonPHIIt()`。
+   - `i8Type->getPointerTo()` 改成 `llvm::PointerType::get(llvmContext, 0)`。
+   - 涉及函数：`BlockContext::visitBlock`、`extendType::extendType`。
+
+3. `external/NotDec-wasm2llvm/lib/notdec-wasm2llvm/parser-instruction.cpp:212,240,313,1896-1897,2047-2049,2057-2059`
+   - `PointerType::getUnqual(...)` 和 `PointerType::get(Ty, 0)` 改成
+     `PointerType::get(llvmContext, 0)`。
+   - 这些地方都只是把地址值 cast 成默认地址空间指针；真正的 load/store/call
+     类型仍然分别由 `CreateLoad` / `CreateCall` 单独传入。
+   - 顺手删除 `createStoreLane()` 里改完后多出来的无用
+     `elementType` 局部变量。
+   - 涉及函数：`BlockContext::visitStoreInst`、
+     `BlockContext::convertStackAddr`、
+     `BlockContext::visitLoadInst`、
+     `BlockContext::visitCallIndirectInst`、
+     `BlockContext::createLoadLane`、
+     `BlockContext::createStoreLane`。
+
+### 验证
+
+验证命令：
+
+```bash
+cmake --build ./build --target all -j4
+cmake --build ./build-main-no-llvm2c --target notdec -j4
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-structmerge-hlayout-final/out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-structmerge-hlayout-final
+```
+
+结果：
+
+- 两条构建都成功。
+- 这轮收掉的 `getPointerTo()`、`getUnqual()`、`getFirstNonPHI()` warning
+  在上述构建里都不再出现。
+- `fortune` 运行成功。
+
+### 性能补充
+
+这次实测：
+
+- `real 16.29s`
+- `user 15.89s`
+- `sys 0.39s`
+
+对比参考 `real 16.33s`，没有观察到性能下降。
+
+## 已完成：删除未接线的 `FuncSigModify`
+
+继续清理 warning 时又确认了一遍 `FuncSigModify`：
+
+- 定义只在 `src/Passes/PassManager.cpp`
+- 没有接进 `PassEnv::build_passes()`
+- 仓库里也没有其他调用点
+
+所以这轮没有继续给它修 warning，而是直接删掉这段未接线 pass。
+
+### 修改
+
+1. `src/Passes/PassManager.cpp:159-291`
+   - 删除整个 `FuncSigModify`。
+   - 涉及函数：`FuncSigModify::run(Module&)`、
+     `addChangeArgToPointer`、`addChangeRetToPointer`、`changeCall`、
+     `run(Function&)`。
+
+### 验证
+
+验证命令：
+
+```bash
+cmake --build ./build --target all -j4
+cmake --build ./build-main-no-llvm2c --target notdec -j4
+```
+
+结果：
+
+- 两条构建都成功。
+- 因为这个 pass 本来就没接进主链路，这次没有单独重跑 fortune。
+
+### 性能补充
+
+- `FuncSigModify` 未接线，删除后不影响运行时主链路。
+- 这轮没有新增性能数据。
