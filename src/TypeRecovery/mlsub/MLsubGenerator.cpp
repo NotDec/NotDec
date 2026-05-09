@@ -71,6 +71,45 @@ bool envFlagEnabled(llvm::StringRef Name) {
   return Value != nullptr && llvm::StringRef(Value) == "1";
 }
 
+bool isFunctionPointerTable(const llvm::GlobalVariable &GV) {
+  auto *TableTy = GV.getValueType();
+  if (!TableTy->isArrayTy()) {
+    return false;
+  }
+
+  auto *ElemTy = TableTy->getArrayElementType();
+  if (!ElemTy->isPointerTy()) {
+    return false;
+  }
+
+  auto *Init = GV.getInitializer();
+  if (Init == nullptr) {
+    return false;
+  }
+
+  // Opaque pointer mode no longer exposes the pointee from `ptr`, so only
+  // trust tables whose initializer entries are visibly functions or casts of
+  // functions.
+  for (const auto &Op : Init->operands()) {
+    auto *Entry = dyn_cast<Constant>(Op.get());
+    if (Entry == nullptr) {
+      continue;
+    }
+    if (isa<Function>(Entry)) {
+      return true;
+    }
+    auto *CE = dyn_cast<ConstantExpr>(Entry);
+    if (CE == nullptr || !CE->isCast()) {
+      continue;
+    }
+    if (isa<Function>(CE->getOperand(0))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 [[noreturn]] void failSignatureOverride(llvm::StringRef Path,
                                         llvm::StringRef Message) {
   llvm::errs() << "Error: invalid MLsub override";
@@ -3431,19 +3470,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       } else if (CE->getOpcode() == Instruction::GetElementPtr) {
         // getelementptr of table, i.e., function pointer array
         if (auto GV = dyn_cast<GlobalVariable>(CE->getOperand(0))) {
-          // if is function pointer array
-          auto T1 = GV->getType();
-          if (T1->isPointerTy() && T1->getPointerElementType()->isArrayTy() &&
-              T1->getPointerElementType()
-                  ->getArrayElementType()
-                  ->isPointerTy() &&
-              T1->getPointerElementType()
-                      ->getArrayElementType()
-                      ->getPointerElementType() != nullptr &&
-              T1->getPointerElementType()
-                  ->getArrayElementType()
-                  ->getPointerElementType()
-                  ->isFunctionTy()) {
+          if (isFunctionPointerTable(*GV)) {
             // if constant offset
             if (auto CI1 = dyn_cast<ConstantInt>(CE->getOperand(1))) {
               if (CI1->isZero()) {
@@ -3716,9 +3743,8 @@ void ConstraintsGenerator::MLsubVisitor::handlePHINodes() {
   }
 }
 
-unsigned ConstraintsGenerator::getPointerElemSize(Type *ty) {
-  Type *Elem = ty->getPointerElementType();
-  return llvm2c::getLLVMTypeSize(Elem, PointerSize);
+unsigned ConstraintsGenerator::getLLVMTypeSize(Type *ElemTy) {
+  return llvm2c::getLLVMTypeSize(ElemTy, PointerSize);
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
@@ -3739,7 +3765,7 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
 
   auto PtrVal = cg.getOrInsertNode(getExtValuePtr(I.getPointerOperand(), &I, 0));
   auto RetVal = cg.getOrInsertNode(&I);
-  auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
+  auto BitSize = cg.getLLVMTypeSize(I.getType());
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 0);
 
   cg.recordLoad(Addr, RetVal, BitSize, &I);
@@ -3768,7 +3794,7 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   }
 
   auto PtrVal = cg.getOrInsertNode(getExtValuePtr(I.getPointerOperand(), &I, 1));
-  auto BitSize = cg.getPointerElemSize(I.getPointerOperandType());
+  auto BitSize = cg.getLLVMTypeSize(I.getValueOperand()->getType());
   auto StoreVal = cg.getOrInsertNode(getExtValuePtr(I.getValueOperand(), &I, 0));
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 1);
   auto Value = getExtValuePtr(I.getValueOperand(), &I, 0);
@@ -3861,13 +3887,13 @@ void ConstraintsGenerator::MLsubVisitor::visitSelectInst(SelectInst &I) {
   auto DstVar = cg.createNode(&I);
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
-  auto Src1Var = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 0));
-  auto Src2Var = cg.getOrInsertNode(getExtValuePtr(Src2, &I, 1));
+  auto Src1Var = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 1));
+  auto Src2Var = cg.getOrInsertNode(getExtValuePtr(Src2, &I, 2));
   // Not generate boolean constraints. Because it must be i1.
   cg.addSubtype(Src1Var, DstVar);
   cg.addSubtype(Src2Var, DstVar);
-  cg.addPointerCopy(&I, getExtValuePtr(Src1, &I, 0));
-  cg.addPointerCopy(&I, getExtValuePtr(Src2, &I, 1));
+  cg.addPointerCopy(&I, getExtValuePtr(Src1, &I, 1));
+  cg.addPointerCopy(&I, getExtValuePtr(Src2, &I, 2));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAdd(BinaryOperator &I) {

@@ -194,3 +194,122 @@ ninja -C build-main-no-llvm2c -k 100 notdec \
 1. 先单独啃 `DSROA.cpp`，因为它是最大的单点阻塞。
 2. 再处理 `MLsubGenerator.cpp` 和 retdec-stack 里 `getPointerElementType()` 的
    显式类型来源。
+
+## 已完成：`MLsubGenerator.cpp` opaque pointer 修复
+
+这一步继续实现上面第 2 点，但只处理主项目本体里当前真正挡编译的
+`MLsubGenerator.cpp`，不顺手扩散成全局兼容层。
+
+### 修改
+
+1. `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:225`
+   - `getPointerElemSize()` 改名成 `getLLVMTypeSize()`。
+   - 涉及函数：`ConstraintsGenerator::getLLVMTypeSize` 声明。
+
+2. `src/TypeRecovery/mlsub/MLsubGenerator.cpp:74-110`
+   - 新增 `isFunctionPointerTable(const llvm::GlobalVariable &GV)`。
+   - 改成从 `GV.getValueType()` 和 initializer 判断“是不是函数指针表”，
+     不再从 `ptr` 类型里取 pointee。
+   - 涉及函数：`isFunctionPointerTable`。
+
+3. `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3470-3483`
+   - `convertSimpleTypeVal()` 里 `ConstantExpr::GetElementPtr` 的函数表判断，
+     改成调用 `isFunctionPointerTable(*GV)`。
+   - 涉及函数：`ConstraintsGenerator::convertSimpleTypeVal`。
+
+4. `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3746-3748,3766-3769,3796-3798`
+   - `load/store` 的 bit size 不再从 pointer type 的 element type 反推。
+   - `load` 直接看 `I.getType()`，`store` 直接看
+     `I.getValueOperand()->getType()`。
+   - 涉及函数：`ConstraintsGenerator::getLLVMTypeSize`、
+     `ConstraintsGenerator::MLsubVisitor::visitLoadInst`、
+     `ConstraintsGenerator::MLsubVisitor::visitStoreInst`。
+
+### 验证
+
+验证命令：
+
+```bash
+cmake --build ./build-main-no-llvm2c --target notdec -j4
+cmake --build ./build --target all -j4
+```
+
+结果：
+
+- `build-main-no-llvm2c` 成功，说明主项目本体里原来
+  `MLsubGenerator.cpp.o` 的 LLVM 22/opaque pointer 编译阻塞已清掉。
+- 顶层 `build` 这次也成功，没有出现新的首个编译错误。
+
+### 性能
+
+这次还是编译兼容修复，没有跑 fortune，暂无新的性能数据。
+
+### 当前判断补充
+
+- `src/Passes/Global.cpp:48` 还残留一个 `getPointerElementType()`，但这个文件现在
+  不在 `src/CMakeLists.txt` 的 `notdec` target 里，不是当前主线编译阻塞。
+- 当前真正还值得顺手清的，是少量 deprecated API，例如
+  `src/Passes/PassManager.cpp:201,225` 和
+  `external/NotDec-wasm2llvm/lib/notdec-wasm2llvm/parser-block.cpp:457`
+  的 `getPointerTo()`。
+
+## 已完成：运行期兼容补修与 fortune 验证
+
+上面 `MLsubGenerator.cpp` 编译过后，首次跑 `fortune` 时又暴露了两个旧接口假设：
+
+1. `ExtValuePtr` 还在用常量的 use-list 自证 “这个 constant 属于这个 user”。
+2. `visitSelectInst()` 里把 `select` 的 true/false operand 索引写成了 `0/1`，
+   但真实索引是 `1/2`。
+
+这两个点在旧 LLVM 上没那么容易炸，在 LLVM 22 下被断言直接打出来了。
+
+### 修改
+
+1. `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:261-265`
+   - 常量校验不再走 `Val->users()`。
+   - 改成直接校验 `User != nullptr`、`OpInd` 合法，且
+     `User->getOperand(OpInd) == V`。
+   - 涉及函数：`canonicalizeExtValue`。
+
+2. `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/Utils.h:12-18`
+   - 删除这次修改后变成无用代码的 `hasUser()`。
+
+3. `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3886-3896`
+   - `visitSelectInst()` 里 `getExtValuePtr()` / `addPointerCopy()` 对
+     true/false 分支的 operand index 改成 `1/2`。
+   - 涉及函数：`ConstraintsGenerator::MLsubVisitor::visitSelectInst`。
+
+### 验证
+
+验证命令：
+
+```bash
+cmake --build ./build --target all -j4
+cmake --build ./build-main-no-llvm2c --target notdec -j4
+/usr/bin/time -p env NOTDEC_POINTER_ANALYSIS_MODE=original \
+  ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-structmerge-hlayout-final/out.ll \
+  --tr-level=2 --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-fortune-structmerge-hlayout-final
+```
+
+结果：
+
+- 两条构建都成功。
+- `fortune` 运行成功，输出落到
+  `/tmp/notdec-fortune-structmerge-hlayout-final/out.ll`。
+
+### 性能补充
+
+参考时间是 2026-04-29 记录的 `real 16.33s`。
+
+这次实测：
+
+- `real 16.12s`
+- `user 15.74s`
+- `sys 0.37s`
+
+结论：
+
+- 没有观察到性能下降，反而比参考快了约 `0.21s`，可以视为同口径持平。

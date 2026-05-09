@@ -222,7 +222,7 @@ struct ConstraintsGenerator {
 
   SimpleType addRemapType(ExtValuePtr Val, ExtValuePtr Target);
 
-  unsigned getPointerElemSize(llvm::Type *ty);
+  unsigned getLLVMTypeSize(llvm::Type *ElemTy);
   static inline bool is_cast(llvm::Value *Val) {
     return llvm::isa<llvm::AddrSpaceCastInst, llvm::BitCastInst,
                      llvm::PtrToIntInst, llvm::IntToPtrInst>(Val);
