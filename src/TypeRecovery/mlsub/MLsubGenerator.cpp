@@ -1249,7 +1249,7 @@ void validateExtraConstraintsAnchor(const llvm::json::Object &Root,
   if (*SHA256 != ModuleSHA256Hex) {
     failExtraConstraints("ir_anchor.sha256",
                          ("sha256 mismatch: expected " +
-                          ModuleSHA256Hex.str())
+                          ModuleSHA256Hex.str() + ", current " + SHA256->str())
                              .c_str());
   }
 
