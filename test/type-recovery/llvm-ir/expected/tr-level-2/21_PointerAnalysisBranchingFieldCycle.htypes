@@ -15,20 +15,8 @@ struct rec_36 {
   struct_0 field_0; /* recursive body at offset: 0 */
 };
 
-struct struct_1 {
-  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
 struct rec_60 {
   struct_0 field_0; /* recursive body at offset: 0 */
-};
-
-struct struct_2 {
-  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
-struct struct_3 {
-  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
 };
 
 struct rec_45 {
@@ -41,6 +29,18 @@ struct rec_75 {
 
 struct rec_82 {
   struct_0 field_0; /* recursive body at offset: 0 */
+};
+
+struct struct_1 {
+  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
+};
+
+struct struct_2 {
+  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
+};
+
+struct struct_3 {
+  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
 };
 
 union union_1 {
@@ -89,14 +89,14 @@ union union_6 {
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
 [+] main::%loaded => lower=bottom:8 ; upper=top:8
-[+] main::%next => lower=bottom:32 ; upper=struct_1*
-[+] main::%next.ptr => lower=bottom:32 ; upper=struct_1*
+[+] main::%next => lower=bottom:32 ; upper='r:8[]*
+[+] main::%next.ptr => lower=bottom:32 ; upper='r:8[]*
 [+] main::%p => lower=bottom:32 ; upper=struct_0*
 [+] main::%short.next => lower=bottom:32 ; upper=rec_60*
 [+] main::%short.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
-[+] main::%wide.left.next => lower=bottom:32 ; upper=struct_2*
+[+] main::%wide.left.next => lower=bottom:32 ; upper='r:8[]*
 [+] main::%wide.left.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
-[+] main::%wide.right.next => lower=bottom:32 ; upper=struct_3*
+[+] main::%wide.right.next => lower=bottom:32 ; upper='r:8[]*
 [+] main::%wide.right.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [-] main::arg0 => lower=bottom:32 ; upper=top:32
@@ -107,4 +107,3 @@ union union_6 {
 
 [memory]
 type => top:32
-
