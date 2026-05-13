@@ -488,7 +488,7 @@ C++ + LLVM API + CSV facts loader 的复杂度可控。真正复杂的是 opcode
     - 忽略本次本地构建目录 `build-evm2llvm/`。
 12. `.gitmodules:14-17`、`external/NotDec-evm2llvm`
     - 将 `external/NotDec-evm2llvm` 登记为 submodule。
-    - 子仓库远程是 `git@github.com:am009/NotDec-evm2llvm.git`，分支是 `main`，当前指向 `4ba7a88`。
+    - 子仓库远程是 `git@github.com:NotDec/NotDec-evm2llvm.git`，分支是 `main`，当前指向 `4ba7a88`。
 
 验证命令：
 

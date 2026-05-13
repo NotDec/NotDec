@@ -9,9 +9,9 @@
 	url = git@github.com:am009/binarysub-private.git
 [submodule "external/NotDec-bin2llvm"]
 	path = external/NotDec-bin2llvm
-	url = git@github.com:am009/NotDec-bin2llvm.git
+	url = git@github.com:NotDec/NotDec-bin2llvm.git
 	branch = main
 [submodule "external/NotDec-evm2llvm"]
 	path = external/NotDec-evm2llvm
-	url = git@github.com:am009/NotDec-evm2llvm.git
+	url = git@github.com:NotDec/NotDec-evm2llvm.git
 	branch = main
