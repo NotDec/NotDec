@@ -662,3 +662,59 @@ long_running llvm-as/opt verify：通过
 性能影响：
 
 仍是独立子项目改动，未接入主 pipeline，没有跑 fortune 用例。对当前 NotDec 主链路运行时间不应有影响。
+
+## 阶段 1 补充：private call/return facts lowering（2026-05-13）
+
+背景：
+
+上一轮为了先让真实 facts 过 verifier，`CALLPRIVATE/RETURNPRIVATE/PHI` 做了 skeleton。继续检查 Gigahorse facts 后，`CALLPRIVATE/RETURNPRIVATE` 已有足够关系可以先真实 lowering：
+
+- `IRFunctionCall.csv`：caller block 到 callee function
+- `ActualReturnArgs.csv`：caller block 接收哪些返回变量
+- `FormalArgs.csv`：callee 参数
+- `RETURNPRIVATE` 的 `TAC_Use`：第 0 个 use 是返回 block，后续 use 是返回值
+
+PHI 还缺直接 incoming predecessor 关系。`PHILocation.csv` 只给 block、stack index 和 phi stmt；`TAC_Use` 里都是 `-1` 位置，部分变量名带来源 block 后缀但不完整。因此这次没有假装生成 native LLVM phi，仍保留 slot fallback，后面需要补 facts 或更可靠的推断。
+
+修改内容：
+
+1. `external/NotDec-evm2llvm/include/notdec-evm2llvm/TacProgram.h:34-50`
+   - `TacFunction` 新增 `ReturnVars`。
+   - 新增 `PrivateCallInfo`。
+   - `TacProgram` 新增 `PrivateCallsByBlock`。
+2. `external/NotDec-evm2llvm/lib/FactLoader.cpp:101-305`
+   - 读取 `IRFunctionCall.csv` 和 `ActualReturnArgs.csv`。
+   - 从 `RETURNPRIVATE` 的 uses 推出每个 function 的返回值列表。
+3. `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:28-342`
+   - 先为所有 function 创建 LLVM prototype。
+   - private function 根据 `ReturnVars` 返回 `void`、`i256` 或 literal struct。
+   - `CALLPRIVATE` 根据 `IRFunctionCall` 找 callee，根据 `ActualReturnArgs` 存返回值。
+   - `RETURNPRIVATE` 生成真实 LLVM `ret`。
+4. `external/NotDec-evm2llvm/include/notdec-evm2llvm/InstructionLowerer.h:37`
+   - 将 `storeWord` 暴露给 `LlvmLowerer`，用于存 private call 返回值。
+5. `external/NotDec-evm2llvm/test/fixtures/private_call/*.csv`
+   - 新增最小 private call fixture。
+6. `external/NotDec-evm2llvm/test/CMakeLists.txt:37`
+   - 将 `private_call` 加入默认 fixture verify。
+
+验证命令：
+
+```bash
+cmake -S external/NotDec-evm2llvm -B build-evm2llvm -G Ninja
+cmake --build build-evm2llvm --target evm2llvm -j4
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+./build-evm2llvm/bin/evm2llvm --facts /sn640/gigahorse-toolchain/.temp/long_running/out --output /tmp/notdec-evm2llvm-long-running.ll
+llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-evm2llvm-long-running.ll -o /tmp/notdec-evm2llvm-long-running.bc
+llvm-22.1.0.obj/bin/opt -passes=verify -disable-output /tmp/notdec-evm2llvm-long-running.bc
+```
+
+结果：
+
+```text
+默认 fixture 测试：100% tests passed, 0 tests failed out of 9
+long_running llvm-as/opt verify：通过
+```
+
+判断：
+
+`CALLPRIVATE/RETURNPRIVATE` 已经不再是简单写 0/跳过。PHI 还没真正修复，下一步需要优先确认能否从 Gigahorse 侧输出 PHI incoming predecessor facts；否则 native phi 会靠猜，风险比 slot fallback 更高。
