@@ -831,3 +831,44 @@ long_running + PHIIncoming facts：生成 9462 行 LLVM IR，通过 llvm-as / op
 判断：
 
 这一步仍然没有生成 native LLVM `phi`，但已经按真实 CFG 边恢复了 PHI 的输入选择，比旧 slot fallback 正确。复杂度主要来自条件边 edge block，属于必要复杂度。当前方案评分：实现效果 7/10，复杂度 4/10，维护成本 3/10。后续如果要改成 native LLVM phi，可以复用 `PHIIncomingByEdge`，但需要同步处理当前 alloca/load/store 风格。
+
+## 阶段 1 补充：wrapper 检查 PHIIncoming 能力（2026-05-13）
+
+背景：
+
+stock Gigahorse docker 可以跑外部 client，但不会输出这次新增的 `PHIIncoming.csv`。如果 wrapper 静默继续跑，用户会以为 PHI 已按 predecessor 修正，实际却退回旧 fallback。
+
+修改：
+
+1. `external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py:122-132`
+   - 新增 `warn_if_phi_incoming_missing`。
+   - 如果 facts 目录没有 `PHIIncoming.csv`，打印 warning，但不中断。
+2. `external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py:227`
+   - Gigahorse facts 目录存在后、调用 `evm2llvm` 前执行检查。
+
+验证命令：
+
+```bash
+python3 -m py_compile external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py --help
+
+# 用 /bin/true 代替 Gigahorse，预置 facts 目录，分别测试缺失和存在 PHIIncoming.csv。
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py \
+  "$HOME/.cache/notdec-evm2llvm-wrapper-check/input-src/arithmetic.hex" \
+  -o /tmp/wrapper-arithmetic.ll \
+  --gigahorse-bin /bin/true \
+  --work-dir "$HOME/.cache/notdec-evm2llvm-wrapper-check" \
+  --keep-work-dir \
+  --evm2llvm ./build-evm2llvm/bin/evm2llvm
+```
+
+结果：
+
+```text
+缺 PHIIncoming.csv：打印 warning，并继续生成 IR
+有 PHIIncoming.csv：不打印 warning，继续生成 IR
+```
+
+影响：
+
+不改变 lowering 结果，只让旧 Gigahorse / stock docker 的能力差异显式暴露。当前方案评分：实现效果 8/10，复杂度 1/10，维护成本 1/10。
