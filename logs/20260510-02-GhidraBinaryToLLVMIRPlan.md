@@ -737,3 +737,81 @@ IR：把 P-Code 的 memory 访问降到一个外部 byte array，不试图恢复
 2. 理解成本：7/10。只加了一个外部 byte array 模型，容易替换。
 3. 维护成本：7/10。后续要把 address-space、section、栈和初始内存补实。
 4. 更好的方案：下一步应补基本块和直接分支，否则无法表达多指令控制流；真实内存布局等 LIEF 接入时再细化。
+
+## 实现记录（2026-05-13，基本块和直接分支）
+
+这次继续补控制流，只做 raw P-Code 里最直接的一层：`BRANCH`、`CBRANCH`、`RETURN`。目标是让短字节串里的
+直接跳转能生成 LLVM basic block 和 terminator。间接跳转、call、跨块 SSA/PHI 先不做。
+
+### 已完成
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/Pcode.h:10-56`
+   - `PcodeOpcode` 新增 `Branch`、`CBranch`、`Return`、`BoolNegate`。
+   - `PcodeOpView` 新增 `Address` 字段，用来记录每条 P-Code 所属指令地址。
+2. `external/NotDec-bin2llvm/lib/Pcode.cpp:5-63`
+   - `pcodeOpcodeName(...)` 新增 `BRANCH`、`CBRANCH`、`RETURN`、`BOOL_NEGATE`。
+3. `external/NotDec-bin2llvm/tools/SleighBytes.cpp:98-175`
+   - `convertOpcode(...)` 新增 `ghidra::CPUI_BRANCH`、`ghidra::CPUI_CBRANCH`、
+     `ghidra::CPUI_RETURN`、`ghidra::CPUI_BOOL_NEGATE`。
+   - `PcodeCollector::dump(...)` 保存 `address.getOffset()` 到 `PcodeOpView::Address`。
+4. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:47-249`
+   - `PcodeLowerer` 新增 basic block 构建流程。
+   - 按入口、直接分支目标、terminator 后继 op 切块。
+   - `BRANCH` 降成 `br label`。
+   - `CBRANCH` 降成 `condbr`，true target 是 P-Code 的 direct ram target，false target 是 fallthrough。
+   - `RETURN` 暂时降成 `ret void`，不使用返回地址 varnode。
+   - 目标地址不在输入 bytes 内时，创建外部 target block，并暂时 `ret void`。
+5. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:199-205,455-463`
+   - 新增 `asCondition(...)`。
+   - 新增 `lowerBoolNegate(...)`，支持 x86 `jne` 这类先生成 `BOOL_NEGATE` 再 `CBRANCH` 的样例。
+6. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:66-68`
+   - 每个 basic block 开始时清空当前 SSA 值表。
+   - 原因是当前还没有 PHI 和显式 register state，跨块直接复用 LLVM instruction 会违反 dominance。
+
+### 验证
+
+1. 构建：
+   `cmake --build /tmp/notdec-bin2llvm-build-sleigh --target notdec-sleigh-pcode notdec-sleigh-llvm -j4`
+2. 条件分支 `je + ret + ret`：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-llvm /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 7401c3c3 -o /tmp/notdec-sleigh-cbranch.ll -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-cbranch.ll -o /tmp/notdec-sleigh-cbranch.bc`
+3. 直接分支 `jmp + ret + ret`：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-llvm /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla eb01c3c3 -o /tmp/notdec-sleigh-branch.ll -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-branch.ll -o /tmp/notdec-sleigh-branch.bc`
+4. `jne + ret + ret`，覆盖 `BOOL_NEGATE`：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-llvm /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 7501c3c3 -o /tmp/notdec-sleigh-jne.ll -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-jne.ll -o /tmp/notdec-sleigh-jne.bc`
+5. 回归之前样例：
+   - `4881ecc00f0000` 整数样例
+   - `488b0424` LOAD 样例
+   - `48890424` STORE 样例
+   - `c3` RETURN 样例
+   都已用 `notdec-sleigh-llvm` 输出 `.ll` 并通过 `llvm-as`。
+6. 旧 P-Code 打印路径仍可用：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-pcode /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 7401c3c3 -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+7. 无 sleigh 的旧最小 CLI 仍可构建和装配：
+   `cmake --build /tmp/notdec-bin2llvm-build-off --target notdec-bin2llvm -j4`
+   `/tmp/notdec-bin2llvm-build-off/bin/notdec-bin2llvm /tmp/notdec-bin2llvm-demo-check.ll`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-bin2llvm-demo-check.ll -o /tmp/notdec-bin2llvm-demo-check.bc`
+
+结果：
+
+1. 上面命令都已通过。
+2. `7401c3c3` 输出包含 `br i1 ... label %bb_3, label %bb_2`。
+3. `eb01c3c3` 输出包含直接 `br label %bb_3`。
+4. `7501c3c3` 输出包含 `xor i1 ..., true` 和 `condbr`。
+
+### 当前限制
+
+1. 跨 basic block 的 register/unique 值没有 PHI，也没有显式状态对象；每个 block 开始都会重新从 unknown 输入读值。
+2. `RETURN` 现在只生成 `ret void`，还没表达返回地址、返回值或调用约定。
+3. 只支持 direct `ram` target；`BRANCHIND`、`CALL`、`CALLIND` 都还没做。
+4. unreachable block 仍会保留在 IR 里，比如直接跳过的 fallthrough block。
+5. 这次仍只改 `external/NotDec-bin2llvm`，没有改 NotDec 主 pass pipeline；因此没有跑 fortune 当前关注用例计时。
+
+### 评价
+
+1. 实现效果：7/10。直接控制流已经能进 LLVM IR，并通过 verifier/assembler。
+2. 理解成本：7/10。basic block 切分逻辑还小，但已经到了需要认真处理状态和 PHI 的前夜。
+3. 维护成本：6/10。继续扩展前最好先决定 register state 是 SSA map、函数参数结构体，还是显式内存状态。
+4. 更好的方案：下一步不急着接更多 opcode，先把 register state 做成显式结构，否则跨块和 call 很快会卡住。
