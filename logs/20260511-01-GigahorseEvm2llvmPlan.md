@@ -718,3 +718,116 @@ long_running llvm-as/opt verify：通过
 判断：
 
 `CALLPRIVATE/RETURNPRIVATE` 已经不再是简单写 0/跳过。PHI 还没真正修复，下一步需要优先确认能否从 Gigahorse 侧输出 PHI incoming predecessor facts；否则 native phi 会靠猜，风险比 slot fallback 更高。
+
+## 阶段 1 补充：Gigahorse 输出 PHI incoming facts（2026-05-13）
+
+背景：
+
+之前 `PHILocation.csv` 只给 `block / stackIndex / phiStmt`，`TAC_Use.csv` 只给 PHI 的变量集合，位置都是 `-1`。缺少 `incoming value -> predecessor block` 后，evm2llvm 不能可靠生成 native LLVM phi。
+
+判断：
+
+Gigahorse 的 `functions.dl` 已经在内部保留了这层信息：
+
+- `FunctionalBlockInputContents(next, index, var)` 来自 `FunctionalBlockOutputContents(from, index, var)` 和 `LocalBlockEdge(from, next)`。
+- 因此可以直接输出 predecessor 级别的 incoming facts，不需要从变量名猜。
+
+修改内容：
+
+1. `/sn640/gigahorse-toolchain/logic/decompiler_output.dl:45-71`
+   - 新增 `PHIIncoming(phiStmt, block, predBlock, var)`。
+   - 对普通定义变量和函数参数分别生成 incoming。
+2. `/sn640/gigahorse-toolchain/clientlib/decompiler_imports.dl:280-281`
+   - 将 `PHIIncoming.csv` 加入 client import schema。
+3. `/sn640/gigahorse-toolchain/clientlib/tac-transformers/abstract_tac_transformer.dl:24,50`
+   - 给 TAC transformer 加入 `In_PHIIncoming` / `Out_PHIIncoming`。
+4. `/sn640/gigahorse-toolchain/clientlib/tac-transformers/abstract_function_inliner.dl:510-541`
+   - inliner 保留已有 PHI incoming。
+   - 对 inliner 自己插入的多返回 PHI 也输出 incoming。
+5. `/sn640/gigahorse-toolchain/clientlib/function_inliner.dl:278,308`
+   - 默认 inliner 读写 `PHIIncoming.csv`。
+
+验证命令：
+
+```bash
+python3 /sn640/gigahorse-toolchain/gigahorse.py \
+  /sn640/gigahorse-toolchain/examples/long_running.hex \
+  -w /tmp/gigahorse-phiincoming-test \
+  --restart -j1 --timeout_secs 300 --skip_sig_resolution
+
+wc -l /tmp/gigahorse-phiincoming-test/long_running/out/PHIIncoming.csv
+awk -F '\t' '$2=="PHI"{print $1}' /tmp/gigahorse-phiincoming-test/long_running/out/TAC_Op.csv | sort -u > /tmp/phis.txt
+awk -F '\t' '{print $1}' /tmp/gigahorse-phiincoming-test/long_running/out/PHIIncoming.csv | sort -u > /tmp/phis-incoming.txt
+comm -23 /tmp/phis.txt /tmp/phis-incoming.txt
+```
+
+结果：
+
+```text
+main.dl / function_inliner.dl 编译通过
+long_running 分析完成
+PHIIncoming.csv：196 行
+PHI 总数：93
+有 incoming 的 PHI：93
+缺 incoming 的 PHI：0
+incoming 中不存在于 LocalBlockEdge 的边：0
+incoming 中不存在于 TAC_Use(phi, var, -1) 的变量：0
+```
+
+备注：
+
+命令最后写 `results.json` 时因为 `/sn640/gigahorse-toolchain/results.json` 权限不足退出，但 decompiler 和 inliner 已经完成，facts 已生成。
+
+影响：
+
+这次只改 Gigahorse Datalog 输出，不改 NotDec 主 pipeline，也不影响 fortune 当前用例。运行时多输出一个小关系，复杂度低。当前方案评分：实现效果 8/10，复杂度 2/10，维护成本 2/10。下一步可以让 `external/NotDec-evm2llvm` 读取 `PHIIncoming.csv`，先用 edge store 修正 slot fallback，再考虑直接生成 LLVM phi。
+
+## 阶段 1 补充：evm2llvm 对接 PHIIncoming（2026-05-13）
+
+背景：
+
+Gigahorse 已能输出 `PHIIncoming.csv`。evm2llvm 原来的 PHI fallback 在 phi block 入口只取第一个 `TAC_Use(phi, var, -1)`，没有按 predecessor 区分，循环和多前驱块会丢语义。
+
+实现：
+
+1. `external/NotDec-evm2llvm/include/notdec-evm2llvm/TacProgram.h:50-67`
+   - 新增 `PhiIncoming`。
+   - `TacProgram` 新增 `PhiIncomingByEdge`，key 是 `(predBlock, block)`。
+2. `external/NotDec-evm2llvm/lib/FactLoader.cpp:180-188`
+   - 读取可选 `PHIIncoming.csv`。
+   - 没有该文件时保持旧 fixture 和旧 Gigahorse facts 可用。
+3. `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:83-149`
+   - 收集 incoming var。
+   - 新增 `emitPhiEdgeStores`，在 predecessor 边上把 incoming value 写入 PHI def slot。
+   - 条件分支边如果需要写 PHI，插入 `edge.<pred>.to.<succ>` block，避免两个 successor 的 store 都被执行。
+4. `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:207-253`
+   - 无条件边直接在 terminator 前写 PHI stores。
+   - 条件边跳到 edge block 或原 successor。
+5. `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:378-429`
+   - 有真实 incoming 的 PHI 不再走旧的“取第一个 use” fallback。
+6. `external/NotDec-evm2llvm/test/fixtures/phi_branch/*`
+   - 新增两个 predecessor 汇入一个 PHI block 的最小 fixture。
+7. `external/NotDec-evm2llvm/test/CMakeLists.txt:39`
+   - 将 `phi_branch` 加入默认 fixture verify。
+
+验证命令：
+
+```bash
+cmake --build build-evm2llvm --target evm2llvm -j4
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+./build-evm2llvm/bin/evm2llvm --facts /tmp/gigahorse-phiincoming-test/long_running/out --output /tmp/notdec-evm2llvm-long-running-phiincoming.ll
+llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-evm2llvm-long-running-phiincoming.ll -o /tmp/notdec-evm2llvm-long-running-phiincoming.bc
+llvm-22.1.0.obj/bin/opt -passes=verify -disable-output /tmp/notdec-evm2llvm-long-running-phiincoming.bc
+```
+
+结果：
+
+```text
+默认 fixture 测试：100% tests passed, 0 tests failed out of 12
+phi_branch fixture：通过 llvm-as / opt verify
+long_running + PHIIncoming facts：生成 9462 行 LLVM IR，通过 llvm-as / opt verify
+```
+
+判断：
+
+这一步仍然没有生成 native LLVM `phi`，但已经按真实 CFG 边恢复了 PHI 的输入选择，比旧 slot fallback 正确。复杂度主要来自条件边 edge block，属于必要复杂度。当前方案评分：实现效果 7/10，复杂度 4/10，维护成本 3/10。后续如果要改成 native LLVM phi，可以复用 `PHIIncomingByEdge`，但需要同步处理当前 alloca/load/store 风格。
