@@ -594,3 +594,83 @@ LIEF 不是阶段 1 的构建依赖。先用 `sleigh-lift` 风格的 byte string
 2. 理解成本：8/10。目录和入口很少，没有先引入假的中间层。
 3. 维护成本：8/10。现在主要风险不在代码，而在后续 `sleigh` 安装和 Ghidra Java/native 边界。
 4. 更好的方案：如果 `/sn640/sleigh` 很快能稳定安装，下一版可以直接把 `sleigh` 的最小 p-code 打印器一起落进这个骨架，比继续空转 GhidraScript 更值。
+
+## 实现记录（2026-05-13，native P-Code 到 LLVM IR 最小闭环）
+
+这次继续推进上一节的“先做 native 侧 lowering”判断，没有先接 GhidraScript。当前目标是让
+`hex bytes -> sleigh/libsla -> P-Code -> LLVM IR` 跑通，范围只覆盖整数和临时/寄存器值，不碰内存、
+真实函数边界和控制流。
+
+### 已完成
+
+1. 新增项目自己的轻量 P-Code 数据视图：
+   - `external/NotDec-bin2llvm/include/notdec-bin2llvm/Pcode.h:10-55`
+     - 新增 `PcodeOpcode`、`VarnodeView`、`PcodeOpView`、`PcodeProgram`。
+   - `external/NotDec-bin2llvm/lib/Pcode.cpp:5-51`
+     - 新增 `pcodeOpcodeName(...)`。
+2. 新增最小 P-Code lowering：
+   - `external/NotDec-bin2llvm/include/notdec-bin2llvm/PcodeToLLVM.h:15-22`
+     - 新增 `PcodeLoweringConfig` 和 `buildPcodeModule(...)`。
+   - `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:22-329`
+     - 新增 `PcodeLowerer`。
+     - 当前支持 `COPY`、整数算术/位运算、比较、移位、`INT_ZEXT`、`INT_SEXT`、`PIECE`、
+       `SUBPIECE`、`POPCOUNT`、`INT_SBORROW`。
+     - unknown register/unique 读先用 `freeze poison`，避免把运算直接常量折叠没。
+     - 写 register/unique 只维护本函数内 SSA 值表，还不是 ABI/状态建模。
+3. 把 `notdec-sleigh-pcode` 的 Sleigh 输入逻辑抽成共享代码：
+   - `external/NotDec-bin2llvm/tools/SleighBytes.h:13-27`
+     - 新增 `SleighBytesOptions`、`collectSleighPcode(...)`、`printPcodeProgram(...)`。
+   - `external/NotDec-bin2llvm/tools/SleighBytes.cpp:16-348`
+     - 迁移原来的内存镜像、`.sla/.pspec` 查找、hex bytes 解析、Sleigh 初始化。
+     - 新增 `PcodeCollector`，把 `ghidra::PcodeEmit` 回调转成 `PcodeProgram`。
+   - `external/NotDec-bin2llvm/tools/notdec-sleigh-pcode.cpp:15-30`
+     - 改成只解析参数、收集 P-Code、打印 `PcodeProgram`。
+4. 新增 native bytes 到 LLVM IR CLI：
+   - `external/NotDec-bin2llvm/tools/notdec-sleigh-llvm.cpp:16-117`
+     - 参数格式：`<sla-file> <hex-bytes> -o <output.ll> [-a address] [-p root-sla-dir] [-s pspec-file]`。
+     - 调用 `collectSleighPcode(...)`、`buildPcodeModule(...)`、`verifyModule(...)`，最后写 `.ll`。
+5. 更新 CMake：
+   - `external/NotDec-bin2llvm/lib/CMakeLists.txt:1-4`
+     - `notdec-bin2llvm-core` 加入 `Pcode.cpp`、`PcodeToLLVM.cpp`。
+   - `external/NotDec-bin2llvm/tools/CMakeLists.txt:10-44`
+     - 新增 `notdec-bin2llvm-sleigh-bytes` 静态库。
+     - 新增 `notdec-sleigh-llvm` target。
+     - `notdec-sleigh-pcode` 改为复用 `notdec-bin2llvm-sleigh-bytes`。
+
+### 验证
+
+1. 构建 native/sleigh 两个 CLI：
+   `cmake --build /tmp/notdec-bin2llvm-build-sleigh --target notdec-sleigh-pcode notdec-sleigh-llvm -j4`
+2. 确认无 sleigh 的旧最小 CLI 仍可构建：
+   `cmake --build /tmp/notdec-bin2llvm-build-off --target notdec-bin2llvm -j4`
+3. 旧 P-Code 打印路径：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-pcode /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 4881ecc00f0000 -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+4. 新 lowering 路径：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-llvm /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 4881ecc00f0000 -o /tmp/notdec-sleigh-sub.ll -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+5. LLVM IR 装配验证：
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-sub.ll -o /tmp/notdec-sleigh-sub.bc`
+6. 旧空 module 路径：
+   `/tmp/notdec-bin2llvm-build-off/bin/notdec-bin2llvm /tmp/notdec-bin2llvm-demo-check.ll`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-bin2llvm-demo-check.ll -o /tmp/notdec-bin2llvm-demo-check.bc`
+
+结果：
+
+1. 上面命令都已通过。
+2. `4881ecc00f0000` 仍能打印原来的 9 条 P-Code。
+3. 新 CLI 输出的 `/tmp/notdec-sleigh-sub.ll` 可被 LLVM 22 `llvm-as` 接受。
+4. 输出 IR 里能看到 `icmp ult`、`llvm.ssub.with.overflow.i64`、`sub`、`icmp slt`、`and`、
+   `llvm.ctpop.i64` 等，对应当前样例里的 flag 计算和 `rsp -= 0xfc0`。
+
+### 当前限制
+
+1. `LOAD`、`STORE`、`BRANCH`、`CBRANCH`、`CALL`、`RETURN` 还没降。
+2. register 还不是显式状态对象，只是按 varnode key 维护 SSA 值。
+3. unknown 输入用 `freeze poison`，只适合现在的结构验证，不代表真实入口寄存器建模。
+4. 这次只改 `external/NotDec-bin2llvm`，没有改 NotDec 主 pass pipeline；因此没有跑 fortune 当前关注用例计时。
+
+### 评价
+
+1. 实现效果：8/10。已经有第一条 `bytes -> P-Code -> LLVM IR` 闭环，且 IR 通过 verifier/assembler。
+2. 理解成本：7/10。新增了必要的数据视图和 lowering，但没有引入更大的抽象层。
+3. 维护成本：7/10。后续主要成本是逐步补 opcode 和把 register/memory 状态做实。
+4. 更好的方案：下一步优先补 `LOAD/STORE` 的简单 byte-array 内存模型，随后再做基本块和直接分支；现在不应急着接 LIEF。
