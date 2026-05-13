@@ -605,3 +605,60 @@ ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
 ```
 
 没有直接跑 docker Gigahorse。当前机器 `PATH` 里没有 `gigahorse` 命令，且前一次本地 Gigahorse 试跑已证明首次 Souffle 编译会很慢。
+
+## 阶段 1 补充：真实 Gigahorse facts 验证和第一批 helper opcode（2026-05-13）
+
+背景：
+
+用 `/sn640/gigahorse-toolchain/.temp/long_running/out` 真实 facts 试跑后，最先失败在 `MSTORE`。继续按失败点补了一批 helper lowering，目标是先让真实 Gigahorse facts 能产出 verifier-clean IR。
+
+修改内容：
+
+1. `external/NotDec-evm2llvm/include/notdec-evm2llvm/InstructionLowerer.h:21-59`
+   - 新增 `RuntimeHandles`，把 `%mem/%calldata/%returndata/%env` 传给 instruction lowering。
+   - 新增 state read/write lowering 入口。
+2. `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:117-176`
+   - 从 LLVM function 前四个参数保存 runtime handles。
+   - 创建 `InstructionLowerer` 时传入这些 handles。
+3. `external/NotDec-evm2llvm/lib/EvmRuntimeDecls.cpp:15-54`
+   - 新增 helper 声明：
+     - memory/calldata/storage：`evm_mload/mstore/mstore8/msize`、`evm_calldataload/calldatasize/calldatacopy`、`evm_sload/sstore`
+     - 算术/位操作 helper：`evm_div/sdiv/mod/smod/exp/signextend/byte/shl/shr/sar`
+     - EVM side effects/env：`evm_sha3`、`evm_log0..4`、`evm_call`、`evm_callvalue/caller/timestamp/gas`
+4. `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:109-445`
+   - helper 化 `MLOAD/MSTORE/MSTORE8/MSIZE/SLOAD/SSTORE/CALLDATALOAD/CALLDATASIZE/CALLDATACOPY/SHA3`。
+   - helper 化 `DIV/SDIV/MOD/SMOD/EXP/SIGNEXTEND/BYTE/SHL/SHR/SAR`，避免 LLVM UB/poison。
+   - helper 化 `CALLVALUE/CALLER/TIMESTAMP/GAS/LOG0..4/CALL`。
+   - `THROW` 作为 halting marker 处理。
+   - `CALLPRIVATE/RETURNPRIVATE/PHI` 先做 skeleton lowering：`CALLPRIVATE` 有返回时写 0，`PHI` 取第一个 incoming use。这只是为了先生成合法 IR，后续必须替换为真实 private call/native phi 方案。
+5. `external/NotDec-evm2llvm/test/CMakeLists.txt:1-35`
+   - 抽出 `add_evm2llvm_fixture`，避免每个 fixture 重复写 emit/llvm-as/opt-verify。
+6. `external/NotDec-evm2llvm/test/fixtures/state/*.csv`
+   - 新增 state helper 小 fixture，覆盖 `MSTORE/MLOAD/CALLVALUE`。
+
+验证命令：
+
+```bash
+cmake -S external/NotDec-evm2llvm -B build-evm2llvm -G Ninja
+cmake --build build-evm2llvm --target evm2llvm -j4
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+./build-evm2llvm/bin/evm2llvm --facts /sn640/gigahorse-toolchain/.temp/long_running/out --output /tmp/notdec-evm2llvm-long-running.ll
+llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-evm2llvm-long-running.ll -o /tmp/notdec-evm2llvm-long-running.bc
+llvm-22.1.0.obj/bin/opt -passes=verify -disable-output /tmp/notdec-evm2llvm-long-running.bc
+```
+
+结果：
+
+```text
+默认 fixture 测试：100% tests passed, 0 tests failed out of 6
+long_running facts：生成 8793 行 LLVM IR，23 个 function，32 个 helper declaration
+long_running llvm-as/opt verify：通过
+```
+
+风险：
+
+当前 `CALLPRIVATE/RETURNPRIVATE/PHI` 是 skeleton，不代表真实语义。它的价值是让真实 facts 先进入 LLVM verifier 闭环，便于继续补 opcode 和 CFG。下一步应优先实现 private call facts 和 PHI incoming，而不是长期保留这些占位。
+
+性能影响：
+
+仍是独立子项目改动，未接入主 pipeline，没有跑 fortune 用例。对当前 NotDec 主链路运行时间不应有影响。
