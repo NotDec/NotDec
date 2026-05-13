@@ -674,3 +674,66 @@ LIEF 不是阶段 1 的构建依赖。先用 `sleigh-lift` 风格的 byte string
 2. 理解成本：7/10。新增了必要的数据视图和 lowering，但没有引入更大的抽象层。
 3. 维护成本：7/10。后续主要成本是逐步补 opcode 和把 register/memory 状态做实。
 4. 更好的方案：下一步优先补 `LOAD/STORE` 的简单 byte-array 内存模型，随后再做基本块和直接分支；现在不应急着接 LIEF。
+
+## 实现记录（2026-05-13，LOAD/STORE 最小内存模型）
+
+这次继续沿着 native lowering 走，先补 `LOAD/STORE`，不接 GhidraScript，不接 LIEF。当前只做结构正确的
+IR：把 P-Code 的 memory 访问降到一个外部 byte array，不试图恢复真实段、栈、ABI 或初始内存内容。
+
+### 已完成
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/Pcode.h:10-13`
+   - `PcodeOpcode` 新增 `Load`、`Store`。
+   - 更新 `PcodeOpView` 注释，说明 output 为空现在主要对应 `STORE` 和控制流类 op。
+2. `external/NotDec-bin2llvm/lib/Pcode.cpp:5-13`
+   - `pcodeOpcodeName(...)` 新增 `LOAD`、`STORE` 名称。
+3. `external/NotDec-bin2llvm/tools/SleighBytes.cpp:98-105`
+   - `convertOpcode(...)` 新增 `ghidra::CPUI_LOAD`、`ghidra::CPUI_STORE` 到项目 opcode 的映射。
+4. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:262-319`
+   - 新增 `memoryGlobal()`，第一次遇到内存访问时创建
+     `@notdec_ram = external global [1048576 x i8]`。
+   - 新增 `memoryPointer(...)`，把 P-Code 地址值转成 `getelementptr`。
+   - 新增 `requireConstSpaceSelector(...)`，先要求 `LOAD/STORE` 第一个输入是 `const`。
+   - 新增 `lowerLoad(...)`，生成 unaligned `load`。
+   - 新增 `lowerStore(...)`，生成 unaligned `store`。
+   - `lowerOp(...)` 接入 `Load`、`Store`。
+
+### 验证
+
+1. 构建：
+   `cmake --build /tmp/notdec-bin2llvm-build-sleigh --target notdec-sleigh-pcode notdec-sleigh-llvm -j4`
+2. 原整数样例仍可降：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-llvm /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 4881ecc00f0000 -o /tmp/notdec-sleigh-sub.ll -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-sub.ll -o /tmp/notdec-sleigh-sub.bc`
+3. LOAD 样例：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-llvm /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 488b0424 -o /tmp/notdec-sleigh-load.ll -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-load.ll -o /tmp/notdec-sleigh-load.bc`
+4. STORE 样例：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-llvm /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 48890424 -o /tmp/notdec-sleigh-store.ll -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-store.ll -o /tmp/notdec-sleigh-store.bc`
+5. 旧 P-Code 打印路径仍可用：
+   `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-pcode /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 488b0424 -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+6. 无 sleigh 的旧最小 CLI 仍可构建和装配：
+   `cmake --build /tmp/notdec-bin2llvm-build-off --target notdec-bin2llvm -j4`
+   `/tmp/notdec-bin2llvm-build-off/bin/notdec-bin2llvm /tmp/notdec-bin2llvm-demo-check.ll`
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-bin2llvm-demo-check.ll -o /tmp/notdec-bin2llvm-demo-check.bc`
+
+结果：
+
+1. 上面命令都已通过。
+2. `488b0424` 输出包含 `@notdec_ram`、`getelementptr`、`load i64`。
+3. `48890424` 输出包含 `@notdec_ram`、`getelementptr`、`store i64`。
+
+### 当前限制
+
+1. P-Code 的 address-space selector 只检查是否为 `const`，还没映射到具体 Ghidra address space。
+2. `@notdec_ram` 是固定 1MiB 外部数组，地址越界、真实 section、栈和全局变量都还没建模。
+3. load/store 直接按 LLVM 整数 load/store 表示，没有显式处理端序。
+4. 这次仍只改 `external/NotDec-bin2llvm`，没有改 NotDec 主 pass pipeline；因此没有跑 fortune 当前关注用例计时。
+
+### 评价
+
+1. 实现效果：7/10。内存访问已经能进 IR，并通过 LLVM verifier/assembler。
+2. 理解成本：7/10。只加了一个外部 byte array 模型，容易替换。
+3. 维护成本：7/10。后续要把 address-space、section、栈和初始内存补实。
+4. 更好的方案：下一步应补基本块和直接分支，否则无法表达多指令控制流；真实内存布局等 LIEF 接入时再细化。
