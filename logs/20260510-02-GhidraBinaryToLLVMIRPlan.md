@@ -487,15 +487,15 @@ LIEF 不是阶段 1 的构建依赖。先用 `sleigh-lift` 风格的 byte string
 
 ### 这一步没做
 
-1. 没接 `sleigh::sla`、`sleigh::decomp`。原因很直接：`/sn640/sleigh` 当前还没看到现成安装结果，这一步应该单独验证。
+1. 还没把 `sleigh::sla`、`sleigh::decomp` 真正连到 `notdec-bin2llvm` 的库或 CLI 上；这次只先把依赖获取和 target 注入方式定下来。
 2. 没接 GhidraScript/headless `-PostScript`。
 3. 没开始做 packed p-code 解码。
 4. 没做 LIEF。
 
 ### 下一步
 
-1. 先把 `/sn640/sleigh` 单独 build + install，确认 `sleighConfig.cmake`、`sleigh::sla`、`sleigh::decomp`、`sleigh::support` 的真实引用方式。
-2. 在 `external/NotDec-bin2llvm` 里加一个可选的 `sleigh-lift` 风格最小实验，把 byte string 转成 p-code 并打印。
+1. 在 `external/NotDec-bin2llvm` 里加一个最小 `bytes -> p-code 打印` CLI，真正链接 `sleigh::sla`、`sleigh::decomp`、`sleigh::support`。
+2. 先复用固定 commit 的 `FetchContent` 路线；本地调试时用 `NOTDEC_BIN2LLVM_SLEIGH_SOURCE_DIR=/sn640/sleigh` 覆盖，避免每次都走网络。
 3. 等 native 侧 p-code 输入通了，再开始补 `ghidra_scripts/` 的 headless 导出闭环。
 
 ### 仓库结构更新（2026-05-13）
@@ -514,6 +514,79 @@ LIEF 不是阶段 1 的构建依赖。先用 `sleigh-lift` 风格的 byte string
 3. `external/NotDec-bin2llvm/.git`
    - 执行 `git submodule absorbgitdirs external/NotDec-bin2llvm`
    - 现在已经转成 `gitdir: ../../.git/modules/external/NotDec-bin2llvm`
+
+### 依赖接入更新（2026-05-13）
+
+这一步把 `sleigh` 的接入策略从“将来单独 install 后再 `find_package`”改成了“默认固定 commit 的 `FetchContent_MakeAvailable`，本地源码覆盖可选”。原因很简单：当前更需要的是把 `sleigh` targets 直接注入当前构建，先跑通 native 侧 p-code 输入，而不是先搭一个 superbuild。
+
+1. `external/NotDec-bin2llvm/CMakeLists.txt:1-56`
+   - `cmake_minimum_required` 从 `3.13.4` 提到 `3.14`，因为 `FetchContent_MakeAvailable` 需要这个下限。
+   - 保留 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH` 开关，默认仍然关闭，避免最小骨架构建时无条件拉大依赖。
+   - 新增 `NOTDEC_BIN2LLVM_SLEIGH_GIT_REPOSITORY`，当前固定为 `https://github.com/lifting-bits/sleigh.git`。
+   - 新增 `NOTDEC_BIN2LLVM_SLEIGH_GIT_TAG`，当前固定 commit 为 `c1aec71e4090a57daea1544379c63537e5e1add7`。
+   - 新增 `NOTDEC_BIN2LLVM_SLEIGH_SOURCE_DIR`，用于本地源码覆盖。
+   - `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON` 时，改为 `include(FetchContent)` + `FetchContent_Declare(...)` + `FetchContent_MakeAvailable(sleigh)`。
+   - 这一步先显式关掉 `sleigh_BUILD_TOOLS`、`sleigh_BUILD_SLEIGHSPECS`、`sleigh_BUILD_EXTRATOOLS`，只保留 `sleigh_BUILD_SUPPORT=ON`，避免把不需要的工具链一并打开。
+
+2. 验证命令
+   - 关闭 sleigh：
+     `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-build-off -G Ninja`
+   - 开启 sleigh，并用本地源码覆盖：
+     `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-build-sleigh -G Ninja -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON -DNOTDEC_BIN2LLVM_SLEIGH_SOURCE_DIR=/sn640/sleigh`
+   - 两个配置分别构建当前 CLI：
+     `cmake --build /tmp/notdec-bin2llvm-build-off --target notdec-bin2llvm -j4`
+     `cmake --build /tmp/notdec-bin2llvm-build-sleigh --target notdec-bin2llvm -j4`
+
+3. 验证结果
+   - `OFF` 路径保持原样，最小骨架继续能独立配置和构建。
+   - `ON + 本地源码覆盖` 路径可以成功配置，并把 `sleigh` 及其 Ghidra 源码依赖拉进 build tree。
+   - 这里也顺手确认了一个事实：即使本地覆盖 `/sn640/sleigh` 源码，`sleigh` 自己仍会继续下载并 patch 它依赖的 Ghidra 源码；这属于 `sleigh` 项目自身的构建行为，不是 `NotDec-bin2llvm` 这边接法的问题。
+
+### Native p-code CLI 更新（2026-05-13）
+
+这一步开始真正消费 `sleigh` target，不再只停在“依赖能接进来”。目标很窄：先做一个最小 native CLI，输入 `.sla + hex bytes`，直接打印 p-code。
+
+1. `external/NotDec-bin2llvm/tools/CMakeLists.txt`
+   - 新增 `notdec-sleigh-pcode` target。
+   - 只在 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON` 时构建。
+   - 直接链接 `sleigh::sla`、`sleigh::decomp`、`sleigh::support`。
+
+2. `external/NotDec-bin2llvm/tools/notdec-sleigh-pcode.cpp`
+   - 新增最小 CLI。
+   - 复用了 `sleigh-lift` 的核心思路，但只保留当前需要的部分：
+     - `InMemoryLoadImage`
+     - hex bytes 解析
+     - Sleigh/pspec 初始化
+     - `PcodeEmit` 打印
+   - 当前支持参数：
+     - 位置参数：`<sla-file> <hex-bytes>`
+     - 可选参数：`-a address`、`-p root-sla-dir`、`-s pspec-file`
+
+3. `external/NotDec-bin2llvm/CMakeLists.txt`
+   - 为 `sleigh_sla`、`sleigh_decomp`、`sleigh_support` 显式加回 `-frtti`。
+   - 原因是 `FindLLVM.cmake` 当前会全局加 `-fno-rtti`，而 `sleigh` 上游内部有 `dynamic_cast`，不加回 RTTI 会在 `slghpattern.cc`、`slghpatexpress.cc` 等文件直接编译失败。
+   - 这一步只修正 `sleigh` 子目标，不改当前主项目的 LLVM 风格选择。
+
+4. 验证命令
+   - 构建：
+     `cmake --build /tmp/notdec-bin2llvm-build-sleigh --target notdec-sleigh-pcode -j4`
+   - 运行：
+     `/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-sleigh-pcode /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.sla 4881ecc00f0000 -s /sn640/ghidra/build/dist/ghidra_11.3.2_DEV/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+
+5. 验证结果
+   - `notdec-sleigh-pcode` 已成功构建。
+   - 对 x86-64 字节串 `4881ecc00f0000`，已经能直接打印出 p-code。
+   - 输出里包含：
+     - `INT_SUB`
+     - `INT_LESS`
+     - `INT_SBORROW`
+     - `INT_EQUAL`
+   - 说明当前链路已经达到：
+     `hex bytes -> sleigh/libsla -> p-code print`
+
+6. 当前判断
+   - 先不切 shared `libsla/libdecomp`。上游 `BUILD_SHARED_LIBS` 注释已经明确写了 `Untested and not supported`，现在更值的是先把链路跑通。
+   - 下一步应当把这个 CLI 产出的 p-code 输入收敛成我们自己的数据访问接口，再开始做 `p-code -> LLVM IR` 的最小 lowering。
 
 ### 评价
 
