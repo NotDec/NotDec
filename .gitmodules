@@ -7,3 +7,7 @@
 [submodule "external/binarysub"]
 	path = external/binarysub
 	url = git@github.com:am009/binarysub-private.git
+[submodule "external/NotDec-bin2llvm"]
+	path = external/NotDec-bin2llvm
+	url = git@github.com:am009/NotDec-bin2llvm.git
+	branch = main

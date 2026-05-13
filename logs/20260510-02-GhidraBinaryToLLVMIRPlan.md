@@ -429,3 +429,95 @@ LIEF 不是阶段 1 的构建依赖。先用 `sleigh-lift` 风格的 byte string
 6. LIEF + libsla 对同一二进制跑通一条指令或一个函数。
 7. `/sn640/sleigh` 使用它自己管理的 Ghidra 源码版本时，能构建出 `sleigh::sla` 和 `sleigh::decomp` 对应库。
 8. 两条链路都能直接使用 libSLA/Ghidra P-Code 结构进入 lowering。
+
+## 实现记录（2026-05-13）
+
+这次先完成阶段 1 的最小骨架，目标只到“独立子项目能链接 LLVM 22，并输出 verifier 通过的最小 IR”，还没开始接 GhidraScript、packed p-code，也还没验证 `find_package(sleigh)` 的真实安装链路。
+
+### 已完成
+
+1. 新建独立子项目 `external/NotDec-bin2llvm/`，没有接进顶层默认构建。
+2. 新建本地 LLVM 查找逻辑，默认指向仓库内 `llvm-22.1.0.obj`，并强制走 shared `libLLVM.so`。
+3. 新建最小库目标 `notdec-bin2llvm-core` 和 CLI `notdec-bin2llvm`。
+4. CLI 当前能生成一个最小 module：
+   `define void @notdec_stub() { ret void }`
+5. 预留 `ghidra_scripts/` 目录，但故意不放进构建链。
+
+### 本次修改
+
+1. `external/NotDec-bin2llvm/CMakeLists.txt:1-21`
+   - 新建独立项目入口。
+   - 增加 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH` 开关，默认不启用。
+2. `external/NotDec-bin2llvm/cmake/FindLLVM.cmake:1-90`
+   - 新建本地 LLVM 22 查找逻辑。
+   - 新建接口库 `notdec_bin2llvm_llvm_deps`，统一挂 shared LLVM 依赖。
+3. `external/NotDec-bin2llvm/include/notdec-bin2llvm/ModuleBuilder.h:1-23`
+   - 新建 `notdec::bin2llvm::BuildConfig`。
+   - 新建 `notdec::bin2llvm::buildDemoModule(...)` 声明。
+4. `external/NotDec-bin2llvm/lib/ModuleBuilder.cpp:1-29`
+   - 实现 `notdec::bin2llvm::buildDemoModule(...)`。
+   - 只创建 `module/function/basic block/ret void`，不提前引入 p-code 抽象。
+5. `external/NotDec-bin2llvm/lib/CMakeLists.txt:1-13`
+   - 新建 `notdec-bin2llvm-core` 静态库目标。
+6. `external/NotDec-bin2llvm/tools/notdec-bin2llvm.cpp:1-45`
+   - 实现 CLI `main(...)`。
+   - 实现局部辅助函数 `writeModule(...)`。
+   - 先做参数检查、`verifyModule` 和 `.ll` 输出。
+7. `external/NotDec-bin2llvm/tools/CMakeLists.txt:1-8`
+   - 新建 CLI target `notdec-bin2llvm`。
+8. `external/NotDec-bin2llvm/ghidra_scripts/README.md:1-9`
+   - 只保留脚本目录约定和后续待补项。
+
+### 验证
+
+1. 配置：
+   `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-build -G Ninja`
+2. 构建：
+   `cmake --build /tmp/notdec-bin2llvm-build --target notdec-bin2llvm -j4`
+3. 运行：
+   `/tmp/notdec-bin2llvm-build/bin/notdec-bin2llvm /tmp/notdec-bin2llvm-demo.ll`
+4. IR 装配验证：
+   `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-bin2llvm-demo.ll -o /tmp/notdec-bin2llvm-demo.bc`
+
+结果：
+
+1. 四条命令都已跑通。
+2. 产物 `/tmp/notdec-bin2llvm-demo.ll` 可被 `llvm-as` 接受。
+3. 当前输出 IR 为最小 stub，说明 LLVM 22 动态链接、库目标、CLI 入口都已经通了。
+
+### 这一步没做
+
+1. 没接 `sleigh::sla`、`sleigh::decomp`。原因很直接：`/sn640/sleigh` 当前还没看到现成安装结果，这一步应该单独验证。
+2. 没接 GhidraScript/headless `-PostScript`。
+3. 没开始做 packed p-code 解码。
+4. 没做 LIEF。
+
+### 下一步
+
+1. 先把 `/sn640/sleigh` 单独 build + install，确认 `sleighConfig.cmake`、`sleigh::sla`、`sleigh::decomp`、`sleigh::support` 的真实引用方式。
+2. 在 `external/NotDec-bin2llvm` 里加一个可选的 `sleigh-lift` 风格最小实验，把 byte string 转成 p-code 并打印。
+3. 等 native 侧 p-code 输入通了，再开始补 `ghidra_scripts/` 的 headless 导出闭环。
+
+### 仓库结构更新（2026-05-13）
+
+后续决定把 `external/NotDec-bin2llvm` 单独做成 git 仓库，并注册为主项目子模块，这样更符合现有 `external/` 目录的组织方式，也避免主仓库直接跟踪子项目内部文件。
+
+1. `external/NotDec-bin2llvm`
+   - 执行 `git init -b main`
+   - 提交首个骨架 commit `3d2da89`，提交信息 `Initial project skeleton`
+   - 配置远端 `git@github.com:am009/NotDec-bin2llvm.git`
+   - 执行 `git push -u origin main`
+2. `.gitmodules:10-13`
+   - 新增子模块 `external/NotDec-bin2llvm`
+   - URL 为 `git@github.com:am009/NotDec-bin2llvm.git`
+   - 跟踪分支设为 `main`
+3. `external/NotDec-bin2llvm/.git`
+   - 执行 `git submodule absorbgitdirs external/NotDec-bin2llvm`
+   - 现在已经转成 `gitdir: ../../.git/modules/external/NotDec-bin2llvm`
+
+### 评价
+
+1. 实现效果：8/10。最小骨架已经能独立配置、构建、出 IR，达到了阶段 1 的起点目标。
+2. 理解成本：8/10。目录和入口很少，没有先引入假的中间层。
+3. 维护成本：8/10。现在主要风险不在代码，而在后续 `sleigh` 安装和 Ghidra Java/native 边界。
+4. 更好的方案：如果 `/sn640/sleigh` 很快能稳定安装，下一版可以直接把 `sleigh` 的最小 p-code 打印器一起落进这个骨架，比继续空转 GhidraScript 更值。
