@@ -991,3 +991,101 @@ HighFunction 小样例。
 
 维护成本：6/10。下一步继续补 op 前，最好先让导出 schema 带 pointer 宽度、
 address space endian 和 call prototype。
+
+## 实现记录（2026-05-14，浮点和 helper op）
+
+这次继续补 heritage lowering 的 P-Code 覆盖面。目标仍是先生成可验证 LLVM IR；
+对语义依赖 Ghidra 运行时或外部 schema 的 op，先保留 helper call。
+
+### 已完成
+
+1. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:60`
+   - 新增 `floatType(...)` 和 `floatByteSize(...)`。
+   - 当前只接受 4/8 字节浮点，分别降成 LLVM `float` / `double`。
+2. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:188`
+   - 新增 `readFloatBits(...)` 和 `writeFloatBits(...)`。
+   - heritage varnode 仍按整数位模式保存，浮点 op 内部临时 bitcast 成 LLVM FP。
+3. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:483`
+   - 新增 `lowerFloatBinary(...)`。
+   - 支持 `FLOAT_ADD`、`FLOAT_SUB`、`FLOAT_MULT`、`FLOAT_DIV`。
+4. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:517`
+   - 新增 `lowerFloatCompare(...)`。
+   - 支持 `FLOAT_EQUAL`、`FLOAT_NOTEQUAL`、`FLOAT_LESS`、`FLOAT_LESSEQUAL`。
+5. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:554`
+   - 新增 `lowerFloatUnary(...)`。
+   - 支持 `FLOAT_NEG`、`FLOAT_ABS`、`FLOAT_SQRT`、`CEIL`、`FLOOR`、`ROUND`。
+6. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:602`
+   - 新增 `lowerFloatNan(...)`，用 `fcmp uno` 表达 NaN 判断。
+7. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:623`
+   - 新增 `lowerFloatCast(...)`。
+   - 支持 `INT2FLOAT`、`FLOAT2FLOAT`、`TRUNC`。
+8. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:916`
+   - 放宽 `CALL`：允许无输出的 direct call。
+9. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:954`
+   - 新增 `lowerHelperCall(...)`。
+   - `CALLIND`、`CALLOTHER`、`SEGMENTOP`、`CPOOLREF`、`NEW` 先降成
+     `notdec_heritage_*` vararg helper。
+10. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:1076`
+    - 新增 `BRANCHIND` 终结符 lowering。
+    - 有后继时生成 LLVM `indirectbr`，没有后继时退成 return poison/void。
+11. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:1154`
+    - `lowerOp(...)` 接入上述浮点和 helper op。
+12. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:1212`
+    - `lowerBlock(...)` 把 `BRANCHIND` 当终结符处理。
+
+### 验证
+
+构建：
+
+```bash
+clang-format -i external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp
+cmake --build /tmp/notdec-bin2llvm-build-sleigh \
+  --target notdec-heritage-check notdec-heritage-llvm -j4
+```
+
+回归和新增临时 JSON：
+
+```bash
+for name in sample loadp storep divmix udivmix bitops structops floatops helperops; do
+  /tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+    /tmp/notdec-heritage-${name}.json
+  /tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+    /tmp/notdec-heritage-${name}.json -o /tmp/notdec-heritage-${name}.ll
+  /sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+    /tmp/notdec-heritage-${name}.ll -o /tmp/notdec-heritage-${name}.bc
+done
+```
+
+结果：全部通过。
+
+`floatops` 输出 IR 覆盖 `fadd/fsub/fmul/fdiv`、`llvm.fabs`、`llvm.sqrt`、
+`llvm.ceil`、`llvm.floor`、`llvm.round`、`sitofp`、`fpext`、`fptosi` 和 float
+`fcmp`。
+
+`helperops` 输出 IR 覆盖 `notdec_heritage_CALLOTHER_i32`、
+`notdec_heritage_CALLIND_i32`、`notdec_heritage_SEGMENTOP_i32`、
+`notdec_heritage_CPOOLREF_i32`、`notdec_heritage_NEW_i32` 和 `indirectbr`。
+
+这次只改 `external/NotDec-bin2llvm` 的 heritage JSON 到 LLVM lowering，没有改
+NotDec 主 pass pipeline、类型恢复、结构体合并或 pointer analysis，所以没有跑
+fortune 同口径性能对比。
+
+### 当前限制
+
+1. 浮点只支持 4/8 字节，暂不支持 x87 80-bit、16-bit half、128-bit float。
+2. `INT2FLOAT` 当前按 signed int 降成 `sitofp`。Ghidra 可以通过前置 zero-extend
+   表达 unsigned 转换，后续最好从 schema/类型信息里显式判断。
+3. `CALLIND`、`CALLOTHER`、`SEGMENTOP`、`CPOOLREF`、`NEW` 只是 helper 占位，
+   没有恢复真实调用目标、userop 名字、constant pool 类型或 allocator 语义。
+4. `BRANCHIND` 只把现有 CFG 后继塞进 `indirectbr`，没有恢复 jump table range。
+
+### 评分
+
+实现效果：7/10。P-Code 覆盖面明显扩大，常见 float op 和剩余控制/调用类 op
+至少能过 LLVM verifier。
+
+复杂度：6/10。浮点 lowering 是直接映射；helper op 保持简单，但后续要想变准需要
+schema 增量。
+
+维护成本：6/10。当前代码仍是单文件直接分发，容易理解；主要债务是 helper op 的
+真实语义和浮点 signed/unsigned 转换判定。
