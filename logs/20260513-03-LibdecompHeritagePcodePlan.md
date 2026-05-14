@@ -1089,3 +1089,61 @@ schema 增量。
 
 维护成本：6/10。当前代码仍是单文件直接分发，容易理解；主要债务是 helper op 的
 真实语义和浮点 signed/unsigned 转换判定。
+
+## 实现记录（2026-05-14，补齐标准 P-Code 枚举）
+
+这次按 Ghidra `PcodeOp` 标准枚举对了一遍。`PCODE_MAX=75`，其中 slot 45 没有
+定义；除这个空洞外，0 到 74 的 mnemonic 现在都有 lowering 路径。
+
+### 已完成
+
+1. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:1199`
+   - `UNIMPLEMENTED` 接入 `lowerHelperCall(...)`。
+   - 输出形如 `notdec_heritage_UNIMPLEMENTED_i32(...)` 的 helper call。
+   - 这样遇到 Ghidra 的占位 op 时不会直接报 unsupported。
+
+### 验证
+
+构建：
+
+```bash
+clang-format -i external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp
+cmake --build /tmp/notdec-bin2llvm-build-sleigh \
+  --target notdec-heritage-check notdec-heritage-llvm -j4
+```
+
+回归和新增临时 JSON：
+
+```bash
+for name in sample loadp storep divmix udivmix bitops structops floatops helperops unimplemented; do
+  /tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+    /tmp/notdec-heritage-${name}.json
+  /tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+    /tmp/notdec-heritage-${name}.json -o /tmp/notdec-heritage-${name}.ll
+  /sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+    /tmp/notdec-heritage-${name}.ll -o /tmp/notdec-heritage-${name}.bc
+done
+```
+
+结果：全部通过。`unimplemented` 样例输出 IR 包含
+`notdec_heritage_UNIMPLEMENTED_i32`。
+
+这次仍只改 `external/NotDec-bin2llvm` 的 heritage lowering，没有改 NotDec 主 pass
+pipeline，所以没有跑 fortune 同口径性能对比。
+
+### 当前限制
+
+1. “支持全部标准 op”现在指不会因为 mnemonic 未接入而失败，不代表所有 op 都有完整
+   语义。`CALLIND`、`CALLOTHER`、`SEGMENTOP`、`CPOOLREF`、`NEW`、`UNIMPLEMENTED`
+   仍是 helper 占位。
+2. 浮点、bit range、pointer op 的精度限制沿用上一节：需要 schema 带更多类型、
+   endian、prototype 和地址空间信息后再提高语义准确度。
+
+### 评分
+
+实现效果：8/10。标准 P-Code mnemonic 覆盖已经补齐，后续失败更可能来自 schema
+信息不足，而不是没接 op。
+
+复杂度：5/10。只是在已有 helper 机制里接入最后一个占位 op。
+
+维护成本：5/10。改动很小；后续主要工作是把 helper 占位替换成更准确的语义。
