@@ -124,6 +124,15 @@ native 路线，还要再迁移一次。
 缺点是 libdecomp 初始化和数据库环境比较重，第一步容易卡在工程接入，而不是
 LLVM lowering 本身。
 
+2026-05-14 更新：路线 B 先搁置，不作为当前下一步。原因是路线 A 已经能通过
+Ghidra headless 导出 `HighFunction`、参数 varnode、`MULTIEQUAL` 和 direct call
+信息，当前瓶颈已经转到 native lowering 的 opcode 覆盖和 schema 细节。直接接
+C++ `Funcdata` 现在会把问题重新拉回 `Architecture`、数据库、compiler spec 和
+action pipeline 初始化，不利于判断 LLVM lowering 本身是否可行。路线 B 保留为
+后续收敛方向，触发条件是：headless 导出 schema 基本稳定、LLVM lowering 能覆盖
+分支/PHI/call/load/store 的小样例，并且 Java/headless 进程边界开始明显影响批量
+使用。
+
 ### 当前建议
 
 先走路线 A 做 1-2 天 spike。验明三件事：
@@ -132,7 +141,8 @@ LLVM lowering 本身。
 2. 导出的 P-Code 是否已经足够少寄存器化，能直接映射到 LLVM 参数/返回值。
 3. `CPUI_MULTIEQUAL`、`CPUI_INDIRECT`、call site 信息是否能按预期保留下来。
 
-如果结果好，再把导出 schema 固化，并开始路线 B 的 C++ 原生接入。否则回到
+如果结果好，先把导出 schema 固化，并继续补 heritage P-Code 到 LLVM IR 的
+lowering。C++ 原生 libdecomp 接入暂缓；如果导出质量不好，再回到
 `20260513-02-Bin2llvmRegisterPlan.md` 的 register slot + `mem2reg` 方案。
 
 ## LLVM lowering 变化
@@ -693,3 +703,116 @@ cmake --build /tmp/notdec-bin2llvm-build-off --target notdec-bin2llvm -j4
 
 下一步应扩大样例，不急着做 C++ 原生 libdecomp 接入。先补 `loop`、stack/local
 变量和一两个 LOAD/STORE 样例，确认导出后的 P-Code 形态再扩 lowering。
+
+## 实现记录（2026-05-14，heritage lowering 扩 opcode）
+
+这次按上面的新判断继续路线 A，没有接 C++ 原生 libdecomp。目标是让
+`headless HighFunction JSON -> native heritage lowering -> LLVM IR` 覆盖更多
+真实小函数。
+
+### 已完成
+
+1. 明确搁置 C++ 原生 libdecomp：
+   - `logs/20260513-03-LibdecompHeritagePcodePlan.md:108`
+     - 在路线 B 小节补充 2026-05-14 更新，说明原生 `Funcdata` 接入暂缓。
+   - `logs/20260510-02-GhidraBinaryToLLVMIRPlan.md:175`
+     - 在链路 B 顺序说明后补充路线 A 继续优先、`sleigh::decomp` 暂作参考。
+2. 扩展 heritage P-Code lowering：
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:184`
+     - 新增 `requireOutput(...)`，统一检查输出 varnode。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:210`
+     - 新增 `lowerBinary(...)`，支持 `INT_ADD`、`INT_SUB`、`INT_MULT`、
+       `INT_AND`、`INT_OR`、`INT_XOR`、`INT_LEFT`、`INT_RIGHT`、`INT_SRIGHT`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:244`
+     - 扩展 compare，支持 `INT_LESSEQUAL`、`INT_LESS`、`INT_NOTEQUAL`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:277`
+     - 新增 `INT_ZEXT`、`INT_SEXT`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:298`
+     - 新增 `BOOL_NEGATE`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:310`
+     - 新增 `INT_NEGATE`、`INT_2COMP`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:330`
+     - 新增 `BOOL_AND`、`BOOL_OR`、`BOOL_XOR`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:360`
+     - 新增 `SUBPIECE`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:376`
+     - 新增 `PIECE`。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:398`
+     - 新增临时 `@notdec_ram` 内存模型和 `LOAD` / `STORE` lowering。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:486`
+     - `CALL` 改成临时 vararg 声明，避免同一 callee 在不同 call site 参数数不同
+       时产生 LLVM 函数类型冲突。
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:532`
+     - `BRANCH` 作为 terminator 降成 LLVM `br label`。
+
+### 验证
+
+构建：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build-sleigh \
+  --target notdec-heritage-check notdec-heritage-llvm -j4
+```
+
+分支、PHI、direct call 样例 `branchy`：
+
+```bash
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+  /tmp/notdec-heritage-sample.json
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-sample.json -o /tmp/notdec-heritage-sample.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-sample.ll -o /tmp/notdec-heritage-sample.bc
+```
+
+结果：通过。`branchy` 统计为 4 blocks、9 ops、2 params、0 missing param
+varnodes、1 个 `MULTIEQUAL`、2 个 direct calls。输出 IR 包含 LLVM PHI 和
+`declare i32 @helper(...)`。
+
+LOAD 样例 `loadp`：
+
+```bash
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+  /tmp/notdec-heritage-loadp.json
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-loadp.json -o /tmp/notdec-heritage-loadp.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-loadp.ll -o /tmp/notdec-heritage-loadp.bc
+```
+
+结果：通过。导出 op 为 `LOAD`、`INT_ADD`、`COPY`、`RETURN`，输出 IR 包含
+`@notdec_ram`、`getelementptr`、`load i32`。
+
+STORE 样例 `storep`：
+
+```bash
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+  /tmp/notdec-heritage-storep.json
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-storep.json -o /tmp/notdec-heritage-storep.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-storep.ll -o /tmp/notdec-heritage-storep.bc
+```
+
+结果：通过。导出 op 为 `INT_ADD`、`STORE`、`RETURN`，输出 IR 包含
+`store i32`。
+
+### 当前限制
+
+1. `@notdec_ram` 仍是临时 1MiB 外部数组，不代表真实 section、stack 或 globals。
+2. `CALL` 用 vararg 只是为了让 IR 类型稳定；真正的 call prototype 仍需要从导出
+   schema 补。
+3. pointer 参数现在仍按 `i32` 映射，再 zext 到地址宽度；这是临时行为。
+4. 这次只改 `external/NotDec-bin2llvm` 和日志，不接 NotDec 主 pass pipeline；
+   因此没有跑 `fortune.o3.wasm.ll` 计时，也不会影响当前 wasm 类型恢复性能。
+
+### 评分
+
+实现效果：7/10。heritage 路线已经能覆盖分支、PHI、call、load、store 的小样例。
+
+复杂度：6/10。新增 opcode 都是直接 lowering，临时内存和 vararg call 是明确的过渡方案。
+
+维护成本：6/10。下一步要重点补 schema，而不是继续盲目堆 opcode。
+
+更好的方案：优先让 Java 导出 call prototype、pointer 宽度和 address space 映射，
+再把当前 vararg call、`i32` pointer 和 `@notdec_ram` 替换掉。

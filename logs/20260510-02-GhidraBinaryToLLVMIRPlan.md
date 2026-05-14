@@ -174,6 +174,12 @@ cmake -S /sn640/sleigh -B /sn640/sleigh/build-notdec \
 
 所以顺序上应先做链路 A，再做链路 B。链路 A 跑通后，C++ lowering 的输入和上下文要求才有参照物。
 
+2026-05-14 更新：这里的“再做链路 B”不再指马上接 C++ 原生 libdecomp
+`Funcdata`。当前先继续路线 A，也就是 Ghidra headless / Java decompiler 导出
+`HighFunction` 后 P-Code，再由 native CLI 校验和 lowering。`sleigh::decomp`
+仍可继续作为 raw P-Code、opcode 名称和后续 native 收敛的参考，但原生 libdecomp
+环境暂缓，等导出 schema 和 LLVM lowering 覆盖面稳定后再评估。
+
 ## LLVM IR 生成计划
 
 LLVM 调用必须用 `/sn640/NotDec/llvm-22.1.0.obj` 的动态库。当前方案直接使用 LLVM C++ API，
