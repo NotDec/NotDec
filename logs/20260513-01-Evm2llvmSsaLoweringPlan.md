@@ -371,3 +371,62 @@ opt -passes=verify -disable-output /tmp/out.bc
 下一步直接实现 SSA-only，不再做 mirror-slot 过渡模式。
 
 先落地 `validateSsaFacts` 和 `ValueMap`，让错误尽早暴露。只要 Gigahorse facts 一直满足当前观察到的条件，SSA-only 路线比继续维护 slot fallback 更简单，也更符合 TAC 的设计。
+
+## 2026-05-14 实现记录：阶段 1/2 已完成
+
+本次实现了前两步的中间态：facts 自检 + `ValueMap` 普通表达式 lowering。native PHI 还没做，所以临时 slot 只保留给 PHI edge-store 旧路径。
+
+改动文件和函数：
+
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/SsaFactValidator.h:9`：新增 `validateSsaFacts` 声明。
+- `external/NotDec-evm2llvm/lib/SsaFactValidator.cpp:20`：新增 `validateSsaFacts`，检查重复 statement、重复 def、同 var 多 def、`PHIIncoming` 是否指向真实 PHI、边是否是 `LocalBlockEdge`、两端 block 是否同函数。
+- `external/NotDec-evm2llvm/lib/CMakeLists.txt:1`：把 `SsaFactValidator.cpp` 加进 `notdec-evm2llvm-core`。
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/InstructionLowerer.h:29`：`InstructionLowerer` 接收 `Values`，新增 `loadPhiEdgeWord` 和 `defineWord`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:45`：`loadWord` 改成先读 `Values`，再读常量，最后只读临时 PHI slot；普通变量缺值时报 `missing SSA value`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:65`：`loadPhiEdgeWord` 专门给 PHI edge-store 用，优先读 slot，避免 edge block 使用不支配该 block 的 SSA 指令。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:73`：`defineWord` 写入 `Values`，重复定义直接报错；如果变量属于临时 PHI slot，再 mirror store。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:401`：普通 scalar 指令、`CALL` 返回、无 incoming 的 `PHI` 都改用 `defineWord`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:34`：新增函数内 block lowering 顺序，按 entry 出发的 reverse postorder 处理，避免按 fact id 先处理 use block。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:107`：PHI edge-store 改用 `loadPhiEdgeWord`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:377`：只为 `PHIIncoming` 涉及的 phi def 和 incoming var 建临时 slot，不再为函数内所有变量建 slot。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:414`：函数 formals 直接放入 `Values`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:423`：普通 statement lowering 改用 reverse postorder。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:461`：`lowerToLlvm` 开始时调用 `validateSsaFacts`。
+
+实现中调整：
+
+- 原计划说前两步“不再从 slot load/store”，实际改成“普通变量不再依赖 slot；PHI edge-store 旧路径临时用 slot”。原因是 `long_running` 的 `PHIIncoming` 会在 edge-store 中读取 loop-carried incoming var，native PHI 之前不能直接用跨 block 的 SSA 指令，否则 LLVM verifier 会报 dominance 错。
+- `PHIIncoming` 当前还会出现同一 PHI stmt、同一 edge 多个 incoming var 的情况。这次没有改变语义，只让旧 edge-store 路径继续按原顺序写 slot。native PHI 阶段需要重新确认这个 fact 的精确定义。
+
+验证：
+
+```bash
+cmake --build build-evm2llvm --target evm2llvm -j4
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+/usr/bin/time -p ./build-evm2llvm/bin/evm2llvm --facts /tmp/gigahorse-phiincoming-test/long_running/out --output /tmp/notdec-evm2llvm-long-running.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-evm2llvm-long-running.ll -o /tmp/notdec-evm2llvm-long-running.bc
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output /tmp/notdec-evm2llvm-long-running.bc
+```
+
+结果：
+
+- `evm2llvm.fixture`：12/12 passed。
+- `long_running`：emit、assemble、verify 通过。
+- `long_running` emit 时间：`real 0.12s, user 0.11s, sys 0.01s`。
+
+性能说明：
+
+- 本次只改 `external/NotDec-evm2llvm`，不触碰 NotDec 主 pass pipeline、类型恢复、结构体合并或 pointer analysis。
+- 因此没有跑 fortune 当前关注用例；它和本次 evm2llvm fact lowering 不是同口径对比。
+
+当前方案评分：
+
+- 实现效果：7/10。前两步目标达成，fixtures 和 long_running 都过；但 native PHI 还没做，IR 里仍有 PHI 旧路径 slot。
+- 复杂度：6/10。`ValueMap` 逻辑比较直接，但临时 PHI slot 让中间态还有一点理解成本。
+- 维护成本：6/10。下一步 native PHI 完成后，应删除 `loadPhiEdgeWord`、PHI edge-store slot 和 edge block 插入逻辑，维护成本会下降。
+
+下一步：
+
+1. 处理 native PHI 前，先确认 `PHIIncoming` 同一 `phiStmt + edge` 多 incoming var 的真实语义。
+2. 实现 native PHI placeholder 和 `addIncoming`。
+3. 删除 PHI edge-store、`loadPhiEdgeWord`、临时 PHI slot。
