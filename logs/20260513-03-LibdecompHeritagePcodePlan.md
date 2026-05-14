@@ -548,3 +548,148 @@ JSON 导出格式已经够支撑下一步最小 lowering：
 1. 把 checker 里的临时读取逻辑收敛成可复用的 `HeritagePcode` 数据结构。
 2. 先做 `max2` 的 lowering：参数、比较、`MULTIEQUAL`、return。
 3. 再做 `caller` 的 direct call lowering。
+
+## 实现记录（2026-05-14，heritage P-Code 到 LLVM IR 最小闭环）
+
+这次继续推进 native 侧，不再只做 JSON 校验。目标很窄：把上一节导出的
+`max2` / `caller` 两个 heritage JSON 转成 verifier 通过的 LLVM IR。
+
+### 已完成
+
+1. 新增 heritage JSON 数据结构：
+   - `external/NotDec-bin2llvm/include/notdec-bin2llvm/HeritagePcode.h:14-78`
+2. 新增 JSON loader：
+   - `external/NotDec-bin2llvm/lib/HeritagePcode.cpp:13-286`
+3. 新增 heritage lowering 接口：
+   - `external/NotDec-bin2llvm/include/notdec-bin2llvm/HeritageToLLVM.h:15-22`
+4. 新增 heritage lowering 实现：
+   - `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:18-425`
+5. 新增 CLI：
+   - `external/NotDec-bin2llvm/tools/notdec-heritage-llvm.cpp:16-85`
+6. 改造 checker 复用 loader：
+   - `external/NotDec-bin2llvm/tools/notdec-heritage-check.cpp:12-163`
+7. 更新 CMake：
+   - `external/NotDec-bin2llvm/lib/CMakeLists.txt:1-7`
+   - `external/NotDec-bin2llvm/tools/CMakeLists.txt:36-43`
+
+### 修改内容
+
+1. `HeritagePcode.h:14-72`
+   - 新增 `HeritageVarnode`、`HeritageOp`、`HeritageBlock`、`HeritageParam`、
+     `HeritageFunction`、`HeritageProgram`。
+   - 保留按 id 建索引的 map，方便 lowering 查引用。
+2. `HeritagePcode.cpp:80-228`
+   - 解析 function、blocks、ops、varnodes。
+   - offset 从 JSON 字符串解析为 `uint64_t`。
+3. `HeritagePcode.cpp:233-286`
+   - 新增 `indexHeritageProgram(...)` 和 `loadHeritageProgramFromJson(...)`。
+4. `HeritageToLLVM.cpp:61-118`
+   - 按 Ghidra prototype 创建 LLVM function。
+   - 参数 varnode 映射到 LLVM argument。
+5. `HeritageToLLVM.cpp:139-165`
+   - 实现 varnode read/write。
+   - 常量直接生成 `ConstantInt`，未知值暂用 `freeze poison`。
+6. `HeritageToLLVM.cpp:180-228`
+   - 支持 `COPY`、`INT_ADD`、`INT_SLESSEQUAL`、`INT_SLESS`、`INT_EQUAL`。
+7. `HeritageToLLVM.cpp:231-255`
+   - 支持 `MULTIEQUAL -> LLVM PHI`。
+   - PHI incoming 顺序按 block 的 `in` 边和 `MULTIEQUAL` 输入一一对应。
+8. `HeritageToLLVM.cpp:258-285`
+   - 支持 direct `CALL`。
+   - 当前用 `callTargetName` 生成外部函数声明。
+9. `HeritageToLLVM.cpp:288-360`
+   - 支持 `CBRANCH` 和 `RETURN`。
+   - `CBRANCH` 通过目标 varnode 的 address 找 true block，另一个 successor 作为 false block。
+10. `HeritageToLLVM.cpp:384-425`
+   - 按 block 内 op 顺序 lowering。
+   - 这里故意不按全局 `ops` 顺序，因为 Ghidra 的全局迭代顺序可能和 block iterator
+     顺序不同。
+11. `notdec-heritage-llvm.cpp:56-85`
+   - 新增 CLI 主流程：读 JSON、lower、verify、写 `.ll`。
+
+### 验证
+
+构建：
+
+```bash
+cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-build-off -G Ninja
+cmake --build /tmp/notdec-bin2llvm-build-off --target notdec-heritage-check notdec-heritage-llvm -j4
+```
+
+校验和 lowering `max2`：
+
+```bash
+/tmp/notdec-bin2llvm-build-off/bin/notdec-heritage-check /tmp/notdec-heritage-max2.json
+/tmp/notdec-bin2llvm-build-off/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-max2.json -o /tmp/notdec-heritage-max2.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-max2.ll -o /tmp/notdec-heritage-max2.bc
+```
+
+结果：
+
+```llvm
+define i32 @max2(i32 %a, i32 %b) {
+entry:
+  %0 = icmp sle i32 %a, %b
+  %1 = zext i1 %0 to i8
+  %2 = icmp ne i8 %1, 0
+  br i1 %2, label %"bb:2", label %"bb:1"
+
+"bb:1":
+  br label %"bb:2"
+
+"bb:2":
+  %"vn:163" = phi i32 [ %a, %entry ], [ %b, %"bb:1" ]
+  ret i32 %"vn:163"
+}
+```
+
+校验和 lowering `caller`：
+
+```bash
+/tmp/notdec-bin2llvm-build-off/bin/notdec-heritage-check /tmp/notdec-heritage-caller.json
+/tmp/notdec-bin2llvm-build-off/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-caller.json -o /tmp/notdec-heritage-caller.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-caller.ll -o /tmp/notdec-heritage-caller.bc
+```
+
+结果：
+
+```llvm
+define i32 @caller(i32 %x) {
+entry:
+  %0 = add i32 %x, 1
+  %1 = call i32 @callee(i32 %0)
+  ret i32 %1
+}
+
+declare i32 @callee(i32)
+```
+
+旧最小 CLI 仍可构建：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build-off --target notdec-bin2llvm -j4
+```
+
+### 当前限制
+
+1. lowering 只覆盖当前两个样例需要的 opcode。
+2. 类型映射非常粗，只把 `int` / `uint` / `undefined4` 当成 `i32`。
+3. direct call 只用 `callTargetName`，还没有使用 Ghidra call prototype 对象。
+4. 不支持 LOAD/STORE、stack、globals、INDIRECT、CALLIND。
+5. 这次仍只改 `external/NotDec-bin2llvm`，没有影响 NotDec 主链路，所以没有跑
+   `fortune.o3.wasm.ll` 计时。
+
+### 当前判断
+
+路线 A 已经从“能导出”推进到“能生成 LLVM IR”。最关键的判断是成立的：
+
+1. Ghidra heritage 的 `MULTIEQUAL` 可以直接转 LLVM PHI。
+2. 参数 varnode 可以直接转 LLVM function argument。
+3. 简单 direct call 可以从 HighFunction P-Code 转成 LLVM call。
+
+下一步应扩大样例，不急着做 C++ 原生 libdecomp 接入。先补 `loop`、stack/local
+变量和一两个 LOAD/STORE 样例，确认导出后的 P-Code 形态再扩 lowering。
