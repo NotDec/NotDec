@@ -816,3 +816,89 @@ STORE 样例 `storep`：
 
 更好的方案：优先让 Java 导出 call prototype、pointer 宽度和 address space 映射，
 再把当前 vararg call、`i32` pointer 和 `@notdec_ram` 替换掉。
+
+## 实现记录（2026-05-14，整数除余和 bit op）
+
+这次继续扩 heritage lowering，只补不依赖新 schema 的 op。
+
+### 已完成
+
+1. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:238`
+   - `lowerBinary(...)` 新增 `INT_DIV`、`INT_SDIV`、`INT_REM`、`INT_SREM`。
+2. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:286`
+   - 新增 `lowerOverflow(...)`。
+   - `INT_CARRY` 映射到 `llvm.uadd.with.overflow`。
+   - `INT_SCARRY` 映射到 `llvm.sadd.with.overflow`。
+   - `INT_SBORROW` 映射到 `llvm.ssub.with.overflow`。
+3. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:316`
+   - 新增 `lowerCountBits(...)`。
+   - `POPCOUNT` 映射到 `llvm.ctpop`。
+   - `LZCOUNT` 映射到 `llvm.ctlz`，`is_zero_undef=false`。
+4. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:681`
+   - `lowerOp(...)` 接入上述 op。
+
+### 验证
+
+构建：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build-sleigh \
+  --target notdec-heritage-check notdec-heritage-llvm -j4
+```
+
+有符号除余样例 `divmix`：
+
+```bash
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+  /tmp/notdec-heritage-divmix.json
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-divmix.json -o /tmp/notdec-heritage-divmix.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-divmix.ll -o /tmp/notdec-heritage-divmix.bc
+```
+
+结果：通过。导出 op 为 `INT_SDIV`、`INT_SREM`、`INT_ADD`、`COPY`、
+`RETURN`，输出 IR 包含 `sdiv` 和 `srem`。
+
+无符号除余样例 `udivmix`：
+
+```bash
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+  /tmp/notdec-heritage-udivmix.json
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-udivmix.json -o /tmp/notdec-heritage-udivmix.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-udivmix.ll -o /tmp/notdec-heritage-udivmix.bc
+```
+
+结果：通过。导出 op 为 `INT_DIV`、`INT_REM`、`INT_ADD`、`COPY`、
+`RETURN`，输出 IR 包含 `udiv` 和 `urem`。
+
+临时 JSON 样例 `bitops`：
+
+```bash
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+  /tmp/notdec-heritage-bitops.json
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-bitops.json -o /tmp/notdec-heritage-bitops.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-bitops.ll -o /tmp/notdec-heritage-bitops.bc
+```
+
+结果：通过。输出 IR 包含 `llvm.uadd.with.overflow.i32`、
+`llvm.sadd.with.overflow.i32`、`llvm.ssub.with.overflow.i32`、`llvm.ctpop.i32`
+和 `llvm.ctlz.i32`。
+
+### 当前限制
+
+1. overflow 和 bit count 样例是手写临时 JSON，后续需要找到稳定 C/二进制样例。
+2. 除法除零语义暂时交给 LLVM `div/rem` 自身处理，没有额外保护。
+3. 仍未支持 floating-point、`INDIRECT`、`CALLIND`、`BRANCHIND`、`CALLOTHER`。
+
+### 评分
+
+实现效果：7/10。整数 op 覆盖面继续扩大，且都通过 LLVM verifier/assembler。
+
+复杂度：5/10。新增逻辑基本是直接映射 LLVM 指令或 intrinsic。
+
+维护成本：6/10。后续主要风险仍是 schema，而不是这些单 op lowering。
