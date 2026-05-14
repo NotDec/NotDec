@@ -477,3 +477,31 @@ ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
 
 1. 迁移 `CALLPRIVATE` 多返回的覆盖测试，确认 `ActualReturnArgs` 路径。
 2. 收紧缺失 `PHIIncoming.csv` 的行为，按 SSA-only 要求报错或至少在含 PHI 时失败。
+
+## 2026-05-14 实现记录：阶段 4 多返回覆盖
+
+阶段 4 的实现逻辑已在前面 `ValueMap` 改造中完成：`lowerPrivateCall` 对多返回 call 使用 `extractvalue`，并把每个 caller 侧 return var 写入 `Values`。本次补测试覆盖，避免后续改动破坏这条路径。
+
+改动文件和函数：
+
+- `external/NotDec-evm2llvm/test/CMakeLists.txt:39`：新增 `private_call_multi_return` fixture。
+- `external/NotDec-evm2llvm/test/fixtures/private_call_multi_return/ActualReturnArgs.csv:1`：声明 caller 侧两个返回变量 `0xret0`、`0xret1`。
+- `external/NotDec-evm2llvm/test/fixtures/private_call_multi_return/TAC_Def.csv:2`：`CALLPRIVATE` 语句定义两个返回变量。
+- `external/NotDec-evm2llvm/test/fixtures/private_call_multi_return/TAC_Op.csv:2`：caller 调用 private function，callee 通过 `RETURNPRIVATE` 返回 `{sum, diff}`。
+
+验证：
+
+```bash
+cmake --build build-evm2llvm --target evm2llvm -j4
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+rg -n "private.call|extractvalue|ret.insert" build-evm2llvm/test/private_call_multi_return.ll
+```
+
+结果：
+
+- `evm2llvm.fixture`：15/15 passed。
+- `private_call_multi_return.ll` 中出现 `{ i256, i256 }` call 和两个 `extractvalue`。
+
+性能说明：
+
+- 本次只新增 evm2llvm fixture，不改变主链路性能。
