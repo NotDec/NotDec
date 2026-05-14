@@ -1,31 +1,37 @@
-# evm2llvm SSA lowering 计划
+# evm2llvm SSA-only lowering 计划
 
 ## 总结
 
-当前观察很简单：
+当前观察：
 
 - Gigahorse TAC 已经把 EVM 栈语义提升成 `TAC_Def` / `TAC_Use`，evm2llvm 不应该再重新推栈。
-- `PHIIncoming.csv` 已经补上了 PHI 的 predecessor incoming 信息。
-- 当前样本里 `TAC_Def` 满足“一变量一 def”：`long_running` 是 1667 个 def、1667 个唯一变量；现有 fixtures 也没有重复 def。
-- 现在 evm2llvm 仍主要用 alloca/load/store slot 表达变量，PHI 是按边 store 到 phi def slot，不是 native LLVM phi。
+- `PHIIncoming.csv` 已经补上 PHI 的 predecessor incoming 信息。
+- 当前样本满足“一变量一 def”：`long_running` 是 1667 个 def、1667 个唯一变量；现有 fixtures 也没有重复 def。
+- 现有 evm2llvm 还是 alloca/load/store slot 风格，PHI 是按边 store 到 phi def slot，不是 native LLVM phi。
 
-目标形态：
+计划直接做破坏式更新：
 
-evm2llvm 应该逐步改成基于 TAC 变量的 SSA lowering。普通 TAC def 直接产生 LLVM `Value*`，use 直接读取这个 `Value*`；PHI 用 `PHIIncoming.csv` 生成 native LLVM `phi`。短期可以保留 slot fallback，避免一次性改太大。
+- 只保留 SSA-only lowering。
+- 普通 TAC scalar 变量不再默认创建 slot。
+- 普通 def 直接生成 LLVM `Value*`，use 直接读取这个 `Value*`。
+- PHI 用 `PHIIncoming.csv` 生成 native LLVM `phi`。
+- facts 不满足 SSA-only 要求时直接报错退出，不再静默退回旧 slot 模式。
+
+自检单独做成函数。默认开启，发现问题直接失败。后续如果确认 Gigahorse 输出一直稳定，可以加选项关闭自检以减少开销。
 
 ## 背景
 
-Gigahorse 的输入是 EVM 栈机器，但它输出的 TAC 已经不是原始栈操作。对 evm2llvm 来说，更应该相信这些 facts：
+Gigahorse 的输入是 EVM 栈机器，但它输出的 TAC 已经不是原始栈操作。evm2llvm 应该消费这些 facts：
 
 - `TAC_Def(stmt, var, n)`：语句定义变量。
 - `TAC_Use(stmt, var, n)`：语句使用变量。
 - `PHIIncoming(phiStmt, block, predBlock, var)`：某个 PHI 在某条 predecessor 边上取哪个变量。
 
-这里的 `stackIndex` 是 Gigahorse 内部恢复 PHI 的依据，不应该成为 evm2llvm lowering 的主要模型。evm2llvm 应该消费 TAC 变量和 CFG facts。
+`stackIndex` 是 Gigahorse 内部恢复 PHI 的依据，不应该成为 evm2llvm lowering 的主要模型。evm2llvm 只需要看 TAC 变量和 CFG facts。
 
 ## 当前实现
 
-当前 evm2llvm 是 slot-based：
+当前 lowering 是 slot-based：
 
 ```llvm
 %x.slot = alloca i256
@@ -33,16 +39,22 @@ store i256 %v, ptr %x.slot
 %u = load i256, ptr %x.slot
 ```
 
-当前 PHI 处理已经比旧版本正确：
+当前 PHI 处理已经按真实 CFG 边选择 incoming：
 
-- 对无条件边，在 predecessor terminator 前把 incoming value store 到 phi def slot。
-- 对条件边，必要时插入 `edge.<pred>.to.<succ>` block，只在实际走到这条边时 store。
+- 无条件边：在 predecessor terminator 前把 incoming value store 到 phi def slot。
+- 条件边：必要时插入 `edge.<pred>.to.<succ>` block，只在实际走到这条边时 store。
 
-这保证了 PHI incoming 选择按 CFG 边发生，但 IR 里还没有 native LLVM `phi`。
+这比旧 fallback 正确，但 IR 里还没有 native LLVM `phi`。
+
+SSA-only 后，这套 slot PHI edge-store 逻辑应删除。PHI 应直接是：
+
+```llvm
+%x = phi i256 [ %a, %pred1 ], [ %b, %pred2 ]
+```
 
 ## 关键观察
 
-### 1. TAC var 当前看起来是 SSA def
+### 1. TAC var 当前可以当 SSA def
 
 对 `/tmp/gigahorse-phiincoming-test/long_running/out/TAC_Def.csv` 的观察：
 
@@ -53,7 +65,7 @@ TAC_Def 行数：1667
 
 当前 evm2llvm fixtures 也没有发现同一个 var 被不同 statement 定义多次。
 
-这说明至少当前样本可以按 SSA 风格处理：
+这说明当前样本满足：
 
 ```text
 var -> exactly one defining stmt
@@ -69,7 +81,7 @@ FunctionalBlockInputContents(next, index, var) :-
   LocalBlockEdge(from, next).
 ```
 
-`PHIIncoming.csv` 只是把这层关系导出成 client 可读 facts：
+`PHIIncoming.csv` 把这层关系导出成：
 
 ```text
 phiStmt    phiBlock    predBlock    incomingVar
@@ -77,124 +89,261 @@ phiStmt    phiBlock    predBlock    incomingVar
 
 因此 evm2llvm 不需要从变量名猜 predecessor，也不需要重新理解 stack index。
 
-### 3. slot fallback 仍有价值
+### 3. 可以放弃旧 slot 模式
 
-即使 TAC 当前看起来是 SSA，短期仍保留 fallback 更稳：
+现在目标是新的 evm2llvm 前端，不需要长期兼容 stock Gigahorse docker 的缺失 facts。wrapper 已经会在缺 `PHIIncoming.csv` 时提示。下一步 lowering 可以直接要求 patched Gigahorse facts。
 
-- 旧 Gigahorse / stock docker 可能没有 `PHIIncoming.csv`。
-- 后续真实合约可能暴露 imprecise facts。
-- private call、多返回、side-effect 指令还需要逐步改。
+如果 facts 不满足要求，应该报错并告诉用户缺什么，而不是生成看似通过 verifier 但语义不准的 IR。
 
 ## 目标
 
-短期目标是混合 SSA：
+默认模式只有一个：SSA-only。
 
-- 新增 `ValueMap`：`FactId -> llvm::Value*`。
-- 普通表达式 def 直接写入 `ValueMap`。
-- use 优先从 `ValueMap` 读取。
-- 找不到值时再 fallback 到 slot 或常量。
-- PHI 生成 native LLVM `PHINode`，再视需要 store 回 slot 兼容旧逻辑。
+具体目标：
 
-中期目标是大部分 TAC 变量不再分配 slot：
+1. 普通 scalar TAC var 不建 slot。
+2. `CONST/MOV/ADD/SUB/MUL/...` 直接生成 LLVM value。
+3. `TAC_Use` 从 `ValueMap` 读取。
+4. `PHIIncoming.csv` 生成 native LLVM `PHINode`。
+5. `CALLPRIVATE` 返回值直接绑定到 SSA value。
+6. side-effect 指令继续 emit runtime helper / terminator，但不能把 state effect 当普通 scalar value。
+7. facts 自检失败时直接报错退出。
 
-- 纯表达式、常量、普通 def/use 全走 SSA。
-- private call 返回值走 SSA value / extractvalue。
-- PHI 直接成为 LLVM native phi。
-- slot 只保留给确实需要 fallback 的变量。
+## facts 自检
 
-长期目标是完全移除普通 TAC 变量 slot：
+新增一个独立函数，例如：
 
-- EVM memory/storage/calldata/env 仍作为 runtime state。
-- TAC scalar value 全部是 LLVM SSA value。
+```cpp
+llvm::Error validateSsaFacts(const TacProgram &program);
+```
+
+这个函数只检查 facts 是否满足 SSA-only lowering 的基本前提，不生成 LLVM IR。
+
+检查项：
+
+1. 每个 `TAC_Def` 的 `var` 最多被一个 statement 定义。
+2. 每个 statement 的同一个 def index 不能重复。
+3. 每个非 PHI use 必须能找到 def 或常量。
+4. 每个 `PHIIncoming.phiStmt` 必须存在，对应 statement 必须是 `PHI`。
+5. 每个有 `PHIIncoming` 的 PHI 必须有且只有一个 def。
+6. 每条 `PHIIncoming(predBlock, block)` 必须是 `LocalBlockEdge(predBlock, block)`。
+7. `predBlock` 和 `block` 必须属于同一个 function。
+8. 每个有 `PHIIncoming` 的 PHI，incoming 数量至少覆盖当前函数内进入该 block 的 predecessor 边。
+9. `CALLPRIVATE` 的 actual/formal 参数数量必须匹配。
+10. `RETURNPRIVATE` 的返回数量必须匹配 function return vars。
+
+处理策略：
+
+- 默认启用自检。
+- 自检失败直接返回 `Error`，CLI 打印错误并退出。
+- 后续可以加 `--disable-ssa-fact-checks`，只在性能敏感或确认 facts 来源稳定时关闭。
+
+不要在自检失败时自动退回 slot lowering。这样问题会被隐藏。
+
+## 2026-05-14 评估调整
+
+计划总体方向不需要变：终态仍然是 SSA-only，失败就报错，不保留完整 slot fallback。
+
+需要改进的是前几步的落地边界。`ValueMap` 和普通表达式 SSA 化可以先做，但 native PHI 还没完成时，直接删除全部 slot 会让当前 `PHIIncoming` 用例失去 phi def 的可读值。因此前两步只能作为过渡：
+
+- 普通 TAC scalar 的读写必须优先走 `Values`。
+- `CONST/MOV/ADD/SUB/...` 这类已迁移指令写 def 时必须写入 `Values`。
+- formals 进入函数时也要写入 `Values`。
+- slot 只允许短暂服务于尚未迁移的 PHI edge-store 旧路径，不能作为普通变量的通用 fallback。
+- 如果普通变量既不在 `Values`，也不是常量，应直接报错。
+- native PHI 完成后，删除 PHI edge-store 和这段临时 slot 兼容逻辑。
+
+这样前两步不会提前承诺“已经无 slot”，也不会让 slot fallback 继续掩盖 SSA facts 问题。
 
 ## 技术路线
 
-### 阶段 1：加 SSA ValueMap
+### 阶段 1：建立 ValueMap
 
-在 lowering function 内维护：
+在 function lowering 内维护：
 
 ```cpp
 std::map<FactId, llvm::Value *> Values;
 ```
 
-`loadWord(var)` 改成：
+读取变量：
 
-1. 先查 `Values[var]`。
-2. 再查常量。
-3. 再 fallback slot。
-4. 都没有则报错。
+1. 查 `Values[var]`。
+2. 查 `TAC_Variable_Value` 常量。
+3. 在 native PHI 完成前，只允许 PHI 旧路径读临时 slot。
+4. 查不到就报错。
 
-`storeWord(var, value)` 暂时可以同时：
+普通变量不再从 slot load。
 
-1. `Values[var] = value`
-2. 如 slot 存在，继续 store
+写变量：
 
-这样可以先不破坏旧逻辑。
+1. 确认 `var` 还没有写入 `Values`。
+2. `Values[var] = value`。
+3. 如果重复写，直接报错。
 
-### 阶段 2：native PHI
+普通表达式不再依赖 slot。native PHI 尚未完成前，可以临时 mirror store 到 PHI 旧路径需要的 slot；这只是拆除旧 PHI lowering 前的中间态。
 
-对有 `PHIIncoming` 的 TAC PHI：
+### 阶段 2：普通表达式 SSA lowering
 
-1. 在 phi block 开头创建 LLVM `PHINode`。
-2. 对每条 incoming：
-   - 取 `incomingVar` 对应的 LLVM value。
-   - `phi->addIncoming(value, predBB)`。
-3. `Values[phiDef] = phi`。
-4. 短期可继续 store 到 `phiDef.slot`，方便还没 SSA 化的 use。
+先覆盖当前已经支持的纯 scalar 指令：
 
-这一步完成后，IR 里应出现真实：
+- `CONST`
+- `MOV`
+- `ADD/SUB/MUL`
+- `AND/OR/XOR/NOT`
+- `EQ/LT/GT/SLT/SGT/ISZERO`
+- `DIV/SDIV/MOD/SMOD`
+- `EXP/SIGNEXTEND/BYTE/SHL/SHR/SAR`
+- `SHA3`
+- `MLOAD/SLOAD/CALLDATALOAD/CALLDATASIZE/CALLVALUE/CALLER/TIMESTAMP/GAS/MSIZE`
 
-```llvm
-%x = phi i256 [ %a, %pred1 ], [ %b, %pred2 ]
-```
+规则：
 
-### 阶段 3：普通表达式改为 SSA def
+- 有 def 的表达式必须产生一个 LLVM value。
+- 单 def 写入 `Values[def]`。
+- 多 def 暂时只允许已明确处理的 private call。
+- 没有 def 的纯表达式可以直接忽略或报错，按当前 opcode 语义决定。
 
-对 `ADD/SUB/MUL/MLOAD/CALLVALUE/...` 这些当前返回一个 value 的指令：
+### 阶段 3：native PHI
 
-- lower 后直接 `Values[def] = value`。
-- 不再强制 store 到 slot。
-- 如果后续 fallback 还依赖 slot，可以临时保留 store，等验证稳定后删除。
+PHI 不能等到普通语句顺序 lowering 时才创建。loop header 的 PHI 可能被 loop body 使用。
+
+实现方式：
+
+1. 创建所有 LLVM basic block。
+2. 在普通语句 lowering 前，扫描每个 block 开头的 TAC PHI。
+3. 对每个有 `PHIIncoming` 的 PHI 创建 placeholder `PHINode`。
+4. 立即 `Values[phiDef] = phiNode`。
+5. 普通语句 lowering 完成后，按 `PHIIncoming` 填 `addIncoming(value, predBB)`。
+
+注意：
+
+- 不再插 `edge.<pred>.to.<succ>` block。
+- PHI incoming block 使用真实 LLVM predecessor。
+- 如果后续其它 transform 拆边，必须同步更新 incoming block。第一版先不拆 PHI 边。
 
 ### 阶段 4：private call 多返回 SSA
 
-`CALLPRIVATE` 当前已经能返回 `void`、`i256` 或 struct。SSA 形态应改成：
+`CALLPRIVATE` 当前已经能返回 `void`、`i256` 或 struct。SSA-only 下：
 
-- 单返回：`Values[retVar] = callResult`
-- 多返回：`Values[retVarI] = extractvalue callResult, i`
+- 无返回：只 emit call。
+- 单返回：`Values[retVar] = callResult`。
+- 多返回：`Values[retVarI] = extractvalue callResult, i`。
 
-### 阶段 5：减少 slot
+`ActualReturnArgs.csv` 优先决定 caller 侧 return var。没有或数量不匹配就报错。
 
-当 fixtures 和真实样本验证稳定后：
+### 阶段 5：side-effect 指令
 
-- 不再为所有 TAC vars 创建 alloca。
-- 只为 fallback 需要的变量创建 slot。
-- 或者先保留一个 debug 开关，方便对比 slot/SSA 两种 lowering。
+这些不是普通 scalar 表达式：
+
+- `MSTORE`
+- `MSTORE8`
+- `SSTORE`
+- `CALL`
+- `LOG0..LOG4`
+- `CALLDATACOPY`
+- `RETURN`
+- `REVERT`
+- `STOP`
+- `THROW`
+
+处理规则：
+
+- 有明确 scalar def 的 side-effect 指令才写 `Values`。
+- 没有 scalar def 的只 emit side effect。
+- terminator 仍由 CFG lowering 处理。
+
+### 阶段 6：删除 slot 相关代码
+
+SSA-only 稳定后，删除或大幅收缩：
+
+- 为每个变量创建 `alloca` 的逻辑。
+- `InstructionLowerer` 里的 slot-only `loadWord/storeWord`。
+- PHI edge-store block 逻辑。
+
+如果以后确实需要 slot，只为特定状态建，不再为普通 TAC var 建。
+
+## 代码改动边界
+
+### FactLoader
+
+可以新增基础索引：
+
+- `DefsByVar`
+- `DefByStmtIndex`
+- `StmtById`
+- `BlockByStmt`
+
+这些索引用于 `validateSsaFacts` 和 lowering。
+
+### LlvmLowerer
+
+负责 function-level SSA 状态：
+
+1. 调用 `validateSsaFacts`。
+2. 创建 LLVM function 和 basic block。
+3. 创建 PHI placeholder。
+4. 维护 `Values`。
+5. lowering 普通 statements。
+6. 填 PHI incoming。
+7. lowering terminator。
+
+### InstructionLowerer
+
+终态下 `InstructionLowerer` 不再持有 `slots`。阶段 1/2 过渡时可以继续接收临时 slot map，但接口必须把普通 scalar 的读写收敛到 `ValueMap`，不要让 opcode lowering 直接依赖 slot。
+
+它应该通过一个小接口读写 scalar：
+
+```cpp
+llvm::Expected<llvm::Value *> loadValue(const FactId &var);
+llvm::Error defineValue(const FactId &var, llvm::Value *value);
+```
+
+这样 opcode lowering 不需要知道 facts 索引和 PHI 细节。
+
+## 推进顺序
+
+建议按这个顺序实现：
+
+1. 新增 `validateSsaFacts`，先只检查 def 唯一性、PHIIncoming 边合法性。
+2. 改 `InstructionLowerer` 接口，引入 `ValueMap`，formals 和普通 def 写入 `ValueMap`。
+3. 迁移 `CONST/MOV/ADD/SUB`，只为尚未 native 化的 PHI 保留临时 slot 兼容，确保 fixtures 先过。
+4. 迁移所有当前支持的纯 scalar opcode。
+5. 实现 native PHI，删除 PHI edge-store 逻辑。
+6. 迁移 `CALLPRIVATE` 返回值。
+7. 删除默认变量 slot 创建。
+8. 用 `long_running + PHIIncoming` 验证。
+9. 需要时补 `--disable-ssa-fact-checks`。
 
 ## 风险
 
 1. **dominance 问题**
 
-LLVM SSA value 必须支配所有 uses。Gigahorse TAC 如果有 imprecise CFG 或缺 PHI，native SSA 会比 slot 更容易失败。
+LLVM SSA value 必须支配所有 uses。如果 Gigahorse facts 缺 PHI 或 CFG 不完整，SSA-only 会直接失败。这是预期行为。
 
-2. **旧 facts 兼容**
+2. **旧 Gigahorse facts**
 
-没有 `PHIIncoming.csv` 时，native PHI 不能可靠生成。需要继续支持旧 fallback，并保留 wrapper warning。
+旧 facts 没有 `PHIIncoming.csv`，不能可靠生成 native PHI。SSA-only 应直接报错，提示需要 patched Gigahorse。
 
-3. **插边逻辑和 native PHI 冲突**
+3. **PHI 填充顺序**
 
-当前 edge-store 会插 edge block。native PHI 阶段要明确 incoming block 是原 predecessor 还是拆边后的 block。第一版 native PHI 建议不要为 PHI 再插 edge block。
+loop PHI 需要先创建 placeholder，否则 loop body use 会找不到 value。
 
 4. **side-effect 指令**
 
-`MSTORE/SSTORE/CALL/LOG/RETURN/REVERT` 不是纯表达式。SSA 化时要只把 scalar def 放入 `ValueMap`，不要把 state effect 当普通值。
+不能把 `MSTORE/SSTORE/CALL/LOG/RETURN/REVERT` 的 state effect 当普通 scalar value。只有明确 def 才写入 `ValueMap`。
+
+5. **自检开销**
+
+自检会多扫 facts。当前规模应可接受。后续如果确认 Gigahorse 输出稳定，可以加开关关闭。
 
 ## 判断标准
 
-1. `TAC_Def` 唯一性检查通过：
+1. 自检能明确报错：
 
 ```text
-每个 var 最多一个 defining stmt
+duplicate TAC def for var ...
+missing SSA value for use ...
+PHIIncoming edge is not a LocalBlockEdge ...
 ```
 
 2. 默认 fixtures 通过：
@@ -213,15 +362,12 @@ opt -passes=verify -disable-output /tmp/out.bc
 
 4. IR 中能看到 native LLVM `phi`。
 
-5. 与当前 slot edge-store 版本相比，输出不应更容易 verifier 失败。
+5. 普通 TAC scalar var 不再默认生成 `.slot` alloca。
+
+6. 缺少 `PHIIncoming.csv` 时直接报错，提示需要支持 PHIIncoming 的 Gigahorse。
 
 ## 当前建议
 
-下一步不要直接删除 slot。先做混合 SSA：
+下一步直接实现 SSA-only，不再做 mirror-slot 过渡模式。
 
-```text
-ValueMap 优先，slot fallback 保底。
-```
-
-这样可以验证 Gigahorse TAC 的 SSA 质量，也能保留旧 Gigahorse / stock docker 的可用性。等 native PHI 和普通表达式 SSA 都稳定后，再逐步减少 slot。
-
+先落地 `validateSsaFacts` 和 `ValueMap`，让错误尽早暴露。只要 Gigahorse facts 一直满足当前观察到的条件，SSA-only 路线比继续维护 slot fallback 更简单，也更符合 TAC 的设计。
