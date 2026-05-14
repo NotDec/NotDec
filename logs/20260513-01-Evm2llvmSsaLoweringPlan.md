@@ -430,3 +430,50 @@ ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
 1. 处理 native PHI 前，先确认 `PHIIncoming` 同一 `phiStmt + edge` 多 incoming var 的真实语义。
 2. 实现 native PHI placeholder 和 `addIncoming`。
 3. 删除 PHI edge-store、`loadPhiEdgeWord`、临时 PHI slot。
+
+## 2026-05-14 实现记录：阶段 3 输出 native PHI
+
+阶段 3 做了调整：没有直接用 `PHIIncoming` 生成 `PHINode::addIncoming`。真实 `long_running` 里，`PHIIncoming` 的 incoming var 不一定支配 predecessor 末尾，直接 `addIncoming(value, pred)` 会被 LLVM verifier 拒绝。旧 edge-store 语义是正确的中间表示，所以本次保留 edge-store 作为构造步骤，再用 LLVM `PromoteMemToReg` 生成最终 native PHI。
+
+改动文件和函数：
+
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:12`：新增 `DominatorTree`、`BasicBlockUtils`、`PromoteMemToReg` 相关 include。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:110`：新增 `promotePhiSlotsToSsa`，收集可提升的 PHI 临时 alloca 并调用 `PromoteMemToReg`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:125`：新增 `mergePhiEdgeBlocks`，mem2reg 后合并 `edge.*` 空跳转块。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:445`：临时 alloca 名字改为变量名本身，不再带 `.slot` 后缀，避免 mem2reg 后残留 `.slot` 名字。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:472`：函数 lowering 结束后调用 `promotePhiSlotsToSsa` 和 `mergePhiEdgeBlocks`。
+
+实现中调整：
+
+- 直接 native PHI 方案试过，但 `long_running` 会报 dominance 错误，例如 incoming value 定义在并不支配 predecessor 的 block 中。
+- 当前方案仍使用 `PHIIncoming` 决定 edge-store 的值，之后交给 mem2reg 构造合法 SSA PHI。输出效果满足 native PHI 目标，同时保留旧 edge-store 的边语义。
+- 源码里暂时还有 `loadPhiEdgeWord` 和 PHI 临时 slot，因为它们是 mem2reg 前的构造步骤。最终输出 IR 不再保留这些 slot。
+
+验证：
+
+```bash
+cmake --build build-evm2llvm --target evm2llvm -j4
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+/usr/bin/time -p ./build-evm2llvm/bin/evm2llvm --facts /tmp/gigahorse-phiincoming-test/long_running/out --output /tmp/notdec-evm2llvm-long-running.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-evm2llvm-long-running.ll -o /tmp/notdec-evm2llvm-long-running.bc
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output /tmp/notdec-evm2llvm-long-running.bc
+```
+
+结果：
+
+- `evm2llvm.fixture`：12/12 passed。
+- `long_running`：emit、assemble、verify 通过。
+- `long_running` emit 时间：`real 0.12s, user 0.12s, sys 0.00s`。
+- `/tmp/notdec-evm2llvm-long-running.ll` 中 `phi` 数量为 61。
+- 输出中未发现 `.slot`、`alloca i256`、`edge.*`。
+
+当前方案评分：
+
+- 实现效果：8/10。输出达成 native PHI，fixtures 和 long_running 都过。
+- 复杂度：7/10。比直接 `addIncoming` 多了一步 mem2reg，但这是当前 facts 语义下更稳的做法。
+- 维护成本：6/10。后续如果 Gigahorse 导出的是真正 predecessor-local incoming value，可以再改成直接建 PHI；在当前 facts 下不建议强行直接化。
+
+下一步：
+
+1. 迁移 `CALLPRIVATE` 多返回的覆盖测试，确认 `ActualReturnArgs` 路径。
+2. 收紧缺失 `PHIIncoming.csv` 的行为，按 SSA-only 要求报错或至少在含 PHI 时失败。
