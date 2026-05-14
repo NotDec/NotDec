@@ -545,3 +545,70 @@ rm /tmp/evm2llvm-missing-phiincoming/PHIIncoming.csv
 - 阶段 4 多返回 private call 已有覆盖。
 - 阶段 5 side-effect 指令仍沿用当前 helper lowering，`CALL` 的 scalar def 已走 `Values`。
 - 阶段 6 还未做源码层面的 PHI 临时 slot 删除；当前用它作为 mem2reg 输入，最终输出 IR 已无 slot。
+
+## 2026-05-14 实现记录：源码层面原生 PHI
+
+这次重新评估后，阶段 3 的判断更新：Gigahorse 侧已经补齐 `PHIIncoming` 的唯一缺口，`long_running` 的 PHI incoming 已能一条 predecessor 对一条 incoming。因此 evm2llvm 不再需要先建 PHI slot 再走 `PromoteMemToReg`，可以直接生成 LLVM `PHINode`。
+
+改动文件和函数：
+
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/InstructionLowerer.h:28`：`InstructionLowerer` 注释改为纯 SSA value 模型，构造函数不再接收 PHI slot。
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/InstructionLowerer.h:39`：删除 `loadPhiEdgeWord` / `storeWord`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:23`：构造函数删除 `Slots` 成员。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:43`：`loadWord` 只读 `Values` 或常量，缺失直接报错。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:58`：`defineWord` 只写 `Values`，重复 def 报错。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:78`：新增 `terminalStatement`，跳过 PHI 找真实 terminator，修复 PHI id 排序导致的 `ret void` 错误。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:117`：新增 `PhiNodeMap`，用 PHI statement id 关联 LLVM `PHINode`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:128`：新增 `valueForPhiIncoming`，PHI incoming 可来自已降低 SSA value 或常量。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:144`：新增 `fillPhiIncoming`，按 `PHIIncoming.csv` 调 `PHINode::addIncoming`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:230`：普通 CFG 分支直接跳真实 successor，不再插 `edge.*` block。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:401`：普通语句 lowering 前预创建所有有 incoming 的 PHI placeholder，并写入 `Values[phiDef]`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:452`：所有 block lowering 完成后填 PHI incoming。
+- `external/NotDec-evm2llvm/lib/SsaFactValidator.cpp:26`：记录每个 block 的 predecessor 和每个 PHI 的 incoming predecessor。
+- `external/NotDec-evm2llvm/lib/SsaFactValidator.cpp:90`：拒绝同一个 PHI 从同一个 predecessor 重复 incoming。
+- `external/NotDec-evm2llvm/lib/SsaFactValidator.cpp:123`：检查每个 PHI 的 incoming predecessor 必须和当前函数内 CFG predecessor 完全一致。
+
+实现中调整：
+
+- 之前 direct PHI 失败的核心原因不是 LLVM PHI 本身，而是 Gigahorse 少导出 `0x1078B0x1068B0xeee -> 0x107eB0x1078B0x1068B0xeee` 这一条 incoming。Gigahorse 修复后，这条边现在生成：
+
+```llvm
+%_0x107e_0x0V0x1078V0x1068V0xeee = phi i256
+  [ %_0x1068_0x1V0xeee, %bb._0x1078B0x1068B0xeee ],
+  [ %evm.add68, %bb._0x1087B0x1078B0x1068B0xeee ]
+```
+
+- `long_running` 里还有一个无关旧问题：block `0x784` 同时有 `THROW` 和同地址 PHI，旧代码用排序后的 `block.Statements.back()` 判断 terminator，会误把 PHI 当尾语句，导致返回 `i256` 的函数里生成 `ret void`。现在改成取最后一条非 PHI statement。
+- 源码层面已删除 PHI 临时 slot、edge-store、`PromoteMemToReg`、`edge.*` block 合并逻辑。
+
+验证：
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE
+cmake --build build -j4
+ctest --test-dir build --output-on-failure
+build/bin/evm2llvm --facts /tmp/gigahorse-phi-postprocess-test/long_running/out --output /tmp/evm2llvm-long-running-native-phi.ll --module-name long_running
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/evm2llvm-long-running-native-phi.ll -o /tmp/evm2llvm-long-running-native-phi.bc
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output /tmp/evm2llvm-long-running-native-phi.bc
+build/bin/evm2llvm --facts /tmp/gigahorse-souffle241-addon64-test/long_running/out --output /tmp/evm2llvm-long-running-native-phi-unrepaired.ll --module-name long_running
+/usr/bin/time -p build/bin/evm2llvm --facts /tmp/gigahorse-phi-postprocess-test/long_running/out --output /tmp/evm2llvm-long-running-native-phi-time.ll --module-name long_running
+```
+
+结果：
+
+- `ctest`：15/15 passed。
+- 修复后的 `long_running`：emit、assemble、verify 通过。
+- 未修复 Gigahorse facts 的 `long_running`：按预期失败，错误为 `PHIIncoming missing predecessor for PHI 0x107e_0x0S0x1078S0x1068S0xeee from 0x1078B0x1068B0xeee`。
+- `long_running` emit 时间：`real 0.13s, user 0.11s, sys 0.01s`。
+- 输出 IR 未发现 `alloca` 或 `edge.*`。
+
+当前方案评分：
+
+- 实现效果：9/10。源码和输出都是真正 native PHI，真实样例通过 verifier。
+- 复杂度：8/10。删除 mem2reg 后路径更直接，但更依赖 Gigahorse `PHIIncoming` 完整性；validator 已提前兜住。
+- 维护成本：8/10。后续主要维护 `PHIIncoming` fact 质量，不再维护 slot/mem2reg 双路径。
+
+下一步：
+
+1. 把 Gigahorse `PHIIncoming` 补边修复纳入固定测试或生成流程，避免回退到缺边 facts。
+2. 再跑更多真实合约，确认 `terminalStatement` 对 PHI/terminator 同地址的处理没有其它边界问题。
