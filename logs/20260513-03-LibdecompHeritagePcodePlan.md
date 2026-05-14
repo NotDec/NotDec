@@ -902,3 +902,92 @@ cmake --build /tmp/notdec-bin2llvm-build-sleigh \
 复杂度：5/10。新增逻辑基本是直接映射 LLVM 指令或 intrinsic。
 
 维护成本：6/10。后续主要风险仍是 schema，而不是这些单 op lowering。
+
+## 实现记录（2026-05-14，指针和 bit range op）
+
+这次继续补 heritage lowering 中常见的内部 op，仍不改 schema。
+
+### 已完成
+
+1. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:200`
+   - 新增 `constInput(...)`，统一读取必须是常量的 op 输入。
+2. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:228`
+   - 新增 `lowerCopyLike(...)`。
+   - `CAST` 和 `INDIRECT` 第一版按 copy/resize 处理。
+3. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:491`
+   - 新增 `lowerPtrAdd(...)`。
+   - `PTRADD(base, index, elementSize)` 降成 `base + index * elementSize`。
+4. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:511`
+   - 新增 `lowerPtrSub(...)`。
+   - `PTRSUB(base, offset)` 降成 `base + offset`。
+5. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:528`
+   - 新增 `lowerInsert(...)`。
+   - 按 bit offset 和 bit size 生成 clear/mask/shift/or。
+6. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:561`
+   - 新增 `lowerExtract(...)`。
+   - 支持 `EXTRACT`、`ZPULL`、`SPULL`，其中 `SPULL` 做符号扩展。
+7. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:817`
+   - `lowerOp(...)` 接入 `CAST`、`INDIRECT`。
+8. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:866`
+   - `lowerOp(...)` 接入 `PTRADD`、`PTRSUB`、`INSERT`、`EXTRACT`、`ZPULL`、
+     `SPULL`。
+
+### 验证
+
+构建：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build-sleigh \
+  --target notdec-heritage-check notdec-heritage-llvm -j4
+```
+
+临时 JSON 样例 `structops`：
+
+```bash
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+  /tmp/notdec-heritage-structops.json
+/tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-structops.json -o /tmp/notdec-heritage-structops.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-structops.ll -o /tmp/notdec-heritage-structops.bc
+```
+
+结果：通过。样例覆盖 `CAST`、`PTRADD`、`PTRSUB`、`INSERT`、`EXTRACT`、
+`SPULL`、`INDIRECT`。输出 IR 包含 `mul/add` 指针算术、bit range mask/shift、
+`ashr` 符号扩展。
+
+同时回归：
+
+```bash
+for name in sample loadp storep divmix udivmix bitops structops; do
+  /tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-check \
+    /tmp/notdec-heritage-${name}.json
+  /tmp/notdec-bin2llvm-build-sleigh/bin/notdec-heritage-llvm \
+    /tmp/notdec-heritage-${name}.json -o /tmp/notdec-heritage-${name}.ll
+  /sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+    /tmp/notdec-heritage-${name}.ll -o /tmp/notdec-heritage-${name}.bc
+done
+```
+
+结果：全部通过。
+
+### 当前限制
+
+1. `INDIRECT` 现在只是 copy-like，不表达间接副作用屏障。
+2. `PTRADD/PTRSUB` 仍只是整数地址运算，没有真实 pointer type、object base 或 field
+   metadata。
+3. `INSERT/EXTRACT` 暂按 little-endian bit numbering 理解；如果 Ghidra 对某些
+   address space 使用 big-endian bitfield，需要 schema 带 endian 信息后再修。
+4. 仍未支持 `BRANCHIND`、`CALLIND`、`CALLOTHER`、`SEGMENTOP`、`CPOOLREF`、
+   `NEW` 和 floating-point op。
+
+### 评分
+
+实现效果：7/10。当前整数、指针算术和 bit range op 覆盖面已经能支撑更多
+HighFunction 小样例。
+
+复杂度：6/10。实现仍是局部 lowering，但 `INDIRECT` 和 bitfield endian 已经开始
+依赖更准的语义信息。
+
+维护成本：6/10。下一步继续补 op 前，最好先让导出 schema 带 pointer 宽度、
+address space endian 和 call prototype。
