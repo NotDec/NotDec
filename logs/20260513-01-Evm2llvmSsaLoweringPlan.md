@@ -505,3 +505,43 @@ rg -n "private.call|extractvalue|ret.insert" build-evm2llvm/test/private_call_mu
 性能说明：
 
 - 本次只新增 evm2llvm fixture，不改变主链路性能。
+
+## 2026-05-14 实现记录：缺 PHIIncoming 时失败
+
+本次收紧了旧 Gigahorse facts 的处理：如果 facts 中有 TAC `PHI`，但没有 `PHIIncoming.csv`，自检直接失败。没有 PHI 的简单 fixture 不受影响。
+
+改动文件和函数：
+
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/TacProgram.h:67`：新增 `HasPhiIncomingFacts`。
+- `external/NotDec-evm2llvm/lib/FactLoader.cpp:180`：加载 facts 时记录 `PHIIncoming.csv` 是否存在。
+- `external/NotDec-evm2llvm/lib/SsaFactValidator.cpp:40`：扫描 TAC `PHI`。
+- `external/NotDec-evm2llvm/lib/SsaFactValidator.cpp:62`：有 PHI 但缺 `PHIIncoming.csv` 时返回错误。
+- `external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py:127`：wrapper warning 不再说会使用旧 slot fallback。
+
+验证：
+
+```bash
+cmake --build build-evm2llvm --target evm2llvm -j4
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+rm -rf /tmp/evm2llvm-missing-phiincoming
+cp -a external/NotDec-evm2llvm/test/fixtures/phi_branch /tmp/evm2llvm-missing-phiincoming
+rm /tmp/evm2llvm-missing-phiincoming/PHIIncoming.csv
+./build-evm2llvm/bin/evm2llvm --facts /tmp/evm2llvm-missing-phiincoming --output /tmp/evm2llvm-missing-phiincoming.ll
+/usr/bin/time -p ./build-evm2llvm/bin/evm2llvm --facts /tmp/gigahorse-phiincoming-test/long_running/out --output /tmp/notdec-evm2llvm-long-running.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-evm2llvm-long-running.ll -o /tmp/notdec-evm2llvm-long-running.bc
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output /tmp/notdec-evm2llvm-long-running.bc
+```
+
+结果：
+
+- `evm2llvm.fixture`：15/15 passed。
+- 缺 `PHIIncoming.csv` 的 `phi_branch` 负例按预期失败，错误为：`missing PHIIncoming.csv; SSA-only PHI lowering requires Gigahorse facts with predecessor-specific PHI inputs`。
+- `long_running`：emit、assemble、verify 通过，emit 时间 `real 0.13s, user 0.11s, sys 0.01s`。
+
+当前进度：
+
+- 阶段 1/2 已完成。
+- 阶段 3 输出 native PHI 已完成。
+- 阶段 4 多返回 private call 已有覆盖。
+- 阶段 5 side-effect 指令仍沿用当前 helper lowering，`CALL` 的 scalar def 已走 `Values`。
+- 阶段 6 还未做源码层面的 PHI 临时 slot 删除；当前用它作为 mem2reg 输入，最终输出 IR 已无 slot。
