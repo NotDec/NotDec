@@ -180,3 +180,78 @@ cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-llvm notdec-he
 复杂度：5/10。改动集中在函数级 lowering，新增 pending PHI，但没有引入支配树或全局数据流。
 
 维护成本：5/10。`PendingPhi` 是局部机制，后续如果要做更严格 dominance 检查，可以继续接在 `finalizePendingPhis(...)`。
+
+## 2026-05-15 补充：poison fallback warning
+
+问题：
+
+上一轮 unknown PHI incoming 会用 typed poison 兜底，但没有 warning。类似的 poison 兜底还有未初始化 varnode、无法在
+predecessor edge 上 resize PHI incoming、无 successor 的非 void `BRANCHIND`、无 successor 的非 void fallthrough return。
+
+改动：
+
+1. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`
+   - 第 35 行新增 `printPoisonFallbackWarning(...)`。
+   - 第 251 行新增 `HeritageLowerer::warnPoisonFallback(...)`，同一个函数内相同原因只打印一次，避免重复读同一未知输入时刷屏。
+   - 第 348 行 `read(...)`：未初始化 varnode 走 `freeze poison` 前打印 warning。
+   - 第 1101 行 `resizeForPhiIncoming(...)`：PHI incoming 常量无法 resize 成目标类型时打印 warning。
+   - 第 1107 行 `resizeForPhiIncoming(...)`：predecessor 没 terminator，无法在 edge 上插 cast 时打印 warning。
+   - 第 1132 行 `readPhiIncoming(...)`：PHI incoming varnode 不可用，使用 typed poison 前打印 warning。
+   - 第 1334 行 `lowerBranch(...)`：无 successor 的非 void `BRANCHIND` 返回 poison 前打印 warning。
+   - 第 1482 行 `lowerBlock(...)`：无 successor 的非 void fallthrough 返回 poison 前打印 warning。
+
+验证：
+
+1. 编译：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-llvm notdec-heritage-module-llvm -j4
+```
+
+2. PHI unknown incoming fixture：
+
+把 `/tmp/notdec-heritage-sample.json` 的 `MULTIEQUAL` 第二个 incoming 改成不存在的 `vn:missing`。
+
+```bash
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-phi-poison.json \
+  -o /tmp/notdec-heritage-phi-poison.ll \
+  2>/tmp/notdec-heritage-phi-poison.warn.log
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-phi-poison.ll \
+  -o /tmp/notdec-heritage-phi-poison.bc
+```
+
+warning：
+
+```text
+Warning: heritage lowering uses poison fallback in branchy: PHI incoming varnode is unavailable: vn:missing
+```
+
+3. 模块 smoke：
+
+```bash
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /tmp/notdec-heritage-module-smoke.json \
+  -o /tmp/notdec-heritage-module-smoke-warn.ll \
+  2>/tmp/notdec-heritage-module-smoke.warn.log
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-module-smoke-warn.ll \
+  -o /tmp/notdec-heritage-module-smoke-warn.bc
+```
+
+会对输入 varnode 的 `freeze poison` 打 warning。重复读同一个 varnode 只打印一次。
+
+4. 正常 `branchy` 样例：
+
+```bash
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-llvm \
+  /tmp/notdec-heritage-sample.json \
+  -o /tmp/notdec-heritage-sample.warn.ll \
+  2>/tmp/notdec-heritage-sample.warn.log
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-heritage-sample.warn.ll \
+  -o /tmp/notdec-heritage-sample.warn.bc
+```
+
+无 warning。
