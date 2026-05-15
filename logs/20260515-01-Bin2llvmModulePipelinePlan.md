@@ -545,6 +545,122 @@ declare i32 @printf(...)
 
 维护成本：6/10。单函数 schema 保留，模块函数复用单函数结构，后续阶段 4 可以在这个边界上继续填 body。
 
+## 2026-05-15 实施记录：阶段 4 已完成
+
+本次在模块工具里接入函数体 lowering。仍然不修具体 opcode、控制流或 PHI 问题，只做失败隔离。
+
+已改文件：
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/HeritageToLLVM.h`
+   - 第 20 行新增 `HeritageModuleLoweringFailure`。
+   - 第 26 行新增 `HeritageModuleLoweringStats`。
+   - 第 42 行新增 `buildHeritageModuleWithBodies(...)`。
+2. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`
+   - 第 135 行新增 `HeritageModuleSymbolPlan`，保存内部函数名、外部函数名、入口地址到 LLVM 符号名的映射。
+   - 第 142 行 `planModuleSymbols(...)`：统一规划模块内符号名，避免 declaration 和 body lowering 各自生成不同名字。
+   - 第 165 行 `resolveCallTargetName(...)`：CALL lowering 先按入口地址解析内部函数，再按名字解析内部或外部函数。
+   - 第 186 行 `declareInternalFunction(...)`：复用内部函数 declaration 创建逻辑。
+   - 第 206 行 `HeritageLowerer(...)`：支持传入已有 LLVM function，让模块级 lowering 能填充已创建的 declaration。
+   - 第 1434 行 `buildHeritageModuleWithBodies(...)`：先创建所有内部、外部 declaration，再逐个 lower `status == "ok"` 的函数体；lowering 或 `verifyFunction` 失败时删除半成品 body，恢复成 declaration，并记录失败。
+3. `external/NotDec-bin2llvm/tools/notdec-heritage-module-llvm.cpp`
+   - 第 16 行 `CliOptions` 新增 `DeclarationsOnly`。
+   - 第 28 行 `parseArgs(...)` 支持 `--declarations-only`。
+   - 第 66 行 `main(...)` 默认调用 `buildHeritageModuleWithBodies(...)`，并输出内部 declaration 数、外部 declaration 数、成功 body 数和失败 body 数。
+4. `external/NotDec-bin2llvm/ghidra_scripts/README.md`
+   - 第 63 行补充说明：模块 LLVM 工具默认填 body，单函数失败会恢复 declaration。
+   - 第 69 行补充 `--declarations-only` 用法。
+
+验证：
+
+1. 编译：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-module-check notdec-heritage-module-llvm notdec-heritage-check notdec-heritage-llvm -j4
+```
+
+2. 正常 body smoke：
+
+```bash
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /tmp/notdec-heritage-module-smoke.json \
+  -o /tmp/notdec-heritage-module-smoke-body.ll
+```
+
+输出：
+
+```text
+heritage module lowering
+  internal declarations: 2
+  external declarations: 1
+  lowered function bodies: 2
+  failed function bodies: 0
+```
+
+`/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-heritage-module-smoke-body.ll -o /tmp/notdec-heritage-module-smoke-body.bc` 通过。
+
+3. declaration-only 回归：
+
+```bash
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /tmp/notdec-heritage-module-smoke.json \
+  -o /tmp/notdec-heritage-module-smoke-decls.ll \
+  --declarations-only
+```
+
+`/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-heritage-module-smoke-decls.ll -o /tmp/notdec-heritage-module-smoke-decls.bc` 通过。
+
+4. 失败隔离 smoke：把第二个函数的第一个 opcode 改成 `BADOP` 后运行模块 lowering。
+
+输出：
+
+```text
+heritage module lowering
+  internal declarations: 2
+  external declarations: 0
+  lowered function bodies: 1
+  failed function bodies: 1
+  failure: badops ram:00005000: unsupported heritage opcode: BADOP
+```
+
+生成 IR 里 `structops` 是 `define`，`badops` 保留为 `declare`：
+
+```llvm
+define i32 @structops() {
+  ...
+}
+
+declare i32 @badops()
+```
+
+`/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-heritage-module-isolate-smoke.ll -o /tmp/notdec-heritage-module-isolate-smoke.bc` 通过。
+
+5. 旧单函数工具回归：
+
+```bash
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-check /tmp/notdec-heritage-structops.json
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-llvm /tmp/notdec-heritage-structops.json -o /tmp/notdec-heritage-structops-old.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-heritage-structops-old.ll -o /tmp/notdec-heritage-structops-old.bc
+```
+
+均通过。
+
+注意：
+
+1. `external/NotDec-bin2llvm` 当前 CMake 找到的是 LLVM 22.1.0。body IR 里会出现 LLVM 22 打印的 intrinsic attributes，系统 `/usr/bin/llvm-as` 是 LLVM 14，不能作为这个子项目的同口径验证工具。
+2. 当前环境没有 `analyzeHeadless`，所以仍未跑真实 Ghidra headless / Bench2。
+
+性能：
+
+这次仍只影响 `external/NotDec-bin2llvm`，没有接 NotDec 主 pass pipeline，不跑 `fortune.o3.wasm.ll` 同口径性能。Bench2 计时要等有 Ghidra 环境后做。
+
+阶段评分：
+
+实现效果：8/10。模块里现在能同时包含成功 lowering 的 `define` 和失败保留的 `declare`，满足阶段 4 的核心目标。
+
+复杂度：6/10。新增了模块符号规划和 per-function 失败隔离，但没有碰 opcode 细节，复杂度还可控。
+
+维护成本：6/10。模块 lowering 复用原 `HeritageLowerer`，后续修控制流问题时仍集中在原函数级 lowering 内。
+
 ## 风险
 
 1. Ghidra 对大 ELF 的 auto-analysis 时间很长，`vim` 已经出现 6 分钟仍未进入导出脚本。
