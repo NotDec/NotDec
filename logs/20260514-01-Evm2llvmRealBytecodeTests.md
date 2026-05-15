@@ -153,7 +153,9 @@ Gigahorse 首次运行会编译 Souffle 程序，不应计入样本分析时间�
 
 1. Gigahorse 接 apehex runtime bytecode 没有明显问题，首次慢主要是 Souffle 编译缓存。
 2. evm2llvm 当前 opcode 覆盖不足，`DELEGATECALL` 是最先暴露的真实链上高频缺口。
-3. 即使 evm2llvm 不崩溃，也可能生成 LLVM 14 不接受的 IR；`04_small` 是一个最小回归样本。
+3. `04_small` 用 pilot 脚本里的 `/usr/bin/llvm-as` 失败，是因为系统工具还是 LLVM 14；
+   当前项目应使用 `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as`。用 LLVM 22 复查后该样本
+   `llvm-as` 和 `opt -passes=verify` 均通过。
 4. 后续应该先补 `DELEGATECALL`，再把 wrapper 失败日志改成保留 evm2llvm stderr 的第一条真实错误，
    否则大批量统计会被 `CalledProcessError` 淹没。
 
