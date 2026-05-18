@@ -661,6 +661,51 @@ declare i32 @badops()
 
 维护成本：6/10。模块 lowering 复用原 `HeritageLowerer`，后续修控制流问题时仍集中在原函数级 lowering 内。
 
+## 2026-05-17 实施记录：真实 Bench2 小模块验证
+
+本次没有改 bin2llvm 代码，只用 Bench2 真实二进制验证模块级链路，并补充根上下文。
+
+已改文件：
+
+1. `AGENTS.md`
+   - 第 73 行：把 `external/NotDec-bin2llvm` 补进 external 子模块说明。
+   - 第 172 行：把 `external/NotDec-bin2llvm/` 补进高频目录。
+   - 第 187 行新增 `Bench2 与近期目标`：记录 `/sn640/NotDec-Exp/Bench2` 的 `rootfs/`、`manifest/`、`bin2llvm-ir/`，并明确 B2 / L / LVM 近期目标是围绕 Bench2 真实项目生成语义正确的 LLVM IR，`llvm-as` 通过只是底线。
+
+真实项目验证：
+
+1. `vsftpd`
+   - 输入：`/sn640/NotDec-Exp/Bench2/rootfs/usr/sbin/vsftpd`
+   - 产物：`/sn640/NotDec-Exp/Bench2/bin2llvm-ir/vsftpd/module-limit5.{json,ll,bc,ghidra.log,check.log,lower.log,llvm-as.log}`
+   - Ghidra：attempted 5，succeeded 5，failed 0，external 95；analysis 9s，导出 4467ms，`/usr/bin/time -p real 21.24s`
+   - checker：functions 5，externals 95，failures 0，direct calls 240，resolved external calls 240，unknown calls 0，`real 10.67s`
+   - lowering：internal declarations 5，external declarations 95，lowered bodies 5，failed bodies 0，`real 11.01s`
+   - `llvm-as`：`/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as` 通过，`real 0.57s`
+   - 注意：lower 日志里有 95 条 poison fallback，主要来自 `FUN_00106740` 的 uninitialized varnode 和 PHI incoming 缺值。这个结果说明模块结构能跑通，但 `vsftpd` 语义还不能算对。
+2. `libuv`
+   - 输入：`/sn640/NotDec-Exp/Bench2/rootfs/usr/lib/x86_64-linux-gnu/libuv.so.1.0.0`
+   - 产物：`/sn640/NotDec-Exp/Bench2/bin2llvm-ir/libuv/module-limit5.{json,ll,bc,ghidra.log,check.log,lower.log,llvm-as.log}`
+   - Ghidra：attempted 5，succeeded 5，failed 0，external 2；analysis 10s，导出 242ms，`/usr/bin/time -p real 16.64s`
+   - checker：functions 5，externals 2，failures 0，direct calls 4，resolved external calls 4，unknown calls 0，`real 0.02s`
+   - lowering：internal declarations 5，external declarations 2，lowered bodies 5，failed bodies 0，`real 0.04s`
+   - `llvm-as`：`/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as` 通过，`real 0.02s`
+   - lower 日志没有 poison fallback。
+
+当前判断：
+
+1. 阶段 4 的真实 Bench2 小模块验证已经开始，`vsftpd` 和 `libuv` 都能生成模块级 `.ll/.bc`。
+2. `libuv` 小样例更干净，可以作为下一轮快速回归样例。
+3. `vsftpd` 暴露了下一步真正要修的语义问题：不能长期用 poison fallback 掩盖 uninitialized varnode / PHI incoming 缺值。
+4. 当前只影响 `external/NotDec-bin2llvm` 和文档上下文，没接 NotDec 主 pass pipeline，不跑 `fortune.o3.wasm.ll` 同口径性能。
+
+阶段评分：
+
+实现效果：8/10。真实项目能生成可汇编的模块级 IR，但 `vsftpd` 已经显示语义正确性还没到位。
+
+复杂度：3/10。本次没有新增 bin2llvm 代码，只补上下文并跑真实验证。
+
+维护成本：4/10。新增上下文能减少后续找 Bench2 路径和目标的成本；后续主要维护压力在 poison fallback 和 PHI 语义修复。
+
 ## 风险
 
 1. Ghidra 对大 ELF 的 auto-analysis 时间很长，`vim` 已经出现 6 分钟仍未进入导出脚本。

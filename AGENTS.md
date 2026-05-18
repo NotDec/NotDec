@@ -50,10 +50,10 @@ The test: Every changed line should trace directly to the user's request.
    `dec` 配置入手；启动时必须显式选择具体配置，并先把参数改到当前要反编译的
    IR。
 2. 代码一定要多写注释，特别是新引入的数据结构前，说明背后的设计理念。
-3. 工作流程：收到需求 -> 思考后告诉用户打算怎么更改 -> 讨论一致后再开始实现 -> 实现完后再写文档到logs/
+3. 工作流程：收到需求 -> 思考后告诉用户打算怎么更改 -> 讨论一致后再开始实现。复杂代码修改实现完后再写文档到 `logs/`；简单文档修改、注释修改、错别字修正不需要写日志。
 4. 写修改日志时，必须明确指出修改了哪个文件的哪一行，涉及哪些函数。
 5. 尽量复用并改进之前的日志，最好每个功能都单独一个日志。
-6. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和性能结果。最后，需要从实现效果，复杂度（增加其他人对项目的理解成本），后期维护成本等角度对当前的方案打分，同时思考有没有更好的方案。
+6. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和性能结果。只有复杂代码修改需要从实现效果、复杂度（增加其他人对项目的理解成本）、后期维护成本三个角度评分，并思考有没有更好的方案。
 7. 如果当前的任务是对之前的plan日志的实现，则不需要单独创建日志，而是将实现情况写入之前的计划日志，比如将计划的步骤在标题中标记为已完成，记录实现细节，以及调整计划时考虑不全而实现时有所改变的部分。同时也不要使得日志文件过于冗长，简洁一些，包括语言风格上，以及没有真正实现，或者试错的思路都尽量简写。
 8. 每次改动后都要关注是否造成性能下降。涉及类型恢复、结构体合并、pointer analysis、pass pipeline 时，至少对比 fortune 当前关注用例的同口径运行时间。
 9. evm2llvm 的 PHI 修复不能退回旧的 slot 模式 + mem2reg 思路。遇到 `PHIIncoming`
@@ -70,7 +70,8 @@ workdir `/tmp/notdec-fortune-structmerge-hlayout-final`，
 
 ## 1. Git 与 external/ 子模块
 
-`external/NotDec-wasm2llvm`、`external/NotDec-llvm2c`、`external/binarysub`
+`external/NotDec-bin2llvm`、`external/NotDec-wasm2llvm`、
+`external/NotDec-llvm2c`、`external/binarysub`
 都是 git submodule。检查工作树时注意区分：
 
 - 顶层 `git status --short`
@@ -168,6 +169,8 @@ workdir `/tmp/notdec-fortune-structmerge-hlayout-final`，
   - decompilation / recovery pass
 - `external/NotDec-wasm2llvm/`
   - wasm/wat 前端
+- `external/NotDec-bin2llvm/`
+  - ELF / shared object 到 LLVM IR 的二进制前端
 - `external/NotDec-llvm2c/`
   - C backend
 - `external/binarysub/`
@@ -181,7 +184,28 @@ workdir `/tmp/notdec-fortune-structmerge-hlayout-final`，
 - `scripts/`
   - 调试、LLVM、可视化辅助脚本
 
-## 6. 构建
+## 6. Bench2 与近期目标
+
+Bench2 真实项目集合在 `/sn640/NotDec-Exp/Bench2`：
+
+- `rootfs/`：已收集的真实项目二进制和依赖。
+- `manifest/benchmark-targets.tsv`：当前选中的 ELF / shared object 目标。
+- `manifest/benchmark-needed.tsv`：目标的动态依赖。
+- `bin2llvm-ir/`：bin2llvm 相关 JSON、`.ll`、`.bc`、日志和 Ghidra project。
+
+B2 / L / LVM 近期共同目标：围绕 Bench2 这些真实项目生成 LLVM IR，并且语义要对。
+“能被 `llvm-as` 接受”只是底线，不能代替语义正确。
+
+当前按本仓库目录理解：
+
+- B2：`external/NotDec-bin2llvm`，目标是从 ELF / shared object 生成模块级 LLVM IR。
+- LVM：`external/NotDec-wasm2llvm`，目标是从 wasm/wat 生成语义正确的 LLVM IR。
+- L：主链路里消费和继续处理 LLVM IR 的部分，包括 NotDec pass pipeline 和后端联调。
+
+做 Bench2 相关验证时，优先用小目标快速跑通，例如 `vsftpd`、`libuv`、`memcached`。
+大目标如 `vim`、`python`、`ffmpeg` 要记录 Ghidra analysis 时间、导出时间、lowering 时间和失败原因。
+
+## 7. 构建
 
 当前仓库依赖本地 LLVM 22，默认布局是：
 
@@ -206,7 +230,7 @@ cmake --build ./build --target all
 
 - `build/bin/notdec`
 
-## 7. 运行与调试
+## 8. 运行与调试
 
 调试前先读仓库根目录的 `DEBUG.md`。本文件只保留最小结论，workdir 产物和
 调试文件清单统一以 `DEBUG.md` 为准。
@@ -240,7 +264,7 @@ cmake --build ./build --target all
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=/tmp/notdec-work
 ```
 
-## 8. 测试
+## 9. 测试
 
 测试布局和 oracle 细节以 `test/README.md` 为准；这里仅保留当前最常用入口。
 
@@ -275,7 +299,7 @@ cmake --build ./build --target TypeBuilderTest binarysub -j4
 - 跑全量前先确认外部依赖、数据路径、子模块状态
 - `test/legacy/` 和各 suite 下的 `legacy/` 默认不是当前 golden
 
-## 9. 修改代码时的建议
+## 10. 修改代码时的建议
 
 建议的阅读顺序：
 
@@ -293,6 +317,6 @@ cmake --build ./build --target TypeBuilderTest binarysub -j4
    - 先看 `src/Passes/`
    - 再看 `src/TypeRecovery/`
 
-## 10. 本文件维护原则
+## 11. 本文件维护原则
 
 当本文件涉及的内容变化时，应同步更新本文件：
