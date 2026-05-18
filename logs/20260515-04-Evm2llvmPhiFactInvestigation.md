@@ -489,3 +489,164 @@ build-evm2llvm/bin/evm2llvm --facts "$facts" --output "$ll"
 
 只改 evm2llvm basic block 创建顺序和一个小 fixture，不触碰 NotDec 主 pass pipeline、
 类型恢复、结构体合并或 pointer analysis，未跑 fortune。
+
+## 2026-05-18 PHI 现状复查和对照信息输出
+
+PHI 复查：
+
+- 当前 `/sn640/gigahorse-toolchain/gigahorse.py` 的 `repair_phi_incoming` 仍是 5 月 15 日的窄修复：
+  修非直连 predecessor，以及用 predecessor block 内唯一 PHI def 合并 duplicate raw vars。
+- 对缓存 facts 原始状态复查：
+  - `05_medium_233cfe3212`：68 行，6 条非直连 edge，3 组 duplicate。
+  - `06_medium_fe9f436f05`：17 行，1 条非直连 edge，0 组 duplicate。
+  - `07_large_0994def38c`：300 行，0 条非直连 edge，23 组 duplicate。
+  - `08_large_9fc75dd266`：同 07。
+- 拷贝到 `/tmp/evm2llvm-phi-recheck-442024` 并调用当前 `repair_phi_incoming` 后：
+  - `05`：非直连 edge 修掉，但仍有 3 组 duplicate，evm2llvm 仍报
+    `duplicate PHIIncoming predecessor for PHI 0x38d_0x1S0x17e from 0xbf8B0x378B0x17e`。
+  - `06`：PHI 校验通过，继续暴露 `unsupported opcode CODECOPY at 0x28c`。
+  - `07/08`：`PHIIncoming.csv` 降到 274 行，PHI 校验通过，继续暴露
+    `unsupported opcode EXTCODESIZE at 0x99e`。
+
+判断：
+
+- 当前 PHI 转换对 `06/07/08` 的已知问题已经修好。
+- `05` 还没修好；日志中“用原始 pred block 内唯一被非 PHI 使用的 PHI def”仍只是手工验证过的窄经验规则，
+  没有进入源码。这里继续不在 evm2llvm 里绕过 validator。
+
+新增对照信息：
+
+- `external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py:12`：
+  新增 EVM opcode 表，覆盖常见固定 opcode、`PUSH0`、`PUSH1..32`、`DUP1..16`、
+  `SWAP1..16`、`LOG0..4`。
+- `external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py:228`：
+  新增 `read_bytecode_bytes`，读取 `.hex` 字节码。
+- `external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py:238`：
+  新增 `write_bytecode_listing`，在 contract work 目录写
+  `evm-bytecode.txt`，列为 `pc / bytes / opcode / operand`。
+- `external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py:350`：
+  Gigahorse facts 生成后、调用 evm2llvm 前写出 `evm-bytecode.txt`。
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/TacProgram.h:66`：
+  `TacProgram` 增加 `OriginalStatementsByStmt` 和 `InlineInfoByStmt`，保存 TAC 到原始 EVM
+  statement 的映射。
+- `external/NotDec-evm2llvm/lib/FactLoader.cpp:80`：
+  新增 `parseOriginalStatementList`，解析 Gigahorse 的 `[0x42, 0xbd, nil]` 形式列表。
+- `external/NotDec-evm2llvm/lib/FactLoader.cpp:161`：
+  读取 `TAC_Statement_OriginalStatement.csv`、
+  `TAC_Statement_OriginalStatementList.csv` 和 `TAC_Statement_InlineInfo.csv`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:145`：
+  新增 `metadataForStmt`，生成 `!notdec.evm` 元数据，字段包含 `tac=...`、`op=...`、
+  `evm.pc=...`，有 inline 信息时还带 `inline=...`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:178`：
+  新增 `InsertedInstructionAnnotator`，给一个 TAC statement lowering 期间新增的 LLVM 指令挂元数据。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:501`、`518`、`530`、`537`：
+  PHI、private call、普通 TAC 指令和真实控制流 terminator 都会带 `!notdec.evm`。
+
+验证：
+
+```bash
+cmake --build build-evm2llvm --target evm2llvm -j4
+python3 -m py_compile external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py
+ctest --test-dir build-evm2llvm -R evm2llvm.fixture --output-on-failure
+build-evm2llvm/bin/evm2llvm \
+  --facts /sn640/NotDecChainExp/evm2llvm_apehex_pilot/work/03_small_9752b87bf2.cached/03_small_9752b87bf2/out \
+  --output /tmp/evm2llvm-meta-check.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/evm2llvm-meta-check.ll \
+  -o /tmp/evm2llvm-meta-check.bc
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output \
+  /tmp/evm2llvm-meta-check.bc
+external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py \
+  /sn640/NotDecChainExp/evm2llvm_apehex_pilot/inputs/01_tiny_c68dbd0999.hex \
+  --output /tmp/evm2llvm-wrapper-check/out.ll \
+  --evm2llvm build-evm2llvm/bin/evm2llvm \
+  --gigahorse-dir /sn640/gigahorse-toolchain \
+  --work-dir /tmp/evm2llvm-wrapper-check/work \
+  --timeout-secs 180 \
+  --gigahorse-extra-arg=-i \
+  --gigahorse-extra-arg=--disable_inline \
+  --gigahorse-extra-arg=--disable_scalable_fallback
+```
+
+结果：
+
+- `evm2llvm.fixture`：18/18 通过。
+- `03_small_9752b87bf2`：生成 IR、`llvm-as`、`opt -passes=verify` 通过。
+- IR 中能看到形如 `!notdec.evm !0` 的 metadata，metadata 内容形如
+  `!"tac=0xbdS0x3c", !"op=SLOAD", !"evm.pc=0x42,0xbd", !"inline=[0x97, nil]"`。
+- wrapper 在 `/tmp/evm2llvm-wrapper-check/work/01_tiny_c68dbd0999/evm-bytecode.txt`
+  生成了 bytecode 指令列表。
+
+性能：
+
+- 只改 evm2llvm wrapper 和 IR 注解，不触碰 NotDec 主 pass pipeline、类型恢复、结构体合并或
+  pointer analysis，未跑 fortune。
+- 复杂度评分：实现效果 8/10，能直接从 IR metadata 反查 TAC 和原始 EVM pc；复杂度 3/10，
+  主要是一个插入期 annotator 和 wrapper 反汇编表；维护成本 3/10，后续如果要支持新 opcode，
+  只需要补 Python 表。
+
+## 2026-05-18：Gigahorse 侧 PHI inline 修复
+
+实现位置：
+
+- `/sn640/gigahorse-toolchain/clientlib/tac-transformers/abstract_function_inliner.dl:510`
+  新增 `ExistingPHIForwardCandidate` 等关系。规则是：如果 predecessor block 里已经有一个 PHI，
+  同时后继 `PHIIncoming` 在同一个 pred 上列出了多个 raw vars，并且这个 PHI 的 use set
+  正好等于这些 raw vars，就把后继 incoming value 改成这个 pred block PHI def。
+- `/sn640/gigahorse-toolchain/clientlib/tac-transformers/abstract_function_inliner.dl:578`
+  新增 `ExistingPHIInlinedReturnPred`。private call inline 后，原来的 callsite block 不再是直接
+  predecessor，`PHIIncoming` 改为指向 cloned callee exit block。
+- `/sn640/gigahorse-toolchain/clientlib/tac-transformers/abstract_function_inliner.dl:587`
+  拆开 `Out_PHIIncoming` 输出规则，分别处理“已 forward / 未 forward”和“inline return pred /
+  普通 pred”四种情况。
+- `/sn640/gigahorse-toolchain/gigahorse.py:11` 和
+  `/sn640/gigahorse-toolchain/gigahorse.py:281` 附近：删除旧的 Python `repair_phi_incoming`
+  后处理和调用。现在不再靠 Python 猜修 CSV。
+
+修复后的 05 关键事实：
+
+```text
+0x38d_0x1S0x17e  0x38dB0x17e  0xbf8B0x378B0x17e  0x378_0x0V0x17e
+0x3ff_0x1S0x1a2  0x3ffB0x1a2  0xbf8B0x3eaB0x1a2  0x3ea_0x0V0x1a2
+0x46b_0x1S0x1b5  0x46bB0x1b5  0xbf8B0x456B0x1b5  0x456_0x0V0x1b5
+```
+
+也就是说：
+
+- pred 已经是真实直接入边 `0xbf8B...`。
+- value 已经是 pred block 内合并后的 PHI def，不再是两个 raw vars。
+
+验证：
+
+```bash
+python3 -m py_compile /sn640/gigahorse-toolchain/gigahorse.py
+python3 /sn640/gigahorse-toolchain/gigahorse.py \
+  -w /tmp/gigahorse-dl-phi-05-norepair-tight -j 1 -T 180 \
+  --results_file /tmp/gigahorse-dl-phi-05-norepair-tight/results.json \
+  --restart /sn640/NotDecChainExp/evm2llvm_apehex_pilot/inputs/05_medium_233cfe3212.hex
+build-evm2llvm/bin/evm2llvm \
+  --facts /tmp/gigahorse-dl-phi-05-norepair-tight/05_medium_233cfe3212/out \
+  --output /tmp/gigahorse-dl-phi-05-norepair-tight/05.ll
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/gigahorse-dl-phi-05-norepair-tight/05.ll \
+  -o /tmp/gigahorse-dl-phi-05-norepair-tight/05.bc
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output \
+  /tmp/gigahorse-dl-phi-05-norepair-tight/05.bc
+```
+
+结果：
+
+- `05`：`PHIIncoming.csv` 65 行，`bad_edges=0`，重复 `(phi, block, pred)=0`；
+  evm2llvm、`llvm-as`、`opt -passes=verify` 通过。
+- `06`：`PHIIncoming.csv` 17 行，`bad_edges=0`，重复 `(phi, block, pred)=0`；
+  evm2llvm 继续到已有问题 `unsupported opcode CODECOPY at 0x28c`。
+- `07/08`：`PHIIncoming.csv` 274 行，`bad_edges=0`，重复 `(phi, block, pred)=0`；
+  evm2llvm 继续到已有问题 `unsupported opcode EXTCODESIZE at 0x99e`。
+
+判断：
+
+- 当前这组 inline + PHI 问题已经在 Gigahorse 导出侧修复。
+- evm2llvm 不需要放宽 PHI validator，也不需要 slot + mem2reg fallback。
+- 复杂度评分：实现效果 8/10；复杂度 5/10，Datalog 规则比 Python repair 长，但语义位置更对；
+  维护成本 4/10，后续主要风险是“多个候选 PHI 的消歧规则”仍依赖非 PHI use。
+- 性能：只改 Gigahorse EVM facts 生成，不触碰 NotDec 主 pass pipeline、类型恢复、结构体合并或
+  pointer analysis，未跑 fortune。
