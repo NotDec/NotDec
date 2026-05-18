@@ -1,5 +1,23 @@
 # 2026-05-17 bin2llvm poison fallback 问题分析计划
 
+## 用户原始 prompt
+
+```text
+当前的bin2llvm项目，遇到底层的寄存器varnode的时候，会直接生成poisoned value。比如最近遇到的那个logs/20260517-01-Bin2llvmPoisonFallbackPlan.md里面的RSP。为了语义的正确性，当前还是应该根据架构对寄存器的描述，为每个寄存器都生成一个全局变量，然后遇到这种情况就访问对应的全局变量。考虑按需创建，这样就仅会创建这些被使用到的寄存器。全局变量的名字还是用寄存器的常用名字，同时考虑通过meta data去增加额外的信息，比如他在p code里的具体的识别信息（寄存器内存块里面的偏移和大小等）。
+后续也会单独实现非high function的底层pcode转LLVMIR的功能，所以当前实现的时候，就可以提前按照完全的纯寄存器底层PCode转IR的角度写代码。
+寄存器内存段的拆分一定要按照这种方式：按照必定不可能被重叠访问的边界去切分，即不可能会有这样的访问范围，使得该边界在该访问内部。比如RAX可以被EAX，AX，AL等方式访问一部分，那么就按最大的RAX单独划分出来，作为全局变量。更小的访问就基于这个大的全局变量做切割再访问。(另外，访问EAX时会清空RAX高位这种语义已经被PCode考虑了，不需要再调研看是否考虑到)
+
+另外，在agents.md里面说明一下以后这种logs下面的plan文档的写作方式：首先将所有的用户的原始prompt需求放在顶部。然后再写其他内容
+```
+
+```text
+底层 PcodeToLLVM.cpp 当前缺 registerName的问题，能否通过架构定义，找到对应的sla文件和寄存器的定义，从而得到寄存器名字？
+```
+
+```text
+按照这种方式写规划log然后实现吧
+```
+
 ## 背景
 
 `20260515-01-Bin2llvmModulePipelinePlan.md` 里已经用 Bench2 跑了两个模块级小样例：
@@ -349,3 +367,129 @@ Bench2 需要记录：
 维护成本预期：6/10。按 varnode space 分类后边界更清楚，但后续要和模块 memory map、stack frame、ABI 表达统一。
 
 更好的方案是从 Ghidra 导出更完整的函数入口 live-in、memory map 和 `INDIRECT` effect 信息，再 native lowering 按这些结构处理。当前先用已有 JSON 字段做最小修复，能更快验证 Bench2。
+
+## 2026-05-18 实现记录
+
+这次实现了寄存器 varnode 的全局变量建模。`ram` / `stack` input 仍按原分类保留 poison warning，后续单独处理。
+
+### 已改文件
+
+1. `AGENTS.md`
+   - 第 57 行：补充 `logs/` 下 plan 文档必须先保留用户原始 prompt。
+2. `external/NotDec-bin2llvm/include/notdec-bin2llvm/RegisterStorage.h`
+   - 第 18 行 `RegisterInfo`：描述架构寄存器范围。
+   - 第 25 行 `RegisterAccess`：描述一次 p-code 寄存器访问。
+   - 第 36 行 `RegisterStorage`：按重叠寄存器范围合并成一个 backing global，并提供读写切片。
+3. `external/NotDec-bin2llvm/lib/RegisterStorage.cpp`
+   - 第 60 行 `RegisterStorage::RegisterStorage(...)`：把同一 space 内互相重叠的寄存器区间合并；相邻但不重叠的不合并。
+   - 第 134 行 `globalFor(...)`：按需创建外部全局变量，名字优先用寄存器名，并挂 `notdec.register` metadata。
+   - 第 164 行 `bitOffset(...)`：按访问相对 offset 计算切片 bit offset；当前支持 big-endian 参数。
+   - 第 192 行 `read(...)`：从 backing global load，再按访问范围截取。
+   - 第 213 行 `write(...)`：小寄存器写入时保留 backing global 其他位，只更新访问范围。
+4. `external/NotDec-bin2llvm/include/notdec-bin2llvm/Pcode.h`
+   - 第 44 行 `VarnodeView`：增加 `IsRegister` 和 `RegisterName`。
+   - 第 62 行 `PcodeProgram`：增加完整 `Registers` 表和 `IsBigEndian`。
+5. `external/NotDec-bin2llvm/tools/SleighBytes.cpp`
+   - 第 91 行 `convertVarnode(...)`：用 `Sleigh::getExactRegisterName(...)` / `getRegisterName(...)` 给底层 varnode 补寄存器名。
+   - 第 202 行 `collectRegisters(...)`：用 `Sleigh::getAllRegisters(...)` 导出完整寄存器表。
+   - 第 343 行：记录架构 endian。
+   - 第 344 行：收集完整寄存器表。
+6. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp`
+   - 第 56 行 `PcodeLowerer::lower(...)`：为底层 P-Code lowering 创建 `RegisterStorage`。
+   - 第 274 行 `read(...)`：未在 `Values` 中找到的 register varnode 改为从寄存器 global 读取。
+   - 第 298 行 `write(...)`：register output 写回寄存器 global。
+7. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`
+   - 第 173 行 `registerInfosForHeritageProgram(...)`：从 Heritage JSON 里已有 register varnode 收集寄存器范围。
+   - 第 354 行 `read(...)`：live-in register 不再走 poison fallback，改为 load 对应 global。
+   - 第 380 行 `write(...)`：register output 同步写回对应 global。
+   - 第 1155 行 `readPhiIncoming(...)`：PHI incoming 如果是 register varnode，就在 incoming block terminator 前 load。
+   - 第 1537 行：`HeritageLowerer` 持有 `RegisterStorage`。
+8. `external/NotDec-bin2llvm/lib/CMakeLists.txt`
+   - 增加 `RegisterStorage.cpp` 到 `notdec-bin2llvm-core`。
+
+### 验证
+
+构建：
+
+```bash
+cmake -S external/NotDec-bin2llvm -B external/NotDec-bin2llvm/build -G Ninja \
+  -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON \
+  -DNOTDEC_BIN2LLVM_SLEIGH_SOURCE_DIR=/sn640/sleigh \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE
+cmake --build external/NotDec-bin2llvm/build \
+  --target notdec-heritage-module-llvm notdec-sleigh-llvm -j4
+```
+
+说明：这次配置时 `/sn640/sleigh` 的 CMake 仍触发了 Ghidra FetchContent，实际下载到了
+`external/NotDec-bin2llvm/build/_deps/ghidrasource-src`。
+
+Heritage module 验证：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-heritage-module-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/vsftpd/module-limit5.json \
+  -o /tmp/notdec-vsftpd-reg.ll
+llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-vsftpd-reg.ll \
+  -o /tmp/notdec-vsftpd-reg.bc
+```
+
+结果：
+
+1. `llvm-as` 通过。
+2. `vsftpd module-limit5` poison fallback 从 95 条降到 91 条。
+3. `RSP`、`FS_OFFSET`、`R13`、`R15` 已生成全局变量，例如 `@RSP = external global i64, !notdec.register ...`。
+4. 剩余 91 条是 `ram` / `stack` input，不属于本次寄存器建模。
+
+干净用例：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-heritage-module-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/libuv/module-limit5.json \
+  -o /tmp/notdec-libuv-reg.ll
+llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-libuv-reg.ll \
+  -o /tmp/notdec-libuv-reg.bc
+```
+
+结果：`llvm-as` 通过，没有新增 poison fallback。
+
+底层 Sleigh P-Code 验证：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-sleigh-llvm \
+  /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.sla \
+  4889c8 \
+  -o /tmp/notdec-sleigh-reg.ll \
+  -s /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.pspec
+llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-reg.ll \
+  -o /tmp/notdec-sleigh-reg.bc
+```
+
+结果：生成 `@RAX` 和 `@RCX`，`mov rax, rcx` 通过寄存器 global 表达。
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-sleigh-llvm \
+  /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.sla \
+  89c8 \
+  -o /tmp/notdec-sleigh-eax.ll \
+  -s /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.pspec
+llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-sleigh-eax.ll \
+  -o /tmp/notdec-sleigh-eax.bc
+```
+
+结果：`EAX/ECX` 访问没有单独建 `@EAX/@ECX`，而是基于 `@RAX/@RCX` 做切片。
+
+### 性能
+
+这次只改 bin2llvm lowering，不涉及 NotDec 主 pass pipeline、类型恢复、结构体合并或 pointer analysis，所以没有跑 fortune 当前关注用例。
+
+对 Bench2 小样例，`vsftpd module-limit5` 和 `libuv module-limit5` 都能正常生成并通过 `llvm-as`。新增逻辑按需创建寄存器 global，数量跟实际使用到的 backing register 有关，不会为未使用寄存器建全量 global。
+
+### 评分
+
+实现效果：8/10。寄存器 live-in 和底层 Sleigh register varnode 已不再退到 poison，底层路径能从架构定义拿寄存器名。
+
+复杂度：4/10。新增了一个共享 `RegisterStorage`，但逻辑集中，两个 lowering 只接读写入口。
+
+维护成本：4/10。后续如果要更精确处理特殊寄存器、flags 或多 piece register，需要继续扩展 `RegisterStorage`，但现在的入口是清晰的。
+
+更好的方案：Heritage JSON 目前只有已出现的 register varnode，没有完整架构寄存器表。更完整的方案是让 Heritage module JSON 也导出架构 register table，这样 high function 路径和底层 Sleigh 路径可以完全同口径合并寄存器范围。
