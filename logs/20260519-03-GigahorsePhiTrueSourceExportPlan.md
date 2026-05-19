@@ -135,3 +135,46 @@
 
 这份记录只定方向，不写实现清单。
 等 Gigahorse 侧真改完，再把实际改动、影响范围和验证结果补进同一条日志里。
+
+## 2026-05-19 实现记录
+
+这次把 PHI 导出收紧到块尾的真实来源，不再直接展开 `FunctionalBlockOutputContents`。
+同时把 `evm2llvm` 这条测试入口改成默认重跑时清空旧 work dir，避免新的 `--disable_inline`
+facts 和旧导出混在一起。
+
+改动文件：
+
+- `/sn640/gigahorse-toolchain/logic/decompiler_output.dl:55-84`
+  - `PHIIncoming` 的非 forward 分支改为先读 `IRBlockOutLocalStackContents`。
+  - 只保留块尾本地可见的变量源和函数参数源，去掉对展开后 `FunctionalBlockOutputContents` 的直接枚举。
+  - 涉及关系：`PHIIncoming`、`PHIOutputForwarded`。
+- `/sn640/NotDec/external/NotDec-evm2llvm/test/CMakeLists.txt:49-61`
+  - 给 Gigahorse 测试加上 `--restart`。
+  - 这样每次跑测试都从新导出的 facts 开始，不会复用旧 work dir。
+- `/sn640/NotDec/external/NotDec-evm2llvm/docs/README.md:61-72`
+  - 补了 `--restart` 的默认用法。
+  - 说明现在做 PHI 排查时要关 inliner，并且不要复用旧导出。
+
+验证：
+
+```bash
+python3 /sn640/gigahorse-toolchain/gigahorse.py \
+  -w /tmp/gigahorse-phi-true-source -j 1 -T 180 \
+  --results_file /tmp/gigahorse-phi-true-source/results.json \
+  --restart --disable_inline \
+  /sn640/NotDecChainExp/evm2llvm_apehex_pilot/inputs/05_medium_233cfe3212.hex
+```
+
+结果：
+
+- `PHIIncoming.csv` 行数为 61。
+- `(phiStmt, block, predBlock)` 重复为 0。
+- `PHIIncoming.csv` 没有缺 direct predecessor。
+- `evm2llvm`、`llvm-as`、`opt -passes=verify` 都通过。
+
+判断：
+
+- 实现效果：8/10，已经把当前这份样本上的重复 incoming 消掉。
+- 复杂度：4/10，只是把来源入口收紧，没有引入新抽象。
+- 维护成本：4/10，后续如果再出现歧义，问题会更集中在 `IRBlockOutLocalStackContents`
+  的事实质量上。
