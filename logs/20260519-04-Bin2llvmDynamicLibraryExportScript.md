@@ -512,3 +512,59 @@ PHI incoming varnode is unavailable: vn:6751 ... register=R13 highVariable=unaff
 - 实现效果：8/10。libuv 里残留的 `@R13` 消失，IR 仍可 assemble。
 - 复杂度：2/10。只收紧 register fallback 条件。
 - 后期维护成本：3/10。后续如果不想要 poison，可以把 `unaff_*` 建成函数局部 unknown input，但不应恢复全局寄存器。
+
+## 2026-05-19 追加：恢复 `unaff_R13` 的全局寄存器兜底
+
+用户原始要求：
+
+> unaff_R13 是什么意思，所以为什么会有poison值？直接假设是callee saved寄存器不就行了吗
+> 还是回退到之前的全局寄存器的方式吧
+
+### 判断
+
+`unaff_R13` 是 Ghidra 对“函数内部没有定义，但被使用的 R13 入口值”的命名。它经常对应 callee-saved 寄存器的入口值。
+
+上一节把 `unaff_*` 排除出 register fallback 后，`FUN_00118640` 的 PHI incoming 找不到值，只能走已有 poison fallback。用户希望先回到之前的全局寄存器方式，避免这个 poison。
+
+### 实现
+
+[`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:573)
+删除 `canReadRegisterFallback(...)` 里对 `highVariable` 前缀 `unaff_` 的拒绝逻辑。现在所有没有 SSA 值的 register input 都可以从 `RegisterStorage` 读兜底。
+
+[`external/NotDec-bin2llvm/ARCHITECTURE.md`](/sn640/NotDec/external/NotDec-bin2llvm/ARCHITECTURE.md:238)
+同步删掉“`unaff_*` 不读全局寄存器”的说明。
+
+这只恢复 register input 的读兜底，不恢复 register varnode 的全局写回，所以 `@RDX/@RAX` 这类普通临时寄存器全局副作用不会回来。
+
+### 验证
+
+编译：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-module-llvm -j4
+```
+
+正式重跑 libuv：
+
+```bash
+/usr/bin/time -p /tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.json \
+  -o /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.ll
+```
+
+结果：
+
+- lowered function bodies: 478
+- failed function bodies: 0
+- real 13.99s
+- `llvm-as module-all.ll -o module-all.bc` 通过
+- `PHI incoming ... unaff_R13` 的 poison fallback warning 消失
+- 正式输出开头是 `@FS_OFFSET`、`@RSP`、`@R13`
+- `@R13` 只有一个 global 定义和一次 load
+- `@RDX/@RAX` 没有恢复
+
+### 评分
+
+- 实现效果：8/10。按要求去掉 `unaff_R13` poison，仍保留前面减少普通寄存器全局副作用的效果。
+- 复杂度：1/10。只删除前一轮的特判。
+- 后期维护成本：3/10。以后如果要更准，可以把 callee-saved 入口值做成函数局部参数式 unknown value；当前先用全局寄存器兜底保持 IR 可用。
