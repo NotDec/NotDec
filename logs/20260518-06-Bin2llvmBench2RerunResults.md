@@ -219,3 +219,80 @@ Function return type does not match operand type of return inst!
 2. 再看 `FUN_00106711` / `FUN_001069e6` 的 function prototype 和 `RETURN` input size。
 3. 最后看缺 return value 的 7 个小函数，是不是 cold/thunk 片段或 Ghidra 返回类型误判。
 
+## 2026-05-19 实施记录：先修容易的 RETURN 问题
+
+本次只修 return lowering，不碰 CFG / PHI。
+
+修改文件：
+
+1. `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`
+   - 第 389 行新增 `resizeToIntegerType(...)`，按 LLVM 函数返回类型做 zext / trunc。
+   - 第 1499 行修改 `returnValueFor(...)`，不再固定把返回值缩成 4 字节。
+   - 第 1504 行处理 non-void `RETURN` 缺 value input：生成对应返回类型的 `undef`，并打印带 op id / 函数 / block / return type 的 warning。
+
+效果：
+
+1. `python/one-_PyPegen_fill_token.cold` 从 verifier 失败变为通过。
+2. `wrk/one-parse_url_char.cold` 从 verifier 失败变为通过。
+3. `memcached --limit=20` 从 20 个函数里 11 个 body 失败，降到 2 个 body 失败。
+4. 剩下 2 个失败都是 CFG / PHI：
+   - `FUN_001066f0`
+   - `FUN_00106740`
+
+验证命令：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build \
+  --target notdec-heritage-module-llvm notdec-heritage-llvm -j4
+
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/python/one-_PyPegen_fill_token.cold.json \
+  -o /tmp/notdec-return-fix-regress/python/out.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-return-fix-regress/python/out.ll \
+  -o /tmp/notdec-return-fix-regress/python/out.bc
+
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/wrk/one-parse_url_char.cold.json \
+  -o /tmp/notdec-return-fix-regress/wrk/out.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-return-fix-regress/wrk/out.ll \
+  -o /tmp/notdec-return-fix-regress/wrk/out.bc
+
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /tmp/notdec-bench2-rerun-20260518/memcached20/module-limit20.json \
+  -o /tmp/notdec-return-fix-regress/memcached20/out.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-return-fix-regress/memcached20/out.ll \
+  -o /tmp/notdec-return-fix-regress/memcached20/out.bc
+
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /tmp/notdec-bench2-rerun-20260518/vsftpd10/module-limit10.json \
+  -o /tmp/notdec-return-fix-regress/vsftpd10/out.ll
+
+/tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /tmp/notdec-bench2-rerun-20260518/libuv20/module-limit20.json \
+  -o /tmp/notdec-return-fix-regress/libuv20/out.ll
+```
+
+验证结果：
+
+1. `python` lower `real 0.02s`，`llvm-as` 通过，IR 中为 `ret i64 4294967295`。
+2. `wrk` lower `real 0.02s`，`llvm-as` 通过，IR 中为 `ret i64 1`。
+3. `memcached --limit=20` lower `real 1.77s`，18 个 body 成功，2 个 body 失败，`llvm-as` 通过。
+4. `vsftpd --limit=10` 仍是 10 个 body 全部成功，lower `real 14.70s`。
+5. `libuv --limit=20` 仍是 20 个 body 全部成功，lower `real 0.03s`。
+
+风险：
+
+1. non-void `RETURN` 缺 value input 时返回 `undef` 只是结构兜底，不代表语义完整。warning 已带 op id，后续要回到 Ghidra prototype / cold fragment 语义上确认。
+2. `ret i32` 到 `ret i64` 当前按 zero extend 处理，符合现有 `resize(...)` 的风格；如果后续能从函数签名拿到 signedness，再考虑 signed extend。
+
+评分：
+
+1. 实现效果：7/10。解决了容易的 return verifier 问题，明显减少 `memcached` 失败数。
+2. 复杂度：2/10。只改 return lowering，新增一个小 helper。
+3. 维护成本：3/10。`undef` 兜底需要后续追语义，但 warning 已经具体到 op。
