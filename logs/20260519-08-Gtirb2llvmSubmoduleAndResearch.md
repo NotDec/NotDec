@@ -7,29 +7,29 @@
 
 ## 背景和目标
 
-目标是先把 `gtirb2llvm` 项目放进 NotDec 的 `external/`，并把上游 GTIRB 作为它自己的子模块。当前只做项目骨架和路线调研，不实现二进制 lifter。
+目标最初是先把 `gtirb2llvm` 项目放进 NotDec 的 `external/`，并把上游 GTIRB 作为它自己的子模块。后续调整为把项目放在 `/sn640/gtirb2llvm`，NotDec 不再把它登记为 submodule。当前只做项目骨架和路线调研，不实现二进制 lifter。
 
 ## 实现记录
 
-1. 顶层 `.gitmodules:18-21`
-   - 新增 `external/gtirb2llvm` 子模块。
-   - 远程为 `git@github.com:am009/gtirb2llvm.git`。
-   - 跟踪分支为 `main`。
+1. 顶层 `.gitmodules`
+   - 先新增过 `external/gtirb2llvm` 子模块。
+   - 后续按用户要求移除该子模块记录。
+   - `gtirb2llvm` 现在位于 `/sn640/gtirb2llvm`，作为普通 git 仓库使用。
 
-2. `external/gtirb2llvm/.gitmodules:1-4`
+2. `/sn640/gtirb2llvm/.gitmodules:1-4`
    - 新增内部子模块 `external/gtirb`。
    - 远程为 `https://github.com/GrammaTech/gtirb.git`。
    - 跟踪分支为 `master`，因为上游 GTIRB 当前默认分支是 `master`。
 
-3. `external/gtirb2llvm/README.md:1-21`
+3. `/sn640/gtirb2llvm/README.md:1-21`
    - 说明当前项目定位：GTIRB 负责二进制结构事实，LLVM IR lowering 仍需要指令语义来源。
 
-4. `external/gtirb2llvm/CMakeLists.txt:1-13`
+4. `/sn640/gtirb2llvm/CMakeLists.txt:1-13`
    - 加最小 CMake 项目。
    - 默认不构建 GTIRB，避免一开始引入重依赖。
    - 通过 `GTIRB2LLVM_BUILD_GTIRB=ON` 可显式进入 GTIRB 子模块。
 
-5. `external/gtirb2llvm/docs/gtirb-to-llvm-ir.md:1-97`
+5. `/sn640/gtirb2llvm/docs/gtirb-to-llvm-ir.md:1-97`
    - 记录调研结论：GTIRB 不是完整语义 lifter。
    - 建议第一阶段先做 `.gtirb` dump，验证 module/function/block/symbol/CFG/AuxData 是否够用。
    - 第二阶段再接 NotDec-bin2llvm 现有 SLEIGH/P-Code lowering。
@@ -37,17 +37,17 @@
 ## 验证
 
 ```bash
-cmake -S external/gtirb2llvm -B /tmp/gtirb2llvm-build -G Ninja
+cmake -S /sn640/gtirb2llvm -B /tmp/gtirb2llvm-build -G Ninja
 cmake --build /tmp/gtirb2llvm-build
-git -C external/gtirb2llvm branch --show-current
-git -C external/gtirb2llvm submodule status
+git -C /sn640/gtirb2llvm branch --show-current
+git -C /sn640/gtirb2llvm submodule status
 ```
 
 结果：
 
 - CMake 配置通过。
 - 默认构建没有目标，`ninja: no work to do.`。
-- `external/gtirb2llvm` 当前在 `main` 分支。
+- `/sn640/gtirb2llvm` 当前在 `main` 分支。
 - 内部 `external/gtirb` 子模块指向 `e0869b51cd0fa1eb80e3af66da5e0723410a0379`。
 
 ## 性能影响
