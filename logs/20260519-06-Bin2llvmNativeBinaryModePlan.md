@@ -279,3 +279,71 @@
 1. 解决压缩 `.sla` 来源。可以增加一个可选的 Sleigh spec compiler 工具，或者在构建时允许生成 compressed `.sla`。
 2. 用 compressed x86-64 `.sla` 跑通 `/bin/ls` entry 附近 P-Code 输出。
 3. 再新增 native LLVM 输出工具，复用现有 `PcodeToLLVM`。
+
+### 2026-05-19 Ghidra 版本统一和 .sla 兼容
+
+这次先把 Ghidra 来源固定住，避免 `lifting-bits/sleigh` 用 12.0.4 源码编库，
+测试时却拿旧 Ghidra 11.0.1 目录里的 XML `.sla`。
+
+当前约定：
+
+1. `/sn640/ghidra` 是本机统一的 Ghidra source checkout。
+2. 它需要跟 `lifting-bits/sleigh` 当前 pin 的版本一致。当前 sleigh commit
+   `c1aec71e4090a57daea1544379c63537e5e1add7` 对应
+   `Ghidra_12.0.4_build`。
+3. `/sn640/ghidra` 已 checkout 到 `Ghidra_12.0.4_build`
+   (`e40ed13014`)。
+4. native pcode 工具使用
+   `/sn640/ghidra/Ghidra/Processors/.../data/languages/` 下同版本的
+   `.sla/.pspec`。旧的 `/sn640/myprograms/ghidra_11.0.1_PUBLIC` 不再使用。
+
+修改点：
+
+1. `external/NotDec-bin2llvm/CMakeLists.txt:30`
+   - 新增 `NOTDEC_BIN2LLVM_GHIDRA_SOURCE_DIR`，默认 `/sn640/ghidra`。
+2. `external/NotDec-bin2llvm/CMakeLists.txt:69`
+   - 开启 Sleigh 时设置 `FETCHCONTENT_SOURCE_DIR_GHIDRASOURCE`，让
+     `lifting-bits/sleigh` 直接用这份 Ghidra source。
+3. `external/NotDec-bin2llvm/ARCHITECTURE.md:311`
+   - 文档里写明 Ghidra source 统一走
+     `NOTDEC_BIN2LLVM_GHIDRA_SOURCE_DIR`，spec 也应来自同版本 checkout。
+4. `external/NotDec-bin2llvm/lib/SleighLift.cpp:119`
+   - 新增 `XmlCapableSleigh`，只暴露 Ghidra `Sleigh::decode(...)` 的 XML
+     decode 入口。
+5. `external/NotDec-bin2llvm/lib/SleighLift.cpp:223`
+   - `.sla` 是 XML 时不再直接报错，改为直接 decode XML；compressed `.sla`
+     仍走原来的 `DocumentStorage` `<sleigh>path</sleigh>` 路径。
+
+验证：
+
+1. `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-native-ghidra -DNOTDEC_BIN2LLVM_ENABLE_LIEF=ON -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON -DNOTDEC_BIN2LLVM_GHIDRA_SOURCE_DIR=/sn640/ghidra`
+   - 配置通过。
+   - CMake 输出确认 `Using Ghidra version 12.0.4 at git ref Ghidra_12.0.4_build`。
+   - CMake 输出确认 `Ghidra source located at '/sn640/ghidra'`。
+2. `cmake --build /tmp/notdec-bin2llvm-native-ghidra --target notdec-native-pcode -j4`
+   - 构建通过。
+3. `file /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.sla`
+   - 输出为 `data`，说明当前 12.0.4 checkout 里的 x86-64 `.sla` 是 compressed
+     形式，不是旧 11.0.1 目录里的 XML debug 形式。
+4. `/tmp/notdec-bin2llvm-native-ghidra/bin/notdec-native-pcode /bin/ls /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.sla -a 0x6aa0 -l 16 -s /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   - 跑通，输出了 `/bin/ls` entry 附近的 P-Code。
+
+性能影响：
+
+1. 默认 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=OFF`，默认构建和 NotDec 主链路不受影响。
+2. 这次只改 bin2llvm native 实验路径，还没接入 pass pipeline，不需要对 fortune
+   用例做运行时间对比。
+
+复杂度评分：
+
+1. 实现效果：8/10。主路径改为同版本 compressed `.sla` 后已经跑通；XML `.sla`
+   也保留了直接 decode 入口，避免之后再遇到旧格式时只能报错。
+2. 理解成本：6/10。新增了一个很小的 `Sleigh` 子类，但只用于访问 Ghidra 已有的
+   decode 逻辑。
+3. 维护成本：6/10。Ghidra source 位置通过 CMake cache 变量控制，默认值是本机约定，
+   后面换机器时可以覆盖。
+
+后续：
+
+1. 在 native pcode 已跑通的基础上新增 native LLVM 输出工具。
+2. 再考虑把 ELF machine 到 `.sla/.pspec` 的映射做成自动选择，减少命令行参数。
