@@ -419,3 +419,96 @@ cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-module-llvm -j
 - 后期维护成本：4/10。后续如果需要更精确地处理未知 call clobber，可以单独在 call lowering 处建模，不需要恢复全量 register global 写回。
 
 潜在风险是：如果某些函数内确实依赖“一个 register varnode 写入，另一个没有 SSA def 的同寄存器 varnode 再读”，现在会走全局寄存器兜底，而不是本地最新值。libuv 当前样本没有触发 lower/verify 失败。更完整的方案是增加函数内 register-state map，而不是恢复 module-global store。
+
+## 2026-05-19 追加：去掉 `unaff_R13` 的全局寄存器兜底
+
+用户原始要求：
+
+> 当前剩下的R13寄存器操作是干什么的
+> 尝试按照这个方式处理试试
+
+### 问题
+
+前一轮去掉 register write-back 后，libuv 开头还剩：
+
+```llvm
+@FS_OFFSET = external global i64, !notdec.register !0
+@RSP = external global i64, !notdec.register !1
+@R13 = external global i64, !notdec.register !2
+```
+
+追到 `FUN_00118640`，这次 `R13` 来自一个 PHI incoming：
+
+```json
+"id": "vn:6751",
+"registerName": "R13",
+"isInput": true,
+"highVariable": "unaff_R13",
+"def": null
+```
+
+也就是 Ghidra 对未知入口值的命名，不是一个真实要跨函数维护的 module-global register 状态。
+
+### 实现
+
+[`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:573)
+新增 `canReadRegisterFallback(...)`：
+
+- 只有 register input 才允许读 `RegisterStorage` 兜底。
+- `highVariable` 以 `unaff_` 开头时不允许兜底。
+
+[`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:583)
+调整 `read(...)`。
+
+[`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:1539)
+调整 `readPhiIncoming(...)`。
+
+[`external/NotDec-bin2llvm/ARCHITECTURE.md`](/sn640/NotDec/external/NotDec-bin2llvm/ARCHITECTURE.md:238)
+补充说明：`unaff_*` 是未知入口值，不读全局寄存器。
+
+### 验证
+
+编译：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-module-llvm -j4
+```
+
+临时重跑 libuv：
+
+```bash
+/usr/bin/time -p /tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.json \
+  -o /tmp/notdec-libuv-register-no-unaff.ll
+```
+
+结果：
+
+- lowered function bodies: 478
+- failed function bodies: 0
+- real 14.03s
+- `llvm-as /tmp/notdec-libuv-register-no-unaff.ll` 通过
+- `@R13` 不再出现
+- 文件开头只剩 `@FS_OFFSET` 和 `@RSP`
+
+正式重跑 `/sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.ll`：
+
+- lowered function bodies: 478
+- failed function bodies: 0
+- real 14.15s
+- `llvm-as module-all.ll -o module-all.bc` 通过
+- 正式输出里也只剩 `@FS_OFFSET` 和 `@RSP`
+
+这会产生一条 warning：
+
+```text
+PHI incoming varnode is unavailable: vn:6751 ... register=R13 highVariable=unaff_R13
+```
+
+当前走 poison fallback。这个结果比生成 `@R13` 全局变量更接近事实：这里是未知入口值，不是可复用的寄存器内存段。
+
+### 评分
+
+- 实现效果：8/10。libuv 里残留的 `@R13` 消失，IR 仍可 assemble。
+- 复杂度：2/10。只收紧 register fallback 条件。
+- 后期维护成本：3/10。后续如果不想要 poison，可以把 `unaff_*` 建成函数局部 unknown input，但不应恢复全局寄存器。
