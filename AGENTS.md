@@ -51,7 +51,7 @@ The test: Every changed line should trace directly to the user's request.
    IR。
 2. 代码一定要多写注释，特别是新引入的数据结构前，说明背后的设计理念。
 3. 工作流程：收到需求 -> 思考后告诉用户打算怎么更改 -> 讨论一致后再开始实现。复杂代码修改实现完后再写文档到 `logs/`；简单文档修改、注释修改、错别字修正不需要写日志。
-   实现完计划并完成验证后，可以直接提交；涉及 submodule 时，先在 submodule 内提交，再提交顶层指针和日志。
+   实现完计划并完成验证后，默认必须直接提交，不要停在未提交状态；涉及 submodule 时，先在 submodule 内提交，再提交顶层指针和日志。
 4. 写修改日志时，必须明确指出修改了哪个文件的哪一行，涉及哪些函数。
 5. 尽量复用并改进之前的日志，最好每个功能都单独一个日志。
 6. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和性能结果。只有复杂代码修改需要从实现效果、复杂度（增加其他人对项目的理解成本）、后期维护成本三个角度评分，并思考有没有更好的方案。
@@ -186,7 +186,10 @@ workdir `/tmp/notdec-fortune-structmerge-hlayout-final`，
 - `scripts/`
   - 调试、LLVM、可视化辅助脚本
 
-## 6. Bench2 与近期目标
+## 6. 近期目标
+
+bin2LLVM 子项目近期目标：围绕 Bench2 这些真实项目生成 LLVM IR，并且语义要对。
+“能被 `llvm-as` 接受”只是底线，不能代替语义正确。
 
 Bench2 真实项目集合在 `/sn640/NotDec-Exp/Bench2`：
 
@@ -194,18 +197,6 @@ Bench2 真实项目集合在 `/sn640/NotDec-Exp/Bench2`：
 - `manifest/benchmark-targets.tsv`：当前选中的 ELF / shared object 目标。
 - `manifest/benchmark-needed.tsv`：目标的动态依赖。
 - `bin2llvm-ir/`：bin2llvm 相关 JSON、`.ll`、`.bc`、日志和 Ghidra project。
-
-B2 / L / LVM 近期共同目标：围绕 Bench2 这些真实项目生成 LLVM IR，并且语义要对。
-“能被 `llvm-as` 接受”只是底线，不能代替语义正确。
-
-当前按本仓库目录理解：
-
-- B2：`external/NotDec-bin2llvm`，目标是从 ELF / shared object 生成模块级 LLVM IR。
-- LVM：`external/NotDec-wasm2llvm`，目标是从 wasm/wat 生成语义正确的 LLVM IR。
-- L：主链路里消费和继续处理 LLVM IR 的部分，包括 NotDec pass pipeline 和后端联调。
-
-做 Bench2 相关验证时，优先用小目标快速跑通，例如 `vsftpd`、`libuv`、`memcached`。
-大目标如 `vim`、`python`、`ffmpeg` 要记录 Ghidra analysis 时间、导出时间、lowering 时间和失败原因。
 
 ## 7. 构建
 

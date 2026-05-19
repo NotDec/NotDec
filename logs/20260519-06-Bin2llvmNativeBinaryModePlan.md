@@ -107,6 +107,32 @@
 2. 再转换成现有 lowering 能消费的结构。
 3. 最后才考虑是否需要更完整的原生 P-Code 表达。
 
+### 5. libsla / libdecomp 对接规划
+
+先把 `libsla` 作为主线接进来，`libdecomp` 暂时只保留为依赖和实验方向。
+
+判断：
+
+1. `libsla` 的边界清楚，负责从机器码和架构 spec 生成 raw P-Code。
+2. `libdecomp` 涉及 Ghidra decompiler 侧的 `Architecture`、函数模型、符号表、调用约定和 action pipeline，第一步直接接主链路容易把问题混在一起。
+3. 本地模式当前最缺的是真实二进制内存映射、函数范围和 P-Code 收集入口，不是马上复刻 Java decompiler 的 HighFunction。
+
+实施顺序：
+
+1. 先把现有 `SleighBytes` 里的 `.sla/.pspec` 加载、寄存器收集、`PcodeEmit` 收集逻辑拆成公共 C++ 库。
+2. 公共库入口接受 `ghidra::LoadImage`、起始地址和长度，不再绑定 hex 字符串。
+3. 旧的 hex 工具继续保留，用新的公共库实现，作为回归验证。
+4. 下一步用 LIEF 生成真实 ELF `LoadImage`，把 executable segment 映射给 libsla。
+5. 函数入口第一版来自 LIEF 符号表和 entry point，不先做递归反汇编和 CFG 恢复。
+6. `.sla/.pspec` 第一版由命令行显式指定，等 x86_64 跑通后再做 LIEF machine 到 Sleigh spec 的自动映射。
+
+`libdecomp` 的处理：
+
+1. CMake 继续链接 `sleigh::decomp`，因为当前 sleigh target 已经暴露出来。
+2. 主线不先调用 `libdecomp`。
+3. 后续单独做一个 probe 工具，验证能否在 native 侧构造 decompiler 环境并拿到接近 Java `HighFunction` 的结果。
+4. 如果 probe 稳定，再决定是否把 `libdecomp` 用作 raw P-Code 之后的增强层。
+
 ## 实现记录
 
 ### 2026-05-19
@@ -147,3 +173,52 @@
 2. `cmake --build /tmp/notdec-bin2llvm-lief --target notdec-lief-elf -j4`
 3. `/tmp/notdec-bin2llvm-lief/bin/notdec-lief-elf /bin/ls`
 4. 输出正常，`/bin/ls` 被识别为 ELF `DYN`，并打印了入口和各类计数。
+
+### 2026-05-19 libsla 公共层拆分
+
+按上面的 libsla 规划，先把旧 Sleigh hex 工具里的核心逻辑拆出来，给后面的 LIEF ELF loader 复用。
+
+修改点：
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/SleighLift.h:17-33`
+   - 新增 `SleighSpecOptions`。
+   - 新增 `findSleighSpecPath(...)`。
+   - 新增面向 `ghidra::LoadImage` 的 `collectSleighPcode(...)`。
+2. `external/NotDec-bin2llvm/lib/SleighLift.cpp:12-255`
+   - 从旧工具迁出 varnode 转换、opcode 转换、`PcodeCollector`、寄存器收集、processor spec context 加载。
+   - `collectSleighPcode(...)` 现在负责初始化 `ghidra::Sleigh`，加载 `.sla/.pspec`，按地址范围调用 `oneInstruction()` 收集 P-Code。
+3. `external/NotDec-bin2llvm/tools/SleighBytes.cpp:15-140`
+   - 保留旧的 hex bytes 输入和 `InMemoryLoadImage`。
+   - 删除重复的 Sleigh 初始化和 P-Code collector 代码，改为调用新的公共 `collectSleighPcode(...)`。
+4. `external/NotDec-bin2llvm/lib/CMakeLists.txt:20-37`
+   - 新增 `notdec-bin2llvm-sleigh` 静态库，仅在 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON` 时构建。
+   - 该库链接 `notdec-bin2llvm-core`、`sleigh::sla`、`sleigh::decomp`、`sleigh::support`。
+5. `external/NotDec-bin2llvm/tools/CMakeLists.txt:83-115`
+   - `notdec-bin2llvm-sleigh-bytes` 改为依赖 `notdec-bin2llvm-sleigh`。
+
+验证：
+
+1. `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-cmake-test`
+   - 默认配置通过，默认链路没有引入 Sleigh 依赖。
+2. `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-sleigh -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON`
+   - Sleigh 配置通过。
+3. `cmake --build /tmp/notdec-bin2llvm-sleigh --target notdec-sleigh-pcode notdec-sleigh-llvm -j4`
+   - 两个旧 Sleigh 工具构建通过。
+   - 上游 Ghidra / libdecomp 编译有大量 `-Wsign-compare` warning，当前不是本次改动引入的错误。
+
+性能影响：
+
+1. 默认 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=OFF` 时没有新增编译目标，也没有影响现有 bin2llvm 主链路。
+2. 运行时还没接入 NotDec 主 pipeline，不需要对 fortune 用例做运行时间对比。
+
+复杂度评分：
+
+1. 实现效果：7/10。先把 libsla 公共入口拆出来了，后面 LIEF loader 可以直接传 `LoadImage`。
+2. 理解成本：6/10。新增一个 `SleighLift` 层，但它只承载原来已经存在的初始化和 collector 逻辑。
+3. 维护成本：6/10。Sleigh 依赖仍然只在开关打开时构建，默认链路没有新增负担。
+
+后续：
+
+1. 新增 LIEF ELF `LoadImage`，支持按 VA 从 executable segment 读字节。
+2. 新增 native pcode 工具，输入 ELF、函数地址/长度、`.sla/.pspec`，输出 P-Code。
+3. 再把 native pcode 工具接到现有 `PcodeToLLVM`。
