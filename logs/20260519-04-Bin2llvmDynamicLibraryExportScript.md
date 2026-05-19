@@ -323,3 +323,99 @@ entry:
 - 后期维护成本：5/10。后续可以在这个 alloca 基础上继续做局部变量拆分或结构化；正偏移栈参数需要单独策略。
 
 更好的后续方案是把 stack varnode 按 high variable 或重叠区间进一步拆成多个 alloca，但当前先保留一个 byte-addressed frame，语义更稳。
+
+## 2026-05-19 追加：降低 register varnode 全局副作用
+
+### 用户追加 prompt
+
+```text
+libuv里面很多rdx，分析一下里面残存的寄存器操作都是干什么的
+
+heritage里面保留这种寄存器读写它有什么意义啊，不太理解
+
+按照这个方式处理试试
+```
+
+### 背景
+
+修完寄存器合并和 stack alloca 后，libuv 里仍然有大量 `@RDX` 访问。分析后发现主要有几类：
+
+1. ABI 或返回值寄存器痕迹，例如 `uv_buf_init` 里 `EDX` 对应第二个参数或返回结构的一部分。
+2. 普通算术临时寄存器，例如某些差值先写进 `RDX`，但后续已经有 SSA 值继续使用。
+3. `EDX/DX/DL` 子寄存器写入，由 `RegisterStorage` 保留成对 `@RDX` 的 mask/merge。
+4. 字符串复制循环里的目标指针，原机器码放在 `RDX`，但 heritage 里已经能表现成 phi。
+
+这些 register varnode 对 Ghidra 来说是机器语义和 provenance，但 lower 到 LLVM IR 时不应该全部变成 module-global register 状态。
+
+### 实现
+
+[`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:608)
+调整 `write(...)`：
+
+- 所有 varnode 仍然写入函数内 `Values`。
+- stack varnode 仍然同步 store 到 `%notdec_stack`。
+- register varnode 不再默认同步写入 `RegisterStorage`，也就是不再生成 `store ... @RDX` 这类全局寄存器副作用。
+- `read(...)` 的兜底逻辑保留。如果一个 register input 没有 SSA 值，仍然可以从 `RegisterStorage` 读全局寄存器。
+
+[`external/NotDec-bin2llvm/ARCHITECTURE.md`](/sn640/NotDec/external/NotDec-bin2llvm/ARCHITECTURE.md:238)
+同步补充 register varnode 的 lower 策略。
+
+### 验证
+
+编译：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-module-llvm -j4
+```
+
+临时重跑 libuv：
+
+```bash
+/usr/bin/time -p /tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.json \
+  -o /tmp/notdec-libuv-register-quiet.ll
+```
+
+结果：
+
+- lowered function bodies: 478
+- failed function bodies: 0
+- real 14.13s
+- `llvm-as /tmp/notdec-libuv-register-quiet.ll` 通过
+
+正式重跑 libuv：
+
+```bash
+/usr/bin/time -p /tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.json \
+  -o /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.ll
+```
+
+结果：
+
+- lowered function bodies: 478
+- failed function bodies: 0
+- real 13.97s
+- `llvm-as` 通过
+
+对比效果：
+
+- 修改前 libuv 里 `@RDX` 引用约 624 次。
+- 修改后 `@RDX` 不再出现在 `module-all.ll`。
+- 修改后开头只剩：
+
+```llvm
+@FS_OFFSET = external global i64, !notdec.register !0
+@RSP = external global i64, !notdec.register !1
+@R13 = external global i64, !notdec.register !2
+```
+
+剩下的 register access 主要是 register input fallback，例如 `FS_OFFSET`、`RSP` 和少量没有 SSA 值的 callee-saved 寄存器。
+
+### 评分
+
+- 实现效果：8/10。`@RDX/@RAX` 这类临时寄存器全局副作用大幅消失，libuv 仍可完整 lower 和 assemble。
+- 复杂度：3/10。只删掉 register write-back，保持读兜底。
+- 后期维护成本：4/10。后续如果需要更精确地处理未知 call clobber，可以单独在 call lowering 处建模，不需要恢复全量 register global 写回。
+
+潜在风险是：如果某些函数内确实依赖“一个 register varnode 写入，另一个没有 SSA def 的同寄存器 varnode 再读”，现在会走全局寄存器兜底，而不是本地最新值。libuv 当前样本没有触发 lower/verify 失败。更完整的方案是增加函数内 register-state map，而不是恢复 module-global store。
