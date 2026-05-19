@@ -222,3 +222,60 @@
 1. 新增 LIEF ELF `LoadImage`，支持按 VA 从 executable segment 读字节。
 2. 新增 native pcode 工具，输入 ELF、函数地址/长度、`.sla/.pspec`，输出 P-Code。
 3. 再把 native pcode 工具接到现有 `PcodeToLLVM`。
+
+### 2026-05-19 LIEF ELF LoadImage 和 native pcode 工具
+
+继续按计划推进第一步本地闭环，先不接主 `bin2llvm` CLI。
+
+修改点：
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/LiefElfLoadImage.h:1-32`
+   - 新增 `LiefElfLoadImage`，继承 `ghidra::LoadImage`。
+   - 只负责把 ELF 可执行 `PT_LOAD` 段暴露成 VA 到字节的读取视图。
+2. `external/NotDec-bin2llvm/lib/LiefElfLoadImage.cpp:1-59`
+   - 从 LIEF `Binary::segments()` 收集 `LOAD + X` 段。
+   - `loadFill(...)` 按 VA 查段，未映射地址和 bss 范围先读 0。
+3. `external/NotDec-bin2llvm/lib/CMakeLists.txt:38-54`
+   - 新增 `notdec-bin2llvm-native` 静态库。
+   - 只在 `NOTDEC_BIN2LLVM_ENABLE_LIEF=ON` 且 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON` 时构建。
+4. `external/NotDec-bin2llvm/tools/notdec-native-pcode.cpp:1-127`
+   - 新增 `notdec-native-pcode` 工具。
+   - 参数为 `<elf-file> <sla-file> -a <address> -l <length> [-p root-sla-dir] [-s pspec-file]`。
+   - 工具流程是 LIEF 解析 ELF，构造 `LiefElfLoadImage`，再调用 `collectSleighPcode(...)` 输出 P-Code。
+5. `external/NotDec-bin2llvm/tools/CMakeLists.txt:90-101`
+   - 新增 `notdec-native-pcode` 构建目标。
+6. `external/NotDec-bin2llvm/lib/SleighLift.cpp:5-213`
+   - 增加 XML `.sla` 检查。
+   - 当前 libsla 入口需要压缩 `.sla`，遇到 Ghidra release 里的 XML debug `.sla` 时明确报错，避免直接抛 `LowlevelError`。
+
+验证：
+
+1. `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-native -DNOTDEC_BIN2LLVM_ENABLE_LIEF=ON -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON`
+   - 配置通过。
+2. `cmake --build /tmp/notdec-bin2llvm-native --target notdec-native-pcode -j4`
+   - 构建通过。
+   - 首次构建会编译 LIEF 和 Sleigh/Ghidra 依赖，耗时较长。
+3. `cmake --build /tmp/notdec-bin2llvm-native --target notdec-lief-elf -j4`
+   - 构建通过。
+4. `/tmp/notdec-bin2llvm-native/bin/notdec-lief-elf /bin/ls`
+   - 输出正常，`/bin/ls` 被识别为 ELF `DYN`，entry point 为 `0x6aa0`。
+5. `/tmp/notdec-bin2llvm-native/bin/notdec-native-pcode /bin/ls /sn640/myprograms/ghidra_11.0.1_PUBLIC/Ghidra/Processors/x86/data/languages/x86-64.sla -a 0x6aa0 -l 16 -s /sn640/myprograms/ghidra_11.0.1_PUBLIC/Ghidra/Processors/x86/data/languages/x86-64.pspec`
+   - 工具能启动并进入 native ELF + libsla 路径。
+   - 这里没有得到 P-Code，因为该 `.sla` 是 XML debug 格式，当前 libsla 报错：`libsla expects a compressed .sla file`。
+
+性能影响：
+
+1. 默认开关仍然关闭，默认构建和运行不引入 LIEF / Sleigh。
+2. 还没有接入 NotDec 主 pipeline，不需要对 fortune 用例做运行时间对比。
+
+复杂度评分：
+
+1. 实现效果：7/10。ELF 到 `LoadImage` 的接线已经完成，native pcode 工具也能走到 libsla；剩下阻塞是压缩 `.sla` 输入。
+2. 理解成本：6/10。新增 `LiefElfLoadImage` 一层，但职责很小，只是 VA 读字节。
+3. 维护成本：6/10。新库和工具都在双开关下，默认链路不受影响。
+
+后续：
+
+1. 解决压缩 `.sla` 来源。可以增加一个可选的 Sleigh spec compiler 工具，或者在构建时允许生成 compressed `.sla`。
+2. 用 compressed x86-64 `.sla` 跑通 `/bin/ls` entry 附近 P-Code 输出。
+3. 再新增 native LLVM 输出工具，复用现有 `PcodeToLLVM`。
