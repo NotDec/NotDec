@@ -15,3 +15,7 @@
 	path = external/NotDec-evm2llvm
 	url = git@github.com:NotDec/NotDec-evm2llvm.git
 	branch = main
+[submodule "external/gtirb2llvm"]
+	path = external/gtirb2llvm
+	url = git@github.com:am009/gtirb2llvm.git
+	branch = main
