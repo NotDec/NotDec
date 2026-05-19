@@ -237,3 +237,89 @@ cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-module-llvm -j
 - 后期维护成本：6/10。后续如果支持更多架构，需要为对应架构补 alias 规则；通用 `RegisterStorage` 不需要改。
 
 更好的方案是让 Ghidra 导出 register bank 的完整定义，而不是在 C++ 里写 x86-64 alias 表。当前先用小范围规则修复真实样本，避免扩大 Ghidra 导出 schema。
+
+## 2026-05-19 追加：heritage stack varnode 改成本地 alloca
+
+### 用户追加 prompt
+
+```text
+能不能直接获取到每个函数栈的大小，然后直接进一步在函数开头生成alloca，然后stack varnode变成栈空间访问？
+
+按照这个方式改进
+```
+
+### 背景
+
+libuv 的 heritage IR 里没有显式的函数入口 `RSP -= frame_size` 和出口 `RSP += frame_size`。Ghidra 已经把普通栈帧访问抽成了 `Stack[-0x30]` 这类 frame-relative varnode。
+
+之前 lower `Stack[-x]` 时会读 `@RSP`，再加负偏移并走 `inttoptr`。这能生成 IR，但把已经抽象好的本地栈又还原成了临时地址模型，不利于后续类型恢复和局部变量识别。
+
+### 实现
+
+1. [`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:359)
+   新增 `StackFrame`，记录本函数负偏移 stack varnode 的覆盖范围和入口 alloca。
+2. [`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:462)
+   `createStackFrame()` 扫描 `Program.Varnodes`，只收集 `space == "stack"` 且 signed offset 为负的 varnode。用最低偏移和最高覆盖端点决定 alloca 大小。
+3. [`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:618)
+   `write(...)` 遇到 stack varnode 时，把值同步 store 到对应 alloca 位置，避免同一栈槽后续通过另一个 varnode 读不到写入。
+4. [`external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp`](/sn640/NotDec/external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:1371)
+   `pointerForStackVarnode(...)` 把 `Stack[-x]` 映射到 `%notdec_stack` 上的 byte GEP；`readAddressTiedInput(...)` 直接从这个 pointer load。
+5. [`external/NotDec-bin2llvm/ARCHITECTURE.md`](/sn640/NotDec/external/NotDec-bin2llvm/ARCHITECTURE.md:249)
+   增加“栈”小节，记录 heritage stack varnode 生成函数内 byte-addressed alloca，正偏移暂不纳入。
+
+### 验证
+
+编译：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-build --target notdec-heritage-module-llvm -j4
+```
+
+重跑 libuv：
+
+```bash
+/usr/bin/time -p /tmp/notdec-bin2llvm-build/bin/notdec-heritage-module-llvm \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.json \
+  -o /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.ll
+```
+
+结果：
+
+- lowered function bodies: 478
+- failed function bodies: 0
+- real 14.37s
+
+再跑：
+
+```bash
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.ll \
+  -o /sn640/NotDec-Exp/Bench2/bin2llvm-ir/dynamic-libs/libuv/shared-library/module-all.bc
+```
+
+通过。
+
+典型输出：
+
+```llvm
+define void @FUN_00109f80(i64 %param_1) {
+entry:
+  %notdec_stack = alloca [56 x i8], align 16
+  %"vn:1005.stack" = getelementptr inbounds i8, ptr %notdec_stack, i64 8
+  %"vn:1005.mem" = load i64, ptr %"vn:1005.stack", align 1
+}
+```
+
+说明：
+
+- `Stack[-0x38]` 映射到 alloca offset 0。
+- `Stack[-0x30]` 映射到 alloca offset 8。
+- 仍然可能看到少量 `@RSP` 读，那是 heritage 里显式计算栈地址值的 P-Code，不是 `Stack[-x]` 本身的内存访问。
+
+### 评分
+
+- 实现效果：8/10。当前 libuv 样本里的本地 stack varnode 已经从 `@RSP + offset` 改成函数内 alloca 访问。
+- 复杂度：5/10。只在 `HeritageLowerer` 内增加一份 per-function 状态，没有改 JSON schema。
+- 后期维护成本：5/10。后续可以在这个 alloca 基础上继续做局部变量拆分或结构化；正偏移栈参数需要单独策略。
+
+更好的后续方案是把 stack varnode 按 high variable 或重叠区间进一步拆成多个 alloca，但当前先保留一个 byte-addressed frame，语义更稳。
