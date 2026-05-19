@@ -57,6 +57,18 @@
 
 那么优先看这个目录。
 
+## 2.1 EVM / PHI 调试
+
+调 Gigahorse 的 PHI 来源时，默认把 inliner 关掉。
+
+原因很直接：
+
+- 先看原始 CFG 和 block-level PHI 事实。
+- inline 以后，return edge 和 PHI 来源会混在一起，不容易分清是导出问题还是 inline 问题。
+- 只有明确要查 inline 行为时，再单独打开。
+
+对应的 wrapper 常用参数是 `--gigahorse-extra-arg=--disable_inline`。
+
 ## 3. 工作文件夹里常见文件及作用
 
 下面按当前仓库里实际会出现的文件说明。不是每次运行都会生成全部文件；是否出现取决于输入、`tr-level`、是否走到 `llvm2c`、以及具体 pass 是否执行到对应阶段。
@@ -223,3 +235,11 @@
    - 继续追 binarysub 内部传播细节
 8. `llvm2c-before-demotessa.ll` / `llvm2c-after-demotessa.ll`
    - 如果 `.ll` 看起来正常，但 `.c` 输出异常，再看这里
+
+## 5. Bench2 本机跑法
+
+如果要看当前这台机器上的 Bench2 真实项目跑法，请去：
+
+- [`external/NotDec-bin2llvm/DEBUG.md`](/sn640/NotDec/external/NotDec-bin2llvm/DEBUG.md)
+
+主仓库这里只保留通用的调试说明，不重复写 bin2llvm 的本机命令。

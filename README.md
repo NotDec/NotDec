@@ -43,6 +43,7 @@ Based on Ubuntu 22.04
 
 - Use `--gen-work-dir` (or `-g`) to emit intermediate work files. By default, NotDec writes them to `<input>.notdec/`; use `--work-dir=<path>` to override the directory.
 - The robustness of the backend in generating C code may be insufficient; encountering complex statements may still cause errors or generate syntax errors.
+- When working on `external/NotDec-evm2llvm` PHI source issues, keep Gigahorse inlining disabled by default and only enable it for explicit inline tests.
 
 # 中文
 
@@ -80,6 +81,7 @@ Based on Ubuntu 22.04
 
 - 使用`--gen-work-dir`（或`-g`）可以输出中间工作文件。默认目录是`<input>.notdec/`；如果需要固定路径，可用`--work-dir=<path>`覆盖。
 - 后端生成C代码的鲁棒性可能不足，遇到复杂的语句可能依然会报错或产生语法错误。
+- 处理 `external/NotDec-evm2llvm` 的 PHI 来源问题时，Gigahorse 默认关掉 inliner，只在明确测试 inline 行为时再打开。
 
 ### 资料收集
 
