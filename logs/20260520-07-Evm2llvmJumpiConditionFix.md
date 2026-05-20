@@ -105,11 +105,14 @@
 
 新的修复：
 
-- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:249-262`
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:249-256`
   - 删除 `isConcreteSuccessorValue()` 和“排除 concrete successor”的启发式。
-  - `JUMPI` 一个 use 时继续兼容旧 facts，用 `Uses[0]` 当 condition。
   - `JUMPI` 两个 use 时固定用 `Uses[1]` 当 condition。
   - 其他 use 数量直接报错，不再猜。
+- `external/NotDec-evm2llvm/test/fixtures/phi_branch/TAC_Use.csv`
+  - 给原来单 use 的 `JUMPI` 补上 destination use。
+- `external/NotDec-evm2llvm/test/fixtures/phi_branch/TAC_Variable_Value.csv`
+  - 补上 destination 常量 `0x10target = 0x10`。
 
 再次验证：
 
@@ -122,9 +125,19 @@
 结果：
 
 - 0394 输出里不再有 `br i1 true`。
-- `phi_branch` 单 use 兼容路径通过。
+- `phi_branch` 已改成双 use，并通过。
 - `jumpi_condition` 双 use 路径通过。
 
 剩余风险：
 
 - 现在不再按 successor 猜条件，主要风险变成：如果未来 Gigahorse 改变 `TAC_Use` position 对 `JUMPI` 的含义，需要同步更新这里的约定。
+
+## 补充调整：删除单 use 兼容
+
+进一步检查后，单 use `JUMPI` 只存在于旧 fixture，真实 0394 facts 里的 6 个 `JUMPI` 都是两个 use。为避免错误 facts 被默默降错，已删除单 use 兼容：
+
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:249-256`
+  - `jumpiConditionUseIndex()` 现在严格要求 `JUMPI` 有两个 use。
+  - 两个 use 以外直接报错：`must have destination and condition uses`。
+
+验证同上，`phi_branch`、`jump_table`、`jumpi_condition` 回归通过，0394 重新生成后仍通过 LLVM 22 `llvm-as` 和 `opt -passes=verify`。
