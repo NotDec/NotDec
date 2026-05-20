@@ -347,3 +347,77 @@
 
 1. 在 native pcode 已跑通的基础上新增 native LLVM 输出工具。
 2. 再考虑把 ELF machine 到 `.sla/.pspec` 的映射做成自动选择，减少命令行参数。
+
+### 2026-05-20 native LLVM 输出工具
+
+继续推进 native 路径，先不接主 `bin2llvm` CLI，只新增一个独立工具验证：
+
+`ELF -> LIEF LoadImage -> Sleigh raw P-Code -> PcodeToLLVM -> .ll`
+
+修改点：
+
+1. `external/NotDec-bin2llvm/tools/notdec-native-llvm.cpp:1`
+   - 新增 `notdec-native-llvm` 工具。
+   - 参数为
+     `<elf-file> <sla-file> -a <address> -l <length> -o <output.ll> [-p root-sla-dir] [-s pspec-file]`。
+   - 内部复用 `LiefElfLoadImage`、`collectSleighPcode(...)` 和
+     `buildPcodeModule(...)`，并在写文件前调用 LLVM verifier。
+2. `external/NotDec-bin2llvm/tools/CMakeLists.txt:102`
+   - 在 `NOTDEC_BIN2LLVM_ENABLE_LIEF=ON` 且
+     `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON` 时构建 `notdec-native-llvm`。
+3. `external/NotDec-bin2llvm/include/notdec-bin2llvm/Pcode.h:16`
+   - 增加 raw Sleigh 常见 opcode：`CALL`、`CALLIND`、`BRANCHIND`、
+     `INT_CARRY`、`INT_SCARRY`、`INT_DIV`、`INT_REM`、`BOOL_AND`、
+     `BOOL_OR`、`BOOL_XOR`。
+4. `external/NotDec-bin2llvm/lib/SleighLift.cpp:41`
+   - 把上述 Ghidra raw P-Code opcode 映射到 `PcodeOpcode`。
+5. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:108`
+   - `BRANCHIND` 作为 terminator，当前先跳到 `notdec_exit`，表示控制流离开
+     当前可解析范围。
+6. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:492`
+   - `INT_CARRY` / `INT_SCARRY` 分别用 LLVM unsigned / signed add overflow
+     intrinsic lowering。
+7. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:520`
+   - `BOOL_AND` / `BOOL_OR` / `BOOL_XOR` 先转成 i1 条件再做布尔运算。
+8. `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:604`
+   - `CALL` / `CALLIND` 暂时 lowering 成 vararg helper call，保留调用副作用占位。
+
+验证：
+
+1. `cmake --build /tmp/notdec-bin2llvm-native-ghidra --target notdec-native-llvm -j4`
+   - 构建通过。
+2. `/tmp/notdec-bin2llvm-native-ghidra/bin/notdec-native-llvm /bin/ls /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.sla -a 0x6aa0 -l 16 -s /sn640/ghidra/Ghidra/Processors/x86/data/languages/x86-64.pspec -o /tmp/notdec-native-ls-entry.ll`
+   - 生成 `.ll` 成功。
+3. 同一命令把 `-l` 扩大到 `64`、`256`、`512`、`1024`
+   - 都能生成 `.ll`。
+4. 对 `/tmp/notdec-native-ls-entry-1024.ll` 跑：
+   - `llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-native-ls-entry-1024.ll -o /tmp/notdec-native-ls-entry-1024.bc`
+   - `llvm-22.1.0.obj/bin/opt -passes=verify /tmp/notdec-native-ls-entry-1024.bc -o /tmp/notdec-native-ls-entry-1024.opt.bc`
+   - assemble 和 verifier 都通过。
+
+当前限制：
+
+1. `CALL` / `CALLIND` 还只是 helper，占位表达副作用，不等于完整调用语义。
+2. `BRANCHIND` 还没有解析跳转表或间接目标，当前直接到 exit block。
+3. `INT_DIV` / `INT_REM` 目前直接用 LLVM `udiv/urem`，还没有显式建模除零异常。
+4. `notdec_ram` 仍是临时统一内存数组，不是真实 ELF memory model。
+
+性能影响：
+
+1. 默认开关仍关闭，不影响默认构建和 NotDec 主链路。
+2. 仍未接入 NotDec pass pipeline，不需要对 fortune 用例做运行时间对比。
+
+复杂度评分：
+
+1. 实现效果：8/10。已经能从真实 `/bin/ls` raw P-Code 生成可验证 LLVM IR，并跑过
+   entry 起始 1024 字节。
+2. 理解成本：6/10。新增工具是现有 native pcode 和 sleigh llvm 的组合；新增 opcode
+   lowering 都在 `PcodeToLLVM` 一处。
+3. 维护成本：6/10。实验路径仍在双开关下；后续要把 helper call 和间接跳转逐步替换成
+   更精确的语义。
+
+后续：
+
+1. 做 ELF machine 到 `.sla/.pspec` 自动映射，减少手动参数。
+2. 给 native LLVM 工具加一个小回归测试，至少覆盖 `/bin/ls` entry 起始片段。
+3. 逐步替换 `CALL/CALLIND/BRANCHIND` 的 helper / exit fallback。
