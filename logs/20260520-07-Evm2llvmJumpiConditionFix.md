@@ -54,3 +54,39 @@
 
 这次修的是 `JUMPI` 的 operand 选择，不动其他 opcode lowering。
 后面如果再看到 `br i1 true`，优先先看事实里 `JUMPI` 的 use 列表，而不是先怀疑 LLVM verifier。
+
+## 补充 review
+
+复查最新提交并用 `0394_19494617_261e203d6f_433b0912f7c8` 的真实 facts 重生成 IR 时，发现原修复还有一个真实样例会触发的问题：
+
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:257`
+  - `isConcreteSuccessorValue()` 会遍历 successors，并调用 `blockIdConstant()`。
+  - 真实样例里有 `0xeb0x0`、`0xef0xf44` 这类带 context 后缀的 block id，不能被 `blockIdConstant()` 解析成纯地址。
+  - 原代码遇到这个 error 后直接 `continue`，但没有 `takeError()` / `consumeError()`，LLVM 的 `Expected` 析构时会 abort。
+
+修复：
+
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:258`
+  - 在跳过不可解析 successor 前调用 `llvm::consumeError(successorConstantOrError.takeError())`。
+  - 语义不变：不可解析 successor 仍然不能用来判断 concrete target，只是把错误正确消费掉。
+
+验证：
+
+- `cmake --build build-evm2llvm --target evm2llvm -j4`
+- 用已有 facts 更新：
+  - `/sn640/NotDecChainExp/apehex_evm_contracts/notdec-runs/20260520-evm2llvm-train-batch010/outputs/0394_19494617_261e203d6f_433b0912f7c8.ll`
+- LLVM 22 验证：
+  - `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as ...0394...ll -o ...0394...bc`
+  - `/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output ...0394...bc`
+- 回归：
+  - `ctest --test-dir build-evm2llvm -R 'evm2llvm.fixture.(phi_branch|jump_table|jumpi_condition)' --output-on-failure`
+
+更新后的 0394 输出里，原来的 `br i1 true` 已经变成真实条件：
+
+- selector dispatch 使用 `%evm.branch.cond`
+- `callvalue == 0` 使用 `%evm.branch.cond`
+- delegatecall 成败分支使用 `%evm.branch.cond`
+
+剩余风险：
+
+- 当前条件选择还是启发式：多个 use 时排除 concrete successor，取剩下的 operand。它比旧逻辑正确，但如果某个条件值本身刚好等于 successor 地址，仍可能误判。后续最好让 Gigahorse facts 显式标出 `JUMPI` 的 destination 和 condition，或者在 loader 层按 opcode operand 角色拆开。
