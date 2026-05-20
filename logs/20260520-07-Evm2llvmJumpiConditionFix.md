@@ -55,7 +55,7 @@
 这次修的是 `JUMPI` 的 operand 选择，不动其他 opcode lowering。
 后面如果再看到 `br i1 true`，优先先看事实里 `JUMPI` 的 use 列表，而不是先怀疑 LLVM verifier。
 
-## 补充 review
+## 补充 review：真实样例 abort
 
 复查最新提交并用 `0394_19494617_261e203d6f_433b0912f7c8` 的真实 facts 重生成 IR 时，发现原修复还有一个真实样例会触发的问题：
 
@@ -87,6 +87,44 @@
 - `callvalue == 0` 使用 `%evm.branch.cond`
 - delegatecall 成败分支使用 `%evm.branch.cond`
 
+## 补充调整：去掉 successor 启发式
+
+继续确认 `TAC_Use.csv` 的第三列后，发现它在 `FactLoader` 里已经作为 operand position 排序：
+
+- `external/NotDec-evm2llvm/lib/FactLoader.cpp:140`
+  - 读取 `TAC_Use.csv` 第三列为 position。
+- `external/NotDec-evm2llvm/lib/FactLoader.cpp:258`
+  - 按 position 排序后写入 `TacStatement::Uses`。
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/TacProgram.h:15`
+  - 注释也说明 uses/defs 已按 position 排好。
+
+因此对 Gigahorse 导出的两操作数 `JUMPI`，可以按 EVM 栈语义直接处理：
+
+- `Uses[0]` 是 destination。
+- `Uses[1]` 是 condition。
+
+新的修复：
+
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:249-262`
+  - 删除 `isConcreteSuccessorValue()` 和“排除 concrete successor”的启发式。
+  - `JUMPI` 一个 use 时继续兼容旧 facts，用 `Uses[0]` 当 condition。
+  - `JUMPI` 两个 use 时固定用 `Uses[1]` 当 condition。
+  - 其他 use 数量直接报错，不再猜。
+
+再次验证：
+
+- `cmake --build build-evm2llvm --target evm2llvm -j4`
+- 重新生成并更新 `0394_19494617_261e203d6f_433b0912f7c8.ll`
+- `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as ...0394...ll -o ...0394...bc`
+- `/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify -disable-output ...0394...bc`
+- `ctest --test-dir build-evm2llvm -R 'evm2llvm.fixture.(phi_branch|jump_table|jumpi_condition)' --output-on-failure`
+
+结果：
+
+- 0394 输出里不再有 `br i1 true`。
+- `phi_branch` 单 use 兼容路径通过。
+- `jumpi_condition` 双 use 路径通过。
+
 剩余风险：
 
-- 当前条件选择还是启发式：多个 use 时排除 concrete successor，取剩下的 operand。它比旧逻辑正确，但如果某个条件值本身刚好等于 successor 地址，仍可能误判。后续最好让 Gigahorse facts 显式标出 `JUMPI` 的 destination 和 condition，或者在 loader 层按 opcode operand 角色拆开。
+- 现在不再按 successor 猜条件，主要风险变成：如果未来 Gigahorse 改变 `TAC_Use` position 对 `JUMPI` 的含义，需要同步更新这里的约定。
