@@ -658,3 +658,58 @@ Ghidra 会尽量应用 relocation。native 第一版只实现入口发现和 PLT
 4. direct-flow decode 可能串函数，必须用 symbol size、eh_frame range、下一个入口限制。
 5. 函数发现变多后，lowering 失败也会变多。计划里要区分“发现成功”“decode 成功”“lower 成功”。
 
+## 2026-05-20 实现记录：第一步框架和报告
+
+本次完成“第一步：只做框架和报告”。还没有做 relocation / PLT、eh_frame、递归 decode。
+
+改动：
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/NativeAnalysis.h:17`
+   - 新增 `NativeFunctionConfidence`。
+   - `NativeProgramState` 在 `:56` 定义共享状态，保存内存段、section、function seed、source 统计和 note。
+   - `NativeAnalyzer` / `NativeAnalysisManager` 在 `:94`、`:108` 定义轻量 analyzer 接口和固定顺序调度器。
+2. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:71`
+   - 新增 `ElfLoadAnalyzer`，检查 executable `PT_LOAD`。
+   - `:89` 新增 `ElfEntryAnalyzer`，处理 `e_entry`、`DT_INIT`、`DT_FINI`、`DT_INIT_ARRAY`、`DT_PREINIT_ARRAY`、`DT_FINI_ARRAY`。
+   - `:143` 新增 `ElfSymbolAnalyzer`，收集 defined `STT_FUNC` 且落在 executable segment 的符号。
+   - `:170` 新增 `ReportAnalyzer`，输出 seed 总数、source 统计、confidence 统计、executable sections 和 seed 列表。
+   - `:261` 构造 `NativeProgramState`，从 LIEF segment/section 建内存和 section 索引。
+3. `external/NotDec-bin2llvm/tools/notdec-native-discover.cpp:34`
+   - 新增独立 CLI：`notdec-native-discover <elf-file>`。
+4. `external/NotDec-bin2llvm/lib/CMakeLists.txt:40`
+   - `notdec-bin2llvm-native` 编进 `NativeAnalysis.cpp`。
+5. `external/NotDec-bin2llvm/tools/CMakeLists.txt:91`
+   - 新增 `notdec-native-discover` target。
+   - `:101` 新增 `/bin/ls` smoke test：`notdec.native_discover.x86_64_smoke`。
+
+验证：
+
+```bash
+cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-native-ghidra -DNOTDEC_BIN2LLVM_ENABLE_LIEF=ON -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON -DNOTDEC_BIN2LLVM_GHIDRA_SOURCE_DIR=/sn640/ghidra
+cmake --build /tmp/notdec-bin2llvm-native-ghidra --target notdec-native-discover -j4
+ctest --test-dir /tmp/notdec-bin2llvm-native-ghidra -R notdec.native_discover.x86_64_smoke --output-on-failure
+/tmp/notdec-bin2llvm-native-ghidra/bin/notdec-native-discover /sn640/NotDec-Exp/Bench2/rootfs/usr/lib/x86_64-linux-gnu/libuv.so.1.0.0
+```
+
+结果：
+
+1. `/bin/ls` smoke test 通过。
+2. libuv report：
+   - `function seeds: 311`
+   - `elf-symbol: 307`
+   - `dt-init: 1`
+   - `dt-fini: 1`
+   - `dt-init-array: 1`
+   - `dt-fini-array: 2`
+3. libuv executable sections 能看到 `.init`、`.plt`、`.plt.got`、`.plt.sec`、`.text`、`.fini`。
+4. `e_entry = 0` 没有被加入 seed。
+
+性能影响：
+
+这次只改 `external/NotDec-bin2llvm` 的 native 实验工具，没有接入 NotDec 主 pass pipeline，不影响 fortune 当前关注用例。libuv discovery 本身在当前机器上是瞬时完成，输出规模主要来自 311 行 seed 报告。
+
+评分：
+
+1. 实现效果：8/10。第一步验收达成，能解释 libuv 当前入口来源；但还没覆盖 eh_frame 和 direct-flow。
+2. 复杂度：4/10。新增状态和 analyzer 接口很小，主要复杂度来自 LIEF ELF 信息整理。
+3. 维护成本：4/10。后续 relocation、eh_frame、decode 可以接在同一 state 上，但如果 analyzer 继续增多，应该拆文件。
