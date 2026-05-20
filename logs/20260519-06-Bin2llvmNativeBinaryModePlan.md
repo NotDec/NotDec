@@ -421,3 +421,72 @@
 1. 做 ELF machine 到 `.sla/.pspec` 自动映射，减少手动参数。
 2. 给 native LLVM 工具加一个小回归测试，至少覆盖 `/bin/ls` entry 起始片段。
 3. 逐步替换 `CALL/CALLIND/BRANCHIND` 的 helper / exit fallback。
+
+### 2026-05-20 x86-64 spec 自动选择和 smoke test
+
+继续推进 native LLVM 工具的可用性，先解决两个小问题：
+
+1. 手动传 `.sla/.pspec` 命令太长，不利于后面批量跑 Bench2。
+2. 之前没有 CTest 入口，新工具容易被后续改动破坏。
+
+修改点：
+
+1. `external/NotDec-bin2llvm/tools/notdec-native-llvm.cpp:38`
+   - usage 改成 `<elf-file> [sla-file] ...`，`sla-file` 变成可选位置参数。
+2. `external/NotDec-bin2llvm/tools/notdec-native-llvm.cpp:54`
+   - 参数解析支持省略 `sla-file`，保留手动传入 `.sla`、`-p`、`-s` 的调试入口。
+3. `external/NotDec-bin2llvm/tools/notdec-native-llvm.cpp:115`
+   - 新增默认 x86 spec root：
+     `NOTDEC_BIN2LLVM_DEFAULT_GHIDRA_SOURCE_DIR/Ghidra/Processors/x86/data/languages`。
+4. `external/NotDec-bin2llvm/tools/notdec-native-llvm.cpp:120`
+   - 新增自动 spec 选择。当前只支持 `LIEF::ELF::ARCH::X86_64`，自动选择
+     `x86-64.sla` 和同目录 `x86-64.pspec`。
+5. `external/NotDec-bin2llvm/CMakeLists.txt:7`
+   - 引入 `CTest`，让子项目可以注册 smoke test。
+6. `external/NotDec-bin2llvm/tools/CMakeLists.txt:112`
+   - 给 `notdec-native-llvm` 注入
+     `NOTDEC_BIN2LLVM_DEFAULT_GHIDRA_SOURCE_DIR`，默认来自
+     `NOTDEC_BIN2LLVM_GHIDRA_SOURCE_DIR`。
+7. `external/NotDec-bin2llvm/tools/CMakeLists.txt:117`
+   - 新增 `notdec.native_llvm.x86_64_smoke` 测试。
+   - 测试流程是 `/bin/ls` entry 起始 1024 字节自动选 spec 生成 `.ll`，再用 LLVM 22
+     `llvm-as` 和 `opt -passes=verify` 验证。
+8. `external/NotDec-bin2llvm/ARCHITECTURE.md:350`
+   - 文档说明 `notdec-native-llvm` 的 x86-64 自动 spec 选择和手动覆盖方式。
+
+验证：
+
+1. `cmake -S external/NotDec-bin2llvm -B /tmp/notdec-bin2llvm-native-ghidra -DNOTDEC_BIN2LLVM_ENABLE_LIEF=ON -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON -DNOTDEC_BIN2LLVM_GHIDRA_SOURCE_DIR=/sn640/ghidra`
+   - 配置通过。
+2. `cmake --build /tmp/notdec-bin2llvm-native-ghidra --target notdec-native-llvm -j4`
+   - 构建通过。
+3. `/tmp/notdec-bin2llvm-native-ghidra/bin/notdec-native-llvm /bin/ls -a 0x6aa0 -l 1024 -o /tmp/notdec-native-ls-auto.ll`
+   - 不手写 `.sla/.pspec`，生成 `.ll` 成功。
+4. `llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-native-ls-auto.ll -o /tmp/notdec-native-ls-auto.bc`
+   - assemble 通过。
+5. `llvm-22.1.0.obj/bin/opt -passes=verify /tmp/notdec-native-ls-auto.bc -o /tmp/notdec-native-ls-auto.opt.bc`
+   - verifier 通过。
+6. `ctest --test-dir /tmp/notdec-bin2llvm-native-ghidra -R notdec.native_llvm.x86_64_smoke --output-on-failure`
+   - 1 个测试通过。
+
+当前限制：
+
+1. 自动选择目前只支持 x86-64。
+2. smoke test 用的是本机 `/bin/ls` 和固定 entry `0x6aa0`，适合当前开发机，不适合当作跨发行版稳定 oracle。
+
+性能影响：
+
+1. 默认 `NOTDEC_BIN2LLVM_ENABLE_SLEIGH=OFF`，默认构建仍不引入 native Sleigh 路径。
+2. smoke test 只在 `BUILD_TESTING=ON` 且双开关打开时注册，不影响 NotDec 主链路。
+
+复杂度评分：
+
+1. 实现效果：8/10。常用 x86-64 命令已经简化，且有最小回归测试兜底。
+2. 理解成本：5/10。自动选择逻辑只在 `notdec-native-llvm` 工具内，当前没有新公共抽象。
+3. 维护成本：6/10。测试依赖 `/bin/ls` 固定 entry，后面要换成仓库内小 ELF 样本才更稳。
+
+后续：
+
+1. 放一个仓库内的极小 x86-64 ELF fixture，替换 `/bin/ls` smoke test。
+2. 把自动 spec 选择抽到公共 helper，让 `notdec-native-pcode` 也能复用。
+3. 开始跑 Bench2 manifest 里的 x86-64 ELF entry 片段，统计下一批 lowering 缺口。
