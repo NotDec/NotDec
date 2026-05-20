@@ -357,3 +357,96 @@ libuv 目标：
 1. `.eh_frame` 解析是按 section bytes 线性扫描。
 2. 当前只接 `notdec-native-discover`，不接主 NotDec pass pipeline。
 3. 不需要对 fortune 当前关注用例做同口径时间对比。
+
+## 实现记录（2026-05-20，已完成第一版）
+
+### 改动文件和函数
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/NativeAnalysis.h:36`
+   - `NativeFunctionSeed` 增加半开区间 range 字段：`RangeStart`、`RangeEnd`、`RangeSource`。
+   - 选择半开区间 `[start,end)`，避免 inclusive end 溢出，后续作为 decode 边界更直接。
+2. `external/NotDec-bin2llvm/include/notdec-bin2llvm/NativeAnalysis.h:57`
+   - 新增 `NativeEhFrameStats`，记录 `.eh_frame_hdr`、`.eh_frame`、CIE/FDE、invalid、unsupported、seed 合并数量。
+3. `external/NotDec-bin2llvm/include/notdec-bin2llvm/NativeAnalysis.h:125`
+   - `NativeProgramState` 增加 `ehFrameStats()` 和 `addFunctionRange(...)`。
+4. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:68`
+   - 新增 `readBytes(...)`、`executableRangeContains(...)`、`addUnsupportedEhFrameSample(...)`。
+5. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:353`
+   - 新增 `EhFrameAnalyzer`，priority 为 50，顺序在 `ElfSymbolAnalyzer` 后、`ReportAnalyzer` 前。
+6. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:399`
+   - `EhFrameReader::parse()` 线性扫描 `.eh_frame`，支持 32-bit record length，区分 CIE / FDE。
+7. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:504`
+   - 实现 ULEB128 / SLEB128 读取。
+8. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:545`
+   - 支持第一版需要的 pointer encoding：`absptr`、`pcrel`、`udata4`、`sdata4`、`udata8`、`sdata8`、`omit`。
+9. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:667`
+   - `EhFrameReader::parseCie()` 解析 CIE augmentation，读取 `zR` 中的 FDE address encoding；`P`、`L` 只跳过，不处理语义。
+10. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:739`
+    - `EhFrameReader::parseFde()` 解析 FDE 的 `pc begin` 和 `pc range`，过滤 0 range、非 executable start、跨 executable segment range。
+    - 通过 `addFunctionSeed(..., "eh-frame", High)` 合并 seed，再通过 `addFunctionRange(...)` 写 range。
+11. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:881`
+    - `ReportAnalyzer::run()` 增加 `eh_frame` 和 `range sources` 输出，并在 seed 列表中打印 range。
+12. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:1058`
+    - `NativeProgramState::addFunctionSeed()` 在 symbol size 非 0 时填入 symbol range。
+13. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:1114`
+    - `NativeProgramState::addFunctionRange()` 合并 eh_frame range；如果与已有 range 不一致，只写 note，不强行覆盖。
+14. `external/NotDec-bin2llvm/tools/notdec-native-discover.cpp:55`
+    - 注册 `createEhFrameAnalyzer()`。
+
+### 验证
+
+构建：
+
+```bash
+cmake -S external/NotDec-bin2llvm -B external/NotDec-bin2llvm/build-native -G Ninja \
+  -DNOTDEC_BIN2LLVM_ENABLE_LIEF=ON \
+  -DNOTDEC_BIN2LLVM_ENABLE_SLEIGH=ON \
+  -DNOTDEC_BIN2LLVM_SLEIGH_SOURCE_DIR=/sn640/sleigh \
+  -DLLVM_DIR=/sn640/NotDec/llvm-22.1.0.obj/lib/cmake/llvm \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE
+cmake --build external/NotDec-bin2llvm/build-native --target notdec-native-discover -j4
+```
+
+libuv 验证：
+
+```bash
+external/NotDec-bin2llvm/build-native/bin/notdec-native-discover \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/lib/x86_64-linux-gnu/libuv.so.1.0.0 \
+  > /tmp/notdec-native-libuv-ehframe-report.txt
+```
+
+关键结果：
+
+1. `function seeds: 484`，高于计划里的 311。
+2. `sources` 中出现 `eh-frame: 480`。
+3. `.eh_frame_hdr: yes`，`.eh_frame: yes`。
+4. `CIE: 1`，`FDE: 480`，`parsed FDE: 480`。
+5. `added seeds: 173`，`overlapped seeds: 307`。
+6. `invalid: 0`，`unsupported: 0`。
+7. `range sources` 为 `eh-frame: 480`。
+
+额外确认：
+
+```bash
+readelf --debug-dump=frames \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/lib/x86_64-linux-gnu/libuv.so.1.0.0
+```
+
+`readelf` 输出确认 `.eh_frame` 中确实存在短 range FDE，例如 `0x9b40..0x9b4d`，不是 reader 错位。
+
+CTest：
+
+```bash
+ctest --test-dir external/NotDec-bin2llvm/build-native \
+  -R notdec.native_discover.x86_64_smoke --output-on-failure
+```
+
+结果：通过，`1/1`。
+
+### 性能和维护评估
+
+1. 实现效果：8/10。libuv 当前目标全部 FDE 解析成功，seed 增量符合预期，report 能直接看见 range。
+2. 复杂度：6/10。新增了一个最小 DWARF EH reader，但只限 `.eh_frame` 常见 encoding，没有引入完整 CFI 解释。
+3. 维护成本：5/10。代码集中在 `NativeAnalysis.cpp`，后续如果要支持更多 encoding 或 `.eh_frame_hdr` table，需要拆出独立文件。
+
+暂时没有更好的低成本方案。直接复用完整 DWARF 库会更重；当前 first pass 只需要 FDE start/range，线性 reader 更合适。
