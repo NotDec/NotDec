@@ -198,6 +198,17 @@ Bench2 真实项目集合在 `/sn640/NotDec-Exp/Bench2`：
 - `manifest/benchmark-needed.tsv`：目标的动态依赖。
 - `bin2llvm-ir/`：bin2llvm 相关 JSON、`.ll`、`.bc`、日志和 Ghidra project。
 
+bin2llvm native 链路写计划时，优先按这个结构写，范围只限
+`external/NotDec-bin2llvm` 的 native 路线：
+
+1. 先说明当前目标和已有 native 状态。
+2. 再介绍 Ghidra 相关实现，明确写出源码文件和关键函数。
+3. 然后说明 native 侧要复刻哪些策略，哪些地方要保守处理或暂时不做。
+4. 最后写阶段计划、判断标准、风险和不做什么。
+
+这个写法只用于 bin2llvm native 链路；主 NotDec pass、evm2llvm、wasm2llvm、
+llvm2c 等其他任务仍按普通项目规范写计划。
+
 ## 7. 构建
 
 当前仓库依赖本地 LLVM 22，默认布局是：
