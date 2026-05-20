@@ -332,3 +332,77 @@ plt:
 2. imported symbol 没有内部地址，不能硬塞成 executable seed。
 3. 如果 LIEF 对 relocation table 分类不足，需要回到 Ghidra 的 `DT_JMPREL` 思路，自己读 dynamic table。
 4. relocation-aware pointer read 如果覆盖原始 bytes，要能追踪来源，否则后面排错困难。
+
+## 2026-05-20 实现记录：relocation / PLT 第一版
+
+本次实现了计划里的 relocation / PLT 第一版。范围仍然只在
+`external/NotDec-bin2llvm` native discovery 工具内，没有接主 NotDec pass pipeline。
+
+改动：
+
+1. `external/NotDec-bin2llvm/include/notdec-bin2llvm/NativeAnalysis.h:52`
+   - 新增 `NativeRelocationInfo`，记录 relocation address、type、symbol、addend、status 和计算出的 pointer 值。
+   - `:68` 新增 `NativePltEntry`，记录 PLT stub、GOT slot、external symbol。
+   - `:95` 在 `NativeProgramState` 中保存 relocation、relocated pointer、PLT entry。
+   - `:102` 新增 `readRawPointer(...)`，`readPointer(...)` 先查 relocated pointer，再读原始 bytes。
+   - `:104` 新增 `lookupPltExternal(...)`，给后续 decode 分类 PLT call 用。
+2. `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:123`
+   - 新增 `RelocationPltAnalyzer`。
+   - `:149` 处理 x86-64 relocation：
+     - `R_X86_64_RELATIVE` / `RELATIVE64` 计算 relocated pointer。
+     - `R_X86_64_GLOB_DAT` 对 defined symbol 计算 pointer；imported symbol 记为 external。
+     - `R_X86_64_JUMP_SLOT` 记为 external，并参与 PLT 映射。
+     - `R_X86_64_IRELATIVE` 只记录 resolver，不升 function seed。
+     - 其他类型记为 unsupported。
+   - `:186` 用 `.plt.sec` 优先、`.plt` 兜底，把 jump-slot relocation 顺序映射到 PLT stub。
+   - `:356` 在 report 里输出 relocation 总数、relocated pointer 数量、status/type 统计。
+   - `:375` 在 report 里输出 PLT external symbol 数量和前 8 个 stub 映射样例。
+   - `:486` `readPointer(...)` 改成 relocation-aware。
+3. `external/NotDec-bin2llvm/tools/notdec-native-discover.cpp:52`
+   - 在 `ElfEntryAnalyzer` 之前注册 `RelocationPltAnalyzer`。
+
+验证：
+
+```bash
+cmake --build /tmp/notdec-bin2llvm-native-ghidra --target notdec-native-discover -j4
+ctest --test-dir /tmp/notdec-bin2llvm-native-ghidra -R notdec.native_discover.x86_64_smoke --output-on-failure
+/tmp/notdec-bin2llvm-native-ghidra/bin/notdec-native-discover /sn640/NotDec-Exp/Bench2/rootfs/usr/lib/x86_64-linux-gnu/libuv.so.1.0.0
+```
+
+结果：
+
+1. smoke test 通过。
+2. libuv seed 数保持 `function seeds: 311`，没有回退。
+3. relocation report：
+   - `total: 232`
+   - `relocated pointers: 4`
+   - `applied: 4`
+   - `external: 224`
+   - `unsupported: 4`
+   - `X86_64_RELATIVE: 4`
+   - `X86_64_GLOB_DAT: 9`
+   - `X86_64_JUMP_SLOT: 215`
+   - `X86_64_64: 4`
+4. PLT report：
+   - `external symbols: 215`
+   - 前几个映射为：
+     - `0x8dd0 -> getenv via GOT 0x33900`
+     - `0x8de0 -> sigprocmask via GOT 0x33908`
+     - `0x8df0 -> __snprintf_chk via GOT 0x33910`
+   - 这些和 `readelf -rW` / `objdump -d -j .plt.sec` 对得上。
+
+和计划不同的地方：
+
+1. 第一版没有手写 `DT_JMPREL` parser，先用 LIEF 的 `relocations()`。libuv 当前信息足够。
+2. imported `GLOB_DAT` / `JUMP_SLOT` 没有写 relocated pointer，因为没有内部 executable 地址；只记录 external。
+3. `R_X86_64_64` 先记为 unsupported。它们是 allocator 函数指针槽，不影响当前入口发现。
+
+性能影响：
+
+当前只多了一次 relocation 线性扫描和一个 PLT 映射构造。libuv discovery 仍是瞬时完成。没有接主 pass pipeline，不影响 fortune 当前关注用例。
+
+评分：
+
+1. 实现效果：8/10。relocation-aware pointer 和 PLT external mapping 已经可用；但还没支持 `R_X86_64_64`、GOTPCRELX 和手写 dynamic relocation parser。
+2. 复杂度：5/10。新增状态较少，但 PLT stub 顺序映射依赖 x86-64 ELF 约定，后续要谨慎扩展。
+3. 维护成本：5/10。后续 `FunctionDecodeAnalyzer` 可以直接用 `lookupPltExternal(...)`，但如果要支持更多 ELF 布局，PLT 映射可能需要拆成独立 helper。
