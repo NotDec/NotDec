@@ -81,9 +81,10 @@ unsupported opcode EXTCODEHASH at 0xfc6
 
 已把这份记录里的两个问题一起收掉：
 
-- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:364-422`
-  - `RETURN` / `STOP` 的兜底返回改成按函数返回类型返回。
-  - `void` 函数继续 `ret void`，非 `void` 函数返回 `poison`，避免 verifier 报 `ret void` / `i256` 不匹配。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:94-137,364-422`
+  - `terminalStatement()` 改为只识别真实控制流 terminator。
+  - 修复 `RETURNPRIVATE` 后面还有 trailing `CONST` 时，被误判为“无 private return”的问题。
+  - 非 `void` 函数如果真的没有 `RETURNPRIVATE`，现在直接报错，不再生成假返回。
 - `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:21-886`
   - 补了 `EXTCODEHASH`、`EXTCODECOPY`、`TLOAD`、`TSTORE`、`CREATE`、`CALLCODE`、`BLOCKHASH`、`COINBASE`、`GASPRICE`、`GASLIMIT`、`BASEFEE`、`BLOBHASH`、`BLOBBASEFEE`、`PC`、`KECCAK256`、`DIFFICULTY` / `PREVRANDAO`。
   - 处理了 `PUSH0` 和常见 `PUSHn`、`DUPn`、`SWAPn` 的 TAC 入口，避免这些原样落到 `unsupported opcode`。
