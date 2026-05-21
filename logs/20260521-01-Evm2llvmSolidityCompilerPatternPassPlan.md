@@ -371,8 +371,9 @@ metadata 形式先保持简单：
 - memory dynamic array / bytes / string 对象。
 - zero slot。
 - metadata-only 模式先识别 `mload(0x40)`、对齐后的 bump、`mstore(0x40, new_ptr)` 这一类内存分配模式，并标出对象基址、大小、长度槽和 data 起点。
-- rewrite 模式再考虑把明确的 Solidity memory 对象转换成更自然的 LLVM IR 语义。小的、生命周期局部、不会逃逸到 `sha3` / `call` / `return` 之外的对象，可以尝试用 `alloca` 或 typed aggregate 表达；会作为 ABI buffer、hash buffer、call data buffer 使用的对象，必须保留和 EVM byte-addressed memory 等价的语义，不能简单全改成 `alloca`。
-- 后续如果对象已经被转换，相关 `evm_mload` / `evm_mstore` 应改写成对该对象对应偏移的 load/store；不能证明偏移和对象边界时，继续保留原 helper。
+- rewrite 模式把明确的 free memory pointer bump 改成专门 intrinsic，例如 `evm_malloca(size)`。
+- `evm_malloca(size)` 的语义是读取当前 `0x40` free memory pointer，按 Solidity 规则分配 `size` 字节并更新 `0x40`，返回分配前的 EVM memory 地址。
+- 后续如果能证明某些 `evm_mload` / `evm_mstore` 访问落在这个对象内，可以把它们标成对 `evm_malloca` 返回对象的偏移访问；不能证明偏移和对象边界时，继续保留原 helper。
 
 ### Pass 10：EventLogPass
 
@@ -442,7 +443,7 @@ metadata 形式先保持简单：
 - 不能把库模式写进 compiler pass。ERC1967、Ownable、ERC20、ERC721 都只能作为评估样例，不应成为 Solidity 编译器模式识别规则。
 - 两种模式必须共用同一套 matcher，避免 metadata-only 和 rewrite 识别结果不一致。
 - 只有含义明确、误报风险低的模式才在 rewrite 模式改 CFG 或替换 intrinsic。复杂 ABI、storage、memory 对象先标候选，等样例足够再做转换。
-- MemoryObjectPass 不能把所有 EVM memory 都直接改成 `alloca`。EVM memory 是 byte-addressed，并且经常作为 ABI/hash/call/return buffer 逃逸；只有局部对象、固定偏移、生命周期清楚时才适合改成 LLVM 对象。
+- `evm_malloca` 只抽象 Solidity free memory pointer 的 bump allocation，不改变 EVM memory 的 byte-addressed 语义。ABI/hash/call/return buffer 仍必须和原 EVM memory 行为等价。
 
 ## 判断标准
 
