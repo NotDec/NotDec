@@ -62,13 +62,6 @@ The test: Every changed line should trace directly to the user's request.
    语义问题时，要优先确认真实 CFG/SSA 语义，或者修复 Gigahorse 侧导出；如果问题复杂，
    先记录和归类，不要用 slot fallback 掩盖问题。
 
-当前关注的测试用例： test/type-recovery/realworld/cases/fortune.o3.wasm.ll
-源码在：/sn640/NotDec-Exp/ICSE-HOWARD/fortune-mod
-当前参考运行时间：2026-04-29，`NOTDEC_POINTER_ANALYSIS_MODE=original`，
-`--tr-level=2 --frozen-tr-input-ir -g`，
-workdir `/tmp/notdec-fortune-structmerge-hlayout-final`，
-`/usr/bin/time -p` 结果 `real 16.33s`。
-最新的计划需要看 `logs/` 下最新计划和日志。
 
 ## 1. Git 与 external/ 子模块
 
@@ -188,6 +181,8 @@ workdir `/tmp/notdec-fortune-structmerge-hlayout-final`，
 
 ## 6. 近期目标
 
+**bin2llvm项目**
+
 bin2LLVM 子项目近期目标：围绕 Bench2 这些真实项目生成 LLVM IR，并且语义要对。
 “能被 `llvm-as` 接受”只是底线，不能代替语义正确。
 
@@ -208,6 +203,24 @@ bin2llvm native 链路写计划时，优先按这个结构写，范围只限
 
 这个写法只用于 bin2llvm native 链路；主 NotDec pass、evm2llvm、wasm2llvm、
 llvm2c 等其他任务仍按普通项目规范写计划。
+
+**evm2llvm项目**
+
+apehex EVM 数据集和跑批目录在：
+
+- 数据集：`/sn640/NotDecChainExp/apehex_evm_contracts`
+- 运行目录：`/sn640/NotDecChainExp/evm2llvm_apehex_pilot`
+- 历史结果：`/sn640/NotDecChainExp/apehex_evm_contracts/notdec-runs`
+
+当前这条链路的跑法是：
+
+- 入口脚本：`/sn640/NotDecChainExp/evm2llvm_apehex_pilot/scripts/notdec-evm2llvm-apehex-batch.py`
+- screen 会话：`apehex-longrun`
+- 目前的循环方式：在 `screen` 里反复跑批次，批次名形如 `YYYYMMDD-evm2llvm-train-batchNNN`
+- 常用参数：`--gigahorse-dir /sn640/gigahorse-toolchain --run-root /sn640/NotDecChainExp/evm2llvm_apehex_pilot --batch-size 40 --jobs 8`
+- 输出内容：每个批次会生成 `manifest.csv`、`summary.csv`、`inputs/`、`logs/`、`outputs/`、`work/`
+- 结果目录：`/sn640/NotDecChainExp/evm2llvm_apehex_pilot/20260521-evm2llvm-train-batch001`
+
 
 ## 7. 构建
 
