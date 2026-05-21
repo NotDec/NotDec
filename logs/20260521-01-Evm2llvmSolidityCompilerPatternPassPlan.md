@@ -15,18 +15,19 @@
 
 ## 总体目标
 
-第一阶段不要急着生成好看的 Solidity 源码。先让 IR 里多出可靠的语义标注：
+第一阶段不要急着生成好看的 Solidity 源码。先把编译器主动插入、含义明确的低层逻辑提升掉：
 
 - public/external 函数的 `nonpayable`、fallback、receive、参数 ABI 解码、返回 ABI 编码。
 - compiler-generated `require` / `assert` / panic / ABI bounds check 和用户业务判断的区别。
 - address、bool、小整数、enum、bytes/string、storage packed field 这些类型线索。
 - mapping、动态数组、短 bytes/string、事件、外部调用返回冒泡等常见编译器形状。
 
-输出形式建议先保守：
+输出形式按风险分两类：
 
 - 函数级 metadata：例如 `!notdec.solidity.nonpayable`、`!notdec.solidity.entry_kind`。
 - 指令级 metadata：例如 `!notdec.solidity.abi_decode`、`!notdec.solidity.cleanup`、`!notdec.solidity.panic`。
-- 少量高层 intrinsic：只用于已经很稳定的结构，比如 ABI return、revert error、storage packed load/store。
+- 语义明确、误报风险低的模式，直接删除或替换原低层 IR，再用 metadata / 高层 intrinsic 表达语义。例如 nonpayable guard、ABI return、Panic/Error revert、returndata bubble。
+- 需要跨块推理或容易和业务逻辑混在一起的模式，先只标候选，不急着改 CFG。
 
 ## 需要识别的编译器底层模式
 
@@ -57,7 +58,8 @@
 提升目标：
 
 - 给函数标 `nonpayable`。
-- 把这段标成 compiler guard，不显示成用户手写 `if (msg.value != 0) revert()`。
+- 删除这段 compiler guard 的低层 CFG/指令，用函数 metadata 表达语义。
+- 后端不要再显示成用户手写 `if (msg.value != 0) revert()`。
 - fallback/receive 要单独处理：receive 天然允许收 ETH，fallback 是否 payable 要看有没有同类 guard。
 
 ### 3. ABI 参数解码
@@ -290,6 +292,7 @@
 
 - 识别 `callvalue == 0` 加 `revert(0,0)`。
 - 给函数标 `nonpayable`。
+- 删除已经确认是 compiler guard 的低层检查块。
 - 标出 fallback/receive 的 payable 状态。
 
 ### Pass 3：AbiDecodePass
@@ -307,7 +310,8 @@
 
 - 识别 ABI return buffer。
 - 识别静态和动态返回值编码。
-- 给 return 指令或函数返回区挂 metadata。
+- 对简单、完整的 ABI return 编码，替换成高层 return intrinsic 或等价 metadata 表达。
+- 对动态返回值或不完整 buffer，先只给 return 指令或函数返回区挂候选 metadata。
 
 ### Pass 5：SolidityRevertPass
 
@@ -316,6 +320,8 @@
 - 空 revert、`Error(string)`、`Panic(uint256)`、custom error。
 - returndata bubble。
 - panic code 分类。
+- 对完整的 Panic/Error/custom error 编码，替换成高层 revert intrinsic 或 metadata 表达。
+- 对低级调用失败后的 returndata bubble，删除手写 copy/revert 形状，标成 `revert_bubble`。
 
 ### Pass 6：ValueCleanupTypeHintPass
 
@@ -383,7 +389,7 @@
 
 ## 推荐阶段
 
-第一阶段先做不会改变 IR 的 annotation：
+第一阶段先做低风险语义转换：
 
 1. `SolidityPatternAnnotationPass`
 2. `SelectorInlinedLogicExtractionPass`
@@ -391,7 +397,7 @@
 4. `AbiReturnPass`
 5. `SolidityRevertPass`
 
-这一阶段能最快改善输出：selector 函数里的内联逻辑、nonpayable、return、panic/revert 都会更清楚。
+这一阶段能最快改善输出：selector 函数里的内联逻辑先标候选；nonpayable、简单 ABI return、panic/error revert、returndata bubble 直接提升掉。
 
 第二阶段做类型和对象：
 
@@ -417,12 +423,12 @@
 - optimizer 会重排、合并或删除很多中间块，matcher 不能只按固定基本块形状写。
 - ABI decode、memory allocation、revert encoding 都会共用 `mstore`，需要先有轻量 dataflow，不能只按相邻指令匹配。
 - 不能把库模式写进 compiler pass。ERC1967、Ownable、ERC20、ERC721 都只能作为评估样例，不应成为 Solidity 编译器模式识别规则。
-- 第一阶段最好只加 metadata，不改 CFG。等误报率低了，再考虑替换成高层 intrinsic。
+- 只有含义明确、误报风险低的模式才改 CFG 或替换 intrinsic。复杂 ABI、storage、memory 对象先标候选，等样例足够再做转换。
 
 ## 判断标准
 
 - 在 `20260520-evm2llvm-train-batch010` 这批输出上，pass 能统计每类模式的命中数量，并能 dump 到文本或 JSON。
 - 在旧 plan 的 0394 proxy 样例上，能识别 `function_selector` 里的 selector 分发边界、receive/fallback 内联 body 候选、`implementation()` 的 nonpayable guard、address return ABI encode、delegatecall returndata bubble；但不输出 ERC1967 implementation slot 语义。
 - 在包含普通业务函数的样例上，compiler guard、panic、ABI bounds check 不应被当成业务 require。
-- 新 pass 默认 annotation-only 时，IR verifier 通过，原有 evm2llvm 输出语义不变。
+- 语义转换后 IR verifier 通过；nonpayable guard、简单 ABI return、panic/error revert、returndata bubble 的原始低层形状不再作为业务逻辑输出。
 - 这次只是写 plan，不涉及主 NotDec pass pipeline；后续若接入主 pipeline，再按项目规范对 fortune 当前关注用例做同口径时间对比。
