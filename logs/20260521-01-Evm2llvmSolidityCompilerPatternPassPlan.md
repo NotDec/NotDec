@@ -263,11 +263,11 @@
 
 作用：
 
-- 统一保存识别结果。
-- 提供 metadata 名称、统计输出和 debug dump。
+- 定义公共 metadata 名称、字段格式和查询接口。
+- 提供统计输出和 debug dump。
 - 不改变 IR 语义。
 
-这是其他 pass 的公共底座，避免每个 pass 自己发明 metadata 格式。
+这更像公共基础设施，不一定要扫描 IR。目标是避免后面的 pass 各自发明 metadata 格式。
 
 ### Pass 1：SelectorInlinedLogicExtractionPass
 
