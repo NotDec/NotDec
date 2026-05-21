@@ -58,6 +58,25 @@ using notdec::frontend::wasm::MEM_NAME;
 
 using namespace llvm;
 
+namespace {
+
+// The middle-end passes currently encode Wasm lowering assumptions. Keep the
+// target split explicit so EVM IR can enter the main driver without reusing the
+// Wasm recovery pipeline by accident.
+enum class TargetArch { Wasm, Evm, Other };
+
+TargetArch classifyTargetArch(StringRef Triple) {
+  if (Triple.starts_with("wasm32") || Triple.starts_with("wasm64")) {
+    return TargetArch::Wasm;
+  }
+  if (Triple.starts_with("evm")) {
+    return TargetArch::Evm;
+  }
+  return TargetArch::Other;
+}
+
+} // namespace
+
 // A Pass that undo some optimizations of the InstCombinePass.
 struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
@@ -254,6 +273,17 @@ void PassEnv::add_type_recovery_passes(int level) {
 void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
                            bool frozenTRInputIR) {
   if (level < 1) {
+    return;
+  }
+
+  switch (classifyTargetArch(Mod.getTargetTriple().getTriple())) {
+  case TargetArch::Wasm:
+    break;
+  case TargetArch::Evm:
+    // EVM-specific recovery passes will be added here later. For now, allow
+    // evm2llvm IR to flow through to LLVM IR / bitcode output unchanged.
+    return;
+  case TargetArch::Other:
     return;
   }
 
