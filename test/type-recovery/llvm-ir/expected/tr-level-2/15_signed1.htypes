@@ -3,34 +3,33 @@
 [decls]
 
 [types]
-[+] <null-value> => lower=<null> ; upper=top:64
-[+] @.str => lower=bottom:64 ; upper=top:64
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @.str => lower=bottom:32 ; upper=top:32
 [+] @conv_signed => lower=(bottom:32 (*)(top:64))* ; upper=(top:32 (*)(bottom:64))*
-[+] @conv_unsigned => lower=(bottom:32 (*)(top:64))* ; upper=top:64
-[+] @main => lower=(bottom:32 (*)())* ; upper=top:64
-[+] @printf => lower=(bottom:32 (*)(top:64))* ; upper=(top:32 (*)(bottom:64, bottom:32))*
+[+] @conv_unsigned => lower=(bottom:32 (*)(top:64))* ; upper=top:32
+[+] @main => lower=(bottom:32 (*)())* ; upper=top:32
+[+] @printf => lower=(bottom:32 (*)(top:32))* ; upper=(top:32 (*)(bottom:32, bottom:32))*
 [+] const(i32 0)@main::%bb0.i2:0 => lower=bottom:32 ; upper=top:32
 [+] const(i32 0)@main::%bb0.i7:0 => lower=bottom:32 ; upper=top:32
 [+] const(i64 -68719476737)@main::%bb0.i3:0 => lower=bottom:64 ; upper=top:64
-[-] conv_signed::%bb0.i0 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=64>
+[-] conv_signed::%bb0.i0 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=64>
 [+] conv_signed::%bb0.i2 => lower=bottom:64 ; upper=top:64
 [+] conv_signed::%bb0.i3 => lower=bottom:32 ; upper=top:32
 [+] conv_signed::<ret> => lower=bottom:32 ; upper=top:32
 [+] conv_signed::arg0 => lower=bottom:64 ; upper=top:64
-[-] conv_unsigned::%bb0.i0 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=64>
+[-] conv_unsigned::%bb0.i0 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=64>
 [+] conv_unsigned::%bb0.i2 => lower=bottom:64 ; upper=top:64
 [+] conv_unsigned::%bb0.i3 => lower=bottom:32 ; upper=top:32
 [+] conv_unsigned::<ret> => lower=bottom:32 ; upper=top:32
 [+] conv_unsigned::arg0 => lower=bottom:64 ; upper=top:64
-[-] main::%bb0.i0 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
-[-] main::%bb0.i1 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
+[-] main::%bb0.i0 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[-] main::%bb0.i1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] main::%bb0.i3 => lower=bottom:32 ; upper=top:32
 [+] main::%bb0.i5 => lower=bottom:32 ; upper=top:32
 [+] main::%bb0.i6 => lower=bottom:32 ; upper=top:32
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] printf::<ret> => lower=bottom:32 ; upper=top:32
-[+] printf::arg0 => lower=bottom:64 ; upper=top:64
+[+] printf::arg0 => lower=bottom:32 ; upper=top:32
 
 [memory]
-type => top:64
-
+type => top:32
