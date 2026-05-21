@@ -44,6 +44,7 @@
 #include "Passes/PassManager.h"
 #include "Passes/ReorderBasicblock.h"
 #include "Passes/StackAlloca.h"
+#include "Passes/evm/SolidityPatterns.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/Utils.h"
 #include "notdec-wasm2llvm/utils.h"
@@ -272,18 +273,23 @@ void PassEnv::add_type_recovery_passes(int level) {
 
 void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
                            bool frozenTRInputIR) {
-  if (level < 1) {
-    return;
-  }
-
-  switch (classifyTargetArch(Mod.getTargetTriple().getTriple())) {
+  TargetArch Arch = classifyTargetArch(Mod.getTargetTriple().getTriple());
+  switch (Arch) {
   case TargetArch::Wasm:
     break;
   case TargetArch::Evm:
-    // EVM-specific recovery passes will be added here later. For now, allow
-    // evm2llvm IR to flow through to LLVM IR / bitcode output unchanged.
+    // EVM inputs still benefit from LLVM's local canonicalization before
+    // Solidity/EVM-specific matchers inspect the IR.
+    MPM.addPass(
+        createModuleToFunctionPassAdaptor(buildFunctionOptimizations()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(evm::PayabilityGuardPass()));
+    MPM.addPass(VerifierPass(false));
     return;
   case TargetArch::Other:
+    return;
+  }
+
+  if (level < 1) {
     return;
   }
 

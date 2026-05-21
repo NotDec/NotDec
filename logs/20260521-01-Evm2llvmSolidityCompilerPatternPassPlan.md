@@ -432,3 +432,9 @@
 - 在包含普通业务函数的样例上，compiler guard、panic、ABI bounds check 不应被当成业务 require。
 - 语义转换后 IR verifier 通过；nonpayable guard、简单 ABI return、panic/error revert、returndata bubble 的原始低层形状不再作为业务逻辑输出。
 - 这次只是写 plan，不涉及主 NotDec pass pipeline；后续若接入主 pipeline，再按项目规范对 fortune 当前关注用例做同口径时间对比。
+
+## 进展记录
+
+- 已实现第一步：EVM 主链路先跑 LLVM 优化，再跑 `PayabilityGuardPass`。
+- 当前只做优化后 nonpayable guard 的 metadata 标注，不删除 CFG。
+- 实现位置：`src/Passes/PassManager.cpp:273-291`、`src/Passes/evm/SolidityPatterns.cpp:1-133`。

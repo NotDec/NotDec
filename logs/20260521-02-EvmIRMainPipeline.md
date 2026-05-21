@@ -33,3 +33,17 @@ evm2llvm 现在会在输出 IR 里写入 `target triple = "evm-unknown-unknown"`
 ## 风险
 
 当前 `--dump-htypes` 仍假设类型恢复已初始化。对 EVM / 其它非 wasm triple 使用 `--dump-htypes` 会报错。这个行为和这次目标不冲突，因为当前只要求 EVM IR 能输出 LLVM IR。
+
+## 实现记录
+
+- `src/Passes/PassManager.cpp:44-47,273-291` 现在把 `target triple = "evm-unknown-unknown"` 走到专用分支。这个分支不再直接返回，而是先跑 `buildFunctionOptimizations()`，再跑 EVM 专用的 `PayabilityGuardPass`，最后跑 `VerifierPass(false)`；`tr-level` 对这条 EVM 通用前处理不再起阻断作用。
+- `include/notdec/Passes/PassManager.h:51-56` 给 `PayabilityGuardPass` 注册了 pass 名，方便 debug 和后续 pipeline 观察。
+- `src/Passes/evm/SolidityPatterns.cpp:1-133` 新增了第一版 EVM Solidity 模式 pass。它只认优化后的非 payable guard：`callvalue == 0` 的条件分支，失败块里是 `evm_revert(ptr %mem, 0, 0)` 加 `unreachable`。命中后只挂 metadata，不删 CFG。
+- `src/CMakeLists.txt:2-18` 把新 pass 源文件接进主库。
+
+## 验证
+
+- 构建：`cmake --build ./build --target notdec-decompile -j4`
+- 单样例：`0014_19493039_2d4c31bc6b_6b76dc72860b.ll`、`0011_19493032_87fd4a2922_ba61188f81c3.ll`、`0002_19493003_57d4d29397_136994712c59.ll`
+- 批量：`/sn640/NotDecChainExp/evm2llvm_apehex_pilot/20260521-evm2llvm-train-batch001/outputs/*.ll` 共 40 个样例都能经主 binary 跑完并通过 `llvm-22.1.0.obj/bin/llvm-as`
+- 结果：`0014` 命中 2 个 nonpayable guard，`0011` 命中 5 个，`0002` 没有误标
