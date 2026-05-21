@@ -2,7 +2,12 @@
 
 ## 原始 prompt
 
-阅读 logs/20260520-06-Evm2llvmSemanticLiftPlan.md 首先盘点一下solidity编译器到底有哪些这种主动加入的底层操作。提到的这个plan里面，基于Selector恢复原始函数名这个暂时不需要关注，因为GIGA horse有一些常见的匹配出来，而且这个是evm2llvm底层lifting的部分负责的。当前需要的是尝试用llvm pass的方式，每个pass负责识别某个底层的特性，然后转换为比如nonpayable metadata标注或者什么其他的高层次语义形式。专门识别ERC1967 implementation slot这种就更不用考虑了，是源码上的编程模式，这个完全不用考虑。总之，写一个新的plan，尽量全的盘点solidity编译器这种需要识别的底层模式，然后规划一下要写哪些pass
+阅读 logs/20260520-06-Evm2llvmSemanticLiftPlan.md 首先盘点一下solidity编译器到底有哪些这种主动加入的底层操作。提到的这个plan里面，基于Selector恢复原始函数名这个暂时不需要关注，因为GIGA horse有一些常见的匹配出来，而且这个是evm2llvm底层lifting的部分负责的。当前需要的是尝试用llvm pass的方式，每个pass负责识别某个底层的特性，然后转换为比如nonpayable metadata标注或者什么其他的高层次语义形式。专门识别ERC1967 implementation slot这种就更不用考虑了，是源码上的编程模式，这个完全不用考虑。总之，写一个新的plan，尽量全的盘点solidity编译器这种需要识别的底层模式，然后规划一下要写哪些pass。
+
+- 从那边/sn640/NotDecChainExp那边的apehex数据集里面找大小合适的合约作为测试用例，同步测试实现的情况。
+- 直接接入主项目的链路，logs/20260521-02-EvmIRMainPipeline.md 这里打通了一些流程。将那边evm2llvm的结果作为输入，然后通过主项目的binary跑，走匹配triple的evm的路径跑这些evm专门的pass，目前的这些Pass的地位先作为，不管什么tr-level都跑的通用pass。
+- Pass代码考虑放到 src/Passes 下面创建一个文件夹，比如叫evm的文件夹吧。
+- 考虑在所有这些pass之前，模仿web assembly那边的链路，先跑一遍LLVM的优化pass，将IR优化为canonical的形式。各个Pass只需要支持优化后的形状，所以考虑先加入优化Pass，然后把样例先用主项目链路跑一遍，然后再对着新的优化后的IR写Pass。
 
 ## 背景
 
@@ -11,7 +16,7 @@
 - 不做 selector 到原始函数名的恢复。Gigahorse 已经能匹配一些常见 selector，evm2llvm 底层 lifting 也会继续负责 selector 入口的基础信息。
 - 不做 ERC1967 implementation slot 这类源码或库层面的模式。固定 slot 是 OpenZeppelin / ERC 编程约定，不是 Solidity 编译器必然主动生成的底层操作。
 
-这份 plan 只关心 Solidity 编译器为了 ABI、内存、storage、安全检查、错误编码、调用语义而主动生成的低层代码。目标是后续用 LLVM pass 在当前 evm2llvm IR 上识别这些模式，并挂 metadata 或替换成更高层的语义 intrinsic。
+这份 plan 只关心 Solidity 编译器为了 ABI、内存、storage、安全检查、错误编码、调用语义而主动生成的低层代码。目标是后续用 LLVM pass 在当前 evm2llvm IR 上识别这些模式，并按配置选择只挂 metadata，或者进一步替换成更高层的语义 intrinsic / LLVM IR 结构。
 
 ## 总体目标
 
@@ -22,12 +27,16 @@
 - address、bool、小整数、enum、bytes/string、storage packed field 这些类型线索。
 - mapping、动态数组、短 bytes/string、事件、外部调用返回冒泡等常见编译器形状。
 
-输出形式按风险分两类：
+识别语义的 pass 做成两种运行模式：
+
+- metadata-only 模式：只挂函数级或指令级 metadata，不改 CFG，不删原始低层 IR。这个模式用于调试、统计、回归对比，也适合还不够稳定的 matcher。
+- rewrite 模式：在 metadata-only 识别结果可靠时，删除或替换原低层 IR，仅用 metadata / 高层 intrinsic / 更自然的 LLVM IR 结构表达语义。例如 nonpayable guard、ABI return、Panic/Error revert、returndata bubble。
+
+metadata 形式先保持简单：
 
 - 函数级 metadata：例如 `!notdec.solidity.nonpayable`、`!notdec.solidity.entry_kind`。
 - 指令级 metadata：例如 `!notdec.solidity.abi_decode`、`!notdec.solidity.cleanup`、`!notdec.solidity.panic`。
-- 语义明确、误报风险低的模式，直接删除或替换原低层 IR，再用 metadata / 高层 intrinsic 表达语义。例如 nonpayable guard、ABI return、Panic/Error revert、returndata bubble。
-- 需要跨块推理或容易和业务逻辑混在一起的模式，先只标候选，不急着改 CFG。
+- 需要跨块推理或容易和业务逻辑混在一起的模式，默认先只标候选，不急着启用 rewrite。
 
 ## 需要识别的编译器底层模式
 
@@ -58,7 +67,8 @@
 提升目标：
 
 - 给函数标 `nonpayable`。
-- 删除这段 compiler guard 的低层 CFG/指令，用函数 metadata 表达语义。
+- metadata-only 模式只标出这段 compiler guard。
+- rewrite 模式删除这段 compiler guard 的低层 CFG/指令，用函数 metadata 表达语义。
 - 后端不要再显示成用户手写 `if (msg.value != 0) revert()`。
 - fallback/receive 要单独处理：receive 天然允许收 ETH，fallback 是否 payable 要看有没有同类 guard。
 
@@ -266,8 +276,9 @@
 作用：
 
 - 定义公共 metadata 名称、字段格式和查询接口。
+- 定义 pass 运行模式：metadata-only 和 rewrite。
 - 提供统计输出和 debug dump。
-- 不改变 IR 语义。
+- 自身不改变 IR 语义。
 
 这更像公共基础设施，不一定要扫描 IR。目标是避免后面的 pass 各自发明 metadata 格式。
 
@@ -292,7 +303,8 @@
 
 - 识别 `callvalue == 0` 加 `revert(0,0)`。
 - 给函数标 `nonpayable`。
-- 删除已经确认是 compiler guard 的低层检查块。
+- metadata-only 模式只标注 guard 范围。
+- rewrite 模式删除已经确认是 compiler guard 的低层检查块。
 - 标出 fallback/receive 的 payable 状态。
 
 ### Pass 3：AbiDecodePass
@@ -310,7 +322,8 @@
 
 - 识别 ABI return buffer。
 - 识别静态和动态返回值编码。
-- 对简单、完整的 ABI return 编码，替换成高层 return intrinsic 或等价 metadata 表达。
+- metadata-only 模式只标注 return buffer、返回槽位和返回类型线索。
+- rewrite 模式对简单、完整的 ABI return 编码，替换成高层 return intrinsic 或等价 metadata 表达。
 - 对动态返回值或不完整 buffer，先只给 return 指令或函数返回区挂候选 metadata。
 
 ### Pass 5：SolidityRevertPass
@@ -320,8 +333,9 @@
 - 空 revert、`Error(string)`、`Panic(uint256)`、custom error。
 - returndata bubble。
 - panic code 分类。
-- 对完整的 Panic/Error/custom error 编码，替换成高层 revert intrinsic 或 metadata 表达。
-- 对低级调用失败后的 returndata bubble，删除手写 copy/revert 形状，标成 `revert_bubble`。
+- metadata-only 模式只标注错误类型、panic code、custom error selector 和 bubble 范围。
+- rewrite 模式对完整的 Panic/Error/custom error 编码，替换成高层 revert intrinsic 或 metadata 表达。
+- rewrite 模式对低级调用失败后的 returndata bubble，删除手写 copy/revert 形状，标成 `revert_bubble`。
 
 ### Pass 6：ValueCleanupTypeHintPass
 
@@ -356,6 +370,9 @@
 - free memory pointer 分配。
 - memory dynamic array / bytes / string 对象。
 - zero slot。
+- metadata-only 模式先识别 `mload(0x40)`、对齐后的 bump、`mstore(0x40, new_ptr)` 这一类内存分配模式，并标出对象基址、大小、长度槽和 data 起点。
+- rewrite 模式再考虑把明确的 Solidity memory 对象转换成更自然的 LLVM IR 语义。小的、生命周期局部、不会逃逸到 `sha3` / `call` / `return` 之外的对象，可以尝试用 `alloca` 或 typed aggregate 表达；会作为 ABI buffer、hash buffer、call data buffer 使用的对象，必须保留和 EVM byte-addressed memory 等价的语义，不能简单全改成 `alloca`。
+- 后续如果对象已经被转换，相关 `evm_mload` / `evm_mstore` 应改写成对该对象对应偏移的 load/store；不能证明偏移和对象边界时，继续保留原 helper。
 
 ### Pass 10：EventLogPass
 
@@ -389,7 +406,7 @@
 
 ## 推荐阶段
 
-第一阶段先做低风险语义转换：
+第一阶段先把低风险模式接进主链路，并支持两种模式：
 
 1. `SolidityPatternAnnotationPass`
 2. `SelectorInlinedLogicExtractionPass`
@@ -397,7 +414,7 @@
 4. `AbiReturnPass`
 5. `SolidityRevertPass`
 
-这一阶段能最快改善输出：selector 函数里的内联逻辑先标候选；nonpayable、简单 ABI return、panic/error revert、returndata bubble 直接提升掉。
+这一阶段能最快改善输出：selector 函数里的内联逻辑先标候选；nonpayable、简单 ABI return、panic/error revert、returndata bubble 先在 metadata-only 模式验证命中，再在 rewrite 模式里提升掉。
 
 第二阶段做类型和对象：
 
@@ -407,7 +424,7 @@
 4. `StorageFieldPass`
 5. `StorageAddressingPass`
 
-这一阶段风险更高，因为需要跨块追踪值和 memory 写入顺序。
+这一阶段风险更高，因为需要跨块追踪值和 memory 写入顺序。MemoryObjectPass 可以先识别对象和偏移；rewrite 模式只处理能证明边界和生命周期的对象。
 
 第三阶段做跨调用和事件：
 
@@ -423,18 +440,22 @@
 - optimizer 会重排、合并或删除很多中间块，matcher 不能只按固定基本块形状写。
 - ABI decode、memory allocation、revert encoding 都会共用 `mstore`，需要先有轻量 dataflow，不能只按相邻指令匹配。
 - 不能把库模式写进 compiler pass。ERC1967、Ownable、ERC20、ERC721 都只能作为评估样例，不应成为 Solidity 编译器模式识别规则。
-- 只有含义明确、误报风险低的模式才改 CFG 或替换 intrinsic。复杂 ABI、storage、memory 对象先标候选，等样例足够再做转换。
+- 两种模式必须共用同一套 matcher，避免 metadata-only 和 rewrite 识别结果不一致。
+- 只有含义明确、误报风险低的模式才在 rewrite 模式改 CFG 或替换 intrinsic。复杂 ABI、storage、memory 对象先标候选，等样例足够再做转换。
+- MemoryObjectPass 不能把所有 EVM memory 都直接改成 `alloca`。EVM memory 是 byte-addressed，并且经常作为 ABI/hash/call/return buffer 逃逸；只有局部对象、固定偏移、生命周期清楚时才适合改成 LLVM 对象。
 
 ## 判断标准
 
 - 在 `20260520-evm2llvm-train-batch010` 这批输出上，pass 能统计每类模式的命中数量，并能 dump 到文本或 JSON。
 - 在旧 plan 的 0394 proxy 样例上，能识别 `function_selector` 里的 selector 分发边界、receive/fallback 内联 body 候选、`implementation()` 的 nonpayable guard、address return ABI encode、delegatecall returndata bubble；但不输出 ERC1967 implementation slot 语义。
 - 在包含普通业务函数的样例上，compiler guard、panic、ABI bounds check 不应被当成业务 require。
-- 语义转换后 IR verifier 通过；nonpayable guard、简单 ABI return、panic/error revert、returndata bubble 的原始低层形状不再作为业务逻辑输出。
-- 这次只是写 plan，不涉及主 NotDec pass pipeline；后续若接入主 pipeline，再按项目规范对 fortune 当前关注用例做同口径时间对比。
+- metadata-only 模式不改变 CFG，IR verifier 通过，并能输出命中统计。
+- rewrite 模式语义转换后 IR verifier 通过；nonpayable guard、简单 ABI return、panic/error revert、returndata bubble 的原始低层形状不再作为业务逻辑输出。
+- 主链路接入后，用 apehex 中大小合适、有源码的样例同步验证。因为 pass 只在 EVM triple 路径运行，fortune 不是直接相关用例；如果后续改到通用 pipeline，再按项目规范做 fortune 时间对比。
 
 ## 进展记录
 
 - 已实现第一步：EVM 主链路先跑 LLVM 优化，再跑 `PayabilityGuardPass`。
 - 当前只做优化后 nonpayable guard 的 metadata 标注，不删除 CFG。
 - 实现位置：`src/Passes/PassManager.cpp:273-291`、`src/Passes/evm/SolidityPatterns.cpp:1-133`。
+- 下一步把 EVM Solidity pass 加上明确的 metadata-only / rewrite 运行模式；当前实现属于 metadata-only。
