@@ -282,7 +282,19 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
     // Solidity/EVM-specific matchers inspect the IR.
     MPM.addPass(
         createModuleToFunctionPassAdaptor(buildFunctionOptimizations()));
+    MPM.addPass(evm::SolidityPatternAnnotationPass());
+    MPM.addPass(createModuleToFunctionPassAdaptor(
+        evm::SelectorInlinedLogicExtractionPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::PayabilityGuardPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(evm::AbiReturnPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(evm::SolidityRevertPass()));
+    MPM.addPass(
+        createModuleToFunctionPassAdaptor(evm::ValueCleanupTypeHintPass()));
+    MPM.addPass(
+        createModuleToFunctionPassAdaptor(evm::StorageAddressingPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(evm::MemoryObjectPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(evm::EventLogPass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(evm::ExternalCallPass()));
     MPM.addPass(VerifierPass(false));
     return;
   case TargetArch::Other:

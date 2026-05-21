@@ -7,17 +7,56 @@
     {
       "name": "0014_proxy_like",
       "input": "cases/0014_proxy_like.ll",
-      "expected_nonpayable_functions": 2
+      "expected_nonpayable_functions": 2,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 4,
+        "notdec.solidity.cleanup": 1,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 1,
+        "notdec.solidity.external_call": 1,
+        "notdec.solidity.memory_object": 11,
+        "notdec.solidity.payability_guard": 10,
+        "notdec.solidity.revert": 2,
+        "notdec.solidity.selector_inlined_body": 2,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 0
+      }
     },
     {
       "name": "0011_multi_public",
       "input": "cases/0011_multi_public.ll",
-      "expected_nonpayable_functions": 5
+      "expected_nonpayable_functions": 5,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.cleanup": 1,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.memory_object": 9,
+        "notdec.solidity.payability_guard": 25,
+        "notdec.solidity.revert": 13,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 0
+      }
     },
     {
       "name": "0002_delegatecall_no_nonpayable",
       "input": "cases/0002_delegatecall_no_nonpayable.ll",
-      "expected_nonpayable_functions": 0
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 3,
+        "notdec.solidity.cleanup": 1,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 1,
+        "notdec.solidity.memory_object": 1,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 1,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 0
+      }
     }
   ]
 }

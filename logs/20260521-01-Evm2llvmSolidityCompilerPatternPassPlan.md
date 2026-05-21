@@ -463,3 +463,104 @@ metadata 形式先保持简单：
 - 实现位置：`src/Passes/PassManager.cpp:273-291`、`src/Passes/evm/SolidityPatterns.cpp:1-133`。
 - 已接入 CTest：`notdec.evm.solidity_patterns`。测试使用 3 个 apehex evm2llvm `.ll`，分别检查 nonpayable metadata 数量为 2、5、0。
 - 下一步把 EVM Solidity pass 加上明确的 metadata-only / rewrite 运行模式；当前实现属于 metadata-only。
+
+### 2026-05-21 实现记录
+
+本次继续按 metadata-only 做第一批和低风险候选识别，不删除 CFG，不引入 rewrite。
+
+已实现或补齐：
+
+- `SolidityPatternAnnotationPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:21`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:221`。
+  - 效果：在 module 上写入 `notdec.solidity.patterns`，记录当前为 `mode=metadata-only`。
+- `SelectorInlinedLogicExtractionPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:31`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:230`。
+  - 涉及函数：`SelectorInlinedLogicExtractionPass::run`。
+  - 效果：给 `public___function_selector___*` 标 `!notdec.solidity.entry_kind`；标 `mstore(0x40,0x80)` prologue；把 dispatcher 里的 `call` / `delegatecall` / `staticcall` / `callcode` / `log*` 标成内联 body 候选。
+- `PayabilityGuardPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:41`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:266`。
+  - 本次调整：复用 `isPublicEntryFunction`，继续只标 `callvalue == 0 -> revert(0,0)`。
+- `AbiReturnPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:50`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:310`。
+  - 效果：标 `evm_return`，区分 `static_1_word`、`returndata_forward` 和普通 candidate。
+- `SolidityRevertPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:60`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:336`。
+  - 效果：标空 revert、returndata bubble、`Panic(uint256)` selector 形状；其他 revert 先标 candidate。
+- `ValueCleanupTypeHintPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:68`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:368`。
+  - 效果：标 160 bit address mask、低位 mask、清低位 mask 和 `signextend`。
+- `StorageAddressingPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:78`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:404`。
+  - 效果：只标 `evm_sha3(..., 64)` 为 mapping slot 候选、`evm_sha3(..., 32)` 为动态数组数据 slot 候选。
+- `MemoryObjectPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:87`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:430`。
+  - 效果：标 `mload(0x40)`、`mstore(0x40,0x80)`、`mstore(0x40,new_ptr)`。
+- `EventLogPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:95`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:460`。
+  - 效果：标 `evm_log0` 到 `evm_log4`，记录 topic 数。
+- `ExternalCallPass`
+  - 声明位置：`include/notdec/Passes/evm/SolidityPatterns.h:103`。
+  - 实现位置：`src/Passes/evm/SolidityPatterns.cpp:482`。
+  - 效果：标 `call`、`staticcall`、`delegatecall`、`callcode` 的 EVM call kind。
+
+主链路接入：
+
+- `include/notdec/Passes/PassManager.h:55-75` 注册新 pass 名。
+- `src/Passes/PassManager.cpp:280-298` 在 EVM triple 路径接入：
+  - LLVM canonicalization
+  - `SolidityPatternAnnotationPass`
+  - `SelectorInlinedLogicExtractionPass`
+  - `PayabilityGuardPass`
+  - `AbiReturnPass`
+  - `SolidityRevertPass`
+  - `ValueCleanupTypeHintPass`
+  - `StorageAddressingPass`
+  - `MemoryObjectPass`
+  - `EventLogPass`
+  - `ExternalCallPass`
+  - verifier
+
+测试：
+
+- `test/run_evm_solidity_patterns_suite.py:96-112` 增加通用 metadata 计数。
+- `test/run_evm_solidity_patterns_suite.py:194-210` 按 manifest 检查每类 metadata。
+- `test/evm/solidity-patterns/manifest.json:7-60` 给 3 个样例增加 metadata oracle。
+- 验证命令：
+  - `cmake --build ./build --target all -j4`
+  - `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+- 结果：通过，`1/1 Test #17: notdec.evm.solidity_patterns`。
+
+暂不做或只做候选的点：
+
+- `AbiDecodePass` 还没实现。原因是当前样例里的 calldata bounds、offset、cleanup 和业务判断混在一起，需要轻量 dataflow，否则误报风险高。
+- `StorageFieldPass` 还没精确实现。当前只由 `ValueCleanupTypeHintPass` 标 mask，由 `StorageAddressingPass` 标 sha3 地址根；packed field 的 bit offset / width 需要追踪 `sload`、shift、mask、merge、`sstore`。
+- `StorageAddressingPass` 目前只标 sha3 长度候选，不恢复 nested mapping / array 链。
+- `MemoryObjectPass` 目前只标 free memory pointer 读写，不生成 `evm_malloca`。原因是对象边界和生命周期还没证明。
+- `AbiReturnPass` 目前不追踪完整 return buffer 写入顺序，只标 `evm_return` 站点和简单大小线索。
+- `SolidityRevertPass` 目前只识别空 revert、returndata bubble、panic selector 形状；`Error(string)` 和 custom error 需要追踪多条 `mstore` 的 ABI 编码，先不做。
+- `ValueCleanupTypeHintPass` 目前不恢复 bool 归一和 enum 上界，只标 mask / `signextend`。
+- `EventLogPass` 目前只标 `log0` 到 `log4` 和 topic 数，不解析 topic/data buffer，也不判断匿名事件。
+- `ExternalCallPass` 目前只标 EVM call kind，不恢复 call data encode、return data decode、success 检查结构。
+- `CheckedOperationPass` 还没实现。当前 `SolidityRevertPass` 只识别 panic revert 形状，还没把 panic 和前面的算术、数组边界、enum 转换检查关联起来。
+- rewrite 模式还没实现。当前所有 pass 都只加 metadata，IR verifier 通过，语义不变。
+
+复杂度和维护判断：
+
+- 实现效果：6/10。第一批可明确识别的入口、return、revert、call、event、memory pointer、cleanup 都能在样例上稳定命中；复杂 ABI/storage/checked arithmetic 仍只是候选或记录问题。
+- 理解成本：4/10。新增 pass 数量多，但都集中在 `src/Passes/evm/SolidityPatterns.cpp`，每个 pass 只做单一 metadata 标注。
+- 后期维护成本：5/10。后面如果进入 rewrite 或精确 ABI/storage，需要把现在的局部 matcher 升级为共享 dataflow；当前 metadata 名称和 pass 边界可以继续复用。
+- 更好的方案：下一步先加一个小型 def-use 追踪工具，只覆盖同一函数内常量 offset、mload/mstore、returndatasize、sha3 参数；不要直接上复杂全局分析。
+
+性能说明：
+
+- 本次改动只在 EVM triple 路径运行，fortune wasm 用例不经过这些 pass。
+- 已跑 EVM suite，单次 CTest 总时间约 `0.51 sec`。当前未发现明显性能问题。

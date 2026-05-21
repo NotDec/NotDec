@@ -52,8 +52,27 @@ struct PassEnv {
                            "linear-allocation-recovery");
     PIC.addClassToPassName("notdec::PointerTypeRecovery",
                            "pointer-type-recovery");
+    PIC.addClassToPassName("notdec::passes::evm::SolidityPatternAnnotationPass",
+                           "evm-solidity-pattern-annotation");
+    PIC.addClassToPassName(
+        "notdec::passes::evm::SelectorInlinedLogicExtractionPass",
+        "evm-selector-inlined-logic");
     PIC.addClassToPassName("notdec::passes::evm::PayabilityGuardPass",
                            "evm-payability-guard");
+    PIC.addClassToPassName("notdec::passes::evm::AbiReturnPass",
+                           "evm-abi-return");
+    PIC.addClassToPassName("notdec::passes::evm::SolidityRevertPass",
+                           "evm-solidity-revert");
+    PIC.addClassToPassName("notdec::passes::evm::ValueCleanupTypeHintPass",
+                           "evm-value-cleanup-type-hint");
+    PIC.addClassToPassName("notdec::passes::evm::StorageAddressingPass",
+                           "evm-storage-addressing");
+    PIC.addClassToPassName("notdec::passes::evm::MemoryObjectPass",
+                           "evm-memory-object");
+    PIC.addClassToPassName("notdec::passes::evm::EventLogPass",
+                           "evm-event-log");
+    PIC.addClassToPassName("notdec::passes::evm::ExternalCallPass",
+                           "evm-external-call");
 
     // llvm2c passes
     PIC.addClassToPassName("notdec::llvm2c::AdjustCFGPass", "adjustcfg");

@@ -93,16 +93,22 @@ def count_nonpayable_functions(path: Path) -> int:
     return len(NONPAYABLE_DEFINE_RE.findall(path.read_text()))
 
 
+def count_metadata_uses(path: Path, metadata_name: str) -> int:
+    text = path.read_text()
+    return text.count(f"!{metadata_name}")
+
+
 def write_compare_report(
     *,
     report_path: Path,
-    expected_count: int,
-    actual_count: int,
+    expected_counts: dict[str, int],
+    actual_counts: dict[str, int],
 ) -> bool:
-    passed = actual_count == expected_count
+    passed = actual_counts == expected_counts
     lines = ["PASS" if passed else "FAIL"]
-    lines.append(f"  expected_nonpayable_functions={expected_count}")
-    lines.append(f"  actual_nonpayable_functions={actual_count}")
+    for key in sorted(expected_counts):
+        lines.append(f"  expected_{key}={expected_counts[key]}")
+        lines.append(f"  actual_{key}={actual_counts.get(key, 0)}")
     report_path.write_text("\n".join(lines) + "\n")
     return passed
 
@@ -186,11 +192,21 @@ def main() -> int:
             case_ok = llvm_as_proc.returncode == 0 and output_bc.exists()
 
         if case_ok:
-            actual_count = count_nonpayable_functions(output_ll)
+            expected_counts = {
+                "nonpayable_functions": case["expected_nonpayable_functions"]
+            }
+            expected_counts.update(case.get("expected_metadata_counts", {}))
+            actual_counts = {
+                "nonpayable_functions": count_nonpayable_functions(output_ll)
+            }
+            for metadata_name in case.get("expected_metadata_counts", {}):
+                actual_counts[metadata_name] = count_metadata_uses(
+                    output_ll, metadata_name
+                )
             compare_ok = write_compare_report(
                 report_path=compare_txt,
-                expected_count=case["expected_nonpayable_functions"],
-                actual_count=actual_count,
+                expected_counts=expected_counts,
+                actual_counts=actual_counts,
             )
             log_sections.append(compare_txt.read_text())
             case_ok = compare_ok
