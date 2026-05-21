@@ -30,20 +30,21 @@
 
 ## 需要识别的编译器底层模式
 
-### 1. Runtime 初始化和入口骨架
+### 1. Selector 函数里的内联业务逻辑
 
 典型模式：
 
-- 入口开头 `mstore(0x40, 0x80)`。
-- 用 `calldatasize < 4` 区分普通函数 selector 和 fallback/receive。
-- 用 `calldataload(0) >> 224` 取 selector，再和常量比较并跳转。
-- 空 calldata 和非空短 calldata 走不同 fallback/receive 路径。
+- Gigahorse 当前会把入口分发放进名字类似 `public___function_selector___0x0` 的函数。
+- 这个函数里有 selector 分发逻辑：`calldatasize < 4`、`calldataload(0) >> 224`、和 selector 常量比较。
+- 有些没有单独 public 函数壳的逻辑会被内联在 selector 函数里，例如 fallback 路径、receive 路径、短分支里的直接 revert/return、delegatecall 转发等。
+- 入口开头可能有 `mstore(0x40, 0x80)`。例如 0394 样例里 `public___function_selector___0x0` 开头就有 `evm_mstore(%mem, 64, 128)`。
 
 提升目标：
 
-- 标出 dispatcher、public function entry、fallback entry、receive entry。
-- 保留 selector 常量，但不在这个 pass 里查函数名。
-- 把 free memory pointer 初始化标成 Solidity runtime prologue，避免后端把它当业务代码。
+- 不把 selector 分发从 `function_selector` 函数里拆走。现在单独放在那里是合理的。
+- 识别 selector 分发边界，找出不属于 selector 比较链的内联逻辑区域。
+- 对这些区域做函数提取候选标注，例如 `fallback_body_candidate`、`receive_body_candidate`、`selector_inlined_body_candidate`。
+- `mstore(0x40, 0x80)` 只作为可选 prologue 标注，不单独作为重点 pass。
 
 ### 2. Payable / nonpayable 入口保护
 
@@ -268,18 +269,20 @@
 
 这是其他 pass 的公共底座，避免每个 pass 自己发明 metadata 格式。
 
-### Pass 1：EvmEntrySkeletonPass
+### Pass 1：SelectorInlinedLogicExtractionPass
 
 负责：
 
-- runtime prologue：`mstore(0x40, 0x80)`。
-- dispatcher、public function entry、fallback、receive。
-- selector 常量和 entry 的关系。
+- 识别 `public___function_selector___*` 里的 selector 分发区域。
+- 保留 selector 分发函数本身，不强行拆 dispatcher。
+- 找出 selector 比较链之外被内联进去的逻辑。
+- 给 fallback/receive 或其他内联 body 加函数提取候选 metadata。
 
 不负责：
 
 - selector 查函数名。
 - 业务函数重命名。
+- 实际 clone / split 函数。第一阶段只标注候选区域。
 
 ### Pass 2：PayabilityGuardPass
 
@@ -383,12 +386,12 @@
 第一阶段先做不会改变 IR 的 annotation：
 
 1. `SolidityPatternAnnotationPass`
-2. `EvmEntrySkeletonPass`
+2. `SelectorInlinedLogicExtractionPass`
 3. `PayabilityGuardPass`
 4. `AbiReturnPass`
 5. `SolidityRevertPass`
 
-这一阶段能最快改善输出：入口、nonpayable、return、panic/revert 都会更清楚。
+这一阶段能最快改善输出：selector 函数里的内联逻辑、nonpayable、return、panic/revert 都会更清楚。
 
 第二阶段做类型和对象：
 
@@ -419,7 +422,7 @@
 ## 判断标准
 
 - 在 `20260520-evm2llvm-train-batch010` 这批输出上，pass 能统计每类模式的命中数量，并能 dump 到文本或 JSON。
-- 在旧 plan 的 0394 proxy 样例上，能识别 dispatcher、receive/fallback、`implementation()` 的 nonpayable guard、address return ABI encode、delegatecall returndata bubble；但不输出 ERC1967 implementation slot 语义。
+- 在旧 plan 的 0394 proxy 样例上，能识别 `function_selector` 里的 selector 分发边界、receive/fallback 内联 body 候选、`implementation()` 的 nonpayable guard、address return ABI encode、delegatecall returndata bubble；但不输出 ERC1967 implementation slot 语义。
 - 在包含普通业务函数的样例上，compiler guard、panic、ABI bounds check 不应被当成业务 require。
 - 新 pass 默认 annotation-only 时，IR verifier 通过，原有 evm2llvm 输出语义不变。
 - 这次只是写 plan，不涉及主 NotDec pass pipeline；后续若接入主 pipeline，再按项目规范对 fortune 当前关注用例做同口径时间对比。
