@@ -24,6 +24,10 @@ This mirrors the usual LLVM split:
   - Self-contained lifting suites grouped by frontend/input architecture.
   - `cases/` stores checked-in raw inputs such as `.wasm`.
   - `expected/` stores suite-local lifting oracles.
+- `test/evm/`
+  - EVM IR pass-pipeline suites.
+  - `cases/` stores checked-in evm2llvm LLVM IR inputs.
+  - Oracles check targeted EVM metadata instead of full IR text.
 - `test/type-recovery/<suite>/`
   - Self-contained type recovery suites.
   - `manifest.json` defines the checked cases and per-suite setup.
@@ -41,6 +45,10 @@ This mirrors the usual LLVM split:
   - Raw WebAssembly lifting regression cases.
   - Currently tracks `fortune.o3.wasm` with a workdir-log oracle that checks
     `PNDiff.warn.txt` and `01-recovery-passes.log`.
+- `test/evm/solidity-patterns/`
+  - EVM Solidity compiler-pattern pass cases.
+  - Currently checks nonpayable guard metadata counts on selected apehex
+    evm2llvm outputs.
 - `test/type-recovery/llvm-ir/`
   - Handwritten LLVM IR type recovery regression cases.
 - `test/type-recovery/sysy/`

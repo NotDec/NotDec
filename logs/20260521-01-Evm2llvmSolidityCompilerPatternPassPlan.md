@@ -4,7 +4,7 @@
 
 阅读 logs/20260520-06-Evm2llvmSemanticLiftPlan.md 首先盘点一下solidity编译器到底有哪些这种主动加入的底层操作。提到的这个plan里面，基于Selector恢复原始函数名这个暂时不需要关注，因为GIGA horse有一些常见的匹配出来，而且这个是evm2llvm底层lifting的部分负责的。当前需要的是尝试用llvm pass的方式，每个pass负责识别某个底层的特性，然后转换为比如nonpayable metadata标注或者什么其他的高层次语义形式。专门识别ERC1967 implementation slot这种就更不用考虑了，是源码上的编程模式，这个完全不用考虑。总之，写一个新的plan，尽量全的盘点solidity编译器这种需要识别的底层模式，然后规划一下要写哪些pass。
 
-- 从那边/sn640/NotDecChainExp那边的apehex数据集里面找大小合适的合约作为测试用例，同步测试实现的情况。
+- 从那边/sn640/NotDecChainExp那边的apehex数据集里面找大小合适的合约作为测试用例，同步测试实现的情况。比如现在的 `test/evm/solidity-patterns/`
 - 直接接入主项目的链路，logs/20260521-02-EvmIRMainPipeline.md 这里打通了一些流程。将那边evm2llvm的结果作为输入，然后通过主项目的binary跑，走匹配triple的evm的路径跑这些evm专门的pass，目前的这些Pass的地位先作为，不管什么tr-level都跑的通用pass。
 - Pass代码考虑放到 src/Passes 下面创建一个文件夹，比如叫evm的文件夹吧。
 - 考虑在所有这些pass之前，模仿web assembly那边的链路，先跑一遍LLVM的优化pass，将IR优化为canonical的形式。各个Pass只需要支持优化后的形状，所以考虑先加入优化Pass，然后把样例先用主项目链路跑一遍，然后再对着新的优化后的IR写Pass。
@@ -405,6 +405,8 @@ metadata 形式先保持简单：
 
 这个 pass 要依赖 `SolidityRevertPass` 的 panic 识别结果。
 
+可以考虑专门写一些，然后用solidity编译器编译出来作为测试用例。
+
 ## 推荐阶段
 
 第一阶段先把低风险模式接进主链路，并支持两种模式：
@@ -459,4 +461,5 @@ metadata 形式先保持简单：
 - 已实现第一步：EVM 主链路先跑 LLVM 优化，再跑 `PayabilityGuardPass`。
 - 当前只做优化后 nonpayable guard 的 metadata 标注，不删除 CFG。
 - 实现位置：`src/Passes/PassManager.cpp:273-291`、`src/Passes/evm/SolidityPatterns.cpp:1-133`。
+- 已接入 CTest：`notdec.evm.solidity_patterns`。测试使用 3 个 apehex evm2llvm `.ll`，分别检查 nonpayable metadata 数量为 2、5、0。
 - 下一步把 EVM Solidity pass 加上明确的 metadata-only / rewrite 运行模式；当前实现属于 metadata-only。

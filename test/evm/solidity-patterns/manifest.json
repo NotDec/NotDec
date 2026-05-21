@@ -1,0 +1,23 @@
+{
+  "suite": "evm.solidity-patterns",
+  "default_args": [
+    "--tr-level=0"
+  ],
+  "cases": [
+    {
+      "name": "0014_proxy_like",
+      "input": "cases/0014_proxy_like.ll",
+      "expected_nonpayable_functions": 2
+    },
+    {
+      "name": "0011_multi_public",
+      "input": "cases/0011_multi_public.ll",
+      "expected_nonpayable_functions": 5
+    },
+    {
+      "name": "0002_delegatecall_no_nonpayable",
+      "input": "cases/0002_delegatecall_no_nonpayable.ll",
+      "expected_nonpayable_functions": 0
+    }
+  ]
+}

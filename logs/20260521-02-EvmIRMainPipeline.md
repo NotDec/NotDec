@@ -47,3 +47,10 @@ evm2llvm 现在会在输出 IR 里写入 `target triple = "evm-unknown-unknown"`
 - 单样例：`0014_19493039_2d4c31bc6b_6b76dc72860b.ll`、`0011_19493032_87fd4a2922_ba61188f81c3.ll`、`0002_19493003_57d4d29397_136994712c59.ll`
 - 批量：`/sn640/NotDecChainExp/evm2llvm_apehex_pilot/20260521-evm2llvm-train-batch001/outputs/*.ll` 共 40 个样例都能经主 binary 跑完并通过 `llvm-22.1.0.obj/bin/llvm-as`
 - 结果：`0014` 命中 2 个 nonpayable guard，`0011` 命中 5 个，`0002` 没有误标
+
+## 测试接入
+
+- `test/evm/solidity-patterns/cases/` 固化了 3 个 apehex evm2llvm 输出：`0014_proxy_like.ll`、`0011_multi_public.ll`、`0002_delegatecall_no_nonpayable.ll`。
+- `test/run_evm_solidity_patterns_suite.py` 负责跑主项目 binary、再跑 `llvm-22.1.0.obj/bin/llvm-as`，最后只统计函数定义上的 `notdec.solidity.nonpayable` metadata。
+- `test/CMakeLists.txt` 新增 CTest：`notdec.evm.solidity_patterns`。
+- 当前 oracle：`0014` 期望 2 个，`0011` 期望 5 个，`0002` 期望 0 个。
