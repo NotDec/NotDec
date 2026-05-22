@@ -20,9 +20,9 @@
 总原则：
 
 - 先跑 EVM IR canonicalization。所有 matcher 面向优化后的 IR。
-- 识别 pass 默认 metadata-only，不删 CFG。
 - 只有明确依赖关系的 pass 才要求顺序；没有依赖的 pass 可以并列跑。
-- rewrite 独立放最后，不能和识别混在一起。
+- 每个识别 pass 自己带 rewrite flag，默认开启。metadata 仍然保留，方便调试、统计和测试。
+- 不单独做一个总的 rewrite pass。某个模式由哪个 pass 识别，就由哪个 pass 在 rewrite 模式下改写。
 
 ## 当前测试组织
 
@@ -45,7 +45,7 @@ CTest 入口是 `notdec.evm.solidity_patterns`。它由 `test/CMakeLists.txt` �
 - `0011_multi_public.ll`
 - `0002_delegatecall_no_nonpayable.ll`
 
-这批测试适合守住现有 metadata-only 行为，但还不够覆盖后面列出的所有底层模式。后续新增 pass 时，manifest 也要从“只看数量”逐步扩展到“命中位置、kind、关键参数、误报样例”。
+这批测试适合守住当前 metadata 行为，但还不够覆盖后面列出的所有底层模式。后续新增 pass 时，manifest 也要从“只看数量”逐步扩展到“命中位置、kind、关键参数、误报样例、rewrite 后 IR 形状”。
 
 ## 推荐总顺序
 
@@ -58,7 +58,6 @@ CTest 入口是 `notdec.evm.solidity_patterns`。它由 `test/CMakeLists.txt` �
 5. 识别 ABI decode / ABI return / ABI revert encoding。
 6. 识别 storage addressing / packed field / storage bytes-string。
 7. 识别 external call 和 event。它们可以早标 helper call，但参数结构要等 memory/ABI。
-8. rewrite。默认关闭，只处理低风险模式。
 
 其中 4 到 7 不是每个 pass 都有严格线性顺序。真正的依赖是：ABI、event、external call、revert encoding 都依赖 memory buffer；checked arithmetic、bounds check 依赖 panic/error 识别；storage field 依赖 storage address 根。
 
@@ -93,11 +92,14 @@ flowchart TD
   D --> N
   F --> O[event log ABI]
 
-  C --> P[low-risk rewrite<br/>off by default]
-  D --> P
-  H --> P
-  J --> P
-  P --> Q[VerifierPass]
+  C --> Q[VerifierPass]
+  I --> Q
+  H --> Q
+  J --> Q
+  L --> Q
+  M --> Q
+  N --> Q
+  O --> Q
 ```
 
 ## EVM IR canonicalization
@@ -139,6 +141,12 @@ flowchart TD
 - fallback / receive 的判断还不稳定，尤其是 `calldatasize == 0` 和 payable 状态要结合后面的 callvalue guard。
 - 第一阶段不做 selector 到源码函数名恢复。
 
+rewrite flag：
+
+- 默认开启。
+- 能确认 selector prologue 和 dispatcher 比较链后，可以把它们从后端业务输出里隐藏。
+- 对 fallback / receive / selector 内联 body，rewrite 的目标是先标清边界；是否拆函数可以后续再做，不影响默认开启。
+
 ## Payable / nonpayable guard
 
 底层模式：
@@ -163,7 +171,12 @@ flowchart TD
 - 已有 `PayabilityGuardPass`，能识别直接的 `callvalue == 0 -> revert(0,0)`。
 - 还没处理 optimizer 变形后的等价条件。
 - fallback/receive 的 payable 状态还没完整区分。
-- rewrite 可以先只支持这个模式，但要等 fallback/receive 误报风险降下来。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后删除或隐藏 `callvalue == 0 -> revert(0,0)` 这段 guard，用函数级 `nonpayable` 语义表达。
+- fallback/receive 的 payable 状态如果还无法确认，只跳过对应函数，不影响其他已确认 public entry 的 rewrite。
 
 ## Revert、Panic、Error、custom error 和 returndata bubble
 
@@ -193,6 +206,12 @@ flowchart TD
 - 还缺 `Error(string)`、custom error、revert buffer 的 ABI 结构。
 - `revert(0,0)` 误报风险高：nonpayable、ABI bounds、fallback reject、用户 require 都可能用它。
 
+rewrite flag：
+
+- 默认开启。
+- 明确的 Panic、Error、custom error、returndata bubble 改写成高层 revert 语义。
+- `revert(0,0)` 只有在被 nonpayable、ABI bounds、fallback reject 等上游语义认领后才改写；普通空 revert 保留为用户可见的低层退出。
+
 ## Checked arithmetic 和 bounds check
 
 底层模式：
@@ -220,6 +239,12 @@ flowchart TD
 - 还没有独立 `BoundsCheckPass`。
 - enum 上界检查、bool 归一和 panic 的关系还没处理。
 
+rewrite flag：
+
+- 默认开启。
+- 命中后把 `op + condition + panic` 合成 checked arithmetic 或 bounds check 语义，避免后端输出编译器插入的比较和 panic 分支。
+- 如果 panic code 不完整，先不改写该处，不能猜成业务逻辑。
+
 ## Value cleanup 和类型线索
 
 底层模式：
@@ -246,6 +271,12 @@ flowchart TD
 - 对 `shl/sub/and` 组合生成的 mask 识别不足。
 - 对 bool 双重 `iszero`、enum range check 还没覆盖。
 - address mask 和 uint160 mask 本质形状接近，metadata 要保留置信度，不能直接定最终类型。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后把 cleanup 当作类型线索，不再把 address mask、bool 归一、`signextend` 这类编译器清理当普通业务位运算输出。
+- 如果还不能确定最终类型，保留类型候选，不强行改成 address/bool/enum。
 
 ## Memory buffer 和动态对象
 
@@ -276,6 +307,12 @@ flowchart TD
 - 还缺跨基本块的 buffer 分组、起点、长度、写入顺序。
 - Memory 是当前最大的瓶颈，因为 ABI、revert、event、external call 都共享这套 `mstore/mload`。
 
+rewrite flag：
+
+- 默认开启。
+- 命中后把明确的 free memory pointer bump 改写成 memory allocation 语义，例如 `evm_malloca(size)`。
+- buffer 边界不清楚时，不删除原始 `mstore/mload`，但仍把已确认的分配点改写出来，供 ABI/event/call pass 使用。
+
 ## ABI decode
 
 底层模式：
@@ -304,6 +341,12 @@ flowchart TD
 - 还没有 `AbiDecodePass`。
 - 静态参数可以先做，动态参数要等 memory buffer 更稳。
 - ABI bounds check 容易和业务 require 混在一起，不能只看 `revert(0,0)`。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后把 calldata bounds check、`calldataload`、cleanup 合成 public/external 参数语义。
+- 静态参数先改写；动态参数等 offset/length 和 memory copy 能绑定后再改写。
 
 ## ABI return
 
@@ -334,6 +377,12 @@ flowchart TD
 - 还没恢复动态返回值、head/tail、返回类型线索。
 - 因此建议把完整 `AbiReturnPass` 放在 memory buffer 和 value cleanup 之后。
 
+rewrite flag：
+
+- 默认开启。
+- 命中后把 `mstore` return buffer 和 `evm_return` 合成返回值语义。
+- 简单静态返回先改写；动态返回在 head/tail 结构明确后改写。
+
 ## ABI revert encoding
 
 底层模式：
@@ -358,6 +407,12 @@ flowchart TD
 
 - 当前只在 `SolidityRevertPass` 里做了部分 Panic selector 识别。
 - 更完整的 ABI revert encoding 可以作为 `SolidityRevertPass` 增强，也可以拆成单独 pass。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后把 revert buffer 写入序列改写成 Panic/Error/custom error 语义。
+- 这个 rewrite 需要和 `SolidityRevertPass` 共用同一个识别结果，不能再写一套独立 matcher。
 
 ## Storage addressing、mapping 和动态数组
 
@@ -386,6 +441,12 @@ flowchart TD
 - 还没确认 hash 前 memory 里写了什么。
 - 还没恢复 nested mapping / array 的链。
 
+rewrite flag：
+
+- 默认开启。
+- 命中后把 sha3 slot 计算改写成 mapping / dynamic array storage address 语义。
+- 只按 `sha3` 长度猜出来的 candidate 不改写，必须确认 scratch memory 里的 key/base slot。
+
 ## Packed storage field
 
 底层模式：
@@ -410,6 +471,12 @@ flowchart TD
 - 写 field 前的 clear/or/shift 组合容易被 optimizer 改形状。
 - 只恢复 slot/offset/width，不猜变量名。
 
+rewrite flag：
+
+- 默认开启。
+- 命中后把 shift/mask/or 序列改写成 packed storage field load/store 语义。
+- 变量名和源码 storage layout 不在这里猜，只输出 slot、bit offset、bit width。
+
 ## Storage bytes/string 短长编码
 
 底层模式：
@@ -433,7 +500,12 @@ flowchart TD
 当前状态和问题：
 
 - 还没有 `StorageBytesStringPass`。
-- 第一阶段只适合标 candidate，不适合 rewrite 成高级字符串操作。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后把短/长分支、长度、data slot 改写成 storage bytes/string 语义。
+- 不需要一步到位改成高级字符串操作，但不应继续把短长编码分支当普通业务逻辑输出。
 
 ## Event log
 
@@ -459,6 +531,12 @@ flowchart TD
 
 - 已有 `EventLogPass`，只标 topic 数。
 - 还没恢复 topic 常量、data buffer、匿名事件、动态 indexed 参数。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后把 `evm_logN` 和对应 memory data buffer 改写成 `emit event` 语义。
+- 事件名不查表，topic 常量和参数结构先保留。
 
 ## External call 和 returndata
 
@@ -490,26 +568,11 @@ flowchart TD
 - 还没把 success check、returndata bubble、returndata decode 绑定成一个外部调用结构。
 - 不识别 proxy、ERC1967、OpenZeppelin 这类源码/库模式。
 
-## Rewrite
+rewrite flag：
 
-底层模式：
-
-- 已经识别并确认是编译器生成的低层片段。
-
-高层语义：
-
-- 用 metadata 或高层 intrinsic 表达，不再让后端输出底层 helper 序列。
-
-顺序要求：
-
-- 必须最后跑。
-- 只能依赖前面 metadata 结果，不能再自己写一套 matcher。
-- 默认关闭。
-
-当前建议：
-
-- 第一批只 rewrite nonpayable guard、简单 ABI return、明确 Panic/Error/custom error、returndata bubble。
-- storage、dynamic ABI、event、external call 暂时不要 rewrite。
+- 默认开启。
+- 命中后把 call helper、input/output buffer、success check、失败冒泡和返回解码合成外部调用语义。
+- proxy/library 识别不在这里做；`delegatecall` 只表达低层调用语义。
 
 ## 收集测试用例
 
@@ -567,5 +630,5 @@ flowchart TD
 - batch001 已有样例能跑完并通过 `llvm-as`。
 - 每个底层模式最终至少有 5 个 case 覆盖，case 可以复用到多个模式。
 - 每个 pass 的 oracle 不只看命中数量，还要逐步覆盖命中位置、kind、关键参数和误报样例。
-- metadata-only 不改变 CFG。
-- rewrite 开启后必须 verifier 通过，并且只处理前面列出的低风险模式。
+- 每个识别 pass 的 rewrite flag 默认开启；测试里需要同时覆盖 metadata 和 rewrite 后 IR 形状。
+- rewrite 后必须 verifier 通过。
