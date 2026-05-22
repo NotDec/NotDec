@@ -98,6 +98,18 @@ def count_metadata_uses(path: Path, metadata_name: str) -> int:
     return text.count(f"!{metadata_name}")
 
 
+def rewrite_marker_name(metadata_name: str) -> str:
+    prefix = "notdec.solidity."
+    if metadata_name.startswith(prefix):
+        metadata_name = metadata_name[len(prefix) :]
+    return "notdec_solidity_rewrite_" + metadata_name.replace(".", "_")
+
+
+def count_rewrite_markers(path: Path, metadata_name: str) -> int:
+    text = path.read_text()
+    return text.count(f"call void @{rewrite_marker_name(metadata_name)}(")
+
+
 def write_compare_report(
     *,
     report_path: Path,
@@ -196,6 +208,17 @@ def main() -> int:
                 "nonpayable_functions": case["expected_nonpayable_functions"]
             }
             expected_counts.update(case.get("expected_metadata_counts", {}))
+            expect_rewrite_markers = case.get(
+                "expect_rewrite_markers",
+                manifest.get("expect_rewrite_markers", False),
+            )
+            if expect_rewrite_markers:
+                for metadata_name, count in case.get(
+                    "expected_metadata_counts", {}
+                ).items():
+                    expected_counts[
+                        f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
+                    ] = count
             actual_counts = {
                 "nonpayable_functions": count_nonpayable_functions(output_ll)
             }
@@ -203,6 +226,10 @@ def main() -> int:
                 actual_counts[metadata_name] = count_metadata_uses(
                     output_ll, metadata_name
                 )
+                if expect_rewrite_markers:
+                    actual_counts[
+                        f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
+                    ] = count_rewrite_markers(output_ll, metadata_name)
             compare_ok = write_compare_report(
                 report_path=compare_txt,
                 expected_counts=expected_counts,

@@ -1,10 +1,12 @@
 #include "Passes/evm/SolidityPatterns.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Metadata.h>
@@ -104,6 +106,16 @@ StringRef getCalleeName(const Value *V) {
   return Callee == nullptr ? StringRef("") : Callee->getName();
 }
 
+bool isRewriteMarkerCall(const Instruction &I) {
+  auto *Call = dyn_cast<CallBase>(&I);
+  if (Call == nullptr) {
+    return false;
+  }
+  const Function *Callee = Call->getCalledFunction();
+  return Callee != nullptr &&
+         Callee->getName().starts_with("notdec_solidity_rewrite_");
+}
+
 CallBase *getCallValueFromPredicate(ICmpInst *Cmp) {
   if (Cmp == nullptr) {
     return nullptr;
@@ -132,6 +144,9 @@ bool isEmptyRevertBlock(BasicBlock *BB) {
     if (isa<UnreachableInst>(&I)) {
       continue;
     }
+    if (isRewriteMarkerCall(I)) {
+      continue;
+    }
     auto *Call = dyn_cast<CallBase>(&I);
     if (Call == nullptr || !isCallTo(Call, "evm_revert") ||
         Call->arg_size() != 3 || !isZero(Call->getArgOperand(1)) ||
@@ -142,20 +157,93 @@ bool isEmptyRevertBlock(BasicBlock *BB) {
   return true;
 }
 
+std::string getRewriteMarkerName(StringRef Kind) {
+  std::string Name = "notdec_solidity_rewrite_";
+  Kind.consume_front("notdec.solidity.");
+  for (char C : Kind) {
+    Name.push_back(C == '.' ? '_' : C);
+  }
+  return Name;
+}
+
+uint64_t getRewriteKindCode(StringRef Value) {
+  // The marker call is a stable rewrite surface for tests and later lowering.
+  // Keep the original EVM instruction alive, and carry the matched kind as a
+  // small deterministic code so this pass does not need one helper per variant.
+  uint64_t Hash = 1469598103934665603ULL;
+  for (char C : Value) {
+    Hash ^= static_cast<unsigned char>(C);
+    Hash *= 1099511628211ULL;
+  }
+  return Hash;
+}
+
+void insertRewriteMarker(LLVMContext &Ctx, Instruction &I, StringRef Kind,
+                         StringRef RewriteKind) {
+  Module *M = I.getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      getRewriteMarkerName(Kind),
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (I.isTerminator()) {
+    Builder.SetInsertPoint(&I);
+  } else if (Instruction *Next = I.getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(I.getParent());
+  }
+
+  auto *KindCode =
+      ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                       getRewriteKindCode(RewriteKind));
+  Value *Args[] = {KindCode};
+  Builder.CreateCall(Marker, Args);
+}
+
+void insertRewriteMarker(LLVMContext &Ctx, Function &F, StringRef Kind,
+                         StringRef RewriteKind) {
+  BasicBlock &Entry = F.getEntryBlock();
+  auto It = Entry.getFirstNonPHIOrDbgOrAlloca();
+  Instruction *InsertBefore = It == Entry.end() ? nullptr : &*It;
+  if (InsertBefore == nullptr) {
+    InsertBefore = Entry.getTerminator();
+  }
+  if (InsertBefore == nullptr) {
+    return;
+  }
+  insertRewriteMarker(Ctx, *InsertBefore, Kind, RewriteKind);
+}
+
 void addStringMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
                        StringRef Value) {
+  if (isRewriteMarkerCall(I)) {
+    return;
+  }
   I.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
+  insertRewriteMarker(Ctx, I, Kind, Value);
 }
 
 void addStringMetadata(LLVMContext &Ctx, Function &F, StringRef Kind,
                        StringRef Value) {
+  bool IsNew = F.getMetadata(Kind) == nullptr;
   F.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
+  if (IsNew) {
+    insertRewriteMarker(Ctx, F, Kind, Value);
+  }
 }
 
 void markBlock(LLVMContext &Ctx, BasicBlock &BB, StringRef Kind,
                StringRef Value) {
+  SmallVector<Instruction *, 8> OriginalInstructions;
   for (Instruction &I : BB) {
-    addStringMetadata(Ctx, I, Kind, Value);
+    if (!isRewriteMarkerCall(I)) {
+      OriginalInstructions.push_back(&I);
+    }
+  }
+  for (Instruction *I : OriginalInstructions) {
+    addStringMetadata(Ctx, *I, Kind, Value);
   }
 }
 

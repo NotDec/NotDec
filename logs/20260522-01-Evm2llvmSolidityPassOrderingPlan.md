@@ -658,3 +658,9 @@ rewrite 在测试用例收集阶段不是主目标，但后面需要单独完善
 - 主链路能输出每类底层模式的识别统计。
 - 每个 pass 的 oracle 不只看命中数量，还要逐步覆盖命中位置、kind、关键参数和误报样例。
 - rewrite 完善阶段要覆盖 rewrite 后 IR 形状，并保证 verifier 通过。
+
+## rewrite 阶段实现记录
+
+2026-05-22：完成第一版通用 rewrite surface。各 pass 仍复用原 metadata matcher，但在命中点同步插入 `notdec_solidity_rewrite_*` marker call；测试 runner 已开启 rewrite marker oracle，要求 marker 数量和对应 metadata 数量一致。详细记录见 `logs/20260522-proj-passes/rewrite/20260522-06-solidity-pattern-rewrite-markers.md`。
+
+当前判断：这版覆盖所有现有 pass 类别，但还只是保守 marker，不删除低层 EVM helper。memory / ABI / storage 等需要更强数据流后，才能继续做真正合并和替换。
