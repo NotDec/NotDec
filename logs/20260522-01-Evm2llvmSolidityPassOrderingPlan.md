@@ -87,8 +87,8 @@ flowchart TD
 
 当前问题：
 
-- 只能跑局部、低风险的 LLVM 优化，不能把 wasm 类型恢复和 wasm 专用 pass 带进来。
-- optimizer 会改变 Solidity 不同版本的形状，matcher 要围绕 helper call、值依赖和终点写，不能只写固定基本块。
+- canonicalization 的强度要控制好。优化太弱，后面的 pass 要兼容很多噪声；优化太强，可能把原本容易看的保护分支、buffer 写入顺序合并到更难匹配的形状里。
+- matcher 不能假设某个模式一定是“入口块判断、失败块 revert、成功块继续”这种固定基本块排列。更稳的写法是从 `evm_callvalue`、`evm_revert`、`evm_mstore` 这类 helper 调用出发，沿着 SSA use-def 和分支关系确认它们是不是同一个编译器模式。
 
 ## Selector、fallback、receive 和 public 入口
 
@@ -504,4 +504,3 @@ flowchart TD
 - 每个 pass 的 oracle 不只看命中数量，还要看命中位置、kind、关键参数和误报样例。
 - metadata-only 不改变 CFG。
 - rewrite 开启后必须 verifier 通过，并且只处理前面列出的低风险模式。
-
