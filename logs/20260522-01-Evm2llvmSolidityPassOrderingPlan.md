@@ -664,3 +664,5 @@ rewrite 在测试用例收集阶段不是主目标，但后面需要单独完善
 2026-05-22：完成第一版通用 rewrite surface。各 pass 仍复用原 metadata matcher，但在命中点同步插入 `notdec_solidity_rewrite_*` marker call、`notdec_solidity_rewrite_hidden` marker call，并给原始低层指令或函数入口点写 `notdec.solidity.rewrite_hidden.*` metadata；测试 runner 已开启 rewrite marker / hidden oracle，要求数量和对应 metadata 数量一致。详细记录见 `logs/20260522-proj-passes/rewrite/20260522-06-solidity-pattern-rewrite-markers.md`。
 
 当前判断：这版覆盖所有现有 pass 类别，并且为后端隐藏低层 EVM helper 提供了直接 metadata。但它仍是保守 rewrite surface，没有真正删除 CFG / helper，也没有合并 memory / ABI / storage 结构。memory / ABI / storage 等需要更强数据流后，才能继续做真正合并和替换。
+
+2026-05-22：补充按类别 rewrite 审计，逐类记录当前通用 rewrite / hide 覆盖情况，以及不继续删除 CFG / 合并 typed intrinsic 的原因。详细记录见 `logs/20260522-proj-passes/rewrite/20260522-07-solidity-pattern-rewrite-category-audit.md`。
