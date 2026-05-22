@@ -31,7 +31,7 @@
 - `rewrite/`：各 pass 的 rewrite 通用能力改进。
 - `testcase/`：新增、整理、标注测试用例和测试 oracle。
 
-每个 pass 相关修改都要在对应目录下写一份 log。新增测试用例、修改 manifest、补 oracle 这类改动写到 `testcase/`。如果一次工作同时增加测试用例并修改多个 pass，就分别在 `testcase/` 和对应 pass 目录下写多份 log，避免把不同问题混在一个记录里。
+每个 pass 相关修改都要在对应目录下写一份 log。新增测试用例、修改 manifest、补 oracle 这类改动写到 `testcase/`。如果一次工作同时增加测试用例并修改多个 pass，就分别在 `testcase/` 和对应 pass 目录下写多份 log，避免把不同问题混在一个记录里。Pass目录下的log需要单独有段落评估是否当前修改足够通用，不是针对性的启发式策略。
 
 ## 背景
 
