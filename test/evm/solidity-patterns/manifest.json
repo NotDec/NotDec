@@ -7,8 +7,21 @@
     {
       "name": "0014_proxy_like",
       "input": "cases/0014_proxy_like.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "value_cleanup"
+      ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
@@ -25,8 +38,20 @@
     {
       "name": "0011_multi_public",
       "input": "cases/0011_multi_public.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "value_cleanup"
+      ],
       "expected_nonpayable_functions": 5,
       "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
@@ -43,8 +68,18 @@
     {
       "name": "0002_delegatecall_no_nonpayable",
       "input": "cases/0002_delegatecall_no_nonpayable.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "external_call",
+        "memory_buffer",
+        "revert",
+        "selector_entry",
+        "value_cleanup"
+      ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 3,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
@@ -56,6 +91,352 @@
         "notdec.solidity.selector_inlined_body": 1,
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0
+      }
+    },
+    {
+      "name": "0441_19494998_776c03cc9d_8117f350cb9d",
+      "input": "cases/0441_19494998_776c03cc9d_8117f350cb9d.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 6,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 8,
+        "notdec.solidity.abi_return": 10,
+        "notdec.solidity.cleanup": 3,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 2,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.memory_object": 17,
+        "notdec.solidity.payability_guard": 30,
+        "notdec.solidity.revert": 14,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 0
+      }
+    },
+    {
+      "name": "0448_19495059_065877b669_4f138305be23",
+      "input": "cases/0448_19495059_065877b669_4f138305be23.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 19,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 6,
+        "notdec.solidity.abi_return": 28,
+        "notdec.solidity.cleanup": 20,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 7,
+        "notdec.solidity.external_call": 8,
+        "notdec.solidity.memory_object": 119,
+        "notdec.solidity.payability_guard": 95,
+        "notdec.solidity.revert": 71,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 19
+      }
+    },
+    {
+      "name": "0450_19495071_6b6c9447e0_6344565f4b31",
+      "input": "cases/0450_19495071_6b6c9447e0_6344565f4b31.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 2,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 4,
+        "notdec.solidity.cleanup": 9,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 2,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.memory_object": 25,
+        "notdec.solidity.payability_guard": 10,
+        "notdec.solidity.revert": 9,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 2
+      }
+    },
+    {
+      "name": "0456_19495158_c7c34e07aa_0e692a3d145c",
+      "input": "cases/0456_19495158_c7c34e07aa_0e692a3d145c.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 20,
+        "notdec.solidity.cleanup": 22,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 2,
+        "notdec.solidity.external_call": 1,
+        "notdec.solidity.memory_object": 45,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 28,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 14
+      }
+    },
+    {
+      "name": "0457_19495180_71d7525532_df21a257bd5c",
+      "input": "cases/0457_19495180_71d7525532_df21a257bd5c.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 15,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 22,
+        "notdec.solidity.cleanup": 42,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 5,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.memory_object": 87,
+        "notdec.solidity.payability_guard": 75,
+        "notdec.solidity.revert": 82,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 23
+      }
+    },
+    {
+      "name": "0459_19495198_fc5ac215e3_805f0e6bf43e",
+      "input": "cases/0459_19495198_fc5ac215e3_805f0e6bf43e.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 15,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 22,
+        "notdec.solidity.cleanup": 42,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 5,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.memory_object": 87,
+        "notdec.solidity.payability_guard": 75,
+        "notdec.solidity.revert": 82,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 23
+      }
+    },
+    {
+      "name": "0460_19495212_3dd362a96f_b915c4f6cb8b",
+      "input": "cases/0460_19495212_3dd362a96f_b915c4f6cb8b.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 2,
+        "notdec.solidity.abi_return": 32,
+        "notdec.solidity.cleanup": 11,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 5,
+        "notdec.solidity.external_call": 1,
+        "notdec.solidity.memory_object": 83,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 35,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 21
+      }
+    },
+    {
+      "name": "0725_19498082_e78beb21f7_98e658f9eae8",
+      "input": "cases/0725_19498082_e78beb21f7_98e658f9eae8.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 29,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 30,
+        "notdec.solidity.cleanup": 68,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 8,
+        "notdec.solidity.external_call": 4,
+        "notdec.solidity.memory_object": 156,
+        "notdec.solidity.payability_guard": 145,
+        "notdec.solidity.revert": 109,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 15
+      }
+    },
+    {
+      "name": "0726_19498082_c3945ab21b_2b68f9f60fc2",
+      "input": "cases/0726_19498082_c3945ab21b_2b68f9f60fc2.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 2,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 4,
+        "notdec.solidity.cleanup": 9,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 2,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.memory_object": 33,
+        "notdec.solidity.payability_guard": 10,
+        "notdec.solidity.revert": 9,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 2
+      }
+    },
+    {
+      "name": "0735_19498132_e6671af1f9_f57fe690a6a3",
+      "input": "cases/0735_19498132_e6671af1f9_f57fe690a6a3.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 2,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 4,
+        "notdec.solidity.cleanup": 4,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.memory_object": 14,
+        "notdec.solidity.payability_guard": 10,
+        "notdec.solidity.revert": 8,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 2
+      }
+    },
+    {
+      "name": "0740_19498186_acae9b9760_d235a47b18d5",
+      "input": "cases/0740_19498186_acae9b9760_d235a47b18d5.ll",
+      "patterns": [
+        "abi_decode",
+        "abi_return",
+        "event_log",
+        "external_call",
+        "memory_buffer",
+        "nonpayable_guard",
+        "payability",
+        "revert",
+        "selector_entry",
+        "storage_addressing",
+        "value_cleanup"
+      ],
+      "expected_nonpayable_functions": 29,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_return": 30,
+        "notdec.solidity.cleanup": 68,
+        "notdec.solidity.entry_kind": 1,
+        "notdec.solidity.event": 8,
+        "notdec.solidity.external_call": 4,
+        "notdec.solidity.memory_object": 156,
+        "notdec.solidity.payability_guard": 145,
+        "notdec.solidity.revert": 109,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 1,
+        "notdec.solidity.storage_addressing": 15
       }
     }
   ]

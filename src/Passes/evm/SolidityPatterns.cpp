@@ -17,6 +17,7 @@ STATISTIC(NumNonpayableGuards, "Number of Solidity nonpayable guards found");
 STATISTIC(NumSelectorPrologues, "Number of Solidity selector prologues found");
 STATISTIC(NumSelectorInlinedBodies,
           "Number of Solidity selector inlined body candidates found");
+STATISTIC(NumAbiDecodes, "Number of Solidity ABI decode candidates found");
 STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
 STATISTIC(NumCleanups, "Number of Solidity value cleanup hints found");
@@ -35,6 +36,7 @@ const char *KIND_SOLIDITY_SELECTOR_PROLOGUE =
     "notdec.solidity.selector_prologue";
 const char *KIND_SOLIDITY_SELECTOR_INLINED_BODY =
     "notdec.solidity.selector_inlined_body";
+const char *KIND_SOLIDITY_ABI_DECODE = "notdec.solidity.abi_decode";
 const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
 const char *KIND_SOLIDITY_CLEANUP = "notdec.solidity.cleanup";
@@ -136,6 +138,10 @@ bool isSelectorFunction(const Function &F) {
 
 bool isPublicEntryFunction(const Function &F) {
   return F.getName().starts_with("public_") && !isSelectorFunction(F);
+}
+
+bool isAbiDecodeContext(const Function &F) {
+  return isPublicEntryFunction(F) || isSelectorFunction(F);
 }
 
 bool isMstoreAt(const CallBase &Call, uint64_t Offset, uint64_t Value) {
@@ -302,6 +308,41 @@ PreservedAnalyses PayabilityGuardPass::run(Function &F,
     ++NumNonpayableGuards;
     Changed = true;
     break;
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+PreservedAnalyses AbiDecodePass::run(Function &F, FunctionAnalysisManager &) {
+  if (!isAbiDecodeContext(F)) {
+    return PreservedAnalyses::all();
+  }
+
+  LLVMContext &Ctx = F.getContext();
+  bool Changed = false;
+
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isCallTo(Call, "evm_calldataload") && Call->arg_size() == 2) {
+      StringRef Kind = isConstantIntValue(Call->getArgOperand(1), 0)
+                           ? "selector_word"
+                           : "static_arg_word";
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_DECODE, Kind);
+      ++NumAbiDecodes;
+      Changed = true;
+      continue;
+    }
+
+    if (isCallTo(Call, "evm_calldatacopy") && Call->arg_size() == 5) {
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_DECODE,
+                        "dynamic_copy_candidate");
+      ++NumAbiDecodes;
+      Changed = true;
+    }
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
