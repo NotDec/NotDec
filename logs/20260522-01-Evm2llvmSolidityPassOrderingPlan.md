@@ -2,378 +2,506 @@
 
 ## 原始 prompt
 
+首次 prompt：
+
 阅读logs/20260521-01-Evm2llvmSolidityCompilerPatternPassPlan.md，然后单独写一个新的计划文件，规划一下这些PASS按照什么顺序组织比较合适。用Mermaid写一个架构图，然后再单独列举一下当前的难点，有哪些Pass/底层模式没有写/识别，有哪些问题需要解决。
+
+本次修订 prompt：
+
+抛弃之前的分类思路，重新认真思考，就单纯按照底层模式以及对应的高层语义去分，然后，重点是顺序是怎么样的。如果没有严格顺序要求的话，就说明一下，然后就只聊一下这些pass之间有顺序上的要求的部分，比如某个pass先处理之后，有利于后续的另一个pass。
+这里第一点，metadata和基础索引层，这个很奇怪，它只是统一metadata名字，应该只是提供基础的架构，为什么要放到这个推荐顺序里面来。这个第二点入口和CFG边界层，这个名字不太明确，第一眼看上去不知道是干什么的，考虑没必要非要取一个什么什么层这样的名字，标题就简单说这部分是处理什么特性。其次，这里当前已有但还偏弱的pass，还有这个还没写的pass，以及当前难点，这3块最好融入到前面这里面，不要单独列举
 
 ## 背景
 
-上一份 plan 已经把 Solidity 编译器主动生成的底层模式列出来了。当前代码也已经有一批 metadata-only pass：
+上一份 plan 已经列出 Solidity 编译器会主动生成哪些底层代码。这里不再按“层”分类，而是按底层模式和对应高层语义来组织 pass。
 
-- `SolidityPatternAnnotationPass`
-- `SelectorInlinedLogicExtractionPass`
-- `PayabilityGuardPass`
-- `AbiReturnPass`
-- `SolidityRevertPass`
-- `ValueCleanupTypeHintPass`
-- `StorageAddressingPass`
-- `MemoryObjectPass`
-- `EventLogPass`
-- `ExternalCallPass`
+`SolidityPatternAnnotationPass`、metadata 名字、公共 helper、统计输出，这些属于实现基础设施。它们应该在代码结构里统一，但不是一个需要参与语义顺序讨论的 pass。真正需要讨论顺序的是：某个模式先识别后，是否能让另一个模式更可靠。
 
-这些 pass 现在主要是“看到 helper 调用或简单形状就挂 metadata”。下一步不能只按“功能类别”排队，还要按依赖排队：先把 IR 形状稳定下来，再识别入口、错误、内存对象、ABI、storage，最后才做跨调用、事件和 rewrite。
+总原则：
 
-## 目标
+- 先跑 EVM IR canonicalization。所有 matcher 面向优化后的 IR。
+- 识别 pass 默认 metadata-only，不删 CFG。
+- 只有明确依赖关系的 pass 才要求顺序；没有依赖的 pass 可以并列跑。
+- rewrite 独立放最后，不能和识别混在一起。
 
-这份计划只解决 pass 组织问题：
+## 推荐总顺序
 
-- 给 EVM Solidity pass 一个更合适的运行顺序。
-- 明确哪些 pass 是基础信息，哪些 pass 依赖前面结果。
-- 列出当前没写、只写了候选、或者底层模式还没识别的部分。
-- 先保持 metadata-only 为主，rewrite 只能放到后面低风险模式里。
+严格顺序只需要这样：
 
-## 推荐顺序
+1. EVM IR canonicalization。
+2. 识别 selector / fallback / receive / public entry。
+3. 识别 revert / panic / error / returndata bubble。
+4. 识别 value cleanup 和 memory buffer。
+5. 识别 ABI decode / ABI return / ABI revert encoding。
+6. 识别 storage addressing / packed field / storage bytes-string。
+7. 识别 external call 和 event。它们可以早标 helper call，但参数结构要等 memory/ABI。
+8. rewrite。默认关闭，只处理低风险模式。
 
-### 0. EVM IR canonicalization
-
-先跑当前已有的 LLVM 局部优化，让 stack-lifted IR 变成比较稳定的 SSA 形状。
-
-要求：
-
-- 只做局部、通用、低风险优化。
-- 不跑 wasm 类型恢复、不跑主 NotDec 的 wasm 恢复 pass。
-- 所有 Solidity matcher 只面向 canonical 后的 IR 写，不兼容太多旧形状。
-
-### 1. Metadata 和基础索引层
-
-顺序：
-
-1. `SolidityPatternAnnotationPass`
-2. 后续补一个公共的 `EvmSolidityAnalysis` 或轻量索引工具，不一定马上做成 LLVM analysis pass
-
-作用：
-
-- 统一 metadata 名字、字段和版本。
-- 建立 helper call 索引：`evm_mload`、`evm_mstore`、`evm_sha3`、`evm_revert`、`evm_return`、`evm_call*`、`evm_log*`。
-- 后面不要每个 pass 自己完整扫一遍并重复发明字段。
-
-### 2. 入口和 CFG 边界层
-
-顺序：
-
-1. `SelectorInlinedLogicExtractionPass`
-2. `PayabilityGuardPass`
-
-原因：
-
-- 先知道哪些函数是 selector dispatcher、public entry、fallback/receive 候选。
-- `nonpayable` guard 是入口语义，应该在 ABI decode 和业务 require 之前识别。
-- selector 函数里内联的 fallback/receive/body 候选要先标出来，后面 ABI、call、event pass 才能知道这些代码不一定属于 selector 比较链。
-
-当前建议：
-
-- `SelectorInlinedLogicExtractionPass` 继续只标边界和候选，不拆函数。
-- `PayabilityGuardPass` 继续 metadata-only，rewrite 等 fallback/receive 判定更稳定后再开。
-
-### 3. 错误和保护层
-
-顺序：
-
-1. `SolidityRevertPass`
-2. 后续新增 `CheckedOperationPass`
-3. 后续新增 `BoundsCheckPass`
-
-原因：
-
-- ABI decode、数组访问、checked arithmetic 都会失败到 revert/panic。
-- 先识别 `Panic(uint256)`、`Error(string)`、custom error、empty revert、returndata bubble，后面的 pass 才能把某些判断归类为编译器保护，而不是业务逻辑。
-- `CheckedOperationPass` 和 `BoundsCheckPass` 需要依赖 panic code。
-
-### 4. 值清理和类型线索层
-
-顺序：
-
-1. `ValueCleanupTypeHintPass`
-2. 后续可以补 `BoolEnumCleanupPass`，也可以合进这个 pass
-
-原因：
-
-- address mask、小整数 mask、`signextend`、bool 归一会被 ABI、storage、return、external call 共用。
-- 这些只是线索，不应该过早变成最终类型。
-
-### 5. 内存对象层
-
-顺序：
-
-1. `MemoryObjectPass`
-2. 后续补 memory write slice / buffer range 跟踪
-
-原因：
-
-- ABI return、ABI decode 动态参数、event data、call data encode、revert encode 都依赖 memory buffer。
-- 现在只标 `mload(0x40)` / `mstore(0x40, new_ptr)` 还不够，下一步要能把一组 `mstore` 归到同一个 buffer。
-
-### 6. ABI 层
-
-顺序：
-
-1. 后续新增 `AbiDecodePass`
-2. `AbiReturnPass`
-3. 后续补 `AbiRevertEncodingPass`，也可以作为 `SolidityRevertPass` 的增强
-
-原因：
-
-- decode 依赖入口函数和 calldata bounds check。
-- return 依赖 memory object 和 cleanup type hint。
-- revert 的 `Error(string)` / custom error 本质也是 ABI encoding，不能永远只在 `SolidityRevertPass` 里做相邻块匹配。
-
-建议：
-
-- `AbiReturnPass` 从当前位置挪到 `MemoryObjectPass` 和 `ValueCleanupTypeHintPass` 后面。
-- 简单 `return(ptr, 32)` 可以继续早标，但完整返回值结构要等 memory buffer 信息。
-
-### 7. Storage 层
-
-顺序：
-
-1. `StorageAddressingPass`
-2. 后续新增 `StorageFieldPass`
-3. 后续新增 `StorageBytesStringPass`
-
-原因：
-
-- sha3 slot 根、packed field、bytes/string 短长编码是三层问题。
-- 先识别 `sha3(key, slot)` / `sha3(slot)` 这种地址根，再识别 `sload/sstore` 上的 bit field。
-- bytes/string storage 依赖 storage addressing、panic 0x22、循环拷贝，放在 storage field 后面更稳。
-
-### 8. 外部交互层
-
-顺序：
-
-1. `ExternalCallPass`
-2. `EventLogPass`
-3. 后续补 `ExternalCallAbiPass`
-
-原因：
-
-- 低级 call 本身容易识别，但 call data encode、returndata decode、失败冒泡要依赖 memory、ABI、revert。
-- event log 也依赖 memory buffer 和 topic/data 区分。
-- 所以现在可以先标 helper 调用，真正恢复调用参数和事件参数要放到 ABI/memory 后面。
-
-### 9. Rewrite 层
-
-顺序：
-
-1. `NonpayableGuardRewritePass`
-2. `SimpleAbiReturnRewritePass`
-3. `RevertRewritePass`
-4. 后续再考虑 call/event/storage rewrite
-
-原因：
-
-- rewrite 不应该混在识别 pass 里。识别和替换分开，方便 metadata-only 做统计和回归。
-- 第一批只能处理低误报模式：nonpayable guard、简单 ABI return、panic/error/custom error、returndata bubble。
-- storage、dynamic ABI、memory object 先不要 rewrite。
+其中 4 到 7 不是每个 pass 都有严格线性顺序。真正的依赖是：ABI、event、external call、revert encoding 都依赖 memory buffer；checked arithmetic、bounds check 依赖 panic/error 识别；storage field 依赖 storage address 根。
 
 ## 架构图
 
 ```mermaid
 flowchart TD
-  A[EVM LLVM IR<br/>target triple = evm-unknown-unknown] --> B[LLVM local canonicalization]
-  B --> C[SolidityPatternAnnotationPass<br/>metadata namespace]
-  C --> D[Helper call index / shared match utils]
+  A[EVM LLVM IR<br/>evm-unknown-unknown] --> B[LLVM local canonicalization]
 
-  D --> E[Entry and CFG layer]
-  E --> E1[SelectorInlinedLogicExtractionPass]
-  E --> E2[PayabilityGuardPass]
+  B --> C[selector / fallback / receive / public entry]
+  C --> D[revert / panic / error / returndata bubble]
 
-  E --> F[Error and guard layer]
-  F --> F1[SolidityRevertPass]
-  F --> F2[CheckedOperationPass<br/>missing]
-  F --> F3[BoundsCheckPass<br/>missing]
+  D --> E[value cleanup hints]
+  D --> F[memory buffer objects]
+  E --> G[ABI decode]
+  F --> G
+  E --> H[ABI return]
+  F --> H
+  D --> I[checked arithmetic / bounds check]
 
-  F --> G[Value hint layer]
-  G --> G1[ValueCleanupTypeHintPass]
-  G --> G2[Bool / enum cleanup<br/>missing]
+  F --> J[ABI revert encoding]
+  D --> J
 
-  G --> H[Memory object layer]
-  H --> H1[MemoryObjectPass]
-  H --> H2[Buffer range tracking<br/>missing]
+  E --> K[storage addressing]
+  F --> K
+  K --> L[packed storage field]
+  K --> M[storage bytes/string]
+  D --> M
 
-  H --> I[ABI layer]
-  I --> I1[AbiDecodePass<br/>missing]
-  I --> I2[AbiReturnPass]
-  I --> I3[AbiRevertEncoding<br/>partial]
+  F --> N[external call ABI]
+  G --> N
+  D --> N
+  F --> O[event log ABI]
 
-  I --> J[Storage layer]
-  J --> J1[StorageAddressingPass]
-  J --> J2[StorageFieldPass<br/>missing]
-  J --> J3[StorageBytesStringPass<br/>missing]
-
-  I --> K[External interaction layer]
-  K --> K1[ExternalCallPass]
-  K --> K2[EventLogPass]
-  K --> K3[ExternalCallAbiPass<br/>missing]
-
-  J --> L[Rewrite layer<br/>off by default]
-  K --> L
-  L --> M[VerifierPass]
-  M --> N[LLVM IR / later backend]
+  C --> P[low-risk rewrite<br/>off by default]
+  D --> P
+  H --> P
+  J --> P
+  P --> Q[VerifierPass]
 ```
 
-## 当前已有但还偏弱的 pass
+## EVM IR canonicalization
 
-- `SelectorInlinedLogicExtractionPass`
-  - 当前只按函数名和明显 `call/log` 标候选。
-  - 还没有真正识别 selector 比较链边界、fallback、receive、内联 body 的 CFG 区域。
+底层模式：evm2llvm 输出的 stack-lifted IR，里面有很多冗余 zext、icmp、helper call 周围的临时值。
 
-- `PayabilityGuardPass`
-  - 当前只识别比较直接的 `callvalue == 0` 加 `revert(0,0)`。
-  - 还没有处理 optimizer 变形后的等价条件，也没有结合 fallback/receive 判断 payable 状态。
+高层语义：没有直接高层语义，只是把形状稳定下来。
 
-- `AbiReturnPass`
-  - 当前主要标 `evm_return`，简单区分 `32` 字节和 returndata forward。
-  - 还没有识别 return buffer 的 `mstore` 序列、head/tail、动态返回值、返回类型线索。
+顺序要求：必须最先跑。后面的 pass 不应该同时兼容优化前和优化后两套形状。
 
-- `SolidityRevertPass`
-  - 当前能标 empty revert、returndata bubble、部分 Panic selector。
-  - 还没完整识别 `Error(string)`、custom error、panic code、revert buffer 的 ABI 结构。
+当前问题：
 
-- `ValueCleanupTypeHintPass`
-  - 当前能标常量 mask 和 `signextend`。
-  - 对 `shl/sub/and` 组合生成的 mask、bool 双重 `iszero`、enum range check 还不够。
+- 只能跑局部、低风险的 LLVM 优化，不能把 wasm 类型恢复和 wasm 专用 pass 带进来。
+- optimizer 会改变 Solidity 不同版本的形状，matcher 要围绕 helper call、值依赖和终点写，不能只写固定基本块。
 
-- `StorageAddressingPass`
-  - 当前只按 `evm_sha3` 长度标 mapping / dynamic array 候选。
-  - 还没有确认 scratch memory 里写了 key/base slot，也没恢复嵌套关系。
+## Selector、fallback、receive 和 public 入口
 
-- `MemoryObjectPass`
-  - 当前只标 free memory pointer 的 load/store。
-  - 还没有分配大小、对象边界、length/data 起点、buffer alias。
+底层模式：
 
-- `EventLogPass`
-  - 当前只按 `evm_log0..4` 标 topic 数。
-  - 还没有恢复 topic、data buffer、匿名事件、动态 indexed 参数 hash。
+- `public___function_selector___*` 里有 selector 分发。
+- `calldatasize < 4`、`calldataload(0) >> 224`、selector 常量比较。
+- fallback / receive / delegatecall 转发逻辑可能内联在 selector 函数里。
+- public 函数名通常是 `public_*`。
 
-- `ExternalCallPass`
-  - 当前只标 call kind。
-  - 还没有恢复 target/value/gas/input/output buffer、success check、returndata decode。
+高层语义：
 
-## 还没写的 pass / 底层模式
+- 哪些函数是 ABI public entry。
+- 哪段代码是 dispatcher。
+- 哪段代码是 fallback / receive / selector 内联 body 候选。
 
-- `AbiDecodePass`
-  - 缺 calldata size 检查、静态参数槽位、动态 offset/length、`calldatacopy`、参数 cleanup 到类型线索。
+顺序要求：
 
-- `StorageFieldPass`
-  - 缺 packed storage load/store：`sload` 后 shift/mask，`sstore` 前 clear/or merge。
+- 这部分应该在 nonpayable、ABI decode、event、external call 之前跑。
+- 原因是后续 pass 需要知道自己看到的是 public entry 里的业务逻辑，还是 selector dispatcher 里的内联路径。
+- 如果暂时不拆函数，也至少要先标出 selector 比较链边界和内联 body 候选。
 
-- `StorageBytesStringPass`
-  - 缺 bytes/string storage 短长分支、长度恢复、`Panic(0x22)` 归类。
+当前状态和问题：
 
-- `CheckedOperationPass`
-  - 缺 Solidity 0.8 checked add/sub/mul/div、类型转换、取负等 panic 模式。
+- 已有 `SelectorInlinedLogicExtractionPass`，但现在只按函数名和明显 `call/log` 标候选。
+- 还没真正识别 selector 比较链边界。
+- fallback / receive 的判断还不稳定，尤其是 `calldatasize == 0` 和 payable 状态要结合后面的 callvalue guard。
+- 第一阶段不做 selector 到源码函数名恢复。
 
-- `BoundsCheckPass`
-  - 缺 array bounds、slice、calldata dynamic object bounds 的统一识别。
+## Payable / nonpayable guard
 
-- `ExternalCallAbiPass`
-  - 缺 call data ABI encode、returndata ABI decode、失败路径和成功路径绑定。
+底层模式：
 
-- `BoolEnumCleanupPass`
-  - 缺 bool 归一、enum 上界检查和非法值 panic 的稳定识别。
+- public/fallback 入口读 `evm_callvalue`。
+- 判断 `callvalue == 0` 或等价条件。
+- 失败分支 `revert(0, 0)`。
 
-- `MemoryBufferAnalysis`
-  - 缺跨基本块的 memory 写入分组、buffer 起点/长度、`mload(0x40)` 生命周期。
+高层语义：
 
-- `RewritePass`
-  - 还没有 metadata-only 和 rewrite 的统一开关。
-  - 还没有把识别结果变成高层 intrinsic 或删低层 CFG 的独立阶段。
+- 函数是 `nonpayable`。
+- 这段 `revert(0,0)` 是编译器保护，不是用户手写 require。
 
-## 当前难点
+顺序要求：
 
-1. Memory 是核心瓶颈。
+- 依赖入口识别。没有 public/fallback/receive 上下文时，单独看到 `callvalue == 0` 不够稳。
+- 应该在 ABI decode 之前跑，因为 ABI decode 也会产生 `revert(0,0)`。
+- 可以在通用 revert 识别前后都跑，但更实用的是：先标 nonpayable guard，再让 revert pass 读取这个标记，避免把它当普通 empty revert。
 
-   ABI return、ABI decode、revert、event、external call 都通过同一套 `evm_mstore` / `evm_mload` 表达。只看相邻指令会误判，必须有轻量 buffer 跟踪。
+当前状态和问题：
 
-2. 编译器版本和 optimizer 会改形状。
+- 已有 `PayabilityGuardPass`，能识别直接的 `callvalue == 0 -> revert(0,0)`。
+- 还没处理 optimizer 变形后的等价条件。
+- fallback/receive 的 payable 状态还没完整区分。
+- rewrite 可以先只支持这个模式，但要等 fallback/receive 误报风险降下来。
 
-   Solidity legacy codegen、via-IR、0.4/0.5/0.8 的形状不同。pass 不能只记固定基本块，要围绕 helper 调用、值依赖和 panic/revert 终点写。
+## Revert、Panic、Error、custom error 和 returndata bubble
 
-3. selector dispatcher 和业务代码混在一起。
+底层模式：
 
-   Gigahorse 当前会把一部分 fallback/receive/delegatecall 逻辑留在 selector 函数里。先不拆函数是对的，但必须把 selector 比较链和内联 body 区域分开。
+- `revert(0,0)`。
+- `Panic(uint256)` selector `0x4e487b71` 加 panic code。
+- `Error(string)` selector `0x08c379a0` 加 ABI string。
+- custom error selector 加参数。
+- 低级 call 失败后 `returndatacopy` 再 `revert(0, returndatasize)`。
 
-4. revert 既可能是编译器保护，也可能是用户业务逻辑。
+高层语义：
 
-   `revert(0,0)` 在 nonpayable、ABI bounds、fallback reject、用户手写 require 里都可能出现。必须结合入口位置、条件来源和 panic/error encoding 判断。
+- `require` / `assert` / compiler panic / ABI bounds check / custom error。
+- 外部调用失败时原样冒泡 returndata。
 
-5. storage 地址计算需要确认 scratch memory 内容。
+顺序要求：
 
-   `sha3(..., 64)` 不一定就是 mapping。要知道 hash 前 memory 里写的是 key 和 base slot，否则只能标 candidate。
+- 应该在 checked arithmetic、array bounds、ABI decode 保护识别之前跑。
+- 后面这些 pass 需要通过 panic code 或 error 形状判断某个条件是不是编译器保护。
+- 但 `Error(string)` 和 custom error 的参数结构依赖 memory buffer，所以 revert pass 可以先标 selector 和终点，完整 ABI 参数后面再补。
 
-6. cleanup 不是最终类型。
+当前状态和问题：
 
-   address mask 和 uint160 mask 形状类似。bool、enum、小整数也会共享 mask/range check。metadata 里要保留置信度，避免过早定类型。
+- 已有 `SolidityRevertPass`，能标 empty revert、returndata bubble、部分 Panic selector。
+- 还缺 panic code 提取。
+- 还缺 `Error(string)`、custom error、revert buffer 的 ABI 结构。
+- `revert(0,0)` 误报风险高：nonpayable、ABI bounds、fallback reject、用户 require 都可能用它。
 
-7. rewrite 风险比识别高很多。
+## Checked arithmetic 和 bounds check
 
-   删除 CFG 或替换 intrinsic 前，必须证明这段代码完全是编译器生成逻辑。第一阶段 rewrite 只适合 nonpayable、简单 return、明确 panic/error、returndata bubble。
+底层模式：
 
-8. 测试 oracle 不能只看命中数量。
+- Solidity 0.8+ checked add/sub/mul/div、取负、类型转换失败。
+- array index 和 length 比较，失败进 `Panic(0x32)` 等。
+- bytes/string storage 编码错误进 `Panic(0x22)`。
 
-   当前 suite 主要统计 nonpayable metadata。后续需要 per-pass oracle：命中位置、kind、关键参数、误报样例都要固化。
+高层语义：
 
-## 阶段计划
+- 普通算术表达式带 checked 语义。
+- 数组边界检查。
+- enum / 类型转换合法性检查。
+- bytes/string storage 编码合法性检查。
 
-### 阶段一：整理顺序和公共设施
+顺序要求：
 
-- 把 pipeline 顺序调整为：canonicalization、metadata、entry、revert、cleanup、memory、ABI、storage、external/event、verifier。
-- 抽公共 helper：callee 判定、常量判定、metadata 写入、helper call 分类。
-- 先不改语义，只保证现有测试仍过。
+- 严格依赖 revert/panic 识别。没有 panic code 时，很难区分 compiler check 和业务 if。
+- 对 ABI decode bounds check，还依赖 calldata 参数模式。
+- 对 storage bytes/string，还依赖 storage 地址和编码模式。
 
-判断标准：
+当前状态和问题：
+
+- 还没有独立 `CheckedOperationPass`。
+- 还没有独立 `BoundsCheckPass`。
+- enum 上界检查、bool 归一和 panic 的关系还没处理。
+
+## Value cleanup 和类型线索
+
+底层模式：
+
+- `and ((1 << N) - 1)`。
+- `signextend`。
+- `iszero(iszero(x))` 或等价 bool 归一。
+- enum / 小整数的范围检查。
+
+高层语义：
+
+- address、bool、uintN、intN、bytesN、enum 的类型线索。
+- 这些不是最终类型，只是低层值被清理到某种宽度。
+
+顺序要求：
+
+- 它和 revert 识别没有强依赖，可以早跑。
+- 但它有利于 ABI decode、ABI return、storage field、external call 参数恢复。
+- 所以推荐放在 ABI/storage/external call 之前。
+
+当前状态和问题：
+
+- 已有 `ValueCleanupTypeHintPass`，能标常量 mask 和 `signextend`。
+- 对 `shl/sub/and` 组合生成的 mask 识别不足。
+- 对 bool 双重 `iszero`、enum range check 还没覆盖。
+- address mask 和 uint160 mask 本质形状接近，metadata 要保留置信度，不能直接定最终类型。
+
+## Memory buffer 和动态对象
+
+底层模式：
+
+- `mload(0x40)` 取 free memory pointer。
+- `mstore(0x40, new_ptr)` 更新 free memory pointer。
+- 一组 `mstore` 写 ABI buffer、revert buffer、event data、call data、return data。
+- 动态数组 / bytes / string 的 length 和 data 区域。
+
+高层语义：
+
+- memory allocation。
+- ABI buffer。
+- revert/error buffer。
+- event data buffer。
+- external call input/output buffer。
+
+顺序要求：
+
+- 这是 ABI return、ABI decode 动态参数、revert encoding、event、external call 的共同前置条件。
+- 没有 memory buffer 跟踪时，这些 pass 只能做很粗的 helper 标注。
+- 它不一定要在 value cleanup 之后，但两者结合后能更好识别 buffer 里写入的类型。
+
+当前状态和问题：
+
+- 已有 `MemoryObjectPass`，只标 `mload(0x40)` 和 `mstore(0x40, ...)`。
+- 还缺跨基本块的 buffer 分组、起点、长度、写入顺序。
+- Memory 是当前最大的瓶颈，因为 ABI、revert、event、external call 都共享这套 `mstore/mload`。
+
+## ABI decode
+
+底层模式：
+
+- `calldatasize` bounds check。
+- `calldataload(4 + 32 * index)`。
+- 动态参数 offset / length 检查。
+- `calldatacopy` 复制 bytes/string/array。
+- 参数读出后 mask / signextend / bool 归一。
+
+高层语义：
+
+- public/external 函数参数。
+- calldata bounds check 是 ABI 解码保护，不是用户业务判断。
+- 参数类型线索。
+
+顺序要求：
+
+- 依赖 public entry 识别。
+- 依赖 revert/panic 识别来归类失败路径。
+- 依赖 value cleanup 获取类型线索。
+- 动态参数依赖 memory buffer。
+
+当前状态和问题：
+
+- 还没有 `AbiDecodePass`。
+- 静态参数可以先做，动态参数要等 memory buffer 更稳。
+- ABI bounds check 容易和业务 require 混在一起，不能只看 `revert(0,0)`。
+
+## ABI return
+
+底层模式：
+
+- `mload(0x40)` 取返回 buffer。
+- 多个 `mstore(retptr + offset, value)`。
+- 动态返回值 head/tail。
+- `return(retptr, size)`。
+- 也可能是 returndata forward。
+
+高层语义：
+
+- 函数返回值。
+- 返回值类型线索。
+- 外部调用 returndata 原样返回。
+
+顺序要求：
+
+- 简单 `return(ptr, 32)` 可以早标。
+- 完整恢复返回值结构依赖 memory buffer 和 value cleanup。
+- returndata forward 依赖 external call / returndata bubble 相关模式，但可以先标候选。
+
+当前状态和问题：
+
+- 已有 `AbiReturnPass`，主要标 `evm_return`，区分 `32` 字节和 returndata forward。
+- 还没识别 return buffer 的 `mstore` 序列。
+- 还没恢复动态返回值、head/tail、返回类型线索。
+- 因此建议把完整 `AbiReturnPass` 放在 memory buffer 和 value cleanup 之后。
+
+## ABI revert encoding
+
+底层模式：
+
+- 写 `Panic(uint256)` / `Error(string)` / custom error selector。
+- 按 ABI 写参数。
+- `revert(ptr, size)`。
+
+高层语义：
+
+- `assert` / compiler panic。
+- `require(..., "message")`。
+- custom error。
+
+顺序要求：
+
+- 依赖 revert 终点识别。
+- 依赖 memory buffer。
+- custom error 参数还依赖 value cleanup。
+
+当前状态和问题：
+
+- 当前只在 `SolidityRevertPass` 里做了部分 Panic selector 识别。
+- 更完整的 ABI revert encoding 可以作为 `SolidityRevertPass` 增强，也可以拆成单独 pass。
+
+## Storage addressing、mapping 和动态数组
+
+底层模式：
+
+- scratch memory 写 key 和 base slot。
+- `sha3(mem, 64)` 得到 mapping element slot。
+- `sha3(slot)` 得到 dynamic array data 起点。
+- 嵌套 mapping/array 形成 sha3 链。
+
+高层语义：
+
+- mapping slot。
+- dynamic array data slot。
+- 嵌套 storage 地址关系。
+
+顺序要求：
+
+- 对简单 sha3 候选没有严格依赖。
+- 可靠识别需要 memory scratch 内容，所以受 memory buffer / mstore 跟踪影响。
+- packed field 和 storage bytes/string 应该在 storage address 根之后做。
+
+当前状态和问题：
+
+- 已有 `StorageAddressingPass`，只按 `evm_sha3` 长度标候选。
+- 还没确认 hash 前 memory 里写了什么。
+- 还没恢复 nested mapping / array 的链。
+
+## Packed storage field
+
+底层模式：
+
+- `sload(slot)` 后 shift/mask 取 field。
+- `sstore(slot, old_cleared | new_shifted)` 写 field。
+- address、bool、小整数、bytesN 可能被打包。
+
+高层语义：
+
+- `storage_field_load(slot, bit_offset, bit_width)`。
+- `storage_field_store(slot, bit_offset, bit_width, value)`。
+
+顺序要求：
+
+- 依赖 value cleanup 来判断 bit width。
+- 依赖 storage addressing 来知道 slot 根，尤其是 mapping/array 元素里的 packed field。
+
+当前状态和问题：
+
+- 还没有 `StorageFieldPass`。
+- 写 field 前的 clear/or/shift 组合容易被 optimizer 改形状。
+- 只恢复 slot/offset/width，不猜变量名。
+
+## Storage bytes/string 短长编码
+
+底层模式：
+
+- storage slot 低 bit 判断短/长编码。
+- 短 bytes/string 数据在同一个 slot。
+- 长 bytes/string 数据从 `sha3(slot)` 开始。
+- 非法编码可能 `Panic(0x22)`。
+
+高层语义：
+
+- storage bytes/string 的 length、data、short/long 分支。
+- storage 编码错误。
+
+顺序要求：
+
+- 依赖 storage addressing。
+- 依赖 panic 识别，尤其是 `Panic(0x22)`。
+- 长 bytes/string 的拷贝还依赖 memory buffer。
+
+当前状态和问题：
+
+- 还没有 `StorageBytesStringPass`。
+- 第一阶段只适合标 candidate，不适合 rewrite 成高级字符串操作。
+
+## Event log
+
+底层模式：
+
+- `evm_log0` 到 `evm_log4`。
+- topic0 是事件签名 hash，匿名事件没有 topic0。
+- 非 indexed 参数写 memory data buffer。
+- 动态 indexed 参数先 hash。
+
+高层语义：
+
+- `emit event(topics, data)`。
+- topic 和 data 的 ABI 结构。
+
+顺序要求：
+
+- 标 `logN` helper 没有依赖，可以随时做。
+- 恢复事件参数依赖 memory buffer 和 ABI encode。
+- 动态 indexed 参数 hash 还依赖 storage/memory/value 线索。
+
+当前状态和问题：
+
+- 已有 `EventLogPass`，只标 topic 数。
+- 还没恢复 topic 常量、data buffer、匿名事件、动态 indexed 参数。
+
+## External call 和 returndata
+
+底层模式：
+
+- `call` / `staticcall` / `delegatecall` / `callcode`。
+- call data 写到 memory。
+- success check。
+- 失败时 returndata bubble。
+- 成功时 returndata ABI decode 或直接 return。
+
+高层语义：
+
+- 外部调用的 kind、target、value、gas、input、output。
+- 调用失败冒泡。
+- 调用返回值解码。
+
+顺序要求：
+
+- 标 call kind 没有严格依赖，可以早做。
+- 恢复 input/output buffer 依赖 memory buffer。
+- success check 和失败路径依赖 revert / returndata bubble 识别。
+- 返回值解码依赖 ABI decode/return 的 buffer 能力。
+
+当前状态和问题：
+
+- 已有 `ExternalCallPass`，只标 call kind。
+- 还没恢复 target/value/gas/input/output buffer。
+- 还没把 success check、returndata bubble、returndata decode 绑定成一个外部调用结构。
+- 不识别 proxy、ERC1967、OpenZeppelin 这类源码/库模式。
+
+## Rewrite
+
+底层模式：
+
+- 已经识别并确认是编译器生成的低层片段。
+
+高层语义：
+
+- 用 metadata 或高层 intrinsic 表达，不再让后端输出底层 helper 序列。
+
+顺序要求：
+
+- 必须最后跑。
+- 只能依赖前面 metadata 结果，不能再自己写一套 matcher。
+- 默认关闭。
+
+当前建议：
+
+- 第一批只 rewrite nonpayable guard、简单 ABI return、明确 Panic/Error/custom error、returndata bubble。
+- storage、dynamic ABI、event、external call 暂时不要 rewrite。
+
+## 不做什么
+
+- 不做 selector 到源码函数名恢复。
+- 不识别 ERC1967、Ownable、ERC20/721 这类源码或库模式。
+- 不为了让 IR 通过而退回 slot fallback 或掩盖 PHIIncoming 问题。
+- 不要求第一阶段覆盖所有 Solidity 版本；先用 apehex 里有源码、大小合适的样例同步验证。
+
+## 验证标准
 
 - `notdec.evm.solidity_patterns` 通过。
-- batch001 中已有样例仍能跑完并通过 `llvm-as`。
-- metadata 数量变化能解释，不出现明显重复标注。
-
-### 阶段二：补 memory 和 ABI decode
-
-- 先做最小 `MemoryBufferAnalysis`，能把 `mload(0x40)` 到一组 `mstore` / `return` / `revert` / `log` / `call` 关联起来。
-- 写 `AbiDecodePass`，先覆盖静态参数和 calldata bounds check。
-- 增强 `AbiReturnPass` 和 `SolidityRevertPass`，让它们使用 memory buffer 信息。
-
-判断标准：
-
-- 能在当前 `test/evm/solidity-patterns/` 三个样例上标出简单 return buffer、panic/custom error 候选、returndata bubble。
-- 对业务 require 不误标为 ABI bounds。
-
-### 阶段三：补 storage 和 checked/bounds
-
-- 写 `StorageFieldPass` 和更可靠的 `StorageAddressingPass`。
-- 写 `CheckedOperationPass` / `BoundsCheckPass`，依赖 panic code 分类。
-- bytes/string storage 先只做候选识别。
-
-判断标准：
-
-- packed address/bool/small int 的 load/store 能给出 slot、bit offset、bit width。
-- mapping/dynamic array slot 不再只靠 `sha3` 长度猜。
-
-### 阶段四：补 external/event 细节和低风险 rewrite
-
-- 增强 `ExternalCallPass` 和 `EventLogPass`，接上 memory/ABI 信息。
-- 单独加 rewrite 开关，默认关闭。
-- 只对低风险模式启用 rewrite。
-
-判断标准：
-
-- metadata-only 和 rewrite 使用同一套 matcher。
-- rewrite 后 verifier 通过。
-- rewritten IR 不再把 nonpayable、panic/error、returndata bubble 当业务代码输出。
-
-## 风险和不做什么
-
-- 不识别 ERC1967、Ownable、ERC20/721 这类源码或库模式。
-- 不做 selector 到源码函数名的查表恢复。
-- 不为了让 IR 通过而退回 slot fallback 或掩盖 PHIIncoming 问题。
-- 不在 storage、dynamic ABI、external call 上过早 rewrite。
-- 不要求第一阶段覆盖所有 Solidity 版本；先用 apehex 里有源码、大小合适的样例做同步验证。
+- batch001 已有样例能跑完并通过 `llvm-as`。
+- 每个 pass 的 oracle 不只看命中数量，还要看命中位置、kind、关键参数和误报样例。
+- metadata-only 不改变 CFG。
+- rewrite 开启后必须 verifier 通过，并且只处理前面列出的低风险模式。
 
