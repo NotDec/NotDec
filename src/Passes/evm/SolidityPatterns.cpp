@@ -1,5 +1,6 @@
 #include "Passes/evm/SolidityPatterns.h"
 
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Constants.h>
@@ -19,10 +20,18 @@ STATISTIC(NumSelectorInlinedBodies,
           "Number of Solidity selector inlined body candidates found");
 STATISTIC(NumAbiDecodes, "Number of Solidity ABI decode candidates found");
 STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
+STATISTIC(NumAbiRevertEncodings,
+          "Number of Solidity ABI revert encoding candidates found");
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
+STATISTIC(NumCheckedBounds,
+          "Number of Solidity checked operation/bounds candidates found");
 STATISTIC(NumCleanups, "Number of Solidity value cleanup hints found");
 STATISTIC(NumStorageAddressing,
           "Number of Solidity storage addressing candidates found");
+STATISTIC(NumPackedStorageFields,
+          "Number of Solidity packed storage field candidates found");
+STATISTIC(NumStorageBytesStrings,
+          "Number of Solidity storage bytes/string candidates found");
 STATISTIC(NumMemoryObjects, "Number of Solidity memory object hints found");
 STATISTIC(NumEvents, "Number of Solidity event candidates found");
 STATISTIC(NumExternalCalls, "Number of Solidity external calls found");
@@ -38,10 +47,17 @@ const char *KIND_SOLIDITY_SELECTOR_INLINED_BODY =
     "notdec.solidity.selector_inlined_body";
 const char *KIND_SOLIDITY_ABI_DECODE = "notdec.solidity.abi_decode";
 const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
+const char *KIND_SOLIDITY_ABI_REVERT_ENCODING =
+    "notdec.solidity.abi_revert_encoding";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
+const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
 const char *KIND_SOLIDITY_CLEANUP = "notdec.solidity.cleanup";
 const char *KIND_SOLIDITY_STORAGE_ADDRESSING =
     "notdec.solidity.storage_addressing";
+const char *KIND_SOLIDITY_PACKED_STORAGE_FIELD =
+    "notdec.solidity.packed_storage_field";
+const char *KIND_SOLIDITY_STORAGE_BYTES_STRING =
+    "notdec.solidity.storage_bytes_string";
 const char *KIND_SOLIDITY_MEMORY_OBJECT = "notdec.solidity.memory_object";
 const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_EXTERNAL_CALL = "notdec.solidity.external_call";
@@ -49,6 +65,9 @@ const char *KIND_SOLIDITY_EXTERNAL_CALL = "notdec.solidity.external_call";
 namespace {
 
 bool isCallTo(const Value *V, StringRef Name) {
+  if (V == nullptr) {
+    return false;
+  }
   auto *Call = dyn_cast<CallBase>(V);
   if (Call == nullptr) {
     return false;
@@ -58,16 +77,25 @@ bool isCallTo(const Value *V, StringRef Name) {
 }
 
 bool isZero(const Value *V) {
+  if (V == nullptr) {
+    return false;
+  }
   auto *C = dyn_cast<ConstantInt>(V);
   return C != nullptr && C->isZero();
 }
 
 bool isConstantIntValue(const Value *V, uint64_t N) {
+  if (V == nullptr) {
+    return false;
+  }
   auto *C = dyn_cast<ConstantInt>(V);
   return C != nullptr && C->getValue() == N;
 }
 
 StringRef getCalleeName(const Value *V) {
+  if (V == nullptr) {
+    return "";
+  }
   auto *Call = dyn_cast<CallBase>(V);
   if (Call == nullptr) {
     return "";
@@ -157,6 +185,28 @@ bool isMloadAt(const CallBase &Call, uint64_t Offset) {
 
 bool isReturndataSize(Value *V) { return isCallTo(V, "evm_returndatasize"); }
 
+bool isPanicSelectorValue(Value *V) {
+  if (V == nullptr) {
+    return false;
+  }
+  auto *Selector = dyn_cast<CallBase>(V);
+  return Selector != nullptr && isCallTo(Selector, "evm_shl") &&
+         Selector->arg_size() == 2 &&
+         isConstantIntValue(Selector->getArgOperand(0), 224) &&
+         isConstantIntValue(Selector->getArgOperand(1), 0x4e487b71);
+}
+
+bool isSelectorWord(Value *V) {
+  if (V == nullptr) {
+    return false;
+  }
+  auto *Selector = dyn_cast<CallBase>(V);
+  return Selector != nullptr && isCallTo(Selector, "evm_shl") &&
+         Selector->arg_size() == 2 &&
+         isConstantIntValue(Selector->getArgOperand(0), 224) &&
+         isa<ConstantInt>(Selector->getArgOperand(1));
+}
+
 bool isReturndataBubble(BasicBlock &BB, CallBase &Revert) {
   if (Revert.arg_size() != 3 || !isZero(Revert.getArgOperand(1)) ||
       !isReturndataSize(Revert.getArgOperand(2))) {
@@ -188,14 +238,87 @@ bool hasPanicSelectorStore(BasicBlock &BB, CallBase &Revert) {
       continue;
     }
     auto *Selector = dyn_cast<CallBase>(Call->getArgOperand(2));
-    if (Selector != nullptr && isCallTo(Selector, "evm_shl") &&
-        Selector->arg_size() == 2 &&
-        isConstantIntValue(Selector->getArgOperand(0), 224) &&
-        isConstantIntValue(Selector->getArgOperand(1), 0x4e487b71)) {
+    if (isPanicSelectorValue(Selector)) {
       return true;
     }
   }
   return false;
+}
+
+bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth,
+                     SmallPtrSetImpl<Value *> &Seen) {
+  if (V == nullptr || Depth == 0 || !Seen.insert(V).second) {
+    return false;
+  }
+  if (isCallTo(V, Name)) {
+    return true;
+  }
+
+  if (auto *Inst = dyn_cast<Instruction>(V)) {
+    for (Value *Op : Inst->operands()) {
+      if (dependsOnCallTo(Op, Name, Depth - 1, Seen)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth = 8) {
+  SmallPtrSet<Value *, 16> Seen;
+  return dependsOnCallTo(V, Name, Depth, Seen);
+}
+
+bool expressionHasPackedStorageOp(Value *V, unsigned Depth,
+                                  SmallPtrSetImpl<Value *> &Seen) {
+  if (V == nullptr || Depth == 0 || !Seen.insert(V).second) {
+    return false;
+  }
+
+  if (auto *Bin = dyn_cast<BinaryOperator>(V)) {
+    if (Bin->getOpcode() == Instruction::And ||
+        Bin->getOpcode() == Instruction::Or ||
+        Bin->getOpcode() == Instruction::Xor ||
+        Bin->getOpcode() == Instruction::Mul) {
+      return true;
+    }
+  }
+
+  if (auto *Call = dyn_cast<CallBase>(V)) {
+    StringRef Name = getCalleeName(Call);
+    if (Name == "evm_shl" || Name == "evm_shr" || Name == "evm_sar" ||
+        Name == "evm_div" || Name == "evm_exp") {
+      return true;
+    }
+  }
+
+  if (auto *Inst = dyn_cast<Instruction>(V)) {
+    for (Value *Op : Inst->operands()) {
+      if (expressionHasPackedStorageOp(Op, Depth - 1, Seen)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool expressionHasPackedStorageOp(Value *V, unsigned Depth = 8) {
+  SmallPtrSet<Value *, 16> Seen;
+  return expressionHasPackedStorageOp(V, Depth, Seen);
+}
+
+bool isLowBitMask(const ConstantInt &C) {
+  return C.getValue() == 1 || C.getValue() == 31 || C.getValue() == 127;
+}
+
+bool hasLowBitMaskOperand(const BinaryOperator &Bin) {
+  if (Bin.getOpcode() != Instruction::And) {
+    return false;
+  }
+  return (isa<ConstantInt>(Bin.getOperand(0)) &&
+          isLowBitMask(*cast<ConstantInt>(Bin.getOperand(0)))) ||
+         (isa<ConstantInt>(Bin.getOperand(1)) &&
+          isLowBitMask(*cast<ConstantInt>(Bin.getOperand(1))));
 }
 
 std::string classifyMask(const APInt &Mask) {
@@ -406,6 +529,85 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
+PreservedAnalyses AbiRevertEncodingPass::run(Function &F,
+                                             FunctionAnalysisManager &) {
+  LLVMContext &Ctx = F.getContext();
+  bool Changed = false;
+
+  for (BasicBlock &BB : F) {
+    for (Instruction &I : BB) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr) {
+        continue;
+      }
+
+      if (isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
+          isSelectorWord(Call->getArgOperand(2))) {
+        StringRef Kind = isPanicSelectorValue(Call->getArgOperand(2))
+                             ? "panic_selector"
+                             : "error_selector_candidate";
+        addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_REVERT_ENCODING, Kind);
+        ++NumAbiRevertEncodings;
+        Changed = true;
+        continue;
+      }
+
+      if (!isCallTo(Call, "evm_revert") || Call->arg_size() != 3) {
+        continue;
+      }
+      if (isZero(Call->getArgOperand(1)) && isZero(Call->getArgOperand(2))) {
+        continue;
+      }
+      if (isReturndataBubble(BB, *Call)) {
+        continue;
+      }
+
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_REVERT_ENCODING,
+                        "encoded_revert_candidate");
+      ++NumAbiRevertEncodings;
+      Changed = true;
+    }
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+PreservedAnalyses CheckedBoundsPass::run(Function &F, FunctionAnalysisManager &) {
+  LLVMContext &Ctx = F.getContext();
+  bool Changed = false;
+
+  for (BasicBlock &BB : F) {
+    auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
+    if (Br != nullptr && Br->isConditional()) {
+      if ((isEmptyRevertBlock(Br->getSuccessor(0)) ||
+           isEmptyRevertBlock(Br->getSuccessor(1))) &&
+          !dependsOnCallTo(Br->getCondition(), "evm_callvalue")) {
+        addStringMetadata(Ctx, *Br, KIND_SOLIDITY_CHECKED_BOUNDS,
+                          "guard_to_empty_revert_candidate");
+        ++NumCheckedBounds;
+        Changed = true;
+      }
+    }
+
+    for (Instruction &I : BB) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr || !isCallTo(Call, "evm_revert") ||
+          Call->arg_size() != 3) {
+        continue;
+      }
+      if (isConstantIntValue(Call->getArgOperand(2), 36) &&
+          hasPanicSelectorStore(BB, *Call)) {
+        addStringMetadata(Ctx, I, KIND_SOLIDITY_CHECKED_BOUNDS,
+                          "panic_guard_candidate");
+        ++NumCheckedBounds;
+        Changed = true;
+      }
+    }
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
 PreservedAnalyses ValueCleanupTypeHintPass::run(Function &F,
                                                 FunctionAnalysisManager &) {
   LLVMContext &Ctx = F.getContext();
@@ -463,6 +665,81 @@ PreservedAnalyses StorageAddressingPass::run(Function &F,
     addStringMetadata(Ctx, I, KIND_SOLIDITY_STORAGE_ADDRESSING, Kind);
     ++NumStorageAddressing;
     Changed = true;
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+PreservedAnalyses PackedStorageFieldPass::run(Function &F,
+                                              FunctionAnalysisManager &) {
+  LLVMContext &Ctx = F.getContext();
+  bool Changed = false;
+
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_sstore") &&
+        Call->arg_size() == 2) {
+      Value *Stored = Call->getArgOperand(1);
+      if (dependsOnCallTo(Stored, "evm_sload") &&
+          expressionHasPackedStorageOp(Stored)) {
+        addStringMetadata(Ctx, I, KIND_SOLIDITY_PACKED_STORAGE_FIELD,
+                          "packed_store_candidate");
+        ++NumPackedStorageFields;
+        Changed = true;
+      }
+      continue;
+    }
+
+    if (Call != nullptr && isCallTo(Call, "evm_sload")) {
+      for (User *U : Call->users()) {
+        if (expressionHasPackedStorageOp(U)) {
+          addStringMetadata(Ctx, I, KIND_SOLIDITY_PACKED_STORAGE_FIELD,
+                            "packed_load_candidate");
+          ++NumPackedStorageFields;
+          Changed = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+PreservedAnalyses StorageBytesStringPass::run(Function &F,
+                                              FunctionAnalysisManager &) {
+  LLVMContext &Ctx = F.getContext();
+  bool Changed = false;
+
+  for (Instruction &I : instructions(F)) {
+    if (auto *Bin = dyn_cast<BinaryOperator>(&I);
+        Bin != nullptr && hasLowBitMaskOperand(*Bin)) {
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_STORAGE_BYTES_STRING,
+                        "low_bit_encoding_candidate");
+      ++NumStorageBytesStrings;
+      Changed = true;
+      continue;
+    }
+
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_mstore8")) {
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_STORAGE_BYTES_STRING,
+                        "byte_copy_candidate");
+      ++NumStorageBytesStrings;
+      Changed = true;
+      continue;
+    }
+    if ((isCallTo(Call, "evm_shr") || isCallTo(Call, "evm_shl")) &&
+        Call->arg_size() == 2 &&
+        isConstantIntValue(Call->getArgOperand(0), 248)) {
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_STORAGE_BYTES_STRING,
+                        "short_bytes_shift_candidate");
+      ++NumStorageBytesStrings;
+      Changed = true;
+    }
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

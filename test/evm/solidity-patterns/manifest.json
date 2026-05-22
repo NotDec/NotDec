@@ -14,6 +14,7 @@
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
@@ -23,16 +24,20 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
+        "notdec.solidity.abi_revert_encoding": 0,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 1,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.memory_object": 11,
+        "notdec.solidity.packed_storage_field": 4,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 2,
         "notdec.solidity.selector_inlined_body": 2,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 0
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
       }
     },
     {
@@ -41,9 +46,12 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
@@ -53,16 +61,20 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 2,
+        "notdec.solidity.abi_revert_encoding": 4,
+        "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.memory_object": 9,
+        "notdec.solidity.packed_storage_field": 7,
         "notdec.solidity.payability_guard": 25,
         "notdec.solidity.revert": 13,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 0
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
       }
     },
     {
@@ -71,8 +83,10 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
         "external_call",
         "memory_buffer",
+        "packed_storage_field",
         "revert",
         "selector_entry",
         "value_cleanup"
@@ -81,16 +95,20 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 3,
+        "notdec.solidity.abi_revert_encoding": 1,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.memory_object": 1,
+        "notdec.solidity.packed_storage_field": 1,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 1,
         "notdec.solidity.selector_inlined_body": 1,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 0
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
       }
     },
     {
@@ -99,29 +117,37 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 6,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 10,
+        "notdec.solidity.abi_revert_encoding": 1,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.cleanup": 3,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.memory_object": 17,
+        "notdec.solidity.packed_storage_field": 7,
         "notdec.solidity.payability_guard": 30,
         "notdec.solidity.revert": 14,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 0
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 1
       }
     },
     {
@@ -130,30 +156,38 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 19,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 6,
         "notdec.solidity.abi_return": 28,
+        "notdec.solidity.abi_revert_encoding": 42,
+        "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.cleanup": 20,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 7,
         "notdec.solidity.external_call": 8,
         "notdec.solidity.memory_object": 119,
+        "notdec.solidity.packed_storage_field": 46,
         "notdec.solidity.payability_guard": 95,
         "notdec.solidity.revert": 71,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 19
+        "notdec.solidity.storage_addressing": 19,
+        "notdec.solidity.storage_bytes_string": 3
       }
     },
     {
@@ -162,30 +196,37 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
+        "notdec.solidity.abi_revert_encoding": 0,
+        "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.cleanup": 9,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.memory_object": 25,
+        "notdec.solidity.packed_storage_field": 6,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 9,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 2
+        "notdec.solidity.storage_addressing": 2,
+        "notdec.solidity.storage_bytes_string": 19
       }
     },
     {
@@ -194,28 +235,36 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
+        "packed_storage_field",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 20,
+        "notdec.solidity.abi_revert_encoding": 16,
+        "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.cleanup": 22,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.memory_object": 45,
+        "notdec.solidity.packed_storage_field": 8,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 28,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 14
+        "notdec.solidity.storage_addressing": 14,
+        "notdec.solidity.storage_bytes_string": 3
       }
     },
     {
@@ -224,30 +273,38 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 15,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
+        "notdec.solidity.abi_revert_encoding": 28,
+        "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.cleanup": 42,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.memory_object": 87,
+        "notdec.solidity.packed_storage_field": 14,
         "notdec.solidity.payability_guard": 75,
         "notdec.solidity.revert": 82,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 23
+        "notdec.solidity.storage_addressing": 23,
+        "notdec.solidity.storage_bytes_string": 2
       }
     },
     {
@@ -256,30 +313,38 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 15,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
+        "notdec.solidity.abi_revert_encoding": 28,
+        "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.cleanup": 42,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.memory_object": 87,
+        "notdec.solidity.packed_storage_field": 14,
         "notdec.solidity.payability_guard": 75,
         "notdec.solidity.revert": 82,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 23
+        "notdec.solidity.storage_addressing": 23,
+        "notdec.solidity.storage_bytes_string": 2
       }
     },
     {
@@ -288,28 +353,36 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
+        "packed_storage_field",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 32,
+        "notdec.solidity.abi_revert_encoding": 24,
+        "notdec.solidity.checked_bounds": 12,
         "notdec.solidity.cleanup": 11,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.memory_object": 83,
+        "notdec.solidity.packed_storage_field": 26,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 35,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 21
+        "notdec.solidity.storage_addressing": 21,
+        "notdec.solidity.storage_bytes_string": 2
       }
     },
     {
@@ -318,30 +391,38 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 30,
+        "notdec.solidity.abi_revert_encoding": 44,
+        "notdec.solidity.checked_bounds": 29,
         "notdec.solidity.cleanup": 68,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.memory_object": 156,
+        "notdec.solidity.packed_storage_field": 46,
         "notdec.solidity.payability_guard": 145,
         "notdec.solidity.revert": 109,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 15
+        "notdec.solidity.storage_addressing": 15,
+        "notdec.solidity.storage_bytes_string": 4
       }
     },
     {
@@ -350,30 +431,37 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
+        "notdec.solidity.abi_revert_encoding": 0,
+        "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.cleanup": 9,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.memory_object": 33,
+        "notdec.solidity.packed_storage_field": 6,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 9,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 2
+        "notdec.solidity.storage_addressing": 2,
+        "notdec.solidity.storage_bytes_string": 19
       }
     },
     {
@@ -382,29 +470,37 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
+        "notdec.solidity.abi_revert_encoding": 1,
+        "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.cleanup": 4,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.memory_object": 14,
+        "notdec.solidity.packed_storage_field": 7,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 8,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 2
+        "notdec.solidity.storage_addressing": 2,
+        "notdec.solidity.storage_bytes_string": 2
       }
     },
     {
@@ -413,30 +509,38 @@
       "patterns": [
         "abi_decode",
         "abi_return",
+        "abi_revert_encoding",
+        "checked_bounds",
         "event_log",
         "external_call",
         "memory_buffer",
         "nonpayable_guard",
+        "packed_storage_field",
         "payability",
         "revert",
         "selector_entry",
         "storage_addressing",
+        "storage_bytes_string",
         "value_cleanup"
       ],
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 30,
+        "notdec.solidity.abi_revert_encoding": 44,
+        "notdec.solidity.checked_bounds": 29,
         "notdec.solidity.cleanup": 68,
         "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.memory_object": 156,
+        "notdec.solidity.packed_storage_field": 46,
         "notdec.solidity.payability_guard": 145,
         "notdec.solidity.revert": 109,
         "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
-        "notdec.solidity.storage_addressing": 15
+        "notdec.solidity.storage_addressing": 15,
+        "notdec.solidity.storage_bytes_string": 4
       }
     }
   ]

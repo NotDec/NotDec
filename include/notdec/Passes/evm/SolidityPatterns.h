@@ -12,9 +12,13 @@ extern const char *KIND_SOLIDITY_SELECTOR_PROLOGUE;
 extern const char *KIND_SOLIDITY_SELECTOR_INLINED_BODY;
 extern const char *KIND_SOLIDITY_ABI_DECODE;
 extern const char *KIND_SOLIDITY_ABI_RETURN;
+extern const char *KIND_SOLIDITY_ABI_REVERT_ENCODING;
 extern const char *KIND_SOLIDITY_REVERT;
+extern const char *KIND_SOLIDITY_CHECKED_BOUNDS;
 extern const char *KIND_SOLIDITY_CLEANUP;
 extern const char *KIND_SOLIDITY_STORAGE_ADDRESSING;
+extern const char *KIND_SOLIDITY_PACKED_STORAGE_FIELD;
+extern const char *KIND_SOLIDITY_STORAGE_BYTES_STRING;
 extern const char *KIND_SOLIDITY_MEMORY_OBJECT;
 extern const char *KIND_SOLIDITY_EVENT;
 extern const char *KIND_SOLIDITY_EXTERNAL_CALL;
@@ -76,6 +80,26 @@ struct SolidityRevertPass : llvm::PassInfoMixin<SolidityRevertPass> {
   static bool isRequired() { return true; }
 };
 
+// Marks ABI-encoded revert buffers such as Panic/Error/custom-error payloads.
+// The pass keeps this as metadata only because buffer grouping is still shared
+// with the memory object work.
+struct AbiRevertEncodingPass
+    : llvm::PassInfoMixin<AbiRevertEncodingPass> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
+// Marks compiler-inserted guard candidates that branch to empty revert or Panic.
+// It deliberately leaves the exact source category to later passes.
+struct CheckedBoundsPass : llvm::PassInfoMixin<CheckedBoundsPass> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Marks common value cleanup idioms such as address masks, low-bit masks and
 // signextend.  These are type hints only, not final recovered types.
 struct ValueCleanupTypeHintPass
@@ -89,6 +113,26 @@ struct ValueCleanupTypeHintPass
 // Marks sha3-based storage addressing candidates.  Exact packed field recovery
 // still needs stronger dataflow, so this pass only labels the address roots.
 struct StorageAddressingPass : llvm::PassInfoMixin<StorageAddressingPass> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
+// Marks packed storage load/store idioms built from sload/sstore plus
+// shift/mask/or chains.
+struct PackedStorageFieldPass
+    : llvm::PassInfoMixin<PackedStorageFieldPass> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
+// Marks short/long storage bytes-string encoding candidates.  These are still
+// low-level candidates, not recovered Solidity string operations.
+struct StorageBytesStringPass
+    : llvm::PassInfoMixin<StorageBytesStringPass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 
