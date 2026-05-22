@@ -85,10 +85,8 @@ flowchart TD
 
 顺序要求：必须最先跑。后面的 pass 不应该同时兼容优化前和优化后两套形状。
 
-当前问题：
-
-- canonicalization 的强度要控制好。优化太弱，后面的 pass 要兼容很多噪声；优化太强，可能把原本容易看的保护分支、buffer 写入顺序合并到更难匹配的形状里。
-- matcher 不能假设某个模式一定是“入口块判断、失败块 revert、成功块继续”这种固定基本块排列。更稳的写法是从 `evm_callvalue`、`evm_revert`、`evm_mstore` 这类 helper 调用出发，沿着 SSA use-def 和分支关系确认它们是不是同一个编译器模式。
+**根据需要，可以专门调整一下优化pass链路的构建**： canonicalization 的强度要控制好。优化太弱，后面的 pass 要兼容很多噪声；优化太强，可能把原本容易看的保护分支、buffer 写入顺序合并到更难匹配的形状里。
+- matcher 可以先按常见 CFG 形状匹配，例如“入口块判断、失败块 revert、成功块继续”。但不能只看跳转形状，还要沿着 SSA use-def 确认条件值、helper 调用和失败终点确实连在一起，避免把业务分支误标成编译器模式。
 
 ## Selector、fallback、receive 和 public 入口
 
