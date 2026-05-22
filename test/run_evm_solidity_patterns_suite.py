@@ -110,6 +110,11 @@ def count_rewrite_markers(path: Path, metadata_name: str) -> int:
     return text.count(f"call void @{rewrite_marker_name(metadata_name)}(")
 
 
+def count_hidden_markers(path: Path) -> int:
+    text = path.read_text()
+    return text.count("call void @notdec_solidity_rewrite_hidden(")
+
+
 def write_compare_report(
     *,
     report_path: Path,
@@ -212,6 +217,10 @@ def main() -> int:
                 "expect_rewrite_markers",
                 manifest.get("expect_rewrite_markers", False),
             )
+            expect_rewrite_hidden = case.get(
+                "expect_rewrite_hidden",
+                manifest.get("expect_rewrite_hidden", False),
+            )
             if expect_rewrite_markers:
                 for metadata_name, count in case.get(
                     "expected_metadata_counts", {}
@@ -219,6 +228,10 @@ def main() -> int:
                     expected_counts[
                         f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
                     ] = count
+            if expect_rewrite_hidden:
+                expected_counts["rewrite_hidden_markers"] = sum(
+                    case.get("expected_metadata_counts", {}).values()
+                )
             actual_counts = {
                 "nonpayable_functions": count_nonpayable_functions(output_ll)
             }
@@ -230,6 +243,10 @@ def main() -> int:
                     actual_counts[
                         f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
                     ] = count_rewrite_markers(output_ll, metadata_name)
+            if expect_rewrite_hidden:
+                actual_counts["rewrite_hidden_markers"] = count_hidden_markers(
+                    output_ll
+                )
             compare_ok = write_compare_report(
                 report_path=compare_txt,
                 expected_counts=expected_counts,

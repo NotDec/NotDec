@@ -17,13 +17,22 @@
 - `test/run_evm_solidity_patterns_suite.py:211` 扩展 oracle，开启后要求每个 metadata 类别都有同数量的 rewrite marker。
 - `test/evm/solidity-patterns/manifest.json:3` 开启 `expect_rewrite_markers`。
 
+## 补充修改：低层 helper hide 标记
+
+- `src/Passes/evm/SolidityPatterns.cpp:205` 新增 `insertHiddenMarker`，每个被 pass 认领的低层点同步插入 `notdec_solidity_rewrite_hidden(i256 kind)`。
+- `src/Passes/evm/SolidityPatterns.cpp:241` 新增 function 版本 `insertHiddenMarker`，处理 `entry_kind`、函数级 ABI return 这类不是直接挂在 helper 上的语义。
+- `src/Passes/evm/SolidityPatterns.cpp:254` 和 `src/Passes/evm/SolidityPatterns.cpp:264` 更新 `addStringMetadata`，确保 hidden marker 和原识别结果同源。
+- `test/run_evm_solidity_patterns_suite.py:113` 新增 hidden marker 计数。
+- `test/run_evm_solidity_patterns_suite.py:220` 和 `test/run_evm_solidity_patterns_suite.py:246` 扩展 oracle，要求 hidden marker 总数等于该 case 所有 `notdec.solidity.*` metadata 期望数之和。
+- `test/evm/solidity-patterns/manifest.json:4` 开启 `expect_rewrite_hidden`。
+
 ## 通用性
 
 这版没有给某个 case 写专门规则。rewrite 入口集中在 `addStringMetadata`，所以 selector、payability、revert、checked-bounds、value-cleanup、memory、ABI、storage、event、external-call 等现有 pass 都走同一套规则。当前不删除原始 EVM helper，只插入高层 marker，目的是先建立稳定可测的 rewrite 表达，避免过早破坏后续 matcher。
 
 ## 风险和代价
 
-- IR 会多出 marker call，suite 时间从旧 binary 的约 76.44s 增加到 80.91s，约 5.8%。后续如果要压性能，可以改成按类别开关或只对需要 oracle 的类别插入。
+- IR 会多出 marker call。第一版 rewrite marker 后 suite 时间从旧 binary 的约 76.44s 增加到 80.91s，约 5.8%；加入 hidden marker 后为 84.55s，比旧 binary 增加约 10.6%。后续如果要压性能，可以改成按类别开关或只对需要 oracle 的类别插入。
 - 这还不是最终高层 IR，只是第一阶段 rewrite surface。真正删除低层 helper、合并 buffer / guard 还需要逐类继续做。
 
 复杂度评分：实现效果 7/10，复杂度 4/10，维护成本 4/10。更彻底的方案是每个 pass 输出专门的 typed intrinsic，但现在 memory / ABI / storage 数据流还不够稳，先统一 marker 更稳。
@@ -32,4 +41,5 @@
 
 - `cmake --build ./build --target all -j4`
 - `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
-  - 结果：58/58 passed，80.91s。
+  - 第一版 rewrite marker 结果：58/58 passed，80.91s。
+  - 加入 hidden marker 后结果：58/58 passed，84.55s。

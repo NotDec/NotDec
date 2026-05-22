@@ -202,6 +202,28 @@ void insertRewriteMarker(LLVMContext &Ctx, Instruction &I, StringRef Kind,
   Builder.CreateCall(Marker, Args);
 }
 
+void insertHiddenMarker(LLVMContext &Ctx, Instruction &I, StringRef Kind) {
+  Module *M = I.getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_hidden",
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (I.isTerminator()) {
+    Builder.SetInsertPoint(&I);
+  } else if (Instruction *Next = I.getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(I.getParent());
+  }
+
+  auto *KindCode =
+      ConstantInt::get(Type::getIntNTy(Ctx, 256), getRewriteKindCode(Kind));
+  Value *Args[] = {KindCode};
+  Builder.CreateCall(Marker, Args);
+}
+
 void insertRewriteMarker(LLVMContext &Ctx, Function &F, StringRef Kind,
                          StringRef RewriteKind) {
   BasicBlock &Entry = F.getEntryBlock();
@@ -216,6 +238,19 @@ void insertRewriteMarker(LLVMContext &Ctx, Function &F, StringRef Kind,
   insertRewriteMarker(Ctx, *InsertBefore, Kind, RewriteKind);
 }
 
+void insertHiddenMarker(LLVMContext &Ctx, Function &F, StringRef Kind) {
+  BasicBlock &Entry = F.getEntryBlock();
+  auto It = Entry.getFirstNonPHIOrDbgOrAlloca();
+  Instruction *InsertBefore = It == Entry.end() ? nullptr : &*It;
+  if (InsertBefore == nullptr) {
+    InsertBefore = Entry.getTerminator();
+  }
+  if (InsertBefore == nullptr) {
+    return;
+  }
+  insertHiddenMarker(Ctx, *InsertBefore, Kind);
+}
+
 void addStringMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
                        StringRef Value) {
   if (isRewriteMarkerCall(I)) {
@@ -223,6 +258,7 @@ void addStringMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
   }
   I.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
   insertRewriteMarker(Ctx, I, Kind, Value);
+  insertHiddenMarker(Ctx, I, Kind);
 }
 
 void addStringMetadata(LLVMContext &Ctx, Function &F, StringRef Kind,
@@ -231,6 +267,7 @@ void addStringMetadata(LLVMContext &Ctx, Function &F, StringRef Kind,
   F.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
   if (IsNew) {
     insertRewriteMarker(Ctx, F, Kind, Value);
+    insertHiddenMarker(Ctx, F, Kind);
   }
 }
 

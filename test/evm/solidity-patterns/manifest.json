@@ -1,6 +1,7 @@
 {
   "suite": "evm.solidity-patterns",
   "expect_rewrite_markers": true,
+  "expect_rewrite_hidden": true,
   "default_args": [
     "--tr-level=0"
   ],
