@@ -6,10 +6,32 @@
 
 阅读logs/20260521-01-Evm2llvmSolidityCompilerPatternPassPlan.md，然后单独写一个新的计划文件，规划一下这些PASS按照什么顺序组织比较合适。用Mermaid写一个架构图，然后再单独列举一下当前的难点，有哪些Pass/底层模式没有写/识别，有哪些问题需要解决。
 
-本次修订 prompt：
+收集测试用例的过程中，需要同步改进各个pass的标注能力，对于rewrite能力则可以放一放，等后续再做完善。同时在保证主链路能够打印出这种底层模式识别相关的统计信息，在不断加入测试用例的过程中，同时确保所有的底层模式能够被识别出来。但是如果某个前置pass的rewrite有助于后续的识别，则可以先完善前置pass的rewrite能力。
+然后后面单独增加一个段落是改进rewrite能力，确保当前的rewrite足够通用，能够处理当前所有收集的测试用例，而不是使用特别针对性的启发式策略。
 
-抛弃之前的分类思路，重新认真思考，就单纯按照底层模式以及对应的高层语义去分，然后，重点是顺序是怎么样的。如果没有严格顺序要求的话，就说明一下，然后就只聊一下这些pass之间有顺序上的要求的部分，比如某个pass先处理之后，有利于后续的另一个pass。
-这里第一点，metadata和基础索引层，这个很奇怪，它只是统一metadata名字，应该只是提供基础的架构，为什么要放到这个推荐顺序里面来。这个第二点入口和CFG边界层，这个名字不太明确，第一眼看上去不知道是干什么的，考虑没必要非要取一个什么什么层这样的名字，标题就简单说这部分是处理什么特性。其次，这里当前已有但还偏弱的pass，还有这个还没写的pass，以及当前难点，这3块最好融入到前面这里面，不要单独列举
+注意，每次修改产生的log都改为按照分类放置到external/NotDec-evm2llvm/logs/20260522-proj-passes下的文件夹内。
+
+日志目录约定：
+
+- `canonicalization/`：EVM IR canonicalization、优化 pass 链路调整。
+- `selector-entry/`：selector dispatcher、fallback、receive、public entry 识别。
+- `payability/`：payable / nonpayable guard。
+- `revert/`：empty revert、Panic、Error、custom error、returndata bubble。
+- `checked-bounds/`：checked arithmetic、array bounds、slice、enum / conversion check。
+- `value-cleanup/`：address / bool / uintN / intN / enum cleanup 和类型线索。
+- `memory-buffer/`：free memory pointer、memory allocation、ABI/event/call/revert buffer 跟踪。
+- `abi-decode/`：ABI 参数解码、calldata bounds、动态参数。
+- `abi-return/`：ABI 返回值编码、return buffer、returndata forward。
+- `abi-revert-encoding/`：Panic/Error/custom error 的 ABI revert buffer。
+- `storage-addressing/`：mapping slot、dynamic array slot、sha3 storage 地址链。
+- `packed-storage-field/`：packed storage field load/store。
+- `storage-bytes-string/`：storage bytes/string 短长编码。
+- `event-log/`：event log、topic、event data buffer。
+- `external-call/`：call/staticcall/delegatecall/callcode、success check、returndata decode。
+- `rewrite/`：各 pass 的 rewrite 通用能力改进。
+- `testcase/`：新增、整理、标注测试用例和测试 oracle。
+
+每个 pass 相关修改都要在对应目录下写一份 log。新增测试用例、修改 manifest、补 oracle 这类改动写到 `testcase/`。如果一次工作同时增加测试用例并修改多个 pass，就分别在 `testcase/` 和对应 pass 目录下写多份 log，避免把不同问题混在一个记录里。
 
 ## 背景
 
@@ -610,18 +632,6 @@ rewrite 能力可以先放一放，后续再集中完善。例外是：如果某
 - 对还没实现的 pass，也可以先把样例收进去，manifest 里先只标 `patterns`。
 - 如果某个模式还识别不出来，应该同步改进对应 pass 的标注能力和统计输出，而不是只把样例堆进去。
 
-第一批优先收集这些模式：
-
-- selector / fallback / receive / public entry。
-- payable / nonpayable guard。
-- empty revert、Panic、Error(string)、custom error、returndata bubble。
-- value cleanup：address mask、uintN/intN、bool、enum。
-- memory free pointer 和 ABI buffer。
-- ABI decode 静态参数、动态参数、ABI return。
-- storage addressing、packed field、storage bytes/string。
-- event log。
-- external call、staticcall、delegatecall、returndata decode。
-
 ## 改进 rewrite 能力
 
 rewrite 在测试用例收集阶段不是主目标，但后面需要单独完善。标准不是“当前几个样例能过”，而是当前收集到的所有同类模式都能用同一套规则处理。
@@ -645,7 +655,6 @@ rewrite 在测试用例收集阶段不是主目标，但后面需要单独完善
 
 - `notdec.evm.solidity_patterns` 通过。
 - batch001 已有样例能跑完并通过 `llvm-as`。
-- 每个底层模式最终至少有 5 个 case 覆盖，case 可以复用到多个模式。
 - 主链路能输出每类底层模式的识别统计。
 - 每个 pass 的 oracle 不只看命中数量，还要逐步覆盖命中位置、kind、关键参数和误报样例。
 - rewrite 完善阶段要覆盖 rewrite 后 IR 形状，并保证 verifier 通过。
