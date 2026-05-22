@@ -26,9 +26,18 @@
 - `test/run_evm_solidity_patterns_suite.py:220` 和 `test/run_evm_solidity_patterns_suite.py:246` 扩展 oracle，要求 hidden marker 总数等于该 case 所有 `notdec.solidity.*` metadata 期望数之和。
 - `test/evm/solidity-patterns/manifest.json:4` 开启 `expect_rewrite_hidden`。
 
+## 补充修改：原指令 hide metadata
+
+- `src/Passes/evm/SolidityPatterns.cpp:169` 新增 `getHiddenMetadataName`，生成 `notdec.solidity.rewrite_hidden.<category>`。这里不用单一 metadata 名，避免同一条指令被多个 pass 认领时互相覆盖。
+- `src/Passes/evm/SolidityPatterns.cpp:188` 新增 `getFunctionRewritePoint`，统一函数级 rewrite / hide marker 的插入点。
+- `src/Passes/evm/SolidityPatterns.cpp:261` 和 `src/Passes/evm/SolidityPatterns.cpp:267` 新增 instruction / function 两种 `addHiddenMetadata`。
+- `src/Passes/evm/SolidityPatterns.cpp:276` 和 `src/Passes/evm/SolidityPatterns.cpp:287` 更新 `addStringMetadata`，在原始低层指令或函数入口点同步写 hide metadata。
+- `test/run_evm_solidity_patterns_suite.py:118` 新增 hidden metadata 计数。
+- `test/run_evm_solidity_patterns_suite.py:236` 和 `test/run_evm_solidity_patterns_suite.py:251` 扩展 oracle，要求 hidden metadata 数量和 hidden marker 数量、metadata 总数一致。
+
 ## 通用性
 
-这版没有给某个 case 写专门规则。rewrite 入口集中在 `addStringMetadata`，所以 selector、payability、revert、checked-bounds、value-cleanup、memory、ABI、storage、event、external-call 等现有 pass 都走同一套规则。当前不删除原始 EVM helper，只插入高层 marker，目的是先建立稳定可测的 rewrite 表达，避免过早破坏后续 matcher。
+这版没有给某个 case 写专门规则。rewrite 入口集中在 `addStringMetadata`，所以 selector、payability、revert、checked-bounds、value-cleanup、memory、ABI、storage、event、external-call 等现有 pass 都走同一套规则。当前不删除原始 EVM helper，而是在命中点同时写高层 marker、hide marker 和原指令 hide metadata。这样后端可以直接按 `notdec.solidity.rewrite_hidden.*` 隐藏低层残片，后续 matcher 也还能继续看原始 helper。
 
 ## 风险和代价
 
@@ -43,3 +52,4 @@
 - `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
   - 第一版 rewrite marker 结果：58/58 passed，80.91s。
   - 加入 hidden marker 后结果：58/58 passed，84.55s。
+  - 加入原指令 hide metadata 后结果：58/58 passed，84.58s。

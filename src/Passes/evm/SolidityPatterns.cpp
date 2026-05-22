@@ -166,6 +166,13 @@ std::string getRewriteMarkerName(StringRef Kind) {
   return Name;
 }
 
+std::string getHiddenMetadataName(StringRef Kind) {
+  std::string Name = "notdec.solidity.rewrite_hidden.";
+  Kind.consume_front("notdec.solidity.");
+  Name += Kind.str();
+  return Name;
+}
+
 uint64_t getRewriteKindCode(StringRef Value) {
   // The marker call is a stable rewrite surface for tests and later lowering.
   // Keep the original EVM instruction alive, and carry the matched kind as a
@@ -176,6 +183,16 @@ uint64_t getRewriteKindCode(StringRef Value) {
     Hash *= 1099511628211ULL;
   }
   return Hash;
+}
+
+Instruction *getFunctionRewritePoint(Function &F) {
+  BasicBlock &Entry = F.getEntryBlock();
+  auto It = Entry.getFirstNonPHIOrDbgOrAlloca();
+  Instruction *InsertBefore = It == Entry.end() ? nullptr : &*It;
+  if (InsertBefore == nullptr) {
+    InsertBefore = Entry.getTerminator();
+  }
+  return InsertBefore;
 }
 
 void insertRewriteMarker(LLVMContext &Ctx, Instruction &I, StringRef Kind,
@@ -226,12 +243,7 @@ void insertHiddenMarker(LLVMContext &Ctx, Instruction &I, StringRef Kind) {
 
 void insertRewriteMarker(LLVMContext &Ctx, Function &F, StringRef Kind,
                          StringRef RewriteKind) {
-  BasicBlock &Entry = F.getEntryBlock();
-  auto It = Entry.getFirstNonPHIOrDbgOrAlloca();
-  Instruction *InsertBefore = It == Entry.end() ? nullptr : &*It;
-  if (InsertBefore == nullptr) {
-    InsertBefore = Entry.getTerminator();
-  }
+  Instruction *InsertBefore = getFunctionRewritePoint(F);
   if (InsertBefore == nullptr) {
     return;
   }
@@ -239,16 +251,26 @@ void insertRewriteMarker(LLVMContext &Ctx, Function &F, StringRef Kind,
 }
 
 void insertHiddenMarker(LLVMContext &Ctx, Function &F, StringRef Kind) {
-  BasicBlock &Entry = F.getEntryBlock();
-  auto It = Entry.getFirstNonPHIOrDbgOrAlloca();
-  Instruction *InsertBefore = It == Entry.end() ? nullptr : &*It;
-  if (InsertBefore == nullptr) {
-    InsertBefore = Entry.getTerminator();
-  }
+  Instruction *InsertBefore = getFunctionRewritePoint(F);
   if (InsertBefore == nullptr) {
     return;
   }
   insertHiddenMarker(Ctx, *InsertBefore, Kind);
+}
+
+void addHiddenMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
+                       StringRef Value) {
+  I.setMetadata(getHiddenMetadataName(Kind),
+                MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
+}
+
+void addHiddenMetadata(LLVMContext &Ctx, Function &F, StringRef Kind,
+                       StringRef Value) {
+  Instruction *InsertBefore = getFunctionRewritePoint(F);
+  if (InsertBefore == nullptr) {
+    return;
+  }
+  addHiddenMetadata(Ctx, *InsertBefore, Kind, Value);
 }
 
 void addStringMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
@@ -257,6 +279,7 @@ void addStringMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
     return;
   }
   I.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
+  addHiddenMetadata(Ctx, I, Kind, Value);
   insertRewriteMarker(Ctx, I, Kind, Value);
   insertHiddenMarker(Ctx, I, Kind);
 }
@@ -266,6 +289,7 @@ void addStringMetadata(LLVMContext &Ctx, Function &F, StringRef Kind,
   bool IsNew = F.getMetadata(Kind) == nullptr;
   F.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
   if (IsNew) {
+    addHiddenMetadata(Ctx, F, Kind, Value);
     insertRewriteMarker(Ctx, F, Kind, Value);
     insertHiddenMarker(Ctx, F, Kind);
   }
