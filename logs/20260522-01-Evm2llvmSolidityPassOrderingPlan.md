@@ -24,6 +24,29 @@
 - 只有明确依赖关系的 pass 才要求顺序；没有依赖的 pass 可以并列跑。
 - rewrite 独立放最后，不能和识别混在一起。
 
+## 当前测试组织
+
+现有 EVM Solidity pattern 测试在 `test/evm/solidity-patterns/`：
+
+- `cases/` 下放固定的 evm2llvm `.ll` 输入。
+- `manifest.json` 列出每个 case、默认参数和 oracle。
+- 现在默认用 `--tr-level=0` 跑主项目 binary，EVM triple 分支仍会执行 EVM 专用 pass。
+- oracle 目前主要检查函数级 `notdec.solidity.nonpayable` 数量，以及各类 `notdec.solidity.*` metadata 出现次数。
+
+CTest 入口是 `notdec.evm.solidity_patterns`。它由 `test/CMakeLists.txt` 注册，实际调用 `test/run_evm_solidity_patterns_suite.py`。runner 的流程是：
+
+1. 用 `notdec-decompile` 读 case 的 `.ll`，输出到测试 workdir 里的 `out.ll`。
+2. 用项目内 LLVM 22 的 `llvm-as` 汇编 `out.ll`，确认输出 IR 合法。
+3. 统计 manifest 里要求的 metadata 数量，写 `compare.txt` 和 `run.log`。
+
+当前固定 case 只有 3 个：
+
+- `0014_proxy_like.ll`
+- `0011_multi_public.ll`
+- `0002_delegatecall_no_nonpayable.ll`
+
+这批测试适合守住现有 metadata-only 行为，但还不够覆盖后面列出的所有底层模式。后续新增 pass 时，manifest 也要从“只看数量”逐步扩展到“命中位置、kind、关键参数、误报样例”。
+
 ## 推荐总顺序
 
 严格顺序只需要这样：
@@ -488,6 +511,49 @@ flowchart TD
 - 第一批只 rewrite nonpayable guard、简单 ABI return、明确 Panic/Error/custom error、returndata bubble。
 - storage、dynamic ABI、event、external call 暂时不要 rewrite。
 
+## 收集测试用例
+
+这一步单独做，先不要求新增 pass。目标是从 `/sn640/NotDecChainExp` 的 apehex 数据集和已有 evm2llvm batch 输出里挑合适样例，补齐 `test/evm/solidity-patterns/`。
+
+用例来源优先级：
+
+1. `/sn640/NotDecChainExp/evm2llvm_apehex_pilot/` 已经跑通并能生成 `.ll` 的样例。
+2. `/sn640/NotDecChainExp/apehex_evm_contracts/notdec-runs/` 的历史结果。
+3. 有源码或能导出源码 markdown 的样例优先，因为能反查 Solidity 写法和编译器版本。
+
+每个新增 case 要在 manifest 里标注它覆盖了哪些底层模式。一个 case 可以覆盖多个模式，例如同一个合约可以同时覆盖 nonpayable、ABI return、external call、returndata bubble。
+
+建议给 manifest 增加一个只用于说明和筛选的字段，例如：
+
+```json
+"patterns": [
+  "selector_dispatch",
+  "nonpayable_guard",
+  "abi_return_static",
+  "external_delegatecall",
+  "returndata_bubble"
+]
+```
+
+覆盖目标：
+
+- 每个底层模式至少 5 个 case 覆盖。
+- 同一种模式尽量覆盖不同编译器版本、不同 optimizer 情况和不同 CFG 形状。
+- 每个 case 保留输入 `.ll`，必要时补一份简短说明，写清楚它为什么算覆盖这些模式。
+- 对还没实现的 pass，也可以先把样例收进去，manifest 里先只标 `patterns`，oracle 暂时不要求对应 metadata。
+
+第一批优先收集这些模式：
+
+- selector / fallback / receive / public entry。
+- payable / nonpayable guard。
+- empty revert、Panic、Error(string)、custom error、returndata bubble。
+- value cleanup：address mask、uintN/intN、bool、enum。
+- memory free pointer 和 ABI buffer。
+- ABI decode 静态参数、动态参数、ABI return。
+- storage addressing、packed field、storage bytes/string。
+- event log。
+- external call、staticcall、delegatecall、returndata decode。
+
 ## 不做什么
 
 - 不做 selector 到源码函数名恢复。
@@ -499,6 +565,7 @@ flowchart TD
 
 - `notdec.evm.solidity_patterns` 通过。
 - batch001 已有样例能跑完并通过 `llvm-as`。
-- 每个 pass 的 oracle 不只看命中数量，还要看命中位置、kind、关键参数和误报样例。
+- 每个底层模式最终至少有 5 个 case 覆盖，case 可以复用到多个模式。
+- 每个 pass 的 oracle 不只看命中数量，还要逐步覆盖命中位置、kind、关键参数和误报样例。
 - metadata-only 不改变 CFG。
 - rewrite 开启后必须 verifier 通过，并且只处理前面列出的低风险模式。
