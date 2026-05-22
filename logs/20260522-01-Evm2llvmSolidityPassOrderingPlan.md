@@ -576,7 +576,11 @@ rewrite flag：
 
 ## 收集测试用例
 
-这一步单独做，先不要求新增 pass。目标是从 `/sn640/NotDecChainExp` 的 apehex 数据集和已有 evm2llvm batch 输出里挑合适样例，补齐 `test/evm/solidity-patterns/`。
+这一步不是单纯搬样例。收集测试用例的过程中，要同步改进各个 pass 的标注能力，并保证主链路能打印底层模式识别相关的统计信息。目标是不断加入真实样例时，能看到每类底层模式是否已经被识别出来、命中了多少、漏在哪里。
+
+rewrite 能力可以先放一放，后续再集中完善。例外是：如果某个前置 pass 的 rewrite 能明显帮助后续识别，比如先改写 memory allocation 后 ABI/event/call buffer 更容易绑定，就可以先完善这个前置 rewrite。
+
+样例来源是 `/sn640/NotDecChainExp` 的 apehex 数据集和已有 evm2llvm batch 输出，最终补齐 `test/evm/solidity-patterns/`。
 
 用例来源优先级：
 
@@ -603,7 +607,8 @@ rewrite flag：
 - 每个底层模式至少 5 个 case 覆盖。
 - 同一种模式尽量覆盖不同编译器版本、不同 optimizer 情况和不同 CFG 形状。
 - 每个 case 保留输入 `.ll`，必要时补一份简短说明，写清楚它为什么算覆盖这些模式。
-- 对还没实现的 pass，也可以先把样例收进去，manifest 里先只标 `patterns`，oracle 暂时不要求对应 metadata。
+- 对还没实现的 pass，也可以先把样例收进去，manifest 里先只标 `patterns`。
+- 如果某个模式还识别不出来，应该同步改进对应 pass 的标注能力和统计输出，而不是只把样例堆进去。
 
 第一批优先收集这些模式：
 
@@ -617,6 +622,18 @@ rewrite flag：
 - event log。
 - external call、staticcall、delegatecall、returndata decode。
 
+## 改进 rewrite 能力
+
+rewrite 在测试用例收集阶段不是主目标，但后面需要单独完善。标准不是“当前几个样例能过”，而是当前收集到的所有同类模式都能用同一套规则处理。
+
+要求：
+
+- 每个 pass 的 rewrite 复用自己的识别结果，不再写一套只服务 rewrite 的 matcher。
+- rewrite 规则要能覆盖当前收集到的所有相关 case，不能用特别针对某一个样例的启发式策略。
+- rewrite 后的 IR 要保留足够语义信息，后续 pass 仍能继续识别 ABI、storage、event、external call 等模式。
+- 每次完善 rewrite，都要补对应 oracle：verifier 通过、低层 helper 序列被替换或隐藏、高层语义 metadata / intrinsic 保留。
+- 如果 rewrite 让后续识别变差，要优先修 rewrite 表达方式，而不是让后续 pass 重新匹配被改坏的低层残片。
+
 ## 不做什么
 
 - 不做 selector 到源码函数名恢复。
@@ -629,6 +646,6 @@ rewrite flag：
 - `notdec.evm.solidity_patterns` 通过。
 - batch001 已有样例能跑完并通过 `llvm-as`。
 - 每个底层模式最终至少有 5 个 case 覆盖，case 可以复用到多个模式。
+- 主链路能输出每类底层模式的识别统计。
 - 每个 pass 的 oracle 不只看命中数量，还要逐步覆盖命中位置、kind、关键参数和误报样例。
-- 每个识别 pass 的 rewrite flag 默认开启；测试里需要同时覆盖 metadata 和 rewrite 后 IR 形状。
-- rewrite 后必须 verifier 通过。
+- rewrite 完善阶段要覆盖 rewrite 后 IR 形状，并保证 verifier 通过。
