@@ -120,3 +120,32 @@
 
 - 上一轮 `notdec.evm.solidity_patterns` 为 84.61s。
 - 本轮为 85.97s，增加约 1.6%。主要来自额外 region input / successor 检查和更多 skipped metadata。
+
+2026-05-24：把 rewrite 回归扩到当前 58 个 case，并清理 skipped 噪声。
+
+- `test/run_evm_solidity_rewrite_suite.py:37` 新增 skip reason 统计，runner 现在同时检查 outline 函数数、outline call 数、outline metadata、`selector_inlined_body` 和 `selector_outline_skipped` 原因。
+- `test/evm/solidity-rewrite/manifest.json:1` 改为覆盖 `test/evm/solidity-patterns` 当前全部 58 个 case。
+- `src/Passes/evm/SolidityPatterns.cpp:353` 新增 `dependsOnSelectorLoad`，`isSelectorCompareBranch` 只把依赖 `calldataload(0)` 的常量比较当 selector dispatcher，避免把 body 里的普通 `returndatasize == 0` 误归类为 dispatcher。
+- `src/Passes/evm/SolidityPatterns.cpp:468` 新增 `isVoidReturnBlock`，`src/Passes/evm/SolidityPatterns.cpp:570` 新增 `mapVoidReturnExits`，outline 时把共享 `common.ret` 映射成新 helper 内自己的 return block，不删除 selector 里被 public call stub 复用的 return block。
+- `src/Passes/evm/SolidityPatterns.cpp:585` 新增 body signal 过滤，只有 region 内有 `evm_call` / `evm_delegatecall` / `evm_log*` / `evm_return` / `evm_revert` 这类真实 body 信号时才尝试 outline 或记录 skipped。
+- `src/Passes/evm/SolidityPatterns.cpp:545` 重新把 `revert(0,0)` empty reject 作为 region 边界，避免 binary-search dispatcher 的 reject 分支制造 skipped 噪声。
+- `test/evm/solidity-patterns/manifest.json:27` 更新 `0014_proxy_like` 的 metadata oracle：outline 后 selector 函数里的 inline body 已拆走，`abi_decode` 也减少到当前实际输出。
+- `test/evm/solidity-patterns/manifest.json:99` 更新 `0002_delegatecall_no_nonpayable` 的 `abi_return` oracle：outline helper 里新增一个 return site 标注。
+
+当前 58 个 rewrite oracle 结论：
+
+- 只有 `0014_proxy_like` 和 `0002_delegatecall_no_nonpayable` 生成 `notdec_solidity_selector_inline.*` helper。
+- 其他 56 个 case 不 outline，也不再产生 `selector_outline_skipped` 噪声。
+- `selector_outline_skipped` 当前为 0。后续如果出现 skipped，说明是真正有 body signal 但边界还不能安全拆的 case。
+
+验证：
+
+- `cmake --build ./build --target all -j4`：通过。
+- `ctest --test-dir build -R 'notdec.evm.solidity_(rewrite|patterns)' --output-on-failure`：通过。
+  - `notdec.evm.solidity_patterns`：58/58 passed，85.97s。
+  - `notdec.evm.solidity_rewrite`：58/58 passed，85.57s。
+
+性能：
+
+- rewrite suite 现在跑 58 个 case，所以耗时从小样例 suite 的 1.63s 增加到 85.57s，这是测试覆盖扩大导致的。
+- patterns suite 本轮 85.97s，和上一轮 85.97s 同口径持平。

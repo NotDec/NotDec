@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,15 @@ def run_command(command: list[str], cwd: Path, env: dict[str, str]) -> subproces
 
 def count_text(path: Path, needle: str) -> int:
     return path.read_text().count(needle)
+
+
+def count_skip_reasons(text: str) -> dict[str, int]:
+    metadata = dict(re.findall(r"!(\d+) = !\{!\"([^\"]+)\"\}", text))
+    counts: dict[str, int] = {}
+    for metadata_id in re.findall(r"!notdec\.solidity\.selector_outline_skipped !(\d+)", text):
+        reason = metadata.get(metadata_id, "unknown")
+        counts[f"skip_reason:{reason}"] = counts.get(f"skip_reason:{reason}", 0) + 1
+    return counts
 
 
 def main() -> int:
@@ -89,20 +99,25 @@ def main() -> int:
             ok = llvm_as_proc.returncode == 0 and output_bc.exists()
 
         if ok:
+            output_text = output_ll.read_text()
             checks = {
-                "outlined_functions": count_text(
-                    output_ll, "define internal void @notdec_solidity_selector_inline."
+                "outlined_functions": output_text.count(
+                    "define internal void @notdec_solidity_selector_inline."
                 ),
-                "outline_calls": count_text(
-                    output_ll, "call void @notdec_solidity_selector_inline."
+                "outline_calls": output_text.count(
+                    "call void @notdec_solidity_selector_inline."
                 ),
-                "outlined_metadata": count_text(
-                    output_ll, "!notdec.solidity.selector_outlined_body"
+                "outlined_metadata": output_text.count(
+                    "!notdec.solidity.selector_outlined_body"
                 ),
-                "skipped_metadata": count_text(
-                    output_ll, "!notdec.solidity.selector_outline_skipped"
+                "selector_inlined_body": output_text.count(
+                    "!notdec.solidity.selector_inlined_body"
+                ),
+                "skipped_metadata": output_text.count(
+                    "!notdec.solidity.selector_outline_skipped"
                 ),
             }
+            checks.update(count_skip_reasons(output_text))
             expected = case["expected_counts"]
             lines = ["PASS"]
             for key, value in expected.items():

@@ -350,6 +350,33 @@ bool isSelectorValueProducer(const Instruction &I) {
          isConstantIntValue(Call->getArgOperand(0), 224);
 }
 
+bool dependsOnSelectorLoad(Value *V, unsigned Depth,
+                           SmallPtrSetImpl<Value *> &Seen) {
+  if (V == nullptr || Depth == 0 || !Seen.insert(V).second) {
+    return false;
+  }
+  auto *Call = dyn_cast<CallBase>(V);
+  if (Call != nullptr && isCallTo(Call, "evm_calldataload") &&
+      Call->arg_size() == 2 && isZero(Call->getArgOperand(1))) {
+    return true;
+  }
+  auto *Inst = dyn_cast<Instruction>(V);
+  if (Inst == nullptr) {
+    return false;
+  }
+  for (Value *Op : Inst->operands()) {
+    if (dependsOnSelectorLoad(Op, Depth - 1, Seen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool dependsOnSelectorLoad(Value *V, unsigned Depth = 8) {
+  SmallPtrSet<Value *, 16> Seen;
+  return dependsOnSelectorLoad(V, Depth, Seen);
+}
+
 bool isSelectorCompareBranch(BasicBlock &BB) {
   auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
   if (Br == nullptr || !Br->isConditional()) {
@@ -367,7 +394,7 @@ bool isSelectorCompareBranch(BasicBlock &BB) {
 
   for (unsigned I = 0; I < 2; ++I) {
     if (isa<ConstantInt>(Cmp->getOperand(I)) &&
-        isa<Instruction>(Cmp->getOperand(1 - I))) {
+        dependsOnSelectorLoad(Cmp->getOperand(1 - I))) {
       return true;
     }
   }
@@ -438,6 +465,19 @@ bool isPublicCallStub(BasicBlock &BB) {
 
 bool isEmptyRejectBlock(BasicBlock &BB) { return isEmptyRevertBlock(&BB); }
 
+bool isVoidReturnBlock(BasicBlock &BB) {
+  for (Instruction &I : BB) {
+    if (isa<ReturnInst>(&I)) {
+      continue;
+    }
+    if (isRewriteMarkerCall(I)) {
+      continue;
+    }
+    return false;
+  }
+  return isa<ReturnInst>(BB.getTerminator());
+}
+
 bool hasOutsidePredecessor(BasicBlock &BB,
                            const SmallPtrSetImpl<BasicBlock *> &Region) {
   for (BasicBlock *Pred : predecessors(&BB)) {
@@ -490,8 +530,8 @@ void collectRegionInputs(const SmallVectorImpl<BasicBlock *> &Blocks,
 }
 
 // Build the inline body region from a dispatcher successor.  Stop at dispatcher
-// blocks and public call stubs so the cloned function keeps the real
-// fallback/receive body plus its local return/revert exits.
+// blocks, public call stubs and shared `ret void` exits so the cloned function
+// keeps the real fallback/receive body without stealing selector return blocks.
 void collectReachableBody(BasicBlock *Entry,
                           const SmallPtrSetImpl<BasicBlock *> &Dispatcher,
                           SmallVectorImpl<BasicBlock *> &Blocks,
@@ -502,7 +542,8 @@ void collectReachableBody(BasicBlock *Entry,
   while (!Worklist.empty()) {
     BasicBlock *BB = Worklist.pop_back_val();
     if (Region.contains(BB) || Dispatcher.contains(BB) ||
-        isPublicCallStub(*BB)) {
+        isPublicCallStub(*BB) || isEmptyRejectBlock(*BB) ||
+        isVoidReturnBlock(*BB)) {
       continue;
     }
     Region.insert(BB);
@@ -518,7 +559,48 @@ bool regionHasOutsideSuccessor(const SmallVectorImpl<BasicBlock *> &Blocks,
                                const SmallPtrSetImpl<BasicBlock *> &Region) {
   for (BasicBlock *BB : Blocks) {
     for (BasicBlock *Succ : successors(BB)) {
-      if (!Region.contains(Succ)) {
+      if (!Region.contains(Succ) && !isVoidReturnBlock(*Succ)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void mapVoidReturnExits(Function &NewF, ArrayRef<BasicBlock *> Blocks,
+                        const SmallPtrSetImpl<BasicBlock *> &Region,
+                        ValueToValueMapTy &VMap) {
+  for (BasicBlock *BB : Blocks) {
+    for (BasicBlock *Succ : successors(BB)) {
+      if (Region.contains(Succ) || !isVoidReturnBlock(*Succ) ||
+          VMap.count(Succ) != 0) {
+        continue;
+      }
+      auto *Exit = BasicBlock::Create(NewF.getContext(),
+                                      Succ->getName() + ".outline.ret", &NewF);
+      IRBuilder<> Builder(Exit);
+      Builder.CreateRetVoid();
+      VMap[Succ] = Exit;
+    }
+  }
+}
+
+bool isSelectorBodySignal(const Instruction &I) {
+  auto *Call = dyn_cast<CallBase>(&I);
+  if (Call == nullptr) {
+    return false;
+  }
+  StringRef Name = getCalleeName(Call);
+  return Name == "evm_call" || Name == "evm_staticcall" ||
+         Name == "evm_delegatecall" || Name == "evm_callcode" ||
+         Name.starts_with("evm_log") || Name == "evm_return" ||
+         Name == "evm_revert";
+}
+
+bool regionHasBodySignal(const SmallVectorImpl<BasicBlock *> &Blocks) {
+  for (BasicBlock *BB : Blocks) {
+    for (Instruction &I : *BB) {
+      if (isSelectorBodySignal(I)) {
         return true;
       }
     }
@@ -588,6 +670,7 @@ Function *cloneSelectorRegion(Function &F, ArrayRef<BasicBlock *> Blocks,
     BasicBlock *NewBB = CloneBasicBlock(BB, VMap, "", NewF);
     VMap[BB] = NewBB;
   }
+  mapVoidReturnExits(*NewF, Blocks, Region, VMap);
 
   for (BasicBlock &BB : *NewF) {
     for (Instruction &I : BB) {
@@ -908,6 +991,10 @@ SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &) {
     SmallVector<BasicBlock *, 16> Blocks;
     SmallPtrSet<BasicBlock *, 16> Region;
     collectReachableBody(Entry, Dispatcher, Blocks, Region);
+
+    if (!regionHasBodySignal(Blocks)) {
+      continue;
+    }
 
     StringRef SkipReason = getOutlineSkipReason(Blocks, Region);
     if (!SkipReason.empty()) {
