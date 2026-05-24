@@ -220,3 +220,34 @@
 - 实现效果：8/10。已经覆盖独立 region、多 region、共享 PHI tail 三类主要形态。
 - 复杂度：7/10。替换时需要区分删除块和保留 tail，理解成本上升，但仍局限在 outline clone/rewrite 逻辑。
 - 维护成本：7/10。后续继续放宽前，需要补更多真实 CFG case；不能把所有 multi-entry 都当安全共享 tail。
+
+2026-05-24：分析 skipped case 并扩大扫描。
+
+- `src/Passes/evm/SolidityPatterns.cpp:614` 放宽 `regionHasOutsideSuccessor`，把 `revert(0,0)` 空拒绝块作为可映射出口，不再因此 skip。
+- `src/Passes/evm/SolidityPatterns.cpp:644` 新增 `mapEmptyRejectExits`，clone helper 时为 region 外的空拒绝块 clone 一个 helper-local reject block。
+- `src/Passes/evm/SolidityPatterns.cpp:771` 在 `cloneSelectorRegion` 中调用 `mapEmptyRejectExits`。
+- `test/evm/solidity-rewrite/cases/0022_19493052_21bd0f78bf_e92711815df7.ll:136` 新增真实空 reject 出口样例。
+- `test/evm/solidity-rewrite/manifest.json:41` 新增 `0022_19493052_21bd0f78bf_e92711815df7` oracle，期望 1 个 helper、无 skipped。
+
+扫描结论：
+
+- 修复前，前 200 个带 selector inline 调用的真实输出全部通过 `llvm-as`；20 个 case outline，合计 28 个 helper；8 个 skipped，全部是 `outside_successor`。
+- `0022_19493052_21bd0f78bf_e92711815df7` 是最小 skipped 样例：body 正常走 `delegatecall`，失败的 nonpayable 分支跳到 `revert(0,0)` 空拒绝块。
+- 修复后，同一批 200 个样例全部通过 `llvm-as`；26 个 case outline，合计 36 个 helper；skipped 降到 0。
+- 剩余未 outline 的主要是“有 `selector_inlined_body` marker，但当前 dispatcher/region 边界规则没有把它们当作可拆候选”，不是 skipped 类问题。
+
+验证：
+
+- `cmake --build ./build --target all -j4`：通过。
+- `./build/bin/notdec /sn640/NotDecChainExp/evm2llvm_apehex_pilot/20260521-evm2llvm-train-batch001/outputs/0022_19493052_21bd0f78bf_e92711815df7.ll -o /tmp/0022.reject.ll --tr-level=0`：通过。
+- `llvm-22.1.0.obj/bin/llvm-as /tmp/0022.reject.ll -o /tmp/0022.reject.bc`：通过。
+- `ctest --test-dir build -R 'notdec.evm.solidity_(rewrite|patterns)' --output-on-failure`：通过。
+  - `notdec.evm.solidity_patterns`：58/58 passed，85.29s。
+  - `notdec.evm.solidity_rewrite`：61/61 passed，84.86s。
+
+性能和维护成本：
+
+- patterns suite 从上一轮 85.29s 到本轮 85.29s，持平。
+- 实现效果：8/10。当前扫描口径下 skipped 已清零；下一步重点应转向未进入候选的 marker。
+- 复杂度：7/10。新增空 reject 出口映射，和已有 void-return 出口映射同类。
+- 维护成本：7/10。要避免继续把任意外部 successor 都当出口；目前只支持 `ret void` 和 `revert(0,0)` 两种明确形态。

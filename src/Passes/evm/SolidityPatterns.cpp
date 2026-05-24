@@ -615,7 +615,8 @@ bool regionHasOutsideSuccessor(const SmallVectorImpl<BasicBlock *> &Blocks,
                                const SmallPtrSetImpl<BasicBlock *> &Region) {
   for (BasicBlock *BB : Blocks) {
     for (BasicBlock *Succ : successors(BB)) {
-      if (!Region.contains(Succ) && !isVoidReturnBlock(*Succ)) {
+      if (!Region.contains(Succ) && !isVoidReturnBlock(*Succ) &&
+          !isEmptyRejectBlock(*Succ)) {
         return true;
       }
     }
@@ -637,6 +638,21 @@ void mapVoidReturnExits(Function &NewF, ArrayRef<BasicBlock *> Blocks,
       IRBuilder<> Builder(Exit);
       Builder.CreateRetVoid();
       VMap[Succ] = Exit;
+    }
+  }
+}
+
+void mapEmptyRejectExits(Function &NewF, ArrayRef<BasicBlock *> Blocks,
+                         const SmallPtrSetImpl<BasicBlock *> &Region,
+                         ValueToValueMapTy &VMap) {
+  for (BasicBlock *BB : Blocks) {
+    for (BasicBlock *Succ : successors(BB)) {
+      if (Region.contains(Succ) || !isEmptyRejectBlock(*Succ) ||
+          VMap.count(Succ) != 0) {
+        continue;
+      }
+      BasicBlock *NewBB = CloneBasicBlock(Succ, VMap, ".outline", &NewF);
+      VMap[Succ] = NewBB;
     }
   }
 }
@@ -751,6 +767,7 @@ Function *cloneSelectorRegion(Function &F, ArrayRef<BasicBlock *> Blocks,
     VMap[BB] = NewBB;
   }
   mapVoidReturnExits(*NewF, Blocks, Region, VMap);
+  mapEmptyRejectExits(*NewF, Blocks, Region, VMap);
   if (hasSharedTailEntry(Blocks, Region)) {
     pruneOutsidePhiIncoming(Blocks, Region, VMap);
   }
