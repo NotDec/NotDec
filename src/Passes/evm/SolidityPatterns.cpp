@@ -4,6 +4,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
@@ -11,6 +12,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Transforms/Utils/Cloning.h>
 
 using namespace llvm;
 
@@ -37,6 +39,10 @@ STATISTIC(NumStorageBytesStrings,
 STATISTIC(NumMemoryObjects, "Number of Solidity memory object hints found");
 STATISTIC(NumEvents, "Number of Solidity event candidates found");
 STATISTIC(NumExternalCalls, "Number of Solidity external calls found");
+STATISTIC(NumSelectorOutlinedBodies,
+          "Number of Solidity selector inline bodies outlined");
+STATISTIC(NumSelectorOutlineSkipped,
+          "Number of Solidity selector inline body outline candidates skipped");
 
 namespace notdec::passes::evm {
 
@@ -65,6 +71,11 @@ const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_EXTERNAL_CALL = "notdec.solidity.external_call";
 
 namespace {
+
+constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINED_BODY =
+    "notdec.solidity.selector_outlined_body";
+constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED =
+    "notdec.solidity.selector_outline_skipped";
 
 bool isCallTo(const Value *V, StringRef Name) {
   if (V == nullptr) {
@@ -114,6 +125,11 @@ bool isRewriteMarkerCall(const Instruction &I) {
   const Function *Callee = Call->getCalledFunction();
   return Callee != nullptr &&
          Callee->getName().starts_with("notdec_solidity_rewrite_");
+}
+
+void addPlainMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
+                      StringRef Value) {
+  I.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
 }
 
 CallBase *getCallValueFromPredicate(ICmpInst *Cmp) {
@@ -319,6 +335,274 @@ bool isPublicEntryFunction(const Function &F) {
 
 bool isAbiDecodeContext(const Function &F) {
   return isPublicEntryFunction(F) || isSelectorFunction(F);
+}
+
+bool isSelectorValueProducer(const Instruction &I) {
+  auto *Call = dyn_cast<CallBase>(&I);
+  if (Call == nullptr) {
+    return false;
+  }
+  if (isCallTo(Call, "evm_calldataload") && Call->arg_size() == 2 &&
+      isZero(Call->getArgOperand(1))) {
+    return true;
+  }
+  return isCallTo(Call, "evm_shr") && Call->arg_size() == 2 &&
+         isConstantIntValue(Call->getArgOperand(0), 224);
+}
+
+bool isSelectorCompareBranch(BasicBlock &BB) {
+  auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
+  if (Br == nullptr || !Br->isConditional()) {
+    return false;
+  }
+
+  auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
+  if (Cmp == nullptr) {
+    return false;
+  }
+  if (Cmp->getPredicate() != ICmpInst::ICMP_EQ &&
+      Cmp->getPredicate() != ICmpInst::ICMP_NE) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    if (isa<ConstantInt>(Cmp->getOperand(I)) &&
+        isa<Instruction>(Cmp->getOperand(1 - I))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isSelectorSizeGate(BasicBlock &BB) {
+  for (Instruction &I : BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_calldatasize")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isDispatcherBlock(BasicBlock &BB) {
+  if (isSelectorSizeGate(BB) || isSelectorCompareBranch(BB)) {
+    return true;
+  }
+  for (Instruction &I : BB) {
+    if (isSelectorValueProducer(I)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Selector call stubs are dispatcher leaves, not user body.  They only forward
+// to an already lifted public function and then return.
+bool isPublicCallStub(BasicBlock &BB) {
+  CallBase *OnlyCall = nullptr;
+  for (Instruction &I : BB) {
+    if (isa<ReturnInst>(&I) || isRewriteMarkerCall(I)) {
+      continue;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || OnlyCall != nullptr) {
+      return false;
+    }
+    const Function *Callee = Call->getCalledFunction();
+    if (Callee == nullptr || !Callee->getName().starts_with("public_")) {
+      return false;
+    }
+    OnlyCall = Call;
+  }
+  return OnlyCall != nullptr && isa<ReturnInst>(BB.getTerminator());
+}
+
+bool isEmptyRejectBlock(BasicBlock &BB) { return isEmptyRevertBlock(&BB); }
+
+bool hasOutsidePredecessor(BasicBlock &BB,
+                           const SmallPtrSetImpl<BasicBlock *> &Region) {
+  for (BasicBlock *Pred : predecessors(&BB)) {
+    if (!Region.contains(Pred)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasOutsideUse(Value &V, const SmallPtrSetImpl<BasicBlock *> &Region) {
+  for (User *U : V.users()) {
+    auto *UserI = dyn_cast<Instruction>(U);
+    if (UserI != nullptr && !Region.contains(UserI->getParent())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool regionHasLiveOut(const SmallVectorImpl<BasicBlock *> &Blocks,
+                      const SmallPtrSetImpl<BasicBlock *> &Region) {
+  for (BasicBlock *BB : Blocks) {
+    for (Instruction &I : *BB) {
+      if (!I.getType()->isVoidTy() && hasOutsideUse(I, Region)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool regionHasUnsupportedLiveIn(const SmallVectorImpl<BasicBlock *> &Blocks,
+                                const SmallPtrSetImpl<BasicBlock *> &Region) {
+  for (BasicBlock *BB : Blocks) {
+    for (Instruction &I : *BB) {
+      for (Value *Op : I.operands()) {
+        auto *Def = dyn_cast<Instruction>(Op);
+        if (Def == nullptr || Region.contains(Def->getParent())) {
+          continue;
+        }
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Build the inline body region from a dispatcher successor.  Stop at dispatcher
+// blocks, public call stubs and reject blocks so the cloned function only keeps
+// real fallback/receive body code.
+void collectReachableBody(BasicBlock *Entry,
+                          const SmallPtrSetImpl<BasicBlock *> &Dispatcher,
+                          SmallVectorImpl<BasicBlock *> &Blocks,
+                          SmallPtrSetImpl<BasicBlock *> &Region) {
+  SmallVector<BasicBlock *, 16> Worklist;
+  Worklist.push_back(Entry);
+
+  while (!Worklist.empty()) {
+    BasicBlock *BB = Worklist.pop_back_val();
+    if (Region.contains(BB) || Dispatcher.contains(BB) || isPublicCallStub(*BB) ||
+        isEmptyRejectBlock(*BB)) {
+      continue;
+    }
+    Region.insert(BB);
+    Blocks.push_back(BB);
+
+    for (BasicBlock *Succ : successors(BB)) {
+      Worklist.push_back(Succ);
+    }
+  }
+}
+
+// Keep the first outline version conservative.  Values produced inside the
+// region must not be used by the selector function after replacement, and
+// values from outside instructions are skipped until there is a real need to
+// pass extra SSA values into the outlined function.
+StringRef getOutlineSkipReason(const SmallVectorImpl<BasicBlock *> &Blocks,
+                               const SmallPtrSetImpl<BasicBlock *> &Region) {
+  if (Blocks.empty()) {
+    return "empty";
+  }
+  for (size_t I = 1; I < Blocks.size(); ++I) {
+    if (hasOutsidePredecessor(*Blocks[I], Region)) {
+      return "multi_entry";
+    }
+  }
+  if (regionHasLiveOut(Blocks, Region)) {
+    return "live_out";
+  }
+  if (regionHasUnsupportedLiveIn(Blocks, Region)) {
+    return "live_in";
+  }
+  return "";
+}
+
+// Clone the region into a standalone helper with the same EVM ABI-like
+// arguments.  The selector function will call this helper and return.
+Function *cloneSelectorRegion(Function &F, ArrayRef<BasicBlock *> Blocks,
+                              const SmallPtrSetImpl<BasicBlock *> &Region,
+                              BasicBlock *Entry) {
+  Module *M = F.getParent();
+  SmallVector<Type *, 4> ParamTypes;
+  for (Argument &Arg : F.args()) {
+    ParamTypes.push_back(Arg.getType());
+  }
+
+  auto *NewFTy = FunctionType::get(F.getReturnType(), ParamTypes, false);
+  Function *NewF = Function::Create(NewFTy, GlobalValue::InternalLinkage,
+                                    "notdec_solidity_selector_inline." +
+                                        F.getName(),
+                                    M);
+  NewF->setCallingConv(F.getCallingConv());
+  NewF->addFnAttr(Attribute::NoInline);
+  NewF->setDSOLocal(true);
+
+  ValueToValueMapTy VMap;
+  auto NewArg = NewF->arg_begin();
+  for (Argument &Arg : F.args()) {
+    NewArg->setName(Arg.getName());
+    VMap[&Arg] = &*NewArg++;
+  }
+
+  for (BasicBlock *BB : Blocks) {
+    BasicBlock *NewBB = CloneBasicBlock(BB, VMap, "", NewF);
+    VMap[BB] = NewBB;
+  }
+
+  for (BasicBlock &BB : *NewF) {
+    for (Instruction &I : BB) {
+      RemapInstruction(&I, VMap,
+                       RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
+    }
+  }
+
+  if (auto *MappedEntry = dyn_cast<BasicBlock>(VMap[Entry])) {
+    if (MappedEntry != &NewF->getEntryBlock()) {
+      MappedEntry->moveBefore(&NewF->getEntryBlock());
+    }
+  }
+
+  return NewF;
+}
+
+// Replace all outside edges into the outlined region with one call block.  The
+// original body blocks are removed from the selector function after cloning.
+void replaceRegionWithCall(Function &F, Function &Outlined,
+                           ArrayRef<BasicBlock *> Blocks,
+                           const SmallPtrSetImpl<BasicBlock *> &Region,
+                           BasicBlock *Entry) {
+  BasicBlock *After =
+      BasicBlock::Create(F.getContext(), Entry->getName() + ".outlined", &F);
+  IRBuilder<> Builder(After);
+  SmallVector<Value *, 4> Args;
+  for (Argument &Arg : F.args()) {
+    Args.push_back(&Arg);
+  }
+  Builder.CreateCall(&Outlined, Args)
+      ->setMetadata(KIND_SOLIDITY_SELECTOR_OUTLINED_BODY,
+                    MDNode::get(F.getContext(),
+                                {MDString::get(F.getContext(), "call")}));
+  Builder.CreateRetVoid();
+
+  SmallVector<BasicBlock *, 8> OutsidePreds;
+  for (BasicBlock *Pred : predecessors(Entry)) {
+    if (!Region.contains(Pred)) {
+      OutsidePreds.push_back(Pred);
+    }
+  }
+  for (BasicBlock *Pred : OutsidePreds) {
+    Pred->getTerminator()->replaceUsesOfWith(Entry, After);
+  }
+
+  for (BasicBlock *BB : Blocks) {
+    if (BB->getParent() != &F) {
+      continue;
+    }
+    BB->dropAllReferences();
+  }
+  for (BasicBlock *BB : Blocks) {
+    if (BB->getParent() == &F) {
+      BB->eraseFromParent();
+    }
+  }
 }
 
 bool isMstoreAt(const CallBase &Call, uint64_t Offset, uint64_t Value) {
@@ -536,6 +820,66 @@ SelectorInlinedLogicExtractionPass::run(Function &F,
                         "candidate");
       ++NumSelectorInlinedBodies;
     }
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+PreservedAnalyses
+SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &) {
+  if (!isSelectorFunction(F)) {
+    return PreservedAnalyses::all();
+  }
+
+  LLVMContext &Ctx = F.getContext();
+  SmallPtrSet<BasicBlock *, 32> Dispatcher;
+  SmallVector<BasicBlock *, 8> Candidates;
+
+  for (BasicBlock &BB : F) {
+    if (isDispatcherBlock(BB)) {
+      Dispatcher.insert(&BB);
+    }
+  }
+  if (Dispatcher.empty()) {
+    return PreservedAnalyses::all();
+  }
+
+  for (BasicBlock *BB : Dispatcher) {
+    for (BasicBlock *Succ : successors(BB)) {
+      if (!Dispatcher.contains(Succ) && !isPublicCallStub(*Succ) &&
+          !isEmptyRejectBlock(*Succ)) {
+        Candidates.push_back(Succ);
+      }
+    }
+  }
+
+  bool Changed = false;
+  for (BasicBlock *Entry : Candidates) {
+    if (Entry->getParent() != &F) {
+      continue;
+    }
+
+    SmallVector<BasicBlock *, 16> Blocks;
+    SmallPtrSet<BasicBlock *, 16> Region;
+    collectReachableBody(Entry, Dispatcher, Blocks, Region);
+
+    StringRef SkipReason = getOutlineSkipReason(Blocks, Region);
+    if (!SkipReason.empty()) {
+      if (!Blocks.empty()) {
+        addPlainMetadata(Ctx, *Blocks.front()->getTerminator(),
+                         KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED, SkipReason);
+      }
+      ++NumSelectorOutlineSkipped;
+      continue;
+    }
+
+    Function *Outlined = cloneSelectorRegion(F, Blocks, Region, Entry);
+    Outlined->setMetadata(KIND_SOLIDITY_SELECTOR_OUTLINED_BODY,
+                          MDNode::get(Ctx, {MDString::get(Ctx, F.getName())}));
+    replaceRegionWithCall(F, *Outlined, Blocks, Region, Entry);
+    ++NumSelectorOutlinedBodies;
+    Changed = true;
+    break;
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

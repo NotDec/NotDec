@@ -1,0 +1,28 @@
+{
+  "suite": "evm.solidity-rewrite",
+  "default_args": [
+    "--tr-level=0"
+  ],
+  "cases": [
+    {
+      "name": "proxy_like_outlines_fallback_body",
+      "input": "../solidity-patterns/cases/0014_proxy_like.ll",
+      "expected_counts": {
+        "outlined_functions": 1,
+        "outline_calls": 1,
+        "outlined_metadata": 2,
+        "skipped_metadata": 4
+      }
+    },
+    {
+      "name": "multi_public_keeps_dispatcher_only",
+      "input": "../solidity-patterns/cases/0011_multi_public.ll",
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 7
+      }
+    }
+  ]
+}

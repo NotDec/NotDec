@@ -282,6 +282,8 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
     // Solidity/EVM-specific matchers inspect the IR.
     MPM.addPass(
         createModuleToFunctionPassAdaptor(buildFunctionOptimizations()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(
+        evm::SelectorEntryOutliningPass()));
     MPM.addPass(evm::SolidityPatternAnnotationPass());
     MPM.addPass(createModuleToFunctionPassAdaptor(
         evm::SelectorInlinedLogicExtractionPass()));

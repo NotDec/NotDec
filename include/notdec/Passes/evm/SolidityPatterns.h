@@ -43,6 +43,18 @@ struct SelectorInlinedLogicExtractionPass
   static bool isRequired() { return true; }
 };
 
+// Splits selector-entry inline fallback/receive bodies into standalone helper
+// functions when the CFG boundary is clear.  The pass keeps dispatcher-only
+// blocks in the selector function and skips ambiguous regions instead of
+// guessing.
+struct SelectorEntryOutliningPass
+    : llvm::PassInfoMixin<SelectorEntryOutliningPass> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Matches Solidity's canonical nonpayable guard after the generic LLVM
 // optimizer has simplified the original stack-lifted condition.
 struct PayabilityGuardPass : llvm::PassInfoMixin<PayabilityGuardPass> {
