@@ -11,7 +11,17 @@
         "outlined_functions": 1,
         "outline_calls": 1,
         "outlined_metadata": 2,
-        "skipped_metadata": 4
+        "skipped_metadata": 1
+      }
+    },
+    {
+      "name": "delegatecall_proxy_outlines_revert_bubble",
+      "input": "../solidity-patterns/cases/0002_delegatecall_no_nonpayable.ll",
+      "expected_counts": {
+        "outlined_functions": 1,
+        "outline_calls": 1,
+        "outlined_metadata": 2,
+        "skipped_metadata": 1
       }
     },
     {
@@ -21,7 +31,17 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "skipped_metadata": 7
+        "skipped_metadata": 0
+      }
+    },
+    {
+      "name": "binary_search_dispatcher_skips_nonclosed_regions",
+      "input": "../solidity-patterns/cases/0448_19495059_065877b669_4f138305be23.ll",
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 2
       }
     }
   ]

@@ -30,7 +30,7 @@
 - `evm_revert(0,0)` + `unreachable` 是 reject，不 outline。
 - 其他从 dispatcher 落入、单入口、无回跳 dispatcher、无复杂 live-out 的区域可 outline。
 
-实现优先使用 LLVM `CodeExtractor`。如果 region 不满足约束，就只标 metadata / skipped 原因，不强拆。
+实现使用本地 region clone / remap。之前试过 `CodeExtractor`，但 selector 里的多 return / 多出口规整后结构不符合目标，所以这里不用它直接改 CFG。如果 region 不满足约束，就只标 metadata / skipped 原因，不强拆。
 
 ## 测试
 
@@ -92,3 +92,31 @@
 
 - 上一轮 rewrite marker 后 `notdec.evm.solidity_patterns` 约 84.58s。
 - 本轮加入 selector outline 后为 84.61s，同口径基本无变化。
+
+2026-05-24：继续完善 selector outline。
+
+- `src/Passes/evm/SolidityPatterns.cpp:377` 收紧 `isSelectorSizeGate`，只把条件表达式依赖 `evm_calldatasize` 的块当 dispatcher，避免普通 body 里的 calldata size 使用被误归类。
+- `src/Passes/evm/SolidityPatterns.cpp:420` 放宽 `isPublicCallStub`，支持 `public_*` call 后跳到 `common.ret` 的形状，不再把这类 dispatcher leaf 记成 skipped region。
+- `src/Passes/evm/SolidityPatterns.cpp:473` 新增 `collectRegionInputs`，只做本地 region input 收集，不是通用 live-in analysis，也没有复用 LLVM 的 live-in 分析。
+- `src/Passes/evm/SolidityPatterns.cpp:517` 新增 `regionHasOutsideSuccessor`，避免 clone 出来的 region 还跳回原函数里的外部块，修复后 58 个 case 不再触发跨函数 dominator assertion。
+- `src/Passes/evm/SolidityPatterns.cpp:554` 和 `src/Passes/evm/SolidityPatterns.cpp:610` 支持把 region 外定义的 SSA input 作为 outlined helper 的额外参数传入。
+- `test/evm/solidity-rewrite/manifest.json:17` 增加 `0002_delegatecall_no_nonpayable`，覆盖 delegatecall proxy 的 revert-bubble inline region。
+- `test/evm/solidity-rewrite/manifest.json:37` 增加 `0448_19495059_065877b669_4f138305be23`，覆盖 binary-search dispatcher 中非闭合 region 的保守 skip。
+
+全量扫描：
+
+- 58 个 `test/evm/solidity-patterns` case 全部能生成 IR，并且全部通过项目 LLVM 22 `llvm-as`。
+- 当前只有 `0014_proxy_like` 和 `0002_delegatecall_no_nonpayable` outline 出 selector inline helper，正好对应当前 oracle 里有 `selector_inlined_body` 的两个 case。
+- 43 个 case 仍有 `selector_outline_skipped`，主要是 binary-search dispatcher 或非闭合 region；这些先保守跳过。
+
+验证：
+
+- `cmake --build ./build --target all -j4`：通过。
+- `ctest --test-dir build -R 'notdec.evm.solidity_(rewrite|patterns)' --output-on-failure`：通过。
+  - `notdec.evm.solidity_patterns`：58/58 passed，85.97s。
+  - `notdec.evm.solidity_rewrite`：4/4 passed，1.63s。
+
+性能：
+
+- 上一轮 `notdec.evm.solidity_patterns` 为 84.61s。
+- 本轮为 85.97s，增加约 1.6%。主要来自额外 region input / successor 检查和更多 skipped metadata。
