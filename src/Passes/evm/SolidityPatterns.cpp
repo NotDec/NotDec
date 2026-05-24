@@ -6,6 +6,7 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstIterator.h>
@@ -527,12 +528,35 @@ bool regionHasLiveOut(const SmallVectorImpl<BasicBlock *> &Blocks,
   return false;
 }
 
+bool hasSharedTailEntry(ArrayRef<BasicBlock *> Blocks,
+                        const SmallPtrSetImpl<BasicBlock *> &Region) {
+  for (size_t I = 1; I < Blocks.size(); ++I) {
+    if (hasOutsidePredecessor(*Blocks[I], Region)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void collectRegionInputs(const SmallVectorImpl<BasicBlock *> &Blocks,
                          const SmallPtrSetImpl<BasicBlock *> &Region,
                          SmallVectorImpl<Instruction *> &Inputs) {
   SmallPtrSet<Instruction *, 16> Seen;
   for (BasicBlock *BB : Blocks) {
     for (Instruction &I : *BB) {
+      if (auto *Phi = dyn_cast<PHINode>(&I)) {
+        for (unsigned Idx = 0; Idx < Phi->getNumIncomingValues(); ++Idx) {
+          if (!Region.contains(Phi->getIncomingBlock(Idx))) {
+            continue;
+          }
+          auto *Def = dyn_cast<Instruction>(Phi->getIncomingValue(Idx));
+          if (Def != nullptr && !Region.contains(Def->getParent()) &&
+              Seen.insert(Def).second) {
+            Inputs.push_back(Def);
+          }
+        }
+        continue;
+      }
       for (Value *Op : I.operands()) {
         auto *Def = dyn_cast<Instruction>(Op);
         if (Def == nullptr || Region.contains(Def->getParent())) {
@@ -544,6 +568,21 @@ void collectRegionInputs(const SmallVectorImpl<BasicBlock *> &Blocks,
       }
     }
   }
+}
+
+bool regionInputsAvailableAtEntry(ArrayRef<Instruction *> Inputs,
+                                  BasicBlock *Entry,
+                                  const SmallPtrSetImpl<BasicBlock *> &Region,
+                                  DominatorTree &DT) {
+  for (Instruction *Input : Inputs) {
+    for (BasicBlock *Pred : predecessors(Entry)) {
+      if (!Region.contains(Pred) &&
+          !DT.dominates(Input, Pred->getTerminator())) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 // Build the inline body region from a dispatcher successor.  Stop at dispatcher
@@ -602,6 +641,27 @@ void mapVoidReturnExits(Function &NewF, ArrayRef<BasicBlock *> Blocks,
   }
 }
 
+void pruneOutsidePhiIncoming(ArrayRef<BasicBlock *> Blocks,
+                             const SmallPtrSetImpl<BasicBlock *> &Region,
+                             ValueToValueMapTy &VMap) {
+  for (BasicBlock *BB : Blocks) {
+    auto *MappedBB = dyn_cast_or_null<BasicBlock>(VMap.lookup(BB));
+    if (MappedBB == nullptr) {
+      continue;
+    }
+
+    for (PHINode &Phi : MappedBB->phis()) {
+      for (int I = static_cast<int>(Phi.getNumIncomingValues()) - 1; I >= 0;
+           --I) {
+        auto *IncomingBB = Phi.getIncomingBlock(static_cast<unsigned>(I));
+        if (!Region.contains(IncomingBB)) {
+          Phi.removeIncomingValue(static_cast<unsigned>(I), false);
+        }
+      }
+    }
+  }
+}
+
 bool isSelectorBodySignal(const Instruction &I) {
   auto *Call = dyn_cast<CallBase>(&I);
   if (Call == nullptr) {
@@ -635,7 +695,10 @@ StringRef getOutlineSkipReason(const SmallVectorImpl<BasicBlock *> &Blocks,
   }
   for (size_t I = 1; I < Blocks.size(); ++I) {
     if (hasOutsidePredecessor(*Blocks[I], Region)) {
-      return "multi_entry";
+      // This is a shared tail.  We clone it into the helper and prune PHI
+      // incoming edges from the other selector path, while keeping the original
+      // shared tail in the selector for that other path.
+      continue;
     }
   }
   if (regionHasLiveOut(Blocks, Region)) {
@@ -688,6 +751,9 @@ Function *cloneSelectorRegion(Function &F, ArrayRef<BasicBlock *> Blocks,
     VMap[BB] = NewBB;
   }
   mapVoidReturnExits(*NewF, Blocks, Region, VMap);
+  if (hasSharedTailEntry(Blocks, Region)) {
+    pruneOutsidePhiIncoming(Blocks, Region, VMap);
+  }
 
   for (BasicBlock &BB : *NewF) {
     for (Instruction &I : BB) {
@@ -738,14 +804,51 @@ void replaceRegionWithCall(Function &F, Function &Outlined,
     Pred->getTerminator()->replaceUsesOfWith(Entry, After);
   }
 
+  SmallPtrSet<BasicBlock *, 16> Keep;
+  SmallVector<BasicBlock *, 8> Worklist;
   for (BasicBlock *BB : Blocks) {
-    if (BB->getParent() != &F) {
+    if (BB != Entry && hasOutsidePredecessor(*BB, Region) &&
+        Keep.insert(BB).second) {
+      Worklist.push_back(BB);
+    }
+  }
+  while (!Worklist.empty()) {
+    BasicBlock *BB = Worklist.pop_back_val();
+    for (BasicBlock *Succ : successors(BB)) {
+      if (Region.contains(Succ) && Keep.insert(Succ).second) {
+        Worklist.push_back(Succ);
+      }
+    }
+  }
+
+  SmallPtrSet<BasicBlock *, 16> Delete;
+  for (BasicBlock *BB : Blocks) {
+    if (!Keep.contains(BB)) {
+      Delete.insert(BB);
+    }
+  }
+  for (BasicBlock *BB : Blocks) {
+    if (!Keep.contains(BB)) {
+      continue;
+    }
+    for (PHINode &Phi : BB->phis()) {
+      for (int I = static_cast<int>(Phi.getNumIncomingValues()) - 1; I >= 0;
+           --I) {
+        if (Delete.contains(Phi.getIncomingBlock(static_cast<unsigned>(I)))) {
+          Phi.removeIncomingValue(static_cast<unsigned>(I), false);
+        }
+      }
+    }
+  }
+
+  for (BasicBlock *BB : Blocks) {
+    if (BB->getParent() != &F || Keep.contains(BB)) {
       continue;
     }
     BB->dropAllReferences();
   }
   for (BasicBlock *BB : Blocks) {
-    if (BB->getParent() == &F) {
+    if (BB->getParent() == &F && !Keep.contains(BB)) {
       BB->eraseFromParent();
     }
   }
@@ -972,12 +1075,13 @@ SelectorInlinedLogicExtractionPass::run(Function &F,
 }
 
 PreservedAnalyses
-SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &) {
+SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &FAM) {
   if (!isSelectorFunction(F)) {
     return PreservedAnalyses::all();
   }
 
   LLVMContext &Ctx = F.getContext();
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
   bool Changed = false;
   while (true) {
     SmallPtrSet<BasicBlock *, 32> Dispatcher;
@@ -1033,6 +1137,12 @@ SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &) {
 
       SmallVector<Instruction *, 8> Inputs;
       collectRegionInputs(Blocks, Region, Inputs);
+      if (!regionInputsAvailableAtEntry(Inputs, Entry, Region, DT)) {
+        if (!Blocks.empty()) {
+          Skipped.push_back({Blocks.front(), "input_not_available"});
+        }
+        continue;
+      }
 
       Function *Outlined =
           cloneSelectorRegion(F, Blocks, Region, Entry, Inputs);

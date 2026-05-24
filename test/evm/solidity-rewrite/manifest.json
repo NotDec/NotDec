@@ -49,6 +49,17 @@
       }
     },
     {
+      "name": "0046_19493140_f89daa079d_8aad1d5bf751",
+      "input": "cases/0046_19493140_f89daa079d_8aad1d5bf751.ll",
+      "expected_counts": {
+        "outlined_functions": 2,
+        "outline_calls": 2,
+        "outlined_metadata": 4,
+        "selector_inlined_body": 0,
+        "skipped_metadata": 0
+      }
+    },
+    {
       "name": "0441_19494998_776c03cc9d_8117f350cb9d",
       "input": "../solidity-patterns/cases/0441_19494998_776c03cc9d_8117f350cb9d.ll",
       "expected_counts": {

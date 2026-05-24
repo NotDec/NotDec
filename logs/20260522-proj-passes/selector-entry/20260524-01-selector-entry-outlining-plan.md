@@ -183,3 +183,40 @@
 - 实现效果：7/10。已经支持同一 selector 多个独立 inline body；共享 merge/PHI 还没处理。
 - 复杂度：6/10。多轮重扫 CFG 比单轮复杂一点，但逻辑仍集中在 `SelectorEntryOutliningPass::run`。
 - 维护成本：6/10。后续要处理共享 tail 时，需要明确 PHI incoming 裁剪/复制策略，不能用更宽松的 dispatcher 判断绕过去。
+
+2026-05-24：支持共享 tail / PHI 的窄形态。
+
+- `src/Passes/evm/SolidityPatterns.cpp:530` 新增 `hasSharedTailEntry`，识别 region 内有 block 被 region 外路径共同进入的情况。
+- `src/Passes/evm/SolidityPatterns.cpp:540` 调整 `collectRegionInputs`，PHI 只收集来自 region 内 incoming block 的值，避免把另一条 selector 路径的定义错误传给 helper。
+- `src/Passes/evm/SolidityPatterns.cpp:573` 新增 `regionInputsAvailableAtEntry`，用 LLVM `DominatorTree` 检查 helper 参数在所有外部入口边之前都可用。
+- `src/Passes/evm/SolidityPatterns.cpp:637` 新增 `pruneOutsidePhiIncoming`，clone helper 时删除共享 tail PHI 里来自其他路径的 incoming。
+- `src/Passes/evm/SolidityPatterns.cpp:682` 放宽 `getOutlineSkipReason` 对 multi-entry block 的处理。现在这类 block 按共享 tail 处理，后面的 live-out / outside-successor 检查仍保留。
+- `src/Passes/evm/SolidityPatterns.cpp:791` 调整 `replaceRegionWithCall`，替换当前路径后只删除当前路径独占块；对仍被另一条路径使用的共享 tail 及其 return/revert 后继保留。
+- `src/Passes/evm/SolidityPatterns.cpp:808` 删除当前路径独占块前，先把保留 tail PHI 中来自待删除块的 incoming 移除，避免 dangling use。
+- `test/evm/solidity-rewrite/cases/0046_19493140_f89daa079d_8aad1d5bf751.ll:136` 新增真实共享 tail 样例。
+- `test/evm/solidity-rewrite/manifest.json:52` 新增 `0046_19493140_f89daa079d_8aad1d5bf751` oracle，期望两个 helper、两个 call、无 skipped。
+
+当前结果：
+
+- rewrite suite 从 59 个 case 增加到 60 个 case。
+- outline 成功 case 从 3 个增加到 4 个：新增 `0046_19493140_f89daa079d_8aad1d5bf751`。
+- 额外验证同形态 `0047_19493140_2a60672937_8aad1d5bf751` 也能拆出 2 个 helper。
+- 前 40 个带 selector inline 调用的真实输出扫描：40 个都能通过 `llvm-as`；5 个 case outline，合计 9 个 helper；剩余 skipped 1 个。
+
+验证：
+
+- `cmake --build ./build --target all -j4`：通过。
+- `./build/bin/notdec test/evm/solidity-rewrite/cases/0046_19493140_f89daa079d_8aad1d5bf751.ll -o /tmp/0046.shared2.ll --tr-level=0`：通过。
+- `llvm-22.1.0.obj/bin/llvm-as /tmp/0046.shared2.ll -o /tmp/0046.shared2.bc`：通过。
+- `./build/bin/notdec /sn640/NotDecChainExp/evm2llvm_apehex_pilot/20260521-evm2llvm-train-batch002/outputs/0047_19493140_2a60672937_8aad1d5bf751.ll -o /tmp/0047.shared.ll --tr-level=0`：通过。
+- `llvm-22.1.0.obj/bin/llvm-as /tmp/0047.shared.ll -o /tmp/0047.shared.bc`：通过。
+- `ctest --test-dir build -R 'notdec.evm.solidity_(rewrite|patterns)' --output-on-failure`：通过。
+  - `notdec.evm.solidity_patterns`：58/58 passed，85.29s。
+  - `notdec.evm.solidity_rewrite`：60/60 passed，84.84s。
+
+性能和维护成本：
+
+- patterns suite 从上一轮 85.10s 到 85.29s，基本持平。
+- 实现效果：8/10。已经覆盖独立 region、多 region、共享 PHI tail 三类主要形态。
+- 复杂度：7/10。替换时需要区分删除块和保留 tail，理解成本上升，但仍局限在 outline clone/rewrite 逻辑。
+- 维护成本：7/10。后续继续放宽前，需要补更多真实 CFG case；不能把所有 multi-entry 都当安全共享 tail。
