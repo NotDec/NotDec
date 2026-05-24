@@ -401,33 +401,50 @@ bool isSelectorCompareBranch(BasicBlock &BB) {
   return false;
 }
 
+bool dependsOnCalldataSizeValue(Value *V, unsigned Depth,
+                                SmallPtrSetImpl<Value *> &Seen) {
+  if (V == nullptr || Depth == 0 || !Seen.insert(V).second) {
+    return false;
+  }
+
+  auto *Call = dyn_cast<CallBase>(V);
+  if (Call != nullptr) {
+    return isCallTo(Call, "evm_calldatasize");
+  }
+
+  auto *Inst = dyn_cast<Instruction>(V);
+  if (Inst == nullptr) {
+    return false;
+  }
+  for (Value *Op : Inst->operands()) {
+    if (dependsOnCalldataSizeValue(Op, Depth - 1, Seen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool dependsOnCalldataSizeValue(Value *V, unsigned Depth = 8) {
+  SmallPtrSet<Value *, 16> Seen;
+  return dependsOnCalldataSizeValue(V, Depth, Seen);
+}
+
 bool isSelectorSizeGate(BasicBlock &BB) {
   auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
   if (Br == nullptr || !Br->isConditional()) {
     return false;
   }
 
-  SmallPtrSet<Value *, 8> Seen;
-  SmallVector<Value *, 8> Worklist;
-  Worklist.push_back(Br->getCondition());
-  while (!Worklist.empty()) {
-    Value *V = Worklist.pop_back_val();
-    if (V == nullptr || !Seen.insert(V).second) {
-      continue;
-    }
-    auto *Call = dyn_cast<CallBase>(V);
-    if (Call != nullptr && isCallTo(Call, "evm_calldatasize")) {
-      return true;
-    }
-    auto *Inst = dyn_cast<Instruction>(V);
-    if (Inst == nullptr || Inst->getParent() != &BB) {
-      continue;
-    }
-    for (Value *Op : Inst->operands()) {
-      Worklist.push_back(Op);
+  auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
+  if (Cmp != nullptr) {
+    for (unsigned I = 0; I < 2; ++I) {
+      if (isa<ConstantInt>(Cmp->getOperand(I)) &&
+          dependsOnCalldataSizeValue(Cmp->getOperand(1 - I))) {
+        return true;
+      }
     }
   }
-  return false;
+  return dependsOnCalldataSizeValue(Br->getCondition());
 }
 
 bool isDispatcherBlock(BasicBlock &BB) {
@@ -961,61 +978,84 @@ SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &) {
   }
 
   LLVMContext &Ctx = F.getContext();
-  SmallPtrSet<BasicBlock *, 32> Dispatcher;
-  SmallVector<BasicBlock *, 8> Candidates;
-
-  for (BasicBlock &BB : F) {
-    if (isDispatcherBlock(BB)) {
-      Dispatcher.insert(&BB);
-    }
-  }
-  if (Dispatcher.empty()) {
-    return PreservedAnalyses::all();
-  }
-
-  for (BasicBlock *BB : Dispatcher) {
-    for (BasicBlock *Succ : successors(BB)) {
-      if (!Dispatcher.contains(Succ) && !isPublicCallStub(*Succ) &&
-          !isEmptyRejectBlock(*Succ)) {
-        Candidates.push_back(Succ);
-      }
-    }
-  }
-
   bool Changed = false;
-  for (BasicBlock *Entry : Candidates) {
-    if (Entry->getParent() != &F) {
-      continue;
-    }
+  while (true) {
+    SmallPtrSet<BasicBlock *, 32> Dispatcher;
+    SmallVector<BasicBlock *, 8> Candidates;
+    SmallPtrSet<BasicBlock *, 8> CandidateSet;
 
-    SmallVector<BasicBlock *, 16> Blocks;
-    SmallPtrSet<BasicBlock *, 16> Region;
-    collectReachableBody(Entry, Dispatcher, Blocks, Region);
-
-    if (!regionHasBodySignal(Blocks)) {
-      continue;
-    }
-
-    StringRef SkipReason = getOutlineSkipReason(Blocks, Region);
-    if (!SkipReason.empty()) {
-      if (!Blocks.empty()) {
-        addPlainMetadata(Ctx, *Blocks.front()->getTerminator(),
-                         KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED, SkipReason);
+    for (BasicBlock &BB : F) {
+      if (isDispatcherBlock(BB)) {
+        Dispatcher.insert(&BB);
       }
-      ++NumSelectorOutlineSkipped;
-      continue;
+    }
+    if (Dispatcher.empty()) {
+      break;
     }
 
-    SmallVector<Instruction *, 8> Inputs;
-    collectRegionInputs(Blocks, Region, Inputs);
+    // Keep candidate order stable by walking function blocks.  Some selector
+    // bodies become outlineable only after a later shared tail has been split
+    // out, so each successful rewrite restarts this search on the new CFG.
+    for (BasicBlock &BB : F) {
+      if (!Dispatcher.contains(&BB)) {
+        continue;
+      }
+      for (BasicBlock *Succ : successors(&BB)) {
+        if (!Dispatcher.contains(Succ) && !isPublicCallStub(*Succ) &&
+            !isEmptyRejectBlock(*Succ) && CandidateSet.insert(Succ).second) {
+          Candidates.push_back(Succ);
+        }
+      }
+    }
 
-    Function *Outlined = cloneSelectorRegion(F, Blocks, Region, Entry, Inputs);
-    Outlined->setMetadata(KIND_SOLIDITY_SELECTOR_OUTLINED_BODY,
-                          MDNode::get(Ctx, {MDString::get(Ctx, F.getName())}));
-    replaceRegionWithCall(F, *Outlined, Blocks, Region, Entry, Inputs);
-    ++NumSelectorOutlinedBodies;
-    Changed = true;
-    break;
+    bool OutlinedThisRound = false;
+    SmallVector<std::pair<BasicBlock *, StringRef>, 4> Skipped;
+    for (BasicBlock *Entry : Candidates) {
+      if (Entry->getParent() != &F) {
+        continue;
+      }
+
+      SmallVector<BasicBlock *, 16> Blocks;
+      SmallPtrSet<BasicBlock *, 16> Region;
+      collectReachableBody(Entry, Dispatcher, Blocks, Region);
+
+      if (!regionHasBodySignal(Blocks)) {
+        continue;
+      }
+
+      StringRef SkipReason = getOutlineSkipReason(Blocks, Region);
+      if (!SkipReason.empty()) {
+        if (!Blocks.empty()) {
+          Skipped.push_back({Blocks.front(), SkipReason});
+        }
+        continue;
+      }
+
+      SmallVector<Instruction *, 8> Inputs;
+      collectRegionInputs(Blocks, Region, Inputs);
+
+      Function *Outlined =
+          cloneSelectorRegion(F, Blocks, Region, Entry, Inputs);
+      Outlined->setMetadata(
+          KIND_SOLIDITY_SELECTOR_OUTLINED_BODY,
+          MDNode::get(Ctx, {MDString::get(Ctx, F.getName())}));
+      replaceRegionWithCall(F, *Outlined, Blocks, Region, Entry, Inputs);
+      ++NumSelectorOutlinedBodies;
+      Changed = true;
+      OutlinedThisRound = true;
+      break;
+    }
+
+    if (!OutlinedThisRound) {
+      for (auto [BB, SkipReason] : Skipped) {
+        if (BB->getParent() == &F) {
+          addPlainMetadata(Ctx, *BB->getTerminator(),
+                           KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED, SkipReason);
+          ++NumSelectorOutlineSkipped;
+        }
+      }
+      break;
+    }
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

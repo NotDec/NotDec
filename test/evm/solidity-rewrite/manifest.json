@@ -30,10 +30,21 @@
       "name": "0002_delegatecall_no_nonpayable",
       "input": "../solidity-patterns/cases/0002_delegatecall_no_nonpayable.ll",
       "expected_counts": {
-        "outlined_functions": 1,
-        "outline_calls": 1,
-        "outlined_metadata": 2,
-        "selector_inlined_body": 1,
+        "outlined_functions": 2,
+        "outline_calls": 2,
+        "outlined_metadata": 4,
+        "selector_inlined_body": 0,
+        "skipped_metadata": 0
+      }
+    },
+    {
+      "name": "0023_19493052_5c9e137a4b_8640b1f47e0e",
+      "input": "cases/0023_19493052_5c9e137a4b_8640b1f47e0e.ll",
+      "expected_counts": {
+        "outlined_functions": 2,
+        "outline_calls": 2,
+        "outlined_metadata": 4,
+        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },

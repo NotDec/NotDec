@@ -149,3 +149,37 @@
 
 - rewrite suite 现在跑 58 个 case，所以耗时从小样例 suite 的 1.63s 增加到 85.57s，这是测试覆盖扩大导致的。
 - patterns suite 本轮 85.97s，和上一轮 85.97s 同口径持平。
+
+2026-05-24：继续提高 outline 成功数量。
+
+- `src/Passes/evm/SolidityPatterns.cpp:404` 新增 `dependsOnCalldataSizeValue`，追 `evm_calldatasize` 时不再穿过普通 call 的参数。
+- `src/Passes/evm/SolidityPatterns.cpp:432` 收紧 `isSelectorSizeGate`，避免把 body 里依赖 calldata size 参数的 `delegatecall` 分支误当 dispatcher。
+- `src/Passes/evm/SolidityPatterns.cpp:982` 调整 `SelectorEntryOutliningPass::run`，每成功 outline 一个 region 就重算 CFG 和候选，支持同一个 selector 里拆多个独立 inline body。
+- `src/Passes/evm/SolidityPatterns.cpp:1011` 临时 skip 不立即写入 IR；只有这一轮没有任何 region 能 outline 时，才写 `selector_outline_skipped`，避免“先拆共享 tail 后可拆”的路径留下假 skip。
+- `test/evm/solidity-rewrite/cases/0023_19493052_5c9e137a4b_8640b1f47e0e.ll:136` 新增真实 fallback/receive 样例，当前能 outline 两个 helper。
+- `test/evm/solidity-rewrite/manifest.json:30` 更新 `0002_delegatecall_no_nonpayable` oracle：现在同一个 selector 里能拆两个 helper。
+- `test/evm/solidity-rewrite/manifest.json:41` 新增 `0023_19493052_5c9e137a4b_8640b1f47e0e` rewrite oracle，期望两个 helper、两个 call、无 skipped。
+- `test/evm/solidity-patterns/manifest.json:98` 更新 `0002_delegatecall_no_nonpayable` 的 patterns oracle：outline 后 selector 里少一个 ABI decode 标注，外部调用已搬到 helper，`selector_inlined_body` 为 0。
+
+当前结果：
+
+- rewrite suite 从 58 个 case 增加到 59 个 case。
+- outline 成功 case 从 2 个增加到 3 个：`0014_proxy_like`、`0002_delegatecall_no_nonpayable`、`0023_19493052_5c9e137a4b_8640b1f47e0e`。
+- `0002_delegatecall_no_nonpayable` 和 `0023_19493052_5c9e137a4b_8640b1f47e0e` 都能在一个 selector 中生成 2 个 outlined helper。
+- `0046/0047` 这类 receive/fallback 先分叉、再通过 PHI 汇合到共同 delegatecall tail 的样例还不能安全拆。现在会保守留下 `live_out` skip，后续需要专门处理共享 tail/PHI 复制，不能靠放宽 dispatcher 误判来拆。
+
+验证：
+
+- `cmake --build ./build --target all -j4`：通过。
+- `llvm-22.1.0.obj/bin/llvm-as /tmp/0046.after2.ll -o /tmp/0046.after2.bc`：通过。
+- `llvm-22.1.0.obj/bin/llvm-as /tmp/0047.after2.ll -o /tmp/0047.after2.bc`：通过。
+- `ctest --test-dir build -R 'notdec.evm.solidity_(rewrite|patterns)' --output-on-failure`：通过。
+  - `notdec.evm.solidity_patterns`：58/58 passed，85.10s。
+  - `notdec.evm.solidity_rewrite`：59/59 passed，84.18s。
+
+性能和维护成本：
+
+- 同口径 patterns suite 从上一轮 85.97s 到 85.10s，没有看到性能下降。
+- 实现效果：7/10。已经支持同一 selector 多个独立 inline body；共享 merge/PHI 还没处理。
+- 复杂度：6/10。多轮重扫 CFG 比单轮复杂一点，但逻辑仍集中在 `SelectorEntryOutliningPass::run`。
+- 维护成本：6/10。后续要处理共享 tail 时，需要明确 PHI incoming 裁剪/复制策略，不能用更宽松的 dispatcher 判断绕过去。

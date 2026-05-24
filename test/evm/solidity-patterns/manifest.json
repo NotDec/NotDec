@@ -95,7 +95,7 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
+        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.abi_revert_encoding": 1,
         "notdec.solidity.checked_bounds": 0,
@@ -107,7 +107,7 @@
         "notdec.solidity.packed_storage_field": 1,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 1,
-        "notdec.solidity.selector_inlined_body": 1,
+        "notdec.solidity.selector_inlined_body": 0,
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
