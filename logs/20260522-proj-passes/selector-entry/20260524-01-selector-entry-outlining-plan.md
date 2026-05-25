@@ -269,3 +269,32 @@
 
 - skipped 类问题当前已经处理完。继续提高 outline 数量时，重点不是放宽 skip，而是处理“未进入候选”的形态。
 - 可以优先研究 `0185` 这类优化后入口边界消失的 fallback-only / receive-only 形态，但需要先设计 entry-rooted outline，不能直接复用 dispatcher successor 替换逻辑。
+
+2026-05-25：新增 entry-rooted whole-selector outline 的窄形态。
+
+- `src/Passes/evm/SolidityPatterns.cpp:702` 新增 `hasWholeSelectorOutlineShape`，只接受没有 dispatcher rewrite 成功、函数内有 `evm_calldatasize`、有 body signal、没有 `caller/origin` 分支、也没有 `mstore(64,128)` prologue 的 selector。
+- `src/Passes/evm/SolidityPatterns.cpp:857` 新增 `replaceWholeFunctionWithCall`，把原 selector 函数体替换成 `call helper; ret void`。
+- `src/Passes/evm/SolidityPatterns.cpp:1208` 在普通 dispatcher outline 没有改动时，尝试 whole-selector outline。
+- `test/evm/solidity-rewrite/cases/0003_19493003_0a0ab7aaf4_d8a74687f33e.ll:136` 新增最小 fallback proxy 样例。
+- `test/evm/solidity-rewrite/manifest.json:41` 新增 `0003_19493003_0a0ab7aaf4_d8a74687f33e` oracle，期望 1 个 helper、无 skipped。
+
+边界判断：
+
+- `0003_19493003_0a0ab7aaf4_d8a74687f33e` 能从整个 selector 函数 outline 成 helper。
+- `0298_19494123_f892a1f7d9_943b732c640f` 仍不 outline，因为它是 `caller/origin` 分支负例。
+- `0185_19493516_e7180ca8be_c7c648477e0c` 暂时仍不 outline，因为它有 free-memory prologue。直接搬整函数会影响后续 prologue / ABI decode annotation，需要另做 helper-context annotation 设计。
+
+扫描和验证：
+
+- 前 200 个带 selector inline 调用的真实输出：200 个全部通过 `notdec` 和 `llvm-as`；outline case 从 26 增加到 195，helper 从 36 增加到 205；skipped 仍为 0。
+- `ctest --test-dir build -R 'notdec.evm.solidity_(rewrite|patterns)' --output-on-failure`：通过。
+  - `notdec.evm.solidity_patterns`：58/58 passed，85.24s。
+  - `notdec.evm.solidity_rewrite`：62/62 passed，85.11s。
+- 新增 `0003` 后单独跑 `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`：通过，63/63 passed，85.19s。
+
+性能和维护成本：
+
+- patterns suite 从上一轮 85.29s 到本轮 85.24s，基本持平。
+- 实现效果：9/10。当前 200 样例里绝大多数 fallback proxy 直线形态都能 outline。
+- 复杂度：7/10。整函数替换逻辑独立，和 region rewrite 分开，复杂度可控。
+- 维护成本：7/10。whole-selector 规则必须保持窄；带 prologue 的形态要等 helper 上下文 annotation 设计清楚后再放开。

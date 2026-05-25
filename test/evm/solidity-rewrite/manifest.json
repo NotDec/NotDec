@@ -38,6 +38,17 @@
       }
     },
     {
+      "name": "0003_19493003_0a0ab7aaf4_d8a74687f33e",
+      "input": "cases/0003_19493003_0a0ab7aaf4_d8a74687f33e.ll",
+      "expected_counts": {
+        "outlined_functions": 1,
+        "outline_calls": 1,
+        "outlined_metadata": 2,
+        "selector_inlined_body": 0,
+        "skipped_metadata": 0
+      }
+    },
+    {
       "name": "0022_19493052_21bd0f78bf_e92711815df7",
       "input": "cases/0022_19493052_21bd0f78bf_e92711815df7.ll",
       "expected_counts": {

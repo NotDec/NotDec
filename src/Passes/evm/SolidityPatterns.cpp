@@ -701,6 +701,32 @@ bool regionHasBodySignal(const SmallVectorImpl<BasicBlock *> &Blocks) {
   return false;
 }
 
+bool hasCallTo(Function &F, StringRef Name) {
+  for (Instruction &I : instructions(F)) {
+    if (isCallTo(&I, Name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasWholeSelectorOutlineShape(Function &F,
+                                  const SmallVectorImpl<BasicBlock *> &Blocks) {
+  if (!hasCallTo(F, "evm_calldatasize") || hasCallTo(F, "evm_caller") ||
+      hasCallTo(F, "evm_origin")) {
+    return false;
+  }
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
+        Call->arg_size() == 3 && isConstantIntValue(Call->getArgOperand(1), 64) &&
+        isConstantIntValue(Call->getArgOperand(2), 128)) {
+      return false;
+    }
+  }
+  return regionHasBodySignal(Blocks);
+}
+
 // Keep outline conservative.  Values produced inside the region must not be
 // used by the selector function after replacement.  Values produced before the
 // region are passed as extra helper arguments by collectRegionInputs().
@@ -868,6 +894,33 @@ void replaceRegionWithCall(Function &F, Function &Outlined,
     if (BB->getParent() == &F && !Keep.contains(BB)) {
       BB->eraseFromParent();
     }
+  }
+}
+
+void replaceWholeFunctionWithCall(Function &F, Function &Outlined) {
+  BasicBlock *NewEntry = BasicBlock::Create(F.getContext(), "entry.outlined", &F);
+  IRBuilder<> Builder(NewEntry);
+  SmallVector<Value *, 4> Args;
+  for (Argument &Arg : F.args()) {
+    Args.push_back(&Arg);
+  }
+  Builder.CreateCall(&Outlined, Args)
+      ->setMetadata(KIND_SOLIDITY_SELECTOR_OUTLINED_BODY,
+                    MDNode::get(F.getContext(),
+                                {MDString::get(F.getContext(), "call")}));
+  Builder.CreateRetVoid();
+
+  SmallVector<BasicBlock *, 16> OldBlocks;
+  for (BasicBlock &BB : F) {
+    if (&BB != NewEntry) {
+      OldBlocks.push_back(&BB);
+    }
+  }
+  for (BasicBlock *BB : OldBlocks) {
+    BB->dropAllReferences();
+  }
+  for (BasicBlock *BB : OldBlocks) {
+    BB->eraseFromParent();
   }
 }
 
@@ -1182,6 +1235,27 @@ SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &FAM) {
         }
       }
       break;
+    }
+  }
+
+  if (!Changed) {
+    SmallVector<BasicBlock *, 16> Blocks;
+    SmallPtrSet<BasicBlock *, 16> Region;
+    for (BasicBlock &BB : F) {
+      Blocks.push_back(&BB);
+      Region.insert(&BB);
+    }
+
+    if (hasWholeSelectorOutlineShape(F, Blocks)) {
+      SmallVector<Instruction *, 1> Inputs;
+      Function *Outlined =
+          cloneSelectorRegion(F, Blocks, Region, &F.getEntryBlock(), Inputs);
+      Outlined->setMetadata(
+          KIND_SOLIDITY_SELECTOR_OUTLINED_BODY,
+          MDNode::get(Ctx, {MDString::get(Ctx, F.getName())}));
+      replaceWholeFunctionWithCall(F, *Outlined);
+      ++NumSelectorOutlinedBodies;
+      Changed = true;
     }
   }
 
