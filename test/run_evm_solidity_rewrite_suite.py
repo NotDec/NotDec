@@ -43,6 +43,24 @@ def count_skip_reasons(text: str) -> dict[str, int]:
     return counts
 
 
+def count_outlined_functions(text: str) -> int:
+    return len(
+        re.findall(
+            r"define internal void @(?:public__)?notdec_solidity_selector_inline\.",
+            text,
+        )
+    )
+
+
+def count_outline_calls(text: str) -> int:
+    return len(
+        re.findall(
+            r"call void @(?:public__)?notdec_solidity_selector_inline\.",
+            text,
+        )
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
@@ -101,12 +119,8 @@ def main() -> int:
         if ok:
             output_text = output_ll.read_text()
             checks = {
-                "outlined_functions": output_text.count(
-                    "define internal void @notdec_solidity_selector_inline."
-                ),
-                "outline_calls": output_text.count(
-                    "call void @notdec_solidity_selector_inline."
-                ),
+                "outlined_functions": count_outlined_functions(output_text),
+                "outline_calls": count_outline_calls(output_text),
                 "outlined_metadata": output_text.count(
                     "!notdec.solidity.selector_outlined_body"
                 ),

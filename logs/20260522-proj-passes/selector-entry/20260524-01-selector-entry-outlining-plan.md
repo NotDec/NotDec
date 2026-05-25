@@ -298,3 +298,25 @@
 - 实现效果：9/10。当前 200 样例里绝大多数 fallback proxy 直线形态都能 outline。
 - 复杂度：7/10。整函数替换逻辑独立，和 region rewrite 分开，复杂度可控。
 - 维护成本：7/10。whole-selector 规则必须保持窄；带 prologue 的形态要等 helper 上下文 annotation 设计清楚后再放开。
+
+2026-05-25：把 outline 出来的 helper 改成 public entry 上下文。
+
+- `src/Passes/evm/SolidityPatterns.cpp:773` 把 helper 名从 `notdec_solidity_selector_inline.<selector>` 改为 `public__notdec_solidity_selector_inline.body`。
+- 这样后续 `AbiDecodePass` 这类按 `isPublicEntryFunction` 判断的 pass 会处理拆出来的业务函数。
+- helper 名里不能带原 selector 函数名，因为原名含 `function_selector`，会让 helper 被 `isSelectorFunction` 误判成 selector，再次进入 outline。
+- `test/run_evm_solidity_rewrite_suite.py:46` 增加 outline helper / call 计数函数，兼容旧的 `notdec_solidity_selector_inline.*` 和新的 `public__notdec_solidity_selector_inline.*`。
+- `test/evm/solidity-patterns/manifest.json:27` 和 `:98` 调整 `0014_proxy_like`、`0002_delegatecall_no_nonpayable` 的 `abi_decode` 期望。helper 变成 public entry 后，`AbiDecodePass` 会在 helper 内多标一次。
+
+验证：
+
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`：通过，63/63 passed，86.41s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`：通过，58/58 passed，86.38s。
+- 扫描 `/sn640/NotDecChainExp/evm2llvm_apehex_pilot` 下按路径排序前 200 个输出：200 个 `notdec` 通过，200 个 `llvm-as` 通过；120 个 case outline，合计 125 个 helper；`bad_helper_names_with_function_selector=0`。
+- 这批更宽口径里有 2 个 `outside_successor` skipped，两个样例都已经各自成功 outline 了 1 个 helper；不是改名引入的重复 outline。
+
+性能和维护成本：
+
+- patterns suite 从上一轮 85.24s 到本轮 86.38s，增加约 1.3%，在测试波动范围内。
+- 实现效果：8/10。拆出的 helper 已能进入 public-entry 后续 pass，且避免 selector 误判。
+- 复杂度：6/10。改动主要是命名和测试计数。
+- 维护成本：6/10。后续如果改 `isPublicEntryFunction` 的判定规则，需要一起复查 helper 命名。

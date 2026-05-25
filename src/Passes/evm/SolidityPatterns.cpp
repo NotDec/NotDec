@@ -770,8 +770,7 @@ Function *cloneSelectorRegion(Function &F, ArrayRef<BasicBlock *> Blocks,
 
   auto *NewFTy = FunctionType::get(F.getReturnType(), ParamTypes, false);
   Function *NewF = Function::Create(NewFTy, GlobalValue::InternalLinkage,
-                                    "notdec_solidity_selector_inline." +
-                                        F.getName(),
+                                    "public__notdec_solidity_selector_inline.body",
                                     M);
   NewF->setCallingConv(F.getCallingConv());
   NewF->addFnAttr(Attribute::NoInline);

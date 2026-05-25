@@ -24,7 +24,7 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 0,
@@ -95,7 +95,7 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.abi_revert_encoding": 1,
         "notdec.solidity.checked_bounds": 0,
