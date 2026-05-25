@@ -251,3 +251,21 @@
 - 实现效果：8/10。当前扫描口径下 skipped 已清零；下一步重点应转向未进入候选的 marker。
 - 复杂度：7/10。新增空 reject 出口映射，和已有 void-return 出口映射同类。
 - 维护成本：7/10。要避免继续把任意外部 successor 都当出口；目前只支持 `ret void` 和 `revert(0,0)` 两种明确形态。
+
+2026-05-25：继续分析 skipped 和未进入候选的样例。
+
+- 重新扫描前 200 个带 selector inline 调用的真实输出：200 个全部通过 `notdec` 和 `llvm-as`，skipped 仍为 0。
+- 当前 26 个 case outline，合计 36 个 helper；176 个 case 仍保留 `selector_inlined_body` marker。
+- `0298_19494123_f892a1f7d9_943b732c640f` 有 5 个 marker，但入口按 `caller/origin` 分支，不是 selector/calldata dispatcher。它是负例，不应该为了提高 outline 数量去拆。
+- `0185_19493516_e7180ca8be_c7c648477e0c` 有 2 个 marker，原始 IR 里有 calldata-size 分支，但优化后两条边合并成直线，outline pass 看不到 dispatcher successor。这类属于“入口边界被优化掉”，需要单独设计，不能和 skipped 混在一起处理。
+- `test/evm/solidity-rewrite/cases/0298_19494123_f892a1f7d9_943b732c640f.ll:136` 新增负例样例。
+- `test/evm/solidity-rewrite/manifest.json:74` 新增 `0298_19494123_f892a1f7d9_943b732c640f` oracle，期望不 outline、不 skipped，但保留 5 个 `selector_inlined_body` marker。
+
+验证：
+
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`：通过，62/62 passed，85.92s。
+
+下一步判断：
+
+- skipped 类问题当前已经处理完。继续提高 outline 数量时，重点不是放宽 skip，而是处理“未进入候选”的形态。
+- 可以优先研究 `0185` 这类优化后入口边界消失的 fallback-only / receive-only 形态，但需要先设计 entry-rooted outline，不能直接复用 dispatcher successor 替换逻辑。
