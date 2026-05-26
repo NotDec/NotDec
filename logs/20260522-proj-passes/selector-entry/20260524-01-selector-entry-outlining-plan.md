@@ -320,3 +320,27 @@
 - 实现效果：8/10。拆出的 helper 已能进入 public-entry 后续 pass，且避免 selector 误判。
 - 复杂度：6/10。改动主要是命名和测试计数。
 - 维护成本：6/10。后续如果改 `isPublicEntryFunction` 的判定规则，需要一起复查 helper 命名。
+
+2026-05-26：清理已 outline successor 带来的 skipped 噪声。
+
+- `src/Passes/evm/SolidityPatterns.cpp:627` 新增 `isSelectorOutlinedCallBlock`，用 `selector_outlined_body` metadata 判断一个 successor 是否是前一轮生成的 outline call block。
+- `src/Passes/evm/SolidityPatterns.cpp:636` 新增 `regionOnlyExitsToOutlinedCall`，只在 region 的外部出口全部指向已 outline call block 时返回 true。
+- `src/Passes/evm/SolidityPatterns.cpp:778` 的 `getOutlineSkipReason` 遇到这种情况返回 `already_outlined_successor`。
+- `src/Passes/evm/SolidityPatterns.cpp:1231` 不再把 `already_outlined_successor` 写成 `selector_outline_skipped`。这类候选不继续强拆，也不污染 skipped 指标。
+- `test/evm/solidity-rewrite/cases/0102_19493156_cd944044cc_b6456dbb7db3.ll:1` 和 `test/evm/solidity-rewrite/cases/0188_19493600_ac3404db28_614bfb7197be.ll:1` 固化两个真实样例。
+- `test/evm/solidity-rewrite/manifest.json:85` 新增这两个 oracle，要求各自 outline 1 个 helper 且 `skipped_metadata=0`。
+
+验证：
+
+- `cmake --build ./build --target all -j4`：通过。
+- `ctest --test-dir build -R 'notdec.evm.solidity_(rewrite|patterns)' --output-on-failure`：通过。
+  - `notdec.evm.solidity_patterns`：58/58 passed，86.31s。
+  - `notdec.evm.solidity_rewrite`：65/65 passed，86.66s。
+- 扫描 `/sn640/NotDecChainExp/evm2llvm_apehex_pilot` 下按路径排序前 200 个输出：200 个 `notdec` 通过，200 个 `llvm-as` 通过；120 个 case outline，合计 125 个 helper；`skipped_metadata=0`。
+
+性能和维护成本：
+
+- patterns suite 从上一轮 86.38s 到本轮 86.31s，基本持平。
+- 实现效果：8/10。skipped 指标重新只表示真正没法拆的候选。
+- 复杂度：6/10。只新增一个已 outline successor 过滤，不改变 region clone/rewrite 规则。
+- 维护成本：6/10。后续如果 outline call metadata 改名，需要同步这个判断。

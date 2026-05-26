@@ -82,6 +82,28 @@
       }
     },
     {
+      "name": "0102_19493156_cd944044cc_b6456dbb7db3",
+      "input": "cases/0102_19493156_cd944044cc_b6456dbb7db3.ll",
+      "expected_counts": {
+        "outlined_functions": 1,
+        "outline_calls": 1,
+        "outlined_metadata": 2,
+        "selector_inlined_body": 2,
+        "skipped_metadata": 0
+      }
+    },
+    {
+      "name": "0188_19493600_ac3404db28_614bfb7197be",
+      "input": "cases/0188_19493600_ac3404db28_614bfb7197be.ll",
+      "expected_counts": {
+        "outlined_functions": 1,
+        "outline_calls": 1,
+        "outlined_metadata": 2,
+        "selector_inlined_body": 3,
+        "skipped_metadata": 0
+      }
+    },
+    {
       "name": "0298_19494123_f892a1f7d9_943b732c640f",
       "input": "cases/0298_19494123_f892a1f7d9_943b732c640f.ll",
       "expected_counts": {

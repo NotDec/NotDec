@@ -624,6 +624,34 @@ bool regionHasOutsideSuccessor(const SmallVectorImpl<BasicBlock *> &Blocks,
   return false;
 }
 
+bool isSelectorOutlinedCallBlock(const BasicBlock &BB) {
+  for (const Instruction &I : BB) {
+    if (I.getMetadata(KIND_SOLIDITY_SELECTOR_OUTLINED_BODY) != nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool regionOnlyExitsToOutlinedCall(
+    const SmallVectorImpl<BasicBlock *> &Blocks,
+    const SmallPtrSetImpl<BasicBlock *> &Region) {
+  bool SawOutlinedCall = false;
+  for (BasicBlock *BB : Blocks) {
+    for (BasicBlock *Succ : successors(BB)) {
+      if (Region.contains(Succ) || isVoidReturnBlock(*Succ) ||
+          isEmptyRejectBlock(*Succ)) {
+        continue;
+      }
+      if (!isSelectorOutlinedCallBlock(*Succ)) {
+        return false;
+      }
+      SawOutlinedCall = true;
+    }
+  }
+  return SawOutlinedCall;
+}
+
 void mapVoidReturnExits(Function &NewF, ArrayRef<BasicBlock *> Blocks,
                         const SmallPtrSetImpl<BasicBlock *> &Region,
                         ValueToValueMapTy &VMap) {
@@ -747,6 +775,9 @@ StringRef getOutlineSkipReason(const SmallVectorImpl<BasicBlock *> &Blocks,
     return "live_out";
   }
   if (regionHasOutsideSuccessor(Blocks, Region)) {
+    if (regionOnlyExitsToOutlinedCall(Blocks, Region)) {
+      return "already_outlined_successor";
+    }
     return "outside_successor";
   }
   return "";
@@ -1198,7 +1229,7 @@ SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &FAM) {
 
       StringRef SkipReason = getOutlineSkipReason(Blocks, Region);
       if (!SkipReason.empty()) {
-        if (!Blocks.empty()) {
+        if (!Blocks.empty() && SkipReason != "already_outlined_successor") {
           Skipped.push_back({Blocks.front(), SkipReason});
         }
         continue;
