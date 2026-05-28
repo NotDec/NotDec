@@ -14,6 +14,7 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <optional>
 
 using namespace llvm;
 
@@ -44,6 +45,8 @@ STATISTIC(NumSelectorOutlinedBodies,
           "Number of Solidity selector inline bodies outlined");
 STATISTIC(NumSelectorOutlineSkipped,
           "Number of Solidity selector inline body outline candidates skipped");
+STATISTIC(NumPayabilityCfgRewrites,
+          "Number of Solidity nonpayable guards rewritten in the CFG");
 
 namespace notdec::passes::evm {
 
@@ -77,6 +80,18 @@ constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINED_BODY =
     "notdec.solidity.selector_outlined_body";
 constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED =
     "notdec.solidity.selector_outline_skipped";
+
+// Carries the exact pieces of one canonical nonpayable guard.  The matcher
+// only proves the shape; the pass later uses this to annotate the old guard and
+// replace only the terminator edge.
+struct PayabilityGuardMatch {
+  BasicBlock *GuardBlock = nullptr;
+  BasicBlock *SuccessBlock = nullptr;
+  BasicBlock *FailureBlock = nullptr;
+  CallBase *CallValue = nullptr;
+  ICmpInst *Condition = nullptr;
+  BranchInst *Branch = nullptr;
+};
 
 bool isCallTo(const Value *V, StringRef Name) {
   if (V == nullptr) {
@@ -172,6 +187,34 @@ bool isEmptyRevertBlock(BasicBlock *BB) {
     }
   }
   return true;
+}
+
+std::optional<PayabilityGuardMatch> matchPayabilityGuard(BasicBlock &BB) {
+  auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
+  if (Br == nullptr || !Br->isConditional()) {
+    return std::nullopt;
+  }
+
+  auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
+  CallBase *CallValue = getCallValueFromPredicate(Cmp);
+  if (CallValue == nullptr) {
+    return std::nullopt;
+  }
+
+  BasicBlock *Success = nullptr;
+  BasicBlock *Failure = nullptr;
+  if (Cmp->getPredicate() == ICmpInst::ICMP_EQ) {
+    Success = Br->getSuccessor(0);
+    Failure = Br->getSuccessor(1);
+  } else {
+    Success = Br->getSuccessor(1);
+    Failure = Br->getSuccessor(0);
+  }
+  if (!isEmptyRevertBlock(Failure)) {
+    return std::nullopt;
+  }
+
+  return PayabilityGuardMatch{&BB, Success, Failure, CallValue, Cmp, Br};
 }
 
 std::string getRewriteMarkerName(StringRef Kind) {
@@ -273,6 +316,21 @@ void insertHiddenMarker(LLVMContext &Ctx, Function &F, StringRef Kind) {
     return;
   }
   insertHiddenMarker(Ctx, *InsertBefore, Kind);
+}
+
+void insertPayabilityCfgRewriteMarker(LLVMContext &Ctx,
+                                      const PayabilityGuardMatch &Match) {
+  Module *M = Match.GuardBlock->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_cfg_rewrite_payability_guard",
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Match.Branch);
+  Value *Args[] = {
+      ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                       getRewriteKindCode("payability_guard"))};
+  Builder.CreateCall(Marker, Args);
 }
 
 void addHiddenMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
@@ -1302,33 +1360,32 @@ PreservedAnalyses PayabilityGuardPass::run(Function &F,
   bool Changed = false;
 
   for (BasicBlock &BB : F) {
-    auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
-    if (Br == nullptr || !Br->isConditional()) {
-      continue;
-    }
-
-    auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
-    CallBase *CallValue = getCallValueFromPredicate(Cmp);
-    if (CallValue == nullptr) {
-      continue;
-    }
-
-    BasicBlock *Failure = Cmp->getPredicate() == ICmpInst::ICMP_EQ
-                              ? Br->getSuccessor(1)
-                              : Br->getSuccessor(0);
-    if (!isEmptyRevertBlock(Failure)) {
+    std::optional<PayabilityGuardMatch> Match = matchPayabilityGuard(BB);
+    if (!Match) {
       continue;
     }
 
     F.setMetadata(KIND_SOLIDITY_NONPAYABLE,
                   MDNode::get(Ctx, {MDString::get(Ctx, "true")}));
-    addStringMetadata(Ctx, *CallValue, KIND_SOLIDITY_PAYABILITY_GUARD,
+    addStringMetadata(Ctx, *Match->CallValue, KIND_SOLIDITY_PAYABILITY_GUARD,
                       "callvalue");
-    addStringMetadata(Ctx, *Cmp, KIND_SOLIDITY_PAYABILITY_GUARD, "condition");
-    addStringMetadata(Ctx, *Br, KIND_SOLIDITY_PAYABILITY_GUARD, "branch");
-    markBlock(Ctx, *Failure, KIND_SOLIDITY_PAYABILITY_GUARD, "revert");
+    addStringMetadata(Ctx, *Match->Condition, KIND_SOLIDITY_PAYABILITY_GUARD,
+                      "condition");
+    addStringMetadata(Ctx, *Match->Branch, KIND_SOLIDITY_PAYABILITY_GUARD,
+                      "branch");
+    markBlock(Ctx, *Match->FailureBlock, KIND_SOLIDITY_PAYABILITY_GUARD,
+              "revert");
+
+    // Keep the guard block as the predecessor, but consume the compiler
+    // nonpayable branch so later passes do not see the outer reject wrapper.
+    insertPayabilityCfgRewriteMarker(Ctx, *Match);
+    IRBuilder<> Builder(Match->Branch);
+    BranchInst *NewBranch = Builder.CreateBr(Match->SuccessBlock);
+    NewBranch->copyMetadata(*Match->Branch);
+    Match->Branch->eraseFromParent();
 
     ++NumNonpayableGuards;
+    ++NumPayabilityCfgRewrites;
     Changed = true;
     break;
   }

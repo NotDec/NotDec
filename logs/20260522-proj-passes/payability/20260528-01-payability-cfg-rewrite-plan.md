@@ -262,3 +262,66 @@ ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
 ## 当前判断
 
 Payability guard 是 Solidity 编译器稳定生成的外层保护，适合比其它模式更早进入 CFG rewrite 阶段。相比 ABI / storage / external call，payability 的数据流简单、边界清楚、测试覆盖充足。当前应把 metadata-only 定位为内部识别步骤，把 CFG rewrite 作为主流程目标。
+
+## 实现记录
+
+### 已完成：Payability guard CFG rewrite
+
+修改文件：
+
+- `src/Passes/evm/SolidityPatterns.cpp`
+  - 在文件前部新增 `PayabilityGuardMatch`，记录 guard block、success/failure block、`evm_callvalue`、`icmp` 和 branch。
+  - 新增 `matchPayabilityGuard()`，只匹配 `callvalue == 0 ? success : failure` 和 `callvalue != 0 ? failure : success`，并要求 failure 是 `revert(0,0)` + `unreachable` 的直接 block。
+  - 新增 `insertPayabilityCfgRewriteMarker()`，在 rewrite 前插入 `notdec_solidity_cfg_rewrite_payability_guard(i256)`。
+  - 修改 `PayabilityGuardPass::run()`：命中后保留原有函数级 `notdec.solidity.nonpayable`、guard metadata、rewrite marker 和 hidden marker；随后把原条件 branch 替换为直跳 success block，并把旧 branch metadata 复制到新 branch，避免 `notdec.solidity.payability_guard` 计数下降。
+- `test/run_evm_solidity_patterns_suite.py`
+  - 新增 `count_payability_cfg_rewrites()`。
+  - 对包含 `payability` 或 `nonpayable_guard` pattern 的 case 增加 `payability_cfg_rewrites` 检查；默认期望等于 `expected_nonpayable_functions`，可用 `expected_payability_cfg_rewrites` 覆盖。
+
+验证结果：
+
+```bash
+cmake --build ./build --target all -j4
+ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+./build/bin/notdec test/evm/solidity-patterns/cases/0011_multi_public.ll \
+  -o /tmp/0011.payability-rewrite.ll --tr-level=0
+./llvm-22.1.0.obj/bin/llvm-as /tmp/0011.payability-rewrite.ll \
+  -o /tmp/0011.payability-rewrite.bc
+```
+
+结果：
+
+- 构建通过。
+- `notdec.evm.solidity_patterns` 通过，耗时约 87s。
+- `notdec.evm.solidity_rewrite` 通过，耗时约 87s。
+- manifest 中 58 个 case，50 个 payability/nonpayable case。
+- manifest 中 `expected_nonpayable_functions` 总数为 1514。
+- 输出中 `notdec_solidity_cfg_rewrite_payability_guard` 总数为 1514。
+- 输出中 `!notdec.solidity.nonpayable` 总数为 1514。
+- 输出中 `!notdec.solidity.payability_guard` 总数为 7570，与 oracle 一致。
+- 所有 pattern suite 输出 `.ll` 已由 runner 用 `llvm-22.1.0.obj/bin/llvm-as` 验证通过。
+- 抽查 `0011_multi_public`：`public_Withdraw___0x65` 仍有 `!notdec.solidity.nonpayable`；guard block 中有 `notdec_solidity_cfg_rewrite_payability_guard`；原 guard 条件跳转已变成 `br label %bb._0x71`；failure block `bb._0x6d` 变成 `No predecessors!`。
+
+验收结论：
+
+1. `notdec.evm.solidity_patterns` 全量通过。
+2. `notdec.evm.solidity_rewrite` 未退化。
+3. 50 个 payability case 都完成 CFG rewrite。
+4. `expected_nonpayable_functions` 总数仍为 1514。
+5. `payability_cfg_rewrites` 总数为 1514。
+6. `notdec.solidity.payability_guard` metadata 总量仍为 7570。
+7. 所有输出 `.ll` 都通过项目 LLVM 22 `llvm-as`。
+8. `revert` / `checked_bounds` oracle 未变化；这次没有误删用户业务分支的计数信号。
+
+复杂度评分：
+
+- 实现效果：9/10。已达到第一版目标，failure block 暂时不删除，交给后续 cleanup。
+- 理解成本：8/10。新增一个小 match 结构和一个 marker 插入函数，改动集中在 payability pass。
+- 维护成本：8/10。runner 默认规则减少 manifest 逐项维护，后续特殊 case 仍可覆盖。
+
+暂不做：
+
+- 不删除 failure block。
+- 不处理中间 block、复杂 bool 链和共享 failure block 的更强规整。
+- 不修改 `revert` / `checked_bounds` oracle。

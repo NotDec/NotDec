@@ -110,6 +110,11 @@ def count_rewrite_markers(path: Path, metadata_name: str) -> int:
     return text.count(f"call void @{rewrite_marker_name(metadata_name)}(")
 
 
+def count_payability_cfg_rewrites(path: Path) -> int:
+    text = path.read_text()
+    return text.count("call void @notdec_solidity_cfg_rewrite_payability_guard(")
+
+
 def count_hidden_markers(path: Path) -> int:
     text = path.read_text()
     return text.count("call void @notdec_solidity_rewrite_hidden(")
@@ -237,6 +242,13 @@ def main() -> int:
                 hidden_count = sum(case.get("expected_metadata_counts", {}).values())
                 expected_counts["rewrite_hidden_markers"] = hidden_count
                 expected_counts["rewrite_hidden_metadata"] = hidden_count
+            if "payability" in case.get("patterns", []) or "nonpayable_guard" in case.get(
+                "patterns", []
+            ):
+                expected_counts["payability_cfg_rewrites"] = case.get(
+                    "expected_payability_cfg_rewrites",
+                    case["expected_nonpayable_functions"],
+                )
             actual_counts = {
                 "nonpayable_functions": count_nonpayable_functions(output_ll)
             }
@@ -253,6 +265,10 @@ def main() -> int:
                     output_ll
                 )
                 actual_counts["rewrite_hidden_metadata"] = count_hidden_metadata(
+                    output_ll
+                )
+            if "payability_cfg_rewrites" in expected_counts:
+                actual_counts["payability_cfg_rewrites"] = count_payability_cfg_rewrites(
                     output_ll
                 )
             compare_ok = write_compare_report(
