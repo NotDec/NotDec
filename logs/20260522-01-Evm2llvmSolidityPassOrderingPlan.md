@@ -74,57 +74,33 @@ CTest 入口是 `notdec.evm.solidity_patterns`。它由 `test/CMakeLists.txt` �
 严格顺序只需要这样：
 
 1. EVM IR canonicalization。
-2. 识别 selector / fallback / receive / public entry。
-3. 识别 revert / panic / error / returndata bubble。
-4. 识别 value cleanup 和 memory buffer。
-5. 识别 ABI decode / ABI return / ABI revert encoding。
-6. 识别 storage addressing / packed field / storage bytes-string。
-7. 识别 external call 和 event。它们可以早标 helper call，但参数结构要等 memory/ABI。
+2. 入口与控制语义：先识别 selector / fallback / receive / public entry，再识别 payability、revert、checked/bounds。
+3. ABI 与内存语义：先识别 memory buffer，再识别 ABI decode / return / revert encoding。
+4. Storage 与类型线索：先识别 value cleanup 和 storage addressing，再识别 packed field 和 bytes/string。
+5. 外部交互语义：external call 和 event 可以早标 helper kind，但完整参数结构依赖 ABI/memory/revert 结果。
 
-其中 4 到 7 不是每个 pass 都有严格线性顺序。真正的依赖是：ABI、event、external call、revert encoding 都依赖 memory buffer；checked arithmetic、bounds check 依赖 panic/error 识别；storage field 依赖 storage address 根。
+真正的依赖关系不是完全线性的：ABI、event、external call、revert encoding 都依赖 memory buffer；checked arithmetic、bounds check 依赖 panic/error 识别；storage field 依赖 storage address 根；external call 的失败路径依赖 returndata bubble。
 
 ## 架构图
 
 ```mermaid
-flowchart TD
-  A[EVM LLVM IR<br/>evm-unknown-unknown] --> B[LLVM local canonicalization]
+flowchart LR
+  A[EVM LLVM IR<br/>evm-unknown-unknown] --> B[IR Canonicalization]
+  B --> C[Entry & Control]
+  B --> D[ABI & Memory]
+  B --> E[Storage & Type Hints]
+  B --> F[External Interaction]
 
-  B --> C[selector / fallback / receive / public entry]
-  C --> D[revert / panic / error / returndata bubble]
-
-  D --> E[value cleanup hints]
-  D --> F[memory buffer objects]
-  E --> G[ABI decode]
+  C --> G[Structured Solidity Semantics]
+  D --> G
+  E --> G
   F --> G
-  E --> H[ABI return]
-  F --> H
-  D --> I[checked arithmetic / bounds check]
 
-  F --> J[ABI revert encoding]
-  D --> J
-
-  E --> K[storage addressing]
-  F --> K
-  K --> L[packed storage field]
-  K --> M[storage bytes/string]
-  D --> M
-
-  F --> N[external call ABI]
-  G --> N
-  D --> N
-  F --> O[event log ABI]
-
-  C --> Q[VerifierPass]
-  I --> Q
-  H --> Q
-  J --> Q
-  L --> Q
-  M --> Q
-  N --> Q
-  O --> Q
+  G --> H[Rewrite / Output Preparation]
+  H --> I[VerifierPass]
 ```
 
-## EVM IR canonicalization
+## 1. 前置：EVM IR canonicalization
 
 底层模式：evm2llvm 输出的 stack-lifted IR，里面有很多冗余 zext、icmp、helper call 周围的临时值。
 
@@ -132,10 +108,13 @@ flowchart TD
 
 顺序要求：必须最先跑。后面的 pass 不应该同时兼容优化前和优化后两套形状。
 
-**根据需要，可以专门调整一下优化pass链路的构建**： canonicalization 的强度要控制好。优化太弱，后面的 pass 要兼容很多噪声；优化太强，可能把原本容易看的保护分支、buffer 写入顺序合并到更难匹配的形状里。
-- matcher 可以先按常见 CFG 形状匹配，例如“入口块判断、失败块 revert、成功块继续”。但不能只看跳转形状，还要沿着 SSA use-def 确认条件值、helper 调用和失败终点确实连在一起，避免把业务分支误标成编译器模式。
+canonicalization 的强度要控制好。优化太弱，后面的 pass 要兼容很多噪声；优化太强，可能把原本容易看的保护分支、buffer 写入顺序合并到更难匹配的形状里。matcher 可以先按常见 CFG 形状匹配，例如“入口块判断、失败块 revert、成功块继续”，但仍要沿 SSA use-def 确认条件值、helper 调用和失败终点确实连在一起，避免把业务分支误标成编译器模式。
 
-## Selector、fallback、receive 和 public 入口
+## 2. 入口与控制语义
+
+这一类 pass 先回答“当前函数或基本块在合约入口控制流中扮演什么角色”。它们给后面的 ABI、storage、call pass 提供上下文，也负责区分编译器插入的 guard 和用户业务逻辑。
+
+### 2.1 Selector、fallback、receive 和 public 入口
 
 底层模式：
 
@@ -153,23 +132,23 @@ flowchart TD
 顺序要求：
 
 - 这部分应该在 nonpayable、ABI decode、event、external call 之前跑。
-- 原因是后续 pass 需要知道自己看到的是 public entry 里的业务逻辑，还是 selector dispatcher 里的内联路径。
+- 后续 pass 需要知道自己看到的是 public entry 里的业务逻辑，还是 selector dispatcher 里的内联路径。
 - 如果暂时不拆函数，也至少要先标出 selector 比较链边界和内联 body 候选。
 
 当前状态和问题：
 
-- 已有 `SelectorInlinedLogicExtractionPass`，但现在只按函数名和明显 `call/log` 标候选。
-- 还没真正识别 selector 比较链边界。
-- fallback / receive 的判断还不稳定，尤其是 `calldatasize == 0` 和 payable 状态要结合后面的 callvalue guard。
+- 已有 `SelectorInlinedLogicExtractionPass`，但最初只按函数名和明显 `call/log` 标候选。
+- 后续新增 `SelectorEntryOutliningPass`，已经能保守 outline selector 里的部分内联 fallback / delegatecall body。
+- fallback / receive 的判断还需要继续结合 `calldatasize == 0`、payability 状态和共享 tail / PHI 形态。
 - 第一阶段不做 selector 到源码函数名恢复。
 
 rewrite flag：
 
 - 默认开启。
 - 能确认 selector prologue 和 dispatcher 比较链后，可以把它们从后端业务输出里隐藏。
-- 对 fallback / receive / selector 内联 body，rewrite 的目标是先标清边界；是否拆函数可以后续再做，不影响默认开启。
+- 对 fallback / receive / selector 内联 body，rewrite 的目标是先标清边界；安全时再 outline。
 
-## Payable / nonpayable guard
+### 2.2 Payable / nonpayable guard
 
 底层模式：
 
@@ -186,7 +165,7 @@ rewrite flag：
 
 - 依赖入口识别。没有 public/fallback/receive 上下文时，单独看到 `callvalue == 0` 不够稳。
 - 应该在 ABI decode 之前跑，因为 ABI decode 也会产生 `revert(0,0)`。
-- 可以在通用 revert 识别前后都跑，但更实用的是：先标 nonpayable guard，再让 revert pass 读取这个标记，避免把它当普通 empty revert。
+- 可以先标 nonpayable guard，再让 revert pass 读取这个标记，避免把它当普通 empty revert。
 
 当前状态和问题：
 
@@ -200,7 +179,7 @@ rewrite flag：
 - 命中后删除或隐藏 `callvalue == 0 -> revert(0,0)` 这段 guard，用函数级 `nonpayable` 语义表达。
 - fallback/receive 的 payable 状态如果还无法确认，只跳过对应函数，不影响其他已确认 public entry 的 rewrite。
 
-## Revert、Panic、Error、custom error 和 returndata bubble
+### 2.3 Revert、Panic、Error、custom error 和 returndata bubble
 
 底层模式：
 
@@ -219,7 +198,7 @@ rewrite flag：
 
 - 应该在 checked arithmetic、array bounds、ABI decode 保护识别之前跑。
 - 后面这些 pass 需要通过 panic code 或 error 形状判断某个条件是不是编译器保护。
-- 但 `Error(string)` 和 custom error 的参数结构依赖 memory buffer，所以 revert pass 可以先标 selector 和终点，完整 ABI 参数后面再补。
+- `Error(string)` 和 custom error 的参数结构依赖 memory buffer，所以 revert pass 可以先标 selector 和终点，完整 ABI 参数后面再补。
 
 当前状态和问题：
 
@@ -234,7 +213,7 @@ rewrite flag：
 - 明确的 Panic、Error、custom error、returndata bubble 改写成高层 revert 语义。
 - `revert(0,0)` 只有在被 nonpayable、ABI bounds、fallback reject 等上游语义认领后才改写；普通空 revert 保留为用户可见的低层退出。
 
-## Checked arithmetic 和 bounds check
+### 2.4 Checked arithmetic 和 bounds check
 
 底层模式：
 
@@ -267,40 +246,11 @@ rewrite flag：
 - 命中后把 `op + condition + panic` 合成 checked arithmetic 或 bounds check 语义，避免后端输出编译器插入的比较和 panic 分支。
 - 如果 panic code 不完整，先不改写该处，不能猜成业务逻辑。
 
-## Value cleanup 和类型线索
+## 3. ABI 与内存语义
 
-底层模式：
+这一类 pass 负责把 calldata、memory buffer、return buffer 和 revert buffer 从低层 `evm_mload/mstore/copy/return/revert` 序列中恢复出来。它是 ABI、event、external call 参数结构的共同基础。
 
-- `and ((1 << N) - 1)`。
-- `signextend`。
-- `iszero(iszero(x))` 或等价 bool 归一。
-- enum / 小整数的范围检查。
-
-高层语义：
-
-- address、bool、uintN、intN、bytesN、enum 的类型线索。
-- 这些不是最终类型，只是低层值被清理到某种宽度。
-
-顺序要求：
-
-- 它和 revert 识别没有强依赖，可以早跑。
-- 但它有利于 ABI decode、ABI return、storage field、external call 参数恢复。
-- 所以推荐放在 ABI/storage/external call 之前。
-
-当前状态和问题：
-
-- 已有 `ValueCleanupTypeHintPass`，能标常量 mask 和 `signextend`。
-- 对 `shl/sub/and` 组合生成的 mask 识别不足。
-- 对 bool 双重 `iszero`、enum range check 还没覆盖。
-- address mask 和 uint160 mask 本质形状接近，metadata 要保留置信度，不能直接定最终类型。
-
-rewrite flag：
-
-- 默认开启。
-- 命中后把 cleanup 当作类型线索，不再把 address mask、bool 归一、`signextend` 这类编译器清理当普通业务位运算输出。
-- 如果还不能确定最终类型，保留类型候选，不强行改成 address/bool/enum。
-
-## Memory buffer 和动态对象
+### 3.1 Memory buffer 和动态对象
 
 底层模式：
 
@@ -335,7 +285,7 @@ rewrite flag：
 - 命中后把明确的 free memory pointer bump 改写成 memory allocation 语义，例如 `evm_malloca(size)`。
 - buffer 边界不清楚时，不删除原始 `mstore/mload`，但仍把已确认的分配点改写出来，供 ABI/event/call pass 使用。
 
-## ABI decode
+### 3.2 ABI decode
 
 底层模式：
 
@@ -370,7 +320,7 @@ rewrite flag：
 - 命中后把 calldata bounds check、`calldataload`、cleanup 合成 public/external 参数语义。
 - 静态参数先改写；动态参数等 offset/length 和 memory copy 能绑定后再改写。
 
-## ABI return
+### 3.3 ABI return
 
 底层模式：
 
@@ -397,7 +347,6 @@ rewrite flag：
 - 已有 `AbiReturnPass`，主要标 `evm_return`，区分 `32` 字节和 returndata forward。
 - 还没识别 return buffer 的 `mstore` 序列。
 - 还没恢复动态返回值、head/tail、返回类型线索。
-- 因此建议把完整 `AbiReturnPass` 放在 memory buffer 和 value cleanup 之后。
 
 rewrite flag：
 
@@ -405,7 +354,7 @@ rewrite flag：
 - 命中后把 `mstore` return buffer 和 `evm_return` 合成返回值语义。
 - 简单静态返回先改写；动态返回在 head/tail 结构明确后改写。
 
-## ABI revert encoding
+### 3.4 ABI revert encoding
 
 底层模式：
 
@@ -436,7 +385,44 @@ rewrite flag：
 - 命中后把 revert buffer 写入序列改写成 Panic/Error/custom error 语义。
 - 这个 rewrite 需要和 `SolidityRevertPass` 共用同一个识别结果，不能再写一套独立 matcher。
 
-## Storage addressing、mapping 和动态数组
+## 4. Storage 与类型线索
+
+这一类 pass 负责把值宽度清理、storage slot 计算和 storage layout 片段组织起来。它不猜源码变量名，也不识别 ERC1967、Ownable、ERC20/721 这类库/业务模式，只恢复 Solidity 编译器层面的类型和 storage 访问形状。
+
+### 4.1 Value cleanup 和类型线索
+
+底层模式：
+
+- `and ((1 << N) - 1)`。
+- `signextend`。
+- `iszero(iszero(x))` 或等价 bool 归一。
+- enum / 小整数的范围检查。
+
+高层语义：
+
+- address、bool、uintN、intN、bytesN、enum 的类型线索。
+- 这些不是最终类型，只是低层值被清理到某种宽度。
+
+顺序要求：
+
+- 它和 revert 识别没有强依赖，可以早跑。
+- 但它有利于 ABI decode、ABI return、storage field、external call 参数恢复。
+- 所以推荐放在 ABI/storage/external call 之前。
+
+当前状态和问题：
+
+- 已有 `ValueCleanupTypeHintPass`，能标常量 mask 和 `signextend`。
+- 对 `shl/sub/and` 组合生成的 mask 识别不足。
+- 对 bool 双重 `iszero`、enum range check 还没覆盖。
+- address mask 和 uint160 mask 本质形状接近，metadata 要保留置信度，不能直接定最终类型。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后把 cleanup 当作类型线索，不再把 address mask、bool 归一、`signextend` 这类编译器清理当普通业务位运算输出。
+- 如果还不能确定最终类型，保留类型候选，不强行改成 address/bool/enum。
+
+### 4.2 Storage addressing、mapping 和动态数组
 
 底层模式：
 
@@ -469,7 +455,7 @@ rewrite flag：
 - 命中后把 sha3 slot 计算改写成 mapping / dynamic array storage address 语义。
 - 只按 `sha3` 长度猜出来的 candidate 不改写，必须确认 scratch memory 里的 key/base slot。
 
-## Packed storage field
+### 4.3 Packed storage field
 
 底层模式：
 
@@ -499,7 +485,7 @@ rewrite flag：
 - 命中后把 shift/mask/or 序列改写成 packed storage field load/store 语义。
 - 变量名和源码 storage layout 不在这里猜，只输出 slot、bit offset、bit width。
 
-## Storage bytes/string 短长编码
+### 4.4 Storage bytes/string 短长编码
 
 底层模式：
 
@@ -529,38 +515,11 @@ rewrite flag：
 - 命中后把短/长分支、长度、data slot 改写成 storage bytes/string 语义。
 - 不需要一步到位改成高级字符串操作，但不应继续把短长编码分支当普通业务逻辑输出。
 
-## Event log
+## 5. 外部交互语义
 
-底层模式：
+这一类 pass 负责识别合约和外部环境交互的边界：外部调用、returndata 处理和 event log。它们可以先标 helper kind，但要恢复完整参数，仍然需要 ABI/memory/revert 的结果。
 
-- `evm_log0` 到 `evm_log4`。
-- topic0 是事件签名 hash，匿名事件没有 topic0。
-- 非 indexed 参数写 memory data buffer。
-- 动态 indexed 参数先 hash。
-
-高层语义：
-
-- `emit event(topics, data)`。
-- topic 和 data 的 ABI 结构。
-
-顺序要求：
-
-- 标 `logN` helper 没有依赖，可以随时做。
-- 恢复事件参数依赖 memory buffer 和 ABI encode。
-- 动态 indexed 参数 hash 还依赖 storage/memory/value 线索。
-
-当前状态和问题：
-
-- 已有 `EventLogPass`，只标 topic 数。
-- 还没恢复 topic 常量、data buffer、匿名事件、动态 indexed 参数。
-
-rewrite flag：
-
-- 默认开启。
-- 命中后把 `evm_logN` 和对应 memory data buffer 改写成 `emit event` 语义。
-- 事件名不查表，topic 常量和参数结构先保留。
-
-## External call 和 returndata
+### 5.1 External call 和 returndata
 
 底层模式：
 
@@ -595,6 +554,37 @@ rewrite flag：
 - 默认开启。
 - 命中后把 call helper、input/output buffer、success check、失败冒泡和返回解码合成外部调用语义。
 - proxy/library 识别不在这里做；`delegatecall` 只表达低层调用语义。
+
+### 5.2 Event log
+
+底层模式：
+
+- `evm_log0` 到 `evm_log4`。
+- topic0 是事件签名 hash，匿名事件没有 topic0。
+- 非 indexed 参数写 memory data buffer。
+- 动态 indexed 参数先 hash。
+
+高层语义：
+
+- `emit event(topics, data)`。
+- topic 和 data 的 ABI 结构。
+
+顺序要求：
+
+- 标 `logN` helper 没有依赖，可以随时做。
+- 恢复事件参数依赖 memory buffer 和 ABI encode。
+- 动态 indexed 参数 hash 还依赖 storage/memory/value 线索。
+
+当前状态和问题：
+
+- 已有 `EventLogPass`，只标 topic 数。
+- 还没恢复 topic 常量、data buffer、匿名事件、动态 indexed 参数。
+
+rewrite flag：
+
+- 默认开启。
+- 命中后把 `evm_logN` 和对应 memory data buffer 改写成 `emit event` 语义。
+- 事件名不查表，topic 常量和参数结构先保留。
 
 ## 收集测试用例
 
