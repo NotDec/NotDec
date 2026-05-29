@@ -57,6 +57,9 @@
       },
       "expected_error_string_literals": {
         "short": 1
+      },
+      "expected_error_string_marker_payloads": {
+        "147028384:5": 1
       }
     },
     {
@@ -110,6 +113,9 @@
       },
       "expected_error_string_literals": {
         "longer revert message for solidity codegen": 1
+      },
+      "expected_error_string_marker_payloads": {
+        "147028384:42": 1
       }
     },
     {
@@ -163,6 +169,9 @@
       },
       "expected_error_string_literals": {
         "value must be zero": 1
+      },
+      "expected_error_string_marker_payloads": {
+        "147028384:18": 1
       }
     },
     {
@@ -216,6 +225,9 @@
       },
       "expected_error_string_literals": {
         "calldata too short": 1
+      },
+      "expected_error_string_marker_payloads": {
+        "147028384:18": 1
       }
     },
     {
@@ -266,6 +278,9 @@
       "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "0": 1
+      },
+      "expected_custom_error_marker_payloads": {
+        "3510950371:0": 1
       }
     },
     {
@@ -316,6 +331,9 @@
       "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "1": 1
+      },
+      "expected_custom_error_marker_payloads": {
+        "3262408713:1": 1
       }
     },
     {
@@ -366,6 +384,9 @@
       "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "2": 1
+      },
+      "expected_custom_error_marker_payloads": {
+        "256322039:2": 1
       }
     },
     {
@@ -416,6 +437,9 @@
       "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "2": 1
+      },
+      "expected_custom_error_marker_payloads": {
+        "351843970:2": 1
       }
     },
     {
@@ -466,6 +490,9 @@
       "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "1": 1
+      },
+      "expected_custom_error_marker_payloads": {
+        "2826566258:1": 1
       }
     },
     {
@@ -516,6 +543,9 @@
       "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "1": 1
+      },
+      "expected_custom_error_marker_payloads": {
+        "1076066811:1": 1
       }
     },
     {

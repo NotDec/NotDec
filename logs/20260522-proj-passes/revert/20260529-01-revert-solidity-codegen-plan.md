@@ -606,3 +606,61 @@ metadata。
 - 本次仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
   pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
   89.30s 变为 90.06s，`notdec.evm.solidity_rewrite` 从 86.29s 变为 86.10s。
+
+## 第七步实现记录（2026-05-29）
+
+本次整理 selector 型 revert 的 rewrite marker 形态，把已恢复的 payload 形状放进
+marker 参数里。metadata 继续保留为 debug 和 oracle 辅助；marker 作为后续 rewrite /
+lowering 更稳定的接口。
+
+修改内容：
+
+- `src/Passes/evm/SolidityPatterns.cpp:1392` 修改
+  `insertSelectorRewriteMarker()`，marker function type 从 1 个 `i256` 参数扩成
+  2 个 `i256` 参数。
+- `src/Passes/evm/SolidityPatterns.cpp:1415` 对未知 payload 使用
+  `uint64_t::max()` 作为 sentinel。当前新增 10 个 Solidity-generated case 都能拿到
+  具体 payload，不会用到 sentinel。
+- `src/Passes/evm/SolidityPatterns.cpp:1853` 在 Error(string) marker 中传
+  `(selector, string_length)`。
+- `src/Passes/evm/SolidityPatterns.cpp:1857` 在 custom error marker 中传
+  `(selector, static_arg_word_count)`。
+- `test/run_evm_solidity_patterns_suite.py:162` 增加 marker 参数对计数 helper。
+- `test/run_evm_solidity_patterns_suite.py:518`、`:604` 增加
+  `expected_error_string_marker_payloads` 和
+  `expected_custom_error_marker_payloads` oracle。
+- `test/evm/solidity-patterns/manifest.json:61` 起为 10 个 Solidity-generated case
+  增加 marker 参数 oracle：
+  - Error(string): `147028384:5`、`147028384:42`、`147028384:18`
+  - custom error: selector + `0/1/2` 静态 ABI word 个数
+
+效果：
+
+- Error(string) / custom error 的 selector 和 payload 外壳不再只藏在 metadata。
+- 后续 consumer 可以直接读 marker 参数；字符串 literal 仍保留在 metadata，因为 marker
+  不适合直接传字符串。
+- 旧真实样例仍只检查 marker 数量，新 10 个 Solidity-generated case 额外检查 marker
+  参数对。
+
+复杂度评价：
+
+- 实现效果：8/10。marker 已表达 selector 和第一层 payload 形状，但仍未恢复 custom
+  error 参数类型和值。
+- 理解成本：5/10。marker 参数语义更清楚；测试多了一个参数对计数 helper。
+- 后期维护成本：5/10。后续扩展时优先改 marker 参数和 metadata，不需要新 pass。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `python3 -m py_compile test/run_evm_solidity_patterns_suite.py`
+- `cmake --build ./build --target all -j4`
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，耗时 90.29s。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，耗时 86.85s。
+
+性能：
+
+- 本次仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
+  pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
+  90.06s 变为 90.29s，`notdec.evm.solidity_rewrite` 从 86.10s 变为 86.85s。

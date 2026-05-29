@@ -159,6 +159,19 @@ def count_exact_marker(path: Path, marker_name: str) -> int:
     return text.count(f"call void @{marker_name}(")
 
 
+def count_marker_arg_pairs(path: Path, marker_name: str) -> dict[str, int]:
+    text = path.read_text()
+    pattern = (
+        rf"call void @{re.escape(marker_name)}"
+        rf"\(i256 ([^,]+), i256 ([^)]+)\)"
+    )
+    counts: dict[str, int] = {}
+    for first, second in re.findall(pattern, text):
+        key = f"{first.strip()}:{second.strip()}"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def count_hidden_markers(path: Path) -> int:
     text = path.read_text()
     return text.count("call void @notdec_solidity_rewrite_hidden(")
@@ -502,6 +515,14 @@ def main() -> int:
                 "expected_error_string_literals", {}
             ).items():
                 expected_counts[f"error_string_literal:{literal}"] = expected
+            for payload, expected in case.get(
+                "expected_error_string_marker_payloads", {}
+            ).items():
+                expected_counts[f"error_string_marker_payload:{payload}"] = expected
+            for payload, expected in case.get(
+                "expected_custom_error_marker_payloads", {}
+            ).items():
+                expected_counts[f"custom_error_marker_payload:{payload}"] = expected
             if expect_rewrite_markers:
                 revert_kinds = case.get("expected_revert_kinds", {})
                 if "panic" in revert_kinds:
@@ -579,6 +600,20 @@ def main() -> int:
             for literal in case.get("expected_error_string_literals", {}):
                 actual_counts[f"error_string_literal:{literal}"] = (
                     actual_error_string_literals.get(str(literal), 0)
+                )
+            actual_error_string_marker_payloads = count_marker_arg_pairs(
+                output_ll, "notdec_solidity_rewrite_revert_error_string"
+            )
+            for payload in case.get("expected_error_string_marker_payloads", {}):
+                actual_counts[f"error_string_marker_payload:{payload}"] = (
+                    actual_error_string_marker_payloads.get(str(payload), 0)
+                )
+            actual_custom_error_marker_payloads = count_marker_arg_pairs(
+                output_ll, "notdec_solidity_rewrite_revert_custom_error"
+            )
+            for payload in case.get("expected_custom_error_marker_payloads", {}):
+                actual_counts[f"custom_error_marker_payload:{payload}"] = (
+                    actual_custom_error_marker_payloads.get(str(payload), 0)
                 )
             if (
                 "rewrite_marker:notdec_solidity_rewrite_revert_panic"

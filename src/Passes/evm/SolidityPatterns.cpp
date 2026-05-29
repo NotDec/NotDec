@@ -16,6 +16,7 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -1390,7 +1391,8 @@ void insertReturndataBubbleRewriteMarker(LLVMContext &Ctx,
 
 void insertSelectorRewriteMarker(LLVMContext &Ctx,
                                  const SolidityRevertMatch &Match,
-                                 StringRef MarkerName) {
+                                 StringRef MarkerName,
+                                 std::optional<uint64_t> PayloadValue) {
   if (!Match.Selector.has_value() || Match.Revert == nullptr) {
     return;
   }
@@ -1398,7 +1400,9 @@ void insertSelectorRewriteMarker(LLVMContext &Ctx,
   Module *M = Match.Revert->getModule();
   FunctionCallee Marker = M->getOrInsertFunction(
       MarkerName,
-      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {Type::getIntNTy(Ctx, 256),
+                         Type::getIntNTy(Ctx, 256)},
                         false));
 
   IRBuilder<> Builder(Ctx);
@@ -1408,8 +1412,11 @@ void insertSelectorRewriteMarker(LLVMContext &Ctx,
     Builder.SetInsertPoint(Match.Revert->getParent());
   }
 
+  constexpr uint64_t UNKNOWN_PAYLOAD = std::numeric_limits<uint64_t>::max();
   Value *Args[] = {
-      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.Selector)};
+      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.Selector),
+      ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                       PayloadValue.value_or(UNKNOWN_PAYLOAD))};
   Builder.CreateCall(Marker, Args);
 }
 
@@ -1845,10 +1852,12 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
         insertReturndataBubbleRewriteMarker(Ctx, *Match);
       } else if (Match->Kind == "error_string") {
         insertSelectorRewriteMarker(Ctx, *Match,
-                                    "notdec_solidity_rewrite_revert_error_string");
+                                    "notdec_solidity_rewrite_revert_error_string",
+                                    Match->ErrorStringLength);
       } else if (Match->Kind == "custom_error_candidate") {
         insertSelectorRewriteMarker(Ctx, *Match,
-                                    "notdec_solidity_rewrite_revert_custom_error");
+                                    "notdec_solidity_rewrite_revert_custom_error",
+                                    Match->CustomErrorArgCount);
       }
       ++NumReverts;
       Changed = true;
