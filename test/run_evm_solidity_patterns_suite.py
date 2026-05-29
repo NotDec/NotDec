@@ -25,7 +25,13 @@ EVM_RETURNDATACOPY_CALL_RE = re.compile(
     r"\bcall void @evm_returndatacopy\(ptr [^,]+, ptr [^,]+, i256 ([^,]+), i256 ([^,]+), i256 ([^)]+)\)"
 )
 EVM_SHL_ASSIGN_RE = re.compile(
-    r"^\s*(%[\w.\-]+) = call i256 @evm_shl\(i256 224, i256 (\d+)\)"
+    r"^\s*(%[\w.\-]+) = call i256 @evm_shl\(i256 (\d+), i256 (\d+)\)"
+)
+EVM_MLOAD_ASSIGN_RE = re.compile(
+    r"^\s*(%[\w.\-]+) = call i256 @evm_mload\(ptr [^,]+, i256 ([^)]+)\)"
+)
+EVM_ADD_ASSIGN_RE = re.compile(
+    r"^\s*(%[\w.\-]+) = add i256 ([^,]+), ([^,!]+)"
 )
 PANIC_SELECTOR = 0x4E487B71
 ERROR_SELECTOR = 0x08C379A0
@@ -161,20 +167,93 @@ def is_returndatasize_value(value: str) -> bool:
     return value.strip().startswith("%evm.returndatasize")
 
 
+def decode_selector_word(shift: int, payload: int) -> int | None:
+    word = payload << shift
+    if word >> 256:
+        return None
+    if word & ((1 << 224) - 1):
+        return None
+    selector = word >> 224
+    if selector > 0xFFFFFFFF:
+        return None
+    return selector
+
+
+def value_expr(value: str, exprs: dict[str, tuple]) -> tuple:
+    value = value.strip()
+    if value.isdigit():
+        return ("const", int(value))
+    return exprs.get(value, ("var", value))
+
+
+def same_value(lhs: str, rhs: str, exprs: dict[str, tuple]) -> bool:
+    return value_expr(lhs, exprs) == value_expr(rhs, exprs)
+
+
+def const_offset_from_base(offset: str, base: str, exprs: dict[str, tuple]) -> int | None:
+    offset_expr = value_expr(offset, exprs)
+    base_expr = value_expr(base, exprs)
+    if offset_expr == base_expr:
+        return 0
+    if (
+        len(offset_expr) == 2
+        and len(base_expr) == 2
+        and offset_expr[0] == "const"
+        and base_expr[0] == "const"
+        and offset_expr[1] >= base_expr[1]
+    ):
+        return offset_expr[1] - base_expr[1]
+    if (
+        len(offset_expr) == 3
+        and offset_expr[0] == "add"
+        and offset_expr[1] == base_expr
+        and isinstance(offset_expr[2], int)
+    ):
+        return offset_expr[2]
+    return None
+
+
+def selector_from_value(value: str, shl_values: dict[str, int]) -> int | None:
+    value = value.strip()
+    return shl_values.get(value)
+
+
 def classify_reverts_from_block(block: str) -> list[str]:
     shl_values: dict[str, int] = {}
-    last_selector: int | None = None
-    returndata_copy_offsets: set[str] = set()
+    exprs: dict[str, tuple] = {}
+    memory_stores: list[tuple[str, str]] = []
+    returndata_copy_offsets: list[str] = []
     kinds: list[str] = []
 
     for line in block.splitlines():
         shl_match = EVM_SHL_ASSIGN_RE.match(line)
         if shl_match:
-            shl_values[shl_match.group(1)] = int(shl_match.group(2))
+            selector = decode_selector_word(
+                int(shl_match.group(2)), int(shl_match.group(3))
+            )
+            if selector is not None:
+                shl_values[shl_match.group(1)] = selector
+
+        mload_match = EVM_MLOAD_ASSIGN_RE.match(line)
+        if mload_match:
+            exprs[mload_match.group(1)] = (
+                "mload",
+                value_expr(mload_match.group(2), exprs),
+            )
+
+        add_match = EVM_ADD_ASSIGN_RE.match(line)
+        if add_match:
+            lhs = add_match.group(1)
+            left = add_match.group(2).strip()
+            right = add_match.group(3).strip()
+            if left.isdigit():
+                exprs[lhs] = ("add", value_expr(right, exprs), int(left))
+            elif right.isdigit():
+                exprs[lhs] = ("add", value_expr(left, exprs), int(right))
 
         mstore_match = EVM_MSTORE_CALL_RE.search(line)
-        if mstore_match and is_constant_i256(mstore_match.group(1), 0):
-            last_selector = shl_values.get(mstore_match.group(2).strip())
+        if mstore_match:
+            memory_stores.append((mstore_match.group(1), mstore_match.group(2)))
 
         returndata_copy_match = EVM_RETURNDATACOPY_CALL_RE.search(line)
         if returndata_copy_match:
@@ -182,7 +261,7 @@ def classify_reverts_from_block(block: str) -> list[str]:
             source_offset = returndata_copy_match.group(2).strip()
             length = returndata_copy_match.group(3).strip()
             if is_constant_i256(source_offset, 0) and is_returndatasize_value(length):
-                returndata_copy_offsets.add(copy_offset)
+                returndata_copy_offsets.append(copy_offset)
 
         revert_match = EVM_REVERT_CALL_RE.search(line)
         if not revert_match:
@@ -190,20 +269,28 @@ def classify_reverts_from_block(block: str) -> list[str]:
 
         offset = revert_match.group(1).strip()
         length = revert_match.group(2).strip()
+        selector = None
+        for store_offset, store_value in memory_stores:
+            if const_offset_from_base(store_offset, offset, exprs) == 0:
+                selector = selector_from_value(store_value, shl_values)
+
         if is_constant_i256(offset, 0) and is_constant_i256(length, 0):
             kind = "empty"
-        elif is_returndatasize_value(length) and offset in returndata_copy_offsets:
+        elif is_returndatasize_value(length) and any(
+            same_value(offset, copy_offset, exprs)
+            for copy_offset in returndata_copy_offsets
+        ):
             kind = "returndata_bubble"
-        elif is_constant_i256(length, 36) and last_selector == PANIC_SELECTOR:
+        elif is_constant_i256(length, 36) and selector == PANIC_SELECTOR:
             kind = "panic"
-        elif last_selector == ERROR_SELECTOR:
+        elif selector == ERROR_SELECTOR:
             kind = "error_string"
-        elif last_selector is not None and last_selector != PANIC_SELECTOR:
+        elif selector is not None and selector != PANIC_SELECTOR:
             kind = "custom_error_candidate"
         else:
             kind = "encoded_candidate"
         kinds.append(kind)
-        last_selector = None
+        memory_stores.clear()
         returndata_copy_offsets.clear()
 
     return kinds
@@ -218,7 +305,11 @@ def collect_panic_codes_from_block(block: str) -> list[int]:
     for line in block.splitlines():
         shl_match = EVM_SHL_ASSIGN_RE.match(line)
         if shl_match:
-            shl_values[shl_match.group(1)] = int(shl_match.group(2))
+            selector = decode_selector_word(
+                int(shl_match.group(2)), int(shl_match.group(3))
+            )
+            if selector is not None:
+                shl_values[shl_match.group(1)] = selector
 
         mstore_match = EVM_MSTORE_CALL_RE.search(line)
         if mstore_match:
@@ -383,9 +474,12 @@ def main() -> int:
             if expect_rewrite_markers:
                 revert_kinds = case.get("expected_revert_kinds", {})
                 if "panic" in revert_kinds:
+                    expected_panic_markers = sum(
+                        case.get("expected_panic_codes", {}).values()
+                    )
                     expected_counts[
                         "rewrite_marker:notdec_solidity_rewrite_revert_panic"
-                    ] = revert_kinds["panic"]
+                    ] = expected_panic_markers
                 if "expected_returndata_bubbles" in case:
                     expected_counts[
                         "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"

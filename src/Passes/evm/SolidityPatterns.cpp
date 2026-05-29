@@ -5,6 +5,7 @@
 #include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
+#include <llvm/ADT/APInt.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Dominators.h>
@@ -1043,7 +1044,19 @@ bool isSameValue(Value *LHS, Value *RHS) {
   }
   auto *LC = dyn_cast_or_null<ConstantInt>(LHS);
   auto *RC = dyn_cast_or_null<ConstantInt>(RHS);
-  return LC != nullptr && RC != nullptr && LC->getValue() == RC->getValue();
+  if (LC != nullptr && RC != nullptr) {
+    return LC->getValue() == RC->getValue();
+  }
+
+  auto *LCall = dyn_cast_or_null<CallBase>(LHS);
+  auto *RCall = dyn_cast_or_null<CallBase>(RHS);
+  if (LCall == nullptr || RCall == nullptr || LCall->arg_size() != 2 ||
+      RCall->arg_size() != 2 || !isCallTo(LCall, "evm_mload") ||
+      !isCallTo(RCall, "evm_mload")) {
+    return false;
+  }
+  return isSameValue(LCall->getArgOperand(0), RCall->getArgOperand(0)) &&
+         isSameValue(LCall->getArgOperand(1), RCall->getArgOperand(1));
 }
 
 std::optional<uint64_t> getUInt64Constant(Value *V) {
@@ -1054,14 +1067,58 @@ std::optional<uint64_t> getUInt64Constant(Value *V) {
   return C->getZExtValue();
 }
 
+std::optional<uint64_t> getOffsetFromBase(Value *Offset, Value *Base) {
+  if (isSameValue(Offset, Base)) {
+    return 0;
+  }
+
+  auto *OffsetConst = dyn_cast_or_null<ConstantInt>(Offset);
+  auto *BaseConst = dyn_cast_or_null<ConstantInt>(Base);
+  if (OffsetConst != nullptr && BaseConst != nullptr &&
+      OffsetConst->getValue().uge(BaseConst->getValue())) {
+    APInt Diff = OffsetConst->getValue() - BaseConst->getValue();
+    if (Diff.getActiveBits() <= 64) {
+      return Diff.getZExtValue();
+    }
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(Offset);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return std::nullopt;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    if (!isSameValue(Add->getOperand(I), Base)) {
+      continue;
+    }
+    return getUInt64Constant(Add->getOperand(1 - I));
+  }
+  return std::nullopt;
+}
+
 std::optional<uint64_t> getSelectorWord(Value *V) {
   auto *Selector = dyn_cast_or_null<CallBase>(V);
   if (Selector == nullptr || !isCallTo(Selector, "evm_shl") ||
-      Selector->arg_size() != 2 ||
-      !isConstantIntValue(Selector->getArgOperand(0), 224)) {
+      Selector->arg_size() != 2) {
     return std::nullopt;
   }
-  return getUInt64Constant(Selector->getArgOperand(1));
+
+  auto *Shift = dyn_cast_or_null<ConstantInt>(Selector->getArgOperand(0));
+  auto *Payload = dyn_cast_or_null<ConstantInt>(Selector->getArgOperand(1));
+  if (Shift == nullptr || Payload == nullptr ||
+      Shift->getValue().getActiveBits() > 8) {
+    return std::nullopt;
+  }
+
+  // Solidity may emit PUSH3/PUSH4 plus SHL to place the 4-byte selector in the
+  // top bytes of the ABI word.  Decode the stored word instead of matching one
+  // fixed shift amount.
+  APInt Word = Payload->getValue().zextOrTrunc(256);
+  Word <<= Shift->getZExtValue();
+  if (Word.trunc(224) != 0) {
+    return std::nullopt;
+  }
+  return Word.lshr(224).getZExtValue();
 }
 
 bool isPanicSelectorValue(Value *V) {
@@ -1140,7 +1197,9 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
       continue;
     }
 
-    if (isZero(Call->getArgOperand(1))) {
+    std::optional<uint64_t> Offset =
+        getOffsetFromBase(Call->getArgOperand(1), Revert.getArgOperand(1));
+    if (Offset == 0) {
       if (std::optional<uint64_t> Selector =
               getSelectorWord(Call->getArgOperand(2))) {
         Match.SelectorStore = Call;
@@ -1149,7 +1208,7 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
       continue;
     }
 
-    if (isConstantIntValue(Call->getArgOperand(1), 4)) {
+    if (Offset == 4) {
       if (std::optional<uint64_t> Code =
               getUInt64Constant(Call->getArgOperand(2))) {
         Match.PanicCodeStore = Call;

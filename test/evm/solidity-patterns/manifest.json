@@ -15,24 +15,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 3,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 2,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 1,
@@ -62,24 +62,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 3,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 2,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 1,
@@ -109,24 +109,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 4,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 3,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 1,
@@ -156,24 +156,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
-        "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.abi_decode": 3,
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 5,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 5,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 8,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 7,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 1,
@@ -203,24 +203,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 3,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 2,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -250,24 +250,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 4,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 3,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -297,24 +297,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 4,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 3,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -344,24 +344,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 3,
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 4,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 3,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -391,24 +391,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 4,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 3,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -438,24 +438,24 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.checked_bounds": 2,
         "notdec.solidity.cleanup": 0,
-        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.entry_kind": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
-        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.memory_object": 3,
         "notdec.solidity.packed_storage_field": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 1,
+        "notdec.solidity.revert": 5,
         "notdec.solidity.selector_inlined_body": 0,
-        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
       },
       "expected_revert_kinds": {
-        "empty": 0,
+        "empty": 4,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -570,9 +570,9 @@
         "empty": 8,
         "panic": 1,
         "returndata_bubble": 2,
-        "error_string": 0,
+        "error_string": 2,
         "custom_error_candidate": 0,
-        "encoded_candidate": 2
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -740,9 +740,9 @@
         "empty": 35,
         "panic": 10,
         "returndata_bubble": 8,
-        "error_string": 0,
+        "error_string": 18,
         "custom_error_candidate": 0,
-        "encoded_candidate": 18
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1031,9 +1031,9 @@
         "empty": 14,
         "panic": 3,
         "returndata_bubble": 1,
-        "error_string": 0,
+        "error_string": 17,
         "custom_error_candidate": 0,
-        "encoded_candidate": 17
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1325,9 +1325,9 @@
         "empty": 160,
         "panic": 37,
         "returndata_bubble": 20,
-        "error_string": 0,
-        "custom_error_candidate": 0,
-        "encoded_candidate": 57
+        "error_string": 12,
+        "custom_error_candidate": 43,
+        "encoded_candidate": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1384,9 +1384,9 @@
         "empty": 106,
         "panic": 55,
         "returndata_bubble": 10,
-        "error_string": 0,
-        "custom_error_candidate": 0,
-        "encoded_candidate": 53
+        "error_string": 33,
+        "custom_error_candidate": 18,
+        "encoded_candidate": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1442,9 +1442,9 @@
         "empty": 137,
         "panic": 53,
         "returndata_bubble": 56,
-        "error_string": 0,
-        "custom_error_candidate": 0,
-        "encoded_candidate": 44
+        "error_string": 23,
+        "custom_error_candidate": 19,
+        "encoded_candidate": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1499,9 +1499,9 @@
         "empty": 18,
         "panic": 22,
         "returndata_bubble": 2,
-        "error_string": 0,
+        "error_string": 32,
         "custom_error_candidate": 0,
-        "encoded_candidate": 33
+        "encoded_candidate": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1554,11 +1554,11 @@
       },
       "expected_revert_kinds": {
         "empty": 9,
-        "panic": 23,
+        "panic": 30,
         "returndata_bubble": 0,
-        "error_string": 0,
+        "error_string": 19,
         "custom_error_candidate": 0,
-        "encoded_candidate": 113
+        "encoded_candidate": 87
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1615,9 +1615,9 @@
         "empty": 102,
         "panic": 53,
         "returndata_bubble": 12,
-        "error_string": 0,
+        "error_string": 23,
         "custom_error_candidate": 0,
-        "encoded_candidate": 24
+        "encoded_candidate": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1674,9 +1674,9 @@
         "empty": 63,
         "panic": 17,
         "returndata_bubble": 4,
-        "error_string": 0,
+        "error_string": 26,
         "custom_error_candidate": 0,
-        "encoded_candidate": 26
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1731,9 +1731,9 @@
         "empty": 47,
         "panic": 75,
         "returndata_bubble": 9,
-        "error_string": 0,
+        "error_string": 28,
         "custom_error_candidate": 0,
-        "encoded_candidate": 28
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1790,9 +1790,9 @@
         "empty": 58,
         "panic": 17,
         "returndata_bubble": 3,
-        "error_string": 0,
+        "error_string": 25,
         "custom_error_candidate": 0,
-        "encoded_candidate": 25
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1849,9 +1849,9 @@
         "empty": 109,
         "panic": 10,
         "returndata_bubble": 2,
-        "error_string": 0,
+        "error_string": 51,
         "custom_error_candidate": 0,
-        "encoded_candidate": 51
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1908,9 +1908,9 @@
         "empty": 78,
         "panic": 15,
         "returndata_bubble": 30,
-        "error_string": 0,
-        "custom_error_candidate": 0,
-        "encoded_candidate": 52
+        "error_string": 14,
+        "custom_error_candidate": 37,
+        "encoded_candidate": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1963,11 +1963,11 @@
       },
       "expected_revert_kinds": {
         "empty": 12,
-        "panic": 23,
+        "panic": 30,
         "returndata_bubble": 0,
-        "error_string": 0,
+        "error_string": 19,
         "custom_error_candidate": 0,
-        "encoded_candidate": 113
+        "encoded_candidate": 87
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2024,9 +2024,9 @@
         "empty": 86,
         "panic": 0,
         "returndata_bubble": 2,
-        "error_string": 0,
+        "error_string": 35,
         "custom_error_candidate": 0,
-        "encoded_candidate": 40
+        "encoded_candidate": 5
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2083,9 +2083,9 @@
         "empty": 107,
         "panic": 10,
         "returndata_bubble": 2,
-        "error_string": 0,
+        "error_string": 50,
         "custom_error_candidate": 0,
-        "encoded_candidate": 50
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2142,9 +2142,9 @@
         "empty": 75,
         "panic": 18,
         "returndata_bubble": 1,
-        "error_string": 0,
-        "custom_error_candidate": 0,
-        "encoded_candidate": 39
+        "error_string": 17,
+        "custom_error_candidate": 21,
+        "encoded_candidate": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2201,9 +2201,9 @@
         "empty": 112,
         "panic": 7,
         "returndata_bubble": 9,
-        "error_string": 0,
+        "error_string": 36,
         "custom_error_candidate": 0,
-        "encoded_candidate": 36
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2258,9 +2258,9 @@
         "empty": 45,
         "panic": 14,
         "returndata_bubble": 0,
-        "error_string": 0,
-        "custom_error_candidate": 0,
-        "encoded_candidate": 39
+        "error_string": 16,
+        "custom_error_candidate": 22,
+        "encoded_candidate": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2317,9 +2317,9 @@
         "empty": 89,
         "panic": 7,
         "returndata_bubble": 9,
-        "error_string": 0,
+        "error_string": 49,
         "custom_error_candidate": 0,
-        "encoded_candidate": 49
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2376,9 +2376,9 @@
         "empty": 57,
         "panic": 19,
         "returndata_bubble": 7,
-        "error_string": 0,
+        "error_string": 34,
         "custom_error_candidate": 0,
-        "encoded_candidate": 34
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2435,9 +2435,9 @@
         "empty": 64,
         "panic": 7,
         "returndata_bubble": 8,
-        "error_string": 0,
+        "error_string": 46,
         "custom_error_candidate": 0,
-        "encoded_candidate": 46
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2494,9 +2494,9 @@
         "empty": 99,
         "panic": 7,
         "returndata_bubble": 10,
-        "error_string": 0,
+        "error_string": 44,
         "custom_error_candidate": 0,
-        "encoded_candidate": 44
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2553,9 +2553,9 @@
         "empty": 99,
         "panic": 7,
         "returndata_bubble": 10,
-        "error_string": 0,
+        "error_string": 44,
         "custom_error_candidate": 0,
-        "encoded_candidate": 44
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2612,9 +2612,9 @@
         "empty": 99,
         "panic": 7,
         "returndata_bubble": 10,
-        "error_string": 0,
+        "error_string": 44,
         "custom_error_candidate": 0,
-        "encoded_candidate": 44
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2671,9 +2671,9 @@
         "empty": 88,
         "panic": 7,
         "returndata_bubble": 2,
-        "error_string": 0,
+        "error_string": 43,
         "custom_error_candidate": 0,
-        "encoded_candidate": 43
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2905,9 +2905,9 @@
         "empty": 26,
         "panic": 5,
         "returndata_bubble": 8,
-        "error_string": 0,
+        "error_string": 8,
         "custom_error_candidate": 0,
-        "encoded_candidate": 8
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3082,9 +3082,9 @@
         "empty": 35,
         "panic": 9,
         "returndata_bubble": 4,
-        "error_string": 0,
+        "error_string": 16,
         "custom_error_candidate": 0,
-        "encoded_candidate": 16
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3199,9 +3199,9 @@
         "empty": 51,
         "panic": 8,
         "returndata_bubble": 4,
-        "error_string": 0,
+        "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 27
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3258,9 +3258,9 @@
         "empty": 47,
         "panic": 8,
         "returndata_bubble": 3,
-        "error_string": 0,
+        "error_string": 26,
         "custom_error_candidate": 0,
-        "encoded_candidate": 26
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3317,9 +3317,9 @@
         "empty": 62,
         "panic": 7,
         "returndata_bubble": 1,
-        "error_string": 0,
+        "error_string": 30,
         "custom_error_candidate": 0,
-        "encoded_candidate": 30
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3435,9 +3435,9 @@
         "empty": 66,
         "panic": 9,
         "returndata_bubble": 3,
-        "error_string": 0,
+        "error_string": 28,
         "custom_error_candidate": 0,
-        "encoded_candidate": 28
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3494,9 +3494,9 @@
         "empty": 63,
         "panic": 9,
         "returndata_bubble": 3,
-        "error_string": 0,
+        "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 27
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3553,9 +3553,9 @@
         "empty": 63,
         "panic": 9,
         "returndata_bubble": 3,
-        "error_string": 0,
+        "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 27
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3611,9 +3611,9 @@
         "empty": 46,
         "panic": 6,
         "returndata_bubble": 7,
-        "error_string": 0,
+        "error_string": 21,
         "custom_error_candidate": 0,
-        "encoded_candidate": 21
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3670,9 +3670,9 @@
         "empty": 63,
         "panic": 9,
         "returndata_bubble": 3,
-        "error_string": 0,
+        "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 27
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3788,9 +3788,9 @@
         "empty": 43,
         "panic": 7,
         "returndata_bubble": 2,
-        "error_string": 0,
+        "error_string": 24,
         "custom_error_candidate": 0,
-        "encoded_candidate": 24
+        "encoded_candidate": 0
       },
       "expected_panic_codes": {
         "0": 0,

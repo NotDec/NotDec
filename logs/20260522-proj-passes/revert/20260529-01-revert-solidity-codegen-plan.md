@@ -381,3 +381,102 @@ Solidity 源码端到端样例。
 - 本次改动仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
   pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
   87.58s 变为 87.06s，`notdec.evm.solidity_rewrite` 从 86.08s 变为 84.76s。
+
+## 第四步实现记录（2026-05-29）
+
+本次把第三步新增的 10 个手写 IR case 全部替换为 Solidity codegen 来源的 IR。
+没有把 Solidity 编译接进 CTest：当前本机没有固定 `solc` 二进制，生成链路还依赖
+`npx solc@0.8.26`、Gigahorse 和 `evm2llvm`，放进常规测试会让 suite 依赖网络和较重
+外部工具。当前保留 `.sol` 源码和转换后的 `.ll` 输入，CTest 仍只跑稳定的 IR。
+
+修改内容：
+
+- 新增 10 个 Solidity 源文件：
+  - `test/evm/solidity-patterns/solidity/revert_error_string_01.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_error_string_02.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_error_string_03.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_error_string_04.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_custom_error_01.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_custom_error_02.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_custom_error_03.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_custom_error_04.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_custom_error_05.sol:1`
+  - `test/evm/solidity-patterns/solidity/revert_custom_error_06.sol:1`
+- 覆盖第三步的 10 个 IR 输入：
+  - `test/evm/solidity-patterns/cases/revert_error_string_01.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_error_string_02.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_error_string_03.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_error_string_04.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_01.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_02.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_03.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_04.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_05.ll:1`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_06.ll:1`
+- `src/Passes/evm/SolidityPatterns.cpp:1041` 扩展 `isSameValue()`，支持识别相同
+  `evm_mload(ptr, offset)`，用于真实 Solidity free-memory-pointer 形状。
+- `src/Passes/evm/SolidityPatterns.cpp:1070` 新增 `getOffsetFromBase()`，支持
+  `base`、`base + 常量`、常量 offset 差值。
+- `src/Passes/evm/SolidityPatterns.cpp:1099` 改进 `getSelectorWord()`，不再只认
+  `shl(224, selector)`，而是解析 Solidity 常见的 `PUSH3/PUSH4 + SHL` selector word。
+- `src/Passes/evm/SolidityPatterns.cpp:1169` 的 `matchSolidityRevert()` 改为按
+  `revert` 起始地址寻找 selector store 和 panic code store。
+- `test/run_evm_solidity_patterns_suite.py:27`、`:170`、`:221` 同步扩展 runner 的
+  文本分类逻辑，让 oracle 能识别真实 Solidity IR 里的 selector word 和
+  free-memory-pointer offset。
+- `test/run_evm_solidity_patterns_suite.py:476` 将 panic rewrite marker 的预期改为
+  已提取到具体 panic code 的数量。少数真实 IR 能确认 panic selector 和 kind，
+  但 code 不是当前轻量文本分类能稳定提取的常量。
+- `test/evm/solidity-patterns/manifest.json:10` 起更新新增 10 个 case 的 oracle。
+  真实 runtime 自带 dispatcher、fallback 和非 payable 保护，所以这些 case 不再是
+  “只有 1 个 revert”的最小手写形状。
+- `test/evm/solidity-patterns/manifest.json` 同步更新旧真实样例的
+  `expected_revert_kinds`。这不是旧命中下降，而是 selector 解析变强后，一部分原
+  `encoded_candidate` 被细分为 `error_string` 或 `custom_error_candidate`。
+
+生成命令：
+
+```bash
+npx --yes solc@0.8.26 --standard-json
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py \
+  <runtime-bytecode.hex> \
+  -o <case>.ll \
+  --gigahorse-dir /sn640/gigahorse-toolchain \
+  --evm2llvm build-evm2llvm/bin/evm2llvm \
+  --timeout-secs 120 \
+  --jobs 1
+```
+
+效果：
+
+- 10 个 Error(string) / custom error case 不再是手写 IR，均来自 Solidity
+  0.8.26 optimized runtime bytecode 经过 Gigahorse 和 `evm2llvm` 转换后的 IR。
+- `SolidityRevertPass` 能识别真实 codegen 里的 selector 写法：
+  `shl(229, 0x461bcd)` 这类压缩 `Error(string)` selector，以及
+  `revert(freeMemoryPointer, size)` 这类 buffer 起点。
+- `encoded_candidate` 的旧真实样例被进一步细分，Error(string) 和 custom error 的
+  marker 不再只靠手写最小 IR 覆盖。
+
+复杂度评价：
+
+- 实现效果：8/10。测试输入来自真实 Solidity codegen，且 pass 支持了真实 selector
+  和 memory base 形状；还没有接动态 Solidity 编译进 CTest。
+- 理解成本：6/10。runner 多了一点轻量表达式跟踪，但和 pass 的 matcher 规则保持一致。
+- 后期维护成本：6/10。保留 `.sol` 源码后 case 来源清楚；如果以后固定本地 solc，
+  可以再把生成链路脚本化。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `python3 -m py_compile test/run_evm_solidity_patterns_suite.py`
+- `cmake --build ./build --target all -j4`
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，耗时 89.21s。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，耗时 85.93s。
+
+性能：
+
+- 本次仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
+  pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
+  87.06s 变为 89.21s，`notdec.evm.solidity_rewrite` 从 84.76s 变为 85.93s。
