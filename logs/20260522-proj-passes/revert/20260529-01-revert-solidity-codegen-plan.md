@@ -540,3 +540,69 @@ python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py \
 - 本次仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
   pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
   89.21s 变为 89.30s，`notdec.evm.solidity_rewrite` 从 85.93s 变为 86.29s。
+
+## 第六步实现记录（2026-05-29）
+
+本次继续做 Error(string) 的常量字符串内容提取。范围仍然保守：只支持同一 basic
+block 内 `mstore(base + 68 + 32*n, word)` 的常量 ABI word，并且只写入不需要转义的
+可打印 ASCII 字符串。遇到非 ASCII、控制字符、双引号或反斜杠时不写 literal
+metadata。
+
+修改内容：
+
+- `src/Passes/evm/SolidityPatterns.cpp:88` 扩展 `SolidityRevertMatch`，新增
+  `ErrorStringLiteral`。
+- `src/Passes/evm/SolidityPatterns.cpp:101` 新增 `RevertStringWord`，记录 ABI string
+  data word 的序号和 32 字节内容。
+- `src/Passes/evm/SolidityPatterns.cpp:1123` 新增 `getAbiWordBytes()`，支持常量 word
+  和 `evm_shl(shift, constant)` 两种 Solidity 常见写法。
+- `src/Passes/evm/SolidityPatterns.cpp:1177` 新增 `buildAsciiStringLiteral()`，按
+  Error(string) length 拼接 ABI word，并做 ASCII / 转义字符过滤。
+- `src/Passes/evm/SolidityPatterns.cpp:1253` 的 `matchSolidityRevert()` 收集 string
+  data word；`:1312` 只在 offset 可确认时收集，避免真实大样例里空 `optional`
+  解引用；`:1325` 在 Error(string) 上生成 literal。
+- `src/Passes/evm/SolidityPatterns.cpp:1441` 写入
+  `notdec.solidity_revert.error_string_literal` metadata。
+- `test/run_evm_solidity_patterns_suite.py:501`、`:576` 增加
+  `expected_error_string_literals` oracle。
+- `test/evm/solidity-patterns/manifest.json:58` 起为 4 个 Solidity-generated
+  Error(string) case 增加 literal oracle：
+  - `short`
+  - `longer revert message for solidity codegen`
+  - `value must be zero`
+  - `calldata too short`
+
+实现时发现并修正了一个问题：旧真实样例里有些 `mstore` 的 offset 不能相对
+`revert` 起点算出常量。最初代码直接解引用 `Offset`，导致
+`0679_19497465_...`、`0651_19497235_...` 等 case 在 notdec 阶段 abort。已改为
+只有 `Offset.has_value()` 时才尝试收集 string data word。
+
+效果：
+
+- 4 个 Solidity-generated Error(string) case 都能恢复常量字符串内容。
+- rewrite marker 仍保持 selector 参数；字符串内容先作为 metadata 和 oracle 暴露。
+- custom error 本次不继续扩参数值恢复。
+
+复杂度评价：
+
+- 实现效果：7/10。覆盖短字符串和跨两个 ABI word 的常量字符串；非 ASCII 和需要转义的
+  字符串暂时保守跳过。
+- 理解成本：6/10。新增了 ABI word 到 bytes 的局部 helper，但仍集中在
+  `SolidityRevertPass` matcher 内。
+- 后期维护成本：6/10。后续如果要支持转义或 bytes literal，可以复用当前 word 收集逻辑。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `python3 -m py_compile test/run_evm_solidity_patterns_suite.py`
+- `cmake --build ./build --target all -j4`
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，耗时 90.06s。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，耗时 86.10s。
+
+性能：
+
+- 本次仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
+  pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
+  89.30s 变为 90.06s，`notdec.evm.solidity_rewrite` 从 86.29s 变为 86.10s。

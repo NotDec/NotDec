@@ -17,6 +17,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <optional>
+#include <string>
 
 using namespace llvm;
 
@@ -94,6 +95,12 @@ struct SolidityRevertMatch {
   std::optional<uint64_t> PanicCode;
   std::optional<uint64_t> CustomErrorArgCount;
   std::optional<uint64_t> ErrorStringLength;
+  std::optional<std::string> ErrorStringLiteral;
+};
+
+struct RevertStringWord {
+  uint64_t Index = 0;
+  SmallVector<uint8_t, 32> Bytes;
 };
 
 // Carries the exact pieces of one canonical nonpayable guard.  The matcher
@@ -1113,6 +1120,35 @@ std::optional<uint64_t> getLengthFromBase(Value *Length, Value *Base) {
   return getOffsetFromBase(Sub->getOperand(0), Base);
 }
 
+std::optional<SmallVector<uint8_t, 32>> getAbiWordBytes(Value *V) {
+  APInt Word(256, 0);
+  if (auto *C = dyn_cast_or_null<ConstantInt>(V)) {
+    Word = C->getValue().zextOrTrunc(256);
+  } else {
+    auto *Shifted = dyn_cast_or_null<CallBase>(V);
+    if (Shifted == nullptr || !isCallTo(Shifted, "evm_shl") ||
+        Shifted->arg_size() != 2) {
+      return std::nullopt;
+    }
+
+    auto *Shift = dyn_cast_or_null<ConstantInt>(Shifted->getArgOperand(0));
+    auto *Payload = dyn_cast_or_null<ConstantInt>(Shifted->getArgOperand(1));
+    if (Shift == nullptr || Payload == nullptr ||
+        Shift->getValue().getActiveBits() > 8) {
+      return std::nullopt;
+    }
+
+    Word = Payload->getValue().zextOrTrunc(256);
+    Word <<= Shift->getZExtValue();
+  }
+
+  SmallVector<uint8_t, 32> Bytes;
+  for (unsigned I = 0; I < 32; ++I) {
+    Bytes.push_back(Word.lshr((31 - I) * 8).trunc(8).getZExtValue());
+  }
+  return Bytes;
+}
+
 std::optional<uint64_t> getSelectorWord(Value *V) {
   auto *Selector = dyn_cast_or_null<CallBase>(V);
   if (Selector == nullptr || !isCallTo(Selector, "evm_shl") ||
@@ -1136,6 +1172,37 @@ std::optional<uint64_t> getSelectorWord(Value *V) {
     return std::nullopt;
   }
   return Word.lshr(224).getZExtValue();
+}
+
+std::optional<std::string>
+buildAsciiStringLiteral(uint64_t Length, SmallVectorImpl<RevertStringWord> &Words) {
+  std::string Result;
+  Result.reserve(Length);
+
+  for (uint64_t Index = 0; Result.size() < Length; ++Index) {
+    const RevertStringWord *Word = nullptr;
+    for (const RevertStringWord &Candidate : Words) {
+      if (Candidate.Index == Index) {
+        Word = &Candidate;
+        break;
+      }
+    }
+    if (Word == nullptr) {
+      return std::nullopt;
+    }
+
+    for (uint8_t Byte : Word->Bytes) {
+      if (Result.size() == Length) {
+        break;
+      }
+      if (Byte < 0x20 || Byte > 0x7e || Byte == '"' || Byte == '\\') {
+        return std::nullopt;
+      }
+      Result.push_back(static_cast<char>(Byte));
+    }
+  }
+
+  return Result;
 }
 
 bool isPanicSelectorValue(Value *V) {
@@ -1193,6 +1260,7 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
   Match.Revert = &Revert;
   std::optional<uint64_t> RevertLength =
       getLengthFromBase(Revert.getArgOperand(2), Revert.getArgOperand(1));
+  SmallVector<RevertStringWord, 2> StringWords;
 
   if (isZero(Revert.getArgOperand(1)) && isZero(Revert.getArgOperand(2))) {
     Match.Kind = "empty";
@@ -1238,6 +1306,14 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
 
     if (Offset == 36) {
       Match.ErrorStringLength = getUInt64Constant(Call->getArgOperand(2));
+      continue;
+    }
+
+    if (Offset.has_value() && *Offset >= 68 && (*Offset - 68) % 32 == 0) {
+      if (std::optional<SmallVector<uint8_t, 32>> Bytes =
+              getAbiWordBytes(Call->getArgOperand(2))) {
+        StringWords.push_back(RevertStringWord{(*Offset - 68) / 32, *Bytes});
+      }
     }
   }
 
@@ -1246,6 +1322,10 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
     Match.Kind = "panic";
   } else if (Match.Selector.has_value() && *Match.Selector == ERROR_SELECTOR) {
     Match.Kind = "error_string";
+    if (Match.ErrorStringLength.has_value()) {
+      Match.ErrorStringLiteral =
+          buildAsciiStringLiteral(*Match.ErrorStringLength, StringWords);
+    }
   } else if (Match.Selector.has_value()) {
     Match.Kind = "custom_error_candidate";
     if (RevertLength.has_value() && *RevertLength >= 4 &&
@@ -1357,6 +1437,11 @@ void addRevertMatchMetadata(LLVMContext &Ctx,
     addPlainMetadata(Ctx, *Match.Revert,
                      "notdec.solidity_revert.error_string_length",
                      Twine(*Match.ErrorStringLength).str());
+  }
+  if (Match.ErrorStringLiteral.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert,
+                     "notdec.solidity_revert.error_string_literal",
+                     *Match.ErrorStringLiteral);
   }
   if (Match.ReturndataCopy != nullptr) {
     addPlainMetadata(Ctx, *Match.ReturndataCopy,

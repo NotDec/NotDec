@@ -54,6 +54,9 @@
       "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "5": 1
+      },
+      "expected_error_string_literals": {
+        "short": 1
       }
     },
     {
@@ -104,6 +107,9 @@
       "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "42": 1
+      },
+      "expected_error_string_literals": {
+        "longer revert message for solidity codegen": 1
       }
     },
     {
@@ -154,6 +160,9 @@
       "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "18": 1
+      },
+      "expected_error_string_literals": {
+        "value must be zero": 1
       }
     },
     {
@@ -204,6 +213,9 @@
       "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "18": 1
+      },
+      "expected_error_string_literals": {
+        "calldata too short": 1
       }
     },
     {

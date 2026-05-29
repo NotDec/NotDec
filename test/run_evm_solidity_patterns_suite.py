@@ -498,6 +498,10 @@ def main() -> int:
                 "expected_error_string_lengths", {}
             ).items():
                 expected_counts[f"error_string_length:{length}"] = expected
+            for literal, expected in case.get(
+                "expected_error_string_literals", {}
+            ).items():
+                expected_counts[f"error_string_literal:{literal}"] = expected
             if expect_rewrite_markers:
                 revert_kinds = case.get("expected_revert_kinds", {})
                 if "panic" in revert_kinds:
@@ -568,6 +572,13 @@ def main() -> int:
             for length in case.get("expected_error_string_lengths", {}):
                 actual_counts[f"error_string_length:{length}"] = (
                     actual_error_string_lengths.get(str(length), 0)
+                )
+            actual_error_string_literals = count_metadata_string_values(
+                output_ll, "notdec.solidity_revert.error_string_literal"
+            )
+            for literal in case.get("expected_error_string_literals", {}):
+                actual_counts[f"error_string_literal:{literal}"] = (
+                    actual_error_string_literals.get(str(literal), 0)
                 )
             if (
                 "rewrite_marker:notdec_solidity_rewrite_revert_panic"
