@@ -240,3 +240,71 @@ encoded revert，又被当成 panic 或 bubble：
 - `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
 - `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
   通过，耗时 88.61s。
+
+## 第二步实现记录（2026-05-29）
+
+本次实现 `SolidityRevertPass` 的第一版结构化 matcher，暂不移除
+`AbiRevertEncodingPass`。
+
+修改内容：
+
+- `src/Passes/evm/SolidityPatterns.cpp:84` 增加 Panic / Error selector 常量。
+- `src/Passes/evm/SolidityPatterns.cpp:90` 增加 `SolidityRevertMatch`，记录
+  `evm_revert`、selector store、panic code store、returndatacopy、selector、
+  panic code 和 kind。
+- `src/Passes/evm/SolidityPatterns.cpp:1044` 增加常量和 selector 提取 helper：
+  `isSameValue()`、`getUInt64Constant()`、`getSelectorWord()`。
+- `src/Passes/evm/SolidityPatterns.cpp:1079` 改进 returndata bubble 匹配，
+  `findReturndataBubbleCopy()` 支持 `revert(pos, returndatasize())`，要求前面有
+  `returndatacopy(pos, 0, returndatasize())`。
+- `src/Passes/evm/SolidityPatterns.cpp:1124` 增加 `matchSolidityRevert()`，按
+  `empty`、`returndata_bubble`、`panic`、`error_string`、
+  `custom_error_candidate`、`encoded_candidate` 归类。
+- `src/Passes/evm/SolidityPatterns.cpp:1187` 增加
+  `notdec_solidity_rewrite_revert_panic(code)` marker。
+- `src/Passes/evm/SolidityPatterns.cpp:1211` 增加
+  `notdec_solidity_rewrite_revert_returndata_bubble(kind)` marker。
+- `src/Passes/evm/SolidityPatterns.cpp:1236` 增加
+  `addRevertMatchMetadata()`，保留 `notdec.solidity.revert` 主 metadata，同时把
+  panic code / selector / returndata copy 写到 `notdec.solidity_revert.*` 辅助
+  metadata，避免影响旧 `notdec.solidity.revert` 计数。
+- `src/Passes/evm/SolidityPatterns.cpp:1627` 让 `SolidityRevertPass::run()` 使用
+  新 matcher，并为 panic / returndata bubble 插入专用 rewrite marker。
+- `test/run_evm_solidity_patterns_suite.py:132` 增加 `count_exact_marker()`。
+- `test/run_evm_solidity_patterns_suite.py:383` 和 `:429` 增加
+  `notdec_solidity_rewrite_revert_panic`、
+  `notdec_solidity_rewrite_revert_returndata_bubble` 的 oracle 检查。
+- `test/evm/solidity-patterns/manifest.json:1469` 将
+  `1775_19507435_1be1a16c5d_eb304133e7c9` 的
+  `notdec.solidity.abi_revert_encoding` 从 106 调整为 105。原因是新的
+  `revert(pos, returndatasize())` bubble 匹配让 `AbiRevertEncodingPass` 少误标
+  1 个 encoded revert。
+
+效果：
+
+- 现有 `notdec.solidity.revert` 总命中不下降。
+- panic code 和 returndata bubble 的原有 oracle 保持一致。
+- 新增 rewrite marker 已纳入 suite 检查，不再只是 metadata-only。
+- `AbiRevertEncodingPass` 本次保留为临时兼容层，后续再决定移除或迁移。
+
+复杂度评价：
+
+- 实现效果：8/10。覆盖了同 block 的 panic、selector 和
+  `revert(pos, returndatasize())` bubble；跨 block 数据流还没有做。
+- 理解成本：6/10。多了一个 `SolidityRevertMatch`，但比在多个 pass 里重复猜形状更清楚。
+- 后期维护成本：6/10。辅助 metadata 和专用 marker 比旧通用 marker 更明确；后续删除
+  `AbiRevertEncodingPass` 时还需要整理 oracle。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `python3 -m py_compile test/run_evm_solidity_patterns_suite.py`
+- `cmake --build ./build --target all -j4`
+- `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)' --output-on-failure`
+  通过，2 个测试全部通过，耗时 173.66s。
+
+性能：
+
+- 本次只改 EVM Solidity metadata/rewrite matcher，没有改类型恢复、结构体合并、
+  pointer analysis 或主 pass pipeline。验证用例同口径耗时：
+  `notdec.evm.solidity_patterns` 87.58s，`notdec.evm.solidity_rewrite` 86.08s。

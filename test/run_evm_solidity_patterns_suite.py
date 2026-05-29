@@ -129,6 +129,11 @@ def count_payability_cfg_rewrites(path: Path) -> int:
     return text.count("call void @notdec_solidity_cfg_rewrite_payability_guard(")
 
 
+def count_exact_marker(path: Path, marker_name: str) -> int:
+    text = path.read_text()
+    return text.count(f"call void @{marker_name}(")
+
+
 def count_hidden_markers(path: Path) -> int:
     text = path.read_text()
     return text.count("call void @notdec_solidity_rewrite_hidden(")
@@ -375,6 +380,16 @@ def main() -> int:
                 expected_counts["returndata_bubbles"] = case[
                     "expected_returndata_bubbles"
                 ]
+            if expect_rewrite_markers:
+                revert_kinds = case.get("expected_revert_kinds", {})
+                if "panic" in revert_kinds:
+                    expected_counts[
+                        "rewrite_marker:notdec_solidity_rewrite_revert_panic"
+                    ] = revert_kinds["panic"]
+                if "expected_returndata_bubbles" in case:
+                    expected_counts[
+                        "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"
+                    ] = case["expected_returndata_bubbles"]
             actual_counts = {
                 "nonpayable_functions": count_nonpayable_functions(output_ll)
             }
@@ -410,6 +425,25 @@ def main() -> int:
             if "returndata_bubbles" in expected_counts:
                 actual_counts["returndata_bubbles"] = actual_revert_kinds.get(
                     "returndata_bubble", 0
+                )
+            if (
+                "rewrite_marker:notdec_solidity_rewrite_revert_panic"
+                in expected_counts
+            ):
+                actual_counts[
+                    "rewrite_marker:notdec_solidity_rewrite_revert_panic"
+                ] = count_exact_marker(
+                    output_ll, "notdec_solidity_rewrite_revert_panic"
+                )
+            if (
+                "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"
+                in expected_counts
+            ):
+                actual_counts[
+                    "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"
+                ] = count_exact_marker(
+                    output_ll,
+                    "notdec_solidity_rewrite_revert_returndata_bubble",
                 )
             compare_ok = write_compare_report(
                 report_path=compare_txt,

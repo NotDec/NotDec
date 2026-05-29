@@ -4,6 +4,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ADT/Twine.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Dominators.h>
@@ -80,6 +81,21 @@ constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINED_BODY =
     "notdec.solidity.selector_outlined_body";
 constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED =
     "notdec.solidity.selector_outline_skipped";
+constexpr uint64_t PANIC_SELECTOR = 0x4e487b71;
+constexpr uint64_t ERROR_SELECTOR = 0x08c379a0;
+
+// One matched revert site.  Keep the pieces here instead of re-walking the
+// block in every consumer: later passes need to know whether a revert exits
+// with an empty buffer, a Solidity panic payload, or forwarded returndata.
+struct SolidityRevertMatch {
+  StringRef Kind = "encoded_candidate";
+  CallBase *Revert = nullptr;
+  CallBase *SelectorStore = nullptr;
+  CallBase *PanicCodeStore = nullptr;
+  CallBase *ReturndataCopy = nullptr;
+  std::optional<uint64_t> Selector;
+  std::optional<uint64_t> PanicCode;
+};
 
 // Carries the exact pieces of one canonical nonpayable guard.  The matcher
 // only proves the shape; the pass later uses this to annotate the old guard and
@@ -1025,46 +1041,67 @@ bool isMloadAt(const CallBase &Call, uint64_t Offset) {
 
 bool isReturndataSize(Value *V) { return isCallTo(V, "evm_returndatasize"); }
 
-bool isPanicSelectorValue(Value *V) {
-  if (V == nullptr) {
-    return false;
+bool isSameValue(Value *LHS, Value *RHS) {
+  if (LHS == RHS) {
+    return true;
   }
-  auto *Selector = dyn_cast<CallBase>(V);
-  return Selector != nullptr && isCallTo(Selector, "evm_shl") &&
-         Selector->arg_size() == 2 &&
-         isConstantIntValue(Selector->getArgOperand(0), 224) &&
-         isConstantIntValue(Selector->getArgOperand(1), 0x4e487b71);
+  auto *LC = dyn_cast_or_null<ConstantInt>(LHS);
+  auto *RC = dyn_cast_or_null<ConstantInt>(RHS);
+  return LC != nullptr && RC != nullptr && LC->getValue() == RC->getValue();
+}
+
+std::optional<uint64_t> getUInt64Constant(Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr || C->getValue().getActiveBits() > 64) {
+    return std::nullopt;
+  }
+  return C->getZExtValue();
+}
+
+std::optional<uint64_t> getSelectorWord(Value *V) {
+  auto *Selector = dyn_cast_or_null<CallBase>(V);
+  if (Selector == nullptr || !isCallTo(Selector, "evm_shl") ||
+      Selector->arg_size() != 2 ||
+      !isConstantIntValue(Selector->getArgOperand(0), 224)) {
+    return std::nullopt;
+  }
+  return getUInt64Constant(Selector->getArgOperand(1));
+}
+
+bool isPanicSelectorValue(Value *V) {
+  return getSelectorWord(V) == PANIC_SELECTOR;
 }
 
 bool isSelectorWord(Value *V) {
-  if (V == nullptr) {
-    return false;
-  }
-  auto *Selector = dyn_cast<CallBase>(V);
-  return Selector != nullptr && isCallTo(Selector, "evm_shl") &&
-         Selector->arg_size() == 2 &&
-         isConstantIntValue(Selector->getArgOperand(0), 224) &&
-         isa<ConstantInt>(Selector->getArgOperand(1));
+  return getSelectorWord(V).has_value();
 }
 
-bool isReturndataBubble(BasicBlock &BB, CallBase &Revert) {
-  if (Revert.arg_size() != 3 || !isZero(Revert.getArgOperand(1)) ||
+CallBase *findReturndataBubbleCopy(BasicBlock &BB, CallBase &Revert) {
+  if (Revert.arg_size() != 3 ||
       !isReturndataSize(Revert.getArgOperand(2))) {
-    return false;
+    return nullptr;
   }
 
   for (Instruction &I : BB) {
+    if (&I == &Revert) {
+      break;
+    }
     auto *Call = dyn_cast<CallBase>(&I);
     if (Call == nullptr || !isCallTo(Call, "evm_returndatacopy") ||
         Call->arg_size() != 5) {
       continue;
     }
-    if (isZero(Call->getArgOperand(2)) && isZero(Call->getArgOperand(3)) &&
+    if (isSameValue(Call->getArgOperand(2), Revert.getArgOperand(1)) &&
+        isZero(Call->getArgOperand(3)) &&
         isReturndataSize(Call->getArgOperand(4))) {
-      return true;
+      return Call;
     }
   }
-  return false;
+  return nullptr;
+}
+
+bool isReturndataBubble(BasicBlock &BB, CallBase &Revert) {
+  return findReturndataBubbleCopy(BB, Revert) != nullptr;
 }
 
 bool hasPanicSelectorStore(BasicBlock &BB, CallBase &Revert) {
@@ -1077,12 +1114,145 @@ bool hasPanicSelectorStore(BasicBlock &BB, CallBase &Revert) {
         Call->arg_size() != 3 || !isZero(Call->getArgOperand(1))) {
       continue;
     }
-    auto *Selector = dyn_cast<CallBase>(Call->getArgOperand(2));
-    if (isPanicSelectorValue(Selector)) {
+    if (isPanicSelectorValue(Call->getArgOperand(2))) {
       return true;
     }
   }
   return false;
+}
+
+std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
+                                                        CallBase &Revert) {
+  if (Revert.arg_size() != 3) {
+    return std::nullopt;
+  }
+
+  SolidityRevertMatch Match;
+  Match.Revert = &Revert;
+
+  if (isZero(Revert.getArgOperand(1)) && isZero(Revert.getArgOperand(2))) {
+    Match.Kind = "empty";
+    return Match;
+  }
+
+  if (CallBase *Copy = findReturndataBubbleCopy(BB, Revert)) {
+    Match.Kind = "returndata_bubble";
+    Match.ReturndataCopy = Copy;
+    return Match;
+  }
+
+  for (Instruction &I : BB) {
+    if (&I == &Revert) {
+      break;
+    }
+
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
+        Call->arg_size() != 3) {
+      continue;
+    }
+
+    if (isZero(Call->getArgOperand(1))) {
+      if (std::optional<uint64_t> Selector =
+              getSelectorWord(Call->getArgOperand(2))) {
+        Match.SelectorStore = Call;
+        Match.Selector = Selector;
+      }
+      continue;
+    }
+
+    if (isConstantIntValue(Call->getArgOperand(1), 4)) {
+      if (std::optional<uint64_t> Code =
+              getUInt64Constant(Call->getArgOperand(2))) {
+        Match.PanicCodeStore = Call;
+        Match.PanicCode = Code;
+      }
+    }
+  }
+
+  if (isConstantIntValue(Revert.getArgOperand(2), 36) &&
+      Match.Selector.has_value() && *Match.Selector == PANIC_SELECTOR) {
+    Match.Kind = "panic";
+  } else if (Match.Selector.has_value() && *Match.Selector == ERROR_SELECTOR) {
+    Match.Kind = "error_string";
+  } else if (Match.Selector.has_value()) {
+    Match.Kind = "custom_error_candidate";
+  } else {
+    Match.Kind = "encoded_candidate";
+  }
+
+  return Match;
+}
+
+void insertPanicRewriteMarker(LLVMContext &Ctx,
+                              const SolidityRevertMatch &Match) {
+  if (Match.PanicCode == std::nullopt || Match.Revert == nullptr) {
+    return;
+  }
+
+  Module *M = Match.Revert->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_revert_panic",
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (Instruction *Next = Match.Revert->getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(Match.Revert->getParent());
+  }
+
+  Value *Args[] = {
+      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.PanicCode)};
+  Builder.CreateCall(Marker, Args);
+}
+
+void insertReturndataBubbleRewriteMarker(LLVMContext &Ctx,
+                                         const SolidityRevertMatch &Match) {
+  if (Match.Revert == nullptr) {
+    return;
+  }
+
+  Module *M = Match.Revert->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_revert_returndata_bubble",
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (Instruction *Next = Match.Revert->getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(Match.Revert->getParent());
+  }
+
+  Value *Args[] = {
+      ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                       getRewriteKindCode("returndata_bubble"))};
+  Builder.CreateCall(Marker, Args);
+}
+
+void addRevertMatchMetadata(LLVMContext &Ctx,
+                            const SolidityRevertMatch &Match) {
+  if (Match.Revert == nullptr) {
+    return;
+  }
+
+  addStringMetadata(Ctx, *Match.Revert, KIND_SOLIDITY_REVERT, Match.Kind);
+  if (Match.PanicCode.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert, "notdec.solidity_revert.panic_code",
+                     Twine(*Match.PanicCode).str());
+  }
+  if (Match.Selector.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert, "notdec.solidity_revert.selector",
+                     Twine::utohexstr(*Match.Selector).str());
+  }
+  if (Match.ReturndataCopy != nullptr) {
+    addPlainMetadata(Ctx, *Match.ReturndataCopy,
+                     "notdec.solidity_revert.returndata_copy",
+                     "returndata_bubble");
+  }
 }
 
 bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth,
@@ -1467,17 +1637,18 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
         continue;
       }
 
-      StringRef Kind = "candidate";
-      if (isZero(Call->getArgOperand(1)) && isZero(Call->getArgOperand(2))) {
-        Kind = "empty";
-      } else if (isReturndataBubble(BB, *Call)) {
-        Kind = "returndata_bubble";
-      } else if (isConstantIntValue(Call->getArgOperand(2), 36) &&
-                 hasPanicSelectorStore(BB, *Call)) {
-        Kind = "panic";
+      std::optional<SolidityRevertMatch> Match =
+          matchSolidityRevert(BB, *Call);
+      if (!Match.has_value()) {
+        continue;
       }
 
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_REVERT, Kind);
+      addRevertMatchMetadata(Ctx, *Match);
+      if (Match->Kind == "panic") {
+        insertPanicRewriteMarker(Ctx, *Match);
+      } else if (Match->Kind == "returndata_bubble") {
+        insertReturndataBubbleRewriteMarker(Ctx, *Match);
+      }
       ++NumReverts;
       Changed = true;
     }

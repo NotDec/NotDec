@@ -1466,7 +1466,7 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 11,
         "notdec.solidity.abi_return": 42,
-        "notdec.solidity.abi_revert_encoding": 106,
+        "notdec.solidity.abi_revert_encoding": 105,
         "notdec.solidity.checked_bounds": 48,
         "notdec.solidity.cleanup": 74,
         "notdec.solidity.entry_kind": 1,
