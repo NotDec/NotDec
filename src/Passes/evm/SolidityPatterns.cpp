@@ -27,8 +27,6 @@ STATISTIC(NumSelectorInlinedBodies,
           "Number of Solidity selector inlined body candidates found");
 STATISTIC(NumAbiDecodes, "Number of Solidity ABI decode candidates found");
 STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
-STATISTIC(NumAbiRevertEncodings,
-          "Number of Solidity ABI revert encoding candidates found");
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
 STATISTIC(NumCheckedBounds,
           "Number of Solidity checked operation/bounds candidates found");
@@ -60,8 +58,6 @@ const char *KIND_SOLIDITY_SELECTOR_INLINED_BODY =
     "notdec.solidity.selector_inlined_body";
 const char *KIND_SOLIDITY_ABI_DECODE = "notdec.solidity.abi_decode";
 const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
-const char *KIND_SOLIDITY_ABI_REVERT_ENCODING =
-    "notdec.solidity.abi_revert_encoding";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
 const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
 const char *KIND_SOLIDITY_CLEANUP = "notdec.solidity.cleanup";
@@ -1072,10 +1068,6 @@ bool isPanicSelectorValue(Value *V) {
   return getSelectorWord(V) == PANIC_SELECTOR;
 }
 
-bool isSelectorWord(Value *V) {
-  return getSelectorWord(V).has_value();
-}
-
 CallBase *findReturndataBubbleCopy(BasicBlock &BB, CallBase &Revert) {
   if (Revert.arg_size() != 3 ||
       !isReturndataSize(Revert.getArgOperand(2))) {
@@ -1098,10 +1090,6 @@ CallBase *findReturndataBubbleCopy(BasicBlock &BB, CallBase &Revert) {
     }
   }
   return nullptr;
-}
-
-bool isReturndataBubble(BasicBlock &BB, CallBase &Revert) {
-  return findReturndataBubbleCopy(BB, Revert) != nullptr;
 }
 
 bool hasPanicSelectorStore(BasicBlock &BB, CallBase &Revert) {
@@ -1230,6 +1218,31 @@ void insertReturndataBubbleRewriteMarker(LLVMContext &Ctx,
   Value *Args[] = {
       ConstantInt::get(Type::getIntNTy(Ctx, 256),
                        getRewriteKindCode("returndata_bubble"))};
+  Builder.CreateCall(Marker, Args);
+}
+
+void insertSelectorRewriteMarker(LLVMContext &Ctx,
+                                 const SolidityRevertMatch &Match,
+                                 StringRef MarkerName) {
+  if (!Match.Selector.has_value() || Match.Revert == nullptr) {
+    return;
+  }
+
+  Module *M = Match.Revert->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      MarkerName,
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (Instruction *Next = Match.Revert->getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(Match.Revert->getParent());
+  }
+
+  Value *Args[] = {
+      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.Selector)};
   Builder.CreateCall(Marker, Args);
 }
 
@@ -1648,51 +1661,14 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
         insertPanicRewriteMarker(Ctx, *Match);
       } else if (Match->Kind == "returndata_bubble") {
         insertReturndataBubbleRewriteMarker(Ctx, *Match);
+      } else if (Match->Kind == "error_string") {
+        insertSelectorRewriteMarker(Ctx, *Match,
+                                    "notdec_solidity_rewrite_revert_error_string");
+      } else if (Match->Kind == "custom_error_candidate") {
+        insertSelectorRewriteMarker(Ctx, *Match,
+                                    "notdec_solidity_rewrite_revert_custom_error");
       }
       ++NumReverts;
-      Changed = true;
-    }
-  }
-
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
-}
-
-PreservedAnalyses AbiRevertEncodingPass::run(Function &F,
-                                             FunctionAnalysisManager &) {
-  LLVMContext &Ctx = F.getContext();
-  bool Changed = false;
-
-  for (BasicBlock &BB : F) {
-    for (Instruction &I : BB) {
-      auto *Call = dyn_cast<CallBase>(&I);
-      if (Call == nullptr) {
-        continue;
-      }
-
-      if (isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-          isSelectorWord(Call->getArgOperand(2))) {
-        StringRef Kind = isPanicSelectorValue(Call->getArgOperand(2))
-                             ? "panic_selector"
-                             : "error_selector_candidate";
-        addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_REVERT_ENCODING, Kind);
-        ++NumAbiRevertEncodings;
-        Changed = true;
-        continue;
-      }
-
-      if (!isCallTo(Call, "evm_revert") || Call->arg_size() != 3) {
-        continue;
-      }
-      if (isZero(Call->getArgOperand(1)) && isZero(Call->getArgOperand(2))) {
-        continue;
-      }
-      if (isReturndataBubble(BB, *Call)) {
-        continue;
-      }
-
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_REVERT_ENCODING,
-                        "encoded_revert_candidate");
-      ++NumAbiRevertEncodings;
       Changed = true;
     }
   }

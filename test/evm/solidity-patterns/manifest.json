@@ -7,6 +7,476 @@
   ],
   "cases": [
     {
+      "name": "revert_error_string_01",
+      "input": "cases/revert_error_string_01.ll",
+      "patterns": [
+        "revert",
+        "error_string"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 1,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_error_string_02",
+      "input": "cases/revert_error_string_02.ll",
+      "patterns": [
+        "revert",
+        "error_string"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 1,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_error_string_03",
+      "input": "cases/revert_error_string_03.ll",
+      "patterns": [
+        "revert",
+        "error_string"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 1,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_error_string_04",
+      "input": "cases/revert_error_string_04.ll",
+      "patterns": [
+        "revert",
+        "error_string"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 1,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_custom_error_01",
+      "input": "cases/revert_custom_error_01.ll",
+      "patterns": [
+        "revert",
+        "custom_error"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 1,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_custom_error_02",
+      "input": "cases/revert_custom_error_02.ll",
+      "patterns": [
+        "revert",
+        "custom_error"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 1,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_custom_error_03",
+      "input": "cases/revert_custom_error_03.ll",
+      "patterns": [
+        "revert",
+        "custom_error"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 1,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_custom_error_04",
+      "input": "cases/revert_custom_error_04.ll",
+      "patterns": [
+        "revert",
+        "custom_error"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 1,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_custom_error_05",
+      "input": "cases/revert_custom_error_05.ll",
+      "patterns": [
+        "revert",
+        "custom_error"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 1,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
+      "name": "revert_custom_error_06",
+      "input": "cases/revert_custom_error_06.ll",
+      "patterns": [
+        "revert",
+        "custom_error"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_decode": 0,
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.cleanup": 0,
+        "notdec.solidity.entry_kind": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.memory_object": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1,
+        "notdec.solidity.selector_inlined_body": 0,
+        "notdec.solidity.selector_prologue": 0,
+        "notdec.solidity.storage_addressing": 0,
+        "notdec.solidity.storage_bytes_string": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 1,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
+    },
+    {
       "name": "0014_proxy_like",
       "input": "cases/0014_proxy_like.ll",
       "patterns": [
@@ -26,7 +496,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
@@ -69,7 +538,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "external_call",
         "memory_buffer",
@@ -84,7 +552,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.abi_revert_encoding": 4,
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
@@ -127,7 +594,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "external_call",
         "memory_buffer",
         "packed_storage_field",
@@ -139,7 +605,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 1,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.cleanup": 1,
         "notdec.solidity.entry_kind": 1,
@@ -182,7 +647,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -199,7 +663,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 10,
-        "notdec.solidity.abi_revert_encoding": 1,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.cleanup": 3,
         "notdec.solidity.entry_kind": 1,
@@ -242,7 +705,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -260,7 +722,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 6,
         "notdec.solidity.abi_return": 28,
-        "notdec.solidity.abi_revert_encoding": 42,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.cleanup": 20,
         "notdec.solidity.entry_kind": 1,
@@ -320,7 +781,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.cleanup": 9,
         "notdec.solidity.entry_kind": 1,
@@ -363,7 +823,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -379,7 +838,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 20,
-        "notdec.solidity.abi_revert_encoding": 16,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.cleanup": 22,
         "notdec.solidity.entry_kind": 1,
@@ -422,7 +880,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -440,7 +897,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.abi_revert_encoding": 28,
         "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.cleanup": 42,
         "notdec.solidity.entry_kind": 1,
@@ -483,7 +939,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -501,7 +956,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.abi_revert_encoding": 28,
         "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.cleanup": 42,
         "notdec.solidity.entry_kind": 1,
@@ -544,7 +998,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -560,7 +1013,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.abi_revert_encoding": 24,
         "notdec.solidity.checked_bounds": 12,
         "notdec.solidity.cleanup": 11,
         "notdec.solidity.entry_kind": 1,
@@ -603,7 +1055,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -621,7 +1072,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 30,
-        "notdec.solidity.abi_revert_encoding": 44,
         "notdec.solidity.checked_bounds": 29,
         "notdec.solidity.cleanup": 68,
         "notdec.solidity.entry_kind": 1,
@@ -681,7 +1131,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.cleanup": 9,
         "notdec.solidity.entry_kind": 1,
@@ -724,7 +1173,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "external_call",
         "memory_buffer",
@@ -741,7 +1189,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 1,
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.cleanup": 4,
         "notdec.solidity.entry_kind": 1,
@@ -784,7 +1231,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -802,7 +1248,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 30,
-        "notdec.solidity.abi_revert_encoding": 44,
         "notdec.solidity.checked_bounds": 29,
         "notdec.solidity.cleanup": 68,
         "notdec.solidity.entry_kind": 1,
@@ -845,7 +1290,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -863,7 +1307,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 72,
-        "notdec.solidity.abi_revert_encoding": 149,
         "notdec.solidity.checked_bounds": 120,
         "notdec.solidity.cleanup": 74,
         "notdec.solidity.entry_kind": 1,
@@ -906,7 +1349,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -924,7 +1366,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.abi_revert_encoding": 171,
         "notdec.solidity.checked_bounds": 124,
         "notdec.solidity.cleanup": 31,
         "notdec.solidity.entry_kind": 1,
@@ -967,7 +1408,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -984,7 +1424,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 7,
         "notdec.solidity.abi_return": 66,
-        "notdec.solidity.abi_revert_encoding": 189,
         "notdec.solidity.checked_bounds": 120,
         "notdec.solidity.cleanup": 99,
         "notdec.solidity.entry_kind": 1,
@@ -1027,7 +1466,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1043,7 +1481,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 68,
-        "notdec.solidity.abi_revert_encoding": 81,
         "notdec.solidity.checked_bounds": 38,
         "notdec.solidity.cleanup": 34,
         "notdec.solidity.entry_kind": 1,
@@ -1086,7 +1523,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1102,7 +1538,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 17,
         "notdec.solidity.abi_return": 79,
-        "notdec.solidity.abi_revert_encoding": 166,
         "notdec.solidity.checked_bounds": 31,
         "notdec.solidity.cleanup": 22,
         "notdec.solidity.entry_kind": 1,
@@ -1145,7 +1580,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1163,7 +1597,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 11,
         "notdec.solidity.abi_return": 68,
-        "notdec.solidity.abi_revert_encoding": 141,
         "notdec.solidity.checked_bounds": 112,
         "notdec.solidity.cleanup": 31,
         "notdec.solidity.entry_kind": 1,
@@ -1206,7 +1639,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1224,7 +1656,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 56,
-        "notdec.solidity.abi_revert_encoding": 63,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.cleanup": 32,
         "notdec.solidity.entry_kind": 1,
@@ -1267,7 +1698,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1283,7 +1713,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 44,
-        "notdec.solidity.abi_revert_encoding": 185,
         "notdec.solidity.checked_bounds": 113,
         "notdec.solidity.cleanup": 43,
         "notdec.solidity.entry_kind": 1,
@@ -1326,7 +1755,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1344,7 +1772,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 52,
-        "notdec.solidity.abi_revert_encoding": 62,
         "notdec.solidity.checked_bounds": 31,
         "notdec.solidity.cleanup": 30,
         "notdec.solidity.entry_kind": 1,
@@ -1387,7 +1814,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1405,7 +1831,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 104,
-        "notdec.solidity.abi_revert_encoding": 75,
         "notdec.solidity.checked_bounds": 28,
         "notdec.solidity.cleanup": 56,
         "notdec.solidity.entry_kind": 1,
@@ -1448,7 +1873,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1466,7 +1890,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 11,
         "notdec.solidity.abi_return": 42,
-        "notdec.solidity.abi_revert_encoding": 105,
         "notdec.solidity.checked_bounds": 48,
         "notdec.solidity.cleanup": 74,
         "notdec.solidity.entry_kind": 1,
@@ -1509,7 +1932,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1525,7 +1947,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 19,
         "notdec.solidity.abi_return": 77,
-        "notdec.solidity.abi_revert_encoding": 166,
         "notdec.solidity.checked_bounds": 34,
         "notdec.solidity.cleanup": 22,
         "notdec.solidity.entry_kind": 1,
@@ -1568,7 +1989,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1586,7 +2006,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 59,
         "notdec.solidity.abi_return": 62,
-        "notdec.solidity.abi_revert_encoding": 40,
         "notdec.solidity.checked_bounds": 39,
         "notdec.solidity.cleanup": 26,
         "notdec.solidity.entry_kind": 1,
@@ -1629,7 +2048,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1647,7 +2065,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 102,
-        "notdec.solidity.abi_revert_encoding": 74,
         "notdec.solidity.checked_bounds": 28,
         "notdec.solidity.cleanup": 56,
         "notdec.solidity.entry_kind": 1,
@@ -1690,7 +2107,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1708,7 +2124,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 3,
         "notdec.solidity.abi_return": 50,
-        "notdec.solidity.abi_revert_encoding": 84,
         "notdec.solidity.checked_bounds": 46,
         "notdec.solidity.cleanup": 27,
         "notdec.solidity.entry_kind": 1,
@@ -1751,7 +2166,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1769,7 +2183,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 17,
         "notdec.solidity.abi_return": 64,
-        "notdec.solidity.abi_revert_encoding": 54,
         "notdec.solidity.checked_bounds": 64,
         "notdec.solidity.cleanup": 49,
         "notdec.solidity.entry_kind": 1,
@@ -1812,7 +2225,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1828,7 +2240,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 56,
-        "notdec.solidity.abi_revert_encoding": 77,
         "notdec.solidity.checked_bounds": 42,
         "notdec.solidity.cleanup": 50,
         "notdec.solidity.entry_kind": 1,
@@ -1871,7 +2282,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1889,7 +2299,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 82,
-        "notdec.solidity.abi_revert_encoding": 71,
         "notdec.solidity.checked_bounds": 24,
         "notdec.solidity.cleanup": 58,
         "notdec.solidity.entry_kind": 1,
@@ -1932,7 +2341,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -1950,7 +2358,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.abi_revert_encoding": 75,
         "notdec.solidity.checked_bounds": 38,
         "notdec.solidity.cleanup": 36,
         "notdec.solidity.entry_kind": 1,
@@ -1993,7 +2400,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2011,7 +2417,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 6,
         "notdec.solidity.abi_return": 38,
-        "notdec.solidity.abi_revert_encoding": 64,
         "notdec.solidity.checked_bounds": 26,
         "notdec.solidity.cleanup": 48,
         "notdec.solidity.entry_kind": 1,
@@ -2054,7 +2459,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2072,7 +2476,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 92,
-        "notdec.solidity.abi_revert_encoding": 66,
         "notdec.solidity.checked_bounds": 27,
         "notdec.solidity.cleanup": 52,
         "notdec.solidity.entry_kind": 1,
@@ -2115,7 +2518,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2133,7 +2535,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 92,
-        "notdec.solidity.abi_revert_encoding": 66,
         "notdec.solidity.checked_bounds": 27,
         "notdec.solidity.cleanup": 52,
         "notdec.solidity.entry_kind": 1,
@@ -2176,7 +2577,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2194,7 +2594,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 92,
-        "notdec.solidity.abi_revert_encoding": 66,
         "notdec.solidity.checked_bounds": 27,
         "notdec.solidity.cleanup": 52,
         "notdec.solidity.entry_kind": 1,
@@ -2237,7 +2636,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2255,7 +2653,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 86,
-        "notdec.solidity.abi_revert_encoding": 61,
         "notdec.solidity.checked_bounds": 21,
         "notdec.solidity.cleanup": 44,
         "notdec.solidity.entry_kind": 1,
@@ -2298,7 +2695,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2316,7 +2712,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 36,
-        "notdec.solidity.abi_revert_encoding": 22,
         "notdec.solidity.checked_bounds": 11,
         "notdec.solidity.cleanup": 56,
         "notdec.solidity.entry_kind": 1,
@@ -2376,7 +2771,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.cleanup": 11,
         "notdec.solidity.entry_kind": 1,
@@ -2419,7 +2813,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "memory_buffer",
@@ -2436,7 +2829,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.abi_revert_encoding": 9,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.cleanup": 19,
         "notdec.solidity.entry_kind": 1,
@@ -2479,7 +2871,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2496,7 +2887,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 22,
         "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.cleanup": 8,
         "notdec.solidity.entry_kind": 1,
@@ -2539,7 +2929,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2557,7 +2946,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 46,
-        "notdec.solidity.abi_revert_encoding": 44,
         "notdec.solidity.checked_bounds": 31,
         "notdec.solidity.cleanup": 76,
         "notdec.solidity.entry_kind": 1,
@@ -2617,7 +3005,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.cleanup": 9,
         "notdec.solidity.entry_kind": 1,
@@ -2660,7 +3047,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2678,7 +3064,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.abi_revert_encoding": 38,
         "notdec.solidity.checked_bounds": 20,
         "notdec.solidity.cleanup": 48,
         "notdec.solidity.entry_kind": 1,
@@ -2738,7 +3123,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.cleanup": 9,
         "notdec.solidity.entry_kind": 1,
@@ -2781,7 +3165,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2798,7 +3181,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 3,
         "notdec.solidity.abi_return": 44,
-        "notdec.solidity.abi_revert_encoding": 48,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.cleanup": 44,
         "notdec.solidity.entry_kind": 1,
@@ -2841,7 +3223,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2859,7 +3240,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.abi_revert_encoding": 42,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.cleanup": 21,
         "notdec.solidity.entry_kind": 1,
@@ -2902,7 +3282,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -2920,7 +3299,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 62,
-        "notdec.solidity.abi_revert_encoding": 47,
         "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.cleanup": 25,
         "notdec.solidity.entry_kind": 1,
@@ -2980,7 +3358,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 29,
         "notdec.solidity.abi_return": 36,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.cleanup": 63,
         "notdec.solidity.entry_kind": 1,
@@ -3023,7 +3400,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -3041,7 +3417,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 36,
-        "notdec.solidity.abi_revert_encoding": 49,
         "notdec.solidity.checked_bounds": 34,
         "notdec.solidity.cleanup": 22,
         "notdec.solidity.entry_kind": 1,
@@ -3084,7 +3459,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -3102,7 +3476,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.abi_revert_encoding": 49,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.cleanup": 16,
         "notdec.solidity.entry_kind": 1,
@@ -3145,7 +3518,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -3163,7 +3535,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.abi_revert_encoding": 47,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.cleanup": 16,
         "notdec.solidity.entry_kind": 1,
@@ -3206,7 +3577,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -3223,7 +3593,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 11,
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.abi_revert_encoding": 39,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.cleanup": 30,
         "notdec.solidity.entry_kind": 1,
@@ -3266,7 +3635,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -3284,7 +3652,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.abi_revert_encoding": 47,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.cleanup": 16,
         "notdec.solidity.entry_kind": 1,
@@ -3327,7 +3694,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -3345,7 +3711,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.abi_revert_encoding": 23,
         "notdec.solidity.checked_bounds": 21,
         "notdec.solidity.cleanup": 41,
         "notdec.solidity.entry_kind": 1,
@@ -3388,7 +3753,6 @@
       "patterns": [
         "abi_decode",
         "abi_return",
-        "abi_revert_encoding",
         "checked_bounds",
         "event_log",
         "external_call",
@@ -3406,7 +3770,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.abi_revert_encoding": 38,
         "notdec.solidity.checked_bounds": 21,
         "notdec.solidity.cleanup": 22,
         "notdec.solidity.entry_kind": 1,
@@ -3465,7 +3828,6 @@
       "expected_metadata_counts": {
         "notdec.solidity.abi_decode": 20,
         "notdec.solidity.abi_return": 8,
-        "notdec.solidity.abi_revert_encoding": 0,
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.cleanup": 39,
         "notdec.solidity.entry_kind": 1,

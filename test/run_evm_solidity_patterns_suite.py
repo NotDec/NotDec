@@ -390,6 +390,14 @@ def main() -> int:
                     expected_counts[
                         "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"
                     ] = case["expected_returndata_bubbles"]
+                if "error_string" in revert_kinds:
+                    expected_counts[
+                        "rewrite_marker:notdec_solidity_rewrite_revert_error_string"
+                    ] = revert_kinds["error_string"]
+                if "custom_error_candidate" in revert_kinds:
+                    expected_counts[
+                        "rewrite_marker:notdec_solidity_rewrite_revert_custom_error"
+                    ] = revert_kinds["custom_error_candidate"]
             actual_counts = {
                 "nonpayable_functions": count_nonpayable_functions(output_ll)
             }
@@ -444,6 +452,24 @@ def main() -> int:
                 ] = count_exact_marker(
                     output_ll,
                     "notdec_solidity_rewrite_revert_returndata_bubble",
+                )
+            if (
+                "rewrite_marker:notdec_solidity_rewrite_revert_error_string"
+                in expected_counts
+            ):
+                actual_counts[
+                    "rewrite_marker:notdec_solidity_rewrite_revert_error_string"
+                ] = count_exact_marker(
+                    output_ll, "notdec_solidity_rewrite_revert_error_string"
+                )
+            if (
+                "rewrite_marker:notdec_solidity_rewrite_revert_custom_error"
+                in expected_counts
+            ):
+                actual_counts[
+                    "rewrite_marker:notdec_solidity_rewrite_revert_custom_error"
+                ] = count_exact_marker(
+                    output_ll, "notdec_solidity_rewrite_revert_custom_error"
                 )
             compare_ok = write_compare_report(
                 report_path=compare_txt,

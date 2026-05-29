@@ -12,7 +12,6 @@ extern const char *KIND_SOLIDITY_SELECTOR_PROLOGUE;
 extern const char *KIND_SOLIDITY_SELECTOR_INLINED_BODY;
 extern const char *KIND_SOLIDITY_ABI_DECODE;
 extern const char *KIND_SOLIDITY_ABI_RETURN;
-extern const char *KIND_SOLIDITY_ABI_REVERT_ENCODING;
 extern const char *KIND_SOLIDITY_REVERT;
 extern const char *KIND_SOLIDITY_CHECKED_BOUNDS;
 extern const char *KIND_SOLIDITY_CLEANUP;
@@ -86,17 +85,6 @@ struct AbiReturnPass : llvm::PassInfoMixin<AbiReturnPass> {
 
 // Marks empty reverts, Panic(uint256) reverts, and returndata bubbling.
 struct SolidityRevertPass : llvm::PassInfoMixin<SolidityRevertPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
-// Marks ABI-encoded revert buffers such as Panic/Error/custom-error payloads.
-// The pass keeps this as metadata only because buffer grouping is still shared
-// with the memory object work.
-struct AbiRevertEncodingPass
-    : llvm::PassInfoMixin<AbiRevertEncodingPass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 

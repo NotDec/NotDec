@@ -308,3 +308,76 @@ encoded revert，又被当成 panic 或 bubble：
 - 本次只改 EVM Solidity metadata/rewrite matcher，没有改类型恢复、结构体合并、
   pointer analysis 或主 pass pipeline。验证用例同口径耗时：
   `notdec.evm.solidity_patterns` 87.58s，`notdec.evm.solidity_rewrite` 86.08s。
+
+## 第三步实现记录（2026-05-29）
+
+本次按后续决定移除 `AbiRevertEncodingPass`，并补 Error(string) / custom error
+最小 IR 覆盖。新增 case 只覆盖 selector + revert 外壳，不解析 ABI 参数，也不是
+Solidity 源码端到端样例。
+
+修改内容：
+
+- `src/Passes/PassManager.cpp:293` 从 EVM pipeline 移除
+  `AbiRevertEncodingPass`。
+- `include/notdec/Passes/evm/SolidityPatterns.h:13` 删除
+  `KIND_SOLIDITY_ABI_REVERT_ENCODING` 声明，`:92` 附近删除
+  `AbiRevertEncodingPass` 声明。
+- `src/Passes/evm/SolidityPatterns.cpp:27` 删除
+  `NumAbiRevertEncodings` 统计，`:58` 删除
+  `KIND_SOLIDITY_ABI_REVERT_ENCODING` 定义，`:1653` 附近删除
+  `AbiRevertEncodingPass::run()` 实现。
+- `src/Passes/evm/SolidityPatterns.cpp:1224` 增加
+  `insertSelectorRewriteMarker()`，用于 selector 型 revert marker。
+- `src/Passes/evm/SolidityPatterns.cpp:1640` 的
+  `SolidityRevertPass::run()` 在 `error_string` 时插入
+  `notdec_solidity_rewrite_revert_error_string(selector)`，在
+  `custom_error_candidate` 时插入
+  `notdec_solidity_rewrite_revert_custom_error(selector)`。
+- `test/run_evm_solidity_patterns_suite.py:393` 和 `:456` 增加 Error(string) /
+  custom error 专用 rewrite marker 计数检查。
+- `test/evm/solidity-patterns/manifest.json:10` 开始新增 10 个最小 case oracle：
+  4 个 `error_string`，6 个 `custom_error_candidate`。同时移除所有
+  `notdec.solidity.abi_revert_encoding` oracle 和 `abi_revert_encoding` pattern。
+- 新增 10 个 case：
+  - `test/evm/solidity-patterns/cases/revert_error_string_01.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_error_string_02.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_error_string_03.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_error_string_04.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_01.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_02.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_03.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_04.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_05.ll:10`
+  - `test/evm/solidity-patterns/cases/revert_custom_error_06.ll:10`
+
+效果：
+
+- `AbiRevertEncodingPass` 已不在 pipeline 中，声明和实现也已删除。
+- Error(string) 和 custom error 现在有专用 rewrite marker。
+- 当前只确认 selector 和 revert buffer 外壳；错误名、参数类型、string 内容还没有恢复。
+- 旧 `notdec.solidity.abi_revert_encoding` marker-only oracle 已从 pattern suite 移除。
+
+复杂度评价：
+
+- 实现效果：7/10。删掉了重复 pass，并把 Error/custom selector 变成可测 marker。
+  但还不是 ABI 参数恢复。
+- 理解成本：5/10。少了一个 pass，整体更简单；新增 marker 逻辑复用
+  `SolidityRevertMatch`。
+- 后期维护成本：5/10。后续只需要沿着 `SolidityRevertPass` 扩展，不再维护两套 revert
+  判断。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `python3 -m py_compile test/run_evm_solidity_patterns_suite.py`
+- `cmake --build ./build --target all -j4`
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，耗时 87.06s。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，耗时 84.76s。
+
+性能：
+
+- 本次改动仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
+  pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
+  87.58s 变为 87.06s，`notdec.evm.solidity_rewrite` 从 86.08s 变为 84.76s。
