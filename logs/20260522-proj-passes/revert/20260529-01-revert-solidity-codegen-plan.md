@@ -480,3 +480,63 @@ python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py \
 - 本次仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
   pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
   87.06s 变为 89.21s，`notdec.evm.solidity_rewrite` 从 84.76s 变为 85.93s。
+
+## 第五步实现记录（2026-05-29）
+
+本次继续推进 Error(string) / custom error payload 的第一层支持。范围保持保守：
+只记录能从同一 basic block 和 revert 长度里直接确认的信息，不恢复错误名、
+参数类型，也不解析字符串内容。
+
+修改内容：
+
+- `src/Passes/evm/SolidityPatterns.cpp:87` 扩展 `SolidityRevertMatch`，新增
+  `CustomErrorArgCount` 和 `ErrorStringLength`。
+- `src/Passes/evm/SolidityPatterns.cpp:1101` 新增 `getLengthFromBase()`，支持
+  常量长度，以及 Solidity 常见的 `end - freeMemoryPointer`。
+- `src/Passes/evm/SolidityPatterns.cpp:1184` 的 `matchSolidityRevert()` 在 selector 型
+  revert 上记录 revert 总长度。
+- `src/Passes/evm/SolidityPatterns.cpp:1228` 附近记录 `base + 36` 位置的常量
+  string length，用于 Error(string)。
+- `src/Passes/evm/SolidityPatterns.cpp:1248` 附近对 custom error 用
+  `(revert_length - 4) / 32` 计算静态 ABI word 个数。
+- `src/Passes/evm/SolidityPatterns.cpp:1346` 附近把结果写入
+  `notdec.solidity_revert.custom_error_arg_count` 和
+  `notdec.solidity_revert.error_string_length` metadata。
+- `test/run_evm_solidity_patterns_suite.py:121` 增加 metadata 字符串值计数 helper。
+- `test/run_evm_solidity_patterns_suite.py:493`、`:558` 增加
+  `expected_custom_error_arg_counts` 和 `expected_error_string_lengths` oracle。
+- `test/evm/solidity-patterns/manifest.json:55` 起为 10 个 Solidity-generated case
+  增加 payload oracle：
+  - Error(string) 长度：`5`、`42`、`18`、`18`
+  - custom error 参数个数：`0`、`1`、`2`、`2`、`1`、`1`
+
+效果：
+
+- Error(string) 已能记录 ABI string length。
+- custom error 已能记录静态 ABI word 个数。
+- 这些信息先作为 metadata 和测试 oracle 暴露，rewrite marker 暂时保持 selector 参数，
+  避免过早改对外 marker 形状。
+
+复杂度评价：
+
+- 实现效果：7/10。覆盖当前 Solidity-generated case 的 payload 外壳，但还没有
+  字符串内容、错误名和参数类型。
+- 理解成本：5/10。只增加两个字段和一个长度 helper，仍沿用 `SolidityRevertMatch`。
+- 后期维护成本：5/10。后续可以直接在同一 matcher 上继续扩字符串内容或参数类型，
+  不需要再加新 pass。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `python3 -m py_compile test/run_evm_solidity_patterns_suite.py`
+- `cmake --build ./build --target all -j4`
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，耗时 89.30s。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，耗时 86.29s。
+
+性能：
+
+- 本次仍只影响 EVM Solidity matcher 和测试，不涉及类型恢复、结构体合并、
+  pointer analysis 或主类型恢复 pipeline。`notdec.evm.solidity_patterns` 同口径从
+  89.21s 变为 89.30s，`notdec.evm.solidity_rewrite` 从 85.93s 变为 86.29s。

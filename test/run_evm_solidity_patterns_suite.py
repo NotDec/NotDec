@@ -118,6 +118,25 @@ def count_metadata_uses(path: Path, metadata_name: str) -> int:
     return text.count(f"!{metadata_name}")
 
 
+def count_metadata_string_values(path: Path, metadata_name: str) -> dict[str, int]:
+    text = path.read_text()
+    node_ids = re.findall(rf"!{re.escape(metadata_name)} !(\d+)", text)
+    if not node_ids:
+        return {}
+
+    values_by_node = {
+        node_id: value
+        for node_id, value in re.findall(r'^!(\d+) = !\{!"([^"]*)"\}', text, re.MULTILINE)
+    }
+    counts: dict[str, int] = {}
+    for node_id in node_ids:
+        value = values_by_node.get(node_id)
+        if value is None:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
 def rewrite_marker_name(metadata_name: str) -> str:
     prefix = "notdec.solidity."
     if metadata_name.startswith(prefix):
@@ -471,6 +490,14 @@ def main() -> int:
                 expected_counts["returndata_bubbles"] = case[
                     "expected_returndata_bubbles"
                 ]
+            for count, expected in case.get(
+                "expected_custom_error_arg_counts", {}
+            ).items():
+                expected_counts[f"custom_error_arg_count:{count}"] = expected
+            for length, expected in case.get(
+                "expected_error_string_lengths", {}
+            ).items():
+                expected_counts[f"error_string_length:{length}"] = expected
             if expect_rewrite_markers:
                 revert_kinds = case.get("expected_revert_kinds", {})
                 if "panic" in revert_kinds:
@@ -527,6 +554,20 @@ def main() -> int:
             if "returndata_bubbles" in expected_counts:
                 actual_counts["returndata_bubbles"] = actual_revert_kinds.get(
                     "returndata_bubble", 0
+                )
+            actual_custom_error_arg_counts = count_metadata_string_values(
+                output_ll, "notdec.solidity_revert.custom_error_arg_count"
+            )
+            for count in case.get("expected_custom_error_arg_counts", {}):
+                actual_counts[f"custom_error_arg_count:{count}"] = (
+                    actual_custom_error_arg_counts.get(str(count), 0)
+                )
+            actual_error_string_lengths = count_metadata_string_values(
+                output_ll, "notdec.solidity_revert.error_string_length"
+            )
+            for length in case.get("expected_error_string_lengths", {}):
+                actual_counts[f"error_string_length:{length}"] = (
+                    actual_error_string_lengths.get(str(length), 0)
                 )
             if (
                 "rewrite_marker:notdec_solidity_rewrite_revert_panic"

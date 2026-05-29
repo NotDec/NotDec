@@ -51,7 +51,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_error_string_lengths": {
+        "5": 1
+      }
     },
     {
       "name": "revert_error_string_02",
@@ -98,7 +101,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_error_string_lengths": {
+        "42": 1
+      }
     },
     {
       "name": "revert_error_string_03",
@@ -145,7 +151,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_error_string_lengths": {
+        "18": 1
+      }
     },
     {
       "name": "revert_error_string_04",
@@ -192,7 +201,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_error_string_lengths": {
+        "18": 1
+      }
     },
     {
       "name": "revert_custom_error_01",
@@ -239,7 +251,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_custom_error_arg_counts": {
+        "0": 1
+      }
     },
     {
       "name": "revert_custom_error_02",
@@ -286,7 +301,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_custom_error_arg_counts": {
+        "1": 1
+      }
     },
     {
       "name": "revert_custom_error_03",
@@ -333,7 +351,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_custom_error_arg_counts": {
+        "2": 1
+      }
     },
     {
       "name": "revert_custom_error_04",
@@ -380,7 +401,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_custom_error_arg_counts": {
+        "2": 1
+      }
     },
     {
       "name": "revert_custom_error_05",
@@ -427,7 +451,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_custom_error_arg_counts": {
+        "1": 1
+      }
     },
     {
       "name": "revert_custom_error_06",
@@ -474,7 +501,10 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_custom_error_arg_counts": {
+        "1": 1
+      }
     },
     {
       "name": "0014_proxy_like",

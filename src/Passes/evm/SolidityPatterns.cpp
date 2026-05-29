@@ -82,8 +82,8 @@ constexpr uint64_t PANIC_SELECTOR = 0x4e487b71;
 constexpr uint64_t ERROR_SELECTOR = 0x08c379a0;
 
 // One matched revert site.  Keep the pieces here instead of re-walking the
-// block in every consumer: later passes need to know whether a revert exits
-// with an empty buffer, a Solidity panic payload, or forwarded returndata.
+// block in every consumer: later passes need the exit kind, selector, and a
+// small amount of ABI payload shape without rebuilding the memory writes.
 struct SolidityRevertMatch {
   StringRef Kind = "encoded_candidate";
   CallBase *Revert = nullptr;
@@ -92,6 +92,8 @@ struct SolidityRevertMatch {
   CallBase *ReturndataCopy = nullptr;
   std::optional<uint64_t> Selector;
   std::optional<uint64_t> PanicCode;
+  std::optional<uint64_t> CustomErrorArgCount;
+  std::optional<uint64_t> ErrorStringLength;
 };
 
 // Carries the exact pieces of one canonical nonpayable guard.  The matcher
@@ -1096,6 +1098,21 @@ std::optional<uint64_t> getOffsetFromBase(Value *Offset, Value *Base) {
   return std::nullopt;
 }
 
+std::optional<uint64_t> getLengthFromBase(Value *Length, Value *Base) {
+  // Solidity often computes revert size as `end - freeMemoryPointer`; keep this
+  // local and conservative so the revert matcher does not become data-flow.
+  if (std::optional<uint64_t> Constant = getUInt64Constant(Length)) {
+    return Constant;
+  }
+
+  auto *Sub = dyn_cast_or_null<BinaryOperator>(Length);
+  if (Sub == nullptr || Sub->getOpcode() != Instruction::Sub ||
+      !isSameValue(Sub->getOperand(1), Base)) {
+    return std::nullopt;
+  }
+  return getOffsetFromBase(Sub->getOperand(0), Base);
+}
+
 std::optional<uint64_t> getSelectorWord(Value *V) {
   auto *Selector = dyn_cast_or_null<CallBase>(V);
   if (Selector == nullptr || !isCallTo(Selector, "evm_shl") ||
@@ -1174,6 +1191,8 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
 
   SolidityRevertMatch Match;
   Match.Revert = &Revert;
+  std::optional<uint64_t> RevertLength =
+      getLengthFromBase(Revert.getArgOperand(2), Revert.getArgOperand(1));
 
   if (isZero(Revert.getArgOperand(1)) && isZero(Revert.getArgOperand(2))) {
     Match.Kind = "empty";
@@ -1214,6 +1233,11 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
         Match.PanicCodeStore = Call;
         Match.PanicCode = Code;
       }
+      continue;
+    }
+
+    if (Offset == 36) {
+      Match.ErrorStringLength = getUInt64Constant(Call->getArgOperand(2));
     }
   }
 
@@ -1224,6 +1248,10 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
     Match.Kind = "error_string";
   } else if (Match.Selector.has_value()) {
     Match.Kind = "custom_error_candidate";
+    if (RevertLength.has_value() && *RevertLength >= 4 &&
+        (*RevertLength - 4) % 32 == 0) {
+      Match.CustomErrorArgCount = (*RevertLength - 4) / 32;
+    }
   } else {
     Match.Kind = "encoded_candidate";
   }
@@ -1319,6 +1347,16 @@ void addRevertMatchMetadata(LLVMContext &Ctx,
   if (Match.Selector.has_value()) {
     addPlainMetadata(Ctx, *Match.Revert, "notdec.solidity_revert.selector",
                      Twine::utohexstr(*Match.Selector).str());
+  }
+  if (Match.CustomErrorArgCount.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert,
+                     "notdec.solidity_revert.custom_error_arg_count",
+                     Twine(*Match.CustomErrorArgCount).str());
+  }
+  if (Match.ErrorStringLength.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert,
+                     "notdec.solidity_revert.error_string_length",
+                     Twine(*Match.ErrorStringLength).str());
   }
   if (Match.ReturndataCopy != nullptr) {
     addPlainMetadata(Ctx, *Match.ReturndataCopy,
