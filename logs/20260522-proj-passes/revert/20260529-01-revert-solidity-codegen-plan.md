@@ -194,3 +194,49 @@ encoded revert，又被当成 panic 或 bubble：
 - `Error(string)` / custom error 第一阶段只增加 selector / buffer 识别，不要求完整恢复参数。
 - `AbiRevertEncodingPass` 的去留有明确结论：要么移除并迁移 oracle，要么保留为临时兼容层，
   但不再作为主要语义恢复入口。
+
+## 第一步实现记录（2026-05-29）
+
+本次只完成测试框架和 oracle，不改 pass。
+
+- `test/run_evm_solidity_patterns_suite.py` 新增 revert 形状分类：
+  `empty`、`panic`、`returndata_bubble`、`error_string`、
+  `custom_error_candidate`、`encoded_candidate`。
+- 同文件新增 panic code 统计，当前只提取同一 block 内
+  `mstore(0, shl(224, 0x4e487b71))`、`mstore(4, 常量)`、
+  `revert(..., 36)` 这种形状。
+- 同文件新增 returndata bubble 统计，支持
+  `returndatacopy(pos, 0, returndatasize())` 后接
+  `revert(pos, returndatasize())`，包括 `pos=0` 和 SSA `pos`。
+- `test/evm/solidity-patterns/manifest.json` 为 58 个现有 case 增加：
+  `expected_revert_kinds`、`expected_panic_codes`、
+  `expected_returndata_bubbles`。
+
+当前 58 个 case 的总量：
+
+- `empty`: 3109
+- `panic`: 610
+- `returndata_bubble`: 294
+- `encoded_candidate`: 1670
+- `error_string`: 0
+- `custom_error_candidate`: 0
+
+当前 panic code 总量：
+
+- `0x01`: 1
+- `0x11`: 166
+- `0x12`: 30
+- `0x21`: 10
+- `0x22`: 25
+- `0x31`: 10
+- `0x32`: 277
+- `0x41`: 91
+
+`encoded_candidate` 暂时只作为候选，没有强行标成 Error(string) 或 custom error。
+当前 case 里未稳定识别到 `0x08c379a0` selector 或其它 custom selector 外壳。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，耗时 88.61s。

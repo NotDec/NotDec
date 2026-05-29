@@ -40,7 +40,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 2,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0011_multi_public",
@@ -77,7 +98,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 8,
+        "panic": 1,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 2
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 1,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0002_delegatecall_no_nonpayable",
@@ -111,7 +153,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 0,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 1
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0441_19494998_776c03cc9d_8117f350cb9d",
@@ -150,7 +213,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 0,
         "notdec.solidity.storage_bytes_string": 1
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 13,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 1
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0448_19495059_065877b669_4f138305be23",
@@ -190,7 +274,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 19,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 35,
+        "panic": 10,
+        "returndata_bubble": 8,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 18
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 7,
+        "18": 1,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 8
     },
     {
       "name": "0450_19495071_6b6c9447e0_6344565f4b31",
@@ -229,7 +334,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 2,
         "notdec.solidity.storage_bytes_string": 19
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 7,
+        "panic": 0,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0456_19495158_c7c34e07aa_0e692a3d145c",
@@ -267,7 +393,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 14,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 12,
+        "panic": 0,
+        "returndata_bubble": 1,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 15
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 1
     },
     {
       "name": "0457_19495180_71d7525532_df21a257bd5c",
@@ -307,7 +454,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 23,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 56,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 26
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0459_19495198_fc5ac215e3_805f0e6bf43e",
@@ -347,7 +515,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 23,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 56,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 26
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0460_19495212_3dd362a96f_b915c4f6cb8b",
@@ -385,7 +574,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 21,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 14,
+        "panic": 3,
+        "returndata_bubble": 1,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 17
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 2,
+        "18": 0,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 1
     },
     {
       "name": "0725_19498082_e78beb21f7_98e658f9eae8",
@@ -425,7 +635,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 15,
         "notdec.solidity.storage_bytes_string": 4
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 67,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 42
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0726_19498082_c3945ab21b_2b68f9f60fc2",
@@ -464,7 +695,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 2,
         "notdec.solidity.storage_bytes_string": 19
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 7,
+        "panic": 0,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0735_19498132_e6671af1f9_f57fe690a6a3",
@@ -503,7 +755,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 2,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 6,
+        "panic": 0,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0740_19498186_acae9b9760_d235a47b18d5",
@@ -543,7 +816,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 15,
         "notdec.solidity.storage_bytes_string": 4
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 67,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 42
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "2001_19510128_72aa4f70b3_e9ee7c9c0e79",
@@ -583,7 +877,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 62,
         "notdec.solidity.storage_bytes_string": 6
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 160,
+        "panic": 37,
+        "returndata_bubble": 20,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 57
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 7,
+        "18": 0,
+        "33": 2,
+        "34": 1,
+        "49": 1,
+        "50": 17,
+        "65": 9,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 20
     },
     {
       "name": "0189_19493609_3c0627c9e0_9d16fec0a1c2",
@@ -623,7 +938,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 99,
         "notdec.solidity.storage_bytes_string": 4
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 106,
+        "panic": 55,
+        "returndata_bubble": 10,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 53
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 0,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 45,
+        "65": 6,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 10
     },
     {
       "name": "0258_19493864_78edd9f88e_b098925cbd2d",
@@ -662,7 +998,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 26,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 137,
+        "panic": 53,
+        "returndata_bubble": 56,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 44
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 5,
+        "18": 2,
+        "33": 0,
+        "34": 0,
+        "49": 1,
+        "50": 37,
+        "65": 8,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 56
     },
     {
       "name": "0679_19497465_c2187cbc73_f22fac5262f8",
@@ -700,7 +1057,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 98,
         "notdec.solidity.storage_bytes_string": 9
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 18,
+        "panic": 22,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 33
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 2,
+        "50": 12,
+        "65": 3,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0651_19497235_18ca6cbfa7_017843325734",
@@ -738,7 +1116,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 80,
         "notdec.solidity.storage_bytes_string": 5
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 9,
+        "panic": 23,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 113
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 15,
+        "18": 1,
+        "33": 1,
+        "34": 1,
+        "49": 0,
+        "50": 0,
+        "65": 5,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0334_19494307_668d201319_1354ce2e324d",
@@ -778,7 +1177,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 53,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 102,
+        "panic": 53,
+        "returndata_bubble": 12,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 24
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 1,
+        "17": 9,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 1,
+        "50": 29,
+        "65": 11,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 12
     },
     {
       "name": "1274_19502133_51e0372918_736c45f00099",
@@ -818,7 +1238,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 85,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 63,
+        "panic": 17,
+        "returndata_bubble": 4,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 26
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 5,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 1,
+        "50": 9,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 4
     },
     {
       "name": "1991_19510015_7f60edd6aa_6188d2031ddf",
@@ -856,7 +1297,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 92,
         "notdec.solidity.storage_bytes_string": 1
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 47,
+        "panic": 75,
+        "returndata_bubble": 9,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 28
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 9,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 57,
+        "65": 9,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 9
     },
     {
       "name": "1924_19508168_fe1f1c11b0_0b74e6ed0d55",
@@ -896,7 +1358,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 85,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 58,
+        "panic": 17,
+        "returndata_bubble": 3,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 25
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 5,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 1,
+        "50": 9,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 3
     },
     {
       "name": "0340_19494346_717db37a78_7324081e28fc",
@@ -936,7 +1419,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 56,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 109,
+        "panic": 10,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 51
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 3,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "1775_19507435_1be1a16c5d_eb304133e7c9",
@@ -976,7 +1480,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 68,
         "notdec.solidity.storage_bytes_string": 1
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 78,
+        "panic": 15,
+        "returndata_bubble": 30,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 52
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 8,
+        "18": 0,
+        "33": 4,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 3,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 30
     },
     {
       "name": "0648_19497230_998d150449_ea367f7fc1ac",
@@ -1014,7 +1539,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 74,
         "notdec.solidity.storage_bytes_string": 5
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 12,
+        "panic": 23,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 113
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 15,
+        "18": 1,
+        "33": 1,
+        "34": 1,
+        "49": 0,
+        "50": 0,
+        "65": 5,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "1407_19503702_47675ff2ed_71b1710392bd",
@@ -1054,7 +1600,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 87,
         "notdec.solidity.storage_bytes_string": 13
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 86,
+        "panic": 0,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 40
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "1572_19505998_da275bcf64_0796e2424ba2",
@@ -1094,7 +1661,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 56,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 107,
+        "panic": 10,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 50
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 3,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "1988_19508992_89095f0aa3_688f45aabbde",
@@ -1134,7 +1722,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 58,
         "notdec.solidity.storage_bytes_string": 4
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 75,
+        "panic": 18,
+        "returndata_bubble": 1,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 39
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 5,
+        "18": 2,
+        "33": 0,
+        "34": 1,
+        "49": 1,
+        "50": 4,
+        "65": 5,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 1
     },
     {
       "name": "1485_19504919_9deb0fc809_62afe2b29485",
@@ -1174,7 +1783,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 64,
         "notdec.solidity.storage_bytes_string": 6
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 112,
+        "panic": 7,
+        "returndata_bubble": 9,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 36
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 0,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 0,
+        "65": 3,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 9
     },
     {
       "name": "1847_19507643_148f68d102_07c7230a7676",
@@ -1212,7 +1842,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 87,
         "notdec.solidity.storage_bytes_string": 5
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 45,
+        "panic": 14,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 39
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 5,
+        "18": 0,
+        "33": 0,
+        "34": 1,
+        "49": 1,
+        "50": 3,
+        "65": 4,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0657_19497309_a4d607684e_332c65dbca0f",
@@ -1252,7 +1903,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 51,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 89,
+        "panic": 7,
+        "returndata_bubble": 9,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 49
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 9
     },
     {
       "name": "1636_19506827_f7c7103caa_7898f279a7f3",
@@ -1292,7 +1964,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 66,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 57,
+        "panic": 19,
+        "returndata_bubble": 7,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 34
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 4,
+        "18": 1,
+        "33": 2,
+        "34": 1,
+        "49": 1,
+        "50": 10,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 7
     },
     {
       "name": "0637_19497125_d33ca6fd43_b0988224e0b7",
@@ -1332,7 +2025,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 48,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 64,
+        "panic": 7,
+        "returndata_bubble": 8,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 46
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 8
     },
     {
       "name": "1490_19504983_72b68e8dfe_38ab68a7adc2",
@@ -1372,7 +2086,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 45,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 99,
+        "panic": 7,
+        "returndata_bubble": 10,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 44
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 10
     },
     {
       "name": "2002_19510139_923ad4a9d1_4e9ed82fcc5b",
@@ -1412,7 +2147,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 45,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 99,
+        "panic": 7,
+        "returndata_bubble": 10,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 44
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 10
     },
     {
       "name": "1915_19508046_91cdb18983_844dae639fc0",
@@ -1452,7 +2208,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 45,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 99,
+        "panic": 7,
+        "returndata_bubble": 10,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 44
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 10
     },
     {
       "name": "0870_19499091_69ef351b75_57ed8326bd30",
@@ -1492,7 +2269,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 47,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 88,
+        "panic": 7,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 43
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0009_19493025_977804571f_ab93bcf84624",
@@ -1532,7 +2330,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 22,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 46,
+        "panic": 0,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 22
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0029_19493081_446349df2b_2c2bd78bea7d",
@@ -1571,7 +2390,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 2,
         "notdec.solidity.storage_bytes_string": 19
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 7,
+        "panic": 0,
+        "returndata_bubble": 4,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 4
     },
     {
       "name": "0030_19493089_e48135f4b6_56a7c8e02323",
@@ -1610,7 +2450,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 16,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 20,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 9
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0031_19493095_1fa5f54c3e_32ee79d4db5c",
@@ -1649,7 +2510,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 2,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 26,
+        "panic": 5,
+        "returndata_bubble": 8,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 8
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 3,
+        "65": 2,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 8
     },
     {
       "name": "0032_19493098_f0dab0bf78_8c9406cb7887",
@@ -1689,7 +2571,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 33,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 77,
+        "panic": 0,
+        "returndata_bubble": 6,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 39
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 6
     },
     {
       "name": "0038_19493119_aed19fef21_ea7b432ec4f1",
@@ -1728,7 +2631,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 2,
         "notdec.solidity.storage_bytes_string": 19
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 7,
+        "panic": 0,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0112_19493231_e681d3a0e3_c848651ad27d",
@@ -1768,7 +2692,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 25,
         "notdec.solidity.storage_bytes_string": 3
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 35,
+        "panic": 9,
+        "returndata_bubble": 4,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 16
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 5,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 4
     },
     {
       "name": "0114_19493235_fc69a30a99_3aa7e05b781a",
@@ -1807,7 +2752,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 2,
         "notdec.solidity.storage_bytes_string": 19
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 7,
+        "panic": 0,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0118_19493248_593c688d00_799916048038",
@@ -1846,7 +2812,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 46,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 51,
+        "panic": 8,
+        "returndata_bubble": 4,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 27
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 4,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 4
     },
     {
       "name": "0121_19493259_63ed382f00_e1eb3485de04",
@@ -1886,7 +2873,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 12,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 47,
+        "panic": 8,
+        "returndata_bubble": 3,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 26
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 1,
+        "65": 2,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 3
     },
     {
       "name": "0128_19493282_117a55c492_4233986babaf",
@@ -1926,7 +2934,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 28,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 62,
+        "panic": 7,
+        "returndata_bubble": 1,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 30
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 1
     },
     {
       "name": "0146_19493376_503a732d50_138a4d77d617",
@@ -1965,7 +2994,28 @@
         "notdec.solidity.selector_prologue": 0,
         "notdec.solidity.storage_addressing": 57,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 48,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0147_19493380_262c2cb2b2_c24931e22d66",
@@ -2005,7 +3055,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 30,
         "notdec.solidity.storage_bytes_string": 1
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 66,
+        "panic": 9,
+        "returndata_bubble": 3,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 28
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 3,
+        "65": 2,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 3
     },
     {
       "name": "0175_19493428_d314d380f5_900e60ffbb10",
@@ -2045,7 +3116,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 24,
         "notdec.solidity.storage_bytes_string": 1
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 63,
+        "panic": 9,
+        "returndata_bubble": 3,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 27
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 3,
+        "65": 2,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 3
     },
     {
       "name": "0176_19493428_12f263f8c9_ce83d7b0b2a7",
@@ -2085,7 +3177,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 24,
         "notdec.solidity.storage_bytes_string": 1
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 63,
+        "panic": 9,
+        "returndata_bubble": 3,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 27
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 3,
+        "65": 2,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 3
     },
     {
       "name": "0178_19493463_4da3a6e3d8_c33022fe2f2f",
@@ -2124,7 +3237,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 35,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 46,
+        "panic": 6,
+        "returndata_bubble": 7,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 21
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 2,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 7
     },
     {
       "name": "0179_19493473_76bc10e48c_fd3041389134",
@@ -2164,7 +3298,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 24,
         "notdec.solidity.storage_bytes_string": 1
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 63,
+        "panic": 9,
+        "returndata_bubble": 3,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 27
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 3,
+        "18": 1,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 3,
+        "65": 2,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 3
     },
     {
       "name": "0190_19493619_2fea34e2f2_9597b615b1d4",
@@ -2204,7 +3359,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 15,
         "notdec.solidity.storage_bytes_string": 5
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 46,
+        "panic": 0,
+        "returndata_bubble": 0,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 22
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 0
     },
     {
       "name": "0195_19493642_a9eb505e1d_c5345c8e5a60",
@@ -2244,7 +3420,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 12,
         "notdec.solidity.storage_bytes_string": 2
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 43,
+        "panic": 7,
+        "returndata_bubble": 2,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 24
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 2,
+        "18": 1,
+        "33": 0,
+        "34": 1,
+        "49": 0,
+        "50": 1,
+        "65": 2,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 2
     },
     {
       "name": "0207_19493703_606c6dc416_58752239cf88",
@@ -2282,7 +3479,28 @@
         "notdec.solidity.selector_prologue": 1,
         "notdec.solidity.storage_addressing": 30,
         "notdec.solidity.storage_bytes_string": 0
-      }
+      },
+      "expected_revert_kinds": {
+        "empty": 17,
+        "panic": 0,
+        "returndata_bubble": 1,
+        "error_string": 0,
+        "custom_error_candidate": 0,
+        "encoded_candidate": 0
+      },
+      "expected_panic_codes": {
+        "0": 0,
+        "1": 0,
+        "17": 0,
+        "18": 0,
+        "33": 0,
+        "34": 0,
+        "49": 0,
+        "50": 0,
+        "65": 0,
+        "81": 0
+      },
+      "expected_returndata_bubbles": 1
     }
   ]
 }

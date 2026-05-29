@@ -15,6 +15,20 @@ from pathlib import Path
 NONPAYABLE_DEFINE_RE = re.compile(
     r"^define\b.*!notdec\.solidity\.nonpayable\b", re.MULTILINE
 )
+EVM_REVERT_CALL_RE = re.compile(
+    r"\bcall void @evm_revert\(ptr [^,]+, i256 ([^,]+), i256 ([^)]+)\)"
+)
+EVM_MSTORE_CALL_RE = re.compile(
+    r"\bcall void @evm_mstore\(ptr [^,]+, i256 ([^,]+), i256 ([^)]+)\)"
+)
+EVM_RETURNDATACOPY_CALL_RE = re.compile(
+    r"\bcall void @evm_returndatacopy\(ptr [^,]+, ptr [^,]+, i256 ([^,]+), i256 ([^,]+), i256 ([^)]+)\)"
+)
+EVM_SHL_ASSIGN_RE = re.compile(
+    r"^\s*(%[\w.\-]+) = call i256 @evm_shl\(i256 224, i256 (\d+)\)"
+)
+PANIC_SELECTOR = 0x4E487B71
+ERROR_SELECTOR = 0x08C379A0
 
 
 def format_command(cmd: list[str]) -> str:
@@ -123,6 +137,110 @@ def count_hidden_markers(path: Path) -> int:
 def count_hidden_metadata(path: Path) -> int:
     text = path.read_text()
     return text.count("!notdec.solidity.rewrite_hidden.")
+
+
+def count_revert_kinds(path: Path) -> dict[str, int]:
+    text = path.read_text()
+    counts: dict[str, int] = {}
+    for block in re.split(r"\n(?=[\w.$-]+:)", text):
+        for kind in classify_reverts_from_block(block):
+            counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def is_constant_i256(value: str, expected: int) -> bool:
+    return value.strip() == str(expected)
+
+
+def is_returndatasize_value(value: str) -> bool:
+    return value.strip().startswith("%evm.returndatasize")
+
+
+def classify_reverts_from_block(block: str) -> list[str]:
+    shl_values: dict[str, int] = {}
+    last_selector: int | None = None
+    returndata_copy_offsets: set[str] = set()
+    kinds: list[str] = []
+
+    for line in block.splitlines():
+        shl_match = EVM_SHL_ASSIGN_RE.match(line)
+        if shl_match:
+            shl_values[shl_match.group(1)] = int(shl_match.group(2))
+
+        mstore_match = EVM_MSTORE_CALL_RE.search(line)
+        if mstore_match and is_constant_i256(mstore_match.group(1), 0):
+            last_selector = shl_values.get(mstore_match.group(2).strip())
+
+        returndata_copy_match = EVM_RETURNDATACOPY_CALL_RE.search(line)
+        if returndata_copy_match:
+            copy_offset = returndata_copy_match.group(1).strip()
+            source_offset = returndata_copy_match.group(2).strip()
+            length = returndata_copy_match.group(3).strip()
+            if is_constant_i256(source_offset, 0) and is_returndatasize_value(length):
+                returndata_copy_offsets.add(copy_offset)
+
+        revert_match = EVM_REVERT_CALL_RE.search(line)
+        if not revert_match:
+            continue
+
+        offset = revert_match.group(1).strip()
+        length = revert_match.group(2).strip()
+        if is_constant_i256(offset, 0) and is_constant_i256(length, 0):
+            kind = "empty"
+        elif is_returndatasize_value(length) and offset in returndata_copy_offsets:
+            kind = "returndata_bubble"
+        elif is_constant_i256(length, 36) and last_selector == PANIC_SELECTOR:
+            kind = "panic"
+        elif last_selector == ERROR_SELECTOR:
+            kind = "error_string"
+        elif last_selector is not None and last_selector != PANIC_SELECTOR:
+            kind = "custom_error_candidate"
+        else:
+            kind = "encoded_candidate"
+        kinds.append(kind)
+        last_selector = None
+        returndata_copy_offsets.clear()
+
+    return kinds
+
+
+def collect_panic_codes_from_block(block: str) -> list[int]:
+    shl_values: dict[str, int] = {}
+    saw_panic_selector = False
+    pending_codes: list[int] = []
+    codes: list[int] = []
+
+    for line in block.splitlines():
+        shl_match = EVM_SHL_ASSIGN_RE.match(line)
+        if shl_match:
+            shl_values[shl_match.group(1)] = int(shl_match.group(2))
+
+        mstore_match = EVM_MSTORE_CALL_RE.search(line)
+        if mstore_match:
+            offset = mstore_match.group(1).strip()
+            value = mstore_match.group(2).strip()
+            if is_constant_i256(offset, 0) and shl_values.get(value) == PANIC_SELECTOR:
+                saw_panic_selector = True
+            elif is_constant_i256(offset, 4) and value.isdigit():
+                pending_codes.append(int(value))
+
+        if EVM_REVERT_CALL_RE.search(line):
+            if saw_panic_selector and "i256 36" in line:
+                codes.append(pending_codes[-1] if pending_codes else -1)
+            saw_panic_selector = False
+            pending_codes.clear()
+
+    return codes
+
+
+def count_panic_codes(path: Path) -> dict[str, int]:
+    text = path.read_text()
+    counts: dict[str, int] = {}
+    for block in re.split(r"\n(?=[\w.$-]+:)", text):
+        for code in collect_panic_codes_from_block(block):
+            key = "unknown" if code < 0 else str(code)
+            counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def write_compare_report(
@@ -249,6 +367,14 @@ def main() -> int:
                     "expected_payability_cfg_rewrites",
                     case["expected_nonpayable_functions"],
                 )
+            for kind, count in case.get("expected_revert_kinds", {}).items():
+                expected_counts[f"revert_kind:{kind}"] = count
+            for code, count in case.get("expected_panic_codes", {}).items():
+                expected_counts[f"panic_code:{code}"] = count
+            if "expected_returndata_bubbles" in case:
+                expected_counts["returndata_bubbles"] = case[
+                    "expected_returndata_bubbles"
+                ]
             actual_counts = {
                 "nonpayable_functions": count_nonpayable_functions(output_ll)
             }
@@ -270,6 +396,20 @@ def main() -> int:
             if "payability_cfg_rewrites" in expected_counts:
                 actual_counts["payability_cfg_rewrites"] = count_payability_cfg_rewrites(
                     output_ll
+                )
+            actual_revert_kinds = count_revert_kinds(output_ll)
+            for kind in case.get("expected_revert_kinds", {}):
+                actual_counts[f"revert_kind:{kind}"] = actual_revert_kinds.get(
+                    kind, 0
+                )
+            actual_panic_codes = count_panic_codes(output_ll)
+            for code in case.get("expected_panic_codes", {}):
+                actual_counts[f"panic_code:{code}"] = actual_panic_codes.get(
+                    str(code), 0
+                )
+            if "returndata_bubbles" in expected_counts:
+                actual_counts["returndata_bubbles"] = actual_revert_kinds.get(
+                    "returndata_bubble", 0
                 )
             compare_ok = write_compare_report(
                 report_path=compare_txt,
