@@ -103,9 +103,19 @@ struct PayabilityGuardMatch {
 // the panic code is the stable Solidity reason we expose to tests and lowering.
 struct CheckedBoundsMatch {
   StringRef Kind = "unknown";
+  StringRef SkipReason = "";
   BranchInst *Branch = nullptr;
+  BasicBlock *SuccessBlock = nullptr;
+  BasicBlock *FailureBlock = nullptr;
   CallBase *Revert = nullptr;
+  SmallVector<Value *, 3> Operands;
   std::optional<uint64_t> PanicCode;
+  bool Rewrite = false;
+};
+
+struct NormalizedCondition {
+  ICmpInst *Cmp = nullptr;
+  ICmpInst::Predicate Predicate;
 };
 
 bool isCallTo(const Value *V, StringRef Name) {
@@ -1445,50 +1455,566 @@ StringRef getCheckedBoundsKindForPanicCode(uint64_t Code) {
   }
 }
 
-void insertCheckedBoundsPanicRewriteMarker(LLVMContext &Ctx,
-                                           const CheckedBoundsMatch &Match) {
-  if (Match.Revert == nullptr || !Match.PanicCode.has_value()) {
+std::optional<NormalizedCondition> normalizeCondition(Value *V,
+                                                      bool DesiredTrue) {
+  if (auto *ZExt = dyn_cast_or_null<ZExtInst>(V)) {
+    return normalizeCondition(ZExt->getOperand(0), DesiredTrue);
+  }
+
+  auto *Cmp = dyn_cast_or_null<ICmpInst>(V);
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *MaybeBool = Cmp->getOperand(I);
+    Value *MaybeZero = Cmp->getOperand(1 - I);
+    if (!isZero(MaybeZero)) {
+      continue;
+    }
+    if (!isa<ZExtInst>(MaybeBool)) {
+      continue;
+    }
+
+    bool OperandTrue = DesiredTrue;
+    if (Cmp->getPredicate() == ICmpInst::ICMP_EQ) {
+      OperandTrue = !DesiredTrue;
+    } else if (Cmp->getPredicate() != ICmpInst::ICMP_NE) {
+      break;
+    }
+    return normalizeCondition(MaybeBool, OperandTrue);
+  }
+
+  ICmpInst::Predicate Pred = Cmp->getPredicate();
+  if (!DesiredTrue) {
+    Pred = Cmp->getInversePredicate();
+  }
+  return NormalizedCondition{Cmp, Pred};
+}
+
+bool blockHasPhi(BasicBlock *BB) {
+  return BB != nullptr && isa<PHINode>(BB->begin());
+}
+
+bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth);
+
+CallBase *findPanicRevertOnLinearPath(BasicBlock *BB,
+                                      SmallPtrSetImpl<BasicBlock *> &Seen,
+                                      unsigned Depth = 4) {
+  if (BB == nullptr || Depth == 0 || !Seen.insert(BB).second ||
+      blockHasPhi(BB)) {
+    return nullptr;
+  }
+
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "evm_revert") ||
+        Call->arg_size() != 3) {
+      continue;
+    }
+    std::optional<SolidityRevertMatch> RevertMatch =
+        matchSolidityRevert(*BB, *Call);
+    if (RevertMatch.has_value() && RevertMatch->Kind == "panic") {
+      return Call;
+    }
+  }
+
+  auto *Br = dyn_cast<BranchInst>(BB->getTerminator());
+  if (Br == nullptr || Br->isConditional()) {
+    return nullptr;
+  }
+  return findPanicRevertOnLinearPath(Br->getSuccessor(0), Seen, Depth - 1);
+}
+
+CallBase *findPanicRevertOnLinearPath(BasicBlock *BB) {
+  SmallPtrSet<BasicBlock *, 8> Seen;
+  return findPanicRevertOnLinearPath(BB, Seen);
+}
+
+bool binaryOpHasOperand(BinaryOperator *Op, Value *V) {
+  return Op != nullptr && (isSameValue(Op->getOperand(0), V) ||
+                           isSameValue(Op->getOperand(1), V));
+}
+
+BinaryOperator *findBinaryOpInBlock(BasicBlock *BB,
+                                    Instruction::BinaryOps Opcode, Value *LHS,
+                                    Value *RHS) {
+  if (BB == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Op = dyn_cast<BinaryOperator>(&I);
+    if (Op == nullptr || Op->getOpcode() != Opcode) {
+      continue;
+    }
+    if (isSameValue(Op->getOperand(0), LHS) &&
+        isSameValue(Op->getOperand(1), RHS)) {
+      return Op;
+    }
+  }
+  return nullptr;
+}
+
+BinaryOperator *matchCheckedMulSuccessCondition(Value *V) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return nullptr;
+  }
+
+  Value *ZeroChecked = nullptr;
+  CallBase *Div = nullptr;
+  Value *OtherOperand = nullptr;
+  for (Value *Operand : {Or->getOperand(0), Or->getOperand(1)}) {
+    auto *Cmp = dyn_cast<ICmpInst>(Operand);
+    if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_EQ) {
+      return nullptr;
+    }
+
+    if (isZero(Cmp->getOperand(0)) || isZero(Cmp->getOperand(1))) {
+      ZeroChecked = isZero(Cmp->getOperand(0)) ? Cmp->getOperand(1)
+                                               : Cmp->getOperand(0);
+      continue;
+    }
+
+    for (unsigned I = 0; I < 2; ++I) {
+      if (auto *Call = dyn_cast<CallBase>(Cmp->getOperand(I))) {
+        if (isCallTo(Call, "evm_div") && Call->arg_size() == 2) {
+          Div = Call;
+          OtherOperand = Cmp->getOperand(1 - I);
+          break;
+        }
+      }
+    }
+  }
+  if (ZeroChecked == nullptr || Div == nullptr || OtherOperand == nullptr ||
+      !isSameValue(Div->getArgOperand(1), ZeroChecked)) {
+    return nullptr;
+  }
+
+  auto *Product = dyn_cast<BinaryOperator>(Div->getArgOperand(0));
+  if (Product == nullptr || Product->getOpcode() != Instruction::Mul) {
+    return nullptr;
+  }
+  if (!binaryOpHasOperand(Product, ZeroChecked) ||
+      !binaryOpHasOperand(Product, OtherOperand)) {
+    return nullptr;
+  }
+  return Product;
+}
+
+std::optional<CheckedBoundsMatch>
+matchCheckedSubGuard(const NormalizedCondition &FailureCond,
+                     const SolidityRevertMatch &RevertMatch,
+                     BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x11 ||
+      FailureCond.Predicate != ICmpInst::ICMP_UGT) {
+    return std::nullopt;
+  }
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *RHS = Cmp->getOperand(0);
+  Value *LHS = Cmp->getOperand(1);
+  BinaryOperator *Sub =
+      findBinaryOpInBlock(SuccessBlock, Instruction::Sub, LHS, RHS);
+  if (Sub == nullptr) {
+    return std::nullopt;
+  }
+  return CheckedBoundsMatch{
+      "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+      {Sub->getOperand(0), Sub->getOperand(1), Sub}, RevertMatch.PanicCode,
+      true};
+}
+
+std::optional<CheckedBoundsMatch>
+matchCheckedMulGuard(Value *BranchCondition, bool FailureWhenCondTrue,
+                     const SolidityRevertMatch &RevertMatch) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x11) {
+    return std::nullopt;
+  }
+
+  if (!FailureWhenCondTrue) {
+    if (BinaryOperator *Product =
+            matchCheckedMulSuccessCondition(BranchCondition)) {
+      return CheckedBoundsMatch{
+          "checked_mul", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+          {Product->getOperand(0), Product->getOperand(1), Product},
+          RevertMatch.PanicCode, true};
+    }
+  }
+
+  std::optional<NormalizedCondition> SuccessCond =
+      normalizeCondition(BranchCondition, !FailureWhenCondTrue);
+  if (!SuccessCond.has_value() || SuccessCond->Cmp == nullptr ||
+      SuccessCond->Predicate != ICmpInst::ICMP_NE ||
+      !isZero(SuccessCond->Cmp->getOperand(1))) {
+    return std::nullopt;
+  }
+
+  BinaryOperator *Product =
+      matchCheckedMulSuccessCondition(SuccessCond->Cmp->getOperand(0));
+  if (Product == nullptr) {
+    return std::nullopt;
+  }
+  return CheckedBoundsMatch{
+      "checked_mul", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+      {Product->getOperand(0), Product->getOperand(1), Product},
+      RevertMatch.PanicCode, true};
+}
+
+std::optional<CheckedBoundsMatch>
+matchCheckedArithmetic(const NormalizedCondition &FailureCond,
+                       const SolidityRevertMatch &RevertMatch) {
+  if (!RevertMatch.PanicCode.has_value()) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *LHS = Cmp->getOperand(0);
+  Value *RHS = Cmp->getOperand(1);
+  ICmpInst::Predicate Pred = FailureCond.Predicate;
+
+  if (*RevertMatch.PanicCode == 0x11) {
+    if (Pred == ICmpInst::ICMP_UGT || Pred == ICmpInst::ICMP_ULT) {
+      Value *MaybeOriginal = Pred == ICmpInst::ICMP_UGT ? LHS : RHS;
+      Value *MaybeResult = Pred == ICmpInst::ICMP_UGT ? RHS : LHS;
+      auto *Op = dyn_cast<BinaryOperator>(MaybeResult);
+      if (Op != nullptr && Op->getOpcode() == Instruction::Add &&
+          binaryOpHasOperand(Op, MaybeOriginal)) {
+        return CheckedBoundsMatch{
+            "checked_add", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+            {Op->getOperand(0), Op->getOperand(1), Op}, RevertMatch.PanicCode,
+            true};
+      }
+      if (Op != nullptr && Op->getOpcode() == Instruction::Sub &&
+          binaryOpHasOperand(Op, MaybeOriginal)) {
+        return CheckedBoundsMatch{
+            "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+            {Op->getOperand(0), Op->getOperand(1), Op}, RevertMatch.PanicCode,
+            true};
+      }
+    }
+  }
+
+  if (*RevertMatch.PanicCode != 0x12) {
+    return std::nullopt;
+  }
+
+  Value *Divisor = nullptr;
+  if ((Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_ULE ||
+       Pred == ICmpInst::ICMP_SLE) &&
+      isZero(RHS)) {
+    Divisor = LHS;
+  } else if ((Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_UGE ||
+              Pred == ICmpInst::ICMP_SGE) &&
+             isZero(LHS)) {
+    Divisor = RHS;
+  }
+  if (Divisor == nullptr) {
+    return std::nullopt;
+  }
+
+  for (User *U : Divisor->users()) {
+    auto *Call = dyn_cast<CallBase>(U);
+    if (Call == nullptr || Call->arg_size() != 2 ||
+        !isSameValue(Call->getArgOperand(1), Divisor)) {
+      continue;
+    }
+    StringRef Callee = getCalleeName(Call);
+    if (Callee == "evm_div" || Callee == "evm_sdiv") {
+      return CheckedBoundsMatch{
+          "checked_div", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+          {Call->getArgOperand(0), Call->getArgOperand(1)},
+          RevertMatch.PanicCode, true};
+    }
+    if (Callee == "evm_mod" || Callee == "evm_smod") {
+      return CheckedBoundsMatch{
+          "checked_mod", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+          {Call->getArgOperand(0), Call->getArgOperand(1)},
+          RevertMatch.PanicCode, true};
+    }
+  }
+
+  return std::nullopt;
+}
+
+std::optional<CheckedBoundsMatch>
+matchArrayBounds(const NormalizedCondition &FailureCond,
+                 const SolidityRevertMatch &RevertMatch) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x32) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *Index = nullptr;
+  Value *Length = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE) {
+    Index = Cmp->getOperand(0);
+    Length = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
+    Index = Cmp->getOperand(1);
+    Length = Cmp->getOperand(0);
+  } else {
+    return std::nullopt;
+  }
+
+  StringRef Kind = "array_bounds_unknown";
+  if (auto *LengthCall = dyn_cast<CallBase>(Length)) {
+    if (isCallTo(LengthCall, "evm_mload")) {
+      Kind = "array_bounds_memory";
+    } else if (isCallTo(LengthCall, "evm_calldataload")) {
+      Kind = "array_bounds_calldata";
+    } else if (isCallTo(LengthCall, "evm_sload")) {
+      Kind = "array_bounds_storage";
+    }
+  }
+
+  if (Kind == "array_bounds_unknown") {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{Kind, "", nullptr, nullptr, nullptr,
+                            RevertMatch.Revert, {Index, Length},
+                            RevertMatch.PanicCode, true};
+}
+
+std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
+  auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
+  if (Br == nullptr || !Br->isConditional() ||
+      dependsOnCallTo(Br->getCondition(), "evm_callvalue", 8)) {
+    return std::nullopt;
+  }
+
+  for (unsigned SuccIdx = 0; SuccIdx < 2; ++SuccIdx) {
+    BasicBlock *Failure = Br->getSuccessor(SuccIdx);
+    CallBase *Revert = findPanicRevertOnLinearPath(Failure);
+    if (Revert == nullptr) {
+      continue;
+    }
+
+    std::optional<SolidityRevertMatch> RevertMatch =
+        matchSolidityRevert(*Revert->getParent(), *Revert);
+    if (!RevertMatch.has_value() || RevertMatch->Kind != "panic") {
+      continue;
+    }
+
+    bool FailureWhenCondTrue = SuccIdx == 0;
+    std::optional<NormalizedCondition> FailureCond =
+        normalizeCondition(Br->getCondition(), FailureWhenCondTrue);
+
+    CheckedBoundsMatch Match{
+        RevertMatch->PanicCode.has_value()
+            ? getCheckedBoundsKindForPanicCode(*RevertMatch->PanicCode)
+            : StringRef("panic_unknown"),
+        "unrecognized_operands",
+        Br,
+        Br->getSuccessor(1 - SuccIdx),
+        Failure,
+        Revert,
+        {},
+        RevertMatch->PanicCode,
+        false};
+
+    if (std::optional<CheckedBoundsMatch> Mul =
+            matchCheckedMulGuard(Br->getCondition(), FailureWhenCondTrue,
+                                 *RevertMatch)) {
+      Mul->Branch = Br;
+      Mul->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      Mul->FailureBlock = Failure;
+      return Mul;
+    }
+
+    if (!FailureCond.has_value()) {
+      Match.SkipReason = "unsupported_condition";
+      return Match;
+    }
+
+    if (std::optional<CheckedBoundsMatch> Sub =
+            matchCheckedSubGuard(*FailureCond, *RevertMatch,
+                                 Br->getSuccessor(1 - SuccIdx))) {
+      Sub->Branch = Br;
+      Sub->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      Sub->FailureBlock = Failure;
+      return Sub;
+    }
+
+    if (std::optional<CheckedBoundsMatch> Arithmetic =
+            matchCheckedArithmetic(*FailureCond, *RevertMatch)) {
+      Arithmetic->Branch = Br;
+      Arithmetic->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      Arithmetic->FailureBlock = Failure;
+      return Arithmetic;
+    }
+
+    if (std::optional<CheckedBoundsMatch> Bounds =
+            matchArrayBounds(*FailureCond, *RevertMatch)) {
+      Bounds->Branch = Br;
+      Bounds->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      Bounds->FailureBlock = Failure;
+      return Bounds;
+    }
+
+    return Match;
+  }
+
+  return std::nullopt;
+}
+
+StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
+  if (Kind == "checked_add") {
+    return "notdec_solidity_rewrite_checked_add";
+  }
+  if (Kind == "checked_sub") {
+    return "notdec_solidity_rewrite_checked_sub";
+  }
+  if (Kind == "checked_mul") {
+    return "notdec_solidity_rewrite_checked_mul";
+  }
+  if (Kind == "checked_div") {
+    return "notdec_solidity_rewrite_checked_div";
+  }
+  if (Kind == "checked_mod") {
+    return "notdec_solidity_rewrite_checked_mod";
+  }
+  if (Kind == "array_bounds_memory") {
+    return "notdec_solidity_rewrite_array_bounds_memory";
+  }
+  if (Kind == "array_bounds_calldata") {
+    return "notdec_solidity_rewrite_array_bounds_calldata";
+  }
+  if (Kind == "array_bounds_storage") {
+    return "notdec_solidity_rewrite_array_bounds_storage";
+  }
+  return "";
+}
+
+bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
+                                         DominatorTree &DT) {
+  if (!Match.Rewrite || Match.Branch == nullptr) {
+    return true;
+  }
+
+  for (Value *Operand : Match.Operands) {
+    auto *Inst = dyn_cast_or_null<Instruction>(Operand);
+    if (Inst == nullptr || DT.dominates(Inst, Match.Branch)) {
+      continue;
+    }
+    if (Match.Kind == "checked_sub" && Match.Operands.size() == 3 &&
+        Operand == Match.Operands[2]) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+void downgradeCheckedBoundsRewrite(CheckedBoundsMatch &Match,
+                                   StringRef SkipReason) {
+  Match.Rewrite = false;
+  Match.SkipReason = SkipReason;
+  Match.Operands.clear();
+}
+
+void insertCheckedBoundsSemanticMarker(LLVMContext &Ctx,
+                                       const CheckedBoundsMatch &Match) {
+  if (!Match.Rewrite || Match.Branch == nullptr) {
     return;
   }
 
-  Module *M = Match.Revert->getModule();
+  StringRef MarkerName = getCheckedBoundsRewriteMarkerName(Match.Kind);
+  if (MarkerName.empty()) {
+    return;
+  }
+
+  Module *M = Match.Branch->getModule();
+  IRBuilder<> Builder(Match.Branch);
+  SmallVector<Value *, 3> Operands(Match.Operands.begin(),
+                                   Match.Operands.end());
+  if (Match.Kind == "checked_sub" && Operands.size() == 3) {
+    auto *ResultInst = dyn_cast<Instruction>(Operands[2]);
+    if (ResultInst != nullptr &&
+        ResultInst->getParent() != Match.Branch->getParent()) {
+      Operands[2] = Builder.CreateSub(Operands[0], Operands[1],
+                                      ResultInst->getName() + ".rewrite");
+    }
+  }
+
+  SmallVector<Type *, 3> ArgTypes;
+  for (Value *Operand : Operands) {
+    ArgTypes.push_back(Operand->getType());
+  }
   FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_rewrite_checked_bounds_panic",
+      MarkerName, FunctionType::get(Type::getVoidTy(Ctx), ArgTypes, false));
+
+  Builder.CreateCall(Marker, Operands);
+}
+
+void insertCheckedBoundsSkipMarker(LLVMContext &Ctx,
+                                   const CheckedBoundsMatch &Match) {
+  if (Match.Branch == nullptr || Match.SkipReason.empty()) {
+    return;
+  }
+
+  Module *M = Match.Branch->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_checked_bounds_skip",
       FunctionType::get(Type::getVoidTy(Ctx),
                         {Type::getIntNTy(Ctx, 256),
                          Type::getIntNTy(Ctx, 256)},
                         false));
 
-  IRBuilder<> Builder(Ctx);
-  if (Instruction *Next = Match.Revert->getNextNode()) {
-    Builder.SetInsertPoint(Next);
-  } else {
-    Builder.SetInsertPoint(Match.Revert->getParent());
-  }
-
+  IRBuilder<> Builder(Match.Branch);
   Value *Args[] = {
-      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.PanicCode),
       ConstantInt::get(Type::getIntNTy(Ctx, 256),
-                       getRewriteKindCode(Match.Kind))};
+                       Match.PanicCode.value_or(0)),
+      ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                       getRewriteKindCode(Match.SkipReason))};
   Builder.CreateCall(Marker, Args);
 }
 
 void addCheckedBoundsMetadata(LLVMContext &Ctx,
                               const CheckedBoundsMatch &Match) {
   if (Match.Branch != nullptr) {
-    addStringMetadata(Ctx, *Match.Branch, KIND_SOLIDITY_CHECKED_BOUNDS,
-                      Match.Kind);
-  }
-  if (Match.Revert != nullptr) {
-    addStringMetadata(Ctx, *Match.Revert, KIND_SOLIDITY_CHECKED_BOUNDS,
-                      Match.Kind);
+    addPlainMetadata(Ctx, *Match.Branch, KIND_SOLIDITY_CHECKED_BOUNDS,
+                     Match.Kind);
     if (Match.PanicCode.has_value()) {
-      addPlainMetadata(Ctx, *Match.Revert,
+      addPlainMetadata(Ctx, *Match.Branch,
                        "notdec.solidity_checked_bounds.panic_code",
                        Twine(*Match.PanicCode).str());
     }
+    if (!Match.SkipReason.empty()) {
+      addPlainMetadata(Ctx, *Match.Branch,
+                       "notdec.solidity_checked_bounds.skipped",
+                       Match.SkipReason);
+    }
   }
-  insertCheckedBoundsPanicRewriteMarker(Ctx, Match);
+  if (Match.Rewrite) {
+    insertCheckedBoundsSemanticMarker(Ctx, Match);
+  } else {
+    insertCheckedBoundsSkipMarker(Ctx, Match);
+  }
+}
+
+void rewriteCheckedBoundsGuard(const CheckedBoundsMatch &Match) {
+  if (!Match.Rewrite || Match.Branch == nullptr ||
+      Match.SuccessBlock == nullptr) {
+    return;
+  }
+
+  IRBuilder<> Builder(Match.Branch);
+  BranchInst *NewBranch = Builder.CreateBr(Match.SuccessBlock);
+  NewBranch->copyMetadata(*Match.Branch);
+  Match.Branch->eraseFromParent();
 }
 
 bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth,
@@ -1791,44 +2317,29 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
-PreservedAnalyses CheckedBoundsPass::run(Function &F, FunctionAnalysisManager &) {
+PreservedAnalyses CheckedBoundsPass::run(Function &F,
+                                         FunctionAnalysisManager &FAM) {
   LLVMContext &Ctx = F.getContext();
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
   bool Changed = false;
+  SmallVector<CheckedBoundsMatch, 8> Matches;
 
   for (BasicBlock &BB : F) {
-    auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
-    if (Br != nullptr && Br->isConditional()) {
-      if ((isEmptyRevertBlock(Br->getSuccessor(0)) ||
-           isEmptyRevertBlock(Br->getSuccessor(1))) &&
-          !dependsOnCallTo(Br->getCondition(), "evm_callvalue")) {
-        addCheckedBoundsMetadata(
-            Ctx, CheckedBoundsMatch{"empty_revert_guard_candidate", Br,
-                                    nullptr, std::nullopt});
-        ++NumCheckedBounds;
-        Changed = true;
-      }
+    std::optional<CheckedBoundsMatch> Match = matchCheckedBoundsGuard(BB);
+    if (!Match.has_value()) {
+      continue;
     }
+    Matches.push_back(*Match);
+  }
 
-    for (Instruction &I : BB) {
-      auto *Call = dyn_cast<CallBase>(&I);
-      if (Call == nullptr || !isCallTo(Call, "evm_revert") ||
-          Call->arg_size() != 3) {
-        continue;
-      }
-      std::optional<SolidityRevertMatch> RevertMatch =
-          matchSolidityRevert(BB, *Call);
-      if (RevertMatch.has_value() && RevertMatch->Kind == "panic") {
-        StringRef Kind = RevertMatch->PanicCode.has_value()
-                             ? getCheckedBoundsKindForPanicCode(
-                                   *RevertMatch->PanicCode)
-                             : StringRef("panic_unknown");
-        addCheckedBoundsMetadata(Ctx, CheckedBoundsMatch{
-                                          Kind, nullptr, Call,
-                                          RevertMatch->PanicCode});
-        ++NumCheckedBounds;
-        Changed = true;
-      }
+  for (CheckedBoundsMatch &Match : Matches) {
+    if (!checkedBoundsOperandsDominateBranch(Match, DT)) {
+      downgradeCheckedBoundsRewrite(Match, "operand_not_available_at_guard");
     }
+    addCheckedBoundsMetadata(Ctx, Match);
+    rewriteCheckedBoundsGuard(Match);
+    ++NumCheckedBounds;
+    Changed = true;
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

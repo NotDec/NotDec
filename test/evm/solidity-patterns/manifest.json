@@ -16,7 +16,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.checked_bounds": 2,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -32,15 +32,87 @@
         "17": 1
       },
       "expected_checked_bounds_kinds": {
-        "empty_revert_guard_candidate": 1,
-        "panic_checked_arithmetic": 1
+        "checked_add": 1
       },
       "expected_checked_bounds_panic_codes": {
         "17": 1
       },
-      "expected_checked_bounds_marker_payloads": {
-        "17:15101511251744566749": 1
-      }
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_add": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
+    },
+    {
+      "name": "checked_bounds_sub_01",
+      "input": "cases/checked_bounds_sub_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "checked_arithmetic"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 4,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 3,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "17": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "checked_sub": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_sub": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
+    },
+    {
+      "name": "checked_bounds_mul_01",
+      "input": "cases/checked_bounds_mul_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "checked_arithmetic"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 4,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 3,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "17": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "checked_mul": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_mul": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
     },
     {
       "name": "checked_bounds_division_01",
@@ -52,7 +124,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.checked_bounds": 2,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -68,15 +140,51 @@
         "18": 1
       },
       "expected_checked_bounds_kinds": {
-        "empty_revert_guard_candidate": 1,
-        "panic_division_by_zero": 1
+        "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
         "18": 1
       },
-      "expected_checked_bounds_marker_payloads": {
-        "18:18064528040178099939": 1
-      }
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_div": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
+    },
+    {
+      "name": "checked_bounds_mod_01",
+      "input": "cases/checked_bounds_mod_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "division_by_zero"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 4,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 3,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "18": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "checked_mod": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "18": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_mod": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
     },
     {
       "name": "checked_bounds_array_01",
@@ -88,7 +196,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.checked_bounds": 7,
+        "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -105,18 +213,93 @@
         "65": 2
       },
       "expected_checked_bounds_kinds": {
-        "empty_revert_guard_candidate": 4,
-        "panic_array_out_of_bounds": 1,
-        "panic_resource_error": 2
+        "panic_resource_error": 2,
+        "array_bounds_memory": 1
       },
       "expected_checked_bounds_panic_codes": {
         "50": 1,
         "65": 2
       },
-      "expected_checked_bounds_marker_payloads": {
-        "50:9071136428616289443": 1,
-        "65:6191920814015636654": 2
-      }
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_memory": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 1,
+        "unsupported_condition": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
+    },
+    {
+      "name": "checked_bounds_calldata_array_01",
+      "input": "cases/checked_bounds_calldata_array_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "array_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 8,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 7,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "50": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_calldata": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_calldata": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
+    },
+    {
+      "name": "checked_bounds_storage_array_01",
+      "input": "cases/checked_bounds_storage_array_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "array_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 4,
+        "notdec.solidity.storage_addressing": 1
+      },
+      "expected_revert_kinds": {
+        "empty": 3,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "50": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_storage": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_storage": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
     },
     {
       "name": "checked_bounds_enum_01",
@@ -128,7 +311,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.checked_bounds": 2,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -144,15 +327,15 @@
         "33": 1
       },
       "expected_checked_bounds_kinds": {
-        "empty_revert_guard_candidate": 1,
         "panic_enum_conversion": 1
       },
       "expected_checked_bounds_panic_codes": {
         "33": 1
       },
-      "expected_checked_bounds_marker_payloads": {
-        "33:4649423403057108071": 1
-      }
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 0
     },
     {
       "name": "checked_bounds_pop_01",
@@ -185,9 +368,10 @@
       "expected_checked_bounds_panic_codes": {
         "49": 1
       },
-      "expected_checked_bounds_marker_payloads": {
-        "49:16732963434595278286": 1
-      }
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 0
     },
     {
       "name": "revert_error_string_01",
@@ -297,7 +481,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -346,7 +530,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.checked_bounds": 5,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -441,7 +625,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -487,7 +671,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -533,7 +717,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -579,7 +763,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -625,7 +809,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 0,
-        "notdec.solidity.checked_bounds": 2,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 0,
@@ -723,7 +907,7 @@
       "expected_nonpayable_functions": 5,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.checked_bounds": 3,
+        "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 7,
@@ -813,7 +997,7 @@
       "expected_nonpayable_functions": 6,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 10,
-        "notdec.solidity.checked_bounds": 7,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 7,
@@ -861,7 +1045,7 @@
       "expected_nonpayable_functions": 19,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 28,
-        "notdec.solidity.checked_bounds": 22,
+        "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 7,
         "notdec.solidity.external_call": 8,
         "notdec.solidity.packed_storage_field": 46,
@@ -909,7 +1093,7 @@
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 4,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 6,
@@ -955,7 +1139,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 20,
-        "notdec.solidity.checked_bounds": 8,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.packed_storage_field": 8,
@@ -1003,7 +1187,7 @@
       "expected_nonpayable_functions": 15,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.checked_bounds": 36,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 14,
@@ -1051,7 +1235,7 @@
       "expected_nonpayable_functions": 15,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.checked_bounds": 36,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 14,
@@ -1097,7 +1281,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.checked_bounds": 12,
+        "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.packed_storage_field": 26,
@@ -1145,7 +1329,7 @@
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 30,
-        "notdec.solidity.checked_bounds": 29,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 46,
@@ -1193,7 +1377,7 @@
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 4,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 6,
@@ -1240,7 +1424,7 @@
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 3,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 7,
@@ -1288,7 +1472,7 @@
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 30,
-        "notdec.solidity.checked_bounds": 29,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 46,
@@ -1336,7 +1520,7 @@
       "expected_nonpayable_functions": 61,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 72,
-        "notdec.solidity.checked_bounds": 120,
+        "notdec.solidity.checked_bounds": 37,
         "notdec.solidity.event": 21,
         "notdec.solidity.external_call": 26,
         "notdec.solidity.packed_storage_field": 116,
@@ -1384,7 +1568,7 @@
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.checked_bounds": 124,
+        "notdec.solidity.checked_bounds": 55,
         "notdec.solidity.event": 9,
         "notdec.solidity.external_call": 13,
         "notdec.solidity.packed_storage_field": 53,
@@ -1432,7 +1616,7 @@
       "expected_nonpayable_functions": 62,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 66,
-        "notdec.solidity.checked_bounds": 120,
+        "notdec.solidity.checked_bounds": 53,
         "notdec.solidity.event": 30,
         "notdec.solidity.external_call": 57,
         "notdec.solidity.packed_storage_field": 252,
@@ -1478,7 +1662,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 68,
-        "notdec.solidity.checked_bounds": 38,
+        "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 17,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 79,
@@ -1524,7 +1708,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 79,
-        "notdec.solidity.checked_bounds": 38,
+        "notdec.solidity.checked_bounds": 30,
         "notdec.solidity.event": 13,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 41,
@@ -1554,13 +1738,14 @@
       },
       "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
-        "empty_revert_guard_candidate": 8,
         "panic_unknown": 7,
         "panic_storage_encoding": 1,
         "panic_resource_error": 5,
-        "panic_checked_arithmetic": 15,
+        "checked_add": 1,
         "panic_enum_conversion": 1,
-        "panic_division_by_zero": 1
+        "checked_sub": 1,
+        "panic_checked_arithmetic": 13,
+        "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
         "34": 1,
@@ -1569,13 +1754,16 @@
         "33": 1,
         "18": 1
       },
-      "expected_checked_bounds_marker_payloads": {
-        "34:2197520063016227696": 1,
-        "65:6191920814015636654": 5,
-        "17:15101511251744566749": 15,
-        "33:4649423403057108071": 1,
-        "18:18064528040178099939": 1
-      }
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_add": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_checked_div": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 25,
+        "unsupported_condition": 2
+      },
+      "expected_checked_bounds_cfg_rewrites": 3
     },
     {
       "name": "0334_19494307_668d201319_1354ce2e324d",
@@ -1595,7 +1783,7 @@
       "expected_nonpayable_functions": 44,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 68,
-        "notdec.solidity.checked_bounds": 112,
+        "notdec.solidity.checked_bounds": 53,
         "notdec.solidity.event": 11,
         "notdec.solidity.external_call": 15,
         "notdec.solidity.packed_storage_field": 77,
@@ -1643,7 +1831,7 @@
       "expected_nonpayable_functions": 39,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 56,
-        "notdec.solidity.checked_bounds": 33,
+        "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 81,
@@ -1689,7 +1877,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 44,
-        "notdec.solidity.checked_bounds": 113,
+        "notdec.solidity.checked_bounds": 75,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 9,
         "notdec.solidity.packed_storage_field": 99,
@@ -1737,7 +1925,7 @@
       "expected_nonpayable_functions": 36,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 52,
-        "notdec.solidity.checked_bounds": 31,
+        "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 74,
@@ -1785,7 +1973,7 @@
       "expected_nonpayable_functions": 75,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 104,
-        "notdec.solidity.checked_bounds": 28,
+        "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 125,
@@ -1833,7 +2021,7 @@
       "expected_nonpayable_functions": 37,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 42,
-        "notdec.solidity.checked_bounds": 48,
+        "notdec.solidity.checked_bounds": 15,
         "notdec.solidity.event": 14,
         "notdec.solidity.external_call": 33,
         "notdec.solidity.packed_storage_field": 206,
@@ -1879,7 +2067,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 77,
-        "notdec.solidity.checked_bounds": 41,
+        "notdec.solidity.checked_bounds": 30,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 39,
@@ -1909,13 +2097,14 @@
       },
       "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
-        "empty_revert_guard_candidate": 11,
         "panic_unknown": 7,
         "panic_resource_error": 5,
         "panic_storage_encoding": 1,
-        "panic_checked_arithmetic": 15,
+        "checked_add": 1,
+        "checked_sub": 1,
         "panic_enum_conversion": 1,
-        "panic_division_by_zero": 1
+        "panic_checked_arithmetic": 13,
+        "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
         "65": 5,
@@ -1924,13 +2113,16 @@
         "33": 1,
         "18": 1
       },
-      "expected_checked_bounds_marker_payloads": {
-        "65:6191920814015636654": 5,
-        "34:2197520063016227696": 1,
-        "17:15101511251744566749": 15,
-        "33:4649423403057108071": 1,
-        "18:18064528040178099939": 1
-      }
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_add": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_checked_div": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 25,
+        "unsupported_condition": 2
+      },
+      "expected_checked_bounds_cfg_rewrites": 3
     },
     {
       "name": "1407_19503702_47675ff2ed_71b1710392bd",
@@ -1950,7 +2142,7 @@
       "expected_nonpayable_functions": 38,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 62,
-        "notdec.solidity.checked_bounds": 39,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 10,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 70,
@@ -1998,7 +2190,7 @@
       "expected_nonpayable_functions": 73,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 102,
-        "notdec.solidity.checked_bounds": 28,
+        "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 124,
@@ -2046,7 +2238,7 @@
       "expected_nonpayable_functions": 39,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 50,
-        "notdec.solidity.checked_bounds": 46,
+        "notdec.solidity.checked_bounds": 18,
         "notdec.solidity.event": 9,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 61,
@@ -2094,7 +2286,7 @@
       "expected_nonpayable_functions": 46,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 64,
-        "notdec.solidity.checked_bounds": 64,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
         "notdec.solidity.external_call": 10,
         "notdec.solidity.packed_storage_field": 18,
@@ -2140,7 +2332,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 56,
-        "notdec.solidity.checked_bounds": 42,
+        "notdec.solidity.checked_bounds": 14,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.packed_storage_field": 57,
@@ -2188,7 +2380,7 @@
       "expected_nonpayable_functions": 56,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 82,
-        "notdec.solidity.checked_bounds": 24,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 11,
         "notdec.solidity.packed_storage_field": 117,
@@ -2236,7 +2428,7 @@
       "expected_nonpayable_functions": 30,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 38,
+        "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 7,
         "notdec.solidity.packed_storage_field": 117,
@@ -2284,7 +2476,7 @@
       "expected_nonpayable_functions": 37,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 38,
-        "notdec.solidity.checked_bounds": 26,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
         "notdec.solidity.external_call": 8,
         "notdec.solidity.packed_storage_field": 108,
@@ -2332,7 +2524,7 @@
       "expected_nonpayable_functions": 63,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 92,
-        "notdec.solidity.checked_bounds": 27,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
         "notdec.solidity.external_call": 13,
         "notdec.solidity.packed_storage_field": 114,
@@ -2380,7 +2572,7 @@
       "expected_nonpayable_functions": 63,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 92,
-        "notdec.solidity.checked_bounds": 27,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
         "notdec.solidity.external_call": 13,
         "notdec.solidity.packed_storage_field": 114,
@@ -2428,7 +2620,7 @@
       "expected_nonpayable_functions": 63,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 92,
-        "notdec.solidity.checked_bounds": 27,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
         "notdec.solidity.external_call": 13,
         "notdec.solidity.packed_storage_field": 114,
@@ -2476,7 +2668,7 @@
       "expected_nonpayable_functions": 58,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 86,
-        "notdec.solidity.checked_bounds": 21,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 95,
@@ -2524,7 +2716,7 @@
       "expected_nonpayable_functions": 27,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 36,
-        "notdec.solidity.checked_bounds": 11,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 40,
@@ -2572,7 +2764,7 @@
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 4,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 6,
@@ -2619,7 +2811,7 @@
       "expected_nonpayable_functions": 11,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.checked_bounds": 7,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 0,
         "notdec.solidity.packed_storage_field": 3,
@@ -2667,7 +2859,7 @@
       "expected_nonpayable_functions": 10,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 19,
+        "notdec.solidity.checked_bounds": 5,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 8,
         "notdec.solidity.packed_storage_field": 27,
@@ -2715,7 +2907,7 @@
       "expected_nonpayable_functions": 38,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 46,
-        "notdec.solidity.checked_bounds": 31,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 7,
         "notdec.solidity.external_call": 6,
         "notdec.solidity.packed_storage_field": 60,
@@ -2763,7 +2955,7 @@
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 4,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 6,
@@ -2811,7 +3003,7 @@
       "expected_nonpayable_functions": 20,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 20,
+        "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 3,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.packed_storage_field": 57,
@@ -2859,7 +3051,7 @@
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 4,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 6,
@@ -2907,7 +3099,7 @@
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 44,
-        "notdec.solidity.checked_bounds": 22,
+        "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 12,
         "notdec.solidity.packed_storage_field": 55,
@@ -2955,7 +3147,7 @@
       "expected_nonpayable_functions": 25,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 22,
+        "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 47,
@@ -3003,7 +3195,7 @@
       "expected_nonpayable_functions": 42,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 62,
-        "notdec.solidity.checked_bounds": 19,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.packed_storage_field": 60,
@@ -3051,7 +3243,7 @@
       "expected_nonpayable_functions": 26,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 36,
-        "notdec.solidity.checked_bounds": 22,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.packed_storage_field": 71,
@@ -3099,7 +3291,7 @@
       "expected_nonpayable_functions": 33,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 36,
-        "notdec.solidity.checked_bounds": 34,
+        "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 72,
@@ -3147,7 +3339,7 @@
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 33,
+        "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 64,
@@ -3195,7 +3387,7 @@
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 33,
+        "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 64,
@@ -3243,7 +3435,7 @@
       "expected_nonpayable_functions": 25,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.checked_bounds": 22,
+        "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 7,
         "notdec.solidity.packed_storage_field": 68,
@@ -3291,7 +3483,7 @@
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 33,
+        "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.packed_storage_field": 64,
@@ -3339,7 +3531,7 @@
       "expected_nonpayable_functions": 21,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 22,
-        "notdec.solidity.checked_bounds": 21,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.packed_storage_field": 19,
@@ -3387,7 +3579,7 @@
       "expected_nonpayable_functions": 23,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.checked_bounds": 21,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 45,
@@ -3435,7 +3627,7 @@
       "expected_nonpayable_functions": 10,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 8,
-        "notdec.solidity.checked_bounds": 6,
+        "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 1,
         "notdec.solidity.packed_storage_field": 23,

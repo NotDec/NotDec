@@ -154,6 +154,16 @@ def count_payability_cfg_rewrites(path: Path) -> int:
     return text.count("call void @notdec_solidity_cfg_rewrite_payability_guard(")
 
 
+def count_checked_bounds_cfg_rewrites(path: Path) -> int:
+    text = path.read_text()
+    return len(
+        re.findall(
+            r"br label %[^,\n]+,[^\n]*!notdec\.solidity\.checked_bounds",
+            text,
+        )
+    )
+
+
 def count_exact_marker(path: Path, marker_name: str) -> int:
     text = path.read_text()
     return text.count(f"call void @{marker_name}(")
@@ -481,11 +491,19 @@ def main() -> int:
                 for metadata_name, count in case.get(
                     "expected_metadata_counts", {}
                 ).items():
+                    if metadata_name == "notdec.solidity.checked_bounds":
+                        continue
                     expected_counts[
                         f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
                     ] = count
             if expect_rewrite_hidden:
-                hidden_count = sum(case.get("expected_metadata_counts", {}).values())
+                hidden_count = sum(
+                    count
+                    for metadata_name, count in case.get(
+                        "expected_metadata_counts", {}
+                    ).items()
+                    if metadata_name != "notdec.solidity.checked_bounds"
+                )
                 expected_counts["rewrite_hidden_markers"] = hidden_count
                 expected_counts["rewrite_hidden_metadata"] = hidden_count
             if "payability" in case.get("patterns", []) or "nonpayable_guard" in case.get(
@@ -509,6 +527,20 @@ def main() -> int:
                 "expected_checked_bounds_marker_payloads", {}
             ).items():
                 expected_counts[f"checked_bounds_marker_payload:{payload}"] = expected
+            for marker_name, expected in case.get(
+                "expected_checked_bounds_semantic_markers", {}
+            ).items():
+                expected_counts[f"checked_bounds_semantic_marker:{marker_name}"] = (
+                    expected
+                )
+            for reason, expected in case.get(
+                "expected_checked_bounds_skip_reasons", {}
+            ).items():
+                expected_counts[f"checked_bounds_skip_reason:{reason}"] = expected
+            if "expected_checked_bounds_cfg_rewrites" in case:
+                expected_counts["checked_bounds_cfg_rewrites"] = case[
+                    "expected_checked_bounds_cfg_rewrites"
+                ]
             if "expected_returndata_bubbles" in case:
                 expected_counts["returndata_bubbles"] = case[
                     "expected_returndata_bubbles"
@@ -561,7 +593,10 @@ def main() -> int:
                 actual_counts[metadata_name] = count_metadata_uses(
                     output_ll, metadata_name
                 )
-                if expect_rewrite_markers:
+                if (
+                    expect_rewrite_markers
+                    and metadata_name != "notdec.solidity.checked_bounds"
+                ):
                     actual_counts[
                         f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
                     ] = count_rewrite_markers(output_ll, metadata_name)
@@ -606,6 +641,23 @@ def main() -> int:
             for payload in case.get("expected_checked_bounds_marker_payloads", {}):
                 actual_counts[f"checked_bounds_marker_payload:{payload}"] = (
                     actual_checked_bounds_marker_payloads.get(str(payload), 0)
+                )
+            for marker_name in case.get(
+                "expected_checked_bounds_semantic_markers", {}
+            ):
+                actual_counts[f"checked_bounds_semantic_marker:{marker_name}"] = (
+                    count_exact_marker(output_ll, marker_name)
+                )
+            actual_checked_bounds_skip_reasons = count_metadata_string_values(
+                output_ll, "notdec.solidity_checked_bounds.skipped"
+            )
+            for reason in case.get("expected_checked_bounds_skip_reasons", {}):
+                actual_counts[f"checked_bounds_skip_reason:{reason}"] = (
+                    actual_checked_bounds_skip_reasons.get(str(reason), 0)
+                )
+            if "checked_bounds_cfg_rewrites" in expected_counts:
+                actual_counts["checked_bounds_cfg_rewrites"] = (
+                    count_checked_bounds_cfg_rewrites(output_ll)
                 )
             if "returndata_bubbles" in expected_counts:
                 actual_counts["returndata_bubbles"] = actual_revert_kinds.get(
