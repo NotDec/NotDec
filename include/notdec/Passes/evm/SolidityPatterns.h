@@ -54,8 +54,10 @@ struct SolidityRevertPass : llvm::PassInfoMixin<SolidityRevertPass> {
   static bool isRequired() { return true; }
 };
 
-// Marks compiler-inserted guard candidates that branch to empty revert or Panic.
-// It deliberately leaves the exact source category to later passes.
+// Marks compiler-inserted checked arithmetic and bounds guards.  Panic guards
+// are classified by Solidity's stable Panic(uint256) code; empty reverts stay
+// conservative candidates because several compiler and user paths share that
+// shape.
 struct CheckedBoundsPass : llvm::PassInfoMixin<CheckedBoundsPass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);

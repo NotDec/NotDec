@@ -7,6 +7,189 @@
   ],
   "cases": [
     {
+      "name": "checked_bounds_arithmetic_01",
+      "input": "cases/checked_bounds_arithmetic_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "checked_arithmetic"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 2,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 4,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 3,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "17": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "empty_revert_guard_candidate": 1,
+        "panic_checked_arithmetic": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 1
+      },
+      "expected_checked_bounds_marker_payloads": {
+        "17:15101511251744566749": 1
+      }
+    },
+    {
+      "name": "checked_bounds_division_01",
+      "input": "cases/checked_bounds_division_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "division_by_zero"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 2,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 4,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 3,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "18": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "empty_revert_guard_candidate": 1,
+        "panic_division_by_zero": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "18": 1
+      },
+      "expected_checked_bounds_marker_payloads": {
+        "18:18064528040178099939": 1
+      }
+    },
+    {
+      "name": "checked_bounds_array_01",
+      "input": "cases/checked_bounds_array_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "array_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 7,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 9,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 6,
+        "panic": 3
+      },
+      "expected_panic_codes": {
+        "50": 1,
+        "65": 2
+      },
+      "expected_checked_bounds_kinds": {
+        "empty_revert_guard_candidate": 4,
+        "panic_array_out_of_bounds": 1,
+        "panic_resource_error": 2
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 1,
+        "65": 2
+      },
+      "expected_checked_bounds_marker_payloads": {
+        "50:9071136428616289443": 1,
+        "65:6191920814015636654": 2
+      }
+    },
+    {
+      "name": "checked_bounds_enum_01",
+      "input": "cases/checked_bounds_enum_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "enum_conversion"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 2,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 4,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 3,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "33": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "empty_revert_guard_candidate": 1,
+        "panic_enum_conversion": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "33": 1
+      },
+      "expected_checked_bounds_marker_payloads": {
+        "33:4649423403057108071": 1
+      }
+    },
+    {
+      "name": "checked_bounds_pop_01",
+      "input": "cases/checked_bounds_pop_01.ll",
+      "patterns": [
+        "checked_bounds",
+        "empty_array_pop"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 1,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 3,
+        "notdec.solidity.storage_addressing": 1
+      },
+      "expected_revert_kinds": {
+        "empty": 2,
+        "panic": 1
+      },
+      "expected_panic_codes": {
+        "49": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "panic_empty_array_pop": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "49": 1
+      },
+      "expected_checked_bounds_marker_payloads": {
+        "49:16732963434595278286": 1
+      }
+    },
+    {
       "name": "revert_error_string_01",
       "input": "cases/revert_error_string_01.ll",
       "patterns": [
@@ -1341,7 +1524,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 79,
-        "notdec.solidity.checked_bounds": 31,
+        "notdec.solidity.checked_bounds": 38,
         "notdec.solidity.event": 13,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 41,
@@ -1369,7 +1552,30 @@
         "65": 5,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_checked_bounds_kinds": {
+        "empty_revert_guard_candidate": 8,
+        "panic_unknown": 7,
+        "panic_storage_encoding": 1,
+        "panic_resource_error": 5,
+        "panic_checked_arithmetic": 15,
+        "panic_enum_conversion": 1,
+        "panic_division_by_zero": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "34": 1,
+        "65": 5,
+        "17": 15,
+        "33": 1,
+        "18": 1
+      },
+      "expected_checked_bounds_marker_payloads": {
+        "34:2197520063016227696": 1,
+        "65:6191920814015636654": 5,
+        "17:15101511251744566749": 15,
+        "33:4649423403057108071": 1,
+        "18:18064528040178099939": 1
+      }
     },
     {
       "name": "0334_19494307_668d201319_1354ce2e324d",
@@ -1673,7 +1879,7 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 77,
-        "notdec.solidity.checked_bounds": 34,
+        "notdec.solidity.checked_bounds": 41,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.packed_storage_field": 39,
@@ -1701,7 +1907,30 @@
         "65": 5,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_checked_bounds_kinds": {
+        "empty_revert_guard_candidate": 11,
+        "panic_unknown": 7,
+        "panic_resource_error": 5,
+        "panic_storage_encoding": 1,
+        "panic_checked_arithmetic": 15,
+        "panic_enum_conversion": 1,
+        "panic_division_by_zero": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 5,
+        "34": 1,
+        "17": 15,
+        "33": 1,
+        "18": 1
+      },
+      "expected_checked_bounds_marker_payloads": {
+        "65:6191920814015636654": 5,
+        "34:2197520063016227696": 1,
+        "17:15101511251744566749": 15,
+        "33:4649423403057108071": 1,
+        "18:18064528040178099939": 1
+      }
     },
     {
       "name": "1407_19503702_47675ff2ed_71b1710392bd",

@@ -98,6 +98,16 @@ struct PayabilityGuardMatch {
   BranchInst *Branch = nullptr;
 };
 
+// One compiler-inserted checked operation or bounds guard.  Keep both the
+// branch and the panic exit when available: the branch is the guard site, while
+// the panic code is the stable Solidity reason we expose to tests and lowering.
+struct CheckedBoundsMatch {
+  StringRef Kind = "unknown";
+  BranchInst *Branch = nullptr;
+  CallBase *Revert = nullptr;
+  std::optional<uint64_t> PanicCode;
+};
+
 bool isCallTo(const Value *V, StringRef Name) {
   if (V == nullptr) {
     return false;
@@ -1178,10 +1188,6 @@ buildAsciiStringLiteral(uint64_t Length, SmallVectorImpl<RevertStringWord> &Word
   return Result;
 }
 
-bool isPanicSelectorValue(Value *V) {
-  return getSelectorWord(V) == PANIC_SELECTOR;
-}
-
 CallBase *findReturndataBubbleCopy(BasicBlock &BB, CallBase &Revert) {
   if (Revert.arg_size() != 3 ||
       !isReturndataSize(Revert.getArgOperand(2))) {
@@ -1204,23 +1210,6 @@ CallBase *findReturndataBubbleCopy(BasicBlock &BB, CallBase &Revert) {
     }
   }
   return nullptr;
-}
-
-bool hasPanicSelectorStore(BasicBlock &BB, CallBase &Revert) {
-  for (Instruction &I : BB) {
-    if (&I == &Revert) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3 || !isZero(Call->getArgOperand(1))) {
-      continue;
-    }
-    if (isPanicSelectorValue(Call->getArgOperand(2))) {
-      return true;
-    }
-  }
-  return false;
 }
 
 std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
@@ -1427,6 +1416,79 @@ void addRevertMatchMetadata(LLVMContext &Ctx,
                      "notdec.solidity_revert.returndata_copy",
                      "returndata_bubble");
   }
+}
+
+StringRef getCheckedBoundsKindForPanicCode(uint64_t Code) {
+  switch (Code) {
+  case 0x00:
+    return "panic_generic";
+  case 0x01:
+    return "panic_assert";
+  case 0x11:
+    return "panic_checked_arithmetic";
+  case 0x12:
+    return "panic_division_by_zero";
+  case 0x21:
+    return "panic_enum_conversion";
+  case 0x22:
+    return "panic_storage_encoding";
+  case 0x31:
+    return "panic_empty_array_pop";
+  case 0x32:
+    return "panic_array_out_of_bounds";
+  case 0x41:
+    return "panic_resource_error";
+  case 0x51:
+    return "panic_invalid_internal_function";
+  default:
+    return "panic_unknown";
+  }
+}
+
+void insertCheckedBoundsPanicRewriteMarker(LLVMContext &Ctx,
+                                           const CheckedBoundsMatch &Match) {
+  if (Match.Revert == nullptr || !Match.PanicCode.has_value()) {
+    return;
+  }
+
+  Module *M = Match.Revert->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_checked_bounds_panic",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {Type::getIntNTy(Ctx, 256),
+                         Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (Instruction *Next = Match.Revert->getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(Match.Revert->getParent());
+  }
+
+  Value *Args[] = {
+      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.PanicCode),
+      ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                       getRewriteKindCode(Match.Kind))};
+  Builder.CreateCall(Marker, Args);
+}
+
+void addCheckedBoundsMetadata(LLVMContext &Ctx,
+                              const CheckedBoundsMatch &Match) {
+  if (Match.Branch != nullptr) {
+    addStringMetadata(Ctx, *Match.Branch, KIND_SOLIDITY_CHECKED_BOUNDS,
+                      Match.Kind);
+  }
+  if (Match.Revert != nullptr) {
+    addStringMetadata(Ctx, *Match.Revert, KIND_SOLIDITY_CHECKED_BOUNDS,
+                      Match.Kind);
+    if (Match.PanicCode.has_value()) {
+      addPlainMetadata(Ctx, *Match.Revert,
+                       "notdec.solidity_checked_bounds.panic_code",
+                       Twine(*Match.PanicCode).str());
+    }
+  }
+  insertCheckedBoundsPanicRewriteMarker(Ctx, Match);
 }
 
 bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth,
@@ -1739,8 +1801,9 @@ PreservedAnalyses CheckedBoundsPass::run(Function &F, FunctionAnalysisManager &)
       if ((isEmptyRevertBlock(Br->getSuccessor(0)) ||
            isEmptyRevertBlock(Br->getSuccessor(1))) &&
           !dependsOnCallTo(Br->getCondition(), "evm_callvalue")) {
-        addStringMetadata(Ctx, *Br, KIND_SOLIDITY_CHECKED_BOUNDS,
-                          "guard_to_empty_revert_candidate");
+        addCheckedBoundsMetadata(
+            Ctx, CheckedBoundsMatch{"empty_revert_guard_candidate", Br,
+                                    nullptr, std::nullopt});
         ++NumCheckedBounds;
         Changed = true;
       }
@@ -1752,10 +1815,16 @@ PreservedAnalyses CheckedBoundsPass::run(Function &F, FunctionAnalysisManager &)
           Call->arg_size() != 3) {
         continue;
       }
-      if (isConstantIntValue(Call->getArgOperand(2), 36) &&
-          hasPanicSelectorStore(BB, *Call)) {
-        addStringMetadata(Ctx, I, KIND_SOLIDITY_CHECKED_BOUNDS,
-                          "panic_guard_candidate");
+      std::optional<SolidityRevertMatch> RevertMatch =
+          matchSolidityRevert(BB, *Call);
+      if (RevertMatch.has_value() && RevertMatch->Kind == "panic") {
+        StringRef Kind = RevertMatch->PanicCode.has_value()
+                             ? getCheckedBoundsKindForPanicCode(
+                                   *RevertMatch->PanicCode)
+                             : StringRef("panic_unknown");
+        addCheckedBoundsMetadata(Ctx, CheckedBoundsMatch{
+                                          Kind, nullptr, Call,
+                                          RevertMatch->PanicCode});
         ++NumCheckedBounds;
         Changed = true;
       }

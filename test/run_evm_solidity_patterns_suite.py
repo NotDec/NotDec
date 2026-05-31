@@ -499,6 +499,16 @@ def main() -> int:
                 expected_counts[f"revert_kind:{kind}"] = count
             for code, count in case.get("expected_panic_codes", {}).items():
                 expected_counts[f"panic_code:{code}"] = count
+            for kind, count in case.get("expected_checked_bounds_kinds", {}).items():
+                expected_counts[f"checked_bounds_kind:{kind}"] = count
+            for code, count in case.get(
+                "expected_checked_bounds_panic_codes", {}
+            ).items():
+                expected_counts[f"checked_bounds_panic_code:{code}"] = count
+            for payload, expected in case.get(
+                "expected_checked_bounds_marker_payloads", {}
+            ).items():
+                expected_counts[f"checked_bounds_marker_payload:{payload}"] = expected
             if "expected_returndata_bubbles" in case:
                 expected_counts["returndata_bubbles"] = case[
                     "expected_returndata_bubbles"
@@ -575,6 +585,27 @@ def main() -> int:
             for code in case.get("expected_panic_codes", {}):
                 actual_counts[f"panic_code:{code}"] = actual_panic_codes.get(
                     str(code), 0
+                )
+            actual_checked_bounds_kinds = count_metadata_string_values(
+                output_ll, "notdec.solidity.checked_bounds"
+            )
+            for kind in case.get("expected_checked_bounds_kinds", {}):
+                actual_counts[f"checked_bounds_kind:{kind}"] = (
+                    actual_checked_bounds_kinds.get(str(kind), 0)
+                )
+            actual_checked_bounds_panic_codes = count_metadata_string_values(
+                output_ll, "notdec.solidity_checked_bounds.panic_code"
+            )
+            for code in case.get("expected_checked_bounds_panic_codes", {}):
+                actual_counts[f"checked_bounds_panic_code:{code}"] = (
+                    actual_checked_bounds_panic_codes.get(str(code), 0)
+                )
+            actual_checked_bounds_marker_payloads = count_marker_arg_pairs(
+                output_ll, "notdec_solidity_rewrite_checked_bounds_panic"
+            )
+            for payload in case.get("expected_checked_bounds_marker_payloads", {}):
+                actual_counts[f"checked_bounds_marker_payload:{payload}"] = (
+                    actual_checked_bounds_marker_payloads.get(str(payload), 0)
                 )
             if "returndata_bubbles" in expected_counts:
                 actual_counts["returndata_bubbles"] = actual_revert_kinds.get(
