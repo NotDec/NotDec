@@ -2121,8 +2121,8 @@
         "checked_add": 1,
         "panic_checked_arithmetic": 2,
         "memory_allocation_pointer_bounds": 2,
+        "memory_allocation_bounds": 1,
         "checked_mul": 3,
-        "panic_resource_error": 1,
         "checked_exp": 1
       },
       "expected_checked_bounds_panic_codes": {
@@ -2134,13 +2134,14 @@
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_checked_add": 1,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 1,
         "notdec_solidity_rewrite_checked_mul": 3,
         "notdec_solidity_rewrite_checked_exp": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 7
+        "unrecognized_operands": 6
       },
-      "expected_checked_bounds_cfg_rewrites": 8
+      "expected_checked_bounds_cfg_rewrites": 9
     },
     {
       "name": "0648_19497230_998d150449_ea367f7fc1ac",

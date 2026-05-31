@@ -93,6 +93,7 @@ if free_ptr >= 2^64 - fixed_size:
 
 bytes/string 的长度上限检查不会出现 `length * 32`，要靠后续
 `mstore(free_ptr, length)`、rounded size 和 free pointer 写回一起确认。
+如果中间插入了 free pointer overflow guard，header store 可能落在紧邻后继块。
 
 enum 转换、小整数转换、bytes/string storage 编码错误也可能生成不同 panic code。
 

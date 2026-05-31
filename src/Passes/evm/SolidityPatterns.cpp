@@ -2199,6 +2199,51 @@ bool isRoundedByteAllocationSize(Value *V) {
           isConstantIntValue(LengthAdd->getOperand(1), 31));
 }
 
+bool isRoundedByteAllocationSizeForLength(Value *V, Value *Length) {
+  auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
+  if (RoundedSize == nullptr ||
+      RoundedSize->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  Value *RoundedBase = nullptr;
+  if (isMaskClearingLowFiveBits(RoundedSize->getOperand(0))) {
+    RoundedBase = RoundedSize->getOperand(1);
+  } else if (isMaskClearingLowFiveBits(RoundedSize->getOperand(1))) {
+    RoundedBase = RoundedSize->getOperand(0);
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(RoundedBase);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  Value *InnerRounded = nullptr;
+  if (isConstantIntValue(Add->getOperand(0), 63)) {
+    InnerRounded = Add->getOperand(1);
+  } else if (isConstantIntValue(Add->getOperand(1), 63)) {
+    InnerRounded = Add->getOperand(0);
+  }
+
+  auto *InnerAnd = dyn_cast_or_null<BinaryOperator>(InnerRounded);
+  if (InnerAnd == nullptr || InnerAnd->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  Value *InnerBase = nullptr;
+  if (isMaskClearingLowFiveBits(InnerAnd->getOperand(0))) {
+    InnerBase = InnerAnd->getOperand(1);
+  } else if (isMaskClearingLowFiveBits(InnerAnd->getOperand(1))) {
+    InnerBase = InnerAnd->getOperand(0);
+  }
+
+  auto *LengthAdd = dyn_cast_or_null<BinaryOperator>(InnerBase);
+  return LengthAdd != nullptr && LengthAdd->getOpcode() == Instruction::Add &&
+         binaryOpHasOperand(LengthAdd, Length) &&
+         (isConstantIntValue(LengthAdd->getOperand(0), 31) ||
+          isConstantIntValue(LengthAdd->getOperand(1), 31));
+}
+
 bool hasPowerOfTwoExpComputation(BasicBlock *SuccessBlock, Value *Exponent) {
   if (SuccessBlock == nullptr || Exponent == nullptr) {
     return false;
@@ -2217,6 +2262,54 @@ bool hasPowerOfTwoExpComputation(BasicBlock *SuccessBlock, Value *Exponent) {
     if (isCallTo(Call, "evm_exp") &&
         isConstantIntValue(Call->getArgOperand(0), 2) &&
         isSameValue(Call->getArgOperand(1), Exponent)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasBytesAllocationStores(BasicBlock *BB, Value *OldPtr, Value *NewPtr,
+                              Value *Length) {
+  if (BB == nullptr) {
+    return false;
+  }
+
+  bool StoresLength = false;
+  bool StoresFreePtr = false;
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
+        Call->arg_size() != 3) {
+      continue;
+    }
+    if (isSameValue(Call->getArgOperand(1), OldPtr) &&
+        isSameValue(Call->getArgOperand(2), Length)) {
+      StoresLength = true;
+    }
+    if (isConstantIntValue(Call->getArgOperand(1), 64) &&
+        isSameValue(Call->getArgOperand(2), NewPtr)) {
+      StoresFreePtr = true;
+    }
+  }
+  return StoresLength && StoresFreePtr;
+}
+
+bool hasBytesAllocationStoresOnLocalPath(BasicBlock *SuccessBlock,
+                                         Value *OldPtr, Value *NewPtr,
+                                         Value *Length) {
+  if (hasBytesAllocationStores(SuccessBlock, OldPtr, NewPtr, Length)) {
+    return true;
+  }
+
+  // Solidity may split the length guard and the header stores with a pointer
+  // overflow guard. Keep the search local so unrelated later stores do not
+  // justify rewriting the length check.
+  auto *Term = SuccessBlock == nullptr ? nullptr : SuccessBlock->getTerminator();
+  if (Term == nullptr) {
+    return false;
+  }
+  for (BasicBlock *Succ : successors(Term)) {
+    if (hasBytesAllocationStores(Succ, OldPtr, NewPtr, Length)) {
       return true;
     }
   }
@@ -2274,35 +2367,31 @@ bool hasMemoryBytesAllocationComputation(BasicBlock *SuccessBlock,
     return false;
   }
 
-  Value *OldPtr = nullptr;
+  SmallVector<Value *, 4> OldPtrs;
   for (Instruction &I : *SuccessBlock) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3 || !isSameValue(Call->getArgOperand(2), Length) ||
-        !isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
-      continue;
+    if (isFreeMemoryPointerLoad(&I)) {
+      OldPtrs.push_back(&I);
     }
-    OldPtr = Call->getArgOperand(1);
-    break;
-  }
-  if (OldPtr == nullptr) {
-    return false;
   }
 
-  for (Instruction &I : *SuccessBlock) {
-    auto *NewPtr = dyn_cast<BinaryOperator>(&I);
-    if (NewPtr == nullptr || NewPtr->getOpcode() != Instruction::Add ||
-        !binaryOpHasOperand(NewPtr, OldPtr)) {
-      continue;
-    }
-    Value *Size = isSameValue(NewPtr->getOperand(0), OldPtr)
-                      ? NewPtr->getOperand(1)
-                      : NewPtr->getOperand(0);
-    if (!isByteAllocationSize(Size, Length)) {
-      continue;
-    }
-    if (findFreeMemoryPointerStore(SuccessBlock, NewPtr) != nullptr) {
-      return true;
+  for (Value *OldPtr : OldPtrs) {
+    for (Instruction &I : *SuccessBlock) {
+      auto *NewPtr = dyn_cast<BinaryOperator>(&I);
+      if (NewPtr == nullptr || NewPtr->getOpcode() != Instruction::Add ||
+          !binaryOpHasOperand(NewPtr, OldPtr)) {
+        continue;
+      }
+      Value *Size = isSameValue(NewPtr->getOperand(0), OldPtr)
+                        ? NewPtr->getOperand(1)
+                        : NewPtr->getOperand(0);
+      if (!isByteAllocationSize(Size, Length) &&
+          !isRoundedByteAllocationSizeForLength(Size, Length)) {
+        continue;
+      }
+      if (hasBytesAllocationStoresOnLocalPath(SuccessBlock, OldPtr, NewPtr,
+                                              Length)) {
+        return true;
+      }
     }
   }
   return false;
