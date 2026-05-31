@@ -211,6 +211,30 @@ std::optional<uint64_t> matchUInt64LimitMinus(const Value *V) {
   return Size;
 }
 
+std::optional<uint64_t> matchUInt64LimitMinusStrictUpper(const Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr || C->getBitWidth() <= 64) {
+    return std::nullopt;
+  }
+
+  APInt Limit(C->getBitWidth(), 1);
+  Limit <<= 64;
+  if (C->getValue().uge(Limit)) {
+    return std::nullopt;
+  }
+
+  APInt Diff = Limit - C->getValue() - 1;
+  if (Diff.getActiveBits() > 64) {
+    return std::nullopt;
+  }
+
+  uint64_t Size = Diff.getZExtValue();
+  if (Size == 0 || Size > 4096 || Size % 32 != 0) {
+    return std::nullopt;
+  }
+  return Size;
+}
+
 bool isMinus32(const Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   if (C == nullptr) {
@@ -2854,16 +2878,27 @@ std::optional<CheckedBoundsMatch> matchFixedMemoryAllocationPointerBounds(
 
   Value *OldPtr = nullptr;
   std::optional<uint64_t> Size;
+  bool StrictUpperBound = false;
   if (FailureCond.Predicate == ICmpInst::ICMP_UGE) {
     OldPtr = Cmp->getOperand(0);
     Size = matchUInt64LimitMinus(Cmp->getOperand(1));
   } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
     OldPtr = Cmp->getOperand(1);
     Size = matchUInt64LimitMinus(Cmp->getOperand(0));
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGT) {
+    OldPtr = Cmp->getOperand(0);
+    Size = matchUInt64LimitMinusStrictUpper(Cmp->getOperand(1));
+    StrictUpperBound = true;
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT) {
+    OldPtr = Cmp->getOperand(1);
+    Size = matchUInt64LimitMinusStrictUpper(Cmp->getOperand(0));
+    StrictUpperBound = true;
   }
 
-  if (OldPtr == nullptr || !Size.has_value() ||
-      !isFreeMemoryPointerLoad(OldPtr)) {
+  if (OldPtr == nullptr || !Size.has_value()) {
+    return std::nullopt;
+  }
+  if (!StrictUpperBound && !isFreeMemoryPointerLoad(OldPtr)) {
     return std::nullopt;
   }
 

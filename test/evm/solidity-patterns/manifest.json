@@ -1824,8 +1824,8 @@
       "expected_checked_bounds_kinds": {
         "panic_unknown": 7,
         "storage_bytes_encoding": 1,
-        "panic_resource_error": 4,
-        "memory_allocation_pointer_bounds": 1,
+        "panic_resource_error": 1,
+        "memory_allocation_pointer_bounds": 4,
         "checked_add": 6,
         "panic_enum_conversion": 1,
         "checked_sub": 6,
@@ -1844,13 +1844,13 @@
         "notdec_solidity_rewrite_checked_sub": 6,
         "notdec_solidity_rewrite_checked_div": 1,
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
-        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 15,
+        "unrecognized_operands": 12,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 15
+      "expected_checked_bounds_cfg_rewrites": 18
     },
     {
       "name": "0334_19494307_668d201319_1354ce2e324d",
@@ -2245,8 +2245,8 @@
       "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
         "panic_unknown": 7,
-        "panic_resource_error": 4,
-        "memory_allocation_pointer_bounds": 1,
+        "panic_resource_error": 1,
+        "memory_allocation_pointer_bounds": 4,
         "storage_bytes_encoding": 1,
         "checked_add": 6,
         "checked_sub": 6,
@@ -2266,13 +2266,13 @@
         "notdec_solidity_rewrite_checked_sub": 6,
         "notdec_solidity_rewrite_checked_div": 1,
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
-        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 15,
+        "unrecognized_operands": 12,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 15
+      "expected_checked_bounds_cfg_rewrites": 18
     },
     {
       "name": "1407_19503702_47675ff2ed_71b1710392bd",
