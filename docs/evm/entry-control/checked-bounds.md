@@ -71,6 +71,9 @@ value = array[index]
 if length >= 2^64:
     panic(0x41)
 payload_size = round_up(length * 32)
+new_free_ptr = free_ptr + payload_size
+if new_free_ptr < free_ptr or new_free_ptr >= 2^64:
+    panic(0x41)
 ```
 
 enum 转换、小整数转换、bytes/string storage 编码错误也可能生成不同 panic code。

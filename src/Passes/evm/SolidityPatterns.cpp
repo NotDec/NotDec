@@ -156,6 +156,15 @@ bool isUInt64Limit(const Value *V) {
   return C->getValue() == Limit;
 }
 
+bool isMinus32(const Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr) {
+    return false;
+  }
+  const APInt &Value = C->getValue();
+  return Value == APInt(Value.getBitWidth(), -32, true);
+}
+
 bool isAllOnes(const Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   return C != nullptr && C->isMinusOne();
@@ -2032,6 +2041,61 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
              ConstantInt::get(Length->getType(), -32, true)) != nullptr;
 }
 
+bool isMemoryAllocationSize(Value *V) {
+  auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
+  if (RoundedSize == nullptr || RoundedSize->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  Value *RoundedBase = nullptr;
+  if (isMinus32(RoundedSize->getOperand(0))) {
+    RoundedBase = RoundedSize->getOperand(1);
+  } else if (isMinus32(RoundedSize->getOperand(1))) {
+    RoundedBase = RoundedSize->getOperand(0);
+  }
+  if (RoundedBase == nullptr) {
+    return false;
+  }
+
+  auto *Add = dyn_cast<BinaryOperator>(RoundedBase);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  Value *Shift = nullptr;
+  if (isConstantIntValue(Add->getOperand(0), 63)) {
+    Shift = Add->getOperand(1);
+  } else if (isConstantIntValue(Add->getOperand(1), 63)) {
+    Shift = Add->getOperand(0);
+  }
+  auto *ShiftCall = dyn_cast_or_null<CallBase>(Shift);
+  return ShiftCall != nullptr && isCallTo(ShiftCall, "evm_shl") &&
+         ShiftCall->arg_size() == 2 &&
+         isConstantIntValue(ShiftCall->getArgOperand(0), 5);
+}
+
+bool isFreeMemoryPointerLoad(Value *V) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  return Call != nullptr && isCallTo(Call, "evm_mload") &&
+         Call->arg_size() == 2 && isConstantIntValue(Call->getArgOperand(1), 64);
+}
+
+CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
+  if (BB == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
+        Call->arg_size() == 3 &&
+        isConstantIntValue(Call->getArgOperand(1), 64) &&
+        isSameValue(Call->getArgOperand(2), NewPtr)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
 std::optional<CheckedBoundsMatch>
 matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
                             const SolidityRevertMatch &RevertMatch,
@@ -2067,6 +2131,73 @@ matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
                             nullptr,
                             RevertMatch.Revert,
                             {Length},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
+std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
+    Value *BranchCondition, bool FailureWhenCondTrue,
+    const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41 ||
+      FailureWhenCondTrue) {
+    return std::nullopt;
+  }
+
+  auto *And = dyn_cast_or_null<BinaryOperator>(BranchCondition);
+  if (And == nullptr || And->getOpcode() != Instruction::And ||
+      !And->getType()->isIntegerTy(1)) {
+    return std::nullopt;
+  }
+
+  Value *RangeCheckedPtr = nullptr;
+  Value *NoWrapCheckedPtr = nullptr;
+  Value *OldPtr = nullptr;
+  for (Value *Operand : {And->getOperand(0), And->getOperand(1)}) {
+    auto *Cmp = dyn_cast<ICmpInst>(Operand);
+    if (Cmp == nullptr) {
+      return std::nullopt;
+    }
+    if (Cmp->getPredicate() == ICmpInst::ICMP_ULT &&
+        isUInt64Limit(Cmp->getOperand(1))) {
+      RangeCheckedPtr = Cmp->getOperand(0);
+      continue;
+    }
+    if (Cmp->getPredicate() == ICmpInst::ICMP_UGE) {
+      NoWrapCheckedPtr = Cmp->getOperand(0);
+      OldPtr = Cmp->getOperand(1);
+      continue;
+    }
+    return std::nullopt;
+  }
+
+  if (RangeCheckedPtr == nullptr || NoWrapCheckedPtr == nullptr ||
+      !isSameValue(RangeCheckedPtr, NoWrapCheckedPtr) || OldPtr == nullptr ||
+      !isFreeMemoryPointerLoad(OldPtr)) {
+    return std::nullopt;
+  }
+
+  Value *NewPtr = RangeCheckedPtr;
+  auto *NewPtrAdd = dyn_cast<BinaryOperator>(NewPtr);
+  if (NewPtrAdd == nullptr || NewPtrAdd->getOpcode() != Instruction::Add ||
+      !binaryOpHasOperand(NewPtrAdd, OldPtr)) {
+    return std::nullopt;
+  }
+
+  Value *Size = isSameValue(NewPtrAdd->getOperand(0), OldPtr)
+                    ? NewPtrAdd->getOperand(1)
+                    : NewPtrAdd->getOperand(0);
+  if (!isMemoryAllocationSize(Size) ||
+      findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr) {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{"memory_allocation_pointer_bounds",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {OldPtr, Size, NewPtr},
                             RevertMatch.PanicCode,
                             true};
 }
@@ -2107,6 +2238,16 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
         {},
         RevertMatch->PanicCode,
         false};
+
+    if (std::optional<CheckedBoundsMatch> MemoryPointerBounds =
+            matchMemoryAllocationPointerBounds(
+                Br->getCondition(), FailureWhenCondTrue, *RevertMatch,
+                Br->getSuccessor(1 - SuccIdx))) {
+      MemoryPointerBounds->Branch = Br;
+      MemoryPointerBounds->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      MemoryPointerBounds->FailureBlock = Failure;
+      return MemoryPointerBounds;
+    }
 
     if (std::optional<CheckedBoundsMatch> Mul =
             matchCheckedMulGuard(Br->getCondition(), FailureWhenCondTrue,
@@ -2191,6 +2332,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "memory_allocation_bounds") {
     return "notdec_solidity_rewrite_memory_allocation_bounds";
+  }
+  if (Kind == "memory_allocation_pointer_bounds") {
+    return "notdec_solidity_rewrite_memory_allocation_pointer_bounds";
   }
   return "";
 }
