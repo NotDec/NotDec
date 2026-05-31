@@ -11,9 +11,9 @@
 一个新的 EVM Solidity 功能建议按这个顺序推进：
 
 1. 明确 Solidity codegen 依据。
-2. 定义第一版只处理哪些稳定形状。
+2. 定义当前明确支持的稳定形状，以及必须跳过的边界。
 3. 先写结构化 matcher，不要把识别、标注、rewrite 混在一团。
-4. 用 matcher 结果同时驱动 metadata、rewrite marker 和必要 CFG rewrite。
+4. 用 matcher 结果驱动 metadata、测试 oracle 和对外 rewrite。
 5. 把测试框架补到能检查新语义，而不是只看总数。
 6. 引入真实 case，必要时保留对应 Solidity 源码。
 7. 跑 pattern suite、rewrite suite、`llvm-as` 和性能对比。
@@ -34,16 +34,17 @@ if callvalue() { revert(0, 0) }
 revert 也先对照 Solidity 的 Panic、Error、custom error、returndata bubble 生成逻辑，
 再决定 matcher 优先级。
 
-第二，第一版只做哪些形态。
+第二，当前明确支持哪些形态。
 
-`PayabilityGuardPass` 第一版只处理直接形态：
+`PayabilityGuardPass` 当前支持直接形态：
 
 ```text
 callvalue == 0 ? success : revert(0, 0)
 callvalue != 0 ? revert(0, 0) : success
 ```
 
-不处理中间 block、复杂 bool 链、非空 revert。这让第一版可以安全做 CFG rewrite。
+中间 block、复杂 bool 链、非空 revert 不在这条规则里。它们不是靠猜来处理，而是等有
+真实 case 和明确判断标准后再扩展算法。
 
 第三，哪些情况必须跳过。
 
@@ -83,13 +84,18 @@ callvalue != 0 ? revert(0, 0) : success
 
 ## 明确 marker 和 metadata 分工
 
-metadata 适合 debug、统计和测试锚点。marker 更适合作为后续 rewrite 或 lowering 的稳定接口。
+metadata 适合 debug、统计和测试锚点。marker 更适合作为 rewrite 或后续 lowering 的稳定接口。
 
-之前的演进方向是：
+但要注意：对于明确支持 rewrite 的 pass，只打标记、不改写原始低层操作，只能用于内部测试、
+调试和过渡验证。对外输出不能长期同时保留原始低层操作和额外高层标记。这样会让同一段语义出现
+两份表达：一份是低层 EVM helper / CFG，一份是恢复出的高层语义，后续 consumer 很难判断该信谁。
 
-- 早期先用 `notdec.solidity.*` metadata 确认命中。
-- rewrite surface 阶段插入通用 rewrite / hidden marker。
-- 功能变稳定后，增加更有语义的 marker。
+正确目标是：
+
+- metadata 用来确认 matcher 命中、辅助 oracle 和排查误判。
+- marker 表达 rewrite 后保留下来的高层语义。
+- 原始低层操作能安全替换时就替换，不能安全替换时就跳过，不要对外输出“低层操作 + 高层标记”的冗余语义。
+- 如果某类模式暂时只能打标记，文档和日志里要明确它还不是对外完成状态。
 
 例子：
 
@@ -101,8 +107,31 @@ notdec_solidity_rewrite_revert_error_string(selector, string_length)
 notdec_solidity_rewrite_revert_custom_error(selector, static_arg_word_count)
 ```
 
-不要长期只保留“这个低层 helper 可以隐藏”这种弱 marker。marker 最好表达当前已经恢复出的
-关键语义。
+不要长期只保留“这个低层 helper 可以隐藏”这种弱 marker。marker 要表达当前已经恢复出的
+关键语义，并且服务于实际 rewrite 后的语义表示。
+
+## rewrite 要成为对外接口
+
+支持 rewrite 的 pass，对外接口应当是 rewrite 后的 IR，而不是 metadata-only IR。
+
+metadata-only 可以存在，但定位要清楚：
+
+- 内部调试。
+- 统计覆盖率。
+- 给测试 oracle 做锚点。
+- 在算法还没准备好 rewrite 时，短期观察 matcher 的误报和漏报。
+
+一旦一个模式进入 rewrite 范围，就要尽量做到：
+
+- 原始编译器低层保护、buffer 写入、helper 序列或 CFG 被删除、替换、outline，或者被后端明确隐藏。
+- 高层 marker / intrinsic / helper 表达恢复出的语义。
+- 测试检查 rewrite 结果，而不是只检查 metadata 存在。
+- 未能证明安全的 case 直接跳过 rewrite，并通过 skipped reason 或 oracle 暴露原因。
+
+保守 rewrite 和效果覆盖不是矛盾的。之前 selector outline 的过程就是靠不断加入真实 case，
+逐步修正算法边界：单入口、region input、多个 region、共享 tail / PHI、空 reject 出口。
+每一步都只放宽一个明确规则，同时扩充测试集。这样可以保持 rewrite 足够保守，又能在数据集上
+取得越来越好的覆盖。
 
 ## CFG rewrite 要保守
 
@@ -113,15 +142,16 @@ conditional branch -> unconditional branch to success block
 ```
 
 它不绕过 guard block，也不急着删 failure block。这样 PHI 和 dominance 风险低，死代码交给后续
-cleanup。
+cleanup。这里的重点是：对外控制流已经不再走 nonpayable 的低层 reject 分支，而不是只在原分支旁边
+加一个标记。
 
 `SelectorEntryOutliningPass` 更复杂，所以每次只放宽一种边界：
 
-- 先支持单入口、无 live-out 的 region。
-- 再支持 region input 作为 helper 参数。
-- 再支持多轮重扫，同一个 selector 拆多个 helper。
-- 再支持共享 tail / PHI 的窄形态。
-- 再支持空 reject 出口映射。
+- 支持单入口、无 live-out 的 region。
+- 支持 region input 作为 helper 参数。
+- 支持多轮重扫，同一个 selector 拆多个 helper。
+- 支持共享 tail / PHI 的窄形态。
+- 支持空 reject 出口映射。
 
 每次放宽都要有对应真实 case。不能为了提高 outline 数量，把 dispatcher 判断放宽到会误判业务分支。
 
@@ -160,8 +190,8 @@ delegatecall、共享 tail、空 reject 出口样例。
 
 `SolidityRevertPass` 的 Error(string) / custom error 就是这样推进的：
 
-1. 先用最小 IR case 验证 marker 和 oracle 能力。
-2. 再替换为 Solidity 0.8.26 生成的 runtime bytecode 转换出来的 IR。
+1. 用最小 IR case 验证 matcher、marker 和 oracle 能力。
+2. 替换为 Solidity 0.8.26 生成的 runtime bytecode 转换出来的 IR。
 3. 保留 `.sol` 源码，CTest 仍只跑稳定 `.ll`。
 
 没有把 Solidity 编译接进 CTest，是因为生成链路依赖 `npx solc`、Gigahorse 和 evm2llvm，
@@ -207,7 +237,8 @@ selector outline 用它检查：
 - skipped reason 是否符合预期。
 
 如果后续功能也会明显改 CFG 或搬移代码，应考虑加 rewrite suite 或扩展现有 rewrite suite。
-如果只是 marker 和 metadata 语义增强，先放 pattern suite 通常够用。
+如果只是内部 matcher 观察或 metadata 调试，先放 pattern suite 通常够用。只要该功能声明支持
+rewrite，就需要有测试检查 rewrite 后的结构或 marker 语义，不能只看 metadata。
 
 ## oracle 的粒度
 
@@ -267,7 +298,8 @@ fortune 当前关注用例。
 
 - 不要为了命中率把不确定 CFG 硬拆。
 - 不要让两个 pass 各自重复识别同一种底层语义。
-- 不要把 metadata-only 当最终成果。稳定后要有更明确的 marker 或 rewrite 表达。
+- 不要把 metadata-only 当最终成果。支持 rewrite 的 pass 对外必须有 rewrite 表达。
+- 不要对外长期保留“原始低层操作 + 高层标记”的冗余语义。
 - 不要只补 case 不补 oracle。
 - 不要只补总数 oracle，不检查 kind 和关键参数。
 - 不要把手写 IR 长期当真实 codegen 覆盖。
@@ -281,7 +313,8 @@ fortune 当前关注用例。
 - matcher 有结构化结果。
 - metadata 和 marker 分工明确。
 - pattern suite 有 oracle。
-- 如果改 CFG，有 rewrite suite 或等价结构检查。
+- 如果支持 rewrite，有 rewrite suite 或等价结构检查。
+- 对外输出不依赖 metadata-only 表达最终语义。
 - 新增 case 写入 manifest 的 `patterns` 字段。
 - 输出 IR 通过项目 LLVM 22 `llvm-as`。
 - `notdec.evm.solidity_patterns` 通过。
