@@ -15,7 +15,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
@@ -65,7 +64,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
@@ -115,7 +113,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
@@ -165,7 +162,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 3,
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 5,
         "notdec.solidity.event": 0,
@@ -215,7 +211,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
@@ -262,7 +257,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
@@ -309,7 +303,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
@@ -356,7 +349,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 3,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
@@ -403,7 +395,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
@@ -450,7 +441,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 2,
         "notdec.solidity.event": 0,
@@ -492,7 +482,6 @@
       "name": "0014_proxy_like",
       "input": "cases/0014_proxy_like.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "event_log",
         "external_call",
@@ -504,7 +493,6 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 1,
@@ -540,7 +528,6 @@
       "name": "0011_multi_public",
       "input": "cases/0011_multi_public.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "external_call",
@@ -552,7 +539,6 @@
       ],
       "expected_nonpayable_functions": 5,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 0,
@@ -588,7 +574,6 @@
       "name": "0002_delegatecall_no_nonpayable",
       "input": "cases/0002_delegatecall_no_nonpayable.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "external_call",
         "packed_storage_field",
@@ -597,7 +582,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
@@ -633,7 +617,6 @@
       "name": "0441_19494998_776c03cc9d_8117f350cb9d",
       "input": "cases/0441_19494998_776c03cc9d_8117f350cb9d.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -646,7 +629,6 @@
       ],
       "expected_nonpayable_functions": 6,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 10,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 2,
@@ -682,7 +664,6 @@
       "name": "0448_19495059_065877b669_4f138305be23",
       "input": "cases/0448_19495059_065877b669_4f138305be23.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -696,7 +677,6 @@
       ],
       "expected_nonpayable_functions": 19,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 6,
         "notdec.solidity.abi_return": 28,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 7,
@@ -732,7 +712,6 @@
       "name": "0450_19495071_6b6c9447e0_6344565f4b31",
       "input": "cases/0450_19495071_6b6c9447e0_6344565f4b31.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -746,7 +725,6 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
@@ -782,7 +760,6 @@
       "name": "0456_19495158_c7c34e07aa_0e692a3d145c",
       "input": "cases/0456_19495158_c7c34e07aa_0e692a3d145c.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -794,7 +771,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 20,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 2,
@@ -830,7 +806,6 @@
       "name": "0457_19495180_71d7525532_df21a257bd5c",
       "input": "cases/0457_19495180_71d7525532_df21a257bd5c.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -844,7 +819,6 @@
       ],
       "expected_nonpayable_functions": 15,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.event": 5,
@@ -880,7 +854,6 @@
       "name": "0459_19495198_fc5ac215e3_805f0e6bf43e",
       "input": "cases/0459_19495198_fc5ac215e3_805f0e6bf43e.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -894,7 +867,6 @@
       ],
       "expected_nonpayable_functions": 15,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.event": 5,
@@ -930,7 +902,6 @@
       "name": "0460_19495212_3dd362a96f_b915c4f6cb8b",
       "input": "cases/0460_19495212_3dd362a96f_b915c4f6cb8b.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -942,7 +913,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 12,
         "notdec.solidity.event": 5,
@@ -978,7 +948,6 @@
       "name": "0725_19498082_e78beb21f7_98e658f9eae8",
       "input": "cases/0725_19498082_e78beb21f7_98e658f9eae8.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -992,7 +961,6 @@
       ],
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 29,
         "notdec.solidity.event": 8,
@@ -1028,7 +996,6 @@
       "name": "0726_19498082_c3945ab21b_2b68f9f60fc2",
       "input": "cases/0726_19498082_c3945ab21b_2b68f9f60fc2.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1042,7 +1009,6 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
@@ -1078,7 +1044,6 @@
       "name": "0735_19498132_e6671af1f9_f57fe690a6a3",
       "input": "cases/0735_19498132_e6671af1f9_f57fe690a6a3.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "external_call",
@@ -1091,7 +1056,6 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 0,
@@ -1127,7 +1091,6 @@
       "name": "0740_19498186_acae9b9760_d235a47b18d5",
       "input": "cases/0740_19498186_acae9b9760_d235a47b18d5.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1141,7 +1104,6 @@
       ],
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 29,
         "notdec.solidity.event": 8,
@@ -1177,7 +1139,6 @@
       "name": "2001_19510128_72aa4f70b3_e9ee7c9c0e79",
       "input": "cases/2001_19510128_72aa4f70b3_e9ee7c9c0e79.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1191,7 +1152,6 @@
       ],
       "expected_nonpayable_functions": 61,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 72,
         "notdec.solidity.checked_bounds": 120,
         "notdec.solidity.event": 21,
@@ -1227,7 +1187,6 @@
       "name": "0189_19493609_3c0627c9e0_9d16fec0a1c2",
       "input": "cases/0189_19493609_3c0627c9e0_9d16fec0a1c2.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1241,7 +1200,6 @@
       ],
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 124,
         "notdec.solidity.event": 9,
@@ -1277,7 +1235,6 @@
       "name": "0258_19493864_78edd9f88e_b098925cbd2d",
       "input": "cases/0258_19493864_78edd9f88e_b098925cbd2d.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1291,7 +1248,6 @@
       ],
       "expected_nonpayable_functions": 62,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 7,
         "notdec.solidity.abi_return": 66,
         "notdec.solidity.checked_bounds": 120,
         "notdec.solidity.event": 30,
@@ -1327,7 +1283,6 @@
       "name": "0679_19497465_c2187cbc73_f22fac5262f8",
       "input": "cases/0679_19497465_c2187cbc73_f22fac5262f8.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1339,7 +1294,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 68,
         "notdec.solidity.checked_bounds": 38,
         "notdec.solidity.event": 17,
@@ -1375,7 +1329,6 @@
       "name": "0651_19497235_18ca6cbfa7_017843325734",
       "input": "cases/0651_19497235_18ca6cbfa7_017843325734.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1387,7 +1340,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 17,
         "notdec.solidity.abi_return": 79,
         "notdec.solidity.checked_bounds": 31,
         "notdec.solidity.event": 13,
@@ -1423,7 +1375,6 @@
       "name": "0334_19494307_668d201319_1354ce2e324d",
       "input": "cases/0334_19494307_668d201319_1354ce2e324d.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1437,7 +1388,6 @@
       ],
       "expected_nonpayable_functions": 44,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 11,
         "notdec.solidity.abi_return": 68,
         "notdec.solidity.checked_bounds": 112,
         "notdec.solidity.event": 11,
@@ -1473,7 +1423,6 @@
       "name": "1274_19502133_51e0372918_736c45f00099",
       "input": "cases/1274_19502133_51e0372918_736c45f00099.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1487,7 +1436,6 @@
       ],
       "expected_nonpayable_functions": 39,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 56,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.event": 9,
@@ -1523,7 +1471,6 @@
       "name": "1991_19510015_7f60edd6aa_6188d2031ddf",
       "input": "cases/1991_19510015_7f60edd6aa_6188d2031ddf.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1535,7 +1482,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 44,
         "notdec.solidity.checked_bounds": 113,
         "notdec.solidity.event": 12,
@@ -1571,7 +1517,6 @@
       "name": "1924_19508168_fe1f1c11b0_0b74e6ed0d55",
       "input": "cases/1924_19508168_fe1f1c11b0_0b74e6ed0d55.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1585,7 +1530,6 @@
       ],
       "expected_nonpayable_functions": 36,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 52,
         "notdec.solidity.checked_bounds": 31,
         "notdec.solidity.event": 9,
@@ -1621,7 +1565,6 @@
       "name": "0340_19494346_717db37a78_7324081e28fc",
       "input": "cases/0340_19494346_717db37a78_7324081e28fc.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1635,7 +1578,6 @@
       ],
       "expected_nonpayable_functions": 75,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 104,
         "notdec.solidity.checked_bounds": 28,
         "notdec.solidity.event": 8,
@@ -1671,7 +1613,6 @@
       "name": "1775_19507435_1be1a16c5d_eb304133e7c9",
       "input": "cases/1775_19507435_1be1a16c5d_eb304133e7c9.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1685,7 +1626,6 @@
       ],
       "expected_nonpayable_functions": 37,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 11,
         "notdec.solidity.abi_return": 42,
         "notdec.solidity.checked_bounds": 48,
         "notdec.solidity.event": 14,
@@ -1721,7 +1661,6 @@
       "name": "0648_19497230_998d150449_ea367f7fc1ac",
       "input": "cases/0648_19497230_998d150449_ea367f7fc1ac.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1733,7 +1672,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 19,
         "notdec.solidity.abi_return": 77,
         "notdec.solidity.checked_bounds": 34,
         "notdec.solidity.event": 12,
@@ -1769,7 +1707,6 @@
       "name": "1407_19503702_47675ff2ed_71b1710392bd",
       "input": "cases/1407_19503702_47675ff2ed_71b1710392bd.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1783,7 +1720,6 @@
       ],
       "expected_nonpayable_functions": 38,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 59,
         "notdec.solidity.abi_return": 62,
         "notdec.solidity.checked_bounds": 39,
         "notdec.solidity.event": 10,
@@ -1819,7 +1755,6 @@
       "name": "1572_19505998_da275bcf64_0796e2424ba2",
       "input": "cases/1572_19505998_da275bcf64_0796e2424ba2.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1833,7 +1768,6 @@
       ],
       "expected_nonpayable_functions": 73,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 102,
         "notdec.solidity.checked_bounds": 28,
         "notdec.solidity.event": 8,
@@ -1869,7 +1803,6 @@
       "name": "1988_19508992_89095f0aa3_688f45aabbde",
       "input": "cases/1988_19508992_89095f0aa3_688f45aabbde.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1883,7 +1816,6 @@
       ],
       "expected_nonpayable_functions": 39,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 3,
         "notdec.solidity.abi_return": 50,
         "notdec.solidity.checked_bounds": 46,
         "notdec.solidity.event": 9,
@@ -1919,7 +1851,6 @@
       "name": "1485_19504919_9deb0fc809_62afe2b29485",
       "input": "cases/1485_19504919_9deb0fc809_62afe2b29485.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1933,7 +1864,6 @@
       ],
       "expected_nonpayable_functions": 46,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 17,
         "notdec.solidity.abi_return": 64,
         "notdec.solidity.checked_bounds": 64,
         "notdec.solidity.event": 17,
@@ -1969,7 +1899,6 @@
       "name": "1847_19507643_148f68d102_07c7230a7676",
       "input": "cases/1847_19507643_148f68d102_07c7230a7676.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -1981,7 +1910,6 @@
       ],
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 56,
         "notdec.solidity.checked_bounds": 42,
         "notdec.solidity.event": 12,
@@ -2017,7 +1945,6 @@
       "name": "0657_19497309_a4d607684e_332c65dbca0f",
       "input": "cases/0657_19497309_a4d607684e_332c65dbca0f.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2031,7 +1958,6 @@
       ],
       "expected_nonpayable_functions": 56,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 82,
         "notdec.solidity.checked_bounds": 24,
         "notdec.solidity.event": 12,
@@ -2067,7 +1993,6 @@
       "name": "1636_19506827_f7c7103caa_7898f279a7f3",
       "input": "cases/1636_19506827_f7c7103caa_7898f279a7f3.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2081,7 +2006,6 @@
       ],
       "expected_nonpayable_functions": 30,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 38,
         "notdec.solidity.event": 12,
@@ -2117,7 +2041,6 @@
       "name": "0637_19497125_d33ca6fd43_b0988224e0b7",
       "input": "cases/0637_19497125_d33ca6fd43_b0988224e0b7.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2131,7 +2054,6 @@
       ],
       "expected_nonpayable_functions": 37,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 6,
         "notdec.solidity.abi_return": 38,
         "notdec.solidity.checked_bounds": 26,
         "notdec.solidity.event": 17,
@@ -2167,7 +2089,6 @@
       "name": "1490_19504983_72b68e8dfe_38ab68a7adc2",
       "input": "cases/1490_19504983_72b68e8dfe_38ab68a7adc2.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2181,7 +2102,6 @@
       ],
       "expected_nonpayable_functions": 63,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 27,
         "notdec.solidity.event": 10,
@@ -2217,7 +2137,6 @@
       "name": "2002_19510139_923ad4a9d1_4e9ed82fcc5b",
       "input": "cases/2002_19510139_923ad4a9d1_4e9ed82fcc5b.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2231,7 +2150,6 @@
       ],
       "expected_nonpayable_functions": 63,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 27,
         "notdec.solidity.event": 10,
@@ -2267,7 +2185,6 @@
       "name": "1915_19508046_91cdb18983_844dae639fc0",
       "input": "cases/1915_19508046_91cdb18983_844dae639fc0.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2281,7 +2198,6 @@
       ],
       "expected_nonpayable_functions": 63,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 27,
         "notdec.solidity.event": 10,
@@ -2317,7 +2233,6 @@
       "name": "0870_19499091_69ef351b75_57ed8326bd30",
       "input": "cases/0870_19499091_69ef351b75_57ed8326bd30.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2331,7 +2246,6 @@
       ],
       "expected_nonpayable_functions": 58,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 12,
         "notdec.solidity.abi_return": 86,
         "notdec.solidity.checked_bounds": 21,
         "notdec.solidity.event": 8,
@@ -2367,7 +2281,6 @@
       "name": "0009_19493025_977804571f_ab93bcf84624",
       "input": "cases/0009_19493025_977804571f_ab93bcf84624.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2381,7 +2294,6 @@
       ],
       "expected_nonpayable_functions": 27,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 11,
         "notdec.solidity.event": 8,
@@ -2417,7 +2329,6 @@
       "name": "0029_19493081_446349df2b_2c2bd78bea7d",
       "input": "cases/0029_19493081_446349df2b_2c2bd78bea7d.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2431,7 +2342,6 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
@@ -2467,7 +2377,6 @@
       "name": "0030_19493089_e48135f4b6_56a7c8e02323",
       "input": "cases/0030_19493089_e48135f4b6_56a7c8e02323.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2480,7 +2389,6 @@
       ],
       "expected_nonpayable_functions": 11,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 2,
@@ -2516,7 +2424,6 @@
       "name": "0031_19493095_1fa5f54c3e_32ee79d4db5c",
       "input": "cases/0031_19493095_1fa5f54c3e_32ee79d4db5c.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2530,7 +2437,6 @@
       ],
       "expected_nonpayable_functions": 10,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.event": 2,
@@ -2566,7 +2472,6 @@
       "name": "0032_19493098_f0dab0bf78_8c9406cb7887",
       "input": "cases/0032_19493098_f0dab0bf78_8c9406cb7887.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2580,7 +2485,6 @@
       ],
       "expected_nonpayable_functions": 38,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 46,
         "notdec.solidity.checked_bounds": 31,
         "notdec.solidity.event": 7,
@@ -2616,7 +2520,6 @@
       "name": "0038_19493119_aed19fef21_ea7b432ec4f1",
       "input": "cases/0038_19493119_aed19fef21_ea7b432ec4f1.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2630,7 +2533,6 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
@@ -2666,7 +2568,6 @@
       "name": "0112_19493231_e681d3a0e3_c848651ad27d",
       "input": "cases/0112_19493231_e681d3a0e3_c848651ad27d.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2680,7 +2581,6 @@
       ],
       "expected_nonpayable_functions": 20,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 20,
         "notdec.solidity.event": 3,
@@ -2716,7 +2616,6 @@
       "name": "0114_19493235_fc69a30a99_3aa7e05b781a",
       "input": "cases/0114_19493235_fc69a30a99_3aa7e05b781a.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2730,7 +2629,6 @@
       ],
       "expected_nonpayable_functions": 2,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
@@ -2766,7 +2664,6 @@
       "name": "0118_19493248_593c688d00_799916048038",
       "input": "cases/0118_19493248_593c688d00_799916048038.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2780,7 +2677,6 @@
       ],
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 3,
         "notdec.solidity.abi_return": 44,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 4,
@@ -2816,7 +2712,6 @@
       "name": "0121_19493259_63ed382f00_e1eb3485de04",
       "input": "cases/0121_19493259_63ed382f00_e1eb3485de04.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2830,7 +2725,6 @@
       ],
       "expected_nonpayable_functions": 25,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 5,
@@ -2866,7 +2760,6 @@
       "name": "0128_19493282_117a55c492_4233986babaf",
       "input": "cases/0128_19493282_117a55c492_4233986babaf.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2880,7 +2773,6 @@
       ],
       "expected_nonpayable_functions": 42,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 2,
         "notdec.solidity.abi_return": 62,
         "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.event": 5,
@@ -2916,7 +2808,6 @@
       "name": "0146_19493376_503a732d50_138a4d77d617",
       "input": "cases/0146_19493376_503a732d50_138a4d77d617.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2930,7 +2821,6 @@
       ],
       "expected_nonpayable_functions": 26,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 29,
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 12,
@@ -2966,7 +2856,6 @@
       "name": "0147_19493380_262c2cb2b2_c24931e22d66",
       "input": "cases/0147_19493380_262c2cb2b2_c24931e22d66.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -2980,7 +2869,6 @@
       ],
       "expected_nonpayable_functions": 33,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 34,
         "notdec.solidity.event": 4,
@@ -3016,7 +2904,6 @@
       "name": "0175_19493428_d314d380f5_900e60ffbb10",
       "input": "cases/0175_19493428_d314d380f5_900e60ffbb10.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -3030,7 +2917,6 @@
       ],
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.event": 4,
@@ -3066,7 +2952,6 @@
       "name": "0176_19493428_12f263f8c9_ce83d7b0b2a7",
       "input": "cases/0176_19493428_12f263f8c9_ce83d7b0b2a7.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -3080,7 +2965,6 @@
       ],
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.event": 4,
@@ -3116,7 +3000,6 @@
       "name": "0178_19493463_4da3a6e3d8_c33022fe2f2f",
       "input": "cases/0178_19493463_4da3a6e3d8_c33022fe2f2f.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -3130,7 +3013,6 @@
       ],
       "expected_nonpayable_functions": 25,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 11,
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 4,
@@ -3166,7 +3048,6 @@
       "name": "0179_19493473_76bc10e48c_fd3041389134",
       "input": "cases/0179_19493473_76bc10e48c_fd3041389134.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -3180,7 +3061,6 @@
       ],
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 8,
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 33,
         "notdec.solidity.event": 4,
@@ -3216,7 +3096,6 @@
       "name": "0190_19493619_2fea34e2f2_9597b615b1d4",
       "input": "cases/0190_19493619_2fea34e2f2_9597b615b1d4.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -3230,7 +3109,6 @@
       ],
       "expected_nonpayable_functions": 21,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 1,
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 21,
         "notdec.solidity.event": 4,
@@ -3266,7 +3144,6 @@
       "name": "0195_19493642_a9eb505e1d_c5345c8e5a60",
       "input": "cases/0195_19493642_a9eb505e1d_c5345c8e5a60.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -3280,7 +3157,6 @@
       ],
       "expected_nonpayable_functions": 23,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 4,
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 21,
         "notdec.solidity.event": 5,
@@ -3316,7 +3192,6 @@
       "name": "0207_19493703_606c6dc416_58752239cf88",
       "input": "cases/0207_19493703_606c6dc416_58752239cf88.ll",
       "patterns": [
-        "abi_decode",
         "abi_return",
         "checked_bounds",
         "event_log",
@@ -3330,7 +3205,6 @@
       ],
       "expected_nonpayable_functions": 10,
       "expected_metadata_counts": {
-        "notdec.solidity.abi_decode": 20,
         "notdec.solidity.abi_return": 8,
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 4,

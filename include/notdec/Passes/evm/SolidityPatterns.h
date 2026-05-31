@@ -7,7 +7,6 @@ namespace notdec::passes::evm {
 
 extern const char *KIND_SOLIDITY_NONPAYABLE;
 extern const char *KIND_SOLIDITY_PAYABILITY_GUARD;
-extern const char *KIND_SOLIDITY_ABI_DECODE;
 extern const char *KIND_SOLIDITY_ABI_RETURN;
 extern const char *KIND_SOLIDITY_REVERT;
 extern const char *KIND_SOLIDITY_CHECKED_BOUNDS;
@@ -31,16 +30,6 @@ struct SelectorEntryOutliningPass
 // Matches Solidity's canonical nonpayable guard after the generic LLVM
 // optimizer has simplified the original stack-lifted condition.
 struct PayabilityGuardPass : llvm::PassInfoMixin<PayabilityGuardPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
-// Marks calldata reads that are likely part of ABI argument decoding.  This is
-// still a conservative annotation pass: it records static word loads and
-// dynamic calldata copies, but does not infer final parameter types.
-struct AbiDecodePass : llvm::PassInfoMixin<AbiDecodePass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 

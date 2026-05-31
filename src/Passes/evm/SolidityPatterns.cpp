@@ -25,7 +25,6 @@ using namespace llvm;
 #define DEBUG_TYPE "evm-solidity-patterns"
 
 STATISTIC(NumNonpayableGuards, "Number of Solidity nonpayable guards found");
-STATISTIC(NumAbiDecodes, "Number of Solidity ABI decode candidates found");
 STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
 STATISTIC(NumCheckedBounds,
@@ -47,7 +46,6 @@ namespace notdec::passes::evm {
 
 const char *KIND_SOLIDITY_NONPAYABLE = "notdec.solidity.nonpayable";
 const char *KIND_SOLIDITY_PAYABILITY_GUARD = "notdec.solidity.payability_guard";
-const char *KIND_SOLIDITY_ABI_DECODE = "notdec.solidity.abi_decode";
 const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
 const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
@@ -399,8 +397,11 @@ bool isPublicEntryFunction(const Function &F) {
   return F.getName().starts_with("public_") && !isSelectorFunction(F);
 }
 
-bool isAbiDecodeContext(const Function &F) {
-  return isPublicEntryFunction(F) || isSelectorFunction(F);
+bool isCalldataWordLoadAt(const Value *V, uint64_t Offset) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  return Call != nullptr && isCallTo(Call, "evm_calldataload") &&
+         Call->arg_size() == 2 &&
+         isConstantIntValue(Call->getArgOperand(1), Offset);
 }
 
 bool isSelectorValueProducer(const Instruction &I) {
@@ -408,8 +409,7 @@ bool isSelectorValueProducer(const Instruction &I) {
   if (Call == nullptr) {
     return false;
   }
-  if (isCallTo(Call, "evm_calldataload") && Call->arg_size() == 2 &&
-      isZero(Call->getArgOperand(1))) {
+  if (isCalldataWordLoadAt(Call, 0)) {
     return true;
   }
   return isCallTo(Call, "evm_shr") && Call->arg_size() == 2 &&
@@ -422,8 +422,7 @@ bool dependsOnSelectorLoad(Value *V, unsigned Depth,
     return false;
   }
   auto *Call = dyn_cast<CallBase>(V);
-  if (Call != nullptr && isCallTo(Call, "evm_calldataload") &&
-      Call->arg_size() == 2 && isZero(Call->getArgOperand(1))) {
+  if (isCalldataWordLoadAt(Call, 0)) {
     return true;
   }
   auto *Inst = dyn_cast<Instruction>(V);
@@ -1658,41 +1657,6 @@ PreservedAnalyses PayabilityGuardPass::run(Function &F,
     ++NumPayabilityCfgRewrites;
     Changed = true;
     break;
-  }
-
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
-}
-
-PreservedAnalyses AbiDecodePass::run(Function &F, FunctionAnalysisManager &) {
-  if (!isAbiDecodeContext(F)) {
-    return PreservedAnalyses::all();
-  }
-
-  LLVMContext &Ctx = F.getContext();
-  bool Changed = false;
-
-  for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
-    if (isCallTo(Call, "evm_calldataload") && Call->arg_size() == 2) {
-      StringRef Kind = isConstantIntValue(Call->getArgOperand(1), 0)
-                           ? "selector_word"
-                           : "static_arg_word";
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_DECODE, Kind);
-      ++NumAbiDecodes;
-      Changed = true;
-      continue;
-    }
-
-    if (isCallTo(Call, "evm_calldatacopy") && Call->arg_size() == 5) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_DECODE,
-                        "dynamic_copy_candidate");
-      ++NumAbiDecodes;
-      Changed = true;
-    }
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
