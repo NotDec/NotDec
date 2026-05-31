@@ -1833,6 +1833,28 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
               RevertMatch.PanicCode, true};
         }
       }
+
+      MaybeInput = nullptr;
+      if (isZero(LHS)) {
+        MaybeInput = RHS;
+      } else if (isZero(RHS)) {
+        MaybeInput = LHS;
+      }
+      if (MaybeInput != nullptr) {
+        auto *MinusOne = ConstantInt::getAllOnesValue(MaybeInput->getType());
+        BinaryOperator *Add = findBinaryOpInBlock(
+            SuccessBlock, Instruction::Add, MaybeInput, MinusOne);
+        if (Add == nullptr) {
+          Add = findBinaryOpInBlock(SuccessBlock, Instruction::Add, MinusOne,
+                                    MaybeInput);
+        }
+        if (Add != nullptr) {
+          auto *One = ConstantInt::get(MaybeInput->getType(), 1);
+          return CheckedBoundsMatch{
+              "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+              {MaybeInput, One, Add}, RevertMatch.PanicCode, true};
+        }
+      }
     }
 
     if (Pred == ICmpInst::ICMP_UGT) {
