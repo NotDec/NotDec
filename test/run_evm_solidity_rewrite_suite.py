@@ -124,9 +124,6 @@ def main() -> int:
                 "outlined_metadata": output_text.count(
                     "!notdec.solidity.selector_outlined_body"
                 ),
-                "selector_inlined_body": output_text.count(
-                    "!notdec.solidity.selector_inlined_body"
-                ),
                 "skipped_metadata": output_text.count(
                     "!notdec.solidity.selector_outline_skipped"
                 ),

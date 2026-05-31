@@ -284,9 +284,6 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
         createModuleToFunctionPassAdaptor(buildFunctionOptimizations()));
     MPM.addPass(createModuleToFunctionPassAdaptor(
         evm::SelectorEntryOutliningPass()));
-    MPM.addPass(evm::SolidityPatternAnnotationPass());
-    MPM.addPass(createModuleToFunctionPassAdaptor(
-        evm::SelectorInlinedLogicExtractionPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::PayabilityGuardPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::AbiDecodePass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::AbiReturnPass()));

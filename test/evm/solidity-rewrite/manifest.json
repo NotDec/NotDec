@@ -11,7 +11,6 @@
         "outlined_functions": 1,
         "outline_calls": 1,
         "outlined_metadata": 2,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -22,7 +21,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -33,7 +31,6 @@
         "outlined_functions": 2,
         "outline_calls": 2,
         "outlined_metadata": 4,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -44,7 +41,6 @@
         "outlined_functions": 1,
         "outline_calls": 1,
         "outlined_metadata": 2,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -55,7 +51,6 @@
         "outlined_functions": 1,
         "outline_calls": 1,
         "outlined_metadata": 2,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -66,7 +61,6 @@
         "outlined_functions": 2,
         "outline_calls": 2,
         "outlined_metadata": 4,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -77,7 +71,6 @@
         "outlined_functions": 2,
         "outline_calls": 2,
         "outlined_metadata": 4,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -88,7 +81,6 @@
         "outlined_functions": 1,
         "outline_calls": 1,
         "outlined_metadata": 2,
-        "selector_inlined_body": 2,
         "skipped_metadata": 0
       }
     },
@@ -99,7 +91,6 @@
         "outlined_functions": 1,
         "outline_calls": 1,
         "outlined_metadata": 2,
-        "selector_inlined_body": 3,
         "skipped_metadata": 0
       }
     },
@@ -110,7 +101,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 5,
         "skipped_metadata": 0
       }
     },
@@ -121,7 +111,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -132,7 +121,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -143,7 +131,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -154,7 +141,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -165,7 +151,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -176,7 +161,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -187,7 +171,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -198,7 +181,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -209,7 +191,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -220,7 +201,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -231,7 +211,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -242,7 +221,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -253,7 +231,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -264,7 +241,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -275,7 +251,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -286,7 +261,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -297,7 +271,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -308,7 +281,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -319,7 +291,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -330,7 +301,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -341,7 +311,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -352,7 +321,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -363,7 +331,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -374,7 +341,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -385,7 +351,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -396,7 +361,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -407,7 +371,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -418,7 +381,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -429,7 +391,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -440,7 +401,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -451,7 +411,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -462,7 +421,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -473,7 +431,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -484,7 +441,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -495,7 +451,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -506,7 +461,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -517,7 +471,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -528,7 +481,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -539,7 +491,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -550,7 +501,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -561,7 +511,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -572,7 +521,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -583,7 +531,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -594,7 +541,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -605,7 +551,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -616,7 +561,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -627,7 +571,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -638,7 +581,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -649,7 +591,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -660,7 +601,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -671,7 +611,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -682,7 +621,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -693,7 +631,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -704,7 +641,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     },
@@ -715,7 +651,6 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "selector_inlined_body": 0,
         "skipped_metadata": 0
       }
     }

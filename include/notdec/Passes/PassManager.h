@@ -52,11 +52,6 @@ struct PassEnv {
                            "linear-allocation-recovery");
     PIC.addClassToPassName("notdec::PointerTypeRecovery",
                            "pointer-type-recovery");
-    PIC.addClassToPassName("notdec::passes::evm::SolidityPatternAnnotationPass",
-                           "evm-solidity-pattern-annotation");
-    PIC.addClassToPassName(
-        "notdec::passes::evm::SelectorInlinedLogicExtractionPass",
-        "evm-selector-inlined-logic");
     PIC.addClassToPassName("notdec::passes::evm::PayabilityGuardPass",
                            "evm-payability-guard");
     PIC.addClassToPassName("notdec::passes::evm::AbiReturnPass",

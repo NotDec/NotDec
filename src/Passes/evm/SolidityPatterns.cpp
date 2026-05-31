@@ -25,9 +25,6 @@ using namespace llvm;
 #define DEBUG_TYPE "evm-solidity-patterns"
 
 STATISTIC(NumNonpayableGuards, "Number of Solidity nonpayable guards found");
-STATISTIC(NumSelectorPrologues, "Number of Solidity selector prologues found");
-STATISTIC(NumSelectorInlinedBodies,
-          "Number of Solidity selector inlined body candidates found");
 STATISTIC(NumAbiDecodes, "Number of Solidity ABI decode candidates found");
 STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
@@ -54,11 +51,6 @@ namespace notdec::passes::evm {
 
 const char *KIND_SOLIDITY_NONPAYABLE = "notdec.solidity.nonpayable";
 const char *KIND_SOLIDITY_PAYABILITY_GUARD = "notdec.solidity.payability_guard";
-const char *KIND_SOLIDITY_ENTRY_KIND = "notdec.solidity.entry_kind";
-const char *KIND_SOLIDITY_SELECTOR_PROLOGUE =
-    "notdec.solidity.selector_prologue";
-const char *KIND_SOLIDITY_SELECTOR_INLINED_BODY =
-    "notdec.solidity.selector_inlined_body";
 const char *KIND_SOLIDITY_ABI_DECODE = "notdec.solidity.abi_decode";
 const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
@@ -1558,51 +1550,6 @@ StringRef classifyExternalCall(StringRef Name) {
 }
 
 } // namespace
-
-PreservedAnalyses SolidityPatternAnnotationPass::run(Module &M,
-                                                     ModuleAnalysisManager &) {
-  LLVMContext &Ctx = M.getContext();
-  NamedMDNode *Node = M.getOrInsertNamedMetadata("notdec.solidity.patterns");
-  Node->addOperand(MDNode::get(Ctx, {MDString::get(Ctx, "mode=metadata-only"),
-                                     MDString::get(Ctx, "version=1")}));
-  return PreservedAnalyses::none();
-}
-
-PreservedAnalyses
-SelectorInlinedLogicExtractionPass::run(Function &F,
-                                        FunctionAnalysisManager &) {
-  if (!isSelectorFunction(F)) {
-    return PreservedAnalyses::all();
-  }
-
-  LLVMContext &Ctx = F.getContext();
-  bool Changed = false;
-  addStringMetadata(Ctx, F, KIND_SOLIDITY_ENTRY_KIND, "selector");
-  Changed = true;
-
-  for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-    StringRef CalleeName = getCalleeName(Call);
-    if (isMstoreAt(*Call, 64, 128)) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_SELECTOR_PROLOGUE,
-                        "free_memory_pointer");
-      ++NumSelectorPrologues;
-      continue;
-    }
-
-    StringRef CallKind = classifyExternalCall(CalleeName);
-    if (!CallKind.empty() || CalleeName.starts_with("evm_log")) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_SELECTOR_INLINED_BODY,
-                        "candidate");
-      ++NumSelectorInlinedBodies;
-    }
-  }
-
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
-}
 
 PreservedAnalyses
 SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &FAM) {
