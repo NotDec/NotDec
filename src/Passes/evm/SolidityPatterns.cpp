@@ -2205,6 +2205,54 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
                             RevertMatch.PanicCode, true};
 }
 
+bool isSmallEnumMemberCount(Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr) {
+    return false;
+  }
+  const APInt &Count = C->getValue();
+  return !Count.isZero() && Count.ule(256);
+}
+
+std::optional<CheckedBoundsMatch>
+matchEnumConversion(const NormalizedCondition &FailureCond,
+                    const SolidityRevertMatch &RevertMatch) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x21) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *EnumValue = nullptr;
+  Value *MemberCount = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE) {
+    EnumValue = Cmp->getOperand(0);
+    MemberCount = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
+    EnumValue = Cmp->getOperand(1);
+    MemberCount = Cmp->getOperand(0);
+  } else {
+    return std::nullopt;
+  }
+
+  if (!isSmallEnumMemberCount(MemberCount)) {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{"enum_conversion",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {EnumValue, MemberCount},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 bool isFreeMemoryPointerLoad(Value *V);
 CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
 
@@ -2964,6 +3012,14 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       return Bounds;
     }
 
+    if (std::optional<CheckedBoundsMatch> EnumConversion =
+            matchEnumConversion(*FailureCond, *RevertMatch)) {
+      EnumConversion->Branch = Br;
+      EnumConversion->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      EnumConversion->FailureBlock = Failure;
+      return EnumConversion;
+    }
+
     if (std::optional<CheckedBoundsMatch> MemoryBounds =
             matchMemoryAllocationBounds(*FailureCond, *RevertMatch,
                                         Br->getSuccessor(1 - SuccIdx))) {
@@ -3033,6 +3089,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "storage_bytes_encoding") {
     return "notdec_solidity_rewrite_storage_bytes_encoding";
+  }
+  if (Kind == "enum_conversion") {
+    return "notdec_solidity_rewrite_enum_conversion";
   }
   return "";
 }

@@ -109,6 +109,13 @@ bytes/string 的长度上限检查不会出现 `length * 32`，要靠后续
 
 enum 转换、小整数转换、bytes/string storage 编码错误也可能生成不同 panic code。
 
+enum 转换常见形状：
+
+```text
+if value >= enum_member_count:
+    panic(0x21)
+```
+
 storage bytes/string 从 slot 解码时还有编码合法性检查：
 
 ```text
