@@ -1562,8 +1562,9 @@
         "array_bounds_storage": 11,
         "empty_array_pop_storage": 1,
         "enum_conversion": 2,
-        "panic_resource_error": 6,
+        "panic_resource_error": 5,
         "storage_bytes_encoding": 1,
+        "memory_allocation_pointer_bounds": 1,
         "checked_add": 2,
         "checked_sub": 1,
         "panic_checked_arithmetic": 2,
@@ -1587,13 +1588,14 @@
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_checked_add_bound": 1,
         "notdec_solidity_rewrite_enum_conversion": 2,
-        "notdec_solidity_rewrite_empty_array_pop_storage": 1
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1
       },
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 7,
-        "unsupported_condition": 3
+        "unsupported_condition": 2
       },
-      "expected_checked_bounds_cfg_rewrites": 27,
+      "expected_checked_bounds_cfg_rewrites": 28,
       "expected_returndata_bubbles": 20
     },
     {
@@ -1742,7 +1744,7 @@
         "empty_array_pop_storage": 2,
         "memory_allocation_bounds": 1,
         "array_bounds_memory": 3,
-        "panic_resource_error": 2,
+        "memory_allocation_pointer_bounds": 2,
         "checked_sub": 1,
         "checked_add": 1,
         "storage_bytes_encoding": 1,
@@ -1765,13 +1767,14 @@
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_checked_div": 1,
-        "notdec_solidity_rewrite_empty_array_pop_storage": 2
+        "notdec_solidity_rewrite_empty_array_pop_storage": 2,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2
       },
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 0,
-        "unsupported_condition": 2
+        "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 20
+      "expected_checked_bounds_cfg_rewrites": 22
     },
     {
       "name": "0651_19497235_18ca6cbfa7_017843325734",
@@ -1991,9 +1994,10 @@
       "expected_checked_bounds_kinds": {
         "memory_allocation_bounds": 6,
         "array_bounds_memory": 54,
-        "panic_resource_error": 3,
+        "panic_resource_error": 1,
         "array_bounds_storage": 3,
         "panic_checked_arithmetic": 2,
+        "memory_allocation_pointer_bounds": 2,
         "checked_add": 2,
         "checked_mul": 3,
         "checked_sub": 1,
@@ -2008,6 +2012,7 @@
         "notdec_solidity_rewrite_memory_allocation_bounds": 6,
         "notdec_solidity_rewrite_array_bounds_memory": 54,
         "notdec_solidity_rewrite_array_bounds_storage": 3,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_mul": 3,
         "notdec_solidity_rewrite_checked_sub": 1,
@@ -2015,9 +2020,9 @@
       },
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 3,
-        "unsupported_condition": 2
+        "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 70
+      "expected_checked_bounds_cfg_rewrites": 72
     },
     {
       "name": "1924_19508168_fe1f1c11b0_0b74e6ed0d55",

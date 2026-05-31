@@ -101,6 +101,8 @@ if free_ptr + bytes_payload_size overflows or exceeds 2^64:
     panic(0x41)
 if free_ptr >= 2^64 - fixed_size:
     panic(0x41)
+if new_free_ptr > 2^64 - 1 or new_free_ptr < old_free_ptr:
+    panic(0x41)
 ```
 
 bytes/string 的长度上限检查不会出现 `length * 32`，要靠后续

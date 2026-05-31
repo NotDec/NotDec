@@ -2699,6 +2699,23 @@ bool isMemoryAllocationSize(Value *V) {
   return isRoundedByteAllocationSize(V);
 }
 
+bool isSmallFixedMemoryAllocationSize(Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr) {
+    return false;
+  }
+  const APInt &Size = C->getValue();
+  if (Size.isZero() || Size.ugt(4096)) {
+    return false;
+  }
+  uint64_t Size64 = Size.getZExtValue();
+  return Size64 % 32 == 0;
+}
+
+bool isSupportedMemoryAllocationSize(Value *V) {
+  return isMemoryAllocationSize(V) || isSmallFixedMemoryAllocationSize(V);
+}
+
 bool isFreeMemoryPointerLoad(Value *V) {
   auto *Call = dyn_cast_or_null<CallBase>(V);
   return Call != nullptr && isCallTo(Call, "evm_mload") &&
@@ -2928,6 +2945,7 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   Value *RangeCheckedPtr = nullptr;
   Value *NoWrapCheckedPtr = nullptr;
   Value *OldPtr = nullptr;
+  Value *NoWrapLimit = nullptr;
   for (Value *Operand : {And->getOperand(0), And->getOperand(1)}) {
     auto *Cmp = dyn_cast<ICmpInst>(Operand);
     if (Cmp == nullptr) {
@@ -2938,17 +2956,30 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
       RangeCheckedPtr = Cmp->getOperand(0);
       continue;
     }
+    if (Cmp->getPredicate() == ICmpInst::ICMP_ULE &&
+        isUInt64Max(Cmp->getOperand(1))) {
+      RangeCheckedPtr = Cmp->getOperand(0);
+      continue;
+    }
     if (Cmp->getPredicate() == ICmpInst::ICMP_UGE) {
       NoWrapCheckedPtr = Cmp->getOperand(0);
       OldPtr = Cmp->getOperand(1);
       continue;
     }
+    if (Cmp->getPredicate() == ICmpInst::ICMP_ULT) {
+      OldPtr = Cmp->getOperand(0);
+      NoWrapLimit = Cmp->getOperand(1);
+      continue;
+    }
     return std::nullopt;
   }
 
-  if (RangeCheckedPtr == nullptr || NoWrapCheckedPtr == nullptr ||
-      !isSameValue(RangeCheckedPtr, NoWrapCheckedPtr) || OldPtr == nullptr ||
+  if (RangeCheckedPtr == nullptr || OldPtr == nullptr ||
       !isFreeMemoryPointerLoad(OldPtr)) {
+    return std::nullopt;
+  }
+  if (NoWrapCheckedPtr != nullptr &&
+      !isSameValue(RangeCheckedPtr, NoWrapCheckedPtr)) {
     return std::nullopt;
   }
 
@@ -2962,7 +2993,19 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   Value *Size = isSameValue(NewPtrAdd->getOperand(0), OldPtr)
                     ? NewPtrAdd->getOperand(1)
                     : NewPtrAdd->getOperand(0);
-  if (!isMemoryAllocationSize(Size) ||
+  if (NoWrapLimit != nullptr) {
+    auto *SizeConst = dyn_cast<ConstantInt>(Size);
+    auto *LimitConst = dyn_cast<ConstantInt>(NoWrapLimit);
+    if (SizeConst == nullptr || LimitConst == nullptr) {
+      return std::nullopt;
+    }
+    APInt ExpectedLimit = -SizeConst->getValue();
+    if (LimitConst->getValue() != ExpectedLimit) {
+      return std::nullopt;
+    }
+  }
+
+  if (!isSupportedMemoryAllocationSize(Size) ||
       findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr) {
     return std::nullopt;
   }
