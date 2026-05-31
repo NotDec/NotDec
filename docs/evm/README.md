@@ -18,6 +18,9 @@
 3. [Storage 与类型线索](storage-type/README.md)
 4. [外部交互语义](external-interaction/README.md)
 
+如果要继续增加 EVM Solidity 语义恢复功能，先看
+[EVM Solidity 功能开发规范](feature-development-guideline.md)。
+
 入口控制流决定一笔调用先进哪里，ABI 和 memory 决定参数、返回值、错误怎么编码，
 storage 决定状态变量怎么存，外部交互则覆盖 call 和 event。
 
