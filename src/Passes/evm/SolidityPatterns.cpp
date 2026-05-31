@@ -2199,6 +2199,75 @@ bool isRoundedByteAllocationSize(Value *V) {
           isConstantIntValue(LengthAdd->getOperand(1), 31));
 }
 
+bool hasPowerOfTwoExpComputation(BasicBlock *SuccessBlock, Value *Exponent) {
+  if (SuccessBlock == nullptr || Exponent == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || Call->arg_size() != 2) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_shl") &&
+        isSameValue(Call->getArgOperand(0), Exponent) &&
+        isConstantIntValue(Call->getArgOperand(1), 1)) {
+      return true;
+    }
+    if (isCallTo(Call, "evm_exp") &&
+        isConstantIntValue(Call->getArgOperand(0), 2) &&
+        isSameValue(Call->getArgOperand(1), Exponent)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<CheckedBoundsMatch>
+matchPowerOfTwoExpGuard(const NormalizedCondition &FailureCond,
+                        const SolidityRevertMatch &RevertMatch,
+                        BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x11) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *Exponent = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE &&
+      isConstantIntValue(Cmp->getOperand(1), 256)) {
+    Exponent = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+             isConstantIntValue(Cmp->getOperand(0), 256)) {
+    Exponent = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGT &&
+             isConstantIntValue(Cmp->getOperand(1), 255)) {
+    Exponent = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT &&
+             isConstantIntValue(Cmp->getOperand(0), 255)) {
+    Exponent = Cmp->getOperand(1);
+  }
+
+  if (Exponent == nullptr ||
+      !hasPowerOfTwoExpComputation(SuccessBlock, Exponent)) {
+    return std::nullopt;
+  }
+
+  Value *Base = ConstantInt::get(Exponent->getType(), 2);
+  return CheckedBoundsMatch{"checked_exp",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {Base, Exponent},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 bool hasMemoryBytesAllocationComputation(BasicBlock *SuccessBlock,
                                          Value *Length) {
   if (SuccessBlock == nullptr) {
@@ -2667,6 +2736,15 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       return Arithmetic;
     }
 
+    if (std::optional<CheckedBoundsMatch> Exp =
+            matchPowerOfTwoExpGuard(*FailureCond, *RevertMatch,
+                                    Br->getSuccessor(1 - SuccIdx))) {
+      Exp->Branch = Br;
+      Exp->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      Exp->FailureBlock = Failure;
+      return Exp;
+    }
+
     if (std::optional<CheckedBoundsMatch> Bounds =
             matchArrayBounds(*FailureCond, *RevertMatch)) {
       Bounds->Branch = Br;
@@ -2714,6 +2792,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "checked_mod") {
     return "notdec_solidity_rewrite_checked_mod";
+  }
+  if (Kind == "checked_exp") {
+    return "notdec_solidity_rewrite_checked_exp";
   }
   if (Kind == "array_bounds_memory") {
     return "notdec_solidity_rewrite_array_bounds_memory";

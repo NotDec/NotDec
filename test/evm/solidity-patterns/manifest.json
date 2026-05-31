@@ -1912,10 +1912,11 @@
         "array_bounds_memory": 54,
         "panic_resource_error": 3,
         "array_bounds_storage": 3,
-        "panic_checked_arithmetic": 3,
+        "panic_checked_arithmetic": 2,
         "checked_add": 2,
         "checked_mul": 3,
-        "checked_sub": 1
+        "checked_sub": 1,
+        "checked_exp": 1
       },
       "expected_checked_bounds_panic_codes": {
         "65": 9,
@@ -1928,13 +1929,14 @@
         "notdec_solidity_rewrite_array_bounds_storage": 3,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_mul": 3,
-        "notdec_solidity_rewrite_checked_sub": 1
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_checked_exp": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 4,
+        "unrecognized_operands": 3,
         "unsupported_condition": 2
       },
-      "expected_checked_bounds_cfg_rewrites": 69
+      "expected_checked_bounds_cfg_rewrites": 70
     },
     {
       "name": "1924_19508168_fe1f1c11b0_0b74e6ed0d55",
@@ -2083,10 +2085,11 @@
         "panic_enum_conversion": 4,
         "checked_sub": 1,
         "checked_add": 1,
-        "panic_checked_arithmetic": 3,
+        "panic_checked_arithmetic": 2,
         "memory_allocation_pointer_bounds": 2,
         "checked_mul": 3,
-        "panic_resource_error": 1
+        "panic_resource_error": 1,
+        "checked_exp": 1
       },
       "expected_checked_bounds_panic_codes": {
         "33": 4,
@@ -2097,12 +2100,13 @@
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_checked_add": 1,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2,
-        "notdec_solidity_rewrite_checked_mul": 3
+        "notdec_solidity_rewrite_checked_mul": 3,
+        "notdec_solidity_rewrite_checked_exp": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 8
+        "unrecognized_operands": 7
       },
-      "expected_checked_bounds_cfg_rewrites": 7
+      "expected_checked_bounds_cfg_rewrites": 8
     },
     {
       "name": "0648_19497230_998d150449_ea367f7fc1ac",

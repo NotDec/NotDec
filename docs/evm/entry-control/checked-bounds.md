@@ -57,6 +57,14 @@ if b == 0:
 q = a / b
 ```
 
+`2 ** exponent` 在 base 为 2 时常见形状：
+
+```text
+if exponent >= 256:
+    panic(0x11)
+power = 1 << exponent
+```
+
 数组越界常见形状：
 
 ```text
