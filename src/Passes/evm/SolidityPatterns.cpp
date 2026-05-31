@@ -2312,7 +2312,7 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
                                         Value *Length) {
   Value *Shift = findMemoryAllocationShift(SuccessBlock, Length);
   if (Shift == nullptr) {
-    return false;
+    return hasMemoryBytesAllocationComputation(SuccessBlock, Length);
   }
 
   if (auto *RoundedBase = findCommutativeBinaryOpInBlock(

@@ -91,6 +91,9 @@ if free_ptr >= 2^64 - fixed_size:
     panic(0x41)
 ```
 
+bytes/string 的长度上限检查不会出现 `length * 32`，要靠后续
+`mstore(free_ptr, length)`、rounded size 和 free pointer 写回一起确认。
+
 enum 转换、小整数转换、bytes/string storage 编码错误也可能生成不同 panic code。
 
 storage bytes/string 从 slot 解码时还有编码合法性检查：
