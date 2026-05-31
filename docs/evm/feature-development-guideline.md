@@ -6,6 +6,10 @@
 重点不是“先写 pass 再补测试”这么简单。之前几个功能的经验是：主体逻辑完成后，真正
 容易出问题的是边界、oracle、真实 case 和测试框架是否跟上。
 
+## 重要原则
+
+对于支持rewrite的pass，仅打标记而不rewrite的方式仅能用于内部测试用例或者debug，对外的接口要直接做到rewrite，以正确的rewrite为目标。不要留下原始的操作的同时还有额外标记，这样语义冗余。通过增加测试用例并不断调整算法，是可以做到rewrite足够保守的同时在数据集上的效果也很好的
+
 ## 总体流程
 
 一个新的 EVM Solidity 功能建议按这个顺序推进：
@@ -135,25 +139,16 @@ metadata-only 可以存在，但定位要清楚：
 
 ## CFG rewrite 要保守
 
-`PayabilityGuardPass` 的 CFG rewrite 只做最小改动：
+CFG rewrite 的原则是：只改已经证明安全的低层保护结构，优先做最小改动。
+
+例如 `PayabilityGuardPass` 把条件分支改成只走 success edge：
 
 ```text
 conditional branch -> unconditional branch to success block
 ```
 
-它不绕过 guard block，也不急着删 failure block。这样 PHI 和 dominance 风险低，死代码交给后续
-cleanup。这里的重点是：对外控制流已经不再走 nonpayable 的低层 reject 分支，而不是只在原分支旁边
-加一个标记。
-
-`SelectorEntryOutliningPass` 更复杂，所以每次只放宽一种边界：
-
-- 支持单入口、无 live-out 的 region。
-- 支持 region input 作为 helper 参数。
-- 支持多轮重扫，同一个 selector 拆多个 helper。
-- 支持共享 tail / PHI 的窄形态。
-- 支持空 reject 出口映射。
-
-每次放宽都要有对应真实 case。不能为了提高 outline 数量，把 dispatcher 判断放宽到会误判业务分支。
+不要为了命中率绕开不清楚的 CFG 边界。每次放宽规则都要有真实 case 和 oracle 证明；
+不能为了提高 rewrite 数量，把 compiler guard 之外的业务分支也拆进去。
 
 ## 测试用例怎么引入
 
