@@ -70,9 +70,13 @@ value = array[index]
 ```text
 if length >= 2^64:
     panic(0x41)
+if length > 2^64 - 1:
+    panic(0x41)
 payload_size = round_up(length * 32)
 new_free_ptr = free_ptr + payload_size
 if new_free_ptr < free_ptr or new_free_ptr >= 2^64:
+    panic(0x41)
+if free_ptr >= 2^64 - fixed_size:
     panic(0x41)
 ```
 

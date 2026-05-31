@@ -1906,7 +1906,35 @@
         "65": 9,
         "81": 0
       },
-      "expected_returndata_bubbles": 9
+      "expected_returndata_bubbles": 9,
+      "expected_checked_bounds_kinds": {
+        "memory_allocation_bounds": 6,
+        "array_bounds_memory": 54,
+        "panic_resource_error": 3,
+        "array_bounds_storage": 3,
+        "panic_checked_arithmetic": 3,
+        "checked_add": 2,
+        "checked_mul": 3,
+        "checked_sub": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 9,
+        "50": 57,
+        "17": 9
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_memory_allocation_bounds": 6,
+        "notdec_solidity_rewrite_array_bounds_memory": 54,
+        "notdec_solidity_rewrite_array_bounds_storage": 3,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_checked_mul": 3,
+        "notdec_solidity_rewrite_checked_sub": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 4,
+        "unsupported_condition": 2
+      },
+      "expected_checked_bounds_cfg_rewrites": 69
     },
     {
       "name": "1924_19508168_fe1f1c11b0_0b74e6ed0d55",
