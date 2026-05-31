@@ -1838,6 +1838,11 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
   } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
     Index = Cmp->getOperand(1);
     Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_EQ &&
+             (isZero(Cmp->getOperand(0)) || isZero(Cmp->getOperand(1)))) {
+    Length = isZero(Cmp->getOperand(0)) ? Cmp->getOperand(1)
+                                        : Cmp->getOperand(0);
+    Index = ConstantInt::get(Length->getType(), 0);
   } else {
     return std::nullopt;
   }

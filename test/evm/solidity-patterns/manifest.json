@@ -3319,7 +3319,30 @@
         "65": 2,
         "81": 0
       },
-      "expected_returndata_bubbles": 3
+      "expected_returndata_bubbles": 3,
+      "expected_checked_bounds_kinds": {
+        "array_bounds_memory": 3,
+        "panic_checked_arithmetic": 1,
+        "panic_resource_error": 2,
+        "checked_add": 2,
+        "checked_div": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 3,
+        "17": 3,
+        "65": 2,
+        "18": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_memory": 3,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_checked_div": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 2,
+        "unsupported_condition": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 6
     },
     {
       "name": "0175_19493428_d314d380f5_900e60ffbb10",
