@@ -146,6 +146,11 @@ bool isConstantIntValue(const Value *V, uint64_t N) {
   return C != nullptr && C->getValue() == N;
 }
 
+bool isAllOnes(const Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  return C != nullptr && C->isMinusOne();
+}
+
 StringRef getCalleeName(const Value *V) {
   if (V == nullptr) {
     return "";
@@ -1555,6 +1560,20 @@ BinaryOperator *findBinaryOpInBlock(BasicBlock *BB,
   return nullptr;
 }
 
+Value *matchBitwiseNot(Value *V) {
+  auto *Op = dyn_cast_or_null<BinaryOperator>(V);
+  if (Op == nullptr || Op->getOpcode() != Instruction::Xor) {
+    return nullptr;
+  }
+  if (isAllOnes(Op->getOperand(0))) {
+    return Op->getOperand(1);
+  }
+  if (isAllOnes(Op->getOperand(1))) {
+    return Op->getOperand(0);
+  }
+  return nullptr;
+}
+
 BinaryOperator *matchCheckedMulSuccessCondition(Value *V) {
   auto *Or = dyn_cast_or_null<BinaryOperator>(V);
   if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
@@ -1666,7 +1685,8 @@ matchCheckedMulGuard(Value *BranchCondition, bool FailureWhenCondTrue,
 
 std::optional<CheckedBoundsMatch>
 matchCheckedArithmetic(const NormalizedCondition &FailureCond,
-                       const SolidityRevertMatch &RevertMatch) {
+                       const SolidityRevertMatch &RevertMatch,
+                       BasicBlock *SuccessBlock) {
   if (!RevertMatch.PanicCode.has_value()) {
     return std::nullopt;
   }
@@ -1698,6 +1718,60 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
             "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
             {Op->getOperand(0), Op->getOperand(1), Op}, RevertMatch.PanicCode,
             true};
+      }
+    }
+
+    if (Pred == ICmpInst::ICMP_EQ) {
+      Value *MaybeInput = nullptr;
+      if (isAllOnes(LHS)) {
+        MaybeInput = RHS;
+      } else if (isAllOnes(RHS)) {
+        MaybeInput = LHS;
+      }
+      if (MaybeInput != nullptr) {
+        auto *One = ConstantInt::get(MaybeInput->getType(), 1);
+        BinaryOperator *Add = findBinaryOpInBlock(
+            SuccessBlock, Instruction::Add, MaybeInput, One);
+        if (Add == nullptr) {
+          Add = findBinaryOpInBlock(SuccessBlock, Instruction::Add, One,
+                                    MaybeInput);
+        }
+        if (Add != nullptr) {
+          return CheckedBoundsMatch{
+              "checked_add", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+              {Add->getOperand(0), Add->getOperand(1), Add},
+              RevertMatch.PanicCode, true};
+        }
+      }
+    }
+
+    if (Pred == ICmpInst::ICMP_UGT) {
+      Value *AddLHS = LHS;
+      Value *AddRHS = matchBitwiseNot(RHS);
+      if (AddRHS != nullptr) {
+        BinaryOperator *Add = findBinaryOpInBlock(
+            SuccessBlock, Instruction::Add, AddLHS, AddRHS);
+        if (Add == nullptr) {
+          Add = findBinaryOpInBlock(SuccessBlock, Instruction::Add, AddRHS,
+                                    AddLHS);
+        }
+        if (Add != nullptr) {
+          return CheckedBoundsMatch{
+              "checked_add", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+              {Add->getOperand(0), Add->getOperand(1), Add},
+              RevertMatch.PanicCode, true};
+        }
+      }
+    }
+
+    if (Pred == ICmpInst::ICMP_ULT) {
+      BinaryOperator *Sub =
+          findBinaryOpInBlock(SuccessBlock, Instruction::Sub, LHS, RHS);
+      if (Sub != nullptr) {
+        return CheckedBoundsMatch{
+            "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+            {Sub->getOperand(0), Sub->getOperand(1), Sub},
+            RevertMatch.PanicCode, true};
       }
     }
   }
@@ -1849,7 +1923,8 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
     }
 
     if (std::optional<CheckedBoundsMatch> Arithmetic =
-            matchCheckedArithmetic(*FailureCond, *RevertMatch)) {
+            matchCheckedArithmetic(*FailureCond, *RevertMatch,
+                                   Br->getSuccessor(1 - SuccIdx))) {
       Arithmetic->Branch = Br;
       Arithmetic->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       Arithmetic->FailureBlock = Failure;
@@ -1909,8 +1984,8 @@ bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
     if (Inst == nullptr || DT.dominates(Inst, Match.Branch)) {
       continue;
     }
-    if (Match.Kind == "checked_sub" && Match.Operands.size() == 3 &&
-        Operand == Match.Operands[2]) {
+    if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub") &&
+        Match.Operands.size() == 3 && Operand == Match.Operands[2]) {
       continue;
     }
     return false;
@@ -1940,12 +2015,18 @@ void insertCheckedBoundsSemanticMarker(LLVMContext &Ctx,
   IRBuilder<> Builder(Match.Branch);
   SmallVector<Value *, 3> Operands(Match.Operands.begin(),
                                    Match.Operands.end());
-  if (Match.Kind == "checked_sub" && Operands.size() == 3) {
+  if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub") &&
+      Operands.size() == 3) {
     auto *ResultInst = dyn_cast<Instruction>(Operands[2]);
     if (ResultInst != nullptr &&
         ResultInst->getParent() != Match.Branch->getParent()) {
-      Operands[2] = Builder.CreateSub(Operands[0], Operands[1],
-                                      ResultInst->getName() + ".rewrite");
+      if (Match.Kind == "checked_add") {
+        Operands[2] = Builder.CreateAdd(Operands[0], Operands[1],
+                                        ResultInst->getName() + ".rewrite");
+      } else {
+        Operands[2] = Builder.CreateSub(Operands[0], Operands[1],
+                                        ResultInst->getName() + ".rewrite");
+      }
     }
   }
 
