@@ -58,12 +58,8 @@ struct PassEnv {
                            "evm-abi-return");
     PIC.addClassToPassName("notdec::passes::evm::SolidityRevertPass",
                            "evm-solidity-revert");
-    PIC.addClassToPassName("notdec::passes::evm::ValueCleanupTypeHintPass",
-                           "evm-value-cleanup-type-hint");
     PIC.addClassToPassName("notdec::passes::evm::StorageAddressingPass",
                            "evm-storage-addressing");
-    PIC.addClassToPassName("notdec::passes::evm::MemoryObjectPass",
-                           "evm-memory-object");
     PIC.addClassToPassName("notdec::passes::evm::EventLogPass",
                            "evm-event-log");
     PIC.addClassToPassName("notdec::passes::evm::ExternalCallPass",

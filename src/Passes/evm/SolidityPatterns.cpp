@@ -30,14 +30,10 @@ STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
 STATISTIC(NumCheckedBounds,
           "Number of Solidity checked operation/bounds candidates found");
-STATISTIC(NumCleanups, "Number of Solidity value cleanup hints found");
 STATISTIC(NumStorageAddressing,
           "Number of Solidity storage addressing candidates found");
 STATISTIC(NumPackedStorageFields,
           "Number of Solidity packed storage field candidates found");
-STATISTIC(NumStorageBytesStrings,
-          "Number of Solidity storage bytes/string candidates found");
-STATISTIC(NumMemoryObjects, "Number of Solidity memory object hints found");
 STATISTIC(NumEvents, "Number of Solidity event candidates found");
 STATISTIC(NumExternalCalls, "Number of Solidity external calls found");
 STATISTIC(NumSelectorOutlinedBodies,
@@ -55,14 +51,10 @@ const char *KIND_SOLIDITY_ABI_DECODE = "notdec.solidity.abi_decode";
 const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
 const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
-const char *KIND_SOLIDITY_CLEANUP = "notdec.solidity.cleanup";
 const char *KIND_SOLIDITY_STORAGE_ADDRESSING =
     "notdec.solidity.storage_addressing";
 const char *KIND_SOLIDITY_PACKED_STORAGE_FIELD =
     "notdec.solidity.packed_storage_field";
-const char *KIND_SOLIDITY_STORAGE_BYTES_STRING =
-    "notdec.solidity.storage_bytes_string";
-const char *KIND_SOLIDITY_MEMORY_OBJECT = "notdec.solidity.memory_object";
 const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_EXTERNAL_CALL = "notdec.solidity.external_call";
 
@@ -1027,17 +1019,6 @@ void replaceWholeFunctionWithCall(Function &F, Function &Outlined) {
   }
 }
 
-bool isMstoreAt(const CallBase &Call, uint64_t Offset, uint64_t Value) {
-  return isCallTo(&Call, "evm_mstore") && Call.arg_size() == 3 &&
-         isConstantIntValue(Call.getArgOperand(1), Offset) &&
-         isConstantIntValue(Call.getArgOperand(2), Value);
-}
-
-bool isMloadAt(const CallBase &Call, uint64_t Offset) {
-  return isCallTo(&Call, "evm_mload") && Call.arg_size() == 2 &&
-         isConstantIntValue(Call.getArgOperand(1), Offset);
-}
-
 bool isReturndataSize(Value *V) { return isCallTo(V, "evm_returndatasize"); }
 
 bool isSameValue(Value *LHS, Value *RHS) {
@@ -1511,36 +1492,6 @@ bool expressionHasPackedStorageOp(Value *V, unsigned Depth = 8) {
   return expressionHasPackedStorageOp(V, Depth, Seen);
 }
 
-bool isLowBitMask(const ConstantInt &C) {
-  return C.getValue() == 1 || C.getValue() == 31 || C.getValue() == 127;
-}
-
-bool hasLowBitMaskOperand(const BinaryOperator &Bin) {
-  if (Bin.getOpcode() != Instruction::And) {
-    return false;
-  }
-  return (isa<ConstantInt>(Bin.getOperand(0)) &&
-          isLowBitMask(*cast<ConstantInt>(Bin.getOperand(0)))) ||
-         (isa<ConstantInt>(Bin.getOperand(1)) &&
-          isLowBitMask(*cast<ConstantInt>(Bin.getOperand(1))));
-}
-
-std::string classifyMask(const APInt &Mask) {
-  unsigned ActiveBits = Mask.getActiveBits();
-  if (Mask.getBitWidth() == 256 && ActiveBits == 160 &&
-      Mask.popcount() == 160 && Mask.countTrailingOnes() == 160) {
-    return "clean_address";
-  }
-  if (ActiveBits > 0 && Mask.popcount() == ActiveBits &&
-      Mask.countTrailingOnes() == ActiveBits) {
-    return "clean_uint" + std::to_string(ActiveBits);
-  }
-  if (Mask.isNegative() && Mask.countTrailingZeros() > 0) {
-    return "clear_low_bits";
-  }
-  return "";
-}
-
 StringRef classifyExternalCall(StringRef Name) {
   return Name == "evm_call"           ? StringRef("call")
          : Name == "evm_staticcall"   ? StringRef("staticcall")
@@ -1850,42 +1801,6 @@ PreservedAnalyses CheckedBoundsPass::run(Function &F, FunctionAnalysisManager &)
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
-PreservedAnalyses ValueCleanupTypeHintPass::run(Function &F,
-                                                FunctionAnalysisManager &) {
-  LLVMContext &Ctx = F.getContext();
-  bool Changed = false;
-
-  for (Instruction &I : instructions(F)) {
-    if (auto *Bin = dyn_cast<BinaryOperator>(&I);
-        Bin != nullptr && Bin->getOpcode() == Instruction::And) {
-      for (unsigned Op = 0; Op < 2; ++Op) {
-        auto *Mask = dyn_cast<ConstantInt>(Bin->getOperand(Op));
-        if (Mask == nullptr) {
-          continue;
-        }
-        std::string Kind = classifyMask(Mask->getValue());
-        if (!Kind.empty()) {
-          addStringMetadata(Ctx, I, KIND_SOLIDITY_CLEANUP, Kind);
-          ++NumCleanups;
-          Changed = true;
-          break;
-        }
-      }
-      continue;
-    }
-
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call != nullptr && isCallTo(Call, "evm_signextend") &&
-        Call->arg_size() == 2) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_CLEANUP, "clean_int");
-      ++NumCleanups;
-      Changed = true;
-    }
-  }
-
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
-}
-
 PreservedAnalyses StorageAddressingPass::run(Function &F,
                                              FunctionAnalysisManager &) {
   LLVMContext &Ctx = F.getContext();
@@ -1942,75 +1857,6 @@ PreservedAnalyses PackedStorageFieldPass::run(Function &F,
           break;
         }
       }
-    }
-  }
-
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
-}
-
-PreservedAnalyses StorageBytesStringPass::run(Function &F,
-                                              FunctionAnalysisManager &) {
-  LLVMContext &Ctx = F.getContext();
-  bool Changed = false;
-
-  for (Instruction &I : instructions(F)) {
-    if (auto *Bin = dyn_cast<BinaryOperator>(&I);
-        Bin != nullptr && hasLowBitMaskOperand(*Bin)) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_STORAGE_BYTES_STRING,
-                        "low_bit_encoding_candidate");
-      ++NumStorageBytesStrings;
-      Changed = true;
-      continue;
-    }
-
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-    if (isCallTo(Call, "evm_mstore8")) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_STORAGE_BYTES_STRING,
-                        "byte_copy_candidate");
-      ++NumStorageBytesStrings;
-      Changed = true;
-      continue;
-    }
-    if ((isCallTo(Call, "evm_shr") || isCallTo(Call, "evm_shl")) &&
-        Call->arg_size() == 2 &&
-        isConstantIntValue(Call->getArgOperand(0), 248)) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_STORAGE_BYTES_STRING,
-                        "short_bytes_shift_candidate");
-      ++NumStorageBytesStrings;
-      Changed = true;
-    }
-  }
-
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
-}
-
-PreservedAnalyses MemoryObjectPass::run(Function &F,
-                                        FunctionAnalysisManager &) {
-  LLVMContext &Ctx = F.getContext();
-  bool Changed = false;
-
-  for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
-    if (isMloadAt(*Call, 64)) {
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_MEMORY_OBJECT,
-                        "free_memory_pointer_load");
-      ++NumMemoryObjects;
-      Changed = true;
-    } else if (isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-               isConstantIntValue(Call->getArgOperand(1), 64)) {
-      StringRef Kind = isMstoreAt(*Call, 64, 128)
-                           ? "free_memory_pointer_init"
-                           : "free_memory_pointer_update";
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_MEMORY_OBJECT, Kind);
-      ++NumMemoryObjects;
-      Changed = true;
     }
   }
 

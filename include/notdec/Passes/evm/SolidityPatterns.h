@@ -11,11 +11,8 @@ extern const char *KIND_SOLIDITY_ABI_DECODE;
 extern const char *KIND_SOLIDITY_ABI_RETURN;
 extern const char *KIND_SOLIDITY_REVERT;
 extern const char *KIND_SOLIDITY_CHECKED_BOUNDS;
-extern const char *KIND_SOLIDITY_CLEANUP;
 extern const char *KIND_SOLIDITY_STORAGE_ADDRESSING;
 extern const char *KIND_SOLIDITY_PACKED_STORAGE_FIELD;
-extern const char *KIND_SOLIDITY_STORAGE_BYTES_STRING;
-extern const char *KIND_SOLIDITY_MEMORY_OBJECT;
 extern const char *KIND_SOLIDITY_EVENT;
 extern const char *KIND_SOLIDITY_EXTERNAL_CALL;
 
@@ -77,16 +74,6 @@ struct CheckedBoundsPass : llvm::PassInfoMixin<CheckedBoundsPass> {
   static bool isRequired() { return true; }
 };
 
-// Marks common value cleanup idioms such as address masks, low-bit masks and
-// signextend.  These are type hints only, not final recovered types.
-struct ValueCleanupTypeHintPass
-    : llvm::PassInfoMixin<ValueCleanupTypeHintPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
 // Marks sha3-based storage addressing candidates.  Exact packed field recovery
 // still needs stronger dataflow, so this pass only labels the address roots.
 struct StorageAddressingPass : llvm::PassInfoMixin<StorageAddressingPass> {
@@ -100,24 +87,6 @@ struct StorageAddressingPass : llvm::PassInfoMixin<StorageAddressingPass> {
 // shift/mask/or chains.
 struct PackedStorageFieldPass
     : llvm::PassInfoMixin<PackedStorageFieldPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
-// Marks short/long storage bytes-string encoding candidates.  These are still
-// low-level candidates, not recovered Solidity string operations.
-struct StorageBytesStringPass
-    : llvm::PassInfoMixin<StorageBytesStringPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
-// Marks free-memory-pointer loads/stores used by Solidity memory allocation.
-struct MemoryObjectPass : llvm::PassInfoMixin<MemoryObjectPass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 

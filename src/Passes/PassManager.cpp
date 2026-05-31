@@ -290,14 +290,9 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::SolidityRevertPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
     MPM.addPass(
-        createModuleToFunctionPassAdaptor(evm::ValueCleanupTypeHintPass()));
-    MPM.addPass(
         createModuleToFunctionPassAdaptor(evm::StorageAddressingPass()));
     MPM.addPass(
         createModuleToFunctionPassAdaptor(evm::PackedStorageFieldPass()));
-    MPM.addPass(
-        createModuleToFunctionPassAdaptor(evm::StorageBytesStringPass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(evm::MemoryObjectPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::EventLogPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::ExternalCallPass()));
     MPM.addPass(VerifierPass(false));
