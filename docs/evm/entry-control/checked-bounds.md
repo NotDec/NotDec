@@ -116,6 +116,16 @@ if value >= enum_member_count:
     panic(0x21)
 ```
 
+storage 动态数组 `pop()` 常见形状：
+
+```text
+old_len = sload(array_slot)
+if old_len == 0:
+    panic(0x31)
+new_len = old_len - 1
+sstore(array_slot, new_len)
+```
+
 storage bytes/string 从 slot 解码时还有编码合法性检查：
 
 ```text

@@ -2253,6 +2253,78 @@ matchEnumConversion(const NormalizedCondition &FailureCond,
                             true};
 }
 
+bool blockComputesLengthMinusOne(BasicBlock *BB, Value *Length) {
+  if (BB == nullptr || Length == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *BB) {
+    auto *Add = dyn_cast<BinaryOperator>(&I);
+    if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+      continue;
+    }
+
+    Value *Other = nullptr;
+    if (isAllOnes(Add->getOperand(0))) {
+      Other = Add->getOperand(1);
+    } else if (isAllOnes(Add->getOperand(1))) {
+      Other = Add->getOperand(0);
+    } else {
+      continue;
+    }
+
+    if (isSameValue(Other, Length)) {
+      return true;
+    }
+
+    auto *BaseAdd = dyn_cast<BinaryOperator>(Other);
+    if (BaseAdd != nullptr && BaseAdd->getOpcode() == Instruction::Add &&
+        binaryOpHasOperand(BaseAdd, Length)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<CheckedBoundsMatch>
+matchEmptyArrayPop(const NormalizedCondition &FailureCond,
+                   const SolidityRevertMatch &RevertMatch,
+                   BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x31) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr || FailureCond.Predicate != ICmpInst::ICMP_EQ) {
+    return std::nullopt;
+  }
+
+  Value *Length = nullptr;
+  if (isZero(Cmp->getOperand(0))) {
+    Length = Cmp->getOperand(1);
+  } else if (isZero(Cmp->getOperand(1))) {
+    Length = Cmp->getOperand(0);
+  } else {
+    return std::nullopt;
+  }
+
+  auto *LengthCall = dyn_cast_or_null<CallBase>(Length);
+  if (LengthCall == nullptr || !isCallTo(LengthCall, "evm_sload") ||
+      !blockComputesLengthMinusOne(SuccessBlock, Length)) {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{"empty_array_pop_storage",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {Length},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 bool isFreeMemoryPointerLoad(Value *V);
 CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
 
@@ -3020,6 +3092,15 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       return EnumConversion;
     }
 
+    if (std::optional<CheckedBoundsMatch> EmptyArrayPop =
+            matchEmptyArrayPop(*FailureCond, *RevertMatch,
+                               Br->getSuccessor(1 - SuccIdx))) {
+      EmptyArrayPop->Branch = Br;
+      EmptyArrayPop->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      EmptyArrayPop->FailureBlock = Failure;
+      return EmptyArrayPop;
+    }
+
     if (std::optional<CheckedBoundsMatch> MemoryBounds =
             matchMemoryAllocationBounds(*FailureCond, *RevertMatch,
                                         Br->getSuccessor(1 - SuccIdx))) {
@@ -3092,6 +3173,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "enum_conversion") {
     return "notdec_solidity_rewrite_enum_conversion";
+  }
+  if (Kind == "empty_array_pop_storage") {
+    return "notdec_solidity_rewrite_empty_array_pop_storage";
   }
   return "";
 }

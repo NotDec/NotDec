@@ -366,15 +366,18 @@
         "49": 1
       },
       "expected_checked_bounds_kinds": {
-        "panic_empty_array_pop": 1
+        "empty_array_pop_storage": 1
       },
       "expected_checked_bounds_panic_codes": {
         "49": 1
       },
-      "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 1
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
-      "expected_checked_bounds_cfg_rewrites": 0
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 1
     },
     {
       "name": "revert_error_string_01",
@@ -1557,7 +1560,7 @@
         "panic_array_out_of_bounds": 2,
         "array_bounds_memory": 4,
         "array_bounds_storage": 11,
-        "panic_empty_array_pop": 1,
+        "empty_array_pop_storage": 1,
         "enum_conversion": 2,
         "panic_resource_error": 6,
         "storage_bytes_encoding": 1,
@@ -1583,13 +1586,14 @@
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_checked_add_bound": 1,
-        "notdec_solidity_rewrite_enum_conversion": 2
+        "notdec_solidity_rewrite_enum_conversion": 2,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 8,
+        "unrecognized_operands": 7,
         "unsupported_condition": 3
       },
-      "expected_checked_bounds_cfg_rewrites": 26,
+      "expected_checked_bounds_cfg_rewrites": 27,
       "expected_returndata_bubbles": 20
     },
     {
@@ -1735,7 +1739,7 @@
       "expected_returndata_bubbles": 2,
       "expected_checked_bounds_kinds": {
         "array_bounds_storage": 9,
-        "panic_empty_array_pop": 2,
+        "empty_array_pop_storage": 2,
         "memory_allocation_bounds": 1,
         "array_bounds_memory": 3,
         "panic_resource_error": 2,
@@ -1760,13 +1764,14 @@
         "notdec_solidity_rewrite_checked_add": 1,
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_checked_mul": 1,
-        "notdec_solidity_rewrite_checked_div": 1
+        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 2
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 2,
+        "unrecognized_operands": 0,
         "unsupported_condition": 2
       },
-      "expected_checked_bounds_cfg_rewrites": 18
+      "expected_checked_bounds_cfg_rewrites": 20
     },
     {
       "name": "0651_19497235_18ca6cbfa7_017843325734",
@@ -2500,7 +2505,7 @@
         "checked_add": 1,
         "panic_resource_error": 2,
         "array_bounds_storage": 3,
-        "panic_empty_array_pop": 1,
+        "empty_array_pop_storage": 1,
         "memory_allocation_bounds": 1,
         "memory_allocation_pointer_bounds": 1,
         "storage_bytes_encoding": 1,
@@ -2525,12 +2530,13 @@
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_checked_sub_bound": 1,
         "notdec_solidity_rewrite_checked_mul_bound": 1,
-        "notdec_solidity_rewrite_checked_sub": 1
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 3
+        "unrecognized_operands": 2
       },
-      "expected_checked_bounds_cfg_rewrites": 11,
+      "expected_checked_bounds_cfg_rewrites": 12,
       "expected_returndata_bubbles": 0
     },
     {
@@ -2636,7 +2642,7 @@
         "checked_mul": 1,
         "checked_sub": 1,
         "panic_storage_encoding": 1,
-        "panic_empty_array_pop": 1
+        "empty_array_pop_storage": 1
       },
       "expected_checked_bounds_panic_codes": {
         "50": 10,
@@ -2653,13 +2659,14 @@
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_div": 1,
         "notdec_solidity_rewrite_checked_mul": 1,
-        "notdec_solidity_rewrite_checked_sub": 1
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
       "expected_checked_bounds_skip_reasons": {
         "unsupported_condition": 1,
-        "unrecognized_operands": 1
+        "unrecognized_operands": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 17,
+      "expected_checked_bounds_cfg_rewrites": 18,
       "expected_returndata_bubbles": 7
     },
     {
