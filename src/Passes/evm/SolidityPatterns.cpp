@@ -225,6 +225,38 @@ bool isAllOnes(const Value *V) {
   return C != nullptr && C->isMinusOne();
 }
 
+bool isSmallUnsignedMax(const ConstantInt *C) {
+  if (C == nullptr) {
+    return false;
+  }
+  APInt Limit = C->getValue() + 1;
+  return Limit.isPowerOf2() && Limit.ugt(1) &&
+         Limit.getActiveBits() < C->getBitWidth();
+}
+
+bool isConstantWithin(Value *V, const APInt &Max) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  return C != nullptr && C->getValue().ule(Max);
+}
+
+bool isConstantEqual(Value *V, const APInt &Expected) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  return C != nullptr && C->getValue() == Expected;
+}
+
+bool isUnsignedCleanupToMax(Value *V, const APInt &Max) {
+  if (isConstantWithin(V, Max)) {
+    return true;
+  }
+
+  auto *And = dyn_cast_or_null<BinaryOperator>(V);
+  if (And == nullptr || And->getOpcode() != Instruction::And) {
+    return false;
+  }
+  return isConstantEqual(And->getOperand(0), Max) ||
+         isConstantEqual(And->getOperand(1), Max);
+}
+
 StringRef getCalleeName(const Value *V) {
   if (V == nullptr) {
     return "";
@@ -1869,6 +1901,72 @@ matchCheckedMulGuard(Value *BranchCondition, bool FailureWhenCondTrue,
       RevertMatch.PanicCode, true};
 }
 
+bool matchSmallUnsignedBoundedResult(const NormalizedCondition &FailureCond,
+                                     BinaryOperator *&Op,
+                                     ConstantInt *&MaxValue) {
+  Op = nullptr;
+  MaxValue = nullptr;
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return false;
+  }
+
+  Value *Result = nullptr;
+  Value *Bound = nullptr;
+  bool BoundIsLimit = false;
+  switch (FailureCond.Predicate) {
+  case ICmpInst::ICMP_UGT:
+    Result = Cmp->getOperand(0);
+    Bound = Cmp->getOperand(1);
+    break;
+  case ICmpInst::ICMP_ULT:
+    Result = Cmp->getOperand(1);
+    Bound = Cmp->getOperand(0);
+    break;
+  case ICmpInst::ICMP_UGE:
+    Result = Cmp->getOperand(0);
+    Bound = Cmp->getOperand(1);
+    BoundIsLimit = true;
+    break;
+  case ICmpInst::ICMP_ULE:
+    Result = Cmp->getOperand(1);
+    Bound = Cmp->getOperand(0);
+    BoundIsLimit = true;
+    break;
+  default:
+    return false;
+  }
+
+  Op = dyn_cast_or_null<BinaryOperator>(Result);
+  if (Op == nullptr ||
+      (Op->getOpcode() != Instruction::Add &&
+       Op->getOpcode() != Instruction::Sub &&
+       Op->getOpcode() != Instruction::Mul)) {
+    return false;
+  }
+
+  auto *BoundConst = dyn_cast_or_null<ConstantInt>(Bound);
+  if (BoundConst == nullptr) {
+    return false;
+  }
+
+  APInt Max = BoundConst->getValue();
+  if (BoundIsLimit) {
+    if (Max.isZero()) {
+      return false;
+    }
+    Max -= 1;
+  }
+  MaxValue =
+      dyn_cast<ConstantInt>(ConstantInt::get(BoundConst->getType(), Max));
+  if (!isSmallUnsignedMax(MaxValue)) {
+    return false;
+  }
+
+  return isUnsignedCleanupToMax(Op->getOperand(0), Max) &&
+         isUnsignedCleanupToMax(Op->getOperand(1), Max);
+}
+
 std::optional<CheckedBoundsMatch>
 matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                        const SolidityRevertMatch &RevertMatch,
@@ -1887,6 +1985,30 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
   ICmpInst::Predicate Pred = FailureCond.Predicate;
 
   if (*RevertMatch.PanicCode == 0x11) {
+    BinaryOperator *BoundedOp = nullptr;
+    ConstantInt *MaxValue = nullptr;
+    if (matchSmallUnsignedBoundedResult(FailureCond, BoundedOp, MaxValue)) {
+      StringRef Kind = "";
+      if (BoundedOp->getOpcode() == Instruction::Add) {
+        Kind = "checked_add_bound";
+      } else if (BoundedOp->getOpcode() == Instruction::Sub) {
+        Kind = "checked_sub_bound";
+      } else {
+        Kind = "checked_mul_bound";
+      }
+      return CheckedBoundsMatch{Kind,
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedOp->getOperand(0),
+                                 BoundedOp->getOperand(1), BoundedOp,
+                                 MaxValue},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+
     if (Pred == ICmpInst::ICMP_UGT || Pred == ICmpInst::ICMP_ULT) {
       Value *MaybeOriginal = Pred == ICmpInst::ICMP_UGT ? LHS : RHS;
       Value *MaybeResult = Pred == ICmpInst::ICMP_UGT ? RHS : LHS;
@@ -2875,6 +2997,15 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "checked_mul") {
     return "notdec_solidity_rewrite_checked_mul";
+  }
+  if (Kind == "checked_add_bound") {
+    return "notdec_solidity_rewrite_checked_add_bound";
+  }
+  if (Kind == "checked_sub_bound") {
+    return "notdec_solidity_rewrite_checked_sub_bound";
+  }
+  if (Kind == "checked_mul_bound") {
+    return "notdec_solidity_rewrite_checked_mul_bound";
   }
   if (Kind == "checked_div") {
     return "notdec_solidity_rewrite_checked_div";

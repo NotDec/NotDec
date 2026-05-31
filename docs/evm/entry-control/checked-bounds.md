@@ -30,6 +30,18 @@ EVM 的 `ADD`、`SUB`、`MUL` 默认都是 256-bit 模运算。也就是说，�
 
 Solidity 要实现 checked arithmetic，就要在运算前后补判断。
 
+非 256-bit unsigned arithmetic 会先把输入 cleanup 到目标位宽，再检查结果是否超过该位宽的 max：
+
+```text
+x = x & max
+y = y & max
+sum = x + y
+if sum > max:
+    panic(0x11)
+```
+
+`sub` 和 `mul` 也有同类 `result > max` / `result >= max + 1` 形状。rewrite helper 要带上这个 max，不能把它当成普通 256-bit checked arithmetic。
+
 `uint256` 加法常见形状：
 
 ```text
