@@ -2486,6 +2486,25 @@ bool isRoundedByteAllocationSizeForLength(Value *V, Value *Length) {
           isConstantIntValue(LengthAdd->getOperand(1), 31));
 }
 
+bool isRoundedMemoryAllocationSize(Value *V) {
+  auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
+  if (RoundedSize == nullptr || RoundedSize->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  Value *RoundedBase = nullptr;
+  if (isMaskClearingLowFiveBits(RoundedSize->getOperand(0))) {
+    RoundedBase = RoundedSize->getOperand(1);
+  } else if (isMaskClearingLowFiveBits(RoundedSize->getOperand(1))) {
+    RoundedBase = RoundedSize->getOperand(0);
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(RoundedBase);
+  return Add != nullptr && Add->getOpcode() == Instruction::Add &&
+         (isConstantIntValue(Add->getOperand(0), 31) ||
+          isConstantIntValue(Add->getOperand(1), 31));
+}
+
 bool hasPowerOfTwoExpComputation(BasicBlock *SuccessBlock, Value *Exponent) {
   if (SuccessBlock == nullptr || Exponent == nullptr) {
     return false;
@@ -2713,7 +2732,8 @@ bool isSmallFixedMemoryAllocationSize(Value *V) {
 }
 
 bool isSupportedMemoryAllocationSize(Value *V) {
-  return isMemoryAllocationSize(V) || isSmallFixedMemoryAllocationSize(V);
+  return isMemoryAllocationSize(V) || isRoundedMemoryAllocationSize(V) ||
+         isSmallFixedMemoryAllocationSize(V);
 }
 
 bool isFreeMemoryPointerLoad(Value *V) {
@@ -2931,14 +2951,18 @@ matchStorageBytesEncoding(Value *BranchCondition, bool FailureWhenCondTrue,
 std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
     Value *BranchCondition, bool FailureWhenCondTrue,
     const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
-  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41 ||
-      FailureWhenCondTrue) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41) {
     return std::nullopt;
   }
 
-  auto *And = dyn_cast_or_null<BinaryOperator>(BranchCondition);
-  if (And == nullptr || And->getOpcode() != Instruction::And ||
-      !And->getType()->isIntegerTy(1)) {
+  auto *Combiner = dyn_cast_or_null<BinaryOperator>(BranchCondition);
+  if (Combiner == nullptr || !Combiner->getType()->isIntegerTy(1)) {
+    return std::nullopt;
+  }
+
+  Instruction::BinaryOps ExpectedCombiner =
+      FailureWhenCondTrue ? Instruction::Or : Instruction::And;
+  if (Combiner->getOpcode() != ExpectedCombiner) {
     return std::nullopt;
   }
 
@@ -2946,36 +2970,58 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   Value *NoWrapCheckedPtr = nullptr;
   Value *OldPtr = nullptr;
   Value *NoWrapLimit = nullptr;
-  for (Value *Operand : {And->getOperand(0), And->getOperand(1)}) {
+  for (Value *Operand : {Combiner->getOperand(0), Combiner->getOperand(1)}) {
     auto *Cmp = dyn_cast<ICmpInst>(Operand);
     if (Cmp == nullptr) {
       return std::nullopt;
     }
-    if (Cmp->getPredicate() == ICmpInst::ICMP_ULT &&
-        isUInt64Limit(Cmp->getOperand(1))) {
-      RangeCheckedPtr = Cmp->getOperand(0);
-      continue;
-    }
-    if (Cmp->getPredicate() == ICmpInst::ICMP_ULE &&
-        isUInt64Max(Cmp->getOperand(1))) {
-      RangeCheckedPtr = Cmp->getOperand(0);
-      continue;
-    }
-    if (Cmp->getPredicate() == ICmpInst::ICMP_UGE) {
-      NoWrapCheckedPtr = Cmp->getOperand(0);
-      OldPtr = Cmp->getOperand(1);
-      continue;
-    }
-    if (Cmp->getPredicate() == ICmpInst::ICMP_ULT) {
-      OldPtr = Cmp->getOperand(0);
-      NoWrapLimit = Cmp->getOperand(1);
-      continue;
+    if (FailureWhenCondTrue) {
+      // Solidity finalizeAllocation uses:
+      //   or(gt(newFreePtr, uint64max), lt(newFreePtr, memPtr))
+      if (Cmp->getPredicate() == ICmpInst::ICMP_UGT &&
+          isUInt64Max(Cmp->getOperand(1))) {
+        RangeCheckedPtr = Cmp->getOperand(0);
+        continue;
+      }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_UGE &&
+          isUInt64Limit(Cmp->getOperand(1))) {
+        RangeCheckedPtr = Cmp->getOperand(0);
+        continue;
+      }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_ULT) {
+        NoWrapCheckedPtr = Cmp->getOperand(0);
+        OldPtr = Cmp->getOperand(1);
+        continue;
+      }
+    } else {
+      if (Cmp->getPredicate() == ICmpInst::ICMP_ULT &&
+          isUInt64Limit(Cmp->getOperand(1))) {
+        RangeCheckedPtr = Cmp->getOperand(0);
+        continue;
+      }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_ULE &&
+          isUInt64Max(Cmp->getOperand(1))) {
+        RangeCheckedPtr = Cmp->getOperand(0);
+        continue;
+      }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_UGE) {
+        NoWrapCheckedPtr = Cmp->getOperand(0);
+        OldPtr = Cmp->getOperand(1);
+        continue;
+      }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_ULT) {
+        OldPtr = Cmp->getOperand(0);
+        NoWrapLimit = Cmp->getOperand(1);
+        continue;
+      }
     }
     return std::nullopt;
   }
 
-  if (RangeCheckedPtr == nullptr || OldPtr == nullptr ||
-      !isFreeMemoryPointerLoad(OldPtr)) {
+  if (RangeCheckedPtr == nullptr || OldPtr == nullptr) {
+    return std::nullopt;
+  }
+  if (!FailureWhenCondTrue && !isFreeMemoryPointerLoad(OldPtr)) {
     return std::nullopt;
   }
   if (NoWrapCheckedPtr != nullptr &&
