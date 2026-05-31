@@ -2084,6 +2084,7 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
 }
 
 bool isFreeMemoryPointerLoad(Value *V);
+CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
 
 bool hasMemoryArrayAllocationComputation(BasicBlock *SuccessBlock,
                                          Value *Length) {
@@ -2112,6 +2113,132 @@ bool hasMemoryArrayAllocationComputation(BasicBlock *SuccessBlock,
   return false;
 }
 
+bool isMaskClearingLowFiveBits(Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr) {
+    return false;
+  }
+  const APInt &Value = C->getValue();
+  return Value.countTrailingZeros() >= 5;
+}
+
+bool isRoundedByteLength(Value *V, Value *Length) {
+  auto *Rounded = dyn_cast_or_null<BinaryOperator>(V);
+  if (Rounded == nullptr || Rounded->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  Value *Base = nullptr;
+  if (isMaskClearingLowFiveBits(Rounded->getOperand(0))) {
+    Base = Rounded->getOperand(1);
+  } else if (isMaskClearingLowFiveBits(Rounded->getOperand(1))) {
+    Base = Rounded->getOperand(0);
+  }
+  auto *Add = dyn_cast_or_null<BinaryOperator>(Base);
+  return Add != nullptr && Add->getOpcode() == Instruction::Add &&
+         binaryOpHasOperand(Add, Length) &&
+         (isConstantIntValue(Add->getOperand(0), 31) ||
+          isConstantIntValue(Add->getOperand(1), 31));
+}
+
+bool isByteAllocationSize(Value *V, Value *Length) {
+  auto *SizeAdd = dyn_cast_or_null<BinaryOperator>(V);
+  if (SizeAdd == nullptr || SizeAdd->getOpcode() != Instruction::Add) {
+    return false;
+  }
+  Value *Rounded = nullptr;
+  if (isConstantIntValue(SizeAdd->getOperand(0), 32)) {
+    Rounded = SizeAdd->getOperand(1);
+  } else if (isConstantIntValue(SizeAdd->getOperand(1), 32)) {
+    Rounded = SizeAdd->getOperand(0);
+  }
+  return Rounded != nullptr && isRoundedByteLength(Rounded, Length);
+}
+
+bool isRoundedByteAllocationSize(Value *V) {
+  auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
+  if (RoundedSize == nullptr ||
+      RoundedSize->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  Value *RoundedBase = nullptr;
+  if (isMaskClearingLowFiveBits(RoundedSize->getOperand(0))) {
+    RoundedBase = RoundedSize->getOperand(1);
+  } else if (isMaskClearingLowFiveBits(RoundedSize->getOperand(1))) {
+    RoundedBase = RoundedSize->getOperand(0);
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(RoundedBase);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  Value *InnerRounded = nullptr;
+  if (isConstantIntValue(Add->getOperand(0), 63)) {
+    InnerRounded = Add->getOperand(1);
+  } else if (isConstantIntValue(Add->getOperand(1), 63)) {
+    InnerRounded = Add->getOperand(0);
+  }
+
+  auto *InnerAnd = dyn_cast_or_null<BinaryOperator>(InnerRounded);
+  if (InnerAnd == nullptr || InnerAnd->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  Value *InnerBase = nullptr;
+  if (isMaskClearingLowFiveBits(InnerAnd->getOperand(0))) {
+    InnerBase = InnerAnd->getOperand(1);
+  } else if (isMaskClearingLowFiveBits(InnerAnd->getOperand(1))) {
+    InnerBase = InnerAnd->getOperand(0);
+  }
+
+  auto *LengthAdd = dyn_cast_or_null<BinaryOperator>(InnerBase);
+  return LengthAdd != nullptr && LengthAdd->getOpcode() == Instruction::Add &&
+         (isConstantIntValue(LengthAdd->getOperand(0), 31) ||
+          isConstantIntValue(LengthAdd->getOperand(1), 31));
+}
+
+bool hasMemoryBytesAllocationComputation(BasicBlock *SuccessBlock,
+                                         Value *Length) {
+  if (SuccessBlock == nullptr) {
+    return false;
+  }
+
+  Value *OldPtr = nullptr;
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
+        Call->arg_size() != 3 || !isSameValue(Call->getArgOperand(2), Length) ||
+        !isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
+      continue;
+    }
+    OldPtr = Call->getArgOperand(1);
+    break;
+  }
+  if (OldPtr == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *NewPtr = dyn_cast<BinaryOperator>(&I);
+    if (NewPtr == nullptr || NewPtr->getOpcode() != Instruction::Add ||
+        !binaryOpHasOperand(NewPtr, OldPtr)) {
+      continue;
+    }
+    Value *Size = isSameValue(NewPtr->getOperand(0), OldPtr)
+                      ? NewPtr->getOperand(1)
+                      : NewPtr->getOperand(0);
+    if (!isByteAllocationSize(Size, Length)) {
+      continue;
+    }
+    if (findFreeMemoryPointerStore(SuccessBlock, NewPtr) != nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
                                         Value *Length) {
   Value *Shift = findMemoryAllocationShift(SuccessBlock, Length);
@@ -2129,13 +2256,17 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
     }
   }
 
-  return hasMemoryArrayAllocationComputation(SuccessBlock, Length);
+  return hasMemoryArrayAllocationComputation(SuccessBlock, Length) ||
+         hasMemoryBytesAllocationComputation(SuccessBlock, Length);
 }
 
 bool isMemoryAllocationSize(Value *V) {
   auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
   if (RoundedSize == nullptr || RoundedSize->getOpcode() != Instruction::And) {
     return false;
+  }
+  if (isRoundedByteAllocationSize(V)) {
+    return true;
   }
 
   Value *RoundedBase = nullptr;
@@ -2160,9 +2291,12 @@ bool isMemoryAllocationSize(Value *V) {
     Shift = Add->getOperand(0);
   }
   auto *ShiftCall = dyn_cast_or_null<CallBase>(Shift);
-  return ShiftCall != nullptr && isCallTo(ShiftCall, "evm_shl") &&
-         ShiftCall->arg_size() == 2 &&
-         isConstantIntValue(ShiftCall->getArgOperand(0), 5);
+  if (ShiftCall != nullptr && isCallTo(ShiftCall, "evm_shl") &&
+      ShiftCall->arg_size() == 2 &&
+      isConstantIntValue(ShiftCall->getArgOperand(0), 5)) {
+    return true;
+  }
+  return isRoundedByteAllocationSize(V);
 }
 
 bool isFreeMemoryPointerLoad(Value *V) {

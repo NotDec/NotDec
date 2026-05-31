@@ -76,6 +76,9 @@ payload_size = round_up(length * 32)
 new_free_ptr = free_ptr + payload_size
 if new_free_ptr < free_ptr or new_free_ptr >= 2^64:
     panic(0x41)
+bytes_payload_size = round_up(round_up(length + 31) + 63)
+if free_ptr + bytes_payload_size overflows or exceeds 2^64:
+    panic(0x41)
 if free_ptr >= 2^64 - fixed_size:
     panic(0x41)
 ```
