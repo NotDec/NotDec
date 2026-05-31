@@ -146,6 +146,16 @@ bool isConstantIntValue(const Value *V, uint64_t N) {
   return C != nullptr && C->getValue() == N;
 }
 
+bool isUInt64Limit(const Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr || C->getBitWidth() <= 64) {
+    return false;
+  }
+  APInt Limit(C->getBitWidth(), 1);
+  Limit <<= 64;
+  return C->getValue() == Limit;
+}
+
 bool isAllOnes(const Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   return C != nullptr && C->isMinusOne();
@@ -1569,6 +1579,22 @@ BinaryOperator *findCommutativeBinaryOpInBlock(BasicBlock *BB,
   return findBinaryOpInBlock(BB, Opcode, RHS, LHS);
 }
 
+CallBase *findMemoryAllocationShift(BasicBlock *BB, Value *Length) {
+  if (BB == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_shl") &&
+        Call->arg_size() == 2 &&
+        isConstantIntValue(Call->getArgOperand(0), 5) &&
+        isSameValue(Call->getArgOperand(1), Length)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
 Value *matchBitwiseNot(Value *V) {
   auto *Op = dyn_cast_or_null<BinaryOperator>(V);
   if (Op == nullptr || Op->getOpcode() != Instruction::Xor) {
@@ -1987,6 +2013,64 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
                             RevertMatch.PanicCode, true};
 }
 
+bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
+                                        Value *Length) {
+  CallBase *Shift = findMemoryAllocationShift(SuccessBlock, Length);
+  if (Shift == nullptr) {
+    return false;
+  }
+
+  auto *SixtyThree = ConstantInt::get(Length->getType(), 63);
+  BinaryOperator *RoundedBase = findCommutativeBinaryOpInBlock(
+      SuccessBlock, Instruction::Add, Shift, SixtyThree);
+  if (RoundedBase == nullptr) {
+    return false;
+  }
+
+  return findCommutativeBinaryOpInBlock(
+             SuccessBlock, Instruction::And, RoundedBase,
+             ConstantInt::get(Length->getType(), -32, true)) != nullptr;
+}
+
+std::optional<CheckedBoundsMatch>
+matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
+                            const SolidityRevertMatch &RevertMatch,
+                            BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *Length = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE &&
+      isUInt64Limit(Cmp->getOperand(1))) {
+    Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+             isUInt64Limit(Cmp->getOperand(0))) {
+    Length = Cmp->getOperand(1);
+  } else {
+    return std::nullopt;
+  }
+
+  if (!hasMemoryAllocationSizeComputation(SuccessBlock, Length)) {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{"memory_allocation_bounds",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {Length},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
   auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
   if (Br == nullptr || !Br->isConditional() ||
@@ -2065,6 +2149,15 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       return Bounds;
     }
 
+    if (std::optional<CheckedBoundsMatch> MemoryBounds =
+            matchMemoryAllocationBounds(*FailureCond, *RevertMatch,
+                                        Br->getSuccessor(1 - SuccIdx))) {
+      MemoryBounds->Branch = Br;
+      MemoryBounds->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      MemoryBounds->FailureBlock = Failure;
+      return MemoryBounds;
+    }
+
     return Match;
   }
 
@@ -2095,6 +2188,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "array_bounds_storage") {
     return "notdec_solidity_rewrite_array_bounds_storage";
+  }
+  if (Kind == "memory_allocation_bounds") {
+    return "notdec_solidity_rewrite_memory_allocation_bounds";
   }
   return "";
 }

@@ -65,6 +65,14 @@ if index >= length:
 value = array[index]
 ```
 
+动态内存分配也会触发资源检查：
+
+```text
+if length >= 2^64:
+    panic(0x41)
+payload_size = round_up(length * 32)
+```
+
 enum 转换、小整数转换、bytes/string storage 编码错误也可能生成不同 panic code。
 
 ## 例子详解
