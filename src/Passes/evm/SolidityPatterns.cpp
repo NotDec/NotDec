@@ -1560,6 +1560,15 @@ BinaryOperator *findBinaryOpInBlock(BasicBlock *BB,
   return nullptr;
 }
 
+BinaryOperator *findCommutativeBinaryOpInBlock(BasicBlock *BB,
+                                               Instruction::BinaryOps Opcode,
+                                               Value *LHS, Value *RHS) {
+  if (BinaryOperator *Op = findBinaryOpInBlock(BB, Opcode, LHS, RHS)) {
+    return Op;
+  }
+  return findBinaryOpInBlock(BB, Opcode, RHS, LHS);
+}
+
 Value *matchBitwiseNot(Value *V) {
   auto *Op = dyn_cast_or_null<BinaryOperator>(V);
   if (Op == nullptr || Op->getOpcode() != Instruction::Xor) {
@@ -1621,6 +1630,78 @@ BinaryOperator *matchCheckedMulSuccessCondition(Value *V) {
   return Product;
 }
 
+BinaryOperator *matchMulByMaxDivBound(ICmpInst *Cmp,
+                                      ICmpInst::Predicate Pred,
+                                      BasicBlock *SuccessBlock) {
+  if (Cmp == nullptr) {
+    return nullptr;
+  }
+
+  Value *Factor = nullptr;
+  CallBase *Div = nullptr;
+  if (Pred == ICmpInst::ICMP_ULE) {
+    Factor = Cmp->getOperand(0);
+    Div = dyn_cast<CallBase>(Cmp->getOperand(1));
+  } else if (Pred == ICmpInst::ICMP_UGE) {
+    Factor = Cmp->getOperand(1);
+    Div = dyn_cast<CallBase>(Cmp->getOperand(0));
+  } else if (Pred == ICmpInst::ICMP_UGT) {
+    Factor = Cmp->getOperand(0);
+    Div = dyn_cast<CallBase>(Cmp->getOperand(1));
+  } else if (Pred == ICmpInst::ICMP_ULT) {
+    Factor = Cmp->getOperand(1);
+    Div = dyn_cast<CallBase>(Cmp->getOperand(0));
+  }
+
+  if (Factor == nullptr || Div == nullptr || !isCallTo(Div, "evm_div") ||
+      Div->arg_size() != 2 || !isAllOnes(Div->getArgOperand(0))) {
+    return nullptr;
+  }
+
+  return findCommutativeBinaryOpInBlock(SuccessBlock, Instruction::Mul, Factor,
+                                        Div->getArgOperand(1));
+}
+
+BinaryOperator *matchCheckedMulMaxDivSuccessCondition(Value *V,
+                                                      BasicBlock *SuccessBlock) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return nullptr;
+  }
+
+  Value *ZeroChecked = nullptr;
+  ICmpInst *BoundCmp = nullptr;
+  ICmpInst::Predicate BoundPred = ICmpInst::BAD_ICMP_PREDICATE;
+  for (Value *Operand : {Or->getOperand(0), Or->getOperand(1)}) {
+    auto *Cmp = dyn_cast<ICmpInst>(Operand);
+    if (Cmp == nullptr) {
+      return nullptr;
+    }
+    if (Cmp->getPredicate() == ICmpInst::ICMP_EQ &&
+        (isZero(Cmp->getOperand(0)) || isZero(Cmp->getOperand(1)))) {
+      ZeroChecked = isZero(Cmp->getOperand(0)) ? Cmp->getOperand(1)
+                                               : Cmp->getOperand(0);
+      continue;
+    }
+    BoundCmp = Cmp;
+    BoundPred = Cmp->getPredicate();
+  }
+
+  BinaryOperator *Product =
+      matchMulByMaxDivBound(BoundCmp, BoundPred, SuccessBlock);
+  if (Product == nullptr || ZeroChecked == nullptr) {
+    return nullptr;
+  }
+
+  auto *Div = dyn_cast<CallBase>(BoundPred == ICmpInst::ICMP_ULE
+                                     ? BoundCmp->getOperand(1)
+                                     : BoundCmp->getOperand(0));
+  if (Div == nullptr || !isSameValue(Div->getArgOperand(1), ZeroChecked)) {
+    return nullptr;
+  }
+  return Product;
+}
+
 std::optional<CheckedBoundsMatch>
 matchCheckedSubGuard(const NormalizedCondition &FailureCond,
                      const SolidityRevertMatch &RevertMatch,
@@ -1649,12 +1730,21 @@ matchCheckedSubGuard(const NormalizedCondition &FailureCond,
 
 std::optional<CheckedBoundsMatch>
 matchCheckedMulGuard(Value *BranchCondition, bool FailureWhenCondTrue,
-                     const SolidityRevertMatch &RevertMatch) {
+                     const SolidityRevertMatch &RevertMatch,
+                     BasicBlock *SuccessBlock) {
   if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x11) {
     return std::nullopt;
   }
 
   if (!FailureWhenCondTrue) {
+    if (BinaryOperator *Product =
+            matchCheckedMulMaxDivSuccessCondition(BranchCondition,
+                                                  SuccessBlock)) {
+      return CheckedBoundsMatch{
+          "checked_mul", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+          {Product->getOperand(0), Product->getOperand(1), Product},
+          RevertMatch.PanicCode, true};
+    }
     if (BinaryOperator *Product =
             matchCheckedMulSuccessCondition(BranchCondition)) {
       return CheckedBoundsMatch{
@@ -1746,6 +1836,14 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
     }
 
     if (Pred == ICmpInst::ICMP_UGT) {
+      if (BinaryOperator *Mul =
+              matchMulByMaxDivBound(Cmp, Pred, SuccessBlock)) {
+        return CheckedBoundsMatch{
+            "checked_mul", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+            {Mul->getOperand(0), Mul->getOperand(1), Mul},
+            RevertMatch.PanicCode, true};
+      }
+
       Value *AddLHS = LHS;
       Value *AddRHS = matchBitwiseNot(RHS);
       if (AddRHS != nullptr) {
@@ -1906,7 +2004,8 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
 
     if (std::optional<CheckedBoundsMatch> Mul =
             matchCheckedMulGuard(Br->getCondition(), FailureWhenCondTrue,
-                                 *RevertMatch)) {
+                                 *RevertMatch,
+                                 Br->getSuccessor(1 - SuccIdx))) {
       Mul->Branch = Br;
       Mul->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       Mul->FailureBlock = Failure;
@@ -1989,7 +2088,8 @@ bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
     if (Inst == nullptr || DT.dominates(Inst, Match.Branch)) {
       continue;
     }
-    if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub") &&
+    if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
+         Match.Kind == "checked_mul") &&
         Match.Operands.size() == 3 && Operand == Match.Operands[2]) {
       continue;
     }
@@ -2020,7 +2120,8 @@ void insertCheckedBoundsSemanticMarker(LLVMContext &Ctx,
   IRBuilder<> Builder(Match.Branch);
   SmallVector<Value *, 3> Operands(Match.Operands.begin(),
                                    Match.Operands.end());
-  if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub") &&
+  if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
+       Match.Kind == "checked_mul") &&
       Operands.size() == 3) {
     auto *ResultInst = dyn_cast<Instruction>(Operands[2]);
     if (ResultInst != nullptr &&
@@ -2028,8 +2129,11 @@ void insertCheckedBoundsSemanticMarker(LLVMContext &Ctx,
       if (Match.Kind == "checked_add") {
         Operands[2] = Builder.CreateAdd(Operands[0], Operands[1],
                                         ResultInst->getName() + ".rewrite");
-      } else {
+      } else if (Match.Kind == "checked_sub") {
         Operands[2] = Builder.CreateSub(Operands[0], Operands[1],
+                                        ResultInst->getName() + ".rewrite");
+      } else {
+        Operands[2] = Builder.CreateMul(Operands[0], Operands[1],
                                         ResultInst->getName() + ".rewrite");
       }
     }
