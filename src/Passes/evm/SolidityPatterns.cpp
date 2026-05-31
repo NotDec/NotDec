@@ -2096,6 +2096,43 @@ CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
   return nullptr;
 }
 
+// Solidity encodes short storage bytes/string values in the slot itself. This
+// only accepts the canonical decoded-length expression from that same slot.
+bool matchStorageBytesLength(Value *Length, Value *Slot) {
+  auto *Select = dyn_cast_or_null<SelectInst>(Length);
+  if (Select == nullptr) {
+    return false;
+  }
+
+  auto *ShortCond = dyn_cast<ICmpInst>(Select->getCondition());
+  if (ShortCond == nullptr || ShortCond->getPredicate() != ICmpInst::ICMP_EQ ||
+      !isZero(ShortCond->getOperand(1))) {
+    return false;
+  }
+
+  auto *LowBit = dyn_cast<BinaryOperator>(ShortCond->getOperand(0));
+  if (LowBit == nullptr || LowBit->getOpcode() != Instruction::And ||
+      !binaryOpHasOperand(LowBit, Slot) ||
+      !(isConstantIntValue(LowBit->getOperand(0), 1) ||
+        isConstantIntValue(LowBit->getOperand(1), 1))) {
+    return false;
+  }
+
+  auto *ShortLen = dyn_cast<BinaryOperator>(Select->getTrueValue());
+  auto *FullLen = dyn_cast<CallBase>(Select->getFalseValue());
+  if (ShortLen == nullptr || ShortLen->getOpcode() != Instruction::And ||
+      FullLen == nullptr || !isCallTo(FullLen, "evm_shr") ||
+      FullLen->arg_size() != 2 ||
+      !isConstantIntValue(FullLen->getArgOperand(0), 1) ||
+      !isSameValue(FullLen->getArgOperand(1), Slot)) {
+    return false;
+  }
+
+  return binaryOpHasOperand(ShortLen, FullLen) &&
+         (isConstantIntValue(ShortLen->getOperand(0), 127) ||
+          isConstantIntValue(ShortLen->getOperand(1), 127));
+}
+
 std::optional<CheckedBoundsMatch>
 matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
                             const SolidityRevertMatch &RevertMatch,
@@ -2131,6 +2168,68 @@ matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
                             nullptr,
                             RevertMatch.Revert,
                             {Length},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
+std::optional<CheckedBoundsMatch>
+matchStorageBytesEncoding(Value *BranchCondition, bool FailureWhenCondTrue,
+                          const SolidityRevertMatch &RevertMatch) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x22) {
+    return std::nullopt;
+  }
+
+  auto *Xor = dyn_cast_or_null<BinaryOperator>(BranchCondition);
+  if (Xor == nullptr || Xor->getOpcode() != Instruction::Xor ||
+      !Xor->getType()->isIntegerTy(1)) {
+    return std::nullopt;
+  }
+
+  ICmpInst *LenCmp = nullptr;
+  TruncInst *SlotLowBit = nullptr;
+  for (Value *Operand : {Xor->getOperand(0), Xor->getOperand(1)}) {
+    if (auto *Cmp = dyn_cast<ICmpInst>(Operand)) {
+      LenCmp = Cmp;
+      continue;
+    }
+    if (auto *Trunc = dyn_cast<TruncInst>(Operand)) {
+      SlotLowBit = Trunc;
+      continue;
+    }
+    return std::nullopt;
+  }
+
+  if (LenCmp == nullptr || SlotLowBit == nullptr ||
+      !SlotLowBit->getType()->isIntegerTy(1)) {
+    return std::nullopt;
+  }
+
+  Value *Length = nullptr;
+  bool ConditionMeansFailure = false;
+  if (LenCmp->getPredicate() == ICmpInst::ICMP_UGT &&
+      isConstantIntValue(LenCmp->getOperand(1), 31)) {
+    Length = LenCmp->getOperand(0);
+    ConditionMeansFailure = true;
+  } else if (LenCmp->getPredicate() == ICmpInst::ICMP_ULT &&
+             isConstantIntValue(LenCmp->getOperand(1), 32)) {
+    Length = LenCmp->getOperand(0);
+    ConditionMeansFailure = false;
+  } else {
+    return std::nullopt;
+  }
+
+  if (ConditionMeansFailure != FailureWhenCondTrue ||
+      !matchStorageBytesLength(Length, SlotLowBit->getOperand(0))) {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{"storage_bytes_encoding",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {SlotLowBit->getOperand(0), Length},
                             RevertMatch.PanicCode,
                             true};
 }
@@ -2249,6 +2348,15 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       return MemoryPointerBounds;
     }
 
+    if (std::optional<CheckedBoundsMatch> StorageEncoding =
+            matchStorageBytesEncoding(Br->getCondition(), FailureWhenCondTrue,
+                                      *RevertMatch)) {
+      StorageEncoding->Branch = Br;
+      StorageEncoding->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      StorageEncoding->FailureBlock = Failure;
+      return StorageEncoding;
+    }
+
     if (std::optional<CheckedBoundsMatch> Mul =
             matchCheckedMulGuard(Br->getCondition(), FailureWhenCondTrue,
                                  *RevertMatch,
@@ -2335,6 +2443,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "memory_allocation_pointer_bounds") {
     return "notdec_solidity_rewrite_memory_allocation_pointer_bounds";
+  }
+  if (Kind == "storage_bytes_encoding") {
+    return "notdec_solidity_rewrite_storage_bytes_encoding";
   }
   return "";
 }

@@ -78,6 +78,15 @@ if new_free_ptr < free_ptr or new_free_ptr >= 2^64:
 
 enum 转换、小整数转换、bytes/string storage 编码错误也可能生成不同 panic code。
 
+storage bytes/string 从 slot 解码时还有编码合法性检查：
+
+```text
+slot_low_bit = slot & 1
+length = slot_low_bit == 0 ? ((slot >> 1) & 0x7f) : (slot >> 1)
+if (length > 31) xor slot_low_bit:
+    panic(0x22)
+```
+
 ## 例子详解
 
 Solidity 源码：
