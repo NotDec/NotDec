@@ -1882,6 +1882,49 @@ BinaryOperator *matchMulByMaxDivBound(ICmpInst *Cmp,
                                         Div->getArgOperand(1));
 }
 
+BinaryOperator *matchMulByCleanedMaxDivBound(ICmpInst *Cmp,
+                                             ICmpInst::Predicate Pred,
+                                             BasicBlock *SuccessBlock,
+                                             Value *&MaxValue) {
+  if (Cmp == nullptr) {
+    return nullptr;
+  }
+
+  Value *Factor = nullptr;
+  CallBase *Div = nullptr;
+  if (Pred == ICmpInst::ICMP_ULE) {
+    Factor = Cmp->getOperand(0);
+    Div = dyn_cast<CallBase>(Cmp->getOperand(1));
+  } else if (Pred == ICmpInst::ICMP_UGE) {
+    Factor = Cmp->getOperand(1);
+    Div = dyn_cast<CallBase>(Cmp->getOperand(0));
+  } else {
+    return nullptr;
+  }
+
+  if (Factor == nullptr || Div == nullptr || !isCallTo(Div, "evm_div") ||
+      Div->arg_size() != 2 || !isPowerOfTwoMinusOne(Div->getArgOperand(0))) {
+    return nullptr;
+  }
+
+  Value *Max = Div->getArgOperand(0);
+  Value *Divisor = Div->getArgOperand(1);
+  if (!isUnsignedCleanupToMaxValue(Factor, Max) ||
+      !isUnsignedCleanupToMaxValue(Divisor, Max)) {
+    return nullptr;
+  }
+
+  BinaryOperator *Product =
+      findCommutativeBinaryOpInBlock(SuccessBlock, Instruction::Mul, Factor,
+                                     Divisor);
+  if (Product == nullptr) {
+    return nullptr;
+  }
+
+  MaxValue = Max;
+  return Product;
+}
+
 BinaryOperator *matchCheckedMulMaxDivSuccessCondition(Value *V,
                                                       BasicBlock *SuccessBlock) {
   auto *Or = dyn_cast_or_null<BinaryOperator>(V);
@@ -1909,6 +1952,46 @@ BinaryOperator *matchCheckedMulMaxDivSuccessCondition(Value *V,
 
   BinaryOperator *Product =
       matchMulByMaxDivBound(BoundCmp, BoundPred, SuccessBlock);
+  if (Product == nullptr || ZeroChecked == nullptr) {
+    return nullptr;
+  }
+
+  auto *Div = dyn_cast<CallBase>(BoundPred == ICmpInst::ICMP_ULE
+                                     ? BoundCmp->getOperand(1)
+                                     : BoundCmp->getOperand(0));
+  if (Div == nullptr || !isSameValue(Div->getArgOperand(1), ZeroChecked)) {
+    return nullptr;
+  }
+  return Product;
+}
+
+BinaryOperator *matchCheckedMulCleanedMaxDivSuccessCondition(
+    Value *V, BasicBlock *SuccessBlock, Value *&MaxValue) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return nullptr;
+  }
+
+  Value *ZeroChecked = nullptr;
+  ICmpInst *BoundCmp = nullptr;
+  ICmpInst::Predicate BoundPred = ICmpInst::BAD_ICMP_PREDICATE;
+  for (Value *Operand : {Or->getOperand(0), Or->getOperand(1)}) {
+    auto *Cmp = dyn_cast<ICmpInst>(Operand);
+    if (Cmp == nullptr) {
+      return nullptr;
+    }
+    if (Cmp->getPredicate() == ICmpInst::ICMP_EQ &&
+        (isZero(Cmp->getOperand(0)) || isZero(Cmp->getOperand(1)))) {
+      ZeroChecked = isZero(Cmp->getOperand(0)) ? Cmp->getOperand(1)
+                                               : Cmp->getOperand(0);
+      continue;
+    }
+    BoundCmp = Cmp;
+    BoundPred = Cmp->getPredicate();
+  }
+
+  BinaryOperator *Product =
+      matchMulByCleanedMaxDivBound(BoundCmp, BoundPred, SuccessBlock, MaxValue);
   if (Product == nullptr || ZeroChecked == nullptr) {
     return nullptr;
   }
@@ -1957,6 +2040,15 @@ matchCheckedMulGuard(Value *BranchCondition, bool FailureWhenCondTrue,
   }
 
   if (!FailureWhenCondTrue) {
+    Value *MaxValue = nullptr;
+    if (BinaryOperator *Product =
+            matchCheckedMulCleanedMaxDivSuccessCondition(
+                BranchCondition, SuccessBlock, MaxValue)) {
+      return CheckedBoundsMatch{
+          "checked_mul_bound", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+          {Product->getOperand(0), Product->getOperand(1), Product, MaxValue},
+          RevertMatch.PanicCode, true};
+    }
     if (BinaryOperator *Product =
             matchCheckedMulMaxDivSuccessCondition(BranchCondition,
                                                   SuccessBlock)) {
@@ -3755,8 +3847,16 @@ bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
       continue;
     }
     if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
-         Match.Kind == "checked_mul") &&
+         Match.Kind == "checked_mul" || Match.Kind == "checked_add_bound" ||
+         Match.Kind == "checked_sub_bound" ||
+         Match.Kind == "checked_mul_bound") &&
         Match.Operands.size() == 3 && Operand == Match.Operands[2]) {
+      continue;
+    }
+    if ((Match.Kind == "checked_add_bound" ||
+         Match.Kind == "checked_sub_bound" ||
+         Match.Kind == "checked_mul_bound") &&
+        Match.Operands.size() == 4 && Operand == Match.Operands[2]) {
       continue;
     }
     return false;
@@ -3787,15 +3887,18 @@ void insertCheckedBoundsSemanticMarker(LLVMContext &Ctx,
   SmallVector<Value *, 3> Operands(Match.Operands.begin(),
                                    Match.Operands.end());
   if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
-       Match.Kind == "checked_mul") &&
-      Operands.size() == 3) {
+       Match.Kind == "checked_mul" || Match.Kind == "checked_add_bound" ||
+       Match.Kind == "checked_sub_bound" ||
+       Match.Kind == "checked_mul_bound") &&
+      (Operands.size() == 3 || Operands.size() == 4)) {
     auto *ResultInst = dyn_cast<Instruction>(Operands[2]);
     if (ResultInst != nullptr &&
         ResultInst->getParent() != Match.Branch->getParent()) {
-      if (Match.Kind == "checked_add") {
+      if (Match.Kind == "checked_add" || Match.Kind == "checked_add_bound") {
         Operands[2] = Builder.CreateAdd(Operands[0], Operands[1],
                                         ResultInst->getName() + ".rewrite");
-      } else if (Match.Kind == "checked_sub") {
+      } else if (Match.Kind == "checked_sub" ||
+                 Match.Kind == "checked_sub_bound") {
         Operands[2] = Builder.CreateSub(Operands[0], Operands[1],
                                         ResultInst->getName() + ".rewrite");
       } else {
