@@ -2392,6 +2392,102 @@ bool matchCleanedUnsignedIncrement(const NormalizedCondition &FailureCond,
   return false;
 }
 
+bool isShiftLeft255One(Value *V) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  return Call != nullptr && isCallTo(Call, "evm_shl") &&
+         Call->arg_size() == 2 &&
+         isConstantIntValue(Call->getArgOperand(0), 255) &&
+         isConstantIntValue(Call->getArgOperand(1), 1);
+}
+
+bool isCleanedConstantFalseIncrementOverflowCondition(Value *V) {
+  auto *Cmp = dyn_cast_or_null<ICmpInst>(V);
+  if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_EQ) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *MaybeShift = Cmp->getOperand(I);
+    Value *MaybeConstant = Cmp->getOperand(1 - I);
+    if (isShiftLeft255One(MaybeShift) &&
+        (isAllOnes(MaybeConstant) || isConstantIntValue(MaybeConstant, 1))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Solidity's uint256 checked increment guard is `if eq(i, not(0)) panic`.
+// In one-iteration loops, earlier cleanup can fold the loop index to zero and
+// leave only an always-false `shl(255, 1) == {1,-1}` condition.  Keep this
+// matcher tied to the latch/header shape so arbitrary dead panic branches do not
+// become checked-add rewrites.
+bool hasSingleIterationLoopHeader(BasicBlock *Header, BasicBlock *Latch) {
+  if (Header == nullptr || Latch == nullptr) {
+    return false;
+  }
+  auto *Br = dyn_cast_or_null<BranchInst>(Header->getTerminator());
+  auto *Cond = Br != nullptr && Br->isConditional()
+                   ? dyn_cast<PHINode>(Br->getCondition())
+                   : nullptr;
+  if (Cond == nullptr || !Cond->getType()->isIntegerTy(1)) {
+    return false;
+  }
+
+  bool BranchesBackToLatch = false;
+  for (BasicBlock *Succ : successors(Header)) {
+    if (Succ == Latch) {
+      BranchesBackToLatch = true;
+      break;
+    }
+  }
+
+  bool LatchMakesHeaderExit = false;
+  bool EntryStartsLoop = false;
+  for (unsigned I = 0; I < Cond->getNumIncomingValues(); ++I) {
+    auto *Incoming = dyn_cast<ConstantInt>(Cond->getIncomingValue(I));
+    if (Incoming == nullptr) {
+      continue;
+    }
+    if (Cond->getIncomingBlock(I) == Latch && Incoming->isOne()) {
+      LatchMakesHeaderExit = true;
+    } else if (Cond->getIncomingBlock(I) != Latch && Incoming->isZero()) {
+      EntryStartsLoop = true;
+    }
+  }
+
+  return BranchesBackToLatch && LatchMakesHeaderExit && EntryStartsLoop;
+}
+
+std::optional<CheckedBoundsMatch> matchCleanedConstantFalseIncrementGuard(
+    Value *BranchCondition, bool FailureWhenCondTrue,
+    const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x11 ||
+      !FailureWhenCondTrue ||
+      !isCleanedConstantFalseIncrementOverflowCondition(BranchCondition)) {
+    return std::nullopt;
+  }
+
+  auto *GuardInst = dyn_cast<Instruction>(BranchCondition);
+  BasicBlock *GuardBlock = GuardInst == nullptr ? nullptr : GuardInst->getParent();
+  if (!hasSingleIterationLoopHeader(SuccessBlock, GuardBlock)) {
+    return std::nullopt;
+  }
+
+  Type *I256 = Type::getIntNTy(BranchCondition->getContext(), 256);
+  auto *Zero = ConstantInt::get(I256, 0);
+  auto *One = ConstantInt::get(I256, 1);
+  return CheckedBoundsMatch{"checked_add",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {Zero, One, One},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 // Solidity signed add/sub guards can be lowered as a success condition feeding
 // the non-revert edge. Keep these matchers tied to that codegen shape.
 bool matchSignedNegative(Value *V, Value *&Input) {
@@ -4358,6 +4454,16 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       SignedArithmetic->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       SignedArithmetic->FailureBlock = Failure;
       return SignedArithmetic;
+    }
+
+    if (std::optional<CheckedBoundsMatch> ConstantFalseIncrement =
+            matchCleanedConstantFalseIncrementGuard(
+                Br->getCondition(), FailureWhenCondTrue, *RevertMatch,
+                Br->getSuccessor(1 - SuccIdx))) {
+      ConstantFalseIncrement->Branch = Br;
+      ConstantFalseIncrement->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      ConstantFalseIncrement->FailureBlock = Failure;
+      return ConstantFalseIncrement;
     }
 
     if (!FailureCond.has_value()) {

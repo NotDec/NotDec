@@ -4158,6 +4158,80 @@
         "81": 0
       },
       "expected_returndata_bubbles": 1
+    },
+    {
+      "name": "23523_19745765_952a215d44_d3d3b55f272b",
+      "input": "cases/23523_19745765_952a215d44_d3d3b55f272b.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 28,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 30,
+        "notdec.solidity.checked_bounds": 7,
+        "notdec.solidity.event": 7,
+        "notdec.solidity.external_call": 5,
+        "notdec.solidity.packed_storage_field": 71,
+        "notdec.solidity.payability_guard": 140,
+        "notdec.solidity.revert": 92,
+        "notdec.solidity.storage_addressing": 25
+      },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_memory": 2,
+        "checked_add": 2,
+        "checked_sub": 1,
+        "checked_div": 1,
+        "checked_mul": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 4,
+        "18": 1,
+        "50": 2
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_add": 2
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 7
+    },
+    {
+      "name": "23545_19746035_86a085849a_4d774e840428",
+      "input": "cases/23545_19746035_86a085849a_4d774e840428.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 28,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 30,
+        "notdec.solidity.checked_bounds": 7,
+        "notdec.solidity.event": 7,
+        "notdec.solidity.external_call": 5,
+        "notdec.solidity.packed_storage_field": 71,
+        "notdec.solidity.payability_guard": 140,
+        "notdec.solidity.revert": 92,
+        "notdec.solidity.storage_addressing": 25
+      },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_memory": 2,
+        "checked_add": 2,
+        "checked_sub": 1,
+        "checked_div": 1,
+        "checked_mul": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 4,
+        "18": 1,
+        "50": 2
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_add": 2
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 7
     }
   ]
 }
