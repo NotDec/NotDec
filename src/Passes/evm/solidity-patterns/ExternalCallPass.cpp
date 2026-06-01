@@ -22,6 +22,8 @@ STATISTIC(NumExternalCallInputCopyWrites,
           "Number of Solidity external call input copy writes found");
 STATISTIC(NumExternalCallOutputCopyWrites,
           "Number of Solidity external call output copy writes found");
+STATISTIC(NumExternalCallOutputWordReads,
+          "Number of Solidity external call output word reads found");
 STATISTIC(NumExternalCallInputWordWrites,
           "Number of Solidity external call input word writes found");
 STATISTIC(NumExternalCallInputAbiHeadWrites,
@@ -58,6 +60,41 @@ std::optional<ExternalCallMemoryArgs> getExternalCallMemoryArgs(CallBase *Call) 
 bool isExternalAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && *Offset >= 4 && ((*Offset - 4) % 32) == 0;
+}
+
+std::optional<uint64_t> getOffsetFromBase(Value *Ptr, Value *Base) {
+  if (Ptr == Base) {
+    return 0;
+  }
+
+  std::optional<uint64_t> PtrConst = getUInt64Constant(Ptr);
+  std::optional<uint64_t> BaseConst = getUInt64Constant(Base);
+  if (PtrConst.has_value() && BaseConst.has_value() && *PtrConst >= *BaseConst) {
+    return *PtrConst - *BaseConst;
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(Ptr);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return std::nullopt;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *AddBase = Add->getOperand(I);
+    if (AddBase != Base &&
+        !(isFreeMemoryPointerLoad(AddBase) && isFreeMemoryPointerLoad(Base))) {
+      continue;
+    }
+    return getUInt64Constant(Add->getOperand(1 - I));
+  }
+  return std::nullopt;
+}
+
+bool outputSizeCoversWord(Value *OutputSize, uint64_t Offset) {
+  std::optional<uint64_t> Size = getUInt64Constant(OutputSize);
+  if (!Size.has_value()) {
+    return true;
+  }
+  return *Size >= 32 && Offset <= *Size - 32;
 }
 
 uint64_t getExternalCallKindCode(StringRef Kind) {
@@ -259,6 +296,59 @@ void collectExternalCallInputAbiHeadWriteMarkers(
   Writes.append(Candidates.begin(), Candidates.end());
 }
 
+void collectExternalCallOutputWordReadMarkers(
+    BasicBlock &BB, CallBase &ExternalCall, Value *OutputBase, Value *OutputSize,
+    SmallVectorImpl<CallBase *> &Reads) {
+  auto IsMatchingOutputRead = [&](CallBase *Call) {
+    if (!isCallTo(Call, "evm_mload") || Call->arg_size() != 2) {
+      return false;
+    }
+    std::optional<uint64_t> Offset =
+        getOffsetFromBase(Call->getArgOperand(1), OutputBase);
+    return Offset.has_value() && (*Offset % 32) == 0 &&
+           outputSizeCoversWord(OutputSize, *Offset);
+  };
+
+  bool SeenExternalCall = false;
+  for (Instruction &I : BB) {
+    if (&I == &ExternalCall) {
+      SeenExternalCall = true;
+      continue;
+    }
+    if (!SeenExternalCall) {
+      continue;
+    }
+
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isFreeMemoryPointerStore(Call) ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      return;
+    }
+    if (IsMatchingOutputRead(Call)) {
+      Reads.push_back(Call);
+    }
+  }
+
+  for (BasicBlock *Succ : successors(&BB)) {
+    for (Instruction &I : *Succ) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr) {
+        continue;
+      }
+      if (isFreeMemoryPointerStore(Call) ||
+          !classifyExternalCall(getCalleeName(Call)).empty()) {
+        break;
+      }
+      if (IsMatchingOutputRead(Call)) {
+        Reads.push_back(Call);
+      }
+    }
+  }
+}
+
 void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
                                             CallBase &Consumer, uint64_t Role,
@@ -311,6 +401,35 @@ void insertExternalCallOutputCopyWriteMarker(LLVMContext &Ctx,
                      {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(2),
                       CopyWrite.getArgOperand(3), CopyWrite.getArgOperand(4),
                       ConstantInt::get(I256, CallKind)});
+}
+
+bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
+                                            CallBase &WordRead,
+                                            Value *OutputBase,
+                                            uint64_t CallKind) {
+  Module *M = WordRead.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_output_word_read",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  std::optional<uint64_t> Offset =
+      getOffsetFromBase(WordRead.getArgOperand(1), OutputBase);
+  if (!Offset.has_value()) {
+    return false;
+  }
+
+  Instruction *InsertBefore = WordRead.getNextNode();
+  if (InsertBefore == nullptr) {
+    return false;
+  }
+
+  IRBuilder<> Builder(InsertBefore);
+  Builder.CreateCall(Marker,
+                     {OutputBase, ConstantInt::get(I256, *Offset), &WordRead,
+                      ConstantInt::get(I256, CallKind)});
+  return true;
 }
 
 void insertExternalCallInputWordWriteMarker(LLVMContext &Ctx,
@@ -406,6 +525,17 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallOutputCopyWriteMarker(Ctx, *Call, *CopyWrite,
                                                 CallKind);
         ++NumExternalCallOutputCopyWrites;
+      }
+      SmallVector<CallBase *, 8> OutputWordReads;
+      collectExternalCallOutputWordReadMarkers(
+          *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
+          OutputWordReads);
+      for (CallBase *WordRead : OutputWordReads) {
+        if (insertExternalCallOutputWordReadMarker(Ctx, *WordRead,
+                                                   Args->OutputBase,
+                                                   CallKind)) {
+          ++NumExternalCallOutputWordReads;
+        }
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_EXTERNAL_CALL, Kind);
