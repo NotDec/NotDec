@@ -33,6 +33,13 @@ EVM_MLOAD_ASSIGN_RE = re.compile(
 EVM_ADD_ASSIGN_RE = re.compile(
     r"^\s*(%[\w.\-]+) = add i256 ([^,]+), ([^,!]+)"
 )
+CPP_CHECKED_BOUNDS_MARKER_FUNCTION_RE = re.compile(
+    r"StringRef getCheckedBoundsRewriteMarkerName\(StringRef Kind\) \{(.*?)\n\}",
+    re.DOTALL,
+)
+CPP_CHECKED_BOUNDS_MARKER_PAIR_RE = re.compile(
+    r'if \(Kind == "([^"]+)"\) \{\s*return "([^"]+)";\s*\}'
+)
 PANIC_SELECTOR = 0x4E487B71
 ERROR_SELECTOR = 0x08C379A0
 CHECKED_BOUNDS_KIND_TO_MARKER = {
@@ -146,8 +153,42 @@ def expected_checked_bounds_markers_from_kinds(case: dict) -> dict[str, int]:
     return markers
 
 
-def validate_checked_bounds_marker_oracles(manifest: dict) -> list[str]:
+def load_cpp_checked_bounds_marker_mapping(project_root: Path) -> dict[str, str]:
+    source_path = project_root / "src/Passes/evm/SolidityPatterns.cpp"
+    text = source_path.read_text()
+    match = CPP_CHECKED_BOUNDS_MARKER_FUNCTION_RE.search(text)
+    if not match:
+        return {}
+    return dict(CPP_CHECKED_BOUNDS_MARKER_PAIR_RE.findall(match.group(1)))
+
+
+def format_checked_bounds_marker_mapping_errors(
+    expected: dict[str, str], actual: dict[str, str]
+) -> list[str]:
     errors: list[str] = []
+    for kind in sorted(set(expected) | set(actual)):
+        expected_marker = expected.get(kind)
+        actual_marker = actual.get(kind)
+        if expected_marker != actual_marker:
+            errors.append(
+                f"{kind}: runner={expected_marker or '<missing>'} "
+                f"cpp={actual_marker or '<missing>'}"
+            )
+    return errors
+
+
+def validate_checked_bounds_marker_oracles(
+    manifest: dict, project_root: Path
+) -> list[str]:
+    errors: list[str] = []
+    cpp_mapping = load_cpp_checked_bounds_marker_mapping(project_root)
+    if cpp_mapping != CHECKED_BOUNDS_KIND_TO_MARKER:
+        errors.append("runner checked-bounds kind-to-marker map differs from C++")
+        errors.extend(
+            format_checked_bounds_marker_mapping_errors(
+                CHECKED_BOUNDS_KIND_TO_MARKER, cpp_mapping
+            )
+        )
     for case in manifest.get("cases", []):
         expected_kinds = case.get("expected_checked_bounds_kinds")
         if not expected_kinds:
@@ -491,7 +532,7 @@ def main() -> int:
     failed = 0
     print(f"Running suite: {manifest.get('suite', manifest_path.stem)}")
 
-    manifest_errors = validate_checked_bounds_marker_oracles(manifest)
+    manifest_errors = validate_checked_bounds_marker_oracles(manifest, project_root)
     if manifest_errors:
         for error in manifest_errors:
             print(f"[FAIL ] checked_bounds_manifest_oracle: {error}")
