@@ -1086,6 +1086,29 @@
         "65": 0,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "checked_mul": 3,
+        "checked_add": 2,
+        "array_bounds_memory": 2,
+        "checked_exp": 1,
+        "checked_sub": 1,
+        "checked_div": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 7,
+        "50": 2,
+        "18": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_mul": 3,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_array_bounds_memory": 2,
+        "notdec_solidity_rewrite_checked_exp": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_checked_div": 1
+      },
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 10,
       "expected_returndata_bubbles": 8
     },
     {
@@ -3719,6 +3742,35 @@
         "65": 2,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "memory_allocation_bounds": 1,
+        "memory_allocation_pointer_bounds": 1,
+        "storage_bytes_encoding": 1,
+        "checked_add": 1,
+        "checked_mul": 1,
+        "checked_div": 1,
+        "checked_sub": 1,
+        "array_bounds_memory": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 3,
+        "65": 2,
+        "34": 1,
+        "18": 1,
+        "50": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_memory_allocation_bounds": 1,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_checked_add": 1,
+        "notdec_solidity_rewrite_checked_mul": 1,
+        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_array_bounds_memory": 1
+      },
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 8,
       "expected_returndata_bubbles": 3
     },
     {
@@ -4079,6 +4131,30 @@
         "65": 2,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_memory": 3,
+        "checked_add": 2,
+        "checked_mul": 1,
+        "memory_allocation_bounds": 1,
+        "memory_allocation_pointer_bounds": 1,
+        "checked_div": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 3,
+        "17": 3,
+        "65": 2,
+        "18": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_memory": 3,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_checked_mul": 1,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 1,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
+        "notdec_solidity_rewrite_checked_div": 1
+      },
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 9,
       "expected_returndata_bubbles": 3
     },
     {
