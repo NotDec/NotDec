@@ -6,14 +6,9 @@
 
 ## 背景
 
-这三个 pass 当前只做粗粒度 metadata / rewrite marker：
-
-- `MemoryObjectPass` 标 `mload/mstore(0x40)` free memory pointer。
-- `ValueCleanupTypeHintPass` 标 address / uint / int cleanup hint。
-- `StorageBytesStringPass` 标 storage bytes/string 的低位编码、`mstore8` 和短 bytes shift 候选。
-
-它们没有被后续 pass 消费，也没有做结构化恢复。保留它们主要是在 suite 里统计覆盖率，
-会让 EVM Solidity pipeline 看起来比实际语义恢复能力更完整。
+这三个 pass 后续实现过于粗糙。为了代码简洁，也方便后面重新设计 EVM Solidity
+pattern 架构，先暂时去掉它们。后续 memory buffer、value cleanup、storage
+bytes/string 需要重新实现时，再按新的数据结构和 pass 边界补回来。
 
 ## 修改
 
@@ -36,11 +31,10 @@
   `memory_buffer`、`value_cleanup`、`storage_bytes_string` pattern 和对应 metadata
   oracle。
 
-## 通用性
+## 后续
 
-这次不是调低 oracle，也不是针对单个样例绕开失败。删除的是没有后续消费者的候选标注。
-free memory pointer 相关真实需求仍由各自 matcher 自己处理，例如
-`SolidityRevertPass` 直接按 revert base / offset 识别 Error(string) 和 custom error buffer。
+这次不是调低 oracle，也不是针对单个样例绕开失败。删除的原因是旧实现太粗，不适合继续在
+当前架构上扩展。后面重新实现时，应先明确数据结构、pass 边界和消费者，再恢复对应能力。
 
 ## 验证
 
