@@ -33,6 +33,16 @@
 
 这里的 IR rewrite 先不要求删除原始 `mstore/mload/copy`。第一步可以插入稳定的 semantic call / marker，让后续 pass 读这些 marker 做改写。也就是说，memory pass 的产物必须成为后续 pass 真正消费的 IR 事实，而不是旁路注释。
 
+本计划的主线是：
+
+- `MemoryAllocation` 说明 buffer 从哪里来、大小怎么定。
+- `MemoryWrite` 说明哪些值写进了 buffer。
+- `MemoryConsumer` 单独建模，说明 buffer 最后被谁消费。
+- rewrite marker / semantic call 是 pass 之间的接口。
+- metadata 只用于 debug、统计和 oracle，不能作为主要接口。
+
+其中 `MemoryConsumer` 不能只是 `MemoryAllocation` 或 `MemoryWrite` 的附带字段。return、revert、event log、external call input/output、ABI decode read 都是不同消费点，后续 pass 要靠这些消费点决定怎么改写 IR。
+
 本计划只规划主 NotDec 的 EVM Solidity memory 相关 pass，不动 bin2llvm / wasm2llvm / llvm2c。
 
 ## Solidity 源码形状
@@ -132,7 +142,7 @@
 
 ### IR rewrite 硬约束
 
-这组 pass 的完成标准不是“识别到了 memory 形状”，而是“把 memory 形状改写成后续 pass 能消费的 IR 事实”。metadata 可以保留，但只能辅助 debug、统计和 oracle。
+这组 pass 的完成标准不是“识别到了 memory 形状”，而是“把 memory 形状改写成后续 pass 能消费的 IR 事实”。metadata 可以保留，但只能辅助 debug、统计和 oracle，不能作为功能完成的依据。
 
 每一轮实现至少要满足下面三点之一：
 
@@ -140,7 +150,14 @@
 - 让一个后续 pass 改成读取已有 memory marker，而不是重新猜原始 EVM memory 形状。
 - 补齐一个已有 marker 的语义，使它能被后续 pass 稳定消费。
 
-反过来，如果一轮只是在 `mstore`、`return`、`revert`、`log`、`call` 上补 metadata，而没有新增或消费 rewrite marker，这轮只能算分析准备，不能算完成 memory object pass 的实质实现。
+反过来，如果一轮只是在 `mstore`、`mload`、`return`、`revert`、`log`、`call` 上补 metadata，而没有新增或消费 rewrite marker，这轮只能算分析准备，不能算完成 memory object pass 的实质实现。
+
+每个主要消费者都要有对应的 IR 落点：
+
+- return / revert / event log：要能绑定 base、size 和相关 writes。
+- external call input：要能绑定 input base、input size 和 ABI 参数写入。
+- external call output / ABI decode：要能绑定 output base、output size、returndatacopy 或后续 `mload` 读取。
+- scratch sha3：要能明确标成 scratch，不误并入 allocation。
 
 ### 阶段 1：内部数据结构和只读分析
 
