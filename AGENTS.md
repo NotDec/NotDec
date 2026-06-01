@@ -222,6 +222,9 @@ apehex EVM 数据集和跑批目录在：
 - 输出内容：每个批次会生成 `manifest.csv`、`summary.csv`、`inputs/`、`logs/`、`outputs/`、`work/`
 - 结果目录：`/sn640/NotDecChainExp/evm2llvm_apehex_pilot/20260521-evm2llvm-train-batch001`
 
+CheckedBoundsPass 迭代时，apehex 侧默认抽样最近批次里约 100 个 IR 做 smoke/audit 即可；
+只有发现新的 checked-bounds skip、runner 失败或明确需要扩大覆盖时，再扫更多批次。
+
 Solidity 编译器源码在 `/sn640/solidity`。做 EVM Solidity 语义恢复时，优先对照 Solidity 自己的 codegen 形状，不要只从样例里猜。
 
 
