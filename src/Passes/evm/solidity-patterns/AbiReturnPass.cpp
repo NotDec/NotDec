@@ -3,6 +3,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <optional>
@@ -21,6 +22,8 @@ STATISTIC(NumAbiReturnDataCopyWrites,
           "Number of Solidity ABI return data copy writes found");
 STATISTIC(NumAbiReturnDataAllocations,
           "Number of Solidity ABI return data allocations found");
+STATISTIC(NumAbiReturnDynamicArraySources,
+          "Number of Solidity ABI return dynamic array sources found");
 
 namespace {
 
@@ -185,6 +188,88 @@ CallBase *findAbiReturnDataAllocationMarker(BasicBlock &BB, CallBase &Return,
   return Candidate;
 }
 
+struct AbiReturnDynamicArraySource {
+  // Dynamic bytes/string ABI returns write offset 32 and then the source array
+  // length; keep that source explicit for later copy-loop rewrites.
+  Value *ReturnBase = nullptr;
+  Value *SourceArray = nullptr;
+  Value *Length = nullptr;
+};
+
+Value *getMemoryLoadPointer(Value *V) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  if (Call == nullptr || !isCallTo(Call, "evm_mload") ||
+      Call->arg_size() != 2) {
+    return nullptr;
+  }
+  return Call->getArgOperand(1);
+}
+
+bool valueAvailableAt(Value *V, Instruction &UsePoint, DominatorTree &DT) {
+  auto *Def = dyn_cast_or_null<Instruction>(V);
+  if (Def == nullptr) {
+    return true;
+  }
+  if (Def->getParent() == UsePoint.getParent()) {
+    return Def->comesBefore(&UsePoint);
+  }
+  return DT.dominates(Def, &UsePoint);
+}
+
+std::optional<AbiReturnDynamicArraySource>
+findAbiReturnDynamicArraySource(Function &F, CallBase &Return,
+                                Value *ReturnBase, DominatorTree &DT) {
+  CallBase *HeadOffsetWrite = nullptr;
+  CallBase *LengthWrite = nullptr;
+
+  for (Instruction &I : instructions(F)) {
+    if (&I == &Return || !DT.dominates(&I, &Return)) {
+      continue;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      HeadOffsetWrite = nullptr;
+      LengthWrite = nullptr;
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_write") ||
+        Call->arg_size() != 3 ||
+        !isSameOrReloadedFreeMemoryBase(Call->getArgOperand(0), ReturnBase)) {
+      continue;
+    }
+
+    if (isConstantIntValue(Call->getArgOperand(1), 0) &&
+        isConstantIntValue(Call->getArgOperand(2), 32)) {
+      HeadOffsetWrite = Call;
+      continue;
+    }
+
+    if (!isConstantIntValue(Call->getArgOperand(1), 32)) {
+      continue;
+    }
+    Value *SourceArray = getMemoryLoadPointer(Call->getArgOperand(2));
+    if (SourceArray == nullptr || !valueAvailableAt(SourceArray, Return, DT)) {
+      continue;
+    }
+    LengthWrite = Call;
+  }
+
+  if (HeadOffsetWrite == nullptr || LengthWrite == nullptr) {
+    return std::nullopt;
+  }
+  Value *Length = LengthWrite->getArgOperand(2);
+  Value *SourceArray = getMemoryLoadPointer(Length);
+  if (SourceArray == nullptr) {
+    return std::nullopt;
+  }
+  return AbiReturnDynamicArraySource{ReturnBase, SourceArray, Length};
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -196,6 +281,24 @@ void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
   IRBuilder<> Builder(&Return);
   Builder.CreateCall(Marker,
                      {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArraySourceMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArraySource &Source, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_source",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {Source.ReturnBase, Source.SourceArray, Source.Length,
+                      Consumer.getArgOperand(1),
                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
@@ -251,8 +354,9 @@ void insertAbiReturnDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Return,
 
 } // namespace
 
-PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &) {
+PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) {
   LLVMContext &Ctx = F.getContext();
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
   bool Changed = false;
 
   for (Instruction &I : instructions(F)) {
@@ -288,6 +392,14 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &) {
         insertAbiReturnDataAllocationMarker(Ctx, *Call, *Allocation, *Consumer,
                                             Kind);
         ++NumAbiReturnDataAllocations;
+      }
+      std::optional<AbiReturnDynamicArraySource> DynamicSource =
+          findAbiReturnDynamicArraySource(F, *Call, Consumer->getArgOperand(0),
+                                          DT);
+      if (DynamicSource.has_value()) {
+        insertAbiReturnDynamicArraySourceMarker(Ctx, *Call, *DynamicSource,
+                                                *Consumer, Kind);
+        ++NumAbiReturnDynamicArraySources;
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, Kind);
