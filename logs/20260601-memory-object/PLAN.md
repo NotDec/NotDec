@@ -22,17 +22,18 @@
 - 在/sn640/NotDecChainExp/evm2llvm_apehex_pilot 上选固定的100个用例，不断改进效果，直到没有明显的问题
 
 补充要求：
-- 当前计划的目标是 IR rewrite，不是 memory metadata 标注。
+- 当前计划的目标必须是 IR rewrite，不是 memory metadata 标注。
 - metadata 只能用于调试、统计和 oracle，不能作为 pass 之间的主要接口，也不能作为完成标准。
-- 后续 ABI return、revert、event、external call 等 pass 必须逐步改成读取 memory rewrite marker / semantic call。
-- 如果某轮只新增 metadata，没有新增或消费明确的 IR rewrite surface，那一轮不能算完成 memory object pass 的实质实现。
-- 如果某轮插入了 marker，但没有任何后续 pass 读取它，也只能算 rewrite surface 准备，不能算完整闭环。
+- MemoryBufferAnalysis 产出的东西必须落到 IR 里的 marker / semantic call，并且后续 ABI return、revert、event、external call 等 pass 必须逐步读取这些 marker / semantic call。
+- 只新增 metadata，不算 memory object pass 的实质实现。
+- 只插入 marker，但没有任何后续 pass 读取它，只能算 rewrite surface 准备，不能算完整闭环。
+- 完整闭环的判断标准是：memory pass 写出稳定 IR 事实，消费者 pass 读取这些事实，并产出 ABI return / revert / event / external call 级别的语义改写。
 
 ## 背景
 
-旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成，插入没人读取的 marker 也不算真正完成。
+旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成，插入没人读取的 marker 也只算准备，不算真正完成。
 
-这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求立刻删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但 marker 只是中间接口，不是最终结果。后续 pass 必须读取这些 marker，并把 ABI return、revert、event、external call 等低层 memory 用法改写成更高层的语义 call，或者在确认安全后隐藏 / 删除对应的低层指令。只插 marker、不被消费者读取，不能算完成；消费者仍然完全重新扫描原始 `mstore/revert/return/log/call` 来猜语义，也不能算完成。
+这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求立刻删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但 marker 只是中间接口，不是最终结果。后续 pass 必须读取这些 marker，并把 ABI return、revert、event、external call 等低层 memory 用法改写成更高层的语义 call，或者在确认安全后隐藏 / 删除对应的低层指令。只插 marker、不被消费者读取，只能算准备；消费者仍然完全重新扫描原始 `mstore/revert/return/log/call` 来猜语义，也不能算完成。
 
 本计划的主线是：
 
@@ -42,7 +43,7 @@
 - rewrite marker / semantic call 是 pass 之间的接口，后续 pass 必须读取它们。
 - metadata 只用于 debug、统计和 oracle，不能作为主要接口。
 
-如果某个识别结果暂时还不能落到 semantic call / marker，或者没有任何后续 pass 读取它，那它只能算候选分析，不能算 memory object pass 的完成项。
+如果某个识别结果暂时还不能落到 semantic call / marker，或者没有任何后续 pass 读取它，那它只能算候选分析或 rewrite surface 准备，不能算 memory object pass 的完成项。
 
 其中 `MemoryConsumer` 不能只是 `MemoryAllocation` 或 `MemoryWrite` 的附带字段。return、revert、event log、external call input/output、ABI decode read 都是不同消费点，后续 pass 要靠这些消费点决定怎么改写 IR。
 
