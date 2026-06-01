@@ -2009,6 +2009,9 @@
         "unrecognized_operands": 1,
         "unsupported_condition": 0
       },
+      "expected_checked_bounds_skipped_kinds": {
+        "panic_assert": 1
+      },
       "expected_checked_bounds_cfg_rewrites": 52,
       "expected_returndata_bubbles": 12
     },

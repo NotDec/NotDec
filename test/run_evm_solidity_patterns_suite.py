@@ -231,6 +231,26 @@ def count_metadata_string_values(path: Path, metadata_name: str) -> dict[str, in
     return counts
 
 
+def count_checked_bounds_skipped_kinds(path: Path) -> dict[str, int]:
+    text = path.read_text()
+    values_by_node = {
+        node_id: value
+        for node_id, value in re.findall(
+            r'^!(\d+) = !\{!"([^"]*)"\}', text, re.MULTILINE
+        )
+    }
+    counts: dict[str, int] = {}
+    for line in text.splitlines():
+        if "!notdec.solidity_checked_bounds.skipped !" not in line:
+            continue
+        for node_id in re.findall(r"!notdec\.solidity\.checked_bounds !(\d+)", line):
+            value = values_by_node.get(node_id)
+            if value is None:
+                continue
+            counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
 def rewrite_marker_name(metadata_name: str) -> str:
     prefix = "notdec.solidity."
     if metadata_name.startswith(prefix):
@@ -648,6 +668,10 @@ def main() -> int:
                 "expected_checked_bounds_skip_reasons", {}
             ).items():
                 expected_counts[f"checked_bounds_skip_reason:{reason}"] = expected
+            for kind, expected in case.get(
+                "expected_checked_bounds_skipped_kinds", {}
+            ).items():
+                expected_counts[f"checked_bounds_skipped_kind:{kind}"] = expected
             if "expected_checked_bounds_skip_reasons" in case:
                 expected_counts["checked_bounds_skip_total"] = sum(
                     case.get("expected_checked_bounds_skip_reasons", {}).values()
@@ -769,6 +793,13 @@ def main() -> int:
             for reason in case.get("expected_checked_bounds_skip_reasons", {}):
                 actual_counts[f"checked_bounds_skip_reason:{reason}"] = (
                     actual_checked_bounds_skip_reasons.get(str(reason), 0)
+                )
+            actual_checked_bounds_skipped_kinds = count_checked_bounds_skipped_kinds(
+                output_ll
+            )
+            for kind in case.get("expected_checked_bounds_skipped_kinds", {}):
+                actual_counts[f"checked_bounds_skipped_kind:{kind}"] = (
+                    actual_checked_bounds_skipped_kinds.get(str(kind), 0)
                 )
             if "checked_bounds_skip_total" in expected_counts:
                 actual_counts["checked_bounds_skip_total"] = sum(
