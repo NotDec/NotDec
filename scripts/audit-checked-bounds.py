@@ -160,6 +160,7 @@ def write_csv_summary(
     files: int,
     checked_bounds_total: int,
     skip_total: int,
+    skip_reasons: str,
     skipped_kinds: str,
     marker_total: int,
     cfg_rewrites: int,
@@ -174,6 +175,7 @@ def write_csv_summary(
                 "files",
                 "checked_bounds_total",
                 "skip_total",
+                "skip_reasons",
                 "skipped_kinds",
                 "semantic_marker_total",
                 "cfg_rewrites",
@@ -187,6 +189,7 @@ def write_csv_summary(
                 "files": files,
                 "checked_bounds_total": checked_bounds_total,
                 "skip_total": skip_total,
+                "skip_reasons": skip_reasons,
                 "skipped_kinds": skipped_kinds,
                 "semantic_marker_total": marker_total,
                 "cfg_rewrites": cfg_rewrites,
@@ -206,6 +209,7 @@ def write_csv_rows(path: Path, rows: list[dict[str, str | int]]) -> None:
                 "files",
                 "checked_bounds_total",
                 "skip_total",
+                "skip_reasons",
                 "skipped_kinds",
                 "semantic_marker_total",
                 "cfg_rewrites",
@@ -342,6 +346,7 @@ def main() -> int:
             files=int(summary["files"]),
             checked_bounds_total=int(summary["checked_bounds_total"]),
             skip_total=int(summary["skip_total"]),
+            skip_reasons=format_counter_csv(summary["skip_reasons"]),  # type: ignore[arg-type]
             skipped_kinds=format_counter_csv(summary["skipped_kinds"]),  # type: ignore[arg-type]
             marker_total=int(summary["marker_total"]),
             cfg_rewrites=int(summary["cfg_rewrites"]),
@@ -361,6 +366,9 @@ def main() -> int:
                         path_summary["checked_bounds_total"]
                     ),
                     "skip_total": int(path_summary["skip_total"]),
+                    "skip_reasons": format_counter_csv(
+                        path_summary["skip_reasons"]  # type: ignore[arg-type]
+                    ),
                     "skipped_kinds": format_counter_csv(
                         path_summary["skipped_kinds"]  # type: ignore[arg-type]
                     ),
@@ -390,6 +398,9 @@ def main() -> int:
                         file_summary["checked_bounds_total"]
                     ),
                     "skip_total": int(file_summary["skip_total"]),
+                    "skip_reasons": format_counter_csv(
+                        file_summary["skip_reasons"]  # type: ignore[arg-type]
+                    ),
                     "skipped_kinds": format_counter_csv(
                         file_summary["skipped_kinds"]  # type: ignore[arg-type]
                     ),
