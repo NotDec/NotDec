@@ -256,6 +256,10 @@ def main() -> int:
         help="Write one CSV row per input path for batch trend tracking",
     )
     parser.add_argument(
+        "--csv-by-file",
+        help="Write one CSV row per .ll file for locating checked-bounds cases",
+    )
+    parser.add_argument(
         "--list-skips",
         action="store_true",
         help="List files that still contain checked-bounds skip metadata",
@@ -330,6 +334,26 @@ def main() -> int:
                 }
             )
         write_csv_rows(Path(args.csv_by_path), rows)
+
+    if args.csv_by_file:
+        rows: list[dict[str, str | int]] = []
+        for file_path in files:
+            file_summary, _ = summarize_files([file_path], cpp_marker_mapping_status)
+            rows.append(
+                {
+                    "input": str(file_path),
+                    "files": int(file_summary["files"]),
+                    "checked_bounds_total": int(
+                        file_summary["checked_bounds_total"]
+                    ),
+                    "skip_total": int(file_summary["skip_total"]),
+                    "semantic_marker_total": int(file_summary["marker_total"]),
+                    "cfg_rewrites": int(file_summary["cfg_rewrites"]),
+                    "rewrite_expected": int(file_summary["rewrite_expected"]),
+                    "cpp_marker_mapping": str(file_summary["cpp_marker_mapping"]),
+                }
+            )
+        write_csv_rows(Path(args.csv_by_file), rows)
 
     if args.list_skips and skipped_files:
         print("skip_files:")
