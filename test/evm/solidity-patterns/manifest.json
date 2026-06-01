@@ -2061,6 +2061,35 @@
         "65": 0,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_storage": 7,
+        "checked_mul": 2,
+        "array_bounds_memory": 2,
+        "checked_add": 2,
+        "checked_div": 1,
+        "checked_sub": 1,
+        "storage_bytes_encoding": 1,
+        "empty_array_pop_storage": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 9,
+        "17": 5,
+        "18": 1,
+        "34": 1,
+        "49": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_storage": 7,
+        "notdec_solidity_rewrite_checked_mul": 2,
+        "notdec_solidity_rewrite_array_bounds_memory": 2,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1
+      },
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 17,
       "expected_returndata_bubbles": 4
     },
     {
@@ -2187,6 +2216,35 @@
         "65": 0,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_storage": 7,
+        "checked_mul": 2,
+        "array_bounds_memory": 2,
+        "checked_add": 2,
+        "checked_div": 1,
+        "checked_sub": 1,
+        "storage_bytes_encoding": 1,
+        "empty_array_pop_storage": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 9,
+        "17": 5,
+        "18": 1,
+        "34": 1,
+        "49": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_storage": 7,
+        "notdec_solidity_rewrite_checked_mul": 2,
+        "notdec_solidity_rewrite_array_bounds_memory": 2,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1
+      },
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 17,
       "expected_returndata_bubbles": 3
     },
     {
