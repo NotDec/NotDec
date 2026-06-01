@@ -200,6 +200,16 @@ def validate_checked_bounds_marker_oracles(
                 f"{case['name']}: expected_checked_bounds_semantic_markers "
                 "does not match expected_checked_bounds_kinds"
             )
+        expected_skip_reasons = case.get("expected_checked_bounds_skip_reasons", {})
+        skip_total = sum(expected_skip_reasons.values())
+        if skip_total:
+            skipped_kinds = case.get("expected_checked_bounds_skipped_kinds", {})
+            skipped_kind_total = sum(skipped_kinds.values())
+            if skipped_kind_total != skip_total:
+                errors.append(
+                    f"{case['name']}: expected_checked_bounds_skipped_kinds "
+                    "does not match expected_checked_bounds_skip_reasons total"
+                )
     return errors
 
 
