@@ -7,6 +7,7 @@ add_library(notdec STATIC
 	Passes/MemOpMatcher.cpp
 	Passes/ReorderBasicblock.cpp
 	Passes/AllocAnnotator.cpp
+	Passes/evm/MemoryBufferAnalysis.cpp
 	Passes/evm/SolidityPatterns.cpp
 	Passes/evm/solidity-patterns/AbiReturnPass.cpp
 	Passes/evm/solidity-patterns/CheckedBoundsPass.cpp

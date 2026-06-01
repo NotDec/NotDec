@@ -41,7 +41,14 @@
         "notdec_solidity_rewrite_checked_add": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 1
+      "expected_checked_bounds_cfg_rewrites": 1,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_memory_write": 1,
+        "notdec_solidity_memory_consumer": 1
+      },
+      "expected_memory_consumer_kinds": {
+        "return": 1
+      }
     },
     {
       "name": "checked_bounds_sub_01",
@@ -433,6 +440,13 @@
       },
       "expected_error_string_marker_payloads": {
         "147028384:5": 1
+      },
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_memory_write": 4,
+        "notdec_solidity_memory_consumer": 1
+      },
+      "expected_memory_consumer_kinds": {
+        "revert": 1
       }
     },
     {

@@ -293,6 +293,25 @@ def count_exact_marker(path: Path, marker_name: str) -> int:
     return text.count(f"call void @{marker_name}(")
 
 
+def count_memory_consumer_kinds(path: Path) -> dict[str, int]:
+    text = path.read_text()
+    names = {
+        "1": "return",
+        "2": "revert",
+    }
+    pattern = (
+        r"call void @notdec_solidity_memory_consumer"
+        r"\(i256 [^,]+, i256 [^,]+, i256 ([^)]+)\)"
+    )
+    counts: dict[str, int] = {}
+    for value in re.findall(pattern, text):
+        kind = names.get(value.strip())
+        if kind is None:
+            continue
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
 def count_marker_arg_pairs(path: Path, marker_name: str) -> dict[str, int]:
     text = path.read_text()
     pattern = (
@@ -690,6 +709,14 @@ def main() -> int:
                 expected_counts["checked_bounds_cfg_rewrites"] = case[
                     "expected_checked_bounds_cfg_rewrites"
                 ]
+            for marker_name, expected in case.get(
+                "expected_memory_rewrite_markers", {}
+            ).items():
+                expected_counts[f"memory_rewrite_marker:{marker_name}"] = expected
+            for kind, expected in case.get(
+                "expected_memory_consumer_kinds", {}
+            ).items():
+                expected_counts[f"memory_consumer_kind:{kind}"] = expected
             if "expected_returndata_bubbles" in case:
                 expected_counts["returndata_bubbles"] = case[
                     "expected_returndata_bubbles"
@@ -818,6 +845,15 @@ def main() -> int:
             if "checked_bounds_cfg_rewrites" in expected_counts:
                 actual_counts["checked_bounds_cfg_rewrites"] = (
                     count_checked_bounds_cfg_rewrites(output_ll)
+                )
+            for marker_name in case.get("expected_memory_rewrite_markers", {}):
+                actual_counts[f"memory_rewrite_marker:{marker_name}"] = (
+                    count_exact_marker(output_ll, marker_name)
+                )
+            actual_memory_consumer_kinds = count_memory_consumer_kinds(output_ll)
+            for kind in case.get("expected_memory_consumer_kinds", {}):
+                actual_counts[f"memory_consumer_kind:{kind}"] = (
+                    actual_memory_consumer_kinds.get(str(kind), 0)
                 )
             if "returndata_bubbles" in expected_counts:
                 actual_counts["returndata_bubbles"] = actual_revert_kinds.get(

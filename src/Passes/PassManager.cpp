@@ -41,6 +41,7 @@
 
 #include "Passes/AllocAnnotator.h"
 #include "Passes/MemOpMatcher.h"
+#include "Passes/evm/MemoryBufferAnalysis.h"
 #include "Passes/PassManager.h"
 #include "Passes/ReorderBasicblock.h"
 #include "Passes/StackAlloca.h"
@@ -288,6 +289,8 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::AbiReturnPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::SolidityRevertPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
+    MPM.addPass(
+        createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
     MPM.addPass(
         createModuleToFunctionPassAdaptor(evm::StorageAddressingPass()));
     MPM.addPass(
