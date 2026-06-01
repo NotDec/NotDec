@@ -1278,6 +1278,11 @@ bool isSameValue(Value *LHS, Value *RHS) {
          isSameValue(LCall->getArgOperand(1), RCall->getArgOperand(1));
 }
 
+bool isSameRevertBufferSize(Value *LHS, Value *RHS) {
+  return isSameValue(LHS, RHS) ||
+         (isReturndataSize(LHS) && isReturndataSize(RHS));
+}
+
 std::optional<uint64_t> getUInt64Constant(Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   if (C == nullptr || C->getValue().getActiveBits() > 64) {
@@ -1457,6 +1462,48 @@ CallBase *findReturndataBubbleCopy(BasicBlock &BB, CallBase &Revert) {
   return nullptr;
 }
 
+CallBase *findReturndataBubbleCopyFromMemoryMarkers(BasicBlock &BB,
+                                                    CallBase &Revert) {
+  if (Revert.arg_size() != 3 ||
+      !isReturndataSize(Revert.getArgOperand(2))) {
+    return nullptr;
+  }
+
+  CallBase *MatchingConsumer = nullptr;
+  CallBase *MatchingCopy = nullptr;
+  for (Instruction &I : BB) {
+    if (&I == &Revert) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isCallTo(Call, "notdec_solidity_memory_consumer") &&
+        Call->arg_size() == 3 &&
+        isConstantIntValue(Call->getArgOperand(2), 2) &&
+        isSameValue(Call->getArgOperand(0), Revert.getArgOperand(1)) &&
+        isSameRevertBufferSize(Call->getArgOperand(1),
+                               Revert.getArgOperand(2))) {
+      MatchingConsumer = Call;
+      continue;
+    }
+
+    if (isCallTo(Call, "notdec_solidity_memory_copy_write") &&
+        Call->arg_size() == 5 && isZero(Call->getArgOperand(1)) &&
+        isZero(Call->getArgOperand(2)) &&
+        isConstantIntValue(Call->getArgOperand(4), 4) &&
+        isSameValue(Call->getArgOperand(0), Revert.getArgOperand(1)) &&
+        isSameRevertBufferSize(Call->getArgOperand(3),
+                               Revert.getArgOperand(2))) {
+      MatchingCopy = Call;
+    }
+  }
+
+  return MatchingConsumer != nullptr ? MatchingCopy : nullptr;
+}
+
 std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
                                                         CallBase &Revert) {
   if (Revert.arg_size() != 3) {
@@ -1474,6 +1521,13 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
 
   if (isZero(Revert.getArgOperand(1)) && isZero(Revert.getArgOperand(2))) {
     Match.Kind = "empty";
+    return Match;
+  }
+
+  if (CallBase *Copy =
+          findReturndataBubbleCopyFromMemoryMarkers(BB, Revert)) {
+    Match.Kind = "returndata_bubble";
+    Match.ReturndataCopy = Copy;
     return Match;
   }
 
