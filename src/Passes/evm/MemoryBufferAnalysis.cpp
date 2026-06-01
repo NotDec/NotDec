@@ -151,14 +151,29 @@ void insertWriteMarker(LLVMContext &Ctx, const MemoryWrite &Write) {
     return;
   }
   Module *M = Write.StoreOrCopy->getModule();
-  Function *Marker = nullptr;
   Type *I256 = Type::getIntNTy(Ctx, 256);
-  getOrDeclareMarker(*M, "notdec_solidity_memory_write",
-                     {I256, I256, I256}, Marker);
   IRBuilder<> Builder(Write.StoreOrCopy);
-  Builder.CreateCall(Marker, {asI256(Builder, Write.Base),
-                              ConstantInt::get(I256, *Write.Offset),
-                              asI256(Builder, Write.ValueOrSize)});
+  Function *Marker = nullptr;
+  if (Write.Kind == MemoryWriteKind::MStore) {
+    getOrDeclareMarker(*M, "notdec_solidity_memory_write",
+                       {I256, I256, I256}, Marker);
+    Builder.CreateCall(Marker, {asI256(Builder, Write.Base),
+                                ConstantInt::get(I256, *Write.Offset),
+                                asI256(Builder, Write.ValueOrSize)});
+    return;
+  }
+
+  if (Write.SourceOffset == nullptr) {
+    return;
+  }
+  getOrDeclareMarker(*M, "notdec_solidity_memory_copy_write",
+                     {I256, I256, I256, I256, I256}, Marker);
+  Builder.CreateCall(
+      Marker, {asI256(Builder, Write.Base),
+               ConstantInt::get(I256, *Write.Offset),
+               asI256(Builder, Write.SourceOffset),
+               asI256(Builder, Write.ValueOrSize),
+               ConstantInt::get(I256, static_cast<uint64_t>(Write.Kind))});
 }
 
 void insertConsumerMarker(LLVMContext &Ctx, const MemoryConsumer &Consumer) {
@@ -232,7 +247,28 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
         }
         Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
                                            Call->getArgOperand(2),
+                                           nullptr,
                                            MemoryWriteKind::MStore});
+        break;
+      }
+      continue;
+    }
+
+    if ((detail::isCallTo(Call, "evm_calldatacopy") ||
+         detail::isCallTo(Call, "evm_returndatacopy")) &&
+        Call->arg_size() == 5) {
+      Value *Dst = Call->getArgOperand(2);
+      for (Value *Base : Bases) {
+        std::optional<uint64_t> Offset = getOffsetFromBase(Dst, Base);
+        if (!Offset.has_value()) {
+          continue;
+        }
+        MemoryWriteKind Kind = detail::isCallTo(Call, "evm_calldatacopy")
+                                   ? MemoryWriteKind::CalldataCopy
+                                   : MemoryWriteKind::ReturndataCopy;
+        Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
+                                           Call->getArgOperand(4),
+                                           Call->getArgOperand(3), Kind});
         break;
       }
       continue;

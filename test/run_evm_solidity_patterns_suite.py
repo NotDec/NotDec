@@ -315,6 +315,25 @@ def count_memory_consumer_kinds(path: Path) -> dict[str, int]:
     return counts
 
 
+def count_memory_copy_write_kinds(path: Path) -> dict[str, int]:
+    text = path.read_text()
+    names = {
+        "2": "calldata",
+        "3": "returndata",
+    }
+    pattern = (
+        r"call void @notdec_solidity_memory_copy_write"
+        r"\(i256 [^,]+, i256 [^,]+, i256 [^,]+, i256 [^,]+, i256 ([^)]+)\)"
+    )
+    counts: dict[str, int] = {}
+    for value in re.findall(pattern, text):
+        kind = names.get(value.strip())
+        if kind is None:
+            continue
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
 def count_marker_arg_pairs(path: Path, marker_name: str) -> dict[str, int]:
     text = path.read_text()
     pattern = (
@@ -720,6 +739,10 @@ def main() -> int:
                 "expected_memory_consumer_kinds", {}
             ).items():
                 expected_counts[f"memory_consumer_kind:{kind}"] = expected
+            for kind, expected in case.get(
+                "expected_memory_copy_write_kinds", {}
+            ).items():
+                expected_counts[f"memory_copy_write_kind:{kind}"] = expected
             if "expected_returndata_bubbles" in case:
                 expected_counts["returndata_bubbles"] = case[
                     "expected_returndata_bubbles"
@@ -857,6 +880,11 @@ def main() -> int:
             for kind in case.get("expected_memory_consumer_kinds", {}):
                 actual_counts[f"memory_consumer_kind:{kind}"] = (
                     actual_memory_consumer_kinds.get(str(kind), 0)
+                )
+            actual_memory_copy_write_kinds = count_memory_copy_write_kinds(output_ll)
+            for kind in case.get("expected_memory_copy_write_kinds", {}):
+                actual_counts[f"memory_copy_write_kind:{kind}"] = (
+                    actual_memory_copy_write_kinds.get(str(kind), 0)
                 )
             if "returndata_bubbles" in expected_counts:
                 actual_counts["returndata_bubbles"] = actual_revert_kinds.get(

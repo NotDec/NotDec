@@ -16,7 +16,9 @@ class Instruction;
 namespace notdec::passes::evm {
 
 enum class MemoryWriteKind {
-  MStore,
+  MStore = 1,
+  CalldataCopy = 2,
+  ReturndataCopy = 3,
 };
 
 enum class MemoryConsumerKind {
@@ -39,12 +41,14 @@ struct MemoryAllocation {
 };
 
 // A memory write keeps the original EVM call plus the buffer-relative offset.
-// The first version only accepts exact base and base + constant offsets.
+// Copy writes also keep their source offset so later passes can distinguish
+// calldata/returndata bytes from literal word stores.
 struct MemoryWrite {
   llvm::CallBase *StoreOrCopy = nullptr;
   llvm::Value *Base = nullptr;
   std::optional<uint64_t> Offset;
   llvm::Value *ValueOrSize = nullptr;
+  llvm::Value *SourceOffset = nullptr;
   MemoryWriteKind Kind = MemoryWriteKind::MStore;
 };
 
