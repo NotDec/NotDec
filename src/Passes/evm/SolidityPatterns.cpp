@@ -2104,6 +2104,45 @@ matchCheckedSubGuard(const NormalizedCondition &FailureCond,
       true};
 }
 
+std::optional<CheckedBoundsMatch> matchCheckedConstSubLimitGuard(
+    const NormalizedCondition &FailureCond,
+    const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x11) {
+    return std::nullopt;
+  }
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *RHS = nullptr;
+  ConstantInt *Limit = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE) {
+    RHS = Cmp->getOperand(0);
+    Limit = dyn_cast<ConstantInt>(Cmp->getOperand(1));
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
+    RHS = Cmp->getOperand(1);
+    Limit = dyn_cast<ConstantInt>(Cmp->getOperand(0));
+  } else {
+    return std::nullopt;
+  }
+  if (RHS == nullptr || Limit == nullptr || Limit->isZero()) {
+    return std::nullopt;
+  }
+
+  auto LHSValue = Limit->getValue() - 1;
+  auto *LHS = ConstantInt::get(Limit->getType(), LHSValue);
+  BinaryOperator *Sub =
+      findBinaryOpInBlock(SuccessBlock, Instruction::Sub, LHS, RHS);
+  if (Sub == nullptr) {
+    return std::nullopt;
+  }
+  return CheckedBoundsMatch{
+      "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+      {Sub->getOperand(0), Sub->getOperand(1), Sub}, RevertMatch.PanicCode,
+      true};
+}
+
 std::optional<CheckedBoundsMatch>
 matchCheckedMulGuard(Value *BranchCondition, bool FailureWhenCondTrue,
                      const SolidityRevertMatch &RevertMatch,
@@ -4872,6 +4911,14 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       Sub->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       Sub->FailureBlock = Failure;
       return Sub;
+    }
+    if (std::optional<CheckedBoundsMatch> ConstSub =
+            matchCheckedConstSubLimitGuard(*FailureCond, *RevertMatch,
+                                           Br->getSuccessor(1 - SuccIdx))) {
+      ConstSub->Branch = Br;
+      ConstSub->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      ConstSub->FailureBlock = Failure;
+      return ConstSub;
     }
 
     if (std::optional<CheckedBoundsMatch> Arithmetic =
