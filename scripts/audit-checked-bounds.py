@@ -227,7 +227,10 @@ def collect_files(path: Path) -> list[Path]:
 
 def summarize_files(
     files: list[Path], cpp_marker_mapping_status: str
-) -> tuple[dict[str, int | str | Counter[str]], list[tuple[Path, Counter[str]]]]:
+) -> tuple[
+    dict[str, int | str | Counter[str]],
+    list[tuple[Path, Counter[str], Counter[str]]],
+]:
     totals = {
         "kinds": Counter(),
         "panic_codes": Counter(),
@@ -238,7 +241,7 @@ def summarize_files(
         "unmapped_rewrite_kinds": Counter(),
     }
     total_cfg_rewrites = 0
-    skipped_files: list[tuple[Path, Counter[str]]] = []
+    skipped_files: list[tuple[Path, Counter[str], Counter[str]]] = []
 
     for path in files:
         result = audit_file(path)
@@ -246,8 +249,10 @@ def summarize_files(
             totals[key].update(result[key])  # type: ignore[arg-type]
         total_cfg_rewrites += int(result["cfg_rewrites"])
         skip_reasons = result["skip_reasons"]
+        skipped_kinds = result["skipped_kinds"]
         if isinstance(skip_reasons, Counter) and skip_reasons:
-            skipped_files.append((path, skip_reasons))
+            assert isinstance(skipped_kinds, Counter)
+            skipped_files.append((path, skip_reasons, skipped_kinds))
 
     checked_bounds_total = sum(totals["kinds"].values())
     skip_total = sum(totals["skip_reasons"].values())
@@ -398,9 +403,14 @@ def main() -> int:
 
     if args.list_skips and skipped_files:
         print("skip_files:")
-        for path, reasons in skipped_files:
+        for path, reasons, skipped_kinds in skipped_files:
             reason_text = ", ".join(f"{k}:{v}" for k, v in reasons.most_common())
-            print(f"  {path}: {reason_text}")
+            kind_text = ", ".join(
+                f"{k}:{v}" for k, v in skipped_kinds.most_common()
+            )
+            if not kind_text:
+                kind_text = "<none>"
+            print(f"  {path}: reasons={reason_text}; skipped_kinds={kind_text}")
 
     marker_mismatch = summary["expected_markers"] != summary["semantic_markers"]
     if args.fail_on_mismatch and (
