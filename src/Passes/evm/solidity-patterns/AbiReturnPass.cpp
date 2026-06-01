@@ -62,26 +62,6 @@ CallBase *findReturnConsumerMarker(BasicBlock &BB, CallBase &Return) {
   return nullptr;
 }
 
-bool isFreeMemoryPointerLoad(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  return Call != nullptr && isCallTo(Call, "evm_mload") &&
-         Call->arg_size() == 2 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
-}
-
-bool isFreeMemoryPointerStore(CallBase *Call) {
-  return isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
-}
-
-std::optional<uint64_t> getUInt64Constant(Value *V) {
-  auto *C = dyn_cast_or_null<ConstantInt>(V);
-  if (C == nullptr || C->getValue().getActiveBits() > 64) {
-    return std::nullopt;
-  }
-  return C->getZExtValue();
-}
-
 bool isAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && (*Offset % 32) == 0;
@@ -112,9 +92,7 @@ void collectAbiReturnDataWordWriteMarkers(
     }
 
     Value *WriteBase = Call->getArgOperand(0);
-    if (WriteBase == ReturnBase ||
-        (isFreeMemoryPointerLoad(WriteBase) &&
-         isFreeMemoryPointerLoad(ReturnBase))) {
+    if (isSameOrReloadedFreeMemoryBase(WriteBase, ReturnBase)) {
       Candidates.push_back(Call);
     }
   }
@@ -147,9 +125,7 @@ void collectAbiReturnDataCopyWriteMarkers(
     }
 
     Value *CopyBase = Call->getArgOperand(0);
-    if (CopyBase == ReturnBase ||
-        (isFreeMemoryPointerLoad(CopyBase) &&
-         isFreeMemoryPointerLoad(ReturnBase))) {
+    if (isSameOrReloadedFreeMemoryBase(CopyBase, ReturnBase)) {
       Candidates.push_back(Call);
     }
   }

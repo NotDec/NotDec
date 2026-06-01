@@ -1266,6 +1266,23 @@ void replaceWholeFunctionWithCall(Function &F, Function &Outlined) {
 
 bool isReturndataSize(Value *V) { return isCallTo(V, "evm_returndatasize"); }
 
+bool isFreeMemoryPointerLoad(Value *V) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  return Call != nullptr && isCallTo(Call, "evm_mload") &&
+         Call->arg_size() == 2 &&
+         isConstantIntValue(Call->getArgOperand(1), 64);
+}
+
+bool isFreeMemoryPointerStore(CallBase *Call) {
+  return isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
+         isConstantIntValue(Call->getArgOperand(1), 64);
+}
+
+bool isSameOrReloadedFreeMemoryBase(Value *LHS, Value *RHS) {
+  return LHS == RHS ||
+         (isFreeMemoryPointerLoad(LHS) && isFreeMemoryPointerLoad(RHS));
+}
+
 bool isSameValue(Value *LHS, Value *RHS) {
   if (LHS == RHS) {
     return true;
@@ -3860,7 +3877,6 @@ matchEmptyArrayPop(const NormalizedCondition &FailureCond,
                             true};
 }
 
-bool isFreeMemoryPointerLoad(Value *V);
 CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
 bool callHasArg(CallBase *Call, Value *Needle);
 
@@ -4672,12 +4688,6 @@ bool isSupportedMemoryAllocationSizeWithUniformArg(Value *V) {
     return true;
   }
   return isSmallFixedMemoryAllocationSize(getUniformConstantArgument(V));
-}
-
-bool isFreeMemoryPointerLoad(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  return Call != nullptr && isCallTo(Call, "evm_mload") &&
-         Call->arg_size() == 2 && isConstantIntValue(Call->getArgOperand(1), 64);
 }
 
 Value *getMemoryPointerLoadSlot(Value *V) {

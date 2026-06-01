@@ -44,26 +44,6 @@ CallBase *findEventConsumerMarker(BasicBlock &BB, CallBase &Log) {
   return nullptr;
 }
 
-bool isFreeMemoryPointerLoad(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  return Call != nullptr && isCallTo(Call, "evm_mload") &&
-         Call->arg_size() == 2 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
-}
-
-bool isFreeMemoryPointerStore(CallBase *Call) {
-  return isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
-}
-
-std::optional<uint64_t> getUInt64Constant(Value *V) {
-  auto *C = dyn_cast_or_null<ConstantInt>(V);
-  if (C == nullptr || C->getValue().getActiveBits() > 64) {
-    return std::nullopt;
-  }
-  return C->getZExtValue();
-}
-
 bool isEventAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && (*Offset % 32) == 0;
@@ -95,9 +75,7 @@ void collectEventDataWordWriteMarkers(BasicBlock &BB, CallBase &Log,
     }
 
     Value *WriteBase = Call->getArgOperand(0);
-    if (WriteBase == DataBase ||
-        (isFreeMemoryPointerLoad(WriteBase) &&
-         isFreeMemoryPointerLoad(DataBase))) {
+    if (isSameOrReloadedFreeMemoryBase(WriteBase, DataBase)) {
       Candidates.push_back(Call);
     }
   }
@@ -131,9 +109,7 @@ void collectEventDataCopyWriteMarkers(BasicBlock &BB, CallBase &Log,
     }
 
     Value *CopyBase = Call->getArgOperand(0);
-    if (CopyBase == DataBase ||
-        (isFreeMemoryPointerLoad(CopyBase) &&
-         isFreeMemoryPointerLoad(DataBase))) {
+    if (isSameOrReloadedFreeMemoryBase(CopyBase, DataBase)) {
       Candidates.push_back(Call);
     }
   }

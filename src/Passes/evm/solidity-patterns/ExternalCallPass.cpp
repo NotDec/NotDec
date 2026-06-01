@@ -52,26 +52,6 @@ std::optional<ExternalCallMemoryArgs> getExternalCallMemoryArgs(CallBase *Call) 
   return std::nullopt;
 }
 
-bool isFreeMemoryPointerLoad(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  return Call != nullptr && isCallTo(Call, "evm_mload") &&
-         Call->arg_size() == 2 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
-}
-
-bool isFreeMemoryPointerStore(CallBase *Call) {
-  return isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
-}
-
-std::optional<uint64_t> getUInt64Constant(Value *V) {
-  auto *C = dyn_cast_or_null<ConstantInt>(V);
-  if (C == nullptr || C->getValue().getActiveBits() > 64) {
-    return std::nullopt;
-  }
-  return C->getZExtValue();
-}
-
 bool isExternalAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && *Offset >= 4 && ((*Offset - 4) % 32) == 0;
@@ -140,13 +120,7 @@ CallBase *findExternalCallInputCopyWriteMarker(BasicBlock &BB,
     }
 
     Value *CopyBase = Call->getArgOperand(0);
-    if (CopyBase == InputBase) {
-      Candidate = Call;
-      continue;
-    }
-
-    if (isFreeMemoryPointerLoad(CopyBase) &&
-        isFreeMemoryPointerLoad(InputBase)) {
+    if (isSameOrReloadedFreeMemoryBase(CopyBase, InputBase)) {
       Candidate = Call;
     }
   }
@@ -180,13 +154,7 @@ CallBase *findExternalCallInputWordWriteMarker(BasicBlock &BB,
     }
 
     Value *WriteBase = Call->getArgOperand(0);
-    if (WriteBase == InputBase) {
-      Candidate = Call;
-      continue;
-    }
-
-    if (isFreeMemoryPointerLoad(WriteBase) &&
-        isFreeMemoryPointerLoad(InputBase)) {
+    if (isSameOrReloadedFreeMemoryBase(WriteBase, InputBase)) {
       Candidate = Call;
     }
   }
@@ -220,9 +188,7 @@ void collectExternalCallInputAbiHeadWriteMarkers(
     }
 
     Value *WriteBase = Call->getArgOperand(0);
-    if (WriteBase == InputBase ||
-        (isFreeMemoryPointerLoad(WriteBase) &&
-         isFreeMemoryPointerLoad(InputBase))) {
+    if (isSameOrReloadedFreeMemoryBase(WriteBase, InputBase)) {
       Candidates.push_back(Call);
     }
   }

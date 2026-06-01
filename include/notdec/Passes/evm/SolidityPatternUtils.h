@@ -119,6 +119,10 @@ void insertPayabilityCfgRewriteMarker(llvm::LLVMContext &Ctx,
                                       const PayabilityGuardMatch &Match);
 
 bool isReturndataSize(llvm::Value *V);
+std::optional<uint64_t> getUInt64Constant(llvm::Value *V);
+bool isFreeMemoryPointerLoad(llvm::Value *V);
+bool isFreeMemoryPointerStore(llvm::CallBase *Call);
+bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
 std::optional<SolidityRevertMatch>
 matchSolidityRevert(llvm::BasicBlock &BB, llvm::CallBase &Revert);
 void insertPanicRewriteMarker(llvm::LLVMContext &Ctx,
