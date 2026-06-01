@@ -42,6 +42,22 @@ bool isFreeMemoryPointerLoad(Value *V) {
 
 bool isZero(Value *V) { return detail::isConstantIntValue(V, 0); }
 
+bool isMemoryCopyWriteCall(CallBase *Call) {
+  return detail::isCallTo(Call, "evm_calldatacopy") ||
+         detail::isCallTo(Call, "evm_returndatacopy") ||
+         detail::isCallTo(Call, "evm_codecopy");
+}
+
+MemoryWriteKind getMemoryCopyWriteKind(CallBase *Call) {
+  if (detail::isCallTo(Call, "evm_calldatacopy")) {
+    return MemoryWriteKind::CalldataCopy;
+  }
+  if (detail::isCallTo(Call, "evm_returndatacopy")) {
+    return MemoryWriteKind::ReturndataCopy;
+  }
+  return MemoryWriteKind::CodeCopy;
+}
+
 bool isEvmLogCall(CallBase *Call) {
   StringRef Name = detail::getCalleeName(Call);
   if (!Name.starts_with("evm_log") || Name.size() != 8) {
@@ -256,9 +272,7 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
       continue;
     }
 
-    if ((detail::isCallTo(Call, "evm_calldatacopy") ||
-         detail::isCallTo(Call, "evm_returndatacopy")) &&
-        Call->arg_size() == 5) {
+    if (isMemoryCopyWriteCall(Call) && Call->arg_size() == 5) {
       Value *Dst = Call->getArgOperand(2);
       if (detail::isCallTo(Call, "evm_returndatacopy") && isZero(Dst) &&
           isZero(Call->getArgOperand(3))) {
@@ -274,9 +288,7 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
         if (!Offset.has_value()) {
           continue;
         }
-        MemoryWriteKind Kind = detail::isCallTo(Call, "evm_calldatacopy")
-                                   ? MemoryWriteKind::CalldataCopy
-                                   : MemoryWriteKind::ReturndataCopy;
+        MemoryWriteKind Kind = getMemoryCopyWriteKind(Call);
         Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
                                            Call->getArgOperand(4),
                                            Call->getArgOperand(3), Kind});
@@ -284,9 +296,7 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
         break;
       }
       if (!MatchedBase) {
-        MemoryWriteKind Kind = detail::isCallTo(Call, "evm_calldatacopy")
-                                   ? MemoryWriteKind::CalldataCopy
-                                   : MemoryWriteKind::ReturndataCopy;
+        MemoryWriteKind Kind = getMemoryCopyWriteKind(Call);
         Facts.Writes.push_back(MemoryWrite{Call, Dst, 0, Call->getArgOperand(4),
                                            Call->getArgOperand(3), Kind});
       }

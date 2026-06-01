@@ -1163,6 +1163,24 @@
       },
       "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 10,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_memory_allocation": 13,
+        "notdec_solidity_memory_write": 111,
+        "notdec_solidity_memory_copy_write": 10,
+        "notdec_solidity_memory_consumer": 73
+      },
+      "expected_memory_consumer_kinds": {
+        "return": 14,
+        "revert": 36,
+        "event_log": 7,
+        "external_call_input": 8,
+        "external_call_output": 8
+      },
+      "expected_memory_copy_write_kinds": {
+        "calldata": 1,
+        "scratch_returndata": 8,
+        "code": 1
+      },
       "expected_returndata_bubbles": 8
     },
     {
