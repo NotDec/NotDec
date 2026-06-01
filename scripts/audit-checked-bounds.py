@@ -23,6 +23,34 @@ CHECKED_BOUNDS_MARKER_RE = re.compile(
     r"storage_array_length_bounds|enum_conversion|empty_array_pop_storage"
     r"))\("
 )
+# Keep this in sync with getCheckedBoundsRewriteMarkerName in SolidityPatterns.cpp.
+KIND_TO_MARKER = {
+    "checked_add": "notdec_solidity_rewrite_checked_add",
+    "checked_sub": "notdec_solidity_rewrite_checked_sub",
+    "checked_mul": "notdec_solidity_rewrite_checked_mul",
+    "checked_add_bound": "notdec_solidity_rewrite_checked_add_bound",
+    "checked_sub_bound": "notdec_solidity_rewrite_checked_sub_bound",
+    "checked_mul_bound": "notdec_solidity_rewrite_checked_mul_bound",
+    "checked_div": "notdec_solidity_rewrite_checked_div",
+    "checked_mod": "notdec_solidity_rewrite_checked_mod",
+    "checked_exp": "notdec_solidity_rewrite_checked_exp",
+    "array_bounds_memory": "notdec_solidity_rewrite_array_bounds_memory",
+    "array_bounds_calldata": "notdec_solidity_rewrite_array_bounds_calldata",
+    "array_bounds_storage": "notdec_solidity_rewrite_array_bounds_storage",
+    "memory_allocation_bounds": "notdec_solidity_rewrite_memory_allocation_bounds",
+    "memory_allocation_pointer_bounds": (
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds"
+    ),
+    "storage_bytes_encoding": "notdec_solidity_rewrite_storage_bytes_encoding",
+    "storage_byte_array_length_bounds": (
+        "notdec_solidity_rewrite_storage_byte_array_length_bounds"
+    ),
+    "storage_array_length_bounds": (
+        "notdec_solidity_rewrite_storage_array_length_bounds"
+    ),
+    "enum_conversion": "notdec_solidity_rewrite_enum_conversion",
+    "empty_array_pop_storage": "notdec_solidity_rewrite_empty_array_pop_storage",
+}
 
 
 def metadata_values(text: str, metadata_name: str, metadata: dict[str, str]) -> Counter[str]:
@@ -32,9 +60,29 @@ def metadata_values(text: str, metadata_name: str, metadata: dict[str, str]) -> 
     return counts
 
 
+def expected_markers_by_kind(
+    text: str, metadata: dict[str, str]
+) -> tuple[Counter[str], Counter[str]]:
+    expected: Counter[str] = Counter()
+    unmapped: Counter[str] = Counter()
+    for line in text.splitlines():
+        kind_ids = re.findall(r"!notdec\.solidity\.checked_bounds !(\d+)", line)
+        if not kind_ids or "!notdec.solidity_checked_bounds.skipped !" in line:
+            continue
+        for metadata_id in kind_ids:
+            kind = metadata.get(metadata_id, "unknown")
+            marker = KIND_TO_MARKER.get(kind)
+            if marker:
+                expected[marker] += 1
+            else:
+                unmapped[kind] += 1
+    return expected, unmapped
+
+
 def audit_file(path: Path) -> dict[str, Counter[str] | int]:
     text = path.read_text(errors="ignore")
     metadata = dict(METADATA_RE.findall(text))
+    expected_markers, unmapped_rewrite_kinds = expected_markers_by_kind(text, metadata)
     return {
         "kinds": metadata_values(text, "notdec.solidity.checked_bounds", metadata),
         "panic_codes": metadata_values(
@@ -44,6 +92,8 @@ def audit_file(path: Path) -> dict[str, Counter[str] | int]:
             text, "notdec.solidity_checked_bounds.skipped", metadata
         ),
         "semantic_markers": Counter(CHECKED_BOUNDS_MARKER_RE.findall(text)),
+        "expected_markers": expected_markers,
+        "unmapped_rewrite_kinds": unmapped_rewrite_kinds,
         "cfg_rewrites": len(CFG_REWRITE_RE.findall(text)),
     }
 
@@ -107,7 +157,7 @@ def main() -> int:
         action="store_true",
         help=(
             "Return non-zero unless non-skipped checked-bounds metadata count "
-            "matches semantic marker and CFG rewrite counts"
+            "matches semantic marker kinds and CFG rewrite counts"
         ),
     )
     args = parser.parse_args()
@@ -125,6 +175,8 @@ def main() -> int:
         "panic_codes": Counter(),
         "skip_reasons": Counter(),
         "semantic_markers": Counter(),
+        "expected_markers": Counter(),
+        "unmapped_rewrite_kinds": Counter(),
     }
     total_cfg_rewrites = 0
     skipped_files: list[tuple[Path, Counter[str]]] = []
@@ -142,6 +194,8 @@ def main() -> int:
     print_counter("checked_bounds_kinds", totals["kinds"])
     print_counter("panic_codes", totals["panic_codes"])
     print_counter("semantic_markers", totals["semantic_markers"])
+    print_counter("expected_semantic_markers", totals["expected_markers"])
+    print_counter("unmapped_rewrite_kinds", totals["unmapped_rewrite_kinds"])
     print_counter("skip_reasons", totals["skip_reasons"])
     print(f"cfg_rewrites: {total_cfg_rewrites}")
 
@@ -169,14 +223,30 @@ def main() -> int:
             reason_text = ", ".join(f"{k}:{v}" for k, v in reasons.most_common())
             print(f"  {path}: {reason_text}")
 
+    marker_mismatch = totals["expected_markers"] != totals["semantic_markers"]
     if args.fail_on_mismatch and (
-        rewrite_expected != marker_total or rewrite_expected != total_cfg_rewrites
+        rewrite_expected != marker_total
+        or rewrite_expected != total_cfg_rewrites
+        or marker_mismatch
+        or totals["unmapped_rewrite_kinds"]
     ):
         print(
             "ERROR: checked-bounds rewrite mismatch: "
             f"expected={rewrite_expected} markers={marker_total} "
             f"cfg_rewrites={total_cfg_rewrites}"
         )
+        if marker_mismatch:
+            all_markers = set(totals["expected_markers"]) | set(
+                totals["semantic_markers"]
+            )
+            for marker in sorted(all_markers):
+                expected = totals["expected_markers"].get(marker, 0)
+                actual = totals["semantic_markers"].get(marker, 0)
+                if expected != actual:
+                    print(f"  {marker}: expected={expected} actual={actual}")
+        if totals["unmapped_rewrite_kinds"]:
+            for kind, count in totals["unmapped_rewrite_kinds"].most_common():
+                print(f"  unmapped kind {kind}: {count}")
         return 1
 
     return 0
