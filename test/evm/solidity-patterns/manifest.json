@@ -298,6 +298,7 @@
         "notdec.solidity.storage_addressing": 1
       },
       "expected_memory_rewrite_markers": {
+        "notdec_solidity_storage_array_data_access": 1,
         "notdec_solidity_storage_array_data_keccak": 1
       },
       "expected_revert_kinds": {
