@@ -22,6 +22,8 @@ STATISTIC(NumExternalCallInputCopyWrites,
           "Number of Solidity external call input copy writes found");
 STATISTIC(NumExternalCallOutputCopyWrites,
           "Number of Solidity external call output copy writes found");
+STATISTIC(NumExternalCallOutputAbiDecodeBuffers,
+          "Number of Solidity external call output ABI decode buffers found");
 STATISTIC(NumExternalCallOutputWordReads,
           "Number of Solidity external call output word reads found");
 STATISTIC(NumExternalCallInputWordWrites,
@@ -403,6 +405,21 @@ void insertExternalCallOutputCopyWriteMarker(LLVMContext &Ctx,
                       ConstantInt::get(I256, CallKind)});
 }
 
+void insertExternalCallOutputAbiDecodeBufferMarker(LLVMContext &Ctx,
+                                                   CallBase &CopyWrite,
+                                                   uint64_t CallKind) {
+  Module *M = CopyWrite.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_output_abi_decode_buffer",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&CopyWrite);
+  Builder.CreateCall(Marker, {CopyWrite.getArgOperand(0),
+                              CopyWrite.getArgOperand(3),
+                              ConstantInt::get(I256, CallKind)});
+}
+
 bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
                                             CallBase &WordRead,
                                             Value *OutputBase,
@@ -525,6 +542,9 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallOutputCopyWriteMarker(Ctx, *Call, *CopyWrite,
                                                 CallKind);
         ++NumExternalCallOutputCopyWrites;
+        insertExternalCallOutputAbiDecodeBufferMarker(Ctx, *CopyWrite,
+                                                      CallKind);
+        ++NumExternalCallOutputAbiDecodeBuffers;
       }
       SmallVector<CallBase *, 8> OutputWordReads;
       collectExternalCallOutputWordReadMarkers(
