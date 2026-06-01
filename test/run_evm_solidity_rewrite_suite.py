@@ -105,6 +105,64 @@ def count_outline_calls(text: str) -> int:
     )
 
 
+def validate_checked_bounds_oracles(manifest: dict) -> list[str]:
+    errors: list[str] = []
+    required_keys = {
+        "checked_bounds_total",
+        "checked_bounds_skip_total",
+        "checked_bounds_semantic_marker_total",
+        "checked_bounds_cfg_rewrites",
+    }
+    for case in manifest["cases"]:
+        expected = case["expected_counts"]
+        checked_keys = {key for key in expected if key.startswith("checked_bounds")}
+        if not checked_keys:
+            continue
+        missing = sorted(required_keys - checked_keys)
+        if missing:
+            errors.append(
+                f"{case['name']}: missing checked-bounds oracle keys: "
+                + ", ".join(missing)
+            )
+            continue
+        rewrite_expected = (
+            expected["checked_bounds_total"] - expected["checked_bounds_skip_total"]
+        )
+        if expected["checked_bounds_semantic_marker_total"] != rewrite_expected:
+            errors.append(
+                f"{case['name']}: checked-bounds semantic marker total "
+                "does not match rewrite total"
+            )
+        if expected["checked_bounds_cfg_rewrites"] != rewrite_expected:
+            errors.append(
+                f"{case['name']}: checked-bounds CFG rewrite total "
+                "does not match rewrite total"
+            )
+        skip_total = expected["checked_bounds_skip_total"]
+        if skip_total:
+            reason_total = sum(
+                value
+                for key, value in expected.items()
+                if key.startswith("checked_bounds_skip_reason:")
+            )
+            skipped_kind_total = sum(
+                value
+                for key, value in expected.items()
+                if key.startswith("checked_bounds_skipped_kind:")
+            )
+            if reason_total != skip_total:
+                errors.append(
+                    f"{case['name']}: checked-bounds skip reasons "
+                    "do not match skip total"
+                )
+            if skipped_kind_total != skip_total:
+                errors.append(
+                    f"{case['name']}: checked-bounds skipped kinds "
+                    "do not match skip total"
+                )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
@@ -124,6 +182,13 @@ def main() -> int:
     workdir.mkdir(parents=True, exist_ok=True)
 
     manifest = json.loads(manifest_path.read_text())
+    manifest_errors = validate_checked_bounds_oracles(manifest)
+    if manifest_errors:
+        print("Manifest checked-bounds oracle errors:")
+        for error in manifest_errors:
+            print(f"  {error}")
+        return 1
+
     env = os.environ.copy()
     default_args = manifest.get("default_args", [])
 
