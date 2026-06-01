@@ -21,6 +21,7 @@ enum class MemoryWriteKind {
   ReturndataCopy = 3,
   ScratchReturndataCopy = 4,
   CodeCopy = 5,
+  MemoryCopy = 6,
 };
 
 enum class MemoryConsumerKind {

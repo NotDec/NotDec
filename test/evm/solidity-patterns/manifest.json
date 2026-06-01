@@ -3379,6 +3379,26 @@
         "65": 0,
         "81": 0
       },
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_memory_allocation": 11,
+        "notdec_solidity_memory_write": 182,
+        "notdec_solidity_memory_copy_write": 9,
+        "notdec_solidity_memory_consumer": 111
+      },
+      "expected_memory_consumer_kinds": {
+        "return": 43,
+        "revert": 52,
+        "event_log": 8,
+        "external_call_input": 4,
+        "external_call_output": 4
+      },
+      "expected_memory_copy_write_kinds": {
+        "calldata": 1,
+        "returndata": 2,
+        "scratch_returndata": 2,
+        "code": 3,
+        "memory": 1
+      },
       "expected_returndata_bubbles": 2
     },
     {

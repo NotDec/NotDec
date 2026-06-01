@@ -303,6 +303,29 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
       continue;
     }
 
+    if (detail::isCallTo(Call, "evm_mcopy") && Call->arg_size() == 4) {
+      Value *Dst = Call->getArgOperand(1);
+      bool MatchedBase = false;
+      for (Value *Base : Bases) {
+        std::optional<uint64_t> Offset = getOffsetFromBase(Dst, Base);
+        if (!Offset.has_value()) {
+          continue;
+        }
+        Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
+                                           Call->getArgOperand(3),
+                                           Call->getArgOperand(2),
+                                           MemoryWriteKind::MemoryCopy});
+        MatchedBase = true;
+        break;
+      }
+      if (!MatchedBase) {
+        Facts.Writes.push_back(MemoryWrite{Call, Dst, 0, Call->getArgOperand(3),
+                                           Call->getArgOperand(2),
+                                           MemoryWriteKind::MemoryCopy});
+      }
+      continue;
+    }
+
     if (detail::isCallTo(Call, "evm_return") && Call->arg_size() == 3) {
       if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
         Facts.Consumers.push_back(MemoryConsumer{
