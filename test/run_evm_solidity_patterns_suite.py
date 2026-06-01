@@ -373,6 +373,17 @@ def collect_panic_codes_from_block(block: str) -> list[int]:
 
 def count_panic_codes(path: Path) -> dict[str, int]:
     text = path.read_text()
+    marker_codes = re.findall(
+        r"call void @notdec_solidity_rewrite_revert_panic\(i256 ([^)]+)\)",
+        text,
+    )
+    if marker_codes:
+        counts: dict[str, int] = {}
+        for code in marker_codes:
+            key = code.strip()
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
     counts: dict[str, int] = {}
     for block in re.split(r"\n(?=[\w.$-]+:)", text):
         for code in collect_panic_codes_from_block(block):

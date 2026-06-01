@@ -362,6 +362,25 @@ void addPlainMetadata(LLVMContext &Ctx, Instruction &I, StringRef Kind,
   I.setMetadata(Kind, MDNode::get(Ctx, {MDString::get(Ctx, Value)}));
 }
 
+std::optional<uint64_t> getUInt64Metadata(const Instruction &I,
+                                          StringRef Kind) {
+  auto *Node = I.getMetadata(Kind);
+  if (Node == nullptr || Node->getNumOperands() != 1) {
+    return std::nullopt;
+  }
+
+  auto *Value = dyn_cast<MDString>(Node->getOperand(0));
+  if (Value == nullptr) {
+    return std::nullopt;
+  }
+
+  uint64_t Parsed = 0;
+  if (Value->getString().getAsInteger(10, Parsed)) {
+    return std::nullopt;
+  }
+  return Parsed;
+}
+
 CallBase *getCallValueFromPredicate(ICmpInst *Cmp) {
   if (Cmp == nullptr) {
     return nullptr;
@@ -1422,6 +1441,8 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
   std::optional<uint64_t> RevertLength =
       getLengthFromBase(Revert.getArgOperand(2), Revert.getArgOperand(1));
   SmallVector<RevertStringWord, 2> StringWords;
+  CallBase *AbsolutePanicCodeStore = nullptr;
+  std::optional<uint64_t> AbsolutePanicCode;
 
   if (isZero(Revert.getArgOperand(1)) && isZero(Revert.getArgOperand(2))) {
     Match.Kind = "empty";
@@ -1443,6 +1464,14 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
     if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
         Call->arg_size() != 3) {
       continue;
+    }
+
+    if (isConstantIntValue(Call->getArgOperand(1), 4)) {
+      if (std::optional<uint64_t> Code =
+              getUInt64Constant(Call->getArgOperand(2))) {
+        AbsolutePanicCodeStore = Call;
+        AbsolutePanicCode = Code;
+      }
     }
 
     std::optional<uint64_t> Offset =
@@ -1495,6 +1524,17 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
     }
   } else {
     Match.Kind = "encoded_candidate";
+  }
+
+  if (Match.Kind == "panic" && !Match.PanicCode.has_value()) {
+    Match.PanicCode =
+        getUInt64Metadata(Revert, "notdec.solidity_revert.panic_code");
+    if (!Match.PanicCode.has_value() && Match.SelectorStore != nullptr &&
+        isConstantIntValue(Revert.getArgOperand(2), 36) &&
+        AbsolutePanicCode.has_value()) {
+      Match.PanicCodeStore = AbsolutePanicCodeStore;
+      Match.PanicCode = AbsolutePanicCode;
+    }
   }
 
   return Match;

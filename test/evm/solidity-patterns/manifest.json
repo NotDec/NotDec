@@ -1875,37 +1875,38 @@
       "expected_panic_codes": {
         "0": 0,
         "1": 0,
-        "17": 15,
+        "17": 19,
         "18": 1,
         "33": 1,
         "34": 1,
         "49": 0,
         "50": 0,
-        "65": 5,
+        "65": 8,
         "81": 0
       },
       "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
-        "panic_unknown": 7,
+        "panic_resource_error": 3,
         "storage_bytes_encoding": 1,
         "memory_allocation_bounds": 1,
         "memory_allocation_pointer_bounds": 4,
         "enum_conversion": 1,
-        "checked_add": 6,
-        "checked_sub": 9,
+        "checked_add": 9,
+        "checked_sub": 10,
         "panic_checked_arithmetic": 0,
+        "panic_unknown": 0,
         "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
         "34": 1,
-        "65": 5,
-        "17": 15,
+        "65": 8,
+        "17": 19,
         "33": 1,
         "18": 1
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_checked_add": 6,
-        "notdec_solidity_rewrite_checked_sub": 9,
+        "notdec_solidity_rewrite_checked_add": 9,
+        "notdec_solidity_rewrite_checked_sub": 10,
         "notdec_solidity_rewrite_checked_div": 1,
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
         "notdec_solidity_rewrite_enum_conversion": 1,
@@ -1913,10 +1914,10 @@
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 7,
+        "unrecognized_operands": 3,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 23
+      "expected_checked_bounds_cfg_rewrites": 27
     },
     {
       "name": "0334_19494307_668d201319_1354ce2e324d",
@@ -2372,47 +2373,49 @@
       "expected_panic_codes": {
         "0": 0,
         "1": 0,
-        "17": 15,
+        "17": 19,
         "18": 1,
         "33": 1,
         "34": 1,
         "49": 0,
         "50": 0,
-        "65": 5,
+        "65": 8,
         "81": 0
       },
       "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
-        "panic_unknown": 7,
-        "panic_resource_error": 0,
+        "panic_resource_error": 3,
         "memory_allocation_pointer_bounds": 4,
+        "memory_allocation_bounds": 1,
         "storage_bytes_encoding": 1,
         "enum_conversion": 1,
-        "checked_add": 6,
-        "checked_sub": 9,
+        "checked_add": 9,
+        "checked_sub": 10,
         "panic_checked_arithmetic": 0,
+        "panic_unknown": 0,
         "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
-        "65": 5,
+        "65": 8,
         "34": 1,
-        "17": 15,
+        "17": 19,
         "33": 1,
         "18": 1
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_checked_add": 6,
-        "notdec_solidity_rewrite_checked_sub": 9,
+        "notdec_solidity_rewrite_checked_add": 9,
+        "notdec_solidity_rewrite_checked_sub": 10,
         "notdec_solidity_rewrite_checked_div": 1,
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
         "notdec_solidity_rewrite_enum_conversion": 1,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 1,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 7,
+        "unrecognized_operands": 3,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 23
+      "expected_checked_bounds_cfg_rewrites": 27
     },
     {
       "name": "1407_19503702_47675ff2ed_71b1710392bd",
