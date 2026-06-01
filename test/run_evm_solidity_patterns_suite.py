@@ -548,6 +548,10 @@ def main() -> int:
                 "expected_checked_bounds_skip_reasons", {}
             ).items():
                 expected_counts[f"checked_bounds_skip_reason:{reason}"] = expected
+            if "expected_checked_bounds_skip_reasons" in case:
+                expected_counts["checked_bounds_skip_total"] = sum(
+                    case.get("expected_checked_bounds_skip_reasons", {}).values()
+                )
             if "expected_checked_bounds_cfg_rewrites" in case:
                 expected_counts["checked_bounds_cfg_rewrites"] = case[
                     "expected_checked_bounds_cfg_rewrites"
@@ -665,6 +669,10 @@ def main() -> int:
             for reason in case.get("expected_checked_bounds_skip_reasons", {}):
                 actual_counts[f"checked_bounds_skip_reason:{reason}"] = (
                     actual_checked_bounds_skip_reasons.get(str(reason), 0)
+                )
+            if "checked_bounds_skip_total" in expected_counts:
+                actual_counts["checked_bounds_skip_total"] = sum(
+                    actual_checked_bounds_skip_reasons.values()
                 )
             if "checked_bounds_cfg_rewrites" in expected_counts:
                 actual_counts["checked_bounds_cfg_rewrites"] = (
