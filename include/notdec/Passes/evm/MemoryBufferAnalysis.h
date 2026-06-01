@@ -57,6 +57,16 @@ struct MemoryWrite {
   MemoryWriteKind Kind = MemoryWriteKind::MStore;
 };
 
+// A memory read keeps the mload result tied to the same base/offset surface as
+// writes. Consumers such as external call output decode can then read this
+// marker instead of matching raw evm_mload again.
+struct MemoryRead {
+  llvm::CallBase *Load = nullptr;
+  llvm::Value *Base = nullptr;
+  std::optional<uint64_t> Offset;
+  llvm::Value *Value = nullptr;
+};
+
 // A consumer is the operation that gives a memory buffer Solidity meaning.
 // A single base may have several roles, especially external calls that reuse
 // the input base for output or later returndata.
@@ -72,6 +82,7 @@ struct MemoryConsumer {
 struct MemoryBufferFacts {
   llvm::SmallVector<MemoryAllocation, 8> Allocations;
   llvm::SmallVector<MemoryWrite, 16> Writes;
+  llvm::SmallVector<MemoryRead, 16> Reads;
   llvm::SmallVector<MemoryConsumer, 8> Consumers;
 };
 

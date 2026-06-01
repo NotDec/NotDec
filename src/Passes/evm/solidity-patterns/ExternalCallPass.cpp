@@ -302,11 +302,26 @@ void collectExternalCallOutputWordReadMarkers(
     BasicBlock &BB, CallBase &ExternalCall, Value *OutputBase, Value *OutputSize,
     SmallVectorImpl<CallBase *> &Reads) {
   auto IsMatchingOutputRead = [&](CallBase *Call) {
-    if (!isCallTo(Call, "evm_mload") || Call->arg_size() != 2) {
+    std::optional<uint64_t> Offset;
+    if (isCallTo(Call, "notdec_solidity_memory_read") && Call->arg_size() == 3) {
+      Value *ReadBase = Call->getArgOperand(0);
+      if (!isSameOrReloadedFreeMemoryBase(ReadBase, OutputBase)) {
+        return false;
+      }
+      Offset = getUInt64Constant(Call->getArgOperand(1));
+    } else if (isCallTo(Call, "evm_mload") && Call->arg_size() == 2) {
+      auto *NextCall = dyn_cast_or_null<CallBase>(Call->getNextNode());
+      if (NextCall != nullptr &&
+          isCallTo(NextCall, "notdec_solidity_memory_read") &&
+          NextCall->arg_size() == 3 && NextCall->getArgOperand(2) == Call &&
+          isSameOrReloadedFreeMemoryBase(NextCall->getArgOperand(0),
+                                         OutputBase)) {
+        return false;
+      }
+      Offset = getOffsetFromBase(Call->getArgOperand(1), OutputBase);
+    } else {
       return false;
     }
-    std::optional<uint64_t> Offset =
-        getOffsetFromBase(Call->getArgOperand(1), OutputBase);
     return Offset.has_value() && (*Offset % 32) == 0 &&
            outputSizeCoversWord(OutputSize, *Offset);
   };
@@ -430,30 +445,45 @@ void insertExternalCallOutputAbiDecodeBufferMarker(LLVMContext &Ctx,
 }
 
 bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
-                                            CallBase &WordRead,
+                                            CallBase &MemoryRead,
                                             Value *OutputBase,
                                             uint64_t CallKind) {
-  Module *M = WordRead.getModule();
+  Module *M = MemoryRead.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_external_call_output_word_read",
       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
                         false));
 
-  std::optional<uint64_t> Offset =
-      getOffsetFromBase(WordRead.getArgOperand(1), OutputBase);
-  if (!Offset.has_value()) {
+  Value *Base = nullptr;
+  Value *OffsetValue = nullptr;
+  Value *ReadValue = nullptr;
+  if (isCallTo(&MemoryRead, "notdec_solidity_memory_read") &&
+      MemoryRead.arg_size() == 3) {
+    Base = MemoryRead.getArgOperand(0);
+    OffsetValue = MemoryRead.getArgOperand(1);
+    ReadValue = MemoryRead.getArgOperand(2);
+  } else if (isCallTo(&MemoryRead, "evm_mload") && MemoryRead.arg_size() == 2) {
+    std::optional<uint64_t> Offset =
+        getOffsetFromBase(MemoryRead.getArgOperand(1), OutputBase);
+    if (!Offset.has_value()) {
+      return false;
+    }
+    Base = OutputBase;
+    OffsetValue = ConstantInt::get(I256, *Offset);
+    ReadValue = &MemoryRead;
+  } else {
     return false;
   }
 
-  Instruction *InsertBefore = WordRead.getNextNode();
+  Instruction *InsertBefore = MemoryRead.getNextNode();
   if (InsertBefore == nullptr) {
     return false;
   }
 
   IRBuilder<> Builder(InsertBefore);
   Builder.CreateCall(Marker,
-                     {OutputBase, ConstantInt::get(I256, *Offset), &WordRead,
+                     {Base, OffsetValue, ReadValue,
                       ConstantInt::get(I256, CallKind)});
   return true;
 }

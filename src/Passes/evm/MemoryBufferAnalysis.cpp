@@ -16,6 +16,7 @@ using namespace llvm;
 STATISTIC(NumMemoryAllocations,
           "Number of Solidity memory allocations rewritten");
 STATISTIC(NumMemoryWrites, "Number of Solidity memory writes rewritten");
+STATISTIC(NumMemoryReads, "Number of Solidity memory reads rewritten");
 STATISTIC(NumMemoryConsumers,
           "Number of Solidity memory consumers rewritten");
 
@@ -215,6 +216,28 @@ void insertWriteMarker(LLVMContext &Ctx, const MemoryWrite &Write) {
                ConstantInt::get(I256, static_cast<uint64_t>(Write.Kind))});
 }
 
+void insertReadMarker(LLVMContext &Ctx, const MemoryRead &Read) {
+  if (Read.Load == nullptr || Read.Base == nullptr || !Read.Offset.has_value() ||
+      Read.Value == nullptr) {
+    return;
+  }
+  Instruction *InsertBefore = Read.Load->getNextNode();
+  if (InsertBefore == nullptr) {
+    return;
+  }
+
+  Module *M = Read.Load->getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  Function *Marker = nullptr;
+  getOrDeclareMarker(*M, "notdec_solidity_memory_read", {I256, I256, I256},
+                     Marker);
+
+  IRBuilder<> Builder(InsertBefore);
+  Builder.CreateCall(Marker, {asI256(Builder, Read.Base),
+                              ConstantInt::get(I256, *Read.Offset),
+                              asI256(Builder, Read.Value)});
+}
+
 void insertConsumerMarker(LLVMContext &Ctx, const MemoryConsumer &Consumer) {
   if (Consumer.Call == nullptr || Consumer.Base == nullptr ||
       Consumer.Size == nullptr) {
@@ -291,6 +314,23 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
                                            Call->getArgOperand(2),
                                            nullptr,
                                            MemoryWriteKind::MStore});
+        break;
+      }
+      continue;
+    }
+
+    if (detail::isCallTo(Call, "evm_mload") && Call->arg_size() == 2 &&
+        !detail::isConstantIntValue(Call->getArgOperand(1), 64)) {
+      Value *Ptr = Call->getArgOperand(1);
+      for (Value *Base : Bases) {
+        if (!valueAvailableAt(Base, *Call, DT)) {
+          continue;
+        }
+        std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
+        if (!Offset.has_value()) {
+          continue;
+        }
+        Facts.Reads.push_back(MemoryRead{Call, Base, Offset, Call});
         break;
       }
       continue;
@@ -455,6 +495,12 @@ PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
   for (const MemoryWrite &Write : Facts.Writes) {
     insertWriteMarker(Ctx, Write);
     ++NumMemoryWrites;
+    Changed = true;
+  }
+
+  for (const MemoryRead &Read : Facts.Reads) {
+    insertReadMarker(Ctx, Read);
+    ++NumMemoryReads;
     Changed = true;
   }
 
