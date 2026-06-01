@@ -4512,6 +4512,14 @@ ConstantInt *getUniformConstantArgument(Value *V) {
   return Const;
 }
 
+bool isConstantIntValueOrUniformArg(Value *V, uint64_t N) {
+  if (isConstantIntValue(V, N)) {
+    return true;
+  }
+  auto *Uniform = getUniformConstantArgument(V);
+  return Uniform != nullptr && Uniform->getValue() == N;
+}
+
 bool isSupportedMemoryAllocationSize(Value *V) {
   return isMemoryAllocationSize(V) || isRoundedMemoryAllocationSize(V) ||
          isSmallFixedMemoryAllocationSize(V);
@@ -4547,6 +4555,22 @@ CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
     if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
         Call->arg_size() == 3 &&
         isConstantIntValue(Call->getArgOperand(1), 64) &&
+        isSameValue(Call->getArgOperand(2), NewPtr)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
+CallBase *findUniformFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
+  if (BB == nullptr || NewPtr == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
+        Call->arg_size() == 3 &&
+        isConstantIntValueOrUniformArg(Call->getArgOperand(1), 64) &&
         isSameValue(Call->getArgOperand(2), NewPtr)) {
       return Call;
     }
@@ -5110,8 +5134,13 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
     }
   }
 
+  bool HasFreePointerStore = findFreeMemoryPointerStore(SuccessBlock, NewPtr) !=
+                             nullptr;
+  bool HasUniformInitialFreePointerStore =
+      isConstantIntValueOrUniformArg(OldPtr, 128) &&
+      findUniformFreeMemoryPointerStore(SuccessBlock, NewPtr) != nullptr;
   if (!isSupportedMemoryAllocationSizeWithUniformArg(Size) ||
-      (findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr &&
+      (!HasFreePointerStore && !HasUniformInitialFreePointerStore &&
        findMemoryPointerStoreForLoad(SuccessBlock, OldPtr, NewPtr) == nullptr &&
        !(UsesOffsetPair &&
          hasMemoryPointerStoreTransition(GuardBlock, SuccessBlock, OldPtr,
