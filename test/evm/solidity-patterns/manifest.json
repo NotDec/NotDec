@@ -921,6 +921,7 @@
       "expected_returndata_bubbles": 0,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_event_memory_consumer": 1,
+        "notdec_solidity_external_call_memory_consumer": 2,
         "notdec_solidity_memory_consumer": 5,
         "notdec_solidity_memory_copy_write": 2
       },
