@@ -2306,6 +2306,208 @@ bool matchCleanedUnsignedIncrement(const NormalizedCondition &FailureCond,
   return false;
 }
 
+// Solidity signed add/sub guards can be lowered as a success condition feeding
+// the non-revert edge. Keep these matchers tied to that codegen shape.
+bool matchSignedNegative(Value *V, Value *&Input) {
+  auto *Cmp = dyn_cast_or_null<ICmpInst>(V);
+  if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_SLT ||
+      !isZero(Cmp->getOperand(1))) {
+    return false;
+  }
+  Input = Cmp->getOperand(0);
+  return true;
+}
+
+bool matchSignedNonNegative(Value *V, Value *&Input) {
+  auto *Cmp = dyn_cast_or_null<ICmpInst>(V);
+  if (Cmp == nullptr) {
+    return false;
+  }
+  if (Cmp->getPredicate() == ICmpInst::ICMP_SGE &&
+      isZero(Cmp->getOperand(1))) {
+    Input = Cmp->getOperand(0);
+    return true;
+  }
+  if (Cmp->getPredicate() == ICmpInst::ICMP_SGT &&
+      isAllOnes(Cmp->getOperand(1))) {
+    Input = Cmp->getOperand(0);
+    return true;
+  }
+  return false;
+}
+
+bool matchSignedSubSuccessFirstOr(Value *V, BinaryOperator *&Sub, Value *&X,
+                                  Value *&Y) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *MaybeY = nullptr;
+    if (!matchSignedNegative(Or->getOperand(I), MaybeY)) {
+      continue;
+    }
+    auto *Cmp = dyn_cast<ICmpInst>(Or->getOperand(1 - I));
+    if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_SLE) {
+      continue;
+    }
+    auto *MaybeSub = dyn_cast<BinaryOperator>(Cmp->getOperand(0));
+    if (MaybeSub == nullptr || MaybeSub->getOpcode() != Instruction::Sub ||
+        !isSameValue(MaybeSub->getOperand(1), MaybeY) ||
+        !isSameValue(Cmp->getOperand(1), MaybeSub->getOperand(0))) {
+      continue;
+    }
+    Sub = MaybeSub;
+    X = MaybeSub->getOperand(0);
+    Y = MaybeY;
+    return true;
+  }
+  return false;
+}
+
+bool matchSignedSubSuccessSecondOr(Value *V, BinaryOperator *Sub, Value *X,
+                                   Value *Y) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *MaybeY = nullptr;
+    if (!matchSignedNonNegative(Or->getOperand(I), MaybeY) ||
+        !isSameValue(MaybeY, Y)) {
+      continue;
+    }
+    auto *Cmp = dyn_cast<ICmpInst>(Or->getOperand(1 - I));
+    if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_SGE ||
+        !isSameValue(Cmp->getOperand(0), Sub) ||
+        !isSameValue(Cmp->getOperand(1), X)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+BinaryOperator *matchSignedSubSuccessCondition(Value *V) {
+  auto *And = dyn_cast_or_null<BinaryOperator>(V);
+  if (And == nullptr || And->getOpcode() != Instruction::And) {
+    return nullptr;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    BinaryOperator *Sub = nullptr;
+    Value *X = nullptr;
+    Value *Y = nullptr;
+    if (matchSignedSubSuccessFirstOr(And->getOperand(I), Sub, X, Y) &&
+        matchSignedSubSuccessSecondOr(And->getOperand(1 - I), Sub, X, Y)) {
+      return Sub;
+    }
+  }
+  return nullptr;
+}
+
+bool matchSignBit(Value *V, Value *Input) {
+  auto *Shift = dyn_cast_or_null<BinaryOperator>(V);
+  return Shift != nullptr && Shift->getOpcode() == Instruction::LShr &&
+         isSameValue(Shift->getOperand(0), Input) &&
+         isConstantIntValue(Shift->getOperand(1), 255);
+}
+
+bool matchSignedAddFailureZExt(Value *V, BinaryOperator *&Add, Value *&X,
+                               Value *&Y, ICmpInst *&SumLessY) {
+  auto *ZExt = dyn_cast_or_null<ZExtInst>(V);
+  auto *And =
+      ZExt == nullptr ? nullptr : dyn_cast<BinaryOperator>(ZExt->getOperand(0));
+  if (And == nullptr || And->getOpcode() != Instruction::And) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *Cmp = dyn_cast<ICmpInst>(And->getOperand(I));
+    Value *MaybeX = nullptr;
+    if (!matchSignedNonNegative(And->getOperand(1 - I), MaybeX) ||
+        Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_SLT) {
+      continue;
+    }
+    auto *MaybeAdd = dyn_cast<BinaryOperator>(Cmp->getOperand(0));
+    if (MaybeAdd == nullptr || MaybeAdd->getOpcode() != Instruction::Add ||
+        !binaryOpHasOperand(MaybeAdd, MaybeX) ||
+        !binaryOpHasOperand(MaybeAdd, Cmp->getOperand(1))) {
+      continue;
+    }
+    Add = MaybeAdd;
+    X = MaybeX;
+    Y = Cmp->getOperand(1);
+    SumLessY = Cmp;
+    return true;
+  }
+  return false;
+}
+
+bool matchSignedAddFailureSelect(Value *V, BinaryOperator *Add, Value *X,
+                                 ICmpInst *SumLessY) {
+  auto *Select = dyn_cast_or_null<SelectInst>(V);
+  if (Select == nullptr || !isSameValue(Select->getCondition(), SumLessY) ||
+      !isZero(Select->getTrueValue())) {
+    return false;
+  }
+  return matchSignBit(Select->getFalseValue(), X) &&
+         isSameValue(SumLessY->getOperand(0), Add);
+}
+
+BinaryOperator *matchSignedAddSuccessCondition(Value *V) {
+  auto *Cmp = dyn_cast_or_null<ICmpInst>(V);
+  if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_EQ ||
+      !isZero(Cmp->getOperand(1))) {
+    return nullptr;
+  }
+  auto *Or = dyn_cast<BinaryOperator>(Cmp->getOperand(0));
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return nullptr;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    BinaryOperator *Add = nullptr;
+    Value *X = nullptr;
+    Value *Y = nullptr;
+    ICmpInst *SumLessY = nullptr;
+    if (matchSignedAddFailureZExt(Or->getOperand(I), Add, X, Y, SumLessY) &&
+        matchSignedAddFailureSelect(Or->getOperand(1 - I), Add, X,
+                                    SumLessY)) {
+      return Add;
+    }
+  }
+  return nullptr;
+}
+
+std::optional<CheckedBoundsMatch>
+matchSignedCheckedArithmeticGuard(Value *BranchCondition,
+                                  bool FailureWhenCondTrue,
+                                  const SolidityRevertMatch &RevertMatch) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x11 ||
+      FailureWhenCondTrue) {
+    return std::nullopt;
+  }
+
+  if (BinaryOperator *Sub = matchSignedSubSuccessCondition(BranchCondition)) {
+    return CheckedBoundsMatch{
+        "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+        {Sub->getOperand(0), Sub->getOperand(1), Sub}, RevertMatch.PanicCode,
+        true};
+  }
+
+  if (BinaryOperator *Add = matchSignedAddSuccessCondition(BranchCondition)) {
+    return CheckedBoundsMatch{
+        "checked_add", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+        {Add->getOperand(0), Add->getOperand(1), Add}, RevertMatch.PanicCode,
+        true};
+  }
+
+  return std::nullopt;
+}
+
 std::optional<CheckedBoundsMatch>
 matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                        const SolidityRevertMatch &RevertMatch,
@@ -3768,6 +3970,16 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       Mul->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       Mul->FailureBlock = Failure;
       return Mul;
+    }
+
+    if (std::optional<CheckedBoundsMatch> SignedArithmetic =
+            matchSignedCheckedArithmeticGuard(Br->getCondition(),
+                                             FailureWhenCondTrue,
+                                             *RevertMatch)) {
+      SignedArithmetic->Branch = Br;
+      SignedArithmetic->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      SignedArithmetic->FailureBlock = Failure;
+      return SignedArithmetic;
     }
 
     if (!FailureCond.has_value()) {
