@@ -9,6 +9,7 @@
 
 namespace llvm {
 class CallBase;
+class DominatorTree;
 class Function;
 class Instruction;
 } // namespace llvm
@@ -74,7 +75,8 @@ struct MemoryBufferFacts {
   llvm::SmallVector<MemoryConsumer, 8> Consumers;
 };
 
-MemoryBufferFacts analyzeMemoryBuffers(llvm::Function &F);
+MemoryBufferFacts analyzeMemoryBuffers(llvm::Function &F,
+                                       llvm::DominatorTree &DT);
 
 struct MemoryBufferRewritePass
     : llvm::PassInfoMixin<MemoryBufferRewritePass> {

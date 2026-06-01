@@ -1885,7 +1885,10 @@
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 53
+      "expected_checked_bounds_cfg_rewrites": 53,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_external_call_output_copy_write": 6
+      }
     },
     {
       "name": "0679_19497465_c2187cbc73_f22fac5262f8",

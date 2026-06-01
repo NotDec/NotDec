@@ -3,6 +3,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <optional>
@@ -19,6 +20,8 @@ STATISTIC(NumExternalCallMemoryConsumers,
           "Number of Solidity external call memory consumers found");
 STATISTIC(NumExternalCallInputCopyWrites,
           "Number of Solidity external call input copy writes found");
+STATISTIC(NumExternalCallOutputCopyWrites,
+          "Number of Solidity external call output copy writes found");
 STATISTIC(NumExternalCallInputWordWrites,
           "Number of Solidity external call input word writes found");
 STATISTIC(NumExternalCallInputAbiHeadWrites,
@@ -128,6 +131,66 @@ CallBase *findExternalCallInputCopyWriteMarker(BasicBlock &BB,
   return Candidate;
 }
 
+CallBase *findExternalCallOutputCopyWriteMarker(BasicBlock &BB,
+                                                CallBase &ExternalCall,
+                                                Value *OutputBase) {
+  bool SeenExternalCall = false;
+  auto IsMatchingOutputCopy = [&](CallBase *Call) {
+    if (!isCallTo(Call, "notdec_solidity_memory_copy_write") ||
+        Call->arg_size() != 5 ||
+        !isConstantIntValue(Call->getArgOperand(1), 0) ||
+        !isConstantIntValue(Call->getArgOperand(2), 0) ||
+        !isConstantIntValue(Call->getArgOperand(4), 3)) {
+      return false;
+    }
+
+    Value *CopyBase = Call->getArgOperand(0);
+    return isSameOrReloadedFreeMemoryBase(CopyBase, OutputBase);
+  };
+
+  for (Instruction &I : BB) {
+    if (&I == &ExternalCall) {
+      SeenExternalCall = true;
+      continue;
+    }
+    if (!SeenExternalCall) {
+      continue;
+    }
+
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call) ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      return nullptr;
+    }
+
+    if (IsMatchingOutputCopy(Call)) {
+      return Call;
+    }
+  }
+
+  for (BasicBlock *Succ : successors(&BB)) {
+    for (Instruction &I : *Succ) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr) {
+        continue;
+      }
+      if (isFreeMemoryPointerStore(Call) ||
+          !classifyExternalCall(getCalleeName(Call)).empty()) {
+        break;
+      }
+      if (IsMatchingOutputCopy(Call)) {
+        return Call;
+      }
+    }
+  }
+
+  return nullptr;
+}
+
 CallBase *findExternalCallInputWordWriteMarker(BasicBlock &BB,
                                                CallBase &ExternalCall,
                                                Value *InputBase) {
@@ -232,6 +295,24 @@ void insertExternalCallInputCopyWriteMarker(LLVMContext &Ctx,
                       ConstantInt::get(I256, CallKind)});
 }
 
+void insertExternalCallOutputCopyWriteMarker(LLVMContext &Ctx,
+                                             CallBase &ExternalCall,
+                                             CallBase &CopyWrite,
+                                             uint64_t CallKind) {
+  Module *M = ExternalCall.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_output_copy_write",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&CopyWrite);
+  Builder.CreateCall(Marker,
+                     {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(2),
+                      CopyWrite.getArgOperand(3), CopyWrite.getArgOperand(4),
+                      ConstantInt::get(I256, CallKind)});
+}
+
 void insertExternalCallInputWordWriteMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
                                             CallBase &WordWrite,
@@ -319,6 +400,12 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallMemoryConsumerMarker(Ctx, *Call, *Consumer, 2,
                                                CallKind);
         ++NumExternalCallMemoryConsumers;
+      }
+      if (CallBase *CopyWrite = findExternalCallOutputCopyWriteMarker(
+              *Call->getParent(), *Call, Args->OutputBase)) {
+        insertExternalCallOutputCopyWriteMarker(Ctx, *Call, *CopyWrite,
+                                                CallKind);
+        ++NumExternalCallOutputCopyWrites;
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_EXTERNAL_CALL, Kind);

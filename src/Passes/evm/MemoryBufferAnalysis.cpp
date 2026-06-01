@@ -3,6 +3,7 @@
 
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -41,6 +42,17 @@ bool isFreeMemoryPointerLoad(Value *V) {
 }
 
 bool isZero(Value *V) { return detail::isConstantIntValue(V, 0); }
+
+bool valueAvailableAt(Value *V, Instruction &UsePoint, DominatorTree &DT) {
+  auto *Def = dyn_cast_or_null<Instruction>(V);
+  if (Def == nullptr) {
+    return true;
+  }
+  if (Def->getParent() == UsePoint.getParent()) {
+    return Def->comesBefore(&UsePoint);
+  }
+  return DT.dominates(Def, &UsePoint);
+}
 
 bool isMemoryCopyWriteCall(CallBase *Call) {
   return detail::isCallTo(Call, "evm_calldatacopy") ||
@@ -221,7 +233,7 @@ void insertConsumerMarker(LLVMContext &Ctx, const MemoryConsumer &Consumer) {
 
 } // namespace
 
-MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
+MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
   MemoryBufferFacts Facts;
 
   for (Instruction &I : instructions(F)) {
@@ -268,6 +280,9 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
     if (detail::isCallTo(Call, "evm_mstore") && Call->arg_size() == 3) {
       Value *Ptr = Call->getArgOperand(1);
       for (Value *Base : Bases) {
+        if (!valueAvailableAt(Base, *Call, DT)) {
+          continue;
+        }
         std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
         if (!Offset.has_value()) {
           continue;
@@ -285,6 +300,9 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
       Value *Ptr = Call->getArgOperand(1);
       bool MatchedBase = false;
       for (Value *Base : Bases) {
+        if (!valueAvailableAt(Base, *Call, DT)) {
+          continue;
+        }
         std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
         if (!Offset.has_value()) {
           continue;
@@ -314,6 +332,9 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
       }
       bool MatchedBase = false;
       for (Value *Base : Bases) {
+        if (!valueAvailableAt(Base, *Call, DT)) {
+          continue;
+        }
         std::optional<uint64_t> Offset = getOffsetFromBase(Dst, Base);
         if (!Offset.has_value()) {
           continue;
@@ -337,6 +358,9 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
       Value *Dst = Call->getArgOperand(1);
       bool MatchedBase = false;
       for (Value *Base : Bases) {
+        if (!valueAvailableAt(Base, *Call, DT)) {
+          continue;
+        }
         std::optional<uint64_t> Offset = getOffsetFromBase(Dst, Base);
         if (!Offset.has_value()) {
           continue;
@@ -416,9 +440,10 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
 }
 
 PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
-                                               FunctionAnalysisManager &) {
+                                               FunctionAnalysisManager &FAM) {
   LLVMContext &Ctx = F.getContext();
-  MemoryBufferFacts Facts = analyzeMemoryBuffers(F);
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
+  MemoryBufferFacts Facts = analyzeMemoryBuffers(F, DT);
   bool Changed = false;
 
   for (const MemoryAllocation &Alloc : Facts.Allocations) {
