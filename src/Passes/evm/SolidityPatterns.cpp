@@ -2994,6 +2994,7 @@ matchEmptyArrayPop(const NormalizedCondition &FailureCond,
 
 bool isFreeMemoryPointerLoad(Value *V);
 CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
+bool callHasArg(CallBase *Call, Value *Needle);
 
 bool hasMemoryArrayAllocationComputation(BasicBlock *SuccessBlock,
                                          Value *Length) {
@@ -3346,6 +3347,43 @@ bool hasMemoryAllocationHelperCall(BasicBlock *SuccessBlock, Value *Length) {
   return false;
 }
 
+bool hasVoidMemoryAllocationHelperCall(BasicBlock *SuccessBlock, Value *Length) {
+  if (SuccessBlock == nullptr || Length == nullptr) {
+    return false;
+  }
+
+  SmallVector<Value *, 4> HeaderPtrs;
+  for (Instruction &I : *SuccessBlock) {
+    auto *Store = dyn_cast<CallBase>(&I);
+    if (Store != nullptr && isCallTo(Store, "evm_mstore") &&
+        Store->arg_size() == 3 && isSameValue(Store->getArgOperand(2), Length)) {
+      HeaderPtrs.push_back(Store->getArgOperand(1));
+    }
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (!isPrivateHelperCall(Call) || !Call->getType()->isVoidTy()) {
+      continue;
+    }
+
+    bool HasSize = false;
+    for (Value *Arg : Call->args()) {
+      HasSize |= isDynamicAllocationSize(Arg, Length, SuccessBlock);
+    }
+    if (!HasSize) {
+      continue;
+    }
+
+    for (Value *HeaderPtr : HeaderPtrs) {
+      if (callHasArg(Call, HeaderPtr)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool hasMemoryAllocationSizeReturn(BasicBlock *SuccessBlock, Value *Length) {
   if (SuccessBlock == nullptr || Length == nullptr) {
     return false;
@@ -3445,6 +3483,7 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
   if (Shift == nullptr) {
     return hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
            hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
+           hasVoidMemoryAllocationHelperCall(SuccessBlock, Length) ||
            hasMemoryAllocationSizeReturn(SuccessBlock, Length);
   }
 
@@ -3461,6 +3500,7 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
   return hasMemoryArrayAllocationComputation(SuccessBlock, Length) ||
          hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
          hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
+         hasVoidMemoryAllocationHelperCall(SuccessBlock, Length) ||
          hasMemoryAllocationSizeReturn(SuccessBlock, Length);
 }
 
