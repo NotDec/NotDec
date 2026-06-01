@@ -2241,6 +2241,38 @@ BinaryOperator *findCheckedStepResult(BasicBlock *SuccessBlock,
   return Add;
 }
 
+bool matchCleanedUnsignedIncrement(const NormalizedCondition &FailureCond,
+                                   BasicBlock *SuccessBlock,
+                                   BinaryOperator *&Add, Value *&Input,
+                                   Value *&MaxValue) {
+  Add = nullptr;
+  Input = nullptr;
+  MaxValue = nullptr;
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr || FailureCond.Predicate != ICmpInst::ICMP_EQ) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *Cleaned = Cmp->getOperand(I);
+    Value *Max = Cmp->getOperand(1 - I);
+    if (!isPowerOfTwoMinusOne(Max) ||
+        !isUnsignedCleanupToMaxValue(Cleaned, Max)) {
+      continue;
+    }
+
+    auto *One = ConstantInt::get(Cleaned->getType(), 1);
+    Add = findCheckedStepResult(SuccessBlock, Cmp, Cleaned, One);
+    if (Add != nullptr) {
+      Input = Cleaned;
+      MaxValue = Max;
+      return true;
+    }
+  }
+
+  return false;
+}
+
 std::optional<CheckedBoundsMatch>
 matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                        const SolidityRevertMatch &RevertMatch,
@@ -2322,6 +2354,20 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                                 {BoundedOp->getOperand(0),
                                  BoundedOp->getOperand(1), BoundedOp,
                                  DynamicMax},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+    Value *BoundedInput = nullptr;
+    if (matchCleanedUnsignedIncrement(FailureCond, SuccessBlock, BoundedOp,
+                                      BoundedInput, DynamicMax)) {
+      auto *One = ConstantInt::get(BoundedOp->getType(), 1);
+      return CheckedBoundsMatch{"checked_add_bound",
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedInput, One, BoundedOp, DynamicMax},
                                 RevertMatch.PanicCode,
                                 true};
     }
