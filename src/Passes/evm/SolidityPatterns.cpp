@@ -1729,6 +1729,20 @@ Value *findMemoryAllocationShift(BasicBlock *BB, Value *Length) {
   return nullptr;
 }
 
+bool isMemoryAllocationShift(Value *V, Value *Length) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  if (Call != nullptr && isCallTo(Call, "evm_shl") && Call->arg_size() == 2 &&
+      isConstantIntValue(Call->getArgOperand(0), 5) &&
+      isSameValue(Call->getArgOperand(1), Length)) {
+    return true;
+  }
+
+  auto *Shift = dyn_cast_or_null<BinaryOperator>(V);
+  return Shift != nullptr && Shift->getOpcode() == Instruction::Shl &&
+         isSameValue(Shift->getOperand(0), Length) &&
+         isConstantIntValue(Shift->getOperand(1), 5);
+}
+
 Value *matchBitwiseNot(Value *V) {
   auto *Op = dyn_cast_or_null<BinaryOperator>(V);
   if (Op == nullptr || Op->getOpcode() != Instruction::Xor) {
@@ -2487,9 +2501,15 @@ bool isArrayAllocationSize(Value *V, Value *Length, BasicBlock *BB) {
     return false;
   }
   Value *Shift = findMemoryAllocationShift(BB, Length);
-  return Shift != nullptr && binaryOpHasOperand(SizeAdd, Shift) &&
-         (isConstantIntValue(SizeAdd->getOperand(0), 32) ||
-          isConstantIntValue(SizeAdd->getOperand(1), 32));
+  if (Shift != nullptr && binaryOpHasOperand(SizeAdd, Shift) &&
+      (isConstantIntValue(SizeAdd->getOperand(0), 32) ||
+       isConstantIntValue(SizeAdd->getOperand(1), 32))) {
+    return true;
+  }
+  return (isConstantIntValue(SizeAdd->getOperand(0), 32) &&
+          isMemoryAllocationShift(SizeAdd->getOperand(1), Length)) ||
+         (isConstantIntValue(SizeAdd->getOperand(1), 32) &&
+          isMemoryAllocationShift(SizeAdd->getOperand(0), Length));
 }
 
 bool isRoundedByteAllocationSize(Value *V) {

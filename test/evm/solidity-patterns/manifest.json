@@ -1927,6 +1927,48 @@
         "65": 11,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_memory": 26,
+        "memory_allocation_bounds": 10,
+        "checked_add": 2,
+        "panic_assert": 1,
+        "array_bounds_storage": 3,
+        "empty_array_pop_storage": 1,
+        "memory_allocation_pointer_bounds": 1,
+        "storage_bytes_encoding": 1,
+        "checked_sub": 1,
+        "checked_mul": 3,
+        "checked_div": 1,
+        "panic_checked_arithmetic": 2,
+        "checked_exp": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 29,
+        "65": 11,
+        "17": 9,
+        "1": 1,
+        "49": 1,
+        "34": 1,
+        "18": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_memory": 26,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 10,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_array_bounds_storage": 3,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_checked_mul": 3,
+        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_checked_exp": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 2,
+        "unsupported_condition": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 50,
       "expected_returndata_bubbles": 12
     },
     {
@@ -2023,9 +2065,8 @@
       },
       "expected_returndata_bubbles": 9,
       "expected_checked_bounds_kinds": {
-        "memory_allocation_bounds": 6,
+        "memory_allocation_bounds": 7,
         "array_bounds_memory": 54,
-        "panic_resource_error": 1,
         "array_bounds_storage": 3,
         "panic_checked_arithmetic": 2,
         "memory_allocation_pointer_bounds": 2,
@@ -2040,7 +2081,7 @@
         "17": 9
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_memory_allocation_bounds": 6,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 7,
         "notdec_solidity_rewrite_array_bounds_memory": 54,
         "notdec_solidity_rewrite_array_bounds_storage": 3,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2,
@@ -2050,10 +2091,10 @@
         "notdec_solidity_rewrite_checked_exp": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 3,
+        "unrecognized_operands": 2,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 72
+      "expected_checked_bounds_cfg_rewrites": 73
     },
     {
       "name": "1924_19508168_fe1f1c11b0_0b74e6ed0d55",
