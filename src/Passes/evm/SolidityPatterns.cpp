@@ -2478,6 +2478,16 @@ bool isShiftLeft255One(Value *V) {
          isConstantIntValue(Call->getArgOperand(1), 1);
 }
 
+bool isSignedInt256MinValue(Value *V) {
+  if (isShiftLeft255One(V)) {
+    return true;
+  }
+
+  auto *Sub = dyn_cast_or_null<BinaryOperator>(V);
+  return Sub != nullptr && Sub->getOpcode() == Instruction::Sub &&
+         isZero(Sub->getOperand(0)) && isShiftLeft255One(Sub->getOperand(1));
+}
+
 bool isCleanedConstantFalseIncrementOverflowCondition(Value *V) {
   auto *Cmp = dyn_cast_or_null<ICmpInst>(V);
   if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_EQ) {
@@ -2564,6 +2574,78 @@ std::optional<CheckedBoundsMatch> matchCleanedConstantFalseIncrementGuard(
                             {Zero, One, One},
                             RevertMatch.PanicCode,
                             true};
+}
+
+bool matchSignedNegationGuard(const NormalizedCondition &FailureCond,
+                              BasicBlock *SuccessBlock, BinaryOperator *&Sub,
+                              Value *&Input) {
+  Sub = nullptr;
+  Input = nullptr;
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr || FailureCond.Predicate != ICmpInst::ICMP_EQ) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *MaybeInput = Cmp->getOperand(I);
+    if (!isSignedInt256MinValue(Cmp->getOperand(1 - I))) {
+      continue;
+    }
+    Sub = findBinaryOpInBlock(SuccessBlock, Instruction::Sub,
+                              ConstantInt::get(MaybeInput->getType(), 0),
+                              MaybeInput);
+    if (Sub != nullptr) {
+      Input = MaybeInput;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool matchSignedNarrowSubRangeGuard(const NormalizedCondition &FailureCond,
+                                    BinaryOperator *&Sub, Value *&MaxValue) {
+  Sub = nullptr;
+  MaxValue = nullptr;
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr || FailureCond.Predicate != ICmpInst::ICMP_UGE) {
+    return false;
+  }
+
+  Value *MaybeAdd = nullptr;
+  Value *MaybeRange = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE) {
+    MaybeAdd = Cmp->getOperand(0);
+    MaybeRange = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
+    MaybeAdd = Cmp->getOperand(1);
+    MaybeRange = Cmp->getOperand(0);
+  } else {
+    return false;
+  }
+
+  auto *Range = dyn_cast<ConstantInt>(MaybeRange);
+  auto *Add = dyn_cast<BinaryOperator>(MaybeAdd);
+  if (Range == nullptr || Add == nullptr || Add->getOpcode() != Instruction::Add ||
+      !Range->getValue().isPowerOf2()) {
+    return false;
+  }
+
+  auto HalfRange = Range->getValue().lshr(1);
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *Offset = dyn_cast<ConstantInt>(Add->getOperand(I));
+    auto *CandidateSub = dyn_cast<BinaryOperator>(Add->getOperand(1 - I));
+    if (Offset == nullptr || Offset->getValue() != HalfRange ||
+        CandidateSub == nullptr ||
+        CandidateSub->getOpcode() != Instruction::Sub) {
+      continue;
+    }
+
+    Sub = CandidateSub;
+    MaxValue =
+        ConstantInt::get(Range->getType(), HalfRange - 1);
+    return true;
+  }
+  return false;
 }
 
 // Solidity signed add/sub guards can be lowered as a success condition feeding
@@ -2907,6 +2989,30 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
   if (*RevertMatch.PanicCode == 0x11) {
     BinaryOperator *BoundedOp = nullptr;
     ConstantInt *MaxValue = nullptr;
+    Value *NegatedInput = nullptr;
+    if (matchSignedNegationGuard(FailureCond, SuccessBlock, BoundedOp,
+                                 NegatedInput)) {
+      auto *Zero = ConstantInt::get(BoundedOp->getType(), 0);
+      return CheckedBoundsMatch{
+          "checked_sub", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+          {Zero, NegatedInput, BoundedOp}, RevertMatch.PanicCode, true};
+    }
+
+    Value *DynamicMax = nullptr;
+    if (matchSignedNarrowSubRangeGuard(FailureCond, BoundedOp, DynamicMax)) {
+      return CheckedBoundsMatch{"checked_sub_bound",
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedOp->getOperand(0),
+                                 BoundedOp->getOperand(1), BoundedOp,
+                                 DynamicMax},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+
     if (matchSmallUnsignedBoundedResult(FailureCond, BoundedOp, MaxValue)) {
       StringRef Kind = "";
       if (BoundedOp->getOpcode() == Instruction::Add) {
@@ -2929,7 +3035,6 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                                 true};
     }
 
-    Value *DynamicMax = nullptr;
     if (matchUnsignedBoundedResult(FailureCond, Instruction::Add, BoundedOp,
                                    DynamicMax)) {
       return CheckedBoundsMatch{"checked_add_bound",

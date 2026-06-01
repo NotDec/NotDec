@@ -4403,6 +4403,113 @@
       },
       "expected_checked_bounds_cfg_rewrites": 9,
       "expected_returndata_bubbles": 7
+    },
+    {
+      "name": "24562_19760107_e25027c623_f371f33b9104",
+      "input": "cases/24562_19760107_e25027c623_f371f33b9104.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 1,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 2,
+        "notdec.solidity.checked_bounds": 11,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 8,
+        "notdec.solidity.packed_storage_field": 0,
+        "notdec.solidity.payability_guard": 5,
+        "notdec.solidity.revert": 44,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "panic": 11,
+        "empty": 23,
+        "returndata_bubble": 8,
+        "error_string": 2
+      },
+      "expected_panic_codes": {
+        "65": 4,
+        "17": 6,
+        "50": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "memory_allocation_pointer_bounds": 2,
+        "checked_sub": 2,
+        "memory_allocation_bounds": 2,
+        "checked_mul": 3,
+        "array_bounds_memory": 1,
+        "checked_exp": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 4,
+        "17": 6,
+        "50": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2,
+        "notdec_solidity_rewrite_checked_sub": 2,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 2,
+        "notdec_solidity_rewrite_checked_mul": 3,
+        "notdec_solidity_rewrite_array_bounds_memory": 1,
+        "notdec_solidity_rewrite_checked_exp": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 11,
+      "expected_returndata_bubbles": 8
+    },
+    {
+      "name": "24612_19760427_dd0dd0b57c_933311393a34",
+      "input": "cases/24612_19760427_dd0dd0b57c_933311393a34.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 5,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 13,
+        "notdec.solidity.packed_storage_field": 69,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 47,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "error_string": 8,
+        "encoded_candidate": 1,
+        "empty": 22,
+        "panic": 5,
+        "returndata_bubble": 11
+      },
+      "expected_panic_codes": {
+        "17": 4,
+        "18": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "checked_sub_bound": 1,
+        "checked_mul": 1,
+        "checked_div": 1,
+        "checked_sub": 1,
+        "checked_add": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 4,
+        "18": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_sub_bound": 1,
+        "notdec_solidity_rewrite_checked_mul": 1,
+        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_checked_add": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 5,
+      "expected_returndata_bubbles": 11
     }
   ]
 }
