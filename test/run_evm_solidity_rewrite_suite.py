@@ -149,6 +149,28 @@ def main() -> int:
             print(f"[FAIL ] {name}")
             print(f"        log: {log_path}")
 
+    audit_script = project_root / "scripts/audit-checked-bounds.py"
+    if audit_script.exists():
+        audit = run_command(
+            [
+                sys.executable,
+                str(audit_script),
+                str(workdir),
+                "--fail-on-mismatch",
+            ],
+            project_root,
+            env,
+        )
+        audit_log = workdir / "checked-bounds-audit.log"
+        audit_log.write_text(audit.stdout)
+        print(audit.stdout, end="")
+        if audit.returncode == 0:
+            print("[PASS ] checked_bounds_audit")
+        else:
+            failed += 1
+            print("[FAIL ] checked_bounds_audit")
+            print(f"        log: {audit_log}")
+
     print(f"Summary: {passed} passed, {failed} failed")
     return 0 if failed == 0 else 1
 
