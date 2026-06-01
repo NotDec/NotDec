@@ -17,6 +17,8 @@ STATISTIC(NumMemoryAllocations,
           "Number of Solidity memory allocations rewritten");
 STATISTIC(NumMemoryWrites, "Number of Solidity memory writes rewritten");
 STATISTIC(NumMemoryReads, "Number of Solidity memory reads rewritten");
+STATISTIC(NumMemoryArrayByteWrites,
+          "Number of Solidity memory array byte writes rewritten");
 STATISTIC(NumMemoryConsumers,
           "Number of Solidity memory consumers rewritten");
 
@@ -123,6 +125,36 @@ std::optional<uint64_t> getOffsetFromBase(Value *Ptr, Value *Base) {
     return getUInt64Constant(Add->getOperand(1 - I));
   }
   return std::nullopt;
+}
+
+Value *getArrayByteIndexFromPtr(Value *Ptr, Value *ArrayBase) {
+  auto *PtrAdd = dyn_cast_or_null<BinaryOperator>(Ptr);
+  if (PtrAdd == nullptr || PtrAdd->getOpcode() != Instruction::Add) {
+    return nullptr;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    if (!isSameValue(PtrAdd->getOperand(I), ArrayBase)) {
+      continue;
+    }
+
+    Value *DataOffset = PtrAdd->getOperand(1 - I);
+    auto *OffsetAdd = dyn_cast_or_null<BinaryOperator>(DataOffset);
+    if (OffsetAdd != nullptr && OffsetAdd->getOpcode() == Instruction::Add) {
+      for (unsigned J = 0; J < 2; ++J) {
+        if (detail::isConstantIntValue(OffsetAdd->getOperand(J), 32)) {
+          return OffsetAdd->getOperand(1 - J);
+        }
+      }
+    }
+
+    std::optional<uint64_t> ConstantOffset = getUInt64Constant(DataOffset);
+    if (ConstantOffset.has_value() && *ConstantOffset >= 32) {
+      return ConstantInt::get(DataOffset->getType(), *ConstantOffset - 32);
+    }
+  }
+
+  return nullptr;
 }
 
 Value *getAllocationSize(Value *NewPtr, Value *Base) {
@@ -238,6 +270,24 @@ void insertReadMarker(LLVMContext &Ctx, const MemoryRead &Read) {
                               asI256(Builder, Read.Value)});
 }
 
+void insertArrayByteWriteMarker(LLVMContext &Ctx,
+                                const MemoryArrayByteWrite &Write) {
+  if (Write.Store == nullptr || Write.ArrayBase == nullptr ||
+      Write.Index == nullptr || Write.Value == nullptr) {
+    return;
+  }
+  Module *M = Write.Store->getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  Function *Marker = nullptr;
+  getOrDeclareMarker(*M, "notdec_solidity_memory_array_byte_write",
+                     {I256, I256, I256}, Marker);
+
+  IRBuilder<> Builder(Write.Store);
+  Builder.CreateCall(Marker, {asI256(Builder, Write.ArrayBase),
+                              asI256(Builder, Write.Index),
+                              asI256(Builder, Write.Value)});
+}
+
 void insertConsumerMarker(LLVMContext &Ctx, const MemoryConsumer &Consumer) {
   if (Consumer.Call == nullptr || Consumer.Base == nullptr ||
       Consumer.Size == nullptr) {
@@ -347,6 +397,10 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
       for (Value *Base : Bases) {
         if (!valueAvailableAt(Base, *Call, DT)) {
           continue;
+        }
+        if (Value *Index = getArrayByteIndexFromPtr(Ptr, Base)) {
+          Facts.ArrayByteWrites.push_back(MemoryArrayByteWrite{
+              Call, Base, Index, Call->getArgOperand(2)});
         }
         std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
         if (!Offset.has_value()) {
@@ -506,6 +560,12 @@ PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
   for (const MemoryRead &Read : Facts.Reads) {
     insertReadMarker(Ctx, Read);
     ++NumMemoryReads;
+    Changed = true;
+  }
+
+  for (const MemoryArrayByteWrite &Write : Facts.ArrayByteWrites) {
+    insertArrayByteWriteMarker(Ctx, Write);
+    ++NumMemoryArrayByteWrites;
     Changed = true;
   }
 

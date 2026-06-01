@@ -67,6 +67,16 @@ struct MemoryRead {
   llvm::Value *Value = nullptr;
 };
 
+// Byte writes to memory bytes/string arrays use byte offsets after the 32-byte
+// length word. This fact keeps the array base and byte index explicit instead
+// of exposing only the final address passed to mstore8.
+struct MemoryArrayByteWrite {
+  llvm::CallBase *Store = nullptr;
+  llvm::Value *ArrayBase = nullptr;
+  llvm::Value *Index = nullptr;
+  llvm::Value *Value = nullptr;
+};
+
 // A consumer is the operation that gives a memory buffer Solidity meaning.
 // A single base may have several roles, especially external calls that reuse
 // the input base for output or later returndata.
@@ -83,6 +93,7 @@ struct MemoryBufferFacts {
   llvm::SmallVector<MemoryAllocation, 8> Allocations;
   llvm::SmallVector<MemoryWrite, 16> Writes;
   llvm::SmallVector<MemoryRead, 16> Reads;
+  llvm::SmallVector<MemoryArrayByteWrite, 8> ArrayByteWrites;
   llvm::SmallVector<MemoryConsumer, 8> Consumers;
 };
 

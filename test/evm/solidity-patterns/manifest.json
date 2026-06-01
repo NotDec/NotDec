@@ -1254,6 +1254,7 @@
         "notdec_solidity_memory_allocation": 6,
         "notdec_solidity_memory_write": 18,
         "notdec_solidity_memory_byte_write": 3,
+        "notdec_solidity_memory_array_byte_write": 3,
         "notdec_solidity_memory_copy_write": 6,
         "notdec_solidity_memory_consumer": 10,
         "notdec_solidity_event_data_copy_write": 2
