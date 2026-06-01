@@ -2808,9 +2808,63 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
   return std::nullopt;
 }
 
+bool isCalldataArrayIndexScale(Value *V, Value *Index) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  if (Call != nullptr && isCallTo(Call, "evm_shl") && Call->arg_size() == 2) {
+    return isConstantIntValue(Call->getArgOperand(0), 5) &&
+           isSameValue(Call->getArgOperand(1), Index);
+  }
+
+  auto *Op = dyn_cast_or_null<BinaryOperator>(V);
+  if (Op == nullptr) {
+    return false;
+  }
+  if (Op->getOpcode() == Instruction::Shl) {
+    return isSameValue(Op->getOperand(0), Index) &&
+           isConstantIntValue(Op->getOperand(1), 5);
+  }
+  if (Op->getOpcode() == Instruction::Mul) {
+    return (isSameValue(Op->getOperand(0), Index) &&
+            isConstantIntValue(Op->getOperand(1), 32)) ||
+           (isSameValue(Op->getOperand(1), Index) &&
+            isConstantIntValue(Op->getOperand(0), 32));
+  }
+  return false;
+}
+
+bool isCalldataArrayElementOffset(Value *V, Value *Index) {
+  if (isCalldataArrayIndexScale(V, Index)) {
+    return true;
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(V);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+  return isCalldataArrayIndexScale(Add->getOperand(0), Index) ||
+         isCalldataArrayIndexScale(Add->getOperand(1), Index);
+}
+
+bool hasCalldataArrayElementLoad(BasicBlock *SuccessBlock, Value *Index) {
+  if (SuccessBlock == nullptr || Index == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_calldataload") &&
+        Call->arg_size() == 2 &&
+        isCalldataArrayElementOffset(Call->getArgOperand(1), Index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::optional<CheckedBoundsMatch>
 matchArrayBounds(const NormalizedCondition &FailureCond,
-                 const SolidityRevertMatch &RevertMatch) {
+                 const SolidityRevertMatch &RevertMatch,
+                 BasicBlock *SuccessBlock) {
   if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x32) {
     return std::nullopt;
   }
@@ -2849,7 +2903,11 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
   }
 
   if (Kind == "array_bounds_unknown") {
-    return std::nullopt;
+    if (hasCalldataArrayElementLoad(SuccessBlock, Index)) {
+      Kind = "array_bounds_calldata";
+    } else {
+      return std::nullopt;
+    }
   }
 
   return CheckedBoundsMatch{Kind, "", nullptr, nullptr, nullptr,
@@ -4132,7 +4190,8 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
     }
 
     if (std::optional<CheckedBoundsMatch> Bounds =
-            matchArrayBounds(*FailureCond, *RevertMatch)) {
+            matchArrayBounds(*FailureCond, *RevertMatch,
+                             Br->getSuccessor(1 - SuccIdx))) {
       Bounds->Branch = Br;
       Bounds->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       Bounds->FailureBlock = Failure;
