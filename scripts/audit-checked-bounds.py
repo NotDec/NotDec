@@ -10,6 +10,13 @@ from pathlib import Path
 
 
 METADATA_RE = re.compile(r"!(\d+) = !\{!\"([^\"]*)\"\}", re.MULTILINE)
+CPP_MARKER_FUNCTION_RE = re.compile(
+    r"StringRef getCheckedBoundsRewriteMarkerName\(StringRef Kind\) \{(.*?)\n\}",
+    re.DOTALL,
+)
+CPP_MARKER_PAIR_RE = re.compile(
+    r'if \(Kind == "([^"]+)"\) \{\s*return "([^"]+)";\s*\}'
+)
 CFG_REWRITE_RE = re.compile(
     r"br label %[^,\n]+,[^\n]*!notdec\.solidity\.checked_bounds"
 )
@@ -102,6 +109,32 @@ def print_counter(title: str, counts: Counter[str]) -> None:
     print(f"{title}: {sum(counts.values())}")
     for key, value in counts.most_common():
         print(f"  {key}: {value}")
+
+
+def load_cpp_marker_mapping() -> dict[str, str]:
+    source_path = (
+        Path(__file__).resolve().parents[1]
+        / "src/Passes/evm/SolidityPatterns.cpp"
+    )
+    text = source_path.read_text()
+    match = CPP_MARKER_FUNCTION_RE.search(text)
+    if not match:
+        return {}
+    return dict(CPP_MARKER_PAIR_RE.findall(match.group(1)))
+
+
+def print_marker_mapping_mismatch(
+    expected: dict[str, str], actual: dict[str, str]
+) -> None:
+    all_kinds = sorted(set(expected) | set(actual))
+    for kind in all_kinds:
+        expected_marker = expected.get(kind)
+        actual_marker = actual.get(kind)
+        if expected_marker != actual_marker:
+            print(
+                f"  {kind}: python={expected_marker or '<missing>'} "
+                f"cpp={actual_marker or '<missing>'}"
+            )
 
 
 def write_csv_summary(
@@ -205,6 +238,12 @@ def main() -> int:
     marker_total = sum(totals["semantic_markers"].values())
     print(f"rewrite_expected: {rewrite_expected}")
     print(f"rewrite_markers: {marker_total}")
+    cpp_marker_mapping = load_cpp_marker_mapping()
+    cpp_marker_mapping_mismatch = cpp_marker_mapping != KIND_TO_MARKER
+    print(
+        "cpp_marker_mapping: "
+        f"{'mismatch' if cpp_marker_mapping_mismatch else 'matched'}"
+    )
 
     if args.csv:
         write_csv_summary(
@@ -229,6 +268,7 @@ def main() -> int:
         or rewrite_expected != total_cfg_rewrites
         or marker_mismatch
         or totals["unmapped_rewrite_kinds"]
+        or cpp_marker_mapping_mismatch
     ):
         print(
             "ERROR: checked-bounds rewrite mismatch: "
@@ -247,6 +287,9 @@ def main() -> int:
         if totals["unmapped_rewrite_kinds"]:
             for kind, count in totals["unmapped_rewrite_kinds"].most_common():
                 print(f"  unmapped kind {kind}: {count}")
+        if cpp_marker_mapping_mismatch:
+            print("  C++ marker mapping differs from Python audit mapping:")
+            print_marker_mapping_mismatch(KIND_TO_MARKER, cpp_marker_mapping)
         return 1
 
     return 0
