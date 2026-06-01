@@ -17,6 +17,8 @@ using namespace detail;
 STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
 STATISTIC(NumAbiReturnDataWordWrites,
           "Number of Solidity ABI return data word writes found");
+STATISTIC(NumAbiReturnDataCopyWrites,
+          "Number of Solidity ABI return data copy writes found");
 
 namespace {
 
@@ -120,6 +122,41 @@ void collectAbiReturnDataWordWriteMarkers(
   Writes.append(Candidates.begin(), Candidates.end());
 }
 
+void collectAbiReturnDataCopyWriteMarkers(
+    BasicBlock &BB, CallBase &Return, Value *ReturnBase,
+    SmallVectorImpl<CallBase *> &Writes) {
+  SmallVector<CallBase *, 8> Candidates;
+
+  for (Instruction &I : BB) {
+    if (&I == &Return) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      Candidates.clear();
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_copy_write") ||
+        Call->arg_size() != 5 || !isAbiHeadOffset(Call->getArgOperand(1))) {
+      continue;
+    }
+
+    Value *CopyBase = Call->getArgOperand(0);
+    if (CopyBase == ReturnBase ||
+        (isFreeMemoryPointerLoad(CopyBase) &&
+         isFreeMemoryPointerLoad(ReturnBase))) {
+      Candidates.push_back(Call);
+    }
+  }
+
+  Writes.append(Candidates.begin(), Candidates.end());
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -150,6 +187,23 @@ void insertAbiReturnDataWordWriteMarker(LLVMContext &Ctx, CallBase &Return,
                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
+void insertAbiReturnDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Return,
+                                        CallBase &CopyWrite, StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_data_copy_write",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(1),
+                      CopyWrite.getArgOperand(2), CopyWrite.getArgOperand(3),
+                      CopyWrite.getArgOperand(4),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
 } // namespace
 
 PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &) {
@@ -175,6 +229,14 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &) {
       for (CallBase *WordWrite : WordWrites) {
         insertAbiReturnDataWordWriteMarker(Ctx, *Call, *WordWrite, Kind);
         ++NumAbiReturnDataWordWrites;
+      }
+      SmallVector<CallBase *, 8> CopyWrites;
+      collectAbiReturnDataCopyWriteMarkers(*Call->getParent(), *Call,
+                                           Consumer->getArgOperand(0),
+                                           CopyWrites);
+      for (CallBase *CopyWrite : CopyWrites) {
+        insertAbiReturnDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Kind);
+        ++NumAbiReturnDataCopyWrites;
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, Kind);
