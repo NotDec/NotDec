@@ -31,7 +31,7 @@
 
 旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成。
 
-这里的 IR rewrite 先不要求删除原始 `mstore/mload/copy`。第一步可以插入稳定的 semantic call / marker，让后续 pass 读这些 marker 做改写。也就是说，memory pass 的产物必须成为后续 pass 真正消费的 IR 事实，而不是旁路注释。
+这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但这些 marker 必须作为后续 pass 的输入，而不能只是统计点或 oracle。也就是说，memory pass 的产物必须成为后续 pass 真正消费的 IR 事实，而不是旁路注释。
 
 本计划的主线是：
 
@@ -40,6 +40,8 @@
 - `MemoryConsumer` 单独建模，说明 buffer 最后被谁消费。
 - rewrite marker / semantic call 是 pass 之间的接口。
 - metadata 只用于 debug、统计和 oracle，不能作为主要接口。
+
+如果某个识别结果暂时还不能落到 semantic call / marker，或者没有任何后续 pass 读取它，那它只能算候选分析，不能算 memory object pass 的完成项。
 
 其中 `MemoryConsumer` 不能只是 `MemoryAllocation` 或 `MemoryWrite` 的附带字段。return、revert、event log、external call input/output、ABI decode read 都是不同消费点，后续 pass 要靠这些消费点决定怎么改写 IR。
 
@@ -161,7 +163,7 @@
 
 ### 阶段 1：内部数据结构和只读分析
 
-新增内部分析 helper，先由 memory pass 和现有 pass 按需调用。分析本身可以只读，但每个事实都要能对应到后面的 IR rewrite 点，不能停在“统计命中”或“打 metadata”。如果一个事实暂时不能落到 IR marker / semantic call，就先作为候选记录在日志里，不把它当作已实现功能。
+新增内部分析 helper，先由 memory pass 和现有 pass 按需调用。分析本身可以只读，但它不是交付结果；交付结果必须是后续阶段插入或消费的 IR rewrite surface。每个事实都要能对应到后面的 marker / semantic call，不能停在“统计命中”或“打 metadata”。如果一个事实暂时不能落到 IR marker / semantic call，就先作为候选记录在日志里，不把它当作已实现功能。
 
 建议文件：
 
@@ -188,7 +190,7 @@
   - `Value *Base`
   - `Value *Size`
 
-第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。分析结果必须能回答“要在哪里插入 rewrite marker / semantic call、后续 pass 读哪个 IR 事实”，否则不算完成。
+第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。分析结果必须能回答两个问题：“要在哪里插入 rewrite marker / semantic call”和“哪个后续 pass 会读这个 IR 事实”。答不上来就只记为候选，不进入完成标准。
 
 ### 阶段 2：free pointer / allocation 识别
 
@@ -234,7 +236,7 @@
 
 不要恢复旧 `MemoryObjectPass` 那种单纯计数 metadata。memory 相关能力必须写出明确的 IR rewrite surface，让后续 ABI / revert / event / external-call pass 能消费。metadata 可以同步保留，但只用于调试、统计和测试 oracle。实现时要优先保证 marker / semantic call 的语义稳定，metadata 不能作为主要接口。
 
-这一阶段的硬要求是：后续 pass 要能读 IR 里的 marker / semantic call 完成改写。仅仅在原始 `mstore`、`return`、`revert`、`log` 或 `call` 上挂 metadata，不算 IR rewrite，也不算完成。
+这一阶段的硬要求是：后续 pass 要能读 IR 里的 marker / semantic call 完成改写。仅仅在原始 `mstore`、`return`、`revert`、`log` 或 `call` 上挂 metadata，不算 IR rewrite，也不算完成。仅仅插入没人读取的 marker，也只能算 rewrite surface 准备；必须在后续迭代里接入消费者，才算完整闭环。
 
 第一阶段 rewrite 不急着删除原始 `mstore/mload/copy`，先插入稳定的语义 call / marker。后续 pass 必须能直接基于这些 IR marker 工作，而不是重新从低层 EVM memory call 猜一次：
 

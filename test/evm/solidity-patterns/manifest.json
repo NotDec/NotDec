@@ -4158,7 +4158,10 @@
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 9
+      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_storage_scratch_keccak": 29
+      }
     },
     {
       "name": "0175_19493428_d314d380f5_900e60ffbb10",
