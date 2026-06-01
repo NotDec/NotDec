@@ -1999,6 +1999,30 @@ bool matchSmallUnsignedBoundedResult(const NormalizedCondition &FailureCond,
          isUnsignedCleanupToMax(Op->getOperand(1), Max);
 }
 
+BinaryOperator *findCheckedStepResult(BasicBlock *SuccessBlock,
+                                      Instruction *GuardInst, Value *Input,
+                                      Value *Step) {
+  BinaryOperator *Add =
+      findBinaryOpInBlock(SuccessBlock, Instruction::Add, Input, Step);
+  if (Add == nullptr) {
+    Add = findBinaryOpInBlock(SuccessBlock, Instruction::Add, Step, Input);
+  }
+  if (Add != nullptr) {
+    return Add;
+  }
+
+  // Some Solidity helper blocks compute value +/- 1 before the overflow check
+  // and branch to panic afterwards. Accept only the same checked input and the
+  // fixed step constant, so this does not turn arbitrary pre-branch arithmetic
+  // into a checked operation.
+  BasicBlock *GuardBlock = GuardInst == nullptr ? nullptr : GuardInst->getParent();
+  Add = findBinaryOpInBlock(GuardBlock, Instruction::Add, Input, Step);
+  if (Add == nullptr) {
+    Add = findBinaryOpInBlock(GuardBlock, Instruction::Add, Step, Input);
+  }
+  return Add;
+}
+
 std::optional<CheckedBoundsMatch>
 matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                        const SolidityRevertMatch &RevertMatch,
@@ -2070,12 +2094,8 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
       }
       if (MaybeInput != nullptr) {
         auto *One = ConstantInt::get(MaybeInput->getType(), 1);
-        BinaryOperator *Add = findBinaryOpInBlock(
-            SuccessBlock, Instruction::Add, MaybeInput, One);
-        if (Add == nullptr) {
-          Add = findBinaryOpInBlock(SuccessBlock, Instruction::Add, One,
-                                    MaybeInput);
-        }
+        BinaryOperator *Add =
+            findCheckedStepResult(SuccessBlock, Cmp, MaybeInput, One);
         if (Add != nullptr) {
           return CheckedBoundsMatch{
               "checked_add", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
@@ -2092,12 +2112,8 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
       }
       if (MaybeInput != nullptr) {
         auto *MinusOne = ConstantInt::getAllOnesValue(MaybeInput->getType());
-        BinaryOperator *Add = findBinaryOpInBlock(
-            SuccessBlock, Instruction::Add, MaybeInput, MinusOne);
-        if (Add == nullptr) {
-          Add = findBinaryOpInBlock(SuccessBlock, Instruction::Add, MinusOne,
-                                    MaybeInput);
-        }
+        BinaryOperator *Add =
+            findCheckedStepResult(SuccessBlock, Cmp, MaybeInput, MinusOne);
         if (Add != nullptr) {
           auto *One = ConstantInt::get(MaybeInput->getType(), 1);
           return CheckedBoundsMatch{
