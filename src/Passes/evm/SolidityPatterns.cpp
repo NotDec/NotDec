@@ -2866,6 +2866,15 @@ bool isSmallEnumMemberCount(Value *V) {
   return !Count.isZero() && Count.ule(256);
 }
 
+ConstantInt *getEnumMemberCountFromMax(Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr || C->getValue().uge(255)) {
+    return nullptr;
+  }
+
+  return cast<ConstantInt>(ConstantInt::get(C->getType(), C->getValue() + 1));
+}
+
 std::optional<CheckedBoundsMatch>
 matchEnumConversion(const NormalizedCondition &FailureCond,
                     const SolidityRevertMatch &RevertMatch) {
@@ -2886,6 +2895,12 @@ matchEnumConversion(const NormalizedCondition &FailureCond,
   } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
     EnumValue = Cmp->getOperand(1);
     MemberCount = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGT) {
+    EnumValue = Cmp->getOperand(0);
+    MemberCount = getEnumMemberCountFromMax(Cmp->getOperand(1));
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT) {
+    EnumValue = Cmp->getOperand(1);
+    MemberCount = getEnumMemberCountFromMax(Cmp->getOperand(0));
   } else {
     return std::nullopt;
   }
