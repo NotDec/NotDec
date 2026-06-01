@@ -101,7 +101,7 @@
 
 ## 对 NotDec 的启发
 
-1. 名字不要再叫旧的 `MemoryObjectPass`。更准确的是先做 `MemoryBufferAnalysis`，再决定是否加 `MemoryBufferPass` 输出 metadata。
+1. 名字不要再叫旧的 `MemoryObjectPass`。更准确的是先做 `MemoryBufferAnalysis`，再由 pass 写出可被后续 pass 消费的 IR rewrite surface。metadata 只用于调试和 oracle，不是最终产物。
 2. 第一层事实是 allocation：
    - base：`mload(0x40)` 或 `allocate_unbounded()` 返回值。
    - finalize：`mstore(0x40, newPtr)` 或 `finalize_allocation(base, size)` 展开后的等价形状。
@@ -122,7 +122,7 @@
 
 ### 阶段 1：内部数据结构和只读分析
 
-新增内部分析 helper，先不进 pipeline 或只由现有 pass 按需调用。
+新增内部分析 helper，先由 memory pass 和现有 pass 按需调用。分析本身只读，但它必须服务后面的 IR rewrite，不能停在“统计命中”。
 
 建议文件：
 
@@ -149,7 +149,7 @@
   - `Value *Base`
   - `Value *Size`
 
-第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。
+第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。分析结果必须能回答“要在哪里插入 rewrite marker / semantic call”，否则不算完成。
 
 ### 阶段 2：free pointer / allocation 识别
 
@@ -191,15 +191,20 @@
 - `ExternalCallPass`：call input/output buffer，允许 input/output 同 base。
 - `StorageAddressingPass`：只读 scratch `mstore(0, key); mstore(32, slot); sha3(0,64)`，不当作 allocation。
 
-### 阶段 5：metadata / marker
+### 阶段 5：IR rewrite surface
 
-不要恢复旧 `MemoryObjectPass` 那种单纯计数 metadata。只有当分析结果被消费者使用时，再输出：
+不要恢复旧 `MemoryObjectPass` 那种单纯计数 metadata。memory 相关能力必须写出明确的 IR rewrite surface，让后续 ABI / revert / event / external-call pass 能消费。metadata 可以同步保留，但只用于调试、统计和测试 oracle。
 
-- allocation marker：base、size、finalized。
-- buffer role marker：return / revert / event / call_input / call_output / scratch。
-- write marker：offset、source kind。
+第一阶段 rewrite 不急着删除原始 `mstore/mload/copy`，先插入稳定的语义 call / marker：
 
-rewrite 默认先不开，只保留 metadata 和统计。真正删除或隐藏低层 `mstore` 等后 ABI/event/external consumers 稳定后再做。
+- allocation rewrite：表达 base、size、finalized，例如 `notdec_solidity_memory_allocation(base, size)`。
+- buffer role rewrite：表达 return / revert / event / call_input / call_output / scratch。
+- write rewrite：表达 base、offset、source kind，例如常量 offset 的 word write。
+- consumer rewrite：在 `return/revert/log/call` 附近绑定 buffer role，避免后续 pass 重新猜 base / size。
+
+第二阶段再按消费者迁移情况决定是否隐藏或删除低层 `mstore/mload/copy`。只要后续 pass 还依赖低层指令，就只能 hide 不能删。
+
+完成标准里，只有 metadata 没有 rewrite surface 不算完成。
 
 ## 风险
 
@@ -207,6 +212,7 @@ rewrite 默认先不开，只保留 metadata 和统计。真正删除或隐藏�
 - `allocate_unbounded()` 和 `finalize_allocation()` 可能被分开很远，跨块绑定过激会误报。
 - storage sha3 scratch 使用 `mstore(0/32)`，不能误当作 ABI buffer。
 - checked-bounds 已经识别一部分 allocation guard，memory pass 如果重复 rewrite 会打架。
+- rewrite marker 如果设计得太像普通 call，可能影响后续 pattern matcher；插入位置和命名要稳定。
 - 真实 IR 里函数调用、内联 helper、优化后的表达式形状会混合出现，第一版必须保守。
 
 ## 判断标准
@@ -215,6 +221,8 @@ rewrite 默认先不开，只保留 metadata 和统计。真正删除或隐藏�
   - 能识别 free pointer base 和 finalize。
   - 能收集 return/revert buffer 的常量 offset writes。
   - 不把 storage sha3 scratch 当 allocation。
+  - 能插入 memory allocation / buffer role / write / consumer 的 rewrite surface。
+- manifest oracle 不能只看 metadata 数量，要检查对应 rewrite marker。
 - `notdec.evm.solidity_patterns` 继续通过。
 - 对 apehex 当前样例跑 audit，只统计命中和未命中，不因 memory pass 改变既有 checked-bounds / revert 行为。
 - 实现过程中如果涉及 checked-bounds、external-call、event-log 的消费者，分别在对应 `logs/20260522-proj-passes/` 分类下补实现记录。
