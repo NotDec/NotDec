@@ -24,6 +24,8 @@ STATISTIC(NumExternalCallOutputCopyWrites,
           "Number of Solidity external call output copy writes found");
 STATISTIC(NumExternalCallOutputAbiDecodeBuffers,
           "Number of Solidity external call output ABI decode buffers found");
+STATISTIC(NumExternalCallInputAllocations,
+          "Number of Solidity external call input allocations found");
 STATISTIC(NumExternalCallOutputAllocations,
           "Number of Solidity external call output allocations found");
 STATISTIC(NumExternalCallOutputWordReads,
@@ -421,6 +423,52 @@ CallBase *findExternalCallOutputAllocationMarker(BasicBlock &BB,
   return nullptr;
 }
 
+CallBase *findExternalCallInputAllocationMarker(
+    BasicBlock &BB, CallBase &ExternalCall, CallBase *InputCopyWrite,
+    CallBase *InputWordWrite, ArrayRef<CallBase *> InputAbiHeadWrites) {
+  auto MatchesInputDataBase = [&](Value *AllocationBase) {
+    if (InputCopyWrite != nullptr && InputCopyWrite->arg_size() == 5 &&
+        isSameOrReloadedFreeMemoryBase(AllocationBase,
+                                       InputCopyWrite->getArgOperand(0))) {
+      return true;
+    }
+    if (InputWordWrite != nullptr && InputWordWrite->arg_size() == 3 &&
+        isSameOrReloadedFreeMemoryBase(AllocationBase,
+                                       InputWordWrite->getArgOperand(0))) {
+      return true;
+    }
+    for (CallBase *Write : InputAbiHeadWrites) {
+      if (Write->arg_size() == 3 &&
+          isSameOrReloadedFreeMemoryBase(AllocationBase,
+                                         Write->getArgOperand(0))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  CallBase *Candidate = nullptr;
+  for (Instruction &I : BB) {
+    if (&I == &ExternalCall) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_allocation") ||
+        Call->arg_size() != 2) {
+      continue;
+    }
+    if (MatchesInputDataBase(Call->getArgOperand(0))) {
+      Candidate = Call;
+    }
+  }
+
+  return Candidate;
+}
+
 void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
                                             CallBase &Consumer, uint64_t Role,
@@ -518,6 +566,28 @@ void insertExternalCallOutputAllocationMarker(LLVMContext &Ctx,
   Builder.CreateCall(Marker,
                      {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
                       OutputSize, ConstantInt::get(I256, CallKind)});
+}
+
+void insertExternalCallInputAllocationMarker(LLVMContext &Ctx,
+                                             CallBase &ExternalCall,
+                                             CallBase &Allocation,
+                                             Value *InputSize,
+                                             uint64_t CallKind) {
+  if (Allocation.arg_size() != 2 || InputSize == nullptr) {
+    return;
+  }
+
+  Module *M = ExternalCall.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_input_allocation",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&ExternalCall);
+  Builder.CreateCall(Marker,
+                     {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
+                      InputSize, ConstantInt::get(I256, CallKind)});
 }
 
 bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
@@ -625,14 +695,18 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
                                                CallKind);
         ++NumExternalCallMemoryConsumers;
       }
+      CallBase *InputCopyWrite = nullptr;
       if (CallBase *CopyWrite = findExternalCallInputCopyWriteMarker(
               *Call->getParent(), *Call, Args->InputBase)) {
+        InputCopyWrite = CopyWrite;
         insertExternalCallInputCopyWriteMarker(Ctx, *Call, *CopyWrite,
                                                CallKind);
         ++NumExternalCallInputCopyWrites;
       }
+      CallBase *InputWordWrite = nullptr;
       if (CallBase *WordWrite = findExternalCallInputWordWriteMarker(
               *Call->getParent(), *Call, Args->InputBase)) {
+        InputWordWrite = WordWrite;
         insertExternalCallInputWordWriteMarker(Ctx, *Call, *WordWrite,
                                                CallKind);
         ++NumExternalCallInputWordWrites;
@@ -644,6 +718,13 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallInputAbiHeadWriteMarker(Ctx, *Call, *AbiHeadWrite,
                                                   CallKind);
         ++NumExternalCallInputAbiHeadWrites;
+      }
+      if (CallBase *Allocation = findExternalCallInputAllocationMarker(
+              *Call->getParent(), *Call, InputCopyWrite, InputWordWrite,
+              AbiHeadWrites)) {
+        insertExternalCallInputAllocationMarker(Ctx, *Call, *Allocation,
+                                                Args->InputSize, CallKind);
+        ++NumExternalCallInputAllocations;
       }
       if (CallBase *Consumer = findExternalCallConsumerMarker(
               *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,

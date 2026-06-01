@@ -1185,6 +1185,7 @@
         "notdec_solidity_memory_consumer": 73,
         "notdec_solidity_external_call_input_word_write": 6,
         "notdec_solidity_external_call_input_abi_head_write": 10,
+        "notdec_solidity_external_call_input_allocation": 3,
         "notdec_solidity_event_data_word_write": 8,
         "notdec_solidity_abi_return_data_allocation": 3,
         "notdec_solidity_abi_return_data_copy_write": 1
