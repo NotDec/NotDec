@@ -4337,6 +4337,72 @@
         "unrecognized_operands": 0
       },
       "expected_checked_bounds_cfg_rewrites": 17
+    },
+    {
+      "name": "24590_19760322_8a0f96cd7a_ecc07eeb03e3",
+      "input": "cases/24590_19760322_8a0f96cd7a_ecc07eeb03e3.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 10,
+        "notdec.solidity.checked_bounds": 9,
+        "notdec.solidity.event": 11,
+        "notdec.solidity.external_call": 9,
+        "notdec.solidity.packed_storage_field": 58,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 74,
+        "notdec.solidity.storage_addressing": 40
+      },
+      "expected_revert_kinds": {
+        "empty": 23,
+        "custom_error_candidate": 34,
+        "panic": 9,
+        "returndata_bubble": 7,
+        "error_string": 1
+      },
+      "expected_panic_codes": {
+        "17": 3,
+        "33": 1,
+        "49": 1,
+        "50": 2,
+        "34": 1,
+        "65": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "checked_add_bound": 1,
+        "checked_sub_bound": 1,
+        "enum_conversion": 1,
+        "array_bounds_storage": 2,
+        "empty_array_pop_storage": 1,
+        "checked_sub": 1,
+        "storage_bytes_encoding": 1,
+        "storage_byte_array_length_bounds": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 3,
+        "33": 1,
+        "50": 2,
+        "49": 1,
+        "34": 1,
+        "65": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_add_bound": 1,
+        "notdec_solidity_rewrite_checked_sub_bound": 1,
+        "notdec_solidity_rewrite_enum_conversion": 1,
+        "notdec_solidity_rewrite_array_bounds_storage": 2,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_returndata_bubbles": 7
     }
   ]
 }

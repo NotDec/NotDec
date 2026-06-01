@@ -2360,6 +2360,39 @@ BinaryOperator *findCheckedStepResult(BasicBlock *SuccessBlock,
   return Add;
 }
 
+Value *getUnsignedCleanupSource(Value *V, Value *Max) {
+  auto *And = dyn_cast_or_null<BinaryOperator>(V);
+  if (And == nullptr || And->getOpcode() != Instruction::And) {
+    return nullptr;
+  }
+  if (isSameValue(And->getOperand(0), Max)) {
+    return And->getOperand(1);
+  }
+  if (isSameValue(And->getOperand(1), Max)) {
+    return And->getOperand(0);
+  }
+  return nullptr;
+}
+
+BinaryOperator *findCheckedCleanedStepResult(BasicBlock *SuccessBlock,
+                                             Instruction *GuardInst,
+                                             Value *Cleaned, Value *Step,
+                                             Value *Max) {
+  if (BinaryOperator *Add =
+          findCheckedStepResult(SuccessBlock, GuardInst, Cleaned, Step)) {
+    return Add;
+  }
+
+  // Packed fields at offset zero can be guarded as `and(raw, max) == bound`,
+  // then updated as `raw +/- 1` before the later mask writes the field back.
+  // Keep this tied to the exact cleanup source and power-of-two mask.
+  Value *Raw = getUnsignedCleanupSource(Cleaned, Max);
+  if (Raw == nullptr || !isPowerOfTwoMinusOne(Max)) {
+    return nullptr;
+  }
+  return findCheckedStepResult(SuccessBlock, GuardInst, Raw, Step);
+}
+
 bool matchCleanedUnsignedIncrement(const NormalizedCondition &FailureCond,
                                    BasicBlock *SuccessBlock,
                                    BinaryOperator *&Add, Value *&Input,
@@ -2381,7 +2414,52 @@ bool matchCleanedUnsignedIncrement(const NormalizedCondition &FailureCond,
     }
 
     auto *One = ConstantInt::get(Cleaned->getType(), 1);
-    Add = findCheckedStepResult(SuccessBlock, Cmp, Cleaned, One);
+    Add = findCheckedCleanedStepResult(SuccessBlock, Cmp, Cleaned, One, Max);
+    if (Add != nullptr) {
+      Input = Cleaned;
+      MaxValue = Max;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool matchCleanedUnsignedDecrement(const NormalizedCondition &FailureCond,
+                                   BasicBlock *SuccessBlock,
+                                   BinaryOperator *&Add, Value *&Input,
+                                   Value *&MaxValue) {
+  Add = nullptr;
+  Input = nullptr;
+  MaxValue = nullptr;
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr || FailureCond.Predicate != ICmpInst::ICMP_EQ) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *Cleaned = Cmp->getOperand(I);
+    if (!isZero(Cmp->getOperand(1 - I))) {
+      continue;
+    }
+
+    auto *And = dyn_cast_or_null<BinaryOperator>(Cleaned);
+    if (And == nullptr || And->getOpcode() != Instruction::And) {
+      continue;
+    }
+    Value *Max = nullptr;
+    if (isPowerOfTwoMinusOne(And->getOperand(0))) {
+      Max = And->getOperand(0);
+    } else if (isPowerOfTwoMinusOne(And->getOperand(1))) {
+      Max = And->getOperand(1);
+    } else {
+      continue;
+    }
+    if (!isUnsignedCleanupToMaxValue(Cleaned, Max)) {
+      continue;
+    }
+
+    Add = findCheckedCleanedStepResult(SuccessBlock, Cmp, Cleaned, Max, Max);
     if (Add != nullptr) {
       Input = Cleaned;
       MaxValue = Max;
@@ -2914,6 +2992,19 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                                       BoundedInput, DynamicMax)) {
       auto *One = ConstantInt::get(BoundedOp->getType(), 1);
       return CheckedBoundsMatch{"checked_add_bound",
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedInput, One, BoundedOp, DynamicMax},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+    if (matchCleanedUnsignedDecrement(FailureCond, SuccessBlock, BoundedOp,
+                                      BoundedInput, DynamicMax)) {
+      auto *One = ConstantInt::get(BoundedOp->getType(), 1);
+      return CheckedBoundsMatch{"checked_sub_bound",
                                 "",
                                 nullptr,
                                 nullptr,
