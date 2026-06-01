@@ -35,6 +35,33 @@ EVM_ADD_ASSIGN_RE = re.compile(
 )
 PANIC_SELECTOR = 0x4E487B71
 ERROR_SELECTOR = 0x08C379A0
+CHECKED_BOUNDS_KIND_TO_MARKER = {
+    "checked_add": "notdec_solidity_rewrite_checked_add",
+    "checked_sub": "notdec_solidity_rewrite_checked_sub",
+    "checked_mul": "notdec_solidity_rewrite_checked_mul",
+    "checked_add_bound": "notdec_solidity_rewrite_checked_add_bound",
+    "checked_sub_bound": "notdec_solidity_rewrite_checked_sub_bound",
+    "checked_mul_bound": "notdec_solidity_rewrite_checked_mul_bound",
+    "checked_div": "notdec_solidity_rewrite_checked_div",
+    "checked_mod": "notdec_solidity_rewrite_checked_mod",
+    "checked_exp": "notdec_solidity_rewrite_checked_exp",
+    "array_bounds_memory": "notdec_solidity_rewrite_array_bounds_memory",
+    "array_bounds_calldata": "notdec_solidity_rewrite_array_bounds_calldata",
+    "array_bounds_storage": "notdec_solidity_rewrite_array_bounds_storage",
+    "memory_allocation_bounds": "notdec_solidity_rewrite_memory_allocation_bounds",
+    "memory_allocation_pointer_bounds": (
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds"
+    ),
+    "storage_bytes_encoding": "notdec_solidity_rewrite_storage_bytes_encoding",
+    "storage_byte_array_length_bounds": (
+        "notdec_solidity_rewrite_storage_byte_array_length_bounds"
+    ),
+    "storage_array_length_bounds": (
+        "notdec_solidity_rewrite_storage_array_length_bounds"
+    ),
+    "enum_conversion": "notdec_solidity_rewrite_enum_conversion",
+    "empty_array_pop_storage": "notdec_solidity_rewrite_empty_array_pop_storage",
+}
 
 
 def format_command(cmd: list[str]) -> str:
@@ -107,6 +134,32 @@ def run_command(
 
 def write_log(log_path: Path, sections: list[str]) -> None:
     log_path.write_text("\n\n".join(sections) + "\n")
+
+
+def expected_checked_bounds_markers_from_kinds(case: dict) -> dict[str, int]:
+    markers: dict[str, int] = {}
+    for kind, count in case.get("expected_checked_bounds_kinds", {}).items():
+        marker = CHECKED_BOUNDS_KIND_TO_MARKER.get(kind)
+        if marker is None:
+            continue
+        markers[marker] = markers.get(marker, 0) + count
+    return markers
+
+
+def validate_checked_bounds_marker_oracles(manifest: dict) -> list[str]:
+    errors: list[str] = []
+    for case in manifest.get("cases", []):
+        expected_kinds = case.get("expected_checked_bounds_kinds")
+        if not expected_kinds:
+            continue
+        expected_markers = case.get("expected_checked_bounds_semantic_markers", {})
+        derived_markers = expected_checked_bounds_markers_from_kinds(case)
+        if derived_markers != expected_markers:
+            errors.append(
+                f"{case['name']}: expected_checked_bounds_semantic_markers "
+                "does not match expected_checked_bounds_kinds"
+            )
+    return errors
 
 
 def count_nonpayable_functions(path: Path) -> int:
@@ -437,6 +490,12 @@ def main() -> int:
     passed = 0
     failed = 0
     print(f"Running suite: {manifest.get('suite', manifest_path.stem)}")
+
+    manifest_errors = validate_checked_bounds_marker_oracles(manifest)
+    if manifest_errors:
+        for error in manifest_errors:
+            print(f"[FAIL ] checked_bounds_manifest_oracle: {error}")
+        return 1
 
     for case in manifest["cases"]:
         name = case["name"]
