@@ -146,6 +146,7 @@ def write_csv_summary(
     marker_total: int,
     cfg_rewrites: int,
     rewrite_expected: int,
+    cpp_marker_mapping: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
@@ -158,6 +159,7 @@ def write_csv_summary(
                 "semantic_marker_total",
                 "cfg_rewrites",
                 "rewrite_expected",
+                "cpp_marker_mapping",
             ],
         )
         writer.writeheader()
@@ -169,6 +171,7 @@ def write_csv_summary(
                 "semantic_marker_total": marker_total,
                 "cfg_rewrites": cfg_rewrites,
                 "rewrite_expected": rewrite_expected,
+                "cpp_marker_mapping": cpp_marker_mapping,
             }
         )
 
@@ -254,6 +257,9 @@ def main() -> int:
             marker_total=marker_total,
             cfg_rewrites=total_cfg_rewrites,
             rewrite_expected=rewrite_expected,
+            cpp_marker_mapping=(
+                "mismatch" if cpp_marker_mapping_mismatch else "matched"
+            ),
         )
 
     if args.list_skips and skipped_files:
