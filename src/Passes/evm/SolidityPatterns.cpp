@@ -3118,7 +3118,14 @@ bool hasCalldataArrayElementLoad(BasicBlock *SuccessBlock, Value *Index) {
 
 bool isMemoryArrayIndexScale(Value *V, Value *Index) {
   auto *Op = dyn_cast_or_null<BinaryOperator>(V);
-  if (Op == nullptr || Op->getOpcode() != Instruction::Mul) {
+  if (Op == nullptr) {
+    return false;
+  }
+  if (Op->getOpcode() == Instruction::Shl) {
+    return isSameValue(Op->getOperand(0), Index) &&
+           isConstantIntValue(Op->getOperand(1), 5);
+  }
+  if (Op->getOpcode() != Instruction::Mul) {
     return false;
   }
 

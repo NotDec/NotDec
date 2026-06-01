@@ -4280,6 +4280,63 @@
       },
       "expected_checked_bounds_cfg_rewrites": 9,
       "expected_returndata_bubbles": 8
+    },
+    {
+      "name": "24601_19760411_36f7edebdb_cd389ea0a4e2",
+      "input": "cases/24601_19760411_36f7edebdb_cd389ea0a4e2.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 26,
+        "notdec.solidity.checked_bounds": 17,
+        "notdec.solidity.event": 17,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 29,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 61,
+        "notdec.solidity.storage_addressing": 34
+      },
+      "expected_revert_kinds": {
+        "empty": 42,
+        "panic": 17,
+        "custom_error_candidate": 2
+      },
+      "expected_panic_codes": {
+        "17": 1,
+        "34": 1,
+        "50": 8,
+        "65": 7
+      },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_calldata": 1,
+        "array_bounds_memory": 7,
+        "checked_add": 1,
+        "memory_allocation_bounds": 5,
+        "memory_allocation_pointer_bounds": 1,
+        "storage_byte_array_length_bounds": 1,
+        "storage_bytes_encoding": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 1,
+        "34": 1,
+        "50": 8,
+        "65": 7
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_calldata": 1,
+        "notdec_solidity_rewrite_array_bounds_memory": 7,
+        "notdec_solidity_rewrite_checked_add": 1,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 5,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
+        "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 17
     }
   ]
 }
