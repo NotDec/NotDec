@@ -2997,6 +2997,76 @@ bool hasCalldataArrayElementLoad(BasicBlock *SuccessBlock, Value *Index) {
   return false;
 }
 
+bool isMemoryArrayIndexScale(Value *V, Value *Index) {
+  auto *Op = dyn_cast_or_null<BinaryOperator>(V);
+  if (Op == nullptr || Op->getOpcode() != Instruction::Mul) {
+    return false;
+  }
+
+  ConstantInt *Scale = nullptr;
+  if (isSameValue(Op->getOperand(0), Index)) {
+    Scale = dyn_cast<ConstantInt>(Op->getOperand(1));
+  } else if (isSameValue(Op->getOperand(1), Index)) {
+    Scale = dyn_cast<ConstantInt>(Op->getOperand(0));
+  }
+  if (Scale == nullptr) {
+    return false;
+  }
+
+  const APInt &ScaleValue = Scale->getValue();
+  return ScaleValue.uge(32) && ScaleValue.urem(32) == 0;
+}
+
+bool valueUsesMemoryArrayIndexScale(Value *V, Value *Scale, unsigned Depth,
+                                    SmallPtrSetImpl<Value *> &Seen) {
+  if (V == nullptr || Scale == nullptr || Depth == 0 ||
+      !Seen.insert(V).second) {
+    return false;
+  }
+  if (isSameValue(V, Scale)) {
+    return true;
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(V);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+  return valueUsesMemoryArrayIndexScale(Add->getOperand(0), Scale, Depth - 1,
+                                        Seen) ||
+         valueUsesMemoryArrayIndexScale(Add->getOperand(1), Scale, Depth - 1,
+                                        Seen);
+}
+
+bool valueUsesMemoryArrayIndexScale(Value *V, Value *Scale) {
+  SmallPtrSet<Value *, 8> Seen;
+  return valueUsesMemoryArrayIndexScale(V, Scale, 4, Seen);
+}
+
+bool hasMemoryArrayElementAccess(BasicBlock *SuccessBlock, Value *Index) {
+  if (SuccessBlock == nullptr || Index == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    if (!isMemoryArrayIndexScale(&I, Index)) {
+      continue;
+    }
+
+    for (Instruction &UseI : *SuccessBlock) {
+      auto *Call = dyn_cast<CallBase>(&UseI);
+      if (Call == nullptr) {
+        continue;
+      }
+      for (Value *Arg : Call->args()) {
+        if (valueUsesMemoryArrayIndexScale(Arg, &I)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 std::optional<CheckedBoundsMatch>
 matchArrayBounds(const NormalizedCondition &FailureCond,
                  const SolidityRevertMatch &RevertMatch,
@@ -3041,6 +3111,8 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
   if (Kind == "array_bounds_unknown") {
     if (hasCalldataArrayElementLoad(SuccessBlock, Index)) {
       Kind = "array_bounds_calldata";
+    } else if (hasMemoryArrayElementAccess(SuccessBlock, Index)) {
+      Kind = "array_bounds_memory";
     } else {
       return std::nullopt;
     }
