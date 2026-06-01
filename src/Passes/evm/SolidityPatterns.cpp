@@ -289,6 +289,52 @@ bool isUnsignedCleanupToMax(Value *V, const APInt &Max) {
          isConstantEqual(And->getOperand(1), Max);
 }
 
+bool isPowerOfTwoMinusOne(Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C != nullptr) {
+    APInt Limit = C->getValue() + 1;
+    return Limit.isPowerOf2() && Limit.ugt(1) &&
+           Limit.getActiveBits() < C->getBitWidth();
+  }
+
+  auto *Add = dyn_cast_or_null<BinaryOperator>(V);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  Value *MaybeShift = nullptr;
+  auto *LHS = dyn_cast<ConstantInt>(Add->getOperand(0));
+  auto *RHS = dyn_cast<ConstantInt>(Add->getOperand(1));
+  if (LHS != nullptr && LHS->isMinusOne()) {
+    MaybeShift = Add->getOperand(1);
+  } else if (RHS != nullptr && RHS->isMinusOne()) {
+    MaybeShift = Add->getOperand(0);
+  }
+
+  auto *Shift = dyn_cast_or_null<CallBase>(MaybeShift);
+  if (Shift == nullptr || !isCallTo(Shift, "evm_shl") ||
+      Shift->arg_size() != 2 ||
+      !isConstantIntValue(Shift->getArgOperand(1), 1)) {
+    return false;
+  }
+  auto *Bits = dyn_cast<ConstantInt>(Shift->getArgOperand(0));
+  return Bits != nullptr && Bits->getValue().ugt(1) &&
+         Bits->getValue().ult(256);
+}
+
+bool isUnsignedCleanupToMaxValue(Value *V, Value *Max) {
+  if (V == nullptr || Max == nullptr) {
+    return false;
+  }
+  if (auto *MaxConst = dyn_cast<ConstantInt>(Max)) {
+    return isUnsignedCleanupToMax(V, MaxConst->getValue());
+  }
+
+  auto *And = dyn_cast_or_null<BinaryOperator>(V);
+  return And != nullptr && And->getOpcode() == Instruction::And &&
+         (And->getOperand(0) == Max || And->getOperand(1) == Max);
+}
+
 StringRef getCalleeName(const Value *V) {
   if (V == nullptr) {
     return "";
@@ -2013,6 +2059,72 @@ bool matchSmallUnsignedBoundedResult(const NormalizedCondition &FailureCond,
          isUnsignedCleanupToMax(Op->getOperand(1), Max);
 }
 
+bool matchUnsignedBoundedResult(Value *Result, Value *Max,
+                                Instruction::BinaryOps Opcode,
+                                BinaryOperator *&Op) {
+  Op = dyn_cast_or_null<BinaryOperator>(Result);
+  if (Op == nullptr || Op->getOpcode() != Opcode ||
+      !isPowerOfTwoMinusOne(Max)) {
+    return false;
+  }
+  return isUnsignedCleanupToMaxValue(Op->getOperand(0), Max) &&
+         isUnsignedCleanupToMaxValue(Op->getOperand(1), Max);
+}
+
+bool matchUnsignedBoundedResult(const NormalizedCondition &FailureCond,
+                                Instruction::BinaryOps Opcode,
+                                BinaryOperator *&Op, Value *&MaxValue) {
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return false;
+  }
+
+  Value *Result = nullptr;
+  Value *Max = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGT) {
+    Result = Cmp->getOperand(0);
+    Max = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT) {
+    Result = Cmp->getOperand(1);
+    Max = Cmp->getOperand(0);
+  } else {
+    return false;
+  }
+
+  if (!matchUnsignedBoundedResult(Result, Max, Opcode, Op)) {
+    return false;
+  }
+  MaxValue = Max;
+  return true;
+}
+
+bool matchUnsignedBoundedMulCleanup(const NormalizedCondition &FailureCond,
+                                    BinaryOperator *&Mul, Value *&MaxValue) {
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr || FailureCond.Predicate != ICmpInst::ICMP_NE) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *CandidateMul = dyn_cast<BinaryOperator>(Cmp->getOperand(I));
+    auto *Cleanup = dyn_cast<BinaryOperator>(Cmp->getOperand(1 - I));
+    if (CandidateMul == nullptr || CandidateMul->getOpcode() != Instruction::Mul ||
+        Cleanup == nullptr || Cleanup->getOpcode() != Instruction::And ||
+        !binaryOpHasOperand(Cleanup, CandidateMul)) {
+      continue;
+    }
+
+    Value *Max = Cleanup->getOperand(0) == CandidateMul
+                     ? Cleanup->getOperand(1)
+                     : Cleanup->getOperand(0);
+    if (matchUnsignedBoundedResult(CandidateMul, Max, Instruction::Mul, Mul)) {
+      MaxValue = Max;
+      return true;
+    }
+  }
+  return false;
+}
+
 BinaryOperator *findCheckedStepResult(BasicBlock *SuccessBlock,
                                       Instruction *GuardInst, Value *Input,
                                       Value *Step) {
@@ -2075,6 +2187,49 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                                 {BoundedOp->getOperand(0),
                                  BoundedOp->getOperand(1), BoundedOp,
                                  MaxValue},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+
+    Value *DynamicMax = nullptr;
+    if (matchUnsignedBoundedResult(FailureCond, Instruction::Add, BoundedOp,
+                                   DynamicMax)) {
+      return CheckedBoundsMatch{"checked_add_bound",
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedOp->getOperand(0),
+                                 BoundedOp->getOperand(1), BoundedOp,
+                                 DynamicMax},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+    if (matchUnsignedBoundedResult(FailureCond, Instruction::Sub, BoundedOp,
+                                   DynamicMax)) {
+      return CheckedBoundsMatch{"checked_sub_bound",
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedOp->getOperand(0),
+                                 BoundedOp->getOperand(1), BoundedOp,
+                                 DynamicMax},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+    if (matchUnsignedBoundedMulCleanup(FailureCond, BoundedOp, DynamicMax)) {
+      return CheckedBoundsMatch{"checked_mul_bound",
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedOp->getOperand(0),
+                                 BoundedOp->getOperand(1), BoundedOp,
+                                 DynamicMax},
                                 RevertMatch.PanicCode,
                                 true};
     }
