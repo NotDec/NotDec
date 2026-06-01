@@ -16,6 +16,8 @@ using namespace detail;
 STATISTIC(NumExternalCalls, "Number of Solidity external calls found");
 STATISTIC(NumExternalCallMemoryConsumers,
           "Number of Solidity external call memory consumers found");
+STATISTIC(NumExternalCallInputCopyWrites,
+          "Number of Solidity external call input copy writes found");
 
 namespace {
 
@@ -43,6 +45,18 @@ std::optional<ExternalCallMemoryArgs> getExternalCallMemoryArgs(CallBase *Call) 
                                   Call->getArgOperand(8)};
   }
   return std::nullopt;
+}
+
+bool isFreeMemoryPointerLoad(Value *V) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  return Call != nullptr && isCallTo(Call, "evm_mload") &&
+         Call->arg_size() == 2 &&
+         isConstantIntValue(Call->getArgOperand(1), 64);
+}
+
+bool isFreeMemoryPointerStore(CallBase *Call) {
+  return isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
+         isConstantIntValue(Call->getArgOperand(1), 64);
 }
 
 uint64_t getExternalCallKindCode(StringRef Kind) {
@@ -82,6 +96,46 @@ CallBase *findExternalCallConsumerMarker(BasicBlock &BB, CallBase &ExternalCall,
   return nullptr;
 }
 
+CallBase *findExternalCallInputCopyWriteMarker(BasicBlock &BB,
+                                               CallBase &ExternalCall,
+                                               Value *InputBase) {
+  CallBase *Candidate = nullptr;
+
+  for (Instruction &I : BB) {
+    if (&I == &ExternalCall) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      Candidate = nullptr;
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_copy_write") ||
+        Call->arg_size() != 5 ||
+        !isConstantIntValue(Call->getArgOperand(1), 0)) {
+      continue;
+    }
+
+    Value *CopyBase = Call->getArgOperand(0);
+    if (CopyBase == InputBase) {
+      Candidate = Call;
+      continue;
+    }
+
+    if (isFreeMemoryPointerLoad(CopyBase) &&
+        isFreeMemoryPointerLoad(InputBase)) {
+      Candidate = Call;
+    }
+  }
+
+  return Candidate;
+}
+
 void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
                                             CallBase &Consumer, uint64_t Role,
@@ -97,6 +151,24 @@ void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
   Builder.CreateCall(Marker,
                      {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
                       ConstantInt::get(I256, Role),
+                      ConstantInt::get(I256, CallKind)});
+}
+
+void insertExternalCallInputCopyWriteMarker(LLVMContext &Ctx,
+                                            CallBase &ExternalCall,
+                                            CallBase &CopyWrite,
+                                            uint64_t CallKind) {
+  Module *M = ExternalCall.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_input_copy_write",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&ExternalCall);
+  Builder.CreateCall(Marker,
+                     {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(2),
+                      CopyWrite.getArgOperand(3), CopyWrite.getArgOperand(4),
                       ConstantInt::get(I256, CallKind)});
 }
 
@@ -124,6 +196,12 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallMemoryConsumerMarker(Ctx, *Call, *Consumer, 1,
                                                CallKind);
         ++NumExternalCallMemoryConsumers;
+      }
+      if (CallBase *CopyWrite = findExternalCallInputCopyWriteMarker(
+              *Call->getParent(), *Call, Args->InputBase)) {
+        insertExternalCallInputCopyWriteMarker(Ctx, *Call, *CopyWrite,
+                                               CallKind);
+        ++NumExternalCallInputCopyWrites;
       }
       if (CallBase *Consumer = findExternalCallConsumerMarker(
               *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
