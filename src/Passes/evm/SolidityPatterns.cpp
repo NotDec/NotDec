@@ -3918,6 +3918,22 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   return "";
 }
 
+bool checkedBoundsValueAvailableAtBranch(Value *V, BranchInst *Branch,
+                                         DominatorTree &DT) {
+  auto *Inst = dyn_cast_or_null<Instruction>(V);
+  return Inst == nullptr || DT.dominates(Inst, Branch);
+}
+
+bool canRematerializeCheckedBoundsOperand(Value *V, BranchInst *Branch,
+                                          DominatorTree &DT) {
+  auto *BinOp = dyn_cast_or_null<BinaryOperator>(V);
+  if (BinOp == nullptr || BinOp->getOpcode() != Instruction::And) {
+    return false;
+  }
+  return checkedBoundsValueAvailableAtBranch(BinOp->getOperand(0), Branch, DT) &&
+         checkedBoundsValueAvailableAtBranch(BinOp->getOperand(1), Branch, DT);
+}
+
 bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
                                          DominatorTree &DT) {
   if (!Match.Rewrite || Match.Branch == nullptr) {
@@ -3928,8 +3944,7 @@ bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
   }
 
   for (Value *Operand : Match.Operands) {
-    auto *Inst = dyn_cast_or_null<Instruction>(Operand);
-    if (Inst == nullptr || DT.dominates(Inst, Match.Branch)) {
+    if (checkedBoundsValueAvailableAtBranch(Operand, Match.Branch, DT)) {
       continue;
     }
     if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
@@ -3943,6 +3958,10 @@ bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
          Match.Kind == "checked_sub_bound" ||
          Match.Kind == "checked_mul_bound") &&
         Match.Operands.size() == 4 && Operand == Match.Operands[2]) {
+      continue;
+    }
+    if ((Match.Kind == "checked_div" || Match.Kind == "checked_mod") &&
+        canRematerializeCheckedBoundsOperand(Operand, Match.Branch, DT)) {
       continue;
     }
     return false;
@@ -3972,6 +3991,16 @@ void insertCheckedBoundsSemanticMarker(LLVMContext &Ctx,
   IRBuilder<> Builder(Match.Branch);
   SmallVector<Value *, 3> Operands(Match.Operands.begin(),
                                    Match.Operands.end());
+  if (Match.Kind == "checked_div" || Match.Kind == "checked_mod") {
+    for (Value *&Operand : Operands) {
+      auto *BinOp = dyn_cast_or_null<BinaryOperator>(Operand);
+      if (BinOp != nullptr && BinOp->getParent() != Match.Branch->getParent() &&
+          BinOp->getOpcode() == Instruction::And) {
+        Operand = Builder.CreateAnd(BinOp->getOperand(0), BinOp->getOperand(1),
+                                    BinOp->getName() + ".rewrite");
+      }
+    }
+  }
   if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
        Match.Kind == "checked_mul" || Match.Kind == "checked_add_bound" ||
        Match.Kind == "checked_sub_bound" ||

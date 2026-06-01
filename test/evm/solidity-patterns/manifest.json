@@ -1745,7 +1745,7 @@
         "notdec_solidity_rewrite_array_bounds_memory": 28,
         "notdec_solidity_rewrite_array_bounds_storage": 9,
         "notdec_solidity_rewrite_checked_add": 2,
-        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_checked_div": 2,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_checked_mul_bound": 1,
         "notdec_solidity_rewrite_checked_sub": 1,
@@ -1753,10 +1753,8 @@
         "notdec_solidity_rewrite_memory_allocation_bounds": 4,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
       },
-      "expected_checked_bounds_skip_reasons": {
-        "operand_not_available_at_guard": 1
-      },
-      "expected_checked_bounds_cfg_rewrites": 52
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 53
     },
     {
       "name": "0679_19497465_c2187cbc73_f22fac5262f8",
