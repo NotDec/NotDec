@@ -19,6 +19,8 @@ STATISTIC(NumEventMemoryConsumers,
           "Number of Solidity event memory consumers found");
 STATISTIC(NumEventDataWordWrites,
           "Number of Solidity event data word writes found");
+STATISTIC(NumEventDataCopyWrites,
+          "Number of Solidity event data copy writes found");
 
 namespace {
 
@@ -103,6 +105,42 @@ void collectEventDataWordWriteMarkers(BasicBlock &BB, CallBase &Log,
   Writes.append(Candidates.begin(), Candidates.end());
 }
 
+void collectEventDataCopyWriteMarkers(BasicBlock &BB, CallBase &Log,
+                                      Value *DataBase,
+                                      SmallVectorImpl<CallBase *> &Writes) {
+  SmallVector<CallBase *, 8> Candidates;
+
+  for (Instruction &I : BB) {
+    if (&I == &Log) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      Candidates.clear();
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_copy_write") ||
+        Call->arg_size() != 5 ||
+        !isEventAbiHeadOffset(Call->getArgOperand(1))) {
+      continue;
+    }
+
+    Value *CopyBase = Call->getArgOperand(0);
+    if (CopyBase == DataBase ||
+        (isFreeMemoryPointerLoad(CopyBase) &&
+         isFreeMemoryPointerLoad(DataBase))) {
+      Candidates.push_back(Call);
+    }
+  }
+
+  Writes.append(Candidates.begin(), Candidates.end());
+}
+
 void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
                                      CallBase &Consumer,
                                      uint64_t TopicCount) {
@@ -135,6 +173,24 @@ void insertEventDataWordWriteMarker(LLVMContext &Ctx, CallBase &Log,
                       ConstantInt::get(I256, TopicCount)});
 }
 
+void insertEventDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Log,
+                                    CallBase &CopyWrite,
+                                    uint64_t TopicCount) {
+  Module *M = Log.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_event_data_copy_write",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Log);
+  Builder.CreateCall(Marker,
+                     {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(1),
+                      CopyWrite.getArgOperand(2), CopyWrite.getArgOperand(3),
+                      CopyWrite.getArgOperand(4),
+                      ConstantInt::get(I256, TopicCount)});
+}
+
 } // namespace
 
 PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
@@ -164,6 +220,13 @@ PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
       for (CallBase *WordWrite : WordWrites) {
         insertEventDataWordWriteMarker(Ctx, *Call, *WordWrite, TopicCount);
         ++NumEventDataWordWrites;
+      }
+      SmallVector<CallBase *, 8> CopyWrites;
+      collectEventDataCopyWriteMarkers(*Call->getParent(), *Call,
+                                       Consumer->getArgOperand(0), CopyWrites);
+      for (CallBase *CopyWrite : CopyWrites) {
+        insertEventDataCopyWriteMarker(Ctx, *Call, *CopyWrite, TopicCount);
+        ++NumEventDataCopyWrites;
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_EVENT,
