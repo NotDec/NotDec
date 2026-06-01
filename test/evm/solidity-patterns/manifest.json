@@ -979,6 +979,7 @@
       },
       "expected_returndata_bubbles": 2,
       "expected_memory_rewrite_markers": {
+        "notdec_solidity_abi_return_memory_consumer": 1,
         "notdec_solidity_memory_copy_write": 2,
         "notdec_solidity_memory_consumer": 10
       },
