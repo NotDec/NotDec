@@ -32,7 +32,7 @@
 
 旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成，插入没人读取的 marker 也不算真正完成。
 
-这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但这些 marker 必须作为后续 pass 的输入，而不能只是统计点或 oracle。也就是说，memory pass 的产物必须成为后续 pass 真正消费的 IR 事实，而不是旁路注释。后续 pass 如果仍然完全重新扫描原始 `mstore/revert/return/log/call` 来猜语义，这一轮就还没把 memory object 接进主流程。
+这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求立刻删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但 marker 只是中间接口，不是最终结果。后续 pass 必须读取这些 marker，并把 ABI return、revert、event、external call 等低层 memory 用法改写成更高层的语义 call，或者在确认安全后隐藏 / 删除对应的低层指令。只插 marker、不被消费者读取，不能算完成；消费者仍然完全重新扫描原始 `mstore/revert/return/log/call` 来猜语义，也不能算完成。
 
 本计划的主线是：
 
@@ -141,19 +141,19 @@
 
 ## 实现规划
 
-整体路线是先插入保守的 semantic call / marker，再逐步迁移消费者。不要一开始删除低层 EVM memory 指令。等 ABI return、revert、event、external call 等消费者已经稳定读取 marker 后，再判断哪些低层指令可以隐藏或删除。
+整体路线是先插入保守的 semantic call / marker，再逐步迁移消费者。不要一开始删除低层 EVM memory 指令。等 ABI return、revert、event、external call 等消费者已经稳定读取 marker，并产出对应的高层语义 call 后，再判断哪些低层指令可以隐藏或删除。
 
 ### IR rewrite 硬约束
 
 这组 pass 的完成标准不是“识别到了 memory 形状”，而是“把 memory 形状改写成后续 pass 能消费的 IR 事实”。metadata 可以保留，但只能辅助 debug、统计和 oracle，不能作为功能完成的依据。
 
-每一轮实现至少要满足下面三点之一：
+每一轮实现如果要算作 memory object pass 的实质推进，至少要满足下面三点之一：
 
 - 新增一个明确的 memory semantic call / marker。
 - 让一个后续 pass 改成读取已有 memory marker，而不是重新猜原始 EVM memory 形状。
 - 补齐一个已有 marker 的语义，使它能被后续 pass 稳定消费。
 
-反过来，如果一轮只是在 `mstore`、`mload`、`return`、`revert`、`log`、`call` 上补 metadata，而没有新增或消费 rewrite marker，这轮只能算分析准备，不能算完成 memory object pass 的实质实现。
+但完整闭环要同时满足两件事：memory pass 写出稳定 IR 事实，消费者 pass 读取这个事实并产生更高层语义改写。反过来，如果一轮只是在 `mstore`、`mload`、`return`、`revert`、`log`、`call` 上补 metadata，而没有新增或消费 rewrite marker，这轮只能算分析准备，不能算完成 memory object pass 的实质实现。只新增没人读取的 marker，也只能算 rewrite surface 准备，不能算完整功能。
 
 每个主要消费者都要有对应的 IR 落点：
 
@@ -239,7 +239,7 @@
 
 不要恢复旧 `MemoryObjectPass` 那种单纯计数 metadata。memory 相关能力必须写出明确的 IR rewrite surface，让后续 ABI / revert / event / external-call pass 能消费。metadata 可以同步保留，但只用于调试、统计和测试 oracle。实现时要优先保证 marker / semantic call 的语义稳定，metadata 不能作为主要接口。
 
-这一阶段的硬要求是：后续 pass 要能读 IR 里的 marker / semantic call 完成改写。仅仅在原始 `mstore`、`return`、`revert`、`log` 或 `call` 上挂 metadata，不算 IR rewrite，也不算完成。仅仅插入没人读取的 marker，也只能算 rewrite surface 准备；必须在后续迭代里接入消费者，才算完整闭环。
+这一阶段的硬要求是：后续 pass 要能读 IR 里的 marker / semantic call 完成改写。仅仅在原始 `mstore`、`return`、`revert`、`log` 或 `call` 上挂 metadata，不算 IR rewrite，也不算完成。仅仅插入没人读取的 marker，也只能算 rewrite surface 准备；必须在后续迭代里接入消费者，并产出 ABI return / revert / event / external call 级别的语义 call，才算完整闭环。
 
 建议按这个闭环推进：
 
@@ -255,7 +255,7 @@
 - write rewrite：表达 base、offset、source kind，例如常量 offset 的 word write。
 - consumer rewrite：在 `return/revert/log/call` 附近绑定 buffer role，避免后续 pass 重新猜 base / size。
 
-第二阶段再按消费者迁移情况决定是否隐藏或删除低层 `mstore/mload/copy`。只要后续 pass 还依赖低层指令，就只能 hide 不能删。
+第二阶段再按消费者迁移情况决定是否隐藏或删除低层 `mstore/mload/copy`。只要后续 pass 还依赖低层指令，就只能 hide 不能删。最终目标不是“IR 上多一些标注 call”，而是让反编译主流程尽量基于高层语义 call 工作，低层 memory 指令只作为保守 fallback 或调试证据存在。
 
 完成标准里，只有 metadata 没有 rewrite surface 不算完成；有 marker 但后续 pass 仍完全绕过 marker、继续猜原始 memory 形状，也不算完成。每个主要消费者迁移后，都要留下一个 proof marker 或语义 call，证明它确实读到了 memory rewrite 结果。
 
