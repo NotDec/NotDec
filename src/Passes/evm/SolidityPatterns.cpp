@@ -4004,6 +4004,21 @@ bool isRoundedMemoryAllocationSize(Value *V) {
           isConstantIntValue(Add->getOperand(1), 31));
 }
 
+bool isRoundedMemoryAllocationSizeFromBase(Value *RoundedSize,
+                                           Value *RoundedBase) {
+  auto *And = dyn_cast_or_null<BinaryOperator>(RoundedSize);
+  if (And == nullptr || And->getOpcode() != Instruction::And) {
+    return false;
+  }
+  if (isMaskClearingLowFiveBits(And->getOperand(0))) {
+    return isSameValue(And->getOperand(1), RoundedBase);
+  }
+  if (isMaskClearingLowFiveBits(And->getOperand(1))) {
+    return isSameValue(And->getOperand(0), RoundedBase);
+  }
+  return false;
+}
+
 bool hasPowerOfTwoExpComputation(BasicBlock *SuccessBlock, Value *Exponent) {
   if (SuccessBlock == nullptr || Exponent == nullptr) {
     return false;
@@ -5105,6 +5120,7 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   Value *NoWrapCheckedPtr = nullptr;
   Value *OldPtr = nullptr;
   Value *NoWrapLimit = nullptr;
+  Value *NoWrapInitialFreePointerRoundedBase = nullptr;
   std::optional<uint64_t> RangeCheckedTotalSize;
   std::optional<uint64_t> NoWrapStrictUpperSize;
   for (Value *Operand : {Combiner->getOperand(0), Combiner->getOperand(1)}) {
@@ -5133,6 +5149,11 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
         std::optional<uint64_t> Size =
             matchWrappingAddStrictUpper(Cmp->getOperand(1));
         if (Size.has_value()) {
+          if (*Size == 128) {
+            OldPtr = ConstantInt::get(Cmp->getOperand(0)->getType(), 128);
+            NoWrapInitialFreePointerRoundedBase = Cmp->getOperand(0);
+            continue;
+          }
           OldPtr = Cmp->getOperand(0);
           NoWrapStrictUpperSize = Size;
           continue;
@@ -5251,6 +5272,11 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
     if (LimitConst->getValue() != ExpectedLimit) {
       return std::nullopt;
     }
+  }
+  if (NoWrapInitialFreePointerRoundedBase != nullptr &&
+      !isRoundedMemoryAllocationSizeFromBase(
+          Size, NoWrapInitialFreePointerRoundedBase)) {
+    return std::nullopt;
   }
   if (NoWrapStrictUpperSize.has_value()) {
     auto *SizeConst = dyn_cast<ConstantInt>(Size);

@@ -73,11 +73,9 @@
         "outlined_metadata": 4,
         "skipped_metadata": 0,
         "checked_bounds_total": 2,
-        "checked_bounds_skip_total": 1,
-        "checked_bounds_semantic_marker_total": 1,
-        "checked_bounds_cfg_rewrites": 1,
-        "checked_bounds_skip_reason:unsupported_condition": 1,
-        "checked_bounds_skipped_kind:panic_resource_error": 1
+        "checked_bounds_skip_total": 0,
+        "checked_bounds_semantic_marker_total": 2,
+        "checked_bounds_cfg_rewrites": 2
       }
     },
     {
