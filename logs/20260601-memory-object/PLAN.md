@@ -23,7 +23,7 @@
 
 ## 背景
 
-旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。
+旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成。
 
 本计划只规划主 NotDec 的 EVM Solidity memory 相关 pass，不动 bin2llvm / wasm2llvm / llvm2c。
 
@@ -122,7 +122,7 @@
 
 ### 阶段 1：内部数据结构和只读分析
 
-新增内部分析 helper，先由 memory pass 和现有 pass 按需调用。分析本身只读，但它必须服务后面的 IR rewrite，不能停在“统计命中”。
+新增内部分析 helper，先由 memory pass 和现有 pass 按需调用。分析本身可以只读，但每个事实都要能对应到后面的 IR rewrite 点，不能停在“统计命中”或“打 metadata”。
 
 建议文件：
 
@@ -149,7 +149,7 @@
   - `Value *Base`
   - `Value *Size`
 
-第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。分析结果必须能回答“要在哪里插入 rewrite marker / semantic call”，否则不算完成。
+第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。分析结果必须能回答“要在哪里插入 rewrite marker / semantic call、后续 pass 读哪个 IR 事实”，否则不算完成。
 
 ### 阶段 2：free pointer / allocation 识别
 
@@ -193,9 +193,9 @@
 
 ### 阶段 5：IR rewrite surface
 
-不要恢复旧 `MemoryObjectPass` 那种单纯计数 metadata。memory 相关能力必须写出明确的 IR rewrite surface，让后续 ABI / revert / event / external-call pass 能消费。metadata 可以同步保留，但只用于调试、统计和测试 oracle。
+不要恢复旧 `MemoryObjectPass` 那种单纯计数 metadata。memory 相关能力必须写出明确的 IR rewrite surface，让后续 ABI / revert / event / external-call pass 能消费。metadata 可以同步保留，但只用于调试、统计和测试 oracle。实现时要优先保证 marker / semantic call 的语义稳定，metadata 不能作为主要接口。
 
-第一阶段 rewrite 不急着删除原始 `mstore/mload/copy`，先插入稳定的语义 call / marker：
+第一阶段 rewrite 不急着删除原始 `mstore/mload/copy`，先插入稳定的语义 call / marker。后续 pass 必须能直接基于这些 IR marker 工作，而不是重新从低层 EVM memory call 猜一次：
 
 - allocation rewrite：表达 base、size、finalized，例如 `notdec_solidity_memory_allocation(base, size)`。
 - buffer role rewrite：表达 return / revert / event / call_input / call_output / scratch。
@@ -204,7 +204,7 @@
 
 第二阶段再按消费者迁移情况决定是否隐藏或删除低层 `mstore/mload/copy`。只要后续 pass 还依赖低层指令，就只能 hide 不能删。
 
-完成标准里，只有 metadata 没有 rewrite surface 不算完成。
+完成标准里，只有 metadata 没有 rewrite surface 不算完成；有 marker 但后续 pass 仍完全绕过 marker、继续猜原始 memory 形状，也不算完成。
 
 ## 风险
 
@@ -223,6 +223,7 @@
   - 不把 storage sha3 scratch 当 allocation。
   - 能插入 memory allocation / buffer role / write / consumer 的 rewrite surface。
 - manifest oracle 不能只看 metadata 数量，要检查对应 rewrite marker。
+- 至少一个后续消费者要改成读取 memory rewrite marker / semantic call；否则 memory pass 只是旁路标注，还没有真正接入。
 - `notdec.evm.solidity_patterns` 继续通过。
 - 对 apehex 当前样例跑 audit，只统计命中和未命中，不因 memory pass 改变既有 checked-bounds / revert 行为。
 - 实现过程中如果涉及 checked-bounds、external-call、event-log 的消费者，分别在对应 `logs/20260522-proj-passes/` 分类下补实现记录。
