@@ -37,6 +37,7 @@ struct SolidityRevertMatch {
   std::optional<uint64_t> CustomErrorArgCount;
   std::optional<uint64_t> ErrorStringLength;
   std::optional<std::string> ErrorStringLiteral;
+  bool UsedMemoryWriteMarker = false;
 };
 
 // Exact pieces of one canonical nonpayable guard.  The pass consumes only this
@@ -124,6 +125,8 @@ void insertPanicRewriteMarker(llvm::LLVMContext &Ctx,
                               const SolidityRevertMatch &Match);
 void insertReturndataBubbleRewriteMarker(llvm::LLVMContext &Ctx,
                                          const SolidityRevertMatch &Match);
+void insertRevertMemoryWriteMatchMarker(llvm::LLVMContext &Ctx,
+                                        const SolidityRevertMatch &Match);
 void insertSelectorRewriteMarker(llvm::LLVMContext &Ctx,
                                  const SolidityRevertMatch &Match,
                                  llvm::StringRef MarkerName,

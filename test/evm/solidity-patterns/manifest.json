@@ -443,6 +443,7 @@
         "147028384:5": 1
       },
       "expected_memory_rewrite_markers": {
+        "notdec_solidity_revert_memory_write_match": 1,
         "notdec_solidity_memory_write": 4,
         "notdec_solidity_memory_consumer": 1
       },

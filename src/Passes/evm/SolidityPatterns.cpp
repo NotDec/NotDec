@@ -58,11 +58,20 @@ struct SolidityRevertMatch {
   std::optional<uint64_t> CustomErrorArgCount;
   std::optional<uint64_t> ErrorStringLength;
   std::optional<std::string> ErrorStringLiteral;
+  bool UsedMemoryWriteMarker = false;
 };
 
 struct RevertStringWord {
   uint64_t Index = 0;
   SmallVector<uint8_t, 32> Bytes;
+};
+
+struct RevertMemoryWrite {
+  CallBase *Call = nullptr;
+  Value *Address = nullptr;
+  std::optional<uint64_t> Offset;
+  Value *StoredValue = nullptr;
+  bool FromMarker = false;
 };
 
 // Carries the exact pieces of one canonical nonpayable guard.  The matcher
@@ -1504,6 +1513,25 @@ CallBase *findReturndataBubbleCopyFromMemoryMarkers(BasicBlock &BB,
   return MatchingConsumer != nullptr ? MatchingCopy : nullptr;
 }
 
+std::optional<RevertMemoryWrite> getRevertMemoryWrite(CallBase &Call,
+                                                      Value *RevertBase) {
+  if (isCallTo(&Call, "evm_mstore") && Call.arg_size() == 3) {
+    return RevertMemoryWrite{
+        &Call, Call.getArgOperand(1),
+        getOffsetFromBase(Call.getArgOperand(1), RevertBase),
+        Call.getArgOperand(2), false};
+  }
+
+  if (isCallTo(&Call, "notdec_solidity_memory_write") &&
+      Call.arg_size() == 3 && isSameValue(Call.getArgOperand(0), RevertBase)) {
+    return RevertMemoryWrite{&Call, nullptr,
+                             getUInt64Constant(Call.getArgOperand(1)),
+                             Call.getArgOperand(2), true};
+  }
+
+  return std::nullopt;
+}
+
 std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
                                                         CallBase &Revert) {
   if (Revert.arg_size() != 3) {
@@ -1543,54 +1571,61 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
     }
 
     auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3) {
+    if (Call == nullptr) {
       continue;
     }
 
-    if (isConstantIntValue(Call->getArgOperand(1), 4)) {
+    std::optional<RevertMemoryWrite> Write =
+        getRevertMemoryWrite(*Call, Revert.getArgOperand(1));
+    if (!Write.has_value()) {
+      continue;
+    }
+    if (Write->FromMarker) {
+      Match.UsedMemoryWriteMarker = true;
+    }
+
+    if (Write->Address != nullptr && isConstantIntValue(Write->Address, 4)) {
       if (std::optional<uint64_t> Code =
-              getUInt64Constant(Call->getArgOperand(2))) {
+              getUInt64Constant(Write->StoredValue)) {
         AbsolutePanicCodeStore = Call;
         AbsolutePanicCode = Code;
       }
     }
-    if (std::optional<uint64_t> Code =
-            getUInt64Constant(Call->getArgOperand(2))) {
+    if (std::optional<uint64_t> Code = getUInt64Constant(Write->StoredValue)) {
       if (isKnownPanicCode(*Code)) {
         PanicCodeCandidates.push_back({Call, *Code});
       }
     }
 
-    std::optional<uint64_t> Offset =
-        getOffsetFromBase(Call->getArgOperand(1), Revert.getArgOperand(1));
-    if (Offset == 0) {
+    if (Write->Offset == 0) {
       if (std::optional<uint64_t> Selector =
-              getSelectorWord(Call->getArgOperand(2))) {
+              getSelectorWord(Write->StoredValue)) {
         Match.SelectorStore = Call;
         Match.Selector = Selector;
       }
       continue;
     }
 
-    if (Offset == 4) {
+    if (Write->Offset == 4) {
       if (std::optional<uint64_t> Code =
-              getUInt64Constant(Call->getArgOperand(2))) {
+              getUInt64Constant(Write->StoredValue)) {
         Match.PanicCodeStore = Call;
         Match.PanicCode = Code;
       }
       continue;
     }
 
-    if (Offset == 36) {
-      Match.ErrorStringLength = getUInt64Constant(Call->getArgOperand(2));
+    if (Write->Offset == 36) {
+      Match.ErrorStringLength = getUInt64Constant(Write->StoredValue);
       continue;
     }
 
-    if (Offset.has_value() && *Offset >= 68 && (*Offset - 68) % 32 == 0) {
+    if (Write->Offset.has_value() && *Write->Offset >= 68 &&
+        (*Write->Offset - 68) % 32 == 0) {
       if (std::optional<SmallVector<uint8_t, 32>> Bytes =
-              getAbiWordBytes(Call->getArgOperand(2))) {
-        StringWords.push_back(RevertStringWord{(*Offset - 68) / 32, *Bytes});
+              getAbiWordBytes(Write->StoredValue)) {
+        StringWords.push_back(
+            RevertStringWord{(*Write->Offset - 68) / 32, *Bytes});
       }
     }
   }
@@ -1679,6 +1714,35 @@ void insertReturndataBubbleRewriteMarker(LLVMContext &Ctx,
   Value *Args[] = {
       ConstantInt::get(Type::getIntNTy(Ctx, 256),
                        getRewriteKindCode("returndata_bubble"))};
+  Builder.CreateCall(Marker, Args);
+}
+
+void insertRevertMemoryWriteMatchMarker(LLVMContext &Ctx,
+                                        const SolidityRevertMatch &Match) {
+  if (!Match.UsedMemoryWriteMarker || !Match.Selector.has_value() ||
+      Match.Revert == nullptr) {
+    return;
+  }
+
+  Module *M = Match.Revert->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_revert_memory_write_match",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {Type::getIntNTy(Ctx, 256),
+                         Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (Instruction *Next = Match.Revert->getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(Match.Revert->getParent());
+  }
+
+  Value *Args[] = {
+      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.Selector),
+      ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                       getRewriteKindCode(Match.Kind))};
   Builder.CreateCall(Marker, Args);
 }
 

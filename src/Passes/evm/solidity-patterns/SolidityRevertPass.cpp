@@ -31,6 +31,7 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
       }
 
       addRevertMatchMetadata(Ctx, *Match);
+      insertRevertMemoryWriteMatchMarker(Ctx, *Match);
       if (Match->Kind == "panic") {
         insertPanicRewriteMarker(Ctx, *Match);
       } else if (Match->Kind == "returndata_bubble") {
