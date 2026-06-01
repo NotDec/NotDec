@@ -181,6 +181,15 @@ void insertWriteMarker(LLVMContext &Ctx, const MemoryWrite &Write) {
     return;
   }
 
+  if (Write.Kind == MemoryWriteKind::MStore8) {
+    getOrDeclareMarker(*M, "notdec_solidity_memory_byte_write",
+                       {I256, I256, I256}, Marker);
+    Builder.CreateCall(Marker, {asI256(Builder, Write.Base),
+                                ConstantInt::get(I256, *Write.Offset),
+                                asI256(Builder, Write.ValueOrSize)});
+    return;
+  }
+
   if (Write.SourceOffset == nullptr) {
     return;
   }
@@ -268,6 +277,27 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
                                            nullptr,
                                            MemoryWriteKind::MStore});
         break;
+      }
+      continue;
+    }
+
+    if (detail::isCallTo(Call, "evm_mstore8") && Call->arg_size() == 3) {
+      Value *Ptr = Call->getArgOperand(1);
+      bool MatchedBase = false;
+      for (Value *Base : Bases) {
+        std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
+        if (!Offset.has_value()) {
+          continue;
+        }
+        Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
+                                           Call->getArgOperand(2), nullptr,
+                                           MemoryWriteKind::MStore8});
+        MatchedBase = true;
+        break;
+      }
+      if (!MatchedBase) {
+        Facts.Writes.push_back(MemoryWrite{Call, Ptr, 0, Call->getArgOperand(2),
+                                           nullptr, MemoryWriteKind::MStore8});
       }
       continue;
     }
