@@ -17,6 +17,8 @@ using namespace detail;
 STATISTIC(NumEvents, "Number of Solidity event candidates found");
 STATISTIC(NumEventMemoryConsumers,
           "Number of Solidity event memory consumers found");
+STATISTIC(NumEventDataAllocations,
+          "Number of Solidity event data allocations found");
 STATISTIC(NumEventDataWordWrites,
           "Number of Solidity event data word writes found");
 STATISTIC(NumEventDataCopyWrites,
@@ -47,6 +49,15 @@ CallBase *findEventConsumerMarker(BasicBlock &BB, CallBase &Log) {
 bool isEventAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && (*Offset % 32) == 0;
+}
+
+bool isSameEventDataBase(Value *LHS, Value *RHS) {
+  if (LHS == RHS) {
+    return true;
+  }
+  std::optional<uint64_t> LConst = getUInt64Constant(LHS);
+  std::optional<uint64_t> RConst = getUInt64Constant(RHS);
+  return LConst.has_value() && RConst.has_value() && *LConst == *RConst;
 }
 
 void collectEventDataWordWriteMarkers(BasicBlock &BB, CallBase &Log,
@@ -117,6 +128,47 @@ void collectEventDataCopyWriteMarkers(BasicBlock &BB, CallBase &Log,
   Writes.append(Candidates.begin(), Candidates.end());
 }
 
+CallBase *findEventDataAllocationMarker(BasicBlock &BB, CallBase &Log,
+                                        ArrayRef<CallBase *> WordWrites,
+                                        ArrayRef<CallBase *> CopyWrites) {
+  auto MatchesEventDataBase = [&](Value *AllocationBase) {
+    for (CallBase *Write : WordWrites) {
+      if (Write->arg_size() == 3 &&
+          isSameEventDataBase(AllocationBase, Write->getArgOperand(0))) {
+        return true;
+      }
+    }
+    for (CallBase *Copy : CopyWrites) {
+      if (Copy->arg_size() == 5 &&
+          isSameEventDataBase(AllocationBase, Copy->getArgOperand(0))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  CallBase *Candidate = nullptr;
+  for (Instruction &I : BB) {
+    if (&I == &Log) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_allocation") ||
+        Call->arg_size() != 2) {
+      continue;
+    }
+    if (MatchesEventDataBase(Call->getArgOperand(0))) {
+      Candidate = Call;
+    }
+  }
+
+  return Candidate;
+}
+
 void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
                                      CallBase &Consumer,
                                      uint64_t TopicCount) {
@@ -129,6 +181,24 @@ void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
   IRBuilder<> Builder(&Log);
   Builder.CreateCall(Marker,
                      {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, TopicCount)});
+}
+
+void insertEventDataAllocationMarker(LLVMContext &Ctx, CallBase &Log,
+                                     CallBase &Allocation,
+                                     CallBase &Consumer,
+                                     uint64_t TopicCount) {
+  Module *M = Log.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_event_data_allocation",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&Log);
+  Builder.CreateCall(Marker,
+                     {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
+                      Consumer.getArgOperand(1),
                       ConstantInt::get(I256, TopicCount)});
 }
 
@@ -203,6 +273,12 @@ PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
       for (CallBase *CopyWrite : CopyWrites) {
         insertEventDataCopyWriteMarker(Ctx, *Call, *CopyWrite, TopicCount);
         ++NumEventDataCopyWrites;
+      }
+      if (CallBase *Allocation = findEventDataAllocationMarker(
+              *Call->getParent(), *Call, WordWrites, CopyWrites)) {
+        insertEventDataAllocationMarker(Ctx, *Call, *Allocation, *Consumer,
+                                        TopicCount);
+        ++NumEventDataAllocations;
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_EVENT,

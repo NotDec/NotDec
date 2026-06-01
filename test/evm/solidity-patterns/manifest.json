@@ -5219,6 +5219,22 @@
         "notdec_solidity_external_call_output_word_read": 2,
         "notdec_solidity_external_call_output_abi_decode_buffer": 2
       }
+    },
+    {
+      "name": "25546_19769987_0d6f2c127b_61e5a573fda0",
+      "input": "cases/25546_19769987_0d6f2c127b_61e5a573fda0.ll",
+      "patterns": [
+        "memory_object"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 58,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_event_data_allocation": 1,
+        "notdec_solidity_event_data_copy_write": 1,
+        "notdec_solidity_event_data_word_write": 4,
+        "notdec_solidity_event_memory_consumer": 8,
+        "notdec_solidity_memory_allocation": 11
+      }
     }
   ]
 }
