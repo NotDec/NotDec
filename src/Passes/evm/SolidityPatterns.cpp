@@ -2223,6 +2223,52 @@ bool matchUnsignedBoundedResult(const NormalizedCondition &FailureCond,
   return true;
 }
 
+bool matchUnsignedAddWithSubtractedMax(const NormalizedCondition &FailureCond,
+                                       BasicBlock *SuccessBlock,
+                                       BinaryOperator *&Add, Value *&LHS,
+                                       Value *&RHS, Value *&MaxValue) {
+  Add = nullptr;
+  LHS = nullptr;
+  RHS = nullptr;
+  MaxValue = nullptr;
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr ||
+      (FailureCond.Predicate != ICmpInst::ICMP_UGT &&
+       FailureCond.Predicate != ICmpInst::ICMP_ULT)) {
+    return false;
+  }
+
+  Value *MaybeLHS =
+      FailureCond.Predicate == ICmpInst::ICMP_UGT ? Cmp->getOperand(0)
+                                                  : Cmp->getOperand(1);
+  auto *LimitSub = dyn_cast<BinaryOperator>(
+      FailureCond.Predicate == ICmpInst::ICMP_UGT ? Cmp->getOperand(1)
+                                                  : Cmp->getOperand(0));
+  if (LimitSub == nullptr || LimitSub->getOpcode() != Instruction::Sub) {
+    return false;
+  }
+
+  Value *Max = LimitSub->getOperand(0);
+  Value *MaybeRHS = LimitSub->getOperand(1);
+  if (!isPowerOfTwoMinusOne(Max) ||
+      !isUnsignedCleanupToMaxValue(MaybeLHS, Max) ||
+      !isUnsignedCleanupToMaxValue(MaybeRHS, Max)) {
+    return false;
+  }
+
+  Add = findCommutativeBinaryOpInBlock(SuccessBlock, Instruction::Add, MaybeLHS,
+                                       MaybeRHS);
+  if (Add == nullptr) {
+    return false;
+  }
+
+  LHS = MaybeLHS;
+  RHS = MaybeRHS;
+  MaxValue = Max;
+  return true;
+}
+
 bool matchUnsignedBoundedMulCleanup(const NormalizedCondition &FailureCond,
                                     BinaryOperator *&Mul, Value *&MaxValue) {
   ICmpInst *Cmp = FailureCond.Cmp;
@@ -2575,6 +2621,22 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
                                 RevertMatch.Revert,
                                 {BoundedOp->getOperand(0),
                                  BoundedOp->getOperand(1), BoundedOp,
+                                 DynamicMax},
+                                RevertMatch.PanicCode,
+                                true};
+    }
+    Value *BoundedLHS = nullptr;
+    Value *BoundedRHS = nullptr;
+    if (matchUnsignedAddWithSubtractedMax(FailureCond, SuccessBlock, BoundedOp,
+                                          BoundedLHS, BoundedRHS,
+                                          DynamicMax)) {
+      return CheckedBoundsMatch{"checked_add_bound",
+                                "",
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                RevertMatch.Revert,
+                                {BoundedLHS, BoundedRHS, BoundedOp,
                                  DynamicMax},
                                 RevertMatch.PanicCode,
                                 true};
