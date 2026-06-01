@@ -4571,6 +4571,81 @@ CallBase *findMemoryPointerStoreForLoad(BasicBlock *BB, Value *OldPtr,
   return nullptr;
 }
 
+// After a previous allocation was rewritten, the next finalizeAllocation guard
+// can see old/new free pointers as two offsets from the same original mload.
+// Require the old pointer to be stored before the guard and the new pointer to
+// be stored to the same slot on success, so this stays tied to free-pointer
+// updates rather than arbitrary address arithmetic.
+Value *findMemoryPointerStoreSlot(BasicBlock *BB, Value *Ptr) {
+  if (BB == nullptr || Ptr == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
+        Call->arg_size() == 3 && isSameValue(Call->getArgOperand(2), Ptr)) {
+      return Call->getArgOperand(1);
+    }
+  }
+  return nullptr;
+}
+
+CallBase *findMemoryPointerStoreToSlot(BasicBlock *BB, Value *Slot,
+                                       Value *NewPtr) {
+  if (BB == nullptr || Slot == nullptr || NewPtr == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
+        Call->arg_size() == 3 && isSameValue(Call->getArgOperand(1), Slot) &&
+        isSameValue(Call->getArgOperand(2), NewPtr)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
+bool hasMemoryPointerStoreTransition(BasicBlock *GuardBlock,
+                                     BasicBlock *SuccessBlock, Value *OldPtr,
+                                     Value *NewPtr) {
+  Value *Slot = findMemoryPointerStoreSlot(GuardBlock, OldPtr);
+  return Slot != nullptr &&
+         findMemoryPointerStoreToSlot(SuccessBlock, Slot, NewPtr) != nullptr;
+}
+
+bool isSmallFixedMemoryAllocationDelta(uint64_t Size) {
+  return Size != 0 && Size <= 4096 && Size % 32 == 0;
+}
+
+bool matchConstantOffsetAllocationDelta(Value *NewPtr, Value *OldPtr,
+                                        Value *&Base, uint64_t &Size) {
+  auto *NewAdd = dyn_cast_or_null<BinaryOperator>(NewPtr);
+  if (NewAdd == nullptr || NewAdd->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  for (Value *CandidateBase : {NewAdd->getOperand(0), NewAdd->getOperand(1)}) {
+    std::optional<uint64_t> NewOffset =
+        getOffsetFromBase(NewPtr, CandidateBase);
+    std::optional<uint64_t> OldOffset =
+        getOffsetFromBase(OldPtr, CandidateBase);
+    if (!NewOffset.has_value() || !OldOffset.has_value() ||
+        *NewOffset <= *OldOffset) {
+      continue;
+    }
+
+    uint64_t Delta = *NewOffset - *OldOffset;
+    if (!isSmallFixedMemoryAllocationDelta(Delta)) {
+      continue;
+    }
+    Base = CandidateBase;
+    Size = Delta;
+    return true;
+  }
+  return false;
+}
+
 // Solidity encodes short storage bytes/string values in the slot itself. This
 // only accepts the canonical decoded-length expression from that same slot.
 bool matchStorageBytesLength(Value *Length, Value *Slot) {
@@ -4893,9 +4968,11 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   }
 
   Value *RangeCheckedPtr = nullptr;
+  Value *RangeCheckedBase = nullptr;
   Value *NoWrapCheckedPtr = nullptr;
   Value *OldPtr = nullptr;
   Value *NoWrapLimit = nullptr;
+  std::optional<uint64_t> RangeCheckedTotalSize;
   for (Value *Operand : {Combiner->getOperand(0), Combiner->getOperand(1)}) {
     auto *Cmp = dyn_cast<ICmpInst>(Operand);
     if (Cmp == nullptr) {
@@ -4908,6 +4985,15 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
           isUInt64Max(Cmp->getOperand(1))) {
         RangeCheckedPtr = Cmp->getOperand(0);
         continue;
+      }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_UGT) {
+        std::optional<uint64_t> TotalSize =
+            matchUInt64LimitMinusStrictUpper(Cmp->getOperand(1));
+        if (TotalSize.has_value()) {
+          RangeCheckedBase = Cmp->getOperand(0);
+          RangeCheckedTotalSize = TotalSize;
+          continue;
+        }
       }
       if (Cmp->getPredicate() == ICmpInst::ICMP_UGE &&
           isUInt64Limit(Cmp->getOperand(1))) {
@@ -4944,27 +5030,74 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
     return std::nullopt;
   }
 
-  if (RangeCheckedPtr == nullptr || OldPtr == nullptr) {
+  if ((RangeCheckedPtr == nullptr && RangeCheckedBase == nullptr) ||
+      OldPtr == nullptr) {
     return std::nullopt;
   }
   if (!FailureWhenCondTrue && !isFreeMemoryPointerLoad(OldPtr)) {
     return std::nullopt;
   }
-  if (NoWrapCheckedPtr != nullptr &&
-      !isSameValue(RangeCheckedPtr, NoWrapCheckedPtr)) {
-    return std::nullopt;
-  }
 
+  BasicBlock *GuardBlock = Combiner->getParent();
   Value *NewPtr = RangeCheckedPtr;
-  auto *NewPtrAdd = dyn_cast<BinaryOperator>(NewPtr);
-  if (NewPtrAdd == nullptr || NewPtrAdd->getOpcode() != Instruction::Add ||
-      !binaryOpHasOperand(NewPtrAdd, OldPtr)) {
+  Value *Size = nullptr;
+  Value *SharedBase = nullptr;
+  uint64_t OffsetDelta = 0;
+  bool UsesOffsetPair = false;
+
+  if (NewPtr == nullptr) {
+    if (!RangeCheckedTotalSize.has_value()) {
+      return std::nullopt;
+    }
+    Value *TotalSizeValue =
+        ConstantInt::get(RangeCheckedBase->getType(), *RangeCheckedTotalSize);
+    auto *FoundNewPtr = findCommutativeBinaryOpInBlock(
+        GuardBlock, Instruction::Add, RangeCheckedBase, TotalSizeValue);
+    if (FoundNewPtr == nullptr) {
+      FoundNewPtr = findCommutativeBinaryOpInBlock(
+          SuccessBlock, Instruction::Add, RangeCheckedBase, TotalSizeValue);
+    }
+    NewPtr = FoundNewPtr;
+  }
+
+  auto *NewPtrAdd = dyn_cast_or_null<BinaryOperator>(NewPtr);
+  if (NewPtrAdd == nullptr || NewPtrAdd->getOpcode() != Instruction::Add) {
     return std::nullopt;
   }
 
-  Value *Size = isSameValue(NewPtrAdd->getOperand(0), OldPtr)
-                    ? NewPtrAdd->getOperand(1)
-                    : NewPtrAdd->getOperand(0);
+  if (binaryOpHasOperand(NewPtrAdd, OldPtr)) {
+    Size = isSameValue(NewPtrAdd->getOperand(0), OldPtr)
+               ? NewPtrAdd->getOperand(1)
+               : NewPtrAdd->getOperand(0);
+  } else if (matchConstantOffsetAllocationDelta(NewPtr, OldPtr, SharedBase,
+                                                OffsetDelta)) {
+    Size = ConstantInt::get(NewPtr->getType(), OffsetDelta);
+    UsesOffsetPair = true;
+  } else {
+    return std::nullopt;
+  }
+
+  if (RangeCheckedBase != nullptr) {
+    if (SharedBase == nullptr) {
+      std::optional<uint64_t> NewOffset =
+          getOffsetFromBase(NewPtr, RangeCheckedBase);
+      std::optional<uint64_t> OldOffset =
+          getOffsetFromBase(OldPtr, RangeCheckedBase);
+      if (!NewOffset.has_value() || !OldOffset.has_value() ||
+          *NewOffset <= *OldOffset) {
+        return std::nullopt;
+      }
+      SharedBase = RangeCheckedBase;
+    }
+    if (!isSameValue(SharedBase, RangeCheckedBase)) {
+      return std::nullopt;
+    }
+  }
+
+  if (NoWrapCheckedPtr != nullptr && !isSameValue(NewPtr, NoWrapCheckedPtr)) {
+    return std::nullopt;
+  }
+
   if (NoWrapLimit != nullptr) {
     auto *SizeConst = dyn_cast<ConstantInt>(Size);
     auto *LimitConst = dyn_cast<ConstantInt>(NoWrapLimit);
@@ -4979,7 +5112,10 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
 
   if (!isSupportedMemoryAllocationSizeWithUniformArg(Size) ||
       (findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr &&
-       findMemoryPointerStoreForLoad(SuccessBlock, OldPtr, NewPtr) == nullptr)) {
+       findMemoryPointerStoreForLoad(SuccessBlock, OldPtr, NewPtr) == nullptr &&
+       !(UsesOffsetPair &&
+         hasMemoryPointerStoreTransition(GuardBlock, SuccessBlock, OldPtr,
+                                         NewPtr)))) {
     return std::nullopt;
   }
 
