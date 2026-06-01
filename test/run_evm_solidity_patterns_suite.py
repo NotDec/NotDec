@@ -774,6 +774,28 @@ def main() -> int:
             if compare_txt.exists():
                 print(f"        compare: {compare_txt}")
 
+    audit_script = project_root / "scripts/audit-checked-bounds.py"
+    if audit_script.exists():
+        audit, audit_log = run_command(
+            title="checked-bounds-audit",
+            command=[
+                sys.executable,
+                str(audit_script),
+                str(workdir),
+                "--fail-on-mismatch",
+            ],
+            cwd=project_root,
+            env=env,
+        )
+        (workdir / "checked-bounds-audit.log").write_text(audit_log)
+        print(audit.stdout, end="")
+        if audit.returncode == 0:
+            print("[PASS ] checked_bounds_audit")
+        else:
+            failed += 1
+            print("[FAIL ] checked_bounds_audit")
+            print(f"        log: {workdir / 'checked-bounds-audit.log'}")
+
     print(f"Summary: {passed} passed, {failed} failed")
     return 0 if failed == 0 else 1
 
