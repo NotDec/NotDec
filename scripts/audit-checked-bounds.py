@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 from collections import Counter
 from pathlib import Path
@@ -53,9 +54,49 @@ def print_counter(title: str, counts: Counter[str]) -> None:
         print(f"  {key}: {value}")
 
 
+def write_csv_summary(
+    path: Path,
+    *,
+    files: int,
+    checked_bounds_total: int,
+    skip_total: int,
+    marker_total: int,
+    cfg_rewrites: int,
+    rewrite_expected: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "files",
+                "checked_bounds_total",
+                "skip_total",
+                "semantic_marker_total",
+                "cfg_rewrites",
+                "rewrite_expected",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "files": files,
+                "checked_bounds_total": checked_bounds_total,
+                "skip_total": skip_total,
+                "semantic_marker_total": marker_total,
+                "cfg_rewrites": cfg_rewrites,
+                "rewrite_expected": rewrite_expected,
+            }
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="+", help="Output directories or .ll files")
+    parser.add_argument(
+        "--csv",
+        help="Write one-row CSV summary for batch trend tracking",
+    )
     parser.add_argument(
         "--list-skips",
         action="store_true",
@@ -110,6 +151,17 @@ def main() -> int:
     marker_total = sum(totals["semantic_markers"].values())
     print(f"rewrite_expected: {rewrite_expected}")
     print(f"rewrite_markers: {marker_total}")
+
+    if args.csv:
+        write_csv_summary(
+            Path(args.csv),
+            files=len(files),
+            checked_bounds_total=checked_bounds_total,
+            skip_total=skip_total,
+            marker_total=marker_total,
+            cfg_rewrites=total_cfg_rewrites,
+            rewrite_expected=rewrite_expected,
+        )
 
     if args.list_skips and skipped_files:
         print("skip_files:")
