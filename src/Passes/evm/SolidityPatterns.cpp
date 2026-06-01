@@ -164,6 +164,18 @@ bool isUInt64Limit(const Value *V) {
   return C->getValue() == Limit;
 }
 
+bool isUInt64LimitValue(const Value *V) {
+  if (isUInt64Limit(V)) {
+    return true;
+  }
+
+  auto *Shift = dyn_cast_or_null<CallBase>(V);
+  return Shift != nullptr && isCallTo(Shift, "evm_shl") &&
+         Shift->arg_size() == 2 &&
+         isConstantIntValue(Shift->getArgOperand(0), 64) &&
+         isConstantIntValue(Shift->getArgOperand(1), 1);
+}
+
 bool isUInt64Max(const Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   if (C != nullptr) {
@@ -4822,6 +4834,85 @@ std::optional<CheckedBoundsMatch> matchStorageByteArrayLengthBounds(
                             true};
 }
 
+BinaryOperator *findStorageArrayLengthIncrementStore(BasicBlock *SuccessBlock,
+                                                     Value *Length) {
+  // Solidity guards dynamic storage array push by checking the old length before
+  // writing oldLength + 1 back to the same storage length slot.
+  auto *LengthLoad = dyn_cast_or_null<CallBase>(Length);
+  if (SuccessBlock == nullptr || LengthLoad == nullptr ||
+      !isCallTo(LengthLoad, "evm_sload") || LengthLoad->arg_size() != 1) {
+    return nullptr;
+  }
+
+  Value *Slot = LengthLoad->getArgOperand(0);
+  Value *One = ConstantInt::get(Length->getType(), 1);
+  BinaryOperator *Increment = findCommutativeBinaryOpInBlock(
+      SuccessBlock, Instruction::Add, Length, One);
+  if (Increment == nullptr) {
+    return nullptr;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *Store = dyn_cast<CallBase>(&I);
+    if (Store == nullptr || !isCallTo(Store, "evm_sstore") ||
+        Store->arg_size() != 2) {
+      continue;
+    }
+    if (isSameValue(Store->getArgOperand(0), Slot) &&
+        isSameValue(Store->getArgOperand(1), Increment)) {
+      return Increment;
+    }
+  }
+  return nullptr;
+}
+
+std::optional<CheckedBoundsMatch> matchStorageArrayLengthBounds(
+    const NormalizedCondition &FailureCond,
+    const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *Length = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE &&
+      isUInt64LimitValue(Cmp->getOperand(1))) {
+    Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+             isUInt64LimitValue(Cmp->getOperand(0))) {
+    Length = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGT &&
+             isUInt64Max(Cmp->getOperand(1))) {
+    Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT &&
+             isUInt64Max(Cmp->getOperand(0))) {
+    Length = Cmp->getOperand(1);
+  } else {
+    return std::nullopt;
+  }
+
+  BinaryOperator *Increment =
+      findStorageArrayLengthIncrementStore(SuccessBlock, Length);
+  if (Increment == nullptr) {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{"storage_array_length_bounds",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {Length, ConstantInt::get(Length->getType(), 1),
+                             Increment},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 std::optional<CheckedBoundsMatch> matchFixedMemoryAllocationPointerBounds(
     const NormalizedCondition &FailureCond,
     const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
@@ -5364,6 +5455,15 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       return StorageByteArrayLength;
     }
 
+    if (std::optional<CheckedBoundsMatch> StorageArrayLength =
+            matchStorageArrayLengthBounds(*FailureCond, *RevertMatch,
+                                          Br->getSuccessor(1 - SuccIdx))) {
+      StorageArrayLength->Branch = Br;
+      StorageArrayLength->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      StorageArrayLength->FailureBlock = Failure;
+      return StorageArrayLength;
+    }
+
     if (std::optional<CheckedBoundsMatch> FixedMemoryPointerBounds =
             matchFixedMemoryAllocationPointerBounds(
                 *FailureCond, *RevertMatch, Br->getSuccessor(1 - SuccIdx))) {
@@ -5438,6 +5538,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   if (Kind == "storage_byte_array_length_bounds") {
     return "notdec_solidity_rewrite_storage_byte_array_length_bounds";
   }
+  if (Kind == "storage_array_length_bounds") {
+    return "notdec_solidity_rewrite_storage_array_length_bounds";
+  }
   if (Kind == "enum_conversion") {
     return "notdec_solidity_rewrite_enum_conversion";
   }
@@ -5479,7 +5582,8 @@ bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
     if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
          Match.Kind == "checked_mul" || Match.Kind == "checked_add_bound" ||
          Match.Kind == "checked_sub_bound" ||
-         Match.Kind == "checked_mul_bound") &&
+         Match.Kind == "checked_mul_bound" ||
+         Match.Kind == "storage_array_length_bounds") &&
         Match.Operands.size() == 3 && Operand == Match.Operands[2]) {
       continue;
     }
@@ -5533,12 +5637,14 @@ void insertCheckedBoundsSemanticMarker(LLVMContext &Ctx,
   if ((Match.Kind == "checked_add" || Match.Kind == "checked_sub" ||
        Match.Kind == "checked_mul" || Match.Kind == "checked_add_bound" ||
        Match.Kind == "checked_sub_bound" ||
-       Match.Kind == "checked_mul_bound") &&
+       Match.Kind == "checked_mul_bound" ||
+       Match.Kind == "storage_array_length_bounds") &&
       (Operands.size() == 3 || Operands.size() == 4)) {
     auto *ResultInst = dyn_cast<Instruction>(Operands[2]);
     if (ResultInst != nullptr &&
         ResultInst->getParent() != Match.Branch->getParent()) {
-      if (Match.Kind == "checked_add" || Match.Kind == "checked_add_bound") {
+      if (Match.Kind == "checked_add" || Match.Kind == "checked_add_bound" ||
+          Match.Kind == "storage_array_length_bounds") {
         Operands[2] = Builder.CreateAdd(Operands[0], Operands[1],
                                         ResultInst->getName() + ".rewrite");
       } else if (Match.Kind == "checked_sub" ||

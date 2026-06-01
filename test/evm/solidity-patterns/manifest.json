@@ -4740,7 +4740,7 @@
         "34": 1
       },
       "expected_checked_bounds_kinds": {
-        "panic_resource_error": 2,
+        "storage_array_length_bounds": 2,
         "checked_add": 2,
         "memory_allocation_pointer_bounds": 3,
         "memory_allocation_bounds": 2,
@@ -4760,12 +4760,11 @@
         "notdec_solidity_rewrite_memory_allocation_bounds": 2,
         "notdec_solidity_rewrite_array_bounds_memory": 1,
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
-        "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1
+        "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1,
+        "notdec_solidity_rewrite_storage_array_length_bounds": 2
       },
-      "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 2
-      },
-      "expected_checked_bounds_cfg_rewrites": 10
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 12
     }
   ]
 }
