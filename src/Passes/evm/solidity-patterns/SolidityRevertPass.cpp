@@ -1,5 +1,6 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
@@ -15,6 +16,10 @@ using namespace detail;
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
 STATISTIC(NumRevertMemoryConsumers,
           "Number of Solidity revert memory consumers found");
+STATISTIC(NumRevertDataWordWrites,
+          "Number of Solidity revert data word writes found");
+STATISTIC(NumRevertDataCopyWrites,
+          "Number of Solidity revert data copy writes found");
 
 namespace {
 
@@ -74,6 +79,103 @@ void insertRevertMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Revert,
                       ConstantInt::get(I256, getRevertKindCode(Kind))});
 }
 
+void collectRevertDataWordWriteMarkers(BasicBlock &BB, CallBase &Revert,
+                                       Value *RevertBase,
+                                       SmallVectorImpl<CallBase *> &Writes) {
+  SmallVector<CallBase *, 8> Candidates;
+
+  for (Instruction &I : BB) {
+    if (&I == &Revert) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      Candidates.clear();
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_write") ||
+        Call->arg_size() != 3) {
+      continue;
+    }
+
+    if (isSameOrReloadedFreeMemoryBase(Call->getArgOperand(0), RevertBase)) {
+      Candidates.push_back(Call);
+    }
+  }
+
+  Writes.append(Candidates.begin(), Candidates.end());
+}
+
+void collectRevertDataCopyWriteMarkers(BasicBlock &BB, CallBase &Revert,
+                                       Value *RevertBase,
+                                       SmallVectorImpl<CallBase *> &Writes) {
+  SmallVector<CallBase *, 4> Candidates;
+
+  for (Instruction &I : BB) {
+    if (&I == &Revert) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      Candidates.clear();
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_copy_write") ||
+        Call->arg_size() != 5) {
+      continue;
+    }
+
+    if (isSameOrReloadedFreeMemoryBase(Call->getArgOperand(0), RevertBase)) {
+      Candidates.push_back(Call);
+    }
+  }
+
+  Writes.append(Candidates.begin(), Candidates.end());
+}
+
+void insertRevertDataWordWriteMarker(LLVMContext &Ctx, CallBase &Revert,
+                                     CallBase &WordWrite, StringRef Kind) {
+  Module *M = Revert.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_revert_data_word_write",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&Revert);
+  Builder.CreateCall(Marker,
+                     {WordWrite.getArgOperand(0), WordWrite.getArgOperand(1),
+                      WordWrite.getArgOperand(2),
+                      ConstantInt::get(I256, getRevertKindCode(Kind))});
+}
+
+void insertRevertDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Revert,
+                                     CallBase &CopyWrite, StringRef Kind) {
+  Module *M = Revert.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_revert_data_copy_write",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Revert);
+  Builder.CreateCall(Marker,
+                     {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(1),
+                      CopyWrite.getArgOperand(2), CopyWrite.getArgOperand(3),
+                      CopyWrite.getArgOperand(4),
+                      ConstantInt::get(I256, getRevertKindCode(Kind))});
+}
+
 } // namespace
 
 PreservedAnalyses SolidityRevertPass::run(Function &F,
@@ -99,6 +201,20 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
       if (CallBase *Consumer = findRevertConsumerMarker(BB, *Call)) {
         insertRevertMemoryConsumerMarker(Ctx, *Call, *Consumer, Match->Kind);
         ++NumRevertMemoryConsumers;
+        SmallVector<CallBase *, 8> WordWrites;
+        collectRevertDataWordWriteMarkers(BB, *Call, Consumer->getArgOperand(0),
+                                          WordWrites);
+        for (CallBase *WordWrite : WordWrites) {
+          insertRevertDataWordWriteMarker(Ctx, *Call, *WordWrite, Match->Kind);
+          ++NumRevertDataWordWrites;
+        }
+        SmallVector<CallBase *, 4> CopyWrites;
+        collectRevertDataCopyWriteMarkers(BB, *Call, Consumer->getArgOperand(0),
+                                          CopyWrites);
+        for (CallBase *CopyWrite : CopyWrites) {
+          insertRevertDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Match->Kind);
+          ++NumRevertDataCopyWrites;
+        }
       }
       insertRevertMemoryWriteMatchMarker(Ctx, *Match);
       if (Match->Kind == "panic") {

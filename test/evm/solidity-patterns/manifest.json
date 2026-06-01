@@ -448,6 +448,7 @@
       },
       "expected_memory_rewrite_markers": {
         "notdec_solidity_revert_memory_consumer": 1,
+        "notdec_solidity_revert_data_word_write": 4,
         "notdec_solidity_revert_memory_write_match": 1,
         "notdec_solidity_memory_write": 4,
         "notdec_solidity_memory_consumer": 1
@@ -992,7 +993,9 @@
         "notdec_solidity_abi_return_data_word_write": 1,
         "notdec_solidity_memory_copy_write": 2,
         "notdec_solidity_memory_consumer": 10,
-        "notdec_solidity_revert_memory_consumer": 5
+        "notdec_solidity_revert_memory_consumer": 5,
+        "notdec_solidity_revert_data_word_write": 8,
+        "notdec_solidity_revert_data_copy_write": 2
       },
       "expected_memory_consumer_kinds": {
         "return": 1,
