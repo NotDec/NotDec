@@ -24,6 +24,8 @@ STATISTIC(NumExternalCallOutputCopyWrites,
           "Number of Solidity external call output copy writes found");
 STATISTIC(NumExternalCallOutputAbiDecodeBuffers,
           "Number of Solidity external call output ABI decode buffers found");
+STATISTIC(NumExternalCallOutputAllocations,
+          "Number of Solidity external call output allocations found");
 STATISTIC(NumExternalCallOutputWordReads,
           "Number of Solidity external call output word reads found");
 STATISTIC(NumExternalCallInputWordWrites,
@@ -366,6 +368,59 @@ void collectExternalCallOutputWordReadMarkers(
   }
 }
 
+CallBase *findExternalCallOutputAllocationMarker(BasicBlock &BB,
+                                                 CallBase &ExternalCall,
+                                                 Value *OutputBase) {
+  auto IsMatchingAllocation = [&](CallBase *Call) {
+    if (!isCallTo(Call, "notdec_solidity_memory_allocation") ||
+        Call->arg_size() != 2) {
+      return false;
+    }
+    return isSameOrReloadedFreeMemoryBase(Call->getArgOperand(0), OutputBase);
+  };
+
+  bool SeenExternalCall = false;
+  for (Instruction &I : BB) {
+    if (&I == &ExternalCall) {
+      SeenExternalCall = true;
+      continue;
+    }
+    if (!SeenExternalCall) {
+      continue;
+    }
+
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (IsMatchingAllocation(Call)) {
+      return Call;
+    }
+    if (isFreeMemoryPointerStore(Call) ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      return nullptr;
+    }
+  }
+
+  for (BasicBlock *Succ : successors(&BB)) {
+    for (Instruction &I : *Succ) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr) {
+        continue;
+      }
+      if (IsMatchingAllocation(Call)) {
+        return Call;
+      }
+      if (isFreeMemoryPointerStore(Call) ||
+          !classifyExternalCall(getCalleeName(Call)).empty()) {
+        break;
+      }
+    }
+  }
+
+  return nullptr;
+}
+
 void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
                                             CallBase &Consumer, uint64_t Role,
@@ -442,6 +497,27 @@ void insertExternalCallOutputAbiDecodeBufferMarker(LLVMContext &Ctx,
                                                 CopyWrite.getArgOperand(0),
                                                 CopyWrite.getArgOperand(3),
                                                 CallKind);
+}
+
+void insertExternalCallOutputAllocationMarker(LLVMContext &Ctx,
+                                              CallBase &Allocation,
+                                              Value *OutputSize,
+                                              uint64_t CallKind) {
+  if (Allocation.arg_size() != 2 || OutputSize == nullptr) {
+    return;
+  }
+
+  Module *M = Allocation.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_output_allocation",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&Allocation);
+  Builder.CreateCall(Marker,
+                     {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
+                      OutputSize, ConstantInt::get(I256, CallKind)});
 }
 
 bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
@@ -596,6 +672,14 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
             Ctx, *OutputWordReads.front(), Args->OutputBase, Args->OutputSize,
             CallKind);
         ++NumExternalCallOutputAbiDecodeBuffers;
+      }
+      if (InsertedOutputDecodeBuffer || !OutputWordReads.empty()) {
+        if (CallBase *Allocation = findExternalCallOutputAllocationMarker(
+                *Call->getParent(), *Call, Args->OutputBase)) {
+          insertExternalCallOutputAllocationMarker(Ctx, *Allocation,
+                                                   Args->OutputSize, CallKind);
+          ++NumExternalCallOutputAllocations;
+        }
       }
       for (CallBase *WordRead : OutputWordReads) {
         if (insertExternalCallOutputWordReadMarker(Ctx, *WordRead,
