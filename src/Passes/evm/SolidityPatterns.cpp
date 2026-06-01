@@ -2859,6 +2859,75 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
          hasMemoryAllocationSizeReturn(SuccessBlock, Length);
 }
 
+bool callHasArg(CallBase *Call, Value *Needle) {
+  if (Call == nullptr || Needle == nullptr) {
+    return false;
+  }
+  for (Value *Arg : Call->args()) {
+    if (isSameValue(Arg, Needle)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasLengthGreaterThan31Branch(BasicBlock *BB, Value *Length) {
+  if (BB == nullptr || Length == nullptr) {
+    return false;
+  }
+  auto *Br = dyn_cast_or_null<BranchInst>(BB->getTerminator());
+  if (Br == nullptr || !Br->isConditional()) {
+    return false;
+  }
+  auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
+  if (Cmp == nullptr) {
+    return false;
+  }
+  return (Cmp->getPredicate() == ICmpInst::ICMP_UGT &&
+          isSameValue(Cmp->getOperand(0), Length) &&
+          isConstantIntValue(Cmp->getOperand(1), 31)) ||
+         (Cmp->getPredicate() == ICmpInst::ICMP_ULT &&
+          isConstantIntValue(Cmp->getOperand(0), 31) &&
+          isSameValue(Cmp->getOperand(1), Length));
+}
+
+bool hasStorageByteArrayCopyToStorageSuccess(BasicBlock *SuccessBlock,
+                                             Value *Length) {
+  if (SuccessBlock == nullptr || Length == nullptr ||
+      !hasLengthGreaterThan31Branch(SuccessBlock, Length)) {
+    return false;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *SLoad = dyn_cast<CallBase>(&I);
+    if (SLoad == nullptr || !isCallTo(SLoad, "evm_sload") ||
+        SLoad->arg_size() != 1) {
+      continue;
+    }
+    Value *Slot = SLoad->getArgOperand(0);
+
+    for (Instruction &OldLenI : *SuccessBlock) {
+      auto *OldLen = dyn_cast<CallBase>(&OldLenI);
+      if (!isPrivateHelperCall(OldLen) || !OldLen->getType()->isIntegerTy(256) ||
+          !callHasArg(OldLen, SLoad)) {
+        continue;
+      }
+
+      for (Instruction &CopyI : *SuccessBlock) {
+        auto *Copy = dyn_cast<CallBase>(&CopyI);
+        if (!isPrivateHelperCall(Copy) || !Copy->getType()->isVoidTy()) {
+          continue;
+        }
+        if (callHasArg(Copy, Slot) && callHasArg(Copy, OldLen) &&
+            callHasArg(Copy, Length)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 bool isMemoryAllocationSize(Value *V) {
   auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
   if (RoundedSize == nullptr || RoundedSize->getOpcode() != Instruction::And) {
@@ -3010,6 +3079,50 @@ matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
   }
 
   return CheckedBoundsMatch{"memory_allocation_bounds",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {Length},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
+std::optional<CheckedBoundsMatch> matchStorageByteArrayLengthBounds(
+    const NormalizedCondition &FailureCond,
+    const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *Length = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGE &&
+      isUInt64Limit(Cmp->getOperand(1))) {
+    Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+             isUInt64Limit(Cmp->getOperand(0))) {
+    Length = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGT &&
+             isUInt64Max(Cmp->getOperand(1))) {
+    Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT &&
+             isUInt64Max(Cmp->getOperand(0))) {
+    Length = Cmp->getOperand(1);
+  } else {
+    return std::nullopt;
+  }
+
+  if (!hasStorageByteArrayCopyToStorageSuccess(SuccessBlock, Length)) {
+    return std::nullopt;
+  }
+
+  return CheckedBoundsMatch{"storage_byte_array_length_bounds",
                             "",
                             nullptr,
                             nullptr,
@@ -3390,6 +3503,15 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       return MemoryBounds;
     }
 
+    if (std::optional<CheckedBoundsMatch> StorageByteArrayLength =
+            matchStorageByteArrayLengthBounds(
+                *FailureCond, *RevertMatch, Br->getSuccessor(1 - SuccIdx))) {
+      StorageByteArrayLength->Branch = Br;
+      StorageByteArrayLength->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      StorageByteArrayLength->FailureBlock = Failure;
+      return StorageByteArrayLength;
+    }
+
     if (std::optional<CheckedBoundsMatch> FixedMemoryPointerBounds =
             matchFixedMemoryAllocationPointerBounds(
                 *FailureCond, *RevertMatch, Br->getSuccessor(1 - SuccIdx))) {
@@ -3450,6 +3572,9 @@ StringRef getCheckedBoundsRewriteMarkerName(StringRef Kind) {
   }
   if (Kind == "storage_bytes_encoding") {
     return "notdec_solidity_rewrite_storage_bytes_encoding";
+  }
+  if (Kind == "storage_byte_array_length_bounds") {
+    return "notdec_solidity_rewrite_storage_byte_array_length_bounds";
   }
   if (Kind == "enum_conversion") {
     return "notdec_solidity_rewrite_enum_conversion";
