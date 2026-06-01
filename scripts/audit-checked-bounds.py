@@ -61,6 +61,14 @@ def main() -> int:
         action="store_true",
         help="List files that still contain checked-bounds skip metadata",
     )
+    parser.add_argument(
+        "--fail-on-mismatch",
+        action="store_true",
+        help=(
+            "Return non-zero unless non-skipped checked-bounds metadata count "
+            "matches semantic marker and CFG rewrite counts"
+        ),
+    )
     args = parser.parse_args()
 
     files: list[Path] = []
@@ -96,11 +104,28 @@ def main() -> int:
     print_counter("skip_reasons", totals["skip_reasons"])
     print(f"cfg_rewrites: {total_cfg_rewrites}")
 
+    checked_bounds_total = sum(totals["kinds"].values())
+    skip_total = sum(totals["skip_reasons"].values())
+    rewrite_expected = checked_bounds_total - skip_total
+    marker_total = sum(totals["semantic_markers"].values())
+    print(f"rewrite_expected: {rewrite_expected}")
+    print(f"rewrite_markers: {marker_total}")
+
     if args.list_skips and skipped_files:
         print("skip_files:")
         for path, reasons in skipped_files:
             reason_text = ", ".join(f"{k}:{v}" for k, v in reasons.most_common())
             print(f"  {path}: {reason_text}")
+
+    if args.fail_on_mismatch and (
+        rewrite_expected != marker_total or rewrite_expected != total_cfg_rewrites
+    ):
+        print(
+            "ERROR: checked-bounds rewrite mismatch: "
+            f"expected={rewrite_expected} markers={marker_total} "
+            f"cfg_rewrites={total_cfg_rewrites}"
+        )
+        return 1
 
     return 0
 
