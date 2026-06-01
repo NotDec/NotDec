@@ -1644,6 +1644,35 @@
         "65": 6,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "array_bounds_memory": 45,
+        "memory_allocation_bounds": 4,
+        "memory_allocation_pointer_bounds": 1,
+        "storage_bytes_encoding": 1,
+        "panic_resource_error": 1,
+        "checked_add": 1,
+        "checked_mul": 1,
+        "checked_sub": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "50": 45,
+        "65": 6,
+        "34": 1,
+        "17": 3
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_array_bounds_memory": 45,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 4,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_checked_add": 1,
+        "notdec_solidity_rewrite_checked_mul": 1,
+        "notdec_solidity_rewrite_checked_sub": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 54,
       "expected_returndata_bubbles": 10
     },
     {
@@ -2416,6 +2445,45 @@
         "65": 5,
         "81": 0
       },
+      "expected_checked_bounds_kinds": {
+        "memory_allocation_bounds": 3,
+        "array_bounds_memory": 1,
+        "array_bounds_storage": 3,
+        "empty_array_pop_storage": 1,
+        "checked_mod": 1,
+        "memory_allocation_pointer_bounds": 1,
+        "storage_bytes_encoding": 1,
+        "checked_mul": 1,
+        "checked_div": 1,
+        "checked_add": 2,
+        "panic_resource_error": 1,
+        "checked_sub": 2
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 5,
+        "50": 4,
+        "49": 1,
+        "18": 2,
+        "34": 1,
+        "17": 5
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_memory_allocation_bounds": 3,
+        "notdec_solidity_rewrite_array_bounds_memory": 1,
+        "notdec_solidity_rewrite_array_bounds_storage": 3,
+        "notdec_solidity_rewrite_empty_array_pop_storage": 1,
+        "notdec_solidity_rewrite_checked_mod": 1,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_checked_mul": 1,
+        "notdec_solidity_rewrite_checked_div": 1,
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_checked_sub": 2
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 17,
       "expected_returndata_bubbles": 1
     },
     {
@@ -2512,10 +2580,10 @@
       },
       "expected_checked_bounds_kinds": {
         "checked_add": 1,
-        "panic_resource_error": 2,
+        "panic_resource_error": 1,
         "array_bounds_storage": 3,
         "empty_array_pop_storage": 1,
-        "memory_allocation_bounds": 1,
+        "memory_allocation_bounds": 2,
         "memory_allocation_pointer_bounds": 1,
         "storage_bytes_encoding": 1,
         "checked_mul": 1,
@@ -2533,7 +2601,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_checked_add": 1,
         "notdec_solidity_rewrite_array_bounds_storage": 3,
-        "notdec_solidity_rewrite_memory_allocation_bounds": 1,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 2,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
         "notdec_solidity_rewrite_checked_mul": 1,
@@ -2543,9 +2611,9 @@
         "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 2
+        "unrecognized_operands": 1
       },
-      "expected_checked_bounds_cfg_rewrites": 12,
+      "expected_checked_bounds_cfg_rewrites": 13,
       "expected_returndata_bubbles": 0
     },
     {

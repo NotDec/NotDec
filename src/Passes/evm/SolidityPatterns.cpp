@@ -2445,6 +2445,42 @@ bool isByteAllocationSize(Value *V, Value *Length) {
   return Rounded != nullptr && isRoundedByteLength(Rounded, Length);
 }
 
+bool isPreIncrementByteAllocationSize(Value *V, Value *Length) {
+  // roundUp(base + 1) + 32 is simplified to (base & -32) + 64.
+  auto *LengthAdd = dyn_cast_or_null<BinaryOperator>(Length);
+  if (LengthAdd == nullptr || LengthAdd->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  Value *Base = nullptr;
+  if (isConstantIntValue(LengthAdd->getOperand(0), 1)) {
+    Base = LengthAdd->getOperand(1);
+  } else if (isConstantIntValue(LengthAdd->getOperand(1), 1)) {
+    Base = LengthAdd->getOperand(0);
+  }
+  if (Base == nullptr) {
+    return false;
+  }
+
+  auto *SizeAdd = dyn_cast_or_null<BinaryOperator>(V);
+  if (SizeAdd == nullptr || SizeAdd->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  Value *RoundedBase = nullptr;
+  if (isConstantIntValue(SizeAdd->getOperand(0), 64)) {
+    RoundedBase = SizeAdd->getOperand(1);
+  } else if (isConstantIntValue(SizeAdd->getOperand(1), 64)) {
+    RoundedBase = SizeAdd->getOperand(0);
+  }
+
+  auto *Rounded = dyn_cast_or_null<BinaryOperator>(RoundedBase);
+  return Rounded != nullptr && Rounded->getOpcode() == Instruction::And &&
+         binaryOpHasOperand(Rounded, Base) &&
+         (isMaskClearingLowFiveBits(Rounded->getOperand(0)) ||
+          isMaskClearingLowFiveBits(Rounded->getOperand(1)));
+}
+
 bool isArrayAllocationSize(Value *V, Value *Length, BasicBlock *BB) {
   auto *SizeAdd = dyn_cast_or_null<BinaryOperator>(V);
   if (SizeAdd == nullptr || SizeAdd->getOpcode() != Instruction::Add) {
@@ -2547,6 +2583,7 @@ bool isRoundedByteAllocationSizeForLength(Value *V, Value *Length) {
 
 bool isDynamicAllocationSize(Value *V, Value *Length, BasicBlock *BB) {
   return isByteAllocationSize(V, Length) ||
+         isPreIncrementByteAllocationSize(V, Length) ||
          isRoundedByteAllocationSizeForLength(V, Length) ||
          isArrayAllocationSize(V, Length, BB);
 }
