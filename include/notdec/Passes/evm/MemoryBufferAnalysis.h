@@ -23,6 +23,8 @@ enum class MemoryConsumerKind {
   Return = 1,
   Revert = 2,
   EventLog = 3,
+  ExternalCallInput = 4,
+  ExternalCallOutput = 5,
 };
 
 // A Solidity allocation is modeled as the relation between the free-memory
@@ -47,7 +49,8 @@ struct MemoryWrite {
 };
 
 // A consumer is the operation that gives a memory buffer Solidity meaning.
-// Return, revert, and event data are handled first; calls will be added later.
+// A single base may have several roles, especially external calls that reuse
+// the input base for output or later returndata.
 struct MemoryConsumer {
   llvm::CallBase *Call = nullptr;
   MemoryConsumerKind Kind = MemoryConsumerKind::Return;

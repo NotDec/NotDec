@@ -49,6 +49,32 @@ bool isEvmLogCall(CallBase *Call) {
   return TopicCount >= '0' && TopicCount <= '4';
 }
 
+struct ExternalCallMemoryArgs {
+  Value *InputBase = nullptr;
+  Value *InputSize = nullptr;
+  Value *OutputBase = nullptr;
+  Value *OutputSize = nullptr;
+};
+
+std::optional<ExternalCallMemoryArgs> getExternalCallMemoryArgs(CallBase *Call) {
+  StringRef Name = detail::getCalleeName(Call);
+  if ((Name == "evm_call" || Name == "evm_callcode") &&
+      Call->arg_size() == 10) {
+    return ExternalCallMemoryArgs{Call->getArgOperand(6),
+                                  Call->getArgOperand(7),
+                                  Call->getArgOperand(8),
+                                  Call->getArgOperand(9)};
+  }
+  if ((Name == "evm_delegatecall" || Name == "evm_staticcall") &&
+      Call->arg_size() == 9) {
+    return ExternalCallMemoryArgs{Call->getArgOperand(5),
+                                  Call->getArgOperand(6),
+                                  Call->getArgOperand(7),
+                                  Call->getArgOperand(8)};
+  }
+  return std::nullopt;
+}
+
 std::optional<uint64_t> getOffsetFromBase(Value *Ptr, Value *Base) {
   if (isSameValue(Ptr, Base)) {
     return 0;
@@ -235,6 +261,22 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
         Facts.Consumers.push_back(MemoryConsumer{
             Call, MemoryConsumerKind::EventLog, Call->getArgOperand(1),
             Call->getArgOperand(2)});
+      }
+      continue;
+    }
+
+    std::optional<ExternalCallMemoryArgs> ExternalArgs =
+        getExternalCallMemoryArgs(Call);
+    if (ExternalArgs.has_value()) {
+      if (isFreeMemoryPointerLoad(ExternalArgs->InputBase)) {
+        Facts.Consumers.push_back(MemoryConsumer{
+            Call, MemoryConsumerKind::ExternalCallInput,
+            ExternalArgs->InputBase, ExternalArgs->InputSize});
+      }
+      if (isFreeMemoryPointerLoad(ExternalArgs->OutputBase)) {
+        Facts.Consumers.push_back(MemoryConsumer{
+            Call, MemoryConsumerKind::ExternalCallOutput,
+            ExternalArgs->OutputBase, ExternalArgs->OutputSize});
       }
       continue;
     }

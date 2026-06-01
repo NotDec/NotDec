@@ -918,11 +918,13 @@
       },
       "expected_returndata_bubbles": 0,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_memory_consumer": 3
+        "notdec_solidity_memory_consumer": 5
       },
       "expected_memory_consumer_kinds": {
         "return": 2,
-        "event_log": 1
+        "event_log": 1,
+        "external_call_input": 1,
+        "external_call_output": 1
       }
     },
     {
