@@ -1033,7 +1033,19 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_memory_copy_write": 2,
+        "notdec_solidity_memory_consumer": 3
+      },
+      "expected_memory_consumer_kinds": {
+        "return": 2,
+        "revert": 1
+      },
+      "expected_memory_copy_write_kinds": {
+        "calldata": 1,
+        "scratch_returndata": 1
+      }
     },
     {
       "name": "0441_19494998_776c03cc9d_8117f350cb9d",

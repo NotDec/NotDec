@@ -268,6 +268,7 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
             MemoryWriteKind::ScratchReturndataCopy});
         continue;
       }
+      bool MatchedBase = false;
       for (Value *Base : Bases) {
         std::optional<uint64_t> Offset = getOffsetFromBase(Dst, Base);
         if (!Offset.has_value()) {
@@ -279,7 +280,15 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
         Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
                                            Call->getArgOperand(4),
                                            Call->getArgOperand(3), Kind});
+        MatchedBase = true;
         break;
+      }
+      if (!MatchedBase) {
+        MemoryWriteKind Kind = detail::isCallTo(Call, "evm_calldatacopy")
+                                   ? MemoryWriteKind::CalldataCopy
+                                   : MemoryWriteKind::ReturndataCopy;
+        Facts.Writes.push_back(MemoryWrite{Call, Dst, 0, Call->getArgOperand(4),
+                                           Call->getArgOperand(3), Kind});
       }
       continue;
     }
