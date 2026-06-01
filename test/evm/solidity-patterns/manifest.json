@@ -2672,7 +2672,30 @@
         "65": 3,
         "81": 0
       },
-      "expected_returndata_bubbles": 9
+      "expected_returndata_bubbles": 9,
+      "expected_checked_bounds_kinds": {
+        "memory_allocation_bounds": 2,
+        "checked_mul": 1,
+        "memory_allocation_pointer_bounds": 1,
+        "storage_bytes_encoding": 1,
+        "checked_add": 1,
+        "checked_sub": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 3,
+        "17": 3,
+        "34": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_memory_allocation_bounds": 2,
+        "notdec_solidity_rewrite_checked_mul": 1,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_checked_add": 1,
+        "notdec_solidity_rewrite_checked_sub": 1
+      },
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 7
     },
     {
       "name": "1847_19507643_148f68d102_07c7230a7676",

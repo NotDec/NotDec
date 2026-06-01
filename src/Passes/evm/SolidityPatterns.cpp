@@ -1882,6 +1882,35 @@ BinaryOperator *matchMulByMaxDivBound(ICmpInst *Cmp,
                                         Div->getArgOperand(1));
 }
 
+BinaryOperator *matchMulByStrictConstMaxDivBound(ICmpInst *Cmp,
+                                                 ICmpInst::Predicate Pred,
+                                                 BasicBlock *SuccessBlock) {
+  if (Cmp == nullptr) {
+    return nullptr;
+  }
+
+  CallBase *Div = nullptr;
+  ConstantInt *ConstMinusOne = nullptr;
+  if (Pred == ICmpInst::ICMP_UGT) {
+    Div = dyn_cast<CallBase>(Cmp->getOperand(0));
+    ConstMinusOne = dyn_cast<ConstantInt>(Cmp->getOperand(1));
+  } else {
+    return nullptr;
+  }
+
+  if (Div == nullptr || ConstMinusOne == nullptr || !isCallTo(Div, "evm_div") ||
+      Div->arg_size() != 2 || !isAllOnes(Div->getArgOperand(0)) ||
+      ConstMinusOne->isMinusOne()) {
+    return nullptr;
+  }
+
+  auto FactorValue = ConstMinusOne->getValue() + 1;
+  auto *Factor =
+      ConstantInt::get(ConstMinusOne->getType(), FactorValue);
+  return findCommutativeBinaryOpInBlock(SuccessBlock, Instruction::Mul, Factor,
+                                        Div->getArgOperand(1));
+}
+
 BinaryOperator *matchMulByCleanedMaxDivBound(ICmpInst *Cmp,
                                              ICmpInst::Predicate Pred,
                                              BasicBlock *SuccessBlock,
@@ -1952,6 +1981,10 @@ BinaryOperator *matchCheckedMulMaxDivSuccessCondition(Value *V,
 
   BinaryOperator *Product =
       matchMulByMaxDivBound(BoundCmp, BoundPred, SuccessBlock);
+  if (Product == nullptr) {
+    Product = matchMulByStrictConstMaxDivBound(BoundCmp, BoundPred,
+                                               SuccessBlock);
+  }
   if (Product == nullptr || ZeroChecked == nullptr) {
     return nullptr;
   }
