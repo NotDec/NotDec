@@ -1886,10 +1886,10 @@
       },
       "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
-        "panic_resource_error": 3,
+        "panic_resource_error": 2,
         "storage_bytes_encoding": 1,
         "memory_allocation_bounds": 1,
-        "memory_allocation_pointer_bounds": 4,
+        "memory_allocation_pointer_bounds": 5,
         "enum_conversion": 1,
         "checked_add": 9,
         "checked_sub": 10,
@@ -1911,13 +1911,13 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
         "notdec_solidity_rewrite_enum_conversion": 1,
         "notdec_solidity_rewrite_memory_allocation_bounds": 1,
-        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 5
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 3,
+        "unrecognized_operands": 2,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 27
+      "expected_checked_bounds_cfg_rewrites": 28
     },
     {
       "name": "0334_19494307_668d201319_1354ce2e324d",
@@ -2384,8 +2384,8 @@
       },
       "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
-        "panic_resource_error": 3,
-        "memory_allocation_pointer_bounds": 4,
+        "panic_resource_error": 2,
+        "memory_allocation_pointer_bounds": 5,
         "memory_allocation_bounds": 1,
         "storage_bytes_encoding": 1,
         "enum_conversion": 1,
@@ -2409,13 +2409,13 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1,
         "notdec_solidity_rewrite_enum_conversion": 1,
         "notdec_solidity_rewrite_memory_allocation_bounds": 1,
-        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 5
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 3,
+        "unrecognized_operands": 2,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 27
+      "expected_checked_bounds_cfg_rewrites": 28
     },
     {
       "name": "1407_19503702_47675ff2ed_71b1710392bd",

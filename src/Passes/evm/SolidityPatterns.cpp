@@ -3940,6 +3940,51 @@ std::optional<CheckedBoundsMatch> matchFixedMemoryAllocationPointerBounds(
                             true};
 }
 
+std::optional<CheckedBoundsMatch> matchZeroSizeMemoryAllocationPointerBounds(
+    const NormalizedCondition &FailureCond,
+    const SolidityRevertMatch &RevertMatch, BasicBlock *SuccessBlock) {
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *NewPtr = nullptr;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGT &&
+      isUInt64Max(Cmp->getOperand(1))) {
+    NewPtr = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT &&
+             isUInt64Max(Cmp->getOperand(0))) {
+    NewPtr = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGE &&
+             isUInt64Limit(Cmp->getOperand(1))) {
+    NewPtr = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+             isUInt64Limit(Cmp->getOperand(0))) {
+    NewPtr = Cmp->getOperand(1);
+  } else {
+    return std::nullopt;
+  }
+
+  if (findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *ZeroSize = ConstantInt::get(NewPtr->getType(), 0);
+  return CheckedBoundsMatch{"memory_allocation_pointer_bounds",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {NewPtr, ZeroSize, NewPtr},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 std::optional<CheckedBoundsMatch>
 matchStorageBytesEncoding(Value *BranchCondition, bool FailureWhenCondTrue,
                           const SolidityRevertMatch &RevertMatch) {
@@ -4280,6 +4325,16 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       FixedMemoryPointerBounds->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       FixedMemoryPointerBounds->FailureBlock = Failure;
       return FixedMemoryPointerBounds;
+    }
+
+    if (std::optional<CheckedBoundsMatch> ZeroSizeMemoryPointerBounds =
+            matchZeroSizeMemoryAllocationPointerBounds(
+                *FailureCond, *RevertMatch, Br->getSuccessor(1 - SuccIdx))) {
+      ZeroSizeMemoryPointerBounds->Branch = Br;
+      ZeroSizeMemoryPointerBounds->SuccessBlock =
+          Br->getSuccessor(1 - SuccIdx);
+      ZeroSizeMemoryPointerBounds->FailureBlock = Failure;
+      return ZeroSizeMemoryPointerBounds;
     }
 
     return Match;
