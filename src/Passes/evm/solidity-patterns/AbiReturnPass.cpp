@@ -19,6 +19,8 @@ STATISTIC(NumAbiReturnDataWordWrites,
           "Number of Solidity ABI return data word writes found");
 STATISTIC(NumAbiReturnDataCopyWrites,
           "Number of Solidity ABI return data copy writes found");
+STATISTIC(NumAbiReturnDataAllocations,
+          "Number of Solidity ABI return data allocations found");
 
 namespace {
 
@@ -65,6 +67,15 @@ CallBase *findReturnConsumerMarker(BasicBlock &BB, CallBase &Return) {
 bool isAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && (*Offset % 32) == 0;
+}
+
+bool isSameAbiReturnDataBase(Value *LHS, Value *RHS) {
+  if (LHS == RHS) {
+    return true;
+  }
+  std::optional<uint64_t> LConst = getUInt64Constant(LHS);
+  std::optional<uint64_t> RConst = getUInt64Constant(RHS);
+  return LConst.has_value() && RConst.has_value() && *LConst == *RConst;
 }
 
 void collectAbiReturnDataWordWriteMarkers(
@@ -133,6 +144,47 @@ void collectAbiReturnDataCopyWriteMarkers(
   Writes.append(Candidates.begin(), Candidates.end());
 }
 
+CallBase *findAbiReturnDataAllocationMarker(BasicBlock &BB, CallBase &Return,
+                                            ArrayRef<CallBase *> WordWrites,
+                                            ArrayRef<CallBase *> CopyWrites) {
+  auto MatchesReturnDataBase = [&](Value *AllocationBase) {
+    for (CallBase *Write : WordWrites) {
+      if (Write->arg_size() == 3 &&
+          isSameAbiReturnDataBase(AllocationBase, Write->getArgOperand(0))) {
+        return true;
+      }
+    }
+    for (CallBase *Copy : CopyWrites) {
+      if (Copy->arg_size() == 5 &&
+          isSameAbiReturnDataBase(AllocationBase, Copy->getArgOperand(0))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  CallBase *Candidate = nullptr;
+  for (Instruction &I : BB) {
+    if (&I == &Return) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_allocation") ||
+        Call->arg_size() != 2) {
+      continue;
+    }
+    if (MatchesReturnDataBase(Call->getArgOperand(0))) {
+      Candidate = Call;
+    }
+  }
+
+  return Candidate;
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -144,6 +196,23 @@ void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
   IRBuilder<> Builder(&Return);
   Builder.CreateCall(Marker,
                      {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDataAllocationMarker(LLVMContext &Ctx, CallBase &Return,
+                                         CallBase &Allocation,
+                                         CallBase &Consumer, StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_data_allocation",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
+                      Consumer.getArgOperand(1),
                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
@@ -213,6 +282,12 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &) {
       for (CallBase *CopyWrite : CopyWrites) {
         insertAbiReturnDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Kind);
         ++NumAbiReturnDataCopyWrites;
+      }
+      if (CallBase *Allocation = findAbiReturnDataAllocationMarker(
+              *Call->getParent(), *Call, WordWrites, CopyWrites)) {
+        insertAbiReturnDataAllocationMarker(Ctx, *Call, *Allocation, *Consumer,
+                                            Kind);
+        ++NumAbiReturnDataAllocations;
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, Kind);
