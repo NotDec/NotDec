@@ -3279,10 +3279,17 @@ bool matchStorageBytesLength(Value *Length, Value *Slot) {
   auto *ShortLen = dyn_cast<BinaryOperator>(Select->getTrueValue());
   auto *FullLen = dyn_cast<CallBase>(Select->getFalseValue());
   if (ShortLen == nullptr || ShortLen->getOpcode() != Instruction::And ||
-      FullLen == nullptr || !isCallTo(FullLen, "evm_shr") ||
-      FullLen->arg_size() != 2 ||
-      !isConstantIntValue(FullLen->getArgOperand(0), 1) ||
-      !isSameValue(FullLen->getArgOperand(1), Slot)) {
+      FullLen == nullptr || FullLen->arg_size() != 2) {
+    return false;
+  }
+
+  bool IsDivByTwo = isCallTo(FullLen, "evm_div") &&
+                    isSameValue(FullLen->getArgOperand(0), Slot) &&
+                    isConstantIntValue(FullLen->getArgOperand(1), 2);
+  bool IsShrByOne = isCallTo(FullLen, "evm_shr") &&
+                    isConstantIntValue(FullLen->getArgOperand(0), 1) &&
+                    isSameValue(FullLen->getArgOperand(1), Slot);
+  if (!IsDivByTwo && !IsShrByOne) {
     return false;
   }
 

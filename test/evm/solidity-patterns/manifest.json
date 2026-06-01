@@ -2855,7 +2855,7 @@
         "checked_div": 1,
         "checked_mul": 1,
         "checked_sub": 1,
-        "panic_storage_encoding": 1,
+        "storage_bytes_encoding": 1,
         "empty_array_pop_storage": 1
       },
       "expected_checked_bounds_panic_codes": {
@@ -2874,13 +2874,11 @@
         "notdec_solidity_rewrite_checked_div": 1,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
         "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
-      "expected_checked_bounds_skip_reasons": {
-        "unsupported_condition": 1,
-        "unrecognized_operands": 0
-      },
-      "expected_checked_bounds_cfg_rewrites": 18,
+      "expected_checked_bounds_skip_reasons": {},
+      "expected_checked_bounds_cfg_rewrites": 19,
       "expected_returndata_bubbles": 7
     },
     {
