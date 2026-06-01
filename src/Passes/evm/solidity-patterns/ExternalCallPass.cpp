@@ -18,6 +18,8 @@ STATISTIC(NumExternalCallMemoryConsumers,
           "Number of Solidity external call memory consumers found");
 STATISTIC(NumExternalCallInputCopyWrites,
           "Number of Solidity external call input copy writes found");
+STATISTIC(NumExternalCallInputWordWrites,
+          "Number of Solidity external call input word writes found");
 
 namespace {
 
@@ -136,6 +138,46 @@ CallBase *findExternalCallInputCopyWriteMarker(BasicBlock &BB,
   return Candidate;
 }
 
+CallBase *findExternalCallInputWordWriteMarker(BasicBlock &BB,
+                                               CallBase &ExternalCall,
+                                               Value *InputBase) {
+  CallBase *Candidate = nullptr;
+
+  for (Instruction &I : BB) {
+    if (&I == &ExternalCall) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      Candidate = nullptr;
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_write") ||
+        Call->arg_size() != 3 ||
+        !isConstantIntValue(Call->getArgOperand(1), 0)) {
+      continue;
+    }
+
+    Value *WriteBase = Call->getArgOperand(0);
+    if (WriteBase == InputBase) {
+      Candidate = Call;
+      continue;
+    }
+
+    if (isFreeMemoryPointerLoad(WriteBase) &&
+        isFreeMemoryPointerLoad(InputBase)) {
+      Candidate = Call;
+    }
+  }
+
+  return Candidate;
+}
+
 void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
                                             CallBase &Consumer, uint64_t Role,
@@ -172,6 +214,24 @@ void insertExternalCallInputCopyWriteMarker(LLVMContext &Ctx,
                       ConstantInt::get(I256, CallKind)});
 }
 
+void insertExternalCallInputWordWriteMarker(LLVMContext &Ctx,
+                                            CallBase &ExternalCall,
+                                            CallBase &WordWrite,
+                                            uint64_t CallKind) {
+  Module *M = ExternalCall.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_input_word_write",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&ExternalCall);
+  Builder.CreateCall(Marker,
+                     {WordWrite.getArgOperand(0), WordWrite.getArgOperand(1),
+                      WordWrite.getArgOperand(2),
+                      ConstantInt::get(I256, CallKind)});
+}
+
 } // namespace
 
 PreservedAnalyses ExternalCallPass::run(Function &F,
@@ -202,6 +262,12 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallInputCopyWriteMarker(Ctx, *Call, *CopyWrite,
                                                CallKind);
         ++NumExternalCallInputCopyWrites;
+      }
+      if (CallBase *WordWrite = findExternalCallInputWordWriteMarker(
+              *Call->getParent(), *Call, Args->InputBase)) {
+        insertExternalCallInputWordWriteMarker(Ctx, *Call, *WordWrite,
+                                               CallKind);
+        ++NumExternalCallInputWordWrites;
       }
       if (CallBase *Consumer = findExternalCallConsumerMarker(
               *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
