@@ -176,36 +176,37 @@ def write_csv_summary(
         )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("paths", nargs="+", help="Output directories or .ll files")
-    parser.add_argument(
-        "--csv",
-        help="Write one-row CSV summary for batch trend tracking",
-    )
-    parser.add_argument(
-        "--list-skips",
-        action="store_true",
-        help="List files that still contain checked-bounds skip metadata",
-    )
-    parser.add_argument(
-        "--fail-on-mismatch",
-        action="store_true",
-        help=(
-            "Return non-zero unless non-skipped checked-bounds metadata count "
-            "matches semantic marker kinds and CFG rewrite counts"
-        ),
-    )
-    args = parser.parse_args()
+def write_csv_rows(path: Path, rows: list[dict[str, str | int]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "input",
+                "files",
+                "checked_bounds_total",
+                "skip_total",
+                "semantic_marker_total",
+                "cfg_rewrites",
+                "rewrite_expected",
+                "cpp_marker_mapping",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(rows)
 
-    files: list[Path] = []
-    for raw_path in args.paths:
-        path = Path(raw_path)
-        if path.is_dir():
-            files.extend(sorted(path.rglob("*.ll")))
-        elif path.suffix == ".ll":
-            files.append(path)
 
+def collect_files(path: Path) -> list[Path]:
+    if path.is_dir():
+        return sorted(path.rglob("*.ll"))
+    if path.suffix == ".ll":
+        return [path]
+    return []
+
+
+def summarize_files(
+    files: list[Path], cpp_marker_mapping_status: str
+) -> tuple[dict[str, int | str | Counter[str]], list[tuple[Path, Counter[str]]]]:
     totals = {
         "kinds": Counter(),
         "panic_codes": Counter(),
@@ -226,41 +227,109 @@ def main() -> int:
         if isinstance(skip_reasons, Counter) and skip_reasons:
             skipped_files.append((path, skip_reasons))
 
-    print(f"files: {len(files)}")
-    print_counter("checked_bounds_kinds", totals["kinds"])
-    print_counter("panic_codes", totals["panic_codes"])
-    print_counter("semantic_markers", totals["semantic_markers"])
-    print_counter("expected_semantic_markers", totals["expected_markers"])
-    print_counter("unmapped_rewrite_kinds", totals["unmapped_rewrite_kinds"])
-    print_counter("skip_reasons", totals["skip_reasons"])
-    print(f"cfg_rewrites: {total_cfg_rewrites}")
-
     checked_bounds_total = sum(totals["kinds"].values())
     skip_total = sum(totals["skip_reasons"].values())
     rewrite_expected = checked_bounds_total - skip_total
     marker_total = sum(totals["semantic_markers"].values())
-    print(f"rewrite_expected: {rewrite_expected}")
-    print(f"rewrite_markers: {marker_total}")
+    summary = {
+        **totals,
+        "files": len(files),
+        "cfg_rewrites": total_cfg_rewrites,
+        "checked_bounds_total": checked_bounds_total,
+        "skip_total": skip_total,
+        "marker_total": marker_total,
+        "rewrite_expected": rewrite_expected,
+        "cpp_marker_mapping": cpp_marker_mapping_status,
+    }
+    return summary, skipped_files
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("paths", nargs="+", help="Output directories or .ll files")
+    parser.add_argument(
+        "--csv",
+        help="Write one-row CSV summary for batch trend tracking",
+    )
+    parser.add_argument(
+        "--csv-by-path",
+        help="Write one CSV row per input path for batch trend tracking",
+    )
+    parser.add_argument(
+        "--list-skips",
+        action="store_true",
+        help="List files that still contain checked-bounds skip metadata",
+    )
+    parser.add_argument(
+        "--fail-on-mismatch",
+        action="store_true",
+        help=(
+            "Return non-zero unless non-skipped checked-bounds metadata count "
+            "matches semantic marker kinds and CFG rewrite counts"
+        ),
+    )
+    args = parser.parse_args()
+
     cpp_marker_mapping = load_cpp_marker_mapping()
     cpp_marker_mapping_mismatch = cpp_marker_mapping != KIND_TO_MARKER
-    print(
-        "cpp_marker_mapping: "
-        f"{'mismatch' if cpp_marker_mapping_mismatch else 'matched'}"
+    cpp_marker_mapping_status = (
+        "mismatch" if cpp_marker_mapping_mismatch else "matched"
     )
+
+    input_files: list[tuple[str, list[Path]]] = []
+    files: list[Path] = []
+    for raw_path in args.paths:
+        path = Path(raw_path)
+        collected = collect_files(path)
+        input_files.append((raw_path, collected))
+        files.extend(collected)
+
+    summary, skipped_files = summarize_files(files, cpp_marker_mapping_status)
+
+    print(f"files: {len(files)}")
+    print_counter("checked_bounds_kinds", summary["kinds"])  # type: ignore[arg-type]
+    print_counter("panic_codes", summary["panic_codes"])  # type: ignore[arg-type]
+    print_counter("semantic_markers", summary["semantic_markers"])  # type: ignore[arg-type]
+    print_counter("expected_semantic_markers", summary["expected_markers"])  # type: ignore[arg-type]
+    print_counter("unmapped_rewrite_kinds", summary["unmapped_rewrite_kinds"])  # type: ignore[arg-type]
+    print_counter("skip_reasons", summary["skip_reasons"])  # type: ignore[arg-type]
+    print(f"cfg_rewrites: {summary['cfg_rewrites']}")
+
+    print(f"rewrite_expected: {summary['rewrite_expected']}")
+    print(f"rewrite_markers: {summary['marker_total']}")
+    print(f"cpp_marker_mapping: {cpp_marker_mapping_status}")
 
     if args.csv:
         write_csv_summary(
             Path(args.csv),
-            files=len(files),
-            checked_bounds_total=checked_bounds_total,
-            skip_total=skip_total,
-            marker_total=marker_total,
-            cfg_rewrites=total_cfg_rewrites,
-            rewrite_expected=rewrite_expected,
-            cpp_marker_mapping=(
-                "mismatch" if cpp_marker_mapping_mismatch else "matched"
-            ),
+            files=int(summary["files"]),
+            checked_bounds_total=int(summary["checked_bounds_total"]),
+            skip_total=int(summary["skip_total"]),
+            marker_total=int(summary["marker_total"]),
+            cfg_rewrites=int(summary["cfg_rewrites"]),
+            rewrite_expected=int(summary["rewrite_expected"]),
+            cpp_marker_mapping=str(summary["cpp_marker_mapping"]),
         )
+
+    if args.csv_by_path:
+        rows: list[dict[str, str | int]] = []
+        for raw_path, collected in input_files:
+            path_summary, _ = summarize_files(collected, cpp_marker_mapping_status)
+            rows.append(
+                {
+                    "input": raw_path,
+                    "files": int(path_summary["files"]),
+                    "checked_bounds_total": int(
+                        path_summary["checked_bounds_total"]
+                    ),
+                    "skip_total": int(path_summary["skip_total"]),
+                    "semantic_marker_total": int(path_summary["marker_total"]),
+                    "cfg_rewrites": int(path_summary["cfg_rewrites"]),
+                    "rewrite_expected": int(path_summary["rewrite_expected"]),
+                    "cpp_marker_mapping": str(path_summary["cpp_marker_mapping"]),
+                }
+            )
+        write_csv_rows(Path(args.csv_by_path), rows)
 
     if args.list_skips and skipped_files:
         print("skip_files:")
@@ -268,30 +337,31 @@ def main() -> int:
             reason_text = ", ".join(f"{k}:{v}" for k, v in reasons.most_common())
             print(f"  {path}: {reason_text}")
 
-    marker_mismatch = totals["expected_markers"] != totals["semantic_markers"]
+    marker_mismatch = summary["expected_markers"] != summary["semantic_markers"]
     if args.fail_on_mismatch and (
-        rewrite_expected != marker_total
-        or rewrite_expected != total_cfg_rewrites
+        summary["rewrite_expected"] != summary["marker_total"]
+        or summary["rewrite_expected"] != summary["cfg_rewrites"]
         or marker_mismatch
-        or totals["unmapped_rewrite_kinds"]
+        or summary["unmapped_rewrite_kinds"]
         or cpp_marker_mapping_mismatch
     ):
         print(
             "ERROR: checked-bounds rewrite mismatch: "
-            f"expected={rewrite_expected} markers={marker_total} "
-            f"cfg_rewrites={total_cfg_rewrites}"
+            f"expected={summary['rewrite_expected']} "
+            f"markers={summary['marker_total']} "
+            f"cfg_rewrites={summary['cfg_rewrites']}"
         )
         if marker_mismatch:
-            all_markers = set(totals["expected_markers"]) | set(
-                totals["semantic_markers"]
+            all_markers = set(summary["expected_markers"]) | set(
+                summary["semantic_markers"]
             )
             for marker in sorted(all_markers):
-                expected = totals["expected_markers"].get(marker, 0)
-                actual = totals["semantic_markers"].get(marker, 0)
+                expected = summary["expected_markers"].get(marker, 0)
+                actual = summary["semantic_markers"].get(marker, 0)
                 if expected != actual:
                     print(f"  {marker}: expected={expected} actual={actual}")
-        if totals["unmapped_rewrite_kinds"]:
-            for kind, count in totals["unmapped_rewrite_kinds"].most_common():
+        if summary["unmapped_rewrite_kinds"]:
+            for kind, count in summary["unmapped_rewrite_kinds"].most_common():
                 print(f"  unmapped kind {kind}: {count}")
         if cpp_marker_mapping_mismatch:
             print("  C++ marker mapping differs from Python audit mapping:")
