@@ -19,6 +19,8 @@ STATISTIC(NumStorageArrayDataKeccak,
           "Number of Solidity storage array data keccak markers found");
 STATISTIC(NumStorageArrayDataAccess,
           "Number of Solidity storage array data access markers found");
+STATISTIC(NumStorageMappingAccess,
+          "Number of Solidity storage mapping access markers found");
 
 namespace {
 
@@ -33,6 +35,10 @@ struct ArrayDataKeccakMatch {
 
 struct ArrayDataAccessMatch {
   CallBase *DataMarker = nullptr;
+};
+
+struct MappingAccessMatch {
+  CallBase *ScratchMarker = nullptr;
 };
 
 bool dependsOnValue(Value *V, Value *Target, unsigned Depth = 8) {
@@ -153,6 +159,31 @@ matchStorageArrayDataAccess(CallBase &Access, Value *StorageSlot) {
   return std::nullopt;
 }
 
+std::optional<MappingAccessMatch> matchStorageMappingAccess(CallBase &Access,
+                                                            Value *StorageSlot) {
+  MappingAccessMatch Match;
+  for (auto It = Access.getIterator(); It != Access.getParent()->begin();) {
+    --It;
+    auto *Call = dyn_cast<CallBase>(&*It);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_sha3") ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      break;
+    }
+    if (!isCallTo(Call, "notdec_solidity_storage_scratch_keccak") ||
+        Call->arg_size() != 3) {
+      continue;
+    }
+    if (dependsOnValue(StorageSlot, Call->getArgOperand(2))) {
+      Match.ScratchMarker = Call;
+      return Match;
+    }
+  }
+  return std::nullopt;
+}
+
 bool insertStorageScratchKeccakMarker(LLVMContext &Ctx, CallBase &Sha3,
                                       const ScratchKeccakMatch &Match) {
   Instruction *InsertBefore = Sha3.getNextNode();
@@ -209,6 +240,26 @@ bool insertStorageArrayDataAccessMarker(LLVMContext &Ctx, CallBase &Access,
   return true;
 }
 
+bool insertStorageMappingAccessMarker(LLVMContext &Ctx, CallBase &Access,
+                                      const MappingAccessMatch &Match,
+                                      Value *StorageSlot,
+                                      uint64_t AccessKind) {
+  Module *M = Access.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_storage_mapping_access",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&Access);
+  Builder.CreateCall(
+      Marker, {Match.ScratchMarker->getArgOperand(0),
+               Match.ScratchMarker->getArgOperand(1),
+               Match.ScratchMarker->getArgOperand(2), StorageSlot,
+               ConstantInt::get(I256, AccessKind)});
+  return true;
+}
+
 } // namespace
 
 PreservedAnalyses StorageAddressingPass::run(Function &F,
@@ -230,6 +281,13 @@ PreservedAnalyses StorageAddressingPass::run(Function &F,
           ++NumStorageArrayDataAccess;
           Changed = true;
         }
+      } else if (std::optional<MappingAccessMatch> Match =
+                     matchStorageMappingAccess(*Call, Call->getArgOperand(0))) {
+        if (insertStorageMappingAccessMarker(Ctx, *Call, *Match,
+                                             Call->getArgOperand(0), 1)) {
+          ++NumStorageMappingAccess;
+          Changed = true;
+        }
       }
       continue;
     }
@@ -240,6 +298,13 @@ PreservedAnalyses StorageAddressingPass::run(Function &F,
         if (insertStorageArrayDataAccessMarker(
                 Ctx, *Call, *Match, Call->getArgOperand(0), 2)) {
           ++NumStorageArrayDataAccess;
+          Changed = true;
+        }
+      } else if (std::optional<MappingAccessMatch> Match =
+                     matchStorageMappingAccess(*Call, Call->getArgOperand(0))) {
+        if (insertStorageMappingAccessMarker(Ctx, *Call, *Match,
+                                             Call->getArgOperand(0), 2)) {
+          ++NumStorageMappingAccess;
           Changed = true;
         }
       }

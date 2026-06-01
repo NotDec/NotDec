@@ -4164,6 +4164,7 @@
       "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 9,
       "expected_memory_rewrite_markers": {
+        "notdec_solidity_storage_mapping_access": 31,
         "notdec_solidity_storage_scratch_keccak": 29
       }
     },
