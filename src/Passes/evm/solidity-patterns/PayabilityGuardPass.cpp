@@ -1,3 +1,18 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
+
+namespace notdec::passes::evm {
+using namespace detail;
+
+STATISTIC(NumNonpayableGuards, "Number of Solidity nonpayable guards found");
+STATISTIC(NumPayabilityCfgRewrites,
+          "Number of Solidity nonpayable guards rewritten in the CFG");
+
 PreservedAnalyses PayabilityGuardPass::run(Function &F,
                                            FunctionAnalysisManager &) {
   if (!isPublicEntryFunction(F)) {
@@ -40,3 +55,5 @@ PreservedAnalyses PayabilityGuardPass::run(Function &F,
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
+
+} // namespace notdec::passes::evm

@@ -1,3 +1,17 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
+
+namespace notdec::passes::evm {
+using namespace detail;
+
+STATISTIC(NumPackedStorageFields,
+          "Number of Solidity packed storage field candidates found");
+
 PreservedAnalyses PackedStorageFieldPass::run(Function &F,
                                               FunctionAnalysisManager &) {
   LLVMContext &Ctx = F.getContext();
@@ -33,3 +47,5 @@ PreservedAnalyses PackedStorageFieldPass::run(Function &F,
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
+
+} // namespace notdec::passes::evm

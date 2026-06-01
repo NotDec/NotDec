@@ -1,3 +1,19 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
+
+namespace notdec::passes::evm {
+using namespace detail;
+
+STATISTIC(NumSelectorOutlinedBodies,
+          "Number of Solidity selector inline bodies outlined");
+STATISTIC(NumSelectorOutlineSkipped,
+          "Number of Solidity selector inline body outline candidates skipped");
+
 PreservedAnalyses
 SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &FAM) {
   if (!isSelectorFunction(F)) {
@@ -115,3 +131,5 @@ SelectorEntryOutliningPass::run(Function &F, FunctionAnalysisManager &FAM) {
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
+
+} // namespace notdec::passes::evm

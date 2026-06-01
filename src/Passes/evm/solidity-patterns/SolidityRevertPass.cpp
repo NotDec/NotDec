@@ -1,3 +1,16 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
+
+namespace notdec::passes::evm {
+using namespace detail;
+
+STATISTIC(NumReverts, "Number of Solidity revert sites found");
+
 PreservedAnalyses SolidityRevertPass::run(Function &F,
                                           FunctionAnalysisManager &) {
   LLVMContext &Ctx = F.getContext();
@@ -38,3 +51,5 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
+
+} // namespace notdec::passes::evm

@@ -2,7 +2,6 @@
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
-#include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/ADT/APInt.h>
@@ -22,26 +21,6 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "evm-solidity-patterns"
-
-STATISTIC(NumNonpayableGuards, "Number of Solidity nonpayable guards found");
-STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
-STATISTIC(NumReverts, "Number of Solidity revert sites found");
-STATISTIC(NumCheckedBounds,
-          "Number of Solidity checked operation/bounds candidates found");
-STATISTIC(NumStorageAddressing,
-          "Number of Solidity storage addressing candidates found");
-STATISTIC(NumPackedStorageFields,
-          "Number of Solidity packed storage field candidates found");
-STATISTIC(NumEvents, "Number of Solidity event candidates found");
-STATISTIC(NumExternalCalls, "Number of Solidity external calls found");
-STATISTIC(NumSelectorOutlinedBodies,
-          "Number of Solidity selector inline bodies outlined");
-STATISTIC(NumSelectorOutlineSkipped,
-          "Number of Solidity selector inline body outline candidates skipped");
-STATISTIC(NumPayabilityCfgRewrites,
-          "Number of Solidity nonpayable guards rewritten in the CFG");
-
 namespace notdec::passes::evm {
 
 const char *KIND_SOLIDITY_NONPAYABLE = "notdec.solidity.nonpayable";
@@ -56,7 +35,7 @@ const char *KIND_SOLIDITY_PACKED_STORAGE_FIELD =
 const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_EXTERNAL_CALL = "notdec.solidity.external_call";
 
-namespace {
+namespace detail {
 
 constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINED_BODY =
     "notdec.solidity.selector_outlined_body";
@@ -5831,16 +5810,6 @@ StringRef classifyExternalCall(StringRef Name) {
                                       : StringRef("");
 }
 
-} // namespace
-
-#include "solidity-patterns/SelectorEntryOutliningPass.inc"
-#include "solidity-patterns/PayabilityGuardPass.inc"
-#include "solidity-patterns/AbiReturnPass.inc"
-#include "solidity-patterns/SolidityRevertPass.inc"
-#include "solidity-patterns/CheckedBoundsPass.inc"
-#include "solidity-patterns/StorageAddressingPass.inc"
-#include "solidity-patterns/PackedStorageFieldPass.inc"
-#include "solidity-patterns/EventLogPass.inc"
-#include "solidity-patterns/ExternalCallPass.inc"
+} // namespace detail
 
 } // namespace notdec::passes::evm

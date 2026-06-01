@@ -1,3 +1,16 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
+
+namespace notdec::passes::evm {
+using namespace detail;
+
+STATISTIC(NumEvents, "Number of Solidity event candidates found");
+
 PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
   LLVMContext &Ctx = F.getContext();
   bool Changed = false;
@@ -19,3 +32,5 @@ PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
+
+} // namespace notdec::passes::evm

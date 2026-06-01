@@ -8,6 +8,15 @@ add_library(notdec STATIC
 	Passes/ReorderBasicblock.cpp
 	Passes/AllocAnnotator.cpp
 	Passes/evm/SolidityPatterns.cpp
+	Passes/evm/solidity-patterns/AbiReturnPass.cpp
+	Passes/evm/solidity-patterns/CheckedBoundsPass.cpp
+	Passes/evm/solidity-patterns/EventLogPass.cpp
+	Passes/evm/solidity-patterns/ExternalCallPass.cpp
+	Passes/evm/solidity-patterns/PackedStorageFieldPass.cpp
+	Passes/evm/solidity-patterns/PayabilityGuardPass.cpp
+	Passes/evm/solidity-patterns/SelectorEntryOutliningPass.cpp
+	Passes/evm/solidity-patterns/SolidityRevertPass.cpp
+	Passes/evm/solidity-patterns/StorageAddressingPass.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/mlsub/PNDiff.cpp
 	TypeRecovery/mlsub/PAPath.cpp

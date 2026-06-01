@@ -1,3 +1,16 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
+
+namespace notdec::passes::evm {
+using namespace detail;
+
+STATISTIC(NumAbiReturns, "Number of Solidity ABI return sites found");
+
 PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &) {
   LLVMContext &Ctx = F.getContext();
   bool Changed = false;
@@ -23,3 +36,5 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &) {
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
+
+} // namespace notdec::passes::evm

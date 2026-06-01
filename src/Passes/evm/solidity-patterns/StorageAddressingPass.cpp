@@ -1,3 +1,17 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+
+using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
+
+namespace notdec::passes::evm {
+using namespace detail;
+
+STATISTIC(NumStorageAddressing,
+          "Number of Solidity storage addressing candidates found");
+
 PreservedAnalyses StorageAddressingPass::run(Function &F,
                                              FunctionAnalysisManager &) {
   LLVMContext &Ctx = F.getContext();
@@ -23,3 +37,5 @@ PreservedAnalyses StorageAddressingPass::run(Function &F,
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
+
+} // namespace notdec::passes::evm
