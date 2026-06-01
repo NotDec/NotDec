@@ -12,6 +12,18 @@ import sys
 from pathlib import Path
 
 
+CHECKED_BOUNDS_MARKER_RE = re.compile(
+    r"call void @(notdec_solidity_rewrite_(?:"
+    r"checked_add|checked_sub|checked_mul|checked_add_bound|checked_sub_bound|"
+    r"checked_mul_bound|checked_div|checked_mod|checked_exp|"
+    r"array_bounds_memory|array_bounds_calldata|array_bounds_storage|"
+    r"memory_allocation_bounds|memory_allocation_pointer_bounds|"
+    r"storage_bytes_encoding|storage_byte_array_length_bounds|"
+    r"storage_array_length_bounds|enum_conversion|empty_array_pop_storage"
+    r"))\("
+)
+
+
 def resolve_path(base: Path, path_str: str) -> Path:
     path = Path(path_str)
     if path.is_absolute():
@@ -41,6 +53,38 @@ def count_skip_reasons(text: str) -> dict[str, int]:
         reason = metadata.get(metadata_id, "unknown")
         counts[f"skip_reason:{reason}"] = counts.get(f"skip_reason:{reason}", 0) + 1
     return counts
+
+
+def count_metadata_string_values(text: str, metadata_name: str) -> dict[str, int]:
+    metadata = dict(re.findall(r"!(\d+) = !\{!\"([^\"]+)\"\}", text))
+    counts: dict[str, int] = {}
+    for metadata_id in re.findall(rf"!{re.escape(metadata_name)} !(\d+)", text):
+        value = metadata.get(metadata_id, "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def count_checked_bounds_skipped_kinds(text: str) -> dict[str, int]:
+    metadata = dict(re.findall(r"!(\d+) = !\{!\"([^\"]+)\"\}", text))
+    counts: dict[str, int] = {}
+    for line in text.splitlines():
+        if "!notdec.solidity_checked_bounds.skipped !" not in line:
+            continue
+        for metadata_id in re.findall(
+            r"!notdec\.solidity\.checked_bounds !(\d+)", line
+        ):
+            value = metadata.get(metadata_id, "unknown")
+            counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def count_checked_bounds_cfg_rewrites(text: str) -> int:
+    return len(
+        re.findall(
+            r"br label %[^,\n]+,[^\n]*!notdec\.solidity\.checked_bounds",
+            text,
+        )
+    )
 
 
 def count_outlined_functions(text: str) -> int:
@@ -129,6 +173,29 @@ def main() -> int:
                 ),
             }
             checks.update(count_skip_reasons(output_text))
+            checked_bounds_kinds = count_metadata_string_values(
+                output_text, "notdec.solidity.checked_bounds"
+            )
+            checked_bounds_skip_reasons = count_metadata_string_values(
+                output_text, "notdec.solidity_checked_bounds.skipped"
+            )
+            checked_bounds_skipped_kinds = count_checked_bounds_skipped_kinds(
+                output_text
+            )
+            checks["checked_bounds_total"] = sum(checked_bounds_kinds.values())
+            checks["checked_bounds_skip_total"] = sum(
+                checked_bounds_skip_reasons.values()
+            )
+            checks["checked_bounds_semantic_marker_total"] = len(
+                CHECKED_BOUNDS_MARKER_RE.findall(output_text)
+            )
+            checks["checked_bounds_cfg_rewrites"] = (
+                count_checked_bounds_cfg_rewrites(output_text)
+            )
+            for reason, count in checked_bounds_skip_reasons.items():
+                checks[f"checked_bounds_skip_reason:{reason}"] = count
+            for kind, count in checked_bounds_skipped_kinds.items():
+                checks[f"checked_bounds_skipped_kind:{kind}"] = count
             expected = case["expected_counts"]
             lines = ["PASS"]
             for key, value in expected.items():
