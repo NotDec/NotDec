@@ -40,6 +40,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_checked_add": 1
       },
+      "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 1
     },
     {
@@ -76,6 +77,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_checked_sub": 1
       },
+      "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 1
     },
     {
@@ -112,6 +114,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_checked_mul": 1
       },
+      "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 1
     },
     {
@@ -148,6 +151,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_checked_div": 1
       },
+      "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 1
     },
     {
@@ -184,6 +188,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_checked_mod": 1
       },
+      "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 1
     },
     {
@@ -263,6 +268,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_array_bounds_calldata": 1
       },
+      "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 1
     },
     {
@@ -299,6 +305,7 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_array_bounds_storage": 1
       },
+      "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 1
     },
     {
