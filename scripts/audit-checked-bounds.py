@@ -260,6 +260,11 @@ def main() -> int:
         help="Write one CSV row per .ll file for locating checked-bounds cases",
     )
     parser.add_argument(
+        "--csv-by-file-nonzero",
+        action="store_true",
+        help="Only include per-file CSV rows with checked-bounds metadata or skips",
+    )
+    parser.add_argument(
         "--list-skips",
         action="store_true",
         help="List files that still contain checked-bounds skip metadata",
@@ -339,6 +344,12 @@ def main() -> int:
         rows: list[dict[str, str | int]] = []
         for file_path in files:
             file_summary, _ = summarize_files([file_path], cpp_marker_mapping_status)
+            if (
+                args.csv_by_file_nonzero
+                and int(file_summary["checked_bounds_total"]) == 0
+                and int(file_summary["skip_total"]) == 0
+            ):
+                continue
             rows.append(
                 {
                     "input": str(file_path),
