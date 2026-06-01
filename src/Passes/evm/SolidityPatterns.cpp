@@ -3458,6 +3458,82 @@ bool hasMemoryArrayElementAccess(BasicBlock *SuccessBlock, Value *Index) {
   return false;
 }
 
+ConstantInt *getArrayLengthFromMaxIndex(Value *V) {
+  auto *MaxIndex = dyn_cast_or_null<ConstantInt>(V);
+  if (MaxIndex == nullptr || MaxIndex->getValue().isAllOnes()) {
+    return nullptr;
+  }
+  return cast<ConstantInt>(
+      ConstantInt::get(MaxIndex->getType(), MaxIndex->getValue() + 1));
+}
+
+bool isStorageArrayIndexScale(Value *V, Value *Index) {
+  if (isSameValue(V, Index)) {
+    return true;
+  }
+
+  auto *Op = dyn_cast_or_null<BinaryOperator>(V);
+  if (Op == nullptr) {
+    return false;
+  }
+
+  if (Op->getOpcode() == Instruction::Mul) {
+    auto *RHS = dyn_cast<ConstantInt>(Op->getOperand(1));
+    auto *LHS = dyn_cast<ConstantInt>(Op->getOperand(0));
+    return (isSameValue(Op->getOperand(0), Index) && RHS != nullptr &&
+            !RHS->isZero()) ||
+           (isSameValue(Op->getOperand(1), Index) && LHS != nullptr &&
+            !LHS->isZero());
+  }
+
+  if (Op->getOpcode() == Instruction::UDiv) {
+    auto *Divisor = dyn_cast<ConstantInt>(Op->getOperand(1));
+    return isSameValue(Op->getOperand(0), Index) && Divisor != nullptr &&
+           !Divisor->isZero();
+  }
+
+  return false;
+}
+
+bool isFixedStorageArraySlotOffset(Value *V, Value *Index) {
+  auto *Add = dyn_cast_or_null<BinaryOperator>(V);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  // Fixed storage arrays use a constant data slot plus an index-derived offset.
+  // Dynamic arrays are handled through their sload length guard above.
+  return (isStorageArrayIndexScale(Add->getOperand(0), Index) &&
+          isa<ConstantInt>(Add->getOperand(1))) ||
+         (isStorageArrayIndexScale(Add->getOperand(1), Index) &&
+          isa<ConstantInt>(Add->getOperand(0)));
+}
+
+bool hasFixedStorageArrayElementAccess(BasicBlock *SuccessBlock,
+                                       Value *Index) {
+  if (SuccessBlock == nullptr || Index == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isCallTo(Call, "evm_sload") && Call->arg_size() == 1 &&
+        isFixedStorageArraySlotOffset(Call->getArgOperand(0), Index)) {
+      return true;
+    }
+
+    if (isCallTo(Call, "evm_sstore") && Call->arg_size() == 2 &&
+        isFixedStorageArraySlotOffset(Call->getArgOperand(0), Index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::optional<CheckedBoundsMatch>
 matchArrayBounds(const NormalizedCondition &FailureCond,
                  const SolidityRevertMatch &RevertMatch,
@@ -3479,6 +3555,12 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
   } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE) {
     Index = Cmp->getOperand(1);
     Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGT) {
+    Index = Cmp->getOperand(0);
+    Length = getArrayLengthFromMaxIndex(Cmp->getOperand(1));
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT) {
+    Index = Cmp->getOperand(1);
+    Length = getArrayLengthFromMaxIndex(Cmp->getOperand(0));
   } else if (FailureCond.Predicate == ICmpInst::ICMP_EQ &&
              (isZero(Cmp->getOperand(0)) || isZero(Cmp->getOperand(1)))) {
     Length = isZero(Cmp->getOperand(0)) ? Cmp->getOperand(1)
@@ -3504,6 +3586,8 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
       Kind = "array_bounds_calldata";
     } else if (hasMemoryArrayElementAccess(SuccessBlock, Index)) {
       Kind = "array_bounds_memory";
+    } else if (hasFixedStorageArrayElementAccess(SuccessBlock, Index)) {
+      Kind = "array_bounds_storage";
     } else {
       return std::nullopt;
     }

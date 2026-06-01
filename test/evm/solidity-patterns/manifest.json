@@ -4566,6 +4566,70 @@
       "expected_checked_bounds_cfg_rewrites": 44
     },
     {
+      "name": "24534_19759897_d822801d63_07fc71c92888",
+      "input": "cases/24534_19759897_d822801d63_07fc71c92888.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 62,
+        "notdec.solidity.checked_bounds": 10,
+        "notdec.solidity.event": 6,
+        "notdec.solidity.external_call": 2,
+        "notdec.solidity.packed_storage_field": 39,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 115,
+        "notdec.solidity.storage_addressing": 28
+      },
+      "expected_revert_kinds": {
+        "empty": 10,
+        "encoded_candidate": 71,
+        "panic": 10,
+        "custom_error_candidate": 17,
+        "returndata_bubble": 1,
+        "error_string": 6
+      },
+      "expected_panic_codes": {
+        "65": 6,
+        "34": 1,
+        "17": 1,
+        "33": 1,
+        "50": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "memory_allocation_pointer_bounds": 3,
+        "memory_allocation_bounds": 1,
+        "storage_bytes_encoding": 1,
+        "checked_add": 1,
+        "enum_conversion": 1,
+        "panic_resource_error": 1,
+        "array_bounds_storage": 1,
+        "storage_byte_array_length_bounds": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 6,
+        "34": 1,
+        "17": 1,
+        "33": 1,
+        "50": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 3,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_checked_add": 1,
+        "notdec_solidity_rewrite_enum_conversion": 1,
+        "notdec_solidity_rewrite_array_bounds_storage": 1,
+        "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unsupported_condition": 1
+      },
+      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_returndata_bubbles": 1
+    },
+    {
       "name": "24541_19759925_deec0e0bb2_47ef0dd1d7b5",
       "input": "cases/24541_19759925_deec0e0bb2_47ef0dd1d7b5.ll",
       "patterns": [
