@@ -130,6 +130,14 @@ bool isCallTo(const Value *V, StringRef Name) {
   return Callee != nullptr && Callee->getName() == Name;
 }
 
+bool isPrivateHelperCall(const CallBase *Call) {
+  if (Call == nullptr) {
+    return false;
+  }
+  const Function *Callee = Call->getCalledFunction();
+  return Callee != nullptr && Callee->getName().starts_with("private__");
+}
+
 bool isZero(const Value *V) {
   if (V == nullptr) {
     return false;
@@ -2421,6 +2429,17 @@ bool isByteAllocationSize(Value *V, Value *Length) {
   return Rounded != nullptr && isRoundedByteLength(Rounded, Length);
 }
 
+bool isArrayAllocationSize(Value *V, Value *Length, BasicBlock *BB) {
+  auto *SizeAdd = dyn_cast_or_null<BinaryOperator>(V);
+  if (SizeAdd == nullptr || SizeAdd->getOpcode() != Instruction::Add) {
+    return false;
+  }
+  Value *Shift = findMemoryAllocationShift(BB, Length);
+  return Shift != nullptr && binaryOpHasOperand(SizeAdd, Shift) &&
+         (isConstantIntValue(SizeAdd->getOperand(0), 32) ||
+          isConstantIntValue(SizeAdd->getOperand(1), 32));
+}
+
 bool isRoundedByteAllocationSize(Value *V) {
   auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
   if (RoundedSize == nullptr ||
@@ -2508,6 +2527,12 @@ bool isRoundedByteAllocationSizeForLength(Value *V, Value *Length) {
          binaryOpHasOperand(LengthAdd, Length) &&
          (isConstantIntValue(LengthAdd->getOperand(0), 31) ||
           isConstantIntValue(LengthAdd->getOperand(1), 31));
+}
+
+bool isDynamicAllocationSize(Value *V, Value *Length, BasicBlock *BB) {
+  return isByteAllocationSize(V, Length) ||
+         isRoundedByteAllocationSizeForLength(V, Length) ||
+         isArrayAllocationSize(V, Length, BB);
 }
 
 bool isRoundedMemoryAllocationSize(Value *V) {
@@ -2601,6 +2626,48 @@ bool hasBytesAllocationStoresOnLocalPath(BasicBlock *SuccessBlock,
   return false;
 }
 
+bool hasAllocationHelperHeaderStore(BasicBlock *SuccessBlock, Value *Ptr,
+                                    Value *Length) {
+  if (SuccessBlock == nullptr || Ptr == nullptr) {
+    return false;
+  }
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
+        Call->arg_size() != 3) {
+      continue;
+    }
+    if (isSameValue(Call->getArgOperand(1), Ptr) &&
+        isSameValue(Call->getArgOperand(2), Length)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasMemoryAllocationHelperCall(BasicBlock *SuccessBlock, Value *Length) {
+  if (SuccessBlock == nullptr || Length == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    // Solidity emits private allocation helpers for ABI decoder/allocation
+    // paths. Only accept them when the returned pointer is immediately used as
+    // a dynamic array header; a private helper call alone is too broad.
+    if (!isPrivateHelperCall(Call) || !Call->getType()->isIntegerTy(256) ||
+        !hasAllocationHelperHeaderStore(SuccessBlock, Call, Length)) {
+      continue;
+    }
+    for (Value *Arg : Call->args()) {
+      if (isDynamicAllocationSize(Arg, Length, SuccessBlock)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 std::optional<CheckedBoundsMatch>
 matchPowerOfTwoExpGuard(const NormalizedCondition &FailureCond,
                         const SolidityRevertMatch &RevertMatch,
@@ -2669,8 +2736,7 @@ bool hasMemoryBytesAllocationComputation(BasicBlock *SuccessBlock,
       Value *Size = isSameValue(NewPtr->getOperand(0), OldPtr)
                         ? NewPtr->getOperand(1)
                         : NewPtr->getOperand(0);
-      if (!isByteAllocationSize(Size, Length) &&
-          !isRoundedByteAllocationSizeForLength(Size, Length)) {
+      if (!isDynamicAllocationSize(Size, Length, SuccessBlock)) {
         continue;
       }
       if (hasBytesAllocationStoresOnLocalPath(SuccessBlock, OldPtr, NewPtr,
@@ -2686,7 +2752,8 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
                                         Value *Length) {
   Value *Shift = findMemoryAllocationShift(SuccessBlock, Length);
   if (Shift == nullptr) {
-    return hasMemoryBytesAllocationComputation(SuccessBlock, Length);
+    return hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
+           hasMemoryAllocationHelperCall(SuccessBlock, Length);
   }
 
   if (auto *RoundedBase = findCommutativeBinaryOpInBlock(
@@ -2700,7 +2767,8 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
   }
 
   return hasMemoryArrayAllocationComputation(SuccessBlock, Length) ||
-         hasMemoryBytesAllocationComputation(SuccessBlock, Length);
+         hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
+         hasMemoryAllocationHelperCall(SuccessBlock, Length);
 }
 
 bool isMemoryAllocationSize(Value *V) {
