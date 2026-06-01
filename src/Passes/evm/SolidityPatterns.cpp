@@ -243,6 +243,24 @@ std::optional<uint64_t> matchUInt64LimitMinusStrictUpper(const Value *V) {
   return Size;
 }
 
+std::optional<uint64_t> matchWrappingAddStrictUpper(const Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr) {
+    return std::nullopt;
+  }
+
+  APInt Size = ~C->getValue();
+  if (Size.getActiveBits() > 64) {
+    return std::nullopt;
+  }
+
+  uint64_t Size64 = Size.getZExtValue();
+  if (Size64 == 0 || Size64 > 4096 || Size64 % 32 != 0) {
+    return std::nullopt;
+  }
+  return Size64;
+}
+
 bool isMinus32(const Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   if (C == nullptr) {
@@ -4997,6 +5015,7 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   Value *OldPtr = nullptr;
   Value *NoWrapLimit = nullptr;
   std::optional<uint64_t> RangeCheckedTotalSize;
+  std::optional<uint64_t> NoWrapStrictUpperSize;
   for (Value *Operand : {Combiner->getOperand(0), Combiner->getOperand(1)}) {
     auto *Cmp = dyn_cast<ICmpInst>(Operand);
     if (Cmp == nullptr) {
@@ -5016,6 +5035,15 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
         if (TotalSize.has_value()) {
           RangeCheckedBase = Cmp->getOperand(0);
           RangeCheckedTotalSize = TotalSize;
+          continue;
+        }
+      }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_UGT) {
+        std::optional<uint64_t> Size =
+            matchWrappingAddStrictUpper(Cmp->getOperand(1));
+        if (Size.has_value()) {
+          OldPtr = Cmp->getOperand(0);
+          NoWrapStrictUpperSize = Size;
           continue;
         }
       }
@@ -5130,6 +5158,13 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
     }
     APInt ExpectedLimit = -SizeConst->getValue();
     if (LimitConst->getValue() != ExpectedLimit) {
+      return std::nullopt;
+    }
+  }
+  if (NoWrapStrictUpperSize.has_value()) {
+    auto *SizeConst = dyn_cast<ConstantInt>(Size);
+    if (SizeConst == nullptr ||
+        SizeConst->getValue() != *NoWrapStrictUpperSize) {
       return std::nullopt;
     }
   }

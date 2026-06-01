@@ -4710,6 +4710,62 @@
       },
       "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 4
+    },
+    {
+      "name": "24259_19755445_aefeec2314_4f43187f4106",
+      "input": "cases/24259_19755445_aefeec2314_4f43187f4106.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 6,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 10,
+        "notdec.solidity.checked_bounds": 12,
+        "notdec.solidity.event": 1,
+        "notdec.solidity.external_call": 0,
+        "notdec.solidity.packed_storage_field": 14,
+        "notdec.solidity.payability_guard": 30,
+        "notdec.solidity.revert": 53,
+        "notdec.solidity.storage_addressing": 16
+      },
+      "expected_revert_kinds": {
+        "empty": 34,
+        "error_string": 7,
+        "panic": 12
+      },
+      "expected_panic_codes": {
+        "65": 8,
+        "17": 2,
+        "50": 1,
+        "34": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "panic_resource_error": 2,
+        "checked_add": 2,
+        "memory_allocation_pointer_bounds": 3,
+        "memory_allocation_bounds": 2,
+        "array_bounds_memory": 1,
+        "storage_bytes_encoding": 1,
+        "storage_byte_array_length_bounds": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 8,
+        "17": 2,
+        "50": 1,
+        "34": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_add": 2,
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 3,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 2,
+        "notdec_solidity_rewrite_array_bounds_memory": 1,
+        "notdec_solidity_rewrite_storage_bytes_encoding": 1,
+        "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 2
+      },
+      "expected_checked_bounds_cfg_rewrites": 10
     }
   ]
 }
