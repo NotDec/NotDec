@@ -1375,6 +1375,24 @@ std::optional<uint64_t> getSelectorWord(Value *V) {
   return Word.lshr(224).getZExtValue();
 }
 
+bool isKnownPanicCode(uint64_t Code) {
+  switch (Code) {
+  case 0x00:
+  case 0x01:
+  case 0x11:
+  case 0x12:
+  case 0x21:
+  case 0x22:
+  case 0x31:
+  case 0x32:
+  case 0x41:
+  case 0x51:
+    return true;
+  default:
+    return false;
+  }
+}
+
 std::optional<std::string>
 buildAsciiStringLiteral(uint64_t Length, SmallVectorImpl<RevertStringWord> &Words) {
   std::string Result;
@@ -1443,6 +1461,7 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
   SmallVector<RevertStringWord, 2> StringWords;
   CallBase *AbsolutePanicCodeStore = nullptr;
   std::optional<uint64_t> AbsolutePanicCode;
+  SmallVector<std::pair<CallBase *, uint64_t>, 2> PanicCodeCandidates;
 
   if (isZero(Revert.getArgOperand(1)) && isZero(Revert.getArgOperand(2))) {
     Match.Kind = "empty";
@@ -1471,6 +1490,12 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
               getUInt64Constant(Call->getArgOperand(2))) {
         AbsolutePanicCodeStore = Call;
         AbsolutePanicCode = Code;
+      }
+    }
+    if (std::optional<uint64_t> Code =
+            getUInt64Constant(Call->getArgOperand(2))) {
+      if (isKnownPanicCode(*Code)) {
+        PanicCodeCandidates.push_back({Call, *Code});
       }
     }
 
@@ -1534,6 +1559,11 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
         AbsolutePanicCode.has_value()) {
       Match.PanicCodeStore = AbsolutePanicCodeStore;
       Match.PanicCode = AbsolutePanicCode;
+    } else if (!Match.PanicCode.has_value() &&
+               isConstantIntValue(Revert.getArgOperand(2), 36) &&
+               PanicCodeCandidates.size() == 1) {
+      Match.PanicCodeStore = PanicCodeCandidates[0].first;
+      Match.PanicCode = PanicCodeCandidates[0].second;
     }
   }
 
@@ -4369,15 +4399,59 @@ bool isSmallFixedMemoryAllocationSize(Value *V) {
   return Size64 % 32 == 0;
 }
 
+ConstantInt *getUniformConstantArgument(Value *V) {
+  auto *Arg = dyn_cast_or_null<Argument>(V);
+  if (Arg == nullptr) {
+    return nullptr;
+  }
+
+  Function *F = Arg->getParent();
+  ConstantInt *Const = nullptr;
+  for (User *U : F->users()) {
+    auto *Call = dyn_cast<CallBase>(U);
+    if (Call == nullptr || Call->getCalledFunction() != F ||
+        Call->arg_size() <= Arg->getArgNo()) {
+      return nullptr;
+    }
+    auto *ArgConst = dyn_cast<ConstantInt>(Call->getArgOperand(Arg->getArgNo()));
+    if (ArgConst == nullptr) {
+      return nullptr;
+    }
+    if (Const == nullptr) {
+      Const = ArgConst;
+      continue;
+    }
+    if (Const->getValue() != ArgConst->getValue()) {
+      return nullptr;
+    }
+  }
+  return Const;
+}
+
 bool isSupportedMemoryAllocationSize(Value *V) {
   return isMemoryAllocationSize(V) || isRoundedMemoryAllocationSize(V) ||
          isSmallFixedMemoryAllocationSize(V);
+}
+
+bool isSupportedMemoryAllocationSizeWithUniformArg(Value *V) {
+  if (isSupportedMemoryAllocationSize(V)) {
+    return true;
+  }
+  return isSmallFixedMemoryAllocationSize(getUniformConstantArgument(V));
 }
 
 bool isFreeMemoryPointerLoad(Value *V) {
   auto *Call = dyn_cast_or_null<CallBase>(V);
   return Call != nullptr && isCallTo(Call, "evm_mload") &&
          Call->arg_size() == 2 && isConstantIntValue(Call->getArgOperand(1), 64);
+}
+
+Value *getMemoryPointerLoadSlot(Value *V) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  if (Call == nullptr || !isCallTo(Call, "evm_mload") || Call->arg_size() != 2) {
+    return nullptr;
+  }
+  return Call->getArgOperand(1);
 }
 
 CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
@@ -4389,6 +4463,23 @@ CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
     if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
         Call->arg_size() == 3 &&
         isConstantIntValue(Call->getArgOperand(1), 64) &&
+        isSameValue(Call->getArgOperand(2), NewPtr)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
+CallBase *findMemoryPointerStoreForLoad(BasicBlock *BB, Value *OldPtr,
+                                        Value *NewPtr) {
+  Value *Slot = getMemoryPointerLoadSlot(OldPtr);
+  if (BB == nullptr || Slot == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
+        Call->arg_size() == 3 && isSameValue(Call->getArgOperand(1), Slot) &&
         isSameValue(Call->getArgOperand(2), NewPtr)) {
       return Call;
     }
@@ -4571,8 +4662,13 @@ std::optional<CheckedBoundsMatch> matchFixedMemoryAllocationPointerBounds(
   Value *SizeValue = ConstantInt::get(OldPtr->getType(), *Size);
   BinaryOperator *NewPtr = findCommutativeBinaryOpInBlock(
       SuccessBlock, Instruction::Add, OldPtr, SizeValue);
+  if (NewPtr == nullptr) {
+    NewPtr = findCommutativeBinaryOpInBlock(Cmp->getParent(), Instruction::Add,
+                                            OldPtr, SizeValue);
+  }
   if (NewPtr == nullptr ||
-      findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr) {
+      (findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr &&
+       findMemoryPointerStoreForLoad(SuccessBlock, OldPtr, NewPtr) == nullptr)) {
     return std::nullopt;
   }
 
@@ -4797,8 +4893,9 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
     }
   }
 
-  if (!isSupportedMemoryAllocationSize(Size) ||
-      findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr) {
+  if (!isSupportedMemoryAllocationSizeWithUniformArg(Size) ||
+      (findFreeMemoryPointerStore(SuccessBlock, NewPtr) == nullptr &&
+       findMemoryPointerStoreForLoad(SuccessBlock, OldPtr, NewPtr) == nullptr)) {
     return std::nullopt;
   }
 

@@ -4564,6 +4564,49 @@
         "unrecognized_operands": 0
       },
       "expected_checked_bounds_cfg_rewrites": 44
+    },
+    {
+      "name": "24541_19759925_deec0e0bb2_47ef0dd1d7b5",
+      "input": "cases/24541_19759925_deec0e0bb2_47ef0dd1d7b5.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 22,
+        "notdec.solidity.checked_bounds": 4,
+        "notdec.solidity.event": 8,
+        "notdec.solidity.external_call": 4,
+        "notdec.solidity.packed_storage_field": 22,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 48,
+        "notdec.solidity.storage_addressing": 3
+      },
+      "expected_revert_kinds": {
+        "empty": 2,
+        "encoded_candidate": 36,
+        "panic": 4,
+        "error_string": 2,
+        "custom_error_candidate": 4
+      },
+      "expected_panic_codes": {
+        "65": 4
+      },
+      "expected_checked_bounds_kinds": {
+        "memory_allocation_pointer_bounds": 3,
+        "memory_allocation_bounds": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "65": 4
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 3,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 4
     }
   ]
 }
