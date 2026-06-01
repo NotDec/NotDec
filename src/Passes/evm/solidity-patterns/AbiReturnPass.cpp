@@ -24,6 +24,8 @@ STATISTIC(NumAbiReturnDataAllocations,
           "Number of Solidity ABI return data allocations found");
 STATISTIC(NumAbiReturnDynamicArraySources,
           "Number of Solidity ABI return dynamic array sources found");
+STATISTIC(NumAbiReturnDynamicArrayCopyLoops,
+          "Number of Solidity ABI return dynamic array copy loops found");
 
 namespace {
 
@@ -196,6 +198,14 @@ struct AbiReturnDynamicArraySource {
   Value *Length = nullptr;
 };
 
+struct AbiReturnDynamicArrayCopyLoop {
+  Value *ReturnBase = nullptr;
+  Value *SourceArray = nullptr;
+  Value *Length = nullptr;
+  CallBase *Load = nullptr;
+  CallBase *Store = nullptr;
+};
+
 Value *getMemoryLoadPointer(Value *V) {
   auto *Call = dyn_cast_or_null<CallBase>(V);
   if (Call == nullptr || !isCallTo(Call, "evm_mload") ||
@@ -270,6 +280,71 @@ findAbiReturnDynamicArraySource(Function &F, CallBase &Return,
   return AbiReturnDynamicArraySource{ReturnBase, SourceArray, Length};
 }
 
+Value *stripAddConstant(Value *V, uint64_t Constant) {
+  auto *Add = dyn_cast_or_null<BinaryOperator>(V);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return nullptr;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    if (isConstantIntValue(Add->getOperand(I), Constant)) {
+      return Add->getOperand(1 - I);
+    }
+  }
+  return nullptr;
+}
+
+Value *matchBasePlusConstantPlusIndex(Value *Ptr, Value *Base,
+                                      uint64_t Constant) {
+  auto *Add = dyn_cast_or_null<BinaryOperator>(Ptr);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return nullptr;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    Value *BaseWithConstant = Add->getOperand(I);
+    Value *Index = Add->getOperand(1 - I);
+    Value *MaybeBase = stripAddConstant(BaseWithConstant, Constant);
+    if (MaybeBase != nullptr &&
+        isSameOrReloadedFreeMemoryBase(MaybeBase, Base)) {
+      return Index;
+    }
+    if (MaybeBase != nullptr && MaybeBase == Base) {
+      return Index;
+    }
+  }
+  return nullptr;
+}
+
+std::optional<AbiReturnDynamicArrayCopyLoop>
+findAbiReturnDynamicArrayCopyLoop(Function &F,
+                                  const AbiReturnDynamicArraySource &Source,
+                                  DominatorTree &DT) {
+  for (Instruction &I : instructions(F)) {
+    auto *Store = dyn_cast<CallBase>(&I);
+    if (Store == nullptr || !isCallTo(Store, "evm_mstore") ||
+        Store->arg_size() != 3) {
+      continue;
+    }
+
+    auto *Load = dyn_cast<CallBase>(Store->getArgOperand(2));
+    if (Load == nullptr || !isCallTo(Load, "evm_mload") ||
+        Load->arg_size() != 2 || !valueAvailableAt(Load, *Store, DT)) {
+      continue;
+    }
+
+    Value *DstIndex = matchBasePlusConstantPlusIndex(
+        Store->getArgOperand(1), Source.ReturnBase, 64);
+    Value *SrcIndex = matchBasePlusConstantPlusIndex(
+        Load->getArgOperand(1), Source.SourceArray, 32);
+    if (DstIndex == nullptr || SrcIndex == nullptr || DstIndex != SrcIndex) {
+      continue;
+    }
+
+    return AbiReturnDynamicArrayCopyLoop{Source.ReturnBase, Source.SourceArray,
+                                         Source.Length, Load, Store};
+  }
+  return std::nullopt;
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -299,6 +374,24 @@ void insertAbiReturnDynamicArraySourceMarker(
   Builder.CreateCall(Marker,
                      {Source.ReturnBase, Source.SourceArray, Source.Length,
                       Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArrayCopyLoopMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayCopyLoop &CopyLoop, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_copy_loop",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
+                      CopyLoop.Length, Consumer.getArgOperand(1),
                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
@@ -400,6 +493,13 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
         insertAbiReturnDynamicArraySourceMarker(Ctx, *Call, *DynamicSource,
                                                 *Consumer, Kind);
         ++NumAbiReturnDynamicArraySources;
+        std::optional<AbiReturnDynamicArrayCopyLoop> CopyLoop =
+            findAbiReturnDynamicArrayCopyLoop(F, *DynamicSource, DT);
+        if (CopyLoop.has_value()) {
+          insertAbiReturnDynamicArrayCopyLoopMarker(Ctx, *Call, *CopyLoop,
+                                                    *Consumer, Kind);
+          ++NumAbiReturnDynamicArrayCopyLoops;
+        }
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, Kind);
