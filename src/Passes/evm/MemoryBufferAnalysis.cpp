@@ -40,6 +40,15 @@ bool isFreeMemoryPointerLoad(Value *V) {
          detail::isConstantIntValue(Call->getArgOperand(1), 64);
 }
 
+bool isEvmLogCall(CallBase *Call) {
+  StringRef Name = detail::getCalleeName(Call);
+  if (!Name.starts_with("evm_log") || Name.size() != 8) {
+    return false;
+  }
+  char TopicCount = Name.back();
+  return TopicCount >= '0' && TopicCount <= '4';
+}
+
 std::optional<uint64_t> getOffsetFromBase(Value *Ptr, Value *Base) {
   if (isSameValue(Ptr, Base)) {
     return 0;
@@ -216,6 +225,15 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
       if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
         Facts.Consumers.push_back(MemoryConsumer{
             Call, MemoryConsumerKind::Revert, Call->getArgOperand(1),
+            Call->getArgOperand(2)});
+      }
+      continue;
+    }
+
+    if (isEvmLogCall(Call) && Call->arg_size() >= 3) {
+      if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
+        Facts.Consumers.push_back(MemoryConsumer{
+            Call, MemoryConsumerKind::EventLog, Call->getArgOperand(1),
             Call->getArgOperand(2)});
       }
       continue;

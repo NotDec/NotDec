@@ -916,7 +916,14 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0
+      "expected_returndata_bubbles": 0,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_memory_consumer": 3
+      },
+      "expected_memory_consumer_kinds": {
+        "return": 2,
+        "event_log": 1
+      }
     },
     {
       "name": "0011_multi_public",

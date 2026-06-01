@@ -298,6 +298,7 @@ def count_memory_consumer_kinds(path: Path) -> dict[str, int]:
     names = {
         "1": "return",
         "2": "revert",
+        "3": "event_log",
     }
     pattern = (
         r"call void @notdec_solidity_memory_consumer"
