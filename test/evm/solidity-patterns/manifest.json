@@ -5204,6 +5204,20 @@
       },
       "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 12
+    },
+    {
+      "name": "25596_19770844_d480364206_1e55fe8eccf5",
+      "input": "cases/25596_19770844_d480364206_1e55fe8eccf5.ll",
+      "patterns": [
+        "memory_object"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 8,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_memory_read": 2,
+        "notdec_solidity_external_call_output_word_read": 2,
+        "notdec_solidity_external_call_output_abi_decode_buffer": 2
+      }
     }
   ]
 }

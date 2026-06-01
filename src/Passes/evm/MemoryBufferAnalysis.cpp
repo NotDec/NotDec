@@ -322,6 +322,7 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
     if (detail::isCallTo(Call, "evm_mload") && Call->arg_size() == 2 &&
         !detail::isConstantIntValue(Call->getArgOperand(1), 64)) {
       Value *Ptr = Call->getArgOperand(1);
+      bool MatchedBase = false;
       for (Value *Base : Bases) {
         if (!valueAvailableAt(Base, *Call, DT)) {
           continue;
@@ -331,7 +332,11 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
           continue;
         }
         Facts.Reads.push_back(MemoryRead{Call, Base, Offset, Call});
+        MatchedBase = true;
         break;
+      }
+      if (!MatchedBase && getUInt64Constant(Ptr).has_value()) {
+        Facts.Reads.push_back(MemoryRead{Call, Ptr, 0, Call});
       }
       continue;
     }
