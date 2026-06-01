@@ -406,18 +406,27 @@ void insertExternalCallOutputCopyWriteMarker(LLVMContext &Ctx,
 }
 
 void insertExternalCallOutputAbiDecodeBufferMarker(LLVMContext &Ctx,
-                                                   CallBase &CopyWrite,
+                                                   Instruction &InsertBefore,
+                                                   Value *Base, Value *Size,
                                                    uint64_t CallKind) {
-  Module *M = CopyWrite.getModule();
+  Module *M = InsertBefore.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_external_call_output_abi_decode_buffer",
       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
 
-  IRBuilder<> Builder(&CopyWrite);
-  Builder.CreateCall(Marker, {CopyWrite.getArgOperand(0),
-                              CopyWrite.getArgOperand(3),
+  IRBuilder<> Builder(&InsertBefore);
+  Builder.CreateCall(Marker, {Base, Size,
                               ConstantInt::get(I256, CallKind)});
+}
+
+void insertExternalCallOutputAbiDecodeBufferMarker(LLVMContext &Ctx,
+                                                   CallBase &CopyWrite,
+                                                   uint64_t CallKind) {
+  insertExternalCallOutputAbiDecodeBufferMarker(Ctx, CopyWrite,
+                                                CopyWrite.getArgOperand(0),
+                                                CopyWrite.getArgOperand(3),
+                                                CallKind);
 }
 
 bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
@@ -537,6 +546,7 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
                                                CallKind);
         ++NumExternalCallMemoryConsumers;
       }
+      bool InsertedOutputDecodeBuffer = false;
       if (CallBase *CopyWrite = findExternalCallOutputCopyWriteMarker(
               *Call->getParent(), *Call, Args->OutputBase)) {
         insertExternalCallOutputCopyWriteMarker(Ctx, *Call, *CopyWrite,
@@ -545,11 +555,18 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallOutputAbiDecodeBufferMarker(Ctx, *CopyWrite,
                                                       CallKind);
         ++NumExternalCallOutputAbiDecodeBuffers;
+        InsertedOutputDecodeBuffer = true;
       }
       SmallVector<CallBase *, 8> OutputWordReads;
       collectExternalCallOutputWordReadMarkers(
           *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
           OutputWordReads);
+      if (!InsertedOutputDecodeBuffer && !OutputWordReads.empty()) {
+        insertExternalCallOutputAbiDecodeBufferMarker(
+            Ctx, *OutputWordReads.front(), Args->OutputBase, Args->OutputSize,
+            CallKind);
+        ++NumExternalCallOutputAbiDecodeBuffers;
+      }
       for (CallBase *WordRead : OutputWordReads) {
         if (insertExternalCallOutputWordReadMarker(Ctx, *WordRead,
                                                    Args->OutputBase,
