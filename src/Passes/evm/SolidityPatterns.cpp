@@ -2664,6 +2664,103 @@ BinaryOperator *matchSignedAddSuccessCondition(Value *V) {
   return nullptr;
 }
 
+bool matchSignedMulMinValueSpecialCase(Value *V, BinaryOperator *&Mul,
+                                       Value *&X, Value *&Y) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *NonNegative = dyn_cast<ICmpInst>(Or->getOperand(I));
+    auto *NotMin = dyn_cast<ICmpInst>(Or->getOperand(1 - I));
+    if (NonNegative == nullptr ||
+        NonNegative->getPredicate() != ICmpInst::ICMP_SGT ||
+        !isAllOnes(NonNegative->getOperand(1)) || NotMin == nullptr ||
+        NotMin->getPredicate() != ICmpInst::ICMP_NE ||
+        !isShiftLeft255One(NotMin->getOperand(1))) {
+      continue;
+    }
+
+    auto *CandidateMul = findBinaryOpInBlock(cast<Instruction>(V)->getParent(),
+                                             Instruction::Mul,
+                                             NonNegative->getOperand(0),
+                                             NotMin->getOperand(0));
+    if (CandidateMul == nullptr) {
+      CandidateMul = findBinaryOpInBlock(cast<Instruction>(V)->getParent(),
+                                         Instruction::Mul,
+                                         NotMin->getOperand(0),
+                                         NonNegative->getOperand(0));
+    }
+    if (CandidateMul == nullptr) {
+      continue;
+    }
+    Mul = CandidateMul;
+    X = NonNegative->getOperand(0);
+    Y = NotMin->getOperand(0);
+    return true;
+  }
+  return false;
+}
+
+bool matchSignedMulDivisionCheck(Value *V, BinaryOperator *&Mul, Value *&X,
+                                 Value *&Y) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *Zero = dyn_cast<ICmpInst>(Or->getOperand(I));
+    auto *Eq = dyn_cast<ICmpInst>(Or->getOperand(1 - I));
+    if (Zero == nullptr || Zero->getPredicate() != ICmpInst::ICMP_EQ ||
+        !isZero(Zero->getOperand(1)) || Eq == nullptr ||
+        Eq->getPredicate() != ICmpInst::ICMP_EQ) {
+      continue;
+    }
+    auto *Div = dyn_cast<CallBase>(Eq->getOperand(1));
+    if (Div == nullptr || !isCallTo(Div, "evm_sdiv") || Div->arg_size() != 2 ||
+        !isSameValue(Div->getArgOperand(1), Zero->getOperand(0))) {
+      continue;
+    }
+    auto *CandidateMul = dyn_cast<BinaryOperator>(Div->getArgOperand(0));
+    if (CandidateMul == nullptr ||
+        CandidateMul->getOpcode() != Instruction::Mul ||
+        !binaryOpHasOperand(CandidateMul, Zero->getOperand(0)) ||
+        !binaryOpHasOperand(CandidateMul, Eq->getOperand(0))) {
+      continue;
+    }
+    Mul = CandidateMul;
+    X = Zero->getOperand(0);
+    Y = Eq->getOperand(0);
+    return true;
+  }
+  return false;
+}
+
+bool matchSignedDivMinValueOverflow(Value *V, Value *&X, Value *&Y) {
+  auto *Or = dyn_cast_or_null<BinaryOperator>(V);
+  if (Or == nullptr || Or->getOpcode() != Instruction::Or) {
+    return false;
+  }
+
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *NotMinusOne = dyn_cast<ICmpInst>(Or->getOperand(I));
+    auto *NotMin = dyn_cast<ICmpInst>(Or->getOperand(1 - I));
+    if (NotMinusOne == nullptr ||
+        NotMinusOne->getPredicate() != ICmpInst::ICMP_NE ||
+        !isAllOnes(NotMinusOne->getOperand(1)) || NotMin == nullptr ||
+        NotMin->getPredicate() != ICmpInst::ICMP_NE ||
+        !isShiftLeft255One(NotMin->getOperand(1))) {
+      continue;
+    }
+    X = NotMin->getOperand(0);
+    Y = NotMinusOne->getOperand(0);
+    return true;
+  }
+  return false;
+}
+
 std::optional<CheckedBoundsMatch>
 matchSignedCheckedArithmeticGuard(Value *BranchCondition,
                                   bool FailureWhenCondTrue,
@@ -2685,6 +2782,28 @@ matchSignedCheckedArithmeticGuard(Value *BranchCondition,
         "checked_add", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
         {Add->getOperand(0), Add->getOperand(1), Add}, RevertMatch.PanicCode,
         true};
+  }
+
+  BinaryOperator *Mul = nullptr;
+  Value *X = nullptr;
+  Value *Y = nullptr;
+  if (matchSignedMulMinValueSpecialCase(BranchCondition, Mul, X, Y) ||
+      matchSignedMulDivisionCheck(BranchCondition, Mul, X, Y)) {
+    return CheckedBoundsMatch{
+        "checked_mul", "", nullptr, nullptr, nullptr, RevertMatch.Revert,
+        {X, Y, Mul}, RevertMatch.PanicCode, true};
+  }
+
+  if (matchSignedDivMinValueOverflow(BranchCondition, X, Y)) {
+    return CheckedBoundsMatch{"checked_div",
+                              "",
+                              nullptr,
+                              nullptr,
+                              nullptr,
+                              RevertMatch.Revert,
+                              {X, Y},
+                              RevertMatch.PanicCode,
+                              true};
   }
 
   return std::nullopt;

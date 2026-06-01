@@ -4229,6 +4229,57 @@
         "unrecognized_operands": 0
       },
       "expected_checked_bounds_cfg_rewrites": 7
+    },
+    {
+      "name": "24663_19760902_bbe5fabbb5_b34e557279fe",
+      "input": "cases/24663_19760902_bbe5fabbb5_b34e557279fe.ll",
+      "patterns": [
+        "checked_bounds"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 26,
+        "notdec.solidity.checked_bounds": 9,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.external_call": 8,
+        "notdec.solidity.packed_storage_field": 6,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 35,
+        "notdec.solidity.storage_addressing": 0
+      },
+      "expected_revert_kinds": {
+        "empty": 15,
+        "panic": 9,
+        "returndata_bubble": 8,
+        "custom_error_candidate": 3
+      },
+      "expected_panic_codes": {
+        "17": 8,
+        "18": 1
+      },
+      "expected_checked_bounds_kinds": {
+        "checked_div": 2,
+        "checked_exp": 1,
+        "checked_mul": 4,
+        "checked_sub": 1,
+        "checked_sub_bound": 1
+      },
+      "expected_checked_bounds_panic_codes": {
+        "17": 8,
+        "18": 1
+      },
+      "expected_checked_bounds_semantic_markers": {
+        "notdec_solidity_rewrite_checked_div": 2,
+        "notdec_solidity_rewrite_checked_exp": 1,
+        "notdec_solidity_rewrite_checked_mul": 4,
+        "notdec_solidity_rewrite_checked_sub": 1,
+        "notdec_solidity_rewrite_checked_sub_bound": 1
+      },
+      "expected_checked_bounds_skip_reasons": {
+        "unrecognized_operands": 0
+      },
+      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_returndata_bubbles": 8
     }
   ]
 }
