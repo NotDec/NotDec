@@ -3671,6 +3671,123 @@ bool hasStorageByteArrayCopyToStorageSuccess(BasicBlock *SuccessBlock,
   return false;
 }
 
+bool isShiftedStorageBytesLength(Value *V, Value *Length) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  return Call != nullptr && isCallTo(Call, "evm_shl") &&
+         Call->arg_size() == 2 &&
+         isConstantIntValue(Call->getArgOperand(0), 1) &&
+         isSameValue(Call->getArgOperand(1), Length);
+}
+
+bool valueContainsShiftedStorageBytesLength(Value *V, Value *Length,
+                                            unsigned Depth,
+                                            SmallPtrSetImpl<Value *> &Seen) {
+  if (V == nullptr || Length == nullptr || Depth == 0 ||
+      !Seen.insert(V).second) {
+    return false;
+  }
+  if (isShiftedStorageBytesLength(V, Length)) {
+    return true;
+  }
+  auto *Inst = dyn_cast<Instruction>(V);
+  if (Inst == nullptr) {
+    return false;
+  }
+  for (Value *Operand : Inst->operands()) {
+    if (valueContainsShiftedStorageBytesLength(Operand, Length, Depth - 1,
+                                               Seen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool valueContainsShiftedStorageBytesLength(Value *V, Value *Length) {
+  SmallPtrSet<Value *, 16> Seen;
+  return valueContainsShiftedStorageBytesLength(V, Length, 8, Seen);
+}
+
+bool hasOldStorageBytesLengthBranch(BasicBlock *BB, CallBase *SLoad) {
+  if (BB == nullptr || SLoad == nullptr) {
+    return false;
+  }
+  auto *Br = dyn_cast_or_null<BranchInst>(BB->getTerminator());
+  if (Br == nullptr || !Br->isConditional()) {
+    return false;
+  }
+  auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
+  if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_UGT ||
+      !isConstantIntValue(Cmp->getOperand(1), 31)) {
+    return false;
+  }
+  auto *OldLen = dyn_cast<CallBase>(Cmp->getOperand(0));
+  return isPrivateHelperCall(OldLen) && OldLen->getType()->isIntegerTy(256) &&
+         callHasArg(OldLen, SLoad);
+}
+
+void collectReachableBlocks(BasicBlock *BB, unsigned Depth,
+                            SmallPtrSetImpl<BasicBlock *> &Seen,
+                            SmallVectorImpl<BasicBlock *> &Blocks) {
+  if (BB == nullptr || Depth == 0 || !Seen.insert(BB).second) {
+    return;
+  }
+  Blocks.push_back(BB);
+  auto *Br = dyn_cast_or_null<BranchInst>(BB->getTerminator());
+  if (Br == nullptr) {
+    return;
+  }
+  for (BasicBlock *Succ : successors(BB)) {
+    collectReachableBlocks(Succ, Depth - 1, Seen, Blocks);
+  }
+}
+
+bool hasDirectStorageByteArrayWrite(BasicBlock *SuccessBlock, Value *Length,
+                                    Value *Slot) {
+  SmallPtrSet<BasicBlock *, 16> Seen;
+  SmallVector<BasicBlock *, 16> Blocks;
+  collectReachableBlocks(SuccessBlock, 16, Seen, Blocks);
+
+  bool SawLengthBranch = false;
+  bool SawEncodedLengthStore = false;
+  for (BasicBlock *BB : Blocks) {
+    if (hasLengthGreaterThan31Branch(BB, Length)) {
+      SawLengthBranch = true;
+    }
+    for (Instruction &I : *BB) {
+      auto *Store = dyn_cast<CallBase>(&I);
+      if (Store == nullptr || !isCallTo(Store, "evm_sstore") ||
+          Store->arg_size() != 2 || !isSameValue(Store->getArgOperand(0), Slot)) {
+        continue;
+      }
+      if (valueContainsShiftedStorageBytesLength(Store->getArgOperand(1),
+                                                 Length)) {
+        SawEncodedLengthStore = true;
+      }
+    }
+  }
+  return SawLengthBranch && SawEncodedLengthStore;
+}
+
+bool hasDirectStorageByteArrayCopyToStorageSuccess(BasicBlock *SuccessBlock,
+                                                   Value *Length) {
+  if (SuccessBlock == nullptr || Length == nullptr) {
+    return false;
+  }
+  for (Instruction &I : *SuccessBlock) {
+    auto *SLoad = dyn_cast<CallBase>(&I);
+    if (SLoad == nullptr || !isCallTo(SLoad, "evm_sload") ||
+        SLoad->arg_size() != 1 ||
+        !hasOldStorageBytesLengthBranch(SuccessBlock, SLoad)) {
+      continue;
+    }
+    if (hasDirectStorageByteArrayWrite(SuccessBlock, Length,
+                                       SLoad->getArgOperand(0))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool isMemoryAllocationSize(Value *V) {
   auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
   if (RoundedSize == nullptr || RoundedSize->getOpcode() != Instruction::And) {
@@ -3868,7 +3985,8 @@ std::optional<CheckedBoundsMatch> matchStorageByteArrayLengthBounds(
     return std::nullopt;
   }
 
-  if (!hasStorageByteArrayCopyToStorageSuccess(SuccessBlock, Length)) {
+  if (!hasStorageByteArrayCopyToStorageSuccess(SuccessBlock, Length) &&
+      !hasDirectStorageByteArrayCopyToStorageSuccess(SuccessBlock, Length)) {
     return std::nullopt;
   }
 
