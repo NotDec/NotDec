@@ -2684,6 +2684,19 @@ bool hasMemoryAllocationHelperCall(BasicBlock *SuccessBlock, Value *Length) {
   return false;
 }
 
+bool hasMemoryAllocationSizeReturn(BasicBlock *SuccessBlock, Value *Length) {
+  if (SuccessBlock == nullptr || Length == nullptr) {
+    return false;
+  }
+  // arrayAllocationSizeFunction returns only the checked allocation size. There
+  // is no local mstore/free-pointer update to use as proof in these helpers.
+  auto *Ret = dyn_cast_or_null<ReturnInst>(SuccessBlock->getTerminator());
+  if (Ret == nullptr || Ret->getNumOperands() != 1) {
+    return false;
+  }
+  return isDynamicAllocationSize(Ret->getReturnValue(), Length, SuccessBlock);
+}
+
 std::optional<CheckedBoundsMatch>
 matchPowerOfTwoExpGuard(const NormalizedCondition &FailureCond,
                         const SolidityRevertMatch &RevertMatch,
@@ -2769,7 +2782,8 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
   Value *Shift = findMemoryAllocationShift(SuccessBlock, Length);
   if (Shift == nullptr) {
     return hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
-           hasMemoryAllocationHelperCall(SuccessBlock, Length);
+           hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
+           hasMemoryAllocationSizeReturn(SuccessBlock, Length);
   }
 
   if (auto *RoundedBase = findCommutativeBinaryOpInBlock(
@@ -2784,7 +2798,8 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
 
   return hasMemoryArrayAllocationComputation(SuccessBlock, Length) ||
          hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
-         hasMemoryAllocationHelperCall(SuccessBlock, Length);
+         hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
+         hasMemoryAllocationSizeReturn(SuccessBlock, Length);
 }
 
 bool isMemoryAllocationSize(Value *V) {
