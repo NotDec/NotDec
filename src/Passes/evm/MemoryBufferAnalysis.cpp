@@ -40,6 +40,8 @@ bool isFreeMemoryPointerLoad(Value *V) {
          detail::isConstantIntValue(Call->getArgOperand(1), 64);
 }
 
+bool isZero(Value *V) { return detail::isConstantIntValue(V, 0); }
+
 bool isEvmLogCall(CallBase *Call) {
   StringRef Name = detail::getCalleeName(Call);
   if (!Name.starts_with("evm_log") || Name.size() != 8) {
@@ -258,6 +260,14 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
          detail::isCallTo(Call, "evm_returndatacopy")) &&
         Call->arg_size() == 5) {
       Value *Dst = Call->getArgOperand(2);
+      if (detail::isCallTo(Call, "evm_returndatacopy") && isZero(Dst) &&
+          isZero(Call->getArgOperand(3))) {
+        Facts.Writes.push_back(MemoryWrite{
+            Call, ConstantInt::get(Call->getArgOperand(2)->getType(), 0), 0,
+            Call->getArgOperand(4), Call->getArgOperand(3),
+            MemoryWriteKind::ScratchReturndataCopy});
+        continue;
+      }
       for (Value *Base : Bases) {
         std::optional<uint64_t> Offset = getOffsetFromBase(Dst, Base);
         if (!Offset.has_value()) {
@@ -279,6 +289,12 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
         Facts.Consumers.push_back(MemoryConsumer{
             Call, MemoryConsumerKind::Return, Call->getArgOperand(1),
             Call->getArgOperand(2)});
+      } else if (isZero(Call->getArgOperand(1)) &&
+                 !isZero(Call->getArgOperand(2))) {
+        Facts.Consumers.push_back(MemoryConsumer{
+            Call, MemoryConsumerKind::Return,
+            ConstantInt::get(Call->getArgOperand(1)->getType(), 0),
+            Call->getArgOperand(2)});
       }
       continue;
     }
@@ -287,6 +303,12 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F) {
       if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
         Facts.Consumers.push_back(MemoryConsumer{
             Call, MemoryConsumerKind::Revert, Call->getArgOperand(1),
+            Call->getArgOperand(2)});
+      } else if (isZero(Call->getArgOperand(1)) &&
+                 !isZero(Call->getArgOperand(2))) {
+        Facts.Consumers.push_back(MemoryConsumer{
+            Call, MemoryConsumerKind::Revert,
+            ConstantInt::get(Call->getArgOperand(1)->getType(), 0),
             Call->getArgOperand(2)});
       }
       continue;

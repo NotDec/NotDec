@@ -320,6 +320,7 @@ def count_memory_copy_write_kinds(path: Path) -> dict[str, int]:
     names = {
         "2": "calldata",
         "3": "returndata",
+        "4": "scratch_returndata",
     }
     pattern = (
         r"call void @notdec_solidity_memory_copy_write"

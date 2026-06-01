@@ -19,6 +19,7 @@ enum class MemoryWriteKind {
   MStore = 1,
   CalldataCopy = 2,
   ReturndataCopy = 3,
+  ScratchReturndataCopy = 4,
 };
 
 enum class MemoryConsumerKind {
