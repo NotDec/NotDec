@@ -86,6 +86,18 @@ def expected_markers_by_kind(
     return expected, unmapped
 
 
+def skipped_kinds_by_branch(text: str, metadata: dict[str, str]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for line in text.splitlines():
+        if "!notdec.solidity_checked_bounds.skipped !" not in line:
+            continue
+        for metadata_id in re.findall(
+            r"!notdec\.solidity\.checked_bounds !(\d+)", line
+        ):
+            counts[metadata.get(metadata_id, "unknown")] += 1
+    return counts
+
+
 def audit_file(path: Path) -> dict[str, Counter[str] | int]:
     text = path.read_text(errors="ignore")
     metadata = dict(METADATA_RE.findall(text))
@@ -98,6 +110,7 @@ def audit_file(path: Path) -> dict[str, Counter[str] | int]:
         "skip_reasons": metadata_values(
             text, "notdec.solidity_checked_bounds.skipped", metadata
         ),
+        "skipped_kinds": skipped_kinds_by_branch(text, metadata),
         "semantic_markers": Counter(CHECKED_BOUNDS_MARKER_RE.findall(text)),
         "expected_markers": expected_markers,
         "unmapped_rewrite_kinds": unmapped_rewrite_kinds,
@@ -109,6 +122,10 @@ def print_counter(title: str, counts: Counter[str]) -> None:
     print(f"{title}: {sum(counts.values())}")
     for key, value in counts.most_common():
         print(f"  {key}: {value}")
+
+
+def format_counter_csv(counts: Counter[str]) -> str:
+    return ";".join(f"{key}:{value}" for key, value in counts.most_common())
 
 
 def load_cpp_marker_mapping() -> dict[str, str]:
@@ -143,6 +160,7 @@ def write_csv_summary(
     files: int,
     checked_bounds_total: int,
     skip_total: int,
+    skipped_kinds: str,
     marker_total: int,
     cfg_rewrites: int,
     rewrite_expected: int,
@@ -156,6 +174,7 @@ def write_csv_summary(
                 "files",
                 "checked_bounds_total",
                 "skip_total",
+                "skipped_kinds",
                 "semantic_marker_total",
                 "cfg_rewrites",
                 "rewrite_expected",
@@ -168,6 +187,7 @@ def write_csv_summary(
                 "files": files,
                 "checked_bounds_total": checked_bounds_total,
                 "skip_total": skip_total,
+                "skipped_kinds": skipped_kinds,
                 "semantic_marker_total": marker_total,
                 "cfg_rewrites": cfg_rewrites,
                 "rewrite_expected": rewrite_expected,
@@ -186,6 +206,7 @@ def write_csv_rows(path: Path, rows: list[dict[str, str | int]]) -> None:
                 "files",
                 "checked_bounds_total",
                 "skip_total",
+                "skipped_kinds",
                 "semantic_marker_total",
                 "cfg_rewrites",
                 "rewrite_expected",
@@ -211,6 +232,7 @@ def summarize_files(
         "kinds": Counter(),
         "panic_codes": Counter(),
         "skip_reasons": Counter(),
+        "skipped_kinds": Counter(),
         "semantic_markers": Counter(),
         "expected_markers": Counter(),
         "unmapped_rewrite_kinds": Counter(),
@@ -302,6 +324,7 @@ def main() -> int:
     print_counter("expected_semantic_markers", summary["expected_markers"])  # type: ignore[arg-type]
     print_counter("unmapped_rewrite_kinds", summary["unmapped_rewrite_kinds"])  # type: ignore[arg-type]
     print_counter("skip_reasons", summary["skip_reasons"])  # type: ignore[arg-type]
+    print_counter("skipped_kinds", summary["skipped_kinds"])  # type: ignore[arg-type]
     print(f"cfg_rewrites: {summary['cfg_rewrites']}")
 
     print(f"rewrite_expected: {summary['rewrite_expected']}")
@@ -314,6 +337,7 @@ def main() -> int:
             files=int(summary["files"]),
             checked_bounds_total=int(summary["checked_bounds_total"]),
             skip_total=int(summary["skip_total"]),
+            skipped_kinds=format_counter_csv(summary["skipped_kinds"]),  # type: ignore[arg-type]
             marker_total=int(summary["marker_total"]),
             cfg_rewrites=int(summary["cfg_rewrites"]),
             rewrite_expected=int(summary["rewrite_expected"]),
@@ -332,6 +356,9 @@ def main() -> int:
                         path_summary["checked_bounds_total"]
                     ),
                     "skip_total": int(path_summary["skip_total"]),
+                    "skipped_kinds": format_counter_csv(
+                        path_summary["skipped_kinds"]  # type: ignore[arg-type]
+                    ),
                     "semantic_marker_total": int(path_summary["marker_total"]),
                     "cfg_rewrites": int(path_summary["cfg_rewrites"]),
                     "rewrite_expected": int(path_summary["rewrite_expected"]),
@@ -358,6 +385,9 @@ def main() -> int:
                         file_summary["checked_bounds_total"]
                     ),
                     "skip_total": int(file_summary["skip_total"]),
+                    "skipped_kinds": format_counter_csv(
+                        file_summary["skipped_kinds"]  # type: ignore[arg-type]
+                    ),
                     "semantic_marker_total": int(file_summary["marker_total"]),
                     "cfg_rewrites": int(file_summary["cfg_rewrites"]),
                     "rewrite_expected": int(file_summary["rewrite_expected"]),
