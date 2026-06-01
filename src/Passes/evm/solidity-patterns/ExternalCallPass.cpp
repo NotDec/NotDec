@@ -1,5 +1,6 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
@@ -20,6 +21,8 @@ STATISTIC(NumExternalCallInputCopyWrites,
           "Number of Solidity external call input copy writes found");
 STATISTIC(NumExternalCallInputWordWrites,
           "Number of Solidity external call input word writes found");
+STATISTIC(NumExternalCallInputAbiHeadWrites,
+          "Number of Solidity external call input ABI head writes found");
 
 namespace {
 
@@ -59,6 +62,19 @@ bool isFreeMemoryPointerLoad(Value *V) {
 bool isFreeMemoryPointerStore(CallBase *Call) {
   return isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
          isConstantIntValue(Call->getArgOperand(1), 64);
+}
+
+std::optional<uint64_t> getUInt64Constant(Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr || C->getValue().getActiveBits() > 64) {
+    return std::nullopt;
+  }
+  return C->getZExtValue();
+}
+
+bool isExternalAbiHeadOffset(Value *V) {
+  std::optional<uint64_t> Offset = getUInt64Constant(V);
+  return Offset.has_value() && *Offset >= 4 && ((*Offset - 4) % 32) == 0;
 }
 
 uint64_t getExternalCallKindCode(StringRef Kind) {
@@ -178,6 +194,42 @@ CallBase *findExternalCallInputWordWriteMarker(BasicBlock &BB,
   return Candidate;
 }
 
+void collectExternalCallInputAbiHeadWriteMarkers(
+    BasicBlock &BB, CallBase &ExternalCall, Value *InputBase,
+    SmallVectorImpl<CallBase *> &Writes) {
+  SmallVector<CallBase *, 8> Candidates;
+
+  for (Instruction &I : BB) {
+    if (&I == &ExternalCall) {
+      break;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+
+    if (isFreeMemoryPointerStore(Call)) {
+      Candidates.clear();
+      continue;
+    }
+
+    if (!isCallTo(Call, "notdec_solidity_memory_write") ||
+        Call->arg_size() != 3 ||
+        !isExternalAbiHeadOffset(Call->getArgOperand(1))) {
+      continue;
+    }
+
+    Value *WriteBase = Call->getArgOperand(0);
+    if (WriteBase == InputBase ||
+        (isFreeMemoryPointerLoad(WriteBase) &&
+         isFreeMemoryPointerLoad(InputBase))) {
+      Candidates.push_back(Call);
+    }
+  }
+
+  Writes.append(Candidates.begin(), Candidates.end());
+}
+
 void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
                                             CallBase &Consumer, uint64_t Role,
@@ -232,6 +284,24 @@ void insertExternalCallInputWordWriteMarker(LLVMContext &Ctx,
                       ConstantInt::get(I256, CallKind)});
 }
 
+void insertExternalCallInputAbiHeadWriteMarker(LLVMContext &Ctx,
+                                               CallBase &ExternalCall,
+                                               CallBase &WordWrite,
+                                               uint64_t CallKind) {
+  Module *M = ExternalCall.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_external_call_input_abi_head_write",
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&ExternalCall);
+  Builder.CreateCall(Marker,
+                     {WordWrite.getArgOperand(0), WordWrite.getArgOperand(1),
+                      WordWrite.getArgOperand(2),
+                      ConstantInt::get(I256, CallKind)});
+}
+
 } // namespace
 
 PreservedAnalyses ExternalCallPass::run(Function &F,
@@ -268,6 +338,14 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         insertExternalCallInputWordWriteMarker(Ctx, *Call, *WordWrite,
                                                CallKind);
         ++NumExternalCallInputWordWrites;
+      }
+      SmallVector<CallBase *, 8> AbiHeadWrites;
+      collectExternalCallInputAbiHeadWriteMarkers(
+          *Call->getParent(), *Call, Args->InputBase, AbiHeadWrites);
+      for (CallBase *AbiHeadWrite : AbiHeadWrites) {
+        insertExternalCallInputAbiHeadWriteMarker(Ctx, *Call, *AbiHeadWrite,
+                                                  CallKind);
+        ++NumExternalCallInputAbiHeadWrites;
       }
       if (CallBase *Consumer = findExternalCallConsumerMarker(
               *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
