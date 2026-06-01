@@ -22,13 +22,16 @@
 - 在/sn640/NotDecChainExp/evm2llvm_apehex_pilot 上选固定的100个用例，不断改进效果，直到没有明显的问题
 
 补充要求：
-- 当前计划必须以 IR rewrite 为目标，不能只给原始 IR 打 metadata。
-- metadata 只能用于调试、统计和 oracle；后续 ABI return、revert、event、external call 等 pass 必须逐步改成读取 memory rewrite marker / semantic call。
+- 当前计划的目标是 IR rewrite。不能只给原始 IR 打 metadata。
+- metadata 只能用于调试、统计和 oracle，不能作为 pass 之间的主要接口。
+- 后续 ABI return、revert、event、external call 等 pass 必须逐步改成读取 memory rewrite marker / semantic call。
 - 如果某轮只新增 metadata，没有新增或消费明确的 IR rewrite surface，那一轮不能算完成 memory object pass 的实质实现。
 
 ## 背景
 
-旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成，metadata 也不能成为后续 pass 的主要接口。
+旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成。
+
+这里的 IR rewrite 先不要求删除原始 `mstore/mload/copy`。第一步可以插入稳定的 semantic call / marker，让后续 pass 读这些 marker 做改写。也就是说，memory pass 的产物必须成为后续 pass 真正消费的 IR 事实，而不是旁路注释。
 
 本计划只规划主 NotDec 的 EVM Solidity memory 相关 pass，不动 bin2llvm / wasm2llvm / llvm2c。
 
@@ -124,6 +127,20 @@
 5. 一段 memory 可以有多个 role，尤其 external call 的 input / output 复用。数据结构要允许多 role，不要强制单一 `kind`。
 
 ## 实现规划
+
+整体路线是先插入保守的 semantic call / marker，再逐步迁移消费者。不要一开始删除低层 EVM memory 指令。等 ABI return、revert、event、external call 等消费者已经稳定读取 marker 后，再判断哪些低层指令可以隐藏或删除。
+
+### IR rewrite 硬约束
+
+这组 pass 的完成标准不是“识别到了 memory 形状”，而是“把 memory 形状改写成后续 pass 能消费的 IR 事实”。metadata 可以保留，但只能辅助 debug、统计和 oracle。
+
+每一轮实现至少要满足下面三点之一：
+
+- 新增一个明确的 memory semantic call / marker。
+- 让一个后续 pass 改成读取已有 memory marker，而不是重新猜原始 EVM memory 形状。
+- 补齐一个已有 marker 的语义，使它能被后续 pass 稳定消费。
+
+反过来，如果一轮只是在 `mstore`、`return`、`revert`、`log`、`call` 上补 metadata，而没有新增或消费 rewrite marker，这轮只能算分析准备，不能算完成 memory object pass 的实质实现。
 
 ### 阶段 1：内部数据结构和只读分析
 
