@@ -5240,6 +5240,21 @@
         "notdec_solidity_event_memory_consumer": 8,
         "notdec_solidity_memory_allocation": 11
       }
+    },
+    {
+      "name": "25619_19770992_6b2850de20_21a0b617860a",
+      "input": "cases/25619_19770992_6b2850de20_21a0b617860a.ll",
+      "patterns": [
+        "abi_return",
+        "memory_object"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 24,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_abi_return_dynamic_array_source": 2,
+        "notdec_solidity_abi_return_dynamic_array_mcopy": 2,
+        "notdec_solidity_abi_return_data_copy_write": 2
+      }
     }
   ]
 }

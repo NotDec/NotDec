@@ -26,6 +26,8 @@ STATISTIC(NumAbiReturnDynamicArraySources,
           "Number of Solidity ABI return dynamic array sources found");
 STATISTIC(NumAbiReturnDynamicArrayCopyLoops,
           "Number of Solidity ABI return dynamic array copy loops found");
+STATISTIC(NumAbiReturnDynamicArrayMCopies,
+          "Number of Solidity ABI return dynamic array mcopies found");
 
 namespace {
 
@@ -206,6 +208,13 @@ struct AbiReturnDynamicArrayCopyLoop {
   CallBase *Store = nullptr;
 };
 
+struct AbiReturnDynamicArrayMCopy {
+  Value *ReturnBase = nullptr;
+  Value *SourceArray = nullptr;
+  Value *Length = nullptr;
+  CallBase *CopyWrite = nullptr;
+};
+
 Value *getMemoryLoadPointer(Value *V) {
   auto *Call = dyn_cast_or_null<CallBase>(V);
   if (Call == nullptr || !isCallTo(Call, "evm_mload") ||
@@ -345,6 +354,45 @@ findAbiReturnDynamicArrayCopyLoop(Function &F,
   return std::nullopt;
 }
 
+bool isSourceArrayDataStart(Value *V, Value *SourceArray) {
+  auto *Add = dyn_cast_or_null<BinaryOperator>(V);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    if (Add->getOperand(I) == SourceArray &&
+        isConstantIntValue(Add->getOperand(1 - I), 32)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<AbiReturnDynamicArrayMCopy>
+findAbiReturnDynamicArrayMCopy(Function &F, CallBase &Return,
+                               const AbiReturnDynamicArraySource &Source,
+                               DominatorTree &DT) {
+  for (Instruction &I : instructions(F)) {
+    auto *Copy = dyn_cast<CallBase>(&I);
+    if (Copy == nullptr ||
+        !isCallTo(Copy, "notdec_solidity_memory_copy_write") ||
+        Copy->arg_size() != 5 || !DT.dominates(Copy, &Return)) {
+      continue;
+    }
+    if (!isSameOrReloadedFreeMemoryBase(Copy->getArgOperand(0),
+                                        Source.ReturnBase) ||
+        !isConstantIntValue(Copy->getArgOperand(1), 64) ||
+        !isSourceArrayDataStart(Copy->getArgOperand(2), Source.SourceArray) ||
+        Copy->getArgOperand(3) != Source.Length ||
+        !isConstantIntValue(Copy->getArgOperand(4), 6)) {
+      continue;
+    }
+    return AbiReturnDynamicArrayMCopy{Source.ReturnBase, Source.SourceArray,
+                                      Source.Length, Copy};
+  }
+  return std::nullopt;
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -392,6 +440,24 @@ void insertAbiReturnDynamicArrayCopyLoopMarker(
   Builder.CreateCall(Marker,
                      {CopyLoop.ReturnBase, CopyLoop.SourceArray,
                       CopyLoop.Length, Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArrayMCopyMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayMCopy &MCopy, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_mcopy",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {MCopy.ReturnBase, MCopy.SourceArray, MCopy.Length,
+                      Consumer.getArgOperand(1),
                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
@@ -499,6 +565,13 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
           insertAbiReturnDynamicArrayCopyLoopMarker(Ctx, *Call, *CopyLoop,
                                                     *Consumer, Kind);
           ++NumAbiReturnDynamicArrayCopyLoops;
+        }
+        std::optional<AbiReturnDynamicArrayMCopy> MCopy =
+            findAbiReturnDynamicArrayMCopy(F, *Call, *DynamicSource, DT);
+        if (MCopy.has_value()) {
+          insertAbiReturnDynamicArrayMCopyMarker(Ctx, *Call, *MCopy, *Consumer,
+                                                 Kind);
+          ++NumAbiReturnDynamicArrayMCopies;
         }
       }
     }
