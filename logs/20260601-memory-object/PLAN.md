@@ -163,9 +163,14 @@
 - external call output / ABI decode：要能绑定 output base、output size、returndatacopy 或后续 `mload` 读取。
 - scratch sha3：要能明确标成 scratch，不误并入 allocation。
 
-### 阶段 1：内部数据结构和只读分析
+### 阶段 1：内部数据结构和 rewrite 输出
 
-新增内部分析 helper，先由 memory pass 和现有 pass 按需调用。分析本身可以只读，但它不是交付结果；交付结果必须是插入 IR rewrite surface，或者让后续 pass 消费已有 rewrite surface。每个事实都要能对应到后面的 marker / semantic call，不能停在“统计命中”或“打 metadata”。如果一个事实暂时不能落到 IR marker / semantic call，就先作为候选记录在日志里，不把它当作已实现功能。
+新增内部分析 helper，先由 memory pass 和现有 pass 按需调用。分析只是手段，不是交付结果。每个实现点都必须回答两个问题：
+
+- 这条 memory 事实会写成哪个 IR marker / semantic call。
+- 哪个后续 pass 会读取这个 marker / semantic call。
+
+答不上来时，只能作为候选分析写进日志，不能算实现完成。metadata 可以同步加，但只能用于 debug、统计和 oracle，不能作为 pass 间接口，也不能作为完成标准。
 
 建议文件：
 
@@ -192,7 +197,7 @@
   - `Value *Base`
   - `Value *Size`
 
-第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。分析结果必须能回答两个问题：“要在哪里插入 rewrite marker / semantic call”和“哪个后续 pass 会读这个 IR 事实”。答不上来就只记为候选，不进入完成标准。实现日志里也要明确写出本轮是“新增 rewrite surface”、“消费已有 rewrite surface”，还是“候选分析准备”；只有前两类算实质推进。
+第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。它的输出不能停在 C++ 内部结构，也不能只挂 metadata；必须在 IR 里插入稳定的 marker / semantic call。实现日志里也要明确写出本轮是“新增 rewrite surface”、“消费已有 rewrite surface”，还是“候选分析准备”；只有前两类算实质推进，完整闭环还必须有消费者读取。
 
 ### 阶段 2：free pointer / allocation 识别
 
@@ -205,6 +210,8 @@
 
 复用 checked-bounds 里已有的 free pointer helper 思路，避免两套判断。必要时把这些 helper 从 checked-bounds 迁到 `MemoryBufferAnalysis`。
 
+这一阶段的交付结果必须是 allocation 语义写回 IR，例如 `notdec_solidity_memory_allocation(base, size)` 或同等 semantic call。只识别 `mload(0x40)` / `mstore(0x40, newPtr)`，但没有写出可消费的 IR 事实，不算完成。
+
 ### 阶段 3：按 base 收集写入
 
 只处理 base 明确、offset 明确的写入：
@@ -216,9 +223,11 @@
 
 第一版不处理 PHI base、不处理复杂 symbolic offset、不处理循环里的逐项写入，只标候选。
 
+这一阶段的交付结果必须是 write 语义写回 IR，例如 word write、copy write、byte write 这类 marker / semantic call。后续 ABI return、revert、event、external call pass 要能读取这些 write 事实，不能各自重新扫描同一批低层 `mstore` / `mload` / copy call。
+
 ### 阶段 4：消费者接入
 
-先接两个最稳定的消费者。这里的“接入”不是复制一份低层 pattern 逻辑，而是让消费者优先读取 memory rewrite marker / semantic call；缺 marker 时可以保留原有保守 fallback，但不能把 fallback 当作新 memory object 能力：
+先接两个最稳定的消费者。这里的“接入”不是复制一份低层 pattern 逻辑，而是让消费者优先读取 memory rewrite marker / semantic call；缺 marker 时可以保留原有保守 fallback，但不能把 fallback 当作新 memory object 能力。每个消费者迁移后，都要产出更高层的语义 call，证明它不是只读了 marker 做统计：
 
 - `AbiReturnPass`
   - `return(base, size)` 找到对应 writes。
@@ -235,6 +244,8 @@
 - `StorageAddressingPass`：只读 scratch `mstore(0, key); mstore(32, slot); sha3(0,64)`，不当作 allocation。
 
 每迁移一个消费者，都要在 manifest oracle 里检查对应 semantic call / marker 的数量，不能只检查旧 metadata。固定 100 个 apehex 用例也要统计这些 marker，避免只在小样例里闭环。
+
+阶段 4 是 memory object pass 是否真正闭环的关键。只有“memory pass 写 marker，消费者 pass 读取 marker，并产出 ABI return / revert / event / external call 级别的 semantic call”，才算完成一个功能闭环。
 
 ### 阶段 5：IR rewrite surface
 
@@ -256,7 +267,7 @@
 - write rewrite：表达 base、offset、source kind，例如常量 offset 的 word write。
 - consumer rewrite：在 `return/revert/log/call` 附近绑定 buffer role，避免后续 pass 重新猜 base / size。
 
-第二阶段再按消费者迁移情况决定是否隐藏或删除低层 `mstore/mload/copy`。只要后续 pass 还依赖低层指令，就只能 hide 不能删。最终目标不是“IR 上多一些标注 call”，而是让反编译主流程尽量基于高层语义 call 工作，低层 memory 指令只作为保守 fallback 或调试证据存在。
+第二阶段再按消费者迁移情况决定是否隐藏或删除低层 `mstore/mload/copy`。只要后续 pass 还依赖低层指令，就只能 hide 不能删。最终目标不是“IR 上多一些标注 call”，而是让反编译主流程尽量基于高层语义 call 工作，低层 memory 指令只作为保守 fallback 或调试证据存在。也就是说，IR rewrite 不是可选优化，而是这组 pass 的目标本身。
 
 完成标准里，只有 metadata 没有 rewrite surface 不算完成；有 marker 但后续 pass 仍完全绕过 marker、继续猜原始 memory 形状，也不算完成。每个主要消费者迁移后，都要留下一个 proof marker 或语义 call，证明它确实读到了 memory rewrite 结果。
 

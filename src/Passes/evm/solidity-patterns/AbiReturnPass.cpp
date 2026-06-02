@@ -28,6 +28,8 @@ STATISTIC(NumAbiReturnDynamicArrayCopyLoops,
           "Number of Solidity ABI return dynamic array copy loops found");
 STATISTIC(NumAbiReturnDynamicArrayMCopies,
           "Number of Solidity ABI return dynamic array mcopies found");
+STATISTIC(NumAbiReturnDynamicArrayHelperCopies,
+          "Number of Solidity ABI return dynamic array helper copies found");
 
 namespace {
 
@@ -215,6 +217,15 @@ struct AbiReturnDynamicArrayMCopy {
   CallBase *CopyWrite = nullptr;
 };
 
+struct AbiReturnDynamicArrayHelperCopy {
+  // Some Solidity builds keep copy_memory_to_memory_with_cleanup outlined; this
+  // keeps the call site tied to the same ABI return source/copy relation.
+  Value *ReturnBase = nullptr;
+  Value *SourceArray = nullptr;
+  Value *Length = nullptr;
+  CallBase *CopyCall = nullptr;
+};
+
 Value *getMemoryLoadPointer(Value *V) {
   auto *Call = dyn_cast_or_null<CallBase>(V);
   if (Call == nullptr || !isCallTo(Call, "evm_mload") ||
@@ -368,6 +379,74 @@ bool isSourceArrayDataStart(Value *V, Value *SourceArray) {
   return false;
 }
 
+Value *getArg(Function &F, unsigned Index) {
+  if (Index >= F.arg_size()) {
+    return nullptr;
+  }
+  return F.getArg(Index);
+}
+
+Value *matchBasePlusIndex(Value *Ptr, Value *Base) {
+  auto *Add = dyn_cast_or_null<BinaryOperator>(Ptr);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return nullptr;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    if (Add->getOperand(I) == Base) {
+      return Add->getOperand(1 - I);
+    }
+  }
+  return nullptr;
+}
+
+bool isAddOf(Value *V, Value *LHS, Value *RHS) {
+  auto *Add = dyn_cast_or_null<BinaryOperator>(V);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return false;
+  }
+  return (Add->getOperand(0) == LHS && Add->getOperand(1) == RHS) ||
+         (Add->getOperand(0) == RHS && Add->getOperand(1) == LHS);
+}
+
+bool isMemoryToMemoryCopyHelper(Function *Callee) {
+  if (Callee == nullptr || Callee->arg_size() < 7) {
+    return false;
+  }
+  Value *Src = getArg(*Callee, 4);
+  Value *Dst = getArg(*Callee, 5);
+  Value *Length = getArg(*Callee, 6);
+
+  bool HasCopy = false;
+  bool HasCleanup = false;
+  for (Instruction &I : instructions(Callee)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
+        Call->arg_size() != 3) {
+      continue;
+    }
+
+    Value *StorePtr = Call->getArgOperand(1);
+    if (isConstantIntValue(Call->getArgOperand(2), 0) &&
+        isAddOf(StorePtr, Dst, Length)) {
+      HasCleanup = true;
+      continue;
+    }
+
+    auto *Load = dyn_cast<CallBase>(Call->getArgOperand(2));
+    if (Load == nullptr || !isCallTo(Load, "evm_mload") ||
+        Load->arg_size() != 2) {
+      continue;
+    }
+    Value *DstIndex = matchBasePlusIndex(StorePtr, Dst);
+    Value *SrcIndex = matchBasePlusIndex(Load->getArgOperand(1), Src);
+    if (DstIndex != nullptr && DstIndex == SrcIndex) {
+      HasCopy = true;
+    }
+  }
+
+  return HasCopy && HasCleanup;
+}
+
 std::optional<AbiReturnDynamicArrayMCopy>
 findAbiReturnDynamicArrayMCopy(Function &F, CallBase &Return,
                                const AbiReturnDynamicArraySource &Source,
@@ -389,6 +468,31 @@ findAbiReturnDynamicArrayMCopy(Function &F, CallBase &Return,
     }
     return AbiReturnDynamicArrayMCopy{Source.ReturnBase, Source.SourceArray,
                                       Source.Length, Copy};
+  }
+  return std::nullopt;
+}
+
+std::optional<AbiReturnDynamicArrayHelperCopy>
+findAbiReturnDynamicArrayHelperCopy(Function &F, CallBase &Return,
+                                    const AbiReturnDynamicArraySource &Source,
+                                    DominatorTree &DT) {
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !DT.dominates(Call, &Return) ||
+        Call->arg_size() < 7 ||
+        !isMemoryToMemoryCopyHelper(Call->getCalledFunction())) {
+      continue;
+    }
+    Value *DstBase = stripAddConstant(Call->getArgOperand(5), 64);
+    if (!isSourceArrayDataStart(Call->getArgOperand(4), Source.SourceArray) ||
+        DstBase == nullptr ||
+        !isSameOrReloadedFreeMemoryBase(DstBase, Source.ReturnBase) ||
+        Call->getArgOperand(6) != Source.Length) {
+      continue;
+    }
+    return AbiReturnDynamicArrayHelperCopy{Source.ReturnBase,
+                                           Source.SourceArray, Source.Length,
+                                           Call};
   }
   return std::nullopt;
 }
@@ -459,6 +563,24 @@ void insertAbiReturnDynamicArrayMCopyMarker(
                      {MCopy.ReturnBase, MCopy.SourceArray, MCopy.Length,
                       Consumer.getArgOperand(1),
                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArrayHelperCopyMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayHelperCopy &HelperCopy, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_helper_copy",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker, {HelperCopy.ReturnBase, HelperCopy.SourceArray, HelperCopy.Length,
+               Consumer.getArgOperand(1),
+               ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDataAllocationMarker(LLVMContext &Ctx, CallBase &Return,
@@ -572,6 +694,13 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
           insertAbiReturnDynamicArrayMCopyMarker(Ctx, *Call, *MCopy, *Consumer,
                                                  Kind);
           ++NumAbiReturnDynamicArrayMCopies;
+        }
+        std::optional<AbiReturnDynamicArrayHelperCopy> HelperCopy =
+            findAbiReturnDynamicArrayHelperCopy(F, *Call, *DynamicSource, DT);
+        if (HelperCopy.has_value()) {
+          insertAbiReturnDynamicArrayHelperCopyMarker(Ctx, *Call, *HelperCopy,
+                                                      *Consumer, Kind);
+          ++NumAbiReturnDynamicArrayHelperCopies;
         }
       }
     }
