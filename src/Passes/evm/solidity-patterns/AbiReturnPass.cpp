@@ -28,6 +28,10 @@ STATISTIC(NumAbiReturnDynamicArraySources,
           "Number of Solidity ABI return dynamic array sources found");
 STATISTIC(NumAbiReturnDynamicArrayCopyLoops,
           "Number of Solidity ABI return dynamic array copy loops found");
+STATISTIC(NumAbiReturnDynamicArrayConvertedCopyLoops,
+          "Number of Solidity ABI return dynamic array converted copy loops found");
+STATISTIC(NumAbiReturnConvertedDynamicArrayRewrites,
+          "Number of Solidity ABI return converted dynamic array rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayMCopies,
           "Number of Solidity ABI return dynamic array mcopies found");
 STATISTIC(NumAbiReturnDynamicArrayHelperCopies,
@@ -235,6 +239,16 @@ struct AbiReturnDynamicArrayCopyLoop {
   Value *SourceArray = nullptr;
   Value *Length = nullptr;
   CallBase *Load = nullptr;
+  CallBase *Store = nullptr;
+};
+
+struct AbiReturnDynamicArrayConvertedCopyLoop {
+  // Solidity encoders may clean or convert each memory array element before
+  // storing it into the ABI return buffer. Keep this separate from raw copies.
+  Value *ReturnBase = nullptr;
+  Value *SourceArray = nullptr;
+  Value *Length = nullptr;
+  CallBase *SourceLoad = nullptr;
   CallBase *Store = nullptr;
 };
 
@@ -470,6 +484,107 @@ bool isAddOf(Value *V, Value *LHS, Value *RHS) {
   }
   return (Add->getOperand(0) == LHS && Add->getOperand(1) == RHS) ||
          (Add->getOperand(0) == RHS && Add->getOperand(1) == LHS);
+}
+
+bool isBasePlusConstant(Value *V, Value *Base, uint64_t Constant) {
+  Value *MaybeBase = stripAddConstant(V, Constant);
+  if (MaybeBase == nullptr) {
+    return false;
+  }
+  return MaybeBase == Base || isSameOrReloadedFreeMemoryBase(MaybeBase, Base);
+}
+
+bool phiHasStep(PHINode &Phi, uint64_t Step) {
+  for (Value *Incoming : Phi.incoming_values()) {
+    if (isAddOf(Incoming, &Phi, ConstantInt::get(Phi.getType(), Step))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool phiHasBaseIncoming(PHINode &Phi, Value *Base, uint64_t Offset) {
+  for (Value *Incoming : Phi.incoming_values()) {
+    if (isBasePlusConstant(Incoming, Base, Offset)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+PHINode *getPointerCursor(Value *Ptr) {
+  if (auto *Phi = dyn_cast_or_null<PHINode>(Ptr)) {
+    return Phi;
+  }
+  auto *Add = dyn_cast_or_null<BinaryOperator>(Ptr);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return nullptr;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    if (isa<ConstantInt>(Add->getOperand(I))) {
+      return dyn_cast<PHINode>(Add->getOperand(1 - I));
+    }
+  }
+  return nullptr;
+}
+
+bool isReturnDataCursor(Value *Ptr, Value *ReturnBase) {
+  PHINode *Cursor = getPointerCursor(Ptr);
+  return Cursor != nullptr && phiHasBaseIncoming(*Cursor, ReturnBase, 64) &&
+         (phiHasStep(*Cursor, 32) || phiHasStep(*Cursor, 64) ||
+          phiHasStep(*Cursor, 96));
+}
+
+bool isSourceDataCursor(Value *Ptr, Value *SourceArray) {
+  PHINode *Cursor = getPointerCursor(Ptr);
+  return Cursor != nullptr && phiHasBaseIncoming(*Cursor, SourceArray, 32) &&
+         phiHasStep(*Cursor, 32);
+}
+
+CallBase *findSourceCursorLoad(Value *V, Value *SourceArray, unsigned Depth = 0) {
+  if (V == nullptr || Depth > 8) {
+    return nullptr;
+  }
+  auto *Call = dyn_cast<CallBase>(V);
+  if (Call != nullptr && isCallTo(Call, "evm_mload") && Call->arg_size() == 2 &&
+      isSourceDataCursor(Call->getArgOperand(1), SourceArray)) {
+    return Call;
+  }
+
+  auto *ValueUser = dyn_cast<User>(V);
+  if (ValueUser == nullptr) {
+    return nullptr;
+  }
+  for (Value *Operand : ValueUser->operands()) {
+    if (CallBase *Load = findSourceCursorLoad(Operand, SourceArray, Depth + 1)) {
+      return Load;
+    }
+  }
+  return nullptr;
+}
+
+std::optional<AbiReturnDynamicArrayConvertedCopyLoop>
+findAbiReturnDynamicArrayConvertedCopyLoop(
+    Function &F, CallBase &Return, const AbiReturnDynamicArraySource &Source,
+    DominatorTree &DT) {
+  for (Instruction &I : instructions(F)) {
+    auto *Store = dyn_cast<CallBase>(&I);
+    if (Store == nullptr || !isCallTo(Store, "evm_mstore") ||
+        Store->arg_size() != 3 ||
+        !isReturnDataCursor(Store->getArgOperand(1), Source.ReturnBase)) {
+      continue;
+    }
+
+    CallBase *SourceLoad =
+        findSourceCursorLoad(Store->getArgOperand(2), Source.SourceArray);
+    if (SourceLoad == nullptr || !valueAvailableAt(SourceLoad, *Store, DT)) {
+      continue;
+    }
+
+    return AbiReturnDynamicArrayConvertedCopyLoop{
+        Source.ReturnBase, Source.SourceArray, Source.Length, SourceLoad, Store};
+  }
+  return std::nullopt;
 }
 
 bool isMemoryToMemoryCopyHelper(Function *Callee) {
@@ -791,6 +906,42 @@ void insertAbiReturnDynamicArrayCopyLoopMarker(
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_copy_loop",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
+                      CopyLoop.Length, Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArrayConvertedCopyLoopMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayConvertedCopyLoop &CopyLoop, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_converted_copy_loop",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
+                      CopyLoop.Length, Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnConvertedDynamicArrayRewriteMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayConvertedCopyLoop &CopyLoop, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_abi_return_converted_dynamic_array",
       FunctionType::get(Type::getVoidTy(Ctx),
                         {I256, I256, I256, I256, I256}, false));
 
@@ -1214,6 +1365,14 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
                                                     *Consumer, Kind);
           ++NumAbiReturnDynamicArrayCopyLoops;
         }
+        std::optional<AbiReturnDynamicArrayConvertedCopyLoop> ConvertedCopyLoop =
+            findAbiReturnDynamicArrayConvertedCopyLoop(F, *Call, *DynamicSource,
+                                                       DT);
+        if (ConvertedCopyLoop.has_value()) {
+          insertAbiReturnDynamicArrayConvertedCopyLoopMarker(
+              Ctx, *Call, *ConvertedCopyLoop, *Consumer, Kind);
+          ++NumAbiReturnDynamicArrayConvertedCopyLoops;
+        }
         std::optional<AbiReturnDynamicArrayMCopy> MCopy =
             findAbiReturnDynamicArrayMCopy(F, *Call, *DynamicSource, DT);
         if (MCopy.has_value()) {
@@ -1238,6 +1397,10 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
           insertAbiReturnStorageDynamicArrayRewriteMarker(
               Ctx, *Call, *StorageSource, *Consumer, Kind);
           ++NumAbiReturnStorageDynamicArrayRewrites;
+        } else if (ConvertedCopyLoop.has_value()) {
+          insertAbiReturnConvertedDynamicArrayRewriteMarker(
+              Ctx, *Call, *ConvertedCopyLoop, *Consumer, Kind);
+          ++NumAbiReturnConvertedDynamicArrayRewrites;
         }
         std::optional<AbiReturnDynamicArrayMemorySource> MemorySource =
             findAbiReturnDynamicArrayMemorySource(F, *Call, *DynamicSource, DT);
