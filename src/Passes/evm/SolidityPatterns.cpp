@@ -1274,13 +1274,30 @@ bool isFreeMemoryPointerLoad(Value *V) {
 }
 
 bool isFreeMemoryPointerStore(CallBase *Call) {
-  return isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
+  if (isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
+      isConstantIntValue(Call->getArgOperand(1), 64)) {
+    return true;
+  }
+  return isCallTo(Call, "notdec_evm_finalize_alloc") && Call->arg_size() == 2;
+}
+
+bool isFreeMemoryAllocationBase(Value *V) {
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  return Call != nullptr &&
+         ((isCallTo(Call, "notdec_evm_alloc") && Call->arg_size() == 1) ||
+          (isCallTo(Call, "notdec_evm_alloc_unbounded") &&
+           Call->arg_size() == 0));
 }
 
 bool isSameOrReloadedFreeMemoryBase(Value *LHS, Value *RHS) {
-  return LHS == RHS ||
-         (isFreeMemoryPointerLoad(LHS) && isFreeMemoryPointerLoad(RHS));
+  if (LHS == RHS) {
+    return true;
+  }
+  bool LHSFreeBase = isFreeMemoryPointerLoad(LHS) ||
+                     isFreeMemoryAllocationBase(LHS);
+  bool RHSFreeBase = isFreeMemoryPointerLoad(RHS) ||
+                     isFreeMemoryAllocationBase(RHS);
+  return LHSFreeBase && RHSFreeBase;
 }
 
 bool isSameValue(Value *LHS, Value *RHS) {

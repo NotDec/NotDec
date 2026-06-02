@@ -6,6 +6,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <optional>
+#include <utility>
 
 using namespace llvm;
 
@@ -25,26 +26,6 @@ STATISTIC(NumEventDataCopyWrites,
           "Number of Solidity event data copy writes found");
 
 namespace {
-
-CallBase *findEventConsumerMarker(BasicBlock &BB, CallBase &Log) {
-  for (Instruction &I : BB) {
-    if (&I == &Log) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr ||
-        !isCallTo(Call, "notdec_solidity_memory_consumer") ||
-        Call->arg_size() != 3 ||
-        !isConstantIntValue(Call->getArgOperand(2), 3)) {
-      continue;
-    }
-    if (Call->getArgOperand(0) == Log.getArgOperand(1) &&
-        Call->getArgOperand(1) == Log.getArgOperand(2)) {
-      return Call;
-    }
-  }
-  return nullptr;
-}
 
 bool isEventAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
@@ -128,9 +109,10 @@ void collectEventDataCopyWriteMarkers(BasicBlock &BB, CallBase &Log,
   Writes.append(Candidates.begin(), Candidates.end());
 }
 
-CallBase *findEventDataAllocationMarker(BasicBlock &BB, CallBase &Log,
-                                        ArrayRef<CallBase *> WordWrites,
-                                        ArrayRef<CallBase *> CopyWrites) {
+std::optional<std::pair<Value *, Value *>>
+findEventDataAllocation(BasicBlock &BB, CallBase &Log,
+                        ArrayRef<CallBase *> WordWrites,
+                        ArrayRef<CallBase *> CopyWrites) {
   auto MatchesEventDataBase = [&](Value *AllocationBase) {
     for (CallBase *Write : WordWrites) {
       if (Write->arg_size() == 3 &&
@@ -147,7 +129,7 @@ CallBase *findEventDataAllocationMarker(BasicBlock &BB, CallBase &Log,
     return false;
   };
 
-  CallBase *Candidate = nullptr;
+  std::optional<std::pair<Value *, Value *>> Candidate;
   for (Instruction &I : BB) {
     if (&I == &Log) {
       break;
@@ -157,12 +139,14 @@ CallBase *findEventDataAllocationMarker(BasicBlock &BB, CallBase &Log,
       continue;
     }
 
-    if (!isCallTo(Call, "notdec_solidity_memory_allocation") ||
-        Call->arg_size() != 2) {
+    if (isCallTo(Call, "notdec_evm_finalize_alloc") && Call->arg_size() == 2 &&
+        MatchesEventDataBase(Call->getArgOperand(0))) {
+      Candidate = std::make_pair(Call->getArgOperand(0), Call->getArgOperand(1));
       continue;
     }
-    if (MatchesEventDataBase(Call->getArgOperand(0))) {
-      Candidate = Call;
+    if (isCallTo(Call, "notdec_evm_alloc") && Call->arg_size() == 1 &&
+        MatchesEventDataBase(Call)) {
+      Candidate = std::make_pair(Call, Call->getArgOperand(0));
     }
   }
 
@@ -170,7 +154,7 @@ CallBase *findEventDataAllocationMarker(BasicBlock &BB, CallBase &Log,
 }
 
 void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
-                                     CallBase &Consumer,
+                                     Value *Base, Value *Size,
                                      uint64_t TopicCount) {
   Module *M = Log.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
@@ -179,14 +163,13 @@ void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Log);
-  Builder.CreateCall(Marker,
-                     {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, TopicCount)});
+  Builder.CreateCall(Marker, {Base, Size, ConstantInt::get(I256, TopicCount)});
 }
 
 void insertEventDataAllocationMarker(LLVMContext &Ctx, CallBase &Log,
-                                     CallBase &Allocation,
-                                     CallBase &Consumer,
+                                     Value *AllocationBase,
+                                     Value *AllocationSize,
+                                     Value *ConsumerSize,
                                      uint64_t TopicCount) {
   Module *M = Log.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
@@ -196,10 +179,8 @@ void insertEventDataAllocationMarker(LLVMContext &Ctx, CallBase &Log,
                         false));
 
   IRBuilder<> Builder(&Log);
-  Builder.CreateCall(Marker,
-                     {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
-                      Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, TopicCount)});
+  Builder.CreateCall(Marker, {AllocationBase, AllocationSize, ConsumerSize,
+                              ConstantInt::get(I256, TopicCount)});
 }
 
 void insertEventDataWordWriteMarker(LLVMContext &Ctx, CallBase &Log,
@@ -255,28 +236,35 @@ PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
     if (Name.back() < '0' || Name.back() > '4') {
       continue;
     }
+    if (Call->arg_size() < 3) {
+      continue;
+    }
     uint64_t TopicCount = static_cast<uint64_t>(Name.back() - '0');
-    if (CallBase *Consumer = findEventConsumerMarker(*Call->getParent(),
-                                                     *Call)) {
-      insertEventMemoryConsumerMarker(Ctx, *Call, *Consumer, TopicCount);
+    {
+      Value *DataBase = Call->getArgOperand(1);
+      Value *DataSize = Call->getArgOperand(2);
+      insertEventMemoryConsumerMarker(Ctx, *Call, DataBase, DataSize,
+                                      TopicCount);
       ++NumEventMemoryConsumers;
       SmallVector<CallBase *, 8> WordWrites;
-      collectEventDataWordWriteMarkers(*Call->getParent(), *Call,
-                                       Consumer->getArgOperand(0), WordWrites);
+      collectEventDataWordWriteMarkers(*Call->getParent(), *Call, DataBase,
+                                       WordWrites);
       for (CallBase *WordWrite : WordWrites) {
         insertEventDataWordWriteMarker(Ctx, *Call, *WordWrite, TopicCount);
         ++NumEventDataWordWrites;
       }
       SmallVector<CallBase *, 8> CopyWrites;
-      collectEventDataCopyWriteMarkers(*Call->getParent(), *Call,
-                                       Consumer->getArgOperand(0), CopyWrites);
+      collectEventDataCopyWriteMarkers(*Call->getParent(), *Call, DataBase,
+                                       CopyWrites);
       for (CallBase *CopyWrite : CopyWrites) {
         insertEventDataCopyWriteMarker(Ctx, *Call, *CopyWrite, TopicCount);
         ++NumEventDataCopyWrites;
       }
-      if (CallBase *Allocation = findEventDataAllocationMarker(
-              *Call->getParent(), *Call, WordWrites, CopyWrites)) {
-        insertEventDataAllocationMarker(Ctx, *Call, *Allocation, *Consumer,
+      if (std::optional<std::pair<Value *, Value *>> Allocation =
+              findEventDataAllocation(*Call->getParent(), *Call, WordWrites,
+                                      CopyWrites)) {
+        insertEventDataAllocationMarker(Ctx, *Call, Allocation->first,
+                                        Allocation->second, DataSize,
                                         TopicCount);
         ++NumEventDataAllocations;
       }

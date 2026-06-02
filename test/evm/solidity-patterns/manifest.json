@@ -5013,8 +5013,8 @@
       "expected_checked_bounds_cfg_rewrites": 44,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_memory_read": 35,
-        "notdec_solidity_external_call_output_word_read": 1,
-        "notdec_solidity_external_call_output_abi_decode_buffer": 1
+        "notdec_solidity_external_call_output_word_read": 3,
+        "notdec_solidity_external_call_output_abi_decode_buffer": 2
       }
     },
     {

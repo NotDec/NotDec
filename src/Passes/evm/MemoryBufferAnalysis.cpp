@@ -2,6 +2,7 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 
 #include <llvm/ADT/Statistic.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
@@ -15,12 +16,12 @@ using namespace llvm;
 
 STATISTIC(NumMemoryAllocations,
           "Number of Solidity memory allocations rewritten");
+STATISTIC(NumMemoryFinalizeAllocations,
+          "Number of Solidity memory allocation finalizers rewritten");
 STATISTIC(NumMemoryWrites, "Number of Solidity memory writes rewritten");
 STATISTIC(NumMemoryReads, "Number of Solidity memory reads rewritten");
 STATISTIC(NumMemoryArrayByteWrites,
           "Number of Solidity memory array byte writes rewritten");
-STATISTIC(NumMemoryConsumers,
-          "Number of Solidity memory consumers rewritten");
 
 namespace notdec::passes::evm {
 namespace {
@@ -179,6 +180,13 @@ void getOrDeclareMarker(Module &M, StringRef Name, ArrayRef<Type *> Args,
   Out = cast<Function>(Callee.getCallee());
 }
 
+Function *getOrDeclareFunction(Module &M, StringRef Name, Type *ReturnType,
+                               ArrayRef<Type *> Args) {
+  FunctionType *FTy = FunctionType::get(ReturnType, Args, false);
+  FunctionCallee Callee = M.getOrInsertFunction(Name, FTy);
+  return cast<Function>(Callee.getCallee());
+}
+
 Value *asI256(IRBuilder<> &Builder, Value *V) {
   Type *I256 = Builder.getIntNTy(256);
   if (V->getType() == I256) {
@@ -206,6 +214,59 @@ void insertAllocationMarker(LLVMContext &Ctx, const MemoryAllocation &Alloc) {
   IRBuilder<> Builder(Alloc.FinalizePoint);
   Builder.CreateCall(Marker,
                      {asI256(Builder, Alloc.Base), asI256(Builder, Alloc.Size)});
+}
+
+bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
+                       DominatorTree &DT,
+                       SmallPtrSetImpl<Instruction *> &RewrittenBases,
+                       SmallVectorImpl<Instruction *> &ToErase) {
+  auto *BaseLoad = dyn_cast_or_null<CallBase>(Alloc.Base);
+  if (BaseLoad == nullptr || Alloc.Size == nullptr ||
+      Alloc.AllocatePoint == nullptr) {
+    return false;
+  }
+  if (!RewrittenBases.insert(BaseLoad).second) {
+    return false;
+  }
+
+  Module *M = BaseLoad->getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  bool SizeAvailable =
+      valueAvailableAt(Alloc.Size, *Alloc.AllocatePoint, DT);
+  SmallVector<Type *, 1> AllocArgs;
+  if (SizeAvailable) {
+    AllocArgs.push_back(I256);
+  }
+  Function *AllocFn = getOrDeclareFunction(
+      *M, SizeAvailable ? "notdec_evm_alloc" : "notdec_evm_alloc_unbounded",
+      I256, AllocArgs);
+
+  IRBuilder<> AllocBuilder(Alloc.AllocatePoint);
+  CallInst *NewBase =
+      SizeAvailable
+          ? AllocBuilder.CreateCall(AllocFn, {asI256(AllocBuilder, Alloc.Size)})
+          : AllocBuilder.CreateCall(AllocFn);
+
+  BaseLoad->replaceAllUsesWith(NewBase);
+  if (BaseLoad->use_empty()) {
+    ToErase.push_back(BaseLoad);
+  }
+
+  if (!SizeAvailable && Alloc.FinalizePoint != nullptr) {
+    Function *FinalizeFn = getOrDeclareFunction(
+        *M, "notdec_evm_finalize_alloc", Type::getVoidTy(Ctx), {I256, I256});
+    IRBuilder<> FinalizeBuilder(Alloc.FinalizePoint);
+    FinalizeBuilder.CreateCall(
+        FinalizeFn,
+        {asI256(FinalizeBuilder, NewBase),
+         asI256(FinalizeBuilder, Alloc.Size)});
+    ++NumMemoryFinalizeAllocations;
+  }
+
+  if (Alloc.FinalizePoint != nullptr) {
+    ToErase.push_back(Alloc.FinalizePoint);
+  }
+  return true;
 }
 
 void insertWriteMarker(LLVMContext &Ctx, const MemoryWrite &Write) {
@@ -571,8 +632,21 @@ PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
 
   for (const MemoryConsumer &Consumer : Facts.Consumers) {
     insertConsumerMarker(Ctx, Consumer);
-    ++NumMemoryConsumers;
     Changed = true;
+  }
+
+  SmallVector<Instruction *, 16> ToErase;
+  SmallPtrSet<Instruction *, 8> RewrittenBases;
+  for (const MemoryAllocation &Alloc : Facts.Allocations) {
+    if (rewriteAllocation(Ctx, Alloc, DT, RewrittenBases, ToErase)) {
+      Changed = true;
+    }
+  }
+
+  for (Instruction *I : ToErase) {
+    if (I != nullptr && I->use_empty()) {
+      I->eraseFromParent();
+    }
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
