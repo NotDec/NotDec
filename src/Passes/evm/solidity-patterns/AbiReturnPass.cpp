@@ -679,6 +679,18 @@ APInt foldEvmShlToI256(const ConstantInt &Shift, const ConstantInt &RawWord) {
   return Word.shl(ShiftAmount);
 }
 
+std::optional<APInt> getLiteralFinalWord(Value *DataWord) {
+  if (auto *Word = dyn_cast_or_null<ConstantInt>(DataWord)) {
+    return Word->getValue().zextOrTrunc(256);
+  }
+  if (CallBase *Shift = getLiteralPayloadShift(DataWord)) {
+    auto *ShiftAmount = cast<ConstantInt>(Shift->getArgOperand(0));
+    auto *RawWord = cast<ConstantInt>(Shift->getArgOperand(1));
+    return foldEvmShlToI256(*ShiftAmount, *RawWord);
+  }
+  return std::nullopt;
+}
+
 uint64_t getLiteralBytesReturnCopyKind(
     const std::optional<AbiReturnDynamicArrayCopyLoop> &CopyLoop,
     const std::optional<AbiReturnDynamicArrayMCopy> &MCopy,
@@ -931,12 +943,9 @@ void insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
 
 void insertAbiReturnDynamicArrayLiteralBytesMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Shift,
+    const AbiReturnDynamicArrayMemorySource &MemorySource,
+    const APInt &FinalWord,
     CallBase &Consumer, StringRef Kind) {
-  auto *ShiftAmount = cast<ConstantInt>(Shift.getArgOperand(0));
-  auto *RawWord = cast<ConstantInt>(Shift.getArgOperand(1));
-  APInt FinalWord = foldEvmShlToI256(*ShiftAmount, *RawWord);
-
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -955,12 +964,9 @@ void insertAbiReturnDynamicArrayLiteralBytesMarker(
 
 void insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Shift,
+    const AbiReturnDynamicArrayMemorySource &MemorySource,
+    const APInt &FinalWord,
     CallBase &Consumer, uint64_t CopyKind, StringRef Kind) {
-  auto *ShiftAmount = cast<ConstantInt>(Shift.getArgOperand(0));
-  auto *RawWord = cast<ConstantInt>(Shift.getArgOperand(1));
-  APInt FinalWord = foldEvmShlToI256(*ShiftAmount, *RawWord);
-
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -979,12 +985,9 @@ void insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
 
 void insertAbiReturnLiteralBytesRewriteMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Shift,
+    const AbiReturnDynamicArrayMemorySource &MemorySource,
+    const APInt &FinalWord,
     CallBase &Consumer, uint64_t CopyKind, StringRef Kind) {
-  auto *ShiftAmount = cast<ConstantInt>(Shift.getArgOperand(0));
-  auto *RawWord = cast<ConstantInt>(Shift.getArgOperand(1));
-  APInt FinalWord = foldEvmShlToI256(*ShiftAmount, *RawWord);
-
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1144,26 +1147,29 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
             insertAbiReturnDynamicArrayLiteralPayloadMarker(
                 Ctx, *Call, *MemorySource, *Consumer, Kind);
             ++NumAbiReturnDynamicArrayLiteralPayloads;
-            if (CallBase *Shift = getLiteralPayloadShift(
-                    MemorySource->DataWrite->getArgOperand(2))) {
+            Value *DataWord = MemorySource->DataWrite->getArgOperand(2);
+            if (CallBase *Shift = getLiteralPayloadShift(DataWord)) {
               insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
                   Ctx, *Call, *MemorySource, *Shift, *Consumer, Kind);
               ++NumAbiReturnDynamicArrayLiteralPayloadShifts;
               insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
                   Ctx, *Call, *MemorySource, *Shift, *Consumer, Kind);
               ++NumAbiReturnDynamicArrayLiteralPayloadWords;
+            }
+            if (std::optional<APInt> FinalWord =
+                    getLiteralFinalWord(DataWord)) {
               insertAbiReturnDynamicArrayLiteralBytesMarker(
-                  Ctx, *Call, *MemorySource, *Shift, *Consumer, Kind);
+                  Ctx, *Call, *MemorySource, *FinalWord, *Consumer, Kind);
               ++NumAbiReturnDynamicArrayLiteralBytes;
               uint64_t CopyKind = getLiteralBytesReturnCopyKind(
                   CopyLoop, MCopy, HelperCopy);
               if (CopyKind != 0) {
                 insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
-                    Ctx, *Call, *MemorySource, *Shift, *Consumer, CopyKind,
+                    Ctx, *Call, *MemorySource, *FinalWord, *Consumer, CopyKind,
                     Kind);
                 ++NumAbiReturnDynamicArrayLiteralByteReturns;
                 insertAbiReturnLiteralBytesRewriteMarker(
-                    Ctx, *Call, *MemorySource, *Shift, *Consumer, CopyKind,
+                    Ctx, *Call, *MemorySource, *FinalWord, *Consumer, CopyKind,
                     Kind);
                 ++NumAbiReturnLiteralByteRewrites;
               }

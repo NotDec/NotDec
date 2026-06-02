@@ -3931,8 +3931,9 @@
       "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 8,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 1,
-        "notdec_solidity_rewrite_abi_return_literal_bytes": 1
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 2,
+        "notdec_solidity_rewrite_abi_return_literal_bytes": 2
       },
       "expected_returndata_bubbles": 4
     },
