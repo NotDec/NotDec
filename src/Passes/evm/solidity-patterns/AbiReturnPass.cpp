@@ -38,6 +38,10 @@ STATISTIC(NumAbiReturnStorageDynamicArrayRewrites,
           "Number of Solidity ABI return storage dynamic array rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayMemorySources,
           "Number of Solidity ABI return dynamic array memory sources found");
+STATISTIC(NumAbiReturnDynamicArrayMemoryBuilderSources,
+          "Number of Solidity ABI return dynamic array memory builder sources found");
+STATISTIC(NumAbiReturnMemoryBuilderRewrites,
+          "Number of Solidity ABI return memory builder rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralSources,
           "Number of Solidity ABI return dynamic array literal sources found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralPayloads,
@@ -265,6 +269,16 @@ struct AbiReturnDynamicArrayMemorySource {
   Value *Length = nullptr;
   CallBase *LengthWrite = nullptr;
   CallBase *DataWrite = nullptr;
+};
+
+struct AbiReturnDynamicArrayMemoryBuilderSource {
+  // bytes/string concat and similar builders may write the array length in this
+  // function, while data words are produced by encodePacked loops that do not
+  // always have per-word memory_write markers.
+  Value *ReturnBase = nullptr;
+  Value *SourceArray = nullptr;
+  Value *Length = nullptr;
+  CallBase *LengthWrite = nullptr;
 };
 
 Value *getMemoryLoadPointer(Value *V) {
@@ -642,6 +656,33 @@ findAbiReturnDynamicArrayMemorySource(
                                            LengthWrite, DataWrite};
 }
 
+std::optional<AbiReturnDynamicArrayMemoryBuilderSource>
+findAbiReturnDynamicArrayMemoryBuilderSource(
+    Function &F, CallBase &Return, const AbiReturnDynamicArraySource &Source,
+    DominatorTree &DT) {
+  CallBase *LengthWrite = nullptr;
+
+  for (Instruction &I : instructions(F)) {
+    if (&I == &Return || !DT.dominates(&I, &Return)) {
+      continue;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "notdec_solidity_memory_write") ||
+        Call->arg_size() != 3 ||
+        !isSameAbiReturnDataBase(Call->getArgOperand(0), Source.SourceArray) ||
+        !isConstantIntValue(Call->getArgOperand(1), 0)) {
+      continue;
+    }
+    LengthWrite = Call;
+  }
+
+  if (LengthWrite == nullptr) {
+    return std::nullopt;
+  }
+  return AbiReturnDynamicArrayMemoryBuilderSource{
+      Source.ReturnBase, Source.SourceArray, Source.Length, LengthWrite};
+}
+
 bool isLiteralDataWord(Value *V) {
   if (isa_and_nonnull<ConstantInt>(V)) {
     return true;
@@ -848,6 +889,46 @@ void insertAbiReturnDynamicArrayMemorySourceMarker(
       Marker,
       {MemorySource.ReturnBase, MemorySource.SourceArray, MemorySource.Length,
        Consumer.getArgOperand(1),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayMemoryBuilderSource &BuilderSource,
+    CallBase &Consumer, StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_memory_builder_source",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {BuilderSource.ReturnBase, BuilderSource.SourceArray,
+       BuilderSource.Length, BuilderSource.LengthWrite->getArgOperand(2),
+       Consumer.getArgOperand(1),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnMemoryBuilderRewriteMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayMemoryBuilderSource &BuilderSource,
+    CallBase &Consumer, uint64_t CopyKind, StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_abi_return_memory_builder",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {BuilderSource.ReturnBase, BuilderSource.SourceArray,
+       BuilderSource.Length, Consumer.getArgOperand(1),
+       ConstantInt::get(I256, CopyKind),
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
@@ -1174,6 +1255,20 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
                 ++NumAbiReturnLiteralByteRewrites;
               }
             }
+          }
+        } else if (!StorageSource.has_value()) {
+          std::optional<AbiReturnDynamicArrayMemoryBuilderSource> BuilderSource =
+              findAbiReturnDynamicArrayMemoryBuilderSource(F, *Call,
+                                                           *DynamicSource, DT);
+          uint64_t CopyKind =
+              getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
+          if (BuilderSource.has_value() && CopyKind != 0) {
+            insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
+                Ctx, *Call, *BuilderSource, *Consumer, Kind);
+            ++NumAbiReturnDynamicArrayMemoryBuilderSources;
+            insertAbiReturnMemoryBuilderRewriteMarker(
+                Ctx, *Call, *BuilderSource, *Consumer, CopyKind, Kind);
+            ++NumAbiReturnMemoryBuilderRewrites;
           }
         }
       }

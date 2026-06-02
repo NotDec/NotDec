@@ -5249,6 +5249,22 @@
       }
     },
     {
+      "name": "25541_19769941_0129b94c29_ed9ec6332e1e",
+      "input": "cases/25541_19769941_0129b94c29_ed9ec6332e1e.ll",
+      "patterns": [
+        "abi_return",
+        "memory_object"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 5,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_abi_return_dynamic_array_source": 2,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2,
+        "notdec_solidity_abi_return_dynamic_array_memory_builder_source": 2,
+        "notdec_solidity_rewrite_abi_return_memory_builder": 2
+      }
+    },
+    {
       "name": "25619_19770992_6b2850de20_21a0b617860a",
       "input": "cases/25619_19770992_6b2850de20_21a0b617860a.ll",
       "patterns": [
