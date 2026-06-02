@@ -20,6 +20,7 @@
 - 完整实现相关功能
 - 基于test/evm/solidity-patterns/manifest.json上测试用例增加oracle并不断改进代码，直到没有明显的问题。
 - 在/sn640/NotDecChainExp/evm2llvm_apehex_pilot 上选固定的100个用例，不断改进效果，直到没有明显的问题
+- 完成标准必须看 IR rewrite 闭环：memory pass 写出稳定 IR marker / semantic call，后续消费者 pass 读取这些 IR 事实，并产出 ABI return / revert / event / external call 级别的语义改写。只打 metadata，或者只插入没人读取的 marker，都不能算完成。
 
 补充要求：
 - 当前计划的目标必须是 IR rewrite，不是 memory metadata 标注。
@@ -39,7 +40,7 @@
 
 这里要把边界写清楚：**只打 metadata 不算实现；只插入没人读取的 marker 也不算完整功能。** metadata 只能帮助调试、统计和 oracle。真正的交付结果必须是 IR 里有稳定的 marker / semantic call，并且至少有一个后续消费者 pass 读取这些 IR 事实，产出更高层的 ABI return / revert / event / external call 语义改写。
 
-这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求立刻删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但 marker 只是中间接口，不是最终结果。后续 pass 必须读取这些 marker，并把 ABI return、revert、event、external call 等低层 memory 用法改写成更高层的语义 call，或者在确认安全后隐藏 / 删除对应的低层指令。只插 marker、不被消费者读取，只能算准备；消费者仍然完全重新扫描原始 `mstore/revert/return/log/call` 来猜语义，也不能算完成。
+这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求立刻删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但 marker 只是中间接口，不是最终结果。后续 pass 必须读取这些 marker，并把 ABI return、revert、event、external call 等低层 memory 用法改写成更高层的语义 call，或者在确认安全后隐藏 / 删除对应的低层指令。只插 marker、不被消费者读取，只能算准备；消费者仍然完全重新扫描原始 `mstore/revert/return/log/call` 来猜语义，也不能算完成。以后评估进度时，不用“识别了多少 memory object”作为完成口径，而是看“哪些消费者已经基于这些 IR 事实完成了语义改写”。
 
 本计划的主线是：
 
@@ -49,7 +50,7 @@
 - rewrite marker / semantic call 是 pass 之间的接口，后续 pass 必须读取它们。
 - metadata 只用于 debug、统计和 oracle，不能作为主要接口。
 
-如果某个识别结果暂时还不能落到 semantic call / marker，或者没有任何后续 pass 读取它，那它只能算候选分析或 rewrite surface 准备，不能算 memory object pass 的完成项。
+如果某个识别结果暂时还不能落到 semantic call / marker，或者没有任何后续 pass 读取它，那它只能算候选分析或 rewrite surface 准备，不能算 memory object pass 的完成项。真正的完成项必须能指到一个具体消费者，例如 ABI return、revert、event log、external call input/output 或 ABI decode。
 
 其中 `MemoryConsumer` 不能只是 `MemoryAllocation` 或 `MemoryWrite` 的附带字段。return、revert、event log、external call input/output、ABI decode read 都是不同消费点，后续 pass 要靠这些消费点决定怎么改写 IR。
 
@@ -156,6 +157,8 @@
 - `consumer rewrite`：后续 pass 已经读取 marker / semantic call，并产出更高层语义 call。
 - `analysis only`：只新增内部分析或 metadata，只能算准备工作，不能算 memory object pass 的功能完成。
 
+只有 `consumer rewrite` 可以算一个完整闭环。`rewrite surface` 可以提交，但日志里必须明确写后续哪个消费者会读取它；如果写不出消费者，这个 marker 设计就需要重新审视。`analysis only` 不能作为本计划的阶段完成点。
+
 ### IR rewrite 硬约束
 
 这组 pass 的完成标准不是“识别到了 memory 形状”，而是“把 memory 形状改写成后续 pass 能消费的 IR 事实”。metadata 可以保留，但只能辅助 debug、统计和 oracle，不能作为功能完成的依据。
@@ -222,7 +225,7 @@
 
 复用 checked-bounds 里已有的 free pointer helper 思路，避免两套判断。必要时把这些 helper 从 checked-bounds 迁到 `MemoryBufferAnalysis`。
 
-这一阶段的交付结果必须是 allocation 语义写回 IR，例如 `notdec_solidity_memory_allocation(base, size)` 或同等 semantic call。只识别 `mload(0x40)` / `mstore(0x40, newPtr)`，但没有写出可消费的 IR 事实，不算完成。
+这一阶段的交付结果必须是 allocation 语义写回 IR，例如 `notdec_solidity_memory_allocation(base, size)` 或同等 semantic call。只识别 `mload(0x40)` / `mstore(0x40, newPtr)`，但没有写出可消费的 IR 事实，不算完成。allocation marker 自身也不算闭环；至少要有一个消费者通过它绑定 base / size，并产出更高层语义 call，才算这个方向真正接上。
 
 ### 阶段 3：按 base 收集写入
 
@@ -235,7 +238,7 @@
 
 第一版不处理 PHI base、不处理复杂 symbolic offset、不处理循环里的逐项写入，只标候选。
 
-这一阶段的交付结果必须是 write 语义写回 IR，例如 word write、copy write、byte write 这类 marker / semantic call。后续 ABI return、revert、event、external call pass 要能读取这些 write 事实，不能各自重新扫描同一批低层 `mstore` / `mload` / copy call。
+这一阶段的交付结果必须是 write 语义写回 IR，例如 word write、copy write、byte write 这类 marker / semantic call。后续 ABI return、revert、event、external call pass 要能读取这些 write 事实，不能各自重新扫描同一批低层 `mstore` / `mload` / copy call。write marker 如果只是给 oracle 计数，不能算完成。
 
 ### 阶段 4：消费者接入
 
@@ -255,7 +258,7 @@
 - `ExternalCallPass`：call input/output buffer，允许 input/output 同 base。
 - `StorageAddressingPass`：只读 scratch `mstore(0, key); mstore(32, slot); sha3(0,64)`，不当作 allocation。
 
-每迁移一个消费者，都要在 manifest oracle 里检查对应 semantic call / marker 的数量，不能只检查旧 metadata。固定 100 个 apehex 用例也要统计这些 marker，避免只在小样例里闭环。
+每迁移一个消费者，都要在 manifest oracle 里检查两个结果：memory marker / semantic call 是否出现，以及消费者产出的高层 rewrite marker 是否出现。固定 100 个 apehex 用例也要统计这两类 marker，避免只在小样例里闭环。
 
 阶段 4 是 memory object pass 是否真正闭环的关键。只有“memory pass 写 marker，消费者 pass 读取 marker，并产出 ABI return / revert / event / external call 级别的 semantic call”，才算完成一个功能闭环。
 
