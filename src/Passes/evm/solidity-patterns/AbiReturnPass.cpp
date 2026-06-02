@@ -313,8 +313,28 @@ Value *stripAddConstant(Value *V, uint64_t Constant) {
   return nullptr;
 }
 
+Value *matchBasePlusIndex(Value *Ptr, Value *Base) {
+  auto *Add = dyn_cast_or_null<BinaryOperator>(Ptr);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return nullptr;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    if (Add->getOperand(I) == Base ||
+        isSameOrReloadedFreeMemoryBase(Add->getOperand(I), Base)) {
+      return Add->getOperand(1 - I);
+    }
+  }
+  return nullptr;
+}
+
 Value *matchBasePlusConstantPlusIndex(Value *Ptr, Value *Base,
                                       uint64_t Constant) {
+  if (Value *BasePlusIndex = stripAddConstant(Ptr, Constant)) {
+    if (Value *Index = matchBasePlusIndex(BasePlusIndex, Base)) {
+      return Index;
+    }
+  }
+
   auto *Add = dyn_cast_or_null<BinaryOperator>(Ptr);
   if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
     return nullptr;
@@ -384,19 +404,6 @@ Value *getArg(Function &F, unsigned Index) {
     return nullptr;
   }
   return F.getArg(Index);
-}
-
-Value *matchBasePlusIndex(Value *Ptr, Value *Base) {
-  auto *Add = dyn_cast_or_null<BinaryOperator>(Ptr);
-  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
-    return nullptr;
-  }
-  for (unsigned I = 0; I < 2; ++I) {
-    if (Add->getOperand(I) == Base) {
-      return Add->getOperand(1 - I);
-    }
-  }
-  return nullptr;
 }
 
 bool isAddOf(Value *V, Value *LHS, Value *RHS) {

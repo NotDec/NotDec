@@ -5270,6 +5270,34 @@
         "notdec_solidity_abi_return_dynamic_array_helper_copy": 1,
         "notdec_solidity_abi_return_data_allocation": 1
       }
+    },
+    {
+      "name": "25544_19769956_6dc86f13a0_e354b4c44525",
+      "input": "cases/25544_19769956_6dc86f13a0_e354b4c44525.ll",
+      "patterns": [
+        "abi_return",
+        "memory_object"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 23,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_abi_return_dynamic_array_source": 2,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2
+      }
+    },
+    {
+      "name": "25563_19770118_498bb800eb_8e79ddef1b42",
+      "input": "cases/25563_19770118_498bb800eb_8e79ddef1b42.ll",
+      "patterns": [
+        "abi_return",
+        "memory_object"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 29,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_abi_return_dynamic_array_source": 2,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2
+      }
     }
   ]
 }
