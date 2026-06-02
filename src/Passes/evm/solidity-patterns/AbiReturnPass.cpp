@@ -34,6 +34,8 @@ STATISTIC(NumAbiReturnDynamicArrayHelperCopies,
           "Number of Solidity ABI return dynamic array helper copies found");
 STATISTIC(NumAbiReturnDynamicArrayStorageSources,
           "Number of Solidity ABI return dynamic array storage sources found");
+STATISTIC(NumAbiReturnStorageDynamicArrayRewrites,
+          "Number of Solidity ABI return storage dynamic array rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayMemorySources,
           "Number of Solidity ABI return dynamic array memory sources found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralSources,
@@ -799,6 +801,25 @@ void insertAbiReturnDynamicArrayStorageSourceMarker(
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
+void insertAbiReturnStorageDynamicArrayRewriteMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayStorageSource &StorageSource, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_abi_return_storage_dynamic_array",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {StorageSource.ReturnBase, StorageSource.SourceArray,
+       StorageSource.Length, Consumer.getArgOperand(1),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
 void insertAbiReturnDynamicArrayMemorySourceMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Consumer,
@@ -1106,6 +1127,9 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
           insertAbiReturnDynamicArrayStorageSourceMarker(
               Ctx, *Call, *StorageSource, *Consumer, Kind);
           ++NumAbiReturnDynamicArrayStorageSources;
+          insertAbiReturnStorageDynamicArrayRewriteMarker(
+              Ctx, *Call, *StorageSource, *Consumer, Kind);
+          ++NumAbiReturnStorageDynamicArrayRewrites;
         }
         std::optional<AbiReturnDynamicArrayMemorySource> MemorySource =
             findAbiReturnDynamicArrayMemorySource(F, *Call, *DynamicSource, DT);
