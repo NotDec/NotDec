@@ -48,6 +48,8 @@ STATISTIC(NumAbiReturnDynamicArrayLiteralBytes,
           "Number of Solidity ABI return dynamic array literal bytes found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralByteReturns,
           "Number of Solidity ABI return dynamic array literal byte returns found");
+STATISTIC(NumAbiReturnLiteralByteRewrites,
+          "Number of Solidity ABI return literal byte rewrites found");
 
 namespace {
 
@@ -954,6 +956,30 @@ void insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
+void insertAbiReturnLiteralBytesRewriteMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Shift,
+    CallBase &Consumer, uint64_t CopyKind, StringRef Kind) {
+  auto *ShiftAmount = cast<ConstantInt>(Shift.getArgOperand(0));
+  auto *RawWord = cast<ConstantInt>(Shift.getArgOperand(1));
+  APInt FinalWord = foldEvmShlToI256(*ShiftAmount, *RawWord);
+
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_abi_return_literal_bytes",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {MemorySource.SourceArray, MemorySource.LengthWrite->getArgOperand(2),
+       ConstantInt::get(I256, FinalWord), MemorySource.ReturnBase,
+       Consumer.getArgOperand(1), ConstantInt::get(I256, CopyKind),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
 void insertAbiReturnDataAllocationMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Allocation,
                                          CallBase &Consumer, StringRef Kind) {
@@ -1112,6 +1138,10 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
                     Ctx, *Call, *MemorySource, *Shift, *Consumer, CopyKind,
                     Kind);
                 ++NumAbiReturnDynamicArrayLiteralByteReturns;
+                insertAbiReturnLiteralBytesRewriteMarker(
+                    Ctx, *Call, *MemorySource, *Shift, *Consumer, CopyKind,
+                    Kind);
+                ++NumAbiReturnLiteralByteRewrites;
               }
             }
           }
