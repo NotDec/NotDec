@@ -5254,6 +5254,7 @@
       "expected_memory_rewrite_markers": {
         "notdec_solidity_abi_return_dynamic_array_source": 2,
         "notdec_solidity_abi_return_dynamic_array_mcopy": 2,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 2,
         "notdec_solidity_abi_return_data_copy_write": 2
       }
     },
@@ -5269,6 +5270,7 @@
       "expected_memory_rewrite_markers": {
         "notdec_solidity_abi_return_dynamic_array_source": 1,
         "notdec_solidity_abi_return_dynamic_array_helper_copy": 1,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 1,
         "notdec_solidity_abi_return_data_allocation": 1
       }
     },
@@ -5283,7 +5285,8 @@
       "expected_nonpayable_functions": 23,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_abi_return_dynamic_array_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 2
       }
     },
     {
@@ -5297,7 +5300,8 @@
       "expected_nonpayable_functions": 29,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_abi_return_dynamic_array_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 2
       }
     }
   ]
