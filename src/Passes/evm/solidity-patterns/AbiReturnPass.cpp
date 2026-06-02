@@ -35,6 +35,8 @@ STATISTIC(NumAbiReturnDynamicArrayStorageSources,
           "Number of Solidity ABI return dynamic array storage sources found");
 STATISTIC(NumAbiReturnDynamicArrayMemorySources,
           "Number of Solidity ABI return dynamic array memory sources found");
+STATISTIC(NumAbiReturnDynamicArrayLiteralSources,
+          "Number of Solidity ABI return dynamic array literal sources found");
 
 namespace {
 
@@ -625,6 +627,24 @@ findAbiReturnDynamicArrayMemorySource(
                                            LengthWrite, DataWrite};
 }
 
+bool isLiteralDataWord(Value *V) {
+  if (isa_and_nonnull<ConstantInt>(V)) {
+    return true;
+  }
+  auto *Call = dyn_cast_or_null<CallBase>(V);
+  if (Call == nullptr || !isCallTo(Call, "evm_shl") || Call->arg_size() != 2) {
+    return false;
+  }
+  return isa<ConstantInt>(Call->getArgOperand(0)) &&
+         isa<ConstantInt>(Call->getArgOperand(1));
+}
+
+bool isAbiReturnDynamicArrayLiteralSource(
+    const AbiReturnDynamicArrayMemorySource &MemorySource) {
+  return isa<ConstantInt>(MemorySource.LengthWrite->getArgOperand(2)) &&
+         isLiteralDataWord(MemorySource.DataWrite->getArgOperand(2));
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -738,6 +758,25 @@ void insertAbiReturnDynamicArrayMemorySourceMarker(
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_memory_source",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {MemorySource.ReturnBase, MemorySource.SourceArray, MemorySource.Length,
+       Consumer.getArgOperand(1),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArrayLiteralSourceMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_literal_source",
       FunctionType::get(Type::getVoidTy(Ctx),
                         {I256, I256, I256, I256, I256}, false));
 
@@ -882,6 +921,11 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
           insertAbiReturnDynamicArrayMemorySourceMarker(
               Ctx, *Call, *MemorySource, *Consumer, Kind);
           ++NumAbiReturnDynamicArrayMemorySources;
+          if (isAbiReturnDynamicArrayLiteralSource(*MemorySource)) {
+            insertAbiReturnDynamicArrayLiteralSourceMarker(
+                Ctx, *Call, *MemorySource, *Consumer, Kind);
+            ++NumAbiReturnDynamicArrayLiteralSources;
+          }
         }
       }
     }
