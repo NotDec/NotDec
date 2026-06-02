@@ -5259,6 +5259,7 @@
         "notdec_solidity_abi_return_dynamic_array_literal_payload": 2,
         "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 2,
         "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2,
         "notdec_solidity_abi_return_data_copy_write": 2
       }
     },
@@ -5279,6 +5280,7 @@
         "notdec_solidity_abi_return_dynamic_array_literal_payload": 1,
         "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 1,
         "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 1,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 1,
         "notdec_solidity_abi_return_data_allocation": 1
       }
     },
@@ -5298,7 +5300,8 @@
         "notdec_solidity_abi_return_dynamic_array_literal_source": 2,
         "notdec_solidity_abi_return_dynamic_array_literal_payload": 2,
         "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2
       }
     },
     {
@@ -5317,7 +5320,8 @@
         "notdec_solidity_abi_return_dynamic_array_literal_source": 2,
         "notdec_solidity_abi_return_dynamic_array_literal_payload": 2,
         "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2
       }
     }
   ]
