@@ -39,6 +39,8 @@ STATISTIC(NumAbiReturnDynamicArrayLiteralSources,
           "Number of Solidity ABI return dynamic array literal sources found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralPayloads,
           "Number of Solidity ABI return dynamic array literal payloads found");
+STATISTIC(NumAbiReturnDynamicArrayLiteralPayloadShifts,
+          "Number of Solidity ABI return dynamic array literal payload shifts found");
 
 namespace {
 
@@ -647,6 +649,16 @@ bool isAbiReturnDynamicArrayLiteralSource(
          isLiteralDataWord(MemorySource.DataWrite->getArgOperand(2));
 }
 
+CallBase *getLiteralPayloadShift(Value *DataWord) {
+  auto *Call = dyn_cast_or_null<CallBase>(DataWord);
+  if (Call == nullptr || !isCallTo(Call, "evm_shl") || Call->arg_size() != 2 ||
+      !isa<ConstantInt>(Call->getArgOperand(0)) ||
+      !isa<ConstantInt>(Call->getArgOperand(1))) {
+    return nullptr;
+  }
+  return Call;
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -811,6 +823,28 @@ void insertAbiReturnDynamicArrayLiteralPayloadMarker(
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
+void insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Shift,
+    CallBase &Consumer, StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_literal_payload_shift",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {MemorySource.SourceArray, MemorySource.LengthWrite->getArgOperand(2),
+       MemorySource.DataWrite->getArgOperand(1), Shift.getArgOperand(0),
+       Shift.getArgOperand(1), MemorySource.DataWrite->getArgOperand(2),
+       MemorySource.ReturnBase, Consumer.getArgOperand(1),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
 void insertAbiReturnDataAllocationMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Allocation,
                                          CallBase &Consumer, StringRef Kind) {
@@ -951,6 +985,12 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
             insertAbiReturnDynamicArrayLiteralPayloadMarker(
                 Ctx, *Call, *MemorySource, *Consumer, Kind);
             ++NumAbiReturnDynamicArrayLiteralPayloads;
+            if (CallBase *Shift = getLiteralPayloadShift(
+                    MemorySource->DataWrite->getArgOperand(2))) {
+              insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
+                  Ctx, *Call, *MemorySource, *Shift, *Consumer, Kind);
+              ++NumAbiReturnDynamicArrayLiteralPayloadShifts;
+            }
           }
         }
       }
