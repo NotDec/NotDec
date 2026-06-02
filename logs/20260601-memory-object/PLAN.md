@@ -29,9 +29,15 @@
 - 只插入 marker，但没有任何后续 pass 读取它，只能算 rewrite surface 准备，不能算完整闭环。
 - 完整闭环的判断标准是：memory pass 写出稳定 IR 事实，消费者 pass 读取这些事实，并产出 ABI return / revert / event / external call 级别的语义改写。
 
+等一下，当前计划有没有明确，一定要做好IR rewrite，而不能仅仅标好metadata
+
+是的，改一下plan.md吧
+
 ## 背景
 
-旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。只打 metadata 不算完成，插入没人读取的 marker 也只算准备，不算真正完成。
+旧 `MemoryObjectPass` 已经删掉。原因不是 memory 语义不重要，而是旧实现太粗，只适合标候选，不适合继续扩展。现在要重新做的是更明确的 memory allocation / buffer analysis，并且结果必须落到 IR rewrite 上，给 ABI return、ABI revert encoding、event log、external call 和 ABI decode 复用。
+
+这里要把边界写清楚：**只打 metadata 不算实现；只插入没人读取的 marker 也不算完整功能。** metadata 只能帮助调试、统计和 oracle。真正的交付结果必须是 IR 里有稳定的 marker / semantic call，并且至少有一个后续消费者 pass 读取这些 IR 事实，产出更高层的 ABI return / revert / event / external call 语义改写。
 
 这里的目标是 rewrite-first：每个可交付步骤都要产生或消费明确的 IR rewrite surface。第一阶段不要求立刻删除原始 `mstore/mload/copy`，可以先插入稳定的 semantic call / marker；但 marker 只是中间接口，不是最终结果。后续 pass 必须读取这些 marker，并把 ABI return、revert、event、external call 等低层 memory 用法改写成更高层的语义 call，或者在确认安全后隐藏 / 删除对应的低层指令。只插 marker、不被消费者读取，只能算准备；消费者仍然完全重新扫描原始 `mstore/revert/return/log/call` 来猜语义，也不能算完成。
 
@@ -144,6 +150,12 @@
 
 整体路线是先插入保守的 semantic call / marker，再逐步迁移消费者。不要一开始删除低层 EVM memory 指令。等 ABI return、revert、event、external call 等消费者已经稳定读取 marker，并产出对应的高层语义 call 后，再判断哪些低层指令可以隐藏或删除。
 
+实现时不能把 “metadata 标好了” 当作进度终点。每一轮都要明确自己属于哪一类：
+
+- `rewrite surface`：新增或补强 IR marker / semantic call，但消费者还没完全迁移。
+- `consumer rewrite`：后续 pass 已经读取 marker / semantic call，并产出更高层语义 call。
+- `analysis only`：只新增内部分析或 metadata，只能算准备工作，不能算 memory object pass 的功能完成。
+
 ### IR rewrite 硬约束
 
 这组 pass 的完成标准不是“识别到了 memory 形状”，而是“把 memory 形状改写成后续 pass 能消费的 IR 事实”。metadata 可以保留，但只能辅助 debug、统计和 oracle，不能作为功能完成的依据。
@@ -170,7 +182,7 @@
 - 这条 memory 事实会写成哪个 IR marker / semantic call。
 - 哪个后续 pass 会读取这个 marker / semantic call。
 
-答不上来时，只能作为候选分析写进日志，不能算实现完成。metadata 可以同步加，但只能用于 debug、统计和 oracle，不能作为 pass 间接口，也不能作为完成标准。
+答不上来时，只能作为候选分析写进日志，不能算实现完成。metadata 可以同步加，但只能用于 debug、统计和 oracle，不能作为 pass 间接口，也不能作为完成标准。也就是说，`MemoryBufferAnalysis` 的价值不在于“分析对象存在于 C++ 里”，而在于它把这些事实写回 IR，并让 ABI return、revert、event、external call 等 pass 能读到。
 
 建议文件：
 
@@ -197,7 +209,7 @@
   - `Value *Base`
   - `Value *Size`
 
-第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。它的输出不能停在 C++ 内部结构，也不能只挂 metadata；必须在 IR 里插入稳定的 marker / semantic call。实现日志里也要明确写出本轮是“新增 rewrite surface”、“消费已有 rewrite surface”，还是“候选分析准备”；只有前两类算实质推进，完整闭环还必须有消费者读取。
+第一版只收集同一函数内 SSA use-def 能直接追到的事实，不做完整 memory SSA。它的输出不能停在 C++ 内部结构，也不能只挂 metadata；必须在 IR 里插入稳定的 marker / semantic call。实现日志里也要明确写出本轮是 `rewrite surface`、`consumer rewrite`，还是 `analysis only`；只有前两类算实质推进，完整闭环还必须有消费者读取。
 
 ### 阶段 2：free pointer / allocation 识别
 
