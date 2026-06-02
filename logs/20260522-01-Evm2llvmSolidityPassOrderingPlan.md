@@ -20,7 +20,7 @@
 - `checked-bounds/`：checked arithmetic、array bounds、slice、enum / conversion check。
 - `value-cleanup/`：address / bool / uintN / intN / enum cleanup 和类型线索。
 - `memory-buffer/`：free memory pointer、memory allocation、ABI/event/call/revert buffer 跟踪。
-- `abi-decode/`：ABI 参数解码、calldata bounds、动态参数。
+- `abi-decode/`：public entry ABI 参数解码、calldata bounds、动态参数。
 - `abi-return/`：ABI 返回值编码、return buffer、returndata forward。
 - `abi-revert-encoding/`：Panic/Error/custom error 的 ABI revert buffer。
 - `storage-addressing/`：mapping slot、dynamic array slot、sha3 storage 地址链。
@@ -75,7 +75,7 @@ CTest 入口是 `notdec.evm.solidity_patterns`。它由 `test/CMakeLists.txt` �
 
 1. EVM IR canonicalization。
 2. 入口与控制语义：先识别 selector / fallback / receive / public entry，再识别 payability、revert、checked/bounds。
-3. ABI 与内存语义：先识别 memory buffer，再识别 ABI decode / return / revert encoding。
+3. ABI 与内存语义：先识别 memory buffer，再识别 public entry ABI 参数解码 / return / revert encoding。
 4. Storage 与类型线索：先识别 value cleanup 和 storage addressing，再识别 packed field 和 bytes/string。
 5. 外部交互语义：external call 和 event 可以早标 helper kind，但完整参数结构依赖 ABI/memory/revert 结果。
 
@@ -285,7 +285,7 @@ rewrite flag：
 - 命中后把明确的 free memory pointer bump 改写成 memory allocation 语义，例如 `evm_malloca(size)`。
 - buffer 边界不清楚时，不删除原始 `mstore/mload`，但仍把已确认的分配点改写出来，供 ABI/event/call pass 使用。
 
-### 3.2 ABI decode
+### 3.2 Public entry ABI 参数解码
 
 底层模式：
 
@@ -300,6 +300,7 @@ rewrite flag：
 - public/external 函数参数。
 - calldata bounds check 是 ABI 解码保护，不是用户业务判断。
 - 参数类型线索。
+- 这里不负责外部调用的返回值解码；那部分属于 `External call 和 returndata`。
 
 顺序要求：
 
