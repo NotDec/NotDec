@@ -5265,6 +5265,21 @@
       }
     },
     {
+      "name": "25928_19774281_d048a8d52d_2758caa02f46",
+      "input": "cases/25928_19774281_d048a8d52d_2758caa02f46.ll",
+      "patterns": [
+        "abi_return",
+        "memory_object"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 0,
+      "expected_memory_rewrite_markers": {
+        "notdec_solidity_abi_return_dynamic_array_source": 3,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 1,
+        "notdec_solidity_rewrite_abi_return_memory_dynamic_array": 1
+      }
+    },
+    {
       "name": "25619_19770992_6b2850de20_21a0b617860a",
       "input": "cases/25619_19770992_6b2850de20_21a0b617860a.ll",
       "patterns": [

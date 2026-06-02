@@ -38,6 +38,8 @@ STATISTIC(NumAbiReturnStorageDynamicArrayRewrites,
           "Number of Solidity ABI return storage dynamic array rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayMemorySources,
           "Number of Solidity ABI return dynamic array memory sources found");
+STATISTIC(NumAbiReturnMemoryDynamicArrayRewrites,
+          "Number of Solidity ABI return memory dynamic array rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayMemoryBuilderSources,
           "Number of Solidity ABI return dynamic array memory builder sources found");
 STATISTIC(NumAbiReturnMemoryBuilderRewrites,
@@ -892,6 +894,28 @@ void insertAbiReturnDynamicArrayMemorySourceMarker(
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
+void insertAbiReturnMemoryDynamicArrayRewriteMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Consumer,
+    uint64_t CopyKind, StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_abi_return_memory_dynamic_array",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256, I256, I256, I256},
+                        false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {MemorySource.ReturnBase, MemorySource.SourceArray, MemorySource.Length,
+       MemorySource.LengthWrite->getArgOperand(2),
+       MemorySource.DataWrite->getArgOperand(1),
+       Consumer.getArgOperand(1), ConstantInt::get(I256, CopyKind),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
 void insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemoryBuilderSource &BuilderSource,
@@ -1221,7 +1245,9 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
           insertAbiReturnDynamicArrayMemorySourceMarker(
               Ctx, *Call, *MemorySource, *Consumer, Kind);
           ++NumAbiReturnDynamicArrayMemorySources;
-          if (isAbiReturnDynamicArrayLiteralSource(*MemorySource)) {
+          bool IsLiteralSource =
+              isAbiReturnDynamicArrayLiteralSource(*MemorySource);
+          if (IsLiteralSource) {
             insertAbiReturnDynamicArrayLiteralSourceMarker(
                 Ctx, *Call, *MemorySource, *Consumer, Kind);
             ++NumAbiReturnDynamicArrayLiteralSources;
@@ -1255,6 +1281,12 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
                 ++NumAbiReturnLiteralByteRewrites;
               }
             }
+          } else {
+            uint64_t CopyKind =
+                getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
+            insertAbiReturnMemoryDynamicArrayRewriteMarker(
+                Ctx, *Call, *MemorySource, *Consumer, CopyKind, Kind);
+            ++NumAbiReturnMemoryDynamicArrayRewrites;
           }
         } else if (!StorageSource.has_value()) {
           std::optional<AbiReturnDynamicArrayMemoryBuilderSource> BuilderSource =
