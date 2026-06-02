@@ -5,6 +5,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <optional>
 
@@ -30,6 +31,8 @@ STATISTIC(NumAbiReturnDynamicArrayMCopies,
           "Number of Solidity ABI return dynamic array mcopies found");
 STATISTIC(NumAbiReturnDynamicArrayHelperCopies,
           "Number of Solidity ABI return dynamic array helper copies found");
+STATISTIC(NumAbiReturnDynamicArrayStorageSources,
+          "Number of Solidity ABI return dynamic array storage sources found");
 
 namespace {
 
@@ -224,6 +227,15 @@ struct AbiReturnDynamicArrayHelperCopy {
   Value *SourceArray = nullptr;
   Value *Length = nullptr;
   CallBase *CopyCall = nullptr;
+};
+
+struct AbiReturnDynamicArrayStorageSource {
+  // Public string/bytes getters often call a helper that decodes storage bytes
+  // into memory and returns the source array later copied into ABI return data.
+  Value *ReturnBase = nullptr;
+  Value *SourceArray = nullptr;
+  Value *Length = nullptr;
+  CallBase *SourceCall = nullptr;
 };
 
 Value *getMemoryLoadPointer(Value *V) {
@@ -504,6 +516,64 @@ findAbiReturnDynamicArrayHelperCopy(Function &F, CallBase &Return,
   return std::nullopt;
 }
 
+CallBase *getSourceArrayProducerCall(Value *SourceArray) {
+  if (auto *Call = dyn_cast_or_null<CallBase>(SourceArray)) {
+    return Call;
+  }
+  auto *Extract = dyn_cast_or_null<ExtractValueInst>(SourceArray);
+  if (Extract == nullptr || Extract->getNumIndices() != 1 ||
+      *Extract->idx_begin() != 0) {
+    return nullptr;
+  }
+  return dyn_cast<CallBase>(Extract->getAggregateOperand());
+}
+
+bool functionHasStorageBytesSource(Function *Callee) {
+  if (Callee == nullptr) {
+    return false;
+  }
+  bool HasStorageSlotLoad = false;
+  bool HasStorageDataHash = false;
+  bool HasStorageDataLoad = false;
+  for (Instruction &I : instructions(Callee)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_sload") && Call->arg_size() == 1) {
+      if (getUInt64Constant(Call->getArgOperand(0)).has_value()) {
+        HasStorageSlotLoad = true;
+      } else {
+        HasStorageDataLoad = true;
+      }
+      continue;
+    }
+    if (isCallTo(Call, "evm_sha3") && Call->arg_size() == 3 &&
+        isConstantIntValue(Call->getArgOperand(1), 0) &&
+        isConstantIntValue(Call->getArgOperand(2), 32)) {
+      HasStorageDataHash = true;
+    }
+  }
+  return HasStorageSlotLoad && HasStorageDataHash && HasStorageDataLoad;
+}
+
+std::optional<AbiReturnDynamicArrayStorageSource>
+findAbiReturnDynamicArrayStorageSource(
+    Function &F, CallBase &Return, const AbiReturnDynamicArraySource &Source,
+    DominatorTree &DT) {
+  CallBase *SourceCall = getSourceArrayProducerCall(Source.SourceArray);
+  if (SourceCall == nullptr || !DT.dominates(SourceCall, &Return) ||
+      SourceCall->getParent()->getParent() != &F) {
+    return std::nullopt;
+  }
+  Function *Callee = SourceCall->getCalledFunction();
+  if (!functionHasStorageBytesSource(Callee)) {
+    return std::nullopt;
+  }
+  return AbiReturnDynamicArrayStorageSource{
+      Source.ReturnBase, Source.SourceArray, Source.Length, SourceCall};
+}
+
 void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Consumer, StringRef Kind) {
   Module *M = Return.getModule();
@@ -588,6 +658,25 @@ void insertAbiReturnDynamicArrayHelperCopyMarker(
       Marker, {HelperCopy.ReturnBase, HelperCopy.SourceArray, HelperCopy.Length,
                Consumer.getArgOperand(1),
                ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
+void insertAbiReturnDynamicArrayStorageSourceMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayStorageSource &StorageSource, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_abi_return_dynamic_array_storage_source",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(
+      Marker,
+      {StorageSource.ReturnBase, StorageSource.SourceArray, StorageSource.Length,
+       Consumer.getArgOperand(1),
+       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDataAllocationMarker(LLVMContext &Ctx, CallBase &Return,
@@ -708,6 +797,14 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
           insertAbiReturnDynamicArrayHelperCopyMarker(Ctx, *Call, *HelperCopy,
                                                       *Consumer, Kind);
           ++NumAbiReturnDynamicArrayHelperCopies;
+        }
+        std::optional<AbiReturnDynamicArrayStorageSource> StorageSource =
+            findAbiReturnDynamicArrayStorageSource(F, *Call, *DynamicSource,
+                                                   DT);
+        if (StorageSource.has_value()) {
+          insertAbiReturnDynamicArrayStorageSourceMarker(
+              Ctx, *Call, *StorageSource, *Consumer, Kind);
+          ++NumAbiReturnDynamicArrayStorageSources;
         }
       }
     }
