@@ -10,8 +10,6 @@ extern const char *KIND_SOLIDITY_PAYABILITY_GUARD;
 extern const char *KIND_SOLIDITY_ABI_RETURN;
 extern const char *KIND_SOLIDITY_REVERT;
 extern const char *KIND_SOLIDITY_CHECKED_BOUNDS;
-extern const char *KIND_SOLIDITY_STORAGE_ADDRESSING;
-extern const char *KIND_SOLIDITY_PACKED_STORAGE_FIELD;
 extern const char *KIND_SOLIDITY_EVENT;
 extern const char *KIND_SOLIDITY_EXTERNAL_CALL;
 
@@ -59,25 +57,6 @@ struct SolidityRevertPass : llvm::PassInfoMixin<SolidityRevertPass> {
 // conservative candidates because several compiler and user paths share that
 // shape.
 struct CheckedBoundsPass : llvm::PassInfoMixin<CheckedBoundsPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
-// Marks sha3-based storage addressing candidates.  Exact packed field recovery
-// still needs stronger dataflow, so this pass only labels the address roots.
-struct StorageAddressingPass : llvm::PassInfoMixin<StorageAddressingPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
-// Marks packed storage load/store idioms built from sload/sstore plus
-// shift/mask/or chains.
-struct PackedStorageFieldPass
-    : llvm::PassInfoMixin<PackedStorageFieldPass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 

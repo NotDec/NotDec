@@ -65,6 +65,43 @@ struct CheckedBoundsMatch {
   bool Rewrite = false;
 };
 
+// Storage addressing helpers identify common Solidity sha3-based storage
+// shapes without writing marker calls.  Callers decide whether the match is
+// useful for their own rewrite.
+struct StorageScratchKeccakMatch {
+  llvm::CallBase *Sha3 = nullptr;
+  llvm::Value *Key = nullptr;
+  llvm::Value *BaseSlot = nullptr;
+};
+
+struct StorageArrayDataKeccakMatch {
+  llvm::CallBase *Sha3 = nullptr;
+  llvm::Value *BaseSlot = nullptr;
+};
+
+struct StorageMappingAccessMatch {
+  llvm::CallBase *Access = nullptr;
+  llvm::Value *Key = nullptr;
+  llvm::Value *BaseSlot = nullptr;
+  llvm::Value *Hash = nullptr;
+  llvm::Value *StorageSlot = nullptr;
+  uint64_t AccessKind = 0;
+};
+
+struct StorageArrayDataAccessMatch {
+  llvm::CallBase *Access = nullptr;
+  llvm::Value *BaseSlot = nullptr;
+  llvm::Value *DataHash = nullptr;
+  llvm::Value *StorageSlot = nullptr;
+  uint64_t AccessKind = 0;
+};
+
+struct PackedStorageAccessMatch {
+  llvm::CallBase *Access = nullptr;
+  llvm::Value *StorageSlot = nullptr;
+  uint64_t AccessKind = 0;
+};
+
 bool isCallTo(const llvm::Value *V, llvm::StringRef Name);
 bool isConstantIntValue(const llvm::Value *V, uint64_t N);
 llvm::StringRef getCalleeName(const llvm::Value *V);
@@ -149,7 +186,20 @@ void addCheckedBoundsMetadata(llvm::LLVMContext &Ctx,
 void rewriteCheckedBoundsGuard(const CheckedBoundsMatch &Match);
 
 bool dependsOnCallTo(llvm::Value *V, llvm::StringRef Name, unsigned Depth = 8);
+bool dependsOnValue(llvm::Value *V, llvm::Value *Target, unsigned Depth = 8);
 bool expressionHasPackedStorageOp(llvm::Value *V, unsigned Depth = 8);
+std::optional<StorageScratchKeccakMatch>
+matchStorageScratchKeccak(llvm::CallBase &Sha3);
+std::optional<StorageArrayDataKeccakMatch>
+matchStorageArrayDataKeccak(llvm::CallBase &Sha3);
+std::optional<StorageMappingAccessMatch>
+matchStorageMappingAccess(llvm::CallBase &Access, llvm::Value *StorageSlot,
+                          uint64_t AccessKind);
+std::optional<StorageArrayDataAccessMatch>
+matchStorageArrayDataAccess(llvm::CallBase &Access, llvm::Value *StorageSlot,
+                            uint64_t AccessKind);
+std::optional<PackedStorageAccessMatch>
+matchPackedStorageAccess(llvm::CallBase &Access, uint64_t AccessKind);
 llvm::StringRef classifyExternalCall(llvm::StringRef Name);
 
 } // namespace notdec::passes::evm::detail

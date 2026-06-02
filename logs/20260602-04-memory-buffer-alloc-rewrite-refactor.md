@@ -222,7 +222,6 @@ matchMLoadRelativeToBase(llvm::CallBase &Load, llvm::Value *Base);
 - `SolidityRevertPass`
 - `EventLogPass`
 - `ExternalCallPass`
-- `StorageAddressingPass`
 
 ### 第四阶段：删除通用 memory marker
 
@@ -272,8 +271,8 @@ notdec_solidity_memory_array_byte_write
 - `src/Passes/evm/solidity-patterns/EventLogPass.cpp:243`
   - event memory consumer 不再读取 `notdec_solidity_memory_consumer`，直接使用 `evm_logN(mem, base, size, ...)` 参数插专用 marker。
 - `src/Passes/PassManager.cpp:289`
-  - 调整 EVM pass 顺序为 checked-bounds / storage / packed-storage 先跑，之后再跑 `MemoryBufferRewritePass`。
-  - 原因是 checked-bounds 和 storage pass 仍需要原始 IR 形状，MemoryBuffer 现在会删除 free pointer 写回。
+  - 调整 EVM pass 顺序为 checked-bounds 先跑，之后再跑 `MemoryBufferRewritePass`。
+  - 原因是 checked-bounds 仍需要原始 IR 形状，MemoryBuffer 现在会删除 free pointer 写回。
 - `test/evm/solidity-patterns/manifest.json:5014`
   - 更新 `24574_19760246_e537c886f5_6e80990d311f` 的 external call output read oracle。
   - 新 rewrite 后同一个 output buffer base 能和后续 reads 对齐，真实多识别 2 个 output word read 和 1 个 decode buffer。
@@ -322,3 +321,114 @@ python3 test/run_evm_solidity_patterns_suite.py \
 2. 把 `ExternalCallPass` 的 input / output consumer 迁成直接读 `evm_call*` 参数，保留现有 copy/read marker 兼容。
 3. 把 memory allocation 专用消费者从旧 `notdec_solidity_memory_allocation` 迁到 `notdec_evm_alloc*` / `notdec_evm_finalize_alloc`，然后删除旧 allocation marker。
 4. 把 write / copy / read marker 拆成共享 C++ helper，先从 external call output read 和 ABI return data write 两个高频路径开始。
+
+## 实现记录 2026-06-02 storage pass cleanup
+
+### 本轮完成内容
+
+本轮去掉两个只负责中间标注的 storage pass，不新增 storage rewrite pass。
+
+具体改动：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h`
+  - `include/notdec/Passes/evm/SolidityPatternUtils.h:68`
+    到 `include/notdec/Passes/evm/SolidityPatternUtils.h:103`
+    新增 storage / packed storage match result。
+  - `include/notdec/Passes/evm/SolidityPatternUtils.h:188`
+    到 `include/notdec/Passes/evm/SolidityPatternUtils.h:202`
+    新增 storage / packed storage helper 声明。
+  - 新增 storage / packed storage match result：
+    - `StorageScratchKeccakMatch`
+    - `StorageArrayDataKeccakMatch`
+    - `StorageMappingAccessMatch`
+    - `StorageArrayDataAccessMatch`
+    - `PackedStorageAccessMatch`
+  - 新增 helper 声明：
+    - `dependsOnValue()`
+    - `matchStorageScratchKeccak()`
+    - `matchStorageArrayDataKeccak()`
+    - `matchStorageMappingAccess()`
+    - `matchStorageArrayDataAccess()`
+    - `matchPackedStorageAccess()`
+- `src/Passes/evm/SolidityPatterns.cpp`
+  - `src/Passes/evm/SolidityPatterns.cpp:5860`
+    新增 `dependsOnValue()`。
+  - `src/Passes/evm/SolidityPatterns.cpp:5924`
+    到 `src/Passes/evm/SolidityPatterns.cpp:6087`
+    新增 storage / packed storage helper 实现。
+  - 把原 `StorageAddressingPass` 和 `PackedStorageFieldPass` 里的核心匹配逻辑迁到 helper。
+  - helper 只返回 C++ match result，不写 metadata，不插 marker。
+- `include/notdec/Passes/evm/SolidityPatterns.h`
+  - 删除 `StorageAddressingPass` / `PackedStorageFieldPass` 声明。
+- `src/Passes/PassManager.cpp`
+  - `src/Passes/PassManager.cpp:289`
+    到 `src/Passes/PassManager.cpp:295`
+    EVM pipeline 不再调度 storage / packed storage pass。
+  - 从 EVM pipeline 删除 `StorageAddressingPass` / `PackedStorageFieldPass`。
+- `include/notdec/Passes/PassManager.h`
+  - 删除 `StorageAddressingPass` 的 pass instrumentation 注册。
+- `src/CMakeLists.txt`
+  - 删除两个 pass 源文件。
+- `src/Passes/evm/solidity-patterns/StorageAddressingPass.cpp`
+  - 删除。
+- `src/Passes/evm/solidity-patterns/PackedStorageFieldPass.cpp`
+  - 删除。
+- `test/evm/solidity-patterns/manifest.json`
+  - 删除 `storage_addressing` / `packed_storage_field` patterns。
+  - 删除对应 metadata / marker oracle。
+- `pipeline.md`
+  - 把这两个 pass 改成 helper 描述。
+
+### 判断
+
+这两个 pass 之前没有做真正 rewrite，只是在 IR 里插中间 marker。当前没有明确下游需要这些 marker 作为主接口，所以改成 helper 更简单。
+
+如果以后某个 pass 真需要 storage root 或 packed field 信息，应直接调用 helper，并在自己的语义范围内决定是否 rewrite。
+
+### 验证
+
+构建：
+
+```bash
+cmake --build ./build --target all -j4
+```
+
+Solidity patterns：
+
+```bash
+python3 test/run_evm_solidity_patterns_suite.py \
+  --binary ./build/bin/notdec \
+  --manifest test/evm/solidity-patterns/manifest.json \
+  --project-root /sn640/NotDec \
+  --workdir /tmp/notdec-solidity-patterns-storage-helper-cleanup
+```
+
+结果：
+
+- `Summary: 99 passed, 0 failed`
+- `cfg_rewrites: 831`
+- `rewrite_markers: 831`
+- `cpp_marker_mapping: matched`
+
+同口径计时：
+
+```bash
+/usr/bin/time -p python3 test/run_evm_solidity_patterns_suite.py \
+  --binary ./build/bin/notdec \
+  --manifest test/evm/solidity-patterns/manifest.json \
+  --project-root /sn640/NotDec \
+  --workdir /tmp/notdec-solidity-patterns-storage-helper-cleanup-timed
+```
+
+结果：
+
+- `Summary: 99 passed, 0 failed`
+- `real 111.74`
+- `user 105.27`
+- `sys 6.49`
+
+### 复杂度和维护成本
+
+- 实现效果：7/10。两个旧 pass 已去掉，旧 storage / packed marker 也不再作为 pass 间接口；识别能力保留成 helper。
+- 复杂度：3/10。删除了两个独立 pass，pipeline 更短；helper 逻辑仍是原来的局部模式匹配。
+- 后期维护成本：3/10。后续需要 storage 信息时直接调用 helper，不需要维护额外 metadata oracle。

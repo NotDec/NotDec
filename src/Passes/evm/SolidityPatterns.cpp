@@ -1,4 +1,4 @@
-#include "Passes/evm/SolidityPatterns.h"
+#include "Passes/evm/SolidityPatternUtils.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
@@ -28,38 +28,13 @@ const char *KIND_SOLIDITY_PAYABILITY_GUARD = "notdec.solidity.payability_guard";
 const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
 const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
-const char *KIND_SOLIDITY_STORAGE_ADDRESSING =
-    "notdec.solidity.storage_addressing";
-const char *KIND_SOLIDITY_PACKED_STORAGE_FIELD =
-    "notdec.solidity.packed_storage_field";
 const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_EXTERNAL_CALL = "notdec.solidity.external_call";
 
 namespace detail {
 
-constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINED_BODY =
-    "notdec.solidity.selector_outlined_body";
-constexpr StringRef KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED =
-    "notdec.solidity.selector_outline_skipped";
 constexpr uint64_t PANIC_SELECTOR = 0x4e487b71;
 constexpr uint64_t ERROR_SELECTOR = 0x08c379a0;
-
-// One matched revert site.  Keep the pieces here instead of re-walking the
-// block in every consumer: later passes need the exit kind, selector, and a
-// small amount of ABI payload shape without rebuilding the memory writes.
-struct SolidityRevertMatch {
-  StringRef Kind = "encoded_candidate";
-  CallBase *Revert = nullptr;
-  CallBase *SelectorStore = nullptr;
-  CallBase *PanicCodeStore = nullptr;
-  CallBase *ReturndataCopy = nullptr;
-  std::optional<uint64_t> Selector;
-  std::optional<uint64_t> PanicCode;
-  std::optional<uint64_t> CustomErrorArgCount;
-  std::optional<uint64_t> ErrorStringLength;
-  std::optional<std::string> ErrorStringLiteral;
-  bool UsedMemoryWriteMarker = false;
-};
 
 struct RevertStringWord {
   uint64_t Index = 0;
@@ -72,33 +47,6 @@ struct RevertMemoryWrite {
   std::optional<uint64_t> Offset;
   Value *StoredValue = nullptr;
   bool FromMarker = false;
-};
-
-// Carries the exact pieces of one canonical nonpayable guard.  The matcher
-// only proves the shape; the pass later uses this to annotate the old guard and
-// replace only the terminator edge.
-struct PayabilityGuardMatch {
-  BasicBlock *GuardBlock = nullptr;
-  BasicBlock *SuccessBlock = nullptr;
-  BasicBlock *FailureBlock = nullptr;
-  CallBase *CallValue = nullptr;
-  ICmpInst *Condition = nullptr;
-  BranchInst *Branch = nullptr;
-};
-
-// One compiler-inserted checked operation or bounds guard.  Keep both the
-// branch and the panic exit when available: the branch is the guard site, while
-// the panic code is the stable Solidity reason we expose to tests and lowering.
-struct CheckedBoundsMatch {
-  StringRef Kind = "unknown";
-  StringRef SkipReason = "";
-  BranchInst *Branch = nullptr;
-  BasicBlock *SuccessBlock = nullptr;
-  BasicBlock *FailureBlock = nullptr;
-  CallBase *Revert = nullptr;
-  SmallVector<Value *, 3> Operands;
-  std::optional<uint64_t> PanicCode;
-  bool Rewrite = false;
 };
 
 struct NormalizedCondition {
@@ -5904,9 +5852,35 @@ bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth,
   return false;
 }
 
-bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth = 8) {
+bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth) {
   SmallPtrSet<Value *, 16> Seen;
   return dependsOnCallTo(V, Name, Depth, Seen);
+}
+
+bool dependsOnValue(Value *V, Value *Target, unsigned Depth,
+                    SmallPtrSetImpl<Value *> &Seen) {
+  if (V == Target) {
+    return true;
+  }
+  if (V == nullptr || Depth == 0 || !Seen.insert(V).second) {
+    return false;
+  }
+
+  auto *UserValue = dyn_cast<User>(V);
+  if (UserValue == nullptr) {
+    return false;
+  }
+  for (Value *Op : UserValue->operands()) {
+    if (dependsOnValue(Op, Target, Depth - 1, Seen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool dependsOnValue(Value *V, Value *Target, unsigned Depth) {
+  SmallPtrSet<Value *, 16> Seen;
+  return dependsOnValue(V, Target, Depth, Seen);
 }
 
 bool expressionHasPackedStorageOp(Value *V, unsigned Depth,
@@ -5942,9 +5916,174 @@ bool expressionHasPackedStorageOp(Value *V, unsigned Depth,
   return false;
 }
 
-bool expressionHasPackedStorageOp(Value *V, unsigned Depth = 8) {
+bool expressionHasPackedStorageOp(Value *V, unsigned Depth) {
   SmallPtrSet<Value *, 16> Seen;
   return expressionHasPackedStorageOp(V, Depth, Seen);
+}
+
+std::optional<StorageScratchKeccakMatch>
+matchStorageScratchKeccak(CallBase &Sha3) {
+  if (!isCallTo(&Sha3, "evm_sha3") || Sha3.arg_size() != 3 ||
+      !isConstantIntValue(Sha3.getArgOperand(1), 0) ||
+      !isConstantIntValue(Sha3.getArgOperand(2), 64)) {
+    return std::nullopt;
+  }
+
+  CallBase *KeyStore = nullptr;
+  CallBase *SlotStore = nullptr;
+  for (auto It = Sha3.getIterator(); It != Sha3.getParent()->begin();) {
+    --It;
+    auto *Call = dyn_cast<CallBase>(&*It);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_sha3") ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      break;
+    }
+    if (!isCallTo(Call, "evm_mstore") || Call->arg_size() != 3) {
+      continue;
+    }
+    if (SlotStore == nullptr && isConstantIntValue(Call->getArgOperand(1), 32)) {
+      SlotStore = Call;
+      continue;
+    }
+    if (KeyStore == nullptr && isConstantIntValue(Call->getArgOperand(1), 0)) {
+      KeyStore = Call;
+      continue;
+    }
+    if (KeyStore != nullptr && SlotStore != nullptr) {
+      break;
+    }
+  }
+
+  if (KeyStore == nullptr || SlotStore == nullptr) {
+    return std::nullopt;
+  }
+  return StorageScratchKeccakMatch{&Sha3, KeyStore->getArgOperand(2),
+                                   SlotStore->getArgOperand(2)};
+}
+
+std::optional<StorageArrayDataKeccakMatch>
+matchStorageArrayDataKeccak(CallBase &Sha3) {
+  if (!isCallTo(&Sha3, "evm_sha3") || Sha3.arg_size() != 3 ||
+      !isConstantIntValue(Sha3.getArgOperand(1), 0) ||
+      !isConstantIntValue(Sha3.getArgOperand(2), 32)) {
+    return std::nullopt;
+  }
+
+  CallBase *BaseSlotStore = nullptr;
+  for (auto It = Sha3.getIterator(); It != Sha3.getParent()->begin();) {
+    --It;
+    auto *Call = dyn_cast<CallBase>(&*It);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_sha3") ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      break;
+    }
+    if (isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
+        isConstantIntValue(Call->getArgOperand(1), 0)) {
+      BaseSlotStore = Call;
+      break;
+    }
+  }
+
+  if (BaseSlotStore == nullptr) {
+    return std::nullopt;
+  }
+  return StorageArrayDataKeccakMatch{&Sha3, BaseSlotStore->getArgOperand(2)};
+}
+
+std::optional<StorageMappingAccessMatch>
+matchStorageMappingAccess(CallBase &Access, Value *StorageSlot,
+                          uint64_t AccessKind) {
+  for (auto It = Access.getIterator(); It != Access.getParent()->begin();) {
+    --It;
+    auto *Call = dyn_cast<CallBase>(&*It);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_sload") || isCallTo(Call, "evm_sstore") ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      break;
+    }
+    if (!isCallTo(Call, "evm_sha3") || Call->arg_size() != 3) {
+      continue;
+    }
+    if (!dependsOnValue(StorageSlot, Call)) {
+      break;
+    }
+    std::optional<StorageScratchKeccakMatch> Scratch =
+        matchStorageScratchKeccak(*Call);
+    if (!Scratch.has_value()) {
+      break;
+    }
+    return StorageMappingAccessMatch{&Access, Scratch->Key,
+                                     Scratch->BaseSlot, Scratch->Sha3,
+                                     StorageSlot, AccessKind};
+  }
+  return std::nullopt;
+}
+
+std::optional<StorageArrayDataAccessMatch>
+matchStorageArrayDataAccess(CallBase &Access, Value *StorageSlot,
+                            uint64_t AccessKind) {
+  for (auto It = Access.getIterator(); It != Access.getParent()->begin();) {
+    --It;
+    auto *Call = dyn_cast<CallBase>(&*It);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (isCallTo(Call, "evm_sload") || isCallTo(Call, "evm_sstore") ||
+        !classifyExternalCall(getCalleeName(Call)).empty()) {
+      break;
+    }
+    if (!isCallTo(Call, "evm_sha3") || Call->arg_size() != 3) {
+      continue;
+    }
+    if (!dependsOnValue(StorageSlot, Call)) {
+      break;
+    }
+    std::optional<StorageArrayDataKeccakMatch> Data =
+        matchStorageArrayDataKeccak(*Call);
+    if (!Data.has_value()) {
+      break;
+    }
+    return StorageArrayDataAccessMatch{&Access, Data->BaseSlot, Data->Sha3,
+                                       StorageSlot, AccessKind};
+  }
+  return std::nullopt;
+}
+
+std::optional<PackedStorageAccessMatch>
+matchPackedStorageAccess(CallBase &Access, uint64_t AccessKind) {
+  if (AccessKind == 1) {
+    if (!isCallTo(&Access, "evm_sload") || Access.arg_size() != 1) {
+      return std::nullopt;
+    }
+    for (User *U : Access.users()) {
+      if (expressionHasPackedStorageOp(U)) {
+        return PackedStorageAccessMatch{&Access, Access.getArgOperand(0),
+                                        AccessKind};
+      }
+    }
+    return std::nullopt;
+  }
+
+  if (AccessKind == 2) {
+    if (!isCallTo(&Access, "evm_sstore") || Access.arg_size() != 2) {
+      return std::nullopt;
+    }
+    Value *Stored = Access.getArgOperand(1);
+    if (dependsOnCallTo(Stored, "evm_sload") &&
+        expressionHasPackedStorageOp(Stored)) {
+      return PackedStorageAccessMatch{&Access, Access.getArgOperand(0),
+                                      AccessKind};
+    }
+  }
+  return std::nullopt;
 }
 
 StringRef classifyExternalCall(StringRef Name) {
