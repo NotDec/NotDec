@@ -28,6 +28,8 @@ STATISTIC(NumAbiReturnDynamicArraySources,
           "Number of Solidity ABI return dynamic array sources found");
 STATISTIC(NumAbiReturnDynamicArrayCopyLoops,
           "Number of Solidity ABI return dynamic array copy loops found");
+STATISTIC(NumAbiReturnDynamicArrayCopyLoopRewrites,
+          "Number of Solidity ABI return dynamic array copy loop rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayConvertedCopyLoops,
           "Number of Solidity ABI return dynamic array converted copy loops found");
 STATISTIC(NumAbiReturnConvertedDynamicArrayRewrites,
@@ -916,6 +918,24 @@ void insertAbiReturnDynamicArrayCopyLoopMarker(
                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
+void insertAbiReturnDynamicArrayCopyLoopRewriteMarker(
+    LLVMContext &Ctx, CallBase &Return,
+    const AbiReturnDynamicArrayCopyLoop &CopyLoop, CallBase &Consumer,
+    StringRef Kind) {
+  Module *M = Return.getModule();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_abi_return_dynamic_array_copy_loop",
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {I256, I256, I256, I256, I256}, false));
+
+  IRBuilder<> Builder(&Return);
+  Builder.CreateCall(Marker,
+                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
+                      CopyLoop.Length, Consumer.getArgOperand(1),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+}
+
 void insertAbiReturnDynamicArrayConvertedCopyLoopMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayConvertedCopyLoop &CopyLoop, CallBase &Consumer,
@@ -1464,6 +1484,10 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
             insertAbiReturnMemoryBuilderRewriteMarker(
                 Ctx, *Call, *BuilderSource, *Consumer, CopyKind, Kind);
             ++NumAbiReturnMemoryBuilderRewrites;
+          } else if (CopyLoop.has_value() && !ConvertedCopyLoop.has_value()) {
+            insertAbiReturnDynamicArrayCopyLoopRewriteMarker(
+                Ctx, *Call, *CopyLoop, *Consumer, Kind);
+            ++NumAbiReturnDynamicArrayCopyLoopRewrites;
           }
         }
       }
