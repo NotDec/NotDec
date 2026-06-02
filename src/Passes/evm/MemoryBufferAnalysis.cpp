@@ -39,10 +39,8 @@ std::optional<uint64_t> getUInt64Constant(Value *V) {
 }
 
 bool isFreeMemoryPointerLoad(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  return Call != nullptr && detail::isCallTo(Call, "evm_mload") &&
-         Call->arg_size() == 2 &&
-         detail::isConstantIntValue(Call->getArgOperand(1), 64);
+  std::optional<detail::EvmMemoryLoad> Load = detail::matchEvmMemoryLoad(V);
+  return Load.has_value() && detail::isConstantIntValue(Load->Address, 64);
 }
 
 bool isZero(Value *V) { return detail::isConstantIntValue(V, 0); }
@@ -371,15 +369,15 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
   MemoryBufferFacts Facts;
 
   for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !detail::isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3) {
+    std::optional<detail::EvmMemoryStore> Store =
+        detail::matchEvmMemoryStore(&I);
+    if (!Store.has_value() || Store->StoreBits != 256) {
       continue;
     }
-    if (!detail::isConstantIntValue(Call->getArgOperand(1), 64)) {
+    if (!detail::isConstantIntValue(Store->Address, 64)) {
       continue;
     }
-    Value *NewPtr = Call->getArgOperand(2);
+    Value *NewPtr = Store->StoredValue;
     auto *NewPtrUser = dyn_cast<User>(NewPtr);
     if (NewPtrUser == nullptr) {
       continue;
@@ -406,77 +404,78 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
   }
 
   for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
-    if (detail::isCallTo(Call, "evm_mstore") && Call->arg_size() == 3) {
-      Value *Ptr = Call->getArgOperand(1);
+    std::optional<detail::EvmMemoryStore> Store =
+        detail::matchEvmMemoryStore(&I);
+    if (Store.has_value() && Store->StoreBits == 256) {
+      Value *Ptr = Store->Address;
       for (Value *Base : Bases) {
-        if (!valueAvailableAt(Base, *Call, DT)) {
+        if (!valueAvailableAt(Base, I, DT)) {
           continue;
         }
         std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
-                                           Call->getArgOperand(2),
-                                           nullptr,
+        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset,
+                                           Store->StoredValue, nullptr,
                                            MemoryWriteKind::MStore});
         break;
       }
       continue;
     }
 
-    if (detail::isCallTo(Call, "evm_mload") && Call->arg_size() == 2 &&
-        !detail::isConstantIntValue(Call->getArgOperand(1), 64)) {
-      Value *Ptr = Call->getArgOperand(1);
+    std::optional<detail::EvmMemoryLoad> Load = detail::matchEvmMemoryLoad(&I);
+    if (Load.has_value() && !detail::isConstantIntValue(Load->Address, 64)) {
+      Value *Ptr = Load->Address;
       bool MatchedBase = false;
       for (Value *Base : Bases) {
-        if (!valueAvailableAt(Base, *Call, DT)) {
+        if (!valueAvailableAt(Base, I, DT)) {
           continue;
         }
         std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Reads.push_back(MemoryRead{Call, Base, Offset, Call});
+        Facts.Reads.push_back(MemoryRead{&I, Base, Offset, Load->LoadedValue});
         MatchedBase = true;
         break;
       }
       if (!MatchedBase && getUInt64Constant(Ptr).has_value()) {
-        Facts.Reads.push_back(MemoryRead{Call, Ptr, 0, Call});
+        Facts.Reads.push_back(MemoryRead{&I, Ptr, 0, Load->LoadedValue});
       }
       continue;
     }
 
-    if (detail::isCallTo(Call, "evm_mstore8") && Call->arg_size() == 3) {
-      Value *Ptr = Call->getArgOperand(1);
+    if (Store.has_value() && Store->StoreBits == 8) {
+      Value *Ptr = Store->Address;
       bool MatchedBase = false;
       for (Value *Base : Bases) {
-        if (!valueAvailableAt(Base, *Call, DT)) {
+        if (!valueAvailableAt(Base, I, DT)) {
           continue;
         }
         if (Value *Index = getArrayByteIndexFromPtr(Ptr, Base)) {
-          Facts.ArrayByteWrites.push_back(MemoryArrayByteWrite{
-              Call, Base, Index, Call->getArgOperand(2)});
+          Facts.ArrayByteWrites.push_back(
+              MemoryArrayByteWrite{&I, Base, Index, Store->StoredValue});
         }
         std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
-                                           Call->getArgOperand(2), nullptr,
+        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset,
+                                           Store->StoredValue, nullptr,
                                            MemoryWriteKind::MStore8});
         MatchedBase = true;
         break;
       }
       if (!MatchedBase) {
-        Facts.Writes.push_back(MemoryWrite{Call, Ptr, 0, Call->getArgOperand(2),
+        Facts.Writes.push_back(MemoryWrite{&I, Ptr, 0, Store->StoredValue,
                                            nullptr, MemoryWriteKind::MStore8});
       }
+      continue;
+    }
+
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
       continue;
     }
 

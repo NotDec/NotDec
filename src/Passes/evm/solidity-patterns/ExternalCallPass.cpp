@@ -304,25 +304,26 @@ void collectExternalCallInputAbiHeadWriteMarkers(
 
 void collectExternalCallOutputWordReadMarkers(
     BasicBlock &BB, CallBase &ExternalCall, Value *OutputBase, Value *OutputSize,
-    SmallVectorImpl<CallBase *> &Reads) {
-  auto IsMatchingOutputRead = [&](CallBase *Call) {
+    SmallVectorImpl<Instruction *> &Reads) {
+  auto IsMatchingOutputRead = [&](Instruction *I) {
     std::optional<uint64_t> Offset;
+    auto *Call = dyn_cast<CallBase>(I);
     if (isCallTo(Call, "notdec_solidity_memory_read") && Call->arg_size() == 3) {
       Value *ReadBase = Call->getArgOperand(0);
       if (!isSameOrReloadedFreeMemoryBase(ReadBase, OutputBase)) {
         return false;
       }
       Offset = getUInt64Constant(Call->getArgOperand(1));
-    } else if (isCallTo(Call, "evm_mload") && Call->arg_size() == 2) {
-      auto *NextCall = dyn_cast_or_null<CallBase>(Call->getNextNode());
+    } else if (std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(I)) {
+      auto *NextCall = dyn_cast_or_null<CallBase>(I->getNextNode());
       if (NextCall != nullptr &&
           isCallTo(NextCall, "notdec_solidity_memory_read") &&
-          NextCall->arg_size() == 3 && NextCall->getArgOperand(2) == Call &&
+          NextCall->arg_size() == 3 && NextCall->getArgOperand(2) == I &&
           isSameOrReloadedFreeMemoryBase(NextCall->getArgOperand(0),
                                          OutputBase)) {
         return false;
       }
-      Offset = getOffsetFromBase(Call->getArgOperand(1), OutputBase);
+      Offset = getOffsetFromBase(Load->Address, OutputBase);
     } else {
       return false;
     }
@@ -340,31 +341,27 @@ void collectExternalCallOutputWordReadMarkers(
       continue;
     }
 
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
+    if (auto *Call = dyn_cast<CallBase>(&I)) {
+      if (isFreeMemoryPointerStore(Call) ||
+          !classifyExternalCall(getCalleeName(Call)).empty()) {
+        return;
+      }
     }
-    if (isFreeMemoryPointerStore(Call) ||
-        !classifyExternalCall(getCalleeName(Call)).empty()) {
-      return;
-    }
-    if (IsMatchingOutputRead(Call)) {
-      Reads.push_back(Call);
+    if (IsMatchingOutputRead(&I)) {
+      Reads.push_back(&I);
     }
   }
 
   for (BasicBlock *Succ : successors(&BB)) {
     for (Instruction &I : *Succ) {
-      auto *Call = dyn_cast<CallBase>(&I);
-      if (Call == nullptr) {
-        continue;
+      if (auto *Call = dyn_cast<CallBase>(&I)) {
+        if (isFreeMemoryPointerStore(Call) ||
+            !classifyExternalCall(getCalleeName(Call)).empty()) {
+          break;
+        }
       }
-      if (isFreeMemoryPointerStore(Call) ||
-          !classifyExternalCall(getCalleeName(Call)).empty()) {
-        break;
-      }
-      if (IsMatchingOutputRead(Call)) {
-        Reads.push_back(Call);
+      if (IsMatchingOutputRead(&I)) {
+        Reads.push_back(&I);
       }
     }
   }
@@ -591,7 +588,7 @@ void insertExternalCallInputAllocationMarker(LLVMContext &Ctx,
 }
 
 bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
-                                            CallBase &MemoryRead,
+                                            Instruction &MemoryRead,
                                             Value *OutputBase,
                                             uint64_t CallKind) {
   Module *M = MemoryRead.getModule();
@@ -604,14 +601,14 @@ bool insertExternalCallOutputWordReadMarker(LLVMContext &Ctx,
   Value *Base = nullptr;
   Value *OffsetValue = nullptr;
   Value *ReadValue = nullptr;
-  if (isCallTo(&MemoryRead, "notdec_solidity_memory_read") &&
-      MemoryRead.arg_size() == 3) {
-    Base = MemoryRead.getArgOperand(0);
-    OffsetValue = MemoryRead.getArgOperand(1);
-    ReadValue = MemoryRead.getArgOperand(2);
-  } else if (isCallTo(&MemoryRead, "evm_mload") && MemoryRead.arg_size() == 2) {
-    std::optional<uint64_t> Offset =
-        getOffsetFromBase(MemoryRead.getArgOperand(1), OutputBase);
+  auto *Call = dyn_cast<CallBase>(&MemoryRead);
+  if (isCallTo(Call, "notdec_solidity_memory_read") && Call->arg_size() == 3) {
+    Base = Call->getArgOperand(0);
+    OffsetValue = Call->getArgOperand(1);
+    ReadValue = Call->getArgOperand(2);
+  } else if (std::optional<EvmMemoryLoad> Load =
+                 matchEvmMemoryLoad(&MemoryRead)) {
+    std::optional<uint64_t> Offset = getOffsetFromBase(Load->Address, OutputBase);
     if (!Offset.has_value()) {
       return false;
     }
@@ -744,7 +741,7 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
         ++NumExternalCallOutputAbiDecodeBuffers;
         InsertedOutputDecodeBuffer = true;
       }
-      SmallVector<CallBase *, 8> OutputWordReads;
+      SmallVector<Instruction *, 8> OutputWordReads;
       collectExternalCallOutputWordReadMarkers(
           *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
           OutputWordReads);
@@ -762,7 +759,7 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
           ++NumExternalCallOutputAllocations;
         }
       }
-      for (CallBase *WordRead : OutputWordReads) {
+      for (Instruction *WordRead : OutputWordReads) {
         if (insertExternalCallOutputWordReadMarker(Ctx, *WordRead,
                                                    Args->OutputBase,
                                                    CallKind)) {

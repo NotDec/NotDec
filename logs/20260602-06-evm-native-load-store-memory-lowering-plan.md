@@ -302,3 +302,65 @@ evm2llvm 源头不再生成 `evm_mload/mstore` 后，主项目里的 Solidity pa
 - EVM 相关函数带 `null_pointer_is_valid`。
 - 类型恢复能看到 `inttoptr`、`load`、`store`，并把地址值纳入 pointer 约束。
 - Solidity patterns suite 里的 ABI return、revert、event、external call oracle 迁移到新 IR 形态后通过。
+
+## 实现记录
+
+本轮按阶段 1 和阶段 2 的最小闭环实现。阶段 3 没做全量删除，因为主项目测试样例仍有旧 helper IR，需要继续兼容。
+
+### evm2llvm 源头 lowering
+
+- `external/NotDec-evm2llvm/include/notdec-evm2llvm/LlvmLowerer.h:17` 新增 `EvmMemoryModel`，默认 `IntToPtr`。
+- `external/NotDec-evm2llvm/tools/evm2llvm.cpp:20` 增加 `--memory-model inttoptr|global-array`，默认 `inttoptr`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:99` 增加 `memoryGlobal()`，给 `global-array` 模式创建 `@notdec_evm_memory`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:124` 增加 `memoryPointer()`，在默认模式生成 `inttoptr`，在调试模式生成 `getelementptr`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:438` 将 `MLOAD` 降成 `load i256, align 1`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:772` 将 `MSTORE` 降成 `store i256, align 1`。
+- `external/NotDec-evm2llvm/lib/InstructionLowerer.cpp:777` 将 `MSTORE8` 降成 `trunc i256 to i8` 后 `store i8, align 1`。
+- `external/NotDec-evm2llvm/lib/LlvmLowerer.cpp:157` 给生成函数加 `null_pointer_is_valid`。
+- `external/NotDec-evm2llvm/lib/EvmRuntimeDecls.cpp:15` 删除 `evm_mload` / `evm_mstore` / `evm_mstore8` 声明。
+
+### 主项目 matcher 迁移
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:108` 增加 `EvmMemoryLoad` / `EvmMemoryStore`，统一表达旧 helper 和新原生 load/store。
+- `src/Passes/evm/SolidityPatterns.cpp:81` 实现 `matchEvmMemoryLoad()`，支持 `evm_mload` 和 `load i256` from `inttoptr`。
+- `src/Passes/evm/SolidityPatterns.cpp:98` 实现 `matchEvmMemoryStore()`，支持 `evm_mstore`、`evm_mstore8`、`store i256` 和 `store i8` to `inttoptr`。
+- `src/Passes/evm/SolidityPatterns.cpp:1275` 让 `isFreeMemoryPointerLoad()` 使用统一 memory load helper。
+- `include/notdec/Passes/evm/MemoryBufferAnalysis.h:51` 将 memory read/write 原始节点从 `CallBase*` 放宽为 `Instruction*`，因为新 IR 的 load/store 不是 call。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:371` 到 `472` 改成从统一 helper 收集 allocation、word write、word read、byte write 和 array byte write，copy 类 helper 仍保留旧 call 识别。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:433` 到 `453` 让 ABI return 动态数组 copy loop 支持原生 load/store。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:543` 到 `584` 让 converted copy loop 里的 source cursor load 支持原生 load。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:589` 到 `620` 让 memory-to-memory helper copy 识别原生 load/store。
+- `src/Passes/evm/solidity-patterns/ExternalCallPass.cpp:305` 到 `365` 让 external call output word read 收集支持原生 memory load。
+- `src/Passes/evm/solidity-patterns/ExternalCallPass.cpp:590` 到 `625` 让 external call output word read marker 能从原生 load 插入。
+
+### 验证
+
+- 主项目构建：
+  - `cmake --build ./build --target notdec -j4`
+  - 通过。
+- evm2llvm 源头测试：
+  - `cmake -S external/NotDec-evm2llvm -B external/NotDec-evm2llvm/build-tests -G Ninja -DLLVM_DIR=/sn640/NotDec/llvm-22.1.0.obj/lib/cmake/llvm -DNOTDEC_EVM2LLVM_ENABLE_TESTS=ON -DNOTDEC_EVM2LLVM_ENABLE_GIGAHORSE_TESTS=OFF`
+  - `cmake --build external/NotDec-evm2llvm/build-tests -j4`
+  - `ctest --test-dir external/NotDec-evm2llvm/build-tests --output-on-failure`
+  - 结果：33/33 通过。
+- evm2llvm memory 模式检查：
+  - `external/NotDec-evm2llvm/build/bin/evm2llvm --facts external/NotDec-evm2llvm/test/fixtures/state -o /tmp/notdec-evm-native-memory/state-inttoptr.ll`
+  - `external/NotDec-evm2llvm/build/bin/evm2llvm --facts external/NotDec-evm2llvm/test/fixtures/state -o /tmp/notdec-evm-native-memory/state-global.ll --memory-model global-array`
+  - 默认输出包含 `store i256 96, ptr inttoptr (i256 64 to ptr), align 1` 和 `load i256, ptr inttoptr (i256 64 to ptr), align 1`。
+  - `global-array` 输出包含 `@notdec_evm_memory` 和 `getelementptr`。
+  - 两种输出函数都带 `null_pointer_is_valid`。
+- 主项目 EVM suite：
+  - `ctest --test-dir build -R evm --output-on-failure`
+  - 结果：`notdec.evm.solidity_patterns` 和 `notdec.evm.solidity_rewrite` 2/2 通过，总耗时 198.38 秒。
+- apehex smoke：
+  - 最近批次 `/sn640/NotDecChainExp/evm2llvm_apehex_pilot/20260602-evm2llvm-train-batch686/outputs` 不足 100 个 `.ll`，实际跑 94 个。
+  - 命令等价于对每个样本跑 `./build/bin/notdec <input.ll> -o /tmp/notdec-evm-native-memory-apehex-smoke/<name>.ll --tr-level=0`。
+  - 结果：94/94 通过，0 失败，用时 67.85 秒。
+
+### 评分
+
+- 实现效果：8/10。evm2llvm 源头已经不再生成 `evm_mload/mstore/mstore8`，主项目关键 memory buffer、ABI return、external call 路径已兼容新 IR；旧 helper IR 也保持通过。
+- 复杂度：6/10。新增一个统一 memory access view，成本可控；但 `SolidityPatterns.cpp` 里仍有部分旧 helper 专用匹配，后续删除 helper 时还要继续清。
+- 维护成本：6/10。短期兼容旧/新两种 IR 会多一些分支，但集中在 helper 和少数 fallback，后续等测试样例全部迁移后可以删除旧 helper 分支。
+
+更好的后续方案：继续把 `SolidityPatterns.cpp` 里 storage scratch keccak、revert raw write 等剩余 `evm_mload/mstore` 直接匹配迁到统一 helper；再更新测试输入和 oracle，最后删除旧 helper 兼容分支。

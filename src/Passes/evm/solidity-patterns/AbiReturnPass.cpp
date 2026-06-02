@@ -240,8 +240,8 @@ struct AbiReturnDynamicArrayCopyLoop {
   Value *ReturnBase = nullptr;
   Value *SourceArray = nullptr;
   Value *Length = nullptr;
-  CallBase *Load = nullptr;
-  CallBase *Store = nullptr;
+  Instruction *Load = nullptr;
+  Instruction *Store = nullptr;
 };
 
 struct AbiReturnDynamicArrayConvertedCopyLoop {
@@ -250,8 +250,8 @@ struct AbiReturnDynamicArrayConvertedCopyLoop {
   Value *ReturnBase = nullptr;
   Value *SourceArray = nullptr;
   Value *Length = nullptr;
-  CallBase *SourceLoad = nullptr;
-  CallBase *Store = nullptr;
+  Instruction *SourceLoad = nullptr;
+  Instruction *Store = nullptr;
 };
 
 struct AbiReturnDynamicArrayMCopy {
@@ -300,12 +300,11 @@ struct AbiReturnDynamicArrayMemoryBuilderSource {
 };
 
 Value *getMemoryLoadPointer(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  if (Call == nullptr || !isCallTo(Call, "evm_mload") ||
-      Call->arg_size() != 2) {
+  std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(V);
+  if (!Load.has_value()) {
     return nullptr;
   }
-  return Call->getArgOperand(1);
+  return Load->Address;
 }
 
 bool valueAvailableAt(Value *V, Instruction &UsePoint, DominatorTree &DT) {
@@ -432,28 +431,26 @@ findAbiReturnDynamicArrayCopyLoop(Function &F,
                                   const AbiReturnDynamicArraySource &Source,
                                   DominatorTree &DT) {
   for (Instruction &I : instructions(F)) {
-    auto *Store = dyn_cast<CallBase>(&I);
-    if (Store == nullptr || !isCallTo(Store, "evm_mstore") ||
-        Store->arg_size() != 3) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (!Store.has_value() || Store->StoreBits != 256) {
       continue;
     }
 
-    auto *Load = dyn_cast<CallBase>(Store->getArgOperand(2));
-    if (Load == nullptr || !isCallTo(Load, "evm_mload") ||
-        Load->arg_size() != 2 || !valueAvailableAt(Load, *Store, DT)) {
+    std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(Store->StoredValue);
+    if (!Load.has_value() || !valueAvailableAt(Load->Inst, I, DT)) {
       continue;
     }
 
     Value *DstIndex = matchBasePlusConstantPlusIndex(
-        Store->getArgOperand(1), Source.ReturnBase, 64);
+        Store->Address, Source.ReturnBase, 64);
     Value *SrcIndex = matchBasePlusConstantPlusIndex(
-        Load->getArgOperand(1), Source.SourceArray, 32);
+        Load->Address, Source.SourceArray, 32);
     if (DstIndex == nullptr || SrcIndex == nullptr || DstIndex != SrcIndex) {
       continue;
     }
 
     return AbiReturnDynamicArrayCopyLoop{Source.ReturnBase, Source.SourceArray,
-                                         Source.Length, Load, Store};
+                                         Source.Length, Load->Inst, &I};
   }
   return std::nullopt;
 }
@@ -543,14 +540,14 @@ bool isSourceDataCursor(Value *Ptr, Value *SourceArray) {
          phiHasStep(*Cursor, 32);
 }
 
-CallBase *findSourceCursorLoad(Value *V, Value *SourceArray, unsigned Depth = 0) {
+Instruction *findSourceCursorLoad(Value *V, Value *SourceArray,
+                                  unsigned Depth = 0) {
   if (V == nullptr || Depth > 8) {
     return nullptr;
   }
-  auto *Call = dyn_cast<CallBase>(V);
-  if (Call != nullptr && isCallTo(Call, "evm_mload") && Call->arg_size() == 2 &&
-      isSourceDataCursor(Call->getArgOperand(1), SourceArray)) {
-    return Call;
+  std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(V);
+  if (Load.has_value() && isSourceDataCursor(Load->Address, SourceArray)) {
+    return Load->Inst;
   }
 
   auto *ValueUser = dyn_cast<User>(V);
@@ -558,7 +555,8 @@ CallBase *findSourceCursorLoad(Value *V, Value *SourceArray, unsigned Depth = 0)
     return nullptr;
   }
   for (Value *Operand : ValueUser->operands()) {
-    if (CallBase *Load = findSourceCursorLoad(Operand, SourceArray, Depth + 1)) {
+    if (Instruction *Load =
+            findSourceCursorLoad(Operand, SourceArray, Depth + 1)) {
       return Load;
     }
   }
@@ -570,21 +568,20 @@ findAbiReturnDynamicArrayConvertedCopyLoop(
     Function &F, CallBase &Return, const AbiReturnDynamicArraySource &Source,
     DominatorTree &DT) {
   for (Instruction &I : instructions(F)) {
-    auto *Store = dyn_cast<CallBase>(&I);
-    if (Store == nullptr || !isCallTo(Store, "evm_mstore") ||
-        Store->arg_size() != 3 ||
-        !isReturnDataCursor(Store->getArgOperand(1), Source.ReturnBase)) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (!Store.has_value() || Store->StoreBits != 256 ||
+        !isReturnDataCursor(Store->Address, Source.ReturnBase)) {
       continue;
     }
 
-    CallBase *SourceLoad =
-        findSourceCursorLoad(Store->getArgOperand(2), Source.SourceArray);
-    if (SourceLoad == nullptr || !valueAvailableAt(SourceLoad, *Store, DT)) {
+    Instruction *SourceLoad =
+        findSourceCursorLoad(Store->StoredValue, Source.SourceArray);
+    if (SourceLoad == nullptr || !valueAvailableAt(SourceLoad, I, DT)) {
       continue;
     }
 
     return AbiReturnDynamicArrayConvertedCopyLoop{
-        Source.ReturnBase, Source.SourceArray, Source.Length, SourceLoad, Store};
+        Source.ReturnBase, Source.SourceArray, Source.Length, SourceLoad, &I};
   }
   return std::nullopt;
 }
@@ -600,26 +597,24 @@ bool isMemoryToMemoryCopyHelper(Function *Callee) {
   bool HasCopy = false;
   bool HasCleanup = false;
   for (Instruction &I : instructions(Callee)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (!Store.has_value() || Store->StoreBits != 256) {
       continue;
     }
 
-    Value *StorePtr = Call->getArgOperand(1);
-    if (isConstantIntValue(Call->getArgOperand(2), 0) &&
+    Value *StorePtr = Store->Address;
+    if (isConstantIntValue(Store->StoredValue, 0) &&
         isAddOf(StorePtr, Dst, Length)) {
       HasCleanup = true;
       continue;
     }
 
-    auto *Load = dyn_cast<CallBase>(Call->getArgOperand(2));
-    if (Load == nullptr || !isCallTo(Load, "evm_mload") ||
-        Load->arg_size() != 2) {
+    std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(Store->StoredValue);
+    if (!Load.has_value()) {
       continue;
     }
     Value *DstIndex = matchBasePlusIndex(StorePtr, Dst);
-    Value *SrcIndex = matchBasePlusIndex(Load->getArgOperand(1), Src);
+    Value *SrcIndex = matchBasePlusIndex(Load->Address, Src);
     if (DstIndex != nullptr && DstIndex == SrcIndex) {
       HasCopy = true;
     }

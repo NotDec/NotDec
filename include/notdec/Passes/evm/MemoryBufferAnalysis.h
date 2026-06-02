@@ -45,11 +45,11 @@ struct MemoryAllocation {
   bool Finalized = false;
 };
 
-// A memory write keeps the original EVM call plus the buffer-relative offset.
+// A memory write keeps the original memory instruction plus the buffer-relative offset.
 // Copy writes also keep their source offset so later passes can distinguish
 // calldata/returndata bytes from literal word stores.
 struct MemoryWrite {
-  llvm::CallBase *StoreOrCopy = nullptr;
+  llvm::Instruction *StoreOrCopy = nullptr;
   llvm::Value *Base = nullptr;
   std::optional<uint64_t> Offset;
   llvm::Value *ValueOrSize = nullptr;
@@ -57,11 +57,11 @@ struct MemoryWrite {
   MemoryWriteKind Kind = MemoryWriteKind::MStore;
 };
 
-// A memory read keeps the mload result tied to the same base/offset surface as
+// A memory read keeps the loaded value tied to the same base/offset surface as
 // writes. Consumers such as external call output decode can then read this
-// marker instead of matching raw evm_mload again.
+// marker instead of matching raw memory loads again.
 struct MemoryRead {
-  llvm::CallBase *Load = nullptr;
+  llvm::Instruction *Load = nullptr;
   llvm::Value *Base = nullptr;
   std::optional<uint64_t> Offset;
   llvm::Value *Value = nullptr;
@@ -71,7 +71,7 @@ struct MemoryRead {
 // length word. This fact keeps the array base and byte index explicit instead
 // of exposing only the final address passed to mstore8.
 struct MemoryArrayByteWrite {
-  llvm::CallBase *Store = nullptr;
+  llvm::Instruction *Store = nullptr;
   llvm::Value *ArrayBase = nullptr;
   llvm::Value *Index = nullptr;
   llvm::Value *Value = nullptr;

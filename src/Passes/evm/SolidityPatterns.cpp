@@ -66,6 +66,63 @@ bool isCallTo(const Value *V, StringRef Name) {
   return Callee != nullptr && Callee->getName() == Name;
 }
 
+Value *getIntToPtrAddress(Value *Ptr) {
+  auto *Cast = dyn_cast_or_null<IntToPtrInst>(Ptr);
+  if (Cast != nullptr) {
+    return Cast->getOperand(0);
+  }
+  auto *ConstExpr = dyn_cast_or_null<ConstantExpr>(Ptr);
+  if (ConstExpr != nullptr && ConstExpr->getOpcode() == Instruction::IntToPtr) {
+    return ConstExpr->getOperand(0);
+  }
+  return nullptr;
+}
+
+std::optional<EvmMemoryLoad> matchEvmMemoryLoad(Value *V) {
+  if (auto *Call = dyn_cast_or_null<CallBase>(V);
+      Call != nullptr && isCallTo(Call, "evm_mload") && Call->arg_size() == 2) {
+    return EvmMemoryLoad{Call, Call->getArgOperand(1), Call};
+  }
+
+  auto *Load = dyn_cast_or_null<LoadInst>(V);
+  if (Load == nullptr || Load->getType() != Type::getIntNTy(Load->getContext(), 256)) {
+    return std::nullopt;
+  }
+  Value *Address = getIntToPtrAddress(Load->getPointerOperand());
+  if (Address == nullptr) {
+    return std::nullopt;
+  }
+  return EvmMemoryLoad{Load, Address, Load};
+}
+
+std::optional<EvmMemoryStore> matchEvmMemoryStore(Instruction *I) {
+  if (auto *Call = dyn_cast_or_null<CallBase>(I);
+      Call != nullptr && isCallTo(Call, "evm_mstore") && Call->arg_size() == 3) {
+    return EvmMemoryStore{Call, Call->getArgOperand(1), Call->getArgOperand(2),
+                          256};
+  }
+  if (auto *Call = dyn_cast_or_null<CallBase>(I);
+      Call != nullptr && isCallTo(Call, "evm_mstore8") && Call->arg_size() == 3) {
+    return EvmMemoryStore{Call, Call->getArgOperand(1), Call->getArgOperand(2),
+                          8};
+  }
+
+  auto *Store = dyn_cast_or_null<StoreInst>(I);
+  if (Store == nullptr) {
+    return std::nullopt;
+  }
+  Value *Address = getIntToPtrAddress(Store->getPointerOperand());
+  if (Address == nullptr) {
+    return std::nullopt;
+  }
+  Type *ValueType = Store->getValueOperand()->getType();
+  unsigned Bits = ValueType->isIntegerTy() ? ValueType->getIntegerBitWidth() : 0;
+  if (Bits != 8 && Bits != 256) {
+    return std::nullopt;
+  }
+  return EvmMemoryStore{Store, Address, Store->getValueOperand(), Bits};
+}
+
 bool isPrivateHelperCall(const CallBase *Call) {
   if (Call == nullptr) {
     return false;
@@ -1215,10 +1272,8 @@ void replaceWholeFunctionWithCall(Function &F, Function &Outlined) {
 bool isReturndataSize(Value *V) { return isCallTo(V, "evm_returndatasize"); }
 
 bool isFreeMemoryPointerLoad(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  return Call != nullptr && isCallTo(Call, "evm_mload") &&
-         Call->arg_size() == 2 &&
-         isConstantIntValue(Call->getArgOperand(1), 64);
+  std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(V);
+  return Load.has_value() && isConstantIntValue(Load->Address, 64);
 }
 
 bool isFreeMemoryPointerStore(CallBase *Call) {

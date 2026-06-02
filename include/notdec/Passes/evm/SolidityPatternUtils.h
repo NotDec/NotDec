@@ -102,6 +102,22 @@ struct PackedStorageAccessMatch {
   uint64_t AccessKind = 0;
 };
 
+// EVM native memory accesses can be present as old helper calls or as the new
+// LLVM load/store form.  These views keep pass code focused on address/value
+// semantics while the source IR is migrating.
+struct EvmMemoryLoad {
+  llvm::Instruction *Inst = nullptr;
+  llvm::Value *Address = nullptr;
+  llvm::Value *LoadedValue = nullptr;
+};
+
+struct EvmMemoryStore {
+  llvm::Instruction *Inst = nullptr;
+  llvm::Value *Address = nullptr;
+  llvm::Value *StoredValue = nullptr;
+  unsigned StoreBits = 0;
+};
+
 bool isCallTo(const llvm::Value *V, llvm::StringRef Name);
 bool isConstantIntValue(const llvm::Value *V, uint64_t N);
 llvm::StringRef getCalleeName(const llvm::Value *V);
@@ -157,6 +173,8 @@ void insertPayabilityCfgRewriteMarker(llvm::LLVMContext &Ctx,
 
 bool isReturndataSize(llvm::Value *V);
 std::optional<uint64_t> getUInt64Constant(llvm::Value *V);
+std::optional<EvmMemoryLoad> matchEvmMemoryLoad(llvm::Value *V);
+std::optional<EvmMemoryStore> matchEvmMemoryStore(llvm::Instruction *I);
 bool isFreeMemoryPointerLoad(llvm::Value *V);
 bool isFreeMemoryPointerStore(llvm::CallBase *Call);
 bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
