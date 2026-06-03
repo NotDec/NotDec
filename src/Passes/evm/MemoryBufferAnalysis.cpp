@@ -270,67 +270,70 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
   return true;
 }
 
-void insertWriteMarker(LLVMContext &Ctx, const MemoryWrite &Write) {
-  if (Write.StoreOrCopy == nullptr || Write.Base == nullptr ||
-      !Write.Offset.has_value() || Write.ValueOrSize == nullptr) {
-    return;
-  }
-  Module *M = Write.StoreOrCopy->getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  IRBuilder<> Builder(Write.StoreOrCopy);
-  Function *Marker = nullptr;
-  if (Write.Kind == MemoryWriteKind::MStore) {
-    getOrDeclareMarker(*M, "notdec_solidity_memory_write",
-                       {I256, I256, I256}, Marker);
-    Builder.CreateCall(Marker, {asI256(Builder, Write.Base),
-                                ConstantInt::get(I256, *Write.Offset),
-                                asI256(Builder, Write.ValueOrSize)});
-    return;
-  }
-
-  if (Write.Kind == MemoryWriteKind::MStore8) {
-    getOrDeclareMarker(*M, "notdec_solidity_memory_byte_write",
-                       {I256, I256, I256}, Marker);
-    Builder.CreateCall(Marker, {asI256(Builder, Write.Base),
-                                ConstantInt::get(I256, *Write.Offset),
-                                asI256(Builder, Write.ValueOrSize)});
-    return;
-  }
-
-  if (Write.SourceOffset == nullptr) {
-    return;
-  }
-  getOrDeclareMarker(*M, "notdec_solidity_memory_copy_write",
-                     {I256, I256, I256, I256, I256}, Marker);
-  Builder.CreateCall(
-      Marker, {asI256(Builder, Write.Base),
-               ConstantInt::get(I256, *Write.Offset),
-               asI256(Builder, Write.SourceOffset),
-               asI256(Builder, Write.ValueOrSize),
-               ConstantInt::get(I256, static_cast<uint64_t>(Write.Kind))});
-}
-
-void insertReadMarker(LLVMContext &Ctx, const MemoryRead &Read) {
-  if (Read.Load == nullptr || Read.Base == nullptr || !Read.Offset.has_value() ||
-      Read.Value == nullptr) {
-    return;
-  }
-  Instruction *InsertBefore = Read.Load->getNextNode();
-  if (InsertBefore == nullptr) {
-    return;
-  }
-
-  Module *M = Read.Load->getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  Function *Marker = nullptr;
-  getOrDeclareMarker(*M, "notdec_solidity_memory_read", {I256, I256, I256},
-                     Marker);
-
-  IRBuilder<> Builder(InsertBefore);
-  Builder.CreateCall(Marker, {asI256(Builder, Read.Base),
-                              ConstantInt::get(I256, *Read.Offset),
-                              asI256(Builder, Read.Value)});
-}
+// The generic memory read/write/copy marker materialization is paused. These
+// facts currently duplicate the allocation-backed memory model and should be
+// revisited after type recovery consumes normal memory facts directly.
+// void insertWriteMarker(LLVMContext &Ctx, const MemoryWrite &Write) {
+//   if (Write.StoreOrCopy == nullptr || Write.Base == nullptr ||
+//       !Write.Offset.has_value() || Write.ValueOrSize == nullptr) {
+//     return;
+//   }
+//   Module *M = Write.StoreOrCopy->getModule();
+//   Type *I256 = Type::getIntNTy(Ctx, 256);
+//   IRBuilder<> Builder(Write.StoreOrCopy);
+//   Function *Marker = nullptr;
+//   if (Write.Kind == MemoryWriteKind::MStore) {
+//     getOrDeclareMarker(*M, "notdec_solidity_memory_write",
+//                        {I256, I256, I256}, Marker);
+//     Builder.CreateCall(Marker, {asI256(Builder, Write.Base),
+//                                 ConstantInt::get(I256, *Write.Offset),
+//                                 asI256(Builder, Write.ValueOrSize)});
+//     return;
+//   }
+//
+//   if (Write.Kind == MemoryWriteKind::MStore8) {
+//     getOrDeclareMarker(*M, "notdec_solidity_memory_byte_write",
+//                        {I256, I256, I256}, Marker);
+//     Builder.CreateCall(Marker, {asI256(Builder, Write.Base),
+//                                 ConstantInt::get(I256, *Write.Offset),
+//                                 asI256(Builder, Write.ValueOrSize)});
+//     return;
+//   }
+//
+//   if (Write.SourceOffset == nullptr) {
+//     return;
+//   }
+//   getOrDeclareMarker(*M, "notdec_solidity_memory_copy_write",
+//                      {I256, I256, I256, I256, I256}, Marker);
+//   Builder.CreateCall(
+//       Marker, {asI256(Builder, Write.Base),
+//                ConstantInt::get(I256, *Write.Offset),
+//                asI256(Builder, Write.SourceOffset),
+//                asI256(Builder, Write.ValueOrSize),
+//                ConstantInt::get(I256, static_cast<uint64_t>(Write.Kind))});
+// }
+//
+// void insertReadMarker(LLVMContext &Ctx, const MemoryRead &Read) {
+//   if (Read.Load == nullptr || Read.Base == nullptr ||
+//       !Read.Offset.has_value() || Read.Value == nullptr) {
+//     return;
+//   }
+//   Instruction *InsertBefore = Read.Load->getNextNode();
+//   if (InsertBefore == nullptr) {
+//     return;
+//   }
+//
+//   Module *M = Read.Load->getModule();
+//   Type *I256 = Type::getIntNTy(Ctx, 256);
+//   Function *Marker = nullptr;
+//   getOrDeclareMarker(*M, "notdec_solidity_memory_read", {I256, I256, I256},
+//                      Marker);
+//
+//   IRBuilder<> Builder(InsertBefore);
+//   Builder.CreateCall(Marker, {asI256(Builder, Read.Base),
+//                               ConstantInt::get(I256, *Read.Offset),
+//                               asI256(Builder, Read.Value)});
+// }
 
 void insertArrayByteWriteMarker(LLVMContext &Ctx,
                                 const MemoryArrayByteWrite &Write) {
@@ -616,17 +619,21 @@ PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
     Changed = true;
   }
 
-  for (const MemoryWrite &Write : Facts.Writes) {
-    insertWriteMarker(Ctx, Write);
-    ++NumMemoryWrites;
-    Changed = true;
-  }
-
-  for (const MemoryRead &Read : Facts.Reads) {
-    insertReadMarker(Ctx, Read);
-    ++NumMemoryReads;
-    Changed = true;
-  }
+  // The generic memory read/write/copy markers duplicate the allocation-backed
+  // memory model and currently add noisy facts before type recovery is stable.
+  // Keep collecting them for local analysis, but do not materialize marker
+  // calls in IR.
+  // for (const MemoryWrite &Write : Facts.Writes) {
+  //   insertWriteMarker(Ctx, Write);
+  //   ++NumMemoryWrites;
+  //   Changed = true;
+  // }
+  //
+  // for (const MemoryRead &Read : Facts.Reads) {
+  //   insertReadMarker(Ctx, Read);
+  //   ++NumMemoryReads;
+  //   Changed = true;
+  // }
 
   for (const MemoryArrayByteWrite &Write : Facts.ArrayByteWrites) {
     insertArrayByteWriteMarker(Ctx, Write);

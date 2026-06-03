@@ -539,6 +539,57 @@ dynamic ABI 建模的输入。它不参与 MLsub 求解，也不改变 htypes sn
 我目前不建议继续直接往 MLsub subtype 里塞 role/use。更稳的下一步是先做 B 或 A：
 让类型结果或 debug facts 能稳定表达 object role，再让 ABI/event/call 的后处理消费它。
 
+## 2026-06-03 实现记录：暂停通用 memory read/write/copy marker 生成
+
+用户判断 `notdec_solidity_memory_write/read/copy_write` 这组 marker 和
+`calloc/calloc_unbounded` 后的真实内存模型有重复，且当前事实生成方向可能跑偏。
+
+本次只做最小改动：
+
+- [src/Passes/evm/MemoryBufferAnalysis.cpp:616](/sn640/NotDec/src/Passes/evm/MemoryBufferAnalysis.cpp:616)
+  `MemoryBufferRewritePass::run()` 继续调用 `analyzeMemoryBuffers()` 收集 facts，
+  继续执行 `rewriteAllocation()` 生成 `calloc/calloc_unbounded`，但注释掉
+  `Facts.Writes` 和 `Facts.Reads` 的 marker materialize 循环。
+- 受影响的生成函数是 `insertWriteMarker()` 和 `insertReadMarker()`：
+  `notdec_solidity_memory_write`、`notdec_solidity_memory_read`、
+  `notdec_solidity_memory_copy_write` 不再由这个 pass 插入 IR。
+
+保留项：
+
+- `notdec_solidity_memory_allocation` 暂时保留，因为 ABI/event/external-call pass
+  仍有直接扫描它的逻辑。
+- `calloc/calloc_unbounded`、`notdec_evm_finalize_alloc` 保留，类型恢复继续以它们作为
+  heap object 输入。
+- `notdec_solidity_memory_array_byte_write` 暂时保留；这次用户点名的是
+  write/read/copy_write，array byte marker 是否也要停用后续单独判断。
+
+风险：
+
+- 现有 Solidity pattern pass 里还有直接消费
+  `notdec_solidity_memory_write/read/copy_write` 的逻辑；对应 pattern suite 可能下降。
+  这次优先保证类型推理接入路径不再被这些 marker 干扰。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，`0.40s`。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，`81.46s`。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  初次失败 12 个 case，原因是 manifest 仍期待停用后的旧 memory marker；
+  同步更新 [test/evm/solidity-patterns/manifest.json](/sn640/NotDec/test/evm/solidity-patterns/manifest.json:41)
+  后通过，`106.02s`。
+- 抽样 `checked_bounds_array_01.ll` 生成 `/tmp/notdec-evm-marker-off.ll`，确认
+  `notdec_solidity_memory_write/read/copy_write` 不再出现，`calloc_unbounded`、
+  `notdec_solidity_memory_allocation`、`notdec_evm_finalize_alloc` 仍保留。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-no-memory-markers.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-no-memory-markers.htypes`
+  通过，`elapsed=12.41 user=12.03 sys=0.37 maxrss=851196`。
+
 ## 2026-06-03 实现记录：临时禁用 consumer marker 生成
 
 根据当前判断，consumer marker 这条链先停掉，等类型恢复有稳定 role 承载方式后再恢复。
