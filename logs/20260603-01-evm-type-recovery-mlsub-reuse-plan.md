@@ -497,3 +497,44 @@ dynamic ABI 建模的输入。它不参与 MLsub 求解，也不改变 htypes sn
 - 这一步解决 facts 可观察性，暂时不把 role/use、copy range、dynamic ABI 接进求解。
 - 下一步可以基于 `EVMMarkerFacts.txt` 先分类真实 marker 形态，再决定哪些 role 能直接进
   MLsub，哪些只应保留为 ABI consumer 信息。
+
+## 2026-06-03 判断记录：role/use 不能直接当字段约束
+
+用真实 Solidity patterns 样例跑了一次 workdir：
+
+```bash
+./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll \
+  -o /tmp/notdec-evm-real-facts.ll --tr-level=2 \
+  --gen-work-dir --work-dir=/tmp/notdec-evm-real-facts-work \
+  --dump-htypes=/tmp/notdec-evm-real-facts.htypes
+```
+
+`/tmp/notdec-evm-real-facts-work/EVMMarkerFacts.txt` 里能看到这些主要 marker：
+
+- `notdec_solidity_memory_allocation` 1 个。
+- `notdec_solidity_memory_write` 2 个。
+- `notdec_solidity_memory_read` 1 个。
+- `notdec_solidity_memory_consumer` 4 个。
+- `notdec_solidity_abi_return_memory_consumer` 1 个。
+- `notdec_solidity_abi_return_data_word_write` 1 个。
+- `notdec_solidity_revert_memory_consumer` 3 个。
+- 还有 `notdec_solidity_rewrite_*` marker，它们是 rewrite/debug surface，不应该进入
+  MLsub 类型求解。
+
+当前判断：
+
+- `memory_write/read` 的 `(base, offset, value)` 已经可以转成 record field，这一步已经做了。
+- `memory_consumer`、`abi_return_memory_consumer`、`revert_memory_consumer` 这类 marker
+  表达的是 object role/use，不是字段布局。直接把它们变成 MLsub record 约束会把
+  “这个 buffer 被 return/revert 使用”误当成结构体字段信息。
+- `rewrite_*` marker 更不能进入类型求解，它们只说明已有 matcher 的 rewrite 意图。
+
+所以第三阶段继续往 role/use 走之前，需要先决定一个承载方式：
+
+- 方案 A：把 role/use 保留在独立 facts/debug 层，后续 ABI/event/call pass 消费它。
+- 方案 B：在 HType 结果里新增 EVM object role metadata，但不进入 MLsub subtype 求解。
+- 方案 C：只对极少数高置信度 role 派生约束，例如 ABI return buffer 的 head word；
+  但这需要先明确动态 ABI 的 head/tail 规则，不能只按 consumer marker 推断。
+
+我目前不建议继续直接往 MLsub subtype 里塞 role/use。更稳的下一步是先做 B 或 A：
+让类型结果或 debug facts 能稳定表达 object role，再让 ABI/event/call 的后处理消费它。
