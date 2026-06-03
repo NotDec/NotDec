@@ -446,3 +446,54 @@ dynamic ABI 暂时不进求解，避免 role 还不明确时污染类型。
 - 这一步选择“直接补 MLsub record field 约束”，但只限 constant offset word marker。
 - role/use、copy range、dynamic ABI 仍需要后续单独建模；不能只靠字段 offset 推断 ABI
   动态结构。
+
+## 2026-06-03 实现记录：第三阶段 marker facts debug 输出
+
+继续第三阶段。上一节已经把高置信度 word marker 转成字段约束；这一步把剩下的
+`notdec_solidity_*` marker 先稳定输出到 workdir，作为后续 role/use、copy range、
+dynamic ABI 建模的输入。它不参与 MLsub 求解，也不改变 htypes snapshot。
+
+改动位置：
+
+- `include/notdec/TypeRecovery/mlsub/HTypeDebug.h:13`：
+  新增 `writeDebugEVMMarkerFacts()` 声明。
+- `src/TypeRecovery/mlsub/HTypeDebug.cpp:28`：
+  新增 `EVMMarkerFacts.txt` 文件名和 `getUInt64Constant()`。
+- `src/TypeRecovery/mlsub/HTypeDebug.cpp:102`，函数
+  `writeDebugEVMMarkerFacts()`：
+  扫描 module 里所有 `notdec_solidity_*` call，按 IR 顺序输出 marker stable id、
+  所在函数、callee 名、每个参数的 stable id；能安全解析为 64-bit 常量的参数额外输出
+  `const=` 十进制值。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3078`，函数
+  `MLsubRecovery::genASTTypes()`：
+  在有 workdir 时写出 `EVMMarkerFacts.txt`，和 `ValueHTypes.txt`、
+  `ImportantHTypes.txt` 同一阶段生成。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `./build/bin/notdec test/type-recovery/evm/cases/03_evm_solidity_markers.ll
+  -o /tmp/notdec-evm-marker-facts.ll --tr-level=2 --frozen-tr-input-ir
+  --gen-work-dir --work-dir=/tmp/notdec-evm-marker-facts-work
+  --dump-htypes=/tmp/notdec-evm-marker-facts.htypes` 通过，并生成
+  `/tmp/notdec-evm-marker-facts-work/EVMMarkerFacts.txt`。文件里能看到
+  allocation、consumer、word write/read 等 marker，以及 offset/size/kind 的常量值。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，0.40s。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/10_BottomUp1.ll
+  -o /tmp/notdec-10-bottomup-marker-facts.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-10-bottomup-marker-facts.htypes` 通过。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，111.77s。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-marker-facts.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-marker-facts.htypes`
+  通过，`elapsed=12.69 user=12.34 sys=0.34 maxrss=852744`。
+
+判断：
+
+- 这一步解决 facts 可观察性，暂时不把 role/use、copy range、dynamic ABI 接进求解。
+- 下一步可以基于 `EVMMarkerFacts.txt` 先分类真实 marker 形态，再决定哪些 role 能直接进
+  MLsub，哪些只应保留为 ABI consumer 信息。

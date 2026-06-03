@@ -5,7 +5,10 @@
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringExtras.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
@@ -22,6 +25,15 @@ namespace {
 
 constexpr llvm::StringLiteral kValueHTypesFile = "ValueHTypes.txt";
 constexpr llvm::StringLiteral kImportantHTypesFile = "ImportantHTypes.txt";
+constexpr llvm::StringLiteral kEVMMarkerFactsFile = "EVMMarkerFacts.txt";
+
+std::optional<std::uint64_t> getUInt64Constant(const llvm::Value *V) {
+  const auto *CI = llvm::dyn_cast_or_null<llvm::ConstantInt>(V);
+  if (CI == nullptr || CI->getValue().getActiveBits() > 64) {
+    return std::nullopt;
+  }
+  return CI->getZExtValue();
+}
 
 void primeSnapshotFormatter(const llvm2c::HTypeResult &Result,
                             ast::HTypeSnapshotFormatter &Formatter) {
@@ -86,6 +98,65 @@ struct ImportantFunctionEntry {
 };
 
 } // namespace
+
+void writeDebugEVMMarkerFacts(llvm::StringRef DebugDir,
+                              const llvm::Module &M) {
+  std::vector<const llvm::CallBase *> Markers;
+  for (const llvm::Function &F : M) {
+    for (const llvm::BasicBlock &BB : F) {
+      for (const llvm::Instruction &I : BB) {
+        auto *Call = llvm::dyn_cast<llvm::CallBase>(&I);
+        if (Call == nullptr) {
+          continue;
+        }
+        auto *Callee = Call->getCalledFunction();
+        if (Callee == nullptr ||
+            !Callee->getName().starts_with("notdec_solidity_")) {
+          continue;
+        }
+        Markers.push_back(Call);
+      }
+    }
+  }
+  if (Markers.empty()) {
+    return;
+  }
+
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(
+      llvm2c::join(DebugDir.str(), kEVMMarkerFactsFile.str()), EC,
+      llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Error printing to " << kEVMMarkerFactsFile << ", "
+                 << EC.message() << "\n";
+    return;
+  }
+
+  Out << "# EVMMarkerFacts\n\n";
+  for (const llvm::CallBase *Call : Markers) {
+    const auto *Callee = Call->getCalledFunction();
+    Out << "marker " << toStableString(ExtValuePtr(
+           const_cast<llvm::CallBase *>(Call))) << "\n";
+    Out << "  function => ";
+    if (const llvm::Function *Parent = Call->getFunction()) {
+      Out << Parent->getName();
+    } else {
+      Out << "<none>";
+    }
+    Out << "\n";
+    Out << "  callee => " << Callee->getName() << "\n";
+    for (unsigned Index = 0; Index < Call->arg_size(); ++Index) {
+      const llvm::Value *Arg = Call->getArgOperand(Index);
+      Out << "  arg" << Index << " => "
+          << toStableString(ExtValuePtr(const_cast<llvm::Value *>(Arg)));
+      if (auto Constant = getUInt64Constant(Arg)) {
+        Out << " ; const=" << *Constant;
+      }
+      Out << "\n";
+    }
+    Out << "\n";
+  }
+}
 
 void writeDebugValueHTypes(llvm::StringRef DebugDir,
                            const llvm2c::HTypeResult &Result) {

@@ -3075,6 +3075,7 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   }
   normalizeHTypeResult(*ResultVal);
   if (auto WorkDir = notdec::getWorkDirOpt()) {
+    writeDebugEVMMarkerFacts(*WorkDir, M);
     writeDebugValueHTypes(*WorkDir, *ResultVal);
     writeDebugImportantHTypes(*WorkDir, *ResultVal);
   }
