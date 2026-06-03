@@ -3559,6 +3559,30 @@ static bool isMinMaxIntrinsic(llvm::Intrinsic::ID ID) {
          ID == Intrinsic::umax || ID == Intrinsic::umin;
 }
 
+static bool isEVMModule(const llvm::Module &M) {
+  return StringRef(M.getTargetTriple().getTriple()).starts_with("evm");
+}
+
+static bool constantHasAllPointerTagMiddleBits(const ConstantInt &CI) {
+  const APInt &Val = CI.getValue();
+  unsigned BitWidth = Val.getBitWidth();
+  if (BitWidth <= 8) {
+    return false;
+  }
+  APInt Mask = APInt::getBitsSet(BitWidth, 8, std::min(BitWidth, 30u));
+  return (Val & Mask) == Mask;
+}
+
+static bool constantHasNoPointerTagMiddleBits(const ConstantInt &CI) {
+  const APInt &Val = CI.getValue();
+  unsigned BitWidth = Val.getBitWidth();
+  if (BitWidth <= 8) {
+    return true;
+  }
+  APInt Mask = APInt::getBitsSet(BitWidth, 8, std::min(BitWidth, 30u));
+  return !(Val & Mask);
+}
+
 static inline void ensureSequence(Value *&Src1, Value *&Src2) {
   if (llvm::isa<llvm::ConstantInt>(Src1) &&
       llvm::isa<llvm::ConstantInt>(Src2)) {
@@ -3648,6 +3672,21 @@ bool ConstraintsGenerator::MLsubVisitor::isHeapAllocationCall(
   return false;
 }
 
+bool ConstraintsGenerator::MLsubVisitor::shouldIgnoreRuntimeCall(
+    llvm::CallBase &I) {
+  auto *F = I.getCalledFunction();
+  auto *M = I.getModule();
+  if (F == nullptr || M == nullptr || !isEVMModule(*M)) {
+    return false;
+  }
+
+  StringRef Name = F->getName();
+  if (Name == "notdec_evm_finalize_alloc") {
+    return true;
+  }
+  return Name.starts_with("evm_");
+}
+
 bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
     llvm::CallBase &I) {
   auto Target = I.getCalledFunction();
@@ -3711,6 +3750,8 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     cg.setPointer(&I);
     cg.ContraVariantValues.insert(&I);
     cg.addAddressOf(&I, cg.getRootMemoryObject(HeapObject{.Allocator = &I}));
+  } else if (shouldIgnoreRuntimeCall(I)) {
+    return;
   } else if (handleIntrinsicCall(I)) {
     return;
   } else {
@@ -3945,7 +3986,7 @@ void ConstraintsGenerator::MLsubVisitor::visitAnd(BinaryOperator &I) {
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
-    if ((CI->getZExtValue() & 0x3fffff00) == 0x3fffff00) {
+    if (constantHasAllPointerTagMiddleBits(*CI)) {
       // act as simple assignment
       cg.addSubtype(RetNode, Src1Node);
       return;
@@ -3972,7 +4013,7 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
     // at least most of the bits are passed, View as pointer alignment.
-    if ((CI->getZExtValue() & 0x3fffff00) == 0) {
+    if (constantHasNoPointerTagMiddleBits(*CI)) {
       // act as simple assignment
       cg.addSubtype(RetNode, Src1Node);
       return;

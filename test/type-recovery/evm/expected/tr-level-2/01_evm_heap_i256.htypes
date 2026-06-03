@@ -1,0 +1,32 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:256
+[+] @calloc => lower=(bottom:256 (*)(top:256, top:256))* ; upper=top:256
+[+] @calloc_unbounded => lower=(bottom:256 (*)())* ; upper=top:256
+[+] @evm_return => lower=(void (*)(top:256, top:256, top:256))* ; upper=top:256
+[+] @main => lower=(void (*)(top:256))* ; upper=top:256
+[+] @notdec_evm_finalize_alloc => lower=(void (*)(top:256, top:256))* ; upper=top:256
+[+] calloc::<ret> => lower=bottom:256 ; upper=top:256
+[+] calloc::arg0 => lower=bottom:256 ; upper=top:256
+[+] calloc::arg1 => lower=bottom:256 ; upper=top:256
+[+] calloc_unbounded::<ret> => lower=bottom:256 ; upper=top:256
+[+] const(i256 42)@main::%bb.entry.i3:0 => lower=bottom:256 ; upper=top:256
+[+] evm_return::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_return::arg1 => lower=bottom:256 ; upper=top:256
+[+] evm_return::arg2 => lower=bottom:256 ; upper=top:256
+[+] main::%addr => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[-] main::%buf => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] main::%buf.again => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[-] main::%scratch => lower=bottom:256 ; upper=top:256
+[+] main::%scratch.addr => lower=bottom:256 ; upper=top:256
+[+] main::%word => lower=bottom:256 ; upper=top:256
+[+] main::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_finalize_alloc::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_finalize_alloc::arg1 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:256
+

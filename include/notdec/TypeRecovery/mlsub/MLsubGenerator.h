@@ -333,6 +333,7 @@ protected:
     MLsubVisitor(ConstraintsGenerator &cg) : cg(cg) {}
 
     static bool isHeapAllocationCall(llvm::CallBase &I);
+    static bool shouldIgnoreRuntimeCall(llvm::CallBase &I);
     bool handleIntrinsicCall(llvm::CallBase &I);
     // overloaded visit functions
     void visitExtractValueInst(llvm::ExtractValueInst &I);

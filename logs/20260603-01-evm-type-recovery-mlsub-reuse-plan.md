@@ -223,3 +223,86 @@ EVM 也使用同一套外层架构：
 - `ptrtoint/inttoptr i256` 能和 pointer 结果合并，不额外制造假类型。
 - EVM helper 不作为普通未知函数污染 summary。
 - apehex 抽样能稳定跑完，并且 htypes/debug 能看到 memory object 字段或 role 的增量信息。
+
+## 2026-06-03 实现记录：第一阶段最小闭环
+
+本次完成第一阶段的 EVM MLsub 接入，范围只限打通类型恢复，不消费类型结果做 rewrite。
+
+改动位置：
+
+- `src/Passes/PassManager.cpp:275`，函数 `PassEnv::build_passes()`：
+  EVM 分支在 Solidity/EVM pass 和 verifier 后，`tr-level >= 2` 时调用
+  `prepareTypeRecoveryContext()` 和 `add_type_recovery_passes()`。`--emit-tr-input-ir`
+  会停在 EVM 规范化后，`--frozen-tr-input-ir` 会跳过 EVM matcher，直接进入 MLsub。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:335`：
+  给 `MLsubVisitor` 声明 `shouldIgnoreRuntimeCall()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3562`：
+  新增 EVM module 判断和 APInt 版 pointer tag mask 判断，避免 i256 常量调用
+  `getZExtValue()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3663` 和 `:3675`：
+  `isHeapAllocationCall()` 继续识别 `calloc/calloc_unbounded/notdec_evm_alloc*`；
+  `shouldIgnoreRuntimeCall()` 在 EVM module 里忽略 `evm_*` 和
+  `notdec_evm_finalize_alloc` call site，避免当普通 C 函数 summary 实例化。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3729`，函数
+  `MLsubVisitor::visitCallBase()`：
+  allocation 仍按 heap object 处理，EVM runtime helper 直接保守跳过。
+- `src/TypeRecovery/LowTy.cpp:60`，函数 `fromLLVMTy()`：
+  允许 256-bit pointer size，使 EVM `i256` 成为 pointer-sized integer。
+- `src/TypeRecovery/mlsub/PNDiff.cpp:103` 和 `:181`：
+  PNDiff 只在 APInt 能安全放进 signed 64-bit 时提取 offset；超出时返回 unknown，
+  不截断 EVM i256 常量。
+- `test/type-recovery/evm/`：
+  新增 frozen EVM TR 小 suite，覆盖 `calloc`、`calloc_unbounded`、
+  `ptrtoint/inttoptr i256`、原生 `load/store`、`evm_return` 和
+  `notdec_evm_finalize_alloc`。
+- `test/CMakeLists.txt:91`：
+  注册 `notdec.type_recovery.evm.tr_level_2`。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，0.15s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，112.00s。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，84.19s。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll
+  -o /tmp/notdec-evm-tr.ll --tr-level=2 --dump-htypes=/tmp/notdec-evm-tr.htypes`
+  通过，生成 478 行 htypes。
+- `./build/bin/notdec /tmp/notdec-evm-tr-input.ll -o /tmp/notdec-evm-tr-frozen.ll
+  --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-evm-tr-frozen.htypes`
+  通过，生成 478 行 htypes。
+- fortune 当前关注用例：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-tr2.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-tr2.htypes`
+  通过，`elapsed=12.39 user=12.04 sys=0.35 maxrss=852792`。
+
+已知验证结果：
+
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`
+  仍有 4 个 snapshot 差异：`17_StackArray`、`18_offset1`、
+  `20_PointerAnalysisFieldCycle`、`21_PointerAnalysisBranchingFieldCycle`。
+  差异表现为少了未引用/已归一化的 decl；PNDiff trace 仍能看到
+  `ptradd-reify offset=@0+4i`，不像本次 EVM 接入引入的崩溃或 offset 丢失。
+- `ctest --test-dir build -R notdec.type_recovery.sysy.tr_level_2 --output-on-failure`
+  当前失败原因是 x86_64/Other target 没初始化 TR：
+  `--dump-htypes requires type recovery to be initialized`，和本次 EVM 分支无关。
+- `ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-failure`
+  当前可跑完 MLsub，但 DWARF oracle 仍有 `fortune.o3.wasm` 结构字段缺失差异。
+
+评分：
+
+- 实现效果：7/10。EVM `tr-level=2` 和 frozen TR 最小闭环已通，能 dump htypes；
+  helper call site 不再走普通 summary。memory object role/facts 还没接入。
+- 复杂度：6/10。只改 pipeline、visitor 少量判断和 i256 常量边界，没有复制 visitor。
+  PNDiff 的 64-bit offset 边界仍是后续需要明确建模的地方。
+- 维护成本：6/10。当前用 module triple 做少量分支，成本低；如果第二阶段继续增加
+  helper 语义，应把 EVM helper 规则收窄到更集中的小函数里。
+
+下一步：
+
+- 第二阶段先把 EVM helper 语义分类做细，只保守记录 role/use，不影响普通 MLsub 求解。
+- 第三阶段再接 MemoryBuffer/ABI marker 事实，只从 base + constant offset 的 32 字节 word 开始。

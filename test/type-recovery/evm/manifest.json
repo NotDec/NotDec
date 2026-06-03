@@ -1,0 +1,15 @@
+{
+  "suite": "notdec type recovery evm frozen stage-b tr-level=2",
+  "default_args": [
+    "--tr-level=2",
+    "--frozen-tr-input-ir"
+  ],
+  "cases": [
+    {
+      "name": "01_evm_heap_i256",
+      "input": "cases/01_evm_heap_i256.ll",
+      "expected": "expected/tr-level-2/01_evm_heap_i256.htypes",
+      "status": "pass"
+    }
+  ]
+}

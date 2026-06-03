@@ -89,6 +89,11 @@ add_type_recovery_suite(
 )
 
 add_type_recovery_suite(
+	notdec.type_recovery.evm.tr_level_2
+	type-recovery/evm/manifest.json
+)
+
+add_type_recovery_suite(
 	notdec.type_recovery.sysy.tr_level_2
 	type-recovery/sysy/manifest.json
 )

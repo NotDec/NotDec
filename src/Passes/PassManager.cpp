@@ -279,21 +279,34 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
   case TargetArch::Wasm:
     break;
   case TargetArch::Evm:
-    // EVM inputs still benefit from LLVM's local canonicalization before
-    // Solidity/EVM-specific matchers inspect the IR.
-    MPM.addPass(
-        createModuleToFunctionPassAdaptor(buildFunctionOptimizations()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(
-        evm::SelectorEntryOutliningPass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(evm::PayabilityGuardPass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
-    MPM.addPass(
-        createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(evm::AbiReturnPass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(evm::SolidityRevertPass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(evm::EventLogPass()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(evm::ExternalCallPass()));
+    if (!frozenTRInputIR) {
+      // EVM inputs still benefit from LLVM's local canonicalization before
+      // Solidity/EVM-specific matchers inspect the IR. Keep this target-local
+      // pipeline separate from the Wasm pre-TR passes because those still
+      // assume Wasm memory and stack shapes.
+      MPM.addPass(
+          createModuleToFunctionPassAdaptor(buildFunctionOptimizations()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(
+          evm::SelectorEntryOutliningPass()));
+      MPM.addPass(
+          createModuleToFunctionPassAdaptor(evm::PayabilityGuardPass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
+      MPM.addPass(
+          createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(evm::AbiReturnPass()));
+      MPM.addPass(
+          createModuleToFunctionPassAdaptor(evm::SolidityRevertPass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(evm::EventLogPass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(evm::ExternalCallPass()));
+    }
     MPM.addPass(VerifierPass(false));
+    if (level >= 2) {
+      prepareTypeRecoveryContext();
+      if (stopBeforeTypeRecovery) {
+        return;
+      }
+      add_type_recovery_passes(level);
+    }
     return;
   case TargetArch::Other:
     return;

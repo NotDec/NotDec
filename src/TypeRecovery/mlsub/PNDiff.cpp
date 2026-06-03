@@ -101,15 +101,22 @@ void traceConstraintEvent(PNIGraph &G, const std::string &Event,
 }
 
 std::optional<int64_t> getIntConstantValue(const ExtValuePtr &Val) {
+  auto GetSigned64 = [](const llvm::ConstantInt &CI) -> std::optional<int64_t> {
+    const llvm::APInt &Value = CI.getValue();
+    if (Value.getSignificantBits() > 64) {
+      return std::nullopt;
+    }
+    return Value.getSExtValue();
+  };
   if (auto *V = std::get_if<llvm::Value *>(&Val)) {
     if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(*V)) {
-      return CI->getSExtValue();
+      return GetSigned64(*CI);
     }
     return std::nullopt;
   }
   if (auto *C = std::get_if<UConstant>(&Val)) {
     if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(C->Val)) {
-      return CI->getSExtValue();
+      return GetSigned64(*CI);
     }
   }
   return std::nullopt;
@@ -175,7 +182,11 @@ std::optional<OffsetRange> matchOffsetRange(llvm::Value *I) {
   using namespace llvm;
   assert(I->getType()->isIntegerTy());
   if (auto *CI = dyn_cast<llvm::ConstantInt>(I)) {
-    return OffsetRange{.offset = CI->getSExtValue()};
+    auto Constant = getIntConstantValue(ExtValuePtr{CI});
+    if (!Constant) {
+      return std::nullopt;
+    }
+    return OffsetRange{.offset = *Constant};
   }
   // Unknown or unsupported shape no longer pretends to be 1*x.
   if (!isa<llvm::BinaryOperator>(I)) {
@@ -218,9 +229,13 @@ std::optional<OffsetRange> matchOffsetRange(llvm::Value *I) {
     return Result;
   } else if (BinOp->getOpcode() == llvm::Instruction::Shl &&
              llvm::isa<ConstantInt>(Src2)) {
+    auto Shift = getIntConstantValue(ExtValuePtr{Src2});
+    if (!Shift || *Shift < 0 || *Shift >= 63) {
+      return std::nullopt;
+    }
     auto Result =
         matchOffsetRange(Src1).value_or(getUnknownOffsetRange()) *
-        (1 << llvm::cast<ConstantInt>(Src2)->getSExtValue());
+        (int64_t{1} << *Shift);
     if (isUnknownOffsetRange(Result)) {
       return std::nullopt;
     }

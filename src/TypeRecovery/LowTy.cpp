@@ -58,7 +58,7 @@ PtrOrNum fromIPChar(char C) {
 }
 
 PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize) {
-  assert(PointerSize == 32 || PointerSize == 64);
+  assert(PointerSize == 32 || PointerSize == 64 || PointerSize == 256);
   if (LowTy == nullptr) {
     return Null;
   } else if (LowTy->isPointerTy()) {
