@@ -9,7 +9,7 @@ declare void @notdec_evm_finalize_alloc(i256, i256)
 declare void @evm_log1(ptr, i256, i256, i256)
 declare i256 @evm_call(ptr, ptr, ptr, i256, i256, i256, i256, i256, i256, i256)
 
-define i256 @main(ptr %mem, ptr %returndata, ptr %env) {
+define i256 @main(ptr %mem, ptr %returndata, ptr %env) #0 {
 entry:
   %buf.addr = call i256 @notdec_evm_alloc(i256 64)
   %buf.ptr = inttoptr i256 %buf.addr to ptr
@@ -20,3 +20,5 @@ entry:
   %ok = call i256 @evm_call(ptr %mem, ptr %returndata, ptr %env, i256 100000, i256 1, i256 0, i256 %buf.addr, i256 32, i256 %scratch.addr, i256 64)
   ret i256 %ok
 }
+
+attributes #0 = { null_pointer_is_valid }

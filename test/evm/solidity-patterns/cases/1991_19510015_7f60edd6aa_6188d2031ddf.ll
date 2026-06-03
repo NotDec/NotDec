@@ -3,11 +3,8 @@ source_filename = "notdec.evm2llvm"
 target datalayout = "E-p:256:256-i256:256:256-S256-a:256:256"
 target triple = "evm-unknown-unknown"
 
-declare i256 @evm_mload(ptr, i256)
 
-declare void @evm_mstore(ptr, i256, i256)
 
-declare void @evm_mstore8(ptr, i256, i256)
 
 declare void @evm_mcopy(ptr, i256, i256, i256)
 
@@ -133,9 +130,10 @@ declare void @evm_return(ptr, i256, i256)
 
 declare void @evm_revert(ptr, i256, i256)
 
-define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x0:
-  call void @evm_mstore(ptr %mem, i256 64, i256 128), !notdec.evm !0
+  %notdec.evm.mem.ptr.0 = inttoptr i256 64 to ptr
+  store i256 128, ptr %notdec.evm.mem.ptr.0, align 1, !notdec.evm !0
   %evm.callvalue = call i256 @evm_callvalue(ptr %env), !notdec.evm !1
   %evm.iszero = icmp eq i256 %evm.callvalue, 0, !notdec.evm !2
   %evm.bool = zext i1 %evm.iszero to i256, !notdec.evm !2
@@ -530,7 +528,7 @@ bb._0xc:                                          ; preds = %bb._0x0
   unreachable, !notdec.evm !121
 }
 
-define { i256, i256 } @private__0x1001_0x1001(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1001arg0x0, i256 %_0x1001arg0x1, i256 %_0x1001arg0x2, i256 %_0x1001arg0x3) {
+define { i256, i256 } @private__0x1001_0x1001(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1001arg0x0, i256 %_0x1001arg0x1, i256 %_0x1001arg0x2, i256 %_0x1001arg0x3) #0 {
 bb._0x1001:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !122
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !123
@@ -552,21 +550,24 @@ bb._0x1037:                                       ; preds = %bb._0x102a
   ret { i256, i256 } %ret.insert3, !notdec.evm !129
 
 bb._0x1013:                                       ; preds = %bb._0x1001
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !130
+  %notdec.evm.mem.ptr.1 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.1, align 1, !notdec.evm !130
   %evm.shl4 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !131
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl4), !notdec.evm !132
+  %notdec.evm.mem.ptr.2 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl4, ptr %notdec.evm.mem.ptr.2, align 1, !notdec.evm !132
   %evm.add = add i256 4, %evm.mload, !notdec.evm !133
   %private.call5 = call i256 @private__0x3594_0x3594(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add, i256 954322), !notdec.evm !134
   br label %bb._0xe8fd2
 
 bb._0xe8fd2:                                      ; preds = %bb._0x1013
-  %evm.mload6 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !135
+  %notdec.evm.mem.ptr.3 = inttoptr i256 64 to ptr
+  %evm.mload6 = load i256, ptr %notdec.evm.mem.ptr.3, align 1, !notdec.evm !135
   %evm.sub7 = sub i256 %private.call5, %evm.mload6, !notdec.evm !136
   call void @evm_revert(ptr %mem, i256 %evm.mload6, i256 %evm.sub7), !notdec.evm !137
   unreachable, !notdec.evm !137
 }
 
-define { i256, i256 } @private__0x1043_0x1043(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1043arg0x0, i256 %_0x1043arg0x1, i256 %_0x1043arg0x2) {
+define { i256, i256 } @private__0x1043_0x1043(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1043arg0x0, i256 %_0x1043arg0x1, i256 %_0x1043arg0x2) #0 {
 bb._0x1043:
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !138
   %evm.caller1 = call i256 @evm_caller(ptr %env), !notdec.evm !139
@@ -582,7 +583,7 @@ bb._0x1053:                                       ; preds = %bb._0x1043
   ret { i256, i256 } %ret.insert4, !notdec.evm !142
 }
 
-define void @private__0x105e_0x105e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x105earg0x0, i256 %_0x105earg0x1) {
+define void @private__0x105e_0x105e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x105earg0x0, i256 %_0x105earg0x1) #0 {
 bb._0x105e:
   %evm.sload = call i256 @evm_sload(i256 6), !notdec.evm !143
   %evm.and = and i256 255, %evm.sload, !notdec.evm !144
@@ -647,29 +648,36 @@ bb._0x1107:                                       ; preds = %bb._0x1100
   ret void, !notdec.evm !175
 
 bb._0x1082:                                       ; preds = %bb._0x107d
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !176
+  %notdec.evm.mem.ptr.4 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.4, align 1, !notdec.evm !176
   %evm.shl = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !177
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl), !notdec.evm !178
+  %notdec.evm.mem.ptr.5 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.5, align 1, !notdec.evm !178
   %evm.add = add i256 %evm.mload, 4, !notdec.evm !179
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 32), !notdec.evm !180
+  %notdec.evm.mem.ptr.6 = inttoptr i256 %evm.add to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.6, align 1, !notdec.evm !180
   %evm.add19 = add i256 %evm.mload, 36, !notdec.evm !181
-  call void @evm_mstore(ptr %mem, i256 %evm.add19, i256 46), !notdec.evm !182
+  %notdec.evm.mem.ptr.7 = inttoptr i256 %evm.add19 to ptr
+  store i256 46, ptr %notdec.evm.mem.ptr.7, align 1, !notdec.evm !182
   %evm.add20 = add i256 %evm.mload, 68, !notdec.evm !183
-  call void @evm_mstore(ptr %mem, i256 %evm.add20, i256 30501843210766873584622776278354242063887054688622528025717794791008837329509), !notdec.evm !184
+  %notdec.evm.mem.ptr.8 = inttoptr i256 %evm.add20 to ptr
+  store i256 30501843210766873584622776278354242063887054688622528025717794791008837329509, ptr %notdec.evm.mem.ptr.8, align 1, !notdec.evm !184
   %evm.shl21 = call i256 @evm_shl(i256 146, i256 514312124706079685529631109060953), !notdec.evm !185
   %evm.add22 = add i256 %evm.mload, 100, !notdec.evm !186
-  call void @evm_mstore(ptr %mem, i256 %evm.add22, i256 %evm.shl21), !notdec.evm !187
+  %notdec.evm.mem.ptr.9 = inttoptr i256 %evm.add22 to ptr
+  store i256 %evm.shl21, ptr %notdec.evm.mem.ptr.9, align 1, !notdec.evm !187
   %evm.add23 = add i256 132, %evm.mload, !notdec.evm !188
   br label %bb._0x7632, !notdec.evm !189
 
 bb._0x7632:                                       ; preds = %bb._0x1082
-  %evm.mload24 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !190
+  %notdec.evm.mem.ptr.10 = inttoptr i256 64 to ptr
+  %evm.mload24 = load i256, ptr %notdec.evm.mem.ptr.10, align 1, !notdec.evm !190
   %evm.sub = sub i256 %evm.add23, %evm.mload24, !notdec.evm !191
   call void @evm_revert(ptr %mem, i256 %evm.mload24, i256 %evm.sub), !notdec.evm !192
   unreachable, !notdec.evm !192
 }
 
-define void @private__0x1225_0x1225(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1225arg0x0, i256 %_0x1225arg0x1, i256 %_0x1225arg0x2) {
+define void @private__0x1225_0x1225(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1225arg0x0, i256 %_0x1225arg0x1, i256 %_0x1225arg0x2) #0 {
 bb._0x1225:
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !193
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !194
@@ -705,8 +713,10 @@ bb._0x1fd10x1225:                                 ; preds = %bb._0x1f7e0x1225
   %evm.shl11 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !209
   %evm.sub12 = sub i256 %evm.shl11, 1, !notdec.evm !210
   %evm.and13 = and i256 %evm.sub12, %_0x1225arg0x1, !notdec.evm !211
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and13), !notdec.evm !212
-  call void @evm_mstore(ptr %mem, i256 32, i256 58), !notdec.evm !213
+  %notdec.evm.mem.ptr.11 = inttoptr i256 0 to ptr
+  store i256 %evm.and13, ptr %notdec.evm.mem.ptr.11, align 1, !notdec.evm !212
+  %notdec.evm.mem.ptr.12 = inttoptr i256 32 to ptr
+  store i256 58, ptr %notdec.evm.mem.ptr.12, align 1, !notdec.evm !213
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !214
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !215
   %evm.shl14 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !216
@@ -716,7 +726,8 @@ bb._0x1fd10x1225:                                 ; preds = %bb._0x1f7e0x1225
   %evm.and17 = and i256 %_0x1225arg0x0, %evm.sub12, !notdec.evm !220
   %evm.or = or i256 %evm.and17, %evm.and16, !notdec.evm !221
   call void @evm_sstore(i256 %evm.sha3, i256 %evm.or), !notdec.evm !222
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !223
+  %notdec.evm.mem.ptr.13 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.13, align 1, !notdec.evm !223
   call void @evm_log3(ptr %mem, i256 %evm.mload, i256 0, i256 -52182329275405693997205492740651498409748790152693547769034737884749434593110, i256 %evm.and13, i256 %evm.and17), !notdec.evm !224
   br label %bb._0xe906e, !notdec.evm !225
 
@@ -724,59 +735,74 @@ bb._0xe906e:                                      ; preds = %bb._0x1fd10x1225
   ret void, !notdec.evm !226
 
 bb._0x1f8a0x1225:                                 ; preds = %bb._0x1f7e0x1225
-  %evm.mload18 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !227
+  %notdec.evm.mem.ptr.14 = inttoptr i256 64 to ptr
+  %evm.mload18 = load i256, ptr %notdec.evm.mem.ptr.14, align 1, !notdec.evm !227
   %evm.shl19 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !228
-  call void @evm_mstore(ptr %mem, i256 %evm.mload18, i256 %evm.shl19), !notdec.evm !229
+  %notdec.evm.mem.ptr.15 = inttoptr i256 %evm.mload18 to ptr
+  store i256 %evm.shl19, ptr %notdec.evm.mem.ptr.15, align 1, !notdec.evm !229
   %evm.add = add i256 %evm.mload18, 4, !notdec.evm !230
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 32), !notdec.evm !231
+  %notdec.evm.mem.ptr.16 = inttoptr i256 %evm.add to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.16, align 1, !notdec.evm !231
   %evm.add20 = add i256 %evm.mload18, 36, !notdec.evm !232
-  call void @evm_mstore(ptr %mem, i256 %evm.add20, i256 25), !notdec.evm !233
+  %notdec.evm.mem.ptr.17 = inttoptr i256 %evm.add20 to ptr
+  store i256 25, ptr %notdec.evm.mem.ptr.17, align 1, !notdec.evm !233
   %evm.add21 = add i256 %evm.mload18, 68, !notdec.evm !234
-  call void @evm_mstore(ptr %mem, i256 %evm.add21, i256 37690949290324196817065650194729576098824250008910874234182692351524787453952), !notdec.evm !235
+  %notdec.evm.mem.ptr.18 = inttoptr i256 %evm.add21 to ptr
+  store i256 37690949290324196817065650194729576098824250008910874234182692351524787453952, ptr %notdec.evm.mem.ptr.18, align 1, !notdec.evm !235
   %evm.add22 = add i256 100, %evm.mload18, !notdec.evm !236
   br label %bb._0x7a150x1225, !notdec.evm !237
 
 bb._0x7a150x1225:                                 ; preds = %bb._0x1f8a0x1225
-  %evm.mload23 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !238
+  %notdec.evm.mem.ptr.19 = inttoptr i256 64 to ptr
+  %evm.mload23 = load i256, ptr %notdec.evm.mem.ptr.19, align 1, !notdec.evm !238
   %evm.sub24 = sub i256 %evm.add22, %evm.mload23, !notdec.evm !239
   call void @evm_revert(ptr %mem, i256 %evm.mload23, i256 %evm.sub24), !notdec.evm !240
   unreachable, !notdec.evm !240
 
 bb._0x1f370x1225:                                 ; preds = %bb._0x1f280x1225
-  %evm.mload25 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !241
+  %notdec.evm.mem.ptr.20 = inttoptr i256 64 to ptr
+  %evm.mload25 = load i256, ptr %notdec.evm.mem.ptr.20, align 1, !notdec.evm !241
   %evm.shl26 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !242
-  call void @evm_mstore(ptr %mem, i256 %evm.mload25, i256 %evm.shl26), !notdec.evm !243
+  %notdec.evm.mem.ptr.21 = inttoptr i256 %evm.mload25 to ptr
+  store i256 %evm.shl26, ptr %notdec.evm.mem.ptr.21, align 1, !notdec.evm !243
   %evm.add27 = add i256 %evm.mload25, 4, !notdec.evm !244
-  call void @evm_mstore(ptr %mem, i256 %evm.add27, i256 32), !notdec.evm !245
+  %notdec.evm.mem.ptr.22 = inttoptr i256 %evm.add27 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.22, align 1, !notdec.evm !245
   %evm.add28 = add i256 %evm.mload25, 36, !notdec.evm !246
-  call void @evm_mstore(ptr %mem, i256 %evm.add28, i256 24), !notdec.evm !247
+  %notdec.evm.mem.ptr.23 = inttoptr i256 %evm.add28 to ptr
+  store i256 24, ptr %notdec.evm.mem.ptr.23, align 1, !notdec.evm !247
   %evm.add29 = add i256 %evm.mload25, 68, !notdec.evm !248
-  call void @evm_mstore(ptr %mem, i256 %evm.add29, i256 37690949290324196817064684894883064520784954685232344919415882660299289919488), !notdec.evm !249
+  %notdec.evm.mem.ptr.24 = inttoptr i256 %evm.add29 to ptr
+  store i256 37690949290324196817064684894883064520784954685232344919415882660299289919488, ptr %notdec.evm.mem.ptr.24, align 1, !notdec.evm !249
   %evm.add30 = add i256 100, %evm.mload25, !notdec.evm !250
   br label %bb._0x79ed0x1225, !notdec.evm !251
 
 bb._0x79ed0x1225:                                 ; preds = %bb._0x1f370x1225
-  %evm.mload31 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !252
+  %notdec.evm.mem.ptr.25 = inttoptr i256 64 to ptr
+  %evm.mload31 = load i256, ptr %notdec.evm.mem.ptr.25, align 1, !notdec.evm !252
   %evm.sub32 = sub i256 %evm.add30, %evm.mload31, !notdec.evm !253
   call void @evm_revert(ptr %mem, i256 %evm.mload31, i256 %evm.sub32), !notdec.evm !254
   unreachable, !notdec.evm !254
 
 bb._0x1256:                                       ; preds = %bb._0x1225
-  %evm.mload33 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !255
+  %notdec.evm.mem.ptr.26 = inttoptr i256 64 to ptr
+  %evm.mload33 = load i256, ptr %notdec.evm.mem.ptr.26, align 1, !notdec.evm !255
   %evm.shl34 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !256
-  call void @evm_mstore(ptr %mem, i256 %evm.mload33, i256 %evm.shl34), !notdec.evm !257
+  %notdec.evm.mem.ptr.27 = inttoptr i256 %evm.mload33 to ptr
+  store i256 %evm.shl34, ptr %notdec.evm.mem.ptr.27, align 1, !notdec.evm !257
   %evm.add35 = add i256 4, %evm.mload33, !notdec.evm !258
   %private.call = call i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add35, i256 954438), !notdec.evm !259
   br label %bb._0xe9046
 
 bb._0xe9046:                                      ; preds = %bb._0x1256
-  %evm.mload36 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !260
+  %notdec.evm.mem.ptr.28 = inttoptr i256 64 to ptr
+  %evm.mload36 = load i256, ptr %notdec.evm.mem.ptr.28, align 1, !notdec.evm !260
   %evm.sub37 = sub i256 %private.call, %evm.mload36, !notdec.evm !261
   call void @evm_revert(ptr %mem, i256 %evm.mload36, i256 %evm.sub37), !notdec.evm !262
   unreachable, !notdec.evm !262
 }
 
-define void @private__0x1316_0x1316(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1316arg0x0, i256 %_0x1316arg0x1, i256 %_0x1316arg0x2, i256 %_0x1316arg0x3, i256 %_0x1316arg0x4, i256 %_0x1316arg0x5) {
+define void @private__0x1316_0x1316(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1316arg0x0, i256 %_0x1316arg0x1, i256 %_0x1316arg0x2, i256 %_0x1316arg0x3, i256 %_0x1316arg0x4, i256 %_0x1316arg0x5) #0 {
 bb._0x1316:
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !263
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !264
@@ -814,8 +840,10 @@ bb._0x13a9:                                       ; preds = %bb._0x13a0
   %evm.shl7 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !279
   %evm.sub8 = sub i256 %evm.shl7, 1, !notdec.evm !280
   %evm.and9 = and i256 %_0x1316arg0x4, %evm.sub8, !notdec.evm !281
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and9), !notdec.evm !282
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !283
+  %notdec.evm.mem.ptr.29 = inttoptr i256 0 to ptr
+  store i256 %evm.and9, ptr %notdec.evm.mem.ptr.29, align 1, !notdec.evm !282
+  %notdec.evm.mem.ptr.30 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.30, align 1, !notdec.evm !283
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !284
   %evm.lt10 = icmp ult i256 %_0x13a9_0x0, %_0x1316arg0x2, !notdec.evm !285
   %evm.bool11 = zext i1 %evm.lt10 to i256, !notdec.evm !285
@@ -836,8 +864,10 @@ bb._0x13ea:                                       ; preds = %bb._0x13d5
   %evm.shl14 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !294
   %evm.sub15 = sub i256 %evm.shl14, 1, !notdec.evm !295
   %evm.and16 = and i256 %evm.sub15, %private.call, !notdec.evm !296
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and16), !notdec.evm !297
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !298
+  %notdec.evm.mem.ptr.31 = inttoptr i256 0 to ptr
+  store i256 %evm.and16, ptr %notdec.evm.mem.ptr.31, align 1, !notdec.evm !297
+  %notdec.evm.mem.ptr.32 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.32, align 1, !notdec.evm !298
   %evm.sha317 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !299
   %evm.add18 = add i256 %evm.sha3, 2, !notdec.evm !300
   %evm.sload = call i256 @evm_sload(i256 %evm.add18), !notdec.evm !301
@@ -874,11 +904,14 @@ bb._0x147d:                                       ; preds = %bb._0x1431
   %evm.shl35 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !320
   %evm.sub36 = sub i256 %evm.shl35, 1, !notdec.evm !321
   %evm.and37 = and i256 %evm.sub36, %_0x1316arg0x4, !notdec.evm !322
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !323
+  %notdec.evm.mem.ptr.33 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.33, align 1, !notdec.evm !323
   %evm.shl38 = call i256 @evm_shl(i256 224, i256 2982123053), !notdec.evm !324
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl38), !notdec.evm !325
+  %notdec.evm.mem.ptr.34 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl38, ptr %notdec.evm.mem.ptr.34, align 1, !notdec.evm !325
   %evm.add39 = add i256 4, %evm.mload, !notdec.evm !326
-  %evm.mload40 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !327
+  %notdec.evm.mem.ptr.35 = inttoptr i256 64 to ptr
+  %evm.mload40 = load i256, ptr %notdec.evm.mem.ptr.35, align 1, !notdec.evm !327
   %evm.sub41 = sub i256 %evm.add39, %evm.mload40, !notdec.evm !328
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !329
   %evm.staticcall = call i256 @evm_staticcall(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas, i256 %evm.and37, i256 %evm.mload40, i256 %evm.sub41, i256 %evm.mload40, i256 32), !notdec.evm !330
@@ -891,12 +924,14 @@ bb._0x147d:                                       ; preds = %bb._0x1431
 
 bb._0x14c1:                                       ; preds = %bb._0x147d
   %_0x14c1_0xa = phi i256 [ %_0x147d_0x3, %bb._0x147d ], !notdec.evm !334
-  %evm.mload47 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !335
+  %notdec.evm.mem.ptr.36 = inttoptr i256 64 to ptr
+  %evm.mload47 = load i256, ptr %notdec.evm.mem.ptr.36, align 1, !notdec.evm !335
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !336
   %evm.add48 = add i256 %evm.returndatasize, 31, !notdec.evm !337
   %evm.and49 = and i256 %evm.add48, -32, !notdec.evm !338
   %evm.add50 = add i256 %evm.mload47, %evm.and49, !notdec.evm !339
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add50), !notdec.evm !340
+  %notdec.evm.mem.ptr.37 = inttoptr i256 64 to ptr
+  store i256 %evm.add50, ptr %notdec.evm.mem.ptr.37, align 1, !notdec.evm !340
   %evm.add51 = add i256 %evm.mload47, %evm.returndatasize, !notdec.evm !341
   %private.call52 = call i256 @private__0x3675_0x3675(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload47, i256 %evm.add51, i256 5349), !notdec.evm !342
   br label %bb._0x14e5
@@ -987,24 +1022,31 @@ bb._0x15ca:                                       ; preds = %bb._0x1583
 bb._0x15df:                                       ; preds = %bb._0x15ca
   %_0x15df_0xa = phi i256 [ %_0x15ca_0xc, %bb._0x15ca ], !notdec.evm !397
   %evm.sload97 = call i256 @evm_sload(i256 %evm.sha317), !notdec.evm !398
-  %evm.mload98 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !399
-  call void @evm_mstore(ptr %mem, i256 %evm.mload98, i256 %evm.and61), !notdec.evm !400
+  %notdec.evm.mem.ptr.38 = inttoptr i256 64 to ptr
+  %evm.mload98 = load i256, ptr %notdec.evm.mem.ptr.38, align 1, !notdec.evm !399
+  %notdec.evm.mem.ptr.39 = inttoptr i256 %evm.mload98 to ptr
+  store i256 %evm.and61, ptr %notdec.evm.mem.ptr.39, align 1, !notdec.evm !400
   %evm.shl99 = call i256 @evm_shl(i256 88, i256 1), !notdec.evm !401
   %evm.sub100 = sub i256 %evm.shl99, 1, !notdec.evm !402
   %evm.and101 = and i256 %private.call96, %evm.sub100, !notdec.evm !403
   %evm.add102 = add i256 %evm.mload98, 32, !notdec.evm !404
-  call void @evm_mstore(ptr %mem, i256 %evm.add102, i256 %evm.and101), !notdec.evm !405
+  %notdec.evm.mem.ptr.40 = inttoptr i256 %evm.add102 to ptr
+  store i256 %evm.and101, ptr %notdec.evm.mem.ptr.40, align 1, !notdec.evm !405
   %evm.shl103 = call i256 @evm_shl(i256 224, i256 1), !notdec.evm !406
   %evm.div104 = call i256 @evm_div(i256 %evm.sload97, i256 %evm.shl103), !notdec.evm !407
   %evm.and105 = and i256 4294967295, %evm.div104, !notdec.evm !408
   %evm.add106 = add i256 %evm.mload98, 64, !notdec.evm !409
-  call void @evm_mstore(ptr %mem, i256 %evm.add106, i256 %evm.and105), !notdec.evm !410
+  %notdec.evm.mem.ptr.41 = inttoptr i256 %evm.add106 to ptr
+  store i256 %evm.and105, ptr %notdec.evm.mem.ptr.41, align 1, !notdec.evm !410
   %evm.add107 = add i256 %evm.mload98, 96, !notdec.evm !411
-  call void @evm_mstore(ptr %mem, i256 %evm.add107, i256 %evm.and105), !notdec.evm !412
+  %notdec.evm.mem.ptr.42 = inttoptr i256 %evm.add107 to ptr
+  store i256 %evm.and105, ptr %notdec.evm.mem.ptr.42, align 1, !notdec.evm !412
   %evm.add108 = add i256 %evm.mload98, 128, !notdec.evm !413
-  call void @evm_mstore(ptr %mem, i256 %evm.add108, i256 %private.ret55), !notdec.evm !414
+  %notdec.evm.mem.ptr.43 = inttoptr i256 %evm.add108 to ptr
+  store i256 %private.ret55, ptr %notdec.evm.mem.ptr.43, align 1, !notdec.evm !414
   %evm.add109 = add i256 160, %evm.mload98, !notdec.evm !415
-  %evm.mload110 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !416
+  %notdec.evm.mem.ptr.44 = inttoptr i256 64 to ptr
+  %evm.mload110 = load i256, ptr %notdec.evm.mem.ptr.44, align 1, !notdec.evm !416
   %evm.sub111 = sub i256 %evm.add109, %evm.mload110, !notdec.evm !417
   call void @evm_log3(ptr %mem, i256 %evm.mload110, i256 %evm.sub111, i256 -37952818559785066389972698679369799893918124169894124196364029007910515765819, i256 %evm.and89, i256 %evm.and86), !notdec.evm !418
   %private.call112 = call i256 @private__0x3604_0x3604(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x15df_0xa, i256 5682), !notdec.evm !419
@@ -1024,8 +1066,10 @@ bb._0x7749:                                       ; preds = %bb._0x15c3
   %_0x7749_0x1 = phi i256 [ %_0x15c3_0x0, %bb._0x15c3 ], !notdec.evm !426
   %_0x7749_0xd = phi i256 [ %_0x15c3_0xc, %bb._0x15c3 ], !notdec.evm !427
   %evm.shl113 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !428
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl113), !notdec.evm !429
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !430
+  %notdec.evm.mem.ptr.45 = inttoptr i256 0 to ptr
+  store i256 %evm.shl113, ptr %notdec.evm.mem.ptr.45, align 1, !notdec.evm !429
+  %notdec.evm.mem.ptr.46 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.46, align 1, !notdec.evm !430
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !431
   unreachable, !notdec.evm !431
 
@@ -1038,8 +1082,10 @@ bb._0x7714:                                       ; preds = %bb._0x1567
   %_0x7714_0x1 = phi i256 [ %_0x1567_0x0, %bb._0x1567 ], !notdec.evm !435
   %_0x7714_0x9 = phi i256 [ %_0x1567_0x8, %bb._0x1567 ], !notdec.evm !436
   %evm.shl114 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !437
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl114), !notdec.evm !438
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !439
+  %notdec.evm.mem.ptr.47 = inttoptr i256 0 to ptr
+  store i256 %evm.shl114, ptr %notdec.evm.mem.ptr.47, align 1, !notdec.evm !438
+  %notdec.evm.mem.ptr.48 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.48, align 1, !notdec.evm !439
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !440
   unreachable, !notdec.evm !440
 
@@ -1052,8 +1098,10 @@ bb._0x76df:                                       ; preds = %bb._0x1516
   %_0x76df_0x1 = phi i256 [ %_0x1516_0x0, %bb._0x1516 ], !notdec.evm !444
   %_0x76df_0x9 = phi i256 [ %_0x1516_0x8, %bb._0x1516 ], !notdec.evm !445
   %evm.shl115 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !446
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl115), !notdec.evm !447
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !448
+  %notdec.evm.mem.ptr.49 = inttoptr i256 0 to ptr
+  store i256 %evm.shl115, ptr %notdec.evm.mem.ptr.49, align 1, !notdec.evm !447
+  %notdec.evm.mem.ptr.50 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.50, align 1, !notdec.evm !448
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !449
   unreachable, !notdec.evm !449
 
@@ -1067,21 +1115,27 @@ bb._0x14b8:                                       ; preds = %bb._0x147d
 
 bb._0x1436:                                       ; preds = %bb._0x1431
   %_0x1436_0x3 = phi i256 [ %_0x1431_0x4, %bb._0x1431 ], !notdec.evm !455
-  %evm.mload118 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !456
+  %notdec.evm.mem.ptr.51 = inttoptr i256 64 to ptr
+  %evm.mload118 = load i256, ptr %notdec.evm.mem.ptr.51, align 1, !notdec.evm !456
   %evm.shl119 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !457
-  call void @evm_mstore(ptr %mem, i256 %evm.mload118, i256 %evm.shl119), !notdec.evm !458
+  %notdec.evm.mem.ptr.52 = inttoptr i256 %evm.mload118 to ptr
+  store i256 %evm.shl119, ptr %notdec.evm.mem.ptr.52, align 1, !notdec.evm !458
   %evm.add120 = add i256 %evm.mload118, 4, !notdec.evm !459
-  call void @evm_mstore(ptr %mem, i256 %evm.add120, i256 32), !notdec.evm !460
+  %notdec.evm.mem.ptr.53 = inttoptr i256 %evm.add120 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.53, align 1, !notdec.evm !460
   %evm.add121 = add i256 %evm.mload118, 36, !notdec.evm !461
-  call void @evm_mstore(ptr %mem, i256 %evm.add121, i256 27), !notdec.evm !462
+  %notdec.evm.mem.ptr.54 = inttoptr i256 %evm.add121 to ptr
+  store i256 27, ptr %notdec.evm.mem.ptr.54, align 1, !notdec.evm !462
   %evm.add122 = add i256 %evm.mload118, 68, !notdec.evm !463
-  call void @evm_mstore(ptr %mem, i256 %evm.add122, i256 30886828657638985091417789057756525846028199893051930688595218043735543644160), !notdec.evm !464
+  %notdec.evm.mem.ptr.55 = inttoptr i256 %evm.add122 to ptr
+  store i256 30886828657638985091417789057756525846028199893051930688595218043735543644160, ptr %notdec.evm.mem.ptr.55, align 1, !notdec.evm !464
   %evm.add123 = add i256 100, %evm.mload118, !notdec.evm !465
   br label %bb._0x76b7, !notdec.evm !466
 
 bb._0x76b7:                                       ; preds = %bb._0x1436
   %_0x76b7_0x4 = phi i256 [ %_0x1436_0x3, %bb._0x1436 ], !notdec.evm !467
-  %evm.mload124 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !468
+  %notdec.evm.mem.ptr.56 = inttoptr i256 64 to ptr
+  %evm.mload124 = load i256, ptr %notdec.evm.mem.ptr.56, align 1, !notdec.evm !468
   %evm.sub125 = sub i256 %evm.add123, %evm.mload124, !notdec.evm !469
   call void @evm_revert(ptr %mem, i256 %evm.mload124, i256 %evm.sub125), !notdec.evm !470
   unreachable, !notdec.evm !470
@@ -1095,47 +1149,58 @@ bb._0x7682:                                       ; preds = %bb._0x13ce
   %_0x7682_0x1 = phi i256 [ %_0x13ce_0x0, %bb._0x13ce ], !notdec.evm !474
   %_0x7682_0x8 = phi i256 [ %_0x13ce_0x7, %bb._0x13ce ], !notdec.evm !475
   %evm.shl126 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !476
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl126), !notdec.evm !477
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !478
+  %notdec.evm.mem.ptr.57 = inttoptr i256 0 to ptr
+  store i256 %evm.shl126, ptr %notdec.evm.mem.ptr.57, align 1, !notdec.evm !477
+  %notdec.evm.mem.ptr.58 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.58, align 1, !notdec.evm !478
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !479
   unreachable, !notdec.evm !479
 
 bb._0x1366:                                       ; preds = %bb._0x135e
-  %evm.mload127 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !480
+  %notdec.evm.mem.ptr.59 = inttoptr i256 64 to ptr
+  %evm.mload127 = load i256, ptr %notdec.evm.mem.ptr.59, align 1, !notdec.evm !480
   %evm.shl128 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !481
-  call void @evm_mstore(ptr %mem, i256 %evm.mload127, i256 %evm.shl128), !notdec.evm !482
+  %notdec.evm.mem.ptr.60 = inttoptr i256 %evm.mload127 to ptr
+  store i256 %evm.shl128, ptr %notdec.evm.mem.ptr.60, align 1, !notdec.evm !482
   %evm.add129 = add i256 %evm.mload127, 4, !notdec.evm !483
-  call void @evm_mstore(ptr %mem, i256 %evm.add129, i256 32), !notdec.evm !484
+  %notdec.evm.mem.ptr.61 = inttoptr i256 %evm.add129 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.61, align 1, !notdec.evm !484
   %evm.add130 = add i256 %evm.mload127, 36, !notdec.evm !485
-  call void @evm_mstore(ptr %mem, i256 %evm.add130, i256 13), !notdec.evm !486
+  %notdec.evm.mem.ptr.62 = inttoptr i256 %evm.add130 to ptr
+  store i256 13, ptr %notdec.evm.mem.ptr.62, align 1, !notdec.evm !486
   %evm.shl131 = call i256 @evm_shl(i256 154, i256 1451974992572225450839691760981), !notdec.evm !487
   %evm.add132 = add i256 %evm.mload127, 68, !notdec.evm !488
-  call void @evm_mstore(ptr %mem, i256 %evm.add132, i256 %evm.shl131), !notdec.evm !489
+  %notdec.evm.mem.ptr.63 = inttoptr i256 %evm.add132 to ptr
+  store i256 %evm.shl131, ptr %notdec.evm.mem.ptr.63, align 1, !notdec.evm !489
   %evm.add133 = add i256 100, %evm.mload127, !notdec.evm !490
   br label %bb._0x765a, !notdec.evm !491
 
 bb._0x765a:                                       ; preds = %bb._0x1366
-  %evm.mload134 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !492
+  %notdec.evm.mem.ptr.64 = inttoptr i256 64 to ptr
+  %evm.mload134 = load i256, ptr %notdec.evm.mem.ptr.64, align 1, !notdec.evm !492
   %evm.sub135 = sub i256 %evm.add133, %evm.mload134, !notdec.evm !493
   call void @evm_revert(ptr %mem, i256 %evm.mload134, i256 %evm.sub135), !notdec.evm !494
   unreachable, !notdec.evm !494
 
 bb._0x1347:                                       ; preds = %bb._0x1316
-  %evm.mload136 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !495
+  %notdec.evm.mem.ptr.65 = inttoptr i256 64 to ptr
+  %evm.mload136 = load i256, ptr %notdec.evm.mem.ptr.65, align 1, !notdec.evm !495
   %evm.shl137 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !496
-  call void @evm_mstore(ptr %mem, i256 %evm.mload136, i256 %evm.shl137), !notdec.evm !497
+  %notdec.evm.mem.ptr.66 = inttoptr i256 %evm.mload136 to ptr
+  store i256 %evm.shl137, ptr %notdec.evm.mem.ptr.66, align 1, !notdec.evm !497
   %evm.add138 = add i256 4, %evm.mload136, !notdec.evm !498
   %private.call139 = call i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add138, i256 954553), !notdec.evm !499
   br label %bb._0xe90b9
 
 bb._0xe90b9:                                      ; preds = %bb._0x1347
-  %evm.mload140 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !500
+  %notdec.evm.mem.ptr.67 = inttoptr i256 64 to ptr
+  %evm.mload140 = load i256, ptr %notdec.evm.mem.ptr.67, align 1, !notdec.evm !500
   %evm.sub141 = sub i256 %private.call139, %evm.mload140, !notdec.evm !501
   call void @evm_revert(ptr %mem, i256 %evm.mload140, i256 %evm.sub141), !notdec.evm !502
   unreachable, !notdec.evm !502
 }
 
-define i256 @private__0x1642_0x1642(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1642arg0x0, i256 %_0x1642arg0x1, i256 %_0x1642arg0x2, i256 %_0x1642arg0x3, i256 %_0x1642arg0x4, i256 %_0x1642arg0x5, i256 %_0x1642arg0x6, i256 %_0x1642arg0x7) {
+define i256 @private__0x1642_0x1642(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1642arg0x0, i256 %_0x1642arg0x1, i256 %_0x1642arg0x2, i256 %_0x1642arg0x3, i256 %_0x1642arg0x4, i256 %_0x1642arg0x5, i256 %_0x1642arg0x6, i256 %_0x1642arg0x7) #0 {
 bb._0x1642:
   %evm.branch.cond = icmp ne i256 %_0x1642arg0x4, 0, !notdec.evm !503
   br i1 %evm.branch.cond, label %bb._0x1651, label %bb._0x164a, !notdec.evm !503
@@ -1185,17 +1250,23 @@ bb._0x169b:                                       ; preds = %bb._0x1686
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !525
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !526
   %evm.and = and i256 %evm.sub, %private.call7, !notdec.evm !527
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !528
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !529
+  %notdec.evm.mem.ptr.68 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.68, align 1, !notdec.evm !528
+  %notdec.evm.mem.ptr.69 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.69, align 1, !notdec.evm !529
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !530
   %evm.and8 = and i256 %evm.sub, %_0x1642arg0x0, !notdec.evm !531
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and8), !notdec.evm !532
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !533
+  %notdec.evm.mem.ptr.70 = inttoptr i256 0 to ptr
+  store i256 %evm.and8, ptr %notdec.evm.mem.ptr.70, align 1, !notdec.evm !532
+  %notdec.evm.mem.ptr.71 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.71, align 1, !notdec.evm !533
   %evm.sha39 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !534
   %evm.and10 = and i256 %_0x1642arg0x2, %evm.sub, !notdec.evm !535
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and10), !notdec.evm !536
+  %notdec.evm.mem.ptr.72 = inttoptr i256 0 to ptr
+  store i256 %evm.and10, ptr %notdec.evm.mem.ptr.72, align 1, !notdec.evm !536
   %evm.add11 = add i256 1, %evm.sha39, !notdec.evm !537
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add11), !notdec.evm !538
+  %notdec.evm.mem.ptr.73 = inttoptr i256 32 to ptr
+  store i256 %evm.add11, ptr %notdec.evm.mem.ptr.73, align 1, !notdec.evm !538
   %evm.sha312 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !539
   %evm.sload = call i256 @evm_sload(i256 %evm.sha312), !notdec.evm !540
   %evm.shl13 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !541
@@ -1234,17 +1305,23 @@ bb._0x175f:                                       ; preds = %bb._0x1754
   %evm.shl23 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !558
   %evm.sub24 = sub i256 %evm.shl23, 1, !notdec.evm !559
   %evm.and25 = and i256 %evm.sub24, %private.call7, !notdec.evm !560
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and25), !notdec.evm !561
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !562
+  %notdec.evm.mem.ptr.74 = inttoptr i256 0 to ptr
+  store i256 %evm.and25, ptr %notdec.evm.mem.ptr.74, align 1, !notdec.evm !561
+  %notdec.evm.mem.ptr.75 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.75, align 1, !notdec.evm !562
   %evm.sha326 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !563
   %evm.and27 = and i256 %evm.sub24, %_0x1642arg0x0, !notdec.evm !564
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and27), !notdec.evm !565
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha326), !notdec.evm !566
+  %notdec.evm.mem.ptr.76 = inttoptr i256 0 to ptr
+  store i256 %evm.and27, ptr %notdec.evm.mem.ptr.76, align 1, !notdec.evm !565
+  %notdec.evm.mem.ptr.77 = inttoptr i256 32 to ptr
+  store i256 %evm.sha326, ptr %notdec.evm.mem.ptr.77, align 1, !notdec.evm !566
   %evm.sha328 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !567
   %evm.and29 = and i256 %_0x1642arg0x2, %evm.sub24, !notdec.evm !568
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and29), !notdec.evm !569
+  %notdec.evm.mem.ptr.78 = inttoptr i256 0 to ptr
+  store i256 %evm.and29, ptr %notdec.evm.mem.ptr.78, align 1, !notdec.evm !569
   %evm.add30 = add i256 1, %evm.sha328, !notdec.evm !570
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add30), !notdec.evm !571
+  %notdec.evm.mem.ptr.79 = inttoptr i256 32 to ptr
+  store i256 %evm.add30, ptr %notdec.evm.mem.ptr.79, align 1, !notdec.evm !571
   %evm.sha331 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !572
   %evm.sload32 = call i256 @evm_sload(i256 %evm.sha331), !notdec.evm !573
   %evm.shl33 = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !574
@@ -1274,18 +1351,22 @@ bb._0x17e7:                                       ; preds = %bb._0x17d7
 
 bb._0x17f2:                                       ; preds = %bb._0x17e7
   %_0x17f2_0x0 = phi i256 [ %_0x17e7_0x0, %bb._0x17e7 ], !notdec.evm !592
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !593
+  %notdec.evm.mem.ptr.80 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.80, align 1, !notdec.evm !593
   %evm.shl43 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !594
   %evm.sub44 = sub i256 %evm.shl43, 1, !notdec.evm !595
   %evm.and45 = and i256 %evm.sub44, %_0x1642arg0x3, !notdec.evm !596
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and45), !notdec.evm !597
+  %notdec.evm.mem.ptr.81 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and45, ptr %notdec.evm.mem.ptr.81, align 1, !notdec.evm !597
   %evm.add46 = add i256 %evm.mload, 32, !notdec.evm !598
-  call void @evm_mstore(ptr %mem, i256 %evm.add46, i256 %_0x17f2_0x0), !notdec.evm !599
+  %notdec.evm.mem.ptr.82 = inttoptr i256 %evm.add46 to ptr
+  store i256 %_0x17f2_0x0, ptr %notdec.evm.mem.ptr.82, align 1, !notdec.evm !599
   %evm.and47 = and i256 %_0x1642arg0x1, %evm.sub44, !notdec.evm !600
   %evm.and48 = and i256 %evm.sub44, %_0x1642arg0x0, !notdec.evm !601
   %evm.and49 = and i256 %_0x1642arg0x2, %evm.sub44, !notdec.evm !602
   %evm.add50 = add i256 64, %evm.mload, !notdec.evm !603
-  %evm.mload51 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !604
+  %notdec.evm.mem.ptr.83 = inttoptr i256 64 to ptr
+  %evm.mload51 = load i256, ptr %notdec.evm.mem.ptr.83, align 1, !notdec.evm !604
   %evm.sub52 = sub i256 %evm.add50, %evm.mload51, !notdec.evm !605
   call void @evm_log4(ptr %mem, i256 %evm.mload51, i256 %evm.sub52, i256 -28803009399537478248617873826149267734032226468717881246643451797326201819132, i256 %evm.and49, i256 %evm.and48, i256 %evm.and47), !notdec.evm !606
   br label %bb._0xf9fde, !notdec.evm !607
@@ -1306,17 +1387,23 @@ bb._0x16f5:                                       ; preds = %bb._0x16eb
   %evm.shl53 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !614
   %evm.sub54 = sub i256 %evm.shl53, 1, !notdec.evm !615
   %evm.and55 = and i256 %private.call7, %evm.sub54, !notdec.evm !616
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and55), !notdec.evm !617
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !618
+  %notdec.evm.mem.ptr.84 = inttoptr i256 0 to ptr
+  store i256 %evm.and55, ptr %notdec.evm.mem.ptr.84, align 1, !notdec.evm !617
+  %notdec.evm.mem.ptr.85 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.85, align 1, !notdec.evm !618
   %evm.sha356 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !619
   %evm.and57 = and i256 %evm.sub54, %_0x1642arg0x0, !notdec.evm !620
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and57), !notdec.evm !621
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha356), !notdec.evm !622
+  %notdec.evm.mem.ptr.86 = inttoptr i256 0 to ptr
+  store i256 %evm.and57, ptr %notdec.evm.mem.ptr.86, align 1, !notdec.evm !621
+  %notdec.evm.mem.ptr.87 = inttoptr i256 32 to ptr
+  store i256 %evm.sha356, ptr %notdec.evm.mem.ptr.87, align 1, !notdec.evm !622
   %evm.sha358 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !623
   %evm.and59 = and i256 %_0x1642arg0x2, %evm.sub54, !notdec.evm !624
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and59), !notdec.evm !625
+  %notdec.evm.mem.ptr.88 = inttoptr i256 0 to ptr
+  store i256 %evm.and59, ptr %notdec.evm.mem.ptr.88, align 1, !notdec.evm !625
   %evm.add60 = add i256 1, %evm.sha358, !notdec.evm !626
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add60), !notdec.evm !627
+  %notdec.evm.mem.ptr.89 = inttoptr i256 32 to ptr
+  store i256 %evm.add60, ptr %notdec.evm.mem.ptr.89, align 1, !notdec.evm !627
   %evm.sha361 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !628
   %evm.sload62 = call i256 @evm_sload(i256 %evm.sha361), !notdec.evm !629
   %evm.shl63 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !630
@@ -1348,8 +1435,10 @@ bb._0x777e:                                       ; preds = %bb._0x167f
   %_0x777e_0x5 = phi i256 [ %_0x167f_0x4, %bb._0x167f ], !notdec.evm !647
   %_0x777e_0x6 = phi i256 [ %_0x167f_0x5, %bb._0x167f ], !notdec.evm !648
   %evm.shl69 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !649
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl69), !notdec.evm !650
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !651
+  %notdec.evm.mem.ptr.90 = inttoptr i256 0 to ptr
+  store i256 %evm.shl69, ptr %notdec.evm.mem.ptr.90, align 1, !notdec.evm !650
+  %notdec.evm.mem.ptr.91 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.91, align 1, !notdec.evm !651
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !652
   unreachable, !notdec.evm !652
 
@@ -1360,13 +1449,15 @@ bb._0xe9105:                                      ; preds = %bb._0x164a
   ret i256 0, !notdec.evm !654
 }
 
-define void @private__0x184f_0x184f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x184farg0x0, i256 %_0x184farg0x1, i256 %_0x184farg0x2, i256 %_0x184farg0x3, i256 %_0x184farg0x4) {
+define void @private__0x184f_0x184f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x184farg0x0, i256 %_0x184farg0x1, i256 %_0x184farg0x2, i256 %_0x184farg0x3, i256 %_0x184farg0x4) #0 {
 bb._0x184f:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !655
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !656
   %evm.and = and i256 %_0x184farg0x3, %evm.sub, !notdec.evm !657
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !658
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !659
+  %notdec.evm.mem.ptr.92 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.92, align 1, !notdec.evm !658
+  %notdec.evm.mem.ptr.93 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.93, align 1, !notdec.evm !659
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !660
   %evm.add = add i256 2, %evm.sha3, !notdec.evm !661
   %evm.sload = call i256 @evm_sload(i256 %evm.add), !notdec.evm !662
@@ -1407,20 +1498,26 @@ bb._0x18a30x184f:                                 ; preds = %bb._0x18910x184f
   %evm.shl11 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !683
   %evm.sub12 = sub i256 %evm.shl11, 1, !notdec.evm !684
   %evm.and13 = and i256 %_0x184farg0x3, %evm.sub12, !notdec.evm !685
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and13), !notdec.evm !686
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !687
+  %notdec.evm.mem.ptr.94 = inttoptr i256 0 to ptr
+  store i256 %evm.and13, ptr %notdec.evm.mem.ptr.94, align 1, !notdec.evm !686
+  %notdec.evm.mem.ptr.95 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.95, align 1, !notdec.evm !687
   %evm.sha314 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !688
   %evm.shl15 = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !689
   %evm.sub16 = sub i256 %evm.shl15, 1, !notdec.evm !690
   %evm.and17 = and i256 %_0x18a30x184f_0x0, %evm.sub16, !notdec.evm !691
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and17), !notdec.evm !692
+  %notdec.evm.mem.ptr.96 = inttoptr i256 0 to ptr
+  store i256 %evm.and17, ptr %notdec.evm.mem.ptr.96, align 1, !notdec.evm !692
   %evm.add18 = add i256 %evm.sha314, 1, !notdec.evm !693
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add18), !notdec.evm !694
+  %notdec.evm.mem.ptr.97 = inttoptr i256 32 to ptr
+  store i256 %evm.add18, ptr %notdec.evm.mem.ptr.97, align 1, !notdec.evm !694
   %evm.sha319 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !695
   %evm.sload20 = call i256 @evm_sload(i256 %evm.sha319), !notdec.evm !696
   %evm.and21 = and i256 %evm.sub12, %evm.sload20, !notdec.evm !697
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and21), !notdec.evm !698
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha314), !notdec.evm !699
+  %notdec.evm.mem.ptr.98 = inttoptr i256 0 to ptr
+  store i256 %evm.and21, ptr %notdec.evm.mem.ptr.98, align 1, !notdec.evm !698
+  %notdec.evm.mem.ptr.99 = inttoptr i256 32 to ptr
+  store i256 %evm.sha314, ptr %notdec.evm.mem.ptr.99, align 1, !notdec.evm !699
   %evm.sha322 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !700
   %private.call = call { i256, i256 } @private__0x2aa9_0x2aa9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.exp, i256 %_0x184farg0x0, i256 %evm.sha322, i256 6380), !notdec.evm !701
   %private.ret = extractvalue { i256, i256 } %private.call, 0, !notdec.evm !701
@@ -1462,18 +1559,23 @@ bb._0x19130x184f:                                 ; preds = %bb._0x190d0x184f
   %evm.shl37 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !719
   %evm.sub38 = sub i256 %evm.shl37, 1, !notdec.evm !720
   %evm.and39 = and i256 %evm.sub38, %_0x184farg0x3, !notdec.evm !721
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !722
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.ret23), !notdec.evm !723
+  %notdec.evm.mem.ptr.100 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.100, align 1, !notdec.evm !722
+  %notdec.evm.mem.ptr.101 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.ret23, ptr %notdec.evm.mem.ptr.101, align 1, !notdec.evm !723
   %evm.add40 = add i256 %evm.mload, 32, !notdec.evm !724
-  call void @evm_mstore(ptr %mem, i256 %evm.add40, i256 %private.ret23), !notdec.evm !725
+  %notdec.evm.mem.ptr.102 = inttoptr i256 %evm.add40 to ptr
+  store i256 %private.ret23, ptr %notdec.evm.mem.ptr.102, align 1, !notdec.evm !725
   %evm.add41 = add i256 %evm.mload, 64, !notdec.evm !726
-  call void @evm_mstore(ptr %mem, i256 %evm.add41, i256 %private.ret26), !notdec.evm !727
+  %notdec.evm.mem.ptr.103 = inttoptr i256 %evm.add41 to ptr
+  store i256 %private.ret26, ptr %notdec.evm.mem.ptr.103, align 1, !notdec.evm !727
   %evm.add42 = add i256 96, %evm.mload, !notdec.evm !728
   br label %bb._0x19740x184f, !notdec.evm !729
 
 bb._0x19740x184f:                                 ; preds = %bb._0x19130x184f
   %_0x19740x184f_0xb = phi i256 [ %_0x19130x184f_0x6, %bb._0x19130x184f ], !notdec.evm !730
-  %evm.mload43 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !731
+  %notdec.evm.mem.ptr.104 = inttoptr i256 64 to ptr
+  %evm.mload43 = load i256, ptr %notdec.evm.mem.ptr.104, align 1, !notdec.evm !731
   %evm.sub44 = sub i256 %evm.add42, %evm.mload43, !notdec.evm !732
   call void @evm_log4(ptr %mem, i256 %evm.mload43, i256 %evm.sub44, i256 23074986786148437592796231436663248424150072283456022866739994303455194312680, i256 %evm.and39, i256 %evm.and36, i256 %evm.and33), !notdec.evm !733
   br label %bb._0x197d0x184f, !notdec.evm !734
@@ -1490,7 +1592,7 @@ bb._0xe917d0x184f:                                ; preds = %bb._0x18880x184f
   ret void, !notdec.evm !739
 }
 
-define i256 @private__0x1999_0x1999(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1999arg0x0, i256 %_0x1999arg0x1, i256 %_0x1999arg0x2, i256 %_0x1999arg0x3) {
+define i256 @private__0x1999_0x1999(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1999arg0x0, i256 %_0x1999arg0x1, i256 %_0x1999arg0x2, i256 %_0x1999arg0x3) #0 {
 bb._0x1999:
   %evm.shl = call i256 @evm_shl(i256 64, i256 1), !notdec.evm !740
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !741
@@ -1502,12 +1604,15 @@ bb._0x1999:
   br i1 %evm.branch.cond, label %bb._0x19b3, label %bb._0x19ac, !notdec.evm !744
 
 bb._0x19b3:                                       ; preds = %bb._0x1999
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !745
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %_0x1999arg0x1), !notdec.evm !746
+  %notdec.evm.mem.ptr.105 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.105, align 1, !notdec.evm !745
+  %notdec.evm.mem.ptr.106 = inttoptr i256 %evm.mload to ptr
+  store i256 %_0x1999arg0x1, ptr %notdec.evm.mem.ptr.106, align 1, !notdec.evm !746
   %evm.mul = mul i256 32, %_0x1999arg0x1, !notdec.evm !747
   %evm.add = add i256 32, %evm.mul, !notdec.evm !748
   %evm.add2 = add i256 %evm.mload, %evm.add, !notdec.evm !749
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add2), !notdec.evm !750
+  %notdec.evm.mem.ptr.107 = inttoptr i256 64 to ptr
+  store i256 %evm.add2, ptr %notdec.evm.mem.ptr.107, align 1, !notdec.evm !750
   %evm.iszero3 = icmp eq i256 %_0x1999arg0x1, 0, !notdec.evm !751
   %evm.bool4 = zext i1 %evm.iszero3 to i256, !notdec.evm !751
   %evm.branch.cond5 = icmp ne i256 %evm.bool4, 0, !notdec.evm !752
@@ -1520,23 +1625,29 @@ bb._0x19cd:                                       ; preds = %bb._0x19b3
 bb._0x19d1:                                       ; preds = %bb._0x19fe, %bb._0x19cd
   %_0x19d1_0x0 = phi i256 [ %evm.add6, %bb._0x19cd ], [ %evm.add13, %bb._0x19fe ], !notdec.evm !755
   %_0x19d1_0x1 = phi i256 [ %_0x1999arg0x1, %bb._0x19cd ], [ %evm.sub14, %bb._0x19fe ], !notdec.evm !756
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !757
+  %notdec.evm.mem.ptr.108 = inttoptr i256 64 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.108, align 1, !notdec.evm !757
   %evm.add8 = add i256 96, %evm.mload7, !notdec.evm !758
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add8), !notdec.evm !759
+  %notdec.evm.mem.ptr.109 = inttoptr i256 64 to ptr
+  store i256 %evm.add8, ptr %notdec.evm.mem.ptr.109, align 1, !notdec.evm !759
   %evm.shl9 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !760
   %evm.sub10 = sub i256 %evm.shl9, 1, !notdec.evm !761
   %evm.and = and i256 %evm.sub10, 0, !notdec.evm !762
-  call void @evm_mstore(ptr %mem, i256 %evm.mload7, i256 %evm.and), !notdec.evm !763
+  %notdec.evm.mem.ptr.110 = inttoptr i256 %evm.mload7 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.110, align 1, !notdec.evm !763
   %evm.add11 = add i256 32, %evm.mload7, !notdec.evm !764
-  call void @evm_mstore(ptr %mem, i256 %evm.add11, i256 0), !notdec.evm !765
+  %notdec.evm.mem.ptr.111 = inttoptr i256 %evm.add11 to ptr
+  store i256 0, ptr %notdec.evm.mem.ptr.111, align 1, !notdec.evm !765
   %evm.add12 = add i256 32, %evm.add11, !notdec.evm !766
-  call void @evm_mstore(ptr %mem, i256 %evm.add12, i256 0), !notdec.evm !767
+  %notdec.evm.mem.ptr.112 = inttoptr i256 %evm.add12 to ptr
+  store i256 0, ptr %notdec.evm.mem.ptr.112, align 1, !notdec.evm !767
   br label %bb._0x19fe, !notdec.evm !768
 
 bb._0x19fe:                                       ; preds = %bb._0x19d1
   %_0x19fe_0x1 = phi i256 [ %_0x19d1_0x0, %bb._0x19d1 ], !notdec.evm !769
   %_0x19fe_0x2 = phi i256 [ %_0x19d1_0x1, %bb._0x19d1 ], !notdec.evm !770
-  call void @evm_mstore(ptr %mem, i256 %_0x19fe_0x1, i256 %evm.mload7), !notdec.evm !771
+  %notdec.evm.mem.ptr.113 = inttoptr i256 %_0x19fe_0x1 to ptr
+  store i256 %evm.mload7, ptr %notdec.evm.mem.ptr.113, align 1, !notdec.evm !771
   %evm.add13 = add i256 32, %_0x19fe_0x1, !notdec.evm !772
   %evm.sub14 = sub i256 %_0x19fe_0x2, 1, !notdec.evm !773
   %evm.branch.cond15 = icmp ne i256 %evm.sub14, 0, !notdec.evm !774
@@ -1580,7 +1691,8 @@ bb._0x1a31:                                       ; preds = %bb._0x1a20
 
 bb._0x1a46:                                       ; preds = %bb._0x1a31
   %_0x1a46_0x1 = phi i256 [ %_0x1a31_0x3, %bb._0x1a31 ], !notdec.evm !793
-  %evm.mload26 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !794
+  %notdec.evm.mem.ptr.114 = inttoptr i256 %evm.mload to ptr
+  %evm.mload26 = load i256, ptr %notdec.evm.mem.ptr.114, align 1, !notdec.evm !794
   %evm.lt27 = icmp ult i256 %_0x1a46_0x1, %evm.mload26, !notdec.evm !795
   %evm.bool28 = zext i1 %evm.lt27 to i256, !notdec.evm !795
   %evm.branch.cond29 = icmp ne i256 %evm.bool28, 0, !notdec.evm !796
@@ -1592,11 +1704,13 @@ bb._0x1a58:                                       ; preds = %bb._0x1a46
   %evm.mul30 = mul i256 32, %_0x1a58_0x0, !notdec.evm !799
   %evm.add31 = add i256 %evm.mul30, %evm.mload, !notdec.evm !800
   %evm.add32 = add i256 %evm.add31, 32, !notdec.evm !801
-  %evm.mload33 = call i256 @evm_mload(ptr %mem, i256 %evm.add32), !notdec.evm !802
+  %notdec.evm.mem.ptr.115 = inttoptr i256 %evm.add32 to ptr
+  %evm.mload33 = load i256, ptr %notdec.evm.mem.ptr.115, align 1, !notdec.evm !802
   %evm.shl34 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !803
   %evm.sub35 = sub i256 %evm.shl34, 1, !notdec.evm !804
   %evm.and36 = and i256 %private.call, %evm.sub35, !notdec.evm !805
-  call void @evm_mstore(ptr %mem, i256 %evm.mload33, i256 %evm.and36), !notdec.evm !806
+  %notdec.evm.mem.ptr.116 = inttoptr i256 %evm.mload33 to ptr
+  store i256 %evm.and36, ptr %notdec.evm.mem.ptr.116, align 1, !notdec.evm !806
   %evm.lt37 = icmp ult i256 %_0x1a58_0x3, %_0x1999arg0x1, !notdec.evm !807
   %evm.bool38 = zext i1 %evm.lt37 to i256, !notdec.evm !807
   %evm.branch.cond39 = icmp ne i256 %evm.bool38, 0, !notdec.evm !808
@@ -1613,17 +1727,21 @@ bb._0x1a82:                                       ; preds = %bb._0x1a58
 
 bb._0x1a97:                                       ; preds = %bb._0x1a82
   %_0x1a97_0x1 = phi i256 [ %_0x1a82_0x3, %bb._0x1a82 ], !notdec.evm !815
-  %evm.mload44 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !816
+  %notdec.evm.mem.ptr.117 = inttoptr i256 64 to ptr
+  %evm.mload44 = load i256, ptr %notdec.evm.mem.ptr.117, align 1, !notdec.evm !816
   %evm.shl45 = call i256 @evm_shl(i256 224, i256 184274377), !notdec.evm !817
-  call void @evm_mstore(ptr %mem, i256 %evm.mload44, i256 %evm.shl45), !notdec.evm !818
+  %notdec.evm.mem.ptr.118 = inttoptr i256 %evm.mload44 to ptr
+  store i256 %evm.shl45, ptr %notdec.evm.mem.ptr.118, align 1, !notdec.evm !818
   %evm.shl46 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !819
   %evm.sub47 = sub i256 %evm.shl46, 1, !notdec.evm !820
   %evm.and48 = and i256 %evm.sub47, %_0x1999arg0x0, !notdec.evm !821
   %evm.add49 = add i256 %evm.mload44, 4, !notdec.evm !822
-  call void @evm_mstore(ptr %mem, i256 %evm.add49, i256 %evm.and48), !notdec.evm !823
+  %notdec.evm.mem.ptr.119 = inttoptr i256 %evm.add49 to ptr
+  store i256 %evm.and48, ptr %notdec.evm.mem.ptr.119, align 1, !notdec.evm !823
   %evm.and50 = and i256 %evm.sub47, %private.call43, !notdec.evm !824
   %evm.add51 = add i256 36, %evm.mload44, !notdec.evm !825
-  %evm.mload52 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !826
+  %notdec.evm.mem.ptr.120 = inttoptr i256 64 to ptr
+  %evm.mload52 = load i256, ptr %notdec.evm.mem.ptr.120, align 1, !notdec.evm !826
   %evm.sub53 = sub i256 %evm.add51, %evm.mload52, !notdec.evm !827
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !828
   %evm.staticcall = call i256 @evm_staticcall(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas, i256 %evm.and50, i256 %evm.mload52, i256 %evm.sub53, i256 %evm.mload52, i256 64), !notdec.evm !829
@@ -1636,12 +1754,14 @@ bb._0x1a97:                                       ; preds = %bb._0x1a82
 
 bb._0x1ade:                                       ; preds = %bb._0x1a97
   %_0x1ade_0x4 = phi i256 [ %_0x1a97_0x1, %bb._0x1a97 ], !notdec.evm !833
-  %evm.mload59 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !834
+  %notdec.evm.mem.ptr.121 = inttoptr i256 64 to ptr
+  %evm.mload59 = load i256, ptr %notdec.evm.mem.ptr.121, align 1, !notdec.evm !834
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !835
   %evm.add60 = add i256 %evm.returndatasize, 31, !notdec.evm !836
   %evm.and61 = and i256 %evm.add60, -32, !notdec.evm !837
   %evm.add62 = add i256 %evm.mload59, %evm.and61, !notdec.evm !838
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add62), !notdec.evm !839
+  %notdec.evm.mem.ptr.122 = inttoptr i256 64 to ptr
+  store i256 %evm.add62, ptr %notdec.evm.mem.ptr.122, align 1, !notdec.evm !839
   %evm.add63 = add i256 %evm.mload59, %evm.returndatasize, !notdec.evm !840
   br label %bb._0x37bf, !notdec.evm !841
 
@@ -1657,14 +1777,17 @@ bb._0x37bf:                                       ; preds = %bb._0x1ade
 
 bb._0x37d2:                                       ; preds = %bb._0x37bf
   %_0x37d2_0x5 = phi i256 [ %_0x37bf_0x3, %bb._0x37bf ], !notdec.evm !847
-  %evm.mload69 = call i256 @evm_mload(ptr %mem, i256 %evm.mload59), !notdec.evm !848
+  %notdec.evm.mem.ptr.123 = inttoptr i256 %evm.mload59 to ptr
+  %evm.mload69 = load i256, ptr %notdec.evm.mem.ptr.123, align 1, !notdec.evm !848
   %evm.add70 = add i256 %evm.mload59, 32, !notdec.evm !849
-  %evm.mload71 = call i256 @evm_mload(ptr %mem, i256 %evm.add70), !notdec.evm !850
+  %notdec.evm.mem.ptr.124 = inttoptr i256 %evm.add70 to ptr
+  %evm.mload71 = load i256, ptr %notdec.evm.mem.ptr.124, align 1, !notdec.evm !850
   br label %bb._0x1b02, !notdec.evm !851
 
 bb._0x1b02:                                       ; preds = %bb._0x37d2
   %_0x1b02_0x2 = phi i256 [ %_0x37d2_0x5, %bb._0x37d2 ], !notdec.evm !852
-  %evm.mload72 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !853
+  %notdec.evm.mem.ptr.125 = inttoptr i256 %evm.mload to ptr
+  %evm.mload72 = load i256, ptr %notdec.evm.mem.ptr.125, align 1, !notdec.evm !853
   %evm.lt73 = icmp ult i256 %_0x1b02_0x2, %evm.mload72, !notdec.evm !854
   %evm.bool74 = zext i1 %evm.lt73 to i256, !notdec.evm !854
   %evm.branch.cond75 = icmp ne i256 %evm.bool74, 0, !notdec.evm !855
@@ -1676,9 +1799,11 @@ bb._0x1b14:                                       ; preds = %bb._0x1b02
   %evm.mul76 = mul i256 32, %_0x1b14_0x0, !notdec.evm !858
   %evm.add77 = add i256 32, %evm.mul76, !notdec.evm !859
   %evm.add78 = add i256 %evm.add77, %evm.mload, !notdec.evm !860
-  %evm.mload79 = call i256 @evm_mload(ptr %mem, i256 %evm.add78), !notdec.evm !861
+  %notdec.evm.mem.ptr.126 = inttoptr i256 %evm.add78 to ptr
+  %evm.mload79 = load i256, ptr %notdec.evm.mem.ptr.126, align 1, !notdec.evm !861
   %evm.add80 = add i256 32, %evm.mload79, !notdec.evm !862
-  %evm.mload81 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !863
+  %notdec.evm.mem.ptr.127 = inttoptr i256 %evm.mload to ptr
+  %evm.mload81 = load i256, ptr %notdec.evm.mem.ptr.127, align 1, !notdec.evm !863
   %evm.lt82 = icmp ult i256 %_0x1b14_0x4, %evm.mload81, !notdec.evm !864
   %evm.bool83 = zext i1 %evm.lt82 to i256, !notdec.evm !864
   %evm.branch.cond84 = icmp ne i256 %evm.bool83, 0, !notdec.evm !865
@@ -1690,10 +1815,13 @@ bb._0x1b31:                                       ; preds = %bb._0x1b14
   %evm.mul85 = mul i256 32, %_0x1b31_0x0, !notdec.evm !868
   %evm.add86 = add i256 %evm.mul85, %evm.mload, !notdec.evm !869
   %evm.add87 = add i256 %evm.add86, 32, !notdec.evm !870
-  %evm.mload88 = call i256 @evm_mload(ptr %mem, i256 %evm.add87), !notdec.evm !871
+  %notdec.evm.mem.ptr.128 = inttoptr i256 %evm.add87 to ptr
+  %evm.mload88 = load i256, ptr %notdec.evm.mem.ptr.128, align 1, !notdec.evm !871
   %evm.add89 = add i256 64, %evm.mload88, !notdec.evm !872
-  call void @evm_mstore(ptr %mem, i256 %evm.add89, i256 %evm.mload71), !notdec.evm !873
-  call void @evm_mstore(ptr %mem, i256 %evm.add80, i256 %evm.mload69), !notdec.evm !874
+  %notdec.evm.mem.ptr.129 = inttoptr i256 %evm.add89 to ptr
+  store i256 %evm.mload71, ptr %notdec.evm.mem.ptr.129, align 1, !notdec.evm !873
+  %notdec.evm.mem.ptr.130 = inttoptr i256 %evm.add80 to ptr
+  store i256 %evm.mload69, ptr %notdec.evm.mem.ptr.130, align 1, !notdec.evm !874
   %private.call90 = call i256 @private__0x3604_0x3604(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1b31_0x5, i256 6990), !notdec.evm !875
   br label %bb._0x1b4e
 
@@ -1711,8 +1839,10 @@ bb._0x78bc:                                       ; preds = %bb._0x1b2a
   %_0x78bc_0x1 = phi i256 [ %_0x1b2a_0x0, %bb._0x1b2a ], !notdec.evm !882
   %_0x78bc_0x6 = phi i256 [ %_0x1b2a_0x5, %bb._0x1b2a ], !notdec.evm !883
   %evm.shl91 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !884
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl91), !notdec.evm !885
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !886
+  %notdec.evm.mem.ptr.131 = inttoptr i256 0 to ptr
+  store i256 %evm.shl91, ptr %notdec.evm.mem.ptr.131, align 1, !notdec.evm !885
+  %notdec.evm.mem.ptr.132 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.132, align 1, !notdec.evm !886
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !887
   unreachable, !notdec.evm !887
 
@@ -1725,8 +1855,10 @@ bb._0x7887:                                       ; preds = %bb._0x1b0d
   %_0x7887_0x1 = phi i256 [ %_0x1b0d_0x0, %bb._0x1b0d ], !notdec.evm !891
   %_0x7887_0x5 = phi i256 [ %_0x1b0d_0x4, %bb._0x1b0d ], !notdec.evm !892
   %evm.shl92 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !893
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl92), !notdec.evm !894
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !895
+  %notdec.evm.mem.ptr.133 = inttoptr i256 0 to ptr
+  store i256 %evm.shl92, ptr %notdec.evm.mem.ptr.133, align 1, !notdec.evm !894
+  %notdec.evm.mem.ptr.134 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.134, align 1, !notdec.evm !895
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !896
   unreachable, !notdec.evm !896
 
@@ -1752,8 +1884,10 @@ bb._0x7852:                                       ; preds = %bb._0x1a7b
   %_0x7852_0x1 = phi i256 [ %_0x1a7b_0x0, %bb._0x1a7b ], !notdec.evm !907
   %_0x7852_0x4 = phi i256 [ %_0x1a7b_0x3, %bb._0x1a7b ], !notdec.evm !908
   %evm.shl95 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !909
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl95), !notdec.evm !910
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !911
+  %notdec.evm.mem.ptr.135 = inttoptr i256 0 to ptr
+  store i256 %evm.shl95, ptr %notdec.evm.mem.ptr.135, align 1, !notdec.evm !910
+  %notdec.evm.mem.ptr.136 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.136, align 1, !notdec.evm !911
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !912
   unreachable, !notdec.evm !912
 
@@ -1766,8 +1900,10 @@ bb._0x781d:                                       ; preds = %bb._0x1a51
   %_0x781d_0x1 = phi i256 [ %_0x1a51_0x0, %bb._0x1a51 ], !notdec.evm !916
   %_0x781d_0x4 = phi i256 [ %_0x1a51_0x3, %bb._0x1a51 ], !notdec.evm !917
   %evm.shl96 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !918
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl96), !notdec.evm !919
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !920
+  %notdec.evm.mem.ptr.137 = inttoptr i256 0 to ptr
+  store i256 %evm.shl96, ptr %notdec.evm.mem.ptr.137, align 1, !notdec.evm !919
+  %notdec.evm.mem.ptr.138 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.138, align 1, !notdec.evm !920
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !921
   unreachable, !notdec.evm !921
 
@@ -1780,8 +1916,10 @@ bb._0x77e8:                                       ; preds = %bb._0x1a2a
   %_0x77e8_0x1 = phi i256 [ %_0x1a2a_0x0, %bb._0x1a2a ], !notdec.evm !925
   %_0x77e8_0x4 = phi i256 [ %_0x1a2a_0x3, %bb._0x1a2a ], !notdec.evm !926
   %evm.shl97 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !927
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl97), !notdec.evm !928
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !929
+  %notdec.evm.mem.ptr.139 = inttoptr i256 0 to ptr
+  store i256 %evm.shl97, ptr %notdec.evm.mem.ptr.139, align 1, !notdec.evm !928
+  %notdec.evm.mem.ptr.140 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.140, align 1, !notdec.evm !929
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !930
   unreachable, !notdec.evm !930
 
@@ -1790,29 +1928,39 @@ bb._0x19ac:                                       ; preds = %bb._0x1999
 
 bb._0x77b3:                                       ; preds = %bb._0x19ac
   %evm.shl98 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !932
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl98), !notdec.evm !933
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !934
+  %notdec.evm.mem.ptr.141 = inttoptr i256 0 to ptr
+  store i256 %evm.shl98, ptr %notdec.evm.mem.ptr.141, align 1, !notdec.evm !933
+  %notdec.evm.mem.ptr.142 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.142, align 1, !notdec.evm !934
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !935
   unreachable, !notdec.evm !935
 }
 
-define i256 @private__0x1b56_0x1b56(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1b56arg0x0, i256 %_0x1b56arg0x1, i256 %_0x1b56arg0x2, i256 %_0x1b56arg0x3) {
+define i256 @private__0x1b56_0x1b56(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1b56arg0x0, i256 %_0x1b56arg0x1, i256 %_0x1b56arg0x2, i256 %_0x1b56arg0x3) #0 {
 bb._0x1b56:
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x1b56arg0x0), !notdec.evm !936
+  %notdec.evm.mem.ptr.143 = inttoptr i256 %_0x1b56arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.143, align 1, !notdec.evm !936
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !937
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !938
   %evm.and = and i256 %evm.sub, %evm.mload, !notdec.evm !939
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !940
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !941
+  %notdec.evm.mem.ptr.144 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.144, align 1, !notdec.evm !940
+  %notdec.evm.mem.ptr.145 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.145, align 1, !notdec.evm !941
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !942
   %evm.and1 = and i256 %evm.sub, %_0x1b56arg0x1, !notdec.evm !943
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and1), !notdec.evm !944
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !945
+  %notdec.evm.mem.ptr.146 = inttoptr i256 0 to ptr
+  store i256 %evm.and1, ptr %notdec.evm.mem.ptr.146, align 1, !notdec.evm !944
+  %notdec.evm.mem.ptr.147 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.147, align 1, !notdec.evm !945
   %evm.sha32 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !946
-  %evm.mload3 = call i256 @evm_mload(ptr %mem, i256 %_0x1b56arg0x0), !notdec.evm !947
+  %notdec.evm.mem.ptr.148 = inttoptr i256 %_0x1b56arg0x0 to ptr
+  %evm.mload3 = load i256, ptr %notdec.evm.mem.ptr.148, align 1, !notdec.evm !947
   %evm.and4 = and i256 %evm.sub, %evm.mload3, !notdec.evm !948
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and4), !notdec.evm !949
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !950
+  %notdec.evm.mem.ptr.149 = inttoptr i256 0 to ptr
+  store i256 %evm.and4, ptr %notdec.evm.mem.ptr.149, align 1, !notdec.evm !949
+  %notdec.evm.mem.ptr.150 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.150, align 1, !notdec.evm !950
   %evm.sha35 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !951
   %evm.add = add i256 2, %evm.sha35, !notdec.evm !952
   %evm.sload = call i256 @evm_sload(i256 %evm.add), !notdec.evm !953
@@ -1824,7 +1972,8 @@ bb._0x1b56:
 
 bb._0x1ba80x1b56:                                 ; preds = %bb._0x1b56
   %evm.add8 = add i256 64, %_0x1b56arg0x0, !notdec.evm !958
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 %evm.add8), !notdec.evm !959
+  %notdec.evm.mem.ptr.151 = inttoptr i256 %evm.add8 to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.151, align 1, !notdec.evm !959
   %private.call10 = call { i256, i256 } @private__0x1e5e_0x1e5e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %private.call, i256 %evm.mload9, i256 %evm.sha32, i256 7099), !notdec.evm !960
   %private.ret = extractvalue { i256, i256 } %private.call10, 0, !notdec.evm !960
   %private.ret11 = extractvalue { i256, i256 } %private.call10, 1, !notdec.evm !960
@@ -1832,13 +1981,16 @@ bb._0x1ba80x1b56:                                 ; preds = %bb._0x1b56
 
 bb._0x1bbb0x1b56:                                 ; preds = %bb._0x1ba80x1b56
   %evm.add12 = add i256 %_0x1b56arg0x0, 32, !notdec.evm !961
-  %evm.mload13 = call i256 @evm_mload(ptr %mem, i256 %evm.add12), !notdec.evm !962
+  %notdec.evm.mem.ptr.152 = inttoptr i256 %evm.add12 to ptr
+  %evm.mload13 = load i256, ptr %notdec.evm.mem.ptr.152, align 1, !notdec.evm !962
   %evm.shl14 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !963
   %evm.sub15 = sub i256 %evm.shl14, 1, !notdec.evm !964
   %evm.and16 = and i256 %_0x1b56arg0x2, %evm.sub15, !notdec.evm !965
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and16), !notdec.evm !966
+  %notdec.evm.mem.ptr.153 = inttoptr i256 0 to ptr
+  store i256 %evm.and16, ptr %notdec.evm.mem.ptr.153, align 1, !notdec.evm !966
   %evm.add17 = add i256 %evm.sha32, 1, !notdec.evm !967
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add17), !notdec.evm !968
+  %notdec.evm.mem.ptr.154 = inttoptr i256 32 to ptr
+  store i256 %evm.add17, ptr %notdec.evm.mem.ptr.154, align 1, !notdec.evm !968
   %evm.sha318 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !969
   %evm.sload19 = call i256 @evm_sload(i256 %evm.sha318), !notdec.evm !970
   %evm.shl20 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !971
@@ -1851,14 +2003,15 @@ bb._0xe91c90x1b56:                                ; preds = %bb._0x1bbb0x1b56
   ret i256 %private.call23, !notdec.evm !975
 }
 
-define i256 @private__0x1cff_0x1cff(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1cffarg0x0, i256 %_0x1cffarg0x1, i256 %_0x1cffarg0x2, i256 %_0x1cffarg0x3) {
+define i256 @private__0x1cff_0x1cff(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1cffarg0x0, i256 %_0x1cffarg0x1, i256 %_0x1cffarg0x2, i256 %_0x1cffarg0x3) #0 {
 bb._0x1cff:
   br label %bb._0x1d03, !notdec.evm !976
 
 bb._0x1d03:                                       ; preds = %bb._0x1e56, %bb._0x1cff
   %_0x1d03_0x0 = phi i256 [ 0, %bb._0x1cff ], [ %private.call69, %bb._0x1e56 ], !notdec.evm !977
   %_0x1d03_0x1 = phi i256 [ 0, %bb._0x1cff ], [ %_0x1e56_0x3, %bb._0x1e56 ], !notdec.evm !978
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x1cffarg0x0), !notdec.evm !979
+  %notdec.evm.mem.ptr.155 = inttoptr i256 %_0x1cffarg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.155, align 1, !notdec.evm !979
   %evm.lt = icmp ult i256 %_0x1d03_0x0, %evm.mload, !notdec.evm !980
   %evm.bool = zext i1 %evm.lt to i256, !notdec.evm !980
   %evm.iszero = icmp eq i256 %evm.bool, 0, !notdec.evm !981
@@ -1874,7 +2027,8 @@ bb._0xe91f3:                                      ; preds = %bb._0x1d03
 bb._0x1d0d:                                       ; preds = %bb._0x1d03
   %_0x1d0d_0x0 = phi i256 [ %_0x1d03_0x0, %bb._0x1d03 ], !notdec.evm !986
   %_0x1d0d_0x1 = phi i256 [ %_0x1d03_0x1, %bb._0x1d03 ], !notdec.evm !987
-  %evm.mload2 = call i256 @evm_mload(ptr %mem, i256 %_0x1cffarg0x0), !notdec.evm !988
+  %notdec.evm.mem.ptr.156 = inttoptr i256 %_0x1cffarg0x0 to ptr
+  %evm.mload2 = load i256, ptr %notdec.evm.mem.ptr.156, align 1, !notdec.evm !988
   %evm.lt3 = icmp ult i256 %_0x1d0d_0x0, %evm.mload2, !notdec.evm !989
   %evm.bool4 = zext i1 %evm.lt3 to i256, !notdec.evm !989
   %evm.branch.cond5 = icmp ne i256 %evm.bool4, 0, !notdec.evm !990
@@ -1887,9 +2041,11 @@ bb._0x1d1e:                                       ; preds = %bb._0x1d0d
   %evm.mul = mul i256 32, %_0x1d1e_0x0, !notdec.evm !994
   %evm.add = add i256 32, %evm.mul, !notdec.evm !995
   %evm.add6 = add i256 %evm.add, %_0x1cffarg0x0, !notdec.evm !996
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 %evm.add6), !notdec.evm !997
+  %notdec.evm.mem.ptr.157 = inttoptr i256 %evm.add6 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.157, align 1, !notdec.evm !997
   %evm.add8 = add i256 32, %evm.mload7, !notdec.evm !998
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 %evm.add8), !notdec.evm !999
+  %notdec.evm.mem.ptr.158 = inttoptr i256 %evm.add8 to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.158, align 1, !notdec.evm !999
   %evm.eq = icmp eq i256 0, %evm.mload9, !notdec.evm !1000
   %evm.bool10 = zext i1 %evm.eq to i256, !notdec.evm !1000
   %evm.iszero11 = icmp eq i256 %evm.bool10, 0, !notdec.evm !1001
@@ -1900,7 +2056,8 @@ bb._0x1d1e:                                       ; preds = %bb._0x1d0d
 bb._0x1dad:                                       ; preds = %bb._0x1d1e
   %_0x1dad_0x0 = phi i256 [ %_0x1d1e_0x2, %bb._0x1d1e ], !notdec.evm !1003
   %_0x1dad_0x1 = phi i256 [ %_0x1d1e_0x3, %bb._0x1d1e ], !notdec.evm !1004
-  %evm.mload14 = call i256 @evm_mload(ptr %mem, i256 %_0x1cffarg0x0), !notdec.evm !1005
+  %notdec.evm.mem.ptr.159 = inttoptr i256 %_0x1cffarg0x0 to ptr
+  %evm.mload14 = load i256, ptr %notdec.evm.mem.ptr.159, align 1, !notdec.evm !1005
   %evm.lt15 = icmp ult i256 %_0x1dad_0x0, %evm.mload14, !notdec.evm !1006
   %evm.bool16 = zext i1 %evm.lt15 to i256, !notdec.evm !1006
   %evm.branch.cond17 = icmp ne i256 %evm.bool16, 0, !notdec.evm !1007
@@ -1913,25 +2070,34 @@ bb._0x1dc3:                                       ; preds = %bb._0x1dad
   %evm.mul18 = mul i256 32, %_0x1dc3_0x0, !notdec.evm !1011
   %evm.add19 = add i256 %evm.mul18, %_0x1cffarg0x0, !notdec.evm !1012
   %evm.add20 = add i256 32, %evm.add19, !notdec.evm !1013
-  %evm.mload21 = call i256 @evm_mload(ptr %mem, i256 %evm.add20), !notdec.evm !1014
-  %evm.mload22 = call i256 @evm_mload(ptr %mem, i256 %evm.mload21), !notdec.evm !1015
+  %notdec.evm.mem.ptr.160 = inttoptr i256 %evm.add20 to ptr
+  %evm.mload21 = load i256, ptr %notdec.evm.mem.ptr.160, align 1, !notdec.evm !1014
+  %notdec.evm.mem.ptr.161 = inttoptr i256 %evm.mload21 to ptr
+  %evm.mload22 = load i256, ptr %notdec.evm.mem.ptr.161, align 1, !notdec.evm !1015
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1016
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !1017
   %evm.and = and i256 %evm.sub, %evm.mload22, !notdec.evm !1018
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !1019
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1020
+  %notdec.evm.mem.ptr.162 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.162, align 1, !notdec.evm !1019
+  %notdec.evm.mem.ptr.163 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.163, align 1, !notdec.evm !1020
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1021
   %evm.and23 = and i256 %evm.sub, %_0x1cffarg0x1, !notdec.evm !1022
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and23), !notdec.evm !1023
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !1024
+  %notdec.evm.mem.ptr.164 = inttoptr i256 0 to ptr
+  store i256 %evm.and23, ptr %notdec.evm.mem.ptr.164, align 1, !notdec.evm !1023
+  %notdec.evm.mem.ptr.165 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.165, align 1, !notdec.evm !1024
   %evm.sha324 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1025
   %evm.and25 = and i256 %_0x1cffarg0x2, %evm.sub, !notdec.evm !1026
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and25), !notdec.evm !1027
+  %notdec.evm.mem.ptr.166 = inttoptr i256 0 to ptr
+  store i256 %evm.and25, ptr %notdec.evm.mem.ptr.166, align 1, !notdec.evm !1027
   %evm.add26 = add i256 %evm.sha324, 1, !notdec.evm !1028
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add26), !notdec.evm !1029
+  %notdec.evm.mem.ptr.167 = inttoptr i256 32 to ptr
+  store i256 %evm.add26, ptr %notdec.evm.mem.ptr.167, align 1, !notdec.evm !1029
   %evm.sha327 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1030
   %evm.sload = call i256 @evm_sload(i256 %evm.sha327), !notdec.evm !1031
-  %evm.mload28 = call i256 @evm_mload(ptr %mem, i256 %_0x1cffarg0x0), !notdec.evm !1032
+  %notdec.evm.mem.ptr.168 = inttoptr i256 %_0x1cffarg0x0 to ptr
+  %evm.mload28 = load i256, ptr %notdec.evm.mem.ptr.168, align 1, !notdec.evm !1032
   %evm.shl29 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !1033
   %evm.div = call i256 @evm_div(i256 %evm.sload, i256 %evm.shl29), !notdec.evm !1034
   %evm.shl30 = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !1035
@@ -1949,7 +2115,8 @@ bb._0xe921a:                                      ; preds = %bb._0x1dc3
   %evm.mul36 = mul i256 32, %_0xe921a_0x0, !notdec.evm !1043
   %evm.add37 = add i256 32, %evm.mul36, !notdec.evm !1044
   %evm.add38 = add i256 %evm.add37, %_0x1cffarg0x0, !notdec.evm !1045
-  %evm.mload39 = call i256 @evm_mload(ptr %mem, i256 %evm.add38), !notdec.evm !1046
+  %notdec.evm.mem.ptr.169 = inttoptr i256 %evm.add38 to ptr
+  %evm.mload39 = load i256, ptr %notdec.evm.mem.ptr.169, align 1, !notdec.evm !1046
   %private.call = call i256 @private__0x1b56_0x1b56(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload39, i256 %_0x1cffarg0x1, i256 %_0x1cffarg0x2, i256 7733), !notdec.evm !1047
   br label %bb._0x1e35
 
@@ -1981,8 +2148,10 @@ bb._0x79b8:                                       ; preds = %bb._0x1e2e
   %_0x79b8_0x7 = phi i256 [ %_0x1e2e_0x6, %bb._0x1e2e ], !notdec.evm !1062
   %_0x79b8_0x8 = phi i256 [ %_0x1e2e_0x7, %bb._0x1e2e ], !notdec.evm !1063
   %evm.shl42 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1064
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl42), !notdec.evm !1065
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1066
+  %notdec.evm.mem.ptr.170 = inttoptr i256 0 to ptr
+  store i256 %evm.shl42, ptr %notdec.evm.mem.ptr.170, align 1, !notdec.evm !1065
+  %notdec.evm.mem.ptr.171 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.171, align 1, !notdec.evm !1066
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1067
   unreachable, !notdec.evm !1067
 
@@ -1997,15 +2166,18 @@ bb._0x7983:                                       ; preds = %bb._0x1dbc
   %_0x7983_0x5 = phi i256 [ %_0x1dbc_0x4, %bb._0x1dbc ], !notdec.evm !1073
   %_0x7983_0x6 = phi i256 [ %_0x1dbc_0x5, %bb._0x1dbc ], !notdec.evm !1074
   %evm.shl43 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1075
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl43), !notdec.evm !1076
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1077
+  %notdec.evm.mem.ptr.172 = inttoptr i256 0 to ptr
+  store i256 %evm.shl43, ptr %notdec.evm.mem.ptr.172, align 1, !notdec.evm !1076
+  %notdec.evm.mem.ptr.173 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.173, align 1, !notdec.evm !1077
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1078
   unreachable, !notdec.evm !1078
 
 bb._0x1d33:                                       ; preds = %bb._0x1d1e
   %_0x1d33_0x0 = phi i256 [ %_0x1d1e_0x2, %bb._0x1d1e ], !notdec.evm !1079
   %_0x1d33_0x1 = phi i256 [ %_0x1d1e_0x3, %bb._0x1d1e ], !notdec.evm !1080
-  %evm.mload44 = call i256 @evm_mload(ptr %mem, i256 %_0x1cffarg0x0), !notdec.evm !1081
+  %notdec.evm.mem.ptr.174 = inttoptr i256 %_0x1cffarg0x0 to ptr
+  %evm.mload44 = load i256, ptr %notdec.evm.mem.ptr.174, align 1, !notdec.evm !1081
   %evm.lt45 = icmp ult i256 %_0x1d33_0x0, %evm.mload44, !notdec.evm !1082
   %evm.bool46 = zext i1 %evm.lt45 to i256, !notdec.evm !1082
   %evm.branch.cond47 = icmp ne i256 %evm.bool46, 0, !notdec.evm !1083
@@ -2018,22 +2190,30 @@ bb._0x1d48:                                       ; preds = %bb._0x1d33
   %evm.mul48 = mul i256 32, %_0x1d48_0x0, !notdec.evm !1087
   %evm.add49 = add i256 %evm.mul48, %_0x1cffarg0x0, !notdec.evm !1088
   %evm.add50 = add i256 32, %evm.add49, !notdec.evm !1089
-  %evm.mload51 = call i256 @evm_mload(ptr %mem, i256 %evm.add50), !notdec.evm !1090
-  %evm.mload52 = call i256 @evm_mload(ptr %mem, i256 %evm.mload51), !notdec.evm !1091
+  %notdec.evm.mem.ptr.175 = inttoptr i256 %evm.add50 to ptr
+  %evm.mload51 = load i256, ptr %notdec.evm.mem.ptr.175, align 1, !notdec.evm !1090
+  %notdec.evm.mem.ptr.176 = inttoptr i256 %evm.mload51 to ptr
+  %evm.mload52 = load i256, ptr %notdec.evm.mem.ptr.176, align 1, !notdec.evm !1091
   %evm.shl53 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1092
   %evm.sub54 = sub i256 %evm.shl53, 1, !notdec.evm !1093
   %evm.and55 = and i256 %evm.sub54, %evm.mload52, !notdec.evm !1094
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and55), !notdec.evm !1095
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1096
+  %notdec.evm.mem.ptr.177 = inttoptr i256 0 to ptr
+  store i256 %evm.and55, ptr %notdec.evm.mem.ptr.177, align 1, !notdec.evm !1095
+  %notdec.evm.mem.ptr.178 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.178, align 1, !notdec.evm !1096
   %evm.sha356 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1097
   %evm.and57 = and i256 %evm.sub54, %_0x1cffarg0x1, !notdec.evm !1098
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and57), !notdec.evm !1099
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha356), !notdec.evm !1100
+  %notdec.evm.mem.ptr.179 = inttoptr i256 0 to ptr
+  store i256 %evm.and57, ptr %notdec.evm.mem.ptr.179, align 1, !notdec.evm !1099
+  %notdec.evm.mem.ptr.180 = inttoptr i256 32 to ptr
+  store i256 %evm.sha356, ptr %notdec.evm.mem.ptr.180, align 1, !notdec.evm !1100
   %evm.sha358 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1101
   %evm.and59 = and i256 %_0x1cffarg0x2, %evm.sub54, !notdec.evm !1102
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and59), !notdec.evm !1103
+  %notdec.evm.mem.ptr.181 = inttoptr i256 0 to ptr
+  store i256 %evm.and59, ptr %notdec.evm.mem.ptr.181, align 1, !notdec.evm !1103
   %evm.add60 = add i256 %evm.sha358, 1, !notdec.evm !1104
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add60), !notdec.evm !1105
+  %notdec.evm.mem.ptr.182 = inttoptr i256 32 to ptr
+  store i256 %evm.add60, ptr %notdec.evm.mem.ptr.182, align 1, !notdec.evm !1105
   %evm.sha361 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1106
   %evm.sload62 = call i256 @evm_sload(i256 %evm.sha361), !notdec.evm !1107
   %evm.shl63 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !1108
@@ -2072,8 +2252,10 @@ bb._0x794e:                                       ; preds = %bb._0x1d41
   %_0x794e_0x5 = phi i256 [ %_0x1d41_0x4, %bb._0x1d41 ], !notdec.evm !1129
   %_0x794e_0x6 = phi i256 [ %_0x1d41_0x5, %bb._0x1d41 ], !notdec.evm !1130
   %evm.shl70 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1131
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl70), !notdec.evm !1132
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1133
+  %notdec.evm.mem.ptr.183 = inttoptr i256 0 to ptr
+  store i256 %evm.shl70, ptr %notdec.evm.mem.ptr.183, align 1, !notdec.evm !1132
+  %notdec.evm.mem.ptr.184 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.184, align 1, !notdec.evm !1133
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1134
   unreachable, !notdec.evm !1134
 
@@ -2088,19 +2270,21 @@ bb._0x7919:                                       ; preds = %bb._0x1d17
   %_0x7919_0x3 = phi i256 [ %_0x1d17_0x2, %bb._0x1d17 ], !notdec.evm !1140
   %_0x7919_0x4 = phi i256 [ %_0x1d17_0x3, %bb._0x1d17 ], !notdec.evm !1141
   %evm.shl71 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1142
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl71), !notdec.evm !1143
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1144
+  %notdec.evm.mem.ptr.185 = inttoptr i256 0 to ptr
+  store i256 %evm.shl71, ptr %notdec.evm.mem.ptr.185, align 1, !notdec.evm !1143
+  %notdec.evm.mem.ptr.186 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.186, align 1, !notdec.evm !1144
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1145
   unreachable, !notdec.evm !1145
 }
 
-define void @public_fallback___0x1da(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_fallback___0x1da(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x1da:
   call void @evm_revert(ptr %mem, i256 0, i256 0), !notdec.evm !1146
   unreachable, !notdec.evm !1146
 }
 
-define void @public_getDistributionEnd_address_address__0x1df(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getDistributionEnd_address_address__0x1df(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x1df:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !1147
   %private.call = call { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 493), !notdec.evm !1148
@@ -2113,19 +2297,22 @@ bb._0x1ed:                                        ; preds = %bb._0x1df
   br label %bb._0x64b54
 
 bb._0x64b54:                                      ; preds = %bb._0x1ed
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1150
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.call2), !notdec.evm !1151
+  %notdec.evm.mem.ptr.187 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.187, align 1, !notdec.evm !1150
+  %notdec.evm.mem.ptr.188 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.call2, ptr %notdec.evm.mem.ptr.188, align 1, !notdec.evm !1151
   %evm.add = add i256 32, %evm.mload, !notdec.evm !1152
   br label %bb._0xfa087, !notdec.evm !1153
 
 bb._0xfa087:                                      ; preds = %bb._0x64b54
-  %evm.mload3 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1154
+  %notdec.evm.mem.ptr.189 = inttoptr i256 64 to ptr
+  %evm.mload3 = load i256, ptr %notdec.evm.mem.ptr.189, align 1, !notdec.evm !1154
   %evm.sub = sub i256 %evm.add, %evm.mload3, !notdec.evm !1155
   call void @evm_return(ptr %mem, i256 %evm.mload3, i256 %evm.sub), !notdec.evm !1156
   ret void, !notdec.evm !1156
 }
 
-define { i256, i256 } @private__0x1e5e_0x1e5e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1e5earg0x0, i256 %_0x1e5earg0x1, i256 %_0x1e5earg0x2, i256 %_0x1e5earg0x3) {
+define { i256, i256 } @private__0x1e5e_0x1e5e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1e5earg0x0, i256 %_0x1e5earg0x1, i256 %_0x1e5earg0x2, i256 %_0x1e5earg0x3) #0 {
 bb._0x1e5e:
   %evm.sload = call i256 @evm_sload(i256 %_0x1e5earg0x2), !notdec.evm !1157
   %evm.shl = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !1158
@@ -2234,13 +2421,14 @@ bb._0xe9272:                                      ; preds = %bb._0x1ebf
   ret { i256, i256 } %ret.insert32, !notdec.evm !1209
 }
 
-define void @private__0x2028_0x2028(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2028arg0x0, i256 %_0x2028arg0x1) {
+define void @private__0x2028_0x2028(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2028arg0x0, i256 %_0x2028arg0x1) #0 {
 bb._0x2028:
   br label %bb._0x202b, !notdec.evm !1210
 
 bb._0x202b:                                       ; preds = %bb._0x26b0, %bb._0x2028
   %_0x202b_0x0 = phi i256 [ 0, %bb._0x2028 ], [ %private.call412, %bb._0x26b0 ], !notdec.evm !1211
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1212
+  %notdec.evm.mem.ptr.190 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.190, align 1, !notdec.evm !1212
   %evm.lt = icmp ult i256 %_0x202b_0x0, %evm.mload, !notdec.evm !1213
   %evm.bool = zext i1 %evm.lt to i256, !notdec.evm !1213
   %evm.iszero = icmp eq i256 %evm.bool, 0, !notdec.evm !1214
@@ -2254,7 +2442,8 @@ bb._0xe9299:                                      ; preds = %bb._0x202b
 
 bb._0x2035:                                       ; preds = %bb._0x202b
   %_0x2035_0x0 = phi i256 [ %_0x202b_0x0, %bb._0x202b ], !notdec.evm !1218
-  %evm.mload2 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1219
+  %notdec.evm.mem.ptr.191 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload2 = load i256, ptr %notdec.evm.mem.ptr.191, align 1, !notdec.evm !1219
   %evm.lt3 = icmp ult i256 %_0x2035_0x0, %evm.mload2, !notdec.evm !1220
   %evm.bool4 = zext i1 %evm.lt3 to i256, !notdec.evm !1220
   %evm.branch.cond5 = icmp ne i256 %evm.bool4, 0, !notdec.evm !1221
@@ -2266,14 +2455,18 @@ bb._0x204a:                                       ; preds = %bb._0x2035
   %evm.mul = mul i256 32, %_0x204a_0x0, !notdec.evm !1224
   %evm.add = add i256 %evm.mul, %_0x2028arg0x0, !notdec.evm !1225
   %evm.add6 = add i256 32, %evm.add, !notdec.evm !1226
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 %evm.add6), !notdec.evm !1227
+  %notdec.evm.mem.ptr.192 = inttoptr i256 %evm.add6 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.192, align 1, !notdec.evm !1227
   %evm.add8 = add i256 96, %evm.mload7, !notdec.evm !1228
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 %evm.add8), !notdec.evm !1229
+  %notdec.evm.mem.ptr.193 = inttoptr i256 %evm.add8 to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.193, align 1, !notdec.evm !1229
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1230
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !1231
   %evm.and = and i256 %evm.sub, %evm.mload9, !notdec.evm !1232
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !1233
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1234
+  %notdec.evm.mem.ptr.194 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.194, align 1, !notdec.evm !1233
+  %notdec.evm.mem.ptr.195 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.195, align 1, !notdec.evm !1234
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1235
   %evm.add10 = add i256 2, %evm.sha3, !notdec.evm !1236
   %evm.sload = call i256 @evm_sload(i256 %evm.add10), !notdec.evm !1237
@@ -2285,7 +2478,8 @@ bb._0x204a:                                       ; preds = %bb._0x2035
 
 bb._0x2084:                                       ; preds = %bb._0x204a
   %_0x2084_0x0 = phi i256 [ %_0x204a_0x4, %bb._0x204a ], !notdec.evm !1242
-  %evm.mload14 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1243
+  %notdec.evm.mem.ptr.196 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload14 = load i256, ptr %notdec.evm.mem.ptr.196, align 1, !notdec.evm !1243
   %evm.lt15 = icmp ult i256 %_0x2084_0x0, %evm.mload14, !notdec.evm !1244
   %evm.bool16 = zext i1 %evm.lt15 to i256, !notdec.evm !1244
   %evm.branch.cond17 = icmp ne i256 %evm.bool16, 0, !notdec.evm !1245
@@ -2297,13 +2491,16 @@ bb._0x2097:                                       ; preds = %bb._0x2084
   %evm.mul18 = mul i256 32, %_0x2097_0x0, !notdec.evm !1248
   %evm.add19 = add i256 %evm.mul18, %_0x2028arg0x0, !notdec.evm !1249
   %evm.add20 = add i256 32, %evm.add19, !notdec.evm !1250
-  %evm.mload21 = call i256 @evm_mload(ptr %mem, i256 %evm.add20), !notdec.evm !1251
+  %notdec.evm.mem.ptr.197 = inttoptr i256 %evm.add20 to ptr
+  %evm.mload21 = load i256, ptr %notdec.evm.mem.ptr.197, align 1, !notdec.evm !1251
   %evm.add22 = add i256 96, %evm.mload21, !notdec.evm !1252
-  %evm.mload23 = call i256 @evm_mload(ptr %mem, i256 %evm.add22), !notdec.evm !1253
+  %notdec.evm.mem.ptr.198 = inttoptr i256 %evm.add22 to ptr
+  %evm.mload23 = load i256, ptr %notdec.evm.mem.ptr.198, align 1, !notdec.evm !1253
   %evm.sload24 = call i256 @evm_sload(i256 4), !notdec.evm !1254
   %evm.add25 = add i256 %evm.sload24, 1, !notdec.evm !1255
   call void @evm_sstore(i256 4, i256 %evm.add25), !notdec.evm !1256
-  call void @evm_mstore(ptr %mem, i256 0, i256 4), !notdec.evm !1257
+  %notdec.evm.mem.ptr.199 = inttoptr i256 0 to ptr
+  store i256 4, ptr %notdec.evm.mem.ptr.199, align 1, !notdec.evm !1257
   %evm.sha326 = call i256 @evm_sha3(ptr %mem, i256 0, i256 32), !notdec.evm !1258
   %evm.add27 = add i256 %evm.sha326, %evm.sload24, !notdec.evm !1259
   %evm.sload28 = call i256 @evm_sload(i256 %evm.add27), !notdec.evm !1260
@@ -2320,7 +2517,8 @@ bb._0x2097:                                       ; preds = %bb._0x2084
 
 bb._0x20d7:                                       ; preds = %bb._0x2097, %bb._0x204a
   %_0x20d7_0x0 = phi i256 [ %_0x204a_0x4, %bb._0x204a ], [ %_0x2097_0x3, %bb._0x2097 ], !notdec.evm !1271
-  %evm.mload35 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1272
+  %notdec.evm.mem.ptr.200 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload35 = load i256, ptr %notdec.evm.mem.ptr.200, align 1, !notdec.evm !1272
   %evm.lt36 = icmp ult i256 %_0x20d7_0x0, %evm.mload35, !notdec.evm !1273
   %evm.bool37 = zext i1 %evm.lt36 to i256, !notdec.evm !1273
   %evm.branch.cond38 = icmp ne i256 %evm.bool37, 0, !notdec.evm !1274
@@ -2332,17 +2530,22 @@ bb._0x20eb:                                       ; preds = %bb._0x20d7
   %evm.mul39 = mul i256 32, %_0x20eb_0x0, !notdec.evm !1277
   %evm.add40 = add i256 32, %evm.mul39, !notdec.evm !1278
   %evm.add41 = add i256 %evm.add40, %_0x2028arg0x0, !notdec.evm !1279
-  %evm.mload42 = call i256 @evm_mload(ptr %mem, i256 %evm.add41), !notdec.evm !1280
+  %notdec.evm.mem.ptr.201 = inttoptr i256 %evm.add41 to ptr
+  %evm.mload42 = load i256, ptr %notdec.evm.mem.ptr.201, align 1, !notdec.evm !1280
   %evm.add43 = add i256 96, %evm.mload42, !notdec.evm !1281
-  %evm.mload44 = call i256 @evm_mload(ptr %mem, i256 %evm.add43), !notdec.evm !1282
+  %notdec.evm.mem.ptr.202 = inttoptr i256 %evm.add43 to ptr
+  %evm.mload44 = load i256, ptr %notdec.evm.mem.ptr.202, align 1, !notdec.evm !1282
   %evm.shl45 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1283
   %evm.sub46 = sub i256 %evm.shl45, 1, !notdec.evm !1284
   %evm.and47 = and i256 %evm.sub46, %evm.mload44, !notdec.evm !1285
-  %evm.mload48 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1286
+  %notdec.evm.mem.ptr.203 = inttoptr i256 64 to ptr
+  %evm.mload48 = load i256, ptr %notdec.evm.mem.ptr.203, align 1, !notdec.evm !1286
   %evm.shl49 = call i256 @evm_shl(i256 224, i256 826074471), !notdec.evm !1287
-  call void @evm_mstore(ptr %mem, i256 %evm.mload48, i256 %evm.shl49), !notdec.evm !1288
+  %notdec.evm.mem.ptr.204 = inttoptr i256 %evm.mload48 to ptr
+  store i256 %evm.shl49, ptr %notdec.evm.mem.ptr.204, align 1, !notdec.evm !1288
   %evm.add50 = add i256 4, %evm.mload48, !notdec.evm !1289
-  %evm.mload51 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1290
+  %notdec.evm.mem.ptr.205 = inttoptr i256 64 to ptr
+  %evm.mload51 = load i256, ptr %notdec.evm.mem.ptr.205, align 1, !notdec.evm !1290
   %evm.sub52 = sub i256 %evm.add50, %evm.mload51, !notdec.evm !1291
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !1292
   %evm.staticcall = call i256 @evm_staticcall(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas, i256 %evm.and47, i256 %evm.mload51, i256 %evm.sub52, i256 %evm.mload51, i256 32), !notdec.evm !1293
@@ -2355,19 +2558,22 @@ bb._0x20eb:                                       ; preds = %bb._0x20d7
 
 bb._0x2134:                                       ; preds = %bb._0x20eb
   %_0x2134_0x5 = phi i256 [ %_0x20eb_0x3, %bb._0x20eb ], !notdec.evm !1297
-  %evm.mload58 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1298
+  %notdec.evm.mem.ptr.206 = inttoptr i256 64 to ptr
+  %evm.mload58 = load i256, ptr %notdec.evm.mem.ptr.206, align 1, !notdec.evm !1298
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !1299
   %evm.add59 = add i256 %evm.returndatasize, 31, !notdec.evm !1300
   %evm.and60 = and i256 %evm.add59, -32, !notdec.evm !1301
   %evm.add61 = add i256 %evm.mload58, %evm.and60, !notdec.evm !1302
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add61), !notdec.evm !1303
+  %notdec.evm.mem.ptr.207 = inttoptr i256 64 to ptr
+  store i256 %evm.add61, ptr %notdec.evm.mem.ptr.207, align 1, !notdec.evm !1303
   %evm.add62 = add i256 %evm.mload58, %evm.returndatasize, !notdec.evm !1304
   %private.call = call i256 @private__0x3802_0x3802(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload58, i256 %evm.add62, i256 8536), !notdec.evm !1305
   br label %bb._0x2158
 
 bb._0x2158:                                       ; preds = %bb._0x2134
   %_0x2158_0x2 = phi i256 [ %_0x2134_0x5, %bb._0x2134 ], !notdec.evm !1306
-  %evm.mload63 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1307
+  %notdec.evm.mem.ptr.208 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload63 = load i256, ptr %notdec.evm.mem.ptr.208, align 1, !notdec.evm !1307
   %evm.lt64 = icmp ult i256 %_0x2158_0x2, %evm.mload63, !notdec.evm !1308
   %evm.bool65 = zext i1 %evm.lt64 to i256, !notdec.evm !1308
   %evm.branch.cond66 = icmp ne i256 %evm.bool65, 0, !notdec.evm !1309
@@ -2379,17 +2585,21 @@ bb._0x216e:                                       ; preds = %bb._0x2158
   %evm.mul67 = mul i256 32, %_0x216e_0x0, !notdec.evm !1312
   %evm.add68 = add i256 32, %evm.mul67, !notdec.evm !1313
   %evm.add69 = add i256 %evm.add68, %_0x2028arg0x0, !notdec.evm !1314
-  %evm.mload70 = call i256 @evm_mload(ptr %mem, i256 %evm.add69), !notdec.evm !1315
+  %notdec.evm.mem.ptr.209 = inttoptr i256 %evm.add69 to ptr
+  %evm.mload70 = load i256, ptr %notdec.evm.mem.ptr.209, align 1, !notdec.evm !1315
   %evm.add71 = add i256 96, %evm.mload70, !notdec.evm !1316
-  %evm.mload72 = call i256 @evm_mload(ptr %mem, i256 %evm.add71), !notdec.evm !1317
+  %notdec.evm.mem.ptr.210 = inttoptr i256 %evm.add71 to ptr
+  %evm.mload72 = load i256, ptr %notdec.evm.mem.ptr.210, align 1, !notdec.evm !1317
   %evm.shl73 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1318
   %evm.sub74 = sub i256 %evm.shl73, 1, !notdec.evm !1319
   %evm.and75 = and i256 %evm.sub74, %evm.mload72, !notdec.evm !1320
   %evm.shl76 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1321
   %evm.sub77 = sub i256 %evm.shl76, 1, !notdec.evm !1322
   %evm.and78 = and i256 %evm.sub77, %evm.and75, !notdec.evm !1323
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and78), !notdec.evm !1324
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1325
+  %notdec.evm.mem.ptr.211 = inttoptr i256 0 to ptr
+  store i256 %evm.and78, ptr %notdec.evm.mem.ptr.211, align 1, !notdec.evm !1324
+  %notdec.evm.mem.ptr.212 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.212, align 1, !notdec.evm !1325
   %evm.sha379 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1326
   %evm.add80 = add i256 2, %evm.sha379, !notdec.evm !1327
   %evm.exp = call i256 @evm_exp(i256 256, i256 16), !notdec.evm !1328
@@ -2402,7 +2612,8 @@ bb._0x216e:                                       ; preds = %bb._0x2158
   %evm.or87 = or i256 %evm.mul86, %evm.and84, !notdec.evm !1335
   call void @evm_sstore(i256 %evm.add80, i256 %evm.or87), !notdec.evm !1336
   %evm.and88 = and i256 255, %private.call, !notdec.evm !1337
-  %evm.mload89 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1338
+  %notdec.evm.mem.ptr.213 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload89 = load i256, ptr %notdec.evm.mem.ptr.213, align 1, !notdec.evm !1338
   %evm.lt90 = icmp ult i256 %_0x216e_0x6, %evm.mload89, !notdec.evm !1339
   %evm.bool91 = zext i1 %evm.lt90 to i256, !notdec.evm !1339
   %evm.branch.cond92 = icmp ne i256 %evm.bool91, 0, !notdec.evm !1340
@@ -2414,20 +2625,25 @@ bb._0x21d1:                                       ; preds = %bb._0x216e
   %evm.mul93 = mul i256 32, %_0x21d1_0x0, !notdec.evm !1343
   %evm.add94 = add i256 32, %evm.mul93, !notdec.evm !1344
   %evm.add95 = add i256 %evm.add94, %_0x2028arg0x0, !notdec.evm !1345
-  %evm.mload96 = call i256 @evm_mload(ptr %mem, i256 %evm.add95), !notdec.evm !1346
+  %notdec.evm.mem.ptr.214 = inttoptr i256 %evm.add95 to ptr
+  %evm.mload96 = load i256, ptr %notdec.evm.mem.ptr.214, align 1, !notdec.evm !1346
   %evm.add97 = add i256 96, %evm.mload96, !notdec.evm !1347
-  %evm.mload98 = call i256 @evm_mload(ptr %mem, i256 %evm.add97), !notdec.evm !1348
+  %notdec.evm.mem.ptr.215 = inttoptr i256 %evm.add97 to ptr
+  %evm.mload98 = load i256, ptr %notdec.evm.mem.ptr.215, align 1, !notdec.evm !1348
   %evm.shl99 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1349
   %evm.sub100 = sub i256 %evm.shl99, 1, !notdec.evm !1350
   %evm.and101 = and i256 %evm.sub100, %evm.mload98, !notdec.evm !1351
   %evm.shl102 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1352
   %evm.sub103 = sub i256 %evm.shl102, 1, !notdec.evm !1353
   %evm.and104 = and i256 %evm.sub103, %evm.and101, !notdec.evm !1354
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and104), !notdec.evm !1355
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1356
+  %notdec.evm.mem.ptr.216 = inttoptr i256 0 to ptr
+  store i256 %evm.and104, ptr %notdec.evm.mem.ptr.216, align 1, !notdec.evm !1355
+  %notdec.evm.mem.ptr.217 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.217, align 1, !notdec.evm !1356
   %evm.sha3105 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1357
   %evm.add106 = add i256 0, %evm.sha3105, !notdec.evm !1358
-  %evm.mload107 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1359
+  %notdec.evm.mem.ptr.218 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload107 = load i256, ptr %notdec.evm.mem.ptr.218, align 1, !notdec.evm !1359
   %evm.lt108 = icmp ult i256 %_0x21d1_0x6, %evm.mload107, !notdec.evm !1360
   %evm.bool109 = zext i1 %evm.lt108 to i256, !notdec.evm !1360
   %evm.branch.cond110 = icmp ne i256 %evm.bool109, 0, !notdec.evm !1361
@@ -2439,14 +2655,18 @@ bb._0x2214:                                       ; preds = %bb._0x21d1
   %evm.mul111 = mul i256 32, %_0x2214_0x0, !notdec.evm !1364
   %evm.add112 = add i256 %evm.mul111, %_0x2028arg0x0, !notdec.evm !1365
   %evm.add113 = add i256 32, %evm.add112, !notdec.evm !1366
-  %evm.mload114 = call i256 @evm_mload(ptr %mem, i256 %evm.add113), !notdec.evm !1367
+  %notdec.evm.mem.ptr.219 = inttoptr i256 %evm.add113 to ptr
+  %evm.mload114 = load i256, ptr %notdec.evm.mem.ptr.219, align 1, !notdec.evm !1367
   %evm.add115 = add i256 128, %evm.mload114, !notdec.evm !1368
-  %evm.mload116 = call i256 @evm_mload(ptr %mem, i256 %evm.add115), !notdec.evm !1369
+  %notdec.evm.mem.ptr.220 = inttoptr i256 %evm.add115 to ptr
+  %evm.mload116 = load i256, ptr %notdec.evm.mem.ptr.220, align 1, !notdec.evm !1369
   %evm.shl117 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1370
   %evm.sub118 = sub i256 %evm.shl117, 1, !notdec.evm !1371
   %evm.and119 = and i256 %evm.sub118, %evm.mload116, !notdec.evm !1372
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and119), !notdec.evm !1373
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add106), !notdec.evm !1374
+  %notdec.evm.mem.ptr.221 = inttoptr i256 0 to ptr
+  store i256 %evm.and119, ptr %notdec.evm.mem.ptr.221, align 1, !notdec.evm !1373
+  %notdec.evm.mem.ptr.222 = inttoptr i256 32 to ptr
+  store i256 %evm.add106, ptr %notdec.evm.mem.ptr.222, align 1, !notdec.evm !1374
   %evm.sha3120 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1375
   %evm.sload121 = call i256 @evm_sload(i256 %evm.sha3120), !notdec.evm !1376
   %evm.shl122 = call i256 @evm_shl(i256 192, i256 1), !notdec.evm !1377
@@ -2457,7 +2677,8 @@ bb._0x2214:                                       ; preds = %bb._0x21d1
 
 bb._0x2252:                                       ; preds = %bb._0x2214
   %_0x2252_0x2 = phi i256 [ %_0x2214_0x6, %bb._0x2214 ], !notdec.evm !1381
-  %evm.mload126 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1382
+  %notdec.evm.mem.ptr.223 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload126 = load i256, ptr %notdec.evm.mem.ptr.223, align 1, !notdec.evm !1382
   %evm.lt127 = icmp ult i256 %_0x2252_0x2, %evm.mload126, !notdec.evm !1383
   %evm.bool128 = zext i1 %evm.lt127 to i256, !notdec.evm !1383
   %evm.branch.cond129 = icmp ne i256 %evm.bool128, 0, !notdec.evm !1384
@@ -2469,10 +2690,13 @@ bb._0x2263:                                       ; preds = %bb._0x2252
   %evm.mul130 = mul i256 32, %_0x2263_0x0, !notdec.evm !1387
   %evm.add131 = add i256 32, %evm.mul130, !notdec.evm !1388
   %evm.add132 = add i256 %evm.add131, %_0x2028arg0x0, !notdec.evm !1389
-  %evm.mload133 = call i256 @evm_mload(ptr %mem, i256 %evm.add132), !notdec.evm !1390
+  %notdec.evm.mem.ptr.224 = inttoptr i256 %evm.add132 to ptr
+  %evm.mload133 = load i256, ptr %notdec.evm.mem.ptr.224, align 1, !notdec.evm !1390
   %evm.add134 = add i256 128, %evm.mload133, !notdec.evm !1391
-  %evm.mload135 = call i256 @evm_mload(ptr %mem, i256 %evm.add134), !notdec.evm !1392
-  %evm.mload136 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1393
+  %notdec.evm.mem.ptr.225 = inttoptr i256 %evm.add134 to ptr
+  %evm.mload135 = load i256, ptr %notdec.evm.mem.ptr.225, align 1, !notdec.evm !1392
+  %notdec.evm.mem.ptr.226 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload136 = load i256, ptr %notdec.evm.mem.ptr.226, align 1, !notdec.evm !1393
   %evm.lt137 = icmp ult i256 %_0x2263_0x4, %evm.mload136, !notdec.evm !1394
   %evm.bool138 = zext i1 %evm.lt137 to i256, !notdec.evm !1394
   %evm.branch.cond139 = icmp ne i256 %evm.bool138, 0, !notdec.evm !1395
@@ -2484,20 +2708,25 @@ bb._0x2285:                                       ; preds = %bb._0x2263
   %evm.mul140 = mul i256 32, %_0x2285_0x0, !notdec.evm !1398
   %evm.add141 = add i256 32, %evm.mul140, !notdec.evm !1399
   %evm.add142 = add i256 %evm.add141, %_0x2028arg0x0, !notdec.evm !1400
-  %evm.mload143 = call i256 @evm_mload(ptr %mem, i256 %evm.add142), !notdec.evm !1401
+  %notdec.evm.mem.ptr.227 = inttoptr i256 %evm.add142 to ptr
+  %evm.mload143 = load i256, ptr %notdec.evm.mem.ptr.227, align 1, !notdec.evm !1401
   %evm.add144 = add i256 96, %evm.mload143, !notdec.evm !1402
-  %evm.mload145 = call i256 @evm_mload(ptr %mem, i256 %evm.add144), !notdec.evm !1403
+  %notdec.evm.mem.ptr.228 = inttoptr i256 %evm.add144 to ptr
+  %evm.mload145 = load i256, ptr %notdec.evm.mem.ptr.228, align 1, !notdec.evm !1403
   %evm.shl146 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1404
   %evm.sub147 = sub i256 %evm.shl146, 1, !notdec.evm !1405
   %evm.and148 = and i256 %evm.sub147, %evm.mload145, !notdec.evm !1406
   %evm.shl149 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1407
   %evm.sub150 = sub i256 %evm.shl149, 1, !notdec.evm !1408
   %evm.and151 = and i256 %evm.sub150, %evm.and148, !notdec.evm !1409
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and151), !notdec.evm !1410
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1411
+  %notdec.evm.mem.ptr.229 = inttoptr i256 0 to ptr
+  store i256 %evm.and151, ptr %notdec.evm.mem.ptr.229, align 1, !notdec.evm !1410
+  %notdec.evm.mem.ptr.230 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.230, align 1, !notdec.evm !1411
   %evm.sha3152 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1412
   %evm.add153 = add i256 1, %evm.sha3152, !notdec.evm !1413
-  %evm.mload154 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1414
+  %notdec.evm.mem.ptr.231 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload154 = load i256, ptr %notdec.evm.mem.ptr.231, align 1, !notdec.evm !1414
   %evm.lt155 = icmp ult i256 %_0x2285_0x7, %evm.mload154, !notdec.evm !1415
   %evm.bool156 = zext i1 %evm.lt155 to i256, !notdec.evm !1415
   %evm.branch.cond157 = icmp ne i256 %evm.bool156, 0, !notdec.evm !1416
@@ -2509,17 +2738,21 @@ bb._0x22cc:                                       ; preds = %bb._0x2285
   %evm.mul158 = mul i256 32, %_0x22cc_0x0, !notdec.evm !1419
   %evm.add159 = add i256 32, %evm.mul158, !notdec.evm !1420
   %evm.add160 = add i256 %evm.add159, %_0x2028arg0x0, !notdec.evm !1421
-  %evm.mload161 = call i256 @evm_mload(ptr %mem, i256 %evm.add160), !notdec.evm !1422
+  %notdec.evm.mem.ptr.232 = inttoptr i256 %evm.add160 to ptr
+  %evm.mload161 = load i256, ptr %notdec.evm.mem.ptr.232, align 1, !notdec.evm !1422
   %evm.add162 = add i256 96, %evm.mload161, !notdec.evm !1423
-  %evm.mload163 = call i256 @evm_mload(ptr %mem, i256 %evm.add162), !notdec.evm !1424
+  %notdec.evm.mem.ptr.233 = inttoptr i256 %evm.add162 to ptr
+  %evm.mload163 = load i256, ptr %notdec.evm.mem.ptr.233, align 1, !notdec.evm !1424
   %evm.shl164 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1425
   %evm.sub165 = sub i256 %evm.shl164, 1, !notdec.evm !1426
   %evm.and166 = and i256 %evm.sub165, %evm.mload163, !notdec.evm !1427
   %evm.shl167 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1428
   %evm.sub168 = sub i256 %evm.shl167, 1, !notdec.evm !1429
   %evm.and169 = and i256 %evm.sub168, %evm.and166, !notdec.evm !1430
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and169), !notdec.evm !1431
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1432
+  %notdec.evm.mem.ptr.234 = inttoptr i256 0 to ptr
+  store i256 %evm.and169, ptr %notdec.evm.mem.ptr.234, align 1, !notdec.evm !1431
+  %notdec.evm.mem.ptr.235 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.235, align 1, !notdec.evm !1432
   %evm.sha3170 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1433
   %evm.add171 = add i256 2, %evm.sha3170, !notdec.evm !1434
   %evm.sload172 = call i256 @evm_sload(i256 %evm.add171), !notdec.evm !1435
@@ -2534,8 +2767,10 @@ bb._0x22cc:                                       ; preds = %bb._0x2285
   %evm.shl181 = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !1444
   %evm.sub182 = sub i256 %evm.shl181, 1, !notdec.evm !1445
   %evm.and183 = and i256 %evm.sub182, %evm.and180, !notdec.evm !1446
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and183), !notdec.evm !1447
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add153), !notdec.evm !1448
+  %notdec.evm.mem.ptr.236 = inttoptr i256 0 to ptr
+  store i256 %evm.and183, ptr %notdec.evm.mem.ptr.236, align 1, !notdec.evm !1447
+  %notdec.evm.mem.ptr.237 = inttoptr i256 32 to ptr
+  store i256 %evm.add153, ptr %notdec.evm.mem.ptr.237, align 1, !notdec.evm !1448
   %evm.sha3184 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1449
   %evm.exp185 = call i256 @evm_exp(i256 256, i256 0), !notdec.evm !1450
   %evm.sload186 = call i256 @evm_sload(i256 %evm.sha3184), !notdec.evm !1451
@@ -2550,7 +2785,8 @@ bb._0x22cc:                                       ; preds = %bb._0x2285
   %evm.mul195 = mul i256 %evm.and194, %evm.exp185, !notdec.evm !1460
   %evm.or196 = or i256 %evm.mul195, %evm.and191, !notdec.evm !1461
   call void @evm_sstore(i256 %evm.sha3184, i256 %evm.or196), !notdec.evm !1462
-  %evm.mload197 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1463
+  %notdec.evm.mem.ptr.238 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload197 = load i256, ptr %notdec.evm.mem.ptr.238, align 1, !notdec.evm !1463
   %evm.lt198 = icmp ult i256 %_0x22cc_0x9, %evm.mload197, !notdec.evm !1464
   %evm.bool199 = zext i1 %evm.lt198 to i256, !notdec.evm !1464
   %evm.branch.cond200 = icmp ne i256 %evm.bool199, 0, !notdec.evm !1465
@@ -2562,14 +2798,18 @@ bb._0x2369:                                       ; preds = %bb._0x22cc
   %evm.mul201 = mul i256 32, %_0x2369_0x0, !notdec.evm !1468
   %evm.add202 = add i256 %evm.mul201, %_0x2028arg0x0, !notdec.evm !1469
   %evm.add203 = add i256 32, %evm.add202, !notdec.evm !1470
-  %evm.mload204 = call i256 @evm_mload(ptr %mem, i256 %evm.add203), !notdec.evm !1471
+  %notdec.evm.mem.ptr.239 = inttoptr i256 %evm.add203 to ptr
+  %evm.mload204 = load i256, ptr %notdec.evm.mem.ptr.239, align 1, !notdec.evm !1471
   %evm.add205 = add i256 96, %evm.mload204, !notdec.evm !1472
-  %evm.mload206 = call i256 @evm_mload(ptr %mem, i256 %evm.add205), !notdec.evm !1473
+  %notdec.evm.mem.ptr.240 = inttoptr i256 %evm.add205 to ptr
+  %evm.mload206 = load i256, ptr %notdec.evm.mem.ptr.240, align 1, !notdec.evm !1473
   %evm.shl207 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1474
   %evm.sub208 = sub i256 %evm.shl207, 1, !notdec.evm !1475
   %evm.and209 = and i256 %evm.sub208, %evm.mload206, !notdec.evm !1476
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and209), !notdec.evm !1477
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !1478
+  %notdec.evm.mem.ptr.241 = inttoptr i256 0 to ptr
+  store i256 %evm.and209, ptr %notdec.evm.mem.ptr.241, align 1, !notdec.evm !1477
+  %notdec.evm.mem.ptr.242 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.242, align 1, !notdec.evm !1478
   %evm.sha3210 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1479
   %evm.add211 = add i256 2, %evm.sha3210, !notdec.evm !1480
   %evm.sload212 = call i256 @evm_sload(i256 %evm.add211), !notdec.evm !1481
@@ -2598,7 +2838,8 @@ bb._0x23aa:                                       ; preds = %bb._0x2369
 
 bb._0x23d0:                                       ; preds = %bb._0x23aa, %bb._0x2214
   %_0x23d0_0x2 = phi i256 [ %_0x2214_0x6, %bb._0x2214 ], [ %_0x23aa_0x6, %bb._0x23aa ], !notdec.evm !1501
-  %evm.mload229 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1502
+  %notdec.evm.mem.ptr.243 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload229 = load i256, ptr %notdec.evm.mem.ptr.243, align 1, !notdec.evm !1502
   %evm.lt230 = icmp ult i256 %_0x23d0_0x2, %evm.mload229, !notdec.evm !1503
   %evm.bool231 = zext i1 %evm.lt230 to i256, !notdec.evm !1503
   %evm.branch.cond232 = icmp ne i256 %evm.bool231, 0, !notdec.evm !1504
@@ -2610,14 +2851,18 @@ bb._0x23e6:                                       ; preds = %bb._0x23d0
   %evm.mul233 = mul i256 32, %_0x23e6_0x0, !notdec.evm !1507
   %evm.add234 = add i256 %evm.mul233, %_0x2028arg0x0, !notdec.evm !1508
   %evm.add235 = add i256 32, %evm.add234, !notdec.evm !1509
-  %evm.mload236 = call i256 @evm_mload(ptr %mem, i256 %evm.add235), !notdec.evm !1510
+  %notdec.evm.mem.ptr.244 = inttoptr i256 %evm.add235 to ptr
+  %evm.mload236 = load i256, ptr %notdec.evm.mem.ptr.244, align 1, !notdec.evm !1510
   %evm.add237 = add i256 128, %evm.mload236, !notdec.evm !1511
-  %evm.mload238 = call i256 @evm_mload(ptr %mem, i256 %evm.add237), !notdec.evm !1512
+  %notdec.evm.mem.ptr.245 = inttoptr i256 %evm.add237 to ptr
+  %evm.mload238 = load i256, ptr %notdec.evm.mem.ptr.245, align 1, !notdec.evm !1512
   %evm.shl239 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1513
   %evm.sub240 = sub i256 %evm.shl239, 1, !notdec.evm !1514
   %evm.and241 = and i256 %evm.sub240, %evm.mload238, !notdec.evm !1515
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and241), !notdec.evm !1516
-  call void @evm_mstore(ptr %mem, i256 32, i256 2), !notdec.evm !1517
+  %notdec.evm.mem.ptr.246 = inttoptr i256 0 to ptr
+  store i256 %evm.and241, ptr %notdec.evm.mem.ptr.246, align 1, !notdec.evm !1516
+  %notdec.evm.mem.ptr.247 = inttoptr i256 32 to ptr
+  store i256 2, ptr %notdec.evm.mem.ptr.247, align 1, !notdec.evm !1517
   %evm.sha3242 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1518
   %evm.sload243 = call i256 @evm_sload(i256 %evm.sha3242), !notdec.evm !1519
   %evm.and244 = and i256 255, %evm.sload243, !notdec.evm !1520
@@ -2626,7 +2871,8 @@ bb._0x23e6:                                       ; preds = %bb._0x23d0
 
 bb._0x2416:                                       ; preds = %bb._0x23e6
   %_0x2416_0x2 = phi i256 [ %_0x23e6_0x6, %bb._0x23e6 ], !notdec.evm !1522
-  %evm.mload246 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1523
+  %notdec.evm.mem.ptr.248 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload246 = load i256, ptr %notdec.evm.mem.ptr.248, align 1, !notdec.evm !1523
   %evm.lt247 = icmp ult i256 %_0x2416_0x2, %evm.mload246, !notdec.evm !1524
   %evm.bool248 = zext i1 %evm.lt247 to i256, !notdec.evm !1524
   %evm.branch.cond249 = icmp ne i256 %evm.bool248, 0, !notdec.evm !1525
@@ -2638,17 +2884,21 @@ bb._0x242d:                                       ; preds = %bb._0x2416
   %evm.mul250 = mul i256 32, %_0x242d_0x0, !notdec.evm !1528
   %evm.add251 = add i256 32, %evm.mul250, !notdec.evm !1529
   %evm.add252 = add i256 %evm.add251, %_0x2028arg0x0, !notdec.evm !1530
-  %evm.mload253 = call i256 @evm_mload(ptr %mem, i256 %evm.add252), !notdec.evm !1531
+  %notdec.evm.mem.ptr.249 = inttoptr i256 %evm.add252 to ptr
+  %evm.mload253 = load i256, ptr %notdec.evm.mem.ptr.249, align 1, !notdec.evm !1531
   %evm.add254 = add i256 128, %evm.mload253, !notdec.evm !1532
-  %evm.mload255 = call i256 @evm_mload(ptr %mem, i256 %evm.add254), !notdec.evm !1533
+  %notdec.evm.mem.ptr.250 = inttoptr i256 %evm.add254 to ptr
+  %evm.mload255 = load i256, ptr %notdec.evm.mem.ptr.250, align 1, !notdec.evm !1533
   %evm.shl256 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1534
   %evm.sub257 = sub i256 %evm.shl256, 1, !notdec.evm !1535
   %evm.and258 = and i256 %evm.sub257, %evm.mload255, !notdec.evm !1536
   %evm.shl259 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1537
   %evm.sub260 = sub i256 %evm.shl259, 1, !notdec.evm !1538
   %evm.and261 = and i256 %evm.sub260, %evm.and258, !notdec.evm !1539
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and261), !notdec.evm !1540
-  call void @evm_mstore(ptr %mem, i256 32, i256 2), !notdec.evm !1541
+  %notdec.evm.mem.ptr.251 = inttoptr i256 0 to ptr
+  store i256 %evm.and261, ptr %notdec.evm.mem.ptr.251, align 1, !notdec.evm !1540
+  %notdec.evm.mem.ptr.252 = inttoptr i256 32 to ptr
+  store i256 2, ptr %notdec.evm.mem.ptr.252, align 1, !notdec.evm !1541
   %evm.sha3262 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1542
   %evm.exp263 = call i256 @evm_exp(i256 256, i256 0), !notdec.evm !1543
   %evm.sload264 = call i256 @evm_sload(i256 %evm.sha3262), !notdec.evm !1544
@@ -2658,7 +2908,8 @@ bb._0x242d:                                       ; preds = %bb._0x2416
   %evm.mul268 = mul i256 1, %evm.exp263, !notdec.evm !1548
   %evm.or269 = or i256 %evm.mul268, %evm.and267, !notdec.evm !1549
   call void @evm_sstore(i256 %evm.sha3262, i256 %evm.or269), !notdec.evm !1550
-  %evm.mload270 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1551
+  %notdec.evm.mem.ptr.253 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload270 = load i256, ptr %notdec.evm.mem.ptr.253, align 1, !notdec.evm !1551
   %evm.lt271 = icmp ult i256 %_0x242d_0x7, %evm.mload270, !notdec.evm !1552
   %evm.bool272 = zext i1 %evm.lt271 to i256, !notdec.evm !1552
   %evm.branch.cond273 = icmp ne i256 %evm.bool272, 0, !notdec.evm !1553
@@ -2670,13 +2921,16 @@ bb._0x2484:                                       ; preds = %bb._0x242d
   %evm.mul274 = mul i256 32, %_0x2484_0x0, !notdec.evm !1556
   %evm.add275 = add i256 %evm.mul274, %_0x2028arg0x0, !notdec.evm !1557
   %evm.add276 = add i256 32, %evm.add275, !notdec.evm !1558
-  %evm.mload277 = call i256 @evm_mload(ptr %mem, i256 %evm.add276), !notdec.evm !1559
+  %notdec.evm.mem.ptr.254 = inttoptr i256 %evm.add276 to ptr
+  %evm.mload277 = load i256, ptr %notdec.evm.mem.ptr.254, align 1, !notdec.evm !1559
   %evm.add278 = add i256 128, %evm.mload277, !notdec.evm !1560
-  %evm.mload279 = call i256 @evm_mload(ptr %mem, i256 %evm.add278), !notdec.evm !1561
+  %notdec.evm.mem.ptr.255 = inttoptr i256 %evm.add278 to ptr
+  %evm.mload279 = load i256, ptr %notdec.evm.mem.ptr.255, align 1, !notdec.evm !1561
   %evm.sload280 = call i256 @evm_sload(i256 3), !notdec.evm !1562
   %evm.add281 = add i256 %evm.sload280, 1, !notdec.evm !1563
   call void @evm_sstore(i256 3, i256 %evm.add281), !notdec.evm !1564
-  call void @evm_mstore(ptr %mem, i256 0, i256 3), !notdec.evm !1565
+  %notdec.evm.mem.ptr.256 = inttoptr i256 0 to ptr
+  store i256 3, ptr %notdec.evm.mem.ptr.256, align 1, !notdec.evm !1565
   %evm.sha3282 = call i256 @evm_sha3(ptr %mem, i256 0, i256 32), !notdec.evm !1566
   %evm.add283 = add i256 %evm.sha3282, %evm.sload280, !notdec.evm !1567
   %evm.sload284 = call i256 @evm_sload(i256 %evm.add283), !notdec.evm !1568
@@ -2693,7 +2947,8 @@ bb._0x2484:                                       ; preds = %bb._0x242d
 
 bb._0x24c4:                                       ; preds = %bb._0x2484, %bb._0x23e6
   %_0x24c4_0x2 = phi i256 [ %_0x23e6_0x6, %bb._0x23e6 ], [ %_0x2484_0x5, %bb._0x2484 ], !notdec.evm !1579
-  %evm.mload293 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1580
+  %notdec.evm.mem.ptr.257 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload293 = load i256, ptr %notdec.evm.mem.ptr.257, align 1, !notdec.evm !1580
   %evm.lt294 = icmp ult i256 %_0x24c4_0x2, %evm.mload293, !notdec.evm !1581
   %evm.bool295 = zext i1 %evm.lt294 to i256, !notdec.evm !1581
   %evm.branch.cond296 = icmp ne i256 %evm.bool295, 0, !notdec.evm !1582
@@ -2705,9 +2960,11 @@ bb._0x24dc:                                       ; preds = %bb._0x24c4
   %evm.mul297 = mul i256 32, %_0x24dc_0x0, !notdec.evm !1585
   %evm.add298 = add i256 32, %evm.mul297, !notdec.evm !1586
   %evm.add299 = add i256 %evm.add298, %_0x2028arg0x0, !notdec.evm !1587
-  %evm.mload300 = call i256 @evm_mload(ptr %mem, i256 %evm.add299), !notdec.evm !1588
+  %notdec.evm.mem.ptr.258 = inttoptr i256 %evm.add299 to ptr
+  %evm.mload300 = load i256, ptr %notdec.evm.mem.ptr.258, align 1, !notdec.evm !1588
   %evm.add301 = add i256 32, %evm.mload300, !notdec.evm !1589
-  %evm.mload302 = call i256 @evm_mload(ptr %mem, i256 %evm.add301), !notdec.evm !1590
+  %notdec.evm.mem.ptr.259 = inttoptr i256 %evm.add301 to ptr
+  %evm.mload302 = load i256, ptr %notdec.evm.mem.ptr.259, align 1, !notdec.evm !1590
   %private.call303 = call i256 @private__0x3781_0x3781(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 10, i256 %evm.and88, i256 955068), !notdec.evm !1591
   br label %bb._0xe92bc
 
@@ -2721,7 +2978,8 @@ bb._0xe92bc:                                      ; preds = %bb._0x24dc
 bb._0x24f5:                                       ; preds = %bb._0xe92bc
   %_0x24f5_0x5 = phi i256 [ %_0xe92bc_0x7, %bb._0xe92bc ], !notdec.evm !1594
   %evm.sload306 = call i256 @evm_sload(i256 %evm.sha3120), !notdec.evm !1595
-  %evm.mload307 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1596
+  %notdec.evm.mem.ptr.260 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload307 = load i256, ptr %notdec.evm.mem.ptr.260, align 1, !notdec.evm !1596
   %evm.shl308 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !1597
   %evm.div309 = call i256 @evm_div(i256 %evm.sload306, i256 %evm.shl308), !notdec.evm !1598
   %evm.shl310 = call i256 @evm_shl(i256 88, i256 1), !notdec.evm !1599
@@ -2741,8 +2999,10 @@ bb._0x252f:                                       ; preds = %bb._0x24f5
   %evm.mul319 = mul i256 32, %_0x252f_0x0, !notdec.evm !1609
   %evm.add320 = add i256 %evm.mul319, %_0x2028arg0x0, !notdec.evm !1610
   %evm.add321 = add i256 %evm.add320, 32, !notdec.evm !1611
-  %evm.mload322 = call i256 @evm_mload(ptr %mem, i256 %evm.add321), !notdec.evm !1612
-  %evm.mload323 = call i256 @evm_mload(ptr %mem, i256 %evm.mload322), !notdec.evm !1613
+  %notdec.evm.mem.ptr.261 = inttoptr i256 %evm.add321 to ptr
+  %evm.mload322 = load i256, ptr %notdec.evm.mem.ptr.261, align 1, !notdec.evm !1612
+  %notdec.evm.mem.ptr.262 = inttoptr i256 %evm.mload322 to ptr
+  %evm.mload323 = load i256, ptr %notdec.evm.mem.ptr.262, align 1, !notdec.evm !1613
   %evm.sload324 = call i256 @evm_sload(i256 %evm.sha3120), !notdec.evm !1614
   %evm.shl325 = call i256 @evm_shl(i256 88, i256 1), !notdec.evm !1615
   %evm.sub326 = sub i256 %evm.shl325, 1, !notdec.evm !1616
@@ -2754,7 +3014,8 @@ bb._0x252f:                                       ; preds = %bb._0x24f5
   %evm.and332 = and i256 %evm.sload324, %evm.not331, !notdec.evm !1622
   %evm.or333 = or i256 %evm.and332, %evm.mul329, !notdec.evm !1623
   call void @evm_sstore(i256 %evm.sha3120, i256 %evm.or333), !notdec.evm !1624
-  %evm.mload334 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1625
+  %notdec.evm.mem.ptr.263 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload334 = load i256, ptr %notdec.evm.mem.ptr.263, align 1, !notdec.evm !1625
   %evm.lt335 = icmp ult i256 %_0x252f_0x7, %evm.mload334, !notdec.evm !1626
   %evm.bool336 = zext i1 %evm.lt335 to i256, !notdec.evm !1626
   %evm.branch.cond337 = icmp ne i256 %evm.bool336, 0, !notdec.evm !1627
@@ -2766,9 +3027,11 @@ bb._0x2578:                                       ; preds = %bb._0x252f
   %evm.mul338 = mul i256 32, %_0x2578_0x0, !notdec.evm !1630
   %evm.add339 = add i256 %evm.mul338, %_0x2028arg0x0, !notdec.evm !1631
   %evm.add340 = add i256 %evm.add339, 32, !notdec.evm !1632
-  %evm.mload341 = call i256 @evm_mload(ptr %mem, i256 %evm.add340), !notdec.evm !1633
+  %notdec.evm.mem.ptr.264 = inttoptr i256 %evm.add340 to ptr
+  %evm.mload341 = load i256, ptr %notdec.evm.mem.ptr.264, align 1, !notdec.evm !1633
   %evm.add342 = add i256 64, %evm.mload341, !notdec.evm !1634
-  %evm.mload343 = call i256 @evm_mload(ptr %mem, i256 %evm.add342), !notdec.evm !1635
+  %notdec.evm.mem.ptr.265 = inttoptr i256 %evm.add342 to ptr
+  %evm.mload343 = load i256, ptr %notdec.evm.mem.ptr.265, align 1, !notdec.evm !1635
   %evm.sload344 = call i256 @evm_sload(i256 %evm.sha3120), !notdec.evm !1636
   %evm.and345 = and i256 %evm.mload343, 4294967295, !notdec.evm !1637
   %evm.shl346 = call i256 @evm_shl(i256 224, i256 1), !notdec.evm !1638
@@ -2778,7 +3041,8 @@ bb._0x2578:                                       ; preds = %bb._0x252f
   %evm.and350 = and i256 %evm.sload344, %evm.sub349, !notdec.evm !1642
   %evm.or351 = or i256 %evm.and350, %evm.mul347, !notdec.evm !1643
   call void @evm_sstore(i256 %evm.sha3120, i256 %evm.or351), !notdec.evm !1644
-  %evm.mload352 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1645
+  %notdec.evm.mem.ptr.266 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload352 = load i256, ptr %notdec.evm.mem.ptr.266, align 1, !notdec.evm !1645
   %evm.lt353 = icmp ult i256 %_0x2578_0x7, %evm.mload352, !notdec.evm !1646
   %evm.bool354 = zext i1 %evm.lt353 to i256, !notdec.evm !1646
   %evm.branch.cond355 = icmp ne i256 %evm.bool354, 0, !notdec.evm !1647
@@ -2790,13 +3054,16 @@ bb._0x25b9:                                       ; preds = %bb._0x2578
   %evm.mul356 = mul i256 32, %_0x25b9_0x0, !notdec.evm !1650
   %evm.add357 = add i256 32, %evm.mul356, !notdec.evm !1651
   %evm.add358 = add i256 %evm.add357, %_0x2028arg0x0, !notdec.evm !1652
-  %evm.mload359 = call i256 @evm_mload(ptr %mem, i256 %evm.add358), !notdec.evm !1653
+  %notdec.evm.mem.ptr.267 = inttoptr i256 %evm.add358 to ptr
+  %evm.mload359 = load i256, ptr %notdec.evm.mem.ptr.267, align 1, !notdec.evm !1653
   %evm.add360 = add i256 128, %evm.mload359, !notdec.evm !1654
-  %evm.mload361 = call i256 @evm_mload(ptr %mem, i256 %evm.add360), !notdec.evm !1655
+  %notdec.evm.mem.ptr.268 = inttoptr i256 %evm.add360 to ptr
+  %evm.mload361 = load i256, ptr %notdec.evm.mem.ptr.268, align 1, !notdec.evm !1655
   %evm.shl362 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1656
   %evm.sub363 = sub i256 %evm.shl362, 1, !notdec.evm !1657
   %evm.and364 = and i256 %evm.sub363, %evm.mload361, !notdec.evm !1658
-  %evm.mload365 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1659
+  %notdec.evm.mem.ptr.269 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload365 = load i256, ptr %notdec.evm.mem.ptr.269, align 1, !notdec.evm !1659
   %evm.lt366 = icmp ult i256 %_0x25b9_0x7, %evm.mload365, !notdec.evm !1660
   %evm.bool367 = zext i1 %evm.lt366 to i256, !notdec.evm !1660
   %evm.branch.cond368 = icmp ne i256 %evm.bool367, 0, !notdec.evm !1661
@@ -2808,13 +3075,16 @@ bb._0x25e0:                                       ; preds = %bb._0x25b9
   %evm.mul369 = mul i256 32, %_0x25e0_0x0, !notdec.evm !1664
   %evm.add370 = add i256 32, %evm.mul369, !notdec.evm !1665
   %evm.add371 = add i256 %evm.add370, %_0x2028arg0x0, !notdec.evm !1666
-  %evm.mload372 = call i256 @evm_mload(ptr %mem, i256 %evm.add371), !notdec.evm !1667
+  %notdec.evm.mem.ptr.270 = inttoptr i256 %evm.add371 to ptr
+  %evm.mload372 = load i256, ptr %notdec.evm.mem.ptr.270, align 1, !notdec.evm !1667
   %evm.add373 = add i256 96, %evm.mload372, !notdec.evm !1668
-  %evm.mload374 = call i256 @evm_mload(ptr %mem, i256 %evm.add373), !notdec.evm !1669
+  %notdec.evm.mem.ptr.271 = inttoptr i256 %evm.add373 to ptr
+  %evm.mload374 = load i256, ptr %notdec.evm.mem.ptr.271, align 1, !notdec.evm !1669
   %evm.shl375 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1670
   %evm.sub376 = sub i256 %evm.shl375, 1, !notdec.evm !1671
   %evm.and377 = and i256 %evm.sub376, %evm.mload374, !notdec.evm !1672
-  %evm.mload378 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1673
+  %notdec.evm.mem.ptr.272 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload378 = load i256, ptr %notdec.evm.mem.ptr.272, align 1, !notdec.evm !1673
   %evm.lt379 = icmp ult i256 %_0x25e0_0x8, %evm.mload378, !notdec.evm !1674
   %evm.bool380 = zext i1 %evm.lt379 to i256, !notdec.evm !1674
   %evm.branch.cond381 = icmp ne i256 %evm.bool380, 0, !notdec.evm !1675
@@ -2826,10 +3096,13 @@ bb._0x2629:                                       ; preds = %bb._0x25e0
   %evm.mul382 = mul i256 32, %_0x2629_0x0, !notdec.evm !1678
   %evm.add383 = add i256 32, %evm.mul382, !notdec.evm !1679
   %evm.add384 = add i256 %evm.add383, %_0x2028arg0x0, !notdec.evm !1680
-  %evm.mload385 = call i256 @evm_mload(ptr %mem, i256 %evm.add384), !notdec.evm !1681
+  %notdec.evm.mem.ptr.273 = inttoptr i256 %evm.add384 to ptr
+  %evm.mload385 = load i256, ptr %notdec.evm.mem.ptr.273, align 1, !notdec.evm !1681
   %evm.add386 = add i256 0, %evm.mload385, !notdec.evm !1682
-  %evm.mload387 = call i256 @evm_mload(ptr %mem, i256 %evm.add386), !notdec.evm !1683
-  %evm.mload388 = call i256 @evm_mload(ptr %mem, i256 %_0x2028arg0x0), !notdec.evm !1684
+  %notdec.evm.mem.ptr.274 = inttoptr i256 %evm.add386 to ptr
+  %evm.mload387 = load i256, ptr %notdec.evm.mem.ptr.274, align 1, !notdec.evm !1683
+  %notdec.evm.mem.ptr.275 = inttoptr i256 %_0x2028arg0x0 to ptr
+  %evm.mload388 = load i256, ptr %notdec.evm.mem.ptr.275, align 1, !notdec.evm !1684
   %evm.lt389 = icmp ult i256 %_0x2629_0xb, %evm.mload388, !notdec.evm !1685
   %evm.bool390 = zext i1 %evm.lt389 to i256, !notdec.evm !1685
   %evm.branch.cond391 = icmp ne i256 %evm.bool390, 0, !notdec.evm !1686
@@ -2841,31 +3114,40 @@ bb._0x2648:                                       ; preds = %bb._0x2629
   %evm.mul392 = mul i256 32, %_0x2648_0x0, !notdec.evm !1689
   %evm.add393 = add i256 32, %evm.mul392, !notdec.evm !1690
   %evm.add394 = add i256 %evm.add393, %_0x2028arg0x0, !notdec.evm !1691
-  %evm.mload395 = call i256 @evm_mload(ptr %mem, i256 %evm.add394), !notdec.evm !1692
+  %notdec.evm.mem.ptr.276 = inttoptr i256 %evm.add394 to ptr
+  %evm.mload395 = load i256, ptr %notdec.evm.mem.ptr.276, align 1, !notdec.evm !1692
   %evm.add396 = add i256 64, %evm.mload395, !notdec.evm !1693
-  %evm.mload397 = call i256 @evm_mload(ptr %mem, i256 %evm.add396), !notdec.evm !1694
-  %evm.mload398 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1695
+  %notdec.evm.mem.ptr.277 = inttoptr i256 %evm.add396 to ptr
+  %evm.mload397 = load i256, ptr %notdec.evm.mem.ptr.277, align 1, !notdec.evm !1694
+  %notdec.evm.mem.ptr.278 = inttoptr i256 64 to ptr
+  %evm.mload398 = load i256, ptr %notdec.evm.mem.ptr.278, align 1, !notdec.evm !1695
   %evm.shl399 = call i256 @evm_shl(i256 88, i256 1), !notdec.evm !1696
   %evm.sub400 = sub i256 %evm.shl399, 1, !notdec.evm !1697
   %evm.and401 = and i256 %evm.sub400, %evm.and312, !notdec.evm !1698
-  call void @evm_mstore(ptr %mem, i256 %evm.mload398, i256 %evm.and401), !notdec.evm !1699
+  %notdec.evm.mem.ptr.279 = inttoptr i256 %evm.mload398 to ptr
+  store i256 %evm.and401, ptr %notdec.evm.mem.ptr.279, align 1, !notdec.evm !1699
   %evm.and402 = and i256 %evm.sub400, %evm.mload387, !notdec.evm !1700
   %evm.add403 = add i256 %evm.mload398, 32, !notdec.evm !1701
-  call void @evm_mstore(ptr %mem, i256 %evm.add403, i256 %evm.and402), !notdec.evm !1702
+  %notdec.evm.mem.ptr.280 = inttoptr i256 %evm.add403 to ptr
+  store i256 %evm.and402, ptr %notdec.evm.mem.ptr.280, align 1, !notdec.evm !1702
   %evm.and404 = and i256 4294967295, %evm.and315, !notdec.evm !1703
   %evm.add405 = add i256 %evm.mload398, 64, !notdec.evm !1704
-  call void @evm_mstore(ptr %mem, i256 %evm.add405, i256 %evm.and404), !notdec.evm !1705
+  %notdec.evm.mem.ptr.281 = inttoptr i256 %evm.add405 to ptr
+  store i256 %evm.and404, ptr %notdec.evm.mem.ptr.281, align 1, !notdec.evm !1705
   %evm.and406 = and i256 %evm.mload397, 4294967295, !notdec.evm !1706
   %evm.add407 = add i256 %evm.mload398, 96, !notdec.evm !1707
-  call void @evm_mstore(ptr %mem, i256 %evm.add407, i256 %evm.and406), !notdec.evm !1708
+  %notdec.evm.mem.ptr.282 = inttoptr i256 %evm.add407 to ptr
+  store i256 %evm.and406, ptr %notdec.evm.mem.ptr.282, align 1, !notdec.evm !1708
   %evm.add408 = add i256 %evm.mload398, 128, !notdec.evm !1709
-  call void @evm_mstore(ptr %mem, i256 %evm.add408, i256 %private.ret305), !notdec.evm !1710
+  %notdec.evm.mem.ptr.283 = inttoptr i256 %evm.add408 to ptr
+  store i256 %private.ret305, ptr %notdec.evm.mem.ptr.283, align 1, !notdec.evm !1710
   %evm.add409 = add i256 160, %evm.mload398, !notdec.evm !1711
   br label %bb._0x2698, !notdec.evm !1712
 
 bb._0x2698:                                       ; preds = %bb._0x2648
   %_0x2698_0x9 = phi i256 [ %_0x2648_0xd, %bb._0x2648 ], !notdec.evm !1713
-  %evm.mload410 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1714
+  %notdec.evm.mem.ptr.284 = inttoptr i256 64 to ptr
+  %evm.mload410 = load i256, ptr %notdec.evm.mem.ptr.284, align 1, !notdec.evm !1714
   %evm.sub411 = sub i256 %evm.add409, %evm.mload410, !notdec.evm !1715
   call void @evm_log3(ptr %mem, i256 %evm.mload410, i256 %evm.sub411, i256 -37952818559785066389972698679369799893918124169894124196364029007910515765819, i256 %evm.and377, i256 %evm.and364), !notdec.evm !1716
   %private.call412 = call i256 @private__0x3604_0x3604(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2698_0x9, i256 9904), !notdec.evm !1717
@@ -2885,8 +3167,10 @@ bb._0x7e2c:                                       ; preds = %bb._0x2641
   %_0x7e2c_0x1 = phi i256 [ %_0x2641_0x0, %bb._0x2641 ], !notdec.evm !1724
   %_0x7e2c_0xe = phi i256 [ %_0x2641_0xd, %bb._0x2641 ], !notdec.evm !1725
   %evm.shl413 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1726
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl413), !notdec.evm !1727
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1728
+  %notdec.evm.mem.ptr.285 = inttoptr i256 0 to ptr
+  store i256 %evm.shl413, ptr %notdec.evm.mem.ptr.285, align 1, !notdec.evm !1727
+  %notdec.evm.mem.ptr.286 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.286, align 1, !notdec.evm !1728
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1729
   unreachable, !notdec.evm !1729
 
@@ -2899,8 +3183,10 @@ bb._0x7df7:                                       ; preds = %bb._0x2622
   %_0x7df7_0x1 = phi i256 [ %_0x2622_0x0, %bb._0x2622 ], !notdec.evm !1733
   %_0x7df7_0xc = phi i256 [ %_0x2622_0xb, %bb._0x2622 ], !notdec.evm !1734
   %evm.shl414 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1735
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl414), !notdec.evm !1736
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1737
+  %notdec.evm.mem.ptr.287 = inttoptr i256 0 to ptr
+  store i256 %evm.shl414, ptr %notdec.evm.mem.ptr.287, align 1, !notdec.evm !1736
+  %notdec.evm.mem.ptr.288 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.288, align 1, !notdec.evm !1737
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1738
   unreachable, !notdec.evm !1738
 
@@ -2913,8 +3199,10 @@ bb._0x7dc2:                                       ; preds = %bb._0x25d9
   %_0x7dc2_0x1 = phi i256 [ %_0x25d9_0x0, %bb._0x25d9 ], !notdec.evm !1742
   %_0x7dc2_0x9 = phi i256 [ %_0x25d9_0x8, %bb._0x25d9 ], !notdec.evm !1743
   %evm.shl415 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1744
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl415), !notdec.evm !1745
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1746
+  %notdec.evm.mem.ptr.289 = inttoptr i256 0 to ptr
+  store i256 %evm.shl415, ptr %notdec.evm.mem.ptr.289, align 1, !notdec.evm !1745
+  %notdec.evm.mem.ptr.290 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.290, align 1, !notdec.evm !1746
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1747
   unreachable, !notdec.evm !1747
 
@@ -2927,8 +3215,10 @@ bb._0x7d8d:                                       ; preds = %bb._0x25b2
   %_0x7d8d_0x1 = phi i256 [ %_0x25b2_0x0, %bb._0x25b2 ], !notdec.evm !1751
   %_0x7d8d_0x8 = phi i256 [ %_0x25b2_0x7, %bb._0x25b2 ], !notdec.evm !1752
   %evm.shl416 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1753
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl416), !notdec.evm !1754
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1755
+  %notdec.evm.mem.ptr.291 = inttoptr i256 0 to ptr
+  store i256 %evm.shl416, ptr %notdec.evm.mem.ptr.291, align 1, !notdec.evm !1754
+  %notdec.evm.mem.ptr.292 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.292, align 1, !notdec.evm !1755
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1756
   unreachable, !notdec.evm !1756
 
@@ -2941,8 +3231,10 @@ bb._0x7d58:                                       ; preds = %bb._0x2571
   %_0x7d58_0x1 = phi i256 [ %_0x2571_0x0, %bb._0x2571 ], !notdec.evm !1760
   %_0x7d58_0x8 = phi i256 [ %_0x2571_0x7, %bb._0x2571 ], !notdec.evm !1761
   %evm.shl417 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1762
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl417), !notdec.evm !1763
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1764
+  %notdec.evm.mem.ptr.293 = inttoptr i256 0 to ptr
+  store i256 %evm.shl417, ptr %notdec.evm.mem.ptr.293, align 1, !notdec.evm !1763
+  %notdec.evm.mem.ptr.294 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.294, align 1, !notdec.evm !1764
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1765
   unreachable, !notdec.evm !1765
 
@@ -2955,8 +3247,10 @@ bb._0x7d23:                                       ; preds = %bb._0x2528
   %_0x7d23_0x1 = phi i256 [ %_0x2528_0x0, %bb._0x2528 ], !notdec.evm !1769
   %_0x7d23_0x8 = phi i256 [ %_0x2528_0x7, %bb._0x2528 ], !notdec.evm !1770
   %evm.shl418 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1771
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl418), !notdec.evm !1772
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1773
+  %notdec.evm.mem.ptr.295 = inttoptr i256 0 to ptr
+  store i256 %evm.shl418, ptr %notdec.evm.mem.ptr.295, align 1, !notdec.evm !1772
+  %notdec.evm.mem.ptr.296 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.296, align 1, !notdec.evm !1773
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1774
   unreachable, !notdec.evm !1774
 
@@ -2969,8 +3263,10 @@ bb._0x7cee:                                       ; preds = %bb._0x24d5
   %_0x7cee_0x1 = phi i256 [ %_0x24d5_0x0, %bb._0x24d5 ], !notdec.evm !1778
   %_0x7cee_0x8 = phi i256 [ %_0x24d5_0x7, %bb._0x24d5 ], !notdec.evm !1779
   %evm.shl419 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1780
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl419), !notdec.evm !1781
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1782
+  %notdec.evm.mem.ptr.297 = inttoptr i256 0 to ptr
+  store i256 %evm.shl419, ptr %notdec.evm.mem.ptr.297, align 1, !notdec.evm !1781
+  %notdec.evm.mem.ptr.298 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.298, align 1, !notdec.evm !1782
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1783
   unreachable, !notdec.evm !1783
 
@@ -2983,8 +3279,10 @@ bb._0x7cb9:                                       ; preds = %bb._0x247d
   %_0x7cb9_0x1 = phi i256 [ %_0x247d_0x0, %bb._0x247d ], !notdec.evm !1787
   %_0x7cb9_0x6 = phi i256 [ %_0x247d_0x5, %bb._0x247d ], !notdec.evm !1788
   %evm.shl420 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1789
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl420), !notdec.evm !1790
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1791
+  %notdec.evm.mem.ptr.299 = inttoptr i256 0 to ptr
+  store i256 %evm.shl420, ptr %notdec.evm.mem.ptr.299, align 1, !notdec.evm !1790
+  %notdec.evm.mem.ptr.300 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.300, align 1, !notdec.evm !1791
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1792
   unreachable, !notdec.evm !1792
 
@@ -2997,8 +3295,10 @@ bb._0x7c84:                                       ; preds = %bb._0x2426
   %_0x7c84_0x1 = phi i256 [ %_0x2426_0x0, %bb._0x2426 ], !notdec.evm !1796
   %_0x7c84_0x8 = phi i256 [ %_0x2426_0x7, %bb._0x2426 ], !notdec.evm !1797
   %evm.shl421 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1798
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl421), !notdec.evm !1799
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1800
+  %notdec.evm.mem.ptr.301 = inttoptr i256 0 to ptr
+  store i256 %evm.shl421, ptr %notdec.evm.mem.ptr.301, align 1, !notdec.evm !1799
+  %notdec.evm.mem.ptr.302 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.302, align 1, !notdec.evm !1800
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1801
   unreachable, !notdec.evm !1801
 
@@ -3011,8 +3311,10 @@ bb._0x7c4f:                                       ; preds = %bb._0x23df
   %_0x7c4f_0x1 = phi i256 [ %_0x23df_0x0, %bb._0x23df ], !notdec.evm !1805
   %_0x7c4f_0x7 = phi i256 [ %_0x23df_0x6, %bb._0x23df ], !notdec.evm !1806
   %evm.shl422 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1807
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl422), !notdec.evm !1808
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1809
+  %notdec.evm.mem.ptr.303 = inttoptr i256 0 to ptr
+  store i256 %evm.shl422, ptr %notdec.evm.mem.ptr.303, align 1, !notdec.evm !1808
+  %notdec.evm.mem.ptr.304 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.304, align 1, !notdec.evm !1809
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1810
   unreachable, !notdec.evm !1810
 
@@ -3025,8 +3327,10 @@ bb._0x7c1a:                                       ; preds = %bb._0x2362
   %_0x7c1a_0x1 = phi i256 [ %_0x2362_0x0, %bb._0x2362 ], !notdec.evm !1814
   %_0x7c1a_0x7 = phi i256 [ %_0x2362_0x6, %bb._0x2362 ], !notdec.evm !1815
   %evm.shl423 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1816
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl423), !notdec.evm !1817
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1818
+  %notdec.evm.mem.ptr.305 = inttoptr i256 0 to ptr
+  store i256 %evm.shl423, ptr %notdec.evm.mem.ptr.305, align 1, !notdec.evm !1817
+  %notdec.evm.mem.ptr.306 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.306, align 1, !notdec.evm !1818
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1819
   unreachable, !notdec.evm !1819
 
@@ -3039,8 +3343,10 @@ bb._0x7be5:                                       ; preds = %bb._0x22c5
   %_0x7be5_0x1 = phi i256 [ %_0x22c5_0x0, %bb._0x22c5 ], !notdec.evm !1823
   %_0x7be5_0xa = phi i256 [ %_0x22c5_0x9, %bb._0x22c5 ], !notdec.evm !1824
   %evm.shl424 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1825
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl424), !notdec.evm !1826
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1827
+  %notdec.evm.mem.ptr.307 = inttoptr i256 0 to ptr
+  store i256 %evm.shl424, ptr %notdec.evm.mem.ptr.307, align 1, !notdec.evm !1826
+  %notdec.evm.mem.ptr.308 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.308, align 1, !notdec.evm !1827
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1828
   unreachable, !notdec.evm !1828
 
@@ -3053,8 +3359,10 @@ bb._0x7bb0:                                       ; preds = %bb._0x227e
   %_0x7bb0_0x1 = phi i256 [ %_0x227e_0x0, %bb._0x227e ], !notdec.evm !1832
   %_0x7bb0_0x8 = phi i256 [ %_0x227e_0x7, %bb._0x227e ], !notdec.evm !1833
   %evm.shl425 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1834
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl425), !notdec.evm !1835
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1836
+  %notdec.evm.mem.ptr.309 = inttoptr i256 0 to ptr
+  store i256 %evm.shl425, ptr %notdec.evm.mem.ptr.309, align 1, !notdec.evm !1835
+  %notdec.evm.mem.ptr.310 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.310, align 1, !notdec.evm !1836
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1837
   unreachable, !notdec.evm !1837
 
@@ -3067,8 +3375,10 @@ bb._0x7b7b:                                       ; preds = %bb._0x225c
   %_0x7b7b_0x1 = phi i256 [ %_0x225c_0x0, %bb._0x225c ], !notdec.evm !1841
   %_0x7b7b_0x5 = phi i256 [ %_0x225c_0x4, %bb._0x225c ], !notdec.evm !1842
   %evm.shl426 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1843
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl426), !notdec.evm !1844
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1845
+  %notdec.evm.mem.ptr.311 = inttoptr i256 0 to ptr
+  store i256 %evm.shl426, ptr %notdec.evm.mem.ptr.311, align 1, !notdec.evm !1844
+  %notdec.evm.mem.ptr.312 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.312, align 1, !notdec.evm !1845
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1846
   unreachable, !notdec.evm !1846
 
@@ -3081,8 +3391,10 @@ bb._0x7b46:                                       ; preds = %bb._0x220d
   %_0x7b46_0x1 = phi i256 [ %_0x220d_0x0, %bb._0x220d ], !notdec.evm !1850
   %_0x7b46_0x7 = phi i256 [ %_0x220d_0x6, %bb._0x220d ], !notdec.evm !1851
   %evm.shl427 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1852
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl427), !notdec.evm !1853
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1854
+  %notdec.evm.mem.ptr.313 = inttoptr i256 0 to ptr
+  store i256 %evm.shl427, ptr %notdec.evm.mem.ptr.313, align 1, !notdec.evm !1853
+  %notdec.evm.mem.ptr.314 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.314, align 1, !notdec.evm !1854
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1855
   unreachable, !notdec.evm !1855
 
@@ -3095,8 +3407,10 @@ bb._0x7b11:                                       ; preds = %bb._0x21ca
   %_0x7b11_0x1 = phi i256 [ %_0x21ca_0x0, %bb._0x21ca ], !notdec.evm !1859
   %_0x7b11_0x7 = phi i256 [ %_0x21ca_0x6, %bb._0x21ca ], !notdec.evm !1860
   %evm.shl428 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1861
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl428), !notdec.evm !1862
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1863
+  %notdec.evm.mem.ptr.315 = inttoptr i256 0 to ptr
+  store i256 %evm.shl428, ptr %notdec.evm.mem.ptr.315, align 1, !notdec.evm !1862
+  %notdec.evm.mem.ptr.316 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.316, align 1, !notdec.evm !1863
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1864
   unreachable, !notdec.evm !1864
 
@@ -3109,8 +3423,10 @@ bb._0x7adc:                                       ; preds = %bb._0x2167
   %_0x7adc_0x1 = phi i256 [ %_0x2167_0x0, %bb._0x2167 ], !notdec.evm !1868
   %_0x7adc_0x7 = phi i256 [ %_0x2167_0x6, %bb._0x2167 ], !notdec.evm !1869
   %evm.shl429 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1870
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl429), !notdec.evm !1871
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1872
+  %notdec.evm.mem.ptr.317 = inttoptr i256 0 to ptr
+  store i256 %evm.shl429, ptr %notdec.evm.mem.ptr.317, align 1, !notdec.evm !1871
+  %notdec.evm.mem.ptr.318 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.318, align 1, !notdec.evm !1872
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1873
   unreachable, !notdec.evm !1873
 
@@ -3131,8 +3447,10 @@ bb._0x7aa7:                                       ; preds = %bb._0x20e4
   %_0x7aa7_0x1 = phi i256 [ %_0x20e4_0x0, %bb._0x20e4 ], !notdec.evm !1882
   %_0x7aa7_0x4 = phi i256 [ %_0x20e4_0x3, %bb._0x20e4 ], !notdec.evm !1883
   %evm.shl432 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1884
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl432), !notdec.evm !1885
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1886
+  %notdec.evm.mem.ptr.319 = inttoptr i256 0 to ptr
+  store i256 %evm.shl432, ptr %notdec.evm.mem.ptr.319, align 1, !notdec.evm !1885
+  %notdec.evm.mem.ptr.320 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.320, align 1, !notdec.evm !1886
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1887
   unreachable, !notdec.evm !1887
 
@@ -3145,8 +3463,10 @@ bb._0x7a72:                                       ; preds = %bb._0x2090
   %_0x7a72_0x1 = phi i256 [ %_0x2090_0x0, %bb._0x2090 ], !notdec.evm !1891
   %_0x7a72_0x4 = phi i256 [ %_0x2090_0x3, %bb._0x2090 ], !notdec.evm !1892
   %evm.shl433 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1893
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl433), !notdec.evm !1894
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1895
+  %notdec.evm.mem.ptr.321 = inttoptr i256 0 to ptr
+  store i256 %evm.shl433, ptr %notdec.evm.mem.ptr.321, align 1, !notdec.evm !1894
+  %notdec.evm.mem.ptr.322 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.322, align 1, !notdec.evm !1895
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1896
   unreachable, !notdec.evm !1896
 
@@ -3159,13 +3479,15 @@ bb._0x7a3d:                                       ; preds = %bb._0x2043
   %_0x7a3d_0x1 = phi i256 [ %_0x2043_0x0, %bb._0x2043 ], !notdec.evm !1900
   %_0x7a3d_0x5 = phi i256 [ %_0x2043_0x4, %bb._0x2043 ], !notdec.evm !1901
   %evm.shl434 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !1902
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl434), !notdec.evm !1903
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !1904
+  %notdec.evm.mem.ptr.323 = inttoptr i256 0 to ptr
+  store i256 %evm.shl434, ptr %notdec.evm.mem.ptr.323, align 1, !notdec.evm !1903
+  %notdec.evm.mem.ptr.324 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.324, align 1, !notdec.evm !1904
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !1905
   unreachable, !notdec.evm !1905
 }
 
-define void @public_claimRewards_address___uint256_address_address__0x205(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_claimRewards_address___uint256_address_address__0x205(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x205:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !1906
   %private.call = call { i256, i256, i256, i256, i256 } @private__0x2f71_0x2f71(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 531), !notdec.evm !1907
@@ -3181,19 +3503,22 @@ bb._0x213:                                        ; preds = %bb._0x205
   br label %bb._0x7531c
 
 bb._0x7531c:                                      ; preds = %bb._0x213
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1909
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.call5), !notdec.evm !1910
+  %notdec.evm.mem.ptr.325 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.325, align 1, !notdec.evm !1909
+  %notdec.evm.mem.ptr.326 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.call5, ptr %notdec.evm.mem.ptr.326, align 1, !notdec.evm !1910
   %evm.add = add i256 32, %evm.mload, !notdec.evm !1911
   br label %bb._0xfa0af, !notdec.evm !1912
 
 bb._0xfa0af:                                      ; preds = %bb._0x7531c
-  %evm.mload6 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1913
+  %notdec.evm.mem.ptr.327 = inttoptr i256 64 to ptr
+  %evm.mload6 = load i256, ptr %notdec.evm.mem.ptr.327, align 1, !notdec.evm !1913
   %evm.sub = sub i256 %evm.add, %evm.mload6, !notdec.evm !1914
   call void @evm_return(ptr %mem, i256 %evm.mload6, i256 %evm.sub), !notdec.evm !1915
   ret void, !notdec.evm !1915
 }
 
-define void @public_getRewardOracle_address__0x218(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getRewardOracle_address__0x218(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x218:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !1916
   %private.call = call i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 550), !notdec.evm !1917
@@ -3203,30 +3528,35 @@ bb._0x226:                                        ; preds = %bb._0x218
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1918
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !1919
   %evm.and = and i256 %evm.sub, %private.call, !notdec.evm !1920
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !1921
-  call void @evm_mstore(ptr %mem, i256 32, i256 59), !notdec.evm !1922
+  %notdec.evm.mem.ptr.328 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.328, align 1, !notdec.evm !1921
+  %notdec.evm.mem.ptr.329 = inttoptr i256 32 to ptr
+  store i256 59, ptr %notdec.evm.mem.ptr.329, align 1, !notdec.evm !1922
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !1923
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !1924
   %evm.and1 = and i256 %evm.sload, %evm.sub, !notdec.evm !1925
   br label %bb._0x85ae4, !notdec.evm !1926
 
 bb._0x85ae4:                                      ; preds = %bb._0x226
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1927
+  %notdec.evm.mem.ptr.330 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.330, align 1, !notdec.evm !1927
   %evm.shl2 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !1928
   %evm.sub3 = sub i256 %evm.shl2, 1, !notdec.evm !1929
   %evm.and4 = and i256 %evm.and1, %evm.sub3, !notdec.evm !1930
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and4), !notdec.evm !1931
+  %notdec.evm.mem.ptr.331 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and4, ptr %notdec.evm.mem.ptr.331, align 1, !notdec.evm !1931
   %evm.add = add i256 32, %evm.mload, !notdec.evm !1932
   br label %bb._0xfa0d7, !notdec.evm !1933
 
 bb._0xfa0d7:                                      ; preds = %bb._0x85ae4
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1934
+  %notdec.evm.mem.ptr.332 = inttoptr i256 64 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.332, align 1, !notdec.evm !1934
   %evm.sub6 = sub i256 %evm.add, %evm.mload5, !notdec.evm !1935
   call void @evm_return(ptr %mem, i256 %evm.mload5, i256 %evm.sub6), !notdec.evm !1936
   ret void, !notdec.evm !1936
 }
 
-define void @public_handleAction_address_uint256_uint256__0x25c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_handleAction_address_uint256_uint256__0x25c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x25c:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !1937
   br label %bb._0x3008, !notdec.evm !1938
@@ -3262,7 +3592,7 @@ bb._0x3019:                                       ; preds = %bb._0x3008
   unreachable, !notdec.evm !1950
 }
 
-define { i256, i256 } @private__0x26b8_0x26b8(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x26b8arg0x0, i256 %_0x26b8arg0x1, i256 %_0x26b8arg0x2, i256 %_0x26b8arg0x3, i256 %_0x26b8arg0x4, i256 %_0x26b8arg0x5) {
+define { i256, i256 } @private__0x26b8_0x26b8(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x26b8arg0x0, i256 %_0x26b8arg0x1, i256 %_0x26b8arg0x2, i256 %_0x26b8arg0x3, i256 %_0x26b8arg0x4, i256 %_0x26b8arg0x5) #0 {
 bb._0x26b8:
   %evm.sload = call i256 @evm_sload(i256 3), !notdec.evm !1951
   %evm.shl = call i256 @evm_shl(i256 64, i256 1), !notdec.evm !1952
@@ -3275,12 +3605,15 @@ bb._0x26b8:
   br i1 %evm.branch.cond, label %bb._0x26d8, label %bb._0x26d1, !notdec.evm !1956
 
 bb._0x26d8:                                       ; preds = %bb._0x26b8
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1957
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.sload), !notdec.evm !1958
+  %notdec.evm.mem.ptr.333 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.333, align 1, !notdec.evm !1957
+  %notdec.evm.mem.ptr.334 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.sload, ptr %notdec.evm.mem.ptr.334, align 1, !notdec.evm !1958
   %evm.mul = mul i256 32, %evm.sload, !notdec.evm !1959
   %evm.add = add i256 32, %evm.mul, !notdec.evm !1960
   %evm.add2 = add i256 %evm.mload, %evm.add, !notdec.evm !1961
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add2), !notdec.evm !1962
+  %notdec.evm.mem.ptr.335 = inttoptr i256 64 to ptr
+  store i256 %evm.add2, ptr %notdec.evm.mem.ptr.335, align 1, !notdec.evm !1962
   %evm.iszero3 = icmp eq i256 %evm.sload, 0, !notdec.evm !1963
   %evm.bool4 = zext i1 %evm.iszero3 to i256, !notdec.evm !1963
   %evm.branch.cond5 = icmp ne i256 %evm.bool4, 0, !notdec.evm !1964
@@ -3306,12 +3639,15 @@ bb._0x2701:                                       ; preds = %bb._0x26f2, %bb._0x
   br i1 %evm.branch.cond15, label %bb._0x271c, label %bb._0x2715, !notdec.evm !1976
 
 bb._0x271c:                                       ; preds = %bb._0x2701
-  %evm.mload16 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !1977
-  call void @evm_mstore(ptr %mem, i256 %evm.mload16, i256 %evm.sload), !notdec.evm !1978
+  %notdec.evm.mem.ptr.336 = inttoptr i256 64 to ptr
+  %evm.mload16 = load i256, ptr %notdec.evm.mem.ptr.336, align 1, !notdec.evm !1977
+  %notdec.evm.mem.ptr.337 = inttoptr i256 %evm.mload16 to ptr
+  store i256 %evm.sload, ptr %notdec.evm.mem.ptr.337, align 1, !notdec.evm !1978
   %evm.mul17 = mul i256 32, %evm.sload, !notdec.evm !1979
   %evm.add18 = add i256 32, %evm.mul17, !notdec.evm !1980
   %evm.add19 = add i256 %evm.mload16, %evm.add18, !notdec.evm !1981
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add19), !notdec.evm !1982
+  %notdec.evm.mem.ptr.338 = inttoptr i256 64 to ptr
+  store i256 %evm.add19, ptr %notdec.evm.mem.ptr.338, align 1, !notdec.evm !1982
   %evm.iszero20 = icmp eq i256 %evm.sload, 0, !notdec.evm !1983
   %evm.bool21 = zext i1 %evm.iszero20 to i256, !notdec.evm !1983
   %evm.branch.cond22 = icmp ne i256 %evm.bool21, 0, !notdec.evm !1984
@@ -3367,7 +3703,8 @@ bb._0x2a9d:                                       ; preds = %bb._0x29a9
 
 bb._0x29b2:                                       ; preds = %bb._0x29a9
   %_0x29b2_0x0 = phi i256 [ %_0x29a9_0x0, %bb._0x29a9 ], !notdec.evm !2007
-  %evm.mload37 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !2008
+  %notdec.evm.mem.ptr.339 = inttoptr i256 %evm.mload to ptr
+  %evm.mload37 = load i256, ptr %notdec.evm.mem.ptr.339, align 1, !notdec.evm !2008
   %evm.lt38 = icmp ult i256 %_0x29b2_0x0, %evm.mload37, !notdec.evm !2009
   %evm.bool39 = zext i1 %evm.lt38 to i256, !notdec.evm !2009
   %evm.branch.cond40 = icmp ne i256 %evm.bool39, 0, !notdec.evm !2010
@@ -3379,8 +3716,10 @@ bb._0x29c7:                                       ; preds = %bb._0x29b2
   %evm.mul41 = mul i256 32, %_0x29c7_0x0, !notdec.evm !2013
   %evm.add42 = add i256 32, %evm.mul41, !notdec.evm !2014
   %evm.add43 = add i256 %evm.add42, %evm.mload, !notdec.evm !2015
-  %evm.mload44 = call i256 @evm_mload(ptr %mem, i256 %evm.add43), !notdec.evm !2016
-  %evm.mload45 = call i256 @evm_mload(ptr %mem, i256 %evm.mload16), !notdec.evm !2017
+  %notdec.evm.mem.ptr.340 = inttoptr i256 %evm.add43 to ptr
+  %evm.mload44 = load i256, ptr %notdec.evm.mem.ptr.340, align 1, !notdec.evm !2016
+  %notdec.evm.mem.ptr.341 = inttoptr i256 %evm.mload16 to ptr
+  %evm.mload45 = load i256, ptr %notdec.evm.mem.ptr.341, align 1, !notdec.evm !2017
   %evm.lt46 = icmp ult i256 %_0x29c7_0x4, %evm.mload45, !notdec.evm !2018
   %evm.bool47 = zext i1 %evm.lt46 to i256, !notdec.evm !2018
   %evm.branch.cond48 = icmp ne i256 %evm.bool47, 0, !notdec.evm !2019
@@ -3392,7 +3731,8 @@ bb._0x29e1:                                       ; preds = %bb._0x29c7
   %evm.mul49 = mul i256 32, %_0x29e1_0x0, !notdec.evm !2022
   %evm.add50 = add i256 32, %evm.mul49, !notdec.evm !2023
   %evm.add51 = add i256 %evm.add50, %evm.mload16, !notdec.evm !2024
-  %evm.mload52 = call i256 @evm_mload(ptr %mem, i256 %evm.add51), !notdec.evm !2025
+  %notdec.evm.mem.ptr.342 = inttoptr i256 %evm.add51 to ptr
+  %evm.mload52 = load i256, ptr %notdec.evm.mem.ptr.342, align 1, !notdec.evm !2025
   br label %bb._0x2c840x26b8, !notdec.evm !2026
 
 bb._0x2c840x26b8:                                 ; preds = %bb._0x29e1
@@ -3400,23 +3740,31 @@ bb._0x2c840x26b8:                                 ; preds = %bb._0x29e1
   %evm.shl53 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2028
   %evm.sub54 = sub i256 %evm.shl53, 1, !notdec.evm !2029
   %evm.and = and i256 %evm.sub54, %evm.mload44, !notdec.evm !2030
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !2031
-  call void @evm_mstore(ptr %mem, i256 32, i256 58), !notdec.evm !2032
+  %notdec.evm.mem.ptr.343 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.343, align 1, !notdec.evm !2031
+  %notdec.evm.mem.ptr.344 = inttoptr i256 32 to ptr
+  store i256 58, ptr %notdec.evm.mem.ptr.344, align 1, !notdec.evm !2032
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2033
   %evm.sload55 = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !2034
-  %evm.mload56 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2035
+  %notdec.evm.mem.ptr.345 = inttoptr i256 64 to ptr
+  %evm.mload56 = load i256, ptr %notdec.evm.mem.ptr.345, align 1, !notdec.evm !2035
   %evm.shl57 = call i256 @evm_shl(i256 225, i256 190799041), !notdec.evm !2036
-  call void @evm_mstore(ptr %mem, i256 %evm.mload56, i256 %evm.shl57), !notdec.evm !2037
+  %notdec.evm.mem.ptr.346 = inttoptr i256 %evm.mload56 to ptr
+  store i256 %evm.shl57, ptr %notdec.evm.mem.ptr.346, align 1, !notdec.evm !2037
   %evm.and58 = and i256 %evm.sub54, %_0x26b8arg0x0, !notdec.evm !2038
   %evm.add59 = add i256 %evm.mload56, 4, !notdec.evm !2039
-  call void @evm_mstore(ptr %mem, i256 %evm.add59, i256 %evm.and58), !notdec.evm !2040
+  %notdec.evm.mem.ptr.347 = inttoptr i256 %evm.add59 to ptr
+  store i256 %evm.and58, ptr %notdec.evm.mem.ptr.347, align 1, !notdec.evm !2040
   %evm.add60 = add i256 %evm.mload56, 36, !notdec.evm !2041
-  call void @evm_mstore(ptr %mem, i256 %evm.add60, i256 %evm.and), !notdec.evm !2042
+  %notdec.evm.mem.ptr.348 = inttoptr i256 %evm.add60 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.348, align 1, !notdec.evm !2042
   %evm.add61 = add i256 %evm.mload56, 68, !notdec.evm !2043
-  call void @evm_mstore(ptr %mem, i256 %evm.add61, i256 %evm.mload52), !notdec.evm !2044
+  %notdec.evm.mem.ptr.349 = inttoptr i256 %evm.add61 to ptr
+  store i256 %evm.mload52, ptr %notdec.evm.mem.ptr.349, align 1, !notdec.evm !2044
   %evm.and62 = and i256 %evm.sub54, %evm.sload55, !notdec.evm !2045
   %evm.add63 = add i256 100, %evm.mload56, !notdec.evm !2046
-  %evm.mload64 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2047
+  %notdec.evm.mem.ptr.350 = inttoptr i256 64 to ptr
+  %evm.mload64 = load i256, ptr %notdec.evm.mem.ptr.350, align 1, !notdec.evm !2047
   %evm.sub65 = sub i256 %evm.add63, %evm.mload64, !notdec.evm !2048
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !2049
   %evm.call = call i256 @evm_call(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas, i256 %evm.and62, i256 0, i256 %evm.mload64, i256 %evm.sub65, i256 %evm.mload64, i256 32), !notdec.evm !2050
@@ -3429,12 +3777,14 @@ bb._0x2c840x26b8:                                 ; preds = %bb._0x29e1
 
 bb._0x2cf10x26b8:                                 ; preds = %bb._0x2c840x26b8
   %_0x2cf10x26b8_0xa = phi i256 [ %_0x2c840x26b8_0x4, %bb._0x2c840x26b8 ], !notdec.evm !2054
-  %evm.mload71 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2055
+  %notdec.evm.mem.ptr.351 = inttoptr i256 64 to ptr
+  %evm.mload71 = load i256, ptr %notdec.evm.mem.ptr.351, align 1, !notdec.evm !2055
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !2056
   %evm.add72 = add i256 %evm.returndatasize, 31, !notdec.evm !2057
   %evm.and73 = and i256 %evm.add72, -32, !notdec.evm !2058
   %evm.add74 = add i256 %evm.mload71, %evm.and73, !notdec.evm !2059
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add74), !notdec.evm !2060
+  %notdec.evm.mem.ptr.352 = inttoptr i256 64 to ptr
+  store i256 %evm.add74, ptr %notdec.evm.mem.ptr.352, align 1, !notdec.evm !2060
   %evm.add75 = add i256 %evm.mload71, %evm.returndatasize, !notdec.evm !2061
   %private.call76 = call i256 @private__0x3825_0x3825(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload71, i256 %evm.add75, i256 11541), !notdec.evm !2062
   br label %bb._0x2d150x26b8
@@ -3459,7 +3809,8 @@ bb._0x29ee:                                       ; preds = %bb._0x2d5a0x26b8
   %evm.shl83 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2071
   %evm.sub84 = sub i256 %evm.shl83, 1, !notdec.evm !2072
   %evm.and85 = and i256 %evm.sub84, %_0x26b8arg0x0, !notdec.evm !2073
-  %evm.mload86 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !2074
+  %notdec.evm.mem.ptr.353 = inttoptr i256 %evm.mload to ptr
+  %evm.mload86 = load i256, ptr %notdec.evm.mem.ptr.353, align 1, !notdec.evm !2074
   %evm.lt87 = icmp ult i256 %_0x29ee_0x0, %evm.mload86, !notdec.evm !2075
   %evm.bool88 = zext i1 %evm.lt87 to i256, !notdec.evm !2075
   %evm.branch.cond89 = icmp ne i256 %evm.bool88, 0, !notdec.evm !2076
@@ -3471,14 +3822,16 @@ bb._0x2a0a:                                       ; preds = %bb._0x29ee
   %evm.mul90 = mul i256 32, %_0x2a0a_0x0, !notdec.evm !2079
   %evm.add91 = add i256 32, %evm.mul90, !notdec.evm !2080
   %evm.add92 = add i256 %evm.add91, %evm.mload, !notdec.evm !2081
-  %evm.mload93 = call i256 @evm_mload(ptr %mem, i256 %evm.add92), !notdec.evm !2082
+  %notdec.evm.mem.ptr.354 = inttoptr i256 %evm.add92 to ptr
+  %evm.mload93 = load i256, ptr %notdec.evm.mem.ptr.354, align 1, !notdec.evm !2082
   %evm.shl94 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2083
   %evm.sub95 = sub i256 %evm.shl94, 1, !notdec.evm !2084
   %evm.and96 = and i256 %evm.sub95, %evm.mload93, !notdec.evm !2085
   %evm.shl97 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2086
   %evm.sub98 = sub i256 %evm.shl97, 1, !notdec.evm !2087
   %evm.and99 = and i256 %evm.sub98, %_0x26b8arg0x1, !notdec.evm !2088
-  %evm.mload100 = call i256 @evm_mload(ptr %mem, i256 %evm.mload16), !notdec.evm !2089
+  %notdec.evm.mem.ptr.355 = inttoptr i256 %evm.mload16 to ptr
+  %evm.mload100 = load i256, ptr %notdec.evm.mem.ptr.355, align 1, !notdec.evm !2089
   %evm.lt101 = icmp ult i256 %_0x2a0a_0x3, %evm.mload100, !notdec.evm !2090
   %evm.bool102 = zext i1 %evm.lt101 to i256, !notdec.evm !2090
   %evm.branch.cond103 = icmp ne i256 %evm.bool102, 0, !notdec.evm !2091
@@ -3490,20 +3843,25 @@ bb._0x2a59:                                       ; preds = %bb._0x2a0a
   %evm.mul104 = mul i256 32, %_0x2a59_0x0, !notdec.evm !2094
   %evm.add105 = add i256 32, %evm.mul104, !notdec.evm !2095
   %evm.add106 = add i256 %evm.add105, %evm.mload16, !notdec.evm !2096
-  %evm.mload107 = call i256 @evm_mload(ptr %mem, i256 %evm.add106), !notdec.evm !2097
-  %evm.mload108 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2098
+  %notdec.evm.mem.ptr.356 = inttoptr i256 %evm.add106 to ptr
+  %evm.mload107 = load i256, ptr %notdec.evm.mem.ptr.356, align 1, !notdec.evm !2097
+  %notdec.evm.mem.ptr.357 = inttoptr i256 64 to ptr
+  %evm.mload108 = load i256, ptr %notdec.evm.mem.ptr.357, align 1, !notdec.evm !2098
   %evm.shl109 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2099
   %evm.sub110 = sub i256 %evm.shl109, 1, !notdec.evm !2100
   %evm.and111 = and i256 %evm.sub110, %_0x26b8arg0x2, !notdec.evm !2101
-  call void @evm_mstore(ptr %mem, i256 %evm.mload108, i256 %evm.and111), !notdec.evm !2102
+  %notdec.evm.mem.ptr.358 = inttoptr i256 %evm.mload108 to ptr
+  store i256 %evm.and111, ptr %notdec.evm.mem.ptr.358, align 1, !notdec.evm !2102
   %evm.add112 = add i256 %evm.mload108, 32, !notdec.evm !2103
-  call void @evm_mstore(ptr %mem, i256 %evm.add112, i256 %evm.mload107), !notdec.evm !2104
+  %notdec.evm.mem.ptr.359 = inttoptr i256 %evm.add112 to ptr
+  store i256 %evm.mload107, ptr %notdec.evm.mem.ptr.359, align 1, !notdec.evm !2104
   %evm.add113 = add i256 64, %evm.mload108, !notdec.evm !2105
   br label %bb._0x2a83, !notdec.evm !2106
 
 bb._0x2a83:                                       ; preds = %bb._0x2a59
   %_0x2a83_0x5 = phi i256 [ %_0x2a59_0x7, %bb._0x2a59 ], !notdec.evm !2107
-  %evm.mload114 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2108
+  %notdec.evm.mem.ptr.360 = inttoptr i256 64 to ptr
+  %evm.mload114 = load i256, ptr %notdec.evm.mem.ptr.360, align 1, !notdec.evm !2108
   %evm.sub115 = sub i256 %evm.add113, %evm.mload114, !notdec.evm !2109
   call void @evm_log4(ptr %mem, i256 %evm.mload114, i256 %evm.sub115, i256 -28803009399537478248617873826149267734032226468717881246643451797326201819132, i256 %evm.and99, i256 %evm.and96, i256 %evm.and85), !notdec.evm !2110
   %private.call116 = call i256 @private__0x3604_0x3604(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2a83_0x5, i256 10901), !notdec.evm !2111
@@ -3523,8 +3881,10 @@ bb._0x80dd:                                       ; preds = %bb._0x2a52
   %_0x80dd_0x1 = phi i256 [ %_0x2a52_0x0, %bb._0x2a52 ], !notdec.evm !2118
   %_0x80dd_0x8 = phi i256 [ %_0x2a52_0x7, %bb._0x2a52 ], !notdec.evm !2119
   %evm.shl117 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2120
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl117), !notdec.evm !2121
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2122
+  %notdec.evm.mem.ptr.361 = inttoptr i256 0 to ptr
+  store i256 %evm.shl117, ptr %notdec.evm.mem.ptr.361, align 1, !notdec.evm !2121
+  %notdec.evm.mem.ptr.362 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.362, align 1, !notdec.evm !2122
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2123
   unreachable, !notdec.evm !2123
 
@@ -3537,29 +3897,37 @@ bb._0x80a8:                                       ; preds = %bb._0x2a03
   %_0x80a8_0x1 = phi i256 [ %_0x2a03_0x0, %bb._0x2a03 ], !notdec.evm !2127
   %_0x80a8_0x4 = phi i256 [ %_0x2a03_0x3, %bb._0x2a03 ], !notdec.evm !2128
   %evm.shl118 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2129
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl118), !notdec.evm !2130
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2131
+  %notdec.evm.mem.ptr.363 = inttoptr i256 0 to ptr
+  store i256 %evm.shl118, ptr %notdec.evm.mem.ptr.363, align 1, !notdec.evm !2130
+  %notdec.evm.mem.ptr.364 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.364, align 1, !notdec.evm !2131
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2132
   unreachable, !notdec.evm !2132
 
 bb._0x2d220x26b8:                                 ; preds = %bb._0x2d150x26b8
   %_0x2d220x26b8_0x6 = phi i256 [ %_0x2d150x26b8_0x7, %bb._0x2d150x26b8 ], !notdec.evm !2133
-  %evm.mload119 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2134
+  %notdec.evm.mem.ptr.365 = inttoptr i256 64 to ptr
+  %evm.mload119 = load i256, ptr %notdec.evm.mem.ptr.365, align 1, !notdec.evm !2134
   %evm.shl120 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !2135
-  call void @evm_mstore(ptr %mem, i256 %evm.mload119, i256 %evm.shl120), !notdec.evm !2136
+  %notdec.evm.mem.ptr.366 = inttoptr i256 %evm.mload119 to ptr
+  store i256 %evm.shl120, ptr %notdec.evm.mem.ptr.366, align 1, !notdec.evm !2136
   %evm.add121 = add i256 %evm.mload119, 4, !notdec.evm !2137
-  call void @evm_mstore(ptr %mem, i256 %evm.add121, i256 32), !notdec.evm !2138
+  %notdec.evm.mem.ptr.367 = inttoptr i256 %evm.add121 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.367, align 1, !notdec.evm !2138
   %evm.add122 = add i256 %evm.mload119, 36, !notdec.evm !2139
-  call void @evm_mstore(ptr %mem, i256 %evm.add122, i256 14), !notdec.evm !2140
+  %notdec.evm.mem.ptr.368 = inttoptr i256 %evm.add122 to ptr
+  store i256 14, ptr %notdec.evm.mem.ptr.368, align 1, !notdec.evm !2140
   %evm.shl123 = call i256 @evm_shl(i256 145, i256 855119663624007496993905358481321), !notdec.evm !2141
   %evm.add124 = add i256 %evm.mload119, 68, !notdec.evm !2142
-  call void @evm_mstore(ptr %mem, i256 %evm.add124, i256 %evm.shl123), !notdec.evm !2143
+  %notdec.evm.mem.ptr.369 = inttoptr i256 %evm.add124 to ptr
+  store i256 %evm.shl123, ptr %notdec.evm.mem.ptr.369, align 1, !notdec.evm !2143
   %evm.add125 = add i256 100, %evm.mload119, !notdec.evm !2144
   br label %bb._0x82010x26b8, !notdec.evm !2145
 
 bb._0x82010x26b8:                                 ; preds = %bb._0x2d220x26b8
   %_0x82010x26b8_0x7 = phi i256 [ %_0x2d220x26b8_0x6, %bb._0x2d220x26b8 ], !notdec.evm !2146
-  %evm.mload126 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2147
+  %notdec.evm.mem.ptr.370 = inttoptr i256 64 to ptr
+  %evm.mload126 = load i256, ptr %notdec.evm.mem.ptr.370, align 1, !notdec.evm !2147
   %evm.sub127 = sub i256 %evm.add125, %evm.mload126, !notdec.evm !2148
   call void @evm_revert(ptr %mem, i256 %evm.mload126, i256 %evm.sub127), !notdec.evm !2149
   unreachable, !notdec.evm !2149
@@ -3581,8 +3949,10 @@ bb._0x8073:                                       ; preds = %bb._0x29da
   %_0x8073_0x1 = phi i256 [ %_0x29da_0x0, %bb._0x29da ], !notdec.evm !2158
   %_0x8073_0x6 = phi i256 [ %_0x29da_0x5, %bb._0x29da ], !notdec.evm !2159
   %evm.shl130 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2160
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl130), !notdec.evm !2161
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2162
+  %notdec.evm.mem.ptr.371 = inttoptr i256 0 to ptr
+  store i256 %evm.shl130, ptr %notdec.evm.mem.ptr.371, align 1, !notdec.evm !2161
+  %notdec.evm.mem.ptr.372 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.372, align 1, !notdec.evm !2162
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2163
   unreachable, !notdec.evm !2163
 
@@ -3595,8 +3965,10 @@ bb._0x803e:                                       ; preds = %bb._0x29c0
   %_0x803e_0x1 = phi i256 [ %_0x29c0_0x0, %bb._0x29c0 ], !notdec.evm !2167
   %_0x803e_0x5 = phi i256 [ %_0x29c0_0x4, %bb._0x29c0 ], !notdec.evm !2168
   %evm.shl131 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2169
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl131), !notdec.evm !2170
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2171
+  %notdec.evm.mem.ptr.373 = inttoptr i256 0 to ptr
+  store i256 %evm.shl131, ptr %notdec.evm.mem.ptr.373, align 1, !notdec.evm !2170
+  %notdec.evm.mem.ptr.374 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.374, align 1, !notdec.evm !2171
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2172
   unreachable, !notdec.evm !2172
 
@@ -3647,7 +4019,8 @@ bb._0x2799:                                       ; preds = %bb._0x2790
   %evm.shl145 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2197
   %evm.sub146 = sub i256 %evm.shl145, 1, !notdec.evm !2198
   %evm.and147 = and i256 %evm.sub146, 0, !notdec.evm !2199
-  %evm.mload148 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !2200
+  %notdec.evm.mem.ptr.375 = inttoptr i256 %evm.mload to ptr
+  %evm.mload148 = load i256, ptr %notdec.evm.mem.ptr.375, align 1, !notdec.evm !2200
   %evm.lt149 = icmp ult i256 %_0x2799_0x0, %evm.mload148, !notdec.evm !2201
   %evm.bool150 = zext i1 %evm.lt149 to i256, !notdec.evm !2201
   %evm.branch.cond151 = icmp ne i256 %evm.bool150, 0, !notdec.evm !2202
@@ -3660,7 +4033,8 @@ bb._0x27b5:                                       ; preds = %bb._0x2799
   %evm.mul152 = mul i256 32, %_0x27b5_0x0, !notdec.evm !2206
   %evm.add153 = add i256 32, %evm.mul152, !notdec.evm !2207
   %evm.add154 = add i256 %evm.add153, %evm.mload, !notdec.evm !2208
-  %evm.mload155 = call i256 @evm_mload(ptr %mem, i256 %evm.add154), !notdec.evm !2209
+  %notdec.evm.mem.ptr.376 = inttoptr i256 %evm.add154 to ptr
+  %evm.mload155 = load i256, ptr %notdec.evm.mem.ptr.376, align 1, !notdec.evm !2209
   %evm.shl156 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2210
   %evm.sub157 = sub i256 %evm.shl156, 1, !notdec.evm !2211
   %evm.and158 = and i256 %evm.sub157, %evm.mload155, !notdec.evm !2212
@@ -3684,7 +4058,8 @@ bb._0x27df:                                       ; preds = %bb._0x27cd
   %_0x27df_0x0 = phi i256 [ %_0x27cd_0x0, %bb._0x27cd ], !notdec.evm !2221
   %_0x27df_0x2 = phi i256 [ %_0x27cd_0x0, %bb._0x27cd ], !notdec.evm !2222
   %_0x27df_0x4 = phi i256 [ %_0x27cd_0x2, %bb._0x27cd ], !notdec.evm !2223
-  call void @evm_mstore(ptr %mem, i256 0, i256 3), !notdec.evm !2224
+  %notdec.evm.mem.ptr.377 = inttoptr i256 0 to ptr
+  store i256 3, ptr %notdec.evm.mem.ptr.377, align 1, !notdec.evm !2224
   %evm.sha3168 = call i256 @evm_sha3(ptr %mem, i256 0, i256 32), !notdec.evm !2225
   %evm.add169 = add i256 %evm.sha3168, %_0x27df_0x0, !notdec.evm !2226
   %evm.sload170 = call i256 @evm_sload(i256 %evm.add169), !notdec.evm !2227
@@ -3693,7 +4068,8 @@ bb._0x27df:                                       ; preds = %bb._0x27cd
   %evm.shl171 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2230
   %evm.sub172 = sub i256 %evm.shl171, 1, !notdec.evm !2231
   %evm.and173 = and i256 %evm.sub172, %evm.div, !notdec.evm !2232
-  %evm.mload174 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !2233
+  %notdec.evm.mem.ptr.378 = inttoptr i256 %evm.mload to ptr
+  %evm.mload174 = load i256, ptr %notdec.evm.mem.ptr.378, align 1, !notdec.evm !2233
   %evm.lt175 = icmp ult i256 %_0x27df_0x2, %evm.mload174, !notdec.evm !2234
   %evm.bool176 = zext i1 %evm.lt175 to i256, !notdec.evm !2234
   %evm.branch.cond177 = icmp ne i256 %evm.bool176, 0, !notdec.evm !2235
@@ -3712,7 +4088,8 @@ bb._0x280f:                                       ; preds = %bb._0x27df
   %evm.shl184 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2245
   %evm.sub185 = sub i256 %evm.shl184, 1, !notdec.evm !2246
   %evm.and186 = and i256 %evm.sub185, %evm.and183, !notdec.evm !2247
-  call void @evm_mstore(ptr %mem, i256 %evm.add180, i256 %evm.and186), !notdec.evm !2248
+  %notdec.evm.mem.ptr.379 = inttoptr i256 %evm.add180 to ptr
+  store i256 %evm.and186, ptr %notdec.evm.mem.ptr.379, align 1, !notdec.evm !2248
   br label %bb._0x2830, !notdec.evm !2249
 
 bb._0x2830:                                       ; preds = %bb._0x280f, %bb._0x27b5
@@ -3721,10 +4098,13 @@ bb._0x2830:                                       ; preds = %bb._0x280f, %bb._0x
   %evm.shl187 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2252
   %evm.sub188 = sub i256 %evm.shl187, 1, !notdec.evm !2253
   %evm.and189 = and i256 %private.call138, %evm.sub188, !notdec.evm !2254
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and189), !notdec.evm !2255
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !2256
+  %notdec.evm.mem.ptr.380 = inttoptr i256 0 to ptr
+  store i256 %evm.and189, ptr %notdec.evm.mem.ptr.380, align 1, !notdec.evm !2255
+  %notdec.evm.mem.ptr.381 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.381, align 1, !notdec.evm !2256
   %evm.sha3190 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2257
-  %evm.mload191 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !2258
+  %notdec.evm.mem.ptr.382 = inttoptr i256 %evm.mload to ptr
+  %evm.mload191 = load i256, ptr %notdec.evm.mem.ptr.382, align 1, !notdec.evm !2258
   %evm.lt192 = icmp ult i256 %_0x2830_0x0, %evm.mload191, !notdec.evm !2259
   %evm.bool193 = zext i1 %evm.lt192 to i256, !notdec.evm !2259
   %evm.branch.cond194 = icmp ne i256 %evm.bool193, 0, !notdec.evm !2260
@@ -3737,17 +4117,22 @@ bb._0x285e:                                       ; preds = %bb._0x2830
   %evm.mul195 = mul i256 32, %_0x285e_0x0, !notdec.evm !2264
   %evm.add196 = add i256 %evm.mul195, %evm.mload, !notdec.evm !2265
   %evm.add197 = add i256 32, %evm.add196, !notdec.evm !2266
-  %evm.mload198 = call i256 @evm_mload(ptr %mem, i256 %evm.add197), !notdec.evm !2267
+  %notdec.evm.mem.ptr.383 = inttoptr i256 %evm.add197 to ptr
+  %evm.mload198 = load i256, ptr %notdec.evm.mem.ptr.383, align 1, !notdec.evm !2267
   %evm.shl199 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2268
   %evm.sub200 = sub i256 %evm.shl199, 1, !notdec.evm !2269
   %evm.and201 = and i256 %evm.sub200, %evm.mload198, !notdec.evm !2270
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and201), !notdec.evm !2271
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3190), !notdec.evm !2272
+  %notdec.evm.mem.ptr.384 = inttoptr i256 0 to ptr
+  store i256 %evm.and201, ptr %notdec.evm.mem.ptr.384, align 1, !notdec.evm !2271
+  %notdec.evm.mem.ptr.385 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3190, ptr %notdec.evm.mem.ptr.385, align 1, !notdec.evm !2272
   %evm.sha3202 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2273
   %evm.and203 = and i256 %_0x26b8arg0x1, %evm.sub200, !notdec.evm !2274
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and203), !notdec.evm !2275
+  %notdec.evm.mem.ptr.386 = inttoptr i256 0 to ptr
+  store i256 %evm.and203, ptr %notdec.evm.mem.ptr.386, align 1, !notdec.evm !2275
   %evm.add204 = add i256 %evm.sha3202, 1, !notdec.evm !2276
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add204), !notdec.evm !2277
+  %notdec.evm.mem.ptr.387 = inttoptr i256 32 to ptr
+  store i256 %evm.add204, ptr %notdec.evm.mem.ptr.387, align 1, !notdec.evm !2277
   %evm.sha3205 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2278
   %evm.sload206 = call i256 @evm_sload(i256 %evm.sha3205), !notdec.evm !2279
   %evm.shl207 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !2280
@@ -3763,7 +4148,8 @@ bb._0x285e:                                       ; preds = %bb._0x2830
 bb._0x28b0:                                       ; preds = %bb._0x285e
   %_0x28b0_0x1 = phi i256 [ %_0x285e_0x5, %bb._0x285e ], !notdec.evm !2287
   %_0x28b0_0x3 = phi i256 [ %_0x285e_0x7, %bb._0x285e ], !notdec.evm !2288
-  %evm.mload215 = call i256 @evm_mload(ptr %mem, i256 %evm.mload16), !notdec.evm !2289
+  %notdec.evm.mem.ptr.388 = inttoptr i256 %evm.mload16 to ptr
+  %evm.mload215 = load i256, ptr %notdec.evm.mem.ptr.388, align 1, !notdec.evm !2289
   %evm.lt216 = icmp ult i256 %_0x28b0_0x1, %evm.mload215, !notdec.evm !2290
   %evm.bool217 = zext i1 %evm.lt216 to i256, !notdec.evm !2290
   %evm.branch.cond218 = icmp ne i256 %evm.bool217, 0, !notdec.evm !2291
@@ -3776,21 +4162,26 @@ bb._0x28c2:                                       ; preds = %bb._0x28b0
   %evm.mul219 = mul i256 32, %_0x28c2_0x0, !notdec.evm !2295
   %evm.add220 = add i256 32, %evm.mul219, !notdec.evm !2296
   %evm.add221 = add i256 %evm.add220, %evm.mload16, !notdec.evm !2297
-  %evm.mload222 = call i256 @evm_mload(ptr %mem, i256 %evm.add221), !notdec.evm !2298
+  %notdec.evm.mem.ptr.389 = inttoptr i256 %evm.add221 to ptr
+  %evm.mload222 = load i256, ptr %notdec.evm.mem.ptr.389, align 1, !notdec.evm !2298
   %private.call223 = call i256 @private__0x35ec_0x35ec(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload222, i256 %evm.and211, i256 10454), !notdec.evm !2299
   br label %bb._0x28d6
 
 bb._0x28d6:                                       ; preds = %bb._0x28c2
   %_0x28d6_0x4 = phi i256 [ %_0x28c2_0x4, %bb._0x28c2 ], !notdec.evm !2300
   %_0x28d6_0x6 = phi i256 [ %_0x28c2_0x6, %bb._0x28c2 ], !notdec.evm !2301
-  call void @evm_mstore(ptr %mem, i256 %evm.add221, i256 %private.call223), !notdec.evm !2302
+  %notdec.evm.mem.ptr.390 = inttoptr i256 %evm.add221 to ptr
+  store i256 %private.call223, ptr %notdec.evm.mem.ptr.390, align 1, !notdec.evm !2302
   %evm.shl224 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2303
   %evm.sub225 = sub i256 %evm.shl224, 1, !notdec.evm !2304
   %evm.and226 = and i256 %private.call138, %evm.sub225, !notdec.evm !2305
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and226), !notdec.evm !2306
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !2307
+  %notdec.evm.mem.ptr.391 = inttoptr i256 0 to ptr
+  store i256 %evm.and226, ptr %notdec.evm.mem.ptr.391, align 1, !notdec.evm !2306
+  %notdec.evm.mem.ptr.392 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.392, align 1, !notdec.evm !2307
   %evm.sha3227 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2308
-  %evm.mload228 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !2309
+  %notdec.evm.mem.ptr.393 = inttoptr i256 %evm.mload to ptr
+  %evm.mload228 = load i256, ptr %notdec.evm.mem.ptr.393, align 1, !notdec.evm !2309
   %evm.lt229 = icmp ult i256 %_0x28d6_0x4, %evm.mload228, !notdec.evm !2310
   %evm.bool230 = zext i1 %evm.lt229 to i256, !notdec.evm !2310
   %evm.branch.cond231 = icmp ne i256 %evm.bool230, 0, !notdec.evm !2311
@@ -3803,15 +4194,18 @@ bb._0x2907:                                       ; preds = %bb._0x28d6
   %evm.mul232 = mul i256 32, %_0x2907_0x0, !notdec.evm !2315
   %evm.add233 = add i256 32, %evm.mul232, !notdec.evm !2316
   %evm.add234 = add i256 %evm.add233, %evm.mload, !notdec.evm !2317
-  %evm.mload235 = call i256 @evm_mload(ptr %mem, i256 %evm.add234), !notdec.evm !2318
+  %notdec.evm.mem.ptr.394 = inttoptr i256 %evm.add234 to ptr
+  %evm.mload235 = load i256, ptr %notdec.evm.mem.ptr.394, align 1, !notdec.evm !2318
   %evm.shl236 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2319
   %evm.sub237 = sub i256 %evm.shl236, 1, !notdec.evm !2320
   %evm.and238 = and i256 %evm.sub237, %evm.mload235, !notdec.evm !2321
   %evm.shl239 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2322
   %evm.sub240 = sub i256 %evm.shl239, 1, !notdec.evm !2323
   %evm.and241 = and i256 %evm.sub240, %evm.and238, !notdec.evm !2324
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and241), !notdec.evm !2325
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3227), !notdec.evm !2326
+  %notdec.evm.mem.ptr.395 = inttoptr i256 0 to ptr
+  store i256 %evm.and241, ptr %notdec.evm.mem.ptr.395, align 1, !notdec.evm !2325
+  %notdec.evm.mem.ptr.396 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3227, ptr %notdec.evm.mem.ptr.396, align 1, !notdec.evm !2326
   %evm.sha3242 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2327
   %evm.add243 = add i256 1, %evm.sha3242, !notdec.evm !2328
   %evm.shl244 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2329
@@ -3820,8 +4214,10 @@ bb._0x2907:                                       ; preds = %bb._0x28d6
   %evm.shl247 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2332
   %evm.sub248 = sub i256 %evm.shl247, 1, !notdec.evm !2333
   %evm.and249 = and i256 %evm.sub248, %evm.and246, !notdec.evm !2334
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and249), !notdec.evm !2335
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add243), !notdec.evm !2336
+  %notdec.evm.mem.ptr.397 = inttoptr i256 0 to ptr
+  store i256 %evm.and249, ptr %notdec.evm.mem.ptr.397, align 1, !notdec.evm !2335
+  %notdec.evm.mem.ptr.398 = inttoptr i256 32 to ptr
+  store i256 %evm.add243, ptr %notdec.evm.mem.ptr.398, align 1, !notdec.evm !2336
   %evm.sha3250 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2337
   %evm.add251 = add i256 0, %evm.sha3250, !notdec.evm !2338
   %evm.exp252 = call i256 @evm_exp(i256 256, i256 13), !notdec.evm !2339
@@ -3862,8 +4258,10 @@ bb._0x8009:                                       ; preds = %bb._0x2900
   %_0x8009_0x7 = phi i256 [ %_0x2900_0x6, %bb._0x2900 ], !notdec.evm !2365
   %_0x8009_0x9 = phi i256 [ %_0x2900_0x8, %bb._0x2900 ], !notdec.evm !2366
   %evm.shl263 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2367
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl263), !notdec.evm !2368
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2369
+  %notdec.evm.mem.ptr.399 = inttoptr i256 0 to ptr
+  store i256 %evm.shl263, ptr %notdec.evm.mem.ptr.399, align 1, !notdec.evm !2368
+  %notdec.evm.mem.ptr.400 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.400, align 1, !notdec.evm !2369
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2370
   unreachable, !notdec.evm !2370
 
@@ -3878,8 +4276,10 @@ bb._0x7fd4:                                       ; preds = %bb._0x28bb
   %_0x7fd4_0x5 = phi i256 [ %_0x28bb_0x4, %bb._0x28bb ], !notdec.evm !2376
   %_0x7fd4_0x7 = phi i256 [ %_0x28bb_0x6, %bb._0x28bb ], !notdec.evm !2377
   %evm.shl264 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2378
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl264), !notdec.evm !2379
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2380
+  %notdec.evm.mem.ptr.401 = inttoptr i256 0 to ptr
+  store i256 %evm.shl264, ptr %notdec.evm.mem.ptr.401, align 1, !notdec.evm !2379
+  %notdec.evm.mem.ptr.402 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.402, align 1, !notdec.evm !2380
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2381
   unreachable, !notdec.evm !2381
 
@@ -3894,8 +4294,10 @@ bb._0x7f9f:                                       ; preds = %bb._0x2857
   %_0x7f9f_0x6 = phi i256 [ %_0x2857_0x5, %bb._0x2857 ], !notdec.evm !2387
   %_0x7f9f_0x8 = phi i256 [ %_0x2857_0x7, %bb._0x2857 ], !notdec.evm !2388
   %evm.shl265 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2389
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl265), !notdec.evm !2390
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2391
+  %notdec.evm.mem.ptr.403 = inttoptr i256 0 to ptr
+  store i256 %evm.shl265, ptr %notdec.evm.mem.ptr.403, align 1, !notdec.evm !2390
+  %notdec.evm.mem.ptr.404 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.404, align 1, !notdec.evm !2391
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2392
   unreachable, !notdec.evm !2392
 
@@ -3910,8 +4312,10 @@ bb._0x7f6a:                                       ; preds = %bb._0x2808
   %_0x7f6a_0x4 = phi i256 [ %_0x2808_0x3, %bb._0x2808 ], !notdec.evm !2398
   %_0x7f6a_0x6 = phi i256 [ %_0x2808_0x5, %bb._0x2808 ], !notdec.evm !2399
   %evm.shl266 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2400
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl266), !notdec.evm !2401
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2402
+  %notdec.evm.mem.ptr.405 = inttoptr i256 0 to ptr
+  store i256 %evm.shl266, ptr %notdec.evm.mem.ptr.405, align 1, !notdec.evm !2401
+  %notdec.evm.mem.ptr.406 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.406, align 1, !notdec.evm !2402
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2403
   unreachable, !notdec.evm !2403
 
@@ -3926,8 +4330,10 @@ bb._0x7f35:                                       ; preds = %bb._0x27d8
   %_0x7f35_0x3 = phi i256 [ %_0x27d8_0x2, %bb._0x27d8 ], !notdec.evm !2409
   %_0x7f35_0x5 = phi i256 [ %_0x27d8_0x4, %bb._0x27d8 ], !notdec.evm !2410
   %evm.shl267 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2411
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl267), !notdec.evm !2412
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2413
+  %notdec.evm.mem.ptr.407 = inttoptr i256 0 to ptr
+  store i256 %evm.shl267, ptr %notdec.evm.mem.ptr.407, align 1, !notdec.evm !2412
+  %notdec.evm.mem.ptr.408 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.408, align 1, !notdec.evm !2413
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2414
   unreachable, !notdec.evm !2414
 
@@ -3942,8 +4348,10 @@ bb._0x7f00:                                       ; preds = %bb._0x27ae
   %_0x7f00_0x4 = phi i256 [ %_0x27ae_0x3, %bb._0x27ae ], !notdec.evm !2420
   %_0x7f00_0x6 = phi i256 [ %_0x27ae_0x5, %bb._0x27ae ], !notdec.evm !2421
   %evm.shl268 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2422
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl268), !notdec.evm !2423
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2424
+  %notdec.evm.mem.ptr.409 = inttoptr i256 0 to ptr
+  store i256 %evm.shl268, ptr %notdec.evm.mem.ptr.409, align 1, !notdec.evm !2423
+  %notdec.evm.mem.ptr.410 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.410, align 1, !notdec.evm !2424
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2425
   unreachable, !notdec.evm !2425
 
@@ -3956,8 +4364,10 @@ bb._0x7ecb:                                       ; preds = %bb._0x276f
   %_0x7ecb_0x1 = phi i256 [ %_0x276f_0x0, %bb._0x276f ], !notdec.evm !2429
   %_0x7ecb_0x5 = phi i256 [ %_0x276f_0x4, %bb._0x276f ], !notdec.evm !2430
   %evm.shl269 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2431
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl269), !notdec.evm !2432
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2433
+  %notdec.evm.mem.ptr.411 = inttoptr i256 0 to ptr
+  store i256 %evm.shl269, ptr %notdec.evm.mem.ptr.411, align 1, !notdec.evm !2432
+  %notdec.evm.mem.ptr.412 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.412, align 1, !notdec.evm !2433
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2434
   unreachable, !notdec.evm !2434
 
@@ -3966,8 +4376,10 @@ bb._0x2715:                                       ; preds = %bb._0x2701
 
 bb._0x7e96:                                       ; preds = %bb._0x2715
   %evm.shl270 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2436
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl270), !notdec.evm !2437
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !2438
+  %notdec.evm.mem.ptr.413 = inttoptr i256 0 to ptr
+  store i256 %evm.shl270, ptr %notdec.evm.mem.ptr.413, align 1, !notdec.evm !2437
+  %notdec.evm.mem.ptr.414 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.414, align 1, !notdec.evm !2438
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2439
   unreachable, !notdec.evm !2439
 
@@ -3976,13 +4388,15 @@ bb._0x26d1:                                       ; preds = %bb._0x26b8
 
 bb._0x7e61:                                       ; preds = %bb._0x26d1
   %evm.shl271 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2441
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl271), !notdec.evm !2442
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !2443
+  %notdec.evm.mem.ptr.415 = inttoptr i256 0 to ptr
+  store i256 %evm.shl271, ptr %notdec.evm.mem.ptr.415, align 1, !notdec.evm !2442
+  %notdec.evm.mem.ptr.416 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.416, align 1, !notdec.evm !2443
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2444
   unreachable, !notdec.evm !2444
 }
 
-define void @public_claimRewardsOnBehalf_address___uint256_address_address_address__0x271(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_claimRewardsOnBehalf_address___uint256_address_address_address__0x271(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x271:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !2445
   %private.call = call { i256, i256, i256, i256, i256, i256 } @private__0x303d_0x303d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 639), !notdec.evm !2446
@@ -3999,19 +4413,22 @@ bb._0x27f:                                        ; preds = %bb._0x271
   br label %bb._0x85b64
 
 bb._0x85b64:                                      ; preds = %bb._0x27f
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2448
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.call6), !notdec.evm !2449
+  %notdec.evm.mem.ptr.417 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.417, align 1, !notdec.evm !2448
+  %notdec.evm.mem.ptr.418 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.call6, ptr %notdec.evm.mem.ptr.418, align 1, !notdec.evm !2449
   %evm.add = add i256 32, %evm.mload, !notdec.evm !2450
   br label %bb._0xfa0ff, !notdec.evm !2451
 
 bb._0xfa0ff:                                      ; preds = %bb._0x85b64
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2452
+  %notdec.evm.mem.ptr.419 = inttoptr i256 64 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.419, align 1, !notdec.evm !2452
   %evm.sub = sub i256 %evm.add, %evm.mload7, !notdec.evm !2453
   call void @evm_return(ptr %mem, i256 %evm.mload7, i256 %evm.sub), !notdec.evm !2454
   ret void, !notdec.evm !2454
 }
 
-define void @public_getAllUserRewards_address___address__0x284(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getAllUserRewards_address___address__0x284(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x284:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !2455
   %private.call = call { i256, i256, i256 } @private__0x30c1_0x30c1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 658), !notdec.evm !2456
@@ -4027,18 +4444,20 @@ bb._0x292:                                        ; preds = %bb._0x284
   br label %bb._0x9632c
 
 bb._0x9632c:                                      ; preds = %bb._0x292
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2458
+  %notdec.evm.mem.ptr.420 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.420, align 1, !notdec.evm !2458
   %private.call6 = call i256 @private__0x315b_0x315b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload, i256 %private.ret4, i256 %private.ret5, i256 1024295), !notdec.evm !2459
   br label %bb._0xfa127
 
 bb._0xfa127:                                      ; preds = %bb._0x9632c
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2460
+  %notdec.evm.mem.ptr.421 = inttoptr i256 64 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.421, align 1, !notdec.evm !2460
   %evm.sub = sub i256 %private.call6, %evm.mload7, !notdec.evm !2461
   call void @evm_return(ptr %mem, i256 %evm.mload7, i256 %evm.sub), !notdec.evm !2462
   ret void, !notdec.evm !2462
 }
 
-define void @public_getUserAssetIndex_address_address_address__0x2a5(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getUserAssetIndex_address_address_address__0x2a5(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x2a5:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !2463
   %private.call = call { i256, i256, i256 } @private__0x31b2_0x31b2(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 691), !notdec.evm !2464
@@ -4051,17 +4470,23 @@ bb._0x2b3:                                        ; preds = %bb._0x2a5
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2465
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !2466
   %evm.and = and i256 %private.ret1, %evm.sub, !notdec.evm !2467
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !2468
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !2469
+  %notdec.evm.mem.ptr.422 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.422, align 1, !notdec.evm !2468
+  %notdec.evm.mem.ptr.423 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.423, align 1, !notdec.evm !2469
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2470
   %evm.and3 = and i256 %evm.sub, %private.ret, !notdec.evm !2471
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and3), !notdec.evm !2472
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !2473
+  %notdec.evm.mem.ptr.424 = inttoptr i256 0 to ptr
+  store i256 %evm.and3, ptr %notdec.evm.mem.ptr.424, align 1, !notdec.evm !2472
+  %notdec.evm.mem.ptr.425 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.425, align 1, !notdec.evm !2473
   %evm.sha34 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2474
   %evm.and5 = and i256 %private.ret2, %evm.sub, !notdec.evm !2475
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and5), !notdec.evm !2476
+  %notdec.evm.mem.ptr.426 = inttoptr i256 0 to ptr
+  store i256 %evm.and5, ptr %notdec.evm.mem.ptr.426, align 1, !notdec.evm !2476
   %evm.add = add i256 1, %evm.sha34, !notdec.evm !2477
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add), !notdec.evm !2478
+  %notdec.evm.mem.ptr.427 = inttoptr i256 32 to ptr
+  store i256 %evm.add, ptr %notdec.evm.mem.ptr.427, align 1, !notdec.evm !2478
   %evm.sha36 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2479
   %evm.sload = call i256 @evm_sload(i256 %evm.sha36), !notdec.evm !2480
   %evm.shl7 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !2481
@@ -4070,19 +4495,22 @@ bb._0x2b3:                                        ; preds = %bb._0x2a5
   br label %bb._0x96381, !notdec.evm !2484
 
 bb._0x96381:                                      ; preds = %bb._0x2b3
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2485
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and9), !notdec.evm !2486
+  %notdec.evm.mem.ptr.428 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.428, align 1, !notdec.evm !2485
+  %notdec.evm.mem.ptr.429 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and9, ptr %notdec.evm.mem.ptr.429, align 1, !notdec.evm !2486
   %evm.add10 = add i256 32, %evm.mload, !notdec.evm !2487
   br label %bb._0xfa14f, !notdec.evm !2488
 
 bb._0xfa14f:                                      ; preds = %bb._0x96381
-  %evm.mload11 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2489
+  %notdec.evm.mem.ptr.430 = inttoptr i256 64 to ptr
+  %evm.mload11 = load i256, ptr %notdec.evm.mem.ptr.430, align 1, !notdec.evm !2489
   %evm.sub12 = sub i256 %evm.add10, %evm.mload11, !notdec.evm !2490
   call void @evm_return(ptr %mem, i256 %evm.mload11, i256 %evm.sub12), !notdec.evm !2491
   ret void, !notdec.evm !2491
 }
 
-define { i256, i256 } @private__0x2aa9_0x2aa9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2aa9arg0x0, i256 %_0x2aa9arg0x1, i256 %_0x2aa9arg0x2, i256 %_0x2aa9arg0x3) {
+define { i256, i256 } @private__0x2aa9_0x2aa9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2aa9arg0x0, i256 %_0x2aa9arg0x1, i256 %_0x2aa9arg0x2, i256 %_0x2aa9arg0x3) #0 {
 bb._0x2aa9:
   %private.call = call { i256, i256 } @private__0x1e5e_0x1e5e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2aa9arg0x0, i256 %_0x2aa9arg0x1, i256 %_0x2aa9arg0x2, i256 10938), !notdec.evm !2492
   %private.ret = extractvalue { i256, i256 } %private.call, 0, !notdec.evm !2492
@@ -4155,33 +4583,40 @@ bb._0xe9304:                                      ; preds = %bb._0x2b3a
   ret { i256, i256 } %ret.insert25, !notdec.evm !2532
 
 bb._0x2ad7:                                       ; preds = %bb._0x2ac8
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2533
+  %notdec.evm.mem.ptr.431 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.431, align 1, !notdec.evm !2533
   %evm.shl26 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !2534
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl26), !notdec.evm !2535
+  %notdec.evm.mem.ptr.432 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl26, ptr %notdec.evm.mem.ptr.432, align 1, !notdec.evm !2535
   %evm.add = add i256 %evm.mload, 4, !notdec.evm !2536
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 32), !notdec.evm !2537
+  %notdec.evm.mem.ptr.433 = inttoptr i256 %evm.add to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.433, align 1, !notdec.evm !2537
   %evm.add27 = add i256 %evm.mload, 36, !notdec.evm !2538
-  call void @evm_mstore(ptr %mem, i256 %evm.add27, i256 14), !notdec.evm !2539
+  %notdec.evm.mem.ptr.434 = inttoptr i256 %evm.add27 to ptr
+  store i256 14, ptr %notdec.evm.mem.ptr.434, align 1, !notdec.evm !2539
   %evm.shl28 = call i256 @evm_shl(i256 144, i256 1486816826556560372167059960516439), !notdec.evm !2540
   %evm.add29 = add i256 %evm.mload, 68, !notdec.evm !2541
-  call void @evm_mstore(ptr %mem, i256 %evm.add29, i256 %evm.shl28), !notdec.evm !2542
+  %notdec.evm.mem.ptr.435 = inttoptr i256 %evm.add29 to ptr
+  store i256 %evm.shl28, ptr %notdec.evm.mem.ptr.435, align 1, !notdec.evm !2542
   %evm.add30 = add i256 100, %evm.mload, !notdec.evm !2543
   br label %bb._0x8112, !notdec.evm !2544
 
 bb._0x8112:                                       ; preds = %bb._0x2ad7
-  %evm.mload31 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2545
+  %notdec.evm.mem.ptr.436 = inttoptr i256 64 to ptr
+  %evm.mload31 = load i256, ptr %notdec.evm.mem.ptr.436, align 1, !notdec.evm !2545
   %evm.sub32 = sub i256 %evm.add30, %evm.mload31, !notdec.evm !2546
   call void @evm_revert(ptr %mem, i256 %evm.mload31, i256 %evm.sub32), !notdec.evm !2547
   unreachable, !notdec.evm !2547
 }
 
-define void @private__0x2b96_0x2b96(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2b96arg0x0, i256 %_0x2b96arg0x1, i256 %_0x2b96arg0x2) {
+define void @private__0x2b96_0x2b96(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2b96arg0x0, i256 %_0x2b96arg0x1, i256 %_0x2b96arg0x2) #0 {
 bb._0x2b96:
   br label %bb._0x2b99, !notdec.evm !2548
 
 bb._0x2b99:                                       ; preds = %bb._0x2c0f, %bb._0x2b96
   %_0x2b99_0x0 = phi i256 [ 0, %bb._0x2b96 ], [ %private.call81, %bb._0x2c0f ], !notdec.evm !2549
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x2b96arg0x0), !notdec.evm !2550
+  %notdec.evm.mem.ptr.437 = inttoptr i256 %_0x2b96arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.437, align 1, !notdec.evm !2550
   %evm.lt = icmp ult i256 %_0x2b99_0x0, %evm.mload, !notdec.evm !2551
   %evm.bool = zext i1 %evm.lt to i256, !notdec.evm !2551
   %evm.iszero = icmp eq i256 %evm.bool, 0, !notdec.evm !2552
@@ -4195,7 +4630,8 @@ bb._0xe9330:                                      ; preds = %bb._0x2b99
 
 bb._0x2ba3:                                       ; preds = %bb._0x2b99
   %_0x2ba3_0x0 = phi i256 [ %_0x2b99_0x0, %bb._0x2b99 ], !notdec.evm !2556
-  %evm.mload2 = call i256 @evm_mload(ptr %mem, i256 %_0x2b96arg0x0), !notdec.evm !2557
+  %notdec.evm.mem.ptr.438 = inttoptr i256 %_0x2b96arg0x0 to ptr
+  %evm.mload2 = load i256, ptr %notdec.evm.mem.ptr.438, align 1, !notdec.evm !2557
   %evm.lt3 = icmp ult i256 %_0x2ba3_0x0, %evm.mload2, !notdec.evm !2558
   %evm.bool4 = zext i1 %evm.lt3 to i256, !notdec.evm !2558
   %evm.branch.cond5 = icmp ne i256 %evm.bool4, 0, !notdec.evm !2559
@@ -4207,10 +4643,13 @@ bb._0x2bb7:                                       ; preds = %bb._0x2ba3
   %evm.mul = mul i256 32, %_0x2bb7_0x0, !notdec.evm !2562
   %evm.add = add i256 32, %evm.mul, !notdec.evm !2563
   %evm.add6 = add i256 %evm.add, %_0x2b96arg0x0, !notdec.evm !2564
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 %evm.add6), !notdec.evm !2565
+  %notdec.evm.mem.ptr.439 = inttoptr i256 %evm.add6 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.439, align 1, !notdec.evm !2565
   %evm.add8 = add i256 0, %evm.mload7, !notdec.evm !2566
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 %evm.add8), !notdec.evm !2567
-  %evm.mload10 = call i256 @evm_mload(ptr %mem, i256 %_0x2b96arg0x0), !notdec.evm !2568
+  %notdec.evm.mem.ptr.440 = inttoptr i256 %evm.add8 to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.440, align 1, !notdec.evm !2567
+  %notdec.evm.mem.ptr.441 = inttoptr i256 %_0x2b96arg0x0 to ptr
+  %evm.mload10 = load i256, ptr %notdec.evm.mem.ptr.441, align 1, !notdec.evm !2568
   %evm.lt11 = icmp ult i256 %_0x2bb7_0x3, %evm.mload10, !notdec.evm !2569
   %evm.bool12 = zext i1 %evm.lt11 to i256, !notdec.evm !2569
   %evm.branch.cond13 = icmp ne i256 %evm.bool12, 0, !notdec.evm !2570
@@ -4222,10 +4661,13 @@ bb._0x2bd6:                                       ; preds = %bb._0x2bb7
   %evm.mul14 = mul i256 32, %_0x2bd6_0x0, !notdec.evm !2573
   %evm.add15 = add i256 32, %evm.mul14, !notdec.evm !2574
   %evm.add16 = add i256 %evm.add15, %_0x2b96arg0x0, !notdec.evm !2575
-  %evm.mload17 = call i256 @evm_mload(ptr %mem, i256 %evm.add16), !notdec.evm !2576
+  %notdec.evm.mem.ptr.442 = inttoptr i256 %evm.add16 to ptr
+  %evm.mload17 = load i256, ptr %notdec.evm.mem.ptr.442, align 1, !notdec.evm !2576
   %evm.add18 = add i256 32, %evm.mload17, !notdec.evm !2577
-  %evm.mload19 = call i256 @evm_mload(ptr %mem, i256 %evm.add18), !notdec.evm !2578
-  %evm.mload20 = call i256 @evm_mload(ptr %mem, i256 %_0x2b96arg0x0), !notdec.evm !2579
+  %notdec.evm.mem.ptr.443 = inttoptr i256 %evm.add18 to ptr
+  %evm.mload19 = load i256, ptr %notdec.evm.mem.ptr.443, align 1, !notdec.evm !2578
+  %notdec.evm.mem.ptr.444 = inttoptr i256 %_0x2b96arg0x0 to ptr
+  %evm.mload20 = load i256, ptr %notdec.evm.mem.ptr.444, align 1, !notdec.evm !2579
   %evm.lt21 = icmp ult i256 %_0x2bd6_0x5, %evm.mload20, !notdec.evm !2580
   %evm.bool22 = zext i1 %evm.lt21 to i256, !notdec.evm !2580
   %evm.branch.cond23 = icmp ne i256 %evm.bool22, 0, !notdec.evm !2581
@@ -4237,9 +4679,11 @@ bb._0x2bf4:                                       ; preds = %bb._0x2bd6
   %evm.mul24 = mul i256 32, %_0x2bf4_0x0, !notdec.evm !2584
   %evm.add25 = add i256 32, %evm.mul24, !notdec.evm !2585
   %evm.add26 = add i256 %evm.add25, %_0x2b96arg0x0, !notdec.evm !2586
-  %evm.mload27 = call i256 @evm_mload(ptr %mem, i256 %evm.add26), !notdec.evm !2587
+  %notdec.evm.mem.ptr.445 = inttoptr i256 %evm.add26 to ptr
+  %evm.mload27 = load i256, ptr %notdec.evm.mem.ptr.445, align 1, !notdec.evm !2587
   %evm.add28 = add i256 64, %evm.mload27, !notdec.evm !2588
-  %evm.mload29 = call i256 @evm_mload(ptr %mem, i256 %evm.add28), !notdec.evm !2589
+  %notdec.evm.mem.ptr.446 = inttoptr i256 %evm.add28 to ptr
+  %evm.mload29 = load i256, ptr %notdec.evm.mem.ptr.446, align 1, !notdec.evm !2589
   br label %bb._0x184f0x2b96, !notdec.evm !2590
 
 bb._0x184f0x2b96:                                 ; preds = %bb._0x2bf4
@@ -4247,8 +4691,10 @@ bb._0x184f0x2b96:                                 ; preds = %bb._0x2bf4
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2592
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !2593
   %evm.and = and i256 %evm.mload9, %evm.sub, !notdec.evm !2594
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !2595
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !2596
+  %notdec.evm.mem.ptr.447 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.447, align 1, !notdec.evm !2595
+  %notdec.evm.mem.ptr.448 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.448, align 1, !notdec.evm !2596
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2597
   %evm.add30 = add i256 2, %evm.sha3, !notdec.evm !2598
   %evm.sload = call i256 @evm_sload(i256 %evm.add30), !notdec.evm !2599
@@ -4294,20 +4740,26 @@ bb._0x18a30x2b96:                                 ; preds = %bb._0x18910x2b96
   %evm.shl45 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2625
   %evm.sub46 = sub i256 %evm.shl45, 1, !notdec.evm !2626
   %evm.and47 = and i256 %evm.mload9, %evm.sub46, !notdec.evm !2627
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and47), !notdec.evm !2628
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !2629
+  %notdec.evm.mem.ptr.449 = inttoptr i256 0 to ptr
+  store i256 %evm.and47, ptr %notdec.evm.mem.ptr.449, align 1, !notdec.evm !2628
+  %notdec.evm.mem.ptr.450 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.450, align 1, !notdec.evm !2629
   %evm.sha348 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2630
   %evm.shl49 = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !2631
   %evm.sub50 = sub i256 %evm.shl49, 1, !notdec.evm !2632
   %evm.and51 = and i256 %_0x18a30x2b96_0x0, %evm.sub50, !notdec.evm !2633
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and51), !notdec.evm !2634
+  %notdec.evm.mem.ptr.451 = inttoptr i256 0 to ptr
+  store i256 %evm.and51, ptr %notdec.evm.mem.ptr.451, align 1, !notdec.evm !2634
   %evm.add52 = add i256 %evm.sha348, 1, !notdec.evm !2635
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add52), !notdec.evm !2636
+  %notdec.evm.mem.ptr.452 = inttoptr i256 32 to ptr
+  store i256 %evm.add52, ptr %notdec.evm.mem.ptr.452, align 1, !notdec.evm !2636
   %evm.sha353 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2637
   %evm.sload54 = call i256 @evm_sload(i256 %evm.sha353), !notdec.evm !2638
   %evm.and55 = and i256 %evm.sub46, %evm.sload54, !notdec.evm !2639
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and55), !notdec.evm !2640
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha348), !notdec.evm !2641
+  %notdec.evm.mem.ptr.453 = inttoptr i256 0 to ptr
+  store i256 %evm.and55, ptr %notdec.evm.mem.ptr.453, align 1, !notdec.evm !2640
+  %notdec.evm.mem.ptr.454 = inttoptr i256 32 to ptr
+  store i256 %evm.sha348, ptr %notdec.evm.mem.ptr.454, align 1, !notdec.evm !2641
   %evm.sha356 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2642
   %private.call = call { i256, i256 } @private__0x2aa9_0x2aa9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.exp, i256 %evm.mload29, i256 %evm.sha356, i256 6380), !notdec.evm !2643
   %private.ret = extractvalue { i256, i256 } %private.call, 0, !notdec.evm !2643
@@ -4354,19 +4806,24 @@ bb._0x19130x2b96:                                 ; preds = %bb._0x190d0x2b96
   %evm.shl71 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2666
   %evm.sub72 = sub i256 %evm.shl71, 1, !notdec.evm !2667
   %evm.and73 = and i256 %evm.sub72, %evm.mload9, !notdec.evm !2668
-  %evm.mload74 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2669
-  call void @evm_mstore(ptr %mem, i256 %evm.mload74, i256 %private.ret57), !notdec.evm !2670
+  %notdec.evm.mem.ptr.455 = inttoptr i256 64 to ptr
+  %evm.mload74 = load i256, ptr %notdec.evm.mem.ptr.455, align 1, !notdec.evm !2669
+  %notdec.evm.mem.ptr.456 = inttoptr i256 %evm.mload74 to ptr
+  store i256 %private.ret57, ptr %notdec.evm.mem.ptr.456, align 1, !notdec.evm !2670
   %evm.add75 = add i256 %evm.mload74, 32, !notdec.evm !2671
-  call void @evm_mstore(ptr %mem, i256 %evm.add75, i256 %private.ret57), !notdec.evm !2672
+  %notdec.evm.mem.ptr.457 = inttoptr i256 %evm.add75 to ptr
+  store i256 %private.ret57, ptr %notdec.evm.mem.ptr.457, align 1, !notdec.evm !2672
   %evm.add76 = add i256 %evm.mload74, 64, !notdec.evm !2673
-  call void @evm_mstore(ptr %mem, i256 %evm.add76, i256 %private.ret60), !notdec.evm !2674
+  %notdec.evm.mem.ptr.458 = inttoptr i256 %evm.add76 to ptr
+  store i256 %private.ret60, ptr %notdec.evm.mem.ptr.458, align 1, !notdec.evm !2674
   %evm.add77 = add i256 96, %evm.mload74, !notdec.evm !2675
   br label %bb._0x19740x2b96, !notdec.evm !2676
 
 bb._0x19740x2b96:                                 ; preds = %bb._0x19130x2b96
   %_0x19740x2b96_0x13 = phi i256 [ %_0x19130x2b96_0xe, %bb._0x19130x2b96 ], !notdec.evm !2677
   %_0x19740x2b96_0xb = phi i256 [ %_0x19130x2b96_0x6, %bb._0x19130x2b96 ], !notdec.evm !2678
-  %evm.mload78 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2679
+  %notdec.evm.mem.ptr.459 = inttoptr i256 64 to ptr
+  %evm.mload78 = load i256, ptr %notdec.evm.mem.ptr.459, align 1, !notdec.evm !2679
   %evm.sub79 = sub i256 %evm.add77, %evm.mload78, !notdec.evm !2680
   call void @evm_log4(ptr %mem, i256 %evm.mload78, i256 %evm.sub79, i256 23074986786148437592796231436663248424150072283456022866739994303455194312680, i256 %evm.and73, i256 %evm.and70, i256 %evm.and67), !notdec.evm !2681
   br label %bb._0x197d0x2b96, !notdec.evm !2682
@@ -4404,8 +4861,10 @@ bb._0x81a4:                                       ; preds = %bb._0x2bed
   %_0x81a4_0x1 = phi i256 [ %_0x2bed_0x0, %bb._0x2bed ], !notdec.evm !2699
   %_0x81a4_0x7 = phi i256 [ %_0x2bed_0x6, %bb._0x2bed ], !notdec.evm !2700
   %evm.shl82 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2701
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl82), !notdec.evm !2702
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2703
+  %notdec.evm.mem.ptr.460 = inttoptr i256 0 to ptr
+  store i256 %evm.shl82, ptr %notdec.evm.mem.ptr.460, align 1, !notdec.evm !2702
+  %notdec.evm.mem.ptr.461 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.461, align 1, !notdec.evm !2703
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2704
   unreachable, !notdec.evm !2704
 
@@ -4418,8 +4877,10 @@ bb._0x816f:                                       ; preds = %bb._0x2bcf
   %_0x816f_0x1 = phi i256 [ %_0x2bcf_0x0, %bb._0x2bcf ], !notdec.evm !2708
   %_0x816f_0x6 = phi i256 [ %_0x2bcf_0x5, %bb._0x2bcf ], !notdec.evm !2709
   %evm.shl83 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2710
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl83), !notdec.evm !2711
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2712
+  %notdec.evm.mem.ptr.462 = inttoptr i256 0 to ptr
+  store i256 %evm.shl83, ptr %notdec.evm.mem.ptr.462, align 1, !notdec.evm !2711
+  %notdec.evm.mem.ptr.463 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.463, align 1, !notdec.evm !2712
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2713
   unreachable, !notdec.evm !2713
 
@@ -4432,13 +4893,15 @@ bb._0x813a:                                       ; preds = %bb._0x2bb0
   %_0x813a_0x1 = phi i256 [ %_0x2bb0_0x0, %bb._0x2bb0 ], !notdec.evm !2717
   %_0x813a_0x4 = phi i256 [ %_0x2bb0_0x3, %bb._0x2bb0 ], !notdec.evm !2718
   %evm.shl84 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2719
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl84), !notdec.evm !2720
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !2721
+  %notdec.evm.mem.ptr.464 = inttoptr i256 0 to ptr
+  store i256 %evm.shl84, ptr %notdec.evm.mem.ptr.464, align 1, !notdec.evm !2720
+  %notdec.evm.mem.ptr.465 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.465, align 1, !notdec.evm !2721
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2722
   unreachable, !notdec.evm !2722
 }
 
-define i256 @private__0x2c17_0x2c17(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2c17arg0x0, i256 %_0x2c17arg0x1) {
+define i256 @private__0x2c17_0x2c17(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2c17arg0x0, i256 %_0x2c17arg0x1) #0 {
 bb._0x2c17:
   %evm.shl = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !2723
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !2724
@@ -4453,50 +4916,65 @@ bb._0xe9354:                                      ; preds = %bb._0x2c17
   ret i256 %_0x2c17arg0x0, !notdec.evm !2728
 
 bb._0x2c29:                                       ; preds = %bb._0x2c17
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2729
+  %notdec.evm.mem.ptr.466 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.466, align 1, !notdec.evm !2729
   %evm.shl2 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !2730
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl2), !notdec.evm !2731
+  %notdec.evm.mem.ptr.467 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl2, ptr %notdec.evm.mem.ptr.467, align 1, !notdec.evm !2731
   %evm.add = add i256 %evm.mload, 4, !notdec.evm !2732
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 32), !notdec.evm !2733
+  %notdec.evm.mem.ptr.468 = inttoptr i256 %evm.add to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.468, align 1, !notdec.evm !2733
   %evm.add3 = add i256 %evm.mload, 36, !notdec.evm !2734
-  call void @evm_mstore(ptr %mem, i256 %evm.add3, i256 39), !notdec.evm !2735
+  %notdec.evm.mem.ptr.469 = inttoptr i256 %evm.add3 to ptr
+  store i256 39, ptr %notdec.evm.mem.ptr.469, align 1, !notdec.evm !2735
   %evm.add4 = add i256 %evm.mload, 68, !notdec.evm !2736
-  call void @evm_mstore(ptr %mem, i256 %evm.add4, i256 37714057305872612089428949748275078505078436571074044799028069429283585400881), !notdec.evm !2737
+  %notdec.evm.mem.ptr.470 = inttoptr i256 %evm.add4 to ptr
+  store i256 37714057305872612089428949748275078505078436571074044799028069429283585400881, ptr %notdec.evm.mem.ptr.470, align 1, !notdec.evm !2737
   %evm.shl5 = call i256 @evm_shl(i256 200, i256 14135460576719987), !notdec.evm !2738
   %evm.add6 = add i256 %evm.mload, 100, !notdec.evm !2739
-  call void @evm_mstore(ptr %mem, i256 %evm.add6, i256 %evm.shl5), !notdec.evm !2740
+  %notdec.evm.mem.ptr.471 = inttoptr i256 %evm.add6 to ptr
+  store i256 %evm.shl5, ptr %notdec.evm.mem.ptr.471, align 1, !notdec.evm !2740
   %evm.add7 = add i256 132, %evm.mload, !notdec.evm !2741
   br label %bb._0x81d9, !notdec.evm !2742
 
 bb._0x81d9:                                       ; preds = %bb._0x2c29
-  %evm.mload8 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2743
+  %notdec.evm.mem.ptr.472 = inttoptr i256 64 to ptr
+  %evm.mload8 = load i256, ptr %notdec.evm.mem.ptr.472, align 1, !notdec.evm !2743
   %evm.sub9 = sub i256 %evm.add7, %evm.mload8, !notdec.evm !2744
   call void @evm_revert(ptr %mem, i256 %evm.mload8, i256 %evm.sub9), !notdec.evm !2745
   unreachable, !notdec.evm !2745
 }
 
-define void @private__0x2c84_0x2c84(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2c84arg0x0, i256 %_0x2c84arg0x1, i256 %_0x2c84arg0x2, i256 %_0x2c84arg0x3) {
+define void @private__0x2c84_0x2c84(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2c84arg0x0, i256 %_0x2c84arg0x1, i256 %_0x2c84arg0x2, i256 %_0x2c84arg0x3) #0 {
 bb._0x2c84:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2746
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !2747
   %evm.and = and i256 %evm.sub, %_0x2c84arg0x1, !notdec.evm !2748
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !2749
-  call void @evm_mstore(ptr %mem, i256 32, i256 58), !notdec.evm !2750
+  %notdec.evm.mem.ptr.473 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.473, align 1, !notdec.evm !2749
+  %notdec.evm.mem.ptr.474 = inttoptr i256 32 to ptr
+  store i256 58, ptr %notdec.evm.mem.ptr.474, align 1, !notdec.evm !2750
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2751
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !2752
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2753
+  %notdec.evm.mem.ptr.475 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.475, align 1, !notdec.evm !2753
   %evm.shl1 = call i256 @evm_shl(i256 225, i256 190799041), !notdec.evm !2754
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl1), !notdec.evm !2755
+  %notdec.evm.mem.ptr.476 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl1, ptr %notdec.evm.mem.ptr.476, align 1, !notdec.evm !2755
   %evm.and2 = and i256 %evm.sub, %_0x2c84arg0x2, !notdec.evm !2756
   %evm.add = add i256 %evm.mload, 4, !notdec.evm !2757
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 %evm.and2), !notdec.evm !2758
+  %notdec.evm.mem.ptr.477 = inttoptr i256 %evm.add to ptr
+  store i256 %evm.and2, ptr %notdec.evm.mem.ptr.477, align 1, !notdec.evm !2758
   %evm.add3 = add i256 %evm.mload, 36, !notdec.evm !2759
-  call void @evm_mstore(ptr %mem, i256 %evm.add3, i256 %evm.and), !notdec.evm !2760
+  %notdec.evm.mem.ptr.478 = inttoptr i256 %evm.add3 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.478, align 1, !notdec.evm !2760
   %evm.add4 = add i256 %evm.mload, 68, !notdec.evm !2761
-  call void @evm_mstore(ptr %mem, i256 %evm.add4, i256 %_0x2c84arg0x0), !notdec.evm !2762
+  %notdec.evm.mem.ptr.479 = inttoptr i256 %evm.add4 to ptr
+  store i256 %_0x2c84arg0x0, ptr %notdec.evm.mem.ptr.479, align 1, !notdec.evm !2762
   %evm.and5 = and i256 %evm.sub, %evm.sload, !notdec.evm !2763
   %evm.add6 = add i256 100, %evm.mload, !notdec.evm !2764
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2765
+  %notdec.evm.mem.ptr.480 = inttoptr i256 64 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.480, align 1, !notdec.evm !2765
   %evm.sub8 = sub i256 %evm.add6, %evm.mload7, !notdec.evm !2766
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !2767
   %evm.call = call i256 @evm_call(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas, i256 %evm.and5, i256 0, i256 %evm.mload7, i256 %evm.sub8, i256 %evm.mload7, i256 32), !notdec.evm !2768
@@ -4508,12 +4986,14 @@ bb._0x2c84:
   br i1 %evm.branch.cond, label %bb._0x2cf10x2c84, label %bb._0x2ce80x2c84, !notdec.evm !2771
 
 bb._0x2cf10x2c84:                                 ; preds = %bb._0x2c84
-  %evm.mload11 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2772
+  %notdec.evm.mem.ptr.481 = inttoptr i256 64 to ptr
+  %evm.mload11 = load i256, ptr %notdec.evm.mem.ptr.481, align 1, !notdec.evm !2772
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !2773
   %evm.add12 = add i256 %evm.returndatasize, 31, !notdec.evm !2774
   %evm.and13 = and i256 %evm.add12, -32, !notdec.evm !2775
   %evm.add14 = add i256 %evm.mload11, %evm.and13, !notdec.evm !2776
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add14), !notdec.evm !2777
+  %notdec.evm.mem.ptr.482 = inttoptr i256 64 to ptr
+  store i256 %evm.add14, ptr %notdec.evm.mem.ptr.482, align 1, !notdec.evm !2777
   %evm.add15 = add i256 %evm.mload11, %evm.returndatasize, !notdec.evm !2778
   %private.call = call i256 @private__0x3825_0x3825(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload11, i256 %evm.add15, i256 11541), !notdec.evm !2779
   br label %bb._0x2d150x2c84
@@ -4532,21 +5012,27 @@ bb._0x2d5a0x2c84:                                 ; preds = %bb._0x2d150x2c84
   ret void, !notdec.evm !2784
 
 bb._0x2d220x2c84:                                 ; preds = %bb._0x2d150x2c84
-  %evm.mload22 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2785
+  %notdec.evm.mem.ptr.483 = inttoptr i256 64 to ptr
+  %evm.mload22 = load i256, ptr %notdec.evm.mem.ptr.483, align 1, !notdec.evm !2785
   %evm.shl23 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !2786
-  call void @evm_mstore(ptr %mem, i256 %evm.mload22, i256 %evm.shl23), !notdec.evm !2787
+  %notdec.evm.mem.ptr.484 = inttoptr i256 %evm.mload22 to ptr
+  store i256 %evm.shl23, ptr %notdec.evm.mem.ptr.484, align 1, !notdec.evm !2787
   %evm.add24 = add i256 %evm.mload22, 4, !notdec.evm !2788
-  call void @evm_mstore(ptr %mem, i256 %evm.add24, i256 32), !notdec.evm !2789
+  %notdec.evm.mem.ptr.485 = inttoptr i256 %evm.add24 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.485, align 1, !notdec.evm !2789
   %evm.add25 = add i256 %evm.mload22, 36, !notdec.evm !2790
-  call void @evm_mstore(ptr %mem, i256 %evm.add25, i256 14), !notdec.evm !2791
+  %notdec.evm.mem.ptr.486 = inttoptr i256 %evm.add25 to ptr
+  store i256 14, ptr %notdec.evm.mem.ptr.486, align 1, !notdec.evm !2791
   %evm.shl26 = call i256 @evm_shl(i256 145, i256 855119663624007496993905358481321), !notdec.evm !2792
   %evm.add27 = add i256 %evm.mload22, 68, !notdec.evm !2793
-  call void @evm_mstore(ptr %mem, i256 %evm.add27, i256 %evm.shl26), !notdec.evm !2794
+  %notdec.evm.mem.ptr.487 = inttoptr i256 %evm.add27 to ptr
+  store i256 %evm.shl26, ptr %notdec.evm.mem.ptr.487, align 1, !notdec.evm !2794
   %evm.add28 = add i256 100, %evm.mload22, !notdec.evm !2795
   br label %bb._0x82010x2c84, !notdec.evm !2796
 
 bb._0x82010x2c84:                                 ; preds = %bb._0x2d220x2c84
-  %evm.mload29 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2797
+  %notdec.evm.mem.ptr.488 = inttoptr i256 64 to ptr
+  %evm.mload29 = load i256, ptr %notdec.evm.mem.ptr.488, align 1, !notdec.evm !2797
   %evm.sub30 = sub i256 %evm.add28, %evm.mload29, !notdec.evm !2798
   call void @evm_revert(ptr %mem, i256 %evm.mload29, i256 %evm.sub30), !notdec.evm !2799
   unreachable, !notdec.evm !2799
@@ -4559,14 +5045,16 @@ bb._0x2ce80x2c84:                                 ; preds = %bb._0x2c84
   unreachable, !notdec.evm !2803
 }
 
-define { i256, i256 } @private__0x2d61_0x2d61(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2d61arg0x0, i256 %_0x2d61arg0x1, i256 %_0x2d61arg0x2, i256 %_0x2d61arg0x3, i256 %_0x2d61arg0x4, i256 %_0x2d61arg0x5) {
+define { i256, i256 } @private__0x2d61_0x2d61(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2d61arg0x0, i256 %_0x2d61arg0x1, i256 %_0x2d61arg0x2, i256 %_0x2d61arg0x3, i256 %_0x2d61arg0x4, i256 %_0x2d61arg0x5) #0 {
 bb._0x2d61:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2804
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !2805
   %evm.and = and i256 %_0x2d61arg0x3, %evm.sub, !notdec.evm !2806
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !2807
+  %notdec.evm.mem.ptr.489 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.489, align 1, !notdec.evm !2807
   %evm.add = add i256 %_0x2d61arg0x4, 1, !notdec.evm !2808
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add), !notdec.evm !2809
+  %notdec.evm.mem.ptr.490 = inttoptr i256 32 to ptr
+  store i256 %evm.add, ptr %notdec.evm.mem.ptr.490, align 1, !notdec.evm !2809
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2810
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !2811
   %evm.shl1 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !2812
@@ -4588,9 +5076,11 @@ bb._0x2d93:                                       ; preds = %bb._0x2d61
   %evm.shl6 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2819
   %evm.sub7 = sub i256 %evm.shl6, 1, !notdec.evm !2820
   %evm.and8 = and i256 %_0x2d61arg0x3, %evm.sub7, !notdec.evm !2821
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and8), !notdec.evm !2822
+  %notdec.evm.mem.ptr.491 = inttoptr i256 0 to ptr
+  store i256 %evm.and8, ptr %notdec.evm.mem.ptr.491, align 1, !notdec.evm !2822
   %evm.add9 = add i256 %_0x2d61arg0x4, 1, !notdec.evm !2823
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add9), !notdec.evm !2824
+  %notdec.evm.mem.ptr.492 = inttoptr i256 32 to ptr
+  store i256 %evm.add9, ptr %notdec.evm.mem.ptr.492, align 1, !notdec.evm !2824
   %evm.sha310 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2825
   %evm.sload11 = call i256 @evm_sload(i256 %evm.sha310), !notdec.evm !2826
   %evm.and12 = and i256 -20282409603651670423947251286016, %evm.sload11, !notdec.evm !2827
@@ -4621,9 +5111,11 @@ bb._0x2de8:                                       ; preds = %bb._0x2ddd
   %evm.shl22 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2838
   %evm.sub23 = sub i256 %evm.shl22, 1, !notdec.evm !2839
   %evm.and24 = and i256 %_0x2d61arg0x3, %evm.sub23, !notdec.evm !2840
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and24), !notdec.evm !2841
+  %notdec.evm.mem.ptr.493 = inttoptr i256 0 to ptr
+  store i256 %evm.and24, ptr %notdec.evm.mem.ptr.493, align 1, !notdec.evm !2841
   %evm.add25 = add i256 %_0x2d61arg0x4, 1, !notdec.evm !2842
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add25), !notdec.evm !2843
+  %notdec.evm.mem.ptr.494 = inttoptr i256 32 to ptr
+  store i256 %evm.add25, ptr %notdec.evm.mem.ptr.494, align 1, !notdec.evm !2843
   %evm.sha326 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !2844
   %evm.sload27 = call i256 @evm_sload(i256 %evm.sha326), !notdec.evm !2845
   %evm.shl28 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !2846
@@ -4676,13 +5168,15 @@ bb._0x3862:                                       ; preds = %bb._0x3847
 
 bb._0x8498:                                       ; preds = %bb._0x3862
   %evm.shl53 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !2878
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl53), !notdec.evm !2879
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !2880
+  %notdec.evm.mem.ptr.495 = inttoptr i256 0 to ptr
+  store i256 %evm.shl53, ptr %notdec.evm.mem.ptr.495, align 1, !notdec.evm !2879
+  %notdec.evm.mem.ptr.496 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.496, align 1, !notdec.evm !2880
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !2881
   unreachable, !notdec.evm !2881
 }
 
-define i256 @private__0x2e56_0x2e56(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2e56arg0x0, i256 %_0x2e56arg0x1, i256 %_0x2e56arg0x2, i256 %_0x2e56arg0x3, i256 %_0x2e56arg0x4) {
+define i256 @private__0x2e56_0x2e56(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2e56arg0x0, i256 %_0x2e56arg0x1, i256 %_0x2e56arg0x2, i256 %_0x2e56arg0x3, i256 %_0x2e56arg0x4) #0 {
 bb._0x2e56:
   %private.call = call i256 @private__0x37a8_0x37a8(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2e56arg0x2, i256 %_0x2e56arg0x1, i256 11875), !notdec.evm !2882
   br label %bb._0x2e63
@@ -4696,7 +5190,7 @@ bb._0x2e6d:                                       ; preds = %bb._0x2e63
   ret i256 %evm.div, !notdec.evm !2885
 }
 
-define i256 @private__0x2e7a_0x2e7a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2e7aarg0x0, i256 %_0x2e7aarg0x1) {
+define i256 @private__0x2e7a_0x2e7a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2e7aarg0x0, i256 %_0x2e7aarg0x1) #0 {
 bb._0x2e7a:
   %evm.gt = icmp ugt i256 %_0x2e7aarg0x0, 4294967295, !notdec.evm !2886
   %evm.bool = zext i1 %evm.gt to i256, !notdec.evm !2886
@@ -4709,29 +5203,36 @@ bb._0xe93d3:                                      ; preds = %bb._0x2e7a
   ret i256 %_0x2e7aarg0x0, !notdec.evm !2889
 
 bb._0x2e89:                                       ; preds = %bb._0x2e7a
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2890
+  %notdec.evm.mem.ptr.497 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.497, align 1, !notdec.evm !2890
   %evm.shl = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !2891
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl), !notdec.evm !2892
+  %notdec.evm.mem.ptr.498 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.498, align 1, !notdec.evm !2892
   %evm.add = add i256 %evm.mload, 4, !notdec.evm !2893
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 32), !notdec.evm !2894
+  %notdec.evm.mem.ptr.499 = inttoptr i256 %evm.add to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.499, align 1, !notdec.evm !2894
   %evm.add2 = add i256 %evm.mload, 36, !notdec.evm !2895
-  call void @evm_mstore(ptr %mem, i256 %evm.add2, i256 38), !notdec.evm !2896
+  %notdec.evm.mem.ptr.500 = inttoptr i256 %evm.add2 to ptr
+  store i256 38, ptr %notdec.evm.mem.ptr.500, align 1, !notdec.evm !2896
   %evm.add3 = add i256 %evm.mload, 68, !notdec.evm !2897
-  call void @evm_mstore(ptr %mem, i256 %evm.add3, i256 37714057305872612089428949748275078505078436571074044799028069429283585400883), !notdec.evm !2898
+  %notdec.evm.mem.ptr.501 = inttoptr i256 %evm.add3 to ptr
+  store i256 37714057305872612089428949748275078505078436571074044799028069429283585400883, ptr %notdec.evm.mem.ptr.501, align 1, !notdec.evm !2898
   %evm.shl4 = call i256 @evm_shl(i256 208, i256 55114671420531), !notdec.evm !2899
   %evm.add5 = add i256 %evm.mload, 100, !notdec.evm !2900
-  call void @evm_mstore(ptr %mem, i256 %evm.add5, i256 %evm.shl4), !notdec.evm !2901
+  %notdec.evm.mem.ptr.502 = inttoptr i256 %evm.add5 to ptr
+  store i256 %evm.shl4, ptr %notdec.evm.mem.ptr.502, align 1, !notdec.evm !2901
   %evm.add6 = add i256 132, %evm.mload, !notdec.evm !2902
   br label %bb._0x8229, !notdec.evm !2903
 
 bb._0x8229:                                       ; preds = %bb._0x2e89
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !2904
+  %notdec.evm.mem.ptr.503 = inttoptr i256 64 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.503, align 1, !notdec.evm !2904
   %evm.sub = sub i256 %evm.add6, %evm.mload7, !notdec.evm !2905
   call void @evm_revert(ptr %mem, i256 %evm.mload7, i256 %evm.sub), !notdec.evm !2906
   unreachable, !notdec.evm !2906
 }
 
-define void @private__0x2edf_0x2edf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2edfarg0x0, i256 %_0x2edfarg0x1) {
+define void @private__0x2edf_0x2edf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2edfarg0x0, i256 %_0x2edfarg0x1) #0 {
 bb._0x2edf:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !2907
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !2908
@@ -4749,7 +5250,7 @@ bb._0x2ef0:                                       ; preds = %bb._0x2edf
   unreachable, !notdec.evm !2913
 }
 
-define { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2ef4arg0x0, i256 %_0x2ef4arg0x1, i256 %_0x2ef4arg0x2) {
+define { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2ef4arg0x0, i256 %_0x2ef4arg0x1, i256 %_0x2ef4arg0x2) #0 {
 bb._0x2ef4:
   %evm.sub = sub i256 %_0x2ef4arg0x1, %_0x2ef4arg0x0, !notdec.evm !2914
   %evm.slt = icmp slt i256 %evm.sub, 64, !notdec.evm !2915
@@ -4780,7 +5281,7 @@ bb._0x2f03:                                       ; preds = %bb._0x2ef4
   unreachable, !notdec.evm !2924
 }
 
-define { i256, i256 } @private__0x2f2d_0x2f2d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2f2darg0x0, i256 %_0x2f2darg0x1, i256 %_0x2f2darg0x2) {
+define { i256, i256 } @private__0x2f2d_0x2f2d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2f2darg0x0, i256 %_0x2f2darg0x1, i256 %_0x2f2darg0x2) #0 {
 bb._0x2f2d:
   %evm.add = add i256 %_0x2f2darg0x0, 31, !notdec.evm !2925
   %evm.slt = icmp slt i256 %evm.add, %_0x2f2darg0x1, !notdec.evm !2926
@@ -4829,7 +5330,7 @@ bb._0x2f3b:                                       ; preds = %bb._0x2f2d
   unreachable, !notdec.evm !2944
 }
 
-define void @public_setRewardOracle_address_address__0x2f6(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_setRewardOracle_address_address__0x2f6(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x2f6:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !2945
   %private.call = call { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 772), !notdec.evm !2946
@@ -4845,7 +5346,7 @@ bb._0xa6b49:                                      ; preds = %bb._0x304
   ret void, !notdec.evm !2948
 }
 
-define { i256, i256, i256, i256, i256 } @private__0x2f71_0x2f71(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2f71arg0x0, i256 %_0x2f71arg0x1, i256 %_0x2f71arg0x2) {
+define { i256, i256, i256, i256, i256 } @private__0x2f71_0x2f71(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2f71arg0x0, i256 %_0x2f71arg0x1, i256 %_0x2f71arg0x2) #0 {
 bb._0x2f71:
   %evm.sub = sub i256 %_0x2f71arg0x1, %_0x2f71arg0x0, !notdec.evm !2949
   %evm.slt = icmp slt i256 %evm.sub, 128, !notdec.evm !2950
@@ -4904,7 +5405,7 @@ bb._0x2f85:                                       ; preds = %bb._0x2f71
   unreachable, !notdec.evm !2971
 }
 
-define i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2fe4arg0x0, i256 %_0x2fe4arg0x1, i256 %_0x2fe4arg0x2) {
+define i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2fe4arg0x0, i256 %_0x2fe4arg0x1, i256 %_0x2fe4arg0x2) #0 {
 bb._0x2fe4:
   %evm.sub = sub i256 %_0x2fe4arg0x1, %_0x2fe4arg0x0, !notdec.evm !2972
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !2973
@@ -4927,7 +5428,7 @@ bb._0x2ff2:                                       ; preds = %bb._0x2fe4
   unreachable, !notdec.evm !2979
 }
 
-define { i256, i256, i256, i256, i256, i256 } @private__0x303d_0x303d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x303darg0x0, i256 %_0x303darg0x1, i256 %_0x303darg0x2) {
+define { i256, i256, i256, i256, i256, i256 } @private__0x303d_0x303d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x303darg0x0, i256 %_0x303darg0x1, i256 %_0x303darg0x2) #0 {
 bb._0x303d:
   %evm.sub = sub i256 %_0x303darg0x1, %_0x303darg0x0, !notdec.evm !2980
   %evm.slt = icmp slt i256 %evm.sub, 160, !notdec.evm !2981
@@ -4993,7 +5494,7 @@ bb._0x3052:                                       ; preds = %bb._0x303d
   unreachable, !notdec.evm !3005
 }
 
-define void @public_claimRewardsToSelf_address___uint256_address__0x309(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_claimRewardsToSelf_address___uint256_address__0x309(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x309:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3006
   %private.call = call { i256, i256, i256, i256 } @private__0x31f2_0x31f2(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 791), !notdec.evm !3007
@@ -5008,19 +5509,22 @@ bb._0x317:                                        ; preds = %bb._0x309
   br label %bb._0xa6b6a
 
 bb._0xa6b6a:                                      ; preds = %bb._0x317
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3009
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.call4), !notdec.evm !3010
+  %notdec.evm.mem.ptr.504 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.504, align 1, !notdec.evm !3009
+  %notdec.evm.mem.ptr.505 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.call4, ptr %notdec.evm.mem.ptr.505, align 1, !notdec.evm !3010
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3011
   br label %bb._0xfa177, !notdec.evm !3012
 
 bb._0xfa177:                                      ; preds = %bb._0xa6b6a
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3013
+  %notdec.evm.mem.ptr.506 = inttoptr i256 64 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.506, align 1, !notdec.evm !3013
   %evm.sub = sub i256 %evm.add, %evm.mload5, !notdec.evm !3014
   call void @evm_return(ptr %mem, i256 %evm.mload5, i256 %evm.sub), !notdec.evm !3015
   ret void, !notdec.evm !3015
 }
 
-define { i256, i256, i256 } @private__0x30c1_0x30c1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x30c1arg0x0, i256 %_0x30c1arg0x1, i256 %_0x30c1arg0x2) {
+define { i256, i256, i256 } @private__0x30c1_0x30c1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x30c1arg0x0, i256 %_0x30c1arg0x1, i256 %_0x30c1arg0x2) #0 {
 bb._0x30c1:
   %evm.sub = sub i256 %_0x30c1arg0x1, %_0x30c1arg0x0, !notdec.evm !3016
   %evm.slt = icmp slt i256 %evm.sub, 64, !notdec.evm !3017
@@ -5069,10 +5573,12 @@ bb._0x30d2:                                       ; preds = %bb._0x30c1
   unreachable, !notdec.evm !3033
 }
 
-define i256 @private__0x3117_0x3117(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3117arg0x0, i256 %_0x3117arg0x1, i256 %_0x3117arg0x2) {
+define i256 @private__0x3117_0x3117(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3117arg0x0, i256 %_0x3117arg0x1, i256 %_0x3117arg0x2) #0 {
 bb._0x3117:
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x3117arg0x0), !notdec.evm !3034
-  call void @evm_mstore(ptr %mem, i256 %_0x3117arg0x1, i256 %evm.mload), !notdec.evm !3035
+  %notdec.evm.mem.ptr.507 = inttoptr i256 %_0x3117arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.507, align 1, !notdec.evm !3034
+  %notdec.evm.mem.ptr.508 = inttoptr i256 %_0x3117arg0x1 to ptr
+  store i256 %evm.mload, ptr %notdec.evm.mem.ptr.508, align 1, !notdec.evm !3035
   %evm.add = add i256 %_0x3117arg0x1, 32, !notdec.evm !3036
   %evm.add1 = add i256 %_0x3117arg0x0, 32, !notdec.evm !3037
   br label %bb._0x312b, !notdec.evm !3038
@@ -5098,20 +5604,23 @@ bb._0x3134:                                       ; preds = %bb._0x312b
   %_0x3134_0x0 = phi i256 [ %_0x312b_0x0, %bb._0x312b ], !notdec.evm !3049
   %_0x3134_0x1 = phi i256 [ %_0x312b_0x1, %bb._0x312b ], !notdec.evm !3050
   %_0x3134_0x6 = phi i256 [ %_0x312b_0x6, %bb._0x312b ], !notdec.evm !3051
-  %evm.mload3 = call i256 @evm_mload(ptr %mem, i256 %_0x3134_0x1), !notdec.evm !3052
+  %notdec.evm.mem.ptr.509 = inttoptr i256 %_0x3134_0x1 to ptr
+  %evm.mload3 = load i256, ptr %notdec.evm.mem.ptr.509, align 1, !notdec.evm !3052
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3053
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3054
   %evm.and = and i256 %evm.sub, %evm.mload3, !notdec.evm !3055
-  call void @evm_mstore(ptr %mem, i256 %_0x3134_0x6, i256 %evm.and), !notdec.evm !3056
+  %notdec.evm.mem.ptr.510 = inttoptr i256 %_0x3134_0x6 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.510, align 1, !notdec.evm !3056
   %evm.add4 = add i256 32, %_0x3134_0x6, !notdec.evm !3057
   %evm.add5 = add i256 32, %_0x3134_0x1, !notdec.evm !3058
   %evm.add6 = add i256 1, %_0x3134_0x0, !notdec.evm !3059
   br label %bb._0x312b, !notdec.evm !3060
 }
 
-define i256 @private__0x315b_0x315b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x315barg0x0, i256 %_0x315barg0x1, i256 %_0x315barg0x2, i256 %_0x315barg0x3) {
+define i256 @private__0x315b_0x315b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x315barg0x0, i256 %_0x315barg0x1, i256 %_0x315barg0x2, i256 %_0x315barg0x3) #0 {
 bb._0x315b:
-  call void @evm_mstore(ptr %mem, i256 %_0x315barg0x0, i256 64), !notdec.evm !3061
+  %notdec.evm.mem.ptr.511 = inttoptr i256 %_0x315barg0x0 to ptr
+  store i256 64, ptr %notdec.evm.mem.ptr.511, align 1, !notdec.evm !3061
   %evm.add = add i256 %_0x315barg0x0, 64, !notdec.evm !3062
   %private.call = call i256 @private__0x3117_0x3117(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x315barg0x2, i256 %evm.add, i256 12654), !notdec.evm !3063
   br label %bb._0x316e
@@ -5119,9 +5628,12 @@ bb._0x315b:
 bb._0x316e:                                       ; preds = %bb._0x315b
   %evm.sub = sub i256 %private.call, %_0x315barg0x0, !notdec.evm !3064
   %evm.add1 = add i256 32, %_0x315barg0x0, !notdec.evm !3065
-  call void @evm_mstore(ptr %mem, i256 %evm.add1, i256 %evm.sub), !notdec.evm !3066
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x315barg0x1), !notdec.evm !3067
-  call void @evm_mstore(ptr %mem, i256 %private.call, i256 %evm.mload), !notdec.evm !3068
+  %notdec.evm.mem.ptr.512 = inttoptr i256 %evm.add1 to ptr
+  store i256 %evm.sub, ptr %notdec.evm.mem.ptr.512, align 1, !notdec.evm !3066
+  %notdec.evm.mem.ptr.513 = inttoptr i256 %_0x315barg0x1 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.513, align 1, !notdec.evm !3067
+  %notdec.evm.mem.ptr.514 = inttoptr i256 %private.call to ptr
+  store i256 %evm.mload, ptr %notdec.evm.mem.ptr.514, align 1, !notdec.evm !3068
   %evm.add2 = add i256 32, %_0x315barg0x1, !notdec.evm !3069
   %evm.add3 = add i256 32, %private.call, !notdec.evm !3070
   br label %bb._0x3189, !notdec.evm !3071
@@ -5147,15 +5659,17 @@ bb._0x3192:                                       ; preds = %bb._0x3189
   %_0x3192_0x0 = phi i256 [ %_0x3189_0x0, %bb._0x3189 ], !notdec.evm !3082
   %_0x3192_0x2 = phi i256 [ %_0x3189_0x2, %bb._0x3189 ], !notdec.evm !3083
   %_0x3192_0x4 = phi i256 [ %_0x3189_0x4, %bb._0x3189 ], !notdec.evm !3084
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 %_0x3192_0x4), !notdec.evm !3085
-  call void @evm_mstore(ptr %mem, i256 %_0x3192_0x2, i256 %evm.mload5), !notdec.evm !3086
+  %notdec.evm.mem.ptr.515 = inttoptr i256 %_0x3192_0x4 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.515, align 1, !notdec.evm !3085
+  %notdec.evm.mem.ptr.516 = inttoptr i256 %_0x3192_0x2 to ptr
+  store i256 %evm.mload5, ptr %notdec.evm.mem.ptr.516, align 1, !notdec.evm !3086
   %evm.add6 = add i256 32, %_0x3192_0x4, !notdec.evm !3087
   %evm.add7 = add i256 32, %_0x3192_0x2, !notdec.evm !3088
   %evm.add8 = add i256 1, %_0x3192_0x0, !notdec.evm !3089
   br label %bb._0x3189, !notdec.evm !3090
 }
 
-define { i256, i256, i256 } @private__0x31b2_0x31b2(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x31b2arg0x0, i256 %_0x31b2arg0x1, i256 %_0x31b2arg0x2) {
+define { i256, i256, i256 } @private__0x31b2_0x31b2(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x31b2arg0x0, i256 %_0x31b2arg0x1, i256 %_0x31b2arg0x2) #0 {
 bb._0x31b2:
   %evm.sub = sub i256 %_0x31b2arg0x1, %_0x31b2arg0x0, !notdec.evm !3091
   %evm.slt = icmp slt i256 %evm.sub, 96, !notdec.evm !3092
@@ -5193,7 +5707,7 @@ bb._0x31c3:                                       ; preds = %bb._0x31b2
   unreachable, !notdec.evm !3104
 }
 
-define void @public_getTransferStrategy_address__0x31c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getTransferStrategy_address__0x31c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x31c:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3105
   %private.call = call i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 810), !notdec.evm !3106
@@ -5203,30 +5717,35 @@ bb._0x32a:                                        ; preds = %bb._0x31c
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3107
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3108
   %evm.and = and i256 %evm.sub, %private.call, !notdec.evm !3109
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !3110
-  call void @evm_mstore(ptr %mem, i256 32, i256 58), !notdec.evm !3111
+  %notdec.evm.mem.ptr.517 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.517, align 1, !notdec.evm !3110
+  %notdec.evm.mem.ptr.518 = inttoptr i256 32 to ptr
+  store i256 58, ptr %notdec.evm.mem.ptr.518, align 1, !notdec.evm !3111
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3112
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !3113
   %evm.and1 = and i256 %evm.sload, %evm.sub, !notdec.evm !3114
   br label %bb._0xb7332, !notdec.evm !3115
 
 bb._0xb7332:                                      ; preds = %bb._0x32a
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3116
+  %notdec.evm.mem.ptr.519 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.519, align 1, !notdec.evm !3116
   %evm.shl2 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3117
   %evm.sub3 = sub i256 %evm.shl2, 1, !notdec.evm !3118
   %evm.and4 = and i256 %evm.and1, %evm.sub3, !notdec.evm !3119
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and4), !notdec.evm !3120
+  %notdec.evm.mem.ptr.520 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and4, ptr %notdec.evm.mem.ptr.520, align 1, !notdec.evm !3120
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3121
   br label %bb._0xfa19f, !notdec.evm !3122
 
 bb._0xfa19f:                                      ; preds = %bb._0xb7332
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3123
+  %notdec.evm.mem.ptr.521 = inttoptr i256 64 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.521, align 1, !notdec.evm !3123
   %evm.sub6 = sub i256 %evm.add, %evm.mload5, !notdec.evm !3124
   call void @evm_return(ptr %mem, i256 %evm.mload5, i256 %evm.sub6), !notdec.evm !3125
   ret void, !notdec.evm !3125
 }
 
-define { i256, i256, i256, i256 } @private__0x31f2_0x31f2(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x31f2arg0x0, i256 %_0x31f2arg0x1, i256 %_0x31f2arg0x2) {
+define { i256, i256, i256, i256 } @private__0x31f2_0x31f2(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x31f2arg0x0, i256 %_0x31f2arg0x1, i256 %_0x31f2arg0x2) #0 {
 bb._0x31f2:
   %evm.sub = sub i256 %_0x31f2arg0x1, %_0x31f2arg0x0, !notdec.evm !3126
   %evm.slt = icmp slt i256 %evm.sub, 96, !notdec.evm !3127
@@ -5278,9 +5797,10 @@ bb._0x3204:                                       ; preds = %bb._0x31f2
   unreachable, !notdec.evm !3145
 }
 
-define i256 @private__0x3250_0x3250(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3250arg0x0, i256 %_0x3250arg0x1, i256 %_0x3250arg0x2) {
+define i256 @private__0x3250_0x3250(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3250arg0x0, i256 %_0x3250arg0x1, i256 %_0x3250arg0x2) #0 {
 bb._0x3250:
-  call void @evm_mstore(ptr %mem, i256 %_0x3250arg0x0, i256 32), !notdec.evm !3146
+  %notdec.evm.mem.ptr.522 = inttoptr i256 %_0x3250arg0x0 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.522, align 1, !notdec.evm !3146
   %evm.add = add i256 %_0x3250arg0x0, 32, !notdec.evm !3147
   %private.call = call i256 @private__0x3117_0x3117(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3250arg0x1, i256 %evm.add, i256 955618), !notdec.evm !3148
   br label %bb._0xe94e2
@@ -5289,7 +5809,7 @@ bb._0xe94e2:                                      ; preds = %bb._0x3250
   ret i256 %private.call, !notdec.evm !3149
 }
 
-define { i256, i256, i256, i256 } @private__0x3263_0x3263(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3263arg0x0, i256 %_0x3263arg0x1, i256 %_0x3263arg0x2) {
+define { i256, i256, i256, i256 } @private__0x3263_0x3263(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3263arg0x0, i256 %_0x3263arg0x1, i256 %_0x3263arg0x2) #0 {
 bb._0x3263:
   %evm.sub = sub i256 %_0x3263arg0x1, %_0x3263arg0x0, !notdec.evm !3150
   %evm.slt = icmp slt i256 %evm.sub, 96, !notdec.evm !3151
@@ -5345,7 +5865,7 @@ bb._0x3275:                                       ; preds = %bb._0x3263
   unreachable, !notdec.evm !3170
 }
 
-define i256 @private__0x332d_0x332d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x332darg0x0, i256 %_0x332darg0x1) {
+define i256 @private__0x332d_0x332d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x332darg0x0, i256 %_0x332darg0x1) #0 {
 bb._0x332d:
   %evm.calldataload = call i256 @evm_calldataload(ptr %calldata, i256 %_0x332darg0x0), !notdec.evm !3171
   %evm.shl = call i256 @evm_shl(i256 88, i256 1), !notdec.evm !3172
@@ -5364,7 +5884,7 @@ bb._0x3340:                                       ; preds = %bb._0x332d
   unreachable, !notdec.evm !3178
 }
 
-define i256 @private__0x3349_0x3349(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3349arg0x0, i256 %_0x3349arg0x1) {
+define i256 @private__0x3349_0x3349(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3349arg0x0, i256 %_0x3349arg0x1) #0 {
 bb._0x3349:
   %evm.calldataload = call i256 @evm_calldataload(ptr %calldata, i256 %_0x3349arg0x0), !notdec.evm !3179
   %evm.and = and i256 %evm.calldataload, 4294967295, !notdec.evm !3180
@@ -5381,7 +5901,7 @@ bb._0x3359:                                       ; preds = %bb._0x3349
   unreachable, !notdec.evm !3184
 }
 
-define i256 @private__0x335d_0x335d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x335darg0x0, i256 %_0x335darg0x1, i256 %_0x335darg0x2) {
+define i256 @private__0x335d_0x335d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x335darg0x0, i256 %_0x335darg0x1, i256 %_0x335darg0x2) #0 {
 bb._0x335d:
   %evm.sub = sub i256 %_0x335darg0x1, %_0x335darg0x0, !notdec.evm !3185
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !3186
@@ -5425,7 +5945,8 @@ bb._0x33ad:                                       ; preds = %bb._0x339b
   br label %bb._0x32fd, !notdec.evm !3205
 
 bb._0x32fd:                                       ; preds = %bb._0x33ad
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3206
+  %notdec.evm.mem.ptr.523 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.523, align 1, !notdec.evm !3206
   %evm.add19 = add i256 %evm.add18, 31, !notdec.evm !3207
   %evm.and = and i256 -32, %evm.add19, !notdec.evm !3208
   %evm.add20 = add i256 %evm.mload, %evm.and, !notdec.evm !3209
@@ -5442,11 +5963,13 @@ bb._0x32fd:                                       ; preds = %bb._0x33ad
   br i1 %evm.branch.cond28, label %bb._0x3325, label %bb._0x331e, !notdec.evm !3216
 
 bb._0x3325:                                       ; preds = %bb._0x32fd
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add20), !notdec.evm !3217
+  %notdec.evm.mem.ptr.524 = inttoptr i256 64 to ptr
+  store i256 %evm.add20, ptr %notdec.evm.mem.ptr.524, align 1, !notdec.evm !3217
   br label %bb._0x33bb, !notdec.evm !3218
 
 bb._0x33bb:                                       ; preds = %bb._0x3325
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.calldataload11), !notdec.evm !3219
+  %notdec.evm.mem.ptr.525 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.calldataload11, ptr %notdec.evm.mem.ptr.525, align 1, !notdec.evm !3219
   %evm.add29 = add i256 %evm.mload, 32, !notdec.evm !3220
   %evm.mul = mul i256 224, %evm.calldataload11, !notdec.evm !3221
   %evm.add30 = add i256 %evm.add, %evm.mul, !notdec.evm !3222
@@ -5496,7 +6019,8 @@ bb._0x33f7:                                       ; preds = %bb._0x33e8
 bb._0x32d5:                                       ; preds = %bb._0x33f7
   %_0x32d5_0x4 = phi i256 [ %_0x33f7_0x3, %bb._0x33f7 ], !notdec.evm !3246
   %_0x32d5_0x5 = phi i256 [ %_0x33f7_0x4, %bb._0x33f7 ], !notdec.evm !3247
-  %evm.mload49 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3248
+  %notdec.evm.mem.ptr.526 = inttoptr i256 64 to ptr
+  %evm.mload49 = load i256, ptr %notdec.evm.mem.ptr.526, align 1, !notdec.evm !3248
   %evm.add50 = add i256 %evm.mload49, 224, !notdec.evm !3249
   %evm.shl51 = call i256 @evm_shl(i256 64, i256 1), !notdec.evm !3250
   %evm.sub52 = sub i256 %evm.shl51, 1, !notdec.evm !3251
@@ -5513,7 +6037,8 @@ bb._0x32d5:                                       ; preds = %bb._0x33f7
 bb._0x32f7:                                       ; preds = %bb._0x32d5
   %_0x32f7_0x6 = phi i256 [ %_0x32d5_0x4, %bb._0x32d5 ], !notdec.evm !3257
   %_0x32f7_0x7 = phi i256 [ %_0x32d5_0x5, %bb._0x32d5 ], !notdec.evm !3258
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add50), !notdec.evm !3259
+  %notdec.evm.mem.ptr.527 = inttoptr i256 64 to ptr
+  store i256 %evm.add50, ptr %notdec.evm.mem.ptr.527, align 1, !notdec.evm !3259
   br label %bb._0x33ff, !notdec.evm !3260
 
 bb._0x33ff:                                       ; preds = %bb._0x32f7
@@ -5525,11 +6050,13 @@ bb._0x33ff:                                       ; preds = %bb._0x32f7
 bb._0x3408:                                       ; preds = %bb._0x33ff
   %_0x3408_0x5 = phi i256 [ %_0x33ff_0x4, %bb._0x33ff ], !notdec.evm !3264
   %_0x3408_0x6 = phi i256 [ %_0x33ff_0x5, %bb._0x33ff ], !notdec.evm !3265
-  call void @evm_mstore(ptr %mem, i256 %evm.mload49, i256 %private.call), !notdec.evm !3266
+  %notdec.evm.mem.ptr.528 = inttoptr i256 %evm.mload49 to ptr
+  store i256 %private.call, ptr %notdec.evm.mem.ptr.528, align 1, !notdec.evm !3266
   %evm.add61 = add i256 %_0x3408_0x6, 32, !notdec.evm !3267
   %evm.calldataload62 = call i256 @evm_calldataload(ptr %calldata, i256 %evm.add61), !notdec.evm !3268
   %evm.add63 = add i256 %evm.mload49, 32, !notdec.evm !3269
-  call void @evm_mstore(ptr %mem, i256 %evm.add63, i256 %evm.calldataload62), !notdec.evm !3270
+  %notdec.evm.mem.ptr.529 = inttoptr i256 %evm.add63 to ptr
+  store i256 %evm.calldataload62, ptr %notdec.evm.mem.ptr.529, align 1, !notdec.evm !3270
   %evm.add64 = add i256 %_0x3408_0x6, 64, !notdec.evm !3271
   %private.call65 = call i256 @private__0x3349_0x3349(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add64, i256 13343), !notdec.evm !3272
   br label %bb._0x341f
@@ -5538,7 +6065,8 @@ bb._0x341f:                                       ; preds = %bb._0x3408
   %_0x341f_0x6 = phi i256 [ %_0x3408_0x5, %bb._0x3408 ], !notdec.evm !3273
   %_0x341f_0x7 = phi i256 [ %_0x3408_0x6, %bb._0x3408 ], !notdec.evm !3274
   %evm.add66 = add i256 %evm.mload49, 64, !notdec.evm !3275
-  call void @evm_mstore(ptr %mem, i256 %evm.add66, i256 %private.call65), !notdec.evm !3276
+  %notdec.evm.mem.ptr.530 = inttoptr i256 %evm.add66 to ptr
+  store i256 %private.call65, ptr %notdec.evm.mem.ptr.530, align 1, !notdec.evm !3276
   %evm.add67 = add i256 96, %_0x341f_0x7, !notdec.evm !3277
   %evm.calldataload68 = call i256 @evm_calldataload(ptr %calldata, i256 %evm.add67), !notdec.evm !3278
   call void @private__0x2edf_0x2edf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.calldataload68, i256 13362), !notdec.evm !3279
@@ -5548,7 +6076,8 @@ bb._0x3432:                                       ; preds = %bb._0x341f
   %_0x3432_0x6 = phi i256 [ %_0x341f_0x6, %bb._0x341f ], !notdec.evm !3280
   %_0x3432_0x7 = phi i256 [ %_0x341f_0x7, %bb._0x341f ], !notdec.evm !3281
   %evm.add69 = add i256 %evm.mload49, 96, !notdec.evm !3282
-  call void @evm_mstore(ptr %mem, i256 %evm.add69, i256 %evm.calldataload68), !notdec.evm !3283
+  %notdec.evm.mem.ptr.531 = inttoptr i256 %evm.add69 to ptr
+  store i256 %evm.calldataload68, ptr %notdec.evm.mem.ptr.531, align 1, !notdec.evm !3283
   %evm.add70 = add i256 128, %_0x3432_0x7, !notdec.evm !3284
   %evm.calldataload71 = call i256 @evm_calldataload(ptr %calldata, i256 %evm.add70), !notdec.evm !3285
   call void @private__0x2edf_0x2edf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.calldataload71, i256 13381), !notdec.evm !3286
@@ -5558,7 +6087,8 @@ bb._0x3445:                                       ; preds = %bb._0x3432
   %_0x3445_0x6 = phi i256 [ %_0x3432_0x6, %bb._0x3432 ], !notdec.evm !3287
   %_0x3445_0x7 = phi i256 [ %_0x3432_0x7, %bb._0x3432 ], !notdec.evm !3288
   %evm.add72 = add i256 %evm.mload49, 128, !notdec.evm !3289
-  call void @evm_mstore(ptr %mem, i256 %evm.add72, i256 %evm.calldataload71), !notdec.evm !3290
+  %notdec.evm.mem.ptr.532 = inttoptr i256 %evm.add72 to ptr
+  store i256 %evm.calldataload71, ptr %notdec.evm.mem.ptr.532, align 1, !notdec.evm !3290
   %evm.add73 = add i256 160, %_0x3445_0x7, !notdec.evm !3291
   %evm.calldataload74 = call i256 @evm_calldataload(ptr %calldata, i256 %evm.add73), !notdec.evm !3292
   call void @private__0x2edf_0x2edf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.calldataload74, i256 13400), !notdec.evm !3293
@@ -5568,7 +6098,8 @@ bb._0x3458:                                       ; preds = %bb._0x3445
   %_0x3458_0x6 = phi i256 [ %_0x3445_0x6, %bb._0x3445 ], !notdec.evm !3294
   %_0x3458_0x7 = phi i256 [ %_0x3445_0x7, %bb._0x3445 ], !notdec.evm !3295
   %evm.add75 = add i256 %evm.mload49, 160, !notdec.evm !3296
-  call void @evm_mstore(ptr %mem, i256 %evm.add75, i256 %evm.calldataload74), !notdec.evm !3297
+  %notdec.evm.mem.ptr.533 = inttoptr i256 %evm.add75 to ptr
+  store i256 %evm.calldataload74, ptr %notdec.evm.mem.ptr.533, align 1, !notdec.evm !3297
   %evm.add76 = add i256 192, %_0x3458_0x7, !notdec.evm !3298
   %evm.calldataload77 = call i256 @evm_calldataload(ptr %calldata, i256 %evm.add76), !notdec.evm !3299
   call void @private__0x2edf_0x2edf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.calldataload77, i256 13419), !notdec.evm !3300
@@ -5578,8 +6109,10 @@ bb._0x346b:                                       ; preds = %bb._0x3458
   %_0x346b_0x6 = phi i256 [ %_0x3458_0x6, %bb._0x3458 ], !notdec.evm !3301
   %_0x346b_0x7 = phi i256 [ %_0x3458_0x7, %bb._0x3458 ], !notdec.evm !3302
   %evm.add78 = add i256 %evm.mload49, 192, !notdec.evm !3303
-  call void @evm_mstore(ptr %mem, i256 %evm.add78, i256 %evm.calldataload77), !notdec.evm !3304
-  call void @evm_mstore(ptr %mem, i256 %_0x346b_0x6, i256 %evm.mload49), !notdec.evm !3305
+  %notdec.evm.mem.ptr.534 = inttoptr i256 %evm.add78 to ptr
+  store i256 %evm.calldataload77, ptr %notdec.evm.mem.ptr.534, align 1, !notdec.evm !3304
+  %notdec.evm.mem.ptr.535 = inttoptr i256 %_0x346b_0x6 to ptr
+  store i256 %evm.mload49, ptr %notdec.evm.mem.ptr.535, align 1, !notdec.evm !3305
   %evm.add79 = add i256 224, %_0x346b_0x7, !notdec.evm !3306
   %evm.add80 = add i256 32, %_0x346b_0x6, !notdec.evm !3307
   br label %bb._0x33df, !notdec.evm !3308
@@ -5593,8 +6126,10 @@ bb._0x8251:                                       ; preds = %bb._0x32f0
   %_0x8251_0x7 = phi i256 [ %_0x32f0_0x6, %bb._0x32f0 ], !notdec.evm !3312
   %_0x8251_0x8 = phi i256 [ %_0x32f0_0x7, %bb._0x32f0 ], !notdec.evm !3313
   %evm.shl81 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3314
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl81), !notdec.evm !3315
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !3316
+  %notdec.evm.mem.ptr.536 = inttoptr i256 0 to ptr
+  store i256 %evm.shl81, ptr %notdec.evm.mem.ptr.536, align 1, !notdec.evm !3315
+  %notdec.evm.mem.ptr.537 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.537, align 1, !notdec.evm !3316
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3317
   unreachable, !notdec.evm !3317
 
@@ -5613,8 +6148,10 @@ bb._0x331e:                                       ; preds = %bb._0x32fd
 
 bb._0x8286:                                       ; preds = %bb._0x331e
   %evm.shl82 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3323
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl82), !notdec.evm !3324
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !3325
+  %notdec.evm.mem.ptr.538 = inttoptr i256 0 to ptr
+  store i256 %evm.shl82, ptr %notdec.evm.mem.ptr.538, align 1, !notdec.evm !3324
+  %notdec.evm.mem.ptr.539 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.539, align 1, !notdec.evm !3325
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3326
   unreachable, !notdec.evm !3326
 
@@ -5623,8 +6160,10 @@ bb._0x33a6:                                       ; preds = %bb._0x339b
 
 bb._0x82bb:                                       ; preds = %bb._0x33a6
   %evm.shl83 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3328
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl83), !notdec.evm !3329
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !3330
+  %notdec.evm.mem.ptr.540 = inttoptr i256 0 to ptr
+  store i256 %evm.shl83, ptr %notdec.evm.mem.ptr.540, align 1, !notdec.evm !3329
+  %notdec.evm.mem.ptr.541 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.541, align 1, !notdec.evm !3330
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3331
   unreachable, !notdec.evm !3331
 
@@ -5641,7 +6180,7 @@ bb._0x336c:                                       ; preds = %bb._0x335d
   unreachable, !notdec.evm !3334
 }
 
-define void @public_getRewardsByAsset_address__0x348(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getRewardsByAsset_address__0x348(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x348:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3335
   %private.call = call i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 854), !notdec.evm !3336
@@ -5652,18 +6191,20 @@ bb._0x356:                                        ; preds = %bb._0x348
   br label %bb._0xb7369
 
 bb._0xb7369:                                      ; preds = %bb._0x356
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3338
+  %notdec.evm.mem.ptr.542 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.542, align 1, !notdec.evm !3338
   %private.call2 = call i256 @private__0x3250_0x3250(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload, i256 %private.call1, i256 1024455), !notdec.evm !3339
   br label %bb._0xfa1c7
 
 bb._0xfa1c7:                                      ; preds = %bb._0xb7369
-  %evm.mload3 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3340
+  %notdec.evm.mem.ptr.543 = inttoptr i256 64 to ptr
+  %evm.mload3 = load i256, ptr %notdec.evm.mem.ptr.543, align 1, !notdec.evm !3340
   %evm.sub = sub i256 %private.call2, %evm.mload3, !notdec.evm !3341
   call void @evm_return(ptr %mem, i256 %evm.mload3, i256 %evm.sub), !notdec.evm !3342
   ret void, !notdec.evm !3342
 }
 
-define { i256, i256 } @private__0x348a_0x348a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x348aarg0x0, i256 %_0x348aarg0x1, i256 %_0x348aarg0x2) {
+define { i256, i256 } @private__0x348a_0x348a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x348aarg0x0, i256 %_0x348aarg0x1, i256 %_0x348aarg0x2) #0 {
 bb._0x348a:
   %evm.sub = sub i256 %_0x348aarg0x1, %_0x348aarg0x0, !notdec.evm !3343
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !3344
@@ -5705,7 +6246,7 @@ bb._0x3499:                                       ; preds = %bb._0x348a
   unreachable, !notdec.evm !3357
 }
 
-define { i256, i256, i256 } @private__0x34cb_0x34cb(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x34cbarg0x0, i256 %_0x34cbarg0x1, i256 %_0x34cbarg0x2) {
+define { i256, i256, i256 } @private__0x34cb_0x34cb(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x34cbarg0x0, i256 %_0x34cbarg0x1, i256 %_0x34cbarg0x2) #0 {
 bb._0x34cb:
   %evm.sub = sub i256 %_0x34cbarg0x1, %_0x34cbarg0x0, !notdec.evm !3358
   %evm.slt = icmp slt i256 %evm.sub, 96, !notdec.evm !3359
@@ -5742,7 +6283,7 @@ bb._0x34dc:                                       ; preds = %bb._0x34cb
   unreachable, !notdec.evm !3370
 }
 
-define { i256, i256, i256, i256, i256 } @private__0x3512_0x3512(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3512arg0x0, i256 %_0x3512arg0x1, i256 %_0x3512arg0x2) {
+define { i256, i256, i256, i256, i256 } @private__0x3512_0x3512(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3512arg0x0, i256 %_0x3512arg0x1, i256 %_0x3512arg0x2) #0 {
 bb._0x3512:
   %evm.sub = sub i256 %_0x3512arg0x1, %_0x3512arg0x0, !notdec.evm !3371
   %evm.slt = icmp slt i256 %evm.sub, 96, !notdec.evm !3372
@@ -5814,19 +6355,22 @@ bb._0x3526:                                       ; preds = %bb._0x3512
   unreachable, !notdec.evm !3396
 }
 
-define i256 @private__0x3594_0x3594(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3594arg0x0, i256 %_0x3594arg0x1) {
+define i256 @private__0x3594_0x3594(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3594arg0x0, i256 %_0x3594arg0x1) #0 {
 bb._0x3594:
-  call void @evm_mstore(ptr %mem, i256 %_0x3594arg0x0, i256 32), !notdec.evm !3397
+  %notdec.evm.mem.ptr.544 = inttoptr i256 %_0x3594arg0x0 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.544, align 1, !notdec.evm !3397
   %evm.add = add i256 %_0x3594arg0x0, 32, !notdec.evm !3398
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 18), !notdec.evm !3399
+  %notdec.evm.mem.ptr.545 = inttoptr i256 %evm.add to ptr
+  store i256 18, ptr %notdec.evm.mem.ptr.545, align 1, !notdec.evm !3399
   %evm.shl = call i256 @evm_shl(i256 112, i256 6385853550292532458850385369858013024047955), !notdec.evm !3400
   %evm.add1 = add i256 %_0x3594arg0x0, 64, !notdec.evm !3401
-  call void @evm_mstore(ptr %mem, i256 %evm.add1, i256 %evm.shl), !notdec.evm !3402
+  %notdec.evm.mem.ptr.546 = inttoptr i256 %evm.add1 to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.546, align 1, !notdec.evm !3402
   %evm.add2 = add i256 96, %_0x3594arg0x0, !notdec.evm !3403
   ret i256 %evm.add2, !notdec.evm !3404
 }
 
-define i256 @private__0x35ec_0x35ec(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x35ecarg0x0, i256 %_0x35ecarg0x1, i256 %_0x35ecarg0x2) {
+define i256 @private__0x35ec_0x35ec(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x35ecarg0x0, i256 %_0x35ecarg0x1, i256 %_0x35ecarg0x2) #0 {
 bb._0x35ec:
   %evm.not = xor i256 %_0x35ecarg0x1, -1, !notdec.evm !3405
   %evm.gt = icmp ugt i256 %_0x35ecarg0x0, %evm.not, !notdec.evm !3406
@@ -5845,13 +6389,15 @@ bb._0x35f8:                                       ; preds = %bb._0x35ec
 
 bb._0x82f0:                                       ; preds = %bb._0x35f8
   %evm.shl = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3412
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl), !notdec.evm !3413
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3414
+  %notdec.evm.mem.ptr.547 = inttoptr i256 0 to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.547, align 1, !notdec.evm !3413
+  %notdec.evm.mem.ptr.548 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.548, align 1, !notdec.evm !3414
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3415
   unreachable, !notdec.evm !3415
 }
 
-define i256 @private__0x3604_0x3604(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3604arg0x0, i256 %_0x3604arg0x1) {
+define i256 @private__0x3604_0x3604(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3604arg0x0, i256 %_0x3604arg0x1) #0 {
 bb._0x3604:
   %evm.eq = icmp eq i256 %_0x3604arg0x0, -1, !notdec.evm !3416
   %evm.bool = zext i1 %evm.eq to i256, !notdec.evm !3416
@@ -5869,25 +6415,30 @@ bb._0x3611:                                       ; preds = %bb._0x3604
 
 bb._0x8325:                                       ; preds = %bb._0x3611
   %evm.shl = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3422
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl), !notdec.evm !3423
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3424
+  %notdec.evm.mem.ptr.549 = inttoptr i256 0 to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.549, align 1, !notdec.evm !3423
+  %notdec.evm.mem.ptr.550 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.550, align 1, !notdec.evm !3424
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3425
   unreachable, !notdec.evm !3425
 }
 
-define i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x361farg0x0, i256 %_0x361farg0x1) {
+define i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x361farg0x0, i256 %_0x361farg0x1) #0 {
 bb._0x361f:
-  call void @evm_mstore(ptr %mem, i256 %_0x361farg0x0, i256 32), !notdec.evm !3426
+  %notdec.evm.mem.ptr.551 = inttoptr i256 %_0x361farg0x0 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.551, align 1, !notdec.evm !3426
   %evm.add = add i256 %_0x361farg0x0, 32, !notdec.evm !3427
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 21), !notdec.evm !3428
+  %notdec.evm.mem.ptr.552 = inttoptr i256 %evm.add to ptr
+  store i256 21, ptr %notdec.evm.mem.ptr.552, align 1, !notdec.evm !3428
   %evm.shl = call i256 @evm_shl(i256 89, i256 57952816635656534579138015057158637577978016670377), !notdec.evm !3429
   %evm.add1 = add i256 %_0x361farg0x0, 64, !notdec.evm !3430
-  call void @evm_mstore(ptr %mem, i256 %evm.add1, i256 %evm.shl), !notdec.evm !3431
+  %notdec.evm.mem.ptr.553 = inttoptr i256 %evm.add1 to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.553, align 1, !notdec.evm !3431
   %evm.add2 = add i256 96, %_0x361farg0x0, !notdec.evm !3432
   ret i256 %evm.add2, !notdec.evm !3433
 }
 
-define i256 @private__0x364e_0x364e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x364earg0x0, i256 %_0x364earg0x1) {
+define i256 @private__0x364e_0x364e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x364earg0x0, i256 %_0x364earg0x1) #0 {
 bb._0x364e:
   %evm.shl = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !3434
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3435
@@ -5908,13 +6459,15 @@ bb._0x3664:                                       ; preds = %bb._0x364e
 
 bb._0x835a:                                       ; preds = %bb._0x3664
   %evm.shl2 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3443
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl2), !notdec.evm !3444
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3445
+  %notdec.evm.mem.ptr.554 = inttoptr i256 0 to ptr
+  store i256 %evm.shl2, ptr %notdec.evm.mem.ptr.554, align 1, !notdec.evm !3444
+  %notdec.evm.mem.ptr.555 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.555, align 1, !notdec.evm !3445
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3446
   unreachable, !notdec.evm !3446
 }
 
-define i256 @private__0x3675_0x3675(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3675arg0x0, i256 %_0x3675arg0x1, i256 %_0x3675arg0x2) {
+define i256 @private__0x3675_0x3675(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3675arg0x0, i256 %_0x3675arg0x1, i256 %_0x3675arg0x2) #0 {
 bb._0x3675:
   %evm.sub = sub i256 %_0x3675arg0x1, %_0x3675arg0x0, !notdec.evm !3447
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !3448
@@ -5925,7 +6478,8 @@ bb._0x3675:
   br i1 %evm.branch.cond, label %bb._0x3687, label %bb._0x3683, !notdec.evm !3450
 
 bb._0x3687:                                       ; preds = %bb._0x3675
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x3675arg0x0), !notdec.evm !3451
+  %notdec.evm.mem.ptr.556 = inttoptr i256 %_0x3675arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.556, align 1, !notdec.evm !3451
   ret i256 %evm.mload, !notdec.evm !3452
 
 bb._0x3683:                                       ; preds = %bb._0x3675
@@ -5933,7 +6487,7 @@ bb._0x3683:                                       ; preds = %bb._0x3675
   unreachable, !notdec.evm !3453
 }
 
-define void @public_getUserRewards_address___address_address__0x368(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getUserRewards_address___address_address__0x368(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x368:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3454
   %private.call = call { i256, i256, i256, i256 } @private__0x3263_0x3263(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 886), !notdec.evm !3455
@@ -5948,19 +6502,22 @@ bb._0x376:                                        ; preds = %bb._0x368
   br label %bb._0xb73bd
 
 bb._0xb73bd:                                      ; preds = %bb._0x376
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3457
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.call4), !notdec.evm !3458
+  %notdec.evm.mem.ptr.557 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.557, align 1, !notdec.evm !3457
+  %notdec.evm.mem.ptr.558 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.call4, ptr %notdec.evm.mem.ptr.558, align 1, !notdec.evm !3458
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3459
   br label %bb._0xfa1ef, !notdec.evm !3460
 
 bb._0xfa1ef:                                      ; preds = %bb._0xb73bd
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3461
+  %notdec.evm.mem.ptr.559 = inttoptr i256 64 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.559, align 1, !notdec.evm !3461
   %evm.sub = sub i256 %evm.add, %evm.mload5, !notdec.evm !3462
   call void @evm_return(ptr %mem, i256 %evm.mload5, i256 %evm.sub), !notdec.evm !3463
   ret void, !notdec.evm !3463
 }
 
-define { i256, i256 } @private__0x368e_0x368e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x368earg0x0, i256 %_0x368earg0x1, i256 %_0x368earg0x2) {
+define { i256, i256 } @private__0x368e_0x368e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x368earg0x0, i256 %_0x368earg0x1, i256 %_0x368earg0x2) #0 {
 bb._0x368e:
   br label %bb._0x3693, !notdec.evm !3464
 
@@ -6031,13 +6588,15 @@ bb._0x838f:                                       ; preds = %bb._0x36a8
   %_0x838f_0x3 = phi i256 [ %_0x36a8_0x2, %bb._0x36a8 ], !notdec.evm !3504
   %_0x838f_0x5 = phi i256 [ %_0x36a8_0x4, %bb._0x36a8 ], !notdec.evm !3505
   %evm.shl = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3506
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl), !notdec.evm !3507
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3508
+  %notdec.evm.mem.ptr.560 = inttoptr i256 0 to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.560, align 1, !notdec.evm !3507
+  %notdec.evm.mem.ptr.561 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.561, align 1, !notdec.evm !3508
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3509
   unreachable, !notdec.evm !3509
 }
 
-define i256 @private__0x36d1_0x36d1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x36d1arg0x0, i256 %_0x36d1arg0x1, i256 %_0x36d1arg0x2) {
+define i256 @private__0x36d1_0x36d1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x36d1arg0x0, i256 %_0x36d1arg0x1, i256 %_0x36d1arg0x2) #0 {
 bb._0x36d1:
   %evm.branch.cond = icmp ne i256 %_0x36d1arg0x1, 0, !notdec.evm !3510
   br i1 %evm.branch.cond, label %bb._0x36e0, label %bb._0x36d9, !notdec.evm !3510
@@ -6084,8 +6643,10 @@ bb._0x3717:                                       ; preds = %bb._0x370d
 
 bb._0x83c4:                                       ; preds = %bb._0x3717
   %evm.shl9 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3525
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl9), !notdec.evm !3526
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3527
+  %notdec.evm.mem.ptr.562 = inttoptr i256 0 to ptr
+  store i256 %evm.shl9, ptr %notdec.evm.mem.ptr.562, align 1, !notdec.evm !3526
+  %notdec.evm.mem.ptr.563 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.563, align 1, !notdec.evm !3527
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3528
   unreachable, !notdec.evm !3528
 
@@ -6133,8 +6694,10 @@ bb._0x3763:                                       ; preds = %bb._0x3756
 
 bb._0x83f9:                                       ; preds = %bb._0x3763
   %evm.shl27 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3547
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl27), !notdec.evm !3548
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3549
+  %notdec.evm.mem.ptr.564 = inttoptr i256 0 to ptr
+  store i256 %evm.shl27, ptr %notdec.evm.mem.ptr.564, align 1, !notdec.evm !3548
+  %notdec.evm.mem.ptr.565 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.565, align 1, !notdec.evm !3549
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3550
   unreachable, !notdec.evm !3550
 
@@ -6158,7 +6721,7 @@ bb._0xe957a:                                      ; preds = %bb._0x36d9
   ret i256 1, !notdec.evm !3557
 }
 
-define i256 @private__0x3772_0x3772(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3772arg0x0, i256 %_0x3772arg0x1, i256 %_0x3772arg0x2) {
+define i256 @private__0x3772_0x3772(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3772arg0x0, i256 %_0x3772arg0x1, i256 %_0x3772arg0x2) #0 {
 bb._0x3772:
   %evm.and = and i256 %_0x3772arg0x1, 255, !notdec.evm !3558
   %private.call = call i256 @private__0x36d1_0x36d1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3772arg0x0, i256 %evm.and, i256 956039), !notdec.evm !3559
@@ -6168,7 +6731,7 @@ bb._0xe9687:                                      ; preds = %bb._0x3772
   ret i256 %private.call, !notdec.evm !3560
 }
 
-define i256 @private__0x3781_0x3781(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3781arg0x0, i256 %_0x3781arg0x1, i256 %_0x3781arg0x2) {
+define i256 @private__0x3781_0x3781(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3781arg0x0, i256 %_0x3781arg0x1, i256 %_0x3781arg0x2) #0 {
 bb._0x3781:
   %private.call = call i256 @private__0x36d1_0x36d1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3781arg0x0, i256 %_0x3781arg0x1, i256 956077), !notdec.evm !3561
   br label %bb._0xe96ad
@@ -6177,7 +6740,7 @@ bb._0xe96ad:                                      ; preds = %bb._0x3781
   ret i256 %private.call, !notdec.evm !3562
 }
 
-define i256 @private__0x378d_0x378d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x378darg0x0, i256 %_0x378darg0x1, i256 %_0x378darg0x2) {
+define i256 @private__0x378d_0x378d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x378darg0x0, i256 %_0x378darg0x1, i256 %_0x378darg0x2) #0 {
 bb._0x378d:
   %evm.sub = sub i256 %_0x378darg0x1, %_0x378darg0x0, !notdec.evm !3563
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !3564
@@ -6199,7 +6762,7 @@ bb._0x379b:                                       ; preds = %bb._0x378d
   unreachable, !notdec.evm !3569
 }
 
-define i256 @private__0x37a8_0x37a8(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x37a8arg0x0, i256 %_0x37a8arg0x1, i256 %_0x37a8arg0x2) {
+define i256 @private__0x37a8_0x37a8(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x37a8arg0x0, i256 %_0x37a8arg0x1, i256 %_0x37a8arg0x2) #0 {
 bb._0x37a8:
   %evm.lt = icmp ult i256 %_0x37a8arg0x0, %_0x37a8arg0x1, !notdec.evm !3570
   %evm.bool = zext i1 %evm.lt to i256, !notdec.evm !3570
@@ -6217,13 +6780,15 @@ bb._0x37b3:                                       ; preds = %bb._0x37a8
 
 bb._0x842e:                                       ; preds = %bb._0x37b3
   %evm.shl = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3576
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl), !notdec.evm !3577
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3578
+  %notdec.evm.mem.ptr.566 = inttoptr i256 0 to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.566, align 1, !notdec.evm !3577
+  %notdec.evm.mem.ptr.567 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.567, align 1, !notdec.evm !3578
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3579
   unreachable, !notdec.evm !3579
 }
 
-define void @public_getClaimer_address__0x37b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getClaimer_address__0x37b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x37b:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3580
   %private.call = call i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 905), !notdec.evm !3581
@@ -6233,30 +6798,35 @@ bb._0x389:                                        ; preds = %bb._0x37b
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3582
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3583
   %evm.and = and i256 %evm.sub, %private.call, !notdec.evm !3584
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !3585
-  call void @evm_mstore(ptr %mem, i256 32, i256 57), !notdec.evm !3586
+  %notdec.evm.mem.ptr.568 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.568, align 1, !notdec.evm !3585
+  %notdec.evm.mem.ptr.569 = inttoptr i256 32 to ptr
+  store i256 57, ptr %notdec.evm.mem.ptr.569, align 1, !notdec.evm !3586
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3587
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !3588
   %evm.and1 = and i256 %evm.sload, %evm.sub, !notdec.evm !3589
   br label %bb._0xc7b85, !notdec.evm !3590
 
 bb._0xc7b85:                                      ; preds = %bb._0x389
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3591
+  %notdec.evm.mem.ptr.570 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.570, align 1, !notdec.evm !3591
   %evm.shl2 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3592
   %evm.sub3 = sub i256 %evm.shl2, 1, !notdec.evm !3593
   %evm.and4 = and i256 %evm.and1, %evm.sub3, !notdec.evm !3594
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and4), !notdec.evm !3595
+  %notdec.evm.mem.ptr.571 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and4, ptr %notdec.evm.mem.ptr.571, align 1, !notdec.evm !3595
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3596
   br label %bb._0xfa217, !notdec.evm !3597
 
 bb._0xfa217:                                      ; preds = %bb._0xc7b85
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3598
+  %notdec.evm.mem.ptr.572 = inttoptr i256 64 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.572, align 1, !notdec.evm !3598
   %evm.sub6 = sub i256 %evm.add, %evm.mload5, !notdec.evm !3599
   call void @evm_return(ptr %mem, i256 %evm.mload5, i256 %evm.sub6), !notdec.evm !3600
   ret void, !notdec.evm !3600
 }
 
-define i256 @private__0x37e3_0x37e3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x37e3arg0x0, i256 %_0x37e3arg0x1, i256 %_0x37e3arg0x2) {
+define i256 @private__0x37e3_0x37e3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x37e3arg0x0, i256 %_0x37e3arg0x1, i256 %_0x37e3arg0x2) #0 {
 bb._0x37e3:
   %evm.div = call i256 @evm_div(i256 -1, i256 %_0x37e3arg0x0), !notdec.evm !3601
   %evm.gt = icmp ugt i256 %_0x37e3arg0x1, %evm.div, !notdec.evm !3602
@@ -6280,13 +6850,15 @@ bb._0x37f6:                                       ; preds = %bb._0x37e3
 
 bb._0x8463:                                       ; preds = %bb._0x37f6
   %evm.shl = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !3611
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl), !notdec.evm !3612
-  call void @evm_mstore(ptr %mem, i256 4, i256 17), !notdec.evm !3613
+  %notdec.evm.mem.ptr.573 = inttoptr i256 0 to ptr
+  store i256 %evm.shl, ptr %notdec.evm.mem.ptr.573, align 1, !notdec.evm !3612
+  %notdec.evm.mem.ptr.574 = inttoptr i256 4 to ptr
+  store i256 17, ptr %notdec.evm.mem.ptr.574, align 1, !notdec.evm !3613
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !3614
   unreachable, !notdec.evm !3614
 }
 
-define i256 @private__0x3802_0x3802(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3802arg0x0, i256 %_0x3802arg0x1, i256 %_0x3802arg0x2) {
+define i256 @private__0x3802_0x3802(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3802arg0x0, i256 %_0x3802arg0x1, i256 %_0x3802arg0x2) #0 {
 bb._0x3802:
   %evm.sub = sub i256 %_0x3802arg0x1, %_0x3802arg0x0, !notdec.evm !3615
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !3616
@@ -6297,7 +6869,8 @@ bb._0x3802:
   br i1 %evm.branch.cond, label %bb._0x3814, label %bb._0x3810, !notdec.evm !3618
 
 bb._0x3814:                                       ; preds = %bb._0x3802
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x3802arg0x0), !notdec.evm !3619
+  %notdec.evm.mem.ptr.575 = inttoptr i256 %_0x3802arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.575, align 1, !notdec.evm !3619
   %evm.and = and i256 %evm.mload, 255, !notdec.evm !3620
   %evm.eq = icmp eq i256 %evm.mload, %evm.and, !notdec.evm !3621
   %evm.bool2 = zext i1 %evm.eq to i256, !notdec.evm !3621
@@ -6316,7 +6889,7 @@ bb._0x3810:                                       ; preds = %bb._0x3802
   unreachable, !notdec.evm !3625
 }
 
-define i256 @private__0x3825_0x3825(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3825arg0x0, i256 %_0x3825arg0x1, i256 %_0x3825arg0x2) {
+define i256 @private__0x3825_0x3825(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3825arg0x0, i256 %_0x3825arg0x1, i256 %_0x3825arg0x2) #0 {
 bb._0x3825:
   %evm.sub = sub i256 %_0x3825arg0x1, %_0x3825arg0x0, !notdec.evm !3626
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !3627
@@ -6327,7 +6900,8 @@ bb._0x3825:
   br i1 %evm.branch.cond, label %bb._0x3837, label %bb._0x3833, !notdec.evm !3629
 
 bb._0x3837:                                       ; preds = %bb._0x3825
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0x3825arg0x0), !notdec.evm !3630
+  %notdec.evm.mem.ptr.576 = inttoptr i256 %_0x3825arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.576, align 1, !notdec.evm !3630
   %evm.iszero2 = icmp eq i256 %evm.mload, 0, !notdec.evm !3631
   %evm.bool3 = zext i1 %evm.iszero2 to i256, !notdec.evm !3631
   %evm.iszero4 = icmp eq i256 %evm.bool3, 0, !notdec.evm !3632
@@ -6349,7 +6923,7 @@ bb._0x3833:                                       ; preds = %bb._0x3825
   unreachable, !notdec.evm !3637
 }
 
-define void @public_getRewardsData_address_address__0x3a7(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getRewardsData_address_address__0x3a7(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x3a7:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3638
   %private.call = call { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 949), !notdec.evm !3639
@@ -6361,12 +6935,16 @@ bb._0x3b5:                                        ; preds = %bb._0x3a7
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3640
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3641
   %evm.and = and i256 %evm.sub, %private.ret1, !notdec.evm !3642
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !3643
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !3644
+  %notdec.evm.mem.ptr.577 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.577, align 1, !notdec.evm !3643
+  %notdec.evm.mem.ptr.578 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.578, align 1, !notdec.evm !3644
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3645
   %evm.and2 = and i256 %evm.sub, %private.ret, !notdec.evm !3646
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and2), !notdec.evm !3647
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !3648
+  %notdec.evm.mem.ptr.579 = inttoptr i256 0 to ptr
+  store i256 %evm.and2, ptr %notdec.evm.mem.ptr.579, align 1, !notdec.evm !3647
+  %notdec.evm.mem.ptr.580 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.580, align 1, !notdec.evm !3648
   %evm.sha33 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3649
   %evm.sload = call i256 @evm_sload(i256 %evm.sha33), !notdec.evm !3650
   %evm.shl4 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !3651
@@ -6386,25 +6964,31 @@ bb._0x3b5:                                        ; preds = %bb._0x3a7
   br label %bb._0x414, !notdec.evm !3665
 
 bb._0x414:                                        ; preds = %bb._0x3b5
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3666
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and6), !notdec.evm !3667
+  %notdec.evm.mem.ptr.581 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.581, align 1, !notdec.evm !3666
+  %notdec.evm.mem.ptr.582 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and6, ptr %notdec.evm.mem.ptr.582, align 1, !notdec.evm !3667
   %evm.add = add i256 %evm.mload, 32, !notdec.evm !3668
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 %evm.and10), !notdec.evm !3669
+  %notdec.evm.mem.ptr.583 = inttoptr i256 %evm.add to ptr
+  store i256 %evm.and10, ptr %notdec.evm.mem.ptr.583, align 1, !notdec.evm !3669
   %evm.add17 = add i256 %evm.mload, 64, !notdec.evm !3670
-  call void @evm_mstore(ptr %mem, i256 %evm.add17, i256 %evm.and13), !notdec.evm !3671
+  %notdec.evm.mem.ptr.584 = inttoptr i256 %evm.add17 to ptr
+  store i256 %evm.and13, ptr %notdec.evm.mem.ptr.584, align 1, !notdec.evm !3671
   %evm.add18 = add i256 %evm.mload, 96, !notdec.evm !3672
-  call void @evm_mstore(ptr %mem, i256 %evm.add18, i256 %evm.and16), !notdec.evm !3673
+  %notdec.evm.mem.ptr.585 = inttoptr i256 %evm.add18 to ptr
+  store i256 %evm.and16, ptr %notdec.evm.mem.ptr.585, align 1, !notdec.evm !3673
   %evm.add19 = add i256 128, %evm.mload, !notdec.evm !3674
   br label %bb._0xc7bbc, !notdec.evm !3675
 
 bb._0xc7bbc:                                      ; preds = %bb._0x414
-  %evm.mload20 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3676
+  %notdec.evm.mem.ptr.586 = inttoptr i256 64 to ptr
+  %evm.mload20 = load i256, ptr %notdec.evm.mem.ptr.586, align 1, !notdec.evm !3676
   %evm.sub21 = sub i256 %evm.add19, %evm.mload20, !notdec.evm !3677
   call void @evm_return(ptr %mem, i256 %evm.mload20, i256 %evm.sub21), !notdec.evm !3678
   ret void, !notdec.evm !3678
 }
 
-define void @public_getAssetIndex_address_address__0x434(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getAssetIndex_address_address__0x434(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x434:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3679
   %private.call = call { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1090), !notdec.evm !3680
@@ -6419,41 +7003,48 @@ bb._0x442:                                        ; preds = %bb._0x434
   br label %bb._0x447
 
 bb._0x447:                                        ; preds = %bb._0x442
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3682
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.ret4), !notdec.evm !3683
+  %notdec.evm.mem.ptr.587 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.587, align 1, !notdec.evm !3682
+  %notdec.evm.mem.ptr.588 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.ret4, ptr %notdec.evm.mem.ptr.588, align 1, !notdec.evm !3683
   %evm.add = add i256 %evm.mload, 32, !notdec.evm !3684
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 %private.ret3), !notdec.evm !3685
+  %notdec.evm.mem.ptr.589 = inttoptr i256 %evm.add to ptr
+  store i256 %private.ret3, ptr %notdec.evm.mem.ptr.589, align 1, !notdec.evm !3685
   %evm.add5 = add i256 64, %evm.mload, !notdec.evm !3686
   br label %bb._0xc7be4, !notdec.evm !3687
 
 bb._0xc7be4:                                      ; preds = %bb._0x447
-  %evm.mload6 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3688
+  %notdec.evm.mem.ptr.590 = inttoptr i256 64 to ptr
+  %evm.mload6 = load i256, ptr %notdec.evm.mem.ptr.590, align 1, !notdec.evm !3688
   %evm.sub = sub i256 %evm.add5, %evm.mload6, !notdec.evm !3689
   call void @evm_return(ptr %mem, i256 %evm.mload6, i256 %evm.sub), !notdec.evm !3690
   ret void, !notdec.evm !3690
 }
 
-define void @public_getEmissionManager___0x45c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getEmissionManager___0x45c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x45c:
   br label %bb._0xc7c0c, !notdec.evm !3691
 
 bb._0xc7c0c:                                      ; preds = %bb._0x45c
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3692
+  %notdec.evm.mem.ptr.591 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.591, align 1, !notdec.evm !3692
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3693
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3694
   %evm.and = and i256 1443110500457411796578838204131955442359735615893, %evm.sub, !notdec.evm !3695
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and), !notdec.evm !3696
+  %notdec.evm.mem.ptr.592 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.592, align 1, !notdec.evm !3696
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3697
   br label %bb._0xfa23f, !notdec.evm !3698
 
 bb._0xfa23f:                                      ; preds = %bb._0xc7c0c
-  %evm.mload1 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3699
+  %notdec.evm.mem.ptr.593 = inttoptr i256 64 to ptr
+  %evm.mload1 = load i256, ptr %notdec.evm.mem.ptr.593, align 1, !notdec.evm !3699
   %evm.sub2 = sub i256 %evm.add, %evm.mload1, !notdec.evm !3700
   call void @evm_return(ptr %mem, i256 %evm.mload1, i256 %evm.sub2), !notdec.evm !3701
   ret void, !notdec.evm !3701
 }
 
-define void @public__0x955c2ad7_0x482(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public__0x955c2ad7_0x482(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x482:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3702
   %private.call = call i256 @private__0x335d_0x335d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1168), !notdec.evm !3703
@@ -6467,7 +7058,7 @@ bb._0xc7c43:                                      ; preds = %bb._0x490
   ret void, !notdec.evm !3705
 }
 
-define void @public_getAssetDecimals_address__0x495(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getAssetDecimals_address__0x495(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x495:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3706
   %private.call = call i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1187), !notdec.evm !3707
@@ -6477,8 +7068,10 @@ bb._0x4a3:                                        ; preds = %bb._0x495
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3708
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3709
   %evm.and = and i256 %evm.sub, %private.call, !notdec.evm !3710
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !3711
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !3712
+  %notdec.evm.mem.ptr.594 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.594, align 1, !notdec.evm !3711
+  %notdec.evm.mem.ptr.595 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.595, align 1, !notdec.evm !3712
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3713
   %evm.add = add i256 2, %evm.sha3, !notdec.evm !3714
   %evm.sload = call i256 @evm_sload(i256 %evm.add), !notdec.evm !3715
@@ -6488,20 +7081,23 @@ bb._0x4a3:                                        ; preds = %bb._0x495
   br label %bb._0x4cb, !notdec.evm !3719
 
 bb._0x4cb:                                        ; preds = %bb._0x4a3
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3720
+  %notdec.evm.mem.ptr.596 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.596, align 1, !notdec.evm !3720
   %evm.and3 = and i256 %evm.and2, 255, !notdec.evm !3721
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and3), !notdec.evm !3722
+  %notdec.evm.mem.ptr.597 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and3, ptr %notdec.evm.mem.ptr.597, align 1, !notdec.evm !3722
   %evm.add4 = add i256 32, %evm.mload, !notdec.evm !3723
   br label %bb._0xc7c64, !notdec.evm !3724
 
 bb._0xc7c64:                                      ; preds = %bb._0x4cb
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3725
+  %notdec.evm.mem.ptr.598 = inttoptr i256 64 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.598, align 1, !notdec.evm !3725
   %evm.sub6 = sub i256 %evm.add4, %evm.mload5, !notdec.evm !3726
   call void @evm_return(ptr %mem, i256 %evm.mload5, i256 %evm.sub6), !notdec.evm !3727
   ret void, !notdec.evm !3727
 }
 
-define void @public_claimAllRewardsOnBehalf_address___address_address__0x4dd(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_claimAllRewardsOnBehalf_address___address_address__0x4dd(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x4dd:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3728
   %private.call = call { i256, i256, i256, i256 } @private__0x3263_0x3263(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1259), !notdec.evm !3729
@@ -6518,18 +7114,20 @@ bb._0x4eb:                                        ; preds = %bb._0x4dd
   br label %bb._0xc7c8c
 
 bb._0xc7c8c:                                      ; preds = %bb._0x4eb
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3731
+  %notdec.evm.mem.ptr.599 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.599, align 1, !notdec.evm !3731
   %private.call7 = call i256 @private__0x315b_0x315b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload, i256 %private.ret5, i256 %private.ret6, i256 1024615), !notdec.evm !3732
   br label %bb._0xfa267
 
 bb._0xfa267:                                      ; preds = %bb._0xc7c8c
-  %evm.mload8 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3733
+  %notdec.evm.mem.ptr.600 = inttoptr i256 64 to ptr
+  %evm.mload8 = load i256, ptr %notdec.evm.mem.ptr.600, align 1, !notdec.evm !3733
   %evm.sub = sub i256 %private.call7, %evm.mload8, !notdec.evm !3734
   call void @evm_return(ptr %mem, i256 %evm.mload8, i256 %evm.sub), !notdec.evm !3735
   ret void, !notdec.evm !3735
 }
 
-define void @public_getUserAccruedRewards_address_address__0x4f0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getUserAccruedRewards_address_address__0x4f0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x4f0:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3736
   %private.call = call { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1278), !notdec.evm !3737
@@ -6542,36 +7140,41 @@ bb._0x4fe:                                        ; preds = %bb._0x4f0
   br label %bb._0xc7cb9
 
 bb._0xc7cb9:                                      ; preds = %bb._0x4fe
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3739
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %private.call2), !notdec.evm !3740
+  %notdec.evm.mem.ptr.601 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.601, align 1, !notdec.evm !3739
+  %notdec.evm.mem.ptr.602 = inttoptr i256 %evm.mload to ptr
+  store i256 %private.call2, ptr %notdec.evm.mem.ptr.602, align 1, !notdec.evm !3740
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3741
   br label %bb._0xfa28f, !notdec.evm !3742
 
 bb._0xfa28f:                                      ; preds = %bb._0xc7cb9
-  %evm.mload3 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3743
+  %notdec.evm.mem.ptr.603 = inttoptr i256 64 to ptr
+  %evm.mload3 = load i256, ptr %notdec.evm.mem.ptr.603, align 1, !notdec.evm !3743
   %evm.sub = sub i256 %evm.add, %evm.mload3, !notdec.evm !3744
   call void @evm_return(ptr %mem, i256 %evm.mload3, i256 %evm.sub), !notdec.evm !3745
   ret void, !notdec.evm !3745
 }
 
-define void @public_getRewardsList___0x503(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_getRewardsList___0x503(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x503:
   %private.call = call i256 @private__0xf9f_0xf9f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 885889), !notdec.evm !3746
   br label %bb._0xd8481
 
 bb._0xd8481:                                      ; preds = %bb._0x503
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3747
+  %notdec.evm.mem.ptr.604 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.604, align 1, !notdec.evm !3747
   %private.call1 = call i256 @private__0x3250_0x3250(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload, i256 %private.call, i256 1024695), !notdec.evm !3748
   br label %bb._0xfa2b7
 
 bb._0xfa2b7:                                      ; preds = %bb._0xd8481
-  %evm.mload2 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3749
+  %notdec.evm.mem.ptr.605 = inttoptr i256 64 to ptr
+  %evm.mload2 = load i256, ptr %notdec.evm.mem.ptr.605, align 1, !notdec.evm !3749
   %evm.sub = sub i256 %private.call1, %evm.mload2, !notdec.evm !3750
   call void @evm_return(ptr %mem, i256 %evm.mload2, i256 %evm.sub), !notdec.evm !3751
   ret void, !notdec.evm !3751
 }
 
-define void @public_claimAllRewards_address___address__0x50b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_claimAllRewards_address___address__0x50b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x50b:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3752
   %private.call = call { i256, i256, i256 } @private__0x30c1_0x30c1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1305), !notdec.evm !3753
@@ -6587,18 +7190,20 @@ bb._0x519:                                        ; preds = %bb._0x50b
   br label %bb._0xd84ad
 
 bb._0xd84ad:                                      ; preds = %bb._0x519
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3755
+  %notdec.evm.mem.ptr.606 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.606, align 1, !notdec.evm !3755
   %private.call6 = call i256 @private__0x315b_0x315b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload, i256 %private.ret4, i256 %private.ret5, i256 1024735), !notdec.evm !3756
   br label %bb._0xfa2df
 
 bb._0xfa2df:                                      ; preds = %bb._0xd84ad
-  %evm.mload7 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3757
+  %notdec.evm.mem.ptr.607 = inttoptr i256 64 to ptr
+  %evm.mload7 = load i256, ptr %notdec.evm.mem.ptr.607, align 1, !notdec.evm !3757
   %evm.sub = sub i256 %private.call6, %evm.mload7, !notdec.evm !3758
   call void @evm_return(ptr %mem, i256 %evm.mload7, i256 %evm.sub), !notdec.evm !3759
   ret void, !notdec.evm !3759
 }
 
-define void @public_claimAllRewardsToSelf_address____0x51e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_claimAllRewardsToSelf_address____0x51e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x51e:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3760
   %private.call = call { i256, i256 } @private__0x348a_0x348a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1324), !notdec.evm !3761
@@ -6613,18 +7218,20 @@ bb._0x52c:                                        ; preds = %bb._0x51e
   br label %bb._0xd84da
 
 bb._0xd84da:                                      ; preds = %bb._0x52c
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3763
+  %notdec.evm.mem.ptr.608 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.608, align 1, !notdec.evm !3763
   %private.call5 = call i256 @private__0x315b_0x315b(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload, i256 %private.ret3, i256 %private.ret4, i256 1024775), !notdec.evm !3764
   br label %bb._0xfa307
 
 bb._0xfa307:                                      ; preds = %bb._0xd84da
-  %evm.mload6 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3765
+  %notdec.evm.mem.ptr.609 = inttoptr i256 64 to ptr
+  %evm.mload6 = load i256, ptr %notdec.evm.mem.ptr.609, align 1, !notdec.evm !3765
   %evm.sub = sub i256 %private.call5, %evm.mload6, !notdec.evm !3766
   call void @evm_return(ptr %mem, i256 %evm.mload6, i256 %evm.sub), !notdec.evm !3767
   ret void, !notdec.evm !3767
 }
 
-define void @public_initialize_address__0x531(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_initialize_address__0x531(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x531:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3768
   %private.call = call i256 @private__0x2fe4_0x2fe4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1343), !notdec.evm !3769
@@ -6638,7 +7245,7 @@ bb._0xd8507:                                      ; preds = %bb._0x53f
   ret void, !notdec.evm !3771
 }
 
-define void @public_setDistributionEnd_address_address_uint32__0x544(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_setDistributionEnd_address_address_uint32__0x544(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x544:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3772
   %private.call = call { i256, i256, i256 } @private__0x34cb_0x34cb(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1362), !notdec.evm !3773
@@ -6664,12 +7271,16 @@ bb._0x115d:                                       ; preds = %bb._0x1115
   %evm.shl3 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3781
   %evm.sub4 = sub i256 %evm.shl3, 1, !notdec.evm !3782
   %evm.and5 = and i256 %evm.sub4, %private.ret2, !notdec.evm !3783
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and5), !notdec.evm !3784
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !3785
+  %notdec.evm.mem.ptr.610 = inttoptr i256 0 to ptr
+  store i256 %evm.and5, ptr %notdec.evm.mem.ptr.610, align 1, !notdec.evm !3784
+  %notdec.evm.mem.ptr.611 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.611, align 1, !notdec.evm !3785
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3786
   %evm.and6 = and i256 %private.ret1, %evm.sub4, !notdec.evm !3787
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and6), !notdec.evm !3788
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !3789
+  %notdec.evm.mem.ptr.612 = inttoptr i256 0 to ptr
+  store i256 %evm.and6, ptr %notdec.evm.mem.ptr.612, align 1, !notdec.evm !3788
+  %notdec.evm.mem.ptr.613 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.613, align 1, !notdec.evm !3789
   %evm.sha37 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3790
   %evm.sload = call i256 @evm_sload(i256 %evm.sha37), !notdec.evm !3791
   %evm.shl8 = call i256 @evm_shl(i256 224, i256 1), !notdec.evm !3792
@@ -6680,30 +7291,37 @@ bb._0x115d:                                       ; preds = %bb._0x1115
   %evm.mul = mul i256 %evm.and12, %evm.shl11, !notdec.evm !3797
   %evm.or = or i256 %evm.mul, %evm.and10, !notdec.evm !3798
   call void @evm_sstore(i256 %evm.sha37, i256 %evm.or), !notdec.evm !3799
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3800
+  %notdec.evm.mem.ptr.614 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.614, align 1, !notdec.evm !3800
   %evm.shl13 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !3801
   %evm.div = call i256 @evm_div(i256 %evm.or, i256 %evm.shl13), !notdec.evm !3802
   %evm.shl14 = call i256 @evm_shl(i256 88, i256 1), !notdec.evm !3803
   %evm.sub15 = sub i256 %evm.shl14, 1, !notdec.evm !3804
   %evm.and16 = and i256 %evm.sub15, %evm.div, !notdec.evm !3805
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and16), !notdec.evm !3806
+  %notdec.evm.mem.ptr.615 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and16, ptr %notdec.evm.mem.ptr.615, align 1, !notdec.evm !3806
   %evm.add = add i256 %evm.mload, 32, !notdec.evm !3807
-  call void @evm_mstore(ptr %mem, i256 %evm.add, i256 %evm.and16), !notdec.evm !3808
+  %notdec.evm.mem.ptr.616 = inttoptr i256 %evm.add to ptr
+  store i256 %evm.and16, ptr %notdec.evm.mem.ptr.616, align 1, !notdec.evm !3808
   %evm.div17 = call i256 @evm_div(i256 %evm.sload, i256 %evm.shl11), !notdec.evm !3809
   %evm.and18 = and i256 %evm.div17, 4294967295, !notdec.evm !3810
   %evm.add19 = add i256 %evm.mload, 64, !notdec.evm !3811
-  call void @evm_mstore(ptr %mem, i256 %evm.add19, i256 %evm.and18), !notdec.evm !3812
+  %notdec.evm.mem.ptr.617 = inttoptr i256 %evm.add19 to ptr
+  store i256 %evm.and18, ptr %notdec.evm.mem.ptr.617, align 1, !notdec.evm !3812
   %evm.add20 = add i256 %evm.mload, 96, !notdec.evm !3813
-  call void @evm_mstore(ptr %mem, i256 %evm.add20, i256 %evm.and12), !notdec.evm !3814
+  %notdec.evm.mem.ptr.618 = inttoptr i256 %evm.add20 to ptr
+  store i256 %evm.and12, ptr %notdec.evm.mem.ptr.618, align 1, !notdec.evm !3814
   %evm.shl21 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !3815
   %evm.sub22 = sub i256 %evm.shl21, 1, !notdec.evm !3816
   %evm.and23 = and i256 %evm.sub22, %evm.sload, !notdec.evm !3817
   %evm.and24 = and i256 %evm.mul, %evm.sub22, !notdec.evm !3818
   %evm.or25 = or i256 %evm.and24, %evm.and23, !notdec.evm !3819
   %evm.add26 = add i256 %evm.mload, 128, !notdec.evm !3820
-  call void @evm_mstore(ptr %mem, i256 %evm.add26, i256 %evm.or25), !notdec.evm !3821
+  %notdec.evm.mem.ptr.619 = inttoptr i256 %evm.add26 to ptr
+  store i256 %evm.or25, ptr %notdec.evm.mem.ptr.619, align 1, !notdec.evm !3821
   %evm.add27 = add i256 160, %evm.mload, !notdec.evm !3822
-  %evm.mload28 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3823
+  %notdec.evm.mem.ptr.620 = inttoptr i256 64 to ptr
+  %evm.mload28 = load i256, ptr %notdec.evm.mem.ptr.620, align 1, !notdec.evm !3823
   %evm.sub29 = sub i256 %evm.add27, %evm.mload28, !notdec.evm !3824
   call void @evm_log3(ptr %mem, i256 %evm.mload28, i256 %evm.sub29, i256 -37952818559785066389972698679369799893918124169894124196364029007910515765819, i256 %evm.and5, i256 %evm.and6), !notdec.evm !3825
   br label %bb._0xd8528, !notdec.evm !3826
@@ -6712,58 +7330,67 @@ bb._0xd8528:                                      ; preds = %bb._0x115d
   ret void, !notdec.evm !3827
 
 bb._0x1146:                                       ; preds = %bb._0x1115
-  %evm.mload30 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3828
+  %notdec.evm.mem.ptr.621 = inttoptr i256 64 to ptr
+  %evm.mload30 = load i256, ptr %notdec.evm.mem.ptr.621, align 1, !notdec.evm !3828
   %evm.shl31 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !3829
-  call void @evm_mstore(ptr %mem, i256 %evm.mload30, i256 %evm.shl31), !notdec.evm !3830
+  %notdec.evm.mem.ptr.622 = inttoptr i256 %evm.mload30 to ptr
+  store i256 %evm.shl31, ptr %notdec.evm.mem.ptr.622, align 1, !notdec.evm !3830
   %evm.add32 = add i256 4, %evm.mload30, !notdec.evm !3831
   %private.call33 = call i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add32, i256 954398), !notdec.evm !3832
   br label %bb._0xe901e
 
 bb._0xe901e:                                      ; preds = %bb._0x1146
-  %evm.mload34 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3833
+  %notdec.evm.mem.ptr.623 = inttoptr i256 64 to ptr
+  %evm.mload34 = load i256, ptr %notdec.evm.mem.ptr.623, align 1, !notdec.evm !3833
   %evm.sub35 = sub i256 %private.call33, %evm.mload34, !notdec.evm !3834
   call void @evm_revert(ptr %mem, i256 %evm.mload34, i256 %evm.sub35), !notdec.evm !3835
   unreachable, !notdec.evm !3835
 }
 
-define void @public_EMISSION_MANAGER___0x557(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_EMISSION_MANAGER___0x557(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x557:
   br label %bb._0xe976d, !notdec.evm !3836
 
 bb._0xe976d:                                      ; preds = %bb._0x557
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3837
+  %notdec.evm.mem.ptr.624 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.624, align 1, !notdec.evm !3837
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3838
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3839
   %evm.and = and i256 1443110500457411796578838204131955442359735615893, %evm.sub, !notdec.evm !3840
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and), !notdec.evm !3841
+  %notdec.evm.mem.ptr.625 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.625, align 1, !notdec.evm !3841
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3842
   br label %bb._0xfa3c9, !notdec.evm !3843
 
 bb._0xfa3c9:                                      ; preds = %bb._0xe976d
-  %evm.mload1 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3844
+  %notdec.evm.mem.ptr.626 = inttoptr i256 64 to ptr
+  %evm.mload1 = load i256, ptr %notdec.evm.mem.ptr.626, align 1, !notdec.evm !3844
   %evm.sub2 = sub i256 %evm.add, %evm.mload1, !notdec.evm !3845
   call void @evm_return(ptr %mem, i256 %evm.mload1, i256 %evm.sub2), !notdec.evm !3846
   ret void, !notdec.evm !3846
 }
 
-define void @public_REVISION___0x57e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_REVISION___0x57e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x57e:
   br label %bb._0xe97a4, !notdec.evm !3847
 
 bb._0xe97a4:                                      ; preds = %bb._0x57e
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3848
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 1), !notdec.evm !3849
+  %notdec.evm.mem.ptr.627 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.627, align 1, !notdec.evm !3848
+  %notdec.evm.mem.ptr.628 = inttoptr i256 %evm.mload to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.628, align 1, !notdec.evm !3849
   %evm.add = add i256 32, %evm.mload, !notdec.evm !3850
   br label %bb._0xfa3f1, !notdec.evm !3851
 
 bb._0xfa3f1:                                      ; preds = %bb._0xe97a4
-  %evm.mload1 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3852
+  %notdec.evm.mem.ptr.629 = inttoptr i256 64 to ptr
+  %evm.mload1 = load i256, ptr %notdec.evm.mem.ptr.629, align 1, !notdec.evm !3852
   %evm.sub = sub i256 %evm.add, %evm.mload1, !notdec.evm !3853
   call void @evm_return(ptr %mem, i256 %evm.mload1, i256 %evm.sub), !notdec.evm !3854
   ret void, !notdec.evm !3854
 }
 
-define void @public_setTransferStrategy_address_address__0x586(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_setTransferStrategy_address_address__0x586(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x586:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3855
   %private.call = call { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1428), !notdec.evm !3856
@@ -6779,7 +7406,7 @@ bb._0xe8d48:                                      ; preds = %bb._0x594
   ret void, !notdec.evm !3858
 }
 
-define void @public_setClaimer_address_address__0x599(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_setClaimer_address_address__0x599(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x599:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3859
   %private.call = call { i256, i256 } @private__0x2ef4_0x2ef4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1447), !notdec.evm !3860
@@ -6804,8 +7431,10 @@ bb._0x12bf:                                       ; preds = %bb._0x1277
   %evm.shl2 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3868
   %evm.sub3 = sub i256 %evm.shl2, 1, !notdec.evm !3869
   %evm.and4 = and i256 %evm.sub3, %private.ret1, !notdec.evm !3870
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and4), !notdec.evm !3871
-  call void @evm_mstore(ptr %mem, i256 32, i256 57), !notdec.evm !3872
+  %notdec.evm.mem.ptr.630 = inttoptr i256 0 to ptr
+  store i256 %evm.and4, ptr %notdec.evm.mem.ptr.630, align 1, !notdec.evm !3871
+  %notdec.evm.mem.ptr.631 = inttoptr i256 32 to ptr
+  store i256 57, ptr %notdec.evm.mem.ptr.631, align 1, !notdec.evm !3872
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3873
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !3874
   %evm.shl5 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3875
@@ -6815,7 +7444,8 @@ bb._0x12bf:                                       ; preds = %bb._0x1277
   %evm.and8 = and i256 %private.ret, %evm.sub3, !notdec.evm !3879
   %evm.or = or i256 %evm.and8, %evm.and7, !notdec.evm !3880
   call void @evm_sstore(i256 %evm.sha3, i256 %evm.or), !notdec.evm !3881
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3882
+  %notdec.evm.mem.ptr.632 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.632, align 1, !notdec.evm !3882
   call void @evm_log3(ptr %mem, i256 %evm.mload, i256 0, i256 33085833104303436145339881708349162099997900013126797039124150997711037033000, i256 %evm.and4, i256 %evm.and8), !notdec.evm !3883
   br label %bb._0xe8d69, !notdec.evm !3884
 
@@ -6823,21 +7453,24 @@ bb._0xe8d69:                                      ; preds = %bb._0x12bf
   ret void, !notdec.evm !3885
 
 bb._0x12a8:                                       ; preds = %bb._0x1277
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3886
+  %notdec.evm.mem.ptr.633 = inttoptr i256 64 to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.633, align 1, !notdec.evm !3886
   %evm.shl10 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !3887
-  call void @evm_mstore(ptr %mem, i256 %evm.mload9, i256 %evm.shl10), !notdec.evm !3888
+  %notdec.evm.mem.ptr.634 = inttoptr i256 %evm.mload9 to ptr
+  store i256 %evm.shl10, ptr %notdec.evm.mem.ptr.634, align 1, !notdec.evm !3888
   %evm.add = add i256 4, %evm.mload9, !notdec.evm !3889
   %private.call11 = call i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add, i256 954513), !notdec.evm !3890
   br label %bb._0xe9091
 
 bb._0xe9091:                                      ; preds = %bb._0x12a8
-  %evm.mload12 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3891
+  %notdec.evm.mem.ptr.635 = inttoptr i256 64 to ptr
+  %evm.mload12 = load i256, ptr %notdec.evm.mem.ptr.635, align 1, !notdec.evm !3891
   %evm.sub13 = sub i256 %private.call11, %evm.mload12, !notdec.evm !3892
   call void @evm_revert(ptr %mem, i256 %evm.mload12, i256 %evm.sub13), !notdec.evm !3893
   unreachable, !notdec.evm !3893
 }
 
-define void @public_setEmissionPerSecond_address_address___uint88____0x5ac(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public_setEmissionPerSecond_address_address___uint88____0x5ac(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x5ac:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !3894
   %private.call = call { i256, i256, i256, i256, i256 } @private__0x3512_0x3512(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 4, i256 %evm.calldatasize, i256 1466), !notdec.evm !3895
@@ -6856,17 +7489,21 @@ bb._0xe8d8a:                                      ; preds = %bb._0x5ba
   ret void, !notdec.evm !3897
 }
 
-define i256 @private__0x5bf_0x5bf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x5bfarg0x0, i256 %_0x5bfarg0x1, i256 %_0x5bfarg0x2) {
+define i256 @private__0x5bf_0x5bf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x5bfarg0x0, i256 %_0x5bfarg0x1, i256 %_0x5bfarg0x2) #0 {
 bb._0x5bf:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3898
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3899
   %evm.and = and i256 %evm.sub, %_0x5bfarg0x1, !notdec.evm !3900
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !3901
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !3902
+  %notdec.evm.mem.ptr.636 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.636, align 1, !notdec.evm !3901
+  %notdec.evm.mem.ptr.637 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.637, align 1, !notdec.evm !3902
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3903
   %evm.and1 = and i256 %_0x5bfarg0x0, %evm.sub, !notdec.evm !3904
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and1), !notdec.evm !3905
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !3906
+  %notdec.evm.mem.ptr.638 = inttoptr i256 0 to ptr
+  store i256 %evm.and1, ptr %notdec.evm.mem.ptr.638, align 1, !notdec.evm !3905
+  %notdec.evm.mem.ptr.639 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.639, align 1, !notdec.evm !3906
   %evm.sha32 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3907
   %evm.sload = call i256 @evm_sload(i256 %evm.sha32), !notdec.evm !3908
   %evm.shl3 = call i256 @evm_shl(i256 224, i256 1), !notdec.evm !3909
@@ -6878,7 +7515,7 @@ bb._0xf9f6c:                                      ; preds = %bb._0x5bf
   ret i256 %evm.and4, !notdec.evm !3913
 }
 
-define i256 @private__0x5f9_0x5f9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x5f9arg0x0, i256 %_0x5f9arg0x1, i256 %_0x5f9arg0x2, i256 %_0x5f9arg0x3, i256 %_0x5f9arg0x4, i256 %_0x5f9arg0x5) {
+define i256 @private__0x5f9_0x5f9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x5f9arg0x0, i256 %_0x5f9arg0x1, i256 %_0x5f9arg0x2, i256 %_0x5f9arg0x3, i256 %_0x5f9arg0x4, i256 %_0x5f9arg0x5) #0 {
 bb._0x5f9:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3914
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3915
@@ -6896,21 +7533,24 @@ bb._0x639:                                        ; preds = %bb._0x62a
   ret i256 %private.call, !notdec.evm !3921
 
 bb._0x60a:                                        ; preds = %bb._0x5f9
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3922
+  %notdec.evm.mem.ptr.640 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.640, align 1, !notdec.evm !3922
   %evm.shl2 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !3923
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl2), !notdec.evm !3924
+  %notdec.evm.mem.ptr.641 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl2, ptr %notdec.evm.mem.ptr.641, align 1, !notdec.evm !3924
   %evm.add = add i256 4, %evm.mload, !notdec.evm !3925
   %private.call3 = call i256 @private__0x3594_0x3594(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add, i256 953771), !notdec.evm !3926
   br label %bb._0xe8dab
 
 bb._0xe8dab:                                      ; preds = %bb._0x60a
-  %evm.mload4 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3927
+  %notdec.evm.mem.ptr.642 = inttoptr i256 64 to ptr
+  %evm.mload4 = load i256, ptr %notdec.evm.mem.ptr.642, align 1, !notdec.evm !3927
   %evm.sub5 = sub i256 %private.call3, %evm.mload4, !notdec.evm !3928
   call void @evm_revert(ptr %mem, i256 %evm.mload4, i256 %evm.sub5), !notdec.evm !3929
   unreachable, !notdec.evm !3929
 }
 
-define void @private__0x643_0x643(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x643arg0x0, i256 %_0x643arg0x1, i256 %_0x643arg0x2, i256 %_0x643arg0x3) {
+define void @private__0x643_0x643(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x643arg0x0, i256 %_0x643arg0x1, i256 %_0x643arg0x2, i256 %_0x643arg0x3) #0 {
 bb._0x643:
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !3930
   call void @private__0x184f_0x184f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x643arg0x1, i256 %_0x643arg0x0, i256 %_0x643arg0x2, i256 %evm.caller, i256 953811), !notdec.evm !3931
@@ -6920,13 +7560,15 @@ bb._0xe8dd3:                                      ; preds = %bb._0x643
   ret void, !notdec.evm !3932
 }
 
-define i256 @private__0x654_0x654(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x654arg0x0, i256 %_0x654arg0x1, i256 %_0x654arg0x2, i256 %_0x654arg0x3, i256 %_0x654arg0x4, i256 %_0x654arg0x5, i256 %_0x654arg0x6) {
+define i256 @private__0x654_0x654(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x654arg0x0, i256 %_0x654arg0x1, i256 %_0x654arg0x2, i256 %_0x654arg0x3, i256 %_0x654arg0x4, i256 %_0x654arg0x5, i256 %_0x654arg0x6) #0 {
 bb._0x654:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !3933
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !3934
   %evm.and = and i256 %_0x654arg0x2, %evm.sub, !notdec.evm !3935
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !3936
-  call void @evm_mstore(ptr %mem, i256 32, i256 57), !notdec.evm !3937
+  %notdec.evm.mem.ptr.643 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.643, align 1, !notdec.evm !3936
+  %notdec.evm.mem.ptr.644 = inttoptr i256 32 to ptr
+  store i256 57, ptr %notdec.evm.mem.ptr.644, align 1, !notdec.evm !3937
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !3938
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !3939
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !3940
@@ -6959,61 +7601,76 @@ bb._0x73c:                                        ; preds = %bb._0x72d
   ret i256 %private.call, !notdec.evm !3954
 
 bb._0x716:                                        ; preds = %bb._0x707
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3955
+  %notdec.evm.mem.ptr.645 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.645, align 1, !notdec.evm !3955
   %evm.shl11 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !3956
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl11), !notdec.evm !3957
+  %notdec.evm.mem.ptr.646 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl11, ptr %notdec.evm.mem.ptr.646, align 1, !notdec.evm !3957
   %evm.add = add i256 4, %evm.mload, !notdec.evm !3958
   %private.call12 = call i256 @private__0x3594_0x3594(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add, i256 953847), !notdec.evm !3959
   br label %bb._0xe8df7
 
 bb._0xe8df7:                                      ; preds = %bb._0x716
-  %evm.mload13 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3960
+  %notdec.evm.mem.ptr.647 = inttoptr i256 64 to ptr
+  %evm.mload13 = load i256, ptr %notdec.evm.mem.ptr.647, align 1, !notdec.evm !3960
   %evm.sub14 = sub i256 %private.call12, %evm.mload13, !notdec.evm !3961
   call void @evm_revert(ptr %mem, i256 %evm.mload13, i256 %evm.sub14), !notdec.evm !3962
   unreachable, !notdec.evm !3962
 
 bb._0x6c9:                                        ; preds = %bb._0x6ba
-  %evm.mload15 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3963
+  %notdec.evm.mem.ptr.648 = inttoptr i256 64 to ptr
+  %evm.mload15 = load i256, ptr %notdec.evm.mem.ptr.648, align 1, !notdec.evm !3963
   %evm.shl16 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !3964
-  call void @evm_mstore(ptr %mem, i256 %evm.mload15, i256 %evm.shl16), !notdec.evm !3965
+  %notdec.evm.mem.ptr.649 = inttoptr i256 %evm.mload15 to ptr
+  store i256 %evm.shl16, ptr %notdec.evm.mem.ptr.649, align 1, !notdec.evm !3965
   %evm.add17 = add i256 %evm.mload15, 4, !notdec.evm !3966
-  call void @evm_mstore(ptr %mem, i256 %evm.add17, i256 32), !notdec.evm !3967
+  %notdec.evm.mem.ptr.650 = inttoptr i256 %evm.add17 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.650, align 1, !notdec.evm !3967
   %evm.add18 = add i256 %evm.mload15, 36, !notdec.evm !3968
-  call void @evm_mstore(ptr %mem, i256 %evm.add18, i256 20), !notdec.evm !3969
+  %notdec.evm.mem.ptr.651 = inttoptr i256 %evm.add18 to ptr
+  store i256 20, ptr %notdec.evm.mem.ptr.651, align 1, !notdec.evm !3969
   %evm.shl19 = call i256 @evm_shl(i256 96, i256 418503298271971407223533053846125334988335698771), !notdec.evm !3970
   %evm.add20 = add i256 %evm.mload15, 68, !notdec.evm !3971
-  call void @evm_mstore(ptr %mem, i256 %evm.add20, i256 %evm.shl19), !notdec.evm !3972
+  %notdec.evm.mem.ptr.652 = inttoptr i256 %evm.add20 to ptr
+  store i256 %evm.shl19, ptr %notdec.evm.mem.ptr.652, align 1, !notdec.evm !3972
   %evm.add21 = add i256 100, %evm.mload15, !notdec.evm !3973
   br label %bb._0x7196, !notdec.evm !3974
 
 bb._0x7196:                                       ; preds = %bb._0x6c9
-  %evm.mload22 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3975
+  %notdec.evm.mem.ptr.653 = inttoptr i256 64 to ptr
+  %evm.mload22 = load i256, ptr %notdec.evm.mem.ptr.653, align 1, !notdec.evm !3975
   %evm.sub23 = sub i256 %evm.add21, %evm.mload22, !notdec.evm !3976
   call void @evm_revert(ptr %mem, i256 %evm.mload22, i256 %evm.sub23), !notdec.evm !3977
   unreachable, !notdec.evm !3977
 
 bb._0x67c:                                        ; preds = %bb._0x654
-  %evm.mload24 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3978
+  %notdec.evm.mem.ptr.654 = inttoptr i256 64 to ptr
+  %evm.mload24 = load i256, ptr %notdec.evm.mem.ptr.654, align 1, !notdec.evm !3978
   %evm.shl25 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !3979
-  call void @evm_mstore(ptr %mem, i256 %evm.mload24, i256 %evm.shl25), !notdec.evm !3980
+  %notdec.evm.mem.ptr.655 = inttoptr i256 %evm.mload24 to ptr
+  store i256 %evm.shl25, ptr %notdec.evm.mem.ptr.655, align 1, !notdec.evm !3980
   %evm.add26 = add i256 %evm.mload24, 4, !notdec.evm !3981
-  call void @evm_mstore(ptr %mem, i256 %evm.add26, i256 32), !notdec.evm !3982
+  %notdec.evm.mem.ptr.656 = inttoptr i256 %evm.add26 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.656, align 1, !notdec.evm !3982
   %evm.add27 = add i256 %evm.mload24, 36, !notdec.evm !3983
-  call void @evm_mstore(ptr %mem, i256 %evm.add27, i256 20), !notdec.evm !3984
+  %notdec.evm.mem.ptr.657 = inttoptr i256 %evm.add27 to ptr
+  store i256 20, ptr %notdec.evm.mem.ptr.657, align 1, !notdec.evm !3984
   %evm.shl28 = call i256 @evm_shl(i256 98, i256 96050731380548604999064602992415164534640513361), !notdec.evm !3985
   %evm.add29 = add i256 %evm.mload24, 68, !notdec.evm !3986
-  call void @evm_mstore(ptr %mem, i256 %evm.add29, i256 %evm.shl28), !notdec.evm !3987
+  %notdec.evm.mem.ptr.658 = inttoptr i256 %evm.add29 to ptr
+  store i256 %evm.shl28, ptr %notdec.evm.mem.ptr.658, align 1, !notdec.evm !3987
   %evm.add30 = add i256 100, %evm.mload24, !notdec.evm !3988
   br label %bb._0x716e, !notdec.evm !3989
 
 bb._0x716e:                                       ; preds = %bb._0x67c
-  %evm.mload31 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !3990
+  %notdec.evm.mem.ptr.659 = inttoptr i256 64 to ptr
+  %evm.mload31 = load i256, ptr %notdec.evm.mem.ptr.659, align 1, !notdec.evm !3990
   %evm.sub32 = sub i256 %evm.add30, %evm.mload31, !notdec.evm !3991
   call void @evm_revert(ptr %mem, i256 %evm.mload31, i256 %evm.sub32), !notdec.evm !3992
   unreachable, !notdec.evm !3992
 }
 
-define { i256, i256 } @private__0x749_0x749(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x749arg0x0, i256 %_0x749arg0x1, i256 %_0x749arg0x2, i256 %_0x749arg0x3) {
+define { i256, i256 } @private__0x749_0x749(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x749arg0x0, i256 %_0x749arg0x1, i256 %_0x749arg0x2, i256 %_0x749arg0x3) #0 {
 bb._0x749:
   %private.call = call i256 @private__0x1999_0x1999(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x749arg0x0, i256 %_0x749arg0x1, i256 %_0x749arg0x2, i256 1881), !notdec.evm !3993
   br label %bb._0x759
@@ -7030,12 +7687,15 @@ bb._0x759:                                        ; preds = %bb._0x749
   br i1 %evm.branch.cond, label %bb._0x776, label %bb._0x76f, !notdec.evm !3999
 
 bb._0x776:                                        ; preds = %bb._0x759
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4000
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.sload), !notdec.evm !4001
+  %notdec.evm.mem.ptr.660 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.660, align 1, !notdec.evm !4000
+  %notdec.evm.mem.ptr.661 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.sload, ptr %notdec.evm.mem.ptr.661, align 1, !notdec.evm !4001
   %evm.mul = mul i256 32, %evm.sload, !notdec.evm !4002
   %evm.add = add i256 32, %evm.mul, !notdec.evm !4003
   %evm.add2 = add i256 %evm.mload, %evm.add, !notdec.evm !4004
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add2), !notdec.evm !4005
+  %notdec.evm.mem.ptr.662 = inttoptr i256 64 to ptr
+  store i256 %evm.add2, ptr %notdec.evm.mem.ptr.662, align 1, !notdec.evm !4005
   %evm.iszero3 = icmp eq i256 %evm.sload, 0, !notdec.evm !4006
   %evm.bool4 = zext i1 %evm.iszero3 to i256, !notdec.evm !4006
   %evm.branch.cond5 = icmp ne i256 %evm.bool4, 0, !notdec.evm !4007
@@ -7051,7 +7711,8 @@ bb._0x790:                                        ; preds = %bb._0x776
 
 bb._0x79f:                                        ; preds = %bb._0x790, %bb._0x776
   %_0x79f_0x0 = phi i256 [ %evm.sload, %bb._0x776 ], [ %evm.add8, %bb._0x790 ], !notdec.evm !4014
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !4015
+  %notdec.evm.mem.ptr.663 = inttoptr i256 %evm.mload to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.663, align 1, !notdec.evm !4015
   %evm.shl10 = call i256 @evm_shl(i256 64, i256 1), !notdec.evm !4016
   %evm.sub11 = sub i256 %evm.shl10, 1, !notdec.evm !4017
   %evm.gt12 = icmp ugt i256 %evm.mload9, %evm.sub11, !notdec.evm !4018
@@ -7062,12 +7723,15 @@ bb._0x79f:                                        ; preds = %bb._0x790, %bb._0x7
   br i1 %evm.branch.cond16, label %bb._0x7bb, label %bb._0x7b4, !notdec.evm !4020
 
 bb._0x7bb:                                        ; preds = %bb._0x79f
-  %evm.mload17 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4021
-  call void @evm_mstore(ptr %mem, i256 %evm.mload17, i256 %evm.mload9), !notdec.evm !4022
+  %notdec.evm.mem.ptr.664 = inttoptr i256 64 to ptr
+  %evm.mload17 = load i256, ptr %notdec.evm.mem.ptr.664, align 1, !notdec.evm !4021
+  %notdec.evm.mem.ptr.665 = inttoptr i256 %evm.mload17 to ptr
+  store i256 %evm.mload9, ptr %notdec.evm.mem.ptr.665, align 1, !notdec.evm !4022
   %evm.mul18 = mul i256 32, %evm.mload9, !notdec.evm !4023
   %evm.add19 = add i256 32, %evm.mul18, !notdec.evm !4024
   %evm.add20 = add i256 %evm.mload17, %evm.add19, !notdec.evm !4025
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add20), !notdec.evm !4026
+  %notdec.evm.mem.ptr.666 = inttoptr i256 64 to ptr
+  store i256 %evm.add20, ptr %notdec.evm.mem.ptr.666, align 1, !notdec.evm !4026
   %evm.iszero21 = icmp eq i256 %evm.mload9, 0, !notdec.evm !4027
   %evm.bool22 = zext i1 %evm.iszero21 to i256, !notdec.evm !4027
   %evm.branch.cond23 = icmp ne i256 %evm.bool22, 0, !notdec.evm !4028
@@ -7087,7 +7751,8 @@ bb._0x7e4:                                        ; preds = %bb._0x7d5, %bb._0x7
 
 bb._0x7ea:                                        ; preds = %bb._0xa03, %bb._0x7e4
   %_0x7ea_0x0 = phi i256 [ 0, %bb._0x7e4 ], [ %private.call40, %bb._0xa03 ], !notdec.evm !4037
-  %evm.mload28 = call i256 @evm_mload(ptr %mem, i256 %private.call), !notdec.evm !4038
+  %notdec.evm.mem.ptr.667 = inttoptr i256 %private.call to ptr
+  %evm.mload28 = load i256, ptr %notdec.evm.mem.ptr.667, align 1, !notdec.evm !4038
   %evm.lt = icmp ult i256 %_0x7ea_0x0, %evm.mload28, !notdec.evm !4039
   %evm.bool29 = zext i1 %evm.lt to i256, !notdec.evm !4039
   %evm.iszero30 = icmp eq i256 %evm.bool29, 0, !notdec.evm !4040
@@ -7111,7 +7776,8 @@ bb._0x7f4:                                        ; preds = %bb._0x7ea
 bb._0x7f6:                                        ; preds = %bb._0x9f0, %bb._0x7f4
   %_0x7f6_0x0 = phi i256 [ 0, %bb._0x7f4 ], [ %private.call196, %bb._0x9f0 ], !notdec.evm !4047
   %_0x7f6_0x1 = phi i256 [ %_0x7f4_0x0, %bb._0x7f4 ], [ %_0x9f0_0x3, %bb._0x9f0 ], !notdec.evm !4048
-  %evm.mload34 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !4049
+  %notdec.evm.mem.ptr.668 = inttoptr i256 %evm.mload to ptr
+  %evm.mload34 = load i256, ptr %notdec.evm.mem.ptr.668, align 1, !notdec.evm !4049
   %evm.lt35 = icmp ult i256 %_0x7f6_0x0, %evm.mload34, !notdec.evm !4050
   %evm.bool36 = zext i1 %evm.lt35 to i256, !notdec.evm !4050
   %evm.iszero37 = icmp eq i256 %evm.bool36, 0, !notdec.evm !4051
@@ -7143,7 +7809,8 @@ bb._0x812:                                        ; preds = %bb._0x800
   %_0x812_0x0 = phi i256 [ %_0x800_0x0, %bb._0x800 ], !notdec.evm !4064
   %_0x812_0x2 = phi i256 [ %_0x800_0x0, %bb._0x800 ], !notdec.evm !4065
   %_0x812_0x3 = phi i256 [ %_0x800_0x1, %bb._0x800 ], !notdec.evm !4066
-  call void @evm_mstore(ptr %mem, i256 0, i256 3), !notdec.evm !4067
+  %notdec.evm.mem.ptr.669 = inttoptr i256 0 to ptr
+  store i256 3, ptr %notdec.evm.mem.ptr.669, align 1, !notdec.evm !4067
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 32), !notdec.evm !4068
   %evm.add45 = add i256 %evm.sha3, %_0x812_0x0, !notdec.evm !4069
   %evm.sload46 = call i256 @evm_sload(i256 %evm.add45), !notdec.evm !4070
@@ -7152,7 +7819,8 @@ bb._0x812:                                        ; preds = %bb._0x800
   %evm.shl47 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4073
   %evm.sub48 = sub i256 %evm.shl47, 1, !notdec.evm !4074
   %evm.and = and i256 %evm.sub48, %evm.div, !notdec.evm !4075
-  %evm.mload49 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !4076
+  %notdec.evm.mem.ptr.670 = inttoptr i256 %evm.mload to ptr
+  %evm.mload49 = load i256, ptr %notdec.evm.mem.ptr.670, align 1, !notdec.evm !4076
   %evm.lt50 = icmp ult i256 %_0x812_0x2, %evm.mload49, !notdec.evm !4077
   %evm.bool51 = zext i1 %evm.lt50 to i256, !notdec.evm !4077
   %evm.branch.cond52 = icmp ne i256 %evm.bool51, 0, !notdec.evm !4078
@@ -7171,8 +7839,10 @@ bb._0x842:                                        ; preds = %bb._0x812
   %evm.shl59 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4088
   %evm.sub60 = sub i256 %evm.shl59, 1, !notdec.evm !4089
   %evm.and61 = and i256 %evm.sub60, %evm.and58, !notdec.evm !4090
-  call void @evm_mstore(ptr %mem, i256 %evm.add55, i256 %evm.and61), !notdec.evm !4091
-  %evm.mload62 = call i256 @evm_mload(ptr %mem, i256 %private.call), !notdec.evm !4092
+  %notdec.evm.mem.ptr.671 = inttoptr i256 %evm.add55 to ptr
+  store i256 %evm.and61, ptr %notdec.evm.mem.ptr.671, align 1, !notdec.evm !4091
+  %notdec.evm.mem.ptr.672 = inttoptr i256 %private.call to ptr
+  %evm.mload62 = load i256, ptr %notdec.evm.mem.ptr.672, align 1, !notdec.evm !4092
   %evm.lt63 = icmp ult i256 %_0x842_0x4, %evm.mload62, !notdec.evm !4093
   %evm.bool64 = zext i1 %evm.lt63 to i256, !notdec.evm !4093
   %evm.branch.cond65 = icmp ne i256 %evm.bool64, 0, !notdec.evm !4094
@@ -7185,20 +7855,25 @@ bb._0x878:                                        ; preds = %bb._0x842
   %evm.mul66 = mul i256 32, %_0x878_0x0, !notdec.evm !4098
   %evm.add67 = add i256 32, %evm.mul66, !notdec.evm !4099
   %evm.add68 = add i256 %evm.add67, %private.call, !notdec.evm !4100
-  %evm.mload69 = call i256 @evm_mload(ptr %mem, i256 %evm.add68), !notdec.evm !4101
+  %notdec.evm.mem.ptr.673 = inttoptr i256 %evm.add68 to ptr
+  %evm.mload69 = load i256, ptr %notdec.evm.mem.ptr.673, align 1, !notdec.evm !4101
   %evm.add70 = add i256 0, %evm.mload69, !notdec.evm !4102
-  %evm.mload71 = call i256 @evm_mload(ptr %mem, i256 %evm.add70), !notdec.evm !4103
+  %notdec.evm.mem.ptr.674 = inttoptr i256 %evm.add70 to ptr
+  %evm.mload71 = load i256, ptr %notdec.evm.mem.ptr.674, align 1, !notdec.evm !4103
   %evm.shl72 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4104
   %evm.sub73 = sub i256 %evm.shl72, 1, !notdec.evm !4105
   %evm.and74 = and i256 %evm.sub73, %evm.mload71, !notdec.evm !4106
   %evm.shl75 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4107
   %evm.sub76 = sub i256 %evm.shl75, 1, !notdec.evm !4108
   %evm.and77 = and i256 %evm.sub76, %evm.and74, !notdec.evm !4109
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and77), !notdec.evm !4110
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !4111
+  %notdec.evm.mem.ptr.675 = inttoptr i256 0 to ptr
+  store i256 %evm.and77, ptr %notdec.evm.mem.ptr.675, align 1, !notdec.evm !4110
+  %notdec.evm.mem.ptr.676 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.676, align 1, !notdec.evm !4111
   %evm.sha378 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4112
   %evm.add79 = add i256 0, %evm.sha378, !notdec.evm !4113
-  %evm.mload80 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !4114
+  %notdec.evm.mem.ptr.677 = inttoptr i256 %evm.mload to ptr
+  %evm.mload80 = load i256, ptr %notdec.evm.mem.ptr.677, align 1, !notdec.evm !4114
   %evm.lt81 = icmp ult i256 %_0x878_0x4, %evm.mload80, !notdec.evm !4115
   %evm.bool82 = zext i1 %evm.lt81 to i256, !notdec.evm !4115
   %evm.branch.cond83 = icmp ne i256 %evm.bool82, 0, !notdec.evm !4116
@@ -7211,15 +7886,18 @@ bb._0x8bb:                                        ; preds = %bb._0x878
   %evm.mul84 = mul i256 32, %_0x8bb_0x0, !notdec.evm !4120
   %evm.add85 = add i256 32, %evm.mul84, !notdec.evm !4121
   %evm.add86 = add i256 %evm.add85, %evm.mload, !notdec.evm !4122
-  %evm.mload87 = call i256 @evm_mload(ptr %mem, i256 %evm.add86), !notdec.evm !4123
+  %notdec.evm.mem.ptr.678 = inttoptr i256 %evm.add86 to ptr
+  %evm.mload87 = load i256, ptr %notdec.evm.mem.ptr.678, align 1, !notdec.evm !4123
   %evm.shl88 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4124
   %evm.sub89 = sub i256 %evm.shl88, 1, !notdec.evm !4125
   %evm.and90 = and i256 %evm.sub89, %evm.mload87, !notdec.evm !4126
   %evm.shl91 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4127
   %evm.sub92 = sub i256 %evm.shl91, 1, !notdec.evm !4128
   %evm.and93 = and i256 %evm.sub92, %evm.and90, !notdec.evm !4129
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and93), !notdec.evm !4130
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add79), !notdec.evm !4131
+  %notdec.evm.mem.ptr.679 = inttoptr i256 0 to ptr
+  store i256 %evm.and93, ptr %notdec.evm.mem.ptr.679, align 1, !notdec.evm !4130
+  %notdec.evm.mem.ptr.680 = inttoptr i256 32 to ptr
+  store i256 %evm.add79, ptr %notdec.evm.mem.ptr.680, align 1, !notdec.evm !4131
   %evm.sha394 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4132
   %evm.add95 = add i256 1, %evm.sha394, !notdec.evm !4133
   %evm.shl96 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4134
@@ -7228,8 +7906,10 @@ bb._0x8bb:                                        ; preds = %bb._0x878
   %evm.shl99 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4137
   %evm.sub100 = sub i256 %evm.shl99, 1, !notdec.evm !4138
   %evm.and101 = and i256 %evm.sub100, %evm.and98, !notdec.evm !4139
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and101), !notdec.evm !4140
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add95), !notdec.evm !4141
+  %notdec.evm.mem.ptr.681 = inttoptr i256 0 to ptr
+  store i256 %evm.and101, ptr %notdec.evm.mem.ptr.681, align 1, !notdec.evm !4140
+  %notdec.evm.mem.ptr.682 = inttoptr i256 32 to ptr
+  store i256 %evm.add95, ptr %notdec.evm.mem.ptr.682, align 1, !notdec.evm !4141
   %evm.sha3102 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4142
   %evm.add103 = add i256 0, %evm.sha3102, !notdec.evm !4143
   %evm.sload104 = call i256 @evm_sload(i256 %evm.add103), !notdec.evm !4144
@@ -7241,7 +7921,8 @@ bb._0x8bb:                                        ; preds = %bb._0x878
   %evm.shl110 = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !4150
   %evm.sub111 = sub i256 %evm.shl110, 1, !notdec.evm !4151
   %evm.and112 = and i256 %evm.sub111, %evm.and109, !notdec.evm !4152
-  %evm.mload113 = call i256 @evm_mload(ptr %mem, i256 %evm.mload17), !notdec.evm !4153
+  %notdec.evm.mem.ptr.683 = inttoptr i256 %evm.mload17 to ptr
+  %evm.mload113 = load i256, ptr %notdec.evm.mem.ptr.683, align 1, !notdec.evm !4153
   %evm.lt114 = icmp ult i256 %_0x8bb_0x4, %evm.mload113, !notdec.evm !4154
   %evm.bool115 = zext i1 %evm.lt114 to i256, !notdec.evm !4154
   %evm.branch.cond116 = icmp ne i256 %evm.bool115, 0, !notdec.evm !4155
@@ -7254,15 +7935,18 @@ bb._0x93b:                                        ; preds = %bb._0x8bb
   %evm.mul117 = mul i256 32, %_0x93b_0x0, !notdec.evm !4159
   %evm.add118 = add i256 32, %evm.mul117, !notdec.evm !4160
   %evm.add119 = add i256 %evm.add118, %evm.mload17, !notdec.evm !4161
-  %evm.mload120 = call i256 @evm_mload(ptr %mem, i256 %evm.add119), !notdec.evm !4162
+  %notdec.evm.mem.ptr.684 = inttoptr i256 %evm.add119 to ptr
+  %evm.mload120 = load i256, ptr %notdec.evm.mem.ptr.684, align 1, !notdec.evm !4162
   %private.call121 = call i256 @private__0x35ec_0x35ec(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload120, i256 %evm.and112, i256 2383), !notdec.evm !4163
   br label %bb._0x94f
 
 bb._0x94f:                                        ; preds = %bb._0x93b
   %_0x94f_0x3 = phi i256 [ %_0x93b_0x3, %bb._0x93b ], !notdec.evm !4164
   %_0x94f_0x4 = phi i256 [ %_0x93b_0x4, %bb._0x93b ], !notdec.evm !4165
-  call void @evm_mstore(ptr %mem, i256 %evm.add119, i256 %private.call121), !notdec.evm !4166
-  %evm.mload122 = call i256 @evm_mload(ptr %mem, i256 %private.call), !notdec.evm !4167
+  %notdec.evm.mem.ptr.685 = inttoptr i256 %evm.add119 to ptr
+  store i256 %private.call121, ptr %notdec.evm.mem.ptr.685, align 1, !notdec.evm !4166
+  %notdec.evm.mem.ptr.686 = inttoptr i256 %private.call to ptr
+  %evm.mload122 = load i256, ptr %notdec.evm.mem.ptr.686, align 1, !notdec.evm !4167
   %evm.lt123 = icmp ult i256 %_0x94f_0x4, %evm.mload122, !notdec.evm !4168
   %evm.bool124 = zext i1 %evm.lt123 to i256, !notdec.evm !4168
   %evm.branch.cond125 = icmp ne i256 %evm.bool124, 0, !notdec.evm !4169
@@ -7275,9 +7959,11 @@ bb._0x966:                                        ; preds = %bb._0x94f
   %evm.mul126 = mul i256 32, %_0x966_0x0, !notdec.evm !4173
   %evm.add127 = add i256 32, %evm.mul126, !notdec.evm !4174
   %evm.add128 = add i256 %evm.add127, %private.call, !notdec.evm !4175
-  %evm.mload129 = call i256 @evm_mload(ptr %mem, i256 %evm.add128), !notdec.evm !4176
+  %notdec.evm.mem.ptr.687 = inttoptr i256 %evm.add128 to ptr
+  %evm.mload129 = load i256, ptr %notdec.evm.mem.ptr.687, align 1, !notdec.evm !4176
   %evm.add130 = add i256 32, %evm.mload129, !notdec.evm !4177
-  %evm.mload131 = call i256 @evm_mload(ptr %mem, i256 %evm.add130), !notdec.evm !4178
+  %notdec.evm.mem.ptr.688 = inttoptr i256 %evm.add130 to ptr
+  %evm.mload131 = load i256, ptr %notdec.evm.mem.ptr.688, align 1, !notdec.evm !4178
   %evm.eq = icmp eq i256 0, %evm.mload131, !notdec.evm !4179
   %evm.bool132 = zext i1 %evm.eq to i256, !notdec.evm !4179
   %evm.iszero133 = icmp eq i256 %evm.bool132, 0, !notdec.evm !4180
@@ -7288,7 +7974,8 @@ bb._0x966:                                        ; preds = %bb._0x94f
 bb._0x97f:                                        ; preds = %bb._0x966
   %_0x97f_0x0 = phi i256 [ %_0x966_0x2, %bb._0x966 ], !notdec.evm !4182
   %_0x97f_0x1 = phi i256 [ %_0x966_0x3, %bb._0x966 ], !notdec.evm !4183
-  %evm.mload136 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !4184
+  %notdec.evm.mem.ptr.689 = inttoptr i256 %evm.mload to ptr
+  %evm.mload136 = load i256, ptr %notdec.evm.mem.ptr.689, align 1, !notdec.evm !4184
   %evm.lt137 = icmp ult i256 %_0x97f_0x0, %evm.mload136, !notdec.evm !4185
   %evm.bool138 = zext i1 %evm.lt137 to i256, !notdec.evm !4185
   %evm.branch.cond139 = icmp ne i256 %evm.bool138, 0, !notdec.evm !4186
@@ -7301,8 +7988,10 @@ bb._0x995:                                        ; preds = %bb._0x97f
   %evm.mul140 = mul i256 32, %_0x995_0x0, !notdec.evm !4190
   %evm.add141 = add i256 32, %evm.mul140, !notdec.evm !4191
   %evm.add142 = add i256 %evm.add141, %evm.mload, !notdec.evm !4192
-  %evm.mload143 = call i256 @evm_mload(ptr %mem, i256 %evm.add142), !notdec.evm !4193
-  %evm.mload144 = call i256 @evm_mload(ptr %mem, i256 %private.call), !notdec.evm !4194
+  %notdec.evm.mem.ptr.690 = inttoptr i256 %evm.add142 to ptr
+  %evm.mload143 = load i256, ptr %notdec.evm.mem.ptr.690, align 1, !notdec.evm !4193
+  %notdec.evm.mem.ptr.691 = inttoptr i256 %private.call to ptr
+  %evm.mload144 = load i256, ptr %notdec.evm.mem.ptr.691, align 1, !notdec.evm !4194
   %evm.lt145 = icmp ult i256 %_0x995_0x5, %evm.mload144, !notdec.evm !4195
   %evm.bool146 = zext i1 %evm.lt145 to i256, !notdec.evm !4195
   %evm.branch.cond147 = icmp ne i256 %evm.bool146, 0, !notdec.evm !4196
@@ -7315,27 +8004,36 @@ bb._0xe8e1f:                                      ; preds = %bb._0x995
   %evm.mul148 = mul i256 32, %_0xe8e1f_0x0, !notdec.evm !4200
   %evm.add149 = add i256 32, %evm.mul148, !notdec.evm !4201
   %evm.add150 = add i256 %evm.add149, %private.call, !notdec.evm !4202
-  %evm.mload151 = call i256 @evm_mload(ptr %mem, i256 %evm.add150), !notdec.evm !4203
+  %notdec.evm.mem.ptr.692 = inttoptr i256 %evm.add150 to ptr
+  %evm.mload151 = load i256, ptr %notdec.evm.mem.ptr.692, align 1, !notdec.evm !4203
   br label %bb._0x1b560x749, !notdec.evm !4204
 
 bb._0x1b560x749:                                  ; preds = %bb._0xe8e1f
   %_0x1b560x749_0x4 = phi i256 [ %_0xe8e1f_0x5, %bb._0xe8e1f ], !notdec.evm !4205
   %_0x1b560x749_0x5 = phi i256 [ %_0xe8e1f_0x6, %bb._0xe8e1f ], !notdec.evm !4206
-  %evm.mload152 = call i256 @evm_mload(ptr %mem, i256 %evm.mload151), !notdec.evm !4207
+  %notdec.evm.mem.ptr.693 = inttoptr i256 %evm.mload151 to ptr
+  %evm.mload152 = load i256, ptr %notdec.evm.mem.ptr.693, align 1, !notdec.evm !4207
   %evm.shl153 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4208
   %evm.sub154 = sub i256 %evm.shl153, 1, !notdec.evm !4209
   %evm.and155 = and i256 %evm.sub154, %evm.mload152, !notdec.evm !4210
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and155), !notdec.evm !4211
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !4212
+  %notdec.evm.mem.ptr.694 = inttoptr i256 0 to ptr
+  store i256 %evm.and155, ptr %notdec.evm.mem.ptr.694, align 1, !notdec.evm !4211
+  %notdec.evm.mem.ptr.695 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.695, align 1, !notdec.evm !4212
   %evm.sha3156 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4213
   %evm.and157 = and i256 %evm.sub154, %evm.mload143, !notdec.evm !4214
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and157), !notdec.evm !4215
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3156), !notdec.evm !4216
+  %notdec.evm.mem.ptr.696 = inttoptr i256 0 to ptr
+  store i256 %evm.and157, ptr %notdec.evm.mem.ptr.696, align 1, !notdec.evm !4215
+  %notdec.evm.mem.ptr.697 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3156, ptr %notdec.evm.mem.ptr.697, align 1, !notdec.evm !4216
   %evm.sha3158 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4217
-  %evm.mload159 = call i256 @evm_mload(ptr %mem, i256 %evm.mload151), !notdec.evm !4218
+  %notdec.evm.mem.ptr.698 = inttoptr i256 %evm.mload151 to ptr
+  %evm.mload159 = load i256, ptr %notdec.evm.mem.ptr.698, align 1, !notdec.evm !4218
   %evm.and160 = and i256 %evm.sub154, %evm.mload159, !notdec.evm !4219
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and160), !notdec.evm !4220
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !4221
+  %notdec.evm.mem.ptr.699 = inttoptr i256 0 to ptr
+  store i256 %evm.and160, ptr %notdec.evm.mem.ptr.699, align 1, !notdec.evm !4220
+  %notdec.evm.mem.ptr.700 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.700, align 1, !notdec.evm !4221
   %evm.sha3161 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4222
   %evm.add162 = add i256 2, %evm.sha3161, !notdec.evm !4223
   %evm.sload163 = call i256 @evm_sload(i256 %evm.add162), !notdec.evm !4224
@@ -7349,7 +8047,8 @@ bb._0x1ba80x749:                                  ; preds = %bb._0x1b560x749
   %_0x1ba80x749_0x8 = phi i256 [ %_0x1b560x749_0x4, %bb._0x1b560x749 ], !notdec.evm !4229
   %_0x1ba80x749_0x9 = phi i256 [ %_0x1b560x749_0x5, %bb._0x1b560x749 ], !notdec.evm !4230
   %evm.add168 = add i256 64, %evm.mload151, !notdec.evm !4231
-  %evm.mload169 = call i256 @evm_mload(ptr %mem, i256 %evm.add168), !notdec.evm !4232
+  %notdec.evm.mem.ptr.701 = inttoptr i256 %evm.add168 to ptr
+  %evm.mload169 = load i256, ptr %notdec.evm.mem.ptr.701, align 1, !notdec.evm !4232
   %private.call170 = call { i256, i256 } @private__0x1e5e_0x1e5e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %private.call167, i256 %evm.mload169, i256 %evm.sha3158, i256 7099), !notdec.evm !4233
   %private.ret = extractvalue { i256, i256 } %private.call170, 0, !notdec.evm !4233
   %private.ret171 = extractvalue { i256, i256 } %private.call170, 1, !notdec.evm !4233
@@ -7359,13 +8058,16 @@ bb._0x1bbb0x749:                                  ; preds = %bb._0x1ba80x749
   %_0x1bbb0x749_0xa = phi i256 [ %_0x1ba80x749_0x8, %bb._0x1ba80x749 ], !notdec.evm !4234
   %_0x1bbb0x749_0xb = phi i256 [ %_0x1ba80x749_0x9, %bb._0x1ba80x749 ], !notdec.evm !4235
   %evm.add172 = add i256 %evm.mload151, 32, !notdec.evm !4236
-  %evm.mload173 = call i256 @evm_mload(ptr %mem, i256 %evm.add172), !notdec.evm !4237
+  %notdec.evm.mem.ptr.702 = inttoptr i256 %evm.add172 to ptr
+  %evm.mload173 = load i256, ptr %notdec.evm.mem.ptr.702, align 1, !notdec.evm !4237
   %evm.shl174 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4238
   %evm.sub175 = sub i256 %evm.shl174, 1, !notdec.evm !4239
   %evm.and176 = and i256 %_0x749arg0x0, %evm.sub175, !notdec.evm !4240
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and176), !notdec.evm !4241
+  %notdec.evm.mem.ptr.703 = inttoptr i256 0 to ptr
+  store i256 %evm.and176, ptr %notdec.evm.mem.ptr.703, align 1, !notdec.evm !4241
   %evm.add177 = add i256 %evm.sha3158, 1, !notdec.evm !4242
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add177), !notdec.evm !4243
+  %notdec.evm.mem.ptr.704 = inttoptr i256 32 to ptr
+  store i256 %evm.add177, ptr %notdec.evm.mem.ptr.704, align 1, !notdec.evm !4243
   %evm.sha3178 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4244
   %evm.sload179 = call i256 @evm_sload(i256 %evm.sha3178), !notdec.evm !4245
   %evm.shl180 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !4246
@@ -7382,7 +8084,8 @@ bb._0xe91c90x749:                                 ; preds = %bb._0x1bbb0x749
 bb._0x9bc:                                        ; preds = %bb._0xe91c90x749
   %_0x9bc_0x1 = phi i256 [ %_0xe91c90x749_0x9, %bb._0xe91c90x749 ], !notdec.evm !4253
   %_0x9bc_0x2 = phi i256 [ %_0xe91c90x749_0xa, %bb._0xe91c90x749 ], !notdec.evm !4254
-  %evm.mload184 = call i256 @evm_mload(ptr %mem, i256 %evm.mload17), !notdec.evm !4255
+  %notdec.evm.mem.ptr.705 = inttoptr i256 %evm.mload17 to ptr
+  %evm.mload184 = load i256, ptr %notdec.evm.mem.ptr.705, align 1, !notdec.evm !4255
   %evm.lt185 = icmp ult i256 %_0x9bc_0x1, %evm.mload184, !notdec.evm !4256
   %evm.bool186 = zext i1 %evm.lt185 to i256, !notdec.evm !4256
   %evm.branch.cond187 = icmp ne i256 %evm.bool186, 0, !notdec.evm !4257
@@ -7395,14 +8098,16 @@ bb._0x9ce:                                        ; preds = %bb._0x9bc
   %evm.mul188 = mul i256 32, %_0x9ce_0x0, !notdec.evm !4261
   %evm.add189 = add i256 32, %evm.mul188, !notdec.evm !4262
   %evm.add190 = add i256 %evm.add189, %evm.mload17, !notdec.evm !4263
-  %evm.mload191 = call i256 @evm_mload(ptr %mem, i256 %evm.add190), !notdec.evm !4264
+  %notdec.evm.mem.ptr.706 = inttoptr i256 %evm.add190 to ptr
+  %evm.mload191 = load i256, ptr %notdec.evm.mem.ptr.706, align 1, !notdec.evm !4264
   %private.call192 = call i256 @private__0x35ec_0x35ec(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload191, i256 %private.call183, i256 2530), !notdec.evm !4265
   br label %bb._0x9e2
 
 bb._0x9e2:                                        ; preds = %bb._0x9ce
   %_0x9e2_0x3 = phi i256 [ %_0x9ce_0x3, %bb._0x9ce ], !notdec.evm !4266
   %_0x9e2_0x4 = phi i256 [ %_0x9ce_0x4, %bb._0x9ce ], !notdec.evm !4267
-  call void @evm_mstore(ptr %mem, i256 %evm.add190, i256 %private.call192), !notdec.evm !4268
+  %notdec.evm.mem.ptr.707 = inttoptr i256 %evm.add190 to ptr
+  store i256 %private.call192, ptr %notdec.evm.mem.ptr.707, align 1, !notdec.evm !4268
   br label %bb._0x9e6, !notdec.evm !4269
 
 bb._0x9c7:                                        ; preds = %bb._0x9bc
@@ -7416,8 +8121,10 @@ bb._0x73d0:                                       ; preds = %bb._0x9c7
   %_0x73d0_0x4 = phi i256 [ %_0x9c7_0x3, %bb._0x9c7 ], !notdec.evm !4275
   %_0x73d0_0x5 = phi i256 [ %_0x9c7_0x4, %bb._0x9c7 ], !notdec.evm !4276
   %evm.shl193 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4277
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl193), !notdec.evm !4278
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4279
+  %notdec.evm.mem.ptr.708 = inttoptr i256 0 to ptr
+  store i256 %evm.shl193, ptr %notdec.evm.mem.ptr.708, align 1, !notdec.evm !4278
+  %notdec.evm.mem.ptr.709 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.709, align 1, !notdec.evm !4279
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4280
   unreachable, !notdec.evm !4280
 
@@ -7432,8 +8139,10 @@ bb._0x739b:                                       ; preds = %bb._0x9a8
   %_0x739b_0x6 = phi i256 [ %_0x9a8_0x5, %bb._0x9a8 ], !notdec.evm !4286
   %_0x739b_0x7 = phi i256 [ %_0x9a8_0x6, %bb._0x9a8 ], !notdec.evm !4287
   %evm.shl194 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4288
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl194), !notdec.evm !4289
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4290
+  %notdec.evm.mem.ptr.710 = inttoptr i256 0 to ptr
+  store i256 %evm.shl194, ptr %notdec.evm.mem.ptr.710, align 1, !notdec.evm !4289
+  %notdec.evm.mem.ptr.711 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.711, align 1, !notdec.evm !4290
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4291
   unreachable, !notdec.evm !4291
 
@@ -7448,8 +8157,10 @@ bb._0x7366:                                       ; preds = %bb._0x98e
   %_0x7366_0x5 = phi i256 [ %_0x98e_0x4, %bb._0x98e ], !notdec.evm !4297
   %_0x7366_0x6 = phi i256 [ %_0x98e_0x5, %bb._0x98e ], !notdec.evm !4298
   %evm.shl195 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4299
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl195), !notdec.evm !4300
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4301
+  %notdec.evm.mem.ptr.712 = inttoptr i256 0 to ptr
+  store i256 %evm.shl195, ptr %notdec.evm.mem.ptr.712, align 1, !notdec.evm !4300
+  %notdec.evm.mem.ptr.713 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.713, align 1, !notdec.evm !4301
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4302
   unreachable, !notdec.evm !4302
 
@@ -7481,8 +8192,10 @@ bb._0x7331:                                       ; preds = %bb._0x95f
   %_0x7331_0x3 = phi i256 [ %_0x95f_0x2, %bb._0x95f ], !notdec.evm !4318
   %_0x7331_0x4 = phi i256 [ %_0x95f_0x3, %bb._0x95f ], !notdec.evm !4319
   %evm.shl197 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4320
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl197), !notdec.evm !4321
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4322
+  %notdec.evm.mem.ptr.714 = inttoptr i256 0 to ptr
+  store i256 %evm.shl197, ptr %notdec.evm.mem.ptr.714, align 1, !notdec.evm !4321
+  %notdec.evm.mem.ptr.715 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.715, align 1, !notdec.evm !4322
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4323
   unreachable, !notdec.evm !4323
 
@@ -7497,8 +8210,10 @@ bb._0x72fc:                                       ; preds = %bb._0x934
   %_0x72fc_0x4 = phi i256 [ %_0x934_0x3, %bb._0x934 ], !notdec.evm !4329
   %_0x72fc_0x5 = phi i256 [ %_0x934_0x4, %bb._0x934 ], !notdec.evm !4330
   %evm.shl198 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4331
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl198), !notdec.evm !4332
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4333
+  %notdec.evm.mem.ptr.716 = inttoptr i256 0 to ptr
+  store i256 %evm.shl198, ptr %notdec.evm.mem.ptr.716, align 1, !notdec.evm !4332
+  %notdec.evm.mem.ptr.717 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.717, align 1, !notdec.evm !4333
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4334
   unreachable, !notdec.evm !4334
 
@@ -7513,8 +8228,10 @@ bb._0x72c7:                                       ; preds = %bb._0x8b4
   %_0x72c7_0x5 = phi i256 [ %_0x8b4_0x4, %bb._0x8b4 ], !notdec.evm !4340
   %_0x72c7_0x6 = phi i256 [ %_0x8b4_0x5, %bb._0x8b4 ], !notdec.evm !4341
   %evm.shl199 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4342
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl199), !notdec.evm !4343
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4344
+  %notdec.evm.mem.ptr.718 = inttoptr i256 0 to ptr
+  store i256 %evm.shl199, ptr %notdec.evm.mem.ptr.718, align 1, !notdec.evm !4343
+  %notdec.evm.mem.ptr.719 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.719, align 1, !notdec.evm !4344
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4345
   unreachable, !notdec.evm !4345
 
@@ -7529,8 +8246,10 @@ bb._0x7292:                                       ; preds = %bb._0x871
   %_0x7292_0x5 = phi i256 [ %_0x871_0x4, %bb._0x871 ], !notdec.evm !4351
   %_0x7292_0x6 = phi i256 [ %_0x871_0x5, %bb._0x871 ], !notdec.evm !4352
   %evm.shl200 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4353
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl200), !notdec.evm !4354
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4355
+  %notdec.evm.mem.ptr.720 = inttoptr i256 0 to ptr
+  store i256 %evm.shl200, ptr %notdec.evm.mem.ptr.720, align 1, !notdec.evm !4354
+  %notdec.evm.mem.ptr.721 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.721, align 1, !notdec.evm !4355
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4356
   unreachable, !notdec.evm !4356
 
@@ -7545,8 +8264,10 @@ bb._0x725d:                                       ; preds = %bb._0x83b
   %_0x725d_0x4 = phi i256 [ %_0x83b_0x3, %bb._0x83b ], !notdec.evm !4362
   %_0x725d_0x5 = phi i256 [ %_0x83b_0x4, %bb._0x83b ], !notdec.evm !4363
   %evm.shl201 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4364
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl201), !notdec.evm !4365
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4366
+  %notdec.evm.mem.ptr.722 = inttoptr i256 0 to ptr
+  store i256 %evm.shl201, ptr %notdec.evm.mem.ptr.722, align 1, !notdec.evm !4365
+  %notdec.evm.mem.ptr.723 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.723, align 1, !notdec.evm !4366
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4367
   unreachable, !notdec.evm !4367
 
@@ -7561,8 +8282,10 @@ bb._0x7228:                                       ; preds = %bb._0x80b
   %_0x7228_0x3 = phi i256 [ %_0x80b_0x2, %bb._0x80b ], !notdec.evm !4373
   %_0x7228_0x4 = phi i256 [ %_0x80b_0x3, %bb._0x80b ], !notdec.evm !4374
   %evm.shl202 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4375
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl202), !notdec.evm !4376
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4377
+  %notdec.evm.mem.ptr.724 = inttoptr i256 0 to ptr
+  store i256 %evm.shl202, ptr %notdec.evm.mem.ptr.724, align 1, !notdec.evm !4376
+  %notdec.evm.mem.ptr.725 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.725, align 1, !notdec.evm !4377
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4378
   unreachable, !notdec.evm !4378
 
@@ -7571,8 +8294,10 @@ bb._0x7b4:                                        ; preds = %bb._0x79f
 
 bb._0x71f3:                                       ; preds = %bb._0x7b4
   %evm.shl203 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4380
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl203), !notdec.evm !4381
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !4382
+  %notdec.evm.mem.ptr.726 = inttoptr i256 0 to ptr
+  store i256 %evm.shl203, ptr %notdec.evm.mem.ptr.726, align 1, !notdec.evm !4381
+  %notdec.evm.mem.ptr.727 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.727, align 1, !notdec.evm !4382
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4383
   unreachable, !notdec.evm !4383
 
@@ -7581,13 +8306,15 @@ bb._0x76f:                                        ; preds = %bb._0x759
 
 bb._0x71be:                                       ; preds = %bb._0x76f
   %evm.shl204 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4385
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl204), !notdec.evm !4386
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !4387
+  %notdec.evm.mem.ptr.728 = inttoptr i256 0 to ptr
+  store i256 %evm.shl204, ptr %notdec.evm.mem.ptr.728, align 1, !notdec.evm !4386
+  %notdec.evm.mem.ptr.729 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.729, align 1, !notdec.evm !4387
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4388
   unreachable, !notdec.evm !4388
 }
 
-define void @private__0xa16_0xa16(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xa16arg0x0, i256 %_0xa16arg0x1, i256 %_0xa16arg0x2) {
+define void @private__0xa16_0xa16(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xa16arg0x0, i256 %_0xa16arg0x1, i256 %_0xa16arg0x2) #0 {
 bb._0xa16:
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !4389
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4390
@@ -7605,11 +8332,14 @@ bb._0x1bf70xa16:                                  ; preds = %bb._0xa5e
   %evm.shl1 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4396
   %evm.sub2 = sub i256 %evm.shl1, 1, !notdec.evm !4397
   %evm.and3 = and i256 %evm.sub2, %_0xa16arg0x0, !notdec.evm !4398
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4399
+  %notdec.evm.mem.ptr.730 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.730, align 1, !notdec.evm !4399
   %evm.shl4 = call i256 @evm_shl(i256 224, i256 1355963341), !notdec.evm !4400
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl4), !notdec.evm !4401
+  %notdec.evm.mem.ptr.731 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl4, ptr %notdec.evm.mem.ptr.731, align 1, !notdec.evm !4401
   %evm.add = add i256 4, %evm.mload, !notdec.evm !4402
-  %evm.mload5 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4403
+  %notdec.evm.mem.ptr.732 = inttoptr i256 64 to ptr
+  %evm.mload5 = load i256, ptr %notdec.evm.mem.ptr.732, align 1, !notdec.evm !4403
   %evm.sub6 = sub i256 %evm.add, %evm.mload5, !notdec.evm !4404
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !4405
   %evm.staticcall = call i256 @evm_staticcall(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas, i256 %evm.and3, i256 %evm.mload5, i256 %evm.sub6, i256 %evm.mload5, i256 32), !notdec.evm !4406
@@ -7621,12 +8351,14 @@ bb._0x1bf70xa16:                                  ; preds = %bb._0xa5e
   br i1 %evm.branch.cond10, label %bb._0x1c370xa16, label %bb._0x1c2e0xa16, !notdec.evm !4409
 
 bb._0x1c370xa16:                                  ; preds = %bb._0x1bf70xa16
-  %evm.mload11 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4410
+  %notdec.evm.mem.ptr.733 = inttoptr i256 64 to ptr
+  %evm.mload11 = load i256, ptr %notdec.evm.mem.ptr.733, align 1, !notdec.evm !4410
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !4411
   %evm.add12 = add i256 %evm.returndatasize, 31, !notdec.evm !4412
   %evm.and13 = and i256 %evm.add12, -32, !notdec.evm !4413
   %evm.add14 = add i256 %evm.mload11, %evm.and13, !notdec.evm !4414
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add14), !notdec.evm !4415
+  %notdec.evm.mem.ptr.734 = inttoptr i256 64 to ptr
+  store i256 %evm.add14, ptr %notdec.evm.mem.ptr.734, align 1, !notdec.evm !4415
   %evm.add15 = add i256 %evm.mload11, %evm.returndatasize, !notdec.evm !4416
   %private.call = call i256 @private__0x3675_0x3675(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload11, i256 %evm.add15, i256 7259), !notdec.evm !4417
   br label %bb._0x1c5b0xa16
@@ -7641,8 +8373,10 @@ bb._0x1ca80xa16:                                  ; preds = %bb._0x1c5b0xa16
   %evm.shl18 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4420
   %evm.sub19 = sub i256 %evm.shl18, 1, !notdec.evm !4421
   %evm.and20 = and i256 %evm.sub19, %_0xa16arg0x1, !notdec.evm !4422
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and20), !notdec.evm !4423
-  call void @evm_mstore(ptr %mem, i256 32, i256 59), !notdec.evm !4424
+  %notdec.evm.mem.ptr.735 = inttoptr i256 0 to ptr
+  store i256 %evm.and20, ptr %notdec.evm.mem.ptr.735, align 1, !notdec.evm !4423
+  %notdec.evm.mem.ptr.736 = inttoptr i256 32 to ptr
+  store i256 59, ptr %notdec.evm.mem.ptr.736, align 1, !notdec.evm !4424
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4425
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !4426
   %evm.shl21 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4427
@@ -7652,7 +8386,8 @@ bb._0x1ca80xa16:                                  ; preds = %bb._0x1c5b0xa16
   %evm.and24 = and i256 %_0xa16arg0x0, %evm.sub19, !notdec.evm !4431
   %evm.or = or i256 %evm.and24, %evm.and23, !notdec.evm !4432
   call void @evm_sstore(i256 %evm.sha3, i256 %evm.or), !notdec.evm !4433
-  %evm.mload25 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4434
+  %notdec.evm.mem.ptr.737 = inttoptr i256 64 to ptr
+  %evm.mload25 = load i256, ptr %notdec.evm.mem.ptr.737, align 1, !notdec.evm !4434
   call void @evm_log3(ptr %mem, i256 %evm.mload25, i256 0, i256 11811077800630211879463896014686040810120646756326157266300715827896135331661, i256 %evm.and20, i256 %evm.and24), !notdec.evm !4435
   br label %bb._0xe8e9f, !notdec.evm !4436
 
@@ -7660,20 +8395,26 @@ bb._0xe8e9f:                                      ; preds = %bb._0x1ca80xa16
   ret void, !notdec.evm !4437
 
 bb._0x1c610xa16:                                  ; preds = %bb._0x1c5b0xa16
-  %evm.mload26 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4438
+  %notdec.evm.mem.ptr.738 = inttoptr i256 64 to ptr
+  %evm.mload26 = load i256, ptr %notdec.evm.mem.ptr.738, align 1, !notdec.evm !4438
   %evm.shl27 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4439
-  call void @evm_mstore(ptr %mem, i256 %evm.mload26, i256 %evm.shl27), !notdec.evm !4440
+  %notdec.evm.mem.ptr.739 = inttoptr i256 %evm.mload26 to ptr
+  store i256 %evm.shl27, ptr %notdec.evm.mem.ptr.739, align 1, !notdec.evm !4440
   %evm.add28 = add i256 %evm.mload26, 4, !notdec.evm !4441
-  call void @evm_mstore(ptr %mem, i256 %evm.add28, i256 32), !notdec.evm !4442
+  %notdec.evm.mem.ptr.740 = inttoptr i256 %evm.add28 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.740, align 1, !notdec.evm !4442
   %evm.add29 = add i256 %evm.mload26, 36, !notdec.evm !4443
-  call void @evm_mstore(ptr %mem, i256 %evm.add29, i256 24), !notdec.evm !4444
+  %notdec.evm.mem.ptr.741 = inttoptr i256 %evm.add29 to ptr
+  store i256 24, ptr %notdec.evm.mem.ptr.741, align 1, !notdec.evm !4444
   %evm.add30 = add i256 %evm.mload26, 68, !notdec.evm !4445
-  call void @evm_mstore(ptr %mem, i256 %evm.add30, i256 35878046925251112547224839097665699540559070317255515579439100265505602142208), !notdec.evm !4446
+  %notdec.evm.mem.ptr.742 = inttoptr i256 %evm.add30 to ptr
+  store i256 35878046925251112547224839097665699540559070317255515579439100265505602142208, ptr %notdec.evm.mem.ptr.742, align 1, !notdec.evm !4446
   %evm.add31 = add i256 100, %evm.mload26, !notdec.evm !4447
   br label %bb._0x78f10xa16, !notdec.evm !4448
 
 bb._0x78f10xa16:                                  ; preds = %bb._0x1c610xa16
-  %evm.mload32 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4449
+  %notdec.evm.mem.ptr.743 = inttoptr i256 64 to ptr
+  %evm.mload32 = load i256, ptr %notdec.evm.mem.ptr.743, align 1, !notdec.evm !4449
   %evm.sub33 = sub i256 %evm.add31, %evm.mload32, !notdec.evm !4450
   call void @evm_revert(ptr %mem, i256 %evm.mload32, i256 %evm.sub33), !notdec.evm !4451
   unreachable, !notdec.evm !4451
@@ -7686,21 +8427,24 @@ bb._0x1c2e0xa16:                                  ; preds = %bb._0x1bf70xa16
   unreachable, !notdec.evm !4455
 
 bb._0xa47:                                        ; preds = %bb._0xa16
-  %evm.mload36 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4456
+  %notdec.evm.mem.ptr.744 = inttoptr i256 64 to ptr
+  %evm.mload36 = load i256, ptr %notdec.evm.mem.ptr.744, align 1, !notdec.evm !4456
   %evm.shl37 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4457
-  call void @evm_mstore(ptr %mem, i256 %evm.mload36, i256 %evm.shl37), !notdec.evm !4458
+  %notdec.evm.mem.ptr.745 = inttoptr i256 %evm.mload36 to ptr
+  store i256 %evm.shl37, ptr %notdec.evm.mem.ptr.745, align 1, !notdec.evm !4458
   %evm.add38 = add i256 4, %evm.mload36, !notdec.evm !4459
   %private.call39 = call i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add38, i256 953975), !notdec.evm !4460
   br label %bb._0xe8e77
 
 bb._0xe8e77:                                      ; preds = %bb._0xa47
-  %evm.mload40 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4461
+  %notdec.evm.mem.ptr.746 = inttoptr i256 64 to ptr
+  %evm.mload40 = load i256, ptr %notdec.evm.mem.ptr.746, align 1, !notdec.evm !4461
   %evm.sub41 = sub i256 %private.call39, %evm.mload40, !notdec.evm !4462
   call void @evm_revert(ptr %mem, i256 %evm.mload40, i256 %evm.sub41), !notdec.evm !4463
   unreachable, !notdec.evm !4463
 }
 
-define i256 @private__0xa6c_0xa6c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xa6carg0x0, i256 %_0xa6carg0x1, i256 %_0xa6carg0x2, i256 %_0xa6carg0x3, i256 %_0xa6carg0x4) {
+define i256 @private__0xa6c_0xa6c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xa6carg0x0, i256 %_0xa6carg0x1, i256 %_0xa6carg0x2, i256 %_0xa6carg0x3, i256 %_0xa6carg0x4) #0 {
 bb._0xa6c:
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !4464
   %evm.caller1 = call i256 @evm_caller(ptr %env), !notdec.evm !4465
@@ -7712,13 +8456,15 @@ bb._0xe8ec2:                                      ; preds = %bb._0xa6c
   ret i256 %private.call, !notdec.evm !4468
 }
 
-define i256 @private__0xa86_0xa86(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xa86arg0x0, i256 %_0xa86arg0x1) {
+define i256 @private__0xa86_0xa86(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xa86arg0x0, i256 %_0xa86arg0x1) #0 {
 bb._0xa86:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4469
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !4470
   %evm.and = and i256 %_0xa86arg0x0, %evm.sub, !notdec.evm !4471
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !4472
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !4473
+  %notdec.evm.mem.ptr.747 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.747, align 1, !notdec.evm !4472
+  %notdec.evm.mem.ptr.748 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.748, align 1, !notdec.evm !4473
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4474
   %evm.add = add i256 2, %evm.sha3, !notdec.evm !4475
   %evm.sload = call i256 @evm_sload(i256 %evm.add), !notdec.evm !4476
@@ -7735,12 +8481,15 @@ bb._0xa86:
   br i1 %evm.branch.cond, label %bb._0xac9, label %bb._0xac2, !notdec.evm !4484
 
 bb._0xac9:                                        ; preds = %bb._0xa86
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4485
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.and3), !notdec.evm !4486
+  %notdec.evm.mem.ptr.749 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.749, align 1, !notdec.evm !4485
+  %notdec.evm.mem.ptr.750 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.and3, ptr %notdec.evm.mem.ptr.750, align 1, !notdec.evm !4486
   %evm.mul = mul i256 32, %evm.and3, !notdec.evm !4487
   %evm.add7 = add i256 32, %evm.mul, !notdec.evm !4488
   %evm.add8 = add i256 %evm.mload, %evm.add7, !notdec.evm !4489
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add8), !notdec.evm !4490
+  %notdec.evm.mem.ptr.751 = inttoptr i256 64 to ptr
+  store i256 %evm.add8, ptr %notdec.evm.mem.ptr.751, align 1, !notdec.evm !4490
   %evm.iszero9 = icmp eq i256 %evm.and3, 0, !notdec.evm !4491
   %evm.bool10 = zext i1 %evm.iszero9 to i256, !notdec.evm !4491
   %evm.branch.cond11 = icmp ne i256 %evm.bool10, 0, !notdec.evm !4492
@@ -7782,18 +8531,23 @@ bb._0xb13:                                        ; preds = %bb._0xaf8
   %evm.shl25 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4514
   %evm.sub26 = sub i256 %evm.shl25, 1, !notdec.evm !4515
   %evm.and27 = and i256 %_0xa86arg0x0, %evm.sub26, !notdec.evm !4516
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and27), !notdec.evm !4517
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !4518
+  %notdec.evm.mem.ptr.752 = inttoptr i256 0 to ptr
+  store i256 %evm.and27, ptr %notdec.evm.mem.ptr.752, align 1, !notdec.evm !4517
+  %notdec.evm.mem.ptr.753 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.753, align 1, !notdec.evm !4518
   %evm.sha328 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4519
   %evm.shl29 = call i256 @evm_shl(i256 128, i256 1), !notdec.evm !4520
   %evm.sub30 = sub i256 %evm.shl29, 1, !notdec.evm !4521
   %evm.and31 = and i256 %_0xb13_0x0, %evm.sub30, !notdec.evm !4522
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and31), !notdec.evm !4523
+  %notdec.evm.mem.ptr.754 = inttoptr i256 0 to ptr
+  store i256 %evm.and31, ptr %notdec.evm.mem.ptr.754, align 1, !notdec.evm !4523
   %evm.add32 = add i256 1, %evm.sha328, !notdec.evm !4524
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add32), !notdec.evm !4525
+  %notdec.evm.mem.ptr.755 = inttoptr i256 32 to ptr
+  store i256 %evm.add32, ptr %notdec.evm.mem.ptr.755, align 1, !notdec.evm !4525
   %evm.sha333 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4526
   %evm.sload34 = call i256 @evm_sload(i256 %evm.sha333), !notdec.evm !4527
-  %evm.mload35 = call i256 @evm_mload(ptr %mem, i256 %evm.mload), !notdec.evm !4528
+  %notdec.evm.mem.ptr.756 = inttoptr i256 %evm.mload to ptr
+  %evm.mload35 = load i256, ptr %notdec.evm.mem.ptr.756, align 1, !notdec.evm !4528
   %evm.and36 = and i256 %evm.sub26, %evm.sload34, !notdec.evm !4529
   %evm.lt37 = icmp ult i256 %evm.and31, %evm.mload35, !notdec.evm !4530
   %evm.bool38 = zext i1 %evm.lt37 to i256, !notdec.evm !4530
@@ -7808,7 +8562,8 @@ bb._0xb5a:                                        ; preds = %bb._0xb13
   %evm.mul43 = mul i256 32, %evm.and31, !notdec.evm !4536
   %evm.add44 = add i256 %evm.mul43, %evm.mload, !notdec.evm !4537
   %evm.add45 = add i256 32, %evm.add44, !notdec.evm !4538
-  call void @evm_mstore(ptr %mem, i256 %evm.add45, i256 %evm.and42), !notdec.evm !4539
+  %notdec.evm.mem.ptr.757 = inttoptr i256 %evm.add45 to ptr
+  store i256 %evm.and42, ptr %notdec.evm.mem.ptr.757, align 1, !notdec.evm !4539
   %private.call = call i256 @private__0x364e_0x364e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xb5a_0x3, i256 2940), !notdec.evm !4540
   br label %bb._0xb7c
 
@@ -7824,8 +8579,10 @@ bb._0xb53:                                        ; preds = %bb._0xb13
 bb._0x743a:                                       ; preds = %bb._0xb53
   %_0x743a_0x4 = phi i256 [ %_0xb53_0x3, %bb._0xb53 ], !notdec.evm !4546
   %evm.shl46 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4547
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl46), !notdec.evm !4548
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4549
+  %notdec.evm.mem.ptr.758 = inttoptr i256 0 to ptr
+  store i256 %evm.shl46, ptr %notdec.evm.mem.ptr.758, align 1, !notdec.evm !4548
+  %notdec.evm.mem.ptr.759 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.759, align 1, !notdec.evm !4549
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4550
   unreachable, !notdec.evm !4550
 
@@ -7834,13 +8591,15 @@ bb._0xac2:                                        ; preds = %bb._0xa86
 
 bb._0x7405:                                       ; preds = %bb._0xac2
   %evm.shl47 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4552
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl47), !notdec.evm !4553
-  call void @evm_mstore(ptr %mem, i256 4, i256 65), !notdec.evm !4554
+  %notdec.evm.mem.ptr.760 = inttoptr i256 0 to ptr
+  store i256 %evm.shl47, ptr %notdec.evm.mem.ptr.760, align 1, !notdec.evm !4553
+  %notdec.evm.mem.ptr.761 = inttoptr i256 4 to ptr
+  store i256 65, ptr %notdec.evm.mem.ptr.761, align 1, !notdec.evm !4554
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4555
   unreachable, !notdec.evm !4555
 }
 
-define i256 @private__0xb8c_0xb8c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xb8carg0x0, i256 %_0xb8carg0x1, i256 %_0xb8carg0x2, i256 %_0xb8carg0x3, i256 %_0xb8carg0x4) {
+define i256 @private__0xb8c_0xb8c(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xb8carg0x0, i256 %_0xb8carg0x1, i256 %_0xb8carg0x2, i256 %_0xb8carg0x3, i256 %_0xb8carg0x4) #0 {
 bb._0xb8c:
   %private.call = call i256 @private__0x1999_0x1999(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xb8carg0x1, i256 %_0xb8carg0x2, i256 %_0xb8carg0x3, i256 2974), !notdec.evm !4556
   br label %bb._0xb9e
@@ -7853,22 +8612,29 @@ bb._0xe8f11:                                      ; preds = %bb._0xb9e
   ret i256 %private.call1, !notdec.evm !4558
 }
 
-define { i256, i256 } @private__0xba3_0xba3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xba3arg0x0, i256 %_0xba3arg0x1, i256 %_0xba3arg0x2) {
+define { i256, i256 } @private__0xba3_0xba3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xba3arg0x0, i256 %_0xba3arg0x1, i256 %_0xba3arg0x2) #0 {
 bb._0xba3:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4559
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !4560
   %evm.and = and i256 %_0xba3arg0x1, %evm.sub, !notdec.evm !4561
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !4562
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !4563
+  %notdec.evm.mem.ptr.762 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.762, align 1, !notdec.evm !4562
+  %notdec.evm.mem.ptr.763 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.763, align 1, !notdec.evm !4563
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4564
   %evm.and1 = and i256 %_0xba3arg0x0, %evm.sub, !notdec.evm !4565
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and1), !notdec.evm !4566
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha3), !notdec.evm !4567
+  %notdec.evm.mem.ptr.764 = inttoptr i256 0 to ptr
+  store i256 %evm.and1, ptr %notdec.evm.mem.ptr.764, align 1, !notdec.evm !4566
+  %notdec.evm.mem.ptr.765 = inttoptr i256 32 to ptr
+  store i256 %evm.sha3, ptr %notdec.evm.mem.ptr.765, align 1, !notdec.evm !4567
   %evm.sha32 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4568
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4569
+  %notdec.evm.mem.ptr.766 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.766, align 1, !notdec.evm !4569
   %evm.shl3 = call i256 @evm_shl(i256 224, i256 2982123053), !notdec.evm !4570
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl3), !notdec.evm !4571
-  %evm.mload4 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4572
+  %notdec.evm.mem.ptr.767 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl3, ptr %notdec.evm.mem.ptr.767, align 1, !notdec.evm !4571
+  %notdec.evm.mem.ptr.768 = inttoptr i256 64 to ptr
+  %evm.mload4 = load i256, ptr %notdec.evm.mem.ptr.768, align 1, !notdec.evm !4572
   %evm.add = add i256 %evm.mload, 4, !notdec.evm !4573
   %evm.sub5 = sub i256 %evm.mload, %evm.mload4, !notdec.evm !4574
   %evm.add6 = add i256 %evm.sub5, 4, !notdec.evm !4575
@@ -7882,12 +8648,14 @@ bb._0xba3:
   br i1 %evm.branch.cond, label %bb._0xc0b, label %bb._0xc02, !notdec.evm !4580
 
 bb._0xc0b:                                        ; preds = %bb._0xba3
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4581
+  %notdec.evm.mem.ptr.769 = inttoptr i256 64 to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.769, align 1, !notdec.evm !4581
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !4582
   %evm.add10 = add i256 %evm.returndatasize, 31, !notdec.evm !4583
   %evm.and11 = and i256 %evm.add10, -32, !notdec.evm !4584
   %evm.add12 = add i256 %evm.mload9, %evm.and11, !notdec.evm !4585
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add12), !notdec.evm !4586
+  %notdec.evm.mem.ptr.770 = inttoptr i256 64 to ptr
+  store i256 %evm.add12, ptr %notdec.evm.mem.ptr.770, align 1, !notdec.evm !4586
   %evm.add13 = add i256 %evm.mload9, %evm.returndatasize, !notdec.evm !4587
   %private.call = call i256 @private__0x3675_0x3675(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload9, i256 %evm.add13, i256 3119), !notdec.evm !4588
   br label %bb._0xc2f
@@ -7896,8 +8664,10 @@ bb._0xc2f:                                        ; preds = %bb._0xc0b
   %evm.shl14 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4589
   %evm.sub15 = sub i256 %evm.shl14, 1, !notdec.evm !4590
   %evm.and16 = and i256 %_0xba3arg0x1, %evm.sub15, !notdec.evm !4591
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and16), !notdec.evm !4592
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !4593
+  %notdec.evm.mem.ptr.771 = inttoptr i256 0 to ptr
+  store i256 %evm.and16, ptr %notdec.evm.mem.ptr.771, align 1, !notdec.evm !4592
+  %notdec.evm.mem.ptr.772 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.772, align 1, !notdec.evm !4593
   %evm.sha317 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4594
   %evm.add18 = add i256 2, %evm.sha317, !notdec.evm !4595
   %evm.sload = call i256 @evm_sload(i256 %evm.add18), !notdec.evm !4596
@@ -7929,7 +8699,7 @@ bb._0xc02:                                        ; preds = %bb._0xba3
   unreachable, !notdec.evm !4607
 }
 
-define void @private__0xc72_0xc72(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xc72arg0x0, i256 %_0xc72arg0x1) {
+define void @private__0xc72_0xc72(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xc72arg0x0, i256 %_0xc72arg0x1) #0 {
 bb._0xc72:
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !4608
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4609
@@ -7945,7 +8715,8 @@ bb._0xcba:                                        ; preds = %bb._0xc72
 
 bb._0xcbd:                                        ; preds = %bb._0xdf9, %bb._0xcba
   %_0xcbd_0x0 = phi i256 [ 0, %bb._0xcba ], [ %private.call134, %bb._0xdf9 ], !notdec.evm !4615
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 %_0xc72arg0x0), !notdec.evm !4616
+  %notdec.evm.mem.ptr.773 = inttoptr i256 %_0xc72arg0x0 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.773, align 1, !notdec.evm !4616
   %evm.lt = icmp ult i256 %_0xcbd_0x0, %evm.mload, !notdec.evm !4617
   %evm.bool1 = zext i1 %evm.lt to i256, !notdec.evm !4617
   %evm.iszero = icmp eq i256 %evm.bool1, 0, !notdec.evm !4618
@@ -7963,7 +8734,8 @@ bb._0xe8f61:                                      ; preds = %bb._0xe01
 
 bb._0xcc7:                                        ; preds = %bb._0xcbd
   %_0xcc7_0x0 = phi i256 [ %_0xcbd_0x0, %bb._0xcbd ], !notdec.evm !4623
-  %evm.mload4 = call i256 @evm_mload(ptr %mem, i256 %_0xc72arg0x0), !notdec.evm !4624
+  %notdec.evm.mem.ptr.774 = inttoptr i256 %_0xc72arg0x0 to ptr
+  %evm.mload4 = load i256, ptr %notdec.evm.mem.ptr.774, align 1, !notdec.evm !4624
   %evm.lt5 = icmp ult i256 %_0xcc7_0x0, %evm.mload4, !notdec.evm !4625
   %evm.bool6 = zext i1 %evm.lt5 to i256, !notdec.evm !4625
   %evm.branch.cond7 = icmp ne i256 %evm.bool6, 0, !notdec.evm !4626
@@ -7975,17 +8747,22 @@ bb._0xcd8:                                        ; preds = %bb._0xcc7
   %evm.mul = mul i256 32, %_0xcd8_0x0, !notdec.evm !4629
   %evm.add = add i256 32, %evm.mul, !notdec.evm !4630
   %evm.add8 = add i256 %evm.add, %_0xc72arg0x0, !notdec.evm !4631
-  %evm.mload9 = call i256 @evm_mload(ptr %mem, i256 %evm.add8), !notdec.evm !4632
+  %notdec.evm.mem.ptr.775 = inttoptr i256 %evm.add8 to ptr
+  %evm.mload9 = load i256, ptr %notdec.evm.mem.ptr.775, align 1, !notdec.evm !4632
   %evm.add10 = add i256 96, %evm.mload9, !notdec.evm !4633
-  %evm.mload11 = call i256 @evm_mload(ptr %mem, i256 %evm.add10), !notdec.evm !4634
+  %notdec.evm.mem.ptr.776 = inttoptr i256 %evm.add10 to ptr
+  %evm.mload11 = load i256, ptr %notdec.evm.mem.ptr.776, align 1, !notdec.evm !4634
   %evm.shl12 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4635
   %evm.sub13 = sub i256 %evm.shl12, 1, !notdec.evm !4636
   %evm.and14 = and i256 %evm.sub13, %evm.mload11, !notdec.evm !4637
-  %evm.mload15 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4638
+  %notdec.evm.mem.ptr.777 = inttoptr i256 64 to ptr
+  %evm.mload15 = load i256, ptr %notdec.evm.mem.ptr.777, align 1, !notdec.evm !4638
   %evm.shl16 = call i256 @evm_shl(i256 224, i256 2982123053), !notdec.evm !4639
-  call void @evm_mstore(ptr %mem, i256 %evm.mload15, i256 %evm.shl16), !notdec.evm !4640
+  %notdec.evm.mem.ptr.778 = inttoptr i256 %evm.mload15 to ptr
+  store i256 %evm.shl16, ptr %notdec.evm.mem.ptr.778, align 1, !notdec.evm !4640
   %evm.add17 = add i256 4, %evm.mload15, !notdec.evm !4641
-  %evm.mload18 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4642
+  %notdec.evm.mem.ptr.779 = inttoptr i256 64 to ptr
+  %evm.mload18 = load i256, ptr %notdec.evm.mem.ptr.779, align 1, !notdec.evm !4642
   %evm.sub19 = sub i256 %evm.add17, %evm.mload18, !notdec.evm !4643
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !4644
   %evm.staticcall = call i256 @evm_staticcall(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas, i256 %evm.and14, i256 %evm.mload18, i256 %evm.sub19, i256 %evm.mload18, i256 32), !notdec.evm !4645
@@ -7998,19 +8775,22 @@ bb._0xcd8:                                        ; preds = %bb._0xcc7
 
 bb._0xd21:                                        ; preds = %bb._0xcd8
   %_0xd21_0x4 = phi i256 [ %_0xcd8_0x2, %bb._0xcd8 ], !notdec.evm !4649
-  %evm.mload25 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4650
+  %notdec.evm.mem.ptr.780 = inttoptr i256 64 to ptr
+  %evm.mload25 = load i256, ptr %notdec.evm.mem.ptr.780, align 1, !notdec.evm !4650
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !4651
   %evm.add26 = add i256 %evm.returndatasize, 31, !notdec.evm !4652
   %evm.and27 = and i256 %evm.add26, -32, !notdec.evm !4653
   %evm.add28 = add i256 %evm.mload25, %evm.and27, !notdec.evm !4654
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add28), !notdec.evm !4655
+  %notdec.evm.mem.ptr.781 = inttoptr i256 64 to ptr
+  store i256 %evm.add28, ptr %notdec.evm.mem.ptr.781, align 1, !notdec.evm !4655
   %evm.add29 = add i256 %evm.mload25, %evm.returndatasize, !notdec.evm !4656
   %private.call = call i256 @private__0x3675_0x3675(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload25, i256 %evm.add29, i256 3397), !notdec.evm !4657
   br label %bb._0xd45
 
 bb._0xd45:                                        ; preds = %bb._0xd21
   %_0xd45_0x1 = phi i256 [ %_0xd21_0x4, %bb._0xd21 ], !notdec.evm !4658
-  %evm.mload30 = call i256 @evm_mload(ptr %mem, i256 %_0xc72arg0x0), !notdec.evm !4659
+  %notdec.evm.mem.ptr.782 = inttoptr i256 %_0xc72arg0x0 to ptr
+  %evm.mload30 = load i256, ptr %notdec.evm.mem.ptr.782, align 1, !notdec.evm !4659
   %evm.lt31 = icmp ult i256 %_0xd45_0x1, %evm.mload30, !notdec.evm !4660
   %evm.bool32 = zext i1 %evm.lt31 to i256, !notdec.evm !4660
   %evm.branch.cond33 = icmp ne i256 %evm.bool32, 0, !notdec.evm !4661
@@ -8022,10 +8802,13 @@ bb._0xd57:                                        ; preds = %bb._0xd45
   %evm.mul34 = mul i256 32, %_0xd57_0x0, !notdec.evm !4664
   %evm.add35 = add i256 32, %evm.mul34, !notdec.evm !4665
   %evm.add36 = add i256 %evm.add35, %_0xc72arg0x0, !notdec.evm !4666
-  %evm.mload37 = call i256 @evm_mload(ptr %mem, i256 %evm.add36), !notdec.evm !4667
+  %notdec.evm.mem.ptr.783 = inttoptr i256 %evm.add36 to ptr
+  %evm.mload37 = load i256, ptr %notdec.evm.mem.ptr.783, align 1, !notdec.evm !4667
   %evm.add38 = add i256 32, %evm.mload37, !notdec.evm !4668
-  call void @evm_mstore(ptr %mem, i256 %evm.add38, i256 %private.call), !notdec.evm !4669
-  %evm.mload39 = call i256 @evm_mload(ptr %mem, i256 %_0xc72arg0x0), !notdec.evm !4670
+  %notdec.evm.mem.ptr.784 = inttoptr i256 %evm.add38 to ptr
+  store i256 %private.call, ptr %notdec.evm.mem.ptr.784, align 1, !notdec.evm !4669
+  %notdec.evm.mem.ptr.785 = inttoptr i256 %_0xc72arg0x0 to ptr
+  %evm.mload39 = load i256, ptr %notdec.evm.mem.ptr.785, align 1, !notdec.evm !4670
   %evm.lt40 = icmp ult i256 %_0xd57_0x3, %evm.mload39, !notdec.evm !4671
   %evm.bool41 = zext i1 %evm.lt40 to i256, !notdec.evm !4671
   %evm.branch.cond42 = icmp ne i256 %evm.bool41, 0, !notdec.evm !4672
@@ -8037,10 +8820,13 @@ bb._0xd7c:                                        ; preds = %bb._0xd57
   %evm.mul43 = mul i256 32, %_0xd7c_0x0, !notdec.evm !4675
   %evm.add44 = add i256 32, %evm.mul43, !notdec.evm !4676
   %evm.add45 = add i256 %evm.add44, %_0xc72arg0x0, !notdec.evm !4677
-  %evm.mload46 = call i256 @evm_mload(ptr %mem, i256 %evm.add45), !notdec.evm !4678
+  %notdec.evm.mem.ptr.786 = inttoptr i256 %evm.add45 to ptr
+  %evm.mload46 = load i256, ptr %notdec.evm.mem.ptr.786, align 1, !notdec.evm !4678
   %evm.add47 = add i256 128, %evm.mload46, !notdec.evm !4679
-  %evm.mload48 = call i256 @evm_mload(ptr %mem, i256 %evm.add47), !notdec.evm !4680
-  %evm.mload49 = call i256 @evm_mload(ptr %mem, i256 %_0xc72arg0x0), !notdec.evm !4681
+  %notdec.evm.mem.ptr.787 = inttoptr i256 %evm.add47 to ptr
+  %evm.mload48 = load i256, ptr %notdec.evm.mem.ptr.787, align 1, !notdec.evm !4680
+  %notdec.evm.mem.ptr.788 = inttoptr i256 %_0xc72arg0x0 to ptr
+  %evm.mload49 = load i256, ptr %notdec.evm.mem.ptr.788, align 1, !notdec.evm !4681
   %evm.lt50 = icmp ult i256 %_0xd7c_0x3, %evm.mload49, !notdec.evm !4682
   %evm.bool51 = zext i1 %evm.lt50 to i256, !notdec.evm !4682
   %evm.branch.cond52 = icmp ne i256 %evm.bool51, 0, !notdec.evm !4683
@@ -8052,9 +8838,11 @@ bb._0xd9a:                                        ; preds = %bb._0xd7c
   %evm.mul53 = mul i256 32, %_0xd9a_0x0, !notdec.evm !4686
   %evm.add54 = add i256 32, %evm.mul53, !notdec.evm !4687
   %evm.add55 = add i256 %evm.add54, %_0xc72arg0x0, !notdec.evm !4688
-  %evm.mload56 = call i256 @evm_mload(ptr %mem, i256 %evm.add55), !notdec.evm !4689
+  %notdec.evm.mem.ptr.789 = inttoptr i256 %evm.add55 to ptr
+  %evm.mload56 = load i256, ptr %notdec.evm.mem.ptr.789, align 1, !notdec.evm !4689
   %evm.add57 = add i256 160, %evm.mload56, !notdec.evm !4690
-  %evm.mload58 = call i256 @evm_mload(ptr %mem, i256 %evm.add57), !notdec.evm !4691
+  %notdec.evm.mem.ptr.790 = inttoptr i256 %evm.add57 to ptr
+  %evm.mload58 = load i256, ptr %notdec.evm.mem.ptr.790, align 1, !notdec.evm !4691
   br label %bb._0x1f280xc72, !notdec.evm !4692
 
 bb._0x1f280xc72:                                  ; preds = %bb._0xd9a
@@ -8082,8 +8870,10 @@ bb._0x1fd10xc72:                                  ; preds = %bb._0x1f7e0xc72
   %evm.shl70 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4705
   %evm.sub71 = sub i256 %evm.shl70, 1, !notdec.evm !4706
   %evm.and72 = and i256 %evm.sub71, %evm.mload48, !notdec.evm !4707
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and72), !notdec.evm !4708
-  call void @evm_mstore(ptr %mem, i256 32, i256 58), !notdec.evm !4709
+  %notdec.evm.mem.ptr.791 = inttoptr i256 0 to ptr
+  store i256 %evm.and72, ptr %notdec.evm.mem.ptr.791, align 1, !notdec.evm !4708
+  %notdec.evm.mem.ptr.792 = inttoptr i256 32 to ptr
+  store i256 58, ptr %notdec.evm.mem.ptr.792, align 1, !notdec.evm !4709
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4710
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !4711
   %evm.shl73 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4712
@@ -8093,13 +8883,15 @@ bb._0x1fd10xc72:                                  ; preds = %bb._0x1f7e0xc72
   %evm.and76 = and i256 %evm.mload58, %evm.sub71, !notdec.evm !4716
   %evm.or = or i256 %evm.and76, %evm.and75, !notdec.evm !4717
   call void @evm_sstore(i256 %evm.sha3, i256 %evm.or), !notdec.evm !4718
-  %evm.mload77 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4719
+  %notdec.evm.mem.ptr.793 = inttoptr i256 64 to ptr
+  %evm.mload77 = load i256, ptr %notdec.evm.mem.ptr.793, align 1, !notdec.evm !4719
   call void @evm_log3(ptr %mem, i256 %evm.mload77, i256 0, i256 -52182329275405693997205492740651498409748790152693547769034737884749434593110, i256 %evm.and72, i256 %evm.and76), !notdec.evm !4720
   br label %bb._0xdab, !notdec.evm !4721
 
 bb._0xdab:                                        ; preds = %bb._0x1fd10xc72
   %_0xdab_0x0 = phi i256 [ %_0x1fd10xc72_0x3, %bb._0x1fd10xc72 ], !notdec.evm !4722
-  %evm.mload78 = call i256 @evm_mload(ptr %mem, i256 %_0xc72arg0x0), !notdec.evm !4723
+  %notdec.evm.mem.ptr.794 = inttoptr i256 %_0xc72arg0x0 to ptr
+  %evm.mload78 = load i256, ptr %notdec.evm.mem.ptr.794, align 1, !notdec.evm !4723
   %evm.lt79 = icmp ult i256 %_0xdab_0x0, %evm.mload78, !notdec.evm !4724
   %evm.bool80 = zext i1 %evm.lt79 to i256, !notdec.evm !4724
   %evm.branch.cond81 = icmp ne i256 %evm.bool80, 0, !notdec.evm !4725
@@ -8111,10 +8903,13 @@ bb._0xdc0:                                        ; preds = %bb._0xdab
   %evm.mul82 = mul i256 32, %_0xdc0_0x0, !notdec.evm !4728
   %evm.add83 = add i256 32, %evm.mul82, !notdec.evm !4729
   %evm.add84 = add i256 %evm.add83, %_0xc72arg0x0, !notdec.evm !4730
-  %evm.mload85 = call i256 @evm_mload(ptr %mem, i256 %evm.add84), !notdec.evm !4731
+  %notdec.evm.mem.ptr.795 = inttoptr i256 %evm.add84 to ptr
+  %evm.mload85 = load i256, ptr %notdec.evm.mem.ptr.795, align 1, !notdec.evm !4731
   %evm.add86 = add i256 128, %evm.mload85, !notdec.evm !4732
-  %evm.mload87 = call i256 @evm_mload(ptr %mem, i256 %evm.add86), !notdec.evm !4733
-  %evm.mload88 = call i256 @evm_mload(ptr %mem, i256 %_0xc72arg0x0), !notdec.evm !4734
+  %notdec.evm.mem.ptr.796 = inttoptr i256 %evm.add86 to ptr
+  %evm.mload87 = load i256, ptr %notdec.evm.mem.ptr.796, align 1, !notdec.evm !4733
+  %notdec.evm.mem.ptr.797 = inttoptr i256 %_0xc72arg0x0 to ptr
+  %evm.mload88 = load i256, ptr %notdec.evm.mem.ptr.797, align 1, !notdec.evm !4734
   %evm.lt89 = icmp ult i256 %_0xdc0_0x3, %evm.mload88, !notdec.evm !4735
   %evm.bool90 = zext i1 %evm.lt89 to i256, !notdec.evm !4735
   %evm.branch.cond91 = icmp ne i256 %evm.bool90, 0, !notdec.evm !4736
@@ -8126,9 +8921,11 @@ bb._0xdde:                                        ; preds = %bb._0xdc0
   %evm.mul92 = mul i256 32, %_0xdde_0x0, !notdec.evm !4739
   %evm.add93 = add i256 32, %evm.mul92, !notdec.evm !4740
   %evm.add94 = add i256 %evm.add93, %_0xc72arg0x0, !notdec.evm !4741
-  %evm.mload95 = call i256 @evm_mload(ptr %mem, i256 %evm.add94), !notdec.evm !4742
+  %notdec.evm.mem.ptr.798 = inttoptr i256 %evm.add94 to ptr
+  %evm.mload95 = load i256, ptr %notdec.evm.mem.ptr.798, align 1, !notdec.evm !4742
   %evm.add96 = add i256 192, %evm.mload95, !notdec.evm !4743
-  %evm.mload97 = call i256 @evm_mload(ptr %mem, i256 %evm.add96), !notdec.evm !4744
+  %notdec.evm.mem.ptr.799 = inttoptr i256 %evm.add96 to ptr
+  %evm.mload97 = load i256, ptr %notdec.evm.mem.ptr.799, align 1, !notdec.evm !4744
   br label %bb._0x1bf70xc72, !notdec.evm !4745
 
 bb._0x1bf70xc72:                                  ; preds = %bb._0xdde
@@ -8136,11 +8933,14 @@ bb._0x1bf70xc72:                                  ; preds = %bb._0xdde
   %evm.shl98 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4747
   %evm.sub99 = sub i256 %evm.shl98, 1, !notdec.evm !4748
   %evm.and100 = and i256 %evm.sub99, %evm.mload97, !notdec.evm !4749
-  %evm.mload101 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4750
+  %notdec.evm.mem.ptr.800 = inttoptr i256 64 to ptr
+  %evm.mload101 = load i256, ptr %notdec.evm.mem.ptr.800, align 1, !notdec.evm !4750
   %evm.shl102 = call i256 @evm_shl(i256 224, i256 1355963341), !notdec.evm !4751
-  call void @evm_mstore(ptr %mem, i256 %evm.mload101, i256 %evm.shl102), !notdec.evm !4752
+  %notdec.evm.mem.ptr.801 = inttoptr i256 %evm.mload101 to ptr
+  store i256 %evm.shl102, ptr %notdec.evm.mem.ptr.801, align 1, !notdec.evm !4752
   %evm.add103 = add i256 4, %evm.mload101, !notdec.evm !4753
-  %evm.mload104 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4754
+  %notdec.evm.mem.ptr.802 = inttoptr i256 64 to ptr
+  %evm.mload104 = load i256, ptr %notdec.evm.mem.ptr.802, align 1, !notdec.evm !4754
   %evm.sub105 = sub i256 %evm.add103, %evm.mload104, !notdec.evm !4755
   %evm.gas106 = call i256 @evm_gas(ptr %env), !notdec.evm !4756
   %evm.staticcall107 = call i256 @evm_staticcall(ptr %mem, ptr %returndata, ptr %env, i256 %evm.gas106, i256 %evm.and100, i256 %evm.mload104, i256 %evm.sub105, i256 %evm.mload104, i256 32), !notdec.evm !4757
@@ -8153,12 +8953,14 @@ bb._0x1bf70xc72:                                  ; preds = %bb._0xdde
 
 bb._0x1c370xc72:                                  ; preds = %bb._0x1bf70xc72
   %_0x1c370xc72_0x8 = phi i256 [ %_0x1bf70xc72_0x3, %bb._0x1bf70xc72 ], !notdec.evm !4761
-  %evm.mload113 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4762
+  %notdec.evm.mem.ptr.803 = inttoptr i256 64 to ptr
+  %evm.mload113 = load i256, ptr %notdec.evm.mem.ptr.803, align 1, !notdec.evm !4762
   %evm.returndatasize114 = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !4763
   %evm.add115 = add i256 %evm.returndatasize114, 31, !notdec.evm !4764
   %evm.and116 = and i256 %evm.add115, -32, !notdec.evm !4765
   %evm.add117 = add i256 %evm.mload113, %evm.and116, !notdec.evm !4766
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add117), !notdec.evm !4767
+  %notdec.evm.mem.ptr.804 = inttoptr i256 64 to ptr
+  store i256 %evm.add117, ptr %notdec.evm.mem.ptr.804, align 1, !notdec.evm !4767
   %evm.add118 = add i256 %evm.mload113, %evm.returndatasize114, !notdec.evm !4768
   %private.call119 = call i256 @private__0x3675_0x3675(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.mload113, i256 %evm.add118, i256 7259), !notdec.evm !4769
   br label %bb._0x1c5b0xc72
@@ -8175,8 +8977,10 @@ bb._0x1ca80xc72:                                  ; preds = %bb._0x1c5b0xc72
   %evm.shl122 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4774
   %evm.sub123 = sub i256 %evm.shl122, 1, !notdec.evm !4775
   %evm.and124 = and i256 %evm.sub123, %evm.mload87, !notdec.evm !4776
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and124), !notdec.evm !4777
-  call void @evm_mstore(ptr %mem, i256 32, i256 59), !notdec.evm !4778
+  %notdec.evm.mem.ptr.805 = inttoptr i256 0 to ptr
+  store i256 %evm.and124, ptr %notdec.evm.mem.ptr.805, align 1, !notdec.evm !4777
+  %notdec.evm.mem.ptr.806 = inttoptr i256 32 to ptr
+  store i256 59, ptr %notdec.evm.mem.ptr.806, align 1, !notdec.evm !4778
   %evm.sha3125 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4779
   %evm.sload126 = call i256 @evm_sload(i256 %evm.sha3125), !notdec.evm !4780
   %evm.shl127 = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4781
@@ -8186,7 +8990,8 @@ bb._0x1ca80xc72:                                  ; preds = %bb._0x1c5b0xc72
   %evm.and131 = and i256 %evm.mload97, %evm.sub123, !notdec.evm !4785
   %evm.or132 = or i256 %evm.and131, %evm.and130, !notdec.evm !4786
   call void @evm_sstore(i256 %evm.sha3125, i256 %evm.or132), !notdec.evm !4787
-  %evm.mload133 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4788
+  %notdec.evm.mem.ptr.807 = inttoptr i256 64 to ptr
+  %evm.mload133 = load i256, ptr %notdec.evm.mem.ptr.807, align 1, !notdec.evm !4788
   call void @evm_log3(ptr %mem, i256 %evm.mload133, i256 0, i256 11811077800630211879463896014686040810120646756326157266300715827896135331661, i256 %evm.and124, i256 %evm.and131), !notdec.evm !4789
   br label %bb._0xdef, !notdec.evm !4790
 
@@ -8202,21 +9007,27 @@ bb._0xdf9:                                        ; preds = %bb._0xdef
 
 bb._0x1c610xc72:                                  ; preds = %bb._0x1c5b0xc72
   %_0x1c610xc72_0x3 = phi i256 [ %_0x1c5b0xc72_0x5, %bb._0x1c5b0xc72 ], !notdec.evm !4796
-  %evm.mload135 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4797
+  %notdec.evm.mem.ptr.808 = inttoptr i256 64 to ptr
+  %evm.mload135 = load i256, ptr %notdec.evm.mem.ptr.808, align 1, !notdec.evm !4797
   %evm.shl136 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4798
-  call void @evm_mstore(ptr %mem, i256 %evm.mload135, i256 %evm.shl136), !notdec.evm !4799
+  %notdec.evm.mem.ptr.809 = inttoptr i256 %evm.mload135 to ptr
+  store i256 %evm.shl136, ptr %notdec.evm.mem.ptr.809, align 1, !notdec.evm !4799
   %evm.add137 = add i256 %evm.mload135, 4, !notdec.evm !4800
-  call void @evm_mstore(ptr %mem, i256 %evm.add137, i256 32), !notdec.evm !4801
+  %notdec.evm.mem.ptr.810 = inttoptr i256 %evm.add137 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.810, align 1, !notdec.evm !4801
   %evm.add138 = add i256 %evm.mload135, 36, !notdec.evm !4802
-  call void @evm_mstore(ptr %mem, i256 %evm.add138, i256 24), !notdec.evm !4803
+  %notdec.evm.mem.ptr.811 = inttoptr i256 %evm.add138 to ptr
+  store i256 24, ptr %notdec.evm.mem.ptr.811, align 1, !notdec.evm !4803
   %evm.add139 = add i256 %evm.mload135, 68, !notdec.evm !4804
-  call void @evm_mstore(ptr %mem, i256 %evm.add139, i256 35878046925251112547224839097665699540559070317255515579439100265505602142208), !notdec.evm !4805
+  %notdec.evm.mem.ptr.812 = inttoptr i256 %evm.add139 to ptr
+  store i256 35878046925251112547224839097665699540559070317255515579439100265505602142208, ptr %notdec.evm.mem.ptr.812, align 1, !notdec.evm !4805
   %evm.add140 = add i256 100, %evm.mload135, !notdec.evm !4806
   br label %bb._0x78f10xc72, !notdec.evm !4807
 
 bb._0x78f10xc72:                                  ; preds = %bb._0x1c610xc72
   %_0x78f10xc72_0x4 = phi i256 [ %_0x1c610xc72_0x3, %bb._0x1c610xc72 ], !notdec.evm !4808
-  %evm.mload141 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4809
+  %notdec.evm.mem.ptr.813 = inttoptr i256 64 to ptr
+  %evm.mload141 = load i256, ptr %notdec.evm.mem.ptr.813, align 1, !notdec.evm !4809
   %evm.sub142 = sub i256 %evm.add140, %evm.mload141, !notdec.evm !4810
   call void @evm_revert(ptr %mem, i256 %evm.mload141, i256 %evm.sub142), !notdec.evm !4811
   unreachable, !notdec.evm !4811
@@ -8238,8 +9049,10 @@ bb._0x7578:                                       ; preds = %bb._0xdd7
   %_0x7578_0x1 = phi i256 [ %_0xdd7_0x0, %bb._0xdd7 ], !notdec.evm !4820
   %_0x7578_0x5 = phi i256 [ %_0xdd7_0x4, %bb._0xdd7 ], !notdec.evm !4821
   %evm.shl145 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4822
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl145), !notdec.evm !4823
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4824
+  %notdec.evm.mem.ptr.814 = inttoptr i256 0 to ptr
+  store i256 %evm.shl145, ptr %notdec.evm.mem.ptr.814, align 1, !notdec.evm !4823
+  %notdec.evm.mem.ptr.815 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.815, align 1, !notdec.evm !4824
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4825
   unreachable, !notdec.evm !4825
 
@@ -8252,49 +9065,63 @@ bb._0x7543:                                       ; preds = %bb._0xdb9
   %_0x7543_0x1 = phi i256 [ %_0xdb9_0x0, %bb._0xdb9 ], !notdec.evm !4829
   %_0x7543_0x4 = phi i256 [ %_0xdb9_0x3, %bb._0xdb9 ], !notdec.evm !4830
   %evm.shl146 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4831
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl146), !notdec.evm !4832
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4833
+  %notdec.evm.mem.ptr.816 = inttoptr i256 0 to ptr
+  store i256 %evm.shl146, ptr %notdec.evm.mem.ptr.816, align 1, !notdec.evm !4832
+  %notdec.evm.mem.ptr.817 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.817, align 1, !notdec.evm !4833
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4834
   unreachable, !notdec.evm !4834
 
 bb._0x1f8a0xc72:                                  ; preds = %bb._0x1f7e0xc72
   %_0x1f8a0xc72_0x3 = phi i256 [ %_0x1f7e0xc72_0x3, %bb._0x1f7e0xc72 ], !notdec.evm !4835
-  %evm.mload147 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4836
+  %notdec.evm.mem.ptr.818 = inttoptr i256 64 to ptr
+  %evm.mload147 = load i256, ptr %notdec.evm.mem.ptr.818, align 1, !notdec.evm !4836
   %evm.shl148 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4837
-  call void @evm_mstore(ptr %mem, i256 %evm.mload147, i256 %evm.shl148), !notdec.evm !4838
+  %notdec.evm.mem.ptr.819 = inttoptr i256 %evm.mload147 to ptr
+  store i256 %evm.shl148, ptr %notdec.evm.mem.ptr.819, align 1, !notdec.evm !4838
   %evm.add149 = add i256 %evm.mload147, 4, !notdec.evm !4839
-  call void @evm_mstore(ptr %mem, i256 %evm.add149, i256 32), !notdec.evm !4840
+  %notdec.evm.mem.ptr.820 = inttoptr i256 %evm.add149 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.820, align 1, !notdec.evm !4840
   %evm.add150 = add i256 %evm.mload147, 36, !notdec.evm !4841
-  call void @evm_mstore(ptr %mem, i256 %evm.add150, i256 25), !notdec.evm !4842
+  %notdec.evm.mem.ptr.821 = inttoptr i256 %evm.add150 to ptr
+  store i256 25, ptr %notdec.evm.mem.ptr.821, align 1, !notdec.evm !4842
   %evm.add151 = add i256 %evm.mload147, 68, !notdec.evm !4843
-  call void @evm_mstore(ptr %mem, i256 %evm.add151, i256 37690949290324196817065650194729576098824250008910874234182692351524787453952), !notdec.evm !4844
+  %notdec.evm.mem.ptr.822 = inttoptr i256 %evm.add151 to ptr
+  store i256 37690949290324196817065650194729576098824250008910874234182692351524787453952, ptr %notdec.evm.mem.ptr.822, align 1, !notdec.evm !4844
   %evm.add152 = add i256 100, %evm.mload147, !notdec.evm !4845
   br label %bb._0x7a150xc72, !notdec.evm !4846
 
 bb._0x7a150xc72:                                  ; preds = %bb._0x1f8a0xc72
   %_0x7a150xc72_0x4 = phi i256 [ %_0x1f8a0xc72_0x3, %bb._0x1f8a0xc72 ], !notdec.evm !4847
-  %evm.mload153 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4848
+  %notdec.evm.mem.ptr.823 = inttoptr i256 64 to ptr
+  %evm.mload153 = load i256, ptr %notdec.evm.mem.ptr.823, align 1, !notdec.evm !4848
   %evm.sub154 = sub i256 %evm.add152, %evm.mload153, !notdec.evm !4849
   call void @evm_revert(ptr %mem, i256 %evm.mload153, i256 %evm.sub154), !notdec.evm !4850
   unreachable, !notdec.evm !4850
 
 bb._0x1f370xc72:                                  ; preds = %bb._0x1f280xc72
   %_0x1f370xc72_0x3 = phi i256 [ %_0x1f280xc72_0x3, %bb._0x1f280xc72 ], !notdec.evm !4851
-  %evm.mload155 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4852
+  %notdec.evm.mem.ptr.824 = inttoptr i256 64 to ptr
+  %evm.mload155 = load i256, ptr %notdec.evm.mem.ptr.824, align 1, !notdec.evm !4852
   %evm.shl156 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4853
-  call void @evm_mstore(ptr %mem, i256 %evm.mload155, i256 %evm.shl156), !notdec.evm !4854
+  %notdec.evm.mem.ptr.825 = inttoptr i256 %evm.mload155 to ptr
+  store i256 %evm.shl156, ptr %notdec.evm.mem.ptr.825, align 1, !notdec.evm !4854
   %evm.add157 = add i256 %evm.mload155, 4, !notdec.evm !4855
-  call void @evm_mstore(ptr %mem, i256 %evm.add157, i256 32), !notdec.evm !4856
+  %notdec.evm.mem.ptr.826 = inttoptr i256 %evm.add157 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.826, align 1, !notdec.evm !4856
   %evm.add158 = add i256 %evm.mload155, 36, !notdec.evm !4857
-  call void @evm_mstore(ptr %mem, i256 %evm.add158, i256 24), !notdec.evm !4858
+  %notdec.evm.mem.ptr.827 = inttoptr i256 %evm.add158 to ptr
+  store i256 24, ptr %notdec.evm.mem.ptr.827, align 1, !notdec.evm !4858
   %evm.add159 = add i256 %evm.mload155, 68, !notdec.evm !4859
-  call void @evm_mstore(ptr %mem, i256 %evm.add159, i256 37690949290324196817064684894883064520784954685232344919415882660299289919488), !notdec.evm !4860
+  %notdec.evm.mem.ptr.828 = inttoptr i256 %evm.add159 to ptr
+  store i256 37690949290324196817064684894883064520784954685232344919415882660299289919488, ptr %notdec.evm.mem.ptr.828, align 1, !notdec.evm !4860
   %evm.add160 = add i256 100, %evm.mload155, !notdec.evm !4861
   br label %bb._0x79ed0xc72, !notdec.evm !4862
 
 bb._0x79ed0xc72:                                  ; preds = %bb._0x1f370xc72
   %_0x79ed0xc72_0x4 = phi i256 [ %_0x1f370xc72_0x3, %bb._0x1f370xc72 ], !notdec.evm !4863
-  %evm.mload161 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4864
+  %notdec.evm.mem.ptr.829 = inttoptr i256 64 to ptr
+  %evm.mload161 = load i256, ptr %notdec.evm.mem.ptr.829, align 1, !notdec.evm !4864
   %evm.sub162 = sub i256 %evm.add160, %evm.mload161, !notdec.evm !4865
   call void @evm_revert(ptr %mem, i256 %evm.mload161, i256 %evm.sub162), !notdec.evm !4866
   unreachable, !notdec.evm !4866
@@ -8308,8 +9135,10 @@ bb._0x750e:                                       ; preds = %bb._0xd93
   %_0x750e_0x1 = phi i256 [ %_0xd93_0x0, %bb._0xd93 ], !notdec.evm !4870
   %_0x750e_0x5 = phi i256 [ %_0xd93_0x4, %bb._0xd93 ], !notdec.evm !4871
   %evm.shl163 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4872
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl163), !notdec.evm !4873
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4874
+  %notdec.evm.mem.ptr.830 = inttoptr i256 0 to ptr
+  store i256 %evm.shl163, ptr %notdec.evm.mem.ptr.830, align 1, !notdec.evm !4873
+  %notdec.evm.mem.ptr.831 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.831, align 1, !notdec.evm !4874
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4875
   unreachable, !notdec.evm !4875
 
@@ -8322,8 +9151,10 @@ bb._0x74d9:                                       ; preds = %bb._0xd75
   %_0x74d9_0x1 = phi i256 [ %_0xd75_0x0, %bb._0xd75 ], !notdec.evm !4879
   %_0x74d9_0x4 = phi i256 [ %_0xd75_0x3, %bb._0xd75 ], !notdec.evm !4880
   %evm.shl164 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4881
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl164), !notdec.evm !4882
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4883
+  %notdec.evm.mem.ptr.832 = inttoptr i256 0 to ptr
+  store i256 %evm.shl164, ptr %notdec.evm.mem.ptr.832, align 1, !notdec.evm !4882
+  %notdec.evm.mem.ptr.833 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.833, align 1, !notdec.evm !4883
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4884
   unreachable, !notdec.evm !4884
 
@@ -8336,8 +9167,10 @@ bb._0x74a4:                                       ; preds = %bb._0xd50
   %_0x74a4_0x1 = phi i256 [ %_0xd50_0x0, %bb._0xd50 ], !notdec.evm !4888
   %_0x74a4_0x4 = phi i256 [ %_0xd50_0x3, %bb._0xd50 ], !notdec.evm !4889
   %evm.shl165 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4890
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl165), !notdec.evm !4891
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4892
+  %notdec.evm.mem.ptr.834 = inttoptr i256 0 to ptr
+  store i256 %evm.shl165, ptr %notdec.evm.mem.ptr.834, align 1, !notdec.evm !4891
+  %notdec.evm.mem.ptr.835 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.835, align 1, !notdec.evm !4892
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4893
   unreachable, !notdec.evm !4893
 
@@ -8358,33 +9191,40 @@ bb._0x746f:                                       ; preds = %bb._0xcd1
   %_0x746f_0x1 = phi i256 [ %_0xcd1_0x0, %bb._0xcd1 ], !notdec.evm !4902
   %_0x746f_0x3 = phi i256 [ %_0xcd1_0x2, %bb._0xcd1 ], !notdec.evm !4903
   %evm.shl168 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !4904
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl168), !notdec.evm !4905
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !4906
+  %notdec.evm.mem.ptr.836 = inttoptr i256 0 to ptr
+  store i256 %evm.shl168, ptr %notdec.evm.mem.ptr.836, align 1, !notdec.evm !4905
+  %notdec.evm.mem.ptr.837 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.837, align 1, !notdec.evm !4906
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !4907
   unreachable, !notdec.evm !4907
 
 bb._0xca3:                                        ; preds = %bb._0xc72
-  %evm.mload169 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4908
+  %notdec.evm.mem.ptr.838 = inttoptr i256 64 to ptr
+  %evm.mload169 = load i256, ptr %notdec.evm.mem.ptr.838, align 1, !notdec.evm !4908
   %evm.shl170 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4909
-  call void @evm_mstore(ptr %mem, i256 %evm.mload169, i256 %evm.shl170), !notdec.evm !4910
+  %notdec.evm.mem.ptr.839 = inttoptr i256 %evm.mload169 to ptr
+  store i256 %evm.shl170, ptr %notdec.evm.mem.ptr.839, align 1, !notdec.evm !4910
   %evm.add171 = add i256 4, %evm.mload169, !notdec.evm !4911
   %private.call172 = call i256 @private__0x361f_0x361f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add171, i256 954169), !notdec.evm !4912
   br label %bb._0xe8f39
 
 bb._0xe8f39:                                      ; preds = %bb._0xca3
-  %evm.mload173 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4913
+  %notdec.evm.mem.ptr.840 = inttoptr i256 64 to ptr
+  %evm.mload173 = load i256, ptr %notdec.evm.mem.ptr.840, align 1, !notdec.evm !4913
   %evm.sub174 = sub i256 %private.call172, %evm.mload173, !notdec.evm !4914
   call void @evm_revert(ptr %mem, i256 %evm.mload173, i256 %evm.sub174), !notdec.evm !4915
   unreachable, !notdec.evm !4915
 }
 
-define { i256, i256 } @private__0xe0e_0xe0e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xe0earg0x0, i256 %_0xe0earg0x1, i256 %_0xe0earg0x2, i256 %_0xe0earg0x3, i256 %_0xe0earg0x4) {
+define { i256, i256 } @private__0xe0e_0xe0e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xe0earg0x0, i256 %_0xe0earg0x1, i256 %_0xe0earg0x2, i256 %_0xe0earg0x3, i256 %_0xe0earg0x4) #0 {
 bb._0xe0e:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4916
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !4917
   %evm.and = and i256 %_0xe0earg0x1, %evm.sub, !notdec.evm !4918
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !4919
-  call void @evm_mstore(ptr %mem, i256 32, i256 57), !notdec.evm !4920
+  %notdec.evm.mem.ptr.841 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.841, align 1, !notdec.evm !4919
+  %notdec.evm.mem.ptr.842 = inttoptr i256 32 to ptr
+  store i256 57, ptr %notdec.evm.mem.ptr.842, align 1, !notdec.evm !4920
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !4921
   %evm.sload = call i256 @evm_sload(i256 %evm.sha3), !notdec.evm !4922
   %evm.caller = call i256 @evm_caller(ptr %env), !notdec.evm !4923
@@ -8421,61 +9261,76 @@ bb._0xef7:                                        ; preds = %bb._0xeea
   ret { i256, i256 } %ret.insert12, !notdec.evm !4937
 
 bb._0xed3:                                        ; preds = %bb._0xec4
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4938
+  %notdec.evm.mem.ptr.843 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.843, align 1, !notdec.evm !4938
   %evm.shl13 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4939
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.shl13), !notdec.evm !4940
+  %notdec.evm.mem.ptr.844 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.shl13, ptr %notdec.evm.mem.ptr.844, align 1, !notdec.evm !4940
   %evm.add = add i256 4, %evm.mload, !notdec.evm !4941
   %private.call14 = call i256 @private__0x3594_0x3594(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.add, i256 954243), !notdec.evm !4942
   br label %bb._0xe8f83
 
 bb._0xe8f83:                                      ; preds = %bb._0xed3
-  %evm.mload15 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4943
+  %notdec.evm.mem.ptr.845 = inttoptr i256 64 to ptr
+  %evm.mload15 = load i256, ptr %notdec.evm.mem.ptr.845, align 1, !notdec.evm !4943
   %evm.sub16 = sub i256 %private.call14, %evm.mload15, !notdec.evm !4944
   call void @evm_revert(ptr %mem, i256 %evm.mload15, i256 %evm.sub16), !notdec.evm !4945
   unreachable, !notdec.evm !4945
 
 bb._0xe86:                                        ; preds = %bb._0xe77
-  %evm.mload17 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4946
+  %notdec.evm.mem.ptr.846 = inttoptr i256 64 to ptr
+  %evm.mload17 = load i256, ptr %notdec.evm.mem.ptr.846, align 1, !notdec.evm !4946
   %evm.shl18 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4947
-  call void @evm_mstore(ptr %mem, i256 %evm.mload17, i256 %evm.shl18), !notdec.evm !4948
+  %notdec.evm.mem.ptr.847 = inttoptr i256 %evm.mload17 to ptr
+  store i256 %evm.shl18, ptr %notdec.evm.mem.ptr.847, align 1, !notdec.evm !4948
   %evm.add19 = add i256 %evm.mload17, 4, !notdec.evm !4949
-  call void @evm_mstore(ptr %mem, i256 %evm.add19, i256 32), !notdec.evm !4950
+  %notdec.evm.mem.ptr.848 = inttoptr i256 %evm.add19 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.848, align 1, !notdec.evm !4950
   %evm.add20 = add i256 %evm.mload17, 36, !notdec.evm !4951
-  call void @evm_mstore(ptr %mem, i256 %evm.add20, i256 20), !notdec.evm !4952
+  %notdec.evm.mem.ptr.849 = inttoptr i256 %evm.add20 to ptr
+  store i256 20, ptr %notdec.evm.mem.ptr.849, align 1, !notdec.evm !4952
   %evm.shl21 = call i256 @evm_shl(i256 96, i256 418503298271971407223533053846125334988335698771), !notdec.evm !4953
   %evm.add22 = add i256 %evm.mload17, 68, !notdec.evm !4954
-  call void @evm_mstore(ptr %mem, i256 %evm.add22, i256 %evm.shl21), !notdec.evm !4955
+  %notdec.evm.mem.ptr.850 = inttoptr i256 %evm.add22 to ptr
+  store i256 %evm.shl21, ptr %notdec.evm.mem.ptr.850, align 1, !notdec.evm !4955
   %evm.add23 = add i256 100, %evm.mload17, !notdec.evm !4956
   br label %bb._0x75d5, !notdec.evm !4957
 
 bb._0x75d5:                                       ; preds = %bb._0xe86
-  %evm.mload24 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4958
+  %notdec.evm.mem.ptr.851 = inttoptr i256 64 to ptr
+  %evm.mload24 = load i256, ptr %notdec.evm.mem.ptr.851, align 1, !notdec.evm !4958
   %evm.sub25 = sub i256 %evm.add23, %evm.mload24, !notdec.evm !4959
   call void @evm_revert(ptr %mem, i256 %evm.mload24, i256 %evm.sub25), !notdec.evm !4960
   unreachable, !notdec.evm !4960
 
 bb._0xe39:                                        ; preds = %bb._0xe0e
-  %evm.mload26 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4961
+  %notdec.evm.mem.ptr.852 = inttoptr i256 64 to ptr
+  %evm.mload26 = load i256, ptr %notdec.evm.mem.ptr.852, align 1, !notdec.evm !4961
   %evm.shl27 = call i256 @evm_shl(i256 229, i256 4594637), !notdec.evm !4962
-  call void @evm_mstore(ptr %mem, i256 %evm.mload26, i256 %evm.shl27), !notdec.evm !4963
+  %notdec.evm.mem.ptr.853 = inttoptr i256 %evm.mload26 to ptr
+  store i256 %evm.shl27, ptr %notdec.evm.mem.ptr.853, align 1, !notdec.evm !4963
   %evm.add28 = add i256 %evm.mload26, 4, !notdec.evm !4964
-  call void @evm_mstore(ptr %mem, i256 %evm.add28, i256 32), !notdec.evm !4965
+  %notdec.evm.mem.ptr.854 = inttoptr i256 %evm.add28 to ptr
+  store i256 32, ptr %notdec.evm.mem.ptr.854, align 1, !notdec.evm !4965
   %evm.add29 = add i256 %evm.mload26, 36, !notdec.evm !4966
-  call void @evm_mstore(ptr %mem, i256 %evm.add29, i256 20), !notdec.evm !4967
+  %notdec.evm.mem.ptr.855 = inttoptr i256 %evm.add29 to ptr
+  store i256 20, ptr %notdec.evm.mem.ptr.855, align 1, !notdec.evm !4967
   %evm.shl30 = call i256 @evm_shl(i256 98, i256 96050731380548604999064602992415164534640513361), !notdec.evm !4968
   %evm.add31 = add i256 %evm.mload26, 68, !notdec.evm !4969
-  call void @evm_mstore(ptr %mem, i256 %evm.add31, i256 %evm.shl30), !notdec.evm !4970
+  %notdec.evm.mem.ptr.856 = inttoptr i256 %evm.add31 to ptr
+  store i256 %evm.shl30, ptr %notdec.evm.mem.ptr.856, align 1, !notdec.evm !4970
   %evm.add32 = add i256 100, %evm.mload26, !notdec.evm !4971
   br label %bb._0x75ad, !notdec.evm !4972
 
 bb._0x75ad:                                       ; preds = %bb._0xe39
-  %evm.mload33 = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !4973
+  %notdec.evm.mem.ptr.857 = inttoptr i256 64 to ptr
+  %evm.mload33 = load i256, ptr %notdec.evm.mem.ptr.857, align 1, !notdec.evm !4973
   %evm.sub34 = sub i256 %evm.add32, %evm.mload33, !notdec.evm !4974
   call void @evm_revert(ptr %mem, i256 %evm.mload33, i256 %evm.sub34), !notdec.evm !4975
   unreachable, !notdec.evm !4975
 }
 
-define i256 @private__0xf06_0xf06(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xf06arg0x0, i256 %_0xf06arg0x1, i256 %_0xf06arg0x2) {
+define i256 @private__0xf06_0xf06(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xf06arg0x0, i256 %_0xf06arg0x1, i256 %_0xf06arg0x2) #0 {
 bb._0xf06:
   br label %bb._0xf0c, !notdec.evm !4976
 
@@ -8508,24 +9363,31 @@ bb._0xf2d:                                        ; preds = %bb._0xf17
   %_0xf2d_0x0 = phi i256 [ %_0xf17_0x0, %bb._0xf17 ], !notdec.evm !4991
   %_0xf2d_0x4 = phi i256 [ %_0xf17_0x0, %bb._0xf17 ], !notdec.evm !4992
   %_0xf2d_0x5 = phi i256 [ %_0xf17_0x1, %bb._0xf17 ], !notdec.evm !4993
-  call void @evm_mstore(ptr %mem, i256 0, i256 4), !notdec.evm !4994
+  %notdec.evm.mem.ptr.858 = inttoptr i256 0 to ptr
+  store i256 4, ptr %notdec.evm.mem.ptr.858, align 1, !notdec.evm !4994
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 32), !notdec.evm !4995
   %evm.add = add i256 %evm.sha3, %_0xf2d_0x0, !notdec.evm !4996
   %evm.sload6 = call i256 @evm_sload(i256 %evm.add), !notdec.evm !4997
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !4998
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !4999
   %evm.and = and i256 %evm.sub, %evm.sload6, !notdec.evm !5000
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !5001
-  call void @evm_mstore(ptr %mem, i256 32, i256 1), !notdec.evm !5002
+  %notdec.evm.mem.ptr.859 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.859, align 1, !notdec.evm !5001
+  %notdec.evm.mem.ptr.860 = inttoptr i256 32 to ptr
+  store i256 1, ptr %notdec.evm.mem.ptr.860, align 1, !notdec.evm !5002
   %evm.sha37 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !5003
   %evm.and8 = and i256 %evm.sub, %_0xf06arg0x0, !notdec.evm !5004
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and8), !notdec.evm !5005
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.sha37), !notdec.evm !5006
+  %notdec.evm.mem.ptr.861 = inttoptr i256 0 to ptr
+  store i256 %evm.and8, ptr %notdec.evm.mem.ptr.861, align 1, !notdec.evm !5005
+  %notdec.evm.mem.ptr.862 = inttoptr i256 32 to ptr
+  store i256 %evm.sha37, ptr %notdec.evm.mem.ptr.862, align 1, !notdec.evm !5006
   %evm.sha39 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !5007
   %evm.and10 = and i256 %_0xf06arg0x1, %evm.sub, !notdec.evm !5008
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and10), !notdec.evm !5009
+  %notdec.evm.mem.ptr.863 = inttoptr i256 0 to ptr
+  store i256 %evm.and10, ptr %notdec.evm.mem.ptr.863, align 1, !notdec.evm !5009
   %evm.add11 = add i256 %evm.sha39, 1, !notdec.evm !5010
-  call void @evm_mstore(ptr %mem, i256 32, i256 %evm.add11), !notdec.evm !5011
+  %notdec.evm.mem.ptr.864 = inttoptr i256 32 to ptr
+  store i256 %evm.add11, ptr %notdec.evm.mem.ptr.864, align 1, !notdec.evm !5011
   %evm.sha312 = call i256 @evm_sha3(ptr %mem, i256 0, i256 64), !notdec.evm !5012
   %evm.sload13 = call i256 @evm_sload(i256 %evm.sha312), !notdec.evm !5013
   %evm.shl14 = call i256 @evm_shl(i256 104, i256 1), !notdec.evm !5014
@@ -8558,21 +9420,26 @@ bb._0x75fd:                                       ; preds = %bb._0xf26
   %_0x75fd_0x5 = phi i256 [ %_0xf26_0x4, %bb._0xf26 ], !notdec.evm !5031
   %_0x75fd_0x6 = phi i256 [ %_0xf26_0x5, %bb._0xf26 ], !notdec.evm !5032
   %evm.shl19 = call i256 @evm_shl(i256 224, i256 1313373041), !notdec.evm !5033
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.shl19), !notdec.evm !5034
-  call void @evm_mstore(ptr %mem, i256 4, i256 50), !notdec.evm !5035
+  %notdec.evm.mem.ptr.865 = inttoptr i256 0 to ptr
+  store i256 %evm.shl19, ptr %notdec.evm.mem.ptr.865, align 1, !notdec.evm !5034
+  %notdec.evm.mem.ptr.866 = inttoptr i256 4 to ptr
+  store i256 50, ptr %notdec.evm.mem.ptr.866, align 1, !notdec.evm !5035
   call void @evm_revert(ptr %mem, i256 0, i256 36), !notdec.evm !5036
   unreachable, !notdec.evm !5036
 }
 
-define i256 @private__0xf9f_0xf9f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xf9farg0x0) {
+define i256 @private__0xf9f_0xf9f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xf9farg0x0) #0 {
 bb._0xf9f:
   %evm.sload = call i256 @evm_sload(i256 3), !notdec.evm !5037
   %evm.mul = mul i256 32, %evm.sload, !notdec.evm !5038
   %evm.add = add i256 32, %evm.mul, !notdec.evm !5039
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !5040
+  %notdec.evm.mem.ptr.867 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.867, align 1, !notdec.evm !5040
   %evm.add1 = add i256 %evm.mload, %evm.add, !notdec.evm !5041
-  call void @evm_mstore(ptr %mem, i256 64, i256 %evm.add1), !notdec.evm !5042
-  call void @evm_mstore(ptr %mem, i256 %evm.mload, i256 %evm.sload), !notdec.evm !5043
+  %notdec.evm.mem.ptr.868 = inttoptr i256 64 to ptr
+  store i256 %evm.add1, ptr %notdec.evm.mem.ptr.868, align 1, !notdec.evm !5042
+  %notdec.evm.mem.ptr.869 = inttoptr i256 %evm.mload to ptr
+  store i256 %evm.sload, ptr %notdec.evm.mem.ptr.869, align 1, !notdec.evm !5043
   %evm.add2 = add i256 32, %evm.mload, !notdec.evm !5044
   %evm.sload3 = call i256 @evm_sload(i256 3), !notdec.evm !5045
   %evm.iszero = icmp eq i256 %evm.sload3, 0, !notdec.evm !5046
@@ -8583,7 +9450,8 @@ bb._0xf9f:
 bb._0xfc9:                                        ; preds = %bb._0xf9f
   %evm.mul4 = mul i256 32, %evm.sload3, !notdec.evm !5048
   %evm.add5 = add i256 %evm.add2, %evm.mul4, !notdec.evm !5049
-  call void @evm_mstore(ptr %mem, i256 0, i256 3), !notdec.evm !5050
+  %notdec.evm.mem.ptr.870 = inttoptr i256 0 to ptr
+  store i256 3, ptr %notdec.evm.mem.ptr.870, align 1, !notdec.evm !5050
   %evm.sha3 = call i256 @evm_sha3(ptr %mem, i256 0, i256 32), !notdec.evm !5051
   br label %bb._0xfd9, !notdec.evm !5052
 
@@ -8594,7 +9462,8 @@ bb._0xfd9:                                        ; preds = %bb._0xfd9, %bb._0xf
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !5056
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !5057
   %evm.and = and i256 %evm.sub, %evm.sload6, !notdec.evm !5058
-  call void @evm_mstore(ptr %mem, i256 %_0xfd9_0x0, i256 %evm.and), !notdec.evm !5059
+  %notdec.evm.mem.ptr.871 = inttoptr i256 %_0xfd9_0x0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.871, align 1, !notdec.evm !5059
   %evm.add7 = add i256 %_0xfd9_0x1, 1, !notdec.evm !5060
   %evm.add8 = add i256 32, %_0xfd9_0x0, !notdec.evm !5061
   %evm.gt = icmp ugt i256 %evm.add5, %evm.add8, !notdec.evm !5062
@@ -13677,3 +14546,5 @@ bb._0xff7:                                        ; preds = %bb._0xfd9, %bb._0xf
 !5065 = !{!"tac=0xff7_0x1", !"op=PHI"}
 !5066 = !{!"tac=0xff7_0x2", !"op=PHI"}
 !5067 = !{!"tac=0x1000", !"op=RETURNPRIVATE", !"evm.pc=0x1000"}
+
+attributes #0 = { null_pointer_is_valid }

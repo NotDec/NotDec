@@ -176,7 +176,7 @@ std::optional<uint64_t> getUInt64Constant(llvm::Value *V);
 std::optional<EvmMemoryLoad> matchEvmMemoryLoad(llvm::Value *V);
 std::optional<EvmMemoryStore> matchEvmMemoryStore(llvm::Instruction *I);
 bool isFreeMemoryPointerLoad(llvm::Value *V);
-bool isFreeMemoryPointerStore(llvm::CallBase *Call);
+bool isFreeMemoryPointerStore(llvm::Instruction *I);
 bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
 std::optional<SolidityRevertMatch>
 matchSolidityRevert(llvm::BasicBlock &BB, llvm::CallBase &Revert);

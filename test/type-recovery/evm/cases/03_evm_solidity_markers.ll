@@ -13,7 +13,7 @@ declare void @notdec_solidity_event_data_word_write(i256, i256, i256, i256)
 declare void @notdec_solidity_external_call_input_word_write(i256, i256, i256, i256)
 declare void @notdec_solidity_external_call_output_word_read(i256, i256, i256, i256)
 
-define void @main() {
+define void @main() #0 {
 entry:
   %buf = call ptr @calloc(i256 1, i256 96)
   %addr = ptrtoint ptr %buf to i256
@@ -27,3 +27,5 @@ entry:
   call void @notdec_solidity_external_call_output_word_read(i256 %addr, i256 64, i256 5, i256 1)
   ret void
 }
+
+attributes #0 = { null_pointer_is_valid }

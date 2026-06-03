@@ -139,7 +139,7 @@ void collectAbiReturnDataWordWriteMarkers(
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidates.clear();
       continue;
     }
@@ -172,7 +172,7 @@ void collectAbiReturnDataCopyWriteMarkers(
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidates.clear();
       continue;
     }
@@ -337,7 +337,7 @@ findAbiReturnDynamicArraySource(Function &F, CallBase &Return,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       HeadOffsetWrite = nullptr;
       LengthWrite = nullptr;
       continue;

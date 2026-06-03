@@ -80,7 +80,7 @@ void collectRevertDataWordWriteMarkers(BasicBlock &BB, CallBase &Revert,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidates.clear();
       continue;
     }
@@ -112,7 +112,7 @@ void collectRevertDataCopyWriteMarkers(BasicBlock &BB, CallBase &Revert,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidates.clear();
       continue;
     }

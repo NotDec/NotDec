@@ -3,11 +3,8 @@ source_filename = "notdec.evm2llvm"
 target datalayout = "E-p:256:256-i256:256:256-S256-a:256:256"
 target triple = "evm-unknown-unknown"
 
-declare i256 @evm_mload(ptr, i256)
 
-declare void @evm_mstore(ptr, i256, i256)
 
-declare void @evm_mstore8(ptr, i256, i256)
 
 declare void @evm_mcopy(ptr, i256, i256, i256)
 
@@ -133,9 +130,10 @@ declare void @evm_return(ptr, i256, i256)
 
 declare void @evm_revert(ptr, i256, i256)
 
-define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x0:
-  call void @evm_mstore(ptr %mem, i256 64, i256 128), !notdec.evm !0
+  %notdec.evm.mem.ptr.0 = inttoptr i256 64 to ptr
+  store i256 128, ptr %notdec.evm.mem.ptr.0, align 1, !notdec.evm !0
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !1
   %evm.branch.cond = icmp ne i256 %evm.calldatasize, 0, !notdec.evm !2
   br i1 %evm.branch.cond, label %bb._0xa, label %bb._0x9, !notdec.evm !2
@@ -148,7 +146,8 @@ bb._0xa:                                          ; preds = %bb._0x0
   br i1 %evm.branch.cond1, label %bb._0x15, label %bb._0x11, !notdec.evm !5
 
 bb._0x15:                                         ; preds = %bb._0xa
-  %evm.mload = call i256 @evm_mload(ptr %mem, i256 64), !notdec.evm !6
+  %notdec.evm.mem.ptr.1 = inttoptr i256 64 to ptr
+  %evm.mload = load i256, ptr %notdec.evm.mem.ptr.1, align 1, !notdec.evm !6
   %evm.calldatasize2 = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !7
   call void @evm_calldatacopy(ptr %mem, ptr %calldata, i256 %evm.mload, i256 0, i256 %evm.calldatasize2), !notdec.evm !8
   %evm.gas = call i256 @evm_gas(ptr %env), !notdec.evm !9
@@ -195,3 +194,5 @@ bb._0x9:                                          ; preds = %bb._0x0
 !16 = !{!"tac=0x5a", !"op=RETURN", !"evm.pc=0x5a"}
 !17 = !{!"tac=0x14", !"op=REVERT", !"evm.pc=0x14"}
 !18 = !{!"tac=0x9", !"op=STOP", !"evm.pc=0x9"}
+
+attributes #0 = { null_pointer_is_valid }

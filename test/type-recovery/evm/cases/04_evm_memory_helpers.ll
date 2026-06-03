@@ -3,13 +3,16 @@ source_filename = "notdec.evm.type-recovery.memory-helpers"
 target datalayout = "E-p:256:256-i256:256:256-S256-a:256:256"
 target triple = "evm-unknown-unknown"
 
-declare i256 @evm_mload(ptr, i256)
-declare void @evm_mstore(ptr, i256, i256)
 
-define void @main(ptr %mem) {
+define void @main(ptr %mem) #0 {
 entry:
-  call void @evm_mstore(ptr %mem, i256 0, i256 11)
-  %word = call i256 @evm_mload(ptr %mem, i256 32)
-  call void @evm_mstore(ptr %mem, i256 64, i256 %word)
+  %notdec.evm.mem.ptr.0 = inttoptr i256 0 to ptr
+  store i256 11, ptr %notdec.evm.mem.ptr.0, align 1
+  %notdec.evm.mem.ptr.1 = inttoptr i256 32 to ptr
+  %word = load i256, ptr %notdec.evm.mem.ptr.1, align 1
+  %notdec.evm.mem.ptr.2 = inttoptr i256 64 to ptr
+  store i256 %word, ptr %notdec.evm.mem.ptr.2, align 1
   ret void
 }
+
+attributes #0 = { null_pointer_is_valid }

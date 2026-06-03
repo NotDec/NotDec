@@ -3,11 +3,8 @@ source_filename = "notdec.evm2llvm"
 target datalayout = "E-p:256:256-i256:256:256-S256-a:256:256"
 target triple = "evm-unknown-unknown"
 
-declare i256 @evm_mload(ptr, i256)
 
-declare void @evm_mstore(ptr, i256, i256)
 
-declare void @evm_mstore8(ptr, i256, i256)
 
 declare void @evm_mcopy(ptr, i256, i256, i256)
 
@@ -133,7 +130,7 @@ declare void @evm_return(ptr, i256, i256)
 
 declare void @evm_revert(ptr, i256, i256)
 
-define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x0:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !0
   %evm.branch.cond = icmp ne i256 %evm.calldatasize, 0, !notdec.evm !1
@@ -172,7 +169,8 @@ bb._0x5f:                                         ; preds = %bb._0x2c
 bb._0x4:                                          ; preds = %bb._0x0
   %evm.callvalue = call i256 @evm_callvalue(ptr %env), !notdec.evm !23
   %evm.returndatasize13 = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !24
-  call void @evm_mstore(ptr %mem, i256 %evm.returndatasize13, i256 %evm.callvalue), !notdec.evm !25
+  %notdec.evm.mem.ptr.0 = inttoptr i256 %evm.returndatasize13 to ptr
+  store i256 %evm.callvalue, ptr %notdec.evm.mem.ptr.0, align 1, !notdec.evm !25
   %evm.msize = call i256 @evm_msize(ptr %mem), !notdec.evm !26
   %evm.returndatasize14 = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !27
   call void @evm_log1(ptr %mem, i256 %evm.returndatasize14, i256 %evm.msize, i256 -44194564504436295181980612648397100322757857567031707332955818750814971871745), !notdec.evm !28
@@ -209,3 +207,5 @@ bb._0x4:                                          ; preds = %bb._0x0
 !27 = !{!"tac=0x29", !"op=RETURNDATASIZE", !"evm.pc=0x29"}
 !28 = !{!"tac=0x2a", !"op=LOG1", !"evm.pc=0x2a"}
 !29 = !{!"tac=0x2b", !"op=STOP", !"evm.pc=0x2b"}
+
+attributes #0 = { null_pointer_is_valid }

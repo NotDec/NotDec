@@ -21,6 +21,12 @@ EVM_REVERT_CALL_RE = re.compile(
 EVM_MSTORE_CALL_RE = re.compile(
     r"\bcall void @evm_mstore\(ptr [^,]+, i256 ([^,]+), i256 ([^)]+)\)"
 )
+EVM_INTTOPTR_ASSIGN_RE = re.compile(
+    r"^\s*(%[\w.\-]+) = inttoptr i256 ([^ ]+) to ptr"
+)
+EVM_NATIVE_STORE_RE = re.compile(
+    r"^\s*store i(?:256|8) ([^,]+), ptr ([^,]+), align \d+"
+)
 EVM_RETURNDATACOPY_CALL_RE = re.compile(
     r"\bcall void @evm_returndatacopy\(ptr [^,]+, ptr [^,]+, i256 ([^,]+), i256 ([^,]+), i256 ([^)]+)\)"
 )
@@ -29,6 +35,9 @@ EVM_SHL_ASSIGN_RE = re.compile(
 )
 EVM_MLOAD_ASSIGN_RE = re.compile(
     r"^\s*(%[\w.\-]+) = call i256 @evm_mload\(ptr [^,]+, i256 ([^)]+)\)"
+)
+EVM_NATIVE_LOAD_RE = re.compile(
+    r"^\s*(%[\w.\-]+) = load i256, ptr ([^,]+), align \d+"
 )
 EVM_ADD_ASSIGN_RE = re.compile(
     r"^\s*(%[\w.\-]+) = add i256 ([^,]+), ([^,!]+)"
@@ -431,11 +440,16 @@ def selector_from_value(value: str, shl_values: dict[str, int]) -> int | None:
 def classify_reverts_from_block(block: str) -> list[str]:
     shl_values: dict[str, int] = {}
     exprs: dict[str, tuple] = {}
+    ptr_offsets: dict[str, str] = {}
     memory_stores: list[tuple[str, str]] = []
     returndata_copy_offsets: list[str] = []
     kinds: list[str] = []
 
     for line in block.splitlines():
+        ptr_match = EVM_INTTOPTR_ASSIGN_RE.match(line)
+        if ptr_match:
+            ptr_offsets[ptr_match.group(1)] = ptr_match.group(2).strip()
+
         shl_match = EVM_SHL_ASSIGN_RE.match(line)
         if shl_match:
             selector = decode_selector_word(
@@ -451,6 +465,12 @@ def classify_reverts_from_block(block: str) -> list[str]:
                 value_expr(mload_match.group(2), exprs),
             )
 
+        native_load_match = EVM_NATIVE_LOAD_RE.match(line)
+        if native_load_match:
+            offset = ptr_offsets.get(native_load_match.group(2).strip())
+            if offset is not None:
+                exprs[native_load_match.group(1)] = ("mload", value_expr(offset, exprs))
+
         add_match = EVM_ADD_ASSIGN_RE.match(line)
         if add_match:
             lhs = add_match.group(1)
@@ -464,6 +484,12 @@ def classify_reverts_from_block(block: str) -> list[str]:
         mstore_match = EVM_MSTORE_CALL_RE.search(line)
         if mstore_match:
             memory_stores.append((mstore_match.group(1), mstore_match.group(2)))
+
+        native_store_match = EVM_NATIVE_STORE_RE.match(line)
+        if native_store_match:
+            offset = ptr_offsets.get(native_store_match.group(2).strip())
+            if offset is not None:
+                memory_stores.append((offset, native_store_match.group(1).strip()))
 
         returndata_copy_match = EVM_RETURNDATACOPY_CALL_RE.search(line)
         if returndata_copy_match:
@@ -508,11 +534,16 @@ def classify_reverts_from_block(block: str) -> list[str]:
 
 def collect_panic_codes_from_block(block: str) -> list[int]:
     shl_values: dict[str, int] = {}
+    ptr_offsets: dict[str, str] = {}
     saw_panic_selector = False
     pending_codes: list[int] = []
     codes: list[int] = []
 
     for line in block.splitlines():
+        ptr_match = EVM_INTTOPTR_ASSIGN_RE.match(line)
+        if ptr_match:
+            ptr_offsets[ptr_match.group(1)] = ptr_match.group(2).strip()
+
         shl_match = EVM_SHL_ASSIGN_RE.match(line)
         if shl_match:
             selector = decode_selector_word(
@@ -525,6 +556,17 @@ def collect_panic_codes_from_block(block: str) -> list[int]:
         if mstore_match:
             offset = mstore_match.group(1).strip()
             value = mstore_match.group(2).strip()
+            if is_constant_i256(offset, 0) and shl_values.get(value) == PANIC_SELECTOR:
+                saw_panic_selector = True
+            elif is_constant_i256(offset, 4) and value.isdigit():
+                pending_codes.append(int(value))
+
+        native_store_match = EVM_NATIVE_STORE_RE.match(line)
+        if native_store_match:
+            value = native_store_match.group(1).strip()
+            offset = ptr_offsets.get(native_store_match.group(2).strip())
+            if offset is None:
+                continue
             if is_constant_i256(offset, 0) and shl_values.get(value) == PANIC_SELECTOR:
                 saw_panic_selector = True
             elif is_constant_i256(offset, 4) and value.isdigit():

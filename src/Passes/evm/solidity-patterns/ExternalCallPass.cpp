@@ -160,7 +160,7 @@ CallBase *findExternalCallInputCopyWriteMarker(BasicBlock &BB,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidate = nullptr;
       continue;
     }
@@ -211,7 +211,7 @@ CallBase *findExternalCallOutputCopyWriteMarker(BasicBlock &BB,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call) ||
+    if (isFreeMemoryPointerStore(&I) ||
         !classifyExternalCall(getCalleeName(Call)).empty()) {
       return nullptr;
     }
@@ -227,7 +227,7 @@ CallBase *findExternalCallOutputCopyWriteMarker(BasicBlock &BB,
       if (Call == nullptr) {
         continue;
       }
-      if (isFreeMemoryPointerStore(Call) ||
+      if (isFreeMemoryPointerStore(&I) ||
           !classifyExternalCall(getCalleeName(Call)).empty()) {
         break;
       }
@@ -254,7 +254,7 @@ CallBase *findExternalCallInputWordWriteMarker(BasicBlock &BB,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidate = nullptr;
       continue;
     }
@@ -288,7 +288,7 @@ void collectExternalCallInputAbiHeadWriteMarkers(
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidates.clear();
       continue;
     }
@@ -348,7 +348,7 @@ void collectExternalCallOutputWordReadMarkers(
     }
 
     if (auto *Call = dyn_cast<CallBase>(&I)) {
-      if (isFreeMemoryPointerStore(Call) ||
+      if (isFreeMemoryPointerStore(&I) ||
           !classifyExternalCall(getCalleeName(Call)).empty()) {
         return;
       }
@@ -361,7 +361,7 @@ void collectExternalCallOutputWordReadMarkers(
   for (BasicBlock *Succ : successors(&BB)) {
     for (Instruction &I : *Succ) {
       if (auto *Call = dyn_cast<CallBase>(&I)) {
-        if (isFreeMemoryPointerStore(Call) ||
+        if (isFreeMemoryPointerStore(&I) ||
             !classifyExternalCall(getCalleeName(Call)).empty()) {
           break;
         }
@@ -401,7 +401,7 @@ CallBase *findExternalCallOutputAllocationMarker(BasicBlock &BB,
     if (IsMatchingAllocation(Call)) {
       return Call;
     }
-    if (isFreeMemoryPointerStore(Call) ||
+    if (isFreeMemoryPointerStore(&I) ||
         !classifyExternalCall(getCalleeName(Call)).empty()) {
       return nullptr;
     }
@@ -416,7 +416,7 @@ CallBase *findExternalCallOutputAllocationMarker(BasicBlock &BB,
       if (IsMatchingAllocation(Call)) {
         return Call;
       }
-      if (isFreeMemoryPointerStore(Call) ||
+      if (isFreeMemoryPointerStore(&I) ||
           !classifyExternalCall(getCalleeName(Call)).empty()) {
         break;
       }

@@ -75,7 +75,7 @@ void collectEventDataWordWriteMarkers(BasicBlock &BB, CallBase &Log,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidates.clear();
       continue;
     }
@@ -109,7 +109,7 @@ void collectEventDataCopyWriteMarkers(BasicBlock &BB, CallBase &Log,
       continue;
     }
 
-    if (isFreeMemoryPointerStore(Call)) {
+    if (isFreeMemoryPointerStore(&I)) {
       Candidates.clear();
       continue;
     }

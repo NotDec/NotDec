@@ -3,11 +3,8 @@ source_filename = "notdec.evm2llvm"
 target datalayout = "E-p:256:256-i256:256:256-S256-a:256:256"
 target triple = "evm-unknown-unknown"
 
-declare i256 @evm_mload(ptr, i256)
 
-declare void @evm_mstore(ptr, i256, i256)
 
-declare void @evm_mstore8(ptr, i256, i256)
 
 declare void @evm_mcopy(ptr, i256, i256, i256)
 
@@ -133,7 +130,7 @@ declare void @evm_return(ptr, i256, i256)
 
 declare void @evm_revert(ptr, i256, i256)
 
-define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x0:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !0
   %evm.returndatasize = call i256 @evm_returndatasize(ptr %returndata), !notdec.evm !1
@@ -178,3 +175,5 @@ bb._0x2a:                                         ; preds = %bb._0x0
 !14 = !{!"tac=0x29", !"op=JUMPI", !"evm.pc=0x29"}
 !15 = !{!"tac=0x2c", !"op=RETURN", !"evm.pc=0x2c"}
 !16 = !{!"tac=0x2a", !"op=REVERT", !"evm.pc=0x2a"}
+
+attributes #0 = { null_pointer_is_valid }

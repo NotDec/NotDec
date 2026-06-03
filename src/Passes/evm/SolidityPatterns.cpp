@@ -67,6 +67,9 @@ bool isCallTo(const Value *V, StringRef Name) {
 }
 
 Value *getIntToPtrAddress(Value *Ptr) {
+  if (isa_and_nonnull<ConstantPointerNull>(Ptr)) {
+    return ConstantInt::get(Type::getIntNTy(Ptr->getContext(), 256), 0);
+  }
   auto *Cast = dyn_cast_or_null<IntToPtrInst>(Ptr);
   if (Cast != nullptr) {
     return Cast->getOperand(0);
@@ -1060,10 +1063,9 @@ bool hasWholeSelectorOutlineShape(Function &F,
     return false;
   }
   for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
-        Call->arg_size() == 3 && isConstantIntValue(Call->getArgOperand(1), 64) &&
-        isConstantIntValue(Call->getArgOperand(2), 128)) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() && isConstantIntValue(Store->Address, 64) &&
+        isConstantIntValue(Store->StoredValue, 128)) {
       return false;
     }
   }
@@ -1276,12 +1278,14 @@ bool isFreeMemoryPointerLoad(Value *V) {
   return Load.has_value() && isConstantIntValue(Load->Address, 64);
 }
 
-bool isFreeMemoryPointerStore(CallBase *Call) {
-  if (isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-      isConstantIntValue(Call->getArgOperand(1), 64)) {
+bool isFreeMemoryPointerStore(Instruction *I) {
+  std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(I);
+  if (Store.has_value() && isConstantIntValue(Store->Address, 64)) {
     return true;
   }
-  return isCallTo(Call, "notdec_evm_finalize_alloc") && Call->arg_size() == 2;
+  auto *Call = dyn_cast_or_null<CallBase>(I);
+  return Call != nullptr && isCallTo(Call, "notdec_evm_finalize_alloc") &&
+         Call->arg_size() == 2;
 }
 
 bool isFreeMemoryAllocationBase(Value *V) {
@@ -1324,13 +1328,17 @@ bool isSameValue(Value *LHS, Value *RHS) {
 
   auto *LCall = dyn_cast_or_null<CallBase>(LHS);
   auto *RCall = dyn_cast_or_null<CallBase>(RHS);
-  if (LCall == nullptr || RCall == nullptr || LCall->arg_size() != 2 ||
-      RCall->arg_size() != 2 || !isCallTo(LCall, "evm_mload") ||
-      !isCallTo(RCall, "evm_mload")) {
-    return false;
+  if (LCall != nullptr && RCall != nullptr && LCall->arg_size() == 2 &&
+      RCall->arg_size() == 2 && isCallTo(LCall, "evm_mload") &&
+      isCallTo(RCall, "evm_mload")) {
+    return isSameValue(LCall->getArgOperand(0), RCall->getArgOperand(0)) &&
+           isSameValue(LCall->getArgOperand(1), RCall->getArgOperand(1));
   }
-  return isSameValue(LCall->getArgOperand(0), RCall->getArgOperand(0)) &&
-         isSameValue(LCall->getArgOperand(1), RCall->getArgOperand(1));
+
+  std::optional<EvmMemoryLoad> LLoad = matchEvmMemoryLoad(LHS);
+  std::optional<EvmMemoryLoad> RLoad = matchEvmMemoryLoad(RHS);
+  return LLoad.has_value() && RLoad.has_value() &&
+         isSameValue(LLoad->Address, RLoad->Address);
 }
 
 bool isSameRevertBufferSize(Value *LHS, Value *RHS) {
@@ -1559,20 +1567,21 @@ CallBase *findReturndataBubbleCopyFromMemoryMarkers(BasicBlock &BB,
   return MatchingConsumer != nullptr ? MatchingCopy : nullptr;
 }
 
-std::optional<RevertMemoryWrite> getRevertMemoryWrite(CallBase &Call,
+std::optional<RevertMemoryWrite> getRevertMemoryWrite(Instruction &I,
                                                       Value *RevertBase) {
-  if (isCallTo(&Call, "evm_mstore") && Call.arg_size() == 3) {
+  if (std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I)) {
     return RevertMemoryWrite{
-        &Call, Call.getArgOperand(1),
-        getOffsetFromBase(Call.getArgOperand(1), RevertBase),
-        Call.getArgOperand(2), false};
+        dyn_cast<CallBase>(&I), Store->Address,
+        getOffsetFromBase(Store->Address, RevertBase),
+        Store->StoredValue, false};
   }
 
-  if (isCallTo(&Call, "notdec_solidity_memory_write") &&
-      Call.arg_size() == 3 && isSameValue(Call.getArgOperand(0), RevertBase)) {
-    return RevertMemoryWrite{&Call, nullptr,
-                             getUInt64Constant(Call.getArgOperand(1)),
-                             Call.getArgOperand(2), true};
+  auto *Call = dyn_cast<CallBase>(&I);
+  if (Call != nullptr && isCallTo(Call, "notdec_solidity_memory_write") &&
+      Call->arg_size() == 3 && isSameValue(Call->getArgOperand(0), RevertBase)) {
+    return RevertMemoryWrite{Call, nullptr,
+                             getUInt64Constant(Call->getArgOperand(1)),
+                             Call->getArgOperand(2), true};
   }
 
   return std::nullopt;
@@ -1616,13 +1625,8 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
       break;
     }
 
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
     std::optional<RevertMemoryWrite> Write =
-        getRevertMemoryWrite(*Call, Revert.getArgOperand(1));
+        getRevertMemoryWrite(I, Revert.getArgOperand(1));
     if (!Write.has_value()) {
       continue;
     }
@@ -1633,20 +1637,20 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
     if (Write->Address != nullptr && isConstantIntValue(Write->Address, 4)) {
       if (std::optional<uint64_t> Code =
               getUInt64Constant(Write->StoredValue)) {
-        AbsolutePanicCodeStore = Call;
+        AbsolutePanicCodeStore = Write->Call;
         AbsolutePanicCode = Code;
       }
     }
     if (std::optional<uint64_t> Code = getUInt64Constant(Write->StoredValue)) {
       if (isKnownPanicCode(*Code)) {
-        PanicCodeCandidates.push_back({Call, *Code});
+        PanicCodeCandidates.push_back({Write->Call, *Code});
       }
     }
 
     if (Write->Offset == 0) {
       if (std::optional<uint64_t> Selector =
               getSelectorWord(Write->StoredValue)) {
-        Match.SelectorStore = Call;
+        Match.SelectorStore = Write->Call;
         Match.Selector = Selector;
       }
       continue;
@@ -1655,7 +1659,7 @@ std::optional<SolidityRevertMatch> matchSolidityRevert(BasicBlock &BB,
     if (Write->Offset == 4) {
       if (std::optional<uint64_t> Code =
               getUInt64Constant(Write->StoredValue)) {
-        Match.PanicCodeStore = Call;
+        Match.PanicCodeStore = Write->Call;
         Match.PanicCode = Code;
       }
       continue;

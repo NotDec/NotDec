@@ -334,7 +334,6 @@ protected:
 
     static bool isHeapAllocationCall(llvm::CallBase &I);
     static bool shouldIgnoreRuntimeCall(llvm::CallBase &I);
-    bool handleEVMMemoryHelperCall(llvm::CallBase &I);
     bool handleEVMMarkerCall(llvm::CallBase &I);
     bool handleIntrinsicCall(llvm::CallBase &I);
     // overloaded visit functions

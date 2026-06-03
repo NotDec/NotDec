@@ -3,11 +3,8 @@ source_filename = "notdec.evm2llvm"
 target datalayout = "E-p:256:256-i256:256:256-S256-a:256:256"
 target triple = "evm-unknown-unknown"
 
-declare i256 @evm_mload(ptr, i256)
 
-declare void @evm_mstore(ptr, i256, i256)
 
-declare void @evm_mstore8(ptr, i256, i256)
 
 declare void @evm_mcopy(ptr, i256, i256, i256)
 
@@ -133,9 +130,10 @@ declare void @evm_return(ptr, i256, i256)
 
 declare void @evm_revert(ptr, i256, i256)
 
-define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define void @public___function_selector___0x0(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x0:
-  call void @evm_mstore(ptr %mem, i256 64, i256 128), !notdec.evm !0
+  %notdec.evm.mem.ptr.0 = inttoptr i256 64 to ptr
+  store i256 128, ptr %notdec.evm.mem.ptr.0, align 1, !notdec.evm !0
   %evm.sload = call i256 @evm_sload(i256 0), !notdec.evm !1
   %evm.and = and i256 %evm.sload, 1461501637330902918203684832716283019655932542975, !notdec.evm !2
   %evm.calldataload = call i256 @evm_calldataload(ptr %calldata, i256 0), !notdec.evm !3
@@ -172,7 +170,8 @@ bb._0x6c:                                         ; preds = %bb._0x50
   unreachable, !notdec.evm !20
 
 bb._0x47:                                         ; preds = %bb._0x0
-  call void @evm_mstore(ptr %mem, i256 0, i256 %evm.and), !notdec.evm !21
+  %notdec.evm.mem.ptr.1 = inttoptr i256 0 to ptr
+  store i256 %evm.and, ptr %notdec.evm.mem.ptr.1, align 1, !notdec.evm !21
   call void @evm_return(ptr %mem, i256 0, i256 32), !notdec.evm !22
   ret void, !notdec.evm !22
 }
@@ -200,3 +199,5 @@ bb._0x47:                                         ; preds = %bb._0x0
 !20 = !{!"tac=0x6f", !"op=REVERT", !"evm.pc=0x6f"}
 !21 = !{!"tac=0x4a", !"op=MSTORE", !"evm.pc=0x4a"}
 !22 = !{!"tac=0x4f", !"op=RETURN", !"evm.pc=0x4f"}
+
+attributes #0 = { null_pointer_is_valid }
