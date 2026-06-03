@@ -350,21 +350,23 @@ void insertArrayByteWriteMarker(LLVMContext &Ctx,
                               asI256(Builder, Write.Value)});
 }
 
-void insertConsumerMarker(LLVMContext &Ctx, const MemoryConsumer &Consumer) {
-  if (Consumer.Call == nullptr || Consumer.Base == nullptr ||
-      Consumer.Size == nullptr) {
-    return;
-  }
-  Module *M = Consumer.Call->getModule();
-  Function *Marker = nullptr;
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  getOrDeclareMarker(*M, "notdec_solidity_memory_consumer",
-                     {I256, I256, I256}, Marker);
-  IRBuilder<> Builder(Consumer.Call);
-  Builder.CreateCall(
-      Marker, {asI256(Builder, Consumer.Base), asI256(Builder, Consumer.Size),
-               ConstantInt::get(I256, static_cast<uint64_t>(Consumer.Kind))});
-}
+// Consumer markers encode ABI/revert/event role, not memory layout. Keep this
+// insertion code disabled until type recovery has a stable role carrier.
+// void insertConsumerMarker(LLVMContext &Ctx, const MemoryConsumer &Consumer) {
+//   if (Consumer.Call == nullptr || Consumer.Base == nullptr ||
+//       Consumer.Size == nullptr) {
+//     return;
+//   }
+//   Module *M = Consumer.Call->getModule();
+//   Function *Marker = nullptr;
+//   Type *I256 = Type::getIntNTy(Ctx, 256);
+//   getOrDeclareMarker(*M, "notdec_solidity_memory_consumer",
+//                      {I256, I256, I256}, Marker);
+//   IRBuilder<> Builder(Consumer.Call);
+//   Builder.CreateCall(
+//       Marker, {asI256(Builder, Consumer.Base), asI256(Builder, Consumer.Size),
+//                ConstantInt::get(I256, static_cast<uint64_t>(Consumer.Kind))});
+// }
 
 } // namespace
 
@@ -632,10 +634,13 @@ PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
     Changed = true;
   }
 
-  for (const MemoryConsumer &Consumer : Facts.Consumers) {
-    insertConsumerMarker(Ctx, Consumer);
-    Changed = true;
-  }
+  // Consumer markers encode ABI/revert/event role, not memory layout. Keep
+  // collecting the facts, but stop materializing markers until type recovery
+  // has a stable role carrier.
+  // for (const MemoryConsumer &Consumer : Facts.Consumers) {
+  //   insertConsumerMarker(Ctx, Consumer);
+  //   Changed = true;
+  // }
 
   SmallVector<Instruction *, 16> ToErase;
   SmallPtrSet<Instruction *, 8> RewrittenBases;

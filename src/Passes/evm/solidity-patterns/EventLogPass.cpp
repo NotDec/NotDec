@@ -169,18 +169,20 @@ findEventDataAllocation(BasicBlock &BB, CallBase &Log,
   return Candidate;
 }
 
-void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
-                                     Value *Base, Value *Size,
-                                     uint64_t TopicCount) {
-  Module *M = Log.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_event_memory_consumer",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
-
-  IRBuilder<> Builder(&Log);
-  Builder.CreateCall(Marker, {Base, Size, ConstantInt::get(I256, TopicCount)});
-}
+// Consumer markers encode buffer role rather than memory layout. Keep this
+// disabled until type recovery has a stable role carrier.
+// void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
+//                                      Value *Base, Value *Size,
+//                                      uint64_t TopicCount) {
+//   Module *M = Log.getModule();
+//   Type *I256 = Type::getIntNTy(Ctx, 256);
+//   FunctionCallee Marker = M->getOrInsertFunction(
+//       "notdec_solidity_event_memory_consumer",
+//       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
+//
+//   IRBuilder<> Builder(&Log);
+//   Builder.CreateCall(Marker, {Base, Size, ConstantInt::get(I256, TopicCount)});
+// }
 
 void insertEventDataAllocationMarker(LLVMContext &Ctx, CallBase &Log,
                                      Value *AllocationBase,
@@ -259,9 +261,9 @@ PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
     {
       Value *DataBase = Call->getArgOperand(1);
       Value *DataSize = Call->getArgOperand(2);
-      insertEventMemoryConsumerMarker(Ctx, *Call, DataBase, DataSize,
-                                      TopicCount);
-      ++NumEventMemoryConsumers;
+      // insertEventMemoryConsumerMarker(Ctx, *Call, DataBase, DataSize,
+      //                                 TopicCount);
+      // ++NumEventMemoryConsumers;
       SmallVector<CallBase *, 8> WordWrites;
       collectEventDataWordWriteMarkers(*Call->getParent(), *Call, DataBase,
                                        WordWrites);

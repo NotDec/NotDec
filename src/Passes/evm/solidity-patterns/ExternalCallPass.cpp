@@ -119,26 +119,27 @@ uint64_t getExternalCallKindCode(StringRef Kind) {
   return 0;
 }
 
-CallBase *findExternalCallConsumerMarker(BasicBlock &BB, CallBase &ExternalCall,
-                                         Value *Base, Value *Size,
-                                         uint64_t ConsumerKind) {
-  for (Instruction &I : BB) {
-    if (&I == &ExternalCall) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr ||
-        !isCallTo(Call, "notdec_solidity_memory_consumer") ||
-        Call->arg_size() != 3 ||
-        !isConstantIntValue(Call->getArgOperand(2), ConsumerKind)) {
-      continue;
-    }
-    if (Call->getArgOperand(0) == Base && Call->getArgOperand(1) == Size) {
-      return Call;
-    }
-  }
-  return nullptr;
-}
+// CallBase *findExternalCallConsumerMarker(BasicBlock &BB,
+//                                          CallBase &ExternalCall,
+//                                          Value *Base, Value *Size,
+//                                          uint64_t ConsumerKind) {
+//   for (Instruction &I : BB) {
+//     if (&I == &ExternalCall) {
+//       break;
+//     }
+//     auto *Call = dyn_cast<CallBase>(&I);
+//     if (Call == nullptr ||
+//         !isCallTo(Call, "notdec_solidity_memory_consumer") ||
+//         Call->arg_size() != 3 ||
+//         !isConstantIntValue(Call->getArgOperand(2), ConsumerKind)) {
+//       continue;
+//     }
+//     if (Call->getArgOperand(0) == Base && Call->getArgOperand(1) == Size) {
+//       return Call;
+//     }
+//   }
+//   return nullptr;
+// }
 
 CallBase *findExternalCallInputCopyWriteMarker(BasicBlock &BB,
                                                CallBase &ExternalCall,
@@ -466,23 +467,25 @@ CallBase *findExternalCallInputAllocationMarker(
   return Candidate;
 }
 
-void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
-                                            CallBase &ExternalCall,
-                                            CallBase &Consumer, uint64_t Role,
-                                            uint64_t CallKind) {
-  Module *M = ExternalCall.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_external_call_memory_consumer",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
-                        false));
-
-  IRBuilder<> Builder(&ExternalCall);
-  Builder.CreateCall(Marker,
-                     {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, Role),
-                      ConstantInt::get(I256, CallKind)});
-}
+// Consumer markers encode buffer role rather than memory layout. Keep this
+// disabled until type recovery has a stable role carrier.
+// void insertExternalCallMemoryConsumerMarker(LLVMContext &Ctx,
+//                                             CallBase &ExternalCall,
+//                                             CallBase &Consumer, uint64_t Role,
+//                                             uint64_t CallKind) {
+//   Module *M = ExternalCall.getModule();
+//   Type *I256 = Type::getIntNTy(Ctx, 256);
+//   FunctionCallee Marker = M->getOrInsertFunction(
+//       "notdec_solidity_external_call_memory_consumer",
+//       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
+//                         false));
+//
+//   IRBuilder<> Builder(&ExternalCall);
+//   Builder.CreateCall(Marker,
+//                      {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
+//                       ConstantInt::get(I256, Role),
+//                       ConstantInt::get(I256, CallKind)});
+// }
 
 void insertExternalCallInputCopyWriteMarker(LLVMContext &Ctx,
                                             CallBase &ExternalCall,
@@ -686,12 +689,12 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
     std::optional<ExternalCallMemoryArgs> Args = getExternalCallMemoryArgs(Call);
     if (Args.has_value()) {
       uint64_t CallKind = getExternalCallKindCode(Kind);
-      if (CallBase *Consumer = findExternalCallConsumerMarker(
-              *Call->getParent(), *Call, Args->InputBase, Args->InputSize, 4)) {
-        insertExternalCallMemoryConsumerMarker(Ctx, *Call, *Consumer, 1,
-                                               CallKind);
-        ++NumExternalCallMemoryConsumers;
-      }
+      // if (CallBase *Consumer = findExternalCallConsumerMarker(
+      //         *Call->getParent(), *Call, Args->InputBase, Args->InputSize, 4)) {
+      //   insertExternalCallMemoryConsumerMarker(Ctx, *Call, *Consumer, 1,
+      //                                          CallKind);
+      //   ++NumExternalCallMemoryConsumers;
+      // }
       CallBase *InputCopyWrite = nullptr;
       if (CallBase *CopyWrite = findExternalCallInputCopyWriteMarker(
               *Call->getParent(), *Call, Args->InputBase)) {
@@ -723,13 +726,13 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
                                                 Args->InputSize, CallKind);
         ++NumExternalCallInputAllocations;
       }
-      if (CallBase *Consumer = findExternalCallConsumerMarker(
-              *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
-              5)) {
-        insertExternalCallMemoryConsumerMarker(Ctx, *Call, *Consumer, 2,
-                                               CallKind);
-        ++NumExternalCallMemoryConsumers;
-      }
+      // if (CallBase *Consumer = findExternalCallConsumerMarker(
+      //         *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
+      //         5)) {
+      //   insertExternalCallMemoryConsumerMarker(Ctx, *Call, *Consumer, 2,
+      //                                          CallKind);
+      //   ++NumExternalCallMemoryConsumers;
+      // }
       bool InsertedOutputDecodeBuffer = false;
       if (CallBase *CopyWrite = findExternalCallOutputCopyWriteMarker(
               *Call->getParent(), *Call, Args->OutputBase)) {

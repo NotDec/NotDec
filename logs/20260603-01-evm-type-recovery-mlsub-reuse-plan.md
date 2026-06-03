@@ -538,3 +538,55 @@ dynamic ABI 建模的输入。它不参与 MLsub 求解，也不改变 htypes sn
 
 我目前不建议继续直接往 MLsub subtype 里塞 role/use。更稳的下一步是先做 B 或 A：
 让类型结果或 debug facts 能稳定表达 object role，再让 ABI/event/call 的后处理消费它。
+
+## 2026-06-03 实现记录：临时禁用 consumer marker 生成
+
+根据当前判断，consumer marker 这条链先停掉，等类型恢复有稳定 role 承载方式后再恢复。
+这次只禁用 consumer/role marker；allocation、memory read/write、copy write、ABI/event/call
+data word/copy/allocation marker 仍保留。
+
+改动位置：
+
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:353` 和 `:637`：
+  注释 `insertConsumerMarker()` 和 `MemoryBufferRewritePass::run()` 里物化
+  `notdec_solidity_memory_consumer` 的循环。`Facts.Consumers` 仍保留收集，不删分析结构。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:48` 和 `:187`：
+  注释 `notdec_solidity_revert_memory_consumer` 的插入函数和调用点。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:866` 和 `:1348`：
+  注释 `notdec_solidity_abi_return_memory_consumer` 的插入函数和调用点。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:172` 和 `:264`：
+  注释 `notdec_solidity_event_memory_consumer` 的插入函数和调用点。
+- `src/Passes/evm/solidity-patterns/ExternalCallPass.cpp:122`、`:470`、`:692`、`:729`：
+  注释 external-call consumer 查找、`notdec_solidity_external_call_memory_consumer`
+  插入函数，以及 input/output consumer marker 的调用点。
+- `test/evm/solidity-patterns/manifest.json`：
+  同步受影响样例的 expected consumer marker 和 consumer kind 计数为 0；同时把依赖
+  consumer marker 才会派生的 ABI dynamic marker 计数同步为 0。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过，无 warning。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，0.42s。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，84.07s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，109.54s。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll
+  -o /tmp/notdec-evm-no-consumer.ll --tr-level=2 --gen-work-dir
+  --work-dir=/tmp/notdec-evm-no-consumer-work
+  --dump-htypes=/tmp/notdec-evm-no-consumer.htypes` 通过；
+  `EVMMarkerFacts.txt` 中确认没有 `consumer` marker。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-no-consumer.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-no-consumer.htypes`
+  通过，`elapsed=12.53 user=12.11 sys=0.42 maxrss=851276`。
+
+判断：
+
+- consumer 相关逻辑目前只“停止物化 marker”，没有删除 facts 收集结构，后面接类型恢复 role
+  metadata 时可以恢复或改成写入新的承载层。
+- 下游依赖 consumer marker 的 ABI dynamic marker 也会减少，这是预期结果；这类逻辑后续应改为
+  消费新的 role metadata，而不是继续依赖 `notdec_solidity_memory_consumer`。

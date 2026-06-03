@@ -42,11 +42,11 @@
       "expected_checked_bounds_cfg_rewrites": 1,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_memory_write": 1,
-        "notdec_solidity_memory_consumer": 2
+        "notdec_solidity_memory_consumer": 0
       },
       "expected_memory_consumer_kinds": {
-        "return": 1,
-        "revert": 1
+        "return": 0,
+        "revert": 0
       }
     },
     {
@@ -422,14 +422,14 @@
         "147028384:5": 1
       },
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_revert_memory_consumer": 1,
+        "notdec_solidity_revert_memory_consumer": 0,
         "notdec_solidity_revert_data_word_write": 4,
         "notdec_solidity_revert_memory_write_match": 1,
         "notdec_solidity_memory_write": 4,
-        "notdec_solidity_memory_consumer": 1
+        "notdec_solidity_memory_consumer": 0
       },
       "expected_memory_consumer_kinds": {
-        "revert": 1
+        "revert": 0
       }
     },
     {
@@ -880,17 +880,17 @@
       },
       "expected_returndata_bubbles": 0,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_event_memory_consumer": 1,
-        "notdec_solidity_external_call_memory_consumer": 2,
+        "notdec_solidity_event_memory_consumer": 0,
+        "notdec_solidity_external_call_memory_consumer": 0,
         "notdec_solidity_external_call_input_copy_write": 1,
-        "notdec_solidity_memory_consumer": 5,
+        "notdec_solidity_memory_consumer": 0,
         "notdec_solidity_memory_copy_write": 2
       },
       "expected_memory_consumer_kinds": {
-        "return": 2,
-        "event_log": 1,
-        "external_call_input": 1,
-        "external_call_output": 1
+        "return": 0,
+        "event_log": 0,
+        "external_call_input": 0,
+        "external_call_output": 0
       },
       "expected_memory_copy_write_kinds": {
         "calldata": 1,
@@ -940,19 +940,19 @@
       },
       "expected_returndata_bubbles": 2,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_memory_consumer": 1,
-        "notdec_solidity_abi_return_data_word_write": 1,
+        "notdec_solidity_abi_return_memory_consumer": 0,
+        "notdec_solidity_abi_return_data_word_write": 0,
         "notdec_solidity_memory_copy_write": 2,
-        "notdec_solidity_memory_consumer": 10,
-        "notdec_solidity_revert_memory_consumer": 5,
+        "notdec_solidity_memory_consumer": 0,
+        "notdec_solidity_revert_memory_consumer": 0,
         "notdec_solidity_revert_data_word_write": 8,
         "notdec_solidity_revert_data_copy_write": 2
       },
       "expected_memory_consumer_kinds": {
-        "return": 1,
-        "revert": 5,
-        "external_call_input": 2,
-        "external_call_output": 2
+        "return": 0,
+        "revert": 0,
+        "external_call_input": 0,
+        "external_call_output": 0
       },
       "expected_memory_copy_write_kinds": {
         "scratch_returndata": 2
@@ -999,11 +999,11 @@
       "expected_returndata_bubbles": 0,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_memory_copy_write": 2,
-        "notdec_solidity_memory_consumer": 3
+        "notdec_solidity_memory_consumer": 0
       },
       "expected_memory_consumer_kinds": {
-        "return": 2,
-        "revert": 1
+        "return": 0,
+        "revert": 0
       },
       "expected_memory_copy_write_kinds": {
         "calldata": 1,
@@ -1123,20 +1123,20 @@
         "notdec_solidity_memory_allocation": 13,
         "notdec_solidity_memory_write": 111,
         "notdec_solidity_memory_copy_write": 10,
-        "notdec_solidity_memory_consumer": 73,
+        "notdec_solidity_memory_consumer": 0,
         "notdec_solidity_external_call_input_word_write": 6,
         "notdec_solidity_external_call_input_abi_head_write": 10,
         "notdec_solidity_external_call_input_allocation": 3,
         "notdec_solidity_event_data_word_write": 8,
-        "notdec_solidity_abi_return_data_allocation": 3,
-        "notdec_solidity_abi_return_data_copy_write": 1
+        "notdec_solidity_abi_return_data_allocation": 0,
+        "notdec_solidity_abi_return_data_copy_write": 0
       },
       "expected_memory_consumer_kinds": {
-        "return": 14,
-        "revert": 36,
-        "event_log": 7,
-        "external_call_input": 8,
-        "external_call_output": 8
+        "return": 0,
+        "revert": 0,
+        "event_log": 0,
+        "external_call_input": 0,
+        "external_call_output": 0
       },
       "expected_memory_copy_write_kinds": {
         "calldata": 1,
@@ -1193,19 +1193,19 @@
         "notdec_solidity_memory_byte_write": 3,
         "notdec_solidity_memory_array_byte_write": 3,
         "notdec_solidity_memory_copy_write": 6,
-        "notdec_solidity_memory_consumer": 10,
-        "notdec_solidity_abi_return_dynamic_array_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2,
-        "notdec_solidity_abi_return_dynamic_array_storage_source": 2,
-        "notdec_solidity_rewrite_abi_return_storage_dynamic_array": 2,
+        "notdec_solidity_memory_consumer": 0,
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 0,
+        "notdec_solidity_abi_return_dynamic_array_storage_source": 0,
+        "notdec_solidity_rewrite_abi_return_storage_dynamic_array": 0,
         "notdec_solidity_event_data_copy_write": 2
       },
       "expected_memory_consumer_kinds": {
-        "return": 2,
-        "revert": 2,
-        "event_log": 2,
-        "external_call_input": 2,
-        "external_call_output": 2
+        "return": 0,
+        "revert": 0,
+        "event_log": 0,
+        "external_call_input": 0,
+        "external_call_output": 0
       },
       "expected_memory_copy_write_kinds": {
         "calldata": 2,
@@ -3243,14 +3243,14 @@
         "notdec_solidity_memory_allocation": 11,
         "notdec_solidity_memory_write": 182,
         "notdec_solidity_memory_copy_write": 9,
-        "notdec_solidity_memory_consumer": 111
+        "notdec_solidity_memory_consumer": 0
       },
       "expected_memory_consumer_kinds": {
-        "return": 43,
-        "revert": 52,
-        "event_log": 8,
-        "external_call_input": 4,
-        "external_call_output": 4
+        "return": 0,
+        "revert": 0,
+        "event_log": 0,
+        "external_call_input": 0,
+        "external_call_output": 0
       },
       "expected_memory_copy_write_kinds": {
         "calldata": 1,
@@ -3704,9 +3704,9 @@
       "expected_checked_bounds_skip_reasons": {},
       "expected_checked_bounds_cfg_rewrites": 8,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 2,
-        "notdec_solidity_rewrite_abi_return_literal_bytes": 2
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 0,
+        "notdec_solidity_rewrite_abi_return_literal_bytes": 0
       },
       "expected_returndata_bubbles": 4
     },
@@ -4945,7 +4945,7 @@
         "notdec_solidity_event_data_allocation": 1,
         "notdec_solidity_event_data_copy_write": 1,
         "notdec_solidity_event_data_word_write": 4,
-        "notdec_solidity_event_memory_consumer": 8,
+        "notdec_solidity_event_memory_consumer": 0,
         "notdec_solidity_memory_allocation": 11
       }
     },
@@ -4959,10 +4959,10 @@
       "expect_rewrite_hidden": false,
       "expected_nonpayable_functions": 5,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2,
-        "notdec_solidity_abi_return_dynamic_array_memory_builder_source": 2,
-        "notdec_solidity_rewrite_abi_return_memory_builder": 2
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 0,
+        "notdec_solidity_abi_return_dynamic_array_memory_builder_source": 0,
+        "notdec_solidity_rewrite_abi_return_memory_builder": 0
       }
     },
     {
@@ -4975,11 +4975,11 @@
       "expect_rewrite_hidden": false,
       "expected_nonpayable_functions": 0,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_source": 3,
-        "notdec_solidity_abi_return_dynamic_array_converted_copy_loop": 1,
-        "notdec_solidity_abi_return_dynamic_array_memory_source": 1,
-        "notdec_solidity_rewrite_abi_return_memory_dynamic_array": 1,
-        "notdec_solidity_rewrite_abi_return_converted_dynamic_array": 1
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_converted_copy_loop": 0,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 0,
+        "notdec_solidity_rewrite_abi_return_memory_dynamic_array": 0,
+        "notdec_solidity_rewrite_abi_return_converted_dynamic_array": 0
       }
     },
     {
@@ -4992,17 +4992,17 @@
       "expect_rewrite_hidden": false,
       "expected_nonpayable_functions": 24,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_mcopy": 2,
-        "notdec_solidity_abi_return_dynamic_array_memory_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 2,
-        "notdec_solidity_abi_return_data_copy_write": 2,
-        "notdec_solidity_rewrite_abi_return_literal_bytes": 2
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_mcopy": 0,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 0,
+        "notdec_solidity_abi_return_data_copy_write": 0,
+        "notdec_solidity_rewrite_abi_return_literal_bytes": 0
       }
     },
     {
@@ -5015,17 +5015,17 @@
       "expect_rewrite_hidden": false,
       "expected_nonpayable_functions": 8,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_source": 1,
-        "notdec_solidity_abi_return_dynamic_array_helper_copy": 1,
-        "notdec_solidity_abi_return_dynamic_array_memory_source": 1,
-        "notdec_solidity_abi_return_dynamic_array_literal_source": 1,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload": 1,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 1,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 1,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 1,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 1,
-        "notdec_solidity_abi_return_data_allocation": 1,
-        "notdec_solidity_rewrite_abi_return_literal_bytes": 1
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_helper_copy": 0,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 0,
+        "notdec_solidity_abi_return_data_allocation": 0,
+        "notdec_solidity_rewrite_abi_return_literal_bytes": 0
       }
     },
     {
@@ -5038,16 +5038,16 @@
       "expect_rewrite_hidden": false,
       "expected_nonpayable_functions": 23,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2,
-        "notdec_solidity_abi_return_dynamic_array_memory_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 2,
-        "notdec_solidity_rewrite_abi_return_literal_bytes": 2
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 0,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 0,
+        "notdec_solidity_rewrite_abi_return_literal_bytes": 0
       }
     },
     {
@@ -5060,16 +5060,16 @@
       "expect_rewrite_hidden": false,
       "expected_nonpayable_functions": 29,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_copy_loop": 2,
-        "notdec_solidity_abi_return_dynamic_array_memory_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_source": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 2,
-        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 2,
-        "notdec_solidity_rewrite_abi_return_literal_bytes": 2
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 0,
+        "notdec_solidity_abi_return_dynamic_array_memory_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_shift": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_payload_word": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes": 0,
+        "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 0,
+        "notdec_solidity_rewrite_abi_return_literal_bytes": 0
       }
     },
     {
@@ -5082,9 +5082,9 @@
       "expect_rewrite_hidden": false,
       "expected_nonpayable_functions": 4,
       "expected_memory_rewrite_markers": {
-        "notdec_solidity_abi_return_dynamic_array_source": 1,
-        "notdec_solidity_abi_return_dynamic_array_copy_loop": 1,
-        "notdec_solidity_rewrite_abi_return_dynamic_array_copy_loop": 1
+        "notdec_solidity_abi_return_dynamic_array_source": 0,
+        "notdec_solidity_abi_return_dynamic_array_copy_loop": 0,
+        "notdec_solidity_rewrite_abi_return_dynamic_array_copy_loop": 0
       }
     }
   ]

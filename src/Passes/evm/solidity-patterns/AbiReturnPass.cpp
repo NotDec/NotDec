@@ -863,19 +863,21 @@ uint64_t getLiteralBytesReturnCopyKind(
   return 0;
 }
 
-void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
-                                         CallBase &Consumer, StringRef Kind) {
-  Module *M = Return.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_abi_return_memory_consumer",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
-
-  IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
-}
+// Consumer markers encode buffer role rather than memory layout. Keep this
+// disabled until type recovery has a stable role carrier.
+// void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
+//                                          CallBase &Consumer, StringRef Kind) {
+//   Module *M = Return.getModule();
+//   Type *I256 = Type::getIntNTy(Ctx, 256);
+//   FunctionCallee Marker = M->getOrInsertFunction(
+//       "notdec_solidity_abi_return_memory_consumer",
+//       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
+//
+//   IRBuilder<> Builder(&Return);
+//   Builder.CreateCall(Marker,
+//                      {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
+//                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+// }
 
 void insertAbiReturnDynamicArraySourceMarker(
     LLVMContext &Ctx, CallBase &Return,
@@ -1343,7 +1345,7 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
     if (CallBase *Consumer = findReturnConsumerMarker(*Call->getParent(),
                                                       *Call)) {
       Kind = classifyAbiReturnSize(Consumer->getArgOperand(1));
-      insertAbiReturnMemoryConsumerMarker(Ctx, *Call, *Consumer, Kind);
+      // insertAbiReturnMemoryConsumerMarker(Ctx, *Call, *Consumer, Kind);
       SmallVector<CallBase *, 8> WordWrites;
       collectAbiReturnDataWordWriteMarkers(*Call->getParent(), *Call,
                                            Consumer->getArgOperand(0),

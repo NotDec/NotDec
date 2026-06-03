@@ -45,20 +45,22 @@ uint64_t getRevertKindCode(StringRef Kind) {
   return 0;
 }
 
-void insertRevertMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Revert,
-                                      Value *Base, Value *Size,
-                                      StringRef Kind) {
-  Module *M = Revert.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_revert_memory_consumer",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
-
-  IRBuilder<> Builder(&Revert);
-  Builder.CreateCall(Marker,
-                     {Base, Size,
-                      ConstantInt::get(I256, getRevertKindCode(Kind))});
-}
+// Consumer markers encode buffer role rather than memory layout. Keep this
+// disabled until type recovery has a stable role carrier.
+// void insertRevertMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Revert,
+//                                       Value *Base, Value *Size,
+//                                       StringRef Kind) {
+//   Module *M = Revert.getModule();
+//   Type *I256 = Type::getIntNTy(Ctx, 256);
+//   FunctionCallee Marker = M->getOrInsertFunction(
+//       "notdec_solidity_revert_memory_consumer",
+//       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
+//
+//   IRBuilder<> Builder(&Revert);
+//   Builder.CreateCall(Marker,
+//                      {Base, Size,
+//                       ConstantInt::get(I256, getRevertKindCode(Kind))});
+// }
 
 void collectRevertDataWordWriteMarkers(BasicBlock &BB, CallBase &Revert,
                                        Value *RevertBase,
@@ -181,10 +183,10 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
       addRevertMatchMetadata(Ctx, *Match);
       if (!isConstantIntValue(Call->getArgOperand(2), 0)) {
         Value *RevertBase = Call->getArgOperand(1);
-        Value *RevertSize = Call->getArgOperand(2);
-        insertRevertMemoryConsumerMarker(Ctx, *Call, RevertBase, RevertSize,
-                                         Match->Kind);
-        ++NumRevertMemoryConsumers;
+        // Value *RevertSize = Call->getArgOperand(2);
+        // insertRevertMemoryConsumerMarker(Ctx, *Call, RevertBase, RevertSize,
+        //                                  Match->Kind);
+        // ++NumRevertMemoryConsumers;
         SmallVector<CallBase *, 8> WordWrites;
         collectRevertDataWordWriteMarkers(BB, *Call, RevertBase, WordWrites);
         for (CallBase *WordWrite : WordWrites) {
