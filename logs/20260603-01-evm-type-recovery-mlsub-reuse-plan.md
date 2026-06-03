@@ -758,3 +758,61 @@ data word/copy/allocation marker 仍保留。
     处失败。
   本次新增逻辑有 EVM module 限制，未在非 EVM module 触发；这两个失败先记录为
   现有 suite 状态，后续单独清理。
+
+## 2026-06-03 实现记录：MLsub 消费 native EVM load/store 常量地址
+
+旧 `evm_mload` / `evm_mstore` helper 已经停用，EVM memory 现在是 native LLVM
+`inttoptr + load/store`。本次继续推进类型推理对接，只做常量地址的小闭环：
+把 `inttoptr i256 <const> to ptr` 识别成 EVM memory 的常量地址，再让对应
+`load/store` 给全局 memory type 补 record field。
+
+改动位置：
+
+- [include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:283](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:283)
+  给 `ConstraintsGenerator` 增加 `addEVMConstantMemoryField()`。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:2106](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:2106)
+  新增 `ConstraintsGenerator::addEVMConstantMemoryField()`：
+  只接受 `ConstantAddr`，把地址值当 EVM memory byte offset，生成
+  `MemoryType <: { @offset: value }`。动态地址不处理，避免把数组访问误当固定字段。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3663](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3663)
+  在 `MLsubVisitor::visitCastInst()` 中，EVM module 下把
+  `inttoptr i256 <const> to ptr` remap 到 `ConstantAddr`。这样后续 native
+  `load/store` 能复用同一个地址节点。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3920](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3920)
+  `visitLoadInst()` 记录普通 load 后，如果是 EVM module，就把常量地址 load result
+  接到 memory field。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3954](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3954)
+  `visitStoreInst()` 同理把常量地址 store value 接到 memory field。
+- [test/type-recovery/evm/expected/tr-level-2/04_evm_memory_helpers.htypes:4](/sn640/NotDec/test/type-recovery/evm/expected/tr-level-2/04_evm_memory_helpers.htypes:4)
+  更新 oracle，确认 native memory case 的 `[memory]` 现在是含 offset 0、32、64
+  的 `struct_0*`。
+
+当前限制：
+
+- 只处理 `inttoptr` 的常量 i256 地址。
+- 没有把动态 offset 恢复成字段。
+- 没有恢复 ABI/event/external-call role；这些仍等后续有稳定承载方式再接。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R 'notdec.type_recovery.evm.tr_level_2|notdec.evm.solidity_patterns|notdec.evm.solidity_rewrite' --output-on-failure`
+  通过，3/3，总耗时 `188.62s`。
+- 手工运行：
+  `./build/bin/notdec test/type-recovery/evm/cases/04_evm_memory_helpers.ll
+  -o /tmp/notdec-evm-04.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-evm-04.htypes` 通过；htypes 里 `[memory]` 为
+  `struct_0*`，字段 offset 为 0、32、64。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-evm-native-mlsub.ll --tr-level=2
+  --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-evm-native-mlsub.htypes`
+  通过，`elapsed=12.84 user=12.42 sys=0.42 maxrss=852520`。
+
+判断：
+
+- 这一步完成 native EVM memory 的常量 offset MLsub 小闭环。
+- 相比前一版 helper 接入，这次不再依赖 `evm_mload/mstore`，和当前 IR 形态一致。
+- 性能和最近 12.5 秒级 fortune 结果基本一致，没有明显退化。

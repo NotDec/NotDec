@@ -280,6 +280,7 @@ struct ConstraintsGenerator {
                   llvm::Instruction *Source);
   void recordStore(ExtValuePtr Addr, SimpleType ValueTy, unsigned BitSize,
                    llvm::Instruction *Source);
+  void addEVMConstantMemoryField(ExtValuePtr Addr, SimpleType ValueTy);
   void onPointsToDelta(ExtValuePtr Addr, MemoryLocKey Loc);
   void addPointerAccessViews();
   void flushPointerDerivedTypeConstraints();

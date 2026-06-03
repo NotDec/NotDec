@@ -1,10 +1,19 @@
 # HTypeResult
 
 [decls]
+struct struct_0 {
+  top:256 field_0; /* at offset: 0 */
+  'g:256 field_1; /* at offset: 32 */
+  'g:256 field_2; /* at offset: 64 */
+};
+
 
 [types]
-[+] <null-value> => lower=<null> ; upper=top:256
+[+] <null-value> => lower=<null> ; upper=struct_0*
 [+] @main => lower=(void (*)(top:256))* ; upper=top:256
+[+] addr(0x0) => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] addr(0x20) => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] addr(0x40) => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
 [+] const(i256 11)@main::%bb.entry.i1:0 => lower=bottom:256 ; upper=top:256
 [+] main::%notdec.evm.mem.ptr.0 => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
 [+] main::%notdec.evm.mem.ptr.1 => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
@@ -13,5 +22,4 @@
 [+] main::arg0 => lower=bottom:256 ; upper=top:256
 
 [memory]
-type => top:256
-
+type => struct_0*

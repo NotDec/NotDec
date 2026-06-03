@@ -2103,6 +2103,22 @@ void ConstraintsGenerator::recordStore(ExtValuePtr Addr, SimpleType ValueTy,
                            " size=" + std::to_string(BitSize));
 }
 
+void ConstraintsGenerator::addEVMConstantMemoryField(ExtValuePtr Addr,
+                                                     SimpleType ValueTy) {
+  auto *ConstAddr = std::get_if<ConstantAddr>(&Addr);
+  if (ConstAddr == nullptr) {
+    return;
+  }
+
+  // EVM native memory uses inttoptr constants as byte offsets into one memory
+  // object. Keep only constant offsets here; dynamic offsets need separate
+  // array/unknown modeling.
+  std::vector<std::pair<std::string, SimpleType>> Fields;
+  Fields.emplace_back(
+      OffsetRange{.offset = ConstAddr->Val->getSExtValue()}.str(), ValueTy);
+  addSubtype(MemoryType, binarysub::make_record(std::move(Fields)));
+}
+
 void ConstraintsGenerator::onPointsToDelta(ExtValuePtr Addr,
                                            MemoryLocKey Loc) {
   if (auto LoadsIt = MemoryAccesses.LoadsByAddr.find(Addr);
@@ -3643,6 +3659,15 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
 
 void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
   if (isa<BitCastInst, PtrToIntInst, IntToPtrInst>(I)) {
+    if (isa<IntToPtrInst>(I) && I.getModule() != nullptr &&
+        isEVMModule(*I.getModule())) {
+      if (auto *CI = dyn_cast<ConstantInt>(I.getOperand(0))) {
+        ConstantAddr Addr{.Val = CI};
+        cg.getOrInsertNode(Addr);
+        cg.addRemapType(&I, Addr);
+        return;
+      }
+    }
     // Treat pointer/int casts as aliases for PNDiff even when the source
     // hasn't been materialized as a MLsub type variable yet.
     auto *Src = I.getOperand(0);
@@ -3892,6 +3917,9 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 0);
 
   cg.recordLoad(Addr, RetVal, BitSize, &I);
+  if (I.getModule() != nullptr && isEVMModule(*I.getModule())) {
+    cg.addEVMConstantMemoryField(Addr, RetVal);
+  }
   if (cg.isPointerAnalysisEnabled() && I.getType()->isPointerTy()) {
     cg.PA.addLoadPtr(&I, Addr);
   }
@@ -3923,6 +3951,9 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   auto Value = getExtValuePtr(I.getValueOperand(), &I, 0);
 
   cg.recordStore(Addr, StoreVal, BitSize, &I);
+  if (I.getModule() != nullptr && isEVMModule(*I.getModule())) {
+    cg.addEVMConstantMemoryField(Addr, StoreVal);
+  }
   if (cg.isPointerAnalysisEnabled() &&
       I.getValueOperand()->getType()->isPointerTy()) {
     cg.PA.addStorePtr(Addr, Value);
