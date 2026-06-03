@@ -16,6 +16,12 @@
       "input": "cases/02_evm_runtime_helpers.ll",
       "expected": "expected/tr-level-2/02_evm_runtime_helpers.htypes",
       "status": "pass"
+    },
+    {
+      "name": "03_evm_solidity_markers",
+      "input": "cases/03_evm_solidity_markers.ll",
+      "expected": "expected/tr-level-2/03_evm_solidity_markers.htypes",
+      "status": "pass"
     }
   ]
 }

@@ -3690,6 +3690,9 @@ bool ConstraintsGenerator::MLsubVisitor::shouldIgnoreRuntimeCall(
   if (Name == "notdec_evm_finalize_alloc") {
     return true;
   }
+  if (Name.starts_with("notdec_solidity_")) {
+    return true;
+  }
   return Name.starts_with("evm_");
 }
 

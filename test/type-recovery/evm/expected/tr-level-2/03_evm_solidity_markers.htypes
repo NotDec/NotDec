@@ -1,0 +1,43 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:256
+[+] @calloc => lower=(bottom:256 (*)(top:256, top:256))* ; upper=top:256
+[+] @main => lower=(void (*)())* ; upper=top:256
+[+] @notdec_solidity_abi_return_data_word_write => lower=(void (*)(top:256, top:256, top:256, top:256))* ; upper=top:256
+[+] @notdec_solidity_event_data_word_write => lower=(void (*)(top:256, top:256, top:256, top:256))* ; upper=top:256
+[+] @notdec_solidity_external_call_input_word_write => lower=(void (*)(top:256, top:256, top:256, top:256))* ; upper=top:256
+[+] @notdec_solidity_memory_allocation => lower=(void (*)(top:256, top:256))* ; upper=top:256
+[+] @notdec_solidity_memory_consumer => lower=(void (*)(top:256, top:256, top:256))* ; upper=top:256
+[+] @notdec_solidity_memory_write => lower=(void (*)(top:256, top:256, top:256))* ; upper=top:256
+[+] calloc::<ret> => lower=bottom:256 ; upper=top:256
+[+] calloc::arg0 => lower=bottom:256 ; upper=top:256
+[+] calloc::arg1 => lower=bottom:256 ; upper=top:256
+[+] main::%addr => lower=bottom:256 ; upper=top:256
+[-] main::%buf => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_abi_return_data_word_write::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_abi_return_data_word_write::arg1 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_abi_return_data_word_write::arg2 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_abi_return_data_word_write::arg3 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_event_data_word_write::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_event_data_word_write::arg1 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_event_data_word_write::arg2 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_event_data_word_write::arg3 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_external_call_input_word_write::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_external_call_input_word_write::arg1 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_external_call_input_word_write::arg2 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_external_call_input_word_write::arg3 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_allocation::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_allocation::arg1 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_consumer::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_consumer::arg1 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_consumer::arg2 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_write::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_write::arg1 => lower=bottom:256 ; upper=top:256
+[+] notdec_solidity_memory_write::arg2 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:256
+

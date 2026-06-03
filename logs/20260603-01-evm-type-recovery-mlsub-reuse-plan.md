@@ -348,3 +348,47 @@ EVM 也使用同一套外层架构：
 - 这一步没有复制 visitor，也没有引入 policy 对象；只是把 EVM-only helper 的判断收窄到
   EVM module。
 - `evm_log/call` 目前仍只是保守忽略 call site；真正 role/use fact 需要下一步决定落在哪里。
+
+## 2026-06-03 实现记录：第二阶段 marker call 保守忽略
+
+继续推进第二阶段。现有 EVM pass 已经会插入 `notdec_solidity_*` marker call，
+这些 marker 是后续可消费的 facts，不是普通程序函数。MLsub 在第三阶段真正读取这些 facts
+之前，先不要让它们作为普通 call 进入 summary/call-site 约束。
+
+改动位置：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3681`，函数
+  `MLsubVisitor::shouldIgnoreRuntimeCall()`：
+  在 EVM module 下新增 `notdec_solidity_*` call site 的保守忽略。注意这只跳过 call
+  约束；marker declaration 自身仍会在 htypes 里出现，这是当前 MLsub 初始化函数节点的行为。
+- `test/type-recovery/evm/cases/03_evm_solidity_markers.ll:1`：
+  新增 frozen EVM IR，覆盖 memory allocation/write/consumer marker、ABI return word write
+  marker、event word write marker、external call input word write marker。
+- `test/type-recovery/evm/manifest.json:20`：
+  注册 `03_evm_solidity_markers`。
+- `test/type-recovery/evm/expected/tr-level-2/03_evm_solidity_markers.htypes`：
+  新增 snapshot，锁住 marker call 不导致 MLsub 崩溃或普通 call-site 约束扩散。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，0.38s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，112.10s。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll
+  -o /tmp/notdec-evm-marker-real.ll --tr-level=2
+  --dump-htypes=/tmp/notdec-evm-marker-real.htypes` 通过。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-marker-ignore.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-marker-ignore.htypes`
+  通过，`elapsed=12.54 user=12.16 sys=0.38 maxrss=852128`。
+
+判断：
+
+- 这一步仍没有决定 role/use facts 的最终承载位置，只是避免 marker call 污染普通 MLsub
+  call 约束。
+- 下一步进入第三阶段前，需要做设计判断：读取 `notdec_solidity_*` marker 后，facts 是先写入
+  独立 debug/facts 输出，还是直接补 MLsub record field 约束。
