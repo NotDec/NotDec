@@ -1,0 +1,28 @@
+# HTypeResult
+
+[decls]
+struct struct_0 {
+  top:256 field_0; /* at offset: 0 */
+  top:256 field_1; /* at offset: 32 */
+  top:256 field_2; /* at offset: 64 */
+};
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:256
+[+] @evm_mload => lower=(bottom:256 (*)(top:256, top:256))* ; upper=top:256
+[+] @evm_mstore => lower=(void (*)(top:256, top:256, top:256))* ; upper=top:256
+[+] @main => lower=(void (*)(struct_0*))* ; upper=top:256
+[+] const(i256 11)@main::%bb.entry.i0:2 => lower=bottom:256 ; upper=top:256
+[+] evm_mload::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_mload::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_mload::arg1 => lower=bottom:256 ; upper=top:256
+[+] evm_mstore::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_mstore::arg1 => lower=bottom:256 ; upper=top:256
+[+] evm_mstore::arg2 => lower=bottom:256 ; upper=top:256
+[+] main::%word => lower=bottom:256 ; upper=top:256
+[+] main::arg0 => lower=bottom:256 ; upper=struct_0*
+
+[memory]
+type => top:256
+

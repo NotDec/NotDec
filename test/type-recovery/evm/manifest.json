@@ -22,6 +22,12 @@
       "input": "cases/03_evm_solidity_markers.ll",
       "expected": "expected/tr-level-2/03_evm_solidity_markers.htypes",
       "status": "pass"
+    },
+    {
+      "name": "04_evm_memory_helpers",
+      "input": "cases/04_evm_memory_helpers.ll",
+      "expected": "expected/tr-level-2/04_evm_memory_helpers.htypes",
+      "status": "pass"
     }
   ]
 }

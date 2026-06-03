@@ -697,3 +697,64 @@ data word/copy/allocation marker 仍保留。
   metadata 时可以恢复或改成写入新的承载层。
 - 下游依赖 consumer marker 的 ABI dynamic marker 也会减少，这是预期结果；这类逻辑后续应改为
   消费新的 role metadata，而不是继续依赖 `notdec_solidity_memory_consumer`。
+
+## 2026-06-03 实现记录：MLsub 直接消费 EVM memory helper
+
+暂停 Solidity memory/data marker 后，真实 EVM pattern case 里仍有大量
+`evm_mload` / `evm_mstore` helper。之前 MLsub 会把 `evm_*` runtime helper
+整体 ignore，导致这些内存访问事实进不了类型推理。
+
+本次只接高置信度常量 offset：
+
+- [include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:337](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:337)
+  为 `MLsubVisitor` 增加 `handleEVMMemoryHelperCall()`。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3745](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3745)
+  新增 `handleEVMMemoryHelperCall()`：
+  - 只在 EVM module 下处理。
+  - `evm_mstore(ptr base, i256 const_offset, i256 value)` 生成
+    `base <: { @offset: value }`。
+  - `evm_mload(ptr base, i256 const_offset)` 生成
+    `base <: { @offset: call_result }`。
+  - 非常量 offset 先只消费 helper，不生成字段约束。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3845](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3845)
+  在 `visitCallBase()` 中把 EVM memory helper 处理放在 runtime ignore 前面，
+  其他 `evm_*` 仍按原逻辑忽略。
+- [test/type-recovery/evm/cases/04_evm_memory_helpers.ll](/sn640/NotDec/test/type-recovery/evm/cases/04_evm_memory_helpers.ll:1)
+  新增 frozen EVM case，覆盖 `evm_mstore` / `evm_mload` 常量 offset。
+- [test/type-recovery/evm/expected/tr-level-2/04_evm_memory_helpers.htypes](/sn640/NotDec/test/type-recovery/evm/expected/tr-level-2/04_evm_memory_helpers.htypes:4)
+  新增 oracle，确认 `%mem` 被恢复成含 offset 0、32、64 的 record。
+
+当前限制：
+
+- 这一步只把 helper 的第一个参数 `%mem` 当 base，暂不把访问归属到
+  `calloc` 后的具体 Solidity allocation object。
+- 动态 offset 先不建字段，避免把数组访问误当固定结构字段。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，`0.51s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll
+  -o /tmp/notdec-evm-helper-fields.ll --tr-level=2 --gen-work-dir
+  --work-dir=/tmp/notdec-evm-helper-fields-work
+  --dump-htypes=/tmp/notdec-evm-helper-fields.htypes` 通过；
+  htypes 中可见 `evm_mstore` 常量 offset 推出的 EVM memory record 字段。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-evm-memory-helper-fields.ll --tr-level=2
+  --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-evm-memory-helper-fields.htypes`
+  通过，`elapsed=12.53 user=12.12 sys=0.40 maxrss=852084`。
+
+额外检查：
+
+- `ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2'
+  --output-on-failure` 当前未通过。
+  - `llvm_ir` 有 4 个 htype snapshot 差异，样例之一是旧 expected 多了未使用的
+    `struct_1` 声明。
+  - `sysy` 当前在 `--dump-htypes requires type recovery to be initialized`
+    处失败。
+  本次新增逻辑有 EVM module 限制，未在非 EVM module 触发；这两个失败先记录为
+  现有 suite 状态，后续单独清理。

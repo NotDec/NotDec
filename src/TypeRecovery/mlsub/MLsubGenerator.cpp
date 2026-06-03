@@ -3744,6 +3744,43 @@ bool ConstraintsGenerator::MLsubVisitor::handleEVMMarkerCall(
   return true;
 }
 
+bool ConstraintsGenerator::MLsubVisitor::handleEVMMemoryHelperCall(
+    llvm::CallBase &I) {
+  auto *F = I.getCalledFunction();
+  auto *M = I.getModule();
+  if (F == nullptr || M == nullptr || !isEVMModule(*M)) {
+    return false;
+  }
+
+  StringRef Name = F->getName();
+  bool IsMStore = Name == "evm_mstore";
+  bool IsMLoad = Name == "evm_mload";
+  if (!IsMStore && !IsMLoad) {
+    return false;
+  }
+  if (I.arg_size() < 2 || (IsMStore && I.arg_size() < 3)) {
+    return true;
+  }
+
+  auto Offset = getUInt64Constant(I.getArgOperand(1));
+  if (!Offset.has_value()) {
+    return true;
+  }
+
+  OffsetRange Field{.offset = static_cast<OffsetTy>(*Offset)};
+  auto BaseTy = cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(0), &I, 0));
+  auto ValueTy = IsMStore
+                     ? cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(2),
+                                                         &I, 2))
+                     : cg.getOrInsertNode(&I);
+  std::vector<std::pair<std::string, SimpleType>> Fields;
+  Fields.emplace_back(Field.str(), ValueTy);
+  auto RecordTy = binarysub::make_record(std::move(Fields));
+
+  cg.addSubtype(BaseTy, RecordTy);
+  return true;
+}
+
 bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
     llvm::CallBase &I) {
   auto Target = I.getCalledFunction();
@@ -3807,6 +3844,8 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     cg.setPointer(&I);
     cg.ContraVariantValues.insert(&I);
     cg.addAddressOf(&I, cg.getRootMemoryObject(HeapObject{.Allocator = &I}));
+  } else if (handleEVMMemoryHelperCall(I)) {
+    return;
   } else if (handleEVMMarkerCall(I)) {
     return;
   } else if (shouldIgnoreRuntimeCall(I)) {
