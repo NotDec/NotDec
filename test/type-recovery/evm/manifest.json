@@ -10,6 +10,12 @@
       "input": "cases/01_evm_heap_i256.ll",
       "expected": "expected/tr-level-2/01_evm_heap_i256.htypes",
       "status": "pass"
+    },
+    {
+      "name": "02_evm_runtime_helpers",
+      "input": "cases/02_evm_runtime_helpers.ll",
+      "expected": "expected/tr-level-2/02_evm_runtime_helpers.htypes",
+      "status": "pass"
     }
   ]
 }

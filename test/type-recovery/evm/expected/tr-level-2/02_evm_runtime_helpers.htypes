@@ -1,0 +1,45 @@
+# HTypeResult
+
+[decls]
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:256
+[+] @evm_call => lower=(bottom:256 (*)(top:256, top:256, top:256, top:256, top:256, top:256, top:256, top:256, top:256, top:256))* ; upper=top:256
+[+] @evm_log1 => lower=(void (*)(top:256, top:256, top:256, top:256))* ; upper=top:256
+[+] @main => lower=(bottom:256 (*)(top:256, top:256, top:256))* ; upper=top:256
+[+] @notdec_evm_alloc => lower=(bottom:256 (*)(top:256))* ; upper=top:256
+[+] @notdec_evm_alloc_unbounded => lower=(bottom:256 (*)())* ; upper=top:256
+[+] @notdec_evm_finalize_alloc => lower=(void (*)(top:256, top:256))* ; upper=top:256
+[+] const(i256 7)@main::%bb.entry.i2:0 => lower=bottom:256 ; upper=top:256
+[+] evm_call::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg1 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg2 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg3 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg4 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg5 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg6 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg7 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg8 => lower=bottom:256 ; upper=top:256
+[+] evm_call::arg9 => lower=bottom:256 ; upper=top:256
+[+] evm_log1::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_log1::arg1 => lower=bottom:256 ; upper=top:256
+[+] evm_log1::arg2 => lower=bottom:256 ; upper=top:256
+[+] evm_log1::arg3 => lower=bottom:256 ; upper=top:256
+[-] main::%buf.addr => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] main::%buf.ptr => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] main::%ok => lower=bottom:256 ; upper=top:256
+[-] main::%scratch.addr => lower=bottom:256 ; upper=top:256
+[+] main::<ret> => lower=bottom:256 ; upper=top:256
+[+] main::arg0 => lower=bottom:256 ; upper=top:256
+[+] main::arg1 => lower=bottom:256 ; upper=top:256
+[+] main::arg2 => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_alloc::<ret> => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_alloc::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_alloc_unbounded::<ret> => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_finalize_alloc::arg0 => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_finalize_alloc::arg1 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:256
+

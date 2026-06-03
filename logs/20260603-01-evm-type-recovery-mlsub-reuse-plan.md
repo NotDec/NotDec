@@ -306,3 +306,45 @@ EVM 也使用同一套外层架构：
 
 - 第二阶段先把 EVM helper 语义分类做细，只保守记录 role/use，不影响普通 MLsub 求解。
 - 第三阶段再接 MemoryBuffer/ABI marker 事实，只从 base + constant offset 的 32 字节 word 开始。
+
+## 2026-06-03 实现记录：第二阶段 helper 判断收窄
+
+本次继续推进第二阶段，但仍不接 memory object facts。重点是把 EVM-only helper 的识别范围收紧，
+并补测试覆盖旧 helper 和 runtime helper call。
+
+改动位置：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3663`，函数
+  `MLsubVisitor::isHeapAllocationCall()`：
+  `malloc/calloc` 保持通用 allocation 识别；`calloc_unbounded`、
+  `notdec_evm_alloc`、`notdec_evm_alloc_unbounded` 只在 EVM module triple 下识别为
+  heap allocation，避免非 EVM module 误吃 EVM 兼容 helper。
+- `test/type-recovery/evm/cases/02_evm_runtime_helpers.ll:1`：
+  新增 frozen EVM IR，用旧 `notdec_evm_alloc*` 返回 i256 地址，并调用
+  `notdec_evm_finalize_alloc`、`evm_log1`、`evm_call`。
+- `test/type-recovery/evm/manifest.json:14`：
+  注册 `02_evm_runtime_helpers`。
+- `test/type-recovery/evm/expected/tr-level-2/02_evm_runtime_helpers.htypes`：
+  新增 expected snapshot，锁住旧 allocation helper 仍能产生 pointer 结果，runtime helper
+  不导致 MLsub 崩溃。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，0.27s。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/10_BottomUp1.ll
+  -o /tmp/notdec-10-bottomup.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-10-bottomup.htypes` 通过。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-stage2.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-stage2.htypes`
+  通过，`elapsed=12.45 user=12.06 sys=0.38 maxrss=848612`。
+
+判断：
+
+- 这一步没有复制 visitor，也没有引入 policy 对象；只是把 EVM-only helper 的判断收窄到
+  EVM module。
+- `evm_log/call` 目前仍只是保守忽略 call site；真正 role/use fact 需要下一步决定落在哪里。

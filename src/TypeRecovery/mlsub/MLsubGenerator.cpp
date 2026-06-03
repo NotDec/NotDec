@@ -3664,8 +3664,14 @@ bool ConstraintsGenerator::MLsubVisitor::isHeapAllocationCall(
     llvm::CallBase &I) {
   if (auto F = I.getCalledFunction()) {
     StringRef Name = F->getName();
-    if (Name == "malloc" || Name == "calloc" || Name == "calloc_unbounded" ||
-        Name == "notdec_evm_alloc" || Name == "notdec_evm_alloc_unbounded") {
+    if (Name == "malloc" || Name == "calloc") {
+      return true;
+    }
+    auto *M = I.getModule();
+    bool IsEVM = M != nullptr && isEVMModule(*M);
+    if (IsEVM && (Name == "calloc_unbounded" ||
+                  Name == "notdec_evm_alloc" ||
+                  Name == "notdec_evm_alloc_unbounded")) {
       return true;
     }
   }
