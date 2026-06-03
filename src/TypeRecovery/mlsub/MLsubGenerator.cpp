@@ -3583,6 +3583,14 @@ static bool constantHasNoPointerTagMiddleBits(const ConstantInt &CI) {
   return !(Val & Mask);
 }
 
+static std::optional<std::uint64_t> getUInt64Constant(const Value *V) {
+  const auto *CI = dyn_cast_or_null<ConstantInt>(V);
+  if (CI == nullptr || CI->getValue().getActiveBits() > 64) {
+    return std::nullopt;
+  }
+  return CI->getZExtValue();
+}
+
 static inline void ensureSequence(Value *&Src1, Value *&Src2) {
   if (llvm::isa<llvm::ConstantInt>(Src1) &&
       llvm::isa<llvm::ConstantInt>(Src2)) {
@@ -3696,6 +3704,45 @@ bool ConstraintsGenerator::MLsubVisitor::shouldIgnoreRuntimeCall(
   return Name.starts_with("evm_");
 }
 
+bool ConstraintsGenerator::MLsubVisitor::handleEVMMarkerCall(
+    llvm::CallBase &I) {
+  auto *F = I.getCalledFunction();
+  auto *M = I.getModule();
+  if (F == nullptr || M == nullptr || !isEVMModule(*M)) {
+    return false;
+  }
+
+  StringRef Name = F->getName();
+  bool IsWordWrite =
+      Name == "notdec_solidity_memory_write" ||
+      Name == "notdec_solidity_abi_return_data_word_write" ||
+      Name == "notdec_solidity_event_data_word_write" ||
+      Name == "notdec_solidity_external_call_input_word_write";
+  bool IsWordRead = Name == "notdec_solidity_memory_read" ||
+                    Name == "notdec_solidity_external_call_output_word_read";
+  if (!IsWordWrite && !IsWordRead) {
+    return false;
+  }
+  if (I.arg_size() < 3) {
+    return true;
+  }
+
+  auto Offset = getUInt64Constant(I.getArgOperand(1));
+  if (!Offset.has_value()) {
+    return true;
+  }
+
+  OffsetRange Field{.offset = static_cast<OffsetTy>(*Offset)};
+  auto BaseTy = cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(0), &I, 0));
+  auto ValueTy = cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(2), &I, 2));
+  std::vector<std::pair<std::string, SimpleType>> Fields;
+  Fields.emplace_back(Field.str(), ValueTy);
+  auto RecordTy = binarysub::make_record(std::move(Fields));
+
+  cg.addSubtype(BaseTy, RecordTy);
+  return true;
+}
+
 bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
     llvm::CallBase &I) {
   auto Target = I.getCalledFunction();
@@ -3759,6 +3806,8 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     cg.setPointer(&I);
     cg.ContraVariantValues.insert(&I);
     cg.addAddressOf(&I, cg.getRootMemoryObject(HeapObject{.Allocator = &I}));
+  } else if (handleEVMMarkerCall(I)) {
+    return;
   } else if (shouldIgnoreRuntimeCall(I)) {
     return;
   } else if (handleIntrinsicCall(I)) {

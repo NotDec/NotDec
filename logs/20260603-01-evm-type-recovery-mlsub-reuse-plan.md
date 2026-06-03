@@ -392,3 +392,57 @@ EVM 也使用同一套外层架构：
   call 约束。
 - 下一步进入第三阶段前，需要做设计判断：读取 `notdec_solidity_*` marker 后，facts 是先写入
   独立 debug/facts 输出，还是直接补 MLsub record field 约束。
+
+## 2026-06-03 实现记录：第三阶段常量 offset word marker 接入
+
+进入第三阶段的一个小切片。这里没有先做独立 facts 输出，而是把参数含义已经稳定、
+且 offset 是常量的 word marker 直接转成 MLsub record field 约束。consumer、copy、
+dynamic ABI 暂时不进求解，避免 role 还不明确时污染类型。
+
+改动位置：
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:337`：
+  给 `MLsubVisitor` 新增 `handleEVMMarkerCall()` 声明。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3586`：
+  新增 `getUInt64Constant()`，只接受能安全放进 64-bit 的 marker offset。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3707`，函数
+  `MLsubVisitor::handleEVMMarkerCall()`：
+  在 EVM module 下消费 `notdec_solidity_memory_write/read`、
+  `notdec_solidity_abi_return_data_word_write`、
+  `notdec_solidity_event_data_word_write`、
+  `notdec_solidity_external_call_input_word_write`、
+  `notdec_solidity_external_call_output_word_read`。前三个参数统一按
+  `(base, offset, value)` 处理，常量 offset 转成 `base <: { @offset: value }`。
+  这一步只让 base 暴露字段，不把 value 强行约束为 pointer 或 record。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3810`，函数
+  `MLsubVisitor::visitCallBase()`：
+  allocation 之后、runtime ignore 之前调用 `handleEVMMarkerCall()`，让可消费 marker
+  先生成字段约束，其余 marker 仍由 `shouldIgnoreRuntimeCall()` 保守跳过。
+- `test/type-recovery/evm/cases/03_evm_solidity_markers.ll:1`：
+  在原 marker 用例里补 `notdec_solidity_memory_read` 和
+  `notdec_solidity_external_call_output_word_read`。
+- `test/type-recovery/evm/expected/tr-level-2/03_evm_solidity_markers.htypes`：
+  更新 snapshot，现在 `%addr/%buf` 能看到 0、32、64 三个 word 字段。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，0.40s。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/10_BottomUp1.ll
+  -o /tmp/notdec-10-bottomup-marker-fields.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-10-bottomup-marker-fields.htypes` 通过。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，112.10s。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-marker-fields.ll --tr-level=2 --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-marker-fields.htypes`
+  通过，`elapsed=12.66 user=12.26 sys=0.39 maxrss=852764`。
+
+判断：
+
+- 这一步选择“直接补 MLsub record field 约束”，但只限 constant offset word marker。
+- role/use、copy range、dynamic ABI 仍需要后续单独建模；不能只靠字段 offset 推断 ABI
+  动态结构。
