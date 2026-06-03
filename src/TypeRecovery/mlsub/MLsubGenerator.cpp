@@ -3930,7 +3930,7 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   // if this is access to table, then we ignore the type, and return func ptr.
-  auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 0));
+  auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 1));
   if (!Node) {
     if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
       if (CE->getOpcode() == Instruction::BitCast) {

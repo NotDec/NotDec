@@ -258,6 +258,56 @@ EVM 也使用同一套外层架构：
 - `test/CMakeLists.txt:91`：
   注册 `notdec.type_recovery.evm.tr_level_2`。
 
+## 2026-06-03 实现记录：native EVM store operand index 修复
+
+背景：
+
+- apehex native memory 10 样本里，重建 `evm2llvm` 后真实输出已经变成
+  `store i256 ..., ptr inttoptr (...)` / `ptr null`，不再是
+  `evm_mstore` helper。
+- `20260603-tr-smoke-10-native` 中 9/10 通过，
+  `15307_19663968_59a7ca7f75_a3f41975d684` 在 NotDec 类型恢复阶段触发断言：
+  `llvmValue2ExtVal: constant not used by user`。
+
+调试结论：
+
+- gdb 调用栈显示断言来自
+  `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:262`。
+- 上层调用是
+  `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3933`，
+  `ConstraintsGenerator::MLsubVisitor::visitStoreInst()`。
+- 该处是 store 预检查路径，把 `I.getPointerOperand()` 传给
+  `getExtValuePtr(..., &I, 0)`。但 LLVM `store` 的 operand 0 是 stored value，
+  operand 1 才是 pointer。后面正式处理路径已经使用 operand 1，只有预检查漏了。
+
+改动位置：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3933`，
+  函数 `ConstraintsGenerator::MLsubVisitor::visitStoreInst()`：
+  将 store pointer operand 预检查里的 `OpInd` 从 `0` 改为 `1`。
+
+验证：
+
+- 重新构建：
+  `cmake --build ./build --target notdec-decompile -j4`，通过。
+- 单独复跑失败 IR：
+  `./build/bin/notdec .../15307_19663968_59a7ca7f75_a3f41975d684.ll -o /tmp/15307-fixed.tr.ll --tr-level=2 --dump-htypes /tmp/15307-fixed.htypes`，通过。
+- EVM 类型恢复回归：
+  `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`，通过。
+- native apehex 10 样本复跑：
+  `/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/scripts/notdec-evm-type-recovery-apehex.py --run-name 20260603-tr-smoke-10-native-opind-fix --limit 10 --jobs 2 --gigahorse-jobs 1 --timeout-secs 600`，
+  10/10 通过。
+- 同口径性能：native 10 样本总阶段仍主要耗在 Gigahorse，每个样本约
+  46-58 秒；NotDec 类型恢复每个样本约 0.26-0.31 秒，没有看到本次改动带来性能下降。
+
+残留情况：
+
+- 同时跑
+  `ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy|evm).tr_level_2' --output-on-failure`
+  时，EVM 通过；`llvm_ir` 有既有 HType snapshot 差异，`sysy` 非 frozen 路径报
+  `--dump-htypes requires type recovery to be initialized`。这两类不在本次一行
+  store operand index 修复范围内，本次未顺手改。
+
 验证：
 
 - `cmake --build ./build --target all -j4` 通过。
