@@ -1577,15 +1577,15 @@
       "expected_nonpayable_functions": 61,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 72,
-        "notdec.solidity.checked_bounds": 37,
+        "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.event": 21,
         "notdec.solidity.external_call": 26,
         "notdec.solidity.payability_guard": 305,
-        "notdec.solidity.revert": 274
+        "notdec.solidity.revert": 273
       },
       "expected_revert_kinds": {
         "empty": 160,
-        "panic": 37,
+        "panic": 36,
         "returndata_bubble": 20,
         "error_string": 12,
         "custom_error_candidate": 43,
@@ -1599,13 +1599,13 @@
         "33": 2,
         "34": 1,
         "49": 1,
-        "50": 17,
+        "50": 16,
         "65": 9,
         "81": 0
       },
       "expected_checked_bounds_kinds": {
         "array_bounds_calldata": 1,
-        "array_bounds_memory": 5,
+        "array_bounds_memory": 4,
         "array_bounds_storage": 11,
         "checked_add": 2,
         "checked_add_bound": 2,
@@ -1624,12 +1624,12 @@
         "33": 2,
         "34": 1,
         "49": 1,
-        "50": 17,
+        "50": 16,
         "65": 9
       },
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_array_bounds_calldata": 1,
-        "notdec_solidity_rewrite_array_bounds_memory": 5,
+        "notdec_solidity_rewrite_array_bounds_memory": 4,
         "notdec_solidity_rewrite_array_bounds_storage": 11,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_add_bound": 2,
@@ -1644,7 +1644,7 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 37,
+      "expected_checked_bounds_cfg_rewrites": 36,
       "expected_returndata_bubbles": 20
     },
     {
@@ -1663,19 +1663,19 @@
       "expected_nonpayable_functions": 29,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.checked_bounds": 55,
+        "notdec.solidity.checked_bounds": 43,
         "notdec.solidity.event": 9,
         "notdec.solidity.external_call": 13,
         "notdec.solidity.payability_guard": 145,
-        "notdec.solidity.revert": 224
+        "notdec.solidity.revert": 212
       },
       "expected_revert_kinds": {
         "empty": 106,
-        "panic": 55,
+        "panic": 43,
         "returndata_bubble": 10,
-        "error_string": 33,
+        "error_string": 32,
         "custom_error_candidate": 18,
-        "encoded_candidate": 2
+        "encoded_candidate": 3
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1685,12 +1685,12 @@
         "33": 0,
         "34": 1,
         "49": 0,
-        "50": 45,
+        "50": 33,
         "65": 6,
         "81": 0
       },
       "expected_checked_bounds_kinds": {
-        "array_bounds_memory": 45,
+        "array_bounds_memory": 33,
         "checked_add": 1,
         "checked_mul": 1,
         "checked_sub": 1,
@@ -1702,11 +1702,11 @@
       "expected_checked_bounds_panic_codes": {
         "17": 3,
         "34": 1,
-        "50": 45,
+        "50": 33,
         "65": 6
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_array_bounds_memory": 45,
+        "notdec_solidity_rewrite_array_bounds_memory": 33,
         "notdec_solidity_rewrite_checked_add": 1,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_checked_sub": 1,
@@ -1716,7 +1716,7 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 55,
+      "expected_checked_bounds_cfg_rewrites": 43,
       "expected_returndata_bubbles": 10
     },
     {
@@ -1735,15 +1735,15 @@
       "expected_nonpayable_functions": 62,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 66,
-        "notdec.solidity.checked_bounds": 53,
+        "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 30,
         "notdec.solidity.external_call": 57,
         "notdec.solidity.payability_guard": 310,
-        "notdec.solidity.revert": 290
+        "notdec.solidity.revert": 288
       },
       "expected_revert_kinds": {
         "empty": 137,
-        "panic": 53,
+        "panic": 51,
         "returndata_bubble": 56,
         "error_string": 23,
         "custom_error_candidate": 19,
@@ -1757,13 +1757,13 @@
         "33": 0,
         "34": 0,
         "49": 1,
-        "50": 37,
+        "50": 35,
         "65": 8,
         "81": 0
       },
       "expected_returndata_bubbles": 56,
       "expected_checked_bounds_kinds": {
-        "array_bounds_memory": 28,
+        "array_bounds_memory": 26,
         "array_bounds_storage": 9,
         "checked_add": 2,
         "checked_div": 2,
@@ -1772,17 +1772,17 @@
         "checked_sub": 1,
         "empty_array_pop_storage": 1,
         "memory_allocation_bounds": 4,
-        "memory_allocation_pointer_bounds": 4
+        "memory_allocation_pointer_bounds": 1
       },
       "expected_checked_bounds_panic_codes": {
         "17": 5,
         "18": 2,
         "49": 1,
-        "50": 37,
+        "50": 35,
         "65": 8
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_array_bounds_memory": 28,
+        "notdec_solidity_rewrite_array_bounds_memory": 26,
         "notdec_solidity_rewrite_array_bounds_storage": 9,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_div": 2,
@@ -1791,14 +1791,19 @@
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_empty_array_pop_storage": 1,
         "notdec_solidity_rewrite_memory_allocation_bounds": 4,
-        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 4
+        "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1
       },
-      "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 53,
+      "expected_checked_bounds_skip_reasons": {
+        "unsupported_condition": 3
+      },
+      "expected_checked_bounds_cfg_rewrites": 48,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_external_call_output_copy_write": 0,
         "notdec_solidity_external_call_output_abi_decode_buffer": 0,
         "notdec_solidity_external_call_output_allocation": 0
+      },
+      "expected_checked_bounds_skipped_kinds": {
+        "panic_resource_error": 3
       }
     },
     {
@@ -1970,7 +1975,7 @@
       "expected_nonpayable_functions": 44,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 68,
-        "notdec.solidity.checked_bounds": 53,
+        "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 11,
         "notdec.solidity.external_call": 15,
         "notdec.solidity.payability_guard": 220,
@@ -1997,7 +2002,7 @@
         "81": 0
       },
       "expected_checked_bounds_kinds": {
-        "array_bounds_memory": 26,
+        "array_bounds_memory": 23,
         "memory_allocation_bounds": 10,
         "checked_add": 3,
         "panic_assert": 1,
@@ -2011,7 +2016,7 @@
         "checked_exp": 1
       },
       "expected_checked_bounds_panic_codes": {
-        "50": 29,
+        "50": 27,
         "65": 11,
         "17": 9,
         "1": 1,
@@ -2020,7 +2025,7 @@
         "18": 1
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_array_bounds_memory": 26,
+        "notdec_solidity_rewrite_array_bounds_memory": 23,
         "notdec_solidity_rewrite_memory_allocation_bounds": 10,
         "notdec_solidity_rewrite_checked_add": 3,
         "notdec_solidity_rewrite_array_bounds_storage": 3,
@@ -2033,13 +2038,14 @@
         "notdec_solidity_rewrite_checked_exp": 1
       },
       "expected_checked_bounds_skip_reasons": {
-        "unrecognized_operands": 1,
+        "unrecognized_operands": 2,
         "unsupported_condition": 0
       },
       "expected_checked_bounds_skipped_kinds": {
+        "panic_array_out_of_bounds": 1,
         "panic_assert": 1
       },
-      "expected_checked_bounds_cfg_rewrites": 52,
+      "expected_checked_bounds_cfg_rewrites": 49,
       "expected_returndata_bubbles": 12
     },
     {
@@ -2129,15 +2135,15 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 44,
-        "notdec.solidity.checked_bounds": 75,
+        "notdec.solidity.checked_bounds": 61,
         "notdec.solidity.event": 12,
         "notdec.solidity.external_call": 9,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 159
+        "notdec.solidity.revert": 145
       },
       "expected_revert_kinds": {
         "empty": 47,
-        "panic": 75,
+        "panic": 61,
         "returndata_bubble": 9,
         "error_string": 28,
         "custom_error_candidate": 0,
@@ -2151,14 +2157,14 @@
         "33": 0,
         "34": 0,
         "49": 0,
-        "50": 57,
+        "50": 43,
         "65": 9,
         "81": 0
       },
       "expected_returndata_bubbles": 9,
       "expected_checked_bounds_kinds": {
         "memory_allocation_bounds": 7,
-        "array_bounds_memory": 54,
+        "array_bounds_memory": 40,
         "array_bounds_storage": 3,
         "memory_allocation_pointer_bounds": 2,
         "checked_add": 2,
@@ -2169,12 +2175,12 @@
       },
       "expected_checked_bounds_panic_codes": {
         "65": 9,
-        "50": 57,
+        "50": 43,
         "17": 9
       },
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_memory_allocation_bounds": 7,
-        "notdec_solidity_rewrite_array_bounds_memory": 54,
+        "notdec_solidity_rewrite_array_bounds_memory": 40,
         "notdec_solidity_rewrite_array_bounds_storage": 3,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2,
         "notdec_solidity_rewrite_checked_add": 2,
@@ -2187,7 +2193,7 @@
         "unrecognized_operands": 0,
         "unsupported_condition": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 75
+      "expected_checked_bounds_cfg_rewrites": 61
     },
     {
       "name": "1924_19508168_fe1f1c11b0_0b74e6ed0d55",
@@ -3408,15 +3414,15 @@
       "expected_nonpayable_functions": 10,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 4,
-        "notdec.solidity.checked_bounds": 5,
+        "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
         "notdec.solidity.external_call": 8,
         "notdec.solidity.payability_guard": 50,
-        "notdec.solidity.revert": 47
+        "notdec.solidity.revert": 46
       },
       "expected_revert_kinds": {
         "empty": 26,
-        "panic": 5,
+        "panic": 4,
         "returndata_bubble": 8,
         "error_string": 8,
         "custom_error_candidate": 0,
@@ -3430,7 +3436,7 @@
         "33": 0,
         "34": 0,
         "49": 0,
-        "50": 3,
+        "50": 2,
         "65": 2,
         "81": 0
       },
@@ -3456,7 +3462,7 @@
         "notdec.solidity.event": 7,
         "notdec.solidity.external_call": 6,
         "notdec.solidity.payability_guard": 190,
-        "notdec.solidity.revert": 122
+        "notdec.solidity.revert": 121
       },
       "expected_revert_kinds": {
         "empty": 77,
@@ -3464,7 +3470,7 @@
         "returndata_bubble": 6,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 39
+        "encoded_candidate": 38
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3726,15 +3732,15 @@
       "expected_nonpayable_functions": 25,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 8,
+        "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 125,
-        "notdec.solidity.revert": 84
+        "notdec.solidity.revert": 83
       },
       "expected_revert_kinds": {
         "empty": 47,
-        "panic": 8,
+        "panic": 7,
         "returndata_bubble": 3,
         "error_string": 26,
         "custom_error_candidate": 0,
@@ -3748,7 +3754,7 @@
         "33": 0,
         "34": 1,
         "49": 0,
-        "50": 1,
+        "50": 0,
         "65": 2,
         "81": 0
       },
@@ -3760,14 +3766,14 @@
         "checked_mul": 1,
         "checked_div": 1,
         "checked_sub": 1,
-        "array_bounds_memory": 1
+        "array_bounds_memory": 0
       },
       "expected_checked_bounds_panic_codes": {
         "17": 3,
         "65": 2,
         "34": 1,
         "18": 1,
-        "50": 1
+        "50": 0
       },
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_memory_allocation_bounds": 1,
@@ -3777,10 +3783,10 @@
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_checked_div": 1,
         "notdec_solidity_rewrite_checked_sub": 1,
-        "notdec_solidity_rewrite_array_bounds_memory": 1
+        "notdec_solidity_rewrite_array_bounds_memory": 0
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 8,
+      "expected_checked_bounds_cfg_rewrites": 7,
       "expected_returndata_bubbles": 3
     },
     {
@@ -3887,15 +3893,15 @@
       "expected_nonpayable_functions": 33,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 36,
-        "notdec.solidity.checked_bounds": 9,
+        "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 165,
-        "notdec.solidity.revert": 106
+        "notdec.solidity.revert": 105
       },
       "expected_revert_kinds": {
         "empty": 66,
-        "panic": 9,
+        "panic": 8,
         "returndata_bubble": 3,
         "error_string": 28,
         "custom_error_candidate": 0,
@@ -3909,13 +3915,13 @@
         "33": 0,
         "34": 0,
         "49": 0,
-        "50": 3,
+        "50": 2,
         "65": 2,
         "81": 0
       },
       "expected_returndata_bubbles": 3,
       "expected_checked_bounds_kinds": {
-        "array_bounds_memory": 3,
+        "array_bounds_memory": 2,
         "memory_allocation_pointer_bounds": 1,
         "memory_allocation_bounds": 1,
         "checked_add": 2,
@@ -3923,7 +3929,7 @@
         "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
-        "50": 3,
+        "50": 2,
         "17": 3,
         "65": 2,
         "18": 1
@@ -3931,13 +3937,13 @@
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
         "notdec_solidity_rewrite_memory_allocation_bounds": 1,
-        "notdec_solidity_rewrite_array_bounds_memory": 3,
+        "notdec_solidity_rewrite_array_bounds_memory": 2,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_checked_bounds_cfg_rewrites": 8,
       "expected_memory_rewrite_markers": {}
     },
     {
@@ -3956,15 +3962,15 @@
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 9,
+        "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 155,
-        "notdec.solidity.revert": 102
+        "notdec.solidity.revert": 101
       },
       "expected_revert_kinds": {
         "empty": 63,
-        "panic": 9,
+        "panic": 8,
         "returndata_bubble": 3,
         "error_string": 27,
         "custom_error_candidate": 0,
@@ -3978,12 +3984,12 @@
         "33": 0,
         "34": 0,
         "49": 0,
-        "50": 3,
+        "50": 2,
         "65": 2,
         "81": 0
       },
       "expected_checked_bounds_kinds": {
-        "array_bounds_memory": 3,
+        "array_bounds_memory": 2,
         "checked_add": 2,
         "checked_mul": 1,
         "memory_allocation_bounds": 1,
@@ -3991,13 +3997,13 @@
         "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
-        "50": 3,
+        "50": 2,
         "17": 3,
         "65": 2,
         "18": 1
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_array_bounds_memory": 3,
+        "notdec_solidity_rewrite_array_bounds_memory": 2,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_memory_allocation_bounds": 1,
@@ -4005,7 +4011,7 @@
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_checked_bounds_cfg_rewrites": 8,
       "expected_returndata_bubbles": 3
     },
     {
@@ -4024,15 +4030,15 @@
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 9,
+        "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 155,
-        "notdec.solidity.revert": 102
+        "notdec.solidity.revert": 101
       },
       "expected_revert_kinds": {
         "empty": 63,
-        "panic": 9,
+        "panic": 8,
         "returndata_bubble": 3,
         "error_string": 27,
         "custom_error_candidate": 0,
@@ -4046,12 +4052,12 @@
         "33": 0,
         "34": 0,
         "49": 0,
-        "50": 3,
+        "50": 2,
         "65": 2,
         "81": 0
       },
       "expected_checked_bounds_kinds": {
-        "array_bounds_memory": 3,
+        "array_bounds_memory": 2,
         "checked_add": 2,
         "checked_mul": 1,
         "memory_allocation_bounds": 1,
@@ -4059,13 +4065,13 @@
         "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
-        "50": 3,
+        "50": 2,
         "17": 3,
         "65": 2,
         "18": 1
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_array_bounds_memory": 3,
+        "notdec_solidity_rewrite_array_bounds_memory": 2,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_memory_allocation_bounds": 1,
@@ -4073,7 +4079,7 @@
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_checked_bounds_cfg_rewrites": 8,
       "expected_returndata_bubbles": 3
     },
     {
@@ -4136,15 +4142,15 @@
       "expected_nonpayable_functions": 31,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 34,
-        "notdec.solidity.checked_bounds": 9,
+        "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 155,
-        "notdec.solidity.revert": 102
+        "notdec.solidity.revert": 101
       },
       "expected_revert_kinds": {
         "empty": 63,
-        "panic": 9,
+        "panic": 8,
         "returndata_bubble": 3,
         "error_string": 27,
         "custom_error_candidate": 0,
@@ -4158,12 +4164,12 @@
         "33": 0,
         "34": 0,
         "49": 0,
-        "50": 3,
+        "50": 2,
         "65": 2,
         "81": 0
       },
       "expected_checked_bounds_kinds": {
-        "array_bounds_memory": 3,
+        "array_bounds_memory": 2,
         "checked_add": 2,
         "checked_mul": 1,
         "memory_allocation_bounds": 1,
@@ -4171,13 +4177,13 @@
         "checked_div": 1
       },
       "expected_checked_bounds_panic_codes": {
-        "50": 3,
+        "50": 2,
         "17": 3,
         "65": 2,
         "18": 1
       },
       "expected_checked_bounds_semantic_markers": {
-        "notdec_solidity_rewrite_array_bounds_memory": 3,
+        "notdec_solidity_rewrite_array_bounds_memory": 2,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_mul": 1,
         "notdec_solidity_rewrite_memory_allocation_bounds": 1,
@@ -4185,7 +4191,7 @@
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 9,
+      "expected_checked_bounds_cfg_rewrites": 8,
       "expected_returndata_bubbles": 3
     },
     {
@@ -4248,15 +4254,15 @@
       "expected_nonpayable_functions": 23,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 32,
-        "notdec.solidity.checked_bounds": 7,
+        "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 5,
         "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 115,
-        "notdec.solidity.revert": 76
+        "notdec.solidity.revert": 75
       },
       "expected_revert_kinds": {
         "empty": 43,
-        "panic": 7,
+        "panic": 6,
         "returndata_bubble": 2,
         "error_string": 24,
         "custom_error_candidate": 0,
@@ -4270,7 +4276,7 @@
         "33": 0,
         "34": 1,
         "49": 0,
-        "50": 1,
+        "50": 0,
         "65": 2,
         "81": 0
       },
@@ -4678,48 +4684,48 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
-        "notdec.solidity.checked_bounds": 44,
+        "notdec.solidity.checked_bounds": 42,
         "notdec.solidity.event": 0,
         "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 62
+        "notdec.solidity.revert": 60
       },
       "expected_revert_kinds": {
         "empty": 10,
-        "panic": 44,
+        "panic": 42,
         "custom_error_candidate": 5,
         "error_string": 3
       },
       "expected_panic_codes": {
         "65": 4,
         "17": 4,
-        "50": 36
+        "50": 34
       },
       "expected_checked_bounds_kinds": {
         "memory_allocation_pointer_bounds": 2,
         "memory_allocation_bounds": 2,
         "checked_add": 2,
         "checked_mul": 1,
-        "array_bounds_memory": 36,
+        "array_bounds_memory": 34,
         "checked_sub": 1
       },
       "expected_checked_bounds_panic_codes": {
         "65": 4,
         "17": 4,
-        "50": 36
+        "50": 34
       },
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 2,
         "notdec_solidity_rewrite_memory_allocation_bounds": 2,
         "notdec_solidity_rewrite_checked_add": 2,
         "notdec_solidity_rewrite_checked_mul": 1,
-        "notdec_solidity_rewrite_array_bounds_memory": 36,
+        "notdec_solidity_rewrite_array_bounds_memory": 34,
         "notdec_solidity_rewrite_checked_sub": 1
       },
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 44,
+      "expected_checked_bounds_cfg_rewrites": 42,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_memory_read": 0,
         "notdec_solidity_external_call_output_word_read": 0,

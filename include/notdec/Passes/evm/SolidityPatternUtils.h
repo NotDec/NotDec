@@ -102,9 +102,8 @@ struct PackedStorageAccessMatch {
   uint64_t AccessKind = 0;
 };
 
-// EVM native memory accesses can be present as old helper calls or as the new
-// LLVM load/store form.  These views keep pass code focused on address/value
-// semantics while the source IR is migrating.
+// EVM memory is represented as native LLVM load/store through inttoptr.  These
+// views keep pass code focused on address/value semantics.
 struct EvmMemoryLoad {
   llvm::Instruction *Inst = nullptr;
   llvm::Value *Address = nullptr;

@@ -82,11 +82,6 @@ Value *getIntToPtrAddress(Value *Ptr) {
 }
 
 std::optional<EvmMemoryLoad> matchEvmMemoryLoad(Value *V) {
-  if (auto *Call = dyn_cast_or_null<CallBase>(V);
-      Call != nullptr && isCallTo(Call, "evm_mload") && Call->arg_size() == 2) {
-    return EvmMemoryLoad{Call, Call->getArgOperand(1), Call};
-  }
-
   auto *Load = dyn_cast_or_null<LoadInst>(V);
   if (Load == nullptr || Load->getType() != Type::getIntNTy(Load->getContext(), 256)) {
     return std::nullopt;
@@ -99,17 +94,6 @@ std::optional<EvmMemoryLoad> matchEvmMemoryLoad(Value *V) {
 }
 
 std::optional<EvmMemoryStore> matchEvmMemoryStore(Instruction *I) {
-  if (auto *Call = dyn_cast_or_null<CallBase>(I);
-      Call != nullptr && isCallTo(Call, "evm_mstore") && Call->arg_size() == 3) {
-    return EvmMemoryStore{Call, Call->getArgOperand(1), Call->getArgOperand(2),
-                          256};
-  }
-  if (auto *Call = dyn_cast_or_null<CallBase>(I);
-      Call != nullptr && isCallTo(Call, "evm_mstore8") && Call->arg_size() == 3) {
-    return EvmMemoryStore{Call, Call->getArgOperand(1), Call->getArgOperand(2),
-                          8};
-  }
-
   auto *Store = dyn_cast_or_null<StoreInst>(I);
   if (Store == nullptr) {
     return std::nullopt;
@@ -1324,15 +1308,6 @@ bool isSameValue(Value *LHS, Value *RHS) {
   auto *RC = dyn_cast_or_null<ConstantInt>(RHS);
   if (LC != nullptr && RC != nullptr) {
     return LC->getValue() == RC->getValue();
-  }
-
-  auto *LCall = dyn_cast_or_null<CallBase>(LHS);
-  auto *RCall = dyn_cast_or_null<CallBase>(RHS);
-  if (LCall != nullptr && RCall != nullptr && LCall->arg_size() == 2 &&
-      RCall->arg_size() == 2 && isCallTo(LCall, "evm_mload") &&
-      isCallTo(RCall, "evm_mload")) {
-    return isSameValue(LCall->getArgOperand(0), RCall->getArgOperand(0)) &&
-           isSameValue(LCall->getArgOperand(1), RCall->getArgOperand(1));
   }
 
   std::optional<EvmMemoryLoad> LLoad = matchEvmMemoryLoad(LHS);
@@ -3748,10 +3723,10 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
   }
 
   StringRef Kind = "array_bounds_unknown";
-  if (auto *LengthCall = dyn_cast<CallBase>(Length)) {
-    if (isCallTo(LengthCall, "evm_mload")) {
-      Kind = "array_bounds_memory";
-    } else if (isCallTo(LengthCall, "evm_calldataload")) {
+  if (matchEvmMemoryLoad(Length).has_value()) {
+    Kind = "array_bounds_memory";
+  } else if (auto *LengthCall = dyn_cast<CallBase>(Length)) {
+    if (isCallTo(LengthCall, "evm_calldataload")) {
       Kind = "array_bounds_calldata";
     } else if (isCallTo(LengthCall, "evm_sload")) {
       Kind = "array_bounds_storage";
@@ -3910,7 +3885,7 @@ matchEmptyArrayPop(const NormalizedCondition &FailureCond,
                             true};
 }
 
-CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
+Instruction *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
 bool callHasArg(CallBase *Call, Value *Needle);
 
 bool hasMemoryArrayAllocationComputation(BasicBlock *SuccessBlock,
@@ -3928,12 +3903,11 @@ bool hasMemoryArrayAllocationComputation(BasicBlock *SuccessBlock,
   }
 
   for (Instruction &I : *SuccessBlock) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3 || !isSameValue(Call->getArgOperand(2), Length)) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (!Store.has_value() || !isSameValue(Store->StoredValue, Length)) {
       continue;
     }
-    if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
+    if (isFreeMemoryPointerLoad(Store->Address)) {
       return true;
     }
   }
@@ -4198,17 +4172,16 @@ bool hasBytesAllocationStores(BasicBlock *BB, Value *OldPtr, Value *NewPtr,
   bool StoresLength = false;
   bool StoresFreePtr = false;
   for (Instruction &I : *BB) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (!Store.has_value()) {
       continue;
     }
-    if (isSameValue(Call->getArgOperand(1), OldPtr) &&
-        isSameValue(Call->getArgOperand(2), Length)) {
+    if (isSameValue(Store->Address, OldPtr) &&
+        isSameValue(Store->StoredValue, Length)) {
       StoresLength = true;
     }
-    if (isConstantIntValue(Call->getArgOperand(1), 64) &&
-        isSameValue(Call->getArgOperand(2), NewPtr)) {
+    if (isConstantIntValue(Store->Address, 64) &&
+        isSameValue(Store->StoredValue, NewPtr)) {
       StoresFreePtr = true;
     }
   }
@@ -4243,13 +4216,12 @@ bool hasAllocationHelperHeaderStore(BasicBlock *SuccessBlock, Value *Ptr,
     return false;
   }
   for (Instruction &I : *SuccessBlock) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_mstore") ||
-        Call->arg_size() != 3) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (!Store.has_value()) {
       continue;
     }
-    if (isSameValue(Call->getArgOperand(1), Ptr) &&
-        isSameValue(Call->getArgOperand(2), Length)) {
+    if (isSameValue(Store->Address, Ptr) &&
+        isSameValue(Store->StoredValue, Length)) {
       return true;
     }
   }
@@ -4286,10 +4258,9 @@ bool hasVoidMemoryAllocationHelperCall(BasicBlock *SuccessBlock, Value *Length) 
 
   SmallVector<Value *, 4> HeaderPtrs;
   for (Instruction &I : *SuccessBlock) {
-    auto *Store = dyn_cast<CallBase>(&I);
-    if (Store != nullptr && isCallTo(Store, "evm_mstore") &&
-        Store->arg_size() == 3 && isSameValue(Store->getArgOperand(2), Length)) {
-      HeaderPtrs.push_back(Store->getArgOperand(1));
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() && isSameValue(Store->StoredValue, Length)) {
+      HeaderPtrs.push_back(Store->Address);
     }
   }
 
@@ -4724,57 +4695,50 @@ bool isSupportedMemoryAllocationSizeWithUniformArg(Value *V) {
 }
 
 Value *getMemoryPointerLoadSlot(Value *V) {
-  auto *Call = dyn_cast_or_null<CallBase>(V);
-  if (Call == nullptr || !isCallTo(Call, "evm_mload") || Call->arg_size() != 2) {
-    return nullptr;
-  }
-  return Call->getArgOperand(1);
+  std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(V);
+  return Load.has_value() ? Load->Address : nullptr;
 }
 
-CallBase *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
+Instruction *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
   if (BB == nullptr) {
     return nullptr;
   }
   for (Instruction &I : *BB) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
-        Call->arg_size() == 3 &&
-        isConstantIntValue(Call->getArgOperand(1), 64) &&
-        isSameValue(Call->getArgOperand(2), NewPtr)) {
-      return Call;
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() && isConstantIntValue(Store->Address, 64) &&
+        isSameValue(Store->StoredValue, NewPtr)) {
+      return Store->Inst;
     }
   }
   return nullptr;
 }
 
-CallBase *findUniformFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
+Instruction *findUniformFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
   if (BB == nullptr || NewPtr == nullptr) {
     return nullptr;
   }
   for (Instruction &I : *BB) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
-        Call->arg_size() == 3 &&
-        isConstantIntValueOrUniformArg(Call->getArgOperand(1), 64) &&
-        isSameValue(Call->getArgOperand(2), NewPtr)) {
-      return Call;
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() &&
+        isConstantIntValueOrUniformArg(Store->Address, 64) &&
+        isSameValue(Store->StoredValue, NewPtr)) {
+      return Store->Inst;
     }
   }
   return nullptr;
 }
 
-CallBase *findMemoryPointerStoreForLoad(BasicBlock *BB, Value *OldPtr,
-                                        Value *NewPtr) {
+Instruction *findMemoryPointerStoreForLoad(BasicBlock *BB, Value *OldPtr,
+                                           Value *NewPtr) {
   Value *Slot = getMemoryPointerLoadSlot(OldPtr);
   if (BB == nullptr || Slot == nullptr) {
     return nullptr;
   }
   for (Instruction &I : *BB) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
-        Call->arg_size() == 3 && isSameValue(Call->getArgOperand(1), Slot) &&
-        isSameValue(Call->getArgOperand(2), NewPtr)) {
-      return Call;
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() && isSameValue(Store->Address, Slot) &&
+        isSameValue(Store->StoredValue, NewPtr)) {
+      return Store->Inst;
     }
   }
   return nullptr;
@@ -4790,26 +4754,24 @@ Value *findMemoryPointerStoreSlot(BasicBlock *BB, Value *Ptr) {
     return nullptr;
   }
   for (Instruction &I : *BB) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
-        Call->arg_size() == 3 && isSameValue(Call->getArgOperand(2), Ptr)) {
-      return Call->getArgOperand(1);
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() && isSameValue(Store->StoredValue, Ptr)) {
+      return Store->Address;
     }
   }
   return nullptr;
 }
 
-CallBase *findMemoryPointerStoreToSlot(BasicBlock *BB, Value *Slot,
-                                       Value *NewPtr) {
+Instruction *findMemoryPointerStoreToSlot(BasicBlock *BB, Value *Slot,
+                                          Value *NewPtr) {
   if (BB == nullptr || Slot == nullptr || NewPtr == nullptr) {
     return nullptr;
   }
   for (Instruction &I : *BB) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call != nullptr && isCallTo(Call, "evm_mstore") &&
-        Call->arg_size() == 3 && isSameValue(Call->getArgOperand(1), Slot) &&
-        isSameValue(Call->getArgOperand(2), NewPtr)) {
-      return Call;
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() && isSameValue(Store->Address, Slot) &&
+        isSameValue(Store->StoredValue, NewPtr)) {
+      return Store->Inst;
     }
   }
   return nullptr;
@@ -5997,39 +5959,37 @@ matchStorageScratchKeccak(CallBase &Sha3) {
     return std::nullopt;
   }
 
-  CallBase *KeyStore = nullptr;
-  CallBase *SlotStore = nullptr;
+  Value *Key = nullptr;
+  Value *BaseSlot = nullptr;
   for (auto It = Sha3.getIterator(); It != Sha3.getParent()->begin();) {
     --It;
     auto *Call = dyn_cast<CallBase>(&*It);
-    if (Call == nullptr) {
-      continue;
-    }
-    if (isCallTo(Call, "evm_sha3") ||
-        !classifyExternalCall(getCalleeName(Call)).empty()) {
+    if (Call != nullptr &&
+        (isCallTo(Call, "evm_sha3") ||
+         !classifyExternalCall(getCalleeName(Call)).empty())) {
       break;
     }
-    if (!isCallTo(Call, "evm_mstore") || Call->arg_size() != 3) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&*It);
+    if (!Store.has_value()) {
       continue;
     }
-    if (SlotStore == nullptr && isConstantIntValue(Call->getArgOperand(1), 32)) {
-      SlotStore = Call;
+    if (BaseSlot == nullptr && isConstantIntValue(Store->Address, 32)) {
+      BaseSlot = Store->StoredValue;
       continue;
     }
-    if (KeyStore == nullptr && isConstantIntValue(Call->getArgOperand(1), 0)) {
-      KeyStore = Call;
+    if (Key == nullptr && isConstantIntValue(Store->Address, 0)) {
+      Key = Store->StoredValue;
       continue;
     }
-    if (KeyStore != nullptr && SlotStore != nullptr) {
+    if (Key != nullptr && BaseSlot != nullptr) {
       break;
     }
   }
 
-  if (KeyStore == nullptr || SlotStore == nullptr) {
+  if (Key == nullptr || BaseSlot == nullptr) {
     return std::nullopt;
   }
-  return StorageScratchKeccakMatch{&Sha3, KeyStore->getArgOperand(2),
-                                   SlotStore->getArgOperand(2)};
+  return StorageScratchKeccakMatch{&Sha3, Key, BaseSlot};
 }
 
 std::optional<StorageArrayDataKeccakMatch>
@@ -6040,28 +6000,26 @@ matchStorageArrayDataKeccak(CallBase &Sha3) {
     return std::nullopt;
   }
 
-  CallBase *BaseSlotStore = nullptr;
+  Value *BaseSlot = nullptr;
   for (auto It = Sha3.getIterator(); It != Sha3.getParent()->begin();) {
     --It;
     auto *Call = dyn_cast<CallBase>(&*It);
-    if (Call == nullptr) {
-      continue;
-    }
-    if (isCallTo(Call, "evm_sha3") ||
-        !classifyExternalCall(getCalleeName(Call)).empty()) {
+    if (Call != nullptr &&
+        (isCallTo(Call, "evm_sha3") ||
+         !classifyExternalCall(getCalleeName(Call)).empty())) {
       break;
     }
-    if (isCallTo(Call, "evm_mstore") && Call->arg_size() == 3 &&
-        isConstantIntValue(Call->getArgOperand(1), 0)) {
-      BaseSlotStore = Call;
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&*It);
+    if (Store.has_value() && isConstantIntValue(Store->Address, 0)) {
+      BaseSlot = Store->StoredValue;
       break;
     }
   }
 
-  if (BaseSlotStore == nullptr) {
+  if (BaseSlot == nullptr) {
     return std::nullopt;
   }
-  return StorageArrayDataKeccakMatch{&Sha3, BaseSlotStore->getArgOperand(2)};
+  return StorageArrayDataKeccakMatch{&Sha3, BaseSlot};
 }
 
 std::optional<StorageMappingAccessMatch>

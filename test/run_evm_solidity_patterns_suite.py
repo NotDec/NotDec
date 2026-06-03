@@ -18,9 +18,6 @@ NONPAYABLE_DEFINE_RE = re.compile(
 EVM_REVERT_CALL_RE = re.compile(
     r"\bcall void @evm_revert\(ptr [^,]+, i256 ([^,]+), i256 ([^)]+)\)"
 )
-EVM_MSTORE_CALL_RE = re.compile(
-    r"\bcall void @evm_mstore\(ptr [^,]+, i256 ([^,]+), i256 ([^)]+)\)"
-)
 EVM_INTTOPTR_ASSIGN_RE = re.compile(
     r"^\s*(%[\w.\-]+) = inttoptr i256 ([^ ]+) to ptr"
 )
@@ -32,9 +29,6 @@ EVM_RETURNDATACOPY_CALL_RE = re.compile(
 )
 EVM_SHL_ASSIGN_RE = re.compile(
     r"^\s*(%[\w.\-]+) = call i256 @evm_shl\(i256 (\d+), i256 (\d+)\)"
-)
-EVM_MLOAD_ASSIGN_RE = re.compile(
-    r"^\s*(%[\w.\-]+) = call i256 @evm_mload\(ptr [^,]+, i256 ([^)]+)\)"
 )
 EVM_NATIVE_LOAD_RE = re.compile(
     r"^\s*(%[\w.\-]+) = load i256, ptr ([^,]+), align \d+"
@@ -373,7 +367,17 @@ def count_revert_kinds(path: Path) -> dict[str, int]:
     text = path.read_text()
     counts: dict[str, int] = {}
     for block in re.split(r"\n(?=[\w.$-]+:)", text):
-        for kind in classify_reverts_from_block(block):
+        if "call void @notdec_solidity_rewrite_revert_panic(" in block:
+            kinds = ["panic"]
+        elif "call void @notdec_solidity_rewrite_revert_error_string(" in block:
+            kinds = ["error_string"]
+        elif "call void @notdec_solidity_rewrite_revert_custom_error(" in block:
+            kinds = ["custom_error_candidate"]
+        elif "call void @notdec_solidity_rewrite_revert_returndata_bubble(" in block:
+            kinds = ["returndata_bubble"]
+        else:
+            kinds = classify_reverts_from_block(block)
+        for kind in kinds:
             counts[kind] = counts.get(kind, 0) + 1
     return counts
 
@@ -458,13 +462,6 @@ def classify_reverts_from_block(block: str) -> list[str]:
             if selector is not None:
                 shl_values[shl_match.group(1)] = selector
 
-        mload_match = EVM_MLOAD_ASSIGN_RE.match(line)
-        if mload_match:
-            exprs[mload_match.group(1)] = (
-                "mload",
-                value_expr(mload_match.group(2), exprs),
-            )
-
         native_load_match = EVM_NATIVE_LOAD_RE.match(line)
         if native_load_match:
             offset = ptr_offsets.get(native_load_match.group(2).strip())
@@ -480,10 +477,6 @@ def classify_reverts_from_block(block: str) -> list[str]:
                 exprs[lhs] = ("add", value_expr(right, exprs), int(left))
             elif right.isdigit():
                 exprs[lhs] = ("add", value_expr(left, exprs), int(right))
-
-        mstore_match = EVM_MSTORE_CALL_RE.search(line)
-        if mstore_match:
-            memory_stores.append((mstore_match.group(1), mstore_match.group(2)))
 
         native_store_match = EVM_NATIVE_STORE_RE.match(line)
         if native_store_match:
@@ -551,15 +544,6 @@ def collect_panic_codes_from_block(block: str) -> list[int]:
             )
             if selector is not None:
                 shl_values[shl_match.group(1)] = selector
-
-        mstore_match = EVM_MSTORE_CALL_RE.search(line)
-        if mstore_match:
-            offset = mstore_match.group(1).strip()
-            value = mstore_match.group(2).strip()
-            if is_constant_i256(offset, 0) and shl_values.get(value) == PANIC_SELECTOR:
-                saw_panic_selector = True
-            elif is_constant_i256(offset, 4) and value.isdigit():
-                pending_codes.append(int(value))
 
         native_store_match = EVM_NATIVE_STORE_RE.match(line)
         if native_store_match:

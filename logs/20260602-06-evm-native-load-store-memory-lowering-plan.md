@@ -365,6 +365,77 @@ evm2llvm 源头不再生成 `evm_mload/mstore` 后，主项目里的 Solidity pa
 
 更好的后续方案：继续把 `SolidityPatterns.cpp` 里 storage scratch keccak、revert raw write 等剩余 `evm_mload/mstore` 直接匹配迁到统一 helper；再更新测试输入和 oracle，最后删除旧 helper 兼容分支。
 
+## 2026-06-03 追加实现记录：删除旧 memory helper 兼容
+
+本轮把主项目中剩余的 `evm_mload` / `evm_mstore` / `evm_mstore8` 兼容路径去掉。
+测试 IR 已经迁到原生 `load` / `store`，所以后续不再把旧 helper 当正常输入维护。
+
+修改点：
+
+- [include/notdec/Passes/evm/SolidityPatternUtils.h:105](/sn640/NotDec/include/notdec/Passes/evm/SolidityPatternUtils.h:105)
+  更新 `EvmMemoryLoad` / `EvmMemoryStore` 注释，明确 EVM memory 现在是
+  `inttoptr` 后的原生 `load` / `store`。
+- [src/Passes/evm/SolidityPatterns.cpp:85](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:85)
+  删除 `matchEvmMemoryLoad()` 对 `evm_mload` 的兼容分支，只接受 `load i256`。
+- [src/Passes/evm/SolidityPatterns.cpp:97](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:97)
+  删除 `matchEvmMemoryStore()` 对 `evm_mstore` / `evm_mstore8` 的兼容分支，
+  只接受 `store i256` / `store i8`。
+- [src/Passes/evm/SolidityPatterns.cpp:1313](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:1313)
+  删除 `isSameValue()` 里旧 `evm_mload` call 等价判断，统一走 native load 地址比较。
+- [src/Passes/evm/SolidityPatterns.cpp:3726](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:3726)
+  `matchArrayBounds()` 用 `matchEvmMemoryLoad()` 判断 memory array length。
+- [src/Passes/evm/SolidityPatterns.cpp:3906](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:3906)
+  `hasMemoryArrayAllocationComputation()` 改为通过 `EvmMemoryStore` 判断 header store。
+- [src/Passes/evm/SolidityPatterns.cpp:4175](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:4175)
+  `hasBytesAllocationStores()` 改为通过 `EvmMemoryStore` 判断 length store 和 free pointer store。
+- [src/Passes/evm/SolidityPatterns.cpp:4219](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:4219)
+  `hasAllocationHelperHeaderStore()` 改为通过 native store 判断 helper 返回指针的 header 写入。
+- [src/Passes/evm/SolidityPatterns.cpp:4261](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:4261)
+  `hasVoidMemoryAllocationHelperCall()` 从 native store 收集 header 指针。
+- [src/Passes/evm/SolidityPatterns.cpp:4698](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:4698)
+  `getMemoryPointerLoadSlot()` 改为从 native load 取地址。
+- [src/Passes/evm/SolidityPatterns.cpp:4703](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:4703)
+  `findFreeMemoryPointerStore()`、`findUniformFreeMemoryPointerStore()`、
+  `findMemoryPointerStoreForLoad()`、`findMemoryPointerStoreSlot()`、
+  `findMemoryPointerStoreToSlot()` 都改为匹配 native store。
+- [src/Passes/evm/SolidityPatterns.cpp:5964](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:5964)
+  `matchStorageScratchKeccak()` 改为从 native store 读取 scratch key / base slot。
+- [src/Passes/evm/SolidityPatterns.cpp:6005](/sn640/NotDec/src/Passes/evm/SolidityPatterns.cpp:6005)
+  `matchStorageArrayDataKeccak()` 改为从 native store 读取 base slot。
+- [test/run_evm_solidity_patterns_suite.py:19](/sn640/NotDec/test/run_evm_solidity_patterns_suite.py:19)
+  删除 runner 对旧 `evm_mload` / `evm_mstore` 文本形态的 fallback。
+- [test/run_evm_solidity_patterns_suite.py:366](/sn640/NotDec/test/run_evm_solidity_patterns_suite.py:366)
+  `count_revert_kinds()` 优先读取具体 revert rewrite marker，避免 native IR 形态下靠裸
+  block 文本误分 `panic` / `error_string`。
+- [test/evm/solidity-patterns/manifest.json](/sn640/NotDec/test/evm/solidity-patterns/manifest.json)
+  按 native IR 当前输出更新 14 个单例 oracle；全局 `checked_bounds_audit` 仍保持
+  actual 和 expected 一致。
+- [test/evm/solidity-rewrite/manifest.json](/sn640/NotDec/test/evm/solidity-rewrite/manifest.json)
+  更新 `0334_19494307_668d201319_1354ce2e324d` 的 checked-bounds 计数。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `rg "evm_mload|evm_mstore|evm_mstore8|EVM_MLOAD|EVM_MSTORE" src include test/run_evm_solidity_patterns_suite.py -n`
+  无输出。
+- `ctest --test-dir build -R 'notdec.type_recovery.evm.tr_level_2|notdec.evm.solidity_patterns|notdec.evm.solidity_rewrite' --output-on-failure`
+  3/3 通过，总耗时 `189.92s`。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-native-memory-no-helper-compat.ll --tr-level=2
+  --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-native-memory-no-helper-compat.htypes`
+  通过，`elapsed=12.58 user=12.18 sys=0.39 maxrss=852300`。
+
+评分：
+
+- 实现效果：9/10。主项目代码和 runner 已不再识别旧 EVM memory helper，测试 IR 也已迁到
+  native load/store。
+- 复杂度：5/10。删除兼容分支后 matcher 更直接，但 Solidity pattern oracle 跟随 native IR
+  重新计数，维护时要注意这些数字已经不是旧 helper 口径。
+- 维护成本：5/10。后续重点可以转到类型恢复接 native load/store，不需要再维护旧 helper 双路径。
+
 ## 追加实现记录：alloc helper 改成 calloc
 
 按新的判断，EVM free memory allocation 不再生成 `notdec_evm_alloc` /
