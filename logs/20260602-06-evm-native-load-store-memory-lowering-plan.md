@@ -364,3 +364,43 @@ evm2llvm 源头不再生成 `evm_mload/mstore` 后，主项目里的 Solidity pa
 - 维护成本：6/10。短期兼容旧/新两种 IR 会多一些分支，但集中在 helper 和少数 fallback，后续等测试样例全部迁移后可以删除旧 helper 分支。
 
 更好的后续方案：继续把 `SolidityPatterns.cpp` 里 storage scratch keccak、revert raw write 等剩余 `evm_mload/mstore` 直接匹配迁到统一 helper；再更新测试输入和 oracle，最后删除旧 helper 兼容分支。
+
+## 追加实现记录：alloc helper 改成 calloc
+
+按新的判断，EVM free memory allocation 不再生成 `notdec_evm_alloc` /
+`notdec_evm_alloc_unbounded`，而是在源头直接生成更通用的 `calloc` /
+`calloc_unbounded`。旧名字只保留 matcher 兼容，不新增重命名 pass。
+
+### 修改点
+
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:217` 的 `rewriteAllocation()` 改为生成
+  `calloc(i256 1, i256 size)` 或 `calloc_unbounded()`，返回值是 `ptr`，再用
+  `ptrtoint ptr ... to i256` 接回 EVM 地址表达；`calloc` 返回值标记 `noalias`。
+- `src/Passes/evm/SolidityPatterns.cpp:1287` 的
+  `isFreeMemoryAllocationBase()` 继续识别旧 `notdec_evm_alloc*`，并新增识别
+  `ptrtoint(call @calloc(...))` 和 `ptrtoint(call @calloc_unbounded())`。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:44` 新增
+  `getSizedAllocationSize()`，event log 的 event data allocation 识别同时支持旧
+  `notdec_evm_alloc(size)` 和新 `ptrtoint(call @calloc(1, size))`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3639` 的
+  `isHeapAllocationCall()` 识别 `malloc`、`calloc`、`calloc_unbounded`，同时保留旧
+  `notdec_evm_alloc*` 兼容。
+- `notdec_evm_finalize_alloc(base, size)` 暂时保留，用于 allocation 时 size 还不可用、
+  后面才确认大小的 unbounded 场景。
+
+### 验证
+
+- `cmake --build ./build --target all -j4`：通过。
+- 单样例检查：
+  `./build/bin/notdec test/evm/solidity-patterns/cases/0450_19495071_6b6c9447e0_6344565f4b31.ll -o /tmp/notdec-calloc-alloc-check.ll --tr-level=0`
+  生成结果包含 `call ptr @calloc(i256 1, i256 ...)`、`ptrtoint ptr ... to i256`
+  和 `call ptr @calloc_unbounded()`；没有再生成 `notdec_evm_alloc*`。
+- apehex smoke：最近批次抽样 77 个 `.ll`，逐个执行
+  `./build/bin/notdec <input.ll> -o /tmp/notdec-calloc-apehex-smoke/<name>.ll --tr-level=0`，
+  77/77 通过，用时 50.02 秒。
+- `ctest --test-dir build -R 'notdec.evm' --output-on-failure`：2/2 通过，总耗时
+  195.16 秒。
+- 试跑过
+  `ctest --test-dir build -R 'notdec.evm|notdec.type_recovery.llvm_ir.tr_level_2' --output-on-failure`。
+  EVM 测试通过；`notdec.type_recovery.llvm_ir.tr_level_2` 有 4 个非 `calloc`
+  相关样例 diff，表现为既有的透明/递归结构输出变化，本轮没有改 oracle。

@@ -1286,10 +1286,19 @@ bool isFreeMemoryPointerStore(CallBase *Call) {
 
 bool isFreeMemoryAllocationBase(Value *V) {
   auto *Call = dyn_cast_or_null<CallBase>(V);
+  if (Call != nullptr &&
+      ((isCallTo(Call, "notdec_evm_alloc") && Call->arg_size() == 1) ||
+       (isCallTo(Call, "notdec_evm_alloc_unbounded") &&
+        Call->arg_size() == 0))) {
+    return true;
+  }
+
+  auto *PtrToInt = dyn_cast_or_null<PtrToIntInst>(V);
+  Call = PtrToInt == nullptr ? nullptr
+                             : dyn_cast_or_null<CallBase>(PtrToInt->getOperand(0));
   return Call != nullptr &&
-         ((isCallTo(Call, "notdec_evm_alloc") && Call->arg_size() == 1) ||
-          (isCallTo(Call, "notdec_evm_alloc_unbounded") &&
-           Call->arg_size() == 0));
+         ((isCallTo(Call, "calloc") && Call->arg_size() == 2) ||
+          (isCallTo(Call, "calloc_unbounded") && Call->arg_size() == 0));
 }
 
 bool isSameOrReloadedFreeMemoryBase(Value *LHS, Value *RHS) {

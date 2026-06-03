@@ -41,6 +41,22 @@ bool isSameEventDataBase(Value *LHS, Value *RHS) {
   return LConst.has_value() && RConst.has_value() && *LConst == *RConst;
 }
 
+Value *getSizedAllocationSize(Value *Base) {
+  auto *Call = dyn_cast_or_null<CallBase>(Base);
+  if (Call != nullptr && isCallTo(Call, "notdec_evm_alloc") &&
+      Call->arg_size() == 1) {
+    return Call->getArgOperand(0);
+  }
+
+  auto *PtrToInt = dyn_cast_or_null<PtrToIntInst>(Base);
+  Call = PtrToInt == nullptr ? nullptr
+                             : dyn_cast_or_null<CallBase>(PtrToInt->getOperand(0));
+  if (Call != nullptr && isCallTo(Call, "calloc") && Call->arg_size() == 2) {
+    return Call->getArgOperand(1);
+  }
+  return nullptr;
+}
+
 void collectEventDataWordWriteMarkers(BasicBlock &BB, CallBase &Log,
                                       Value *DataBase,
                                       SmallVectorImpl<CallBase *> &Writes) {
@@ -134,19 +150,19 @@ findEventDataAllocation(BasicBlock &BB, CallBase &Log,
     if (&I == &Log) {
       break;
     }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
+    if (auto *Call = dyn_cast<CallBase>(&I)) {
+      if (isCallTo(Call, "notdec_evm_finalize_alloc") &&
+          Call->arg_size() == 2 &&
+          MatchesEventDataBase(Call->getArgOperand(0))) {
+        Candidate =
+            std::make_pair(Call->getArgOperand(0), Call->getArgOperand(1));
+        continue;
+      }
     }
-
-    if (isCallTo(Call, "notdec_evm_finalize_alloc") && Call->arg_size() == 2 &&
-        MatchesEventDataBase(Call->getArgOperand(0))) {
-      Candidate = std::make_pair(Call->getArgOperand(0), Call->getArgOperand(1));
-      continue;
-    }
-    if (isCallTo(Call, "notdec_evm_alloc") && Call->arg_size() == 1 &&
-        MatchesEventDataBase(Call)) {
-      Candidate = std::make_pair(Call, Call->getArgOperand(0));
+    if (Value *Size = getSizedAllocationSize(&I)) {
+      if (MatchesEventDataBase(&I)) {
+        Candidate = std::make_pair(&I, Size);
+      }
     }
   }
 

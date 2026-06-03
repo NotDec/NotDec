@@ -218,7 +218,7 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
                        DominatorTree &DT,
                        SmallPtrSetImpl<Instruction *> &RewrittenBases,
                        SmallVectorImpl<Instruction *> &ToErase) {
-  auto *BaseLoad = dyn_cast_or_null<CallBase>(Alloc.Base);
+  auto *BaseLoad = dyn_cast_or_null<Instruction>(Alloc.Base);
   if (BaseLoad == nullptr || Alloc.Size == nullptr ||
       Alloc.AllocatePoint == nullptr) {
     return false;
@@ -229,21 +229,24 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
 
   Module *M = BaseLoad->getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
+  Type *PtrTy = PointerType::get(Ctx, 0);
   bool SizeAvailable =
       valueAvailableAt(Alloc.Size, *Alloc.AllocatePoint, DT);
-  SmallVector<Type *, 1> AllocArgs;
+  SmallVector<Type *, 2> AllocArgs;
   if (SizeAvailable) {
-    AllocArgs.push_back(I256);
+    AllocArgs.append({I256, I256});
   }
   Function *AllocFn = getOrDeclareFunction(
-      *M, SizeAvailable ? "notdec_evm_alloc" : "notdec_evm_alloc_unbounded",
-      I256, AllocArgs);
+      *M, SizeAvailable ? "calloc" : "calloc_unbounded", PtrTy, AllocArgs);
+  AllocFn->addRetAttr(Attribute::NoAlias);
 
   IRBuilder<> AllocBuilder(Alloc.AllocatePoint);
-  CallInst *NewBase =
-      SizeAvailable
-          ? AllocBuilder.CreateCall(AllocFn, {asI256(AllocBuilder, Alloc.Size)})
-          : AllocBuilder.CreateCall(AllocFn);
+  CallInst *NewBasePtr =
+      SizeAvailable ? AllocBuilder.CreateCall(
+                          AllocFn, {ConstantInt::get(I256, 1),
+                                    asI256(AllocBuilder, Alloc.Size)})
+                    : AllocBuilder.CreateCall(AllocFn);
+  Value *NewBase = AllocBuilder.CreatePtrToInt(NewBasePtr, I256, "evm.alloc.addr");
 
   BaseLoad->replaceAllUsesWith(NewBase);
   if (BaseLoad->use_empty()) {

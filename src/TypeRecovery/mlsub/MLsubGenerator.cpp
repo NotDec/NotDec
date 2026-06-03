@@ -3638,9 +3638,10 @@ void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
 
 bool ConstraintsGenerator::MLsubVisitor::isHeapAllocationCall(
     llvm::CallBase &I) {
-  // TODO add more func names
   if (auto F = I.getCalledFunction()) {
-    if (F->getName() == "malloc") {
+    StringRef Name = F->getName();
+    if (Name == "malloc" || Name == "calloc" || Name == "calloc_unbounded" ||
+        Name == "notdec_evm_alloc" || Name == "notdec_evm_alloc_unbounded") {
       return true;
     }
   }
