@@ -590,6 +590,62 @@ dynamic ABI 建模的输入。它不参与 MLsub 求解，也不改变 htypes sn
   --dump-htypes=/tmp/notdec-fortune-no-memory-markers.htypes`
   通过，`elapsed=12.41 user=12.03 sys=0.37 maxrss=851196`。
 
+## 2026-06-03 实现记录：暂停 ABI/event/external-call data marker 生成
+
+用户判断 `notdec_solidity_abi_return_data_word_write`、
+`notdec_solidity_event_data_word_write`、
+`notdec_solidity_external_call_input_word_write` 这类 marker 也应先停掉，
+更适合等类型推理稳定后再生成。
+
+本次只暂停语义 data marker materialize，不关闭 pattern pass 本身：
+
+- [src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:67](/sn640/NotDec/src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:67)
+  新增 `kEmitAbiReturnDataMarkers = false`，暂停
+  `notdec_solidity_abi_return_data_allocation`、
+  `notdec_solidity_abi_return_data_word_write`、
+  `notdec_solidity_abi_return_data_copy_write`。
+- [src/Passes/evm/solidity-patterns/EventLogPass.cpp:27](/sn640/NotDec/src/Passes/evm/solidity-patterns/EventLogPass.cpp:27)
+  新增 `kEmitEventDataMarkers = false`，暂停
+  `notdec_solidity_event_data_allocation`、
+  `notdec_solidity_event_data_word_write`、
+  `notdec_solidity_event_data_copy_write`。
+- [src/Passes/evm/solidity-patterns/ExternalCallPass.cpp:37](/sn640/NotDec/src/Passes/evm/solidity-patterns/ExternalCallPass.cpp:37)
+  新增 `kEmitExternalCallDataMarkers = false`，暂停 external-call input/output
+  copy、word、allocation、ABI decode buffer marker。
+- [src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:23](/sn640/NotDec/src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:23)
+  新增 `kEmitRevertDataMarkers = false`，暂停
+  `notdec_solidity_revert_data_word_write` 和
+  `notdec_solidity_revert_data_copy_write`。
+- [test/evm/solidity-patterns/manifest.json:4725](/sn640/NotDec/test/evm/solidity-patterns/manifest.json:4725)
+  同步把剩余 external-call output data marker oracle 改为 0。
+
+保留项：
+
+- ABI return / event / external-call / revert 的 rewrite marker 和 metadata 继续生成。
+- 这些 pass 的 matcher 逻辑保留，只是不再把 data facts 插回 IR。
+
+验证：
+
+- `cmake --build ./build --target all -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，`0.42s`。
+- `ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure`
+  通过，`82.24s`。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  更新剩余 oracle 后通过，`106.86s`。
+- 抽样 `24574_19760246_e537c886f5_6e80990d311f.ll` 生成
+  `/tmp/notdec-evm-no-data-markers.ll`，确认
+  `notdec_solidity_abi_return_data_*`、`notdec_solidity_event_data_*`、
+  `notdec_solidity_external_call_input_*`、
+  `notdec_solidity_external_call_output_*` 不再出现。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-no-solidity-data-markers.ll --tr-level=2
+  --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-no-solidity-data-markers.htypes`
+  通过，`elapsed=12.48 user=12.11 sys=0.36 maxrss=850680`。
+
 ## 2026-06-03 实现记录：临时禁用 consumer marker 生成
 
 根据当前判断，consumer marker 这条链先停掉，等类型恢复有稳定 role 承载方式后再恢复。

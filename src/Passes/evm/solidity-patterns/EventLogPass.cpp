@@ -27,6 +27,10 @@ STATISTIC(NumEventDataCopyWrites,
 
 namespace {
 
+// Event payload markers are semantic annotations. Keep them disabled until the
+// type recovery path has a stable post-inference place to regenerate them.
+constexpr bool kEmitEventDataMarkers = false;
+
 bool isEventAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && (*Offset % 32) == 0;
@@ -267,24 +271,28 @@ PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
       SmallVector<CallBase *, 8> WordWrites;
       collectEventDataWordWriteMarkers(*Call->getParent(), *Call, DataBase,
                                        WordWrites);
-      for (CallBase *WordWrite : WordWrites) {
-        insertEventDataWordWriteMarker(Ctx, *Call, *WordWrite, TopicCount);
-        ++NumEventDataWordWrites;
+      if (kEmitEventDataMarkers) {
+        for (CallBase *WordWrite : WordWrites) {
+          insertEventDataWordWriteMarker(Ctx, *Call, *WordWrite, TopicCount);
+          ++NumEventDataWordWrites;
+        }
       }
       SmallVector<CallBase *, 8> CopyWrites;
       collectEventDataCopyWriteMarkers(*Call->getParent(), *Call, DataBase,
                                        CopyWrites);
-      for (CallBase *CopyWrite : CopyWrites) {
-        insertEventDataCopyWriteMarker(Ctx, *Call, *CopyWrite, TopicCount);
-        ++NumEventDataCopyWrites;
-      }
-      if (std::optional<std::pair<Value *, Value *>> Allocation =
-              findEventDataAllocation(*Call->getParent(), *Call, WordWrites,
-                                      CopyWrites)) {
-        insertEventDataAllocationMarker(Ctx, *Call, Allocation->first,
-                                        Allocation->second, DataSize,
-                                        TopicCount);
-        ++NumEventDataAllocations;
+      if (kEmitEventDataMarkers) {
+        for (CallBase *CopyWrite : CopyWrites) {
+          insertEventDataCopyWriteMarker(Ctx, *Call, *CopyWrite, TopicCount);
+          ++NumEventDataCopyWrites;
+        }
+        if (std::optional<std::pair<Value *, Value *>> Allocation =
+                findEventDataAllocation(*Call->getParent(), *Call, WordWrites,
+                                        CopyWrites)) {
+          insertEventDataAllocationMarker(Ctx, *Call, Allocation->first,
+                                          Allocation->second, DataSize,
+                                          TopicCount);
+          ++NumEventDataAllocations;
+        }
       }
     }
     addStringMetadata(Ctx, I, KIND_SOLIDITY_EVENT,

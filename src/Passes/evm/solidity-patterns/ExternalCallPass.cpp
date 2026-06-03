@@ -37,6 +37,11 @@ STATISTIC(NumExternalCallInputAbiHeadWrites,
 
 namespace {
 
+// External-call payload markers are semantic annotations. Keep them disabled
+// until the type recovery path has a stable post-inference place to regenerate
+// them.
+constexpr bool kEmitExternalCallDataMarkers = false;
+
 struct ExternalCallMemoryArgs {
   Value *InputBase = nullptr;
   Value *InputSize = nullptr;
@@ -699,32 +704,40 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
       if (CallBase *CopyWrite = findExternalCallInputCopyWriteMarker(
               *Call->getParent(), *Call, Args->InputBase)) {
         InputCopyWrite = CopyWrite;
-        insertExternalCallInputCopyWriteMarker(Ctx, *Call, *CopyWrite,
-                                               CallKind);
-        ++NumExternalCallInputCopyWrites;
+        if (kEmitExternalCallDataMarkers) {
+          insertExternalCallInputCopyWriteMarker(Ctx, *Call, *CopyWrite,
+                                                 CallKind);
+          ++NumExternalCallInputCopyWrites;
+        }
       }
       CallBase *InputWordWrite = nullptr;
       if (CallBase *WordWrite = findExternalCallInputWordWriteMarker(
               *Call->getParent(), *Call, Args->InputBase)) {
         InputWordWrite = WordWrite;
-        insertExternalCallInputWordWriteMarker(Ctx, *Call, *WordWrite,
-                                               CallKind);
-        ++NumExternalCallInputWordWrites;
+        if (kEmitExternalCallDataMarkers) {
+          insertExternalCallInputWordWriteMarker(Ctx, *Call, *WordWrite,
+                                                 CallKind);
+          ++NumExternalCallInputWordWrites;
+        }
       }
       SmallVector<CallBase *, 8> AbiHeadWrites;
       collectExternalCallInputAbiHeadWriteMarkers(
           *Call->getParent(), *Call, Args->InputBase, AbiHeadWrites);
-      for (CallBase *AbiHeadWrite : AbiHeadWrites) {
-        insertExternalCallInputAbiHeadWriteMarker(Ctx, *Call, *AbiHeadWrite,
-                                                  CallKind);
-        ++NumExternalCallInputAbiHeadWrites;
+      if (kEmitExternalCallDataMarkers) {
+        for (CallBase *AbiHeadWrite : AbiHeadWrites) {
+          insertExternalCallInputAbiHeadWriteMarker(Ctx, *Call, *AbiHeadWrite,
+                                                    CallKind);
+          ++NumExternalCallInputAbiHeadWrites;
+        }
       }
       if (CallBase *Allocation = findExternalCallInputAllocationMarker(
               *Call->getParent(), *Call, InputCopyWrite, InputWordWrite,
               AbiHeadWrites)) {
-        insertExternalCallInputAllocationMarker(Ctx, *Call, *Allocation,
-                                                Args->InputSize, CallKind);
-        ++NumExternalCallInputAllocations;
+        if (kEmitExternalCallDataMarkers) {
+          insertExternalCallInputAllocationMarker(Ctx, *Call, *Allocation,
+                                                  Args->InputSize, CallKind);
+          ++NumExternalCallInputAllocations;
+        }
       }
       // if (CallBase *Consumer = findExternalCallConsumerMarker(
       //         *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
@@ -736,37 +749,46 @@ PreservedAnalyses ExternalCallPass::run(Function &F,
       bool InsertedOutputDecodeBuffer = false;
       if (CallBase *CopyWrite = findExternalCallOutputCopyWriteMarker(
               *Call->getParent(), *Call, Args->OutputBase)) {
-        insertExternalCallOutputCopyWriteMarker(Ctx, *Call, *CopyWrite,
-                                                CallKind);
-        ++NumExternalCallOutputCopyWrites;
-        insertExternalCallOutputAbiDecodeBufferMarker(Ctx, *CopyWrite,
-                                                      CallKind);
-        ++NumExternalCallOutputAbiDecodeBuffers;
-        InsertedOutputDecodeBuffer = true;
+        if (kEmitExternalCallDataMarkers) {
+          insertExternalCallOutputCopyWriteMarker(Ctx, *Call, *CopyWrite,
+                                                  CallKind);
+          ++NumExternalCallOutputCopyWrites;
+          insertExternalCallOutputAbiDecodeBufferMarker(Ctx, *CopyWrite,
+                                                        CallKind);
+          ++NumExternalCallOutputAbiDecodeBuffers;
+          InsertedOutputDecodeBuffer = true;
+        }
       }
       SmallVector<Instruction *, 8> OutputWordReads;
       collectExternalCallOutputWordReadMarkers(
           *Call->getParent(), *Call, Args->OutputBase, Args->OutputSize,
           OutputWordReads);
       if (!InsertedOutputDecodeBuffer && !OutputWordReads.empty()) {
-        insertExternalCallOutputAbiDecodeBufferMarker(
-            Ctx, *OutputWordReads.front(), Args->OutputBase, Args->OutputSize,
-            CallKind);
-        ++NumExternalCallOutputAbiDecodeBuffers;
+        if (kEmitExternalCallDataMarkers) {
+          insertExternalCallOutputAbiDecodeBufferMarker(
+              Ctx, *OutputWordReads.front(), Args->OutputBase, Args->OutputSize,
+              CallKind);
+          ++NumExternalCallOutputAbiDecodeBuffers;
+        }
       }
       if (InsertedOutputDecodeBuffer || !OutputWordReads.empty()) {
         if (CallBase *Allocation = findExternalCallOutputAllocationMarker(
                 *Call->getParent(), *Call, Args->OutputBase)) {
-          insertExternalCallOutputAllocationMarker(Ctx, *Allocation,
-                                                   Args->OutputSize, CallKind);
-          ++NumExternalCallOutputAllocations;
+          if (kEmitExternalCallDataMarkers) {
+            insertExternalCallOutputAllocationMarker(Ctx, *Allocation,
+                                                     Args->OutputSize,
+                                                     CallKind);
+            ++NumExternalCallOutputAllocations;
+          }
         }
       }
-      for (Instruction *WordRead : OutputWordReads) {
-        if (insertExternalCallOutputWordReadMarker(Ctx, *WordRead,
-                                                   Args->OutputBase,
-                                                   CallKind)) {
-          ++NumExternalCallOutputWordReads;
+      if (kEmitExternalCallDataMarkers) {
+        for (Instruction *WordRead : OutputWordReads) {
+          if (insertExternalCallOutputWordReadMarker(Ctx, *WordRead,
+                                                     Args->OutputBase,
+                                                     CallKind)) {
+            ++NumExternalCallOutputWordReads;
+          }
         }
       }
     }

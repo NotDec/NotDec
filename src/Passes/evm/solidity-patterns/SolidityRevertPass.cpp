@@ -23,6 +23,10 @@ STATISTIC(NumRevertDataCopyWrites,
 
 namespace {
 
+// Revert payload markers are semantic annotations. Keep them disabled until the
+// type recovery path has a stable post-inference place to regenerate them.
+constexpr bool kEmitRevertDataMarkers = false;
+
 uint64_t getRevertKindCode(StringRef Kind) {
   if (Kind == "empty") {
     return 1;
@@ -189,15 +193,21 @@ PreservedAnalyses SolidityRevertPass::run(Function &F,
         // ++NumRevertMemoryConsumers;
         SmallVector<CallBase *, 8> WordWrites;
         collectRevertDataWordWriteMarkers(BB, *Call, RevertBase, WordWrites);
-        for (CallBase *WordWrite : WordWrites) {
-          insertRevertDataWordWriteMarker(Ctx, *Call, *WordWrite, Match->Kind);
-          ++NumRevertDataWordWrites;
+        if (kEmitRevertDataMarkers) {
+          for (CallBase *WordWrite : WordWrites) {
+            insertRevertDataWordWriteMarker(Ctx, *Call, *WordWrite,
+                                            Match->Kind);
+            ++NumRevertDataWordWrites;
+          }
         }
         SmallVector<CallBase *, 4> CopyWrites;
         collectRevertDataCopyWriteMarkers(BB, *Call, RevertBase, CopyWrites);
-        for (CallBase *CopyWrite : CopyWrites) {
-          insertRevertDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Match->Kind);
-          ++NumRevertDataCopyWrites;
+        if (kEmitRevertDataMarkers) {
+          for (CallBase *CopyWrite : CopyWrites) {
+            insertRevertDataCopyWriteMarker(Ctx, *Call, *CopyWrite,
+                                            Match->Kind);
+            ++NumRevertDataCopyWrites;
+          }
         }
       }
       insertRevertMemoryWriteMatchMarker(Ctx, *Match);

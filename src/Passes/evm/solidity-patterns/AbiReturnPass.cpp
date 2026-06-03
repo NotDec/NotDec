@@ -67,6 +67,10 @@ STATISTIC(NumAbiReturnLiteralByteRewrites,
 
 namespace {
 
+// ABI return payload markers are semantic annotations. Keep them disabled until
+// the type recovery path has a stable post-inference place to regenerate them.
+constexpr bool kEmitAbiReturnDataMarkers = false;
+
 StringRef classifyAbiReturnSize(Value *Size) {
   if (isConstantIntValue(Size, 32)) {
     return "static_1_word";
@@ -1350,23 +1354,27 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
       collectAbiReturnDataWordWriteMarkers(*Call->getParent(), *Call,
                                            Consumer->getArgOperand(0),
                                            WordWrites);
-      for (CallBase *WordWrite : WordWrites) {
-        insertAbiReturnDataWordWriteMarker(Ctx, *Call, *WordWrite, Kind);
-        ++NumAbiReturnDataWordWrites;
+      if (kEmitAbiReturnDataMarkers) {
+        for (CallBase *WordWrite : WordWrites) {
+          insertAbiReturnDataWordWriteMarker(Ctx, *Call, *WordWrite, Kind);
+          ++NumAbiReturnDataWordWrites;
+        }
       }
       SmallVector<CallBase *, 8> CopyWrites;
       collectAbiReturnDataCopyWriteMarkers(*Call->getParent(), *Call,
                                            Consumer->getArgOperand(0),
                                            CopyWrites);
-      for (CallBase *CopyWrite : CopyWrites) {
-        insertAbiReturnDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Kind);
-        ++NumAbiReturnDataCopyWrites;
-      }
-      if (CallBase *Allocation = findAbiReturnDataAllocationMarker(
-              *Call->getParent(), *Call, WordWrites, CopyWrites)) {
-        insertAbiReturnDataAllocationMarker(Ctx, *Call, *Allocation, *Consumer,
-                                            Kind);
-        ++NumAbiReturnDataAllocations;
+      if (kEmitAbiReturnDataMarkers) {
+        for (CallBase *CopyWrite : CopyWrites) {
+          insertAbiReturnDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Kind);
+          ++NumAbiReturnDataCopyWrites;
+        }
+        if (CallBase *Allocation = findAbiReturnDataAllocationMarker(
+                *Call->getParent(), *Call, WordWrites, CopyWrites)) {
+          insertAbiReturnDataAllocationMarker(Ctx, *Call, *Allocation,
+                                              *Consumer, Kind);
+          ++NumAbiReturnDataAllocations;
+        }
       }
       std::optional<AbiReturnDynamicArraySource> DynamicSource =
           findAbiReturnDynamicArraySource(F, *Call, Consumer->getArgOperand(0),

@@ -4722,8 +4722,8 @@
       "expected_checked_bounds_cfg_rewrites": 44,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_memory_read": 0,
-        "notdec_solidity_external_call_output_word_read": 3,
-        "notdec_solidity_external_call_output_abi_decode_buffer": 2
+        "notdec_solidity_external_call_output_word_read": 0,
+        "notdec_solidity_external_call_output_abi_decode_buffer": 0
       }
     },
     {
@@ -4929,8 +4929,8 @@
       "expected_nonpayable_functions": 8,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_memory_read": 0,
-        "notdec_solidity_external_call_output_word_read": 2,
-        "notdec_solidity_external_call_output_abi_decode_buffer": 2
+        "notdec_solidity_external_call_output_word_read": 0,
+        "notdec_solidity_external_call_output_abi_decode_buffer": 0
       }
     },
     {
