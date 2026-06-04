@@ -27,9 +27,9 @@
 ## 目标
 
 1. 固定刚完成的多返回和 PNDiff 规则，避免后续回退。
-2. 用已经筛好的 80 个 apehex pilot 样本做验证。已有 IR 先直接跑 type recovery；
-   缺 IR 的样本再补跑 Gigahorse + evm2llvm。
-3. 先确认 HType 质量：`extractvalue` 多返回字段正常工作，再确认类型推理能否分析出内存类型。
+2. 样本范围固定为已经筛好的 selected-apehex-80。已有 IR 先直接跑 type recovery；
+   缺 IR 的样本再补跑 Gigahorse + evm2llvm，不扩大到完整 apehex。
+3. 合并检查 HType 质量：先确认 `extractvalue` 是否正常工作，再确认类型推理是否能分析出内存类型。
 
 ## 路线
 
@@ -78,6 +78,8 @@ apehex。
 
 ### 3. 确认 HType 质量和内存类型
 
+这一步把原来的 HType 检查和内存类型检查合并，不再单独拆成后续步骤。
+
 先从验证样本里挑 3-5 个有 private 多返回的样本，确认 `extractvalue` 相关结果：
 
 - 函数类型是否输出多返回。
@@ -85,8 +87,8 @@ apehex。
 - `ReturnValue::<ret>` 和 `::<ret:N>` 是否分开。
 - 普通 struct/memory record 没有被当 tuple return 拆掉。
 
-然后再看类型推理是否已经能分析出内存类型。第一轮只看 HType 里已经能稳定看到的结果，
-不在这一步新增字段建模：
+确认 `extractvalue` 正常后，再看类型推理是否已经能分析出内存类型。第一轮只看 HType
+里已经能稳定看到的结果，不在这一步新增字段建模：
 
 - `[memory] type => struct_*` 是否存在。
 - `evm.mem.ptr` / `evm.alloc.addr` 是否带上具体 struct 类型。
@@ -267,3 +269,101 @@ HType 质量检查：
   看起来是当前测试入口/配置问题，和这次 EVM aggregate/负 offset 修复不是同一类问题。
 - 性能风险需要后续单独看：`7435`、`18404` 在 `notdec_tr` 600 秒 timeout；
   `20900` 原始 `notdec_tr` 用时约 249 秒，`24713` 约 118 秒，`20695` 约 93 秒。
+
+## 2026-06-04 定位记录：两个 notdec_tr timeout 都指向大 SCC，但卡点不同
+
+对剩余两个 `notdec_tr` timeout 样本加了临时 `NOTDEC_MLSUB_TIMING=1` 探针后，
+确认 timeout 都和一个 200+ 函数的大 SCC 有关，但不是同一个阶段：
+
+- `7435_19576293_0de5f3a958_6780a1c34693`
+  - 120 秒采样仍停在 `bottomUpPhase()` 的 SCC0。
+  - SCC0 是 level 0，包含 217 个函数。
+  - 卡点在 `ConstraintsGenerator::run()` 里的逐函数 `MLsubVisitor::visit()`，
+    还没有进入 `PG.solve()`、`topDownPhase()` 或 HType 输出。
+  - 后段 public 函数越来越慢，例如：
+    `public_nextImplementationDelay___0x8fe` 约 11 秒，
+    `public_availableToInvestOut___0x96e` 约 13 秒，
+    `public_redeem_uint256_address_address__0x993` 约 22 秒，
+    `public_underlyingBalanceInVault___0x9cf` 约 25 秒。
+
+- `18404_19693601_dc6a4df89e_e8062015dadc`
+  - 120 秒采样中 `bottomUpPhase()` 约 6 秒完成。
+  - SCC0 是 level 0，包含 240 个函数。
+  - log 没有出现任何 `top-down-scc` 行，说明卡在第一个
+    `ConstraintsGenerator::genTypes()` 里，具体是 `bulkSimplifyDetailed()` 阶段。
+
+还试了一次很小的现有配置试验：
+
+```json
+{
+  "poly_funcs": [
+    "calloc",
+    "calloc_unbounded",
+    "notdec_solidity_memory_allocation",
+    "notdec_evm_finalize_alloc"
+  ],
+  "level_override": {}
+}
+```
+
+这个配置只把 `18404` 的大 SCC 从 240 个函数降到 236 个函数，120 秒内仍 timeout。
+所以简单把 allocation helper 标成 poly summary boundary 不够。
+
+当前判断：
+
+- 这不像一个普通崩溃修复，更像 SCC/summary 边界策略问题。
+- 直接改 `prepareSCC()` 的 same-level region collapse 可能影响所有类型恢复用例。
+- 更稳的下一步应该先决定路线：是做 EVM 专用的大 SCC 切分/summary boundary，
+  还是继续用 `NOTDEC_POLY_FUNCS`/`level_override` 找一组可解释的 public/private
+  边界，再考虑固化。
+
+## 2026-06-04 profile 记录：7435 不是固定 IR 死循环，热点在 binarysub constraint cache
+
+按“先排除是否代码里有死循环路径”的方向，对
+`7435_19576293_0de5f3a958_6780a1c34693` 做了 gdb 采样和 perf profile。
+
+gdb 采样：
+
+- 90 秒后中断，栈稳定落在
+  `MLsubRecovery::bottomUpPhase -> ConstraintsGenerator::run ->
+  MLsubVisitor::visitStoreInst -> ConstraintsGenerator::addSubtype ->
+  binarysub::constrain`。
+- 多次采样没有看到固定某个 LLVM IR 指令自旋的显式死循环。
+- 一次采样停在 `binarysub::trace_related() -> collect_ids()`，发现 trace 没开时仍会先递归
+  `collect_ids(lhs/rhs)`。
+
+perf profile：
+
+- 原始 90 秒 profile：
+  - 约 80% CPU 在 `MLsubRecovery::bottomUpPhase`。
+  - 约 73% 走到 `MLsubVisitor::visitStoreInst -> addSubtype -> binarysub::constrain`。
+  - `std::set<pair<TypeNode*, TypeNode*>>::find` 是主要热点。
+  - `trace_related/collect_ids` 约 10%，属于 trace 关闭时的无用开销。
+- 加 trace 早退后重跑 90 秒 profile：
+  - `trace_related/collect_ids` 热点基本消失。
+  - 主要热点仍然是 `visitStoreInst -> addSubtype -> binarysub::constrain`。
+  - `std::set<pair<TypeNode*, TypeNode*>>::find` 约 50% children，占比更集中。
+
+代码修复：
+
+- [external/binarysub/src/binarysub-core.cpp:176](/sn640/NotDec/external/binarysub/src/binarysub-core.cpp:176)
+  在 `trace_related()` 开头增加 `binarysub_trace_enabled()` 早退。trace 没开时不再递归
+  `collect_ids()`。
+
+验证：
+
+- `cmake --build ./build --target notdec-decompile -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure` 通过。
+- `7435` 在 trace 早退后 180 秒仍 timeout，RSS 约 588MB，仍没有打印
+  `Constraint generation done!`。
+
+当前判断：
+
+- `7435` 更像是大 SCC 下 store 约束传播量过大，`binarysub::constrain` cache/worklist
+  查询成本被放大，不是固定一条 IR 或某个 visitor 分支的死循环。
+- trace 早退值得保留，但它只是清掉无用调试开销，不解决主 timeout。
+- 下一步如果继续优化，需要看两个方向：
+  1. 约束规模：继续切 SCC/summary boundary，减少同一个 `ConstraintsGenerator` 内的 store
+     约束传播量。
+  2. constraint cache 数据结构：把 `std::set<pair<TypeNode*, TypeNode*>>` 换成 hash set
+     或至少统计 cache size / worklist 增长，确认是否是数据结构问题。
