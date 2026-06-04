@@ -4,11 +4,11 @@
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:256
-[+] @evm_caller => lower=(bottom:256 (*)())* ; upper=top:256
 [+] @main => lower=(bottom:256 (*)())* ; upper=top:256
-[+] evm_caller::<ret> => lower=bottom:256 ; upper=top:256
-[+] main::%caller => lower=bottom:256 ; upper=top:256
+[+] @notdec_test_semantic_value => lower=(bottom:256 (*)())* ; upper=(top:256 (*)())*
+[+] main::%value => lower=bottom:256 ; upper=top:256
 [+] main::<ret> => lower=bottom:256 ; upper=top:256
+[+] notdec_test_semantic_value::<ret> => lower=bottom:256 ; upper=top:256
 
 [memory]
 type => top:256

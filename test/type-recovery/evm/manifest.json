@@ -52,6 +52,12 @@
         "NOTDEC_SUMMARY_OVERRIDE": "test/type-recovery/evm/support/allowed_arch_wasm.summary.json"
       },
       "status": "pass"
+    },
+    {
+      "name": "08_evm_runtime_semantic_primitives",
+      "input": "cases/08_evm_runtime_semantic_primitives.ll",
+      "expected": "expected/tr-level-2/08_evm_runtime_semantic_primitives.htypes",
+      "status": "pass"
     }
   ]
 }

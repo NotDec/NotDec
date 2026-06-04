@@ -532,3 +532,58 @@ digraph evm_i256_semantics {
 
 - 还没有把 EVM runtime builtin 的真实 address/storage_key/integer 约束固化进 summary
   或 visitor；这一步放回后续 semantic lattice 实现。
+
+## 2026-06-04 实现记录：EVM runtime 强信号接入 semantic primitive
+
+完成第一版 EVM i256 semantic 类型来源。当前只给强信号 runtime helper 打约束：
+
+- `address`：`evm_address` / `evm_caller` / `evm_origin` / `evm_coinbase` 返回值，
+  `evm_balance` / `evm_extcodesize` / `evm_extcodehash` / `evm_extcodecopy` 的地址参数，
+  `evm_call*` 的 target 参数，`evm_create*` 返回值。
+- `storage_key`：`evm_sload` / `evm_sstore` 的 key 参数。
+- `integer`：`evm_call*` 的 gas/value/size/status、`evm_create*` 的 value/size/salt、
+  `evm_balance` 等查询返回值。
+
+这次仍然不做 selector，不从 `and x, 2^160-1` 推 address，也不从 keccak 结果反推
+storage key。EVM memory base 参数也没有直接标成 `integer`。
+
+改动位置：
+
+- [include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:358](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:358)
+  给 `MLsubVisitor` 增加 `addEVMRuntimeSemanticConstraints()` 声明。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3789](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3789)
+  新增 `makeEVMSemanticPrimitive()`，统一构造 `prim.uint256.evm.*` primitive。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:4004](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:4004)
+  新增 `addEVMSemanticConstraint()`，把目标 SSA/operand 标成非指针，并添加 semantic
+  primitive 下界。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:4011](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:4011)
+  新增 `MLsubVisitor::addEVMRuntimeSemanticConstraints()`，按 EVM runtime helper 名称给
+  address/storage_key/integer 打强信号约束。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:4153](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:4153)
+  `visitCallBase()` 在跳过 EVM runtime call 副作用建模前，先写入 semantic primitive 约束。
+- [test/type-recovery/evm/cases/08_evm_runtime_semantic_primitives.ll:6](/sn640/NotDec/test/type-recovery/evm/cases/08_evm_runtime_semantic_primitives.ll:6)
+  新增 frozen IR，覆盖 `evm_caller`、`evm_balance`、`evm_sload`、`evm_sstore`、`evm_call`。
+- [test/type-recovery/evm/expected/tr-level-2/08_evm_runtime_semantic_primitives.htypes:4](/sn640/NotDec/test/type-recovery/evm/expected/tr-level-2/08_evm_runtime_semantic_primitives.htypes:4)
+  新增 HType snapshot，能看到 `integer`、`address`、`storage_key` 三个 semantic typedef。
+- [test/type-recovery/evm/expected/tr-level-2/02_evm_runtime_helpers.htypes:4](/sn640/NotDec/test/type-recovery/evm/expected/tr-level-2/02_evm_runtime_helpers.htypes:4)
+  更新 runtime helper 旧 case 的 snapshot，`evm_call` 的 gas/value/size/status 和 target
+  已出现 semantic typedef。
+- [test/type-recovery/evm/cases/06_evm_allowed_arch_summary.ll:6](/sn640/NotDec/test/type-recovery/evm/cases/06_evm_allowed_arch_summary.ll:6)
+  把 allowed-arch 回归里的 callee 从 `evm_caller` 换成自定义
+  `notdec_test_semantic_value`，避免和 runtime visitor 规则重叠。
+
+验证：
+
+- `cmake --build ./build --target notdec-decompile -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过。
+
+HType 观察：
+
+- `08_evm_runtime_semantic_primitives` 中：
+  - `%caller` 是 `address`。
+  - `%balance` / `%ok` / gas 和 size 常量是 `integer`。
+  - `%slot` 是 `storage_key`。
+  - `%target` 是 `address`。
+- 当前仍能看到 `in.base` / `out.base` 在样例里带上 `integer` 下界。这不是本轮直接给
+  memory base 打的约束，更像现有 i256 传播/合并结果，后续需要继续看 semantic 质量。

@@ -3786,6 +3786,10 @@ static bool isEVMModule(const llvm::Module &M) {
   return StringRef(M.getTargetTriple().getTriple()).starts_with("evm");
 }
 
+static SimpleType makeEVMSemanticPrimitive(llvm::StringRef Name) {
+  return binarysub::make_primitive(("prim.uint256.evm." + Name).str(), 256);
+}
+
 static bool constantHasAllPointerTagMiddleBits(const ConstantInt &CI) {
   const APInt &Val = CI.getValue();
   unsigned BitWidth = Val.getBitWidth();
@@ -3997,6 +4001,87 @@ bool ConstraintsGenerator::MLsubVisitor::handleEVMMarkerCall(
   return true;
 }
 
+void addEVMSemanticConstraint(ConstraintsGenerator &CG, ExtValuePtr Val,
+                              llvm::StringRef SemanticName) {
+  CG.setNonPointer(Val);
+  CG.addSubtype(makeEVMSemanticPrimitive(SemanticName),
+                CG.getOrInsertNode(Val));
+}
+
+void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
+    llvm::CallBase &I) {
+  auto *F = I.getCalledFunction();
+  if (F == nullptr) {
+    return;
+  }
+
+  auto markArg = [&](unsigned Index, llvm::StringRef SemanticName) {
+    if (Index < I.arg_size() &&
+        I.getArgOperand(Index)->getType()->isIntegerTy(256)) {
+      addEVMSemanticConstraint(
+          cg, getExtValuePtr(I.getArgOperand(Index), &I, Index), SemanticName);
+    }
+  };
+  auto markRet = [&](llvm::StringRef SemanticName) {
+    if (!I.getType()->isVoidTy() && I.getType()->isIntegerTy(256)) {
+      addEVMSemanticConstraint(cg, &I, SemanticName);
+    }
+  };
+
+  StringRef Name = F->getName();
+  if (Name == "evm_address" || Name == "evm_caller" ||
+      Name == "evm_origin" || Name == "evm_coinbase") {
+    markRet("address");
+    return;
+  }
+  if (Name == "evm_create" || Name == "evm_create2") {
+    markRet("address");
+    markArg(0, "integer");
+    markArg(2, "integer");
+    if (Name == "evm_create2") {
+      markArg(3, "integer");
+    }
+    return;
+  }
+  if (Name == "evm_balance" || Name == "evm_extcodesize" ||
+      Name == "evm_extcodehash") {
+    markArg(0, "address");
+    markRet("integer");
+    return;
+  }
+  if (Name == "evm_extcodecopy") {
+    markArg(1, "address");
+    markArg(3, "integer");
+    markArg(4, "integer");
+    return;
+  }
+  if (Name == "evm_sload") {
+    markArg(0, "storage_key");
+    return;
+  }
+  if (Name == "evm_sstore") {
+    markArg(0, "storage_key");
+    return;
+  }
+  if (Name == "evm_call" || Name == "evm_callcode") {
+    markArg(3, "integer");
+    markArg(4, "address");
+    markArg(5, "integer");
+    markArg(7, "integer");
+    markArg(9, "integer");
+    markRet("integer");
+    return;
+  }
+  if (Name == "evm_delegatecall" || Name == "evm_staticcall") {
+    markArg(3, "integer");
+    markArg(4, "address");
+    markArg(6, "integer");
+    markArg(8, "integer");
+    markRet("integer");
+    return;
+  }
+}
+
 bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
     llvm::CallBase &I) {
   auto Target = I.getCalledFunction();
@@ -4066,6 +4151,7 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
   } else if (handleEVMMarkerCall(I)) {
     return;
   } else if (shouldIgnoreRuntimeCall(I)) {
+    addEVMRuntimeSemanticConstraints(I);
     return;
   } else if (handleIntrinsicCall(I)) {
     return;

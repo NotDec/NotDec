@@ -1,7 +1,7 @@
 {
   "version": 1,
   "functions": {
-    "evm_caller": {
+    "notdec_test_semantic_value": {
       "allowed_arch": ["evm"],
       "ret": {
         "kind": "primitive",

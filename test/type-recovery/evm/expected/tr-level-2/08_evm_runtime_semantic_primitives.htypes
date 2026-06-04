@@ -5,21 +5,22 @@ typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.int
 
 typedef u256 typedef_1; /* semantic primitive lattice node: prim.uint256.evm.address */
 
+typedef u256 typedef_2; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
+
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:256
+[+] @evm_balance => lower=(bottom:256 (*)(top:256))* ; upper=top:256
 [+] @evm_call => lower=(bottom:256 (*)(top:256, top:256, top:256, top:256, top:256, top:256, top:256, top:256, top:256, top:256))* ; upper=top:256
-[+] @evm_log1 => lower=(void (*)(top:256, top:256, top:256, top:256))* ; upper=top:256
-[+] @main => lower=(typedef_0 (*)(top:256, top:256, top:256))* ; upper=top:256
-[+] @notdec_evm_alloc => lower=(bottom:256 (*)(top:256))* ; upper=top:256
-[+] @notdec_evm_alloc_unbounded => lower=(bottom:256 (*)())* ; upper=top:256
-[+] @notdec_evm_finalize_alloc => lower=(void (*)(top:256, top:256))* ; upper=top:256
-[+] const(i256 0)@main::%ok:5 => lower=typedef_0 ; upper=top:256
-[+] const(i256 1)@main::%ok:4 => lower=typedef_1 ; upper=top:256
+[+] @evm_caller => lower=(bottom:256 (*)())* ; upper=top:256
+[+] @evm_sload => lower=(bottom:256 (*)(top:256))* ; upper=top:256
+[+] @evm_sstore => lower=(void (*)(top:256, top:256))* ; upper=top:256
+[+] @main => lower=(typedef_0 (*)(top:256, top:256, top:256, top:256, top:256, top:256, top:256))* ; upper=top:256
 [+] const(i256 100000)@main::%ok:3 => lower=typedef_0 ; upper=top:256
 [+] const(i256 32)@main::%ok:7 => lower=typedef_0 ; upper=top:256
 [+] const(i256 64)@main::%ok:9 => lower=typedef_0 ; upper=top:256
-[+] const(i256 7)@main::%bb.entry.i2:0 => lower=bottom:256 ; upper=top:256
+[+] evm_balance::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_balance::arg0 => lower=bottom:256 ; upper=top:256
 [+] evm_call::<ret> => lower=bottom:256 ; upper=top:256
 [+] evm_call::arg0 => lower=bottom:256 ; upper=top:256
 [+] evm_call::arg1 => lower=bottom:256 ; upper=top:256
@@ -31,23 +32,22 @@ typedef u256 typedef_1; /* semantic primitive lattice node: prim.uint256.evm.add
 [+] evm_call::arg7 => lower=bottom:256 ; upper=top:256
 [+] evm_call::arg8 => lower=bottom:256 ; upper=top:256
 [+] evm_call::arg9 => lower=bottom:256 ; upper=top:256
-[+] evm_log1::arg0 => lower=bottom:256 ; upper=top:256
-[+] evm_log1::arg1 => lower=bottom:256 ; upper=top:256
-[+] evm_log1::arg2 => lower=bottom:256 ; upper=top:256
-[+] evm_log1::arg3 => lower=bottom:256 ; upper=top:256
-[-] main::%buf.addr => lower=typedef_0 ; upper=ptr<load=void, store=void, psize=256>
-[+] main::%buf.ptr => lower=typedef_0 ; upper=ptr<load=void, store=void, psize=256>
+[+] evm_caller::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_sload::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_sload::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg1 => lower=bottom:256 ; upper=top:256
+[+] main::%balance => lower=typedef_0 ; upper=top:256
+[+] main::%caller => lower=typedef_1 ; upper=top:256
 [+] main::%ok => lower=typedef_0 ; upper=top:256
-[-] main::%scratch.addr => lower=typedef_0 ; upper=top:256
 [+] main::<ret> => lower=typedef_0 ; upper=top:256
 [+] main::arg0 => lower=bottom:256 ; upper=top:256
 [+] main::arg1 => lower=bottom:256 ; upper=top:256
 [+] main::arg2 => lower=bottom:256 ; upper=top:256
-[+] notdec_evm_alloc::<ret> => lower=bottom:256 ; upper=top:256
-[+] notdec_evm_alloc::arg0 => lower=bottom:256 ; upper=top:256
-[+] notdec_evm_alloc_unbounded::<ret> => lower=bottom:256 ; upper=top:256
-[+] notdec_evm_finalize_alloc::arg0 => lower=bottom:256 ; upper=top:256
-[+] notdec_evm_finalize_alloc::arg1 => lower=bottom:256 ; upper=top:256
+[+] main::arg3 => lower=typedef_2 ; upper=top:256
+[+] main::arg4 => lower=typedef_1 ; upper=top:256
+[+] main::arg5 => lower=typedef_0 ; upper=top:256
+[+] main::arg6 => lower=typedef_0 ; upper=top:256
 
 [memory]
 type => top:256
