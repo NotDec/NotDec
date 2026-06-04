@@ -630,7 +630,14 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
         // 2. Pointer - Unknown = Unknown
         // degrade to Result != Right constraint? Not very useful
       } else {
-        assert(false && "Should not reach here");
+        // Examples such as Unknown - Unknown = Pointer do not give a sound
+        // local update without knowing which unknown aliases the pointer base.
+        // Keep the constraint alive for later solve rounds instead of aborting.
+        traceConstraintEvent(
+            G, "sub:defer",
+            formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
+                                     Inst) +
+                " reason=no-local-rule");
       }
     } else {
       // all unknown, nothing we can do now.

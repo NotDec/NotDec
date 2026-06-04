@@ -3412,6 +3412,119 @@ SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val) {
   std::abort();
 }
 
+SimpleType ConstraintsGenerator::makeAggregateReturnRecord(
+    llvm::Type *Ty,
+    const std::function<SimpleType(unsigned, llvm::Type *)> &MakeField) {
+  std::vector<std::pair<std::string, SimpleType>> Fields;
+  if (auto *StructTy = dyn_cast<StructType>(Ty)) {
+    Fields.reserve(StructTy->getNumElements());
+    for (unsigned I = 0; I < StructTy->getNumElements(); ++I) {
+      Fields.emplace_back(std::to_string(I),
+                          MakeField(I, StructTy->getElementType(I)));
+    }
+  } else if (auto *ArrayTy = dyn_cast<ArrayType>(Ty)) {
+    Fields.reserve(ArrayTy->getNumElements());
+    for (unsigned I = 0; I < ArrayTy->getNumElements(); ++I) {
+      Fields.emplace_back(std::to_string(I),
+                          MakeField(I, ArrayTy->getElementType()));
+    }
+  } else {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "ERROR: unsupported aggregate return type: " << *Ty
+                 << "\n";
+    std::abort();
+  }
+  return binarysub::make_record(std::move(Fields));
+}
+
+static SimpleType makeAggregateReturnFieldSeed(llvm::Type *Ty,
+                                               unsigned PointerSize) {
+  if (Ty->isIntegerTy(1)) {
+    return binarysub::make_primitive("bool", 1);
+  }
+  if (Ty->isIntegerTy()) {
+    return binarysub::make_primitive("uint",
+                                     Ty->getScalarSizeInBits());
+  }
+  if (Ty->isFloatingPointTy()) {
+    return binarysub::make_primitive("float",
+                                     Ty->getScalarSizeInBits());
+  }
+  if (Ty->isPointerTy() || Ty->isFunctionTy()) {
+    return binarysub::make_record({});
+  }
+  llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+               << "ERROR: unsupported aggregate return field type: " << *Ty
+               << "\n";
+  std::abort();
+}
+
+SimpleType
+ConstraintsGenerator::makeFunctionAggregateReturnRecord(llvm::Function &Func) {
+  return makeAggregateReturnRecord(
+      Func.getReturnType(), [&](unsigned Index, llvm::Type *FieldTy) {
+        auto Slot = getOrInsertNode(ReturnValue{
+            .Func = &Func, .Index = static_cast<int32_t>(Index)});
+        addSubtype(makeAggregateReturnFieldSeed(FieldTy, PointerSize), Slot);
+        return Slot;
+      });
+}
+
+SimpleType
+ConstraintsGenerator::getOrCreateCallAggregateReturnSlot(llvm::CallBase &Call,
+                                                         unsigned Index) {
+  auto Key = std::make_pair(&Call, Index);
+  auto It = AggregateCallReturnSlots.find(Key);
+  if (It != AggregateCallReturnSlots.end()) {
+    return It->second;
+  }
+  auto *Ty = Call.getType();
+  llvm::Type *FieldTy = nullptr;
+  if (auto *StructTy = dyn_cast<StructType>(Ty)) {
+    FieldTy = StructTy->getElementType(Index);
+  } else if (auto *ArrayTy = dyn_cast<ArrayType>(Ty)) {
+    FieldTy = ArrayTy->getElementType();
+  } else {
+    llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
+                 << "ERROR: call is not aggregate typed: " << Call << "\n";
+    std::abort();
+  }
+  auto Slot = binarysub::make_variable(lvl, getLLVMTypeSize(FieldTy));
+  addSubtype(makeAggregateReturnFieldSeed(FieldTy, PointerSize), Slot);
+  AggregateCallReturnSlots.emplace(Key, Slot);
+  return Slot;
+}
+
+SimpleType
+ConstraintsGenerator::makeCallAggregateReturnRecord(llvm::CallBase &Call) {
+  return makeAggregateReturnRecord(
+      Call.getType(), [&](unsigned Index, llvm::Type *) {
+        return getOrCreateCallAggregateReturnSlot(Call, Index);
+      });
+}
+
+void ConstraintsGenerator::addAggregateReturnConstraints(llvm::Value *Agg,
+                                                         llvm::ReturnInst &Ret) {
+  auto *Insert = dyn_cast<InsertValueInst>(Agg);
+  if (Insert == nullptr) {
+    return;
+  }
+  addAggregateReturnConstraints(Insert->getAggregateOperand(), Ret);
+  auto Indices = Insert->getIndices();
+  if (Indices.size() != 1) {
+    return;
+  }
+  auto *Inserted = Insert->getInsertedValueOperand();
+  if (Inserted->getType()->isAggregateType() || Inserted->getType()->isVoidTy()) {
+    return;
+  }
+  auto Src = getOrInsertNode(getExtValuePtr(
+      Inserted, Insert, InsertValueInst::getInsertedValueOperandIndex()));
+  auto Dst = getOrInsertNode(ReturnValue{
+      .Func = Ret.getFunction(), .Index = static_cast<int32_t>(Indices[0])});
+  addSubtype(Src, Dst);
+}
+
 void ConstraintsGenerator::maybeUnifyPNDiffTypeVariablePair(
     const SimpleType &Lhs, const SimpleType &Rhs) {
   if (!EnablePNDiffTypeVariableClosureUnification || !Lhs || !Rhs) {
@@ -3653,15 +3766,30 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
         }
       }
     }
+    auto Indices = I.getIndices();
+    if (Indices.size() == 1 && !I.getType()->isAggregateType()) {
+      auto Dst = cg.createNode(&I);
+      auto Src = cg.getOrCreateCallAggregateReturnSlot(*Call, Indices[0]);
+      cg.addSubtype(Src, Dst);
+      return;
+    }
   }
-  // EVM private multi-return is represented as an aggregate call followed by
-  // extractvalue. The aggregate value itself is not modeled by MLsub, but each
-  // scalar result can still participate in later constraints.
   if (!I.getType()->isAggregateType()) {
     cg.createNode(&I);
     return;
   }
   assert(false && "TODO: ExtractValueInst aggregate result");
+}
+
+void ConstraintsGenerator::MLsubVisitor::visitInsertValueInst(
+    InsertValueInst &I) {
+  // The aggregate value itself is only an LLVM carrier for multi-return values.
+  // ReturnInst walks the insertvalue chain and connects inserted scalar values
+  // to the current function's per-field return slots.
+  if (I.getType()->isAggregateType()) {
+    return;
+  }
+  visitInstruction(I);
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
@@ -3857,11 +3985,12 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
       Args.push_back(ValVar);
     }
     SimpleType Ret = nullptr;
-    // Aggregate call results are only useful to MLsub after extractvalue turns
-    // them back into scalar values. Creating a node for the aggregate itself
-    // would call getSize({ ... }) and abort.
-    if (!I.getType()->isVoidTy() && !I.getType()->isAggregateType()) {
-      Ret = cg.getOrInsertNode(&I);
+    if (!I.getType()->isVoidTy()) {
+      if (I.getType()->isAggregateType()) {
+        Ret = cg.makeCallAggregateReturnRecord(I);
+      } else {
+        Ret = cg.getOrInsertNode(&I);
+      }
     }
     auto ActualFunc = binarysub::make_function(Args, Ret);
     if (cg.SCCs.count(Target)) {
@@ -3881,6 +4010,7 @@ void ConstraintsGenerator::MLsubVisitor::visitReturnInst(ReturnInst &I) {
     return;
   }
   if (SrcVal->getType()->isAggregateType()) {
+    cg.addAggregateReturnConstraints(SrcVal, I);
     return;
   }
   auto Src = cg.getOrInsertNode(getExtValuePtr(SrcVal, &I, 0));

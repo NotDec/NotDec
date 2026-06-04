@@ -928,3 +928,80 @@ data word/copy/allocation marker 仍保留。
 - 复杂度：低，只是在已有 MLsub visitor 里跳过当前无法表示的 aggregate 本体。
 - 维护成本：低，但后续如果要恢复多返回字段关系，仍需要单独设计 aggregate 拆分或
   更明确的 per-field 约束。
+
+## 2026-06-04 实现记录：用 record 建模 aggregate 多返回
+
+上一段“跳过 aggregate 本体”只能避免崩溃，没有把 private helper 的多个返回值稳定连到
+函数类型上。这次改成：LLVM IR 仍保留 `{ i256, i256 }` 这类 aggregate Value；
+binarysub 的 `make_function` 仍只有单个 `result`，所以在 result 位置放
+`record{"0": ret0, "1": ret1, ...}`；最后 HType 转换函数类型时，把这个连续数字字段的
+record 拆成多个返回类型。
+
+改动位置：
+
+- [include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:107](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:107)
+  新增 `AggregateCallReturnSlots`，按 `CallBase + field index` 保存每个 aggregate call
+  的返回字段节点，避免不同 call 的同一字段混在一起。
+- [include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:149](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:149)
+  `ConstraintsGenerator::run()` 遇到 aggregate 函数返回时调用
+  `makeFunctionAggregateReturnRecord()`，给函数签名 result 建 tuple record。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3415](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3415)
+  新增 `makeAggregateReturnRecord()`、`makeFunctionAggregateReturnRecord()`、
+  `makeCallAggregateReturnRecord()` 和 `getOrCreateCallAggregateReturnSlot()`，把 struct/array
+  返回值按字段编号包装成 binarysub record。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3506](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3506)
+  `addAggregateReturnConstraints()` 递归走 `insertvalue` 链，把插入的标量值连到当前函数的
+  `ReturnValue{Func, Index}`。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3769](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3769)
+  `MLsubVisitor::visitExtractValueInst()` 对 aggregate call 的标量 `extractvalue`，把 call
+  字段 slot 连到 extract 结果。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3784](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3784)
+  `visitInsertValueInst()` 跳过 aggregate carrier 本体；真正的字段关系由 return 侧处理。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3987](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3987)
+  `visitCallBase()` 对 aggregate call 的实际函数类型 result 也建 tuple record。
+- [src/TypeRecovery/mlsub/TypeBuilder.cpp:52](/sn640/NotDec/src/TypeRecovery/mlsub/TypeBuilder.cpp:52)
+  新增 `parseTupleFieldIndex()` 和 `getSequentialTupleRecordFields()`，只把字段名为
+  `0..n-1` 的 record 当函数多返回 tuple。
+- [src/TypeRecovery/mlsub/TypeBuilder.cpp:994](/sn640/NotDec/src/TypeRecovery/mlsub/TypeBuilder.cpp:994)
+  `TypeBuilder::convert(UFunctionType)` 在 result 是这种 tuple record 时，生成多个
+  `RetTypes`；普通 record 仍走原来的单返回逻辑。
+- [src/TypeRecovery/mlsub/PNDiff.cpp:633](/sn640/NotDec/src/TypeRecovery/mlsub/PNDiff.cpp:633)
+  `SubNodeCons::solve()` 遇到 `Unknown - Unknown = Pointer` 这类没有本地规则的情况时改成
+  trace 后 defer，不再 assert。`3938` 样本会触发这个点。
+- [external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:185](/sn640/NotDec/external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:185)
+  `ReturnValue` 的显示名带上 index。
+- [external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:215](/sn640/NotDec/external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:215)
+  `getType(ReturnValue)` 对 struct/array return 按 `Index` 返回字段 LLVM 类型，scalar return
+  仍要求 `Index == 0`。
+
+验证：
+
+- `cmake --build ./build --target notdec-decompile -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过。
+- 单样本 `26592_19784089_8c65bcf004_3cf345d49e39`、`27555_19797354_202e574be9_1a582ff02a29`
+  和 `3938_19528412_7cfde523bc_0b78633855ab` 手工 `--tr-level=2 --dump-htypes` 通过。
+- HType 检查：`3938` 的 `@private__0x2b2_0x2b2` 显示为
+  `((u256, 'm11:256 | u256) (*)(...))*`，并且值表里有
+  `private__0x2b2_0x2b2::<ret>` 和 `::<ret:1>`，说明函数类型和字段节点都已拆开。
+- apehex native 30 样本：
+  `/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/scripts/notdec-evm-type-recovery-apehex.py
+  --run-name 20260604-tr-smoke-30-record-ret-pndiff --limit 30 --jobs 2
+  --gigahorse-jobs 1 --timeout-secs 600` 通过，30/30 ok；`notdec_tr_secs` 平均
+  `0.62s`，最大 `1.77s`。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-record-ret.ll --tr-level=2
+  --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-record-ret.htypes`
+  通过，`elapsed=12.78 user=12.38 sys=0.39 maxrss=851676`。
+
+判断：
+
+- 实现效果：aggregate 多返回不再只是跳过，函数 summary / call actual / return / extractvalue
+  都能通过 per-field 节点连接，HType 文件能输出多返回函数类型。
+- 复杂度：中等。没有改 binarysub 核心函数类型，只在 function result 位置用 record 作为
+  tuple，并在 HType 转换处拆开。
+- 维护成本：可控，但这个约定目前只靠字段名 `0..n-1` 识别。后续如果 binarysub 原生支持
+  多返回，可以把这层 tuple record 去掉。

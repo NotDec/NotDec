@@ -49,6 +49,50 @@ using binarysub::UUnion;
 
 using FieldEntry = std::pair<SimpleRange, HType *>;
 
+static std::optional<unsigned> parseTupleFieldIndex(const std::string &Name) {
+  if (Name.empty()) {
+    return std::nullopt;
+  }
+  unsigned Value = 0;
+  for (char C : Name) {
+    if (!std::isdigit(static_cast<unsigned char>(C))) {
+      return std::nullopt;
+    }
+    Value = Value * 10 + static_cast<unsigned>(C - '0');
+  }
+  return Value;
+}
+
+static std::optional<std::vector<UTypePtr>>
+getSequentialTupleRecordFields(const UTypePtr &Ty) {
+  auto *Record = std::get_if<URecordType>(&Ty->v);
+  if (Record == nullptr || Record->fields.empty()) {
+    return std::nullopt;
+  }
+
+  std::map<unsigned, UTypePtr> Ordered;
+  for (const auto &Field : Record->fields) {
+    auto Index = parseTupleFieldIndex(Field.first);
+    if (!Index.has_value()) {
+      return std::nullopt;
+    }
+    if (!Ordered.emplace(*Index, Field.second).second) {
+      return std::nullopt;
+    }
+  }
+
+  std::vector<UTypePtr> Fields;
+  Fields.reserve(Ordered.size());
+  for (unsigned Index = 0; Index < Ordered.size(); ++Index) {
+    auto It = Ordered.find(Index);
+    if (It == Ordered.end()) {
+      return std::nullopt;
+    }
+    Fields.push_back(It->second);
+  }
+  return Fields;
+}
+
 TypeBuilder::TypeBuilder(TypeBuilderContext &Parent)
     : Parent(Parent), Ctx(Parent.Ctx) {
   initializeStructMergeInfo();
@@ -949,7 +993,13 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
     }
     std::vector<HType *> RetTypes;
     if (V->result) {
-      RetTypes.push_back(convert(V->result));
+      if (auto TupleFields = getSequentialTupleRecordFields(V->result)) {
+        for (const auto &Field : *TupleFields) {
+          RetTypes.push_back(convert(Field));
+        }
+      } else {
+        RetTypes.push_back(convert(V->result));
+      }
     }
     auto FTy = Ctx.getFunctionType(false, RetTypes, Params);
     Result = getPtrTy(FTy);

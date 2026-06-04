@@ -104,6 +104,8 @@ struct ConstraintsGenerator {
   std::set<ExtValuePtr> ContraVariantValues;
   std::set<ExtValuePtr> SnapshotContraVariantValues;
   std::map<std::uint32_t, std::set<ExtValuePtr>> OriginalVariableSources;
+  std::map<std::pair<llvm::CallBase *, unsigned>, SimpleType>
+      AggregateCallReturnSlots;
   bool EnablePNDiffTypeVariableClosureUnification = true;
   std::ostream *TraceStream = nullptr;
   PointerAnalysisMode PAMode = PointerAnalysisMode::Original;
@@ -145,12 +147,12 @@ struct ConstraintsGenerator {
         Args.push_back(Arg);
       }
       SimpleType Ret = nullptr;
-      // MLsub currently models scalar and pointer values. Aggregate returns
-      // from EVM private multi-return helpers are consumed through
-      // extractvalue, so do not create a node for the aggregate value itself.
-      if (!Func->getReturnType()->isVoidTy() &&
-          !Func->getReturnType()->isAggregateType()) {
-        Ret = createNode(ReturnValue{.Func = Func});
+      if (!Func->getReturnType()->isVoidTy()) {
+        if (Func->getReturnType()->isAggregateType()) {
+          Ret = makeFunctionAggregateReturnRecord(*Func);
+        } else {
+          Ret = createNode(ReturnValue{.Func = Func});
+        }
       }
       addSubtype(binarysub::make_function(Args, Ret), F);
     }
@@ -176,6 +178,14 @@ struct ConstraintsGenerator {
 
   SimpleType convertSimpleType(ExtValuePtr Val);
   SimpleType convertSimpleTypeVal(Value *Val, llvm::User *User, long OpInd);
+  SimpleType makeAggregateReturnRecord(
+      llvm::Type *Ty,
+      const std::function<SimpleType(unsigned, llvm::Type *)> &MakeField);
+  SimpleType makeFunctionAggregateReturnRecord(llvm::Function &Func);
+  SimpleType makeCallAggregateReturnRecord(llvm::CallBase &Call);
+  SimpleType getOrCreateCallAggregateReturnSlot(llvm::CallBase &Call,
+                                                unsigned Index);
+  void addAggregateReturnConstraints(llvm::Value *Agg, llvm::ReturnInst &Ret);
   void maybeUnifyPNDiffTypeVariablePair(const SimpleType &Lhs,
                                         const SimpleType &Rhs);
   void observeOldMemoryTypeEdge(const SimpleType &Lhs, const SimpleType &Rhs);
@@ -343,6 +353,7 @@ protected:
     bool handleIntrinsicCall(llvm::CallBase &I);
     // overloaded visit functions
     void visitExtractValueInst(llvm::ExtractValueInst &I);
+    void visitInsertValueInst(llvm::InsertValueInst &I);
     void visitCastInst(llvm::CastInst &I);
     void visitCallBase(llvm::CallBase &I);
     void visitReturnInst(llvm::ReturnInst &I);
