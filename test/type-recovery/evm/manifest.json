@@ -28,6 +28,12 @@
       "input": "cases/04_evm_memory_helpers.ll",
       "expected": "expected/tr-level-2/04_evm_memory_helpers.htypes",
       "status": "pass"
+    },
+    {
+      "name": "05_evm_aggregate_return_pndiff_sub",
+      "input": "cases/05_evm_aggregate_return_pndiff_sub.ll",
+      "expected": "expected/tr-level-2/05_evm_aggregate_return_pndiff_sub.htypes",
+      "status": "pass"
     }
   ]
 }

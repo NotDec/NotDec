@@ -1,0 +1,32 @@
+# HTypeResult
+
+[decls]
+struct struct_0 {
+  top:256 field_0; /* at offset: 96 */
+};
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=struct_0*
+[+] @main => lower=(void (*)(top:256, top:256))* ; upper=top:256
+[+] @private_pair => lower=((u256, 'd:256 | u256) (*)(top:256, 'd:256))* ; upper=((ptr<load=void, store=void, psize=256>, top:256) (*)(bottom:256, bottom:256))*
+[+] addr(0x60) => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] const(i256 7)@private_pair::%bb.entry.i2:0 => lower=bottom:256 ; upper=top:256
+[+] main::%addr => lower=u256 ; upper=ptr<load=void, store=void, psize=256>
+[+] main::%amount => lower=u256 ; upper=top:256
+[+] main::%out => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] main::%ptr => lower=u256 ; upper=ptr<load=void, store=void, psize=256>
+[+] main::%sum => lower=bottom:256 ; upper=top:256
+[+] main::%word => lower=bottom:256 ; upper=top:256
+[+] main::arg0 => lower=bottom:256 ; upper=top:256
+[+] main::arg1 => lower=bottom:256 ; upper=top:256
+[+] private_pair::%addr => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] private_pair::%ptr => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] private_pair::<ret:1> => lower=u256 ; upper=top:256
+[+] private_pair::<ret> => lower=u256 ; upper=ptr<load=void, store=void, psize=256>
+[+] private_pair::arg0 => lower=bottom:256 ; upper=top:256
+[+] private_pair::arg1 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => struct_0*
+

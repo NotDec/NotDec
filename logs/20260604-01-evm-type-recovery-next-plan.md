@@ -114,3 +114,27 @@
 - 暂不重跑完整 apehex。
 - 暂不做动态 ABI bytes/string/array。
 - 暂不让类型结果驱动 ABI rewrite 或 cleanup。
+
+## 2026-06-04 实现记录：完成最小回归测试
+
+完成路线第 1 步，新增一个 frozen EVM LLVM IR case，固定 aggregate 多返回和
+PNDiff sub pointer result 规则。
+
+改动位置：
+
+- [test/type-recovery/evm/cases/05_evm_aggregate_return_pndiff_sub.ll:6](/sn640/NotDec/test/type-recovery/evm/cases/05_evm_aggregate_return_pndiff_sub.ll:6)
+  新增 `@private_pair`，返回 `{ i256, i256 }`。函数里用
+  `%addr = sub i256 %base, %delta` 和 `inttoptr %addr` 触发
+  `Unknown - Unknown = Pointer` 到 `Pointer - Number = Pointer` 的 PNDiff 规则。
+- [test/type-recovery/evm/cases/05_evm_aggregate_return_pndiff_sub.ll:16](/sn640/NotDec/test/type-recovery/evm/cases/05_evm_aggregate_return_pndiff_sub.ll:16)
+  新增 `@main`，调用 `@private_pair` 后用两个 `extractvalue` 读取返回字段。
+- [test/type-recovery/evm/expected/tr-level-2/05_evm_aggregate_return_pndiff_sub.htypes:10](/sn640/NotDec/test/type-recovery/evm/expected/tr-level-2/05_evm_aggregate_return_pndiff_sub.htypes:10)
+  新增 HType snapshot。`@private_pair` 输出为多返回函数类型，
+  `private_pair::<ret>` 和 `::<ret:1>` 分开。
+- [test/type-recovery/evm/manifest.json:32](/sn640/NotDec/test/type-recovery/evm/manifest.json:32)
+  把新 case 加入 EVM type recovery suite。
+
+验证：
+
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过。
