@@ -367,3 +367,45 @@ perf profile：
      约束传播量。
   2. constraint cache 数据结构：把 `std::set<pair<TypeNode*, TypeNode*>>` 换成 hash set
      或至少统计 cache size / worklist 增长，确认是否是数据结构问题。
+
+## 2026-06-04 实现记录：跳过两个 notdec_tr timeout，并检查现有 HType
+
+按“先标记、后续跳过 timeout case，然后看已有 HType”的方向继续推进。
+
+跳过策略：
+
+- `/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/scripts/notdec-evm-type-recovery-apehex.py`
+  的 `load_samples()` 增加 `skip_reason` 过滤。manifest 行里这个字段非空时，不加入待跑样本。
+- `/sn640/NotDecChainExp/evm2llvm_apehex_pilot/selected-apehex-80/manifest.csv`
+  给 `7435_19576293_0de5f3a958_6780a1c34693` 和
+  `18404_19693601_dc6a4df89e_e8062015dadc` 标记
+  `skip_reason=notdec_tr_timeout`。
+- `/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/selected-apehex-80-missing50/manifest.csv`
+  同样标记这两个样本。
+
+验证：
+
+- 对完整 `selected-apehex-80` dry-run，runner 现在加载 78 个样本。
+- 对 `selected-apehex-80-missing50` dry-run，runner 现在加载 48 个样本。
+- 上面两个 dry-run 输出里都不再包含 `7435` 和 `18404`。
+
+已有 HType 检查：
+
+- 合并现有结果：
+  - `/tmp/notdec-selected80-existing30-tr/htypes`
+  - `/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/20260604-selected80-missing50/htypes`
+  - `/tmp/notdec-selected80-rerun-crashes-final/htypes`
+- 去重后共有 75 个有效 HType。
+- 49 个有 `extractvalue` 的 IR，都能在对应 HType 中看到 `::<ret:1>` 或更高序号的多返回槽位。
+  HType 文本本身不会保留 `extractvalue` 字符串，这是正常的。
+- 75 个 HType 都有 `[memory]` 段。
+- 52 个样本的 `evm.alloc.addr` 上能看到 `struct_*`。
+- 60 个样本能看到 `evm.mem.ptr`。
+
+当前判断：
+
+- 多返回建模在现有样本里看起来已经接住：`extractvalue` 对应的返回槽位没有丢。
+- 内存类型已经能在 allocation pointer 和部分 memory pointer 上出现 `struct_*`，但质量还不稳定：
+  不是所有 `evm.mem.ptr` 都带 struct，部分仍只是 `ptr<load=void, store=void, psize=256>`。
+- 下一步应该挑 3-5 个代表样本人工看 HType 质量，重点看 `evm.alloc.addr` 到后续
+  `evm.mem.ptr` 的 struct 是否能传下去，以及字段 offset 是否符合 IR 里的 store/load 形状。
