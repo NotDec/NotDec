@@ -965,9 +965,10 @@ record 拆成多个返回类型。
 - [src/TypeRecovery/mlsub/TypeBuilder.cpp:994](/sn640/NotDec/src/TypeRecovery/mlsub/TypeBuilder.cpp:994)
   `TypeBuilder::convert(UFunctionType)` 在 result 是这种 tuple record 时，生成多个
   `RetTypes`；普通 record 仍走原来的单返回逻辑。
-- [src/TypeRecovery/mlsub/PNDiff.cpp:633](/sn640/NotDec/src/TypeRecovery/mlsub/PNDiff.cpp:633)
-  `SubNodeCons::solve()` 遇到 `Unknown - Unknown = Pointer` 这类没有本地规则的情况时改成
-  trace 后 defer，不再 assert。`3938` 样本会触发这个点。
+- [src/TypeRecovery/mlsub/PNDiff.cpp:362](/sn640/NotDec/src/TypeRecovery/mlsub/PNDiff.cpp:362)
+  `SubNodeCons::Rules` 补上 `{'P', 'I', 'p'}`，让
+  `Unknown - Unknown = Pointer` 直接推成 `Pointer - Number = Pointer`。
+  `3938` 样本会触发这个点。
 - [external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:185](/sn640/NotDec/external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:185)
   `ReturnValue` 的显示名带上 index。
 - [external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:215](/sn640/NotDec/external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:215)
@@ -981,6 +982,8 @@ record 拆成多个返回类型。
   通过。
 - 单样本 `26592_19784089_8c65bcf004_3cf345d49e39`、`27555_19797354_202e574be9_1a582ff02a29`
   和 `3938_19528412_7cfde523bc_0b78633855ab` 手工 `--tr-level=2 --dump-htypes` 通过。
+- 用 `20260604-tr-smoke-30-record-ret-pndiff/outputs/*.ll` 只重跑 `notdec --tr-level=2
+  --dump-htypes`，30/30 ok。
 - HType 检查：`3938` 的 `@private__0x2b2_0x2b2` 显示为
   `((u256, 'm11:256 | u256) (*)(...))*`，并且值表里有
   `private__0x2b2_0x2b2::<ret>` 和 `::<ret:1>`，说明函数类型和字段节点都已拆开。
@@ -995,7 +998,8 @@ record 拆成多个返回类型。
   -o /tmp/notdec-fortune-record-ret.ll --tr-level=2
   --frozen-tr-input-ir
   --dump-htypes=/tmp/notdec-fortune-record-ret.htypes`
-  通过，`elapsed=12.78 user=12.38 sys=0.39 maxrss=851676`。
+  通过；补 `SubNodeCons::Rules` 后同口径重跑为
+  `elapsed=12.35 user=11.94 sys=0.41 maxrss=852632`。
 
 判断：
 

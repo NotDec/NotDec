@@ -361,7 +361,7 @@ const char AddNodeCons::Rules[][3] = {
 
 const char SubNodeCons::Rules[][3] = {
     {'i', 'I', 'I'}, {'I', 'i', 'i'}, {'P', 'i', 'p'}, {'P', 'p', 'I'},
-    {'p', 'P', 'i'}, {'p', 'i', 'P'}, {'p', 'I', 'p'}};
+    {'p', 'P', 'i'}, {'p', 'i', 'P'}, {'p', 'I', 'p'}, {'P', 'I', 'p'}};
 
 bool AddNodeCons::isFullySolved(PNIGraph &G) {
   PNINode *Left = &G.getPNIVar(LeftNode);
@@ -630,14 +630,7 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
         // 2. Pointer - Unknown = Unknown
         // degrade to Result != Right constraint? Not very useful
       } else {
-        // Examples such as Unknown - Unknown = Pointer do not give a sound
-        // local update without knowing which unknown aliases the pointer base.
-        // Keep the constraint alive for later solve rounds instead of aborting.
-        traceConstraintEvent(
-            G, "sub:defer",
-            formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
-                                     Inst) +
-                " reason=no-local-rule");
+        assert(false && "Should not reach here");
       }
     } else {
       // all unknown, nothing we can do now.
