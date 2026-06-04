@@ -585,5 +585,6 @@ HType 观察：
   - `%balance` / `%ok` / gas 和 size 常量是 `integer`。
   - `%slot` 是 `storage_key`。
   - `%target` 是 `address`。
-- 当前仍能看到 `in.base` / `out.base` 在样例里带上 `integer` 下界。这不是本轮直接给
-  memory base 打的约束，更像现有 i256 传播/合并结果，后续需要继续看 semantic 质量。
+- 复查 `in.base` / `out.base`：重建 `notdec-decompile` 后重新跑
+  `08_evm_runtime_semantic_primitives`，确认它们保持 `bottom:256`，不是 `integer`。
+  之前看到的 `integer` 来自旧 snapshot / 旧二进制结果，不是当前 visitor 规则。

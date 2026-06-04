@@ -35,10 +35,10 @@ typedef u256 typedef_1; /* semantic primitive lattice node: prim.uint256.evm.add
 [+] evm_log1::arg1 => lower=bottom:256 ; upper=top:256
 [+] evm_log1::arg2 => lower=bottom:256 ; upper=top:256
 [+] evm_log1::arg3 => lower=bottom:256 ; upper=top:256
-[-] main::%buf.addr => lower=typedef_0 ; upper=ptr<load=void, store=void, psize=256>
-[+] main::%buf.ptr => lower=typedef_0 ; upper=ptr<load=void, store=void, psize=256>
+[-] main::%buf.addr => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] main::%buf.ptr => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
 [+] main::%ok => lower=typedef_0 ; upper=top:256
-[-] main::%scratch.addr => lower=typedef_0 ; upper=top:256
+[-] main::%scratch.addr => lower=bottom:256 ; upper=top:256
 [+] main::<ret> => lower=typedef_0 ; upper=top:256
 [+] main::arg0 => lower=bottom:256 ; upper=top:256
 [+] main::arg1 => lower=bottom:256 ; upper=top:256

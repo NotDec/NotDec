@@ -46,8 +46,8 @@ typedef u256 typedef_2; /* semantic primitive lattice node: prim.uint256.evm.sto
 [+] main::arg2 => lower=bottom:256 ; upper=top:256
 [+] main::arg3 => lower=typedef_2 ; upper=top:256
 [+] main::arg4 => lower=typedef_1 ; upper=top:256
-[+] main::arg5 => lower=typedef_0 ; upper=top:256
-[+] main::arg6 => lower=typedef_0 ; upper=top:256
+[+] main::arg5 => lower=bottom:256 ; upper=top:256
+[+] main::arg6 => lower=bottom:256 ; upper=top:256
 
 [memory]
 type => top:256
