@@ -251,6 +251,81 @@ bool hasFunctionTypeOverride(const llvm::json::Object &Spec,
   return HasArgs;
 }
 
+constexpr llvm::StringLiteral kBuiltinEVMI256SemanticLattice = R"dot(
+digraph evm_i256_semantics {
+  graph [base="uint", bits="256", namespace="evm"];
+
+  root [kind="root", display_name="evm_word"];
+  integer;
+  address;
+  storage_key;
+
+  integer -> root;
+  address -> root;
+  storage_key -> root;
+}
+)dot";
+
+std::string getOverrideArchName(const llvm::Module &M) {
+  StringRef Triple = M.getTargetTriple().getTriple();
+  if (Triple.starts_with("evm")) {
+    return "evm";
+  }
+  if (Triple.starts_with("wasm32") || Triple.starts_with("wasm64")) {
+    return "wasm";
+  }
+
+  auto Arch = Triple.split('-').first;
+  return Arch.empty() ? std::string("unknown") : Arch.str();
+}
+
+bool overrideAllowedForModule(const llvm::json::Object &Spec,
+                              llvm::StringRef Path, const llvm::Module &M) {
+  auto *AllowedValue = Spec.get("allowed_arch");
+  if (AllowedValue == nullptr) {
+    return true;
+  }
+
+  const auto *Allowed = AllowedValue->getAsArray();
+  if (Allowed == nullptr) {
+    failSignatureOverride(appendJSONPath(Path, "allowed_arch"),
+                          "expected array of strings");
+  }
+
+  auto CurrentArch = getOverrideArchName(M);
+  for (size_t Index = 0; Index < Allowed->size(); ++Index) {
+    auto EntryPath =
+        appendJSONIndexPath(appendJSONPath(Path, "allowed_arch"), Index);
+    auto Arch = (*Allowed)[Index].getAsString();
+    if (!Arch) {
+      failSignatureOverride(EntryPath, "expected string");
+    }
+    if (*Arch == CurrentArch) {
+      return true;
+    }
+  }
+  return false;
+}
+
+binarysub::expected<void, binarysub::Error>
+registerBuiltinPrimitiveSemanticLatticesForModule(const llvm::Module &M) {
+  if (getOverrideArchName(M) != "evm") {
+    return {};
+  }
+
+  auto &Registry = binarysub::globalPrimitiveSemanticRegistry();
+  if (Registry.findFamily("uint", 256, "evm") != nullptr) {
+    return {};
+  }
+
+  auto Family = Registry.registerFamilyFromDot(kBuiltinEVMI256SemanticLattice,
+                                               "<builtin-evm-i256>");
+  if (!Family) {
+    return binarysub::make_unexpected(Family.error());
+  }
+  return {};
+}
+
 enum class OverridePNDiffState {
   Ptr,
   Number,
@@ -1105,6 +1180,11 @@ void loadOverrideFileImpl(llvm::Module &M, const char *Path,
 
   for (const auto &Ent : *Functions) {
     std::string FuncPath = appendJSONPath("functions", Ent.first);
+    const auto &Spec = requireObject(Ent.second, FuncPath);
+    if (!overrideAllowedForModule(Spec, FuncPath, M)) {
+      continue;
+    }
+
     auto *Func = M.getFunction(Ent.first);
     if (Func == nullptr) {
       llvm::errs() << "Warning: MLsub " << Kind
@@ -1112,7 +1192,6 @@ void loadOverrideFileImpl(llvm::Module &M, const char *Path,
       continue;
     }
 
-    const auto &Spec = requireObject(Ent.second, FuncPath);
     bool HasFunctionType =
         hasFunctionTypeOverride(Spec, FuncPath, RequireDefinition);
     if (HasFunctionType) {
@@ -1286,6 +1365,14 @@ void validateExtraConstraintFunctions(const llvm::json::Object &Root,
 
   for (const auto &Ent : *Functions) {
     std::string FuncPath = appendJSONPath("functions", Ent.first);
+    const auto *Spec = Ent.second.getAsObject();
+    if (Spec == nullptr) {
+      failExtraConstraints(FuncPath, "expected object");
+    }
+    if (!overrideAllowedForModule(*Spec, FuncPath, M)) {
+      continue;
+    }
+
     auto *Func = M.getFunction(Ent.first);
     if (Func == nullptr) {
       llvm::errs() << "Warning: MLsub extra constraints function not found: "
@@ -1293,10 +1380,6 @@ void validateExtraConstraintFunctions(const llvm::json::Object &Root,
       continue;
     }
 
-    const auto *Spec = Ent.second.getAsObject();
-    if (Spec == nullptr) {
-      failExtraConstraints(FuncPath, "expected object");
-    }
     auto *ActionsValue = Spec->get("actions");
     if (ActionsValue == nullptr) {
       failExtraConstraints(FuncPath, "missing field 'actions'");
@@ -2396,6 +2479,13 @@ void MLsubRecovery::run() {
   SummaryOverrideDoc = makeEmptyOverrideDoc();
   SignatureOverrideFuncs.clear();
   SignatureOverrideDoc = makeEmptyOverrideDoc();
+  if (auto RegistrySetup = registerBuiltinPrimitiveSemanticLatticesForModule(M);
+      !RegistrySetup) {
+    llvm::errs() << "Error: failed to register builtin primitive semantic "
+                    "lattice: "
+                 << RegistrySetup.error().msg << "\n";
+    std::abort();
+  }
   if (!kDefaultMLsubBuiltinSummaryOverridePath.empty() &&
       llvm::sys::fs::exists(kDefaultMLsubBuiltinSummaryOverridePath)) {
     loadSummaryFile(M, kDefaultMLsubBuiltinSummaryOverridePath.data(), false);

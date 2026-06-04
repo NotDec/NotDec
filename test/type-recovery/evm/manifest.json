@@ -34,6 +34,24 @@
       "input": "cases/05_evm_aggregate_return_pndiff_sub.ll",
       "expected": "expected/tr-level-2/05_evm_aggregate_return_pndiff_sub.htypes",
       "status": "pass"
+    },
+    {
+      "name": "06_evm_allowed_arch_summary_evm",
+      "input": "cases/06_evm_allowed_arch_summary.ll",
+      "expected": "expected/tr-level-2/06_evm_allowed_arch_summary_evm.htypes",
+      "env": {
+        "NOTDEC_SUMMARY_OVERRIDE": "test/type-recovery/evm/support/allowed_arch_evm.summary.json"
+      },
+      "status": "pass"
+    },
+    {
+      "name": "07_evm_allowed_arch_summary_wasm_skip",
+      "input": "cases/06_evm_allowed_arch_summary.ll",
+      "expected": "expected/tr-level-2/07_evm_allowed_arch_summary_wasm_skip.htypes",
+      "env": {
+        "NOTDEC_SUMMARY_OVERRIDE": "test/type-recovery/evm/support/allowed_arch_wasm.summary.json"
+      },
+      "status": "pass"
     }
   ]
 }

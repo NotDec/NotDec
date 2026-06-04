@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "functions": {
+    "evm_caller": {
+      "allowed_arch": ["evm"],
+      "ret": {
+        "kind": "primitive",
+        "name": "prim.uint256.evm.address",
+        "bits": 256
+      },
+      "args": []
+    }
+  }
+}

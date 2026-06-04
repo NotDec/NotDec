@@ -483,3 +483,52 @@ digraph evm_i256_semantics {
 
 补充：`external/binarysub/doc/simplesub/TypeSimplifier.scala` 是 SimpleSub 论文/原型的参考代码，
 在 `doc/` 目录下，不参与当前 C++ binarysub / NotDec 构建。
+
+## 2026-06-04 实现记录：summary/signature 增加架构过滤
+
+先完成一个小的前置改进：override 文件现在可以用 `allowed_arch` 限定适用架构，
+并把 EVM i256 semantic lattice 的内置注册挪到 MLsub 已经拿到当前 `Module` 之后。
+这样后续可以把 EVM 专属 summary 放进通用 registry，不会污染其他 target。
+
+改动位置：
+
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:254](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:254)
+  新增内置 EVM i256 semantic lattice，包含 `integer`、`address`、`storage_key`。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:269](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:269)
+  新增 `getOverrideArchName()`，用 target triple 归类 `evm`、`wasm`，其他架构取 triple
+  第一段。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:282](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:282)
+  新增 `overrideAllowedForModule()`，支持 override spec 里的
+  `allowed_arch: ["evm"]` 这类过滤字段。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:310](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:310)
+  新增 `registerBuiltinPrimitiveSemanticLatticesForModule()`，只在当前模块是 EVM 时注册
+  `prim.uint256.evm.*` family。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:1181](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:1181)
+  `loadOverrideFileImpl()` 在查找函数和校验 summary/signature 前先执行 `allowed_arch`
+  过滤，避免非目标架构上出现无意义 missing function warning。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:1366](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:1366)
+  extra constraints 的函数入口也复用同一套 `allowed_arch` 过滤。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:2482](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:2482)
+  在加载 builtin summary / 用户 summary 前注册当前模块适用的 builtin semantic lattice。
+- [test/type-recovery/evm/cases/06_evm_allowed_arch_summary.ll:6](/sn640/NotDec/test/type-recovery/evm/cases/06_evm_allowed_arch_summary.ll:6)
+  新增一个只声明 `evm_caller` 的 EVM frozen IR。
+- [test/type-recovery/evm/support/allowed_arch_evm.summary.json:4](/sn640/NotDec/test/type-recovery/evm/support/allowed_arch_evm.summary.json:4)
+  新增 `allowed_arch: ["evm"]` summary，验证 EVM 模块上可以使用
+  `prim.uint256.evm.address`。
+- [test/type-recovery/evm/support/allowed_arch_wasm.summary.json:4](/sn640/NotDec/test/type-recovery/evm/support/allowed_arch_wasm.summary.json:4)
+  新增 `allowed_arch: ["wasm"]` summary，验证同一个 EVM 模块上该 override 会被跳过。
+- [test/type-recovery/evm/manifest.json:38](/sn640/NotDec/test/type-recovery/evm/manifest.json:38)
+  新增两个 snapshot case，分别覆盖架构命中和架构不命中。
+
+验证：
+
+- `cmake --build ./build --target notdec-decompile -j4` 通过。
+- 临时 summary 验证：同一个 EVM IR 下，`allowed_arch:["evm"]` 输出
+  `prim.uint256.evm.address` typedef，`allowed_arch:["wasm"]` 不输出 semantic typedef。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过。
+
+当前还没做：
+
+- 还没有把 EVM runtime builtin 的真实 address/storage_key/integer 约束固化进 summary
+  或 visitor；这一步放回后续 semantic lattice 实现。

@@ -1,0 +1,17 @@
+# HTypeResult
+
+[decls]
+typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.address */
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:256
+[+] @evm_caller => lower=(typedef_0 (*)())* ; upper=top:256
+[+] @main => lower=(bottom:256 (*)())* ; upper=top:256
+[+] evm_caller::<ret> => lower=bottom:256 ; upper=top:256
+[+] main::%caller => lower=bottom:256 ; upper=top:256
+[+] main::<ret> => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:256
+
