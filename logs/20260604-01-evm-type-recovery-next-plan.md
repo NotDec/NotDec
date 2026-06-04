@@ -25,9 +25,9 @@
 ## 目标
 
 1. 固定刚完成的多返回和 PNDiff 规则，避免后续回退。
-2. 扩大 apehex type-recovery-only 验证，不急着全量重跑 Gigahorse。
-3. 开始接 memory object 的 constant offset 字段，让 HType 里能稳定看到 return/event/call buffer 字段。
-4. 把 `PNDiff.warn.txt` 纳入批跑观察，不只看 `notdec_tr` 是否成功。
+2. 用已经筛好的 80 个 apehex pilot 样本做 type-recovery-only 验证，不急着全量重跑
+   Gigahorse。
+3. 先确认 HType 质量：`extractvalue` 多返回字段正常工作，再确认类型推理能否分析出内存类型。
 
 ## 路线
 
@@ -46,7 +46,13 @@
 - oracle 或 dump 检查能看到函数 HType 是多返回。
 - 这个 case 不依赖 apehex 数据集。
 
-### 2. 跑 50-100 个 apehex type-recovery-only 样本
+### 2. 跑 selected-apehex-80 type-recovery-only 样本
+
+使用已经筛好的 80 个 pilot 样本：
+
+```text
+/sn640/NotDecChainExp/evm2llvm_apehex_pilot/selected-apehex-80/manifest.csv
+```
 
 先复用已有 `outputs/*.ll`，只跑：
 
@@ -59,32 +65,24 @@
 观察点：
 
 - 是否还有 assert / abort。
-- `PNDiff.warn.txt` 里 residual Add/Sub 数量是否异常增多。
 - HType 里 private helper 多返回是否稳定。
 - 普通 memory record 是否没有被误拆成多返回。
 
 判断标准：
 
-- 50-100 个样本全部 `notdec_tr` ok。
+- 80 个 pilot 样本全部 `notdec_tr` ok。
 - 多返回样本里能看到类似 `((ret0, ret1) (*)(...))*` 的函数类型。
-- 没有新的高频 residual PNDiff 模式。
 
-### 3. 人工抽查 HType 质量
+### 3. 确认 HType 质量和内存类型
 
-从验证样本里挑 3-5 个有 private 多返回的样本，人工看：
+先从验证样本里挑 3-5 个有 private 多返回的样本，确认 `extractvalue` 相关结果：
 
 - 函数类型是否输出多返回。
 - `extractvalue` 后的字段是否拿到对应类型。
 - `ReturnValue::<ret>` 和 `::<ret:N>` 是否分开。
 - 普通 struct/memory record 没有被当 tuple return 拆掉。
 
-这一步的重点不是覆盖率，而是确认建模方向没有偏。
-
-### 4. 接 memory object constant offset 字段
-
-多返回稳定后，再回到 native memory 类型恢复主线。
-
-第一版只做高置信度情况：
+然后再看类型推理是否已经能分析出内存类型。第一轮只看高置信度情况：
 
 - allocation base 能确定。
 - offset 是常量。
@@ -99,27 +97,16 @@
 
 判断标准：
 
-- 新增字段约束不会造成现有 30/50/100 样本崩溃。
+- `extractvalue` 多返回字段在 HType 中能稳定对应到字段返回值。
+- 80 个 pilot 样本中能定位出已有内存类型恢复效果较好的样本。
 - 常量 offset 字段在 HType/debug 输出中可见。
 - 低置信度 object 绑定先不写约束，只记录或跳过。
-
-### 5. 把 PNDiff warning 用起来
-
-当前 `workdir/PNDiff.warn.txt` 会记录 solve 后仍残留的 Add/Sub 约束。
-后续批跑要统计：
-
-- residual Add/Sub 数量。
-- 新增 residual 的样本。
-- residual 的指令形态和 PNDiff state。
-
-这比只看 `notdec_tr ok` 更有用。类型恢复成功但残留大量 PNDiff，说明结果可能不稳定。
 
 ## 风险
 
 - 最小回归测试如果只看不崩，无法保证 HType 真的是多返回，所以需要 oracle 或明确检查 dump。
 - `record{"0","1"}` 目前是 function result 位置的 tuple 约定，不能扩散到普通 memory record。
 - memory object offset 字段如果绑定错 base，会污染类型结果。第一版必须只做高置信度 constant offset。
-- `PNDiff.warn.txt` 可能已有历史 residual，需要按同口径比较，不要把旧问题当新回归。
 
 ## 暂不做
 
@@ -127,4 +114,3 @@
 - 暂不重跑完整 apehex。
 - 暂不做动态 ABI bytes/string/array。
 - 暂不让类型结果驱动 ABI rewrite 或 cleanup。
-
