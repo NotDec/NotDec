@@ -409,3 +409,52 @@ perf profile：
   不是所有 `evm.mem.ptr` 都带 struct，部分仍只是 `ptr<load=void, store=void, psize=256>`。
 - 下一步应该挑 3-5 个代表样本人工看 HType 质量，重点看 `evm.alloc.addr` 到后续
   `evm.mem.ptr` 的 struct 是否能传下去，以及字段 offset 是否符合 IR 里的 store/load 形状。
+
+## 2026-06-04 调研记录：EVM i256 semantic primitive lattice
+
+binarysub 已经有同底层 primitive bits 的语义 lattice 支持：
+
+- `PrimitiveSemanticRegistry` 可以从 DOT 注册一个 family，包含 `base`、`bits`、
+  `namespace` 和节点。
+- `constrain()` 在 primitive 名字不相等时，会查全局 registry；如果两边属于同一个
+  family，则按 lattice subtype 判断。
+- simplify 阶段会把同 family 的多个 semantic primitive 用 join/meet 合并。
+- HType 转换会把 semantic primitive 输出成 typedef，底层仍是对应的 base primitive。
+
+当前 EVM 缺口：
+
+- NotDec/EVM 侧还没有注册内置 EVM i256 lattice。
+- EVM builtin 签名和约束生成还没有系统地产生 `prim.uint256.evm.*` 这种 primitive。
+
+第一版先只做 `address`，不放 `selector`：
+
+- `selector` 在当前 IR 里也是 `i256`，因为 EVM 栈字统一 256-bit。
+- 但语义上 selector 是 4 bytes。后面如果要恢复 selector，应该先考虑一个 pass 把
+  selector 单独转成 `i32`，再讨论 selector 类型。
+- 所以第一版 semantic lattice 不引入 `selector`，避免把 32-bit 语义硬塞进 `bits=256`
+  的 primitive family。
+
+建议第一版 lattice：
+
+```dot
+digraph evm_i256_semantics {
+  graph [base="uint", bits="256", namespace="evm"];
+
+  root [kind="root", display_name="evm_word"];
+  scalar;
+  address;
+
+  address -> scalar;
+  scalar -> root;
+}
+```
+
+第一批 address 来源只用强信号：
+
+- `evm_address` / `evm_caller` / `evm_origin` / `evm_coinbase` 返回 `address`。
+- `evm_balance` 的 address 参数。
+- `evm_extcodesize` / `evm_extcodehash` / `evm_extcodecopy` 的 address 参数。
+- `evm_call` / `evm_callcode` / `evm_delegatecall` / `evm_staticcall` 的 target address 参数。
+- `evm_create` / `evm_create2` 返回 `address`。
+
+暂时不把 `and x, 2^160-1` 这种 mask 当成强 address 约束，先避免误报。
