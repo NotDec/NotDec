@@ -426,13 +426,19 @@ binarysub 已经有同底层 primitive bits 的语义 lattice 支持：
 - NotDec/EVM 侧还没有注册内置 EVM i256 lattice。
 - EVM builtin 签名和约束生成还没有系统地产生 `prim.uint256.evm.*` 这种 primitive。
 
-第一版先只做 `address`，不放 `selector`：
+第一版做 `address`、`storage_key` 和 `integer`，不放 `selector`：
 
 - `selector` 在当前 IR 里也是 `i256`，因为 EVM 栈字统一 256-bit。
 - 但语义上 selector 是 4 bytes。后面如果要恢复 selector，应该先考虑一个 pass 把
   selector 单独转成 `i32`，再讨论 selector 类型。
 - 所以第一版 semantic lattice 不引入 `selector`，避免把 32-bit 语义硬塞进 `bits=256`
   的 primitive family。
+- `address` 特指 EVM 账户地址，不是内存地址；内存地址继续由现有 pointer / memory
+  object 类型表达。
+- `storage_key` 是 `i256`，对应 `sload/sstore` 的 slot key。
+- `integer` 表示纯数字用法的 `i256` 值；第一版不再额外区分内存指针语义。
+- 不引入 `memory_word`。这个名字会把“从 memory 取出的 32-byte word”和内存对象类型混在一起，
+  对当前类型恢复没有帮助。
 
 建议第一版 lattice：
 
@@ -441,15 +447,19 @@ digraph evm_i256_semantics {
   graph [base="uint", bits="256", namespace="evm"];
 
   root [kind="root", display_name="evm_word"];
-  scalar;
+  integer;
   address;
+  storage_key;
 
-  address -> scalar;
-  scalar -> root;
+  integer -> root;
+  address -> root;
+  storage_key -> root;
 }
 ```
 
-第一批 address 来源只用强信号：
+第一批类型来源只用强信号。
+
+`address`：
 
 - `evm_address` / `evm_caller` / `evm_origin` / `evm_coinbase` 返回 `address`。
 - `evm_balance` 的 address 参数。
@@ -457,4 +467,19 @@ digraph evm_i256_semantics {
 - `evm_call` / `evm_callcode` / `evm_delegatecall` / `evm_staticcall` 的 target address 参数。
 - `evm_create` / `evm_create2` 返回 `address`。
 
+`storage_key`：
+
+- `evm_sload` 的 key 参数。
+- `evm_sstore` 的 key 参数。
+- 暂时不从 keccak 结果反推 storage key，先只用 `sload/sstore` 调用点。
+
+`integer`：
+
+- 算术 intrinsic 和普通整数算术结果可以先落到 `integer`。
+- 但如果某个值同时流入 `address` 和 `integer`，第一版应该暴露冲突或 join 到 root，
+  不要静默把账户地址当普通数字。
+
 暂时不把 `and x, 2^160-1` 这种 mask 当成强 address 约束，先避免误报。
+
+补充：`external/binarysub/doc/simplesub/TypeSimplifier.scala` 是 SimpleSub 论文/原型的参考代码，
+在 `doc/` 目录下，不参与当前 C++ binarysub / NotDec 构建。
