@@ -6,6 +6,8 @@
 
 把当前的这个规划写到一个新的logs/下的文件
 
+是的，改一下规划，就按这个80个吧。另外里面的第五步先去掉。第三步和第四步合并一下，确认HType质量里面就先确认extractvalue是否正常工作，然后再确认是否类型推理能够正常分析出内存的类型。
+
 ## 背景
 
 当前 EVM 类型恢复已经接入 MLsub 主流程，普通 LLVM 操作、native load/store、allocation helper
@@ -25,8 +27,8 @@
 ## 目标
 
 1. 固定刚完成的多返回和 PNDiff 规则，避免后续回退。
-2. 用已经筛好的 80 个 apehex pilot 样本做 type-recovery-only 验证，不急着全量重跑
-   Gigahorse。
+2. 用已经筛好的 80 个 apehex pilot 样本做验证。已有 IR 先直接跑 type recovery；
+   缺 IR 的样本再补跑 Gigahorse + evm2llvm。
 3. 先确认 HType 质量：`extractvalue` 多返回字段正常工作，再确认类型推理能否分析出内存类型。
 
 ## 路线
@@ -46,7 +48,7 @@
 - oracle 或 dump 检查能看到函数 HType 是多返回。
 - 这个 case 不依赖 apehex 数据集。
 
-### 2. 跑 selected-apehex-80 type-recovery-only 样本
+### 2. 跑 selected-apehex-80 样本
 
 使用已经筛好的 80 个 pilot 样本：
 
@@ -60,7 +62,8 @@
 ./build/bin/notdec sample.ll -o out.ll --tr-level=2 --dump-htypes sample.htypes
 ```
 
-不重跑 Gigahorse，不重新 evm2llvm。这样能快速覆盖类型恢复本身。
+缺 IR 的样本单独补跑 Gigahorse + evm2llvm，仍然只围绕这 80 个 pilot，不扩大到完整
+apehex。
 
 观察点：
 
@@ -82,25 +85,18 @@
 - `ReturnValue::<ret>` 和 `::<ret:N>` 是否分开。
 - 普通 struct/memory record 没有被当 tuple return 拆掉。
 
-然后再看类型推理是否已经能分析出内存类型。第一轮只看高置信度情况：
+然后再看类型推理是否已经能分析出内存类型。第一轮只看 HType 里已经能稳定看到的结果，
+不在这一步新增字段建模：
 
-- allocation base 能确定。
-- offset 是常量。
-- load/store 是 32 字节 word 或能明确换算到 bit size。
-- 不处理动态 ABI head/tail，不猜 range copy。
-
-目标是让 HType 或 debug 输出里开始出现：
-
-- return buffer 字段。
-- event data 字段。
-- external call input/output buffer 字段。
+- `[memory] type => struct_*` 是否存在。
+- `evm.mem.ptr` / `evm.alloc.addr` 是否带上具体 struct 类型。
+- struct 字段里是否能看到常量 offset。
 
 判断标准：
 
 - `extractvalue` 多返回字段在 HType 中能稳定对应到字段返回值。
 - 80 个 pilot 样本中能定位出已有内存类型恢复效果较好的样本。
 - 常量 offset 字段在 HType/debug 输出中可见。
-- 低置信度 object 绑定先不写约束，只记录或跳过。
 
 ## 风险
 
@@ -138,3 +134,43 @@ PNDiff sub pointer result 规则。
 
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过。
+
+## 2026-06-04 实现记录：复用已有 IR 检查 selected-apehex-80 的 30 个样本
+
+路线第 2/3 步先用已有 IR 做了 type-recovery-only 检查。当前
+`selected-apehex-80` 里只有 30 个样本在
+`/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/*/outputs/*.ll`
+下有可复用 IR；其余 50 个缺 `.ll`。旧 evm2llvm pilot batch 的 `outputs/*.ll`
+也没有对应文件，符合之前清理旧 IR 的状态。
+
+验证目录：
+
+```text
+/tmp/notdec-selected80-existing30-tr
+```
+
+结果：
+
+- 30 个已有 IR 全部 `notdec --tr-level=2 --dump-htypes` 通过。
+- `summary.csv`：30/30 ok。
+- `missing.csv`：记录剩余 50 个缺 IR 的 selected-apehex-80 样本。
+
+HType 质量检查：
+
+- 30 个里 7 个样本出现 private helper 多返回函数类型。
+- 这 7 个样本里能看到 `::<ret:N>` 字段返回槽位，并且函数类型输出为多返回形式。
+- 抽查 `3938`、`26592`、`1111`、`29023`、`8312`：
+  - 已使用的 `extractvalue` 字段能在 HType 里看到对应 SSA 值类型。
+  - `1111` 和 `8312` 的 `%private.ret1` 在 IR 中取出后没有实际参与后续内存/算术使用，
+    所以 HType dump 没有独立 SSA 行；但对应 callee 的 `::<ret:1>` 槽位存在。
+- 30 个里 18 个样本输出了 memory struct 字段。
+- 内存类型表现较明显的样本包括 `8312`、`3938`、`29023`、`1111`：
+  - HType 中有 `[memory] type => struct_*`。
+  - 多个 `evm.mem.ptr` / `evm.alloc.addr` 已带 `ptr<...> & struct_*`。
+  - struct 字段里已经出现常量 offset，例如 `32`、`64`、`100` 等。
+
+当前决策点：
+
+- 如果要完成完整 selected-apehex-80 验证，需要重新对缺失 50 个样本跑
+  Gigahorse + evm2llvm 生成 IR。
+- 在补齐 50 个 IR 前，type-recovery-only 验证只能证明已有 30 个 selected pilot 样本。
