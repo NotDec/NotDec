@@ -3654,7 +3654,14 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
       }
     }
   }
-  assert(false && "TODO: ExtractValueInst general case");
+  // EVM private multi-return is represented as an aggregate call followed by
+  // extractvalue. The aggregate value itself is not modeled by MLsub, but each
+  // scalar result can still participate in later constraints.
+  if (!I.getType()->isAggregateType()) {
+    cg.createNode(&I);
+    return;
+  }
+  assert(false && "TODO: ExtractValueInst aggregate result");
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
@@ -3784,6 +3791,9 @@ bool ConstraintsGenerator::MLsubVisitor::handleIntrinsicCall(
   default:
     break;
   }
+  if (ID == Intrinsic::assume) {
+    return true;
+  }
   if (isMinMaxIntrinsic(ID)) {
     assert(I.arg_size() == 2 && "min/max intrinsic must have two operands");
     auto RetVar = cg.getOrInsertNode(&I);
@@ -3847,7 +3857,10 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
       Args.push_back(ValVar);
     }
     SimpleType Ret = nullptr;
-    if (!I.getType()->isVoidTy()) {
+    // Aggregate call results are only useful to MLsub after extractvalue turns
+    // them back into scalar values. Creating a node for the aggregate itself
+    // would call getSize({ ... }) and abort.
+    if (!I.getType()->isVoidTy() && !I.getType()->isAggregateType()) {
       Ret = cg.getOrInsertNode(&I);
     }
     auto ActualFunc = binarysub::make_function(Args, Ret);
@@ -3865,6 +3878,9 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
 void ConstraintsGenerator::MLsubVisitor::visitReturnInst(ReturnInst &I) {
   auto *SrcVal = I.getReturnValue();
   if (SrcVal == nullptr) { // ret void.
+    return;
+  }
+  if (SrcVal->getType()->isAggregateType()) {
     return;
   }
   auto Src = cg.getOrInsertNode(getExtValuePtr(SrcVal, &I, 0));

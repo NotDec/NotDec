@@ -145,7 +145,11 @@ struct ConstraintsGenerator {
         Args.push_back(Arg);
       }
       SimpleType Ret = nullptr;
-      if (!Func->getReturnType()->isVoidTy()) {
+      // MLsub currently models scalar and pointer values. Aggregate returns
+      // from EVM private multi-return helpers are consumed through
+      // extractvalue, so do not create a node for the aggregate value itself.
+      if (!Func->getReturnType()->isVoidTy() &&
+          !Func->getReturnType()->isAggregateType()) {
         Ret = createNode(ReturnValue{.Func = Func});
       }
       addSubtype(binarysub::make_function(Args, Ret), F);

@@ -866,3 +866,65 @@ data word/copy/allocation marker 仍保留。
 - 这一步完成 native EVM memory 的常量 offset MLsub 小闭环。
 - 相比前一版 helper 接入，这次不再依赖 `evm_mload/mstore`，和当前 IR 形态一致。
 - 性能和最近 12.5 秒级 fortune 结果基本一致，没有明显退化。
+
+## 2026-06-04 实现记录：跳过 aggregate 本体，修复 EVM 多返回样本崩溃
+
+30 个 apehex native EVM type recovery smoke 中有 8 个在 `notdec_tr` 阶段失败。
+其中 7 个是 EVM private multi-return 生成的 `{ i256, i256 }` 等 aggregate
+返回值被 MLsub 当普通值建节点，最后 `getSize({ ... })` abort；另 1 个是
+`llvm.assume` intrinsic 进入 `unhandledCalls`，但它在 SCC 准备阶段被声明/intrinsic
+过滤掉，后面 `Func2SCCIndex.at()` 抛 `map::at`。
+
+改动位置：
+
+- [include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:148](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:148)
+  在 `ConstraintsGenerator::run()` 的函数签名建模里，aggregate return 不再创建
+  `ReturnValue` 节点。MLsub 当前只建模标量/指针值，EVM 多返回的 aggregate 本体先跳过。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3657](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3657)
+  `MLsubVisitor::visitExtractValueInst()` 对普通 aggregate `extractvalue` 的标量结果创建节点，
+  让后续用到的单个返回值继续参与约束。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3794](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3794)
+  `handleIntrinsicCall()` 忽略 `llvm.assume`，避免它进入 `unhandledCalls`。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3860](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3860)
+  `visitCallBase()` 对 aggregate call 保留参数约束，但不创建 aggregate 返回节点。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3883](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3883)
+  `visitReturnInst()` 遇到 aggregate return 直接跳过，和函数签名侧保持一致。
+
+当前限制：
+
+- 这不是完整 aggregate 类型建模。多返回值之间没有通过 aggregate 本体建立字段关系，
+  只是让 `extractvalue` 后的标量结果继续跑。
+- `insertvalue` 仍会打印未建模 warning，但这轮验证不影响类型恢复完成。
+
+验证：
+
+- `cmake --build ./build --target notdec-decompile -j4` 通过。
+- 手工单样本：
+  `./build/bin/notdec .../26592_19784089_8c65bcf004_3cf345d49e39.ll
+  -o /tmp/26592.tr.ll --tr-level=2 --dump-htypes /tmp/26592.htypes` 通过。
+- 手工单样本：
+  `./build/bin/notdec .../27555_19797354_202e574be9_1a582ff02a29.ll
+  -o /tmp/27555.tr.ll --tr-level=2 --dump-htypes /tmp/27555.htypes` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过。
+- apehex native 30 样本：
+  `/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/scripts/notdec-evm-type-recovery-apehex.py
+  --run-name 20260604-tr-smoke-30-aggregate-skip --limit 30 --jobs 2
+  --gigahorse-jobs 1 --timeout-secs 600` 通过，30/30 ok；本轮之前失败的
+  `26592`、`3938`、`1111`、`0710`、`8312`、`13137`、`29023`、`27555`
+  都通过。`notdec_tr_secs` 平均 `0.61s`，最大 `1.67s`。
+- fortune 当前关注用例同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M'
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll
+  -o /tmp/notdec-fortune-evm-aggregate-skip.ll --tr-level=2
+  --frozen-tr-input-ir
+  --dump-htypes=/tmp/notdec-fortune-evm-aggregate-skip.htypes`
+  通过，`elapsed=12.49 user=12.14 sys=0.34 maxrss=851264`。
+
+判断：
+
+- 实现效果：7 个 aggregate crash 和 1 个 `llvm.assume` SCC 查表 crash 都被消掉，
+  30 个样本从 22/30 提升到 30/30。
+- 复杂度：低，只是在已有 MLsub visitor 里跳过当前无法表示的 aggregate 本体。
+- 维护成本：低，但后续如果要恢复多返回字段关系，仍需要单独设计 aggregate 拆分或
+  更明确的 per-field 约束。
