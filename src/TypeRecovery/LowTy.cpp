@@ -17,6 +17,17 @@ unsigned getSize(llvm::Type *Ty, unsigned PointerSize) {
   if (Ty->isPointerTy() || Ty->isFunctionTy()) {
     return PointerSize;
   }
+  if (auto *StructTy = llvm::dyn_cast<llvm::StructType>(Ty)) {
+    unsigned Size = 0;
+    for (llvm::Type *ElemTy : StructTy->elements()) {
+      Size += getSize(ElemTy, PointerSize);
+    }
+    return Size;
+  }
+  if (auto *ArrayTy = llvm::dyn_cast<llvm::ArrayType>(Ty)) {
+    return ArrayTy->getNumElements() *
+           getSize(ArrayTy->getElementType(), PointerSize);
+  }
   assert(false && "TODO: unhandled type");
 }
 
@@ -233,6 +244,9 @@ std::string llvmType2Elem(llvm::Type *T) {
   }
   if (T->isFunctionTy()) {
     return "func";
+  }
+  if (T->isAggregateType()) {
+    return "aggregate";
   }
   assert(false && "TODO: unhandled LLVM type");
 }

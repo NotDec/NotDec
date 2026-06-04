@@ -303,11 +303,16 @@ struct ConstraintsGenerator {
   void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off) {
     auto BaseNode = getOrInsertNode(basePtr);
     auto ResultNode = getOrInsertNode(result);
+    PG.unifyVar(basePtr, result);
+    // Negative offsets can appear in pointer arithmetic, but they are not safe
+    // to materialize as object fields. Keep the P/N relation and skip the field.
+    if (PointerSize == 256 && Off.hasNegativeBaseOffset()) {
+      return;
+    }
     std::vector<std::pair<std::string, SimpleType>> fields;
     fields.emplace_back(Off.str(), ResultNode);
     addSubtype(BaseNode, binarysub::make_record(std::move(fields)));
     addSubtype(ResultNode, binarysub::make_record({}));
-    PG.unifyVar(basePtr, result);
     if (isPointerAnalysisEnabled()) {
       PA.addField(result, basePtr, Off, getSize(result));
     }

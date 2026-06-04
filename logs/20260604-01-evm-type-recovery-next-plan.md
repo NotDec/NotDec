@@ -174,3 +174,96 @@ HType 质量检查：
 - 如果要完成完整 selected-apehex-80 验证，需要重新对缺失 50 个样本跑
   Gigahorse + evm2llvm 生成 IR。
 - 在补齐 50 个 IR 前，type-recovery-only 验证只能证明已有 30 个 selected pilot 样本。
+
+## 2026-06-04 实现记录：补齐 missing50 并修复 aggregate/负 offset 崩溃
+
+完成路线第 2/3 步的一轮推进：对 `selected-apehex-80` 中缺 IR 的 50 个样本补跑
+Gigahorse + evm2llvm + type recovery，并修掉其中能直接定位的 type recovery 崩溃。
+
+补跑目录：
+
+```text
+/sn640/NotDecChainExp/evm_type_recovery_apehex_pilot/20260604-selected80-missing50
+```
+
+原始 missing50 结果：
+
+- 36/50 直接 ok。
+- 14/50 fail：
+  - 9 个 `notdec_tr` crash，后续本次已修复并局部重跑通过。
+  - 2 个 `notdec_tr` timeout：`18404_19693601_dc6a4df89e_e8062015dadc`、
+    `7435_19576293_0de5f3a958_6780a1c34693`。
+  - 2 个 evm2llvm 失败：`22492_19734645_9489004623_d90f6b6ef58d`、
+    `26708_19785111_ed5443326c_5864b22a5ad0`，其中 `26708` 是 `phiincoming`。
+  - 1 个 Gigahorse timeout：`13930_19647126_c6ee358d43_4890d547bb1c`。
+
+代码修复：
+
+- [external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:240](/sn640/NotDec/external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:240)
+  修改 `notdec::getSize(llvm::Type *, unsigned int)`，支持 struct/array aggregate size。
+  EVM private return aggregate 本体现在能查询 `{ i256, i256 }`、`{ i256, i256, i256 }`
+  这类 LLVM Value 的 bit size。
+- [src/TypeRecovery/LowTy.cpp:12](/sn640/NotDec/src/TypeRecovery/LowTy.cpp:12)
+  修改 `notdec::retypd::getSize(llvm::Type *, unsigned)`，同步支持 struct/array aggregate size。
+- [src/TypeRecovery/LowTy.cpp:248](/sn640/NotDec/src/TypeRecovery/LowTy.cpp:248)
+  修改 `llvmType2Elem`，把 aggregate 低层类型标成 `aggregate`，避免旧 P/N 低层类型转换遇到
+  aggregate Value 本体时 assert。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp:3643](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3643)
+  修改 `ConstraintsGenerator::convertSimpleTypeVal`，aggregate constant 先按变量处理。
+  这覆盖 `zeroinitializer` 和 `{ i256 0, i256 0, i256 poison }` 这类 evm2llvm
+  为 private 多返回生成的初始 aggregate 常量。
+- [external/NotDec-llvm2c/include/notdec-llvm2c/Interface/Range.h:77](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-llvm2c/Interface/Range.h:77)
+  给 `OffsetRange` 增加 `hasNegativeBaseOffset()`。
+- [include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:303](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:303)
+  修改 `ConstraintsGenerator::setAsPtrAdd`。在 `PointerSize == 256` 且 base offset 为负时，
+  只保留 P/N 变量统一，跳过 record field 和 pointer-analysis field。这样 EVM 负偏移指针
+  不再把 TypeBuilder 带到 `OffsetRange::maxAccess()` 的负 offset assert；普通 32/64 位
+  LLVM 栈用例仍保留原来的负 offset 字段建模。
+
+局部验证：
+
+- `/tmp/notdec-selected80-rerun-crashes-final`：
+  - 9/9 个原 `notdec_tr` crash 样本重跑通过。
+  - `14575_19657109_cadd3b2a47_50062a119b46` 覆盖负 offset 跳过。
+  - `13110`、`13153`、`19407`、`22332`、`22877`、`24934`、`29524`、`9314`
+    覆盖 aggregate size / aggregate elem / aggregate constant。
+- 单独复测 `14575`：`./build/bin/notdec ... --tr-level=2 --dump-htypes` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure` 通过。
+
+合并口径：
+
+- selected-apehex-80 目前有效 HType 覆盖 75/80。
+- 75 = 已有 IR 的 30 个 ok + missing50 原始 36 个 ok + 本次修复后 9 个 ok。
+- 剩余 5 个不是这次 crash 修复能直接解决：
+  - 2 个 evm2llvm 失败。
+  - 1 个 Gigahorse timeout。
+  - 2 个 `notdec_tr` timeout，需要后续单独看性能。
+
+HType 质量检查：
+
+- 75 个有效 HType 中：
+  - 49 个样本有 `::<ret:N>` 多返回槽位。
+  - 49 个样本有 private helper 多返回函数类型。
+  - 62 个样本有 `[memory] type => struct_*` 和常量 offset 字段。
+- `extractvalue` 检查：
+  - 42 个样本含 `extractvalue`。
+  - 29 个样本的 `extractvalue` SSA 名全部出现在 HType 中。
+  - 其余样本缺失的名字主要是两类：只用于 `insertvalue` 重新组装 aggregate return，或在
+    PHI 链中继续传递但没有进入内存/算术约束。对应 callee 的 `::<ret:N>` 槽位仍存在。
+- 抽查 `13110`、`14575`、`26262`、`20900`：
+  - private helper 函数输出多返回形式，例如 `((u256, u256) (*)(...))*`
+    或 `((u256, u256, u256) (*)(...))*`。
+  - `::<ret:N>` 返回槽位存在。
+  - `[memory] type => struct_*` 存在。
+  - struct 字段里能看到常量 offset，例如 `0`、`32`、`64`、`96`、`160`、`192` 等。
+
+额外验证和风险：
+
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir|sysy).tr_level_2' --output-on-failure`
+  中 EVM suite 通过。
+- 同一命令下 llvm-ir suite 还有 4 个 HType snapshot diff，表现为少了若干未引用 decl；
+  不再是负 offset 指针类型大面积丢失。
+- sysy suite 当前全部在 `--dump-htypes requires type recovery to be initialized` 处失败，
+  看起来是当前测试入口/配置问题，和这次 EVM aggregate/负 offset 修复不是同一类问题。
+- 性能风险需要后续单独看：`7435`、`18404` 在 `notdec_tr` 600 秒 timeout；
+  `20900` 原始 `notdec_tr` 用时约 249 秒，`24713` 约 118 秒，`20695` 约 93 秒。

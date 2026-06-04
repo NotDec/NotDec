@@ -3640,6 +3640,9 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
     } else if (isa<ConstantPointerNull>(C)) {
       return binarysub::make_variable(
           lvl, getSize(getExtValuePtr(C, User, OpInd)));
+    } else if (C->getType()->isAggregateType()) {
+      return binarysub::make_variable(
+          lvl, getSize(getExtValuePtr(C, User, OpInd)));
     } else if (isa<UndefValue>(C)) {
       return binarysub::make_variable(
           lvl, getSize(getExtValuePtr(C, User, OpInd)));
