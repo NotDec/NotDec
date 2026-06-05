@@ -206,3 +206,37 @@ Solidity 语义 pass 的标注接口继续扩散。
 - fortune 同口径命令：
   `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-pipeline-check.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-pipeline-check.htypes`
   通过，`elapsed=12.13`。
+
+## 具体样例检查：revert_error_string_01
+
+样例：
+
+`test/evm/solidity-patterns/cases/revert_error_string_01.ll`
+
+命令：
+
+`./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-tr2.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-tr2.htypes`
+
+关键 IR：
+
+- `public_run___0x2a` 里先从 free memory pointer 读出 `%evm.mload`，然后向
+  `inttoptr(%evm.mload + offset)` 连续 store ABI encoded `Error(string)` payload。
+- `evm_revert` 使用的是后面重新从 `0x40` 读出的 `%evm.mload5`：
+  `evm_revert(mem, %evm.mload5, %evm.sub)`。
+
+当前 HType 结果：
+
+- `%evm.mload` 的 upper type 是 pointer，因为它后面被 `inttoptr` 用来写 memory。
+- `%evm.mload5` 的 type 仍是 `bottom/top`，不是 pointer。
+- `--debug-only=evm-solidity-patterns` 会输出：
+  `evm revert: base has no pointer HType: %evm.mload5 = load i256, ptr inttoptr (i256 64 to ptr)`。
+
+判断：
+
+- 这不是 `SolidityRevertPass` 拿不到 `HTypeResult`，而是类型恢复还没有把 free memory pointer reload
+  和前面基于同一 base 的 memory writes 统一起来。
+- 仅给 `evm_revert` 的 base 参数加 pointer 标记还不够；后置 pass 需要的是 base 指向的 payload record
+  field。当前 HType 还没有把 `inttoptr(base + offset)` 的 store 汇总成 base 的 record 字段。
+- 下一步应先补 EVM native memory object 的类型恢复：把 `inttoptr(base + constant offset)` 的 store/load
+  转成 base record field 约束，至少先覆盖 free memory pointer load/reload 这种常见 Solidity ABI
+  encoder 形状。补好后再回到 `SolidityRevertPass` 删除旧的 memory write 扫描。
