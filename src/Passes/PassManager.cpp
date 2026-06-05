@@ -130,17 +130,12 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
   std::string OutFilePath;
   ::notdec::llvm2c::Options llvm2cOpt;
   bool disableTypeRecovery = false;
-  std::string *CachedHTypeSnapshot = nullptr;
-  bool *HasCachedHTypeSnapshot = nullptr;
 
   MLsubNotdecLLVM2C(mlsub::MLsubRecovery &TR, std::string outFilePath,
-               ::notdec::llvm2c::Options &llvm2cOpt, bool disableTypeRecovery,
-               std::string *CachedHTypeSnapshot = nullptr,
-               bool *HasCachedHTypeSnapshot = nullptr)
+                    ::notdec::llvm2c::Options &llvm2cOpt,
+                    bool disableTypeRecovery)
       : TR(TR), OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
-        disableTypeRecovery(disableTypeRecovery),
-        CachedHTypeSnapshot(CachedHTypeSnapshot),
-        HasCachedHTypeSnapshot(HasCachedHTypeSnapshot) {}
+        disableTypeRecovery(disableTypeRecovery) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
     std::string outsuffix = getSuffix(OutFilePath);
@@ -150,14 +145,6 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
     std::unique_ptr<mlsub::MLsubRecovery::Result> HighTypes;
     if (!disableTypeRecovery) {
       HighTypes = std::move(TR.getResult(M, MAM));
-      if (HighTypes != nullptr && CachedHTypeSnapshot != nullptr &&
-          HasCachedHTypeSnapshot != nullptr) {
-        CachedHTypeSnapshot->clear();
-        llvm::raw_string_ostream SnapshotOS(*CachedHTypeSnapshot);
-        HighTypes->print(SnapshotOS);
-        SnapshotOS.flush();
-        *HasCachedHTypeSnapshot = true;
-      }
     }
 
     std::error_code EC;
@@ -174,6 +161,35 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
 
     return PreservedAnalyses::all();
   }
+  static bool isRequired() { return true; }
+};
+
+struct HTypeDumpPass : PassInfoMixin<HTypeDumpPass> {
+  mlsub::MLsubRecovery &TR;
+  std::string OutputPath;
+
+  HTypeDumpPass(mlsub::MLsubRecovery &TR, StringRef OutputPath)
+      : TR(TR), OutputPath(OutputPath.str()) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    std::unique_ptr<mlsub::MLsubRecovery::Result> &HighTypes =
+        TR.getResult(M, MAM);
+    if (HighTypes == nullptr) {
+      llvm::errs() << "Error: failed to materialize HType results for dump.\n";
+      std::abort();
+    }
+
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(OutputPath, EC, llvm::sys::fs::OF_Text);
+    if (EC) {
+      llvm::errs() << "Cannot open HType dump output file " << OutputPath
+                   << ": " << EC.message() << "\n";
+      std::abort();
+    }
+    HighTypes->print(OS);
+    return PreservedAnalyses::all();
+  }
+
   static bool isRequired() { return true; }
 };
 
@@ -273,7 +289,7 @@ void PassEnv::add_type_recovery_passes(int level) {
 }
 
 void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
-                           bool frozenTRInputIR) {
+                           bool frozenTRInputIR, StringRef HTypeDumpPath) {
   TargetArch Arch = classifyTargetArch(Mod.getTargetTriple().getTriple());
   switch (Arch) {
   case TargetArch::Wasm:
@@ -293,10 +309,6 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(
           createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(evm::AbiReturnPass()));
-      MPM.addPass(
-          createModuleToFunctionPassAdaptor(evm::SolidityRevertPass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(evm::EventLogPass()));
     }
     MPM.addPass(VerifierPass(false));
     if (level >= 2) {
@@ -305,9 +317,20 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
         return;
       }
       add_type_recovery_passes(level);
+      if (!HTypeDumpPath.empty()) {
+        MPM.addPass(HTypeDumpPass(*TR, HTypeDumpPath));
+      }
+      MPM.addPass(evm::AbiReturnPass(*TR));
+      MPM.addPass(evm::SolidityRevertPass(*TR));
+      MPM.addPass(createModuleToFunctionPassAdaptor(evm::EventLogPass()));
     }
     return;
   case TargetArch::Other:
+    if (!HTypeDumpPath.empty()) {
+      llvm::errs() << "Error: --dump-htypes requires a target with type "
+                      "recovery pipeline support.\n";
+      std::abort();
+    }
     return;
   }
 
@@ -324,6 +347,9 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       }
     }
     add_type_recovery_passes(level);
+    if (!HTypeDumpPath.empty()) {
+      MPM.addPass(HTypeDumpPass(*TR, HTypeDumpPath));
+    }
     return;
   }
 
@@ -333,14 +359,9 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
 
 void PassEnv::add_llvm2c(std::string OutFilePath,
                          ::notdec::llvm2c::Options llvm2cOpt,
-                         bool disableTypeRecovery,
-                         bool captureHTypeSnapshot) {
-  CachedHTypeSnapshot.clear();
-  HasCachedHTypeSnapshot = false;
-  MPM.addPass(MLsubNotdecLLVM2C(
-      *TR, OutFilePath, llvm2cOpt, disableTypeRecovery,
-      captureHTypeSnapshot ? &CachedHTypeSnapshot : nullptr,
-      captureHTypeSnapshot ? &HasCachedHTypeSnapshot : nullptr));
+                         bool disableTypeRecovery) {
+  MPM.addPass(MLsubNotdecLLVM2C(*TR, OutFilePath, llvm2cOpt,
+                                disableTypeRecovery));
 }
 
 void PassEnv::run_passes() {
@@ -359,47 +380,6 @@ void PassEnv::emit_tr_input_ir(const std::string &OutputPath) {
     std::abort();
   }
   TR->emitTRInputArtifacts(Mod, OutputPath);
-}
-
-void PassEnv::dump_htypes(const std::string &OutputPath) {
-  if (OutputPath.empty()) {
-    return;
-  }
-
-  if (HasCachedHTypeSnapshot) {
-    std::error_code EC;
-    llvm::raw_fd_ostream OS(OutputPath, EC, llvm::sys::fs::OF_Text);
-    if (EC) {
-      llvm::errs() << "Cannot open HType dump output file " << OutputPath
-                   << ": " << EC.message() << "\n";
-      std::abort();
-    }
-    OS << CachedHTypeSnapshot;
-    return;
-  }
-
-  if (TR == nullptr) {
-    llvm::errs() << "Error: --dump-htypes requires type recovery to be "
-                    "initialized (tr-level >= 2).\n";
-    std::abort();
-  }
-
-  std::unique_ptr<mlsub::MLsubRecovery::Result> &HighTypes =
-      TR->getResult(Mod, MAM);
-  if (HighTypes == nullptr) {
-    llvm::errs() << "Error: failed to materialize HType results for dump.\n";
-    std::abort();
-  }
-
-  std::error_code EC;
-  llvm::raw_fd_ostream OS(OutputPath, EC, llvm::sys::fs::OF_Text);
-  if (EC) {
-    llvm::errs() << "Cannot open HType dump output file " << OutputPath
-                 << ": " << EC.message() << "\n";
-    std::abort();
-  }
-
-  HighTypes->print(OS);
 }
 
 // 需要去掉尾递归等优化，因此需要构建自己的Pass。

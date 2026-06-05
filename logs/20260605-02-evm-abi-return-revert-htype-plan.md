@@ -154,3 +154,55 @@ Solidity 语义 pass 的标注接口继续扩散。
   `SolidityRevertPass` 的 Panic/Error/custom error 分类仍会扫 revert 前的 memory write。
   下一步要么先做 post-TR HType 查询入口，再替换这段逻辑；要么先把旧 marker 路径和 raw memory
   store 路径拆开，记录哪些样例还依赖访问模式。
+
+## 实现记录：语义 pass 后移并接入 HType
+
+本轮先把顺序和 HType 数据入口打通，还没有替换 payload 内部字段识别。
+
+改动位置：
+
+- `include/notdec/Passes/evm/SolidityPatterns.h:43`：`AbiReturnPass` 改成 module pass，
+  构造时保存 `mlsub::MLsubRecovery &TR`。
+- `include/notdec/Passes/evm/SolidityPatterns.h:54`：`SolidityRevertPass` 同样改成 module pass，
+  后续可直接读 `HTypeResult`。
+- `src/Passes/PassManager.cpp:167`：新增 `HTypeDumpPass`，把 `--dump-htypes` 放进 pass pipeline，
+  不再用 cache。
+- `src/Passes/PassManager.cpp:291`：`PassEnv::build_passes` 接收 `HTypeDumpPath`。
+- `src/Passes/PassManager.cpp:319`：EVM pipeline 中，类型恢复后先运行 `HTypeDumpPass`，
+  再运行 `AbiReturnPass`、`SolidityRevertPass`、`EventLogPass`。
+- `src/Passes/PassManager.cpp:349`：Wasm/type-recovery pipeline 中，也在类型恢复后插入
+  `HTypeDumpPass`。
+- `src/Passes/PassManager.cpp:360`：`add_llvm2c` 删除 HType snapshot cache 参数；`.c` 输出继续直接
+  `TR.getResult`。
+- `include/notdec/Passes/PassManager.h:118`：`--dump-htypes` 仍要求 `tr-level >= 2`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:108`：新增 `hasRecordPointeeHType`，
+  用 `getExtValuePtr(base, call, 1)` 查 `HTypeResult::getDefaultValueType`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:1311`：`AbiReturnPass::run` 遍历 module 内函数，
+  在非空 `evm_return` 上检查 base 是否是结构体指针；暂时只统计和 debug 输出，不改变匹配结果。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:57`：新增 revert 侧的
+  `hasRecordPointeeHType`。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:176`：`SolidityRevertPass::run` 遍历 module
+  内函数，在非空 `evm_revert` 上检查 base HType。
+
+当前判断：
+
+- 不再解析 `.htypes` 文件；后置 pass 直接访问 C++ 的 `HTypeResult`。
+- `--dump-htypes` 的输出时机现在由 pass 顺序控制，EVM 后续 pass 改 IR 不会再影响 EVM type recovery
+  snapshot 的 value key。
+- 旧的 memory write / copy write payload 匹配还没有删。下一步要拿一个具体样例，对照 HType record
+  field，把 return/revert payload 分类从访问模式迁到字段读取。
+
+验证：
+
+- `cmake --build ./build --target notdec-decompile -j4` 通过。
+- `ctest --test-dir build -R '^notdec\.type_recovery\.evm\.tr_level_2$' --output-on-failure`
+  通过，用时 0.90s。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-tr2.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-tr2.htypes`
+  通过；输出 IR 里仍有 `notdec.solidity.revert` metadata。
+- `ctest --test-dir build -R '^notdec\.type_recovery\.llvm_ir\.tr_level_2$' --output-on-failure`
+  更新 4 个 snapshot oracle 后通过，用时 2.35s。更新的样例是 `17_StackArray`、`18_offset1`、
+  `20_PointerAnalysisFieldCycle`、`21_PointerAnalysisBranchingFieldCycle`；diff 只删除未被
+  value/memory 引用的 decl，符合 `HTypeSnapshotFormatter::getOrderedDecls` 的可达 decl 打印规则。
+- fortune 同口径命令：
+  `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-pipeline-check.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-pipeline-check.htypes`
+  通过，`elapsed=12.13`。

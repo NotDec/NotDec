@@ -19,60 +19,6 @@ struct rec_60 {
   struct_0 field_0; /* recursive body at offset: 0 */
 };
 
-struct rec_45 {
-  struct_0 field_0; /* recursive body at offset: 0 */
-};
-
-struct rec_75 {
-  struct_0 field_0; /* recursive body at offset: 0 */
-};
-
-struct rec_82 {
-  struct_0 field_0; /* recursive body at offset: 0 */
-};
-
-struct struct_1 {
-  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
-struct struct_2 {
-  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
-struct struct_3 {
-  'r:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
-union union_1 {
-  rec_45 field_0; /* at offset: 0 */
-  struct_0 field_1; /* at offset: 0 */
-};
-
-union union_2 {
-  rec_36 field_0; /* at offset: 0 */
-  rec_45 field_1; /* at offset: 0 */
-};
-
-union union_3 {
-  rec_60 field_0; /* at offset: 0 */
-  struct_0 field_1; /* at offset: 0 */
-};
-
-union union_4 {
-  rec_75 field_0; /* at offset: 0 */
-  struct_0 field_1; /* at offset: 0 */
-};
-
-union union_5 {
-  rec_82 field_0; /* at offset: 0 */
-  struct_0 field_1; /* at offset: 0 */
-};
-
-union union_6 {
-  rec_75 field_0; /* at offset: 0 */
-  rec_82 field_1; /* at offset: 0 */
-};
-
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32

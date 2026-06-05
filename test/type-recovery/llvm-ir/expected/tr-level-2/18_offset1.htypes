@@ -10,10 +10,6 @@ struct struct_1 {
   top:32 field_0; /* at offset: -24 */
 };
 
-struct struct_2 {
-  i8[4][] field_0; /* at offset: 0 */
-};
-
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32

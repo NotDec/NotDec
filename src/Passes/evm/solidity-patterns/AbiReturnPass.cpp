@@ -1,4 +1,5 @@
 #include "Passes/evm/SolidityPatternUtils.h"
+#include "TypeRecovery/mlsub/MLsubGenerator.h"
 
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
@@ -8,6 +9,8 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/Debug.h>
+#include <notdec-llvm2c/Interface.h>
 #include <optional>
 
 using namespace llvm;
@@ -71,6 +74,10 @@ STATISTIC(
     "Number of Solidity ABI return dynamic array literal byte returns found");
 STATISTIC(NumAbiReturnLiteralByteRewrites,
           "Number of Solidity ABI return literal byte rewrites found");
+STATISTIC(NumAbiReturnNonPointerBaseHTypes,
+          "Number of ABI return bases without pointer HType");
+STATISTIC(NumAbiReturnNonRecordBaseHTypes,
+          "Number of ABI return bases without record pointee HType");
 
 namespace {
 
@@ -96,6 +103,27 @@ uint64_t getAbiReturnKindCode(StringRef Kind) {
     return 2;
   }
   return 0;
+}
+
+bool hasRecordPointeeHType(llvm2c::HTypeResult &HTypes, Value *Base,
+                           CallBase &Use, unsigned ArgIndex) {
+  ast::HType *Ty =
+      HTypes.getDefaultValueType(getExtValuePtr(Base, &Use, ArgIndex));
+  if (Ty == nullptr || !Ty->isPointerType()) {
+    LLVM_DEBUG(dbgs() << "evm abi return: base has no pointer HType: "
+                      << *Base << "\n");
+    ++NumAbiReturnNonPointerBaseHTypes;
+    return false;
+  }
+
+  ast::HType *Pointee = Ty->getPointeeType();
+  if (Pointee == nullptr || !Pointee->isRecordType()) {
+    LLVM_DEBUG(dbgs() << "evm abi return: base HType is not record pointer: "
+                      << Ty->getAsString() << " for " << *Base << "\n");
+    ++NumAbiReturnNonRecordBaseHTypes;
+    return false;
+  }
+  return true;
 }
 
 bool isAbiHeadOffset(Value *V) {
@@ -1280,176 +1308,191 @@ void insertAbiReturnDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Return,
 
 } // namespace
 
-PreservedAnalyses AbiReturnPass::run(Function &F,
-                                     FunctionAnalysisManager &FAM) {
-  LLVMContext &Ctx = F.getContext();
-  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
+PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
+  std::unique_ptr<mlsub::MLsubRecovery::Result> &HighTypes =
+      TR.getResult(M, MAM);
+  if (HighTypes == nullptr) {
+    return PreservedAnalyses::all();
+  }
+
   bool Changed = false;
 
-  for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr || !isCallTo(Call, "evm_return") ||
-        Call->arg_size() != 3) {
+  for (Function &F : M) {
+    if (F.isDeclaration()) {
       continue;
     }
 
-    StringRef Kind = classifyAbiReturnSize(Call->getArgOperand(2));
-    Value *ReturnBase = Call->getArgOperand(1);
-    Value *ReturnSize = Call->getArgOperand(2);
-    if (!isConstantIntValue(ReturnSize, 0)) {
-      SmallVector<CallBase *, 8> WordWrites;
-      collectAbiReturnDataWordWriteMarkers(*Call->getParent(), *Call,
-                                           ReturnBase, WordWrites);
-      if (kEmitAbiReturnDataMarkers) {
-        for (CallBase *WordWrite : WordWrites) {
-          insertAbiReturnDataWordWriteMarker(Ctx, *Call, *WordWrite, Kind);
-          ++NumAbiReturnDataWordWrites;
-        }
+    LLVMContext &Ctx = F.getContext();
+    DominatorTree DT(F);
+    for (Instruction &I : instructions(F)) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr || !isCallTo(Call, "evm_return") ||
+          Call->arg_size() != 3) {
+        continue;
       }
-      SmallVector<CallBase *, 8> CopyWrites;
-      collectAbiReturnDataCopyWriteMarkers(*Call->getParent(), *Call,
-                                           ReturnBase, CopyWrites);
-      if (kEmitAbiReturnDataMarkers) {
-        for (CallBase *CopyWrite : CopyWrites) {
-          insertAbiReturnDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Kind);
-          ++NumAbiReturnDataCopyWrites;
+
+      StringRef Kind = classifyAbiReturnSize(Call->getArgOperand(2));
+      Value *ReturnBase = Call->getArgOperand(1);
+      Value *ReturnSize = Call->getArgOperand(2);
+      if (!isConstantIntValue(ReturnSize, 0)) {
+        hasRecordPointeeHType(*HighTypes, ReturnBase, *Call, 1);
+        SmallVector<CallBase *, 8> WordWrites;
+        collectAbiReturnDataWordWriteMarkers(*Call->getParent(), *Call,
+                                             ReturnBase, WordWrites);
+        if (kEmitAbiReturnDataMarkers) {
+          for (CallBase *WordWrite : WordWrites) {
+            insertAbiReturnDataWordWriteMarker(Ctx, *Call, *WordWrite, Kind);
+            ++NumAbiReturnDataWordWrites;
+          }
         }
-        if (CallBase *Allocation = findAbiReturnDataAllocationMarker(
-                *Call->getParent(), *Call, WordWrites, CopyWrites)) {
-          insertAbiReturnDataAllocationMarker(Ctx, *Call, *Allocation,
-                                              ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnDataAllocations;
-        }
-      }
-      std::optional<AbiReturnDynamicArraySource> DynamicSource =
-          findAbiReturnDynamicArraySource(F, *Call, ReturnBase, DT);
-      if (DynamicSource.has_value()) {
-        insertAbiReturnDynamicArraySourceMarker(Ctx, *Call, *DynamicSource,
+        SmallVector<CallBase *, 8> CopyWrites;
+        collectAbiReturnDataCopyWriteMarkers(*Call->getParent(), *Call,
+                                             ReturnBase, CopyWrites);
+        if (kEmitAbiReturnDataMarkers) {
+          for (CallBase *CopyWrite : CopyWrites) {
+            insertAbiReturnDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Kind);
+            ++NumAbiReturnDataCopyWrites;
+          }
+          if (CallBase *Allocation = findAbiReturnDataAllocationMarker(
+                  *Call->getParent(), *Call, WordWrites, CopyWrites)) {
+            insertAbiReturnDataAllocationMarker(Ctx, *Call, *Allocation,
                                                 ReturnBase, ReturnSize, Kind);
-        ++NumAbiReturnDynamicArraySources;
-        std::optional<AbiReturnDynamicArrayCopyLoop> CopyLoop =
-            findAbiReturnDynamicArrayCopyLoop(F, *DynamicSource, DT);
-        if (CopyLoop.has_value()) {
-          insertAbiReturnDynamicArrayCopyLoopMarker(
-              Ctx, *Call, *CopyLoop, ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnDynamicArrayCopyLoops;
+            ++NumAbiReturnDataAllocations;
+          }
         }
-        std::optional<AbiReturnDynamicArrayConvertedCopyLoop>
-            ConvertedCopyLoop = findAbiReturnDynamicArrayConvertedCopyLoop(
-                F, *Call, *DynamicSource, DT);
-        if (ConvertedCopyLoop.has_value()) {
-          insertAbiReturnDynamicArrayConvertedCopyLoopMarker(
-              Ctx, *Call, *ConvertedCopyLoop, ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnDynamicArrayConvertedCopyLoops;
-        }
-        std::optional<AbiReturnDynamicArrayMCopy> MCopy =
-            findAbiReturnDynamicArrayMCopy(F, *Call, *DynamicSource, DT);
-        if (MCopy.has_value()) {
-          insertAbiReturnDynamicArrayMCopyMarker(Ctx, *Call, *MCopy, ReturnBase,
-                                                 ReturnSize, Kind);
-          ++NumAbiReturnDynamicArrayMCopies;
-        }
-        std::optional<AbiReturnDynamicArrayHelperCopy> HelperCopy =
-            findAbiReturnDynamicArrayHelperCopy(F, *Call, *DynamicSource, DT);
-        if (HelperCopy.has_value()) {
-          insertAbiReturnDynamicArrayHelperCopyMarker(
-              Ctx, *Call, *HelperCopy, ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnDynamicArrayHelperCopies;
-        }
-        std::optional<AbiReturnDynamicArrayStorageSource> StorageSource =
-            findAbiReturnDynamicArrayStorageSource(F, *Call, *DynamicSource,
-                                                   DT);
-        if (StorageSource.has_value()) {
-          insertAbiReturnDynamicArrayStorageSourceMarker(
-              Ctx, *Call, *StorageSource, ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnDynamicArrayStorageSources;
-          insertAbiReturnStorageDynamicArrayRewriteMarker(
-              Ctx, *Call, *StorageSource, ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnStorageDynamicArrayRewrites;
-        } else if (ConvertedCopyLoop.has_value()) {
-          insertAbiReturnConvertedDynamicArrayRewriteMarker(
-              Ctx, *Call, *ConvertedCopyLoop, ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnConvertedDynamicArrayRewrites;
-        }
-        std::optional<AbiReturnDynamicArrayMemorySource> MemorySource =
-            findAbiReturnDynamicArrayMemorySource(F, *Call, *DynamicSource, DT);
-        if (MemorySource.has_value()) {
-          insertAbiReturnDynamicArrayMemorySourceMarker(
-              Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
-          ++NumAbiReturnDynamicArrayMemorySources;
-          bool IsLiteralSource =
-              isAbiReturnDynamicArrayLiteralSource(*MemorySource);
-          if (IsLiteralSource) {
-            insertAbiReturnDynamicArrayLiteralSourceMarker(
+        std::optional<AbiReturnDynamicArraySource> DynamicSource =
+            findAbiReturnDynamicArraySource(F, *Call, ReturnBase, DT);
+        if (DynamicSource.has_value()) {
+          insertAbiReturnDynamicArraySourceMarker(Ctx, *Call, *DynamicSource,
+                                                  ReturnBase, ReturnSize, Kind);
+          ++NumAbiReturnDynamicArraySources;
+          std::optional<AbiReturnDynamicArrayCopyLoop> CopyLoop =
+              findAbiReturnDynamicArrayCopyLoop(F, *DynamicSource, DT);
+          if (CopyLoop.has_value()) {
+            insertAbiReturnDynamicArrayCopyLoopMarker(
+                Ctx, *Call, *CopyLoop, ReturnBase, ReturnSize, Kind);
+            ++NumAbiReturnDynamicArrayCopyLoops;
+          }
+          std::optional<AbiReturnDynamicArrayConvertedCopyLoop>
+              ConvertedCopyLoop = findAbiReturnDynamicArrayConvertedCopyLoop(
+                  F, *Call, *DynamicSource, DT);
+          if (ConvertedCopyLoop.has_value()) {
+            insertAbiReturnDynamicArrayConvertedCopyLoopMarker(
+                Ctx, *Call, *ConvertedCopyLoop, ReturnBase, ReturnSize, Kind);
+            ++NumAbiReturnDynamicArrayConvertedCopyLoops;
+          }
+          std::optional<AbiReturnDynamicArrayMCopy> MCopy =
+              findAbiReturnDynamicArrayMCopy(F, *Call, *DynamicSource, DT);
+          if (MCopy.has_value()) {
+            insertAbiReturnDynamicArrayMCopyMarker(Ctx, *Call, *MCopy,
+                                                   ReturnBase, ReturnSize,
+                                                   Kind);
+            ++NumAbiReturnDynamicArrayMCopies;
+          }
+          std::optional<AbiReturnDynamicArrayHelperCopy> HelperCopy =
+              findAbiReturnDynamicArrayHelperCopy(F, *Call, *DynamicSource,
+                                                  DT);
+          if (HelperCopy.has_value()) {
+            insertAbiReturnDynamicArrayHelperCopyMarker(
+                Ctx, *Call, *HelperCopy, ReturnBase, ReturnSize, Kind);
+            ++NumAbiReturnDynamicArrayHelperCopies;
+          }
+          std::optional<AbiReturnDynamicArrayStorageSource> StorageSource =
+              findAbiReturnDynamicArrayStorageSource(F, *Call, *DynamicSource,
+                                                     DT);
+          if (StorageSource.has_value()) {
+            insertAbiReturnDynamicArrayStorageSourceMarker(
+                Ctx, *Call, *StorageSource, ReturnBase, ReturnSize, Kind);
+            ++NumAbiReturnDynamicArrayStorageSources;
+            insertAbiReturnStorageDynamicArrayRewriteMarker(
+                Ctx, *Call, *StorageSource, ReturnBase, ReturnSize, Kind);
+            ++NumAbiReturnStorageDynamicArrayRewrites;
+          } else if (ConvertedCopyLoop.has_value()) {
+            insertAbiReturnConvertedDynamicArrayRewriteMarker(
+                Ctx, *Call, *ConvertedCopyLoop, ReturnBase, ReturnSize, Kind);
+            ++NumAbiReturnConvertedDynamicArrayRewrites;
+          }
+          std::optional<AbiReturnDynamicArrayMemorySource> MemorySource =
+              findAbiReturnDynamicArrayMemorySource(F, *Call, *DynamicSource,
+                                                    DT);
+          if (MemorySource.has_value()) {
+            insertAbiReturnDynamicArrayMemorySourceMarker(
                 Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
-            ++NumAbiReturnDynamicArrayLiteralSources;
-            insertAbiReturnDynamicArrayLiteralPayloadMarker(
-                Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
-            ++NumAbiReturnDynamicArrayLiteralPayloads;
-            Value *DataWord = MemorySource->DataWrite->getArgOperand(2);
-            if (CallBase *Shift = getLiteralPayloadShift(DataWord)) {
-              insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
-                  Ctx, *Call, *MemorySource, *Shift, ReturnBase, ReturnSize,
-                  Kind);
-              ++NumAbiReturnDynamicArrayLiteralPayloadShifts;
-              insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
-                  Ctx, *Call, *MemorySource, *Shift, ReturnBase, ReturnSize,
-                  Kind);
-              ++NumAbiReturnDynamicArrayLiteralPayloadWords;
-            }
-            if (std::optional<APInt> FinalWord =
-                    getLiteralFinalWord(DataWord)) {
-              insertAbiReturnDynamicArrayLiteralBytesMarker(
-                  Ctx, *Call, *MemorySource, *FinalWord, ReturnBase, ReturnSize,
-                  Kind);
-              ++NumAbiReturnDynamicArrayLiteralBytes;
+            ++NumAbiReturnDynamicArrayMemorySources;
+            bool IsLiteralSource =
+                isAbiReturnDynamicArrayLiteralSource(*MemorySource);
+            if (IsLiteralSource) {
+              insertAbiReturnDynamicArrayLiteralSourceMarker(
+                  Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
+              ++NumAbiReturnDynamicArrayLiteralSources;
+              insertAbiReturnDynamicArrayLiteralPayloadMarker(
+                  Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
+              ++NumAbiReturnDynamicArrayLiteralPayloads;
+              Value *DataWord = MemorySource->DataWrite->getArgOperand(2);
+              if (CallBase *Shift = getLiteralPayloadShift(DataWord)) {
+                insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
+                    Ctx, *Call, *MemorySource, *Shift, ReturnBase, ReturnSize,
+                    Kind);
+                ++NumAbiReturnDynamicArrayLiteralPayloadShifts;
+                insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
+                    Ctx, *Call, *MemorySource, *Shift, ReturnBase, ReturnSize,
+                    Kind);
+                ++NumAbiReturnDynamicArrayLiteralPayloadWords;
+              }
+              if (std::optional<APInt> FinalWord =
+                      getLiteralFinalWord(DataWord)) {
+                insertAbiReturnDynamicArrayLiteralBytesMarker(
+                    Ctx, *Call, *MemorySource, *FinalWord, ReturnBase,
+                    ReturnSize, Kind);
+                ++NumAbiReturnDynamicArrayLiteralBytes;
+                uint64_t CopyKind =
+                    getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
+                if (CopyKind != 0) {
+                  insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
+                      Ctx, *Call, *MemorySource, *FinalWord, ReturnBase,
+                      ReturnSize, CopyKind, Kind);
+                  ++NumAbiReturnDynamicArrayLiteralByteReturns;
+                  insertAbiReturnLiteralBytesRewriteMarker(
+                      Ctx, *Call, *MemorySource, *FinalWord, ReturnBase,
+                      ReturnSize, CopyKind, Kind);
+                  ++NumAbiReturnLiteralByteRewrites;
+                }
+              }
+            } else {
               uint64_t CopyKind =
                   getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
-              if (CopyKind != 0) {
-                insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
-                    Ctx, *Call, *MemorySource, *FinalWord, ReturnBase,
-                    ReturnSize, CopyKind, Kind);
-                ++NumAbiReturnDynamicArrayLiteralByteReturns;
-                insertAbiReturnLiteralBytesRewriteMarker(
-                    Ctx, *Call, *MemorySource, *FinalWord, ReturnBase,
-                    ReturnSize, CopyKind, Kind);
-                ++NumAbiReturnLiteralByteRewrites;
-              }
+              insertAbiReturnMemoryDynamicArrayRewriteMarker(
+                  Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, CopyKind,
+                  Kind);
+              ++NumAbiReturnMemoryDynamicArrayRewrites;
             }
-          } else {
+          } else if (!StorageSource.has_value()) {
+            std::optional<AbiReturnDynamicArrayMemoryBuilderSource>
+                BuilderSource = findAbiReturnDynamicArrayMemoryBuilderSource(
+                    F, *Call, *DynamicSource, DT);
             uint64_t CopyKind =
                 getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
-            insertAbiReturnMemoryDynamicArrayRewriteMarker(
-                Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, CopyKind,
-                Kind);
-            ++NumAbiReturnMemoryDynamicArrayRewrites;
-          }
-        } else if (!StorageSource.has_value()) {
-          std::optional<AbiReturnDynamicArrayMemoryBuilderSource>
-              BuilderSource = findAbiReturnDynamicArrayMemoryBuilderSource(
-                  F, *Call, *DynamicSource, DT);
-          uint64_t CopyKind =
-              getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
-          if (BuilderSource.has_value() && CopyKind != 0) {
-            insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
-                Ctx, *Call, *BuilderSource, ReturnBase, ReturnSize, Kind);
-            ++NumAbiReturnDynamicArrayMemoryBuilderSources;
-            insertAbiReturnMemoryBuilderRewriteMarker(
-                Ctx, *Call, *BuilderSource, ReturnBase, ReturnSize, CopyKind,
-                Kind);
-            ++NumAbiReturnMemoryBuilderRewrites;
-          } else if (CopyLoop.has_value() && !ConvertedCopyLoop.has_value()) {
-            insertAbiReturnDynamicArrayCopyLoopRewriteMarker(
-                Ctx, *Call, *CopyLoop, ReturnBase, ReturnSize, Kind);
-            ++NumAbiReturnDynamicArrayCopyLoopRewrites;
+            if (BuilderSource.has_value() && CopyKind != 0) {
+              insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
+                  Ctx, *Call, *BuilderSource, ReturnBase, ReturnSize, Kind);
+              ++NumAbiReturnDynamicArrayMemoryBuilderSources;
+              insertAbiReturnMemoryBuilderRewriteMarker(
+                  Ctx, *Call, *BuilderSource, ReturnBase, ReturnSize, CopyKind,
+                  Kind);
+              ++NumAbiReturnMemoryBuilderRewrites;
+            } else if (CopyLoop.has_value() && !ConvertedCopyLoop.has_value()) {
+              insertAbiReturnDynamicArrayCopyLoopRewriteMarker(
+                  Ctx, *Call, *CopyLoop, ReturnBase, ReturnSize, Kind);
+              ++NumAbiReturnDynamicArrayCopyLoopRewrites;
+            }
           }
         }
       }
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, Kind);
+      addStringMetadata(Ctx, F, KIND_SOLIDITY_ABI_RETURN, "true");
+      ++NumAbiReturns;
+      Changed = true;
     }
-    addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, Kind);
-    addStringMetadata(Ctx, F, KIND_SOLIDITY_ABI_RETURN, "true");
-    ++NumAbiReturns;
-    Changed = true;
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

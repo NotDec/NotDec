@@ -1,18 +1,6 @@
 # HTypeResult
 
 [decls]
-struct struct_0 {
-  top:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
-struct struct_1 {
-  top:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
-struct struct_2 {
-  top:8[] field_0; /* tail value recursion normalized to array at offset: 0 */
-};
-
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32

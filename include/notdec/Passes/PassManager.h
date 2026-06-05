@@ -40,8 +40,6 @@ struct PassEnv {
   llvm::StandardInstrumentations SI;
   llvm::PassBuilder PB;
   llvm::ModulePassManager MPM;
-  std::string CachedHTypeSnapshot;
-  bool HasCachedHTypeSnapshot = false;
 
   PassEnv(llvm::Module &Mod)
       : Mod(Mod), SI(Mod.getContext(), ::llvm::DebugFlag, false,
@@ -86,12 +84,11 @@ struct PassEnv {
   void add_pre_type_recovery_passes();
   void add_type_recovery_passes(int level);
   void build_passes(int level, bool stopBeforeTypeRecovery = false,
-                    bool frozenTRInputIR = false);
+                    bool frozenTRInputIR = false,
+                    llvm::StringRef HTypeDumpPath = "");
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
-                  bool disableTypeRecovery,
-                  bool captureHTypeSnapshot = false);
+                  bool disableTypeRecovery);
   void run_passes();
-  void dump_htypes(const std::string &OutputPath);
   void emit_tr_input_ir(const std::string &OutputPath);
 };
 
@@ -118,21 +115,23 @@ struct DecompileConfig {
     bool EmitTRInputIR = !Opts.emitTRInputIR.empty();
     bool FrozenTRInputIR = Opts.frozenTRInputIR;
     int EffectiveLevel = EmitTRInputIR ? std::max(level, 2) : level;
-    PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR);
+    if (!HTypeDumpPath.empty() && EffectiveLevel < 2) {
+      llvm::errs() << "Error: --dump-htypes requires type recovery "
+                      "(tr-level >= 2).\n";
+      std::abort();
+    }
+    PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR,
+                    HTypeDumpPath);
     if (EmitTRInputIR) {
       return;
     }
     bool isC = getSuffix(OutFilePath) == ".c";
     if (isC) {
-      PE.add_llvm2c(OutFilePath, llvm2cOpt, EffectiveLevel < 2,
-                    !HTypeDumpPath.empty());
+      PE.add_llvm2c(OutFilePath, llvm2cOpt, EffectiveLevel < 2);
     }
   }
   void run_passes() {
     PE.run_passes();
-    if (!HTypeDumpPath.empty()) {
-      PE.dump_htypes(HTypeDumpPath);
-    }
   }
   void emit_tr_input_ir() { PE.emit_tr_input_ir(Opts.emitTRInputIR); }
 };

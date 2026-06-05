@@ -3,6 +3,10 @@
 
 #include <llvm/IR/PassManager.h>
 
+namespace notdec::mlsub {
+class MLsubRecovery;
+}
+
 namespace notdec::passes::evm {
 
 extern const char *KIND_SOLIDITY_NONPAYABLE;
@@ -37,16 +41,22 @@ struct PayabilityGuardPass : llvm::PassInfoMixin<PayabilityGuardPass> {
 // rewrite memory writes because return buffers often share code with dynamic
 // object construction.
 struct AbiReturnPass : llvm::PassInfoMixin<AbiReturnPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
+  mlsub::MLsubRecovery &TR;
+
+  explicit AbiReturnPass(mlsub::MLsubRecovery &TR) : TR(TR) {}
+
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 
   static bool isRequired() { return true; }
 };
 
 // Marks empty reverts, Panic(uint256) reverts, and returndata bubbling.
 struct SolidityRevertPass : llvm::PassInfoMixin<SolidityRevertPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
+  mlsub::MLsubRecovery &TR;
+
+  explicit SolidityRevertPass(mlsub::MLsubRecovery &TR) : TR(TR) {}
+
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 
   static bool isRequired() { return true; }
 };
