@@ -18,7 +18,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -61,7 +60,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -96,7 +94,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -131,7 +128,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -166,7 +162,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -201,7 +196,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 9
       },
@@ -242,7 +236,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 8
       },
@@ -277,7 +270,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -313,7 +305,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -350,7 +341,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 3
       },
@@ -387,7 +377,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 3
       },
@@ -444,7 +433,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 3
       },
@@ -491,7 +479,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -538,7 +525,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 8
       },
@@ -585,7 +571,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 3
       },
@@ -629,7 +614,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -673,7 +657,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -717,7 +700,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -761,7 +743,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 4
       },
@@ -805,7 +786,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 5
       },
@@ -843,7 +823,6 @@
       "patterns": [
         "abi_return",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -854,7 +833,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 1,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 2
       },
@@ -903,7 +881,6 @@
       "patterns": [
         "abi_return",
         "checked_bounds",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -914,7 +891,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 25,
         "notdec.solidity.revert": 13
       },
@@ -963,7 +939,6 @@
       "input": "cases/0002_delegatecall_no_nonpayable.ll",
       "patterns": [
         "abi_return",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -972,7 +947,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 1
       },
@@ -1017,7 +991,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1028,7 +1001,6 @@
         "notdec.solidity.abi_return": 10,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 30,
         "notdec.solidity.revert": 14
       },
@@ -1061,7 +1033,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1072,7 +1043,6 @@
         "notdec.solidity.abi_return": 28,
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 7,
-        "notdec.solidity.external_call": 8,
         "notdec.solidity.payability_guard": 95,
         "notdec.solidity.revert": 71
       },
@@ -1152,7 +1122,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1163,7 +1132,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 9
       },
@@ -1221,7 +1189,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -1230,7 +1197,6 @@
         "notdec.solidity.abi_return": 20,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 28
       },
@@ -1263,7 +1229,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1274,7 +1239,6 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 5,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 75,
         "notdec.solidity.revert": 82
       },
@@ -1307,7 +1271,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1318,7 +1281,6 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 5,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 75,
         "notdec.solidity.revert": 82
       },
@@ -1351,7 +1313,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -1360,7 +1321,6 @@
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 5,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 35
       },
@@ -1393,7 +1353,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1404,7 +1363,6 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 145,
         "notdec.solidity.revert": 109
       },
@@ -1437,7 +1395,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1448,7 +1405,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 9
       },
@@ -1480,7 +1436,6 @@
       "patterns": [
         "abi_return",
         "checked_bounds",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1491,7 +1446,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 8
       },
@@ -1524,7 +1478,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1535,7 +1488,6 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 145,
         "notdec.solidity.revert": 109
       },
@@ -1568,7 +1520,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1579,7 +1530,6 @@
         "notdec.solidity.abi_return": 72,
         "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.event": 21,
-        "notdec.solidity.external_call": 26,
         "notdec.solidity.payability_guard": 305,
         "notdec.solidity.revert": 273
       },
@@ -1654,7 +1604,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1665,7 +1614,6 @@
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 43,
         "notdec.solidity.event": 9,
-        "notdec.solidity.external_call": 13,
         "notdec.solidity.payability_guard": 145,
         "notdec.solidity.revert": 212
       },
@@ -1726,7 +1674,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1737,7 +1684,6 @@
         "notdec.solidity.abi_return": 66,
         "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 30,
-        "notdec.solidity.external_call": 57,
         "notdec.solidity.payability_guard": 310,
         "notdec.solidity.revert": 288
       },
@@ -1813,7 +1759,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -1822,7 +1767,6 @@
         "notdec.solidity.abi_return": 68,
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 17,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 75
       },
@@ -1892,7 +1836,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -1901,7 +1844,6 @@
         "notdec.solidity.abi_return": 79,
         "notdec.solidity.checked_bounds": 30,
         "notdec.solidity.event": 13,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 145
       },
@@ -1966,7 +1908,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -1977,7 +1918,6 @@
         "notdec.solidity.abi_return": 68,
         "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 11,
-        "notdec.solidity.external_call": 15,
         "notdec.solidity.payability_guard": 220,
         "notdec.solidity.revert": 191
       },
@@ -2055,7 +1995,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2066,7 +2005,6 @@
         "notdec.solidity.abi_return": 56,
         "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 195,
         "notdec.solidity.revert": 110
       },
@@ -2128,7 +2066,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -2137,7 +2074,6 @@
         "notdec.solidity.abi_return": 44,
         "notdec.solidity.checked_bounds": 61,
         "notdec.solidity.event": 12,
-        "notdec.solidity.external_call": 9,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 145
       },
@@ -2202,7 +2138,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2213,7 +2148,6 @@
         "notdec.solidity.abi_return": 52,
         "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 180,
         "notdec.solidity.revert": 103
       },
@@ -2275,7 +2209,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2286,7 +2219,6 @@
         "notdec.solidity.abi_return": 104,
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 375,
         "notdec.solidity.revert": 172
       },
@@ -2350,7 +2282,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2361,7 +2292,6 @@
         "notdec.solidity.abi_return": 42,
         "notdec.solidity.checked_bounds": 15,
         "notdec.solidity.event": 14,
-        "notdec.solidity.external_call": 33,
         "notdec.solidity.payability_guard": 185,
         "notdec.solidity.revert": 175
       },
@@ -2423,7 +2353,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -2432,7 +2361,6 @@
         "notdec.solidity.abi_return": 77,
         "notdec.solidity.checked_bounds": 30,
         "notdec.solidity.event": 12,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 148
       },
@@ -2497,7 +2425,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2508,7 +2435,6 @@
         "notdec.solidity.abi_return": 62,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 10,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 190,
         "notdec.solidity.revert": 128
       },
@@ -2541,7 +2467,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2552,7 +2477,6 @@
         "notdec.solidity.abi_return": 102,
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 365,
         "notdec.solidity.revert": 169
       },
@@ -2616,7 +2540,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2627,7 +2550,6 @@
         "notdec.solidity.abi_return": 50,
         "notdec.solidity.checked_bounds": 18,
         "notdec.solidity.event": 9,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 195,
         "notdec.solidity.revert": 133
       },
@@ -2698,7 +2620,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2709,7 +2630,6 @@
         "notdec.solidity.abi_return": 64,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
-        "notdec.solidity.external_call": 10,
         "notdec.solidity.payability_guard": 230,
         "notdec.solidity.revert": 164
       },
@@ -2765,7 +2685,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "revert",
         "selector_entry"
       ],
@@ -2774,7 +2693,6 @@
         "notdec.solidity.abi_return": 56,
         "notdec.solidity.checked_bounds": 14,
         "notdec.solidity.event": 12,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 98
       },
@@ -2842,7 +2760,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2853,7 +2770,6 @@
         "notdec.solidity.abi_return": 82,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 12,
-        "notdec.solidity.external_call": 11,
         "notdec.solidity.payability_guard": 280,
         "notdec.solidity.revert": 154
       },
@@ -2886,7 +2802,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2897,7 +2812,6 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.event": 12,
-        "notdec.solidity.external_call": 7,
         "notdec.solidity.payability_guard": 150,
         "notdec.solidity.revert": 117
       },
@@ -2962,7 +2876,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -2973,7 +2886,6 @@
         "notdec.solidity.abi_return": 38,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
-        "notdec.solidity.external_call": 8,
         "notdec.solidity.payability_guard": 185,
         "notdec.solidity.revert": 125
       },
@@ -3006,7 +2918,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3017,7 +2928,6 @@
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
-        "notdec.solidity.external_call": 13,
         "notdec.solidity.payability_guard": 315,
         "notdec.solidity.revert": 160
       },
@@ -3074,7 +2984,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3085,7 +2994,6 @@
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
-        "notdec.solidity.external_call": 13,
         "notdec.solidity.payability_guard": 315,
         "notdec.solidity.revert": 160
       },
@@ -3142,7 +3050,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3153,7 +3060,6 @@
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
-        "notdec.solidity.external_call": 13,
         "notdec.solidity.payability_guard": 315,
         "notdec.solidity.revert": 160
       },
@@ -3210,7 +3116,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3221,7 +3126,6 @@
         "notdec.solidity.abi_return": 86,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 8,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 290,
         "notdec.solidity.revert": 140
       },
@@ -3274,7 +3178,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3285,7 +3188,6 @@
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 135,
         "notdec.solidity.revert": 70
       },
@@ -3318,7 +3220,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3329,7 +3230,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 11
       },
@@ -3372,7 +3272,6 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 55,
         "notdec.solidity.revert": 29
       },
@@ -3405,7 +3304,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3416,7 +3314,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 8,
         "notdec.solidity.payability_guard": 50,
         "notdec.solidity.revert": 46
       },
@@ -3449,7 +3346,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3460,7 +3356,6 @@
         "notdec.solidity.abi_return": 46,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 7,
-        "notdec.solidity.external_call": 6,
         "notdec.solidity.payability_guard": 190,
         "notdec.solidity.revert": 121
       },
@@ -3493,7 +3388,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3504,7 +3398,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 9
       },
@@ -3537,7 +3430,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3548,7 +3440,6 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 3,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 100,
         "notdec.solidity.revert": 64
       },
@@ -3609,7 +3500,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3620,7 +3510,6 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 10,
         "notdec.solidity.revert": 9
       },
@@ -3653,7 +3542,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3664,7 +3552,6 @@
         "notdec.solidity.abi_return": 44,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 12,
         "notdec.solidity.payability_guard": 145,
         "notdec.solidity.revert": 90
       },
@@ -3723,7 +3610,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3734,7 +3620,6 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 125,
         "notdec.solidity.revert": 83
       },
@@ -3796,7 +3681,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3807,7 +3691,6 @@
         "notdec.solidity.abi_return": 62,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 210,
         "notdec.solidity.revert": 100
       },
@@ -3840,7 +3723,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3851,7 +3733,6 @@
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 12,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 130,
         "notdec.solidity.revert": 48
       },
@@ -3884,7 +3765,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3895,7 +3775,6 @@
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 165,
         "notdec.solidity.revert": 105
       },
@@ -3953,7 +3832,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -3964,7 +3842,6 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 155,
         "notdec.solidity.revert": 101
       },
@@ -4021,7 +3898,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -4032,7 +3908,6 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 155,
         "notdec.solidity.revert": 101
       },
@@ -4089,7 +3964,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -4100,7 +3974,6 @@
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 7,
         "notdec.solidity.payability_guard": 125,
         "notdec.solidity.revert": 80
       },
@@ -4133,7 +4006,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -4144,7 +4016,6 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 3,
         "notdec.solidity.payability_guard": 155,
         "notdec.solidity.revert": 101
       },
@@ -4201,7 +4072,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -4212,7 +4082,6 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 105,
         "notdec.solidity.revert": 68
       },
@@ -4245,7 +4114,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -4256,7 +4124,6 @@
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 5,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 115,
         "notdec.solidity.revert": 75
       },
@@ -4289,7 +4156,6 @@
         "abi_return",
         "checked_bounds",
         "event_log",
-        "external_call",
         "nonpayable_guard",
         "payability",
         "revert",
@@ -4300,7 +4166,6 @@
         "notdec.solidity.abi_return": 8,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 1,
         "notdec.solidity.payability_guard": 50,
         "notdec.solidity.revert": 18
       },
@@ -4337,7 +4202,6 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 7,
-        "notdec.solidity.external_call": 5,
         "notdec.solidity.payability_guard": 140,
         "notdec.solidity.revert": 92
       },
@@ -4376,7 +4240,6 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 7,
-        "notdec.solidity.external_call": 5,
         "notdec.solidity.payability_guard": 140,
         "notdec.solidity.revert": 92
       },
@@ -4415,7 +4278,6 @@
         "notdec.solidity.abi_return": 26,
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 8,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 35
       },
@@ -4464,7 +4326,6 @@
         "notdec.solidity.abi_return": 26,
         "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 17,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 61
       },
@@ -4519,7 +4380,6 @@
         "notdec.solidity.abi_return": 10,
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 11,
-        "notdec.solidity.external_call": 9,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 74
       },
@@ -4583,7 +4443,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 11,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 8,
         "notdec.solidity.payability_guard": 5,
         "notdec.solidity.revert": 44
       },
@@ -4636,7 +4495,6 @@
         "notdec.solidity.abi_return": 0,
         "notdec.solidity.checked_bounds": 5,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 13,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 47
       },
@@ -4686,7 +4544,6 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 42,
         "notdec.solidity.event": 0,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 60
       },
@@ -4743,7 +4600,6 @@
         "notdec.solidity.abi_return": 62,
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 6,
-        "notdec.solidity.external_call": 2,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 115
       },
@@ -4802,7 +4658,6 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 8,
-        "notdec.solidity.external_call": 4,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 48
       },
@@ -4843,7 +4698,6 @@
         "notdec.solidity.abi_return": 24,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 4,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 42
       },
@@ -4883,7 +4737,6 @@
         "notdec.solidity.abi_return": 10,
         "notdec.solidity.checked_bounds": 12,
         "notdec.solidity.event": 1,
-        "notdec.solidity.external_call": 0,
         "notdec.solidity.payability_guard": 30,
         "notdec.solidity.revert": 53
       },

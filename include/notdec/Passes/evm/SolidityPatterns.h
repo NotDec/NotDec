@@ -11,7 +11,6 @@ extern const char *KIND_SOLIDITY_ABI_RETURN;
 extern const char *KIND_SOLIDITY_REVERT;
 extern const char *KIND_SOLIDITY_CHECKED_BOUNDS;
 extern const char *KIND_SOLIDITY_EVENT;
-extern const char *KIND_SOLIDITY_EXTERNAL_CALL;
 
 // Splits selector-entry inline fallback/receive bodies into standalone helper
 // functions when the CFG boundary is clear.  The pass keeps dispatcher-only
@@ -65,15 +64,6 @@ struct CheckedBoundsPass : llvm::PassInfoMixin<CheckedBoundsPass> {
 
 // Marks EVM log instructions as event emission candidates.
 struct EventLogPass : llvm::PassInfoMixin<EventLogPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
-// Marks low-level call instructions.  Proxy/library recognition is deliberately
-// outside this pass; the metadata only records the EVM call kind.
-struct ExternalCallPass : llvm::PassInfoMixin<ExternalCallPass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 

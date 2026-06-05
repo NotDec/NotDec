@@ -29,7 +29,6 @@ const char *KIND_SOLIDITY_ABI_RETURN = "notdec.solidity.abi_return";
 const char *KIND_SOLIDITY_REVERT = "notdec.solidity.revert";
 const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
 const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
-const char *KIND_SOLIDITY_EXTERNAL_CALL = "notdec.solidity.external_call";
 
 namespace detail {
 

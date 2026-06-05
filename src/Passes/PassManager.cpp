@@ -297,7 +297,6 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       MPM.addPass(
           createModuleToFunctionPassAdaptor(evm::SolidityRevertPass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(evm::EventLogPass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(evm::ExternalCallPass()));
     }
     MPM.addPass(VerifierPass(false));
     if (level >= 2) {

@@ -60,8 +60,6 @@ struct PassEnv {
                            "evm-solidity-revert");
     PIC.addClassToPassName("notdec::passes::evm::EventLogPass",
                            "evm-event-log");
-    PIC.addClassToPassName("notdec::passes::evm::ExternalCallPass",
-                           "evm-external-call");
 
     // llvm2c passes
     PIC.addClassToPassName("notdec::llvm2c::AdjustCFGPass", "adjustcfg");

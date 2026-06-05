@@ -40,7 +40,7 @@ Memory Object analysis。pass 如果 rewrite IR，需要同步维护相关类型
 2. 类型恢复主流程生成 `MLsubRecovery::Result`。
 3. 语义 pass 按下面顺序消费类型结果：
    - Storage recovery / StorageField pass
-   - ExternalCallPass
+   - external call 处理
    - AbiReturnPass
    - SolidityRevertPass
    - EventLogPass
@@ -109,7 +109,7 @@ rewrite：
 - 初期只加 metadata 或 side-table，不删除原始 `sload/sstore`。
 - 如果后续改成高层 `notdec_storage_load(slot)`，新 value 继承原 load result 类型。
 
-### 2. ExternalCallPass
+### 2. External call 处理
 
 负责：
 
@@ -125,8 +125,9 @@ rewrite：
 
 rewrite：
 
-- 可以把低层 call 标成 external-call marker。
-- 如果生成新 helper call，返回值继承旧 call status 的类型。
+- 不再用只写 metadata 的 `ExternalCallPass`。`evm_call`、`evm_staticcall`、`evm_delegatecall`、
+  `evm_callcode` 从 callee 名字已经能区分，重复 metadata 没有价值。
+- 后续如果生成新 helper call，返回值继承旧 call status 的类型。
 - input/output buffer 的字段类型从 memory object 类型结果读取，不自己重新推。
 
 ### 3. AbiReturnPass
@@ -232,3 +233,31 @@ rewrite：
 - 不做完整动态 ABI 展开。
 - 不把所有 `uint160` 直接叫 address。
 
+## 实现记录：删除 ExternalCallPass
+
+本次按“call kind 从 callee 名字即可看出”的判断，删除只写
+`notdec.solidity.external_call` metadata 的 pass。
+
+改动位置：
+
+- `src/CMakeLists.txt:12`：从 notdec 静态库源文件列表里移除
+  `Passes/evm/solidity-patterns/ExternalCallPass.cpp`。
+- `include/notdec/Passes/PassManager.h:55`：删除 `ExternalCallPass` 的 pass name 注册。
+- `src/Passes/PassManager.cpp:287`：从 EVM pre-TR pipeline 删除
+  `evm::ExternalCallPass()`。
+- `include/notdec/Passes/evm/SolidityPatterns.h:8`：删除
+  `KIND_SOLIDITY_EXTERNAL_CALL` 声明和 `ExternalCallPass` 类型声明。
+- `src/Passes/evm/SolidityPatterns.cpp:26`：删除
+  `KIND_SOLIDITY_EXTERNAL_CALL` 常量。
+- 删除 `src/Passes/evm/solidity-patterns/ExternalCallPass.cpp`。
+- `test/evm/solidity-patterns/manifest.json`：删除
+  `notdec.solidity.external_call` metadata oracle 和 `external_call` 标签。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json`
+- `cmake --build ./build --target notdec-decompile -j4`
+- `ctest --test-dir build -R '^notdec\.type_recovery\.evm\.tr_level_2$' --output-on-failure`
+  通过，用时 0.95s。
+- `ctest --test-dir build -R '^notdec\.evm\.solidity_patterns$' --output-on-failure`
+  通过，用时 107.41s。
