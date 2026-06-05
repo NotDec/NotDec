@@ -16,8 +16,6 @@ namespace notdec::passes::evm {
 using namespace detail;
 
 STATISTIC(NumEvents, "Number of Solidity event candidates found");
-STATISTIC(NumEventMemoryConsumers,
-          "Number of Solidity event memory consumers found");
 STATISTIC(NumEventDataAllocations,
           "Number of Solidity event data allocations found");
 STATISTIC(NumEventDataWordWrites,
@@ -53,8 +51,9 @@ Value *getSizedAllocationSize(Value *Base) {
   }
 
   auto *PtrToInt = dyn_cast_or_null<PtrToIntInst>(Base);
-  Call = PtrToInt == nullptr ? nullptr
-                             : dyn_cast_or_null<CallBase>(PtrToInt->getOperand(0));
+  Call = PtrToInt == nullptr
+             ? nullptr
+             : dyn_cast_or_null<CallBase>(PtrToInt->getOperand(0));
   if (Call != nullptr && isCallTo(Call, "calloc") && Call->arg_size() == 2) {
     return Call->getArgOperand(1);
   }
@@ -173,32 +172,15 @@ findEventDataAllocation(BasicBlock &BB, CallBase &Log,
   return Candidate;
 }
 
-// Consumer markers encode buffer role rather than memory layout. Keep this
-// disabled until type recovery has a stable role carrier.
-// void insertEventMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Log,
-//                                      Value *Base, Value *Size,
-//                                      uint64_t TopicCount) {
-//   Module *M = Log.getModule();
-//   Type *I256 = Type::getIntNTy(Ctx, 256);
-//   FunctionCallee Marker = M->getOrInsertFunction(
-//       "notdec_solidity_event_memory_consumer",
-//       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
-//
-//   IRBuilder<> Builder(&Log);
-//   Builder.CreateCall(Marker, {Base, Size, ConstantInt::get(I256, TopicCount)});
-// }
-
 void insertEventDataAllocationMarker(LLVMContext &Ctx, CallBase &Log,
                                      Value *AllocationBase,
-                                     Value *AllocationSize,
-                                     Value *ConsumerSize,
+                                     Value *AllocationSize, Value *ConsumerSize,
                                      uint64_t TopicCount) {
   Module *M = Log.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_event_data_allocation",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
-                        false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Log);
   Builder.CreateCall(Marker, {AllocationBase, AllocationSize, ConsumerSize,
@@ -206,25 +188,21 @@ void insertEventDataAllocationMarker(LLVMContext &Ctx, CallBase &Log,
 }
 
 void insertEventDataWordWriteMarker(LLVMContext &Ctx, CallBase &Log,
-                                    CallBase &WordWrite,
-                                    uint64_t TopicCount) {
+                                    CallBase &WordWrite, uint64_t TopicCount) {
   Module *M = Log.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_event_data_word_write",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
-                        false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Log);
-  Builder.CreateCall(Marker,
-                     {WordWrite.getArgOperand(0), WordWrite.getArgOperand(1),
-                      WordWrite.getArgOperand(2),
-                      ConstantInt::get(I256, TopicCount)});
+  Builder.CreateCall(
+      Marker, {WordWrite.getArgOperand(0), WordWrite.getArgOperand(1),
+               WordWrite.getArgOperand(2), ConstantInt::get(I256, TopicCount)});
 }
 
 void insertEventDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Log,
-                                    CallBase &CopyWrite,
-                                    uint64_t TopicCount) {
+                                    CallBase &CopyWrite, uint64_t TopicCount) {
   Module *M = Log.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -233,11 +211,10 @@ void insertEventDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Log,
                         {I256, I256, I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Log);
-  Builder.CreateCall(Marker,
-                     {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(1),
-                      CopyWrite.getArgOperand(2), CopyWrite.getArgOperand(3),
-                      CopyWrite.getArgOperand(4),
-                      ConstantInt::get(I256, TopicCount)});
+  Builder.CreateCall(
+      Marker, {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(1),
+               CopyWrite.getArgOperand(2), CopyWrite.getArgOperand(3),
+               CopyWrite.getArgOperand(4), ConstantInt::get(I256, TopicCount)});
 }
 
 } // namespace
@@ -265,9 +242,6 @@ PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
     {
       Value *DataBase = Call->getArgOperand(1);
       Value *DataSize = Call->getArgOperand(2);
-      // insertEventMemoryConsumerMarker(Ctx, *Call, DataBase, DataSize,
-      //                                 TopicCount);
-      // ++NumEventMemoryConsumers;
       SmallVector<CallBase *, 8> WordWrites;
       collectEventDataWordWriteMarkers(*Call->getParent(), *Call, DataBase,
                                        WordWrites);

@@ -1,8 +1,8 @@
 #include "Passes/evm/MemoryBufferAnalysis.h"
 #include "Passes/evm/SolidityPatternUtils.h"
 
-#include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
@@ -26,9 +26,7 @@ STATISTIC(NumMemoryArrayByteWrites,
 namespace notdec::passes::evm {
 namespace {
 
-bool isSameValue(Value *LHS, Value *RHS) {
-  return LHS == RHS;
-}
+bool isSameValue(Value *LHS, Value *RHS) { return LHS == RHS; }
 
 std::optional<uint64_t> getUInt64Constant(Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
@@ -70,41 +68,6 @@ MemoryWriteKind getMemoryCopyWriteKind(CallBase *Call) {
     return MemoryWriteKind::ReturndataCopy;
   }
   return MemoryWriteKind::CodeCopy;
-}
-
-bool isEvmLogCall(CallBase *Call) {
-  StringRef Name = detail::getCalleeName(Call);
-  if (!Name.starts_with("evm_log") || Name.size() != 8) {
-    return false;
-  }
-  char TopicCount = Name.back();
-  return TopicCount >= '0' && TopicCount <= '4';
-}
-
-struct ExternalCallMemoryArgs {
-  Value *InputBase = nullptr;
-  Value *InputSize = nullptr;
-  Value *OutputBase = nullptr;
-  Value *OutputSize = nullptr;
-};
-
-std::optional<ExternalCallMemoryArgs> getExternalCallMemoryArgs(CallBase *Call) {
-  StringRef Name = detail::getCalleeName(Call);
-  if ((Name == "evm_call" || Name == "evm_callcode") &&
-      Call->arg_size() == 10) {
-    return ExternalCallMemoryArgs{Call->getArgOperand(6),
-                                  Call->getArgOperand(7),
-                                  Call->getArgOperand(8),
-                                  Call->getArgOperand(9)};
-  }
-  if ((Name == "evm_delegatecall" || Name == "evm_staticcall") &&
-      Call->arg_size() == 9) {
-    return ExternalCallMemoryArgs{Call->getArgOperand(5),
-                                  Call->getArgOperand(6),
-                                  Call->getArgOperand(7),
-                                  Call->getArgOperand(8)};
-  }
-  return std::nullopt;
 }
 
 std::optional<uint64_t> getOffsetFromBase(Value *Ptr, Value *Base) {
@@ -172,8 +135,8 @@ Value *getAllocationSize(Value *NewPtr, Value *Base) {
 
 void getOrDeclareMarker(Module &M, StringRef Name, ArrayRef<Type *> Args,
                         Function *&Out) {
-  FunctionType *FTy = FunctionType::get(Type::getVoidTy(M.getContext()), Args,
-                                        false);
+  FunctionType *FTy =
+      FunctionType::get(Type::getVoidTy(M.getContext()), Args, false);
   FunctionCallee Callee = M.getOrInsertFunction(Name, FTy);
   Out = cast<Function>(Callee.getCallee());
 }
@@ -210,8 +173,8 @@ void insertAllocationMarker(LLVMContext &Ctx, const MemoryAllocation &Alloc) {
   getOrDeclareMarker(*M, "notdec_solidity_memory_allocation", {I256, I256},
                      Marker);
   IRBuilder<> Builder(Alloc.FinalizePoint);
-  Builder.CreateCall(Marker,
-                     {asI256(Builder, Alloc.Base), asI256(Builder, Alloc.Size)});
+  Builder.CreateCall(
+      Marker, {asI256(Builder, Alloc.Base), asI256(Builder, Alloc.Size)});
 }
 
 bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
@@ -230,8 +193,7 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
   Module *M = BaseLoad->getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   Type *PtrTy = PointerType::get(Ctx, 0);
-  bool SizeAvailable =
-      valueAvailableAt(Alloc.Size, *Alloc.AllocatePoint, DT);
+  bool SizeAvailable = valueAvailableAt(Alloc.Size, *Alloc.AllocatePoint, DT);
   SmallVector<Type *, 2> AllocArgs;
   if (SizeAvailable) {
     AllocArgs.append({I256, I256});
@@ -242,11 +204,12 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
 
   IRBuilder<> AllocBuilder(Alloc.AllocatePoint);
   CallInst *NewBasePtr =
-      SizeAvailable ? AllocBuilder.CreateCall(
-                          AllocFn, {ConstantInt::get(I256, 1),
-                                    asI256(AllocBuilder, Alloc.Size)})
-                    : AllocBuilder.CreateCall(AllocFn);
-  Value *NewBase = AllocBuilder.CreatePtrToInt(NewBasePtr, I256, "evm.alloc.addr");
+      SizeAvailable
+          ? AllocBuilder.CreateCall(AllocFn, {ConstantInt::get(I256, 1),
+                                              asI256(AllocBuilder, Alloc.Size)})
+          : AllocBuilder.CreateCall(AllocFn);
+  Value *NewBase =
+      AllocBuilder.CreatePtrToInt(NewBasePtr, I256, "evm.alloc.addr");
 
   BaseLoad->replaceAllUsesWith(NewBase);
   if (BaseLoad->use_empty()) {
@@ -257,10 +220,9 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
     Function *FinalizeFn = getOrDeclareFunction(
         *M, "notdec_evm_finalize_alloc", Type::getVoidTy(Ctx), {I256, I256});
     IRBuilder<> FinalizeBuilder(Alloc.FinalizePoint);
-    FinalizeBuilder.CreateCall(
-        FinalizeFn,
-        {asI256(FinalizeBuilder, NewBase),
-         asI256(FinalizeBuilder, Alloc.Size)});
+    FinalizeBuilder.CreateCall(FinalizeFn,
+                               {asI256(FinalizeBuilder, NewBase),
+                                asI256(FinalizeBuilder, Alloc.Size)});
     ++NumMemoryFinalizeAllocations;
   }
 
@@ -353,24 +315,6 @@ void insertArrayByteWriteMarker(LLVMContext &Ctx,
                               asI256(Builder, Write.Value)});
 }
 
-// Consumer markers encode ABI/revert/event role, not memory layout. Keep this
-// insertion code disabled until type recovery has a stable role carrier.
-// void insertConsumerMarker(LLVMContext &Ctx, const MemoryConsumer &Consumer) {
-//   if (Consumer.Call == nullptr || Consumer.Base == nullptr ||
-//       Consumer.Size == nullptr) {
-//     return;
-//   }
-//   Module *M = Consumer.Call->getModule();
-//   Function *Marker = nullptr;
-//   Type *I256 = Type::getIntNTy(Ctx, 256);
-//   getOrDeclareMarker(*M, "notdec_solidity_memory_consumer",
-//                      {I256, I256, I256}, Marker);
-//   IRBuilder<> Builder(Consumer.Call);
-//   Builder.CreateCall(
-//       Marker, {asI256(Builder, Consumer.Base), asI256(Builder, Consumer.Size),
-//                ConstantInt::get(I256, static_cast<uint64_t>(Consumer.Kind))});
-// }
-
 } // namespace
 
 MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
@@ -424,9 +368,8 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset,
-                                           Store->StoredValue, nullptr,
-                                           MemoryWriteKind::MStore});
+        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset, Store->StoredValue,
+                                           nullptr, MemoryWriteKind::MStore});
         break;
       }
       continue;
@@ -469,9 +412,8 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset,
-                                           Store->StoredValue, nullptr,
-                                           MemoryWriteKind::MStore8});
+        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset, Store->StoredValue,
+                                           nullptr, MemoryWriteKind::MStore8});
         MatchedBase = true;
         break;
       }
@@ -532,10 +474,9 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
-                                           Call->getArgOperand(3),
-                                           Call->getArgOperand(2),
-                                           MemoryWriteKind::MemoryCopy});
+        Facts.Writes.push_back(
+            MemoryWrite{Call, Base, Offset, Call->getArgOperand(3),
+                        Call->getArgOperand(2), MemoryWriteKind::MemoryCopy});
         MatchedBase = true;
         break;
       }
@@ -543,61 +484,6 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         Facts.Writes.push_back(MemoryWrite{Call, Dst, 0, Call->getArgOperand(3),
                                            Call->getArgOperand(2),
                                            MemoryWriteKind::MemoryCopy});
-      }
-      continue;
-    }
-
-    if (detail::isCallTo(Call, "evm_return") && Call->arg_size() == 3) {
-      if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
-        Facts.Consumers.push_back(MemoryConsumer{
-            Call, MemoryConsumerKind::Return, Call->getArgOperand(1),
-            Call->getArgOperand(2)});
-      } else if (isZero(Call->getArgOperand(1)) &&
-                 !isZero(Call->getArgOperand(2))) {
-        Facts.Consumers.push_back(MemoryConsumer{
-            Call, MemoryConsumerKind::Return,
-            ConstantInt::get(Call->getArgOperand(1)->getType(), 0),
-            Call->getArgOperand(2)});
-      }
-      continue;
-    }
-
-    if (detail::isCallTo(Call, "evm_revert") && Call->arg_size() == 3) {
-      if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
-        Facts.Consumers.push_back(MemoryConsumer{
-            Call, MemoryConsumerKind::Revert, Call->getArgOperand(1),
-            Call->getArgOperand(2)});
-      } else if (isZero(Call->getArgOperand(1)) &&
-                 !isZero(Call->getArgOperand(2))) {
-        Facts.Consumers.push_back(MemoryConsumer{
-            Call, MemoryConsumerKind::Revert,
-            ConstantInt::get(Call->getArgOperand(1)->getType(), 0),
-            Call->getArgOperand(2)});
-      }
-      continue;
-    }
-
-    if (isEvmLogCall(Call) && Call->arg_size() >= 3) {
-      if (isFreeMemoryPointerLoad(Call->getArgOperand(1))) {
-        Facts.Consumers.push_back(MemoryConsumer{
-            Call, MemoryConsumerKind::EventLog, Call->getArgOperand(1),
-            Call->getArgOperand(2)});
-      }
-      continue;
-    }
-
-    std::optional<ExternalCallMemoryArgs> ExternalArgs =
-        getExternalCallMemoryArgs(Call);
-    if (ExternalArgs.has_value()) {
-      if (isFreeMemoryPointerLoad(ExternalArgs->InputBase)) {
-        Facts.Consumers.push_back(MemoryConsumer{
-            Call, MemoryConsumerKind::ExternalCallInput,
-            ExternalArgs->InputBase, ExternalArgs->InputSize});
-      }
-      if (isFreeMemoryPointerLoad(ExternalArgs->OutputBase)) {
-        Facts.Consumers.push_back(MemoryConsumer{
-            Call, MemoryConsumerKind::ExternalCallOutput,
-            ExternalArgs->OutputBase, ExternalArgs->OutputSize});
       }
       continue;
     }
@@ -640,14 +526,6 @@ PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
     ++NumMemoryArrayByteWrites;
     Changed = true;
   }
-
-  // Consumer markers encode ABI/revert/event role, not memory layout. Keep
-  // collecting the facts, but stop materializing markers until type recovery
-  // has a stable role carrier.
-  // for (const MemoryConsumer &Consumer : Facts.Consumers) {
-  //   insertConsumerMarker(Ctx, Consumer);
-  //   Changed = true;
-  // }
 
   SmallVector<Instruction *, 16> ToErase;
   SmallPtrSet<Instruction *, 8> RewrittenBases;

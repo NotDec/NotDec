@@ -1,11 +1,11 @@
 #ifndef _NOTDEC_PASSES_EVM_MEMORY_BUFFER_ANALYSIS_H_
 #define _NOTDEC_PASSES_EVM_MEMORY_BUFFER_ANALYSIS_H_
 
+#include <cstdint>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
 #include <optional>
-#include <cstdint>
 
 namespace llvm {
 class CallBase;
@@ -26,14 +26,6 @@ enum class MemoryWriteKind {
   MStore8 = 7,
 };
 
-enum class MemoryConsumerKind {
-  Return = 1,
-  Revert = 2,
-  EventLog = 3,
-  ExternalCallInput = 4,
-  ExternalCallOutput = 5,
-};
-
 // A Solidity allocation is modeled as the relation between the free-memory
 // pointer read and the later write-back to slot 0x40. Some buffers are
 // allocate_unbounded() and have no finalize point yet.
@@ -45,9 +37,9 @@ struct MemoryAllocation {
   bool Finalized = false;
 };
 
-// A memory write keeps the original memory instruction plus the buffer-relative offset.
-// Copy writes also keep their source offset so later passes can distinguish
-// calldata/returndata bytes from literal word stores.
+// A memory write keeps the original memory instruction plus the buffer-relative
+// offset. Copy writes also keep their source offset so later passes can
+// distinguish calldata/returndata bytes from literal word stores.
 struct MemoryWrite {
   llvm::Instruction *StoreOrCopy = nullptr;
   llvm::Value *Base = nullptr;
@@ -58,8 +50,8 @@ struct MemoryWrite {
 };
 
 // A memory read keeps the loaded value tied to the same base/offset surface as
-// writes. Consumers such as external call output decode can then read this
-// marker instead of matching raw memory loads again.
+// writes. Later passes can use this fact without matching raw memory loads
+// again.
 struct MemoryRead {
   llvm::Instruction *Load = nullptr;
   llvm::Value *Base = nullptr;
@@ -77,16 +69,6 @@ struct MemoryArrayByteWrite {
   llvm::Value *Value = nullptr;
 };
 
-// A consumer is the operation that gives a memory buffer Solidity meaning.
-// A single base may have several roles, especially external calls that reuse
-// the input base for output or later returndata.
-struct MemoryConsumer {
-  llvm::CallBase *Call = nullptr;
-  MemoryConsumerKind Kind = MemoryConsumerKind::Return;
-  llvm::Value *Base = nullptr;
-  llvm::Value *Size = nullptr;
-};
-
 // The analysis result is deliberately simple: later passes can use the same
 // facts to do real rewrites instead of rediscovering mstore sequences.
 struct MemoryBufferFacts {
@@ -94,14 +76,12 @@ struct MemoryBufferFacts {
   llvm::SmallVector<MemoryWrite, 16> Writes;
   llvm::SmallVector<MemoryRead, 16> Reads;
   llvm::SmallVector<MemoryArrayByteWrite, 8> ArrayByteWrites;
-  llvm::SmallVector<MemoryConsumer, 8> Consumers;
 };
 
 MemoryBufferFacts analyzeMemoryBuffers(llvm::Function &F,
                                        llvm::DominatorTree &DT);
 
-struct MemoryBufferRewritePass
-    : llvm::PassInfoMixin<MemoryBufferRewritePass> {
+struct MemoryBufferRewritePass : llvm::PassInfoMixin<MemoryBufferRewritePass> {
   llvm::PreservedAnalyses run(llvm::Function &F,
                               llvm::FunctionAnalysisManager &);
 

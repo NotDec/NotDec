@@ -111,3 +111,46 @@ Solidity 语义 pass 的标注接口继续扩散。
 - base 不是结构体指针的样例能被明确记录，而不是静默降级。
 - 现有 EVM solidity patterns 测试仍通过，必要时更新只针对旧 marker 的 oracle。
 - selected-apehex-80 中成功生成 HType 的样本，抽查 return/revert 结果不明显倒退。
+
+## 实现记录：删除 MemoryConsumer 层
+
+本轮先推进最明确的一步：删除 `MemoryConsumer` 汇总层，让具体 pass 自己看
+`evm_return` / `evm_revert` / `evm_log*` 的参数。
+
+改动位置：
+
+- `include/notdec/Passes/evm/MemoryBufferAnalysis.h:19`：删除
+  `MemoryConsumerKind`、`MemoryConsumer` 和 `MemoryBufferFacts::Consumers`。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:320`：`analyzeMemoryBuffers` 不再收集
+  return/revert/event/external-call consumer；这里只保留 allocation、write、read、array byte write facts。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:495`：`MemoryBufferRewritePass` 不再保留 consumer marker
+  materialization 的死代码。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:101`：删除
+  `findReturnConsumerMarker`，不再依赖 `notdec_solidity_memory_consumer`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:1305`：动态 return 相关逻辑改成直接使用
+  `evm_return` 的 `base` / `size` 参数。
+- `src/Passes/evm/SolidityPatterns.cpp:1498`：删除依赖
+  `notdec_solidity_memory_consumer` 和 `notdec_solidity_memory_copy_write` marker 的 returndata bubble
+  识别路径；保留直接匹配 `evm_returndatacopy` 的路径。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:16`：删除已禁用的 revert consumer marker
+  统计和插入代码。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:18`：删除已禁用的 event consumer marker
+  统计和插入代码。
+
+验证：
+
+- `cmake --build ./build --target notdec-decompile -j4` 通过。
+- `ctest --test-dir build -R '^notdec\.type_recovery\.evm\.tr_level_2$' --output-on-failure`
+  通过，用时 0.93s。
+- `ctest --test-dir build -R '^notdec\.evm\.solidity_patterns$' --output-on-failure`
+  通过，用时 104.89s。
+
+当前技术决策点：
+
+- `AbiReturnPass`、`SolidityRevertPass`、`EventLogPass` 现在仍在 EVM pipeline 的类型恢复前运行。
+  要真正读 `HTypeResult`，需要先决定把这些语义解释挪到类型恢复后，还是拆成 pre-TR 出口识别和
+  post-TR HType 解释两段。
+- `MemoryWrite` 结构和 `notdec_solidity_memory_write` 相关匹配还没有完全删除。
+  `SolidityRevertPass` 的 Panic/Error/custom error 分类仍会扫 revert 前的 memory write。
+  下一步要么先做 post-TR HType 查询入口，再替换这段逻辑；要么先把旧 marker 路径和 raw memory
+  store 路径拆开，记录哪些样例还依赖访问模式。

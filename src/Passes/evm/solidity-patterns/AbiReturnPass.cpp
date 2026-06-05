@@ -28,12 +28,15 @@ STATISTIC(NumAbiReturnDynamicArraySources,
           "Number of Solidity ABI return dynamic array sources found");
 STATISTIC(NumAbiReturnDynamicArrayCopyLoops,
           "Number of Solidity ABI return dynamic array copy loops found");
-STATISTIC(NumAbiReturnDynamicArrayCopyLoopRewrites,
-          "Number of Solidity ABI return dynamic array copy loop rewrites found");
-STATISTIC(NumAbiReturnDynamicArrayConvertedCopyLoops,
-          "Number of Solidity ABI return dynamic array converted copy loops found");
-STATISTIC(NumAbiReturnConvertedDynamicArrayRewrites,
-          "Number of Solidity ABI return converted dynamic array rewrites found");
+STATISTIC(
+    NumAbiReturnDynamicArrayCopyLoopRewrites,
+    "Number of Solidity ABI return dynamic array copy loop rewrites found");
+STATISTIC(
+    NumAbiReturnDynamicArrayConvertedCopyLoops,
+    "Number of Solidity ABI return dynamic array converted copy loops found");
+STATISTIC(
+    NumAbiReturnConvertedDynamicArrayRewrites,
+    "Number of Solidity ABI return converted dynamic array rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayMCopies,
           "Number of Solidity ABI return dynamic array mcopies found");
 STATISTIC(NumAbiReturnDynamicArrayHelperCopies,
@@ -46,22 +49,26 @@ STATISTIC(NumAbiReturnDynamicArrayMemorySources,
           "Number of Solidity ABI return dynamic array memory sources found");
 STATISTIC(NumAbiReturnMemoryDynamicArrayRewrites,
           "Number of Solidity ABI return memory dynamic array rewrites found");
-STATISTIC(NumAbiReturnDynamicArrayMemoryBuilderSources,
-          "Number of Solidity ABI return dynamic array memory builder sources found");
+STATISTIC(
+    NumAbiReturnDynamicArrayMemoryBuilderSources,
+    "Number of Solidity ABI return dynamic array memory builder sources found");
 STATISTIC(NumAbiReturnMemoryBuilderRewrites,
           "Number of Solidity ABI return memory builder rewrites found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralSources,
           "Number of Solidity ABI return dynamic array literal sources found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralPayloads,
           "Number of Solidity ABI return dynamic array literal payloads found");
-STATISTIC(NumAbiReturnDynamicArrayLiteralPayloadShifts,
-          "Number of Solidity ABI return dynamic array literal payload shifts found");
-STATISTIC(NumAbiReturnDynamicArrayLiteralPayloadWords,
-          "Number of Solidity ABI return dynamic array literal payload words found");
+STATISTIC(
+    NumAbiReturnDynamicArrayLiteralPayloadShifts,
+    "Number of Solidity ABI return dynamic array literal payload shifts found");
+STATISTIC(
+    NumAbiReturnDynamicArrayLiteralPayloadWords,
+    "Number of Solidity ABI return dynamic array literal payload words found");
 STATISTIC(NumAbiReturnDynamicArrayLiteralBytes,
           "Number of Solidity ABI return dynamic array literal bytes found");
-STATISTIC(NumAbiReturnDynamicArrayLiteralByteReturns,
-          "Number of Solidity ABI return dynamic array literal byte returns found");
+STATISTIC(
+    NumAbiReturnDynamicArrayLiteralByteReturns,
+    "Number of Solidity ABI return dynamic array literal byte returns found");
 STATISTIC(NumAbiReturnLiteralByteRewrites,
           "Number of Solidity ABI return literal byte rewrites found");
 
@@ -91,26 +98,6 @@ uint64_t getAbiReturnKindCode(StringRef Kind) {
   return 0;
 }
 
-CallBase *findReturnConsumerMarker(BasicBlock &BB, CallBase &Return) {
-  for (Instruction &I : BB) {
-    if (&I == &Return) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr ||
-        !isCallTo(Call, "notdec_solidity_memory_consumer") ||
-        Call->arg_size() != 3 ||
-        !isConstantIntValue(Call->getArgOperand(2), 1)) {
-      continue;
-    }
-    if (Call->getArgOperand(0) == Return.getArgOperand(1) &&
-        Call->getArgOperand(1) == Return.getArgOperand(2)) {
-      return Call;
-    }
-  }
-  return nullptr;
-}
-
 bool isAbiHeadOffset(Value *V) {
   std::optional<uint64_t> Offset = getUInt64Constant(V);
   return Offset.has_value() && (*Offset % 32) == 0;
@@ -125,9 +112,9 @@ bool isSameAbiReturnDataBase(Value *LHS, Value *RHS) {
   return LConst.has_value() && RConst.has_value() && *LConst == *RConst;
 }
 
-void collectAbiReturnDataWordWriteMarkers(
-    BasicBlock &BB, CallBase &Return, Value *ReturnBase,
-    SmallVectorImpl<CallBase *> &Writes) {
+void collectAbiReturnDataWordWriteMarkers(BasicBlock &BB, CallBase &Return,
+                                          Value *ReturnBase,
+                                          SmallVectorImpl<CallBase *> &Writes) {
   SmallVector<CallBase *, 8> Candidates;
 
   for (Instruction &I : BB) {
@@ -158,9 +145,9 @@ void collectAbiReturnDataWordWriteMarkers(
   Writes.append(Candidates.begin(), Candidates.end());
 }
 
-void collectAbiReturnDataCopyWriteMarkers(
-    BasicBlock &BB, CallBase &Return, Value *ReturnBase,
-    SmallVectorImpl<CallBase *> &Writes) {
+void collectAbiReturnDataCopyWriteMarkers(BasicBlock &BB, CallBase &Return,
+                                          Value *ReturnBase,
+                                          SmallVectorImpl<CallBase *> &Writes) {
   SmallVector<CallBase *, 8> Candidates;
 
   for (Instruction &I : BB) {
@@ -430,10 +417,8 @@ Value *matchBasePlusConstantPlusIndex(Value *Ptr, Value *Base,
   return nullptr;
 }
 
-std::optional<AbiReturnDynamicArrayCopyLoop>
-findAbiReturnDynamicArrayCopyLoop(Function &F,
-                                  const AbiReturnDynamicArraySource &Source,
-                                  DominatorTree &DT) {
+std::optional<AbiReturnDynamicArrayCopyLoop> findAbiReturnDynamicArrayCopyLoop(
+    Function &F, const AbiReturnDynamicArraySource &Source, DominatorTree &DT) {
   for (Instruction &I : instructions(F)) {
     std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
     if (!Store.has_value() || Store->StoreBits != 256) {
@@ -445,10 +430,10 @@ findAbiReturnDynamicArrayCopyLoop(Function &F,
       continue;
     }
 
-    Value *DstIndex = matchBasePlusConstantPlusIndex(
-        Store->Address, Source.ReturnBase, 64);
-    Value *SrcIndex = matchBasePlusConstantPlusIndex(
-        Load->Address, Source.SourceArray, 32);
+    Value *DstIndex =
+        matchBasePlusConstantPlusIndex(Store->Address, Source.ReturnBase, 64);
+    Value *SrcIndex =
+        matchBasePlusConstantPlusIndex(Load->Address, Source.SourceArray, 32);
     if (DstIndex == nullptr || SrcIndex == nullptr || DstIndex != SrcIndex) {
       continue;
     }
@@ -670,9 +655,8 @@ findAbiReturnDynamicArrayHelperCopy(Function &F, CallBase &Return,
         Call->getArgOperand(6) != Source.Length) {
       continue;
     }
-    return AbiReturnDynamicArrayHelperCopy{Source.ReturnBase,
-                                           Source.SourceArray, Source.Length,
-                                           Call};
+    return AbiReturnDynamicArrayHelperCopy{
+        Source.ReturnBase, Source.SourceArray, Source.Length, Call};
   }
   return std::nullopt;
 }
@@ -736,9 +720,9 @@ findAbiReturnDynamicArrayStorageSource(
 }
 
 std::optional<AbiReturnDynamicArrayMemorySource>
-findAbiReturnDynamicArrayMemorySource(
-    Function &F, CallBase &Return, const AbiReturnDynamicArraySource &Source,
-    DominatorTree &DT) {
+findAbiReturnDynamicArrayMemorySource(Function &F, CallBase &Return,
+                                      const AbiReturnDynamicArraySource &Source,
+                                      DominatorTree &DT) {
   CallBase *LengthWrite = nullptr;
   CallBase *DataWrite = nullptr;
 
@@ -867,209 +851,182 @@ uint64_t getLiteralBytesReturnCopyKind(
   return 0;
 }
 
-// Consumer markers encode buffer role rather than memory layout. Keep this
-// disabled until type recovery has a stable role carrier.
-// void insertAbiReturnMemoryConsumerMarker(LLVMContext &Ctx, CallBase &Return,
-//                                          CallBase &Consumer, StringRef Kind) {
-//   Module *M = Return.getModule();
-//   Type *I256 = Type::getIntNTy(Ctx, 256);
-//   FunctionCallee Marker = M->getOrInsertFunction(
-//       "notdec_solidity_abi_return_memory_consumer",
-//       FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256}, false));
-//
-//   IRBuilder<> Builder(&Return);
-//   Builder.CreateCall(Marker,
-//                      {Consumer.getArgOperand(0), Consumer.getArgOperand(1),
-//                       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
-// }
-
 void insertAbiReturnDynamicArraySourceMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArraySource &Source, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArraySource &Source, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_source",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {Source.ReturnBase, Source.SourceArray, Source.Length,
-                      Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(
+      Marker, {Source.ReturnBase, Source.SourceArray, Source.Length, ReturnSize,
+               ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayCopyLoopMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayCopyLoop &CopyLoop, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayCopyLoop &CopyLoop, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_copy_loop",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
-                      CopyLoop.Length, Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(
+      Marker, {CopyLoop.ReturnBase, CopyLoop.SourceArray, CopyLoop.Length,
+               ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayCopyLoopRewriteMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayCopyLoop &CopyLoop, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayCopyLoop &CopyLoop, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_rewrite_abi_return_dynamic_array_copy_loop",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
-                      CopyLoop.Length, Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(
+      Marker, {CopyLoop.ReturnBase, CopyLoop.SourceArray, CopyLoop.Length,
+               ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayConvertedCopyLoopMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayConvertedCopyLoop &CopyLoop, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayConvertedCopyLoop &CopyLoop, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_converted_copy_loop",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
-                      CopyLoop.Length, Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(
+      Marker, {CopyLoop.ReturnBase, CopyLoop.SourceArray, CopyLoop.Length,
+               ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnConvertedDynamicArrayRewriteMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayConvertedCopyLoop &CopyLoop, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayConvertedCopyLoop &CopyLoop, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_rewrite_abi_return_converted_dynamic_array",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {CopyLoop.ReturnBase, CopyLoop.SourceArray,
-                      CopyLoop.Length, Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(
+      Marker, {CopyLoop.ReturnBase, CopyLoop.SourceArray, CopyLoop.Length,
+               ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayMCopyMarker(
-    LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMCopy &MCopy, CallBase &Consumer,
-    StringRef Kind) {
+    LLVMContext &Ctx, CallBase &Return, const AbiReturnDynamicArrayMCopy &MCopy,
+    Value *ReturnBase, Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_mcopy",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {MCopy.ReturnBase, MCopy.SourceArray, MCopy.Length,
-                      Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(
+      Marker, {MCopy.ReturnBase, MCopy.SourceArray, MCopy.Length, ReturnSize,
+               ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayHelperCopyMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayHelperCopy &HelperCopy, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayHelperCopy &HelperCopy, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_helper_copy",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
   Builder.CreateCall(
       Marker, {HelperCopy.ReturnBase, HelperCopy.SourceArray, HelperCopy.Length,
-               Consumer.getArgOperand(1),
-               ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+               ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayStorageSourceMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayStorageSource &StorageSource, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayStorageSource &StorageSource, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_storage_source",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(
-      Marker,
-      {StorageSource.ReturnBase, StorageSource.SourceArray, StorageSource.Length,
-       Consumer.getArgOperand(1),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(Marker,
+                     {StorageSource.ReturnBase, StorageSource.SourceArray,
+                      StorageSource.Length, ReturnSize,
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnStorageDynamicArrayRewriteMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayStorageSource &StorageSource, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayStorageSource &StorageSource, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_rewrite_abi_return_storage_dynamic_array",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(
-      Marker,
-      {StorageSource.ReturnBase, StorageSource.SourceArray,
-       StorageSource.Length, Consumer.getArgOperand(1),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(Marker,
+                     {StorageSource.ReturnBase, StorageSource.SourceArray,
+                      StorageSource.Length, ReturnSize,
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayMemorySourceMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayMemorySource &MemorySource, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_memory_source",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(
-      Marker,
-      {MemorySource.ReturnBase, MemorySource.SourceArray, MemorySource.Length,
-       Consumer.getArgOperand(1),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(Marker,
+                     {MemorySource.ReturnBase, MemorySource.SourceArray,
+                      MemorySource.Length, ReturnSize,
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnMemoryDynamicArrayRewriteMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Consumer,
-    uint64_t CopyKind, StringRef Kind) {
+    const AbiReturnDynamicArrayMemorySource &MemorySource, Value *ReturnBase,
+    Value *ReturnSize, uint64_t CopyKind, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1080,18 +1037,17 @@ void insertAbiReturnMemoryDynamicArrayRewriteMarker(
 
   IRBuilder<> Builder(&Return);
   Builder.CreateCall(
-      Marker,
-      {MemorySource.ReturnBase, MemorySource.SourceArray, MemorySource.Length,
-       MemorySource.LengthWrite->getArgOperand(2),
-       MemorySource.DataWrite->getArgOperand(1),
-       Consumer.getArgOperand(1), ConstantInt::get(I256, CopyKind),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+      Marker, {MemorySource.ReturnBase, MemorySource.SourceArray,
+               MemorySource.Length, MemorySource.LengthWrite->getArgOperand(2),
+               MemorySource.DataWrite->getArgOperand(1), ReturnSize,
+               ConstantInt::get(I256, CopyKind),
+               ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemoryBuilderSource &BuilderSource,
-    CallBase &Consumer, StringRef Kind) {
+    Value *ReturnBase, Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1100,18 +1056,17 @@ void insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
                         {I256, I256, I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(
-      Marker,
-      {BuilderSource.ReturnBase, BuilderSource.SourceArray,
-       BuilderSource.Length, BuilderSource.LengthWrite->getArgOperand(2),
-       Consumer.getArgOperand(1),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(Marker,
+                     {BuilderSource.ReturnBase, BuilderSource.SourceArray,
+                      BuilderSource.Length,
+                      BuilderSource.LengthWrite->getArgOperand(2), ReturnSize,
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnMemoryBuilderRewriteMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemoryBuilderSource &BuilderSource,
-    CallBase &Consumer, uint64_t CopyKind, StringRef Kind) {
+    Value *ReturnBase, Value *ReturnSize, uint64_t CopyKind, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1120,37 +1075,35 @@ void insertAbiReturnMemoryBuilderRewriteMarker(
                         {I256, I256, I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(
-      Marker,
-      {BuilderSource.ReturnBase, BuilderSource.SourceArray,
-       BuilderSource.Length, Consumer.getArgOperand(1),
-       ConstantInt::get(I256, CopyKind),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(Marker,
+                     {BuilderSource.ReturnBase, BuilderSource.SourceArray,
+                      BuilderSource.Length, ReturnSize,
+                      ConstantInt::get(I256, CopyKind),
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayLiteralSourceMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayMemorySource &MemorySource, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_literal_source",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256}, false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256, I256},
+                        false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(
-      Marker,
-      {MemorySource.ReturnBase, MemorySource.SourceArray, MemorySource.Length,
-       Consumer.getArgOperand(1),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(Marker,
+                     {MemorySource.ReturnBase, MemorySource.SourceArray,
+                      MemorySource.Length, ReturnSize,
+                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayLiteralPayloadMarker(
     LLVMContext &Ctx, CallBase &Return,
-    const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Consumer,
-    StringRef Kind) {
+    const AbiReturnDynamicArrayMemorySource &MemorySource, Value *ReturnBase,
+    Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1164,14 +1117,13 @@ void insertAbiReturnDynamicArrayLiteralPayloadMarker(
       {MemorySource.SourceArray, MemorySource.LengthWrite->getArgOperand(2),
        MemorySource.DataWrite->getArgOperand(1),
        MemorySource.DataWrite->getArgOperand(2), MemorySource.ReturnBase,
-       Consumer.getArgOperand(1),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+       ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Shift,
-    CallBase &Consumer, StringRef Kind) {
+    Value *ReturnBase, Value *ReturnSize, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1186,14 +1138,14 @@ void insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
       {MemorySource.SourceArray, MemorySource.LengthWrite->getArgOperand(2),
        MemorySource.DataWrite->getArgOperand(1), Shift.getArgOperand(0),
        Shift.getArgOperand(1), MemorySource.DataWrite->getArgOperand(2),
-       MemorySource.ReturnBase, Consumer.getArgOperand(1),
+       MemorySource.ReturnBase, ReturnSize,
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemorySource &MemorySource, CallBase &Shift,
-    CallBase &Consumer, StringRef Kind) {
+    Value *ReturnBase, Value *ReturnSize, StringRef Kind) {
   auto *ShiftAmount = cast<ConstantInt>(Shift.getArgOperand(0));
   auto *RawWord = cast<ConstantInt>(Shift.getArgOperand(1));
   APInt FinalWord = foldEvmShlToI256(*ShiftAmount, *RawWord);
@@ -1202,10 +1154,9 @@ void insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_dynamic_array_literal_payload_word",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256, I256, I256, I256, I256,
-                         I256},
-                        false));
+      FunctionType::get(
+          Type::getVoidTy(Ctx),
+          {I256, I256, I256, I256, I256, I256, I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Return);
   Builder.CreateCall(
@@ -1214,15 +1165,14 @@ void insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
        MemorySource.DataWrite->getArgOperand(1), Shift.getArgOperand(0),
        Shift.getArgOperand(1), ConstantInt::get(I256, FinalWord),
        MemorySource.DataWrite->getArgOperand(2), MemorySource.ReturnBase,
-       Consumer.getArgOperand(1),
-       ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+       ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayLiteralBytesMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemorySource &MemorySource,
-    const APInt &FinalWord,
-    CallBase &Consumer, StringRef Kind) {
+    const APInt &FinalWord, Value *ReturnBase, Value *ReturnSize,
+    StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1234,16 +1184,15 @@ void insertAbiReturnDynamicArrayLiteralBytesMarker(
   Builder.CreateCall(
       Marker,
       {MemorySource.SourceArray, MemorySource.LengthWrite->getArgOperand(2),
-       ConstantInt::get(I256, FinalWord), MemorySource.ReturnBase,
-       Consumer.getArgOperand(1),
+       ConstantInt::get(I256, FinalWord), MemorySource.ReturnBase, ReturnSize,
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemorySource &MemorySource,
-    const APInt &FinalWord,
-    CallBase &Consumer, uint64_t CopyKind, StringRef Kind) {
+    const APInt &FinalWord, Value *ReturnBase, Value *ReturnSize,
+    uint64_t CopyKind, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1255,16 +1204,16 @@ void insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
   Builder.CreateCall(
       Marker,
       {MemorySource.SourceArray, MemorySource.LengthWrite->getArgOperand(2),
-       ConstantInt::get(I256, FinalWord), MemorySource.ReturnBase,
-       Consumer.getArgOperand(1), ConstantInt::get(I256, CopyKind),
+       ConstantInt::get(I256, FinalWord), MemorySource.ReturnBase, ReturnSize,
+       ConstantInt::get(I256, CopyKind),
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnLiteralBytesRewriteMarker(
     LLVMContext &Ctx, CallBase &Return,
     const AbiReturnDynamicArrayMemorySource &MemorySource,
-    const APInt &FinalWord,
-    CallBase &Consumer, uint64_t CopyKind, StringRef Kind) {
+    const APInt &FinalWord, Value *ReturnBase, Value *ReturnSize,
+    uint64_t CopyKind, StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
@@ -1276,26 +1225,25 @@ void insertAbiReturnLiteralBytesRewriteMarker(
   Builder.CreateCall(
       Marker,
       {MemorySource.SourceArray, MemorySource.LengthWrite->getArgOperand(2),
-       ConstantInt::get(I256, FinalWord), MemorySource.ReturnBase,
-       Consumer.getArgOperand(1), ConstantInt::get(I256, CopyKind),
+       ConstantInt::get(I256, FinalWord), MemorySource.ReturnBase, ReturnSize,
+       ConstantInt::get(I256, CopyKind),
        ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDataAllocationMarker(LLVMContext &Ctx, CallBase &Return,
                                          CallBase &Allocation,
-                                         CallBase &Consumer, StringRef Kind) {
+                                         Value *ReturnBase, Value *ReturnSize,
+                                         StringRef Kind) {
   Module *M = Return.getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_data_allocation",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
-                        false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Return);
-  Builder.CreateCall(Marker,
-                     {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
-                      Consumer.getArgOperand(1),
-                      ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
+  Builder.CreateCall(
+      Marker, {Allocation.getArgOperand(0), Allocation.getArgOperand(1),
+               ReturnSize, ConstantInt::get(I256, getAbiReturnKindCode(Kind))});
 }
 
 void insertAbiReturnDataWordWriteMarker(LLVMContext &Ctx, CallBase &Return,
@@ -1304,8 +1252,7 @@ void insertAbiReturnDataWordWriteMarker(LLVMContext &Ctx, CallBase &Return,
   Type *I256 = Type::getIntNTy(Ctx, 256);
   FunctionCallee Marker = M->getOrInsertFunction(
       "notdec_solidity_abi_return_data_word_write",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256},
-                        false));
+      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256}, false));
 
   IRBuilder<> Builder(&Return);
   Builder.CreateCall(Marker,
@@ -1333,7 +1280,8 @@ void insertAbiReturnDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Return,
 
 } // namespace
 
-PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) {
+PreservedAnalyses AbiReturnPass::run(Function &F,
+                                     FunctionAnalysisManager &FAM) {
   LLVMContext &Ctx = F.getContext();
   DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
   bool Changed = false;
@@ -1346,14 +1294,12 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
     }
 
     StringRef Kind = classifyAbiReturnSize(Call->getArgOperand(2));
-    if (CallBase *Consumer = findReturnConsumerMarker(*Call->getParent(),
-                                                      *Call)) {
-      Kind = classifyAbiReturnSize(Consumer->getArgOperand(1));
-      // insertAbiReturnMemoryConsumerMarker(Ctx, *Call, *Consumer, Kind);
+    Value *ReturnBase = Call->getArgOperand(1);
+    Value *ReturnSize = Call->getArgOperand(2);
+    if (!isConstantIntValue(ReturnSize, 0)) {
       SmallVector<CallBase *, 8> WordWrites;
       collectAbiReturnDataWordWriteMarkers(*Call->getParent(), *Call,
-                                           Consumer->getArgOperand(0),
-                                           WordWrites);
+                                           ReturnBase, WordWrites);
       if (kEmitAbiReturnDataMarkers) {
         for (CallBase *WordWrite : WordWrites) {
           insertAbiReturnDataWordWriteMarker(Ctx, *Call, *WordWrite, Kind);
@@ -1362,8 +1308,7 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
       }
       SmallVector<CallBase *, 8> CopyWrites;
       collectAbiReturnDataCopyWriteMarkers(*Call->getParent(), *Call,
-                                           Consumer->getArgOperand(0),
-                                           CopyWrites);
+                                           ReturnBase, CopyWrites);
       if (kEmitAbiReturnDataMarkers) {
         for (CallBase *CopyWrite : CopyWrites) {
           insertAbiReturnDataCopyWriteMarker(Ctx, *Call, *CopyWrite, Kind);
@@ -1372,44 +1317,43 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
         if (CallBase *Allocation = findAbiReturnDataAllocationMarker(
                 *Call->getParent(), *Call, WordWrites, CopyWrites)) {
           insertAbiReturnDataAllocationMarker(Ctx, *Call, *Allocation,
-                                              *Consumer, Kind);
+                                              ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnDataAllocations;
         }
       }
       std::optional<AbiReturnDynamicArraySource> DynamicSource =
-          findAbiReturnDynamicArraySource(F, *Call, Consumer->getArgOperand(0),
-                                          DT);
+          findAbiReturnDynamicArraySource(F, *Call, ReturnBase, DT);
       if (DynamicSource.has_value()) {
         insertAbiReturnDynamicArraySourceMarker(Ctx, *Call, *DynamicSource,
-                                                *Consumer, Kind);
+                                                ReturnBase, ReturnSize, Kind);
         ++NumAbiReturnDynamicArraySources;
         std::optional<AbiReturnDynamicArrayCopyLoop> CopyLoop =
             findAbiReturnDynamicArrayCopyLoop(F, *DynamicSource, DT);
         if (CopyLoop.has_value()) {
-          insertAbiReturnDynamicArrayCopyLoopMarker(Ctx, *Call, *CopyLoop,
-                                                    *Consumer, Kind);
+          insertAbiReturnDynamicArrayCopyLoopMarker(
+              Ctx, *Call, *CopyLoop, ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnDynamicArrayCopyLoops;
         }
-        std::optional<AbiReturnDynamicArrayConvertedCopyLoop> ConvertedCopyLoop =
-            findAbiReturnDynamicArrayConvertedCopyLoop(F, *Call, *DynamicSource,
-                                                       DT);
+        std::optional<AbiReturnDynamicArrayConvertedCopyLoop>
+            ConvertedCopyLoop = findAbiReturnDynamicArrayConvertedCopyLoop(
+                F, *Call, *DynamicSource, DT);
         if (ConvertedCopyLoop.has_value()) {
           insertAbiReturnDynamicArrayConvertedCopyLoopMarker(
-              Ctx, *Call, *ConvertedCopyLoop, *Consumer, Kind);
+              Ctx, *Call, *ConvertedCopyLoop, ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnDynamicArrayConvertedCopyLoops;
         }
         std::optional<AbiReturnDynamicArrayMCopy> MCopy =
             findAbiReturnDynamicArrayMCopy(F, *Call, *DynamicSource, DT);
         if (MCopy.has_value()) {
-          insertAbiReturnDynamicArrayMCopyMarker(Ctx, *Call, *MCopy, *Consumer,
-                                                 Kind);
+          insertAbiReturnDynamicArrayMCopyMarker(Ctx, *Call, *MCopy, ReturnBase,
+                                                 ReturnSize, Kind);
           ++NumAbiReturnDynamicArrayMCopies;
         }
         std::optional<AbiReturnDynamicArrayHelperCopy> HelperCopy =
             findAbiReturnDynamicArrayHelperCopy(F, *Call, *DynamicSource, DT);
         if (HelperCopy.has_value()) {
-          insertAbiReturnDynamicArrayHelperCopyMarker(Ctx, *Call, *HelperCopy,
-                                                      *Consumer, Kind);
+          insertAbiReturnDynamicArrayHelperCopyMarker(
+              Ctx, *Call, *HelperCopy, ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnDynamicArrayHelperCopies;
         }
         std::optional<AbiReturnDynamicArrayStorageSource> StorageSource =
@@ -1417,55 +1361,58 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
                                                    DT);
         if (StorageSource.has_value()) {
           insertAbiReturnDynamicArrayStorageSourceMarker(
-              Ctx, *Call, *StorageSource, *Consumer, Kind);
+              Ctx, *Call, *StorageSource, ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnDynamicArrayStorageSources;
           insertAbiReturnStorageDynamicArrayRewriteMarker(
-              Ctx, *Call, *StorageSource, *Consumer, Kind);
+              Ctx, *Call, *StorageSource, ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnStorageDynamicArrayRewrites;
         } else if (ConvertedCopyLoop.has_value()) {
           insertAbiReturnConvertedDynamicArrayRewriteMarker(
-              Ctx, *Call, *ConvertedCopyLoop, *Consumer, Kind);
+              Ctx, *Call, *ConvertedCopyLoop, ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnConvertedDynamicArrayRewrites;
         }
         std::optional<AbiReturnDynamicArrayMemorySource> MemorySource =
             findAbiReturnDynamicArrayMemorySource(F, *Call, *DynamicSource, DT);
         if (MemorySource.has_value()) {
           insertAbiReturnDynamicArrayMemorySourceMarker(
-              Ctx, *Call, *MemorySource, *Consumer, Kind);
+              Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
           ++NumAbiReturnDynamicArrayMemorySources;
           bool IsLiteralSource =
               isAbiReturnDynamicArrayLiteralSource(*MemorySource);
           if (IsLiteralSource) {
             insertAbiReturnDynamicArrayLiteralSourceMarker(
-                Ctx, *Call, *MemorySource, *Consumer, Kind);
+                Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
             ++NumAbiReturnDynamicArrayLiteralSources;
             insertAbiReturnDynamicArrayLiteralPayloadMarker(
-                Ctx, *Call, *MemorySource, *Consumer, Kind);
+                Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, Kind);
             ++NumAbiReturnDynamicArrayLiteralPayloads;
             Value *DataWord = MemorySource->DataWrite->getArgOperand(2);
             if (CallBase *Shift = getLiteralPayloadShift(DataWord)) {
               insertAbiReturnDynamicArrayLiteralPayloadShiftMarker(
-                  Ctx, *Call, *MemorySource, *Shift, *Consumer, Kind);
+                  Ctx, *Call, *MemorySource, *Shift, ReturnBase, ReturnSize,
+                  Kind);
               ++NumAbiReturnDynamicArrayLiteralPayloadShifts;
               insertAbiReturnDynamicArrayLiteralPayloadWordMarker(
-                  Ctx, *Call, *MemorySource, *Shift, *Consumer, Kind);
+                  Ctx, *Call, *MemorySource, *Shift, ReturnBase, ReturnSize,
+                  Kind);
               ++NumAbiReturnDynamicArrayLiteralPayloadWords;
             }
             if (std::optional<APInt> FinalWord =
                     getLiteralFinalWord(DataWord)) {
               insertAbiReturnDynamicArrayLiteralBytesMarker(
-                  Ctx, *Call, *MemorySource, *FinalWord, *Consumer, Kind);
+                  Ctx, *Call, *MemorySource, *FinalWord, ReturnBase, ReturnSize,
+                  Kind);
               ++NumAbiReturnDynamicArrayLiteralBytes;
-              uint64_t CopyKind = getLiteralBytesReturnCopyKind(
-                  CopyLoop, MCopy, HelperCopy);
+              uint64_t CopyKind =
+                  getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
               if (CopyKind != 0) {
                 insertAbiReturnDynamicArrayLiteralBytesReturnMarker(
-                    Ctx, *Call, *MemorySource, *FinalWord, *Consumer, CopyKind,
-                    Kind);
+                    Ctx, *Call, *MemorySource, *FinalWord, ReturnBase,
+                    ReturnSize, CopyKind, Kind);
                 ++NumAbiReturnDynamicArrayLiteralByteReturns;
                 insertAbiReturnLiteralBytesRewriteMarker(
-                    Ctx, *Call, *MemorySource, *FinalWord, *Consumer, CopyKind,
-                    Kind);
+                    Ctx, *Call, *MemorySource, *FinalWord, ReturnBase,
+                    ReturnSize, CopyKind, Kind);
                 ++NumAbiReturnLiteralByteRewrites;
               }
             }
@@ -1473,25 +1420,27 @@ PreservedAnalyses AbiReturnPass::run(Function &F, FunctionAnalysisManager &FAM) 
             uint64_t CopyKind =
                 getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
             insertAbiReturnMemoryDynamicArrayRewriteMarker(
-                Ctx, *Call, *MemorySource, *Consumer, CopyKind, Kind);
+                Ctx, *Call, *MemorySource, ReturnBase, ReturnSize, CopyKind,
+                Kind);
             ++NumAbiReturnMemoryDynamicArrayRewrites;
           }
         } else if (!StorageSource.has_value()) {
-          std::optional<AbiReturnDynamicArrayMemoryBuilderSource> BuilderSource =
-              findAbiReturnDynamicArrayMemoryBuilderSource(F, *Call,
-                                                           *DynamicSource, DT);
+          std::optional<AbiReturnDynamicArrayMemoryBuilderSource>
+              BuilderSource = findAbiReturnDynamicArrayMemoryBuilderSource(
+                  F, *Call, *DynamicSource, DT);
           uint64_t CopyKind =
               getLiteralBytesReturnCopyKind(CopyLoop, MCopy, HelperCopy);
           if (BuilderSource.has_value() && CopyKind != 0) {
             insertAbiReturnDynamicArrayMemoryBuilderSourceMarker(
-                Ctx, *Call, *BuilderSource, *Consumer, Kind);
+                Ctx, *Call, *BuilderSource, ReturnBase, ReturnSize, Kind);
             ++NumAbiReturnDynamicArrayMemoryBuilderSources;
             insertAbiReturnMemoryBuilderRewriteMarker(
-                Ctx, *Call, *BuilderSource, *Consumer, CopyKind, Kind);
+                Ctx, *Call, *BuilderSource, ReturnBase, ReturnSize, CopyKind,
+                Kind);
             ++NumAbiReturnMemoryBuilderRewrites;
           } else if (CopyLoop.has_value() && !ConvertedCopyLoop.has_value()) {
             insertAbiReturnDynamicArrayCopyLoopRewriteMarker(
-                Ctx, *Call, *CopyLoop, *Consumer, Kind);
+                Ctx, *Call, *CopyLoop, ReturnBase, ReturnSize, Kind);
             ++NumAbiReturnDynamicArrayCopyLoopRewrites;
           }
         }
