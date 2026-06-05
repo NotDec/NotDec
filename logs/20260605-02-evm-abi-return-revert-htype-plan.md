@@ -284,3 +284,49 @@ Solidity 语义 pass 的标注接口继续扩散。
 - 曾尝试对所有 cast 都强制创建源 SimpleType，fortune 退化到 `elapsed=149.06`，已收窄为
   EVM `IntToPtrInst` 专用处理。
 - 这个改动不合并 PNI 节点对应的 SimpleType，只补 cast 源值缺失时的 MLsub 映射入口。
+
+## 实现记录：free memory pointer reload 合并
+
+本轮补 `revert_error_string_01` 里没有 `mstore(0x40, new_ptr)` 的情况。
+
+修改：
+
+- `include/notdec/Passes/evm/MemoryBufferAnalysis.h:29`：更新 `MemoryAllocation`
+  注释，说明没有写回 `0x40` 的 buffer 会生成 `calloc_unbounded()`。
+- `include/notdec/Passes/evm/MemoryBufferAnalysis.h:37`：给 `MemoryAllocation`
+  增加 `Reloads`，记录同一 basic block 内未被 `mstore(0x40, ...)` 打断的
+  free memory pointer reload。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:46`：增加
+  `isFreeMemoryPointerClobber`，只把明确写 `0x40` 当作 reload 合并的边界。
+  按当前判断，EVM call/copy 先假设不会修改 free memory pointer slot。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:51`、`:74`：增加
+  `hasFreeMemoryPointerClobberBetween` 和 `collectFreeMemoryPointerReloads`，
+  先只合并同一 basic block 内的 reload。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:226`：`rewriteAllocation` 允许
+  `Alloc.Size == nullptr`，这种情况生成 `calloc_unbounded()`；同时把 `Reloads`
+  里的 load 一起替换成同一个 `evm.alloc.addr`。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:553`：在已有 `Writes` 基础上补无
+  finalize allocation。条件是 base 来自 `mload(0x40)`，且后面确实有基于该 base
+  的 memory write。
+
+效果：
+
+- `revert_error_string_01` 的 `public_run___0x2a` 现在在入口生成：
+  `%0 = call ptr @calloc_unbounded()` 和 `%evm.alloc.addr = ptrtoint ptr %0 to i256`。
+- 原来的 `%evm.mload5` 被替换掉，`evm_revert` 现在使用：
+  `evm_revert(mem, %evm.alloc.addr, %evm.sub)`。
+- `ValueTypes.txt` 中 `%evm.alloc.addr` 的 upper 是
+  `{@100: {}, @36: Ptr<...>, @4: Ptr<...>, @68: Ptr<...>} & Ptr<...>`，
+  也就是 revert base 已经能拿到 payload record 形状。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-unbounded.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-unbounded.htypes --gen-work-dir --work-dir=/tmp/notdec-revert-error-string-unbounded-work`
+  通过。
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir).tr_level_2' --output-on-failure`
+  通过，用时 3.19s。
+- fortune 同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-unbounded-reload.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-unbounded-reload.htypes`
+  通过，`elapsed=12.11 user=11.71 sys=0.39 maxrss=834792`。近期参考是
+  `elapsed=12.13/12.16`，没有明显性能退化。

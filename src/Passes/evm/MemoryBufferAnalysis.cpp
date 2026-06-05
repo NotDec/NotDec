@@ -43,6 +43,52 @@ bool isFreeMemoryPointerLoad(Value *V) {
 
 bool isZero(Value *V) { return detail::isConstantIntValue(V, 0); }
 
+bool isFreeMemoryPointerClobber(Instruction &I) {
+  std::optional<detail::EvmMemoryStore> Store = detail::matchEvmMemoryStore(&I);
+  return Store.has_value() && detail::isConstantIntValue(Store->Address, 64);
+}
+
+bool hasFreeMemoryPointerClobberBetween(Instruction *From, Instruction *To) {
+  if (From == nullptr || To == nullptr || From->getParent() != To->getParent() ||
+      !From->comesBefore(To)) {
+    return true;
+  }
+  for (Instruction *I = From->getNextNode(); I != nullptr && I != To;
+       I = I->getNextNode()) {
+    if (isFreeMemoryPointerClobber(*I)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasAllocationForBase(ArrayRef<MemoryAllocation> Allocations, Value *Base) {
+  for (const MemoryAllocation &Alloc : Allocations) {
+    if (Alloc.Base == Base) {
+      return true;
+    }
+  }
+  return false;
+}
+
+SmallVector<Instruction *, 4> collectFreeMemoryPointerReloads(
+    Instruction *Base, ArrayRef<Value *> Bases) {
+  SmallVector<Instruction *, 4> Reloads;
+  if (Base == nullptr) {
+    return Reloads;
+  }
+  for (Value *MaybeReload : Bases) {
+    auto *Reload = dyn_cast_or_null<Instruction>(MaybeReload);
+    if (Reload == nullptr || Reload == Base) {
+      continue;
+    }
+    if (!hasFreeMemoryPointerClobberBetween(Base, Reload)) {
+      Reloads.push_back(Reload);
+    }
+  }
+  return Reloads;
+}
+
 bool valueAvailableAt(Value *V, Instruction &UsePoint, DominatorTree &DT) {
   auto *Def = dyn_cast_or_null<Instruction>(V);
   if (Def == nullptr) {
@@ -182,8 +228,7 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
                        SmallPtrSetImpl<Instruction *> &RewrittenBases,
                        SmallVectorImpl<Instruction *> &ToErase) {
   auto *BaseLoad = dyn_cast_or_null<Instruction>(Alloc.Base);
-  if (BaseLoad == nullptr || Alloc.Size == nullptr ||
-      Alloc.AllocatePoint == nullptr) {
+  if (BaseLoad == nullptr || Alloc.AllocatePoint == nullptr) {
     return false;
   }
   if (!RewrittenBases.insert(BaseLoad).second) {
@@ -193,7 +238,8 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
   Module *M = BaseLoad->getModule();
   Type *I256 = Type::getIntNTy(Ctx, 256);
   Type *PtrTy = PointerType::get(Ctx, 0);
-  bool SizeAvailable = valueAvailableAt(Alloc.Size, *Alloc.AllocatePoint, DT);
+  bool SizeAvailable = Alloc.Size != nullptr &&
+                       valueAvailableAt(Alloc.Size, *Alloc.AllocatePoint, DT);
   SmallVector<Type *, 2> AllocArgs;
   if (SizeAvailable) {
     AllocArgs.append({I256, I256});
@@ -215,8 +261,18 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
   if (BaseLoad->use_empty()) {
     ToErase.push_back(BaseLoad);
   }
+  for (Instruction *Reload : Alloc.Reloads) {
+    if (Reload == nullptr || Reload == BaseLoad) {
+      continue;
+    }
+    Reload->replaceAllUsesWith(NewBase);
+    if (Reload->use_empty()) {
+      ToErase.push_back(Reload);
+    }
+  }
 
-  if (!SizeAvailable && Alloc.FinalizePoint != nullptr) {
+  if (!SizeAvailable && Alloc.FinalizePoint != nullptr &&
+      Alloc.Size != nullptr) {
     Function *FinalizeFn = getOrDeclareFunction(
         *M, "notdec_evm_finalize_alloc", Type::getVoidTy(Ctx), {I256, I256});
     IRBuilder<> FinalizeBuilder(Alloc.FinalizePoint);
@@ -342,8 +398,13 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
       if (Size == nullptr) {
         continue;
       }
-      Facts.Allocations.push_back(
-          MemoryAllocation{Op, Size, cast<Instruction>(Op), &I, true});
+      MemoryAllocation Alloc;
+      Alloc.Base = Op;
+      Alloc.Size = Size;
+      Alloc.AllocatePoint = cast<Instruction>(Op);
+      Alloc.FinalizePoint = &I;
+      Alloc.Finalized = true;
+      Facts.Allocations.push_back(Alloc);
       break;
     }
   }
@@ -487,6 +548,34 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
       }
       continue;
     }
+  }
+
+  for (Value *Base : Bases) {
+    if (hasAllocationForBase(Facts.Allocations, Base)) {
+      continue;
+    }
+    auto *BaseInst = dyn_cast<Instruction>(Base);
+    if (BaseInst == nullptr) {
+      continue;
+    }
+
+    bool HasWrite = false;
+    for (const MemoryWrite &Write : Facts.Writes) {
+      if (Write.Base == Base) {
+        HasWrite = true;
+        break;
+      }
+    }
+    if (!HasWrite) {
+      continue;
+    }
+
+    MemoryAllocation Alloc;
+    Alloc.Base = Base;
+    Alloc.AllocatePoint = BaseInst;
+    Alloc.Reloads = collectFreeMemoryPointerReloads(BaseInst, Bases);
+    Alloc.Finalized = false;
+    Facts.Allocations.push_back(Alloc);
   }
 
   return Facts;

@@ -27,13 +27,14 @@ enum class MemoryWriteKind {
 };
 
 // A Solidity allocation is modeled as the relation between the free-memory
-// pointer read and the later write-back to slot 0x40. Some buffers are
-// allocate_unbounded() and have no finalize point yet.
+// pointer read and the later write-back to slot 0x40. Some buffers are used
+// without updating slot 0x40 and become calloc_unbounded().
 struct MemoryAllocation {
   llvm::Value *Base = nullptr;
   llvm::Value *Size = nullptr;
   llvm::Instruction *AllocatePoint = nullptr;
   llvm::Instruction *FinalizePoint = nullptr;
+  llvm::SmallVector<llvm::Instruction *, 4> Reloads;
   bool Finalized = false;
 };
 
