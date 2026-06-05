@@ -3904,10 +3904,7 @@ void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
     // hasn't been materialized as a MLsub type variable yet.
     auto *Src = I.getOperand(0);
     auto SrcVal = getExtValuePtr(Src, &I, 0);
-    if (isa<IntToPtrInst>(I) && I.getModule() != nullptr &&
-        isEVMModule(*I.getModule())) {
-      cg.getOrInsertNode(SrcVal);
-    }
+    cg.getOrInsertNode(SrcVal);
     if (cg.PG.getPNIVarOrNull(SrcVal) != nullptr) {
       // Materialize the cast result first so its LLVM low type participates in
       // the merge; otherwise inttoptr can lose the result-side pointer hint and
