@@ -7,7 +7,7 @@ add_executable(
 target_link_libraries(
 	MLsubGeneratorTest
 	GTest::gtest_main
-	notdec
+	notdec-core
 )
 
 add_executable(
@@ -17,7 +17,7 @@ add_executable(
 target_link_libraries(
 	TypeBuilderTest
 	GTest::gtest_main
-	notdec
+	notdec-core
 )
 
 add_executable(
@@ -27,7 +27,7 @@ add_executable(
 target_link_libraries(
 	PAPathTest
 	GTest::gtest_main
-	notdec
+	notdec-core
 )
 
 include(GoogleTest)

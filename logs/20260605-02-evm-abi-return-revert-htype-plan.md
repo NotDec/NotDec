@@ -240,3 +240,47 @@ Solidity 语义 pass 的标注接口继续扩散。
 - 下一步应先补 EVM native memory object 的类型恢复：把 `inttoptr(base + constant offset)` 的 store/load
   转成 base record field 约束，至少先覆盖 free memory pointer load/reload 这种常见 Solidity ABI
   encoder 形状。补好后再回到 `SolidityRevertPass` 删除旧的 memory write 扫描。
+
+## 实现记录：EVM inttoptr 源节点补齐
+
+本轮先补 `inttoptr(base + offset)` store 约束断开的最小缺口。
+
+修改：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3907`：在 `MLsubVisitor::visitCastInst` 中，
+  对 EVM 模块里的 `IntToPtrInst` 先调用 `cg.getOrInsertNode(SrcVal)`。
+  这样 `%notdec.evm.mem.ptr.N = inttoptr i256 %evm.addN to ptr` 会 remap 到已有的
+  `%evm.addN` SimpleType，后续 store 约束和 ptradd field 约束落到同一个节点。
+- `src/CMakeLists.txt:2`：把主库 target 从 `notdec` 改成 `notdec-core`。
+- `src/CMakeLists.txt:85`：把可执行 target 改成 `notdec`，输出仍是 `build/bin/notdec`。
+  之后 `cmake --build ./build --target notdec` 会重新链接可执行文件。
+- `test/CMakeLists.txt:10`、`:27`、`:44`、`:61`：CTest 里的 `$<TARGET_FILE:...>` 改成
+  `$<TARGET_FILE:notdec>`。
+- `unittests/Retypd/CMakeLists.txt:10`、`:20`、`:30`：单测改为链接 `notdec-core`。
+
+效果：
+
+- `revert_error_string_01` 的 trace 中，`%notdec.evm.mem.ptr.3/4/5` 已从独立
+  `mapping:create` 变成 `mapping:remap` 到 `%evm.add/add1/add3`。
+- `ValueTypes.txt` 中 `%evm.mload` 的 upper 从
+  `{@100: {}, @36: {}, @4: {}, @68: {}} & Ptr<...>` 变成
+  `{@100: {}, @36: Ptr<...>, @4: Ptr<...>, @68: Ptr<...>} & Ptr<...>`。
+  `type-struct-merge.md` 里 `@4/@36/@68` 字段也能看到 `PtrStore<...>`。
+- `%evm.mload5` 仍是 `top`。这说明 free memory pointer reload 还没从 `0x40` slot 的
+  load/store 关系拿到同一个 payload record，后续还要补这一段。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过，并确认会链接 `build/bin/notdec`。
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir).tr_level_2' --output-on-failure`
+  通过，用时 3.18s。
+- fortune 同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-evmcast.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-evmcast.htypes`
+  通过，`elapsed=12.16 user=11.79 sys=0.36 maxrss=834508`。近期参考是 `elapsed=12.13`，
+  没有明显性能退化。
+
+方案备注：
+
+- 曾尝试对所有 cast 都强制创建源 SimpleType，fortune 退化到 `elapsed=149.06`，已收窄为
+  EVM `IntToPtrInst` 专用处理。
+- 这个改动不合并 PNI 节点对应的 SimpleType，只补 cast 源值缺失时的 MLsub 映射入口。

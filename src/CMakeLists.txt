@@ -1,5 +1,5 @@
 
-add_library(notdec STATIC
+add_library(notdec-core STATIC
 	# source files that are common to all frontend
 	Passes/PassManager.cpp
 	Passes/StackPointerFinder.cpp
@@ -30,7 +30,7 @@ add_library(notdec STATIC
 
 # 主项目源码里有一部分类型恢复和 pass 逻辑直接复用了 llvm2c 的头文件类型，
 # 即使暂时不构建 llvm2c 库，编这些源文件时也仍然需要头文件可见。
-target_include_directories(notdec
+target_include_directories(notdec-core
 	PUBLIC
 	${PROJECT_SOURCE_DIR}/external/NotDec-llvm2c/include
 )
@@ -50,7 +50,7 @@ configure_file(
 	"${NOTDEC_MLSUB_BUILTIN_SUMMARIES_BUILD}"
 	COPYONLY
 )
-target_compile_definitions(notdec
+target_compile_definitions(notdec-core
 	PRIVATE
 	NOTDEC_DEFAULT_MLSUB_SUMMARY_OVERRIDE_PATH="${NOTDEC_MLSUB_BUILTIN_SUMMARIES_BUILD}"
 )
@@ -58,26 +58,38 @@ target_compile_definitions(notdec
 # include直接在外部设置了src目录。
 
 if (NOTDEC_ENABLE_WASM)
-	target_link_libraries(notdec
+	target_link_libraries(notdec-core
 		PUBLIC
 		notdec-wasm2llvm
 	)
 endif()
 
 if (NOTDEC_ENABLE_LLVM2C)
-	# target_sources(notdec PRIVATE
+	# target_sources(notdec-core PRIVATE
 	# 	backend/main.cpp
 	# )
-	target_link_libraries(notdec
+	target_link_libraries(notdec-core
 		PUBLIC
 		notdec-llvm2c
 	)
 endif()
 
-target_link_libraries(notdec
+target_link_libraries(notdec-core
 	PUBLIC
 	notdec_llvm_deps
 	binarysub_lib
+)
+
+# 添加可执行文件
+
+add_executable(notdec
+	NotDec.cpp
+)
+
+# target_compile_features(bin2pat PUBLIC cxx_std_17)
+
+target_link_libraries(notdec
+	notdec-core
 )
 
 set_target_properties(notdec
@@ -85,30 +97,13 @@ set_target_properties(notdec
 		OUTPUT_NAME "notdec"
 )
 
-# 添加可执行文件
-
-add_executable(notdec-decompile 
-	NotDec.cpp
-)
-
-# target_compile_features(bin2pat PUBLIC cxx_std_17)
-
-target_link_libraries(notdec-decompile 
-	notdec
-)
-
-set_target_properties(notdec-decompile
-	PROPERTIES
-		OUTPUT_NAME "notdec"
-)
-
-install(TARGETS notdec-decompile DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+install(TARGETS notdec DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 if(NOTDEC_ENABLE_RETDEC_LLVMIR2HLL)
 	# # remove -fno-rtti
 	# string(REPLACE " -fno-rtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 	# add_subdirectory(backend/retdec-llvmir2hll)
 	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
-	# # enable retdec interface in notdec
-	# target_compile_definitions(notdec PUBLIC ENABLE_RETDEC_LLVMIR2HLL)
+	# # enable retdec interface in notdec-core
+	# target_compile_definitions(notdec-core PUBLIC ENABLE_RETDEC_LLVMIR2HLL)
 endif()

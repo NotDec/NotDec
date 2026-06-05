@@ -7,7 +7,7 @@ function(add_type_recovery_suite test_name manifest_relpath)
 			${Python3_EXECUTABLE}
 			${CMAKE_CURRENT_SOURCE_DIR}/run_type_recovery_suite.py
 			--binary
-			$<TARGET_FILE:notdec-decompile>
+			$<TARGET_FILE:notdec>
 			--manifest
 			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
 			--project-root
@@ -24,7 +24,7 @@ function(add_lifting_suite test_name manifest_relpath)
 			${Python3_EXECUTABLE}
 			${CMAKE_CURRENT_SOURCE_DIR}/run_lifting_suite.py
 			--binary
-			$<TARGET_FILE:notdec-decompile>
+			$<TARGET_FILE:notdec>
 			--manifest
 			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
 			--project-root
@@ -41,7 +41,7 @@ function(add_evm_solidity_patterns_suite test_name manifest_relpath)
 			${Python3_EXECUTABLE}
 			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_patterns_suite.py
 			--binary
-			$<TARGET_FILE:notdec-decompile>
+			$<TARGET_FILE:notdec>
 			--manifest
 			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
 			--project-root
@@ -58,7 +58,7 @@ function(add_evm_solidity_rewrite_suite test_name manifest_relpath)
 			${Python3_EXECUTABLE}
 			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_rewrite_suite.py
 			--binary
-			$<TARGET_FILE:notdec-decompile>
+			$<TARGET_FILE:notdec>
 			--manifest
 			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
 			--project-root
