@@ -56,21 +56,24 @@ Memory Object analysis。pass 如果 rewrite IR，需要同步维护相关类型
 
 ## 类型结果使用方式
 
-后续 pass 不解析 `.htypes` 文本。应该通过 `MLsubRecovery::Result` 查询：
+后续 pass 直接访问 `MLsubRecovery::Result` 里的 C++ HType 数据结构，不解析 `.htypes` 文本。
+基本入口是拿 LLVM `Value *` 查 `HTypeResult::getDefaultValueType(Value)`：
 
 - 某个 `Value` 的 lower / upper HType。
 - 某个函数参数、返回值、call result 的类型。
-- 某个 memory object field 的类型。
+- return/revert/event 的 buffer base 类型。
 - semantic primitive：`prim.uint256.evm.address`、`integer`、`storage_key`。
 
-如果现有 result API 不方便，需要先补一个很薄的查询接口，例如：
+对内存 buffer，正常情况是：如果后续基于某个 `base` 做了 memory access，类型推理应该把这个
+`base` 推成结构体指针类型。后置 pass 拿到这个 HType 后，解引用到 record，再按 field range
+读取 `[0, size)` 范围内的字段类型。
 
-- `getValueHType(Value *)`
-- `hasSemantic(Value *, "address")`
-- `hasSemantic(Value *, "storage_key")`
-- `getMemoryFieldType(Object, Offset)`
+如果 `evm_return` / `evm_revert` / `evm_log*` 的 buffer base 在类型结果里仍是普通整数，而不是
+结构体指针，不要回退到访问模式匹配。先记录函数、call、base、size 和当前 HType，作为类型恢复缺口
+单独报告。
 
-这个接口只是访问类型恢复结果，不做新的语义归纳。
+如果现有 result API 不方便，可以补很薄的访问 helper，例如 `getValueHType(Value *)`、
+`hasSemantic(Value *, "address")`。helper 只读类型恢复结果，不做新的语义归纳。
 
 ## Rewrite 时维护类型结果
 
