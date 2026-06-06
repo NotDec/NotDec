@@ -309,6 +309,7 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(
           createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
+      MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
     }
     MPM.addPass(VerifierPass(false));
     if (level >= 2) {
