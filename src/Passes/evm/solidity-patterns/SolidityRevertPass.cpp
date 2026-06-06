@@ -1,7 +1,6 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 
-#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
@@ -17,158 +16,155 @@ namespace notdec::passes::evm {
 using namespace detail;
 
 STATISTIC(NumReverts, "Number of Solidity revert sites found");
-STATISTIC(NumRevertDataWordWrites,
-          "Number of Solidity revert data word writes found");
-STATISTIC(NumRevertDataCopyWrites,
-          "Number of Solidity revert data copy writes found");
 STATISTIC(NumRevertNonPointerBaseHTypes,
           "Number of revert bases without pointer HType");
 STATISTIC(NumRevertNonRecordBaseHTypes,
           "Number of revert bases without record pointee HType");
+STATISTIC(NumRevertMissingPayloadHTypes,
+          "Number of revert payloads not recoverable from HType");
 
 namespace {
 
-// Revert payload markers are semantic annotations. Keep them disabled until the
-// type recovery path has a stable post-inference place to regenerate them.
-constexpr bool kEmitRevertDataMarkers = false;
+struct RevertPayloadHType {
+  ast::RecordDecl *Record = nullptr;
+  bool HasSelector = false;
+  bool HasPanicCode = false;
+  bool HasErrorHead = false;
+  bool HasErrorLength = false;
+  bool HasErrorData = false;
+};
 
-uint64_t getRevertKindCode(StringRef Kind) {
-  if (Kind == "empty") {
-    return 1;
+ast::RecordDecl *getRecordPointerPointee(ast::HType *Ty) {
+  if (Ty == nullptr) {
+    return nullptr;
   }
-  if (Kind == "panic") {
-    return 2;
+  if (Ty->isPointerType()) {
+    ast::HType *Pointee = Ty->getPointeeType();
+    return Pointee == nullptr ? nullptr : Pointee->getAsRecordDecl();
   }
-  if (Kind == "returndata_bubble") {
-    return 3;
+  if (auto *Inter = dyn_cast<ast::SetInterType>(Ty)) {
+    for (ast::HType *Term : Inter->getTypes()) {
+      if (ast::RecordDecl *Record = getRecordPointerPointee(Term)) {
+        return Record;
+      }
+    }
   }
-  if (Kind == "error_string") {
-    return 4;
+  if (auto *Union = dyn_cast<ast::SetUnionType>(Ty)) {
+    for (ast::HType *Term : Union->getTypes()) {
+      if (ast::RecordDecl *Record = getRecordPointerPointee(Term)) {
+        return Record;
+      }
+    }
   }
-  if (Kind == "custom_error_candidate") {
-    return 5;
-  }
-  if (Kind == "encoded_candidate") {
-    return 6;
-  }
-  return 0;
+  return nullptr;
 }
 
-bool hasRecordPointeeHType(llvm2c::HTypeResult &HTypes, Value *Base,
-                           CallBase &Use, unsigned ArgIndex) {
+bool containsPointerType(ast::HType *Ty) {
+  if (Ty == nullptr) {
+    return false;
+  }
+  if (Ty->isPointerType()) {
+    return true;
+  }
+  if (auto *Inter = dyn_cast<ast::SetInterType>(Ty)) {
+    return llvm::any_of(Inter->getTypes(), containsPointerType);
+  }
+  if (auto *Union = dyn_cast<ast::SetUnionType>(Ty)) {
+    return llvm::any_of(Union->getTypes(), containsPointerType);
+  }
+  return false;
+}
+
+ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
+                                       Value *Base, CallBase &Use,
+                                       unsigned ArgIndex) {
   ast::HType *Ty =
       HTypes.getDefaultValueType(getExtValuePtr(Base, &Use, ArgIndex));
-  if (Ty == nullptr || !Ty->isPointerType()) {
+  ast::RecordDecl *Record = getRecordPointerPointee(Ty);
+  if (Record != nullptr) {
+    return Record;
+  }
+
+  if (Ty == nullptr || !containsPointerType(Ty)) {
     LLVM_DEBUG(dbgs() << "evm revert: base has no pointer HType: " << *Base
                       << "\n");
     ++NumRevertNonPointerBaseHTypes;
-    return false;
+    return nullptr;
   }
 
-  ast::HType *Pointee = Ty->getPointeeType();
-  if (Pointee == nullptr || !Pointee->isRecordType()) {
-    LLVM_DEBUG(dbgs() << "evm revert: base HType is not record pointer: "
-                      << Ty->getAsString() << " for " << *Base << "\n");
-    ++NumRevertNonRecordBaseHTypes;
-    return false;
-  }
-  return true;
+  LLVM_DEBUG(dbgs() << "evm revert: base HType is not record pointer: "
+                    << Ty->getAsString() << " for " << *Base << "\n");
+  ++NumRevertNonRecordBaseHTypes;
+  return nullptr;
 }
 
-void collectRevertDataWordWriteMarkers(BasicBlock &BB, CallBase &Revert,
-                                       Value *RevertBase,
-                                       SmallVectorImpl<CallBase *> &Writes) {
-  SmallVector<CallBase *, 8> Candidates;
+bool hasFieldAt(ast::RecordDecl &Record, int64_t Offset) {
+  return Record.getFieldAt(Offset) != nullptr;
+}
 
-  for (Instruction &I : BB) {
-    if (&I == &Revert) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
-    if (isFreeMemoryPointerStore(&I)) {
-      Candidates.clear();
-      continue;
-    }
-
-    if (!isCallTo(Call, "notdec_solidity_memory_write") ||
-        Call->arg_size() != 3) {
-      continue;
-    }
-
-    if (isSameOrReloadedFreeMemoryBase(Call->getArgOperand(0), RevertBase)) {
-      Candidates.push_back(Call);
-    }
+std::optional<RevertPayloadHType>
+getRevertPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Revert) {
+  ast::RecordDecl *Record =
+      getRecordPointeeHType(HTypes, Revert.getArgOperand(1), Revert, 1);
+  if (Record == nullptr) {
+    return std::nullopt;
   }
 
-  Writes.append(Candidates.begin(), Candidates.end());
+  RevertPayloadHType Payload;
+  Payload.Record = Record;
+  Payload.HasSelector = hasFieldAt(*Record, 0);
+  Payload.HasPanicCode = hasFieldAt(*Record, 4);
+  Payload.HasErrorHead = hasFieldAt(*Record, 4);
+  Payload.HasErrorLength = hasFieldAt(*Record, 36);
+  Payload.HasErrorData = hasFieldAt(*Record, 68);
+  return Payload;
 }
 
-void collectRevertDataCopyWriteMarkers(BasicBlock &BB, CallBase &Revert,
-                                       Value *RevertBase,
-                                       SmallVectorImpl<CallBase *> &Writes) {
-  SmallVector<CallBase *, 4> Candidates;
-
-  for (Instruction &I : BB) {
-    if (&I == &Revert) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
-    if (isFreeMemoryPointerStore(&I)) {
-      Candidates.clear();
-      continue;
-    }
-
-    if (!isCallTo(Call, "notdec_solidity_memory_copy_write") ||
-        Call->arg_size() != 5) {
-      continue;
-    }
-
-    if (isSameOrReloadedFreeMemoryBase(Call->getArgOperand(0), RevertBase)) {
-      Candidates.push_back(Call);
-    }
+std::optional<SolidityRevertMatch>
+classifyRevertFromHType(llvm2c::HTypeResult &HTypes, CallBase &Revert) {
+  if (isConstantIntValue(Revert.getArgOperand(1), 0) &&
+      isConstantIntValue(Revert.getArgOperand(2), 0)) {
+    SolidityRevertMatch Match;
+    Match.Revert = &Revert;
+    Match.Kind = "empty";
+    return Match;
   }
 
-  Writes.append(Candidates.begin(), Candidates.end());
-}
+  if (isConstantIntValue(Revert.getArgOperand(2), 0)) {
+    SolidityRevertMatch Match;
+    Match.Revert = &Revert;
+    Match.Kind = "encoded_candidate";
+    return Match;
+  }
 
-void insertRevertDataWordWriteMarker(LLVMContext &Ctx, CallBase &Revert,
-                                     CallBase &WordWrite, StringRef Kind) {
-  Module *M = Revert.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_revert_data_word_write",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256}, false));
+  std::optional<RevertPayloadHType> Payload =
+      getRevertPayloadHType(HTypes, Revert);
+  if (!Payload.has_value()) {
+    ++NumRevertMissingPayloadHTypes;
+    return std::nullopt;
+  }
 
-  IRBuilder<> Builder(&Revert);
-  Builder.CreateCall(Marker,
-                     {WordWrite.getArgOperand(0), WordWrite.getArgOperand(1),
-                      WordWrite.getArgOperand(2),
-                      ConstantInt::get(I256, getRevertKindCode(Kind))});
-}
+  SolidityRevertMatch Match;
+  Match.Revert = &Revert;
+  if (isConstantIntValue(Revert.getArgOperand(2), 36) &&
+      Payload->HasSelector && Payload->HasPanicCode) {
+    Match.Kind = "panic";
+    return Match;
+  }
 
-void insertRevertDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Revert,
-                                     CallBase &CopyWrite, StringRef Kind) {
-  Module *M = Revert.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_revert_data_copy_write",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256, I256}, false));
+  if (Payload->HasSelector && Payload->HasErrorHead &&
+      Payload->HasErrorLength) {
+    Match.Kind = "error_string";
+    return Match;
+  }
 
-  IRBuilder<> Builder(&Revert);
-  Builder.CreateCall(Marker,
-                     {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(1),
-                      CopyWrite.getArgOperand(2), CopyWrite.getArgOperand(3),
-                      CopyWrite.getArgOperand(4),
-                      ConstantInt::get(I256, getRevertKindCode(Kind))});
+  if (Payload->HasSelector) {
+    Match.Kind = "custom_error_candidate";
+    return Match;
+  }
+
+  Match.Kind = "encoded_candidate";
+  return Match;
 }
 
 } // namespace
@@ -198,35 +194,12 @@ PreservedAnalyses SolidityRevertPass::run(Module &M,
         }
 
         std::optional<SolidityRevertMatch> Match =
-            matchSolidityRevert(BB, *Call);
+            classifyRevertFromHType(*HighTypes, *Call);
         if (!Match.has_value()) {
           continue;
         }
 
         addRevertMatchMetadata(Ctx, *Match);
-        if (!isConstantIntValue(Call->getArgOperand(2), 0)) {
-          Value *RevertBase = Call->getArgOperand(1);
-          hasRecordPointeeHType(*HighTypes, RevertBase, *Call, 1);
-          SmallVector<CallBase *, 8> WordWrites;
-          collectRevertDataWordWriteMarkers(BB, *Call, RevertBase, WordWrites);
-          if (kEmitRevertDataMarkers) {
-            for (CallBase *WordWrite : WordWrites) {
-              insertRevertDataWordWriteMarker(Ctx, *Call, *WordWrite,
-                                              Match->Kind);
-              ++NumRevertDataWordWrites;
-            }
-          }
-          SmallVector<CallBase *, 4> CopyWrites;
-          collectRevertDataCopyWriteMarkers(BB, *Call, RevertBase, CopyWrites);
-          if (kEmitRevertDataMarkers) {
-            for (CallBase *CopyWrite : CopyWrites) {
-              insertRevertDataCopyWriteMarker(Ctx, *Call, *CopyWrite,
-                                              Match->Kind);
-              ++NumRevertDataCopyWrites;
-            }
-          }
-        }
-        insertRevertMemoryWriteMatchMarker(Ctx, *Match);
         if (Match->Kind == "panic") {
           insertPanicRewriteMarker(Ctx, *Match);
         } else if (Match->Kind == "returndata_bubble") {
