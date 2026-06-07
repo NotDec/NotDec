@@ -7,15 +7,11 @@ struct struct_0 {
 };
 
 union union_0 {
-  rec_36 field_0; /* at offset: 0 */
+  rec_35 field_0; /* at offset: 0 */
   struct_0 field_1; /* at offset: 0 */
 };
 
-struct rec_36 {
-  struct_0 field_0; /* recursive body at offset: 0 */
-};
-
-struct rec_60 {
+struct rec_35 {
   struct_0 field_0; /* recursive body at offset: 0 */
 };
 
@@ -38,12 +34,12 @@ struct rec_60 {
 [+] main::%next => lower=bottom:32 ; upper='r:8[]*
 [+] main::%next.ptr => lower=bottom:32 ; upper='r:8[]*
 [+] main::%p => lower=bottom:32 ; upper=struct_0*
-[+] main::%short.next => lower=bottom:32 ; upper=rec_60*
-[+] main::%short.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
+[+] main::%short.next => lower=bottom:32 ; upper=rec_35*
+[+] main::%short.ptr => lower=bottom:32 ; upper=rec_35*
 [+] main::%wide.left.next => lower=bottom:32 ; upper='r:8[]*
-[+] main::%wide.left.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
+[+] main::%wide.left.ptr => lower=bottom:32 ; upper='r:8[]*
 [+] main::%wide.right.next => lower=bottom:32 ; upper='r:8[]*
-[+] main::%wide.right.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
+[+] main::%wide.right.ptr => lower=bottom:32 ; upper='r:8[]*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [-] main::arg0 => lower=bottom:32 ; upper=top:32
 [-] main::arg1 => lower=bool ; upper=bool
@@ -53,3 +49,4 @@ struct rec_60 {
 
 [memory]
 type => top:32
+

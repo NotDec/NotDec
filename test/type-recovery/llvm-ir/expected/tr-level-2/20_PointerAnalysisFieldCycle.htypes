@@ -7,18 +7,19 @@
 [+] @main => lower=(bottom:32 (*)(top:32))* ; upper=top:32
 [+] const(i32 0)@main::%bb.exit.i0:0 => lower=bottom:32 ; upper=top:32
 [+] const(i32 0)@main::%i:0 => lower=bottom:32 ; upper=top:32
-[+] main::%base => lower=bottom:32 ; upper=top:8[]*
-[-] main::%buf => lower=bottom:32 ; upper=top:8[]*
+[+] main::%base => lower=bottom:32 ; upper='i:8[]*
+[-] main::%buf => lower=bottom:32 ; upper='i:8[]*
 [+] main::%done => lower=bool ; upper=bool
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
-[+] main::%next => lower=bottom:32 ; upper=top:8[]*
-[+] main::%next.ptr => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=8>
-[+] main::%p => lower=bottom:32 ; upper=top:8[]*
-[+] main::%p.ptr => lower=bottom:32 ; upper=top:8[]*
+[+] main::%next => lower=bottom:32 ; upper='i:8[]*
+[+] main::%next.ptr => lower=bottom:32 ; upper='i:8[]*
+[+] main::%p => lower=bottom:32 ; upper='i:8[]*
+[+] main::%p.ptr => lower=bottom:32 ; upper='i:8[]*
 [+] main::%v => lower=bottom:8 ; upper=top:8
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
+

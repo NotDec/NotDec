@@ -303,10 +303,11 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 本次 Debug fortune：`elapsed=57.20s`，`rss_kb=182684`。
 - 对比计划里的旧 Debug fortune `59.87s`，closure cache 单独只有小幅下降，说明后续仍需要看
   `CompactType` 比较/hash 或 bulk 后半段 cache。
-- `notdec.type_recovery.llvm_ir.tr_level_2` 当前 10 passed / 11 failed。失败样例里
+- `notdec.type_recovery.llvm_ir.tr_level_2` 初次运行是 10 passed / 11 failed。失败样例里
   `02_ConstantAddr1` 的 diff 是新增 `const(i32 1024)@main::%a:0` HType 条目，属于当前 worktree 的
-  HType oracle 差异，不像 closure cache 的结构变化；后续如果要用 CTest 作硬判断，需要先同步或分类这些
-  oracle 差异。
+  HType oracle 差异，不像 closure cache 的结构变化。
+- 已同步这 11 个 `test/type-recovery/llvm-ir/expected/tr-level-2/*.htypes` oracle 后重跑：
+  `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
 
 # 当前不做
 

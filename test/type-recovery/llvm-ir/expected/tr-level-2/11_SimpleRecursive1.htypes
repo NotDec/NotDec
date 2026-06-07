@@ -1,24 +1,29 @@
 # HTypeResult
 
 [decls]
+struct struct_0 {
+  'd:32 field_0; /* at offset: 0 */
+  f32 field_1; /* at offset: 4 */
+};
+
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
 [+] @isFloat => lower=(void (*)(f32))* ; upper=(void (*)(f32))*
 [+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
-[+] @ptrFloat => lower=(void (*)('d:32 & 'd:32*))* ; upper=(void (*)(bottom:32))*
+[+] @ptrFloat => lower=(void (*)('d:32 & struct_0*))* ; upper=(void (*)(bottom:32))*
 [+] const(i32 0)@main::%bb.allocator.i3:0 => lower=bottom:32 ; upper=top:32
 [+] isFloat::arg0 => lower=f32 ; upper=f32
-[+] main::%stack => lower=bottom:32 ; upper='d:32 & 'd:32*
-[-] main::%stackPtr => lower=bottom:32 ; upper='d:32 & 'd:32*
+[+] main::%stack => lower=bottom:32 ; upper='d:32 & struct_0*
+[-] main::%stackPtr => lower=bottom:32 ; upper='d:32 & struct_0*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 [+] main::arg1 => lower=bottom:32 ; upper=top:32
 [+] ptrFloat::%f1 => lower=f32 ; upper=f32
-[+] ptrFloat::%v1 => lower=bottom:32 ; upper=void*
+[+] ptrFloat::%v1 => lower=bottom:32 ; upper=ptr<load=f32, store=void, psize=32>
 [+] ptrFloat::%v2 => lower=bottom:32 ; upper=ptr<load=f32, store=void, psize=32>
-[+] ptrFloat::%v3 => lower=bottom:32 ; upper='d:32 & 'd:32*
-[+] ptrFloat::arg0 => lower=bottom:32 ; upper='d:32 & 'd:32*
+[+] ptrFloat::%v3 => lower=bottom:32 ; upper='d:32 & struct_0*
+[+] ptrFloat::arg0 => lower=bottom:32 ; upper='d:32 & struct_0*
 
 [memory]
 type => top:32

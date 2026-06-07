@@ -1,18 +1,6 @@
 # HTypeResult
 
 [decls]
-struct struct_0 {
-  struct_0 field_0; /* at offset: 4 */
-};
-
-struct struct_1 {
-  struct_1 field_0; /* at offset: 4 */
-};
-
-struct struct_2 {
-  struct_2 field_0; /* at offset: 4 */
-};
-
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
@@ -20,11 +8,11 @@ struct struct_2 {
 [+] const(i32 0)@main::%bb.exit.i0:0 => lower=bottom:32 ; upper=top:32
 [+] const(i32 0)@main::%bb.loop.i3:0 => lower=bottom:32 ; upper=top:32
 [+] main::%cmp => lower=bool ; upper=bool
-[+] main::%new_9 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
-[+] main::%p1 => lower=bottom:32 ; upper=struct_0*
-[+] main::%p2 => lower=bottom:32 ; upper=struct_1*
-[-] main::%stack1 => lower=bottom:32 ; upper=struct_2*
-[+] main::%stack1p => lower=bottom:32 ; upper=struct_2*
+[+] main::%new_9 => lower=bottom:32 ; upper=top:32[]*
+[+] main::%p1 => lower=bottom:32 ; upper=top:32[]*
+[+] main::%p2 => lower=bottom:32 ; upper=top:32[]*
+[-] main::%stack1 => lower=bottom:32 ; upper=top:32[]*
+[+] main::%stack1p => lower=bottom:32 ; upper=top:32[]*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 [+] main::arg1 => lower=bottom:32 ; upper=top:32
