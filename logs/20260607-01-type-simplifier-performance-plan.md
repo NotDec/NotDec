@@ -445,6 +445,52 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 直接收益不大，但已经消除了 `CompactType` 构造后的原地修改，为后续 cached structural hash /
   hash-consing 做准备。
 
+# 实现记录：`CompactType` structural hash 和 unordered 递归检测容器
+
+已实现。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub-utils.h`：
+  - `value_ptr::operator==` / `operator<` 增加同指针快路径。
+- `external/binarysub/include/binarysub/binarysub.h`：
+  - `CompactType` 增加 `mutable std::optional<std::size_t> cachedHash`。
+  - 增加 `CompactType::structuralHash()`，按普通树/DAG 结构 hash，不处理直接自环。
+  - `PolarCompactTypeSet` 从 `std::set` 改成 `std::unordered_set`。
+  - `PolarCompactTypeMap` 从 `std::map` 改成 `std::unordered_map`。
+  - hash key 仍是 `CompactTypePtr + polarity`，equality 仍按 `CompactType` 值相等判断。
+- `external/binarysub/src/binarysub-test.cpp`：
+  - 更新禁用的 direct self-cycle 测试注释，说明现在 hash/equality 也依赖 `CompactType` 本体无直接环。
+
+实现判断：
+
+- 当前递归语义仍由 `recVars` / `newRecVars` 表示，`CompactType` 本体按有限树/DAG hash。
+- hash 不参与 `CompactType::operator<`，所以普通有序 `set/map` 的顺序不变。
+- 只替换 `PolarCompactTypeSet/Map`，它们用于 `canonicalizeType()` / `coalesceCompactType()` 的递归检测。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-compact-hash.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-compact-hash.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过，生成 `/tmp/notdec-fortune-compact-hash.ll` 和
+  `/tmp/notdec-fortune-compact-hash.htypes`。
+- 本次 Debug fortune：`elapsed=37.66s`，`rss_kb=180920`。
+- 对比不可变构造后的 `56.32s`，这一步收益明显。
+
 # 当前不做
 
 - 不回退 `687cd6d`。
