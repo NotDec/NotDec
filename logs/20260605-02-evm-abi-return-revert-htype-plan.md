@@ -414,3 +414,62 @@ Solidity 语义 pass 的标注接口继续扩散。
   `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-event-htype.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-event-htype.htypes`
   通过，`elapsed=12.11 user=11.74 sys=0.36 maxrss=839080`。近期参考是
   `11.99/12.19`，没有明显性能退化。
+
+## 实现记录：HType buffer 读取 helper 抽取
+
+本轮对应 `20260607-01-evm-abi-return-revert-htype-refactor-plan.md` 的阶段 2。
+只整理重复的 HType record pointer 读取逻辑，不改 ABI return / revert / event 的语义分类。
+
+修改：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:20`：前置声明
+  `notdec::ast::HType`、`RecordDecl` 和 `notdec::llvm2c::HTypeResult`。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:114`：新增
+  `HTypeBufferGap`，区分没有 pointer HType 和 pointer 不是 record pointee 两类缺口。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:123`：新增
+  `HTypeBufferView`。这个结构只带 `Record`、原始 `BaseType` 和缺口类型，不缓存
+  `.htypes` 文本，也不做 Solidity 语义分类。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:199`：声明
+  `getHTypeBufferView`。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:14`：新增
+  `getRecordPointerPointee`，统一处理 pointer、set intersection 和 set union 里的
+  record pointee。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:39`：新增
+  `containsPointerType`，用于把“完全不是 pointer”和“是 pointer 但不是 record pointer”
+  分开报告。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:57`：实现
+  `getHTypeBufferView`，用 `getExtValuePtr(base, call, argIndex)` 查
+  `HTypeResult::getDefaultValueType`。
+- `src/CMakeLists.txt:15`：把 `HTypeBufferView.cpp` 加入 `notdec-core`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:36`：`getRecordPointeeHType`
+  改用 `getHTypeBufferView`，保留 ABI return 自己的 debug 文案和统计。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:37`：
+  `getRecordPointeeHType` 改用同一个 helper，revert payload 字段判断仍在
+  `getRevertPayloadHType` / `classifyRevertFromHType` 内。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:26`：
+  `getRecordPointeeHType` 改用同一个 helper，event pass 仍只标 `evm_logN`
+  topic count。
+
+效果：
+
+- `AbiReturnPass.cpp`、`SolidityRevertPass.cpp`、`EventLogPass.cpp` 不再各自重复
+  `getRecordPointerPointee` / `containsPointerType`。
+- 新逻辑放在 `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp`，没有继续增加
+  `src/Passes/evm/SolidityPatterns.cpp` 的长度。
+- helper 只读 `HTypeResult`，不扫描 IR，不解析 `.htypes`，也不把 HType 结果做成新的汇总层。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-htype-helper.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-htype-helper.htypes`
+  通过；输出 IR 中 `evm_revert(..., %evm.alloc.addr, 100)` 仍带
+  `!notdec.solidity.revert !{!"error_string"}`。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  仍失败，`7 passed, 92 failed`。这和当前重构计划里记录的迁移中状态一致；失败 suite
+  仍不能作为阶段 2 helper 抽取的阻塞条件。
+
+复杂度：2/10。只是把三份重复读取逻辑移到一个薄 helper。
+维护成本：2/10。后续 ABI return / revert / event 能共用同一个 HType buffer 入口。
+实现效果：7/10。减少重复，也避免 `SolidityPatterns.cpp` 继续变长；还没有进入阶段 3/4 的语义分类重构。

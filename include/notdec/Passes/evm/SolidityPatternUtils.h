@@ -17,6 +17,15 @@
 #include <optional>
 #include <string>
 
+namespace notdec::ast {
+class HType;
+class RecordDecl;
+} // namespace notdec::ast
+
+namespace notdec::llvm2c {
+struct HTypeResult;
+} // namespace notdec::llvm2c
+
 namespace notdec::passes::evm::detail {
 
 inline constexpr llvm::StringLiteral KIND_SOLIDITY_SELECTOR_OUTLINED_BODY(
@@ -102,6 +111,21 @@ struct PackedStorageAccessMatch {
   uint64_t AccessKind = 0;
 };
 
+enum class HTypeBufferGap {
+  None,
+  NoPointerType,
+  NonRecordPointerType,
+};
+
+// Thin view over one ABI/revert/event memory buffer type.  It only exposes the
+// record pointee already recovered by MLsub; callers keep all Solidity-specific
+// classification and fallback decisions local to their pass.
+struct HTypeBufferView {
+  notdec::ast::RecordDecl *Record = nullptr;
+  notdec::ast::HType *BaseType = nullptr;
+  HTypeBufferGap Gap = HTypeBufferGap::None;
+};
+
 // EVM memory is represented as native LLVM load/store through inttoptr.  These
 // views keep pass code focused on address/value semantics.
 struct EvmMemoryLoad {
@@ -172,6 +196,9 @@ void insertPayabilityCfgRewriteMarker(llvm::LLVMContext &Ctx,
 
 bool isReturndataSize(llvm::Value *V);
 std::optional<uint64_t> getUInt64Constant(llvm::Value *V);
+HTypeBufferView getHTypeBufferView(notdec::llvm2c::HTypeResult &HTypes,
+                                   llvm::Value *Base, llvm::CallBase &Use,
+                                   unsigned ArgIndex);
 std::optional<EvmMemoryLoad> matchEvmMemoryLoad(llvm::Value *V);
 std::optional<EvmMemoryStore> matchEvmMemoryStore(llvm::Instruction *I);
 bool isFreeMemoryPointerLoad(llvm::Value *V);
