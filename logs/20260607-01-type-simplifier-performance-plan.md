@@ -309,6 +309,49 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 已同步这 11 个 `test/type-recovery/llvm-ir/expected/tr-level-2/*.htypes` oracle 后重跑：
   `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
 
+# 试验记录：思路 2 bulk 后半段 cache
+
+尝试过一个保守版本，没有保留代码。
+
+试验做法：
+
+- 在 `bulkSimplifyDetailed()` 后半段，仍然对每个 root 运行 `analyzeOccurrences()`。
+- 根据 `canonical CompactType root + local recursive bindings + polarity` 构造字符串 key。
+- cache 命中时复用最终 `UTypePtr`，跳过 `simplifyType()` 和 `coalesceCompactType()`。
+- `printDebug=true` 时禁用 cache，避免少打印 debug 信息。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-local-cache.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-local-cache.htypes
+
+rm -rf /tmp/notdec-fortune-local-cache-work
+NOTDEC_BINARYSUB_TRACE=1 /usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-local-cache-trace.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-local-cache-trace.htypes \
+  --gen-work-dir \
+  --work-dir=/tmp/notdec-fortune-local-cache-work
+```
+
+结果：
+
+- 普通 fortune：`elapsed=57.29s`，`rss_kb=185160`，相比 closure cache 后的 `57.20s` 没有收益。
+- trace fortune：主 bulk `roots=4437`，cache `entries=4411`，`hits=26`，`misses=4411`。
+- 命中率太低，字符串 key 构造还会增加成本，所以撤回这版代码。
+
+判断：
+
+- 直接按完整 root 结果做 per-root final cache 不值得。
+- 如果继续做思路 2，应该先做更细粒度统计，或者结合 `CompactType` structural hash / hash-consing。
+- 当前更值得继续的是思路 3：减少 `CompactType::operator<` 的深层按值比较成本。
+
 # 当前不做
 
 - 不回退 `687cd6d`。
