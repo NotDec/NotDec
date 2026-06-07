@@ -588,3 +588,95 @@ HType 观察：
 - 复查 `in.base` / `out.base`：重建 `notdec-decompile` 后重新跑
   `08_evm_runtime_semantic_primitives`，确认它们保持 `bottom:256`，不是 `integer`。
   之前看到的 `integer` 来自旧 snapshot / 旧二进制结果，不是当前 visitor 规则。
+
+## 2026-06-07 性能记录：fortune 在 cast source 全局 materialize 后明显变慢
+
+这次只做性能对比和 profile 记录，没有改代码。
+
+关注提交：
+
+- 当前提交：`687cd6d1268b7d901ca09aabb25eb2f4338a580a`
+  `Experiment with global cast source materialization`
+- 对照提交：`687cd6d^ = 23b24a8`
+  `Recover unbounded EVM memory allocations`
+
+`687cd6d` 的关键变化在
+[src/TypeRecovery/mlsub/MLsubGenerator.cpp:3907](/sn640/NotDec-worktree-evm-type-perf/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3907)：
+原来只在 EVM `inttoptr` 上 materialize cast source，后来改成所有 cast 都执行
+`cg.getOrInsertNode(SrcVal)`。
+
+fortune 同口径用例：
+
+```bash
+./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/.../out.ll \
+  --tr-level=2 \
+  --dump-htypes /tmp/.../out.htypes
+```
+
+时间结果：
+
+| 版本 | 构建 | 时间 | RSS |
+| --- | --- | ---: | ---: |
+| `23b24a8` | Debug | `7.22s` | `167832 KB` |
+| `23b24a8` | RelWithDebInfo + assert | `4.64s` | `163952 KB` |
+| `687cd6d` | Debug | `59.87s` | `180780 KB` |
+| `687cd6d` | RelWithDebInfo + assert | `8.21s` | `177064 KB` |
+
+回归幅度：
+
+- Debug：`7.22s -> 59.87s`，约 `8.3x`。
+- RelWithDebInfo：`4.64s -> 8.21s`，约 `1.8x`。
+
+assertion 影响排查：
+
+- Debug 下只给 `binarysub_lib` 关普通 `assert()`：`58.20s`。
+- Debug 下给 `binarysub_lib` 同时关普通 `assert()` 和 `_GLIBCXX_ASSERTIONS`：`57.76s`。
+- RelWithDebInfo 下普通 `assert()` 和 `_GLIBCXX_ASSERTIONS` 都开着仍是 `8.21s`。
+
+结论：这次 Debug 变慢的主因不是 assertion，而是 `687cd6d` 扩大 cast source
+materialization 后，更多节点进入 MLsub，放大了后续 `TypeSimplifier` 工作量。
+
+当前 profile 文件：
+
+- perf data：`/tmp/notdec-debug-profile-fortune/perf.data`
+- flat 报告：`/tmp/notdec-debug-profile-fortune/reports/perf-flat.txt`
+- children 汇总：`/tmp/notdec-debug-profile-fortune/reports/perf-children-summary.txt`
+- callgraph：`/tmp/notdec-debug-profile-fortune/reports/perf-children-callgraph.txt`
+- 带粗略秒数短表：
+  - `/tmp/notdec-debug-profile-fortune/reports/perf-flat-top-with-seconds.txt`
+  - `/tmp/notdec-debug-profile-fortune/reports/perf-children-top-with-seconds.txt`
+
+`687cd6d` Debug 的 `NOTDEC_MLSUB_TIMING`：
+
+```text
+bulkSimplifyDetailed roots=4437
+canonicalize_ms=27169
+struct_merge_ms=5606
+local_simplify_ms=21002
+analyze_ms=3155
+origin_ms=625
+simplify_ms=1200
+coalesce_ms=15314
+total_ms=53779
+```
+
+perf children 视角主要热点：
+
+```text
+63.21%  notdec::mlsub::MLsubRecovery::run
+62.52%  notdec::mlsub::ConstraintsGenerator::genTypes
+55.74%  binarysub::TypeSimplifier::bulkSimplifyDetailed
+35.11%  binarysub::TypeSimplifier::canonicalizeType
+29.80%  binarysub::operator<
+29.58%  binarysub::CompactType::operator<
+```
+
+当前判断：
+
+- 优先怀疑 `cg.getOrInsertNode(SrcVal)` 对所有 cast 生效过宽。
+- 应先统计 `687cd6d` 比 `23b24a8` 多 materialize 了哪些 cast source、增加了多少
+  PNI 节点、root 和 SCC 输入。
+- 如果确实是少数 cast 类别需要 materialize，应把规则收窄，而不是先优化 STL 或
+  `TypeSimplifier`。
+- 如果收窄规则后仍慢，再进入 `TypeSimplifier` 层面优化。
