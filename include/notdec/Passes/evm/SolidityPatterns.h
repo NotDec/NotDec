@@ -74,8 +74,11 @@ struct CheckedBoundsPass : llvm::PassInfoMixin<CheckedBoundsPass> {
 
 // Marks EVM log instructions as event emission candidates.
 struct EventLogPass : llvm::PassInfoMixin<EventLogPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
+  mlsub::MLsubRecovery &TR;
+
+  explicit EventLogPass(mlsub::MLsubRecovery &TR) : TR(TR) {}
+
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 
   static bool isRequired() { return true; }
 };

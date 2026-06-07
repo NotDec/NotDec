@@ -371,3 +371,46 @@ Solidity 语义 pass 的标注接口继续扩散。
   `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-fold-eq-psize.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-fold-eq-psize.htypes`
   通过，`elapsed=11.99 user=11.63 sys=0.35 maxrss=839108`。近期参考是
   `11.89/11.96/12.19`，没有明显性能退化。
+
+## 实现记录：EventLogPass 停止扫描 memory write marker
+
+本轮把 `EventLogPass` 也接到类型恢复之后的 HType 数据入口。
+
+修改：
+
+- `include/notdec/Passes/evm/SolidityPatterns.h:76`：`EventLogPass` 改成
+  module pass，构造时保存 `mlsub::MLsubRecovery &TR`。
+- `src/Passes/PassManager.cpp:326`：EVM pipeline 中直接加入
+  `evm::EventLogPass(*TR)`，不再通过 function adaptor。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:16`：删除
+  event data allocation / word write / copy write marker 统计，改成 HType
+  缺口统计。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:67`：新增
+  `getRecordPointeeHType`，用 log data base 查 `HTypeResult`。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:98`：
+  `EventLogPass::run` 遍历 module。`evm_logN` 本身仍直接按 call 名字标
+  `notdec.solidity.event`；非空 data payload 只查 HType，查不到只记录缺口，
+  不再回退扫描 `notdec_solidity_memory_write` 或
+  `notdec_solidity_memory_copy_write`。
+
+效果：
+
+- `EventLogPass.cpp` 里不再有 `notdec_solidity_memory_*` 引用。
+- `test/type-recovery/evm/cases/02_evm_runtime_helpers.ll` 仍能在 `evm_log1`
+  上输出 `notdec.solidity.event` metadata。
+- 该样例的 `%buf.addr` 目前只是 `Ptr<...>`，还不是 record pointer；这会作为
+  event data HType 缺口记录，不做访问模式兜底。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir).tr_level_2|notdec.evm.solidity_patterns' --output-on-failure`
+  中 type recovery 两个 suite 通过；`notdec.evm.solidity_patterns` 仍失败，
+  失败主要是现有 oracle 仍按旧的 ABI return / revert HType-only 迁移前结果统计，
+  如 `notdec.solidity.abi_return` 和 `notdec.solidity.revert` 期望非 0、实际为 0。
+- `./build/bin/notdec test/type-recovery/evm/cases/02_evm_runtime_helpers.ll -o /tmp/notdec-event-htype.ll --tr-level=2 --dump-htypes=/tmp/notdec-event-htype.htypes --gen-work-dir --work-dir=/tmp/notdec-event-htype-work`
+  通过，输出 IR 中 `evm_log1` 带 `notdec.solidity.event`。
+- fortune 同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-event-htype.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-event-htype.htypes`
+  通过，`elapsed=12.11 user=11.74 sys=0.36 maxrss=839080`。近期参考是
+  `11.99/12.19`，没有明显性能退化。

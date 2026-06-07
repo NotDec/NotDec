@@ -1,12 +1,10 @@
 #include "Passes/evm/SolidityPatternUtils.h"
+#include "TypeRecovery/mlsub/MLsubGenerator.h"
 
-#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Statistic.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
-#include <optional>
-#include <utility>
+#include <llvm/Support/Debug.h>
+#include <notdec-llvm2c/Interface.h>
 
 using namespace llvm;
 
@@ -16,263 +14,120 @@ namespace notdec::passes::evm {
 using namespace detail;
 
 STATISTIC(NumEvents, "Number of Solidity event candidates found");
-STATISTIC(NumEventDataAllocations,
-          "Number of Solidity event data allocations found");
-STATISTIC(NumEventDataWordWrites,
-          "Number of Solidity event data word writes found");
-STATISTIC(NumEventDataCopyWrites,
-          "Number of Solidity event data copy writes found");
+STATISTIC(NumEventNonPointerDataHTypes,
+          "Number of event data bases without pointer HType");
+STATISTIC(NumEventNonRecordDataHTypes,
+          "Number of event data bases without record pointee HType");
+STATISTIC(NumEventMissingDataHTypes,
+          "Number of event data payloads not recoverable from HType");
 
 namespace {
 
-// Event payload markers are semantic annotations. Keep them disabled until the
-// type recovery path has a stable post-inference place to regenerate them.
-constexpr bool kEmitEventDataMarkers = false;
-
-bool isEventAbiHeadOffset(Value *V) {
-  std::optional<uint64_t> Offset = getUInt64Constant(V);
-  return Offset.has_value() && (*Offset % 32) == 0;
-}
-
-bool isSameEventDataBase(Value *LHS, Value *RHS) {
-  if (LHS == RHS) {
-    return true;
+ast::RecordDecl *getRecordPointerPointee(ast::HType *Ty) {
+  if (Ty == nullptr) {
+    return nullptr;
   }
-  std::optional<uint64_t> LConst = getUInt64Constant(LHS);
-  std::optional<uint64_t> RConst = getUInt64Constant(RHS);
-  return LConst.has_value() && RConst.has_value() && *LConst == *RConst;
-}
-
-Value *getSizedAllocationSize(Value *Base) {
-  auto *Call = dyn_cast_or_null<CallBase>(Base);
-  if (Call != nullptr && isCallTo(Call, "notdec_evm_alloc") &&
-      Call->arg_size() == 1) {
-    return Call->getArgOperand(0);
+  if (Ty->isPointerType()) {
+    ast::HType *Pointee = Ty->getPointeeType();
+    return Pointee == nullptr ? nullptr : Pointee->getAsRecordDecl();
   }
-
-  auto *PtrToInt = dyn_cast_or_null<PtrToIntInst>(Base);
-  Call = PtrToInt == nullptr
-             ? nullptr
-             : dyn_cast_or_null<CallBase>(PtrToInt->getOperand(0));
-  if (Call != nullptr && isCallTo(Call, "calloc") && Call->arg_size() == 2) {
-    return Call->getArgOperand(1);
+  if (auto *Inter = dyn_cast<ast::SetInterType>(Ty)) {
+    for (ast::HType *Term : Inter->getTypes()) {
+      if (ast::RecordDecl *Record = getRecordPointerPointee(Term)) {
+        return Record;
+      }
+    }
+  }
+  if (auto *Union = dyn_cast<ast::SetUnionType>(Ty)) {
+    for (ast::HType *Term : Union->getTypes()) {
+      if (ast::RecordDecl *Record = getRecordPointerPointee(Term)) {
+        return Record;
+      }
+    }
   }
   return nullptr;
 }
 
-void collectEventDataWordWriteMarkers(BasicBlock &BB, CallBase &Log,
-                                      Value *DataBase,
-                                      SmallVectorImpl<CallBase *> &Writes) {
-  SmallVector<CallBase *, 8> Candidates;
-
-  for (Instruction &I : BB) {
-    if (&I == &Log) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
-    if (isFreeMemoryPointerStore(&I)) {
-      Candidates.clear();
-      continue;
-    }
-
-    if (!isCallTo(Call, "notdec_solidity_memory_write") ||
-        Call->arg_size() != 3 ||
-        !isEventAbiHeadOffset(Call->getArgOperand(1))) {
-      continue;
-    }
-
-    Value *WriteBase = Call->getArgOperand(0);
-    if (isSameOrReloadedFreeMemoryBase(WriteBase, DataBase)) {
-      Candidates.push_back(Call);
-    }
-  }
-
-  Writes.append(Candidates.begin(), Candidates.end());
-}
-
-void collectEventDataCopyWriteMarkers(BasicBlock &BB, CallBase &Log,
-                                      Value *DataBase,
-                                      SmallVectorImpl<CallBase *> &Writes) {
-  SmallVector<CallBase *, 8> Candidates;
-
-  for (Instruction &I : BB) {
-    if (&I == &Log) {
-      break;
-    }
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
-      continue;
-    }
-
-    if (isFreeMemoryPointerStore(&I)) {
-      Candidates.clear();
-      continue;
-    }
-
-    if (!isCallTo(Call, "notdec_solidity_memory_copy_write") ||
-        Call->arg_size() != 5 ||
-        !isEventAbiHeadOffset(Call->getArgOperand(1))) {
-      continue;
-    }
-
-    Value *CopyBase = Call->getArgOperand(0);
-    if (isSameOrReloadedFreeMemoryBase(CopyBase, DataBase)) {
-      Candidates.push_back(Call);
-    }
-  }
-
-  Writes.append(Candidates.begin(), Candidates.end());
-}
-
-std::optional<std::pair<Value *, Value *>>
-findEventDataAllocation(BasicBlock &BB, CallBase &Log,
-                        ArrayRef<CallBase *> WordWrites,
-                        ArrayRef<CallBase *> CopyWrites) {
-  auto MatchesEventDataBase = [&](Value *AllocationBase) {
-    for (CallBase *Write : WordWrites) {
-      if (Write->arg_size() == 3 &&
-          isSameEventDataBase(AllocationBase, Write->getArgOperand(0))) {
-        return true;
-      }
-    }
-    for (CallBase *Copy : CopyWrites) {
-      if (Copy->arg_size() == 5 &&
-          isSameEventDataBase(AllocationBase, Copy->getArgOperand(0))) {
-        return true;
-      }
-    }
+bool containsPointerType(ast::HType *Ty) {
+  if (Ty == nullptr) {
     return false;
-  };
+  }
+  if (Ty->isPointerType()) {
+    return true;
+  }
+  if (auto *Inter = dyn_cast<ast::SetInterType>(Ty)) {
+    return llvm::any_of(Inter->getTypes(), containsPointerType);
+  }
+  if (auto *Union = dyn_cast<ast::SetUnionType>(Ty)) {
+    return llvm::any_of(Union->getTypes(), containsPointerType);
+  }
+  return false;
+}
 
-  std::optional<std::pair<Value *, Value *>> Candidate;
-  for (Instruction &I : BB) {
-    if (&I == &Log) {
-      break;
-    }
-    if (auto *Call = dyn_cast<CallBase>(&I)) {
-      if (isCallTo(Call, "notdec_evm_finalize_alloc") &&
-          Call->arg_size() == 2 &&
-          MatchesEventDataBase(Call->getArgOperand(0))) {
-        Candidate =
-            std::make_pair(Call->getArgOperand(0), Call->getArgOperand(1));
-        continue;
-      }
-    }
-    if (Value *Size = getSizedAllocationSize(&I)) {
-      if (MatchesEventDataBase(&I)) {
-        Candidate = std::make_pair(&I, Size);
-      }
-    }
+ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
+                                       Value *Base, CallBase &Use,
+                                       unsigned ArgIndex) {
+  ast::HType *Ty =
+      HTypes.getDefaultValueType(getExtValuePtr(Base, &Use, ArgIndex));
+  ast::RecordDecl *Record = getRecordPointerPointee(Ty);
+  if (Record != nullptr) {
+    return Record;
   }
 
-  return Candidate;
+  if (Ty == nullptr || !containsPointerType(Ty)) {
+    LLVM_DEBUG(dbgs() << "evm event: data base has no pointer HType: " << *Base
+                      << "\n");
+    ++NumEventNonPointerDataHTypes;
+    return nullptr;
+  }
+
+  LLVM_DEBUG(dbgs() << "evm event: data base HType is not record pointer: "
+                    << Ty->getAsString() << " for " << *Base << "\n");
+  ++NumEventNonRecordDataHTypes;
+  return nullptr;
 }
 
-void insertEventDataAllocationMarker(LLVMContext &Ctx, CallBase &Log,
-                                     Value *AllocationBase,
-                                     Value *AllocationSize, Value *ConsumerSize,
-                                     uint64_t TopicCount) {
-  Module *M = Log.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_event_data_allocation",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256}, false));
-
-  IRBuilder<> Builder(&Log);
-  Builder.CreateCall(Marker, {AllocationBase, AllocationSize, ConsumerSize,
-                              ConstantInt::get(I256, TopicCount)});
-}
-
-void insertEventDataWordWriteMarker(LLVMContext &Ctx, CallBase &Log,
-                                    CallBase &WordWrite, uint64_t TopicCount) {
-  Module *M = Log.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_event_data_word_write",
-      FunctionType::get(Type::getVoidTy(Ctx), {I256, I256, I256, I256}, false));
-
-  IRBuilder<> Builder(&Log);
-  Builder.CreateCall(
-      Marker, {WordWrite.getArgOperand(0), WordWrite.getArgOperand(1),
-               WordWrite.getArgOperand(2), ConstantInt::get(I256, TopicCount)});
-}
-
-void insertEventDataCopyWriteMarker(LLVMContext &Ctx, CallBase &Log,
-                                    CallBase &CopyWrite, uint64_t TopicCount) {
-  Module *M = Log.getModule();
-  Type *I256 = Type::getIntNTy(Ctx, 256);
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_event_data_copy_write",
-      FunctionType::get(Type::getVoidTy(Ctx),
-                        {I256, I256, I256, I256, I256, I256}, false));
-
-  IRBuilder<> Builder(&Log);
-  Builder.CreateCall(
-      Marker, {CopyWrite.getArgOperand(0), CopyWrite.getArgOperand(1),
-               CopyWrite.getArgOperand(2), CopyWrite.getArgOperand(3),
-               CopyWrite.getArgOperand(4), ConstantInt::get(I256, TopicCount)});
+bool isEVMLogCall(CallBase &Call) {
+  StringRef Name = getCalleeName(&Call);
+  return Name.starts_with("evm_log") && Name.size() == 8 &&
+         Name.back() >= '0' && Name.back() <= '4' && Call.arg_size() >= 3;
 }
 
 } // namespace
 
-PreservedAnalyses EventLogPass::run(Function &F, FunctionAnalysisManager &) {
-  LLVMContext &Ctx = F.getContext();
+PreservedAnalyses EventLogPass::run(Module &M, ModuleAnalysisManager &MAM) {
+  std::unique_ptr<mlsub::MLsubRecovery::Result> &HighTypes =
+      TR.getResult(M, MAM);
+  if (HighTypes == nullptr) {
+    return PreservedAnalyses::all();
+  }
+
   bool Changed = false;
 
-  for (Instruction &I : instructions(F)) {
-    auto *Call = dyn_cast<CallBase>(&I);
-    if (Call == nullptr) {
+  for (Function &F : M) {
+    if (F.isDeclaration()) {
       continue;
     }
-    StringRef Name = getCalleeName(Call);
-    if (!Name.starts_with("evm_log") || Name.size() != 8) {
-      continue;
-    }
-    if (Name.back() < '0' || Name.back() > '4') {
-      continue;
-    }
-    if (Call->arg_size() < 3) {
-      continue;
-    }
-    uint64_t TopicCount = static_cast<uint64_t>(Name.back() - '0');
-    {
-      Value *DataBase = Call->getArgOperand(1);
-      Value *DataSize = Call->getArgOperand(2);
-      SmallVector<CallBase *, 8> WordWrites;
-      collectEventDataWordWriteMarkers(*Call->getParent(), *Call, DataBase,
-                                       WordWrites);
-      if (kEmitEventDataMarkers) {
-        for (CallBase *WordWrite : WordWrites) {
-          insertEventDataWordWriteMarker(Ctx, *Call, *WordWrite, TopicCount);
-          ++NumEventDataWordWrites;
-        }
+
+    LLVMContext &Ctx = F.getContext();
+    for (Instruction &I : instructions(F)) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr || !isEVMLogCall(*Call)) {
+        continue;
       }
-      SmallVector<CallBase *, 8> CopyWrites;
-      collectEventDataCopyWriteMarkers(*Call->getParent(), *Call, DataBase,
-                                       CopyWrites);
-      if (kEmitEventDataMarkers) {
-        for (CallBase *CopyWrite : CopyWrites) {
-          insertEventDataCopyWriteMarker(Ctx, *Call, *CopyWrite, TopicCount);
-          ++NumEventDataCopyWrites;
-        }
-        if (std::optional<std::pair<Value *, Value *>> Allocation =
-                findEventDataAllocation(*Call->getParent(), *Call, WordWrites,
-                                        CopyWrites)) {
-          insertEventDataAllocationMarker(Ctx, *Call, Allocation->first,
-                                          Allocation->second, DataSize,
-                                          TopicCount);
-          ++NumEventDataAllocations;
-        }
+
+      if (!isConstantIntValue(Call->getArgOperand(2), 0) &&
+          getRecordPointeeHType(*HighTypes, Call->getArgOperand(1), *Call, 1) ==
+              nullptr) {
+        ++NumEventMissingDataHTypes;
       }
+
+      StringRef Name = getCalleeName(Call);
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_EVENT,
+                        ("topic_count_" + Twine(Name.back())).str());
+      ++NumEvents;
+      Changed = true;
     }
-    addStringMetadata(Ctx, I, KIND_SOLIDITY_EVENT,
-                      ("topic_count_" + Twine(Name.back())).str());
-    ++NumEvents;
-    Changed = true;
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
