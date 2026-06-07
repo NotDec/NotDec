@@ -8,13 +8,14 @@
 [+] const(i32 0)@main::%bb.allocator.i4:0 => lower=bottom:32 ; upper=top:32
 [+] const(i32 1)@main::%bb.allocator.i6:0 => lower=bottom:32 ; upper=top:32
 [+] main::%Off1 => lower=bottom:32 ; upper=void*
-[+] main::%mem1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[+] main::%mem1 => lower=bottom:32 ; upper=top:32*
 [+] main::%mem2 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
-[-] main::%stack1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
-[+] main::%stack_1p => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
+[-] main::%stack1 => lower=bottom:32 ; upper=top:32*
+[+] main::%stack_1p => lower=bottom:32 ; upper=top:32*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 [+] main::arg1 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
+

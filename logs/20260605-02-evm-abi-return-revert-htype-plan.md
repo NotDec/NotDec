@@ -330,3 +330,44 @@ Solidity 语义 pass 的标注接口继续扩散。
   `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-unbounded-reload.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-unbounded-reload.htypes`
   通过，`elapsed=12.11 user=11.71 sys=0.39 maxrss=834792`。近期参考是
   `elapsed=12.13/12.16`，没有明显性能退化。
+
+## 实现记录：pointer-sized direct access 折到 offset 0
+
+问题：
+
+- binarysub 已有 `fold_direct_pointer_into_zero_field`，会在同一个 memory object
+  既有普通字段又有 direct load/store 时，把 direct 访问折成 offset 0 字段。
+- 原条件是 `psize >= pointer_size` 时不折。这样 `load32 p` 和 `load32 p.4`
+  在 32-bit pointer 下仍打印成 `{4: ...} & Ptr<...>`，而不是更直接的
+  `{0: ..., 4: ...}`。
+- EVM 下 pointer size 和 word access 都是 256-bit，也会遇到同类问题。
+
+修改：
+
+- `external/binarysub/src/binarysub.cpp:529`：把保护条件从
+  `psize >= pointer_size` 改成 `psize > pointer_size`，允许刚好等于 pointer
+  size 的 direct access 折到 offset 0。超过 pointer size 的情况先保留保护。
+- `external/binarysub/src/binarysub-test.cpp:399`：更新
+  `test_pointer_record_wrap` 预期，`load32 p` 现在对应 field `0`。
+- 更新 `test/type-recovery/llvm-ir/expected/tr-level-2/05_MultiOffset.htypes`
+  和 `11_SimpleRecursive1.htypes`。变化都是 pointer-sized direct access 从
+  `ptr<load/store ...>` 变成 offset 0 字段对应的指针类型。
+
+效果：
+
+- `revert_error_string_01` 中 `%evm.alloc.addr` 的 UType 现在包含
+  `{0: Ptr<...>, @4: Ptr<...>, @36: Ptr<...>, @68: Ptr<...>}`。
+- `SolidityRevertPass` 能仅根据 HType 把该样例标成 `error_string`。
+
+验证：
+
+- `cmake --build ./build --target binarysub notdec -j4` 通过。
+- `./build/binarysub` 通过。
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir).tr_level_2' --output-on-failure`
+  通过，用时 3.21s。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-fold-eq-psize.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-fold-eq-psize.htypes --gen-work-dir --work-dir=/tmp/notdec-revert-fold-eq-psize-work`
+  通过，输出 metadata 为 `error_string`。
+- fortune 同口径：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-fold-eq-psize.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes=/tmp/notdec-fortune-fold-eq-psize.htypes`
+  通过，`elapsed=11.99 user=11.63 sys=0.35 maxrss=839108`。近期参考是
+  `11.89/11.96/12.19`，没有明显性能退化。
