@@ -246,6 +246,7 @@ flowchart LR
 
 - `AbiReturnPass` 不应该自己完整重建 head/tail。
 - 它负责把 return helper 和对象类型绑定，做最终语义输出。
+- 当前实现方向是把 `AbiReturnPass` 放到类型恢复后，payload 只读 HType record field。
 
 ### 7.3 Revert encoding
 
@@ -264,8 +265,9 @@ flowchart LR
 
 顺序变化：
 
-- `SolidityRevertPass` 可以早识别终点和 panic selector。
-- 完整参数结构等类型恢复后再补。
+- `SolidityRevertPass` 当前也放到类型恢复后。
+- empty revert 可以只看 `evm_revert` 参数；非空 Panic / Error(string) / custom error payload 从 HType record field 读。
+- 如果 HType 缺字段，不回退扫 `mstore` / memory write marker。
 
 ### 7.4 Event log
 
@@ -284,8 +286,8 @@ flowchart LR
 
 顺序变化：
 
-- `EventLogPass` 早期只标 log 边界。
-- 完整 event data decode 从 memory object type 拿。
+- `EventLogPass` 当前放到类型恢复后。
+- `evm_logN` 边界仍按 helper 名字识别；非空 data buffer 只从 HType record field 读。
 
 ### 7.5 External call 和返回值
 

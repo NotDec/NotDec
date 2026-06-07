@@ -102,7 +102,7 @@ Memory Object analysis。pass 如果 rewrite IR，需要同步维护相关类型
 - 区分静态 word、动态 head offset、tail length/data。
 - 对 address/bool/uint/int 候选只在有上下文时提升语义。
 
-暂不做：
+边界：
 
 - 不一次性恢复完整 ABI。
 - 不用 selector database 反查函数签名。
@@ -121,7 +121,7 @@ rewrite：
 - 生成 return tuple / dynamic return 候选。
 - 标记哪些 `mstore` 是 return buffer 构造。
 
-暂不做：
+边界：
 
 - 不完整展开动态 bytes/string/array。
 - 不把所有 return word 都强行命名。
@@ -140,7 +140,7 @@ rewrite：
 - 保留 checked/bounds pass 已经识别的 compiler guard 结果。
 - 和 `AbiReturnPass` 共用 buffer 字段查询/解码辅助逻辑。
 
-暂不做：
+边界：
 
 - 不查 selector database。
 - 不恢复完整 custom error 名字。
@@ -160,7 +160,7 @@ rewrite：
 - topics 里如果有 `address` / `integer` 类型，作为 topic 参数类型证据。
 - data buffer 字段类型来自 memory object 类型结果。
 
-暂不做：
+边界：
 
 - 不查 event signature database。
 - 不恢复事件名。
@@ -179,7 +179,7 @@ rewrite：
 - 记录 storage read/write 的 key、value、所在函数、上下文。
 - 识别简单 constant slot、`add(base, offset)` slot。
 
-暂不做：
+边界：
 
 - 不从 keccak 反推 mapping。
 - 不合并复杂 storage struct。
@@ -209,7 +209,7 @@ rewrite：
 - storage pass 的 key 应该主要来自 `sload/sstore`。
 - return/revert/event pass 的 buffer 字段必须能追到 memory object 类型结果。
 
-## 暂不做
+## 当前边界
 
 - 不做 HType 文本解析式的汇总层。
 - 不做 keccak 到 mapping 的反推。
