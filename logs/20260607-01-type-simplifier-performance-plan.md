@@ -491,6 +491,71 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 本次 Debug fortune：`elapsed=37.66s`，`rss_kb=180920`。
 - 对比不可变构造后的 `56.32s`，这一步收益明显。
 
+# 诊断记录：fortune 分阶段耗时
+
+为了确认 hash 优化后剩余瓶颈，给 `bulkSimplifyDetailed()` 加了 trace-only 统计。
+
+改动：
+
+- `external/binarysub/src/binarysub.cpp:15`，增加 `elapsed_ms()` 计时 helper。
+- `external/binarysub/src/binarysub.cpp:2283`，增加 `CompactTreeStats` 和
+  `collect_compact_tree_stats()`，统计 canonical compact 树/DAG 的节点规模。
+- `external/binarysub/src/binarysub.cpp:2357`，在 `TypeSimplifier::bulkSimplifyDetailed()` 里统计
+  canonicalize、struct merge、analyze、origin、simplify、coalesce 的耗时。
+- 这些输出只在 `NOTDEC_BINARYSUB_TRACE=1` 时写入 trace，不改变默认输出。
+
+验证命令：
+
+```bash
+rm -rf /tmp/notdec-fortune-hash-timing-work
+NOTDEC_BINARYSUB_TRACE=1 /usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-hash-timing.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-hash-timing.htypes \
+  --gen-work-dir \
+  --work-dir=/tmp/notdec-fortune-hash-timing-work
+```
+
+主 bulk 结果：
+
+```text
+[simplify:bulk-timing] roots=4437 canonicalize_ms=21051 struct_merge_ms=5855 analyze_ms=2292 origin_ms=505 simplify_ms=1093 coalesce_ms=448 total_ms=31975
+[simplify:bulk-compact-stats] roots=4437 nodes=14385 vars=46853 prims=5698 records=1868 functions=116 ptrs=3986 max_depth=20 rec_vars=79
+elapsed=43.72 rss_kb=184244
+```
+
+阶段占比：
+
+| 阶段 | 时间 | 占 bulk total |
+| --- | ---: | ---: |
+| canonicalize | `21051 ms` | `65.8%` |
+| struct merge | `5855 ms` | `18.3%` |
+| analyze | `2292 ms` | `7.2%` |
+| simplify | `1093 ms` | `3.4%` |
+| origin | `505 ms` | `1.6%` |
+| coalesce | `448 ms` | `1.4%` |
+
+判断：
+
+- `coalesce` 已经从 hash 前的主要热点降到 `448 ms`，现在不是主问题。
+- 最大瓶颈变成 `canonicalizeType()`。fortune 主 bulk 有 `4437` 个 root，canonical compact
+  图里有 `14385` 个节点，但变量出现次数有 `46853`。这说明大量成本花在变量 bound 展开和
+  `merge_compact_types()` 上，不是最终 coalesce。
+- 第二个瓶颈是 `build_struct_merge_info()`。当前有 `1868` 个 record 节点和 `3986` 个 ptr 节点，
+  struct merge 需要在 canonical shape 上收集候选、合并 body、做冲突检查，复杂度容易被相似 record
+  候选组放大。
+
+下一步如果要追到具体代码模式，优先加这几类 trace：
+
+- `canonicalizeType()` 按 root 计时，输出最慢的 top N root，带 `PolarVar` 和 origin。
+- `merge_compact_types()` 计数和累计耗时，按调用来源区分 canonicalize / struct merge / simplify。
+- `canonicalizeType::go1()` 统计每个变量展开了多少 non-variable bound、bound compact size 多大。
+- `build_struct_merge_info()` 统计候选 bucket size、冲突检查次数、最大候选组。
+
+这样可以把“fortune 哪个 IR 变量/哪类结构最慢”从阶段级别缩小到具体 root，再用
+`variableOrigins` / HType 名字对应回 LLVM IR 里的变量和代码形状。
+
 # 当前不做
 
 - 不回退 `687cd6d`。
