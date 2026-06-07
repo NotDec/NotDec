@@ -352,6 +352,99 @@ NOTDEC_BINARYSUB_TRACE=1 /usr/bin/time -f 'elapsed=%e rss_kb=%M' \
 - 如果继续做思路 2，应该先做更细粒度统计，或者结合 `CompactType` structural hash / hash-consing。
 - 当前更值得继续的是思路 3：减少 `CompactType::operator<` 的深层按值比较成本。
 
+# 实施计划：把 `CompactType` 收口成不可变构造
+
+目标：
+
+- 先不改变类型简化算法，只把 `CompactType` 从“先建空对象再填字段”的 builder 写法，改成统一构造。
+- `CompactType` 本体仍按树/DAG 处理，递归语义继续由 `recVars` / `newRecVars` 表示。
+- 为后续 cached structural hash / hash-consing 做准备。
+
+路线：
+
+1. 在 `CompactType` 上增加完整构造函数，字段改成 `const`。
+2. 增加统一 helper：
+
+   ```cpp
+   make_compact_type(vars, prims, size, record, function, ptrLoad, ptrStore, psize,
+                     foldPolarity)
+   ```
+
+   如果 `foldPolarity` 有值，在构造前执行原 `fold_direct_pointer_into_zero_field()` 的逻辑。
+
+3. 删除原地修改版 `fold_direct_pointer_into_zero_field()`，把逻辑移到构造 helper 里。
+4. 改写主要构造点：
+   - `make_direct_pointer_compact()`
+   - `merge_compact_types()`
+   - `canonicalizeType()` 里的 `make_compact` 和 `adapted`
+   - `applySimplificationPlan()` 的 `reconstruct`
+   - `coalesceCompactType()` 里的 `fromOnlyVariable`
+5. 保持 `SimpleTypeSet` / `std::map` / `std::vector` 的顺序不变，避免因为构造方式改变 oracle。
+
+判断：
+
+- `CompactType::check()` 和 `CompactType::operator<()` 都没有 cycle guard，当前隐含前提是
+  `CompactType` 本体不直接成环；递归类型由 `recVars` / `newRecVars` 单独表达。
+- 单纯改成不可变构造不应该改变 set/map 顺序。后续如果把 hash 纳入 `operator<`，才可能改变排序。
+- 这一步先不加 hash，不做 hash-consing。
+
+验证：
+
+- `cmake --build ./build --target binarysub -j4`
+- `./build/binarysub`
+- `cmake --build ./build --target notdec -j4`
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`
+- fortune smoke，对比 elapsed/RSS 和 HType 是否正常生成。
+
+# 实现记录：`CompactType` 不可变构造
+
+已实现。当前 `CompactType` 字段改为 `const`，只能通过构造函数一次性初始化。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h`：
+  - `CompactType::{vars, prims, size, record, function, ptrLoad, ptrStore, psize}` 改成 `const`。
+  - 增加完整构造函数。
+  - `check()` 改成 `const` 方法。
+- `external/binarysub/src/binarysub.cpp`：
+  - 增加 `make_compact_type()`，集中处理构造和 direct pointer 折叠。
+  - 删除原地修改版 `fold_direct_pointer_into_zero_field()`。
+  - 改写 `merge_compact_types()`，先收集字段，再一次性构造 `CompactType`。
+  - 改写 `canonicalizeType()` 中的 `make_compact`、memobject 构造和 `adapted` 构造。
+  - 改写 `applySimplificationPlan()` 的 `reconstruct`，变量替换后一次性构造。
+  - 改写 `coalesceCompactType()` 的 `fromOnlyVariable`。
+- `external/binarysub/src/binarysub-test.cpp`：
+  - 测试中的手工 builder 写法改成构造式。
+  - `test_compact_recursive_size()` 不再构造直接自环 `CompactType`，改用 `newRecVars` 表达递归语义。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-immutable-compact.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-immutable-compact.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过，生成 `/tmp/notdec-fortune-immutable-compact.ll` 和
+  `/tmp/notdec-fortune-immutable-compact.htypes`。
+- 本次 Debug fortune：`elapsed=56.32s`，`rss_kb=182776`。
+
+判断：
+
+- 这一步没有引入 hash，也没有改变 `CompactType::operator<` 排序逻辑。
+- 直接收益不大，但已经消除了 `CompactType` 构造后的原地修改，为后续 cached structural hash /
+  hash-consing 做准备。
+
 # 当前不做
 
 - 不回退 `687cd6d`。
