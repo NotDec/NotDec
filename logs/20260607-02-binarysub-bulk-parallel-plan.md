@@ -297,7 +297,7 @@ go1 递归完成后才写 recVars[fresh_var] = adapted
 missing -> pending(freshVar) -> stable(freshVar + bound)
 ```
 
-可行结构：
+建议不要拆成 `pendingMap` / `stableMap` 两个容器。用一个 concurrent map，value 里带状态：
 
 ```cpp
 struct RecursiveEntry {
@@ -307,6 +307,13 @@ struct RecursiveEntry {
   bool finalized = false;
 };
 ```
+
+理由：
+
+- 一个 map 只存一份 key / hash bucket / entry wrapper，比两个 map 省内存。
+- pending -> stable 是同一个 entry 的状态变化，不需要搬移 entry，也没有迁移窗口。
+- 递归引用遇到 pending entry 时可以直接返回 `freshVar`，这正是递归打断需要的行为。
+- 两个 map 只有在 stable entry 很多、pending 很少、且 stable 查询是长期热点时才可能更快；这里是单次 canonicalize 构造过程，不值得先复杂化。
 
 可以用 `concurrent_hash_map` 保证同一个 key 只有一个 entry；entry accessor 保护内部字段。
 
@@ -373,3 +380,65 @@ struct RecursiveEntry {
 - 关闭宏时没有 oneTBB include 和 link。
 - 并行相关状态集中在少量 helper / wrapper 里，不把 lock 逻辑散到所有递归分支。
 - 保留单线程路径，方便定位并行 bug。
+
+# 实现记录：并行入口和局部 coalesce counter
+
+已实现第一阶段骨架，暂未引入实际 parallel loop。
+
+改动：
+
+- `external/binarysub/CMakeLists.txt`：
+  - 增加 `BINARYSUB_ENABLE_TBB_PARALLEL` option，默认 `OFF`。
+  - option 打开时 `find_package(TBB REQUIRED)`，链接 `TBB::tbb`，定义
+    `BINARYSUB_ENABLE_TBB_PARALLEL=1`。
+  - option 关闭时定义 `BINARYSUB_ENABLE_TBB_PARALLEL=0`，不 include / link oneTBB。
+- `external/binarysub/include/binarysub/binarysub.h`：
+  - 增加 `BulkSimplifyOptions`。
+  - `bulkSimplifyDetailed()` / `bulkSimplify()` 增加 options 参数，默认 `{}`，保持旧调用兼容。
+- `external/binarysub/src/binarysub.cpp`：
+  - 增加 `NOTDEC_BINARYSUB_THREADS` 解析。
+  - 增加 `resolve_bulk_simplify_thread_count()`。
+  - `printDebug=true`、宏关闭、`enableParallel=false` 都强制 `threads=1`。
+  - trace 的 `[simplify:bulk-begin]` 增加 `threads=` 和 `tbb=`。
+  - `coalesceCompactType()` 的 `static int recVarCounter` 改成单次 coalesce 的局部 counter。
+
+当前行为：
+
+- 默认构建仍是单线程。
+- `BINARYSUB_ENABLE_TBB_PARALLEL=ON` 只验证 oneTBB 依赖和宏开关，不改变算法路径。
+- 还没有实现 bulk 后半段并行，也没有并发化 `closureCache/go0Cache`。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake -S external/binarysub -B /tmp/binarysub-tbb-parallel-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=ON
+cmake --build /tmp/binarysub-tbb-parallel-build --target binarysub -j4
+/tmp/binarysub-tbb-parallel-build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  test/type-recovery/llvm-ir/cases/02_ConstantAddr1.ll \
+  -o /tmp/notdec-binarysub-options-smoke.ll \
+  --tr-level=2 \
+  --gen-work-dir \
+  --work-dir=/tmp/notdec-binarysub-options-smoke
+```
+
+结果：
+
+- 默认 `binarysub` 构建和自测通过。
+- standalone `BINARYSUB_ENABLE_TBB_PARALLEL=ON` 构建和自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- 默认 trace 确认宏关闭路径：
+
+```text
+[simplify:bulk-begin] roots=13 threads=1 tbb=0
+```
+
+下一步：
+
+- 实现 bulk 后半段 per-root 并行，仍不触碰 `canonicalizeType()` 的 `recursive/recVars` 共享状态。
