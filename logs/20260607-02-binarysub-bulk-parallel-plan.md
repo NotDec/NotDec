@@ -297,15 +297,22 @@ go1 递归完成后才写 recVars[fresh_var] = adapted
 missing -> pending(freshVar) -> stable(freshVar + bound)
 ```
 
-建议不要拆成 `pendingMap` / `stableMap` 两个容器。用一个 concurrent map，value 里带状态：
+建议不要拆成 `pendingMap` / `stableMap` 两个容器。用一个 concurrent map，value 里带状态。
+更稳的形态是 map 只负责按 key 找到 entry，entry 自己负责 pending/stable 和等待：
 
 ```cpp
 struct RecursiveEntry {
   SimpleType freshVar;
-  std::optional<CompactTypePtr> bound;
+  CompactTypePtr bound;
   std::set<std::uint32_t> origins;
-  bool finalized = false;
+  enum class State { Pending, Stable };
+  std::atomic<State> state = State::Pending;
+  std::mutex mutex;
+  std::condition_variable cv;
 };
+
+using RecursiveMap =
+    oneapi::tbb::concurrent_hash_map<Key, std::shared_ptr<RecursiveEntry>, HashCompare>;
 ```
 
 理由：
@@ -315,7 +322,9 @@ struct RecursiveEntry {
 - 递归引用遇到 pending entry 时可以直接返回 `freshVar`，这正是递归打断需要的行为。
 - 两个 map 只有在 stable entry 很多、pending 很少、且 stable 查询是长期热点时才可能更快；这里是单次 canonicalize 构造过程，不值得先复杂化。
 
-可以用 `concurrent_hash_map` 保证同一个 key 只有一个 entry；entry accessor 保护内部字段。
+可以用 `concurrent_hash_map` 保证同一个 key 只有一个 entry。但不要用 map accessor 长时间保护内部字段。
+正确做法是拿到 `shared_ptr<RecursiveEntry>` 后马上释放 accessor；递归、等待、finalize 都只碰 entry 自己的
+mutex/cv。这样不会把 TBB map 的锁带进递归调用里。
 
 重要规则：
 
