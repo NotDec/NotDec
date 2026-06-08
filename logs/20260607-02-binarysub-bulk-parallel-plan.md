@@ -406,7 +406,7 @@ struct RecursiveEntry {
 
 - 默认构建仍是单线程。
 - `BINARYSUB_ENABLE_TBB_PARALLEL=ON` 只验证 oneTBB 依赖和宏开关，不改变算法路径。
-- 还没有实现 bulk 后半段并行，也没有并发化 `closureCache/go0Cache`。
+- 这一阶段还没有实现 bulk 后半段并行，也没有并发化 `closureCache/go0Cache`。
 
 验证：
 
@@ -442,3 +442,67 @@ NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
 下一步：
 
 - 实现 bulk 后半段 per-root 并行，仍不触碰 `canonicalizeType()` 的 `recursive/recVars` 共享状态。
+
+# 实现记录：bulk 后半段 per-root 并行
+
+已实现第二阶段。只并行 `bulkSimplifyDetailed()` 里 canonicalize 和 struct merge 之后的 per-root
+local simplify，不并行 `canonicalizeType()`。
+
+改动：
+
+- `external/binarysub/src/binarysub.cpp`：
+  - 宏打开时 include `oneapi/tbb/global_control.h` 和 `oneapi/tbb/parallel_for.h`。
+  - 把 `compactMap` 转成有序 `LocalRoots` vector。
+  - 增加 `LocalSimplifyResult`，每个 root 的 `UTypePtr` 和阶段耗时写入独立 slot。
+  - 抽出 `processLocalRoot(index)`，串行和并行共用同一套逻辑。
+  - `BINARYSUB_ENABLE_TBB_PARALLEL=1` 且 `ThreadCount > 1` 时，用 `parallel_for` 跑 local roots。
+  - 用 `oneapi::tbb::global_control::max_allowed_parallelism` 限制线程数。
+  - 主线程最后按 `LocalRoots` 顺序汇总 `uMap` 和各阶段耗时。
+- `external/binarysub/src/binarysub-test.cpp`：
+  - 增加 `test_bulk_simplify_parallel_options()`，比较 serial options 和
+    `BulkSimplifyOptions{enableParallel=true, threadCount=2}` 的 bulk 输出。
+- `external/binarysub/include/binarysub/binarysub-test.h`、
+  `external/binarysub/src/binarysub-test-main.cpp`：
+  - 接入新测试。
+
+实现判断：
+
+- 并行任务只读 canonical `recVars`，不改 `canonicalizeType()` 的 `recursive/recVars`。
+- 每个 root 使用自己的 `OccurrenceAnalysisState` 和 `TypeSimplifier localSimplifier`。
+- 多线程不写共享 `std::map`；结果先写 vector slot，最后主线程合并。
+- `printDebug=true` 仍由线程数解析强制单线程。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+rm -rf /tmp/binarysub-tbb-parallel-build
+cmake -S external/binarysub -B /tmp/binarysub-tbb-parallel-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=ON
+cmake --build /tmp/binarysub-tbb-parallel-build --target binarysub -j4
+/tmp/binarysub-tbb-parallel-build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-bulk-local-parallel-default.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-bulk-local-parallel-default.htypes
+```
+
+结果：
+
+- 默认 `BINARYSUB_ENABLE_TBB_PARALLEL=OFF` 的 `binarysub` 自测通过。
+- standalone `BINARYSUB_ENABLE_TBB_PARALLEL=ON` 的 `binarysub` 自测通过，新测试覆盖
+  `enableParallel=true/threadCount=2` 的 parallel options 路径。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- 默认 fortune smoke 通过：`elapsed=28.39s`，`rss_kb=185824`，相比上一轮 `28.49s` 无明显退化。
+
+注意：
+
+- 当前顶层 NotDec 默认构建仍是 `BINARYSUB_ENABLE_TBB_PARALLEL=OFF`，所以 fortune smoke 验证的是
+  新结构的单线程 fallback。
+- 要在 NotDec 主链路实际启用 bulk 后半段并行，还需要顶层 CMake 打开
+  `BINARYSUB_ENABLE_TBB_PARALLEL`，并由调用方传入 `BulkSimplifyOptions{enableParallel=true}`。
