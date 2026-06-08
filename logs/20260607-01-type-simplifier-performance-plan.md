@@ -65,6 +65,36 @@ profile 文件：
 - `/tmp/notdec-debug-profile-fortune/reports/perf-children-summary.txt`
 - `/tmp/notdec-debug-profile-fortune/reports/perf-children-callgraph.txt`
 
+# 优化流程汇总
+
+下面是当前这轮 `fortune.o3.wasm.ll` Debug 性能优化的完整时间线。时间都是同一类 Debug smoke
+口径，trace 版本因为写日志会更慢，单独列在对应实现记录里。
+
+| 步骤 | 顶层 commit | binarysub commit | fortune Debug | 说明 |
+| --- | --- | --- | ---: | --- |
+| 回归基线 | `687cd6d` | `666949d` 前后 | `59.87s` | cast source 语义修复后暴露 `TypeSimplifier` 性能问题。 |
+| closure cache | `1d10e13` | `3dcbb97` | `57.20s` | 缓存 `canonicalizeType()` 的单变量 closure，key 是 `TypeNode* + polarity`。 |
+| bulk 后半段 cache 试验 | `6af6829` | 无保留代码 | `57.29s` | per-root final cache 命中率太低，`hits=26` / `misses=4411`，代码撤回，只保留记录。 |
+| `CompactType` 不可变构造 | `3131285` | `a132d40` | `56.32s` | 字段改成构造后不可变，为 cached hash 做准备，直接收益不大。 |
+| direct self-cycle 测试注释 | `32585a8` | `9b11214` | 未单独计时 | 记录 `CompactType` 本体仍假设有限树/DAG，递归语义走 `recVars/newRecVars`。 |
+| structural hash / unordered recursion key | `88b8cc6` | `a18fd87` | `37.66s` | 给 `CompactType` 加 structural hash，把递归检测容器换成 unordered，避开大量深层 `<` 比较。 |
+| 分阶段 trace | `f689e37` | `fedb611` | trace `43.72s` | 增加 trace-only stage timing。此时主 bulk `canonicalize_ms=21051`，`total_ms=31975`。 |
+| origin 缺省 self | `d8d7403` | `e4e424b` | `33.18s` | `variableOrigins` 只记录非默认 origin；缺省按 `{var.id}` 读取，减少 `go0()` 副作用。 |
+| `go0` cache | `254ea68` | `66c1210` | `28.49s` | 缓存 `canonicalizeType::go0()` 的 `SimpleType -> CompactType` 外层转换。trace 中 `canonicalize_ms=12231`，`total_ms=22509`。 |
+
+同时还有两个配套 commit：
+
+- `afd0369`：更新 LLVM IR type recovery oracle，处理语义修复后已有的 HType 输出漂移。
+- `bc28627`：建立本性能计划文档。
+
+整体结果：
+
+- Debug fortune 从 `59.87s` 降到 `28.49s`。
+- 最大收益来自两类：
+  - 降低 `CompactType` 深比较成本：`56.32s` -> `37.66s`。
+  - 降低 `canonicalizeType()` 重复构造：`37.66s` -> `28.49s`。
+- 当前 trace 下主 bulk 剩余瓶颈仍是 `canonicalizeType()`，但已从 `21051 ms` 降到 `12231 ms`。
+
 # 优化目标
 
 短期目标是把 Debug fortune 从约 `60s` 明显降下来，同时不改变 `687cd6d` 的语义修复。
