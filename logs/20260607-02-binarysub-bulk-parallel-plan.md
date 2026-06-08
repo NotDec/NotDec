@@ -202,6 +202,7 @@ coalesceCompactType(root)
 
 ```cpp
 closureCache
+go0Cache
 recursive
 recVars
 variableOrigins
@@ -213,23 +214,63 @@ oneTBB 的 `concurrent_hash_map` 适合这些共享表里的“查找或插入�
 oneapi::tbb::concurrent_hash_map<Key, Value, HashCompare>
 ```
 
-### 4.1 先并发化 `closureCache`
+不同状态要分开处理，不能都当成普通 map。
 
-`closureCache` 是最适合先做的：
+### 4.1 纯 cache：`closureCache` / `go0Cache`
+
+`closureCache` 和 `go0Cache` 是最适合先做的：
 
 ```text
-key = TypeNode* + polarity
-value = SimpleTypeSet
+closureCache:
+  key = TypeNode* + polarity
+  value = SimpleTypeSet
+
+go0Cache:
+  key = TypeNode* + polarity
+  value = CompactTypePtr
 ```
 
-closure 算完后 value 不再变化。可以先查 cache，miss 时计算，再插入。
+它们的 value 算完后不再变化。可以先查 cache，miss 时计算，再插入。
 
 要注意：
 
-- 多个线程可能同时 miss 并计算同一个 closure。可以接受重复计算，最后 `insert` 去重。
+- 多个线程可能同时 miss 并计算同一个 key。第一版可以接受重复计算，最后 `insert` 去重。
 - 如果想避免重复计算，需要 pending 状态，但第一版不需要。
+- `go0Cache` 已经在单线程里实现，且 `variableOrigins` 缺省 self 后，`go0()` 基本没有 origin 副作用。
 
-### 4.2 再处理 `recursive`
+### 4.2 union metadata：`variableOrigins`
+
+`variableOrigins` 不是递归类型状态机，而是 metadata：
+
+```text
+SimpleType var -> set<original variable ids>
+```
+
+当前语义是：
+
+```text
+如果 var 不在 variableOrigins 里，默认 origin = {var.id}
+```
+
+并行时它可以用 oneTBB `concurrent_hash_map` 的 accessor 做 entry-level update，类似 compute：
+
+```cpp
+OriginMap::accessor acc;
+map.insert(acc, key);
+acc->second.insert(srcOrigins.begin(), srcOrigins.end());
+```
+
+规则：
+
+- 只在发生非默认 origin 时插入 map。
+- value update 只做 set union。
+- 不需要 pending/stable。
+- 不要同时持有两个 accessor。先拷贝 src origins，再更新 dst origins，避免反向锁顺序死锁。
+- 不要在 accessor 持有期间递归调用 `go1()` 或做 `merge_compact_types()`。
+
+更保守的第一版也可以让 worker 收集 thread-local origin，最后主线程 union。
+
+### 4.3 pending/finalize 状态：`recursive` / `recVars`
 
 `recursive` 比较难：
 
@@ -250,17 +291,38 @@ recursive 先创建 fresh var
 go1 递归完成后才写 recVars[fresh_var] = adapted
 ```
 
-所以第一版可以把 `recursive` 并发化，但 `recVars` 仍用 mutex 保护普通 map。
+所以 `recursive` / `recVars` 不能简单换成 concurrent map。它们更像一个状态机：
 
-### 4.3 `recVars` 和 `variableOrigins`
+```text
+missing -> pending(freshVar) -> stable(freshVar + bound)
+```
 
-这两类有合并/更新，不适合第一版直接换成 concurrent map。
+可行结构：
 
-建议第一版：
+```cpp
+struct RecursiveEntry {
+  SimpleType freshVar;
+  std::optional<CompactTypePtr> bound;
+  std::set<std::uint32_t> origins;
+  bool finalized = false;
+};
+```
 
-- `recVars` 用一个 mutex 保护。
-- `variableOrigins` 用一个 mutex 保护 origin union。
-- 如果锁竞争严重，再细化成 per-key 锁或换 concurrent map。
+可以用 `concurrent_hash_map` 保证同一个 key 只有一个 entry；entry accessor 保护内部字段。
+
+重要规则：
+
+- 看到 pending entry 时，如果当前位置是递归引用，应该直接返回 `freshVar`，不能等待 bound。
+- 只有真正需要 final bound 的地方才等待 finalized；等待时不能持有其他 entry lock。
+- finalize 可能被多个线程尝试，不能假设只回填一次。
+- 如果已有 bound 和新 bound 相同，可以忽略；如果不同，不能覆盖，至少要 merge 或先 trace/assert。
+- 不要在持有 entry accessor 时递归调用 `go1()`，否则容易死锁。
+
+判断：
+
+- 单线程当前通常是 `recursive` 创建一次、`recVars` 回填一次。
+- 并行共享后不能依赖这个“一次回填”假设。
+- 这块不作为第一轮实现。第一轮 canonicalize 并行优先只共享纯 cache 和 origin metadata。
 
 ### 4.4 fresh id 和文本输出
 
