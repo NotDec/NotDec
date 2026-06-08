@@ -611,6 +611,64 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 理解成本：低到中，新增的是“缺省 self”的 origin 规则，需要在读 origin 时统一走 helper。
 - 维护成本：较低。后续如果新增 origin 读取点，必须使用 helper，不能直接假设 map 里有普通变量。
 
+# 实现记录：`canonicalizeType::go0` cache
+
+已实现。`go0()` 现在按 `TypeNode* + polarity` 缓存 `SimpleType -> CompactType` 的外层转换结果。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:491`，在 `TypeSimplifier` 增加 `go0Cache`。
+- `external/binarysub/include/binarysub/binarysub.h:529`，`isClear()` / `clear()` 纳入 `go0Cache`。
+- `external/binarysub/src/binarysub.cpp:1116`，`canonicalizeType()` 的 `go0()` 入口先查 cache，miss 后构造
+  `CompactTypePtr` 并写回 cache。
+
+实现判断：
+
+- cache key 使用 identity，不走结构比较。
+- cache value 是不可变 `CompactTypePtr`，可以安全复用。
+- 前一节已经把普通 origin 初始化从 `go0()` 移走，所以 cache 命中不需要回放副作用。
+- cache 生命周期仍限定在单个 `TypeSimplifier` / 单次 bulk simplify 内。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-go0-cache.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-go0-cache.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过，生成 `/tmp/notdec-fortune-go0-cache.ll` 和
+  `/tmp/notdec-fortune-go0-cache.htypes`。
+- 普通 Debug fortune：`elapsed=28.49s`，`rss_kb=185596`。对比缺省 origin 重构后的
+  `33.18s`，收益明显。
+- trace fortune 主 bulk：
+
+```text
+[simplify:bulk-timing] roots=4437 canonicalize_ms=12231 struct_merge_ms=5809 analyze_ms=2293 origin_ms=191 simplify_ms=833 coalesce_ms=450 total_ms=22509
+elapsed=34.31 rss_kb=186880
+```
+
+对比上一轮 trace：
+
+- `canonicalize_ms`: `21051 ms` -> `12231 ms`
+- `total_ms`: `31975 ms` -> `22509 ms`
+
+判断：
+
+- `go0` cache 确实打中了 repeated non-variable bound compact 转换。
+- 当前剩余主耗时仍是 `canonicalizeType()`，但已经从约 `21s` 降到约 `12s`。
+- 后续如果做并行，`go0Cache` 可以作为 oneTBB concurrent cache 的低风险候选；`recursive/recVars` 仍暂不碰。
+
 # 当前不做
 
 - 不回退 `687cd6d`。
