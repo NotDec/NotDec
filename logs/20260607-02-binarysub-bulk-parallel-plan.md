@@ -590,3 +590,65 @@ ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy|realworld).tr_leve
 - 实现效果：8/10。默认并行已经生效，fortune 有可见收益，文本输出稳定。
 - 理解成本：3/10。新增的是 CMake 开关和显式 options，调用路径容易看懂。
 - 维护成本：3/10。TBB 依赖默认打开，但仍可用 CMake option 关闭；主要风险是不同环境没有 TBB 时默认 configure 会失败。
+
+# 继续检查：canonicalize 并行前置判断
+
+第 1-3 步已经完成：
+
+- 并行入口和 TBB 开关已实现。
+- `coalesceCompactType()` 的局部 counter 已处理。
+- bulk 后半段 per-root 并行已实现并默认启用。
+- fortune 默认并行能看到收益，输出重复运行稳定。
+
+剩余主要是第 4 步：并行 `canonicalizeType()`。
+
+检查 `external/binarysub/src/binarysub.cpp` 里的 `TypeSimplifier::canonicalizeType()` 后，当前不能只把
+`closureCache` / `go0Cache` 换成 concurrent map 就并行 root loop。原因是同一个函数里还会写这些共享状态：
+
+- `recursive`：递归路径上按 `CompactTypePtr + polarity` 创建 fresh var。
+- `recVars`：递归展开完成后回填 fresh var 的 bound。
+- `variableOrigins`：创建递归 fresh var 时写 origin。
+- `closureCache` / `go0Cache`：纯 cache，但只覆盖一部分读写。
+
+所以第 4 步的真实决策是：
+
+- 如果继续共享一个 `TypeSimplifier` 并并行 `canonicalizeType()`，必须先实现 4.3 里的
+  `recursive/recVars` pending -> stable 方案，否则会有数据竞争，也可能让同一个递归 shape 被创建成多个 fresh var。
+- 如果每个 root 用独立 `TypeSimplifier` 做 canonicalize，再合并结果，实现简单一些，但会放弃 bulk 内共享递归状态，可能让输出变粗、递归变量变多。这条路线之前计划里不建议先做。
+
+当前判断：
+
+- `closureCache/go0Cache` 可以继续作为后续并发化的一部分，但它们不能单独解锁 canonicalize 并行。
+- 下一步如果要继续拿最大收益，应该先做 `recursive/recVars` 的 entry 状态结构；这会改动核心语义路径，风险明显高于前面的 per-root local simplify。
+- 在做这一步前，最好先补一个小型递归 shape 复用测试，确保并行后同形递归类型仍合并到同一个 fresh var，避免只靠 fortune smoke 判断。
+
+# 实现记录：补递归 shape 复用测试
+
+本次没有继续改算法，只先补第 4 步前置测试，保护后续并行 `canonicalizeType()` 时最容易破坏的行为。
+
+改动：
+
+- `external/binarysub/src/binarysub-test.cpp:637`：新增
+  `test_bulk_simplify_reuses_recursive_shape()`。
+  - 构造两个变量 `lhs/rhs`。
+  - 分别给它们加入同形递归 record bound：`{next: lhs}` 和 `{next: rhs}`。
+  - 用默认并行 options 跑 `bulkSimplifyDetailed()`。
+  - 对两个 root 的输出做 `normalizeVariableNames()` 后比较，要求文本一致，并确认输出里仍包含递归 record 形状。
+- `external/binarysub/include/binarysub/binarysub-test.h:15`：声明新测试。
+- `external/binarysub/src/binarysub-test-main.cpp:44`：接入新测试。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+```
+
+结果：
+
+- `binarysub` 自测通过。
+
+判断：
+
+- 这个测试不是完整的并发递归状态测试，因为当前 `canonicalizeType()` 还没并行。
+- 它先固定当前 bulk 语义：同形递归 bound 不应因为后续并行化而打印成不同 final form。
