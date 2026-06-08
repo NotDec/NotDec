@@ -556,6 +556,61 @@ elapsed=43.72 rss_kb=184244
 这样可以把“fortune 哪个 IR 变量/哪类结构最慢”从阶段级别缩小到具体 root，再用
 `variableOrigins` / HType 名字对应回 LLVM IR 里的变量和代码形状。
 
+# 实现记录：`variableOrigins` 缺省 self
+
+已实现。`variableOrigins` 现在只需要记录非默认 origin；如果某个 `SimpleType` 变量不在表里，
+读取时按 `{var.id}` 处理。
+
+改动：
+
+- `external/binarysub/src/binarysub.cpp:32`，增加 `origins_or_self()` 和
+  `append_origins_or_self()`，统一处理缺省 origin。
+- `external/binarysub/src/binarysub.cpp:50`，增加 `collect_max_variable_id_impl()`，用于从实际
+  compact tree / rec var bounds 里计算 synthetic id 起点。
+- `external/binarysub/src/binarysub.cpp:1055`，`TypeSimplifier::canonicalizeType()` 不再在
+  `go0()` 里主动初始化普通变量 origin，只在创建递归 fresh var 时写非默认 origin。
+- `external/binarysub/src/binarysub.cpp:1384`，`computeSimplificationPlan()` 合并变量时按缺省 self
+  读取 origin，不再为了收集变量而填满 `variableOrigins`。
+- `external/binarysub/src/binarysub.cpp:1735`，`coalesceCompactType()` 读取变量 origin 时按缺省 self
+  处理。
+- `external/binarysub/src/binarysub.cpp:2369`，`bulkSimplifyDetailed()` 的
+  `canonicalNextSyntheticUTypeVarId` 改为扫描 `compactMap`、`recVars` 和已有非默认 origin，避免
+  稀疏 `variableOrigins` 下 synthetic id 撞到普通变量 id。
+
+实现判断：
+
+- 这个改动把 origin 从“提前初始化的全量表”改成“按需覆盖表”，为后续 `go0` cache 减少副作用。
+- 普通变量不需要占用 map 项；递归 fresh var 和变量合并仍然会写入非默认 origin。
+- 单个 `simplify()` 路径也同步修了 `coalesceCompactType()` 内部 synthetic id 的 fallback 计算。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-origin-default.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-origin-default.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过，生成 `/tmp/notdec-fortune-origin-default.ll` 和
+  `/tmp/notdec-fortune-origin-default.htypes`。
+- 本次 Debug fortune：`elapsed=33.18s`，`rss_kb=180840`。
+
+维护判断：
+
+- 实现效果：减少 `canonicalizeType::go0()` 的副作用，给后续 `go0` cache / 并发 closure cache 铺路。
+- 理解成本：低到中，新增的是“缺省 self”的 origin 规则，需要在读 origin 时统一走 helper。
+- 维护成本：较低。后续如果新增 origin 读取点，必须使用 helper，不能直接假设 map 里有普通变量。
+
 # 当前不做
 
 - 不回退 `687cd6d`。
