@@ -3065,7 +3065,9 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   if (SolveMemory) {
     Tys.insert(PolMem);
   }
-  auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false);
+  binarysub::BulkSimplifyOptions BulkOptions;
+  BulkOptions.enableParallel = true;
+  auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
   const auto &Res = BulkResult.types;
 
   // Create TypeBuilder context and builder

@@ -199,6 +199,8 @@ endif()
 
 option(NOTDEC_ENABLE_WASM "Enable wasm decompilation support." ON)
 option(NOTDEC_ENABLE_LLVM2C "Enable notdec llvm2c backend." ON)
+option(NOTDEC_ENABLE_BINARYSUB_PARALLEL
+	"Enable oneTBB based parallel binarysub bulk simplifier." ON)
 # TODO add tests
 
 if (NOTDEC_ENABLE_WASM)
@@ -213,6 +215,8 @@ if (NOTDEC_ENABLE_LLVM2C)
 	add_compile_definitions(NOTDEC_ENABLE_LLVM2C)
 endif ()
 
+set(BINARYSUB_ENABLE_TBB_PARALLEL ${NOTDEC_ENABLE_BINARYSUB_PARALLEL}
+	CACHE BOOL "Enable oneTBB based parallel bulk simplifier" FORCE)
 add_subdirectory(external/binarysub)
 
 include_directories(${PROJECT_SOURCE_DIR}/include/notdec)

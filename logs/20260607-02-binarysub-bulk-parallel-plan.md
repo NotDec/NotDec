@@ -515,3 +515,78 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
   新结构的单线程 fallback。
 - 要在 NotDec 主链路实际启用 bulk 后半段并行，还需要顶层 CMake 打开
   `BINARYSUB_ENABLE_TBB_PARALLEL`，并由调用方传入 `BulkSimplifyOptions{enableParallel=true}`。
+
+# 实现记录：默认启用 bulk 后半段并行
+
+已按当前判断把 binarysub bulk 后半段并行改成默认启用。仍保留 CMake 关闭路径。
+
+改动：
+
+- `external/binarysub/CMakeLists.txt:8`：`BINARYSUB_ENABLE_TBB_PARALLEL` 默认从 `OFF` 改为 `ON`。
+- `external/binarysub/include/binarysub/binarysub.h:480`：`BulkSimplifyOptions::enableParallel` 默认从 `false` 改为 `true`。
+- `external/binarysub/src/binarysub-test.cpp:598`：parallel options 测试里的 serial baseline 显式传 `enableParallel=false`，避免默认值变化后测试失去对比意义。
+- `CMakeLists.txt:202`：新增 `NOTDEC_ENABLE_BINARYSUB_PARALLEL`，默认 `ON`。
+- `CMakeLists.txt:218`：顶层把 `NOTDEC_ENABLE_BINARYSUB_PARALLEL` 写入子模块 `BINARYSUB_ENABLE_TBB_PARALLEL` cache，避免旧 build cache 保持 `OFF`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3063`：`ConstraintsGenerator::genTypes()` 显式传 `BulkSimplifyOptions{enableParallel=true}` 调用 `bulkSimplifyDetailed()`。
+
+验证：
+
+```bash
+cmake -S . -B ./build -G Ninja
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+rm -rf /tmp/binarysub-default-parallel-build
+cmake -S external/binarysub -B /tmp/binarysub-default-parallel-build -G Ninja
+cmake --build /tmp/binarysub-default-parallel-build --target binarysub -j4
+/tmp/binarysub-default-parallel-build/binarysub
+rm -rf /tmp/binarysub-parallel-off-build
+cmake -S external/binarysub -B /tmp/binarysub-parallel-off-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
+cmake --build /tmp/binarysub-parallel-off-build --target binarysub -j4
+/tmp/binarysub-parallel-off-build/binarysub
+NOTDEC_BINARYSUB_TRACE=1 NOTDEC_BINARYSUB_THREADS=8 ./build/bin/notdec \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-parallel-trace.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-parallel-trace.htypes \
+  --gen-work-dir \
+  --work-dir=/tmp/notdec-fortune-parallel-trace
+```
+
+结果：
+
+- 顶层 configure 通过，找到 TBB。
+- 顶层 `binarysub` 自测通过。
+- 顶层 `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- binarysub standalone 默认并行构建和自测通过。
+- binarysub standalone 显式 `BINARYSUB_ENABLE_TBB_PARALLEL=OFF` 构建和自测通过。
+- fortune 直接运行通过，默认并行耗时 `elapsed=24.50s`，上一轮默认单线程 smoke 是 `28.39s`。
+- fortune 两次 `NOTDEC_BINARYSUB_THREADS=8` 输出稳定，`.ll` 和 `.htypes` 的 `diff -q` 均无差异。
+- fortune trace 确认默认并行生效：
+
+```text
+[simplify:bulk-begin] roots=4437 threads=8 tbb=1
+[simplify:bulk-timing] roots=4437 canonicalize_ms=12229 struct_merge_ms=5785 analyze_ms=2487 origin_ms=204 simplify_ms=891 coalesce_ms=490 total_ms=18820
+```
+
+额外检查：
+
+```bash
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy|realworld).tr_level_2' --output-on-failure
+```
+
+结果中 `llvm_ir` 通过，`sysy` 和 `realworld` 失败。但失败原因不是并行输出不稳定：
+
+- `sysy`：普通 clang IR 目标被识别为 `TargetArch::Other`，当前 PassManager 拒绝 `--dump-htypes`。
+- `realworld/fortune`：suite 注入的 `NOTDEC_EXTRA_CONSTRAINTS` 里 `ir_anchor.sha256` 与当前 IR 不匹配。
+
+这两个问题与本次 TBB 默认启用无直接关系，后续应单独修测试环境或 oracle。
+
+评分：
+
+- 实现效果：8/10。默认并行已经生效，fortune 有可见收益，文本输出稳定。
+- 理解成本：3/10。新增的是 CMake 开关和显式 options，调用路径容易看懂。
+- 维护成本：3/10。TBB 依赖默认打开，但仍可用 CMake option 关闭；主要风险是不同环境没有 TBB 时默认 configure 会失败。
