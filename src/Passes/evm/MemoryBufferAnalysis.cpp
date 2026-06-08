@@ -265,6 +265,12 @@ bool rewriteAllocation(LLVMContext &Ctx, const MemoryAllocation &Alloc,
     if (Reload == nullptr || Reload == BaseLoad) {
       continue;
     }
+    // A reload of slot 0x40 represents the same allocation base until the free
+    // memory pointer is written back. Mark it as rewritten too, so a later
+    // allocation candidate cannot rewrite and erase the same load again.
+    if (!RewrittenBases.insert(Reload).second) {
+      continue;
+    }
     Reload->replaceAllUsesWith(NewBase);
     if (Reload->use_empty()) {
       ToErase.push_back(Reload);
@@ -625,7 +631,7 @@ PreservedAnalyses MemoryBufferRewritePass::run(Function &F,
   }
 
   for (Instruction *I : ToErase) {
-    if (I != nullptr && I->use_empty()) {
+    if (I != nullptr && I->getParent() != nullptr && I->use_empty()) {
       I->eraseFromParent();
     }
   }
