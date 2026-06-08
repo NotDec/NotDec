@@ -192,30 +192,7 @@ coalesceCompactType(root)
 - fortune 里这部分只占十几个百分点，收益有限。
 - 但这一步能验证 oneTBB 接入、线程数控制、结果合并方式。
 
-## 4. 再看 `build_struct_merge_info()` 并行
-
-`struct_merge_ms=5855`，占主 bulk 约 `18.3%`，值得看。
-
-先补统计：
-
-- record candidate 数量。
-- bucket 数量。
-- 每个 bucket 的 candidate size。
-- conflict check 次数。
-- 最大 bucket。
-
-如果 bucket 分布适合，再并行：
-
-- 候选收集可以按 root 并行。
-- bucket 内 conflict/group 构造可以按 bucket 并行。
-- 最终 `StructMergeInfo` 要排序，避免输出无意义抖动。
-
-风险：
-
-- 如果热点集中在一个超大 bucket，并行收益有限。
-- 如果并行后 candidate id 分配顺序变化，sidecar 输出可能变化。
-
-## 5. 最后并行 `canonicalizeType()`
+## 4. 最后并行 `canonicalizeType()`
 
 这是收益最大的部分，也是风险最大的部分。
 
@@ -236,7 +213,7 @@ oneTBB 的 `concurrent_hash_map` 适合这些共享表里的“查找或插入�
 oneapi::tbb::concurrent_hash_map<Key, Value, HashCompare>
 ```
 
-### 5.1 先并发化 `closureCache`
+### 4.1 先并发化 `closureCache`
 
 `closureCache` 是最适合先做的：
 
@@ -252,7 +229,7 @@ closure 算完后 value 不再变化。可以先查 cache，miss 时计算，再
 - 多个线程可能同时 miss 并计算同一个 closure。可以接受重复计算，最后 `insert` 去重。
 - 如果想避免重复计算，需要 pending 状态，但第一版不需要。
 
-### 5.2 再处理 `recursive`
+### 4.2 再处理 `recursive`
 
 `recursive` 比较难：
 
@@ -275,7 +252,7 @@ go1 递归完成后才写 recVars[fresh_var] = adapted
 
 所以第一版可以把 `recursive` 并发化，但 `recVars` 仍用 mutex 保护普通 map。
 
-### 5.3 `recVars` 和 `variableOrigins`
+### 4.3 `recVars` 和 `variableOrigins`
 
 这两类有合并/更新，不适合第一版直接换成 concurrent map。
 
@@ -285,7 +262,7 @@ go1 递归完成后才写 recVars[fresh_var] = adapted
 - `variableOrigins` 用一个 mutex 保护 origin union。
 - 如果锁竞争严重，再细化成 per-key 锁或换 concurrent map。
 
-### 5.4 fresh id 和文本输出
+### 4.4 fresh id 和文本输出
 
 并行后 fresh recursive var 的创建顺序可能变化。语义上可以接受，但 `.htypes` 文本可能变。
 
@@ -299,6 +276,8 @@ go1 递归完成后才写 recVars[fresh_var] = adapted
 - 不建议先自己写完整 concurrent hash map。
 - 不建议一开始把 `canonicalizeType()` 拆成分批合并算法，改动太大。
 - 不建议一开始做“每个 root 完全独立 TypeSimplifier”，可能让结果明显变粗。
+- 不建议现在并行 `build_struct_merge_info()`。这块贪心分组策略后面可能还会改，先保留现有阶段级 timing；
+  等它成为新的主瓶颈时再单独分析。
 - 不建议直接引 OpenMP。oneTBB 的 container 和 task API 更贴近这里的需求。
 
 # 风险
