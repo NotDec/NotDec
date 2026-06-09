@@ -271,6 +271,52 @@
   失败，10 passed / 89 failed；其中 `checked_bounds_audit` 通过。
 - 临时单样例运行 `revert_error_string_01` 通过，`checked_bounds_audit` 通过。
 
+## 2026-06-09 实现记录：ABI return 接受 HType store evidence 单字段返回
+
+`checked_bounds_arithmetic_01` 里 return buffer 是：
+
+- `%0 = call ptr @calloc_unbounded()`
+- `%evm.alloc.addr = ptrtoint ptr %0 to i256`
+- `store i256 %evm.add, ptr %0`
+- `evm_return(..., %evm.alloc.addr, 32)`
+
+HType 已经把 `%evm.alloc.addr` 识别成 pointer，但不是 record pointer，也没有透明
+offset 0 字段。这里可以按用户前面说的“单个指针也可以看作只有一个成员的结构体指针”
+处理，但必须基于类型恢复导出的 store evidence，不能回退扫 raw IR。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:33`：
+  `AbiReturnPayloadHType` 新增 `HasOffset0StoreEvidence`，只表示 HType store
+  evidence 证明 return 前 offset 0 有 256-bit store。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:59`：
+  `getAbiReturnPayloadHType` 接收 `TR.getEVMStoreEvidence()`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:78`：
+  当 base 是非 record pointer 且没有透明 offset 0 字段时，查询
+  `getHTypeStoreValuesAtOffsetBefore(..., offset 0, Return)`。有 evidence 才继续，
+  没有则仍作为 HType 缺口返回。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:110`：
+  evidence-only 路径只允许 `size == 32` 的 `static_1_word`，更长 return 仍必须
+  依赖 HType record / field，不扩大成泛化 `candidate`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:137`：
+  `AbiReturnPass::run` 读取 `TR.getEVMStoreEvidence()` 并传给分类函数。
+
+复杂度评分：
+
+- 实现效果：6/10。单 word ABI return 不再因为 pointer 没形成 record 而漏标；
+  动态 return 和多字段 return 仍然留给后续类型恢复字段补全。
+- 理解成本：2/10。只给 `AbiReturnPass` 接入已有 HType store evidence，没有新增
+  raw IR matcher。
+- 维护成本：2/10。约束明确，只服务 32 字节单字段 return，误伤面较小。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.90s。
+- 临时单样例运行 `checked_bounds_arithmetic_01` 通过，`checked_bounds_audit` 通过。
+- 未跑 fortune，同本轮用户要求，先不处理 fortune 性能问题。
+
 ## 2026-06-09 实现记录：revert metadata / marker helper 移到专门文件
 
 本次只做纯搬移，避免 `src/Passes/evm/SolidityPatterns.cpp` 继续承载

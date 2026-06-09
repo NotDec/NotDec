@@ -30,6 +30,7 @@ struct AbiReturnPayloadHType {
   unsigned FieldCount = 0;
   bool HasOffset0 = false;
   bool HasTransparentOffset0 = false;
+  bool HasOffset0StoreEvidence = false;
   bool HasDynamicHead = false;
   bool HasDynamicLength = false;
 };
@@ -55,7 +56,9 @@ getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
 }
 
 std::optional<AbiReturnPayloadHType>
-getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
+getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes,
+                         ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                         CallBase &Return) {
   std::optional<HTypeBufferView> View =
       getAbiReturnBufferHType(HTypes, Return.getArgOperand(1), Return, 1);
   if (!View.has_value()) {
@@ -73,7 +76,12 @@ getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
       }
     }
   } else if (!Payload.HasTransparentOffset0) {
-    return std::nullopt;
+    SmallVector<Value *, 2> Offset0Stores = getHTypeStoreValuesAtOffsetBefore(
+        Stores, Return.getArgOperand(1), 0, Return);
+    Payload.HasOffset0StoreEvidence = !Offset0Stores.empty();
+    if (!Payload.HasOffset0StoreEvidence) {
+      return std::nullopt;
+    }
   }
   Payload.HasOffset0 = hasHTypeBufferFieldAt(*View, 0);
   Payload.HasDynamicHead = hasHTypeBufferFieldAt(*View, 0);
@@ -82,7 +90,9 @@ getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
 }
 
 std::optional<StringRef>
-classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
+classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
+                           ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                           CallBase &Return) {
   if (isConstantIntValue(Return.getArgOperand(2), 0)) {
     return StringRef("empty");
   }
@@ -91,15 +101,21 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
   }
 
   std::optional<AbiReturnPayloadHType> Payload =
-      getAbiReturnPayloadHType(HTypes, Return);
+      getAbiReturnPayloadHType(HTypes, Stores, Return);
   if (!Payload.has_value()) {
     ++NumAbiReturnMissingPayloadHTypes;
     return std::nullopt;
   }
 
-  if (isConstantIntValue(Return.getArgOperand(2), 32) &&
-      (Payload->HasOffset0 || Payload->HasTransparentOffset0)) {
+  bool IsSingleWordReturn = isConstantIntValue(Return.getArgOperand(2), 32);
+  if (IsSingleWordReturn &&
+      (Payload->HasOffset0 || Payload->HasTransparentOffset0 ||
+       Payload->HasOffset0StoreEvidence)) {
     return StringRef("static_1_word");
+  }
+  if (Payload->HasOffset0StoreEvidence && !Payload->HasOffset0 &&
+      !Payload->HasTransparentOffset0) {
+    return std::nullopt;
   }
   if (Payload->HasDynamicHead && Payload->HasDynamicLength) {
     return StringRef("dynamic_candidate");
@@ -118,6 +134,7 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
   if (HighTypes == nullptr) {
     return PreservedAnalyses::all();
   }
+  ArrayRef<mlsub::EVMStoreEvidence> StoreEvidence = TR.getEVMStoreEvidence();
   bool Changed = false;
 
   for (Function &F : M) {
@@ -134,7 +151,7 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       std::optional<StringRef> Kind =
-          classifyAbiReturnFromHType(*HighTypes, *Call);
+          classifyAbiReturnFromHType(*HighTypes, StoreEvidence, *Call);
       if (!Kind.has_value()) {
         continue;
       }
