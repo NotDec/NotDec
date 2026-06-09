@@ -23,7 +23,8 @@ STATISTIC(NumEventMissingDataHTypes,
 
 namespace {
 
-bool hasEventDataHType(llvm2c::HTypeResult &HTypes, Value *Base,
+bool hasEventDataHType(llvm2c::HTypeResult &HTypes,
+                       ArrayRef<mlsub::EVMStoreEvidence> Stores, Value *Base,
                        CallBase &Use, unsigned ArgIndex) {
   HTypeBufferView View = getHTypeBufferView(HTypes, Base, Use, ArgIndex);
   if (View.Record != nullptr) {
@@ -31,6 +32,10 @@ bool hasEventDataHType(llvm2c::HTypeResult &HTypes, Value *Base,
   }
   if (View.HasTransparentOffset0Field) {
     return true;
+  }
+  if (View.Gap == HTypeBufferGap::NonRecordPointerType &&
+      isConstantIntValue(Use.getArgOperand(2), 32)) {
+    return !getHTypeStoreValuesAtOffsetBefore(Stores, Base, 0, Use).empty();
   }
 
   if (View.Gap == HTypeBufferGap::NoPointerType) {
@@ -61,6 +66,7 @@ PreservedAnalyses EventLogPass::run(Module &M, ModuleAnalysisManager &MAM) {
   if (HighTypes == nullptr) {
     return PreservedAnalyses::all();
   }
+  ArrayRef<mlsub::EVMStoreEvidence> StoreEvidence = TR.getEVMStoreEvidence();
 
   bool Changed = false;
 
@@ -77,7 +83,8 @@ PreservedAnalyses EventLogPass::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       if (!isConstantIntValue(Call->getArgOperand(2), 0) &&
-          !hasEventDataHType(*HighTypes, Call->getArgOperand(1), *Call, 1)) {
+          !hasEventDataHType(*HighTypes, StoreEvidence, Call->getArgOperand(1),
+                             *Call, 1)) {
         ++NumEventMissingDataHTypes;
       }
 

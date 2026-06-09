@@ -452,3 +452,36 @@ guard matcher 仍留在 `SolidityPatterns.cpp`。这样不会改变 HType 后移
 - `cmake --build ./build --target notdec -j4` 通过。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.92s。
+
+## 2026-06-09 实现记录：EventLogPass 接受单字段 store evidence
+
+本次继续按路线 A 收敛。`AbiReturnPass` 和 `SolidityRevertPass` 已经支持
+non-record pointer 通过 `TR.getEVMStoreEvidence()` 证明 offset 0 单字段 payload；
+`EventLogPass` 也补同一条规则，但只限 32 字节 event data。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:26`：
+  `hasEventDataHType` 增加 `ArrayRef<mlsub::EVMStoreEvidence>` 参数。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:36`：
+  如果 data base 是 non-record pointer，且 `evm_logN` 的 data size 是 32，
+  则用 `getHTypeStoreValuesAtOffsetBefore(..., offset 0, log)` 判断是否有
+  HType store evidence。没有 evidence 时仍记录 HType 缺口，不扫 raw store。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:69`：
+  `EventLogPass::run` 读取 `TR.getEVMStoreEvidence()` 并传给 event data 判断。
+
+复杂度评分：
+
+- 实现效果：5/10。补齐 event data 的单字段 pointer case，和 ABI return / revert
+  的 evidence 路线一致；多字段和动态 event data 仍依赖后续类型恢复字段。
+- 理解成本：1/10。只是在本 pass 内接入已有 store evidence helper。
+- 维护成本：1/10。没有新增 shared 层，也没有改 `SolidityPatterns.cpp`。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。
+- 临时 event 小集合前三例仍失败，但 `notdec.solidity.event` 计数都匹配；
+  失败来自 revert / payability / checked-bounds / ABI return 旧缺口。
+- 完整 event 子集包含大真实合约样例，运行较慢，已停止；本轮不处理 fortune 性能。
