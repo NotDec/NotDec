@@ -278,6 +278,58 @@ direct 或一层子 helper 的 HType store evidence。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.89s。
 
+## 2026-06-09 实现记录：helper-encoded revert 标成 encoded candidate
+
+`0679_19497465_c2187cbc73_f22fac5262f8` 还剩一个 revert 漏标。它先在新分配的
+free-memory buffer 写入 `Error(string)` selector，再把 `base + 4` 传给
+`private__0x2d80_0x2d80` 编码动态 string payload，最后执行
+`revert(mload(0x40), helper_ret - mload(0x40))`。当前 HType 能证明 selector store
+和 helper 形参 offset 0 / 32 的 store evidence，但 selector 和 string payload
+跨了两个 base，所以不能按普通 `error_string` 规则给出完整 string 长度。
+
+本次只把这种 helper-encoded revert 标成 `encoded_candidate`。规则仍然很窄：revert
+base 必须是 free-memory reload，size 必须是 helper return 减同一个 free-memory
+base；helper 调用前同一基本块里必须有最近一次 `mstore(0x40, new_base)`；helper
+buffer 实参必须是 `new_base + 4`；`new_base` offset 0 必须有 selector store
+evidence；helper 形参 offset 0 / 32 必须有 HType 字段和 store evidence。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:81`：
+  新增 `getLastFreeMemoryPointerStoreBefore`，只在同一基本块内找 helper call 前最近
+  一次 free-memory pointer store。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:93`：
+  新增 `getSiblingAddOffsetFromBase`，只处理 `%x + C1` 相对 `%x + C0` 的偏移。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:129`：
+  新增 `hasHelperEncodedRevertPayload`，用 HType store evidence 证明 selector 和
+  helper 动态 payload head/length。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:387`：
+  `classifyRevertFromHType` 在普通 HType payload 判断前接受上述 helper 形状，并只
+  标成 `encoded_candidate`。
+
+复杂度评分：
+
+- 实现效果：6/10。`0679...` 的 revert 从 74/75 收敛到 75/75，`encoded_candidate`
+  从 0/1 收敛到 1/1。
+- 理解成本：4/10。需要看一次 free-memory pointer store 和 sibling add 偏移，但规则
+  只服务这个 helper-encoded revert 形状。
+- 维护成本：3/10。仍基于 HType/store evidence；后续如果 HType 能直接把 `base + 4`
+  payload 并回 revert buffer，这段可以收窄。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `0679_19497465_c2187cbc73_f22fac5262f8`：ABI return 68/68，
+  revert 75/75，`encoded_candidate` 1/1；该样例仍剩 checked-bounds
+  `memory_allocation_bounds` / `memory_allocation_pointer_bounds` oracle 差异。
+- 临时 8 样例集合中，`0011_multi_public`、`0002_delegatecall_no_nonpayable`、
+  `0441_19494998_776c03cc9d_8117f350cb9d`、
+  `0448_19495059_065877b669_4f138305be23`、
+  `0657_19497309_a4d607684e_332c65dbca0f` 通过；`0340...`、`0679...`、`1991...`
+  剩 checked-bounds oracle 差异。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.91s。
+
 ## 2026-06-09 实现记录：动态 return helper 支持形参 HType fallback
 
 `0340_19494346_717db37a78_7324081e28fc` 里还有两个动态 ABI return 漏标。

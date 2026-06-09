@@ -78,6 +78,116 @@ bool hasSolidityReturndataForwardShape(CallBase &Revert) {
          blockHasReturndataForwardCopyBefore(*Pred, Dest, nullptr);
 }
 
+std::optional<Value *>
+getLastFreeMemoryPointerStoreBefore(Instruction &Before) {
+  for (auto It = Before.getIterator(); It != Before.getParent()->begin();) {
+    --It;
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&*It);
+    if (Store.has_value() && Store->StoreBits == 256 &&
+        isConstantIntValue(Store->Address, 64)) {
+      return Store->StoredValue;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<uint64_t> getSiblingAddOffsetFromBase(Value *Ptr, Value *Base) {
+  if (std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base)) {
+    return Offset;
+  }
+
+  auto *PtrAdd = dyn_cast_or_null<BinaryOperator>(Ptr);
+  auto *BaseAdd = dyn_cast_or_null<BinaryOperator>(Base);
+  if (PtrAdd == nullptr || BaseAdd == nullptr ||
+      PtrAdd->getOpcode() != Instruction::Add ||
+      BaseAdd->getOpcode() != Instruction::Add) {
+    return std::nullopt;
+  }
+
+  for (unsigned PtrBaseIndex = 0; PtrBaseIndex < 2; ++PtrBaseIndex) {
+    Value *SharedBase = PtrAdd->getOperand(PtrBaseIndex);
+    std::optional<uint64_t> PtrConst =
+        getUInt64Constant(PtrAdd->getOperand(1 - PtrBaseIndex));
+    if (!PtrConst.has_value()) {
+      continue;
+    }
+
+    for (unsigned BaseBaseIndex = 0; BaseBaseIndex < 2; ++BaseBaseIndex) {
+      if (BaseAdd->getOperand(BaseBaseIndex) != SharedBase) {
+        continue;
+      }
+      std::optional<uint64_t> BaseConst =
+          getUInt64Constant(BaseAdd->getOperand(1 - BaseBaseIndex));
+      if (BaseConst.has_value() && *PtrConst >= *BaseConst) {
+        return *PtrConst - *BaseConst;
+      }
+    }
+  }
+
+  return std::nullopt;
+}
+
+bool hasHelperEncodedRevertPayload(llvm2c::HTypeResult &HTypes,
+                                   ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                   CallBase &Revert) {
+  // This covers helpers that encode the payload after an already-written
+  // selector.  The pass can prove an encoded revert, but not the full string.
+  if (!isFreeMemoryPointerLoad(Revert.getArgOperand(1))) {
+    return false;
+  }
+
+  auto *Size = dyn_cast<BinaryOperator>(Revert.getArgOperand(2));
+  if (Size == nullptr || Size->getOpcode() != Instruction::Sub ||
+      !isSameOrReloadedFreeMemoryBase(Size->getOperand(1),
+                                      Revert.getArgOperand(1))) {
+    return false;
+  }
+
+  auto *HelperCall = dyn_cast<CallBase>(Size->getOperand(0));
+  Function *Helper =
+      HelperCall == nullptr ? nullptr : HelperCall->getCalledFunction();
+  if (Helper == nullptr || Helper->isDeclaration()) {
+    return false;
+  }
+
+  std::optional<Value *> RevertBase =
+      getLastFreeMemoryPointerStoreBefore(*HelperCall);
+  if (!RevertBase.has_value()) {
+    return false;
+  }
+
+  bool HasSelector = false;
+  for (Value *StoredValue :
+       getHTypeStoreValuesAtOffsetBefore(Stores, *RevertBase, 0, Revert)) {
+    if (getSelectorWord(StoredValue).has_value()) {
+      HasSelector = true;
+      break;
+    }
+  }
+  if (!HasSelector) {
+    return false;
+  }
+
+  for (unsigned I = 0, E = HelperCall->arg_size(); I != E; ++I) {
+    std::optional<uint64_t> ArgOffset =
+        getSiblingAddOffsetFromBase(HelperCall->getArgOperand(I), *RevertBase);
+    if (!ArgOffset.has_value() || *ArgOffset != 4 ||
+        I >= Helper->arg_size()) {
+      continue;
+    }
+
+    Argument *HelperArg = Helper->getArg(I);
+    HTypeBufferView View = getHTypeValueBufferView(HTypes, HelperArg);
+    if (hasHTypeBufferFieldAt(View, 0) && hasHTypeBufferFieldAt(View, 32) &&
+        !getHTypeStoreValuesAtOffset(Stores, HelperArg, 0).empty() &&
+        !getHTypeStoreValuesAtOffset(Stores, HelperArg, 32).empty()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void insertPanicRewriteMarker(LLVMContext &Ctx,
                               const SolidityRevertMatch &Match) {
   if (Match.PanicCode == std::nullopt || Match.Revert == nullptr) {
@@ -271,6 +381,13 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
   }
 
   if (isConstantIntValue(Revert.getArgOperand(2), 0)) {
+    SolidityRevertMatch Match;
+    Match.Revert = &Revert;
+    Match.Kind = "encoded_candidate";
+    return Match;
+  }
+
+  if (hasHelperEncodedRevertPayload(HTypes, Stores, Revert)) {
     SolidityRevertMatch Match;
     Match.Revert = &Revert;
     Match.Kind = "encoded_candidate";
