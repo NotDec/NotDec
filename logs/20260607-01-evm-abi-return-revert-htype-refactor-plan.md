@@ -626,3 +626,50 @@ return 漏标。
 - 临时完整 solidity-patterns manifest：37 passed / 62 failed。全部
   `returndata_forward` compare 都对齐；剩余失败仍主要是 ABI return 或旧
   encoded candidate 缺口。
+
+## 2026-06-09 实现记录：动态 string return helper 走 HType store evidence
+
+`0448_19495059_065877b669_4f138305be23` 的 `name()` / `symbol()` 返回值形状是：
+public 函数先把旧 `mload(0x40)` 传给跨函数 helper，helper 写入 ABI string
+head / length / data，并返回 end pointer；public 函数再执行
+`return(mload(0x40), helper_ret - mload(0x40))`。类型恢复里 helper 的 buffer
+参数已有 `struct_3*`，helper 参数上的 offset 0 / 32 store evidence 也存在；
+但 helper 返回值仍是 `top:256`，return 前重新加载的 free-memory base 也没有直接
+带上同一个 HType。
+
+本次没有在 ABI return pass 里恢复任意跨函数 store，也没有改类型恢复核心。只补
+Solidity 动态 string helper 的窄形状：return base 必须是 `mload(0x40)`，size
+必须是 `helper_ret - mload(0x40)`，helper 的某个实参必须和 return base 是同一个
+free-memory base，且该实参的 HType buffer 视图和 helper 形参上的 HType store
+evidence 能证明 offset 0 / 32 都被写过。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:38`：
+  新增本地 `AbiReturnHelperPayload`，只记录 helper evidence 是否证明动态 head
+  和 length。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:100`：
+  新增 `getDynamicReturnHelperPayloadHType`，匹配
+  `return(mload(0x40), helper_ret - mload(0x40))`，并用
+  `getHTypeBufferView` / `getHTypeStoreValuesAtOffset` 检查 helper buffer 参数。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:162`：
+  `classifyAbiReturnFromHType` 在普通 return base HType 判断前，把上述 helper
+  evidence 标成 `dynamic_candidate`。
+
+复杂度评分：
+
+- 实现效果：7/10。`0448...` 的两个动态 string ABI return 补齐，focused suite
+  从 3/4 变成 4/4。
+- 理解成本：3/10。规则比普通 HType buffer 判断多看了一层 helper call，但仍限制在
+  Solidity ABI return pass 内。
+- 维护成本：3/10。后续如果类型恢复能把 helper end pointer / free-memory reload
+  直接连回 buffer，这段可以收窄或删除。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时 4 样例集合中，`0011_multi_public`、`0002_delegatecall_no_nonpayable`、
+  `0441_19494998_776c03cc9d_8117f350cb9d`、
+  `0448_19495059_065877b669_4f138305be23` 全部通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.91s。

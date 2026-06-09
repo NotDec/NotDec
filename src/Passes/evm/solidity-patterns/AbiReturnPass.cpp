@@ -35,6 +35,13 @@ struct AbiReturnPayloadHType {
   bool HasDynamicLength = false;
 };
 
+// Evidence found through a Solidity ABI encoder helper call instead of the
+// final evm_return base value itself.
+struct AbiReturnHelperPayload {
+  bool HasOffset0StoreEvidence = false;
+  bool HasDynamicLengthStoreEvidence = false;
+};
+
 std::optional<HTypeBufferView>
 getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
                         unsigned ArgIndex) {
@@ -92,6 +99,57 @@ getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes,
   return Payload;
 }
 
+std::optional<AbiReturnHelperPayload>
+getDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
+                                   ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                   CallBase &Return) {
+  if (!isFreeMemoryPointerLoad(Return.getArgOperand(1))) {
+    return std::nullopt;
+  }
+
+  auto *Size = dyn_cast<BinaryOperator>(Return.getArgOperand(2));
+  if (Size == nullptr || Size->getOpcode() != Instruction::Sub ||
+      !isSameOrReloadedFreeMemoryBase(Size->getOperand(1),
+                                      Return.getArgOperand(1))) {
+    return std::nullopt;
+  }
+
+  auto *HelperCall = dyn_cast<CallBase>(Size->getOperand(0));
+  Function *Helper =
+      HelperCall == nullptr ? nullptr : HelperCall->getCalledFunction();
+  if (Helper == nullptr || Helper->isDeclaration()) {
+    return std::nullopt;
+  }
+
+  for (unsigned I = 0, E = HelperCall->arg_size(); I != E; ++I) {
+    if (!isSameOrReloadedFreeMemoryBase(HelperCall->getArgOperand(I),
+                                        Return.getArgOperand(1))) {
+      continue;
+    }
+    if (I >= Helper->arg_size()) {
+      continue;
+    }
+
+    HTypeBufferView View = getHTypeBufferView(
+        HTypes, HelperCall->getArgOperand(I), *HelperCall, I);
+    if (View.Record == nullptr && !View.HasTransparentOffset0Field) {
+      continue;
+    }
+
+    Argument *HelperArg = Helper->getArg(I);
+    bool HasHead = hasHTypeBufferFieldAt(View, 0) &&
+                   !getHTypeStoreValuesAtOffset(Stores, HelperArg, 0).empty();
+    bool HasLength =
+        hasHTypeBufferFieldAt(View, 32) &&
+        !getHTypeStoreValuesAtOffset(Stores, HelperArg, 32).empty();
+    if (HasHead && HasLength) {
+      return AbiReturnHelperPayload{HasHead, HasLength};
+    }
+  }
+
+  return std::nullopt;
+}
+
 std::optional<StringRef>
 classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
                            ArrayRef<mlsub::EVMStoreEvidence> Stores,
@@ -101,6 +159,13 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
   }
   if (isReturndataSize(Return.getArgOperand(2))) {
     return StringRef("returndata_forward");
+  }
+
+  std::optional<AbiReturnHelperPayload> HelperPayload =
+      getDynamicReturnHelperPayloadHType(HTypes, Stores, Return);
+  if (HelperPayload.has_value() && HelperPayload->HasOffset0StoreEvidence &&
+      HelperPayload->HasDynamicLengthStoreEvidence) {
+    return StringRef("dynamic_candidate");
   }
 
   std::optional<AbiReturnPayloadHType> Payload =
