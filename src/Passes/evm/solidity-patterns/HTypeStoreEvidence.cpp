@@ -82,10 +82,27 @@ bool hasHTypeFieldAt(ast::RecordDecl &Record, int64_t Offset) {
   return Record.getFieldAt(Offset) != nullptr;
 }
 
+bool hasHTypeBufferFieldAt(const HTypeBufferView &View, int64_t Offset) {
+  if (View.Record != nullptr) {
+    return hasHTypeFieldAt(*View.Record, Offset);
+  }
+  return Offset == 0 && View.HasTransparentOffset0Field;
+}
+
 SmallVector<Value *, 2>
 getHTypeFieldStoreValues(ArrayRef<mlsub::EVMStoreEvidence> Stores,
                          ast::RecordDecl &Record, Value *Base, int64_t Offset) {
   if (!hasHTypeFieldAt(Record, Offset)) {
+    return {};
+  }
+  return getHTypeStoreValuesAtOffset(Stores, Base, Offset);
+}
+
+SmallVector<Value *, 2>
+getHTypeBufferFieldStoreValues(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                               const HTypeBufferView &View, Value *Base,
+                               int64_t Offset) {
+  if (!hasHTypeBufferFieldAt(View, Offset)) {
     return {};
   }
   return getHTypeStoreValuesAtOffset(Stores, Base, Offset);

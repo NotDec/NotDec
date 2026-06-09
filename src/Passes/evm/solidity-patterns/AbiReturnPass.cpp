@@ -55,9 +55,7 @@ getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
 }
 
 std::optional<AbiReturnPayloadHType>
-getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes,
-                         ArrayRef<mlsub::EVMStoreEvidence> Stores,
-                         CallBase &Return) {
+getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
   std::optional<HTypeBufferView> View =
       getAbiReturnBufferHType(HTypes, Return.getArgOperand(1), Return, 1);
   if (!View.has_value()) {
@@ -74,22 +72,17 @@ getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes,
         ++Payload.FieldCount;
       }
     }
-    Payload.HasOffset0 = hasHTypeFieldAt(*Payload.Record, 0);
-    Payload.HasDynamicHead = hasHTypeFieldAt(*Payload.Record, 0);
-    Payload.HasDynamicLength = hasHTypeFieldAt(*Payload.Record, 32);
-  } else if (!getHTypeStoreValuesAtOffset(Stores, Return.getArgOperand(1), 0)
-                  .empty()) {
-    Payload.HasOffset0 = true;
   } else if (!Payload.HasTransparentOffset0) {
     return std::nullopt;
   }
+  Payload.HasOffset0 = hasHTypeBufferFieldAt(*View, 0);
+  Payload.HasDynamicHead = hasHTypeBufferFieldAt(*View, 0);
+  Payload.HasDynamicLength = hasHTypeBufferFieldAt(*View, 32);
   return Payload;
 }
 
 std::optional<StringRef>
-classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
-                           ArrayRef<mlsub::EVMStoreEvidence> Stores,
-                           CallBase &Return) {
+classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
   if (isConstantIntValue(Return.getArgOperand(2), 0)) {
     return StringRef("empty");
   }
@@ -98,7 +91,7 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
   }
 
   std::optional<AbiReturnPayloadHType> Payload =
-      getAbiReturnPayloadHType(HTypes, Stores, Return);
+      getAbiReturnPayloadHType(HTypes, Return);
   if (!Payload.has_value()) {
     ++NumAbiReturnMissingPayloadHTypes;
     return std::nullopt;
@@ -125,8 +118,6 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
   if (HighTypes == nullptr) {
     return PreservedAnalyses::all();
   }
-  ArrayRef<mlsub::EVMStoreEvidence> StoreEvidence = TR.getEVMStoreEvidence();
-
   bool Changed = false;
 
   for (Function &F : M) {
@@ -143,7 +134,7 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       std::optional<StringRef> Kind =
-          classifyAbiReturnFromHType(*HighTypes, StoreEvidence, *Call);
+          classifyAbiReturnFromHType(*HighTypes, *Call);
       if (!Kind.has_value()) {
         continue;
       }

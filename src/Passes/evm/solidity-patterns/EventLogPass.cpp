@@ -23,26 +23,28 @@ STATISTIC(NumEventMissingDataHTypes,
 
 namespace {
 
-ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
-                                       Value *Base, CallBase &Use,
-                                       unsigned ArgIndex) {
+bool hasEventDataHType(llvm2c::HTypeResult &HTypes, Value *Base,
+                       CallBase &Use, unsigned ArgIndex) {
   HTypeBufferView View = getHTypeBufferView(HTypes, Base, Use, ArgIndex);
   if (View.Record != nullptr) {
-    return View.Record;
+    return true;
+  }
+  if (View.HasTransparentOffset0Field) {
+    return true;
   }
 
   if (View.Gap == HTypeBufferGap::NoPointerType) {
     LLVM_DEBUG(dbgs() << "evm event: data base has no pointer HType: " << *Base
                       << "\n");
     ++NumEventNonPointerDataHTypes;
-    return nullptr;
+    return false;
   }
 
   LLVM_DEBUG(dbgs() << "evm event: data base HType is not record pointer: "
                     << View.BaseType->getAsString() << " for " << *Base
                     << "\n");
   ++NumEventNonRecordDataHTypes;
-  return nullptr;
+  return false;
 }
 
 bool isEVMLogCall(CallBase &Call) {
@@ -75,8 +77,7 @@ PreservedAnalyses EventLogPass::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       if (!isConstantIntValue(Call->getArgOperand(2), 0) &&
-          getRecordPointeeHType(*HighTypes, Call->getArgOperand(1), *Call, 1) ==
-              nullptr) {
+          !hasEventDataHType(*HighTypes, Call->getArgOperand(1), *Call, 1)) {
         ++NumEventMissingDataHTypes;
       }
 

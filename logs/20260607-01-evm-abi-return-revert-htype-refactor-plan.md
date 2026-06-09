@@ -136,3 +136,46 @@
 - HType 现在还不能覆盖所有 Solidity ABI encoder 形状，尤其是动态 tail 和 returndata copy。
 - 旧 `solidity_patterns` suite 会在中间阶段持续失败，不能用它作为阻塞当前迁移的唯一标准。
 - 如果 helper 写厚了，容易变成新的 HType 汇总层；这次 helper 只能读已有 C++ 类型结果。
+
+## 2026-06-09 实现记录：单字段指针按 offset 0 buffer 字段处理
+
+本次按路线 A 继续收敛到 post-TR HType 路线。先确认
+`src/Passes/PassManager.cpp` 里 EVM pipeline 已经在 `add_type_recovery_passes`
+之后运行 `AbiReturnPass`、`SolidityRevertPass`、`CheckedBoundsPass` 和
+`EventLogPass`，所以这次没有调整 pass 顺序。
+
+实现改动：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:209`：
+  新增 `hasHTypeBufferFieldAt` 和 `getHTypeBufferFieldStoreValues` 声明。
+  这两个 helper 统一判断 record field 和透明 offset 0 单字段指针。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:85`：
+  实现 `hasHTypeBufferFieldAt`。如果有 record，就按 record field 判断；
+  如果没有 record 但 `HTypeBufferView::HasTransparentOffset0Field` 为真，只把
+  offset 0 当作存在字段。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:101`：
+  实现 `getHTypeBufferFieldStoreValues`，只在 HType buffer 认为该 offset 是字段时
+  返回 store evidence，避免重新引入 raw store 兜底。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:57`：
+  `getAbiReturnPayloadHType` 改为直接用 `hasHTypeBufferFieldAt`，删除原来对
+  offset 0 store evidence 的本地特殊判断。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:60`：
+  `getRevertBufferHType` 接受透明 offset 0 单字段指针。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:85`：
+  `getRevertPayloadHType` 改走 `HTypeBufferView`，selector / panic code /
+  error string 字段都通过 buffer field helper 判断。
+- `src/Passes/evm/solidity-patterns/EventLogPass.cpp:26`：
+  event data 判断也接受透明 offset 0 单字段指针，避免把单字段 buffer 误报成
+  missing HType。
+
+复杂度评分：
+
+- 实现效果：7/10。单字段指针现在能被 return / revert / event pass 按最小
+  HType buffer 字段处理；但动态 tail 仍然依赖类型恢复产出更多 record fields。
+- 理解成本：2/10。只加了两个薄 helper，没有新增汇总层。
+- 维护成本：2/10。调用点集中在 `solidity-patterns/` 下，没有继续加长
+  `SolidityPatterns.cpp`。
+
+验证：
+
+- `cmake --build ./build --target notdec-core -j4` 通过。

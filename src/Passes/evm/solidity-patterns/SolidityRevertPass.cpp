@@ -26,7 +26,6 @@ STATISTIC(NumRevertMissingPayloadHTypes,
 namespace {
 
 struct RevertPayloadHType {
-  ast::RecordDecl *Record = nullptr;
   bool HasSelector = false;
   bool HasPanicCode = false;
   bool HasErrorHead = false;
@@ -58,26 +57,29 @@ getCanonicalPanicPayloadFromEvidence(ArrayRef<mlsub::EVMStoreEvidence> Stores,
   return Payload;
 }
 
-ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
-                                       Value *Base, CallBase &Use,
-                                       unsigned ArgIndex) {
+std::optional<HTypeBufferView>
+getRevertBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
+                     unsigned ArgIndex) {
   HTypeBufferView View = getHTypeBufferView(HTypes, Base, Use, ArgIndex);
   if (View.Record != nullptr) {
-    return View.Record;
+    return View;
+  }
+  if (View.HasTransparentOffset0Field) {
+    return View;
   }
 
   if (View.Gap == HTypeBufferGap::NoPointerType) {
     LLVM_DEBUG(dbgs() << "evm revert: base has no pointer HType: " << *Base
                       << "\n");
     ++NumRevertNonPointerBaseHTypes;
-    return nullptr;
+    return std::nullopt;
   }
 
   LLVM_DEBUG(dbgs() << "evm revert: base HType is not record pointer: "
                     << View.BaseType->getAsString() << " for " << *Base
                     << "\n");
   ++NumRevertNonRecordBaseHTypes;
-  return nullptr;
+  return std::nullopt;
 }
 
 std::optional<RevertPayloadHType>
@@ -89,25 +91,24 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
     return PanicPayload;
   }
 
-  ast::RecordDecl *Record =
-      getRecordPointeeHType(HTypes, Revert.getArgOperand(1), Revert, 1);
-  if (Record == nullptr) {
+  std::optional<HTypeBufferView> View =
+      getRevertBufferHType(HTypes, Revert.getArgOperand(1), Revert, 1);
+  if (!View.has_value()) {
     return std::nullopt;
   }
 
   RevertPayloadHType Payload;
-  Payload.Record = Record;
-  Payload.HasSelector = hasHTypeFieldAt(*Record, 0);
-  Payload.HasPanicCode = hasHTypeFieldAt(*Record, 4);
-  Payload.HasErrorHead = hasHTypeFieldAt(*Record, 4);
-  Payload.HasErrorLength = hasHTypeFieldAt(*Record, 36);
-  Payload.HasErrorData = hasHTypeFieldAt(*Record, 68);
-  Payload.SelectorStores =
-      getHTypeFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 0);
-  Payload.PanicCodeStores =
-      getHTypeFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 4);
-  Payload.ErrorLengthStores =
-      getHTypeFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 36);
+  Payload.HasSelector = hasHTypeBufferFieldAt(*View, 0);
+  Payload.HasPanicCode = hasHTypeBufferFieldAt(*View, 4);
+  Payload.HasErrorHead = hasHTypeBufferFieldAt(*View, 4);
+  Payload.HasErrorLength = hasHTypeBufferFieldAt(*View, 36);
+  Payload.HasErrorData = hasHTypeBufferFieldAt(*View, 68);
+  Payload.SelectorStores = getHTypeBufferFieldStoreValues(
+      Stores, *View, Revert.getArgOperand(1), 0);
+  Payload.PanicCodeStores = getHTypeBufferFieldStoreValues(
+      Stores, *View, Revert.getArgOperand(1), 4);
+  Payload.ErrorLengthStores = getHTypeBufferFieldStoreValues(
+      Stores, *View, Revert.getArgOperand(1), 36);
   return Payload;
 }
 

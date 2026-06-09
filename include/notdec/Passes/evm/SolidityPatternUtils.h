@@ -207,10 +207,14 @@ HTypeBufferView getHTypeBufferView(notdec::llvm2c::HTypeResult &HTypes,
                                    llvm::Value *Base, llvm::CallBase &Use,
                                    unsigned ArgIndex);
 bool hasHTypeFieldAt(notdec::ast::RecordDecl &Record, int64_t Offset);
+bool hasHTypeBufferFieldAt(const HTypeBufferView &View, int64_t Offset);
 llvm::SmallVector<llvm::Value *, 2>
 getHTypeFieldStoreValues(llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores,
                          notdec::ast::RecordDecl &Record, llvm::Value *Base,
                          int64_t Offset);
+llvm::SmallVector<llvm::Value *, 2> getHTypeBufferFieldStoreValues(
+    llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores,
+    const HTypeBufferView &View, llvm::Value *Base, int64_t Offset);
 llvm::SmallVector<llvm::Value *, 2> getHTypeStoreValuesAtOffset(
     llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores, llvm::Value *Base,
     int64_t Offset);
