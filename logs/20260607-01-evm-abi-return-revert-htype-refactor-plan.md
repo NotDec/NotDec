@@ -179,6 +179,9 @@
 验证：
 
 - `cmake --build ./build --target notdec-core -j4` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.93s。
 
 ## 2026-06-09 实现记录：revert metadata / marker helper 移到专门文件
 
@@ -213,6 +216,34 @@
 - `cmake --build ./build --target notdec -j4` 通过。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.92s。
+
+## 2026-06-09 实现记录：删除暂停的 memory write/read marker 死代码
+
+本次只清理已经注释掉的旧 marker materialization，没有改变
+`MemoryBufferRewritePass` 当前实际行为。`MemoryWrite` / `MemoryRead` facts 仍保留，
+因为 allocation 判断还会用 `Facts.Writes` 判断 free-memory pointer load 是否真的被写入。
+
+实现改动：
+
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:18`：
+  删除不再递增的 `NumMemoryWrites` 和 `NumMemoryReads` 统计项。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:292`：
+  删除已经注释掉的 `insertWriteMarker` 和 `insertReadMarker` 死代码。
+  这段代码会物化 `notdec_solidity_memory_write`、
+  `notdec_solidity_memory_copy_write`、`notdec_solidity_memory_read`，已经和当前
+  HType-only 迁移方向不一致。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:533`：
+  删除 `MemoryBufferRewritePass::run` 里已经注释掉的 write/read marker 调用循环。
+
+复杂度评分：
+
+- 实现效果：4/10。只是删死代码，但减少旧 marker 路径回流的可能性。
+- 理解成本：1/10。没有新增逻辑。
+- 维护成本：1/10。后续读 `MemoryBufferRewritePass` 时不会再看到暂停的旧 marker 分支。
+
+验证：
+
+- `cmake --build ./build --target notdec-core -j4` 通过。
 
 ## 2026-06-09 实现记录：checked-bounds 输出 helper 移到专门文件
 
