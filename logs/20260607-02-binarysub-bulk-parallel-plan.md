@@ -753,3 +753,47 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 这一步只改变 `recursive` 的 value 形状，不改变语义，也不引入锁。
 - `recVars` 仍然保留，因为后续 `analyzeOccurrences()`、`simplifyType()`、`coalesceCompactType()` 还依赖它。
 - 下一步可以考虑把 entry 改成可等待状态，例如 `shared_ptr<Entry> + mutex/cv`，再讨论是否替换成 oneTBB concurrent map。
+
+# 实现记录：把 recursive entry 改成 shared_ptr 状态对象
+
+本次继续推进第 4.3 的数据结构准备，仍不并行 `canonicalizeType()`。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:488`：
+  `CanonicalRecursiveEntry` 增加 `State { Pending, Stable }`，替换上一版 `bool finalized`。
+- `external/binarysub/include/binarysub/binarysub.h:498`：
+  `TypeSimplifier::recursive` 改成
+  `PolarCompactTypeMap<std::shared_ptr<CanonicalRecursiveEntry>>`。
+- `external/binarysub/src/binarysub.cpp:1079`：
+  `getOrCreateRecursiveVar()` 改为返回 `entry->freshVar`，miss 时创建 `shared_ptr` entry，初始状态为
+  `Pending`。
+- `external/binarysub/src/binarysub.cpp:1098`：
+  `finalizeRecursiveVar()` 改为通过 `shared_ptr` 更新 `entry.bound`，并把状态改成 `Stable`。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-rec-entry-shared.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-rec-entry-shared.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=24.87s`，`rss_kb=194500`，仍在默认并行同一量级。
+
+判断：
+
+- 这一步仍不引入锁，也不改变 `go1()` 的执行路径。
+- `shared_ptr<Entry>` 是为后续 oneTBB concurrent map 做准备：map accessor 只负责找到 entry，后续递归和等待可以只操作 entry 本身。
+- 下一步如果继续，需要决定是否现在就加 `mutex/cv`，还是先把 `recursive` 容器替换成 oneTBB concurrent map。
