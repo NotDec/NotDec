@@ -178,6 +178,19 @@ bool hasFixedTupleHelperPayloadHType(llvm2c::HTypeResult &HTypes,
   return true;
 }
 
+bool hasFixedWordHelperPayloadHType(llvm2c::HTypeResult &HTypes,
+                                    ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                    Function &Helper, Argument *Base) {
+  if (!helperReturnsBasePlusSize(Helper, Base, 32)) {
+    return false;
+  }
+
+  HTypeBufferView View = getHTypeValueBufferView(HTypes, Base);
+  return (hasHTypeBufferFieldAt(View, 0) &&
+          hasStoreEvidenceAt(Stores, Base, 0)) ||
+         hasNestedHelperStoreEvidenceAt(HTypes, Stores, Helper, Base, 0);
+}
+
 std::optional<HTypeBufferView>
 getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
                         unsigned ArgIndex) {
@@ -274,6 +287,9 @@ getDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
       // encoder helper formal still has the recovered ABI buffer record.
       // Trust that formal only for this free-memory-base helper shape.
       View = getHTypeValueBufferView(HTypes, HelperArg);
+    }
+    if (hasFixedWordHelperPayloadHType(HTypes, Stores, *Helper, HelperArg)) {
+      return AbiReturnHelperPayload{false, false, true};
     }
     if (View.Record == nullptr && !View.HasTransparentOffset0Field) {
       continue;

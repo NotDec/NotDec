@@ -874,3 +874,40 @@ outer helper 的返回值依赖 inner helper 的返回值。
   `0448_19495059_065877b669_4f138305be23` 全部通过。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.92s。
+
+## 2026-06-09 实现记录：固定单词 return helper 支持 HType store evidence
+
+`2001_19510128_72aa4f70b3_e9ee7c9c0e79` 里还有一种固定 32 字节 ABI return
+漏标：public 函数执行 `return(mload(0x40), helper_ret - mload(0x40))`，helper
+只把一个值编码到 `base + 0`，然后返回 `base + 32`。类型恢复没有把 public 侧的
+free-memory reload 直接连到 buffer record，但 helper 形参和它调用的下一层 helper
+已有 HType pointer 和 offset 0 的 store evidence。
+
+本次只补这个窄形状：helper 必须返回 `base + 32`，offset 0 必须能由 helper 形参的
+HType 字段加直接 store evidence 证明，或者由一层 nested helper 的 store evidence
+证明。没有恢复任意 helper 的 store 集合，也没有放宽到非 HType 证据。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:181`：
+  新增 `hasFixedWordHelperPayloadHType`，检查 helper 返回 `base + 32`，并用
+  offset 0 的 HType 字段和 store evidence 判断单词 payload。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:290`：
+  `getDynamicReturnHelperPayloadHType` 在继续检查动态 string / fixed tuple 前，先接受
+  上述固定单词 helper，并标成 fixed ABI return candidate。
+
+复杂度评分：
+
+- 实现效果：6/10。`2001...` 的 ABI return 从 70/72 收敛到 72/72。
+- 理解成本：2/10。规则只多覆盖 `base + 32` 单词 helper，仍在 ABI return pass 内。
+- 维护成本：2/10。后续如果 HType 能把该 helper 直接恢复成完整 buffer record，这段可以删除。
+
+验证：
+
+- `git diff --check` 通过。
+- `cmake --build ./build --target notdec -j4` 通过，ninja 报告 no work to do。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.89s。
+- 临时单样例 `2001_19510128_72aa4f70b3_e9ee7c9c0e79` 仍整体失败，但
+  `notdec.solidity.abi_return` 已对齐为 72/72；剩余差异是已知的 2 个
+  `encoded_candidate` revert 缺口和 checked-bounds skip。
