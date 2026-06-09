@@ -72,6 +72,21 @@ bool containsTransparentOffset0Field(ast::HType *Ty) {
   return false;
 }
 
+HTypeBufferView makeHTypeBufferView(ast::HType *Ty) {
+  ast::RecordDecl *Record = getRecordPointerPointee(Ty);
+  bool HasTransparentOffset0Field = containsTransparentOffset0Field(Ty);
+  if (Record != nullptr) {
+    return HTypeBufferView{Record, Ty, HasTransparentOffset0Field,
+                           HTypeBufferGap::None};
+  }
+  if (!containsPointerType(Ty)) {
+    return HTypeBufferView{nullptr, Ty, HasTransparentOffset0Field,
+                           HTypeBufferGap::NoPointerType};
+  }
+  return HTypeBufferView{nullptr, Ty, HasTransparentOffset0Field,
+                         HTypeBufferGap::NonRecordPointerType};
+}
+
 } // namespace
 
 HTypeBufferView getHTypeBufferView(llvm2c::HTypeResult &HTypes, Value *Base,
@@ -86,18 +101,14 @@ HTypeBufferView getHTypeBufferView(llvm2c::HTypeResult &HTypes, Value *Base,
       Ty = BaseTy;
     }
   }
-  ast::RecordDecl *Record = getRecordPointerPointee(Ty);
-  bool HasTransparentOffset0Field = containsTransparentOffset0Field(Ty);
-  if (Record != nullptr) {
-    return HTypeBufferView{Record, Ty, HasTransparentOffset0Field,
-                           HTypeBufferGap::None};
-  }
-  if (!containsPointerType(Ty)) {
-    return HTypeBufferView{nullptr, Ty, HasTransparentOffset0Field,
-                           HTypeBufferGap::NoPointerType};
-  }
-  return HTypeBufferView{nullptr, Ty, HasTransparentOffset0Field,
-                         HTypeBufferGap::NonRecordPointerType};
+  return makeHTypeBufferView(Ty);
+}
+
+HTypeBufferView getHTypeValueBufferView(llvm2c::HTypeResult &HTypes,
+                                        Value *Base) {
+  ast::HType *Ty =
+      HTypes.getDefaultValueType(getExtValuePtr(Base, nullptr));
+  return makeHTypeBufferView(Ty);
 }
 
 } // namespace notdec::passes::evm::detail

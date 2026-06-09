@@ -224,6 +224,59 @@
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.92s。
 
+## 2026-06-09 实现记录：动态 return helper 支持形参 HType fallback
+
+`0340_19494346_717db37a78_7324081e28fc` 里还有两个动态 ABI return 漏标。
+public wrapper 的形状仍是
+`return(mload(0x40), helper_ret - mload(0x40))`，helper 也是
+`private__0x2cf3_0x2cf3`。区别是这两个 wrapper 里的 free-memory load 在 HType
+里还是 `top:256`，但 helper 对应形参已经恢复成 `struct_0*`，并且形参上有 offset
+0 / 32 的 HType store evidence。
+
+本次没有放宽到任意 helper。规则仍然要求 return base 是 free-memory pointer，
+size 是 helper return 减同一个 free-memory base，helper 实参也是同一个
+free-memory base，并且后续 payload 判断继续基于 helper 形参上的 HType store
+evidence。只是在 call-site 实参没有 record HType 时，允许回看 callee 形参自己的
+HType。
+
+实现改动：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:209`：
+  新增 `getHTypeValueBufferView` 声明，用于直接按某个 LLVM value 自身的 HType
+  构造 buffer view。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:75`：
+  抽出 `makeHTypeBufferView`，避免 call-site view 和 value 自身 view 重复实现
+  record / transparent offset 0 判断。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:108`：
+  实现 `getHTypeValueBufferView`，只读 `getExtValuePtr(Base, nullptr)` 的默认
+  HType，不扫描 IR store。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:181`：
+  `getDynamicReturnHelperPayloadHType` 在 helper 实参 view 没有 record 时，回看
+  helper 形参 view；offset 0 / 32 仍然必须由 helper 形参上的 HType store evidence
+  证明。
+
+复杂度评分：
+
+- 实现效果：7/10。`0340...` 的 ABI return 从 100/104 收敛到 104/104，两个漏标
+  return 都补齐。
+- 理解成本：2/10。新增的是 HType view 的小入口，没有新增 payload 汇总层。
+- 维护成本：2/10。规则仍集中在 `AbiReturnPass.cpp` 的动态 helper 分支里。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `0340_19494346_717db37a78_7324081e28fc`：ABI return
+  `expected_notdec.solidity.abi_return=104` /
+  `actual_notdec.solidity.abi_return=104`，真实 `evm_return` 52/52 标记；该样例
+  整体仍因为已知 checked-bounds `memory_allocation_bounds` oracle 差异失败。
+- 临时 6 样例集合中，`0011_multi_public`、`0002_delegatecall_no_nonpayable`、
+  `0441_19494998_776c03cc9d_8117f350cb9d`、
+  `0448_19495059_065877b669_4f138305be23`、
+  `0657_19497309_a4d607684e_332c65dbca0f` 通过；`0340...` 只剩上述
+  checked-bounds 差异。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.90s。
+
 ## 2026-06-09 实现记录：solidity_patterns runner 跟随 HType-only 路线
 
 本次只改测试和审计脚本，不改 pass 行为。目标是让 `solidity_patterns`

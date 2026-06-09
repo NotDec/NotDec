@@ -206,6 +206,8 @@ std::optional<uint64_t> getSelectorWord(llvm::Value *V);
 HTypeBufferView getHTypeBufferView(notdec::llvm2c::HTypeResult &HTypes,
                                    llvm::Value *Base, llvm::CallBase &Use,
                                    unsigned ArgIndex);
+HTypeBufferView getHTypeValueBufferView(notdec::llvm2c::HTypeResult &HTypes,
+                                        llvm::Value *Base);
 bool hasHTypeFieldAt(notdec::ast::RecordDecl &Record, int64_t Offset);
 bool hasHTypeBufferFieldAt(const HTypeBufferView &View, int64_t Offset);
 llvm::SmallVector<llvm::Value *, 2>

@@ -178,11 +178,17 @@ getDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
 
     HTypeBufferView View = getHTypeBufferView(
         HTypes, HelperCall->getArgOperand(I), *HelperCall, I);
+    Argument *HelperArg = Helper->getArg(I);
+    if (View.Record == nullptr && !View.HasTransparentOffset0Field) {
+      // Some public wrappers keep the free-memory load as top, while the
+      // encoder helper formal still has the recovered ABI buffer record.
+      // Trust that formal only for this free-memory-base helper shape.
+      View = getHTypeValueBufferView(HTypes, HelperArg);
+    }
     if (View.Record == nullptr && !View.HasTransparentOffset0Field) {
       continue;
     }
 
-    Argument *HelperArg = Helper->getArg(I);
     bool HasHead = hasHTypeBufferFieldAt(View, 0) &&
                    hasStoreEvidenceAt(Stores, HelperArg, 0);
     bool HasLength =
