@@ -839,3 +839,59 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 这一步只是让 entry 具备后续等待/唤醒能力。
 - 当前还没有等待路径，所以不会改变单线程 canonicalize 行为。
 - 下一步如果继续，应优先把 `recursive` 容器替换成 oneTBB concurrent map，并保持规则：拿到 `shared_ptr<Entry>` 后尽快释放 map accessor。
+
+# 实现记录：把 recursive 容器切到 oneTBB concurrent map
+
+本次把第 4.3 的 `recursive` 容器切到 oneTBB concurrent map，但仍不并行 `canonicalizeType()`。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:26`：在公共头里补
+  `BINARYSUB_ENABLE_TBB_PARALLEL` 默认值，保证 standalone OFF 构建也能包含该头。
+- `external/binarysub/include/binarysub/binarysub.h:30`：宏打开时 include
+  `oneapi/tbb/concurrent_hash_map.h`。
+- `external/binarysub/include/binarysub/binarysub.h:419`：新增
+  `PolarCompactTypeHashCompare`，适配 oneTBB 的 `hash()/equal()` 接口。
+- `external/binarysub/include/binarysub/binarysub.h:439`：新增
+  `ConcurrentPolarCompactTypeMap<T>`：
+  - 宏打开时使用 `oneapi::tbb::concurrent_hash_map`。
+  - 宏关闭时退回 `PolarCompactTypeMap<T>`。
+- `external/binarysub/include/binarysub/binarysub.h:535`：
+  `TypeSimplifier::recursive` 改成 `ConcurrentPolarCompactTypeMap<std::shared_ptr<CanonicalRecursiveEntry>>`。
+- `external/binarysub/src/binarysub.cpp:1079`：
+  `getOrCreateRecursiveVar()` 在 TBB 路径用 accessor 做 get-or-create，拿到 `shared_ptr<Entry>` 后退出 accessor 作用域。
+- `external/binarysub/src/binarysub.cpp:1108`：
+  `finalizeRecursiveVar()` 在 TBB 路径用 const_accessor 查 entry，复制 `shared_ptr<Entry>` 后退出 accessor 作用域，再更新 entry 自身状态。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+rm -rf /tmp/binarysub-rec-concurrent-off-build
+cmake -S external/binarysub -B /tmp/binarysub-rec-concurrent-off-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
+cmake --build /tmp/binarysub-rec-concurrent-off-build --target binarysub -j4
+/tmp/binarysub-rec-concurrent-off-build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-rec-concurrent.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-rec-concurrent.htypes
+```
+
+结果：
+
+- 默认 ON 的 `binarysub` 自测通过。
+- standalone `BINARYSUB_ENABLE_TBB_PARALLEL=OFF` 构建和自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=25.05s`，`rss_kb=194680`，相比前几轮默认并行略慢但仍在同一量级。
+
+判断：
+
+- 这一步只是把 `recursive` 容器换成并发容器，还没有并行 `canonicalizeType()`。
+- helper 已经按计划避免在持有 TBB accessor 时递归或等待。
+- 目前 `variableOrigins` 仍是普通 `std::map`，所以还不能直接并行 canonicalize root loop。
