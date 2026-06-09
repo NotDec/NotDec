@@ -624,3 +624,47 @@ Solidity 语义 pass 的标注接口继续扩散。
 复杂度：4/10。新增一个薄 helper，并让 ABI return 分类走 HType record。
 维护成本：3/10。helper 可被 ABI return / revert 共用；后续要继续守住“先 HType 字段、再 evidence”的边界。
 实现效果：6/10。阶段 4 的 pass 边界更清楚，但单 word return 的 record 恢复还没解决，下一步应进入阶段 5。
+
+## 阶段 5 决策点：single-word ABI return 的 offset 0 record 是否保留
+
+现象：
+
+- `0011_multi_public` 的 `public__0xf39d8c65_0xe0` 已经被 memory allocation rewrite
+  改成：
+  `%0 = call ptr @calloc_unbounded()`、
+  `%evm.alloc.addr = ptrtoint ptr %0 to i256`、
+  `store i256 %private.call, ptr %0`、
+  `evm_return(mem, %evm.alloc.addr, 32)`。
+- 但 HType 里 `public__0xf39d8c65_0xe0::%evm.alloc.addr` 仍是
+  `ptr<load=void, store=void, psize=256>`，不是 record pointer。
+- 我试过一个窄方向：在 EVM `load/store` 处理里，对直接访问 heap allocation base 的
+  256-bit store 补 `{0: value}` record 约束。结果中间确实产生了单字段 record，
+  但 `normalizeTransparentSingleFieldRecords` 又把它折成
+  `'o17:256* & ptr<load=void, store='o17:256, psize=256>`。`AbiReturnPass`
+  仍拿不到 record pointer。
+- 这说明当前问题不是简单漏一条 store 约束，而是 HType normalize 的策略问题：
+  单字段 offset 0 record 被认为是透明 wrapper，会被折掉。
+
+不确定点：
+
+- ABI return / revert / event 这类 EVM buffer 是否应该要求 single-word buffer 也保留成
+  record pointer。
+- 如果全局禁止 single-field record 透明化，可能影响普通 LLVM IR 和 C 输出质量。
+- 如果只为 EVM allocation / ABI buffer 保留，需要给 HType normalize 提供来源信息，
+  或者让 semantic pass 能识别“透明化后的 offset 0 buffer”。
+
+备选路线：
+
+- 路线 A：在 HType normalize 里保留来自 EVM ABI buffer 的 single-field record。
+  需要给 record 或 value type 增加来源标记，范围较大，但语义最直接。
+- 路线 B：`AbiReturnPass` 接受透明化后的
+  `T* & ptr<load/store=T, psize=256>` 作为 single-word payload。这个改动小，
+  但会让 pass 直接依赖 normalize 后的表示，需要谨慎确认不会变成旧式扫描兜底。
+- 路线 C：在类型恢复侧为 ABI consumer base 单独附加不可透明化的 record view。
+  这接近新的 HType view/sidecar，需要避免变成额外汇总层。
+
+当前判断：
+
+- 不应该在 `AbiReturnPass` 里回退扫 store。
+- 也不应该贸然改全局 transparent single-field record normalize。
+- 这里需要先决定 single-word ABI buffer 的表达方式，再继续阶段 5。
