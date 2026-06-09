@@ -1062,3 +1062,70 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
   如果两个线程对同一个 recursive entry 都进入 `finalizeRecursiveVar()`，第二次 finalize 遇到已有 stable
   bound 时应该怎么处理。计划里列过三个方向：相同则忽略、不同则 merge、或者先 assert/trace。
   当前代码还是覆盖写，不能直接并行 root loop。
+
+# 尝试记录：canonicalize root loop 并行触发 bound 冲突
+
+本次按原计划继续尝试第 4 步，但没有保留代码改动。
+
+尝试内容：
+
+- 把 `finalizeRecursiveVar()` 改成幂等 finalize：
+  - `Pending` 时写 `entry.bound`，变成 `Stable`，并写 `recVars`。
+  - `Stable` 时如果新旧 bound 相同则忽略。
+  - `Stable` 时如果新旧 bound 不同则 trace/assert。
+- 把 `bulkSimplifyDetailed()` 的 canonicalize 阶段改成：
+  - `types` 转为有序 vector。
+  - worker 写各自的 `CompactTypePtr` result slot。
+  - 主线程按输入顺序插回 `compactMap`。
+
+结果：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+rm -rf /tmp/binarysub-canonical-parallel-off-build
+cmake -S external/binarysub -B /tmp/binarysub-canonical-parallel-off-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
+cmake --build /tmp/binarysub-canonical-parallel-off-build --target binarysub -j4
+/tmp/binarysub-canonical-parallel-off-build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+```
+
+这些都通过。
+
+fortune 带 trace 的一次运行通过：
+
+```text
+elapsed=31.61 rss_kb=197028
+[simplify:bulk-timing] roots=4437 canonicalize_ms=13079 struct_merge_ms=5804 analyze_ms=3208 origin_ms=254 simplify_ms=1179 coalesce_ms=642 total_ms=19400
+```
+
+但不带 trace 的 fortune 触发 assert：
+
+```text
+Assertion `false && "Recursive entry finalized with a different compact bound"' failed.
+elapsed=1.57 rss_kb=157856
+```
+
+`NOTDEC_BINARYSUB_THREADS=1` 也触发同一个 assert：
+
+```text
+Assertion `false && "Recursive entry finalized with a different compact bound"' failed.
+elapsed=1.67 rss_kb=156416
+```
+
+判断：
+
+- “同一个 recursive entry 的第二次 finalize 只会得到相同 bound”这个假设不成立。
+- 而且它不只是并发调度问题；在线程数为 1 的路径里也会出现不同 bound。
+- 当前串行算法实际依赖 `finalizeRecursiveVar()` 后写覆盖前写的行为。
+- 因此不能用简单的 `Pending -> Stable` 一次写入模型直接并行 canonicalize root loop。
+- 这次代码已回退，没有提交失败实现。
+
+后续可选方向：
+
+- 先研究 `finalizeRecursiveVar()` 多次覆盖的语义：哪些 key 会被覆盖，旧 bound 和新 bound 差在哪里，最后一次覆盖为什么是可接受结果。
+- 如果覆盖只是同一个串行遍历顺序下的确定性修正，可以考虑把 canonicalize 阶段拆成“并行预计算 + 串行 finalize 提交”。
+- 如果覆盖本质上是递增合并，则需要把 `recursive/recVars` 做成明确的 merge/fixed-point 状态，而不是一次 stable。
+- 暂时不建议继续硬并行 canonicalize root loop；当前已实现的可提交并行收益仍来自 bulk 后半段 per-root 并行。
