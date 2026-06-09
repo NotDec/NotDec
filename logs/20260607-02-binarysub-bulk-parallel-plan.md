@@ -1243,3 +1243,70 @@ elapsed=16.13 rss_kb=201808
 - 不再继续靠调度中的 owner 选择修补文本稳定性。
 - 如果要默认打开 canonicalize 并行，应先在 UType/HType 输出前做递归类型稳定化，把等价但折叠点不同的递归表示归一。
 - 另一条路是 canonicalize 阶段并行预计算，最后按 root 顺序串行提交 recursive/recVars，但这会损失一部分收益。
+
+# 实现记录：canonicalize 状态数 progress trace
+
+目标：
+
+- 类比 NFA 到 DFA 的构造过程，在 `canonicalizeType()` 里记录已经展开过多少个
+  `(CompactType, polarity)` 状态。
+- 只通过现有 `NOTDEC_BINARYSUB_TRACE` 输出，避免默认 stderr/stdout 变化影响测试 oracle。
+- 每新增约 1000 个状态输出一次，canonicalize 阶段结束再输出一次最终状态数和耗时。
+
+实现：
+
+- `external/binarysub/include/binarysub/binarysub.h:551`
+  - 在 `TypeSimplifier` 里增加 `canonicalizeProgressStates`、
+    `nextCanonicalizeProgressReport` 和 `canonicalizeProgressMutex`。
+  - 这个集合只在 trace 打开时使用，key 和递归检测使用的 `(CompactType, polarity)` 一致。
+- `external/binarysub/include/binarysub/binarysub.h:574`
+  - 增加 `traceCanonicalizeProgress()` 和 `canonicalizeProgressStateCount()`。
+- `external/binarysub/include/binarysub/binarysub.h:624`
+  - `isClear()` / `clear()` 覆盖新增 trace 状态，保证 `TypeSimplifier` 生命周期检查仍然完整。
+- `external/binarysub/src/binarysub.cpp:1081`
+  - 实现 `traceCanonicalizeProgress()`：trace 没开直接返回；trace 开启时用 mutex 保护 set。
+  - 达到 1000、2000、3000 这类阈值时输出
+    `[simplify:canonicalize-progress] states=N`。
+- `external/binarysub/src/binarysub.cpp:1408`
+  - 在 `canonicalizeType()` 的 `go1()` 里，对每个非空 `pty = (ty, pol)` 记录一次。
+- `external/binarysub/src/binarysub.cpp:2708`
+  - 在 bulk canonicalize 阶段结束后输出
+    `[simplify:canonicalize-final] states=N ms=M`。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+rm -rf /tmp/notdec-canon-progress
+NOTDEC_BINARYSUB_TRACE=1 /usr/bin/time -f 'elapsed=%e cpu=%P rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-canon-progress.ll --tr-level=2 \
+  --gen-work-dir --work-dir=/tmp/notdec-canon-progress \
+  --dump-htypes=/tmp/notdec-canon-progress.htypes
+rg "canonicalize-progress|canonicalize-final|bulk-timing|bulk-compact-stats" \
+  /tmp/notdec-canon-progress/binarysub-trace.log
+```
+
+结果：
+
+```text
+./build/binarysub: passed
+fortune elapsed=36.10 cpu=121% rss_kb=199072
+
+[simplify:canonicalize-progress] states=1000
+[simplify:canonicalize-progress] states=2000
+[simplify:canonicalize-progress] states=3000
+[simplify:canonicalize-progress] states=4000
+[simplify:canonicalize-progress] states=5000
+[simplify:canonicalize-final] states=5078 ms=12629
+[simplify:bulk-timing] roots=4437 canonicalize_ms=12629 struct_merge_ms=5860 analyze_ms=3327 origin_ms=275 simplify_ms=1199 coalesce_ms=7817 total_ms=24257
+[simplify:bulk-compact-stats] roots=4437 nodes=15657 vars=51164 prims=6376 records=2129 functions=116 ptrs=4484 max_depth=20 rec_vars=79
+```
+
+评分：
+
+- 实现效果：8/10。可以直接看到 canonicalize 状态数增长，fortune 主 bulk 最终是 5078 个状态。
+- 理解成本：2/10。只是 trace 统计，不改变算法结果。
+- 维护成本：2/10。状态挂在 `TypeSimplifier` 生命周期里，trace 不开时只有一次分支判断。
