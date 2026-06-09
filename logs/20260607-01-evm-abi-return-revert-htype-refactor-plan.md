@@ -317,6 +317,43 @@ offset 0 字段。这里可以按用户前面说的“单个指针也可以看�
 - 临时单样例运行 `checked_bounds_arithmetic_01` 通过，`checked_bounds_audit` 通过。
 - 未跑 fortune，同本轮用户要求，先不处理 fortune 性能问题。
 
+## 2026-06-09 实现记录：revert custom error 接受 HType selector evidence
+
+`revert_custom_error_01/02/05/06` 的共同形状是：HType 已经把 `%evm.alloc.addr`
+识别成 pointer，但没有形成 record；selector 的 `store` 已经进入
+`TR.getEVMStoreEvidence()`，所以可以基于类型恢复 evidence 恢复 custom error。
+这不是重新扫 raw IR。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:35`：
+  `RevertPayloadHType` 新增 `SelectorFromStoreEvidenceOnly`，记录 selector 只来自
+  HType store evidence，不来自 record field。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:152`：
+  `getRevertBufferHType` 允许 non-record pointer 继续进入 payload evidence 判断。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:197`：
+  如果 record / transparent field 都没有，但 offset 0 在 revert 前有 256-bit
+  store evidence，则用它作为 selector evidence；offset 4 的 panic code 也只从
+  evidence 取。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:284`：
+  如果 selector 是 `Error(string)`，但只有 selector evidence、没有 head / length
+  字段，则不降级成 custom error，避免误分类。
+
+复杂度评分：
+
+- 实现效果：7/10。custom error 短 payload 能恢复，仍然只依赖 HType 结果和
+  HType store evidence。
+- 理解成本：2/10。逻辑仍集中在 `SolidityRevertPass.cpp`，没有新增 shared 层。
+- 维护成本：2/10。Error(string) 有保护，误判面较小。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时小集合 `revert_custom_error_01` 到 `revert_custom_error_06` 全部通过。
+- 临时小集合 `revert_error_string_01` 到 `revert_error_string_04` 全部通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.91s。
+
 ## 2026-06-09 实现记录：revert metadata / marker helper 移到专门文件
 
 本次只做纯搬移，避免 `src/Passes/evm/SolidityPatterns.cpp` 继续承载

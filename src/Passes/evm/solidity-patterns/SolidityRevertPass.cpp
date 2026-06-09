@@ -32,6 +32,7 @@ struct RevertPayloadHType {
   bool HasErrorHead = false;
   bool HasErrorLength = false;
   bool HasErrorData = false;
+  bool SelectorFromStoreEvidenceOnly = false;
   SmallVector<Value *, 2> SelectorStores;
   SmallVector<Value *, 2> PanicCodeStores;
   SmallVector<Value *, 2> ErrorLengthStores;
@@ -148,6 +149,9 @@ getRevertBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
   if (View.HasTransparentOffset0Field) {
     return View;
   }
+  if (View.Gap == HTypeBufferGap::NonRecordPointerType) {
+    return View;
+  }
 
   if (View.Gap == HTypeBufferGap::NoPointerType) {
     LLVM_DEBUG(dbgs() << "evm revert: base has no pointer HType: " << *Base
@@ -190,6 +194,20 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
       Stores, *View, Revert.getArgOperand(1), 4);
   Payload.ErrorLengthStores = getHTypeBufferFieldStoreValues(
       Stores, *View, Revert.getArgOperand(1), 36);
+  if (!Payload.HasSelector && !Payload.HasPanicCode &&
+      !Payload.HasErrorHead && !Payload.HasErrorLength &&
+      !Payload.HasErrorData) {
+    Payload.SelectorStores = getHTypeStoreValuesAtOffsetBefore(
+        Stores, Revert.getArgOperand(1), 0, Revert);
+    if (Payload.SelectorStores.empty()) {
+      return std::nullopt;
+    }
+    Payload.HasSelector = true;
+    Payload.SelectorFromStoreEvidenceOnly = true;
+    Payload.PanicCodeStores = getHTypeStoreValuesAtOffsetBefore(
+        Stores, Revert.getArgOperand(1), 4, Revert);
+    Payload.HasPanicCode = !Payload.PanicCodeStores.empty();
+  }
   return Payload;
 }
 
@@ -262,6 +280,10 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
       return std::nullopt;
     }
     return Match;
+  }
+  if (Selector.has_value() && *Selector == 0x08c379a0 &&
+      Payload->SelectorFromStoreEvidenceOnly) {
+    return std::nullopt;
   }
 
   if (Selector.has_value()) {
