@@ -1010,3 +1010,55 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 现在 `recursive`、`variableOrigins`、`closureCache`、`go0Cache` 的直接共享写点都已有保护。
   下一个真正需要处理的是 `recVars`：`finalizeRecursiveVar()` 仍会写
   `recVars[freshVar] = bound`。
+
+# 实现记录：给 recVars 回填加 mutex 保护
+
+本次继续收口 `canonicalizeType()` 的共享写点，但仍不并行 `canonicalizeType()`。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:537`：
+  给 `recVars` 增加 `recVarsMutex`。
+- `external/binarysub/include/binarysub/binarysub.h:581`：
+  增加 `setRecVarBound()`。
+- `external/binarysub/src/binarysub.cpp:1202`：
+  `finalizeRecursiveVar()` 回填 `recVars` 时改用 `setRecVarBound()`。
+- `external/binarysub/src/binarysub.cpp:1206`：
+  实现 `setRecVarBound()`，用一把 mutex 保护 `recVars[var] = bound`。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+rm -rf /tmp/binarysub-recvars-mutex-off-build
+cmake -S external/binarysub -B /tmp/binarysub-recvars-mutex-off-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
+cmake --build /tmp/binarysub-recvars-mutex-off-build --target binarysub -j4
+/tmp/binarysub-recvars-mutex-off-build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-recvars-mutex.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-recvars-mutex.htypes
+```
+
+结果：
+
+- 默认 ON 的 `binarysub` 自测通过。
+- standalone `BINARYSUB_ENABLE_TBB_PARALLEL=OFF` 构建和自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=25.47s`，`rss_kb=195760`，和最近几轮默认并行结果基本同一档。
+
+判断：
+
+- 这一步只保护 `finalizeRecursiveVar()` 对 `recVars` 的回填写入。
+- 后面的 `computeSimplificationPlan()` / `applySimplificationPlan()` / `coalesceCompactType()` 仍按现有流程单线程读写
+  `recVars` / `newRecVars`。
+- 继续真正并行 canonicalize root loop 前，还有一个不能靠 mutex 自动解决的决策点：
+  如果两个线程对同一个 recursive entry 都进入 `finalizeRecursiveVar()`，第二次 finalize 遇到已有 stable
+  bound 时应该怎么处理。计划里列过三个方向：相同则忽略、不同则 merge、或者先 assert/trace。
+  当前代码还是覆盖写，不能直接并行 root loop。
