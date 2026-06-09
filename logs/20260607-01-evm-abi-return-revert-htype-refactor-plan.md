@@ -526,3 +526,32 @@ slot store 形状。
 - 临时 checked-bounds 小集合 10 个样例全通过，skip 总数为 0。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.91s。
+
+## 2026-06-09 实现记录：nonpayable reject 不计入 revert oracle
+
+确认 `PayabilityGuardPass` 只消掉最外层 `msg.value == 0 ? body : revert(0,0)`
+判断。failure block 没有和其它 unreachable 分支共享；它在 pre-TR 被 payability
+CFG rewrite 消费后，post-TR `SolidityRevertPass` 看不到这类 `evm_revert(0,0)`。
+
+本次按用户决策更新 oracle：nonpayable reject revert 不再计入
+`notdec.solidity.revert` 和 `expected_revert_kinds.empty`。同时 payability guard 的
+metadata 期望改成当前 pass 实际保留的三个点：`callvalue`、`condition`、`branch`。
+failure block 的 payability metadata 会随 CFG rewrite 变成不可达细节，不再作为 oracle。
+
+实现改动：
+
+- `test/evm/solidity-patterns/manifest.json`：
+  对有 `expected_nonpayable_functions` 的样例，把
+  `expected_metadata_counts["notdec.solidity.payability_guard"]` 改成
+  `3 * expected_nonpayable_functions`。
+- `test/evm/solidity-patterns/manifest.json`：
+  把 nonpayable reject 数从 `expected_revert_kinds.empty` 中扣掉，并按当前 runner
+  语义让 `expected_metadata_counts["notdec.solidity.revert"]` 等于除
+  `returndata_bubble` 外的 revert kind 总和。
+
+验证：
+
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json` 通过。
+- 临时 15 样例集合中，`0014_proxy_like` 和 `0011_multi_public` 从失败变为通过。
+- 同一集合剩余失败为其它缺口：`0002_delegatecall_no_nonpayable` 少 ABI return 和
+  encoded revert，`0441...` 少 encoded revert，`0448...` 少 ABI return。

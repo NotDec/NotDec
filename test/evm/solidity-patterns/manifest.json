@@ -833,11 +833,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 1,
-        "notdec.solidity.payability_guard": 10,
-        "notdec.solidity.revert": 2
+        "notdec.solidity.payability_guard": 6,
+        "notdec.solidity.revert": 0
       },
       "expected_revert_kinds": {
-        "empty": 2,
+        "empty": 0,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -891,11 +891,11 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
-        "notdec.solidity.payability_guard": 25,
-        "notdec.solidity.revert": 13
+        "notdec.solidity.payability_guard": 15,
+        "notdec.solidity.revert": 6
       },
       "expected_revert_kinds": {
-        "empty": 8,
+        "empty": 3,
         "panic": 1,
         "returndata_bubble": 2,
         "error_string": 2,
@@ -1001,11 +1001,11 @@
         "notdec.solidity.abi_return": 10,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 30,
-        "notdec.solidity.revert": 14
+        "notdec.solidity.payability_guard": 18,
+        "notdec.solidity.revert": 8
       },
       "expected_revert_kinds": {
-        "empty": 13,
+        "empty": 7,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -1043,11 +1043,11 @@
         "notdec.solidity.abi_return": 28,
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 7,
-        "notdec.solidity.payability_guard": 95,
-        "notdec.solidity.revert": 71
+        "notdec.solidity.payability_guard": 57,
+        "notdec.solidity.revert": 44
       },
       "expected_revert_kinds": {
-        "empty": 35,
+        "empty": 16,
         "panic": 10,
         "returndata_bubble": 8,
         "error_string": 18,
@@ -1132,11 +1132,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 10,
-        "notdec.solidity.revert": 9
+        "notdec.solidity.payability_guard": 6,
+        "notdec.solidity.revert": 5
       },
       "expected_revert_kinds": {
-        "empty": 7,
+        "empty": 5,
         "panic": 0,
         "returndata_bubble": 2,
         "error_string": 0,
@@ -1198,7 +1198,7 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 28
+        "notdec.solidity.revert": 27
       },
       "expected_revert_kinds": {
         "empty": 12,
@@ -1239,11 +1239,11 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 5,
-        "notdec.solidity.payability_guard": 75,
-        "notdec.solidity.revert": 82
+        "notdec.solidity.payability_guard": 45,
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
-        "empty": 56,
+        "empty": 41,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -1281,11 +1281,11 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 5,
-        "notdec.solidity.payability_guard": 75,
-        "notdec.solidity.revert": 82
+        "notdec.solidity.payability_guard": 45,
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
-        "empty": 56,
+        "empty": 41,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -1322,7 +1322,7 @@
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 5,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 35
+        "notdec.solidity.revert": 34
       },
       "expected_revert_kinds": {
         "empty": 14,
@@ -1363,11 +1363,11 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
-        "notdec.solidity.payability_guard": 145,
-        "notdec.solidity.revert": 109
+        "notdec.solidity.payability_guard": 87,
+        "notdec.solidity.revert": 80
       },
       "expected_revert_kinds": {
-        "empty": 67,
+        "empty": 38,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -1405,11 +1405,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 10,
-        "notdec.solidity.revert": 9
+        "notdec.solidity.payability_guard": 6,
+        "notdec.solidity.revert": 5
       },
       "expected_revert_kinds": {
-        "empty": 7,
+        "empty": 5,
         "panic": 0,
         "returndata_bubble": 2,
         "error_string": 0,
@@ -1446,11 +1446,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
-        "notdec.solidity.payability_guard": 10,
-        "notdec.solidity.revert": 8
+        "notdec.solidity.payability_guard": 6,
+        "notdec.solidity.revert": 4
       },
       "expected_revert_kinds": {
-        "empty": 6,
+        "empty": 4,
         "panic": 0,
         "returndata_bubble": 2,
         "error_string": 0,
@@ -1488,11 +1488,11 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
-        "notdec.solidity.payability_guard": 145,
-        "notdec.solidity.revert": 109
+        "notdec.solidity.payability_guard": 87,
+        "notdec.solidity.revert": 80
       },
       "expected_revert_kinds": {
-        "empty": 67,
+        "empty": 38,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -1530,11 +1530,11 @@
         "notdec.solidity.abi_return": 72,
         "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.event": 21,
-        "notdec.solidity.payability_guard": 305,
-        "notdec.solidity.revert": 273
+        "notdec.solidity.payability_guard": 183,
+        "notdec.solidity.revert": 192
       },
       "expected_revert_kinds": {
-        "empty": 160,
+        "empty": 99,
         "panic": 36,
         "returndata_bubble": 20,
         "error_string": 12,
@@ -1614,11 +1614,11 @@
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 43,
         "notdec.solidity.event": 9,
-        "notdec.solidity.payability_guard": 145,
-        "notdec.solidity.revert": 212
+        "notdec.solidity.payability_guard": 87,
+        "notdec.solidity.revert": 173
       },
       "expected_revert_kinds": {
-        "empty": 106,
+        "empty": 77,
         "panic": 43,
         "returndata_bubble": 10,
         "error_string": 32,
@@ -1684,11 +1684,11 @@
         "notdec.solidity.abi_return": 66,
         "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 30,
-        "notdec.solidity.payability_guard": 310,
-        "notdec.solidity.revert": 288
+        "notdec.solidity.payability_guard": 186,
+        "notdec.solidity.revert": 170
       },
       "expected_revert_kinds": {
-        "empty": 137,
+        "empty": 75,
         "panic": 51,
         "returndata_bubble": 56,
         "error_string": 23,
@@ -1768,7 +1768,7 @@
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 17,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 75
+        "notdec.solidity.revert": 73
       },
       "expected_revert_kinds": {
         "empty": 18,
@@ -1918,11 +1918,11 @@
         "notdec.solidity.abi_return": 68,
         "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 11,
-        "notdec.solidity.payability_guard": 220,
-        "notdec.solidity.revert": 191
+        "notdec.solidity.payability_guard": 132,
+        "notdec.solidity.revert": 135
       },
       "expected_revert_kinds": {
-        "empty": 102,
+        "empty": 58,
         "panic": 53,
         "returndata_bubble": 12,
         "error_string": 23,
@@ -2005,11 +2005,11 @@
         "notdec.solidity.abi_return": 56,
         "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
-        "notdec.solidity.payability_guard": 195,
-        "notdec.solidity.revert": 110
+        "notdec.solidity.payability_guard": 117,
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
-        "empty": 63,
+        "empty": 24,
         "panic": 17,
         "returndata_bubble": 4,
         "error_string": 26,
@@ -2075,7 +2075,7 @@
         "notdec.solidity.checked_bounds": 61,
         "notdec.solidity.event": 12,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 145
+        "notdec.solidity.revert": 136
       },
       "expected_revert_kinds": {
         "empty": 47,
@@ -2148,11 +2148,11 @@
         "notdec.solidity.abi_return": 52,
         "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
-        "notdec.solidity.payability_guard": 180,
-        "notdec.solidity.revert": 103
+        "notdec.solidity.payability_guard": 108,
+        "notdec.solidity.revert": 64
       },
       "expected_revert_kinds": {
-        "empty": 58,
+        "empty": 22,
         "panic": 17,
         "returndata_bubble": 3,
         "error_string": 25,
@@ -2219,11 +2219,11 @@
         "notdec.solidity.abi_return": 104,
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
-        "notdec.solidity.payability_guard": 375,
-        "notdec.solidity.revert": 172
+        "notdec.solidity.payability_guard": 225,
+        "notdec.solidity.revert": 95
       },
       "expected_revert_kinds": {
-        "empty": 109,
+        "empty": 34,
         "panic": 10,
         "returndata_bubble": 2,
         "error_string": 51,
@@ -2292,11 +2292,11 @@
         "notdec.solidity.abi_return": 42,
         "notdec.solidity.checked_bounds": 15,
         "notdec.solidity.event": 14,
-        "notdec.solidity.payability_guard": 185,
-        "notdec.solidity.revert": 175
+        "notdec.solidity.payability_guard": 111,
+        "notdec.solidity.revert": 108
       },
       "expected_revert_kinds": {
-        "empty": 78,
+        "empty": 41,
         "panic": 15,
         "returndata_bubble": 30,
         "error_string": 14,
@@ -2435,11 +2435,11 @@
         "notdec.solidity.abi_return": 62,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 10,
-        "notdec.solidity.payability_guard": 190,
-        "notdec.solidity.revert": 128
+        "notdec.solidity.payability_guard": 114,
+        "notdec.solidity.revert": 88
       },
       "expected_revert_kinds": {
-        "empty": 86,
+        "empty": 48,
         "panic": 0,
         "returndata_bubble": 2,
         "error_string": 35,
@@ -2477,11 +2477,11 @@
         "notdec.solidity.abi_return": 102,
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
-        "notdec.solidity.payability_guard": 365,
-        "notdec.solidity.revert": 169
+        "notdec.solidity.payability_guard": 219,
+        "notdec.solidity.revert": 94
       },
       "expected_revert_kinds": {
-        "empty": 107,
+        "empty": 34,
         "panic": 10,
         "returndata_bubble": 2,
         "error_string": 50,
@@ -2550,11 +2550,11 @@
         "notdec.solidity.abi_return": 50,
         "notdec.solidity.checked_bounds": 18,
         "notdec.solidity.event": 9,
-        "notdec.solidity.payability_guard": 195,
-        "notdec.solidity.revert": 133
+        "notdec.solidity.payability_guard": 117,
+        "notdec.solidity.revert": 93
       },
       "expected_revert_kinds": {
-        "empty": 75,
+        "empty": 36,
         "panic": 18,
         "returndata_bubble": 1,
         "error_string": 17,
@@ -2630,11 +2630,11 @@
         "notdec.solidity.abi_return": 64,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
-        "notdec.solidity.payability_guard": 230,
-        "notdec.solidity.revert": 164
+        "notdec.solidity.payability_guard": 138,
+        "notdec.solidity.revert": 109
       },
       "expected_revert_kinds": {
-        "empty": 112,
+        "empty": 66,
         "panic": 7,
         "returndata_bubble": 9,
         "error_string": 36,
@@ -2770,11 +2770,11 @@
         "notdec.solidity.abi_return": 82,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 12,
-        "notdec.solidity.payability_guard": 280,
-        "notdec.solidity.revert": 154
+        "notdec.solidity.payability_guard": 168,
+        "notdec.solidity.revert": 89
       },
       "expected_revert_kinds": {
-        "empty": 89,
+        "empty": 33,
         "panic": 7,
         "returndata_bubble": 9,
         "error_string": 49,
@@ -2812,11 +2812,11 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.event": 12,
-        "notdec.solidity.payability_guard": 150,
-        "notdec.solidity.revert": 117
+        "notdec.solidity.payability_guard": 90,
+        "notdec.solidity.revert": 80
       },
       "expected_revert_kinds": {
-        "empty": 57,
+        "empty": 27,
         "panic": 19,
         "returndata_bubble": 7,
         "error_string": 34,
@@ -2886,11 +2886,11 @@
         "notdec.solidity.abi_return": 38,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
-        "notdec.solidity.payability_guard": 185,
-        "notdec.solidity.revert": 125
+        "notdec.solidity.payability_guard": 111,
+        "notdec.solidity.revert": 80
       },
       "expected_revert_kinds": {
-        "empty": 64,
+        "empty": 27,
         "panic": 7,
         "returndata_bubble": 8,
         "error_string": 46,
@@ -2928,11 +2928,11 @@
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
-        "notdec.solidity.payability_guard": 315,
-        "notdec.solidity.revert": 160
+        "notdec.solidity.payability_guard": 189,
+        "notdec.solidity.revert": 87
       },
       "expected_revert_kinds": {
-        "empty": 99,
+        "empty": 36,
         "panic": 7,
         "returndata_bubble": 10,
         "error_string": 44,
@@ -2994,11 +2994,11 @@
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
-        "notdec.solidity.payability_guard": 315,
-        "notdec.solidity.revert": 160
+        "notdec.solidity.payability_guard": 189,
+        "notdec.solidity.revert": 87
       },
       "expected_revert_kinds": {
-        "empty": 99,
+        "empty": 36,
         "panic": 7,
         "returndata_bubble": 10,
         "error_string": 44,
@@ -3060,11 +3060,11 @@
         "notdec.solidity.abi_return": 92,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
-        "notdec.solidity.payability_guard": 315,
-        "notdec.solidity.revert": 160
+        "notdec.solidity.payability_guard": 189,
+        "notdec.solidity.revert": 87
       },
       "expected_revert_kinds": {
-        "empty": 99,
+        "empty": 36,
         "panic": 7,
         "returndata_bubble": 10,
         "error_string": 44,
@@ -3126,11 +3126,11 @@
         "notdec.solidity.abi_return": 86,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 8,
-        "notdec.solidity.payability_guard": 290,
-        "notdec.solidity.revert": 140
+        "notdec.solidity.payability_guard": 174,
+        "notdec.solidity.revert": 80
       },
       "expected_revert_kinds": {
-        "empty": 88,
+        "empty": 30,
         "panic": 7,
         "returndata_bubble": 2,
         "error_string": 43,
@@ -3188,11 +3188,11 @@
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
-        "notdec.solidity.payability_guard": 135,
-        "notdec.solidity.revert": 70
+        "notdec.solidity.payability_guard": 81,
+        "notdec.solidity.revert": 41
       },
       "expected_revert_kinds": {
-        "empty": 46,
+        "empty": 19,
         "panic": 0,
         "returndata_bubble": 2,
         "error_string": 0,
@@ -3230,11 +3230,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 10,
-        "notdec.solidity.revert": 11
+        "notdec.solidity.payability_guard": 6,
+        "notdec.solidity.revert": 5
       },
       "expected_revert_kinds": {
-        "empty": 7,
+        "empty": 5,
         "panic": 0,
         "returndata_bubble": 4,
         "error_string": 0,
@@ -3272,11 +3272,11 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 55,
-        "notdec.solidity.revert": 29
+        "notdec.solidity.payability_guard": 33,
+        "notdec.solidity.revert": 18
       },
       "expected_revert_kinds": {
-        "empty": 20,
+        "empty": 9,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -3314,11 +3314,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 50,
-        "notdec.solidity.revert": 46
+        "notdec.solidity.payability_guard": 30,
+        "notdec.solidity.revert": 28
       },
       "expected_revert_kinds": {
-        "empty": 26,
+        "empty": 16,
         "panic": 4,
         "returndata_bubble": 8,
         "error_string": 8,
@@ -3356,11 +3356,11 @@
         "notdec.solidity.abi_return": 46,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 7,
-        "notdec.solidity.payability_guard": 190,
-        "notdec.solidity.revert": 121
+        "notdec.solidity.payability_guard": 114,
+        "notdec.solidity.revert": 77
       },
       "expected_revert_kinds": {
-        "empty": 77,
+        "empty": 39,
         "panic": 0,
         "returndata_bubble": 6,
         "error_string": 0,
@@ -3398,11 +3398,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 10,
-        "notdec.solidity.revert": 9
+        "notdec.solidity.payability_guard": 6,
+        "notdec.solidity.revert": 5
       },
       "expected_revert_kinds": {
-        "empty": 7,
+        "empty": 5,
         "panic": 0,
         "returndata_bubble": 2,
         "error_string": 0,
@@ -3440,11 +3440,11 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 3,
-        "notdec.solidity.payability_guard": 100,
-        "notdec.solidity.revert": 64
+        "notdec.solidity.payability_guard": 60,
+        "notdec.solidity.revert": 40
       },
       "expected_revert_kinds": {
-        "empty": 35,
+        "empty": 15,
         "panic": 9,
         "returndata_bubble": 4,
         "error_string": 16,
@@ -3510,11 +3510,11 @@
         "notdec.solidity.abi_return": 4,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
-        "notdec.solidity.payability_guard": 10,
-        "notdec.solidity.revert": 9
+        "notdec.solidity.payability_guard": 6,
+        "notdec.solidity.revert": 5
       },
       "expected_revert_kinds": {
-        "empty": 7,
+        "empty": 5,
         "panic": 0,
         "returndata_bubble": 2,
         "error_string": 0,
@@ -3552,11 +3552,11 @@
         "notdec.solidity.abi_return": 44,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 145,
-        "notdec.solidity.revert": 90
+        "notdec.solidity.payability_guard": 87,
+        "notdec.solidity.revert": 57
       },
       "expected_revert_kinds": {
-        "empty": 51,
+        "empty": 22,
         "panic": 8,
         "returndata_bubble": 4,
         "error_string": 27,
@@ -3620,11 +3620,11 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
-        "notdec.solidity.payability_guard": 125,
-        "notdec.solidity.revert": 83
+        "notdec.solidity.payability_guard": 75,
+        "notdec.solidity.revert": 55
       },
       "expected_revert_kinds": {
-        "empty": 47,
+        "empty": 22,
         "panic": 7,
         "returndata_bubble": 3,
         "error_string": 26,
@@ -3691,11 +3691,11 @@
         "notdec.solidity.abi_return": 62,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
-        "notdec.solidity.payability_guard": 210,
-        "notdec.solidity.revert": 100
+        "notdec.solidity.payability_guard": 126,
+        "notdec.solidity.revert": 57
       },
       "expected_revert_kinds": {
-        "empty": 62,
+        "empty": 20,
         "panic": 7,
         "returndata_bubble": 1,
         "error_string": 30,
@@ -3733,11 +3733,11 @@
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 12,
-        "notdec.solidity.payability_guard": 130,
-        "notdec.solidity.revert": 48
+        "notdec.solidity.payability_guard": 78,
+        "notdec.solidity.revert": 22
       },
       "expected_revert_kinds": {
-        "empty": 48,
+        "empty": 22,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -3775,11 +3775,11 @@
         "notdec.solidity.abi_return": 36,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 165,
-        "notdec.solidity.revert": 105
+        "notdec.solidity.payability_guard": 99,
+        "notdec.solidity.revert": 69
       },
       "expected_revert_kinds": {
-        "empty": 66,
+        "empty": 33,
         "panic": 8,
         "returndata_bubble": 3,
         "error_string": 28,
@@ -3842,11 +3842,11 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 155,
-        "notdec.solidity.revert": 101
+        "notdec.solidity.payability_guard": 93,
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
-        "empty": 63,
+        "empty": 32,
         "panic": 8,
         "returndata_bubble": 3,
         "error_string": 27,
@@ -3908,11 +3908,11 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 155,
-        "notdec.solidity.revert": 101
+        "notdec.solidity.payability_guard": 93,
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
-        "empty": 63,
+        "empty": 32,
         "panic": 8,
         "returndata_bubble": 3,
         "error_string": 27,
@@ -3974,11 +3974,11 @@
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 125,
-        "notdec.solidity.revert": 80
+        "notdec.solidity.payability_guard": 75,
+        "notdec.solidity.revert": 48
       },
       "expected_revert_kinds": {
-        "empty": 46,
+        "empty": 21,
         "panic": 6,
         "returndata_bubble": 7,
         "error_string": 21,
@@ -4016,11 +4016,11 @@
         "notdec.solidity.abi_return": 34,
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 155,
-        "notdec.solidity.revert": 101
+        "notdec.solidity.payability_guard": 93,
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
-        "empty": 63,
+        "empty": 32,
         "panic": 8,
         "returndata_bubble": 3,
         "error_string": 27,
@@ -4082,11 +4082,11 @@
         "notdec.solidity.abi_return": 22,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 105,
-        "notdec.solidity.revert": 68
+        "notdec.solidity.payability_guard": 63,
+        "notdec.solidity.revert": 47
       },
       "expected_revert_kinds": {
-        "empty": 46,
+        "empty": 25,
         "panic": 0,
         "returndata_bubble": 0,
         "error_string": 0,
@@ -4124,11 +4124,11 @@
         "notdec.solidity.abi_return": 32,
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 5,
-        "notdec.solidity.payability_guard": 115,
-        "notdec.solidity.revert": 75
+        "notdec.solidity.payability_guard": 69,
+        "notdec.solidity.revert": 50
       },
       "expected_revert_kinds": {
-        "empty": 43,
+        "empty": 20,
         "panic": 6,
         "returndata_bubble": 2,
         "error_string": 24,
@@ -4166,11 +4166,11 @@
         "notdec.solidity.abi_return": 8,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
-        "notdec.solidity.payability_guard": 50,
-        "notdec.solidity.revert": 18
+        "notdec.solidity.payability_guard": 30,
+        "notdec.solidity.revert": 7
       },
       "expected_revert_kinds": {
-        "empty": 17,
+        "empty": 7,
         "panic": 0,
         "returndata_bubble": 1,
         "error_string": 0,
@@ -4202,8 +4202,8 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 7,
-        "notdec.solidity.payability_guard": 140,
-        "notdec.solidity.revert": 92
+        "notdec.solidity.payability_guard": 84,
+        "notdec.solidity.revert": 0
       },
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 2,
@@ -4240,8 +4240,8 @@
         "notdec.solidity.abi_return": 30,
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 7,
-        "notdec.solidity.payability_guard": 140,
-        "notdec.solidity.revert": 92
+        "notdec.solidity.payability_guard": 84,
+        "notdec.solidity.revert": 0
       },
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 2,
@@ -4279,7 +4279,7 @@
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 35
+        "notdec.solidity.revert": 27
       },
       "expected_revert_kinds": {
         "empty": 15,
@@ -4381,7 +4381,7 @@
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 11,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 74
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
         "empty": 23,
@@ -4443,12 +4443,12 @@
         "notdec.solidity.abi_return": 2,
         "notdec.solidity.checked_bounds": 11,
         "notdec.solidity.event": 0,
-        "notdec.solidity.payability_guard": 5,
-        "notdec.solidity.revert": 44
+        "notdec.solidity.payability_guard": 3,
+        "notdec.solidity.revert": 35
       },
       "expected_revert_kinds": {
         "panic": 11,
-        "empty": 23,
+        "empty": 22,
         "returndata_bubble": 8,
         "error_string": 2
       },
@@ -4496,7 +4496,7 @@
         "notdec.solidity.checked_bounds": 5,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 47
+        "notdec.solidity.revert": 36
       },
       "expected_revert_kinds": {
         "error_string": 8,
@@ -4601,7 +4601,7 @@
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 6,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 115
+        "notdec.solidity.revert": 114
       },
       "expected_revert_kinds": {
         "empty": 10,
@@ -4737,11 +4737,11 @@
         "notdec.solidity.abi_return": 10,
         "notdec.solidity.checked_bounds": 12,
         "notdec.solidity.event": 1,
-        "notdec.solidity.payability_guard": 30,
-        "notdec.solidity.revert": 53
+        "notdec.solidity.payability_guard": 18,
+        "notdec.solidity.revert": 47
       },
       "expected_revert_kinds": {
-        "empty": 34,
+        "empty": 28,
         "error_string": 7,
         "panic": 12
       },
