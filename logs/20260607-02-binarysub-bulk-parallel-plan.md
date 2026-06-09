@@ -706,3 +706,50 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 
 - 这一步不是性能优化，目的是缩小后续并发化 `recursive/recVars` 的改动面。
 - 下一步如果继续第 4 步，应把这些 helper 的内部实现替换成 entry 状态结构，而不是在 `go1` 里继续直接改 map。
+
+# 实现记录：把 recursive value 改成 entry
+
+本次继续推进第 4.3 的准备工作，仍不并行 `canonicalizeType()`。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:488`：新增
+  `CanonicalRecursiveEntry`。
+  - `freshVar`：递归打断时返回的 fresh var。
+  - `bound`：finalize 后得到的递归 bound。
+  - `finalized`：当前是否已经回填 bound。
+- `external/binarysub/include/binarysub/binarysub.h:496`：
+  `TypeSimplifier::recursive` 从 `PolarCompactTypeMap<SimpleType>` 改成
+  `PolarCompactTypeMap<CanonicalRecursiveEntry>`。
+- `external/binarysub/src/binarysub.cpp:1079`：
+  `getOrCreateRecursiveVar()` 改为读写 entry，但对外仍返回 `SimpleType freshVar`。
+- `external/binarysub/src/binarysub.cpp:1097`：
+  `finalizeRecursiveVar()` 改为设置 `entry.bound` / `entry.finalized`，同时继续维护现有
+  `recVars[freshVar] = bound`，避免影响后续 simplify/coalesce 流程。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-rec-entry.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-rec-entry.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=24.65s`，`rss_kb=195328`，和前两轮默认并行基本一致。
+
+判断：
+
+- 这一步只改变 `recursive` 的 value 形状，不改变语义，也不引入锁。
+- `recVars` 仍然保留，因为后续 `analyzeOccurrences()`、`simplifyType()`、`coalesceCompactType()` 还依赖它。
+- 下一步可以考虑把 entry 改成可等待状态，例如 `shared_ptr<Entry> + mutex/cv`，再讨论是否替换成 oneTBB concurrent map。
