@@ -42,6 +42,52 @@ struct AbiReturnHelperPayload {
   bool HasDynamicLengthStoreEvidence = false;
 };
 
+bool hasStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores, Value *Base,
+                        int64_t Offset) {
+  return !getHTypeStoreValuesAtOffset(Stores, Base, Offset).empty();
+}
+
+// Some Solidity ABI helpers write the dynamic head, then delegate the tail
+// buffer at base+32 to a second helper.  Accept only the one-hop shape where
+// the outer helper returns the delegated helper's end pointer.
+bool hasDelegatedStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                 Function &Helper, Argument *Base,
+                                 int64_t Offset) {
+  auto HelperReturnsFrom = [&](CallBase &Call) {
+    for (BasicBlock &BB : Helper) {
+      auto *Ret = dyn_cast<ReturnInst>(BB.getTerminator());
+      if (Ret != nullptr && dependsOnValue(Ret->getReturnValue(), &Call)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (Instruction &Inst : instructions(Helper)) {
+    auto *Call = dyn_cast<CallBase>(&Inst);
+    Function *Callee = Call == nullptr ? nullptr : Call->getCalledFunction();
+    if (Callee == nullptr || Callee->isDeclaration() ||
+        !HelperReturnsFrom(*Call)) {
+      continue;
+    }
+
+    for (unsigned I = 0, E = Call->arg_size(); I != E; ++I) {
+      std::optional<uint64_t> ArgOffset =
+          getOffsetFromBase(Call->getArgOperand(I), Base);
+      if (!ArgOffset.has_value() ||
+          *ArgOffset != static_cast<uint64_t>(Offset) ||
+          I >= Callee->arg_size()) {
+        continue;
+      }
+      if (hasStoreEvidenceAt(Stores, Callee->getArg(I), 0)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 std::optional<HTypeBufferView>
 getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
                         unsigned ArgIndex) {
@@ -138,10 +184,11 @@ getDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
 
     Argument *HelperArg = Helper->getArg(I);
     bool HasHead = hasHTypeBufferFieldAt(View, 0) &&
-                   !getHTypeStoreValuesAtOffset(Stores, HelperArg, 0).empty();
+                   hasStoreEvidenceAt(Stores, HelperArg, 0);
     bool HasLength =
         hasHTypeBufferFieldAt(View, 32) &&
-        !getHTypeStoreValuesAtOffset(Stores, HelperArg, 32).empty();
+        (hasStoreEvidenceAt(Stores, HelperArg, 32) ||
+         hasDelegatedStoreEvidenceAt(Stores, *Helper, HelperArg, 32));
     if (HasHead && HasLength) {
       return AbiReturnHelperPayload{HasHead, HasLength};
     }

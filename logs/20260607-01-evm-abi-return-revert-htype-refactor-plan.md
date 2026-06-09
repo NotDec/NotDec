@@ -673,3 +673,45 @@ evidence 能证明 offset 0 / 32 都被写过。
   `0448_19495059_065877b669_4f138305be23` 全部通过。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.91s。
+
+## 2026-06-09 实现记录：动态 return helper 支持一层 tail 委托
+
+`0657_19497309_a4d607684e_332c65dbca0f` 还有一个动态 ABI return 漏标：
+`public__0x3c14f4d5_0x4ef` 调用 `private__0x2f3f_0x2f3f` 后执行
+`return(mload(0x40), helper_ret - mload(0x40))`。这个 helper 自己只写
+`base + 0 = 32`，然后把 `base + 32` 传给 `private__0x2efb_0x2efb` 写动态 tail
+的 length / data，最后返回 inner helper 的 end pointer。
+
+这仍然不是任意跨函数 store 汇总。本次只接受一层委托：outer helper 的 ABI buffer
+参数必须有 HType buffer 字段，outer helper 写 offset 0；它把 `base + 32` 传给
+inner helper，inner helper 对对应形参 offset 0 有 HType store evidence，并且
+outer helper 的返回值依赖 inner helper 的返回值。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:45`：
+  新增本地 `hasStoreEvidenceAt`，封装对 HType store evidence 的 offset 查询。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:53`：
+  新增 `hasDelegatedStoreEvidenceAt`，只识别一层 `base + offset` 传参，并要求
+  outer helper 返回 inner helper 的结果。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:185`：
+  `getDynamicReturnHelperPayloadHType` 的 dynamic length 证据除了直接 offset 32
+  store，也接受上述一层 tail 委托证据。
+
+复杂度评分：
+
+- 实现效果：6/10。`0657...` 从 ABI return 少 2 个 metadata 收敛为通过。
+- 理解成本：3/10。比上一轮多了一层 helper 关系，但仍限制在一个明确 Solidity ABI
+  helper 形状里。
+- 维护成本：3/10。后续如果类型恢复能把 `base + 32` 的 delegated store 汇总到
+  outer buffer 字段，这段可以删除。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `0657_19497309_a4d607684e_332c65dbca0f` 通过。
+- 临时 4 样例集合中，`0011_multi_public`、`0002_delegatecall_no_nonpayable`、
+  `0441_19494998_776c03cc9d_8117f350cb9d`、
+  `0448_19495059_065877b669_4f138305be23` 全部通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。
