@@ -43,15 +43,12 @@ inline constexpr llvm::StringLiteral KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED(
 struct SolidityRevertMatch {
   llvm::StringRef Kind = "encoded_candidate";
   llvm::CallBase *Revert = nullptr;
-  llvm::CallBase *SelectorStore = nullptr;
-  llvm::CallBase *PanicCodeStore = nullptr;
   llvm::CallBase *ReturndataCopy = nullptr;
   std::optional<uint64_t> Selector;
   std::optional<uint64_t> PanicCode;
   std::optional<uint64_t> CustomErrorArgCount;
   std::optional<uint64_t> ErrorStringLength;
   std::optional<std::string> ErrorStringLiteral;
-  bool UsedMemoryWriteMarker = false;
 };
 
 // Exact pieces of one canonical nonpayable guard.  The pass consumes only this
@@ -230,14 +227,10 @@ std::optional<EvmMemoryStore> matchEvmMemoryStore(llvm::Instruction *I);
 bool isFreeMemoryPointerLoad(llvm::Value *V);
 bool isFreeMemoryPointerStore(llvm::Instruction *I);
 bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
-std::optional<SolidityRevertMatch>
-matchSolidityRevert(llvm::BasicBlock &BB, llvm::CallBase &Revert);
 void insertPanicRewriteMarker(llvm::LLVMContext &Ctx,
                               const SolidityRevertMatch &Match);
 void insertReturndataBubbleRewriteMarker(llvm::LLVMContext &Ctx,
                                          const SolidityRevertMatch &Match);
-void insertRevertMemoryWriteMatchMarker(llvm::LLVMContext &Ctx,
-                                        const SolidityRevertMatch &Match);
 void insertSelectorRewriteMarker(llvm::LLVMContext &Ctx,
                                  const SolidityRevertMatch &Match,
                                  llvm::StringRef MarkerName,

@@ -826,3 +826,54 @@ revert payload。但直接改有两个路线选择，影响都不小：
 维护成本：5/10。短期内仍保留旧 `matchSolidityRevert`，后续还要继续收口旧路径。
 实现效果：8/10。checked/bounds 的 panic 识别已经走 HType revert metadata，同时补上了 canonical
 Panic payload 的 HType evidence 路径。
+
+## 实现记录：删除旧 revert raw store matcher
+
+上一轮 checked/bounds 已经不再调用 `matchSolidityRevert`。本轮继续收口，把没有调用方的旧
+revert payload 扫描入口删掉，避免后面又误用回 raw store / memory marker 路径。
+
+改动位置：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:43`：`SolidityRevertMatch` 删除
+  `SelectorStore`、`PanicCodeStore` 和 `UsedMemoryWriteMarker`，这些字段只服务旧扫描路径。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:230`：删除 `matchSolidityRevert` 和
+  `insertRevertMemoryWriteMatchMarker` 声明。
+- `src/Passes/evm/SolidityPatterns.cpp:35`：删除旧 `PANIC_SELECTOR` / `ERROR_SELECTOR` 常量，
+  以及 `RevertStringWord`、`RevertMemoryWrite`。
+- `src/Passes/evm/SolidityPatterns.cpp:1340`：保留 `getSelectorWord`，供
+  `SolidityRevertPass` 的 HType store evidence 分类继续使用。
+- `src/Passes/evm/SolidityPatterns.cpp:1365`：删除 `matchSolidityRevert` 及其专用 helper，
+  包括 `getLengthFromBase`、`getAbiWordBytes`、`buildAsciiStringLiteral`、
+  `findReturndataBubbleCopy`、`getRevertMemoryWrite` 和旧 panic code 猜测逻辑。
+- `src/Passes/evm/SolidityPatterns.cpp:1413`：删除
+  `insertRevertMemoryWriteMatchMarker`，不再生成
+  `notdec_solidity_revert_memory_write_match`。
+
+效果：
+
+- `src/Passes/evm` 里已经没有 `matchSolidityRevert`、`RevertMemoryWrite`、
+  `UsedMemoryWriteMarker` 或 `notdec_solidity_revert_memory_write_match` 的真实代码引用。
+- `SolidityRevertPass` 仍使用 HType field / HType store evidence 分类，并继续复用通用的 rewrite
+  marker 插入函数。
+- `MemoryBufferAnalysis.cpp` 里还保留注释掉的旧 `notdec_solidity_memory_write` marker 代码；
+  本轮没有清理注释和 memory buffer 自身分析。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R '^notdec\.type_recovery\.evm\.tr_level_2$' --output-on-failure`
+  通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_arithmetic_01.ll -o /tmp/notdec-checked-arithmetic-no-old-revert.ll --tr-level=2 --dump-htypes=/tmp/notdec-checked-arithmetic-no-old-revert.htypes`
+  通过，输出仍包含 checked bounds metadata 和 revert panic metadata。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll -o /tmp/notdec-checked-array-no-old-revert.ll --tr-level=2 --dump-htypes=/tmp/notdec-checked-array-no-old-revert.htypes`
+  通过，输出仍包含 checked bounds metadata、skipped metadata 和 revert panic metadata。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-no-old-revert.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-no-old-revert.htypes`
+  通过，Error(string) rewrite marker 保持不变。
+- `rg -n "matchSolidityRevert|notdec_solidity_revert_memory_write_match|RevertMemoryWrite|UsedMemoryWriteMarker" src/Passes/evm include/notdec/Passes/evm -g '*.cpp' -g '*.h'`
+  只剩无关命名或无结果；真实旧入口已删除。
+- 按用户要求，本轮不看 fortune 性能问题。
+
+复杂度：3/10。主要是删除无调用方代码。
+维护成本：2/10。减少了旧路径；后续更不容易误回退到 raw store matcher。
+实现效果：7/10。revert 侧旧扫描入口被拿掉，但 `MemoryBufferAnalysis` 里注释掉的 marker 代码和其他非
+revert pass 的局部 store shape matcher 还没有清理。
