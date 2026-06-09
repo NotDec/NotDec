@@ -895,3 +895,62 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 这一步只是把 `recursive` 容器换成并发容器，还没有并行 `canonicalizeType()`。
 - helper 已经按计划避免在持有 TBB accessor 时递归或等待。
 - 目前 `variableOrigins` 仍是普通 `std::map`，所以还不能直接并行 canonicalize root loop。
+
+# 实现记录：给 variableOrigins 加 mutex 保护
+
+本次按“先简单用 mutex”的方向处理 `variableOrigins`，仍不并行 `canonicalizeType()`。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:550`：
+  给 `TypeSimplifier` 增加 `variableOriginsMutex`。
+- `external/binarysub/include/binarysub/binarysub.h:555`：
+  增加 `originsForVar()`、`appendOriginsForVar()`、`setOriginsForVar()`、
+  `mergeOriginsForVars()`、`snapshotVariableOrigins()`。
+- `external/binarysub/src/binarysub.cpp:1047`：
+  实现上述 helper，用一把 mutex 保护 `variableOrigins` 的读、写和 snapshot。
+- `external/binarysub/src/binarysub.cpp:1079`：
+  `collectCanonicalOriginsFromVars()` 改为一次性锁住 `variableOrigins` 后收集 origin。
+- `external/binarysub/src/binarysub.cpp:1119`、`external/binarysub/src/binarysub.cpp:1132`：
+  `getOrCreateRecursiveVar()` 写 fresh var origin 时改用 `setOriginsForVar()`。
+- `external/binarysub/src/binarysub.cpp:1491`：
+  `computeSimplificationPlan()` 合并 origin 时改用 `mergeOriginsForVars()`。
+- `external/binarysub/src/binarysub.cpp:1846`、`external/binarysub/src/binarysub.cpp:1916`、
+  `external/binarysub/src/binarysub.cpp:1942`：
+  `coalesceCompactType()` 读取 origin 时改用 helper。
+- `external/binarysub/src/binarysub.cpp:1861`、`external/binarysub/src/binarysub.cpp:2573`：
+  遍历/拷贝 `variableOrigins` 前先做 snapshot。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+rm -rf /tmp/binarysub-origin-mutex-off-build
+cmake -S external/binarysub -B /tmp/binarysub-origin-mutex-off-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
+cmake --build /tmp/binarysub-origin-mutex-off-build --target binarysub -j4
+/tmp/binarysub-origin-mutex-off-build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-origin-mutex.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-origin-mutex.htypes
+```
+
+结果：
+
+- 默认 ON 的 `binarysub` 自测通过。
+- standalone `BINARYSUB_ENABLE_TBB_PARALLEL=OFF` 构建和自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=24.59s`，`rss_kb=195788`，没有明显退化。
+
+判断：
+
+- 这一步先用简单 mutex 消除 `variableOrigins` 的直接数据竞争点。
+- 当前还没有并行 `canonicalizeType()`，所以没有新增锁竞争。
+- 后续如果并行 root loop，`getOrCreateRecursiveVar()` 仍会在持有 `recursive` accessor 时读取/写入
+  `variableOrigins`。当前没有反向锁顺序；如果后面新增反向访问，需要再拆开 accessor 作用域。
