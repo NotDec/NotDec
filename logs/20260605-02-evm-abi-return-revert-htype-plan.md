@@ -877,3 +877,39 @@ revert payload 扫描入口删掉，避免后面又误用回 raw store / memory 
 维护成本：2/10。减少了旧路径；后续更不容易误回退到 raw store matcher。
 实现效果：7/10。revert 侧旧扫描入口被拿掉，但 `MemoryBufferAnalysis` 里注释掉的 marker 代码和其他非
 revert pass 的局部 store shape matcher 还没有清理。
+
+## 实现记录：删除旧 revert matcher 遗留的死分支
+
+删除 `matchSolidityRevert` 后，`returndata_bubble`、`ErrorStringLiteral` 和
+`ReturndataCopy` 已经没有分类入口会设置。本轮只删除这些旧 matcher 遗留的死字段和死 marker
+插入函数；以后如果要恢复 returndata bubble，应重新基于类型恢复或 copy evidence 设计。
+
+改动位置：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:43`：`SolidityRevertMatch` 删除
+  `ReturndataCopy` 和 `ErrorStringLiteral`。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:230`：删除
+  `insertReturndataBubbleRewriteMarker` 声明。
+- `src/Passes/evm/SolidityPatterns.cpp:1389`：删除
+  `insertReturndataBubbleRewriteMarker` 实现，不再保留不可达的
+  `notdec_solidity_rewrite_revert_returndata_bubble` 插入入口。
+- `src/Passes/evm/SolidityPatterns.cpp:1440`：`addRevertMatchMetadata` 删除
+  `error_string_literal` 和 `returndata_copy` metadata 写入分支。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:233`：删除不可达的
+  `Match->Kind == "returndata_bubble"` 分支。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R '^notdec\.type_recovery\.evm\.tr_level_2$' --output-on-failure`
+  通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_arithmetic_01.ll -o /tmp/notdec-checked-arithmetic-drop-dead-revert.ll --tr-level=2 --dump-htypes=/tmp/notdec-checked-arithmetic-drop-dead-revert.htypes`
+  通过，checked bounds 和 revert panic metadata 保持不变。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll -o /tmp/notdec-checked-array-drop-dead-revert.ll --tr-level=2 --dump-htypes=/tmp/notdec-checked-array-drop-dead-revert.htypes`
+  通过，checked bounds、skipped 和 revert panic metadata 保持不变。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-drop-dead-revert.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-drop-dead-revert.htypes`
+  通过，Error(string) rewrite marker 保持不变。
+
+复杂度：2/10。纯删除不可达旧分支。
+维护成本：2/10。`SolidityRevertMatch` 只保留当前 HType 分类实际会写的字段。
+实现效果：6/10。进一步清理旧 revert matcher 遗留，但 returndata bubble 未来仍需要单独按新路线重做。

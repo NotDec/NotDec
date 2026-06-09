@@ -1386,30 +1386,6 @@ void insertPanicRewriteMarker(LLVMContext &Ctx,
   Builder.CreateCall(Marker, Args);
 }
 
-void insertReturndataBubbleRewriteMarker(LLVMContext &Ctx,
-                                         const SolidityRevertMatch &Match) {
-  if (Match.Revert == nullptr) {
-    return;
-  }
-
-  Module *M = Match.Revert->getModule();
-  FunctionCallee Marker = M->getOrInsertFunction(
-      "notdec_solidity_rewrite_revert_returndata_bubble",
-      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
-                        false));
-
-  IRBuilder<> Builder(Ctx);
-  if (Instruction *Next = Match.Revert->getNextNode()) {
-    Builder.SetInsertPoint(Next);
-  } else {
-    Builder.SetInsertPoint(Match.Revert->getParent());
-  }
-
-  Value *Args[] = {ConstantInt::get(Type::getIntNTy(Ctx, 256),
-                                    getRewriteKindCode("returndata_bubble"))};
-  Builder.CreateCall(Marker, Args);
-}
-
 void insertSelectorRewriteMarker(LLVMContext &Ctx,
                                  const SolidityRevertMatch &Match,
                                  StringRef MarkerName,
@@ -1463,16 +1439,6 @@ void addRevertMatchMetadata(LLVMContext &Ctx,
     addPlainMetadata(Ctx, *Match.Revert,
                      "notdec.solidity_revert.error_string_length",
                      Twine(*Match.ErrorStringLength).str());
-  }
-  if (Match.ErrorStringLiteral.has_value()) {
-    addPlainMetadata(Ctx, *Match.Revert,
-                     "notdec.solidity_revert.error_string_literal",
-                     *Match.ErrorStringLiteral);
-  }
-  if (Match.ReturndataCopy != nullptr) {
-    addPlainMetadata(Ctx, *Match.ReturndataCopy,
-                     "notdec.solidity_revert.returndata_copy",
-                     "returndata_bubble");
   }
 }
 

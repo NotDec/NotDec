@@ -233,8 +233,6 @@ PreservedAnalyses SolidityRevertPass::run(Module &M,
         addRevertMatchMetadata(Ctx, *Match);
         if (Match->Kind == "panic") {
           insertPanicRewriteMarker(Ctx, *Match);
-        } else if (Match->Kind == "returndata_bubble") {
-          insertReturndataBubbleRewriteMarker(Ctx, *Match);
         } else if (Match->Kind == "error_string") {
           insertSelectorRewriteMarker(
               Ctx, *Match, "notdec_solidity_rewrite_revert_error_string",

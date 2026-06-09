@@ -43,12 +43,10 @@ inline constexpr llvm::StringLiteral KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED(
 struct SolidityRevertMatch {
   llvm::StringRef Kind = "encoded_candidate";
   llvm::CallBase *Revert = nullptr;
-  llvm::CallBase *ReturndataCopy = nullptr;
   std::optional<uint64_t> Selector;
   std::optional<uint64_t> PanicCode;
   std::optional<uint64_t> CustomErrorArgCount;
   std::optional<uint64_t> ErrorStringLength;
-  std::optional<std::string> ErrorStringLiteral;
 };
 
 // Exact pieces of one canonical nonpayable guard.  The pass consumes only this
@@ -229,8 +227,6 @@ bool isFreeMemoryPointerStore(llvm::Instruction *I);
 bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
 void insertPanicRewriteMarker(llvm::LLVMContext &Ctx,
                               const SolidityRevertMatch &Match);
-void insertReturndataBubbleRewriteMarker(llvm::LLVMContext &Ctx,
-                                         const SolidityRevertMatch &Match);
 void insertSelectorRewriteMarker(llvm::LLVMContext &Ctx,
                                  const SolidityRevertMatch &Match,
                                  llvm::StringRef MarkerName,
