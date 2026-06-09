@@ -45,6 +45,9 @@ getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
   if (View.HasTransparentOffset0Field) {
     return View;
   }
+  if (isa<Constant>(Base)) {
+    return View;
+  }
   if (View.Gap == HTypeBufferGap::NoPointerType) {
     LLVM_DEBUG(dbgs() << "evm abi return: base has no pointer HType: " << *Base
                       << "\n");

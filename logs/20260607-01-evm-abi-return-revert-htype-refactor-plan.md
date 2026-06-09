@@ -555,3 +555,25 @@ failure block 的 payability metadata 会随 CFG rewrite 变成不可达细节�
 - 临时 15 样例集合中，`0014_proxy_like` 和 `0011_multi_public` 从失败变为通过。
 - 同一集合剩余失败为其它缺口：`0002_delegatecall_no_nonpayable` 少 ABI return 和
   encoded revert，`0441...` 少 encoded revert，`0448...` 少 ABI return。
+
+## 2026-06-09 实现记录：ABI return 常量 base 走 HType store evidence
+
+`0002_delegatecall_no_nonpayable` 里有 `evm_return(..., 0, 32)` 形状。HType store
+evidence 已经能证明 offset 0 有对应 store，但 `base == 0` 是常量，没有 pointer
+HType，原来在 `getAbiReturnBufferHType` 里会先按 missing HType 丢掉，导致单 word
+return 漏标。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:48`：
+  `getAbiReturnBufferHType` 对常量 base 返回当前 `HTypeBufferView`，让后面的
+  `getHTypeStoreValuesAtOffsetBefore(..., offset 0, Return)` 继续用 HType store
+  evidence 判断。没有 evidence 时仍然返回 missing payload，不扫 raw store。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过。
+- 临时单样例 `0002_delegatecall_no_nonpayable` 的 ABI return 实际数量从 2 变为 4；
+  剩余失败只剩 returndata forward / encoded revert 分类问题。
