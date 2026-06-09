@@ -229,15 +229,6 @@ std::optional<EvmMemoryStore> matchEvmMemoryStore(llvm::Instruction *I);
 bool isFreeMemoryPointerLoad(llvm::Value *V);
 bool isFreeMemoryPointerStore(llvm::Instruction *I);
 bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
-void insertPanicRewriteMarker(llvm::LLVMContext &Ctx,
-                              const SolidityRevertMatch &Match);
-void insertSelectorRewriteMarker(llvm::LLVMContext &Ctx,
-                                 const SolidityRevertMatch &Match,
-                                 llvm::StringRef MarkerName,
-                                 std::optional<uint64_t> Payload);
-void addRevertMatchMetadata(llvm::LLVMContext &Ctx,
-                            const SolidityRevertMatch &Match);
-
 std::optional<CheckedBoundsMatch>
 matchCheckedBoundsGuard(llvm::BasicBlock &BB);
 bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,

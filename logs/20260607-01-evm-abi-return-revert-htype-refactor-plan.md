@@ -179,3 +179,37 @@
 验证：
 
 - `cmake --build ./build --target notdec-core -j4` 通过。
+
+## 2026-06-09 实现记录：revert metadata / marker helper 移到专门文件
+
+本次只做纯搬移，避免 `src/Passes/evm/SolidityPatterns.cpp` 继续承载
+`SolidityRevertPass` 专属逻辑。
+
+实现改动：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:229`：
+  删除 `insertPanicRewriteMarker`、`insertSelectorRewriteMarker`、
+  `addRevertMatchMetadata` 的公共声明。这三个函数只被 `SolidityRevertPass`
+  使用，不再作为共享接口暴露。
+- `src/Passes/evm/SolidityPatterns.cpp:1362`：
+  删除上述三个函数实现，大文件减少约 80 行。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:40`：
+  在匿名 namespace 内补回 `insertPanicRewriteMarker`。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:64`：
+  在匿名 namespace 内补回 `insertSelectorRewriteMarker`。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:93`：
+  在匿名 namespace 内补回 `addRevertMatchMetadata`。
+
+复杂度评分：
+
+- 实现效果：6/10。没有改变 HType 分类能力，但减少了 `SolidityPatterns.cpp`
+  里的 revert 专属代码。
+- 理解成本：1/10。只是把只被一个 pass 使用的 helper 移到本 pass 文件。
+- 维护成本：1/10。公共接口更小，后续改 revert metadata 不需要碰大文件。
+
+验证：
+
+- `cmake --build ./build --target notdec-core -j4` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。

@@ -1,6 +1,7 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 
+#include <limits>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
@@ -35,6 +36,86 @@ struct RevertPayloadHType {
   SmallVector<Value *, 2> PanicCodeStores;
   SmallVector<Value *, 2> ErrorLengthStores;
 };
+
+void insertPanicRewriteMarker(LLVMContext &Ctx,
+                              const SolidityRevertMatch &Match) {
+  if (Match.PanicCode == std::nullopt || Match.Revert == nullptr) {
+    return;
+  }
+
+  Module *M = Match.Revert->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      "notdec_solidity_rewrite_revert_panic",
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (Instruction *Next = Match.Revert->getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(Match.Revert->getParent());
+  }
+
+  Value *Args[] = {
+      ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.PanicCode)};
+  Builder.CreateCall(Marker, Args);
+}
+
+void insertSelectorRewriteMarker(LLVMContext &Ctx,
+                                 const SolidityRevertMatch &Match,
+                                 StringRef MarkerName,
+                                 std::optional<uint64_t> PayloadValue) {
+  if (!Match.Selector.has_value() || Match.Revert == nullptr) {
+    return;
+  }
+
+  Module *M = Match.Revert->getModule();
+  FunctionCallee Marker = M->getOrInsertFunction(
+      MarkerName,
+      FunctionType::get(Type::getVoidTy(Ctx),
+                        {Type::getIntNTy(Ctx, 256), Type::getIntNTy(Ctx, 256)},
+                        false));
+
+  IRBuilder<> Builder(Ctx);
+  if (Instruction *Next = Match.Revert->getNextNode()) {
+    Builder.SetInsertPoint(Next);
+  } else {
+    Builder.SetInsertPoint(Match.Revert->getParent());
+  }
+
+  constexpr uint64_t UNKNOWN_PAYLOAD = std::numeric_limits<uint64_t>::max();
+  Value *Args[] = {ConstantInt::get(Type::getIntNTy(Ctx, 256), *Match.Selector),
+                   ConstantInt::get(Type::getIntNTy(Ctx, 256),
+                                    PayloadValue.value_or(UNKNOWN_PAYLOAD))};
+  Builder.CreateCall(Marker, Args);
+}
+
+void addRevertMatchMetadata(LLVMContext &Ctx,
+                            const SolidityRevertMatch &Match) {
+  if (Match.Revert == nullptr) {
+    return;
+  }
+
+  addStringMetadata(Ctx, *Match.Revert, KIND_SOLIDITY_REVERT, Match.Kind);
+  if (Match.PanicCode.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert, "notdec.solidity_revert.panic_code",
+                     Twine(*Match.PanicCode).str());
+  }
+  if (Match.Selector.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert, "notdec.solidity_revert.selector",
+                     Twine::utohexstr(*Match.Selector).str());
+  }
+  if (Match.CustomErrorArgCount.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert,
+                     "notdec.solidity_revert.custom_error_arg_count",
+                     Twine(*Match.CustomErrorArgCount).str());
+  }
+  if (Match.ErrorStringLength.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert,
+                     "notdec.solidity_revert.error_string_length",
+                     Twine(*Match.ErrorStringLength).str());
+  }
+}
 
 std::optional<RevertPayloadHType>
 getCanonicalPanicPayloadFromEvidence(ArrayRef<mlsub::EVMStoreEvidence> Stores,
