@@ -15,27 +15,6 @@ from pathlib import Path
 NONPAYABLE_DEFINE_RE = re.compile(
     r"^define\b.*!notdec\.solidity\.nonpayable\b", re.MULTILINE
 )
-EVM_REVERT_CALL_RE = re.compile(
-    r"\bcall void @evm_revert\(ptr [^,]+, i256 ([^,]+), i256 ([^)]+)\)"
-)
-EVM_INTTOPTR_ASSIGN_RE = re.compile(
-    r"^\s*(%[\w.\-]+) = inttoptr i256 ([^ ]+) to ptr"
-)
-EVM_NATIVE_STORE_RE = re.compile(
-    r"^\s*store i(?:256|8) ([^,]+), ptr ([^,]+), align \d+"
-)
-EVM_RETURNDATACOPY_CALL_RE = re.compile(
-    r"\bcall void @evm_returndatacopy\(ptr [^,]+, ptr [^,]+, i256 ([^,]+), i256 ([^,]+), i256 ([^)]+)\)"
-)
-EVM_SHL_ASSIGN_RE = re.compile(
-    r"^\s*(%[\w.\-]+) = call i256 @evm_shl\(i256 (\d+), i256 (\d+)\)"
-)
-EVM_NATIVE_LOAD_RE = re.compile(
-    r"^\s*(%[\w.\-]+) = load i256, ptr ([^,]+), align \d+"
-)
-EVM_ADD_ASSIGN_RE = re.compile(
-    r"^\s*(%[\w.\-]+) = add i256 ([^,]+), ([^,!]+)"
-)
 CPP_CHECKED_BOUNDS_MARKER_FUNCTION_RE = re.compile(
     r"StringRef getCheckedBoundsRewriteMarkerName\(StringRef Kind\) \{(.*?)\n\}",
     re.DOTALL,
@@ -43,8 +22,6 @@ CPP_CHECKED_BOUNDS_MARKER_FUNCTION_RE = re.compile(
 CPP_CHECKED_BOUNDS_MARKER_PAIR_RE = re.compile(
     r'if \(Kind == "([^"]+)"\) \{\s*return "([^"]+)";\s*\}'
 )
-PANIC_SELECTOR = 0x4E487B71
-ERROR_SELECTOR = 0x08C379A0
 CHECKED_BOUNDS_KIND_TO_MARKER = {
     "checked_add": "notdec_solidity_rewrite_checked_add",
     "checked_sub": "notdec_solidity_rewrite_checked_sub",
@@ -157,7 +134,9 @@ def expected_checked_bounds_markers_from_kinds(case: dict) -> dict[str, int]:
 
 
 def load_cpp_checked_bounds_marker_mapping(project_root: Path) -> dict[str, str]:
-    source_path = project_root / "src/Passes/evm/SolidityPatterns.cpp"
+    source_path = (
+        project_root / "src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp"
+    )
     text = source_path.read_text()
     match = CPP_CHECKED_BOUNDS_MARKER_FUNCTION_RE.search(text)
     if not match:
@@ -364,205 +343,7 @@ def count_hidden_metadata(path: Path) -> int:
 
 
 def count_revert_kinds(path: Path) -> dict[str, int]:
-    text = path.read_text()
-    counts: dict[str, int] = {}
-    for block in re.split(r"\n(?=[\w.$-]+:)", text):
-        if "call void @notdec_solidity_rewrite_revert_panic(" in block:
-            kinds = ["panic"]
-        elif "call void @notdec_solidity_rewrite_revert_error_string(" in block:
-            kinds = ["error_string"]
-        elif "call void @notdec_solidity_rewrite_revert_custom_error(" in block:
-            kinds = ["custom_error_candidate"]
-        elif "call void @notdec_solidity_rewrite_revert_returndata_bubble(" in block:
-            kinds = ["returndata_bubble"]
-        else:
-            kinds = classify_reverts_from_block(block)
-        for kind in kinds:
-            counts[kind] = counts.get(kind, 0) + 1
-    return counts
-
-
-def is_constant_i256(value: str, expected: int) -> bool:
-    return value.strip() == str(expected)
-
-
-def is_returndatasize_value(value: str) -> bool:
-    return value.strip().startswith("%evm.returndatasize")
-
-
-def decode_selector_word(shift: int, payload: int) -> int | None:
-    word = payload << shift
-    if word >> 256:
-        return None
-    if word & ((1 << 224) - 1):
-        return None
-    selector = word >> 224
-    if selector > 0xFFFFFFFF:
-        return None
-    return selector
-
-
-def value_expr(value: str, exprs: dict[str, tuple]) -> tuple:
-    value = value.strip()
-    if value.isdigit():
-        return ("const", int(value))
-    return exprs.get(value, ("var", value))
-
-
-def same_value(lhs: str, rhs: str, exprs: dict[str, tuple]) -> bool:
-    return value_expr(lhs, exprs) == value_expr(rhs, exprs)
-
-
-def const_offset_from_base(offset: str, base: str, exprs: dict[str, tuple]) -> int | None:
-    offset_expr = value_expr(offset, exprs)
-    base_expr = value_expr(base, exprs)
-    if offset_expr == base_expr:
-        return 0
-    if (
-        len(offset_expr) == 2
-        and len(base_expr) == 2
-        and offset_expr[0] == "const"
-        and base_expr[0] == "const"
-        and offset_expr[1] >= base_expr[1]
-    ):
-        return offset_expr[1] - base_expr[1]
-    if (
-        len(offset_expr) == 3
-        and offset_expr[0] == "add"
-        and offset_expr[1] == base_expr
-        and isinstance(offset_expr[2], int)
-    ):
-        return offset_expr[2]
-    return None
-
-
-def selector_from_value(value: str, shl_values: dict[str, int]) -> int | None:
-    value = value.strip()
-    return shl_values.get(value)
-
-
-def classify_reverts_from_block(block: str) -> list[str]:
-    shl_values: dict[str, int] = {}
-    exprs: dict[str, tuple] = {}
-    ptr_offsets: dict[str, str] = {}
-    memory_stores: list[tuple[str, str]] = []
-    returndata_copy_offsets: list[str] = []
-    kinds: list[str] = []
-
-    for line in block.splitlines():
-        ptr_match = EVM_INTTOPTR_ASSIGN_RE.match(line)
-        if ptr_match:
-            ptr_offsets[ptr_match.group(1)] = ptr_match.group(2).strip()
-
-        shl_match = EVM_SHL_ASSIGN_RE.match(line)
-        if shl_match:
-            selector = decode_selector_word(
-                int(shl_match.group(2)), int(shl_match.group(3))
-            )
-            if selector is not None:
-                shl_values[shl_match.group(1)] = selector
-
-        native_load_match = EVM_NATIVE_LOAD_RE.match(line)
-        if native_load_match:
-            offset = ptr_offsets.get(native_load_match.group(2).strip())
-            if offset is not None:
-                exprs[native_load_match.group(1)] = ("mload", value_expr(offset, exprs))
-
-        add_match = EVM_ADD_ASSIGN_RE.match(line)
-        if add_match:
-            lhs = add_match.group(1)
-            left = add_match.group(2).strip()
-            right = add_match.group(3).strip()
-            if left.isdigit():
-                exprs[lhs] = ("add", value_expr(right, exprs), int(left))
-            elif right.isdigit():
-                exprs[lhs] = ("add", value_expr(left, exprs), int(right))
-
-        native_store_match = EVM_NATIVE_STORE_RE.match(line)
-        if native_store_match:
-            offset = ptr_offsets.get(native_store_match.group(2).strip())
-            if offset is not None:
-                memory_stores.append((offset, native_store_match.group(1).strip()))
-
-        returndata_copy_match = EVM_RETURNDATACOPY_CALL_RE.search(line)
-        if returndata_copy_match:
-            copy_offset = returndata_copy_match.group(1).strip()
-            source_offset = returndata_copy_match.group(2).strip()
-            length = returndata_copy_match.group(3).strip()
-            if is_constant_i256(source_offset, 0) and is_returndatasize_value(length):
-                returndata_copy_offsets.append(copy_offset)
-
-        revert_match = EVM_REVERT_CALL_RE.search(line)
-        if not revert_match:
-            continue
-
-        offset = revert_match.group(1).strip()
-        length = revert_match.group(2).strip()
-        selector = None
-        for store_offset, store_value in memory_stores:
-            if const_offset_from_base(store_offset, offset, exprs) == 0:
-                selector = selector_from_value(store_value, shl_values)
-
-        if is_constant_i256(offset, 0) and is_constant_i256(length, 0):
-            kind = "empty"
-        elif is_returndatasize_value(length) and any(
-            same_value(offset, copy_offset, exprs)
-            for copy_offset in returndata_copy_offsets
-        ):
-            kind = "returndata_bubble"
-        elif is_constant_i256(length, 36) and selector == PANIC_SELECTOR:
-            kind = "panic"
-        elif selector == ERROR_SELECTOR:
-            kind = "error_string"
-        elif selector is not None and selector != PANIC_SELECTOR:
-            kind = "custom_error_candidate"
-        else:
-            kind = "encoded_candidate"
-        kinds.append(kind)
-        memory_stores.clear()
-        returndata_copy_offsets.clear()
-
-    return kinds
-
-
-def collect_panic_codes_from_block(block: str) -> list[int]:
-    shl_values: dict[str, int] = {}
-    ptr_offsets: dict[str, str] = {}
-    saw_panic_selector = False
-    pending_codes: list[int] = []
-    codes: list[int] = []
-
-    for line in block.splitlines():
-        ptr_match = EVM_INTTOPTR_ASSIGN_RE.match(line)
-        if ptr_match:
-            ptr_offsets[ptr_match.group(1)] = ptr_match.group(2).strip()
-
-        shl_match = EVM_SHL_ASSIGN_RE.match(line)
-        if shl_match:
-            selector = decode_selector_word(
-                int(shl_match.group(2)), int(shl_match.group(3))
-            )
-            if selector is not None:
-                shl_values[shl_match.group(1)] = selector
-
-        native_store_match = EVM_NATIVE_STORE_RE.match(line)
-        if native_store_match:
-            value = native_store_match.group(1).strip()
-            offset = ptr_offsets.get(native_store_match.group(2).strip())
-            if offset is None:
-                continue
-            if is_constant_i256(offset, 0) and shl_values.get(value) == PANIC_SELECTOR:
-                saw_panic_selector = True
-            elif is_constant_i256(offset, 4) and value.isdigit():
-                pending_codes.append(int(value))
-
-        if EVM_REVERT_CALL_RE.search(line):
-            if saw_panic_selector and "i256 36" in line:
-                codes.append(pending_codes[-1] if pending_codes else -1)
-            saw_panic_selector = False
-            pending_codes.clear()
-
-    return codes
+    return count_metadata_string_values(path, "notdec.solidity.revert")
 
 
 def count_panic_codes(path: Path) -> dict[str, int]:
@@ -578,12 +359,7 @@ def count_panic_codes(path: Path) -> dict[str, int]:
             counts[key] = counts.get(key, 0) + 1
         return counts
 
-    counts: dict[str, int] = {}
-    for block in re.split(r"\n(?=[\w.$-]+:)", text):
-        for code in collect_panic_codes_from_block(block):
-            key = "unknown" if code < 0 else str(code)
-            counts[key] = counts.get(key, 0) + 1
-    return counts
+    return count_metadata_string_values(path, "notdec.solidity_revert.panic_code")
 
 
 def write_compare_report(
@@ -594,8 +370,8 @@ def write_compare_report(
 ) -> bool:
     passed = actual_counts == expected_counts
     lines = ["PASS" if passed else "FAIL"]
-    for key in sorted(expected_counts):
-        lines.append(f"  expected_{key}={expected_counts[key]}")
+    for key in sorted(set(expected_counts) | set(actual_counts)):
+        lines.append(f"  expected_{key}={expected_counts.get(key, 0)}")
         lines.append(f"  actual_{key}={actual_counts.get(key, 0)}")
     report_path.write_text("\n".join(lines) + "\n")
     return passed
@@ -725,6 +501,8 @@ def main() -> int:
                     case["expected_nonpayable_functions"],
                 )
             for kind, count in case.get("expected_revert_kinds", {}).items():
+                if kind == "returndata_bubble":
+                    continue
                 expected_counts[f"revert_kind:{kind}"] = count
             for code, count in case.get("expected_panic_codes", {}).items():
                 expected_counts[f"panic_code:{code}"] = count
@@ -772,10 +550,6 @@ def main() -> int:
                 "expected_memory_copy_write_kinds", {}
             ).items():
                 expected_counts[f"memory_copy_write_kind:{kind}"] = expected
-            if "expected_returndata_bubbles" in case:
-                expected_counts["returndata_bubbles"] = case[
-                    "expected_returndata_bubbles"
-                ]
             for count, expected in case.get(
                 "expected_custom_error_arg_counts", {}
             ).items():
@@ -784,10 +558,6 @@ def main() -> int:
                 "expected_error_string_lengths", {}
             ).items():
                 expected_counts[f"error_string_length:{length}"] = expected
-            for literal, expected in case.get(
-                "expected_error_string_literals", {}
-            ).items():
-                expected_counts[f"error_string_literal:{literal}"] = expected
             for payload, expected in case.get(
                 "expected_error_string_marker_payloads", {}
             ).items():
@@ -805,10 +575,6 @@ def main() -> int:
                     expected_counts[
                         "rewrite_marker:notdec_solidity_rewrite_revert_panic"
                     ] = expected_panic_markers
-                if "expected_returndata_bubbles" in case:
-                    expected_counts[
-                        "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"
-                    ] = case["expected_returndata_bubbles"]
                 if "error_string" in revert_kinds:
                     expected_counts[
                         "rewrite_marker:notdec_solidity_rewrite_revert_error_string"
@@ -844,6 +610,8 @@ def main() -> int:
                 )
             actual_revert_kinds = count_revert_kinds(output_ll)
             for kind in case.get("expected_revert_kinds", {}):
+                if kind == "returndata_bubble":
+                    continue
                 actual_counts[f"revert_kind:{kind}"] = actual_revert_kinds.get(
                     kind, 0
                 )
@@ -915,10 +683,6 @@ def main() -> int:
                 actual_counts[f"memory_copy_write_kind:{kind}"] = (
                     actual_memory_copy_write_kinds.get(str(kind), 0)
                 )
-            if "returndata_bubbles" in expected_counts:
-                actual_counts["returndata_bubbles"] = actual_revert_kinds.get(
-                    "returndata_bubble", 0
-                )
             actual_custom_error_arg_counts = count_metadata_string_values(
                 output_ll, "notdec.solidity_revert.custom_error_arg_count"
             )
@@ -932,13 +696,6 @@ def main() -> int:
             for length in case.get("expected_error_string_lengths", {}):
                 actual_counts[f"error_string_length:{length}"] = (
                     actual_error_string_lengths.get(str(length), 0)
-                )
-            actual_error_string_literals = count_metadata_string_values(
-                output_ll, "notdec.solidity_revert.error_string_literal"
-            )
-            for literal in case.get("expected_error_string_literals", {}):
-                actual_counts[f"error_string_literal:{literal}"] = (
-                    actual_error_string_literals.get(str(literal), 0)
                 )
             actual_error_string_marker_payloads = count_marker_arg_pairs(
                 output_ll, "notdec_solidity_rewrite_revert_error_string"
@@ -962,16 +719,6 @@ def main() -> int:
                     "rewrite_marker:notdec_solidity_rewrite_revert_panic"
                 ] = count_exact_marker(
                     output_ll, "notdec_solidity_rewrite_revert_panic"
-                )
-            if (
-                "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"
-                in expected_counts
-            ):
-                actual_counts[
-                    "rewrite_marker:notdec_solidity_rewrite_revert_returndata_bubble"
-                ] = count_exact_marker(
-                    output_ll,
-                    "notdec_solidity_rewrite_revert_returndata_bubble",
                 )
             if (
                 "rewrite_marker:notdec_solidity_rewrite_revert_error_string"

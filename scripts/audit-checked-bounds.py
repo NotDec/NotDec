@@ -30,7 +30,7 @@ CHECKED_BOUNDS_MARKER_RE = re.compile(
     r"storage_array_length_bounds|enum_conversion|empty_array_pop_storage"
     r"))\("
 )
-# Keep this in sync with getCheckedBoundsRewriteMarkerName in SolidityPatterns.cpp.
+# Keep this in sync with getCheckedBoundsRewriteMarkerName in CheckedBoundsPass.cpp.
 KIND_TO_MARKER = {
     "checked_add": "notdec_solidity_rewrite_checked_add",
     "checked_sub": "notdec_solidity_rewrite_checked_sub",
@@ -131,7 +131,7 @@ def format_counter_csv(counts: Counter[str]) -> str:
 def load_cpp_marker_mapping() -> dict[str, str]:
     source_path = (
         Path(__file__).resolve().parents[1]
-        / "src/Passes/evm/SolidityPatterns.cpp"
+        / "src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp"
     )
     text = source_path.read_text()
     match = CPP_MARKER_FUNCTION_RE.search(text)

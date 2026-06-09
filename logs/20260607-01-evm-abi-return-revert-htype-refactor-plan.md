@@ -224,6 +224,53 @@
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.92s。
 
+## 2026-06-09 实现记录：solidity_patterns runner 跟随 HType-only 路线
+
+本次只改测试和审计脚本，不改 pass 行为。目标是让 `solidity_patterns`
+不再通过旧 raw store 扫描给 revert 兜底，同时让 checked-bounds 审计跟随已经拆出的
+`CheckedBoundsPass.cpp`。
+
+实现改动：
+
+- `test/run_evm_solidity_patterns_suite.py:136`：
+  checked-bounds kind 到 rewrite marker 的 C++ 映射改为读取
+  `src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp`。
+- `test/run_evm_solidity_patterns_suite.py:345`：
+  `count_revert_kinds` 改为只统计 `notdec.solidity.revert` metadata，不再扫
+  `evm_revert`、`inttoptr`、`store`、`returndatacopy` 的 IR 形状。
+- `test/run_evm_solidity_patterns_suite.py:349`：
+  panic code 没有 rewrite marker 时改读 `notdec.solidity_revert.panic_code`
+  metadata，不再从 raw store 推断。
+- `test/run_evm_solidity_patterns_suite.py:365`：
+  compare 报告同时列出 expected / actual 两边的 key，避免实际多出的 key 被隐藏。
+- `test/run_evm_solidity_patterns_suite.py:501` 和 `:610`：
+  `returndata_bubble` 暂时从 revert kind oracle 跳过。当前 post-TR revert pass
+  没有重新实现 returndata bubble，不能再让 runner 用旧 raw IR 逻辑补出结果。
+- `scripts/audit-checked-bounds.py:33` 和 `:131`：
+  checked-bounds audit 改为从 `CheckedBoundsPass.cpp` 读取 marker 映射。
+
+当前观察：
+
+- `checked_bounds_audit` 已经通过，输出 `cpp_marker_mapping: matched`。
+- `revert_error_string_01` 用新 metadata oracle 能通过。
+- 完整 `notdec.evm.solidity_patterns` 仍有大量失败，主要是 ABI return 现在不再按旧
+  memory marker oracle 输出，以及 custom error / 真实合约样例里 HType 字段还不够。
+  这些不通过恢复 raw store 扫描解决，后续继续按类型恢复缺口处理。
+
+复杂度评分：
+
+- 实现效果：5/10。测试侧不再掩盖 HType-only 路线；但完整 suite 还没收敛。
+- 理解成本：1/10。删除旧脚本 matcher，oracle 更直接。
+- 维护成本：1/10。checked-bounds 映射仍从 C++ 读，搬文件后不再误报 mismatch。
+
+验证：
+
+- `python3 -m py_compile scripts/audit-checked-bounds.py test/run_evm_solidity_patterns_suite.py`
+  通过。
+- `ctest --test-dir build -R '^notdec\.evm\.solidity_patterns$' --output-on-failure`
+  失败，10 passed / 89 failed；其中 `checked_bounds_audit` 通过。
+- 临时单样例运行 `revert_error_string_01` 通过，`checked_bounds_audit` 通过。
+
 ## 2026-06-09 实现记录：revert metadata / marker helper 移到专门文件
 
 本次只做纯搬移，避免 `src/Passes/evm/SolidityPatterns.cpp` 继续承载
