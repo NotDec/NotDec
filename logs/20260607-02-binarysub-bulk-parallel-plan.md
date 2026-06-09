@@ -797,3 +797,45 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 这一步仍不引入锁，也不改变 `go1()` 的执行路径。
 - `shared_ptr<Entry>` 是为后续 oneTBB concurrent map 做准备：map accessor 只负责找到 entry，后续递归和等待可以只操作 entry 本身。
 - 下一步如果继续，需要决定是否现在就加 `mutex/cv`，还是先把 `recursive` 容器替换成 oneTBB concurrent map。
+
+# 实现记录：给 recursive entry 加内部锁
+
+本次继续推进第 4.3 的 entry 状态结构，仍不并行 `canonicalizeType()`，也不替换 `recursive` 容器。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:8`、`external/binarysub/include/binarysub/binarysub.h:15`：
+  引入 `condition_variable` 和 `mutex`。
+- `external/binarysub/include/binarysub/binarysub.h:490`：
+  `CanonicalRecursiveEntry` 增加构造函数、`mutex` 和 `condition_variable`。
+- `external/binarysub/src/binarysub.cpp:1089`：
+  `getOrCreateRecursiveVar()` 改成直接构造 `shared_ptr<CanonicalRecursiveEntry>(freshVar)`。
+- `external/binarysub/src/binarysub.cpp:1093`：
+  `finalizeRecursiveVar()` 在 entry 自己的锁内更新 `bound/state`，解锁后 `notify_all()`。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-rec-entry-lock.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-rec-entry-lock.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=24.85s`，`rss_kb=195768`，没有明显退化。
+
+判断：
+
+- 这一步只是让 entry 具备后续等待/唤醒能力。
+- 当前还没有等待路径，所以不会改变单线程 canonicalize 行为。
+- 下一步如果继续，应优先把 `recursive` 容器替换成 oneTBB concurrent map，并保持规则：拿到 `shared_ptr<Entry>` 后尽快释放 map accessor。
