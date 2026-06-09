@@ -668,3 +668,64 @@ Solidity 语义 pass 的标注接口继续扩散。
 - 不应该在 `AbiReturnPass` 里回退扫 store。
 - 也不应该贸然改全局 transparent single-field record normalize。
 - 这里需要先决定 single-word ABI buffer 的表达方式，再继续阶段 5。
+
+## 实现记录：ABI return 支持单字段指针
+
+本轮按路线 B 推进：单个指针可以看作只有一个成员的结构体指针，但只在
+`AbiReturnPass` 里单独支持。没有修改 HType normalize，也没有恢复 raw store 扫描。
+
+改动位置：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:128`：`HTypeBufferView` 增加
+  `HasTransparentOffset0Field`，表达 HType 已把 offset 0 单字段 record 折成
+  `ptr<store=T>` 的情况。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:219`：声明
+  `getHTypeStoreValuesAtOffset`，供 ABI return 读取 HType 侧保存的 store evidence。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:42`：`containsPointerType` 把
+  `DualPointerType` 也算作指针形态，避免 `ptr<load=void, store=void>` 被误报成 no pointer。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:58`：新增
+  `containsTransparentOffset0Field`，识别 `ptr<store=T, psize=256>` 这类透明单字段证据。
+- `src/Passes/evm/solidity-patterns/HTypeBufferView.cpp:77`：`getHTypeBufferView` 在 call operand
+  位点没有指针 HType 时，回退查 base value 自身的 HType。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:46`：`getHTypeFieldStoreValues` 继续要求
+  record field 存在，然后复用新的 offset evidence helper。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:55`：新增
+  `getHTypeStoreValuesAtOffset`，只读 `MLsubRecovery` 保存的 `EVMStoreEvidence`，按 base+offset 过滤。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:37`：`getAbiReturnBufferHType` 不再把非 record
+  指针直接视为缺口，允许后续用 HType store evidence 判断 offset 0。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:57`：`getAbiReturnPayloadHType` 对非 record
+  指针要求 offset 0 store evidence 或透明单字段 HType；否则仍返回缺口，不标 `candidate`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:89`：`classifyAbiReturnFromHType` 接收
+  `EVMStoreEvidence`，`size == 32` 且 offset 0 成立时标 `static_1_word`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:122`：`AbiReturnPass::run` 从
+  `MLsubRecovery` 读取 `getEVMStoreEvidence()` 并传给分类函数。
+
+效果：
+
+- `test/evm/solidity-patterns/cases/0011_multi_public.ll` 里
+  `store i256 %private.call, ptr %0` 和
+  `evm_return(..., %evm.alloc.addr, 32)` 现在能通过 HType 指针 + offset 0 store evidence
+  标成 `notdec.solidity.abi_return = static_1_word`。
+- `returndata_forward` 仍走原来的直接识别，不依赖本地 payload。
+- `revert_error_string_01.ll` 仍能输出
+  `notdec_solidity_rewrite_revert_error_string(i256 147028384, i256 5)`。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R '^notdec\.type_recovery\.evm\.tr_level_2$' --output-on-failure`
+  通过，用时 0.89s。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0011_multi_public.ll -o /tmp/notdec-0011-multi-public.ll --tr-level=2 --dump-htypes=/tmp/notdec-0011-multi-public.htypes`
+  通过，`evm_return` 标成 `static_1_word`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-tr2.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-tr2.htypes`
+  通过，Error(string) rewrite marker 保持不变。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0002_delegatecall_no_nonpayable.ll -o /tmp/notdec-0002-delegatecall.ll --tr-level=2 --dump-htypes=/tmp/notdec-0002-delegatecall.htypes`
+  通过，`returndata_forward` 仍保留。
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir).tr_level_2' --output-on-failure`
+  中 EVM 通过；LLVM IR 仍是已知的
+  `21_PointerAnalysisBranchingFieldCycle` snapshot 命名漂移失败。
+- 按用户要求，本轮不看 fortune 性能问题。
+
+复杂度：5/10。多了一个非 record 指针分支，但只服务单字段 ABI return。
+维护成本：4/10。helper 仍只读 HType 和 HType store evidence；后续如果 HType 保留单字段 record，可以删掉这条分支。
+实现效果：8/10。解决了当前 single-word ABI return 缺口，同时没有恢复旧 marker/raw store 扫描。

@@ -43,14 +43,19 @@ bool hasHTypeFieldAt(ast::RecordDecl &Record, int64_t Offset) {
   return Record.getFieldAt(Offset) != nullptr;
 }
 
-SmallVector<Value *, 2> getHTypeFieldStoreValues(
-    ArrayRef<mlsub::EVMStoreEvidence> Stores, ast::RecordDecl &Record,
-    Value *Base, int64_t Offset) {
-  SmallVector<Value *, 2> Values;
+SmallVector<Value *, 2>
+getHTypeFieldStoreValues(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                         ast::RecordDecl &Record, Value *Base, int64_t Offset) {
   if (!hasHTypeFieldAt(Record, Offset)) {
-    return Values;
+    return {};
   }
+  return getHTypeStoreValuesAtOffset(Stores, Base, Offset);
+}
 
+SmallVector<Value *, 2>
+getHTypeStoreValuesAtOffset(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                            Value *Base, int64_t Offset) {
+  SmallVector<Value *, 2> Values;
   for (const mlsub::EVMStoreEvidence &Store : Stores) {
     if (Store.BitSize != 256 || Store.StoredValue == nullptr) {
       continue;

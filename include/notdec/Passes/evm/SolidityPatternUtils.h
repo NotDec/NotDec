@@ -128,6 +128,10 @@ enum class HTypeBufferGap {
 struct HTypeBufferView {
   notdec::ast::RecordDecl *Record = nullptr;
   notdec::ast::HType *BaseType = nullptr;
+  // normalizeTransparentSingleFieldRecords can fold a one-field record at
+  // offset 0 into a pointer with a concrete store type.  ABI return still needs
+  // to treat that as one payload field instead of falling back to IR scanning.
+  bool HasTransparentOffset0Field = false;
   HTypeBufferGap Gap = HTypeBufferGap::None;
 };
 
@@ -208,9 +212,13 @@ HTypeBufferView getHTypeBufferView(notdec::llvm2c::HTypeResult &HTypes,
                                    llvm::Value *Base, llvm::CallBase &Use,
                                    unsigned ArgIndex);
 bool hasHTypeFieldAt(notdec::ast::RecordDecl &Record, int64_t Offset);
-llvm::SmallVector<llvm::Value *, 2> getHTypeFieldStoreValues(
-    llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores,
-    notdec::ast::RecordDecl &Record, llvm::Value *Base, int64_t Offset);
+llvm::SmallVector<llvm::Value *, 2>
+getHTypeFieldStoreValues(llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores,
+                         notdec::ast::RecordDecl &Record, llvm::Value *Base,
+                         int64_t Offset);
+llvm::SmallVector<llvm::Value *, 2> getHTypeStoreValuesAtOffset(
+    llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores, llvm::Value *Base,
+    int64_t Offset);
 std::optional<uint64_t>
 getUniqueUInt64FieldValue(llvm::ArrayRef<llvm::Value *> Values,
                           bool &Conflict);

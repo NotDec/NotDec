@@ -29,56 +29,67 @@ struct AbiReturnPayloadHType {
   ast::RecordDecl *Record = nullptr;
   unsigned FieldCount = 0;
   bool HasOffset0 = false;
+  bool HasTransparentOffset0 = false;
   bool HasDynamicHead = false;
   bool HasDynamicLength = false;
 };
 
-ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
-                                       Value *Base, CallBase &Use,
-                                       unsigned ArgIndex) {
+std::optional<HTypeBufferView>
+getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
+                        unsigned ArgIndex) {
   HTypeBufferView View = getHTypeBufferView(HTypes, Base, Use, ArgIndex);
   if (View.Record != nullptr) {
-    return View.Record;
+    return View;
   }
-
+  if (View.HasTransparentOffset0Field) {
+    return View;
+  }
   if (View.Gap == HTypeBufferGap::NoPointerType) {
-    LLVM_DEBUG(dbgs() << "evm abi return: base has no pointer HType: "
-                      << *Base << "\n");
+    LLVM_DEBUG(dbgs() << "evm abi return: base has no pointer HType: " << *Base
+                      << "\n");
     ++NumAbiReturnNonPointerBaseHTypes;
-    return nullptr;
+    return std::nullopt;
   }
 
-  LLVM_DEBUG(dbgs() << "evm abi return: base HType is not record pointer: "
-                    << View.BaseType->getAsString() << " for " << *Base
-                    << "\n");
-  ++NumAbiReturnNonRecordBaseHTypes;
-  return nullptr;
+  return View;
 }
 
 std::optional<AbiReturnPayloadHType>
-getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
-  ast::RecordDecl *Record =
-      getRecordPointeeHType(HTypes, Return.getArgOperand(1), Return, 1);
-  if (Record == nullptr) {
+getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes,
+                         ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                         CallBase &Return) {
+  std::optional<HTypeBufferView> View =
+      getAbiReturnBufferHType(HTypes, Return.getArgOperand(1), Return, 1);
+  if (!View.has_value()) {
     return std::nullopt;
   }
 
   AbiReturnPayloadHType Payload;
-  Payload.Record = Record;
-  Payload.FieldCount = 0;
-  for (const ast::FieldDecl &Field : Record->getFields()) {
-    if (!Field.isPadding) {
-      ++Payload.FieldCount;
+  Payload.Record = View->Record;
+  Payload.HasTransparentOffset0 = View->HasTransparentOffset0Field;
+  if (Payload.Record != nullptr) {
+    Payload.FieldCount = 0;
+    for (const ast::FieldDecl &Field : Payload.Record->getFields()) {
+      if (!Field.isPadding) {
+        ++Payload.FieldCount;
+      }
     }
+    Payload.HasOffset0 = hasHTypeFieldAt(*Payload.Record, 0);
+    Payload.HasDynamicHead = hasHTypeFieldAt(*Payload.Record, 0);
+    Payload.HasDynamicLength = hasHTypeFieldAt(*Payload.Record, 32);
+  } else if (!getHTypeStoreValuesAtOffset(Stores, Return.getArgOperand(1), 0)
+                  .empty()) {
+    Payload.HasOffset0 = true;
+  } else if (!Payload.HasTransparentOffset0) {
+    return std::nullopt;
   }
-  Payload.HasOffset0 = hasHTypeFieldAt(*Record, 0);
-  Payload.HasDynamicHead = hasHTypeFieldAt(*Record, 0);
-  Payload.HasDynamicLength = hasHTypeFieldAt(*Record, 32);
   return Payload;
 }
 
-std::optional<StringRef> classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
-                                                    CallBase &Return) {
+std::optional<StringRef>
+classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
+                           ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                           CallBase &Return) {
   if (isConstantIntValue(Return.getArgOperand(2), 0)) {
     return StringRef("empty");
   }
@@ -87,13 +98,14 @@ std::optional<StringRef> classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
   }
 
   std::optional<AbiReturnPayloadHType> Payload =
-      getAbiReturnPayloadHType(HTypes, Return);
+      getAbiReturnPayloadHType(HTypes, Stores, Return);
   if (!Payload.has_value()) {
     ++NumAbiReturnMissingPayloadHTypes;
     return std::nullopt;
   }
 
-  if (isConstantIntValue(Return.getArgOperand(2), 32) && Payload->HasOffset0) {
+  if (isConstantIntValue(Return.getArgOperand(2), 32) &&
+      (Payload->HasOffset0 || Payload->HasTransparentOffset0)) {
     return StringRef("static_1_word");
   }
   if (Payload->HasDynamicHead && Payload->HasDynamicLength) {
@@ -113,6 +125,7 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
   if (HighTypes == nullptr) {
     return PreservedAnalyses::all();
   }
+  ArrayRef<mlsub::EVMStoreEvidence> StoreEvidence = TR.getEVMStoreEvidence();
 
   bool Changed = false;
 
@@ -130,7 +143,7 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       std::optional<StringRef> Kind =
-          classifyAbiReturnFromHType(*HighTypes, *Call);
+          classifyAbiReturnFromHType(*HighTypes, StoreEvidence, *Call);
       if (!Kind.has_value()) {
         continue;
       }

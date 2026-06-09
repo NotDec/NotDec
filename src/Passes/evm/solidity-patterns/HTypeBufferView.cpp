@@ -3,9 +3,12 @@
 
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/Debug.h>
 #include <notdec-llvm2c/Interface.h>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "evm-solidity-patterns"
 
 namespace notdec::passes::evm::detail {
 
@@ -40,7 +43,7 @@ bool containsPointerType(ast::HType *Ty) {
   if (Ty == nullptr) {
     return false;
   }
-  if (Ty->isPointerType()) {
+  if (Ty->isPointerType() || Ty->isDualPointerType()) {
     return true;
   }
   if (auto *Inter = dyn_cast<ast::SetInterType>(Ty)) {
@@ -52,20 +55,49 @@ bool containsPointerType(ast::HType *Ty) {
   return false;
 }
 
+bool containsTransparentOffset0Field(ast::HType *Ty) {
+  if (Ty == nullptr) {
+    return false;
+  }
+  if (auto *DualPtr = dyn_cast<ast::DualPointerType>(Ty)) {
+    return DualPtr->getAccessSize() == 256 &&
+           DualPtr->getStoreType() != nullptr;
+  }
+  if (auto *Inter = dyn_cast<ast::SetInterType>(Ty)) {
+    return any_of(Inter->getTypes(), containsTransparentOffset0Field);
+  }
+  if (auto *Union = dyn_cast<ast::SetUnionType>(Ty)) {
+    return any_of(Union->getTypes(), containsTransparentOffset0Field);
+  }
+  return false;
+}
+
 } // namespace
 
 HTypeBufferView getHTypeBufferView(llvm2c::HTypeResult &HTypes, Value *Base,
                                    CallBase &Use, unsigned ArgIndex) {
   ast::HType *Ty =
       HTypes.getDefaultValueType(getExtValuePtr(Base, &Use, ArgIndex));
+  if (!containsPointerType(Ty) && !isa<Constant>(Base)) {
+    if (ast::HType *BaseTy =
+            HTypes.getDefaultValueType(getExtValuePtr(Base, nullptr))) {
+      LLVM_DEBUG(dbgs() << "evm htype buffer: fallback base type "
+                        << BaseTy->getAsString() << " for " << *Base << "\n");
+      Ty = BaseTy;
+    }
+  }
   ast::RecordDecl *Record = getRecordPointerPointee(Ty);
+  bool HasTransparentOffset0Field = containsTransparentOffset0Field(Ty);
   if (Record != nullptr) {
-    return HTypeBufferView{Record, Ty, HTypeBufferGap::None};
+    return HTypeBufferView{Record, Ty, HasTransparentOffset0Field,
+                           HTypeBufferGap::None};
   }
   if (!containsPointerType(Ty)) {
-    return HTypeBufferView{nullptr, Ty, HTypeBufferGap::NoPointerType};
+    return HTypeBufferView{nullptr, Ty, HasTransparentOffset0Field,
+                           HTypeBufferGap::NoPointerType};
   }
-  return HTypeBufferView{nullptr, Ty, HTypeBufferGap::NonRecordPointerType};
+  return HTypeBufferView{nullptr, Ty, HasTransparentOffset0Field,
+                         HTypeBufferGap::NonRecordPointerType};
 }
 
 } // namespace notdec::passes::evm::detail
