@@ -224,6 +224,60 @@
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.92s。
 
+## 2026-06-09 实现记录：fixed-size tuple return helper 走 HType store evidence
+
+`0679_19497465_c2187cbc73_f22fac5262f8` 的 `public_fees___0x51f` 还有一个 ABI
+return 漏标。形状仍是 `return(mload(0x40), helper_ret - mload(0x40))`，但 helper
+不是动态 string encoder，而是把 4 个 64-byte struct 连续写入 return buffer，
+最后返回 `base + 256`。HType 里 return buffer 形参已经是 `struct_12*`，字段覆盖
+0 / 32 / 64 / 128 / 192，子 helper 形参也有对应的 HType store evidence。
+
+本次没有把 ABI return pass 放宽到任意跨函数写入。只接受 fixed-size tuple helper：
+return base 必须是 free-memory pointer，size 必须是 helper return 减同一个
+free-memory base，helper 的 buffer 形参必须有 record HType，helper 的所有 return
+都必须是 `base + record_size`，并且 record 的每个非 padding 字段每 32 字节都要有
+direct 或一层子 helper 的 HType store evidence。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:40`：
+  `AbiReturnHelperPayload` 新增 fixed tuple evidence 标记。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:92`：
+  新增 `helperReturnsBasePlusSize`，约束 fixed-size helper 的返回值必须是 buffer
+  base 加 record 大小。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:110`：
+  新增 `hasNestedHelperStoreEvidenceAt`，只沿 helper 内一层子 helper 传参检查 HType
+  store evidence，不扫描 raw store。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:143`：
+  新增 `hasFixedTupleHelperPayloadHType`，用 record range 和字段逐 32 字节验证 helper
+  payload。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:290`：
+  动态 helper 分支在 string/bytes 证据不满足时，再尝试 fixed tuple helper。
+
+复杂度评分：
+
+- 实现效果：6/10。`0679...` 的 ABI return 从 66/68 收敛到 68/68，真实
+  `evm_return` 34/34 标记。
+- 理解成本：4/10。比动态 string helper 多了 record range 和一层子 helper 字段覆盖
+  检查，但仍限制在 ABI return pass 内。
+- 维护成本：3/10。规则仍基于 HType/store evidence；后续如果类型恢复能把 helper
+  写入汇总回 buffer record，这段可以收窄。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `0679_19497465_c2187cbc73_f22fac5262f8`：ABI return
+  `expected_notdec.solidity.abi_return=68` /
+  `actual_notdec.solidity.abi_return=68`，真实 `evm_return` 34/34 标记；该样例仍剩
+  一个 helper-encoded revert 缺口。
+- 临时 8 样例集合中，`0011_multi_public`、`0002_delegatecall_no_nonpayable`、
+  `0441_19494998_776c03cc9d_8117f350cb9d`、
+  `0448_19495059_065877b669_4f138305be23`、
+  `0657_19497309_a4d607684e_332c65dbca0f` 通过；`0340...` 和 `1991...` 仍只剩
+  checked-bounds oracle 差异，`0679...` 剩上述 revert 缺口。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.89s。
+
 ## 2026-06-09 实现记录：动态 return helper 支持形参 HType fallback
 
 `0340_19494346_717db37a78_7324081e28fc` 里还有两个动态 ABI return 漏标。

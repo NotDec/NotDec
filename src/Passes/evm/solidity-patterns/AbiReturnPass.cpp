@@ -40,6 +40,7 @@ struct AbiReturnPayloadHType {
 struct AbiReturnHelperPayload {
   bool HasOffset0StoreEvidence = false;
   bool HasDynamicLengthStoreEvidence = false;
+  bool HasFixedTupleStoreEvidence = false;
 };
 
 bool hasStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores, Value *Base,
@@ -86,6 +87,95 @@ bool hasDelegatedStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores,
   }
 
   return false;
+}
+
+bool helperReturnsBasePlusSize(Function &Helper, Argument *Base,
+                               uint64_t Size) {
+  bool SawReturn = false;
+  for (BasicBlock &BB : Helper) {
+    auto *Ret = dyn_cast<ReturnInst>(BB.getTerminator());
+    if (Ret == nullptr) {
+      continue;
+    }
+    SawReturn = true;
+    std::optional<uint64_t> Offset =
+        getOffsetFromBase(Ret->getReturnValue(), Base);
+    if (!Offset.has_value() || *Offset != Size) {
+      return false;
+    }
+  }
+  return SawReturn;
+}
+
+bool hasNestedHelperStoreEvidenceAt(llvm2c::HTypeResult &HTypes,
+                                    ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                    Function &Helper, Argument *Base,
+                                    int64_t Offset) {
+  for (Instruction &Inst : instructions(Helper)) {
+    auto *Call = dyn_cast<CallBase>(&Inst);
+    Function *Callee = Call == nullptr ? nullptr : Call->getCalledFunction();
+    if (Callee == nullptr || Callee->isDeclaration()) {
+      continue;
+    }
+
+    for (unsigned I = 0, E = Call->arg_size(); I != E; ++I) {
+      std::optional<uint64_t> ArgOffset =
+          getOffsetFromBase(Call->getArgOperand(I), Base);
+      if (!ArgOffset.has_value() ||
+          *ArgOffset > static_cast<uint64_t>(Offset) ||
+          I >= Callee->arg_size()) {
+        continue;
+      }
+
+      int64_t NestedOffset = Offset - static_cast<int64_t>(*ArgOffset);
+      Argument *CalleeArg = Callee->getArg(I);
+      HTypeBufferView CalleeView = getHTypeValueBufferView(HTypes, CalleeArg);
+      if (hasHTypeBufferFieldAt(CalleeView, NestedOffset) &&
+          hasStoreEvidenceAt(Stores, CalleeArg, NestedOffset)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+bool hasFixedTupleHelperPayloadHType(llvm2c::HTypeResult &HTypes,
+                                     ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                     Function &Helper, Argument *Base,
+                                     const HTypeBufferView &View) {
+  if (View.Record == nullptr) {
+    return false;
+  }
+
+  SimpleRange Range = View.Record->getRange();
+  if (Range.Start != 0 || Range.Size <= 0 || Range.Size % 32 != 0 ||
+      Range.Size > 4096) {
+    return false;
+  }
+  if (!helperReturnsBasePlusSize(Helper, Base,
+                                 static_cast<uint64_t>(Range.Size))) {
+    return false;
+  }
+
+  for (const ast::FieldDecl &Field : View.Record->getFields()) {
+    if (Field.isPadding) {
+      continue;
+    }
+    if (Field.R.Start < 0 || Field.R.Size <= 0 || Field.R.Size % 32 != 0) {
+      return false;
+    }
+    for (int64_t Offset = Field.R.Start, End = Field.R.Start + Field.R.Size;
+         Offset < End; Offset += 32) {
+      if (!hasStoreEvidenceAt(Stores, Base, Offset) &&
+          !hasNestedHelperStoreEvidenceAt(HTypes, Stores, Helper, Base,
+                                          Offset)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 std::optional<HTypeBufferView>
@@ -198,6 +288,10 @@ getDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
     if (HasHead && HasLength) {
       return AbiReturnHelperPayload{HasHead, HasLength};
     }
+    if (hasFixedTupleHelperPayloadHType(HTypes, Stores, *Helper, HelperArg,
+                                        View)) {
+      return AbiReturnHelperPayload{false, false, true};
+    }
   }
 
   return std::nullopt;
@@ -219,6 +313,9 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
   if (HelperPayload.has_value() && HelperPayload->HasOffset0StoreEvidence &&
       HelperPayload->HasDynamicLengthStoreEvidence) {
     return StringRef("dynamic_candidate");
+  }
+  if (HelperPayload.has_value() && HelperPayload->HasFixedTupleStoreEvidence) {
+    return StringRef("tuple_candidate");
   }
 
   std::optional<AbiReturnPayloadHType> Payload =
