@@ -59,77 +59,6 @@ ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
   return nullptr;
 }
 
-bool hasFieldAt(ast::RecordDecl &Record, int64_t Offset) {
-  return Record.getFieldAt(Offset) != nullptr;
-}
-
-Value *getValueFromExtValue(const ExtValuePtr &Value) {
-  if (auto *V = std::get_if<llvm::Value *>(&Value)) {
-    return *V;
-  }
-  return nullptr;
-}
-
-bool isPtrToIntOf(Value *MaybePtrToInt, Value *Ptr) {
-  auto *Cast = dyn_cast_or_null<PtrToIntInst>(MaybePtrToInt);
-  return Cast != nullptr && Cast->getOperand(0) == Ptr;
-}
-
-std::optional<uint64_t> getEvidenceOffsetFromBase(const ExtValuePtr &Addr,
-                                                  Value *Base) {
-  Value *AddrValue = getValueFromExtValue(Addr);
-  if (AddrValue == nullptr) {
-    return std::nullopt;
-  }
-
-  if (isPtrToIntOf(Base, AddrValue)) {
-    return 0;
-  }
-  if (auto *Cast = dyn_cast<IntToPtrInst>(AddrValue)) {
-    AddrValue = Cast->getOperand(0);
-  }
-  return getOffsetFromBase(AddrValue, Base);
-}
-
-SmallVector<Value *, 2> getFieldStoreValues(
-    ArrayRef<mlsub::EVMStoreEvidence> Stores, ast::RecordDecl &Record,
-    Value *Base, int64_t Offset) {
-  SmallVector<Value *, 2> Values;
-  if (!hasFieldAt(Record, Offset)) {
-    return Values;
-  }
-
-  for (const mlsub::EVMStoreEvidence &Store : Stores) {
-    if (Store.BitSize != 256 || Store.StoredValue == nullptr) {
-      continue;
-    }
-    std::optional<uint64_t> StoreOffset =
-        getEvidenceOffsetFromBase(Store.Addr, Base);
-    if (StoreOffset.has_value() &&
-        *StoreOffset == static_cast<uint64_t>(Offset)) {
-      Values.push_back(Store.StoredValue);
-    }
-  }
-  return Values;
-}
-
-std::optional<uint64_t> getUniqueUInt64FieldValue(ArrayRef<Value *> Values,
-                                                  bool &Conflict) {
-  std::optional<uint64_t> Result;
-  for (Value *V : Values) {
-    std::optional<uint64_t> Candidate = getUInt64Constant(V);
-    if (!Candidate.has_value()) {
-      continue;
-    }
-    if (Result.has_value() && *Result != *Candidate) {
-      Conflict = true;
-      return std::nullopt;
-    }
-    Result = Candidate;
-  }
-  return Result;
-}
-
 std::optional<RevertPayloadHType>
 getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
                       ArrayRef<mlsub::EVMStoreEvidence> Stores,
@@ -142,17 +71,17 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
 
   RevertPayloadHType Payload;
   Payload.Record = Record;
-  Payload.HasSelector = hasFieldAt(*Record, 0);
-  Payload.HasPanicCode = hasFieldAt(*Record, 4);
-  Payload.HasErrorHead = hasFieldAt(*Record, 4);
-  Payload.HasErrorLength = hasFieldAt(*Record, 36);
-  Payload.HasErrorData = hasFieldAt(*Record, 68);
+  Payload.HasSelector = hasHTypeFieldAt(*Record, 0);
+  Payload.HasPanicCode = hasHTypeFieldAt(*Record, 4);
+  Payload.HasErrorHead = hasHTypeFieldAt(*Record, 4);
+  Payload.HasErrorLength = hasHTypeFieldAt(*Record, 36);
+  Payload.HasErrorData = hasHTypeFieldAt(*Record, 68);
   Payload.SelectorStores =
-      getFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 0);
+      getHTypeFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 0);
   Payload.PanicCodeStores =
-      getFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 4);
+      getHTypeFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 4);
   Payload.ErrorLengthStores =
-      getFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 36);
+      getHTypeFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 36);
   return Payload;
 }
 

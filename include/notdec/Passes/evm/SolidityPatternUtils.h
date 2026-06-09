@@ -17,8 +17,13 @@
 #include <optional>
 #include <string>
 
+namespace notdec::mlsub {
+struct EVMStoreEvidence;
+} // namespace notdec::mlsub
+
 namespace notdec::ast {
 class HType;
+class FieldDecl;
 class RecordDecl;
 } // namespace notdec::ast
 
@@ -202,6 +207,13 @@ std::optional<uint64_t> getSelectorWord(llvm::Value *V);
 HTypeBufferView getHTypeBufferView(notdec::llvm2c::HTypeResult &HTypes,
                                    llvm::Value *Base, llvm::CallBase &Use,
                                    unsigned ArgIndex);
+bool hasHTypeFieldAt(notdec::ast::RecordDecl &Record, int64_t Offset);
+llvm::SmallVector<llvm::Value *, 2> getHTypeFieldStoreValues(
+    llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores,
+    notdec::ast::RecordDecl &Record, llvm::Value *Base, int64_t Offset);
+std::optional<uint64_t>
+getUniqueUInt64FieldValue(llvm::ArrayRef<llvm::Value *> Values,
+                          bool &Conflict);
 std::optional<EvmMemoryLoad> matchEvmMemoryLoad(llvm::Value *V);
 std::optional<EvmMemoryStore> matchEvmMemoryStore(llvm::Instruction *I);
 bool isFreeMemoryPointerLoad(llvm::Value *V);

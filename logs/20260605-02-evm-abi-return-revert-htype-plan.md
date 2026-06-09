@@ -548,3 +548,79 @@ Solidity 语义 pass 的标注接口继续扩散。
 复杂度：4/10。新增了一个很薄的 EVM store evidence sidecar，pass 侧只做字段级读取。
 维护成本：3/10。证据生命周期跟 `MLsubRecovery` 绑定，后续 ABI return 也可以复用，但需要继续保持“先 HType 字段、再 evidence”的边界。
 实现效果：7/10。`Error(string)` selector 和 length 已走 HType evidence 路线；string literal 和更多 ABI payload 还没迁移。
+
+## 实现记录：ABI return HType 字段分类和 store evidence helper 下沉
+
+问题：
+
+- `SolidityRevertPass` 已经有一套 HType field + store evidence 读取逻辑，后续
+  ABI return 也会需要同样的 offset 判断。继续放在 `SolidityRevertPass.cpp`
+  会让逻辑重复，也会让单个 pass 文件继续变长。
+- `AbiReturnPass` 之前只按 `size == 32` / `returndatasize` 给 return 分类。
+  这不符合阶段 4 的边界：本地非空 return 必须先从 HType record fields 读 payload。
+
+修改：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:20`：前置声明
+  `mlsub::EVMStoreEvidence`，供 helper 声明使用。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:210`：新增
+  `hasHTypeFieldAt`、`getHTypeFieldStoreValues` 和
+  `getUniqueUInt64FieldValue` 声明。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:12`：新增
+  `getValueFromExtValue`、`isPtrToIntOf`、`getEvidenceOffsetFromBase`，统一处理
+  `ptrtoint base` 和 `inttoptr(base + const)` 两类地址形状。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:42`：实现
+  `hasHTypeFieldAt`。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:46`：实现
+  `getHTypeFieldStoreValues`。仍然先确认 HType record 有字段，再读取 store evidence。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:68`：实现
+  `getUniqueUInt64FieldValue`，多个不同常量视为冲突。
+- `src/CMakeLists.txt:16`：把 `HTypeStoreEvidence.cpp` 加入 `notdec-core`。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:71`：改用新 helper，
+  删除 pass 内重复的 evidence offset / field store 读取函数。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:26`：新增
+  `AbiReturnPayloadHType`，只记录当前 return buffer 的 HType field 形状，不做新的
+  汇总层。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:58`：新增
+  `getAbiReturnPayloadHType`，非 padding 字段计数，并识别 offset 0 / 32。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:80`：新增
+  `classifyAbiReturnFromHType`。`empty` 和 `returndata_forward` 仍是直接入口；
+  其它本地非空 return 必须先拿到 HType record，再分类为
+  `static_1_word`、`dynamic_candidate`、`tuple_candidate` 或 `candidate`。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:110`：
+  `AbiReturnPass::run` 改用 HType 分类结果，拿不到 payload 时跳过并记录缺口。
+
+效果：
+
+- `AbiReturnPass` 不再只靠 size heuristic 标本地非空 return。
+- `returndata_forward` 这类不是本地 buffer 构造的 return 仍保留直接识别。
+- `SolidityRevertPass.cpp` 变短，store evidence 读取逻辑移到专门 cpp 文件。
+- `0011_multi_public` 暴露出阶段 5 的缺口：`public__0xf39d8c65_0xe0::%evm.alloc.addr`
+  仍是 `ptr<load=void, store=void, psize=256>`，不是 record pointer，所以本地
+  32-byte return 暂时不会被 `AbiReturnPass` 标成 `static_1_word`。这需要继续修
+  类型恢复，不能在 pass 里回退扫 store。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-after-abi-helper.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-after-abi-helper.htypes --gen-work-dir --work-dir=/tmp/notdec-revert-after-abi-helper-work`
+  通过，输出仍有
+  `notdec_solidity_rewrite_revert_error_string(i256 147028384, i256 5)`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0002_delegatecall_no_nonpayable.ll -o /tmp/notdec-abi-return-0002-after.ll --tr-level=2 --dump-htypes=/tmp/notdec-abi-return-0002-after.htypes --gen-work-dir --work-dir=/tmp/notdec-abi-return-0002-after-work`
+  通过，returndata forward return 仍带
+  `!notdec.solidity.abi_return !{!"returndata_forward"}`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0011_multi_public.ll -o /tmp/notdec-abi-return-0011-after.ll --tr-level=2 --dump-htypes=/tmp/notdec-abi-return-0011-after.htypes --gen-work-dir --work-dir=/tmp/notdec-abi-return-0011-after-work`
+  通过。HType 显示本地 32-byte return base 仍不是 record pointer。
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir).tr_level_2' --output-on-failure`
+  中 EVM suite 通过；LLVM IR suite 仍是
+  `21_PointerAnalysisBranchingFieldCycle` snapshot 命名漂移失败。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  仍失败，`9 passed, 90 failed`。这和迁移中 oracle 状态一致；本轮没有按旧 oracle
+  恢复 memory marker / raw store 扫描。
+- 按用户要求，本轮不看 fortune 性能问题。
+
+复杂度：4/10。新增一个薄 helper，并让 ABI return 分类走 HType record。
+维护成本：3/10。helper 可被 ABI return / revert 共用；后续要继续守住“先 HType 字段、再 evidence”的边界。
+实现效果：6/10。阶段 4 的 pass 边界更清楚，但单 word return 的 record 恢复还没解决，下一步应进入阶段 5。

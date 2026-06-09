@@ -23,15 +23,15 @@ STATISTIC(NumAbiReturnMissingPayloadHTypes,
 
 namespace {
 
-StringRef classifyAbiReturnSize(Value *Size) {
-  if (isConstantIntValue(Size, 32)) {
-    return "static_1_word";
-  }
-  if (isReturndataSize(Size)) {
-    return "returndata_forward";
-  }
-  return "candidate";
-}
+// Local view of one return buffer.  It only records fields already present in
+// the HType record; missing record fields stay as type-recovery gaps.
+struct AbiReturnPayloadHType {
+  ast::RecordDecl *Record = nullptr;
+  unsigned FieldCount = 0;
+  bool HasOffset0 = false;
+  bool HasDynamicHead = false;
+  bool HasDynamicLength = false;
+};
 
 ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
                                        Value *Base, CallBase &Use,
@@ -53,6 +53,56 @@ ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
                     << "\n");
   ++NumAbiReturnNonRecordBaseHTypes;
   return nullptr;
+}
+
+std::optional<AbiReturnPayloadHType>
+getAbiReturnPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Return) {
+  ast::RecordDecl *Record =
+      getRecordPointeeHType(HTypes, Return.getArgOperand(1), Return, 1);
+  if (Record == nullptr) {
+    return std::nullopt;
+  }
+
+  AbiReturnPayloadHType Payload;
+  Payload.Record = Record;
+  Payload.FieldCount = 0;
+  for (const ast::FieldDecl &Field : Record->getFields()) {
+    if (!Field.isPadding) {
+      ++Payload.FieldCount;
+    }
+  }
+  Payload.HasOffset0 = hasHTypeFieldAt(*Record, 0);
+  Payload.HasDynamicHead = hasHTypeFieldAt(*Record, 0);
+  Payload.HasDynamicLength = hasHTypeFieldAt(*Record, 32);
+  return Payload;
+}
+
+std::optional<StringRef> classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
+                                                    CallBase &Return) {
+  if (isConstantIntValue(Return.getArgOperand(2), 0)) {
+    return StringRef("empty");
+  }
+  if (isReturndataSize(Return.getArgOperand(2))) {
+    return StringRef("returndata_forward");
+  }
+
+  std::optional<AbiReturnPayloadHType> Payload =
+      getAbiReturnPayloadHType(HTypes, Return);
+  if (!Payload.has_value()) {
+    ++NumAbiReturnMissingPayloadHTypes;
+    return std::nullopt;
+  }
+
+  if (isConstantIntValue(Return.getArgOperand(2), 32) && Payload->HasOffset0) {
+    return StringRef("static_1_word");
+  }
+  if (Payload->HasDynamicHead && Payload->HasDynamicLength) {
+    return StringRef("dynamic_candidate");
+  }
+  if (Payload->FieldCount > 1) {
+    return StringRef("tuple_candidate");
+  }
+  return StringRef("candidate");
 }
 
 } // namespace
@@ -79,17 +129,12 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
         continue;
       }
 
-      StringRef Kind = classifyAbiReturnSize(Call->getArgOperand(2));
-      Value *ReturnBase = Call->getArgOperand(1);
-      Value *ReturnSize = Call->getArgOperand(2);
-      if (!isConstantIntValue(ReturnSize, 0)) {
-        if (getRecordPointeeHType(*HighTypes, ReturnBase, *Call, 1) ==
-            nullptr) {
-          ++NumAbiReturnMissingPayloadHTypes;
-          continue;
-        }
+      std::optional<StringRef> Kind =
+          classifyAbiReturnFromHType(*HighTypes, *Call);
+      if (!Kind.has_value()) {
+        continue;
       }
-      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, Kind);
+      addStringMetadata(Ctx, I, KIND_SOLIDITY_ABI_RETURN, *Kind);
       addStringMetadata(Ctx, F, KIND_SOLIDITY_ABI_RETURN, "true");
       ++NumAbiReturns;
       Changed = true;
