@@ -954,3 +954,59 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 - 当前还没有并行 `canonicalizeType()`，所以没有新增锁竞争。
 - 后续如果并行 root loop，`getOrCreateRecursiveVar()` 仍会在持有 `recursive` accessor 时读取/写入
   `variableOrigins`。当前没有反向锁顺序；如果后面新增反向访问，需要再拆开 accessor 作用域。
+
+# 实现记录：给 canonical cache 加 mutex 保护
+
+本次继续按“先简单用 mutex”的方向处理 `closureCache` 和 `go0Cache`，仍不并行
+`canonicalizeType()`。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:541`：
+  给 `closureCache` 增加 `closureCacheMutex`。
+- `external/binarysub/include/binarysub/binarysub.h:547`：
+  给 `go0Cache` 增加 `go0CacheMutex`。
+- `external/binarysub/include/binarysub/binarysub.h:557`：
+  增加 `lookupClosureCache()`、`storeClosureCache()`、`lookupGo0Cache()`、
+  `storeGo0Cache()`。
+- `external/binarysub/src/binarysub.cpp:1047`：
+  实现上述 helper，用一把 mutex 保护各自 cache 的查找和插入。
+- `external/binarysub/src/binarysub.cpp:1228`：
+  `canonicalizeType()` 里的 `closeOver()` 改为通过 helper 访问 `closureCache`。
+- `external/binarysub/src/binarysub.cpp:1271`：
+  `canonicalizeType()` 里的 `go0()` 改为通过 helper 访问 `go0Cache`。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+rm -rf /tmp/binarysub-cache-mutex-off-build
+cmake -S external/binarysub -B /tmp/binarysub-cache-mutex-off-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
+cmake --build /tmp/binarysub-cache-mutex-off-build --target binarysub -j4
+/tmp/binarysub-cache-mutex-off-build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-cache-mutex.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-cache-mutex.htypes
+```
+
+结果：
+
+- 默认 ON 的 `binarysub` 自测通过。
+- standalone `BINARYSUB_ENABLE_TBB_PARALLEL=OFF` 构建和自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=25.39s`，`rss_kb=195804`，和最近几轮默认并行结果基本同一档。
+
+判断：
+
+- 这一步只保护 cache 容器本身，不把 miss 后的计算放进锁里。
+- 后续并行 root loop 时，cache miss 可能重复计算，但不会破坏结果。
+- 现在 `recursive`、`variableOrigins`、`closureCache`、`go0Cache` 的直接共享写点都已有保护。
+  下一个真正需要处理的是 `recVars`：`finalizeRecursiveVar()` 仍会写
+  `recVars[freshVar] = bound`。
