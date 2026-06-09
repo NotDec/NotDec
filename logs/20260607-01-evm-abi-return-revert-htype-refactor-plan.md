@@ -485,3 +485,44 @@ non-record pointer 通过 `TR.getEVMStoreEvidence()` 证明 offset 0 单字段 p
 - 临时 event 小集合前三例仍失败，但 `notdec.solidity.event` 计数都匹配；
   失败来自 revert / payability / checked-bounds / ABI return 旧缺口。
 - 完整 event 子集包含大真实合约样例，运行较慢，已停止；本轮不处理 fortune 性能。
+
+## 2026-06-09 实现记录：checked-bounds 适配 post-TR native memory
+
+`checked_bounds_array_01` 在 ABI return / revert 迁移后只剩 checked-bounds 失败：
+ABI return、revert、panic code 都已匹配，两个 guard 被标成 skip。原因不是旧
+memory marker 缺失，而是 `MemoryBufferRewritePass` 把部分 EVM memory object 改成了
+native pointer 后，checked-bounds matcher 还只认旧的 `inttoptr` / free-memory
+slot store 形状。
+
+实现改动：
+
+- `src/Passes/evm/SolidityPatterns.cpp:52`：
+  `getIntToPtrAddress` 接受 native LLVM pointer，允许 `load i256, ptr %0`
+  被后续 `matchEvmMemoryLoad` 当作 memory load。这里不恢复旧 marker，只让已经改写成
+  pointer 的 memory object 进入现有 matcher。
+- `src/Passes/evm/SolidityPatterns.cpp:4372`：
+  新增 `findFinalizeAllocCall`，只匹配成功块里的
+  `notdec_evm_finalize_alloc(base, size)`。
+- `src/Passes/evm/SolidityPatterns.cpp:4963`：
+  `matchMemoryAllocationPointerBounds` 在 success 条件为 true 的 `and` guard 下，
+  允许 old pointer 是已改写 allocation base。
+- `src/Passes/evm/SolidityPatterns.cpp:5057`：
+  memory allocation pointer guard 除了旧 free-memory slot store，也接受
+  `notdec_evm_finalize_alloc(oldPtr, size)` 作为成功路径证据。
+
+复杂度评分：
+
+- 实现效果：6/10。`checked_bounds_array_01` 从 2 个 skip 收敛为全匹配，
+  checked-bounds 小集合全过。
+- 理解成本：2/10。仍然改了 `SolidityPatterns.cpp` 的核心 matcher，因为这部分还没拆；
+  但规则只覆盖 post-TR native memory 的两个具体形状。
+- 维护成本：2/10。新增 helper 很小，后续拆 checked-bounds matcher 时可以一起搬到
+  `CheckedBoundsPass.cpp` 或专门 matcher 文件。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `checked_bounds_array_01` 通过。
+- 临时 checked-bounds 小集合 10 个样例全通过，skip 总数为 0。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.91s。

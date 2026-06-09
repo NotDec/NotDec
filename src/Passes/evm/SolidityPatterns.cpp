@@ -61,6 +61,12 @@ Value *getIntToPtrAddress(Value *Ptr) {
   if (ConstExpr != nullptr && ConstExpr->getOpcode() == Instruction::IntToPtr) {
     return ConstExpr->getOperand(0);
   }
+  // MemoryBufferRewritePass rewrites some EVM memory objects to native LLVM
+  // pointers.  Keep those direct pointer loads/stores visible to the remaining
+  // Solidity pattern matchers without reconstructing old memory markers.
+  if (Ptr != nullptr && Ptr->getType()->isPointerTy()) {
+    return Ptr;
+  }
   return nullptr;
 }
 
@@ -4363,6 +4369,21 @@ Instruction *findUniformFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr) {
   return nullptr;
 }
 
+Instruction *findFinalizeAllocCall(BasicBlock *BB, Value *Base, Value *Size) {
+  if (BB == nullptr || Base == nullptr || Size == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isCallTo(Call, "notdec_evm_finalize_alloc") &&
+        Call->arg_size() == 2 && isSameValue(Call->getArgOperand(0), Base) &&
+        isSameValue(Call->getArgOperand(1), Size)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
 Instruction *findMemoryPointerStoreForLoad(BasicBlock *BB, Value *OldPtr,
                                            Value *NewPtr) {
   Value *Slot = getMemoryPointerLoadSlot(OldPtr);
@@ -4939,7 +4960,8 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
       OldPtr == nullptr) {
     return std::nullopt;
   }
-  if (!FailureWhenCondTrue && !isFreeMemoryPointerLoad(OldPtr)) {
+  if (!FailureWhenCondTrue && !isFreeMemoryPointerLoad(OldPtr) &&
+      !isFreeMemoryAllocationBase(OldPtr)) {
     return std::nullopt;
   }
 
@@ -5032,8 +5054,12 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   bool HasUniformInitialFreePointerStore =
       isConstantIntValueOrUniformArg(OldPtr, 128) &&
       findUniformFreeMemoryPointerStore(SuccessBlock, NewPtr) != nullptr;
+  bool HasFinalizeAlloc = isFreeMemoryAllocationBase(OldPtr) &&
+                          findFinalizeAllocCall(SuccessBlock, OldPtr, Size) !=
+                              nullptr;
   if (!isSupportedMemoryAllocationSizeWithUniformArg(Size) ||
       (!HasFreePointerStore && !HasUniformInitialFreePointerStore &&
+       !HasFinalizeAlloc &&
        findMemoryPointerStoreForLoad(SuccessBlock, OldPtr, NewPtr) == nullptr &&
        !(UsesOffsetPair && hasMemoryPointerStoreTransition(
                                GuardBlock, SuccessBlock, OldPtr, NewPtr)))) {
