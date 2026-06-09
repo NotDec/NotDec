@@ -3,7 +3,7 @@
   "expect_rewrite_markers": true,
   "expect_rewrite_hidden": true,
   "default_args": [
-    "--tr-level=0"
+    "--tr-level=2"
   ],
   "cases": [
     {

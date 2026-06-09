@@ -913,3 +913,38 @@ revert pass 的局部 store shape matcher 还没有清理。
 复杂度：2/10。纯删除不可达旧分支。
 维护成本：2/10。`SolidityRevertMatch` 只保留当前 HType 分类实际会写的字段。
 实现效果：6/10。进一步清理旧 revert matcher 遗留，但 returndata bubble 未来仍需要单独按新路线重做。
+
+## 实现记录：solidity_patterns suite 改为 post-TR 入口
+
+继续看阶段 6 时发现，`notdec.evm.solidity_patterns` 仍用 `--tr-level=0` 运行。现在
+`AbiReturnPass`、`SolidityRevertPass` 和 `CheckedBoundsPass` 都在类型恢复后，旧入口根本不会跑
+这些 pass，导致 suite 里大量实际计数为 0。
+
+改动位置：
+
+- `test/evm/solidity-patterns/manifest.json:5`：默认参数从 `--tr-level=0` 改成
+  `--tr-level=2`。
+
+验证和当前基线：
+
+- `ctest --test-dir build -R '^notdec\.evm\.solidity_patterns$' --output-on-failure`
+  运行 456.50s，当前 20 passed / 79 failed。
+- 切到 `tr-level=2` 后，`checked_bounds_audit` 通过：
+  `checked_bounds_kinds=672`，`semantic_markers=484`，`expected_semantic_markers=484`，
+  `cfg_rewrites=484`，`rewrite_expected=484`。
+- `checked_bounds_arithmetic_01`、`checked_bounds_sub_01`、`checked_bounds_mul_01`、
+  `checked_bounds_division_01`、`checked_bounds_mod_01` 等基础 checked arithmetic case 通过。
+- `checked_bounds_array_01` 这类仍失败，原因是部分 guard 已被识别为
+  `panic_array_out_of_bounds` / `panic_resource_error`，但因 `unrecognized_operands` 等原因只标
+  skipped，不做 CFG rewrite。这是后续 checked-bounds 真实缺口，不应直接改 oracle 掩盖。
+- `revert_error_string_01` 已能标 `error_string` 和 length，但旧 oracle 仍期待
+  `error_string_literal`；该 literal 来自已删除的旧 raw store 字符串拼接逻辑，不能直接恢复。
+- 多个真实样例仍期待 `returndata_bubble` rewrite marker；这条路径已明确需要以后按 HType/copy
+  evidence 重新设计。
+
+当前判断：
+
+- suite 入口必须保持 `tr-level=2`，否则测试不到当前重构后的 pass。
+- 不适合一次性按当前输出重写全部 99 个 case 的 oracle。剩余失败混有旧 oracle、已知被删功能
+  和新的 HType/checked-bounds 缺口，需要分批处理。
+- 按用户要求，本轮不看 fortune 性能问题。
