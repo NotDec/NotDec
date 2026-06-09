@@ -911,3 +911,44 @@ HType 字段加直接 store evidence 证明，或者由一层 nested helper 的 
 - 临时单样例 `2001_19510128_72aa4f70b3_e9ee7c9c0e79` 仍整体失败，但
   `notdec.solidity.abi_return` 已对齐为 72/72；剩余差异是已知的 2 个
   `encoded_candidate` revert 缺口和 checked-bounds skip。
+
+## 2026-06-09 实现记录：raw bytes payload revert 支持 HType 证据
+
+`2001_19510128_72aa4f70b3_e9ee7c9c0e79` 剩余两个 revert 漏标不是
+`Error(string)`，也不是直接 `revert(0, returndatasize())` forwarding。它们的
+形状是 Solidity bytes buffer 的 raw payload revert：长度在 `base + 0`，payload
+从 `base + 32` 开始，最后执行 `revert(base + 32, mload(base))`。其中一个 buffer
+来自 returndata copy，另一个是跨 helper 传入的 bytes/string buffer。
+
+本次只识别这个窄形状：revert size 必须是 EVM memory load，revert base 必须是同一
+header base 的 `+32`；header base 要有 HType offset 0 字段，或者 PHI incoming
+值有 HType offset 0 字段和 store evidence。匹配后标成 `encoded_candidate`，不当作
+`returndata_forward` 或 `error_string`。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:191`：
+  新增 `hasRawBytesHeaderEvidence`，检查 raw bytes header 的 HType 字段和 store
+  evidence；对 PHI 只接受有 HType/store evidence 的非常量 incoming。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:223`：
+  新增 `hasRawBytesPayloadRevert`，匹配 `revert(base + 32, mload(base))`。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:443`：
+  `classifyRevertFromHType` 在普通 payload HType 分类前，把上述 raw bytes payload
+  标成 `encoded_candidate`。
+
+复杂度评分：
+
+- 实现效果：6/10。`2001...` 的 Solidity revert 从 210/212 收敛到 212/212。
+- 理解成本：3/10。多看了 `mload(base)` 和 `base + 32` 的关系，但规则仍很直接。
+- 维护成本：3/10。后续如果类型恢复能把 PHI 后的 bytes buffer 保留为明确 record，
+  PHI incoming fallback 可以删掉。
+
+验证：
+
+- `git diff --check` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。
+- 临时单样例 `2001_19510128_72aa4f70b3_e9ee7c9c0e79` 仍整体失败，但
+  `notdec.solidity.revert` 已对齐为 212/212，`encoded_candidate` 已对齐为 2/2，
+  没有未标记 `evm_revert`；剩余失败是 checked-bounds skip。

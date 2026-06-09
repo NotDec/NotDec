@@ -188,6 +188,52 @@ bool hasHelperEncodedRevertPayload(llvm2c::HTypeResult &HTypes,
   return false;
 }
 
+bool hasRawBytesHeaderEvidence(llvm2c::HTypeResult &HTypes,
+                               ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                               Value *HeaderBase, Instruction &Before) {
+  HTypeBufferView View = getHTypeValueBufferView(HTypes, HeaderBase);
+  if (hasHTypeBufferFieldAt(View, 0)) {
+    return true;
+  }
+  if (!getHTypeStoreValuesAtOffsetBefore(Stores, HeaderBase, 0, Before)
+           .empty()) {
+    return true;
+  }
+
+  // After control-flow merge, the length load may use a PHI instead of the
+  // concrete allocation that received the length store.  Keep this fallback
+  // narrow: only trust incoming values that still carry HType/store evidence.
+  auto *Phi = dyn_cast<PHINode>(HeaderBase);
+  if (Phi == nullptr) {
+    return false;
+  }
+  for (Value *Incoming : Phi->incoming_values()) {
+    if (isa<Constant>(Incoming)) {
+      continue;
+    }
+    HTypeBufferView IncomingView = getHTypeValueBufferView(HTypes, Incoming);
+    if (hasHTypeBufferFieldAt(IncomingView, 0) &&
+        !getHTypeStoreValuesAtOffset(Stores, Incoming, 0).empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasRawBytesPayloadRevert(llvm2c::HTypeResult &HTypes,
+                              ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                              CallBase &Revert) {
+  std::optional<EvmMemoryLoad> Length =
+      matchEvmMemoryLoad(Revert.getArgOperand(2));
+  if (!Length.has_value()) {
+    return false;
+  }
+  std::optional<uint64_t> PayloadOffset =
+      getOffsetFromBase(Revert.getArgOperand(1), Length->Address);
+  return PayloadOffset.has_value() && *PayloadOffset == 32 &&
+         hasRawBytesHeaderEvidence(HTypes, Stores, Length->Address, Revert);
+}
+
 void insertPanicRewriteMarker(LLVMContext &Ctx,
                               const SolidityRevertMatch &Match) {
   if (Match.PanicCode == std::nullopt || Match.Revert == nullptr) {
@@ -388,6 +434,13 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
   }
 
   if (hasHelperEncodedRevertPayload(HTypes, Stores, Revert)) {
+    SolidityRevertMatch Match;
+    Match.Revert = &Revert;
+    Match.Kind = "encoded_candidate";
+    return Match;
+  }
+
+  if (hasRawBytesPayloadRevert(HTypes, Stores, Revert)) {
     SolidityRevertMatch Match;
     Match.Revert = &Revert;
     Match.Kind = "encoded_candidate";
