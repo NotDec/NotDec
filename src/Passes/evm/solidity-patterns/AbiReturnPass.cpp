@@ -191,6 +191,49 @@ bool hasFixedWordHelperPayloadHType(llvm2c::HTypeResult &HTypes,
          hasNestedHelperStoreEvidenceAt(HTypes, Stores, Helper, Base, 0);
 }
 
+bool hasConstantStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                Value *Base, int64_t Offset,
+                                uint64_t ExpectedValue) {
+  for (Value *StoredValue : getHTypeStoreValuesAtOffset(Stores, Base, Offset)) {
+    if (isConstantIntValue(StoredValue, ExpectedValue)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<AbiReturnHelperPayload>
+getInlineDynamicReturnPayloadHType(llvm2c::HTypeResult &HTypes,
+                                   ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                   CallBase &Return) {
+  if (!isFreeMemoryPointerLoad(Return.getArgOperand(1))) {
+    return std::nullopt;
+  }
+
+  auto *Size = dyn_cast<BinaryOperator>(Return.getArgOperand(2));
+  if (Size == nullptr || Size->getOpcode() != Instruction::Sub ||
+      !isSameOrReloadedFreeMemoryBase(Size->getOperand(1),
+                                      Return.getArgOperand(1))) {
+    return std::nullopt;
+  }
+
+  Value *End = Size->getOperand(0);
+  for (Instruction &Inst : instructions(*Return.getFunction())) {
+    if (!isSameOrReloadedFreeMemoryBase(&Inst, Return.getArgOperand(1)) ||
+        !dependsOnValue(End, &Inst)) {
+      continue;
+    }
+
+    HTypeBufferView View = getHTypeValueBufferView(HTypes, &Inst);
+    if (hasHTypeBufferFieldAt(View, 0) && hasHTypeBufferFieldAt(View, 32) &&
+        hasConstantStoreEvidenceAt(Stores, &Inst, 0, 32) &&
+        hasStoreEvidenceAt(Stores, &Inst, 32)) {
+      return AbiReturnHelperPayload{true, true, false};
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<HTypeBufferView>
 getAbiReturnBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
                         unsigned ArgIndex) {
@@ -326,6 +369,9 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
 
   std::optional<AbiReturnHelperPayload> HelperPayload =
       getDynamicReturnHelperPayloadHType(HTypes, Stores, Return);
+  if (!HelperPayload.has_value()) {
+    HelperPayload = getInlineDynamicReturnPayloadHType(HTypes, Stores, Return);
+  }
   if (HelperPayload.has_value() && HelperPayload->HasOffset0StoreEvidence &&
       HelperPayload->HasDynamicLengthStoreEvidence) {
     return StringRef("dynamic_candidate");

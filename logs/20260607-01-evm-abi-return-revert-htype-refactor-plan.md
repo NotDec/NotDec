@@ -952,3 +952,47 @@ header base 的 `+32`；header base 要有 HType offset 0 字段，或者 PHI in
 - 临时单样例 `2001_19510128_72aa4f70b3_e9ee7c9c0e79` 仍整体失败，但
   `notdec.solidity.revert` 已对齐为 212/212，`encoded_candidate` 已对齐为 2/2，
   没有未标记 `evm_revert`；剩余失败是 checked-bounds skip。
+
+## 2026-06-09 实现记录：本函数内动态 return buffer 支持 HType 证据
+
+`0450_19495071_6b6c9447e0_6344565f4b31` 的 `tokenName()` / `tokenSymbol()`
+不是跨函数 encoder helper。public 函数自己分配 return buffer，写入 ABI dynamic
+head `32`，从源 bytes/string buffer 读 length，copy payload，最后执行
+`return(mload(0x40), end - mload(0x40))`。最终 return base 是 free-memory reload，
+而写入证据在同函数里的 allocation base 上；两者没有同一个 SSA value。
+
+本次只补这个窄形状：return base 必须是 free-memory load，size 必须是
+`end - free-memory-load`；同函数里必须存在一个 free-memory allocation base，`end`
+依赖它，且该 base 的 HType 有 offset 0 / 32 字段，offset 0 store evidence 必须是
+常量 32，offset 32 必须有 HType store evidence。没有恢复通用 copy loop，也不扫描
+非 HType 证据。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:194`：
+  新增 `hasConstantStoreEvidenceAt`，用于判断 offset 0 的 ABI dynamic head 是否写入
+  常量 32。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:205`：
+  新增 `getInlineDynamicReturnPayloadHType`，匹配本函数内 allocation base 与
+  `return(mload(0x40), end - mload(0x40))` 的关系，并要求 HType/store evidence
+  证明 dynamic head 和 length。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:369`：
+  `classifyAbiReturnFromHType` 在跨函数 helper 失败后，尝试上述本函数内动态
+  return buffer 规则。
+
+复杂度评分：
+
+- 实现效果：7/10。`0450...` 和同类 4-count 动态 return 小样例收敛为通过。
+- 理解成本：3/10。规则多看了同函数 allocation base，但仍限制在 ABI return pass 内。
+- 维护成本：3/10。后续如果类型恢复能把 free-memory reload 直接连回 allocation
+  record，这段可以收窄或删除。
+
+验证：
+
+- `git diff --check` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `0450_19495071_6b6c9447e0_6344565f4b31` 通过。
+- 临时 5 样例集合
+  `0450...`、`0726...`、`0735...`、`0038...`、`0114...` 全部通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.90s。
