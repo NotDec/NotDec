@@ -330,15 +330,23 @@ mutex/cv。这样不会把 TBB map 的锁带进递归调用里。
 
 - 看到 pending entry 时，如果当前位置是递归引用，应该直接返回 `freshVar`，不能等待 bound。
 - 只有真正需要 final bound 的地方才等待 finalized；等待时不能持有其他 entry lock。
-- finalize 可能被多个线程尝试，不能假设只回填一次。
-- 如果已有 bound 和新 bound 相同，可以忽略；如果不同，不能覆盖，至少要 merge 或先 trace/assert。
+- `inProcess` 仍然是单次 `go1()` 调用栈的局部状态，不共享。
+- `recursive` / `recVars` 可以共享，但不能让所有线程都写同一个 `recVars[freshVar]`。
+- `getOrCreateRecursiveVar()` 插入 `recursive` 成功的那次 canonicalize 调用，应把这个 key 记录到当前调用局部的
+  `ownedRecursiveKeys`。
+- `finalizeRecursiveVar()` 仍然返回同一个 `freshVar`；但只有 `pty` 在当前调用的 `ownedRecursiveKeys` 里时，才更新
+  `entry.bound` 和 `recVars[freshVar]`。
+- 如果当前调用只是复用了别人已经创建的 recursive entry，就只返回 `freshVar`，不写 bound。
+- 这个规则让每个 recursive entry 只有一个 logical writer，避免并行时多个线程互相覆盖 `recVars`。
 - 不要在持有 entry accessor 时递归调用 `go1()`，否则容易死锁。
 
 判断：
 
-- 单线程当前通常是 `recursive` 创建一次、`recVars` 回填一次。
-- 并行共享后不能依赖这个“一次回填”假设。
-- 这块不作为第一轮实现。第一轮 canonicalize 并行优先只共享纯 cache 和 origin metadata。
+- 这个方案不是按 OS thread 认 owner，而是按一次 `canonicalizeType()` 调用的局部 owned set 认 owner。
+- 创建 entry 的调用栈之后一定会回到对应外层 `go1()`，所以有机会 finalize。
+- 这比 `Pending -> Stable` first-writer-wins 更贴近原算法：递归引用仍共享 fresh var，但 `recVars` 的定义只由创建者写。
+- 并行下谁先创建 entry 仍可能受调度影响，所以文本表示可能变化；当前判断是语义应等价。
+- 这块是下一轮 canonicalize 并行的核心实现点。第一轮已先完成 bulk 后半段并行。
 
 ### 4.4 fresh id 和文本输出
 
@@ -1123,9 +1131,115 @@ elapsed=1.67 rss_kb=156416
 - 因此不能用简单的 `Pending -> Stable` 一次写入模型直接并行 canonicalize root loop。
 - 这次代码已回退，没有提交失败实现。
 
+后来用一个很小的 SimpleType 图复现了同 key 两次 finalize 得到不同结构 bound：
+
+```text
+v0.lowerBounds += { a: v1, b: v0 }
+v1.lowerBounds += { a: v0, b: v0 }
+root = { v0: v0, v1: v1 }
+```
+
+临时 assert 打印出的差异类似：
+
+```text
+key: {v0}, positive
+old bound: { a: { a: t, b: t }, b: t }
+new bound: { a: u, b: t }
+```
+
+这里差异来自 `inProcess` 不同：同一个 `{v0}, positive` 从不同递归路径进入时，内部字段碰到的折返点不同。
+这说明 bound 的结构表示可能不同。
+
+当前判断：
+
+- 这不是并行才有的问题，而是共享 `recursive` / `recVars` 后就需要面对的问题。
+- 这两个 bound 很可能是同一个递归类型的不同折叠表示；底层 SimpleType 图已经固定，`CompactType + polarity`
+  一样时，真实类型语义应当一样。
+- 代码目前没有递归类型等价判断，所以不能用结构相等来证明它们相同。
+- 因此后续并行方案不应 assert “第二次 finalize 结构必须一样”，而应避免多 writer：谁创建 recursive entry，谁负责写
+  `recVars`。
+
 后续可选方向：
 
-- 先研究 `finalizeRecursiveVar()` 多次覆盖的语义：哪些 key 会被覆盖，旧 bound 和新 bound 差在哪里，最后一次覆盖为什么是可接受结果。
-- 如果覆盖只是同一个串行遍历顺序下的确定性修正，可以考虑把 canonicalize 阶段拆成“并行预计算 + 串行 finalize 提交”。
-- 如果覆盖本质上是递增合并，则需要把 `recursive/recVars` 做成明确的 merge/fixed-point 状态，而不是一次 stable。
-- 暂时不建议继续硬并行 canonicalize root loop；当前已实现的可提交并行收益仍来自 bulk 后半段 per-root 并行。
+- 按 4.3 的 owner set 方案继续：`recursive` 共享，`recVars` 只由创建者回填。
+- 保留单线程 canonicalize 结果作为基线，先看 binarysub 自测、fortune 和 htype diff。
+- 如果文本输出不稳定但语义等价，再考虑 canonical renaming 或递归类型规范化。
+- 暂时不做递归类型等价判断；这比 owner set 复杂很多。
+
+# 实现记录：canonicalize 并行实验开关
+
+本次继续推进第 4 步，但没有把 canonicalize 并行设为默认。
+
+实现：
+
+- `external/binarysub/include/binarysub/binarysub-core.h`
+  - `VarSupply::next` 改成 `std::atomic<std::uint32_t>`，`fresh_id()` 用 relaxed `fetch_add()`。
+  - 原因是 canonicalize 并行实验会从多个线程创建 fresh SimpleType 变量，旧的 `next++` 有数据竞争。
+- `external/binarysub/include/binarysub/binarysub.h`
+  - `CanonicalRecursiveEntry` 增加 `ownerIndex`，记录当前 recursive key 的确定性 owner 候选。
+  - `canonicalizeType()` 增加默认参数 `ownerIndex = 0`。
+  - `getOrCreateRecursiveVar()` / `finalizeRecursiveVar()` 增加 `ownerIndex` 和 `ownedRecursiveKeys` 参数。
+- `external/binarysub/src/binarysub.cpp`
+  - `getOrCreateRecursiveVar()` 在共享 `recursive` entry 上记录最小 `ownerIndex`。
+  - `finalizeRecursiveVar()` 只有当前 root 是 entry owner 时才写 `entry.bound` 和 `recVars`。
+  - `bulkSimplifyDetailed()` 的 canonicalize 阶段改成 vector result slot；只有设置
+    `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1` 时才用 TBB 并行这个阶段。
+  - 默认路径仍串行 canonicalize，只保留已稳定的 bulk 后半段并行。
+
+为什么没有默认打开：
+
+- 设置 `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1` 后，fortune 能跑通，性能明显更好。
+- 但 repeated fortune `.htypes` 仍不稳定。即使把 `rec_数字` 归一化，仍能看到递归折叠点不同导致的结构差异。
+- `.ll` 在简单归一化 `rec_数字` 后一致，说明当前更像是递归类型表示差异，不像明显语义错误。
+- 但当前 oracle 依赖文本结果，默认路径不能引入这种不稳定。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub notdec -j4
+./build/binarysub
+rm -rf /tmp/binarysub-canon-exp-off-build
+cmake -S external/binarysub -B /tmp/binarysub-canon-exp-off-build -G Ninja \
+  -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
+cmake --build /tmp/binarysub-canon-exp-off-build --target binarysub -j4
+/tmp/binarysub-canon-exp-off-build/binarysub
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+```
+
+结果都通过。
+
+fortune 默认路径重复运行稳定：
+
+```text
+elapsed=30.62 rss_kb=195244
+elapsed=30.75 rss_kb=194396
+default htypes repeat identical
+default ll repeat identical
+```
+
+canonicalize 并行实验路径：
+
+```bash
+NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1 ./build/bin/notdec ...
+```
+
+代表性结果：
+
+```text
+elapsed=16.17 rss_kb=202160
+elapsed=16.13 rss_kb=201808
+```
+
+但 `.htypes` 重复运行不稳定，所以只保留为实验开关。
+
+评分：
+
+- 实现效果：6/10。默认路径保持稳定；实验路径证明 canonicalize 并行有明显收益，但文本稳定性未解决。
+- 理解成本：6/10。`recursive` entry 增加 owner 规则，读代码时需要理解 owner 只约束 `recVars` 回填。
+- 维护成本：5/10。实验开关隔离了风险；后续如果要默认启用，需要先做递归类型 canonical renaming 或更强的规范化。
+
+后续更好的方案：
+
+- 不再继续靠调度中的 owner 选择修补文本稳定性。
+- 如果要默认打开 canonicalize 并行，应先在 UType/HType 输出前做递归类型稳定化，把等价但折叠点不同的递归表示归一。
+- 另一条路是 canonicalize 阶段并行预计算，最后按 root 顺序串行提交 recursive/recVars，但这会损失一部分收益。
