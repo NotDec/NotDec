@@ -213,3 +213,40 @@
 - `cmake --build ./build --target notdec -j4` 通过。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.92s。
+
+## 2026-06-09 实现记录：checked-bounds 输出 helper 移到专门文件
+
+本次只拆 `CheckedBoundsPass` 的输出侧逻辑，`matchCheckedBoundsGuard` 和它依赖的大量
+guard matcher 仍留在 `SolidityPatterns.cpp`。这样不会改变 HType 后移路线，也避免一次性搬动
+过多匹配代码。
+
+实现改动：
+
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:231`：
+  删除 `checkedBoundsOperandsDominateBranch`、`downgradeCheckedBoundsRewrite`、
+  `addCheckedBoundsMetadata`、`rewriteCheckedBoundsGuard` 的公共声明。
+- `src/Passes/evm/SolidityPatterns.cpp:5247`：
+  删除 checked-bounds rewrite marker 名称、operand 可用性检查、skip 降级、
+  metadata 插入和 CFG rewrite helper，大文件减少约 244 行。
+- `src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp:18`：
+  在匿名 namespace 内补回 `getRewriteKindCode`，只服务 checked-bounds skip marker。
+- `src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp:32`：
+  在本文件内补回 checked-bounds rewrite marker 名称映射。
+- `src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp:110`：
+  在本文件内补回 operand dominance / rematerialize 检查。
+- `src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp:146`：
+  在本文件内补回 skip 降级、metadata、rewrite marker 和 CFG rewrite helper。
+
+复杂度评分：
+
+- 实现效果：6/10。没有改变 checked-bounds 识别能力，但把 pass 输出侧代码移出大文件。
+- 理解成本：2/10。`CheckedBoundsPass.cpp` 变长，但内容就是本 pass 的输出和 rewrite。
+- 维护成本：2/10。公共接口更小，后续改 checked-bounds rewrite 不需要碰
+  `SolidityPatterns.cpp`。
+
+验证：
+
+- `cmake --build ./build --target notdec-core -j4` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。

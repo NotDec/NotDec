@@ -231,13 +231,6 @@ bool isFreeMemoryPointerStore(llvm::Instruction *I);
 bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
 std::optional<CheckedBoundsMatch>
 matchCheckedBoundsGuard(llvm::BasicBlock &BB);
-bool checkedBoundsOperandsDominateBranch(const CheckedBoundsMatch &Match,
-                                         llvm::DominatorTree &DT);
-void downgradeCheckedBoundsRewrite(CheckedBoundsMatch &Match,
-                                   llvm::StringRef Reason);
-void addCheckedBoundsMetadata(llvm::LLVMContext &Ctx,
-                              const CheckedBoundsMatch &Match);
-void rewriteCheckedBoundsGuard(const CheckedBoundsMatch &Match);
 
 bool dependsOnCallTo(llvm::Value *V, llvm::StringRef Name, unsigned Depth = 8);
 bool dependsOnValue(llvm::Value *V, llvm::Value *Target, unsigned Depth = 8);
