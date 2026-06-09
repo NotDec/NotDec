@@ -473,3 +473,78 @@ Solidity 语义 pass 的标注接口继续扩散。
 复杂度：2/10。只是把三份重复读取逻辑移到一个薄 helper。
 维护成本：2/10。后续 ABI return / revert / event 能共用同一个 HType buffer 入口。
 实现效果：7/10。减少重复，也避免 `SolidityPatterns.cpp` 继续变长；还没有进入阶段 3/4 的语义分类重构。
+
+## 实现记录：SolidityRevertPass 基于 HType store evidence 读取 selector
+
+问题：
+
+- `SolidityRevertPass` 已经改成先看 revert base 的 HType record，但只知道
+  offset 0 / 4 / 36 这些字段存在，还不知道字段里存入的 selector、panic code
+  或 string length。
+- 不能回到旧的“直接扫 IR store 推 payload”路线。store 只能作为 HType 已确认字段后的
+  evidence 使用。
+
+修改：
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:68`：新增
+  `EVMStoreEvidence`，只保存 EVM store 的地址、原始 stored value、bit size 和来源指令。
+  这个结构不暴露 BinarySub 临时类型节点。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:510`：`MLsubRecovery` 增加
+  `EVMStores` 和 `getEVMStoreEvidence()`，供类型恢复后的 EVM semantic pass 读取。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:48`：前置声明 `isEVMModule`，让
+  store 记录阶段能判断当前 module。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2178`：`recordStore` 在 EVM module
+  下即使 pointer analysis 未启用，也保留 store 记录；非 EVM 仍按原来的
+  pointer analysis 开关处理。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3163`：`MLsubRecovery::genASTTypes`
+  合并各 SCC 结果时，把 EVM store 转成 `EVMStoreEvidence`，在 release BinarySub
+  state 前只保留 LLVM value / instruction 指针。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:199`：暴露
+  `getOffsetFromBase` 和 `getSelectorWord`，供拆分后的 `SolidityRevertPass.cpp`
+  复用旧工具函数，避免继续把逻辑写回 `SolidityPatterns.cpp`。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:28`：
+  `RevertPayloadHType` 增加 offset 0 / 4 / 36 对应的 store evidence 列表。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:78`：
+  `getEvidenceOffsetFromBase` 支持 `store ptr %base` 和
+  `store ptr inttoptr(base + const)` 两种 EVM lowering 形状。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:94`：
+  `getFieldStoreValues` 先确认 HType record 有对应 field，再按 offset 过滤
+  `EVMStoreEvidence`。这保证 store evidence 只作为 HType 字段的补充证据。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:159`：
+  `classifyRevertFromHType` 现在从 offset 0 evidence 解 selector，区分
+  `panic`、`error_string` 和 `custom_error_candidate`；offset 4 / 36 的唯一常量
+  evidence 分别填 `PanicCode` 和 `ErrorStringLength`。同一字段出现冲突常量时放弃分类。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:247`：
+  `SolidityRevertPass::run` 在 `TR.getResult()` 后读取 `TR.getEVMStoreEvidence()`，
+  传给 HType 分类逻辑。
+
+效果：
+
+- `revert_error_string_01` 现在基于 HType record 字段和 store evidence 识别
+  `Error(string)` selector `0x08c379a0`。
+- offset 36 的 `store i256 5` 能写入
+  `notdec.solidity_revert.error_string_length`，rewrite marker 参数也从 unknown
+  变成 `5`。
+- 新逻辑没有恢复旧 memory marker / raw store 全量扫描；所有 store evidence
+  查询都在 HType field 已存在之后发生。
+- 本次没有继续增加 `src/Passes/evm/SolidityPatterns.cpp` 的长度。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-evidence-final3.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-evidence-final3.htypes --gen-work-dir --work-dir=/tmp/notdec-revert-evidence-final3-work`
+  通过。输出中 `evm_revert(..., %evm.alloc.addr, 100)` 带
+  `!notdec.solidity_revert.selector` 和
+  `!notdec.solidity_revert.error_string_length`，并插入
+  `notdec_solidity_rewrite_revert_error_string(i256 147028384, i256 5)`。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.90s。
+- `ctest --test-dir build -R 'notdec.type_recovery.(evm|llvm_ir).tr_level_2' --output-on-failure`
+  中 EVM suite 通过；LLVM IR suite 的
+  `21_PointerAnalysisBranchingFieldCycle` 仍失败，差异是 `rec_35` / `rec_36` /
+  `rec_60` 这类 snapshot 命名漂移，和本轮 EVM-only store evidence 路线无关。
+- 按用户要求，本轮不看 fortune 性能问题。
+
+复杂度：4/10。新增了一个很薄的 EVM store evidence sidecar，pass 侧只做字段级读取。
+维护成本：3/10。证据生命周期跟 `MLsubRecovery` 绑定，后续 ABI return 也可以复用，但需要继续保持“先 HType 字段、再 evidence”的边界。
+实现效果：7/10。`Error(string)` selector 和 length 已走 HType evidence 路线；string literal 和更多 ABI payload 还没迁移。

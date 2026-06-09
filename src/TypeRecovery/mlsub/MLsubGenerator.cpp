@@ -45,6 +45,8 @@ using namespace llvm;
 
 namespace notdec::mlsub {
 
+static bool isEVMModule(const llvm::Module &M);
+
 namespace {
 
 struct PolyPolicyConfig {
@@ -2176,7 +2178,10 @@ void ConstraintsGenerator::recordLoad(ExtValuePtr Addr, SimpleType ResultTy,
 void ConstraintsGenerator::recordStore(ExtValuePtr Addr, SimpleType ValueTy,
                                        unsigned BitSize,
                                        llvm::Instruction *Source) {
-  if (!isPointerAnalysisEnabled()) {
+  bool KeepForEVMEvidence =
+      Source != nullptr && Source->getModule() != nullptr &&
+      isEVMModule(*Source->getModule());
+  if (!isPointerAnalysisEnabled() && !KeepForEVMEvidence) {
     return;
   }
   MemoryAccesses.StoresByAddr[Addr].push_back(
@@ -3157,6 +3162,7 @@ void ConstraintsGenerator::releaseBinarysubState() {
 
 void MLsubRecovery::genASTTypes(llvm::Module &M) {
   ResultVal = std::make_unique<Result>();
+  EVMStores.clear();
   // 合并所有类型到一个大的 HTypeResult 里面。
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
@@ -3171,6 +3177,23 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
     ResultVal->ContraVariantValues.insert(
         Data.Generator->SnapshotContraVariantValues.begin(),
         Data.Generator->SnapshotContraVariantValues.end());
+    if (isEVMModule(M)) {
+      for (const auto &Ent : Data.Generator->MemoryAccesses.StoresByAddr) {
+        for (const RecordedStore &Store : Ent.second) {
+          auto *StoreInst =
+              llvm::dyn_cast_or_null<llvm::StoreInst>(Store.Source);
+          if (StoreInst == nullptr) {
+            continue;
+          }
+          EVMStores.push_back(EVMStoreEvidence{
+              .Addr = Store.Addr,
+              .StoredValue = StoreInst->getValueOperand(),
+              .BitSize = Store.BitSize,
+              .Source = Store.Source,
+          });
+        }
+      }
+    }
   }
   ResultVal->HTCtx = HCtx;
   // handle Memory type.

@@ -32,6 +32,9 @@ struct RevertPayloadHType {
   bool HasErrorHead = false;
   bool HasErrorLength = false;
   bool HasErrorData = false;
+  SmallVector<Value *, 2> SelectorStores;
+  SmallVector<Value *, 2> PanicCodeStores;
+  SmallVector<Value *, 2> ErrorLengthStores;
 };
 
 ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
@@ -60,8 +63,77 @@ bool hasFieldAt(ast::RecordDecl &Record, int64_t Offset) {
   return Record.getFieldAt(Offset) != nullptr;
 }
 
+Value *getValueFromExtValue(const ExtValuePtr &Value) {
+  if (auto *V = std::get_if<llvm::Value *>(&Value)) {
+    return *V;
+  }
+  return nullptr;
+}
+
+bool isPtrToIntOf(Value *MaybePtrToInt, Value *Ptr) {
+  auto *Cast = dyn_cast_or_null<PtrToIntInst>(MaybePtrToInt);
+  return Cast != nullptr && Cast->getOperand(0) == Ptr;
+}
+
+std::optional<uint64_t> getEvidenceOffsetFromBase(const ExtValuePtr &Addr,
+                                                  Value *Base) {
+  Value *AddrValue = getValueFromExtValue(Addr);
+  if (AddrValue == nullptr) {
+    return std::nullopt;
+  }
+
+  if (isPtrToIntOf(Base, AddrValue)) {
+    return 0;
+  }
+  if (auto *Cast = dyn_cast<IntToPtrInst>(AddrValue)) {
+    AddrValue = Cast->getOperand(0);
+  }
+  return getOffsetFromBase(AddrValue, Base);
+}
+
+SmallVector<Value *, 2> getFieldStoreValues(
+    ArrayRef<mlsub::EVMStoreEvidence> Stores, ast::RecordDecl &Record,
+    Value *Base, int64_t Offset) {
+  SmallVector<Value *, 2> Values;
+  if (!hasFieldAt(Record, Offset)) {
+    return Values;
+  }
+
+  for (const mlsub::EVMStoreEvidence &Store : Stores) {
+    if (Store.BitSize != 256 || Store.StoredValue == nullptr) {
+      continue;
+    }
+    std::optional<uint64_t> StoreOffset =
+        getEvidenceOffsetFromBase(Store.Addr, Base);
+    if (StoreOffset.has_value() &&
+        *StoreOffset == static_cast<uint64_t>(Offset)) {
+      Values.push_back(Store.StoredValue);
+    }
+  }
+  return Values;
+}
+
+std::optional<uint64_t> getUniqueUInt64FieldValue(ArrayRef<Value *> Values,
+                                                  bool &Conflict) {
+  std::optional<uint64_t> Result;
+  for (Value *V : Values) {
+    std::optional<uint64_t> Candidate = getUInt64Constant(V);
+    if (!Candidate.has_value()) {
+      continue;
+    }
+    if (Result.has_value() && *Result != *Candidate) {
+      Conflict = true;
+      return std::nullopt;
+    }
+    Result = Candidate;
+  }
+  return Result;
+}
+
 std::optional<RevertPayloadHType>
-getRevertPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Revert) {
+getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
+                      ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                      CallBase &Revert) {
   ast::RecordDecl *Record =
       getRecordPointeeHType(HTypes, Revert.getArgOperand(1), Revert, 1);
   if (Record == nullptr) {
@@ -75,11 +147,19 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes, CallBase &Revert) {
   Payload.HasErrorHead = hasFieldAt(*Record, 4);
   Payload.HasErrorLength = hasFieldAt(*Record, 36);
   Payload.HasErrorData = hasFieldAt(*Record, 68);
+  Payload.SelectorStores =
+      getFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 0);
+  Payload.PanicCodeStores =
+      getFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 4);
+  Payload.ErrorLengthStores =
+      getFieldStoreValues(Stores, *Record, Revert.getArgOperand(1), 36);
   return Payload;
 }
 
 std::optional<SolidityRevertMatch>
-classifyRevertFromHType(llvm2c::HTypeResult &HTypes, CallBase &Revert) {
+classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
+                        ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                        CallBase &Revert) {
   if (isConstantIntValue(Revert.getArgOperand(1), 0) &&
       isConstantIntValue(Revert.getArgOperand(2), 0)) {
     SolidityRevertMatch Match;
@@ -96,7 +176,7 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes, CallBase &Revert) {
   }
 
   std::optional<RevertPayloadHType> Payload =
-      getRevertPayloadHType(HTypes, Revert);
+      getRevertPayloadHType(HTypes, Stores, Revert);
   if (!Payload.has_value()) {
     ++NumRevertMissingPayloadHTypes;
     return std::nullopt;
@@ -104,20 +184,57 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes, CallBase &Revert) {
 
   SolidityRevertMatch Match;
   Match.Revert = &Revert;
-  if (isConstantIntValue(Revert.getArgOperand(2), 36) &&
-      Payload->HasSelector && Payload->HasPanicCode) {
+
+  std::optional<uint64_t> Selector;
+  for (Value *StoredValue : Payload->SelectorStores) {
+    std::optional<uint64_t> Candidate = getSelectorWord(StoredValue);
+    if (!Candidate.has_value()) {
+      continue;
+    }
+    if (Selector.has_value() && *Selector != *Candidate) {
+      LLVM_DEBUG(dbgs() << "evm revert: conflicting selector store evidence: "
+                        << Twine::utohexstr(*Selector) << " vs "
+                        << Twine::utohexstr(*Candidate) << "\n");
+      return std::nullopt;
+    }
+    Selector = Candidate;
+  }
+  Match.Selector = Selector;
+
+  if (Selector.has_value() && *Selector == 0x4e487b71 &&
+      isConstantIntValue(Revert.getArgOperand(2), 36) &&
+      Payload->HasPanicCode) {
     Match.Kind = "panic";
+    bool Conflict = false;
+    Match.PanicCode =
+        getUniqueUInt64FieldValue(Payload->PanicCodeStores, Conflict);
+    if (Conflict) {
+      return std::nullopt;
+    }
     return Match;
   }
 
-  if (Payload->HasSelector && Payload->HasErrorHead &&
+  if (Selector.has_value() && *Selector == 0x08c379a0 &&
+      Payload->HasErrorHead &&
       Payload->HasErrorLength) {
     Match.Kind = "error_string";
+    bool Conflict = false;
+    Match.ErrorStringLength =
+        getUniqueUInt64FieldValue(Payload->ErrorLengthStores, Conflict);
+    if (Conflict) {
+      return std::nullopt;
+    }
     return Match;
   }
 
-  if (Payload->HasSelector) {
+  if (Selector.has_value()) {
     Match.Kind = "custom_error_candidate";
+    if (std::optional<uint64_t> RevertLength =
+            getUInt64Constant(Revert.getArgOperand(2));
+        RevertLength.has_value() && *RevertLength >= 4 &&
+        (*RevertLength - 4) % 32 == 0) {
+      Match.CustomErrorArgCount = (*RevertLength - 4) / 32;
+    }
     return Match;
   }
 
@@ -134,6 +251,7 @@ PreservedAnalyses SolidityRevertPass::run(Module &M,
   if (HighTypes == nullptr) {
     return PreservedAnalyses::all();
   }
+  ArrayRef<mlsub::EVMStoreEvidence> StoreEvidence = TR.getEVMStoreEvidence();
 
   bool Changed = false;
 
@@ -152,7 +270,7 @@ PreservedAnalyses SolidityRevertPass::run(Module &M,
         }
 
         std::optional<SolidityRevertMatch> Match =
-            classifyRevertFromHType(*HighTypes, *Call);
+            classifyRevertFromHType(*HighTypes, StoreEvidence, *Call);
         if (!Match.has_value()) {
           continue;
         }

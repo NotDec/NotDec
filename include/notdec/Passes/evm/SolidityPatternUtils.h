@@ -196,6 +196,9 @@ void insertPayabilityCfgRewriteMarker(llvm::LLVMContext &Ctx,
 
 bool isReturndataSize(llvm::Value *V);
 std::optional<uint64_t> getUInt64Constant(llvm::Value *V);
+std::optional<uint64_t> getOffsetFromBase(llvm::Value *Offset,
+                                          llvm::Value *Base);
+std::optional<uint64_t> getSelectorWord(llvm::Value *V);
 HTypeBufferView getHTypeBufferView(notdec::llvm2c::HTypeResult &HTypes,
                                    llvm::Value *Base, llvm::CallBase &Use,
                                    unsigned ArgIndex);

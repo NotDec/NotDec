@@ -65,6 +65,16 @@ struct RecordedStore {
   llvm::Instruction *Source = nullptr;
 };
 
+// EVM semantic passes use this as field evidence after HType has already
+// confirmed a buffer field.  It preserves the original store/value pair without
+// exposing BinarySub's temporary type nodes past type recovery.
+struct EVMStoreEvidence {
+  ExtValuePtr Addr;
+  llvm::Value *StoredValue = nullptr;
+  unsigned BitSize = 0;
+  llvm::Instruction *Source = nullptr;
+};
+
 /// Records IR memory events and gives each explicit MemoryLocKey a content
 /// SimpleType. The records are kept outside PointerAnalysis so PA only answers
 /// object identity, while BinarySub still owns the actual content type.
@@ -497,12 +507,16 @@ public:
 
   using Result = ::notdec::llvm2c::HTypeResult;
   std::unique_ptr<Result> ResultVal;
+  std::vector<EVMStoreEvidence> EVMStores;
   std::unique_ptr<Result> &getResult(llvm::Module &M1,
                                      llvm::ModuleAnalysisManager &MAM) {
     if (ResultVal == nullptr) {
       genASTTypes(M1);
     }
     return ResultVal;
+  }
+  llvm::ArrayRef<EVMStoreEvidence> getEVMStoreEvidence() const {
+    return EVMStores;
   }
   void genASTTypes(llvm::Module &M);
 };
