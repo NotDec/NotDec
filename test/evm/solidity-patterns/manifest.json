@@ -383,10 +383,10 @@
       "expected_revert_kinds": {
         "empty": 2,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 1,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -400,7 +400,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "5": 1
       },
@@ -439,10 +438,10 @@
       "expected_revert_kinds": {
         "empty": 2,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 1,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -456,7 +455,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "42": 1
       },
@@ -485,10 +483,10 @@
       "expected_revert_kinds": {
         "empty": 3,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 1,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -502,7 +500,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "18": 1
       },
@@ -531,10 +528,10 @@
       "expected_revert_kinds": {
         "empty": 7,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 1,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -548,7 +545,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_error_string_lengths": {
         "18": 1
       },
@@ -577,10 +573,10 @@
       "expected_revert_kinds": {
         "empty": 2,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 1,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -594,7 +590,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "0": 1
       },
@@ -620,10 +615,10 @@
       "expected_revert_kinds": {
         "empty": 3,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 1,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -637,7 +632,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "1": 1
       },
@@ -663,10 +657,10 @@
       "expected_revert_kinds": {
         "empty": 3,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 1,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -680,7 +674,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "2": 1
       },
@@ -706,10 +699,10 @@
       "expected_revert_kinds": {
         "empty": 3,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 1,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -723,7 +716,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "2": 1
       },
@@ -749,10 +741,10 @@
       "expected_revert_kinds": {
         "empty": 3,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 1,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -766,7 +758,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "1": 1
       },
@@ -792,10 +783,10 @@
       "expected_revert_kinds": {
         "empty": 4,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 1,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -809,7 +800,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_custom_error_arg_counts": {
         "1": 1
       },
@@ -839,10 +829,10 @@
       "expected_revert_kinds": {
         "empty": 0,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -856,7 +846,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_event_memory_consumer": 0,
         "notdec_solidity_external_call_memory_consumer": 0,
@@ -892,15 +881,15 @@
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 15,
-        "notdec.solidity.revert": 6
+        "notdec.solidity.revert": 8
       },
       "expected_revert_kinds": {
         "empty": 3,
         "panic": 1,
-        "returndata_bubble": 2,
         "error_string": 2,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -914,7 +903,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 2,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_abi_return_memory_consumer": 0,
         "notdec_solidity_abi_return_data_word_write": 0,
@@ -953,10 +941,10 @@
       "expected_revert_kinds": {
         "empty": 0,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 1
+        "encoded_candidate": 0,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -970,7 +958,6 @@
         "65": 0,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_memory_rewrite_markers": {
         "notdec_solidity_memory_copy_write": 0,
         "notdec_solidity_memory_consumer": 0
@@ -1007,10 +994,10 @@
       "expected_revert_kinds": {
         "empty": 7,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 1
+        "encoded_candidate": 0,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1023,8 +1010,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "0448_19495059_065877b669_4f138305be23",
@@ -1044,15 +1030,15 @@
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 7,
         "notdec.solidity.payability_guard": 57,
-        "notdec.solidity.revert": 44
+        "notdec.solidity.revert": 52
       },
       "expected_revert_kinds": {
         "empty": 16,
         "panic": 10,
-        "returndata_bubble": 8,
         "error_string": 18,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 8
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1112,8 +1098,7 @@
         "calldata": 0,
         "scratch_returndata": 0,
         "code": 0
-      },
-      "expected_returndata_bubbles": 8
+      }
     },
     {
       "name": "0450_19495071_6b6c9447e0_6344565f4b31",
@@ -1133,15 +1118,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 6,
-        "notdec.solidity.revert": 5
+        "notdec.solidity.revert": 7
       },
       "expected_revert_kinds": {
         "empty": 5,
         "panic": 0,
-        "returndata_bubble": 2,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1179,8 +1164,7 @@
         "calldata": 0,
         "scratch_returndata": 0,
         "code": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0456_19495158_c7c34e07aa_0e692a3d145c",
@@ -1198,15 +1182,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 27
+        "notdec.solidity.revert": 28
       },
       "expected_revert_kinds": {
         "empty": 12,
         "panic": 0,
-        "returndata_bubble": 1,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 15
+        "encoded_candidate": 15,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1219,8 +1203,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 1
+      }
     },
     {
       "name": "0457_19495180_71d7525532_df21a257bd5c",
@@ -1245,10 +1228,10 @@
       "expected_revert_kinds": {
         "empty": 41,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 26
+        "encoded_candidate": 26,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1261,8 +1244,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "0459_19495198_fc5ac215e3_805f0e6bf43e",
@@ -1287,10 +1269,10 @@
       "expected_revert_kinds": {
         "empty": 41,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 26
+        "encoded_candidate": 26,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1303,8 +1285,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "0460_19495212_3dd362a96f_b915c4f6cb8b",
@@ -1322,15 +1303,15 @@
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 5,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 34
+        "notdec.solidity.revert": 35
       },
       "expected_revert_kinds": {
         "empty": 14,
         "panic": 3,
-        "returndata_bubble": 1,
         "error_string": 17,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1343,8 +1324,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 1
+      }
     },
     {
       "name": "0725_19498082_e78beb21f7_98e658f9eae8",
@@ -1369,10 +1349,10 @@
       "expected_revert_kinds": {
         "empty": 38,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 42
+        "encoded_candidate": 42,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1385,8 +1365,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "0726_19498082_c3945ab21b_2b68f9f60fc2",
@@ -1406,15 +1385,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 6,
-        "notdec.solidity.revert": 5
+        "notdec.solidity.revert": 7
       },
       "expected_revert_kinds": {
         "empty": 5,
         "panic": 0,
-        "returndata_bubble": 2,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1427,8 +1406,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0735_19498132_e6671af1f9_f57fe690a6a3",
@@ -1447,15 +1425,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 6,
-        "notdec.solidity.revert": 4
+        "notdec.solidity.revert": 6
       },
       "expected_revert_kinds": {
         "empty": 4,
         "panic": 0,
-        "returndata_bubble": 2,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1468,8 +1446,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0740_19498186_acae9b9760_d235a47b18d5",
@@ -1494,10 +1471,10 @@
       "expected_revert_kinds": {
         "empty": 38,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 42
+        "encoded_candidate": 42,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1510,8 +1487,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "2001_19510128_72aa4f70b3_e9ee7c9c0e79",
@@ -1531,15 +1507,15 @@
         "notdec.solidity.checked_bounds": 36,
         "notdec.solidity.event": 21,
         "notdec.solidity.payability_guard": 183,
-        "notdec.solidity.revert": 192
+        "notdec.solidity.revert": 212
       },
       "expected_revert_kinds": {
         "empty": 99,
         "panic": 36,
-        "returndata_bubble": 20,
         "error_string": 12,
         "custom_error_candidate": 43,
-        "encoded_candidate": 2
+        "encoded_candidate": 2,
+        "returndata_forward": 20
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1594,8 +1570,7 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 36,
-      "expected_returndata_bubbles": 20
+      "expected_checked_bounds_cfg_rewrites": 36
     },
     {
       "name": "0189_19493609_3c0627c9e0_9d16fec0a1c2",
@@ -1615,15 +1590,15 @@
         "notdec.solidity.checked_bounds": 43,
         "notdec.solidity.event": 9,
         "notdec.solidity.payability_guard": 87,
-        "notdec.solidity.revert": 173
+        "notdec.solidity.revert": 183
       },
       "expected_revert_kinds": {
         "empty": 77,
         "panic": 43,
-        "returndata_bubble": 10,
         "error_string": 32,
         "custom_error_candidate": 18,
-        "encoded_candidate": 3
+        "encoded_candidate": 3,
+        "returndata_forward": 10
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1664,8 +1639,7 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 43,
-      "expected_returndata_bubbles": 10
+      "expected_checked_bounds_cfg_rewrites": 43
     },
     {
       "name": "0258_19493864_78edd9f88e_b098925cbd2d",
@@ -1685,15 +1659,15 @@
         "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 30,
         "notdec.solidity.payability_guard": 186,
-        "notdec.solidity.revert": 170
+        "notdec.solidity.revert": 226
       },
       "expected_revert_kinds": {
         "empty": 75,
         "panic": 51,
-        "returndata_bubble": 56,
         "error_string": 23,
         "custom_error_candidate": 19,
-        "encoded_candidate": 2
+        "encoded_candidate": 2,
+        "returndata_forward": 56
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1707,7 +1681,6 @@
         "65": 8,
         "81": 0
       },
-      "expected_returndata_bubbles": 56,
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 26,
         "array_bounds_storage": 9,
@@ -1768,15 +1741,15 @@
         "notdec.solidity.checked_bounds": 22,
         "notdec.solidity.event": 17,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 73
+        "notdec.solidity.revert": 75
       },
       "expected_revert_kinds": {
         "empty": 18,
         "panic": 22,
-        "returndata_bubble": 2,
         "error_string": 32,
         "custom_error_candidate": 0,
-        "encoded_candidate": 1
+        "encoded_candidate": 1,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1790,7 +1763,6 @@
         "65": 3,
         "81": 0
       },
-      "expected_returndata_bubbles": 2,
       "expected_checked_bounds_kinds": {
         "array_bounds_storage": 9,
         "empty_array_pop_storage": 2,
@@ -1850,10 +1822,10 @@
       "expected_revert_kinds": {
         "empty": 9,
         "panic": 30,
-        "returndata_bubble": 0,
         "error_string": 19,
         "custom_error_candidate": 0,
-        "encoded_candidate": 87
+        "encoded_candidate": 87,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1867,7 +1839,6 @@
         "65": 8,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
         "panic_resource_error": 0,
         "storage_bytes_encoding": 1,
@@ -1919,15 +1890,15 @@
         "notdec.solidity.checked_bounds": 51,
         "notdec.solidity.event": 11,
         "notdec.solidity.payability_guard": 132,
-        "notdec.solidity.revert": 135
+        "notdec.solidity.revert": 147
       },
       "expected_revert_kinds": {
         "empty": 58,
         "panic": 53,
-        "returndata_bubble": 12,
         "error_string": 23,
         "custom_error_candidate": 0,
-        "encoded_candidate": 1
+        "encoded_candidate": 1,
+        "returndata_forward": 12
       },
       "expected_panic_codes": {
         "0": 0,
@@ -1985,8 +1956,7 @@
         "panic_array_out_of_bounds": 1,
         "panic_assert": 1
       },
-      "expected_checked_bounds_cfg_rewrites": 49,
-      "expected_returndata_bubbles": 12
+      "expected_checked_bounds_cfg_rewrites": 49
     },
     {
       "name": "1274_19502133_51e0372918_736c45f00099",
@@ -2006,15 +1976,15 @@
         "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
         "notdec.solidity.payability_guard": 117,
-        "notdec.solidity.revert": 67
+        "notdec.solidity.revert": 71
       },
       "expected_revert_kinds": {
         "empty": 24,
         "panic": 17,
-        "returndata_bubble": 4,
         "error_string": 26,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 4
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2056,8 +2026,7 @@
         "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 17,
-      "expected_returndata_bubbles": 4
+      "expected_checked_bounds_cfg_rewrites": 17
     },
     {
       "name": "1991_19510015_7f60edd6aa_6188d2031ddf",
@@ -2075,15 +2044,15 @@
         "notdec.solidity.checked_bounds": 61,
         "notdec.solidity.event": 12,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 136
+        "notdec.solidity.revert": 145
       },
       "expected_revert_kinds": {
         "empty": 47,
         "panic": 61,
-        "returndata_bubble": 9,
         "error_string": 28,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 9
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2097,7 +2066,6 @@
         "65": 9,
         "81": 0
       },
-      "expected_returndata_bubbles": 9,
       "expected_checked_bounds_kinds": {
         "memory_allocation_bounds": 7,
         "array_bounds_memory": 40,
@@ -2149,15 +2117,15 @@
         "notdec.solidity.checked_bounds": 17,
         "notdec.solidity.event": 9,
         "notdec.solidity.payability_guard": 108,
-        "notdec.solidity.revert": 64
+        "notdec.solidity.revert": 67
       },
       "expected_revert_kinds": {
         "empty": 22,
         "panic": 17,
-        "returndata_bubble": 3,
         "error_string": 25,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 3
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2199,8 +2167,7 @@
         "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 17,
-      "expected_returndata_bubbles": 3
+      "expected_checked_bounds_cfg_rewrites": 17
     },
     {
       "name": "0340_19494346_717db37a78_7324081e28fc",
@@ -2220,15 +2187,15 @@
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
         "notdec.solidity.payability_guard": 225,
-        "notdec.solidity.revert": 95
+        "notdec.solidity.revert": 97
       },
       "expected_revert_kinds": {
         "empty": 34,
         "panic": 10,
-        "returndata_bubble": 2,
         "error_string": 51,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2242,7 +2209,6 @@
         "65": 3,
         "81": 0
       },
-      "expected_returndata_bubbles": 2,
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 2,
         "checked_add": 1,
@@ -2293,15 +2259,15 @@
         "notdec.solidity.checked_bounds": 15,
         "notdec.solidity.event": 14,
         "notdec.solidity.payability_guard": 111,
-        "notdec.solidity.revert": 108
+        "notdec.solidity.revert": 138
       },
       "expected_revert_kinds": {
         "empty": 41,
         "panic": 15,
-        "returndata_bubble": 30,
         "error_string": 14,
         "custom_error_candidate": 37,
-        "encoded_candidate": 1
+        "encoded_candidate": 1,
+        "returndata_forward": 30
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2315,7 +2281,6 @@
         "65": 3,
         "81": 0
       },
-      "expected_returndata_bubbles": 30,
       "expected_checked_bounds_kinds": {
         "checked_add": 1,
         "checked_add_bound": 1,
@@ -2367,10 +2332,10 @@
       "expected_revert_kinds": {
         "empty": 12,
         "panic": 30,
-        "returndata_bubble": 0,
         "error_string": 19,
         "custom_error_candidate": 0,
-        "encoded_candidate": 87
+        "encoded_candidate": 87,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2384,7 +2349,6 @@
         "65": 8,
         "81": 0
       },
-      "expected_returndata_bubbles": 0,
       "expected_checked_bounds_kinds": {
         "panic_resource_error": 0,
         "memory_allocation_pointer_bounds": 5,
@@ -2436,15 +2400,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 10,
         "notdec.solidity.payability_guard": 114,
-        "notdec.solidity.revert": 88
+        "notdec.solidity.revert": 90
       },
       "expected_revert_kinds": {
         "empty": 48,
         "panic": 0,
-        "returndata_bubble": 2,
         "error_string": 35,
         "custom_error_candidate": 0,
-        "encoded_candidate": 5
+        "encoded_candidate": 5,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2457,8 +2421,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "1572_19505998_da275bcf64_0796e2424ba2",
@@ -2478,15 +2441,15 @@
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 8,
         "notdec.solidity.payability_guard": 219,
-        "notdec.solidity.revert": 94
+        "notdec.solidity.revert": 96
       },
       "expected_revert_kinds": {
         "empty": 34,
         "panic": 10,
-        "returndata_bubble": 2,
         "error_string": 50,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2500,7 +2463,6 @@
         "65": 3,
         "81": 0
       },
-      "expected_returndata_bubbles": 2,
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 2,
         "checked_add": 1,
@@ -2551,15 +2513,15 @@
         "notdec.solidity.checked_bounds": 18,
         "notdec.solidity.event": 9,
         "notdec.solidity.payability_guard": 117,
-        "notdec.solidity.revert": 93
+        "notdec.solidity.revert": 94
       },
       "expected_revert_kinds": {
         "empty": 36,
         "panic": 18,
-        "returndata_bubble": 1,
         "error_string": 17,
         "custom_error_candidate": 21,
-        "encoded_candidate": 1
+        "encoded_candidate": 1,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2610,8 +2572,7 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 18,
-      "expected_returndata_bubbles": 1
+      "expected_checked_bounds_cfg_rewrites": 18
     },
     {
       "name": "1485_19504919_9deb0fc809_62afe2b29485",
@@ -2631,15 +2592,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
         "notdec.solidity.payability_guard": 138,
-        "notdec.solidity.revert": 109
+        "notdec.solidity.revert": 118
       },
       "expected_revert_kinds": {
         "empty": 66,
         "panic": 7,
-        "returndata_bubble": 9,
         "error_string": 36,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 9
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2653,7 +2614,6 @@
         "65": 3,
         "81": 0
       },
-      "expected_returndata_bubbles": 9,
       "expected_checked_bounds_kinds": {
         "memory_allocation_bounds": 2,
         "checked_mul": 1,
@@ -2699,10 +2659,10 @@
       "expected_revert_kinds": {
         "empty": 45,
         "panic": 14,
-        "returndata_bubble": 0,
         "error_string": 16,
         "custom_error_candidate": 22,
-        "encoded_candidate": 1
+        "encoded_candidate": 1,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2750,8 +2710,7 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 14,
-      "expected_returndata_bubbles": 0
+      "expected_checked_bounds_cfg_rewrites": 14
     },
     {
       "name": "0657_19497309_a4d607684e_332c65dbca0f",
@@ -2771,15 +2730,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 12,
         "notdec.solidity.payability_guard": 168,
-        "notdec.solidity.revert": 89
+        "notdec.solidity.revert": 98
       },
       "expected_revert_kinds": {
         "empty": 33,
         "panic": 7,
-        "returndata_bubble": 9,
         "error_string": 49,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 9
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2792,8 +2751,7 @@
         "50": 2,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 9
+      }
     },
     {
       "name": "1636_19506827_f7c7103caa_7898f279a7f3",
@@ -2813,15 +2771,15 @@
         "notdec.solidity.checked_bounds": 19,
         "notdec.solidity.event": 12,
         "notdec.solidity.payability_guard": 90,
-        "notdec.solidity.revert": 80
+        "notdec.solidity.revert": 87
       },
       "expected_revert_kinds": {
         "empty": 27,
         "panic": 19,
-        "returndata_bubble": 7,
         "error_string": 34,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 7
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2866,8 +2824,7 @@
         "notdec_solidity_rewrite_empty_array_pop_storage": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 19,
-      "expected_returndata_bubbles": 7
+      "expected_checked_bounds_cfg_rewrites": 19
     },
     {
       "name": "0637_19497125_d33ca6fd43_b0988224e0b7",
@@ -2887,15 +2844,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 17,
         "notdec.solidity.payability_guard": 111,
-        "notdec.solidity.revert": 80
+        "notdec.solidity.revert": 88
       },
       "expected_revert_kinds": {
         "empty": 27,
         "panic": 7,
-        "returndata_bubble": 8,
         "error_string": 46,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 8
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2908,8 +2865,7 @@
         "50": 2,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 8
+      }
     },
     {
       "name": "1490_19504983_72b68e8dfe_38ab68a7adc2",
@@ -2929,15 +2885,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
         "notdec.solidity.payability_guard": 189,
-        "notdec.solidity.revert": 87
+        "notdec.solidity.revert": 97
       },
       "expected_revert_kinds": {
         "empty": 36,
         "panic": 7,
-        "returndata_bubble": 10,
         "error_string": 44,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 10
       },
       "expected_panic_codes": {
         "0": 0,
@@ -2974,8 +2930,7 @@
         "notdec_solidity_rewrite_checked_sub": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 7,
-      "expected_returndata_bubbles": 10
+      "expected_checked_bounds_cfg_rewrites": 7
     },
     {
       "name": "2002_19510139_923ad4a9d1_4e9ed82fcc5b",
@@ -2995,15 +2950,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
         "notdec.solidity.payability_guard": 189,
-        "notdec.solidity.revert": 87
+        "notdec.solidity.revert": 97
       },
       "expected_revert_kinds": {
         "empty": 36,
         "panic": 7,
-        "returndata_bubble": 10,
         "error_string": 44,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 10
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3040,8 +2995,7 @@
         "notdec_solidity_rewrite_checked_sub": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 7,
-      "expected_returndata_bubbles": 10
+      "expected_checked_bounds_cfg_rewrites": 7
     },
     {
       "name": "1915_19508046_91cdb18983_844dae639fc0",
@@ -3061,15 +3015,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 10,
         "notdec.solidity.payability_guard": 189,
-        "notdec.solidity.revert": 87
+        "notdec.solidity.revert": 97
       },
       "expected_revert_kinds": {
         "empty": 36,
         "panic": 7,
-        "returndata_bubble": 10,
         "error_string": 44,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 10
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3106,8 +3060,7 @@
         "notdec_solidity_rewrite_checked_sub": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 7,
-      "expected_returndata_bubbles": 10
+      "expected_checked_bounds_cfg_rewrites": 7
     },
     {
       "name": "0870_19499091_69ef351b75_57ed8326bd30",
@@ -3127,15 +3080,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 8,
         "notdec.solidity.payability_guard": 174,
-        "notdec.solidity.revert": 80
+        "notdec.solidity.revert": 82
       },
       "expected_revert_kinds": {
         "empty": 30,
         "panic": 7,
-        "returndata_bubble": 2,
         "error_string": 43,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3168,8 +3121,7 @@
         "scratch_returndata": 0,
         "code": 0,
         "memory": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0009_19493025_977804571f_ab93bcf84624",
@@ -3189,15 +3141,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
         "notdec.solidity.payability_guard": 81,
-        "notdec.solidity.revert": 41
+        "notdec.solidity.revert": 43
       },
       "expected_revert_kinds": {
         "empty": 19,
         "panic": 0,
-        "returndata_bubble": 2,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 22
+        "encoded_candidate": 22,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3210,8 +3162,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0029_19493081_446349df2b_2c2bd78bea7d",
@@ -3231,15 +3182,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 6,
-        "notdec.solidity.revert": 5
+        "notdec.solidity.revert": 9
       },
       "expected_revert_kinds": {
         "empty": 5,
         "panic": 0,
-        "returndata_bubble": 4,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 4
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3252,8 +3203,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 4
+      }
     },
     {
       "name": "0030_19493089_e48135f4b6_56a7c8e02323",
@@ -3278,10 +3228,10 @@
       "expected_revert_kinds": {
         "empty": 9,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 9
+        "encoded_candidate": 9,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3294,8 +3244,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "0031_19493095_1fa5f54c3e_32ee79d4db5c",
@@ -3315,15 +3264,15 @@
         "notdec.solidity.checked_bounds": 4,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 30,
-        "notdec.solidity.revert": 28
+        "notdec.solidity.revert": 36
       },
       "expected_revert_kinds": {
         "empty": 16,
         "panic": 4,
-        "returndata_bubble": 8,
         "error_string": 8,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 8
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3336,8 +3285,7 @@
         "50": 2,
         "65": 2,
         "81": 0
-      },
-      "expected_returndata_bubbles": 8
+      }
     },
     {
       "name": "0032_19493098_f0dab0bf78_8c9406cb7887",
@@ -3357,15 +3305,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 7,
         "notdec.solidity.payability_guard": 114,
-        "notdec.solidity.revert": 77
+        "notdec.solidity.revert": 83
       },
       "expected_revert_kinds": {
         "empty": 39,
         "panic": 0,
-        "returndata_bubble": 6,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 38
+        "encoded_candidate": 38,
+        "returndata_forward": 6
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3378,8 +3326,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 6
+      }
     },
     {
       "name": "0038_19493119_aed19fef21_ea7b432ec4f1",
@@ -3399,15 +3346,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 6,
-        "notdec.solidity.revert": 5
+        "notdec.solidity.revert": 7
       },
       "expected_revert_kinds": {
         "empty": 5,
         "panic": 0,
-        "returndata_bubble": 2,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3420,8 +3367,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0112_19493231_e681d3a0e3_c848651ad27d",
@@ -3441,15 +3387,15 @@
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 3,
         "notdec.solidity.payability_guard": 60,
-        "notdec.solidity.revert": 40
+        "notdec.solidity.revert": 44
       },
       "expected_revert_kinds": {
         "empty": 15,
         "panic": 9,
-        "returndata_bubble": 4,
         "error_string": 16,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 4
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3490,8 +3436,7 @@
         "notdec_solidity_rewrite_array_bounds_memory": 2
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 9,
-      "expected_returndata_bubbles": 4
+      "expected_checked_bounds_cfg_rewrites": 9
     },
     {
       "name": "0114_19493235_fc69a30a99_3aa7e05b781a",
@@ -3511,15 +3456,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 2,
         "notdec.solidity.payability_guard": 6,
-        "notdec.solidity.revert": 5
+        "notdec.solidity.revert": 7
       },
       "expected_revert_kinds": {
         "empty": 5,
         "panic": 0,
-        "returndata_bubble": 2,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3532,8 +3477,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0118_19493248_593c688d00_799916048038",
@@ -3553,15 +3497,15 @@
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 87,
-        "notdec.solidity.revert": 57
+        "notdec.solidity.revert": 61
       },
       "expected_revert_kinds": {
         "empty": 22,
         "panic": 8,
-        "returndata_bubble": 4,
         "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 4
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3600,8 +3544,7 @@
         "notdec_solidity_abi_return_dynamic_array_literal_bytes": 0,
         "notdec_solidity_abi_return_dynamic_array_literal_bytes_return": 0,
         "notdec_solidity_rewrite_abi_return_literal_bytes": 0
-      },
-      "expected_returndata_bubbles": 4
+      }
     },
     {
       "name": "0121_19493259_63ed382f00_e1eb3485de04",
@@ -3621,15 +3564,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
         "notdec.solidity.payability_guard": 75,
-        "notdec.solidity.revert": 55
+        "notdec.solidity.revert": 58
       },
       "expected_revert_kinds": {
         "empty": 22,
         "panic": 7,
-        "returndata_bubble": 3,
         "error_string": 26,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 3
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3671,8 +3614,7 @@
         "notdec_solidity_rewrite_array_bounds_memory": 0
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 7,
-      "expected_returndata_bubbles": 3
+      "expected_checked_bounds_cfg_rewrites": 7
     },
     {
       "name": "0128_19493282_117a55c492_4233986babaf",
@@ -3692,15 +3634,15 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 5,
         "notdec.solidity.payability_guard": 126,
-        "notdec.solidity.revert": 57
+        "notdec.solidity.revert": 58
       },
       "expected_revert_kinds": {
         "empty": 20,
         "panic": 7,
-        "returndata_bubble": 1,
         "error_string": 30,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3713,8 +3655,7 @@
         "50": 2,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 1
+      }
     },
     {
       "name": "0146_19493376_503a732d50_138a4d77d617",
@@ -3739,10 +3680,10 @@
       "expected_revert_kinds": {
         "empty": 22,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3755,8 +3696,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "0147_19493380_262c2cb2b2_c24931e22d66",
@@ -3776,15 +3716,15 @@
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 99,
-        "notdec.solidity.revert": 69
+        "notdec.solidity.revert": 72
       },
       "expected_revert_kinds": {
         "empty": 33,
         "panic": 8,
-        "returndata_bubble": 3,
         "error_string": 28,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 3
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3798,7 +3738,6 @@
         "65": 2,
         "81": 0
       },
-      "expected_returndata_bubbles": 3,
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 2,
         "memory_allocation_pointer_bounds": 1,
@@ -3843,15 +3782,15 @@
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 93,
-        "notdec.solidity.revert": 67
+        "notdec.solidity.revert": 70
       },
       "expected_revert_kinds": {
         "empty": 32,
         "panic": 8,
-        "returndata_bubble": 3,
         "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 3
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3888,8 +3827,7 @@
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 8,
-      "expected_returndata_bubbles": 3
+      "expected_checked_bounds_cfg_rewrites": 8
     },
     {
       "name": "0176_19493428_12f263f8c9_ce83d7b0b2a7",
@@ -3909,15 +3847,15 @@
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 93,
-        "notdec.solidity.revert": 67
+        "notdec.solidity.revert": 70
       },
       "expected_revert_kinds": {
         "empty": 32,
         "panic": 8,
-        "returndata_bubble": 3,
         "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 3
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3954,8 +3892,7 @@
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 8,
-      "expected_returndata_bubbles": 3
+      "expected_checked_bounds_cfg_rewrites": 8
     },
     {
       "name": "0178_19493463_4da3a6e3d8_c33022fe2f2f",
@@ -3975,15 +3912,15 @@
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 75,
-        "notdec.solidity.revert": 48
+        "notdec.solidity.revert": 55
       },
       "expected_revert_kinds": {
         "empty": 21,
         "panic": 6,
-        "returndata_bubble": 7,
         "error_string": 21,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 7
       },
       "expected_panic_codes": {
         "0": 0,
@@ -3996,8 +3933,7 @@
         "50": 2,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 7
+      }
     },
     {
       "name": "0179_19493473_76bc10e48c_fd3041389134",
@@ -4017,15 +3953,15 @@
         "notdec.solidity.checked_bounds": 8,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 93,
-        "notdec.solidity.revert": 67
+        "notdec.solidity.revert": 70
       },
       "expected_revert_kinds": {
         "empty": 32,
         "panic": 8,
-        "returndata_bubble": 3,
         "error_string": 27,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 3
       },
       "expected_panic_codes": {
         "0": 0,
@@ -4062,8 +3998,7 @@
         "notdec_solidity_rewrite_checked_div": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 8,
-      "expected_returndata_bubbles": 3
+      "expected_checked_bounds_cfg_rewrites": 8
     },
     {
       "name": "0190_19493619_2fea34e2f2_9597b615b1d4",
@@ -4088,10 +4023,10 @@
       "expected_revert_kinds": {
         "empty": 25,
         "panic": 0,
-        "returndata_bubble": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 22
+        "encoded_candidate": 22,
+        "returndata_forward": 0
       },
       "expected_panic_codes": {
         "0": 0,
@@ -4104,8 +4039,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 0
+      }
     },
     {
       "name": "0195_19493642_a9eb505e1d_c5345c8e5a60",
@@ -4125,15 +4059,15 @@
         "notdec.solidity.checked_bounds": 6,
         "notdec.solidity.event": 5,
         "notdec.solidity.payability_guard": 69,
-        "notdec.solidity.revert": 50
+        "notdec.solidity.revert": 52
       },
       "expected_revert_kinds": {
         "empty": 20,
         "panic": 6,
-        "returndata_bubble": 2,
         "error_string": 24,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 2
       },
       "expected_panic_codes": {
         "0": 0,
@@ -4146,8 +4080,7 @@
         "50": 0,
         "65": 2,
         "81": 0
-      },
-      "expected_returndata_bubbles": 2
+      }
     },
     {
       "name": "0207_19493703_606c6dc416_58752239cf88",
@@ -4167,15 +4100,15 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 30,
-        "notdec.solidity.revert": 7
+        "notdec.solidity.revert": 8
       },
       "expected_revert_kinds": {
         "empty": 7,
         "panic": 0,
-        "returndata_bubble": 1,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 0
+        "encoded_candidate": 0,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "0": 0,
@@ -4188,8 +4121,7 @@
         "50": 0,
         "65": 0,
         "81": 0
-      },
-      "expected_returndata_bubbles": 1
+      }
     },
     {
       "name": "23523_19745765_952a215d44_d3d3b55f272b",
@@ -4279,13 +4211,13 @@
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 27
+        "notdec.solidity.revert": 35
       },
       "expected_revert_kinds": {
         "empty": 15,
         "panic": 9,
-        "returndata_bubble": 8,
-        "custom_error_candidate": 3
+        "custom_error_candidate": 3,
+        "returndata_forward": 8
       },
       "expected_panic_codes": {
         "17": 8,
@@ -4312,8 +4244,7 @@
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 9,
-      "expected_returndata_bubbles": 8
+      "expected_checked_bounds_cfg_rewrites": 9
     },
     {
       "name": "24601_19760411_36f7edebdb_cd389ea0a4e2",
@@ -4381,14 +4312,14 @@
         "notdec.solidity.checked_bounds": 9,
         "notdec.solidity.event": 11,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 67
+        "notdec.solidity.revert": 74
       },
       "expected_revert_kinds": {
         "empty": 23,
         "custom_error_candidate": 34,
         "panic": 9,
-        "returndata_bubble": 7,
-        "error_string": 1
+        "error_string": 1,
+        "returndata_forward": 7
       },
       "expected_panic_codes": {
         "17": 3,
@@ -4429,8 +4360,7 @@
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 9,
-      "expected_returndata_bubbles": 7
+      "expected_checked_bounds_cfg_rewrites": 9
     },
     {
       "name": "24562_19760107_e25027c623_f371f33b9104",
@@ -4444,13 +4374,13 @@
         "notdec.solidity.checked_bounds": 11,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 3,
-        "notdec.solidity.revert": 35
+        "notdec.solidity.revert": 43
       },
       "expected_revert_kinds": {
         "panic": 11,
         "empty": 22,
-        "returndata_bubble": 8,
-        "error_string": 2
+        "error_string": 2,
+        "returndata_forward": 8
       },
       "expected_panic_codes": {
         "65": 4,
@@ -4481,8 +4411,7 @@
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 11,
-      "expected_returndata_bubbles": 8
+      "expected_checked_bounds_cfg_rewrites": 11
     },
     {
       "name": "24612_19760427_dd0dd0b57c_933311393a34",
@@ -4496,14 +4425,14 @@
         "notdec.solidity.checked_bounds": 5,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 36
+        "notdec.solidity.revert": 47
       },
       "expected_revert_kinds": {
         "error_string": 8,
         "encoded_candidate": 1,
         "empty": 22,
         "panic": 5,
-        "returndata_bubble": 11
+        "returndata_forward": 11
       },
       "expected_panic_codes": {
         "17": 4,
@@ -4530,8 +4459,7 @@
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 5,
-      "expected_returndata_bubbles": 11
+      "expected_checked_bounds_cfg_rewrites": 5
     },
     {
       "name": "24574_19760246_e537c886f5_6e80990d311f",
@@ -4601,15 +4529,15 @@
         "notdec.solidity.checked_bounds": 10,
         "notdec.solidity.event": 6,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 114
+        "notdec.solidity.revert": 115
       },
       "expected_revert_kinds": {
         "empty": 10,
         "encoded_candidate": 71,
         "panic": 10,
         "custom_error_candidate": 17,
-        "returndata_bubble": 1,
-        "error_string": 6
+        "error_string": 6,
+        "returndata_forward": 1
       },
       "expected_panic_codes": {
         "65": 6,
@@ -4644,8 +4572,7 @@
         "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 10,
-      "expected_returndata_bubbles": 1
+      "expected_checked_bounds_cfg_rewrites": 10
     },
     {
       "name": "24541_19759925_deec0e0bb2_47ef0dd1d7b5",

@@ -38,6 +38,46 @@ struct RevertPayloadHType {
   SmallVector<Value *, 2> ErrorLengthStores;
 };
 
+bool isZeroValue(Value *V) { return isConstantIntValue(V, 0); }
+
+bool isReturndataForwardCopy(CallBase &Call, Value *Dest) {
+  return isCallTo(&Call, "evm_returndatacopy") && Call.arg_size() == 5 &&
+         Call.getArgOperand(2) == Dest && isZeroValue(Call.getArgOperand(3)) &&
+         isReturndataSize(Call.getArgOperand(4));
+}
+
+bool blockHasReturndataForwardCopyBefore(BasicBlock &BB, Value *Dest,
+                                         Instruction *Before) {
+  for (Instruction &I : BB) {
+    if (&I == Before) {
+      return false;
+    }
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr && isReturndataForwardCopy(*Call, Dest)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasSolidityReturndataForwardShape(CallBase &Revert) {
+  if (!isReturndataSize(Revert.getArgOperand(2))) {
+    return false;
+  }
+
+  // Solidity can emit the copy in the block before the success/failure branch,
+  // with the revert itself in the failure successor.
+  Value *Dest = Revert.getArgOperand(1);
+  BasicBlock *BB = Revert.getParent();
+  if (blockHasReturndataForwardCopyBefore(*BB, Dest, &Revert)) {
+    return true;
+  }
+
+  BasicBlock *Pred = BB->getUniquePredecessor();
+  return Pred != nullptr &&
+         blockHasReturndataForwardCopyBefore(*Pred, Dest, nullptr);
+}
+
 void insertPanicRewriteMarker(LLVMContext &Ctx,
                               const SolidityRevertMatch &Match) {
   if (Match.PanicCode == std::nullopt || Match.Revert == nullptr) {
@@ -220,6 +260,13 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
     SolidityRevertMatch Match;
     Match.Revert = &Revert;
     Match.Kind = "empty";
+    return Match;
+  }
+
+  if (hasSolidityReturndataForwardShape(Revert)) {
+    SolidityRevertMatch Match;
+    Match.Revert = &Revert;
+    Match.Kind = "returndata_forward";
     return Match;
   }
 

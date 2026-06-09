@@ -501,8 +501,6 @@ def main() -> int:
                     case["expected_nonpayable_functions"],
                 )
             for kind, count in case.get("expected_revert_kinds", {}).items():
-                if kind == "returndata_bubble":
-                    continue
                 expected_counts[f"revert_kind:{kind}"] = count
             for code, count in case.get("expected_panic_codes", {}).items():
                 expected_counts[f"panic_code:{code}"] = count
@@ -610,8 +608,6 @@ def main() -> int:
                 )
             actual_revert_kinds = count_revert_kinds(output_ll)
             for kind in case.get("expected_revert_kinds", {}):
-                if kind == "returndata_bubble":
-                    continue
                 actual_counts[f"revert_kind:{kind}"] = actual_revert_kinds.get(
                     kind, 0
                 )

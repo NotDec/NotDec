@@ -577,3 +577,52 @@ return 漏标。
   通过。
 - 临时单样例 `0002_delegatecall_no_nonpayable` 的 ABI return 实际数量从 2 变为 4；
   剩余失败只剩 returndata forward / encoded revert 分类问题。
+
+## 2026-06-09 实现记录：revert returndata forward 按 Solidity Yul 形状识别
+
+对照 Solidity 源码后确认，外部调用失败转发下游 revert data 的常见形状是：
+`returndatacopy(pos, 0, returndatasize())` 后接 `revert(pos, returndatasize())`。
+这类 payload 不是本地 ABI encoder 构造，不应该走 HType payload 字段，也不再叫
+`returndata_bubble`。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:41`：
+  新增 `isReturndataForwardCopy`、`blockHasReturndataForwardCopyBefore` 和
+  `hasSolidityReturndataForwardShape`。只接受 copy 目标和 revert base 是同一个
+  SSA value，copy offset 为 0，copy length / revert length 都来自
+  `evm_returndatasize()`。允许 copy 在同块 revert 前，或在 revert 块唯一前驱里。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:266`：
+  `classifyRevertFromHType` 在 HType payload 判断前把上述形状标成
+  `returndata_forward`。这条路径不读取 HType store evidence，也不恢复 raw store
+  payload 扫描。
+- `test/run_evm_solidity_patterns_suite.py:503`：
+  runner 不再跳过这类 revert kind，直接按 metadata 比较。
+- `test/evm/solidity-patterns/manifest.json`：
+  把旧 `returndata_bubble` oracle 改成 `returndata_forward`，并删除
+  `expected_returndata_bubbles`。`0002_delegatecall_no_nonpayable` 和
+  `0441_19494998_776c03cc9d_8117f350cb9d` 的旧 `encoded_candidate` 期望改为
+  `returndata_forward`。
+
+复杂度评分：
+
+- 实现效果：7/10。delegatecall / external call failure 的 forwarding revert
+  不再被当成 encoded payload 缺口；`0002` 和 `0441` 收敛。
+- 理解成本：2/10。规则直接对应 Solidity Yul 形状，且集中在
+  `SolidityRevertPass.cpp`。
+- 维护成本：2/10。没有继续加长 `SolidityPatterns.cpp`，oracle 也不再保留旧
+  bubble 名字。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `python3 -m json.tool test/evm/solidity-patterns/manifest.json` 通过。
+- `python3 -m py_compile test/run_evm_solidity_patterns_suite.py` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.91s。
+- 临时 4 样例集合中，`0011_multi_public`、`0002_delegatecall_no_nonpayable`、
+  `0441_19494998_776c03cc9d_8117f350cb9d` 通过；`0448...` 仍失败，剩余差异是
+  已知动态 string ABI return 缺口。
+- 临时完整 solidity-patterns manifest：37 passed / 62 failed。全部
+  `returndata_forward` compare 都对齐；剩余失败仍主要是 ABI return 或旧
+  encoded candidate 缺口。
