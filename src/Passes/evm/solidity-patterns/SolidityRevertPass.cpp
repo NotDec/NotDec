@@ -37,6 +37,27 @@ struct RevertPayloadHType {
   SmallVector<Value *, 2> ErrorLengthStores;
 };
 
+std::optional<RevertPayloadHType>
+getCanonicalPanicPayloadFromEvidence(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                     CallBase &Revert) {
+  if (!isConstantIntValue(Revert.getArgOperand(1), 0) ||
+      !isConstantIntValue(Revert.getArgOperand(2), 36)) {
+    return std::nullopt;
+  }
+
+  RevertPayloadHType Payload;
+  Payload.HasSelector = true;
+  Payload.HasPanicCode = true;
+  Payload.SelectorStores = getHTypeStoreValuesAtOffsetBefore(
+      Stores, Revert.getArgOperand(1), 0, Revert);
+  Payload.PanicCodeStores = getHTypeStoreValuesAtOffsetBefore(
+      Stores, Revert.getArgOperand(1), 4, Revert);
+  if (Payload.SelectorStores.empty() || Payload.PanicCodeStores.empty()) {
+    return std::nullopt;
+  }
+  return Payload;
+}
+
 ast::RecordDecl *getRecordPointeeHType(llvm2c::HTypeResult &HTypes,
                                        Value *Base, CallBase &Use,
                                        unsigned ArgIndex) {
@@ -63,6 +84,11 @@ std::optional<RevertPayloadHType>
 getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
                       ArrayRef<mlsub::EVMStoreEvidence> Stores,
                       CallBase &Revert) {
+  if (std::optional<RevertPayloadHType> PanicPayload =
+          getCanonicalPanicPayloadFromEvidence(Stores, Revert)) {
+    return PanicPayload;
+  }
+
   ast::RecordDecl *Record =
       getRecordPointeeHType(HTypes, Revert.getArgOperand(1), Revert, 1);
   if (Record == nullptr) {

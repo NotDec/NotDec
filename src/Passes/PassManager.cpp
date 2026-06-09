@@ -306,7 +306,6 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
           evm::SelectorEntryOutliningPass()));
       MPM.addPass(
           createModuleToFunctionPassAdaptor(evm::PayabilityGuardPass()));
-      MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(
           createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
@@ -323,6 +322,7 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       }
       MPM.addPass(evm::AbiReturnPass(*TR));
       MPM.addPass(evm::SolidityRevertPass(*TR));
+      MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(evm::EventLogPass(*TR));
     }
     return;

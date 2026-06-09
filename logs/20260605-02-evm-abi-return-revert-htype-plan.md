@@ -729,3 +729,100 @@ Solidity 语义 pass 的标注接口继续扩散。
 复杂度：5/10。多了一个非 record 指针分支，但只服务单字段 ABI return。
 维护成本：4/10。helper 仍只读 HType 和 HType store evidence；后续如果 HType 保留单字段 record，可以删掉这条分支。
 实现效果：8/10。解决了当前 single-word ABI return 缺口，同时没有恢复旧 marker/raw store 扫描。
+
+## 阶段 5 决策点：CheckedBoundsPass 仍依赖旧 revert store 扫描
+
+继续按重构计划往后查时，发现 `CheckedBoundsPass` 这里还有一条更大的边界问题：
+
+- `src/Passes/PassManager.cpp:309`：`CheckedBoundsPass` 目前在 EVM pre-TR pipeline 运行。
+- `src/Passes/evm/solidity-patterns/CheckedBoundsPass.cpp:23`：pass 入口调用
+  `matchCheckedBoundsGuard`。
+- `src/Passes/evm/SolidityPatterns.cpp:5454`：`matchCheckedBoundsGuard` 找到 failure path
+  上的 `evm_revert` 后，调用 `matchSolidityRevert` 判断是否是 Panic。
+- `src/Passes/evm/SolidityPatterns.cpp:1518`：`matchSolidityRevert` 仍会向前扫
+  `matchEvmMemoryStore` / `notdec_solidity_memory_write`，用 store 形状重建 selector 和
+  Panic code。
+- `src/Passes/evm/SolidityPatterns.cpp:5882`：`rewriteCheckedBoundsGuard` 会直接改 CFG，
+  所以它不只是打 metadata。
+
+这和阶段 3 的边界有冲突：checked/bounds 关联应该保留 guard 证据，不应该通过旧 store 扫描重建
+revert payload。但直接改有两个路线选择，影响都不小：
+
+- 路线 A：把 `CheckedBoundsPass` 后移到类型恢复和 `SolidityRevertPass` 之后，读
+  `notdec.solidity_revert.panic_code` metadata，再做 guard 分类和 CFG rewrite。
+  风险是 CFG rewrite 发生在 post-TR，会改变目前类型恢复看到的 IR，也可能影响后续 semantic pass
+  和旧 rewrite oracle。
+- 路线 B：拆成两段。pre-TR 只收集 guard shape，不读 Panic payload、不改 CFG；post-TR 读
+  HType/metadata 后再分类并 rewrite。
+  风险是需要新建一个 guard sidecar 或 metadata 边界，设计面比本轮 return/revert 要大。
+- 路线 C：保留 `CheckedBoundsPass` pre-TR，但给它接入类型恢复结果。
+  这和当前 pipeline 顺序矛盾，基本不可取，除非专门为 checked/bounds 做一条额外 TR 查询路径。
+
+当前判断：
+
+- 这不是简单删除旧 helper 就能解决的问题；`matchSolidityRevert` 现在还是 checked/bounds 的 panic
+  识别入口。
+- 继续实现前需要先决定 `CheckedBoundsPass` 是否整体后移，还是拆成 pre/post 两段。
+- 在这个决策前，不应该贸然删除 `matchSolidityRevert` 的旧 store 扫描，否则 checked/bounds 大量
+  panic 分类和 CFG rewrite 会直接掉。
+
+## 实现记录：CheckedBoundsPass 后移到 HType revert 分类之后
+
+用户选择路线 A 后，本轮先做最小迁移：`CheckedBoundsPass` 仍负责 guard shape 和 CFG rewrite，
+但 panic payload 不再自己扫 store，而是读取 `SolidityRevertPass` 写到 `evm_revert` 上的
+`notdec.solidity_revert.panic_code` metadata。
+
+改动位置：
+
+- `src/Passes/PassManager.cpp:305`：EVM pre-TR pipeline 移除 `CheckedBoundsPass`。
+- `src/Passes/PassManager.cpp:321`：`SolidityRevertPass` 之后、`EventLogPass` 之前运行
+  `CheckedBoundsPass`。
+- `src/Passes/evm/SolidityPatterns.cpp:1851`：新增 `getPanicRevertFromMetadata`，只接受
+  `evm_revert` 和 `notdec.solidity_revert.panic_code`。
+- `src/Passes/evm/SolidityPatterns.cpp:1886`：`findPanicRevertOnLinearPath` 改为读 revert
+  metadata，不再走 `matchSolidityRevert`。
+- `src/Passes/evm/SolidityPatterns.cpp:5487`：`matchCheckedBoundsGuard` 改为读 revert
+  metadata，不再走旧 store 扫描入口。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:222`：声明
+  `getHTypeStoreValuesAtOffsetBefore`，用于按 HType store evidence 找同一基本块内、revert
+  之前的写入。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:12`：新增
+  `getUInt64FromConstant`，让 store evidence 的常量地址能参与 offset 计算。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:27`：新增
+  `getConstantOffsetFromExtValue`，支持 `ConstantAddr`、`UConstant` 和 `null` 指针地址。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:56`：`getEvidenceOffsetFromBase`
+  支持常量 base 和常量 address 的差值。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:112`：新增
+  `getHTypeStoreValuesAtOffsetBefore`，只读 `EVMStoreEvidence`，并要求 store source 与 revert
+  在同一基本块且位于 revert 之前。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:41`：新增
+  `getCanonicalPanicPayloadFromEvidence`，处理 Solidity 常见的 `revert(0, 36)` Panic payload。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:86`：`getRevertPayloadHType` 先走
+  canonical Panic evidence，再走 record pointer HType。
+
+效果：
+
+- checked/bounds 的 panic 关联已经从旧的本地 store 扫描切到 `SolidityRevertPass` 的 HType
+  分类结果。
+- canonical `store selector, ptr null` / `store panic_code, ptr inttoptr(4)` /
+  `evm_revert(..., 0, 36)` 现在能通过 HType store evidence 被 `SolidityRevertPass` 标上
+  panic metadata。
+- `matchSolidityRevert` 旧实现还保留，供其他旧路径使用；本轮没有贸然删除。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R '^notdec\.type_recovery\.evm\.tr_level_2$' --output-on-failure`
+  通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_arithmetic_01.ll -o /tmp/notdec-checked-arithmetic-posttr-metadata.ll --tr-level=2 --dump-htypes=/tmp/notdec-checked-arithmetic-posttr-metadata.htypes`
+  通过，输出包含 checked bounds metadata 和 revert panic metadata。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_array_01.ll -o /tmp/notdec-checked-array-posttr-metadata.ll --tr-level=2 --dump-htypes=/tmp/notdec-checked-array-posttr-metadata.htypes`
+  通过，输出包含 checked bounds metadata、skipped metadata 和 revert panic metadata。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-post-checked.ll --tr-level=2 --dump-htypes=/tmp/notdec-revert-error-string-post-checked.htypes`
+  通过，Error(string) rewrite marker 保持不变。
+- 按用户要求，本轮不看 fortune 性能问题。
+
+复杂度：6/10。pipeline 顺序变化不大，但 checked/bounds 从 pre-TR rewrite 变成 post-TR rewrite。
+维护成本：5/10。短期内仍保留旧 `matchSolidityRevert`，后续还要继续收口旧路径。
+实现效果：8/10。checked/bounds 的 panic 识别已经走 HType revert metadata，同时补上了 canonical
+Panic payload 的 HType evidence 路径。

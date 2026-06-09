@@ -1848,6 +1848,24 @@ bool blockHasPhi(BasicBlock *BB) {
   return BB != nullptr && isa<PHINode>(BB->begin());
 }
 
+std::optional<SolidityRevertMatch>
+getPanicRevertFromMetadata(CallBase &Revert) {
+  if (!isCallTo(&Revert, "evm_revert") || Revert.arg_size() != 3) {
+    return std::nullopt;
+  }
+  std::optional<uint64_t> PanicCode =
+      getUInt64Metadata(Revert, "notdec.solidity_revert.panic_code");
+  if (!PanicCode.has_value()) {
+    return std::nullopt;
+  }
+
+  SolidityRevertMatch Match;
+  Match.Kind = "panic";
+  Match.Revert = &Revert;
+  Match.PanicCode = PanicCode;
+  return Match;
+}
+
 bool dependsOnCallTo(Value *V, StringRef Name, unsigned Depth);
 
 CallBase *findPanicRevertOnLinearPath(BasicBlock *BB,
@@ -1865,7 +1883,7 @@ CallBase *findPanicRevertOnLinearPath(BasicBlock *BB,
       continue;
     }
     std::optional<SolidityRevertMatch> RevertMatch =
-        matchSolidityRevert(*BB, *Call);
+        getPanicRevertFromMetadata(*Call);
     if (RevertMatch.has_value() && RevertMatch->Kind == "panic") {
       return Call;
     }
@@ -5466,7 +5484,7 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
     }
 
     std::optional<SolidityRevertMatch> RevertMatch =
-        matchSolidityRevert(*Revert->getParent(), *Revert);
+        getPanicRevertFromMetadata(*Revert);
     if (!RevertMatch.has_value() || RevertMatch->Kind != "panic") {
       continue;
     }

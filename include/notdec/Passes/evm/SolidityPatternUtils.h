@@ -219,6 +219,9 @@ getHTypeFieldStoreValues(llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores,
 llvm::SmallVector<llvm::Value *, 2> getHTypeStoreValuesAtOffset(
     llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores, llvm::Value *Base,
     int64_t Offset);
+llvm::SmallVector<llvm::Value *, 2> getHTypeStoreValuesAtOffsetBefore(
+    llvm::ArrayRef<notdec::mlsub::EVMStoreEvidence> Stores, llvm::Value *Base,
+    int64_t Offset, llvm::Instruction &Before);
 std::optional<uint64_t>
 getUniqueUInt64FieldValue(llvm::ArrayRef<llvm::Value *> Values,
                           bool &Conflict);
