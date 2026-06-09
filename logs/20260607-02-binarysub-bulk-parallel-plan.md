@@ -652,3 +652,57 @@ cmake --build ./build --target binarysub -j4
 
 - 这个测试不是完整的并发递归状态测试，因为当前 `canonicalizeType()` 还没并行。
 - 它先固定当前 bulk 语义：同形递归 bound 不应因为后续并行化而打印成不同 final form。
+
+# 实现记录：收拢 canonicalize 递归状态操作
+
+本次是第 4 步的准备重构，不改变算法和并行范围。
+
+问题：
+
+`TypeSimplifier::canonicalizeType()` 里原来直接操作：
+
+- `recursive.find()` / `recursive[pty] = freshVar`
+- `variableOrigins[freshVar] = ...`
+- `recVars[freshVar] = adapted`
+
+这些正是后面改 pending -> stable entry 时要替换的点。如果继续散在 `go1` lambda 里，后续改并发状态会更容易漏。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:508`：在 `TypeSimplifier` 声明几个递归状态 helper。
+- `external/binarysub/src/binarysub.cpp:1047`：新增
+  `collectCanonicalOriginsFromVars()`，集中处理递归 fresh var 的 origin 收集。
+- `external/binarysub/src/binarysub.cpp:1056`：新增
+  `inferRecursiveCompactSize()`，保留原来的 size 推断逻辑。
+- `external/binarysub/src/binarysub.cpp:1079`：新增
+  `getOrCreateRecursiveVar()`，集中处理 `recursive` 查找/创建和 `variableOrigins` 写入。
+- `external/binarysub/src/binarysub.cpp:1093`：新增
+  `finalizeRecursiveVar()`，集中处理 `recursive` 查找和 `recVars` 回填。
+- `external/binarysub/src/binarysub.cpp:1233`、`external/binarysub/src/binarysub.cpp:1297`：
+  `canonicalizeType()` 改为调用这些 helper。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub -j4
+./build/binarysub
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-rec-helper.ll \
+  --tr-level=2 \
+  --dump-htypes=/tmp/notdec-fortune-rec-helper.htypes
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `notdec` 构建通过。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- fortune smoke 通过：`elapsed=24.69s`，`rss_kb=195764`，和上一轮默认并行 `24.50s` 基本一致。
+
+判断：
+
+- 这一步不是性能优化，目的是缩小后续并发化 `recursive/recVars` 的改动面。
+- 下一步如果继续第 4 步，应把这些 helper 的内部实现替换成 entry 状态结构，而不是在 `go1` 里继续直接改 map。
