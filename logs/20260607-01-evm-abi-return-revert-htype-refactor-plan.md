@@ -183,6 +183,47 @@
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.93s。
 
+## 2026-06-09 实现记录：MemoryBufferFacts 收窄为 WrittenBases
+
+上一轮删掉暂停的 memory write/read marker 物化后，`MemoryWrite` / `MemoryRead`
+只剩 `MemoryBufferRewritePass` 内部使用。继续检查后确认：
+
+- `MemoryRead` 没有消费者。
+- `MemoryWrite` 的 payload、source offset、kind 都没有消费者。
+- `MemoryWrite` 只用于判断某个 free-memory pointer base 是否有写入，从而决定是否补
+  `calloc_unbounded()` allocation。
+
+实现改动：
+
+- `include/notdec/Passes/evm/MemoryBufferAnalysis.h:15`：
+  删除 `MemoryWriteKind`。
+- `include/notdec/Passes/evm/MemoryBufferAnalysis.h:27`：
+  删除 `MemoryWrite` 和 `MemoryRead`。
+- `include/notdec/Passes/evm/MemoryBufferAnalysis.h:41`：
+  `MemoryBufferFacts` 改为保存 `WrittenBases`，只记录有写入的 base。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:104`：
+  删除 `getMemoryCopyWriteKind`。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:358`：
+  256-bit store / mstore8 / copy / mcopy 匹配到 free-memory base 时只写入
+  `Facts.WrittenBases`。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:366`：
+  删除 memory read fact 收集。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:441`：
+  allocation candidate 判断改为扫描 `WrittenBases`。
+
+复杂度评分：
+
+- 实现效果：5/10。继续去掉旧 marker 时代残留的数据面，保留 allocation rewrite 需要的信息。
+- 理解成本：1/10。`MemoryBufferFacts` 更窄。
+- 维护成本：1/10。后续不容易误以为 `MemoryBufferAnalysis` 仍提供 payload write/read facts。
+
+验证：
+
+- `cmake --build ./build --target notdec-core -j4` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.92s。
+
 ## 2026-06-09 实现记录：revert metadata / marker helper 移到专门文件
 
 本次只做纯搬移，避免 `src/Passes/evm/SolidityPatterns.cpp` 继续承载

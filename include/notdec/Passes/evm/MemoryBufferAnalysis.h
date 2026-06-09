@@ -5,7 +5,6 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
-#include <optional>
 
 namespace llvm {
 class CallBase;
@@ -15,16 +14,6 @@ class Instruction;
 } // namespace llvm
 
 namespace notdec::passes::evm {
-
-enum class MemoryWriteKind {
-  MStore = 1,
-  CalldataCopy = 2,
-  ReturndataCopy = 3,
-  ScratchReturndataCopy = 4,
-  CodeCopy = 5,
-  MemoryCopy = 6,
-  MStore8 = 7,
-};
 
 // A Solidity allocation is modeled as the relation between the free-memory
 // pointer read and the later write-back to slot 0x40. Some buffers are used
@@ -36,28 +25,6 @@ struct MemoryAllocation {
   llvm::Instruction *FinalizePoint = nullptr;
   llvm::SmallVector<llvm::Instruction *, 4> Reloads;
   bool Finalized = false;
-};
-
-// A memory write keeps the original memory instruction plus the buffer-relative
-// offset. Copy writes also keep their source offset so later passes can
-// distinguish calldata/returndata bytes from literal word stores.
-struct MemoryWrite {
-  llvm::Instruction *StoreOrCopy = nullptr;
-  llvm::Value *Base = nullptr;
-  std::optional<uint64_t> Offset;
-  llvm::Value *ValueOrSize = nullptr;
-  llvm::Value *SourceOffset = nullptr;
-  MemoryWriteKind Kind = MemoryWriteKind::MStore;
-};
-
-// A memory read keeps the loaded value tied to the same base/offset surface as
-// writes. Later passes can use this fact without matching raw memory loads
-// again.
-struct MemoryRead {
-  llvm::Instruction *Load = nullptr;
-  llvm::Value *Base = nullptr;
-  std::optional<uint64_t> Offset;
-  llvm::Value *Value = nullptr;
 };
 
 // Byte writes to memory bytes/string arrays use byte offsets after the 32-byte
@@ -74,8 +41,10 @@ struct MemoryArrayByteWrite {
 // facts to do real rewrites instead of rediscovering mstore sequences.
 struct MemoryBufferFacts {
   llvm::SmallVector<MemoryAllocation, 8> Allocations;
-  llvm::SmallVector<MemoryWrite, 16> Writes;
-  llvm::SmallVector<MemoryRead, 16> Reads;
+  // Bases with at least one write are enough to decide whether a free-memory
+  // pointer load represents an allocation candidate. Payload details now belong
+  // to type recovery, not marker materialization.
+  llvm::SmallVector<llvm::Value *, 16> WrittenBases;
   llvm::SmallVector<MemoryArrayByteWrite, 8> ArrayByteWrites;
 };
 

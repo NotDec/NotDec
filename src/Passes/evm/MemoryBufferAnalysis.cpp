@@ -104,16 +104,6 @@ bool isMemoryCopyWriteCall(CallBase *Call) {
          detail::isCallTo(Call, "evm_codecopy");
 }
 
-MemoryWriteKind getMemoryCopyWriteKind(CallBase *Call) {
-  if (detail::isCallTo(Call, "evm_calldatacopy")) {
-    return MemoryWriteKind::CalldataCopy;
-  }
-  if (detail::isCallTo(Call, "evm_returndatacopy")) {
-    return MemoryWriteKind::ReturndataCopy;
-  }
-  return MemoryWriteKind::CodeCopy;
-}
-
 std::optional<uint64_t> getOffsetFromBase(Value *Ptr, Value *Base) {
   if (isSameValue(Ptr, Base)) {
     return 0;
@@ -368,8 +358,7 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset, Store->StoredValue,
-                                           nullptr, MemoryWriteKind::MStore});
+        Facts.WrittenBases.push_back(Base);
         break;
       }
       continue;
@@ -377,29 +366,11 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
 
     std::optional<detail::EvmMemoryLoad> Load = detail::matchEvmMemoryLoad(&I);
     if (Load.has_value() && !detail::isConstantIntValue(Load->Address, 64)) {
-      Value *Ptr = Load->Address;
-      bool MatchedBase = false;
-      for (Value *Base : Bases) {
-        if (!valueAvailableAt(Base, I, DT)) {
-          continue;
-        }
-        std::optional<uint64_t> Offset = getOffsetFromBase(Ptr, Base);
-        if (!Offset.has_value()) {
-          continue;
-        }
-        Facts.Reads.push_back(MemoryRead{&I, Base, Offset, Load->LoadedValue});
-        MatchedBase = true;
-        break;
-      }
-      if (!MatchedBase && getUInt64Constant(Ptr).has_value()) {
-        Facts.Reads.push_back(MemoryRead{&I, Ptr, 0, Load->LoadedValue});
-      }
       continue;
     }
 
     if (Store.has_value() && Store->StoreBits == 8) {
       Value *Ptr = Store->Address;
-      bool MatchedBase = false;
       for (Value *Base : Bases) {
         if (!valueAvailableAt(Base, I, DT)) {
           continue;
@@ -412,14 +383,8 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(MemoryWrite{&I, Base, Offset, Store->StoredValue,
-                                           nullptr, MemoryWriteKind::MStore8});
-        MatchedBase = true;
+        Facts.WrittenBases.push_back(Base);
         break;
-      }
-      if (!MatchedBase) {
-        Facts.Writes.push_back(MemoryWrite{&I, Ptr, 0, Store->StoredValue,
-                                           nullptr, MemoryWriteKind::MStore8});
       }
       continue;
     }
@@ -433,13 +398,8 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
       Value *Dst = Call->getArgOperand(2);
       if (detail::isCallTo(Call, "evm_returndatacopy") && isZero(Dst) &&
           isZero(Call->getArgOperand(3))) {
-        Facts.Writes.push_back(MemoryWrite{
-            Call, ConstantInt::get(Call->getArgOperand(2)->getType(), 0), 0,
-            Call->getArgOperand(4), Call->getArgOperand(3),
-            MemoryWriteKind::ScratchReturndataCopy});
         continue;
       }
-      bool MatchedBase = false;
       for (Value *Base : Bases) {
         if (!valueAvailableAt(Base, *Call, DT)) {
           continue;
@@ -448,24 +408,14 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         if (!Offset.has_value()) {
           continue;
         }
-        MemoryWriteKind Kind = getMemoryCopyWriteKind(Call);
-        Facts.Writes.push_back(MemoryWrite{Call, Base, Offset,
-                                           Call->getArgOperand(4),
-                                           Call->getArgOperand(3), Kind});
-        MatchedBase = true;
+        Facts.WrittenBases.push_back(Base);
         break;
-      }
-      if (!MatchedBase) {
-        MemoryWriteKind Kind = getMemoryCopyWriteKind(Call);
-        Facts.Writes.push_back(MemoryWrite{Call, Dst, 0, Call->getArgOperand(4),
-                                           Call->getArgOperand(3), Kind});
       }
       continue;
     }
 
     if (detail::isCallTo(Call, "evm_mcopy") && Call->arg_size() == 4) {
       Value *Dst = Call->getArgOperand(1);
-      bool MatchedBase = false;
       for (Value *Base : Bases) {
         if (!valueAvailableAt(Base, *Call, DT)) {
           continue;
@@ -474,16 +424,8 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
         if (!Offset.has_value()) {
           continue;
         }
-        Facts.Writes.push_back(
-            MemoryWrite{Call, Base, Offset, Call->getArgOperand(3),
-                        Call->getArgOperand(2), MemoryWriteKind::MemoryCopy});
-        MatchedBase = true;
+        Facts.WrittenBases.push_back(Base);
         break;
-      }
-      if (!MatchedBase) {
-        Facts.Writes.push_back(MemoryWrite{Call, Dst, 0, Call->getArgOperand(3),
-                                           Call->getArgOperand(2),
-                                           MemoryWriteKind::MemoryCopy});
       }
       continue;
     }
@@ -499,8 +441,8 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
     }
 
     bool HasWrite = false;
-    for (const MemoryWrite &Write : Facts.Writes) {
-      if (Write.Base == Base) {
+    for (Value *WrittenBase : Facts.WrittenBases) {
+      if (WrittenBase == Base) {
         HasWrite = true;
         break;
       }
