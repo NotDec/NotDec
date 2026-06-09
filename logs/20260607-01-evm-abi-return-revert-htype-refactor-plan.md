@@ -996,3 +996,32 @@ head `32`，从源 bytes/string buffer 读 length，copy payload，最后执行
   `0450...`、`0726...`、`0735...`、`0038...`、`0114...` 全部通过。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.90s。
+
+## 2026-06-09 当前技术决策点：tuple + storage bytes/string tail
+
+继续扫描剩余 ABI return 缺口时，`0146_19493376_503a732d50_138a4d77d617`
+只剩一个 `public_transactions_uint256__0x482` ABI return 漏标。该 return 不是前面已支持
+的单动态 buffer，也不是跨函数 helper。它是固定 tuple 里带一个 storage bytes/string
+tail：
+
+- allocation base 的 HType 是 `struct_41*`，record 里有多个 32-byte slot，最后一个
+  字段是 `top:256[]`。
+- tuple head / static fields 有 HType store evidence。
+- dynamic head slot 写入 tail length 的 offset，tail length 也有 store evidence。
+- long storage bytes 分支的 payload store 写在循环 PHI `%_0x551_0x0` 上；该 PHI 的
+  初始 incoming 是 `base + 160`，后续循环 incoming 是 `phi + 32`。
+
+尝试过在 `AbiReturnPass.cpp` 本地加窄规则：识别单个 array 字段、head 指向 length、
+tail base 或 tail PHI 有 store evidence。但 focused `0146...` 仍不命中。继续在 pass
+里补会变成跨 PHI/循环的 tail store 归因，而不是简单消费 HType evidence。
+
+这里需要先做技术决策：
+
+- 路线 A：在 HType/store evidence 层把 PHI/循环 tail store 汇总到外层 buffer 字段，
+  ABI return pass 继续只消费证据。
+- 路线 B：在 `AbiReturnPass.cpp` 本地追踪 PHI/循环 tail store，短期能补样例，但会把
+  ABI return pass 变成局部数据流分析。
+- 路线 C：暂时跳过 `0146...`，继续处理其它更简单的 ABI return/revert 缺口。
+
+当前倾向路线 A。它更符合“必须基于 HType store evidence”的路线，也避免
+`AbiReturnPass.cpp` 继续膨胀成通用 ABI 编码分析。
