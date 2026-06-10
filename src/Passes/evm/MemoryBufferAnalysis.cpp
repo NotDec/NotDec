@@ -1,6 +1,7 @@
 #include "Passes/evm/MemoryBufferAnalysis.h"
 #include "Passes/evm/SolidityPatternUtils.h"
 
+#include <llvm/Analysis/CFG.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
@@ -60,6 +61,84 @@ bool hasFreeMemoryPointerClobberBetween(Instruction *From, Instruction *To) {
   return false;
 }
 
+bool blockHasFreeMemoryPointerClobberBefore(BasicBlock &BB,
+                                            Instruction *Before) {
+  for (Instruction &I : BB) {
+    if (&I == Before) {
+      return false;
+    }
+    if (isFreeMemoryPointerClobber(I)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool blockHasFreeMemoryPointerClobberAfter(Instruction &After) {
+  for (Instruction *I = After.getNextNode(); I != nullptr;
+       I = I->getNextNode()) {
+    if (isFreeMemoryPointerClobber(*I)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasFreeMemoryPointerClobberBeforeReload(Instruction *Base,
+                                             Instruction *Reload,
+                                             DominatorTree &DT) {
+  if (Base == nullptr || Reload == nullptr) {
+    return true;
+  }
+  if (Base->getParent() == Reload->getParent()) {
+    return hasFreeMemoryPointerClobberBetween(Base, Reload);
+  }
+  if (!DT.dominates(Base, Reload)) {
+    return true;
+  }
+
+  BasicBlock *ReloadBB = Reload->getParent();
+  if (blockHasFreeMemoryPointerClobberAfter(*Base)) {
+    return true;
+  }
+
+  SmallPtrSet<BasicBlock *, 16> Seen;
+  SmallVector<BasicBlock *, 16> Worklist;
+  for (BasicBlock *Succ : successors(Base->getParent())) {
+    if (isPotentiallyReachable(Succ, ReloadBB, nullptr, &DT)) {
+      Worklist.push_back(Succ);
+    }
+  }
+
+  while (!Worklist.empty()) {
+    BasicBlock *BB = Worklist.pop_back_val();
+    if (!Seen.insert(BB).second) {
+      continue;
+    }
+
+    if (BB == ReloadBB) {
+      if (blockHasFreeMemoryPointerClobberBefore(*BB, Reload)) {
+        return true;
+      }
+      continue;
+    }
+
+    for (Instruction &I : *BB) {
+      if (isFreeMemoryPointerClobber(I)) {
+        return true;
+      }
+    }
+
+    for (BasicBlock *Succ : successors(BB)) {
+      if (isPotentiallyReachable(Succ, ReloadBB, nullptr, &DT)) {
+        Worklist.push_back(Succ);
+      }
+    }
+  }
+
+  return false;
+}
+
 bool hasAllocationForBase(ArrayRef<MemoryAllocation> Allocations, Value *Base) {
   for (const MemoryAllocation &Alloc : Allocations) {
     if (Alloc.Base == Base) {
@@ -70,7 +149,7 @@ bool hasAllocationForBase(ArrayRef<MemoryAllocation> Allocations, Value *Base) {
 }
 
 SmallVector<Instruction *, 4> collectFreeMemoryPointerReloads(
-    Instruction *Base, ArrayRef<Value *> Bases) {
+    Instruction *Base, ArrayRef<Value *> Bases, DominatorTree &DT) {
   SmallVector<Instruction *, 4> Reloads;
   if (Base == nullptr) {
     return Reloads;
@@ -80,7 +159,7 @@ SmallVector<Instruction *, 4> collectFreeMemoryPointerReloads(
     if (Reload == nullptr || Reload == Base) {
       continue;
     }
-    if (!hasFreeMemoryPointerClobberBetween(Base, Reload)) {
+    if (!hasFreeMemoryPointerClobberBeforeReload(Base, Reload, DT)) {
       Reloads.push_back(Reload);
     }
   }
@@ -454,7 +533,7 @@ MemoryBufferFacts analyzeMemoryBuffers(Function &F, DominatorTree &DT) {
     MemoryAllocation Alloc;
     Alloc.Base = Base;
     Alloc.AllocatePoint = BaseInst;
-    Alloc.Reloads = collectFreeMemoryPointerReloads(BaseInst, Bases);
+    Alloc.Reloads = collectFreeMemoryPointerReloads(BaseInst, Bases, DT);
     Alloc.Finalized = false;
     Facts.Allocations.push_back(Alloc);
   }

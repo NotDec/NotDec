@@ -2405,9 +2405,9 @@
       "expected_revert_kinds": {
         "empty": 48,
         "panic": 0,
-        "error_string": 35,
+        "error_string": 39,
         "custom_error_candidate": 0,
-        "encoded_candidate": 5,
+        "encoded_candidate": 1,
         "returndata_forward": 2
       },
       "expected_panic_codes": {

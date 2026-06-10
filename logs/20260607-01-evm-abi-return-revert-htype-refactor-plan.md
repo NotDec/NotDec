@@ -1217,3 +1217,60 @@ call arg1 会漏标。
 - full `evm.solidity-patterns` suite：75 passed, 24 failed。`0190...` 已通过；
   `0189...` 的 revert 相关 oracle 全部对齐，剩余失败是 checked-bounds
   `memory_allocation_bounds` cfg rewrite 41/43。
+
+## 2026-06-10 实现记录：MemoryBufferRewritePass 替换跨 block free-memory reload
+
+继续查 `1407_19503702_47675ff2ed_71b1710392bd` 时发现，`ptr inttoptr (i256 64 to ptr)`
+这种 ConstantExpr 不是漏点。`src/Passes/evm/SolidityPatterns.cpp` 里的
+`getIntToPtrAddress` 已经支持 `ConstantExpr IntToPtr`。真正的问题是
+`MemoryBufferAnalysis.cpp` 只把同一个 basic block 里、没有写回 0x40 的 reload
+当成同一 allocation base；跨 block 的 join reload 会被保守放弃。
+
+这会让动态 string/bytes 的形状停在：
+
+```llvm
+%end = phi [...]
+%oldFreeMem = load i256, ptr inttoptr (i256 64 to ptr)
+%size = sub i256 %end, %oldFreeMem
+call void @evm_revert(ptr %mem, i256 %oldFreeMem, i256 %size)
+```
+
+HType 已经知道实际 allocation base，但 `revert` / `return` 仍然拿 reload 当 base，
+导致 ABI/revert pass 读不到 payload buffer。
+
+实现改动：
+
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:64`：
+  新增 block 内 0x40 clobber 扫描 helper。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:87`：
+  新增 `hasFreeMemoryPointerClobberBeforeReload`。跨 block 时要求 base dominates reload，
+  并且从 base 到 reload 的可达路径上没有 `mstore(0x40)` / finalize alloc。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:151`：
+  `collectFreeMemoryPointerReloads` 接收 `DominatorTree`，不再只支持同 block reload。
+- `src/Passes/evm/MemoryBufferAnalysis.cpp:536`：
+  allocation candidate 收集 reload 时传入 `DT`。
+- `test/evm/solidity-patterns/manifest.json:2408`：
+  `1407...` 的 `error_string` 从 35 改为 39。
+- `test/evm/solidity-patterns/manifest.json:2410`：
+  `1407...` 的 `encoded_candidate` 从 5 改为 1。
+
+复杂度评分：
+
+- 实现效果：8/10。`1407...` 里 4 个 revert 和 1 个 return 的 base 都从
+  `mload(0x40)` reload 统一回 allocation base，ABI/revert metadata 全部对齐。
+- 理解成本：4/10。MemoryBufferRewritePass 多了跨 block 可达性判断，但没有把 PHI
+  追踪塞进 ABI/revert pass。
+- 维护成本：4/10。路径判断仍是保守的 CFG 扫描；后续如果引入 MemorySSA，可以替换成
+  更直接的 def-use 查询。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/1407_19503702_47675ff2ed_71b1710392bd.ll -o /tmp/notdec-1407-after-reload.ll --tr-level=2`
+  通过；输出 IR 有 90 个 `evm_revert`，90 个都有 `notdec.solidity.revert` metadata；
+  有 31 个 `evm_return`，31 个都有 `notdec.solidity.abi_return` metadata。
+- `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-1407-after-reload.ll -o /tmp/notdec-1407-after-reload.bc`
+  通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.98s。
+- full `evm.solidity-patterns` suite：76 passed, 23 failed。`1407...` 已通过。
