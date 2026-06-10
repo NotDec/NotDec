@@ -1070,3 +1070,45 @@ store。仍然保留 HType store evidence 约束：array 前一个 slot 必须�
   多标。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.96s。
+
+## 2026-06-10 实现记录：fixed word helper 接受普通 pointer HType
+
+`0456_19495158_c7c34e07aa_0e692a3d145c` 的 ERC20 风格 getter / transfer return
+大量使用固定 32 字节 encoder helper：public 函数传入 `mload(0x40)`，helper 写一个
+word，然后返回 `base + 32`。类型恢复把 helper 的 base 参数恢复成 `u256*` 或
+`top:256*`，不是 record；之前 `hasFixedWordHelperPayloadHType` 只接受 record /
+transparent field，导致这些 ABI return 漏标。
+
+本次按“单个 pointer 可以当作只有一个成员的结构体指针”的路线，只放宽固定 32 字节
+helper：helper 仍必须返回 `base + 32`，offset 0 必须有 HType store evidence。另补一层
+nested helper：outer helper 返回 `base + 32`，inner helper 对同一个 base 写 offset 0
+时，也接受这条 store evidence。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:143`：
+  新增 `hasNestedHelperRawStoreEvidenceAt`，只在 helper call 参数能由 outer base
+  推出 offset 时，检查 callee 参数上的 HType store evidence。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:217`：
+  `hasFixedWordHelperPayloadHType` 对 `NonRecordPointerType + offset 0 store evidence`
+  返回 true。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:222`：
+  固定 word helper 的 nested fallback 接受 `hasNestedHelperRawStoreEvidenceAt`。
+
+复杂度评分：
+
+- 实现效果：7/10。`0456...` 从 ABI return 4/20 收敛到通过，并补齐同类 fixed word
+  helper。
+- 理解成本：3/10。只改 fixed word helper 的证据判断，没有放宽 fixed tuple。
+- 维护成本：3/10。后续如果 HTypeBufferView 统一把普通 pointer 暴露为 offset 0 字段，
+  这里可以收窄。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `0456_19495158_c7c34e07aa_0e692a3d145c` 通过。
+- 临时 14 样例集合中，ABI return 相关的 11 个样例全部通过；剩余
+  `0725...` / `0740...` 是 encoded revert 少 2，`0258...` 是 checked-bounds
+  allocation bounds skip，三者 ABI return 都已对齐。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.97s。

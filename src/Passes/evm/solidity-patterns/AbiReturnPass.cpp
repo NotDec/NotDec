@@ -140,6 +140,35 @@ bool hasNestedHelperStoreEvidenceAt(llvm2c::HTypeResult &HTypes,
   return false;
 }
 
+bool hasNestedHelperRawStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                       Function &Helper, Argument *Base,
+                                       int64_t Offset) {
+  for (Instruction &Inst : instructions(Helper)) {
+    auto *Call = dyn_cast<CallBase>(&Inst);
+    Function *Callee = Call == nullptr ? nullptr : Call->getCalledFunction();
+    if (Callee == nullptr || Callee->isDeclaration()) {
+      continue;
+    }
+
+    for (unsigned I = 0, E = Call->arg_size(); I != E; ++I) {
+      std::optional<uint64_t> ArgOffset =
+          getOffsetFromBase(Call->getArgOperand(I), Base);
+      if (!ArgOffset.has_value() ||
+          *ArgOffset > static_cast<uint64_t>(Offset) ||
+          I >= Callee->arg_size()) {
+        continue;
+      }
+
+      int64_t NestedOffset = Offset - static_cast<int64_t>(*ArgOffset);
+      if (hasStoreEvidenceAt(Stores, Callee->getArg(I), NestedOffset)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 bool hasFixedTupleHelperPayloadHType(llvm2c::HTypeResult &HTypes,
                                      ArrayRef<mlsub::EVMStoreEvidence> Stores,
                                      Function &Helper, Argument *Base,
@@ -186,9 +215,14 @@ bool hasFixedWordHelperPayloadHType(llvm2c::HTypeResult &HTypes,
   }
 
   HTypeBufferView View = getHTypeValueBufferView(HTypes, Base);
+  if (View.Gap == HTypeBufferGap::NonRecordPointerType &&
+      hasStoreEvidenceAt(Stores, Base, 0)) {
+    return true;
+  }
   return (hasHTypeBufferFieldAt(View, 0) &&
           hasStoreEvidenceAt(Stores, Base, 0)) ||
-         hasNestedHelperStoreEvidenceAt(HTypes, Stores, Helper, Base, 0);
+         hasNestedHelperStoreEvidenceAt(HTypes, Stores, Helper, Base, 0) ||
+         hasNestedHelperRawStoreEvidenceAt(Stores, Helper, Base, 0);
 }
 
 bool hasConstantStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores,
