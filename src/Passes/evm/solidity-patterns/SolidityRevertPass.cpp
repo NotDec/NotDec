@@ -195,6 +195,9 @@ bool hasRawBytesHeaderEvidence(llvm2c::HTypeResult &HTypes,
   if (hasHTypeBufferFieldAt(View, 0)) {
     return true;
   }
+  if (View.Gap == HTypeBufferGap::NonRecordPointerType) {
+    return true;
+  }
   if (!getHTypeStoreValuesAtOffsetBefore(Stores, HeaderBase, 0, Before)
            .empty()) {
     return true;

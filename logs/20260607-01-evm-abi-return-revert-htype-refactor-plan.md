@@ -1112,3 +1112,29 @@ nested helper：outer helper 返回 `base + 32`，inner helper 对同一个 base
   allocation bounds skip，三者 ABI return 都已对齐。
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.97s。
+
+## 2026-06-10 实现记录：raw bytes revert 接受普通 pointer HType
+
+`0725_19498082_e78beb21f7_98e658f9eae8` 和
+`0740_19498186_acae9b9760_d235a47b18d5` 里有一处
+`revert(arg0 + 32, mload(arg0))`。这里 `arg0` 来自上游 returndata buffer，HType 是
+`top:256*`，不是 record。raw bytes payload revert 规则本来已经要求
+`revert(base + 32, mload(base))`，所以按“普通 pointer 可以当 offset 0 字段”的同一条
+路线接受它。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:198`：
+  `hasRawBytesHeaderEvidence` 在 `HTypeBufferView::Gap` 为
+  `NonRecordPointerType` 时接受 header evidence。
+
+验证和当前决策点：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时 `0725...` / `0740...` 集合中，两个样例的 encoded revert 都从 40/42 提升到
+  41/42。
+- 继续失败的原因不是还有未标 `evm_revert`：当前输出 IR 里只有 79 个
+  `evm_revert`，且 79 个都有 `notdec.solidity.revert` metadata；manifest 仍期望
+  `notdec.solidity.revert=80`、`encoded_candidate=42`。
+- 这里需要单独决定：是把 `0725...` / `0740...` 的 oracle 调整到当前 IR 中实际存在的
+  79 个 revert，还是继续追前序 pass 为什么把 source/input 里的某个 revert 路径消掉。
