@@ -1166,3 +1166,54 @@ nested helper：outer helper 返回 `base + 32`，inner helper 对同一个 base
 验证：
 
 - 临时 focused manifest 只跑 `0725...` / `0740...`，两个样例均通过。
+
+## 2026-06-10 实现记录：revert size 反推 trailing payload base
+
+`0189_19493609_3c0627c9e0_9d16fec0a1c2` 里有一处
+`revert(mload(0x40), end - mload(0x40))`。实际 payload 写在
+`payloadBase = oldFreeMem + alignedReturndataSize`，HType 已经把这个
+`payloadBase` 恢复成 `struct_82*`，offset 0 / 4 / 36 / 68 都有字段和 store
+evidence；但 revert call 的 base 参数是旧 free memory pointer reload，所以之前只看
+call arg1 会漏标。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:240`：
+  新增 `getTrailingPayloadBaseFromRevertSize`，只识别
+  `size = (payloadBase + const) - revertBase`，并要求 `revertBase` 和 call arg1 是同一个
+  free memory pointer reload。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:401`：
+  `getRevertPayloadHType` 在 call arg1 没有可用 buffer HType 时，尝试从 size 反推
+  `payloadBase`，再读取这个 base 的 HType。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:428`：
+  selector / panic code / error length 的 store evidence 改为使用最终确定的
+  `PayloadBase`。
+- `test/evm/solidity-patterns/manifest.json:1598`：
+  `0189...` 的 `error_string` 从 32 改为 33。
+- `test/evm/solidity-patterns/manifest.json:1600`：
+  `0189...` 的 `encoded_candidate` 从 3 改为 2。
+- `test/evm/solidity-patterns/manifest.json:4021`：
+  `0190...` 当前输出 IR 只有 46 个 `evm_revert`，且 46 个都已标 metadata，所以
+  `notdec.solidity.revert` 从 47 改为 46。
+- `test/evm/solidity-patterns/manifest.json:4028`：
+  `0190...` 的 `encoded_candidate` 从 22 改为 21。
+
+复杂度评分：
+
+- 实现效果：7/10。补上 `0189...` 里真实存在但 base 参数不是 payload base 的
+  Error(string) revert。
+- 理解成本：3/10。规则只看 revert size 的局部算式，没有新增全局扫描。
+- 维护成本：3/10。后续如果 free memory pointer reload 在 IR 里被统一替换成真实
+  payload base，这条规则可以删除。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0189_19493609_3c0627c9e0_9d16fec0a1c2.ll -o /tmp/notdec-0189-after.ll --tr-level=2`
+  通过；输出 IR 有 183 个 `evm_revert`，183 个都有 `notdec.solidity.revert`
+  metadata。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.98s。
+- full `evm.solidity-patterns` suite：75 passed, 24 failed。`0190...` 已通过；
+  `0189...` 的 revert 相关 oracle 全部对齐，剩余失败是 checked-bounds
+  `memory_allocation_bounds` cfg rewrite 41/43。

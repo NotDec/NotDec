@@ -237,6 +237,29 @@ bool hasRawBytesPayloadRevert(llvm2c::HTypeResult &HTypes,
          hasRawBytesHeaderEvidence(HTypes, Stores, Length->Address, Revert);
 }
 
+std::optional<Value *> getTrailingPayloadBaseFromRevertSize(CallBase &Revert) {
+  auto *Size = dyn_cast<BinaryOperator>(Revert.getArgOperand(2));
+  if (Size == nullptr || Size->getOpcode() != Instruction::Sub ||
+      !isSameOrReloadedFreeMemoryBase(Size->getOperand(1),
+                                      Revert.getArgOperand(1))) {
+    return std::nullopt;
+  }
+
+  auto *End = dyn_cast<BinaryOperator>(Size->getOperand(0));
+  if (End == nullptr || End->getOpcode() != Instruction::Add) {
+    return std::nullopt;
+  }
+
+  for (unsigned I = 0; I != 2; ++I) {
+    std::optional<uint64_t> TailSize =
+        getUInt64Constant(End->getOperand(1 - I));
+    if (TailSize.has_value() && *TailSize >= 4) {
+      return End->getOperand(I);
+    }
+  }
+  return std::nullopt;
+}
+
 void insertPanicRewriteMarker(LLVMContext &Ctx,
                               const SolidityRevertMatch &Match) {
   if (Match.PanicCode == std::nullopt || Match.Revert == nullptr) {
@@ -375,8 +398,23 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
     return PanicPayload;
   }
 
+  Value *PayloadBase = Revert.getArgOperand(1);
   std::optional<HTypeBufferView> View =
-      getRevertBufferHType(HTypes, Revert.getArgOperand(1), Revert, 1);
+      getRevertBufferHType(HTypes, PayloadBase, Revert, 1);
+  if (!View.has_value()) {
+    std::optional<Value *> TrailingPayloadBase =
+        getTrailingPayloadBaseFromRevertSize(Revert);
+    if (TrailingPayloadBase.has_value()) {
+      HTypeBufferView TrailingView =
+          getHTypeValueBufferView(HTypes, *TrailingPayloadBase);
+      if (TrailingView.Record != nullptr ||
+          TrailingView.HasTransparentOffset0Field ||
+          TrailingView.Gap == HTypeBufferGap::NonRecordPointerType) {
+        PayloadBase = *TrailingPayloadBase;
+        View = TrailingView;
+      }
+    }
+  }
   if (!View.has_value()) {
     return std::nullopt;
   }
@@ -387,24 +425,24 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
   Payload.HasErrorHead = hasHTypeBufferFieldAt(*View, 4);
   Payload.HasErrorLength = hasHTypeBufferFieldAt(*View, 36);
   Payload.HasErrorData = hasHTypeBufferFieldAt(*View, 68);
-  Payload.SelectorStores = getHTypeBufferFieldStoreValues(
-      Stores, *View, Revert.getArgOperand(1), 0);
-  Payload.PanicCodeStores = getHTypeBufferFieldStoreValues(
-      Stores, *View, Revert.getArgOperand(1), 4);
-  Payload.ErrorLengthStores = getHTypeBufferFieldStoreValues(
-      Stores, *View, Revert.getArgOperand(1), 36);
+  Payload.SelectorStores =
+      getHTypeBufferFieldStoreValues(Stores, *View, PayloadBase, 0);
+  Payload.PanicCodeStores =
+      getHTypeBufferFieldStoreValues(Stores, *View, PayloadBase, 4);
+  Payload.ErrorLengthStores =
+      getHTypeBufferFieldStoreValues(Stores, *View, PayloadBase, 36);
   if (!Payload.HasSelector && !Payload.HasPanicCode &&
       !Payload.HasErrorHead && !Payload.HasErrorLength &&
       !Payload.HasErrorData) {
-    Payload.SelectorStores = getHTypeStoreValuesAtOffsetBefore(
-        Stores, Revert.getArgOperand(1), 0, Revert);
+    Payload.SelectorStores =
+        getHTypeStoreValuesAtOffsetBefore(Stores, PayloadBase, 0, Revert);
     if (Payload.SelectorStores.empty()) {
       return std::nullopt;
     }
     Payload.HasSelector = true;
     Payload.SelectorFromStoreEvidenceOnly = true;
-    Payload.PanicCodeStores = getHTypeStoreValuesAtOffsetBefore(
-        Stores, Revert.getArgOperand(1), 4, Revert);
+    Payload.PanicCodeStores =
+        getHTypeStoreValuesAtOffsetBefore(Stores, PayloadBase, 4, Revert);
     Payload.HasPanicCode = !Payload.PanicCodeStores.empty();
   }
   return Payload;

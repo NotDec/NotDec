@@ -1595,9 +1595,9 @@
       "expected_revert_kinds": {
         "empty": 77,
         "panic": 43,
-        "error_string": 32,
+        "error_string": 33,
         "custom_error_candidate": 18,
-        "encoded_candidate": 3,
+        "encoded_candidate": 2,
         "returndata_forward": 10
       },
       "expected_panic_codes": {
@@ -4018,14 +4018,14 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 4,
         "notdec.solidity.payability_guard": 63,
-        "notdec.solidity.revert": 47
+        "notdec.solidity.revert": 46
       },
       "expected_revert_kinds": {
         "empty": 25,
         "panic": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 22,
+        "encoded_candidate": 21,
         "returndata_forward": 0
       },
       "expected_panic_codes": {
