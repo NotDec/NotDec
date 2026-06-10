@@ -1419,3 +1419,68 @@ return base，size 是 `helper(end, oldBase, ...) - mload(0x40)`。这里 helper
   通过，用时 0.98s。
 - full `evm.solidity-patterns` suite：78 passed, 21 failed。通过总数不变，因为这三个
   case 还有 checked-bounds/panic kind 差异，但 ABI/revert 总数已对齐。
+
+## 2026-06-10 实现记录：CheckedBoundsPass 识别 finalize_alloc 动态分配
+
+继续处理 checked-bounds 的 `memory_allocation_bounds` 漏标。`0340...` 的形状是：
+
+```llvm
+%0 = call ptr @calloc_unbounded()
+%base = ptrtoint ptr %0 to i256
+%size = ... ; 由被检查的 length 计算出来
+call void @notdec_evm_finalize_alloc(i256 %base, i256 %size)
+store i256 %length, ptr %0
+```
+
+旧逻辑只认 `mstore(0x40, newPtr)` 这类 free memory pointer 更新；现在类型恢复后已经会把
+这类本地 allocation 改写成 `calloc_unbounded` + `notdec_evm_finalize_alloc`，所以
+checked-bounds 也需要接受这个明确证据。
+
+实现改动：
+
+- `src/Passes/evm/SolidityPatterns.cpp:3528`：
+  给 checked-bounds 前半段增加 `findFinalizeAllocCall` 前置声明，复用后面已有 helper。
+- `src/Passes/evm/SolidityPatterns.cpp:3746`：
+  新增 `isPreIncrementFinalizeAllocationSize`，只识别 `base < uint64max` 后的
+  `(base & mask) + 64` 这种 pre-increment bytes/string allocation size。
+- `src/Passes/evm/SolidityPatterns.cpp:3827`：
+  `hasBytesAllocationStores` 在看到 header store 后，除了 `mstore(0x40,newPtr)`，也接受
+  同块 `notdec_evm_finalize_alloc(oldPtr,size)`。
+- `src/Passes/evm/SolidityPatterns.cpp:4018`：
+  `hasMemoryBytesAllocationComputation` 把 `calloc_unbounded` 生成的 allocation base 也当作
+  old pointer 候选。
+- `src/Passes/evm/SolidityPatterns.cpp:4047`：
+  新增 `blockFinalizesDynamicAllocationSize` / `hasDynamicFinalizeAllocOnLocalPath`，只在当前块
+  或直接后继里有 `notdec_evm_finalize_alloc(_, size)`，且 size 来自被检查 length 时补
+  `memory_allocation_bounds`。
+- `src/Passes/evm/SolidityPatterns.cpp:4607`：
+  `matchMemoryAllocationBounds` 接受归一化后的 `len >= uint64max` / `uint64max <= len`。
+  这仍然需要后面的 allocation size 证据，不单独凭比较条件改写。
+
+效果：
+
+- `0340...`：`memory_allocation_bounds` 从 0 补到 1，case 通过。
+- `0189...`：`memory_allocation_bounds` 从 3 补到 4，case 通过。
+- 5 个 checked-bounds 抽样里 `0189...`、`0258...`、`1572...`、`1485...` 通过；
+  `1988...` 仍失败，原因是少一个 panic/revert 标注，checked-bounds 没有可关联的
+  `SolidityRevertMatch`，不是这次 allocation size 识别本身。
+
+复杂度评分：
+
+- 实现效果：7/10。补上 `calloc_unbounded` + `finalize_alloc` 的动态分配证据，full suite
+  从 78 passed / 21 failed 收敛到 84 passed / 15 failed。
+- 理解成本：3/10。仍在 `CheckedBoundsPass` 的本地 matcher 内，没有新增跨 pass 数据结构。
+- 维护成本：3/10。规则依赖显式 `notdec_evm_finalize_alloc`，后续如果整理
+  `SolidityPatterns.cpp`，这几段应跟 checked-bounds allocation matcher 一起拆出去。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 单 case `0340...`：`/tmp/notdec-solidity-0340-after-calloc-allocation-bounds` 通过。
+- 单 case `0189...`：`/tmp/notdec-solidity-0189-after-uint64max-uge` 通过。
+- 5 case 抽样：`/tmp/notdec-solidity-checkedbounds-sample-after-uint64max-uge`，
+  4 passed / 1 failed，剩余 `1988...` 是 revert/panic 缺口。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 1.03s。
+- full `evm.solidity-patterns` suite：
+  `/tmp/notdec-solidity-patterns-full-after-checked-bounds-finalize`，84 passed, 15 failed。

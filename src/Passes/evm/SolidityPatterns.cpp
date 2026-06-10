@@ -3525,6 +3525,7 @@ matchEmptyArrayPop(const NormalizedCondition &FailureCond,
 }
 
 Instruction *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
+Instruction *findFinalizeAllocCall(BasicBlock *BB, Value *Base, Value *Size);
 bool callHasArg(CallBase *Call, Value *Needle);
 
 bool hasMemoryArrayAllocationComputation(BasicBlock *SuccessBlock,
@@ -3742,6 +3743,29 @@ bool isDynamicAllocationSize(Value *V, Value *Length, BasicBlock *BB) {
          isArrayAllocationSize(V, Length, BB);
 }
 
+bool isPreIncrementFinalizeAllocationSize(Value *V, Value *Length) {
+  // Some Solidity paths guard the pre-incremented byte length with
+  // base < uint64max, then allocate roundUp(base + 1) + 32. InstCombine may
+  // simplify that to (base & mask) + 64.
+  auto *SizeAdd = dyn_cast_or_null<BinaryOperator>(V);
+  if (SizeAdd == nullptr || SizeAdd->getOpcode() != Instruction::Add) {
+    return false;
+  }
+
+  Value *RoundedBase = nullptr;
+  if (isConstantIntValue(SizeAdd->getOperand(0), 64)) {
+    RoundedBase = SizeAdd->getOperand(1);
+  } else if (isConstantIntValue(SizeAdd->getOperand(1), 64)) {
+    RoundedBase = SizeAdd->getOperand(0);
+  }
+
+  auto *Rounded = dyn_cast_or_null<BinaryOperator>(RoundedBase);
+  return Rounded != nullptr && Rounded->getOpcode() == Instruction::And &&
+         binaryOpHasOperand(Rounded, Length) &&
+         (isMaskClearingLowFiveBits(Rounded->getOperand(0)) ||
+          isMaskClearingLowFiveBits(Rounded->getOperand(1)));
+}
+
 bool isRoundedMemoryAllocationSize(Value *V) {
   auto *RoundedSize = dyn_cast_or_null<BinaryOperator>(V);
   if (RoundedSize == nullptr || RoundedSize->getOpcode() != Instruction::And) {
@@ -3801,13 +3825,14 @@ bool hasPowerOfTwoExpComputation(BasicBlock *SuccessBlock, Value *Exponent) {
 }
 
 bool hasBytesAllocationStores(BasicBlock *BB, Value *OldPtr, Value *NewPtr,
-                              Value *Length) {
+                              Value *Size, Value *Length) {
   if (BB == nullptr) {
     return false;
   }
 
   bool StoresLength = false;
   bool StoresFreePtr = false;
+  bool FinalizesAlloc = findFinalizeAllocCall(BB, OldPtr, Size) != nullptr;
   for (Instruction &I : *BB) {
     std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
     if (!Store.has_value()) {
@@ -3822,13 +3847,13 @@ bool hasBytesAllocationStores(BasicBlock *BB, Value *OldPtr, Value *NewPtr,
       StoresFreePtr = true;
     }
   }
-  return StoresLength && StoresFreePtr;
+  return StoresLength && (StoresFreePtr || FinalizesAlloc);
 }
 
 bool hasBytesAllocationStoresOnLocalPath(BasicBlock *SuccessBlock,
-                                         Value *OldPtr, Value *NewPtr,
+                                         Value *OldPtr, Value *NewPtr, Value *Size,
                                          Value *Length) {
-  if (hasBytesAllocationStores(SuccessBlock, OldPtr, NewPtr, Length)) {
+  if (hasBytesAllocationStores(SuccessBlock, OldPtr, NewPtr, Size, Length)) {
     return true;
   }
 
@@ -3841,7 +3866,7 @@ bool hasBytesAllocationStoresOnLocalPath(BasicBlock *SuccessBlock,
     return false;
   }
   for (BasicBlock *Succ : successors(Term)) {
-    if (hasBytesAllocationStores(Succ, OldPtr, NewPtr, Length)) {
+    if (hasBytesAllocationStores(Succ, OldPtr, NewPtr, Size, Length)) {
       return true;
     }
   }
@@ -3992,7 +4017,7 @@ bool hasMemoryBytesAllocationComputation(BasicBlock *SuccessBlock,
 
   SmallVector<Value *, 4> OldPtrs;
   for (Instruction &I : *SuccessBlock) {
-    if (isFreeMemoryPointerLoad(&I)) {
+    if (isFreeMemoryPointerLoad(&I) || isFreeMemoryAllocationBase(&I)) {
       OldPtrs.push_back(&I);
     }
   }
@@ -4011,9 +4036,49 @@ bool hasMemoryBytesAllocationComputation(BasicBlock *SuccessBlock,
         continue;
       }
       if (hasBytesAllocationStoresOnLocalPath(SuccessBlock, OldPtr, NewPtr,
-                                              Length)) {
+                                              Size, Length)) {
         return true;
       }
+    }
+  }
+  return false;
+}
+
+bool blockFinalizesDynamicAllocationSize(BasicBlock *BB, Value *Length,
+                                         BasicBlock *SizeBlock) {
+  if (BB == nullptr || Length == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr || !isCallTo(Call, "notdec_evm_finalize_alloc") ||
+        Call->arg_size() != 2) {
+      continue;
+    }
+    Value *Size = Call->getArgOperand(1);
+    if (isDynamicAllocationSize(Size, Length, SizeBlock) ||
+        isPreIncrementFinalizeAllocationSize(Size, Length)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasDynamicFinalizeAllocOnLocalPath(BasicBlock *SuccessBlock,
+                                        Value *Length) {
+  if (blockFinalizesDynamicAllocationSize(SuccessBlock, Length, SuccessBlock)) {
+    return true;
+  }
+
+  auto *Term =
+      SuccessBlock == nullptr ? nullptr : SuccessBlock->getTerminator();
+  if (Term == nullptr) {
+    return false;
+  }
+  for (BasicBlock *Succ : successors(Term)) {
+    if (blockFinalizesDynamicAllocationSize(Succ, Length, SuccessBlock)) {
+      return true;
     }
   }
   return false;
@@ -4024,6 +4089,7 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
   Value *Shift = findMemoryAllocationShift(SuccessBlock, Length);
   if (Shift == nullptr) {
     return hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
+           hasDynamicFinalizeAllocOnLocalPath(SuccessBlock, Length) ||
            hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
            hasVoidMemoryAllocationHelperCall(SuccessBlock, Length) ||
            hasMemoryAllocationSizeReturn(SuccessBlock, Length);
@@ -4041,6 +4107,7 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
 
   return hasMemoryArrayAllocationComputation(SuccessBlock, Length) ||
          hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
+         hasDynamicFinalizeAllocOnLocalPath(SuccessBlock, Length) ||
          hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
          hasVoidMemoryAllocationHelperCall(SuccessBlock, Length) ||
          hasMemoryAllocationSizeReturn(SuccessBlock, Length);
@@ -4536,6 +4603,12 @@ matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
     Length = Cmp->getOperand(0);
   } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
              isUInt64Limit(Cmp->getOperand(0))) {
+    Length = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGE &&
+             isUInt64Max(Cmp->getOperand(1))) {
+    Length = Cmp->getOperand(0);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+             isUInt64Max(Cmp->getOperand(0))) {
     Length = Cmp->getOperand(1);
   } else if (FailureCond.Predicate == ICmpInst::ICMP_UGT &&
              isUInt64Max(Cmp->getOperand(1))) {
