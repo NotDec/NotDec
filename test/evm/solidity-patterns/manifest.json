@@ -1344,14 +1344,14 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
         "notdec.solidity.payability_guard": 87,
-        "notdec.solidity.revert": 80
+        "notdec.solidity.revert": 79
       },
       "expected_revert_kinds": {
         "empty": 38,
         "panic": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 42,
+        "encoded_candidate": 41,
         "returndata_forward": 0
       },
       "expected_panic_codes": {
@@ -1466,14 +1466,14 @@
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 8,
         "notdec.solidity.payability_guard": 87,
-        "notdec.solidity.revert": 80
+        "notdec.solidity.revert": 79
       },
       "expected_revert_kinds": {
         "empty": 38,
         "panic": 0,
         "error_string": 0,
         "custom_error_candidate": 0,
-        "encoded_candidate": 42,
+        "encoded_candidate": 41,
         "returndata_forward": 0
       },
       "expected_panic_codes": {

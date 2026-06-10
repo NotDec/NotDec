@@ -1138,3 +1138,31 @@ nested helper：outer helper 返回 `base + 32`，inner helper 对同一个 base
   `notdec.solidity.revert=80`、`encoded_candidate=42`。
 - 这里需要单独决定：是把 `0725...` / `0740...` 的 oracle 调整到当前 IR 中实际存在的
   79 个 revert，还是继续追前序 pass 为什么把 source/input 里的某个 revert 路径消掉。
+
+## 2026-06-10 实现记录：0725/0740 revert oracle 按当前 IR 对齐
+
+按用户后续决策，先扫当前输出 IR。如果当前 IR 里确实只有 79 个 `evm_revert`，则按
+当前 IR 调整 oracle。
+
+复核结果：
+
+- `0725_19498082_e78beb21f7_98e658f9eae8` 当前输出 IR 有 79 个 `evm_revert`，
+  79 个都有 `notdec.solidity.revert` metadata；kind 分布为 `empty=38`、
+  `encoded_candidate=41`。
+- `0740_19498186_acae9b9760_d235a47b18d5` 当前输出 IR 同样有 79 个 `evm_revert`，
+  79 个都有 `notdec.solidity.revert` metadata；kind 分布同上。
+
+实现改动：
+
+- `test/evm/solidity-patterns/manifest.json:1347`：
+  `0725...` 的 `notdec.solidity.revert` 从 80 改为 79。
+- `test/evm/solidity-patterns/manifest.json:1354`：
+  `0725...` 的 `encoded_candidate` 从 42 改为 41。
+- `test/evm/solidity-patterns/manifest.json:1469`：
+  `0740...` 的 `notdec.solidity.revert` 从 80 改为 79。
+- `test/evm/solidity-patterns/manifest.json:1476`：
+  `0740...` 的 `encoded_candidate` 从 42 改为 41。
+
+验证：
+
+- 临时 focused manifest 只跑 `0725...` / `0740...`，两个样例均通过。
