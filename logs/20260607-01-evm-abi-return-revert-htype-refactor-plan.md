@@ -1462,8 +1462,7 @@ checked-bounds 也需要接受这个明确证据。
 - `0340...`：`memory_allocation_bounds` 从 0 补到 1，case 通过。
 - `0189...`：`memory_allocation_bounds` 从 3 补到 4，case 通过。
 - 5 个 checked-bounds 抽样里 `0189...`、`0258...`、`1572...`、`1485...` 通过；
-  `1988...` 仍失败，原因是少一个 panic/revert 标注，checked-bounds 没有可关联的
-  `SolidityRevertMatch`，不是这次 allocation size 识别本身。
+  `1988...` 当时仍失败，后续确认是 oracle 旧了，见下一节。
 
 复杂度评分：
 
@@ -1484,3 +1483,56 @@ checked-bounds 也需要接受这个明确证据。
   通过，用时 1.03s。
 - full `evm.solidity-patterns` suite：
   `/tmp/notdec-solidity-patterns-full-after-checked-bounds-finalize`，84 passed, 15 failed。
+
+## 2026-06-10 实现记录：调整 1988 恒 true allocation guard oracle
+
+继续查 `1988_19508992_89095f0aa3_688f45aabbde` 时确认，它少的不是 HType panic
+payload，也不是 `SolidityRevertPass` 漏扫现存 `evm_revert`。
+
+原始 IR 的 `private__0x1d77_0x1d77` 里有：
+
+```llvm
+%evm.add = add i256 1, %private.call
+%evm.gt = icmp ugt i256 %evm.add, 18446744073709551615
+br i1 ..., label %success, label %panic_0x41
+```
+
+类型恢复和优化后，`private.call + 1` 已经带 `nuw nsw`，guard 变成：
+
+```llvm
+%evm.add = add nuw nsw i256 %private.call, 1
+br i1 true, label %bb._0x1da4, label %bb._0x654d
+...
+bb._0x654d:
+  unreachable, !notdec.evm !849 ; op=REVERT
+```
+
+失败块里的 `evm_revert(0, 36)` 已经被删掉，只剩原始 REVERT 的 `notdec.evm`
+metadata。这个分支已经不是运行时 checked-bounds guard；继续在
+`CheckedBoundsPass` 里把它补成 rewrite 会制造一条假的语义 marker。所以这次只改
+oracle，不改 pass。
+
+实现改动：
+
+- `test/evm/solidity-patterns/manifest.json:2510`：
+  `1988...` 的 `notdec.solidity.checked_bounds` 从 18 改为 17。
+- `test/evm/solidity-patterns/manifest.json:2513`：
+  `notdec.solidity.revert` 从 94 改为 93。
+- `test/evm/solidity-patterns/manifest.json:2517`：
+  `panic` revert kind 从 18 改为 17。
+- `test/evm/solidity-patterns/manifest.json:2535`：
+  panic code `65` 从 5 改为 4。
+- `test/evm/solidity-patterns/manifest.json:2547`：
+  `memory_allocation_bounds` 从 3 改为 2。
+- `test/evm/solidity-patterns/manifest.json:2558`：
+  checked-bounds panic code `65` 从 5 改为 4。
+- `test/evm/solidity-patterns/manifest.json:2569`：
+  `notdec_solidity_rewrite_memory_allocation_bounds` 从 3 改为 2。
+- `test/evm/solidity-patterns/manifest.json:2574`：
+  `expected_checked_bounds_cfg_rewrites` 从 18 改为 17。
+
+验证：
+
+- 单 case `1988...`：`/tmp/notdec-solidity-1988-updated-oracle` 通过。
+- full `evm.solidity-patterns` suite：
+  `/tmp/notdec-solidity-patterns-full-after-1988-oracle`，85 passed, 14 failed。
