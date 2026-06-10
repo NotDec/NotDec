@@ -202,6 +202,101 @@ bool hasConstantStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores,
   return false;
 }
 
+bool fieldTypeIsArray(const ast::FieldDecl &Field) {
+  return Field.Type != nullptr && Field.Type->isArrayType();
+}
+
+bool typeIsArrayPointer(ast::HType *Ty) {
+  if (Ty == nullptr) {
+    return false;
+  }
+  if (Ty->isPointerType()) {
+    ast::HType *Pointee = Ty->getPointeeType();
+    return Pointee != nullptr && Pointee->isArrayType();
+  }
+  if (auto *Inter = dyn_cast<ast::SetInterType>(Ty)) {
+    return any_of(Inter->getTypes(), typeIsArrayPointer);
+  }
+  if (auto *Union = dyn_cast<ast::SetUnionType>(Ty)) {
+    return any_of(Union->getTypes(), typeIsArrayPointer);
+  }
+  return false;
+}
+
+bool valueTypeIsArrayPointer(llvm2c::HTypeResult &HTypes, Value *V) {
+  ast::HType *Ty = HTypes.getDefaultValueType(getExtValuePtr(V, nullptr));
+  return typeIsArrayPointer(Ty);
+}
+
+bool hasTupleArrayHeadAndLengthEvidence(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                        Value *Base, int64_t ArrayOffset) {
+  if (ArrayOffset < 32 || ArrayOffset % 32 != 0) {
+    return false;
+  }
+
+  int64_t LengthOffset = ArrayOffset - 32;
+  if (!hasStoreEvidenceAt(Stores, Base, LengthOffset)) {
+    return false;
+  }
+
+  for (int64_t HeadOffset = 0; HeadOffset < LengthOffset;
+       HeadOffset += 32) {
+    if (hasConstantStoreEvidenceAt(Stores, Base, HeadOffset,
+                                   static_cast<uint64_t>(LengthOffset))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool hasInlineTupleArrayTailHType(llvm2c::HTypeResult &HTypes,
+                                  ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                  Value *Base) {
+  HTypeBufferView View = getHTypeValueBufferView(HTypes, Base);
+  if (View.Record != nullptr) {
+    const ast::FieldDecl *ArrayField = nullptr;
+    bool UsableRecord = true;
+    for (const ast::FieldDecl &Field : View.Record->getFields()) {
+      if (Field.isPadding) {
+        continue;
+      }
+      if (Field.R.Start < 0 || Field.R.Size != 32) {
+        UsableRecord = false;
+        break;
+      }
+      if (!fieldTypeIsArray(Field)) {
+        continue;
+      }
+      if (ArrayField != nullptr) {
+        return false;
+      }
+      ArrayField = &Field;
+    }
+
+    if (UsableRecord && ArrayField != nullptr) {
+      return hasTupleArrayHeadAndLengthEvidence(Stores, Base,
+                                                ArrayField->R.Start);
+    }
+  }
+
+  auto *BaseInst = dyn_cast<Instruction>(Base);
+  if (BaseInst == nullptr) {
+    return false;
+  }
+  for (Instruction &Inst : instructions(*BaseInst->getFunction())) {
+    std::optional<uint64_t> Offset = getOffsetFromBase(&Inst, Base);
+    if (!Offset.has_value() || *Offset > static_cast<uint64_t>(INT64_MAX)) {
+      continue;
+    }
+    if (valueTypeIsArrayPointer(HTypes, &Inst) &&
+        hasTupleArrayHeadAndLengthEvidence(
+            Stores, Base, static_cast<int64_t>(*Offset))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::optional<AbiReturnHelperPayload>
 getInlineDynamicReturnPayloadHType(llvm2c::HTypeResult &HTypes,
                                    ArrayRef<mlsub::EVMStoreEvidence> Stores,
@@ -220,7 +315,7 @@ getInlineDynamicReturnPayloadHType(llvm2c::HTypeResult &HTypes,
   Value *End = Size->getOperand(0);
   for (Instruction &Inst : instructions(*Return.getFunction())) {
     if (!isSameOrReloadedFreeMemoryBase(&Inst, Return.getArgOperand(1)) ||
-        !dependsOnValue(End, &Inst)) {
+        !dependsOnValue(End, &Inst, 32)) {
       continue;
     }
 
@@ -229,6 +324,9 @@ getInlineDynamicReturnPayloadHType(llvm2c::HTypeResult &HTypes,
         hasConstantStoreEvidenceAt(Stores, &Inst, 0, 32) &&
         hasStoreEvidenceAt(Stores, &Inst, 32)) {
       return AbiReturnHelperPayload{true, true, false};
+    }
+    if (hasInlineTupleArrayTailHType(HTypes, Stores, &Inst)) {
+      return AbiReturnHelperPayload{false, false, true};
     }
   }
   return std::nullopt;

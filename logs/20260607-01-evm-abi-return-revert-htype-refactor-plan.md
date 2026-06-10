@@ -1025,3 +1025,48 @@ tail base 或 tail PHI 有 store evidence。但 focused `0146...` 仍不命中�
 
 当前倾向路线 A。它更符合“必须基于 HType store evidence”的路线，也避免
 `AbiReturnPass.cpp` 继续膨胀成通用 ABI 编码分析。
+
+## 2026-06-10 实现记录：tuple 内 array tail 的本函数 return 识别
+
+上面的技术决策点已按用户后续判断收敛：如果类型恢复已经把 tuple tail 位置识别成
+array，就足够作为 ABI dynamic tail 证据，不再追 `%_0x551_0x0` 这种 PHI 上的 payload
+store。仍然保留 HType store evidence 约束：array 前一个 slot 必须有 length store，
+某个 head slot 必须写入该 length slot 的 ABI offset。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:205`：
+  新增 `fieldTypeIsArray`，判断 HType record field 是否是 array。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:209`：
+  新增 `typeIsArrayPointer` / `valueTypeIsArrayPointer`，支持直接从 `base + const`
+  的 tail value HType 判断它是否是 `array*`。这是为了覆盖 pass 内 base record
+  暂时不可遍历，但 tail value 已有 `top:256[]*` 的情况。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:231`：
+  新增 `hasTupleArrayHeadAndLengthEvidence`，要求 array offset 前一个 32-byte slot
+  有 length store evidence，并且前面的某个 ABI head slot 写入该 length offset。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:252`：
+  新增 `hasInlineTupleArrayTailHType`。先尝试 base record 里的 array field；如果
+  record 不可用，则只扫描同函数里的 `base + const` value，要求该 value 的 HType
+  是 array pointer。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:315`：
+  `getInlineDynamicReturnPayloadHType` 的 `dependsOnValue` 深度显式放到 32，并在
+  dynamic buffer 规则失败后尝试 tuple array-tail 规则，返回 `tuple_candidate`。
+
+复杂度评分：
+
+- 实现效果：7/10。补上 `0146...public_transactions_uint256__0x482` 漏标，不需要追
+  PHI payload store。
+- 理解成本：4/10。多了一条 tail value HType fallback，但仍只在 ABI return pass 内
+  消费 HType/store evidence。
+- 维护成本：3/10。后续如果 pass 内 base record 总能稳定暴露字段，可以去掉
+  `base + const` fallback。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 临时单样例 `0146_19493376_503a732d50_138a4d77d617` 通过。
+- 临时 14 样例集合中，`0450...`、`0726...`、`0735...`、`0038...`、`0114...`、
+  `0146...` 通过；其余 8 个仍是既有 ABI return 数量缺口，不是本次新增规则导致的
+  多标。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.96s。
