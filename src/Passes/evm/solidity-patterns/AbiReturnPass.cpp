@@ -229,11 +229,48 @@ bool hasConstantStoreEvidenceAt(ArrayRef<mlsub::EVMStoreEvidence> Stores,
                                 Value *Base, int64_t Offset,
                                 uint64_t ExpectedValue) {
   for (Value *StoredValue : getHTypeStoreValuesAtOffset(Stores, Base, Offset)) {
-    if (isConstantIntValue(StoredValue, ExpectedValue)) {
+    std::optional<uint64_t> CallsiteValue =
+        getUniqueCallsiteArgUInt64Constant(StoredValue);
+    if (isConstantIntValue(StoredValue, ExpectedValue) ||
+        (CallsiteValue.has_value() && *CallsiteValue == ExpectedValue)) {
       return true;
     }
   }
   return false;
+}
+
+bool isConstantOrCallsiteArgIntValue(Value *V, uint64_t N) {
+  if (isConstantIntValue(V, N)) {
+    return true;
+  }
+  std::optional<uint64_t> CallsiteValue =
+      getUniqueCallsiteArgUInt64Constant(V);
+  return CallsiteValue.has_value() && *CallsiteValue == N;
+}
+
+std::optional<Value *>
+getLastFreeMemoryPointerStoreBefore(Instruction &Before) {
+  for (auto It = Before.getIterator(); It != Before.getParent()->begin();) {
+    --It;
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&*It);
+    if (Store.has_value() && Store->StoreBits == 256 &&
+        isConstantIntValue(Store->Address, 64)) {
+      return Store->StoredValue;
+    }
+  }
+  return std::nullopt;
+}
+
+bool isSameOrStoredFreeMemoryBase(Value *Candidate, Value *Reload,
+                                  Instruction &Before) {
+  if (isSameOrReloadedFreeMemoryBase(Candidate, Reload)) {
+    return true;
+  }
+  if (!isFreeMemoryPointerLoad(Reload)) {
+    return false;
+  }
+  std::optional<Value *> LastStore = getLastFreeMemoryPointerStoreBefore(Before);
+  return LastStore.has_value() && *LastStore == Candidate;
 }
 
 bool fieldTypeIsArray(const ast::FieldDecl &Field) {
@@ -329,6 +366,86 @@ bool hasInlineTupleArrayTailHType(llvm2c::HTypeResult &HTypes,
     }
   }
   return false;
+}
+
+Value *getAggregateInsertValue(Value *V, unsigned Index) {
+  for (Value *Cur = V; Cur != nullptr;) {
+    auto *Insert = dyn_cast<InsertValueInst>(Cur);
+    if (Insert == nullptr || Insert->getNumIndices() != 1) {
+      return nullptr;
+    }
+    if (*Insert->idx_begin() == Index) {
+      return Insert->getInsertedValueOperand();
+    }
+    Cur = Insert->getAggregateOperand();
+  }
+  return nullptr;
+}
+
+bool helperReturnsAggregateDynamicPayload(llvm2c::HTypeResult &HTypes,
+                                          ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                          Function &Helper) {
+  bool SawReturn = false;
+  for (BasicBlock &BB : Helper) {
+    auto *Ret = dyn_cast<ReturnInst>(BB.getTerminator());
+    if (Ret == nullptr) {
+      continue;
+    }
+    SawReturn = true;
+
+    Value *RetValue = Ret->getReturnValue();
+    Value *End = getAggregateInsertValue(RetValue, 0);
+    Value *Start = getAggregateInsertValue(RetValue, 1);
+    Value *Base = getAggregateInsertValue(RetValue, 2);
+    if (End == nullptr || Start == nullptr || Base == nullptr ||
+        Start != Base || !dependsOnValue(End, Base, 32)) {
+      return false;
+    }
+
+    if (!(hasConstantStoreEvidenceAt(Stores, Base, 0, 32) &&
+          hasStoreEvidenceAt(Stores, Base, 32)) &&
+        !hasInlineTupleArrayTailHType(HTypes, Stores, Base)) {
+      return false;
+    }
+  }
+  return SawReturn;
+}
+
+std::optional<AbiReturnHelperPayload>
+getAggregateDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
+                                            ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                            CallBase &Return) {
+  auto *BaseExtract = dyn_cast<ExtractValueInst>(Return.getArgOperand(1));
+  auto *Size = dyn_cast<BinaryOperator>(Return.getArgOperand(2));
+  if (BaseExtract == nullptr || BaseExtract->getNumIndices() != 1 ||
+      *BaseExtract->idx_begin() != 2 || Size == nullptr ||
+      Size->getOpcode() != Instruction::Sub) {
+    return std::nullopt;
+  }
+
+  auto *EndExtract = dyn_cast<ExtractValueInst>(Size->getOperand(0));
+  auto *StartExtract = dyn_cast<ExtractValueInst>(Size->getOperand(1));
+  if (EndExtract == nullptr || StartExtract == nullptr ||
+      EndExtract->getNumIndices() != 1 || StartExtract->getNumIndices() != 1 ||
+      *EndExtract->idx_begin() != 0 || *StartExtract->idx_begin() != 1) {
+    return std::nullopt;
+  }
+
+  Value *Aggregate = BaseExtract->getAggregateOperand();
+  if (EndExtract->getAggregateOperand() != Aggregate ||
+      StartExtract->getAggregateOperand() != Aggregate) {
+    return std::nullopt;
+  }
+
+  auto *HelperCall = dyn_cast<CallBase>(Aggregate);
+  Function *Helper =
+      HelperCall == nullptr ? nullptr : HelperCall->getCalledFunction();
+  if (Helper == nullptr || Helper->isDeclaration() ||
+      !helperReturnsAggregateDynamicPayload(HTypes, Stores, *Helper)) {
+    return std::nullopt;
+  }
+
+  return AbiReturnHelperPayload{true, true, false};
 }
 
 std::optional<AbiReturnHelperPayload>
@@ -446,8 +563,8 @@ getDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
   }
 
   for (unsigned I = 0, E = HelperCall->arg_size(); I != E; ++I) {
-    if (!isSameOrReloadedFreeMemoryBase(HelperCall->getArgOperand(I),
-                                        Return.getArgOperand(1))) {
+    if (!isSameOrStoredFreeMemoryBase(HelperCall->getArgOperand(I),
+                                      Return.getArgOperand(1), Return)) {
       continue;
     }
     if (I >= Helper->arg_size()) {
@@ -492,7 +609,7 @@ std::optional<StringRef>
 classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
                            ArrayRef<mlsub::EVMStoreEvidence> Stores,
                            CallBase &Return) {
-  if (isConstantIntValue(Return.getArgOperand(2), 0)) {
+  if (isConstantOrCallsiteArgIntValue(Return.getArgOperand(2), 0)) {
     return StringRef("empty");
   }
   if (isReturndataSize(Return.getArgOperand(2))) {
@@ -503,6 +620,10 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
       getDynamicReturnHelperPayloadHType(HTypes, Stores, Return);
   if (!HelperPayload.has_value()) {
     HelperPayload = getInlineDynamicReturnPayloadHType(HTypes, Stores, Return);
+  }
+  if (!HelperPayload.has_value()) {
+    HelperPayload =
+        getAggregateDynamicReturnHelperPayloadHType(HTypes, Stores, Return);
   }
   if (HelperPayload.has_value() && HelperPayload->HasOffset0StoreEvidence &&
       HelperPayload->HasDynamicLengthStoreEvidence) {
@@ -519,7 +640,8 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
     return std::nullopt;
   }
 
-  bool IsSingleWordReturn = isConstantIntValue(Return.getArgOperand(2), 32);
+  bool IsSingleWordReturn =
+      isConstantOrCallsiteArgIntValue(Return.getArgOperand(2), 32);
   if (IsSingleWordReturn &&
       (Payload->HasOffset0 || Payload->HasTransparentOffset0 ||
        Payload->HasOffset0StoreEvidence)) {

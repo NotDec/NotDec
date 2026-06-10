@@ -40,6 +40,15 @@ struct RevertPayloadHType {
 
 bool isZeroValue(Value *V) { return isConstantIntValue(V, 0); }
 
+bool isZeroSizeValue(Value *V) {
+  if (isConstantIntValue(V, 0)) {
+    return true;
+  }
+  std::optional<uint64_t> CallsiteValue =
+      getUniqueCallsiteArgUInt64Constant(V);
+  return CallsiteValue.has_value() && *CallsiteValue == 0;
+}
+
 bool isReturndataForwardCopy(CallBase &Call, Value *Dest) {
   return isCallTo(&Call, "evm_returndatacopy") && Call.arg_size() == 5 &&
          Call.getArgOperand(2) == Dest && isZeroValue(Call.getArgOperand(3)) &&
@@ -482,7 +491,7 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
     return Match;
   }
 
-  if (isConstantIntValue(Revert.getArgOperand(2), 0)) {
+  if (isZeroSizeValue(Revert.getArgOperand(2))) {
     SolidityRevertMatch Match;
     Match.Revert = &Revert;
     Match.Kind = "encoded_candidate";

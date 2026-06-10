@@ -147,6 +147,8 @@ struct EvmMemoryStore {
 
 bool isCallTo(const llvm::Value *V, llvm::StringRef Name);
 bool isConstantIntValue(const llvm::Value *V, uint64_t N);
+std::optional<uint64_t>
+getUniqueCallsiteArgUInt64Constant(const llvm::Value *V);
 llvm::StringRef getCalleeName(const llvm::Value *V);
 void addPlainMetadata(llvm::LLVMContext &Ctx, llvm::Instruction &I,
                       llvm::StringRef Kind, llvm::StringRef Value);

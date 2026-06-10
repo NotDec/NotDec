@@ -46,6 +46,13 @@ std::optional<uint64_t> getConstantOffsetFromExtValue(const ExtValuePtr &Ext) {
   return std::nullopt;
 }
 
+std::optional<uint64_t> getUInt64OrCallsiteArgConstant(Value *V) {
+  if (std::optional<uint64_t> Constant = getUInt64Constant(V)) {
+    return Constant;
+  }
+  return getUniqueCallsiteArgUInt64Constant(V);
+}
+
 bool isPtrToIntOf(Value *MaybePtrToInt, Value *Ptr) {
   auto *Cast = dyn_cast_or_null<PtrToIntInst>(MaybePtrToInt);
   return Cast != nullptr && Cast->getOperand(0) == Ptr;
@@ -72,6 +79,16 @@ std::optional<uint64_t> getEvidenceOffsetFromBase(const ExtValuePtr &Addr,
   }
   if (auto *Cast = dyn_cast<IntToPtrInst>(AddrValue)) {
     AddrValue = Cast->getOperand(0);
+  }
+  if (auto *Add = dyn_cast<BinaryOperator>(AddrValue)) {
+    if (Add->getOpcode() == Instruction::Add) {
+      for (unsigned I = 0; I < 2; ++I) {
+        if (Add->getOperand(I) != Base) {
+          continue;
+        }
+        return getUInt64OrCallsiteArgConstant(Add->getOperand(1 - I));
+      }
+    }
   }
   return getOffsetFromBase(AddrValue, Base);
 }

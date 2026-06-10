@@ -1345,3 +1345,77 @@ payability 都已经对齐，但 manifest 里 `notdec.solidity.revert` 仍是 0�
 
 - full `evm.solidity-patterns` suite：78 passed, 21 failed。`23523...` 和 `23545...`
   已通过。
+
+## 2026-06-10 实现记录：public wrapper 常量和 aggregate ABI return helper
+
+`24534...`、`24541...`、`24763...` 里有一批 ABI return / revert 漏标，形状不是新的
+payload 类型，而是 public wrapper 把 `0` / `32` / `64` 这类常量通过函数形参传给
+真实代码。典型例子：
+
+```llvm
+call void @public_...(ptr %mem, ..., i256 4, i256 64, i256 0)
+...
+call void @evm_revert(ptr %mem, i256 %arg_zero, i256 %arg_zero)
+```
+
+另一个缺口是 `tokenURI` 的跨函数 helper 返回 `{end, base, base}`，外层再做
+`return(base, end - base)`。这个 helper 里 offset 0 写 ABI head，offset 32 写动态
+长度，但 offset 的 `32` 也是 helper 形参常量。
+
+`0334...` 还有一个相近形状：先 `mstore(0x40, end)`，再用 `mload(0x40)` 作为
+return base，size 是 `helper(end, oldBase, ...) - mload(0x40)`。这里 helper 的第一个
+参数和 return base 是同一个值，只是中间隔了一次 free-memory pointer store/reload。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/PublicEntryConstants.cpp:10`：
+  新增 `getUniqueCallsiteArgUInt64Constant`，只在一个 `Argument` 的所有直接调用点都传同一个
+  64 位常量时返回该常量；有间接调用、缺参或冲突时返回空。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:150` 和
+  `src/CMakeLists.txt:18`：声明并编译这个新 helper。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:43`：
+  revert size 判断支持这种 callsite 常量；仍然只让字面 `revert(0, 0)` 算 `empty`，
+  避免把 public wrapper 的 guard revert 误归为 empty。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:228`：
+  store evidence 里的常量值判断支持 callsite 常量。
+- `src/Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp:49`：
+  HType store evidence 的 `base + offset` 计算支持 offset 是 callsite 常量形参。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:346`：
+  新增 aggregate helper 形状识别，只接受同一个 helper call 的
+  `extractvalue 2` 作为 base、`extractvalue 0 - extractvalue 1` 作为 size，并要求 helper
+  返回的 `{end, base, base}` 有 HType store evidence：offset 0 写 32，offset 32 有长度写入。
+- `src/Passes/evm/solidity-patterns/AbiReturnPass.cpp:251`：
+  ABI return helper 匹配支持同 block 内最后一次 `mstore(0x40, X)` 后用 `mload(0x40)` 作为
+  return base 的形状；只有 helper 对 `X` 的 HType/store evidence 能证明 ABI payload 时才标注。
+
+效果：
+
+- `24541...`：ABI return 从 8 补到 22，revert 从 20 补到 47；剩余 1 个 revert 是
+  checked-bounds panic 没被重写。
+- `24763...`：ABI return 从 20 补到 24，revert 从 22 补到 42；剩余失败是
+  checked-bounds / panic kind。
+- `24534...`：ABI return 从 38 补到 62，revert 从 56 补到 115；剩余失败是
+  checked-bounds / panic kind。
+- `0334...`：ABI return 从 66 补到 68，revert 已保持 147；剩余失败是 checked-bounds
+  `memory_allocation_bounds` 少 8 个 rewrite。
+
+复杂度评分：
+
+- 实现效果：8/10。补上 public wrapper 形参常量、`{end, base, base}` ABI return helper，
+  以及 `mstore(0x40, end)` / `mload(0x40)` 形式的动态 return helper。
+- 理解成本：4/10。新增了一个通用 callsite 常量 helper，并让 store evidence offset 计算使用它。
+- 维护成本：3/10。规则保守，只接受所有直接调用点一致的常量；后续如果有间接调用场景，需要另行处理。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 三 case 临时 manifest：
+  `/tmp/notdec-solidity-three-after-store-offset-callsite`，ABI/revert 总数已对齐，仍因
+  checked-bounds 差异失败。
+- 单 case `0334...`：
+  `/tmp/notdec-solidity-0334-after-stored-free-base`，ABI/revert 总数已对齐，仍因
+  checked-bounds 差异失败。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.98s。
+- full `evm.solidity-patterns` suite：78 passed, 21 failed。通过总数不变，因为这三个
+  case 还有 checked-bounds/panic kind 差异，但 ABI/revert 总数已对齐。
