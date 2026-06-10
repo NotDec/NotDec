@@ -1614,3 +1614,48 @@ call void @notdec_solidity_memory_allocation(i256 %base, i256 %size)
   通过，用时 0.97s。
 - full `evm.solidity-patterns` suite：
   `/tmp/notdec-solidity-patterns-full-after-2001-pointer-bound`，90 passed / 9 failed。
+
+## 2026-06-10 实现记录：void allocation helper 的 header 指针对齐
+
+`24259...` 还有一个 `memory_allocation_bounds` skip。IR 形状是 success block 里调用
+void private helper 更新 allocation pointer，然后再写动态 bytes/string header：
+
+```llvm
+%p = call ptr @calloc_unbounded()
+%base = ptrtoint ptr %p to i256
+%size = ...
+call void @private__0xb2f(..., i256 %base, i256 %size, ...)
+store i256 %len, ptr %p
+```
+
+旧的 `hasVoidMemoryAllocationHelperCall` 已经会检查 void helper 参数里有没有 size，也会检查
+helper 参数里有没有 header pointer；但它只做 `ptr` 和参数的直接比较，没处理
+`ptr %p` 对 `ptrtoint ptr %p` 这种类型恢复后的表示差异。
+
+实现改动：
+
+- `src/Passes/evm/SolidityPatterns.cpp:3529`：
+  给 `isSameAllocationHeaderPointer` 加前置声明，供 void helper matcher 使用。
+- `src/Passes/evm/SolidityPatterns.cpp:3954`：
+  `hasVoidMemoryAllocationHelperCall` 在检查 helper 参数是否绑定 header pointer 时，改用
+  `isSameAllocationHeaderPointer`，支持 `ptr` / `ptrtoint ptr` 对齐。
+
+效果：
+
+- `24259...`：`memory_allocation_bounds` 从 1 补到 2，case 通过。
+
+复杂度评分：
+
+- 实现效果：6/10。full suite 从 90 passed / 9 failed 收敛到 91 passed / 8 failed。
+- 理解成本：2/10。复用上一节刚引入的指针对齐 helper，没有新增新的判定路线。
+- 维护成本：2/10。仍要求 void private helper 带动态 size 参数且同块写 header，比较保守。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 单 case `24259...`：
+  `/tmp/notdec-solidity-24259-helper-header` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.97s。
+- full `evm.solidity-patterns` suite：
+  `/tmp/notdec-solidity-patterns-full-after-24259-helper-header`，91 passed / 8 failed。

@@ -3550,6 +3550,7 @@ matchEmptyArrayPop(const NormalizedCondition &FailureCond,
 Instruction *findFreeMemoryPointerStore(BasicBlock *BB, Value *NewPtr);
 Instruction *findFinalizeAllocCall(BasicBlock *BB, Value *Base, Value *Size);
 bool callHasArg(CallBase *Call, Value *Needle);
+bool isSameAllocationHeaderPointer(Value *HeaderPtr, Value *Base);
 
 bool hasMemoryArrayAllocationComputation(BasicBlock *SuccessBlock,
                                          Value *Length) {
@@ -3966,8 +3967,10 @@ bool hasVoidMemoryAllocationHelperCall(BasicBlock *SuccessBlock,
     }
 
     for (Value *HeaderPtr : HeaderPtrs) {
-      if (callHasArg(Call, HeaderPtr)) {
-        return true;
+      for (Value *Arg : Call->args()) {
+        if (isSameAllocationHeaderPointer(HeaderPtr, Arg)) {
+          return true;
+        }
       }
     }
   }
