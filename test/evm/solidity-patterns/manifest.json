@@ -4135,7 +4135,18 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 7,
         "notdec.solidity.payability_guard": 84,
-        "notdec.solidity.revert": 0
+        "notdec.solidity.revert": 64
+      },
+      "expected_revert_kinds": {
+        "empty": 29,
+        "panic": 7,
+        "error_string": 23,
+        "returndata_forward": 5
+      },
+      "expected_panic_codes": {
+        "17": 4,
+        "18": 1,
+        "50": 2
       },
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 2,
@@ -4173,7 +4184,18 @@
         "notdec.solidity.checked_bounds": 7,
         "notdec.solidity.event": 7,
         "notdec.solidity.payability_guard": 84,
-        "notdec.solidity.revert": 0
+        "notdec.solidity.revert": 64
+      },
+      "expected_revert_kinds": {
+        "empty": 29,
+        "panic": 7,
+        "error_string": 23,
+        "returndata_forward": 5
+      },
+      "expected_panic_codes": {
+        "17": 4,
+        "18": 1,
+        "50": 2
       },
       "expected_checked_bounds_kinds": {
         "array_bounds_memory": 2,

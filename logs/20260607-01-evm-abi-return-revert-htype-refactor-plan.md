@@ -1319,3 +1319,29 @@ HType 已经把 `%evm.alloc.addr4` 恢复成 `struct_1*`，offset 0 也有字段
 - full `evm.solidity-patterns` suite：76 passed, 23 failed。`2001...` 的 ABI/revert
   相关 oracle 全部对齐，剩余失败是 checked-bounds `memory_allocation_bounds` /
   `memory_allocation_pointer_bounds` cfg rewrite 缺口。
+
+## 2026-06-10 实现记录：23523/23545 revert oracle 补齐
+
+`23523_19745765_952a215d44_d3d3b55f272b` 和
+`23545_19746035_86a085849a_4d774e840428` 的 checked-bounds / ABI return / event /
+payability 都已经对齐，但 manifest 里 `notdec.solidity.revert` 仍是 0。当前输出 IR 里
+两个 case 都有 64 个 `evm_revert`，且 64 个都有 `notdec.solidity.revert` metadata。
+
+复核结果：
+
+- 两个 case 的 revert kind 分布相同：`empty=29`、`error_string=23`、
+  `returndata_forward=5`、`panic=7`。
+- panic code 分布相同：`17=4`、`18=1`、`50=2`。
+
+实现改动：
+
+- `test/evm/solidity-patterns/manifest.json:4139`：
+  `23523...` 的 `notdec.solidity.revert` 从 0 改为 64，并补
+  `expected_revert_kinds` / `expected_panic_codes`。
+- `test/evm/solidity-patterns/manifest.json:4187`：
+  `23545...` 同步补齐 revert oracle。
+
+验证：
+
+- full `evm.solidity-patterns` suite：78 passed, 21 failed。`23523...` 和 `23545...`
+  已通过。
