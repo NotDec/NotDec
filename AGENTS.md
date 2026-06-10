@@ -76,6 +76,31 @@ The test: Every changed line should trace directly to the user's request.
 
 不要误回滚 `external/` 下已有本地开发态改动。
 
+### 多 worktree 同步流程
+
+如果当前开发 worktree 的提交需要合到主 worktree 所在分支，例如 `/sn640/NotDec`
+的 `v2`，按这个顺序做：
+
+1. 先确认当前 worktree 和相关子模块状态：
+   `git status --short`，以及 `git -C external/<submodule> status --short`。
+2. 当前分支先 rebase 到目标分支最新提交，例如：
+   `git fetch . v2:v2` 后执行 `git rebase v2`。
+   如果目标分支来自远端，就先 fetch 对应 remote，再 rebase 到那个分支。
+3. 涉及子模块时，先在子模块内部完成 commit；顶层再提交 submodule 指针和日志。
+4. rebase 后把当前分支的新提交合入目标分支。优先用非交互命令，例如：
+   `git checkout v2 && git merge --ff-only <current-branch>`。
+   如果当前分支不能快进合入，先停下来确认原因，不要强行改历史。
+5. 更新主 worktree：在 `/sn640/NotDec` 里切到目标分支并拉到最新提交，然后执行
+   `git submodule update --init --recursive`，确保 `external/` 指针也到位。
+6. 最后分别检查开发 worktree、主 worktree、相关子模块的 `git status --short`。
+
+原则：
+
+- 不用 cherry-pick 代替 rebase/fast-forward 流程，除非用户明确要求只挑某几个提交。
+- 不要回滚主 worktree 或子模块里不属于本次任务的本地改动。
+- 如果目标分支、当前分支、主 worktree 分支关系不清楚，先用 `git branch --show-current`、
+  `git log --oneline --decorate -5` 和 `git status --short` 查清楚再动。
+
 ## 2. 项目主链路
 
 `NotDec` 是一个以 LLVM IR 为中间表示的 WebAssembly 反编译与静态分析框架。
