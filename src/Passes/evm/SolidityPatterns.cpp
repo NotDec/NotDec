@@ -244,6 +244,29 @@ std::optional<uint64_t> matchWrappingAddStrictUpper(const Value *V) {
   return Size64;
 }
 
+std::optional<uint64_t> matchWrappingPointerStrictUpper(const Value *V) {
+  auto *ConstExpr = dyn_cast_or_null<ConstantExpr>(V);
+  if (ConstExpr == nullptr ||
+      ConstExpr->getOpcode() != Instruction::IntToPtr) {
+    return std::nullopt;
+  }
+  auto *C = dyn_cast_or_null<ConstantInt>(ConstExpr->getOperand(0));
+  if (C == nullptr) {
+    return std::nullopt;
+  }
+
+  APInt Size = -C->getValue();
+  if (Size.getActiveBits() > 64) {
+    return std::nullopt;
+  }
+
+  uint64_t Size64 = Size.getZExtValue();
+  if (Size64 == 0 || Size64 > 4096 || Size64 % 32 != 0) {
+    return std::nullopt;
+  }
+  return Size64;
+}
+
 bool isMinus32(const Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   if (C == nullptr) {
@@ -3964,6 +3987,64 @@ bool hasMemoryAllocationSizeReturn(BasicBlock *SuccessBlock, Value *Length) {
   return isDynamicAllocationSize(Ret->getReturnValue(), Length, SuccessBlock);
 }
 
+bool isSameAllocationHeaderPointer(Value *HeaderPtr, Value *Base) {
+  if (isSameValue(HeaderPtr, Base)) {
+    return true;
+  }
+
+  auto *PtrToInt = dyn_cast_or_null<PtrToIntInst>(Base);
+  if (PtrToInt != nullptr &&
+      isSameValue(HeaderPtr, PtrToInt->getOperand(0))) {
+    return true;
+  }
+
+  auto *ConstExpr = dyn_cast_or_null<ConstantExpr>(Base);
+  return ConstExpr != nullptr &&
+         ConstExpr->getOpcode() == Instruction::PtrToInt &&
+         isSameValue(HeaderPtr, ConstExpr->getOperand(0));
+}
+
+bool hasSolidityMemoryAllocationMarker(BasicBlock *SuccessBlock,
+                                       Value *Length) {
+  if (SuccessBlock == nullptr || Length == nullptr) {
+    return false;
+  }
+
+  SmallVector<Value *, 4> HeaderPtrs;
+  for (Instruction &I : *SuccessBlock) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (Store.has_value() && isSameValue(Store->StoredValue, Length)) {
+      HeaderPtrs.push_back(Store->Address);
+    }
+  }
+
+  for (Instruction &I : *SuccessBlock) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr ||
+        !isCallTo(Call, "notdec_solidity_memory_allocation") ||
+        Call->arg_size() != 2) {
+      continue;
+    }
+
+    Value *Base = Call->getArgOperand(0);
+    Value *Size = Call->getArgOperand(1);
+    // The allocation marker already binds this size to the local calloc base.
+    // In optimized IR, the size expression may have been computed in an
+    // earlier block and reused by several guarded allocations.
+    if (!isFreeMemoryAllocationBase(Base) ||
+        !isDynamicAllocationSize(Size, Length, nullptr)) {
+      continue;
+    }
+
+    for (Value *HeaderPtr : HeaderPtrs) {
+      if (isSameAllocationHeaderPointer(HeaderPtr, Base)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 std::optional<CheckedBoundsMatch>
 matchPowerOfTwoExpGuard(const NormalizedCondition &FailureCond,
                         const SolidityRevertMatch &RevertMatch,
@@ -4090,6 +4171,7 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
   if (Shift == nullptr) {
     return hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
            hasDynamicFinalizeAllocOnLocalPath(SuccessBlock, Length) ||
+           hasSolidityMemoryAllocationMarker(SuccessBlock, Length) ||
            hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
            hasVoidMemoryAllocationHelperCall(SuccessBlock, Length) ||
            hasMemoryAllocationSizeReturn(SuccessBlock, Length);
@@ -4108,6 +4190,7 @@ bool hasMemoryAllocationSizeComputation(BasicBlock *SuccessBlock,
   return hasMemoryArrayAllocationComputation(SuccessBlock, Length) ||
          hasMemoryBytesAllocationComputation(SuccessBlock, Length) ||
          hasDynamicFinalizeAllocOnLocalPath(SuccessBlock, Length) ||
+         hasSolidityMemoryAllocationMarker(SuccessBlock, Length) ||
          hasMemoryAllocationHelperCall(SuccessBlock, Length) ||
          hasVoidMemoryAllocationHelperCall(SuccessBlock, Length) ||
          hasMemoryAllocationSizeReturn(SuccessBlock, Length);
@@ -4451,6 +4534,23 @@ Instruction *findFinalizeAllocCall(BasicBlock *BB, Value *Base, Value *Size) {
   return nullptr;
 }
 
+Instruction *findSolidityMemoryAllocationCall(BasicBlock *BB, Value *Base,
+                                              Value *Size) {
+  if (BB == nullptr || Base == nullptr || Size == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr &&
+        isCallTo(Call, "notdec_solidity_memory_allocation") &&
+        Call->arg_size() == 2 && isSameValue(Call->getArgOperand(0), Base) &&
+        isSameValue(Call->getArgOperand(1), Size)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
 Instruction *findMemoryPointerStoreForLoad(BasicBlock *BB, Value *OldPtr,
                                            Value *NewPtr) {
   Value *Slot = getMemoryPointerLoadSlot(OldPtr);
@@ -4538,6 +4638,19 @@ bool matchConstantOffsetAllocationDelta(Value *NewPtr, Value *OldPtr,
     return true;
   }
   return false;
+}
+
+Value *findPtrToIntInBlock(BasicBlock *BB, Value *Ptr) {
+  if (BB == nullptr || Ptr == nullptr) {
+    return nullptr;
+  }
+  for (Instruction &I : *BB) {
+    auto *Cast = dyn_cast<PtrToIntInst>(&I);
+    if (Cast != nullptr && isSameValue(Cast->getOperand(0), Ptr)) {
+      return Cast;
+    }
+  }
+  return nullptr;
 }
 
 // Solidity encodes short storage bytes/string values in the slot itself. This
@@ -5020,6 +5133,18 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
         OldPtr = Cmp->getOperand(1);
         continue;
       }
+      if (Cmp->getPredicate() == ICmpInst::ICMP_ULT &&
+          Cmp->getOperand(0)->getType()->isPointerTy()) {
+        std::optional<uint64_t> Size =
+            matchWrappingPointerStrictUpper(Cmp->getOperand(1));
+        Value *OldPtrInt = findPtrToIntInBlock(Combiner->getParent(),
+                                               Cmp->getOperand(0));
+        if (Size.has_value() && OldPtrInt != nullptr) {
+          OldPtr = OldPtrInt;
+          NoWrapStrictUpperSize = Size;
+          continue;
+        }
+      }
       if (Cmp->getPredicate() == ICmpInst::ICMP_ULT) {
         OldPtr = Cmp->getOperand(0);
         NoWrapLimit = Cmp->getOperand(1);
@@ -5130,9 +5255,12 @@ std::optional<CheckedBoundsMatch> matchMemoryAllocationPointerBounds(
   bool HasFinalizeAlloc = isFreeMemoryAllocationBase(OldPtr) &&
                           findFinalizeAllocCall(SuccessBlock, OldPtr, Size) !=
                               nullptr;
+  bool HasSolidityAllocationMarker =
+      isFreeMemoryAllocationBase(OldPtr) &&
+      findSolidityMemoryAllocationCall(SuccessBlock, OldPtr, Size) != nullptr;
   if (!isSupportedMemoryAllocationSizeWithUniformArg(Size) ||
       (!HasFreePointerStore && !HasUniformInitialFreePointerStore &&
-       !HasFinalizeAlloc &&
+       !HasFinalizeAlloc && !HasSolidityAllocationMarker &&
        findMemoryPointerStoreForLoad(SuccessBlock, OldPtr, NewPtr) == nullptr &&
        !(UsesOffsetPair && hasMemoryPointerStoreTransition(
                                GuardBlock, SuccessBlock, OldPtr, NewPtr)))) {

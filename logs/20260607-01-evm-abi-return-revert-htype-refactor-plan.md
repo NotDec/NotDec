@@ -1536,3 +1536,81 @@ oracle，不改 pass。
 - 单 case `1988...`：`/tmp/notdec-solidity-1988-updated-oracle` 通过。
 - full `evm.solidity-patterns` suite：
   `/tmp/notdec-solidity-patterns-full-after-1988-oracle`，85 passed, 14 failed。
+
+## 2026-06-10 实现记录：CheckedBoundsPass 识别 allocation marker 证据
+
+继续处理 checked-bounds 的 `memory_allocation_bounds` / `memory_allocation_pointer_bounds`
+漏标。这次主要覆盖两种类型恢复后的形状：
+
+1. `0334...` 里多个 success block 复用前面块算好的动态数组分配 size：
+
+```llvm
+%size = add i256 (shl i256 %len, 5), 32
+%p = call ptr @calloc(i256 1, i256 %size)
+%base = ptrtoint ptr %p to i256
+store i256 %len, ptr %p
+call void @notdec_solidity_memory_allocation(i256 %base, i256 %size)
+```
+
+2. `2001...` 里固定大小 allocation pointer guard 被优化成 pointer compare：
+
+```llvm
+%p = call ptr @calloc(i256 1, i256 96)
+%base = ptrtoint ptr %p to i256
+%new = add i256 %base, 96
+%nowrap = icmp ult ptr %p, inttoptr (i256 -96 to ptr)
+%range = icmp ule i256 %new, %uint64max
+%ok = and i1 %range, %nowrap
+```
+
+实现改动：
+
+- `src/Passes/evm/SolidityPatterns.cpp:247`：
+  新增 `matchWrappingPointerStrictUpper`，只解析 `inttoptr(-size)` 这种固定小分配的
+  pointer no-wrap 上界。
+- `src/Passes/evm/SolidityPatterns.cpp:3990`：
+  新增 `isSameAllocationHeaderPointer`，让 `store len, ptr %p` 能和
+  `ptrtoint ptr %p to i256` 形式的 allocation base 对齐。
+- `src/Passes/evm/SolidityPatterns.cpp:4007`：
+  新增 `hasSolidityMemoryAllocationMarker`，要求同一 success block 里同时出现 header
+  store、`calloc`/`calloc_unbounded` base、`notdec_solidity_memory_allocation(base,size)`，
+  再接受动态 allocation size。size 可以来自前置块，但必须在 marker 里被绑定到本次 base。
+- `src/Passes/evm/SolidityPatterns.cpp:4171` 和 `src/Passes/evm/SolidityPatterns.cpp:4190`：
+  `hasMemoryAllocationSizeComputation` 接入上面的 marker evidence。
+- `src/Passes/evm/SolidityPatterns.cpp:4537`：
+  新增 `findSolidityMemoryAllocationCall`，给 pointer bounds matcher 复用
+  `notdec_solidity_memory_allocation(base,size)` 证据。
+- `src/Passes/evm/SolidityPatterns.cpp:4643`：
+  新增 `findPtrToIntInBlock`，把 pointer compare 里的 `%p` 收回到同块的 `%base = ptrtoint %p`。
+- `src/Passes/evm/SolidityPatterns.cpp:5136`：
+  `matchMemoryAllocationPointerBounds` 接受 `ptr < inttoptr(-size)` 的 no-wrap 条件。
+- `src/Passes/evm/SolidityPatterns.cpp:5258`：
+  pointer bounds 的成功分支证据除了 free pointer store / finalize_alloc，也接受同块
+  `notdec_solidity_memory_allocation(base,size)`。
+
+效果：
+
+- `0334...`：`memory_allocation_bounds` 从 4 补到 10，case 通过。
+- `2001...`：`memory_allocation_pointer_bounds` 从 1 补到 2，skip 从 1 降到 0，case 通过。
+- full suite 额外带动 `0679...`、`1991...`、`24562...` 通过。
+
+复杂度评分：
+
+- 实现效果：7/10。full `evm.solidity-patterns` 从 85 passed / 14 failed 收敛到
+  90 passed / 9 failed，且 aggregate checked-bounds audit 仍 matched。
+- 理解成本：4/10。仍在 checked-bounds matcher 内，但 `SolidityPatterns.cpp` 继续变长；
+  后续应把 checked-bounds allocation 相关 helper 单独拆出去。
+- 维护成本：4/10。规则依赖显式 allocation marker 和 calloc base，误判风险较低；后续如果
+  allocation marker 的名字或插入位置变化，需要同步这里。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 单 case `0334...`：
+  `/tmp/notdec-solidity-0334-after-allocation-marker` 通过。
+- 单 case `2001...`：
+  `/tmp/notdec-solidity-2001-pointer-bound` 通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.97s。
+- full `evm.solidity-patterns` suite：
+  `/tmp/notdec-solidity-patterns-full-after-2001-pointer-bound`，90 passed / 9 failed。
