@@ -1274,3 +1274,48 @@ HType 已经知道实际 allocation base，但 `revert` / `return` 仍然拿 rel
 - `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
   通过，用时 0.98s。
 - full `evm.solidity-patterns` suite：76 passed, 23 failed。`1407...` 已通过。
+
+## 2026-06-10 实现记录：revert store evidence 优先使用局部 store
+
+`2001_19510128_72aa4f70b3_e9ee7c9c0e79` 有两处 `revert(base, 4)` 没标成
+custom error。这里两个分支共用同一个 allocation base `%evm.alloc.addr4`，但各自向
+offset 0 写不同 selector：
+
+```llvm
+store i256 %evm.shl234, ptr %5
+call void @evm_revert(..., i256 %evm.alloc.addr4, i256 4)
+
+store i256 %evm.shl239, ptr %5
+call void @evm_revert(..., i256 %evm.alloc.addr4, i256 4)
+```
+
+HType 已经把 `%evm.alloc.addr4` 恢复成 `struct_1*`，offset 0 也有字段。漏标原因是
+`SolidityRevertPass` 之前对 record field 读取的是该 base 的全部 store evidence，
+两个分支的 selector 同时被读到后发生冲突。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:263`：
+  新增 `getRevertFieldStoreValues`，先取当前 revert 所在 block 内、revert 前的 HType
+  store evidence；局部 evidence 为空时才回退到全量 evidence。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:444`：
+  selector / panic code / error length 的 record field store evidence 改走这个 helper。
+
+复杂度评分：
+
+- 实现效果：7/10。补上 `2001...` 的 2 个 4 字节 custom error revert。
+- 理解成本：2/10。只调整 store evidence 选择顺序，没有新增 IR matcher。
+- 维护成本：2/10。后续如果 store evidence 带控制流条件，可以替换这个局部优先规则。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/2001_19510128_72aa4f70b3_e9ee7c9c0e79.ll -o /tmp/notdec-2001-after-local-stores.ll --tr-level=2`
+  通过；输出 IR 有 212 个 `evm_revert`，212 个都有 `notdec.solidity.revert` metadata。
+- `/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-2001-after-local-stores.ll -o /tmp/notdec-2001-after-local-stores.bc`
+  通过。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.98s。
+- full `evm.solidity-patterns` suite：76 passed, 23 failed。`2001...` 的 ABI/revert
+  相关 oracle 全部对齐，剩余失败是 checked-bounds `memory_allocation_bounds` /
+  `memory_allocation_pointer_bounds` cfg rewrite 缺口。

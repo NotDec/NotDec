@@ -260,6 +260,21 @@ std::optional<Value *> getTrailingPayloadBaseFromRevertSize(CallBase &Revert) {
   return std::nullopt;
 }
 
+SmallVector<Value *, 2> getRevertFieldStoreValues(
+    ArrayRef<mlsub::EVMStoreEvidence> Stores, const HTypeBufferView &View,
+    Value *Base, int64_t Offset, Instruction &Before) {
+  if (!hasHTypeBufferFieldAt(View, Offset)) {
+    return {};
+  }
+
+  SmallVector<Value *, 2> LocalStores =
+      getHTypeStoreValuesAtOffsetBefore(Stores, Base, Offset, Before);
+  if (!LocalStores.empty()) {
+    return LocalStores;
+  }
+  return getHTypeStoreValuesAtOffset(Stores, Base, Offset);
+}
+
 void insertPanicRewriteMarker(LLVMContext &Ctx,
                               const SolidityRevertMatch &Match) {
   if (Match.PanicCode == std::nullopt || Match.Revert == nullptr) {
@@ -426,11 +441,11 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
   Payload.HasErrorLength = hasHTypeBufferFieldAt(*View, 36);
   Payload.HasErrorData = hasHTypeBufferFieldAt(*View, 68);
   Payload.SelectorStores =
-      getHTypeBufferFieldStoreValues(Stores, *View, PayloadBase, 0);
+      getRevertFieldStoreValues(Stores, *View, PayloadBase, 0, Revert);
   Payload.PanicCodeStores =
-      getHTypeBufferFieldStoreValues(Stores, *View, PayloadBase, 4);
+      getRevertFieldStoreValues(Stores, *View, PayloadBase, 4, Revert);
   Payload.ErrorLengthStores =
-      getHTypeBufferFieldStoreValues(Stores, *View, PayloadBase, 36);
+      getRevertFieldStoreValues(Stores, *View, PayloadBase, 36, Revert);
   if (!Payload.HasSelector && !Payload.HasPanicCode &&
       !Payload.HasErrorHead && !Payload.HasErrorLength &&
       !Payload.HasErrorData) {
