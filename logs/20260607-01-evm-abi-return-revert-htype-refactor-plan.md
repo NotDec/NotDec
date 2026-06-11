@@ -1659,3 +1659,69 @@ helper 参数里有没有 header pointer；但它只做 `ptr` 和参数的直接
   通过，用时 0.97s。
 - full `evm.solidity-patterns` suite：
   `/tmp/notdec-solidity-patterns-full-after-24259-helper-header`，91 passed / 8 failed。
+
+## 2026-06-11 实现记录：修复 EVM i256 ConstantAddr 的 APInt 断言
+
+继续看剩余失败时，`0651...`、`1775...`、`0648...`、`24574...` 都在类型恢复阶段崩溃：
+
+```text
+APInt::getSExtValue(): Assertion `getSignificantBits() <= 64` failed
+```
+
+原因是 EVM IR 里会出现 `inttoptr i256 ...` 的常量地址。`ConstantAddr` 被当作 native
+memory offset 建 `OffsetRange` 时，旧代码直接调用 `ConstantInt::getSExtValue()`；
+但 `OffsetRange` 当前只能表达 `int64_t` offset。对于超过 int64 表达范围的 i256 常量，
+直接调用 LLVM 的 `getSExtValue()` 会触发断言。后面 debug label / stable string 也有同类问题。
+
+这次没有把 `OffsetRange` 改成 i256。原因是 `OffsetRange` 后面还会参与字段排序、范围合并、
+overlap 判断和数组识别，直接扩成 i256 会牵动 TypeBuilder 的核心假设。当前先保守处理：
+能精确表示成 signed 64 的 constant offset 继续保留；不能表示的，不伪造成字段 offset，
+只打印 warning 并跳过这条 constant-memory-field 约束。这样不会随意丢掉可表达 offset，也不会制造
+错误的大字段。
+
+实现改动：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:115`：
+  新增 `getSigned64ConstantAddress`，先用 `APInt::isSignedIntN(64)` 判断，再调用
+  `getSExtValue()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2204`：
+  `addEVMConstantMemoryField` 改用安全转换。超出 int64 的常量地址不加入 `MemoryType`
+  field 约束，并打印 warning。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3046`：
+  `bottomUpPhase` 处理 `unhandledCalls` 时，如果 callee 没有 MLsub SCC，不再 `map::at`
+  崩溃，而是打印 warning 并跳过。这个问题原本被 APInt 断言遮住，0651 修到下一步后暴露。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3534`：
+  `convertSimpleType(ConstantAddr)` 改用安全转换。超出 int64 时仍返回该 ConstantAddr 自己的
+  type variable，只是不把它挂到无法表达的 `MemoryType` field 上。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:46`：
+  新增 `formatConstantIntId`。名字和 stable string 里，如果常量不能 signed64 表示，就用
+  APInt 自己的十六进制文本，不再调用 `getSExtValue()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:320`：
+  `getName` 的 `IntConstant` / `ConstantAddr` 使用安全 formatter。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/ExtValuePtr.cpp:356`：
+  `toStableString(ConstantAddr)` 使用安全 formatter。
+
+效果：
+
+- `0651...`、`1775...`、`0648...`、`24574...` 不再崩溃，都能产出 `out.ll` 和 compare。
+- full suite 的文件数从 95 恢复到 99。通过数仍是 91/99，因为这 4 个 case 现在变成普通
+  checked-bounds/oracle 差异，不再是 runner crash。
+
+复杂度评分：
+
+- 实现效果：8/10。修掉当前 APInt 断言和后续 `map::at` 崩溃，runner 能继续分析所有样例。
+- 理解成本：3/10。没有改 `OffsetRange` 数据结构，只在进入 int64 offset 体系前做边界检查。
+- 维护成本：3/10。后续如果要精确建模 EVM i256 offset，需要单独设计 TypeBuilder 能接受的
+  offset 表示；这次没有提前扩大范围。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 单 case `0651...`：
+  `/tmp/notdec-solidity-0651-apint` 不再崩溃，产出 compare。
+- 3 case 抽样 `1775...`、`0648...`、`24574...`：
+  `/tmp/notdec-solidity-apint-crash-cases` 不再崩溃，均产出 compare。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.98s。
+- full `evm.solidity-patterns` suite：
+  `/tmp/notdec-solidity-patterns-full-after-apint-fix`，91 passed / 8 failed，`files: 99`。

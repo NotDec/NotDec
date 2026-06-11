@@ -112,6 +112,16 @@ bool isFunctionPointerTable(const llvm::GlobalVariable &GV) {
   return false;
 }
 
+std::optional<int64_t> getSigned64ConstantAddress(const llvm::ConstantInt &CI) {
+  const llvm::APInt &Value = CI.getValue();
+  if (!Value.isSignedIntN(64)) {
+    llvm::errs() << "Warning: skip constant memory field outside int64 range: "
+                 << CI << "\n";
+    return std::nullopt;
+  }
+  return Value.getSExtValue();
+}
+
 [[noreturn]] void failSignatureOverride(llvm::StringRef Path,
                                         llvm::StringRef Message) {
   llvm::errs() << "Error: invalid MLsub override";
@@ -2201,9 +2211,12 @@ void ConstraintsGenerator::addEVMConstantMemoryField(ExtValuePtr Addr,
   // EVM native memory uses inttoptr constants as byte offsets into one memory
   // object. Keep only constant offsets here; dynamic offsets need separate
   // array/unknown modeling.
+  auto Offset = getSigned64ConstantAddress(*ConstAddr->Val);
+  if (!Offset.has_value()) {
+    return;
+  }
   std::vector<std::pair<std::string, SimpleType>> Fields;
-  Fields.emplace_back(
-      OffsetRange{.offset = ConstAddr->Val->getSExtValue()}.str(), ValueTy);
+  Fields.emplace_back(OffsetRange{.offset = *Offset}.str(), ValueTy);
   addSubtype(MemoryType, binarysub::make_record(std::move(Fields)));
 }
 
@@ -3032,7 +3045,14 @@ void MLsubRecovery::bottomUpPhase() {
     // create poly schemes and instantiate for unhandled calls.
     for (auto &Ent : Data.Generator->unhandledCalls) {
       auto F = Ent.first->getCalledFunction();
-      auto Ind2 = AG.Func2SCCIndex.at(AG.CG->getOrInsertFunction(F));
+      auto TargetNode = AG.CG->getOrInsertFunction(F);
+      auto TargetIt = AG.Func2SCCIndex.find(TargetNode);
+      if (TargetIt == AG.Func2SCCIndex.end()) {
+        llvm::errs() << "Warning: skip unhandled call without MLsub SCC: "
+                     << F->getName() << "\n";
+        continue;
+      }
+      auto Ind2 = TargetIt->second;
       assert(Ind2 > Ind);
       auto &TData = AG.AllSCCs.at(Ind2);
       auto TargetG = TData.Generator;
@@ -3514,10 +3534,11 @@ SimpleType ConstraintsGenerator::convertSimpleType(ExtValuePtr Val) {
   } else if (auto CA = std::get_if<ConstantAddr>(&Val)) {
     // as field access.
     auto res = binarysub::fresh_variable(lvl, getSize(Val));
-    std::vector<std::pair<std::string, SimpleType>> fields;
-    fields.push_back(
-        {OffsetRange{.offset = CA->Val->getSExtValue()}.str(), res});
-    addSubtype(MemoryType, binarysub::make_record(std::move(fields)));
+    if (auto Offset = getSigned64ConstantAddress(*CA->Val)) {
+      std::vector<std::pair<std::string, SimpleType>> fields;
+      fields.push_back({OffsetRange{.offset = *Offset}.str(), res});
+      addSubtype(MemoryType, binarysub::make_record(std::move(fields)));
+    }
     addSubtype(res, binarysub::make_record({}));
     return res;
   }
