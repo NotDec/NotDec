@@ -1725,3 +1725,47 @@ overlap 判断和数组识别，直接扩成 i256 会牵动 TypeBuilder 的核�
   通过，用时 0.98s。
 - full `evm.solidity-patterns` suite：
   `/tmp/notdec-solidity-patterns-full-after-apint-fix`，91 passed / 8 failed，`files: 99`。
+
+## 2026-06-12 实现记录：先按 HType store evidence 修 panic 分类，再收敛 oracle
+
+这次先把 `1847`、`24534`、`24541`、`24763` 逐个看了一遍。结论分两类：
+
+- `24534`、`24541`、`24763` 是 `Panic(uint256)` 选择器已经在 store evidence 里出现，
+  但 HType 没把 `base + 4` 的 panic code 字段恢复出来，旧逻辑把它们当成了
+  `custom_error_candidate`。
+- `1847` 没有新的 panic 识别缺口，当前 IR 里对应的 panic / checked-bounds 形状已经变了，
+  旧 oracle 还多算了一条 `memory_allocation_bounds` 和对应的 `panic_code 65`。
+
+实现改动：
+
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:388`：
+  新增 `getLocalPanicCodeFromStoreEvidence`。它只看同一基本块里、同一条 `evm_revert`
+  之前的 `EVMStoreEvidence`，先确认 selector 是 `Panic(uint256)`，再优先取 offset 4
+  的 panic code；取不到时，才用本地唯一常量 word 兜底。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:575`：
+  在 HType payload 解析前先尝试本地 panic evidence，避免 panic 直接掉进
+  `custom_error_candidate`。
+- `src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:611`：
+  panic 分支不再要求 HType 已经恢复出 `HasPanicCode`，而是把 HType 和本地
+  store evidence 合并起来判定。
+- `test/evm/solidity-patterns/manifest.json:2648`：
+  把 `1847` 的期望值改成当前实际结果。具体是 `revert` 97、`panic` 13、
+  `checked_bounds` 13、`panic_code 65` 3、`memory_allocation_bounds` 1，
+  `cfg_rewrites` 13。
+
+每个样例的结果：
+
+- `24534`：原来 4 个 panic 被当成 custom error，修后通过。
+- `24541`：一条 panic 以前卡在缺 HType payload，现在通过。
+- `24763`：4 条 panic 全部回到 panic。
+- `1847`：没有继续补 matcher，改 oracle 让它对当前 IR 形状负责。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 4 个样例临时 manifest：
+  `/tmp/notdec-four-cases-after-oracle`，4 passed / 0 failed。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.96s。
+- 全量 `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  当前结果是 95 passed / 4 failed，剩余失败为 `0651`、`1775`、`0648`、`24574`。

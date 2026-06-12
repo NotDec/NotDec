@@ -385,6 +385,66 @@ getCanonicalPanicPayloadFromEvidence(ArrayRef<mlsub::EVMStoreEvidence> Stores,
   return Payload;
 }
 
+std::optional<uint64_t>
+getLocalPanicCodeFromStoreEvidence(ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                                   CallBase &Revert) {
+  if (!isConstantIntValue(Revert.getArgOperand(2), 36)) {
+    return std::nullopt;
+  }
+
+  bool HasPanicSelector = false;
+  for (Value *StoredValue : getHTypeStoreValuesAtOffsetBefore(
+           Stores, Revert.getArgOperand(1), 0, Revert)) {
+    std::optional<uint64_t> Selector = getSelectorWord(StoredValue);
+    if (Selector.has_value() && *Selector == 0x4e487b71) {
+      HasPanicSelector = true;
+      break;
+    }
+  }
+  if (!HasPanicSelector) {
+    return std::nullopt;
+  }
+
+  SmallVector<Value *, 2> CodeStores =
+      getHTypeStoreValuesAtOffsetBefore(Stores, Revert.getArgOperand(1), 4,
+                                        Revert);
+  bool Conflict = false;
+  std::optional<uint64_t> PanicCode =
+      getUniqueUInt64FieldValue(CodeStores, Conflict);
+  if (Conflict) {
+    return std::nullopt;
+  }
+  if (PanicCode.has_value()) {
+    return PanicCode;
+  }
+
+  // Some lifted helper signatures keep the selector base and the `base + 4`
+  // panic-code pointer as separate arguments.  When that argument relation is
+  // not recovered, use only local type-recovery store evidence and require one
+  // unique constant word before the revert.
+  SmallVector<Value *, 2> LocalCodeCandidates;
+  for (const mlsub::EVMStoreEvidence &Store : Stores) {
+    if (Store.BitSize != 256 || Store.StoredValue == nullptr ||
+        Store.Source == nullptr ||
+        Store.Source->getParent() != Revert.getParent() ||
+        !Store.Source->comesBefore(&Revert)) {
+      continue;
+    }
+
+    if (getSelectorWord(Store.StoredValue).has_value()) {
+      continue;
+    }
+    LocalCodeCandidates.push_back(Store.StoredValue);
+  }
+
+  Conflict = false;
+  PanicCode = getUniqueUInt64FieldValue(LocalCodeCandidates, Conflict);
+  if (Conflict) {
+    return std::nullopt;
+  }
+  return PanicCode;
+}
+
 std::optional<HTypeBufferView>
 getRevertBufferHType(llvm2c::HTypeResult &HTypes, Value *Base, CallBase &Use,
                      unsigned ArgIndex) {
@@ -512,6 +572,16 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
     return Match;
   }
 
+  if (std::optional<uint64_t> PanicCode =
+          getLocalPanicCodeFromStoreEvidence(Stores, Revert)) {
+    SolidityRevertMatch Match;
+    Match.Revert = &Revert;
+    Match.Kind = "panic";
+    Match.Selector = 0x4e487b71;
+    Match.PanicCode = PanicCode;
+    return Match;
+  }
+
   std::optional<RevertPayloadHType> Payload =
       getRevertPayloadHType(HTypes, Stores, Revert);
   if (!Payload.has_value()) {
@@ -539,13 +609,20 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
   Match.Selector = Selector;
 
   if (Selector.has_value() && *Selector == 0x4e487b71 &&
-      isConstantIntValue(Revert.getArgOperand(2), 36) &&
-      Payload->HasPanicCode) {
+      isConstantIntValue(Revert.getArgOperand(2), 36)) {
     Match.Kind = "panic";
     bool Conflict = false;
-    Match.PanicCode =
-        getUniqueUInt64FieldValue(Payload->PanicCodeStores, Conflict);
-    if (Conflict) {
+    if (Payload->HasPanicCode) {
+      Match.PanicCode =
+          getUniqueUInt64FieldValue(Payload->PanicCodeStores, Conflict);
+      if (Conflict) {
+        return std::nullopt;
+      }
+    }
+    if (!Match.PanicCode.has_value()) {
+      Match.PanicCode = getLocalPanicCodeFromStoreEvidence(Stores, Revert);
+    }
+    if (!Match.PanicCode.has_value()) {
       return std::nullopt;
     }
     return Match;

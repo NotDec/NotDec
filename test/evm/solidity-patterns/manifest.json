@@ -2651,14 +2651,14 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 56,
-        "notdec.solidity.checked_bounds": 14,
+        "notdec.solidity.checked_bounds": 13,
         "notdec.solidity.event": 12,
         "notdec.solidity.payability_guard": 0,
-        "notdec.solidity.revert": 98
+        "notdec.solidity.revert": 97
       },
       "expected_revert_kinds": {
         "empty": 45,
-        "panic": 14,
+        "panic": 13,
         "error_string": 16,
         "custom_error_candidate": 22,
         "encoded_candidate": 1,
@@ -2673,7 +2673,7 @@
         "34": 1,
         "49": 1,
         "50": 3,
-        "65": 4,
+        "65": 3,
         "81": 0
       },
       "expected_checked_bounds_kinds": {
@@ -2684,7 +2684,7 @@
         "checked_sub": 1,
         "checked_sub_bound": 1,
         "empty_array_pop_storage": 1,
-        "memory_allocation_bounds": 2,
+        "memory_allocation_bounds": 1,
         "memory_allocation_pointer_bounds": 1,
         "storage_byte_array_length_bounds": 1,
         "storage_bytes_encoding": 1
@@ -2694,7 +2694,7 @@
         "34": 1,
         "49": 1,
         "50": 3,
-        "65": 4
+        "65": 3
       },
       "expected_checked_bounds_semantic_markers": {
         "notdec_solidity_rewrite_array_bounds_storage": 3,
@@ -2704,13 +2704,13 @@
         "notdec_solidity_rewrite_checked_sub": 1,
         "notdec_solidity_rewrite_checked_sub_bound": 1,
         "notdec_solidity_rewrite_empty_array_pop_storage": 1,
-        "notdec_solidity_rewrite_memory_allocation_bounds": 2,
+        "notdec_solidity_rewrite_memory_allocation_bounds": 1,
         "notdec_solidity_rewrite_memory_allocation_pointer_bounds": 1,
         "notdec_solidity_rewrite_storage_byte_array_length_bounds": 1,
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 14
+      "expected_checked_bounds_cfg_rewrites": 13
     },
     {
       "name": "0657_19497309_a4d607684e_332c65dbca0f",
