@@ -75,6 +75,8 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 
 如果 public entry 调用 private helper，而 helper 的形参表示 calldata offset，需要把 helper 内的访问映射回调用点的 `%calldata`。已有 `getUniqueCallsiteArgUInt64Constant()` 可以处理“所有 callsite 都传同一个常量”的 helper。对于被多个 public entry 用不同 offset 复用的 helper，不能把 helper 本身固定成某个 ABI 格式；应在调用点上下文归属到各自 public entry 的 calldata buffer，必要时再考虑 clone 或 summary。
 
+clone 不能只按普通函数复制来做。试验中把 private helper 按 constant offset clone 到类型恢复前，会让后续 `SolidityRevertPass` / `CheckedBoundsPass` 把 clone 里的 revert 和 guard 也当作独立语义 marker 统计，导致大量重复标记。后续如果走 clone 路线，需要同时设计 clone 函数在语义 pass 里的可见性：要么 clone 只服务类型恢复并跳过 Solidity marker pass，要么 marker pass 需要按 callsite/context 去归并 clone 产生的重复证据。否则应优先考虑 summary/context 方式。
+
 ## 和类型推理 / HType 的关系
 
 这个 pass 给类型推理提供：
@@ -117,6 +119,7 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:27)：放宽到 `private__` helper，只要函数第二个参数仍是 `%calldata`，就把 helper 内直接 `evm_calldataload` / `evm_calldatacopy` 也改成普通 LLVM 内存访问。这样 helper 形参里的动态 offset 会保留在地址表达式里，不在 helper 内固定成某个 public ABI。
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:46)：对 calldata load/copy 的 source offset 使用 `getUniqueCallsiteArgUInt64Constant()`。如果 helper offset 形参在所有直接 callsite 都是同一个 64-bit 常量，就在重写时直接换成常量；否则保留动态 offset。
+- 尝试过在类型恢复前 clone 多 offset private helper。该路线会重复触发 Solidity revert / checked-bounds marker，已回退，当前没有保留这部分代码。
 
 验证：
 
