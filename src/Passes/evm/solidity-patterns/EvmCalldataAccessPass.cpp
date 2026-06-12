@@ -20,6 +20,8 @@ STATISTIC(NumCalldataLoadsRewritten,
           "Number of evm_calldataload calls rewritten to LLVM loads");
 STATISTIC(NumCalldataCopiesRewritten,
           "Number of evm_calldatacopy calls rewritten to LLVM memcpy calls");
+STATISTIC(NumCalldataCallsiteConstantOffsets,
+          "Number of calldata offsets resolved from unique callsite constants");
 
 namespace notdec::passes::evm {
 namespace {
@@ -47,6 +49,20 @@ bool usesCurrentCalldata(CallBase &Call, unsigned ArgIndex, Value *Calldata) {
   return Call.arg_size() > ArgIndex && Call.getArgOperand(ArgIndex) == Calldata;
 }
 
+Value *resolveCallsiteConstantOffset(Value *Offset) {
+  if (!Offset->getType()->isIntegerTy()) {
+    return Offset;
+  }
+  std::optional<uint64_t> Constant =
+      detail::getUniqueCallsiteArgUInt64Constant(Offset);
+  if (!Constant.has_value()) {
+    return Offset;
+  }
+
+  ++NumCalldataCallsiteConstantOffsets;
+  return ConstantInt::get(Offset->getType(), *Constant);
+}
+
 Value *asPointer(IRBuilder<> &Builder, Value *V, const Twine &Name) {
   if (V->getType()->isPointerTy()) {
     return V;
@@ -71,8 +87,8 @@ bool rewriteCalldataLoad(CallBase &Call, Value *Calldata) {
   }
 
   IRBuilder<> Builder(&Call);
-  Value *Addr =
-      calldataBytePtr(Builder, Calldata, Call.getArgOperand(1), "calldata.ptr");
+  Value *Offset = resolveCallsiteConstantOffset(Call.getArgOperand(1));
+  Value *Addr = calldataBytePtr(Builder, Calldata, Offset, "calldata.ptr");
   auto *Load = Builder.CreateLoad(Builder.getIntNTy(256), Addr,
                                   Call.getName() + ".load");
   Load->setAlignment(Align(1));
@@ -91,9 +107,9 @@ bool rewriteCalldataCopy(CallBase &Call, Value *Calldata) {
 
   IRBuilder<> Builder(&Call);
   Value *Dst = asPointer(Builder, Call.getArgOperand(2), "calldata.copy.dst");
+  Value *SrcOffset = resolveCallsiteConstantOffset(Call.getArgOperand(3));
   Value *Src =
-      calldataBytePtr(Builder, Calldata, Call.getArgOperand(3),
-                      "calldata.copy.src");
+      calldataBytePtr(Builder, Calldata, SrcOffset, "calldata.copy.src");
   Value *Len = Call.getArgOperand(4);
   CallInst *Memcpy =
       Builder.CreateMemCpy(Dst, Align(1), Src, Align(1), Len, false);
