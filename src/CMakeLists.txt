@@ -15,10 +15,13 @@ add_library(notdec-core STATIC
 	Passes/evm/solidity-patterns/EventLogPass.cpp
 	Passes/evm/solidity-patterns/HTypeBufferView.cpp
 	Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp
+	Passes/evm/solidity-patterns/PayabilityGuardMatchers.cpp
 	Passes/evm/solidity-patterns/PayabilityGuardPass.cpp
 	Passes/evm/solidity-patterns/PublicEntryConstants.cpp
+	Passes/evm/solidity-patterns/SelectorEntryMatchers.cpp
 	Passes/evm/solidity-patterns/SelectorEntryOutliningPass.cpp
 	Passes/evm/solidity-patterns/SolidityRevertPass.cpp
+	Passes/evm/solidity-patterns/StorageAccessMatchers.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/mlsub/PNDiff.cpp
 	TypeRecovery/mlsub/PAPath.cpp

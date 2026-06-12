@@ -172,6 +172,8 @@ getUniqueCallsiteArgUInt64Constant(const llvm::Value *V);
 llvm::StringRef getCalleeName(const llvm::Value *V);
 std::optional<uint64_t> getUInt64Metadata(const llvm::Instruction &I,
                                           llvm::StringRef Kind);
+bool isRewriteMarkerCall(const llvm::Instruction &I);
+uint64_t getRewriteKindCode(llvm::StringRef Value);
 void addPlainMetadata(llvm::LLVMContext &Ctx, llvm::Instruction &I,
                       llvm::StringRef Kind, llvm::StringRef Value);
 void addStringMetadata(llvm::LLVMContext &Ctx, llvm::Instruction &I,
@@ -185,6 +187,7 @@ bool isSelectorFunction(const llvm::Function &F);
 bool isPublicEntryFunction(const llvm::Function &F);
 bool isDispatcherBlock(llvm::BasicBlock &BB);
 bool isPublicCallStub(llvm::BasicBlock &BB);
+bool isEmptyRevertBlock(llvm::BasicBlock *BB);
 bool isEmptyRejectBlock(llvm::BasicBlock &BB);
 void collectReachableBody(
     llvm::BasicBlock *Entry,

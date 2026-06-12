@@ -1866,3 +1866,42 @@ br i1 %ok, label %success, label %panic
   通过，用时 0.96s。
 - `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
   通过，用时 413.33s。
+
+## 2026-06-12 实现记录：继续拆 Payability / Selector / Storage matcher
+
+继续清理 `SolidityPatterns.cpp`。这次仍然只做机械搬迁，不改 matcher 行为：
+
+- `src/Passes/evm/solidity-patterns/PayabilityGuardMatchers.cpp`：
+  移入 `getCallValueFromPredicate`、`isEmptyRevertBlock`、`matchPayabilityGuard`、
+  `insertPayabilityCfgRewriteMarker`。
+- `src/Passes/evm/solidity-patterns/SelectorEntryMatchers.cpp`：
+  移入 selector outlining 相关 helper，包括 `isSelectorFunction`、`isDispatcherBlock`、
+  `collectReachableBody`、`cloneSelectorRegion`、`replaceRegionWithCall`、
+  `replaceWholeFunctionWithCall` 等。
+- `src/Passes/evm/solidity-patterns/StorageAccessMatchers.cpp`：
+  移入 storage access 相关 helper，包括 `matchStorageScratchKeccak`、
+  `matchStorageMappingAccess`、`matchStorageArrayDataAccess`、`matchPackedStorageAccess`、
+  `classifyExternalCall` 等。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h`：
+  补了 `isRewriteMarkerCall`、`getRewriteKindCode`、`isEmptyRevertBlock` 的声明。
+- `src/CMakeLists.txt`：
+  加入 3 个新 cpp。
+
+结果：
+
+- `SolidityPatterns.cpp` 从 1673 行降到 754 行。
+- 现在 `SolidityPatterns.cpp` 主要剩通用 EVM/Solidity helper 和 metadata marker helper。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- apehex 固定 79 个输入 smoke：
+  上一轮拆分后 `/tmp/notdec-apehex-selected80-after-split-rerun`，`78 passed / 1 failed`，
+  `elapsed=355`。
+  本轮拆分后 `/tmp/notdec-apehex-selected80-after-more-split`，`78 passed / 1 failed`，
+  `elapsed=366`。失败仍是同一个 90 秒超时样例
+  `20900_19718020_5fefc01174_94ca58abac98`。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 1.06s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，用时 424.66s。
