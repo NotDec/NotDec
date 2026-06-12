@@ -119,17 +119,20 @@ clone 不能只按普通函数复制来做。试验中把 private helper 按 con
 
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:27)：放宽到 `private__` helper，只要函数第二个参数仍是 `%calldata`，就把 helper 内直接 `evm_calldataload` / `evm_calldatacopy` 也改成普通 LLVM 内存访问。这样 helper 形参里的动态 offset 会保留在地址表达式里，不在 helper 内固定成某个 public ABI。
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:46)：对 calldata load/copy 的 source offset 使用 `getUniqueCallsiteArgUInt64Constant()`。如果 helper offset 形参在所有直接 callsite 都是同一个 64-bit 常量，就在重写时直接换成常量；否则保留动态 offset。
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:52)：继续扩展 offset 回推，支持常量、唯一 callsite 参数常量，以及这些值之间的小范围 `add`。例如 helper 内 `%arg + 32`，且 `%arg` 在所有直接 callsite 都是 `4` 时，会写成 `%calldata + 36`；如果 callsite 不一致，仍保留动态 offset。
 - 尝试过在类型恢复前 clone 多 offset private helper。该路线会重复触发 Solidity revert / checked-bounds marker，已回退，当前没有保留这部分代码。
 
 验证：
 
 - `cmake --build ./build --target notdec -j4`
 - `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)|notdec.type_recovery.evm.tr_level_2' --output-on-failure`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0334_19494307_668d201319_1354ce2e324d.ll --tr-level=2 --emit-tr-input-ir=/tmp/0334-pretr-new.ll`
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/0334-pretr-new.ll -o /tmp/0334-pretr-new.bc`
 
-性能观察：最近一次验证中 `notdec.evm.solidity_patterns` 用时约 434 秒，`notdec.evm.solidity_rewrite` 用时约 80 秒，`notdec.type_recovery.evm.tr_level_2` 用时约 1 秒。没有继续跑 fortune；用户已要求先不要管 fortune 性能问题。
+性能观察：最近一次验证中 `notdec.evm.solidity_patterns` 用时 435.74 秒，`notdec.evm.solidity_rewrite` 用时 79.43 秒，`notdec.type_recovery.evm.tr_level_2` 用时 0.96 秒。没有继续跑 fortune；用户已要求先不要管 fortune 性能问题。
 
 方案评分：
 
-- 实现效果：8/10。直接访问已经改成普通 LLVM load/memcpy，能回推唯一 callsite 常量 offset，并避免把 GEP 送进当前 MLsub。
+- 实现效果：8/10。直接访问已经改成普通 LLVM load/memcpy，能回推唯一 callsite 常量 offset 和简单 `arg + const` offset，并避免把 GEP 送进当前 MLsub。
 - 复杂度：6/10。新增 pass 较小，但 checked-bounds matcher 需要兼容新旧 calldata 形状。
 - 维护成本：6/10。private helper 内直接访问和唯一常量 offset 已经处理；跨 public entry 复用 helper 且 offset 不一致时的 clone / summary 仍需要继续按这个 plan 补。

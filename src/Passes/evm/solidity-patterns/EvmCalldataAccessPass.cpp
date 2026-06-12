@@ -49,13 +49,41 @@ bool usesCurrentCalldata(CallBase &Call, unsigned ArgIndex, Value *Calldata) {
   return Call.arg_size() > ArgIndex && Call.getArgOperand(ArgIndex) == Calldata;
 }
 
-Value *resolveCallsiteConstantOffset(Value *Offset) {
-  if (!Offset->getType()->isIntegerTy()) {
-    return Offset;
+std::optional<APInt> resolveOffsetConstant(Value *Offset, unsigned Depth = 0) {
+  if (!Offset->getType()->isIntegerTy() || Depth > 4) {
+    return std::nullopt;
   }
-  std::optional<uint64_t> Constant =
-      detail::getUniqueCallsiteArgUInt64Constant(Offset);
-  if (!Constant.has_value()) {
+
+  if (auto *Constant = dyn_cast<ConstantInt>(Offset)) {
+    return Constant->getValue();
+  }
+
+  if (std::optional<uint64_t> Constant =
+          detail::getUniqueCallsiteArgUInt64Constant(Offset)) {
+    return APInt(Offset->getType()->getIntegerBitWidth(), *Constant);
+  }
+
+  auto *Add = dyn_cast<BinaryOperator>(Offset);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return std::nullopt;
+  }
+
+  // Solidity helpers often compute a field address as "formal offset + 32".
+  // Fold that only when the formal offset itself is constant across all direct
+  // callsites; conflicting call contexts stay as a dynamic offset.
+  std::optional<APInt> LHS =
+      resolveOffsetConstant(Add->getOperand(0), Depth + 1);
+  std::optional<APInt> RHS =
+      resolveOffsetConstant(Add->getOperand(1), Depth + 1);
+  if (!LHS.has_value() || !RHS.has_value()) {
+    return std::nullopt;
+  }
+  return *LHS + *RHS;
+}
+
+Value *resolveCallsiteConstantOffset(Value *Offset) {
+  std::optional<APInt> Constant = resolveOffsetConstant(Offset);
+  if (!Constant.has_value() || isa<ConstantInt>(Offset)) {
     return Offset;
   }
 
