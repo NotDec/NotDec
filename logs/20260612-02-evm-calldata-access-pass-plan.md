@@ -93,7 +93,7 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 - 元素类型和嵌套结构。
 - address、bool、uintN/intN 等值类型。
 
-后续语义 pass 只读取 calldata buffer 的 HType。例如 external call 或 signature pass 需要知道某个 bytes 参数时，应优先查 HType 是否说明 `%cd` 的某个 field 是 bytes，再调用 dynamic bytes helper 处理 memory 侧 copy。不能回到各 pass 自己重新扫 `evm_calldataload/evm_calldatacopy` 的路线。
+后续语义 pass 只读取 calldata buffer 的 HType。例如 external call 或 signature pass 需要知道某个 bytes 参数时，应优先查 HType 是否说明 `%calldata` 的某个 field 是 bytes，再调用 dynamic bytes helper 处理 memory 侧 copy。不能回到各 pass 自己重新扫 `evm_calldataload/evm_calldatacopy` 的路线。
 
 ## 实现注意
 
@@ -113,15 +113,19 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 - [src/Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp:1807)：checked-bounds calldata array matcher 同时识别旧 `evm_calldataload` 和新 `inttoptr(add(ptrtoint(%calldata), offset))` 上的 `load i256`。
 - [test/evm/solidity-rewrite/manifest.json](/sn640/NotDec/test/evm/solidity-rewrite/manifest.json:70)：删掉 level0 rewrite suite 里残留的 checked-bounds 预期；checked-bounds 现在由 tr-level 2 的 patterns suite 覆盖。
 
+后续增量：
+
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:27)：放宽到 `private__` helper，只要函数第二个参数仍是 `%calldata`，就把 helper 内直接 `evm_calldataload` / `evm_calldatacopy` 也改成普通 LLVM 内存访问。这样 helper 形参里的动态 offset 会保留在地址表达式里，不在 helper 内固定成某个 public ABI。
+
 验证：
 
 - `cmake --build ./build --target notdec -j4`
 - `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)|notdec.type_recovery.evm.tr_level_2' --output-on-failure`
 
-性能观察：这次验证中 `notdec.evm.solidity_patterns` 用时约 419 秒，`notdec.evm.solidity_rewrite` 用时约 79 秒，`notdec.type_recovery.evm.tr_level_2` 用时约 1 秒。没有继续跑 fortune；用户已要求先不要管 fortune 性能问题。
+性能观察：最近一次验证中 `notdec.evm.solidity_patterns` 用时约 429 秒，`notdec.evm.solidity_rewrite` 用时约 80 秒，`notdec.type_recovery.evm.tr_level_2` 用时约 1 秒。没有继续跑 fortune；用户已要求先不要管 fortune 性能问题。
 
 方案评分：
 
 - 实现效果：8/10。直接访问已经改成普通 LLVM load/memcpy，并避免把 GEP 送进当前 MLsub。
 - 复杂度：6/10。新增 pass 较小，但 checked-bounds matcher 需要兼容新旧 calldata 形状。
-- 维护成本：6/10。后续 private helper offset 回推还没做，需要继续按这个 plan 补。
+- 维护成本：6/10。private helper 内直接访问已经改写；跨 public entry 复用 helper 时的 clone / summary 仍需要继续按这个 plan 补。

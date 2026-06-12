@@ -24,16 +24,20 @@ STATISTIC(NumCalldataCopiesRewritten,
 namespace notdec::passes::evm {
 namespace {
 
-Value *getPublicEntryCalldataArg(Function &F) {
-  if ((!detail::isPublicEntryFunction(F) && !detail::isSelectorFunction(F)) ||
-      F.arg_size() < 2) {
+bool shouldRewriteFunction(Function &F) {
+  return detail::isPublicEntryFunction(F) || detail::isSelectorFunction(F) ||
+         F.getName().starts_with("private__");
+}
+
+Value *getCalldataArg(Function &F) {
+  if (!shouldRewriteFunction(F) || F.arg_size() < 2) {
     return nullptr;
   }
 
   auto It = F.arg_begin();
   ++It;
   Argument &Arg = *It;
-  if (!Arg.getType()->isPointerTy()) {
+  if (!Arg.getType()->isPointerTy() || Arg.getName() != "calldata") {
     return nullptr;
   }
   return &Arg;
@@ -104,7 +108,7 @@ bool rewriteCalldataCopy(CallBase &Call, Value *Calldata) {
 
 PreservedAnalyses EvmCalldataAccessPass::run(Function &F,
                                              FunctionAnalysisManager &) {
-  Value *Calldata = getPublicEntryCalldataArg(F);
+  Value *Calldata = getCalldataArg(F);
   if (Calldata == nullptr) {
     return PreservedAnalyses::all();
   }
