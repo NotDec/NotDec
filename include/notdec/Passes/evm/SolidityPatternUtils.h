@@ -3,6 +3,7 @@
 
 #include "Passes/evm/SolidityPatterns.h"
 
+#include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
@@ -146,10 +147,31 @@ struct EvmMemoryStore {
 };
 
 bool isCallTo(const llvm::Value *V, llvm::StringRef Name);
+llvm::Value *getIntToPtrAddress(llvm::Value *Ptr);
+bool isPrivateHelperCall(const llvm::CallBase *Call);
+bool isZero(const llvm::Value *V);
 bool isConstantIntValue(const llvm::Value *V, uint64_t N);
+bool isUInt64Limit(const llvm::Value *V);
+bool isUInt64LimitValue(const llvm::Value *V);
+bool isUInt64Max(const llvm::Value *V);
+std::optional<uint64_t> matchUInt64LimitMinus(const llvm::Value *V);
+std::optional<uint64_t>
+matchUInt64LimitMinusStrictUpper(const llvm::Value *V);
+std::optional<uint64_t>
+matchUInt64LimitMinusStrictUpperAllowZero(const llvm::Value *V);
+std::optional<uint64_t> matchWrappingAddStrictUpper(const llvm::Value *V);
+std::optional<uint64_t> matchWrappingPointerStrictUpper(const llvm::Value *V);
+bool isMinus32(const llvm::Value *V);
+bool isAllOnes(const llvm::Value *V);
+bool isSmallUnsignedMax(const llvm::ConstantInt *C);
+bool isUnsignedCleanupToMax(llvm::Value *V, const llvm::APInt &Max);
+bool isPowerOfTwoMinusOne(llvm::Value *V);
+bool isUnsignedCleanupToMaxValue(llvm::Value *V, llvm::Value *Max);
 std::optional<uint64_t>
 getUniqueCallsiteArgUInt64Constant(const llvm::Value *V);
 llvm::StringRef getCalleeName(const llvm::Value *V);
+std::optional<uint64_t> getUInt64Metadata(const llvm::Instruction &I,
+                                          llvm::StringRef Kind);
 void addPlainMetadata(llvm::LLVMContext &Ctx, llvm::Instruction &I,
                       llvm::StringRef Kind, llvm::StringRef Value);
 void addStringMetadata(llvm::LLVMContext &Ctx, llvm::Instruction &I,
@@ -232,7 +254,9 @@ std::optional<EvmMemoryLoad> matchEvmMemoryLoad(llvm::Value *V);
 std::optional<EvmMemoryStore> matchEvmMemoryStore(llvm::Instruction *I);
 bool isFreeMemoryPointerLoad(llvm::Value *V);
 bool isFreeMemoryPointerStore(llvm::Instruction *I);
+bool isFreeMemoryAllocationBase(llvm::Value *V);
 bool isSameOrReloadedFreeMemoryBase(llvm::Value *LHS, llvm::Value *RHS);
+bool isSameValue(llvm::Value *LHS, llvm::Value *RHS);
 std::optional<CheckedBoundsMatch>
 matchCheckedBoundsGuard(llvm::BasicBlock &BB);
 

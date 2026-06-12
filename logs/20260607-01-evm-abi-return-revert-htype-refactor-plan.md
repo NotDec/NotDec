@@ -1830,3 +1830,39 @@ br i1 %ok, label %success, label %panic
   通过，用时 1.03s。
 - `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
   通过，用时 412.35s。
+
+## 2026-06-12 实现记录：把 CheckedBounds matcher 从 SolidityPatterns.cpp 拆出去
+
+前面那次把 `CheckedBoundsPass` 的 matcher 越补越多，`SolidityPatterns.cpp` 又变长了。这里先做
+机械拆分，不改逻辑，也不改 pass 顺序：
+
+- `src/Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp`：
+  把 checked-bounds 相关的实现整体挪出来，包括 `getCheckedBoundsKindForPanicCode`、
+  `normalizeCondition`、`matchCheckedArithmetic`、`matchArrayBounds`、
+  `matchMemoryAllocationBounds`、`matchMemoryAllocationPointerBounds`、
+  `matchDirectAllocationPointerBounds`、`matchCheckedBoundsGuard` 等。
+- `src/Passes/evm/SolidityPatterns.cpp`：
+  只保留通用 helper 和非 checked-bounds 的其它 matcher。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h`：
+  补了这些已存在 helper 的声明，给新 cpp 共享用。
+- `src/CMakeLists.txt`：
+  加入新的 `CheckedBoundsMatchers.cpp` 编译单元。
+
+结果：
+
+- `SolidityPatterns.cpp` 从 5932 行降到 1673 行。
+- checked-bounds 逻辑集中到 `CheckedBoundsMatchers.cpp`，后面再继续拆 `SolidityPatterns.cpp` 时，
+  这里已经有清晰边界。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- apehex 固定 79 个输入 smoke：
+  拆分前 `/tmp/notdec-apehex-selected80-baseline`，`78 passed / 1 failed`，
+  `elapsed=356`。
+  拆分后 `/tmp/notdec-apehex-selected80-after-split-rerun`，`78 passed / 1 failed`，
+  `elapsed=355`。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 0.96s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，用时 413.33s。
