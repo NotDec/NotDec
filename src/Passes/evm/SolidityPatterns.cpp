@@ -226,6 +226,31 @@ std::optional<uint64_t> matchUInt64LimitMinusStrictUpper(const Value *V) {
   return Size;
 }
 
+std::optional<uint64_t> matchUInt64LimitMinusStrictUpperAllowZero(
+    const Value *V) {
+  auto *C = dyn_cast_or_null<ConstantInt>(V);
+  if (C == nullptr || C->getBitWidth() <= 64) {
+    return std::nullopt;
+  }
+
+  APInt Limit(C->getBitWidth(), 1);
+  Limit <<= 64;
+  if (C->getValue().uge(Limit)) {
+    return std::nullopt;
+  }
+
+  APInt Diff = Limit - C->getValue() - 1;
+  if (Diff.getActiveBits() > 64) {
+    return std::nullopt;
+  }
+
+  uint64_t Size = Diff.getZExtValue();
+  if (Size > 4096 || Size % 32 != 0) {
+    return std::nullopt;
+  }
+  return Size;
+}
+
 std::optional<uint64_t> matchWrappingAddStrictUpper(const Value *V) {
   auto *C = dyn_cast_or_null<ConstantInt>(V);
   if (C == nullptr) {
@@ -4656,6 +4681,165 @@ Value *findPtrToIntInBlock(BasicBlock *BB, Value *Ptr) {
   return nullptr;
 }
 
+Value *getOrCreatePtrToIntBeforeTerminator(BasicBlock *BB, Value *Ptr) {
+  if (Value *Existing = findPtrToIntInBlock(BB, Ptr)) {
+    return Existing;
+  }
+  if (BB == nullptr || Ptr == nullptr || !Ptr->getType()->isPointerTy()) {
+    return nullptr;
+  }
+
+  IRBuilder<> Builder(BB->getTerminator());
+  return Builder.CreatePtrToInt(Ptr, Type::getIntNTy(BB->getContext(), 256),
+                                "evm.alloc.addr.rewrite");
+}
+
+std::optional<uint64_t> matchPointerUInt64LimitMinus(Value *PtrLimit,
+                                                     bool StrictUpper,
+                                                     bool AllowZero) {
+  Value *Limit = getIntToPtrAddress(PtrLimit);
+  std::optional<uint64_t> Size =
+      StrictUpper ? matchUInt64LimitMinusStrictUpperAllowZero(Limit)
+                  : matchUInt64LimitMinus(Limit);
+  if (!Size.has_value() || (!AllowZero && *Size == 0)) {
+    return std::nullopt;
+  }
+  return Size;
+}
+
+std::optional<uint64_t> getFixedCallocAllocationSize(Value *Ptr) {
+  auto *Call = dyn_cast_or_null<CallBase>(Ptr);
+  if (Call == nullptr || !isCallTo(Call, "calloc") || Call->arg_size() != 2 ||
+      !isConstantIntValue(Call->getArgOperand(0), 1)) {
+    return std::nullopt;
+  }
+
+  auto *Size = dyn_cast<ConstantInt>(Call->getArgOperand(1));
+  if (Size == nullptr || !isSmallFixedMemoryAllocationSize(Size)) {
+    return std::nullopt;
+  }
+  return Size->getZExtValue();
+}
+
+bool isAllocationPointer(Value *Ptr) {
+  auto *Call = dyn_cast_or_null<CallBase>(Ptr);
+  return Call != nullptr &&
+         ((isCallTo(Call, "calloc") && Call->arg_size() == 2) ||
+          (isCallTo(Call, "calloc_unbounded") && Call->arg_size() == 0));
+}
+
+bool callUsesPtrToInt(CallBase *Call, unsigned ArgNo, Value *Ptr) {
+  if (Call == nullptr || Call->arg_size() <= ArgNo) {
+    return false;
+  }
+  auto *PtrToInt = dyn_cast<PtrToIntInst>(Call->getArgOperand(ArgNo));
+  return PtrToInt != nullptr && isSameValue(PtrToInt->getOperand(0), Ptr);
+}
+
+bool findSolidityMemoryAllocationForPointer(BasicBlock *BB, Value *Ptr,
+                                            Value *Size) {
+  if (BB == nullptr || Ptr == nullptr || Size == nullptr) {
+    return false;
+  }
+  for (Instruction &I : *BB) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call != nullptr &&
+        isCallTo(Call, "notdec_solidity_memory_allocation") &&
+        Call->arg_size() == 2 && callUsesPtrToInt(Call, 0, Ptr) &&
+        isSameValue(Call->getArgOperand(1), Size)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool findFreeMemoryPointerStoreForPointer(BasicBlock *BB, Value *Ptr) {
+  if (BB == nullptr || Ptr == nullptr) {
+    return false;
+  }
+  for (Instruction &I : *BB) {
+    std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&I);
+    if (!Store.has_value() || !isConstantIntValue(Store->Address, 64)) {
+      continue;
+    }
+    auto *PtrToInt = dyn_cast<PtrToIntInst>(Store->StoredValue);
+    if (PtrToInt != nullptr && isSameValue(PtrToInt->getOperand(0), Ptr)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<CheckedBoundsMatch>
+matchDirectAllocationPointerBounds(const NormalizedCondition &FailureCond,
+                                   const SolidityRevertMatch &RevertMatch,
+                                   BasicBlock *SuccessBlock) {
+  // After memory allocation recovery, Solidity's fixed-size allocation guard
+  // can become a direct pointer comparison on the calloc result.  Keep this
+  // matcher tied to allocation calls and success-side allocation evidence so it
+  // does not rewrite unrelated native pointer comparisons.
+  if (!RevertMatch.PanicCode.has_value() || *RevertMatch.PanicCode != 0x41) {
+    return std::nullopt;
+  }
+
+  ICmpInst *Cmp = FailureCond.Cmp;
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+
+  Value *Ptr = nullptr;
+  std::optional<uint64_t> Size;
+  if (FailureCond.Predicate == ICmpInst::ICMP_UGT &&
+      Cmp->getOperand(0)->getType()->isPointerTy()) {
+    Ptr = Cmp->getOperand(0);
+    Size = matchPointerUInt64LimitMinus(Cmp->getOperand(1), true, true);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT &&
+             Cmp->getOperand(1)->getType()->isPointerTy()) {
+    Ptr = Cmp->getOperand(1);
+    Size = matchPointerUInt64LimitMinus(Cmp->getOperand(0), true, true);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGE &&
+             Cmp->getOperand(0)->getType()->isPointerTy()) {
+    Ptr = Cmp->getOperand(0);
+    Size = matchPointerUInt64LimitMinus(Cmp->getOperand(1), false, false);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+             Cmp->getOperand(1)->getType()->isPointerTy()) {
+    Ptr = Cmp->getOperand(1);
+    Size = matchPointerUInt64LimitMinus(Cmp->getOperand(0), false, false);
+  }
+
+  if (Ptr == nullptr || !Size.has_value() || !isAllocationPointer(Ptr)) {
+    return std::nullopt;
+  }
+
+  Value *SizeValue = ConstantInt::get(Type::getIntNTy(Cmp->getContext(), 256),
+                                      *Size);
+  bool HasAllocationMarker =
+      *Size != 0 &&
+      findSolidityMemoryAllocationForPointer(SuccessBlock, Ptr, SizeValue);
+  bool HasMatchingCallocSize =
+      getFixedCallocAllocationSize(Ptr).value_or(
+          std::numeric_limits<uint64_t>::max()) == *Size;
+  bool HasFreePointerStore =
+      *Size == 0 && findFreeMemoryPointerStoreForPointer(SuccessBlock, Ptr);
+  if (!HasAllocationMarker && !HasMatchingCallocSize && !HasFreePointerStore) {
+    return std::nullopt;
+  }
+
+  Value *PtrInt = getOrCreatePtrToIntBeforeTerminator(Cmp->getParent(), Ptr);
+  if (PtrInt == nullptr) {
+    return std::nullopt;
+  }
+  return CheckedBoundsMatch{"memory_allocation_pointer_bounds",
+                            "",
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            RevertMatch.Revert,
+                            {PtrInt, SizeValue, PtrInt},
+                            RevertMatch.PanicCode,
+                            true};
+}
+
 // Solidity encodes short storage bytes/string values in the slot itself. This
 // only accepts the canonical decoded-length expression from that same slot.
 bool matchStorageBytesLength(Value *Length, Value *Slot) {
@@ -5451,6 +5635,15 @@ std::optional<CheckedBoundsMatch> matchCheckedBoundsGuard(BasicBlock &BB) {
       StorageArrayLength->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
       StorageArrayLength->FailureBlock = Failure;
       return StorageArrayLength;
+    }
+
+    if (std::optional<CheckedBoundsMatch> DirectMemoryPointerBounds =
+            matchDirectAllocationPointerBounds(
+                *FailureCond, *RevertMatch, Br->getSuccessor(1 - SuccIdx))) {
+      DirectMemoryPointerBounds->Branch = Br;
+      DirectMemoryPointerBounds->SuccessBlock = Br->getSuccessor(1 - SuccIdx);
+      DirectMemoryPointerBounds->FailureBlock = Failure;
+      return DirectMemoryPointerBounds;
     }
 
     if (std::optional<CheckedBoundsMatch> FixedMemoryPointerBounds =

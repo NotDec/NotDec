@@ -1769,3 +1769,64 @@ overlap 判断和数组识别，直接扩成 i256 会牵动 TypeBuilder 的核�
   通过，用时 0.96s。
 - 全量 `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
   当前结果是 95 passed / 4 failed，剩余失败为 `0651`、`1775`、`0648`、`24574`。
+
+## 2026-06-12 实现记录：识别 calloc 指针直接比较的 allocation bounds
+
+继续看剩余 4 个失败：`0651`、`1775`、`0648`、`24574`。它们已经不是 panic/revert
+分类问题，`panic 0x41` 能识别出来；失败点是 `CheckedBoundsPass` 把几条
+memory allocation pointer guard 标成了 `panic_resource_error` skip。
+
+这些 IR 的共同形状是：
+
+```llvm
+%p = call ptr @calloc(...)
+%ok = icmp ult/ugt ptr %p, inttoptr (i256 <uint64-limit-minus-size> to ptr)
+br i1 %ok, label %success, label %panic
+```
+
+旧 matcher 主要看整数指针和 `add oldPtr, size` 形状，没有覆盖这种类型恢复/内存分配恢复后
+留下的 native `ptr` 直接比较。
+
+实现改动：
+
+- `src/Passes/evm/SolidityPatterns.cpp:226`：
+  新增 `matchUInt64LimitMinusStrictUpperAllowZero`，处理 `uint64max` 这种 size 为 0 的
+  strict upper bound。
+- `src/Passes/evm/SolidityPatterns.cpp:4684`：
+  新增 `getOrCreatePtrToIntBeforeTerminator`。当 success block 里才有 `ptrtoint` 时，
+  在 guard block terminator 前补一个 `ptrtoint`，避免 rewrite marker 使用不支配 guard 的值。
+- `src/Passes/evm/SolidityPatterns.cpp:4696`：
+  新增 `matchPointerUInt64LimitMinus`、`getFixedCallocAllocationSize`、`isAllocationPointer`、
+  `findSolidityMemoryAllocationForPointer`、`findFreeMemoryPointerStoreForPointer`。
+  这些 helper 只服务于 `calloc/calloc_unbounded` 直接指针比较。
+- `src/Passes/evm/SolidityPatterns.cpp:4752`：
+  新增 `matchDirectAllocationPointerBounds`。它只接受 panic code `0x41`，只匹配
+  `calloc/calloc_unbounded` 返回指针和 `inttoptr(i256 limit)` 的比较，并要求 success 分支存在
+  `notdec_solidity_memory_allocation(ptrtoint %p, size)`、匹配的 `calloc(1, size)`，或 size 0
+  的 free memory pointer store 证据。
+- `src/Passes/evm/SolidityPatterns.cpp:5636`：
+  在 `matchCheckedBoundsGuard` 中接入 direct pointer matcher，位置放在 storage/memory length
+  bounds 之后、旧 fixed pointer matcher 之前。
+
+效果：
+
+- 4 个剩余 case 全部通过。
+- full `evm.solidity-patterns` suite 从 95/99 变成 99/99。
+- 这次没有继续扩大到任意 native pointer 比较，也没有改 oracle。
+
+复杂度评分：
+
+- 实现效果：9/10。覆盖当前剩余 checked-bounds 失败，并保持 panic/revert 分类不变。
+- 理解成本：4/10。新增一组局部 helper，但都集中在 `CheckedBoundsPass` matcher 区域。
+- 维护成本：4/10。后续如果继续拆 `SolidityPatterns.cpp`，这组 helper 应该跟 checked-bounds
+  matcher 一起移到专门文件。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- 4 个剩余样例临时 manifest：
+  `/tmp/notdec-remaining-four-after-direct-ptr`，4 passed / 0 failed，`skip_reasons: 0`。
+- `ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure`
+  通过，用时 1.03s。
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
+  通过，用时 412.35s。
