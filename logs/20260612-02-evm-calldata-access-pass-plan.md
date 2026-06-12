@@ -41,12 +41,14 @@ TypeRecovery
 
 整理成同一个 calldata buffer 的 offset 访问：
 
-```text
-%w0 = load_word %cd[4]
-%w1 = load_word %cd[36]
+```llvm
+%cd.addr0 = getelementptr i8, ptr %cd, i256 4
+%w0 = load i256, ptr %cd.addr0
+%cd.addr1 = getelementptr i8, ptr %cd, i256 36
+%w1 = load i256, ptr %cd.addr1
 ```
 
-这里的 `load_word %cd[4]` 是目标形状，不是最终 LLVM 语法。实现时可以用 intrinsic，也可以用和现有 memory object / stack pointer rewrite 一致的 pointer/address 表达式。关键是类型推理能看出 `%cd` 是同一个对象，offset 4、36、68 等位置被读取。
+这里直接使用 LLVM `load` 指令，不引入 `load_word` 或其他专门 helper。如果地址表达式已经是 i256 数字，就按当前 EVM memory 方案用 `inttoptr` / GEP 整理成普通 LLVM pointer。关键是类型推理能看出 `%cd` 是同一个对象，offset 4、36、68 等位置被读取。
 
 range copy 从：
 
@@ -57,9 +59,13 @@ call void @evm_calldatacopy(ptr %mem, ptr %calldata,
 
 整理成：
 
-```text
-copy memory[%dst..%dst+%len] <- %cd[%src..%src+%len]
+```llvm
+%src.ptr = getelementptr i8, ptr %cd, i256 %src
+%dst.ptr = inttoptr i256 %dst to ptr
+call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 false)
 ```
+
+也就是说，`evm_calldatacopy` 直接落成普通 `llvm.memcpy`，不要引入专门 calldata copy intrinsic。EVM memory 已经整体转向普通 LLVM memory，destination 也按现有规则转成普通 pointer。
 
 这样 dynamic bytes/string、array tail 等结构不需要在 pass 里猜。类型推理可以根据 `%cd` 上的 head load、tail load、range copy、bounds guard 恢复结构。
 
