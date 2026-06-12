@@ -8,7 +8,7 @@
 
 当前 public entry 里的 calldata 访问主要表现为 `evm_calldataload`、`evm_calldatacopy`、calldata size guard 和若干 private helper 调用。这样类型推理看到的是一批分散 helper call，而不是一个有字段、有范围访问的输入对象。
 
-Calldata 和普通 memory 的区别是：每个 public function 有自己的 ABI 格式。因此应该在每个 public entry 内引入一个独立 calldata buffer，把这个函数内所有 calldata 访问归到同一个对象上，再交给类型推理恢复结构。
+Calldata 和普通 memory 的区别是：每个 public function 有自己的 ABI 格式。因此应该把每个 public entry 的 `%calldata` 参数当作这个函数自己的输入 buffer，把这个函数内所有 calldata 访问归到同一个对象上，再交给类型推理恢复结构。
 
 这个 pass 不负责识别最终 ABI 参数类型，也不负责判断 address、bool、uintN、bytes/string、array。它只负责把 calldata 访问整理成类型推理能消费的形式。
 
@@ -22,13 +22,7 @@ EvmCalldataAccessPass
 TypeRecovery
 ```
 
-每个 public entry 入口生成一个 calldata buffer 获取点，例如：
-
-```llvm
-%cd = call ptr @notdec_evm_get_calldata(ptr %calldata)
-```
-
-然后把该 public entry 内的 `evm_calldataload`、`evm_calldatacopy`、相关 bounds guard 和 private helper offset 关系都归到 `%cd` 上。
+每个 public entry 直接使用已有 `%calldata` 指针作为 calldata buffer，不引入 `notdec_evm_get_calldata` 之类专门 helper。然后把该 public entry 内的 `evm_calldataload`、`evm_calldatacopy`、相关 bounds guard 和 private helper offset 关系都归到 `%calldata` 上。
 
 ## 重写形状
 
@@ -42,13 +36,17 @@ TypeRecovery
 整理成同一个 calldata buffer 的 offset 访问：
 
 ```llvm
-%cd.addr0 = getelementptr i8, ptr %cd, i256 4
+%cd.base0 = ptrtoint ptr %calldata to i256
+%cd.addr0.raw = add i256 %cd.base0, 4
+%cd.addr0 = inttoptr i256 %cd.addr0.raw to ptr
 %w0 = load i256, ptr %cd.addr0
-%cd.addr1 = getelementptr i8, ptr %cd, i256 36
+%cd.base1 = ptrtoint ptr %calldata to i256
+%cd.addr1.raw = add i256 %cd.base1, 36
+%cd.addr1 = inttoptr i256 %cd.addr1.raw to ptr
 %w1 = load i256, ptr %cd.addr1
 ```
 
-这里直接使用 LLVM `load` 指令，不引入 `load_word` 或其他专门 helper。如果地址表达式已经是 i256 数字，就按当前 EVM memory 方案用 `inttoptr` / GEP 整理成普通 LLVM pointer。关键是类型推理能看出 `%cd` 是同一个对象，offset 4、36、68 等位置被读取。
+这里直接使用 LLVM `load` 指令，不引入 `load_word` 或其他专门 helper。地址按当前 EVM memory 方案整理成 `ptrtoint` / `add` / `inttoptr`，避免在类型恢复前引入 MLsub 还没有正式处理的 GEP。关键是类型推理能看出 `%calldata` 是同一个对象，offset 4、36、68 等位置被读取。
 
 range copy 从：
 
@@ -60,26 +58,28 @@ call void @evm_calldatacopy(ptr %mem, ptr %calldata,
 整理成：
 
 ```llvm
-%src.ptr = getelementptr i8, ptr %cd, i256 %src
+%src.base = ptrtoint ptr %calldata to i256
+%src.raw = add i256 %src.base, %src
+%src.ptr = inttoptr i256 %src.raw to ptr
 %dst.ptr = inttoptr i256 %dst to ptr
 call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 false)
 ```
 
 也就是说，`evm_calldatacopy` 直接落成普通 `llvm.memcpy`，不要引入专门 calldata copy intrinsic。EVM memory 已经整体转向普通 LLVM memory，destination 也按现有规则转成普通 pointer。
 
-这样 dynamic bytes/string、array tail 等结构不需要在 pass 里猜。类型推理可以根据 `%cd` 上的 head load、tail load、range copy、bounds guard 恢复结构。
+这样 dynamic bytes/string、array tail 等结构不需要在 pass 里猜。类型推理可以根据 `%calldata` 上的 head load、tail load、range copy、bounds guard 恢复结构。
 
 ## Public Entry 边界
 
-一个 public entry 内应该只有一个 `notdec_evm_get_calldata`。所有直接 calldata 访问都归到这个 buffer。
+一个 public entry 内所有直接 calldata 访问都归到函数自己的 `%calldata` 指针。
 
-如果 public entry 调用 private helper，而 helper 的形参表示 calldata offset，需要把 helper 内的访问映射回调用点的 `%cd`。已有 `getUniqueCallsiteArgUInt64Constant()` 可以处理“所有 callsite 都传同一个常量”的 helper。对于被多个 public entry 用不同 offset 复用的 helper，不能把 helper 本身固定成某个 ABI 格式；应在调用点上下文归属到各自 public entry 的 calldata buffer，必要时再考虑 clone 或 summary。
+如果 public entry 调用 private helper，而 helper 的形参表示 calldata offset，需要把 helper 内的访问映射回调用点的 `%calldata`。已有 `getUniqueCallsiteArgUInt64Constant()` 可以处理“所有 callsite 都传同一个常量”的 helper。对于被多个 public entry 用不同 offset 复用的 helper，不能把 helper 本身固定成某个 ABI 格式；应在调用点上下文归属到各自 public entry 的 calldata buffer，必要时再考虑 clone 或 summary。
 
 ## 和类型推理 / HType 的关系
 
 这个 pass 给类型推理提供：
 
-- calldata buffer 对象。
+- calldata buffer 对象，也就是 public entry 的 `%calldata` 指针。
 - buffer 上的 word load。
 - buffer range copy 到 memory object。
 - bounds guard 和访问范围的关系。
@@ -100,5 +100,28 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 - 不在这个 pass 里生成 `evm.abi.arg.address`、`evm.abi.arg.bytes` 之类最终参数 helper。
 - 不在这个 pass 里处理 address 高 96 bit 清零、bool range、uintN mask、signextend 等 value normalization；这些是类型推理输入或单独 value normalization 逻辑。
 - 不删除 bounds guard。guard 是否隐藏由后续 cleanup 或 guard pass 统一处理。
-- PHI 合并出来的 calldata offset 不要跳过。能表达成 `%cd` 上的动态 offset 访问就保留给类型推理。
+- PHI 合并出来的 calldata offset 不要跳过。能表达成 `%calldata` 上的动态 offset 访问就保留给类型推理。
 - fallback 里手写协议也可以先作为 calldata buffer 访问表达，不要强行当 Solidity ABI 参数。
+
+## 实现记录
+
+已完成直接 public calldata 访问重写：
+
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:27)：新增 `EvmCalldataAccessPass`。它只处理 `public_` selector/body 函数的当前 `%calldata` 参数；`evm_calldataload` 重写为 `ptrtoint %calldata + offset -> inttoptr -> load i256`；`evm_calldatacopy` 重写为 `llvm.memcpy.p0.p0.i256`。
+- [include/notdec/Passes/evm/SolidityPatterns.h](/sn640/NotDec/include/notdec/Passes/evm/SolidityPatterns.h:40)、[src/CMakeLists.txt](/sn640/NotDec/src/CMakeLists.txt:15)、[src/Passes/PassManager.cpp](/sn640/NotDec/src/Passes/PassManager.cpp:310)：声明 pass、加入构建，并放在 `MemoryBufferRewritePass` 后、类型恢复前。
+- [src/Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp:1741)：`checked_div` / `checked_mod` 的 rewrite marker 只要求 divisor 可用，避免非 guard operand 被优化下沉后导致降级。
+- [src/Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp:1807)：checked-bounds calldata array matcher 同时识别旧 `evm_calldataload` 和新 `inttoptr(add(ptrtoint(%calldata), offset))` 上的 `load i256`。
+- [test/evm/solidity-rewrite/manifest.json](/sn640/NotDec/test/evm/solidity-rewrite/manifest.json:70)：删掉 level0 rewrite suite 里残留的 checked-bounds 预期；checked-bounds 现在由 tr-level 2 的 patterns suite 覆盖。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4`
+- `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)|notdec.type_recovery.evm.tr_level_2' --output-on-failure`
+
+性能观察：这次验证中 `notdec.evm.solidity_patterns` 用时约 419 秒，`notdec.evm.solidity_rewrite` 用时约 79 秒，`notdec.type_recovery.evm.tr_level_2` 用时约 1 秒。没有继续跑 fortune；用户已要求先不要管 fortune 性能问题。
+
+方案评分：
+
+- 实现效果：8/10。直接访问已经改成普通 LLVM load/memcpy，并避免把 GEP 送进当前 MLsub。
+- 复杂度：6/10。新增 pass 较小，但 checked-bounds matcher 需要兼容新旧 calldata 形状。
+- 维护成本：6/10。后续 private helper offset 回推还没做，需要继续按这个 plan 补。

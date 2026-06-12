@@ -37,6 +37,18 @@ struct PayabilityGuardPass : llvm::PassInfoMixin<PayabilityGuardPass> {
   static bool isRequired() { return true; }
 };
 
+// Rewrites direct calldata word/range reads into normal LLVM memory accesses
+// before type recovery.  The pass keeps calldata as the public entry's
+// existing pointer argument instead of introducing a NotDec-specific access
+// helper, so MLsub can reason about it like other memory objects.
+struct EvmCalldataAccessPass
+    : llvm::PassInfoMixin<EvmCalldataAccessPass> {
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Marks low-risk ABI return sites.  The current pass intentionally does not
 // rewrite memory writes because return buffers often share code with dynamic
 // object construction.

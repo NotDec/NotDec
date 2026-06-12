@@ -1,0 +1,141 @@
+#include "Passes/evm/SolidityPatternUtils.h"
+
+#include <llvm/ADT/Statistic.h>
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
+#include <llvm/Pass.h>
+#include <llvm/Support/Alignment.h>
+#include <llvm/Transforms/Utils/Local.h>
+
+#define DEBUG_TYPE "evm-calldata-access"
+
+using namespace llvm;
+
+STATISTIC(NumCalldataLoadsRewritten,
+          "Number of evm_calldataload calls rewritten to LLVM loads");
+STATISTIC(NumCalldataCopiesRewritten,
+          "Number of evm_calldatacopy calls rewritten to LLVM memcpy calls");
+
+namespace notdec::passes::evm {
+namespace {
+
+Value *getPublicEntryCalldataArg(Function &F) {
+  if ((!detail::isPublicEntryFunction(F) && !detail::isSelectorFunction(F)) ||
+      F.arg_size() < 2) {
+    return nullptr;
+  }
+
+  auto It = F.arg_begin();
+  ++It;
+  Argument &Arg = *It;
+  if (!Arg.getType()->isPointerTy()) {
+    return nullptr;
+  }
+  return &Arg;
+}
+
+bool usesCurrentCalldata(CallBase &Call, unsigned ArgIndex, Value *Calldata) {
+  return Call.arg_size() > ArgIndex && Call.getArgOperand(ArgIndex) == Calldata;
+}
+
+Value *asPointer(IRBuilder<> &Builder, Value *V, const Twine &Name) {
+  if (V->getType()->isPointerTy()) {
+    return V;
+  }
+  return Builder.CreateIntToPtr(V, PointerType::get(Builder.getContext(), 0),
+                                Name);
+}
+
+Value *calldataBytePtr(IRBuilder<> &Builder, Value *Calldata, Value *Offset,
+                       const Twine &Name) {
+  Type *OffsetTy = Offset->getType();
+  Value *Base = Builder.CreatePtrToInt(Calldata, OffsetTy, Name + ".base");
+  Value *Addr = Builder.CreateAdd(Base, Offset, Name + ".addr");
+  return Builder.CreateIntToPtr(Addr, PointerType::get(Builder.getContext(), 0),
+                                Name);
+}
+
+bool rewriteCalldataLoad(CallBase &Call, Value *Calldata) {
+  if (!detail::isCallTo(&Call, "evm_calldataload") ||
+      !usesCurrentCalldata(Call, 0, Calldata) || Call.arg_size() != 2) {
+    return false;
+  }
+
+  IRBuilder<> Builder(&Call);
+  Value *Addr =
+      calldataBytePtr(Builder, Calldata, Call.getArgOperand(1), "calldata.ptr");
+  auto *Load = Builder.CreateLoad(Builder.getIntNTy(256), Addr,
+                                  Call.getName() + ".load");
+  Load->setAlignment(Align(1));
+  Load->copyMetadata(Call, {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
+  Call.replaceAllUsesWith(Load);
+  Call.eraseFromParent();
+  ++NumCalldataLoadsRewritten;
+  return true;
+}
+
+bool rewriteCalldataCopy(CallBase &Call, Value *Calldata) {
+  if (!detail::isCallTo(&Call, "evm_calldatacopy") ||
+      !usesCurrentCalldata(Call, 1, Calldata) || Call.arg_size() != 5) {
+    return false;
+  }
+
+  IRBuilder<> Builder(&Call);
+  Value *Dst = asPointer(Builder, Call.getArgOperand(2), "calldata.copy.dst");
+  Value *Src =
+      calldataBytePtr(Builder, Calldata, Call.getArgOperand(3),
+                      "calldata.copy.src");
+  Value *Len = Call.getArgOperand(4);
+  CallInst *Memcpy =
+      Builder.CreateMemCpy(Dst, Align(1), Src, Align(1), Len, false);
+  Memcpy->copyMetadata(Call,
+                       {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
+  Call.eraseFromParent();
+  ++NumCalldataCopiesRewritten;
+  return true;
+}
+
+} // namespace
+
+PreservedAnalyses EvmCalldataAccessPass::run(Function &F,
+                                             FunctionAnalysisManager &) {
+  Value *Calldata = getPublicEntryCalldataArg(F);
+  if (Calldata == nullptr) {
+    return PreservedAnalyses::all();
+  }
+
+  SmallVector<CallBase *, 16> Calls;
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (detail::isCallTo(Call, "evm_calldataload") ||
+        detail::isCallTo(Call, "evm_calldatacopy")) {
+      Calls.push_back(Call);
+    }
+  }
+
+  bool Changed = false;
+  for (CallBase *Call : Calls) {
+    if (Call->getParent() == nullptr) {
+      continue;
+    }
+    if (rewriteCalldataLoad(*Call, Calldata)) {
+      Changed = true;
+      continue;
+    }
+    if (rewriteCalldataCopy(*Call, Calldata)) {
+      Changed = true;
+    }
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+} // namespace notdec::passes::evm

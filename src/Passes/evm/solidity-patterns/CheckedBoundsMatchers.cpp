@@ -9,6 +9,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Operator.h>
 #include <optional>
 
 using namespace llvm;
@@ -1745,7 +1746,7 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
           nullptr,
           nullptr,
           RevertMatch.Revert,
-          {Call->getArgOperand(0), Call->getArgOperand(1)},
+          {Call->getArgOperand(1)},
           RevertMatch.PanicCode,
           true};
     }
@@ -1757,7 +1758,7 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
           nullptr,
           nullptr,
           RevertMatch.Revert,
-          {Call->getArgOperand(0), Call->getArgOperand(1)},
+          {Call->getArgOperand(1)},
           RevertMatch.PanicCode,
           true};
     }
@@ -1803,6 +1804,84 @@ bool isCalldataArrayElementOffset(Value *V, Value *Index) {
          isCalldataArrayIndexScale(Add->getOperand(1), Index);
 }
 
+bool isCalldataPointer(Value *Ptr) {
+  Ptr = Ptr == nullptr ? nullptr : Ptr->stripPointerCasts();
+  if (auto *Arg = dyn_cast_or_null<Argument>(Ptr)) {
+    return Arg->getName() == "calldata";
+  }
+
+  auto *GEP = dyn_cast_or_null<GEPOperator>(Ptr);
+  return GEP != nullptr && isCalldataPointer(GEP->getPointerOperand());
+}
+
+bool isCalldataAddress(Value *V) {
+  if (V == nullptr) {
+    return false;
+  }
+  V = V->stripPointerCasts();
+  if (isCalldataPointer(V)) {
+    return true;
+  }
+
+  if (auto *PTI = dyn_cast<PtrToIntInst>(V)) {
+    return isCalldataPointer(PTI->getOperand(0));
+  }
+
+  if (auto *BO = dyn_cast<BinaryOperator>(V)) {
+    if (BO->getOpcode() != Instruction::Add) {
+      return false;
+    }
+    return isCalldataAddress(BO->getOperand(0)) ||
+           isCalldataAddress(BO->getOperand(1));
+  }
+
+  if (auto *ITP = dyn_cast<IntToPtrInst>(V)) {
+    return isCalldataAddress(ITP->getOperand(0));
+  }
+
+  return false;
+}
+
+bool isCalldataLoad(Value *V) {
+  auto *Load = dyn_cast_or_null<LoadInst>(V);
+  return Load != nullptr && Load->getType()->isIntegerTy(256) &&
+         isCalldataAddress(Load->getPointerOperand());
+}
+
+bool calldataAddressUsesArrayElementOffset(Value *V, Value *Index) {
+  if (V == nullptr) {
+    return false;
+  }
+  V = V->stripPointerCasts();
+
+  if (isCalldataArrayElementOffset(V, Index)) {
+    return true;
+  }
+
+  if (auto *ITP = dyn_cast<IntToPtrInst>(V)) {
+    return calldataAddressUsesArrayElementOffset(ITP->getOperand(0), Index);
+  }
+
+  if (auto *BO = dyn_cast<BinaryOperator>(V)) {
+    if (BO->getOpcode() != Instruction::Add) {
+      return false;
+    }
+    return calldataAddressUsesArrayElementOffset(BO->getOperand(0), Index) ||
+           calldataAddressUsesArrayElementOffset(BO->getOperand(1), Index);
+  }
+
+  auto *GEP = dyn_cast<GEPOperator>(V);
+  if (GEP == nullptr) {
+    return false;
+  }
+  for (Value *Offset : GEP->indices()) {
+    if (isCalldataArrayElementOffset(Offset, Index)) {
+      return true;
+    }
+  }
+  return calldataAddressUsesArrayElementOffset(GEP->getPointerOperand(), Index);
+}
+
 bool hasCalldataArrayElementLoad(BasicBlock *SuccessBlock, Value *Index) {
   if (SuccessBlock == nullptr || Index == nullptr) {
     return false;
@@ -1813,6 +1892,12 @@ bool hasCalldataArrayElementLoad(BasicBlock *SuccessBlock, Value *Index) {
     if (Call != nullptr && isCallTo(Call, "evm_calldataload") &&
         Call->arg_size() == 2 &&
         isCalldataArrayElementOffset(Call->getArgOperand(1), Index)) {
+      return true;
+    }
+    auto *Load = dyn_cast<LoadInst>(&I);
+    if (Load != nullptr && isCalldataAddress(Load->getPointerOperand()) &&
+        calldataAddressUsesArrayElementOffset(Load->getPointerOperand(),
+                                             Index)) {
       return true;
     }
   }
@@ -2008,7 +2093,9 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
   }
 
   StringRef Kind = "array_bounds_unknown";
-  if (matchEvmMemoryLoad(Length).has_value()) {
+  if (isCalldataLoad(Length)) {
+    Kind = "array_bounds_calldata";
+  } else if (matchEvmMemoryLoad(Length).has_value()) {
     Kind = "array_bounds_memory";
   } else if (auto *LengthCall = dyn_cast<CallBase>(Length)) {
     if (isCallTo(LengthCall, "evm_calldataload")) {

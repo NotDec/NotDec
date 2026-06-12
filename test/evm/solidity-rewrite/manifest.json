@@ -71,11 +71,7 @@
         "outlined_functions": 2,
         "outline_calls": 2,
         "outlined_metadata": 4,
-        "skipped_metadata": 0,
-        "checked_bounds_total": 2,
-        "checked_bounds_skip_total": 0,
-        "checked_bounds_semantic_marker_total": 2,
-        "checked_bounds_cfg_rewrites": 2
+        "skipped_metadata": 0
       }
     },
     {
@@ -275,14 +271,7 @@
         "outlined_functions": 0,
         "outline_calls": 0,
         "outlined_metadata": 0,
-        "skipped_metadata": 0,
-        "checked_bounds_total": 51,
-        "checked_bounds_skip_total": 2,
-        "checked_bounds_semantic_marker_total": 49,
-        "checked_bounds_cfg_rewrites": 49,
-        "checked_bounds_skip_reason:unrecognized_operands": 2,
-        "checked_bounds_skipped_kind:panic_assert": 1,
-        "checked_bounds_skipped_kind:panic_array_out_of_bounds": 1
+        "skipped_metadata": 0
       }
     },
     {
