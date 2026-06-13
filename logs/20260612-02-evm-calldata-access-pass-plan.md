@@ -69,6 +69,31 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 
 这样 dynamic bytes/string、array tail 等结构不需要在 pass 里猜。类型推理可以根据 `%calldata` 上的 head load、tail load、range copy、bounds guard 恢复结构。
 
+## 开头 calldata size guard
+
+先只识别 public entry 开头的固定 calldata 最小长度检查，不处理动态 tail 的复杂 bounds。目标形状是 Solidity 常见的：
+
+```yul
+if lt(calldatasize(), 36) { revert(0, 0) }
+```
+
+对应 IR 可能是 `evm_calldatasize` 和常量比较后跳到 revert 块。识别范围保持保守：
+
+- 只在 public entry 的入口附近找，要求 guard 支配后续正常 body。
+- 只接受和常量比较的 `calldatasize`，例如 `calldatasize < 36`、`36 > calldatasize`、`calldatasize >= 36` 的等价形状。
+- fail 分支必须是无 payload 的 revert，或者已经被 Solidity revert helper 识别成普通 reject 分支。
+- 多个开头 guard 可以取最大最小长度；识别不到就不写证据。
+
+识别到以后，不生成新的 calldata 获取 intrinsic。当前 `%calldata` 已经是函数参数，guard 的目标是把“这个路径上 `%calldata` 至少 N bytes”表达出来。可以引入一个只做语义标记的 checked intrinsic：
+
+```llvm
+%calldata.checked = call ptr @notdec_evm_calldata_min_size(ptr %calldata, i256 36)
+```
+
+这个 intrinsic 不分配对象，也不返回新的 calldata 来源；它返回的 pointer 是 `%calldata` 的 checked alias。后续被 guard 支配的 calldata load/copy 可以使用 `%calldata.checked` 作为 base，让类型恢复沿 IR 直接看到这个 buffer 的最小有效长度。MLsub 处理时把它当成 alias/refinement，并把 `min_size = 36` 作为该 calldata buffer 的对象大小下界。这样比函数级 metadata 更容易跟随 dominated use，也更适合作为 guard matcher 的转换目标。
+
+这个信息只表达“入口要求 calldata 至少 N bytes”，不代表完整 ABI 长度，也不覆盖动态 bytes/string/array 的 tail bounds。动态 tail 的 offset、length、payload 越界检查仍然作为后续单独证据处理。
+
 ## Public Entry 边界
 
 一个 public entry 内所有直接 calldata 访问都归到函数自己的 `%calldata` 指针。
