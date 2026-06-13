@@ -672,7 +672,7 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
   bool Changed = false;
 
   for (Function &F : M) {
-    if (F.isDeclaration()) {
+    if (F.isDeclaration() || isCalldataAccessCloneFunction(F)) {
       continue;
     }
 

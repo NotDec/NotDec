@@ -1,7 +1,9 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 
 #include <llvm/ADT/Statistic.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
@@ -11,6 +13,7 @@
 #include <llvm/Pass.h>
 #include <llvm/Support/Alignment.h>
 #include <llvm/Transforms/Utils/Local.h>
+#include <llvm/Transforms/Utils/Cloning.h>
 
 #define DEBUG_TYPE "evm-calldata-access"
 
@@ -22,6 +25,8 @@ STATISTIC(NumCalldataCopiesRewritten,
           "Number of evm_calldatacopy calls rewritten to LLVM memcpy calls");
 STATISTIC(NumCalldataCallsiteConstantOffsets,
           "Number of calldata offsets resolved from unique callsite constants");
+STATISTIC(NumCalldataHelperClones,
+          "Number of private calldata helpers cloned for constant offsets");
 
 namespace notdec::passes::evm {
 namespace {
@@ -29,6 +34,11 @@ namespace {
 bool shouldRewriteFunction(Function &F) {
   return detail::isPublicEntryFunction(F) || detail::isSelectorFunction(F) ||
          F.getName().starts_with("private__");
+}
+
+bool shouldCloneFunction(Function &F) {
+  return F.getName().starts_with("private__") &&
+         !detail::isCalldataAccessCloneFunction(F) && !F.isDeclaration();
 }
 
 Value *getCalldataArg(Function &F) {
@@ -108,6 +118,181 @@ Value *calldataBytePtr(IRBuilder<> &Builder, Value *Calldata, Value *Offset,
                                 Name);
 }
 
+void collectArgumentUses(Value *V, SmallVectorImpl<Argument *> &Args,
+                         unsigned Depth = 0) {
+  if (V == nullptr || Depth > 8) {
+    return;
+  }
+  if (auto *Arg = dyn_cast<Argument>(V)) {
+    if (!Arg->getType()->isPointerTy()) {
+      Args.push_back(Arg);
+    }
+    return;
+  }
+  auto *Inst = dyn_cast<Instruction>(V);
+  if (Inst == nullptr) {
+    return;
+  }
+  for (Use &Operand : Inst->operands()) {
+    collectArgumentUses(Operand.get(), Args, Depth + 1);
+  }
+}
+
+SmallVector<unsigned, 4> getCalldataOffsetArgNos(Function &F,
+                                                 Value *Calldata) {
+  SmallVector<Argument *, 8> Args;
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+    if (detail::isCallTo(Call, "evm_calldataload") &&
+        usesCurrentCalldata(*Call, 0, Calldata) && Call->arg_size() == 2) {
+      collectArgumentUses(Call->getArgOperand(1), Args);
+    } else if (detail::isCallTo(Call, "evm_calldatacopy") &&
+               usesCurrentCalldata(*Call, 1, Calldata) &&
+               Call->arg_size() == 5) {
+      collectArgumentUses(Call->getArgOperand(3), Args);
+    }
+  }
+
+  SmallVector<unsigned, 4> ArgNos;
+  llvm::sort(Args, [](Argument *LHS, Argument *RHS) {
+    return LHS->getArgNo() < RHS->getArgNo();
+  });
+  for (Argument *Arg : Args) {
+    if (ArgNos.empty() || ArgNos.back() != Arg->getArgNo()) {
+      ArgNos.push_back(Arg->getArgNo());
+    }
+  }
+  return ArgNos;
+}
+
+std::string getCloneKey(Function &Callee,
+                        ArrayRef<std::pair<unsigned, APInt>> Constants) {
+  std::string Key = Callee.getName().str();
+  for (const auto &[ArgNo, Value] : Constants) {
+    Key += ":";
+    Key += Twine(ArgNo).str();
+    Key += "=";
+    SmallString<64> ValueText;
+    Value.toString(ValueText, 10, false);
+    Key.append(ValueText.begin(), ValueText.end());
+  }
+  return Key;
+}
+
+Function *cloneHelperForConstants(
+    Function &Callee, ArrayRef<std::pair<unsigned, APInt>> Constants,
+    StringMap<Function *> &CloneCache) {
+  std::string Key = getCloneKey(Callee, Constants);
+  auto It = CloneCache.find(Key);
+  if (It != CloneCache.end()) {
+    return It->second;
+  }
+
+  Module *M = Callee.getParent();
+  Function *Clone =
+      Function::Create(Callee.getFunctionType(), Callee.getLinkage(),
+                       Callee.getAddressSpace(), Callee.getName() + ".cd",
+                       M);
+  Clone->copyAttributesFrom(&Callee);
+  Clone->setMetadata(detail::KIND_EVM_CALLDATA_ACCESS_CLONE,
+                     MDNode::get(Callee.getContext(),
+                                 {MDString::get(Callee.getContext(), Key)}));
+
+  ValueToValueMapTy VMap;
+  auto CloneArg = Clone->arg_begin();
+  for (Argument &Arg : Callee.args()) {
+    CloneArg->setName(Arg.getName());
+    VMap[&Arg] = &*CloneArg++;
+  }
+
+  SmallVector<ReturnInst *, 8> Returns;
+  CloneFunctionInto(Clone, &Callee, VMap,
+                    CloneFunctionChangeType::LocalChangesOnly, Returns);
+
+  for (const auto &[ArgNo, Value] : Constants) {
+    Argument *Arg = Clone->getArg(ArgNo);
+    auto *Constant = ConstantInt::get(Arg->getType(), Value);
+    Arg->replaceAllUsesWith(Constant);
+  }
+
+  CloneCache[Key] = Clone;
+  ++NumCalldataHelperClones;
+  return Clone;
+}
+
+bool cloneCalldataHelpers(Module &M) {
+  StringMap<Function *> CloneCache;
+  SmallVector<CallBase *, 32> Calls;
+
+  for (Function &F : M) {
+    if (!shouldCloneFunction(F)) {
+      continue;
+    }
+    Value *Calldata = getCalldataArg(F);
+    if (Calldata == nullptr) {
+      continue;
+    }
+    SmallVector<unsigned, 4> OffsetArgNos = getCalldataOffsetArgNos(F, Calldata);
+    if (OffsetArgNos.empty()) {
+      continue;
+    }
+
+    for (Use &U : F.uses()) {
+      auto *Call = dyn_cast<CallBase>(U.getUser());
+      if (Call == nullptr || Call->getCalledFunction() != &F) {
+        continue;
+      }
+      bool HasConstant = false;
+      for (unsigned ArgNo : OffsetArgNos) {
+        if (ArgNo < Call->arg_size() &&
+            isa<ConstantInt>(Call->getArgOperand(ArgNo))) {
+          HasConstant = true;
+          break;
+        }
+      }
+      if (HasConstant) {
+        Calls.push_back(Call);
+      }
+    }
+  }
+
+  bool Changed = false;
+  for (CallBase *Call : Calls) {
+    Function *Callee = Call->getCalledFunction();
+    if (Callee == nullptr || !shouldCloneFunction(*Callee)) {
+      continue;
+    }
+    Value *Calldata = getCalldataArg(*Callee);
+    if (Calldata == nullptr) {
+      continue;
+    }
+    SmallVector<unsigned, 4> OffsetArgNos =
+        getCalldataOffsetArgNos(*Callee, Calldata);
+    SmallVector<std::pair<unsigned, APInt>, 4> Constants;
+    for (unsigned ArgNo : OffsetArgNos) {
+      if (ArgNo >= Call->arg_size()) {
+        continue;
+      }
+      auto *Constant = dyn_cast<ConstantInt>(Call->getArgOperand(ArgNo));
+      if (Constant == nullptr) {
+        continue;
+      }
+      Constants.push_back({ArgNo, Constant->getValue()});
+    }
+    if (Constants.empty()) {
+      continue;
+    }
+    Function *Clone = cloneHelperForConstants(*Callee, Constants, CloneCache);
+    Call->setCalledFunction(Clone);
+    Changed = true;
+  }
+
+  return Changed;
+}
+
 bool rewriteCalldataLoad(CallBase &Call, Value *Calldata) {
   if (!detail::isCallTo(&Call, "evm_calldataload") ||
       !usesCurrentCalldata(Call, 0, Calldata) || Call.arg_size() != 2) {
@@ -148,13 +333,10 @@ bool rewriteCalldataCopy(CallBase &Call, Value *Calldata) {
   return true;
 }
 
-} // namespace
-
-PreservedAnalyses EvmCalldataAccessPass::run(Function &F,
-                                             FunctionAnalysisManager &) {
+bool rewriteFunction(Function &F) {
   Value *Calldata = getCalldataArg(F);
   if (Calldata == nullptr) {
-    return PreservedAnalyses::all();
+    return false;
   }
 
   SmallVector<CallBase *, 16> Calls;
@@ -181,6 +363,24 @@ PreservedAnalyses EvmCalldataAccessPass::run(Function &F,
     if (rewriteCalldataCopy(*Call, Calldata)) {
       Changed = true;
     }
+  }
+
+  return Changed;
+}
+
+} // namespace
+
+PreservedAnalyses EvmCalldataAccessPass::run(Module &M,
+                                             ModuleAnalysisManager &) {
+  bool Changed = cloneCalldataHelpers(M);
+  SmallVector<Function *, 32> Functions;
+  for (Function &F : M) {
+    if (!F.isDeclaration()) {
+      Functions.push_back(&F);
+    }
+  }
+  for (Function *F : Functions) {
+    Changed |= rewriteFunction(*F);
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

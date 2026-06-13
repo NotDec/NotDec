@@ -308,8 +308,7 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
           createModuleToFunctionPassAdaptor(evm::PayabilityGuardPass()));
       MPM.addPass(
           createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
-      MPM.addPass(
-          createModuleToFunctionPassAdaptor(evm::EvmCalldataAccessPass()));
+      MPM.addPass(evm::EvmCalldataAccessPass());
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
     }
     MPM.addPass(VerifierPass(false));

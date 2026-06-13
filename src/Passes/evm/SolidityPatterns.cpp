@@ -104,6 +104,10 @@ bool isPrivateHelperCall(const CallBase *Call) {
   return Callee != nullptr && Callee->getName().starts_with("private__");
 }
 
+bool isCalldataAccessCloneFunction(const Function &F) {
+  return F.getMetadata(KIND_EVM_CALLDATA_ACCESS_CLONE) != nullptr;
+}
+
 bool isZero(const Value *V) {
   if (V == nullptr) {
     return false;

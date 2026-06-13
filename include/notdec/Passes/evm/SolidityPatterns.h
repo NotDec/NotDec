@@ -43,8 +43,7 @@ struct PayabilityGuardPass : llvm::PassInfoMixin<PayabilityGuardPass> {
 // helper, so MLsub can reason about it like other memory objects.
 struct EvmCalldataAccessPass
     : llvm::PassInfoMixin<EvmCalldataAccessPass> {
-  llvm::PreservedAnalyses run(llvm::Function &F,
-                              llvm::FunctionAnalysisManager &);
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 
   static bool isRequired() { return true; }
 };
