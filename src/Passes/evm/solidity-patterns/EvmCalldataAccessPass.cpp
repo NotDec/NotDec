@@ -1,19 +1,17 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 
 #include <llvm/ADT/Statistic.h>
-#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
-#include <llvm/ADT/StringMap.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Pass.h>
 #include <llvm/Support/Alignment.h>
 #include <llvm/Transforms/Utils/Local.h>
-#include <llvm/Transforms/Utils/Cloning.h>
 
 #define DEBUG_TYPE "evm-calldata-access"
 
@@ -25,8 +23,8 @@ STATISTIC(NumCalldataCopiesRewritten,
           "Number of evm_calldatacopy calls rewritten to LLVM memcpy calls");
 STATISTIC(NumCalldataCallsiteConstantOffsets,
           "Number of calldata offsets resolved from unique callsite constants");
-STATISTIC(NumCalldataHelperClones,
-          "Number of private calldata helpers cloned for constant offsets");
+STATISTIC(NumCalldataPolymorphicHelpers,
+          "Number of private calldata helpers marked as polymorphic");
 
 namespace notdec::passes::evm {
 namespace {
@@ -36,9 +34,8 @@ bool shouldRewriteFunction(Function &F) {
          F.getName().starts_with("private__");
 }
 
-bool shouldCloneFunction(Function &F) {
-  return F.getName().starts_with("private__") &&
-         !detail::isCalldataAccessCloneFunction(F) && !F.isDeclaration();
+bool shouldMarkPolymorphicFunction(Function &F) {
+  return F.getName().starts_with("private__") && !F.isDeclaration();
 }
 
 Value *getCalldataArg(Function &F) {
@@ -168,67 +165,40 @@ SmallVector<unsigned, 4> getCalldataOffsetArgNos(Function &F,
   return ArgNos;
 }
 
-std::string getCloneKey(Function &Callee,
-                        ArrayRef<std::pair<unsigned, APInt>> Constants) {
-  std::string Key = Callee.getName().str();
-  for (const auto &[ArgNo, Value] : Constants) {
-    Key += ":";
-    Key += Twine(ArgNo).str();
-    Key += "=";
-    SmallString<64> ValueText;
-    Value.toString(ValueText, 10, false);
-    Key.append(ValueText.begin(), ValueText.end());
+bool hasPolymorphicCallsiteOffset(Function &F, unsigned ArgNo) {
+  std::optional<APInt> FirstConstant;
+  bool SawConstant = false;
+  bool SawDynamic = false;
+
+  for (Use &U : F.uses()) {
+    auto *Call = dyn_cast<CallBase>(U.getUser());
+    if (Call == nullptr || Call->getCalledFunction() != &F ||
+        ArgNo >= Call->arg_size()) {
+      continue;
+    }
+
+    auto *Constant = dyn_cast<ConstantInt>(Call->getArgOperand(ArgNo));
+    if (Constant == nullptr) {
+      SawDynamic = true;
+      continue;
+    }
+
+    if (FirstConstant.has_value() &&
+        Constant->getValue() != *FirstConstant) {
+      return true;
+    }
+    FirstConstant = Constant->getValue();
+    SawConstant = true;
   }
-  return Key;
+
+  return SawConstant && SawDynamic;
 }
 
-Function *cloneHelperForConstants(
-    Function &Callee, ArrayRef<std::pair<unsigned, APInt>> Constants,
-    StringMap<Function *> &CloneCache) {
-  std::string Key = getCloneKey(Callee, Constants);
-  auto It = CloneCache.find(Key);
-  if (It != CloneCache.end()) {
-    return It->second;
-  }
-
-  Module *M = Callee.getParent();
-  Function *Clone =
-      Function::Create(Callee.getFunctionType(), Callee.getLinkage(),
-                       Callee.getAddressSpace(), Callee.getName() + ".cd",
-                       M);
-  Clone->copyAttributesFrom(&Callee);
-  Clone->setMetadata(detail::KIND_EVM_CALLDATA_ACCESS_CLONE,
-                     MDNode::get(Callee.getContext(),
-                                 {MDString::get(Callee.getContext(), Key)}));
-
-  ValueToValueMapTy VMap;
-  auto CloneArg = Clone->arg_begin();
-  for (Argument &Arg : Callee.args()) {
-    CloneArg->setName(Arg.getName());
-    VMap[&Arg] = &*CloneArg++;
-  }
-
-  SmallVector<ReturnInst *, 8> Returns;
-  CloneFunctionInto(Clone, &Callee, VMap,
-                    CloneFunctionChangeType::LocalChangesOnly, Returns);
-
-  for (const auto &[ArgNo, Value] : Constants) {
-    Argument *Arg = Clone->getArg(ArgNo);
-    auto *Constant = ConstantInt::get(Arg->getType(), Value);
-    Arg->replaceAllUsesWith(Constant);
-  }
-
-  CloneCache[Key] = Clone;
-  ++NumCalldataHelperClones;
-  return Clone;
-}
-
-bool cloneCalldataHelpers(Module &M) {
-  StringMap<Function *> CloneCache;
-  SmallVector<CallBase *, 32> Calls;
+bool markPolymorphicHelpers(Module &M) {
+  bool Changed = false;
 
   for (Function &F : M) {
-    if (!shouldCloneFunction(F)) {
+    if (!shouldMarkPolymorphicFunction(F)) {
       continue;
     }
     Value *Calldata = getCalldataArg(F);
@@ -236,57 +206,23 @@ bool cloneCalldataHelpers(Module &M) {
       continue;
     }
     SmallVector<unsigned, 4> OffsetArgNos = getCalldataOffsetArgNos(F, Calldata);
-    if (OffsetArgNos.empty()) {
-      continue;
-    }
-
-    for (Use &U : F.uses()) {
-      auto *Call = dyn_cast<CallBase>(U.getUser());
-      if (Call == nullptr || Call->getCalledFunction() != &F) {
-        continue;
-      }
-      bool HasConstant = false;
-      for (unsigned ArgNo : OffsetArgNos) {
-        if (ArgNo < Call->arg_size() &&
-            isa<ConstantInt>(Call->getArgOperand(ArgNo))) {
-          HasConstant = true;
-          break;
-        }
-      }
-      if (HasConstant) {
-        Calls.push_back(Call);
-      }
-    }
-  }
-
-  bool Changed = false;
-  for (CallBase *Call : Calls) {
-    Function *Callee = Call->getCalledFunction();
-    if (Callee == nullptr || !shouldCloneFunction(*Callee)) {
-      continue;
-    }
-    Value *Calldata = getCalldataArg(*Callee);
-    if (Calldata == nullptr) {
-      continue;
-    }
-    SmallVector<unsigned, 4> OffsetArgNos =
-        getCalldataOffsetArgNos(*Callee, Calldata);
-    SmallVector<std::pair<unsigned, APInt>, 4> Constants;
+    bool Polymorphic = false;
     for (unsigned ArgNo : OffsetArgNos) {
-      if (ArgNo >= Call->arg_size()) {
-        continue;
+      if (hasPolymorphicCallsiteOffset(F, ArgNo)) {
+        Polymorphic = true;
+        break;
       }
-      auto *Constant = dyn_cast<ConstantInt>(Call->getArgOperand(ArgNo));
-      if (Constant == nullptr) {
-        continue;
-      }
-      Constants.push_back({ArgNo, Constant->getValue()});
     }
-    if (Constants.empty()) {
+    if (!Polymorphic ||
+        F.getMetadata(detail::KIND_EVM_CALLDATA_POLYMORPHIC_HELPER) !=
+            nullptr) {
       continue;
     }
-    Function *Clone = cloneHelperForConstants(*Callee, Constants, CloneCache);
-    Call->setCalledFunction(Clone);
+
+    F.setMetadata(detail::KIND_EVM_CALLDATA_POLYMORPHIC_HELPER,
+                  MDNode::get(F.getContext(),
+                              {MDString::get(F.getContext(), "true")}));
+    ++NumCalldataPolymorphicHelpers;
     Changed = true;
   }
 
@@ -372,7 +308,7 @@ bool rewriteFunction(Function &F) {
 
 PreservedAnalyses EvmCalldataAccessPass::run(Module &M,
                                              ModuleAnalysisManager &) {
-  bool Changed = cloneCalldataHelpers(M);
+  bool Changed = markPolymorphicHelpers(M);
   SmallVector<Function *, 32> Functions;
   for (Function &F : M) {
     if (!F.isDeclaration()) {

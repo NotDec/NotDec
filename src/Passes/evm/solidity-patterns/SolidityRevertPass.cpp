@@ -674,7 +674,7 @@ PreservedAnalyses SolidityRevertPass::run(Module &M,
   bool Changed = false;
 
   for (Function &F : M) {
-    if (F.isDeclaration() || isCalldataAccessCloneFunction(F)) {
+    if (F.isDeclaration()) {
       continue;
     }
 

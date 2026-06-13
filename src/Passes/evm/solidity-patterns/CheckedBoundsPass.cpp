@@ -277,10 +277,6 @@ void rewriteCheckedBoundsGuard(const CheckedBoundsMatch &Match) {
 
 PreservedAnalyses CheckedBoundsPass::run(Function &F,
                                          FunctionAnalysisManager &FAM) {
-  if (isCalldataAccessCloneFunction(F)) {
-    return PreservedAnalyses::all();
-  }
-
   LLVMContext &Ctx = F.getContext();
   DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
   bool Changed = false;

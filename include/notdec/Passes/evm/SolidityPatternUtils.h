@@ -38,8 +38,8 @@ inline constexpr llvm::StringLiteral KIND_SOLIDITY_SELECTOR_OUTLINED_BODY(
     "notdec.solidity.selector_outlined_body");
 inline constexpr llvm::StringLiteral KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED(
     "notdec.solidity.selector_outline_skipped");
-inline constexpr llvm::StringLiteral KIND_EVM_CALLDATA_ACCESS_CLONE(
-    "notdec.evm.calldata_access_clone");
+inline constexpr llvm::StringLiteral KIND_EVM_CALLDATA_POLYMORPHIC_HELPER(
+    "notdec.evm.calldata_polymorphic_helper");
 
 // Shared result for Solidity revert-like exits.  Revert and checked/bounds
 // passes both need the terminator kind and a small amount of ABI payload shape.
@@ -187,7 +187,6 @@ void markBlock(llvm::LLVMContext &Ctx, llvm::BasicBlock &BB,
 
 bool isSelectorFunction(const llvm::Function &F);
 bool isPublicEntryFunction(const llvm::Function &F);
-bool isCalldataAccessCloneFunction(const llvm::Function &F);
 bool isDispatcherBlock(llvm::BasicBlock &BB);
 bool isPublicCallStub(llvm::BasicBlock &BB);
 bool isEmptyRevertBlock(llvm::BasicBlock *BB);
