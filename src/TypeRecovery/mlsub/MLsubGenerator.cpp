@@ -4023,6 +4023,18 @@ bool ConstraintsGenerator::MLsubVisitor::handleEVMMarkerCall(
   }
 
   StringRef Name = F->getName();
+  if (Name == "notdec_evm_calldata_min_size") {
+    if (I.arg_size() >= 1 && !I.getType()->isVoidTy()) {
+      auto Calldata = getExtValuePtr(I.getArgOperand(0), &I, 0);
+      cg.getOrInsertNode(Calldata);
+      cg.addRemapType(&I, Calldata);
+    }
+    if (I.arg_size() >= 2 && I.getArgOperand(1)->getType()->isIntegerTy()) {
+      cg.setNonPointer(getExtValuePtr(I.getArgOperand(1), &I, 1));
+    }
+    return true;
+  }
+
   bool IsWordWrite =
       Name == "notdec_solidity_memory_write" ||
       Name == "notdec_solidity_abi_return_data_word_write" ||

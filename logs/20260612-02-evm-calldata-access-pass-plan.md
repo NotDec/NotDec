@@ -154,6 +154,15 @@ if lt(calldatasize(), 36) { revert(0, 0) }
 - [include/notdec/Passes/evm/SolidityPatterns.h](/sn640/NotDec/include/notdec/Passes/evm/SolidityPatterns.h:46)、[src/Passes/PassManager.cpp](/sn640/NotDec/src/Passes/PassManager.cpp:311)：`EvmCalldataAccessPass` 保持 module pass，用来查看 helper 的所有直接调用点；仍放在 `MemoryBufferRewritePass` 后、类型恢复前。
 - 按用户后续判断，已删除隐藏 clone 路线：不再生成 `.cd` helper，也不再要求 ABI return / revert / checked-bounds / event marker pass 跳过 clone。
 
+本次增量：
+
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:40)：新增 `CalldataMinSizeGuard`，记录正常分支上的 checked alias 和最小 calldata 大小。
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:74)：新增 `matchCalldataTooShortICmp()` / `matchCalldataTooShort()`，识别 `calldatasize < N`、`N > calldatasize` 以及 `zext`、`iszero`、`icmp ne 0` 包装后的等价形状。
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:176)：新增 `isNoPayloadRevertBlock()`，只接受 fail successor 中的 `evm_revert(..., 0, 0)`。
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:192)：新增 `notdec_evm_calldata_min_size(ptr, i256) -> ptr` 声明和插入逻辑。调用插在正常 successor 的第一条非 PHI 指令前，且要求这个 successor 只有 guard block 一个前驱，避免 marker 被失败路径或其他未检查路径执行。
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:478)：`rewriteFunction()` 构建 `DominatorTree`，对被 checked 正常块支配的 `evm_calldataload` / `evm_calldatacopy` 选择最强的 checked alias 作为 base。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:4026)：`handleEVMMarkerCall()` 把 `notdec_evm_calldata_min_size` 返回值 remap 到原 `%calldata`，并把 size 参数标成非指针，避免它进入普通函数调用约束。
+
 验证：
 
 - `cmake --build ./build --target notdec -j4`
@@ -169,8 +178,19 @@ if lt(calldatasize(), 36) { revert(0, 0) }
 - `/tmp/notdec-0334-mlsub-poly/SCCs.txt` 里 `private__0x3597_0x3597,evm_revert,evm_shl` 被拆成独立 `level = 1` SCC，说明 MLsub 已消费这个 metadata。
 - `./build/bin/notdec test/evm/solidity-patterns/cases/0679_19497465_c2187cbc73_f22fac5262f8.ll -o /tmp/0679-mlsub-poly-fix.ll --tr-level=2`
 - 修复后 0679 不再触发 `genASTTypes()` 的重复 HType 断言。
+- `./build/bin/notdec test/evm/solidity-rewrite/cases/0188_19493600_ac3404db28_614bfb7197be.ll --tr-level=2 --emit-tr-input-ir=/tmp/0188-calldata-min-size.ll`
+- `/tmp/0188-calldata-min-size.ll` 中 `calldatasize > 9` 的正常块开头生成 `%calldata.checked = call ptr @notdec_evm_calldata_min_size(ptr %calldata, i256 10)`，后续 calldata load/copy 使用 `%calldata.checked`。
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/0188-calldata-min-size.ll -o /tmp/0188-calldata-min-size.bc`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0112_19493231_e681d3a0e3_c848651ad27d.ll --tr-level=2 --emit-tr-input-ir=/tmp/0112-calldata-min-size.ll`
+- `/tmp/0112-calldata-min-size.ll` 没有生成 `notdec_evm_calldata_min_size`；该 selector 的 `size < 4` fail successor 不是直接空 revert，当前规则保守跳过。
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/0112-calldata-min-size.ll -o /tmp/0112-calldata-min-size.bc`
+- `./build/bin/notdec test/evm/solidity-rewrite/cases/0188_19493600_ac3404db28_614bfb7197be.ll -o /tmp/0188-calldata-min-size-final.ll --tr-level=2`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0334_19494307_668d201319_1354ce2e324d.ll -o /tmp/0334-calldata-min-size-final.ll --tr-level=2`
+- `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)|notdec.type_recovery.evm.tr_level_2' --output-on-failure`
 
 性能观察：移除 clone、改为多态 metadata 后，最近一次验证中 `notdec.evm.solidity_patterns` 用时 437.67 秒，`notdec.evm.solidity_rewrite` 用时 80.46 秒，`notdec.type_recovery.evm.tr_level_2` 用时 0.98 秒。相比隐藏 clone 的 452.98 秒，patterns suite 用时恢复到接近 clone 前水平；没有继续跑 fortune，用户已要求先不要管 fortune 性能问题。
+
+本次 calldata min-size intrinsic 后，相关 CTest 用时：`notdec.evm.solidity_patterns` 442.24 秒，`notdec.evm.solidity_rewrite` 82.08 秒，`notdec.type_recovery.evm.tr_level_2` 0.98 秒。与前次同口径相比变化很小。
 
 方案评分：
 
