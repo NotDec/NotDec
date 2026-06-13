@@ -165,6 +165,8 @@ Selector dispatcher 本身不作为这个 pass 的处理目标。`calldatasize <
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:478)：`rewriteFunction()` 构建 `DominatorTree`，对被 checked 正常块支配的 `evm_calldataload` / `evm_calldatacopy` 选择最强的 checked alias 作为 base。
 - [src/TypeRecovery/mlsub/MLsubGenerator.cpp](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:4026)：`handleEVMMarkerCall()` 把 `notdec_evm_calldata_min_size` 返回值 remap 到原 `%calldata`，并把 size 参数标成非指针，避免它进入普通函数调用约束。
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:47)：按后续范围确认，`shouldRewriteFunction()` 不再处理 selector dispatcher；只处理独立 public entry 和 private helper。
+- [test/evm/solidity-patterns/cases/calldata_min_size_public_entry_01.ll](/sn640/NotDec/test/evm/solidity-patterns/cases/calldata_min_size_public_entry_01.ll:1)：新增最小独立 public entry 回归样例，覆盖直接 `calldatasize < 36` 空 revert guard。
+- [test/run_evm_solidity_patterns_suite.py](/sn640/NotDec/test/run_evm_solidity_patterns_suite.py:273)、[test/evm/solidity-patterns/manifest.json](/sn640/NotDec/test/evm/solidity-patterns/manifest.json:7)：给 patterns runner 增加 `expected_exact_markers`，并检查 `notdec_evm_calldata_min_size` 出现 1 次。
 
 验证：
 
@@ -198,12 +200,20 @@ Selector dispatcher 本身不作为这个 pass 的处理目标。`calldatasize <
 - `/tmp/0188-calldata-scope.ll` 不生成 `notdec_evm_calldata_min_size`；该样例里命中的 size guard 属于 selector 路径，按当前范围跳过。
 - `./llvm-22.1.0.obj/bin/llvm-as /tmp/0188-calldata-scope.ll -o /tmp/0188-calldata-scope.bc`
 - `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)|notdec.type_recovery.evm.tr_level_2' --output-on-failure`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/calldata_min_size_public_entry_01.ll --tr-level=2 --emit-tr-input-ir=/tmp/calldata-min-size-public-entry-pretr.ll`
+- `/tmp/calldata-min-size-public-entry-pretr.ll` 中正常块开头生成 `%calldata.checked = call ptr @notdec_evm_calldata_min_size(ptr %calldata, i256 36)`，后续 load 使用 `ptrtoint ptr %calldata.checked`。
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/calldata-min-size-public-entry-pretr.ll -o /tmp/calldata-min-size-public-entry-pretr.bc`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/calldata_min_size_public_entry_01.ll -o /tmp/calldata-min-size-public-entry.ll --tr-level=2`
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/calldata-min-size-public-entry.ll -o /tmp/calldata-min-size-public-entry.bc`
+- `ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure`
 
 性能观察：移除 clone、改为多态 metadata 后，最近一次验证中 `notdec.evm.solidity_patterns` 用时 437.67 秒，`notdec.evm.solidity_rewrite` 用时 80.46 秒，`notdec.type_recovery.evm.tr_level_2` 用时 0.98 秒。相比隐藏 clone 的 452.98 秒，patterns suite 用时恢复到接近 clone 前水平；没有继续跑 fortune，用户已要求先不要管 fortune 性能问题。
 
 本次 calldata min-size intrinsic 后，相关 CTest 用时：`notdec.evm.solidity_patterns` 442.24 秒，`notdec.evm.solidity_rewrite` 82.08 秒，`notdec.type_recovery.evm.tr_level_2` 0.98 秒。与前次同口径相比变化很小。
 
 收窄为不处理 selector dispatcher 后，相关 CTest 用时：`notdec.evm.solidity_patterns` 440.95 秒，`notdec.evm.solidity_rewrite` 80.80 秒，`notdec.type_recovery.evm.tr_level_2` 0.96 秒。
+
+新增 public-entry regression 后，`notdec.evm.solidity_patterns` 用时 443.12 秒。
 
 方案评分：
 

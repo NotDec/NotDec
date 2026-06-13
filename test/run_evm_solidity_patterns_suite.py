@@ -272,7 +272,9 @@ def count_checked_bounds_cfg_rewrites(path: Path) -> int:
 
 def count_exact_marker(path: Path, marker_name: str) -> int:
     text = path.read_text()
-    return text.count(f"call void @{marker_name}(")
+    return len(
+        re.findall(rf"\bcall\b[^\n@]*@{re.escape(marker_name)}\(", text)
+    )
 
 
 def count_memory_consumer_kinds(path: Path) -> dict[str, int]:
@@ -540,6 +542,10 @@ def main() -> int:
                 "expected_memory_rewrite_markers", {}
             ).items():
                 expected_counts[f"memory_rewrite_marker:{marker_name}"] = expected
+            for marker_name, expected in case.get(
+                "expected_exact_markers", {}
+            ).items():
+                expected_counts[f"exact_marker:{marker_name}"] = expected
             for kind, expected in case.get(
                 "expected_memory_consumer_kinds", {}
             ).items():
@@ -668,6 +674,10 @@ def main() -> int:
             for marker_name in case.get("expected_memory_rewrite_markers", {}):
                 actual_counts[f"memory_rewrite_marker:{marker_name}"] = (
                     count_exact_marker(output_ll, marker_name)
+                )
+            for marker_name in case.get("expected_exact_markers", {}):
+                actual_counts[f"exact_marker:{marker_name}"] = count_exact_marker(
+                    output_ll, marker_name
                 )
             actual_memory_consumer_kinds = count_memory_consumer_kinds(output_ll)
             for kind in case.get("expected_memory_consumer_kinds", {}):
