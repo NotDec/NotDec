@@ -1810,6 +1810,12 @@ bool isCalldataPointer(Value *Ptr) {
     return Arg->getName() == "calldata";
   }
 
+  auto *Call = dyn_cast_or_null<CallBase>(Ptr);
+  if (Call != nullptr && isCallTo(Call, "notdec_evm_calldata_min_size") &&
+      Call->arg_size() >= 1) {
+    return isCalldataPointer(Call->getArgOperand(0));
+  }
+
   auto *GEP = dyn_cast_or_null<GEPOperator>(Ptr);
   return GEP != nullptr && isCalldataPointer(GEP->getPointerOperand());
 }
@@ -2095,8 +2101,9 @@ matchArrayBounds(const NormalizedCondition &FailureCond,
   StringRef Kind = "array_bounds_unknown";
   if (isCalldataLoad(Length)) {
     Kind = "array_bounds_calldata";
-  } else if (matchEvmMemoryLoad(Length).has_value()) {
-    Kind = "array_bounds_memory";
+  } else if (std::optional<EvmMemoryLoad> Load = matchEvmMemoryLoad(Length)) {
+    Kind = isCalldataAddress(Load->Address) ? "array_bounds_calldata"
+                                            : "array_bounds_memory";
   } else if (auto *LengthCall = dyn_cast<CallBase>(Length)) {
     if (isCallTo(LengthCall, "evm_calldataload")) {
       Kind = "array_bounds_calldata";

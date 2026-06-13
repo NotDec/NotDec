@@ -79,6 +79,18 @@ std::optional<uint64_t> getUInt64Constant(Value *V) {
   return Constant->getZExtValue();
 }
 
+std::optional<uint64_t> getNegatedUInt64Constant(Value *V) {
+  auto *Constant = dyn_cast_or_null<ConstantInt>(V);
+  if (Constant == nullptr || !Constant->getValue().isNegative()) {
+    return std::nullopt;
+  }
+  APInt Negated = -Constant->getValue();
+  if (Negated.getActiveBits() > 64) {
+    return std::nullopt;
+  }
+  return Negated.getZExtValue();
+}
+
 bool isCalldataSize(Value *V, Value *Calldata) {
   auto *Call = dyn_cast_or_null<CallBase>(V);
   return Call != nullptr && detail::isCallTo(Call, "evm_calldatasize") &&
@@ -90,6 +102,35 @@ std::optional<uint64_t> addOne(uint64_t N) {
     return std::nullopt;
   }
   return N + 1;
+}
+
+std::optional<uint64_t> checkedAdd(uint64_t LHS, uint64_t RHS) {
+  if (LHS > std::numeric_limits<uint64_t>::max() - RHS) {
+    return std::nullopt;
+  }
+  return LHS + RHS;
+}
+
+std::optional<uint64_t> matchCalldataSizeMinusConstant(Value *V,
+                                                       Value *Calldata) {
+  auto *Op = dyn_cast_or_null<BinaryOperator>(V);
+  if (Op == nullptr) {
+    return std::nullopt;
+  }
+  if (Op->getOpcode() == Instruction::Sub &&
+      isCalldataSize(Op->getOperand(0), Calldata)) {
+    return getUInt64Constant(Op->getOperand(1));
+  }
+  if (Op->getOpcode() != Instruction::Add) {
+    return std::nullopt;
+  }
+  if (isCalldataSize(Op->getOperand(0), Calldata)) {
+    return getNegatedUInt64Constant(Op->getOperand(1));
+  }
+  if (isCalldataSize(Op->getOperand(1), Calldata)) {
+    return getNegatedUInt64Constant(Op->getOperand(0));
+  }
+  return std::nullopt;
 }
 
 std::optional<uint64_t> matchCalldataTooShortICmp(ICmpInst &Cmp,
@@ -111,6 +152,48 @@ std::optional<uint64_t> matchCalldataTooShortICmp(ICmpInst &Cmp,
     if ((Pred == ICmpInst::ICMP_ULE && TakenWhenTrue) ||
         (Pred == ICmpInst::ICMP_UGT && !TakenWhenTrue)) {
       return addOne(*Bound);
+    }
+    return std::nullopt;
+  }
+
+  if (std::optional<uint64_t> Base =
+          matchCalldataSizeMinusConstant(LHS, Calldata)) {
+    std::optional<uint64_t> Needed = getUInt64Constant(RHS);
+    if (!Needed.has_value()) {
+      return std::nullopt;
+    }
+    if ((Pred == ICmpInst::ICMP_SLT && TakenWhenTrue) ||
+        (Pred == ICmpInst::ICMP_SGE && !TakenWhenTrue)) {
+      return checkedAdd(*Base, *Needed);
+    }
+    if ((Pred == ICmpInst::ICMP_SLE && TakenWhenTrue) ||
+        (Pred == ICmpInst::ICMP_SGT && !TakenWhenTrue)) {
+      std::optional<uint64_t> MinAvailable = addOne(*Needed);
+      if (!MinAvailable.has_value()) {
+        return std::nullopt;
+      }
+      return checkedAdd(*Base, *MinAvailable);
+    }
+    return std::nullopt;
+  }
+
+  if (std::optional<uint64_t> Base =
+          matchCalldataSizeMinusConstant(RHS, Calldata)) {
+    std::optional<uint64_t> Needed = getUInt64Constant(LHS);
+    if (!Needed.has_value()) {
+      return std::nullopt;
+    }
+    if ((Pred == ICmpInst::ICMP_SGT && TakenWhenTrue) ||
+        (Pred == ICmpInst::ICMP_SLE && !TakenWhenTrue)) {
+      return checkedAdd(*Base, *Needed);
+    }
+    if ((Pred == ICmpInst::ICMP_SGE && TakenWhenTrue) ||
+        (Pred == ICmpInst::ICMP_SLT && !TakenWhenTrue)) {
+      std::optional<uint64_t> MinAvailable = addOne(*Needed);
+      if (!MinAvailable.has_value()) {
+        return std::nullopt;
+      }
+      return checkedAdd(*Base, *MinAvailable);
     }
     return std::nullopt;
   }

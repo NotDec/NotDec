@@ -28,6 +28,27 @@
       }
     },
     {
+      "name": "calldata_min_size_sub_public_entry_01",
+      "input": "cases/calldata_min_size_sub_public_entry_01.ll",
+      "patterns": [
+        "calldata"
+      ],
+      "expected_nonpayable_functions": 0,
+      "expected_metadata_counts": {
+        "notdec.solidity.abi_return": 0,
+        "notdec.solidity.checked_bounds": 0,
+        "notdec.solidity.event": 0,
+        "notdec.solidity.payability_guard": 0,
+        "notdec.solidity.revert": 1
+      },
+      "expected_revert_kinds": {
+        "empty": 1
+      },
+      "expected_exact_markers": {
+        "notdec_evm_calldata_min_size": 1
+      }
+    },
+    {
       "name": "checked_bounds_arithmetic_01",
       "input": "cases/checked_bounds_arithmetic_01.ll",
       "patterns": [
