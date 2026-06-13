@@ -1,4 +1,5 @@
 #include "Passes/evm/SolidityPatternUtils.h"
+#include "TypeRecovery/mlsub/Metadata.h"
 
 #include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/SmallVector.h>
@@ -214,14 +215,14 @@ bool markPolymorphicHelpers(Module &M) {
       }
     }
     if (!Polymorphic ||
-        F.getMetadata(detail::KIND_EVM_CALLDATA_POLYMORPHIC_HELPER) !=
-            nullptr) {
+        F.getMetadata(mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION) != nullptr) {
       continue;
     }
 
-    F.setMetadata(detail::KIND_EVM_CALLDATA_POLYMORPHIC_HELPER,
+    F.setMetadata(mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION,
                   MDNode::get(F.getContext(),
-                              {MDString::get(F.getContext(), "true")}));
+                              {MDString::get(F.getContext(),
+                                             "calldata_offset")}));
     ++NumCalldataPolymorphicHelpers;
     Changed = true;
   }

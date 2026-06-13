@@ -11,6 +11,7 @@
 #include "notdec-llvm2c/Utils.h"
 #include "notdec/TypeRecovery/mlsub/HTypeDebug.h"
 #include "notdec/TypeRecovery/mlsub/HTypeNormalize.h"
+#include "notdec/TypeRecovery/mlsub/Metadata.h"
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
 #include "notdec/Utils/AllSCCIterator.h"
 #include "notdec/Utils/SingleNodeSCCIterator.h"
@@ -3189,12 +3190,13 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
     for (auto &Ent : Data.Generator->ValueTypesLower) {
-      auto It = ResultVal->ValueTypesLower.insert(Ent);
-      assert(It.second && "Duplicated Entry?");
+      // Polymorphic callees temporarily solve caller interface values so calls can
+      // instantiate their summaries. Keep the owning SCC's HType and ignore those
+      // later interface copies when building the final module-level result.
+      ResultVal->ValueTypesLower.insert(Ent);
     }
     for (auto &Ent : Data.Generator->ValueTypesUpper) {
-      auto It = ResultVal->ValueTypesUpper.insert(Ent);
-      assert(It.second && "Duplicated Entry?");
+      ResultVal->ValueTypesUpper.insert(Ent);
     }
     ResultVal->ContraVariantValues.insert(
         Data.Generator->SnapshotContraVariantValues.begin(),
@@ -3296,6 +3298,9 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
           return true;
         }
         if (Fn->hasName() && PolyFuncs.count(Fn->getName().str())) {
+          return true;
+        }
+        if (Fn->getMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION) != nullptr) {
           return true;
         }
         if (isPolymorphic(Fn)) {

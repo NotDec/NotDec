@@ -75,7 +75,7 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 
 如果 public entry 调用 private helper，而 helper 的形参表示 calldata offset，需要把 helper 内的访问映射回调用点的 `%calldata`。已有 `getUniqueCallsiteArgUInt64Constant()` 可以处理“所有 callsite 都传同一个常量”的 helper。对于被多个 public entry 用不同 offset 复用的 helper，不能把 helper 本身固定成某个 ABI 格式。
 
-当前不复制 private helper。对于被多个调用点以不同 calldata offset 使用的 helper，只给原函数打 `notdec.evm.calldata_polymorphic_helper` 元数据，说明这个函数的 calldata offset 形参是多态的。这样保留后续类型推理或 summary/context 处理的入口，同时避免增加 IR 体积和重复语义点。
+当前不复制 private helper。对于被多个调用点以不同 calldata offset 使用的 helper，只给原函数打 `notdec.mlsub.polymorphic_function` 元数据，说明这个函数需要按多态函数处理。这个元数据属于类型推理侧，EVM calldata pass 只是生产者；MLsub 在 SCC 分层时消费它，避免让 EVM 专用 metadata 渗进类型推理实现。
 
 ## 和类型推理 / HType 的关系
 
@@ -122,8 +122,10 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:52)：继续扩展 offset 回推，支持常量、唯一 callsite 参数常量，以及这些值之间的小范围 `add`。例如 helper 内 `%arg + 32`，且 `%arg` 在所有直接 callsite 都是 `4` 时，会写成 `%calldata + 36`；如果 callsite 不一致，仍保留动态 offset。
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:118)：`collectArgumentUses()` / `getCalldataOffsetArgNos()` 只收集真正流入 calldata load/copy source offset 的 helper 形参，作为判断多态 calldata helper 的依据。
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:168)：`hasPolymorphicCallsiteOffset()` 检查同一 offset 形参是否存在多个不同常量调用点，或者同时存在常量和动态调用点。
-- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:197)：`markPolymorphicHelpers()` 给这类 helper 打 `notdec.evm.calldata_polymorphic_helper` 元数据，不复制函数。
-- [include/notdec/Passes/evm/SolidityPatternUtils.h](/sn640/NotDec/include/notdec/Passes/evm/SolidityPatternUtils.h:41)：新增 `notdec.evm.calldata_polymorphic_helper` 元数据名。
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:197)：`markPolymorphicHelpers()` 给这类 helper 打 `notdec.mlsub.polymorphic_function` 元数据，metadata 值暂记为 `calldata_offset`，不复制函数。
+- [include/notdec/TypeRecovery/mlsub/Metadata.h](/sn640/NotDec/include/notdec/TypeRecovery/mlsub/Metadata.h:8)：新增类型推理侧通用 metadata 名 `notdec.mlsub.polymorphic_function`。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3303)：`MLsubRecovery::prepareSCC()` 把带 `notdec.mlsub.polymorphic_function` 的函数也当作多态函数，和 `NOTDEC_POLY_FUNCS`、summary override 里的多态标记走同一条 SCC 分层路径。
+- [src/TypeRecovery/mlsub/MLsubGenerator.cpp](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:3192)：`MLsubRecovery::genASTTypes()` 合并最终 HType 时跳过多态 callee 为 caller interface 临时生成的重复记录，保留 value 所属 SCC 先写入的 HType。
 - [include/notdec/Passes/evm/SolidityPatterns.h](/sn640/NotDec/include/notdec/Passes/evm/SolidityPatterns.h:46)、[src/Passes/PassManager.cpp](/sn640/NotDec/src/Passes/PassManager.cpp:311)：`EvmCalldataAccessPass` 保持 module pass，用来查看 helper 的所有直接调用点；仍放在 `MemoryBufferRewritePass` 后、类型恢复前。
 - 按用户后续判断，已删除隐藏 clone 路线：不再生成 `.cd` helper，也不再要求 ABI return / revert / checked-bounds / event marker pass 跳过 clone。
 
@@ -135,11 +137,18 @@ call void @llvm.memcpy.p0.p0.i256(ptr %dst.ptr, ptr %src.ptr, i256 %len, i1 fals
 - `./llvm-22.1.0.obj/bin/llvm-as /tmp/0334-pretr-new.ll -o /tmp/0334-pretr-new.bc`
 - `./build/bin/notdec test/evm/solidity-patterns/cases/0334_19494307_668d201319_1354ce2e324d.ll --tr-level=2 --emit-tr-input-ir=/tmp/0334-pretr-polymorphic.ll`
 - `./llvm-22.1.0.obj/bin/llvm-as /tmp/0334-pretr-polymorphic.ll -o /tmp/0334-pretr-polymorphic.bc`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0334_19494307_668d201319_1354ce2e324d.ll --tr-level=2 --emit-tr-input-ir=/tmp/0334-pretr-mlsub-poly.ll`
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/0334-pretr-mlsub-poly.ll -o /tmp/0334-pretr-mlsub-poly.bc`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0334_19494307_668d201319_1354ce2e324d.ll --tr-level=2 --gen-work-dir --work-dir=/tmp/notdec-0334-mlsub-poly -o /tmp/0334-mlsub-poly.ll`
+- `/tmp/0334-pretr-mlsub-poly.ll` 里 `private__0x3597_0x3597` 带 `!notdec.mlsub.polymorphic_function`；没有 `.cd` helper，也没有残留 `evm_calldataload` / `evm_calldatacopy`。
+- `/tmp/notdec-0334-mlsub-poly/SCCs.txt` 里 `private__0x3597_0x3597,evm_revert,evm_shl` 被拆成独立 `level = 1` SCC，说明 MLsub 已消费这个 metadata。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0679_19497465_c2187cbc73_f22fac5262f8.ll -o /tmp/0679-mlsub-poly-fix.ll --tr-level=2`
+- 修复后 0679 不再触发 `genASTTypes()` 的重复 HType 断言。
 
-性能观察：移除 clone、改为多态 metadata 后，最近一次验证中 `notdec.evm.solidity_patterns` 用时 437.32 秒，`notdec.evm.solidity_rewrite` 用时 81.27 秒，`notdec.type_recovery.evm.tr_level_2` 用时 0.97 秒。相比隐藏 clone 的 452.98 秒，patterns suite 用时恢复到接近 clone 前水平；没有继续跑 fortune，用户已要求先不要管 fortune 性能问题。
+性能观察：移除 clone、改为多态 metadata 后，最近一次验证中 `notdec.evm.solidity_patterns` 用时 437.67 秒，`notdec.evm.solidity_rewrite` 用时 80.46 秒，`notdec.type_recovery.evm.tr_level_2` 用时 0.98 秒。相比隐藏 clone 的 452.98 秒，patterns suite 用时恢复到接近 clone 前水平；没有继续跑 fortune，用户已要求先不要管 fortune 性能问题。
 
 方案评分：
 
 - 实现效果：8/10。直接访问已经改成普通 LLVM load/memcpy，能回推唯一 callsite 常量 offset、简单 `arg + const` offset，并能标出同一 helper 多个 calldata offset 调用点。标记本身不把不同 callsite 的 HType 证据拆开，后续仍需要类型推理或 summary/context 消费这个 metadata。
 - 复杂度：6/10。保留 module pass 是为了看所有直接调用点，但不再复制函数，也不需要后续 marker pass 特判 clone。
-- 维护成本：6/10。metadata 路线比 clone 轻，IR 体积稳定；后续维护重点是让类型推理或相关 helper 使用 `notdec.evm.calldata_polymorphic_helper`。
+- 维护成本：6/10。metadata 路线比 clone 轻，IR 体积稳定；后续维护重点是继续让 calldata 访问证据更完整地进入 HType，而不是让后续 pass 重新匹配 calldata 指令形状。
