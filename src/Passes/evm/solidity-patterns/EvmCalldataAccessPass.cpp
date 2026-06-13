@@ -46,8 +46,7 @@ struct CalldataMinSizeGuard {
 };
 
 bool shouldRewriteFunction(Function &F) {
-  return detail::isPublicEntryFunction(F) || detail::isSelectorFunction(F) ||
-         F.getName().starts_with("private__");
+  return detail::isPublicEntryFunction(F) || F.getName().starts_with("private__");
 }
 
 bool shouldMarkPolymorphicFunction(Function &F) {

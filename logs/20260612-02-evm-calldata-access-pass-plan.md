@@ -98,6 +98,8 @@ if lt(calldatasize(), 36) { revert(0, 0) }
 
 一个 public entry 内所有直接 calldata 访问都归到函数自己的 `%calldata` 指针。
 
+Selector dispatcher 本身不作为这个 pass 的处理目标。`calldatasize < 4` 后再分 receive/fallback/revert 的 selector 入口逻辑是 Solidity dispatcher 语义，不在这里抽 calldata buffer size 证据。这个 pass 只处理已经识别出来的独立 public entry，包括 outline pass 单独拆出来的 public body；private helper 仍按调用点 offset 关系处理。
+
 如果 public entry 调用 private helper，而 helper 的形参表示 calldata offset，需要把 helper 内的访问映射回调用点的 `%calldata`。已有 `getUniqueCallsiteArgUInt64Constant()` 可以处理“所有 callsite 都传同一个常量”的 helper。对于被多个 public entry 用不同 offset 复用的 helper，不能把 helper 本身固定成某个 ABI 格式。
 
 当前不复制 private helper。对于被多个调用点以不同 calldata offset 使用的 helper，只给原函数打 `notdec.mlsub.polymorphic_function` 元数据，说明这个函数需要按多态函数处理。这个元数据属于类型推理侧，EVM calldata pass 只是生产者；MLsub 在 SCC 分层时消费它，避免让 EVM 专用 metadata 渗进类型推理实现。
@@ -162,6 +164,7 @@ if lt(calldatasize(), 36) { revert(0, 0) }
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:192)：新增 `notdec_evm_calldata_min_size(ptr, i256) -> ptr` 声明和插入逻辑。调用插在正常 successor 的第一条非 PHI 指令前，且要求这个 successor 只有 guard block 一个前驱，避免 marker 被失败路径或其他未检查路径执行。
 - [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:478)：`rewriteFunction()` 构建 `DominatorTree`，对被 checked 正常块支配的 `evm_calldataload` / `evm_calldatacopy` 选择最强的 checked alias 作为 base。
 - [src/TypeRecovery/mlsub/MLsubGenerator.cpp](/sn640/NotDec/src/TypeRecovery/mlsub/MLsubGenerator.cpp:4026)：`handleEVMMarkerCall()` 把 `notdec_evm_calldata_min_size` 返回值 remap 到原 `%calldata`，并把 size 参数标成非指针，避免它进入普通函数调用约束。
+- [src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp:47)：按后续范围确认，`shouldRewriteFunction()` 不再处理 selector dispatcher；只处理独立 public entry 和 private helper。
 
 验证：
 
@@ -179,7 +182,7 @@ if lt(calldatasize(), 36) { revert(0, 0) }
 - `./build/bin/notdec test/evm/solidity-patterns/cases/0679_19497465_c2187cbc73_f22fac5262f8.ll -o /tmp/0679-mlsub-poly-fix.ll --tr-level=2`
 - 修复后 0679 不再触发 `genASTTypes()` 的重复 HType 断言。
 - `./build/bin/notdec test/evm/solidity-rewrite/cases/0188_19493600_ac3404db28_614bfb7197be.ll --tr-level=2 --emit-tr-input-ir=/tmp/0188-calldata-min-size.ll`
-- `/tmp/0188-calldata-min-size.ll` 中 `calldatasize > 9` 的正常块开头生成 `%calldata.checked = call ptr @notdec_evm_calldata_min_size(ptr %calldata, i256 10)`，后续 calldata load/copy 使用 `%calldata.checked`。
+- 范围收窄前，`/tmp/0188-calldata-min-size.ll` 中 `calldatasize > 9` 的正常块开头生成 `%calldata.checked = call ptr @notdec_evm_calldata_min_size(ptr %calldata, i256 10)`，后续 calldata load/copy 使用 `%calldata.checked`。
 - `./llvm-22.1.0.obj/bin/llvm-as /tmp/0188-calldata-min-size.ll -o /tmp/0188-calldata-min-size.bc`
 - `./build/bin/notdec test/evm/solidity-patterns/cases/0112_19493231_e681d3a0e3_c848651ad27d.ll --tr-level=2 --emit-tr-input-ir=/tmp/0112-calldata-min-size.ll`
 - `/tmp/0112-calldata-min-size.ll` 没有生成 `notdec_evm_calldata_min_size`；该 selector 的 `size < 4` fail successor 不是直接空 revert，当前规则保守跳过。
@@ -187,10 +190,20 @@ if lt(calldatasize(), 36) { revert(0, 0) }
 - `./build/bin/notdec test/evm/solidity-rewrite/cases/0188_19493600_ac3404db28_614bfb7197be.ll -o /tmp/0188-calldata-min-size-final.ll --tr-level=2`
 - `./build/bin/notdec test/evm/solidity-patterns/cases/0334_19494307_668d201319_1354ce2e324d.ll -o /tmp/0334-calldata-min-size-final.ll --tr-level=2`
 - `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)|notdec.type_recovery.evm.tr_level_2' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/0112_19493231_e681d3a0e3_c848651ad27d.ll --tr-level=2 --emit-tr-input-ir=/tmp/0112-calldata-scope.ll`
+- `/tmp/0112-calldata-scope.ll` 保留 selector dispatcher 里的 `evm_calldataload(ptr %calldata, i256 0)`，不生成 `notdec_evm_calldata_min_size`。
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/0112-calldata-scope.ll -o /tmp/0112-calldata-scope.bc`
+- `./build/bin/notdec test/evm/solidity-rewrite/cases/0188_19493600_ac3404db28_614bfb7197be.ll --tr-level=2 --emit-tr-input-ir=/tmp/0188-calldata-scope.ll`
+- `/tmp/0188-calldata-scope.ll` 不生成 `notdec_evm_calldata_min_size`；该样例里命中的 size guard 属于 selector 路径，按当前范围跳过。
+- `./llvm-22.1.0.obj/bin/llvm-as /tmp/0188-calldata-scope.ll -o /tmp/0188-calldata-scope.bc`
+- `ctest --test-dir build -R 'notdec.evm.solidity_(patterns|rewrite)|notdec.type_recovery.evm.tr_level_2' --output-on-failure`
 
 性能观察：移除 clone、改为多态 metadata 后，最近一次验证中 `notdec.evm.solidity_patterns` 用时 437.67 秒，`notdec.evm.solidity_rewrite` 用时 80.46 秒，`notdec.type_recovery.evm.tr_level_2` 用时 0.98 秒。相比隐藏 clone 的 452.98 秒，patterns suite 用时恢复到接近 clone 前水平；没有继续跑 fortune，用户已要求先不要管 fortune 性能问题。
 
 本次 calldata min-size intrinsic 后，相关 CTest 用时：`notdec.evm.solidity_patterns` 442.24 秒，`notdec.evm.solidity_rewrite` 82.08 秒，`notdec.type_recovery.evm.tr_level_2` 0.98 秒。与前次同口径相比变化很小。
+
+收窄为不处理 selector dispatcher 后，相关 CTest 用时：`notdec.evm.solidity_patterns` 440.95 秒，`notdec.evm.solidity_rewrite` 80.80 秒，`notdec.type_recovery.evm.tr_level_2` 0.96 秒。
 
 方案评分：
 
