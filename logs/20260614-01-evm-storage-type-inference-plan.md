@@ -1480,6 +1480,94 @@ entry:
 
 当前边界：
 
-- 只处理读取侧，不处理 `sstore` 的 clear-mask / shift / or 写入。
+- clear-mask / shift / or 写入在下一步补上。
 - 只处理 direct slot，不处理 `mapping value struct` 里的 `field@slot+0.packed@...`。
 - 只处理低位连续 1 的 mask 和一层 `shr`。Solidity 其它优化形状需要继续补 matcher。
+
+## 实现记录：Packed Field 写入侧最小接入
+
+本次接入 packed 字段写入侧的常见形状：
+
+```text
+old = sload(0)
+cleared = old & clearMask
+new_bits = value << bit_offset
+new = cleared | new_bits
+sstore(0, new)
+```
+
+生成字段和约束：
+
+```text
+value <: slot:0.packed@16:160
+```
+
+这个匹配必须同时满足：
+
+- `old` 来自同一个 slot 的 `sload`。
+- `clearMask` 的 0 bit 区间是连续的一段。
+- `value << offset` 的 offset 和 clearMask 的 0 bit 起点一致。
+
+如果不满足这些条件，就不按 packed 字段处理，避免把普通位运算误当成 storage layout。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4148`：新增 `PackedStorageFieldWriteMatch`，保存 packed 字段名和写入 value。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4324`：新增 `PackedBitRange`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4329`：新增 `getClearMaskBitRange()`，从 clear mask 中提取连续 0 bit 区间。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4392`：新增 `getBitwiseAndOtherOperandForClearMask()`，识别 `old & clearMask`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4421`：新增 `getBitwiseOrOperands()`，识别 LLVM `or` 或 `evm_or`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4468`：新增 `getShiftedWriteValue()`，识别 `value << offset` 或 `evm_shl(offset, value)`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4541`：新增 `getSameSlotSLoad()`，确认 clear part 保留的是同一个 storage slot 的旧值。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4555`：新增 `getPackedStorageFieldWriteMatch()`，把 `old & clearMask | value << offset` 规约成 `packed@offset:width`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4598`：新增 `isPackedWritePreservedWordLoad()`，避免写入前的 `old = sload(slot)` 再生成 whole-slot `load[256]`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4730`：`evm_sload` 对 packed 写入里的 preserved word 直接跳过。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4787`：`evm_sstore` 在 direct slot fallback 前优先尝试 packed write，命中后生成 `value <: packedField`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-packed-write.ll \
+  -o /tmp/notdec-storage-packed-write-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-packed-write-work3
+```
+
+smoke IR：
+
+```llvm
+target triple = "evm"
+
+declare i256 @evm_sload(i256)
+declare void @evm_sstore(i256, i256)
+declare i256 @evm_shl(i256, i256)
+declare i256 @evm_shr(i256, i256)
+
+define i256 @packed_write_read(i256 %owner) {
+entry:
+  %old = call i256 @evm_sload(i256 0)
+  %cleared = and i256 %old, -95780971304118053647396689196894323976171195136409601
+  %shifted.store = call i256 @evm_shl(i256 16, i256 %owner)
+  %new = or i256 %cleared, %shifted.store
+  call void @evm_sstore(i256 0, i256 %new)
+  %word = call i256 @evm_sload(i256 0)
+  %shifted.load = call i256 @evm_shr(i256 16, i256 %word)
+  %loaded = and i256 %shifted.load, 1461501637330902918203684832716283019655932542975
+  ret i256 %loaded
+}
+```
+
+结果：
+
+- trace 里出现 `slot:0.packed@16:160`。
+- `%owner` 约束到 `slot:0.packed@16:160`，读取侧 `%loaded` 也从同一个字段出来。
+- `packed_write_read` lower type 是 `'r -> 'r`，说明 packed 写入值和读取返回已经连通。
+- 写入前的 preserved word 没有再生成 whole `slot:0` 的 direct load；没有把整 slot word 混入 packed 字段 value。
+
+当前边界：
+
+- 只处理 direct slot packed write。
+- 不处理 mapping value struct 里的 packed write，例如 `slot:3.map.value.field@slot+0.packed@16:160`。
+- 不处理更复杂的 mask 生成方式，例如 mask 不是常量，或者 clear / shift / or 被 select、phi、helper call 拆开。
