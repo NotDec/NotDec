@@ -103,6 +103,11 @@ struct ConstraintsGenerator {
   const std::set<llvm::Function *> &SCCs;
   int lvl = 0;
   SimpleType MemoryType = nullptr;
+  // EVM storage is one contract-global object.  Keep the root and field map
+  // shared across SCC generators so polymorphic summaries cannot clone storage
+  // slots into per-callsite variables.
+  SimpleType StorageType = nullptr;
+  std::map<std::string, SimpleType> *StorageFields = nullptr;
 
   DSUMap<ExtValuePtr, SimpleType> V2N;
   MemoryAccessRecords MemoryAccesses;
@@ -127,10 +132,14 @@ struct ConstraintsGenerator {
 
   ConstraintsGenerator(std::string Name, unsigned int pointer_size,
                        const std::set<llvm::Function *> &SCCs,
-                       SimpleType MemoryType, int lvl = 0,
+                       SimpleType MemoryType, SimpleType StorageType = nullptr,
+                       std::map<std::string, SimpleType> *StorageFields =
+                           nullptr,
+                       int lvl = 0,
                        std::ostream *TraceStream = nullptr)
       : PointerSize(pointer_size), Name(Name), PG(*this, Name, pointer_size),
         SCCs(SCCs), lvl(lvl), MemoryType(MemoryType),
+        StorageType(StorageType), StorageFields(StorageFields),
         TraceStream(TraceStream) {
     PG.TraceStream = TraceStream;
     if (auto *Mode = std::getenv("NOTDEC_POINTER_ANALYSIS_MODE")) {
@@ -305,6 +314,7 @@ struct ConstraintsGenerator {
   void recordStore(ExtValuePtr Addr, SimpleType ValueTy, unsigned BitSize,
                    llvm::Instruction *Source);
   void addEVMConstantMemoryField(ExtValuePtr Addr, SimpleType ValueTy);
+  SimpleType getOrCreateStorageField(llvm::StringRef FieldName);
   void onPointsToDelta(ExtValuePtr Addr, MemoryLocKey Loc);
   void addPointerAccessViews();
   void flushPointerDerivedTypeConstraints();
@@ -443,6 +453,8 @@ class MLsubRecovery {
   bool WrotePNDiffOverrideWarningHeader = false;
   // std::map<llvm::Function *, binarysub::TypeScheme> PolySchemes;
   SimpleType MemoryType = nullptr;
+  SimpleType StorageType = nullptr;
+  std::map<std::string, SimpleType> StorageFields;
 
   // HTypeContext for type building
   std::shared_ptr<ast::HTypeContext> HCtx;

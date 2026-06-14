@@ -1076,3 +1076,59 @@ slot:0.array[i]
 - bytes/string short/long 是否合到同一个 bytes object。
 
 性能上，storage field normalization 必须有缓存。一个 `sload/sstore` 最多沿 def-use 向前看有限深度，不要全函数反复扫 scratch memory。
+
+## 实现记录：Direct Slot 最小接入
+
+本次先实现 direct slot，不处理 mapping / array / packed / bytes 的 normalization。
+
+修改点：
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:105`：给 `ConstraintsGenerator` 增加共享的 `StorageType` 和 `StorageFields`。它们表示合约全局 storage root 和字符串字段表。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:133`：扩展 `ConstraintsGenerator` 构造函数，允许从 `MLsubRecovery` 传入共享 storage root。默认参数保留旧单测构造方式。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:315`：声明 `getOrCreateStorageField()`。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:454`：给 `MLsubRecovery` 增加全局 `StorageType` 和 `StorageFields`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2224`：实现 `ConstraintsGenerator::getOrCreateStorageField()`。它按字符串字段创建 level 0 普通 `SimpleType` 变量，并把字段挂到 `StorageType` 的 record 约束上。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2519`：在 `MLsubRecovery::run()` 初始化 `StorageType`，level 固定为 0。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3022`：`bottomUpPhase()` 把同一个 `StorageType` / `StorageFields` 传给每个 SCC 的 `ConstraintsGenerator`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3283`：`topDownPhase()` 后释放 storage root 并清空字段表。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4107`：增加 direct slot 字段名生成，当前只接受能落到 `uint64_t` 的常量 slot，格式是 `slot:N`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4162`：`evm_sload(const_slot)` 给对应字段加 `make_ptr_load(result, 256)`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4173`：`evm_sstore(const_slot, value)` 给对应字段加 `make_ptr_store(value, 256)`。
+- `unittests/Retypd/MLsubGeneratorTest.cpp:86`：新增 `EVMStorageDirectSlotConnectsStoreToLoad`，验证同一个 storage 字符串字段上的 store/load 会推出 `stored <: loaded`。
+
+验证：
+
+```bash
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec /tmp/notdec-storage-direct.ll \
+  -o /tmp/notdec-storage-direct-out.ll --tr-level=2 -g \
+  --work-dir=/tmp/notdec-storage-direct-work2
+rg -n '\[storage:field\]|slot:0|store\[256\]|load\[256\]' \
+  /tmp/notdec-storage-direct-work2/binarysub-trace.log
+```
+
+smoke IR 内容是：
+
+```llvm
+target triple = "evm"
+
+declare i256 @evm_sload(i256)
+declare void @evm_sstore(i256, i256)
+
+define i256 @direct_slot(i256 %x) {
+entry:
+  call void @evm_sstore(i256 0, i256 %x)
+  %y = call i256 @evm_sload(i256 0)
+  ret i256 %y
+}
+```
+
+trace 里能看到 `slot:0` 字段、`store[256]` 和 `load[256]` 都挂在同一个 storage 字段变量上。`ValueTypes.txt` 里 `direct_slot` 的 lower type 变成 `'j -> 'j`，说明 store 输入和 load 返回已经连通。
+
+当前边界：
+
+- 只处理常量 direct slot。
+- `keccak(key, slot)` mapping、`keccak(slot) + index` array、packed bit field、bytes/string short/long 还没实现。
+- 还没有把 storage root 作为单独 HType 结果导出；本次只让 value 约束参与求解。

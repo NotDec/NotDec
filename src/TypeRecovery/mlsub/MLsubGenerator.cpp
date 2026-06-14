@@ -2221,6 +2221,32 @@ void ConstraintsGenerator::addEVMConstantMemoryField(ExtValuePtr Addr,
   addSubtype(MemoryType, binarysub::make_record(std::move(Fields)));
 }
 
+SimpleType
+ConstraintsGenerator::getOrCreateStorageField(llvm::StringRef FieldName) {
+  assert(StorageType != nullptr && "StorageType must be initialized");
+  assert(StorageFields != nullptr && "StorageFields must be initialized");
+
+  auto It = StorageFields->find(FieldName.str());
+  if (It != StorageFields->end()) {
+    return It->second;
+  }
+
+  auto FieldTy = binarysub::make_variable(0, PointerSize);
+  std::string StableName = FieldName.str();
+  StorageFields->insert({StableName, FieldTy});
+
+  std::vector<std::pair<std::string, SimpleType>> Fields;
+  Fields.emplace_back(StableName, FieldTy);
+  addSubtype(StorageType, binarysub::make_record(std::move(Fields)));
+
+  if (TraceStream != nullptr) {
+    *TraceStream << "[storage:field] name=" << StableName
+                 << " ty=" << binarysub::debug_string(FieldTy) << "\n";
+    TraceStream->flush();
+  }
+  return FieldTy;
+}
+
 void ConstraintsGenerator::onPointsToDelta(ExtValuePtr Addr,
                                            MemoryLocKey Loc) {
   if (auto LoadsIt = MemoryAccesses.LoadsByAddr.find(Addr);
@@ -2492,6 +2518,9 @@ void MLsubRecovery::run() {
 
   if (!MemoryType) {
     MemoryType = binarysub::make_variable(0, PointerSize);
+  }
+  if (!StorageType) {
+    StorageType = binarysub::make_variable(0, PointerSize);
   }
 
   SummaryOverrideFuncs.clear();
@@ -2991,8 +3020,8 @@ void MLsubRecovery::bottomUpPhase() {
   for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
     auto &Data = AG.AllSCCs.at(Ind);
     Data.Generator = std::make_shared<ConstraintsGenerator>(
-        Data.SCCName, PointerSize, Data.SCCSet, MemoryType, Data.level,
-        BinarysubTraceFile.get());
+        Data.SCCName, PointerSize, Data.SCCSet, MemoryType, StorageType,
+        &StorageFields, Data.level, BinarysubTraceFile.get());
     auto &G = Data.Generator;
     // insert ContraVariantValues
     if (Ind == 0) {
@@ -3251,6 +3280,9 @@ void MLsubRecovery::topDownPhase() {
   for (auto &Data : AG.AllSCCs) {
     Data.Generator->releaseBinarysubState();
   }
+  binarysub::release_type_graph(StorageType);
+  StorageType = nullptr;
+  StorageFields.clear();
 }
 
 void MLsubRecovery::prepareSCC(CallGraph &CG) {
@@ -4072,6 +4104,14 @@ void addEVMSemanticConstraint(ConstraintsGenerator &CG, ExtValuePtr Val,
                 CG.getOrInsertNode(Val));
 }
 
+std::optional<std::string> getDirectStorageSlotFieldName(llvm::Value *Slot) {
+  auto DirectSlot = getUInt64Constant(Slot);
+  if (!DirectSlot.has_value()) {
+    return std::nullopt;
+  }
+  return "slot:" + std::to_string(*DirectSlot);
+}
+
 void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     llvm::CallBase &I) {
   auto *F = I.getCalledFunction();
@@ -4121,10 +4161,25 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
   }
   if (Name == "evm_sload") {
     markArg(0, "storage_key");
+    if (I.arg_size() == 1 && !I.getType()->isVoidTy()) {
+      if (auto FieldName = getDirectStorageSlotFieldName(I.getArgOperand(0))) {
+        auto FieldTy = cg.getOrCreateStorageField(*FieldName);
+        auto ResultTy = cg.getOrInsertNode(&I);
+        cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+      }
+    }
     return;
   }
   if (Name == "evm_sstore") {
     markArg(0, "storage_key");
+    if (I.arg_size() == 2) {
+      if (auto FieldName = getDirectStorageSlotFieldName(I.getArgOperand(0))) {
+        auto FieldTy = cg.getOrCreateStorageField(*FieldName);
+        auto ValueTy =
+            cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
+        cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
+      }
+    }
     return;
   }
   if (Name == "evm_call" || Name == "evm_callcode") {

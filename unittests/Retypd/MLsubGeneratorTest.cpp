@@ -1,10 +1,12 @@
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "binarysub/binarysub.h"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -79,4 +81,31 @@ TEST(MLsub, PNDiffRecursiveVariablePairUnificationCanBeDisabled) {
 
   EXPECT_NE(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
   CG.releaseBinarysubState();
+}
+
+TEST(MLsub, EVMStorageDirectSlotConnectsStoreToLoad) {
+  static std::set<llvm::Function *> SCCs;
+  SCCs.clear();
+
+  auto MemoryType = binarysub::make_variable(0, 32);
+  auto StorageType = binarysub::make_variable(0, 32);
+  std::map<std::string, binarysub::SimpleType> StorageFields;
+  notdec::mlsub::ConstraintsGenerator CG("storage-test", 32, SCCs, MemoryType,
+                                         StorageType, &StorageFields);
+
+  auto StoredTy = binarysub::make_variable(0, 256);
+  auto LoadedTy = binarysub::make_variable(0, 256);
+  auto FieldTy = CG.getOrCreateStorageField("slot:0");
+
+  CG.addSubtype(FieldTy, binarysub::make_ptr_store(StoredTy, 256));
+  CG.addSubtype(FieldTy, binarysub::make_ptr_load(LoadedTy, 256));
+
+  auto *LoadedVar = LoadedTy->getAsVariableState();
+  ASSERT_NE(LoadedVar, nullptr);
+  EXPECT_NE(std::find(LoadedVar->lowerBounds.begin(),
+                      LoadedVar->lowerBounds.end(), StoredTy),
+            LoadedVar->lowerBounds.end());
+
+  CG.releaseBinarysubState();
+  binarysub::release_type_graph(StorageType);
 }
