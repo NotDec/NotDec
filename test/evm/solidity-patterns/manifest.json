@@ -61,6 +61,20 @@
       }
     },
     {
+      "name": "abi_decoder_helper_rename_01",
+      "input": "cases/abi_decoder_helper_rename_01.ll",
+      "patterns": [
+        "calldata"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 0,
+      "expected_function_definitions": {
+        "abi_decode_word_from_calldata__0x100": 1,
+        "abi_decode_calldata_array_head__0x200": 1,
+        "calldata_array_index_access__0x300": 1
+      }
+    },
+    {
       "name": "checked_bounds_arithmetic_01",
       "input": "cases/checked_bounds_arithmetic_01.ll",
       "patterns": [

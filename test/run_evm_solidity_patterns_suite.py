@@ -277,6 +277,13 @@ def count_exact_marker(path: Path, marker_name: str) -> int:
     )
 
 
+def count_function_definition(path: Path, function_name: str) -> int:
+    text = path.read_text()
+    return len(
+        re.findall(rf"^define\b[^\n@]*@{re.escape(function_name)}\(", text, re.M)
+    )
+
+
 def count_memory_consumer_kinds(path: Path) -> dict[str, int]:
     text = path.read_text()
     names = {
@@ -546,6 +553,10 @@ def main() -> int:
                 "expected_exact_markers", {}
             ).items():
                 expected_counts[f"exact_marker:{marker_name}"] = expected
+            for function_name, expected in case.get(
+                "expected_function_definitions", {}
+            ).items():
+                expected_counts[f"function_definition:{function_name}"] = expected
             for kind, expected in case.get(
                 "expected_memory_consumer_kinds", {}
             ).items():
@@ -678,6 +689,10 @@ def main() -> int:
             for marker_name in case.get("expected_exact_markers", {}):
                 actual_counts[f"exact_marker:{marker_name}"] = count_exact_marker(
                     output_ll, marker_name
+                )
+            for function_name in case.get("expected_function_definitions", {}):
+                actual_counts[f"function_definition:{function_name}"] = (
+                    count_function_definition(output_ll, function_name)
                 )
             actual_memory_consumer_kinds = count_memory_consumer_kinds(output_ll)
             for kind in case.get("expected_memory_consumer_kinds", {}):

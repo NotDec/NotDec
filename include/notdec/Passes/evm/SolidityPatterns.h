@@ -48,6 +48,16 @@ struct EvmCalldataAccessPass
   static bool isRequired() { return true; }
 };
 
+// Renames small private ABI decoder helpers to Solidity-style helper names
+// when their body still matches stable calldata decoder templates.  The pass
+// does not change IR semantics or attach decoder summaries.
+struct AbiDecoderHelperRenamePass
+    : llvm::PassInfoMixin<AbiDecoderHelperRenamePass> {
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Marks low-risk ABI return sites.  The current pass intentionally does not
 // rewrite memory writes because return buffers often share code with dynamic
 // object construction.

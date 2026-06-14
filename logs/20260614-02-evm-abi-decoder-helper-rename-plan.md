@@ -124,3 +124,52 @@ private__0x123_0x123
 - 不根据函数名猜 Solidity 源码签名。
 - 不处理 selector dispatcher。
 - 不把业务 helper 内偶然出现的 `calldataload` 改名成 decoder。
+
+## 实现记录
+
+已完成第一版轻量重命名 pass。
+
+代码改动：
+
+- `include/notdec/Passes/evm/SolidityPatterns.h:51` 新增 `AbiDecoderHelperRenamePass` 声明，明确只做 helper 重命名，不附加 decoder summary。
+- `include/notdec/Passes/evm/SolidityPatternUtils.h:41` 新增 `notdec.evm.original_private_helper` metadata 名，用来保留原始 `private__` 名字。
+- `src/Passes/PassManager.cpp:311` 将 pass 放在 `EvmCalldataAccessPass` 之后、`InstCombinePass` 之前。
+- `src/Passes/evm/SolidityPatterns.cpp:99` 调整 `isPrivateHelperCall()`，让后续 pass 同时接受 `private__` 前缀和 `notdec.evm.original_private_helper` metadata。
+- `src/Passes/evm/solidity-patterns/AbiDecoderHelperRenamePass.cpp:32` 到 `:395` 新增实现。当前只扫描小的 `private__` 函数，要求第二个参数是 `%calldata`，按函数体形状分类为：
+  - `abi_decode_word_from_calldata`
+  - `abi_decode_calldata_dynamic_head`
+  - `abi_decode_calldata_array_head`
+  - `calldata_array_index_access`
+  - `calldata_access_dynamic_tail`
+- `test/run_evm_solidity_patterns_suite.py:280`、`:556`、`:693` 增加 `expected_function_definitions` oracle，用函数定义名计数验证重命名。
+- `test/evm/solidity-patterns/cases/abi_decoder_helper_rename_01.ll:11` 增加回归样例，覆盖 word decoder、array head、array index access。
+- `test/evm/solidity-patterns/manifest.json:64` 接入该样例。
+
+实现中做过一次收紧：`calldata_array_index_access` 不能只看函数内有 unsigned compare，否则真实样例里会误命名业务 helper。当前要求返回值里能追到非指针参数乘/左移常量的 index scale，并且函数内没有 calldata load，降低误匹配风险。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-patterns/cases/abi_decoder_helper_rename_01.ll --tr-level=2 --emit-tr-input-ir=/tmp/abi-decoder-helper-rename-pretr.ll
+rg -n "define .*@(abi_decode|calldata_array)|notdec.evm.original_private_helper|private__0x" /tmp/abi-decoder-helper-rename-pretr.ll
+./llvm-22.1.0.obj/bin/llvm-as /tmp/abi-decoder-helper-rename-pretr.ll -o /tmp/abi-decoder-helper-rename-pretr.bc
+./build/bin/notdec test/evm/solidity-patterns/cases/0334_19494307_668d201319_1354ce2e324d.ll --tr-level=2 --emit-tr-input-ir=/tmp/0334-abi-decoder-rename-pretr.ll
+rg -n "define .*@(abi_decode|calldata_array|calldata_access).*notdec.evm.original_private_helper" /tmp/0334-abi-decoder-rename-pretr.ll | head -n 120
+./llvm-22.1.0.obj/bin/llvm-as /tmp/0334-abi-decoder-rename-pretr.ll -o /tmp/0334-abi-decoder-rename-pretr.bc
+/usr/bin/time -f 'elapsed %e' ctest --test-dir build -R 'notdec.evm.solidity_patterns|notdec.type_recovery.evm.tr_level_2' --output-on-failure
+git diff --check
+```
+
+结果：
+
+- 专门 fixture 里生成了 `abi_decode_word_from_calldata__0x100`、`abi_decode_calldata_array_head__0x200`、`calldata_array_index_access__0x300`，并保留 `notdec.evm.original_private_helper` metadata。
+- 真实样例 `0334_19494307_668d201319_1354ce2e324d.ll` 只重命名了 3 个 `abi_decode_word_from_calldata__...`，没有再大面积误命名 `calldata_array_index_access`。
+- `notdec.evm.solidity_patterns` 和 `notdec.type_recovery.evm.tr_level_2` 均通过，总耗时 `447.64s`。
+- `git diff --check` 通过。
+
+复杂度评估：
+
+- 实现效果：8/10。能恢复一批稳定 helper 名，且不改变 IR 语义。
+- 理解成本：6/10。新增了一个独立 pass 和少量 matcher，但入口和作用都比较窄。
+- 维护成本：6/10。后续如果要扩覆盖，应该继续优先加保守 fixture 和真实样例检查，不要把 matcher 扩成“看见 calldata 就改名”。

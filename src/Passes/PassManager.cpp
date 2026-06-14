@@ -309,6 +309,7 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       MPM.addPass(
           createModuleToFunctionPassAdaptor(evm::MemoryBufferRewritePass()));
       MPM.addPass(evm::EvmCalldataAccessPass());
+      MPM.addPass(evm::AbiDecoderHelperRenamePass());
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
     }
     MPM.addPass(VerifierPass(false));

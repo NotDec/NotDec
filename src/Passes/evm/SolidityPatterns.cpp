@@ -101,7 +101,9 @@ bool isPrivateHelperCall(const CallBase *Call) {
     return false;
   }
   const Function *Callee = Call->getCalledFunction();
-  return Callee != nullptr && Callee->getName().starts_with("private__");
+  return Callee != nullptr &&
+         (Callee->getName().starts_with("private__") ||
+          Callee->getMetadata(KIND_EVM_ORIGINAL_PRIVATE_HELPER) != nullptr);
 }
 
 bool isZero(const Value *V) {

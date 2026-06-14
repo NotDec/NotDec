@@ -10,6 +10,7 @@ add_library(notdec-core STATIC
 	Passes/evm/MemoryBufferAnalysis.cpp
 	Passes/evm/SolidityPatterns.cpp
 	Passes/evm/solidity-patterns/AbiReturnPass.cpp
+	Passes/evm/solidity-patterns/AbiDecoderHelperRenamePass.cpp
 	Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp
 	Passes/evm/solidity-patterns/CheckedBoundsPass.cpp
 	Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp

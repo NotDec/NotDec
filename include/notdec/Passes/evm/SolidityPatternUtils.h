@@ -38,6 +38,8 @@ inline constexpr llvm::StringLiteral KIND_SOLIDITY_SELECTOR_OUTLINED_BODY(
     "notdec.solidity.selector_outlined_body");
 inline constexpr llvm::StringLiteral KIND_SOLIDITY_SELECTOR_OUTLINE_SKIPPED(
     "notdec.solidity.selector_outline_skipped");
+inline constexpr llvm::StringLiteral KIND_EVM_ORIGINAL_PRIVATE_HELPER(
+    "notdec.evm.original_private_helper");
 // Shared result for Solidity revert-like exits.  Revert and checked/bounds
 // passes both need the terminator kind and a small amount of ABI payload shape.
 struct SolidityRevertMatch {
