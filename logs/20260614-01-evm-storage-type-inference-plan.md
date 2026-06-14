@@ -1130,5 +1130,77 @@ trace 里能看到 `slot:0` 字段、`store[256]` 和 `load[256]` 都挂在同�
 当前边界：
 
 - 只处理常量 direct slot。
-- `keccak(key, slot)` mapping、`keccak(slot) + index` array、packed bit field、bytes/string short/long 还没实现。
+- `keccak(key, slot)` mapping 已在下一步补上。
+- `keccak(slot) + index` array、packed bit field、bytes/string short/long 还没实现。
 - 还没有把 storage root 作为单独 HType 结果导出；本次只让 value 约束参与求解。
+
+## 实现记录：Mapping 最小接入
+
+本次继续实现一层 mapping。只处理 Solidity 常见 scratch memory 形状：
+
+```text
+mstore(0, key)
+mstore(32, constant_base_slot)
+slot = keccak256(0, 64)
+sload/sstore(slot, value)
+```
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2`：引入 `Passes/evm/SolidityPatternUtils.h`，复用已有 Solidity storage matcher。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:317`：`getOrCreateStorageField()` 增加可选 `BitSize`，让 mapping key 字段能直接建成 256-bit 类型变量。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2225`：按传入 `BitSize` 创建 storage 字段变量。未传时仍用 pointer size，保持 direct slot value 字段的 `TMemObject` 用法。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4117`：新增 mapping 字段识别 helper。它调用 `matchStorageMappingAccess()`，并且目前只接受常量 base slot。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4199`：`evm_sload(mapping_slot)` 生成 `"slot:N.map.key"` 和 `"slot:N.map.value"` 两个字符串字段；key 走 `key <: slot:N.map.key`，value 走 `slot:N.map.value <: make_ptr_load(result, 256)`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4220`：`evm_sstore(mapping_slot, value)` 使用同样字段；key 走 `key <: slot:N.map.key`，value 走 `slot:N.map.value <: make_ptr_store(value, 256)`。
+
+验证：
+
+```bash
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec /tmp/notdec-storage-direct.ll \
+  -o /tmp/notdec-storage-direct-out.ll --tr-level=2 -g \
+  --work-dir=/tmp/notdec-storage-direct-work
+
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec /tmp/notdec-storage-mapping.ll \
+  -o /tmp/notdec-storage-mapping-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g --work-dir=/tmp/notdec-storage-mapping-work
+```
+
+mapping smoke IR：
+
+```llvm
+target triple = "evm"
+
+declare i256 @evm_sha3(i256, i256, i256)
+declare i256 @evm_sload(i256)
+declare void @evm_sstore(i256, i256)
+
+define i256 @mapping_slot(i256 %key, i256 %v) {
+entry:
+  store i256 %key, ptr inttoptr (i256 0 to ptr)
+  store i256 0, ptr inttoptr (i256 32 to ptr)
+  %slot.store = call i256 @evm_sha3(i256 0, i256 0, i256 64)
+  call void @evm_sstore(i256 %slot.store, i256 %v)
+  store i256 %key, ptr inttoptr (i256 0 to ptr)
+  store i256 0, ptr inttoptr (i256 32 to ptr)
+  %slot.load = call i256 @evm_sha3(i256 0, i256 0, i256 64)
+  %y = call i256 @evm_sload(i256 %slot.load)
+  ret i256 %y
+}
+```
+
+结果：
+
+- direct slot trace 里仍能看到 `slot:0` 同时挂 `store[256]` 和 `load[256]`，`direct_slot` lower type 是 `'j -> 'j`。
+- mapping trace 里能看到 `slot:0.map.key` 和 `slot:0.map.value`。`slot:0.map.value` 同时挂 `store[256]` 和 `load[256]`，`mapping_slot` lower type 是 `⊤ -> 'p -> 'p`，说明 value 参数和返回值已经连通。
+- mapping smoke 需要 `--frozen-tr-input-ir`。不 frozen 时，优化器可能把 `ptr inttoptr(0)` scratch memory 写入折成不可用形状。
+
+当前边界：
+
+- 只支持一层 mapping，且 base slot 必须是常量。
+- 不支持 nested mapping，因为第二层 `keccak(spender, slot1)` 的 base slot 不是常量，而是上一层 hash 结果。下一步需要给 hash 结果保留“它来自哪个 storage 字符串前缀”的信息。
+- scratch memory 写入仍按普通内存 visitor 生成约束，所以 smoke trace 里会看到和 `ptr null` / `inttoptr(32)` 相关的既有 size-mismatch 记录。这不是 storage 约束本身的问题，但后面如果要把 mapping smoke 变成稳定单测，最好直接测 matcher 或给 EVM scratch memory 单独建模。

@@ -1,5 +1,6 @@
 
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include "Passes/evm/SolidityPatternUtils.h"
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/CallGraphDotInfo.h"
 #include "binarysub/binarysub-core.h"
@@ -2221,8 +2222,8 @@ void ConstraintsGenerator::addEVMConstantMemoryField(ExtValuePtr Addr,
   addSubtype(MemoryType, binarysub::make_record(std::move(Fields)));
 }
 
-SimpleType
-ConstraintsGenerator::getOrCreateStorageField(llvm::StringRef FieldName) {
+SimpleType ConstraintsGenerator::getOrCreateStorageField(
+    llvm::StringRef FieldName, unsigned BitSize) {
   assert(StorageType != nullptr && "StorageType must be initialized");
   assert(StorageFields != nullptr && "StorageFields must be initialized");
 
@@ -2231,7 +2232,8 @@ ConstraintsGenerator::getOrCreateStorageField(llvm::StringRef FieldName) {
     return It->second;
   }
 
-  auto FieldTy = binarysub::make_variable(0, PointerSize);
+  auto FieldTy =
+      binarysub::make_variable(0, BitSize == 0 ? PointerSize : BitSize);
   std::string StableName = FieldName.str();
   StorageFields->insert({StableName, FieldTy});
 
@@ -4112,6 +4114,38 @@ std::optional<std::string> getDirectStorageSlotFieldName(llvm::Value *Slot) {
   return "slot:" + std::to_string(*DirectSlot);
 }
 
+std::optional<uint64_t> getConstantStorageBaseSlot(llvm::Value *BaseSlot) {
+  return getUInt64Constant(BaseSlot);
+}
+
+struct MappingStorageFieldMatch {
+  std::string Prefix;
+  llvm::Value *Key = nullptr;
+};
+
+// This is the first storage normalization step: recognize Solidity's
+// mstore(key, 0), mstore(baseSlot, 32), keccak(0, 64) shape only when the
+// mapping base slot is a constant. Nested mapping/array paths need another
+// layer that can name non-constant base slots.
+std::optional<MappingStorageFieldMatch>
+getMappingStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
+                            uint64_t AccessKind) {
+  auto Match = notdec::passes::evm::detail::matchStorageMappingAccess(
+      Access, StorageSlot, AccessKind);
+  if (!Match.has_value()) {
+    return std::nullopt;
+  }
+
+  auto BaseSlot = getConstantStorageBaseSlot(Match->BaseSlot);
+  if (!BaseSlot.has_value()) {
+    return std::nullopt;
+  }
+  return MappingStorageFieldMatch{
+      .Prefix = "slot:" + std::to_string(*BaseSlot) + ".map",
+      .Key = Match->Key,
+  };
+}
+
 void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     llvm::CallBase &I) {
   auto *F = I.getCalledFunction();
@@ -4162,7 +4196,17 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
   if (Name == "evm_sload") {
     markArg(0, "storage_key");
     if (I.arg_size() == 1 && !I.getType()->isVoidTy()) {
-      if (auto FieldName = getDirectStorageSlotFieldName(I.getArgOperand(0))) {
+      if (auto Mapping = getMappingStorageFieldMatch(I, I.getArgOperand(0),
+                                                     /*AccessKind=*/1)) {
+        auto KeyTy = cg.getOrCreateStorageField(Mapping->Prefix + ".key", 256);
+        auto KeyValTy = cg.getOrInsertNode(Mapping->Key);
+        cg.addSubtype(KeyValTy, KeyTy);
+
+        auto FieldTy = cg.getOrCreateStorageField(Mapping->Prefix + ".value");
+        auto ResultTy = cg.getOrInsertNode(&I);
+        cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+      } else if (auto FieldName =
+                     getDirectStorageSlotFieldName(I.getArgOperand(0))) {
         auto FieldTy = cg.getOrCreateStorageField(*FieldName);
         auto ResultTy = cg.getOrInsertNode(&I);
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
@@ -4173,7 +4217,18 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
   if (Name == "evm_sstore") {
     markArg(0, "storage_key");
     if (I.arg_size() == 2) {
-      if (auto FieldName = getDirectStorageSlotFieldName(I.getArgOperand(0))) {
+      if (auto Mapping = getMappingStorageFieldMatch(I, I.getArgOperand(0),
+                                                     /*AccessKind=*/2)) {
+        auto KeyTy = cg.getOrCreateStorageField(Mapping->Prefix + ".key", 256);
+        auto KeyValTy = cg.getOrInsertNode(Mapping->Key);
+        cg.addSubtype(KeyValTy, KeyTy);
+
+        auto FieldTy = cg.getOrCreateStorageField(Mapping->Prefix + ".value");
+        auto ValueTy =
+            cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
+        cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
+      } else if (auto FieldName =
+                     getDirectStorageSlotFieldName(I.getArgOperand(0))) {
         auto FieldTy = cg.getOrCreateStorageField(*FieldName);
         auto ValueTy =
             cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
