@@ -1410,3 +1410,76 @@ NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
 - 静态数组长度还没有记录。后面如果能从 bounds guard 看到 `i < N`，长度适合放 side table，再由 HType 使用。
 - 常量 index 仍按 direct slot，例如 `xs[2]` 会显示成 `slot:2`，不会反推出它属于 `slot:0.static_array`。
 - `base + i * elem_size + field_offset` 这种数组元素 struct 还没有处理。
+
+## 实现记录：Packed Field 读取侧最小接入
+
+本次只接入 packed 字段的读取侧，处理直接 slot 上的常见形状：
+
+```text
+word = sload(0)
+field = (word >> bit_offset) & ((1 << bit_width) - 1)
+```
+
+生成字段：
+
+```text
+slot:0.packed@16:160
+```
+
+约束含义：
+
+```text
+slot:0.packed@16:160 <: extracted_value
+```
+
+这里字段变量仍然建成 256-bit。`160` 只写进字段名，因为 EVM IR 里的提取结果仍是 `i256`，如果把字段变量建成 160-bit，会和现有 SimpleSub 约束大小不一致。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4143`：新增 `PackedStorageFieldReadMatch`，保存 packed 字段名和提取后的 value。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4299`：新增 `getLowMaskBitWidth()`，识别低位连续 1 的 mask，并从 mask 推出 bit width。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4319`：新增 `getBitwiseAndOtherOperand()`，识别 LLVM `and` 或 `evm_and`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4347`：新增 `getShiftedValue()`，识别 `evm_shr(offset, word)` 和 LLVM `lshr`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4373`：新增 `getPackedReadFromExtractedValue()`，把 `and(shr(sload), mask)` 规约成 `packed@offset:width`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4395`：新增 `getPackedStorageFieldReadMatch()`，从 `evm_sload` 的直接 user 或下一层 user 里找 packed read。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4510`：`evm_sload` 在 direct slot fallback 前优先尝试 packed read，命中后不再给 whole slot 加 `make_ptr_load`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-packed-read.ll \
+  -o /tmp/notdec-storage-packed-read-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-packed-read-work2
+```
+
+smoke IR：
+
+```llvm
+target triple = "evm"
+
+declare i256 @evm_sload(i256)
+declare i256 @evm_shr(i256, i256)
+
+define i256 @packed_read() {
+entry:
+  %word = call i256 @evm_sload(i256 0)
+  %shifted = call i256 @evm_shr(i256 16, i256 %word)
+  %owner = and i256 %shifted, 1461501637330902918203684832716283019655932542975
+  ret i256 %owner
+}
+```
+
+结果：
+
+- trace 里出现 `slot:0.packed@16:160`。
+- `slot:0.packed@16:160` 约束到 `%owner`，随后通过返回值约束连到函数返回。
+- 这个 smoke 没有再生成 whole `slot:0` 的 `load[256]`，避免把整个 packed word 当字段 value。
+
+当前边界：
+
+- 只处理读取侧，不处理 `sstore` 的 clear-mask / shift / or 写入。
+- 只处理 direct slot，不处理 `mapping value struct` 里的 `field@slot+0.packed@...`。
+- 只处理低位连续 1 的 mask 和一层 `shr`。Solidity 其它优化形状需要继续补 matcher。

@@ -4140,6 +4140,11 @@ struct StaticArrayStorageFieldMatch {
   llvm::Value *Index = nullptr;
 };
 
+struct PackedStorageFieldReadMatch {
+  std::string FieldName;
+  llvm::Value *Value = nullptr;
+};
+
 std::optional<StorageFieldPrefixMatch>
 getStorageFieldPrefixFromBaseSlot(llvm::Value *BaseSlot, unsigned Depth = 4) {
   if (auto DirectSlot = getUInt64Constant(BaseSlot)) {
@@ -4291,6 +4296,127 @@ getStaticArrayStorageFieldMatch(llvm::Value *StorageSlot) {
   return std::nullopt;
 }
 
+std::optional<unsigned> getLowMaskBitWidth(llvm::Value *V) {
+  auto *CI = dyn_cast_or_null<llvm::ConstantInt>(V);
+  if (CI == nullptr) {
+    return std::nullopt;
+  }
+
+  const llvm::APInt &Mask = CI->getValue();
+  unsigned Width = Mask.getActiveBits();
+  if (Width == 0 || Width >= Mask.getBitWidth()) {
+    return std::nullopt;
+  }
+  for (unsigned I = 0; I < Mask.getBitWidth(); ++I) {
+    bool Expected = I < Width;
+    if (Mask[I] != Expected) {
+      return std::nullopt;
+    }
+  }
+  return Width;
+}
+
+llvm::Value *getBitwiseAndOtherOperand(llvm::Value *V, unsigned &MaskWidth) {
+  auto getOther = [&](llvm::Value *LHS, llvm::Value *RHS) -> llvm::Value * {
+    if (auto Width = getLowMaskBitWidth(LHS)) {
+      MaskWidth = *Width;
+      return RHS;
+    }
+    if (auto Width = getLowMaskBitWidth(RHS)) {
+      MaskWidth = *Width;
+      return LHS;
+    }
+    return nullptr;
+  };
+
+  if (auto *And = dyn_cast<llvm::BinaryOperator>(V)) {
+    if (And->getOpcode() == llvm::Instruction::And) {
+      return getOther(And->getOperand(0), And->getOperand(1));
+    }
+  }
+
+  if (auto *Call = dyn_cast<llvm::CallBase>(V)) {
+    if (notdec::passes::evm::detail::isCallTo(Call, "evm_and") &&
+        Call->arg_size() == 2) {
+      return getOther(Call->getArgOperand(0), Call->getArgOperand(1));
+    }
+  }
+  return nullptr;
+}
+
+llvm::Value *getShiftedValue(llvm::Value *V, unsigned &Offset) {
+  if (auto *Call = dyn_cast<llvm::CallBase>(V)) {
+    if (notdec::passes::evm::detail::isCallTo(Call, "evm_shr") &&
+        Call->arg_size() == 2) {
+      auto Shift = getUInt64Constant(Call->getArgOperand(0));
+      if (Shift.has_value() && *Shift < 256) {
+        Offset = static_cast<unsigned>(*Shift);
+        return Call->getArgOperand(1);
+      }
+    }
+  }
+
+  if (auto *Shift = dyn_cast<llvm::BinaryOperator>(V)) {
+    if (Shift->getOpcode() == llvm::Instruction::LShr) {
+      auto Amount = getUInt64Constant(Shift->getOperand(1));
+      if (Amount.has_value() && *Amount < 256) {
+        Offset = static_cast<unsigned>(*Amount);
+        return Shift->getOperand(0);
+      }
+    }
+  }
+
+  Offset = 0;
+  return V;
+}
+
+std::optional<PackedStorageFieldReadMatch>
+getPackedReadFromExtractedValue(llvm::CallBase &Load, llvm::Value *Extracted,
+                                llvm::StringRef FieldPrefix) {
+  unsigned MaskWidth = 0;
+  llvm::Value *Masked = getBitwiseAndOtherOperand(Extracted, MaskWidth);
+  if (Masked == nullptr) {
+    return std::nullopt;
+  }
+
+  unsigned Offset = 0;
+  llvm::Value *Shifted = getShiftedValue(Masked, Offset);
+  if (!notdec::passes::evm::detail::isSameValue(Shifted, &Load)) {
+    return std::nullopt;
+  }
+
+  return PackedStorageFieldReadMatch{
+      .FieldName = FieldPrefix.str() + ".packed@" + std::to_string(Offset) +
+                   ":" + std::to_string(MaskWidth),
+      .Value = Extracted,
+  };
+}
+
+std::optional<PackedStorageFieldReadMatch>
+getPackedStorageFieldReadMatch(llvm::CallBase &Load) {
+  auto FieldName = getDirectStorageSlotFieldName(Load.getArgOperand(0));
+  if (!FieldName.has_value()) {
+    return std::nullopt;
+  }
+
+  for (llvm::User *User : Load.users()) {
+    auto *DirectValue = dyn_cast<llvm::Value>(User);
+    if (auto Match =
+            getPackedReadFromExtractedValue(Load, DirectValue, *FieldName)) {
+      return Match;
+    }
+
+    for (llvm::User *NestedUser : User->users()) {
+      auto *NestedValue = dyn_cast<llvm::Value>(NestedUser);
+      if (auto Match =
+              getPackedReadFromExtractedValue(Load, NestedValue, *FieldName)) {
+        return Match;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     llvm::CallBase &I) {
   auto *F = I.getCalledFunction();
@@ -4381,6 +4507,10 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
             cg.getOrCreateStorageField(StaticArray->Prefix + ".elem");
         auto ResultTy = cg.getOrInsertNode(&I);
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+      } else if (auto Packed = getPackedStorageFieldReadMatch(I)) {
+        auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
+        auto ValueTy = cg.getOrInsertNode(Packed->Value);
+        cg.addSubtype(FieldTy, ValueTy);
       } else if (auto FieldName =
                      getDirectStorageSlotFieldName(I.getArgOperand(0))) {
         auto FieldTy = cg.getOrCreateStorageField(*FieldName);
