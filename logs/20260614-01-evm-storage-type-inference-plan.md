@@ -1268,6 +1268,90 @@ NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
 
 当前边界：
 
-- 只处理 mapping 链，不处理 `mapping => struct` 的 `+ field_offset`，也不处理 `mapping => array` 的 `keccak(base) + index`。
+- mapping 链已支持；`mapping => array` 在下一步补上。
+- 还不处理 `mapping => struct` 的 `+ field_offset`。
 - 递归深度当前是 4，避免异常 IR 造成无限回溯。这个值只是保守上限，后面遇到更深真实样例再调。
 - scratch memory 的普通内存约束问题仍然存在，和上一节一样。
+
+## 实现记录：Dynamic Array 最小接入
+
+本次接入动态数组元素访问，以及 mapping value 是动态数组的组合。仍然只用字符串字段：
+
+```text
+slot:0.dynamic_array.index
+slot:0.dynamic_array.elem
+slot:2.map.key
+slot:2.map.value.dynamic_array.index
+slot:2.map.value.dynamic_array.elem
+```
+
+Solidity 形状：
+
+```solidity
+uint256[] public xs;                    // slot 0
+mapping(address => uint256[]) history;  // slot 2
+```
+
+IR 形状：
+
+```text
+data_base = keccak256(slot)
+elem_slot = data_base + i
+sstore(elem_slot, v)
+y = sload(elem_slot)
+
+arr_slot = keccak256(a, 2)
+data_base = keccak256(arr_slot)
+elem_slot = data_base + i
+y = sload(elem_slot)
+```
+
+约束含义：
+
+```text
+i <: slot:0.dynamic_array.index
+slot:0.dynamic_array.elem <: make_ptr_load(y, 256)
+slot:0.dynamic_array.elem <: make_ptr_store(v, 256)
+
+a <: slot:2.map.key
+i <: slot:2.map.value.dynamic_array.index
+slot:2.map.value.dynamic_array.elem <: make_ptr_load(y, 256)
+```
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4132`：新增 `ArrayStorageFieldMatch`，保存数组字符串前缀、可选 index 和继承自外层 mapping 的 key 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4202`：新增 `getDynamicArrayIndex()`，从 `data_base + i` 或 `evm_add(data_base, i)` 里提取 index；提不出来时只建 elem，不建 index。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4234`：新增 `getArrayStorageFieldMatch()`，复用 `matchStorageArrayDataAccess()`，再用 `getStorageFieldPrefixFromBaseSlot()` 生成 `slot:N.dynamic_array` 或 `slot:N.map.value.dynamic_array`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4316`：`evm_sload(array_slot)` 生成外层 mapping key、array index 和 elem load 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4358`：`evm_sstore(array_slot, value)` 生成同样字段，并把 elem 接到 `make_ptr_store(value, 256)`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-dynamic-array.ll \
+  -o /tmp/notdec-storage-dynamic-array-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-dynamic-array-work
+
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-mapping-array.ll \
+  -o /tmp/notdec-storage-mapping-array-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-mapping-array-work
+```
+
+结果：
+
+- dynamic array trace 里出现 `slot:0.dynamic_array.index` 和 `slot:0.dynamic_array.elem`，elem 同时挂 `store[256]` 和 `load[256]`。
+- mapping array trace 里出现 `slot:2.map.key`、`slot:2.map.value.dynamic_array.index`、`slot:2.map.value.dynamic_array.elem`，elem 同时挂 `store[256]` 和 `load[256]`。
+- `dynamic_array` lower type 是 `⊤ -> 'p -> 'p`，说明 value 参数和返回值连通。
+
+当前边界：
+
+- length slot 还没有接到 `dynamic_array.length`。现在如果有 `sload(slot)`，仍然会先按 direct slot 处理。
+- 只识别简单的 `data_base + i` / `evm_add(data_base, i)`。数组元素是 struct、或者 index 带乘法/字段偏移时还没处理。
+- static array 还没有专门接入；常量 index 仍会退化成 direct slot。
