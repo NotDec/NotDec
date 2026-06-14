@@ -49,6 +49,18 @@
       }
     },
     {
+      "name": "calldata_min_size_private_helper_01",
+      "input": "cases/calldata_min_size_private_helper_01.ll",
+      "patterns": [
+        "calldata"
+      ],
+      "expect_rewrite_hidden": false,
+      "expected_nonpayable_functions": 0,
+      "expected_exact_markers": {
+        "notdec_evm_calldata_min_size": 0
+      }
+    },
+    {
       "name": "checked_bounds_arithmetic_01",
       "input": "cases/checked_bounds_arithmetic_01.ll",
       "patterns": [

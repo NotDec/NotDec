@@ -49,6 +49,10 @@ bool shouldRewriteFunction(Function &F) {
   return detail::isPublicEntryFunction(F) || F.getName().starts_with("private__");
 }
 
+bool shouldRewriteCalldataMinSizeGuards(Function &F) {
+  return detail::isPublicEntryFunction(F);
+}
+
 bool shouldMarkPolymorphicFunction(Function &F) {
   return F.getName().starts_with("private__") && !F.isDeclaration();
 }
@@ -556,8 +560,10 @@ bool rewriteFunction(Function &F) {
   }
 
   DominatorTree DT(F);
-  SmallVector<CalldataMinSizeGuard, 4> Guards =
-      rewriteCalldataMinSizeGuards(F, Calldata);
+  SmallVector<CalldataMinSizeGuard, 4> Guards;
+  if (shouldRewriteCalldataMinSizeGuards(F)) {
+    Guards = rewriteCalldataMinSizeGuards(F, Calldata);
+  }
   SmallVector<CallBase *, 16> Calls;
   for (Instruction &I : instructions(F)) {
     auto *Call = dyn_cast<CallBase>(&I);
