@@ -1354,4 +1354,59 @@ NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
 
 - length slot 还没有接到 `dynamic_array.length`。现在如果有 `sload(slot)`，仍然会先按 direct slot 处理。
 - 只识别简单的 `data_base + i` / `evm_add(data_base, i)`。数组元素是 struct、或者 index 带乘法/字段偏移时还没处理。
-- static array 还没有专门接入；常量 index 仍会退化成 direct slot。
+- static array 在下一步补上；常量 index 仍会退化成 direct slot。
+
+## 实现记录：Static Array 最小接入
+
+本次接入静态数组的动态 index 形状：
+
+```text
+slot = constant_base + i
+sstore(slot, v)
+y = sload(slot)
+```
+
+生成字段：
+
+```text
+slot:0.static_array.index
+slot:0.static_array.elem
+```
+
+约束含义：
+
+```text
+i <: slot:0.static_array.index
+slot:0.static_array.elem <: make_ptr_load(y, 256)
+slot:0.static_array.elem <: make_ptr_store(v, 256)
+```
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4138`：新增 `StaticArrayStorageFieldMatch`，保存静态数组前缀和 index。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4260`：新增 `getStaticArrayStorageFieldMatch()`，识别 `constant + i` 和 `evm_add(constant, i)`。如果两边都是常量或都不是常量，就不匹配。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4373`：`evm_sload(static_array_slot)` 生成 index 和 elem load 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4427`：`evm_sstore(static_array_slot, value)` 生成 index 和 elem store 约束。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-static-array.ll \
+  -o /tmp/notdec-storage-static-array-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-static-array-work
+```
+
+结果：
+
+- trace 里出现 `slot:0.static_array.index` 和 `slot:0.static_array.elem`。
+- `slot:0.static_array.elem` 同时挂 `store[256]` 和 `load[256]`。
+- `static_array` lower type 是 `⊤ -> 'k -> 'k`，说明 value 参数和返回值已经连通。
+
+当前边界：
+
+- 静态数组长度还没有记录。后面如果能从 bounds guard 看到 `i < N`，长度适合放 side table，再由 HType 使用。
+- 常量 index 仍按 direct slot，例如 `xs[2]` 会显示成 `slot:2`，不会反推出它属于 `slot:0.static_array`。
+- `base + i * elem_size + field_offset` 这种数组元素 struct 还没有处理。

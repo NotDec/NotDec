@@ -4135,6 +4135,11 @@ struct ArrayStorageFieldMatch {
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
+struct StaticArrayStorageFieldMatch {
+  std::string Prefix;
+  llvm::Value *Index = nullptr;
+};
+
 std::optional<StorageFieldPrefixMatch>
 getStorageFieldPrefixFromBaseSlot(llvm::Value *BaseSlot, unsigned Depth = 4) {
   if (auto DirectSlot = getUInt64Constant(BaseSlot)) {
@@ -4252,6 +4257,40 @@ getArrayStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
   };
 }
 
+std::optional<StaticArrayStorageFieldMatch>
+getStaticArrayStorageFieldMatch(llvm::Value *StorageSlot) {
+  auto getMatchFromOperands =
+      [](llvm::Value *LHS,
+         llvm::Value *RHS) -> std::optional<StaticArrayStorageFieldMatch> {
+    auto LSlot = getUInt64Constant(LHS);
+    auto RSlot = getUInt64Constant(RHS);
+    if (LSlot.has_value() == RSlot.has_value()) {
+      return std::nullopt;
+    }
+    uint64_t BaseSlot = LSlot.has_value() ? *LSlot : *RSlot;
+    llvm::Value *Index = LSlot.has_value() ? RHS : LHS;
+    return StaticArrayStorageFieldMatch{
+        .Prefix = "slot:" + std::to_string(BaseSlot) + ".static_array",
+        .Index = Index,
+    };
+  };
+
+  if (auto *Add = dyn_cast<llvm::BinaryOperator>(StorageSlot)) {
+    if (Add->getOpcode() == llvm::Instruction::Add) {
+      return getMatchFromOperands(Add->getOperand(0), Add->getOperand(1));
+    }
+  }
+
+  if (auto *Call = dyn_cast<llvm::CallBase>(StorageSlot)) {
+    if (notdec::passes::evm::detail::isCallTo(Call, "evm_add") &&
+        Call->arg_size() == 2) {
+      return getMatchFromOperands(Call->getArgOperand(0), Call->getArgOperand(1));
+    }
+  }
+
+  return std::nullopt;
+}
+
 void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     llvm::CallBase &I) {
   auto *F = I.getCalledFunction();
@@ -4331,6 +4370,17 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
         auto FieldTy = cg.getOrCreateStorageField(Array->Prefix + ".elem");
         auto ResultTy = cg.getOrInsertNode(&I);
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+      } else if (auto StaticArray =
+                     getStaticArrayStorageFieldMatch(I.getArgOperand(0))) {
+        auto IndexTy =
+            cg.getOrCreateStorageField(StaticArray->Prefix + ".index", 256);
+        auto IndexValTy = cg.getOrInsertNode(StaticArray->Index);
+        cg.addSubtype(IndexValTy, IndexTy);
+
+        auto FieldTy =
+            cg.getOrCreateStorageField(StaticArray->Prefix + ".elem");
+        auto ResultTy = cg.getOrInsertNode(&I);
+        cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
       } else if (auto FieldName =
                      getDirectStorageSlotFieldName(I.getArgOperand(0))) {
         auto FieldTy = cg.getOrCreateStorageField(*FieldName);
@@ -4371,6 +4421,18 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
         }
 
         auto FieldTy = cg.getOrCreateStorageField(Array->Prefix + ".elem");
+        auto ValueTy =
+            cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
+        cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
+      } else if (auto StaticArray =
+                     getStaticArrayStorageFieldMatch(I.getArgOperand(0))) {
+        auto IndexTy =
+            cg.getOrCreateStorageField(StaticArray->Prefix + ".index", 256);
+        auto IndexValTy = cg.getOrInsertNode(StaticArray->Index);
+        cg.addSubtype(IndexValTy, IndexTy);
+
+        auto FieldTy =
+            cg.getOrCreateStorageField(StaticArray->Prefix + ".elem");
         auto ValueTy =
             cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
         cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
