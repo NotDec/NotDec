@@ -1571,3 +1571,83 @@ entry:
 - 只处理 direct slot packed write。
 - 不处理 mapping value struct 里的 packed write，例如 `slot:3.map.value.field@slot+0.packed@16:160`。
 - 不处理更复杂的 mask 生成方式，例如 mask 不是常量，或者 clear / shift / or 被 select、phi、helper call 拆开。
+
+## 实现记录：Bytes/String Length 最小接入
+
+本次只接入 bytes/string 的长度读取，不接入数据内容。
+
+Solidity 的 `bytes` / `string` 在 storage 里会把 length 和 short data 编码到同一个 slot。常见长度恢复形状是：
+
+```text
+word = sload(slot)
+is_short = (word & 1) == 0
+full_len = word / 2
+short_len = full_len & 127
+len = select is_short, short_len, full_len
+```
+
+本次把这个 `len` 接到独立字段：
+
+```text
+slot:0.bytes.length <: len
+```
+
+这样不会把整个 `word = sload(slot)` 当成 `slot:0` 的普通 direct load，也不会把 short data 和 length 混在一个字段里。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4153`：新增 `BytesStorageLengthMatch`，保存 bytes/string length 字段名和最终 length 值。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4447`：新增 `binaryOpHasSameValueOperand()`，复用到 bytes length matcher，判断 `and` 的其中一边是不是原 slot word。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4453`：新增 `isBytesLengthFullLen()`，识别 `evm_div(word, 2)`、`evm_shr(1, word)` 和 LLVM `lshr word, 1`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4481`：新增 `isBytesLengthShortLen()`，识别 `full_len & 127`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4491`：新增 `matchStorageBytesLengthValue()`，识别 `select((word & 1) == 0, short_len, full_len)`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4620`：新增 `getBytesStorageLengthMatch()`，从 `evm_sload` 的 users 里向后找 length decode。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4841`：`evm_sload` 在 packed read 和 direct slot fallback 前优先尝试 bytes length，命中后生成 `slot:N.bytes.length`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5220`：`visitSelectInst()` 改用 `getOrInsertNode()`，允许 storage matcher 先给 `select` 结果加约束，visitor 之后再补普通 select 约束。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-length.ll \
+  -o /tmp/notdec-storage-bytes-length-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-bytes-length-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+smoke IR：
+
+```llvm
+target triple = "evm"
+
+declare i256 @evm_sload(i256)
+declare i256 @evm_shr(i256, i256)
+
+define i256 @bytes_length() {
+entry:
+  %word = call i256 @evm_sload(i256 0)
+  %low = and i256 %word, 1
+  %is.short = icmp eq i256 %low, 0
+  %full = call i256 @evm_shr(i256 1, i256 %word)
+  %short = and i256 %full, 127
+  %len = select i1 %is.short, i256 %short, i256 %full
+  ret i256 %len
+}
+```
+
+结果：
+
+- trace 里出现 `slot:0.bytes.length`。
+- 没有生成 whole `slot:0` 的 direct load。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- 只处理 direct slot 的 bytes/string length。
+- 还不处理 short data、long data element。
+- 还不处理 mapping / array / struct 里的 bytes/string。
+- 还不能区分 bytes 和 string，字段名暂时统一用 `.bytes.length`。

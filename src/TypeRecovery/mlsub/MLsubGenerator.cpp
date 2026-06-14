@@ -4150,6 +4150,11 @@ struct PackedStorageFieldWriteMatch {
   llvm::Value *Value = nullptr;
 };
 
+struct BytesStorageLengthMatch {
+  std::string FieldName;
+  llvm::Value *Length = nullptr;
+};
+
 std::optional<StorageFieldPrefixMatch>
 getStorageFieldPrefixFromBaseSlot(llvm::Value *BaseSlot, unsigned Depth = 4) {
   if (auto DirectSlot = getUInt64Constant(BaseSlot)) {
@@ -4439,6 +4444,80 @@ bool getBitwiseOrOperands(llvm::Value *V, llvm::Value *&LHS,
   return false;
 }
 
+bool binaryOpHasSameValueOperand(llvm::BinaryOperator *Op, llvm::Value *V) {
+  return Op != nullptr &&
+         (notdec::passes::evm::detail::isSameValue(Op->getOperand(0), V) ||
+          notdec::passes::evm::detail::isSameValue(Op->getOperand(1), V));
+}
+
+bool isBytesLengthFullLen(llvm::Value *V, llvm::Value *Slot) {
+  if (auto *Call = dyn_cast_or_null<llvm::CallBase>(V)) {
+    if (Call->arg_size() != 2) {
+      return false;
+    }
+    bool IsDivByTwo =
+        notdec::passes::evm::detail::isCallTo(Call, "evm_div") &&
+        notdec::passes::evm::detail::isSameValue(Call->getArgOperand(0), Slot) &&
+        notdec::passes::evm::detail::isConstantIntValue(Call->getArgOperand(1),
+                                                        2);
+    bool IsShrByOne =
+        notdec::passes::evm::detail::isCallTo(Call, "evm_shr") &&
+        notdec::passes::evm::detail::isConstantIntValue(Call->getArgOperand(0),
+                                                        1) &&
+        notdec::passes::evm::detail::isSameValue(Call->getArgOperand(1), Slot);
+    return IsDivByTwo || IsShrByOne;
+  }
+
+  if (auto *Shift = dyn_cast_or_null<llvm::BinaryOperator>(V)) {
+    return Shift->getOpcode() == llvm::Instruction::LShr &&
+           notdec::passes::evm::detail::isSameValue(Shift->getOperand(0),
+                                                    Slot) &&
+           notdec::passes::evm::detail::isConstantIntValue(Shift->getOperand(1),
+                                                           1);
+  }
+  return false;
+}
+
+bool isBytesLengthShortLen(llvm::Value *V, llvm::Value *FullLen) {
+  auto *ShortLen = dyn_cast_or_null<llvm::BinaryOperator>(V);
+  return ShortLen != nullptr && ShortLen->getOpcode() == llvm::Instruction::And &&
+         binaryOpHasSameValueOperand(ShortLen, FullLen) &&
+         (notdec::passes::evm::detail::isConstantIntValue(
+              ShortLen->getOperand(0), 127) ||
+          notdec::passes::evm::detail::isConstantIntValue(
+              ShortLen->getOperand(1), 127));
+}
+
+bool matchStorageBytesLengthValue(llvm::Value *Length, llvm::Value *Slot) {
+  auto *Select = dyn_cast_or_null<llvm::SelectInst>(Length);
+  if (Select == nullptr) {
+    return false;
+  }
+
+  auto *ShortCond = dyn_cast<llvm::ICmpInst>(Select->getCondition());
+  if (ShortCond == nullptr ||
+      ShortCond->getPredicate() != llvm::ICmpInst::ICMP_EQ ||
+      !notdec::passes::evm::detail::isConstantIntValue(
+          ShortCond->getOperand(1), 0)) {
+    return false;
+  }
+
+  auto *LowBit = dyn_cast<llvm::BinaryOperator>(ShortCond->getOperand(0));
+  if (LowBit == nullptr || LowBit->getOpcode() != llvm::Instruction::And ||
+      !binaryOpHasSameValueOperand(LowBit, Slot) ||
+      !(notdec::passes::evm::detail::isConstantIntValue(LowBit->getOperand(0),
+                                                        1) ||
+        notdec::passes::evm::detail::isConstantIntValue(LowBit->getOperand(1),
+                                                        1))) {
+    return false;
+  }
+
+  llvm::Value *ShortLen = Select->getTrueValue();
+  llvm::Value *FullLen = Select->getFalseValue();
+  return isBytesLengthFullLen(FullLen, Slot) &&
+         isBytesLengthShortLen(ShortLen, FullLen);
+}
+
 llvm::Value *getShiftedValue(llvm::Value *V, unsigned &Offset) {
   if (auto *Call = dyn_cast<llvm::CallBase>(V)) {
     if (notdec::passes::evm::detail::isCallTo(Call, "evm_shr") &&
@@ -4532,6 +4611,42 @@ getPackedStorageFieldReadMatch(llvm::CallBase &Load) {
       if (auto Match =
               getPackedReadFromExtractedValue(Load, NestedValue, *FieldName)) {
         return Match;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<BytesStorageLengthMatch>
+getBytesStorageLengthMatch(llvm::CallBase &Load) {
+  auto FieldName = getDirectStorageSlotFieldName(Load.getArgOperand(0));
+  if (!FieldName.has_value()) {
+    return std::nullopt;
+  }
+
+  llvm::SmallVector<llvm::Value *, 8> Worklist;
+  llvm::SmallPtrSet<llvm::Value *, 16> Seen;
+  for (llvm::User *User : Load.users()) {
+    if (auto *V = dyn_cast<llvm::Value>(User)) {
+      Worklist.push_back(V);
+    }
+  }
+
+  unsigned Steps = 0;
+  while (!Worklist.empty() && Steps++ < 32) {
+    llvm::Value *V = Worklist.pop_back_val();
+    if (V == nullptr || !Seen.insert(V).second) {
+      continue;
+    }
+    if (matchStorageBytesLengthValue(V, &Load)) {
+      return BytesStorageLengthMatch{
+          .FieldName = *FieldName + ".bytes.length",
+          .Length = V,
+      };
+    }
+    for (llvm::User *User : V->users()) {
+      if (auto *UserValue = dyn_cast<llvm::Value>(User)) {
+        Worklist.push_back(UserValue);
       }
     }
   }
@@ -4723,6 +4838,10 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
             cg.getOrCreateStorageField(StaticArray->Prefix + ".elem");
         auto ResultTy = cg.getOrInsertNode(&I);
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+      } else if (auto BytesLength = getBytesStorageLengthMatch(I)) {
+        auto FieldTy = cg.getOrCreateStorageField(BytesLength->FieldName, 256);
+        auto LengthTy = cg.getOrInsertNode(BytesLength->Length);
+        cg.addSubtype(FieldTy, LengthTy);
       } else if (auto Packed = getPackedStorageFieldReadMatch(I)) {
         auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
         auto ValueTy = cg.getOrInsertNode(Packed->Value);
@@ -5099,7 +5218,7 @@ void ConstraintsGenerator::MLsubVisitor::visitICmpInst(ICmpInst &I) {
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitSelectInst(SelectInst &I) {
-  auto DstVar = cg.createNode(&I);
+  auto DstVar = cg.getOrInsertNode(&I);
   auto *Src1 = I.getTrueValue();
   auto *Src2 = I.getFalseValue();
   auto Src1Var = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 1));
