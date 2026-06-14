@@ -1651,3 +1651,83 @@ entry:
 - 还不处理 short data、long data element。
 - 还不处理 mapping / array / struct 里的 bytes/string。
 - 还不能区分 bytes 和 string，字段名暂时统一用 `.bytes.length`。
+
+## 实现记录：Dynamic Array Length 有证据接入
+
+本次把动态数组的 length slot 接进 storage 字段，但只在同一个函数里已经看到同一个 base slot 的数组元素访问时生效。
+
+例如：
+
+```text
+len = sload(0)
+base = keccak256(0)
+slot = base + i
+sstore(slot, v)
+```
+
+生成：
+
+```text
+slot:0.dynamic_array.length <: make_ptr_load(len, 256)
+i <: slot:0.dynamic_array.index
+v <: slot:0.dynamic_array.elem
+```
+
+mapping 到动态数组也使用同一套规则：
+
+```text
+arr = keccak256(key, 2)
+len = sload(arr)
+base = keccak256(arr)
+slot = base + i
+sstore(slot, v)
+```
+
+生成：
+
+```text
+key <: slot:2.map.key
+slot:2.map.value.dynamic_array.length <: make_ptr_load(len, 256)
+i <: slot:2.map.value.dynamic_array.index
+v <: slot:2.map.value.dynamic_array.elem
+```
+
+这里故意不处理只有 `sload(slot)` 的 `xs.length`。单看 IR 时它和普通 `uint256 public x` 完全一样，除非有 layout metadata 或别处能看到 `keccak(slot)` 元素访问，否则不应该猜。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4138`：新增 `ArrayLengthStorageFieldMatch`，保存动态数组前缀和 mapping key 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4280`：新增 `functionHasArrayDataAccessForBaseSlot()`，扫描同一函数里的 `evm_sload` / `evm_sstore`，确认是否存在同 base slot 的 `keccak(base)+index` 元素访问。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4318`：新增 `getArrayLengthStorageFieldMatch()`，把 length slot 规约到 `slot:N.dynamic_array.length` 或 `slot:N.map.value.dynamic_array.length`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4861`：`evm_sload` 在 mapping/direct fallback 前优先尝试动态数组 length。这样 `mapping => dynamic array` 的 length slot 不会被误当成 mapping value 的 whole load。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-dynamic-array-length.ll \
+  -o /tmp/notdec-storage-dynamic-array-length-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-dynamic-array-length-work
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-mapping-array-length.ll \
+  -o /tmp/notdec-storage-mapping-array-length-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-mapping-array-length-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- direct array smoke 里出现 `slot:0.dynamic_array.length`、`slot:0.dynamic_array.index`、`slot:0.dynamic_array.elem`。
+- mapping array smoke 里出现 `slot:2.map.key`、`slot:2.map.value.dynamic_array.length`、`slot:2.map.value.dynamic_array.index`、`slot:2.map.value.dynamic_array.elem`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- 只用同函数内元素访问作为 length 的证据。跨函数 “一个函数只读 length，另一个函数读 elem” 还不能合并。
+- 只有 `xs.length` 的函数仍会按 direct slot 处理。
+- 还不处理动态数组元素是 struct 时的 `base + i * elem_slots + field_offset`。

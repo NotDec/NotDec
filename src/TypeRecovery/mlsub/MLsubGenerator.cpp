@@ -4135,6 +4135,11 @@ struct ArrayStorageFieldMatch {
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
+struct ArrayLengthStorageFieldMatch {
+  std::string Prefix;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
+};
+
 struct StaticArrayStorageFieldMatch {
   std::string Prefix;
   llvm::Value *Index = nullptr;
@@ -4268,6 +4273,61 @@ getArrayStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
   return ArrayStorageFieldMatch{
       .Prefix = Base->Prefix + ".dynamic_array",
       .Index = getDynamicArrayIndex(StorageSlot, Match->DataHash),
+      .KeyConstraints = std::move(Base->KeyConstraints),
+  };
+}
+
+bool functionHasArrayDataAccessForBaseSlot(llvm::Function *F,
+                                           llvm::Value *BaseSlot) {
+  if (F == nullptr) {
+    return false;
+  }
+
+  for (llvm::BasicBlock &BB : *F) {
+    for (llvm::Instruction &Inst : BB) {
+      auto *Call = dyn_cast<llvm::CallBase>(&Inst);
+      if (Call == nullptr) {
+        continue;
+      }
+
+      llvm::Value *StorageSlot = nullptr;
+      uint64_t AccessKind = 0;
+      if (notdec::passes::evm::detail::isCallTo(Call, "evm_sload") &&
+          Call->arg_size() == 1) {
+        StorageSlot = Call->getArgOperand(0);
+        AccessKind = 1;
+      } else if (notdec::passes::evm::detail::isCallTo(Call, "evm_sstore") &&
+                 Call->arg_size() == 2) {
+        StorageSlot = Call->getArgOperand(0);
+        AccessKind = 2;
+      } else {
+        continue;
+      }
+
+      auto Match = notdec::passes::evm::detail::matchStorageArrayDataAccess(
+          *Call, StorageSlot, AccessKind);
+      if (Match.has_value() &&
+          notdec::passes::evm::detail::isSameValue(Match->BaseSlot, BaseSlot)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+std::optional<ArrayLengthStorageFieldMatch>
+getArrayLengthStorageFieldMatch(llvm::CallBase &Load) {
+  llvm::Value *BaseSlot = Load.getArgOperand(0);
+  auto Base = getStorageFieldPrefixFromBaseSlot(BaseSlot);
+  if (!Base.has_value()) {
+    return std::nullopt;
+  }
+  if (!functionHasArrayDataAccessForBaseSlot(Load.getFunction(), BaseSlot)) {
+    return std::nullopt;
+  }
+
+  return ArrayLengthStorageFieldMatch{
+      .Prefix = Base->Prefix + ".dynamic_array",
       .KeyConstraints = std::move(Base->KeyConstraints),
   };
 }
@@ -4798,8 +4858,20 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
   if (Name == "evm_sload") {
     markArg(0, "storage_key");
     if (I.arg_size() == 1 && !I.getType()->isVoidTy()) {
-      if (auto Mapping = getMappingStorageFieldMatch(I, I.getArgOperand(0),
-                                                     /*AccessKind=*/1)) {
+      if (auto ArrayLength = getArrayLengthStorageFieldMatch(I)) {
+        for (const auto &KeyConstraint : ArrayLength->KeyConstraints) {
+          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+          cg.addSubtype(KeyValTy, KeyTy);
+        }
+
+        auto FieldTy =
+            cg.getOrCreateStorageField(ArrayLength->Prefix + ".length");
+        auto ResultTy = cg.getOrInsertNode(&I);
+        cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+      } else if (auto Mapping =
+                     getMappingStorageFieldMatch(I, I.getArgOperand(0),
+                                                 /*AccessKind=*/1)) {
         for (const auto &KeyConstraint : Mapping->KeyConstraints) {
           auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
           auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
