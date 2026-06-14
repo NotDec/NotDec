@@ -4126,6 +4126,7 @@ struct StorageFieldPrefixMatch {
 
 struct MappingStorageFieldMatch {
   std::string Prefix;
+  std::string ValueFieldName;
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
@@ -4197,6 +4198,48 @@ getStorageFieldPrefixFromBaseSlot(llvm::Value *BaseSlot, unsigned Depth = 4) {
   return Base;
 }
 
+std::optional<uint64_t> getConstantOffsetFromBase(llvm::Value *V,
+                                                  llvm::Value *Base,
+                                                  unsigned Depth) {
+  if (notdec::passes::evm::detail::isSameValue(V, Base)) {
+    return 0;
+  }
+  if (Depth == 0) {
+    return std::nullopt;
+  }
+
+  auto getOffsetFromOperands =
+      [&](llvm::Value *LHS, llvm::Value *RHS) -> std::optional<uint64_t> {
+    if (auto LOffset = getConstantOffsetFromBase(LHS, Base, Depth - 1)) {
+      if (auto RConst = getUInt64Constant(RHS)) {
+        return *LOffset + *RConst;
+      }
+    }
+    if (auto ROffset = getConstantOffsetFromBase(RHS, Base, Depth - 1)) {
+      if (auto LConst = getUInt64Constant(LHS)) {
+        return *ROffset + *LConst;
+      }
+    }
+    return std::nullopt;
+  };
+
+  if (auto *Add = dyn_cast<llvm::BinaryOperator>(V)) {
+    if (Add->getOpcode() == llvm::Instruction::Add) {
+      return getOffsetFromOperands(Add->getOperand(0), Add->getOperand(1));
+    }
+  }
+
+  if (auto *Call = dyn_cast<llvm::CallBase>(V)) {
+    if (notdec::passes::evm::detail::isCallTo(Call, "evm_add") &&
+        Call->arg_size() == 2) {
+      return getOffsetFromOperands(Call->getArgOperand(0),
+                                   Call->getArgOperand(1));
+    }
+  }
+
+  return std::nullopt;
+}
+
 // Recognize Solidity's mstore(key, 0), mstore(baseSlot, 32), keccak(0, 64)
 // mapping shape. Base slots are normalized to string prefixes; nested mappings
 // work when the base slot is itself a matched mapping hash.
@@ -4218,8 +4261,18 @@ getMappingStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
       .FieldName = Prefix + ".key",
       .Key = Match->Key,
   });
+
+  std::string ValueFieldName = Prefix + ".value";
+  if (auto Offset =
+          getConstantOffsetFromBase(StorageSlot, Match->Hash, /*Depth=*/2)) {
+    if (*Offset != 0) {
+      ValueFieldName += ".field@slot+" + std::to_string(*Offset);
+    }
+  }
+
   return MappingStorageFieldMatch{
       .Prefix = Prefix,
+      .ValueFieldName = ValueFieldName,
       .KeyConstraints = std::move(Base->KeyConstraints),
   };
 }
@@ -4878,7 +4931,7 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
           cg.addSubtype(KeyValTy, KeyTy);
         }
 
-        auto FieldTy = cg.getOrCreateStorageField(Mapping->Prefix + ".value");
+        auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
         auto ResultTy = cg.getOrInsertNode(&I);
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
       } else if (auto Array =
@@ -4940,7 +4993,7 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
           cg.addSubtype(KeyValTy, KeyTy);
         }
 
-        auto FieldTy = cg.getOrCreateStorageField(Mapping->Prefix + ".value");
+        auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
         auto ValueTy =
             cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
         cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));

@@ -1731,3 +1731,64 @@ cmake --build ./build --target all -j4
 - 只用同函数内元素访问作为 length 的证据。跨函数 “一个函数只读 length，另一个函数读 elem” 还不能合并。
 - 只有 `xs.length` 的函数仍会按 direct slot 处理。
 - 还不处理动态数组元素是 struct 时的 `base + i * elem_slots + field_offset`。
+
+## 实现记录：Mapping Value Struct Slot Offset 最小接入
+
+本次接入 mapping value 里的 struct 字段偏移，处理这种形状：
+
+```text
+base = keccak256(key, 5)
+slot = base + 1
+y = sload(slot)
+```
+
+生成：
+
+```text
+key <: slot:5.map.key
+slot:5.map.value.field@slot+1 <: make_ptr_load(y, 256)
+```
+
+写入同理：
+
+```text
+v <: slot:5.map.value.field@slot+1
+```
+
+这里没有尝试恢复源码字段名，只保留 slot offset。`field@slot+1` 后面可以继续挂 packed 字段，例如以后处理 `field@slot+0.packed@16:160`。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4127`：`MappingStorageFieldMatch` 新增 `ValueFieldName`，让 mapping value 可以指向 `.value` 或 `.value.field@slot+N`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4201`：新增 `getConstantOffsetFromBase()`，识别 `base + 常量` 和 `evm_add(base, 常量)`，递归深度限制为 2。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4246`：`getMappingStorageFieldMatch()` 根据 `StorageSlot` 相对 `keccak` hash 的常量偏移生成 value 字段名。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4934`：`evm_sload` 使用 `Mapping->ValueFieldName` 生成 mapping value load 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4996`：`evm_sstore` 使用 `Mapping->ValueFieldName` 生成 mapping value store 约束。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-mapping-struct-field.ll \
+  -o /tmp/notdec-storage-mapping-struct-field-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-mapping-struct-field-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- trace 里出现 `slot:5.map.key`。
+- trace 里出现 `slot:5.map.value.field@slot+1`。
+- 读写同一个 `field@slot+1` 后，返回值和写入值连通。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- offset 0 仍然显示成 `.value`，因为只看 `keccak(key, slot)` 无法区分 `mapping(address => uint256)` 和 `mapping(address => Struct).field0`。
+- 只处理 mapping value 的常量 slot offset。
+- 还不处理动态数组元素 struct 的 `base + i * elem_slots + field_offset`。
+- 还不处理 mapping value struct 里的 packed read/write。
