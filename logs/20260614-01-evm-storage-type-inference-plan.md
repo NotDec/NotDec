@@ -1201,6 +1201,73 @@ entry:
 
 当前边界：
 
-- 只支持一层 mapping，且 base slot 必须是常量。
-- 不支持 nested mapping，因为第二层 `keccak(spender, slot1)` 的 base slot 不是常量，而是上一层 hash 结果。下一步需要给 hash 结果保留“它来自哪个 storage 字符串前缀”的信息。
+- 一层 mapping 已支持；nested mapping 在下一步补上。
 - scratch memory 写入仍按普通内存 visitor 生成约束，所以 smoke trace 里会看到和 `ptr null` / `inttoptr(32)` 相关的既有 size-mismatch 记录。这不是 storage 约束本身的问题，但后面如果要把 mapping smoke 变成稳定单测，最好直接测 matcher 或给 EVM scratch memory 单独建模。
+
+## 实现记录：Nested Mapping 最小接入
+
+本次把 mapping base slot 从“必须是常量”扩成“常量或上一层 mapping hash”。没有引入专门 path object，内部只递归生成字符串前缀。
+
+Solidity 形状：
+
+```solidity
+mapping(address => mapping(address => uint256)) public allowance; // slot 1
+```
+
+IR 形状：
+
+```text
+slot1 = keccak256(owner, 1)
+slot2 = keccak256(spender, slot1)
+sstore(slot2, v)
+y = sload(slot2)
+```
+
+生成字段：
+
+```text
+slot:1.map.key
+slot:1.map.value.map.key
+slot:1.map.value.map.value
+```
+
+约束含义：
+
+```text
+owner   <: slot:1.map.key
+spender <: slot:1.map.value.map.key
+slot:1.map.value.map.value <: make_ptr_load(y, 256)
+slot:1.map.value.map.value <: make_ptr_store(v, 256)
+```
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4117`：新增 `MappingStorageKeyConstraint`，用来保存某个 key 应该约束到哪个字符串字段。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4122`：新增 `StorageFieldPrefixMatch`，只在 matcher 内部临时保存字符串前缀和 key 约束，不进入 binarysub。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4132`：新增 `getStorageFieldPrefixFromBaseSlot()`。常量 base 生成 `slot:N`；如果 base 是 `evm_sha3`，递归匹配上一层 `keccak(key, base)`，然后把前缀扩成 `.map.value`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4172`：`getMappingStorageFieldMatch()` 改为使用递归前缀，并把当前层 key 追加到 `Prefix + ".key"`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4248`：`evm_sload` 对所有 key 约束逐条生成 `key <: fieldName`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4271`：`evm_sstore` 使用同样逻辑。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-nested-mapping.ll \
+  -o /tmp/notdec-storage-nested-mapping-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-nested-mapping-work
+```
+
+结果：
+
+- trace 里出现 `slot:1.map.key`、`slot:1.map.value.map.key`、`slot:1.map.value.map.value`。
+- `slot:1.map.value.map.value` 同时挂 `store[256]` 和 `load[256]`。
+- `ValueTypes.txt` 里 `nested_mapping` lower type 是 `⊤ -> ⊤ -> 'q -> 'q`，说明第三个参数 `v` 和返回值已经通过 nested mapping value 连通。
+
+当前边界：
+
+- 只处理 mapping 链，不处理 `mapping => struct` 的 `+ field_offset`，也不处理 `mapping => array` 的 `keccak(base) + index`。
+- 递归深度当前是 4，避免异常 IR 造成无限回溯。这个值只是保守上限，后面遇到更深真实样例再调。
+- scratch memory 的普通内存约束问题仍然存在，和上一节一样。

@@ -4114,19 +4114,61 @@ std::optional<std::string> getDirectStorageSlotFieldName(llvm::Value *Slot) {
   return "slot:" + std::to_string(*DirectSlot);
 }
 
-std::optional<uint64_t> getConstantStorageBaseSlot(llvm::Value *BaseSlot) {
-  return getUInt64Constant(BaseSlot);
-}
-
-struct MappingStorageFieldMatch {
-  std::string Prefix;
+struct MappingStorageKeyConstraint {
+  std::string FieldName;
   llvm::Value *Key = nullptr;
 };
 
-// This is the first storage normalization step: recognize Solidity's
-// mstore(key, 0), mstore(baseSlot, 32), keccak(0, 64) shape only when the
-// mapping base slot is a constant. Nested mapping/array paths need another
-// layer that can name non-constant base slots.
+struct StorageFieldPrefixMatch {
+  std::string Prefix;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
+};
+
+struct MappingStorageFieldMatch {
+  std::string Prefix;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
+};
+
+std::optional<StorageFieldPrefixMatch>
+getStorageFieldPrefixFromBaseSlot(llvm::Value *BaseSlot, unsigned Depth = 4) {
+  if (auto DirectSlot = getUInt64Constant(BaseSlot)) {
+    return StorageFieldPrefixMatch{
+        .Prefix = "slot:" + std::to_string(*DirectSlot),
+    };
+  }
+
+  if (Depth == 0) {
+    return std::nullopt;
+  }
+
+  auto *Sha3 = dyn_cast<llvm::CallBase>(BaseSlot);
+  if (Sha3 == nullptr) {
+    return std::nullopt;
+  }
+
+  auto Scratch =
+      notdec::passes::evm::detail::matchStorageScratchKeccak(*Sha3);
+  if (!Scratch.has_value()) {
+    return std::nullopt;
+  }
+
+  auto Base = getStorageFieldPrefixFromBaseSlot(Scratch->BaseSlot, Depth - 1);
+  if (!Base.has_value()) {
+    return std::nullopt;
+  }
+
+  auto Prefix = Base->Prefix + ".map";
+  Base->KeyConstraints.push_back(MappingStorageKeyConstraint{
+      .FieldName = Prefix + ".key",
+      .Key = Scratch->Key,
+  });
+  Base->Prefix = Prefix + ".value";
+  return Base;
+}
+
+// Recognize Solidity's mstore(key, 0), mstore(baseSlot, 32), keccak(0, 64)
+// mapping shape. Base slots are normalized to string prefixes; nested mappings
+// work when the base slot is itself a matched mapping hash.
 std::optional<MappingStorageFieldMatch>
 getMappingStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
                             uint64_t AccessKind) {
@@ -4136,13 +4178,18 @@ getMappingStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
     return std::nullopt;
   }
 
-  auto BaseSlot = getConstantStorageBaseSlot(Match->BaseSlot);
-  if (!BaseSlot.has_value()) {
+  auto Base = getStorageFieldPrefixFromBaseSlot(Match->BaseSlot);
+  if (!Base.has_value()) {
     return std::nullopt;
   }
-  return MappingStorageFieldMatch{
-      .Prefix = "slot:" + std::to_string(*BaseSlot) + ".map",
+  auto Prefix = Base->Prefix + ".map";
+  Base->KeyConstraints.push_back(MappingStorageKeyConstraint{
+      .FieldName = Prefix + ".key",
       .Key = Match->Key,
+  });
+  return MappingStorageFieldMatch{
+      .Prefix = Prefix,
+      .KeyConstraints = std::move(Base->KeyConstraints),
   };
 }
 
@@ -4198,9 +4245,11 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     if (I.arg_size() == 1 && !I.getType()->isVoidTy()) {
       if (auto Mapping = getMappingStorageFieldMatch(I, I.getArgOperand(0),
                                                      /*AccessKind=*/1)) {
-        auto KeyTy = cg.getOrCreateStorageField(Mapping->Prefix + ".key", 256);
-        auto KeyValTy = cg.getOrInsertNode(Mapping->Key);
-        cg.addSubtype(KeyValTy, KeyTy);
+        for (const auto &KeyConstraint : Mapping->KeyConstraints) {
+          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+          cg.addSubtype(KeyValTy, KeyTy);
+        }
 
         auto FieldTy = cg.getOrCreateStorageField(Mapping->Prefix + ".value");
         auto ResultTy = cg.getOrInsertNode(&I);
@@ -4219,9 +4268,11 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     if (I.arg_size() == 2) {
       if (auto Mapping = getMappingStorageFieldMatch(I, I.getArgOperand(0),
                                                      /*AccessKind=*/2)) {
-        auto KeyTy = cg.getOrCreateStorageField(Mapping->Prefix + ".key", 256);
-        auto KeyValTy = cg.getOrInsertNode(Mapping->Key);
-        cg.addSubtype(KeyValTy, KeyTy);
+        for (const auto &KeyConstraint : Mapping->KeyConstraints) {
+          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+          cg.addSubtype(KeyValTy, KeyTy);
+        }
 
         auto FieldTy = cg.getOrCreateStorageField(Mapping->Prefix + ".value");
         auto ValueTy =
