@@ -30,20 +30,20 @@ storage 也有 load/store，但地址不是普通 byte offset。Solidity 把 sto
 - 一个 slot 里的 packed bit field。
 - bytes/string 的 short/long 两套编码。
 
-所以接入类型推理时，关键不是把 `evm_sload(key)` 直接当普通 load，而是先把 `key` 解释成 storage path，再给 path 建类型变量。
+所以接入类型推理时，关键不是把 `evm_sload(key)` 直接当普通 load，而是先把 `key` 解释成稳定的 storage 字符串字段，再给这个字段建普通类型变量。
 
 ## 总原则
 
 不要把 storage 塞进普通线性内存。
 
-建议单独建一个 storage root type，形式上仍然复用 `TMemObject` / record field，但 field name 使用 storage path：
+建议单独建一个全局 storage root type，形式上仍然复用 `TMemObject` / record field。storage 路径不要做成 binarysub 里的新类型，只编码成普通字符串 field name：
 
 ```text
-storage.slot:0
-storage.slot:1.map
-storage.slot:2.array
-storage.slot:3.packed@160:8
-storage.slot:4.bytes
+slot:0
+slot:1.map
+slot:2.array
+slot:3.packed@160:8
+slot:4.bytes
 ```
 
 这样做的好处是：
@@ -52,11 +52,23 @@ storage.slot:4.bytes
 - 和普通 pointer + offset 的模式一致，容易接进现有代码。
 - field name 里保留 Solidity storage 地址语义，不把 mapping / array / packed 混成普通 `uint256` 地址。
 
+这里要再单独强调一条：`StorageRoot` 应该当成全局对象处理。
+
+也就是说，不管某个 storage 访问是从 level = 0 的普通函数里出现，还是因为一个 level > 0 的多态函数实例化出来的，`StorageRoot` 以及它下面所有由字符串 field name 创建出来的类型变量，都应该落在 `level = 0`。
+
+这条规则的目的很直接：
+
+- storage 不是某个局部 let 绑定的临时值。
+- storage 代表的是合约整体的全局状态。
+- 多态函数只是“碰到”它，不是“拥有”它。
+
+所以这里不应该让 `freshenAbove` 把 storage field 复制成更高 level 的新变量，也不应该让 `StorageRoot` 随调用点抬高 level。更稳妥的做法是，storage 相关字段变量在建模时就固定为全局层，再通过普通约束把它和当前调用点的 key / value / index 连起来。
+
 大致类型形状：
 
 ```text
 StorageRoot <: {
-  "slot:0": CellTy,
+  "slot:0": Slot0Obj,
   "slot:1.map": {
     "key": KeyTy,
     "value": ValueTy
@@ -99,18 +111,30 @@ y = sload(0)
 类型接入：
 
 ```text
-field name: storage.slot:0
+field name: slot:0
 
-x <: Cell(slot:0)
-Cell(slot:0) <: y
+StorageRoot <: { "slot:0": Slot0Obj }
+Slot0Obj <: make_ptr_store(x, 256)
+Slot0Obj <: make_ptr_load(y, 256)
 ```
 
-落到 binarysub 可以是：
+这里的 `Slot0Obj` 不是一个新造的值类型，而是直接复用
+`external/binarysub/include/binarysub/binarysub-core.h` 里的
+`TMemObject` 表达方式。`make_ptr_store(x, 256)` 和
+`make_ptr_load(y, 256)` 内部都是带 `directStore` / `directLoad` 的
+`TMemObject`。
+
+这和当前 LLVM `load/store` visitor 的写法一致：
 
 ```text
-StorageRoot <: { "slot:0": Cell0 }
-x <: Cell0
-Cell0 <: y
+load  ptr -> addSubtype(PtrVal, make_ptr_load(RetVal, BitSize))
+store ptr -> addSubtype(PtrVal, make_ptr_store(StoreVal, BitSize))
+```
+
+同一个 `Slot0Obj` 同时有 directStore 和 directLoad 时，binarysub 现有规则会推出：
+
+```text
+x <: y
 ```
 
 如果 `x` 还被 `evm_balance`、`evm_call` 的 address 参数使用，或者被 address mask 清理，就会继续产生：
@@ -119,7 +143,9 @@ Cell0 <: y
 x <: address_like_type
 ```
 
-最后 `Cell0` 自然会吸收这些约束。storage 这层不需要提前判断它是 `uint256` 还是 `address`。
+最后这些约束都会汇到 `Slot0Obj` 的 direct store/load value 上。storage 这层不需要提前判断它是 `uint256` 还是 `address`。
+
+后面例子里如果写 `Map.value`、`Array.elem`、`PackedField`，它们只是在说明 layout 里的哪个字符串字段。真正落到 binarysub 时，只要这个字段会被 `sload/sstore` 访问，就从 `StorageRoot` 上取这个 field name 对应的普通类型变量，再用 `directLoad/directStore` 连接具体 value。
 
 ## 2. Mapping
 
@@ -156,7 +182,7 @@ y = sload(slot)
 类型接入：
 
 ```text
-field name: storage.slot:0.map
+field name: slot:0.map
 
 a <: Map0.key
 v <: Map0.value
@@ -227,7 +253,7 @@ sstore(slot2, v)
 第一种是扁平 field name：
 
 ```text
-field name: storage.slot:1.map.map
+field name: slot:1.map.map
 
 owner   <: Allowance.key0
 spender <: Allowance.key1
@@ -281,7 +307,7 @@ y = sload(slot)
 
 ```text
 xs[2] -> slot 2
-field name: storage.slot:2
+field name: slot:2
 ```
 
 这可以退化成 direct slot。
@@ -289,7 +315,7 @@ field name: storage.slot:2
 如果 `i` 是动态值，不能给每个 index 建无限 field。建议用数组元素模型：
 
 ```text
-field name: storage.slot:0.static_array
+field name: slot:0.static_array
 
 i <: Array.index
 v <: Array.elem
@@ -345,9 +371,9 @@ y = sload(elem_slot)
 类型接入：
 
 ```text
-field name: storage.slot:0.dynamic_array
+field name: slot:0.dynamic_array
 
-LengthCell(slot:0) <: len
+LengthObj(slot:0) <: make_ptr_load(len, 256)
 i <: Array.index
 v <: Array.elem
 Array.elem <: y
@@ -410,7 +436,7 @@ y = sload(elem_slot)
 类型接入：
 
 ```text
-field name: storage.slot:2.map.value.dynamic_array
+field name: slot:2.map.value.dynamic_array
 
 a <: Map.key
 i <: Array.index
@@ -432,7 +458,7 @@ StorageRoot <: {
 }
 ```
 
-这个例子说明 field name 不能只用最终 `keccak` 值。必须保留 path：
+这个例子说明 field name 不能只用最终 `keccak` 值。必须保留完整路径信息：
 
 ```text
 slot 2 -> map key a -> array elem index i
@@ -471,7 +497,7 @@ y = sload(value_slot)
 类型接入：
 
 ```text
-field name: storage.slot:0.dynamic_array.elem.field:values.map
+field name: slot:0.dynamic_array.elem.field:values.map
 
 i <: Array.index
 a <: Map.key
@@ -533,8 +559,8 @@ sstore(1, b)
 如果没有源码名，类型推理只能看到：
 
 ```text
-storage.slot:0
-storage.slot:1
+slot:0
+slot:1
 ```
 
 但如果多个访问来自同一个 base object，例如 array elem 或 mapping value 的 struct：
@@ -558,7 +584,7 @@ y = sload(slot)
 类型接入：
 
 ```text
-field name: storage.slot:5.map.value.field@slot+1
+field name: slot:5.map.value.field@slot+1
 
 a <: Map.key
 Field1 <: y
@@ -623,10 +649,10 @@ word = sload(0)
 owner = (word >> bit_offset) & ((1 << 160) - 1)
 ```
 
-类型接入时不要只给整个 slot 一个 `Cell0`。要给 packed field 单独建 cell：
+类型接入时不要只给整个 slot 一个 field。要给 packed field 单独建 field：
 
 ```text
-field name: storage.slot:0.packed@offset:width
+field name: slot:0.packed@offset:width
 
 a <: PackedField(0, offset, 160)
 PackedField(0, offset, 160) <: owner
@@ -654,7 +680,7 @@ mapping(address => Flags) public flagsOf; // slot 3
 field name 可以是：
 
 ```text
-storage.slot:3.map.value.field@slot+0.packed@16:160
+slot:3.map.value.field@slot+0.packed@16:160
 ```
 
 这比单独记 `slot = keccak(a,3)` 更有用，因为它保留了“mapping value 的 packed 字段”。
@@ -685,7 +711,7 @@ Solidity storage 编码：
 类型接入建议把它当一个 bytes/string object，而不是两个无关路径。
 
 ```text
-field name: storage.slot:0.bytes
+field name: slot:0.bytes
 
 Bytes.length <: len
 Bytes.short_data <: ret_bytes
@@ -710,8 +736,8 @@ StorageRoot <: {
 重点是 short / long 两个分支必须合并到同一个 `slot:0.bytes`。如果拆成：
 
 ```text
-storage.slot:0
-storage.slot:keccak(0).array
+slot:0
+slot:keccak(0).array
 ```
 
 类型结果会看起来像一个 uint256 字段加一个数组，源码语义就丢了。
@@ -746,7 +772,7 @@ if long:
 类型接入：
 
 ```text
-field name: storage.slot:0.dynamic_array.elem.bytes
+field name: slot:0.dynamic_array.elem.bytes
 
 i <: Array.index
 Bytes.length <: ret.length
@@ -804,7 +830,7 @@ y = sload(elem_slot)
 
 ```text
 field name:
-storage.slot:4.map.value.field@slot+1.dynamic_array
+slot:4.map.value.field@slot+1.dynamic_array
 
 a <: Map.key
 i <: Array.index
@@ -828,7 +854,7 @@ StorageRoot <: {
 }
 ```
 
-这类组合是接入方式必须支持的重点。不要给每种组合写死一个独立类型规则。更好的做法是统一维护 path segment：
+这类组合是接入方式必须支持的重点。不要给每种组合写死一个独立类型规则。更好的做法是在 matcher 内部统一维护 path segment：
 
 ```text
 slot(4)
@@ -839,11 +865,11 @@ slot(4)
   -> elem
 ```
 
-最后把 path segment 序列编码成 field name 或嵌套 record。
+最后把 path segment 序列编码成字符串 field name。
 
 ## 13. 建议的 Path Segment
 
-内部先用结构化 path，不要一开始就拼字符串。建议类似：
+内部可以先用结构化 path，最后再拼成字符串。注意，这个 `StoragePath` 只是 matcher / normalization 里的临时结构，不进入 binarysub 类型系统。binarysub 最终只看到 `StorageRoot` 的字符串字段和普通 `SimpleType` 变量。
 
 ```text
 StoragePath =
@@ -869,14 +895,14 @@ ArrayIndex(i, Dynamic)
 转成：
 
 ```text
-storage.slot:4.map.value.field@slot+1.dynamic_array.elem
+slot:4.map.value.field@slot+1.dynamic_array.elem
 ```
 
 对应 side constraints：
 
 ```text
-a <: storage.slot:4.map.key
-i <: storage.slot:4.map.value.field@slot+1.dynamic_array.index
+a <: slot:4.map.key
+i <: slot:4.map.value.field@slot+1.dynamic_array.index
 ```
 
 这样既保留了字段名，又能把 key/index 单独接进类型推理。
@@ -895,26 +921,55 @@ i <: storage.slot:4.map.value.field@slot+1.dynamic_array.index
 
 ```text
 evm_sload(slot):
-  if slot can be normalized to StoragePath:
-    Cell(path) <: result
+  if slot can be normalized to storage field name:
+    FieldTy = getOrCreateStorageField(fieldName, level=0)
+    FieldTy <: make_ptr_load(result, 256)
   else:
     slot <: storage_key
 
 evm_sstore(slot, value):
-  if slot can be normalized to StoragePath:
-    value <: Cell(path)
+  if slot can be normalized to storage field name:
+    FieldTy = getOrCreateStorageField(fieldName, level=0)
+    FieldTy <: make_ptr_store(value, 256)
   else:
     slot <: storage_key
 ```
 
-如果 path 里有 key/index：
+这里的 `getOrCreateStorageField(fieldName, level=0)` 不需要引入新抽象。它可以只是：
+
+1. 在 `StorageRoot` 上查找这个字符串 field name。
+2. 没有就创建一个 level 0 的普通 `SimpleType` 变量。
+3. 对 `StorageRoot` 加一条 record field 约束，让这个字段进入最终类型结果。
+4. 返回这个普通变量，后面继续用 `make_ptr_load` / `make_ptr_store`。
+
+如果字段路径里有 key/index：
 
 ```text
-key <: KeyType(path prefix)
-index <: IndexType(path prefix)
+key <: KeyType(fieldName prefix)
+index <: IndexType(fieldName prefix)
 ```
 
-如果只识别到 `sha3(key, base)`，但 base 还不是常量，也不要丢。可以建一个相对 path：
+这里的 level 规则必须固定：
+
+```text
+CurrentLevel = CG.lvl          // 当前函数 / 多态实例自己的 level
+StorageLevel = 0              // storage root 和所有 storage field 变量永远用 0
+
+key/index/value/result 使用它们原本的当前类型节点。
+StorageRoot、StorageField(fieldName)、KeyType(fieldName)、IndexType(fieldName) 都用 StorageLevel 创建。
+```
+
+例子：
+
+```solidity
+function read(address a) internal view returns (uint256) {
+    return balanceOf[a];
+}
+```
+
+如果 `read` 作为多态 summary 在 caller 里实例化，`a` 和返回值可以有当前实例的 level。但 `balanceOf` 对应的 `"slot:0.map.key"` / `"slot:0.map.value"` 字段变量仍然必须是 level 0。否则同一个 storage mapping 会被不同调用点复制成多个类型对象，最后无法汇总成合约级 layout。
+
+如果只识别到 `sha3(key, base)`，但 base 还不是常量，也不要丢。可以先建一个相对字段名：
 
 ```text
 storage.unknown_base.map
@@ -966,7 +1021,7 @@ StorageRoot {
 }
 ```
 
-只有 debug 输出可以再打印完整 path。
+只有 debug 输出可以再打印完整路径。
 
 ## 16. 不应该做的事
 
@@ -994,7 +1049,7 @@ slot:0.array[i]
 
 动态 index 应该约束到 `array.index`，元素类型约束到 `array.elem`。
 
-不要把 packed slot 的整个 256-bit value 当字段类型来源。packed 字段要按 bit 区间单独建 cell。
+不要把 packed slot 的整个 256-bit value 当字段类型来源。packed 字段要按 bit 区间单独建 field object。
 
 ## 17. 判断标准
 
@@ -1014,11 +1069,10 @@ slot:0.array[i]
 
 每个样例至少检查：
 
-- storage path 是否稳定打印。
+- storage 字符串字段是否稳定打印。
 - key/index/value 是否各自进了类型约束。
-- load/store 是否通过同一个 cell 连起来。
+- load/store 是否通过同一个 storage 字符串字段变量的 directLoad/directStore 连起来。
 - packed 字段没有和整个 slot 混掉。
 - bytes/string short/long 是否合到同一个 bytes object。
 
-性能上，path normalization 必须有缓存。一个 `sload/sstore` 最多沿 def-use 向前看有限深度，不要全函数反复扫 scratch memory。
-
+性能上，storage field normalization 必须有缓存。一个 `sload/sstore` 最多沿 def-use 向前看有限深度，不要全函数反复扫 scratch memory。
