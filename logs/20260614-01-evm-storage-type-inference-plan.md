@@ -2059,3 +2059,79 @@ NOTDEC_SUMMARY_OVERRIDE=/tmp/notdec-evm-string-semantic-summary.json \
 - 这里只接入格本身，还没有新增自动打 `string` 标记的位置。
 - 后续优先从 ABI/signature override、public 函数签名、已知 runtime/helper 语义里补 `string` 证据。
 - 不把所有 `.bytes` storage 默认提升成 `string`，否则会把 Solidity `bytes` 误判成 `string`。
+
+## 实现记录：Bytes/String Long Data 最小接入
+
+本次只接 long bytes/string 的数据块读取和写入，不处理 short data。
+
+Solidity 同一个 `bytes/string` storage 变量有两种运行时编码：
+
+```solidity
+contract C {
+    string public name; // slot 0
+
+    function getWord(uint256 i) public view returns (bytes32) {
+        return bytes(name)[i];
+    }
+}
+```
+
+long 版本的底层形状是：
+
+```text
+word = sload(0)
+len = decode_bytes_length(word)
+data_base = keccak256(0)
+chunk = sload(data_base + i)
+```
+
+这里 `keccak256(0) + i` 和动态数组元素形状很像。为了不把普通动态数组误判成 bytes，本次只在同一个 base slot 已经出现 bytes length decode 时，才把 `keccak256(slot) + i` 归到：
+
+```text
+slot:0.bytes.long_index
+slot:0.bytes.long_elem
+```
+
+否则仍然走普通动态数组：
+
+```text
+slot:0.dynamic_array.index
+slot:0.dynamic_array.elem
+```
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4176`：新增 `BytesStorageLongElemMatch`，保存 `.bytes` 前缀、可选 long index 和外层 mapping key 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4930`：新增 `functionHasBytesLengthDecodeForBaseSlot()`，在同一函数内检查 base slot 的 `sload(slot)` 是否被 bytes length decode 使用。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4975`：新增 `getBytesStorageLongElemMatch()`，复用 array data matcher 识别 `keccak(slot)+i`，但额外要求 base slot 有 bytes length decode。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5160`：`evm_sload` 先识别 bytes length，再识别 array length，避免 long bytes 场景里 `slot:0.bytes.length` 被误写成 `slot:0.dynamic_array.length`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5184`：`evm_sload(keccak(slot)+i)` 命中 long bytes 时生成 `.bytes.long_index` 和 `.bytes.long_elem`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5302`：`evm_sstore(keccak(slot)+i, value)` 命中 long bytes 时使用同一组字段。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-long-elem.ll \
+  -o /tmp/notdec-storage-bytes-long-elem-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-bytes-long-elem-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- trace 里出现 `slot:0.bytes.length`。
+- trace 里出现 `slot:0.bytes.long_index`。
+- trace 里出现 `slot:0.bytes.long_elem`。
+- trace 里没有 `slot:0.dynamic_array.length` 或 `slot:0.dynamic_array.elem`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- 还不处理 short bytes/string 的 inline data，也就是 `slot:0.bytes.short_data`。
+- long bytes 的识别依赖同函数内能看到 length decode。只看到 `keccak(slot)+i` 时仍按动态数组处理。
+- 还没有把 storage root 作为单独 HType 结果导出；本次仍只通过 trace 和 value 约束验证 storage 字段。
