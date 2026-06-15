@@ -115,6 +115,8 @@ struct ConstraintsGenerator {
   // Keep both solved bounds per value. ValueTypesLower is the pos=true result;
   // ValueTypesUpper is the pos=false result.
   std::map<ExtValuePtr, ast::HType *> ValueTypesUpper;
+  ast::HType *StorageHType = nullptr;
+  ast::RecordDecl *StorageDecl = nullptr;
   std::map<llvm::CallBase *, SimpleType> unhandledCalls;
   std::set<ExtValuePtr> ContraVariantValues;
   std::set<ExtValuePtr> SnapshotContraVariantValues;
@@ -192,7 +194,7 @@ struct ConstraintsGenerator {
     }
   }
   void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL,
-                bool SolveMemory = false);
+                bool SolveGlobals = false);
   void releaseBinarysubState();
 
   SimpleType convertSimpleType(ExtValuePtr Val);

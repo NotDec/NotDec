@@ -2203,3 +2203,67 @@ cmake --build ./build --target all -j4
 - 只处理 `and(word, ~0xff)`，还不处理 shift、byte-copy loop 或 helper 拆出来的 short data。
 - short data 目前只是 storage evidence，不负责把 bytes/string 提升成最终 `string`。
 - storage root 仍未单独导出为 HType 结果。
+
+## 实现记录：导出 `[storage]` HType 结果
+
+本次把全局 storage root 从 trace 里推进到 HType 输出里。`ValueHTypes.txt` 和 `ImportantHTypes.txt` 现在都有独立的 `[storage]` section。
+
+当前没有把 storage path 直接当 C 字段名。原因是普通 HType record 仍然按 offset range 解析，适合 memory / struct，不适合 `slot:0.bytes.long_elem` 这种 storage path。最小做法是：
+
+```text
+[storage]
+decl => struct_0
+type => struct_0
+
+struct struct_0 {
+  top:256 field_0; /* storage path: slot:0.bytes.length */
+  u256 field_1;    /* storage path: slot:0.bytes.short_data */
+};
+```
+
+也就是说，字段顺序稳定，原始 storage path 放在字段注释里。这样不会碰普通 memory 的 `OffsetRange::fromStr()` 路径。
+
+修改点：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:63`：`HTypeResult` 增加 `StorageType` / `StorageDecl`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:100`：`HTypeResult::print()` 增加 `[storage]` section。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:118`：`ConstraintsGenerator` 增加 `StorageHType` / `StorageDecl`，因为 binarysub graph 在 `topDownPhase()` 后会释放，storage 必须在 `genTypes()` 阶段先转成 HType。
+- `include/notdec/TypeRecovery/mlsub/TypeBuilder.h:71`：新增 `convertStorageRecord()`。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:900`：实现 storage 专用转换。它不解析 storage 字段名为 `OffsetRange`，而是按 `StorageFields` 的稳定顺序创建 record 字段，并把原始 path 写入 comment。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3121`：`genTypes()` 在第 0 个 SCC 中同时求解 `MemoryType` 和 `StorageType`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3204`：把求解后的 storage UType 交给 `TypeBuilder::convertStorageRecord()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3283`：`genASTTypes()` 把第 0 个 SCC 保存的 storage HType 放入最终 `HTypeResult`。
+- `src/TypeRecovery/mlsub/HTypeNormalize.cpp:144`：normalize 时把 `StorageType` 当作全局根处理，并避免把 `StorageDecl` 当成普通透明单字段 record 消掉。
+- `src/TypeRecovery/mlsub/HTypeDebug.cpp:244`：`ImportantHTypes.txt` 增加 `[storage]` section。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec TypeBuilderTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-short-data.ll \
+  -o /tmp/notdec-storage-with-storage-section-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-with-storage-section-work
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-long-elem.ll \
+  -o /tmp/notdec-storage-long-storage-section-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-long-storage-section-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- short-data smoke 的 `ValueHTypes.txt` 出现 `[storage]`。
+- short-data smoke 的 decl 注释里出现 `storage path: slot:0.bytes.length` 和 `storage path: slot:0.bytes.short_data`。
+- long-data smoke 的 decl 注释里出现 `storage path: slot:0.bytes.length`、`storage path: slot:0.bytes.long_elem`、`storage path: slot:0.bytes.long_index`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- `[storage]` 里的字段名仍是 `field_N`，真实 path 在注释里。
+- 字段类型是当前 raw HType 结果，可能显示 `ptr<load=..., store=...>`，暂不做 Solidity 展示层美化。
+- 顶层当前还有一个 unrelated `external/NotDec-bin2llvm` submodule 指针差异，本次提交不会包含它。

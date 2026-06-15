@@ -68,6 +68,9 @@ public:
 
   // Main conversion entry point
   HType *convert(binarysub::UTypePtr Ty);
+  HType *convertStorageRecord(
+      const binarysub::UTypePtr &Ty,
+      const std::map<std::string, binarysub::SimpleType> &StorageFields);
 
 protected:
   HType *convertRecursive(const binarysub::UTypePtr &Ty,

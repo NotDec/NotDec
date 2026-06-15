@@ -3108,7 +3108,7 @@ void MLsubRecovery::bottomUpPhase() {
 
 void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                                     const llvm::DataLayout &DL,
-                                    bool SolveMemory) {
+                                    bool SolveGlobals) {
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
   SnapshotContraVariantValues = ContraVariantValues;
@@ -3118,8 +3118,12 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     Tys.insert(PolarVar{.var = Ent.second, .pos = false});
   }
   auto PolMem = PolarVar{.var = MemoryType, .pos = false};
-  if (SolveMemory) {
+  auto PolStorage = PolarVar{.var = StorageType, .pos = false};
+  if (SolveGlobals) {
     Tys.insert(PolMem);
+    if (StorageType != nullptr) {
+      Tys.insert(PolStorage);
+    }
   }
   binarysub::BulkSimplifyOptions BulkOptions;
   BulkOptions.enableParallel = true;
@@ -3135,8 +3139,11 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     TypeBuilderRootLabels[PolarVar{.var = Ent.second, .pos = false}] =
         Label + " upper";
   }
-  if (SolveMemory) {
+  if (SolveGlobals) {
     TypeBuilderRootLabels[PolMem] = "<memory>";
+    if (StorageType != nullptr) {
+      TypeBuilderRootLabels[PolStorage] = "<storage>";
+    }
   }
 
   std::map<std::uint32_t, const binarysub::StructMergeCandidateInfo *>
@@ -3184,11 +3191,23 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
         PolarVar{.var = Ent.second, .pos = true}, RootLabel + " lower");
     ValueTypesLower.insert({Ent.first, Lower});
   }
-  if (SolveMemory) {
+  if (SolveGlobals) {
     auto MemUTy = Res.at(PolMem);
     TB.setDebugRootLabel(std::string("<memory>"));
     ValueTypesUpper.insert({nullptr, TB.convert(MemUTy)});
     TB.setDebugRootLabel(std::nullopt);
+
+    if (StorageType != nullptr && StorageFields != nullptr) {
+      auto It = Res.find(PolStorage);
+      if (It != Res.end() && It->second != nullptr) {
+        TB.setDebugRootLabel(std::string("<storage>"));
+        StorageHType = TB.convertStorageRecord(It->second, *StorageFields);
+        TB.setDebugRootLabel(std::nullopt);
+        if (StorageHType != nullptr && StorageHType->isRecordType()) {
+          StorageDecl = StorageHType->getAsRecordDecl();
+        }
+      }
+    }
   }
   for (auto &Ent : V2N) {
     auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
@@ -3199,11 +3218,11 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
 
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
-                          OriginalVariableSources, SolveMemory, PolMem);
+                          OriginalVariableSources, SolveGlobals, PolMem);
     appendDebugVarOrigins(*WorkDir, Name, V2N, ContraVariantValues, Res,
-                          OriginalVariableSources, SolveMemory, PolMem);
+                          OriginalVariableSources, SolveGlobals, PolMem);
     appendDebugStructMerge(*WorkDir, Name, V2N, BulkResult.structMerge,
-                           SolveMemory, PolMem);
+                           SolveGlobals, PolMem);
   }
 }
 
@@ -3261,6 +3280,9 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   if (Mem->isRecordType()) {
     ResultVal->MemoryDecl = Mem->getAsRecordDecl();
   }
+  auto *Storage = AG.AllSCCs.at(0).Generator->StorageHType;
+  ResultVal->StorageType = Storage;
+  ResultVal->StorageDecl = AG.AllSCCs.at(0).Generator->StorageDecl;
   normalizeHTypeResult(*ResultVal);
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     writeDebugEVMMarkerFacts(*WorkDir, M);

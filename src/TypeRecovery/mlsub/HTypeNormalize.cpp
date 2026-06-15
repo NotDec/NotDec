@@ -141,6 +141,7 @@ collectRecursiveAnchorDecls(const llvm2c::HTypeResult &Result) {
     collectRecursiveAnchorDecls(Ent.second, Anchors, Visited);
   }
   collectRecursiveAnchorDecls(Result.MemoryType, Anchors, Visited);
+  collectRecursiveAnchorDecls(Result.StorageType, Anchors, Visited);
   if (Result.HTCtx) {
     for (const auto &Ent : Result.HTCtx->getDecls()) {
       if (auto *RD = llvm::dyn_cast<ast::RecordDecl>(Ent.second.get())) {
@@ -271,6 +272,8 @@ collectRecursiveBinders(const llvm2c::HTypeResult &Result) {
                             VisitedBinders);
   }
   collectRecursiveBinders(Result.MemoryType, Binders, VisitedTypes,
+                          VisitedDecls, VisitedBinders);
+  collectRecursiveBinders(Result.StorageType, Binders, VisitedTypes,
                           VisitedDecls, VisitedBinders);
   return Binders;
 }
@@ -506,6 +509,10 @@ void refreshMemoryDecl(llvm2c::HTypeResult &Result) {
   if (Result.MemoryType != nullptr && Result.MemoryType->isRecordType()) {
     Result.MemoryDecl = Result.MemoryType->getAsRecordDecl();
   }
+  Result.StorageDecl = nullptr;
+  if (Result.StorageType != nullptr && Result.StorageType->isRecordType()) {
+    Result.StorageDecl = Result.StorageType->getAsRecordDecl();
+  }
 }
 
 void normalizeCollapsedRecursiveBinders(
@@ -547,6 +554,9 @@ void normalizeCollapsedRecursiveBinders(
   Result.MemoryType = rewriteCollapsedRecursiveType(*Result.HTCtx,
                                                     Result.MemoryType,
                                                     Replacements);
+  Result.StorageType = rewriteCollapsedRecursiveType(*Result.HTCtx,
+                                                     Result.StorageType,
+                                                     Replacements);
 
   for (const auto &Ent : Result.HTCtx->getDecls()) {
     if (auto *RD = llvm::dyn_cast<ast::RecordDecl>(Ent.second.get())) {
@@ -680,7 +690,7 @@ void normalizeTransparentSingleFieldRecords(llvm2c::HTypeResult &Result) {
   TransparentRecordMap Replacements;
   for (const auto &Ent : Result.HTCtx->getDecls()) {
     auto *RD = llvm::dyn_cast<ast::RecordDecl>(Ent.second.get());
-    if (RD == nullptr || RD == Result.MemoryDecl ||
+    if (RD == nullptr || RD == Result.MemoryDecl || RD == Result.StorageDecl ||
         RecursiveAnchors.count(RD) != 0) {
       continue;
     }
@@ -705,6 +715,8 @@ void normalizeTransparentSingleFieldRecords(llvm2c::HTypeResult &Result) {
   }
   Result.MemoryType = rewriteTransparentRecordType(
       *Result.HTCtx, Result.MemoryType, Replacements);
+  Result.StorageType = rewriteTransparentRecordType(
+      *Result.HTCtx, Result.StorageType, Replacements);
 
   for (const auto &Ent : Result.HTCtx->getDecls()) {
     if (auto *RD = llvm::dyn_cast<ast::RecordDecl>(Ent.second.get())) {

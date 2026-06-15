@@ -61,6 +61,12 @@ void primeSnapshotFormatter(const llvm2c::HTypeResult &Result,
   if (Result.MemoryDecl != nullptr) {
     Formatter.collectDecl(*Result.MemoryDecl);
   }
+  if (Result.StorageType != nullptr) {
+    Formatter.collectType(Result.StorageType);
+  }
+  if (Result.StorageDecl != nullptr) {
+    Formatter.collectDecl(*Result.StorageDecl);
+  }
 }
 
 const ast::FunctionType *unwrapFunctionType(const ast::HType *Ty) {
@@ -232,6 +238,15 @@ void writeDebugImportantHTypes(llvm::StringRef DebugDir,
   }
   if (Result.MemoryType != nullptr) {
     Out << "type => " << Formatter.formatType(Result.MemoryType) << "\n";
+  }
+  Out << "\n";
+
+  Out << "[storage]\n";
+  if (Result.StorageDecl != nullptr) {
+    Out << "decl => " << Formatter.formatDeclName(*Result.StorageDecl) << "\n";
+  }
+  if (Result.StorageType != nullptr) {
+    Out << "type => " << Formatter.formatType(Result.StorageType) << "\n";
   }
   Out << "\n";
 

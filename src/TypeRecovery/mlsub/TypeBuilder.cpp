@@ -897,6 +897,50 @@ HType *TypeBuilder::convertFieldType(const binarysub::UTypePtr &Ty,
   assert(false && "Unhandled field UType variant");
 }
 
+HType *TypeBuilder::convertStorageRecord(
+    const binarysub::UTypePtr &Ty,
+    const std::map<std::string, binarysub::SimpleType> &StorageFields) {
+  auto *Record = std::get_if<URecordType>(&Ty->v);
+  if (Record == nullptr || Record->fields.empty()) {
+    return nullptr;
+  }
+
+  std::map<std::string, UTypePtr> SolvedFields;
+  for (const auto &Field : Record->fields) {
+    SolvedFields.emplace(Field.first, Field.second);
+  }
+
+  auto *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("storage_"));
+  Decl->setComment("EVM storage root");
+
+  notdec::OffsetTy Offset = 0;
+  for (const auto &Field : StorageFields) {
+    auto It = SolvedFields.find(Field.first);
+    if (It == SolvedFields.end()) {
+      continue;
+    }
+
+    HType *FieldTy = convert(It->second);
+    if (FieldTy == nullptr) {
+      continue;
+    }
+
+    ast::FieldDecl FieldDecl{
+        .R = SimpleRange{.Start = Offset, .Size = 1},
+        .Type = FieldTy,
+        .Name = ValueNamer::getName("field_"),
+        .Comment = "storage path: " + Field.first,
+    };
+    Decl->addField(std::move(FieldDecl));
+    ++Offset;
+  }
+
+  if (Decl->getFields().empty()) {
+    return nullptr;
+  }
+  return Ctx.getRecordType(false, Decl);
+}
+
 HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
                                      const binarysub::URecursiveType &T) {
   auto SizeBits = binarysub::get_size(Ty);
