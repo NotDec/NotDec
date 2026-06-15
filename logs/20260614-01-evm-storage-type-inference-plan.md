@@ -2135,3 +2135,71 @@ cmake --build ./build --target all -j4
 - 还不处理 short bytes/string 的 inline data，也就是 `slot:0.bytes.short_data`。
 - long bytes 的识别依赖同函数内能看到 length decode。只看到 `keccak(slot)+i` 时仍按动态数组处理。
 - 还没有把 storage root 作为单独 HType 结果导出；本次仍只通过 trace 和 value 约束验证 storage 字段。
+
+## 实现记录：Bytes/String Short Data 最小接入
+
+本次补上 short bytes/string 的 inline data 提取。只处理最直接的形状：
+
+```text
+word = sload(slot)
+len = decode_bytes_length(word)
+short_data = word & ~0xff
+```
+
+生成：
+
+```text
+slot:0.bytes.length <: len
+slot:0.bytes.short_data <: short_data
+```
+
+这里仍然要求同一个 slot 已经能识别 bytes length decode。也就是说，单独看到 `word & ~0xff` 不会被当成 short bytes，避免普通 packed/bit mask 误判。
+
+Solidity 例子：
+
+```solidity
+contract C {
+    bytes public data; // slot 0
+
+    function firstWord() public view returns (bytes32) {
+        return bytes32(data);
+    }
+}
+```
+
+短数据时，`data` 的内容在 slot 0 的高 31 字节，低 1 字节放 `length * 2`。所以 `word & ~0xff` 可以作为 inline data 证据。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4176`：新增 `BytesStorageShortDataMatch`，保存 `.bytes.short_data` 字段名和提取后的 data value。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4930`：新增 `isBytesShortDataMask()`，只接受低 8 bit 为 0、其余 bit 为 1 的常量 mask。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4950`：新增 `matchStorageBytesShortDataValue()`，识别 `and(word, ~0xff)`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4970`：新增 `getBytesStorageShortDataMatch()`，复用 bytes length 的 storage 前缀和 key/index 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5277`：`evm_sload` 的 bytes length 分支里同步生成 `.bytes.short_data` 约束。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-short-data.ll \
+  -o /tmp/notdec-storage-bytes-short-data-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-bytes-short-data-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- trace 里出现 `slot:0.bytes.length`。
+- trace 里出现 `slot:0.bytes.short_data`。
+- trace 里没有 `slot:0.dynamic_array.*`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- 只处理 `and(word, ~0xff)`，还不处理 shift、byte-copy loop 或 helper 拆出来的 short data。
+- short data 目前只是 storage evidence，不负责把 bytes/string 提升成最终 `string`。
+- storage root 仍未单独导出为 HType 结果。

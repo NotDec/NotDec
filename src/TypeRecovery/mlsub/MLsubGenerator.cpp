@@ -4173,6 +4173,12 @@ struct BytesStorageLengthMatch {
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
+struct BytesStorageShortDataMatch {
+  std::string FieldName;
+  llvm::Value *Data = nullptr;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
+};
+
 struct BytesStorageLongElemMatch {
   std::string Prefix;
   llvm::Value *Index = nullptr;
@@ -4928,6 +4934,106 @@ getBytesStorageLengthMatch(llvm::CallBase &Load) {
 }
 
 bool functionHasBytesLengthDecodeForBaseSlot(llvm::Function *F,
+                                             llvm::Value *BaseSlot);
+
+bool isBytesShortDataMask(llvm::Value *V) {
+  auto *CI = dyn_cast_or_null<llvm::ConstantInt>(V);
+  if (CI == nullptr) {
+    return false;
+  }
+
+  const llvm::APInt &Mask = CI->getValue();
+  if (Mask.getBitWidth() <= 8) {
+    return false;
+  }
+  for (unsigned I = 0; I < Mask.getBitWidth(); ++I) {
+    bool Expected = I >= 8;
+    if (Mask[I] != Expected) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool matchStorageBytesShortDataValue(llvm::Value *Data, llvm::Value *Slot) {
+  auto *And = dyn_cast_or_null<llvm::BinaryOperator>(Data);
+  if (And == nullptr || And->getOpcode() != llvm::Instruction::And) {
+    return false;
+  }
+
+  return (notdec::passes::evm::detail::isSameValue(And->getOperand(0), Slot) &&
+          isBytesShortDataMask(And->getOperand(1))) ||
+         (notdec::passes::evm::detail::isSameValue(And->getOperand(1), Slot) &&
+          isBytesShortDataMask(And->getOperand(0)));
+}
+
+std::optional<BytesStorageShortDataMatch>
+getBytesStorageShortDataMatch(llvm::CallBase &Load) {
+  auto FieldPrefix = getStorageValueFieldPrefixMatch(
+      Load, Load.getArgOperand(0), /*AccessKind=*/1);
+
+  if (!FieldPrefix.has_value()) {
+    if (auto Array = getArrayStorageFieldMatch(Load, Load.getArgOperand(0),
+                                               /*AccessKind=*/1)) {
+      FieldPrefix = StorageValueFieldPrefixMatch{
+          .FieldName = Array->Prefix + ".elem",
+          .KeyConstraints = std::move(Array->KeyConstraints),
+      };
+      if (Array->Index != nullptr) {
+        FieldPrefix->KeyConstraints.push_back(MappingStorageKeyConstraint{
+            .FieldName = Array->Prefix + ".index",
+            .Key = Array->Index,
+        });
+      }
+    } else if (auto StaticArray =
+                   getStaticArrayStorageFieldMatch(Load.getArgOperand(0))) {
+      FieldPrefix = StorageValueFieldPrefixMatch{
+          .FieldName = StaticArray->Prefix + ".elem",
+      };
+      FieldPrefix->KeyConstraints.push_back(MappingStorageKeyConstraint{
+          .FieldName = StaticArray->Prefix + ".index",
+          .Key = StaticArray->Index,
+      });
+    }
+  }
+
+  if (!FieldPrefix.has_value() ||
+      !functionHasBytesLengthDecodeForBaseSlot(Load.getFunction(),
+                                               Load.getArgOperand(0))) {
+    return std::nullopt;
+  }
+
+  llvm::SmallVector<llvm::Value *, 8> Worklist;
+  llvm::SmallPtrSet<llvm::Value *, 16> Seen;
+  for (llvm::User *User : Load.users()) {
+    if (auto *V = dyn_cast<llvm::Value>(User)) {
+      Worklist.push_back(V);
+    }
+  }
+
+  unsigned Steps = 0;
+  while (!Worklist.empty() && Steps++ < 32) {
+    llvm::Value *V = Worklist.pop_back_val();
+    if (V == nullptr || !Seen.insert(V).second) {
+      continue;
+    }
+    if (matchStorageBytesShortDataValue(V, &Load)) {
+      return BytesStorageShortDataMatch{
+          .FieldName = FieldPrefix->FieldName + ".bytes.short_data",
+          .Data = V,
+          .KeyConstraints = std::move(FieldPrefix->KeyConstraints),
+      };
+    }
+    for (llvm::User *User : V->users()) {
+      if (auto *UserValue = dyn_cast<llvm::Value>(User)) {
+        Worklist.push_back(UserValue);
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+bool functionHasBytesLengthDecodeForBaseSlot(llvm::Function *F,
                                              llvm::Value *BaseSlot) {
   if (F == nullptr) {
     return false;
@@ -5167,6 +5273,20 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
         auto FieldTy = cg.getOrCreateStorageField(BytesLength->FieldName, 256);
         auto LengthTy = cg.getOrInsertNode(BytesLength->Length);
         cg.addSubtype(FieldTy, LengthTy);
+
+        if (auto ShortData = getBytesStorageShortDataMatch(I)) {
+          for (const auto &KeyConstraint : ShortData->KeyConstraints) {
+            auto KeyTy =
+                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+            cg.addSubtype(KeyValTy, KeyTy);
+          }
+
+          auto ShortDataFieldTy =
+              cg.getOrCreateStorageField(ShortData->FieldName, 256);
+          auto DataTy = cg.getOrInsertNode(ShortData->Data);
+          cg.addSubtype(ShortDataFieldTy, DataTy);
+        }
       } else if (auto ArrayLength = getArrayLengthStorageFieldMatch(I)) {
         for (const auto &KeyConstraint : ArrayLength->KeyConstraints) {
           auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
