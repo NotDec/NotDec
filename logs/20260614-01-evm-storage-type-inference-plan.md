@@ -1993,3 +1993,69 @@ cmake --build ./build --target all -j4
 - 只处理 length，不处理 `bytes.short_data`、`bytes.long_elem`。
 - 还不能区分 bytes 和 string，字段名仍统一用 `.bytes`。
 - array elem 之外的 mapping/struct bytes length 可复用同一前缀逻辑，但还没有单独 smoke。
+
+## 实现记录：EVM bytes/string 语义格
+
+本次只接入类型格，不改 storage path。storage 字段名仍然统一用 `.bytes`：
+
+```text
+slot:0.bytes.length
+slot:0.bytes.short_data
+slot:0.bytes.long_elem
+```
+
+`string` 作为更具体的语义类型，不通过 path 名字表达，而是通过 binarysub primitive semantic lattice 表达：
+
+```text
+string <: bytes <: root
+```
+
+这样同一个 storage 变量可以先保守恢复成 bytes；后续如果 ABI、summary、库函数或其它证据说明它是 string，再把对应值标成 `prim.uint256.evm.string`。这也避免把短编码和长编码拆成两个最终类型，因为 Solidity 同一个 `bytes/string` 变量运行时可以这次短、下次长。
+
+Solidity 例子：
+
+```solidity
+contract C {
+    string public name;
+
+    function setName(string memory x) public {
+        name = x;
+    }
+
+    function raw() public view returns (bytes memory) {
+        return bytes(name);
+    }
+}
+```
+
+这里 storage 侧仍然是 `slot:0.bytes.*`。`setName` 的 ABI 或 signature 能提供 `string` 证据；`raw()` 的返回值只需要满足 bytes。由于 `string <: bytes`，同一个值可以在需要 bytes 的地方使用。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:273`：在内建 EVM i256 primitive semantic lattice 里新增 `bytes`、`string`，并加入 `string -> bytes -> root`。
+- `unittests/Retypd/TypeBuilderTest.cpp:54`：新增 `SemanticPrimitiveStringIsBytesSubtype`，验证 `string <: bytes` 成立、反向不成立，并确认 TypeBuilder 能把 `prim.uint256.evm.string` 转成带 semantic 注释的 typedef。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec TypeBuilderTest -j4
+./build/bin/TypeBuilderTest
+NOTDEC_SUMMARY_OVERRIDE=/tmp/notdec-evm-string-semantic-summary.json \
+  ./build/bin/notdec /tmp/notdec-evm-string-semantic.ll \
+  -o /tmp/notdec-evm-string-semantic-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-evm-string-semantic-work
+```
+
+结果：
+
+- `TypeBuilderTest` 通过。
+- smoke 中 `NOTDEC_SUMMARY_OVERRIDE` 能接受 `prim.uint256.evm.string` 和 `prim.uint256.evm.bytes`。
+- `/tmp/notdec-evm-string-semantic-work/ValueTypes.txt` 中出现 `prim.uint256.evm.string:256 -> prim.uint256.evm.bytes:256`。
+- `/tmp/notdec-evm-string-semantic-work/ValueHTypes.txt` 中出现 `prim.uint256.evm.string` 和 `prim.uint256.evm.bytes` 对应 typedef。
+
+当前边界：
+
+- 这里只接入格本身，还没有新增自动打 `string` 标记的位置。
+- 后续优先从 ABI/signature override、public 函数签名、已知 runtime/helper 语义里补 `string` 证据。
+- 不把所有 `.bytes` storage 默认提升成 `string`，否则会把 Solidity `bytes` 误判成 `string`。

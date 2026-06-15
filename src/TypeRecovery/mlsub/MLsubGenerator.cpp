@@ -273,10 +273,14 @@ digraph evm_i256_semantics {
   integer;
   address;
   storage_key;
+  bytes;
+  string;
 
   integer -> root;
   address -> root;
   storage_key -> root;
+  bytes -> root;
+  string -> bytes;
 }
 )dot";
 

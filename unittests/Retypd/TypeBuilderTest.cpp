@@ -51,6 +51,51 @@ TEST(Retypd, TypeBuilderSemanticPrimitiveAliasTest) {
   binarysub::clearGlobalPrimitiveSemanticRegistry();
 }
 
+TEST(Retypd, SemanticPrimitiveStringIsBytesSubtype) {
+  static constexpr const char *Dot = R"dot(
+      digraph evm_uint256 {
+        graph [base="uint", bits="256", namespace="evm"];
+        root [special_role="root"];
+        bytes;
+        string;
+        string -> bytes;
+        bytes -> root;
+      }
+  )dot";
+
+  binarysub::clearGlobalPrimitiveSemanticRegistry();
+  auto Family = binarysub::globalPrimitiveSemanticRegistry().registerFamilyFromDot(
+      Dot, "<evm-bytes-string-test>");
+  ASSERT_TRUE(Family);
+
+  binarysub::Cache Cache;
+  auto StringTy = binarysub::make_primitive("prim.uint256.evm.string", 256);
+  auto BytesTy = binarysub::make_primitive("prim.uint256.evm.bytes", 256);
+
+  EXPECT_TRUE(binarysub::constrain(StringTy, BytesTy, Cache));
+  EXPECT_FALSE(binarysub::constrain(BytesTy, StringTy, Cache));
+
+  llvm::LLVMContext LLVMCtx;
+  auto M = std::make_unique<llvm::Module>("semantic-string-typebuilder",
+                                          LLVMCtx);
+  M->setDataLayout("e-p:256:256");
+
+  notdec::ast::HTypeContext HCtx;
+  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilder TB(TBParent);
+
+  auto *HTy = TB.convert(
+      binarysub::make_uprimitivetype("prim.uint256.evm.string", 256));
+  ASSERT_NE(HTy, nullptr);
+  ASSERT_TRUE(HTy->isTypedefType());
+  auto *Decl = HTy->getAsTypedefDecl();
+  ASSERT_NE(Decl, nullptr);
+  EXPECT_EQ(Decl->getComment(),
+            "semantic primitive lattice node: prim.uint256.evm.string");
+
+  binarysub::clearGlobalPrimitiveSemanticRegistry();
+}
+
 TEST(Retypd, TypeBuilderTopFieldRecordLayoutTest) {
   llvm::LLVMContext LLVMCtx;
   auto M = std::make_unique<llvm::Module>("typebuilder-top-field-layout",
