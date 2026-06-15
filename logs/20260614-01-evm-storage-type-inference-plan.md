@@ -1792,3 +1792,204 @@ cmake --build ./build --target all -j4
 - 只处理 mapping value 的常量 slot offset。
 - 还不处理动态数组元素 struct 的 `base + i * elem_slots + field_offset`。
 - 还不处理 mapping value struct 里的 packed read/write。
+
+## 实现记录：Mapping Value Packed Field 最小接入
+
+本次接入 mapping value slot 里的 packed 字段，处理这种形状：
+
+```text
+slot = keccak256(key, 3)
+word = sload(slot)
+owner = (word >> 16) & ((1 << 160) - 1)
+```
+
+以及写入：
+
+```text
+old = sload(slot)
+cleared = old & clearMask
+new = cleared | (owner << 16)
+sstore(slot, new)
+```
+
+生成：
+
+```text
+key <: slot:3.map.key
+owner <: slot:3.map.value.field@slot+0.packed@16:160
+slot:3.map.value.field@slot+0.packed@16:160 <: loaded_owner
+```
+
+这里使用 `.field@slot+0.packed@...`，是为了保留“mapping value 的第 0 个 storage slot 里的 packed 子字段”。它不表示已经能区分源码里的 `mapping(address => uint8)` 和 `mapping(address => Struct).field0`；只是避免把 packed 字段和整个 mapping value 混在一起。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4127`：新增 `StorageValueFieldPrefixMatch`，保存字段名前缀和 mapping key 约束。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4154`：`PackedStorageFieldReadMatch` 新增 key 约束，packed read 命中 mapping slot 时也能约束 key。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4160`：`PackedStorageFieldWriteMatch` 新增 key 约束，packed write 同理。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4250`：新增 `getStorageValueFieldPrefixFromSlotExpression()`，从 storage slot 表达式本身识别 direct slot、`keccak(key, slot)`、`keccak(key, slot)+常量`。这是为了处理 packed write 里 `sstore` 前面已有 `old = sload(slot)`，普通 mapping matcher 向前扫描会被这个 `sload` 截断的问题。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4345`：新增 `getStorageValueFieldPrefixMatch()`，统一给 packed matcher 提供字段名前缀。direct slot 保持 `slot:0`；mapping base slot 在 packed 场景下使用 `slot:N.map.value.field@slot+0`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4781`：packed read 使用通用字段前缀，字段名可生成 `slot:3.map.value.field@slot+0.packed@16:160`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4881`：packed write 使用通用字段前缀，并把 key 约束带回 visitor。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5028`：`evm_sload` 先跳过 packed write preserved word，避免 `old = sload(slot)` 被 mapping whole load 捕获。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5033`：mapping load 分支里先尝试 packed read，命中后不生成 mapping whole value load。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5107`：mapping store 分支里先尝试 packed write，命中后不生成 mapping whole value store。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-mapping-packed-field.ll \
+  -o /tmp/notdec-storage-mapping-packed-field-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-mapping-packed-field-work2
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-packed-write.ll \
+  -o /tmp/notdec-storage-packed-write-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-packed-write-regress
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- mapping packed smoke 里出现 `slot:3.map.key`。
+- mapping packed smoke 里出现 `slot:3.map.value.field@slot+0.packed@16:160`。
+- mapping packed smoke 没有生成 `slot:3.map.value` 的 whole load/store。
+- direct packed regression 仍然生成 `slot:0.packed@16:160`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- mapping base slot 的 packed 字段统一显示成 `.field@slot+0.packed@...`，不是源码级字段名。
+- 还不处理 mapping value 的非 0 slot packed 字段里更复杂的表达式，例如 offset 不是常量。
+- 还不处理动态数组元素 struct 里的 packed 字段。
+
+## 实现记录：Mapping Value Struct Dynamic Array 组合接入
+
+本次接入 plan 里的 `mapping -> struct field -> dynamic_array` 组合：
+
+```text
+user_base = keccak256(key, 4)
+history_slot = user_base + 1
+history_data_base = keccak256(history_slot)
+elem_slot = history_data_base + i
+y = sload(elem_slot)
+```
+
+生成：
+
+```text
+key <: slot:4.map.key
+i <: slot:4.map.value.field@slot+1.dynamic_array.index
+slot:4.map.value.field@slot+1.dynamic_array.elem <: make_ptr_load(y, 256)
+```
+
+如果同函数里也读取了 `history_slot`：
+
+```text
+len = sload(history_slot)
+```
+
+还会生成：
+
+```text
+slot:4.map.value.field@slot+1.dynamic_array.length <: make_ptr_load(len, 256)
+```
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4414`：`getArrayStorageFieldMatch()` 在 `BaseSlot` 上优先尝试 `getStorageValueFieldPrefixFromSlotExpression()`。这样 `keccak(key, 4)+1` 可以作为动态数组 base slot，继续拼成 `.dynamic_array`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4479`：`getArrayLengthStorageFieldMatch()` 同样复用 storage value field 前缀，让 `sload(history_slot)` 归到 `.dynamic_array.length`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-mapping-struct-array.ll \
+  -o /tmp/notdec-storage-mapping-struct-array-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-mapping-struct-array-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- trace 里出现 `slot:4.map.key`。
+- trace 里出现 `slot:4.map.value.field@slot+1.dynamic_array.length`。
+- trace 里出现 `slot:4.map.value.field@slot+1.dynamic_array.index`。
+- trace 里出现 `slot:4.map.value.field@slot+1.dynamic_array.elem`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- 只处理 base slot 是 `keccak(key, slot)+常量` 的动态数组字段。
+- 还不处理动态数组元素是多 slot struct 时的 `base + i * elem_slots + field_offset`。
+- 还不处理这类动态数组元素里的 bytes/string 或 packed 字段。
+
+## 实现记录：Array Element Bytes/String Length 最小接入
+
+本次只把 bytes/string 的 length matcher 推广到数组元素，不接入 short data / long data。
+
+处理这种形状：
+
+```text
+array_base = keccak256(0)
+elem_slot = array_base + i
+word = sload(elem_slot)
+len = decode_bytes_length(word)
+```
+
+生成：
+
+```text
+i <: slot:0.dynamic_array.index
+slot:0.dynamic_array.elem.bytes.length <: len
+```
+
+这里的重点是：`sload(elem_slot)` 不能先被普通 `dynamic_array.elem` whole load 吃掉。只有识别到 Solidity bytes/string length decode 时，才转成 `.elem.bytes.length`。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4166`：`BytesStorageLengthMatch` 新增 key/index 约束列表。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4856`：`getBytesStorageLengthMatch()` 不再只接受 direct slot；先尝试普通 storage value prefix，再尝试 dynamic array elem 和 static array elem。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:4862`：dynamic array elem 命中后生成 `ArrayPrefix + ".elem.bytes.length"`，并把 `ArrayPrefix + ".index"` 约束带回 visitor。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5083`：`evm_sload` 把 bytes length 分支放到 mapping/array whole load 前面，避免 bytes/string 元素被当成普通 256-bit 元素。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec MLsubGeneratorTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-array-bytes-length.ll \
+  -o /tmp/notdec-storage-array-bytes-length-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-array-bytes-length-work
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-length.ll \
+  -o /tmp/notdec-storage-bytes-length-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-bytes-length-regress
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- array bytes length smoke 里出现 `slot:0.dynamic_array.index`。
+- array bytes length smoke 里出现 `slot:0.dynamic_array.elem.bytes.length`。
+- direct bytes length regression 仍然出现 `slot:0.bytes.length`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- 只处理 length，不处理 `bytes.short_data`、`bytes.long_elem`。
+- 还不能区分 bytes 和 string，字段名仍统一用 `.bytes`。
+- array elem 之外的 mapping/struct bytes length 可复用同一前缀逻辑，但还没有单独 smoke。

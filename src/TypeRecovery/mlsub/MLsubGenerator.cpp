@@ -4124,6 +4124,11 @@ struct StorageFieldPrefixMatch {
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
+struct StorageValueFieldPrefixMatch {
+  std::string FieldName;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
+};
+
 struct MappingStorageFieldMatch {
   std::string Prefix;
   std::string ValueFieldName;
@@ -4149,16 +4154,19 @@ struct StaticArrayStorageFieldMatch {
 struct PackedStorageFieldReadMatch {
   std::string FieldName;
   llvm::Value *Value = nullptr;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
 struct PackedStorageFieldWriteMatch {
   std::string FieldName;
   llvm::Value *Value = nullptr;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
 struct BytesStorageLengthMatch {
   std::string FieldName;
   llvm::Value *Length = nullptr;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
 std::optional<StorageFieldPrefixMatch>
@@ -4240,6 +4248,64 @@ std::optional<uint64_t> getConstantOffsetFromBase(llvm::Value *V,
   return std::nullopt;
 }
 
+std::optional<StorageValueFieldPrefixMatch>
+getStorageValueFieldPrefixFromSlotExpression(llvm::Value *StorageSlot,
+                                             bool UseField0ForMappingBase,
+                                             unsigned Depth = 2) {
+  if (auto Base = getStorageFieldPrefixFromBaseSlot(StorageSlot)) {
+    std::string FieldName = Base->Prefix;
+    if (UseField0ForMappingBase && !Base->KeyConstraints.empty()) {
+      FieldName += ".field@slot+0";
+    }
+    return StorageValueFieldPrefixMatch{
+        .FieldName = FieldName,
+        .KeyConstraints = std::move(Base->KeyConstraints),
+    };
+  }
+  if (Depth == 0) {
+    return std::nullopt;
+  }
+
+  auto getOffsetPrefix =
+      [&](llvm::Value *LHS,
+          llvm::Value *RHS) -> std::optional<StorageValueFieldPrefixMatch> {
+    if (auto Prefix = getStorageValueFieldPrefixFromSlotExpression(
+            LHS, /*UseField0ForMappingBase=*/false, Depth - 1)) {
+      if (auto RConst = getUInt64Constant(RHS)) {
+        if (*RConst != 0) {
+          Prefix->FieldName += ".field@slot+" + std::to_string(*RConst);
+        }
+        return Prefix;
+      }
+    }
+    if (auto Prefix = getStorageValueFieldPrefixFromSlotExpression(
+            RHS, /*UseField0ForMappingBase=*/false, Depth - 1)) {
+      if (auto LConst = getUInt64Constant(LHS)) {
+        if (*LConst != 0) {
+          Prefix->FieldName += ".field@slot+" + std::to_string(*LConst);
+        }
+        return Prefix;
+      }
+    }
+    return std::nullopt;
+  };
+
+  if (auto *Add = dyn_cast<llvm::BinaryOperator>(StorageSlot)) {
+    if (Add->getOpcode() == llvm::Instruction::Add) {
+      return getOffsetPrefix(Add->getOperand(0), Add->getOperand(1));
+    }
+  }
+
+  if (auto *Call = dyn_cast<llvm::CallBase>(StorageSlot)) {
+    if (notdec::passes::evm::detail::isCallTo(Call, "evm_add") &&
+        Call->arg_size() == 2) {
+      return getOffsetPrefix(Call->getArgOperand(0), Call->getArgOperand(1));
+    }
+  }
+
+  return std::nullopt;
+}
+
 // Recognize Solidity's mstore(key, 0), mstore(baseSlot, 32), keccak(0, 64)
 // mapping shape. Base slots are normalized to string prefixes; nested mappings
 // work when the base slot is itself a matched mapping hash.
@@ -4274,6 +4340,36 @@ getMappingStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
       .Prefix = Prefix,
       .ValueFieldName = ValueFieldName,
       .KeyConstraints = std::move(Base->KeyConstraints),
+  };
+}
+
+std::optional<StorageValueFieldPrefixMatch>
+getStorageValueFieldPrefixMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
+                                uint64_t AccessKind,
+                                bool UseField0ForMappingBase = false) {
+  if (auto FieldName = getDirectStorageSlotFieldName(StorageSlot)) {
+    return StorageValueFieldPrefixMatch{.FieldName = *FieldName};
+  }
+
+  if (auto FieldPrefix = getStorageValueFieldPrefixFromSlotExpression(
+          StorageSlot, UseField0ForMappingBase)) {
+    return FieldPrefix;
+  }
+
+  auto Mapping = getMappingStorageFieldMatch(Access, StorageSlot, AccessKind);
+  if (!Mapping.has_value()) {
+    return std::nullopt;
+  }
+
+  std::string FieldName = Mapping->ValueFieldName;
+  if (UseField0ForMappingBase &&
+      FieldName == Mapping->Prefix + ".value") {
+    FieldName += ".field@slot+0";
+  }
+
+  return StorageValueFieldPrefixMatch{
+      .FieldName = FieldName,
+      .KeyConstraints = std::move(Mapping->KeyConstraints),
   };
 }
 
@@ -4319,14 +4415,26 @@ getArrayStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
   }
 
   auto Base = getStorageFieldPrefixFromBaseSlot(Match->BaseSlot);
-  if (!Base.has_value()) {
+  auto BaseValue = getStorageValueFieldPrefixFromSlotExpression(
+      Match->BaseSlot, /*UseField0ForMappingBase=*/false);
+  if (!Base.has_value() && !BaseValue.has_value()) {
     return std::nullopt;
   }
 
+  std::string Prefix;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
+  if (BaseValue.has_value()) {
+    Prefix = BaseValue->FieldName;
+    KeyConstraints = std::move(BaseValue->KeyConstraints);
+  } else {
+    Prefix = Base->Prefix;
+    KeyConstraints = std::move(Base->KeyConstraints);
+  }
+
   return ArrayStorageFieldMatch{
-      .Prefix = Base->Prefix + ".dynamic_array",
+      .Prefix = Prefix + ".dynamic_array",
       .Index = getDynamicArrayIndex(StorageSlot, Match->DataHash),
-      .KeyConstraints = std::move(Base->KeyConstraints),
+      .KeyConstraints = std::move(KeyConstraints),
   };
 }
 
@@ -4372,16 +4480,28 @@ std::optional<ArrayLengthStorageFieldMatch>
 getArrayLengthStorageFieldMatch(llvm::CallBase &Load) {
   llvm::Value *BaseSlot = Load.getArgOperand(0);
   auto Base = getStorageFieldPrefixFromBaseSlot(BaseSlot);
-  if (!Base.has_value()) {
+  auto BaseValue = getStorageValueFieldPrefixFromSlotExpression(
+      BaseSlot, /*UseField0ForMappingBase=*/false);
+  if (!Base.has_value() && !BaseValue.has_value()) {
     return std::nullopt;
   }
   if (!functionHasArrayDataAccessForBaseSlot(Load.getFunction(), BaseSlot)) {
     return std::nullopt;
   }
 
+  std::string Prefix;
+  std::vector<MappingStorageKeyConstraint> KeyConstraints;
+  if (BaseValue.has_value()) {
+    Prefix = BaseValue->FieldName;
+    KeyConstraints = std::move(BaseValue->KeyConstraints);
+  } else {
+    Prefix = Base->Prefix;
+    KeyConstraints = std::move(Base->KeyConstraints);
+  }
+
   return ArrayLengthStorageFieldMatch{
-      .Prefix = Base->Prefix + ".dynamic_array",
-      .KeyConstraints = std::move(Base->KeyConstraints),
+      .Prefix = Prefix + ".dynamic_array",
+      .KeyConstraints = std::move(KeyConstraints),
   };
 }
 
@@ -4685,7 +4805,7 @@ llvm::Value *getShiftedWriteValue(llvm::Value *V, unsigned &Offset) {
 
 std::optional<PackedStorageFieldReadMatch>
 getPackedReadFromExtractedValue(llvm::CallBase &Load, llvm::Value *Extracted,
-                                llvm::StringRef FieldPrefix) {
+                                const StorageValueFieldPrefixMatch &FieldPrefix) {
   unsigned MaskWidth = 0;
   llvm::Value *Masked = getBitwiseAndOtherOperand(Extracted, MaskWidth);
   if (Masked == nullptr) {
@@ -4699,30 +4819,33 @@ getPackedReadFromExtractedValue(llvm::CallBase &Load, llvm::Value *Extracted,
   }
 
   return PackedStorageFieldReadMatch{
-      .FieldName = FieldPrefix.str() + ".packed@" + std::to_string(Offset) +
-                   ":" + std::to_string(MaskWidth),
+      .FieldName = FieldPrefix.FieldName + ".packed@" +
+                   std::to_string(Offset) + ":" + std::to_string(MaskWidth),
       .Value = Extracted,
+      .KeyConstraints = FieldPrefix.KeyConstraints,
   };
 }
 
 std::optional<PackedStorageFieldReadMatch>
 getPackedStorageFieldReadMatch(llvm::CallBase &Load) {
-  auto FieldName = getDirectStorageSlotFieldName(Load.getArgOperand(0));
-  if (!FieldName.has_value()) {
+  auto FieldPrefix = getStorageValueFieldPrefixMatch(
+      Load, Load.getArgOperand(0), /*AccessKind=*/1,
+      /*UseField0ForMappingBase=*/true);
+  if (!FieldPrefix.has_value()) {
     return std::nullopt;
   }
 
   for (llvm::User *User : Load.users()) {
     auto *DirectValue = dyn_cast<llvm::Value>(User);
     if (auto Match =
-            getPackedReadFromExtractedValue(Load, DirectValue, *FieldName)) {
+            getPackedReadFromExtractedValue(Load, DirectValue, *FieldPrefix)) {
       return Match;
     }
 
     for (llvm::User *NestedUser : User->users()) {
       auto *NestedValue = dyn_cast<llvm::Value>(NestedUser);
       if (auto Match =
-              getPackedReadFromExtractedValue(Load, NestedValue, *FieldName)) {
+              getPackedReadFromExtractedValue(Load, NestedValue, *FieldPrefix)) {
         return Match;
       }
     }
@@ -4732,8 +4855,35 @@ getPackedStorageFieldReadMatch(llvm::CallBase &Load) {
 
 std::optional<BytesStorageLengthMatch>
 getBytesStorageLengthMatch(llvm::CallBase &Load) {
-  auto FieldName = getDirectStorageSlotFieldName(Load.getArgOperand(0));
-  if (!FieldName.has_value()) {
+  auto FieldPrefix = getStorageValueFieldPrefixMatch(
+      Load, Load.getArgOperand(0), /*AccessKind=*/1);
+
+  if (!FieldPrefix.has_value()) {
+    if (auto Array = getArrayStorageFieldMatch(Load, Load.getArgOperand(0),
+                                               /*AccessKind=*/1)) {
+      FieldPrefix = StorageValueFieldPrefixMatch{
+          .FieldName = Array->Prefix + ".elem",
+          .KeyConstraints = std::move(Array->KeyConstraints),
+      };
+      if (Array->Index != nullptr) {
+        FieldPrefix->KeyConstraints.push_back(MappingStorageKeyConstraint{
+            .FieldName = Array->Prefix + ".index",
+            .Key = Array->Index,
+        });
+      }
+    } else if (auto StaticArray =
+                   getStaticArrayStorageFieldMatch(Load.getArgOperand(0))) {
+      FieldPrefix = StorageValueFieldPrefixMatch{
+          .FieldName = StaticArray->Prefix + ".elem",
+      };
+      FieldPrefix->KeyConstraints.push_back(MappingStorageKeyConstraint{
+          .FieldName = StaticArray->Prefix + ".index",
+          .Key = StaticArray->Index,
+      });
+    }
+  }
+
+  if (!FieldPrefix.has_value()) {
     return std::nullopt;
   }
 
@@ -4753,8 +4903,9 @@ getBytesStorageLengthMatch(llvm::CallBase &Load) {
     }
     if (matchStorageBytesLengthValue(V, &Load)) {
       return BytesStorageLengthMatch{
-          .FieldName = *FieldName + ".bytes.length",
+          .FieldName = FieldPrefix->FieldName + ".bytes.length",
           .Length = V,
+          .KeyConstraints = std::move(FieldPrefix->KeyConstraints),
       };
     }
     for (llvm::User *User : V->users()) {
@@ -4782,9 +4933,12 @@ llvm::CallBase *getSameSlotSLoad(llvm::Value *V, llvm::Value *StorageSlot) {
 
 std::optional<PackedStorageFieldWriteMatch>
 getPackedStorageFieldWriteMatch(llvm::Value *StorageSlot,
-                                llvm::Value *StoredValue) {
-  auto FieldName = getDirectStorageSlotFieldName(StorageSlot);
-  if (!FieldName.has_value()) {
+                                llvm::Value *StoredValue,
+                                llvm::CallBase &Store) {
+  auto FieldPrefix = getStorageValueFieldPrefixMatch(
+      Store, StorageSlot, /*AccessKind=*/2,
+      /*UseField0ForMappingBase=*/true);
+  if (!FieldPrefix.has_value()) {
     return std::nullopt;
   }
 
@@ -4811,9 +4965,11 @@ getPackedStorageFieldWriteMatch(llvm::Value *StorageSlot,
     }
 
     return PackedStorageFieldWriteMatch{
-        .FieldName = *FieldName + ".packed@" + std::to_string(Range.Offset) +
-                     ":" + std::to_string(Range.Width),
+        .FieldName = FieldPrefix->FieldName + ".packed@" +
+                     std::to_string(Range.Offset) + ":" +
+                     std::to_string(Range.Width),
         .Value = Value,
+        .KeyConstraints = FieldPrefix->KeyConstraints,
     };
   };
 
@@ -4852,7 +5008,7 @@ bool isPackedWritePreservedWordLoad(llvm::CallBase &Load) {
           continue;
         }
         if (getPackedStorageFieldWriteMatch(Store->getArgOperand(0),
-                                            Store->getArgOperand(1))) {
+                                            Store->getArgOperand(1), *Store)) {
           return true;
         }
       }
@@ -4922,18 +5078,44 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
             cg.getOrCreateStorageField(ArrayLength->Prefix + ".length");
         auto ResultTy = cg.getOrInsertNode(&I);
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
-      } else if (auto Mapping =
-                     getMappingStorageFieldMatch(I, I.getArgOperand(0),
-                                                 /*AccessKind=*/1)) {
-        for (const auto &KeyConstraint : Mapping->KeyConstraints) {
+      } else if (isPackedWritePreservedWordLoad(I)) {
+        return;
+      } else if (auto BytesLength = getBytesStorageLengthMatch(I)) {
+        for (const auto &KeyConstraint : BytesLength->KeyConstraints) {
           auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
           auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
           cg.addSubtype(KeyValTy, KeyTy);
         }
 
-        auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
-        auto ResultTy = cg.getOrInsertNode(&I);
-        cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+        auto FieldTy = cg.getOrCreateStorageField(BytesLength->FieldName, 256);
+        auto LengthTy = cg.getOrInsertNode(BytesLength->Length);
+        cg.addSubtype(FieldTy, LengthTy);
+      } else if (auto Mapping =
+                     getMappingStorageFieldMatch(I, I.getArgOperand(0),
+                                                 /*AccessKind=*/1)) {
+        if (auto Packed = getPackedStorageFieldReadMatch(I)) {
+          for (const auto &KeyConstraint : Packed->KeyConstraints) {
+            auto KeyTy =
+                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+            cg.addSubtype(KeyValTy, KeyTy);
+          }
+
+          auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
+          auto ValueTy = cg.getOrInsertNode(Packed->Value);
+          cg.addSubtype(FieldTy, ValueTy);
+        } else {
+          for (const auto &KeyConstraint : Mapping->KeyConstraints) {
+            auto KeyTy =
+                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+            cg.addSubtype(KeyValTy, KeyTy);
+          }
+
+          auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
+          auto ResultTy = cg.getOrInsertNode(&I);
+          cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
+        }
       } else if (auto Array =
                      getArrayStorageFieldMatch(I, I.getArgOperand(0),
                                                /*AccessKind=*/1)) {
@@ -4963,16 +5145,10 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
             cg.getOrCreateStorageField(StaticArray->Prefix + ".elem");
         auto ResultTy = cg.getOrInsertNode(&I);
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
-      } else if (auto BytesLength = getBytesStorageLengthMatch(I)) {
-        auto FieldTy = cg.getOrCreateStorageField(BytesLength->FieldName, 256);
-        auto LengthTy = cg.getOrInsertNode(BytesLength->Length);
-        cg.addSubtype(FieldTy, LengthTy);
       } else if (auto Packed = getPackedStorageFieldReadMatch(I)) {
         auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
         auto ValueTy = cg.getOrInsertNode(Packed->Value);
         cg.addSubtype(FieldTy, ValueTy);
-      } else if (isPackedWritePreservedWordLoad(I)) {
-        return;
       } else if (auto FieldName =
                      getDirectStorageSlotFieldName(I.getArgOperand(0))) {
         auto FieldTy = cg.getOrCreateStorageField(*FieldName);
@@ -4987,16 +5163,31 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     if (I.arg_size() == 2) {
       if (auto Mapping = getMappingStorageFieldMatch(I, I.getArgOperand(0),
                                                      /*AccessKind=*/2)) {
-        for (const auto &KeyConstraint : Mapping->KeyConstraints) {
-          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
+        if (auto Packed = getPackedStorageFieldWriteMatch(
+                I.getArgOperand(0), I.getArgOperand(1), I)) {
+          for (const auto &KeyConstraint : Packed->KeyConstraints) {
+            auto KeyTy =
+                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+            cg.addSubtype(KeyValTy, KeyTy);
+          }
 
-        auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
-        auto ValueTy =
-            cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
-        cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
+          auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
+          auto ValueTy = cg.getOrInsertNode(Packed->Value);
+          cg.addSubtype(ValueTy, FieldTy);
+        } else {
+          for (const auto &KeyConstraint : Mapping->KeyConstraints) {
+            auto KeyTy =
+                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+            cg.addSubtype(KeyValTy, KeyTy);
+          }
+
+          auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
+          auto ValueTy =
+              cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
+          cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
+        }
       } else if (auto Array =
                      getArrayStorageFieldMatch(I, I.getArgOperand(0),
                                                /*AccessKind=*/2)) {
@@ -5029,7 +5220,13 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
             cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(1), &I, 1));
         cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
       } else if (auto Packed = getPackedStorageFieldWriteMatch(
-                     I.getArgOperand(0), I.getArgOperand(1))) {
+                     I.getArgOperand(0), I.getArgOperand(1), I)) {
+        for (const auto &KeyConstraint : Packed->KeyConstraints) {
+          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
+          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
+          cg.addSubtype(KeyValTy, KeyTy);
+        }
+
         auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
         auto ValueTy = cg.getOrInsertNode(Packed->Value);
         cg.addSubtype(ValueTy, FieldTy);
