@@ -2391,3 +2391,68 @@ cmake --build ./build --target TypeBuilderTest MLsubGeneratorTest -j4
 - 字段名仍是 `field_N`，可读信息在 comment 里。
 - path 仍是字符串规则，不解析成新对象。
 - fortune 当前直接命令是 74.88 秒，和历史 12.5 秒级日志不在同一当前状态下，不能单独证明本次 patch 引入性能退化；但本次改动对没有 storage HType 的 fortune 只多了一次 record comment 前缀判断。
+
+## 实现记录：Storage HType 补充回归和可读字段名
+
+本次继续补 `packed/static/nested mapping` 三类回归，并把 `[storage]` 结构里的字段名改成 path 段名。
+
+新增覆盖：
+
+- `test/type-recovery/evm/cases/12_evm_storage_packed_read.ll:1`：覆盖 packed read，期望 `[storage]` 里出现 `slot_0 -> packed_16_160`。
+- `test/type-recovery/evm/cases/13_evm_storage_static_array.ll:1`：覆盖 static array，期望 `[storage]` 里出现 `slot_0 -> static_array -> elem/index`。
+- `test/type-recovery/evm/cases/14_evm_storage_nested_mapping.ll:1`：覆盖 nested mapping，期望 `[storage]` 里出现 `slot_1 -> map -> value -> map -> key/value`。
+- `test/type-recovery/evm/manifest.json:80`：注册上述三个 case。
+- `test/type-recovery/evm/expected/tr-level-2/12_evm_storage_packed_read.htypes:1`、`13_evm_storage_static_array.htypes:1`、`14_evm_storage_nested_mapping.htypes:1`：新增 golden。
+
+代码修改：
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1009`：新增 `storageFieldName()`，把 storage path 段转成字段名，例如 `slot:4 -> slot_4`、`field@slot+1 -> field_slot_1`、`packed@16:160 -> packed_16_160`。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1070`：`addField()` 改成接收字段名，不再给 storage record 固定生成 `field_N`。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1089`：内部节点用当前 path 段生成字段名，例如 `map`、`key`、`value`、`dynamic_array`、`elem`、`index`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/HType.cpp:390`：snapshot formatter 只对 `storage path:` 字段使用 `FieldDecl.Name`；普通 record 仍保持原来的 `field_N`，避免大面积改普通 HType golden。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure
+cmake --build ./build --target TypeBuilderTest MLsubGeneratorTest -j4
+./build/bin/TypeBuilderTest
+./build/bin/MLsubGeneratorTest
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-storage-htype-regress-2.ll --tr-level=2 \
+  --frozen-tr-input-ir \
+  --dump-htypes=/tmp/notdec-fortune-storage-htype-regress-2.htypes
+```
+
+结果：
+
+- `notdec.type_recovery.evm.tr_level_2` 通过，14 个 case 全部 pass。
+- `TypeBuilderTest` 通过，6 个 case 全部 pass。
+- `MLsubGeneratorTest` 通过，3 个 case 全部 pass。
+- fortune 直接命令通过，`elapsed=75.71 user=103.54 sys=1.24 maxrss=1264372`，和上一轮 74.88 秒基本同一档。
+
+关于第三点的分析：
+
+第三点说的是 storage elem 里经常出现 `ptr<load=void, store=void, psize=256>`，例如：
+
+```text
+struct struct_2 {
+  ptr<load=void, store=void, psize=256> elem;
+  top:256 index;
+};
+```
+
+这不是展示层字段名问题，而是类型约束当前把某些 storage 值当成了“可 load/store 的 256-bit 地址状对象”。原因大概率有两个：
+
+1. storage array 的 `elem` 同时来自 `sload(slot)` 和 `sstore(slot, v)`，当前约束为了连接 load/store，把这个 field 建成了 binarysub 的 direct memory object 风格，最后 HType 就显示成 dual pointer。
+2. 对普通内存来说，`ptr<load=..., store=...>` 是合理表达；但 storage slot 的 `elem` 更像“slot 内的值”，不是 host memory pointer。也就是说这里需要 storage 专用的 HType value lowering，而不是直接复用普通 memory pointer 展示。
+
+可以改进的方向：
+
+- 保守方案：只在 `[storage]` HType lowering 里，如果某个 leaf 是 `ptr<load=void, store=void, psize=256>` 这种空 load/store wrapper，就剥成 `top:256` 或当前能确定的 value 类型。优点是简单；风险是可能误剥真正表达读写约束的类型。
+- 更好的方案：在 binarysub 约束层把 storage field 的“slot value”和普通 memory object 区分开。storage root 仍是全局对象，但 leaf 不走普通 pointer object 的 HType 展示。优点是语义干净；风险是改动面更大，需要确认 directLoad/directStore 那套约束怎么表达 storage 的读写统一。
+- 暂时不建议只在 formatter 里把 `ptr<...>` 文本替换掉。那会让输出好看，但类型结构本身没变，后续做 Solidity 类型提升时还会遇到同一个问题。
+
+所以第三点应该单独做：先追一个简单 static array 或 nested mapping case，看 `elem` 在 UType 里到底是 pointer wrapper 还是 HType lowering 引入的 wrapper，再决定是在 `convertStorageRecord()` 剥，还是在 storage 约束生成处改。

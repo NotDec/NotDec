@@ -1,0 +1,69 @@
+# HTypeResult
+
+[decls]
+typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
+
+struct struct_0 {
+  top:256 field_0; /* at offset: 32 */
+};
+
+struct struct_1 {
+  struct_2 slot_1; /* storage path: slot:1 (slot 1) */
+}; /* EVM storage root */
+
+struct struct_2 {
+  struct_3 map; /* storage path: slot:1.map (slot 1 / mapping) */
+}; /* storage path: slot:1 (slot 1) */
+
+struct struct_3 {
+  top:256 key; /* storage path: slot:1.map.key (slot 1 / mapping / mapping key) */
+  struct_4 value; /* storage path: slot:1.map.value (slot 1 / mapping / mapping value) */
+}; /* storage path: slot:1.map (slot 1 / mapping) */
+
+struct struct_4 {
+  struct_5 map; /* storage path: slot:1.map.value.map (slot 1 / mapping / mapping value / mapping) */
+}; /* storage path: slot:1.map.value (slot 1 / mapping / mapping value) */
+
+struct struct_5 {
+  top:256 key; /* storage path: slot:1.map.value.map.key (slot 1 / mapping / mapping value / mapping / mapping key) */
+  ptr<load=void, store=void, psize=256> value; /* storage path: slot:1.map.value.map.value (slot 1 / mapping / mapping value / mapping / mapping value) */
+}; /* storage path: slot:1.map.value.map (slot 1 / mapping / mapping value / mapping) */
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=struct_0*
+[+] @evm_sha3 => lower=(bottom:256 (*)(top:256, top:256, top:256))* ; upper=top:64
+[+] @evm_sload => lower=(bottom:256 (*)(top:256))* ; upper=top:64
+[+] @evm_sstore => lower=(void (*)(top:256, top:256))* ; upper=top:64
+[+] @nested_mapping => lower=('q:256 (*)(top:256, top:256, 'q:256))* ; upper=top:64
+[+] addr(0x20) => lower=bottom:256 ; upper=top:256
+[+] const(i256 1)@nested_mapping::%bb.entry.i1:0 => lower=bottom:256 ; upper=top:256
+[+] const(i256 1)@nested_mapping::%bb.entry.i8:0 => lower=bottom:256 ; upper=top:256
+[+] const(ptr null)@nested_mapping::%bb.entry.i0:1 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=256>
+[+] const(ptr null)@nested_mapping::%bb.entry.i10:1 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=256>
+[+] const(ptr null)@nested_mapping::%bb.entry.i3:1 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=256>
+[+] const(ptr null)@nested_mapping::%bb.entry.i7:1 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=256>
+[+] evm_sha3::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_sha3::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sha3::arg1 => lower=bottom:256 ; upper=top:256
+[+] evm_sha3::arg2 => lower=bottom:256 ; upper=top:256
+[+] evm_sload::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_sload::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg1 => lower=bottom:256 ; upper=top:256
+[+] nested_mapping::%slot1.load => lower=bottom:256 ; upper=top:256
+[+] nested_mapping::%slot1.store => lower=bottom:256 ; upper=top:256
+[+] nested_mapping::%slot2.load => lower=typedef_0 ; upper=top:256
+[+] nested_mapping::%slot2.store => lower=typedef_0 ; upper=top:256
+[+] nested_mapping::%y => lower=bottom:256 ; upper=top:256
+[+] nested_mapping::<ret> => lower=bottom:256 ; upper=top:256
+[+] nested_mapping::arg0 => lower=bottom:256 ; upper=top:256
+[+] nested_mapping::arg1 => lower=bottom:256 ; upper=top:256
+[+] nested_mapping::arg2 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => struct_0*
+
+[storage]
+decl => struct_1
+type => struct_1

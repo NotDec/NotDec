@@ -1006,6 +1006,32 @@ HType *TypeBuilder::convertStorageRecord(
     return "storage path: " + Path + " (" + Description + ")";
   };
 
+  auto storageFieldName = [](llvm::StringRef Part) {
+    if (Part.consume_front("slot:")) {
+      return "slot_" + Part.str();
+    }
+    if (Part.consume_front("field@slot+")) {
+      return "field_slot_" + Part.str();
+    }
+    if (Part.consume_front("packed@")) {
+      std::string Name = "packed_";
+      for (char C : Part) {
+        Name += std::isalnum(static_cast<unsigned char>(C)) ? C : '_';
+      }
+      return Name;
+    }
+
+    std::string Name;
+    for (char C : Part) {
+      if (std::isalnum(static_cast<unsigned char>(C)) || C == '_') {
+        Name += C;
+      } else {
+        Name += '_';
+      }
+    }
+    return Name.empty() ? std::string("field") : Name;
+  };
+
   StorageTreeNode Root;
   for (const auto &Field : StorageFields) {
     auto It = SolvedFields.find(Field.first);
@@ -1041,14 +1067,15 @@ HType *TypeBuilder::convertStorageRecord(
     Decl->setComment(IsRoot ? "EVM storage root" : storageComment(Path));
 
     notdec::OffsetTy Offset = 0;
-    auto addField = [&](HType *FieldTy, std::string Comment) {
+    auto addField = [&](HType *FieldTy, std::string Name,
+                        std::string Comment) {
       if (FieldTy == nullptr) {
         return;
       }
       ast::FieldDecl FieldDecl{
           .R = SimpleRange{.Start = Offset, .Size = 1},
           .Type = FieldTy,
-          .Name = ValueNamer::getName("field_"),
+          .Name = std::move(Name),
           .Comment = std::move(Comment),
       };
       Decl->addField(std::move(FieldDecl));
@@ -1056,13 +1083,14 @@ HType *TypeBuilder::convertStorageRecord(
     };
 
     if (Node.Leaf != nullptr) {
-      addField(convert(Node.Leaf), storageComment(Node.LeafPath));
+      addField(convert(Node.Leaf), "whole", storageComment(Node.LeafPath));
     }
 
     for (const auto &Child : Node.Children) {
       std::string ChildPath =
           Path.empty() ? Child.first : Path + "." + Child.first;
       addField(buildNode(Child.second, ChildPath, /*IsRoot=*/false),
+               storageFieldName(Child.first),
                storageComment(ChildPath));
     }
 

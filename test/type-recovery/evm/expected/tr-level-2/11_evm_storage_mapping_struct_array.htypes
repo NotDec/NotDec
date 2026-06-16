@@ -8,30 +8,30 @@ struct struct_0 {
 };
 
 struct struct_1 {
-  struct_2 field_0; /* storage path: slot:4 (slot 4) */
+  struct_2 slot_4; /* storage path: slot:4 (slot 4) */
 }; /* EVM storage root */
 
 struct struct_2 {
-  struct_3 field_0; /* storage path: slot:4.map (slot 4 / mapping) */
+  struct_3 map; /* storage path: slot:4.map (slot 4 / mapping) */
 }; /* storage path: slot:4 (slot 4) */
 
 struct struct_3 {
-  top:256 field_0; /* storage path: slot:4.map.key (slot 4 / mapping / mapping key) */
-  struct_4 field_1; /* storage path: slot:4.map.value (slot 4 / mapping / mapping value) */
+  top:256 key; /* storage path: slot:4.map.key (slot 4 / mapping / mapping key) */
+  struct_4 value; /* storage path: slot:4.map.value (slot 4 / mapping / mapping value) */
 }; /* storage path: slot:4.map (slot 4 / mapping) */
 
 struct struct_4 {
-  struct_5 field_0; /* storage path: slot:4.map.value.field@slot+1 (slot 4 / mapping / mapping value / field slot offset 1) */
+  struct_5 field_slot_1; /* storage path: slot:4.map.value.field@slot+1 (slot 4 / mapping / mapping value / field slot offset 1) */
 }; /* storage path: slot:4.map.value (slot 4 / mapping / mapping value) */
 
 struct struct_5 {
-  struct_6 field_0; /* storage path: slot:4.map.value.field@slot+1.dynamic_array (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array) */
+  struct_6 dynamic_array; /* storage path: slot:4.map.value.field@slot+1.dynamic_array (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array) */
 }; /* storage path: slot:4.map.value.field@slot+1 (slot 4 / mapping / mapping value / field slot offset 1) */
 
 struct struct_6 {
-  ptr<load=void, store=void, psize=256> field_0; /* storage path: slot:4.map.value.field@slot+1.dynamic_array.elem (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array / array element) */
-  top:256 field_1; /* storage path: slot:4.map.value.field@slot+1.dynamic_array.index (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array / array index) */
-  ptr<load=void, store=void, psize=256> field_2; /* storage path: slot:4.map.value.field@slot+1.dynamic_array.length (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array / length) */
+  ptr<load=void, store=void, psize=256> elem; /* storage path: slot:4.map.value.field@slot+1.dynamic_array.elem (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array / array element) */
+  top:256 index; /* storage path: slot:4.map.value.field@slot+1.dynamic_array.index (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array / array index) */
+  ptr<load=void, store=void, psize=256> length; /* storage path: slot:4.map.value.field@slot+1.dynamic_array.length (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array / length) */
 }; /* storage path: slot:4.map.value.field@slot+1.dynamic_array (slot 4 / mapping / mapping value / field slot offset 1 / dynamic array) */
 
 

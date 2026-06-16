@@ -76,6 +76,24 @@
       "input": "cases/11_evm_storage_mapping_struct_array.ll",
       "expected": "expected/tr-level-2/11_evm_storage_mapping_struct_array.htypes",
       "status": "pass"
+    },
+    {
+      "name": "12_evm_storage_packed_read",
+      "input": "cases/12_evm_storage_packed_read.ll",
+      "expected": "expected/tr-level-2/12_evm_storage_packed_read.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "13_evm_storage_static_array",
+      "input": "cases/13_evm_storage_static_array.ll",
+      "expected": "expected/tr-level-2/13_evm_storage_static_array.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "14_evm_storage_nested_mapping",
+      "input": "cases/14_evm_storage_nested_mapping.ll",
+      "expected": "expected/tr-level-2/14_evm_storage_nested_mapping.htypes",
+      "status": "pass"
     }
   ]
 }

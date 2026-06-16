@@ -1,0 +1,41 @@
+# HTypeResult
+
+[decls]
+typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
+
+struct struct_0 {
+  struct_1 slot_0; /* storage path: slot:0 (slot 0) */
+}; /* EVM storage root */
+
+struct struct_1 {
+  struct_2 static_array; /* storage path: slot:0.static_array (slot 0 / static array) */
+}; /* storage path: slot:0 (slot 0) */
+
+struct struct_2 {
+  ptr<load=void, store=void, psize=256> elem; /* storage path: slot:0.static_array.elem (slot 0 / static array / array element) */
+  top:256 index; /* storage path: slot:0.static_array.index (slot 0 / static array / array index) */
+}; /* storage path: slot:0.static_array (slot 0 / static array) */
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:64
+[+] @evm_sload => lower=(bottom:256 (*)(top:256))* ; upper=top:64
+[+] @evm_sstore => lower=(void (*)(top:256, top:256))* ; upper=top:64
+[+] @static_array => lower=('k:256 (*)(top:256, 'k:256))* ; upper=top:64
+[+] evm_sload::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_sload::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg1 => lower=bottom:256 ; upper=top:256
+[+] static_array::%slot.load => lower=typedef_0 ; upper=top:256
+[+] static_array::%slot.store => lower=typedef_0 ; upper=top:256
+[+] static_array::%y => lower=bottom:256 ; upper=top:256
+[+] static_array::<ret> => lower=bottom:256 ; upper=top:256
+[+] static_array::arg0 => lower=bottom:256 ; upper=top:256
+[+] static_array::arg1 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:64
+
+[storage]
+decl => struct_0
+type => struct_0
