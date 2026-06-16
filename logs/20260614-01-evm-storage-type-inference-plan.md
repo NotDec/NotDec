@@ -2267,3 +2267,72 @@ cmake --build ./build --target all -j4
 - `[storage]` 里的字段名仍是 `field_N`，真实 path 在注释里。
 - 字段类型是当前 raw HType 结果，可能显示 `ptr<load=..., store=...>`，暂不做 Solidity 展示层美化。
 - 顶层当前还有一个 unrelated `external/NotDec-bin2llvm` submodule 指针差异，本次提交不会包含它。
+
+## 实现记录：Storage HType 分层树
+
+本次把 storage 的 HType lowering 从 flat record 改成了前缀树。
+
+还是同样的 binarysub 输入：
+
+```text
+slot:4.map.key
+slot:4.map.value.field@slot+1.dynamic_array.elem
+```
+
+但在 HType 输出里，会先按公共前缀归并：
+
+```text
+slot:4
+  map
+    key
+    value
+      field@slot+1
+        dynamic_array
+          elem
+```
+
+这样 `[storage]` 里可以看到更深的结构层次，不再只是两个扁平字段。现在的转换规则是：
+
+1. binarysub 约束仍然保持 flat 字符串 field。
+2. `TypeBuilder::convertStorageRecord()` 先按 `.` 分段建树。
+3. 每个内部节点都变成一个新的 `RecordDecl`。
+4. 如果节点既有 leaf 值又有子节点，就额外保留一个该节点自己的字段，避免丢 whole-slot 语义。
+
+这次没有改普通 memory 的 `OffsetRange::fromStr()` 行为，也没有动 binarysub 里的 field 名解析规则。
+
+修改点：
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:900`：`convertStorageRecord()` 从 flat record 改成 prefix tree lowering。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:901`：新增 storage path 分段和树节点结构。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:935`：内部节点递归生成新的 `RecordDecl`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec TypeBuilderTest -j4
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-short-data.ll \
+  -o /tmp/notdec-storage-tree-short-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-tree-short-work
+NOTDEC_BINARYSUB_TRACE=1 ./build/bin/notdec \
+  /tmp/notdec-storage-bytes-long-elem.ll \
+  -o /tmp/notdec-storage-tree-long-out.ll --tr-level=2 \
+  --frozen-tr-input-ir -g \
+  --work-dir=/tmp/notdec-storage-tree-long-work
+cmake --build ./build --target all -j4
+./build/bin/MLsubGeneratorTest
+./build/bin/TypeBuilderTest
+```
+
+结果：
+
+- short-data smoke 的 `[storage]` 里出现嵌套 `struct_0 -> struct_1`。
+- long-data smoke 的 `[storage]` 里同样出现嵌套层次，并保留 `slot:0.bytes.long_elem`、`slot:0.bytes.long_index`。
+- `cmake --build ./build --target all -j4`、`MLsubGeneratorTest`、`TypeBuilderTest` 均通过。
+
+当前边界：
+
+- 字段名还没改成可读的路径名，仍是 `field_N`。
+- 这个树化只发生在 storage HType lowering，不影响 binarysub 或 memory struct 的 flat range 解析。
+- 还没有把这种层次直接映射成 Solidity 风格的高层字段名，只是先把结构分出来。

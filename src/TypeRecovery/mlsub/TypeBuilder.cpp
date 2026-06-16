@@ -12,6 +12,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/FileSystem.h>
@@ -910,35 +911,94 @@ HType *TypeBuilder::convertStorageRecord(
     SolvedFields.emplace(Field.first, Field.second);
   }
 
-  auto *Decl = RecordDecl::Create(Ctx, ValueNamer::getName("storage_"));
-  Decl->setComment("EVM storage root");
+  struct StorageTreeNode {
+    std::map<std::string, StorageTreeNode> Children;
+    UTypePtr Leaf;
+    std::string LeafPath;
+  };
 
-  notdec::OffsetTy Offset = 0;
+  auto splitPath = [](const std::string &Path) {
+    std::vector<std::string> Parts;
+    size_t Pos = 0;
+    while (Pos <= Path.size()) {
+      size_t Next = Path.find('.', Pos);
+      if (Next == std::string::npos) {
+        Parts.push_back(Path.substr(Pos));
+        break;
+      }
+      Parts.push_back(Path.substr(Pos, Next - Pos));
+      Pos = Next + 1;
+    }
+    return Parts;
+  };
+
+  StorageTreeNode Root;
   for (const auto &Field : StorageFields) {
     auto It = SolvedFields.find(Field.first);
     if (It == SolvedFields.end()) {
       continue;
     }
 
-    HType *FieldTy = convert(It->second);
-    if (FieldTy == nullptr) {
+    auto Parts = splitPath(Field.first);
+    if (Parts.empty()) {
       continue;
     }
 
-    ast::FieldDecl FieldDecl{
-        .R = SimpleRange{.Start = Offset, .Size = 1},
-        .Type = FieldTy,
-        .Name = ValueNamer::getName("field_"),
-        .Comment = "storage path: " + Field.first,
-    };
-    Decl->addField(std::move(FieldDecl));
-    ++Offset;
+    auto *Node = &Root;
+    for (const auto &Part : Parts) {
+      if (Part.empty()) {
+        continue;
+      }
+      Node = &Node->Children[Part];
+    }
+    Node->Leaf = It->second;
+    Node->LeafPath = Field.first;
   }
 
-  if (Decl->getFields().empty()) {
-    return nullptr;
-  }
-  return Ctx.getRecordType(false, Decl);
+  std::function<HType *(const StorageTreeNode &, const std::string &, bool)>
+      buildNode = [&](const StorageTreeNode &Node, const std::string &Path,
+                      bool IsRoot) -> HType * {
+    if (!IsRoot && Node.Children.empty()) {
+      return Node.Leaf == nullptr ? nullptr : convert(Node.Leaf);
+    }
+
+    auto *Decl = RecordDecl::Create(
+        Ctx, ValueNamer::getName(IsRoot ? "storage_" : "storage_node_"));
+    Decl->setComment(IsRoot ? "EVM storage root" : "storage path: " + Path);
+
+    notdec::OffsetTy Offset = 0;
+    auto addField = [&](HType *FieldTy, std::string Comment) {
+      if (FieldTy == nullptr) {
+        return;
+      }
+      ast::FieldDecl FieldDecl{
+          .R = SimpleRange{.Start = Offset, .Size = 1},
+          .Type = FieldTy,
+          .Name = ValueNamer::getName("field_"),
+          .Comment = std::move(Comment),
+      };
+      Decl->addField(std::move(FieldDecl));
+      ++Offset;
+    };
+
+    if (Node.Leaf != nullptr) {
+      addField(convert(Node.Leaf), "storage path: " + Node.LeafPath);
+    }
+
+    for (const auto &Child : Node.Children) {
+      std::string ChildPath =
+          Path.empty() ? Child.first : Path + "." + Child.first;
+      addField(buildNode(Child.second, ChildPath, /*IsRoot=*/false),
+               "storage path: " + ChildPath);
+    }
+
+    if (Decl->getFields().empty()) {
+      return static_cast<HType *>(nullptr);
+    }
+    return Ctx.getRecordType(false, Decl);
+  };
+
+  return buildNode(Root, /*Path=*/"", /*IsRoot=*/true);
 }
 
 HType *TypeBuilder::convertRecursive(const binarysub::UTypePtr &Ty,
