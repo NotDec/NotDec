@@ -582,6 +582,15 @@ void normalizeCollapsedRecursiveBinders(
 
 using TransparentRecordMap = std::map<ast::RecordDecl *, ast::HType *>;
 
+bool isStoragePathRecord(ast::RecordDecl *RD) {
+  if (RD == nullptr) {
+    return false;
+  }
+  const auto &Comment = RD->getComment();
+  return Comment == "EVM storage root" ||
+         Comment.rfind("storage path:", 0) == 0;
+}
+
 ast::HType *
 rewriteTransparentRecordType(ast::HTypeContext &Ctx, ast::HType *Ty,
                              const TransparentRecordMap &Replacements,
@@ -691,7 +700,7 @@ void normalizeTransparentSingleFieldRecords(llvm2c::HTypeResult &Result) {
   for (const auto &Ent : Result.HTCtx->getDecls()) {
     auto *RD = llvm::dyn_cast<ast::RecordDecl>(Ent.second.get());
     if (RD == nullptr || RD == Result.MemoryDecl || RD == Result.StorageDecl ||
-        RecursiveAnchors.count(RD) != 0) {
+        isStoragePathRecord(RD) || RecursiveAnchors.count(RD) != 0) {
       continue;
     }
     auto &Fields = RD->getFields();

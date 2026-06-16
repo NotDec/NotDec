@@ -30,3 +30,4 @@
 [memory]
 type => top:256
 
+[storage]

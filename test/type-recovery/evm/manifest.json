@@ -58,6 +58,24 @@
       "input": "cases/08_evm_runtime_semantic_primitives.ll",
       "expected": "expected/tr-level-2/08_evm_runtime_semantic_primitives.htypes",
       "status": "pass"
+    },
+    {
+      "name": "09_evm_storage_bytes_short",
+      "input": "cases/09_evm_storage_bytes_short.ll",
+      "expected": "expected/tr-level-2/09_evm_storage_bytes_short.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "10_evm_storage_bytes_long",
+      "input": "cases/10_evm_storage_bytes_long.ll",
+      "expected": "expected/tr-level-2/10_evm_storage_bytes_long.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "11_evm_storage_mapping_struct_array",
+      "input": "cases/11_evm_storage_mapping_struct_array.ll",
+      "expected": "expected/tr-level-2/11_evm_storage_mapping_struct_array.htypes",
+      "status": "pass"
     }
   ]
 }

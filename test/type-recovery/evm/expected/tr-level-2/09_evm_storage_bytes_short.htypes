@@ -1,0 +1,47 @@
+# HTypeResult
+
+[decls]
+typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
+
+struct struct_0 {
+  struct_1 field_0; /* storage path: slot:0 (slot 0) */
+}; /* EVM storage root */
+
+struct struct_1 {
+  struct_2 field_0; /* storage path: slot:0.bytes (slot 0 / bytes/string) */
+}; /* storage path: slot:0 (slot 0) */
+
+struct struct_2 {
+  top:256 field_0; /* storage path: slot:0.bytes.length (slot 0 / bytes/string / length) */
+  u256 field_1; /* storage path: slot:0.bytes.short_data (slot 0 / bytes/string / short bytes/string data) */
+}; /* storage path: slot:0.bytes (slot 0 / bytes/string) */
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:64
+[+] @bytes_short_data => lower=(bottom:256 (*)())* ; upper=top:64
+[+] @evm_sload => lower=(bottom:256 (*)(top:256))* ; upper=top:64
+[+] bytes_short_data::%full_len => lower=u256 ; upper=top:256
+[+] bytes_short_data::%is_short => lower=bool ; upper=bool
+[+] bytes_short_data::%len => lower=u256 ; upper=top:256
+[+] bytes_short_data::%low => lower=bottom:256 ; upper=top:256
+[+] bytes_short_data::%ret => lower=bottom:256 ; upper=top:256
+[+] bytes_short_data::%short => lower=bottom:256 ; upper=u256
+[+] bytes_short_data::%short_len => lower=bottom:256 ; upper=top:256
+[+] bytes_short_data::%word => lower=bottom:256 ; upper=u256
+[+] bytes_short_data::<ret> => lower=bottom:256 ; upper=top:256
+[+] const(i256 -256)@bytes_short_data::%short:1 => lower=bottom:256 ; upper=top:256
+[+] const(i256 0)@bytes_short_data::%is_short:1 => lower=bottom:256 ; upper=top:256
+[+] const(i256 0)@bytes_short_data::%word:0 => lower=typedef_0 ; upper=top:256
+[+] const(i256 1)@bytes_short_data::%full_len:1 => lower=bottom:256 ; upper=u256
+[+] const(i256 1)@bytes_short_data::%low:1 => lower=bottom:256 ; upper=top:256
+[+] const(i256 127)@bytes_short_data::%short_len:1 => lower=bottom:256 ; upper=top:256
+[+] evm_sload::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_sload::arg0 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:64
+
+[storage]
+decl => struct_0
+type => struct_0

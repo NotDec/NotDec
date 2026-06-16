@@ -52,3 +52,4 @@ typedef u256 typedef_2; /* semantic primitive lattice node: prim.uint256.evm.sto
 [memory]
 type => top:256
 
+[storage]

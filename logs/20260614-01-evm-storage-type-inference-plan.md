@@ -2336,3 +2336,58 @@ cmake --build ./build --target all -j4
 - 字段名还没改成可读的路径名，仍是 `field_N`。
 - 这个树化只发生在 storage HType lowering，不影响 binarysub 或 memory struct 的 flat range 解析。
 - 还没有把这种层次直接映射成 Solidity 风格的高层字段名，只是先把结构分出来。
+
+## 实现记录：Storage HType 回归样例和 path 显示
+
+本次补了三个 EVM frozen stage-B 回归样例，并把 storage path 的注释显示做得更明确。
+
+新增覆盖：
+
+- `test/type-recovery/evm/cases/09_evm_storage_bytes_short.ll:1`：覆盖 `bytes/string` 短存储，期望 `[storage]` 里有 `slot:0 -> bytes -> length/short_data`。
+- `test/type-recovery/evm/cases/10_evm_storage_bytes_long.ll:1`：覆盖 `bytes/string` 长数据，期望 `[storage]` 里有 `slot:0 -> bytes -> length/long_elem/long_index`。
+- `test/type-recovery/evm/cases/11_evm_storage_mapping_struct_array.ll:1`：覆盖 `mapping(uint => struct{uint[]})` 形状，期望 `[storage]` 里保留 `slot:4 -> map -> value -> field@slot+1 -> dynamic_array -> elem/index/length`。
+- `test/type-recovery/evm/manifest.json:62`：注册上述三个 case。
+- `test/type-recovery/evm/expected/tr-level-2/09_evm_storage_bytes_short.htypes:1`、`10_evm_storage_bytes_long.htypes:1`、`11_evm_storage_mapping_struct_array.htypes:1`：新增 golden。
+- `test/type-recovery/evm/expected/tr-level-2/01_evm_heap_i256.htypes:30` 等旧 EVM golden：同步新增的空 `[storage]` section；其中 `04`、`05` 还随当前实际输出刷新了匿名类型变量名。
+
+代码修改：
+
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:935`：`convertStorageRecord()` 里增加 storage path 段描述。仍然只按字符串规则处理，不引入专门 path object。
+- `src/TypeRecovery/mlsub/TypeBuilder.cpp:1001`：字段和节点注释从单纯 `storage path: ...` 改成 `storage path: ... (...)`，例如 `field@slot+1` 显示为 `field slot offset 1`，`dynamic_array` 显示为 `dynamic array`。
+- `src/TypeRecovery/mlsub/HTypeNormalize.cpp:585`：新增 `isStoragePathRecord()`。
+- `src/TypeRecovery/mlsub/HTypeNormalize.cpp:700`：透明单字段 record normalize 跳过 storage path record，避免 `field@slot+1`、`dynamic_array` 这类中间层被折叠掉。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure
+cmake --build ./build --target TypeBuilderTest MLsubGeneratorTest -j4
+./build/bin/TypeBuilderTest
+./build/bin/MLsubGeneratorTest
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-storage-htype-regress.ll --tr-level=2 \
+  --frozen-tr-input-ir \
+  --dump-htypes=/tmp/notdec-fortune-storage-htype-regress.htypes
+```
+
+结果：
+
+- `notdec.type_recovery.evm.tr_level_2` 通过，11 个 case 全部 pass。
+- `TypeBuilderTest` 通过，6 个 case 全部 pass。
+- `MLsubGeneratorTest` 通过，3 个 case 全部 pass。
+- fortune 直接命令通过，`elapsed=74.88 user=102.22 sys=1.23 maxrss=1263220`。
+- `ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-failure` 能跑完，但仍失败在 `fortune.o3.wasm` 的 DWARF oracle，对应当前已知 realworld oracle 状态；总用时 75.00 秒。
+
+复杂度评分：
+
+- 实现效果：8/10。storage HType 现在能稳定展示 bytes/string、mapping、struct field offset、dynamic array 的层次。
+- 理解成本：6/10。新增逻辑都留在 storage HType lowering 和 normalize skip 里，但注释字符串现在承担了“这是 storage node”的标记作用。
+- 维护成本：6/10。后续如果要把字段名从 `field_N` 换成可读名，可以继续复用当前字符串规则；如果 comment 语义被改，需要同步 `isStoragePathRecord()`。
+
+当前边界：
+
+- 字段名仍是 `field_N`，可读信息在 comment 里。
+- path 仍是字符串规则，不解析成新对象。
+- fortune 当前直接命令是 74.88 秒，和历史 12.5 秒级日志不在同一当前状态下，不能单独证明本次 patch 引入性能退化；但本次改动对没有 storage HType 的 fortune 只多了一次 record comment 前缀判断。

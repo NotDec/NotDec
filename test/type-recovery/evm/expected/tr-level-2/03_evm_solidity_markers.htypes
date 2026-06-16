@@ -62,3 +62,4 @@ struct struct_0 {
 [memory]
 type => top:256
 
+[storage]

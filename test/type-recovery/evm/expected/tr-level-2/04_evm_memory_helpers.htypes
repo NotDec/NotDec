@@ -3,8 +3,8 @@
 [decls]
 struct struct_0 {
   top:256 field_0; /* at offset: 0 */
-  'g:256 field_1; /* at offset: 32 */
-  'g:256 field_2; /* at offset: 64 */
+  'h:256 field_1; /* at offset: 32 */
+  'h:256 field_2; /* at offset: 64 */
 };
 
 
@@ -23,3 +23,5 @@ struct struct_0 {
 
 [memory]
 type => struct_0*
+
+[storage]

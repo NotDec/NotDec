@@ -932,6 +932,80 @@ HType *TypeBuilder::convertStorageRecord(
     return Parts;
   };
 
+  auto describePathPart = [](llvm::StringRef Part) {
+    if (Part.consume_front("slot:")) {
+      return "slot " + Part.str();
+    }
+    if (Part == "map") {
+      return std::string("mapping");
+    }
+    if (Part == "key") {
+      return std::string("mapping key");
+    }
+    if (Part == "value") {
+      return std::string("mapping value");
+    }
+    if (Part == "dynamic_array") {
+      return std::string("dynamic array");
+    }
+    if (Part == "static_array") {
+      return std::string("static array");
+    }
+    if (Part == "index") {
+      return std::string("array index");
+    }
+    if (Part == "elem") {
+      return std::string("array element");
+    }
+    if (Part == "bytes") {
+      return std::string("bytes/string");
+    }
+    if (Part == "length") {
+      return std::string("length");
+    }
+    if (Part == "short_data") {
+      return std::string("short bytes/string data");
+    }
+    if (Part == "long_elem") {
+      return std::string("long bytes/string element");
+    }
+    if (Part == "long_index") {
+      return std::string("long bytes/string index");
+    }
+    if (Part.consume_front("field@slot+")) {
+      return "field slot offset " + Part.str();
+    }
+    if (Part.consume_front("packed@")) {
+      return "packed field bits " + Part.str();
+    }
+    return Part.str();
+  };
+
+  auto describeStoragePath = [&](llvm::StringRef Path) {
+    std::vector<std::string> DescribedParts;
+    for (const auto &Part : splitPath(Path.str())) {
+      if (!Part.empty()) {
+        DescribedParts.push_back(describePathPart(Part));
+      }
+    }
+    std::string Result;
+    for (size_t I = 0; I < DescribedParts.size(); ++I) {
+      if (I != 0) {
+        Result += " / ";
+      }
+      Result += DescribedParts[I];
+    }
+    return Result;
+  };
+
+  auto storageComment = [&](const std::string &Path) {
+    auto Description = describeStoragePath(Path);
+    if (Description.empty()) {
+      return "storage path: " + Path;
+    }
+    return "storage path: " + Path + " (" + Description + ")";
+  };
+
   StorageTreeNode Root;
   for (const auto &Field : StorageFields) {
     auto It = SolvedFields.find(Field.first);
@@ -964,7 +1038,7 @@ HType *TypeBuilder::convertStorageRecord(
 
     auto *Decl = RecordDecl::Create(
         Ctx, ValueNamer::getName(IsRoot ? "storage_" : "storage_node_"));
-    Decl->setComment(IsRoot ? "EVM storage root" : "storage path: " + Path);
+    Decl->setComment(IsRoot ? "EVM storage root" : storageComment(Path));
 
     notdec::OffsetTy Offset = 0;
     auto addField = [&](HType *FieldTy, std::string Comment) {
@@ -982,14 +1056,14 @@ HType *TypeBuilder::convertStorageRecord(
     };
 
     if (Node.Leaf != nullptr) {
-      addField(convert(Node.Leaf), "storage path: " + Node.LeafPath);
+      addField(convert(Node.Leaf), storageComment(Node.LeafPath));
     }
 
     for (const auto &Child : Node.Children) {
       std::string ChildPath =
           Path.empty() ? Child.first : Path + "." + Child.first;
       addField(buildNode(Child.second, ChildPath, /*IsRoot=*/false),
-               "storage path: " + ChildPath);
+               storageComment(ChildPath));
     }
 
     if (Decl->getFields().empty()) {
