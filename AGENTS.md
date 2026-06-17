@@ -58,7 +58,11 @@ The test: Every changed line should trace directly to the user's request.
 6. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和性能结果。只有复杂代码修改需要从实现效果、复杂度（增加其他人对项目的理解成本）、后期维护成本三个角度评分，并思考有没有更好的方案。
    `logs/` 下的 plan 文档顶部必须先保留本次用户的原始 prompt，然后再写背景、目标、路线、风险和判断标准。
 7. 如果当前的任务是对之前的plan日志的实现，则不需要单独创建日志，而是将实现情况写入之前的计划日志，比如将计划的步骤在标题中标记为已完成，记录实现细节，以及调整计划时考虑不全而实现时有所改变的部分。同时也不要使得日志文件过于冗长，简洁一些，包括语言风格上，以及没有真正实现，或者试错的思路都尽量简写。
-8. 每次改动后都要关注是否造成性能下降。涉及类型恢复、结构体合并、pointer analysis、pass pipeline 时，至少对比 fortune 当前关注用例的同口径运行时间。
+8. 每次改动后都要关注是否造成性能下降。涉及类型恢复、结构体合并、
+   pointer analysis、pass pipeline 时，至少对比 fortune 当前关注用例的同口径运行时间。
+   如果改动只影响 EVM Solidity/storage rewrite，fortune 不能代表这条链路，优先用
+   `test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll`
+   做 EVM 性能 smoke。
 9. evm2llvm 的 PHI 修复不能退回旧的 slot 模式 + mem2reg 思路。遇到 `PHIIncoming`
    语义问题时，要优先确认真实 CFG/SSA 语义，或者修复 Gigahorse 侧导出；如果问题复杂，
    先记录和归类，不要用 slot fallback 掩盖问题。

@@ -4142,7 +4142,7 @@ std::optional<std::string> getDirectStorageSlotFieldName(llvm::Value *Slot) {
 
 struct MappingStorageKeyConstraint {
   std::string FieldName;
-  llvm::Value *Key = nullptr;
+  ExtValuePtr Key = static_cast<llvm::Value *>(nullptr);
 };
 
 struct StorageFieldPrefixMatch {
@@ -4163,7 +4163,7 @@ struct MappingStorageFieldMatch {
 
 struct ArrayStorageFieldMatch {
   std::string Prefix;
-  llvm::Value *Index = nullptr;
+  ExtValuePtr Index = static_cast<llvm::Value *>(nullptr);
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
@@ -4174,36 +4174,74 @@ struct ArrayLengthStorageFieldMatch {
 
 struct StaticArrayStorageFieldMatch {
   std::string Prefix;
-  llvm::Value *Index = nullptr;
+  ExtValuePtr Index = static_cast<llvm::Value *>(nullptr);
 };
 
 struct PackedStorageFieldReadMatch {
   std::string FieldName;
-  llvm::Value *Value = nullptr;
+  ExtValuePtr Value = static_cast<llvm::Value *>(nullptr);
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
 struct PackedStorageFieldWriteMatch {
   std::string FieldName;
-  llvm::Value *Value = nullptr;
+  ExtValuePtr Value = static_cast<llvm::Value *>(nullptr);
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
+llvm::Value *getStorageEvidenceValue(const ExtValuePtr &Evidence) {
+  if (auto *V = std::get_if<llvm::Value *>(&Evidence)) {
+    return *V;
+  }
+  if (auto *C = std::get_if<UConstant>(&Evidence)) {
+    return C->Val;
+  }
+  return nullptr;
+}
+
+void addStorageValueEvidenceConstraint(ConstraintsGenerator &cg,
+                                       llvm::StringRef FieldName,
+                                       const ExtValuePtr &Value) {
+  if (getStorageEvidenceValue(Value) == nullptr) {
+    return;
+  }
+  auto FieldTy = cg.getOrCreateStorageField(FieldName, 256);
+  auto ValueTy = cg.getOrInsertNode(Value);
+  cg.addSubtype(ValueTy, FieldTy);
+}
+
+std::optional<SimpleType> getStorageEvidenceType(ConstraintsGenerator &cg,
+                                                 const ExtValuePtr &Value) {
+  if (getStorageEvidenceValue(Value) == nullptr) {
+    return std::nullopt;
+  }
+  return cg.getOrInsertNode(Value);
+}
+
+void addStorageKeyConstraints(
+    ConstraintsGenerator &cg,
+    llvm::ArrayRef<MappingStorageKeyConstraint> KeyConstraints) {
+  for (const auto &KeyConstraint : KeyConstraints) {
+    addStorageValueEvidenceConstraint(cg, KeyConstraint.FieldName,
+                                      KeyConstraint.Key);
+  }
+}
+
 struct BytesStorageLengthMatch {
   std::string FieldName;
-  llvm::Value *Length = nullptr;
+  ExtValuePtr Length = static_cast<llvm::Value *>(nullptr);
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
 struct BytesStorageShortDataMatch {
   std::string FieldName;
-  llvm::Value *Data = nullptr;
+  ExtValuePtr Data = static_cast<llvm::Value *>(nullptr);
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
 struct BytesStorageLongElemMatch {
   std::string Prefix;
-  llvm::Value *Index = nullptr;
+  ExtValuePtr Index = static_cast<llvm::Value *>(nullptr);
   std::vector<MappingStorageKeyConstraint> KeyConstraints;
 };
 
@@ -4230,7 +4268,8 @@ getStorageFieldPrefixFromBaseSlot(llvm::Value *BaseSlot, unsigned Depth = 4) {
     return std::nullopt;
   }
 
-  auto Base = getStorageFieldPrefixFromBaseSlot(Scratch->BaseSlot, Depth - 1);
+  auto ScratchBaseSlot = getStorageEvidenceValue(Scratch->BaseSlot);
+  auto Base = getStorageFieldPrefixFromBaseSlot(ScratchBaseSlot, Depth - 1);
   if (!Base.has_value()) {
     return std::nullopt;
   }
@@ -4356,7 +4395,8 @@ getMappingStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
     return std::nullopt;
   }
 
-  auto Base = getStorageFieldPrefixFromBaseSlot(Match->BaseSlot);
+  auto MatchBaseSlot = getStorageEvidenceValue(Match->BaseSlot);
+  auto Base = getStorageFieldPrefixFromBaseSlot(MatchBaseSlot);
   if (!Base.has_value()) {
     return std::nullopt;
   }
@@ -4411,36 +4451,39 @@ getStorageValueFieldPrefixMatch(llvm::CallBase &Access, llvm::Value *StorageSlot
   };
 }
 
-llvm::Value *getDynamicArrayIndex(llvm::Value *StorageSlot,
-                                  llvm::Value *DataHash) {
+ExtValuePtr getDynamicArrayIndex(llvm::Value *StorageSlot,
+                                 llvm::Value *DataHash) {
   if (notdec::passes::evm::detail::isSameValue(StorageSlot, DataHash)) {
-    return nullptr;
+    return static_cast<llvm::Value *>(nullptr);
   }
 
   auto getIndexFromOperands = [&](llvm::Value *LHS,
-                                  llvm::Value *RHS) -> llvm::Value * {
+                                  llvm::Value *RHS,
+                                  llvm::User *User) -> ExtValuePtr {
     bool LHSIsBase = notdec::passes::evm::detail::dependsOnValue(LHS, DataHash);
     bool RHSIsBase = notdec::passes::evm::detail::dependsOnValue(RHS, DataHash);
     if (LHSIsBase == RHSIsBase) {
-      return nullptr;
+      return static_cast<llvm::Value *>(nullptr);
     }
-    return LHSIsBase ? RHS : LHS;
+    unsigned Index = LHSIsBase ? 1 : 0;
+    return getExtValuePtr(LHSIsBase ? RHS : LHS, User, Index);
   };
 
   if (auto *Add = dyn_cast<llvm::BinaryOperator>(StorageSlot)) {
     if (Add->getOpcode() == llvm::Instruction::Add) {
-      return getIndexFromOperands(Add->getOperand(0), Add->getOperand(1));
+      return getIndexFromOperands(Add->getOperand(0), Add->getOperand(1), Add);
     }
   }
 
   if (auto *Call = dyn_cast<llvm::CallBase>(StorageSlot)) {
     if (notdec::passes::evm::detail::isCallTo(Call, "evm_add") &&
         Call->arg_size() == 2) {
-      return getIndexFromOperands(Call->getArgOperand(0), Call->getArgOperand(1));
+      return getIndexFromOperands(Call->getArgOperand(0), Call->getArgOperand(1),
+                                  Call);
     }
   }
 
-  return nullptr;
+  return static_cast<llvm::Value *>(nullptr);
 }
 
 std::optional<ArrayStorageFieldMatch>
@@ -4452,9 +4495,10 @@ getArrayStorageFieldMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
     return std::nullopt;
   }
 
-  auto Base = getStorageFieldPrefixFromBaseSlot(Match->BaseSlot);
+  auto MatchBaseSlot = getStorageEvidenceValue(Match->BaseSlot);
+  auto Base = getStorageFieldPrefixFromBaseSlot(MatchBaseSlot);
   auto BaseValue = getStorageValueFieldPrefixFromSlotExpression(
-      Match->BaseSlot, /*UseField0ForMappingBase=*/false);
+      MatchBaseSlot, /*UseField0ForMappingBase=*/false);
   if (!Base.has_value() && !BaseValue.has_value()) {
     return std::nullopt;
   }
@@ -4506,7 +4550,8 @@ bool functionHasArrayDataAccessForBaseSlot(llvm::Function *F,
       auto Match = notdec::passes::evm::detail::matchStorageArrayDataAccess(
           *Call, StorageSlot, AccessKind);
       if (Match.has_value() &&
-          notdec::passes::evm::detail::isSameValue(Match->BaseSlot, BaseSlot)) {
+          notdec::passes::evm::detail::isSameValue(
+              getStorageEvidenceValue(Match->BaseSlot), BaseSlot)) {
         return true;
       }
     }
@@ -4547,7 +4592,8 @@ std::optional<StaticArrayStorageFieldMatch>
 getStaticArrayStorageFieldMatch(llvm::Value *StorageSlot) {
   auto getMatchFromOperands =
       [](llvm::Value *LHS,
-         llvm::Value *RHS) -> std::optional<StaticArrayStorageFieldMatch> {
+         llvm::Value *RHS,
+         llvm::User *User) -> std::optional<StaticArrayStorageFieldMatch> {
     auto LSlot = getUInt64Constant(LHS);
     auto RSlot = getUInt64Constant(RHS);
     if (LSlot.has_value() == RSlot.has_value()) {
@@ -4555,22 +4601,24 @@ getStaticArrayStorageFieldMatch(llvm::Value *StorageSlot) {
     }
     uint64_t BaseSlot = LSlot.has_value() ? *LSlot : *RSlot;
     llvm::Value *Index = LSlot.has_value() ? RHS : LHS;
+    unsigned OperandIndex = LSlot.has_value() ? 1 : 0;
     return StaticArrayStorageFieldMatch{
         .Prefix = "slot:" + std::to_string(BaseSlot) + ".static_array",
-        .Index = Index,
+        .Index = getExtValuePtr(Index, User, OperandIndex),
     };
   };
 
   if (auto *Add = dyn_cast<llvm::BinaryOperator>(StorageSlot)) {
     if (Add->getOpcode() == llvm::Instruction::Add) {
-      return getMatchFromOperands(Add->getOperand(0), Add->getOperand(1));
+      return getMatchFromOperands(Add->getOperand(0), Add->getOperand(1), Add);
     }
   }
 
   if (auto *Call = dyn_cast<llvm::CallBase>(StorageSlot)) {
     if (notdec::passes::evm::detail::isCallTo(Call, "evm_add") &&
         Call->arg_size() == 2) {
-      return getMatchFromOperands(Call->getArgOperand(0), Call->getArgOperand(1));
+      return getMatchFromOperands(Call->getArgOperand(0), Call->getArgOperand(1),
+                                  Call);
     }
   }
 
@@ -4695,11 +4743,14 @@ llvm::Value *getBitwiseAndOtherOperandForClearMask(llvm::Value *V,
 }
 
 bool getBitwiseOrOperands(llvm::Value *V, llvm::Value *&LHS,
-                          llvm::Value *&RHS) {
+                          ExtValuePtr &LHSEvidence, llvm::Value *&RHS,
+                          ExtValuePtr &RHSEvidence) {
   if (auto *Or = dyn_cast<llvm::BinaryOperator>(V)) {
     if (Or->getOpcode() == llvm::Instruction::Or) {
       LHS = Or->getOperand(0);
+      LHSEvidence = getExtValuePtr(LHS, Or, 0);
       RHS = Or->getOperand(1);
+      RHSEvidence = getExtValuePtr(RHS, Or, 1);
       return true;
     }
   }
@@ -4708,7 +4759,9 @@ bool getBitwiseOrOperands(llvm::Value *V, llvm::Value *&LHS,
     if (notdec::passes::evm::detail::isCallTo(Call, "evm_or") &&
         Call->arg_size() == 2) {
       LHS = Call->getArgOperand(0);
+      LHSEvidence = getExtValuePtr(LHS, Call, 0);
       RHS = Call->getArgOperand(1);
+      RHSEvidence = getExtValuePtr(RHS, Call, 1);
       return true;
     }
   }
@@ -4815,14 +4868,15 @@ llvm::Value *getShiftedValue(llvm::Value *V, unsigned &Offset) {
   return V;
 }
 
-llvm::Value *getShiftedWriteValue(llvm::Value *V, unsigned &Offset) {
+ExtValuePtr getShiftedWriteValue(llvm::Value *V, const ExtValuePtr &Evidence,
+                                 unsigned &Offset) {
   if (auto *Call = dyn_cast<llvm::CallBase>(V)) {
     if (notdec::passes::evm::detail::isCallTo(Call, "evm_shl") &&
         Call->arg_size() == 2) {
       auto Shift = getUInt64Constant(Call->getArgOperand(0));
       if (Shift.has_value() && *Shift < 256) {
         Offset = static_cast<unsigned>(*Shift);
-        return Call->getArgOperand(1);
+        return getExtValuePtr(Call->getArgOperand(1), Call, 1);
       }
     }
   }
@@ -4832,13 +4886,13 @@ llvm::Value *getShiftedWriteValue(llvm::Value *V, unsigned &Offset) {
       auto Amount = getUInt64Constant(Shift->getOperand(1));
       if (Amount.has_value() && *Amount < 256) {
         Offset = static_cast<unsigned>(*Amount);
-        return Shift->getOperand(0);
+        return getExtValuePtr(Shift->getOperand(0), Shift, 0);
       }
     }
   }
 
   Offset = 0;
-  return V;
+  return Evidence;
 }
 
 std::optional<PackedStorageFieldReadMatch>
@@ -4903,7 +4957,7 @@ getBytesStorageLengthMatch(llvm::CallBase &Load) {
           .FieldName = Array->Prefix + ".elem",
           .KeyConstraints = std::move(Array->KeyConstraints),
       };
-      if (Array->Index != nullptr) {
+      if (getStorageEvidenceValue(Array->Index) != nullptr) {
         FieldPrefix->KeyConstraints.push_back(MappingStorageKeyConstraint{
             .FieldName = Array->Prefix + ".index",
             .Key = Array->Index,
@@ -5001,7 +5055,7 @@ getBytesStorageShortDataMatch(llvm::CallBase &Load) {
           .FieldName = Array->Prefix + ".elem",
           .KeyConstraints = std::move(Array->KeyConstraints),
       };
-      if (Array->Index != nullptr) {
+      if (getStorageEvidenceValue(Array->Index) != nullptr) {
         FieldPrefix->KeyConstraints.push_back(MappingStorageKeyConstraint{
             .FieldName = Array->Prefix + ".index",
             .Key = Array->Index,
@@ -5107,13 +5161,15 @@ getBytesStorageLongElemMatch(llvm::CallBase &Access, llvm::Value *StorageSlot,
       Access, StorageSlot, AccessKind);
   if (!Match.has_value() ||
       !functionHasBytesLengthDecodeForBaseSlot(Access.getFunction(),
-                                               Match->BaseSlot)) {
+                                               getStorageEvidenceValue(
+                                                   Match->BaseSlot))) {
     return std::nullopt;
   }
 
-  auto Base = getStorageFieldPrefixFromBaseSlot(Match->BaseSlot);
+  auto MatchBaseSlot = getStorageEvidenceValue(Match->BaseSlot);
+  auto Base = getStorageFieldPrefixFromBaseSlot(MatchBaseSlot);
   auto BaseValue = getStorageValueFieldPrefixFromSlotExpression(
-      Match->BaseSlot, /*UseField0ForMappingBase=*/false);
+      MatchBaseSlot, /*UseField0ForMappingBase=*/false);
   if (!Base.has_value() && !BaseValue.has_value()) {
     return std::nullopt;
   }
@@ -5162,12 +5218,15 @@ getPackedStorageFieldWriteMatch(llvm::Value *StorageSlot,
 
   llvm::Value *OrLHS = nullptr;
   llvm::Value *OrRHS = nullptr;
-  if (!getBitwiseOrOperands(StoredValue, OrLHS, OrRHS)) {
+  ExtValuePtr OrLHSEvidence = static_cast<llvm::Value *>(nullptr);
+  ExtValuePtr OrRHSEvidence = static_cast<llvm::Value *>(nullptr);
+  if (!getBitwiseOrOperands(StoredValue, OrLHS, OrLHSEvidence, OrRHS,
+                            OrRHSEvidence)) {
     return std::nullopt;
   }
 
-  auto tryMatch = [&](llvm::Value *ClearPart,
-                      llvm::Value *WritePart)
+  auto tryMatch = [&](llvm::Value *ClearPart, llvm::Value *WritePart,
+                      const ExtValuePtr &WritePartEvidence)
       -> std::optional<PackedStorageFieldWriteMatch> {
     PackedBitRange Range;
     llvm::Value *OldValue =
@@ -5177,7 +5236,8 @@ getPackedStorageFieldWriteMatch(llvm::Value *StorageSlot,
     }
 
     unsigned Offset = 0;
-    llvm::Value *Value = getShiftedWriteValue(WritePart, Offset);
+    ExtValuePtr Value = getShiftedWriteValue(WritePart, WritePartEvidence,
+                                             Offset);
     if (Offset != Range.Offset || Range.Width == 0) {
       return std::nullopt;
     }
@@ -5191,10 +5251,10 @@ getPackedStorageFieldWriteMatch(llvm::Value *StorageSlot,
     };
   };
 
-  if (auto Match = tryMatch(OrLHS, OrRHS)) {
+  if (auto Match = tryMatch(OrLHS, OrRHS, OrRHSEvidence)) {
     return Match;
   }
-  return tryMatch(OrRHS, OrLHS);
+  return tryMatch(OrRHS, OrLHS, OrLHSEvidence);
 }
 
 bool isPackedWritePreservedWordLoad(llvm::CallBase &Load) {
@@ -5286,35 +5346,24 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
     markArg(0, "storage_key");
     if (I.arg_size() == 1 && !I.getType()->isVoidTy()) {
       if (auto BytesLength = getBytesStorageLengthMatch(I)) {
-        for (const auto &KeyConstraint : BytesLength->KeyConstraints) {
-          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
+        addStorageKeyConstraints(cg, BytesLength->KeyConstraints);
 
         auto FieldTy = cg.getOrCreateStorageField(BytesLength->FieldName, 256);
-        auto LengthTy = cg.getOrInsertNode(BytesLength->Length);
-        cg.addSubtype(FieldTy, LengthTy);
+        if (auto LengthTy = getStorageEvidenceType(cg, BytesLength->Length)) {
+          cg.addSubtype(FieldTy, *LengthTy);
+        }
 
         if (auto ShortData = getBytesStorageShortDataMatch(I)) {
-          for (const auto &KeyConstraint : ShortData->KeyConstraints) {
-            auto KeyTy =
-                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-            cg.addSubtype(KeyValTy, KeyTy);
-          }
+          addStorageKeyConstraints(cg, ShortData->KeyConstraints);
 
           auto ShortDataFieldTy =
               cg.getOrCreateStorageField(ShortData->FieldName, 256);
-          auto DataTy = cg.getOrInsertNode(ShortData->Data);
-          cg.addSubtype(ShortDataFieldTy, DataTy);
+          if (auto DataTy = getStorageEvidenceType(cg, ShortData->Data)) {
+            cg.addSubtype(ShortDataFieldTy, *DataTy);
+          }
         }
       } else if (auto ArrayLength = getArrayLengthStorageFieldMatch(I)) {
-        for (const auto &KeyConstraint : ArrayLength->KeyConstraints) {
-          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
+        addStorageKeyConstraints(cg, ArrayLength->KeyConstraints);
 
         auto FieldTy =
             cg.getOrCreateStorageField(ArrayLength->Prefix + ".length");
@@ -5325,17 +5374,10 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
       } else if (auto BytesLong =
                      getBytesStorageLongElemMatch(I, I.getArgOperand(0),
                                                   /*AccessKind=*/1)) {
-        for (const auto &KeyConstraint : BytesLong->KeyConstraints) {
-          auto KeyTy =
-              cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
-        if (BytesLong->Index != nullptr) {
-          auto IndexTy =
-              cg.getOrCreateStorageField(BytesLong->Prefix + ".long_index", 256);
-          auto IndexValTy = cg.getOrInsertNode(BytesLong->Index);
-          cg.addSubtype(IndexValTy, IndexTy);
+        addStorageKeyConstraints(cg, BytesLong->KeyConstraints);
+        if (getStorageEvidenceValue(BytesLong->Index) != nullptr) {
+          addStorageValueEvidenceConstraint(
+              cg, BytesLong->Prefix + ".long_index", BytesLong->Index);
         }
 
         auto FieldTy =
@@ -5346,23 +5388,14 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
                      getMappingStorageFieldMatch(I, I.getArgOperand(0),
                                                  /*AccessKind=*/1)) {
         if (auto Packed = getPackedStorageFieldReadMatch(I)) {
-          for (const auto &KeyConstraint : Packed->KeyConstraints) {
-            auto KeyTy =
-                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-            cg.addSubtype(KeyValTy, KeyTy);
-          }
+          addStorageKeyConstraints(cg, Packed->KeyConstraints);
 
           auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
-          auto ValueTy = cg.getOrInsertNode(Packed->Value);
-          cg.addSubtype(FieldTy, ValueTy);
-        } else {
-          for (const auto &KeyConstraint : Mapping->KeyConstraints) {
-            auto KeyTy =
-                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-            cg.addSubtype(KeyValTy, KeyTy);
+          if (auto ValueTy = getStorageEvidenceType(cg, Packed->Value)) {
+            cg.addSubtype(FieldTy, *ValueTy);
           }
+        } else {
+          addStorageKeyConstraints(cg, Mapping->KeyConstraints);
 
           auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
           auto ResultTy = cg.getOrInsertNode(&I);
@@ -5371,16 +5404,10 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
       } else if (auto Array =
                      getArrayStorageFieldMatch(I, I.getArgOperand(0),
                                                /*AccessKind=*/1)) {
-        for (const auto &KeyConstraint : Array->KeyConstraints) {
-          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
-        if (Array->Index != nullptr) {
-          auto IndexTy =
-              cg.getOrCreateStorageField(Array->Prefix + ".index", 256);
-          auto IndexValTy = cg.getOrInsertNode(Array->Index);
-          cg.addSubtype(IndexValTy, IndexTy);
+        addStorageKeyConstraints(cg, Array->KeyConstraints);
+        if (getStorageEvidenceValue(Array->Index) != nullptr) {
+          addStorageValueEvidenceConstraint(cg, Array->Prefix + ".index",
+                                            Array->Index);
         }
 
         auto FieldTy = cg.getOrCreateStorageField(Array->Prefix + ".elem");
@@ -5388,10 +5415,8 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
       } else if (auto StaticArray =
                      getStaticArrayStorageFieldMatch(I.getArgOperand(0))) {
-        auto IndexTy =
-            cg.getOrCreateStorageField(StaticArray->Prefix + ".index", 256);
-        auto IndexValTy = cg.getOrInsertNode(StaticArray->Index);
-        cg.addSubtype(IndexValTy, IndexTy);
+        addStorageValueEvidenceConstraint(cg, StaticArray->Prefix + ".index",
+                                          StaticArray->Index);
 
         auto FieldTy =
             cg.getOrCreateStorageField(StaticArray->Prefix + ".elem");
@@ -5399,8 +5424,9 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
         cg.addSubtype(FieldTy, binarysub::make_ptr_load(ResultTy, 256));
       } else if (auto Packed = getPackedStorageFieldReadMatch(I)) {
         auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
-        auto ValueTy = cg.getOrInsertNode(Packed->Value);
-        cg.addSubtype(FieldTy, ValueTy);
+        if (auto ValueTy = getStorageEvidenceType(cg, Packed->Value)) {
+          cg.addSubtype(FieldTy, *ValueTy);
+        }
       } else if (auto FieldName =
                      getDirectStorageSlotFieldName(I.getArgOperand(0))) {
         auto FieldTy = cg.getOrCreateStorageField(*FieldName);
@@ -5417,23 +5443,14 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
                                                      /*AccessKind=*/2)) {
         if (auto Packed = getPackedStorageFieldWriteMatch(
                 I.getArgOperand(0), I.getArgOperand(1), I)) {
-          for (const auto &KeyConstraint : Packed->KeyConstraints) {
-            auto KeyTy =
-                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-            cg.addSubtype(KeyValTy, KeyTy);
-          }
+          addStorageKeyConstraints(cg, Packed->KeyConstraints);
 
           auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
-          auto ValueTy = cg.getOrInsertNode(Packed->Value);
-          cg.addSubtype(ValueTy, FieldTy);
-        } else {
-          for (const auto &KeyConstraint : Mapping->KeyConstraints) {
-            auto KeyTy =
-                cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-            auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-            cg.addSubtype(KeyValTy, KeyTy);
+          if (auto ValueTy = getStorageEvidenceType(cg, Packed->Value)) {
+            cg.addSubtype(*ValueTy, FieldTy);
           }
+        } else {
+          addStorageKeyConstraints(cg, Mapping->KeyConstraints);
 
           auto FieldTy = cg.getOrCreateStorageField(Mapping->ValueFieldName);
           auto ValueTy =
@@ -5443,16 +5460,10 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
       } else if (auto BytesLong =
                      getBytesStorageLongElemMatch(I, I.getArgOperand(0),
                                                   /*AccessKind=*/2)) {
-        for (const auto &KeyConstraint : BytesLong->KeyConstraints) {
-          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
-        if (BytesLong->Index != nullptr) {
-          auto IndexTy =
-              cg.getOrCreateStorageField(BytesLong->Prefix + ".long_index", 256);
-          auto IndexValTy = cg.getOrInsertNode(BytesLong->Index);
-          cg.addSubtype(IndexValTy, IndexTy);
+        addStorageKeyConstraints(cg, BytesLong->KeyConstraints);
+        if (getStorageEvidenceValue(BytesLong->Index) != nullptr) {
+          addStorageValueEvidenceConstraint(
+              cg, BytesLong->Prefix + ".long_index", BytesLong->Index);
         }
 
         auto FieldTy =
@@ -5463,16 +5474,10 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
       } else if (auto Array =
                      getArrayStorageFieldMatch(I, I.getArgOperand(0),
                                                /*AccessKind=*/2)) {
-        for (const auto &KeyConstraint : Array->KeyConstraints) {
-          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
-        if (Array->Index != nullptr) {
-          auto IndexTy =
-              cg.getOrCreateStorageField(Array->Prefix + ".index", 256);
-          auto IndexValTy = cg.getOrInsertNode(Array->Index);
-          cg.addSubtype(IndexValTy, IndexTy);
+        addStorageKeyConstraints(cg, Array->KeyConstraints);
+        if (getStorageEvidenceValue(Array->Index) != nullptr) {
+          addStorageValueEvidenceConstraint(cg, Array->Prefix + ".index",
+                                            Array->Index);
         }
 
         auto FieldTy = cg.getOrCreateStorageField(Array->Prefix + ".elem");
@@ -5481,10 +5486,8 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
         cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
       } else if (auto StaticArray =
                      getStaticArrayStorageFieldMatch(I.getArgOperand(0))) {
-        auto IndexTy =
-            cg.getOrCreateStorageField(StaticArray->Prefix + ".index", 256);
-        auto IndexValTy = cg.getOrInsertNode(StaticArray->Index);
-        cg.addSubtype(IndexValTy, IndexTy);
+        addStorageValueEvidenceConstraint(cg, StaticArray->Prefix + ".index",
+                                          StaticArray->Index);
 
         auto FieldTy =
             cg.getOrCreateStorageField(StaticArray->Prefix + ".elem");
@@ -5493,15 +5496,12 @@ void ConstraintsGenerator::MLsubVisitor::addEVMRuntimeSemanticConstraints(
         cg.addSubtype(FieldTy, binarysub::make_ptr_store(ValueTy, 256));
       } else if (auto Packed = getPackedStorageFieldWriteMatch(
                      I.getArgOperand(0), I.getArgOperand(1), I)) {
-        for (const auto &KeyConstraint : Packed->KeyConstraints) {
-          auto KeyTy = cg.getOrCreateStorageField(KeyConstraint.FieldName, 256);
-          auto KeyValTy = cg.getOrInsertNode(KeyConstraint.Key);
-          cg.addSubtype(KeyValTy, KeyTy);
-        }
+        addStorageKeyConstraints(cg, Packed->KeyConstraints);
 
         auto FieldTy = cg.getOrCreateStorageField(Packed->FieldName, 256);
-        auto ValueTy = cg.getOrInsertNode(Packed->Value);
-        cg.addSubtype(ValueTy, FieldTy);
+        if (auto ValueTy = getStorageEvidenceType(cg, Packed->Value)) {
+          cg.addSubtype(*ValueTy, FieldTy);
+        }
       } else if (auto FieldName =
                      getDirectStorageSlotFieldName(I.getArgOperand(0))) {
         auto FieldTy = cg.getOrCreateStorageField(*FieldName);

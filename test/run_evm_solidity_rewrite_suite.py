@@ -236,6 +236,40 @@ def main() -> int:
                 "skipped_metadata": output_text.count(
                     "!notdec.solidity.selector_outline_skipped"
                 ),
+                "storage_slot_calls": output_text.count("@evm.storage.slot("),
+                "storage_map_value_calls": output_text.count(
+                    "@evm.storage.map.value("
+                ),
+                "storage_field_calls": output_text.count("@evm.storage.field("),
+                "storage_static_array_elem_calls": output_text.count(
+                    "@evm.storage.static_array.elem("
+                ),
+                "storage_dynamic_array_elem_calls": output_text.count(
+                    "@evm.storage.dynamic_array.elem("
+                ),
+                "storage_dynamic_array_length_load_calls": output_text.count(
+                    "@evm.storage.dynamic_array.length.load("
+                ),
+                "storage_dynamic_array_length_store_calls": output_text.count(
+                    "@evm.storage.dynamic_array.length.store("
+                ),
+                "storage_packed_load_calls": output_text.count(
+                    "@evm.storage.packed.load("
+                ),
+                "storage_packed_store_calls": output_text.count(
+                    "@evm.storage.packed.store("
+                ),
+                "storage_bytes_length_load_calls": output_text.count(
+                    "@evm.storage.bytes.length.load("
+                ),
+                "storage_bytes_short_data_load_calls": output_text.count(
+                    "@evm.storage.bytes.short_data.load("
+                ),
+                "storage_bytes_long_elem_load_calls": output_text.count(
+                    "@evm.storage.bytes.long_elem.load("
+                ),
+                "storage_load_calls": output_text.count("@evm.storage.load("),
+                "storage_store_calls": output_text.count("@evm.storage.store("),
             }
             checks.update(count_skip_reasons(output_text))
             checked_bounds_kinds = count_metadata_string_values(

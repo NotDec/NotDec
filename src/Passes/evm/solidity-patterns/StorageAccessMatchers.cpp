@@ -57,6 +57,8 @@ matchStorageScratchKeccak(CallBase &Sha3) {
 
   Value *Key = nullptr;
   Value *BaseSlot = nullptr;
+  ExtValuePtr KeyEvidence = static_cast<Value *>(nullptr);
+  ExtValuePtr BaseSlotEvidence = static_cast<Value *>(nullptr);
   for (auto It = Sha3.getIterator(); It != Sha3.getParent()->begin();) {
     --It;
     auto *Call = dyn_cast<CallBase>(&*It);
@@ -71,10 +73,12 @@ matchStorageScratchKeccak(CallBase &Sha3) {
     }
     if (BaseSlot == nullptr && isConstantIntValue(Store->Address, 32)) {
       BaseSlot = Store->StoredValue;
+      BaseSlotEvidence = getExtValuePtr(Store->StoredValue, Store->Inst, 0);
       continue;
     }
     if (Key == nullptr && isConstantIntValue(Store->Address, 0)) {
       Key = Store->StoredValue;
+      KeyEvidence = getExtValuePtr(Store->StoredValue, Store->Inst, 0);
       continue;
     }
     if (Key != nullptr && BaseSlot != nullptr) {
@@ -85,7 +89,7 @@ matchStorageScratchKeccak(CallBase &Sha3) {
   if (Key == nullptr || BaseSlot == nullptr) {
     return std::nullopt;
   }
-  return StorageScratchKeccakMatch{&Sha3, Key, BaseSlot};
+  return StorageScratchKeccakMatch{&Sha3, KeyEvidence, BaseSlotEvidence};
 }
 
 std::optional<StorageArrayDataKeccakMatch>
@@ -97,6 +101,7 @@ matchStorageArrayDataKeccak(CallBase &Sha3) {
   }
 
   Value *BaseSlot = nullptr;
+  ExtValuePtr BaseSlotEvidence = static_cast<Value *>(nullptr);
   for (auto It = Sha3.getIterator(); It != Sha3.getParent()->begin();) {
     --It;
     auto *Call = dyn_cast<CallBase>(&*It);
@@ -108,6 +113,7 @@ matchStorageArrayDataKeccak(CallBase &Sha3) {
     std::optional<EvmMemoryStore> Store = matchEvmMemoryStore(&*It);
     if (Store.has_value() && isConstantIntValue(Store->Address, 0)) {
       BaseSlot = Store->StoredValue;
+      BaseSlotEvidence = getExtValuePtr(Store->StoredValue, Store->Inst, 0);
       break;
     }
   }
@@ -115,7 +121,7 @@ matchStorageArrayDataKeccak(CallBase &Sha3) {
   if (BaseSlot == nullptr) {
     return std::nullopt;
   }
-  return StorageArrayDataKeccakMatch{&Sha3, BaseSlot};
+  return StorageArrayDataKeccakMatch{&Sha3, BaseSlotEvidence};
 }
 
 std::optional<StorageMappingAccessMatch>

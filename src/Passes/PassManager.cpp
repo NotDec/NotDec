@@ -326,6 +326,7 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       MPM.addPass(evm::SolidityRevertPass(*TR));
       MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(evm::EventLogPass(*TR));
+      MPM.addPass(evm::EvmStorageHighLevelRewritePass(*TR));
     }
     return;
   case TargetArch::Other:

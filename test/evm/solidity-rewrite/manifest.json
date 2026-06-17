@@ -95,6 +95,134 @@
       }
     },
     {
+      "name": "storage_static_array_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/13_evm_storage_static_array.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 3,
+        "storage_static_array_elem_calls": 3,
+        "storage_load_calls": 2,
+        "storage_store_calls": 2
+      }
+    },
+    {
+      "name": "storage_nested_mapping_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/14_evm_storage_nested_mapping.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 3,
+        "storage_map_value_calls": 5,
+        "storage_load_calls": 2,
+        "storage_store_calls": 2
+      }
+    },
+    {
+      "name": "storage_mapping_struct_array_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/11_evm_storage_mapping_struct_array.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 4,
+        "storage_map_value_calls": 4,
+        "storage_field_calls": 4,
+        "storage_dynamic_array_elem_calls": 3,
+        "storage_dynamic_array_length_load_calls": 2,
+        "storage_load_calls": 2,
+        "storage_store_calls": 2
+      }
+    },
+    {
+      "name": "storage_packed_read_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/12_evm_storage_packed_read.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 2,
+        "storage_packed_load_calls": 2,
+        "storage_load_calls": 0
+      }
+    },
+    {
+      "name": "storage_packed_write_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/15_evm_storage_packed_write.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 2,
+        "storage_packed_store_calls": 2,
+        "storage_load_calls": 0,
+        "storage_store_calls": 0
+      }
+    },
+    {
+      "name": "storage_bytes_short_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/09_evm_storage_bytes_short.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 2,
+        "storage_bytes_length_load_calls": 2,
+        "storage_bytes_short_data_load_calls": 2,
+        "storage_load_calls": 0
+      }
+    },
+    {
+      "name": "storage_bytes_long_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/10_evm_storage_bytes_long.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 3,
+        "storage_bytes_length_load_calls": 2,
+        "storage_bytes_long_elem_load_calls": 2,
+        "storage_load_calls": 0
+      }
+    },
+    {
       "name": "0298_19494123_f892a1f7d9_943b732c640f",
       "input": "cases/0298_19494123_f892a1f7d9_943b732c640f.ll",
       "expected_counts": {

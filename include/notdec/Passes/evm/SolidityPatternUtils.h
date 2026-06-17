@@ -2,6 +2,7 @@
 #define _NOTDEC_PASSES_EVM_SOLIDITY_PATTERN_UTILS_H_
 
 #include "Passes/evm/SolidityPatterns.h"
+#include "notdec-llvm2c/Interface/ExtValuePtr.h"
 
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallPtrSet.h>
@@ -81,19 +82,19 @@ struct CheckedBoundsMatch {
 // useful for their own rewrite.
 struct StorageScratchKeccakMatch {
   llvm::CallBase *Sha3 = nullptr;
-  llvm::Value *Key = nullptr;
-  llvm::Value *BaseSlot = nullptr;
+  notdec::ExtValuePtr Key;
+  notdec::ExtValuePtr BaseSlot;
 };
 
 struct StorageArrayDataKeccakMatch {
   llvm::CallBase *Sha3 = nullptr;
-  llvm::Value *BaseSlot = nullptr;
+  notdec::ExtValuePtr BaseSlot;
 };
 
 struct StorageMappingAccessMatch {
   llvm::CallBase *Access = nullptr;
-  llvm::Value *Key = nullptr;
-  llvm::Value *BaseSlot = nullptr;
+  notdec::ExtValuePtr Key;
+  notdec::ExtValuePtr BaseSlot;
   llvm::Value *Hash = nullptr;
   llvm::Value *StorageSlot = nullptr;
   uint64_t AccessKind = 0;
@@ -101,7 +102,7 @@ struct StorageMappingAccessMatch {
 
 struct StorageArrayDataAccessMatch {
   llvm::CallBase *Access = nullptr;
-  llvm::Value *BaseSlot = nullptr;
+  notdec::ExtValuePtr BaseSlot;
   llvm::Value *DataHash = nullptr;
   llvm::Value *StorageSlot = nullptr;
   uint64_t AccessKind = 0;

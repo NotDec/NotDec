@@ -14,6 +14,7 @@ add_library(notdec-core STATIC
 	Passes/evm/solidity-patterns/CheckedBoundsMatchers.cpp
 	Passes/evm/solidity-patterns/CheckedBoundsPass.cpp
 	Passes/evm/solidity-patterns/EvmCalldataAccessPass.cpp
+	Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp
 	Passes/evm/solidity-patterns/EventLogPass.cpp
 	Passes/evm/solidity-patterns/HTypeBufferView.cpp
 	Passes/evm/solidity-patterns/HTypeStoreEvidence.cpp

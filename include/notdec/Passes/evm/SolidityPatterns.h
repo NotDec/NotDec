@@ -58,6 +58,21 @@ struct AbiDecoderHelperRenamePass
   static bool isRequired() { return true; }
 };
 
+// Rewrites low-level EVM storage reads/writes into composable storage helper
+// calls after MLsub has recovered the contract-global storage HType.  The pass
+// keeps the address expression rules local and does not create a separate
+// marker pass.
+struct EvmStorageHighLevelRewritePass
+    : llvm::PassInfoMixin<EvmStorageHighLevelRewritePass> {
+  mlsub::MLsubRecovery &TR;
+
+  explicit EvmStorageHighLevelRewritePass(mlsub::MLsubRecovery &TR) : TR(TR) {}
+
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Marks low-risk ABI return sites.  The current pass intentionally does not
 // rewrite memory writes because return buffers often share code with dynamic
 // object construction.
