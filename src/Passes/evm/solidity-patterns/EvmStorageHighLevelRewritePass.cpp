@@ -85,6 +85,13 @@ FunctionCallee getStorageBytesLengthLoadFn(Module &M) {
   return M.getOrInsertFunction("evm.storage.bytes.length.load", I256, I256);
 }
 
+FunctionCallee getStorageBytesLengthStoreFn(Module &M) {
+  LLVMContext &Ctx = M.getContext();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  return M.getOrInsertFunction("evm.storage.bytes.length.store",
+                               Type::getVoidTy(Ctx), I256, I256);
+}
+
 FunctionCallee getStorageBytesShortDataLoadFn(Module &M) {
   LLVMContext &Ctx = M.getContext();
   Type *I256 = Type::getIntNTy(Ctx, 256);
@@ -96,6 +103,13 @@ FunctionCallee getStorageBytesLongElemLoadFn(Module &M) {
   Type *I256 = Type::getIntNTy(Ctx, 256);
   return M.getOrInsertFunction("evm.storage.bytes.long_elem.load", I256, I256,
                                I256);
+}
+
+FunctionCallee getStorageBytesLongElemStoreFn(Module &M) {
+  LLVMContext &Ctx = M.getContext();
+  Type *I256 = Type::getIntNTy(Ctx, 256);
+  return M.getOrInsertFunction("evm.storage.bytes.long_elem.store",
+                               Type::getVoidTy(Ctx), I256, I256, I256);
 }
 
 FunctionCallee getStorageLoadFn(Module &M) {
@@ -958,6 +972,61 @@ bool rewriteBytesLongElem(CallBase &Load, ArrayRef<Value *> BytesBaseSlots) {
   return true;
 }
 
+bool rewriteBytesLongElemStore(CallBase &Store,
+                               ArrayRef<Value *> BytesBaseSlots) {
+  std::optional<detail::StorageArrayDataAccessMatch> Match =
+      detail::matchStorageArrayDataAccess(Store, Store.getArgOperand(0),
+                                          /*AccessKind=*/2);
+  if (!Match.has_value() ||
+      !sameAsAnyValue(getEvidenceValue(Match->BaseSlot), BytesBaseSlots)) {
+    return false;
+  }
+
+  Value *Index = getDynamicDataIndex(Store.getArgOperand(0), Match->DataHash);
+  if (Index == nullptr) {
+    return false;
+  }
+
+  SmallPtrSet<Value *, 8> Seen;
+  Value *Ref = buildStorageRef(getEvidenceValue(Match->BaseSlot), Store, Seen);
+  if (Ref == nullptr) {
+    return false;
+  }
+
+  Module &M = *Store.getModule();
+  IRBuilder<> B(&Store);
+  CallInst *NewStore = B.CreateCall(getStorageBytesLongElemStoreFn(M),
+                                    {Ref, Index, Store.getArgOperand(1)});
+  NewStore->copyMetadata(Store);
+  debugRewrite("bytes.long_elem.store", Store, *NewStore);
+  Value *StorageSlot = Store.getArgOperand(0);
+  Store.eraseFromParent();
+  eraseDeadTree(StorageSlot);
+  return true;
+}
+
+bool rewriteBytesLengthStore(CallBase &Store, ArrayRef<Value *> BytesBaseSlots) {
+  if (!sameAsAnyValue(Store.getArgOperand(0), BytesBaseSlots)) {
+    return false;
+  }
+
+  SmallPtrSet<Value *, 8> Seen;
+  Value *Ref = buildStorageRef(Store.getArgOperand(0), Store, Seen);
+  if (Ref == nullptr) {
+    return false;
+  }
+
+  Module &M = *Store.getModule();
+  IRBuilder<> B(&Store);
+  CallInst *NewStore =
+      B.CreateCall(getStorageBytesLengthStoreFn(M),
+                   {Ref, Store.getArgOperand(1)});
+  NewStore->copyMetadata(Store);
+  debugRewrite("bytes.length.store", Store, *NewStore);
+  Store.eraseFromParent();
+  return true;
+}
+
 bool rewriteStorageAccess(CallBase &Call,
                           const SmallPtrSetImpl<CallBase *> &LengthLoads,
                           ArrayRef<Value *> BytesBaseSlots) {
@@ -1005,6 +1074,12 @@ bool rewriteStorageAccess(CallBase &Call,
   }
 
   if (detail::isCallTo(&Call, "evm_sstore") && Call.arg_size() == 2) {
+    if (rewriteBytesLongElemStore(Call, BytesBaseSlots)) {
+      return true;
+    }
+    if (rewriteBytesLengthStore(Call, BytesBaseSlots)) {
+      return true;
+    }
     if (rewritePackedStore(Call)) {
       return true;
     }

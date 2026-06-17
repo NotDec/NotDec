@@ -121,23 +121,24 @@ value = evm.storage.load(elem)
 
 ## Pipeline 位置
 
-第一版放在 EVM 的类型恢复之后、其他 Solidity 语义 rewrite 之前：
+第一版实际放在 EVM 的类型恢复之后、现有 Solidity 语义 rewrite 之后：
 
 ```text
 MLsubRecoveryMain / MLsubRecoveryOpt
 HTypeDumpPass                // 如果启用 --dump-htypes，先 dump 原始 HType
-EvmStorageHighLevelRewritePass
 AbiReturnPass
 SolidityRevertPass
 CheckedBoundsPass
 EventLogPass
+EvmStorageHighLevelRewritePass
 ```
 
 原因：
 
 - 这个 pass 依赖 `[storage]` HType，所以必须在 MLsub 类型恢复之后。
 - 它的职责是消费类型结果并改写 IR，第一版不把改写后的 intrinsic 再送回类型推理。
-- 放在 `AbiReturnPass` / `EventLogPass` 前面，可以让后续 Solidity 语义 pass 看到更清楚的 storage 访问，例如 `return balances[a]` 先变成 `evm.storage.load(evm.storage.map.value(evm.storage.slot(0), a))`。
+- 一开始考虑过放在 `AbiReturnPass` / `EventLogPass` 前面，让后续 pass 看到更清楚的 storage 访问。但实际测试里，太早改写会让 checked-bounds 等旧 matcher 看不到原始 `evm_sload/sstore`，例如 storage array / bytes 的 guard marker 会丢。
+- 当前先把它放到 `AbiReturnPass`、`SolidityRevertPass`、`CheckedBoundsPass`、`EventLogPass` 后面，作为 storage cleanup / high-level rewrite。后续如果某个 pass 真的需要消费 storage intrinsic，再单独迁移那个 pass 的 matcher。
 - `HTypeDumpPass` 放在它前面，dump 的仍然是 rewrite 前的类型推理结果，便于调试 storage HType 本身。
 
 需要注意：
@@ -1042,3 +1043,61 @@ git diff --check
 - 实现效果：8/10。packed 读写闭环完成，debug 输出能直接解释为什么 preserved word load 没被改写。
 - 理解成本：6/10。packed write matcher 比 read 多一些局部 helper，但规则和 MLsub 现有 packed write 形状一致。
 - 维护成本：6/10。bytes 写侧暂时没有硬做，减少误识别风险；后续如果要继续，应先补更具体的 Solidity 写侧用例。
+
+## 当前实现记录：bytes/string 写侧窄规则
+
+本轮把上面规划里的 bytes/string 写侧窄规则落地了一部分：
+
+- 支持 `evm.storage.bytes.length.store(base_ref, len_word)`。
+- 支持 `evm.storage.bytes.long_elem.store(base_ref, index, word)`。
+- 仍然不做整体 `evm.storage.bytes.store`。
+- 仍然不做 `evm.storage.bytes.short_data.store`。原因是 short inline data 和 encoded length 通常合并写进同一个主 slot，单看 `sstore(base, value)` 不能稳定拆出“只写 short data”。
+
+这次改写只在 base slot 已经通过 bytes/string length decode 确认时触发。也就是说，普通 `sstore(slot, value)` 不会因为 slot 常量相同就被当成 bytes length store；`sstore(keccak(slot)+index, value)` 也必须能回到已确认的 bytes/string base，才会变成 long elem store。
+
+实际修改：
+
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:88)：新增 `evm.storage.bytes.length.store(base_ref, len_word)` 原语声明。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:108)：新增 `evm.storage.bytes.long_elem.store(base_ref, index, word)` 原语声明。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:975)：新增 `rewriteBytesLongElemStore`，识别 `sstore(keccak(base)+index, word)`，并删除不再使用的旧 slot 计算链。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:1008)：新增 `rewriteBytesLengthStore`，识别已确认 bytes/string base 上的主 slot 写入。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:1074)：`evm_sstore` 分支先尝试 bytes long elem store 和 bytes length store，再尝试 packed store，最后回落到普通 storage store / dynamic array length store。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:1121)：继续复用 `BytesBaseSlots`，只把同一函数内已有 bytes/string length decode 的 base 作为写侧候选。
+- [test/run_evm_solidity_rewrite_suite.py](/sn640/NotDec/test/run_evm_solidity_rewrite_suite.py:262)：rewrite suite 增加 `storage_bytes_length_store_calls` 和 `storage_bytes_long_elem_store_calls` 计数。
+- [test/evm/solidity-rewrite/manifest.json](/sn640/NotDec/test/evm/solidity-rewrite/manifest.json:226)：新增 `storage_bytes_write_high_level_rewrite`。
+- [test/type-recovery/evm/cases/16_evm_storage_bytes_write.ll](/sn640/NotDec/test/type-recovery/evm/cases/16_evm_storage_bytes_write.ll:1)：新增 bytes 写侧 frozen IR，覆盖主 slot length word 写入和 long data slot 写入。
+
+已经验证：
+
+```text
+cmake --build ./build --target all -j4
+./build/bin/notdec test/type-recovery/evm/cases/16_evm_storage_bytes_write.ll -o /tmp/notdec-bytes-write.ll --tr-level=2 --frozen-tr-input-ir
+ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_patterns --output-on-failure
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-25928-storage-rewrite.ll --tr-level=2
+git diff --check
+```
+
+结果：
+
+- build 通过。
+- bytes 写侧单例输出 `evm.storage.bytes.length.load`、`evm.storage.bytes.length.store`、`evm.storage.bytes.long_elem.store`，没有普通 `evm.storage.store`。
+- `notdec.type_recovery.evm.tr_level_2` 通过，1.74s。
+- `notdec.evm.solidity_rewrite` 通过，82.61s。
+- `notdec.evm.solidity_patterns` 通过，461.84s。
+- 固定 EVM 性能样例 `test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll` 本轮 `elapsed=18.99 rss_kb=955376`。
+- `git diff --check` 通过。
+
+仍未覆盖：
+
+- `bytes.short_data.store`。
+- short/long 互转、push/pop/resize 的整体 helper 语义。
+- storage bytes/string 到 memory 的批量复制或整体赋值。
+- `bytes` 到 `string` 的最终提升。当前继续按 storage 编码访问表达，等 ABI、库函数或其它语义证据再决定是否展示成 `string`。
+
+评分：
+
+- 实现效果：8/10。bytes/string 读侧和两个常见写侧 storage word 都能拆开表达，避免了整体 `bytes.store` 这种不稳定语义。
+- 理解成本：6/10。新增规则复用已有 bytes base 收集和 dynamic array data matcher，没有再引入新 path 表示。
+- 维护成本：6/10。规则仍然偏局部，后续补 short_data 或 helper rewrite 时需要对照 Solidity codegen，再加更具体用例。

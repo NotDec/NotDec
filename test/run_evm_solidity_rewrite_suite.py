@@ -262,11 +262,17 @@ def main() -> int:
                 "storage_bytes_length_load_calls": output_text.count(
                     "@evm.storage.bytes.length.load("
                 ),
+                "storage_bytes_length_store_calls": output_text.count(
+                    "@evm.storage.bytes.length.store("
+                ),
                 "storage_bytes_short_data_load_calls": output_text.count(
                     "@evm.storage.bytes.short_data.load("
                 ),
                 "storage_bytes_long_elem_load_calls": output_text.count(
                     "@evm.storage.bytes.long_elem.load("
+                ),
+                "storage_bytes_long_elem_store_calls": output_text.count(
+                    "@evm.storage.bytes.long_elem.store("
                 ),
                 "storage_load_calls": output_text.count("@evm.storage.load("),
                 "storage_store_calls": output_text.count("@evm.storage.store("),
