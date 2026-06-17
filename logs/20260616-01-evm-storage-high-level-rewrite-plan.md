@@ -1151,3 +1151,58 @@ ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failur
 - `15_evm_storage_packed_write` 的 HType oracle 通过。
 - `16_evm_storage_bytes_write` 的 HType oracle 通过。
 - `notdec.type_recovery.evm.tr_level_2` 通过，1.95s。
+
+## 当前实现记录：真实样例里的 bytes/string helper 解码
+
+前面检查 0189 时没命中，是因为真实 lifted IR 不一定把 `sload` 的 length decode 留在同一个函数里。常见形状是：
+
+```llvm
+%word = call i256 @evm_sload(i256 18)
+%len = call i256 @private__0x126a_0x126a(..., i256 %word, ...)
+```
+
+helper 内部再做：
+
+```llvm
+%full = call i256 @evm_shr(i256 1, i256 %word)
+%low = and i256 %word, 1
+%short = and i256 127, %full
+ret i256 ...
+```
+
+这仍然是 Solidity storage bytes/string 的主 slot length decode，只是证据跨了函数。
+
+实际修改：
+
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:249)：新增 `isAndWithValueAndConstant`，匹配 `word & 1` 这类 helper 内部低位判断。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:258)：新增 `isBytesLengthDecodeHelper`，按“哪个实参传入了 sload word”检查 helper，不用常量本身作为全局证据。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:321)：`hasBytesLengthValue` 现在能通过 helper 调用确认 bytes/string base slot。
+- [src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmStorageHighLevelRewritePass.cpp:374)：`looksLikeBytesLengthDecode` 同步识别 helper，避免 dynamic array length 抢走 bytes/string 主 slot。
+- [test/evm/solidity-rewrite/manifest.json](/sn640/NotDec/test/evm/solidity-rewrite/manifest.json:246)：新增真实样例 `storage_bytes_real_helper_rewrite`，固定 helper 形状下的 storage bytes/string rewrite 数量。
+
+真实样例结果：
+
+```text
+./build/bin/notdec test/evm/solidity-patterns/cases/24534_19759897_d822801d63_07fc71c92888.ll -o /tmp/24534-storage-new.ll --tr-level=2
+```
+
+计数：
+
+- `evm.storage.bytes.length.load`：4
+- `evm.storage.bytes.length.store`：3
+- `evm.storage.bytes.short_data.load`：3
+- `evm.storage.bytes.long_elem.load/store`：0
+- 普通 `evm.storage.load/store`：33 / 16
+
+24534 里 `private__0x126a_0x126a` 是清晰的 bytes/string length decode helper：`shr(word, 1)`、`word & 1`、short 分支 `& 127`，并带 storage bytes encoding 的 panic 校验。0189 重新跑后也从 0 个 bytes intrinsic 变成 `length.load=9`、`short_data.load=2`，说明之前没命中的主要问题就是 helper 证据没有跨函数传播。
+
+仍未覆盖：
+
+- long bytes/string data slot 的真实样例还没有固定到 oracle；当前 24534 只覆盖 short data 和主 slot 写入。
+- storage bytes/string 到 memory 的整段复制仍然保持底层 `length/short_data/long_elem` word 访问，不提升成整体 bytes value。
+
+复杂度评分：
+
+- 实现效果：8/10。真实 helper 形状开始命中，且没有把 helper 常量误当成 storage 证据。
+- 理解成本：6/10。多了一个跨函数 helper matcher，但规则仍然只看 Solidity bytes/string 的固定编码。
+- 维护成本：6/10。后续如果更多编译器版本改 helper 形状，需要继续按真实样例补窄规则。

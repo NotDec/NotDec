@@ -246,6 +246,64 @@ bool matchBytesLengthValue(Value *V, Value *Load) {
          isBytesLengthShortLen(ShortLen, FullLen);
 }
 
+bool isAndWithValueAndConstant(Value *V, Value *Needle, uint64_t Constant) {
+  auto *And = dyn_cast_or_null<BinaryOperator>(V);
+  return And != nullptr && And->getOpcode() == Instruction::And &&
+         ((detail::isSameValue(And->getOperand(0), Needle) &&
+           detail::isConstantIntValue(And->getOperand(1), Constant)) ||
+          (detail::isSameValue(And->getOperand(1), Needle) &&
+           detail::isConstantIntValue(And->getOperand(0), Constant)));
+}
+
+bool isBytesLengthDecodeHelper(Function *F, unsigned WordArgNo) {
+  if (F == nullptr || F->isDeclaration() || F->arg_size() <= WordArgNo) {
+    return false;
+  }
+
+  // Real lifted Solidity often puts storage bytes/string length decoding in a
+  // private helper.  Match it by the exact formal argument that receives the
+  // storage word, so unrelated constants or helper arguments do not become
+  // evidence for the same storage slot.
+  Argument *Word = F->getArg(WordArgNo);
+  Value *FullLen = nullptr;
+  Value *LowBit = nullptr;
+  Value *ShortLen = nullptr;
+  for (Instruction &I : instructions(F)) {
+    if (FullLen == nullptr && isBytesLengthFullLen(&I, Word)) {
+      FullLen = &I;
+    }
+    if (LowBit == nullptr && isAndWithValueAndConstant(&I, Word, 1)) {
+      LowBit = &I;
+    }
+  }
+  if (FullLen == nullptr || LowBit == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : instructions(F)) {
+    if (isBytesLengthShortLen(&I, FullLen)) {
+      ShortLen = &I;
+      break;
+    }
+  }
+  if (ShortLen == nullptr) {
+    return false;
+  }
+
+  for (Instruction &I : instructions(F)) {
+    auto *Ret = dyn_cast<ReturnInst>(&I);
+    if (Ret == nullptr || Ret->getReturnValue() == nullptr) {
+      continue;
+    }
+    Value *RetVal = Ret->getReturnValue();
+    if (detail::dependsOnValue(RetVal, FullLen) ||
+        detail::dependsOnValue(RetVal, ShortLen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool hasBytesLengthValue(CallBase &Load) {
   SmallVector<Value *, 8> Worklist;
   SmallPtrSet<Value *, 16> Seen;
@@ -263,6 +321,15 @@ bool hasBytesLengthValue(CallBase &Load) {
     }
     if (matchBytesLengthValue(V, &Load)) {
       return true;
+    }
+    auto *Call = dyn_cast<CallBase>(V);
+    if (Call != nullptr) {
+      for (unsigned I = 0, E = Call->arg_size(); I < E; ++I) {
+        if (detail::isSameValue(Call->getArgOperand(I), &Load) &&
+            isBytesLengthDecodeHelper(Call->getCalledFunction(), I)) {
+          return true;
+        }
+      }
     }
     for (User *User : V->users()) {
       if (auto *UserValue = dyn_cast<Value>(User)) {
@@ -303,6 +370,12 @@ bool looksLikeBytesLengthDecode(Value *Load) {
         isShiftByOne(Call->getArgOperand(0)) &&
         detail::isSameValue(Call->getArgOperand(1), Load)) {
       return true;
+    }
+    for (unsigned I = 0, E = Call->arg_size(); I < E; ++I) {
+      if (detail::isSameValue(Call->getArgOperand(I), Load) &&
+          isBytesLengthDecodeHelper(Call->getCalledFunction(), I)) {
+        return true;
+      }
     }
   }
   return false;
