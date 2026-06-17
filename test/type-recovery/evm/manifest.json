@@ -94,6 +94,18 @@
       "input": "cases/14_evm_storage_nested_mapping.ll",
       "expected": "expected/tr-level-2/14_evm_storage_nested_mapping.htypes",
       "status": "pass"
+    },
+    {
+      "name": "15_evm_storage_packed_write",
+      "input": "cases/15_evm_storage_packed_write.ll",
+      "expected": "expected/tr-level-2/15_evm_storage_packed_write.htypes",
+      "status": "pass"
+    },
+    {
+      "name": "16_evm_storage_bytes_write",
+      "input": "cases/16_evm_storage_bytes_write.ll",
+      "expected": "expected/tr-level-2/16_evm_storage_bytes_write.htypes",
+      "status": "pass"
     }
   ]
 }

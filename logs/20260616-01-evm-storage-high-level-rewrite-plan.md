@@ -1101,3 +1101,53 @@ git diff --check
 - 实现效果：8/10。bytes/string 读侧和两个常见写侧 storage word 都能拆开表达，避免了整体 `bytes.store` 这种不稳定语义。
 - 理解成本：6/10。新增规则复用已有 bytes base 收集和 dynamic array data matcher，没有再引入新 path 表示。
 - 维护成本：6/10。规则仍然偏局部，后续补 short_data 或 helper rewrite 时需要对照 Solidity codegen，再加更具体用例。
+
+## 当前实现记录：HType oracle 和真实样例检查
+
+本轮先推进前面提到的前三点：
+
+1. 对照 Solidity codegen，确认 `bytes.short_data.store` 不能宽泛实现。
+2. 给 packed write / bytes write 补 HType oracle，确认 storage HType 展示和 rewrite 语义对齐。
+3. 抽一个真实 Solidity string 写入样例跑当前 rewrite，记录没有命中的事实。
+
+Solidity codegen 依据：
+
+- [/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp](/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp:250)：从 storage 读 short byte array 时，主 slot 同时包含 short data 和 length 编码。
+- [/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp](/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp:420)：源码注释明确说 short byte arrays 和 length 一起存。
+- [/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp](/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp:465)：push 时 short 到 long 的边界会把 old data 搬到 `keccak(ref)`，再写主 slot 长度编码。
+- [/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp](/sn640/solidity/libsolidity/codegen/ArrayUtils.cpp:512)：pop 时 short/long 分支都会改主 slot，long 分支还可能清 data slot。
+
+结论还是不变：不要把任意 `sstore(ref, value)` 改成 `bytes.short_data.store`。如果后面要做，只能先识别“主 slot word 里 data 部分和 length 部分”的具体构造；否则容易把 length store、short data store 和 short/long 转换混在一起。
+
+实际修改：
+
+- [test/type-recovery/evm/manifest.json](/sn640/NotDec/test/type-recovery/evm/manifest.json:96)：新增 `15_evm_storage_packed_write` 和 `16_evm_storage_bytes_write` 的 HType snapshot oracle。
+- [test/type-recovery/evm/expected/tr-level-2/15_evm_storage_packed_write.htypes](/sn640/NotDec/test/type-recovery/evm/expected/tr-level-2/15_evm_storage_packed_write.htypes:1)：固定 packed write 的 `[storage]` 结构，`slot:0.packed@160:96` 归到 `slot_0` 下。
+- [test/type-recovery/evm/expected/tr-level-2/16_evm_storage_bytes_write.htypes](/sn640/NotDec/test/type-recovery/evm/expected/tr-level-2/16_evm_storage_bytes_write.htypes:1)：固定 bytes write 的 `[storage]` 结构，`length`、`long_elem`、`long_index` 都归到同一个 `slot:0.bytes` 下。
+
+真实样例检查：
+
+```text
+./build/bin/notdec test/evm/solidity-patterns/cases/0189_19493609_3c0627c9e0_9d16fec0a1c2.ll -o /tmp/notdec-0189-storage-bytes.ll --tr-level=2
+```
+
+结果：
+
+- 该样例含 `public_setURI_string__0x24a`。
+- 当前输出有普通 `evm.storage.load/store`，但没有 `evm.storage.bytes.length.*`、`evm.storage.bytes.short_data.load`、`evm.storage.bytes.long_elem.*`。
+- 这说明真实 lifted IR 里的 string 写入还没有给当前 bytes matcher 提供足够证据，不能把它作为通过型 oracle。
+- 后续要查的是：真实样例的主 slot length decode / storage-byte-array bounds marker 为什么没有被 `BytesBaseSlots` 收集到，或者是否被前面的 pass 改写掉了。
+
+已经验证：
+
+```text
+./build/bin/notdec test/type-recovery/evm/cases/15_evm_storage_packed_write.ll -o /tmp/notdec-15-out.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes /tmp/15_evm_storage_packed_write.htypes
+./build/bin/notdec test/type-recovery/evm/cases/16_evm_storage_bytes_write.ll -o /tmp/notdec-16-out.ll --tr-level=2 --frozen-tr-input-ir --dump-htypes /tmp/16_evm_storage_bytes_write.htypes
+ctest --test-dir build -R notdec.type_recovery.evm.tr_level_2 --output-on-failure
+```
+
+结果：
+
+- `15_evm_storage_packed_write` 的 HType oracle 通过。
+- `16_evm_storage_bytes_write` 的 HType oracle 通过。
+- `notdec.type_recovery.evm.tr_level_2` 通过，1.95s。

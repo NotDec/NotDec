@@ -1,0 +1,39 @@
+# HTypeResult
+
+[decls]
+typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
+
+struct struct_0 {
+  struct_1 slot_0; /* storage path: slot:0 (slot 0) */
+}; /* EVM storage root */
+
+struct struct_1 {
+  top:256 packed_160_96; /* storage path: slot:0.packed@160:96 (slot 0 / packed field bits 160:96) */
+}; /* storage path: slot:0 (slot 0) */
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:64
+[+] @evm_sload => lower=(bottom:256 (*)(top:256))* ; upper=top:64
+[+] @evm_sstore => lower=(void (*)(top:256, top:256))* ; upper=top:64
+[+] @packed_write => lower=(void (*)(top:256))* ; upper=top:64
+[+] const(i256 0)@packed_write::%bb.entry.i4:0 => lower=typedef_0 ; upper=top:256
+[+] const(i256 0)@packed_write::%old:0 => lower=typedef_0 ; upper=top:256
+[+] const(i256 1461501637330902918203684832716283019655932542975)@packed_write::%cleared:1 => lower=bottom:256 ; upper=top:256
+[+] const(i256 160)@packed_write::%shifted:1 => lower=bottom:256 ; upper=top:256
+[+] evm_sload::<ret> => lower=bottom:256 ; upper=top:256
+[+] evm_sload::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg1 => lower=bottom:256 ; upper=top:256
+[+] packed_write::%cleared => lower=bottom:256 ; upper=top:256
+[+] packed_write::%merged => lower=bottom:256 ; upper=top:256
+[+] packed_write::%old => lower=bottom:256 ; upper=top:256
+[+] packed_write::%shifted => lower=bottom:256 ; upper=top:256
+[+] packed_write::arg0 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:64
+
+[storage]
+decl => struct_0
+type => struct_0
