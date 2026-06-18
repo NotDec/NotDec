@@ -711,3 +711,41 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：8/10。`HTypeResult` 已经可以从 backend core 引入，core target 也不再链接 Clang。
 - 复杂度：3/10。主要是头文件搬迁和依赖清理，兼容旧 namespace。
 - 维护成本：4/10。短期仍有旧路径和新路径并存，后续要继续拆 C 专属接口。
+
+## 2026-06-18 实现记录：新增 Structuring 骨架
+
+本轮开始第三阶段的前置工作：先新增语言无关结构恢复 target，不迁移旧 Phoenix，也不接入 C 后端。目标是给 Solidity 后端准备一个不依赖 Clang AST 的结构树接口。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:1`
+  新增语言无关 CFG 和结构树数据结构。block、statement、condition 都用 id / payload id 表示，结构恢复层不保存 Clang 或 Solidity AST 指针。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Structurer.h:1`
+  新增结构恢复算法公共接口 `Structurer::structure()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoStructurer.h:1`
+  新增保守 fallback 算法声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:1`
+  实现 `StructuredCFG::addBlock()`、`StructuredCFG::getBlock()`、`StructuredTree::addNode()`、`StructuredTree::getNode()`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:1`
+  实现最小 `GotoStructurer`：每个 block 输出 label、basic block leaf，再按 terminator 输出 goto / if / switch / return / unreachable。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:1`
+  新增 `notdec-backend-structuring` static target。
+- `external/NotDec-llvm2c/lib/CMakeLists.txt:1`
+  添加 `Structuring` 子目录。
+
+当前保留的限制：
+
+- 新结构树还没有接主仓库，也没有替换旧 `notdec-llvm2c` 的 `StructuralAnalysis`。
+- `GotoStructurer` 只保证完整表达控制流，不负责输出漂亮的 if/while。
+- payload id 的实际含义由后端维护。Solidity 后端后续需要自己保存 payload id 到表达式/语句节点的映射。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec -j4` 通过。
+- 本轮只新增未接入 target，不改 pass pipeline 和现有 C 后端运行逻辑；性能上不预期影响 decompile 路径，未单独跑 EVM runtime smoke。
+
+评分：
+
+- 实现效果：7/10。结构恢复层的目录、target、最小接口已经站住，Solidity 后端可以先依赖它做完整 fallback。
+- 复杂度：4/10。新增数据结构较少，但引入了新 namespace 和 payload id 约定。
+- 维护成本：4/10。后续需要补结构树 printer/adapter，并决定旧 Phoenix 怎么迁移到这套接口。
