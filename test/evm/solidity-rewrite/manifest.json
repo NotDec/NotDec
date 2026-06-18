@@ -268,6 +268,24 @@
       }
     },
     {
+      "name": "storage_bytes_real_string_helper_rewrite",
+      "input": "../solidity-patterns/cases/0189_19493609_3c0627c9e0_9d16fec0a1c2.ll",
+      "args": [
+        "--tr-level=2"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "storage_slot_calls": 129,
+        "storage_bytes_length_load_calls": 9,
+        "storage_bytes_short_data_load_calls": 2,
+        "storage_load_calls": 80,
+        "storage_store_calls": 40
+      }
+    },
+    {
       "name": "0298_19494123_f892a1f7d9_943b732c640f",
       "input": "cases/0298_19494123_f892a1f7d9_943b732c640f.ll",
       "expected_counts": {

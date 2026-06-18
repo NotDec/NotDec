@@ -1196,6 +1196,8 @@ ret i256 ...
 
 24534 里 `private__0x126a_0x126a` 是清晰的 bytes/string length decode helper：`shr(word, 1)`、`word & 1`、short 分支 `& 127`，并带 storage bytes encoding 的 panic 校验。0189 重新跑后也从 0 个 bytes intrinsic 变成 `length.load=9`、`short_data.load=2`，说明之前没命中的主要问题就是 helper 证据没有跨函数传播。
 
+后来又把 0189 固定进 rewrite oracle，说明这个 helper 形状已经稳定到可以做回归了。
+
 仍未覆盖：
 
 - long bytes/string data slot 的真实样例还没有固定到 oracle；当前 24534 只覆盖 short data 和主 slot 写入。
