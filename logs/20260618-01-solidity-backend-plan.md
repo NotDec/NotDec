@@ -749,3 +749,37 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。结构恢复层的目录、target、最小接口已经站住，Solidity 后端可以先依赖它做完整 fallback。
 - 复杂度：4/10。新增数据结构较少，但引入了新 namespace 和 payload id 约定。
 - 维护成本：4/10。后续需要补结构树 printer/adapter，并决定旧 Phoenix 怎么迁移到这套接口。
+
+## 2026-06-18 实现记录：C 后端 target/API 改名兼容层
+
+本轮整理 C 后端的外部名字，不改旧实现。实际 C 后端库 target 改成 `notdec-backend-c`，旧 `notdec-llvm2c` 保留为 CMake 链接兼容层，库文件输出名仍是 `libnotdec-llvm2c.a`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/C/Backend.h:1`
+  新增 C 后端新入口头。`notdec::backend::c::Options`、`HTypeResult`、`decompileModule()`、`demoteSSA()` 先转发到旧 `notdec::llvm2c` 实现。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/CMakeLists.txt:2`
+  实际库 target 从 `notdec-llvm2c` 改成 `notdec-backend-c`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/CMakeLists.txt:18`
+  新增 `notdec-llvm2c` interface target，继续转发链接到 `notdec-backend-c`，主仓库现有 `target_link_libraries(... notdec-llvm2c)` 不需要同步改。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/CMakeLists.txt:45`
+  `notdec-backend-c` 的 `OUTPUT_NAME` 保持 `notdec-llvm2c`，避免改变已有库文件名。
+
+当前保留的限制：
+
+- 旧头文件、旧 namespace、旧工具名还没有迁移。现在只是给后续多语言 backend 加一个新 C 后端名字。
+- `notdec-llvm2c` 现在是 CMake interface 链接目标，不再是直接构建的真实库 target；直接构建真实库应使用 `notdec-backend-c`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `c++ -std=c++17 -Iexternal/NotDec-llvm2c/include -Illvm-22.1.0.obj/include ... -fsyntax-only` 验证 `notdec-backends/C/Backend.h` 可独立解析。
+- 增量复跑 `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4`，结果为 `ninja: no work to do.`。
+- 只出现既有 warning，包括 `CFG.cpp` switch warning、`Utils.cpp` LLVM deprecation warning、`ASTPrinter` switch warning。
+- 本轮只改 CMake target 名和转发头，不改 pass pipeline；性能上不预期影响 decompile 路径，未单独跑 EVM runtime smoke。
+
+评分：
+
+- 实现效果：8/10。C 后端已有新 target 和新 include 路径，旧链接名仍兼容。
+- 复杂度：3/10。主要是 CMake target 改名和 inline 转发。
+- 维护成本：4/10。短期旧名字和新名字并存；后续主仓库可以逐步改用 `notdec-backends/C/Backend.h` 和 `notdec-backend-c`。
