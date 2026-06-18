@@ -1096,3 +1096,48 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：6/10。已有 event/revert 语义能出现在 Solidity 输出里，但还不是结构化函数体。
 - 复杂度：3/10。只读现有 metadata，不新增 pass 和 IR rewrite。
 - 维护成本：4/10。后续需要由结构恢复和更细的 event/error reader 替换这层占位输出。
+
+## 2026-06-18 实现记录：用 topic0 打印 event 声明
+
+本轮继续完善 event 输出。`EventLogPass` 已经标出了 `evm_logN`，后端直接读取 `evm_logN` 的第一个 topic 常量，生成稳定的占位 event 名，并在 contract 顶部声明。没有 topic0 时仍回退到 topic 数。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Ast.h:22`
+  新增 `EventDecl`，`Contract` 增加 `Events`。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Printer.h:21`
+  `Printer` 增加 `printEvent()`。
+- `external/NotDec-llvm2c/lib/Solidity/Printer.cpp:14`
+  `printContract()` 在 state variable 前打印 event 声明。
+- `external/NotDec-llvm2c/lib/Solidity/Printer.cpp:49`
+  `printEvent()` 打印 `event Name(...);`。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:21`
+  `Reader` 增加 `readEvents()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:30`
+  `Reader` 增加 `getEventName()`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:29`
+  `readContract()` 先读取全模块 event 声明。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:52`
+  `readEvents()` 扫描带 `notdec.solidity.event` metadata 的 `evm_logN` 指令，按 event 名去重。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:205`
+  `getEventName()` 优先用 topic0 常量生成 `Event_0x...`，否则用 `Event_topic_count_N`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:258`
+  `formatEventStatement()` 复用同一套 event 命名，保证 `emit` 和声明一致。
+
+当前保留的限制：
+
+- topic0 只是事件签名哈希，当前不会反查真实事件名。
+- event 参数仍为空，indexed/data 参数还没从 log topic 和 memory buffer 里读取。
+- event 声明会收集全模块所有标记点，包括非 public helper 内部的事件；这比漏掉事件更保守。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-event-smoke2.sol --tr-level=2` 通过，耗时约 `17.71s`。
+- smoke 输出有 18 个 event 声明，12 个 `emit Event_0x...`，没有继续输出 `emit Event_topic_count_...`。
+
+评分：
+
+- 实现效果：7/10。event 输出已经能用 topic0 关联声明和 emit。
+- 复杂度：4/10。新增一个 AST 节点和小 reader，仍只消费已有 IR/metadata。
+- 维护成本：4/10。后续要补 event 参数和哈希反查，当前占位名不会阻碍替换。
