@@ -73,20 +73,6 @@ struct EvmStorageHighLevelRewritePass
   static bool isRequired() { return true; }
 };
 
-// Rewrites non-storage high-level objects after MLsub has recovered HType.
-// The first implementation is deliberately narrow: it only rewrites accesses to
-// memory record fields already present in the recovered HType, and it leaves
-// uncertain bytes/array shapes untouched.
-struct EvmHighLevelTypePass : llvm::PassInfoMixin<EvmHighLevelTypePass> {
-  mlsub::MLsubRecovery &TR;
-
-  explicit EvmHighLevelTypePass(mlsub::MLsubRecovery &TR) : TR(TR) {}
-
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
-
-  static bool isRequired() { return true; }
-};
-
 // Marks low-risk ABI return sites.  The current pass intentionally does not
 // rewrite memory writes because return buffers often share code with dynamic
 // object construction.

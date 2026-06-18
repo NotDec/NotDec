@@ -274,12 +274,6 @@ def main() -> int:
                 "storage_bytes_long_elem_store_calls": output_text.count(
                     "@evm.storage.bytes.long_elem.store("
                 ),
-                "htype_field_store_calls": output_text.count(
-                    "@evm.htype.field.store("
-                ),
-                "htype_field_load_calls": output_text.count(
-                    "@evm.htype.field.load("
-                ),
                 "storage_load_calls": output_text.count("@evm.storage.load("),
                 "storage_store_calls": output_text.count("@evm.storage.store("),
             }
