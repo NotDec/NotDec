@@ -626,3 +626,52 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 增加一个轻量 runner，只检查输出文件存在、非空、包含 contract/function/event/revert/storage 这些 oracle 计数。
 - 如果引入 `.sol` 后端代码，再补 EVM 性能 smoke：
   `test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll`。
+
+## 2026-06-18 实现记录：backend core target 拆分
+
+本轮执行整理计划的第一步：先在 `external/NotDec-llvm2c` 里建立 backend core 骨架，不改 C 后端行为，不开始 Solidity 输出实现。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Core/ExtValuePtr.h:1`
+  新增 core 转发头，暂时转发到旧 `notdec-llvm2c/Interface/ExtValuePtr.h`。
+- `external/NotDec-llvm2c/include/notdec-backends/Core/HType.h:1`
+  新增 core 转发头，暂时转发到旧 `notdec-llvm2c/Interface/HType.h`。
+- `external/NotDec-llvm2c/include/notdec-backends/Core/HTypeResult.h:1`
+  新增 core 转发头，暂时转发到旧 `notdec-llvm2c/Interface.h` 里的 `HTypeResult`。
+- `external/NotDec-llvm2c/include/notdec-backends/Core/Range.h:1`
+  新增 core 转发头，暂时转发到旧 `notdec-llvm2c/Interface/Range.h`。
+- `external/NotDec-llvm2c/include/notdec-backends/Core/StructManager.h:1`
+  新增 core 转发头，暂时转发到旧 `notdec-llvm2c/Interface/StructManager.h`。
+- `external/NotDec-llvm2c/include/notdec-backends/Core/ValueNamer.h:1`
+  新增 core 转发头，暂时转发到旧 `notdec-llvm2c/Interface/ValueNamer.h`。
+- `external/NotDec-llvm2c/lib/Core/CMakeLists.txt:1`
+  新增 `notdec-backend-core` target，编译 `StructManager`、`ExtValuePtr`、`ValueNamer`、`HType`、`Range` 这些共享代码。
+- `external/NotDec-llvm2c/lib/CMakeLists.txt:1`
+  先添加 `Core` 子目录，再添加旧 `notdec-llvm2c` 子目录。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/CMakeLists.txt:1`
+  旧 `notdec-llvm2c` target 删除 core 源文件重复编译，改为链接 `notdec-backend-core`。
+
+当前保留的限制：
+
+- `notdec-backend-core` 现在仍然需要 Clang 依赖，因为旧 `HType.h` / `StructManager.h` 里还有 `clang::Decl *`。这轮只拆 target 和 include 边界，不清理 HType 的 C 后端 annotation。
+- 旧 include 路径和 `notdec::llvm2c` namespace 继续保留，主项目不用同步大改。
+- 还没有新增 `Structuring`、`C/`、`Solidity/` 目录；这轮先让 core target 站住。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-core notdec-llvm2c -j4` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- 只出现既有 warning，包括 `StructManager.cpp` signedness warning、`CFG.cpp` switch warning、`Utils.cpp` LLVM deprecation warning、`ASTPrinter` switch warning。
+- 本轮只拆 CMake target 和转发头，不改 pass pipeline，不新增运行时分析逻辑；性能上不预期影响 decompile 路径，未单独跑 EVM runtime smoke。
+
+评分：
+
+- 实现效果：7/10。已经把共享 core target 拆出来，并保持旧 C 后端继续构建。
+- 复杂度：3/10。新增一层 CMake target 和转发头，理解成本低。
+- 维护成本：4/10。短期有旧路径和新路径并存；后续需要继续清掉 core 对 Clang 的依赖。
+
+更好的后续方案：
+
+- 下一步不要急着加 Solidity AST。先把 `HTypeResult` 从旧 `Interface.h` 里真正拆到 `notdec-backends/Core/HTypeResult.h`。
+- 然后处理 `HType.h` / `StructManager.h` 里的 `clang::Decl *`，把它们移到 C 后端 adapter，避免 Solidity 后端被迫链接 Clang。
