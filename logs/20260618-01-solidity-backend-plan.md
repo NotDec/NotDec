@@ -783,3 +783,35 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：8/10。C 后端已有新 target 和新 include 路径，旧链接名仍兼容。
 - 复杂度：3/10。主要是 CMake target 改名和 inline 转发。
 - 维护成本：4/10。短期旧名字和新名字并存；后续主仓库可以逐步改用 `notdec-backends/C/Backend.h` 和 `notdec-backend-c`。
+
+## 2026-06-18 实现记录：新增 Solidity 后端骨架
+
+本轮新增 Solidity 后端的最小 target 和入口函数，只建立目录、target、API，不接主仓库 `.sol` 输出，也不实现 selector/storage/event/revert 恢复。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Backend.h:1`
+  新增 Solidity 后端入口头，定义 `notdec::backend::solidity::Options` 和 `decompileModule()`。
+- `external/NotDec-llvm2c/lib/Solidity/CMakeLists.txt:1`
+  新增 `notdec-backend-solidity` static target，依赖 `notdec-backend-core` 和 `notdec-backend-structuring`，不依赖 Clang。
+- `external/NotDec-llvm2c/lib/Solidity/SolidityBackend.cpp:1`
+  新增最小实现，当前只输出 `contract Decompiled {}` 壳子。
+- `external/NotDec-llvm2c/lib/CMakeLists.txt:4`
+  添加 `Solidity` 子目录。
+
+当前保留的限制：
+
+- 主仓库还没有识别 `.sol` 输出，也没有链接 `notdec-backend-solidity`。
+- 当前输出只是占位 contract 壳子，还没有读取 `Module`、`HTypeResult` 或结构恢复结果。
+- Solidity AST、类型打印、selector/function 识别、storage/event/revert 输出都还没开始。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- 本轮新增 target 未接入 pass pipeline；性能上不预期影响 decompile 路径，未单独跑 EVM runtime smoke。
+
+评分：
+
+- 实现效果：6/10。Solidity 后端 target 和入口已站住，但还只是骨架。
+- 复杂度：2/10。新增文件很少，依赖关系清楚。
+- 维护成本：3/10。后续要尽快补真正的 reader/printer，否则骨架本身价值有限。
