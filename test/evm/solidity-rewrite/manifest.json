@@ -106,7 +106,8 @@
         "outline_calls": 0,
         "outlined_metadata": 0,
         "skipped_metadata": 0,
-        "htype_field_store_calls": 3
+        "htype_field_store_calls": 3,
+        "htype_field_load_calls": 2
       }
     },
     {

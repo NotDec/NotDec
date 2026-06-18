@@ -2181,7 +2181,10 @@ void ConstraintsGenerator::observeOldMemoryTypeEdge(const SimpleType &Lhs,
 void ConstraintsGenerator::recordLoad(ExtValuePtr Addr, SimpleType ResultTy,
                                       unsigned BitSize,
                                       llvm::Instruction *Source) {
-  if (!isPointerAnalysisEnabled()) {
+  bool KeepForEVMEvidence =
+      Source != nullptr && Source->getModule() != nullptr &&
+      isEVMModule(*Source->getModule());
+  if (!isPointerAnalysisEnabled() && !KeepForEVMEvidence) {
     return;
   }
   MemoryAccesses.LoadsByAddr[Addr].push_back(
@@ -3240,6 +3243,7 @@ void ConstraintsGenerator::releaseBinarysubState() {
 void MLsubRecovery::genASTTypes(llvm::Module &M) {
   ResultVal = std::make_unique<Result>();
   EVMStores.clear();
+  EVMLoads.clear();
   // 合并所有类型到一个大的 HTypeResult 里面。
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
@@ -3256,6 +3260,20 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
         Data.Generator->SnapshotContraVariantValues.begin(),
         Data.Generator->SnapshotContraVariantValues.end());
     if (isEVMModule(M)) {
+      for (const auto &Ent : Data.Generator->MemoryAccesses.LoadsByAddr) {
+        for (const RecordedLoad &Load : Ent.second) {
+          auto *LoadInst = llvm::dyn_cast_or_null<llvm::LoadInst>(Load.Source);
+          if (LoadInst == nullptr) {
+            continue;
+          }
+          EVMLoads.push_back(EVMLoadEvidence{
+              .Addr = Load.Addr,
+              .LoadedValue = LoadInst,
+              .BitSize = Load.BitSize,
+              .Source = Load.Source,
+          });
+        }
+      }
       for (const auto &Ent : Data.Generator->MemoryAccesses.StoresByAddr) {
         for (const RecordedStore &Store : Ent.second) {
           auto *StoreInst =

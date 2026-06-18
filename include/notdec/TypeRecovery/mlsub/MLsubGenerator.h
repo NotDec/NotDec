@@ -75,6 +75,16 @@ struct EVMStoreEvidence {
   llvm::Instruction *Source = nullptr;
 };
 
+// Same idea as EVMStoreEvidence, but for loads.  The high-level EVM pass uses
+// this after HType has confirmed the memory field, so the evidence only needs
+// to preserve the original load and its address.
+struct EVMLoadEvidence {
+  ExtValuePtr Addr;
+  llvm::Value *LoadedValue = nullptr;
+  unsigned BitSize = 0;
+  llvm::Instruction *Source = nullptr;
+};
+
 /// Records IR memory events and gives each explicit MemoryLocKey a content
 /// SimpleType. The records are kept outside PointerAnalysis so PA only answers
 /// object identity, while BinarySub still owns the actual content type.
@@ -523,6 +533,7 @@ public:
   using Result = ::notdec::llvm2c::HTypeResult;
   std::unique_ptr<Result> ResultVal;
   std::vector<EVMStoreEvidence> EVMStores;
+  std::vector<EVMLoadEvidence> EVMLoads;
   std::unique_ptr<Result> &getResult(llvm::Module &M1,
                                      llvm::ModuleAnalysisManager &MAM) {
     if (ResultVal == nullptr) {
@@ -532,6 +543,9 @@ public:
   }
   llvm::ArrayRef<EVMStoreEvidence> getEVMStoreEvidence() const {
     return EVMStores;
+  }
+  llvm::ArrayRef<EVMLoadEvidence> getEVMLoadEvidence() const {
+    return EVMLoads;
   }
   void genASTTypes(llvm::Module &M);
 };

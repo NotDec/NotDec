@@ -74,7 +74,7 @@ struct EvmStorageHighLevelRewritePass
 };
 
 // Rewrites non-storage high-level objects after MLsub has recovered HType.
-// The first implementation is deliberately narrow: it only rewrites stores to
+// The first implementation is deliberately narrow: it only rewrites accesses to
 // memory record fields already present in the recovered HType, and it leaves
 // uncertain bytes/array shapes untouched.
 struct EvmHighLevelTypePass : llvm::PassInfoMixin<EvmHighLevelTypePass> {

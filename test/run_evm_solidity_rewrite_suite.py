@@ -277,6 +277,9 @@ def main() -> int:
                 "htype_field_store_calls": output_text.count(
                     "@evm.htype.field.store("
                 ),
+                "htype_field_load_calls": output_text.count(
+                    "@evm.htype.field.load("
+                ),
                 "storage_load_calls": output_text.count("@evm.storage.load("),
                 "storage_store_calls": output_text.count("@evm.storage.store("),
             }
