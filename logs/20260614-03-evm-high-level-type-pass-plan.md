@@ -107,3 +107,41 @@ EvmHighLevelTypePass
 - ABI return、revert、event、external call 相关逻辑只在 HType 已经明确对象类型时复用这些 rewrite，不作为第一版主线。
 - storage/mapping 不被这个 pass 混进来，避免把完全不同的 storage layout 规则揉到一起。
 - patterns suite 和 type recovery suite 不能出现明显性能下降；第一版至少对当前关注用例做同口径耗时对比。
+
+## 当前实现记录：memory record field store 第一版
+
+本轮先落地一个窄闭环：只处理 HType 已经确认的 EVM memory record 字段写入。暂不碰 dynamic bytes/string、array，也不按 ABI payload 场景单独匹配。
+
+实现内容：
+
+- [include/notdec/Passes/evm/SolidityPatterns.h](/sn640/NotDec/include/notdec/Passes/evm/SolidityPatterns.h:76)：新增 `EvmHighLevelTypePass` 声明，注释明确第一版只重写已恢复 HType memory record 字段 store。
+- [src/Passes/evm/solidity-patterns/EvmHighLevelTypePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmHighLevelTypePass.cpp:23)：新增 `getMemoryRecord()`，从 `MemoryDecl` 或 `MemoryType` 的 pointee 取现有 memory record，不新建 HType 视图。
+- [src/Passes/evm/solidity-patterns/EvmHighLevelTypePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmHighLevelTypePass.cpp:72)：新增 `rewriteMemoryFieldStore()`，读取 `EVMStoreEvidence`，只有 256-bit store、地址是常量 memory offset、且 HType memory record 在该 offset 有字段时，才把原 store 改成 `evm.htype.field.store(0, offset, value)`。
+- [src/Passes/evm/solidity-patterns/EvmHighLevelTypePass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/EvmHighLevelTypePass.cpp:113)：`run()` 直接读取 `TR.getResult()` 和 `TR.getEVMStoreEvidence()`，匹配到就 rewrite，匹配不到保留原 IR。
+- [src/CMakeLists.txt](/sn640/NotDec/src/CMakeLists.txt:17)：接入新实现文件。
+- [src/Passes/PassManager.cpp](/sn640/NotDec/src/Passes/PassManager.cpp:330)：第一版把 pass 放在 `EvmStorageHighLevelRewritePass` 之后。原因是实现时发现如果放在 storage rewrite 前，会删掉 storage matcher 仍需要的 scratch memory store，导致 storage mapping oracle 失效。等旧 storage/ABI 逻辑迁移后再考虑前移。
+- [test/run_evm_solidity_rewrite_suite.py](/sn640/NotDec/test/run_evm_solidity_rewrite_suite.py:277)：rewrite suite 增加 `htype_field_store_calls` 计数。
+- [test/evm/solidity-rewrite/manifest.json](/sn640/NotDec/test/evm/solidity-rewrite/manifest.json:98)：新增 `memory_record_field_high_level_rewrite`，复用 `04_evm_memory_helpers.ll`，固定两个字段 store 加一个 declaration。
+
+这次有一个计划未写清的点：pass 位置不能只按“TypeRecovery 后”理解。只要旧 storage / ABI pass 还依赖原始 memory store 形状，新 pass 就不能提前删除这些 store。当前先作为最后的 HType-based cleanup。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/evm/cases/04_evm_memory_helpers.ll -o /tmp/notdec-htype-field.ll --tr-level=2 --frozen-tr-input-ir` 通过，输出 2 个 `evm.htype.field.store` call。
+- `llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-htype-field.ll -o /tmp/notdec-htype-field.bc` 通过。
+- `python3 test/run_evm_solidity_rewrite_suite.py --binary ./build/bin/notdec --manifest test/evm/solidity-rewrite/manifest.json --project-root . --workdir /tmp/notdec-solidity-rewrite-htype-field-suite` 通过，`76 passed, 0 failed`。
+- `ctest --test-dir build -R notdec.type_recovery.evm --output-on-failure` 通过。
+- EVM 性能 smoke：`/usr/bin/time -f 'elapsed=%e rss_kb=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-25928-high-level-type.ll --tr-level=2` 通过，本轮 `elapsed=17.91 rss_kb=958940`。同一用例近期记录为 `17.68s/958320KB` 和 `18.99s/955376KB`，未见明显退化。
+
+评分：
+
+- 实现效果：5/10。已经有一个直接 rewrite 闭环，但只覆盖 memory record field store，还没覆盖 dynamic bytes/string 和 array。
+- 理解成本：5/10。新增一个 pass 和一个 helper intrinsic，规则很窄；但 pipeline 位置需要说明，避免误以为现在能提前替换所有 memory store。
+- 维护成本：5/10。当前只依赖 HType memory record 和 EVMStoreEvidence，后续扩到 array/bytes 前需要先确认 HType 里对应形状足够稳定。
+
+下一步技术决策点：
+
+- `25928_19774281_d048a8d52d_2758caa02f46.ll` 的 HType dump 里能看到 `top:256[]*`、`struct_13*[]*`、`typedef_1[]*` 这类非 storage array 形状，但它们目前更像类型恢复里的泛化 array / tail array，不直接等价于 Solidity dynamic array、static array 或 bytes/string。
+- 如果下一步要 rewrite array，需要先决定：是先引入只表达 HType array 的泛用 helper，例如 `evm.htype.array.elem.*`，还是等更多 Solidity 语义证据把 dynamic/static array 和 bytes/string 区分清楚后再 rewrite。
+- 当前不应直接把所有 `ArrayType` 当成 Solidity dynamic/static array。否则会把 tail-recursion normalization、ABI 临时 buffer、普通 memory array 混在一起。

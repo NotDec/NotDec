@@ -95,6 +95,21 @@
       }
     },
     {
+      "name": "memory_record_field_high_level_rewrite",
+      "input": "../../type-recovery/evm/cases/04_evm_memory_helpers.ll",
+      "args": [
+        "--tr-level=2",
+        "--frozen-tr-input-ir"
+      ],
+      "expected_counts": {
+        "outlined_functions": 0,
+        "outline_calls": 0,
+        "outlined_metadata": 0,
+        "skipped_metadata": 0,
+        "htype_field_store_calls": 3
+      }
+    },
+    {
       "name": "storage_static_array_high_level_rewrite",
       "input": "../../type-recovery/evm/cases/13_evm_storage_static_array.ll",
       "args": [
