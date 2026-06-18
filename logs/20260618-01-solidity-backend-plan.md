@@ -969,3 +969,41 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。已知命名函数的简单 ABI 参数能打印出来。
 - 复杂度：3/10。只做字符串后缀解析，范围可控。
 - 维护成本：4/10。后续要用 ABI decode helper/HType 替代或校验这套命名规则，避免长期依赖名字猜测。
+
+## 2026-06-18 实现记录：固定长度返回值 reader
+
+本轮从 IR 里直接读取固定长度 `evm_return`，先恢复静态 32 字节对齐返回值。动态返回和类型细化暂时不做。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:18`
+  `Reader` 增加 `readReturns()`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:48`
+  `readFunction()` 填充 `Function.Returns`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:57`
+  `readReturns()` 遍历函数内 `evm_return` call，读取第三个参数的常量返回长度。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:74`
+  只接受非零、32 字节对齐、且同一函数内一致的常量长度。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:89`
+  每 32 字节先生成一个 `uint256 retN`。
+
+当前保留的限制：
+
+- 返回类型暂时统一用 `uint256`，还没有用 HType 区分 `address`、`bool`、`uint8` 等。
+- 动态 bytes/string/array 和多路径不同长度返回先跳过。
+- 只识别直接调用 `evm_return` 的函数。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-return-smoke.sol --tr-level=2` 通过，耗时约 `17.76s`。
+- smoke 输出有 25 个 `returns (...)`，例如：
+  - `getThreshold() public returns (uint256 ret0)`
+  - `isPaused() public returns (uint256 ret0)`
+  - `owner() public returns (uint256 ret0)`
+
+评分：
+
+- 实现效果：7/10。固定 32 字节返回值已经能出现在 Solidity 函数签名里。
+- 复杂度：3/10。只读直接常量长度，不做跨 helper 推断。
+- 维护成本：4/10。类型还粗，需要后续接 HType 或 ABI return pass 的更高层结果。
