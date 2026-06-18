@@ -1007,3 +1007,50 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。固定 32 字节返回值已经能出现在 Solidity 函数签名里。
 - 复杂度：3/10。只读直接常量长度，不做跨 helper 推断。
 - 维护成本：4/10。类型还粗，需要后续接 HType 或 ABI return pass 的更高层结果。
+
+## 2026-06-18 实现记录：打印 Solidity storage 变量
+
+本轮把 Solidity backend 接上 HType 的 `StorageDecl`，先把已恢复的 storage field 打成合约状态变量。类型只做保守映射，目标是输出语法稳定，不提前猜 mapping、address 或源码变量名。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:13`
+  `Reader::read()` 增加可选 `HTypeResult` 参数。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:19`
+  `Reader` 增加 `readStateVariables()`。
+- `external/NotDec-llvm2c/lib/Solidity/SolidityBackend.cpp:14`
+  Solidity backend 把 pass pipeline 传入的 HType 结果交给 `Reader`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:23`
+  `readContract()` 在读取 public 函数前先读取 storage 变量。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:48`
+  `readStateVariables()` 遍历 `HT.StorageDecl->getFields()`，跳过 padding，保留 HType field name，空名回退为 `storage_N`，重名时追加序号。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/TypePrinter.h:10`
+  新增 `TypePrinter`，集中处理 HType 到 Solidity 类型名的保守映射。
+- `external/NotDec-llvm2c/lib/Solidity/TypePrinter.cpp:9`
+  `formatIntegerType()` 把 `i1` 打成 `bool`，合法 8 倍数整数打成 `uintN/intN`，其他情况回退 `uint256`。
+- `external/NotDec-llvm2c/lib/Solidity/TypePrinter.cpp:20`
+  `formatType()` 支持 integer、pointer、dual pointer、array、set inter/union，无法稳定判断时回退 `uint256`。
+- `external/NotDec-llvm2c/lib/Solidity/CMakeLists.txt:5`
+  `notdec-backend-solidity` 加入 `TypePrinter.cpp`。
+
+当前保留的限制：
+
+- storage 变量名仍来自 HType field name，比如 `slot_1`；还没有从源码或 slot access 语义恢复真实变量名。
+- `address`、`mapping`、动态数组等 Solidity 高层类型暂时不猜，只在 HType 已经能稳定表达的范围内打印。
+- 所有状态变量暂时打印为 `public`，后续需要结合实际访问模式再降级。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-storage-type-smoke.sol --tr-level=2` 通过，耗时约 `17.63s`。
+- smoke 输出有 4 个 storage 变量、47 个 public 函数，开头出现：
+  - `uint256 public slot_1;`
+  - `uint256 public slot_2;`
+  - `uint256 public slot_3;`
+  - `uint256 public slot_4;`
+
+评分：
+
+- 实现效果：7/10。Solidity 输出已经能带上当前 HType 恢复出的 storage 轮廓。
+- 复杂度：4/10。只新增一个小 TypePrinter 和 Reader 的 storage 分支，没有改 C backend。
+- 维护成本：4/10。类型映射保守，后续可以逐步替换为更准确的 Solidity 类型 reader。
