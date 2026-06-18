@@ -1054,3 +1054,45 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。Solidity 输出已经能带上当前 HType 恢复出的 storage 轮廓。
 - 复杂度：4/10。只新增一个小 TypePrinter 和 Reader 的 storage 分支，没有改 C backend。
 - 维护成本：4/10。类型映射保守，后续可以逐步替换为更准确的 Solidity 类型 reader。
+
+## 2026-06-18 实现记录：打印 event/revert body marker
+
+本轮让 Solidity backend 消费现有 EVM pattern pass 留下的 metadata，先在函数体里打印 event/revert 的保守占位语句。这里不做控制流恢复，也不猜 event 参数和真实 error 类型。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:25`
+  `Reader` 增加 `readBody()`，从函数内指令读取可打印的 body marker。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:27`
+  `Reader` 增加 `getStringMetadata()`，只读取单个 `MDString` operand 的 metadata。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:29`
+  `Reader` 增加 `formatRevertStatement()` 和 `formatEventStatement()`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:90`
+  `readFunction()` 改为调用 `readBody()`，不再只输出固定 TODO。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:99`
+  `readBody()` 读取 `notdec.solidity.revert` 和 `notdec.solidity.event` metadata，生成 `revert();` / `emit Event_topic_count_N();`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:159`
+  `getStringMetadata()` 统一读取 pattern pass 写入的字符串 metadata。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:172`
+  `formatRevertStatement()` 把 panic code、selector、custom error 参数数、error string 长度写入注释。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:196`
+  `formatEventStatement()` 先按 topic 数生成占位 event 名，并保留 TODO 注释。
+
+当前保留的限制：
+
+- 输出顺序只是 IR 指令遍历顺序，不代表真实结构化控制流。
+- event 只知道 topic 数，还没有 event declaration、topic0 名称、data 参数。
+- custom error / Error(string) / Panic(uint256) 先只放在注释里，没有生成 error declaration 或 `require`。
+- 函数体仍保留 `// TODO: recover remaining body`，避免把 marker 输出伪装成完整源码。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-body-marker-smoke.sol --tr-level=2` 通过，耗时约 `18.02s`。
+- smoke 输出仍有 4 个 storage 变量、47 个 public 函数，并出现 12 个 `emit Event_...`、160 个带注释的 `revert();`。
+
+评分：
+
+- 实现效果：6/10。已有 event/revert 语义能出现在 Solidity 输出里，但还不是结构化函数体。
+- 复杂度：3/10。只读现有 metadata，不新增 pass 和 IR rewrite。
+- 维护成本：4/10。后续需要由结构恢复和更细的 event/error reader 替换这层占位输出。
