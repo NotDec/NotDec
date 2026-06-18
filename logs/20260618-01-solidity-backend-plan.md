@@ -892,3 +892,42 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。Solidity 后端已经有独立输出模型和 printer，后续 reader 可以开始填内容。
 - 复杂度：3/10。模型很小，暂时不做完整语义 AST。
 - 维护成本：3/10。后续按真实输出需求补字段即可，当前结构不绑 LLVM/Clang。
+
+## 2026-06-18 实现记录：Solidity public function reader
+
+本轮开始让 Solidity 后端读 IR。第一步只识别 public entry 函数，生成函数壳子，不恢复参数、返回值和函数体。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:1`
+  新增 `Reader`，入口是 `Reader::read(const llvm::Module &M)`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:13`
+  实现 `Reader::read()` 和 `Reader::readContract()`，遍历 module 中的函数，稳定排序后填入 `Contract.Functions`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:40`
+  `isPublicEntryFunction()` 只接受非 declaration、名字以 `public_` 开头、且不包含 `function_selector` 的函数，跳过 dispatcher 和 private helper。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:46`
+  `readFunction()` 生成 public 函数壳子，body 暂时只放 `// TODO: recover body`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:54`
+  `getFunctionName()` 从 IR 名字恢复 Solidity 函数名。未知 selector 形如 `public__0x02717250_0x2c79` 会打印成 `public_0x02717250()`。
+- `external/NotDec-llvm2c/lib/Solidity/SolidityBackend.cpp:1`
+  后端入口改为 `Reader().read(M)` 后交给 `Printer`。
+- `external/NotDec-llvm2c/lib/Solidity/CMakeLists.txt:1`
+  `notdec-backend-solidity` 加入 `Reader.cpp`。
+
+当前保留的限制：
+
+- 函数参数、返回值、payable/view/pure、fallback/receive/constructor 还没恢复。
+- 已知函数名里的 ABI 参数后缀暂时保留在名字里，例如 `transferOwnership_address`，后续等参数 reader 接上后再拆。
+- 函数体还没有结构恢复，只输出 TODO 注释。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-reader-smoke.sol --tr-level=2` 通过，耗时约 `18.59s`。
+- smoke 输出包含 47 个 `function` 壳子，开头是 `public_0x02717250()`、`public_0x036de8af()` 等。
+
+评分：
+
+- 实现效果：7/10。Solidity 输出已经从空 contract 进到 public 函数列表。
+- 复杂度：3/10。只按现有 `public_` 命名约定读函数，没有引入额外分析。
+- 维护成本：4/10。函数命名规则后续要和 ABI 参数 reader 一起调整，当前只是保守占位。
