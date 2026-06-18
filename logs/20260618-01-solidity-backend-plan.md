@@ -1226,3 +1226,44 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。Solidity 的 structuring 接入边界更清楚，Reader 不再承载 CFG 细节。
 - 复杂度：4/10。主要是代码移动和小接口拆分，没有改输出语义。
 - 维护成本：4/10。后续迁移 C backend 或替换 Goto 算法时，可以优先改 BodyBuilder/adapter。
+
+## 2026-06-18 实现记录：抽出 LLVMFunctionCFGBuilder
+
+本轮把 LLVM function 到 `StructuredCFG` 的通用转换从 Solidity `BodyBuilder` 里上提到 `Structuring` 模块。后端只负责提供 statement / condition / switch case 的 payload，Structuring 层负责 block id、successor、terminator 形状。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/LLVMFunctionCFGBuilder.h:19`
+  新增 `LLVMFunctionCFGBuilder`，说明它只转换 LLVM 控制流形状，不持有目标语言 AST。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/LLVMFunctionCFGBuilder.h:25`
+  新增 `PayloadProvider` 接口，后端实现 `collectStatements()`、`getCondition()`、`getSwitchCase()`。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:12`
+  实现 `LLVMFunctionCFGBuilder::build()`，统一处理 basic block id、branch、switch、return、unreachable。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:4`
+  `notdec-backend-structuring` 加入 `LLVMFunctionCFGBuilder.cpp`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:123`
+  `BodyBuilder::readBody()` 改成实现一个 Solidity payload provider，再调用 `LLVMFunctionCFGBuilder::build()`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:130`
+  `SolidityPayloadProvider::collectStatements()` 只抽取现有 revert/event marker。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:147`
+  `getCondition()` 用 LLVM value name 生成 condition payload。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:152`
+  `getSwitchCase()` 把 switch case 常量转成 payload。
+
+当前保留的限制：
+
+- `PayloadProvider` 还是最小接口，后续 C backend 迁移时可能还需要补 edge 属性、default case 标记或异常出口信息。
+- 这轮没有迁移 C backend，也没有改 GotoStructurer 输出。
+- Solidity body 仍然是字符串 fallback，还没接真正 statement AST。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-llvmcfgbuilder-smoke.sol --tr-level=2` 通过，耗时约 `17.75s`。
+- smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：8/10。LLVM CFG adapter 已经从 Solidity 后端抽到通用 Structuring 层，后续 C backend 可以接同一入口。
+- 复杂度：5/10。新增一个 provider 接口，但边界清楚，没有目标语言依赖。
+- 维护成本：4/10。后续新增 Phoenix/Ghidra structurer 时可以复用 `StructuredCFG` 输入，不用重复写 LLVM CFG 扫描。
