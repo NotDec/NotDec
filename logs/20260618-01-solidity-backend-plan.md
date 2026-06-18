@@ -857,3 +857,38 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。主链路已经能选择 `.sol` 并调用 Solidity backend，但后端还没有真实内容。
 - 复杂度：4/10。新增一个 output pass 和 CMake 链接，逻辑和 C 后端一致。
 - 维护成本：4/10。后续要把 C/Solidity backend option 和 output pass 再整理得更通用，但现在先保持薄封装。
+
+## 2026-06-18 实现记录：Solidity AST/Printer 最小层
+
+本轮先补 Solidity 后端的输出层，不读 IR/HType。目的是让后续 selector/function reader、storage reader 都填同一个简单模型，而不是直接在 backend 入口里拼字符串。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Ast.h:1`
+  新增最小 Solidity source model：`SourceUnit`、`Contract`、`StateVariable`、`Function`、`Parameter`。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Printer.h:1`
+  新增 `Printer` 声明，负责输出 source unit / contract / state variable / function。
+- `external/NotDec-llvm2c/lib/Solidity/Printer.cpp:1`
+  实现缩进、contract、变量、函数、参数打印。
+- `external/NotDec-llvm2c/lib/Solidity/SolidityBackend.cpp:1`
+  后端入口改为构造 `SourceUnit`，再通过 `Printer` 输出，不再直接拼 `contract Decompiled {}` 字符串。
+- `external/NotDec-llvm2c/lib/Solidity/CMakeLists.txt:1`
+  `notdec-backend-solidity` 加入 `Printer.cpp`。
+
+当前保留的限制：
+
+- AST 只覆盖第一版需要的壳子、状态变量、函数签名和语句字符串。
+- 表达式、statement 类型、类型系统还没有建模；现在先不为未使用能力加结构。
+- 后端入口仍未读取 `Module`、`HTypeResult` 或结构恢复结果。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-printer-smoke.sol --tr-level=2` 通过，耗时约 `17.57s`，输出仍为 `contract Decompiled {}`。
+- 本轮只改 Solidity 输出层，不改 pass pipeline；EVM smoke 时间和上一轮同口径相近，未见额外性能风险。
+
+评分：
+
+- 实现效果：7/10。Solidity 后端已经有独立输出模型和 printer，后续 reader 可以开始填内容。
+- 复杂度：3/10。模型很小，暂时不做完整语义 AST。
+- 维护成本：3/10。后续按真实输出需求补字段即可，当前结构不绑 LLVM/Clang。
