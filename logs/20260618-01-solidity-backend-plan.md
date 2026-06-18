@@ -1183,3 +1183,46 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。Solidity backend 已经走新 structuring 接口，能完整暴露 CFG fallback。
 - 复杂度：5/10。新增了 LLVM CFG 到 `StructuredCFG` 的 adapter 和结构树渲染，但没有动 C backend。
 - 维护成本：5/10。当前渲染 helper 还在 Reader 内，后续应拆成独立 `SolidityStructuring` / body builder。
+
+## 2026-06-18 实现记录：拆出 Solidity BodyBuilder
+
+本轮把上一轮临时放在 `Reader.cpp` 里的函数体和 structuring 逻辑拆到独立 `BodyBuilder`。`Reader` 回到 contract/function/storage/event 列表读取，`BodyBuilder` 专门负责 LLVM CFG 到 `StructuredCFG` 再到 body fallback 输出。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h:17`
+  新增 `BodyBuilder`，公开 `readBody()`、`getStringMetadata()`、`getEventName()`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:1`
+  新增实现文件，承接 `GotoStructurer` 接入、payload 表、结构树渲染、revert/event marker 格式化。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:124`
+  `BodyBuilder::readBody()` 构建 `StructuredCFG`，调用 `GotoStructurer`，再渲染 fallback body。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:202`
+  `getStringMetadata()` 统一读取 EVM pattern pass 写下的字符串 metadata。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:216`
+  `getEventName()` 保留 topic0 事件命名逻辑，供 `Reader::readEvents()` 和 body emit 输出共用。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:51`
+  `readEvents()` 改用 `BodyBuilder::getStringMetadata()` / `BodyBuilder::getEventName()`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:131`
+  `Reader::readBody()` 简化为转发 `BodyBuilder::readBody()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:27`
+  删除 Reader 里 body marker 相关 helper 声明。
+- `external/NotDec-llvm2c/lib/Solidity/CMakeLists.txt:2`
+  `notdec-backend-solidity` 加入 `BodyBuilder.cpp`。
+
+当前保留的限制：
+
+- `BodyBuilder` 仍然输出字符串 body，Solidity statement AST 还没拆出来。
+- CFG adapter 还在 Solidity backend 内部，后续如果 C backend 也迁移，应该再抽成 backend 通用 adapter 或 C/Solidity 各自 adapter。
+- 这轮只整理边界，不改 Goto fallback 输出质量。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bodybuilder-smoke2.sol --tr-level=2` 通过，耗时约 `17.82s`。
+- smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`，和拆分前一致。
+
+评分：
+
+- 实现效果：7/10。Solidity 的 structuring 接入边界更清楚，Reader 不再承载 CFG 细节。
+- 复杂度：4/10。主要是代码移动和小接口拆分，没有改输出语义。
+- 维护成本：4/10。后续迁移 C backend 或替换 Goto 算法时，可以优先改 BodyBuilder/adapter。
