@@ -81,6 +81,7 @@ if (NOTDEC_ENABLE_LLVM2C)
 	target_link_libraries(notdec-core
 		PUBLIC
 		notdec-llvm2c
+		notdec-backend-solidity
 	)
 endif()
 

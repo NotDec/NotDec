@@ -36,7 +36,8 @@ static cl::opt<std::string> inputFilename(
                    ),
     cl::Required, cl::cat(NotdecCat));
 static cl::opt<std::string> outputFilename(
-    "o", cl::desc("Specify output filename. Supported extension: .ll, .bc, .c"),
+    "o",
+    cl::desc("Specify output filename. Supported extension: .ll, .bc, .c, .sol"),
     cl::value_desc("output.ll"), cl::Optional, cl::cat(NotdecCat));
 
 static cl::opt<log_level>
@@ -361,8 +362,8 @@ int main(int argc, char *argv[]) {
   }
 
   std::string outsuffix = getSuffix(outputFilename);
-  if (outsuffix == ".c") {
-    // do nothing, because we will add llvm2c pass
+  if (outsuffix == ".c" || outsuffix == ".sol") {
+    // do nothing, because we will add backend output pass
   } else if (outsuffix == ".ll") {
     std::error_code EC;
     llvm::raw_fd_ostream os(outputFilename, EC);

@@ -51,6 +51,7 @@
 #include "notdec-wasm2llvm/utils.h"
 
 #ifdef NOTDEC_ENABLE_LLVM2C
+#include "notdec-backends/Solidity/Backend.h"
 #include "notdec-llvm2c/Interface.h"
 #endif
 
@@ -157,6 +158,43 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
     // llvm2cOpt.noDemoteSSA = true;
     notdec::llvm2c::decompileModule(M, MAM, os, llvm2cOpt,
                                     std::move(HighTypes));
+    std::cout << "Decompile result: " << OutFilePath << std::endl;
+
+    return PreservedAnalyses::all();
+  }
+  static bool isRequired() { return true; }
+};
+
+// A Pass that converts a module to Solidity-like source.
+struct MLsubNotdecSolidity : PassInfoMixin<MLsubNotdecSolidity> {
+
+  mlsub::MLsubRecovery &TR;
+  std::string OutFilePath;
+
+  MLsubNotdecSolidity(mlsub::MLsubRecovery &TR, std::string outFilePath)
+      : TR(TR), OutFilePath(std::move(outFilePath)) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    std::string outsuffix = getSuffix(OutFilePath);
+    assert(outsuffix == ".sol");
+
+    std::unique_ptr<mlsub::MLsubRecovery::Result> HighTypes =
+        std::move(TR.getResult(M, MAM));
+
+    std::error_code EC;
+    llvm::raw_fd_ostream os(OutFilePath, EC);
+    if (EC) {
+      std::cerr << "Cannot open output file: " << OutFilePath << std::endl;
+      std::cerr << EC.message() << std::endl;
+      std::abort();
+    }
+
+    notdec::backend::solidity::Options Opts;
+    if (auto DebugDir = notdec::getWorkDirOpt()) {
+      Opts.workDir = *DebugDir;
+    }
+    notdec::backend::solidity::decompileModule(M, MAM, os, Opts,
+                                               std::move(HighTypes));
     std::cout << "Decompile result: " << OutFilePath << std::endl;
 
     return PreservedAnalyses::all();
@@ -366,6 +404,10 @@ void PassEnv::add_llvm2c(std::string OutFilePath,
                          bool disableTypeRecovery) {
   MPM.addPass(MLsubNotdecLLVM2C(*TR, OutFilePath, llvm2cOpt,
                                 disableTypeRecovery));
+}
+
+void PassEnv::add_solidity(std::string OutFilePath) {
+  MPM.addPass(MLsubNotdecSolidity(*TR, OutFilePath));
 }
 
 void PassEnv::run_passes() {

@@ -815,3 +815,45 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：6/10。Solidity 后端 target 和入口已站住，但还只是骨架。
 - 复杂度：2/10。新增文件很少，依赖关系清楚。
 - 维护成本：3/10。后续要尽快补真正的 reader/printer，否则骨架本身价值有限。
+
+## 2026-06-18 实现记录：主仓库接入 `.sol` 输出
+
+本轮把 Solidity 后端骨架接到主 NotDec driver。现在 `-o xxx.sol` 会走类型恢复和 EVM high-level rewrite，然后调用 `notdec-backend-solidity` 写出当前占位 contract。
+
+修改内容：
+
+- `src/NotDec.cpp:38`
+  CLI 输出后缀说明加入 `.sol`。
+- `src/NotDec.cpp:365`
+  `.sol` 和 `.c` 一样交给 pass pipeline 内的 backend output pass 处理，主函数末尾不再报未知后缀。
+- `include/notdec/Passes/PassManager.h:91`
+  新增 `PassEnv::add_solidity()`。
+- `include/notdec/Passes/PassManager.h:129`
+  `DecompileConfig::build_passes()` 识别 `.sol` 输出，并要求 `tr-level >= 2`。
+- `src/Passes/PassManager.cpp:54`
+  引入 `notdec-backends/Solidity/Backend.h`。
+- `src/Passes/PassManager.cpp:168`
+  新增 `MLsubNotdecSolidity` pass：取 `MLsubRecovery::Result`，打开 `.sol` 输出文件，调用 `notdec::backend::solidity::decompileModule()`。
+- `src/Passes/PassManager.cpp:409`
+  实现 `PassEnv::add_solidity()`。
+- `src/CMakeLists.txt:81`
+  `notdec-core` 链接 `notdec-backend-solidity`。
+
+当前保留的限制：
+
+- `.sol` 输出当前还是 `contract Decompiled {}`，只是链路打通。
+- `.sol` 现在要求 `tr-level >= 2`。这是为了后续直接使用 HType 和 EVM high-level rewrite，不支持低等级空壳输出。
+- `tr-level=3` 在当前 EVM smoke 上会撞到已有 `MLsubRecoveryOpt` TODO assert，这不是 Solidity backend 新增问题；当前 EVM smoke 用 `tr-level=2`。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-smoke.sol --tr-level=2` 通过，耗时约 `17.97s`，输出：
+  `contract Decompiled {}`。
+- 同一 EVM 样例用 `--tr-level=3` 失败在 `MLsubRecoveryOpt::run()` 的已有 `assert(false && "TODO")`。
+
+评分：
+
+- 实现效果：7/10。主链路已经能选择 `.sol` 并调用 Solidity backend，但后端还没有真实内容。
+- 复杂度：4/10。新增一个 output pass 和 CMake 链接，逻辑和 C 后端一致。
+- 维护成本：4/10。后续要把 C/Solidity backend option 和 output pass 再整理得更通用，但现在先保持薄封装。

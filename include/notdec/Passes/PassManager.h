@@ -88,6 +88,7 @@ struct PassEnv {
                     llvm::StringRef HTypeDumpPath = "");
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
                   bool disableTypeRecovery);
+  void add_solidity(std::string OutFilePath);
   void run_passes();
   void emit_tr_input_ir(const std::string &OutputPath);
 };
@@ -126,8 +127,16 @@ struct DecompileConfig {
       return;
     }
     bool isC = getSuffix(OutFilePath) == ".c";
+    bool isSolidity = getSuffix(OutFilePath) == ".sol";
     if (isC) {
       PE.add_llvm2c(OutFilePath, llvm2cOpt, EffectiveLevel < 2);
+    } else if (isSolidity) {
+      if (EffectiveLevel < 2) {
+        llvm::errs() << "Error: Solidity output requires type recovery "
+                        "(tr-level >= 2).\n";
+        std::abort();
+      }
+      PE.add_solidity(OutFilePath);
     }
   }
   void run_passes() {
