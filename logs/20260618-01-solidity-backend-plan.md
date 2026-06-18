@@ -675,3 +675,39 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 
 - 下一步不要急着加 Solidity AST。先把 `HTypeResult` 从旧 `Interface.h` 里真正拆到 `notdec-backends/Core/HTypeResult.h`。
 - 然后处理 `HType.h` / `StructManager.h` 里的 `clang::Decl *`，把它们移到 C 后端 adapter，避免 Solidity 后端被迫链接 Clang。
+
+## 2026-06-18 实现记录：HTypeResult 移入 core
+
+本轮继续第一阶段 core 拆分，把 `HTypeResult` 从旧 C 后端入口头里挪到 backend core 头里，并去掉 core target 对 Clang 库的链接。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Core/HTypeResult.h:1`
+  从转发头改成真实定义，包含 `HTypeResult` 的 value type、memory/storage type 和 snapshot 打印逻辑。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:1`
+  删除 `HTypeResult` 定义和不再需要的 LLVM/Clang include，只保留 C 后端 `Options`、`StructuralAlgorithms`、`decompileModule()`、`demoteSSA()`，并 include 新的 core 头。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/HType.h:24`
+  用 `clang::Decl` 前置声明替代 public Clang include，降低 core 头的依赖。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface/StructManager.h:4`
+  删除未使用的 Clang include 和旧的注释字段。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Interface/StructManager.cpp:1`
+  删除未使用的 Clang include。
+- `external/NotDec-llvm2c/lib/Core/CMakeLists.txt:9`
+  `notdec-backend-core` 不再链接 `notdec_clang_deps` / `clangAST`。
+
+当前保留的限制：
+
+- `HTypeResult` 仍在 `notdec::llvm2c` namespace 下，避免主项目和 C 后端同步大改。
+- `HType.h` 里还保留 `clang::Decl *ASTDecl` 这类 C 后端 annotation 字段，只是 public include 不再拉 Clang 头。后续如果 Solidity 后端确实需要完全无 Clang 类型污染，再单独迁移这部分字段。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-core notdec -j4` 通过。
+- 只出现既有 warning，包括 `StructManager.cpp` signedness warning 和 `ASTPrinter` switch warning。
+- 本轮只改头文件归属和 CMake 链接，不改 pass pipeline，也不改运行时分析逻辑；性能上不预期影响 decompile 路径，未单独跑 EVM runtime smoke。
+
+评分：
+
+- 实现效果：8/10。`HTypeResult` 已经可以从 backend core 引入，core target 也不再链接 Clang。
+- 复杂度：3/10。主要是头文件搬迁和依赖清理，兼容旧 namespace。
+- 维护成本：4/10。短期仍有旧路径和新路径并存，后续要继续拆 C 专属接口。
