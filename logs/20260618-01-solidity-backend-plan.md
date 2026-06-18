@@ -931,3 +931,41 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。Solidity 输出已经从空 contract 进到 public 函数列表。
 - 复杂度：3/10。只按现有 `public_` 命名约定读函数，没有引入额外分析。
 - 维护成本：4/10。函数命名规则后续要和 ABI 参数 reader 一起调整，当前只是保守占位。
+
+## 2026-06-18 实现记录：从函数名后缀恢复简单参数
+
+本轮继续完善 Solidity function reader。先不读 ABI decode helper 和 HType，只从已经存在的 public 函数名里拆明确 ABI 类型后缀。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:18`
+  `Reader` 增加 `applyFunctionNameAndParams()`、`parseAbiParameters()`、`isKnownAbiType()`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:46`
+  `readFunction()` 改为同时设置函数名和参数。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:54`
+  `applyFunctionNameAndParams()` 拆掉 `__0x...` 地址后缀，再把尾部连续的 ABI 类型 token 解析成参数。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:106`
+  `parseAbiParameters()` 生成 `arg0`、`arg1` 这类占位参数名。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:120`
+  `isKnownAbiType()` 先支持 `address`、`bool`、`string`、`bytes`、`uintN/intN`、`bytesN`。
+
+当前保留的限制：
+
+- 参数来源只是函数名后缀，不能覆盖匿名 selector、复杂 tuple、array、mapping 等情况。
+- 返回值还没有恢复。
+- 参数名还是 `argN`，没有从源码或 calldata helper 推断。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-params-smoke.sol --tr-level=2` 通过，耗时约 `18.09s`。
+- smoke 输出仍有 47 个函数壳子，并出现：
+  - `setThreshold(uint8 arg0)`
+  - `transferOwnership(address arg0)`
+  - `upgrade(address arg0)`
+
+评分：
+
+- 实现效果：7/10。已知命名函数的简单 ABI 参数能打印出来。
+- 复杂度：3/10。只做字符串后缀解析，范围可控。
+- 维护成本：4/10。后续要用 ABI decode helper/HType 替代或校验这套命名规则，避免长期依赖名字猜测。
