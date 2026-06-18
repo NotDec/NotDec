@@ -149,3 +149,18 @@ EvmHighLevelTypePass
 - `25928_19774281_d048a8d52d_2758caa02f46.ll` 的 HType dump 里能看到 `top:256[]*`、`struct_13*[]*`、`typedef_1[]*` 这类非 storage array 形状，但它们目前更像类型恢复里的泛化 array / tail array，不直接等价于 Solidity dynamic array、static array 或 bytes/string。
 - 如果下一步要 rewrite array，需要先决定：是先引入只表达 HType array 的泛用 helper，例如 `evm.htype.array.elem.*`，还是等更多 Solidity 语义证据把 dynamic/static array 和 bytes/string 区分清楚后再 rewrite。
 - 当前不应直接把所有 `ArrayType` 当成 Solidity dynamic/static array。否则会把 tail-recursion normalization、ABI 临时 buffer、普通 memory array 混在一起。
+
+## 当前观察：array / bytes 先不改
+
+最近扫过的两个 ABI / EVM case 里，array / bytes 的 HType 还不够硬：
+
+- `24562_19760107_e25027c623_f371f33b9104.ll` 里能看到 `top:256[]*`、`u256[]`、`struct_0*` 这类泛化数组/尾递归归一化结果，里面混着 ABI 临时 buffer 和普通 payload 形状。
+- `0457_19495180_71d7525532_df21a257bd5c.ll` 里也有很多 `u256[]` 和 `top:256[]*`，但它们和 `public_*_bytes`、`public_*_string` 入口纠缠在一起，单靠 HType 还不能直接断成 Solidity array / bytes。
+
+所以这一段先不做 rewrite，先按更明显的特征再收：
+
+- static array：等固定边界、固定元素宽度、稳定 index->offset 关系都明确了再做。
+- dynamic array：等 length、data 起点、index/stride 关系都稳定了再做。
+- bytes/string：等长度编码、short/long 分支、copy 模式或 word 对齐这些事实更明确了再做。
+
+现在的判断是：只看到 `ArrayType`、`top:256[]*`、`u256[]` 还不够，不能直接提升成 Solidity array/bytes。
