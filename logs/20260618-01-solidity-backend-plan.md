@@ -1141,3 +1141,45 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：7/10。event 输出已经能用 topic0 关联声明和 emit。
 - 复杂度：4/10。新增一个 AST 节点和小 reader，仍只消费已有 IR/metadata。
 - 维护成本：4/10。后续要补 event 参数和哈希反查，当前占位名不会阻碍替换。
+
+## 2026-06-18 实现记录：Solidity 接入 GotoStructurer
+
+本轮把 Solidity backend 的函数体读取接到新的语言无关 `Structuring` 接口。C backend 仍保留旧 `SAFuncContext + IStructuralAnalysis` 路径，不在这轮迁移。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:3`
+  引入 `notdec-backends/Structuring/GotoStructurer.h`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:21`
+  新增 Solidity reader 内部的结构树渲染 helper，把 `StructuredTree` 输出成 Solidity body 的保守注释和 marker 语句。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:36`
+  `addPayload()` 把后端已有的 revert/event 语句、branch condition、switch case value 放进 payload 表。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:51`
+  `renderStructuredNode()` 支持 sequence、label、basic block、if、switch、goto、return、unreachable、loop 节点的 fallback 输出。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:244`
+  `readBody()` 先把 LLVM basic block 转成 `StructuredCFG`，再调用 `GotoStructurer().structure(Cfg)`。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:258`
+  每个 block 的 statement payload 仍只放现有的 revert/event marker，不把普通 LLVM 指令伪装成 Solidity 语句。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:270`
+  branch、switch、return、unreachable terminator 转成语言无关 terminator。
+- `external/NotDec-llvm2c/lib/Solidity/Reader.cpp:308`
+  `StructuredTree` 渲染成函数体，输出 `// block_N:`、`// if ...`、`// goto block_N` 等 fallback 控制流注释。
+
+当前保留的限制：
+
+- 这轮只接 `GotoStructurer`，不做 Phoenix/Ghidra collapse。
+- 输出的是结构恢复 fallback，不是最终 Solidity `if/while/switch` 源码。
+- condition 目前只打印 LLVM value name，匿名值还只是 `cond` / `switch`。
+- C backend 还没接新 `StructuredCFG`，避免一次性影响现有 C 输出。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-solidity notdec -j4` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-structuring-smoke2.sol --tr-level=2` 通过，耗时约 `17.75s`。
+- smoke 输出有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：7/10。Solidity backend 已经走新 structuring 接口，能完整暴露 CFG fallback。
+- 复杂度：5/10。新增了 LLVM CFG 到 `StructuredCFG` 的 adapter 和结构树渲染，但没有动 C backend。
+- 维护成本：5/10。当前渲染 helper 还在 Reader 内，后续应拆成独立 `SolidityStructuring` / body builder。
