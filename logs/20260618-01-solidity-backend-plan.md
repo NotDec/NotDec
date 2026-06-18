@@ -1267,3 +1267,63 @@ Ghidra 的主结构恢复类是 `CollapseStructure`。它的注释已经把算�
 - 实现效果：8/10。LLVM CFG adapter 已经从 Solidity 后端抽到通用 Structuring 层，后续 C backend 可以接同一入口。
 - 复杂度：5/10。新增一个 provider 接口，但边界清楚，没有目标语言依赖。
 - 维护成本：4/10。后续新增 Phoenix/Ghidra structurer 时可以复用 `StructuredCFG` 输入，不用重复写 LLVM CFG 扫描。
+
+## 2026-06-18 实现记录：C backend 试点接入 StructuredGoto
+
+本轮按新的统一路线先让 C backend 接新 structuring 接口，但不改默认算法。新增 `--algo=structured-goto`，旧 `--algo=phoenix` 仍是默认，旧 `--algo=goto` 也保持不变。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:17`
+  在 `StructuralAlgorithms` 加入 `SA_StructuredGoto`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:13`
+  新增 CLI 选项 `--algo=structured-goto`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuredGoto.h:8`
+  新增 C 侧试点适配器声明，说明仍复用旧 `CFGBuilder` 的 Clang AST lowering，只把旧 C CFG 转成 `StructuredCFG` 后跑 `GotoStructurer`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuredGoto.h:17`
+  给适配器暴露很窄的 label/goto wrapper，避免改旧 `IStructuralAnalysis` 基类接口。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:19`
+  新增 `StructuredGotoAdapter`，保存 payload 表和 `BlockId -> CFGBlock*` 映射。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:63`
+  `buildCFG()` 把旧 C CFG 的 statements、successors、branch/switch terminator 转成语言无关 `StructuredCFG`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:105`
+  `renderNode()` 把 `StructuredTree` 渲染回 Clang statement 列表。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:145`
+  `renderIf()` 保守输出 `if (cond) goto true; goto false;`，不做 fallthrough 优化。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:165`
+  `renderSwitch()` 复用旧 Goto 的 switch/goto 形态。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:210`
+  `replaceCFG()` 把渲染结果放回 entry block，并移除其他 block。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:77`
+  引入 `StructuredGoto.h`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2134`
+  `SAFuncContext::run()` 分发 `SA_StructuredGoto`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:34`
+  `If` 节点记录来源 block id，方便 C 渲染器回查旧 CFG successor。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:45`
+  `Switch` 节点记录来源 block id，方便 C 渲染器回查 default successor。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/CMakeLists.txt:8`
+  `notdec-backend-c` 加入 `StructuredGoto.cpp`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/CMakeLists.txt:29`
+  C backend 链接 `notdec-backend-structuring`。
+
+当前保留的限制：
+
+- 这只是试点路径，没有替换 C 默认 Phoenix。
+- `StructuredGoto` 不做旧 `Goto` 的 fallthrough/invert 优化，所以输出更直白。
+- C 侧 adapter 目前从旧 C CFG 转 `StructuredCFG`，没有直接复用 `LLVMFunctionCFGBuilder`；这是故意的，因为 C 需要保留旧 Clang AST lowering、CFGCleaner 和 CompoundConditionBuilder。
+- Phoenix 还没迁到新接口，下一步才做 `PhoenixStructurer`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec --help | rg -n "algo|structured-goto|phoenix|goto"` 能看到 `structured-goto`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-goto-branch-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.14s`，输出包含 `if (...) goto ...; goto ...;` 形态。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-structured-goto-cchange-smoke.sol --tr-level=2` 通过，耗时约 `17.72s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：7/10。C backend 已能通过新 structuring 接口走 Goto 试点，证明 C/Solidity 可以共用 `StructuredCFG`/`StructuredTree`。
+- 复杂度：5/10。新增一个 C CFG adapter，但没有动旧默认 Phoenix，也没有绕开旧 C lowering。
+- 维护成本：5/10。短期会同时存在旧 C structuring 和新 adapter；迁完 Phoenix 后应再清理重复的 goto 渲染逻辑。
