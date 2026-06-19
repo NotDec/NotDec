@@ -1660,3 +1660,41 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：7/10。去掉了手写支配关系算法，后续 SAILR/Phoenix 复现可以站在 LLVM 算法上。
 - 复杂度：5/10。多了一层本地 overlay 和 `GraphTraits`，但没有把 LLVM 类型泄漏给外部。
 - 维护成本：4/10。适配代码集中在一个文件；后续如果 `MutableRegionGraph` 直接变成 pointer graph，可以再删掉 overlay。
+
+# 2026-06-19 实现记录：SAILR H2 改为数 immediate postdom 边
+
+对照 `/sn640/angr/angr/analyses/decompiler/structuring/sailr.py` 后，确认 Angr 的 H2 不是数所有 transitive postdominator pair，而是数 postdom graph 的边。现在 `MutableRegionGraphAnalysis` 已经有 LLVM-backed immediate postdominator，所以把 H2 从集合大小统计改成 immediate postdom 边数量，更贴近 Angr。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:24`
+  `postDominatorPairCountAfterRemoving()` 改名为 `postDominatorEdgeCountAfterRemoving()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:31`
+  H2 统计改为遍历 `Analysis.ImmediatePostDominators`，只计数非 `InvalidGraphNodeId` 的 immediate postdom 边。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:81`
+  `filterByMostPostDominators()` 改用新的 immediate-edge 计数函数。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break.out.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、1 个 `break`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.out.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch.out.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return.out.c --algo=structured-sailr`
+  通过，输出仍是 `if/else return`，没有 `goto`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-smoke.out.sol --tr-level=2`
+  通过，耗时约 `17.69s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步会影响 SAILR tie-break，但只是在 H2 里把统计口径改成 Angr 的 postdom graph edge 口径。
+- Phoenix 和 Solidity 默认 goto 输出不受影响。
+
+评分：
+
+- 实现效果：6/10。SAILR H2 更接近 Angr，但还没有补 SAILR 的 deoptimization pass。
+- 复杂度：2/10。只改一个计数函数。
+- 维护成本：2/10。直接使用已有 `ImmediatePostDominators`。
