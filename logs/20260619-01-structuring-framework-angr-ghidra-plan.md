@@ -1559,3 +1559,45 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：5/10。真正补上了 child root 合入 parent graph 的构图能力。
 - 复杂度：4/10。新增一个 overload，旧入口不变。
 - 维护成本：4/10。构图逻辑和旧 build 有重复；后续稳定后可抽公共构边 helper。
+
+# 2026-06-19 实现记录：MutableRegionGraph immediate dom/postdom 查询
+
+继续补 SAILR/Angr-style structuring 后续会用到的图查询能力。之前 `MutableRegionGraphAnalysis` 只有 `dominates()` 和 `postDominates()` 布尔查询，无法直接拿 immediate dominator/postdominator。SAILR 的 edge heuristic 和后续 region overlay 都需要更精确的支配关系入口，所以补两个查询函数。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:58`
+  新增 `immediateDominator()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:59`
+  新增 `immediatePostDominator()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:182`
+  新增 `findImmediateDominatorInSet()`，从 dominator/postdominator 集合里选最深的严格支配节点。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:211`
+  实现 `immediateDominator()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:216`
+  实现 `immediatePostDominator()`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-idom.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`、1 个 `break`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-idom.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-idom.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-idom-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-idom-smoke.sol --tr-level=2`
+  通过，耗时约 `17.71s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步不改变 reducer 行为，只补查询 API。
+- 后续 SAILR edge ordering 可以直接用 immediate postdominator，而不是只统计 postdominator 集合大小。
+
+评分：
+
+- 实现效果：5/10。补齐了图分析 API，直接贴近 SAILR 复现需求。
+- 复杂度：3/10。查询基于已有集合，没有改分析数据结构。
+- 维护成本：3/10。逻辑集中在 analysis 层。
