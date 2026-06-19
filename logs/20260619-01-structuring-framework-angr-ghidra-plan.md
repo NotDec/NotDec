@@ -878,7 +878,7 @@ Chick ordering 做稳定排序。
 
 - 真实 `fortune.o3.wasm.ll` 输出里仍只看到 fallback switch，说明这个 reducer 当前只覆盖很窄形态。
 - 用临时 `/tmp/notdec-simple-switch.ll` 走顶层 `notdec -o .c` 会先触发现有 MLsub 空指针断言，没法作为正向集成测试。
-- `notdec-llvm2c` standalone 工具当前只暴露旧 `goto/phoenix`，不能直接选 `structured-phoenix` 验证 shared reducer。
+- `notdec-llvm2c` standalone 工具后来已接入 shared structuring 算法；见下一节记录。
 - 下一步要么补一个直接调用 structuring library 的小单测，要么先迁 loop reducer，再用真实样例观察收益。
 
 验证：
@@ -896,3 +896,43 @@ Chick ordering 做稳定排序。
 - 实现效果：4/10。公共 switch 节点生成链路接上了，但真实样例还没有明显触发。
 - 复杂度：5/10。规则保守，代码集中在 Phoenix reducer；没有改公共节点和 renderer。
 - 维护成本：5/10。后续需要补 structuring 级单测，否则正向覆盖不够稳定。
+
+# 2026-06-19 实现记录：standalone notdec-llvm2c 默认接入新 structuring
+
+本轮按“旧结构恢复后续会被重构掉”的方向处理 standalone 工具：`notdec-llvm2c` 直接暴露
+shared structuring 算法，并把默认算法从旧 `phoenix` 切到 `structured-sailr`。旧
+`goto` / `phoenix` 选项暂时保留，方便对比和回归。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:10`
+  旧 `goto` / `phoenix` 的 CLI 描述标成 legacy。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:13`
+  standalone `--algo` 暴露 `structured-goto`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:16`
+  standalone `--algo` 暴露 `structured-phoenix`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:19`
+  standalone `--algo` 暴露 `structured-sailr`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:23`
+  默认值改成 `SA_StructuredSAILR`。
+
+验证：
+
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --help-hidden` 显示
+  `structured-goto`、`structured-phoenix`、`structured-sailr`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-structured-phoenix.c --algo=structured-phoenix`
+  通过，耗时约 `0.09s`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-default.c`
+  通过，耗时约 `0.09s`，证明默认路径可用。
+
+当前判断：
+
+- standalone 已经可以作为新 structuring 的主要验证入口。
+- 最小 switch 样例仍输出 fallback switch 里的 `goto follow`，这是 reducer 覆盖面问题，不再是工具入口问题。
+
+评分：
+
+- 实现效果：7/10。standalone 路径已切到新算法，后续验证不用绕顶层 MLsub。
+- 复杂度：2/10。只改 CLI 默认值和描述。
+- 维护成本：3/10。旧选项保留做对比；等新链路稳定后再删除旧实现入口。
