@@ -637,3 +637,59 @@ Ghidra 的 `CollapseStructure` 可以作为另一个 `RegionStructurer`：
 - 实现效果：6/10。公共结构树已经能承载 Angr 风格节点，Phoenix 有了第二条保守 reducer。
 - 复杂度：5/10。字段增加较多，但都集中在公共结构节点和 renderer。
 - 维护成本：5/10。保留旧 `Children` 兼容 fallback，短期会有双路径；等 reducer 迁完后可以收窄。
+
+# 2026-06-19 实现记录：条件取反和 if-else reducer
+
+本轮按 Angr 的方向处理条件方向：structuring 层只记录“这个条件需要取反”，不理解 payload 语义。具体怎么把 `cond` 变成 `!cond`，交给 C/Solidity renderer 处理。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:93`
+  `StructuredNode` 新增 `ConditionNegated`，用于表达 Angr `ConditionNode` 里的条件方向。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:43`
+  新增 `conditionText()`，在 Solidity 注释输出里处理 `ConditionNegated`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:72`
+  `If` 注释输出改为使用 `conditionText()`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:118`
+  `While` / `DoWhile` 注释输出也改为使用 `conditionText()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:167`
+  C adapter 新增本地 `invertCond()`，优先反转比较运算符，反转不了再生成 `!cond`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:196`
+  C adapter 新增 `conditionExpr()`，只有语义结构节点渲染时才使用 `ConditionNegated`，fallback 仍走旧逻辑。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:199`
+  `getNodeForBlock()` 改成从 active node 的 `Blocks` 列表里查找，支持在已折叠节点里继续匹配后续规则。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:107`
+  `reduceIfOnce()` 从 true/false 两个 successor 找当前 active graph node。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:120`
+  支持 true 分支是 body、false 分支是 follow 的单臂 if。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:124`
+  支持 false 分支是 body、true 分支是 follow 的单臂 if，并设置 `ConditionNegated`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:129`
+  支持 true/false 两个分支有共同 follow 的 if-else。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:158`
+  生成 `IfNode.ConditionNegated`、`Then`、可选 `Else`。
+
+当前保留限制：
+
+- 只匹配 pred/succ 非常干净的 if 形态，复杂共享入口、多个出口、异常 switch 入口仍不碰。
+- 还没有 loop reducer、switch reducer、virtual edge fallback。
+- SAILR 还没开始；下一步需要加 dominator/postdominator 和 virtual edge ordering 接口。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-goto-cond-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.14s`，输出 40 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-cond-smoke.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `0.14s`，输出 39 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-cond-smoke.sol --tr-level=2` 通过，耗时约 `17.92s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+新的判断：
+
+- 条件方向问题可以先用 `ConditionNegated` 解决，不需要让 structuring 层持有 backend-specific condition processor。
+- 真正接近 Angr 的下一步不是继续加字段，而是给 `MutableRegionGraph` 补 dominator/postdominator，并把 virtual edge ordering 做成 `PhoenixStructurer` 可覆盖的方法，让 SAILR 只改排序策略。
+
+评分：
+
+- 实现效果：6/10。条件方向已解开，if reducer 覆盖面扩大，但仍是保守规则。
+- 复杂度：5/10。`ConditionNegated` 简单，C adapter 里多了一份局部条件反转逻辑。
+- 维护成本：5/10。以后如果 C/Solidity 都需要复杂条件处理，可以再抽 backend condition processor；现在先不用过早抽象。
