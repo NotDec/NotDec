@@ -1247,3 +1247,47 @@ follow；C adapter 会把原 CFG terminator 当普通 payload 带进 basic block
 - 实现效果：6/10。减少了一类明显 goto，并修正了 adapter 的 return 形状。
 - 复杂度：4/10。adapter 变更很小，reducer 只加一个 terminal 分支。
 - 维护成本：4/10。删除重复两块 while reducer后，loop reducer 分支更少。
+
+# 2026-06-19 实现记录：C renderer 只保留 goto 目标 label
+
+shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里还保留了很多内部 label，例如 `if { ret1: return ... }` 或 `while { body: ... }`。这些 label 没有 goto 引用，继续输出会让结构化结果看起来仍像 goto fallback。这轮只在 C renderer 层做保守清理：先遍历 `StructuredTree` 收集所有 `Goto.Target`，渲染 `Label` 时只有被 goto 引用才输出。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:31`
+  新增 `TargetedLabels`，记录仍被 `Goto` 节点引用的 block。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:42`
+  structuring 完成后先调用 `collectGotoTargets()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:71`
+  新增 `collectGotoTargets()`，递归遍历 sequence、if、switch、loop body。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:157`
+  渲染 `Label` 时检查 `TargetedLabels`，没有 goto 指向的 label 不输出。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return-label-clean.c --algo=structured-phoenix`
+  通过，输出 0 个 label、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-label-clean.c --algo=structured-phoenix`
+  通过，输出 1 个 `while`、0 个 label、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-label-clean.c --algo=structured-phoenix`
+  通过，输出 1 个 `switch`、3 个 `break`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return-structured-goto-label.c --algo=structured-goto`
+  通过，输出 2 个 label、2 个 `goto`，说明仍被 goto 引用的 label 没被删。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-label-clean.c --tr-level=2 --algo=structured-phoenix`
+  通过，耗时约 `0.14s`，输出从 38 行降到 34 行，0 个 label、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-label-clean.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`，输出 34 行，0 个 label、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-label-clean.sol --tr-level=2`
+  通过，耗时约 `17.73s`，输出仍是 `471` 个 `// block_...`、`454` 个 `// goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这个改动不改变 shared tree，只改变 C renderer 的 label 输出。
+- 对 fallback goto 路径仍保留必要 label；对已经结构化的 if/loop/switch 清掉无用 label。
+
+评分：
+
+- 实现效果：6/10。结构化输出更接近正常 C，明显减少 label 噪音。
+- 复杂度：3/10。只多一次 tree 遍历。
+- 维护成本：3/10。逻辑集中在 C renderer，不影响 Solidity renderer。
