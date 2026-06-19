@@ -1112,3 +1112,42 @@ follow；C adapter 会把原 CFG terminator 当普通 payload 带进 basic block
 - 实现效果：6/10。入口收拢了，最小两块 while 也能跑。
 - 复杂度：4/10。只是把旧分支改成别名，代价小。
 - 维护成本：4/10。后续再迁别的算法时，不用再照顾两套入口。
+
+# 2026-06-19 实现记录：收窄 semantic control fallback
+
+上一轮两块 while 已能结构化，但 `Header -> Body -> Header` 后面的自然 follow 还会被补成
+`goto exit`。原因是 fallback 判断只看 collapsed node 的最后一个原始 block；两块 while collapse 后最后一个 block 是 body，它不直接连 follow，于是把 header 的正常 false edge 当成缺失边补了出来。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:513`
+  新增 `nodeHasSuccessorTarget()`，检查 collapsed region 里任一原始 block 是否连到目标。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:570`
+  semantic control subtree 的 virtual edge fallback 改用 region 级 successor 判断，避免自然 follow 被重复打印成 `goto`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-two-block-call.ll -o /tmp/notdec-while-two-block-call-fallback.c --algo=structured-phoenix`
+  通过，耗时约 `0.09s`，输出 1 个 `while`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-fallback-regress.c --algo=structured-phoenix`
+  通过，耗时约 `0.17s`，输出 1 个 `switch`、3 个 `break`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-do-loop.ll -o /tmp/notdec-do-loop-fallback-regress.c --algo=structured-phoenix`
+  通过，耗时约 `0.09s`，输出 1 个 `do`、0 个 `goto`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-fallback-smoke.c --tr-level=2 --algo=structured-phoenix`
+  通过，耗时约 `0.14s`，输出 38 行、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-fallback-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`，输出 38 行、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-fallback-smoke.sol --tr-level=2`
+  通过，耗时约 `17.64s`，输出仍是 `471` 个 `// block_...`、`454` 个 `// goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这个改动没有实现 break/continue 分类，只是把已经结构化控制流的自然后继从 fallback 里排除。
+- 后续仍要补真正的 loop exit / continue edge 分类，用于多出口 loop 和 virtualized backedge。
+
+评分：
+
+- 实现效果：6/10。两块 while 的明显冗余 goto 消掉了。
+- 复杂度：3/10。判断范围从 tail block 扩到 collapsed region，逻辑很小。
+- 维护成本：4/10。仍是过渡 fallback，但比只看 tail block 更接近 region graph 的真实含义。
