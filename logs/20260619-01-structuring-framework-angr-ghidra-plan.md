@@ -1601,3 +1601,62 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：5/10。补齐了图分析 API，直接贴近 SAILR 复现需求。
 - 复杂度：3/10。查询基于已有集合，没有改分析数据结构。
 - 维护成本：3/10。逻辑集中在 analysis 层。
+
+# 2026-06-19 实现记录：MutableRegionGraph 复用 LLVM generic dominator tree
+
+前一版 `MutableRegionGraph` 自己用集合迭代计算 dominator/postdominator。这个逻辑能跑，但容易在多出口、不可达块、后续 edge virtualization 后出细错。按当前 goal 的前置调整，改成复用 LLVM 的 `llvm::DominatorTreeBase<NodeT, IsPostDom>`，对外仍保留 `MutableRegionGraphAnalysis` 的 ID-based API。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:54`
+  `MutableRegionGraphAnalysis` 新增 `ImmediateDominators`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:55`
+  `MutableRegionGraphAnalysis` 新增 `ImmediatePostDominators`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:19`
+  新增 `detail::DomOverlayNode`，作为 LLVM generic dom tree 使用的指针节点。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:36`
+  新增 `detail::DomOverlayGraph`，保存 overlay 节点、entry、exit 和 synthetic root。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:52`
+  为 `DomOverlayNode *` 补 `llvm::GraphTraits`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:62`
+  为 `Inverse<DomOverlayNode *>` 补反向边 `GraphTraits`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:73`
+  为 `DomOverlayGraph *` 补节点枚举和 entry 查询。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:98`
+  为 `Inverse<DomOverlayGraph *>` 补 postdom 需要的反向图入口。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:206`
+  新增 `buildDomOverlay()`，把 active `GraphNodeId` 图转成 LLVM 可分析的 pointer graph，并用 synthetic root 连接无前驱 root。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:288`
+  新增 `fillDomAnalysis()`，通过 `DominatorTreeBase` 计算 dom/postdom、immediate dom/postdom，并回填到 `MutableRegionGraphAnalysis`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:337`
+  `immediateDominator()` 改为读取 LLVM 结果回填的 `ImmediateDominators`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:343`
+  `immediatePostDominator()` 改为读取 LLVM 结果回填的 `ImmediatePostDominators`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:626`
+  `MutableRegionGraph::analyze()` 改为先建 overlay，再调用 LLVM-backed analysis。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break.out.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、1 个 `break`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.out.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch.out.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return.out.c --algo=structured-sailr`
+  通过，输出仍是 `if/else return`，没有 `goto`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-smoke.out.sol --tr-level=2`
+  通过，耗时约 `17.64s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步不改变 reducer 行为，只把 dom/postdom 的实现换成 LLVM 维护的 generic 算法。
+- `MutableRegionGraphAnalysis` 的外部接口没有变，Phoenix/SAILR 调用侧不用动。
+- postdom 多出口由 LLVM generic postdom 的 virtual root 处理，比旧版手写 `firstWithoutActiveSucc()` 更可靠；`Result.Exit` 仍保留给现有排序和调试语义。
+
+评分：
+
+- 实现效果：7/10。去掉了手写支配关系算法，后续 SAILR/Phoenix 复现可以站在 LLVM 算法上。
+- 复杂度：5/10。多了一层本地 overlay 和 `GraphTraits`，但没有把 LLVM 类型泄漏给外部。
+- 维护成本：4/10。适配代码集中在一个文件；后续如果 `MutableRegionGraph` 直接变成 pointer graph，可以再删掉 overlay。
