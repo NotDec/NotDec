@@ -410,3 +410,62 @@ Ghidra 的 `CollapseStructure` 可以作为另一个 `RegionStructurer`：
 - Phoenix 迁移时不 include Clang，不依赖旧 C CFG。
 - 文档和接口能清楚说明 backend 负责 payload 和渲染，算法只负责结构树。
 
+# 2026-06-19 实现记录：最小 RecursiveStructurer 和 Goto 迁移
+
+本轮完成阶段 1 到阶段 3 的最小版本：新增 structurer registry、root-only region tree、recursive structurer，并让现有 `GotoStructurer` 通过这条路径运行。没有迁移 Phoenix，也没有开始 SAILR。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Region.h:15`
+  新增 `Region` / `RegionTree`，先支持 root region，字段保留 `Head`、`Blocks`、`Successors`、`Children`。
+- `external/NotDec-llvm2c/lib/Structuring/Region.cpp:62`
+  实现 `RegionTree::addRegion()`。
+- `external/NotDec-llvm2c/lib/Structuring/Region.cpp:71`
+  实现 `RegionTree::getRegion()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionIdentifier.h:10`
+  新增 root-only `RegionIdentifier`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:5`
+  `RegionIdentifier::identifyRoot()` 把整张 `StructuredCFG` 放进一个 root region。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionStructurer.h:8`
+  新增可替换的 region 级算法接口 `RegionStructurer`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RecursiveStructurer.h:27`
+  新增 recursive driver 声明。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:27`
+  `RecursiveStructurer::structure()` 目前只处理 root region，并把结果设为 `StructuredTree` root。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructurerRegistry.h:49`
+  新增默认算法名 `goto` 和 `createStructurer()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:48`
+  registry 第一版只注册 `goto -> GotoStructurer`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoStructurer.h:12`
+  `GotoStructurer` 同时实现整图 `Structurer` 和 region 级 `RegionStructurer`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:15`
+  `GotoStructurer::structure()` 改成 `RegionIdentifier::identifyRoot()` 后调用 `RecursiveStructurer`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:20`
+  原来的整图 Goto fallback 逻辑移到 `structureRegion()`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:165`
+  Solidity body builder 改为从 registry 创建默认 structurer。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:33`
+  C 试点 `StructuredGotoAdapter` 改为从 registry 创建默认 structurer。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:2`
+  `notdec-backend-structuring` 加入新增实现文件。
+
+当前保留的限制：
+
+- `RegionIdentifier` 只生成整函数 root region，还没有自然循环、switch 或 if region。
+- `RecursiveStructurer` 还没有真正的 children postorder 递归，也没有 overlay/rollback。
+- registry 只注册 `goto`。
+- Phoenix 仍是旧 C backend 默认路径，没有迁到新 `RegionStructurer`。
+- SAILR 还没开始。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-recursive-goto-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.14s`，输出仍是 label/goto 形态。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-recursive-goto-smoke.sol --tr-level=2` 通过，耗时约 `17.90s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：6/10。架构入口已经变成 registry + root region + recursive driver，后续 Phoenix/SAILR 可以接这个方向。
+- 复杂度：4/10。新增了几层很薄的框架，但每层现在都只做最小事情。
+- 维护成本：4/10。短期多了一层转发；等 region 识别和 Phoenix 迁移后，这层才会真正发挥作用。
