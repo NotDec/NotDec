@@ -469,3 +469,52 @@ Ghidra 的 `CollapseStructure` 可以作为另一个 `RegionStructurer`：
 - 实现效果：6/10。架构入口已经变成 registry + root region + recursive driver，后续 Phoenix/SAILR 可以接这个方向。
 - 复杂度：4/10。新增了几层很薄的框架，但每层现在都只做最小事情。
 - 维护成本：4/10。短期多了一层转发；等 region 识别和 Phoenix 迁移后，这层才会真正发挥作用。
+
+# 2026-06-19 实现记录：新增 MutableRegionGraph
+
+本轮完成阶段 4 的第一步：给 structuring 层新增内部可变图 `MutableRegionGraph`。它还没有接入 Goto 输出路径，目的是给 Phoenix/SAILR 迁移准备一个不依赖 Clang、不依赖旧 C CFG 的 reducer 工作图。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:17`
+  新增 `VirtualEdgeKind`，先支持 `Goto`、`Break`、`Continue`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:23`
+  新增 `VirtualEdge`，记录被虚拟化的边。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:29`
+  新增 `MutableRegionNode`，节点可以代表原始 block，也可以代表已经结构化出的 subtree。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:41`
+  新增 `MutableRegionGraph`，提供 active node、edge、collapse、virtualize 查询和修改接口。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:22`
+  `MutableRegionGraph::build()` 从 `StructuredCFG + Region` 建内部图，只保留 region 内边。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:86`
+  `addEdge()` 同步维护 succ/pred。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:102`
+  `removeEdge()` 同步删除 succ/pred。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:117`
+  `virtualizeEdge()` 删除真实边，并记录虚拟边。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:126`
+  `collapseNodes()` 把一组 active 节点折叠成一个新节点，并重连外部 pred/succ。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:184`
+  `getNodeForBlock()` 支持从原始 block id 找当前 active graph node。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:5`
+  `notdec-backend-structuring` 加入 `MutableRegionGraph.cpp`。
+
+当前保留的限制：
+
+- 还没有接入任何 structurer，所以这轮不改变输出。
+- 没有 dominator/postdominator，Phoenix 迁移前还要补。
+- `collapseNodes()` 只做图层折叠，不负责生成 `StructuredNode`；算法需要先创建 subtree，再把 `NodeId` 传进来。
+- 没有 overlay/rollback，仍是单次 reducer 的内部状态。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-mutable-graph-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.13s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-mutable-graph-smoke.sol --tr-level=2` 通过，耗时约 `17.88s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：5/10。内部 mutable graph 已有 Phoenix 迁移需要的基本形状，但还没跑任何 reducer。
+- 复杂度：4/10。数据结构简单，主要是 pred/succ 一致性和 collapse 重连。
+- 维护成本：5/10。后续如果 Phoenix 需要更复杂的 edge metadata 或 region overlay，这里还会继续扩展。
