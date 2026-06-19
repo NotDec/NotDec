@@ -746,3 +746,50 @@ Ghidra 的 `CollapseStructure` 可以作为另一个 `RegionStructurer`：
 - 实现效果：5/10。SAILR ordering 的公共入口有了，但还没接真正 virtualize edge。
 - 复杂度：5/10。dominator/postdominator 是简单迭代算法，够当前 region graph 使用。
 - 维护成本：5/10。接口边界接近 Angr，下一步需要把 virtual edge 到结构树的落地方式定清楚。
+
+# 2026-06-19 实现记录：Phoenix virtual edge fallback 落地
+
+本轮把上一个暂停点先按保守方式接上：Phoenix 在普通 reducer 不再变化时，按
+`orderVirtualizableEdges()` 选一条边调用 `MutableRegionGraph::virtualizeEdge()`。
+最后 fallback 输出仍按原 CFG terminator 渲染，只有 virtualized edge 不在原始
+terminator successor 里时，才额外追加 `goto` / `break` / `continue`。这样不会因为
+region graph 删边改掉原始 branch/switch 的基本语义。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:27`
+  新增 `virtualizeOneEdge()`，供 Phoenix 和后续 SAILR 子类复用同一套删边入口。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:204`
+  新增 `groupVirtualEdgesBySource()`，把 graph 记录的 virtual edge 按 source node 分组。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:213`
+  新增 `appendControlTransfer()`，把 virtual edge kind 落成公共 `StructuredNode`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:240`
+  `appendFallbackNode()` 接收 source node 对应的 virtual edges。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:316`
+  fallback 只在目标不属于原始 CFG successor 时追加额外控制转移，避免重复 goto。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:354`
+  实现 `PhoenixStructurer::virtualizeOneEdge()`，先分析 graph，再用可覆盖的 ordering 选边。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:377`
+  `structureRegion()` 的 reducer loop 增加 virtual edge fallback，并保留 1000 次上限。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:391`
+  最终 fallback 输出前读取 `Graph.virtualEdges()`，把已删边补回结构树。
+
+当前保留限制：
+
+- virtual edge kind 现在仍统一从 `Goto` 开始，`Break` / `Continue` 的识别还没迁。
+- Phoenix 的 loop/switch reducer 还没迁；这次只解决“删边后不丢输出”的最小闭环。
+- SAILR 还没实现；下一步应该加 `SAILRStructurer`，先只 override ordering。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-goto-virtual-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.14s`，输出 40 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-virtual-smoke.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `0.15s`，输出 39 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-virtual-smoke.sol --tr-level=2` 通过，耗时约 `17.81s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：6/10。Phoenix 现在可以实际删 virtual edge，且 fallback 不丢控制流。
+- 复杂度：5/10。新增逻辑集中在 Phoenix fallback，没有改 renderer 和公共 node 字段。
+- 维护成本：5/10。短期还有 fallback 补 goto 的兼容逻辑；等 loop/switch reducer 迁完后可以减少这条路径。
