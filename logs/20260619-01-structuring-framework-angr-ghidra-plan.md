@@ -1475,3 +1475,45 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：4/10。仍是基础设施，但补上了 child region overlay 需要的外部边信息。
 - 复杂度：3/10。字段和维护逻辑较小。
 - 维护成本：3/10。信息直接挂在 graph node 上，后续 reducer 可以按需读取。
+
+# 2026-06-19 实现记录：region kind 和外部 successor 查询
+
+继续把 child region overlay 前置条件补清楚。现在 region tree 里已经有 root 和 natural loop child，但类型没有显式区分；同时 `ExternalSuccs` 只有字段，没有统一查询入口。后续 Phoenix/SAILR 需要判断“这个 child 是 natural loop 吗”“这个 node 是否跳到 loop follow”，所以先补小接口。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Region.h:15`
+  新增 `RegionKind`，当前有 `Root` 和 `NaturalLoop`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Region.h:26`
+  `Region` 新增 `Kind`，默认是 `Root`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:165`
+  natural loop child region 标记为 `RegionKind::NaturalLoop`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:46`
+  `MutableRegionNode` 新增 `hasExternalSuccessor()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:175`
+  实现 `hasExternalSuccessor()`，用于后续 reducer 判断 region 外跳转目标。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-region-kind.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`、1 个 `break`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-region-kind.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-region-kind.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-region-kind-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-region-kind-smoke.sol --tr-level=2`
+  通过，耗时约 `17.73s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步仍不改变输出。
+- 后续可以只对 `RegionKind::NaturalLoop` 做 overlay，并用 `hasExternalSuccessor(R.Follow)` 判断 break/exit，而不是猜测所有 child region 都是 loop。
+
+评分：
+
+- 实现效果：4/10。补的是后续递归 structuring 的类型和查询入口。
+- 复杂度：2/10。只是 enum 和只读 helper。
+- 维护成本：2/10。字段语义简单，使用点集中。
