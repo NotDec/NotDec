@@ -1343,3 +1343,51 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：6/10。覆盖一个常见早退出循环，明显减少 goto。
 - 复杂度：5/10。新增代码偏多，但边界收得比较窄，没有改公共接口。
 - 维护成本：5/10。后续做通用 loop reducer 时可以替换这段；在那之前它是一个安全 fast path。
+
+# 2026-06-19 实现记录：RegionIdentifier 识别 natural loop child region
+
+这轮先补 Angr 方向需要的 region 信息，但暂时不改变输出：`RegionIdentifier` 不再只返回 whole-function root，还会用 dominator + backedge 识别 natural loop child region，并挂到 root 的 `Children`。`RecursiveStructurer` 还没有消费这些 child region；后续要补 region overlay / collapse 边界后，再让 Phoenix/SAILR 按 child region 递归结构化。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Region.h:35`
+  `RegionTree` 新增可写 `getRegion()`，用于 `RegionIdentifier` 给 root 追加 child。
+- `external/NotDec-llvm2c/lib/Structuring/Region.cpp:23`
+  实现可写 `RegionTree::getRegion()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:24`
+  新增 `buildPredecessors()`，从 `StructuredCFG` 构造 predecessor map。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:36`
+  新增 `computeDominators()`，用于判断 backedge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:80`
+  新增 `collectNaturalLoop()`，从 latch 反向收集 natural loop block。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:114`
+  新增 `collectSuccessors()`，记录 loop region 的外部 successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:131`
+  新增 `identifyNaturalLoopChildren()`，把每个去重后的 natural loop region 加到 root children。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:192`
+  `identifyRoot()` 创建 root 后调用 natural loop child region 识别。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-region.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`、1 个 `break`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-region.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-region.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `switch`、3 个 `break`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-region-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-region-smoke.sol --tr-level=2`
+  通过，耗时约 `17.53s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步是基础设施，不改变 C/Solidity 输出。
+- 下一步需要定清楚 region overlay 的 collapse 方式：父 region 里 child blocks 是整体替换成 child structured root，还是保留 root graph 只给算法提供辅助信息。这个边界没定之前，不应该让 RecursiveStructurer 直接递归消费 child region。
+
+评分：
+
+- 实现效果：5/10。RegionTree 开始有 natural loop 信息，但还没进入实际递归结构化。
+- 复杂度：4/10。只加了本地 dominator/backedge 识别，没有改 renderer。
+- 维护成本：5/10。当前 dominator 逻辑和 `MutableRegionGraph` 有重复；后续可以抽公共 helper，但现在先避免大范围抽象。
