@@ -577,3 +577,63 @@ Ghidra 的 `CollapseStructure` 可以作为另一个 `RegionStructurer`：
 - 实现效果：5/10。公共 Phoenix 路径能跑，sequence reducer 已经使用 `MutableRegionGraph`，但还没覆盖 Phoenix 的核心规则。
 - 复杂度：5/10。新增代码集中在一个 structurer 和一个 C 试点算法名，没有改默认行为。
 - 维护成本：5/10。当前停在合适边界；继续前需要先把结构树接口补清楚，否则后面会越来越难维护。
+
+# 2026-06-19 实现记录：按 Angr 边界补结构树字段
+
+本轮按 Angr 的边界继续重构：公共 structuring 层开始显式表达 `ConditionNode` / `LoopNode` / `SwitchCaseNode` 需要的语义字段，renderer 优先支持这些字段，但 fallback 节点继续走旧 `Children`，避免改变 Goto fallback 的输出。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:43`
+  新增 `StructuredSwitchCase`，case 可以直接指向结构化后的 body。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:87`
+  `StructuredNode` 新增 `BreakTarget`、`ContinueTarget`、`Then`、`Else`、`Body`、`Default`、`StructuredCases`，对应 Angr 的 condition、loop、switch case 节点边界。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:23`
+  `VirtualEdge` 新增 `FromBlock` / `ToBlock`，保留原始 block id，后续 SAILR 的 edge 排序不依赖会变化的 graph node id。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:120`
+  `virtualizeEdge()` 删除边前记录原始 source tail block 和 destination head block。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:48`
+  Goto fallback 在保留旧 `Children` 的同时填 `If.Then` / `If.Else`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:59`
+  Goto fallback 在保留旧 `Children` 的同时填 `Switch.Default` 和 `StructuredCases`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:66`
+  Solidity renderer 支持语义 `If.Then/Else`；只有 `Children` 为空时才启用，fallback 仍按旧 children 输出。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:81`
+  Solidity renderer 支持语义 `Switch.StructuredCases/Default`。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:114`
+  Solidity renderer 支持 loop 的 `Body` 字段。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:127`
+  C renderer 支持语义 `If.Then/Else`，并保留旧 fallback 渲染。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:202`
+  C renderer 支持语义 `Switch.StructuredCases/Default`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:54`
+  `isFallthroughTo()` 改用 collapsed node 的 tail block 判断 fallthrough，sequence reducer 可以继续处理已折叠节点。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:92`
+  新增保守的单臂 if reducer：只处理 true 分支是 body、false 分支是 follow、body 无外部入口且唯一后继是 follow 的形态。
+
+当前保留限制：
+
+- 单臂 if reducer 不处理 false 分支是 body 的情况，因为当前还没有公共的条件取反 payload 表达。
+- 没有迁移 if-else、loop、switch 和 virtual edge 规则。
+- SAILR 还没开始；下一步至少需要 dominator/postdominator 和 virtual edge 排序入口。
+- 现有测试样例没有明显触发单臂 if reducer，当前主要验证编译、fallback 不变和 sequence reducer 仍正常。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-goto-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.14s`，输出 40 行，保持旧 fallback 形态。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-smoke.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `0.13s`，输出 39 行，sequence reducer 仍生效。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-angr-boundary-smoke.sol --tr-level=2` 通过，耗时约 `17.50s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+新的决策点：
+
+- 条件取反应该放在哪里：在 payload 层提供 `invertCondition(PayloadRef)`，还是在 structuring 层增加 `ConditionNegated` 标志。
+- 如果按 Angr 的 `ConditionProcessor` 方向，最好由 backend 提供 condition processor，structuring 层只记录原条件和是否取反。
+- 没有这个决策，false-branch if、if-else 合并、while 条件方向都会卡住。
+
+评分：
+
+- 实现效果：6/10。公共结构树已经能承载 Angr 风格节点，Phoenix 有了第二条保守 reducer。
+- 复杂度：5/10。字段增加较多，但都集中在公共结构节点和 renderer。
+- 维护成本：5/10。保留旧 `Children` 兼容 fallback，短期会有双路径；等 reducer 迁完后可以收窄。
