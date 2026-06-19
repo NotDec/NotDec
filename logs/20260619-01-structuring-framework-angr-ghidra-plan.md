@@ -1196,3 +1196,54 @@ follow；C adapter 会把原 CFG terminator 当普通 payload 带进 basic block
 - 实现效果：6/10。覆盖面扩大，但仍是保守 reducer。
 - 复杂度：5/10。增加了一个 body 收集函数，没有改 graph 公共接口。
 - 维护成本：5/10。后续做 natural loop reducer 时，这段可以作为线性 fast path 保留，也可以被更通用逻辑替换。
+
+# 2026-06-19 实现记录：terminal if/else reducer 和 C adapter return 识别
+
+这轮补一个简单但常见的 Phoenix if 规约：条件分支的两个 successor 都是终止块时，直接生成
+`if/else`，不再输出 `if (...) goto ret1; goto ret0;`。实现时发现 C adapter 里 Clang CFG 的 return block 会带人工 successor，shared structuring 看不到真正的终止块，所以先修 adapter，再补 reducer。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:75`
+  C adapter 收集 block payload 时记录是否存在 `ReturnStmt`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:87`
+  含 `ReturnStmt` 的 block 映射成 `TerminatorKind::Return`，不再把 Clang CFG 的人工 successor 带进 `StructuredCFG`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:162`
+  `reduceIfOnce()` 新增 terminal node 判断，只接受 successor 为空且 terminator 是 `Return` 或 `Unreachable` 的节点。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:187`
+  支持 true/false 两个分支都是 terminal block 的 if/else。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:468`
+  删除重复的两块 while reducer；现在由 `reduceLinearWhileOnce()` 覆盖两块和线性多块 while。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:773`
+  reducer 顺序里不再调用已删除的两块 while reducer。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return-after.c --algo=structured-phoenix`
+  通过，输出 1 个 `if`、0 个 `goto`、2 个 `return`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-two-block-call.ll -o /tmp/notdec-while-two-block-call-terminal-regress.c --algo=structured-phoenix`
+  通过，输出 1 个 `while`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-terminal-regress.c --algo=structured-phoenix`
+  通过，输出 1 个 `while`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-terminal-regress.c --algo=structured-phoenix`
+  通过，输出 1 个 `switch`、3 个 `break`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-do-loop.ll -o /tmp/notdec-do-loop-terminal-regress.c --algo=structured-phoenix`
+  通过，输出 1 个 `do`、0 个 `goto`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-terminal-smoke.c --tr-level=2 --algo=structured-phoenix`
+  通过，耗时约 `0.13s`，输出 38 行、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-terminal-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`，输出 38 行、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-terminal-smoke.sol --tr-level=2`
+  通过，耗时约 `17.66s`，输出仍是 `471` 个 `// block_...`、`454` 个 `// goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- C backend 转 shared CFG 时，return 语义更准确；这会让后续 Phoenix/SAILR reducer 少看到人工 exit 边。
+- terminal if/else 已覆盖，但普通 if-return + fallthrough、early return、非终止 else 还没迁。
+
+评分：
+
+- 实现效果：6/10。减少了一类明显 goto，并修正了 adapter 的 return 形状。
+- 复杂度：4/10。adapter 变更很小，reducer 只加一个 terminal 分支。
+- 维护成本：4/10。删除重复两块 while reducer后，loop reducer 分支更少。
