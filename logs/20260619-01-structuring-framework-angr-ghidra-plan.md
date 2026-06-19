@@ -693,3 +693,56 @@ Ghidra 的 `CollapseStructure` 可以作为另一个 `RegionStructurer`：
 - 实现效果：6/10。条件方向已解开，if reducer 覆盖面扩大，但仍是保守规则。
 - 复杂度：5/10。`ConditionNegated` 简单，C adapter 里多了一份局部条件反转逻辑。
 - 维护成本：5/10。以后如果 C/Solidity 都需要复杂条件处理，可以再抽 backend condition processor；现在先不用过早抽象。
+
+# 2026-06-19 实现记录：图分析和 virtual edge ordering 接口
+
+本轮继续按 Angr 的方向推进 SAILR 需要的基础设施，但没有开始真正删边。原因是删边以后必须决定 virtualized edge 怎么落回 `StructuredTree`，否则容易把 CFG 边删掉却没有对应的 goto/break/continue 输出。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:46`
+  新增 `MutableRegionGraphAnalysis`，保存 entry、exit、dominator、postdominator 和 node order。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:53`
+  新增 `dominates()` / `postDominates()` 查询。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:75`
+  `MutableRegionGraph` 新增 `analyze()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:82`
+  新增迭代式 dominator 计算。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:121`
+  新增迭代式 postdominator 计算。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:168`
+  实现 `MutableRegionGraphAnalysis::dominates()` / `postDominates()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:374`
+  `MutableRegionGraph::analyze()` 基于 active nodes 生成 entry、exit、dominators、postdominators 和 DFS postorder 派生的 node order。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:22`
+  `PhoenixStructurer` 新增可覆盖的 `orderVirtualizableEdges()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:180`
+  新增 `collectVirtualizableEdges()`，先收集 active graph 的候选边，不实际删边。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:280`
+  `PhoenixStructurer::orderVirtualizableEdges()` 默认按 Angr Phoenix 的 Chick ordering 思路排序：目标节点顺序、目标入度、源出度、原始 block id。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:329`
+  `structureRegion()` 调用 `Graph.analyze()` 和 `orderVirtualizableEdges()`，但暂不使用结果改变输出。
+
+当前暂停点：
+
+- 需要决定 virtualized edge 在公共结构树里如何落地。
+- Angr 的 `_virtualize_edge()` 会改 region graph，同时把 conditional jump 拆成 `ConditionNode + Jump`。我们这里没有 AIL statement，只有 payload id 和结构节点，所以不能直接照搬。
+- 可选方向：
+  - 在 source node 的结构树尾部追加 `Goto/Break/Continue` 节点。
+  - 给 `MutableRegionGraph::virtualizeEdge()` 返回一个待渲染的 `VirtualEdge`，由 reducer collapse 时显式插入到 source subtree。
+  - 在 `StructuredNode` 上增加 `TrailingControl` 一类字段。
+- 这个点需要先定，不然继续实现 Phoenix last-resort edge virtualization 会有语义缺口。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-goto-order-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.15s`，输出 40 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-order-smoke.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `0.15s`，输出 39 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-order-smoke.sol --tr-level=2` 通过，耗时约 `17.83s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：5/10。SAILR ordering 的公共入口有了，但还没接真正 virtualize edge。
+- 复杂度：5/10。dominator/postdominator 是简单迭代算法，够当前 region graph 使用。
+- 维护成本：5/10。接口边界接近 Angr，下一步需要把 virtual edge 到结构树的落地方式定清楚。
