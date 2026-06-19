@@ -1151,3 +1151,48 @@ follow；C adapter 会把原 CFG terminator 当普通 payload 带进 basic block
 - 实现效果：6/10。两块 while 的明显冗余 goto 消掉了。
 - 复杂度：3/10。判断范围从 tail block 扩到 collapsed region，逻辑很小。
 - 维护成本：4/10。仍是过渡 fallback，但比只看 tail block 更接近 region graph 的真实含义。
+
+# 2026-06-19 实现记录：线性多块 while reducer
+
+这轮继续迁旧 Phoenix 的 while 结构恢复，但只做保守版本：支持
+`Header -> Body1 -> ... -> Latch -> Header` 这种线性 body。body 内每个中间节点必须是单后继 fallthrough，body entry 只能由 header 进入，latch 只能回到 header。复杂 loop、多个出口、continue/break 分类仍不在这轮处理。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:348`
+  新增 `collectLinearLoopBody()`，从 body entry 沿单后继链收集 loop body。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:385`
+  新增 `reduceLinearWhileOnce()`，生成公共 `StructuredNodeKind::While`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:439`
+  while body 用 `buildSequenceNode()` 保留已有 structured subtree。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:817`
+  reducer 顺序里先尝试线性多块 while，再回退到原两块 while。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.c --algo=structured-phoenix`
+  通过，耗时约 `0.10s`，输出 1 个 `while`、0 个 `goto`，body 内保留 `a(); b();`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-two-block-call.ll -o /tmp/notdec-while-two-block-call-linear-regress.c --algo=structured-phoenix`
+  通过，耗时约 `0.08s`，输出 1 个 `while`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-linear-regress.c --algo=structured-phoenix`
+  通过，耗时约 `0.18s`，输出 1 个 `switch`、3 个 `break`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-do-loop.ll -o /tmp/notdec-do-loop-linear-regress.c --algo=structured-phoenix`
+  通过，耗时约 `0.08s`，输出 1 个 `do`、0 个 `goto`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-linear-smoke.c --tr-level=2 --algo=structured-phoenix`
+  通过，耗时约 `0.14s`，输出 38 行、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-linear-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`，输出 38 行、0 个行首 `goto`、1 个 `do`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-linear-smoke.sol --tr-level=2`
+  通过，耗时约 `17.55s`，输出仍是 `471` 个 `// block_...`、`454` 个 `// goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- shared Phoenix 的 while 覆盖面从两块 loop 扩到线性多块 loop。
+- 这还不是旧 Phoenix 的完整 `refineLoop()`；多出口 loop、非线性 body、break/continue edge kind 仍待迁。
+
+评分：
+
+- 实现效果：6/10。覆盖面扩大，但仍是保守 reducer。
+- 复杂度：5/10。增加了一个 body 收集函数，没有改 graph 公共接口。
+- 维护成本：5/10。后续做 natural loop reducer 时，这段可以作为线性 fast path 保留，也可以被更通用逻辑替换。
