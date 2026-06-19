@@ -793,3 +793,60 @@ region graph 删边改掉原始 branch/switch 的基本语义。
 - 实现效果：6/10。Phoenix 现在可以实际删 virtual edge，且 fallback 不丢控制流。
 - 复杂度：5/10。新增逻辑集中在 Phoenix fallback，没有改 renderer 和公共 node 字段。
 - 维护成本：5/10。短期还有 fallback 补 goto 的兼容逻辑；等 loop/switch reducer 迁完后可以减少这条路径。
+
+# 2026-06-19 实现记录：接入 SAILR structurer 骨架
+
+本轮按 Angr 的边界接入 SAILR：SAILR 继承 Phoenix，不复制 reducer，只覆盖 virtual edge
+ordering。当前复刻的是 Angr `SAILRStructurer._order_virtualizable_edges()` 的三步启发式：
+少 sibling edge、删边后 postdominator 数更多、目标是 return。最后仍回退到 Phoenix 的
+Chick ordering 做稳定排序。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:24`
+  `orderVirtualizableEdges()` 增加 `StructuredCFG` 参数，让 ordering 能读取 block payload。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:28`
+  `virtualizeOneEdge()` 同步接收 `StructuredCFG`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:325`
+  Phoenix ordering 签名同步调整，默认不使用 CFG。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:356`
+  `virtualizeOneEdge()` 调用新的 ordering hook。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h:11`
+  新增 `SAILRStructurer`，继承 `PhoenixStructurer`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:37`
+  实现 H1：优先选择 sibling edge 更少的候选边。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:67`
+  实现 H2：小图上复制 graph、删除候选边、重新计算 postdominator pair 数。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:93`
+  实现 H3：目标 node 的 tail block 是 `Return` 时优先。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:108`
+  `SAILRStructurer::orderVirtualizableEdges()` 串起 H1/H2/H3，并回退到 Phoenix ordering。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:10`
+  把 `SAILRStructurer.cpp` 加入 `notdec-backend-structuring`。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:17`
+  registry 支持 `"sailr"`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:19`
+  CLI 增加 `--algo=structured-sailr`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2140`
+  C backend 接入 `StructuredGoto(..., "sailr")`。
+
+当前保留限制：
+
+- Angr 的 H3 判断的是 structured node simple return；这里先用 CFG tail `Return` 近似。
+- SAILR 论文里配套的 deoptimization / duplication reverter 还没有接入。
+- 当前 Phoenix reducer 还缺 loop/switch 规则，所以 SAILR ordering 的收益还受限。
+- Solidity 仍走默认 `"goto"` structurer；是否切到 SAILR 需要后续单独比较。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-smoke.c --tr-level=2 --algo=structured-sailr` 通过，耗时约 `0.14s`，输出 39 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-sailr-baseline.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `0.15s`，输出 39 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-sailr-smoke.sol --tr-level=2` 通过，耗时约 `17.60s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+评分：
+
+- 实现效果：6/10。SAILR 已作为独立算法入口接入，并复用 Phoenix 的 reducer/fallback。
+- 复杂度：5/10。新增类很小，唯一接口变化是 ordering hook 多拿一个 `StructuredCFG`。
+- 维护成本：5/10。后续可以继续在 SAILR 类里补 Angr 的策略，不需要再改 C/Solidity renderer。
