@@ -1433,3 +1433,45 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：4/10。只是元信息，但补上了上次卡住的关键缺口。
 - 复杂度：2/10。字段和赋值很小。
 - 维护成本：3/10。字段语义直接，后续 overlay 会用到。
+
+# 2026-06-19 实现记录：MutableRegionGraph 保留 region 外 successor
+
+继续补 loop child region 后续递归消费前需要的边界信息。`MutableRegionGraph::build()` 之前只保留 region 内边，region 外 successor 被丢掉；如果后续用它结构化 natural loop child，就没法知道 body 内哪些边跳到 loop follow。现在每个 `MutableRegionNode` 记录 `ExternalSuccs`，collapse 时也保留这部分信息。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:44`
+  `MutableRegionNode` 新增 `ExternalSuccs`，记录当前 region 图外部 successor 的 block id。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:29`
+  新增 `appendUniqueBlock()`，避免重复记录同一个外部 successor。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:207`
+  `MutableRegionGraph::build()` 遇到不在当前 region 的 successor 时写入 `ExternalSuccs`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:323`
+  `collapseNodes()` 聚合 member node 的 `ExternalSuccs`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:345`
+  被 collapse 的旧节点清空 `ExternalSuccs`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-external-succ.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`、1 个 `break`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-external-succ.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-external-succ.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-external-succ-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-external-succ-smoke.sol --tr-level=2`
+  通过，耗时约 `17.84s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步不改变当前 Phoenix/SAILR 输出，只补 region graph 边界信息。
+- 后续如果让 child region 单独结构化，可以用 `ExternalSuccs` 判断跳到 `Follow` 的 break/exit 边，而不是把 follow block 强行纳入 child region。
+
+评分：
+
+- 实现效果：4/10。仍是基础设施，但补上了 child region overlay 需要的外部边信息。
+- 复杂度：3/10。字段和维护逻辑较小。
+- 维护成本：3/10。信息直接挂在 graph node 上，后续 reducer 可以按需读取。
