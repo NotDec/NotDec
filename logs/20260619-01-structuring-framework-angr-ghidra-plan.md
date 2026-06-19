@@ -1517,3 +1517,45 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：4/10。补的是后续递归 structuring 的类型和查询入口。
 - 复杂度：2/10。只是 enum 和只读 helper。
 - 维护成本：2/10。字段语义简单，使用点集中。
+
+# 2026-06-19 实现记录：MutableRegionGraph child overlay build API
+
+继续补 Angr-style recursive structuring 需要的 overlay 构图能力。之前 `MutableRegionGraph::build(Cfg, R)` 只能把 region 里的每个 block 建成一个节点；后续如果先结构化 child region，需要 parent region 的 graph 能把 child blocks 合成一个已有 `StructuredRoot` 的节点。这轮新增 overload，但现有 Phoenix 仍走旧入口，所以当前输出不变。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:63`
+  新增 `MutableRegionGraph::build(Cfg, Regions, R, StructuredChildren)`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:32`
+  新增 `containsBlock()`，用于判断 child block 是否属于 parent region。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:231`
+  实现 child overlay build：有 structured root 的 child region 会成为一个 graph node，并用 child blocks 填充 block-to-node 映射。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:257`
+  parent region 中不属于 child overlay 的 block 仍建普通节点。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:263`
+  构边时，同一 child overlay 内部的边不再加成自边；跨 overlay 的边照常加；跳出 parent region 的边保留到 `ExternalSuccs`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-overlay-build.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`、1 个 `break`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-overlay-build.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-overlay-build.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-overlay-build-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-overlay-build-smoke.sol --tr-level=2`
+  通过，耗时约 `17.77s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步提供了 parent region overlay 构图入口，但尚未让 `RecursiveStructurer` 使用它。
+- 下一步可以让 `RecursiveStructurer` 先结构化 child，再让 Phoenix parent 通过 overlay build 消费 child root；需要先保证 natural loop child 的 `Follow/ExternalSuccs` 在 reducer 中被正确使用。
+
+评分：
+
+- 实现效果：5/10。真正补上了 child root 合入 parent graph 的构图能力。
+- 复杂度：4/10。新增一个 overload，旧入口不变。
+- 维护成本：4/10。构图逻辑和旧 build 有重复；后续稳定后可抽公共构边 helper。
