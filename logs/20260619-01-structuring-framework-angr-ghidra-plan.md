@@ -1391,3 +1391,45 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：5/10。RegionTree 开始有 natural loop 信息，但还没进入实际递归结构化。
 - 复杂度：4/10。只加了本地 dominator/backedge 识别，没有改 renderer。
 - 维护成本：5/10。当前 dominator 逻辑和 `MutableRegionGraph` 有重复；后续可以抽公共 helper，但现在先避免大范围抽象。
+
+# 2026-06-19 实现记录：natural loop region 记录 latch/follow
+
+上轮尝试让 `RecursiveStructurer` 直接消费 child region 时发现一个边界问题：natural loop child region 如果不带 follow/exit 信息，单独结构化时看不到 loop 出口，容易把正常 `while` 误处理成无限循环，或者漏掉 loop 后面的 `return/follow`。这轮先补元信息，不改变输出。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Region.h:22`
+  `Region` 新增 `Latch`，记录 natural loop 的回边来源。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Region.h:23`
+  `Region` 新增 `Follow`，只在 loop 外 successor 唯一时填写；多出口 loop 保持 `InvalidBlockId`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:163`
+  先收集 natural loop 的外部 successors。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:166`
+  natural loop region 填充 `Latch`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:167`
+  单出口 natural loop region 填充 `Follow`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-region-meta.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`、1 个 `break`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-region-meta.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`，loop 后 `return 0` 仍保留。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-region-meta.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-region-meta-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-region-meta-smoke.sol --tr-level=2`
+  通过，耗时约 `17.60s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步解决了后续递归消费 loop region 前必须有的边界信息。
+- `RecursiveStructurer` 仍未消费 child region；下一步应基于 `Head/Latch/Follow/Successors` 设计 overlay，而不是把 child region 当完全封闭图直接结构化。
+
+评分：
+
+- 实现效果：4/10。只是元信息，但补上了上次卡住的关键缺口。
+- 复杂度：2/10。字段和赋值很小。
+- 维护成本：3/10。字段语义直接，后续 overlay 会用到。
