@@ -936,3 +936,58 @@ shared structuring 算法，并把默认算法从旧 `phoenix` 切到 `structure
 - 实现效果：7/10。standalone 路径已切到新算法，后续验证不用绕顶层 MLsub。
 - 复杂度：2/10。只改 CLI 默认值和描述。
 - 维护成本：3/10。旧选项保留做对比；等新链路稳定后再删除旧实现入口。
+
+# 2026-06-19 实现记录：standalone 验证 simple switch reducer
+
+本轮用 standalone `notdec-llvm2c` 验证 shared structuring，修掉 simple switch 仍退回
+`goto follow` 的问题。核心原因有三个：switch 的所有 case/default 可能直接指向同一个
+follow；C adapter 会把原 CFG terminator 当普通 payload 带进 basic block；C renderer
+还没有真正输出公共 `Break` / `Continue` 节点。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:238`
+  switch target 允许没有 successor，用于表达 case/default 直接指向 follow。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:254`
+  如果所有 switch successor 都是同一个节点，把它作为 follow。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:265`
+  collapse 成员跳过 follow，只 collapse switch head 和真实 case body。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:294`
+  case/default 目标是 follow 时生成空 body + `break`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:374`
+  新增 `nodeTreeContainsKind()`，用于判断 collapsed subtree 是否已包含 semantic switch。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:411`
+  对已生成 semantic switch 的 collapsed node，不再追加原 switch terminator fallback。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:77`
+  C adapter 收集 payload 时跳过原 CFG terminator，避免把旧 switch/if 当普通语句重复输出。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:153`
+  C renderer 支持公共 `Break` 节点。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:157`
+  C renderer 支持公共 `Continue` 节点。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-structured-phoenix.c --algo=structured-phoenix`
+  通过，耗时约 `0.17s`，输出 0 个 `goto`、3 个 `break`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-default.c`
+  通过，耗时约 `0.17s`，默认 `structured-sailr` 输出 0 个 `goto`、3 个 `break`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-rootterm2-smoke.c --tr-level=2 --algo=structured-phoenix`
+  通过，耗时约 `0.14s`，输出 39 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-rootterm2-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`，输出 39 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-rootterm2-smoke.sol --tr-level=2`
+  通过，耗时约 `17.72s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+当前判断：
+
+- standalone 已能正向验证 shared switch reducer。
+- `appendFallbackNode()` 现在只对包含 semantic switch 的 collapsed node 跳过原 terminator；if/loop 等 reducer 还没完全迁完，所以暂时继续保留原 terminator fallback，避免丢控制流。
+
+评分：
+
+- 实现效果：6/10。simple switch 有了正向验证，C adapter 能渲染 break/continue。
+- 复杂度：5/10。fallback 跳过条件仍是过渡逻辑，等 if/loop reducer 完整后应继续收窄。
+- 维护成本：5/10。standalone 覆盖更可靠，但还需要把临时 `/tmp` 样例沉淀成正式测试。
