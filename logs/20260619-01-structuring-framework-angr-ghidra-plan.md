@@ -1291,3 +1291,55 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：6/10。结构化输出更接近正常 C，明显减少 label 噪音。
 - 复杂度：3/10。只多一次 tree 遍历。
 - 维护成本：3/10。逻辑集中在 C renderer，不影响 Solidity renderer。
+
+# 2026-06-19 实现记录：linear while + break reducer
+
+这轮继续迁 Phoenix 的循环恢复，但只补一个窄形状：`while (cond)` 的线性 body 中有一条条件边跳到循环出口时，生成 `if (...) break;`。这个形状在 C adapter 里还会遇到“两个 return block 被拆成不同 terminal node”的情况，所以 reducer 只在两个出口都是 terminal `return/unreachable` 时把额外 terminal 出口并入 loop，避免误吃普通多出口循环。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:402`
+  新增 `LoopBreakSite`，记录 break 所在 graph node、break 出口 node 和条件是否取反。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:408`
+  新增 `isTerminalGraphNode()`，只接受无 successor 且 terminator 是 `Return` 或 `Unreachable` 的 terminal node。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:420`
+  新增 `isLoopBreakExit()`，允许 break 目标是 loop follow，或是只被当前 body node 指向的 terminal clone。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:436`
+  新增 `buildBreakIfNode()`，生成 semantic `If` + `Break`，不生成 goto。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:449`
+  新增 `buildLoopBodyWithBreak()`，把 break-if 插回线性 body 中。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:477`
+  新增 `collectLinearLoopBodyWithBreak()`，只接受线性 loop body 和最多一条 break edge。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:624`
+  新增 `reduceLinearWhileWithBreakOnce()`，生成 `While` 节点并 collapse header、body 和可安全并入的 terminal break 出口。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:997`
+  reducer 顺序里在普通 linear while 之后调用 break fast path。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-out.c --algo=structured-sailr`
+  通过，输出 1 个 `while`、1 个 `break`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break-phoenix.c --algo=structured-phoenix`
+  通过，输出 1 个 `while`、1 个 `break`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body-out.c --algo=structured-sailr`
+  通过，输出 1 个 `while`，没有新增 `break/goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return-out.c --algo=structured-sailr`
+  通过，输出 0 个 `goto/label`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-out.c --algo=structured-sailr`
+  通过，输出 1 个 `switch`、3 个 `break`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-linear-break-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`，输出仍没有行首 `goto`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-linear-break-smoke.sol --tr-level=2`
+  通过，耗时约 `17.50s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这个 reducer 是 Phoenix/SAILR 共享的，所以 `structured-phoenix` 和 `structured-sailr` 都受益。
+- 仍未覆盖非线性 loop body、多条 break、continue、真实多出口 loop。这些后续应该放到更通用的 natural loop reducer 或 edge kind 分类里，不继续堆很多特例。
+
+评分：
+
+- 实现效果：6/10。覆盖一个常见早退出循环，明显减少 goto。
+- 复杂度：5/10。新增代码偏多，但边界收得比较窄，没有改公共接口。
+- 维护成本：5/10。后续做通用 loop reducer 时可以替换这段；在那之前它是一个安全 fast path。
