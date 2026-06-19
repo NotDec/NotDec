@@ -1062,3 +1062,53 @@ follow；C adapter 会把原 CFG terminator 当普通 payload 带进 basic block
 - 实现效果：6/10。do-while 已能正向验证，sequence 合并不再丢 structured subtree。
 - 复杂度：5/10。self-edge 支持会影响 graph 分析，但这是 loop structuring 必需能力。
 - 维护成本：5/10。loop 覆盖面仍窄，后续要继续迁多块 loop 和 break/continue 分类。
+
+# 2026-06-19 实现记录：C backend 旧入口改接共享 structuring，补两块 while reducer
+
+这轮把 `notdec-llvm2c` 的旧算法入口也收进 shared structuring 路线里，避免 C backend 还有一部分路径落回旧 `Goto` / `Phoenix` 类。顺手补了一个很保守的两块 while 规则，让最简单的 `Header -> Body -> Header` 能先结构化出来，再继续靠后续 reducer 处理复杂边界。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2127`
+  `SA_Goto` 现在直接走 `StructuredGoto`，不再走旧 `Goto` 类。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2130`
+  `SA_Phoenix` 现在也改成 `StructuredGoto(*this, "phoenix")`，旧入口只是别名。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:10`
+  旧 `goto` / `phoenix` 描述改成 alias，`structured-goto` / `structured-phoenix` / `structured-sailr` 继续保留。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:348`
+  新增 `reduceTwoBlockWhileOnce()`，只匹配很窄的两块循环：header 只有一个 block、`branch` 终结、两条后继里有一条是 body，body 再单独回到 header。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:403`
+  两块 while 折叠时只 collapse header 和 body，不碰 follow。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:702`
+  reducer 顺序改成每轮只做一个动作，优先 while / self-loop，再做 sequence / if / switch，避免先把 loop header 吸进 sequence。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-two-block-call.ll -o /tmp/notdec-while-two-block-call.c --algo=structured-phoenix`
+  通过，耗时约 `0.08s`，输出 1 个 `while`，保留 1 个 `goto` 到 follow。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-do-loop.ll -o /tmp/notdec-do-loop-structured-phoenix.c --algo=structured-phoenix`
+  通过，耗时约 `0.09s`，输出 1 个 `do`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-structured-phoenix.c --algo=structured-phoenix`
+  通过，输出 1 个 `switch`、3 个 `break`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-legacy-goto.c --algo=goto`
+  通过，说明旧名字已经转到 shared structuring 路径。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-alias-smoke.c --tr-level=2 --algo=structured-phoenix`
+  通过，耗时约 `0.15s`，输出 38 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-legacy-phoenix-alias-smoke.c --tr-level=2 --algo=phoenix`
+  通过，耗时约 `0.14s`，输出 38 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-alias-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`，输出 38 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-structuring-alias-smoke.sol --tr-level=2`
+  通过，耗时约 `17.76s`，输出仍是 `471` 个 `// block_...`、`454` 个 `// goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 旧 C backend 入口已经不再分叉到旧 structurer，结构恢复主线统一到了 shared structuring。
+- 两块 while 现在能出最小闭环，但 follow 还会保留一个显式 `goto`，这和后续 break/continue 分类、以及 fallback 收口还有关，不算当前这轮的失败点。
+
+评分：
+
+- 实现效果：6/10。入口收拢了，最小两块 while 也能跑。
+- 复杂度：4/10。只是把旧分支改成别名，代价小。
+- 维护成本：4/10。后续再迁别的算法时，不用再照顾两套入口。
