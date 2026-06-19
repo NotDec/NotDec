@@ -850,3 +850,49 @@ Chick ordering 做稳定排序。
 - 实现效果：6/10。SAILR 已作为独立算法入口接入，并复用 Phoenix 的 reducer/fallback。
 - 复杂度：5/10。新增类很小，唯一接口变化是 ordering hook 多拿一个 `StructuredCFG`。
 - 维护成本：5/10。后续可以继续在 SAILR 类里补 Angr 的策略，不需要再改 C/Solidity renderer。
+
+# 2026-06-19 实现记录：保守 switch reducer
+
+本轮先迁一个很窄的 Phoenix switch reducer：只处理 switch head 的每个 successor 都是
+独立 case/default body，并且这些 body 都单出口到同一个 follow 的形态。暂不处理 case
+目标就是 follow、tail case、case fallthrough、irregular entry 和嵌套 switch。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:22`
+  新增 `makeBreak()`，给 structured switch case body 补 `break`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:188`
+  新增 `buildSwitchCaseBody()`，把 case node 的已有结构树或 block 列表包成 case body。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:207`
+  新增 `reduceSwitchOnce()`，只匹配共同 follow、单入口、单出口的 switch region。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:258`
+  校验所有 case/default body 只能由 switch head 进入，并且只流向共同 follow。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:281`
+  生成公共 `StructuredNodeKind::Switch`，填充 `Default` 和 `StructuredCases`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:297`
+  collapse switch head 和 case/default body，保留到 follow 的 graph 边。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:510`
+  Phoenix reducer loop 接入 `reduceSwitchOnce()`。
+
+当前保留限制：
+
+- 真实 `fortune.o3.wasm.ll` 输出里仍只看到 fallback switch，说明这个 reducer 当前只覆盖很窄形态。
+- 用临时 `/tmp/notdec-simple-switch.ll` 走顶层 `notdec -o .c` 会先触发现有 MLsub 空指针断言，没法作为正向集成测试。
+- `notdec-llvm2c` standalone 工具当前只暴露旧 `goto/phoenix`，不能直接选 `structured-phoenix` 验证 shared reducer。
+- 下一步要么补一个直接调用 structuring library 的小单测，要么先迁 loop reducer，再用真实样例观察收益。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-backend-c notdec -j4` 通过。
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-switch-final.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `0.14s`，输出 39 行。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-switch-smoke.c --tr-level=2 --algo=structured-sailr` 通过，耗时约 `0.14s`，输出 39 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-switch-smoke.sol --tr-level=2` 通过，耗时约 `18.05s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-structured-phoenix-switch.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `308.82s`，输出 26996 行、2 个 `switch`、562 个 `goto`。
+
+评分：
+
+- 实现效果：4/10。公共 switch 节点生成链路接上了，但真实样例还没有明显触发。
+- 复杂度：5/10。规则保守，代码集中在 Phoenix reducer；没有改公共节点和 renderer。
+- 维护成本：5/10。后续需要补 structuring 级单测，否则正向覆盖不够稳定。
