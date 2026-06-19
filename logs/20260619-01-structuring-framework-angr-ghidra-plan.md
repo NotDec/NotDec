@@ -991,3 +991,74 @@ follow；C adapter 会把原 CFG terminator 当普通 payload 带进 basic block
 - 实现效果：6/10。simple switch 有了正向验证，C adapter 能渲染 break/continue。
 - 复杂度：5/10。fallback 跳过条件仍是过渡逻辑，等 if/loop reducer 完整后应继续收窄。
 - 维护成本：5/10。standalone 覆盖更可靠，但还需要把临时 `/tmp` 样例沉淀成正式测试。
+
+# 2026-06-19 实现记录：self-loop / do-while reducer
+
+本轮继续迁 Phoenix loop 里的最小闭环：支持单块自环。无条件自环生成
+`InfiniteLoop`，条件分支里一边回到自己时生成 `DoWhile`，另一边保留为 follow。
+同时修了 sequence reducer 丢失已结构化 subtree 的问题，否则 loop 会先生成、再被
+`entry -> loop` 的 sequence 合并打回普通 block。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:251`
+  `addEdge()` 允许 self-edge，让 region graph 能表达自环。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:62`
+  新增 `appendRegionNode()`，sequence 合并时优先保留已有 `StructuredRoot`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:74`
+  新增 `buildSequenceNode()`，替代 sequence reducer 里只按 block 重建的路径。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:87`
+  新增 `buildLoopBody()`，loop body 复用已有 structured subtree。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:348`
+  新增 `reduceSelfLoopOnce()`，匹配 self-edge。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:366`
+  单 successor 自环生成 `StructuredNodeKind::InfiniteLoop`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:368`
+  条件自环生成 `StructuredNodeKind::DoWhile`，false 分支回环时设置 `ConditionNegated`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:476`
+  `nodeTreeContainsStructuredControl()` 把 switch/while/do-while/infinite-loop 统一识别为已结构化控制流。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:617`
+  Phoenix reducer loop 接入 `reduceSelfLoopOnce()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:161`
+  C renderer 接入公共 `While`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:164`
+  C renderer 接入公共 `DoWhile`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:167`
+  C renderer 接入公共 `InfiniteLoop`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:215`
+  新增 `trueExpr()`，用于渲染 `while (1)`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:340`
+  新增 `renderWhile()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:348`
+  新增 `renderDoWhile()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:356`
+  新增 `renderInfiniteLoop()`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-do-loop.ll -o /tmp/notdec-do-loop.c --algo=structured-phoenix`
+  通过，耗时约 `0.08s`，输出 1 个 `do`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-do-loop.ll -o /tmp/notdec-do-loop-default.c`
+  通过，耗时约 `0.09s`，默认 `structured-sailr` 输出 1 个 `do`、0 个 `goto`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch-loop-regress.c --algo=structured-phoenix`
+  通过，耗时约 `0.17s`，输出 0 个 `goto`、3 个 `break`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-loop2-smoke.c --tr-level=2 --algo=structured-phoenix`
+  通过，耗时约 `0.14s`，输出 38 行，原自环 goto 被结构化成 `do ... while`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-sailr-loop2-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`，输出 38 行。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-loop2-smoke.sol --tr-level=2`
+  通过，耗时约 `17.62s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+当前保留限制：
+
+- 只支持单块 self-loop；`Header -> Body -> Header` 形式的 while 还没迁。
+- `continue` / `break` edge kind 识别还没迁，当前主要依赖 structured loop 自身消掉回边。
+- 临时无条件无限循环 IR 会在 standalone 前置 LLVM pass 里触发 RAUW 断言，未作为本轮验证标准。
+
+评分：
+
+- 实现效果：6/10。do-while 已能正向验证，sequence 合并不再丢 structured subtree。
+- 复杂度：5/10。self-edge 支持会影响 graph 分析，但这是 loop structuring 必需能力。
+- 维护成本：5/10。loop 覆盖面仍窄，后续要继续迁多块 loop 和 break/continue 分类。
