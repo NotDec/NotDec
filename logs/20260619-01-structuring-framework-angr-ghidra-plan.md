@@ -518,3 +518,62 @@ Ghidra 的 `CollapseStructure` 可以作为另一个 `RegionStructurer`：
 - 实现效果：5/10。内部 mutable graph 已有 Phoenix 迁移需要的基本形状，但还没跑任何 reducer。
 - 复杂度：4/10。数据结构简单，主要是 pred/succ 一致性和 collapse 重连。
 - 维护成本：5/10。后续如果 Phoenix 需要更复杂的 edge metadata 或 region overlay，这里还会继续扩展。
+
+# 2026-06-19 实现记录：公共 Phoenix 入口和 sequence reducer
+
+本轮开始迁移 Phoenix 到新 structuring 架构，但没有继续强行迁移 if/loop/switch 规则。原因是当前 `StructuredNode::If` / `While` / `Switch` 只有通用 `Children`，还不能清楚表达 true body、false body、follow、loop body、break/continue target、switch default/case body。继续迁旧 Phoenix 会把 C 侧的 Clang 语义塞进公共 structuring 层，所以这里停在接口决策点。
+
+已完成内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:9`
+  新增公共 `PhoenixStructurer`，同时实现整图 `Structurer` 和 region 级 `RegionStructurer`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:159`
+  `PhoenixStructurer::structure()` 走 `RegionIdentifier -> RecursiveStructurer`，和 Goto 使用同一套入口。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:164`
+  `PhoenixStructurer::structureRegion()` 从 `StructuredCFG + Region` 构造 `MutableRegionGraph`，先跑 sequence reducer，再 fallback 到 label/goto 输出。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:67`
+  `reduceSequenceOnce()` 实现第一条 Phoenix-style 规约：`A -> B`、`B` 只有一个前驱、`A` 是单后继 fallthrough 时，把两个 graph node 折叠成一个 sequence subtree。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:35`
+  `MutableRegionNode` 新增 `Blocks`，折叠后保留原始 block 列表，便于 reducer 生成 subtree 和 fallback terminator。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:145`
+  `collapseNodes()` 合并成员节点的 `Blocks`，新节点继续代表折叠后的原始 block 序列。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:12`
+  registry 增加 `phoenix -> PhoenixStructurer`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:17`
+  C backend 新增 `--algo=structured-phoenix`，专门验证公共 Phoenix 链路；旧 `--algo=phoenix` 仍走旧 C Phoenix。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuredGoto.h:13`
+  `StructuredGoto` adapter 改成可以传 structurer 名称，默认仍是 `goto`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:34`
+  C adapter 通过 `createStructurer(SA.getStructurerName())` 选择公共算法。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2137`
+  `SA_StructuredPhoenix` 复用 C adapter，传入公共 `phoenix`。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:9`
+  `notdec-backend-structuring` 加入 `PhoenixStructurer.cpp`。
+
+当前明确限制：
+
+- 这不是完整 Phoenix，只迁了算法入口和 sequence reducer。
+- 真实 Phoenix 的 if/if-else/while/do-while/switch/virtual edge 规则还没迁。
+- SAILR 还没开始，因为 SAILR 依赖 Phoenix 的 virtual edge 选择策略，必须等公共结构树接口先定下来。
+- `RegionIdentifier` 仍是 root-only，后续要补 loop/switch/if region，才能接近 Angr 的递归结构化效果。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-c notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-goto-smoke.c --tr-level=2 --algo=structured-goto` 通过，耗时约 `0.15s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-smoke.c --tr-level=2 --algo=structured-phoenix` 通过，耗时约 `0.14s`，输出从 40 行变成 39 行，说明 sequence reducer 已经折叠了一个 fallthrough 块。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-structuring-smoke.sol --tr-level=2` 通过，耗时约 `17.76s`。
+- Solidity smoke 输出仍有 471 个 `// block_...`、454 个 `// goto block_...`、12 个 `emit Event_...`、160 个 `revert();`。
+
+下一步需要先决定公共结构树怎么表达分支和循环：
+
+- `If` 是否明确分成 `Then`、`Else`、`Follow`，还是继续用 children 下标约定。
+- `Loop` 是否需要显式 `Body`、`ConditionBlock`、`Follow`、`BreakTarget`、`ContinueTarget`。
+- `Switch` 是否需要 case body 节点和 default body 节点，而不是当前的 case target 列表。
+- `VirtualEdge` 记录的是 graph node id 还是原始 block id；SAILR 后续需要稳定比较和排序，原始 block id 更容易跨 collapse 使用。
+
+评分：
+
+- 实现效果：5/10。公共 Phoenix 路径能跑，sequence reducer 已经使用 `MutableRegionGraph`，但还没覆盖 Phoenix 的核心规则。
+- 复杂度：5/10。新增代码集中在一个 structurer 和一个 C 试点算法名，没有改默认行为。
+- 维护成本：5/10。当前停在合适边界；继续前需要先把结构树接口补清楚，否则后面会越来越难维护。
