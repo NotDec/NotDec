@@ -3336,3 +3336,38 @@ graph-level refinement 里加入同类保护。
 - 实现效果：4/10。补上 outgoing edge rewrite 的一个关键安全边界。
 - 复杂度：2/10。局部检查。
 - 维护成本：2/10。后续 parent-region 规则可以放在同一处前置检查。
+
+# 2026-06-20 实现记录：child region 多 successor refinement guard
+
+继续补 Angr `_refine_cyclic_core()` 的 parent-region 限制。Angr 在有 parent region 时，如果 cyclic
+refinement 需要处理多个 successor，会直接放弃，避免在 child region 内擅自决定外层 follow。
+当前 shared structuring 没有完整 parent region 对象，这轮用 `R.Kind != Root` 作为保守边界。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1926`
+  `reduceGraphNaturalLoopOnce()` 增加 `const Region &R` 参数，用于判断当前是否是 root region。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1963`
+  如果当前 region 不是 root 且 loop 有多个 successor，则跳过 graph-level refinement。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2183`
+  `PhoenixStructurer::refineCyclic()` 传入当前 region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:470`
+  新增 `testRefineCyclicRejectsChildRegionMultipleSuccessors()`，验证 child natural-loop region 中多个
+  successor 不会被当前 refinement 强行处理。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.64s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-child-multisuccessor-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这是 parent-region 限制的保守版本，不等价于 Angr 的完整 parent graph 判断。
+- root region 仍允许多 successor refinement，保持之前 multi-exit loop 的改善。
+- 实现效果：3/10。补上一个避免 child region 过早决策的边界。
+- 复杂度：1/10。只增加 region kind 检查。
+- 维护成本：2/10。后续如果引入显式 parent region，可替换这个判断。
