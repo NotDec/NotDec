@@ -3703,3 +3703,37 @@ schema 缺少必要的 2-way successor 形状，`linear_do_while` 和 `self_loop
 - 实现效果：4/10。入口边界更像 shared structuring registry。
 - 复杂度：2/10。增加了一个小 CLI value type，但去掉了 C 层 enum。
 - 维护成本：2/10。算法名集中到 registry，后续改动面更小。
+
+# 2026-06-20 实现记录：把 CFGElement helper 移出旧 StructuralAnalysis 头
+
+继续拆旧 `StructuralAnalysis` monolith。`getStmt(CFGElement)` 是 `Goto`、`StructuredGoto` 和
+`StructuringContext` 都要用的基础 CFG helper，不属于旧 Phoenix，也不该继续放在
+`StructuralAnalysis.h` 里。这轮只移动这个 helper，不拆 `SAFuncContext` / `TypeBuilder` 这种更大的 C
+后端上下文，避免把边界拆半截。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuringContext.h:22`
+  声明 `getStmt(CFGElement)`，让 C structuring bridge 直接提供 CFGElement 到 Clang `Stmt` 的基础转换。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuringContext.cpp:17`
+  实现 `getStmt(CFGElement)`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuralAnalysis.h:66`
+  删除 `getStmt(CFGElement)` 声明。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:194`
+  删除旧实现。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-c notdec-llvm2c-exe structuring-analysis-test -j4`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步只是拆 monolith 的小口子，还没有完全去掉 `Goto.cpp` / `StructuredGoto.cpp` 对旧头的 include。
+- 剩余直接依赖主要来自 `SAFuncContext` 和 `TypeBuilder`，下一步要拆就应先单独抽 C backend context
+  头，而不是在 shared structuring reducer 里继续碰旧 monolith。
+- 实现效果：2/10。减少一个不该在旧头里的公共 helper。
+- 复杂度：1/10。纯移动声明和实现。
+- 维护成本：1/10。调用点不变，回归覆盖足够。
