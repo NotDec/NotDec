@@ -2091,3 +2091,25 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 - 旧 C Phoenix 已经不再是对外算法入口，也不再单独编译。
 - 后续如果要继续贴 Angr，可以直接围绕共享 `PhoenixStructurer` / `SAILRStructurer` 往前走，不必再保留旧 Phoenix 的双入口语义。
+
+# 2026-06-20 实现记录：legacy phoenix 入口拒绝测试
+
+旧 C Phoenix 的代码已经删掉了，这里再补一条负面测试，直接确认 `notdec-llvm2c` 不再接受 `--algo=phoenix`。这样删入口不是只看源码，而是有运行时验证。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/structuring/CMakeLists.txt:6`
+  新增 `legacy-phoenix-removed` 这个 ctest。
+- `external/NotDec-llvm2c/test/structuring/run_legacy_phoenix_removed.py:13`
+  直接运行 `notdec-llvm2c --algo=phoenix ...`，要求命令失败且输出包含 `Cannot find option named 'phoenix'`。
+
+验证：
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_legacy_phoenix_removed.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed' --output-on-failure` 通过，2 个测试都通过，耗时约 `0.51s`。
+
+当前判断：
+
+- 旧 Phoenix 入口已经从代码和测试两边同时去掉。
+- 后面要做的是把共享 `PhoenixStructurer` 再收敛到更接近 Angr 的实现，而不是恢复老 Phoenix 行为。
