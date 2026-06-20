@@ -2476,3 +2476,34 @@ c -> head / exit
 - 实现效果：6/10。last-resort 更接近 Angr，但还没有 edge virtualization hints。
 - 复杂度：4/10。增加了分析结果字段和一个小测试目标。
 - 维护成本：4/10。测试直接断言结构层数据，后续改 Phoenix 输出时不容易误伤。
+
+# 2026-06-20 实现记录：补 edge virtualization hints 消费入口
+
+继续对照 Angr `PhoenixStructurer._last_resort_refinement()`。Angr 在普通 last-resort bucket 之前，会先消费 `_edge_virtualization_hints`。当前 Angr 代码里能看到初始化和消费点，但没有在 structuring 模块内看到明确生产者；所以这一步只补 shared structuring 的消费边界，不编造 hint 来源。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:52`
+  新增 protected hook `edgeVirtualizationHints()`，默认用于 Phoenix/SAILR 在 last-resort 前提供优先虚拟化边。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1290`
+  默认实现返回空列表。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1348`
+  `virtualizeOneEdge()` 先消费 still-active hint edge，再走已有 last-resort bucket。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10`
+  新增 `HintStructurer` 测试派生类，覆盖 hook。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:63`
+  新增 `testEdgeVirtualizationHints()`，直接断言 hint edge 优先被虚拟化。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.44s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-edge-hints-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这一步只补消费机制，不新增 hint 生产策略。
+- 这样后续如果从 SAILR deoptimization 或 improved Phoenix schema 里产生 hint，可以接到同一个 hook。
+- 实现效果：4/10。架构边界补齐，但功能上还没有真实 hint producer。
+- 复杂度：2/10。新增一个 hook 和测试。
+- 维护成本：3/10。默认空实现不会影响 Phoenix 行为。
