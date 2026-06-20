@@ -3507,3 +3507,40 @@ jump block 时，如果 source 是 jump table head，可以只 detach edge，不
 - 实现效果：3/10。架构边界更接近 Angr。
 - 复杂度：1/10。接口搬迁。
 - 维护成本：2/10。新增虚函数，但默认行为固定且有测试。
+
+# 2026-06-20 实现记录：child 结构结果是否回填也移到 RegionStructurer
+
+继续把 recursive driver 里的策略往算法对象上收。之前 `RecursiveStructurer` 还自己判断一个 child
+结果是否“包含结构化控制”，再决定是否传给 parent。Angr 的方向是把这些边界尽量放进算法类，
+这样不同 structurer 可以决定 child result 要不要进入 parent overlay。这轮把这个过滤接口也搬到
+`RegionStructurer`，默认行为保持和之前一致。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionStructurer.h:16`
+  新增 `shouldUseStructuredChildRegion()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/RegionStructurer.cpp:36`
+  给默认实现补上 `containsStructuredControl()`，仍然只接受包含 switch/loop 的 child 结果。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:26`
+  recursive driver 不再自己判断 child 是否结构化，改为调用 `Structurer.shouldUseStructuredChildRegion()`。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:4`
+  把 `RegionStructurer.cpp` 加入 backend structuring 静态库。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:53`
+  `RecordingRegionStructurer` 增加参数，能分别模拟“child 结果有结构控制”和“child 结果只是 sequence”。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:267`
+  新增 `testRecursiveStructurerFiltersUnstructuredChildResult()`，验证默认策略会过滤掉不含结构控制的 child。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+
+当前判断：
+
+- 这一步仍不改变现有 Phoenix/SAILR 输出，只是把递归 driver 的判断搬到算法接口。
+- 后续如果有 Dream 或别的 structurer，需要不同的 child 回填策略，可以直接覆盖这个接口。
+- 实现效果：3/10。递归边界更统一了。
+- 复杂度：2/10。多一个小 cpp 文件，但逻辑更集中。
+- 维护成本：2/10。新增虚函数和一个 cpp，但默认行为有测试兜住。
