@@ -3193,3 +3193,38 @@ body 内虚拟化成 `goto`，并从 graph 边里断开，避免折叠后的 loo
 - 实现效果：4/10。修正一处 Angr 行为差异。
 - 复杂度：3/10。局部策略替换。
 - 维护成本：3/10。后续补 parent/dangling 规则时会继续复用该策略。
+
+# 2026-06-20 实现记录：多 continue edge 虚拟化
+
+继续补 Angr `_refine_cyclic_core()` 的 continue edge rewrite。Angr 在 loop body 有多条回到
+loop head 的边时，会保留拓扑上最后一条，其他回边改成 `continue`。这轮先按 block 顺序保留
+最后一个 latch，其余回边通过 `VirtualEdgeKind::Continue` 虚拟化。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1680`
+  新增 `virtualizeExtraContinueEdges()`，收集 loop body 内所有回到 head 的边，保留最后一个，
+  其它边用 `buildVirtualizedSource()` 改写 source node 后调用 `Graph.virtualizeEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1888`
+  `reduceGraphNaturalLoopOnce()` 在处理非 follow exit 后调用 `virtualizeExtraContinueEdges()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:294`
+  新增 `testRefineCyclicVirtualizesExtraContinues()`，验证多 latch loop 中额外回边会变成
+  `VirtualEdgeKind::Continue`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.62s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-extra-continue-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这是 continue rewrite 的最小实现；Angr 用 fullgraph quasi-topological order 选择保留边，
+  当前先用 block 顺序近似。
+- switch-case head 的特殊排除、找不到 source block 时只断边等细节还没有完整复刻。
+- 实现效果：4/10。多 latch 不再全部作为真实回边保留。
+- 复杂度：3/10。复用现有 virtualized source 机制。
+- 维护成本：3/10。后续补 Angr 的精确排序时需要调整保留边选择。
