@@ -3109,3 +3109,48 @@ body，和 RegionIdentifier 里对同一 head loop 的处理保持一致。
 - 实现效果：4/10。多 latch natural loop 不再只看第一条 back edge。
 - 复杂度：3/10。逻辑仍局限在 graph refinement。
 - 维护成本：3/10。后续实现多 successor 时会继续用这套 head/latch 合并结果。
+
+# 2026-06-20 实现记录：graph-level refinement 处理非 follow 出边
+
+继续补 Angr `_refine_cyclic_core()` 里 outgoing edge 的最小路径。之前 graph-level natural loop
+遇到多个 successor 会直接放弃。这轮选择一个 successor 作为 loop follow，其它 loop exit 在
+body 内虚拟化成 `goto`，并从 graph 边里断开，避免折叠后的 loop 节点保留多个后继。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1278`
+  新增 `nodeTreeContainsControlTransfer()`，避免已经虚拟化过的 source node 被 fallback 再按原始
+  terminator 渲染一次。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1565`
+  新增 `chooseNaturalLoopSuccessor()`。当前先保守选择 block id 最小的 successor。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1572`
+  新增 `virtualizeNonFollowLoopExits()`，把非 follow exit 通过 `buildVirtualizedSource()` 写进
+  source node，再调用 `Graph.virtualizeEdge()` 断开 graph 边。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1732`
+  `reduceGraphNaturalLoopOnce()` 不再因为多个 successor 直接放弃，而是设置单一 follow 并虚拟化
+  其它 exit。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:294`
+  新增 `testRefineCyclicVirtualizesNonFollowExits()`，验证非 follow exit 被 virtualize，折叠后的
+  while 节点只保留一个 follow successor。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:104`
+  `multi_exit_loop_fallback` 期望从 `while (1)` 调整为 `while (x == 0)`，head exit 被条件吸收后
+  `break;` 数量从 2 变为 1。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.62s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-outgoing-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这只是 outgoing edge rewrite 的最小版本；Angr 里按 edge count 选择 successor、parent region
+  限制、continue edge rewrite 还没有完整复刻。
+- `multi_exit_loop_fallback` 仍有 `goto b/c/d`，那是后续 acyclic/sequence reducer 的问题，不在
+  这次 outgoing rewrite 里硬修。
+- 实现效果：5/10。多出口 loop 现在能在 shared refinement 里继续收敛到条件 while。
+- 复杂度：4/10。开始修改 graph 边和 source replacement，后续需要更完整的 Angr 规则兜住。
+- 维护成本：4/10。successor 选择策略后续要替换成 Angr 的 edge-count 规则。
