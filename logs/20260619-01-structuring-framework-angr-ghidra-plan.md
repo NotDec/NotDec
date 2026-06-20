@@ -2723,3 +2723,34 @@ while (1) {
 - 实现效果：5/10。补齐 source replacement 的基础形状，但还不是 Angr 那种精确 AIL statement 拆分。
 - 复杂度：4/10。主要是 helper 分拆和结构层测试。
 - 维护成本：4/10。逻辑集中在 `buildVirtualizedSource()`，后续扩展比较直接。
+
+# 2026-06-20 实现记录：整理 structurer registry
+
+对照 Angr `structuring/__init__.py` 的 `STRUCTURER_CLASSES` 和 `structurer_class_from_name(name.lower())`，这轮整理 shared backend 的 structurer registry。目标是让后续继续接 Dream 或其它 Angr structurer 时，只维护一份注册表。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:34`
+  继续使用 `StructurerRegistration` 表作为唯一注册源。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:40`
+  新增 `makeStructurerNames()`，从注册表生成 `registeredStructurerNames()` 返回的 name array，去掉手写重复表。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:50`
+  新增 `equalsIgnoreCase()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:63`
+  `createStructurer()` 改成大小写不敏感查找，行为更接近 Angr 的 `name.lower()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:156`
+  新增 `testStructurerRegistryNames()`，断言注册名顺序和大小写不敏感创建。
+
+验证：
+
+- `cmake --build ../../build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir ../../build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.61s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-registry-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这一步不改变命令行 `--algo` 的枚举值，只整理 shared registry 内部行为。
+- 后续接 Dream 或其它算法时，只需要往 `Structurers` 表里加一项。
+- 实现效果：3/10。是架构清理，不新增算法能力。
+- 复杂度：2/10。局部改动。
+- 维护成本：2/10。去掉重复名字表后更低。
