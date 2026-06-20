@@ -2014,3 +2014,26 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 - 实现效果：6/10。补上了最缺的回归保护。
 - 复杂度：2/10。一个小脚本和一个 CTest 入口。
 - 维护成本：3/10。后续每迁一个 reducer 可以继续往同一个脚本加 case。
+
+# 2026-06-20 实现记录：SAILR 无入口图回退 Phoenix ordering
+
+对照 Angr 的 `SAILRStructurer._order_virtualizable_edges()` 后发现一个边界差异：Angr 找不到 graph entry 时不会启用 H1/H2/H3，而是直接回 Phoenix 默认排序。当前实现无条件跑 SAILR heuristic。这里补齐这个边界，避免入口不明确的 graph 上用不可靠的 sibling/postdom 统计。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:124`
+  如果 `MutableRegionGraphAnalysis::Entry` 是 `InvalidGraphNodeId`，直接调用 `PhoenixStructurer::orderVirtualizableEdges()`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure` 通过，1 个测试，耗时约 `0.42s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-sailr-entry-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-sailr-entry-smoke.sol --tr-level=2`
+  通过，耗时约 `17.70s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这是 SAILR ordering 的小边界修正，不改变 SAILR 主体能力。
+- 下一步更大的缺口仍是 SAILR 的 deoptimization/pass 入口，以及更完整的 Phoenix schema 迁移。
