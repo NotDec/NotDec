@@ -3036,3 +3036,40 @@ loop body，确认最多一个 loop successor 后折成 `InfiniteLoop`。更复�
   natural-loop refinement。
 - 复杂度：3/10。新增逻辑局部，但开始接近 Angr refinement 主路径。
 - 维护成本：3/10。后续补 while/do-while refinement 时可能会调整这些 helper。
+
+# 2026-06-20 实现记录：graph-level refinement 生成 while
+
+继续补 Angr while-refinement 的保守子集。上一轮 graph-level natural-loop refinement 只能生成
+`InfiniteLoop`。这轮在 loop head 是纯条件分支、两个后继里一个进 loop body、一个到唯一 successor
+时，直接生成 `While`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1558`
+  新增 `makeGraphWhileLoop()`。它检查 head 条件分支和 successor，生成 `While`，body 里跳过
+  head block。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1610`
+  新增 `makeGraphInfiniteLoop()`，保留旧 fallback。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1690`
+  `reduceGraphNaturalLoopOnce()` 优先调用 `makeGraphWhileLoop()`，失败时仍生成 `InfiniteLoop`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:240`
+  `testRefineCyclicReducesGraphNaturalLoop()` 改为断言生成 `While`，并检查 loop block 是 head
+  block `1`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.64s`。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-graph-while-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这只覆盖 Angr `_refine_cyclic_is_while_loop()` 的简单情况。
+- do-while refinement、多 successor 选择、outgoing edge rewrite 还没做。
+- 实现效果：4/10。graph-level refinement 不再总是退到 `while (1)`。
+- 复杂度：3/10。新增逻辑局部，判断条件保守。
+- 维护成本：3/10。后续补 do-while 时可能需要把 loop body 构造再拆细。
