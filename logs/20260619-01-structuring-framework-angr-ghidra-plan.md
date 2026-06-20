@@ -3579,3 +3579,32 @@ goto，不尝试任何结构恢复。
 - 实现效果：3/10。入口更统一，行为不变。
 - 复杂度：2/10。增加一个 region overload，但逻辑还是同一套 fallback。
 - 维护成本：2/10。后续若要删旧路径，风险更小。
+
+# 2026-06-20 实现记录：修正 Goto region fallback 的 child block 去重
+
+前一轮把 `GotoStructurer` 接入 recursive driver 后，region-tree 版 `structureRegion()` 还存在一个小 bug：
+它用 `RegionId` 去判断 `BlockId` 是否属于 child，实际上比错了对象，导致 parent region 可能把 child
+block 再输出一遍。这个问题不影响 Phoenix/SAILR，但会让统一入口的 fallback 语义不干净。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:116`
+  region 版 `structureRegion()` 先收集 child region 的 block 集合，再跳过这些 block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:289`
+  新增 `testGotoRegionSkipsChildBlocks()`，直接构造 root/child region overlay，验证 parent fallback
+  不会重复输出 child block。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+
+当前判断：
+
+- 这只是修一个入口统一后暴露出来的去重 bug，不改变 fallback 语义。
+- 后续如果要继续删旧入口，这种 overlay bug 会比保持两条路径更早暴露。
+- 实现效果：2/10。把递归入口的最基本正确性补齐。
+- 复杂度：1/10。局部修复。
+- 维护成本：1/10。一个直接测试就能看住。
