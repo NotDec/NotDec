@@ -2785,3 +2785,39 @@ while (1) {
 - 实现效果：3/10。主要是入口清理，不新增 reducer 能力。
 - 复杂度：2/10。改动集中在接口映射和调用点。
 - 维护成本：2/10。后续新增算法时，至少不用再复制 `StructuredGoto` 执行分支。
+
+# 2026-06-20 实现记录：确认多 latch 自然循环的 region 边界
+
+继续看 Angr 风格 cyclic refinement 时，先检查 multi-exit loop 输出异常是不是
+`RegionIdentifier` 漏掉了同一个 head 下的第二条 latch 路径。结论：不是。当前 region
+识别能把 `head -> a -> b -> head` 和 `head -> a -> c -> d -> head` 合并成一个
+natural loop，并把唯一外部 successor 识别为 `exit`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3`
+  引入 `RegionIdentifier`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:174`
+  新增 `testMergedNaturalLoopKeepsAllLatchPaths()`，构造同一个 loop head、两条 latch
+  路径、一个 exit 的 CFG，断言 natural loop blocks 是 `{0,1,2,3,4}`，successor 和
+  follow 都是 `5`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.62s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-region-boundary-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- multi-exit loop 现在仍不是 Angr 期望的完成态：parent reducer 可能先把 loop 内块和
+  follow 块折成一个 `StructuredRoot`，后续 natural-loop fallback 不能只裁掉外部
+  return/goto。
+- 试过两个直接修法都不合适：把 natural-loop child 直接传给 root 会让简单 while/do-while
+  大幅退化；在 fallback 里按原始 block 重渲染跨边界 node 会丢条件结构。
+- 下一步需要先定边界：要么禁止 acyclic reducer 跨 natural-loop 边界 collapse，要么让
+  `StructuredTree` 支持从 collapsed source 里裁出 loop 内部分。这个点计划里没有细化，
+  不应继续靠局部补丁硬猜。
+- 实现效果：2/10。新增的是定位测试，不是算法修复。
+- 复杂度：1/10。只加测试。
+- 维护成本：2/10。这个测试能防止后续把 region 识别误诊成问题来源。
