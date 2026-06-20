@@ -2212,3 +2212,25 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 - 实现效果：6/10。SAILR 和 Phoenix 的行为边界更接近 Angr。
 - 复杂度：3/10。只加一个布尔 hook。
 - 维护成本：3/10。后续 improved Phoenix 规则有明确入口。
+
+# 2026-06-20 实现记录：shared structuring 默认算法改为 SAILR
+
+Angr 的 `DEFAULT_STRUCTURER` 是 `SAILRStructurer`，而 shared structuring registry 里默认还停在 `goto`。C backend 的 CLI 默认已经是 `structured-sailr`，但 Solidity backend 通过 `DefaultStructurerName` 取默认值，所以仍会落到最弱的 goto。这里把 registry 默认改成 `sailr`，让跨语言 backend 的默认行为和 Angr/C backend 保持一致。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructurerRegistry.h:11`
+  `DefaultStructurerName` 从 `"goto"` 改成 `"sailr"`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-backend-solidity notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available' --output-on-failure` 通过，3 个测试，耗时约 `0.84s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-default-sailr-registry-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-default-sailr-smoke.sol --tr-level=2` 通过，耗时约 `19.10s`。
+
+当前判断：
+
+- 这一步不改变 C CLI 的默认值，因为它已经是 `structured-sailr`。
+- Solidity backend 以后默认走 SAILR，而不是 Goto fallback，更符合“共享 structuring 给多语言后端复用”的目标。
+- EVM smoke 时间和之前同口径约 18s 接近，未见明显性能风险。
