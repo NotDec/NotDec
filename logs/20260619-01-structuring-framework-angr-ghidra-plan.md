@@ -2874,3 +2874,28 @@ sequence/if/switch reducer 把 natural loop 内部节点和 loop exit 节点折�
 - 实现效果：5/10。修掉 multi-exit loop 的主要结构问题，但还没做到漂亮输出。
 - 复杂度：4/10。新增了 region-aware acyclic guard，但只在 root natural-loop exit 上生效。
 - 维护成本：4/10。后续如果要更接近 Angr，应继续把 region overlay 做实，而不是扩大这个 guard。
+
+# 2026-06-20 实现记录：补强 multi-exit loop 回归断言
+
+上一轮修掉了 multi-exit loop 里 `c` 掉到 loop 外的问题。这轮没有继续改算法，只把 smoke
+断言补强，避免后续回归时仍因为只检查 `break/continue` 数量而漏掉块顺序问题。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:307`
+  新增通用 `ordered` 断言，检查一个输出片段必须出现在另一个片段之前。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:107`
+  multi-exit loop 用例新增 `("c();", "return 0;")` 顺序断言，防止 `c` 再次落到 loop 后面。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.64s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-loop-boundary-order-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 重复 terminal `return` 仍存在，但它来自 C backend 的 return duplication / payload 渲染，不适合在 shared structuring 层靠节点去重硬修。
+- 实现效果：2/10。只是加回归保护。
+- 复杂度：1/10。测试脚本小改。
+- 维护成本：1/10。断言简单，后续可复用于其它结构顺序回归。
