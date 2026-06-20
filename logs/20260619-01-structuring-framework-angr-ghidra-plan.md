@@ -2142,3 +2142,43 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 - 对外入口现在清楚了：`phoenix` 是被删除的旧 C Phoenix；`structured-phoenix` 是共享 Angr-style Phoenix reducer。
 - 下一步继续改 `PhoenixStructurer` 本身，使它更贴近 Angr 的 Phoenix 流程，然后在同一套继承关系上补 SAILR。
+
+# 2026-06-20 实现记录：Phoenix 调度拆成 Angr 式阶段
+
+这轮先不增加新 reducer，而是把 shared `PhoenixStructurer` 的主循环拆成更接近 Angr 的阶段：acyclic schema、cyclic schema、cyclic refinement、last-resort refinement。之前这些规则都直接塞在 `structureRegion()` 里，后续 SAILR 或其他 Angr 算法如果只想替换某一阶段，会被迫复制整个循环。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:33`
+  新增可覆写的 `analyzeAcyclic()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:36`
+  新增可覆写的 `analyzeCyclic()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:39`
+  新增可覆写的 `refineCyclic()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:42`
+  新增可覆写的 `lastResortRefinement()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1126`
+  `analyzeAcyclic()` 串起 sequence / if / switch reducer。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1138`
+  `analyzeCyclic()` 串起 while / while-with-break / self-loop reducer。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1150`
+  `refineCyclic()` 暂时承载现有 natural-loop fallback。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1158`
+  `lastResortRefinement()` 承载 virtual edge fallback。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1209`
+  `structureRegion()` 改成按这些阶段调度，不再直接列出所有 reducer。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available' --output-on-failure` 通过，3 个测试，耗时约 `0.65s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-phoenix-staged-smoke.c --tr-level=2 --algo=structured-phoenix` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-sailr-staged-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这一步让 shared Phoenix 的控制流程更像 Angr，但还没有补完整 Phoenix schema。
+- SAILR 后续可以只覆写 `preprocessRegionGraph()`、`orderVirtualizableEdges()` 或某个阶段函数，不需要复制 Phoenix 主循环。
+- 实现效果：6/10。阶段边界更清楚，但具体 reducer 能力还没增加。
+- 复杂度：4/10。只多了几个虚函数，主循环反而更短。
+- 维护成本：4/10。后续迁 Angr 规则时有明确落点，代价是调用层级多了一层。
