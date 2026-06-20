@@ -2821,3 +2821,56 @@ natural loop，并把唯一外部 successor 识别为 `exit`。
 - 实现效果：2/10。新增的是定位测试，不是算法修复。
 - 复杂度：1/10。只加测试。
 - 维护成本：2/10。这个测试能防止后续把 region 识别误诊成问题来源。
+
+# 2026-06-20 实现记录：保护 natural-loop exit 边界
+
+接上一个边界问题，这轮选择更接近 Angr region 边界的方案：不让 root 里的 acyclic
+sequence/if/switch reducer 把 natural loop 内部节点和 loop exit 节点折成同一个
+`StructuredRoot`。这样后续 natural-loop fallback 还能在 loop 内把出口渲染成
+`break`，而不是把 `c` 这类 loop 内块留到 loop 外。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:34`
+  `analyzeAcyclic()` 增加 `RegionTree` 和当前 `Region` 参数，让 acyclic schema 能看到
+  region 边界。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:123`
+  新增 block membership helper。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:147`
+  新增 `collapseCrossesNaturalLoopBoundary()`。当前只保护 root 下 natural-loop 的 exit
+  边界，避免挡住普通 preheader 到 loop head 的边。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:195`
+  `reduceSequenceOnce()` 在 collapse 前检查 natural-loop exit 边界。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:218`
+  `reduceIfOnce()` 在 collapse 前检查 natural-loop exit 边界。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:360`
+  `reduceSwitchOnce()` 在 collapse 前检查 natural-loop exit 边界。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1046`
+  新增 terminal block 判断，用于识别 C backend `RetDupPass` 生成的 return clone。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1064`
+  `classifyNaturalLoopExit()` 改成接收 `StructuredCFG`，把 natural loop 的 terminal
+  exit clone 也分类成 `break`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:104`
+  multi-exit loop smoke 改为断言两个 `break`、两个 `continue`，并禁止 `goto exit`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:33`
+  放宽简单 loop 用例对 preheader `goto head/body` 的格式要求。这个 goto 是当前 fallback
+  形状，不影响本轮要验证的 loop exit 边界。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:335`
+  不再要求 `structured-phoenix` 一定没有 `break`。Phoenix 的 natural-loop fallback
+  也可以合法地产生 break，不能把 break 当成 SAILR-only 行为。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.61s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-loop-boundary-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- multi-exit loop 现在的核心控制流更接近 Angr：loop 内两个出口都变成 `break`，两个回边变成
+  `continue`，`c` 不再掉到 loop 外。
+- 输出里仍可能有 preheader `goto head` 和重复 terminal `return`。这是 C fallback/RetDup
+  后处理问题，不是这轮的 structuring 边界问题。
+- 实现效果：5/10。修掉 multi-exit loop 的主要结构问题，但还没做到漂亮输出。
+- 复杂度：4/10。新增了 region-aware acyclic guard，但只在 root natural-loop exit 上生效。
+- 维护成本：4/10。后续如果要更接近 Angr，应继续把 region overlay 做实，而不是扩大这个 guard。
