@@ -3544,3 +3544,38 @@ jump block 时，如果 source 是 jump table head，可以只 detach edge，不
 - 实现效果：3/10。递归边界更统一了。
 - 复杂度：2/10。多一个小 cpp 文件，但逻辑更集中。
 - 维护成本：2/10。新增虚函数和一个 cpp，但默认行为有测试兜住。
+
+# 2026-06-20 实现记录：Goto 也接入 recursive structuring 入口
+
+继续收拢 structuring 入口。虽然 `GotoStructurer` 不是 Phoenix/SAILR，但它也应该走同一套
+`RecursiveStructurer` + `RegionStructurer` 入口，避免 backend 里还残留一条单独的整图结构化路径。
+这轮让 `GotoStructurer` 明确实现 region 级接口，并保持它仍是纯 fallback：只输出 label/basic block/
+goto，不尝试任何结构恢复。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoStructurer.h:14`
+  `GotoStructurer` 明确声明 `supportsChildRegions()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoStructurer.h:19`
+  新增 region-tree 版 `structureRegion()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:18`
+  `GotoStructurer::structure()` 走 `RegionIdentifier -> RecursiveStructurer`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:108`
+  新增 region-tree 版 `structureRegion()`，用于 recursive driver 传入 child 结果时继续保留 fallback 形态。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-goto-recursive-smoke.c --tr-level=2 --algo=structured-goto`
+  通过。
+
+当前判断：
+
+- 这一步不改变 Goto fallback 的语义，只是把入口统一到 recursive driver。
+- 后续如果继续接别的 backend，至少不会再有一条独立的整图 structuring 路线。
+- 实现效果：3/10。入口更统一，行为不变。
+- 复杂度：2/10。增加一个 region overload，但逻辑还是同一套 fallback。
+- 维护成本：2/10。后续若要删旧路径，风险更小。
