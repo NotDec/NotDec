@@ -1799,3 +1799,24 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 - 实现效果：4/10。补齐了一个安全的 virtual edge kind，但还不是完整 irregular loop exit 迁移。
 - 复杂度：2/10。只多传 `Region` 并改一个分类条件。
 - 维护成本：2/10。逻辑局部，后续补 break 时可以沿用同一个 region-aware 收集入口。
+
+# 2026-06-20 调整记录：break fallback 暂停点
+
+继续迁移 Phoenix irregular loop exit 时，尝试过把 natural-loop child graph 的 `ExternalSuccs` 到 `Follow` 作为 `Break` virtual edge，再把 natural-loop child root 包成 `While`。临时样例 `/tmp/notdec-loop-external-break-fallback.ll` 暴露了一个更早的边界问题：当前 `RegionIdentifier` 会为多 latch / 重叠 natural loop 生成重叠 child region，parent overlay 还没有处理“重叠 child region 该选哪个、如何合并或嵌套”的策略。
+
+因此这轮没有提交 break fallback 代码，只保留已验证的 stable 状态。直接把外部 follow 边标成 `Break` 不够，因为：
+
+- natural-loop child graph 里跳到 follow 的边在 `ExternalSuccs`，不是普通 `Succs`。
+- parent overlay 里的 child->follow 是正常后继，不能猜成 `Break`。
+- child root 只有被 parent overlay 消费后，`break/continue` 才有语义容器；重叠 loop child 会让这个消费关系不明确。
+
+当前判断：
+
+- 下一步不能继续只补 `VirtualEdgeKind::Break`。
+- 需要先定 region 边界策略：至少要过滤或合并重叠 natural-loop child，保证 parent overlay 只消费不重叠、可嵌套的 child region。
+- 这是计划里没有细化的技术决策点，goal 保持 active，不标记 complete。
+
+验证：
+
+- 未提交实验代码已撤回，`external/NotDec-llvm2c` 工作树干净。
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
