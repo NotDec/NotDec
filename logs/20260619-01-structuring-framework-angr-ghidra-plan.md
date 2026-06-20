@@ -3371,3 +3371,37 @@ refinement 需要处理多个 successor，会直接放弃，避免在 child regi
 - 实现效果：3/10。补上一个避免 child region 过早决策的边界。
 - 复杂度：1/10。只增加 region kind 检查。
 - 维护成本：2/10。后续如果引入显式 parent region，可替换这个判断。
+
+# 2026-06-20 实现记录：continue edge 保留顺序改用 graph order
+
+继续把 graph-level loop refinement 往 Angr 的图顺序靠。之前多条回头边时，
+`virtualizeExtraContinueEdges()` 按 block id 排序并保留最大 block id 的真实边。
+这和 Angr 基于 region graph 顺序处理边的方式不一致，也会让结果受输入 block 编号影响。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1743`
+  `virtualizeExtraContinueEdges()` 增加 `MutableRegionGraphAnalysis` 参数。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1756`
+  continue source 排序优先使用 `Analysis.NodeOrder`，只在顺序缺失或相同时回退到 block id。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2031`
+  `reduceGraphNaturalLoopOnce()` 传入本轮 graph analysis，避免重新分析。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:316`
+  `testRefineCyclicVirtualizesExtraContinues()` 增加 `FromBlock == 4` 断言，锁住当前按 graph order
+  保留最后一条回头边的行为。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+
+当前判断：
+
+- 这只是替换一处 block-id tie-break，没有实现完整 Angr quasi-topological sort。
+- `MutableRegionGraphAnalysis::NodeOrder` 仍来自当前 DFS 后序，后续如果补更接近 Angr 的 region
+  order，这里可以直接复用。
+- 实现效果：3/10。减少一个和 Angr 不一致的局部决策。
+- 复杂度：1/10。只改排序依据和一条测试断言。
+- 维护成本：1/10。接口只多传已有分析结果。
