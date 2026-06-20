@@ -2060,3 +2060,34 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 - 这还不是 SAILR deoptimization，只是把算法相关前处理的入口补出来。
 - 后面如果要模拟 Angr 的 pass 过滤和去优化，应该优先覆盖这个 hook，而不是继续往 reducer 主循环里塞特例。
+
+# 2026-06-20 实现记录：删除旧 C Phoenix 入口和编译单元
+
+现在 `llvm2c` 的 structuring 入口已经按 Angr 的方向收口到共享 structuring 骨架，这里把旧版 C Phoenix 的独立入口和编译单元删掉，只保留 `goto` / `structured-goto` / `structured-sailr` 这条新路径。这样对外就不再有旧 `phoenix` / `structured-phoenix`，也不会再编译旧的 `notdec-llvm2c/Phoenix.cpp`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:17`
+  删除 `SA_Phoenix` 和 `SA_StructuredPhoenix`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:9`
+  删除 `phoenix` / `structured-phoenix` CLI 选项。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2126`
+  只保留 `goto` / `structured-goto` / `structured-sailr` 三条 structuring 路径。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/CMakeLists.txt:2`
+  删除旧 `Phoenix.cpp` 编译单元。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Phoenix.h`
+  删除旧 C Phoenix 头文件。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Phoenix.cpp`
+  删除旧 C Phoenix 实现。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-c notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure` 通过，1 个测试，耗时约 `0.45s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-no-legacy-phoenix-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，说明新共享 structuring 路径不受影响。
+
+当前判断：
+
+- 旧 C Phoenix 已经不再是对外算法入口，也不再单独编译。
+- 后续如果要继续贴 Angr，可以直接围绕共享 `PhoenixStructurer` / `SAILRStructurer` 往前走，不必再保留旧 Phoenix 的双入口语义。
