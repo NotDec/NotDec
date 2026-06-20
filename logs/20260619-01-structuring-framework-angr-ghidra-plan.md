@@ -3405,3 +3405,36 @@ refinement 需要处理多个 successor，会直接放弃，避免在 child regi
 - 实现效果：3/10。减少一个和 Angr 不一致的局部决策。
 - 复杂度：1/10。只改排序依据和一条测试断言。
 - 维护成本：1/10。接口只多传已有分析结果。
+
+# 2026-06-20 实现记录：区分 known 和 registered structurer
+
+继续整理 Angr 式多算法入口。plan 里已经把 Dream 作为后续算法接入口，但当前代码不能把
+`dream` 注册成可执行算法，否则会误导调用方以为 DREAM 已实现。这轮只把“已规划算法名”和
+“当前可创建算法”分开。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructurerRegistry.h:15`
+  新增 `knownStructurerNames()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:37`
+  新增 `KnownStructurers`，包含 `goto`、`phoenix`、`sailr`、`dream`。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:69`
+  实现 `knownStructurerNames()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:170`
+  `testStructurerRegistryNames()` 验证 `dream` 是 known name，但 `createStructurer("dream")`
+  仍返回空。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+
+当前判断：
+
+- 这不是 DREAM 实现，也不改变 CLI `--algo` 枚举。
+- 后续如果实现 Dream，只需要把 factory 放进 `Structurers` 并开放对应 CLI/test。
+- 实现效果：2/10。只是把多算法接入口边界补清楚。
+- 复杂度：1/10。只加名字表。
+- 维护成本：1/10。减少后续在文档、CLI、registry 之间重复写算法名的风险。
