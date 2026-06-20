@@ -2617,3 +2617,70 @@ Angr 的真实做法更明确：
 
 - 试探性代码已全部回退，`external/NotDec-llvm2c` 当前无未提交代码改动。
 - goal 继续保持 active；还没有达到“Angr-style virtual edge 生命周期”这个实现点。
+
+# 2026-06-20 实现记录：virtualized source 与 collapsed tail block
+
+继续补 Angr `_virtualize_edge()` 在 shared model 里的缺口。这次没有完整复刻 Angr 的 AIL node replacement，但补了两个必要边界：
+
+- graph node 记录真实 tail block，避免 collapse 后用 `Blocks.back()` 猜 tail。
+- last-resort virtualize 条件边时，可以给 source node 安装 structured replacement。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:39`
+  `MutableRegionNode` 新增 `TailBlock`，表示 fallback 应该参考的尾部 terminator。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:81`
+  新增 `MutableRegionGraph::setStructuredRoot()`，给 virtualize 阶段替换 source node 用。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:370`
+  `addNode()` 初始化 `TailBlock`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:540`
+  实现 `setStructuredRoot()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:548`
+  `virtualizeEdge()` 的 `FromBlock` 改用 `TailBlock`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:564`
+  `collapseNodes()` 合并 `TailBlock`。如果成员有出到 collapsed node 外部的 edge 或 external successor，优先用这个成员的 tail。这个修掉 root-cycle 中 `{c, head, a, b}` 被误认为 tail 是 `b` 的问题。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:42`
+  `lastResortRefinement()` 和 `virtualizeOneEdge()` 接收 `StructuredTree &Tree`，为 source replacement 准备 tree node。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:990`
+  新增 `nodeContainsBlock()`，fallback 追加 virtual edge 时跳过已经在 collapsed node 内部的目标。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:995`
+  新增 `buildVirtualizedBranchSource()`。source tail 是二分支时，把 removed edge 表示成 `if (...) control-transfer`，再补保留边的 control-transfer。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1075`
+  `appendFallbackNode()` 用 `TailBlock` 找 tail，不再用 `Blocks.back()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1189`
+  `hasDirectLoopControlTransfer()` 递归检查 nested `break/continue`，让 `if (...) continue; else break;` 能触发 natural-loop wrapper。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1407`
+  `lastResortRefinement()` 传入 tree。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1417`
+  `virtualizeOneEdge()` 在 `Graph.virtualizeEdge()` 前尝试安装 source replacement。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:38`
+  新增 `branchBlock()` helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:67`
+  更新 hint 测试，断言 virtualize 后 source node 有 `StructuredRoot`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:239`
+  新增 `root_cycle_follow`，要求不能输出 `goto c;`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.61s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-virtualized-source-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+root-cycle 当前输出核心形状：
+
+```c
+while (1) {
+  head:
+    if (x == 0) { a(); } else { b(); }
+    c();
+    if (y == (char **)0) { continue; } else { break; }
+}
+```
+
+当前判断：
+
+- 这一步修掉了 `Blocks.back()` 误作 tail 导致的 `goto c`，并把 source replacement API 接进 last-resort。
+- 这还不是完整 Angr `_virtualize_edge()`：现在只处理 branch tail，switch 和普通 jump 还没有 source replacement。
+- 实现效果：6/10。root-cycle 回归修掉，virtual edge 生命周期向 Angr 靠近了一步。
+- 复杂度：5/10。新增了 `TailBlock` 状态和 virtualize 阶段 tree 写入。
+- 维护成本：5/10。TailBlock 需要后续 reducer collapse 时继续维护，测试已覆盖当前暴露的错误。
