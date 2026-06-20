@@ -1895,3 +1895,41 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 - laminar loop region 是必要前置，但还不足以安全接 `Break` fallback。
 - 下一步应先让 `RecursiveStructurer` 或 `PhoenixStructurer` 明确“child loop ownership”：简单 whole-loop 由 parent/root reducer 处理，只有 parent 无法规约或 child 被明确消费时，才启用 child loop wrapper。
+
+# 2026-06-20 实现记录：root 不消费 natural-loop child
+
+上一步的问题是 root-level Phoenix reducer 和 natural-loop child wrapper 会抢同一个 loop。这里先定一个保守边界：root region 不把 natural-loop child 的结构化结果传回 parent overlay。这样简单 whole-loop 仍由 root-level reducer 处理，避免 child 先包 loop 后留下额外 backedge。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:36`
+  新增 `shouldPassChildToParent()`，root parent 遇到 `RegionKind::NaturalLoop` child 时返回 false。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:61`
+  `StructuredChildren` 只接收允许传给 parent、且确实包含结构化控制节点的 child root。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.ownership.c --algo=structured-sailr`
+  通过，输出有 `while`、`return`，没有额外 `goto head`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break.ownership.c --algo=structured-sailr`
+  通过，输出有 `while`、`break`、`return`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-external-break-fallback.ll -o /tmp/notdec-loop-external-break-fallback.ownership.c --algo=structured-sailr`
+  通过，输出仍偏 goto-heavy，和本次修改前一致。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch.ownership.c --algo=structured-sailr`
+  通过，输出有 `switch`、3 个 `break`、`return`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-ownership-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-ownership-smoke.sol --tr-level=2`
+  通过，耗时约 `17.57s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步只解决 ownership 冲突，不改善 irregular loop。
+- 后续 break fallback 应只在会被非 root parent 消费的 child loop 上启用，或者等 root 无法规约时再兜底，不能无条件给所有 natural-loop child 包 `While`。
+
+评分：
+
+- 实现效果：5/10。避免了已确认的简单 while 回退。
+- 复杂度：2/10。只加了一个过滤条件。
+- 维护成本：3/10。规则保守，后续如果要让 root 消费某些 child loop，需要把 ownership 条件再细分。
