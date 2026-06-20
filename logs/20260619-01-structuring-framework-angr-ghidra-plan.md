@@ -2037,3 +2037,26 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 - 这是 SAILR ordering 的小边界修正，不改变 SAILR 主体能力。
 - 下一步更大的缺口仍是 SAILR 的 deoptimization/pass 入口，以及更完整的 Phoenix schema 迁移。
+
+# 2026-06-20 实现记录：Phoenix 预处理 hook
+
+为了给后续 SAILR 的 deoptimization 留一个位置，这里给 `PhoenixStructurer` 加了一个空的 region preprocess hook，并把它接到 reducer 循环前。当前默认不做任何事，所以 Phoenix 输出不变；但后面如果要按算法名注入预处理，就不用再改主循环。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:29`
+  新增 `preprocessRegionGraph()`，默认空实现。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1168`
+  `structureRegion()` 在 reducer 循环前调用 `preprocessRegionGraph()`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure` 通过，1 个测试，耗时约 `0.42s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-prehook-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.13s`。
+
+当前判断：
+
+- 这还不是 SAILR deoptimization，只是把算法相关前处理的入口补出来。
+- 后面如果要模拟 Angr 的 pass 过滤和去优化，应该优先覆盖这个 hook，而不是继续往 reducer 主循环里塞特例。
