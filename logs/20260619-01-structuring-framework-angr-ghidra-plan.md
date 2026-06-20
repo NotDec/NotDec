@@ -2930,3 +2930,36 @@ sequence/if/switch reducer 把 natural loop 内部节点和 loop exit 节点折�
 - 实现效果：3/10。只改善一个 fallback 输出形状。
 - 复杂度：2/10。局部 sequence 后处理。
 - 维护成本：2/10。规则窄，误伤风险低。
+
+# 2026-06-20 实现记录：补 SAILR edge ordering 策略测试
+
+回到整体算法主线。这轮不继续清理 C 输出细节，而是把 SAILR 的关键差异固定到测试里。
+当前 shared SAILR 已经实现 Angr `SAILRStructurer._order_virtualizable_edges()` 的 H1/H2/H3
+入口，但之前没有直接测试这些策略，后续改 Phoenix last-resort 时容易误伤。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4`
+  引入 `SAILRStructurer`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:39`
+  新增 `TestSAILRStructurer`，只用于暴露 protected 的 `orderVirtualizableEdges()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:203`
+  新增 `testSAILROrderPrefersLeastSiblingEdges()`，覆盖 SAILR H1：优先选择 sibling edge
+  更少的目标。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:232`
+  新增 `testSAILROrderPrefersReturnTargetTieBreak()`，关闭 postdom 过滤后覆盖 SAILR H3：
+  tie-break 时优先选择 return target。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.61s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-sailr-ordering-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这不是新 reducer，但它把 SAILR 的核心 edge virtualization 策略固定住了。
+- H2 的 postdom 计数还没有单独断言，后续如果继续改 dominator/postdom graph，可以再补。
+- 实现效果：2/10。测试补强。
+- 复杂度：1/10。只暴露 protected 方法给测试。
+- 维护成本：2/10。后续重构 SAILR ordering 时能直接抓回归。
