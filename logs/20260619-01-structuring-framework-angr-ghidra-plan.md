@@ -2264,3 +2264,35 @@ Angr 的 `DEFAULT_STRUCTURER` 是 `SAILRStructurer`，而 shared structuring reg
 - 实现效果：6/10。补了常见 early return，但还没有迁 short-circuit condition。
 - 复杂度：4/10。规则本身小，主要复杂度在避免抢 loop。
 - 维护成本：4/10。后续如果引入 Angr 一样的 full graph / region overlay，可以把这个保护换成更准确的 cyclic 判断。
+
+# 2026-06-20 实现记录：Phoenix 线性 do-while schema
+
+继续补 Angr `_match_cyclic_dowhile()` 的一个窄形状：线性 body 的最后一个 latch 条件分支一边回到 body entry，另一边到 follow。此前 shared Phoenix 只支持 self-loop do-while，多块 body 会落到 fallback 或更弱的结构。
+
+这次不处理多入口、多 latch、body 内 break/continue，也不做 Angr 的 multi-statement expression 优化。候选选择上显式尝试两个 successor，只有能从 successor 线性走到 latch 的才作为 do-while body entry。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:714`
+  新增 `collectLinearDoWhileBody()`，从候选 entry 沿单后继 fallthrough 线性走到 latch。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:748`
+  新增 `reduceLinearDoWhileOnce()`，生成 `StructuredNodeKind::DoWhile` 并 collapse body 节点。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1266`
+  `analyzeCyclic()` 在 while / improved while-break 后、self-loop 前尝试线性 do-while。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:163`
+  新增 `linear_do_while` 小 IR，要求输出 `do { ... } while (x == 0);`，不能退回 `goto body1` 或 `while (1)`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available' --output-on-failure` 通过，3 个测试，耗时约 `1.04s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-linear-dowhile-phoenix-smoke.c --tr-level=2 --algo=structured-phoenix` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-linear-dowhile-sailr-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这只是 do-while 的线性子集，还不是完整 Angr cyclic do-while。
+- 规则没有引入新条件表达式，只复用 latch 原条件，所以适合 shared structuring 当前的 opaque payload 模型。
+- 实现效果：6/10。补了一个常见 loop schema。
+- 复杂度：5/10。新增 helper 较长，但逻辑局限在线性 body。
+- 维护成本：4/10。后续完整 do-while 可以替换这个 helper，测试保留为基础回归。
