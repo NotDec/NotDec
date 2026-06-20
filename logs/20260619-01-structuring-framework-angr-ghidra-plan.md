@@ -2296,3 +2296,28 @@ Angr 的 `DEFAULT_STRUCTURER` 是 `SAILRStructurer`，而 shared structuring reg
 - 实现效果：6/10。补了一个常见 loop schema。
 - 复杂度：5/10。新增 helper 较长，但逻辑局限在线性 body。
 - 维护成本：4/10。后续完整 do-while 可以替换这个 helper，测试保留为基础回归。
+
+# 2026-06-20 实现记录：SAILR postdom heuristic 参数收口
+
+对照 Angr `SAILRStructurer.__init__()`，postdom heuristic 有 `postdom_max_edges=10` 和 `postdom_max_graph_size=50` 两个参数。当前实现把这两个值写死在 helper 里。这里把它们收进 `SAILRStructurer` 对象，默认值保持 10/50，方便后续接 backend option 或继续复现 Angr heuristic。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h:13`
+  新增构造函数参数 `PostDomMaxEdges` / `PostDomMaxGraphSize`，默认 `10` / `50`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h:29`
+  新增成员保存这两个限制。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:70`
+  `filterByMostPostDominators()` 改为接收限制参数，不再写死 `10` / `50`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:132`
+  `orderVirtualizableEdges()` 使用对象上的限制参数。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available' --output-on-failure` 通过，3 个测试，耗时约 `1.01s`。
+
+当前判断：
+
+- 行为不变，只把 Angr SAILR 的参数边界放到算法对象上。
+- 后续如果要暴露 SAILR 参数，不需要再改 helper 内部。
