@@ -3228,3 +3228,38 @@ loop head 的边时，会保留拓扑上最后一条，其他回边改成 `conti
 - 实现效果：4/10。多 latch 不再全部作为真实回边保留。
 - 复杂度：3/10。复用现有 virtualized source 机制。
 - 维护成本：3/10。后续补 Angr 的精确排序时需要调整保留边选择。
+
+# 2026-06-20 实现记录：graph-level do-while refinement
+
+继续补 Angr `_refine_cyclic_is_dowhile_loop()` 的保守子集。已有 `reduceLinearDoWhileOnce()` 只处理
+线性链路；这轮在 graph-level refinement 里识别“唯一 latch 是条件分支，两个 successor 分别是
+loop head 和 follow”的情况，生成 `DoWhile`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1791`
+  新增 `makeGraphDoWhileLoop()`，检查唯一 latch、latch 条件分支和唯一 follow，生成 `DoWhile`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1947`
+  `reduceGraphNaturalLoopOnce()` 在 while 识别失败、且原始 successor 不超过一个时尝试
+  `makeGraphDoWhileLoop()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:319`
+  新增 `testRefineCyclicBuildsDoWhileFromLatchCondition()`，验证 latch 条件能生成 `DoWhile`，并保留
+  follow successor。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.61s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-graph-dowhile-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这是 do-while refinement 的保守入口，不处理多出口 do-while。
+- 如果同一个 loop 同时像 while 和 do-while，目前仍优先 while；Angr 里还有 parent-region 下的
+  tie-break 规则，后续再补。
+- 实现效果：4/10。graph-level refinement 可以从 latch 条件生成 `DoWhile`。
+- 复杂度：3/10。局部 loop-kind 判定。
+- 维护成本：3/10。后续补 while/do-while tie-break 时会调整优先级。
