@@ -2443,3 +2443,36 @@ c -> head / exit
 - 这是计划没展开的技术决策点，不能继续用临时近似推进。
 - 已回退试探性代码，当前没有代码改动。
 - goal 不标完成；也不标 blocked，因为还能先做 acyclic view 设计/实现后继续。
+
+# 2026-06-20 实现记录：补 acyclic dropped edge 并接入 type4 fallback
+
+接上一个暂停点，先不在 Phoenix 里猜回边，而是在 `MutableRegionGraphAnalysis` 里记录构造 acyclic DFS view 时因为指向递归栈内节点而丢掉的边。这个语义对应 Angr `to_acyclic_by_order()` 后 type4 fallback 使用的 cycle-closing edges。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:52`
+  `MutableRegionGraphAnalysis` 新增 `AcyclicDroppedEdges`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:190`
+  `dfsOrder()` 增加递归栈参数；遇到指向栈内节点的 active edge 时记录到 dropped edges，不继续递归。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:648`
+  `MutableRegionGraph::analyze()` 把 dropped edges 填进分析结果。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:904`
+  `filterByAngrLastResortPriority()` 在 type1/type2 都为空时，root region 才返回 `AcyclicDroppedEdges`，非 root 不用这个 fallback。
+- `external/NotDec-llvm2c/test/structuring/CMakeLists.txt:21`
+  新增 `structuring-analysis-test`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:19`
+  新增结构层测试，构造 `entry -> head -> a/b -> c -> head/exit`，直接断言 dropped edge 是 `c -> head`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.42s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-acyclic-dropped-edge-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这一步补上了 Angr type4 fallback 需要的数据来源，比之前试探的 node order 近似更稳。
+- 现在 type4 只在 root region 使用，符合 Angr “内层失败交给外层 cyclic region 处理”的边界。
+- 实现效果：6/10。last-resort 更接近 Angr，但还没有 edge virtualization hints。
+- 复杂度：4/10。增加了分析结果字段和一个小测试目标。
+- 维护成本：4/10。测试直接断言结构层数据，后续改 Phoenix 输出时不容易误伤。
