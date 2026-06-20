@@ -1698,3 +1698,58 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：6/10。SAILR H2 更接近 Angr，但还没有补 SAILR 的 deoptimization pass。
 - 复杂度：2/10。只改一个计数函数。
 - 维护成本：2/10。直接使用已有 `ImmediatePostDominators`。
+
+# 2026-06-20 实现记录：递归 structurer 接入 child region overlay
+
+这轮开始让 `RecursiveStructurer` 真正递归处理 child region。这里没有无条件把 child root 喂给 parent：natural loop child 当前不包含 follow block，child 自己可能退化成 goto 序列；如果直接 overlay 到 parent，会丢掉 parent 侧继续识别 loop/follow 的机会。所以这轮只把“已经形成结构化控制节点”的 child root 传给 parent。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionStructurer.h:15`
+  新增 `supportsChildRegions()`，默认返回 `false`，避免 `GotoStructurer` 这类旧实现被 child overlay 改变输出。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionStructurer.h:18`
+  新增带 `RegionTree` 和 `StructuredChildren` 的 `structureRegion()` overload，默认回退到旧接口。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:19`
+  `PhoenixStructurer` 显式 opt-in child region。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:22`
+  `PhoenixStructurer` 实现新的 child-aware `structureRegion()` overload。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:8`
+  新增 `containsStructuredControl()`，只认可包含 `Switch`、`While`、`DoWhile`、`InfiniteLoop` 的 child root。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:36`
+  新增 `structureRegionRecursive()`，递归结构化 child region，并缓存已结构化 region。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:45`
+  只在算法 opt-in 时递归 child；只有结构化成功的 child root 才写入 `StructuredChildren`。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:77`
+  root region 改走递归 driver。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:988`
+  旧 `structureRegion(Cfg, R, Tree)` 保留，转调新 overload。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1000`
+  Phoenix 在有 `StructuredChildren` 时使用 `MutableRegionGraph::build(Cfg, Regions, R, StructuredChildren)`，否则继续旧构图。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break.recursive.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、1 个 `break`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.recursive.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch.recursive.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return.recursive.c --algo=structured-sailr`
+  通过，输出仍是 `if/else return`，没有 `goto`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-recursive-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-recursive-smoke.sol --tr-level=2`
+  通过，耗时约 `17.56s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步接上了 recursive structuring 的数据流，但暂时不强行消费未结构化好的 child region。
+- natural loop child 要真正带来收益，后续需要让 child structuring 拿到 follow/exit 上下文，或者给 natural-loop region 单独的 loop-aware 入口。
+- 当前改动保持 `GotoStructurer` 输出不变，Phoenix/SAILR 才 opt-in child overlay。
+
+评分：
+
+- 实现效果：6/10。递归框架开始实际传递 child root，但保守过滤导致当前 smoke 输出基本不变。
+- 复杂度：4/10。新增一个 overload 和递归 driver，没有改 reducer 主体。
+- 维护成本：4/10。child root 过滤规则集中在 `RecursiveStructurer`，后续补 loop context 时需要回到这里调整。
