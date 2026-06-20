@@ -3073,3 +3073,39 @@ loop body，确认最多一个 loop successor 后折成 `InfiniteLoop`。更复�
 - 实现效果：4/10。graph-level refinement 不再总是退到 `while (1)`。
 - 复杂度：3/10。新增逻辑局部，判断条件保守。
 - 维护成本：3/10。后续补 do-while 时可能需要把 loop body 构造再拆细。
+
+# 2026-06-20 实现记录：graph-level refinement 合并多 latch
+
+继续补 natural-loop refinement 的算法边界。之前 `reduceGraphNaturalLoopOnce()` 按单条 back edge
+收 loop body，多 latch loop 会漏掉其它 latch 路径。这轮改成按 head 收集所有 back edge，再合并
+body，和 RegionIdentifier 里对同一 head loop 的处理保持一致。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1645`
+  `reduceGraphNaturalLoopOnce()` 从“遍历 latch 的 succ”改成“遍历 head 的 pred”，对同一 head
+  的多个 back edge 分别调用 `collectNaturalLoopMembers()`，再合并成员。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1565`
+  `makeGraphWhileLoop()` 放宽 head 节点必须单 block 的限制，但只接受 head 前缀 block 无语句，
+  避免吞掉真实 loop body。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:253`
+  新增 `testRefineCyclicMergesMultipleLatches()`，验证两个 latch 都保留在折叠后的 while 节点里。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.63s`。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-multilatch-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这是算法层修正，不保证现有完整 C 输出马上从 `while (1)` 变成条件 `while`。
+- 多 successor 选择和 outgoing edge rewrite 仍未实现，后面应继续按 Angr `_refine_cyclic_core()`
+  后半段推进。
+- 实现效果：4/10。多 latch natural loop 不再只看第一条 back edge。
+- 复杂度：3/10。逻辑仍局限在 graph refinement。
+- 维护成本：3/10。后续实现多 successor 时会继续用这套 head/latch 合并结果。
