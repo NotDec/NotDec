@@ -1933,3 +1933,49 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 - 实现效果：5/10。避免了已确认的简单 while 回退。
 - 复杂度：2/10。只加了一个过滤条件。
 - 维护成本：3/10。规则保守，后续如果要让 root 消费某些 child loop，需要把 ownership 条件再细分。
+
+# 2026-06-20 实现记录：root natural-loop fallback
+
+上一步只定了 root 不消费 natural-loop child，irregular loop 仍会落到纯 goto。这里在 root-level reducer 里补一个保守兜底：普通 while/if/switch reducer 都没处理掉的 natural loop，会被折成 `InfiniteLoop`；loop 内回到 header 的边转成 `continue`。如果 natural loop 只有一个外部 successor，该外跳才转 `break`；多出口 loop 继续保留 `goto`，避免把不同出口错误合成同一个 break。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:16`
+  新增 `makeControlTransfer()`，统一创建 `Goto` / `Break` / `Continue` 节点。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:789`
+  新增 `classifyNaturalLoopExit()`，natural loop 回 header 转 `Continue`，单出口 follow 转 `Break`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:849`
+  `appendFallbackNode()` 增加 region 参数，fallback 生成 `If` / `Switch` 时直接填 `Then` / `Else` / `StructuredCases`，不再同时填旧 `Children`，避免 C 渲染器走旧 goto 路径。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1030`
+  新增 `reduceNaturalLoopFallbackOnce()`，root region 上把尚未结构化的 natural-loop child 折成 `InfiniteLoop`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1183`
+  reducer 顺序里在 virtual edge fallback 前尝试 natural-loop fallback。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1215`
+  最终 fallback 输出把当前 region 传给 `appendFallbackNode()`，使 child natural-loop fallback 也能复用同一套分类。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.loop-fallback-final.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`，没有 `goto head`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break.loop-fallback-final.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `while`、1 个 `break`，没有 `goto`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch.loop-fallback-final.c --algo=structured-sailr`
+  通过，输出仍是 1 个 `switch`、3 个 `break`，没有 `goto`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-external-break-fallback.ll -o /tmp/notdec-loop-external-break-fallback.loop-fallback6.c --algo=structured-sailr`
+  通过，输出从纯 goto 变成 1 个 `while(1)`、2 个 `continue`、6 个 `goto`；因为该样例有两个外部出口，未把出口强行转成 `break`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-loop-fallback-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-loop-fallback-smoke.sol --tr-level=2`
+  通过，耗时约 `17.79s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步让 Phoenix fallback 开始利用 natural-loop region 信息，不再只靠虚拟 goto 边。
+- 多出口 loop 暂时只消掉回边；要把多出口也结构成 `break`，需要先引入带目标的 break 或更强的 follow 合并策略。
+
+评分：
+
+- 实现效果：6/10。改善 irregular loop 的可读性，但多出口仍保守保留 goto。
+- 复杂度：5/10。fallback 多了一条 root-level natural-loop 规约路径。
+- 维护成本：5/10。逻辑仍集中在 Phoenix fallback，后续迁 SAILR follow 选择时可以替换这一段。
