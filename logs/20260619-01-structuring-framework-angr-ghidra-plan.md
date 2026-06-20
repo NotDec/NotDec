@@ -3608,3 +3608,51 @@ block 再输出一遍。这个问题不影响 Phoenix/SAILR，但会让统一入
 - 实现效果：2/10。把递归入口的最基本正确性补齐。
 - 复杂度：1/10。局部修复。
 - 维护成本：1/10。一个直接测试就能看住。
+
+# 2026-06-20 实现记录：补齐 child overlay 的 external follow 视图
+
+继续往 Angr 的 overlay 方向收。前一版 `MutableRegionGraph::build(Cfg, Overlay)` 已经把 child
+region 放进共享 graph，但 child reducer 仍然看不到离开当前 region 的 follow 节点，只能在
+`ExternalSuccs` 里看到 block id。这样 `reduceLinearDoWhileOnce()`、`reduceSelfLoopOnce()` 这类
+schema 缺少必要的 2-way successor 形状，`linear_do_while` 和 `self_loop_while` 两个 smoke case
+都会退化成 label+goto。顺手还补了一个一起暴露出来的边界：单块自环之前会被 graph builder 吞掉。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:37`
+  `MutableRegionNode` 新增 `ExternalPlaceholder` 标记，并在注释里说明这类节点只给 reducer 看，
+  不能当成 region 内正常语句输出。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:370`
+  `addNode()` 支持创建 external placeholder node。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:403`
+  普通 region graph builder 保留真实的单块自环，不再把 `block -> self` 边误删。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:419`
+  overlay graph builder 遇到 child region 的 external successor 时，同时：
+  1. 继续记录 `ExternalSuccs`
+  2. 按 successor block 去重创建 placeholder node
+  3. 在 `Succs/Preds` 里把这条边接进去
+  这样 child reducer 拿到的图形状就和 Angr `graph_with_successors` 的需求一致了。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2305`
+  两个 `structureRegion()` 的最终 fallback 拼接都跳过 `ExternalPlaceholder`，避免把 region 外 follow
+  节点误渲染进当前 region body。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:277`
+  新增 `testChildOverlayGraphKeepsExternalFollowPlaceholder()`，直接验证 child overlay graph 里：
+  external follow 可见、带 placeholder 标记、同时保留 `ExternalSuccs`。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring notdec-backend-c notdec-llvm2c-exe structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|structuring-analysis' --output-on-failure`
+  通过，4 个测试。
+
+当前判断：
+
+- 这一步还不是完整的 shared-graph destructive mutate，但已经把 child reducer 最缺的
+  `follow` 可见性补齐了，方向和 Angr 更接近。
+- 现在 `linear_do_while` / `self_loop_while` 两个残余 smoke case 已恢复。
+- 实现效果：5/10。Phoenix child loop schema 终于能在 overlay 路径上看到正确图形。
+- 复杂度：3/10。多了 placeholder node 这一层，但边界仍然集中在 mutable graph。
+- 维护成本：3/10。后续真做 overlay graph mutation 时，这个 placeholder 机制大概率还能继续复用。
