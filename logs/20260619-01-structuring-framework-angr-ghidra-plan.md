@@ -4013,3 +4013,41 @@ child 去 finalize。这轮先对齐遍历和 root 生命周期，不引入 shar
 - 实现效果：3/10。递归 structuring 的临时 overlay 状态不再泄漏。
 - 复杂度：1/10。当前只是 structured-root 快照。
 - 维护成本：2/10。接口名字已对齐 Angr，后续扩展时调用点不用再改。
+
+# 2026-06-20 实现记录：给 MutableRegionGraph 增加 refinement checkpoint
+
+继续补 Angr 的 cyclic refinement 流程。Angr 的 Phoenix 在尝试 cyclic refinement 前会 checkpoint，
+如果 refinement 没能把图结构化成可用结果，就 rollback。当前 C++ 还在用本地 `MutableRegionGraph` 过渡，
+所以这轮先给本地图加快照式 checkpoint，并在 `refineCyclic()` 失败路径恢复。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:85`
+  `MutableRegionGraph` 增加 `checkpoint()`、`rollback()`、`commit()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:109`
+  增加 `Checkpoints`，保存 `Nodes` 和 `VirtualizedEdges` 快照。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:567`
+  实现本地图 checkpoint / rollback / commit。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2244`
+  `refineCyclic()` 进入前 checkpoint；自然循环 reducer 或 fallback 成功时 commit，全部失败时 rollback 后 commit。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:128`
+  新增 `testMutableRegionGraphCheckpointRestoresMutations()`，验证 virtualize/collapse 后 rollback 能恢复 active nodes、
+  virtualized edges 和原始边。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步让 Phoenix refinement 失败路径更接近 Angr，避免失败尝试留下本地图副作用。
+- 这仍是过渡实现：checkpoint 作用在 `MutableRegionGraph`，还不是 Angr 的 shared `RegionOverlay` graph undo log。
+- 后续把 reducer mutation 搬到 overlay 后，`MutableRegionGraph` 的快照接口应逐步退场。
+- 实现效果：3/10。补上 Angr refinement checkpoint 的行为边界。
+- 复杂度：2/10。快照直接复制本地图，够用但不是最终模型。
+- 维护成本：2/10。接口以后能映射到 overlay manager，当前测试覆盖失败路径所需状态。
