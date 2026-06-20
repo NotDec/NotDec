@@ -1874,3 +1874,24 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 - 实现效果：6/10。减少了 region tree 的不确定性，是继续迁移 Phoenix irregular loop exit 的前置。
 - 复杂度：5/10。`RegionIdentifier` 多了候选阶段、过滤阶段和 parent 选择阶段。
 - 维护成本：5/10。策略保守，后续如果要支持 irreducible/overlap loop，需要在 `filterLaminarLoops()` 里扩展。
+
+# 2026-06-20 调整记录：natural-loop wrapper 仍需定边界
+
+在 laminar region tree 之后，重新尝试把 natural-loop child 的 `ExternalSuccs` 到 `Follow` 落成 `Break`，并在 child region 外包一层 `While`。这次没有遇到重叠 child 的问题，但 `/tmp/notdec-while-linear-body.ll` 出现回退：原本完整的 `while` 输出里多出了 `goto head`。
+
+原因是现有 root-level Phoenix reducer 已经能在整图上识别简单 while；如果 child region 也提前包 loop，会和 root-level reducer 重复处理同一段 loop，造成 backedge 仍以 fallback 形式留在 body 中。也就是说，`break` fallback 不能只靠“child region 自己包 loop”解决，还需要先明确：
+
+- 哪些 natural-loop child 应该由 child structurer 独立包 loop。
+- 哪些 loop 应继续交给 parent/root-level reducer。
+- parent overlay 消费 child loop 后，head/follow/backedge 这些边如何从 parent graph 中删除或保留。
+
+当前处理：
+
+- 未提交的 `virtualizeExternalEdge()`、external follow `Break`、natural-loop wrapper 代码都已撤回。
+- `external/NotDec-llvm2c` 工作树保持干净。
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+
+当前判断：
+
+- laminar loop region 是必要前置，但还不足以安全接 `Break` fallback。
+- 下一步应先让 `RecursiveStructurer` 或 `PhoenixStructurer` 明确“child loop ownership”：简单 whole-loop 由 parent/root reducer 处理，只有 parent 无法规约或 child 被明确消费时，才启用 child loop wrapper。
