@@ -4091,3 +4091,46 @@ child 去 finalize。这轮先对齐遍历和 root 生命周期，不引入 shar
 - 实现效果：2/10。补上 finalize 所需参数和调用时机。
 - 复杂度：1/10。只新增轻量数据结构和传参。
 - 维护成本：1/10。后续扩展 snapshot 内容不用再改调用点。
+
+# 2026-06-20 实现记录：把 successor snapshot 保存到 finalized child 状态
+
+继续把 overlay finalize 状态从“只有 structured root”推进到 Angr 的 replacement 状态。上一轮已经把
+snapshot 传进 `finalize()`，但没有保存。这轮把 snapshot 和 structured root 一起存进 `OverlayManager`，
+让 parent 构图时能从 finalized child 查询到这份 successor 信息。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:15`
+  调整 `SuccessorSnapshot` 定义位置，让 `FinalizedChildRegion` 直接携带 snapshot。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:23`
+  `FinalizedChildRegion` 增加 `Snapshot` 字段。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:54`
+  `OverlayManager::CheckpointState` 同时保存 `StructuredRoots` 和 `SuccessorSnapshots`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:76`
+  `finalizedChildren()` 返回 child structured root 时同时返回保存的 successor snapshot。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:85`
+  checkpoint / rollback 同时保存和恢复 successor snapshot。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:108`
+  `setStructuredRoot()` 保存 snapshot，`clearStructuredRoot()` 同步删除 snapshot。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:377`
+  扩展 finalized child 测试，验证 snapshot 被保存。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:391`
+  验证 rollback 会清掉 root 和 snapshot 组成的 finalized child 状态。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步仍不做 shared graph 边重连，但 parent 已能看到 child replacement 的 successor snapshot。
+- 后续 `MutableRegionGraph::build(Cfg, Overlay)` 可以基于 `FinalizedChildRegion::Snapshot` 建更接近 Angr 的
+  graph-with-successors 视图。
+- 实现效果：3/10。finalize 状态更接近 Angr 的 replacement + successor snapshot。
+- 复杂度：1/10。只是保存和恢复一份 snapshot。
+- 维护成本：1/10。checkpoint 同步覆盖 root 和 snapshot，状态边界更清晰。
