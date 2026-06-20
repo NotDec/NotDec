@@ -2963,3 +2963,31 @@ sequence/if/switch reducer 把 natural loop 内部节点和 loop exit 节点折�
 - 实现效果：2/10。测试补强。
 - 复杂度：1/10。只暴露 protected 方法给测试。
 - 维护成本：2/10。后续重构 SAILR ordering 时能直接抓回归。
+
+# 2026-06-20 实现记录：补 SAILR H2 postdom ordering 覆盖
+
+继续补 SAILR 和 Angr 对齐的关键行为。这轮只补测试，不调整算法。目标是直接覆盖
+Angr `SAILRStructurer._order_virtualizable_edges()` 的 H2：H1 打平后，优先选择删除后
+postdominator 关系最多的 virtual edge。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:232`
+  新增 `testSAILROrderPrefersMostPostDominators()`。用一个小 CFG 让两条候选边在 H1
+  下打平，再验证 H2 选择 `1 -> 4`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:302`
+  在 `main()` 里接入该测试。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.62s`。
+
+当前判断：
+
+- H1/H2/H3 现在都有直接测试，后续继续补 Phoenix/SAILR reducer 时不容易误改 edge ordering。
+- 实现效果：2/10。只补算法策略覆盖。
+- 复杂度：1/10。单个测试用例。
+- 维护成本：1/10。没有新增生产代码。
