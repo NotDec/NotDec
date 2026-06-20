@@ -3656,3 +3656,50 @@ schema 缺少必要的 2-way successor 形状，`linear_do_while` 和 `self_loop
 - 实现效果：5/10。Phoenix child loop schema 终于能在 overlay 路径上看到正确图形。
 - 复杂度：3/10。多了 placeholder node 这一层，但边界仍然集中在 mutable graph。
 - 维护成本：3/10。后续真做 overlay graph mutation 时，这个 placeholder 机制大概率还能继续复用。
+
+# 2026-06-20 实现记录：删除 C 后端旧 enum structuring 分发
+
+继续收旧 C Phoenix 对外入口。前面已经删除旧 `Phoenix` 类和 `--algo=phoenix` 的真实实现，但
+`notdec-llvm2c::Options` 里还保留 `StructuralAlgorithms` enum，`SAFuncContext::run()` 再通过
+`getStructurerName()` 把 enum 映射到 shared structurer。这会让 C 后端继续拥有一套自己的算法列表，
+后续接 Angr 其他算法时还得同步改 C 层 enum，不符合“公共 structuring 骨架统一接入口”的目标。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:17`
+  删除 `StructuralAlgorithms` enum 和 `getStructurerName()`，`Options` 改为保存 canonical
+  `structurer` 字符串。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:4`
+  新增 `StructurerChoice`，用 LLVM command line literal parser 直接把 CLI 名称映射到 canonical
+  structurer 名称。外部仍支持 `goto`、`structured-goto`、`structured-phoenix`、`structured-sailr`，
+  但不恢复旧 `phoenix` 入口。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:55`
+  registry 增加 CLI alias 表和内部 alias 表。CLI 表只放对外允许的名字；内部 factory 仍支持
+  canonical `phoenix` / `sailr`，供 shared structuring 自己调用。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2127`
+  `SAFuncContext::run()` 不再 switch enum，直接校验并使用 `Options::structurer`。
+- `external/NotDec-llvm2c/include/notdec-backends/C/Backend.h:10`
+  删除 C backend 新入口里对旧 `StructuralAlgorithms` 的转发。
+- `external/NotDec-llvm2c/tools/notdec-llvm2c/notdec-llvm2c.cpp:18`
+  tool 不再 include 旧 `StructuralAnalysis.h`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:210`
+  补 registry alias 测试，确认 `structured-phoenix` 能解析到 `phoenix`，但 `phoenix` 本身不是 CLI
+  合法入口。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-llvm2c-exe structuring-analysis-test notdec-backend-c notdec-backend-structuring -j4`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- 手动确认 `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=phoenix ...` 在命令行解析阶段报
+  `Cannot find option named 'phoenix'`。
+
+当前判断：
+
+- C 后端不再持有自己的算法 enum，后续新增 Angr 算法只需要在 shared registry 里登记，再按需决定是否暴露
+  CLI alias。
+- 旧 `phoenix` 入口仍被拒绝，`structured-phoenix` 继续可用。
+- 实现效果：4/10。入口边界更像 shared structuring registry。
+- 复杂度：2/10。增加了一个小 CLI value type，但去掉了 C 层 enum。
+- 维护成本：2/10。算法名集中到 registry，后续改动面更小。
