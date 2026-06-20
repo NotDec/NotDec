@@ -3849,3 +3849,45 @@ overlay 图视图不一致。它虽然只是 fallback，但统一入口下也应
 - 实现效果：3/10。统一了 fallback 和 Phoenix 图构建的 child 可见规则。
 - 复杂度：1/10。局部条件修正。
 - 维护成本：1/10。测试直接覆盖 finalize 前后行为。
+
+# 2026-06-20 实现记录：把 finalized child 查询收进 OverlayManager
+
+继续收口 overlay 边界。前面已经让 Phoenix 和 Goto fallback 按 finalize / dissolve 状态看 child，
+但判断还散在 `visibleRegionTree()`、`MutableRegionGraph::build()` 和 `GotoStructurer::structureRegion()`。
+这轮把“哪些 child 已经 finalize，可以当成 collapsed child 使用”收进 `OverlayManager`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:14`
+  增加 `FinalizedChildRegion`，统一返回 child overlay、region 数据和 structured root。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:38`
+  `OverlayManager` 增加 `isRegionFinalized()` 和 `finalizedChildren()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:37`
+  `visibleRegionTree()` 改用 `finalizedChildren()`，不再自己判断 structured root。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:55`
+  实现 `isRegionFinalized()` 和 `finalizedChildren()`，把 finalized child 的过滤规则集中到 manager。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:440`
+  overlay graph 构建改用 `finalizedChildren()`，继续把 finalized child 作为 grouped node。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:120`
+  Goto fallback 改用同一个 finalized child 查询，避免和 Phoenix 图视图各自维护规则。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:331`
+  扩展 `testVisibleRegionTreeOnlyIncludesFinalizedChildren()`，直接验证 `finalizedChildren()` 在 finalize /
+  dissolve 前后的返回。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步没有改变结构化结果，只减少重复判断。
+- 后续如果实现 Angr 式 overlay graph mutation / rollback，finalized child 的定义只需要在
+  `OverlayManager` 里继续演进。
+- 实现效果：3/10。进一步把 reducer 从 overlay 状态细节里拿出来。
+- 复杂度：1/10。新增一个小数据结构和查询函数。
+- 维护成本：1/10。共享规则集中，测试覆盖 finalize / dissolve。
