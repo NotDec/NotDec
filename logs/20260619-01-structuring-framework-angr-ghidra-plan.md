@@ -2182,3 +2182,33 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 - 实现效果：6/10。阶段边界更清楚，但具体 reducer 能力还没增加。
 - 复杂度：4/10。只多了几个虚函数，主循环反而更短。
 - 维护成本：4/10。后续迁 Angr 规则时有明确落点，代价是调用层级多了一层。
+
+# 2026-06-20 实现记录：SAILR 启用 improved Phoenix schema
+
+对照 Angr 的 `SAILRStructurer.__init__()`，SAILR 会用 `improve_phoenix=True` 调 Phoenix，而普通 Phoenix 默认不开这些改进规则。当前 shared Phoenix 把 `while (...) { if (...) break; }` 这条 fast path 放在普通 Phoenix 里。这里把它收回到 SAILR/improved Phoenix 边界下，避免普通 `structured-phoenix` 和 `structured-sailr` 继续混成同一个行为。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:44`
+  新增 `useImprovedCyclicSchemas()`，默认返回 `false`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h:13`
+  `SAILRStructurer` 覆写 `useImprovedCyclicSchemas()`，返回 `true`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1144`
+  `reduceLinearWhileWithBreakOnce()` 只在 improved schema 开启时运行。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:181`
+  新增同一 IR 的 SAILR/Phoenix 对比：SAILR 应输出 `break;`，Phoenix 不应使用这条 improved break schema。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available' --output-on-failure` 通过，3 个测试，耗时约 `0.86s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-sailr-improve-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-phoenix-no-improve-smoke.c --tr-level=2 --algo=structured-phoenix` 通过。
+
+当前判断：
+
+- 这一步不是 SAILR deoptimization，只是把已有 improve-only schema 放到 Angr 一样的开关后面。
+- 后续如果继续搬 Angr 里 `if self._improve_algorithm` 的规则，可以落到同一个 hook 下。
+- 实现效果：6/10。SAILR 和 Phoenix 的行为边界更接近 Angr。
+- 复杂度：3/10。只加一个布尔 hook。
+- 维护成本：3/10。后续 improved Phoenix 规则有明确入口。
