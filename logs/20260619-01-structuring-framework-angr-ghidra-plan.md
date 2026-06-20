@@ -2899,3 +2899,34 @@ sequence/if/switch reducer 把 natural loop 内部节点和 loop exit 节点折�
 - 实现效果：2/10。只是加回归保护。
 - 复杂度：1/10。测试脚本小改。
 - 维护成本：1/10。断言简单，后续可复用于其它结构顺序回归。
+
+# 2026-06-20 实现记录：去掉紧邻 infinite loop 的入口 goto
+
+继续收窄 root-cycle 输出。`root_cycle_follow` 里 root sequence 可能出现
+`goto head; while (1) { head: ... }`。这不是一般 goto 清理，只是 fallback 把 loop
+节点排在入口跳转后面导致的冗余。按 Angr 的结构化结果，loop 本身就是顺序中的下一条语句，
+这个 goto 可以删掉。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1436`
+  新增 `dropGotoIntoFollowingInfiniteLoop()`，只删除同一个 `Sequence` 里直接相邻的
+  `Goto(target=head)` + `InfiniteLoop(block=head)`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1761`
+  在 root fallback 生成 sequence 后调用该 helper。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:271`
+  `root_cycle_follow` smoke 增加 `goto head` absence 断言。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.62s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-drop-loop-entry-goto-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这是一个很窄的结构树 cleanup，不处理一般 goto，也不跨 label。
+- root-cycle 输出更接近 Angr：函数直接进入 `while (1)`，不再先 `goto head`。
+- 实现效果：3/10。只改善一个 fallback 输出形状。
+- 复杂度：2/10。局部 sequence 后处理。
+- 维护成本：2/10。规则窄，误伤风险低。
