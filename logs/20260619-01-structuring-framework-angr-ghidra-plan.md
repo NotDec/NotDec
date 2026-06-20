@@ -2321,3 +2321,38 @@ Angr 的 `DEFAULT_STRUCTURER` 是 `SAILRStructurer`，而 shared structuring reg
 
 - 行为不变，只把 Angr SAILR 的参数边界放到算法对象上。
 - 后续如果要暴露 SAILR 参数，不需要再改 helper 内部。
+
+# 2026-06-20 实现记录：structurer registry 改成表驱动
+
+Angr 的结构恢复入口是按 structurer class 表选择算法。当前 shared structuring registry 还是手写 `if` 链，后续继续接 Phoenix / SAILR / 其他 Angr 算法时不够直观。这里把 registry 改成小表，行为保持不变。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructurerRegistry.h:6`
+  引入 `llvm::ArrayRef`，避免使用项目当前 C++17 不支持的 `std::span`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructurerRegistry.h:15`
+  新增 `registeredStructurerNames()`，后续 CLI/help/options/test 可以复用同一份算法名列表。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:24`
+  新增 `StructurerRegistration`，把算法名和 factory 放在同一张表里。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:29`
+  当前注册 `goto`、`phoenix`、`sailr`，和原有可用算法一致。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:43`
+  `registeredStructurerNames()` 返回算法名列表。
+- `external/NotDec-llvm2c/lib/Structuring/StructurerRegistry.cpp:47`
+  `createStructurer()` 改为遍历注册表，不再维护手写 `if` 链。
+- `external/NotDec-llvm2c/test/structuring/CMakeLists.txt:16`
+  新增 `shared-structurer-registry` 回归测试。
+- `external/NotDec-llvm2c/test/structuring/run_shared_structurer_registry.py:24`
+  新增一个小 IR，分别跑 `structured-goto`、`structured-phoenix`、`structured-sailr`，确认三个注册名都能生成输出。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，4 个测试，耗时约 `1.30s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-registry-table-sailr-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这一步只是入口整理，不是新算法实现。
+- registry 形式更接近 Angr 的 `STRUCTURER_CLASSES`，后续加算法只需要补注册项和测试。
+- C++ 标准仍是 C++17，所以没有使用 `std::span`。
