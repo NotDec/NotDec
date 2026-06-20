@@ -2507,3 +2507,38 @@ c -> head / exit
 - 实现效果：4/10。架构边界补齐，但功能上还没有真实 hint producer。
 - 复杂度：2/10。新增一个 hook 和测试。
 - 维护成本：3/10。默认空实现不会影响 Phoenix 行为。
+
+# 2026-06-20 实现记录：head-controlled self-loop 输出 while
+
+继续补 Angr Phoenix `_match_cyclic_while()` 的窄形状。Angr 会根据条件跳转在节点开头还是末尾区分 `while` 和 `do-while`。当前 shared Phoenix 的 self-loop reducer 对条件自环统一输出 `do-while`，导致 LLVM IR 里空 header 条件自环：
+
+```llvm
+head:
+  %cond = icmp eq i32 %x, 0
+  br i1 %cond, label %head, label %exit
+```
+
+输出成 `do { } while (x == 0);`。这个形状没有循环体语句，应该按 head-controlled loop 输出 `while (x == 0) {}`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:733`
+  `collectLinearDoWhileBody()` 跳过 `EntryId == LatchId`，避免 linear do-while schema 抢走单块 self-loop。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:861`
+  `reduceSelfLoopOnce()` 对 `Tail->Statements.empty()` 的条件自环输出 `While`，非空 block 仍输出 `DoWhile`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:221`
+  新增 `self_loop_while`，要求输出 `while (x == 0)`，不能输出 `do {` 或 `goto head`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.53s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-self-loop-while-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这是 Angr head-controlled self-loop 的保守子集，只用 `Tail->Statements.empty()` 区分。
+- 多语句 self-loop 仍按 do-while 保留，避免把循环体前置语句错误挪到条件前。
+- 实现效果：5/10。修掉单块条件自环，但还不是完整 `_match_cyclic_while()`。
+- 复杂度：2/10。只改两个局部判断。
+- 维护成本：3/10。有 smoke 覆盖。
