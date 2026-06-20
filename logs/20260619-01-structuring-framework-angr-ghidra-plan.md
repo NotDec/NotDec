@@ -2991,3 +2991,48 @@ postdominator 关系最多的 virtual edge。
 - 实现效果：2/10。只补算法策略覆盖。
 - 复杂度：1/10。单个测试用例。
 - 维护成本：1/10。没有新增生产代码。
+
+# 2026-06-20 实现记录：补 graph-level natural loop refinement
+
+继续按 Angr 的 `PhoenixStructurer._refine_cyclic_core()` 方向推进。这轮只补最小 natural-loop
+refinement：从当前 `MutableRegionGraph` 里的 back edge 找 loop head/latch，收集被 head 支配的
+loop body，确认最多一个 loop successor 后折成 `InfiniteLoop`。更复杂的 while/do-while 判定、
+多 successor 选择和 outgoing edge rewrite 还没有做。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1499`
+  新增 `collectNaturalLoopMembers()`，用当前 graph 的 dominator 信息从 latch 反向收集 natural
+  loop 成员。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1527`
+  新增 `collectNaturalLoopSuccessors()`，统计 loop body 之外的 successor block。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1555`
+  新增 `reduceGraphNaturalLoopOnce()`。它构造临时 `NaturalLoop` region，复用
+  `appendFallbackNode()` 生成 body，让已有 break/continue 分类继续生效。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1776`
+  `PhoenixStructurer::refineCyclic()` 先尝试 graph-level natural-loop refinement，再走旧的
+  root region fallback。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:45`
+  新增 `TestPhoenixStructurer`，只用于测试 protected 的 `refineCyclic()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:209`
+  新增 `testRefineCyclicReducesGraphNaturalLoop()`，验证 refinement 能把当前 graph 中的
+  natural loop 折成 `InfiniteLoop`，并保留到 follow block 的 successor。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.62s`。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-graph-natural-loop-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这是 Angr cyclic refinement 的第一步，不是完整 `_refine_cyclic_core()`。
+- 保守限制为最多一个 successor，避免现在就处理多出口 successor 选择。
+- 实现效果：4/10。shared Phoenix/SAILR 现在能不依赖预先识别的 root loop 做一次 graph-level
+  natural-loop refinement。
+- 复杂度：3/10。新增逻辑局部，但开始接近 Angr refinement 主路径。
+- 维护成本：3/10。后续补 while/do-while refinement 时可能会调整这些 helper。
