@@ -2387,3 +2387,30 @@ Angr 的结构恢复入口是按 structurer class 表选择算法。当前 share
 - 实现效果：5/10。修掉一个真实 fallback 退化，但 switch 复杂形状还没迁。
 - 复杂度：3/10。只在现有 reducer 内加一个分支。
 - 维护成本：3/10。规则边界清楚，后续完整 switch reducer 可以覆盖它。
+
+# 2026-06-20 实现记录：Phoenix last-resort edge bucket
+
+继续对照 Angr `PhoenixStructurer._last_resort_refinement()`。Angr 不是把所有可虚拟化边直接交给排序，而是先分成三类：两端互不支配的边、source 不支配 target 的 secondary 边、其他边。优先级是第一类、第二类、最后才是其他边。当前 shared Phoenix 直接把所有边交给 `orderVirtualizableEdges()`，这会让 Phoenix/SAILR 的排序启发式在错误的候选集合上工作。
+
+实现时还确认了一点：SAILR H2 里 Angr 统计的是 `PostDominators.post_dom` 的边数，而 Angr 这个 `post_dom` 本身是 immediate postdom tree，不是完整闭包。所以当前 NotDec 统计 immediate postdom 数量不需要改。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:904`
+  新增 `filterByAngrLastResortPriority()`，按 Angr 的三类 last-resort edge bucket 过滤候选。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1336`
+  `virtualizeOneEdge()` 先应用 bucket 过滤，再把候选交给 Phoenix/SAILR 的 `orderVirtualizableEdges()`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，4 个测试，耗时约 `1.38s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-lastresort-priority-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这一步对齐的是 Phoenix last-resort 的候选边优先级，SAILR 会继续复用这个候选集合，然后再执行自己的 H1/H2/H3 排序。
+- 目前没有单独的结构层测试 harness，所以专门断言“选中了 type1 边而不是 type2 边”还不方便；这次用现有 structuring smoke 和主链路 smoke 防回归。
+- 实现效果：5/10。边选择流程更接近 Angr，但还缺 edge virtualization hints 和 root acyclic cycle fallback。
+- 复杂度：3/10。只增加一个候选过滤函数。
+- 维护成本：3/10。分类逻辑独立，后续补 Angr hints/fallback 时可以继续接在 last-resort 阶段。
