@@ -3473,3 +3473,37 @@ jump block 时，如果 source 是 jump table head，可以只 detach edge，不
 - 实现效果：3/10。补了 Angr continue rewrite 的一个安全分支。
 - 复杂度：1/10。局部 guard。
 - 维护成本：2/10。后续有精确信息时需要替换这个保守判断。
+
+# 2026-06-20 实现记录：child region 回填策略移到 RegionStructurer
+
+继续把递归结构恢复边界往 Angr 靠。Angr 的算法类会影响 region graph 的处理策略；之前
+`RecursiveStructurer` 自己写死了 root natural-loop child 不回填到 parent overlay。这轮把这个
+决策移到 `RegionStructurer`，默认行为保持不变，后续 Phoenix/SAILR/Dream 可以按算法覆盖。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionStructurer.h:16`
+  新增 `shouldPassChildRegionToParent()`，默认保留 root natural-loop child 不传给 parent。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:54`
+  `structureRegionRecursive()` 改为调用 `Structurer.shouldPassChildRegionToParent()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:53`
+  新增 `RecordingRegionStructurer`，用于测试递归 driver 的 child 处理策略。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:228`
+  新增 `testRecursiveStructurerUsesChildPassPolicy()`，验证 child region 会先结构化，但默认策略
+  不把 root natural-loop child 传回 root。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+
+当前判断：
+
+- 这一步不改变 Phoenix/SAILR 输出，只把策略边界放回算法对象。
+- 后续如果要更接近 Angr 的 recursive region collapse，可以让某个算法覆盖该接口，而不是继续改
+  recursive driver。
+- 实现效果：3/10。架构边界更接近 Angr。
+- 复杂度：1/10。接口搬迁。
+- 维护成本：2/10。新增虚函数，但默认行为固定且有测试。
