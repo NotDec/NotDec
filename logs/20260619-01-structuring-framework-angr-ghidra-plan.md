@@ -2684,3 +2684,42 @@ while (1) {
 - 实现效果：6/10。root-cycle 回归修掉，virtual edge 生命周期向 Angr 靠近了一步。
 - 复杂度：5/10。新增了 `TailBlock` 状态和 virtualize 阶段 tree 写入。
 - 维护成本：5/10。TailBlock 需要后续 reducer collapse 时继续维护，测试已覆盖当前暴露的错误。
+
+# 2026-06-20 实现记录：补齐 virtualized source 的 switch/fallthrough 形状
+
+上一轮只给 branch tail 做了 source replacement。这轮继续对齐 Angr `_virtualize_edge()` 的边界：source tail 不是条件分支时，也应该能把 virtualized edge 写进 structured tree，而不是只在 graph 里记账。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:995`
+  新增 `appendSourceBody()`，统一把已有 `StructuredRoot` 或原始 block body 放进 replacement sequence。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1007`
+  `buildVirtualizedBranchSource()` 改成接收已解析的 tail block，只负责 branch 形状。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1039`
+  新增 `buildVirtualizedSwitchSource()`，当 removed edge 命中 switch default/case 时生成 structured switch，并在 switch 后补保留 successor 的 control-transfer。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1087`
+  新增 `buildVirtualizedFallthroughSource()`，fallthrough edge 被 virtualized 时生成 source body + control-transfer。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1107`
+  新增 `buildVirtualizedSource()`，按 tail terminator 分发 branch/switch/fallthrough。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14`
+  `HintStructurer` 改成可指定 from/to，方便覆盖不同 source tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:50`
+  新增 `switchBlock()` helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:111`
+  新增 switch source replacement 测试。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:134`
+  新增 fallthrough source replacement 测试。
+
+验证：
+
+- `cmake --build ../../build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir ../../build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.63s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-virtualized-source-shapes-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- virtualized source replacement 现在覆盖 branch/switch/fallthrough 三类 tail，比上一轮更接近 Angr `_virtualize_edge()` 的节点替换语义。
+- 仍未覆盖 return/unreachable，当前不需要；这些 terminator 没有正常 successor，通常不应被 virtualized。
+- 实现效果：5/10。补齐 source replacement 的基础形状，但还不是 Angr 那种精确 AIL statement 拆分。
+- 复杂度：4/10。主要是 helper 分拆和结构层测试。
+- 维护成本：4/10。逻辑集中在 `buildVirtualizedSource()`，后续扩展比较直接。
