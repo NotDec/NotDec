@@ -2542,3 +2542,78 @@ head:
 - 实现效果：5/10。修掉单块条件自环，但还不是完整 `_match_cyclic_while()`。
 - 复杂度：2/10。只改两个局部判断。
 - 维护成本：3/10。有 smoke 覆盖。
+
+# 2026-06-20 暂停点：type4 fallback 还缺虚拟化后的 terminator 改写
+
+补完 `AcyclicDroppedEdges` 以后，又用 root 后继环重新看了输出：
+
+```llvm
+entry -> head
+head -> a / b
+a -> c
+b -> c
+c -> head / exit
+```
+
+当前仍会输出 `goto head`、`while (1)`，并且在 `c` 后生成错误的 `goto c`。说明只是知道 type4 应该虚拟化 `c -> head` 还不够。Angr 的 `_virtualize_edge()` 会改写 source block 的条件跳转，把被移除的 edge 从原始 conditional jump 里拿掉；shared structuring 当前只记录 `VirtualEdge`，fallback 渲染时仍按原始 `CFGBlock::Successors` 生成两个方向，所以会把已虚拟化的边又通过原始 terminator 渲染出来。
+
+这轮试过两个局部修法，都没有提交：
+
+- fallback 渲染 branch/switch/fallthrough 时跳过 virtualized successor。
+- `MutableRegionGraph::collapseNodes()` 后把 `VirtualEdge.From/To` 映射到 collapsed node。
+
+它们没有解决 root cycle 输出，原因是 virtualized edge 和 collapse 后的 fallback node 对应关系还不完整。继续修需要先明确一个边界：shared structuring 是否应该像 Angr 一样在虚拟化时生成一个“改写后的 terminator view”，而不是只靠 `VirtualEdge` 在末尾补 `goto`。
+
+后续建议：
+
+- 给 `MutableRegionNode` 或 `StructuredNode` 增加 terminator override/removed edge 信息，表示某个原始 successor 已经被 virtualized。
+- fallback branch/switch 渲染只依据这个 view 输出仍然保留的 successor。
+- collapse 节点时要合并这个 view，而不是只 remap `VirtualEdge` 的 graph id。
+- 先用结构层测试断言 `c -> head` 被 virtualized 后，`c` 的 fallback terminator 不再包含 `head` successor；再看最终 C 文本。
+
+当前判断：
+
+- 这是 Angr `_virtualize_edge()` 语义在 shared model 里的缺口，计划里没有展开。
+- 已回退试探性代码，当前没有代码改动。
+- goal 不标完成；也不标 blocked，因为可以先设计 terminator view 再继续。
+
+# 2026-06-20 暂停点更新：virtualized edge 需要改写 source node
+
+继续对照 Angr `PhoenixStructurer._virtualize_edge()` 和 root-cycle case：
+
+```llvm
+entry -> head
+head -> a / b
+a -> c
+b -> c
+c -> head / exit
+```
+
+现象：当前 shared Phoenix/SAILR 仍会在 `c()` 后输出错误的 `goto c`。结构层 dump 显示这个 `Goto target=c` 已经出现在 natural-loop 子区域的 tree 里，不是 C AST 适配层，也不是 root fallback 后加出来的。
+
+这轮确认过几个方向，暂不提交代码：
+
+- 给 `MutableRegionNode` 记录 `RemovedSuccs`，并在 collapse 时合并。这个只能说明某条 successor 被删过，不能阻止已写进 structured tree 的旧 `goto`。
+- 在最终 fallback 阶段跳过“目标已经在当前 collapsed node 内”的 virtual edge。无效，因为错误 `goto c` 已经在 natural-loop 子区域 collapse 前写进 tree。
+- 让 root 直接复用 natural-loop child structured node。这个会破坏已有 while/do-while schema，`structuring-smoke` 里多个 while case 退化成 `while (1)` 或丢失 break。
+- 放宽 `reduceSequenceOnce()`，允许已有 structured root 和 follow 节点合并。这个会把 loop backedge 吃掉，输出更差。
+
+Angr 的真实做法更明确：
+
+- `/sn640/angr/angr/analyses/decompiler/structuring/phoenix.py:3035` 的 `_virtualize_edge()` 不只是记录边。
+- 如果 source 末尾是 `ConditionalJump`，Angr 会把它拆成 `ConditionNode(Jump to removed dst) + Jump to other dst`，然后 `detach_edge(src, dst)`，必要时 `replace_nodes_both(src, new_src)`。
+- cyclic refinement 成功后，Angr 还会把 loop body 里的 head 跳转重写成 `ContinueNode`，把 loop exit 重写成 break 形状。
+
+因此 shared model 缺的不是“removed successor 集合”，而是 virtualized edge 生命周期：虚拟化一条边时，source node 的末尾控制流也要形成一个可被后续 reducer/renderer 识别的 structured representation。只在 `MutableRegionGraph::VirtualizedEdges` 里记账，然后等 fallback 尾部补 `goto`，会把已经应该顺序化的 follow edge 变成错误 goto。
+
+下一步建议：
+
+- 在 shared structuring 层增加一个 source-node replacement/terminator override 能力，语义对齐 Angr `_virtualize_edge()`：虚拟化条件边时，把 source 末尾 conditional 分裂成“被移除边的条件跳转节点”和“保留边跳转节点”。
+- 这个 representation 应该进入 `StructuredTree`，而不是只保存在 `MutableRegionGraph`。
+- `lastResortRefinement()` 调 `Graph.virtualizeEdge()` 后，要能返回或安装这个 replacement node；后续 collapse 使用 replacement 作为 source 的 `StructuredRoot`。
+- root-cycle 应加到 `test/structuring/run_structuring_smoke.py`，至少断言不能出现 `goto c;` 这种 self-target goto。
+
+当前状态：
+
+- 试探性代码已全部回退，`external/NotDec-llvm2c` 当前无未提交代码改动。
+- goal 继续保持 active；还没有达到“Angr-style virtual edge 生命周期”这个实现点。
