@@ -3737,3 +3737,45 @@ schema 缺少必要的 2-way successor 形状，`linear_do_while` 和 `self_loop
 - 实现效果：2/10。减少一个不该在旧头里的公共 helper。
 - 复杂度：1/10。纯移动声明和实现。
 - 维护成本：1/10。调用点不变，回归覆盖足够。
+
+# 2026-06-20 实现记录：让 C structuring adapter 不再 include 旧 StructuralAnalysis 头
+
+继续收旧 `StructuralAnalysis` monolith 的外溢。`Goto.cpp` 和 `StructuredGoto.cpp` 之前还直接 include
+`StructuralAnalysis.h`，主要是为了拿 `SAFuncContext::getTypeBuilder()` 做 switch 条件 cast，以及管理 label
+use。这些都是 C 后端渲染细节，不应该让 adapter 直接依赖完整旧头。这轮没有搬 `SAFuncContext` /
+`TypeBuilder` 定义，而是把需要的操作封到 `IStructuralAnalysis` / `StructuredGoto` 的桥接方法里。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuringContext.h:44`
+  `IStructuralAnalysis` 增加 `getASTContext()`、`getCurrentCFG()`，给 C structuring adapter 暴露最小
+  render 上下文。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuringContext.h:50`
+  增加 `castSwitchConditionToInt()`，把 switch pointer condition 的 C 类型修正藏回 bridge。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuringContext.h:51`
+  增加 `removeLabelUse()` / `eraseLabelUseIfEmpty()`，把 label user 维护藏回 bridge。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuringContext.cpp:68`
+  实现这些 wrapper，内部仍使用完整 `SAFuncContext` / `TypeBuilder`，但外部 adapter 不再需要看见这些定义。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuredGoto.h:22`
+  为 private inheritance 下的 adapter 增加明确的 public render wrapper。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/Goto.cpp:12`
+  删除 `StructuralAnalysis.h` include，改用 bridge helper。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:12`
+  删除 `StructuralAnalysis.h` include，adapter 不再保存 `SAFuncContext &`。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-c notdec-llvm2c-exe structuring-analysis-test -j4`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 旧头现在不再被 `Goto.cpp` / `StructuredGoto.cpp` 直接 include，C structuring adapter 的边界更干净。
+- 剩余旧头直接 include 集中在 `StructuringContext.cpp`、`TypeManager.cpp` 和 `StructuralAnalysis.cpp` 自身。
+- 后续如果继续拆，应把 `SAFuncContext` / `TypeBuilder` 的最小 C backend context 单独抽头，而不是让 reducer
+  直接依赖旧 monolith。
+- 实现效果：3/10。减少旧头外溢，adapter 边界更符合 shared structuring。
+- 复杂度：2/10。多了几个 wrapper，但避免了大规模搬上下文定义。
+- 维护成本：2/10。C 渲染细节集中在 bridge，后续拆 context 更容易。
