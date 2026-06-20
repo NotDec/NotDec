@@ -3936,3 +3936,42 @@ last resort` 的 `else if` 链；Angr 的 Phoenix 是每轮先跑 acyclic，当�
 - 实现效果：4/10。主循环顺序更接近 Angr，SAILR 也走同一套流程。
 - 复杂度：2/10。新增 cycle 查询和一个保守的 goto 清理 helper。
 - 维护成本：2/10。行为变化集中在 Phoenix 主循环，smoke 覆盖了原来的回归点。
+
+# 2026-06-20 实现记录：把 RecursiveStructurer 改成 Angr 式 overlay stack
+
+继续对齐 Angr 的 `RecursiveStructurer._structure_overlay_tree()`。之前 C++ 版用普通递归函数按静态
+`children()` 处理 region，最后连 root 也调用 `finalize()`。Angr 是显式 stack 驱动 overlay tree：
+先处理子 region，子 region 成功就 finalize、失败就 dissolve；顶层只取 result，不把 root 当成父节点里的
+child 去 finalize。这轮先对齐遍历和 root 生命周期，不引入 shared graph mutation / rollback。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:32`
+  增加 `finishChildRegion()`，集中处理子 region 的 finalize / dissolve。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:41`
+  增加 `nextUnprocessedChild()`，给显式 stack 查找还没处理过的 child overlay。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:56`
+  用 `structureOverlayTree()` 替换旧递归函数：维护 stack、processed set 和每个 region 的 root node。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:89`
+  只有非 root region 会 finalize / dissolve；root 只把 result 写到 `StructuredTree::root()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:237`
+  扩展 `testRecursiveStructurerVisitsChildBeforeParent()`，验证 child 仍会 finalize，而 root 不再写
+  `structuredRoot`。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步让递归驱动更像 Angr，但仍保留 NotDec 当前的 overlay 过渡模型。
+- 后续要继续靠近 Angr，需要让 `RegionOverlay` 真正持有 shared graph view 和 rollback，而不是只记录
+  `structuredRoot`。
+- 实现效果：3/10。驱动流程更一致，root 生命周期也更接近 Angr。
+- 复杂度：2/10。递归变显式 stack，但逻辑仍局部。
+- 维护成本：2/10。新增 processed set 是当前静态 region tree 下避免 dissolved child 重复处理的过渡处理。
