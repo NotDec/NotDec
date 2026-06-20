@@ -4051,3 +4051,43 @@ child 去 finalize。这轮先对齐遍历和 root 生命周期，不引入 shar
 - 实现效果：3/10。补上 Angr refinement checkpoint 的行为边界。
 - 复杂度：2/10。快照直接复制本地图，够用但不是最终模型。
 - 维护成本：2/10。接口以后能映射到 overlay manager，当前测试覆盖失败路径所需状态。
+
+# 2026-06-20 实现记录：给 RegionOverlay 增加 successor snapshot 接口
+
+继续补 Angr 的 `RegionOverlay.finalize(result, succ_snapshot=...)` 入口。Angr 在 structuring 子 region 前会
+先保存 successor snapshot，finalize 时用它恢复 region 到 successor 的外部流。当前 C++ 还没有 shared graph
+重连，所以这轮先补接口和调用点，把 snapshot 生命周期放到正确位置。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:21`
+  增加 `SuccessorSnapshot`，当前保存 `std::vector<BlockId> Successors`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:77`
+  `RegionOverlay` 增加 `snapshotSuccessors()`，`finalize()` 改为接收 snapshot 参数。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:171`
+  实现 `snapshotSuccessors()`，当前从 `successors()` 拷贝；`finalize()` 暂时只接收参数，后续 shared graph
+  mutation 落地后再用它重建 successor 边。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:83`
+  每个 region 在调用具体 structurer 前先 snapshot successors，非 root child finalize 时传入 snapshot。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:323`
+  更新手工 finalize 调用，覆盖 snapshot 参数。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:368`
+  验证 `snapshotSuccessors()` 能保存 child region 的 successor 列表。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是接口对齐，不是 successor 重连实现。
+- 好处是 `RecursiveStructurer` 的生命周期已经和 Angr 对齐：snapshot 在 structuring 前，finalize 在 child 完成后。
+- 后续要让 snapshot 真正有用，需要把 child collapse/finalize 从 `StructuredRoots` 过渡状态改成 shared graph mutation。
+- 实现效果：2/10。补上 finalize 所需参数和调用时机。
+- 复杂度：1/10。只新增轻量数据结构和传参。
+- 维护成本：1/10。后续扩展 snapshot 内容不用再改调用点。
