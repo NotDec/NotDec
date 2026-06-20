@@ -2754,3 +2754,34 @@ while (1) {
 - 实现效果：3/10。是架构清理，不新增算法能力。
 - 复杂度：2/10。局部改动。
 - 维护成本：2/10。去掉重复名字表后更低。
+
+# 2026-06-20 实现记录：收紧 C backend 到 shared structurer 的入口
+
+上一轮 shared registry 已经集中维护 `goto/phoenix/sailr`，但 C backend 的
+`SAFuncContext::run()` 里仍按 enum 手写多段 `StructuredGoto` 分支。这轮保持 CLI
+行为不变，只把 enum 到 shared structurer 名字的映射集中到接口层。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:25`
+  新增 `getStructurerName()`，把 `SA_Goto` / `SA_StructuredGoto` 映射到
+  `goto`，`SA_StructuredPhoenix` 映射到 `phoenix`，`SA_StructuredSAILR`
+  映射到 `sailr`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2126`
+  `SAFuncContext::run()` 改成统一解析 structurer 名字，再调用一次
+  `StructuredGoto` adapter，去掉算法分支里的重复执行逻辑。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，5 个测试，耗时约 `1.62s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structurer-entry-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这一步没有开放自由字符串 `--algo`，避免改变现有非法算法报错和测试行为。
+- C backend 入口现在只关心“选择哪个 shared structurer”，更接近 Angr 的
+  name-to-structurer 边界。
+- 实现效果：3/10。主要是入口清理，不新增 reducer 能力。
+- 复杂度：2/10。改动集中在接口映射和调用点。
+- 维护成本：2/10。后续新增算法时，至少不用再复制 `StructuredGoto` 执行分支。
