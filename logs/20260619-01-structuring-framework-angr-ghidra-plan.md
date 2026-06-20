@@ -1979,3 +1979,38 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 - 实现效果：6/10。改善 irregular loop 的可读性，但多出口仍保守保留 goto。
 - 复杂度：5/10。fallback 多了一条 root-level natural-loop 规约路径。
 - 维护成本：5/10。逻辑仍集中在 Phoenix fallback，后续迁 SAILR follow 选择时可以替换这一段。
+
+# 2026-06-20 实现记录：structuring smoke 测试
+
+前面几个 Phoenix/SAILR 行为一直靠 `/tmp` 小 IR 手动检查，后续继续迁 SAILR 时容易回退。这里把核心 smoke 固化到 `NotDec-llvm2c` 子模块的 CTest 里，先覆盖当前已支持的最小行为。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/CMakeLists.txt:2`
+  增加 `find_package(Python3 REQUIRED COMPONENTS Interpreter)`。
+- `external/NotDec-llvm2c/test/CMakeLists.txt:5`
+  接入新的 `structuring` 测试目录。
+- `external/NotDec-llvm2c/test/structuring/CMakeLists.txt:1`
+  新增 `structuring-smoke` 测试，直接使用构建出的 `notdec-llvm2c-exe`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:9`
+  新增 4 个小 IR：线性 while、线性 while+break、多出口 loop fallback、简单 switch。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:144`
+  每个 case 跑 `--algo=structured-sailr`，按输出文本检查关键结构和计数。
+
+验证：
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c` 通过。
+- `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -S . -B ./build -G Ninja` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure` 通过，1 个测试，耗时约 `0.41s`。
+
+当前判断：
+
+- 这不是完整 correctness 测试，只是防止当前 Phoenix/SAILR 迁移过程中最基础的 loop/switch 行为回退。
+- 多出口 loop 的断言保持保守：检查 `while(1)` 和两个 `continue`，不要求把外部出口转成 `break`。
+
+评分：
+
+- 实现效果：6/10。补上了最缺的回归保护。
+- 复杂度：2/10。一个小脚本和一个 CTest 入口。
+- 维护成本：3/10。后续每迁一个 reducer 可以继续往同一个脚本加 case。
