@@ -2414,3 +2414,32 @@ Angr 的结构恢复入口是按 structurer class 表选择算法。当前 share
 - 实现效果：5/10。边选择流程更接近 Angr，但还缺 edge virtualization hints 和 root acyclic cycle fallback。
 - 复杂度：3/10。只增加一个候选过滤函数。
 - 维护成本：3/10。分类逻辑独立，后续补 Angr hints/fallback 时可以继续接在 last-resort 阶段。
+
+# 2026-06-20 暂停点：root acyclic cycle fallback 需要先补 acyclic view
+
+继续对照 Angr `PhoenixStructurer._last_resort_refinement()` 时，尝试补 type4：root acyclic region 里出现 cycle debris 时，Angr 会从 `to_acyclic_by_order()` 丢掉的 cycle-closing edges 里选一条虚拟化。
+
+当前 shared structuring 还没有显式的 acyclic graph view，也没有记录“为了转成 acyclic view 被丢掉的边”。试过用 `MutableRegionGraphAnalysis::NodeOrder` 近似判断 `From` 到 `To` 的回边，但一个合法 root 后继环用例会输出很差：
+
+```llvm
+entry -> head
+head -> a / b
+a -> c
+b -> c
+c -> head / exit
+```
+
+这个用例能跑完，但会生成 `goto head` 加 `while (1)`，并且把 `c -> head` 处理成不正确的 `goto c` 形状。说明只靠当前 node order 猜 cycle-closing edge 不可靠，不能提交。
+
+后续要继续复刻 Angr type4 fallback，先做下面这个边界：
+
+- 给 `MutableRegionGraph` 或 `MutableRegionGraphAnalysis` 增加一个 acyclic view 构造，语义对齐 Angr `to_acyclic_by_order()`。
+- 明确返回被移除的 cycle edges，type4 fallback 只从这些边里选。
+- root acyclic fallback 只在 root region 使用；非 root region 仍让外层 cyclic region 接管。
+- 给结构层补一个小 harness，直接断言被虚拟化的边，而不是从最终 C 文本猜。
+
+当前判断：
+
+- 这是计划没展开的技术决策点，不能继续用临时近似推进。
+- 已回退试探性代码，当前没有代码改动。
+- goal 不标完成；也不标 blocked，因为还能先做 acyclic view 设计/实现后继续。
