@@ -3975,3 +3975,41 @@ child 去 finalize。这轮先对齐遍历和 root 生命周期，不引入 shar
 - 实现效果：3/10。驱动流程更一致，root 生命周期也更接近 Angr。
 - 复杂度：2/10。递归变显式 stack，但逻辑仍局部。
 - 维护成本：2/10。新增 processed set 是当前静态 region tree 下避免 dissolved child 重复处理的过渡处理。
+
+# 2026-06-20 实现记录：给 OverlayManager 增加 structuring 状态 checkpoint
+
+继续补 Angr 的 overlay 生命周期。Angr 的 `RecursiveStructurer` 在 structuring overlay tree 前会 checkpoint，
+结束后 rollback / commit，避免 structuring 过程中 finalize / dissolve 的临时状态污染 region identifier 的
+结果。当前 C++ 还没有 shared graph mutation，所以这轮先把实际存在的 overlay 状态 `StructuredRoots`
+纳入 checkpoint。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:41`
+  `OverlayManager` 增加 `checkpoint()`、`rollback()`、`commit()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:51`
+  增加 `StructuredRootCheckpoints`，保存 `StructuredRoots` 快照。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:81`
+  实现 checkpoint / rollback / commit。当前只恢复 structured-root 状态，后续 shared graph mutation 落地后再扩展。
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:116`
+  overlay tree structuring 前建立 checkpoint，拿到 result 后 rollback / commit，再设置 `StructuredTree::root()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:250`
+  更新 `testRecursiveStructurerVisitsChildBeforeParent()`，验证 structuring 结束后 root 和 child finalize 状态都不会留在
+  `OverlayManager`。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步对齐 Angr 的 checkpoint/rollback 外部行为，但不是完整 shared graph undo log。
+- 后续实现 `RegionOverlay` shared graph mutation 时，checkpoint 应扩展到图边、owner、隐藏边和 cached view。
+- 实现效果：3/10。递归 structuring 的临时 overlay 状态不再泄漏。
+- 复杂度：1/10。当前只是 structured-root 快照。
+- 维护成本：2/10。接口名字已对齐 Angr，后续扩展时调用点不用再改。
