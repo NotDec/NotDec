@@ -1753,3 +1753,49 @@ shared structuring 逐步生成 `if/else`、`while`、`switch` 后，C 输出里
 - 实现效果：6/10。递归框架开始实际传递 child root，但保守过滤导致当前 smoke 输出基本不变。
 - 复杂度：4/10。新增一个 overload 和递归 driver，没有改 reducer 主体。
 - 维护成本：4/10。child root 过滤规则集中在 `RecursiveStructurer`，后续补 loop context 时需要回到这里调整。
+
+# 2026-06-20 实现记录：Phoenix virtual edge fallback 识别 continue
+
+shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，renderer 也能输出 `break/continue`，但 fallback 收集边时一直全部标成 `Goto`。这轮先补一个保守分类：只有当前 region 明确是 `NaturalLoop`，且 virtualized edge 目标是这个 loop 的 `Head`，才把边标成 `Continue`。`Break` 先不做，因为 natural-loop child graph 里跳到 follow 的边目前存在于 `ExternalSuccs`，不是普通 `Succs`；在 parent overlay 里 child->follow 又是正常后继，不能直接猜成 break。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:35`
+  `virtualizeOneEdge()` 增加 `Region` 参数，用于判断当前 virtual edge fallback 的 region 类型和 loop head。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:737`
+  `collectVirtualizableEdges()` 增加 `Region` 参数。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:752`
+  只有 `RegionKind::NaturalLoop && ToBlock == R.Head` 时，把 virtual edge kind 设置为 `Continue`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:972`
+  `virtualizeOneEdge()` 调用新的 `collectVirtualizableEdges(R, Graph)`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1030`
+  reducer fallback 调用 `virtualizeOneEdge(Cfg, R, Graph)`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break.continue.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、1 个 `break`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.continue.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch.continue.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-if-two-return.ll -o /tmp/notdec-if-two-return.continue.c --algo=structured-sailr`
+  通过，输出仍是 `if/else return`，没有 `goto`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-continue-fallback.ll -o /tmp/notdec-loop-continue-fallback.c --algo=structured-sailr`
+  通过；该样例被现有 while/if reducer 完整结构化，没有触发 fallback continue，但证明普通 loop 输出没有回退。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-continue-kind-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-continue-kind-smoke.sol --tr-level=2`
+  通过，耗时约 `17.76s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步补上了 continue 分类能力，但现有 smoke 没有触发 fallback continue。
+- break 分类需要先把 loop follow/exit 上下文传进 child graph，不能靠 parent overlay 猜。
+
+评分：
+
+- 实现效果：4/10。补齐了一个安全的 virtual edge kind，但还不是完整 irregular loop exit 迁移。
+- 复杂度：2/10。只多传 `Region` 并改一个分类条件。
+- 维护成本：2/10。逻辑局部，后续补 break 时可以沿用同一个 region-aware 收集入口。
