@@ -3263,3 +3263,41 @@ loop head 和 follow”的情况，生成 `DoWhile`。
 - 实现效果：4/10。graph-level refinement 可以从 latch 条件生成 `DoWhile`。
 - 复杂度：3/10。局部 loop-kind 判定。
 - 维护成本：3/10。后续补 while/do-while tie-break 时会调整优先级。
+
+# 2026-06-20 实现记录：while/do-while tie-break
+
+继续补 Angr `_refine_cyclic_core()` 里 while 和 do-while 同时成立时的取舍。Angr 会避免把
+do-while 的 latch 条件浪费成 while body 里的 break。这轮加入保守规则：唯一 back edge 时，
+如果 head 条件能形成 while、latch 条件也能形成 do-while，且二者 follow 不同，则优先 do-while。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1638`
+  新增 `findGraphDoWhileSuccessor()`，只读取 latch 条件分支，判断 do-while follow。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1903`
+  `reduceGraphNaturalLoopOnce()` 记录 back edge 数量，只在唯一 back edge 时参与 do-while
+  tie-break。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1932`
+  如果 while follow 和 do-while follow 不同，设置 `PreferDoWhile`，优先使用 do-while follow。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1981`
+  loop kind 生成时尊重 `PreferDoWhile`，否则仍保持普通 while 优先。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:360`
+  新增 `testRefineCyclicPrefersDoWhileWhenLatchConditionWouldBecomeBreak()`，验证 latch 条件不会被
+  while 方案吞成 break。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.63s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-dowhile-tiebreak-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- 这只是 Angr tie-break 的一个核心子集；parent region 里的 successor 顺序比较还没做。
+- 多 back edge 情况仍不参与 do-while tie-break。
+- 实现效果：4/10。避免一个常见 do-while 条件被降级成 break。
+- 复杂度：3/10。只加判定，不改结构树接口。
+- 维护成本：3/10。后续补 parent-region 顺序时会扩展这个判断。
