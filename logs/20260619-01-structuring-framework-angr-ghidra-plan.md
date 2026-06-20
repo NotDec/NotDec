@@ -3438,3 +3438,38 @@ refinement 需要处理多个 successor，会直接放弃，避免在 child regi
 - 实现效果：2/10。只是把多算法接入口边界补清楚。
 - 复杂度：1/10。只加名字表。
 - 维护成本：1/10。减少后续在文档、CLI、registry 之间重复写算法名的风险。
+
+# 2026-06-20 实现记录：switch source 的 continue rewrite guard
+
+继续补 Angr `_refine_cyclic_core()` 里 continue rewrite 的保守边界。Angr 在找不到能安全替换的
+jump block 时，如果 source 是 jump table head，可以只 detach edge，不往 source 里插
+`ContinueNode`。NotDec 当前没有完整 jump table 元数据，这轮先用“source 已经是结构化 switch
+子树”作为保守判断：断掉额外回头边，但不替换 source 的 structured root。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1284`
+  新增 `sourceContainsStructuredSwitch()`，判断 source 的 `StructuredRoot` 是否包含
+  `StructuredNodeKind::Switch`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1795`
+  `virtualizeExtraContinueEdges()` 遇到这种 source 时跳过 `buildVirtualizedSource()` 和
+  `setStructuredRoot()`，但仍调用 `Graph.virtualizeEdge()` 断边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:327`
+  新增 `testRefineCyclicSkipsSwitchSourceContinueRewrite()`，验证 switch source 会产生
+  continue virtual edge，但原 structured root 保持不变。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+
+当前判断：
+
+- 这不是完整 jump-table case-head 识别，只是避免把 `continue` 错塞进已经结构化的 switch。
+- 后续如果 `StructuredCFG` 携带 jump table / case-head 元数据，可以把判断从“含 switch 子树”
+  收窄到精确的 case-head。
+- 实现效果：3/10。补了 Angr continue rewrite 的一个安全分支。
+- 复杂度：1/10。局部 guard。
+- 维护成本：2/10。后续有精确信息时需要替换这个保守判断。
