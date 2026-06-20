@@ -2234,3 +2234,33 @@ Angr 的 `DEFAULT_STRUCTURER` 是 `SAILRStructurer`，而 shared structuring reg
 - 这一步不改变 C CLI 的默认值，因为它已经是 `structured-sailr`。
 - Solidity backend 以后默认走 SAILR，而不是 Goto fallback，更符合“共享 structuring 给多语言后端复用”的目标。
 - EVM smoke 时间和之前同口径约 18s 接近，未见明显性能风险。
+
+# 2026-06-20 实现记录：Phoenix early terminal if schema
+
+继续补 Angr `_match_acyclic_ite()` 里的一个保守形状：条件分支的一边是 terminal return/unreachable，另一边继续执行时，可以折成 `if (...) return;` 后接 follow。当前 shared Phoenix 之前只支持 then-fallthrough、if-else common follow、两边都 terminal，漏了 early return 这种常见形状。
+
+实现时遇到一个边界：这个 acyclic schema 不能抢循环里的 `if (...) break`。一开始直接匹配 terminal+follow 会把 `while` header 或 loop body 里的 break 分支先折成普通 if，导致后面的 cyclic while / improved break schema 失效。最终加了保守保护：继续分支不能直接回 header，也不能下一跳回 header。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:198`
+  `reduceIfOnce()` 增加 true 分支 terminal、false 分支继续的 early terminal if schema。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:204`
+  增加 false 分支 terminal、true 分支继续的对称 schema，并取反条件。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:142`
+  新增 `early_return_if` 小 IR，要求输出 `if (x == 0)` 和两个 `return`，且不能退回 `goto ret` / `goto cont`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available' --output-on-failure` 通过，3 个测试，耗时约 `0.92s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-early-terminal-phoenix-smoke.c --tr-level=2 --algo=structured-phoenix` 通过。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-early-terminal-sailr-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这个 schema 是 Angr ITE 的一个子集，不处理外部 region successor 和复杂 switch head。
+- 回边保护是必要的，否则 acyclic if 会抢 cyclic loop schema。
+- 实现效果：6/10。补了常见 early return，但还没有迁 short-circuit condition。
+- 复杂度：4/10。规则本身小，主要复杂度在避免抢 loop。
+- 维护成本：4/10。后续如果引入 Angr 一样的 full graph / region overlay，可以把这个保护换成更准确的 cyclic 判断。
