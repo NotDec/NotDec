@@ -2113,3 +2113,32 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 - 旧 Phoenix 入口已经从代码和测试两边同时去掉。
 - 后面要做的是把共享 `PhoenixStructurer` 再收敛到更接近 Angr 的实现，而不是恢复老 Phoenix 行为。
+
+# 2026-06-20 实现记录：恢复 shared structured-phoenix 入口
+
+前一轮删除旧 C Phoenix 时，把 shared `structured-phoenix` 入口也一起删掉了。按新的目标，应该删除的是旧版 C Phoenix 代码和 `--algo=phoenix`，但保留 `--algo=structured-phoenix`，让它指向共享 `PhoenixStructurer`。这样后续可以继续按 Angr 的 `PhoenixStructurer` 方向改，而不是让用户只能通过 `structured-sailr` 间接测 Phoenix 基线。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:19`
+  恢复 `SA_StructuredPhoenix`，但没有恢复旧 `SA_Phoenix`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:12`
+  恢复 `structured-phoenix` CLI 选项；旧 `phoenix` 仍不存在。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2129`
+  `SA_StructuredPhoenix` 通过 `StructuredGoto(*this, "phoenix")` 调到共享 structuring registry。
+- `external/NotDec-llvm2c/test/structuring/CMakeLists.txt:11`
+  新增 `structured-phoenix-available` ctest。
+- `external/NotDec-llvm2c/test/structuring/run_structured_phoenix_available.py:13`
+  运行 `notdec-llvm2c --algo=structured-phoenix`，确认 shared Phoenix 入口可用。
+
+验证：
+
+- `cmake --build ./build --target notdec notdec-llvm2c-exe -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available' --output-on-failure` 通过，3 个测试，耗时约 `0.64s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-structured-phoenix-shared-smoke.c --tr-level=2 --algo=structured-phoenix` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=phoenix /tmp/notdec-while-linear-body.ll -o /tmp/legacy-phoenix-check.c` 失败且输出 `Cannot find option named 'phoenix'`，符合预期。
+
+当前判断：
+
+- 对外入口现在清楚了：`phoenix` 是被删除的旧 C Phoenix；`structured-phoenix` 是共享 Angr-style Phoenix reducer。
+- 下一步继续改 `PhoenixStructurer` 本身，使它更贴近 Angr 的 Phoenix 流程，然后在同一套继承关系上补 SAILR。
