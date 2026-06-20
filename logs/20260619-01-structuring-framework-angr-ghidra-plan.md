@@ -3891,3 +3891,48 @@ overlay 图视图不一致。它虽然只是 fallback，但统一入口下也应
 - 实现效果：3/10。进一步把 reducer 从 overlay 状态细节里拿出来。
 - 复杂度：1/10。新增一个小数据结构和查询函数。
 - 维护成本：1/10。共享规则集中，测试覆盖 finalize / dissolve。
+
+# 2026-06-20 实现记录：按 Angr 的 Phoenix 主循环处理 cyclic 阶段
+
+用户确认继续严格对齐 Angr 后，回到 Phoenix reducer loop。之前 C++ 版是 `acyclic / cyclic / refine /
+last resort` 的 `else if` 链；Angr 的 Phoenix 是每轮先跑 acyclic，当前 region 有环时继续跑 cyclic，
+只有本轮完全没进展时才进入 cyclic refinement 或 last resort。这轮把流程改成这个形状。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:82`
+  给 `MutableRegionGraph` 增加 `hasCycle()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:518`
+  实现 active graph DFS cycle 检测，用于 Phoenix 主循环判断当前 region 是否还有环。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2316`
+  `structureRegion(Cfg, Region, Tree)` 改成 Angr 风格：acyclic 有进展后仍允许 cyclic schema 在同一轮继续跑；
+  只有本轮无进展时才尝试 cyclic refinement / last resort。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2385`
+  overlay 入口的 `structureRegion(Cfg, RegionOverlay, Tree)` 使用同一套主循环。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1449`
+  原来只删除 `goto` 到紧随其后的 `while(1)`，现在改成 `dropGotoIntoFollowingLoop()`，也处理 `while` /
+  `do while`。`do while` 的入口按 body 第一个 label/basic block 判断，避免父 region 保留跳进子 loop 的
+  `goto head`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:267`
+  `root_cycle_follow` 期望从旧的 `while (1)` 改为严格流程下当前生成的 `do { ... } while (...)`，同时继续要求
+  没有 `goto head` / `goto c`。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步是流程对齐，不是新增结构恢复规则。
+- `root_cycle_follow` 的输出从旧 fallback 的 `while (1)` 变成更直接的 `do while`，语义等价，并且去掉了跳进
+  子 loop 的多余 goto。
+- 还没实现 Angr 的 overlay shared graph mutation / rollback；当前仍是 NotDec 的 `MutableRegionGraph`
+  过渡层。
+- 实现效果：4/10。主循环顺序更接近 Angr，SAILR 也走同一套流程。
+- 复杂度：2/10。新增 cycle 查询和一个保守的 goto 清理 helper。
+- 维护成本：2/10。行为变化集中在 Phoenix 主循环，smoke 覆盖了原来的回归点。
