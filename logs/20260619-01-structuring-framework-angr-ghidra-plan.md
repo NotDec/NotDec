@@ -3154,3 +3154,42 @@ body 内虚拟化成 `goto`，并从 graph 边里断开，避免折叠后的 loo
 - 实现效果：5/10。多出口 loop 现在能在 shared refinement 里继续收敛到条件 while。
 - 复杂度：4/10。开始修改 graph 边和 source replacement，后续需要更完整的 Angr 规则兜住。
 - 维护成本：4/10。successor 选择策略后续要替换成 Angr 的 edge-count 规则。
+
+# 2026-06-20 实现记录：按 Angr edge-count 选择 natural-loop successor
+
+继续对齐 Angr `_refine_cyclic_core()` 的 successor 选择。上一轮多 successor 时先选 block id
+最小的 successor，这和 Angr 不一致。Angr 在 successor 还没确定时，会统计 outgoing edge 目标，
+选择 edge 数最多的目标，打平后选地址最低的目标。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1565`
+  `chooseNaturalLoopSuccessor()` 改为接收 graph 和 loop members，按 exit edge 数最多选 successor，
+  打平后选 block id 最小。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1603`
+  新增 `findGraphWhileSuccessor()`。如果 loop head 是纯条件分支，先用 head 的出 loop 分支作为
+  while successor；只有自然 loop fallback 才用 edge-count 规则。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1798`
+  `reduceGraphNaturalLoopOnce()` 先调用 `findGraphWhileSuccessor()`，失败后再调用
+  `chooseNaturalLoopSuccessor()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:338`
+  新增 `testRefineCyclicPrefersMostCommonExitAsFollow()`，验证自然 loop 有多个 exit 时选择 edge
+  数更多的 target 作为 follow。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.61s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-successor-edge-count-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- successor 选择现在更接近 Angr：while head 已确定 successor 时不被 edge-count 覆盖；natural-loop
+  fallback 才用 edge-count。
+- parent region 限制、dangling successor 检查、continue edge rewrite 还没完整复刻。
+- 实现效果：4/10。修正一处 Angr 行为差异。
+- 复杂度：3/10。局部策略替换。
+- 维护成本：3/10。后续补 parent/dangling 规则时会继续复用该策略。
