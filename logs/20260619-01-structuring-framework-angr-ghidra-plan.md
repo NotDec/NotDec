@@ -2356,3 +2356,34 @@ Angr 的结构恢复入口是按 structurer class 表选择算法。当前 share
 - 这一步只是入口整理，不是新算法实现。
 - registry 形式更接近 Angr 的 `STRUCTURER_CLASSES`，后续加算法只需要补注册项和测试。
 - C++ 标准仍是 C++17，所以没有使用 `std::span`。
+
+# 2026-06-20 实现记录：Phoenix acyclic switch 顺序和 terminal case
+
+对照 Angr `PhoenixStructurer._match_acyclic_schemas()`，acyclic schema 的尝试顺序是 switch、sequence、ITE。当前 shared Phoenix 是 sequence、if、switch。这个顺序会让 case 块先被 sequence 合并，后面 switch reducer 就失去原始 case body。这里把顺序改成和 Angr 一致，并补一个保守的 terminal switch case 形状。
+
+实现时发现一个现有缺口：当所有 case/default 都直接 return 时，`reduceSwitchOnce()` 找不到共同 follow，于是退回 fallback switch，输出 `case: goto case1;` 再在 switch 外放 label。这个形状可以安全折叠，因为每个 target 都是 header 的唯一后继分支目标，而且没有后继边。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:328`
+  `reduceSwitchOnce()` 增加 `HasTerminalCasesOnly` 分支，允许所有 switch target 都是 terminal node。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:350`
+  成员检查根据是否 terminal case 分流：普通 switch 仍要求 case 指向共同 follow；terminal switch 要求 case 没有后继。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1259`
+  `analyzeAcyclic()` 的 schema 顺序改为 switch、sequence、if，和 Angr 一致。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:142`
+  新增 `switch_before_sequence`，要求 terminal case switch 直接生成 case body，不能退成 `goto case1` / `goto case2` / `goto default`。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `ctest --test-dir build -R 'structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure` 通过，4 个测试，耗时约 `1.38s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-switch-terminal-sailr-smoke.c --tr-level=2 --algo=structured-sailr` 通过。
+
+当前判断：
+
+- 这不是完整 Angr switch 迁移，只补了最容易证明正确的 terminal case 子集。
+- schema 顺序已经和 Angr 对齐，后续继续补 switch schema 时不会被 sequence 先抢掉。
+- 实现效果：5/10。修掉一个真实 fallback 退化，但 switch 复杂形状还没迁。
+- 复杂度：3/10。只在现有 reducer 内加一个分支。
+- 维护成本：3/10。规则边界清楚，后续完整 switch reducer 可以覆盖它。
