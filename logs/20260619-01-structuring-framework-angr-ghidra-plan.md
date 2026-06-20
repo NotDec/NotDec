@@ -3779,3 +3779,39 @@ use。这些都是 C 后端渲染细节，不应该让 adapter 直接依赖完�
 - 实现效果：3/10。减少旧头外溢，adapter 边界更符合 shared structuring。
 - 复杂度：2/10。多了几个 wrapper，但避免了大规模搬上下文定义。
 - 维护成本：2/10。C 渲染细节集中在 bridge，后续拆 context 更容易。
+
+# 2026-06-20 实现记录：把可见 region tree 视图收进 OverlayManager
+
+继续靠近 Angr 的 overlay model。Phoenix 的 overlay 入口之前在 `structureRegion()` 里手工拷贝
+`RegionTree`，再过滤掉没有 finalize 的 child region。这是 overlay 状态视图，不应该散在具体 reducer
+里。Angr 的 reducer 应该从 overlay/region manager 拿当前图视图，而不是自己判断哪些 child 可见。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/Region.h:45`
+  给 `RegionTree` 增加非 const `regions()`，用于构造 overlay 可见视图。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:30`
+  `OverlayManager` 增加 `visibleRegionTree()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:37`
+  实现 `visibleRegionTree()`：复制完整 region tree，只保留已经有 `structuredRoot` 的 child。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2329`
+  Phoenix overlay 入口改为直接使用 `OverlayManager::visibleRegionTree()`，删除本地 child 过滤代码。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:286`
+  新增 `testVisibleRegionTreeOnlyIncludesFinalizedChildren()`，验证 finalize / dissolve 对可见 child 视图的影响。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步不改变输出语义，只把 overlay 状态判断从 Phoenix reducer 移到 OverlayManager。
+- 后续做 shared graph mutation / rollback 时，`visibleRegionTree()` 可以继续承载“当前 reducer 看见什么”的逻辑。
+- 实现效果：3/10。边界更接近 Angr，具体 reducer 少了一点 overlay 状态细节。
+- 复杂度：1/10。只是一个视图函数和测试。
+- 维护成本：1/10。后续 child 可见规则变化时不用再改 Phoenix。
