@@ -4134,3 +4134,43 @@ snapshot 传进 `finalize()`，但没有保存。这轮把 snapshot 和 structur
 - 实现效果：3/10。finalize 状态更接近 Angr 的 replacement + successor snapshot。
 - 复杂度：1/10。只是保存和恢复一份 snapshot。
 - 维护成本：1/10。checkpoint 同步覆盖 root 和 snapshot，状态边界更清晰。
+
+# 2026-06-20 实现记录：父图构建使用 finalized child successor snapshot
+
+继续对齐 Angr 的 `finalize_region(..., succs_snapshot=...)` 行为。上一轮已经保存 snapshot，这轮让
+`MutableRegionGraph::build(Cfg, Overlay)` 在 parent 构图时使用它：finalized child 作为 grouped node
+出现时，snapshot 里的 child 外部 successor 会补进 grouped node 的 `ExternalSuccs`，并连到 parent
+里已有节点或 external placeholder。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:430`
+  在 overlay 构图函数里增加 pending snapshot successor 列表，避免 child grouped node 创建时 block 映射还没建完。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:459`
+  读取 `FinalizedChildRegion::Snapshot.Successors`，过滤 child 内部 successor，并记录到 grouped node 的
+  `ExternalSuccs`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:503`
+  全部 block 映射完成后，把 pending snapshot successor 连到 parent 内节点；不在 parent 内的 successor
+  仍走 external placeholder。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:427`
+  增加 `testFinalizedChildSnapshotAddsParentVisibleSuccessor()`，覆盖原始 CFG 没有 child->follow 边、
+  只靠 snapshot 暴露 parent-visible successor 的情况。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:952`
+  把新测试接进 structuring analysis test main。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这里没有让 snapshot 覆盖原始 CFG 边，只做补充。覆盖语义要等 shared overlay graph 持有可变边状态后再做。
+- 这一步让 parent reducer 看到 finalized child replacement 的 successor 视图，比上一轮只保存 snapshot 更接近 Angr。
+- 实现效果：4/10。parent 构图已经用上 successor snapshot，但 shared graph mutation 还没落地。
+- 复杂度：2/10。多了一个 pending 列表，避免过早创建错误边。
+- 维护成本：2/10。后续把 `MutableRegionGraph` 改成 overlay graph view 时，这段逻辑可以平移到 overlay 边重连。
