@@ -1820,3 +1820,57 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 - 未提交实验代码已撤回，`external/NotDec-llvm2c` 工作树干净。
 - `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+
+# 2026-06-20 实现记录：natural loop region 改为 laminar child tree
+
+上一轮 break fallback 的停点是重叠 natural loop child：同一个函数里可能因为多个 backedge / 多个 header 生成部分重叠的 child region，parent overlay 没法安全决定消费哪个 child。这里先把 `RegionIdentifier` 改成更保守的 laminar region tree：同 header backedge 合并成一个 loop；不同 header 的 loop 如果只是部分重叠，就不生成后来的候选；只有完全包含关系才转成嵌套 child。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:16`
+  新增 vector 版 `contains()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:20`
+  新增 `isSubset()`，用于判断 region 包含关系。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:29`
+  新增 `overlaps()`，用于过滤非 laminar 的部分重叠 loop。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:153`
+  新增 `LoopCandidate`，把 natural loop 候选先收集到临时结构。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:168`
+  新增 `mergeLoopCandidate()`，同 header 多 backedge 合并成一个 loop 候选。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:191`
+  新增 `collectLoopCandidates()`，集中收集 backedge 产生的 natural loop。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:217`
+  新增 `filterLaminarLoops()`，过滤部分重叠 loop，只保留不重叠或包含关系。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:248`
+  新增 `makeLoopRegion()`，从候选生成 `RegionKind::NaturalLoop`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:281`
+  `identifyNaturalLoopChildren()` 改为先生成候选，再建立 loop region。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:294`
+  给每个 loop child 选择最小的包含 parent，形成 root/child 嵌套关系。
+
+验证：
+
+- `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-break.ll -o /tmp/notdec-loop-break.laminar.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、1 个 `break`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-while-linear-body.ll -o /tmp/notdec-while-linear-body.laminar.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `while`、loop 后 `return 0`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-simple-switch.ll -o /tmp/notdec-simple-switch.laminar.c --algo=structured-sailr`
+  通过，输出仍有 1 个 `switch`、3 个 `break`、1 个 `return`。
+- `build/external/NotDec-llvm2c/bin/notdec-llvm2c /tmp/notdec-loop-external-break-fallback.ll -o /tmp/notdec-loop-external-break-fallback.laminar.c --algo=structured-sailr`
+  通过；该多 backedge 样例输出仍未改善，但 region tree 已不再给 parent overlay 暴露任意重叠 child。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-laminar-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过，耗时约 `0.14s`。
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-laminar-smoke.sol --tr-level=2`
+  通过，耗时约 `17.51s`，输出仍是 `471` 个 `// block_...`、`454` 个 `goto block_...`、`12` 个 `emit`、`160` 个 `revert`。
+
+当前判断：
+
+- 这一步解决的是 recursive parent overlay 的前置边界：child region 不能部分重叠。
+- break fallback 还没继续接回去；下一步可以在 laminar region tree 基础上重新实现 natural-loop child 的 follow/break 处理。
+
+评分：
+
+- 实现效果：6/10。减少了 region tree 的不确定性，是继续迁移 Phoenix irregular loop exit 的前置。
+- 复杂度：5/10。`RegionIdentifier` 多了候选阶段、过滤阶段和 parent 选择阶段。
+- 维护成本：5/10。策略保守，后续如果要支持 irreducible/overlap loop，需要在 `filterLaminarLoops()` 里扩展。
