@@ -3815,3 +3815,37 @@ use。这些都是 C 后端渲染细节，不应该让 adapter 直接依赖完�
 - 实现效果：3/10。边界更接近 Angr，具体 reducer 少了一点 overlay 状态细节。
 - 复杂度：1/10。只是一个视图函数和测试。
 - 维护成本：1/10。后续 child 可见规则变化时不用再改 Phoenix。
+
+# 2026-06-20 实现记录：修正 Goto fallback 的 dissolved child 可见性
+
+继续统一 overlay 语义。`MutableRegionGraph::build(Cfg, Overlay)` 和 `visibleRegionTree()` 都只把已经
+`finalize()` 的 child 当作 collapsed child；没有 finalize 或已经 `dissolve()` 的 child 应该继续对 parent
+可见。`GotoStructurer::structureRegion()` 之前会跳过所有 child block，不管 child 是否 finalize，这和
+overlay 图视图不一致。它虽然只是 fallback，但统一入口下也应该遵守同一套 overlay 规则。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:120`
+  parent fallback 只处理已经有 `structuredRoot()` 的 child：已 finalize child 会被嵌入并跳过其 blocks；
+  未 finalize / dissolved child 的 blocks 会继续按 parent region 普通 block 输出。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:278`
+  扩展 `testGotoRegionSkipsChildBlocks()`：
+  - child 未 finalize 时，parent fallback 能看到 child block label。
+  - child finalize 后，parent fallback 嵌入 child root，并不再输出 child block label。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这一步修正了 Goto fallback 和 overlay graph 之间的可见性差异。
+- 之后 child finalize/dissolve 的语义可以继续作为 overlay manager 的状态，不需要每个 reducer 自己猜。
+- 实现效果：3/10。统一了 fallback 和 Phoenix 图构建的 child 可见规则。
+- 复杂度：1/10。局部条件修正。
+- 维护成本：1/10。测试直接覆盖 finalize 前后行为。
