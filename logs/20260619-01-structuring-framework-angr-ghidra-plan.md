@@ -3301,3 +3301,38 @@ do-while 的 latch 条件浪费成 while body 里的 break。这轮加入保守�
 - 实现效果：4/10。避免一个常见 do-while 条件被降级成 break。
 - 复杂度：3/10。只加判定，不改结构树接口。
 - 维护成本：3/10。后续补 parent-region 顺序时会扩展这个判断。
+
+# 2026-06-20 实现记录：补 outgoing edge dangling successor 检查
+
+继续补 Angr `_refine_cyclic_core()` 的 outgoing edge sanity check。Angr 在移除 outgoing edge 前会检查：
+如果某个目标节点的所有入边都会被切掉，说明当前 refinement 还没准备好，应放弃本轮。这轮在
+graph-level refinement 里加入同类保护。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1704`
+  新增 `wouldDetachAllPredecessorsOfNonFollowSuccessor()`，统计即将虚拟化掉的 non-follow exit，
+  如果会切掉某个非 terminal target 的所有 predecessor，则返回 true。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2008`
+  `reduceGraphNaturalLoopOnce()` 在虚拟化 non-follow exit 前调用该检查，命中时跳过本轮
+  refinement。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:446`
+  新增 `testRefineCyclicKeepsDanglingNonFollowExit()`，验证非 terminal exit 会被切成 dangling
+  target 时，本轮 refinement 放弃且不产生 virtual edge。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test notdec-backend-structuring notdec-llvm2c-exe notdec -j4`
+  通过。
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry' --output-on-failure`
+  通过，5 个测试，耗时约 `1.63s`。
+- `./build/bin/notdec test/type-recovery/llvm-ir/cases/14_Equality1.ll -o /tmp/notdec-c-dangling-refine-smoke.c --tr-level=2 --algo=structured-sailr`
+  通过。
+
+当前判断：
+
+- terminal exit 不触发 dangling 保护，否则会破坏现有 loop break/return 收敛。
+- 这只是 root-like graph refinement 的保护；Angr parent-region 限制还没补。
+- 实现效果：4/10。补上 outgoing edge rewrite 的一个关键安全边界。
+- 复杂度：2/10。局部检查。
+- 维护成本：2/10。后续 parent-region 规则可以放在同一处前置检查。
