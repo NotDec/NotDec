@@ -763,3 +763,33 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：visibleSuccessors 使用 node-key successor
+
+本轮继续把 parent-visible successor 从 block-only 图迁到 node-key shared graph。`visibleSuccessors()` 现在对 block/structured member 直接读取 `SharedNodeSuccessors`，所以 finalized child 产生的 structured result node 也能贡献外部 successor。未 finalized region member 仍保留 block 展开路径，因为它还不是 structured result node。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:435`
+  `OverlayManager::visibleSuccessors()` 对 block/structured member 改为遍历 `sharedNodeSuccessors(nodeKey(Member))`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:459`
+  未 finalized region member 继续展开 region 内 block，并沿用现有 block successor 兼容路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1036`
+  扩展 finalized child 测试，验证 structured node 指向 parent 内部 block 时不会暴露为外部 successor，指向 parent 外部 block 时会暴露出来。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- parent fallback / loop 后续逻辑已经能看到 structured result node 的外部 block successor。
+- 返回类型仍是 `BlockId`，这是现有调用方的兼容限制；后面需要补 node-key successor API，再迁移 reducer 和 fallback renderer。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
