@@ -405,6 +405,28 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-return-skip.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=72.87 user=80.03 sys=0.04 maxrss=218072`。
 
+本轮把 shared CFG 的 successor snapshot 也提到 `StructuredCFG`，避免 deoptimization pass 继续自己拼 `Successors` / `Cases`：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:76-79`
+  新增 `StructuredCFG::successorsOf()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:90-109`
+  `successorsOf()` 返回普通 successor 和 switch case target 的统一视图。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:217,233-278,368-385,430-465,651-674`
+  `connectedPredecessorComponents()`、`switchReachesBlock()`、`defaultSwitchSuccessor()`、`SwitchReusedEntryRewriter`、`SwitchDefaultCaseDuplicator` 和 `CrossJumpReverter` 改用 shared successor 视图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:852-862`
+  新增 `testStructuredCFGSuccessorsOfIncludesCaseTargets()`，确认 case-only target 也在 successor snapshot 里。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-successors.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=72.48 user=79.81 sys=0.06 maxrss=222304`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
