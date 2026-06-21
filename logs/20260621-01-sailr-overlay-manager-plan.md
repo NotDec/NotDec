@@ -2160,3 +2160,47 @@
 - 实现效果：6/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：SAILR deoptimization pipeline 骨架
+
+继续对齐 Angr `StructuringOptimizationPass` 的 pass-manager 形状。Angr 的 SAILR 不是单个 structurer 类完成的，而是 Phoenix/SAILR structuring 加一组 deoptimization pass；每个 pass 试图改 graph，成功后才把结果交给后续 pass，失败则跳过。本轮先补 shared pipeline 和 `_get_new_gotos()` 钩子，不实现需要复制 block 的具体 pass。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:47`
+  新增 `StructuringOptimizationPass::getNewGotos()` 虚函数，对齐 Angr `_get_new_gotos()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:5`
+  默认 `getNewGotos()` 返回当前 evaluation 的 goto 集。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:20`
+  final evaluation 的 new-goto 检查改为使用 `getNewGotos()`，后续 pass 可以定制比较口径。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPipeline.h:11`
+  新增 `StructuringOptimizationPipeline`，表达 SAILR deoptimization pass 的顺序执行入口。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPipeline.cpp:7`
+  实现 `addPass()` 和 `run()`；pass 成功则更新当前 `StructuredCFG`，失败或无变化则跳过。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:11`
+  将新 pipeline 源文件接入 `notdec-backend-structuring`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:279`
+  新增 `AddFirstSuccessorIgnoringNewGotosPass`，测试 `_get_new_gotos()` 风格钩子。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:759`
+  新增 `testStructuringOptimizationPassCanOverrideNewGotos()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:811`
+  新增 `testStructuringOptimizationPipelineKeepsAcceptedPasses()`，验证已接受 pass 的结果不会被后续被拒绝 pass 覆盖。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3203`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && /sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-pipeline.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.76 user=39.12 sys=0.04 maxrss=221724`。
+
+当前判断：
+
+- 这一步只补 SAILR pass 组织和安全检查扩展点，仍不触碰 block 复制。
+- 后续实现 `CrossJumpReverter`、`ReturnDuplicatorLow`、`DuplicationReverter` 时，仍需要先决定虚拟/复制 block 的 shared ID 和 C/Solidity 渲染策略。
+- 实现效果：6/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
