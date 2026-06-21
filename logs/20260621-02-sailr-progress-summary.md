@@ -311,6 +311,28 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retdup-parentgoto-sailr.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=72.76 user=80.06 sys=0.05 maxrss=220232`。
 
+本轮补了一个更基础的 shared CFG 边识别细节，给 switch copied-block pass 兜底。之前 `SAILRDeoptimization.cpp` 里的本地 `hasSuccessor()` 只看 `CFGBlock::Successors`，但 shared CFG 的 switch case target 也保存在 `CFGBlock::Cases`。虽然当前 LLVM / C adapter 通常会把 case target 同步放进 `Successors`，算法层不应该依赖这个冗余不变量。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:12`
+  `hasSuccessor()` 改为同时检查 `Successors` 和 `Cases`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1181`
+  新增 `testSwitchReusedEntryRewriterReadsCaseOnlyTargets()`，构造 case target 只在 `Cases` 里的 switch，验证 `SwitchReusedEntryRewriter` 仍能复制 reused entry block，copy 的 `BodyBlock` 仍指向原 body。
+
+这个改动仍只在 shared deoptimization 图语义里，不碰 C / Solidity renderer。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-switch-case-edge-sailr.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=72.85 user=80.11 sys=0.07 maxrss=222508`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
