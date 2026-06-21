@@ -121,6 +121,7 @@ The test: Every changed line should trace directly to the user's request.
    - `.ll`：输出 LLVM IR
    - `.bc`：输出 bitcode
    - `.c`：经 `external/NotDec-llvm2c` 生成 C
+   - `.sol`：经 `external/NotDec-llvm2c` 里的 Solidity backend 生成 Solidity-like 源码
 
 ## 3. 关键入口
 
@@ -197,7 +198,7 @@ The test: Every changed line should trace directly to the user's request.
 - `external/NotDec-bin2llvm/`
   - ELF / shared object 到 LLVM IR 的二进制前端
 - `external/NotDec-llvm2c/`
-  - C backend
+  - 当前所有源码后端都先放在这里，包括 C backend 和 Solidity backend。后续可以考虑把这个子模块仓库改名为 `notdec-codegen`，但现在先不改名。
 - `external/binarysub/`
   - 类型推理核心算法
 - `test/`
