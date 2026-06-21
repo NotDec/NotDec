@@ -977,3 +977,41 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：finalize 按 snapshot 重连 shared graph
+
+本轮把 Angr `RegionOverlay.finalize()` 的 successor 重连语义迁到 shared graph。child region finalize 后，structured result node 会根据 `SuccessorSnapshot::NodeSuccessors` 重新建立 outgoing edge；指向自身的边和指向父层 loop head 的 continue 边跳过。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:955`
+  `OverlayManager::setStructuredRoot()` 在保存 snapshot、替换 parent member 后，构造 structured result node key。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:979`
+  清理 result node self-loop。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:982`
+  识别父层 natural loop head，作为 continue edge skip 条件。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:988`
+  遍历 `NodeSuccessors`，把合法 successor 重连到 structured result node。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1030`
+  finalized child snapshot 测试新增 shared node successor 断言。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1073`
+  structured member source-region 测试删除手工补边假设，改为验证 finalize 自动重连 successor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1144`
+  parent loop 测试验证 snapshot 里的 parent loop head 不会被重连，普通 follow 会保留。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- child finalize 的 successor 重连已经进入 shared graph，不再只靠 `MutableRegionGraph::build()` 的 snapshot 兼容层。
+- `collapse_to()` / 通用 replace-nodes 还没实现；这仍是后续 SAILR / deoptimization 的关键缺口。
+- 实现效果：8/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
