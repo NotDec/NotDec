@@ -279,3 +279,37 @@
 - 实现效果：3/10。
 - 复杂度：2/10。
 - 维护成本：2/10。
+
+# 2026-06-21 实现记录：snapshotSuccessors 使用 visible successor
+
+本轮把 `RegionOverlay::snapshotSuccessors()` 切到 derived visible successor。为了兼容手写 `RegionTree` 测试和没有 shared CFG 的调用，derived 结果为空时仍回退到旧 `Region.Successors`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:383`
+  `snapshotSuccessors()` 优先使用 `OverlayManager::visibleSuccessors()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:388`
+  如果没有 shared CFG successor，回退到旧 `Region.Successors`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:518`
+  新增 `testOverlayVisibleSuccessorsMatchIdentifiedLoopSuccessors()`，确认普通识别出的 loop successor 与 derived successor 一致。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:536`
+  新增 `testSnapshotSuccessorsFallsBackWithoutSharedCFG()`，确认手写 `RegionTree` 仍使用旧 successor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1163`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- snapshot 已经开始来自 overlay view，贴近 Angr。
+- fallback 只服务于旧构造路径，不是算法新语义。
+- 实现效果：4/10。
+- 复杂度：2/10。
+- 维护成本：2/10。
