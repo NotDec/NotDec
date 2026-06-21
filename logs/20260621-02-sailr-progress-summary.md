@@ -752,6 +752,36 @@ NotDec 这里没有在算法层制造 C / Solidity 私有 goto 语句，而是�
 - 理解成本：1/10。删掉手写逐边重定向，复用已有 CFG API。
 - 后期维护成本：1/10。后续如果补 similarity / merge graph，这里仍可作为最终 edge rewrite。
 
+本轮把 `SwitchReusedEntryRewriter` 的 region copy 策略和 `ReturnDuplicatorLow` / `CrossJumpReverter` 对齐。之前 reused entry 被多个 switch predecessor 复用时，除第一个 predecessor 外会逐个复制 entry region；现在保留第一个 switch predecessor，其余 predecessor 按 shared CFG 连通组件分组，同一组件只复制一份 entry region。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:546`
+  `SwitchReusedEntryRewriter::runOnGraph()` 先收集除第一个 switch predecessor 外的 `PredsToUpdate`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:554`
+  对 `PredsToUpdate` 调用 `connectedPredecessorComponents()`，并在组件内所有 predecessor 仍直达 entry 时调用 `copyLinearRegionForPredecessors()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1773`
+  新增 `testSwitchReusedEntryRewriterCopiesConnectedPredsOnce()`，验证两个连通 switch predecessor 会共享同一个 copied entry-tail region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4567`
+  把新测试接入 `structuring-analysis-test`。
+
+这个改动仍只处理 shared CFG 的 copied block；没有把 switch lowering 语义或 renderer 特判放进算法层。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-switchentry-connected.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=79.31 user=86.52 sys=0.07 maxrss=217648`。
+
+复杂度 / 维护判断：
+
+- 实现效果：7/10。减少 reused entry pass 的重复复制，并让 copied-region pass 的 predecessor 分组规则更一致。
+- 理解成本：2/10。复用已有组件分组和 region copy helper。
+- 后期维护成本：2/10。后续如果补 Angr 更完整 switch reconstruction，这里仍可保留为 entry-region copy 的共享策略。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
