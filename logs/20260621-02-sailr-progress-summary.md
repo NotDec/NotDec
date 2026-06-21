@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、shared region copy API、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail、连通前驱组件共享复制和 terminal fork shared 子集；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、shared region copy API、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集、`LoweredSwitchSimplifier` 的 shared case-region 复制子集，以及 `ReturnDuplicatorLow` 的线性 return-tail、连通前驱组件共享复制和 terminal fork shared 子集；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -471,14 +471,46 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-copy-region.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=72.01 user=79.38 sys=0.05 maxrss=217764`。
 
+本轮又补了一个窄版 `LoweredSwitchSimplifier`，只处理“多个 switch 前驱共享同一段线性 case 链”的形状，整段用 `duplicateRegion()` 复制，再把各个前驱重定向到自己的 copy：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:64-75`
+  新增 `LoweredSwitchSimplifier` pass 类。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:312-371`
+  新增 `findLinearCopyRegion()` 和 `copyLinearRegionForPredecessors()`，把共享 case 链按 shared region 复制。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:449-525`
+  实现 `LoweredSwitchSimplifier::defaultOptions()` / `runOnGraph()`，只在所有前驱都是 switch 且目标是线性链时才动手。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:826-833`
+  把 `LoweredSwitchSimplifier` 接进 `buildSAILRDeoptimizationPipeline()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:84-88`
+  新增 `TestLoweredSwitchSimplifier`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1392-1458`
+  新增 `testLoweredSwitchSimplifierCopiesLinearSharedCaseRegion()`，验证一段三块线性 case 链会被整段复制，不再只复制入口块。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4010-4013`
+  把新测试挂到主测试入口。
+
+这版还不是 Angr 的完整 lowered-switch 重建，只是 shared CFG 上的保守复制子集。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=78.50 user=85.71 sys=0.08 maxrss=219508`。
+- 同口径重复跑一次：
+  `elapsed=77.69 user=85.07 sys=0.07 maxrss=221644`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
 
-- `LoweredSwitchSimplifier`
+- `LoweredSwitchSimplifier` 的完整 if-else 到 switch 重建
 - 相关 switch / duplication 辅助逻辑
 
-这些 pass 还没有完整实现。`CrossJumpReverter`、`DuplicationReverter`、`SwitchReusedEntryRewriter` 和 `SwitchDefaultCaseDuplicator` 已经有最小 shared 版，`ReturnDuplicatorLow` 已经有单 block / 线性 return-tail 复制子集。
+这些 pass 还没有完整实现。`CrossJumpReverter`、`DuplicationReverter`、`SwitchReusedEntryRewriter`、`SwitchDefaultCaseDuplicator` 和 `LoweredSwitchSimplifier` 都已经有最小 shared 版，`ReturnDuplicatorLow` 已经有单 block / 线性 return-tail 复制子集。
 
 之前的主要卡点是：Angr 这些 pass 基本都会复制或新建 block。当前已经有最小 shared 表示，但具体 pass 还没有实现。
 
@@ -489,7 +521,7 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `ReturnDuplicatorLow` 复制 return block：已实现单 block / 线性 return-tail、连通前驱组件共享复制和 terminal fork 子集，缺一般分支 return-region / Phi / vvar 刷新
 - `DuplicationReverter`：已实现 exact-match shared 合并子集，缺 similarity search / merge graph
 - `SwitchDefaultCaseDuplicator`：已实现 shared default reuse 子集，缺 if-chain / lowering 回写
-- `LoweredSwitchSimplifier` 维护 block copies
+- `LoweredSwitchSimplifier`：已实现 shared case-region 复制子集，缺完整 if-else 到 switch 重建
 
 当前 C renderer 的 label 身份已经改为 shared `BlockId`，body payload 通过 `BodyBlock` 走 shared CFG。后续 pass 仍要注意不要把新 block 的算法语义写到 C/Solidity renderer 里。
 
