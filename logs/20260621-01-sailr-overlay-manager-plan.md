@@ -1015,3 +1015,43 @@
 - 实现效果：8/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：新增 collapseRegionTo 基础语义
+
+本轮补了 Angr `RegionOverlay.collapse_to()` 的基础 shared graph 版本。它把当前 region 成员对应的 shared graph node 收缩成一个 structured result node，保留跨入 / 跨出边，删除 region 内部边，并在 parent view 里用 structured member 替换 child region。checkpoint 已覆盖相关状态，所以 rollback 能恢复。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:181`
+  新增 `OverlayManager::collapseRegionTo()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:216`
+  新增 `memberNodeKeys()`，用于把 block / structured / region member 转成 shared graph node key 集合。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:264`
+  新增 `RegionOverlay::collapseTo()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:527`
+  实现 `memberNodeKeys()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1025`
+  实现 `collapseRegionTo()`：收集 region 内节点、记录跨入 / 跨出边、删除内部节点、插入 result node、重连边、更新 structured root 和 parent members。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1198`
+  实现 `RegionOverlay::collapseTo()` 包装入口。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:944`
+  新增 `testOverlayCollapseRegionRewiresSharedGraph()`，验证 collapse 后 parent member、shared successor、owner、内部边删除和 rollback 恢复。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1775`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 已有可回滚的 shared graph collapse 基础能力。
+- 还没做 Angr `replace_nodes()` 的局部 reducer 收缩，也没把 Phoenix/SAILR reducer 改成直接用这个入口。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
