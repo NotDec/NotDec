@@ -79,6 +79,7 @@ SAILR deoptimization pipeline 骨架已经实现：
 - `StructuringOptimizationPipeline`
 - pass 成功才更新当前 graph
 - pass 失败或无变化就跳过
+- `StructuredCFG::redirectPredecessors()` 支持原子 predecessor 重定向，避免 copied block pass 失败时留下半改图
 
 第一个具体 SAILR deoptimization pass 已经实现：
 
@@ -188,6 +189,21 @@ branch -> return
 
 本轮仍未实现一般分支 return-region、Phi / vvar 刷新、connected in-edge component 的完整 Angr 语义。
 
+本轮补了一处 shared CFG 改图原子性，给后续 copied block pass 复用：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:76`
+  新增 `StructuredCFG::redirectPredecessors()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:90`
+  实现两阶段重定向：先验证所有 predecessor 都有目标边，再统一替换 successor / switch case target。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:333`
+  `copyRegionForPredecessors()` 改用 `redirectPredecessors()`，避免复制 return region 后半途中失败导致 predecessor 指向已删除 copy。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:753`
+  新增 `testStructuredCFGRedirectPredecessorsIsAtomic()`，验证失败时不会改任何 predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:772`
+  新增 `testStructuredCFGRedirectPredecessorsUpdatesSwitchCases()`，验证 switch successor 和 case target 会一起改。
+
+这个改动是 shared graph 语义，不属于 C 或 Solidity renderer 特判。
+
 验证：
 
 - `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
@@ -220,6 +236,17 @@ branch -> return
   通过，5 个测试。
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retfork.c --tr-level=2 --algo=phoenix`
   通过，`elapsed=32.04 user=39.31 sys=0.04 maxrss=220412`。
+
+本轮验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-redir.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=32.44 user=39.60 sys=0.06 maxrss=219352`。
 
 验证通过：
 
