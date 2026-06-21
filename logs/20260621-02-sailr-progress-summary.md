@@ -672,6 +672,28 @@ NotDec 这里没有在算法层制造 C / Solidity 私有 goto 语句，而是�
 - 理解成本：3/10。新增 API 很小，pass 仍只操作 `StructuredCFG`。
 - 后期维护成本：3/10。后续如果需要真正带 payload 的 virtual block，需要另行定义 payload 来源；当前 forwarder 不需要这个语义。
 
+本轮补了 synthetic forwarder 的 shared renderer 侧验证。没有改算法，只把之前新增的 synthetic block 通过 shared tree / Solidity renderer 的边界用测试锁住。
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:749`
+  新增 `testGotoStructurerRendersSyntheticForwarder()`，验证 `GotoStructurer` 能把 synthetic block 结构化成无 statements 的 shared `BasicBlock`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:793`
+  新增 `testSolidityBodyBuilderRendersSyntheticForwarder()`，验证 Solidity shared-tree renderer 能输出 synthetic forwarder 的 label / goto 注释，并且不会因为空 payload 输出 `unknown`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4387`
+  把 synthetic `GotoStructurer` 测试接入主测试入口。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4389`
+  把 Solidity synthetic renderer 测试接入主测试入口。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-synthetic-render.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=79.18 user=86.39 sys=0.10 maxrss=222180`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
