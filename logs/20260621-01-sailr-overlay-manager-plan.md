@@ -1459,3 +1459,38 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：补齐 overlay raw view 的 marked-edge 入口
+
+本轮补 Angr `RegionOverlay.raw_graph` / `raw_graph_with_successors` 对应的基础能力。Angr 默认 view 会隐藏 `mark_edge()` 标记的边，但 raw view 可以显式包含这些 marked edges，供 Phoenix cyclic refinement 做试探和调试。本轮在 NotDec 的 overlay 查询 API 上增加 `IncludeMarkedEdges` 参数，默认仍隐藏 marked edges，不改变现有 reducer 行为。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:156`
+  给 `OverlayManager::visibleNodeSuccessors()`、`visibleSuccessors()`、`quotientEdges()` 增加可选 `IncludeMarkedEdges` 参数，默认 `false`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:698`
+  `visibleNodeSuccessors()` 在 `IncludeMarkedEdges=true` 时不再过滤 edge marks。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:748`
+  `visibleSuccessors()` 把 `IncludeMarkedEdges` 传给 node successor 查询。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:760`
+  `quotientEdges()` 在 member view、with-successors view、successor-to-successor view、extra-full edges 上统一支持包含 marked edges。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1187`
+  扩展 `testOverlayEdgeMarksFilterAndRemap()`：验证默认 view 隐藏 marked edge，raw member view / raw full view 能看到 marked edge，并且 replace remap 后 raw view 仍能看到 remapped marked edge。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4 && ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4 && ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-raw-view.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.76 user=39.13 sys=0.02 maxrss=220640`。
+
+当前判断：
+
+- overlay 查询现在有 Angr raw view 的最小等价入口。
+- 默认 view 行为不变，现有 Phoenix reducer 仍会隐藏 marked edges。
+- 还没实现 Angr `to_acyclic()` / blacklisted_edges 的零拷贝视图；这属于后续 reducer graph 视图对齐。
+- 实现效果：7/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
