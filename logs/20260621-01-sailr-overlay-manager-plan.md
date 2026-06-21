@@ -1494,3 +1494,44 @@
 - 实现效果：7/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：补齐 overlay acyclic view 入口
+
+本轮补 Angr `RegionOverlayGraph.to_acyclic_by_order()` 的最小对应能力。NotDec 目前还没有完整的 `RegionOverlayGraph` 对象，所以先在 `OverlayManager` 查询层增加显式 acyclic view 入口：按 view node order 过滤 `order[src] >= order[dst]` 的边，但不修改共享图，也不影响默认 view。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:163`
+  新增 `visibleNodeSuccessorsAcyclic()`、`visibleSuccessorsAcyclic()`、`quotientEdgesAcyclic()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:68`
+  新增 `isBackEdgeByOrder()`，按 Angr 的 `node_order[u] >= node_order[v]` 判断 view-level back edge；order 缺失时保守保留边。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:915`
+  实现 `visibleNodeSuccessorsAcyclic()`，从 acyclic quotient full view 派生外部 successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:929`
+  实现 `visibleSuccessorsAcyclic()`，保持当前 block successor 兼容入口。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:942`
+  实现 `quotientEdgesAcyclic()`，先取默认 quotient view，再仅在返回 view 里过滤 blacklisted back edges。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:719`
+  新增 `testOverlayAcyclicViewsFilterBackEdgesByOrder()`，验证默认 view 仍保留回边，acyclic view 按 order 去掉回边，并覆盖 child region successor 查询。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2321`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-acyclic-overlay.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.42 user=38.73 sys=0.09 maxrss=221712`。
+
+当前判断：
+
+- overlay 层现在具备 Angr blacklisted-edge acyclic view 的最小等价入口。
+- 默认 `visible*()` / `quotientEdges()` 行为不变，现有 reducer 和 renderer 不受影响。
+- 下一步应把 Phoenix cyclic / last-resort 中依赖 `MutableRegionGraph::analyze()` 临时 DFS dropped edges 的地方，逐步切到 overlay acyclic view 语义；这一步会碰到 block rewrite / deoptimization IR 边界，不能靠 fallback renderer 继续补特例。
+- 实现效果：7/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
