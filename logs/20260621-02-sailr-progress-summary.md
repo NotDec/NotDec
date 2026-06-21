@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、shared region copy API、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集、`LoweredSwitchSimplifier` 的 shared case-region 复制子集，以及 `ReturnDuplicatorLow` 的线性 return-tail、连通前驱组件共享复制和 terminal fork shared 子集；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、shared region copy API、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集、`LoweredSwitchSimplifier` 的 shared case-region 复制子集，以及 `ReturnDuplicatorLow` 的线性 return-tail、连通前驱组件共享复制、terminal fork 和 return-tail 后续 goto edge shared 子集；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -534,6 +534,30 @@ case head -> branch -> return
 - 提交前同口径重复跑一次：
   `elapsed=77.40 user=84.63 sys=0.06 maxrss=221612`。
 
+本轮对照 Angr `/sn640/angr/angr/analyses/decompiler/optimization_passes/return_duplicator_low.py` 的 `_is_goto_edge()`，补了 `ReturnDuplicatorLow` 的另一个 shared CFG stopgap：如果 tested edge 进入 return region，但真实 goto 标记在 region head 后面的单后继 tail 上，也允许复制这段 return region。这对应 Angr 注释里的 Phoenix loop-region / successor goto 情况。
+
+修改仍然只读 shared CFG 和 `GotoManager`：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:251`
+  `gotoEdgeFromSourceOrParent()` 在直接 source goto 和 parent goto 之后，沿 `Target` 的单 successor 链查找 `Gotos.isGotoEdge(Node, Succ)`；遇到分叉、多前驱或自环就停止。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1275`
+  新增 `testReturnDuplicatorLowUsesGotoInReturnTail()`，构造 `pred -> head -> tail -> return`，goto 标记在 `head -> tail`，验证两个 predecessor 都会拿到完整 return region copy，原 region 被删除。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4163`
+  把新测试接入主测试入口。
+
+这一步不处理一般分支 return-region，也不刷新 Phi / vvar；这些仍然需要更明确的 shared payload 语义。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retdup-tail-goto.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=77.86 user=85.10 sys=0.05 maxrss=217768`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
@@ -549,7 +573,7 @@ case head -> branch -> return
 
 - `CrossJumpReverter` 复制 goto target：已实现最小 shared 版
 - `SwitchReusedEntryRewriter` 复制被多个 switch 复用的 entry block：已实现 shared reused-entry 子集
-- `ReturnDuplicatorLow` 复制 return block：已实现单 block / 线性 return-tail、连通前驱组件共享复制和 terminal fork 子集，缺一般分支 return-region / Phi / vvar 刷新
+- `ReturnDuplicatorLow` 复制 return block：已实现单 block / 线性 return-tail、连通前驱组件共享复制、terminal fork 和 return-tail 后续 goto edge 子集，缺一般分支 return-region / Phi / vvar 刷新
 - `DuplicationReverter`：已实现 exact-match shared 合并子集，缺 similarity search / merge graph
 - `SwitchDefaultCaseDuplicator`：已实现 shared default reuse 子集，缺 if-chain / lowering 回写
 - `LoweredSwitchSimplifier`：已实现 shared case-region 复制子集，缺完整 if-else 到 switch 重建
@@ -560,4 +584,4 @@ case head -> branch -> return
 
 下一步可以继续补 `ReturnDuplicatorLow` 的分支 return-region / Phi 语义；如果这部分 shared payload 边界不清，再转向 `LoweredSwitchSimplifier` 里接口更窄的部分。
 
-一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集和 `ReturnDuplicatorLow` 的线性 return-tail / connected predecessor / terminal fork 子集已经搭好；完整 SAILR 还没完成。
+一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集和 `ReturnDuplicatorLow` 的线性 return-tail / connected predecessor / terminal fork / tail-goto 子集已经搭好；完整 SAILR 还没完成。
