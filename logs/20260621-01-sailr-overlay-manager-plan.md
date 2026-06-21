@@ -1171,3 +1171,35 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：Phoenix overlay path 同步 virtualized edge 标记
+
+本轮在 Phoenix overlay path 的成功收敛路径里，同步 `MutableRegionGraph::virtualEdges()` 到 overlay view-only mutation。当前 `VirtualEdge` 只保存 block endpoint，所以这一步只同步 `FromBlock -> ToBlock` 能确认的边，写入 `removeEdgeWithSuccessorsOnly()`；随后最终 `Overlay.replaceNodes()` 会把这些 hidden-full edge remap 到 structured result node。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1111`
+  新增 `syncVirtualEdgesToOverlay()`，把 block endpoint virtual edge 同步为 overlay hidden-full edge。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2721`
+  在 overlay path 的单 active structured node 成功路径中，先同步 virtualized edge，再执行 `Overlay.replaceNodes()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1079`
+  复用 Phoenix overlay path 同步测试，覆盖最终 reduce 后 overlay shared graph 的结果。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1914`
+  该测试已接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- overlay path 已经能同步最终 reducer result 和 block-endpoint virtualized edge 标记。
+- `VirtualEdge` 仍是 block-only，后续如果 SAILR 需要 node-key virtual edge，必须继续扩展 `VirtualEdge` 或新增 overlay-side virtual edge record。
+- 实现效果：6/10。
+- 复杂度：4/10。
+- 维护成本：5/10。
