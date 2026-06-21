@@ -1421,3 +1421,41 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：补齐 replace_nodes_both 吸收 successor 入口
+
+本轮补 Angr `replace_nodes_both(old_node_1=successor)` 的基础入口。Angr 里如果第二个旧节点不是当前 region member，而是 region successor，会先 replace 当前 member，再用 `absorb_successor_into()` 把 successor 在 full view 里的出边挂到新 structured node 上，同时隐藏 member 到 successor 的边。本轮只补共享 overlay 语义入口，不改具体 if/switch schema。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:302`
+  新增 `RegionOverlay::replaceNodes(..., AbsorbedSuccessor, SelfLoop)` overload。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1574`
+  实现 overload：先调用原 `replaceNodes()`，确认新 structured member 已进入当前 view，再调用 `absorbSuccessorInto()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:51`
+  给 `collapseNodesAndSyncOverlay()` 增加可选 `AbsorbedSuccessor` 参数，后续 reducer schema 可以直接接 Angr `old_node_1` 语义。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1177`
+  collapse 后把 `AbsorbedSuccessor` 传给 overlay replace；如果 source 已经是同一个 structured node，则直接执行 `absorbSuccessorInto()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1134`
+  新增 `testOverlayReplaceNodesAbsorbsSuccessor()`，覆盖 replace member 后吸收 successor：新 structured member 接管 successor 出边，原 structured member 到 successor 的 full-view 边被隐藏。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2234`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4 && ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-replace-absorb.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.51 user=38.86 sys=0.06 maxrss=220604`。
+
+当前判断：
+
+- overlay 已有 Angr `replace_nodes_both()` 的 successor absorb 入口。
+- 还没把具体 Phoenix if/switch reducer schema 改到这个入口；下一步要逐个对照 Angr schema 接入，避免猜测。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
