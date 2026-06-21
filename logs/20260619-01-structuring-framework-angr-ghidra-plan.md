@@ -4174,3 +4174,36 @@ snapshot 传进 `finalize()`，但没有保存。这轮把 snapshot 和 structur
 - 实现效果：4/10。parent 构图已经用上 successor snapshot，但 shared graph mutation 还没落地。
 - 复杂度：2/10。多了一个 pending 列表，避免过早创建错误边。
 - 维护成本：2/10。后续把 `MutableRegionGraph` 改成 overlay graph view 时，这段逻辑可以平移到 overlay 边重连。
+
+# 2026-06-20 实现记录：finalized child snapshot 跳过父循环 head
+
+继续对齐 Angr 的 `RegionOverlay.finalize()`。Angr 重连 snapshot successor 时会跳过 enclosing loop head，
+因为这条边表示 child 的 continue/back edge，已经被结构化成 continue，不应该再作为 parent graph 的真实边。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:463`
+  在 parent overlay 是 `RegionKind::NaturalLoop` 且 snapshot successor 等于 parent head 时跳过该 successor，
+  不写入 `ExternalSuccs`，也不加入 pending 重连列表。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:466`
+  增加 `testFinalizedChildSnapshotSkipsParentLoopHead()`，覆盖 finalized child snapshot 同时指向 parent loop head
+  和普通 follow 的情况。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:993`
+  把新测试接进 structuring analysis test main。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是 Angr finalize 的明确规则，不是本地策略选择。
+- 这一步避免 parent 循环因为 child continue 边被重新暴露而多出假 predecessor。
+- 实现效果：4/10。snapshot 重连规则更接近 Angr，但仍是 `MutableRegionGraph` 里的临时 view。
+- 复杂度：1/10。只是一条过滤规则和回归测试。
+- 维护成本：1/10。后续 shared overlay graph 落地时，这条规则应移到 finalize/reconnect 逻辑。
