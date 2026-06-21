@@ -612,3 +612,39 @@
 - 实现效果：7/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：集中 overlay member representative 规则
+
+本轮没有改变 reducer 行为，只把 overlay member 到 representative block 的规则集中到 `OverlayManager`。当前仍沿用现有表示：block member 代表自身，region/structured member 代表 source region head。这样后续如果引入真正的 shared graph node key，改动点会集中在 overlay 层。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:97`
+  新增 `OverlayManager::representativeBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:203`
+  实现 `representativeBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:467`
+  grouped child node 使用 `representativeBlock()` 创建。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:515`
+  quotient edge source member 使用 `representativeBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:537`
+  quotient edge target member 使用 `representativeBlock()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1002`
+  在 structured child 测试中直接确认 representative block 是 child head。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 代表节点规则已集中，后续替换成真正 shared node key 更可控。
+- 这一步仍没有实现 Angr `replace_nodes()` / `collapse_to()`。
+- 实现效果：7/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
