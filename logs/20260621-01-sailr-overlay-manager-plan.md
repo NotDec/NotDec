@@ -837,3 +837,41 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：新增 node-key visible successor
+
+本轮新增 `visibleNodeSuccessors()`，对应 Angr `RegionOverlay.successor_nodes()` 的方向：先返回离开当前 region view 的 overlay node，再由旧 `visibleSuccessors()` 过滤出 block-only 兼容结果。这样后续 SAILR / deoptimization 可以逐步使用 node-key successor，不再被 `BlockId` 接口限制。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:133`
+  新增 `OverlayManager::visibleNodeSuccessors()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:180`
+  新增 `memberForNodeKey()`，用于判断 successor 是否已经在当前 view 内。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:18`
+  新增 `appendUniqueNodeKey()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:303`
+  实现 `memberForNodeKey()`，block key 复用现有 block-to-member 判断，非 block key 按 overlay node 身份匹配。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:463`
+  实现 `visibleNodeSuccessors()`，对 block/structured member 走 node-key shared successor，对未 finalized region member 仍展开 underlying block。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:504`
+  `visibleSuccessors()` 改为 `visibleNodeSuccessors()` 的 block-only 兼容视图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1044`
+  扩展 finalized child 测试，验证 node-key successor 能保留外部 structured successor，同时旧 `visibleSuccessors()` 仍只返回 block。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- successor 语义已经有 Angr-style node-key API。
+- 旧 `SuccessorSnapshot` 仍是 block-only，这是 renderer 兼容点；后续 child finalize / fallback renderer 要继续迁。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
