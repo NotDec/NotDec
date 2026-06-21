@@ -793,3 +793,47 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：hidden edge 改为 node-key 身份
+
+本轮把 view-only hidden edge 从 `BlockId -> BlockId` 改成 `OverlayNodeKey -> OverlayNodeKey`。这样 finalized child 变成 structured result node 后，它的 outgoing edge 也能被当前 overlay view 隐藏。旧的 `hideEdge(BlockId, BlockId)` 仍保留为包装接口，现有 Phoenix 路径不用同步大改。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:98`
+  `OverlayHiddenEdge` 改为保存 `OverlayNodeKey From/To`，并补充注释说明这是 Angr-style view edge 身份。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:142`
+  新增 `OverlayManager::hideNodeEdge()`，作为 node-key hidden edge 的入口。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:346`
+  `isHiddenEdge()` 改为比较 node-key。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:385`
+  `clearHiddenEdge()` 改为按 node-key 清理。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:440`
+  `visibleSuccessors()` 对 block/structured member 都用 node-key hidden edge 过滤。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:488`
+  `quotientEdges()` 对 block/structured member 都用 node-key hidden edge 过滤。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:644`
+  `addNodeEdge()` / `detachNodeEdge()` 统一清掉同一条 node-key hidden edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:676`
+  实现 `hideNodeEdge()`，`hideEdge()` 保留为 block-only 包装。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:685`
+  `hideEdgeToSuccessor()` 对 structured member 走 node-key successor，对未 finalized region member 仍展开 underlying block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1040`
+  扩展 finalized child 测试，验证 structured node 的外部 successor 可以隐藏，重新添加同一条 node edge 后恢复可见。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- hidden edge 已经能覆盖 structured result node，和 Angr 的 overlay view 语义更接近。
+- `removeEdgeWithSuccessorsOnly()` / `addExtraFullEdge()` 仍基于 `OverlayViewEdge`，下一步需要继续处理 external endpoint 的 node-key 化。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
