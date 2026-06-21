@@ -1790,3 +1790,42 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：extra continue edges 同步 overlay
+
+本轮继续收敛 cyclic refinement 的 virtual edge 安装路径。Angr 对额外回到 loop head 的 continue edge 也是先 detach graph edge，能找到可改写 block 时再 replace source。NotDec 之前只在 reducer graph 里 `virtualizeEdge()`，overlay 仍可能保留旧的 real edge。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1568`
+  `installVirtualizedEdge()` 增加 `RewriteSource` 参数；用于 Angr 那种只 detach、不改写 source 的情况。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2352`
+  `virtualizeExtraContinueEdges()` 增加 `RegionOverlay *Overlay` 参数。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2402`
+  extra continue edge 改用 `installVirtualizedEdge()`，普通 source 会同步 replacement，含 structured switch 的 source 只 detach，不改写。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2640`
+  `reduceGraphNaturalLoopOnce()` 调用 extra continue virtualization 时传入当前 overlay。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2079`
+  新增 `testRefineCyclicOverlayVirtualizesExtraContinues()`：构造双 latch loop，验证 overlay path 下 extra continue `4 -> 1` 被虚拟化，最终 loop structured node 保留 follow `5`，不再暴露到 head `1` 的 real edge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2673`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-extra-continues.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=32.13 user=39.39 sys=0.05 maxrss=220584`。
+
+当前判断：
+
+- extra continue edge 现在也复用 Angr 风格 detach + optional replacement 语义，overlay 不再保留被虚拟化的 head edge。
+- structured switch source 仍保持只 detach、不改写；这对应 Angr 找不到安全可改写 block 时先移除 edge 的保守分支。
+- 还没补完整 successor outgoing edge 的 `mark_edge(cyclic_refinement_outgoing=True)` 和条件 break rewrite。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
