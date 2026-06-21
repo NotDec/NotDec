@@ -875,3 +875,37 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：SuccessorSnapshot 保留 node-key successor
+
+本轮把 child finalize 的 successor snapshot 改成双轨：`Successors` 继续保留 block-only 结果给当前 `MutableRegionGraph` / renderer，新增 `NodeSuccessors` 保留 Angr-style overlay node successor。这样递归 structuring 边界不会再把非 block successor 丢掉。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:50`
+  `SuccessorSnapshot` 新增 `NodeSuccessors`，并说明 block-only 字段只是当前 renderer 兼容。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:881`
+  `OverlayManager::setStructuredRoot()` 存储 snapshot 前做双向补齐：旧 block-only snapshot 自动补 node-key，node-key snapshot 自动补 block-only block successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:968`
+  `RegionOverlay::snapshotSuccessors()` 同时记录 `visibleNodeSuccessors()` 和旧 `visibleSuccessors()`；没有 manager-derived successor 时按 region 静态 successor 补 block key。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:386`
+  空 successor snapshot 同时验证 block-only 和 node-key 字段为空。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:432`
+  finalized child 测试验证 snapshot 和 finalized child record 都保留 node-key block successor。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- child finalize 已经不会丢 node-key successor。
+- `MutableRegionGraph::build()` 仍只消费 `Successors`，这是下一层 renderer 兼容点。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
