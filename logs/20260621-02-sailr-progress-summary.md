@@ -263,6 +263,26 @@ fortune smoke 通过，耗时：
 elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 ```
 
+本轮又补了一个更窄的 shared 渲染入口，让 copied / virtual block 的 shared CFG 表示能同时被 C 和 Solidity 复用：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h:15-29`
+  新增 `renderStructuredBody()` 声明，直接接 `StructuredTree` 和 payload 列表。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:204-221`
+  `readBody()` 先走 shared `StructuredTree` 渲染，再补原有 fallback 注释；`renderStructuredBody()` 单独负责 tree 渲染，不把算法逻辑塞进 renderer。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:737-760`
+  新增 `testSolidityBodyBuilderRendersVirtualBlockBodySource()`，验证 shared tree 里的 block label 和 copied body payload 会一起渲染出来。
+
+这次只动了 renderer 接口，不改 structuring 算法本身，也没有把 Solidity 特判放回共享 structuring 里。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-solidity structuring-analysis-test -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-pipeline.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.69 user=39.03 sys=0.04 maxrss=220780`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
