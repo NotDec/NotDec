@@ -2032,3 +2032,53 @@
 - 实现效果：6/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：shared StructuringOptimizationPass wrapper
+
+继续对齐 Angr `StructuringOptimizationPass.analyze()`。本轮只补公共 pass wrapper：它负责初始 structuring 检查、goto guard、rewrite 后重新结构化、失败回滚和相对质量检查。具体 SAILR deoptimization 规则还没有接入。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:15`
+  新增 `StructuringOptimizationOptions`，按 Angr 默认值保存 `RequireStructurableGraph`、`PreventNewGotos`、`StrictlyLessGotos`、`RecoverStructureFails`、`MustImproveRelativeQuality`、`RequireGotos` 和 `MaxOptIters`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:25`
+  新增 `StructuringOptimizationResult`，返回是否成功、是否修改、输出 CFG 和最终 structuring evaluation。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:32`
+  新增 `StructuringOptimizationPass` 基类，子类只实现 `runOnGraph()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:5`
+  实现初始 evaluation 是否需要运行的判断。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:10`
+  实现最终 evaluation 的 goto 数量和 relative quality 检查。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:33`
+  实现 `analyze()` 主流程：初始检查、候选 CFG rewrite、每轮重新 `StructuringEvaluator::evaluate()`，结构化失败时按配置回滚，最后输出通过检查的 CFG。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:10`
+  将 `StructuringOptimizationPass.cpp` 接入 `notdec-backend-structuring`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:196`
+  新增 `CFGEdgeGotoRegionStructurer`，测试用 CFG successor 生成显式 goto。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:226`
+  新增 `RemoveFirstSuccessorPass`，模拟减少 goto 的 rewrite。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:245`
+  新增 `AddFirstSuccessorPass`，模拟引入新 goto 的 rewrite。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:646`
+  新增 `testStructuringOptimizationPassAcceptsImprovedGraph()`，验证减少 successor/goto 的 rewrite 被接受并返回新 CFG。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:663`
+  新增 `testStructuringOptimizationPassRejectsNewGotos()`，验证 `PreventNewGotos` 会拒绝新增 goto 的 rewrite。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3044`
+  将两个新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && /sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-structuring-optpass.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.92 user=39.17 sys=0.05 maxrss=221704`。
+
+当前判断：
+
+- 这一步把 Angr pass wrapper 的边界放到了 shared structuring 层，后续 SAILR deoptimization 子类可以只做 CFG rewrite，不需要碰 C/Solidity renderer。
+- 还没实现 Angr 具体 deoptimization pass，也没有 `RegionSimplifier`；当前 wrapper 使用 `StructuringEvaluator` 的 shared tree 结果做检查。
+- 实现效果：6/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
