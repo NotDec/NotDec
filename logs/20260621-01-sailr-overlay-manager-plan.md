@@ -1866,3 +1866,43 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：structured source 内的 successor goto 改写为 break
+
+上一轮 successor outgoing edge 只会改写 direct reducer source：如果 source 已经有 `StructuredRoot`，但跳到 follow 的控制转移藏在 structured subtree 里，就还没有 Angr `_find_node_going_to_dst()` 那种“在已结构化节点里找目标跳转”的语义。本轮补一个保守版本：只在共享 `StructuredTree` 里已经明确存在 `Target == follow` 的 `Goto/Break/Continue` 时复制子树并替换成 `Break`；不靠 CFG 猜深层 block。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:55`
+  增加 `rewriteStructuredSourceTargetTransfer()` 前置声明，供 cyclic refinement 的 successor outgoing path 使用。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1662`
+  `rewriteLoopSuccessorExits()` 现在优先尝试改写已有 `StructuredRoot` 里的显式 target；找不到时才回到原来的 `buildVirtualizedSource()` direct tail path。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1727`
+  新增 `isTargetedControlTransfer()`，只匹配已经明确带 `Target` 的 `Goto/Break/Continue`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1734`
+  新增 `copyReplacingTargetTransfer()`，递归复制 structured subtree 并替换匹配 target；遇到 `Switch` 或嵌套 loop 时不进入，避免把外层 loop 的 `break` 写进错误层级。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1794`
+  新增 `rewriteStructuredSourceTargetTransfer()`，对外返回新的 replacement root；没有明确 target 时返回 `InvalidNodeId`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:103`
+  新增 `treeContainsGotoTarget()` 测试辅助。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2067`
+  新增 `testRefineCyclicRewritesStructuredSuccessorGoto()`：给 block `2` 预置一个 structured source，里面含 `goto 4`；refine 后验证 replacement root 含 `Break`，且不再含 `goto 4`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2820`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-structured-target.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.52 user=38.87 sys=0.08 maxrss=218760`。
+
+当前判断：
+
+- 这一步比上一轮更接近 Angr `_find_node_going_to_dst()`：source 已经结构化时，不再只能按原始 tail block 重建，而是能改写共享结构化结果里的显式 target。
+- 这还不是完整 `_find_node_going_to_dst()`：NotDec 仍没有 AIL block 级 first/last statement 语义，也没有从 structured source 里恢复条件表达式的完整路径；当前只处理已经明确编码在 `StructuredNode::Target` 里的控制转移。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
