@@ -4207,3 +4207,38 @@ snapshot 传进 `finalize()`，但没有保存。这轮把 snapshot 和 structur
 - 实现效果：4/10。snapshot 重连规则更接近 Angr，但仍是 `MutableRegionGraph` 里的临时 view。
 - 复杂度：1/10。只是一条过滤规则和回归测试。
 - 维护成本：1/10。后续 shared overlay graph 落地时，这条规则应移到 finalize/reconnect 逻辑。
+
+# 2026-06-21 实现记录：SAILR 补回 improve_phoenix 构造开关
+
+继续对齐 Angr 的 `SAILRStructurer` 接口。Angr 的 SAILR 允许传 `improve_phoenix`，默认开启，但不是写死。
+当前 C++ 版已经共用 Phoenix reducer，这里把这个开关补回来，避免 SAILR 的行为被固定住。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h:13`
+  `SAILRStructurer` 构造函数增加 `ImprovePhoenix` 参数，默认 `true`，并保存到成员变量。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h:19`
+  `useImprovedCyclicSchemas()` 改为读取这个开关，不再硬编码为 `true`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:44`
+  `TestSAILRStructurer` 暴露 `useImprovedCyclicSchemas()`，方便验证构造参数。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:980`
+  增加 `testSAILRImprovePhoenixFlagFollowsConstructor()`，确认默认开启且显式关闭有效。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1016`
+  把新测试接进 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是接口对齐，不是算法分叉。
+- 好处是 SAILR 现在和 Angr 一样，能独立决定是否启用 Phoenix 的改进 cyclic schema。
+- 实现效果：3/10。补回一个真实的算法开关。
+- 复杂度：1/10。只新增一个 bool 参数和测试。
+- 维护成本：1/10。以后扩展 SAILR 构造参数时，不用再改调用点的语义。
