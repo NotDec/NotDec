@@ -1535,3 +1535,48 @@
 - 实现效果：7/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：补齐 overlay 显式 blacklisted-edge view
+
+本轮补 Angr `RegionOverlayGraph.to_acyclic(blacklisted_edges)` 的更直接入口。上一轮已经有按 node order 派生 back edge 的 acyclic view；这一轮增加显式 blacklist view，让后续 Phoenix / SAILR 能传入一组 view-level 边并只在查询结果里过滤它们，不修改共享图。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:163`
+  新增 `visibleNodeSuccessorsBlacklisted()`、`visibleSuccessorsBlacklisted()`、`quotientEdgesBlacklisted()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:78`
+  新增 `isBlacklistedEdge()`，按 `OverlayNodeKey` 的 view-level source/target 匹配 blacklist。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:923`
+  实现 `visibleNodeSuccessorsBlacklisted()`，从 blacklisted full quotient view 派生 successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:937`
+  实现 `visibleSuccessorsBlacklisted()`，保留当前 block successor 兼容入口。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:950`
+  实现 `quotientEdgesBlacklisted()`，先取默认 quotient view，再过滤 blacklist 边；不调用 `hideEdge()`，所以不新增 rollback 状态。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1002`
+  `quotientEdgesAcyclic()` 改成先按 order 派生 blacklist，再复用 `quotientEdgesBlacklisted()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:756`
+  扩展 `testOverlayAcyclicViewsFilterBackEdgesByOrder()`，验证显式 blacklist 能过滤指定 member 边，且默认 view 保持不变。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:790`
+  同一测试覆盖 child region successor 的 blacklist 查询。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2342`
+  既有测试入口继续覆盖新增断言。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-blacklist-overlay.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.77 user=39.16 sys=0.08 maxrss=222204`。
+
+当前判断：
+
+- overlay view 现在同时具备 Angr `to_acyclic(blacklisted_edges)` 和 `to_acyclic_by_order(node_order)` 的最小接口。
+- 这仍是查询层能力，尚未把 Phoenix cyclic / last-resort 的 reducer 流程切过来。
+- 下一步如果继续切 reducer，需要处理 Angr `_refine_cyclic_core()` 里的 block copy / terminator rewrite。这是跨 C 和 Solidity 共用 IR 的真实设计点，不能用 fallback renderer 特例替代。
+- 实现效果：7/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
