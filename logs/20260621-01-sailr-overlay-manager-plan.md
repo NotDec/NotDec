@@ -386,3 +386,42 @@
 - 实现效果：6/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：full quotient view 补 successor edge
+
+本轮补 Angr full view 里的 successor-to-successor edge。NotDec 当前只有 `Root` / `NaturalLoop` 两种 region kind，没有 Angr `_in_loop` 的完整来源，所以这里按可确认语义实现：当前 region 是 `NaturalLoop`，或它有 `NaturalLoop` 祖先时，full quotient view 会补外部 successor block 之间的边。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:48`
+  扩展 `OverlayViewEdge`，允许 source 是 external successor block。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:246`
+  更新 member-to-member edge 初始化，适配新字段。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:258`
+  在 `OverlayManager::quotientEdges()` 中判断当前 view 是否处在 loop context。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:272`
+  为 full loop view 追加 successor-to-successor edge。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:514`
+  `MutableRegionGraph::build()` 支持 external successor 作为 edge source，并创建 placeholder source node。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:688`
+  新增 `testOverlayFullViewAddsLoopSuccessorEdges()`，验证 quotient view 和 mutable graph 都保留 successor-to-successor edge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1441`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- full quotient view 的基础边语义更接近 Angr。
+- loop context 目前用 `NaturalLoop` / 祖先 `NaturalLoop` 表示，后续如果引入更多 region kind，需要再对齐 Angr `_in_loop`。
+- hidden edge 和真正 shared graph mutation 仍未实现。
+- 实现效果：6/10。
+- 复杂度：5/10。
+- 维护成本：4/10。
