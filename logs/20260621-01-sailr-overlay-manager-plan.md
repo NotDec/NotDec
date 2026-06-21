@@ -1246,3 +1246,44 @@
 - 实现效果：7/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：last-resort virtualized edge 对齐 Angr detach 语义
+
+对照 Angr 后修正一处语义偏差：Angr `_virtualize_edge()` 会调用 `RegionOverlay.detach_edge()`，也就是从 shared graph 真实移除虚拟化边；之前 NotDec 只把 virtualized edge 放进 with-successors hidden-full 视图，shared graph 里边还在。本轮改成 overlay path 在 last-resort 成功虚拟化边后同步 detach shared edge，并用 overlay checkpoint 包住这一步。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:43`
+  给 `lastResortRefinement()` 增加可选 `RegionOverlay *Overlay` 参数，旧 graph-only 调用不变。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1122`
+  `syncVirtualEdgesToOverlay()` 从 `removeEdgeWithSuccessorsOnly()` 改为 `OverlayManager::detachNodeEdge()`，和 Angr virtualized edge 的 shared graph detach 语义一致。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2642`
+  `lastResortRefinement()` 在 overlay path 成功虚拟化边后同步 overlay，并在失败时 rollback overlay checkpoint。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2814`
+  overlay path 调用 `lastResortRefinement()` 时传入当前 overlay。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:22`
+  测试用 `HintStructurer` 暴露 `lastResortRefinement()`，便于固定虚拟化边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1147`
+  新增 `testPhoenixOverlayLastResortDetachesVirtualizedEdge()`，验证 last-resort 虚拟化 `0 -> 1` 后 shared graph 不再有该边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1987`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-virtual-edge-detach.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.64 user=38.94 sys=0.06 maxrss=219952`。
+
+当前判断：
+
+- last-resort virtualized edge 已经按 Angr 语义改为 shared graph detach。
+- `removeEdgeWithSuccessorsOnly()` 仍保留给 switch-case 这类 Angr 里本来就是 view-only 的路径。
+- 还没做 node-key virtual edge；当前同步仍依赖 `VirtualEdge.FromBlock/ToBlock`。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
