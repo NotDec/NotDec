@@ -1055,3 +1055,49 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：新增 replaceNodes 基础语义
+
+本轮补了 Angr `RegionOverlay.replace_nodes()` 的基础 node-key 版本。它在当前 region view 内把一个或多个 direct member node 替换成 structured result node，重连 shared graph 的跨入 / 跨出边，按 Angr 的规则保留 self-loop，并把 hidden edge / hidden-full edge / extra-full edge 里的旧 node 引用重映射到新 node。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:76`
+  `OverlayMember::structured()` 增加 optional representative block。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:184`
+  新增 `OverlayManager::replaceNodes()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:221`
+  新增 bookkeeping remap helper 声明。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:274`
+  新增 `RegionOverlay::replaceNodes()` 包装入口。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:140`
+  structured member 保存 representative block；`representativeBlock()` 优先使用它。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:553`
+  实现 `remapViewEdgeEndpoint()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:609`
+  实现 `remapBookkeeping()`，覆盖 hidden / hidden-full / extra-full。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1195`
+  实现 `replaceNodes()`：收集 crossing edges、删除旧 node、插入 structured result、重连边、更新 current view members、清理 block owner、重映射 bookkeeping。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1418`
+  实现 `RegionOverlay::replaceNodes()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1000`
+  新增 `testOverlayReplaceNodesRewiresSharedGraphAndBookkeeping()`，验证 shared graph 重连、representative block、hidden edge remap、extra-full edge remap 和 rollback。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1874`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- shared graph 已有 `collapse_to()` 和 `replace_nodes()` 的基础能力。
+- Phoenix / SAILR 还在 `MutableRegionGraph` 上 reduce，下一步应开始把 reducer 的 collapse 调用迁到 overlay replace/collapse，或先做一层 adapter。
+- 实现效果：7/10。
+- 复杂度：7/10。
+- 维护成本：6/10。
