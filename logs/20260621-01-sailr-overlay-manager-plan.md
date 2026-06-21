@@ -2116,3 +2116,47 @@
 - 实现效果：6/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：structuring trial 支持 edges_to_remove
+
+继续对齐 Angr `StructuringOptimizationPass._graph_is_structurable()`。Angr 会在每次试结构化前按 pass 配置临时删除一些边，再做 region identification 和 recursive structuring。本轮把这个行为放到 shared `StructuringEvaluator`，作为只读 trial view，不修改原始 `StructuredCFG`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringEvaluator.h:13`
+  新增 `StructuringEdge`，表达要从 structuring trial view 里临时删除的 CFG edge。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringEvaluator.h:30`
+  `StructuringEvaluator::evaluate()` 增加带 `EdgesToRemove` 的重载。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringEvaluator.cpp:11`
+  新增 `withoutEdges()`，复制 `StructuredCFG` 后删除指定 successor 和 switch case target；如果删完 successor 且原 terminator 不是 return/unreachable，则把 terminator 标成 unreachable。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringEvaluator.cpp:51`
+  带删边参数的 evaluator 使用删边后的 view 执行 `RegionIdentifier::identifyOverlay()`、`RecursiveStructurer::structure()`、`GotoManager::collect()` 和 quality 统计。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:24`
+  `StructuringOptimizationOptions` 增加 `EdgesToRemove`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:40`
+  pass wrapper 的初始 evaluation 使用 `Options.EdgesToRemove`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:70`
+  rewrite 后和回滚后的 evaluation 同样使用 `Options.EdgesToRemove`，保证每轮固定点检查同口径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:638`
+  新增 `testStructuringEvaluatorRemovesEdgesForTrialOnly()`，验证 trial view 会删掉 `0 -> 1` 的 goto，但原 CFG successor 不变。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:746`
+  新增 `testStructuringOptimizationPassUsesRemovedEdgesForInitialGotos()`，验证 pass 的初始 goto 判断使用删边后的 view。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3149`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && /sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-structuring-edges-to-remove.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.52 user=38.97 sys=0.06 maxrss=222148`。
+
+当前判断：
+
+- 这一步继续补齐 Angr pass wrapper 的通用能力，不涉及 C/Solidity renderer。
+- `EdgesToRemove` 现在是 trial view 语义，还不是具体 deoptimization pass 的 rewrite 规则。
+- 实现效果：6/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
