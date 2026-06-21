@@ -724,6 +724,34 @@ NotDec 这里没有在算法层制造 C / Solidity 私有 goto 语句，而是�
 - 理解成本：2/10。复用已有 `connectedPredecessorComponents()` 和 `copyLinearRegionForPredecessors()`，没有新增算法接口。
 - 后期维护成本：2/10。后续扩展完整 Angr cross-jump search 时，这里可以继续作为 predecessor 分组策略保留。
 
+本轮补了 `DuplicationReverter` 的 shared graph 原子重定向。之前 exact-match merge 会逐个 predecessor 调 `replaceEdge()`，虽然当前常见用例没问题，但它绕开了已经实现的 `StructuredCFG::redirectPredecessors()`，也没有把 switch case target 的同步更新作为 pass 级行为锁住。现在 merge dropped block 时一次性验证并重定向所有 predecessor，和其他 copied-region pass 用同一套 shared CFG 语义。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:804`
+  `DuplicationReverter::runOnGraph()` 改为调用 `Graph.redirectPredecessors(DropId, Keep->Id, DropPreds)`，成功后再删除 dropped block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1169`
+  新增 `testDuplicationReverterRedirectsSwitchPredecessorCases()`，验证 switch predecessor 通过 case-only edge 指向 duplicate block 时，merge 后 case target 会指向 kept block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4509`
+  把新测试接入 `structuring-analysis-test`。
+
+这个改动没有改 renderer，也没有给 duplication merge 增加新的相似度语义；只是让当前 exact-match 子集复用 shared CFG 的原子 edge rewrite。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-dup-switch-redirect.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=79.06 user=86.36 sys=0.06 maxrss=217996`。
+
+复杂度 / 维护判断：
+
+- 实现效果：6/10。没有扩展 Angr duplication search，但把现有 exact-match merge 接到 shared atomic rewrite 上，减少后续 pass 组合风险。
+- 理解成本：1/10。删掉手写逐边重定向，复用已有 CFG API。
+- 后期维护成本：1/10。后续如果补 similarity / merge graph，这里仍可作为最终 edge rewrite。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
