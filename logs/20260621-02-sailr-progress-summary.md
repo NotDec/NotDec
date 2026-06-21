@@ -427,6 +427,26 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-successors.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=72.48 user=79.81 sys=0.06 maxrss=222304`。
 
+本轮把 `successorsOf()` 再收紧了一层，避免 switch 的同一个 target 在 `Successors` 和 `Cases` 里同时出现时被重复算两次：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:8-30,95-109`
+  新增 `appendUniqueTarget()`，让 `StructuredCFG::successorsOf()` 按出现顺序去重返回。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:852-875`
+  新增 `testStructuredCFGSuccessorsOfDeduplicatesCaseTargets()`，确认 case target 重复存放时 `successorsOf()` 仍只返回一次。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:217,233-278,381-385,436-465,652-674`
+  相关 shared successor 读取逻辑继续复用这个去重视图。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-successors-dedup.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=72.95 user=80.28 sys=0.06 maxrss=221380`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
