@@ -1708,3 +1708,49 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：virtual edge 同步 source replacement 到 overlay
+
+本轮继续对齐 Angr `_virtualize_edge()` 的共享图语义。Angr 在虚拟化边时不是只隐藏一条边，还会在需要时创建 rewritten source node，然后执行 `detach_edge(src, dst)` 和 `replace_nodes_both(src, new_src)`。NotDec 之前已经能生成共享 `StructuredTree` 版 rewritten source，但 overlay 只同步了断边，没有把 source block 替换成 rewritten structured node；后续 overlay view 仍可能把 source 看成旧 block。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:95`
+  新增 `MutableRegionGraph::setSourceNodes()`，允许 reducer node 在被 overlay replacement 后指向新的 structured overlay node。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:709`
+  实现 `setSourceNodes()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1544`
+  新增 `overlayNodesForGraphNode()`，优先使用 reducer node 的 `SourceNodes`，没有时回退到 block key。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1555`
+  新增 `detachOverlayVirtualEdge()`，按 `OverlayNodeKey` 断开 shared overlay edge，支持 source 已经是 structured node 的情况。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1568`
+  新增 `installVirtualizedEdge()`，统一执行 build rewritten source、`Graph.virtualizeEdge()`、overlay detach、`Overlay.replaceNodes()` 和 reducer `SourceNodes` 更新。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1591`
+  明确按 Angr 顺序先 detach graph edge，再 replace source node，让 replacement 只继承剩余 real outgoing edges。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2878`
+  hint path 改用 `installVirtualizedEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2898`
+  普通 last-resort path 改用 `installVirtualizedEdge()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:231`
+  新增 `testOverlayVirtualizationReplacesSourceNode()`，验证 overlay path 虚拟化 `0 -> 2` 后，`block 0` 被 structured node 替换，shared real edge 只保留 rewritten source 到 kept successor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1650`
+  更新 `testPhoenixOverlayLastResortDetachesVirtualizedEdge()`，不再要求旧 block successor 保留，而是验证 structured replacement 上 removed edge 消失、kept edge 保留。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-replace-virtualized-source.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.54 user=38.92 sys=0.04 maxrss=218052`。
+
+当前判断：
+
+- last-resort virtual edge 现在更接近 Angr：共享 overlay graph 同时看到 detach 和 replacement，不再只靠 renderer 或 reducer graph 记一条虚拟边。
+- 这仍未覆盖 cyclic refinement 里现有 `virtualizeNonFollowLoopExits()` 的 overlay replacement；那条路径还需要继续按 Angr `_refine_cyclic_core()` 切。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
