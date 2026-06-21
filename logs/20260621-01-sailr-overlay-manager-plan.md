@@ -1101,3 +1101,43 @@
 - 实现效果：7/10。
 - 复杂度：7/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：MutableRegionGraph 记录 overlay source nodes
+
+本轮给 `MutableRegionGraph` 增加 overlay source node 记录。Phoenix reducer 目前还在 `MutableRegionGraph` 上执行；要把每次 `collapseNodes()` 映射到 Angr-style `Overlay.replaceNodes()`，必须先知道 graph node 来自哪些 overlay node。这一步只补数据通道，不改变 reducer 行为。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/MutableRegionGraph.h:44`
+  `MutableRegionNode` 新增 `SourceNodes`，记录对应的 `OverlayNodeKey`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:143`
+  新增 `appendUniqueNodeKey()`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:378`
+  `addNode()` 对普通 block node 初始化 block source key。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:482`
+  overlay graph 构建时，child region / structured member 的 graph node source 记录为当前 overlay member 的 node key，而不是拆成内部 block。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:743`
+  `collapseNodes()` 合并成员的 `SourceNodes`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:796`
+  collapsed node 保存合并后的 `SourceNodes`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:171`
+  checkpoint 测试中验证 collapse 后 source node 合并。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1253`
+  finalized child overlay graph 测试验证 parent graph node 保留 structured member source key。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- reducer graph 已经能追踪 overlay node 来源。
+- 下一步可以在 `PhoenixStructurer::structureRegion(RegionOverlay&)` 中用这些 source keys，把 reducer 的 collapse 结果同步回 overlay shared graph。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
