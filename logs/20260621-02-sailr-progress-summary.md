@@ -503,6 +503,37 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - 同口径重复跑一次：
   `elapsed=77.69 user=85.07 sys=0.07 maxrss=221644`。
 
+本轮继续扩了 `LoweredSwitchSimplifier` 的 shared case-region 复制范围。现在除了线性 case 链，也能把链尾的闭合 terminal fork 一起复制：
+
+```text
+case head -> branch -> return
+                    -> unreachable/return
+```
+
+约束仍然很保守：fork head 必须是普通 branch，两个 successor 都必须是闭合 `Return` / `Unreachable`，且都只能由这个 branch 到达。这样只是在 shared CFG 里复制 block，不解释 renderer 语义，也不碰 Phi / vvar。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:312`
+  新增 `appendTerminalForkRegion()`，把满足条件的 terminal fork 追加进 `LinearRegion`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:347`
+  `findLinearCopyRegion()` 在继续走单 successor 链前先尝试吸收 terminal fork，命中后停止扩展。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1460`
+  新增 `testLoweredSwitchSimplifierCopiesTerminalForkCaseRegion()`，验证两个 switch 共享同一个带 terminal fork 的 case region 时，会分别得到完整 copy，并删除原 region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4089`
+  把新测试接入主测试入口。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch-terminal.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=77.98 user=85.38 sys=0.07 maxrss=221288`。
+- 提交前同口径重复跑一次：
+  `elapsed=77.40 user=84.63 sys=0.06 maxrss=221612`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
