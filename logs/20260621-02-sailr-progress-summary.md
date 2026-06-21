@@ -283,6 +283,34 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-pipeline.c --tr-level=2 --algo=phoenix`
   通过，`elapsed=31.69 user=39.03 sys=0.04 maxrss=220780`。
 
+本轮继续补 `ReturnDuplicatorLow`，对齐 Angr `ReturnDuplicatorLow._is_goto_edge()` 里“goto source 可能在相邻 parent block 上”的窄语义。没有推进 `LoweredSwitchSimplifier`，因为 Angr 那边依赖 AIL 表达式相似性、case cluster 和 block copy 的 payload 更新；当前 shared CFG 还没有足够语义直接照搬。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:280`
+  新增 `gotoEdgeFromSourceOrParent()`，先查直接 goto edge，再查 source 的一层 predecessor 是否是 goto source。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:616`
+  `ReturnDuplicatorLow::runOnGraph()` 用这个 helper 选择要复制 return region 的 predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:84`
+  新增 `TestReturnDuplicatorLow`，测试直接调用 shared pass 的 `runOnGraph()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:993`
+  新增 `testReturnDuplicatorLowUsesParentGotoSource()`，手工构造 `GotoManager` 里的 parent goto，验证只复制对应 predecessor 的 return block，且 copy 继续通过 `BodyBlock` 指向原 return body。
+
+这次仍然只改 shared deoptimization 判定，不碰 C / Solidity renderer。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retdup-parentgoto.c --tr-level=2 --algo=structured-phoenix`
+  通过，`elapsed=36.30 user=43.69 sys=0.06 maxrss=219596`。当前 CLI 没有 `--algo=phoenix` literal，所以用 `structured-phoenix`。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retdup-parentgoto-sailr.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=72.76 user=80.06 sys=0.05 maxrss=220232`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
