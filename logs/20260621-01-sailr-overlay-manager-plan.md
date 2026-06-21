@@ -2204,3 +2204,76 @@
 - 实现效果：6/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：copied / virtual block 的 shared 表示
+
+本轮先解决 SAILR deoptimization 继续往下做必须碰到的 block 复制边界。当前没有实现具体 SAILR pass；只把 `StructuredCFG`、shared structurer 和 C adapter 的身份边界补齐，让后续 pass 能新建或复制 block，而不是把复制语义写进 C/Solidity renderer。
+
+核心约定：
+
+- `CFGBlock::Id` 是控制流身份。复制或新建 block 必须有自己的稳定 `BlockId`。
+- `CFGBlock::BodyBlock` 是渲染 body 的来源。原始 block 指向自己，复制 block 指向原始 body。
+- Phoenix / Goto structurer 生成 `BasicBlock` 时保留当前控制流 `BlockId`，但 statements 从 `BodyBlock` 读取。
+- C adapter 的 label / goto 也按 shared `BlockId` 建 label，不再依赖原始 `CFGBlock *`。这样 copied block 不会和原始 block 共用 label。
+- C adapter 的 fallback if / switch 读取 shared `StructuredCFG` successor，不再回读原始 C CFG successor。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:52`
+  新增 `CFGBlock::BodyBlock`，记录 copied / virtual block 的 body 来源。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:67`
+  新增 `StructuredCFG::duplicateBlock()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:73`
+  新增 `bodyBlock()` / `getBodyBlock()` 查询。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:5`
+  `addBlock()` 默认把原始 block 的 `BodyBlock` 设成自己的 `Id`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:17`
+  实现 `duplicateBlock()`，新 block 用新的 `BlockId`，body 来源沿用原始 body，successor 由调用者传入。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:42`
+  实现 `bodyBlock()` / `getBodyBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:132`
+  `appendBlockBody()` 改为从 `getBodyBlock()` 取 statements，但 `StructuredNode::Block` 仍是当前控制流 block。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:18`
+  新增 `makeBlockBody()`，两条 Goto structuring 路径都复用 shared body-source 规则。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuredGoto.h:35`
+  C 后端 adapter 新增 `createStructuredBlockLabelStmt()`，用于按 shared `BlockId` 创建 detached label。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:31`
+  C adapter 保存当前 `StructuredCFG` 和 `BlockId -> LabelStmt`，renderer 不再保存 `BlockId -> CFGBlock *`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:75`
+  新增 `getOrCreateLabelStmt()` / `getOrCreateLabel()`，label 身份来自 shared `BlockId`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:230`
+  `invertCond()` 改为新建反向比较表达式，不再原地改 payload。否则一个 condition payload 被 while / if 复用时，后渲染节点会改坏前面的条件。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:289`
+  fallback `renderIf()` 改为读取 shared CFG successor。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:339`
+  fallback `renderSwitch()` 改为读取 shared CFG successor 和 case target。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:427`
+  实现 `createStructuredBlockLabelStmt()`，生成 `structured_block_<id>` label。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:362`
+  新增 `hasSinglePayload()` 测试 helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:671`
+  新增 `testStructuredCFGDuplicatesBlockBodySource()`，验证复制 block 的稳定新 ID、body 来源和 successor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:696`
+  新增 `testGotoStructurerRendersVirtualBlockBodySource()`，验证只设置 `BodyBlock` 的 virtual block 会渲染原始 statements，但 node block 仍是 virtual ID。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3248`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-copied-block.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=32.34 user=39.80 sys=0.11 maxrss=220248`。
+
+当前判断：
+
+- copied / virtual block 的最小 shared 表示已经落到 `StructuredCFG`，C 和 Solidity 都能通过 shared tree 读取 body payload。C 后端只保留必要的 Clang label 承载差异。
+- 这一步还没有实现 Angr 的 `ReturnDuplicatorLow`、`CrossJumpReverter`、`DuplicationReverter`、`LoweredSwitchSimplifier`。
+- 下一步可以开始做第一个具体 SAILR deoptimization pass；优先选只需要复制 return/goto target block、接口最窄的 pass。
+- 实现效果：7/10。复制 block 的身份和 body 来源边界已经明确。
+- 复杂度：4/10。新增字段和少量 renderer adapter 状态，但没有新增算法分支。
+- 维护成本：4/10。后续 pass 必须遵守 `Id` / `BodyBlock` 分工，否则容易把 label 身份和 body 来源混在一起。

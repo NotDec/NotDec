@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层，以及 copied / virtual block 的最小 shared 表示；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -116,6 +116,33 @@ fortune smoke 通过，耗时：
 elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
 ```
 
+## copied / virtual block 进展
+
+已经补了 SAILR deoptimization 继续往下做需要的最小 shared block 表示：
+
+- `StructuredCFG::CFGBlock` 增加 `BodyBlock`。
+- `StructuredCFG::duplicateBlock()` 可以创建稳定新 `BlockId` 的 copied block。
+- `StructuredCFG::bodyBlock()` / `getBodyBlock()` 提供 body-source 查询。
+- Phoenix / Goto structurer 生成 `BasicBlock` 时保留控制流 `BlockId`，statements 从 `BodyBlock` 读取。
+- C adapter 的 label / goto 改为按 shared `BlockId` 建 label，不再依赖原始 `CFGBlock *`。
+- C adapter 的 fallback if / switch 改为从 shared `StructuredCFG` 读取 successor。
+- C adapter 修了 condition payload 原地取反问题，避免同一个 condition payload 被多个 structured node 复用时互相改坏。
+
+验证通过：
+
+```bash
+cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4
+/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-copied-block.c --tr-level=2 --algo=phoenix
+```
+
+fortune smoke 通过，耗时：
+
+```text
+elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
+```
+
 ## 还差什么
 
 还差真正的 Angr SAILR deoptimization pass：
@@ -128,7 +155,7 @@ elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
 
 这些 pass 还没有完整实现。
 
-主要卡点是：Angr 这些 pass 基本都会复制或新建 block。
+之前的主要卡点是：Angr 这些 pass 基本都会复制或新建 block。当前已经有最小 shared 表示，但具体 pass 还没有实现。
 
 例子：
 
@@ -137,18 +164,10 @@ elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
 - `DuplicationReverter` 新建 merge graph
 - `LoweredSwitchSimplifier` 维护 block copies
 
-而当前 NotDec C renderer 还依赖原始 block 身份，例如 `BlockId -> CFGBlock *`。复制出来的新 block 没有原始 `CFGBlock *`。如果直接写具体 pass，很容易变成 C renderer 一套特判、Solidity renderer 另一套特判，这会偏离“严格按 Angr 框架，C/Solidity 共享算法层”的目标。
+当前 C renderer 的 label 身份已经改为 shared `BlockId`，body payload 通过 `BodyBlock` 走 shared CFG。后续 pass 仍要注意不要把新 block 的算法语义写到 C/Solidity renderer 里。
 
 ## 下一步建议
 
-下一步应该先设计并实现 shared copied/virtual block 表示：
+下一步应该开始实现第一个真正的 SAILR pass。优先选接口最窄、只需要复制 return/goto target block 的 pass，再接入 `StructuringOptimizationPipeline`。
 
-- `StructuredCFG` 能保存复制出来的新 block
-- 新 block 有稳定 `BlockId`
-- 新 block 能引用原始 block body，或保存后端无关的 block payload
-- C 和 Solidity renderer 都从 shared CFG 读取 block 内容
-- SAILR pass 只改 shared CFG，不写 C/Solidity 特判
-
-解决这个以后，再继续实现真正的 SAILR pass，并接入 `StructuringOptimizationPipeline`。
-
-一句话总结：公共架构和 Angr 风格执行框架已经搭好；完整 SAILR 还没完成，下一步要先补 copied/virtual block 的 shared 表示，然后才能实现 Angr 的具体 deoptimization pass。
+一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示已经搭好；完整 SAILR 还没完成，下一步是实现具体 deoptimization pass。
