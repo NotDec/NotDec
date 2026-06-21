@@ -1580,3 +1580,45 @@
 - 实现效果：7/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：补齐 overlay quasi-topological node order
+
+本轮补 Angr `_generate_node_order()` 的 overlay 查询层基础。Angr 用 `graph_with_successors` 的 quasi-topological order 生成 `node_order`，再传给 `to_acyclic_by_order()`。NotDec 之前只能手写 `OverlayNodeKey -> order`，这不利于后续把 Phoenix / SAILR 的 cyclic 和 last-resort 流程切到 overlay view。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:163`
+  新增 `OverlayManager::quasiTopologicalNodeOrder()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:86`
+  新增 `containsNodeKey()`，服务 Tarjan SCC。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:91`
+  新增 `collectScc()`，在 view-level graph 上收集 SCC。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:973`
+  实现 `quasiTopologicalNodeOrder()`：从 full quotient view 构造节点和边，收缩 SCC，按 component DAG 的确定性拓扑顺序生成 `OverlayNodeKey -> order`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1016`
+  SCC 内如果包含当前 region head block，先把 head 放到 component 内第一个位置，贴近 Angr 的 loop-head 候选处理。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:733`
+  扩展 `testOverlayAcyclicViewsFilterBackEdgesByOrder()`，验证简单循环上 helper 生成 `0,1,2` 顺序，并直接用于 `quotientEdgesAcyclic()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:798`
+  同一测试验证 child region successor 也能生成 deterministic order。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-node-order.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.39 user=38.88 sys=0.05 maxrss=219132`。
+
+当前判断：
+
+- overlay 层现在能自己从 full quotient view 派生 `node_order`，后续 Phoenix / SAILR 不再需要外部手写 order。
+- 这仍未切换 reducer 主流程；当前只是补齐 Angr `_generate_node_order()` 所需的共享 view 基础。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
