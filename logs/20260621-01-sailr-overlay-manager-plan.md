@@ -243,3 +243,39 @@
 - 实现效果：2/10。基础状态。
 - 复杂度：1/10。保存一份 successor 表。
 - 维护成本：1/10。
+
+# 2026-06-21 实现记录：只读 visible successor 查询
+
+本轮增加 overlay 的只读 successor view 查询。它对照 Angr 的 `successor_nodes()` 思路，从共享 CFG successor 和当前 overlay members 推导 region 外部 successor。当前还没有替换 `snapshotSuccessors()`，避免改变 structuring 输出。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:71`
+  新增 `OverlayManager::visibleSuccessors(RegionId)`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:11`
+  新增本地 `appendUniqueBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:140`
+  新增 `memberForBlock()`，在一个 region view 中找到 block 所属 member。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:160`
+  实现 `visibleSuccessors()`：member 内部边不算 successor，指向 region view 外部 block 的边才算 successor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:503`
+  新增 `testOverlayManagerDerivesVisibleSuccessors()`，验证 root 无外部 successor，loop child 的 successor 是 follow block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1162`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是 successor view 的只读基础。
+- 还不能直接替换 `RegionOverlay::snapshotSuccessors()`，因为现有 `Region.Successors` 和 derived view 在一些 fallback/loop case 上可能不完全一致，需要单独对比。
+- 实现效果：3/10。
+- 复杂度：2/10。
+- 维护成本：2/10。
