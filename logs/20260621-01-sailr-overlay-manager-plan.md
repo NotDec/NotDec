@@ -1754,3 +1754,39 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：cyclic non-follow exits 复用 overlay virtual edge replacement
+
+本轮把 cyclic refinement 里多出口 natural loop 的 `virtualizeNonFollowLoopExits()` 接到上一轮的 shared virtual edge 安装路径。这样 last-resort 和 cyclic refinement 不再各自维护一套“生成 rewritten source + 删除边”的逻辑；overlay path 也能看到同样的 detach + source replacement 语义。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2281`
+  `virtualizeNonFollowLoopExits()` 增加 `RegionOverlay *Overlay` 参数。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2309`
+  `virtualizeNonFollowLoopExits()` 改用 `installVirtualizedEdge()`，复用 Angr 风格 detach + replacement 顺序。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2640`
+  `reduceGraphNaturalLoopOnce()` 调用 non-follow exit virtualization 时传入当前 overlay。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2314`
+  新增 `testRefineCyclicOverlayVirtualizesNonFollowExits()`：构造有两个 loop exit 的 root，验证 overlay path 下非 follow exit `6` 被虚拟化，最终 loop structured node 只保留到 follow `5` 的 real edge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2611`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-nonfollow-exits.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.86 user=39.27 sys=0.03 maxrss=220400`。
+
+当前判断：
+
+- 多出口 natural loop 的 graph-level virtualization 已经和 last-resort 使用同一套 overlay replacement 语义。
+- 这仍不是完整 Angr `_refine_cyclic_core()`：outgoing edge 的条件恢复、`mark_edge(cyclic_refinement_outgoing=True)` 和更细的 while/do-while source block 查找还没完整迁到 overlay。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
