@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail shared 子集；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail shared 子集和连通前驱组件共享复制子集；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -87,6 +87,7 @@ SAILR deoptimization pipeline 骨架已经实现：
 - `SwitchReusedEntryRewriter` 的 shared reused-entry 子集
 - `SwitchDefaultCaseDuplicator` 的 shared default reuse 子集
 - `ReturnDuplicatorLow` 的单 block / 线性 return-tail 复制子集
+- `ReturnDuplicatorLow` 的连通前驱组件共享复制子集
 - 已接入 `buildSAILRDeoptimizationPipeline()`
 - `SAILRStructurer::structure()` 会先跑 shared deoptimization pipeline，再走 Phoenix/SAILR structuring
 
@@ -151,6 +152,19 @@ elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
 
 实现里特意先快照了 `EntryId` 列表，再做复制和 successor 重写，避免遍历 `Graph.blocks()` 时直接改图。这个 pass 只复制 block，不碰 renderer，也不把 switch lowering 的 if-chain 语义塞进算法层。
 
+本轮继续把 `ReturnDuplicatorLow` 往 Angr 靠了一点，补了“连通前驱组件只复制一次”的 shared 子集：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:163`
+  新增 `connectedPredecessorComponents()`，按前驱连通性分组。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:238`
+  把单个 predecessor 复制 helper 改成 `copyRegionForPredecessors()`，一次复制整段 return region，再把同一组件里的 predecessor 都指向同一个 copied head。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:545`
+  `ReturnDuplicatorLow::runOnGraph()` 先选出需要复制的 predecessor，再按连通组件分组后复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:885`
+  新增 `testReturnDuplicatorLowCopiesConnectedPredsOnce()`，验证两个连通 predecessor 会共享同一个 return-tail copy，而不是复制两份。
+
+这里仍然只做 shared CFG 级别的 region copy，不碰 Phi / vvar 重写，也不把 renderer 特判塞进算法层。
+
 验证：
 
 - `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
@@ -161,6 +175,17 @@ elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
   通过，5 个测试。
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-switchentry.c --tr-level=2 --algo=phoenix`
   通过，`elapsed=31.86 user=39.11 sys=0.07 maxrss=220476`。
+
+本轮验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retdup2.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.51 user=38.83 sys=0.06 maxrss=219448`。
 
 验证通过：
 
