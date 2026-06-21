@@ -113,3 +113,47 @@
 - 实现效果：2/10。只是基础状态，还不是完整共享图。
 - 复杂度：2/10。新增一个 member 表和 owner 表。
 - 维护成本：2/10。后续 finalize/dissolve 会继续使用这份状态。
+
+# 2026-06-21 实现记录：finalize / dissolve 维护 overlay member
+
+本轮让 `finalize()` / `dissolve()` 开始维护上一轮新增的 member / owner 状态。现有 reducer 还没有消费这份状态，所以输出行为不变。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:79`
+  允许 `RegionOverlay` 调用 `OverlayManager` 的 lifecycle helper。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:86`
+  checkpoint 增加 `ParentRegions`，rollback 时能恢复 dissolve 造成的 child reparent。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:90`
+  声明 `finalizeRegionMembers()` / `dissolveRegionMembers()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:111`
+  `finalizeRegionMembers()` 把 parent view 里的 child region member 替换成 structured member。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:126`
+  `dissolveRegionMembers()` 把 child members 插回 parent view，并更新 block owner / nested child parent。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:203`
+  checkpoint / rollback 覆盖 `ParentRegions`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:231`
+  `setStructuredRoot()` 调用 member finalize。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:319`
+  `RegionOverlay::dissolve()` 调用 member dissolve。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:441`
+  新增 `testOverlayManagerFinalizeAndDissolveUpdateMembers()`，验证 finalize、dissolve 和 rollback 后的 member / owner 状态。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1160`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是 Angr lifecycle 语义的基础落地：child finalize / dissolve 已经开始改变 parent view。
+- 还没有恢复 Angr 的 cyclic refinement rollback，因为 `MutableRegionGraph::build()` 仍主要看旧 `RegionTree + finalizedChildren()`。
+- 实现效果：3/10。生命周期状态开始可回滚，但还不是共享 graph。
+- 复杂度：2/10。只操作 member/owner，不碰 reducer。
+- 维护成本：2/10。下一步要让 graph builder 消费这份 view。
