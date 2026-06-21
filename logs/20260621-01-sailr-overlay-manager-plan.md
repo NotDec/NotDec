@@ -2346,7 +2346,60 @@
 
 - `CrossJumpReverter` 的 shared CFG rewrite 已经接入 SAILR pipeline。
 - 这一步没有处理 Angr 的 call counter；shared 层目前只有 payload ref，不知道 payload 是否是 call，所以用 statement 数量做 backend-neutral 复制上限。
-- `ReturnDuplicatorLow`、`DuplicationReverter`、`LoweredSwitchSimplifier` 还没有实现。
+- `ReturnDuplicatorLow` 已经有最小 shared return-block 复制子集，但还没有补 Angr 的 return-region / Phi / connected component 语义。
+- `DuplicationReverter`、`LoweredSwitchSimplifier` 还没有实现。
 - 实现效果：7/10。第一个具体 SAILR deoptimization pass 已落地。
 - 复杂度：4/10。主要增加一个 pass 和 `StructuredCFG::removeBlock()`。
 - 维护成本：4/10。后续 pass 需要继续复用 `duplicateBlock()` / `removeBlock()`，避免各自手写 CFG 复制和删除语义。
+
+# 2026-06-21 实现记录：ReturnDuplicatorLow 最小 shared 子集
+
+本轮继续对照 Angr `ReturnDuplicatorLow`。完整 Angr 版本会寻找包含 end node 的 return-region，支持单入口链、connected in-edge component、Phi / virtual variable 刷新和 return region 删除。当前 shared `StructuredCFG` 还没有 Phi / vvar payload 语义，所以本轮只实现明确安全的最小子集：复制被多个 goto predecessor 共享的单个 terminal return block。
+
+实现范围：
+
+- 只处理 `TerminatorKind::Return` 且无 successor 的单 block return。
+- return block 必须有多个 predecessor。
+- 只复制当前 structuring 结果中 `GotoManager` 明确标记为 goto edge 的 predecessor。
+- 每个 predecessor 得到一份 copied return block。
+- 如果所有 predecessor 都被复制重定向，删除原 return block。
+- 不处理 return-region 链、不处理 Phi / vvar 刷新、不做 connected in-edge component 合并。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:12`
+  新增 `ReturnDuplicatorLow` pass 类。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:53`
+  新增 `ReturnDuplicatorLow::defaultOptions()`，默认 `MaxOptIters = 4`，沿用 pass wrapper 的 goto / quality guard。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:59`
+  实现 `ReturnDuplicatorLow::runOnGraph()`：收集共享 return block、筛选 goto predecessor、复制 return block、重定向 predecessor、必要时删除原 return block。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:129`
+  删除原 return block 前会确认所有当前 predecessor 都已经成功重定向，避免部分复制失败时删掉仍被引用的原块。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:215`
+  同样收紧 `CrossJumpReverter` 删除原 target block 的条件。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:226`
+  `buildSAILRDeoptimizationPipeline()` 按 Angr full preset 顺序把 `ReturnDuplicatorLow` 放在 `CrossJumpReverter` 前面。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:778`
+  新增 `testReturnDuplicatorLowDuplicatesGotoReturnTarget()`，验证两个 goto predecessor 被改到两份 copied return block，原 return block 被删除，复制 body 自持。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3356`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retdup-phoenix.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.78 user=39.18 sys=0.06 maxrss=216648`。
+
+当前判断：
+
+- `ReturnDuplicatorLow` 的最小 shared CFG 子集已经接入 SAILR pipeline。
+- 这不是完整 Angr `ReturnDuplicatorLow`：还缺 return-region 发现、connected in-edge component、Phi / vvar 刷新和多 block region copy。
+- 暂时没有触碰 C/Solidity renderer，也没有把 payload 解释写进算法层。
+- 实现效果：6/10。只覆盖最小但可验证的 return-block 复制。
+- 复杂度：3/10。复用了 `duplicateBlock()` / `removeBlock()` 和 pass wrapper。
+- 维护成本：4/10。后续补完整 ReturnDuplicator 时，需要明确 Phi / payload 的 shared 语义，否则不能继续扩大复制范围。
