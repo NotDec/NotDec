@@ -782,6 +782,41 @@ NotDec 这里没有在算法层制造 C / Solidity 私有 goto 语句，而是�
 - 理解成本：2/10。复用已有组件分组和 region copy helper。
 - 后期维护成本：2/10。后续如果补 Angr 更完整 switch reconstruction，这里仍可保留为 entry-region copy 的共享策略。
 
+本轮继续补 `ReturnDuplicatorLow` 的保守分支 return-region 子集。之前只支持直线 return tail 和 `branch -> {return, unreachable/return}` 这种 terminal fork；现在额外支持：
+
+```text
+branch -> return-tail -> return
+       -> unreachable/return
+```
+
+要求 branch 只有两个 successor，其中一个必须是当前 return region head，另一个必须是只有这个 branch 到达的闭合 `Return` / `Unreachable` terminal block。这个形状仍然不需要 Phi / vvar 刷新，也不需要 renderer 介入。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:130`
+  新增 `prependReturnTailForkRegion()`，只识别一边进入当前 return-tail、一边进入 closed terminal 的 branch。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:207`
+  `findLinearReturnRegion()` 在 terminal fork 后尝试吸收这个 return-tail fork；更一般的 branch region 仍然不做。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1476`
+  新增 `testReturnDuplicatorLowCopiesReturnTailForkRegion()`，验证 branch、tail、return 和 unreachable terminal 会一起复制，并删除原 region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4640`
+  把新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-ret-tail-fork.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=79.41 user=86.62 sys=0.06 maxrss=218428`。
+
+复杂度 / 维护判断：
+
+- 实现效果：7/10。覆盖了一类常见 branch return-tail fork，比原 terminal fork 更接近 Angr 的 return-region 复制，但仍避开需要 payload 重写的一般分支。
+- 理解成本：3/10。新增一个保守 helper，和已有 terminal fork helper 并列。
+- 后期维护成本：3/10。后续补完整 ReturnDuplicatorLow 时，这个 helper 可以作为不需要 Phi/vvar 的 fast path 保留。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
