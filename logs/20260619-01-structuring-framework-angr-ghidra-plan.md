@@ -4242,3 +4242,53 @@ snapshot 传进 `finalize()`，但没有保存。这轮把 snapshot 和 structur
 - 实现效果：3/10。补回一个真实的算法开关。
 - 复杂度：1/10。只新增一个 bool 参数和测试。
 - 维护成本：1/10。以后扩展 SAILR 构造参数时，不用再改调用点的语义。
+
+# 2026-06-21 实现记录：严格 finalize child 并补齐 Phoenix 配套 reducer
+
+按 Angr 的 `RecursiveStructurer` 流程继续收紧：child region 只要有结构化结果就 finalize，不再因为结果是
+fallback `InfiniteLoop` 而 dissolve。这个改动暴露了 Phoenix reducer 之前依赖 parent fallback 补救的问题，
+这轮一并补齐到 child region 内部处理。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:10`
+  删除 `shouldFinalizeStructuredChild()` 的本地例外，`finishChildRegion()` 改为 `Root != InvalidNodeId`
+  就 `Overlay.finalize()`，否则 `dissolve()`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:265`
+  `reduceSequenceOnce()` 不再把 natural loop 的回边当普通 sequence 折叠，避免 cyclic schema 前 loop 被消掉。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:292`
+  `reduceIfOnce()` 不抢先折叠 natural loop head，保留给 cyclic/do-while schema。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1012`
+  `reduceSelfLoopOnce()` 允许 external successor 参与 self-loop schema，并尝试把尾部
+  `if (cond) continue; else break;` 收紧成 `do while`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1530`
+  `wrapNaturalLoopFallback()` 遇到已经以结构化 loop 开头的结果时不再二次包 `while(1)`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1667`
+  增加 `foldGotoDiamond()` / `cleanupStructuredGotos()`，清理 if 分支到相邻 join label 的 goto。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2624`
+  region graph 收敛到单个 structured node 时直接返回该 node，贴近 Angr 的 `len(graph.nodes)==1 => result`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:689`
+  collapse 多节点时优先保留回边来源作为 `TailBlock`，让后续 self-loop/do-while schema 看见 latch 条件。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:761`
+  增加 if-join 后 do-while 的 cyclic refine 回归。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:806`
+  增加 NaturalLoop region 完整 structure 后仍保留 do-while 的回归。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:902`
+  旧的 child 多出口拒绝测试改为验证 child 多出口可以 refine，并产生 virtual edge。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是从过渡兼容逻辑往 Angr strict finalize 方向收敛，不是扩大本地差异。
+- parent fallback 不再负责补救 child loop；child region 自己必须结构化到足够稳定的 result。
+- 实现效果：5/10。RecursiveStructurer 的 child 完成规则更接近 Angr，Phoenix reducer 能承受这个规则。
+- 复杂度：4/10。新增了结构树 goto 清理和几条 reducer 边界规则。
+- 维护成本：3/10。清理逻辑仍是本地 StructuredTree 过渡层，后续 shared overlay graph 更完整后应继续收敛。
