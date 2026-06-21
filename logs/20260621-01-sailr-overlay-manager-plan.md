@@ -1622,3 +1622,47 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：last-resort edge ordering 使用 overlay node order
+
+本轮开始把上一轮的 overlay `node_order` 接入 Phoenix reducer。范围只限 last-resort virtual edge ordering：如果当前 structuring 走 overlay path，就把 `OverlayNodeKey -> order` 映射到 `MutableRegionGraphAnalysis::NodeOrder`，供 Phoenix / SAILR 的 `orderVirtualizableEdges()` 使用；没有 overlay 时仍保持原来的 reducer DFS order。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:64`
+  `virtualizeOneEdge()` 增加可选 `RegionOverlay *Overlay` 参数，默认 `nullptr`，保持旧测试和非 overlay path 调用不变。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1150`
+  新增 `applyOverlayNodeOrder()`：从 `OverlayManager::quasiTopologicalNodeOrder()` 取 overlay order，再按 reducer node 的 `SourceNodes` 映射到 `GraphNodeId`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1170`
+  一个 reducer node 如果对应多个 overlay source，取最小 order；找不到 overlay order 的 node 保留原分析结果。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2720`
+  `lastResortRefinement()` 调用 `virtualizeOneEdge()` 时传入当前 overlay。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2739`
+  `virtualizeOneEdge()` 在 `Graph.analyze()` 后调用 `applyOverlayNodeOrder()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:59`
+  新增 `OrderCaptureStructurer`，捕获 `orderVirtualizableEdges()` 收到的 `Analysis.NodeOrder`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:822`
+  新增 `testPhoenixOverlayPathUsesOverlayNodeOrder()`：构造一个 reducer DFS order 与 overlay quasi order 不同的图，验证非 overlay path 仍用旧 order，overlay path 使用 overlay order。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2405`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-order-virtualize.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.48 user=38.94 sys=0.05 maxrss=219224`。
+
+当前判断：
+
+- last-resort edge ordering 已经开始使用 Angr 风格 overlay view 的 order。
+- 这还没有替换 `collectVirtualizableEdges()` 的 candidate 来源，也没有实现 Angr `_refine_cyclic_core()` 的 block rewrite。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
