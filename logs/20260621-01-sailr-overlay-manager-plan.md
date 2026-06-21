@@ -1141,3 +1141,33 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：Phoenix overlay path 同步最终 reducer collapse
+
+本轮把 Phoenix overlay path 的成功收敛结果同步回 overlay shared graph。当 `MutableRegionGraph` 最终只剩一个带 `StructuredRoot` 的 active node 时，使用该 node 的 `SourceNodes` 调 `RegionOverlay::replaceNodes()`。这样 Phoenix reducer 虽然仍运行在 `MutableRegionGraph` 上，但成功 reduce 的最终结果已经会写回 Angr-style overlay graph。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2704`
+  `PhoenixStructurer::structureRegion(Cfg, RegionOverlay&, Tree)` 在单 active structured node 路径中，调用 `Overlay.replaceNodes(Node->SourceNodes, RootId)`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1079`
+  新增 `testPhoenixOverlayPathSyncsReducerCollapseToOverlay()`，验证简单 sequence reduce 后 overlay members 变成 structured member，shared graph 中原始 block edge 被删除。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1914`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- Phoenix overlay path 的最终成功 reduce 已经会同步回 overlay shared graph。
+- 还没有逐个 reducer 调用点同步，也没有同步 last-resort virtual edge 的 overlay mutation；这仍是 SAILR/deoptimization 继续推进前的缺口。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
