@@ -1287,3 +1287,45 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：补齐 overlay absorb successor 基础语义
+
+本轮补 Angr `RegionOverlay.absorb_successor_into()` 对应的 view-only 语义。这个接口用于把当前 region full view 里的 successor 吸收到一个 structured member：successor 的 full-view 出边改挂到新 structured node 上，原成员到 successor 的边在当前 view 隐藏，shared graph 不改。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:169`
+  新增 `OverlayManager::hideEdgeToNodeSuccessor()`，让隐藏 successor edge 支持 node-key，不只支持 block successor。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:175`
+  新增 `OverlayManager::absorbSuccessorInto()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:279`
+  新增 `RegionOverlay::absorbSuccessorInto()` 包装入口。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:902`
+  `hideEdgeToSuccessor()` 改为调用 node-key 版本；node-key 版本按 member source nodes 扫 shared successors 并写 hidden edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:940`
+  实现 `absorbSuccessorInto()`：扫描 `quotientEdges(..., true)`，把 successor 的 out-edge 变成 `NewNode -> target` extra-full edge，然后隐藏当前 view 中成员到 successor 的边。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1428`
+  实现 `RegionOverlay` 包装方法。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1080`
+  新增 `testOverlayAbsorbSuccessorIntoStructuredMember()`，验证 successor 出边被搬到 structured member，原 structured member 到 successor 的 full-view 边被隐藏。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2039`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-absorb-successor.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.57 user=38.99 sys=0.07 maxrss=221292`。
+
+当前判断：
+
+- overlay 已有 Angr `absorb_successor_into()` 的基础能力，后续 Phoenix 某些 `replace_nodes_both(old_node_1=successor)` 场景可以接这个入口。
+- 当前实现只负责 view-only graph 语义，不处理 AIL/AST 里的条件改写；这部分仍属于后续 Phoenix/SAILR reducer 接入工作。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
