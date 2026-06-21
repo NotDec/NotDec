@@ -1203,3 +1203,46 @@
 - 实现效果：6/10。
 - 复杂度：4/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：Phoenix reducer 中间 collapse 同步 overlay shared graph
+
+本轮继续按 Angr 的 `replace_nodes()` 思路，把 Phoenix overlay path 从“最终结果同步”推进到“每次 reducer collapse 都同步”。这样 reducer 运行在 `MutableRegionGraph` 上时，每次形成 structured node，overlay shared graph 也会立刻把旧 source nodes 替换成新 structured node。后续 reducer 再 collapse 时，source node 会指向上一次的 structured overlay node，而不是已经被删掉的原始 block。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/PhoenixStructurer.h:30`
+  给 `analyzeAcyclic()`、`analyzeCyclic()`、`refineCyclic()` 增加可选 `RegionOverlay *Overlay` 参数，旧调用默认仍走 graph-only 路径。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1162`
+  新增 `collapseNodesAndSyncOverlay()`，封装 `MutableRegionGraph::collapseNodes()` + `RegionOverlay::replaceNodes()`；同步前会先把 virtualized edge 写入 overlay，替换后把 collapsed graph node 的 `SourceNodes` 改成新 structured overlay node。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2576`
+  `analyzeAcyclic()` 把 overlay 参数传给 switch / sequence / if reducer。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2591`
+  `analyzeCyclic()` 把 overlay 参数传给 while / do-while / self-loop reducer。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2608`
+  `refineCyclic()` 增加 overlay checkpoint / rollback，避免 cyclic refinement 试探失败后留下 shared graph mutation。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2787`
+  overlay path 调用 reducer 阶段时传入当前 `RegionOverlay`；最终路径保留 wrapping 后的兜底替换，但避免同一个 structured node 自替换。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1112`
+  新增 `testPhoenixOverlayPathSyncsRepeatedReducerCollapses()`，覆盖 0->1->2 连续 sequence collapse，确认第二次 collapse 使用 structured source node。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1949`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-overlay-sync.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.56 user=38.94 sys=0.04 maxrss=217124`。当前主程序只接受 `--algo=phoenix`，不接受旧日志里的 `--algo=structured-phoenix`。
+
+当前判断：
+
+- Phoenix/SAILR 共用 reducer 已经更接近 Angr 的共享 graph 语义：overlay path 不再等最终结果才替换节点。
+- `lastResortRefinement()` 仍只 mutate `MutableRegionGraph`，没有 overlay checkpoint；当前它只 virtualize edge，不 collapse node，风险比 reducer collapse 小，但后续如果扩展 deoptimization，需要一起接入 overlay mutation。
+- `VirtualEdge` 仍是 block endpoint，node-key virtual edge 还没做。
+- 实现效果：7/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
