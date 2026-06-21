@@ -313,3 +313,41 @@
 - 实现效果：4/10。
 - 复杂度：2/10。
 - 维护成本：2/10。
+
+# 2026-06-21 实现记录：新增 overlay quotient edge 查询
+
+本轮增加只读 `quotientEdges()`，对齐 Angr `RegionOverlay._quotient_edges()` 的基础语义：在一个 overlay view 里，把 child region 折成一个 member，隐藏 child 内部边；需要 full view 时再返回 member 到外部 successor block 的边。当前还没有让 `MutableRegionGraph` 或 reducer 消费这个查询。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:48`
+  新增 `OverlayViewEdge`，表示 member -> member 或 member -> external successor。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:84`
+  新增 `OverlayManager::quotientEdges(RegionId, bool)`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:17`
+  新增 `sameMember()` / `sameEdge()` / `appendUniqueEdge()`，用于边去重。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:221`
+  实现 `quotientEdges()`，从 shared successor 和 overlay members 推导 view edge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:560`
+  新增 `testOverlayManagerDerivesQuotientEdges()`，验证父视图隐藏 child 内部边，child full view 暴露外部 follow。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:618`
+  新增 `testOverlayManagerQuotientKeepsBlockSelfLoop()`，验证 block 自环不会被误删。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1372`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是 parent-visible graph 的只读边视图，后续可以让 `MutableRegionGraph::build()` 从这里取边。
+- 还没有实现 Angr cyclic full view 的 successor-to-successor edge，因为 NotDec 现在还没有完整 hidden edge / loop context 状态。
+- 实现效果：5/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
