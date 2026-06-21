@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail、连通前驱组件共享复制和 terminal fork shared 子集；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、shared region copy API、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail、连通前驱组件共享复制和 terminal fork shared 子集；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -446,6 +446,30 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
   通过，5 个测试。
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-successors-dedup.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=72.95 user=80.28 sys=0.06 maxrss=221380`。
+
+本轮继续把 copied / virtual block 需要的 shared region copy 收口到 `StructuredCFG`，让 deoptimization pass 不再自己拼复制、重定向和回滚流程：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:64-78`
+  新增 `DuplicatedRegion` 和 `StructuredCFG::duplicateRegion()` 声明，复制 bookkeeping 进入 shared CFG。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:70-183`
+  实现 `DuplicatedRegion::copyOf()` 和 `StructuredCFG::duplicateRegion()`，先批量复制，再统一重写 region 内部 successor / case target；中途失败会删掉已建 copy。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:281-304`
+  `copyRegionForPredecessors()` 改为直接复用 `duplicateRegion()`，只保留 predecessor redirect 和失败回滚。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:876-917`
+  新增 `testStructuredCFGDuplicateRegionRewritesInternalEdges()` 和 `testStructuredCFGDuplicateRegionRollsBackOnMissingBlock()`，分别覆盖 region 内边重写和缺块回滚。
+
+这次还是只做 shared CFG 语义，不把 renderer 特判塞回算法层。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-copy-region.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=72.01 user=79.38 sys=0.05 maxrss=217764`。
 
 ## 还差什么
 
