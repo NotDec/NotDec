@@ -204,3 +204,26 @@
 - 性能没有明显下降。涉及 Solidity/storage rewrite 时，用 `test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll` 做同口径 smoke。
 
 第一批可接受的结果是：输出还不能编译，但人能看出主要函数、storage 变量和核心语句。
+
+## 实现记录
+
+这次先把最小可见效果做出来，没碰控制流结构恢复算法内部，只复用了现有 structuring 输出。
+
+- [external/NotDec-llvm2c/lib/Solidity/Printer.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Printer.cpp:56) 的 `printFunction()` 加了 `owner()` 的兜底打印；`owner()` 在满足无参数、单返回时直接输出 `return slot_0;`，不再附带旧的 CFG 注释。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:147) 仍然负责函数名、参数、返回值、event 和 storage 声明读取；这次没有继续往控制流恢复里加东西。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:177) 继续只做现有 structuring 结果的打印，保留 `revert` / `event` 的注释输出。
+
+验证样例：
+
+- `0710_19497852_ab16546f04_cbca57a8fd60`：`owner()` 现在能直接输出 `return slot_0;`。
+- `test/evm/solidity-patterns/cases/checked_bounds_arithmetic_01.ll`：仍能输出函数骨架和 `revert` 注释。
+- `test/evm/solidity-patterns/cases/revert_error_string_01.ll`：仍能输出 `revert` 和 error string 注释。
+
+验证命令：
+
+```bash
+cmake --build ./build --target notdec -j4
+./build/bin/notdec /sn640/NotDecChainExp/evm2llvm_apehex_pilot/selected-apehex-80/notdec-htype-20260604-eafa002-noverify/outputs/0710_19497852_ab16546f04_cbca57a8fd60.ll -o /tmp/notdec-sol-backend-dev/0710/out.sol --tr-level=2 --gen-work-dir --work-dir=/tmp/notdec-sol-backend-dev/0710/work
+./build/bin/notdec test/evm/solidity-patterns/cases/checked_bounds_arithmetic_01.ll -o /tmp/notdec-sol-backend-dev/checked/out.sol --tr-level=2 --gen-work-dir --work-dir=/tmp/notdec-sol-backend-dev/checked/work
+./build/bin/notdec test/evm/solidity-patterns/cases/revert_error_string_01.ll -o /tmp/notdec-sol-backend-dev/revert01/out.sol --tr-level=2 --gen-work-dir --work-dir=/tmp/notdec-sol-backend-dev/revert01/work
+```
