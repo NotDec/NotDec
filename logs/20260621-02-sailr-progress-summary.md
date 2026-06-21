@@ -333,6 +333,38 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-switch-case-edge-sailr.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=72.85 user=80.11 sys=0.07 maxrss=222508`。
 
+本轮把 shared CFG 的边查询从 SAILR pass 本地 helper 提到 `StructuredCFG`，避免后续 pass 各自重复定义“边”的含义。
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:76`
+  新增 `StructuredCFG::hasEdge()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:77`
+  新增 `StructuredCFG::predecessorsOf()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:90`
+  `hasEdge()` 复用 shared edge 判断，同时覆盖普通 successor 和 switch case target。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:95`
+  `predecessorsOf()` 统一返回 shared CFG predecessor。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:53`
+  SAILR deoptimization 改用 `Graph.predecessorsOf()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:409`
+  copied-block pass 改用 `Graph.hasEdge()` 判断 predecessor 是否仍指向目标。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:820`
+  新增 `testStructuredCFGFindsCaseOnlyPredecessors()`，验证 case-only target 也能被 `hasEdge()` / `predecessorsOf()` 看见。
+
+这个改动是 shared graph 基础，不涉及 C / Solidity renderer。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-shared-edge-api-sailr.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=72.54 user=79.88 sys=0.04 maxrss=220016`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
