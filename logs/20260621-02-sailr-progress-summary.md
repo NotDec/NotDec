@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail shared 子集和连通前驱组件共享复制子集；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail、连通前驱组件共享复制和 terminal fork shared 子集；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -88,6 +88,7 @@ SAILR deoptimization pipeline 骨架已经实现：
 - `SwitchDefaultCaseDuplicator` 的 shared default reuse 子集
 - `ReturnDuplicatorLow` 的单 block / 线性 return-tail 复制子集
 - `ReturnDuplicatorLow` 的连通前驱组件共享复制子集
+- `ReturnDuplicatorLow` 的 terminal fork shared 子集
 - 已接入 `buildSAILRDeoptimizationPipeline()`
 - `SAILRStructurer::structure()` 会先跑 shared deoptimization pipeline，再走 Phoenix/SAILR structuring
 
@@ -165,6 +166,28 @@ elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
 
 这里仍然只做 shared CFG 级别的 region copy，不碰 Phi / vvar 重写，也不把 renderer 特判塞进算法层。
 
+本轮又补了 Angr `_single_entry_region()` 里 terminal fork 的 shared 子集。只识别一个保守形状：
+
+```text
+branch -> return
+       -> unreachable/return
+```
+
+两个 terminal successor 都必须没有后继，且都只能由这个 branch 到达。这个形状常见于 stack-canary 风格的 return fork，shared CFG 能直接复制，不需要解释 Phi / vvar，也不需要 renderer 介入。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:108`
+  新增 `isClosedTerminal()`，只认闭合的 `Return` / `Unreachable` terminal block。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:114`
+  新增 `prependTerminalForkRegion()`，把 `branch -> {terminal, terminal}` 纳入 return region。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:152`
+  `findLinearReturnRegion()` 在直线回溯前先尝试吸收 terminal fork；除此之外的一般分支 region 仍然不做。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:926`
+  新增 `testReturnDuplicatorLowCopiesTerminalForkRegion()`，验证复制时会带上 fork head、return terminal 和 unreachable terminal，并删除原 region。
+
+本轮仍未实现一般分支 return-region、Phi / vvar 刷新、connected in-edge component 的完整 Angr 语义。
+
 验证：
 
 - `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
@@ -186,6 +209,17 @@ elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
   通过，5 个测试。
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retdup2.c --tr-level=2 --algo=phoenix`
   通过，`elapsed=31.51 user=38.83 sys=0.06 maxrss=219448`。
+
+本轮验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retfork.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=32.04 user=39.31 sys=0.04 maxrss=220412`。
 
 验证通过：
 
@@ -217,7 +251,7 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 
 - `CrossJumpReverter` 复制 goto target：已实现最小 shared 版
 - `SwitchReusedEntryRewriter` 复制被多个 switch 复用的 entry block：已实现 shared reused-entry 子集
-- `ReturnDuplicatorLow` 复制 return block：已实现单 block / 线性 return-tail 子集，缺分支 return-region / Phi / connected component 逻辑
+- `ReturnDuplicatorLow` 复制 return block：已实现单 block / 线性 return-tail、连通前驱组件共享复制和 terminal fork 子集，缺一般分支 return-region / Phi / vvar 刷新
 - `DuplicationReverter`：已实现 exact-match shared 合并子集，缺 similarity search / merge graph
 - `SwitchDefaultCaseDuplicator`：已实现 shared default reuse 子集，缺 if-chain / lowering 回写
 - `LoweredSwitchSimplifier` 维护 block copies
@@ -228,4 +262,4 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 
 下一步可以继续补 `ReturnDuplicatorLow` 的分支 return-region / Phi 语义；如果这部分 shared payload 边界不清，再转向 `LoweredSwitchSimplifier` 里接口更窄的部分。
 
-一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集和 `ReturnDuplicatorLow` 的线性 return-tail 子集已经搭好；完整 SAILR 还没完成。
+一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集和 `ReturnDuplicatorLow` 的线性 return-tail / connected predecessor / terminal fork 子集已经搭好；完整 SAILR 还没完成。
