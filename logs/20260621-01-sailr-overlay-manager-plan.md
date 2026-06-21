@@ -1829,3 +1829,40 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：successor outgoing edge 标记并补 break source
+
+本轮继续对齐 Angr `_refine_cyclic_core()`。Angr 处理循环体跳到 loop successor/follow 的边时，不会像非 follow exit 那样直接从循环外边界删除，而是标记为 `cyclic_refinement_outgoing`，并在能安全改写 source 时把这条跳转写成 `break` 或条件 `break`。NotDec 这里使用共享 `StructuredTree` 表达 `If + Break`，C 和 Solidity 后端都只消费同一套结构化结果。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1570`
+  新增 `markOverlayRefinementEdge()`，在 overlay shared graph 上标记 `cyclic_refinement_outgoing`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1623`
+  新增 `rewriteLoopSuccessorExits()`：扫描 loop body 到 chosen follow 的 outgoing edge，跳过 head/latch，先标记 overlay edge；source 不是 structured switch 时，复用 `buildVirtualizedSource()` 生成 `break` source，并用 `Overlay::replaceNodes()` 把 overlay source 替换为 structured node。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2704`
+  在 `reduceGraphNaturalLoopOnce()` 里先处理 successor outgoing edge，再处理 non-follow exit virtualization。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:78`
+  新增测试辅助 `treeContainsKind()`，用于检查生成的共享结构化树里是否含 `Break`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1987`
+  新增 `testRefineCyclicOverlayMarksSuccessorBreakEdge()`，验证循环体内 `2 -> follow` 被改写出 `Break`，同时最终 overlay loop node 仍保留到 follow block 的 real edge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2743`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-successor-break.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.46 user=38.76 sys=0.08 maxrss=216672`。
+
+当前判断：
+
+- successor outgoing edge 已经开始走 Angr 的 overlay 标记 + source rewrite 语义，不再靠 renderer 猜测循环出口。
+- 还没实现完整 Angr `_find_node_going_to_dst()`：如果 source 已经是更深的 structured node，目前只改写 direct reducer source，不做嵌套节点替换。
+- 这一步也暂时跳过 head/latch 的 loop-condition edge，避免把循环条件本身误写成 break source。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
