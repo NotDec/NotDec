@@ -648,3 +648,39 @@
 - 实现效果：7/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：引入 OverlayNodeKey
+
+用户明确要求严格按 Angr 方式实现，不为了迁移旧版结构恢复保守折中。本轮先补 shared graph node 身份的基础表示：`OverlayNodeKey`。它能表示 block、child region overlay、structured result 三类 view node。当前还没有把 `SharedSuccessors` 从 `BlockId` map 迁到 `OverlayNodeKey` map，只先把 member 的身份查询落下来，作为后续实现 `replace_nodes()` / `collapse_to()` 的入口。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:33`
+  新增 `OverlayNodeKind`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:43`
+  新增 `OverlayNodeKey`，表示 block / region / structured 三类 overlay view node。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:123`
+  新增 `OverlayManager::nodeKey()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:76`
+  实现 `OverlayNodeKey` 的工厂方法。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:225`
+  实现 `OverlayManager::nodeKey()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1002`
+  在 finalized child 测试中验证 structured member 的 node key。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- shared graph node 的方向已经明确：后续按 Angr 走，structured result 会成为 overlay graph node，而不是只作为旧 renderer 附属信息。
+- 下一步应逐步把 shared successor / hidden / extra full edge 从 `BlockId` 迁到 `OverlayNodeKey`，再实现 `replace_nodes()` / `collapse_to()`。
+- 实现效果：7/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
