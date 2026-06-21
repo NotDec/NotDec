@@ -684,3 +684,50 @@
 - 实现效果：7/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：shared successor 增加 OverlayNodeKey 存储
+
+本轮开始把 shared graph 从纯 `BlockId` successor 图迁到 `OverlayNodeKey`。新增 `SharedNodeSuccessors` 作为真实方向，保留旧 `SharedSuccessors` 作为 block-only 兼容视图。这样 structured result node 已经可以拥有 outgoing edge，后续可以继续把 quotient view、hidden edge 和 reducer mutation 迁到 node-key 语义。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:57`
+  为 `OverlayNodeKey` 增加比较和相等操作，允许作为 map key。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:127`
+  新增 `sharedNodeSuccessors()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:165`
+  checkpoint 状态新增 `SharedNodeSuccessors`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:99`
+  实现 `OverlayNodeKey` 比较和相等。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:188`
+  初始化 shared graph 时同时填充 node-key successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:269`
+  实现 `sharedNodeSuccessors()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:579`
+  实现 `addNodeEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:591`
+  实现 `detachNodeEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:745`
+  checkpoint/rollback 覆盖 `SharedNodeSuccessors`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:873`
+  新增 `testOverlaySharedNodeSuccessorsCanTargetStructuredResults()`，验证 structured node 可以有 outgoing edge，且 rollback 生效。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1666`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- shared graph 已经开始支持 structured result node。
+- 旧 block-only API 仍保留，避免一次性改完 renderer 和现有 reducer。
+- 下一步应让 `quotientEdges()` 从 `SharedNodeSuccessors` 派生，而不是从 block-only `SharedSuccessors` 派生。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
