@@ -1946,3 +1946,41 @@
 - 实现效果：6/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：shared StructuringEvaluator 只读试跑
+
+继续补 Angr SAILR deoptimization 的外围依赖。Angr 的 `_graph_is_structurable()` 会先对当前图做一次 region identification、recursive structuring，再更新 goto manager。NotDec 这里先实现只读试跑，不做 graph rewrite、固定点循环和质量选择。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringEvaluator.h:9`
+  新增 `StructuringEvaluation` 和 `StructuringEvaluator`，返回 structured tree、goto summary 和成功标记。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringEvaluator.cpp:8`
+  `StructuringEvaluator::evaluate()` 依次调用 `RegionIdentifier::identifyOverlay()`、`RecursiveStructurer::structure()` 和 `GotoManager::collect()`。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:9`
+  将 `StructuringEvaluator.cpp` 接入 `notdec-backend-structuring`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:41`
+  sequence source 推进时不再跳过 `Label`，让 evaluator 收集到的 goto source 和共享 structured tree 的显式 block 更一致。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:170`
+  新增 `GotoEmittingRegionStructurer` 测试辅助，直接生成带 `Goto` 的 structured tree。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:499`
+  新增 `testStructuringEvaluatorCollectsGotoSummary()`，验证 evaluator 能完成递归结构化并收集 `0 -> 1` 的 goto。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2877`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && /sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-structuring-evaluator.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.63 user=38.82 sys=0.08 maxrss=221528`。
+
+当前判断：
+
+- 这一步把 Angr `StructuringOptimizationPass` 的只读试跑能力放进 shared structuring 层，后续 C 和 Solidity 都能复用同一份结构化结果和 goto summary。
+- 它还不是完整 SAILR：没有 deoptimization pass、没有 graph rewrite checkpoint、没有 fixed point，也没有 `RegionSimplifier`。
+- 实现效果：5/10。
+- 复杂度：2/10。
+- 维护成本：2/10。
