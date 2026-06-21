@@ -531,3 +531,42 @@
 - 实现效果：6/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：补 shared edge mutation API
+
+本轮补真实 shared edge mutation 的最小子集：`addEdge()` 和 `detachEdge()`。它们直接修改 `SharedSuccessors`，因此会影响 `visibleSuccessors()` / `quotientEdges()` 派生出的 region view；同时 `checkpoint()` / `rollback()` 已经覆盖 `SharedSuccessors`，所以这部分 mutation 可回滚。当前仍没有把 Phoenix reducer 的 `virtualizeEdge()` 自动同步到 overlay。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:101`
+  `OverlayManager` 新增 `addEdge(BlockId, BlockId)` 和 `detachEdge(BlockId, BlockId)`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:184`
+  `RegionOverlay` 新增同名转发方法。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:291`
+  新增 `clearHiddenEdge()`，真实 edge 重新加入或删除时清掉对应 hidden edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:417`
+  实现 `OverlayManager::addEdge()` / `detachEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:678`
+  实现 `RegionOverlay::addEdge()` / `detachEdge()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:838`
+  新增 `testOverlaySharedEdgeMutationsUpdateViews()`，验证 add/detach 会更新 view，且 rollback 恢复。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1595`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- shared edge mutation 基础 API 已经存在。
+- 这一步仍不改变 reducer 行为。
+- 后续把 `MutableRegionGraph` 的虚拟化/折叠同步到 overlay，会改变 parent-visible graph，需要单独设计和验证。
+- 实现效果：7/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
