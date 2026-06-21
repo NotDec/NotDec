@@ -458,3 +458,46 @@
 - 实现效果：6/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：补 view-only overlay mutation 状态
+
+本轮补 Angr overlay mutation 里不需要立刻迁移 reducer 的部分：隐藏普通 view edge、只隐藏 full view edge、追加 full view extra edge。它们都是 view-only 状态，已经纳入 `checkpoint()` / `rollback()`，但还没有实现 Angr 的真实 shared graph node/edge mutation。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:61`
+  新增 `OverlayEdgeEndpoint`，用于表示 member endpoint 或 external successor endpoint。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:106`
+  新增 `hideEdge()`、`hideEdgeToSuccessor()`、`removeEdgeWithSuccessorsOnly()`、`addExtraFullEdge()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:128`
+  checkpoint 状态加入 `HiddenEdges`、`HiddenFullEdges`、`ExtraFullEdges`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:218`
+  新增 `underlyingBlocks()` 和 endpoint 到 view edge 的转换逻辑。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:291`
+  `visibleSuccessors()` 开始过滤 hidden edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:323`
+  `quotientEdges()` 开始过滤 hidden/full-only hidden edge，并追加 extra full edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:406`
+  实现 view-only mutation API。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:785`
+  新增 `testOverlayViewOnlyMutationsAffectQuotientEdges()`，验证 hidden/full-only/extra full edge 和 rollback。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1557`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- view-only mutation 已经有基础状态和 rollback。
+- 还没有实现 Angr 的 `remove_node` / `replace_nodes` / `detach_edge` 这类真实 shared graph mutation。
+- 这一步不改变 Phoenix reducer 路径，只是让后续迁移有可落地的 overlay API。
+- 实现效果：6/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
