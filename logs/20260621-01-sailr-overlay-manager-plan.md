@@ -2277,3 +2277,76 @@
 - 实现效果：7/10。复制 block 的身份和 body 来源边界已经明确。
 - 复杂度：4/10。新增字段和少量 renderer adapter 状态，但没有新增算法分支。
 - 维护成本：4/10。后续 pass 必须遵守 `Id` / `BodyBlock` 分工，否则容易把 label 身份和 body 来源混在一起。
+
+# 2026-06-21 实现记录：接入 shared CrossJumpReverter
+
+本轮开始实现具体 SAILR deoptimization pass。先选 Angr `CrossJumpReverter`，因为它只需要复制一个 linear goto target block，边界比 `ReturnDuplicatorLow` 的 return-region / Phi / connected component 逻辑窄。
+
+对照 Angr 行为：
+
+- 遍历当前 structuring 结果里的 goto source。
+- 每个 source 只处理一个 goto。
+- goto target 必须是当前 CFG successor。
+- goto target 只能有一个 outgoing edge，避免复制条件块。
+- 给每个要更新的 predecessor 复制一份 target block，并把 predecessor 的 successor 从原 target 改到 copy。
+- 如果所有 predecessor 都被更新，删除原 target。
+- NotDec shared 层没有 call counter；当前用 backend-neutral 的 statement 数量作为保守上限，默认最多复制 16 条 payload statement，不看 C/Solidity payload 内容。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:73`
+  新增 mutable `getBlock()`，给 shared deoptimization pass 修改 CFG。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:76`
+  新增 `removeBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:44`
+  实现 mutable `getBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:65`
+  实现 `removeBlock()`；删除 body source 前会把引用它的 copy 改成自持 body，并清掉其他 block 指向被删 block 的 successor / switch case。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:12`
+  新增 `CrossJumpReverter` pass 类。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:30`
+  新增 `buildSAILRDeoptimizationPipeline()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:12`
+  新增 shared CFG 辅助函数：successor 判断、predecessor 收集、successor 替换。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:53`
+  `CrossJumpReverter::defaultOptions()` 对齐 Angr 形状：`StrictlyLessGotos = true`，`MaxOptIters = 3`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:60`
+  实现 `CrossJumpReverter::runOnGraph()`：收集候选、复制 target、重定向 pred、必要时删除原 target。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:136`
+  `buildSAILRDeoptimizationPipeline()` 当前接入 `CrossJumpReverter`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h:18`
+  `SAILRStructurer` override `structure()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp:113`
+  SAILR structuring 前先跑 shared deoptimization pipeline；pipeline 无变化时保留原 CFG。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:16`
+  接入 `SAILRDeoptimization.cpp`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:718`
+  新增 `testStructuredCFGRemoveBlockMaterializesCopiedBody()`，验证删除原 body source 后 copied block 仍能渲染 body。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:735`
+  新增 `testCrossJumpReverterDuplicatesLinearGotoTarget()`，验证两个 goto predecessor 被改到两份 copied target，原 target 被删除。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3311`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。这里覆盖了 `notdec-llvm2c --algo=structured-sailr` 的 smoke。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-crossjump-phoenix.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.56 user=38.80 sys=0.10 maxrss=219716`。
+
+验证限制：
+
+- 顶层 `notdec --algo` 当前不接受 `sailr` / `structured-sailr`，所以 fortune 性能 smoke 仍按当前可用的 `--algo=phoenix` 口径跑。SAILR pipeline 路径由 llvm2c 的 `structuring-smoke` 覆盖。
+
+当前判断：
+
+- `CrossJumpReverter` 的 shared CFG rewrite 已经接入 SAILR pipeline。
+- 这一步没有处理 Angr 的 call counter；shared 层目前只有 payload ref，不知道 payload 是否是 call，所以用 statement 数量做 backend-neutral 复制上限。
+- `ReturnDuplicatorLow`、`DuplicationReverter`、`LoweredSwitchSimplifier` 还没有实现。
+- 实现效果：7/10。第一个具体 SAILR deoptimization pass 已落地。
+- 复杂度：4/10。主要增加一个 pass 和 `StructuredCFG::removeBlock()`。
+- 维护成本：4/10。后续 pass 需要继续复用 `duplicateBlock()` / `removeBlock()`，避免各自手写 CFG 复制和删除语义。
