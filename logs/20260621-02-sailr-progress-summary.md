@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail shared 子集；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail shared 子集；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -84,6 +84,7 @@ SAILR deoptimization pipeline 骨架已经实现：
 
 - `CrossJumpReverter`
 - `DuplicationReverter` 的 exact-match shared 子集
+- `SwitchReusedEntryRewriter` 的 shared reused-entry 子集
 - `SwitchDefaultCaseDuplicator` 的 shared default reuse 子集
 - `ReturnDuplicatorLow` 的单 block / 线性 return-tail 复制子集
 - 已接入 `buildSAILRDeoptimizationPipeline()`
@@ -137,6 +138,30 @@ elapsed=31.76 user=39.12 sys=0.04 maxrss=221724
 - C adapter 的 fallback if / switch 改为从 shared `StructuredCFG` 读取 successor。
 - C adapter 修了 condition payload 原地取反问题，避免同一个 condition payload 被多个 structured node 复用时互相改坏。
 
+本轮又补了一个更窄的 shared switch pass，用来覆盖 Angr 里 reused entry 的最小安全子集：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:51`
+  新增 `SwitchReusedEntryRewriter` pass 类。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:242`
+  实现 `SwitchReusedEntryRewriter::defaultOptions()` 和 `SwitchReusedEntryRewriter::runOnGraph()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:619`
+  `buildSAILRDeoptimizationPipeline()` 把这个 pass 接到 shared deoptimization pipeline 里。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:923`
+  新增 `testSwitchReusedEntryRewriterCopiesReusedEntryBlock()`，验证一个 entry 被多个 switch 复用时会复制出新的 shared block，原 entry 仍保留给第一个 predecessor。
+
+实现里特意先快照了 `EntryId` 列表，再做复制和 successor 重写，避免遍历 `Graph.blocks()` 时直接改图。这个 pass 只复制 block，不碰 renderer，也不把 switch lowering 的 if-chain 语义塞进算法层。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-switchentry.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.86 user=39.11 sys=0.07 maxrss=220476`。
+
 验证通过：
 
 ```bash
@@ -159,13 +184,14 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `LoweredSwitchSimplifier`
 - 相关 switch / duplication 辅助逻辑
 
-这些 pass 还没有完整实现。`CrossJumpReverter`、`DuplicationReverter` 和 `SwitchDefaultCaseDuplicator` 已经有最小 shared 版，`ReturnDuplicatorLow` 已经有单 block / 线性 return-tail 复制子集。
+这些 pass 还没有完整实现。`CrossJumpReverter`、`DuplicationReverter`、`SwitchReusedEntryRewriter` 和 `SwitchDefaultCaseDuplicator` 已经有最小 shared 版，`ReturnDuplicatorLow` 已经有单 block / 线性 return-tail 复制子集。
 
 之前的主要卡点是：Angr 这些 pass 基本都会复制或新建 block。当前已经有最小 shared 表示，但具体 pass 还没有实现。
 
 已处理 / 未处理例子：
 
 - `CrossJumpReverter` 复制 goto target：已实现最小 shared 版
+- `SwitchReusedEntryRewriter` 复制被多个 switch 复用的 entry block：已实现 shared reused-entry 子集
 - `ReturnDuplicatorLow` 复制 return block：已实现单 block / 线性 return-tail 子集，缺分支 return-region / Phi / connected component 逻辑
 - `DuplicationReverter`：已实现 exact-match shared 合并子集，缺 similarity search / merge graph
 - `SwitchDefaultCaseDuplicator`：已实现 shared default reuse 子集，缺 if-chain / lowering 回写
@@ -177,4 +203,4 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 
 下一步可以继续补 `ReturnDuplicatorLow` 的分支 return-region / Phi 语义；如果这部分 shared payload 边界不清，再转向 `LoweredSwitchSimplifier` 里接口更窄的部分。
 
-一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集和 `ReturnDuplicatorLow` 的线性 return-tail 子集已经搭好；完整 SAILR 还没完成。
+一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match 子集、`SwitchReusedEntryRewriter` 的 shared reused-entry 子集、`SwitchDefaultCaseDuplicator` 的 shared default reuse 子集和 `ReturnDuplicatorLow` 的线性 return-tail 子集已经搭好；完整 SAILR 还没完成。
