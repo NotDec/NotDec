@@ -1984,3 +1984,51 @@
 - 实现效果：5/10。
 - 复杂度：2/10。
 - 维护成本：2/10。
+
+# 2026-06-21 实现记录：shared ControlFlowStructureCounter
+
+继续对齐 Angr `StructuringOptimizationPass._improves_relative_quality()`。SAILR deoptimization 不能只看图还能不能结构化，也要避免 rewrite 之后把 loop 或 goto label 分布变差。本轮先在 shared `StructuredTree` 上实现可精确统计的部分，不碰 renderer。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringQuality.h:11`
+  新增 `ControlFlowStructureCounter`，统计 while / do-while / infinite loop、goto target 计数和 label 顺序；保留 `ForLoops` 字段，因为 NotDec 当前没有 for-loop 节点。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringQuality.h:30`
+  新增 `improvesRelativeStructuringQuality()`，用于后续 deoptimization pass 判断 rewrite 是否让结构质量变差。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringQuality.cpp:8`
+  实现 structured tree 递归遍历，收集 loop、goto target 和 label 顺序。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringQuality.cpp:82`
+  实现 Angr 风格相对质量检查：同等 loop 总数时不允许丢 for-loop；goto 总数不变时，不允许 target label 变多，也不允许把 goto 压到更靠前的 label。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringEvaluator.h:17`
+  `StructuringEvaluation` 增加 `Quality` 字段。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringEvaluator.cpp:15`
+  evaluator 成功结构化后同时收集 `ControlFlowStructureCounter`。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:10`
+  将 `StructuringQuality.cpp` 接入 `notdec-backend-structuring`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:513`
+  扩展 evaluator 测试，验证返回的 quality 里包含 goto target。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:516`
+  新增 `testControlFlowStructureCounterCollectsSharedQuality()`，验证 loop、goto target、label 顺序统计。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:551`
+  新增 `testRelativeQualityRejectsBackwardGotoTrade()`，验证更靠前 label 的 goto trade 会被拒绝。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:564`
+  新增 `testRelativeQualityRejectsMoreGotoTargets()`，验证 goto 总数不变但 target label 变多会被拒绝。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2880`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && /sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-structuring-quality2.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.45 user=38.74 sys=0.08 maxrss=217284`。
+
+当前判断：
+
+- 这一步补齐了 SAILR deoptimization 的第二个 shared metric：结构质量可以在算法层比较，C 和 Solidity 后端不用各自判断。
+- 还没有实现完整 Angr pass 管线：没有 fixed point，没有 rewrite rollback，也没有 `RegionSimplifier` 后的质量统计。
+- 实现效果：6/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
