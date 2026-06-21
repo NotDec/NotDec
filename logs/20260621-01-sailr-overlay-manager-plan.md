@@ -199,3 +199,47 @@
 - 实现效果：4/10。parent view 的 finalized child 不再只靠旧 finalizedChildren 拼图。
 - 复杂度：3/10。build 路径多了一层 member 解释。
 - 维护成本：3/10。下一步应继续把 successor view 和未 finalized child view 从 fallback 逻辑里剥离出来。
+
+# 2026-06-21 实现记录：保存共享 CFG successor
+
+本轮给 `OverlayManager` 增加只读共享 CFG successor 状态。它还没有替代 `StructuredCFG` 输入，但后续 overlay view 的 successor 查询可以从这里开始迁移。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:56`
+  新增 `OverlayManager(RegionTree, const StructuredCFG &)` 构造函数。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:70`
+  新增 `sharedSuccessors(BlockId)` 查询。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:90`
+  checkpoint 保存 `SharedSuccessors`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:38`
+  新构造函数初始化 shared CFG successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:75`
+  `initializeSharedGraph()` 从 `StructuredCFG` 保存 block successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:124`
+  实现 `sharedSuccessors()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:222`
+  checkpoint / rollback 覆盖 shared successor。
+- `external/NotDec-llvm2c/lib/Structuring/RegionIdentifier.cpp:337`
+  `identifyOverlay()` 改为把 `StructuredCFG` 传入 `OverlayManager`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:490`
+  新增 `testOverlayManagerKeepsSharedCFGSuccessors()`，验证共享 successor 查询。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1161`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是 shared graph 的只读起点，暂不改变 reducer。
+- 还没有实现 Angr 的 quotient view / successor view；只是把原始边放进 manager。
+- 实现效果：2/10。基础状态。
+- 复杂度：1/10。保存一份 successor 表。
+- 维护成本：1/10。
