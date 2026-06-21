@@ -351,3 +351,38 @@
 - 实现效果：5/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：MutableRegionGraph 使用 overlay quotient view
+
+本轮把 `MutableRegionGraph::build(Cfg, RegionOverlay)` 的普通边生成切到 `OverlayManager::quotientEdges()`。同时把 parent view 里的未 finalized child region 也建成 grouped node，不再在父图里展开 child 内部 CFG 边。这一步更贴近 Angr：父 region 看到的是 child overlay/member，不直接看到 child 内部节点。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:455`
+  `MutableRegionGraph::build()` 开始处理 `OverlayMemberKind::Region` 和 `OverlayMemberKind::Structured` 两类 grouped member。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:465`
+  grouped child node 使用 child head 作为代表 block；finalized child 继续保留 `StructuredRoot`。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:509`
+  普通边生成改为遍历 `quotientEdges(..., true)`，member-to-member 生成 region-local edge，member-to-external successor 生成 placeholder edge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:649`
+  新增 `testOverlayGraphBuildsEdgesFromQuotientView()`，验证父图把 child region 当成一个节点，并隐藏 child 内部回边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1406`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- parent-visible graph 已经开始消费 overlay view，而不是自己扫 CFG。
+- 这一步改变了父图里未 finalized child 的表现，但现有 structuring smoke 没有退化。
+- 还缺 Angr 的 hidden edge、successor-to-successor edge、以及真正共享图 mutate/deopt。
+- 实现效果：6/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
