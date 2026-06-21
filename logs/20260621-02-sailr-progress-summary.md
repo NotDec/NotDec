@@ -694,6 +694,36 @@ NotDec 这里没有在算法层制造 C / Solidity 私有 goto 语句，而是�
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-synthetic-render.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=79.18 user=86.39 sys=0.10 maxrss=222180`。
 
+本轮把 `CrossJumpReverter` 的 connected predecessor 复制策略补齐到和 `ReturnDuplicatorLow` 一致。之前同一个 goto target 的多个连通前驱会各自复制一份 target region；现在先按 shared CFG 连通性分组，同一组件只复制一次，然后把组件内所有仍然直达 target 的 predecessor 一起重定向到同一个 copied head。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:953`
+  `CrossJumpReverter::runOnGraph()` 对 `PredsToUpdate` 调用 `connectedPredecessorComponents()`，逐组件检查 edge 仍存在。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:968`
+  `CrossJumpReverter::runOnGraph()` 改为对整个组件调用 `copyLinearRegionForPredecessors()`，避免连通前驱重复复制同一段 linear region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:96`
+  新增 `TestCrossJumpReverter`，让测试可以直接跑 protected `runOnGraph()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1068`
+  新增 `testCrossJumpReverterCopiesConnectedPredsOnce()`，验证 `0 -> {3, target}` 且 `3 -> target` 时，`0` 和 `3` 会共享同一个 copied target region，原 target region 被删除。
+
+这个改动仍只在 shared CFG / deoptimization pass 层处理 copied block，不碰 C renderer 或 Solidity renderer。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过，`ninja: no work to do`。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-crossjump-connected.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=78.74 user=86.05 sys=0.05 maxrss=221380`。
+
+复杂度 / 维护判断：
+
+- 实现效果：7/10。补上了 connected predecessor 共享 copied region 这一块，减少无意义复制，语义仍保守。
+- 理解成本：2/10。复用已有 `connectedPredecessorComponents()` 和 `copyLinearRegionForPredecessors()`，没有新增算法接口。
+- 后期维护成本：2/10。后续扩展完整 Angr cross-jump search 时，这里可以继续作为 predecessor 分组策略保留。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
