@@ -935,3 +935,45 @@
 - 实现效果：7/10。
 - 复杂度：3/10。
 - 维护成本：3/10。
+
+# 2026-06-21 实现记录：full-view 外部端点保留 node-key 身份
+
+本轮把 `OverlayViewEdge` / `OverlayEdgeEndpoint` 的外部端点扩成双轨：block 外部端点继续填旧 `BlockId` 字段，非 block 外部端点用 `OverlayNodeKey` 保存。这样 full-view extra / hidden edge 已经能表达 structured result node 作为 successor/source 的情况，后续 SAILR 不需要把这些边降级成 block-only。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:83`
+  `OverlayViewEdge` 增加 `HasExternalSourceNode` / `ExternalSourceNode` / `HasExternalSuccessorNode` / `ExternalSuccessorNode`，并新增 `sourceNode()` / `targetNode()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:103`
+  `OverlayEdgeEndpoint` 增加 node-key external endpoint，并保留 `external(BlockId)` 兼容入口。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:41`
+  `sameEdge()` 和 `edgeReferencesBlock()` 纳入 node-key 外部端点。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:148`
+  实现 `OverlayViewEdge::sourceNode()` / `targetNode()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:376`
+  `memberForEndpoint()` 对非 block external endpoint 不再误当 block 查找。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:391`
+  `viewEdgeForEndpoints()` 能从 node-key external endpoint 构造 full-view edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:580`
+  `quotientEdges()` 遇到不在当前 view 内的非 block successor 时，保留为 external node-key successor。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:510`
+  当前 renderer-facing graph 只消费 block external endpoint，非 block external endpoint 暂时跳过。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:838`
+  扩展 view-only mutation 测试，覆盖 structured node 作为 full-view external source/target，并验证 hidden-full 能隐藏这类边。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- full-view overlay edge 已经能保留 Angr-style node 身份。
+- `MutableRegionGraph` 仍是 block renderer 兼容层，后续要么改成 node-key graph builder，要么把 renderer fallback 明确限制在 block-only 输出层。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
