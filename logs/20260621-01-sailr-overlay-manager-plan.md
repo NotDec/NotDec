@@ -501,3 +501,33 @@
 - 实现效果：6/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：RegionOverlay 暴露 view-only mutation 方法
+
+本轮给 `RegionOverlay` 增加 view-only mutation 薄封装，让调用边界更接近 Angr：后续 reducer 迁移时可以直接对当前 overlay 调 `hideEdgeToSuccessor()` / `removeEdgeWithSuccessorsOnly()` / `addExtraFullEdge()`，而不是绕过 overlay 去调 manager。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:181`
+  `RegionOverlay` 新增 `hideEdge()`、`hideEdgeToSuccessor()`、`removeEdgeWithSuccessorsOnly()`、`addExtraFullEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:652`
+  实现这些方法，当前都是转发到 `OverlayManager`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:799`
+  `testOverlayViewOnlyMutationsAffectQuotientEdges()` 改为通过 `RegionOverlay` 调用 mutation API。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是 API 边界对齐，不切换 reducer 行为。
+- 将 `MutableRegionGraph::virtualizeEdge()` 同步回 overlay hidden edge 会改变 parent 后续看到的图，属于后续需要单独评估的行为切换。
+- 实现效果：6/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
