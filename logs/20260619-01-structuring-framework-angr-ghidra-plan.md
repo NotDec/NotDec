@@ -4292,3 +4292,33 @@ fallback `InfiniteLoop` 而 dissolve。这个改动暴露了 Phoenix reducer 之
 - 实现效果：5/10。RecursiveStructurer 的 child 完成规则更接近 Angr，Phoenix reducer 能承受这个规则。
 - 复杂度：4/10。新增了结构树 goto 清理和几条 reducer 边界规则。
 - 维护成本：3/10。清理逻辑仍是本地 StructuredTree 过渡层，后续 shared overlay graph 更完整后应继续收敛。
+
+# 2026-06-21 实现记录：明确 overlay 过渡边界
+
+本轮没有改算法行为，只把 overlay 注释从旧状态改成当前状态。原因是 `finalize()` / `dissolve()` 已经接入，
+但代码说明还写着未接入，容易让后续实现误判 Angr 对齐边界。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:26`
+  更新 `OverlayManager` 注释：说明 Angr 是单共享图 + overlay view，NotDec 当前仍是
+  region tree + finalized child result，`MutableRegionGraph` 从这份状态重建当前 view。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:450`
+  更新 `MutableRegionGraph::build(const StructuredCFG &, const RegionOverlay &)` 里 finalized child
+  的注释：说明这里是在模拟 Angr parent overlay view，而不是旧的 child result 注入路径。
+
+验证：
+
+- `cmake --build /sn640/NotDec/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 这是文档性修正，不改变性能路径。
+- 实现效果：1/10。只避免后续沿旧注释做错判断。
+- 复杂度：0/10。
+- 维护成本：0/10。
