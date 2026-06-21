@@ -1329,3 +1329,49 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：补齐 overlay edge marks
+
+本轮补 Angr `RegionOverlay.mark_edge()` / `drop_edge_marks_from()` 对应的 edge marks。它用于 cyclic refinement 这类试探性流程：边仍留在 shared graph 里，但在当前 region view 里临时不可见；replace/collapse 后 mark 要跟着新 structured node 走，checkpoint rollback 要能恢复。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:171`
+  新增 `OverlayManager::markNodeEdge()`、`markEdge()`、`dropEdgeMarksFrom()`，并在 `RegionOverlay` 上提供包装入口。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:211`
+  把 `EdgeMarks` 加入 checkpoint state；`external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:256` 保存运行时 edge marks。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:463`
+  新增 `isMarkedEdge()`；`external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:481` 新增 `isMarkedViewEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:558`
+  删除 block member 时清理引用该 block 的 edge marks。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:682`
+  `remapBookkeeping()` 在 `replaceNodes()` 后 remap edge marks。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:708`
+  `visibleNodeSuccessors()` 过滤 marked edge；`external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:770` 起 `quotientEdges()` 过滤 marked full-view edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1001`
+  实现 mark/drop 逻辑；`external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1163` 起 checkpoint/rollback 保存并恢复 `EdgeMarks`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:1516`
+  实现 `RegionOverlay::markEdge()` / `dropEdgeMarksFrom()` 包装。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1134`
+  新增 `testOverlayEdgeMarksFilterAndRemap()`，覆盖 mark 过滤、drop 恢复、replaceNodes remap 和 rollback。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2131`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-edge-marks.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.43 user=38.72 sys=0.04 maxrss=220116`。
+
+当前判断：
+
+- overlay 已经具备 Angr edge marks 的基础语义，后续可以把 Phoenix cyclic refinement 的 `cyclic_refinement_outgoing` 接到这里。
+- 当前还没有把 Phoenix `refineCyclic()` 里的 cyclic refinement outgoing mark 真正改成 overlay mark；这属于下一步 reducer 接入。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
