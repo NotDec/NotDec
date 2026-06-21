@@ -1666,3 +1666,45 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：last-resort candidate 来源切到 overlay acyclic view
+
+本轮继续对齐 Angr `PhoenixStructurer._last_resort_refinement()`。Angr 的 last-resort 候选边来自 full overlay graph 经 `to_acyclic_by_order(node_order)` 后的边，再按 member graph 做支配关系分桶。旧 NotDec 路径是从 reducer 当前 graph 直接收集 active edge，并在 root 上 fallback 到 DFS acyclic 构造时丢掉的边；这会绕过 overlay blacklist / marked edge 语义，也会把 Angr 已经通过 acyclic overlay view 排除的回边重新塞回候选集。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1092`
+  新增 `collectOverlayVirtualizableEdges()`：overlay path 下从 `OverlayManager::quotientEdgesAcyclic()` 收集候选边，并把 `OverlayNodeKey` 映射回当前 reducer graph node。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1110`
+  `collectOverlayVirtualizableEdges()` 使用 `OverlayManager::quasiTopologicalNodeOrder()` 生成 Angr 风格 acyclic view 所需的 node order。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1161`
+  `filterByAngrLastResortPriority()` 增加 `IncludeAcyclicDroppedEdges` 参数；overlay path 不再使用旧 reducer DFS dropped-edge fallback。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1170`
+  补齐 Angr last-resort 的第三类 `other_edges` bucket，顺序为 no-dominance、secondary、other。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2832`
+  `virtualizeOneEdge()` 在 overlay path 下使用 `collectOverlayVirtualizableEdges()`，非 overlay path 保持旧入口。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:63`
+  `OrderCaptureStructurer` 额外捕获传给 `orderVirtualizableEdges()` 的候选边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:865`
+  新增 `testPhoenixOverlayLastResortUsesOverlayAcyclicCandidates()`：构造 `0 -> 1, 1 -> 0/2`，验证 overlay path 的 last-resort 候选不会包含 `1 -> 0` 回边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2441`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-acyclic-candidates.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.35 user=38.65 sys=0.05 maxrss=217976`。
+
+当前判断：
+
+- last-resort candidate 来源已经切到 Angr 风格 overlay acyclic view，减少了旧 reducer graph fallback 对 overlay 语义的绕过。
+- 这还不是完整 Angr `_last_resort_refinement()`；真正的 `_refine_cyclic_core()` 还需要 block copy / terminator rewrite / mark_edge 这类共享 IR 能力，不能用 C 或 Solidity renderer 特例替代。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
