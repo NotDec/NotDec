@@ -425,3 +425,36 @@
 - 实现效果：6/10。
 - 复杂度：5/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：递归 structuring 从 overlay members 找 child
+
+本轮把 recursive structuring 的 child 查找从静态 `Region.Children` 改成当前 overlay member view。这样更贴近 Angr：child `dissolve()` 或 `finalize()` 后，parent 后续看到的是当前 overlay 图里的 member，而不是旧 region tree 列表。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:22`
+  `nextUnprocessedChild()` 改为遍历 `OverlayManager::members()` 中的 `OverlayMemberKind::Region`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:75`
+  新增 `FailingRegionStructurer`，用于模拟 child structuring 失败。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:307`
+  新增 `testRecursiveStructurerVisitsDissolvedChildMembers()`，验证 nested child 先处理，父 child 失败 dissolve 后，root 继续按当前 overlay member view 处理。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1489`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- recursive driver 更接近 Angr 的 “从当前 graph view 发现 child region”。
+- 这一步没有引入新的 deoptimization 策略。
+- 真正共享图 mutation / rollback 仍然是后续大块。
+- 实现效果：6/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
