@@ -2082,3 +2082,37 @@
 - 实现效果：6/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：optimization pass 失败回滚后继续固定点
+
+继续对齐 Angr `_fixed_point_analyze()`。Angr 在一次 rewrite 导致结构化失败时，如果允许恢复，会回滚到上一份 graph，然后继续后续迭代直到 `max_opt_iters`。NotDec wrapper 之前回滚后直接退出循环，本轮改成回滚后继续。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:70`
+  `StructuringOptimizationPass::analyze()` 在 rewrite 后重新 evaluate；如果失败且 `RecoverStructureFails` 为 true，恢复上一份 `StructuredCFG` 和 evaluation 后继续下一轮，而不是直接 `break`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:226`
+  新增 `FailOnBlockRegionStructurer`，测试用来模拟某次 rewrite 后 graph 不可结构化。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:278`
+  新增 `RecoverThenRemoveSuccessorPass`，第一轮制造不可结构化临时图，第二轮执行有效 rewrite。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:730`
+  新增 `testStructuringOptimizationPassRecoversAndContinuesFixedPoint()`，验证失败图被回滚、第二轮继续执行、临时 block 不会进入最终输出。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3118`
+  将新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && /sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-structuring-optpass-recover.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.47 user=38.81 sys=0.05 maxrss=221332`。
+
+当前判断：
+
+- 这一步让 shared pass wrapper 的固定点恢复语义更接近 Angr。
+- 仍未进入需要复制 block 的具体 SAILR deoptimization，因此避开了 C 后端 virtual block id 的未决问题。
+- 实现效果：6/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
