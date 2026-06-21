@@ -570,3 +570,45 @@
 - 实现效果：7/10。
 - 复杂度：5/10。
 - 维护成本：5/10。
+
+# 2026-06-21 实现记录：补 block member add/remove
+
+本轮补 node mutation 的最小明确子集：block member 的 add/remove。它对齐 Angr `add_node()` / `_on_node_removed()` 的基础效果：更新当前 overlay member、owner 和 shared successor 状态，并纳入已有 checkpoint/rollback。当前只支持 block id，不实现 `replace_nodes()`、`collapse_to()` 或 structured result node 的 shared graph 表示。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:101`
+  `OverlayManager` 新增 `addBlockMember()` / `removeBlockMember()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:187`
+  `RegionOverlay` 新增同名转发方法。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:40`
+  新增 block/member 和 edge 是否引用 block 的判断 helper。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:313`
+  新增 `clearEdgeStateForBlock()`，删除 block 时清理 shared successors、hidden edge、full-only hidden edge、extra full edge。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:461`
+  实现 `OverlayManager::addBlockMember()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:474`
+  实现 `OverlayManager::removeBlockMember()`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:750`
+  实现 `RegionOverlay::addBlockMember()` / `removeBlockMember()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:873`
+  新增 `testOverlayBlockMemberMutationsUpdateOwnersAndViews()`，验证 member/owner/view 更新和 rollback。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1632`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- block-level node add/remove 基础 API 已经存在。
+- 还没有解决 structured result node 如何进入 shared graph；这是实现 Angr `replace_nodes()` / `collapse_to()` 前必须明确的表示问题。
+- 实现效果：7/10。
+- 复杂度：5/10。
+- 维护成本：5/10。
