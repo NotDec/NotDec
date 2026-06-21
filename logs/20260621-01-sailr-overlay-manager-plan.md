@@ -1906,3 +1906,43 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：shared GotoManager 基础接口
+
+继续对齐 Angr SAILR deoptimization 的外围依赖。Angr 的 `StructuringOptimizationPass` 在 `DURING_REGION_IDENTIFICATION` 阶段会反复跑 `RecursiveStructurer + RegionSimplifier + GotoManager`，用 gotos 数量和 goto edge 位置判断 graph rewrite 是否值得保留。NotDec 还没有这条 deoptimization pass 管线，本轮先补 shared structuring 层的最小 `GotoManager`，只从 `StructuredTree` 收集显式 `Goto`，不碰 C/Solidity renderer。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoManager.h:14`
+  新增 `StructuredGoto`，记录 `Source`、`Target` 和对应 `StructuredTree` node。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoManager.h:30`
+  新增 `GotoManager`，提供 `collect()`、`gotosInBlock()`、`isGotoEdge()`、`size()` 等最小查询接口。
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:6`
+  新增 `sourceBlockForNode()`，用结构化节点自身的明确 `Block` 作为后续 goto source；裸 `Goto` 继承当前 source。
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:28`
+  新增 `collectGotos()`，递归遍历 `StructuredTree`，收集 `StructuredNodeKind::Goto` 且 `Target` 有效的节点。
+- `external/NotDec-llvm2c/lib/Structuring/CMakeLists.txt:9`
+  将 `GotoManager.cpp` 接入 `notdec-backend-structuring`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:424`
+  新增 `testGotoManagerCollectsSequenceGotoSources()`，验证 sequence 里裸 `goto` 继承前一个 basic block source。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:451`
+  新增 `testGotoManagerCollectsIfGotoSources()`，验证 `if` 分支内的 goto 使用 `if` 自己的 block source。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2835`
+  将两个新测试接入 `structuring-analysis-test`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target structuring-analysis-test -j4 && ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-goto-manager.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.51 user=38.82 sys=0.09 maxrss=221300`。
+
+当前判断：
+
+- 这一步提供了 SAILR deoptimization 所需的第一个 shared metric：结构化结果里的 gotos 可被算法层统计和查询，不需要 renderer 反查文本或 AST。
+- 这不是完整 Angr `StructuringOptimizationPass`：还没有固定点分析、graph rewrite 回滚、相对质量评估，也没有 `RegionSimplifier` 那种后处理后的 goto 归类。
+- 实现效果：6/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
