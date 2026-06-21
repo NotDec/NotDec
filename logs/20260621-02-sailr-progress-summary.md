@@ -606,6 +606,34 @@ case head -> branch -> return
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-entry-tail-copy.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=78.09 user=85.38 sys=0.05 maxrss=218572`。
 
+本轮继续补 `CrossJumpReverter` 的 shared CFG 子集。之前只复制 goto target 的单个 block；现在先从 target 收集一段保守的单 successor region，再用 `duplicateRegion()` 复制整段 region，region 内部边也随 copy 重写。
+
+约束仍然保守：target 本身必须只有一个 successor，整段 region 的 statement 总数不能超过 `MaxDuplicatedStatements`，region 扩展仍复用 `findLinearRegionFromHead()` 的边界。这里不碰 C / Solidity renderer，也不把 fallback 渲染当算法语义。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:481`
+  新增 `statementCountInRegion()`，按 shared `LinearRegion` 统计复制成本，缺块时返回最大值让 pass 放弃。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:872`
+  `CrossJumpReverter::runOnGraph()` 改为保存 target 对应的 `LinearRegion`，并调用 `copyLinearRegionForPredecessors()` 复制整段 region；如果所有 predecessor 都被重定向，就删除原 region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:926`
+  扩展 `testCrossJumpReverterDuplicatesLinearGotoTarget()`，把用例改成 `target -> tail -> exit`，验证两个 goto predecessor 会得到各自完整 copy，原 region 被删除，copy 能自持 payload。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-crossjump-region.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=77.84 user=85.12 sys=0.06 maxrss=220320`。
+
+复杂度 / 维护判断：
+
+- 实现效果：8/10。覆盖了 Angr cross-jump deopt 里更接近真实目标的“复制尾部 region”场景，但还不是完整 cross-jump region 搜索。
+- 理解成本：3/10。只复用现有 `LinearRegion` 和 region copy helper，没有引入新图语义。
+- 后期维护成本：3/10。边界保守，后续如果要做更完整 Angr cross-jump，可以继续替换 region 选择逻辑。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
