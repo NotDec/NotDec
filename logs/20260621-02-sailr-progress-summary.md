@@ -365,6 +365,28 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-shared-edge-api-sailr.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=72.54 user=79.88 sys=0.04 maxrss=220016`。
 
+本轮继续把“单个 predecessor 替换一条 shared CFG 边”提到 `StructuredCFG`，让 copied-block pass 不再自己维护 `Successors` / `Cases` 的更新规则：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:76-81`
+  新增 `StructuredCFG::replaceEdge()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:90-127`
+  实现 `replaceEdge()`，并让 `redirectPredecessors()` 复用同一套边替换逻辑。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:391-401,465-476,532-538,680-690`
+  `SwitchReusedEntryRewriter`、`SwitchDefaultCaseDuplicator`、`DuplicationReverter`、`CrossJumpReverter` 改用 `Graph.replaceEdge()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:820-837`
+  新增 `testStructuredCFGReplaceEdgeUpdatesSwitchCases()`，确认 `replaceEdge()` 会同时改普通 successor 和 case target。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-replaceedge.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=73.49 user=81.02 sys=0.10 maxrss=222828`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
