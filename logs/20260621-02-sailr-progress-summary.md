@@ -387,6 +387,24 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 - `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-replaceedge.c --tr-level=2 --algo=structured-sailr`
   通过，`elapsed=73.49 user=81.02 sys=0.10 maxrss=222828`。
 
+本轮再收紧了一处 `ReturnDuplicatorLow` 的 shared 判定，补 Angr 里“紧挨着的 if-stmt 父块要跳过”的边界：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:253-273`
+  `gotoEdgeFromSourceOrParent()` 现在会跳过 `TerminatorKind::Branch` 的直接父块，只接受更上层的 goto source。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1077-1132`
+  新增 `testReturnDuplicatorLowSkipsBranchParentGotoSource()`，确认分支父块上的 goto 不会把旁边的 return predecessor 一起拖进复制。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-return-skip.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=72.87 user=80.03 sys=0.04 maxrss=218072`。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
