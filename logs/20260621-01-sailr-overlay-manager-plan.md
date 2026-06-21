@@ -731,3 +731,35 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：quotientEdges 使用 node-key successor
+
+本轮让 `OverlayManager::quotientEdges()` 对 block/structured member 使用 `SharedNodeSuccessors` 派生 view edge。未 finalized child region member 暂时仍展开 underlying block，因为它在 Angr view 中还是 child `RegionOverlay`，不是 structured result node。这一步开始让 structured result 的 shared graph edge 进入 parent-visible view。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:471`
+  `quotientEdges()` 新增 node-key successor 到 `OverlayViewEdge` 的转换逻辑。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:508`
+  block/structured member 改为遍历 `sharedNodeSuccessors(nodeKey(Member))`。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:520`
+  未 finalized region member 保留 underlying block 展开路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1036`
+  在 finalized child 测试中添加 structured node -> block edge，并验证 `quotientEdges()` 能看到这条 edge。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- structured result node 已经能通过 node-key shared successor 影响 parent-visible quotient view。
+- `visibleSuccessors()` 和 loop successor-to-successor 仍是 block-only 兼容路径，后续需要继续迁移。
+- 实现效果：7/10。
+- 复杂度：6/10。
+- 维护成本：6/10。
