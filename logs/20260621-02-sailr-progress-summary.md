@@ -634,6 +634,44 @@ case head -> branch -> return
 - 理解成本：3/10。只复用现有 `LinearRegion` 和 region copy helper，没有引入新图语义。
 - 后期维护成本：3/10。边界保守，后续如果要做更完整 Angr cross-jump，可以继续替换 region 选择逻辑。
 
+本轮对照 Angr `switch_default_case_duplicator.py` 里 default 被多个 switch head 复用时插入 goto block 的分支，补了 shared CFG 的最小 synthetic block 表示，并让 `SwitchDefaultCaseDuplicator` 用它插入 default forwarder。
+
+NotDec 这里没有在算法层制造 C / Solidity 私有 goto 语句，而是新建一个无 payload 的 shared fallthrough block：`switch head -> synthetic forwarder -> original default`。C 和 Solidity 后端继续从同一棵 shared structured tree 渲染这个控制流块。
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:76`
+  新增 `StructuredCFG::createSyntheticBlock()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:54`
+  实现 `createSyntheticBlock()`，生成自持 `BodyBlock`、空 statements、`Fallthrough` terminator 和给定 successor 的 shared block。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:661`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 先收集每个 default 的 switch predecessor。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:692`
+  对多个 switch head 共享的 default，为每个 switch head 插入 synthetic forwarder，并跳过后续 default-tail copy 分支，贴近 Angr 的 goto-block 行为。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:926`
+  新增 `testStructuredCFGCreateSyntheticBlock()`，锁住 synthetic block 的 shared 身份和 payload 边界。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1434`
+  新增 `testSwitchDefaultCaseDuplicatorInsertsSharedDefaultForwarders()`，验证两个 switch 共享同一个 default 时，会插入两个无 payload forwarder，原 default 不被复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4348`
+  把新 synthetic block 测试接入主测试入口。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4363`
+  把 default forwarder 测试接入主测试入口。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-default-forwarder.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=78.36 user=85.57 sys=0.07 maxrss=221548`。
+
+复杂度 / 维护判断：
+
+- 实现效果：8/10。补上了 Angr default 多 switch 复用场景里的 shared goto-block 等价物，也明确了 synthetic block 的 payload 边界。
+- 理解成本：3/10。新增 API 很小，pass 仍只操作 `StructuredCFG`。
+- 后期维护成本：3/10。后续如果需要真正带 payload 的 virtual block，需要另行定义 payload 来源；当前 forwarder 不需要这个语义。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
