@@ -157,3 +157,45 @@
 - 实现效果：3/10。生命周期状态开始可回滚，但还不是共享 graph。
 - 复杂度：2/10。只操作 member/owner，不碰 reducer。
 - 维护成本：2/10。下一步要让 graph builder 消费这份 view。
+
+# 2026-06-21 实现记录：MutableRegionGraph 读取 overlay member
+
+本轮让 `MutableRegionGraph::build(Cfg, Overlay)` 开始读取 `OverlayManager::members()`。为了不改变现有输出，未 finalized 的 child 仍按普通 block 展开；finalized child 通过 structured member 建成 grouped node。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/RegionOverlay.h:44`
+  `OverlayMember::structured()` 增加 source region id，记录这个 structured member 替换的是哪个 child region。
+- `external/NotDec-llvm2c/lib/Structuring/RegionOverlay.cpp:23`
+  structured member 保存 source region id。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:446`
+  `MutableRegionGraph::build(Cfg, Overlay)` 改为先遍历 overlay members。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:448`
+  block member 直接建普通 reducer node。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:455`
+  structured member 使用 source child region 的 blocks/head 和 structured root 建 grouped node。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:472`
+  继续从 finalized child snapshot 恢复 parent-visible successor。
+- `external/NotDec-llvm2c/lib/Structuring/MutableRegionGraph.cpp:499`
+  保留旧兼容行为：overlay members 没覆盖的 blocks 继续展开，避免未 finalized child 改变当前输出。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:557`
+  新增 `testOverlayGraphUsesStructuredMemberSourceRegion()`，验证 parent graph 从 structured member 找回 source child region 的 blocks 和 successor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1163`
+  将新测试接入 main。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- graph builder 已经开始消费 overlay member，但仍保留未 finalized child 展开逻辑。
+- 这是向 Angr parent overlay view 靠近的一步，不是完整 shared graph。
+- 实现效果：4/10。parent view 的 finalized child 不再只靠旧 finalizedChildren 拼图。
+- 复杂度：3/10。build 路径多了一层 member 解释。
+- 维护成本：3/10。下一步应继续把 successor view 和未 finalized child view 从 fallback 逻辑里剥离出来。
