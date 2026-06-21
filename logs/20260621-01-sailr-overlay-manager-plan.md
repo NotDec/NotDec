@@ -1375,3 +1375,49 @@
 - 实现效果：7/10。
 - 复杂度：4/10。
 - 维护成本：4/10。
+
+# 2026-06-21 实现记录：Phoenix collapse 后清理 refinement marks
+
+本轮补 Angr `replace_nodes_both(..., drop_refinement_marks=True)` 的对应语义。循环类 reducer collapse 后，如果旧节点上有 `cyclic_refinement_outgoing` mark，被 `replaceNodes()` remap 到新 structured node 后要清掉，避免 structured loop 到 follow 的边继续被隐藏。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:50`
+  给 `collapseNodesAndSyncOverlay()` 增加 `DropRefinementMarks` 参数。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:819`
+  `reduceLinearWhileOnce()` collapse 后清理 refinement marks。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:890`
+  `reduceLinearWhileWithBreakOnce()` collapse 后清理 refinement marks。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:996`
+  `reduceLinearDoWhileOnce()` collapse 后清理 refinement marks。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1046`
+  `reduceSelfLoopOnce()` collapse 后清理 refinement marks。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1174`
+  `collapseNodesAndSyncOverlay()` 在 overlay replace 后调用 `dropEdgeMarksFrom(structured_node, "cyclic_refinement_outgoing")`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2470`
+  `reduceGraphNaturalLoopOnce()` collapse 后清理 refinement marks。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2536`
+  `reduceNaturalLoopFallbackOnce()` collapse 后清理 refinement marks。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1616`
+  新增 `testRefineCyclicDropsOverlayRefinementMarksAfterCollapse()`：先构建 graph，再 mark `0 -> follow`，调用 `refineCyclic()` 后确认 structured loop 到 follow 的边仍可见。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2189`
+  接入新测试。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4 && ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-overlay-drop-marks.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.70 user=39.02 sys=0.07 maxrss=220984`。
+
+当前判断：
+
+- `drop_refinement_marks` 的基础语义已和 Angr 对齐。
+- 仍未实现 Angr `_refine_cyclic_core()` 里真正创建 `cyclic_refinement_outgoing` mark 的条件 break 改写；下一步要继续对照 Angr 那段做。
+- 实现效果：7/10。
+- 复杂度：4/10。
+- 维护成本：4/10。
