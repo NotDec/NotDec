@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`，以及 `ReturnDuplicatorLow` 的线性 return-tail shared 子集；还没完成的是完整 SAILR deoptimization 算法。
+当前 goal 还没完成。已经完成的是 Angr 风格 structuring 的公共基础层、copied / virtual block 的最小 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match shared 子集，以及 `ReturnDuplicatorLow` 的线性 return-tail shared 子集；还没完成的是完整 SAILR deoptimization 算法。
 
 当前 goal 按下面这版执行：
 
@@ -83,6 +83,7 @@ SAILR deoptimization pipeline 骨架已经实现：
 第一个具体 SAILR deoptimization pass 已经实现：
 
 - `CrossJumpReverter`
+- `DuplicationReverter` 的 exact-match shared 子集
 - `ReturnDuplicatorLow` 的单 block / 线性 return-tail 复制子集
 - 已接入 `buildSAILRDeoptimizationPipeline()`
 - `SAILRStructurer::structure()` 会先跑 shared deoptimization pipeline，再走 Phoenix/SAILR structuring
@@ -154,11 +155,10 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 
 还差真正的完整 Angr SAILR deoptimization pass：
 
-- `DuplicationReverter`
 - `LoweredSwitchSimplifier`
 - 相关 switch / duplication 辅助逻辑
 
-这些 pass 还没有完整实现。`CrossJumpReverter` 已经有最小 shared 版，`ReturnDuplicatorLow` 已经有单 block / 线性 return-tail 复制子集。
+这些 pass 还没有完整实现。`CrossJumpReverter` 和 `DuplicationReverter` 已经有最小 shared 版，`ReturnDuplicatorLow` 已经有单 block / 线性 return-tail 复制子集。
 
 之前的主要卡点是：Angr 这些 pass 基本都会复制或新建 block。当前已经有最小 shared 表示，但具体 pass 还没有实现。
 
@@ -166,13 +166,13 @@ elapsed=32.34 user=39.80 sys=0.11 maxrss=220248
 
 - `CrossJumpReverter` 复制 goto target：已实现最小 shared 版
 - `ReturnDuplicatorLow` 复制 return block：已实现单 block / 线性 return-tail 子集，缺分支 return-region / Phi / connected component 逻辑
-- `DuplicationReverter` 新建 merge graph
+- `DuplicationReverter`：已实现 exact-match shared 合并子集，缺 similarity search / merge graph
 - `LoweredSwitchSimplifier` 维护 block copies
 
 当前 C renderer 的 label 身份已经改为 shared `BlockId`，body payload 通过 `BodyBlock` 走 shared CFG。后续 pass 仍要注意不要把新 block 的算法语义写到 C/Solidity renderer 里。
 
 ## 下一步建议
 
-下一步可以继续补 `ReturnDuplicatorLow` 的分支 return-region / Phi 语义；如果这部分 shared payload 边界不清，再转向 `DuplicationReverter` 或 `LoweredSwitchSimplifier` 里接口更窄的部分。
+下一步可以继续补 `ReturnDuplicatorLow` 的分支 return-region / Phi 语义；如果这部分 shared payload 边界不清，再转向 `LoweredSwitchSimplifier` 里接口更窄的部分。
 
-一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter` 和 `ReturnDuplicatorLow` 的线性 return-tail 子集已经搭好；完整 SAILR 还没完成。
+一句话总结：公共架构、Angr 风格执行框架、copied / virtual block 的 shared 表示、`CrossJumpReverter`、`DuplicationReverter` 的 exact-match 子集和 `ReturnDuplicatorLow` 的线性 return-tail 子集已经搭好；完整 SAILR 还没完成。

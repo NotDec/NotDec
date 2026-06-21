@@ -2409,3 +2409,49 @@
 - 实现效果：7/10。已经覆盖 Angr low pass 里最常见的直线 return-tail 形状。
 - 复杂度：4/10。新增了 region 发现和 region 复制 helper，但还在 shared CFG 层。
 - 维护成本：4/10。后续补完整 ReturnDuplicator 时，分支 return-region 还是要先把 Phi / payload 语义说清。
+
+# 2026-06-21 实现记录：DuplicationReverter exact-match shared 合并
+
+本轮补 Angr `DuplicationReverter` 的 shared 子集。完整 Angr 版本会先找相似块，再构造 merge graph 做合并；当前 shared `StructuredCFG` 还没有足够的 payload 语义去做相似度和 merge graph，所以本轮只做安全的 exact-match 子集：合并两个形状完全相同、前驱集合不相交、且彼此没有直接边的 block。
+
+实现范围：
+
+- 只比较 block 的 terminator、condition payload、successor 列表、case 列表和 statement payload 列表。
+- 不比较 `BodyBlock`，避免把 copied block 的 shared body 身份误当成语义差异。
+- 只在两个块形状相同、前驱集合不相交、且没有直接互指时才合并。
+- 合并时把被删 block 的所有 predecessor 重定向到保留 block。
+- 不做相似性搜索，不做 merge graph，不碰 renderer。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:12`
+  新增 `DuplicationReverter` pass 类。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:18`
+  新增 shared block 形状比较 helper 和 predecessor 集合判断 helper。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:228`
+  实现 `DuplicationReverter::runOnGraph()`，按 exact-match 条件合并重复块。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:311`
+  `buildSAILRDeoptimizationPipeline()` 现在按 Angr preset 顺序把 `DuplicationReverter` 放到 `ReturnDuplicatorLow` 前面。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:65`
+  新增测试用 subclass，直接暴露 `DuplicationReverter::runOnGraph()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:784`
+  新增 `testDuplicationReverterMergesExactDuplicateBlocks()`，验证并行重复块会合并，且 predecessor 会改到保留块。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-dupmerge.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=31.41 user=38.78 sys=0.07 maxrss=217252`。
+
+当前判断：
+
+- `DuplicationReverter` 的 exact-match shared 子集已经接入 pipeline。
+- 这不是完整 Angr `DuplicationReverter`：还缺 similarity search、merge graph 和更宽的语义合并。
+- 实现效果：6/10。只覆盖最保守的重复块合并。
+- 复杂度：3/10。主要是 shared CFG 的 shape 判定和 predecessor 重定向。
+- 维护成本：3/10。后续如果要扩到相似块合并，需要先补更强的 shared payload 比较语义。
