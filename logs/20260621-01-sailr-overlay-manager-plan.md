@@ -909,3 +909,29 @@
 - 实现效果：7/10。
 - 复杂度：6/10。
 - 维护成本：6/10。
+
+# 2026-06-21 实现记录：递归 structuring 默认使用 shared CFG graph
+
+本轮修正 `RecursiveStructurer::structure(Cfg, Regions)` 的默认 overlay manager 构造方式。之前它只传 `RegionTree`，不会初始化 shared successor graph；这和 Angr 的 OverlayManager 作为共享图所有者不一致。现在默认入口也用 `OverlayManager(Regions, Cfg)`。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/RecursiveStructurer.cpp:82`
+  `RecursiveStructurer::structure(Cfg, Regions, Structurer)` 改为构造带 CFG 的 `OverlayManager`。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+
+当前判断：
+
+- 默认递归 structuring 已经不再绕过 shared graph。
+- 这会让后续 Phoenix / SAILR reducer mutation 更接近 Angr 的 overlay 流程。
+- 实现效果：7/10。
+- 复杂度：3/10。
+- 维护成本：3/10。
