@@ -2455,3 +2455,50 @@
 - 实现效果：6/10。只覆盖最保守的重复块合并。
 - 复杂度：3/10。主要是 shared CFG 的 shape 判定和 predecessor 重定向。
 - 维护成本：3/10。后续如果要扩到相似块合并，需要先补更强的 shared payload 比较语义。
+
+# 2026-06-21 实现记录：SwitchDefaultCaseDuplicator shared default reuse 子集
+
+本轮继续补 switch 侧的 shared deoptimization，但没有硬做 Angr `LoweredSwitchSimplifier`，因为当前 shared CFG 还没有 if-chain / comparison payload 的表达，直接猜 lower-switch 语义会越过边界。先落一个可以明确表达的子集：`Switch` 默认分支被外部 predecessor 复用时，复制 default block 给外部 predecessor。
+
+实现范围：
+
+- 只处理 `TerminatorKind::Switch` 且存在默认 successor 的 block。
+- 只在 default block 还有单 successor 时复制。
+- 默认 block 被多个 predecessor 复用时，保留一个 switch predecessor 指向原 default block。
+- 其他 predecessor 改成指向 copied default block。
+- 复制块继承原 default block 的 body / statements / successor。
+- 不改 case payload，不做 if-chain 回写，不碰 renderer。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:34`
+  新增 `SwitchDefaultCaseDuplicator` pass 类。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:163`
+  新增 `defaultSwitchSuccessor()` 和 `SwitchDefaultCaseDuplicator::defaultOptions()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:174`
+  实现 `SwitchDefaultCaseDuplicator::runOnGraph()`：复制被复用的 default block，并把外部 predecessor 改到 copy。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:311`
+  `buildSAILRDeoptimizationPipeline()` 里把该 pass 放到 `CrossJumpReverter` 之前。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:71`
+  新增测试用 subclass，直接暴露 `SwitchDefaultCaseDuplicator::runOnGraph()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:847`
+  新增 `testSwitchDefaultCaseDuplicatorCopiesReusedDefaultBlock()`，验证外部 predecessor 会走 copied default block，switch 自己仍保留原 default block。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe -j4`
+  通过。
+- `/sn640/NotDec2/build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-switchdup.c --tr-level=2 --algo=phoenix`
+  通过，`elapsed=32.04 user=39.42 sys=0.10 maxrss=218804`。
+
+当前判断：
+
+- 这只是 switch default reuse 的 shared 子集，不是完整 `LoweredSwitchSimplifier`。
+- 还缺 if-chain 识别、switch lowering 回写和 case cluster 逻辑。
+- 实现效果：5/10。只覆盖 switch 侧最稳的块级复用。
+- 复杂度：3/10。只在 shared CFG 上复制 default block 和改 predecessor。
+- 维护成本：3/10。后面真做 `LoweredSwitchSimplifier` 时，这个子集可以继续复用 copied block 语义。
