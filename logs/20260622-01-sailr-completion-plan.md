@@ -1153,3 +1153,46 @@ notdec-llvm2c smoke: elapsed=0.11 user=0.07 sys=0.03 maxrss=182560
 - 实现效果：6/10。original region 删除失败时不再留下半删或半复制状态。
 - 理解成本：2/10。新增一个 shared CFG 批量删除接口，pass 只做删除前预检。
 - 维护成本：3/10。`removeBlocks()` 复制 CFG 做预检，简单但有额外成本；当前只在 deoptimization 删除 original region 前使用，范围可控。
+
+# 2026-06-22 实现记录：DuplicationReverter merge 提交保持原子性
+
+本轮继续收紧 shared deoptimization pass 的提交边界。`DuplicationReverter` 之前会先把 `DropId` 的 predecessor 重定向到 `Keep`，再调用 `removeBlock(DropId)`，并且不检查删除结果。现在 `removeBlock()` 会保护 copied body-source，如果 drop block 不能删，旧逻辑会留下 predecessor 已经改向、drop block 仍存在的半改图。
+
+本轮改成：`DuplicationReverter` 在临时 `StructuredCFG` 上同时执行 redirect 和 remove。两步都成功后才把临时图提交回原图；任一步失败就跳过这个 candidate。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:973`
+  `DuplicationReverter::runOnGraph()` 新建 `Candidate`，在候选图里执行 `redirectPredecessors()` 和 `removeBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:979`
+  只有 redirect 和 remove 都成功后才 `Graph = std::move(Candidate)` 并返回 changed。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1466`
+  新增 `testDuplicationReverterSkipsWhenDropCannotBeRemoved()`，验证 drop block 作为 copied body-source 且无法删除时，predecessor 不会被半重定向。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5308`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.duplication-reverter-atomic.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=185796
+```
+
+复杂度评分：
+
+- 实现效果：6/10。DuplicationReverter 不再把失败删除留下的半重定向当成有效改图。
+- 理解成本：2/10。局部引入临时 CFG 提交流程，没有改变匹配规则。
+- 维护成本：2/10。后续如果 merge 逻辑扩展，仍可沿用这个 candidate 提交边界。
