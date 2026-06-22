@@ -1705,3 +1705,45 @@ elapsed=84.64 user=107.42 sys=1.40 maxrss=1271736
 - 实现效果：6/10。shared deoptimization 的提交边界收口到同一套路。
 - 理解成本：3/10。候选图多一层，但每个 pass 的失败路径更清楚。
 - 维护成本：3/10。后续再补 Angr 语义时，回滚边界更统一。
+
+# 2026-06-22 实现记录：copy helper 失败路径改成事务式回滚
+
+前一轮把 shared deoptimization 的 pass 入口统一成候选图提交，但 `copyRegionForPredecessors()` 和 `copyLinearRegionForPredecessors()` 这两个 helper 里，失败时还是先删临时 copy，再回到调用方继续跑。这样虽然大多数情况下结果是干净的，但 helper 的边界还不够明确，读代码时要自己判断它是不是已经把图恢复成原状。
+
+本轮把这两个 helper 再收紧一层：
+
+- 在 helper 入口先快照当前 `StructuredCFG`。
+- 任何一步失败时，先清理临时 copy，再把图恢复到快照状态。
+- 这样 helper 的返回值就明确表示“这次 copy 没发生”，调用方不用自己猜半成品有没有残留。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:423`
+  `copyRegionForPredecessors()` 失败时恢复快照，保证复制 helper 是事务式边界。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:583`
+  `copyLinearRegionForPredecessors()` 失败时恢复快照，保证线性复制 helper 也是事务式边界。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-sailr-rollback-guard.c \
+  --tr-level=2 --algo=structured-sailr
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+```
+
+复杂度评分：
+
+- 实现效果：5/10。helper 的失败边界更明确。
+- 理解成本：2/10。调用方不用再猜临时 copy 是否已清理。
+- 维护成本：2/10。后面再扩 copy helper 的失败分支时，边界更清楚。
