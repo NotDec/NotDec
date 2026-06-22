@@ -932,3 +932,46 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=186480
 - 实现效果：6/10。拆清 reused-entry 和 default reuse 的 shared pass 边界，减少错误 rewrite 入口。
 - 理解成本：2/10。helper 从 all successors 改成 cases，测试数据同步改成 case target。
 - 维护成本：2/10。后续如果要处理 default entry-like 形状，应在 default pass 或新 shared pass 里明确建模。
+
+# 2026-06-22 实现记录：拒绝不完整的 copied switch materialize
+
+本轮没有扩大 CrossJumpReverter 或 ReturnDuplicatorLow 的匹配范围。对照 Angr 后，更一般的复制仍会涉及 payload / vvar / Phi 重写，当前 shared CFG 还不能表达清楚。
+
+本轮继续补 copied payload 边界：`materializeBlockBody()` 之前在 copied switch 的 case 数量和 body source 不一致时会静默成功，只是不复制 case value。这会留下一个 `BodyMaterialized=true` 但 payload 不完整的 copy。现在改成 case 数量不一致就直接失败，pass 不能把这种 copy 当成已 materialize。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:170`
+  `StructuredCFG::materializeBlockBody()` 在 copied block 和 body source 的 `Cases.size()` 不一致时返回 false。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:178`
+  case 数量一致时直接复制每个 `SwitchCase::Value`，不再静默跳过。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:917`
+  新增 `testStructuredCFGMaterializeRejectsMismatchedSwitchCases()`，验证不完整 copied switch materialize 失败且 copy 仍保持未 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5085`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.materialize-case-count.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=185896
+```
+
+复杂度评分：
+
+- 实现效果：6/10。避免 copied switch 在 case payload 不完整时被标记为 materialized。
+- 理解成本：2/10。只收紧 `materializeBlockBody()` 的失败条件。
+- 维护成本：2/10。后续若要支持 case count 改写，需要先新增 shared payload 重写语义。
