@@ -594,3 +594,46 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=182944
 - 实现效果：6/10。补了 Angr reused-entry 的防御上限，避免可疑 switch 形状触发大规模复制。
 - 理解成本：3/10。多两个参数和一次预扫描，语义直接。
 - 维护成本：3/10。后续如果把 reused-entry 从复制改为 virtual goto，仍可复用这两个上限保护。
+
+# 2026-06-22 实现记录：对齐 ReturnDuplicatorLow 大函数保护
+
+本轮对照 Angr `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，补 shared pass 的函数规模保护。Angr 默认在函数 block 数超过上限时不跑 return duplication，避免在大函数上做昂贵复制和 trial。本轮只补这个防御条件，不扩大一般 branch return region，也不碰 Phi / vvar rewrite。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:31`
+  `ReturnDuplicatorLow` 构造函数增加 `MaxFunctionBlocks=500`，默认值对齐 Angr low pass。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:42`
+  保存 `MaxFunctionBlocks`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:934`
+  `ReturnDuplicatorLow::runOnGraph()` 在 block 数超过上限时直接返回 false。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1365`
+  新增 `testReturnDuplicatorLowSkipsLargeFunction()`，验证超限时不改图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4888`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.return-block-limit.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=182048
+```
+
+复杂度评分：
+
+- 实现效果：5/10。补了 Angr 的大函数保护，但还没有补一般 Phi / vvar rewrite 分支。
+- 理解成本：2/10。只是一个构造参数和入口检查。
+- 维护成本：2/10。后续扩大 ReturnDuplicatorLow 时可以继续沿用这个保护。
