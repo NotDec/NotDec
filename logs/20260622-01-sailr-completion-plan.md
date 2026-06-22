@@ -1323,3 +1323,44 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186180
 - 实现效果：4/10。默认分支和 case 简化的边界被测试钉住了。
 - 理解成本：1/10。只是补了一个 negative test。
 - 维护成本：1/10。边界清楚，后续 default reuse 调整不会误伤 case 简化。
+
+# 2026-06-22 实现记录：SwitchReusedEntryRewriter 只看 case target
+
+本轮继续收紧 switch 相关 pass 的共享边界。`SwitchReusedEntryRewriter` 之前在确认某个 predecessor component 还能到达 entry 时，用的是通用 `Graph.hasEdge()`。这样 default-only 复用也会被算进 reused-entry 逻辑，和前一轮已经收紧的 case/default 边界不一致。
+
+本轮改成：`SwitchReusedEntryRewriter` 只把 `switchCaseReachesBlock()` 命中的 predecessor 当成候选，也就是只看 case target，不把 default successor 算进 reused-entry 的来源。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:700`
+  `SwitchReusedEntryRewriter::runOnGraph()` 的 component 复核从 `Graph.hasEdge()` 改成 `switchCaseReachesBlock()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2465`
+  更新 `testSwitchReusedEntryRewriterSkipsDefaultOnlyTargets()`，改成真正的 default-only 结构。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5364`
+  将测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.switch-reused-entry-case-only.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185744
+```
+
+复杂度评分：
+
+- 实现效果：5/10。reused-entry 不再吞 default-only 结构。
+- 理解成本：2/10。只把 reachability 复核收紧到 case target。
+- 维护成本：2/10。default reuse 和 reused-entry 的边界更稳。
