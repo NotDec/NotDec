@@ -545,3 +545,52 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186524
 - 实现效果：7/10。SAILR pass 输出的 copied block 不再依赖 renderer 回读原 body，copy 身份仍由 `SourceBlock` 保留。
 - 理解成本：4/10。多了一个 helper 内 materialize 步骤，但边界清楚：底层 duplicate 保留 body-source，pass 输出主动落 body。
 - 维护成本：4/10。后续 Phi / vvar rewrite 可以接在 `materializeBlockBody()`，不会分散到 renderer。
+
+# 2026-06-22 实现记录：对齐 Angr reused-entry 复用上限保护
+
+本轮对照 Angr `SwitchReusedEntryRewriter`，没有改变当前 NotDec “复制 reused entry region”的策略。Angr 原实现里有两个保护：单个 entry 被过多 switch 复用时放弃，以及一个函数里 reused entries 太多时放弃。这两个判断是 shared pass 的防御语义，不涉及 C / Solidity renderer，也不需要在 Angr 语义和当前输出质量之间做取舍。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:61`
+  `SwitchReusedEntryRewriter` 构造函数增加 `MaxEntryReuseCount=10` 和 `MaxReusedEntries=20`，默认值对齐 Angr。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:75`
+  保存 reused-entry 上限参数。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:596`
+  `SwitchReusedEntryRewriter::runOnGraph()` 先收集 reused entries，再统一做上限检查。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:617`
+  单个 entry 的 switch predecessor 数量超过 `MaxEntryReuseCount` 时放弃本 pass。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:623`
+  reused entry 总数超过 `MaxReusedEntries` 时放弃本 pass。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2105`
+  新增 `testSwitchReusedEntryRewriterSkipsEntryOverReuseLimit()`，验证单个 entry 超限时不改图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2128`
+  新增 `testSwitchReusedEntryRewriterSkipsTooManyReusedEntries()`，验证 reused entry 总数超限时不改图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4875`
+  将两个新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.reused-entry-limits.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=182944
+```
+
+复杂度评分：
+
+- 实现效果：6/10。补了 Angr reused-entry 的防御上限，避免可疑 switch 形状触发大规模复制。
+- 理解成本：3/10。多两个参数和一次预扫描，语义直接。
+- 维护成本：3/10。后续如果把 reused-entry 从复制改为 virtual goto，仍可复用这两个上限保护。
