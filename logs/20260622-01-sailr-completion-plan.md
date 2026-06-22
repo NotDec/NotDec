@@ -490,3 +490,58 @@ notdec-llvm2c smoke: elapsed=0.08 user=0.04 sys=0.04 maxrss=183448
 - 实现效果：6/10。materialize API 不再把缺 source 的 copied block 标成成功，减少 fallback 语义。
 - 理解成本：2/10。只是把失败条件显式化。
 - 维护成本：3/10。后续删除或重写 body source 前必须先 materialize 成功，失败会更早暴露。
+
+# 2026-06-22 实现记录：SAILR pass 复制后主动 materialize copied body
+
+本轮继续把 copied block 的 body 语义前移到 shared structuring 层。之前 `duplicateRegion()` 创建 copy 后，pass 可能在原 region 仍保留时让 copy 的 `BodyBlock` 指向原 block，后端渲染时再通过 `getBodyBlock()` 读取原 body。这个模式仍然过度依赖“渲染时复用原 body”。
+
+本轮改成：SAILR deoptimization pass 的复制 helper 在 retarget 前主动调用 `materializeBlockBody()`。底层 `duplicateRegion()` 仍保留未 materialize 的 copy 能力，方便表达 body-source 和未来 payload rewrite；但 Return / CrossJump / switch 这些 pass 输出的 copy 默认已有独立 body，同时通过 `SourceBlock` 保留原来源。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:388`
+  `copyRegionForPredecessors()` 在 `duplicateRegion()` 后先 materialize 每个 copy；失败则删除本次 copy 并返回 false。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:538`
+  `copyLinearRegionForPredecessors()` 做同样处理，让 CrossJump、LoweredSwitch、default / reused-entry 等线性复制 pass 输出独立 body。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1450`
+  `testReturnDuplicatorLowUsesParentGotoSource()` 改为验证 copy 已 materialize，且 `SourceBlock` 仍指向原 return block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1516`
+  `testReturnDuplicatorLowSkipsBranchParentGotoSource()` 同步验证 copied return 的 `SourceBlock` 和 materialized body。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1773`
+  `testSwitchDefaultCaseDuplicatorCopiesReusedDefaultBlock()` 验证 copied default block 已 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1916`
+  `testSwitchDefaultCaseDuplicatorCopiesDefaultTailRegion()` 验证 copied default tail 已 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1954`
+  `testSwitchReusedEntryRewriterCopiesReusedEntryBlock()` 验证 copied entry 已 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1993`
+  `testSwitchReusedEntryRewriterCopiesEntryTailRegion()` 验证 copied entry / tail 都已 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2044`
+  `testSwitchReusedEntryRewriterCopiesConnectedPredsOnce()` 验证 component copy 的 entry / tail 都已 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2099`
+  `testSwitchReusedEntryRewriterReadsCaseOnlyTargets()` 验证 case-only target copy 已 materialize。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.pass-materialize.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186524
+```
+
+复杂度评分：
+
+- 实现效果：7/10。SAILR pass 输出的 copied block 不再依赖 renderer 回读原 body，copy 身份仍由 `SourceBlock` 保留。
+- 理解成本：4/10。多了一个 helper 内 materialize 步骤，但边界清楚：底层 duplicate 保留 body-source，pass 输出主动落 body。
+- 维护成本：4/10。后续 Phi / vvar rewrite 可以接在 `materializeBlockBody()`，不会分散到 renderer。
