@@ -975,3 +975,44 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=185896
 - 实现效果：6/10。避免 copied switch 在 case payload 不完整时被标记为 materialized。
 - 理解成本：2/10。只收紧 `materializeBlockBody()` 的失败条件。
 - 维护成本：2/10。后续若要支持 case count 改写，需要先新增 shared payload 重写语义。
+
+# 2026-06-22 实现记录：修正 optimization trial rollback 的 changed 语义
+
+本轮修 shared optimization wrapper 的回滚语义。`StructuringOptimizationPass::analyze()` 之前在 `runOnGraph()` 返回 true 后立刻把 `HadChanges` 置 true；如果随后 structuring trial 失败并 rollback，这次被回滚的改图仍会让 pass 最后可能返回成功。这不符合 checkpoint / rollback 的边界：只有最终保留下来的候选改图才算 pass changed。
+
+本轮改成：candidate 通过 structuring trial 后才设置 `HadChanges`。如果一次改图被 rollback，且没有后续成功改图，pass 返回未成功，不把原图当成已优化结果。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:77`
+  `StructuringOptimizationPass::analyze()` 把 `HadChanges = true` 移到 trial 成功之后。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2679`
+  新增 `testStructuringOptimizationPassRejectsOnlyRolledBackChanges()`，验证只有 rollback 掉的改动时 pass 不成功。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5150`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.rollback-change-guard.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185084
+```
+
+复杂度评分：
+
+- 实现效果：6/10。rollback 掉的改图不再被当成成功优化，shared trial 边界更稳。
+- 理解成本：2/10。只移动一个状态标记，并补 focused test。
+- 维护成本：2/10。后续 pass 可以继续依赖 wrapper 做 trial/rollback 判定。
