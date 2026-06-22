@@ -846,3 +846,44 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.04 maxrss=182076
 - 实现效果：5/10。补住 copied switch 的 successor / case target 身份边界，避免 shared CFG 产生半一致 copy。
 - 理解成本：2/10。只在 `duplicateBlock()` 加一条 switch guard，`duplicateRegion()` 保持原本重写流程。
 - 维护成本：2/10。后续如果需要单块复制 switch 并改 target，应该新增显式 shared API，而不是让调用方只改 successors。
+
+# 2026-06-22 实现记录：收紧 switch default 候选
+
+本轮对照 Angr 的 `SwitchDefaultCaseDuplicator` 后，只补一个 shared pass 语义约束：Angr 只把 out-degree 为 1 的 default-case node 纳入处理。当前 NotDec 之前会先按 default target 聚合，再检查 default block shape，这会让两个 switch 共享 terminal default 时也进入 shared-default forwarder 路径。
+
+本轮改成：default target 必须存在且 `Graph.successorsOf(DefaultTarget).size() == 1`，才记录到 `SwitchPredsByDefault`。terminal default、多出口 default 暂时不做 rewrite/copy，避免把未覆盖的 default 形状误当成 Angr 语义。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:824`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 先检查 default block 是单后继，再记录 shared default candidate。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1945`
+  新增 `testSwitchDefaultCaseDuplicatorSkipsTerminalSharedDefault()`，验证两个 switch 共享 terminal return default 时不插 synthetic forwarder。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5068`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.default-terminal-skip.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=183560
+```
+
+复杂度评分：
+
+- 实现效果：5/10。减少一个和 Angr 不一致的 default rewrite 入口，避免 terminal default 被错误 forward。
+- 理解成本：2/10。只是把候选记录放到 shape 检查之后。
+- 维护成本：2/10。后续要支持 terminal default 时，需要先确认 Angr/NotDec 语义取舍，再单独补 shared 表达。
