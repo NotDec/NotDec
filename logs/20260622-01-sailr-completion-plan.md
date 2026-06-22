@@ -725,3 +725,40 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185340
 - 实现效果：7/10。DuplicationReverter 不再混合 original / copied / synthetic 身份，普通 original duplicate 合并仍保留。
 - 理解成本：3/10。新增一个身份比较函数，和 shape 比较分开。
 - 维护成本：3/10。后续复制策略扩展时，合并条件仍集中在 shared pass。
+
+# 2026-06-22 实现记录：补 copied source 身份回归测试
+
+本轮没有改算法实现，只补 `DuplicationReverter` 的 copied block 身份测试。上一轮已经让 `DuplicationReverter` 合并前检查 identity kind；这次补上 copied source 不同的覆盖，防止后续把 copied block 当成普通 shape duplicate 合并掉。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1330`
+  新增 `testDuplicationReverterKeepsCopiedSourcesSeparate()`，构造两个 materialized copied block，shape 相同但 `SourceBlock` 分别是 1 和 3，验证 `DuplicationReverter` 不合并。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4987`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.dup-copied-source.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.07 sys=0.01 maxrss=185992
+```
+
+复杂度评分：
+
+- 实现效果：5/10。补强 copied source 身份回归覆盖，算法本身沿用上一轮实现。
+- 理解成本：2/10。只新增一个 focused test。
+- 维护成本：2/10。后续改合并条件时，这个测试能直接挡住 copied source 混合。
