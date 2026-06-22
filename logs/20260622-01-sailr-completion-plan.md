@@ -1059,3 +1059,48 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=186240
 - 实现效果：6/10。避免删除 body source 后留下悬空 copied body。
 - 理解成本：2/10。删除前多一层 materialize 成功检查。
 - 维护成本：2/10。后续 payload rewrite 变复杂时，删除 source 仍统一走 shared guard。
+
+# 2026-06-22 实现记录：removeBlock materialize 失败保持原子性
+
+本轮继续收紧 `removeBlock()` 的删除边界。上一轮删除 body source 前会尝试 materialize 所有依赖它的 copied block；但如果前面的 copy materialize 成功、后面的 copy 失败，函数会拒绝删除 source，却已经留下部分 copy 被 materialize 的副作用。
+
+本轮改成：删除前先收集所有 body-user，并预检 copied switch 的 case payload 数量是否能 materialize。只有全部通过后才真正 materialize，避免失败路径改动 CFG。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:313`
+  `StructuredCFG::removeBlock()` 先收集依赖待删 block 的 `BodyUsers`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:316`
+  materialize 前预检 copied block 和 body source 的 `Cases.size()`，失败则直接返回 false。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:323`
+  所有预检通过后再逐个调用 `materializeBlockBody()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:902`
+  新增 `testStructuredCFGRemoveBlockIsAtomicOnMaterializeFailure()`，验证一个可 materialize copy 和一个不可 materialize copy 同时依赖 source 时，失败不会让前者被部分 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5170`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.remove-body-source-atomic.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=182152
+```
+
+复杂度评分：
+
+- 实现效果：6/10。删除 body source 的失败路径不再留下部分 materialize 状态。
+- 理解成本：2/10。只把已有 materialize 检查拆成预检和执行两步。
+- 维护成本：2/10。后续如果 materialize 增加新的失败条件，需要同步补预检或改成事务式 rollback。
