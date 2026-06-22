@@ -637,3 +637,48 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=182048
 - 实现效果：5/10。补了 Angr 的大函数保护，但还没有补一般 Phi / vvar rewrite 分支。
 - 理解成本：2/10。只是一个构造参数和入口检查。
 - 维护成本：2/10。后续扩大 ReturnDuplicatorLow 时可以继续沿用这个保护。
+
+# 2026-06-22 实现记录：default 复用时跳过 switch 内部 predecessor
+
+本轮对照 Angr `SwitchDefaultCaseDuplicator` 的 default 复用处理，补 shared CFG 上的内部 predecessor 过滤。Angr 会检查额外 predecessor 是否仍然能从同一个 switch 的 jump/case 路径到达；如果能到达，就认为这是 switch 内部合法路径，不复制 default。当前 NotDec 之前只按 `Pred != KeepPred` 判断，容易把 case tail 进入 default 的边当成外部复用。
+
+本轮只补 shared CFG reachability 判断，不改 C / Solidity renderer，也不改已有 default forwarder 策略。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:377`
+  新增 `reachesBlock()`，在 shared CFG 上做简单可达性检查。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:396`
+  新增 `reachesBlockFromNonDefaultSwitchSuccessor()`，判断一个 predecessor 是否来自同一个 switch 的非 default successor 路径。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:872`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 构造 `PredsToUpdate` 时跳过 switch 内部 predecessor，不再复制 default。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1888`
+  新增 `testSwitchDefaultCaseDuplicatorSkipsSwitchInternalDefaultPred()`，验证 case tail 进入 default 时不改图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4940`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.default-internal-pred.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186448
+```
+
+复杂度评分：
+
+- 实现效果：6/10。补了 Angr default 复用里的内部路径过滤，减少误复制。
+- 理解成本：4/10。新增一个小的 CFG reachability helper，逻辑局限在 shared pass。
+- 维护成本：4/10。后续如果 default pass 更贴近 Angr jump-table 语义，这个判断还能继续复用。
