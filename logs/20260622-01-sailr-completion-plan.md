@@ -1196,3 +1196,48 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=185796
 - 实现效果：6/10。DuplicationReverter 不再把失败删除留下的半重定向当成有效改图。
 - 理解成本：2/10。局部引入临时 CFG 提交流程，没有改变匹配规则。
 - 维护成本：2/10。后续如果 merge 逻辑扩展，仍可沿用这个 candidate 提交边界。
+
+# 2026-06-22 实现记录：LoweredSwitchSimplifier 只看 case target
+
+本轮继续收紧 switch deoptimization 的 shared 边界。`LoweredSwitchSimplifier` 之前用 `Graph.hasEdge()` 搜索候选 predecessor，这会把 switch 的 default successor 也算进去。这样 `switch case` 的简化和 `default` reuse 混在一起，和 `SwitchDefaultCaseDuplicator` 的 shared 边界不一致。
+
+本轮改成：`LoweredSwitchSimplifier` 只把 `switchCaseReachesBlock()` 命中的 switch 作为候选 predecessor，也就是只看 `SwitchCase::Target`，不再把 default successor 当成 lowered case 处理。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:747`
+  `LoweredSwitchSimplifier::runOnGraph()` 的 predecessor 收集从 `Graph.hasEdge()` 改成 `switchCaseReachesBlock()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2538`
+  更新 `testLoweredSwitchSimplifierCopiesLinearSharedCaseRegion()`，改成真实的 case-target 共享形状。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2608`
+  更新 `testLoweredSwitchSimplifierSkipsUnsafeOriginalDeletion()`，继续验证 unsafe 原始 region 不会被误删。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2651`
+  新增 `testLoweredSwitchSimplifierSkipsDefaultOnlyTargets()`，只确认 default-only 目标不会被当成 lowered case 候选。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5365`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.lowered-switch-case-only.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.04 sys=0.05 maxrss=181924
+```
+
+复杂度评分：
+
+- 实现效果：5/10。`LoweredSwitchSimplifier` 不再把 default reuse 混进 case 简化。
+- 理解成本：2/10。只收紧候选 predecessor 来源。
+- 维护成本：2/10。`switchCaseReachesBlock()` 已经是 shared helper，后续默认/ case 边界更清楚。
