@@ -50,6 +50,7 @@ struct SolidityRevertMatch {
   std::optional<uint64_t> PanicCode;
   std::optional<uint64_t> CustomErrorArgCount;
   std::optional<uint64_t> ErrorStringLength;
+  std::optional<std::string> ErrorStringLiteral;
 };
 
 // Exact pieces of one canonical nonpayable guard.  The pass consumes only this

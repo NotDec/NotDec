@@ -230,3 +230,21 @@ cmake --build ./build --target notdec -j4
 性能烟雾：
 
 - `test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll` 跑通，`/usr/bin/time` 记录 `elapsed=23.09 user=27.17 sys=0.69 maxrss=994536`。
+
+## 实现记录：revert string 语句打印
+
+`revert_error_string_01.ll` 里的字符串没有完全丢。原始 IR 里 `run()` 先写入
+`Error(string)` selector，再写 length `5`，再把 `123918343325 << 218` 写到
+payload data；这个 256-bit word 的高位字节就是 `"short"`。
+
+这次做了一个窄修，只处理已确认的 `Error(string)` 常量短字符串：
+
+- [include/notdec/Passes/evm/SolidityPatternUtils.h](/sn640/NotDec/include/notdec/Passes/evm/SolidityPatternUtils.h:46) 的 `SolidityRevertMatch` 增加 `ErrorStringLiteral`。
+- [src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp](/sn640/NotDec/src/Passes/evm/solidity-patterns/SolidityRevertPass.cpp:271) 增加 `decodeErrorStringLiteral()`，从 offset `36` 的 length store 和 offset `68` 的 data store 解出最多 32 字节的常量字符串；[414] 的 `addRevertMatchMetadata()` 写出 `notdec.solidity_revert.error_string_literal`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:63) 增加 Solidity 字符串转义；[331] 的 `formatRevertStatement()` 在拿到 literal 时打印 `require(false, "...");`。
+
+验证结果：
+
+- `revert_error_string_01.ll` 现在输出 `require(false, "short");`。
+- `checked_bounds_arithmetic_01.ll` 和 apehex `0710_19497852_ab16546f04_cbca57a8fd60.ll` 跑通。
+- EVM smoke `25928_19774281_d048a8d52d_2758caa02f46.ll` 跑通，`elapsed=23.30 user=27.45 sys=0.69 maxrss=995072`。

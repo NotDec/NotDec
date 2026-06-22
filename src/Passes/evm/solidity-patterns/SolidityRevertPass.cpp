@@ -2,6 +2,7 @@
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 
 #include <limits>
+#include <string>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
@@ -27,6 +28,7 @@ STATISTIC(NumRevertMissingPayloadHTypes,
 namespace {
 
 struct RevertPayloadHType {
+  Value *Base = nullptr;
   bool HasSelector = false;
   bool HasPanicCode = false;
   bool HasErrorHead = false;
@@ -269,6 +271,56 @@ std::optional<Value *> getTrailingPayloadBaseFromRevertSize(CallBase &Revert) {
   return std::nullopt;
 }
 
+std::optional<std::string>
+decodeErrorStringLiteral(Value *Base, ArrayRef<mlsub::EVMStoreEvidence> Stores,
+                         CallBase &Revert) {
+  SmallVector<Value *, 2> LengthStores =
+      getHTypeStoreValuesAtOffsetBefore(Stores, Base, 36, Revert);
+  bool Conflict = false;
+  std::optional<uint64_t> Length =
+      getUniqueUInt64FieldValue(LengthStores, Conflict);
+  if (Conflict || !Length.has_value() || *Length == 0 || *Length > 32) {
+    return std::nullopt;
+  }
+
+  SmallVector<Value *, 2> DataStores =
+      getHTypeStoreValuesAtOffsetBefore(Stores, Base, 68, Revert);
+  std::optional<APInt> WordValue;
+  for (Value *StoredValue : DataStores) {
+    auto *Shift = dyn_cast_or_null<CallBase>(StoredValue);
+    if (Shift == nullptr || !isCallTo(Shift, "evm_shl") ||
+        Shift->arg_size() != 2) {
+      continue;
+    }
+    auto *Amount = dyn_cast_or_null<ConstantInt>(Shift->getArgOperand(0));
+    auto *Payload = dyn_cast_or_null<ConstantInt>(Shift->getArgOperand(1));
+    if (Amount == nullptr || Payload == nullptr ||
+        Amount->getValue().getActiveBits() > 8) {
+      continue;
+    }
+
+    APInt Word = Payload->getValue().zextOrTrunc(256);
+    Word <<= Amount->getZExtValue();
+    unsigned UsedBits = static_cast<unsigned>(*Length * 8);
+    if (UsedBits < 256 && Word.trunc(256 - UsedBits) != 0) {
+      continue;
+    }
+    WordValue = Word;
+    break;
+  }
+
+  if (!WordValue.has_value()) {
+    return std::nullopt;
+  }
+
+  std::string Text(*Length, '\0');
+  for (uint64_t I = 0; I != *Length; ++I) {
+    unsigned Shift = static_cast<unsigned>(248 - I * 8);
+    Text[I] = static_cast<char>(WordValue->lshr(Shift).trunc(8).getZExtValue());
+  }
+  return Text;
+}
+
 SmallVector<Value *, 2> getRevertFieldStoreValues(
     ArrayRef<mlsub::EVMStoreEvidence> Stores, const HTypeBufferView &View,
     Value *Base, int64_t Offset, Instruction &Before) {
@@ -361,6 +413,11 @@ void addRevertMatchMetadata(LLVMContext &Ctx,
     addPlainMetadata(Ctx, *Match.Revert,
                      "notdec.solidity_revert.error_string_length",
                      Twine(*Match.ErrorStringLength).str());
+  }
+  if (Match.ErrorStringLiteral.has_value()) {
+    addPlainMetadata(Ctx, *Match.Revert,
+                     "notdec.solidity_revert.error_string_literal",
+                     *Match.ErrorStringLiteral);
   }
 }
 
@@ -504,6 +561,7 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
   }
 
   RevertPayloadHType Payload;
+  Payload.Base = PayloadBase;
   Payload.HasSelector = hasHTypeBufferFieldAt(*View, 0);
   Payload.HasPanicCode = hasHTypeBufferFieldAt(*View, 4);
   Payload.HasErrorHead = hasHTypeBufferFieldAt(*View, 4);
@@ -637,6 +695,10 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
         getUniqueUInt64FieldValue(Payload->ErrorLengthStores, Conflict);
     if (Conflict) {
       return std::nullopt;
+    }
+    if (Payload->HasErrorData) {
+      Match.ErrorStringLiteral =
+          decodeErrorStringLiteral(Payload->Base, Stores, Revert);
     }
     return Match;
   }
