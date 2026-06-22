@@ -246,6 +246,55 @@ elapsed=83.78 user=106.50 sys=1.38 maxrss=1270540
 
 长期应该让 duplicated region 的元数据不只存在 block 上，还能表达一次 copy operation 的范围和 pass 名称。短期先放在 `CFGBlock`，够后续 SAILR deoptimization pass 判断 copied / synthetic block 身份。
 
+# 2026-06-22 实现记录：抽出 shared body materialize API
+
+本轮继续补 copied block 的 shared 语义，没有扩大 ReturnDuplicatorLow 或 switch pass 匹配形状，也没有改 C / Solidity renderer。目标是把“copy 的 body payload 何时落到自己身上”变成 `StructuredCFG` 的显式能力，后续 Phi / vvar / payload rewrite 可以挂在同一个 shared 入口上。
+
+关键边界：
+
+- `materializeBlockBody()` 只复制 statements、terminator、condition 和 switch case value 这类 body payload。
+- successor 和 switch case target 仍保留当前 copied block 的 CFG 身份，不从 body source 覆盖回来。
+- 如果 switch case 数量和 body source 对不上，当前不猜测 target，也不造 `InvalidBlockId` case；后续遇到真实 payload rewrite 再补 shared 语义。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:125`
+  新增 `StructuredCFG::materializeBlockBody(BlockId Id)`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:145`
+  实现 `materializeBlockBody()`。找不到 block 返回 false；body 已经指向自己时只标记 `BodyMaterialized=true`；body source 存在时复制 payload，但不覆盖 successor / case target。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:294`
+  `removeBlock()` 删除 body source 时改为调用 `materializeBlockBody()`，避免同一语义散落在删除逻辑里。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:867`
+  新增 `testStructuredCFGMaterializesCopiedSwitchWithoutRewritingTargets()`，验证 copied switch materialize 后仍保持 copied 身份，successor 和 case target 继续指向 copied region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4753`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.materialize-api.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185060
+```
+
+复杂度评分：
+
+- 实现效果：7/10。shared CFG 现在有明确 materialize 入口，且不会把 copied switch target 改回原块。
+- 理解成本：4/10。新增一个接口，但语义集中，比让 `removeBlock()` 内联处理更清楚。
+- 维护成本：4/10。后续 payload rewrite 可以扩这个入口；当前没有把 renderer fallback 混进算法层。
+
 # 2026-06-22 实现记录：补 duplicated region operation metadata
 
 本轮继续补 shared CFG 的 copied block 语义边界，没有扩大 Return / switch pass 的匹配形状，也没有新增 renderer fallback。
