@@ -245,3 +245,48 @@ elapsed=83.78 user=106.50 sys=1.38 maxrss=1270540
 更好的方案：
 
 长期应该让 duplicated region 的元数据不只存在 block 上，还能表达一次 copy operation 的范围和 pass 名称。短期先放在 `CFGBlock`，够后续 SAILR deoptimization pass 判断 copied / synthetic block 身份。
+
+# 2026-06-22 实现记录：补 duplicated region operation metadata
+
+本轮继续补 shared CFG 的 copied block 语义边界，没有扩大 Return / switch pass 的匹配形状，也没有新增 renderer fallback。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:93`
+  `DuplicatedRegion` 增加 `CopyKind`、`CreatedBy`，记录一次 region copy operation 的来源。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:98`
+  `DuplicatedRegion` 增加 `originalOf()`，可以从 copy `BlockId` 反查原 block。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:112`
+  `StructuredCFG::duplicateRegion()` 增加 copy kind / creator 参数，默认保持现有 SAILR deoptimization 行为。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:103`
+  实现 `DuplicatedRegion::originalOf()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:172`
+  `StructuredCFG::duplicateRegion()` 把 operation metadata 写入返回的 `DuplicatedRegion`，并传给每个 copied block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:961`
+  `testStructuredCFGDuplicateRegionRewritesInternalEdges()` 增加 operation metadata 和 `originalOf()` 断言。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-phoenix /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.copy-region-meta.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.04 maxrss=185752
+```
+
+复杂度评分：
+
+- 实现效果：6/10。一次 region copy 的范围、copy kind、创建者现在留在 shared 返回值里，后续 pass 可以少猜一点。
+- 理解成本：4/10。只是补 `DuplicatedRegion` 返回记录，没有新增全局状态。
+- 维护成本：4/10。接口默认值保持兼容，后续如果需要持久化 copy operation，再从这个返回记录扩展。
