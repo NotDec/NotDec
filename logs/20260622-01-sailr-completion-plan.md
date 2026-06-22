@@ -1016,3 +1016,46 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185084
 - 实现效果：6/10。rollback 掉的改图不再被当成成功优化，shared trial 边界更稳。
 - 理解成本：2/10。只移动一个状态标记，并补 focused test。
 - 维护成本：2/10。后续 pass 可以继续依赖 wrapper 做 trial/rollback 判定。
+
+# 2026-06-22 实现记录：删除 body source 前保护 copied body
+
+本轮继续收紧 copied block 的 body-source 生命周期。上一轮已经让 `materializeBlockBody()` 在 copied switch case payload 不完整时失败；但 `removeBlock()` 删除 body source 时仍会忽略 materialize 失败，可能删除 source 后留下 `BodyBlock` 指向已删除 block 的 copy。
+
+本轮改成：`removeBlock()` 删除 block 前，先 materialize 所有依赖该 block 作为 body source 的其他 block。只要有一个 materialize 失败，就拒绝删除，并且不删边、不删 case target。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:313`
+  `StructuredCFG::removeBlock()` 删除前先 materialize 依赖待删 block 的 copies；失败则返回 false。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:321`
+  materialize 后再次确认没有其他 block 仍指向待删 body source，再执行删边和删 block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:874`
+  新增 `testStructuredCFGRemoveBlockRejectsUnmaterializedCopy()`，验证 copied switch 无法 materialize 时 source 不被删除。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5128`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.remove-body-source-guard.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=186240
+```
+
+复杂度评分：
+
+- 实现效果：6/10。避免删除 body source 后留下悬空 copied body。
+- 理解成本：2/10。删除前多一层 materialize 成功检查。
+- 维护成本：2/10。后续 payload rewrite 变复杂时，删除 source 仍统一走 shared guard。
