@@ -1241,3 +1241,85 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.04 sys=0.05 maxrss=181924
 - 实现效果：5/10。`LoweredSwitchSimplifier` 不再把 default reuse 混进 case 简化。
 - 理解成本：2/10。只收紧候选 predecessor 来源。
 - 维护成本：2/10。`switchCaseReachesBlock()` 已经是 shared helper，后续默认/ case 边界更清楚。
+
+# 2026-06-22 实现记录：SwitchDefaultCaseDuplicator 只处理 default reuse
+
+本轮继续把 switch 相关 deoptimization 的共享边界拆清。前一轮已经把 `LoweredSwitchSimplifier` 限制为 case-target 语义；这轮主要确认 `SwitchDefaultCaseDuplicator` 仍然只负责 default reuse，不被 case 简化的搜索条件污染。
+
+这次没有改 `SwitchDefaultCaseDuplicator` 的匹配规则本身，只是把 `LoweredSwitchSimplifier` 的候选 predecessor 收紧到 `SwitchCase::Target`，让 default-only 结构留给 default pass 处理。这样 case-only / default-only 的责任边界更清楚，避免两个 pass 都拿 `Graph.hasEdge()` 这种过宽条件去抢同一块图。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:747`
+  `LoweredSwitchSimplifier::runOnGraph()` 继续使用 `switchCaseReachesBlock()`，只收 case target。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2651`
+  新增 `testLoweredSwitchSimplifierSkipsDefaultOnlyTargets()`，确认 default-only 目标不会被 case 简化误收。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5365`
+  将测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.lowered-switch-case-only.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.04 sys=0.05 maxrss=181924
+```
+
+复杂度评分：
+
+- 实现效果：5/10。case 简化和 default reuse 的边界更清楚。
+- 理解成本：2/10。只是把候选源收紧到 case target。
+- 维护成本：2/10。后续默认 reuse 再改时，不会撞到 case 简化的入口。
+
+# 2026-06-22 实现记录：default-only 结构留给 SwitchDefaultCaseDuplicator
+
+本轮继续把 switch 相关 pass 的责任边界收紧。前一轮把 `LoweredSwitchSimplifier` 限制成只收 case target，这一轮补了一个 default-only negative 测试，确认 default reuse 仍然不会被 case 简化入口误收。
+
+这次没有改 `SwitchDefaultCaseDuplicator` 的核心逻辑，只是通过测试把边界钉死：default-only 的结构应该留在 default pass 里处理，不应该被 case 简化扫描到。这样后续如果再改 default reuse，不会误碰 lowered switch case 简化的入口。
+
+修改内容：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2651`
+  新增 `testLoweredSwitchSimplifierSkipsDefaultOnlyTargets()`，验证 default-only 目标块不会被 lowered switch case 简化误删。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2665`
+  补齐测试所需的 default 结构 successor 块，保持图完整。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5368`
+  将测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.switch-default-separate.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186180
+```
+
+复杂度评分：
+
+- 实现效果：4/10。默认分支和 case 简化的边界被测试钉住了。
+- 理解成本：1/10。只是补了一个 negative test。
+- 维护成本：1/10。边界清楚，后续 default reuse 调整不会误伤 case 简化。
