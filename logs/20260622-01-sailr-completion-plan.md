@@ -762,3 +762,44 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.07 sys=0.01 maxrss=185992
 - 实现效果：5/10。补强 copied source 身份回归覆盖，算法本身沿用上一轮实现。
 - 理解成本：2/10。只新增一个 focused test。
 - 维护成本：2/10。后续改合并条件时，这个测试能直接挡住 copied source 混合。
+
+# 2026-06-22 实现记录：清理未 materialize copy 的 payload
+
+本轮继续收紧 copied block 的 payload 边界。`duplicateBlock()` 之前会从 source block 浅拷贝 statement / condition / switch case value，再把 `BodyMaterialized` 标成 false。这会让未 materialize 的 copied block 看起来已经带有可渲染 payload，后续容易让 renderer 误把“复用原 body”当成算法语义。
+
+本轮改成：复制 block 时只保留新的控制流身份、body source、successor 和 switch case target；statement / condition / case value payload 必须通过 shared `materializeBlockBody()` 显式落到 copy 上。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:95`
+  `StructuredCFG::duplicateBlock()` 清空 copied block 的 `Statements`、`Condition` 和每个 `SwitchCase::Value`，但保留 successor 和 case target。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:723`
+  `testStructuredCFGDuplicatesBlockBodySource()` 改为先验证未 materialize copy 没有 statement payload，再调用 `materializeBlockBody()` 验证 payload 正确落到 copy。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1059`
+  `testStructuredCFGDuplicateRegionRewritesInternalEdges()` 验证 duplicated region 内部 copy 初始没有 statement payload，materialize 后才出现原 body payload。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.copy-payload-boundary.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=184968
+```
+
+复杂度评分：
+
+- 实现效果：6/10。明确了未 materialize copy 不能携带浅拷贝 payload，后续 renderer 不能偷用这层状态。
+- 理解成本：2/10。改动集中在 `duplicateBlock()`，测试按同一语义调整。
+- 维护成本：2/10。payload materialize 入口更单一，后续 Phi / vvar 重写仍需要另行补 shared 表达。
