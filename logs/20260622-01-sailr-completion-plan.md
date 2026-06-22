@@ -803,3 +803,46 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=184968
 - 实现效果：6/10。明确了未 materialize copy 不能携带浅拷贝 payload，后续 renderer 不能偷用这层状态。
 - 理解成本：2/10。改动集中在 `duplicateBlock()`，测试按同一语义调整。
 - 维护成本：2/10。payload materialize 入口更单一，后续 Phi / vvar 重写仍需要另行补 shared 表达。
+
+# 2026-06-22 实现记录：保护 copied switch 的 target 身份
+
+本轮没有扩大 `ReturnDuplicatorLow` 或 switch pass 的匹配形状。对照 Angr 后，完整一般分支 return-region 仍需要 Phi / vvar payload 重写；`SwitchReusedEntryRewriter` 的 Angr 版本用虚拟 goto 节点，而当前 NotDec 复制 entry region，这属于语义和输出质量取舍，不能直接改。
+
+本轮只补 shared CFG 的复制边界：单块复制 switch 时，不能让调用方传入一组和原 switch successor 不一致的新 successors。否则 copy 会保留原 switch case target，却带着另一组 successor，后续 predecessor / switch case / goto 身份会分裂。region 复制仍由 `duplicateRegion()` 统一复制原 successor，再重写 region 内部 successor 和 case target。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:82`
+  `StructuredCFG::duplicateBlock()` 对 switch block 增加一致性检查：传入 successors 必须等于 source switch 的 successors，否则拒绝复制。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:230`
+  `StructuredCFG::duplicateRegion()` 先读取 original block，复制时传入 original successors，保持 switch copy 的初始 target 身份一致；后续仍在同一函数里重写 region 内部 successor / case target。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:917`
+  新增 `testStructuredCFGRejectsInconsistentCopiedSwitchSuccessors()`，验证单块 copied switch 不接受不一致 successors，并且原 switch target 不被破坏。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5003`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.switch-copy-boundary.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.04 maxrss=182076
+```
+
+复杂度评分：
+
+- 实现效果：5/10。补住 copied switch 的 successor / case target 身份边界，避免 shared CFG 产生半一致 copy。
+- 理解成本：2/10。只在 `duplicateBlock()` 加一条 switch guard，`duplicateRegion()` 保持原本重写流程。
+- 维护成本：2/10。后续如果需要单块复制 switch 并改 target，应该新增显式 shared API，而不是让调用方只改 successors。
