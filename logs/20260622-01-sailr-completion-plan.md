@@ -887,3 +887,48 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=183560
 - 实现效果：5/10。减少一个和 Angr 不一致的 default rewrite 入口，避免 terminal default 被错误 forward。
 - 理解成本：2/10。只是把候选记录放到 shape 检查之后。
 - 维护成本：2/10。后续要支持 terminal default 时，需要先确认 Angr/NotDec 语义取舍，再单独补 shared 表达。
+
+# 2026-06-22 实现记录：SwitchReusedEntryRewriter 只处理 case target
+
+本轮继续收紧 switch deoptimization 的 pass 边界。Angr 的 `SwitchReusedEntryRewriter` 针对 jump table entry node；default case 复用由 `SwitchDefaultCaseDuplicator` 处理。当前 NotDec 之前用 `successorsOf()` 判断 switch 是否触达 entry，会把 default successor 也当成 reused entry，导致两个 pass 的语义边界混在一起。
+
+本轮改成：`SwitchReusedEntryRewriter` 只扫描 `SwitchCase::Target`，不再把 default successor 当 entry。这样 default reuse 继续交给 default pass，reused-entry pass 只处理 case entry reuse。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:301`
+  `switchReachesBlock()` 改为 `switchCaseReachesBlock()`，只检查 `CFGBlock::Cases`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:649`
+  `SwitchReusedEntryRewriter::runOnGraph()` 使用 case-only helper 收集 switch predecessors。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2106`
+  将 reused-entry 正向测试改成真实 case target 复用，而不是 default successor 复用。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2288`
+  新增 `testSwitchReusedEntryRewriterSkipsDefaultOnlyTargets()`，验证 default-only 共享不会触发 reused-entry rewrite。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2310`
+  limit 测试也改成 case target 复用，避免因为 default 不再扫描而失去覆盖。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.reused-entry-case-only.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=186480
+```
+
+复杂度评分：
+
+- 实现效果：6/10。拆清 reused-entry 和 default reuse 的 shared pass 边界，减少错误 rewrite 入口。
+- 理解成本：2/10。helper 从 all successors 改成 cases，测试数据同步改成 case target。
+- 维护成本：2/10。后续如果要处理 default entry-like 形状，应在 default pass 或新 shared pass 里明确建模。
