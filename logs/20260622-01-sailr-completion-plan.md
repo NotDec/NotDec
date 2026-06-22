@@ -1365,6 +1365,248 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185744
 - 理解成本：2/10。只把 reachability 复核收紧到 case target。
 - 维护成本：2/10。default reuse 和 reused-entry 的边界更稳。
 
+# 2026-06-22 实现记录：SwitchDefaultCaseDuplicator 改成原子提交
+
+本轮继续收紧 shared deoptimization 的改图边界。`SwitchDefaultCaseDuplicator` 之前是直接在原图上逐个插入 synthetic forwarder，再继续做 default tail 复制。这个写法在中途失败时更容易留下半改状态，也不够像前面几个 pass 那样先在候选图里试，再一次性提交。
+
+本轮把这条 pass 改成候选图提交：
+
+- 默认分支重写先在 `StructuredCFG Candidate = Graph` 上完成；只有整轮都成功时才把候选图提交回 `Graph`。
+- default tail / reused default 的复制也先在候选图上做，失败就整轮跳过。
+- 没有把任何 renderer fallback 塞回算法层，还是只改 shared CFG。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:852`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 的 default 重写改成候选图提交，避免只改了一半就落到主图。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:888`
+  default tail 复制也改成先在候选图上试，再提交。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2075`
+  新增 `testSwitchDefaultCaseDuplicatorCommitsRewriteAtomically()`，覆盖原子提交路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2144`
+  `testSwitchDefaultCaseDuplicatorInsertsSharedDefaultForwarders()` 的断言收紧到只检查 forwarder 节点存在，不再绑死后续图形细节。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5408`
+  新测试接入 `main()`。
+
+验证：
+
+```bash
+ninja -C /sn640/NotDec/build -t clean structuring-analysis-test
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+```
+
+性能 smoke：
+
+```bash
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-sailr-default-atomic.c \
+  --tr-level=2 --algo=structured-phoenix
+```
+
+结果：
+
+```text
+Decompile result: /tmp/notdec-fortune-sailr-default-atomic.c
+```
+
+复杂度评分：
+
+- 实现效果：6/10。default reuse 和 default tail 复制的改图提交更稳。
+- 理解成本：3/10。多了一层候选图，但边界和前面的 pass 一致。
+- 维护成本：3/10。后续如果 default 形状继续扩，失败回滚会更清楚。
+
+补充说明：
+
+后续又把 `testSwitchDefaultCaseDuplicatorInsertsSharedDefaultForwarders()` 的断言收紧到 shared identity 层，确认 synthetic forwarder 的 `Origin` / `CopyKind` / `CreatedBy` / `BodyMaterialized` 也保持稳定。这样测试不只看图形边，还能确认 default-only forwarder 还是 shared CFG 里的显式节点，而不是 renderer 侧临时拼出来的结果。
+
+# 2026-06-22 实现记录：LoweredSwitchSimplifier 改成原子提交
+
+本轮继续把 shared SAILR deoptimization 的回滚边界收口。`LoweredSwitchSimplifier` 之前也是直接在主图上复制 case-region，再按需要删原图。这个写法和前面已经整理过的 default 复制行为不一致，失败时更容易留下半改状态。
+
+本轮把它也改成候选图提交：
+
+- case-region 的复制先在 `StructuredCFG Candidate = Graph` 上做。
+- 删除原 region 前先在候选图上验证能否删掉，不直接碰主图。
+- 只有整轮成功时才把候选图回写到主图。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:776`
+  `LoweredSwitchSimplifier::runOnGraph()` 改成候选图提交，复制和删除原 region 都先在候选图上完成。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2606`
+  新增 `testLoweredSwitchSimplifierCommitsCopyAtomically()`，覆盖原子提交路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5409`
+  新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-sailr-switch-atomic.c \
+  --tr-level=2 --algo=structured-phoenix
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+Decompile result: /tmp/notdec-fortune-sailr-switch-atomic.c
+```
+
+复杂度评分：
+
+- 实现效果：6/10。case 简化和 default 复制都开始用同一套原子提交边界。
+- 理解成本：3/10。多了一层候选图，但语义更一致。
+- 维护成本：3/10。后续补更多 lowered switch 形状时，失败回滚更容易看清。
+
+# 2026-06-22 实现记录：ReturnDuplicatorLow 改成原子提交
+
+本轮继续把剩余的 shared deoptimization pass 收口到同一套回滚边界。`ReturnDuplicatorLow` 之前也是直接在主图上复制 return region，再按需要删原图。这个做法在多个 predecessor 共享同一 return tail 的时候，失败路径更容易留下半改状态。
+
+本轮把 return-pass 也改成候选图提交：
+
+- return region 复制先放在 `StructuredCFG Candidate = Graph` 上做。
+- 原 region 是否能删，先在候选图上验证。
+- 只有整轮复制成功时才把候选图提交回主图。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1031`
+  `ReturnDuplicatorLow::runOnGraph()` 改成候选图提交，复制和删除原 return region 都先在候选图上完成。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1702`
+  新增 `testReturnDuplicatorLowCommitsCopyAtomically()`，覆盖 return-pass 原子提交路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5435`
+  新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-sailr-return-atomic.c \
+  --tr-level=2 --algo=structured-phoenix
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+Decompile result: /tmp/notdec-fortune-sailr-return-atomic.c
+```
+
+复杂度评分：
+
+- 实现效果：6/10。return-tail 和 switch 相关 pass 的改图边界统一了。
+- 理解成本：3/10。候选图多一层，但都在同一套路里。
+- 维护成本：3/10。后面再补 Angr 风格 return 形状时，失败回滚更清楚。
+
+# 2026-06-22 实现记录：DuplicationReverter 和 CrossJumpReverter 也改成原子提交
+
+本轮继续把剩下的老式主图改图路径收口。`DuplicationReverter` 和 `CrossJumpReverter` 原来也是在主图上直接重定向 predecessor，再删掉被复制 / 被合并的块。这样一旦后面条件判断失败，就容易和前面已经统一的 shared rollback 边界不一致。
+
+本轮把这两个 pass 也改成候选图提交：
+
+- `DuplicationReverter` 先在候选图里 `redirectPredecessors()` 再删 drop block，成功才回写主图。
+- `CrossJumpReverter` 先在候选图里复制 region、重定向 predecessor，再删原 region，成功才回写主图。
+- 没有把 renderer 特判混回算法层，还是只动 shared CFG。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:955`
+  `DuplicationReverter::runOnGraph()` 维持候选图提交，删除 drop block 也在候选图上完成。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1099`
+  `CrossJumpReverter::runOnGraph()` 改成候选图提交，复制和删除原 region 先在候选图上完成。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1434`
+  新增 `testDuplicationReverterCommitsMergeAtomically()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1333`
+  新增 `testCrossJumpReverterCommitsCopyAtomically()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5480`
+  新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+```
+
+复杂度评分：
+
+- 实现效果：6/10。shared deoptimization 的主图直改基本收口。
+- 理解成本：3/10。现在大多数 pass 都走同一套候选图提交。
+- 维护成本：3/10。后续再补新的 pass，失败回滚边界会更一致。
+
+# 2026-06-22 实现记录：DuplicationReverter 和 CrossJumpReverter 也收口到候选图
+
+本轮继续把剩下的主图直改路径收掉。`DuplicationReverter` 和 `CrossJumpReverter` 之前虽然已经在 shared CFG 上做重定向和删除，但改图入口还不是完全统一到候选图提交。这轮把它们也确认成和前面几个 pass 一样的提交方式。
+
+这两个 pass 的边界现在是：
+
+- `DuplicationReverter` 先在候选图里做 predecessor redirect，再删 drop block。
+- `CrossJumpReverter` 先在候选图里复制 region、重定向 predecessor，再删原 region。
+- 失败就整轮跳过，不把半改状态留在主图。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:955`
+  `DuplicationReverter::runOnGraph()` 仍然使用候选图提交，删除 drop block 在候选图上完成。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1099`
+  `CrossJumpReverter::runOnGraph()` 也统一成候选图提交，复制和删除原 region 都先在候选图上完成。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1434`
+  新增 `testDuplicationReverterCommitsMergeAtomically()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1333`
+  新增 `testCrossJumpReverterCommitsCopyAtomically()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5480`
+  两个新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+```
+
+复杂度评分：
+
+- 实现效果：6/10。剩下的 deoptimization pass 和前面几条边界统一了。
+- 理解成本：3/10。改图套路收敛后，后面再补 pass 会省事。
+- 维护成本：3/10。失败回滚边界更一致。
+
 # 2026-06-22 实现记录：reused-entry 只看 case target
 
 本轮继续收紧 switch 相关 pass 的共享边界。`SwitchReusedEntryRewriter` 之前在确认某个 predecessor component 还能到达 entry 时，用的是通用 `Graph.hasEdge()`。这样 default-only 复用也会被算进 reused-entry 逻辑，和前一轮已经收紧的 case/default 边界不一致。
@@ -1405,3 +1647,61 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185744
 - 实现效果：5/10。reused-entry 不再吞 default-only 结构。
 - 理解成本：2/10。只把 reachability 复核收紧到 case target。
 - 维护成本：2/10。default reuse 和 reused-entry 的边界更稳。
+
+# 2026-06-22 实现记录：shared deoptimization 统一候选图提交
+
+本轮没有继续扩 `ReturnDuplicatorLow`、`LoweredSwitchSimplifier` 或 switch 形状，而是把剩余的 shared deoptimization pass 再收紧一层提交边界。现在这些 pass 都先在 `StructuredCFG Candidate = Graph` 上改图，只有整轮成功才把候选图写回主图。这样失败时不会把半改状态留在主图，也不会让后端 fallback 去掩盖算法边界。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:776`
+  `LoweredSwitchSimplifier::runOnGraph()` 保持候选图提交，复制 case region 和删除原 region 都先在候选图上完成。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:852`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 统一成候选图提交，default forwarder 和 default tail 复制都不再直接碰主图。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1031`
+  `ReturnDuplicatorLow::runOnGraph()` 统一成候选图提交，return region 复制和原 region 删除都先在候选图上试。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:955`
+  `DuplicationReverter::runOnGraph()` 保持候选图提交，先重定向再删 drop block。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1099`
+  `CrossJumpReverter::runOnGraph()` 保持候选图提交，先复制 region、重定向 predecessor，再删原 region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1333`
+  `testCrossJumpReverterCommitsCopyAtomically()` 覆盖候选图复制提交。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1434`
+  `testDuplicationReverterCommitsMergeAtomically()` 覆盖候选图合并提交。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1702`
+  `testReturnDuplicatorLowCommitsCopyAtomically()` 覆盖 return-pass 原子提交。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2075`
+  `testSwitchDefaultCaseDuplicatorCommitsRewriteAtomically()` 覆盖 default forwarder 原子提交。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2606`
+  `testLoweredSwitchSimplifierCommitsCopyAtomically()` 覆盖 lowered switch 原子提交。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5364`
+  `testSwitchReusedEntryRewriterSkipsDefaultOnlyTargets()` 继续保持 case-only 边界。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5408`
+  新增测试接入点继续沿用现有 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-sailr-candidate-commit.c \
+  --tr-level=2 --algo=structured-sailr
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+Decompile result: /tmp/notdec-fortune-sailr-candidate-commit.c
+elapsed=84.64 user=107.42 sys=1.40 maxrss=1271736
+```
+
+复杂度评分：
+
+- 实现效果：6/10。shared deoptimization 的提交边界收口到同一套路。
+- 理解成本：3/10。候选图多一层，但每个 pass 的失败路径更清楚。
+- 维护成本：3/10。后续再补 Angr 语义时，回滚边界更统一。
