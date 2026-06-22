@@ -682,3 +682,46 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186448
 - 实现效果：6/10。补了 Angr default 复用里的内部路径过滤，减少误复制。
 - 理解成本：4/10。新增一个小的 CFG reachability helper，逻辑局限在 shared pass。
 - 维护成本：4/10。后续如果 default pass 更贴近 Angr jump-table 语义，这个判断还能继续复用。
+
+# 2026-06-22 实现记录：DuplicationReverter 保留 copied / synthetic 身份
+
+本轮继续收紧 copied / virtual block 的身份边界。`DuplicationReverter` 之前只按 block shape 合并，可能把 synthetic forwarder 或 copied block 和普通 original block 合并掉。这样会丢掉 `Origin`、`SourceBlock`、`CopyKind`、`CreatedBy` 这些 shared CFG 身份信息，不符合 copied / virtual block 必须保持独立身份的目标。
+
+本轮改成：普通 original block 仍可按 shape 合并；但 copied / synthetic 这类带特殊身份的 block，必须 origin / copy kind / creator 一致，且非 original block 的 source 也一致，才允许合并。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:54`
+  新增 `sameBlockIdentityKind()`，用于比较 shared CFG 身份信息。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:951`
+  `DuplicationReverter::runOnGraph()` 合并前同时检查 identity kind 和 block shape。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1307`
+  新增 `testDuplicationReverterKeepsSyntheticIdentitySeparate()`，验证 synthetic forwarder 不会和同 shape 的 ordinary block 合并。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4942`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.dup-identity.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=185340
+```
+
+复杂度评分：
+
+- 实现效果：7/10。DuplicationReverter 不再混合 original / copied / synthetic 身份，普通 original duplicate 合并仍保留。
+- 理解成本：3/10。新增一个身份比较函数，和 shape 比较分开。
+- 维护成本：3/10。后续复制策略扩展时，合并条件仍集中在 shared pass。
