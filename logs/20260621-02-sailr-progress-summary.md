@@ -817,6 +817,36 @@ branch -> return-tail -> return
 - 理解成本：3/10。新增一个保守 helper，和已有 terminal fork helper 并列。
 - 后期维护成本：3/10。后续补完整 ReturnDuplicatorLow 时，这个 helper 可以作为不需要 Phi/vvar 的 fast path 保留。
 
+本轮修了 `SwitchDefaultCaseDuplicator` synthetic default forwarder 的 shared CFG 边界。之前插入 forwarder 时用 `Graph.replaceEdge()`，如果同一个 switch 里 default successor 和某个 case target 都指向同一个 block，会把 case target 也一起改成 forwarder。这会把 Angr 语义里的“default goto block”误扩到 case 边。现在只改 switch 的 default successor 槽位，case target 保持不变。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:365`
+  新增 `replaceDefaultSwitchSuccessor()`，只允许改 `Switch.Successors.front()`，不碰 `Cases`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:779`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 插入 forwarder 后改用 `replaceDefaultSwitchSuccessor()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1715`
+  新增 `testSwitchDefaultCaseDuplicatorKeepsCaseTargetsOnDefaultReuse()`，验证 default 和 case 指向同一 block 时，只 default 变成 forwarder，case 仍指向原 default block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4688`
+  把新测试接入 `structuring-analysis-test`。
+
+这个改动仍然只在 shared CFG 层表达 default forwarder，不引入 C / Solidity renderer 特判。
+
+验证：
+
+- `cmake --build /sn640/NotDec2/build --target notdec-backend-structuring structuring-analysis-test notdec-llvm2c-exe notdec -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `ctest --test-dir /sn640/NotDec2/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+  通过，5 个测试。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-default-only-forwarder.c --tr-level=2 --algo=structured-sailr`
+  通过，`elapsed=78.01 user=85.35 sys=0.05 maxrss=218236`。
+
+复杂度 / 维护判断：
+
+- 实现效果：7/10。修正了 default forwarder 的 shared CFG 边界，避免 case edge 被错误改写。
+- 理解成本：2/10。新增 helper 很小，语义直接对应 switch default slot。
+- 后期维护成本：2/10。后续如果 `StructuredCFG` 增加一等 default edge API，可以把这个 helper 下沉到 CFG API。
+
 ## 还差什么
 
 还差真正的完整 Angr SAILR deoptimization pass：
