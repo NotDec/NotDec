@@ -449,3 +449,44 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186780
 - 实现效果：7/10。copied block materialize 后不会丢复制身份，body-source 和 materialized 状态分开表达。
 - 理解成本：4/10。多一个布尔字段，但语义直接。
 - 维护成本：4/10。后续 payload rewrite 可以检查 `BodyMaterialized`，不必从 `BodyBlock == Id` 反推 copy 是否还保持原身份。
+
+# 2026-06-22 实现记录：materialize 缺 body source 时不再 fallback 成功
+
+本轮继续收紧 shared CFG 的 copied body 语义。上一轮 `materializeBlockBody()` 已经成为 shared API，但如果 body source 已经不存在，函数仍会把 copy 标记成 materialized。这等于把 `duplicateBlock()` 里浅拷贝下来的 payload 当成完整语义，容易重新滑回“renderer 复用 body 看起来能输出”的 fallback。
+
+本轮改成：body source 缺失时 `materializeBlockBody()` 返回 false，并保持 block 原状态。`removeBlock()` 的正常路径不受影响，因为它是在真正 erase body source 前调用 materialize。
+
+修改内容：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:157`
+  `StructuredCFG::materializeBlockBody()` 在 `getBlock(BodyId)` 失败时直接返回 false，不再设置 `BodyBlock=Id` 或 `BodyMaterialized=true`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:910`
+  新增 `testStructuredCFGMaterializeFailsWhenBodySourceIsMissing()`，验证缺 body source 时 copied block 仍保持原 `BodyBlock`、`BodyMaterialized=false` 和 copied 身份。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4779`
+  将新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.materialize-source-guard.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.08 user=0.04 sys=0.04 maxrss=183448
+```
+
+复杂度评分：
+
+- 实现效果：6/10。materialize API 不再把缺 source 的 copied block 标成成功，减少 fallback 语义。
+- 理解成本：2/10。只是把失败条件显式化。
+- 维护成本：3/10。后续删除或重写 body source 前必须先 materialize 成功，失败会更早暴露。
