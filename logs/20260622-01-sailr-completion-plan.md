@@ -290,3 +290,62 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.04 maxrss=185752
 - 实现效果：6/10。一次 region copy 的范围、copy kind、创建者现在留在 shared 返回值里，后续 pass 可以少猜一点。
 - 理解成本：4/10。只是补 `DuplicatedRegion` 返回记录，没有新增全局状态。
 - 维护成本：4/10。接口默认值保持兼容，后续如果需要持久化 copy operation，再从这个返回记录扩展。
+
+# 2026-06-22 实现记录：对齐 Angr SAILR deoptimization pass 顺序
+
+本轮先读了本地 Angr 源码：
+
+- `/sn640/angr/angr/analyses/decompiler/optimization_passes/return_duplicator_low.py`
+- `/sn640/angr/angr/analyses/decompiler/optimization_passes/return_duplicator_base.py`
+- `/sn640/angr/angr/analyses/decompiler/presets/full.py`
+- `/sn640/angr/angr/analyses/decompiler/presets/fast.py`
+- `/sn640/angr/angr/analyses/decompiler/presets/malware.py`
+
+确认两点：
+
+- Angr `ReturnDuplicatorLow` 的一般 region copy 会重写 Phi / VirtualVariable，并更新被移除 predecessor 后的 Phi。当前 NotDec shared CFG 还没有 payload materialize / Phi rewrite 能力，所以本轮不扩大 ReturnDuplicatorLow 的一般分支 region。
+- Angr preset 里这些 pass 的相对顺序不是当前 NotDec 的顺序。`fast` / `malware` 是 `SwitchDefaultCaseDuplicator -> SwitchReusedEntryRewriter -> LoweredSwitchSimplifier -> ReturnDuplicatorLow`；`full` 在 `SwitchDefaultCaseDuplicator` 后还有 `DuplicationReverter`，`CrossJumpReverter` 在 `ReturnDuplicatorLow` 后。NotDec 当前实现了 `DuplicationReverter` 和 `CrossJumpReverter`，所以本轮按 Angr full preset 的相对顺序收敛。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:41`
+  `StructuringOptimizationPass` 增加 `name()`，用于固定和测试 shared pipeline 顺序。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:20`
+  给 `DuplicationReverter` 等 SAILR pass 增加稳定名字。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPipeline.h:23`
+  `StructuringOptimizationPipeline` 增加 `passNames()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPipeline.cpp:14`
+  实现 `passNames()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1053`
+  `buildSAILRDeoptimizationPipeline()` 调整为：
+  `SwitchDefaultCaseDuplicator -> DuplicationReverter -> LoweredSwitchSimplifier -> ReturnDuplicatorLow -> CrossJumpReverter -> SwitchReusedEntryRewriter`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2320`
+  新增 `testSAILRDeoptimizationPipelineMatchesAngrOrder()`，固定当前顺序。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4742`
+  把新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.sailr-pipeline-order.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186400
+```
+
+复杂度评分：
+
+- 实现效果：6/10。pipeline 顺序更接近 Angr，且有测试固定。还没有补 ReturnDuplicatorLow 的 Phi/vvar 复制语义。
+- 理解成本：3/10。新增 pass name 只服务于 pipeline 可观察性。
+- 维护成本：3/10。后续新增 SAILR pass 时需要同步更新顺序测试。
