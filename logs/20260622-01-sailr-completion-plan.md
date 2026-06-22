@@ -1104,3 +1104,52 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.06 sys=0.03 maxrss=182152
 - 实现效果：6/10。删除 body source 的失败路径不再留下部分 materialize 状态。
 - 理解成本：2/10。只把已有 materialize 检查拆成预检和执行两步。
 - 维护成本：2/10。后续如果 materialize 增加新的失败条件，需要同步补预检或改成事务式 rollback。
+
+# 2026-06-22 实现记录：SAILR 删除 original region 前做原子预检
+
+本轮继续处理 copied body-source 和 SAILR deoptimization 的交界。前面已经让 `removeBlock()` 在删除 body source 失败时保持原子，但多个 pass 删除 original region 时仍是逐个 `removeBlock()`，并且不检查失败结果。这样会有两个问题：后面的 block 删除失败时，前面的 block 可能已经被删；或者 source 删除被 shared CFG 拒绝，但 pass 仍继续把这次改图当成成功。
+
+本轮改成：shared `StructuredCFG` 提供 `removeBlocks()`，先在临时 CFG 上按当前 `removeBlock()` 语义试删，全部成功才提交结果。`LoweredSwitchSimplifier`、`ReturnDuplicatorLow`、`CrossJumpReverter` 在准备删除 original region 前先用这个接口做预检；预检失败就跳过该 candidate，不复制和重定向。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:133`
+  新增 `StructuredCFG::removeBlocks()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:348`
+  新增 `StructuredCFG::removeBlocks()`，用临时 CFG 试删所有 block，成功后再整体提交。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:782`
+  `LoweredSwitchSimplifier::runOnGraph()` 删除 original case region 前先预检 `removeBlocks()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1035`
+  `ReturnDuplicatorLow::runOnGraph()` 删除 original return region 前先预检 `removeBlocks()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1117`
+  `CrossJumpReverter::runOnGraph()` 删除 original copied region 前先预检 `removeBlocks()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:943`
+  新增 `testStructuredCFGRemoveBlocksIsAtomicOnLaterFailure()`，验证批量删除后半段失败时前半段不会被删。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2559`
+  新增 `testLoweredSwitchSimplifierSkipsUnsafeOriginalDeletion()`，验证 original region 不能安全删除时 pass 不复制、不重定向、不改图。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.atomic-region-removal.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.11 user=0.07 sys=0.03 maxrss=182560
+```
+
+复杂度评分：
+
+- 实现效果：6/10。original region 删除失败时不再留下半删或半复制状态。
+- 理解成本：2/10。新增一个 shared CFG 批量删除接口，pass 只做删除前预检。
+- 维护成本：3/10。`removeBlocks()` 复制 CFG 做预检，简单但有额外成本；当前只在 deoptimization 删除 original region 前使用，范围可控。
