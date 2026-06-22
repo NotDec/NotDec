@@ -349,3 +349,54 @@ notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186400
 - 实现效果：6/10。pipeline 顺序更接近 Angr，且有测试固定。还没有补 ReturnDuplicatorLow 的 Phi/vvar 复制语义。
 - 理解成本：3/10。新增 pass name 只服务于 pipeline 可观察性。
 - 维护成本：3/10。后续新增 SAILR pass 时需要同步更新顺序测试。
+
+# 2026-06-22 实现记录：materialize copied body 不再丢 copied 身份
+
+本轮继续收紧 copied block 的 shared 语义。之前 `removeBlock()` 删除 body source 时，会把引用该 body 的 copy 改成 `Origin=Original`、`SourceBlock=CopyId`、`CopyKind=None`。这会让 copied block 在 materialize 后丢掉复制身份，不符合“copied block 必须保持独立 BlockId 和明确 body-source / materialize 语义”的目标。
+
+本轮改成：body payload 可以 materialize 到 copy 自己，但 copy 的控制流身份仍然是 copied，source/copy kind/created-by 不被清掉。
+
+修改内容：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:77`
+  `CFGBlock` 新增 `BodyMaterialized`，区分“body 已经落到当前 block”和“body 仍来自其他 block”。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:42`
+  `StructuredCFG::addBlock()` 在 `BodyBlock == Id` 时标记 `BodyMaterialized=true`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:74`
+  `StructuredCFG::duplicateBlock()` 创建 copy 时标记 `BodyMaterialized=false`，即使 statements 当前还是浅拷贝，也以 `BodyBlock` 为语义来源。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:260`
+  `StructuredCFG::removeBlock()` 删除 body source 时只把 `BodyBlock` 改到自身并标记 materialized，不再清掉 `Origin`、`SourceBlock`、`CopyKind`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:716`
+  `testStructuredCFGDuplicatesBlockBodySource()` 增加 original/copy 的 `BodyMaterialized` 断言。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:848`
+  `testStructuredCFGRemoveBlockMaterializesCopiedBody()` 改为验证 materialize 后 copy 仍保持 copied 身份和原 source。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:984`
+  `testStructuredCFGDuplicateRegionRewritesInternalEdges()` 验证 duplicated region 的 copy body 尚未 materialize。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1014`
+  `testStructuredCFGCreateSyntheticBlock()` 验证 synthetic forwarder body 已 materialize。
+
+验证：
+
+```bash
+cmake --build /sn640/NotDec/build --target structuring-analysis-test -j4
+/sn640/NotDec/build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir /sn640/NotDec/build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --algo=structured-sailr /tmp/notdec-while-linear-body.ll \
+  -o /tmp/notdec-while-linear-body.materialized-copy.c
+```
+
+结果：
+
+```text
+structuring-analysis-test: passed
+CTest structuring subset: 100% passed
+notdec-llvm2c smoke: elapsed=0.09 user=0.05 sys=0.03 maxrss=186780
+```
+
+复杂度评分：
+
+- 实现效果：7/10。copied block materialize 后不会丢复制身份，body-source 和 materialized 状态分开表达。
+- 理解成本：4/10。多一个布尔字段，但语义直接。
+- 维护成本：4/10。后续 payload rewrite 可以检查 `BodyMaterialized`，不必从 `BodyBlock == Id` 反推 copy 是否还保持原身份。
