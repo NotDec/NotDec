@@ -2,6 +2,8 @@
 
 写成一个新的规划文件，同时给出明确的计划完成条件
 
+是的，Phi指令一定要按照这个方式处理，把我的原话放到logs/20260623-01-sailr-angr-completion-plan.md顶部。
+
 # 背景
 
 当前 SAILR 复刻已经过了搭框架阶段。shared structuring 的基础边界基本稳定：
@@ -390,3 +392,27 @@ branch return-region 也被更窄的能力位保护住了。copied block 的 pay
 
 仍未完成的部分没有变：Phi / vvar 的真实语义还没补，return duplication 也只是
 一般 branch 形状的最小放行，不是完整 Angr 对齐。
+
+# 2026-06-23 实现记录：Solidity 入口统一 Phi demote
+
+这次把 Solidity 输出前的入口也接到了同一条 demoteSSA 路线上。这样 shared
+structuring 还是保持“结构恢复前不处理 Phi”的旧约定，同时 HType 也会在
+demote 前后按 Phi 名字迁到 `.reg2mem` alloca 上。
+
+## 修改内容
+
+- `src/Passes/PassManager.cpp:53`
+  在 `#ifdef NOTDEC_ENABLE_LLVM2C` 下补入 `notdec-llvm2c/StructuralAnalysis.h`，
+  让顶层 pass 可以直接复用 `demoteSSA()` / `demoteSSAFixHT()`。
+- `src/Passes/PassManager.cpp:193`
+  在 `MLsubNotdecSolidity::run()` 里，调用 Solidity backend 前先执行
+  `demoteSSAFixHT()`；如果没有类型恢复结果，就退回 `demoteSSA()`。
+  这样 Solidity 侧和 C 侧一样，结构恢复入口看到的都是已经去掉 Phi 的 IR。
+
+## 验证
+
+- `cmake --build ./build --target notdec -j4`
+- `./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-sailr-phi-demote.sol --tr-level=2 --work-dir=/tmp/notdec-sailr-phi-demote-work --gen-work-dir`
+
+结果：构建通过，smoke 通过，`llvm2c-before-demotessa.ll` 里还能看到 Phi，
+`llvm2c-after-demotessa.ll` 里已没有 Phi，只剩 `.reg2mem` 相关的 load/store。

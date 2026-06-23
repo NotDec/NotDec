@@ -53,6 +53,7 @@
 #ifdef NOTDEC_ENABLE_LLVM2C
 #include "notdec-backends/Solidity/Backend.h"
 #include "notdec-llvm2c/Interface.h"
+#include "notdec-llvm2c/StructuralAnalysis.h"
 #endif
 
 namespace notdec::passes {
@@ -193,6 +194,14 @@ struct MLsubNotdecSolidity : PassInfoMixin<MLsubNotdecSolidity> {
     if (auto DebugDir = notdec::getWorkDirOpt()) {
       Opts.workDir = *DebugDir;
     }
+
+    const char *WorkDir = Opts.workDir.empty() ? nullptr : Opts.workDir.c_str();
+    if (HighTypes) {
+      notdec::llvm2c::demoteSSAFixHT(M, MAM, *HighTypes, WorkDir);
+    } else {
+      notdec::llvm2c::demoteSSA(M, MAM);
+    }
+
     notdec::backend::solidity::decompileModule(M, MAM, os, Opts,
                                                std::move(HighTypes));
     std::cout << "Decompile result: " << OutFilePath << std::endl;
