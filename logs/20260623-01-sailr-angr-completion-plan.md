@@ -231,3 +231,90 @@ ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|s
 4. 再继续扩 `ReturnDuplicatorLow`。
 
 这条路比直接堆 case 更慢一点，但更接近 Angr 的真实语义，也不会把 renderer fallback 当成算法成功。
+
+# 2026-06-23 实现记录：阶段一 payload materialize 入口
+
+本次完成了阶段一的 shared payload materialize 入口，并用一个受 hook 保护的 branch
+return-region 测试验证扩展方向。总计划还没有完成，Phi / vvar rewrite、完整 Angr
+pass 对照和真实样例分类仍需后续继续做。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:62`
+  新增 `PayloadMaterializeKind`、`PayloadMaterializeContext` 和
+  `PayloadMaterializeHook`。context 记录 source block、body block、copy block、
+  original/new predecessor、copy kind、created-by pass，避免 structuring 层依赖
+  C 或 Solidity AST 类型。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:145`
+  给 `StructuredCFG` 增加 `setPayloadMaterializeHook()`、
+  `hasPayloadMaterializeHook()` 和带 predecessor context 的
+  `materializeBlockBody()` overload。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:142`
+  实现 hook 注册和查询。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:162`
+  保留无 hook 快路径，生产路径行为不变；有 hook 时分别重写 statements、
+  branch condition、switch case value，全部写入临时 buffer，成功后才提交，失败不留下半改 payload。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:300`
+  修正 `duplicateRegion()` 失败回滚：只删除本次新建 copy block，不再用
+  `removeBlock()` 逐个删，避免 copy id 已经出现在原图边里时误改原图边。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:189`
+  新增 `collectClosedLinearReturnTail()` 和 `prependBranchReturnRegion()`，
+  识别一个保守的一般 branch return-region：一个分支继续走原 return head，
+  另一个分支是闭合线性 return tail。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1110`
+  branch return-region 只在 `Graph.hasPayloadMaterializeHook()` 为真时启用。
+  这样当前生产后端没有真实 payload rewrite 时不会扩大复制范围。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:500`
+  和 `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:657`
+  copy helper 调用新的 `materializeBlockBody()` overload，给 payload rewrite
+  传入 predecessor context。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:758`
+  新增 copied payload rewrite 测试，覆盖 statements、condition、switch case value。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:819`
+  新增 rewrite 失败原子性测试。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2203`
+  新增带 payload rewrite hook 的 `ReturnDuplicatorLow` branch return-region 复制测试。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build ./build --target structuring-analysis-test notdec -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+```
+
+结果：全部通过，CTest structuring subset 为 5/5 通过。
+
+性能 smoke 使用同一个 fortune 用例：
+
+```bash
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-sailr-materialize-branch-fastpath.c \
+  --tr-level=2 --algo=structured-sailr
+```
+
+本次改动后：`elapsed=196.55 user=218.80 sys=1.78 maxrss=1266720`。
+
+stash 掉 `external/NotDec-llvm2c` 改动并重建后的同口径 baseline：
+`elapsed=200.10 user=222.16 sys=1.67 maxrss=1264960`。
+
+结论：这次 shared materialize 入口没有可见性能退化。当前环境下
+`structured-sailr` fortune baseline 约 200 秒，和旧日志里的 84.64 秒不是同一口径。
+
+## 当前判断
+
+实现效果：7/10。阶段一的入口和回滚边界已经落到 shared CFG，测试覆盖了 payload
+rewrite、失败原子性和一个 branch return-region 形状；但还没有接真实 C/Solidity payload
+clone，也没有完成 Phi / vvar rewrite。
+
+复杂度：6/10。新增 hook 和 context 会增加理解成本，但它把复制 payload 的问题放在
+`StructuredCFG::materializeBlockBody()` 一个入口里，比在 renderer 里分散特判更可控。
+
+维护成本：6/10。无 hook 快路径保持旧行为，branch return-region 也被 hook gate 保护；
+后续主要维护点是定义真实 payload clone 的所有权和失败清理规则。
+
+更好的方案暂时没有明显成立。直接扩大 return-region copy 会绕过 payload 语义，风险更高；
+把 clone 逻辑放进 C/Solidity renderer 会让两个后端各自背 structuring 语义，也不符合目标。
