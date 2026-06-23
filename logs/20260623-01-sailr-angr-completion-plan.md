@@ -318,3 +318,75 @@ clone，也没有完成 Phi / vvar rewrite。
 
 更好的方案暂时没有明显成立。直接扩大 return-region copy 会绕过 payload 语义，风险更高；
 把 clone 逻辑放进 C/Solidity renderer 会让两个后端各自背 structuring 语义，也不符合目标。
+
+# 2026-06-23 实现记录：真实后端接入 payload materialize hook
+
+这轮把前一版的 shared payload materialize 入口接进了真实后端链路，并把
+`ReturnDuplicatorLow` 的 branch return-region gate 拆成前驱感知能力位。目标还是
+同一个：让 copied block 的 payload rewrite 真正落到 shared CFG，而不是只留在测试里。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:145`
+  给 `setPayloadMaterializeHook()` 增加可选的
+  `SupportsPredecessorRewrite` 标记，并新增
+  `hasPredecessorRewritePayloadMaterializeHook()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:142`
+  保存这个能力位。普通 payload clone 和 predecessor-aware rewrite 现在分开记。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1110`
+  `ReturnDuplicatorLow` 只在 predecessor-aware hook 打开时才放行一般 branch
+  return-region，避免普通 clone hook 误扩大复制形状。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:40`
+  C 的 shared structuring 链路现在安装 payload materialize hook。这里先做保守的
+  payload id 复制，让 copied block 在 shared CFG 里能拿到新 id。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:280`
+  Solidity 链路也安装同类 hook，字符串 payload 会生成新的 id，后续 copied
+  block 不再直接复用原 payload 位置。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2203`
+  新增 predecessor-aware branch return-region 测试。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2368`
+  新增负例测试，确认只有普通 clone hook 时 branch return-region 不会被打开。
+
+## 验证
+
+构建：
+
+```bash
+cmake --build ./build --target notdec structuring-analysis-test -j4
+```
+
+结果：通过。
+
+测试：
+
+```bash
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure
+```
+
+结果：通过，CTest subset 5/5。
+
+性能 smoke：
+
+```bash
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' \
+  ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/notdec-fortune-sailr-stage2.c --tr-level=2 --algo=structured-sailr
+```
+
+结果：`elapsed=205.86 user=228.62 sys=1.66 maxrss=1260704`。和前一轮 196.55s、
+200.10s 同一量级，没有看出这次接 hook 带来新的明显退化。
+
+## 当前判断
+
+实现效果：8/10。现在真实 C/Solidity 链路都能走 shared payload materialize hook，
+branch return-region 也被更窄的能力位保护住了。copied block 的 payload 复制不再只靠测试桩。
+
+复杂度：6/10。多了一个能力位，但逻辑仍在 `StructuredCFG` 和 `SAILRDeoptimization`
+两处收口，没有把判断散到 renderer 里。
+
+维护成本：6/10。后续如果真要做 predecessor 级 rewrite，只需要在 hook 里补具体规则；
+目前普通 clone 和 predecessor-aware rewrite 已经分层。
+
+仍未完成的部分没有变：Phi / vvar 的真实语义还没补，return duplication 也只是
+一般 branch 形状的最小放行，不是完整 Angr 对齐。
