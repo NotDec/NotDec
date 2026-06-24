@@ -515,3 +515,34 @@ switch default-tail 复制路径，确认 switch deoptimization 也消费同一�
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=198.74 user=221.13 sys=1.80 maxrss=1266112`，和前几轮 194-205 秒同口径。
+
+# 2026-06-24 实现记录：DuplicationReverter 默认迭代次数对齐 Angr
+
+这次对照 Angr 当前 `DuplicationReverter`，把 shared pass 的默认迭代次数从 4 改为 5。
+这只是 pass option 对齐，不引入 renderer 行为。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1070`
+  `DuplicationReverter::defaultOptions()` 的 `MaxOptIters` 改为 5。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3481`
+  新增 `testSAILRDeoptimizationDefaultOptionsMatchAngr()`，覆盖
+  `DuplicationReverter`、`ReturnDuplicatorLow`、`CrossJumpReverter` 的关键默认选项。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5943`
+  把新测试接入 structuring analysis 测试入口。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-dup-iters.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=196.85 user=219.02 sys=1.74 maxrss=1264000`，没有看到明显性能退化。
+
+## 仍未实现
+
+Angr 的 `DuplicationReverter` 还有 `_get_new_gotos()` 对 future irreducible gotos 的过滤。
+当前 shared CFG 还没有足够语义判断这类 goto，不能只靠本地猜测实现；后续需要先定义
+shared 层的 future irreducible goto 识别规则。
