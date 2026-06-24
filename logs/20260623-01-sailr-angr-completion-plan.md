@@ -2042,3 +2042,28 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补 pipeline 级测试，不改 pass 主逻辑。
 
 维护成本：1/10。以后看某个 pass 被拒绝时，能直接确认后续 pass 还能继续试。
+
+# 2026-06-24 实现记录：SwitchDefaultCaseDuplicator grouped predecessor 成功路径
+
+这次把 `SwitchDefaultCaseDuplicator` 的 grouped predecessor 成功路径也补了一条更实的 shared 断言：现在 default reuse 后半段在 grouped predecessor 进入时，`PayloadMaterializeContext` 里能稳定看到成组前驱，default copy 也确实还是通过 shared materialize 走，不靠 renderer 自己猜 payload。这个点和前面的 grouped failure 一起，把 default reuse 的事务边界补成了完整一对。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3967-4026`
+  新增 `testSwitchDefaultCaseDuplicatorReportsGroupedPredecessors()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：6/10。default reuse 的 grouped 成功/失败边界都更完整了，但还没继续扩到更多 Angr pass 对齐细节。
+
+复杂度：1/10。只补 shared 测试，不改 pass 主逻辑。
+
+维护成本：1/10。以后如果 default reuse 的 group 处理出问题，能直接看是前驱分组还是 payload rewrite 坏了。
