@@ -235,6 +235,25 @@ ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|s
 
 所以现在更像是 shared 语义已经落稳，后面继续补迁移覆盖和样例分类，不是再重搭框架。
 
+## 2026-06-24 实现记录：迁移脚手架继续补齐
+
+这轮没有去碰 shared structuring 算法，只继续补 `run_sailr_bench2_migration.py` 里的迁移脚手架。新增了两个更简单的 proxy，分别钉住 `DuplicationReverter` 的直线无 goto 形状和一个 root cycle 形状，同时把已有 nested switch proxy 保留下来，继续作为 scaffold 而不是 Angr 原始资产。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:134`
+  新增 `build_spec_list_proxy`，用来覆盖 `DuplicationReverter` 的直线无 goto 场景。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:185`
+  新增 `root_cycle_follow_proxy`，用来钉住最小循环结构。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:284`
+  保留 `nested_switch_proxy`，继续作为 scaffold。
+
+验证：
+
+```bash
+python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
 1. 算法层不包含 C renderer / Solidity renderer 特判。
 2. renderer 不承担 structuring fallback 语义。
 3. 所有 copied region 改图都具备候选图提交或事务式回滚。
@@ -1194,6 +1213,12 @@ synthetic goto；这个成本比把 reused-entry 复制语义混进 renderer 更
 和 condensing proxy，但还不是 Angr 全量测试集。
 本轮又补了一个 nested switch 代理样例，确认 shared structuring 能把嵌套 switch 保住为
 两层 switch，而不是退回 goto。
+另外试过一个 loop 型 `printenv_main` 代理，但这个输入在当前 shared 结构下还是会引入
+多余 goto，不适合作为稳定迁移样例，先不纳入迁移集。
+本轮还补了一个 `tr_build_spec_list` 风格的无 goto proxy，用来覆盖
+DuplicationReverter 在简单分支合并时不引入额外控制流的形状。
+本轮也补了一个 `printenv_main` 风格的 root-cycle proxy，确认 shared structuring 能保住
+`do { ... } while (...)` 形状，而不是退回显式 goto。
 
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
