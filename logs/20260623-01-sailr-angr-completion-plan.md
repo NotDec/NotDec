@@ -327,6 +327,26 @@ cmake --build build --target structuring-analysis-test -j4
 shared 语义边界已经稳定，迁移脚手架也已经把主要 Angr 语义点覆盖住，但还缺一批更接近
 目标测试的真实输入，才能把 scaffold 逐个换掉。
 
+## 2026-06-24 实现记录：把一个 switch scaffold 换成真实 fixture
+
+这轮不再拿 `switch_case_recovery_proxy` 做纯内联 proxy，而是从 Bench2 里的真实
+`switch.c.ll` 抽了一个本地 fixture 出来，仍然保留同样的 switch recovery 语义，
+但输入来源变成真实 LLVM IR 片段。这样脚本里至少有一条 case 不再是手写 proxy，而是
+来自 Bench2 的真实样本切片。
+
+- `external/NotDec-llvm2c/test/structuring/fixtures/switch_case_recovery.ll`
+  新增真实 switch recovery fixture。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:277`
+  `switch_case_recovery_proxy` 改成真实 fixture 输入，语义说明也改成 real sample。
+
+验证：
+
+```bash
+python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
 ## 2026-06-24 实现记录：Phi demote 清理逻辑收敛到共享容器接口
 
 这轮只把 `demoteSSAFixHT()` 里对 Phi 残留的擦除，收敛成 `HTypeResult` 自己的共享接口，
