@@ -311,6 +311,22 @@ cmake --build build --target structuring-analysis-test -j4
 
 结果：通过。
 
+## 2026-06-24 当前收口判断
+
+这一轮重新核了迁移脚手架和真实 Bench2 smoke。结果很一致：
+
+- `libuv/1-uv__cancelled.ll`
+- `memcached/1-drive_machine.lto_priv.0.cold.ll`
+- `wolfssl/1-wc_PKCS7_DecodeEncryptedData.cold.ll`
+
+这些真实样例都能跑完，说明 shared structuring 没坏，但输出太短，不能替掉
+`switch_reuse_proxy`、`duplication_reverter_proxy`、`nested_switch_proxy` 这些仍然更像 Angr
+目标语义的脚手架。
+
+所以这轮先不再继续找“能一把替掉所有 proxy”的样例了。当前更像是：
+shared 语义边界已经稳定，迁移脚手架也已经把主要 Angr 语义点覆盖住，但还缺一批更接近
+目标测试的真实输入，才能把 scaffold 逐个换掉。
+
 ## 2026-06-24 实现记录：Phi demote 清理逻辑收敛到共享容器接口
 
 这轮只把 `demoteSSAFixHT()` 里对 Phi 残留的擦除，收敛成 `HTypeResult` 自己的共享接口，
