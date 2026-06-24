@@ -218,6 +218,23 @@ ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|s
 
 ## 工程完成条件
 
+1. 本计划里列出的 shared 语义、对照关系和测试项都已经落到代码或测试里，不再只停留在描述。
+2. `demoteSSAFixHT()`、`StructuredCFG::materializeBlockBody()`、`ReturnDuplicatorLow`、`CrossJumpReverter`、`DuplicationReverter`、`LoweredSwitchSimplifier`、`SwitchDefaultCaseDuplicator`、`SwitchReusedEntryRewriter` 都有对应的 shared 测试。
+3. `structuring-analysis-test` 和 `sailr-bench2-migration` 都能在当前工作树里跑通。
+4. 真实样例和 scaffold 样例都被清楚区分，日志里不把 scaffold 当成 Angr 原始资产。
+5. 顶层 `logs/20260623-01-sailr-angr-completion-plan.md` 保持最新状态记录，后续每次改动都补具体文件、函数和验证结果。
+
+## 2026-06-24 当前状态
+
+现在 shared structuring 的骨架和主要 SAILR pass 已经接上了，Phi 也按旧链路在结构恢复前 demote 掉了，HType 迁移到 demoted LLVM Value 的边界是通的。`StructuredCFG` 里的 copied / synthetic block 身份、payload materialize、return duplication、cross jump、duplication revert、lowered switch 和 pipeline 顺序也都有测试。
+
+还没到“接近 Angr 完整语义”的地方主要有两件事：
+
+1. `run_sailr_bench2_migration.py` 里的 Angr 测试迁移还没有全变成真实原始资产，部分 case 仍然是 scaffold。
+2. 真实样例覆盖面还不够宽，尤其是更复杂的 switch / duplication 形状，还在受旧 intrinsic 和 CFG 断言影响，不能直接当成最终对照基线。
+
+所以现在更像是 shared 语义已经落稳，后面继续补迁移覆盖和样例分类，不是再重搭框架。
+
 1. 算法层不包含 C renderer / Solidity renderer 特判。
 2. renderer 不承担 structuring fallback 语义。
 3. 所有 copied region 改图都具备候选图提交或事务式回滚。
@@ -1175,6 +1192,8 @@ synthetic goto；这个成本比把 reused-entry 复制语义混进 renderer 更
 结果：迁移脚本通过，CTest 子集通过。
 当前迁移覆盖了 return tail、early return、switch recovery、switch clustering、duplicate proxy
 和 condensing proxy，但还不是 Angr 全量测试集。
+本轮又补了一个 nested switch 代理样例，确认 shared structuring 能把嵌套 switch 保住为
+两层 switch，而不是退回 goto。
 
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
