@@ -2094,3 +2094,30 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补 wrapper 级测试，不改 pass 主逻辑。
 
 维护成本：1/10。以后如果 goto 裁剪出问题，能直接看是 end goto 被误删，还是未来不可约 goto 没被挡住。
+
+# 2026-06-24 实现记录：copy fast path 保留 copied switch 身份
+
+这次补了 `materializeBlockBody()` 的无 hook 快路径在 copied switch 上的身份测试。现在 copied switch 走 fast path 时，`Origin`、`SourceBlock`、`CopiedFromBlock`、`CopyKind`、`CreatedBy`、`BodyBlock` 和 switch case target 这些字段都还能维持住，不会因为没有 hook 就退回到 renderer 自己猜。这个点是 shared materialize 的基础收口之一，能把 copied / virtual block 的身份和 payload 分开看。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:939-969`
+  新增 `testStructuredCFGMaterializeFastPathKeepsCopiedSwitchIdentity()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7395`
+  把新测试接进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：5/10。copy fast path 的身份边界更完整了，但还没继续扩到更多 Angr pass 对齐细节。
+
+复杂度：1/10。只补 shared 快路径测试，不改 pass 主逻辑。
+
+维护成本：1/10。以后如果 copied switch 的 fast path 出问题，能直接看是身份字段退回，还是 case target 丢了。
