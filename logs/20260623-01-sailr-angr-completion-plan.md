@@ -364,6 +364,19 @@ cmake --build build --target phi-demote-test -j4
 
 结果：通过。
 
+## 2026-06-24 迁移边界：真实 module-all 级样例仍被旧 intrinsic 挡住
+
+这轮又试了几个更像“真实整模块”的 Bench2 样例：
+
+- `selected-targets-native/libicu/common-library/module-all.ll`
+- `selected-targets-native/wolfssl/shared-library/module-all.ll`
+- `selected-targets-native/memcached/executable/module-all.ll`
+
+它们都还会先撞旧的 `SAContext::getIntrinsic(...): unhandled intrinsic.` 断言，说明
+整模块级真实样例现在仍然不适合作为 SAILR 迁移主对照。相比之下，前面从
+`switch.c.ll` 抽出来的本地 switch fixture 是可以稳定替换一个 proxy 的，所以当前更合理的
+路线是继续按“真实片段 fixture”推进，而不是硬上 module-all。
+
 ## 2026-06-24 实现记录：Phi demote 清理逻辑收敛到共享容器接口
 
 这轮只把 `demoteSSAFixHT()` 里对 Phi 残留的擦除，收敛成 `HTypeResult` 自己的共享接口，
