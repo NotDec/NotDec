@@ -1724,3 +1724,30 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：2/10。只补 commit 回调，不改现有 payload 复制逻辑。
 
 维护成本：2/10。以后看 materialize 的结果语义，快路径和慢路径现在一致了。
+
+# 2026-06-24 实现记录：Self materialize 结果上下文
+
+这次把 `StructuredCFG::materializeBlockBody()` 的自材化路径也补成了完整结果上下文，不再只在复制块快路径上验证 commit 回调。这样 shared materialize 的结束语义在“块自己 materialize 自己”时也能被单测住，后续补 payload rewrite 时不会把这条最简单路径漏掉。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:250-291`
+  自材化路径沿用 `PayloadMaterializeResultHook`，并把 `OriginalCases`、`NewCases`、`OriginalSuccessors`、`NewSuccessors`、`OriginalTerminator`、`NewTerminator` 一并带上。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:920-949`
+  新增 `testStructuredCFGMaterializeSelfReportsFullContext()`，确认 `materializeBlockBody(10)` 这条路径会收到完整结果上下文。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：待执行。
+
+## 当前判断
+
+实现效果：7/10。自材化路径的结果语义补齐了，但还没继续往 copied / virtual block 的 payload rewrite 形状扩。
+
+复杂度：1/10。只补一条测试和一个结果上下文，不碰主算法。
+
+维护成本：1/10。以后看 materialize 的结尾语义，self path 也有明确断言了。
