@@ -1495,3 +1495,37 @@ region。这样 PHI demote 后的 incoming 值映射不会在 SAILR copied block
 复杂度：2/10。只增加一个公共分组 helper，复用现有 hook 能力判断。
 
 维护成本：2/10。后续真正支持 grouped predecessor rewrite 后，这条规则会自动回到组件级复制。
+
+# 2026-06-24 实现记录：Solidity 消费 shared synthetic goto
+
+这次只补 shared tree 到 Solidity fallback 的 smoke。`SwitchReusedEntryRewriter` 已经用
+shared `SyntheticGoto` 表达 reused-entry virtual goto，C/GotoStructurer 已有覆盖；
+这轮确认 Solidity 也消费同一份 `StructuredTree`，不在 renderer 里倒推 copied/virtual
+block 身份。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1107`
+  新增 `testSolidityBodyBuilderConsumesStructuredSyntheticGoto()`，从 `StructuredCFG`
+  创建 synthetic goto，经 `GotoStructurer` 生成 tree，再交给 Solidity `BodyBuilder`
+  渲染。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6834`
+  接入新测试。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+
+结果：structuring 单测、CTest 子集和 `notdec` 构建通过。此轮只补测试，不跑 fortune。
+
+## 当前判断
+
+实现效果：4/10。没有扩大算法语义，但补齐完成条件里 Solidity 消费 shared virtual/synthetic
+block 的一个 smoke。
+
+复杂度：1/10。只新增测试。
+
+维护成本：1/10。测试防止 Solidity fallback 回到 renderer 侧猜 synthetic goto。
