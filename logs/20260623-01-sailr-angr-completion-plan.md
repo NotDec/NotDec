@@ -1336,3 +1336,48 @@ edge-kind 身份，不能判断当前 goto 来自 case 还是 default。这种�
 复杂度：2/10。只复用已有 switch case-only helper 的边界。
 
 维护成本：2/10。逻辑仍在 shared SAILR pass 内，没有 renderer fallback。
+
+# 2026-06-24 实现记录：StructuredGoto 记录 switch edge 来源
+
+这次补上一轮留下的 edge-kind 缺口。`StructuredGoto` 现在记录 goto 是从普通未知上下文、
+switch case 子树，还是 switch default 子树收集出来的。这样 shared deoptimization pass
+不用只靠 source/target 猜边来源。
+
+`CrossJumpReverter` 用这个信息处理同一个 switch 的 case 和 default 都指向同一 target
+的形状：如果 structured tree 明确当前 goto 来自 case，就只复制和重定向 case target，
+default successor 继续留在原 target；如果来源还是 unknown，就保持上一轮的保守跳过。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoManager.h`
+  新增 `StructuredGotoEdgeKind`，并在 `StructuredGoto` 中记录 `EdgeKind`。
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp`
+  收集 switch case/default 子树里的 goto 时分别标记 `SwitchCase` 和 `SwitchDefault`；
+  普通 sequence/if/body 上下文仍保持 `Unknown`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  `CrossJumpReverter::runOnGraph()` 允许同一 source block 里多个 goto 指向同一 target，
+  并用 edge kind 解决 case/default 同 target 的重写边界；删除 original region 前改为
+  检查 candidate 图里 target 是否真的没有 predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testGotoManagerCollectsSwitchGotoEdgeKinds()` 和
+  `testCrossJumpReverterUsesSwitchCaseGotoKind()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-goto-edge-kind.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=203.72 user=226.08 sys=1.73 maxrss=1269308`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：7/10。goto source-target 现在多了 switch case/default 来源身份，
+CrossJumpReverter 不再需要对明确来源的同 target case/default 形状保守跳过。
+
+复杂度：3/10。只给 shared goto summary 加一个小枚举，没有改 renderer。
+
+维护成本：3/10。后续如果要区分更多 edge 类型，可以继续扩 shared edge identity。
