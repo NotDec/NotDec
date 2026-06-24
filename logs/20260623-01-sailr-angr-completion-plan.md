@@ -546,3 +546,31 @@ switch default-tail 复制路径，确认 switch deoptimization 也消费同一�
 Angr 的 `DuplicationReverter` 还有 `_get_new_gotos()` 对 future irreducible gotos 的过滤。
 当前 shared CFG 还没有足够语义判断这类 goto，不能只靠本地猜测实现；后续需要先定义
 shared 层的 future irreducible goto 识别规则。
+
+# 2026-06-24 实现记录：switch case value materialize 带 target 身份
+
+这次补 copied switch block 的 payload materialize context。之前 hook 能看到
+source/body/copy block 和 predecessor，但处理 `SwitchCaseValue` 时只能靠 index 推断 case
+target。现在 shared CFG 直接把原 case target 和复制后的 case target 传给 hook，后端不用猜。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:68`
+  `PayloadMaterializeContext` 新增 `OriginalTarget` 和 `NewTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:247`
+  `StructuredCFG::materializeBlockBody()` 在 materialize switch case value 时填入
+  `Body->Cases[I].Target` 和 `Block->Cases[I].Target`。statement / condition 继续保持空 target。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1096`
+  加强 `testStructuredCFGMaterializesCopiedSwitchWithoutRewritingTargets()`：验证 external case
+  是 `12 -> 12`，region 内部 case 是 `11 -> CopyBodyId`，同时 case value payload 被 hook 改写但
+  copied CFG target 不被覆盖。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-case-targets.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=195.62 user=218.71 sys=1.68 maxrss=1260792`。
