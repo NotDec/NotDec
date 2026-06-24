@@ -488,6 +488,35 @@ shared identity。现在补一条测试，确认 synthetic goto 复制后仍然�
 维护成本：2/10。后面可以继续往这个脚本里补更多 SAILR 相关样例，再逐步把
 angr 侧测试名和本地样例一一对应起来。
 
+# 2026-06-24 实现记录：Bench2 迁移回归补 Angr 测试映射
+
+这次把之前那组 Bench2 迁移回归再往前挪了一步，不再只是“文件能跑”，而是给每个
+样例补了对应的 Angr 测试名和语义标签。这样后续继续迁移 SAILR 测试时，脚本本身就能
+看出这条样例是在对照哪个 Angr case，而不是只靠人为记忆。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:9`
+  给三个样例分别补了 `angr_test` 和 `semantic` 字段。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:61`
+  失败信息现在会带上样例名、Angr 测试名和语义标签，方便后面补更多映射。
+
+## 验证
+
+- `python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+- `ctest --test-dir /sn640/NotDec/build -R sailr-bench2-migration --output-on-failure`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：5/10。迁移回归已经不只是匿名样例，但现在还只是三组最基础的语义映射，
+还没真的把 angr 的 SAILR 测试逐个迁完。
+
+复杂度：2/10。只是给现有脚本加了元数据和更清楚的失败信息。
+
+维护成本：2/10。后面继续补映射时，脚本结构不需要再改。
+
 # 2026-06-23 实现记录：真实后端接入 payload materialize hook
 
 这轮把前一版的 shared payload materialize 入口接进了真实后端链路，并把
@@ -2605,3 +2634,37 @@ angr 侧测试名和本地样例一一对应起来。
 
 完成标准也要再往前走一步：每个映射都要能说明它对应的是 return duplication、
 duplicate reversion、switch reuse 还是 condensing / goto 语义，而不是只说“这个文件能跑”。
+
+## 2026-06-24 迁移补充：先按语义分类，不硬贴 angr 测试名
+
+这次把 `sailr-bench2-migration` 再收紧了一点，不再假装能直接找到 angr 测试对应的
+本地文件名。实际看下来，Bench2 里能稳定拿来做迁移回归的，是一组已经存在的
+LLVM IR 产物，它们更适合先按语义分类：
+
+- `hexx64/function-0x1156e0/native/function-0x1156e0.ll`
+  对应简单的 return-tail 收口，适合看 `ReturnDuplicatorLow` 一类的最小尾部复制。
+- `python/one-_PyPegen_fill_token.cold.ll`
+  对应 early-exit return 链，适合看 return duplication 的保守子集。
+- `lighttpd/1-main_init_once.ll`
+  对应较明显的 `goto structured_block_*` 链，适合看 condensing / block reuse / goto 输出。
+
+这三组还是离 angr 的原始测试名有距离，但至少已经把迁移目标从“找得到文件”推进成
+“能按语义归类、能跑、能断言”。后面如果要继续贴近 angr，就得再找能对应
+`deduplication`、`switch reuse`、`condensing` 的更小样例，或者从 angr 测试的输入二进制
+开始反向找 NotDec 里的等价物。
+
+## 2026-06-24 angr 测试语义对照补充
+
+这次重新对照了 angr 里的几个 SAILR 测试，能确定的语义点如下：
+
+- `test_true_a_graph_deduplication`
+  核心是 `DuplicationReverter`，看的是重复子图是否能被消掉，不能只是看代码能不能跑。
+- `test_who_condensing_opt_reversion`
+  核心是 `ReturnDuplicatorLow` 和 `CrossJumpReverter` 一起把 condensing / ISC 风格的 goto 链收掉。
+- `test_decompiling_sha384sum_digest_bsd_split_3`
+  核心是 `ReturnDuplicatorLow` 受限时的 return / goto 组合，和 branch split 相关。
+
+现在 NotDec 这边的迁移回归还没有直接对应这些输入二进制本体，但已经把回归脚本按
+return tail、early-exit chain、goto condensing 三类拆开了。下一步更合理的推进方式，
+不是继续硬贴名字，而是先把这三类形状对应的 NotDec 样例做成更稳的回归，再去找是否能
+从 angr 的输入二进制或等价样例补上真正的一一对应。
