@@ -954,3 +954,58 @@ shared CFG / shared tree，没有后端特判。
 
 维护成本：6/10。后续 switch deoptimization 要继续区分 synthetic forwarder 和
 synthetic goto；这个成本比把 reused-entry 复制语义混进 renderer 更低。
+
+# 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
+
+这次继续对照 Angr 当前 `duplication_reverter.py`。Angr 的 `DuplicationReverter`
+默认开启 `require_gotos`、`prevent_new_gotos`、`must_improve_rel_quality`，并在
+`_get_new_gotos()` 里过滤 future irreducible gotos：如果 goto target 不是出口，并且
+在 5 步内连不到任何出口，就不把这个 goto 算作新 goto。之前 NotDec 把这点记成暂停项；
+现在已有 Angr 源码证据，可以在 shared CFG 层实现。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/GotoManager.h:33`
+  新增 `GotoManager::fromGotos()`，让 pass 可以返回过滤后的 goto 集合。
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:65`
+  实现 `fromGotos()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:52`
+  `getNewGotos()` 增加当前候选 `StructuredCFG` 参数，方便 pass 用 shared CFG 判定 goto
+  是否仍应计入 guard。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:5`
+  默认 `getNewGotos()` 继续返回当前 trial 的全部 goto；最终 guard 调用时传入候选图。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:25`
+  `DuplicationReverter` 覆盖 `getNewGotos()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:479`
+  新增 shared CFG 的 5 步 endpoint reachability helper。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1079`
+  `DuplicationReverter::defaultOptions()` 重新对齐 Angr，保留默认
+  `RequireGotos=true`、`PreventNewGotos=true`、`MustImproveRelativeQuality=true`，只设置
+  `MaxOptIters=5`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1142`
+  实现 future irreducible goto 过滤。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1949`
+  新增 `testDuplicationReverterFiltersFutureIrreducibleGotos()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3660`
+  更新默认选项对齐测试，确认 `DuplicationReverter` 的 guard 默认开启。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-dup-goto-filter.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=199.99 user=222.80 sys=1.55 maxrss=1262180`，和近期同口径结果接近。
+
+## 当前判断
+
+实现效果：8/10。`DuplicationReverter` 的 guard 更接近 Angr，future irreducible goto
+不再错误阻止 pass 接受。
+
+复杂度：5/10。只扩了 pass hook 的参数和一个 shared CFG reachability helper，没有引入
+后端差异。
+
+维护成本：5/10。后续如果要调整 cutoff 或 endpoint 判定，只改 shared 层，不需要动 C/Solidity。
