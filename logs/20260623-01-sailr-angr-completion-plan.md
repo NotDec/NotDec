@@ -2015,3 +2015,30 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补失败回滚测试，不改 pass 主逻辑。
 
 维护成本：1/10。以后如果 default reuse 出问题，能直接看是半改图还是 default region 被误删。
+
+# 2026-06-24 实现记录：StructuringOptimizationPipeline 继续跑后续 pass
+
+这次把 pipeline 的接续语义再钉了一层：前一个 pass 被拒绝时，后面的 pass 还能继续跑。这个测试对应的是 shared structuring 的 trial / guard 收口，不是某个单独 pass 的图形状，所以更适合放在 pipeline 层。它说明 SAILR 的优化串联不是“某步失败就全停”，而是“失败的 pass 被跳过，后面的 pass 还能接着试”。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4800-4834`
+  新增 `testStructuringOptimizationPipelineSkipsRejectedPassAndContinues()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7380`
+  把新测试接进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：4/10。pipeline 的 trial / guard 接续更清楚了，但还没继续扩到更多 Angr pass 对齐细节。
+
+复杂度：1/10。只补 pipeline 级测试，不改 pass 主逻辑。
+
+维护成本：1/10。以后看某个 pass 被拒绝时，能直接确认后续 pass 还能继续试。
