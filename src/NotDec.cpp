@@ -1,4 +1,6 @@
 #include <iostream>
+#include <cstdlib>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -7,6 +9,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Signals.h>
 #include <llvm/Support/raw_ostream.h>
 
 #ifdef NOTDEC_ENABLE_WASM
@@ -194,9 +197,26 @@ void configureWorkDirLLVMReports(const notdec::Options &Opts) {
   }
 }
 
+[[noreturn]] void printTerminateStackTrace() {
+  llvm::errs() << "Fatal: unhandled C++ exception or terminate() called.\n";
+  if (auto Ex = std::current_exception()) {
+    try {
+      std::rethrow_exception(Ex);
+    } catch (const std::exception &E) {
+      llvm::errs() << "Exception: " << E.what() << "\n";
+    } catch (...) {
+      llvm::errs() << "Exception: non-std exception\n";
+    }
+  }
+  llvm::sys::PrintStackTrace(llvm::errs());
+  std::abort();
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
+  llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
+  std::set_terminate(printTerminateStackTrace);
   // initDebugOptions();
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
