@@ -1009,3 +1009,49 @@ synthetic goto；这个成本比把 reused-entry 复制语义混进 renderer 更
 后端差异。
 
 维护成本：5/10。后续如果要调整 cutoff 或 endpoint 判定，只改 shared 层，不需要动 C/Solidity。
+
+# 2026-06-24 实现记录：ReturnDuplicatorLow 扩展连通前驱组件
+
+这次继续补 `ReturnDuplicatorLow` 和 Angr 的 connected in-edge grouping 语义。Angr
+不是只复制单条命中 goto 的入边；如果这条入边所在的前驱连通组件可以整体复制，就把组件
+一起复制，避免只改一条边后留下更差的局部结构。NotDec 现在在 shared CFG 层补这一步，
+仍然不让 C/Solidity renderer 参与算法判断。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:377`
+  新增 `expandToConnectedPredecessorComponents()`。它把已选 goto predecessor 扩展到
+  `CurrentPreds` 里的连通组件；如果 payload hook 声明自己依赖具体 predecessor rewrite，
+  就保守保持单 predecessor copy，避免 grouped copy 没有单一 incoming source 时误写 payload。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1238`
+  `ReturnDuplicatorLow::runOnGraph()` 在未触发 “几乎所有 predecessor 都复制” 的路径上，
+  先用上面的 shared helper 扩展 selected predecessors，再进入已有的
+  `copyRegionForPredecessors()` / trial / quality guard 流程。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2061`
+  把已有 connected predecessor 测试里的前驱改成显式 branch，避免测试形状被
+  parent-goto-source 规则误判。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2103`
+  新增 `testReturnDuplicatorLowExpandsGotoPredToConnectedComponent()`：4 个 return
+  predecessor 里只有一个 predecessor 命中 goto，但它和另一个 predecessor 在同一组件；
+  期望复制整个组件，未命中的其它 predecessor 继续指向原 return block。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-connected-preds.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=199.15 user=221.01 sys=1.73 maxrss=1260152`，仍在近期 195-203 秒范围内。
+
+## 当前判断
+
+实现效果：7/10。Return duplication 的 predecessor component 选择更接近 Angr，但
+grouped copy 下的 Phi / payload incoming rewrite 仍需后续 shared 表达补齐。
+
+复杂度：4/10。新增一个小 helper，并复用现有 copy / rollback / quality guard。
+
+维护成本：4/10。保守避开 predecessor-sensitive payload hook，后续补 grouped incoming
+rewrite 时可以只收窄这条 guard。
