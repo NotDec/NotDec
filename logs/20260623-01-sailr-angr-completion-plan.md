@@ -1751,3 +1751,30 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补一条测试和一个结果上下文，不碰主算法。
 
 维护成本：1/10。以后看 materialize 的结尾语义，self path 也有明确断言了。
+
+# 2026-06-24 实现记录：Switch default copy 失败回滚
+
+这次补了 `SwitchDefaultCaseDuplicator` 的一个失败回滚测试。之前 default 复制已经能走 shared materialize，但还缺一个明确的失败边界：当 payload rewrite hook 拒绝时，不能留下半改的 default 复制图。这次把这条边界钉住，避免后面继续把 switch deopt 往前扩时再靠结构结果猜语义。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4335-4374`
+  新增 `testSwitchDefaultCaseDuplicatorSkipsPayloadRewriteFailure()`，确认 default copy 的 payload rewrite 失败会整体回滚。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7230-7237`
+  把新测试挂进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：7/10。switch default 复制的失败边界补上了，但还没继续往 reused-entry 的更复杂 payload 形状扩。
+
+复杂度：1/10。只补失败测试，不动 pass 主逻辑。
+
+维护成本：1/10。以后排查 default copy 回滚问题，至少有一条直接测试兜底。
