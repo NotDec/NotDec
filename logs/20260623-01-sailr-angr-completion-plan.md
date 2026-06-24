@@ -2714,3 +2714,39 @@ proxy 基础上再加更长的 case tail 或 default reuse。
 这让迁移脚本里现在至少有三类比较清楚的 SAILR 语义点：
 return cleanup、goto condensing、switch reuse、duplication reversion。离 angr 原始输入还差一截，
 但已经不是单纯的样例集合了。
+
+## 2026-06-24 迁移补充：补一个不过度去重的 proxy
+
+这次再补一个 `duplication_too_sensitive_proxy`，对应 angr 的
+`test_deduplication_too_sensitive_split_3`。这个 case 的重点不是“把重复去掉”，而是证明
+有些表面重复其实是程序员本来就写出来的结构，不能被 SAILR 错删成更多 gotos。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:1`
+  新增 `duplication_too_sensitive_proxy`。
+
+这个 proxy 还带着一个很明显的 NotDec 边界：如果以后要让它更像 angr，`phi` 这类值来源
+应该先走 demote / rewrite，而不是把 structuring 算法改成直接理解 phi。
+
+## 2026-06-24 迁移补充：把 phi 也当成迁移边界
+
+这次把 `duplication_too_sensitive_proxy` 再收紧一点，明确把 `phi` 当成需要先被 demote / rewrite
+的边界，而不是 structuring 算法需要直接处理的内容。现在这个 proxy 的断言里会把 `phi`
+当成不该泄露到结果里的东西，这和前面 `demote Phi + 维护 HType 到 demoted LLVM Value 映射`
+的路线是同一个方向。
+
+这不是说 NotDec 已经真的把所有 `phi` 语义都处理完了，而是把迁移回归的期望写清楚：
+在 structuring 这层，看到的应该是已经降过的值和结构，不是还没处理的 SSA `phi`。
+
+## 2026-06-24 迁移补充：补一个 condensing / return proxy
+
+这次再补一个 `condensing_return_proxy`，对应 angr 的
+`test_who_condensing_opt_reversion`。这个 case 不是单纯的 goto 链，而是更像
+`ReturnDuplicatorLow` 和 `CrossJumpReverter` 一起处理的 return / condensing 组合：
+有一个返回值判断，两个分支最后汇到同一个收口，再返回。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:1`
+  新增 `condensing_return_proxy`。
+
+到这里，迁移脚本已经把几个主要 SAILR 语义点都覆盖到了：return cleanup、early exit、
+switch reuse、duplication reversion、不过度去重、condensing / return 组合。离真正把
+angr 原始测试输入逐个迁过来还有距离，但至少测试壳和语义分类都已经搭起来了。
