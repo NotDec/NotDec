@@ -483,3 +483,35 @@ switch default-tail 复制路径，确认 switch deoptimization 也消费同一�
 - `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
 
 结果：全部通过。
+
+# 2026-06-24 实现记录：StrictlyLessGotos 独立生效
+
+这次修的是 shared optimization guard。之前 `StrictlyLessGotos` 的最终判断代码已经在，
+但只有 `PreventNewGotos=true` 时才会进入 goto 数量检查；如果 pass 只打开
+`StrictlyLessGotos`，严格减少 goto 的约束会被跳过。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:12`
+  `needsInitialEvaluation()` 把 `StrictlyLessGotos` 也作为需要 initial trial 的条件。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:21`
+  `acceptsFinalEvaluation()` 在 `PreventNewGotos` 或 `StrictlyLessGotos` 任一开启时都检查
+  goto 数量；严格模式继续要求 final goto 数量小于 initial。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1380`
+  在允许新增 goto 的 cross-jump 测试里显式关闭 `StrictlyLessGotos`，避免测试意图依赖默认值。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3362`
+  新增 `testStructuringOptimizationPassEnforcesStrictlyLessGotos()`，覆盖
+  `PreventNewGotos=false` 但 `StrictlyLessGotos=true` 的拒绝路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5914`
+  把新测试接入 structuring analysis 测试入口。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-strict-gotos.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=198.74 user=221.13 sys=1.80 maxrss=1266112`，和前几轮 194-205 秒同口径。
