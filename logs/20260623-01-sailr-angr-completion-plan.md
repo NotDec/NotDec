@@ -632,3 +632,31 @@ virtualized edge，但 copy 自己必须有独立 `BlockId` 和 copied 来源身
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=195.56 user=218.09 sys=1.50 maxrss=1261056`。
+
+# 2026-06-24 实现记录：removeBlock materialize 失败保持回滚
+
+这次补 shared CFG 的 checkpoint-rollback 语义。`removeBlock()` 删除被 copied block 复用的
+body 前，会先 materialize 这些 copy。之前如果后一个 copy materialize 失败，前一个 copy
+可能已经被写实，函数返回 false 但图已经变了。现在先在候选图上完成删除流程，成功后再提交。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:174`
+  新增私有 `removeBlockInPlace()`，把实际删除逻辑和对外事务边界分开。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:410`
+  `StructuredCFG::removeBlock()` 先复制候选图，调用 `removeBlockInPlace()`，失败时保留原图。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:420`
+  原删除逻辑移动到 `removeBlockInPlace()`，语义不变。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:999`
+  加强 `testStructuredCFGRemoveBlockIsAtomicOnMaterializeFailure()`：第二个 copied body
+  materialize 失败时，第一个 copy 也不能被写实，原 body 和两个 copy 都保持原状态。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-removeblock-atomic.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=198.26 user=220.25 sys=1.67 maxrss=1261924`，和近期同口径结果接近。
