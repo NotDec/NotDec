@@ -288,6 +288,29 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结论先记在这里：这几个真实样例可以保留作 smoke，但不能冒充 SAILR 迁移的主对照。
 
+## 2026-06-24 实现记录：Phi demote 的 type 容器再收口
+
+这轮只补了 `HTypeResult` 的两个统一擦除接口，并把 `phi_demote_test` 的断言继续收紧。
+现在 `demoteSSAFixHT()` 相关逻辑不只是把 Phi 的 `hasValueType()` 清掉，还能确认
+`ValueTypesLower` / `ValueTypesUpper` / `ContraVariantValues` 里都不会再残留旧 Phi 条目。
+这条边界仍然是结构恢复前先 demote Phi，不让 structuring 算法直接碰 Phi。
+
+- `external/NotDec-llvm2c/include/notdec-backends/Core/HTypeResult.h:68`
+  增加 `eraseValueTypesIf()` 和 `eraseContraVariantValuesIf()`。
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:91`
+  `testDemoteSSAFixHTKeepsUnnamedPhiTypes()` 继续收紧对 Phi 残留的断言。
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:193`
+  `testDemoteSSAFixHTDropsPhiRefsFromWrittenTypes()` 继续确认写回后没有 Phi 类型残留。
+
+验证：
+
+```bash
+cmake --build build --target phi-demote-test -j4
+cmake --build build --target structuring-analysis-test -j4
+```
+
+结果：通过。
+
 1. 算法层不包含 C renderer / Solidity renderer 特判。
 2. renderer 不承担 structuring fallback 语义。
 3. 所有 copied region 改图都具备候选图提交或事务式回滚。
@@ -1261,6 +1284,8 @@ early-return proxy，继续往 ReturnDuplicatorLow 的 Angr 测试覆盖靠近�
 contra-variant 关系会被清掉，只留下新的 reg2mem 载体。
 现在这条边界更明确了：旧 Phi 的 value-type 条目不会残留在 `ValueTypesLower` /
 `ValueTypesUpper` 里，后续 structuring 看到的只会是 demoted 后的新值。
+同时把这段清理抽进了 `HTypeResult` 的通用接口，`demoteSSAFixHT()` 现在只负责判定
+哪些值该删，不再自己手写三段 map/set 清理逻辑。
 
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
