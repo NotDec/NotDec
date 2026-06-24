@@ -141,7 +141,11 @@ bool shouldTraceConvertStruct() {
   if (envFlagEnabled(kTraceConvertStructEnv)) {
     return true;
   }
-  return ::llvm::DebugFlag && ::llvm::isCurrentDebugType(DEBUG_TYPE);
+#ifndef NDEBUG
+  return ::llvm::DebugFlag && llvm::isCurrentDebugType(DEBUG_TYPE);
+#else
+  return false;
+#endif
 }
 
 void emitConvertStructTrace(llvm::StringRef Content) {

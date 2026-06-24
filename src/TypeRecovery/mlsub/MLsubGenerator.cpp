@@ -3955,16 +3955,20 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
         if (Ind == 0) {
           if (isWithOverflowIntrinsicSigned(Target->getIntrinsicID())) {
             auto N = cg.createNode(&I);
-            assert(false && "TODO: PNI setNonPtr");
-            assert(false && "TODO: getOrCreatePrim");
-            assert(false && "TODO: addSubtype");
+            // Overflow intrinsics return {value, overflow}; field 0 is the
+            // arithmetic result and should stay a plain number.
+            cg.setNonPointer(&I);
+            auto SintNode = binarysub::make_primitive("sint", cg.getSize(&I));
+            cg.addSubtype(SintNode, N);
             return;
           } else if (isWithOverflowIntrinsicUnsigned(
                          Target->getIntrinsicID())) {
             auto N = cg.createNode(&I);
-            assert(false && "TODO: PNI setNonPtr");
-            assert(false && "TODO: getOrCreatePrim");
-            assert(false && "TODO: addSubtype");
+            // Overflow intrinsics return {value, overflow}; field 0 is the
+            // arithmetic result and should stay a plain number.
+            cg.setNonPointer(&I);
+            auto UintNode = binarysub::make_primitive("uint", cg.getSize(&I));
+            cg.addSubtype(UintNode, N);
             return;
           }
         } else if (Ind == 1) {
