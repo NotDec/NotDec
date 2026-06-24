@@ -273,6 +273,21 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-24 迁移边界：真实小样例能跑，但还不够替代 scaffold
+
+这轮又试了几个真实 Bench2 小样例：
+
+- `libuv/1-uv__cancelled.ll`
+- `memcached/1-drive_machine.lto_priv.0.cold.ll`
+- `wolfssl/1-wc_PKCS7_DecodeEncryptedData.cold.ll`
+
+它们都能在 `structured-sailr` 下跑完，但输出太简单，不能替代
+`switch_reuse_proxy`、`duplication_reverter_proxy` 或 `nested_switch_proxy` 这些更明确的
+语义脚手架。也就是说，当前问题不是 shared structuring 跑不动，而是真实样例还没找到
+足够接近 Angr 目标 case 的小输入。
+
+结论先记在这里：这几个真实样例可以保留作 smoke，但不能冒充 SAILR 迁移的主对照。
+
 1. 算法层不包含 C renderer / Solidity renderer 特判。
 2. renderer 不承担 structuring fallback 语义。
 3. 所有 copied region 改图都具备候选图提交或事务式回滚。
@@ -1244,6 +1259,8 @@ early-return proxy，继续往 ReturnDuplicatorLow 的 Angr 测试覆盖靠近�
 稳定分支打印测试。
 本轮还补了 `phi-demote-test` 的第二个用例，专门确认 demote 后旧 Phi 的 HType /
 contra-variant 关系会被清掉，只留下新的 reg2mem 载体。
+现在这条边界更明确了：旧 Phi 的 value-type 条目不会残留在 `ValueTypesLower` /
+`ValueTypesUpper` 里，后续 structuring 看到的只会是 demoted 后的新值。
 
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
