@@ -226,14 +226,14 @@ ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|s
 
 ## 2026-06-24 当前状态
 
-现在 shared structuring 的骨架和主要 SAILR pass 已经接上了，Phi 也按旧链路在结构恢复前 demote 掉了，HType 迁移到 demoted LLVM Value 的边界是通的。`StructuredCFG` 里的 copied / synthetic block 身份、payload materialize、return duplication、cross jump、duplication revert、lowered switch 和 pipeline 顺序也都有测试。
+现在 shared structuring 的骨架和主要 SAILR pass 已经接上了，Phi 也按旧链路在结构恢复前 demote 掉了，HType 迁移到 demoted LLVM Value 的边界是通的。`StructuredCFG` 里的 copied / synthetic block 身份、payload materialize、return duplication、cross jump、duplication revert、lowered switch 和 pipeline 顺序也都有测试。`run_structuring_smoke.py` 里也补了一个直接看 Phi demote 前置边界的 smoke case，确认 structuring 看到的是 demoted 结果，不是 Phi。
 
 还没到“接近 Angr 完整语义”的地方主要有两件事：
 
 1. `run_sailr_bench2_migration.py` 里的 Angr 测试迁移还没有全变成真实原始资产，部分 case 仍然是 scaffold。
 2. 真实样例覆盖面还不够宽，尤其是更复杂的 switch / duplication 形状，还在受旧 intrinsic 和 CFG 断言影响，不能直接当成最终对照基线。
 
-所以现在更像是 shared 语义已经落稳，后面继续补迁移覆盖和样例分类，不是再重搭框架。
+所以现在更像是 shared 语义已经落稳，后面继续补迁移覆盖和样例分类，不是再重搭框架。下一步更值钱的是继续把 `ReturnDuplicatorLow` 和 switch deopt 的 payload rewrite 边界补像 Angr，然后再继续换掉 scaffold。
 
 ## 2026-06-24 实现记录：迁移脚手架继续补齐
 
@@ -253,6 +253,21 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 ```
 
 结果：通过。
+
+## 2026-06-24 实现记录：Phi demote 前置边界补 smoke
+
+这轮没有再改 demote 本身，只是在 structuring smoke 里补了一个最小分支 return case，专门确认结构恢复阶段看到的是已经 demote 过的结果，而不是直接处理 Phi。这个 case 和现有 `phi-demote` / `phi-demote-htypes` 一起，把“Phi 先在结构恢复前消掉”这条边界再钉紧了一点。
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:165`
+  新增 `phi_demote_before_structuring`。
+
+验证：
+
+```bash
+ctest --test-dir build -R 'structuring-smoke|phi-demote|phi-demote-htypes' --output-on-failure
+```
+
+结果：待跑。
 
 ## 2026-06-24 实现记录：Phi demote 的类型残留再收紧
 
@@ -1427,6 +1442,26 @@ ctest --test-dir build -R 'sailr-bench2-migration|structuring-analysis' --output
 ```
 
 结果：通过。
+
+## 2026-06-24 迁移补充：收紧 switch 交叉复用样例的稳定边界
+
+这轮先试了一个更激进的 switch 交叉复用 proxy，想把 default / reused-entry 的交叉复用
+也纳入迁移回归。但实际跑下来，当前 shared structuring 输出会把第二层 `switch` 吃成更
+简单的终点形状，断言 `switch (y)` 不稳定，所以不把这个样例留下。这里保留的是判断：
+这类 case 现在还不适合作为稳定迁移基线，需要等 shared 语义再往前一步，或者换更贴近
+当前输出的 Angr 原始输入。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:328`
+  新增后又移除了一个 `switch_cross_reuse_proxy` 试验样例。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c
+ctest --test-dir build -R 'sailr-bench2-migration|structuring-analysis' --output-on-failure
+```
+
+结果：最终迁移脚本和 CTest 子集通过；这类更激进的交叉复用样例暂不纳入主回归。
 
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
