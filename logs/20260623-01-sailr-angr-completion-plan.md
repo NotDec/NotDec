@@ -347,6 +347,23 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-24 实现记录：HTypeResult 的 demoted value 清理接口补测试
+
+这轮把 `HTypeResult::eraseTypesForDemotedValues()` 再补了一层测试，确认它不只对普通
+LLVM `Value*` 生效，也能把 `UConstant`、`StackObject` 和 `HeapObject` 这几类间接引用
+一起清掉。这样前置 demote Phi 时，清理逻辑就不会在不同调用点各自漏一类引用。
+
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:198`
+  新增 `testHTypeResultErasesTypesForDemotedValues()`。
+
+验证：
+
+```bash
+cmake --build build --target phi-demote-test -j4
+```
+
+结果：通过。
+
 ## 2026-06-24 实现记录：Phi demote 清理逻辑收敛到共享容器接口
 
 这轮只把 `demoteSSAFixHT()` 里对 Phi 残留的擦除，收敛成 `HTypeResult` 自己的共享接口，
@@ -361,6 +378,24 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 ```bash
 cmake --build build --target phi-demote-test -j4
+```
+
+结果：通过。
+
+## 2026-06-24 实现记录：phi-demote 测试修正为可编译的 shared 容器样例
+
+这轮只修了 `phi_demote_test.cpp` 里的测试构造方式，没有改 shared 语义本身。把 `HTypeResult`
+那条按 demoted value 清理类型残留的测试，改成直接用 LLVM 的 `Function` / `Call` / `insert`
+写法，避免测试代码里再卡在构造器重载和 initializer_list 推导上。
+
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:196`
+  `testHTypeResultErasesTypesForDemotedValues()` 改成更直接的 LLVM 构造方式。
+
+验证：
+
+```bash
+cmake --build ./build --target phi-demote-test -j4
+ctest --test-dir build -R 'phi-demote|phi-demote-htypes|structuring-analysis' --output-on-failure
 ```
 
 结果：通过。
