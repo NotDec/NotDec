@@ -1595,3 +1595,42 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只新增 pass 级测试。
 
 维护成本：1/10。测试防止 cross-jump copy 后续重新合并单前驱 payload 来源。
+
+# 2026-06-24 实现记录：Switch 类 SAILR options 覆盖
+
+这次只补测试，钉住 SAILR deoptimization pipeline 里 switch 类 pass 的默认 options。
+之前测试只覆盖了 `DuplicationReverter`、`ReturnDuplicatorLow` 和 `CrossJumpReverter`，
+没有把 `SwitchDefaultCaseDuplicator`、`LoweredSwitchSimplifier`、`SwitchReusedEntryRewriter`
+的 Angr 对齐选项固定下来。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4591`
+  扩展 `testSAILRDeoptimizationDefaultOptionsMatchAngr()`，新增
+  `SwitchDefaultCaseDuplicator`、`LoweredSwitchSimplifier` 和
+  `SwitchReusedEntryRewriter` 的默认 options 断言。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4594`
+  确认这三个 pass 都不要求已有 goto、不阻止新 goto、不要求 relative quality 改善。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4597`
+  确认 `SwitchDefaultCaseDuplicator` 默认 `MaxOptIters == 2`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4611`
+  确认 `LoweredSwitchSimplifier` 默认 `MaxOptIters == 2`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4631`
+  确认 `SwitchReusedEntryRewriter` 默认 `MaxOptIters == 2`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+
+结果：structuring 单测、CTest 子集和 `notdec` 构建通过。此轮只补测试，不跑 fortune。
+
+## 当前判断
+
+实现效果：4/10。没有扩大算法语义，但补齐 pass options 对齐完成条件里的 switch 类覆盖。
+
+复杂度：1/10。只新增默认选项断言。
+
+维护成本：1/10。测试防止后续修改 switch deoptimization 默认 guard 时静默偏离 Angr。
