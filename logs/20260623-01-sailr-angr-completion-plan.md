@@ -461,3 +461,25 @@ source-target 身份，后续做 payload rewrite 不再只能看到 copy block i
 复杂度：5/10。只多了一个 shared helper，两个 copy helper 复用同一套规则。
 
 维护成本：5/10。多前驱仍保守传 `InvalidBlockId`，没有提前承诺复杂 Phi/vvar rewrite。
+
+# 2026-06-24 实现记录：switch default-tail materialize context 测试
+
+这次没有改算法，只补测试覆盖。上一轮已经让 `copyLinearRegionForPredecessors()` 走
+predecessor-aware materialize context，但测试主要覆盖 `ReturnDuplicatorLow`。这轮补上
+switch default-tail 复制路径，确认 switch deoptimization 也消费同一套 shared context。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2698`
+  加强 `testSwitchDefaultCaseDuplicatorCopiesDefaultTailRegion()`：安装
+  predecessor-aware payload hook，要求 `OriginalPredecessor` 和 `NewPredecessor`
+  非空，并用 `NewPredecessor` 改写 copied default head / tail 的 payload。
+  测试同时确认共享的 return block 没有被复制，payload 保持原样。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+
+结果：全部通过。
