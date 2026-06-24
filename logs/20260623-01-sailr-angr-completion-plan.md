@@ -1381,3 +1381,43 @@ CrossJumpReverter 不再需要对明确来源的同 target case/default 形状�
 复杂度：3/10。只给 shared goto summary 加一个小枚举，没有改 renderer。
 
 维护成本：3/10。后续如果要区分更多 edge 类型，可以继续扩 shared edge identity。
+
+# 2026-06-24 实现记录：ReturnDuplicatorLow 支持 switch return-region
+
+这次补 `ReturnDuplicatorLow` 的一个保守 switch 形状：switch 的某个 successor 是当前
+return tail，其他 case/default successor 都是单前驱、封闭的 return tail。只有在
+predecessor-aware payload materialize hook 可用时才放行，避免 copied switch 的 condition
+和 case value 复用原 payload。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  新增 `prependSwitchReturnRegion()`。它复用 `collectClosedLinearReturnTail()`，
+  只接受所有非当前 return-head successor 都能闭合到 terminal return/unreachable 的 switch。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  `findLinearReturnRegion()` 的复杂 region gate 从 branch 扩到 branch/switch，
+  仍由 predecessor-aware payload hook 控制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testReturnDuplicatorLowCopiesSwitchReturnRegionWithPayloadRewrite()`，
+  覆盖 copied switch 的 condition、case value、default successor、case target 和
+  copied return tails 都保持 shared CFG 身份。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-switch-return-region.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=200.22 user=222.46 sys=1.92 maxrss=1270592`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：7/10。`ReturnDuplicatorLow` 覆盖了一个 Angr 语义里常见的 switch return-region
+子集，但仍没有放开带共享内部 predecessor 或非封闭 case tail 的复杂 switch。
+
+复杂度：3/10。复用现有 closed-tail 收集和 transaction copy，没有新增 renderer 逻辑。
+
+维护成本：3/10。后续要扩更复杂 switch 时，仍要先补 shared payload/Phi/vvar 边界。
