@@ -574,3 +574,35 @@ target。现在 shared CFG 直接把原 case target 和复制后的 case target 
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=195.62 user=218.71 sys=1.68 maxrss=1260792`。
+
+# 2026-06-24 实现记录：synthetic forwarder 记录原始边身份
+
+这次补 switch default rewrite 里的 synthetic forwarder 身份。之前 forwarder 只有当前
+successor，后续只能从图里反推它代表哪条原始 edge；如果图再被复制或重定向，原 source-target
+关系会丢。现在 shared CFG 直接记录 synthetic forwarder 对应的原 source 和 target。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:102`
+  `CFGBlock` 新增 `SyntheticSource` / `SyntheticTarget`，只用于 synthetic forwarder 的原始边身份。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:136`
+  新增 `StructuredCFG::createSyntheticForwarder(Source, Target, Creator)`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:74`
+  实现 `createSyntheticForwarder()`，复用普通 synthetic block，再写入 source / target。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:997`
+  `SwitchDefaultCaseDuplicator` 改用 `createSyntheticForwarder()`，记录原 switch default edge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1393`
+  `testStructuredCFGCreateSyntheticBlock()` 覆盖普通 synthetic block 不带原边身份、forwarder 带原边身份。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2609`
+  `testSwitchDefaultCaseDuplicatorInsertsSharedDefaultForwarders()` 验证两个 default forwarder
+  分别记录 `0 -> 1` 和 `3 -> 1`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-forwarder-identity.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=196.91 user=218.94 sys=1.73 maxrss=1260472`。
