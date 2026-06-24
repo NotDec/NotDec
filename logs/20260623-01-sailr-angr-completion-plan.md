@@ -1055,3 +1055,60 @@ grouped copy 下的 Phi / payload incoming rewrite 仍需后续 shared 表达补
 
 维护成本：4/10。保守避开 predecessor-sensitive payload hook，后续补 grouped incoming
 rewrite 时可以只收窄这条 guard。
+
+# 2026-06-24 实现记录：PayloadMaterializeContext 支持 grouped predecessors
+
+这次继续把 copied block 的 payload rewrite 往 Angr 方向补了一层。之前 shared
+materialize 只能稳定带单个 predecessor 上下文，所以 `ReturnDuplicatorLow` 在需要复制
+整个 connected predecessor component 时，仍只能保守地把 payload rewrite 当作单前驱处理。
+现在 shared 层把 grouped predecessor 列表也带上，后续可以在不碰 renderer 的前提下，把
+incoming rewrite 的语义补得更完整。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:74`
+  `PayloadMaterializeContext` 新增 `OriginalPredecessors` / `NewPredecessors`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:179`
+  `setPayloadMaterializeHook()` 新增 grouped predecessor capability 参数；
+  同文件新增 `hasGroupedPredecessorRewritePayloadMaterializeHook()`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:188`
+  `materializeBlockBody()` 新增接受 predecessor vector 的重载。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:177`
+  记录 grouped capability flag。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:217`
+  新的 `materializeBlockBodyImpl()` 统一处理单 predecessor 和 grouped predecessor 两种路径。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:281`
+  materialize context 同时填入单 predecessor 和 grouped predecessor 列表，hook 可以看见整组
+  incoming identity，但 fast path 仍保持原有语义。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:377`
+  `expandToConnectedPredecessorComponents()` 现在只在 hook 声明支持 grouped rewrite 时，
+  才把选中的 predecessor 扩展到整个 connected component。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1217`
+  `ReturnDuplicatorLow::runOnGraph()` 继续走 shared trial / rollback / quality guard，
+  但复制和 materialize 现在能携带 grouped predecessor 上下文。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:856`
+  新增 `testStructuredCFGMaterializeReportsGroupedPredecessors()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2188`
+  新增 `testReturnDuplicatorLowReportsGroupedPredecessorRewrite()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-grouped-preds.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=200.42 user=222.67 sys=1.69 maxrss=1259784`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：7/10。connected predecessor copy 现在能把 grouped incoming 上下文带到 shared
+payload materialize 层，但真正按 predecessor/component 重写 Phi/vvar 还没完整接上。
+
+复杂度：5/10。接口比前一版多了一层 grouped predecessor 维度，但都留在 shared CFG，
+没有扩到 renderer。
+
+维护成本：5/10。后续如果要把 grouped incoming rewrite 真正用起来，只需要沿这条 shared
+context 往下接，不需要重写复制流程。
