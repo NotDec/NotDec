@@ -2635,6 +2635,22 @@ angr 侧测试名和本地样例一一对应起来。
 完成标准也要再往前走一步：每个映射都要能说明它对应的是 return duplication、
 duplicate reversion、switch reuse 还是 condensing / goto 语义，而不是只说“这个文件能跑”。
 
+## 2026-06-24 迁移补充：再加两个本地 proxy
+
+这次没有硬找 Bench2 里现成的一一对应样例，而是先把两个最常见的 Angr SAILR 语义做成
+NotDec 本地 proxy，方便之后继续补迁移语义：
+
+- `switch_reuse_proxy`
+  用一小段内联 LLVM IR 模拟 `LoweredSwitchSimplifier` / switch reuse，检查 `switch (x)`、
+  `case 1/2/3` 和 `return 0;`。
+- `duplication_reverter_proxy`
+  用一小段内联 LLVM IR 模拟 `DuplicationReverter` 的重复尾部收敛，检查两个重复 malloc
+  路径最后还是能回到单一 return。
+
+这两个 proxy 不是 Angr 原始输入，但它们把 `switch reuse` 和 `deduplication`
+从“测试名”变成了能持续跑的本地回归。后面再往 `test_decompiler.py` 的原始条目靠时，
+可以直接在这个脚手架里换输入，不用再搭新测试壳。
+
 ## 2026-06-24 迁移补充：先按语义分类，不硬贴 angr 测试名
 
 这次把 `sailr-bench2-migration` 再收紧了一点，不再假装能直接找到 angr 测试对应的
@@ -2668,3 +2684,33 @@ LLVM IR 产物，它们更适合先按语义分类：
 return tail、early-exit chain、goto condensing 三类拆开了。下一步更合理的推进方式，
 不是继续硬贴名字，而是先把这三类形状对应的 NotDec 样例做成更稳的回归，再去找是否能
 从 angr 的输入二进制或等价样例补上真正的一一对应。
+
+## 2026-06-24 迁移补充：补一个 switch proxy
+
+这次又补了一个本地 `switch` proxy 回归，目的是把 `test_decompiling_sha384sum_digest_bsd_split_3`
+这类语义再往前挪一点。做法不是直接找一个同名输入，而是先构一个小的、稳定的 switch
+reuse 形状，确认 NotDec 在 `structured-sailr` 下能稳定处理：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:1`
+  新增 `switch_reuse_proxy`，输入是脚本内联的一小段 LLVM IR。
+  断言关注点是 `switch (x)`、`case 1/2/3` 和最终 `return 0;`，用来模拟
+  `LoweredSwitchSimplifier` / switch reuse 的最小形状。
+
+这个 proxy 还不是 angr 原始输入的直接迁移，但它把“switch reuse 语义”从纯描述变成了
+一个能持续跑的本地回归。后面如果要继续贴近 angr 的 `sha384sum` 形状，就可以在这个
+proxy 基础上再加更长的 case tail 或 default reuse。
+
+## 2026-06-24 迁移补充：补一个 duplication proxy
+
+这次再补一个本地 `duplication` proxy 回归，目的是真正把
+`test_true_a_graph_deduplication` 对应的 `DuplicationReverter` 语义接到 NotDec 的测试里。
+还是同样的做法：不硬找 `true_a` 本体，而是先构一个重复尾部的最小 LLVM IR 形状，
+让 NotDec 在 `structured-sailr` 下能稳定跑出 `malloc` 和 `return 0;`，并且不再留下
+显式的 `goto dup1 / goto dup2`。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:1`
+  新增 `duplication_reverter_proxy`。
+
+这让迁移脚本里现在至少有三类比较清楚的 SAILR 语义点：
+return cleanup、goto condensing、switch reuse、duplication reversion。离 angr 原始输入还差一截，
+但已经不是单纯的样例集合了。
