@@ -1294,3 +1294,45 @@ case-only rewrite 保持一致。
 复杂度：2/10。复用已有 case-only redirect helper。
 
 维护成本：2/10。逻辑仍在 shared SAILR pass 内，没有 renderer fallback。
+
+# 2026-06-24 实现记录：CrossJumpReverter 区分 switch case 边
+
+这次修正 `CrossJumpReverter` 的 switch predecessor 处理。之前复制 cross-jump target
+时统一调用 `redirectPredecessors()`，如果 predecessor 是 switch，就可能同时改 default
+successor 和 case target。现在 shared 层会先判断 predecessor 是 case 边还是普通 successor
+边：case 边走 case-only rewrite，普通边继续走原 redirect。
+
+同一个 switch 的 case 和 default 都指向同一 target 时，目前 `StructuredGoto` 还没有
+edge-kind 身份，不能判断当前 goto 来自 case 还是 default。这种形状先保守跳过，不猜。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  新增 `blockUsesSwitchCaseEdge()` 和 `blockUsesNonSwitchCaseEdge()`，并在
+  `CrossJumpReverter::runOnGraph()` 中按边类型拆分 predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testCrossJumpReverterRedirectsSwitchCasesOnly()`，覆盖 case target 被复制到
+  copied region、default successor 保持原目标。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testCrossJumpReverterSkipsAmbiguousSwitchCaseDefaultTarget()`，覆盖 case/default
+  同 target 时保守跳过。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-crossjump-switch-case.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=198.16 user=220.31 sys=1.68 maxrss=1270416`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：6/10。case-only cross-jump 已落到 shared CFG，但同 target 的 case/default
+歧义还需要后续给 goto 或 edge 增加来源身份。
+
+复杂度：2/10。只复用已有 switch case-only helper 的边界。
+
+维护成本：2/10。逻辑仍在 shared SAILR pass 内，没有 renderer fallback。
