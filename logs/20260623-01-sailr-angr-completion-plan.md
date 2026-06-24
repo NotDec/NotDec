@@ -2207,3 +2207,97 @@ Solidity renderer 做 fallback。
 
 维护成本：3/10。后续如果更多 pass 要按边类型复制 region，可以复用这个边界，避免再混用
 `redirectPredecessors()`。
+
+# 2026-06-24 实现记录：quality guard 使用 pass 过滤后的 goto 集合
+
+这次修 shared optimization wrapper 的 guard 语义。`StructuringOptimizationPass`
+允许具体 pass override `getNewGotos()`，但之前只有 goto 数量 guard 使用了这个结果；
+`MustImproveRelativeQuality` 仍然直接看 `Current.Quality` 里的原始 goto target 统计。
+这样像 `DuplicationReverter::getNewGotos()` 这种会过滤 future irreducible goto 的 pass，
+在 relative quality 阶段仍可能按未过滤 goto 被误拒。现在 relative quality 会保留
+loop / label 等结构统计，但把 goto target 统计替换成 `getNewGotos()` 的结果。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:6`
+  新增 `qualityWithGotos()`，基于当前 structuring quality 替换 goto target 统计。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:36`
+  `acceptsFinalEvaluation()` 只调用一次 `getNewGotos()`，goto 数量 guard 和 relative
+  quality guard 共用同一个过滤后结果。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:337`
+  新增 `RetargetFirstSuccessorIgnoringNewGotosPass` 测试桩。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5040`
+  新增 `testStructuringOptimizationPassUsesFilteredGotosForQuality()`，覆盖 final tree
+  的 goto target 被改动，但 pass override 后仍应按过滤后 goto 集合通过 quality guard。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7673`
+  把新测试接入 `structuring-analysis-test`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `cmake --build ./build --target phi-demote-test notdec structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-quality-filtered.c --tr-level=2 --algo=structured-sailr`
+
+结果：通过。fortune smoke 为 `elapsed=210.46 user=232.09 sys=1.76 maxrss=1293888`。
+这次数值比前几轮 195-200 秒略高，但改动只在 trial 结束时复用一次 filtered goto
+统计，没有看到明确的算法级性能退化迹象。
+
+## 当前判断
+
+实现效果：6/10。shared trial / quality guard 更接近 Angr 的 override 边界，
+但 `DuplicationReverter` 的 future irreducible goto 识别本身仍只是保守子集。
+
+复杂度：2/10。只在 wrapper 层替换 goto 统计，没有改 pass API。
+
+维护成本：2/10。后续 pass override `getNewGotos()` 时，两个 guard 会自然使用同一份结果，
+不需要各 pass 自己再绕 quality guard。
+
+# 2026-06-24 实现记录：quality guard 消费 getNewGotos 过滤结果
+
+这次修 shared optimization guard 的一个边界：pass 可以 override `getNewGotos()`，
+但最终 relative quality 之前仍然用未过滤的 `Current.Quality.GotoTargets`。这样像
+`DuplicationReverter` 这类会过滤 future irreducible gotos 的 pass，goto 数量 guard
+和 quality guard 可能看的是两套 goto 集合。现在最终 quality 比较会先用
+`getNewGotos()` 的结果替换 current quality 里的 goto target 统计，loop / label 信息仍保留
+当前 structuring trial 的结果。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:6`
+  新增 `qualityWithGotos()`，只替换 `ControlFlowStructureCounter::GotoTargets`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:36`
+  `acceptsFinalEvaluation()` 统一取一次 `FinalGotos`，goto 数量 guard 和 relative
+  quality guard 都使用这份过滤后的结果。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:337`
+  新增 `RetargetFirstSuccessorIgnoringNewGotosPass` 测试桩，用来模拟 pass 自己过滤最终 goto。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5040`
+  新增 `testStructuringOptimizationPassUsesFilteredGotosForQuality()`，覆盖 filtered goto
+  允许 relative quality 接受的路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7673`
+  把新测试接入 `structuring-analysis-test`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `cmake --build ./build --target phi-demote-test notdec structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-filtered-goto-quality.c --tr-level=2 --algo=structured-sailr`
+
+结果：通过。fortune smoke 为 `elapsed=208.78 user=232.95 sys=1.77 maxrss=1271460`。
+这次改动只影响最终 guard 的 goto 统计替换，不增加 structuring trial 次数；单次耗时比上一轮
+197 秒略高，但仍接近近期 195-205 秒区间，暂未看到明确算法级性能退化。
+
+## 当前判断
+
+实现效果：5/10。shared trial / quality guard 和 pass 自定义 goto 过滤更一致了；但
+`DuplicationReverter::getNewGotos()` 的 future irreducible 判断本身仍然只是保守子集。
+
+复杂度：2/10。只在 wrapper 层加一个小 helper，没有改 pass API。
+
+维护成本：2/10。以后具体 pass 只需要维护自己的 `getNewGotos()`，wrapper 不会再用另一套
+goto target 统计做 quality 判断。
