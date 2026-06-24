@@ -1409,6 +1409,25 @@ contra-variant 关系会被清掉，只留下新的 reg2mem 载体。
 现在 `HTypeResult` 也有了按 demoted 值统一清理条目的入口，后面 shared structuring 再
 往前挪时，旧 Phi 的类型映射不会再留在这层散着处理。
 
+## 2026-06-24 迁移补充：补一个 terminal shared default proxy
+
+这次继续往 Angr 的 `switch default / reused-entry` 方向补迁移样例，新增一个
+terminal shared default proxy。目标不是追求更复杂的输入，而是把“多个 switch 共享同一
+个终点 default / return”这类边界先写进稳定回归里，避免后面只看 `switch_cluster_proxy`
+那种简单 case。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:294`
+  新增 `terminal_shared_default_proxy`，对应 `test_reverting_switch_clustering_and_lowering_cat_main_no_endpoint_dup`。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c
+ctest --test-dir build -R 'sailr-bench2-migration|structuring-analysis' --output-on-failure
+```
+
+结果：通过。
+
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
 这次继续对照 Angr 当前 `duplication_reverter.py`。Angr 的 `DuplicationReverter`
