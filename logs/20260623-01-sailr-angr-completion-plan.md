@@ -858,3 +858,43 @@ shared structuring 边界上。
 
 结果：structuring 单测、CTest 子集和 fortune smoke 通过。fortune smoke：
 `elapsed=199.28 user=222.01 sys=1.69 maxrss=1262136`，和近期同口径结果接近。
+
+# 2026-06-24 对照记录：SAILR pass 和 Angr 语义差异
+
+这次没有改算法。当前环境没有安装 `angr`，磁盘上也没有可用的 Angr 源码镜像，所以
+下面只记录当前 NotDec shared 实现能确认的对照状态；不能确认源码细节的地方不继续猜。
+
+## 当前 pass 对照
+
+- `SwitchDefaultCaseDuplicator`
+  对应 Angr SAILR 的 switch default 复制/forwarder 类 deoptimization。NotDec 已在
+  shared CFG 里记录 default forwarder 的原始 `source -> target`，并用 copied block
+  身份 materialize default tail。差异：NotDec 仍保守跳过 terminal shared default 和
+  switch-internal default predecessor。
+- `DuplicationReverter`
+  对应 Angr 的 duplicate block merge pass。NotDec 已支持完全相同 block 的合并、
+  switch predecessor case 重定向、事务式删除和默认 5 次迭代。差异：Angr 的
+  `_get_new_gotos()` 会过滤 future irreducible gotos；NotDec shared 层还没有足够语义
+  定义这类 goto，暂不实现。
+- `LoweredSwitchSimplifier`
+  对应 Angr 的 lowered switch case tail 简化。NotDec 已支持线性 shared case region、
+  terminal fork case region、case-only target 判断和失败回滚。差异：更复杂的
+  case/default 交叉复用还没扩。
+- `ReturnDuplicatorLow`
+  对应 Angr 的 low return duplication。NotDec 已支持 linear return tail、terminal fork、
+  return-tail fork、goto tail 和带 predecessor-aware materialize 的一般 branch return
+  region。差异：多前驱 component 的 payload rewrite 仍保守传 `InvalidBlockId`，没有扩到
+  Phi/vvar 级别 rewrite。
+- `CrossJumpReverter`
+  对应 Angr 的 cross jump revert。NotDec 已支持线性 goto target copy、connected predecessor
+  合并复制和 strictly-less-gotos guard。差异：更复杂 region 仍依赖 shared CFG 后续表达能力。
+- `SwitchReusedEntryRewriter`
+  对应 Angr reused-entry 处理。NotDec 已支持 case-only reused entry、entry tail copy、
+  connected predecessors 和复用上限。差异：Angr 偏 virtual goto 的路径还没确认，NotDec
+  当前用 copied entry region 表达，不能静默扩大。
+
+## 当前暂停点
+
+`DuplicationReverter::_get_new_gotos()` 的 future irreducible goto 过滤需要 Angr 源码或
+清晰 shared CFG 定义后再做。现在如果只按名字猜，会影响 quality guard 是否接受 pass，
+属于算法语义选择，不应在没有证据时落代码。
