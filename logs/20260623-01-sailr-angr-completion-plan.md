@@ -2301,3 +2301,39 @@ loop / label 等结构统计，但把 goto target 统计替换成 `getNewGotos()
 
 维护成本：2/10。以后具体 pass 只需要维护自己的 `getNewGotos()`，wrapper 不会再用另一套
 goto target 统计做 quality 判断。
+
+# 2026-06-24 实现记录：switch edge 同步只改对应边类型
+
+这次修 `CrossJumpReverter` 里 switch 相关的边身份。之前重定向时，switch 的 case 和 default
+都可能被同一套 successor 更新逻辑扫到，导致 case / default 的身份混在一起。现在对 switch
+块只同步 case 列表和 case 对应的 successor 区段，default 只改 `Successors.front()`，
+non-switch 块仍按普通 successor 列表处理。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:489`
+  `redirectSwitchCases()` 先更新 switch block 的 case 区段 successor，再更新 `Cases`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:912`
+  `redirectNonSwitchCaseEdges()` 对 switch block 只改 default successor，避免误动 case 边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2392`
+  `testCrossJumpReverterUsesSwitchDefaultGotoKind()` 改成显式保留 switch 的 default / case 两条边。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4345`
+  `testSwitchReusedEntryRewriterKeepsDefaultSuccessorUntouched()` 补了 switch successor / case 的一致性断言。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：6/10。switch default / case 的边身份更清楚了，shared CFG 的边重定向也更接近
+Angr 的分边处理方式。
+
+复杂度：3/10。只是把原来的粗粒度 successor 更新拆细，没有改算法接口。
+
+维护成本：3/10。后续如果更多 pass 需要按边类型处理，可以直接复用这个边界。
