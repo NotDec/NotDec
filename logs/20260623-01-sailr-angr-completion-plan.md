@@ -1421,3 +1421,32 @@ predecessor-aware payload materialize hook 可用时才放行，避免 copied sw
 复杂度：3/10。复用现有 closed-tail 收集和 transaction copy，没有新增 renderer 逻辑。
 
 维护成本：3/10。后续要扩更复杂 switch 时，仍要先补 shared payload/Phi/vvar 边界。
+
+# 2026-06-24 实现记录：Switch return-region payload guard 测试
+
+这次只补测试，钉住上一轮 `ReturnDuplicatorLow` switch return-region 的安全边界：
+没有 predecessor-aware payload materialize hook 时，不能复制 switch return-region。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testReturnDuplicatorLowSkipsSwitchReturnRegionWithoutPredecessorRewrite()`，
+  构造和正向 switch return-region 测试相同的 CFG，但只安装普通 payload hook，
+  确认 optimization trial 不接受这个复制。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+
+结果：structuring 单测、CTest 子集和 `notdec` 构建通过。此轮只改测试，不跑 fortune。
+
+## 当前判断
+
+实现效果：5/10。没有扩大语义，只把 switch return-region 的 payload guard 固定下来。
+
+复杂度：1/10。只新增 shared structuring 单测。
+
+维护成本：1/10。测试防止后续误绕过 predecessor-aware payload rewrite 要求。
