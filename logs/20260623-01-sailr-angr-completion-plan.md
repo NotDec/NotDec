@@ -2750,3 +2750,55 @@ return cleanup、goto condensing、switch reuse、duplication reversion。离 an
 到这里，迁移脚本已经把几个主要 SAILR 语义点都覆盖到了：return cleanup、early exit、
 switch reuse、duplication reversion、不过度去重、condensing / return 组合。离真正把
 angr 原始测试输入逐个迁过来还有距离，但至少测试壳和语义分类都已经搭起来了。
+
+## 2026-06-24 进展：Phi demote 和真实样例基线先稳住
+
+这一轮先把旧链路的 Phi demote 回归和 htypes 输出链路收稳，再把迁移脚本里的一个
+condensing proxy 换成真实样例。
+
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:93`
+  现在按 demote 后的 `alloca` 实际结果检查 HType 映射，不再依赖前缀猜测。
+- `external/NotDec-llvm2c/test/phi_demote_htypes_smoke.py:19`
+  补了 `--work-dir`，让 `ValueCTypes.txt` 落到测试自己的临时目录里。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:1`
+  把 `condensing_return_proxy` 换成 `lighttpd/1-main_init_once.ll` 的真实样例。
+
+验证上，`phi-demote` 和 `phi-demote-htypes` 现在都能过，`sailr-bench2-migration`
+也保持通过。真实样例这边先找到了 `hexx64` 和 `lighttpd` 两条稳定线，后面可以继续往
+Angr 的 return duplication / condensing 语义靠，不再只靠 proxy 维持覆盖面。
+
+## 2026-06-24 进展：迁移脚本继续往真实样例靠
+
+这一轮把 migration 里的一个 condensing proxy 换成了真实的 `lighttpd/1-main_init_once.ll`
+样例，保留了同一类 Angr 对照，但不再依赖手写 proxy 来撑覆盖面。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:133`
+  `condensing_return_proxy` 改成 `condensing_real_lighttpd`，直接读真实 Bench2 输入。
+
+这一步的意义不在于“样例变多了”，而是在于迁移测试开始真正约束 shared structuring
+在真实输入上的结果，而不是只看最小手写 IR。下一步还是优先找能稳定跑的真实 return /
+switch 样例，继续替换剩下的 proxy。
+
+
+## 2026-06-24 迁移补充：把 Phi demotion 的证据边界收紧
+
+这次没有继续扩大 structuring 侧的迁移壳，而是把 Phi demotion 的验证边界收紧回一个更可证实
+的点：`demoteSSAFixHT` 会把函数里的 Phi 移掉，同时把原来挂在 Phi 上的 HType 从 Phi 本体
+转到 demoted 之后的值上。当前测试只保留了这个稳定结论，没有继续硬猜 demoted slot 的名字。
+
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:1`
+  继续保留 unnamed Phi 的 demotion / HType 迁移断言。
+
+这说明 `phi` 仍然不应该进入 structuring 算法层；它先被 demote，后面的 shared structuring
+和 SAILR migration 才能看见已经降过的值和边界。更强的“名字到 slot 的一一对应”目前还没证实，
+所以先不把它写成已完成。
+
+## 2026-06-24 迁移补充：把不稳定的 Phi 名字断言收回
+
+前一轮尝试把 demoted slot 的名字也纳入断言，但这条在当前 IR / reg2mem 命名下并不稳定，
+容易把测试写成猜名字而不是验证语义。现在已经把那条不稳定断言收回，只保留稳定的结论：
+
+- Phi 会被移掉。
+- 原来的 Phi 类型会跟着 demoted 路径保留下来，而不是继续挂在 Phi 上。
+
+这条边界足够支持后续 structuring 不直接处理 Phi，也够支撑 SAILR 迁移往下走。
