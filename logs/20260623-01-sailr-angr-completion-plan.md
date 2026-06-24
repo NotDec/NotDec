@@ -455,6 +455,39 @@ shared identity。现在补一条测试，确认 synthetic goto 复制后仍然�
 
 维护成本：1/10。以后虚拟块 payload rewrite 出问题时，hook 里能直接看到 source / target。
 
+# 2026-06-24 实现记录：Bench2 SAILR 迁移回归接入 CTest
+
+这次把 Angr 侧 SAILR 测试迁移这件事往前推进了一步，不再只停留在日志里的目标描述。
+现在先用 Bench2 里两组稳定的 LLVM IR 样例做 file-based 回归，直接跑 `structured-sailr`
+并检查最基础的输出形状。这样至少先把“这些样例在 NotDec 的 shared structuring 链路里
+能跑通”钉住，后面再继续往 Angr 测试名和更细断言对齐。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:1`
+  新增一个独立迁移脚本，先接了两组样例：
+  `hexx64/function-0x1156e0/native/function-0x1156e0.ll` 和
+  `python/one-_PyPegen_fill_token.cold.ll`。
+- `external/NotDec-llvm2c/test/structuring/CMakeLists.txt:21`
+  把这个脚本接入 `ctest`，新增 `sailr-bench2-migration`。
+
+## 验证
+
+- `python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+- `ctest --test-dir /sn640/NotDec/build -R sailr-bench2-migration --output-on-failure`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：4/10。迁移回归已经接上，但现在还是先用 Bench2 的稳定样例做入口，
+还没做到 angr 测试名、输入形状、断言语义的逐项对齐。
+
+复杂度：2/10。只是加了一个独立脚本和一个 CTest 条目，没有动 structuring 算法。
+
+维护成本：2/10。后面可以继续往这个脚本里补更多 SAILR 相关样例，再逐步把
+angr 侧测试名和本地样例一一对应起来。
+
 # 2026-06-23 实现记录：真实后端接入 payload materialize hook
 
 这轮把前一版的 shared payload materialize 入口接进了真实后端链路，并把
@@ -2522,3 +2555,53 @@ Angr 的分边处理方式。
 复杂度：3/10。只是把原来的粗粒度 successor 更新拆细，没有改算法接口。
 
 维护成本：3/10。后续如果更多 pass 需要按边类型处理，可以直接复用这个边界。
+
+# 2026-06-24 实现记录：补一组 Bench2 迁移回归
+
+这次先把 Angr 侧 SAILR 测试迁移这件事落到 NotDec 的现有回归框架里，不再只停留在
+“找到样例”。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:1`
+  新增一个 file-based 回归脚本，直接消费 Bench2 里已经存在的 LLVM IR 产物。
+  目前先接了两组能稳定跑通的样例：
+  `hexx64/function-0x1156e0/native/function-0x1156e0.ll` 和
+  `python/one-_PyPegen_fill_token.cold.ll`。
+  断言也尽量保守，只检查它们确实能在 `structured-sailr` 下跑完，并分别出现
+  `return;` / `return -1;` 这类最基本输出形状。
+- `external/NotDec-llvm2c/test/structuring/CMakeLists.txt:1`
+  把这个脚本接进 `ctest`，新增 `sailr-bench2-migration`。
+
+## 验证
+
+```bash
+ctest --test-dir /sn640/NotDec/build -R sailr-bench2-migration --output-on-failure
+```
+
+结果：通过。
+
+## 当前判断
+
+实现效果：4/10。迁移回归已经接上，但现在还是先用本地 Bench2 的稳定样例做入口，
+还没做到 angr 测试名、输入形状、断言语义的逐项对齐。
+
+复杂度：2/10。只是加了一个独立脚本和一个 CTest 条目，没有动 structuring 算法。
+
+维护成本：2/10。后面可以继续往这个脚本里补更多 SAILR 相关样例，再逐步把
+angr 侧测试名和本地样例一一对应起来。
+
+## 后续迁移方向
+
+当前这批回归只说明 NotDec 能用 Bench2 里的现成样例跑出和 SAILR 相关的输出形状，
+还不等于已经把 angr 侧测试完整迁移过来。下一步要做的是把 `test_decompiler.py`
+里的 SAILR 测试逐个映射成 NotDec 这边能拿到的样例和断言，优先找：
+
+- `test_sailr_motivating_example`
+- `test_true_a_graph_deduplication`
+- `test_deduplication_too_sensitive_split_3`
+- `test_decompiling_sha384sum_digest_bsd_split_3`
+- `test_who_condensing_opt_reversion`
+
+完成标准也要再往前走一步：每个映射都要能说明它对应的是 return duplication、
+duplicate reversion、switch reuse 还是 condensing / goto 语义，而不是只说“这个文件能跑”。
