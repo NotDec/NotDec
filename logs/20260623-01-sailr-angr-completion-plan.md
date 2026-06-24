@@ -1634,3 +1634,93 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只新增默认选项断言。
 
 维护成本：1/10。测试防止后续修改 switch deoptimization 默认 guard 时静默偏离 Angr。
+
+# 2026-06-24 实现记录：Phi 先 demote 再做 shared type handoff
+
+这次把旧链路里 Phi 先 demote 的边界再收紧了一层。结构恢复前仍然先走 `demoteSSAFixHT()`，让 structuring 不直接面对 Phi；同时把 Phi 的 HType 继续挂到 demoted 的 `.reg2mem` stack slot 上，后续 shared structuring 只消费已经 demoted 的 LLVM 值。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1500-1628`
+  修改 `demoteSSAFixHT()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1502-1538`
+  先收集所有 Phi，再把它们的 HType 绑定到 demote 后新生成的 `.reg2mem` alloca 名称上。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1595-1628`
+  在 reg2mem 之后回填 `HT.ValueTypesLower/Upper` 和 `ContraVariantValues`，让后续类型恢复看到的是 demoted LLVM Value，而不是 Phi 本身。
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:28-117`
+  维持 Phi demote 单测，确认 unnamed Phi 会被稳定命名并清掉原始 Phi 类型映射，只留下 demoted slot 的类型映射。
+
+## 验证
+
+- `cmake --build ./build --target phi-demote-test -j4`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：构建和单测通过。
+
+## 当前判断
+
+实现效果：6/10。把“Phi 不进 structuring”这条边界落到旧链路里了，但还没继续往 copied/virtual block 的 payload rewrite、ReturnDuplicatorLow 和 switch deoptimization 扩。
+
+复杂度：2/10。只动了 demote 前后的 HType 交接，不改 structuring 算法本身。
+
+维护成本：2/10。以后如果再碰 Phi 语义，先看这里的 demote 入口和类型回填，不用在 structuring 层补 Phi 特判。
+
+# 2026-06-24 实现记录：Switch reused-entry / default-copy rollback 收口
+
+这次继续把 shared structuring 的 rollback 边界往前收。之前虽然已经把 return 和 lowered switch 的复制改成 candidate 提交，但 `SwitchDefaultCaseDuplicator` 和 `SwitchReusedEntryRewriter` 仍然存在中途失败后留下半改图的风险。这里把它们也收成整图 candidate 提交，失败时不回写半成品。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1159-1278`
+  修改 `SwitchDefaultCaseDuplicator::runOnGraph()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1163-1278`
+  用单个 `Candidate` 承载 default forwarder 和 default-tail 复制，只有整轮成功才一次性提交给 `Graph`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:977-1045`
+  修改 `SwitchReusedEntryRewriter::runOnGraph()`，改成整图 candidate 提交，避免 reused-entry rewrite 只改到一半。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3416-3445`
+  保留 `testSwitchDefaultCaseDuplicatorCommitsRewriteAtomically()`，确认 default rewrite 仍然是全有或全无。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：两个测试都通过。
+
+## 当前判断
+
+实现效果：6/10。shared rollback 这条线又往前收了一截，但 copied / virtual block payload materialize 还是主缺口。
+
+复杂度：2/10。只改 shared structuring 的提交边界，没有往 renderer 里塞特判。
+
+维护成本：2/10。以后 switch 类 deopt 的失败处理可以先看 candidate 提交，不用再追局部回写。
+
+# 2026-06-24 实现记录：Materialize fast path commit 回调
+
+这次补了一处 shared payload materialize 的结果语义。之前 `StructuredCFG::materializeBlockBody()` 只有慢路径会把 commit/abort 结果回调给 `MaterializeResultHook`，快路径直接复制 body 时不会告诉共享层“这次 materialize 已经完成”。这会让 copied / virtual block 的共享语义少一个稳定的结束点。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:239-375`
+  修改 `StructuredCFG::materializeBlockBodyImpl()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:250-291`
+  在 `BodyBlock == Id` 的自材化路径和无 `MaterializeHook` 的快路径上都补了 `MaterializeResultHook(..., Committed, {})`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:895-915`
+  新增 `testStructuredCFGMaterializeFastPathReportsCommit()`，确认快路径也会发 commit 回调。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：两个测试都通过。
+
+## 当前判断
+
+实现效果：7/10。shared materialize 的结束语义更完整了，但 copied / virtual block 的 payload rewrite 还有更多形状要补。
+
+复杂度：2/10。只补 commit 回调，不改现有 payload 复制逻辑。
+
+维护成本：2/10。以后看 materialize 的结果语义，快路径和慢路径现在一致了。
