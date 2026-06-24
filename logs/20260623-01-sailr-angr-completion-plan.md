@@ -1112,3 +1112,44 @@ payload materialize 层，但真正按 predecessor/component 重写 Phi/vvar 还
 
 维护成本：5/10。后续如果要把 grouped incoming rewrite 真正用起来，只需要沿这条 shared
 context 往下接，不需要重写复制流程。
+
+# 2026-06-24 实现记录：SwitchDefaultCaseDuplicator 支持 terminal default forwarder
+
+这次补 switch default deoptimization 的一个小缺口。之前 shared default block 必须有一个
+successor，`SwitchDefaultCaseDuplicator` 才会记录这个 default target。这样 terminal
+default（例如直接 return）完全跳过，两个 switch 仍共享同一个 default target。现在改成：
+只要 default target 存在，就可以为每个 switch 插入 synthetic default forwarder；只有需要
+继续复制 default tail region 时，才要求 default target 有单 successor。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1024`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 不再因为 default block 没有 successor 而跳过
+  forwarder 收集；`SwitchPredsByDefault` 会记录 terminal default。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1029`
+  tail region 收集仍保守要求 default target 只有一个 successor，不把 terminal default body
+  当成可复制线性 tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2920`
+  将 `testSwitchDefaultCaseDuplicatorSkipsTerminalSharedDefault()` 改为
+  `testSwitchDefaultCaseDuplicatorForwardsTerminalSharedDefault()`，验证 terminal default 本体
+  保持 return，同时两个 switch default successor 改到独立 synthetic forwarder。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-terminal-default-forwarder.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=200.80 user=222.71 sys=1.70 maxrss=1259784`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：7/10。terminal default 的 reused/default identity 现在能在 shared CFG 中显式表达，
+但更复杂的 default/case 交叉复用仍没展开。
+
+复杂度：3/10。只是把 forwarder 收集和 tail region 复制条件拆开。
+
+维护成本：3/10。仍使用已有 synthetic forwarder，不引入 renderer fallback。
