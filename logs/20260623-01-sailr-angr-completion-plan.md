@@ -2121,3 +2121,44 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补 shared 快路径测试，不改 pass 主逻辑。
 
 维护成本：1/10。以后如果 copied switch 的 fast path 出问题，能直接看是身份字段退回，还是 case target 丢了。
+
+# 2026-06-24 实现记录：LoweredSwitchSimplifier 拆单 case/default 复用
+
+这次补 `LoweredSwitchSimplifier` 的一个真实语义缺口：同一个 switch 同时把 default
+和一个 case 指向同一段 case region 时，旧逻辑因为只有一个 case predecessor 会跳过。
+现在只要目标同时被 case edge 和 non-case/default edge 复用，就复制 case region，
+case 指向 copy，default 继续留在原 region。这个仍然是 shared CFG 行为，不需要 C 或
+Solidity renderer 做 fallback。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1090`
+  在 `LoweredSwitchSimplifier::runOnGraph()` 里增加 `HasNonCaseReuse` 判断。
+  触发条件从“至少两个 case predecessor”放宽为“至少一个 case predecessor，
+  并且该目标还有 default / 普通 successor 复用”。default-only target 仍然跳过。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4779`
+  新增 `testLoweredSwitchSimplifierSplitsSingleCaseDefaultReuse()`，覆盖同一个 switch 的
+  default 和 case 都指向同一 region 的形状。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7546`
+  把新测试接入 `structuring-analysis-test`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `cmake --build ./build --target phi-demote-test notdec -j4`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-single-case-default.c --tr-level=2 --algo=structured-sailr`
+
+结果：通过。fortune smoke 为 `elapsed=195.26 user=218.14 sys=1.74 maxrss=1272544`，
+和前几轮 195-200 秒同口径，没有看到明显性能退化。
+
+## 当前判断
+
+实现效果：6/10。`LoweredSwitchSimplifier` 对 case/default 交叉复用更接近 Angr，
+但还没有覆盖更复杂的多 switch、多 default forwarder 组合。
+
+复杂度：2/10。只复用已有的 case-only copy helper，新增条件很窄。
+
+维护成本：2/10。风险主要在触发条件扩大；新测试和已有 default-only 测试一起守住边界。
