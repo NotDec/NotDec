@@ -753,3 +753,39 @@ renderer 侧倒推 CFG 身份。
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=202.86 user=225.17 sys=1.73 maxrss=1264320`，和近期同口径结果接近。
+
+# 2026-06-24 实现记录：copied block 记录 immediate source
+
+这次补 copied block 的另一层身份。之前 `SourceBlock` 表示最初语义来源，copy-of-copy
+时仍会指向原始 block，但 shared CFG 里没有字段记录“本次是从哪个具体 block 复制出来的”。
+现在新增 `CopiedFromBlock`，后续 payload rewrite、goto source-target 判断和回滚诊断
+都能区分 ultimate source 和 immediate source。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:72`
+  `PayloadMaterializeContext` 新增 `CopiedFromBlock`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:112`
+  `CFGBlock` 新增 `CopiedFromBlock`，记录本次复制的直接来源。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:106`
+  `StructuredCFG::duplicateBlock()` 设置 copy 的 immediate source。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:229`
+  `StructuredCFG::materializeBlockBody()` 把 immediate source 带进 materialize context。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:731`
+  `testStructuredCFGDuplicatesBlockBodySource()` 覆盖 copy-of-copy 时
+  `SourceBlock` 仍指原始 block，`CopiedFromBlock` 指上一层 copy。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:781`
+  `testStructuredCFGMaterializeRewritesCopiedPayloads()` 覆盖普通 copied block context。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1136`
+  `testStructuredCFGMaterializesCopiedSwitchWithoutRewritingTargets()` 覆盖 region copy
+  switch context。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-copied-from.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=200.23 user=222.21 sys=1.66 maxrss=1260716`，和近期同口径结果接近。
