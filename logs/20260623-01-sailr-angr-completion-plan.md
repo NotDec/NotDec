@@ -311,6 +311,24 @@ cmake --build build --target structuring-analysis-test -j4
 
 结果：通过。
 
+## 2026-06-24 实现记录：Phi demote 清理逻辑收敛到共享容器接口
+
+这轮只把 `demoteSSAFixHT()` 里对 Phi 残留的擦除，收敛成 `HTypeResult` 自己的共享接口，
+没有改 demote 的语义本身。这样后面如果还有别的前置清理逻辑要复用同样的过滤规则，
+就不用在 `StructuralAnalysis.cpp` 里各写一遍循环了。
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1563`
+  改成调用 `HTypeResult::eraseValueTypesIf()` 和
+  `HTypeResult::eraseContraVariantValuesIf()`。
+
+验证：
+
+```bash
+cmake --build build --target phi-demote-test -j4
+```
+
+结果：通过。
+
 1. 算法层不包含 C renderer / Solidity renderer 特判。
 2. renderer 不承担 structuring fallback 语义。
 3. 所有 copied region 改图都具备候选图提交或事务式回滚。
