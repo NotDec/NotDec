@@ -690,3 +690,33 @@ body 前，会先 materialize 这些 copy。之前如果后一个 copy materiali
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=196.83 user=218.85 sys=1.68 maxrss=1256772`，没有看到明显性能退化。
+
+# 2026-06-24 实现记录：materialize context 带 terminator 身份
+
+这次继续补 copied block 的 shared payload materialize context。之前 hook 能看到
+successor 映射，但处理 condition payload 时仍要从外部推断这是 branch 还是 switch。
+现在 context 直接带 original/new terminator kind，让后续 payload rewrite 使用 shared CFG
+身份信息，不需要 renderer 侧猜。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:78`
+  `PayloadMaterializeContext` 新增 `OriginalTerminator` 和 `NewTerminator`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:232`
+  `StructuredCFG::materializeBlockBody()` 从 body block 和 copy block 填入 terminator 身份。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:772`
+  `testStructuredCFGMaterializeRewritesCopiedPayloads()` 覆盖普通 copied switch 的 terminator
+  context。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1114`
+  `testStructuredCFGMaterializesCopiedSwitchWithoutRewritingTargets()` 覆盖 region copy 后
+  switch block 的 original/new terminator 身份。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-materialize-terminator.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=195.81 user=218.38 sys=1.75 maxrss=1263424`，没有看到明显性能退化。
