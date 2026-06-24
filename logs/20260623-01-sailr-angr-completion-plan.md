@@ -355,6 +355,39 @@ clone，也没有完成 Phi / vvar rewrite。
 更好的方案暂时没有明显成立。直接扩大 return-region copy 会绕过 payload 语义，风险更高；
 把 clone 逻辑放进 C/Solidity renderer 会让两个后端各自背 structuring 语义，也不符合目标。
 
+# 2026-06-24 实现记录：copy-of-copy 的 switch payload identity 保持
+
+这次继续收紧 shared payload materialize 的边界，钉住 copy-of-copy 的 switch 语义。
+当前 `StructuredCFG` 已经能给 copied block 提供 predecessor-aware rewrite context，
+但还缺一个明确测试来证明：二次复制仍然沿用原始 body source，`CopiedFromBlock`
+只记录这次直接复制来源，switch case value 的 rewrite 仍然可以看到原始 source /
+body / copy 身份三层信息。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1562`
+  新增 `testStructuredCFGMaterializeCopyOfCopyKeepsSwitchIdentity()`，覆盖 switch block
+  的 copy-of-copy 场景，确认 `SourceBlock == 10`、`CopiedFromBlock == 13`，
+  `BodyBlock` 在 materialize 前后都按当前 copy 收口。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7608`
+  把新测试接入 `structuring-analysis-test` 主入口。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：6/10。copy-of-copy 的 switch payload 身份更稳了，但这仍然是 shared CFG
+层的 identity 测试，不是新的 deoptimization 语义。
+
+复杂度：1/10。只是补了一条更硬的回归测试。
+
+维护成本：1/10。后续如果 payload context 再扩字段，这条测试会继续帮忙钉住 copy 链条。
+
 # 2026-06-23 实现记录：真实后端接入 payload materialize hook
 
 这轮把前一版的 shared payload materialize 入口接进了真实后端链路，并把
