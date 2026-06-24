@@ -2067,3 +2067,30 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补 shared 测试，不改 pass 主逻辑。
 
 维护成本：1/10。以后如果 default reuse 的 group 处理出问题，能直接看是前驱分组还是 payload rewrite 坏了。
+
+# 2026-06-24 实现记录：DuplicationReverter getNewGotos 过滤边界
+
+这次补了 `DuplicationReverter::getNewGotos()` 的保留/过滤边界测试。现在除了未来不可约 goto 会被过滤掉，通向正常 end block 的 goto 也会被保留。这个点虽然看起来是 wrapper 逻辑，但它直接关系到 shared structuring trial 结束后新 goto 的裁剪方式，算是 Angr 风格 guard 的一部分。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2537-2573`
+  新增 `testDuplicationReverterKeepsValidEndGotos()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7411`
+  把新测试接进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：4/10。`getNewGotos()` 的过滤/保留边界更完整了，但还没继续扩到更多 Angr pass 对齐细节。
+
+复杂度：1/10。只补 wrapper 级测试，不改 pass 主逻辑。
+
+维护成本：1/10。以后如果 goto 裁剪出问题，能直接看是 end goto 被误删，还是未来不可约 goto 没被挡住。
