@@ -1450,3 +1450,48 @@ predecessor-aware payload materialize hook 可用时才放行，避免 copied sw
 复杂度：1/10。只新增 shared structuring 单测。
 
 维护成本：1/10。测试防止后续误绕过 predecessor-aware payload rewrite 要求。
+
+# 2026-06-24 实现记录：pred-sensitive copy 不合并前驱组件
+
+这次补 shared copy 分组规则：如果 payload materialize hook 说明需要 predecessor rewrite，
+但还不支持 grouped predecessor rewrite，就不能把多个相连 predecessor 合成一份 copied
+region。这样 PHI demote 后的 incoming 值映射不会在 SAILR copied block 里被压成一个来源。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:417`
+  新增 `materializePredecessorComponents()`，在 predecessor-sensitive hook 不支持 grouped
+  rewrite 时返回单前驱组件；否则沿用 connected component。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1096`
+  `LoweredSwitchSimplifier::runOnGraph()` 改用这个分组规则。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1254`
+  `SwitchDefaultCaseDuplicator::runOnGraph()` 改用这个分组规则。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1423`
+  `ReturnDuplicatorLow::runOnGraph()` 改用这个分组规则。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1522`
+  `CrossJumpReverter::runOnGraph()` 改用这个分组规则。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3902`
+  新增 `testLoweredSwitchSimplifierKeepsPredSensitiveCopiesSeparate()`，覆盖两个相连 switch
+  predecessor 共享 case region 时，单前驱 payload rewrite 必须得到两份不同 copy。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6872`
+  接入新测试。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-pred-sensitive-copy.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=199.13 user=221.06 sys=1.48 maxrss=1267948`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：6/10。没有扩大 Angr 形状覆盖，但修住 copied payload incoming 身份的一个 shared
+语义边界。
+
+复杂度：2/10。只增加一个公共分组 helper，复用现有 hook 能力判断。
+
+维护成本：2/10。后续真正支持 grouped predecessor rewrite 后，这条规则会自动回到组件级复制。
