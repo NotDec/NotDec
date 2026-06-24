@@ -416,3 +416,48 @@ demote 前后按 Phi 名字迁到 `.reg2mem` alloca 上。
 
 结果：构建通过，smoke 通过，`llvm2c-before-demotessa.ll` 里还能看到 Phi，
 `llvm2c-after-demotessa.ll` 里已没有 Phi，只剩 `.reg2mem` 相关的 load/store。
+
+# 2026-06-23 实现记录：copied region 的 predecessor-aware materialize context
+
+这次补的是 shared CFG 复制时的 context 语义。之前 copy helper 虽然会调用带
+predecessor 参数的 `materializeBlockBody()`，但对 region 内所有 copy 都传同一个
+外部 predecessor。这样后续做 predecessor-sensitive payload rewrite 时，内部 copied
+block 不知道自己来自哪个原 predecessor，也不知道对应的新 copied predecessor。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:497`
+  新增 `materializeDuplicatedRegion()`，统一给 copied region 内每个 block 计算
+  `OriginalPredecessor` 和 `NewPredecessor`。region head 使用外部 predecessor；
+  region 内部 block 使用原内部 predecessor 和对应 copy。多前驱或无法唯一判断时继续传
+  `InvalidBlockId`，保持保守。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:545`
+  `copyRegionForPredecessors()` 改用这个 helper。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:702`
+  `copyLinearRegionForPredecessors()` 也改用同一 helper，避免 Return / switch deopt
+  两条复制路径语义分叉。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2230`
+  加强 `testReturnDuplicatorLowCopiesBranchReturnRegionWithPayloadRewrite()`：
+  payload hook 现在要求 predecessor context 非空，并用 `NewPredecessor` 生成 payload，
+  验证 region head、then/else tail、return block 都拿到正确的新前驱。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-pred-context.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建和 structuring subset 都通过。fortune smoke 结果：
+`elapsed=194.84 user=217.12 sys=1.71 maxrss=1257804`，和前面 196-205 秒同口径，
+没有看到明显性能退化。
+
+## 当前判断
+
+实现效果：7/10。copied region 的 materialize context 已经能表达单前驱的真实
+source-target 身份，后续做 payload rewrite 不再只能看到 copy block id。
+
+复杂度：5/10。只多了一个 shared helper，两个 copy helper 复用同一套规则。
+
+维护成本：5/10。多前驱仍保守传 `InvalidBlockId`，没有提前承诺复杂 Phi/vvar rewrite。
