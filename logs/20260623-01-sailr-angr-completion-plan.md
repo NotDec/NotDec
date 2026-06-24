@@ -789,3 +789,33 @@ renderer 侧倒推 CFG 身份。
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=200.23 user=222.21 sys=1.66 maxrss=1260716`，和近期同口径结果接近。
+
+# 2026-06-24 实现记录：未命名 Phi demote 保持 HType 映射
+
+这次补结构恢复前 Phi demote 的一个边界。`demoteSSAFixHT()` 通过 PHI 名字把旧
+HType 映射迁到 reg2mem alloca；未命名 PHI 的名字是空串，同一函数里多个未命名
+PHI 会撞到同一个 key。现在 demote 前给未命名 PHI 分配稳定名字，继续保持
+structuring 算法不直接处理 PHI。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1479`
+  `demoteSSAFixHT()` 在收集 PHI HType 前给未命名 PHI 设置 `notdec.phi` 名字，
+  让 LLVM 自动在函数内 uniquify。
+- `external/NotDec-llvm2c/test/CMakeLists.txt:4`
+  新增 `phi-demote-test`，直接链接 `notdec-backend-c`。
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:28`
+  新增 `testDemoteSSAFixHTKeepsUnnamedPhiTypes()`：构造两个未命名 PHI，
+  验证 demote 后无 PHI，旧 PHI HType 映射被删除，两个 reg2mem alloca 都拿到
+  pointer-wrapped HType，contravariant 标记也迁到对应 alloca。
+
+## 验证
+
+- `cmake --build ./build --target phi-demote-test -j4`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-phi-demote.c --tr-level=2 --algo=structured-sailr`
+
+结果：新增测试、structuring CTest 子集和 fortune smoke 通过。fortune smoke：
+`elapsed=198.91 user=221.77 sys=1.54 maxrss=1264148`，和近期同口径结果接近。
