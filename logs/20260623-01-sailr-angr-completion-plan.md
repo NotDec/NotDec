@@ -1224,3 +1224,37 @@ edge” 这个身份。
 复杂度：3/10。只是在已有 tail-copy predecessor 筛选里排除 synthetic forwarder。
 
 维护成本：3/10。逻辑仍在 shared SAILR pass 内，后端只消费最终 CFG/tree。
+
+# 2026-06-24 实现记录：ReturnDuplicatorLow grouped predecessor 覆盖
+
+这次没有扩大 matcher，只补了 `ReturnDuplicatorLow` grouped predecessor materialize 的
+回归测试。目的很小：确认一个 copied return tail 可以按 connected predecessor component
+触发 grouped payload rewrite，并且 copied block 仍保持独立 `BlockId` / `BodyBlock`。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testReturnDuplicatorLowCopiesGroupedReturnPredsWithPayloadRewrite()`。
+  测试构造 `{0,2}` 和 `{3}` 两个 predecessor component，确认 hook 收到 grouped
+  `OriginalPredecessors` / `NewPredecessors`，payload 被 shared materialize 改写，
+  `{0,2}` 共享同一个 copied return block，`3` 得到另一个 copy。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/sailr-grouped-return-preds.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=201.11 user=223.34 sys=1.74 maxrss=1271236`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：5/10。这次主要是把已有 grouped rewrite 边界钉牢，不等于 Phi / vvar
+incoming rewrite 已完整。
+
+复杂度：1/10。只新增 shared structuring 单测。
+
+维护成本：1/10。测试直接覆盖 shared CFG 行为，不引入 renderer fallback。
