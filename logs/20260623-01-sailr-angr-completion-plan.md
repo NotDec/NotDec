@@ -2162,3 +2162,48 @@ Solidity renderer 做 fallback。
 复杂度：2/10。只复用已有的 case-only copy helper，新增条件很窄。
 
 维护成本：2/10。风险主要在触发条件扩大；新测试和已有 default-only 测试一起守住边界。
+
+# 2026-06-24 实现记录：CrossJumpReverter 区分 switch default 边重定向
+
+这次修 `CrossJumpReverter` 的一个 shared CFG 边身份问题。之前 pass 已经能从
+`GotoManager` 里区分 `SwitchCase` 和 `SwitchDefault`，但 default 路径复制 region
+后仍走粗粒度 `redirectPredecessors()`，会把同一个 switch 里指向同一 target 的 case
+也一起改到 copy。现在 default / 普通 successor 只重定向 `Successors`，不改
+`Cases`；case 路径继续只改 switch case。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:901`
+  新增 `redirectNonSwitchCaseEdges()`，只更新 predecessor 的 non-case successor。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:923`
+  新增 `copyLinearRegionForNonCasePredecessors()`，复用 shared region copy 和
+  materialize 逻辑，但提交时只改 non-case edge。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1674`
+  `CrossJumpReverter::runOnGraph()` 的 `NonCasePreds` 路径改用新的 non-case copy helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2362`
+  新增 `testCrossJumpReverterUsesSwitchDefaultGotoKind()`，覆盖同一个 switch 的 default
+  和 case 都指向同一 target、但只有 default 是 goto 的形状。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7573`
+  把新测试接入 `structuring-analysis-test`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `cmake --build ./build --target phi-demote-test notdec structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-crossjump-default-edge.c --tr-level=2 --algo=structured-sailr`
+
+结果：通过。fortune smoke 为 `elapsed=197.01 user=219.16 sys=1.69 maxrss=1267484`，
+和前几轮 195-200 秒同口径，没有看到明显性能退化。
+
+## 当前判断
+
+实现效果：6/10。CrossJumpReverter 的 switch case/default source-target 身份更清楚了，
+但还没覆盖所有 future irreducible goto 过滤语义。
+
+复杂度：3/10。新增一个 helper，但它只是把原来的粗粒度重定向拆成 non-case 专用路径。
+
+维护成本：3/10。后续如果更多 pass 要按边类型复制 region，可以复用这个边界，避免再混用
+`redirectPredecessors()`。
