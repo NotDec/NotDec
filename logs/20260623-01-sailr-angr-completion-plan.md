@@ -606,3 +606,29 @@ successor，后续只能从图里反推它代表哪条原始 edge；如果图再
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=196.91 user=218.94 sys=1.73 maxrss=1260472`。
+
+# 2026-06-24 实现记录：copied forwarder 保留原始边身份
+
+这次补 copied synthetic forwarder 的身份覆盖。forwarder 被 region copy 后仍然要表示原来的
+virtualized edge，但 copy 自己必须有独立 `BlockId` 和 copied 来源身份。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:102`
+  注释明确 synthetic forwarder 的 copy 也保留原始 virtual edge 身份。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1356`
+  新增 `testStructuredCFGDuplicateRegionKeepsSyntheticForwarderIdentity()`，覆盖 copied
+  forwarder 保留 `SyntheticSource` / `SyntheticTarget`，同时拥有独立 `BlockId`、
+  `SourceBlock`、`CopyKind` 和 copied origin。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5957`
+  把新测试接入 structuring analysis 测试入口。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-forwarder-copy.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=195.56 user=218.09 sys=1.50 maxrss=1261056`。
