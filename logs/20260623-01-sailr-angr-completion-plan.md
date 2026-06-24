@@ -720,3 +720,36 @@ successor 映射，但处理 condition payload 时仍要从外部推断这是 br
 
 结果：构建、测试和 fortune smoke 通过。fortune smoke：
 `elapsed=195.81 user=218.38 sys=1.75 maxrss=1263424`，没有看到明显性能退化。
+
+# 2026-06-24 实现记录：materialize context 带 switch case 映射
+
+这次继续补 copied switch 的 shared payload materialize 语义。之前 hook 能看到
+单个 case 的 original/new target，但看不到完整 switch case 列表。现在 context
+同时带 original/new cases，后续 rewrite case value 或判断 reused-entry 时，不需要从
+renderer 侧倒推 CFG 身份。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:76`
+  `PayloadMaterializeContext` 新增 `OriginalCases` 和 `NewCases`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:230`
+  `StructuredCFG::materializeBlockBody()` 从 body block 和 copy block 填入完整 case 列表。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:269`
+  `StructuredCFG::materializeBlockBody()` 在每个 case value hook 前设置当前
+  `OriginalTarget` / `NewTarget`，同时保留完整 case context。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:781`
+  `testStructuredCFGMaterializeRewritesCopiedPayloads()` 覆盖普通 copied switch 的
+  original/new case 列表。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1135`
+  `testStructuredCFGMaterializesCopiedSwitchWithoutRewritingTargets()` 覆盖 region copy 后
+  内部 case target 被改写时，context 同时保留 original/new cases 和单个 case target。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-materialize-cases.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、测试和 fortune smoke 通过。fortune smoke：
+`elapsed=202.86 user=225.17 sys=1.73 maxrss=1264320`，和近期同口径结果接近。
