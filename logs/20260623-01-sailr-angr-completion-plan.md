@@ -254,6 +254,25 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-24 实现记录：Phi demote 的类型残留再收紧
+
+这轮只补了一个小的 shared 断言，继续把 Phi 从结构恢复前的语义边界里拿掉。现在
+`demoteSSAFixHT()` 不只要在 demote 前把 Phi 的 HType 迁到 demoted value 上，还要保证写回
+的类型表里不会再保留 Phi 自己的类型残留；也就是说，后续 structuring 只看 demoted 结果，
+不再把 Phi 当作仍可直接消费的值。
+
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp:89`
+  新增 `testDemoteSSAFixHTDropsPhiRefsFromWrittenTypes()`。
+
+验证：
+
+```bash
+cmake --build build --target phi-demote-test -j4
+python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
 1. 算法层不包含 C renderer / Solidity renderer 特判。
 2. renderer 不承担 structuring fallback 语义。
 3. 所有 copied region 改图都具备候选图提交或事务式回滚。
@@ -1219,6 +1238,12 @@ synthetic goto；这个成本比把 reused-entry 复制语义混进 renderer 更
 DuplicationReverter 在简单分支合并时不引入额外控制流的形状。
 本轮也补了一个 `printenv_main` 风格的 root-cycle proxy，确认 shared structuring 能保住
 `do { ... } while (...)` 形状，而不是退回显式 goto。
+本轮还把 `eager_returns_simplifier_no_duplication_of_default_case` 对应成了一个稳定的
+early-return proxy，继续往 ReturnDuplicatorLow 的 Angr 测试覆盖靠近。
+本轮又补了一个 else-if / ITE proxy，对应 Angr 里 `test_else_if_scope_printing` 这类
+稳定分支打印测试。
+本轮还补了 `phi-demote-test` 的第二个用例，专门确认 demote 后旧 Phi 的 HType /
+contra-variant 关系会被清掉，只留下新的 reg2mem 载体。
 
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
