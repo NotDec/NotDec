@@ -388,6 +388,38 @@ body / copy 身份三层信息。
 
 维护成本：1/10。后续如果 payload context 再扩字段，这条测试会继续帮忙钉住 copy 链条。
 
+# 2026-06-24 实现记录：synthetic goto 的 shared identity 保持
+
+这次补的是虚拟边界里的另一种 synthetic block。前面已经有 synthetic forwarder 的共享
+身份测试，但 synthetic goto 只有渲染侧覆盖，没有单独钉住 copy / materialize 之后的
+shared identity。现在补一条测试，确认 synthetic goto 复制后仍然保留 `SyntheticSource`
+和 `SyntheticTarget`，`materializeBlockBody()` 也只收口它自己的 payload，不把这个虚拟跳转
+变成 renderer 侧特判。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1923`
+  新增 `testStructuredCFGDuplicateSyntheticGotoReportsTargets()`，覆盖 synthetic goto
+  的复制和 materialize 边界。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7705`
+  把新测试接入 `structuring-analysis-test` 主入口。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：5/10。synthetic goto 的边界更清楚了，但仍然只是 shared identity 收口，
+还没有推进新的 deoptimization 语义。
+
+复杂度：1/10。只加测试，不改算法。
+
+维护成本：1/10。以后看虚拟跳转时，能直接对照 synthetic goto 的来源和去向。
+
 # 2026-06-23 实现记录：真实后端接入 payload materialize hook
 
 这轮把前一版的 shared payload materialize 入口接进了真实后端链路，并把
