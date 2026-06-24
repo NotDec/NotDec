@@ -1258,3 +1258,39 @@ incoming rewrite 已完整。
 复杂度：1/10。只新增 shared structuring 单测。
 
 维护成本：1/10。测试直接覆盖 shared CFG 行为，不引入 renderer fallback。
+
+# 2026-06-24 实现记录：SwitchReusedEntryRewriter 保持 default 边
+
+这次修正 reused-entry 的 case/default 边界。`SwitchReusedEntryRewriter` 只应该处理
+switch case target 复用；如果同一个 switch 的 default successor 也碰巧指向相关 block，
+不能因为插入 synthetic goto 就把 default 边一起改掉。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  `SwitchReusedEntryRewriter::runOnGraph()` 改用 case-only redirect helper，
+  只替换 `SwitchCase::Target`，不再调用会同时改 `Successors` 和 `Cases` 的
+  `redirectPredecessors()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testSwitchReusedEntryRewriterKeepsDefaultSuccessorUntouched()`，
+  覆盖 case target 被 synthetic goto 替换，但 default successor 保持原目标的形状。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/sailr-reused-entry-default-preserve.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=201.06 user=223.26 sys=1.78 maxrss=1272340`。
+
+## 当前判断
+
+实现效果：7/10。reused-entry 的 case/default 身份更稳定，和前面的 lowered switch
+case-only rewrite 保持一致。
+
+复杂度：2/10。复用已有 case-only redirect helper。
+
+维护成本：2/10。逻辑仍在 shared SAILR pass 内，没有 renderer fallback。
