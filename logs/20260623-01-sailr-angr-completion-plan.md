@@ -420,6 +420,41 @@ shared identity。现在补一条测试，确认 synthetic goto 复制后仍然�
 
 维护成本：1/10。以后看虚拟跳转时，能直接对照 synthetic goto 的来源和去向。
 
+# 2026-06-24 实现记录：synthetic block payload context 暴露来源和去向
+
+这次补的是 shared payload materialize 的另一层信息：synthetic forwarder / goto
+本身已经是 shared CFG 的显式块，但 materialize hook 之前只能看到 `CopyBlock` 和
+`BodyBlock`，看不到虚拟边的原始来源和去向。现在 `PayloadMaterializeContext`
+也带上 `SyntheticSource` / `SyntheticTarget`，这样后续做虚拟块 payload rewrite 时，
+不需要再反查块本身就能知道这条虚拟跳转从哪来、到哪去。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:78`
+  `PayloadMaterializeContext` 新增 `SyntheticSource` 和 `SyntheticTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:255`
+  `materializeBlockBodyImpl()` 现在把 block 自身的 synthetic 边身份带进 context。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1897`
+  `testStructuredCFGDuplicateSyntheticForwarderReportsTargets()` 补了 synthetic 边身份断言。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1932`
+  `testStructuredCFGDuplicateSyntheticGotoReportsTargets()` 补了 synthetic goto 的 context 断言。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：5/10。synthetic block 的 payload context 更完整了，但这还是共享身份补强，
+不等于新的 deoptimization pass 语义。
+
+复杂度：1/10。只是把已存在字段带进 context。
+
+维护成本：1/10。以后虚拟块 payload rewrite 出问题时，hook 里能直接看到 source / target。
+
 # 2026-06-23 实现记录：真实后端接入 payload materialize hook
 
 这轮把前一版的 shared payload materialize 入口接进了真实后端链路，并把
