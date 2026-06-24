@@ -3,6 +3,7 @@
 写成一个新的规划文件，同时给出明确的计划完成条件
 
 是的，Phi指令一定要按照这个方式处理，把我的原话放到logs/20260623-01-sailr-angr-completion-plan.md顶部。
+当前应该优先按旧链路在结构恢复前 demote Phi，并维护 HType 到 demoted LLVM Value 的映射，使 structuring 算法不直接处理 Phi；随后完善 copied/virtual block 的 payload materialize、ReturnDuplicatorLow、switch deoptimization 和 Angr pass 对齐。
 
 # 背景
 
@@ -257,7 +258,40 @@ pass 对照和真实样例分类仍需后续继续做。
   保留无 hook 快路径，生产路径行为不变；有 hook 时分别重写 statements、
   branch condition、switch case value，全部写入临时 buffer，成功后才提交，失败不留下半改 payload。
 - `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:300`
-  修正 `duplicateRegion()` 失败回滚：只删除本次新建 copy block，不再用
+  修正 `duplicateRegion()` 失败回滚：只删除本次新建 copy block，不再用原图里
+  已经被引用的 copy id 去误删别的边。
+  
+# 2026-06-24 实现记录：switch case / default 复用拆分
+
+本次补了 shared 层的 switch 复用语义，目标是让 case 复用和 default 复用在
+StructuredCFG 里分开处理，不把 renderer fallback 当成算法结果。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  新增只重定向 switch case 的复制 helper，并把 `LoweredSwitchSimplifier`
+  调整成只复制 case predecessor 进入的共享 case region。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  收紧原 region 删除条件：只要 switch 还有 default / 普通 successor 继续指向
+  原目标，就保留原 region，不把 default 语义挪到 copy 上。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增混合 case/default 复用测试，确认复制 case region 后 default 仍保留在原目标，
+  同时 copied block 继续保持独立 `BlockId` 和 `BodyBlock`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/sailr-lowered-switch-default-case.c --tr-level=2 --algo=structured-sailr`
+
+## 结论
+
+目前 shared structuring 还没有到 Angr 全量语义，但 copied / virtual block 的身份、
+payload materialize、branch return-region、switch case/default 复用边界已经比前一版更清楚。
+下一步还是继续补 Phi / vvar 的 shared rewrite 表达，再往 `ReturnDuplicatorLow`
+和更复杂的 switch reuse 走。
   `removeBlock()` 逐个删，避免 copy id 已经出现在原图边里时误改原图边。
 - `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:189`
   新增 `collectClosedLinearReturnTail()` 和 `prependBranchReturnRegion()`，
