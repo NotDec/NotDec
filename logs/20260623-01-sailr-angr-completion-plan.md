@@ -1988,3 +1988,30 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补失败回滚测试，不改 pass 逻辑。
 
 维护成本：1/10。以后如果 grouped predecessor rewrite 出问题，能直接看是不是半改图泄漏。
+
+# 2026-06-24 实现记录：SwitchDefaultCaseDuplicator grouped predecessor 回滚
+
+这次把 `SwitchDefaultCaseDuplicator` 的 grouped predecessor 回滚边界也补上了。现在 default reuse 后半段在 `copyLinearRegionForPredecessors()` 失败时会整组回滚，不会留下只改了一半的 default copy，也不会把原始 default region 挖掉。这个点比单纯的成功路径测试更关键，因为它直接验证了 default reuse 也在 shared 事务边界内。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4033-4079`
+  新增 `testSwitchDefaultCaseDuplicatorRollsBackGroupedPredecessorFailure()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7368`
+  把新测试接进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：6/10。default reuse 的 grouped 回滚补上了，但还没继续扩到更多 switch deoptimization 形状。
+
+复杂度：1/10。只补失败回滚测试，不改 pass 主逻辑。
+
+维护成本：1/10。以后如果 default reuse 出问题，能直接看是半改图还是 default region 被误删。
