@@ -1529,3 +1529,36 @@ block 的一个 smoke。
 复杂度：1/10。只新增测试。
 
 维护成本：1/10。测试防止 Solidity fallback 回到 renderer 侧猜 synthetic goto。
+
+# 2026-06-24 实现记录：Switch default tail pred-sensitive 覆盖
+
+这次只补测试，钉住 `SwitchDefaultCaseDuplicator` 使用 shared predecessor 分组规则的边界。
+当 payload hook 只支持单 predecessor rewrite 时，default tail copy 不能因为两个 predecessor
+互相连通就合成一份 copy，否则 PHI demote 后的 incoming 值来源会被压扁。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3566`
+  新增 `testSwitchDefaultCaseDuplicatorKeepsPredSensitiveCopiesSeparate()`，构造两个相连的
+  default predecessor，共享同一个 default tail，并安装单 predecessor payload rewrite hook。
+  测试确认两条 incoming path 得到两份独立 copied default tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6966`
+  接入新测试。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+
+结果：structuring 单测、CTest 子集和 `notdec` 构建通过。此轮只补测试，不跑 fortune。
+
+## 当前判断
+
+实现效果：4/10。没有扩大算法语义，但把 pred-sensitive copy 的 shared 规则钉到 switch
+default tail pass 上。
+
+复杂度：1/10。只新增 pass 级测试。
+
+维护成本：1/10。测试防止 default tail copy 后续重新合并单前驱 payload 来源。
