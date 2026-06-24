@@ -1961,3 +1961,30 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只加 shared 测试，不改 pass 主逻辑。
 
 维护成本：1/10。以后看 switch 复制链条时，能直接定位是 body/source 乱了，还是 case payload 乱了。
+
+# 2026-06-24 实现记录：ReturnDuplicatorLow grouped predecessor 回滚
+
+这次补了 `ReturnDuplicatorLow` 的 grouped predecessor 回滚测试，专门钉住 shared materialize 失败时不能留下半改图。现在当 `PayloadMaterializeHook` 对一组前驱返回 `nullopt` 时，`ReturnDuplicatorLow` 不会把原图里的 return region 挖掉，也不会留下只改了一半的 copy。这个测试比单纯确认 grouped hook 被调用更硬，因为它直接验证了事务式回滚边界。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2840-2884`
+  新增 `testReturnDuplicatorLowRollsBackGroupedPredecessorFailure()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7293`
+  把新测试接进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：6/10。ReturnDuplicatorLow 的 grouped predecessor 失败回滚补上了，但还没有继续扩到更多 Angr return duplication 形状。
+
+复杂度：1/10。只补失败回滚测试，不改 pass 逻辑。
+
+维护成本：1/10。以后如果 grouped predecessor rewrite 出问题，能直接看是不是半改图泄漏。
