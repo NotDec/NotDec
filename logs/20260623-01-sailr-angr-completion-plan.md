@@ -329,6 +329,24 @@ cmake --build build --target phi-demote-test -j4
 
 结果：通过。
 
+## 2026-06-24 实现记录：按 demoted value 过滤的 helper 再收口
+
+这轮再把 Phi 清理里“判断一个类型条目是否引用了已 demote 的值”这一段，收成
+`HTypeResult::eraseTypesForDemotedValues()`。这样 `demoteSSAFixHT()` 只需要提供 demoted
+value 集合，具体怎么从 `ExtValuePtr` 里找引用关系留在共享类型容器里。语义没变，还是
+结构恢复前先清掉 Phi / 已 demote value 的类型残留。
+
+- `external/NotDec-llvm2c/include/notdec-backends/Core/HTypeResult.h:95`
+  新增 `eraseTypesForDemotedValues()`。
+
+验证：
+
+```bash
+cmake --build build --target phi-demote-test -j4
+```
+
+结果：通过。
+
 1. 算法层不包含 C renderer / Solidity renderer 特判。
 2. renderer 不承担 structuring fallback 语义。
 3. 所有 copied region 改图都具备候选图提交或事务式回滚。
@@ -1304,6 +1322,8 @@ contra-variant 关系会被清掉，只留下新的 reg2mem 载体。
 `ValueTypesUpper` 里，后续 structuring 看到的只会是 demoted 后的新值。
 同时把这段清理抽进了 `HTypeResult` 的通用接口，`demoteSSAFixHT()` 现在只负责判定
 哪些值该删，不再自己手写三段 map/set 清理逻辑。
+现在 `HTypeResult` 也有了按 demoted 值统一清理条目的入口，后面 shared structuring 再
+往前挪时，旧 Phi 的类型映射不会再留在这层散着处理。
 
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
