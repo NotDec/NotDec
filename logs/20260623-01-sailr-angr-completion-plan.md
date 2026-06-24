@@ -819,3 +819,42 @@ structuring 算法不直接处理 PHI。
 
 结果：新增测试、structuring CTest 子集和 fortune smoke 通过。fortune smoke：
 `elapsed=198.91 user=221.77 sys=1.54 maxrss=1264148`，和近期同口径结果接近。
+
+# 2026-06-24 实现记录：materialize 结果通知支持 payload 回滚
+
+这次补 copied payload materialize 的回滚边界。之前 hook 可以生成新的 payload id，
+但如果后续 statement / condition / case value rewrite 失败，shared CFG 只能保持
+block 不被写实，不能通知后端丢弃已经 clone 出来的 payload。现在新增 result hook，
+materialize 成功时通知 committed payload，失败时通知 aborted payload，清理语义仍在
+shared structuring 边界上。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:68`
+  新增 `PayloadMaterializeResult`，区分 `Committed` 和 `Aborted`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:96`
+  新增 `PayloadMaterializeResultHook`，传回本次生成的 payload 列表。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:175`
+  `StructuredCFG` 新增 `setPayloadMaterializeResultHook()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:36`
+  新增 `appendGeneratedPayload()`，只记录有效且不同于原 payload 的新 payload。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:253`
+  `StructuredCFG::materializeBlockBody()` 在 rewrite 失败时发出 `Aborted` 通知。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:318`
+  `StructuredCFG::materializeBlockBody()` 在成功写实后发出 `Committed` 通知。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:812`
+  `testStructuredCFGMaterializeRewritesCopiedPayloads()` 覆盖 committed payload 列表。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:876`
+  `testStructuredCFGMaterializeRewriteFailureIsAtomic()` 覆盖失败时只回报已经生成的
+  payload，且 block 本身仍保持未写实状态。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-materialize-result.c --tr-level=2 --algo=structured-sailr`
+
+结果：structuring 单测、CTest 子集和 fortune smoke 通过。fortune smoke：
+`elapsed=199.28 user=222.01 sys=1.69 maxrss=1262136`，和近期同口径结果接近。
