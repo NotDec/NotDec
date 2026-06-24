@@ -1933,3 +1933,31 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只加一条 shared 复制边界测试，不改算法。
 
 维护成本：1/10。以后排查复制链条时，能直接看到 body/source 是否在二级复制后走样。
+
+# 2026-06-24 实现记录：switch copy-of-copy 边界收口
+
+这次继续把 shared 复制链条收紧了一点，补了 `switchBlock(...)` 的二级复制测试。现在 `duplicateBlock()` 生成的 switch copy 再复制一次时，`SourceBlock` 仍然回到原始 switch body，`CopiedFromBlock` 保留直接来源，`Successors` 也继续按 copied 图维护；再 `materializeBlockBody()` 时，case payload 只通过 shared hook 重写，不靠 renderer 猜。这个点和前面的普通 block copy-of-copy 一起，把“copy 链条里 body/source 不乱、payload 由 shared 层收口”这件事补实了。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1440-1499`
+  新增 `testStructuredCFGDuplicateCopyKeepsSwitchBodySource()`，钉住 switch 二级复制的 body/source/case 关系。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7205`
+  把新测试接进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `cmake --build ./build --target phi-demote-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：5/10。switch copy 链更稳了，但 return duplication 和 switch deopt 的大形状还没继续往外扩。
+
+复杂度：1/10。只加 shared 测试，不改 pass 主逻辑。
+
+维护成本：1/10。以后看 switch 复制链条时，能直接定位是 body/source 乱了，还是 case payload 乱了。
