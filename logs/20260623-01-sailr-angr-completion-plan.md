@@ -898,3 +898,59 @@ shared structuring 边界上。
 `DuplicationReverter::_get_new_gotos()` 的 future irreducible goto 过滤需要 Angr 源码或
 清晰 shared CFG 定义后再做。现在如果只按名字猜，会影响 quality guard 是否接受 pass，
 属于算法语义选择，不应在没有证据时落代码。
+
+# 2026-06-24 实现记录：SwitchReusedEntryRewriter 改为 synthetic goto
+
+这次对照 Angr 当前 `switch_reused_entry_rewriter.py`。Angr 对 reused switch entry 的做法是
+保留第一个 switch predecessor，其余 predecessor 指向新建 goto block，并且这个 goto block
+不再保留到 entry 的 CFG edge。NotDec 之前是复制 entry tail region，这和 Angr 语义不同。
+这轮把它改成 shared synthetic goto block，仍然不把语义放进 C/Solidity renderer。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:45`
+  新增 `CFGBlockCopyKind::SyntheticGoto`，区分“有真实 successor 的 synthetic forwarder”
+  和“只表示 goto 的 synthetic block”。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:160`
+  新增 `StructuredCFG::createSyntheticGoto(Source, Target, Creator)`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:94`
+  实现 synthetic goto block：记录 `SyntheticSource` / `SyntheticTarget`，但
+  `Successors` 为空，避免把 virtual goto 伪装成真实 CFG edge。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:32`
+  shared goto structurer 渲染 synthetic goto block 时，在 block body 后追加
+  `StructuredNodeKind::Goto`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:149`
+  Phoenix/SAILR reducer 的 block body 路径也追加 synthetic goto，保证 trial 和
+  quality guard 能看到这类 goto。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:802`
+  `SwitchReusedEntryRewriter` 不再复制 entry tail；排序后保留第一个 switch predecessor，
+  其余 predecessor redirect 到各自的 synthetic goto block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:943`
+  新增 `testGotoStructurerRendersSyntheticGoto()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1531`
+  `testStructuredCFGCreateSyntheticBlock()` 覆盖 synthetic goto 的身份和空 successor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2930`
+  到 `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3100`
+  更新 reused-entry 测试，确认不再复制 entry/tail，而是生成独立 synthetic goto block。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-reused-entry-goto.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=201.59 user=224.71 sys=1.62 maxrss=1264160`，和近期 195-203 秒同口径结果接近。
+
+## 当前判断
+
+实现效果：8/10。reused-entry 现在更接近 Angr：shared CFG 显式表达 virtual goto，
+而不是复制 entry body 来绕过问题。
+
+复杂度：6/10。新增一个 synthetic block kind 和两个 structurer 输出点，但边界仍在
+shared CFG / shared tree，没有后端特判。
+
+维护成本：6/10。后续 switch deoptimization 要继续区分 synthetic forwarder 和
+synthetic goto；这个成本比把 reused-entry 复制语义混进 renderer 更低。
