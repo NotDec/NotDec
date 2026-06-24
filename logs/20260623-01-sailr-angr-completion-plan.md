@@ -1151,6 +1151,31 @@ shared CFG / shared tree，没有后端特判。
 维护成本：6/10。后续 switch deoptimization 要继续区分 synthetic forwarder 和
 synthetic goto；这个成本比把 reused-entry 复制语义混进 renderer 更低。
 
+# 2026-06-24 实现记录：SAILR 迁移测试接入本地 shared 样例
+
+这次继续推进 Angr 侧 SAILR 测试迁移，不再只停留在测试名对照。把
+`run_sailr_bench2_migration.py` 里的输入改成仓库内可复用的 shared 样例，并补了
+本地路径解析，保证 CTest 和手动运行看到同一批输入。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:6`
+  新增 `REPO_ROOT`，让相对输入路径按仓库根解析。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:44`
+  `switch_reuse_proxy`、`duplication_reverter_proxy`、`duplication_too_sensitive_proxy`、
+  `early_return_proxy`、`switch_case_recovery_proxy` 继续作为迁移代理样例。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:209`
+  `run_case()` 现在会把相对输入路径转成仓库根下的真实文件。
+
+## 验证
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis|sailr-bench2-migration' --output-on-failure`
+
+结果：迁移脚本通过，CTest 子集通过。
+当前迁移覆盖了 return tail、early return、switch recovery、switch clustering、duplicate proxy
+和 condensing proxy，但还不是 Angr 全量测试集。
+
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
 这次继续对照 Angr 当前 `duplication_reverter.py`。Angr 的 `DuplicationReverter`
@@ -2767,6 +2792,92 @@ condensing proxy 换成真实样例。
 也保持通过。真实样例这边先找到了 `hexx64` 和 `lighttpd` 两条稳定线，后面可以继续往
 Angr 的 return duplication / condensing 语义靠，不再只靠 proxy 维持覆盖面。
 
+## 2026-06-24 迁移边界：angr 原始测试资产未在本地树上
+
+这轮又核了一次 angr 仓库本身，确认这些 SAILR 测试名能找到，但对应的二进制资产没有
+直接跟着代码树出现。当前能稳定推进的方式还是先保留本地 proxy + Bench2 语义样例，
+ 把 return duplication、duplication reversion、switch reuse 和 condensing 这些语义先钉住；
+ 等后面补到对应原始资产，再把脚本里的 proxy 逐个替换成真样例。
+
+## 2026-06-24 实现记录：synthetic goto 的 shared 身份再收紧
+
+这次只补了一个很小的 shared 断言，不动算法逻辑。`duplicateRegion({Goto})` 后，
+`createSyntheticGoto()` 生成的 synthetic block 复制出来仍然要保留原来的 `BodyBlock`
+和 `SyntheticSource` / `SyntheticTarget`，这样 virtual goto 的身份不会在复制链里变成
+普通 copied body。
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1927`
+  新增 `testStructuredCFGDuplicateSyntheticGotoReportsTargets()` 里的 `BodyBlock`
+  断言。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+ctest --test-dir build -R 'structuring-analysis' --output-on-failure
+```
+
+结果：通过。
+
+## 2026-06-24 当前判断
+
+shared structuring 的 Phi 边界已经比较稳了，`demoteSSAFixHT` 和对应测试都在，
+`StructuredCFG::materializeBlockBody()` 也已经能把 copied block 的 payload 通过 hook
+重写并保住 CFG 身份。现在最明显的缺口还是两块：一是 `vvar` / static value rewrite
+还没有像 angr 那样单独成层，二是 `ReturnDuplicatorLow` 和 switch deoptimization 的复杂
+形状还没继续扩大到更接近 angr 的覆盖面。
+
+## 2026-06-24 额外缺口：NotDec 还没有 angr 那种独立 dephication 层
+
+angr 这边在 structuring 前还有一层专门的 dephication / vvar remap，能把 phi 和
+virtual variable 的对应关系先整理掉，再让后面的 structuring 算法只看已经降过的值。
+NotDec 现在只有 `demoteSSAFixHT()` 这条旧链路，能把 Phi demote 掉并把 HType 迁到
+demoted LLVM Value 上，但还没有一个和 angr `GraphDephicationVVarMapping` 对齐的独立层。
+这个缺口现在先记着，不在 structuring 算法里硬补 vvar 语义。
+
+## 2026-06-24 迁移验证：真实样例在子模块入口可跑
+
+这轮把之前卡住的点再核了一次。顶层 `notdec` 这条入口会先被 target / type-recovery
+接线挡住，不适合拿来判断 SAILR 迁移是否可用；但子模块里的
+`external/NotDec-llvm2c/bin/notdec-llvm2c` 已经可以直接跑下面这些真实 Bench2 样例：
+
+- `hexx64/function-0x1156e0/native/function-0x1156e0.ll`
+- `python/one-_PyPegen_fill_token.cold.ll`
+- `lighttpd/1-main_init_once.ll`
+
+这说明当前 shared structuring 和 llvm2c 这条线本身是通的，后面要补的是更细的
+语义覆盖和更稳的迁移断言，不是先去改 renderer fallback。
+
+## 2026-06-24 迁移边界：大模块样例先被旧 intrinsic 挡住
+
+这轮也顺手试了 `fortune/module-all.ll` 和 `vsftpd/executable/module-all.ll`，它们都还会先撞
+旧的 `SAContext::getIntrinsic(...): unhandled intrinsic` 断言，和 SAILR 本身关系不大。
+所以这类大模块现在不适合拿来替代迁移脚本里的 proxy，后面还是优先继续找已经能稳定
+跑完的真实样例，先把语义覆盖一点点往前挪。
+
+## 2026-06-24 实现记录：synthetic goto 的 body identity
+
+这轮只补了一个很小的 shared 断言，不动算法逻辑。`duplicateRegion({Goto})` 后，
+`createSyntheticGoto()` 生成的 synthetic block 复制出来仍然要保留原来的 `BodyBlock`
+和 `SyntheticSource` / `SyntheticTarget`，这样 virtual goto 的身份不会在复制链里变成
+普通 copied body。
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1955`
+  新增 `testStructuredCFGDuplicateSyntheticGotoReportsTargets()` 里的 `BodyBlock`
+  断言。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/hexx64/function-0x1156e0/native/function-0x1156e0.ll -o /tmp/hexx64.sailr.c
+./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/python/one-_PyPegen_fill_token.cold.ll -o /tmp/pythoncold.sailr.c
+./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/lighttpd/1-main_init_once.ll -o /tmp/lighttpd.sailr.c
+```
+
+结果：通过。
+
 ## 2026-06-24 进展：迁移脚本继续往真实样例靠
 
 这一轮把 migration 里的一个 condensing proxy 换成了真实的 `lighttpd/1-main_init_once.ll`
@@ -2802,3 +2913,62 @@ switch 样例，继续替换剩下的 proxy。
 - 原来的 Phi 类型会跟着 demoted 路径保留下来，而不是继续挂在 Phi 上。
 
 这条边界足够支持后续 structuring 不直接处理 Phi，也够支撑 SAILR 迁移往下走。
+
+## 2026-06-24 迁移定位：proxy 先继续保留
+
+这轮又试了更大的真实 Bench2 片段，但 `fortune/module-all.ll` 和
+`vsftpd/executable/module-all.ll` 还是先撞旧 intrinsic 断言，说明它们现在还不适合替换
+迁移脚本里的 `switch_reuse_proxy` 和 `duplication_reverter_proxy`。
+
+所以这两个 proxy 先继续保留，用来钉住语义边界，不假装已经有对应的真实输入。等旧
+intrinsic 这条问题单独收掉，再把它们逐个换成真样例。
+
+## 2026-06-24 迁移边界：hexx64 module-all 先撞 CFG 断言
+
+这轮继续试了 `hexx64/native/module-all.ll`，结果不是语义不对，而是先撞到了
+`pred_iterator out of range!` 的 CFG 断言。这个结果说明当前还不能把大模块样例当成
+稳定迁移基线，也不能拿它来替换 `switch_reuse_proxy` / `duplication_reverter_proxy`。
+
+所以目前还是老办法：保留已经跑稳的 `hexx64/function-0x1156e0`、
+`python/one-_PyPegen_fill_token.cold.ll` 和 `lighttpd/1-main_init_once.ll`，先继续钉住
+return / condensing 这几类稳定形状；更复杂的真实 switch / duplication 样例等旧 CFG
+问题单独收掉后再上。
+
+## 2026-06-24 迁移脚手架：新增一个更明确的 switch scaffold
+
+这轮没有找到能稳定替掉 `switch_reuse_proxy` / `duplication_reverter_proxy` 的真实样例，
+所以不再硬塞大模块，先把迁移脚本里的 proxy 语义说清楚，并补一个更简单的
+`switch_case_recovery_proxy` 作为脚手架。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:45`
+  把原来的 `switch_reuse_proxy`、`duplication_reverter_proxy` 和
+  `duplication_too_sensitive_proxy` 的说明标成 scaffold。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:136`
+  新增 `switch_case_recovery_proxy`，也是 scaffold，不是 Angr 原始资产。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-24 实现记录：synthetic copy identity chain 再钉一层
+
+这轮没有去碰 structuring 算法本身，而是把 copied / virtual block 的身份链再钉紧一点。
+现在 `createSyntheticGoto()` 复制出来的块，除了保留 `SourceBlock`、`SyntheticSource` 和
+`SyntheticTarget`，还要保留 `CopiedFromBlock`，这样后面即使经过 `materializeBlockBody()`
+也能清楚地区分“这是从哪个 synthetic block 复制出来的”，不会把 chain 语义丢掉。
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1980`
+  新增 `testStructuredCFGDuplicateSyntheticGotoKeepsCopyIdentityChain()`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
