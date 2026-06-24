@@ -1153,3 +1153,40 @@ default（例如直接 return）完全跳过，两个 switch 仍共享同一个 
 复杂度：3/10。只是把 forwarder 收集和 tail region 复制条件拆开。
 
 维护成本：3/10。仍使用已有 synthetic forwarder，不引入 renderer fallback。
+
+# 2026-06-24 实现记录：SwitchDefaultCaseDuplicator 保持 default forwarder 身份
+
+这次修正上一轮 default forwarder 后暴露出的 shared CFG 身份问题。同一轮
+`SwitchDefaultCaseDuplicator` 会先给 switch default 插入 synthetic forwarder，然后再尝试
+复制 default tail region。之前第二阶段会把刚生成的 forwarder 当成普通 predecessor，
+把 forwarder 的 successor 改到 copied default tail，破坏了 “forwarder 表示 switch default
+edge” 这个身份。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1088`
+  tail-copy 阶段跳过 `CFGBlockCopyKind::SyntheticForwarder` 且
+  `SyntheticTarget == DefaultTarget` 的 predecessor。这样 synthetic default forwarder 仍指向
+  原 default block，不会被同一 pass 的 tail-copy 再改写。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2914`
+  收紧 `testSwitchDefaultCaseDuplicatorInsertsSharedDefaultForwarders()`，明确断言两个
+  forwarder 的 `Successors` 都保持 `{DefaultTarget}`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-default-forwarder-identity.c --tr-level=2 --algo=structured-sailr`
+
+结果：构建、structuring 单测、CTest 子集和 fortune smoke 都通过。fortune smoke：
+`elapsed=202.00 user=223.59 sys=1.87 maxrss=1259840`，仍在近期同口径范围内。
+
+## 当前判断
+
+实现效果：7/10。default forwarder 身份现在更稳定，tail-copy 不会误改 synthetic default edge。
+
+复杂度：3/10。只是在已有 tail-copy predecessor 筛选里排除 synthetic forwarder。
+
+维护成本：3/10。逻辑仍在 shared SAILR pass 内，后端只消费最终 CFG/tree。
