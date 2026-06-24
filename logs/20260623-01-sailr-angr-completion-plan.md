@@ -1905,3 +1905,31 @@ goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源�
 复杂度：1/10。只补测试断言，不改主逻辑。
 
 维护成本：1/10。以后如果 forwarder 的来源或去向丢了，这条测试能直接看出来。
+
+# 2026-06-24 实现记录：Phi demote 和 copy-of-copy 边界收口
+
+这次把旧链路的 Phi 先 demote、再把 HType 交给 demoted LLVM Value 的边界继续保住了，同时补了一条更小的 shared 测试，确认 `duplicateBlock()` 生成的 copy 再复制一次时，`SourceBlock` 仍然指回原始 body，`CopiedFromBlock` 只记录这次直接复制的来源，`materializeBlockBody()` 后才把 `BodyBlock` 收口到当前 copy。这样 structuring 还是只看 demoted 值和 shared CFG 身份，不会被 copy-of-copy 的链条弄乱。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:780-820`
+  新增 `testStructuredCFGDuplicateCopyKeepsOriginalBodySource()`，钉住 copy-of-copy 的 body/source 关系。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7128`
+  把新测试接进 `main()`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j1`
+- `cmake --build ./build --target phi-demote-test -j1`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：5/10。Phi demote 的 shared 边界更稳了，copy-of-copy 的 body/source 语义也更清楚，但还没开始补更复杂的 return duplication 和 switch deopt 形状。
+
+复杂度：1/10。只加一条 shared 复制边界测试，不改算法。
+
+维护成本：1/10。以后排查复制链条时，能直接看到 body/source 是否在二级复制后走样。
