@@ -1562,3 +1562,36 @@ default tail pass 上。
 复杂度：1/10。只新增 pass 级测试。
 
 维护成本：1/10。测试防止 default tail copy 后续重新合并单前驱 payload 来源。
+
+# 2026-06-24 实现记录：CrossJump pred-sensitive 覆盖
+
+这次只补测试，钉住 `CrossJumpReverter` 使用 shared predecessor 分组规则的边界。
+当 payload hook 只支持单 predecessor rewrite 时，cross-jump target copy 不能把相连的
+goto predecessor 合成一份 copy，否则 copied payload 的 incoming 来源会丢失。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1846`
+  新增 `testCrossJumpReverterKeepsPredSensitiveCopiesSeparate()`，构造两个相连 predecessor
+  都跳到同一个 cross-jump target，并安装单 predecessor payload rewrite hook。
+  测试确认两条 goto path 得到两份独立 copied target/tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7014`
+  接入新测试。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'phi-demote|legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `cmake --build ./build --target notdec -j4`
+
+结果：structuring 单测、CTest 子集和 `notdec` 构建通过。此轮只补测试，不跑 fortune。
+
+## 当前判断
+
+实现效果：4/10。没有扩大算法语义，但把 pred-sensitive copy 的 shared 规则钉到
+`CrossJumpReverter`。
+
+复杂度：1/10。只新增 pass 级测试。
+
+维护成本：1/10。测试防止 cross-jump copy 后续重新合并单前驱 payload 来源。
