@@ -2302,6 +2302,91 @@ loop / label 等结构统计，但把 goto target 统计替换成 `getNewGotos()
 维护成本：2/10。以后具体 pass 只需要维护自己的 `getNewGotos()`，wrapper 不会再用另一套
 goto target 统计做 quality 判断。
 
+# 2026-06-24 实现记录：switch 重定向同步 default / case 边
+
+这次补的是 `CrossJumpReverter` 和 `SwitchReusedEntryRewriter` 里一个更细的边界：switch
+块除了 `Cases` 里的 case target，还有 `Successors` 里的 default / 非 case 边。之前只改
+`Cases` 时，默认边和 case 边会在重复 target 的形状下落到不同步的状态。现在重定向时会按
+switch 的边类型分别同步，避免 default 和 case 的身份再被拆开。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:489`
+  `redirectSwitchCases()` 现在会同步更新 switch 的非首个 `Successors`，把重复的 case-edge
+  target 一起改掉。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:917`
+  `redirectNonSwitchCaseEdges()` 现在对 switch 只改首个 default successor，case 边仍留给
+  `redirectSwitchCases()`，避免把两类边混成一类。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2392`
+  `testCrossJumpReverterUsesSwitchDefaultGotoKind()` 改成显式构造 default / case 同 target
+  的 switch，覆盖 default 边和 case 边分开重定向的形状。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4345`
+  `testSwitchReusedEntryRewriterKeepsDefaultSuccessorUntouched()` 增加对 switch 第二个 successor
+  的断言，确认 default 重写后 case 边也被同步到新 target。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+结果：通过。
+
+## 当前判断
+
+实现效果：6/10。switch 的 default / case 边身份更稳了，但这仍然只是边重定向修正，
+还不是完整的 switch deoptimization 语义。
+
+复杂度：2/10。只是把已有重定向逻辑按边类型拆开。
+
+维护成本：2/10。后续继续补 `LoweredSwitchSimplifier` 时，这个边界能直接复用。
+
+# 2026-06-24 实现记录：quality guard 消费 getNewGotos 过滤结果
+
+这次修 shared optimization guard 的一个边界：pass 可以 override `getNewGotos()`，
+但最终 relative quality 之前仍然用未过滤的 `Current.Quality.GotoTargets`。这样像
+`DuplicationReverter` 这类会过滤 future irreducible gotos 的 pass，goto 数量 guard
+和 quality guard 可能看的是两套 goto 集合。现在最终 quality 比较会先用
+`getNewGotos()` 的结果替换 current quality 里的 goto target 统计，loop / label 信息仍保留
+当前 structuring trial 的结果。
+
+## 修改内容
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:6`
+  新增 `qualityWithGotos()`，只替换 `ControlFlowStructureCounter::GotoTargets`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:36`
+  `acceptsFinalEvaluation()` 统一取一次 `FinalGotos`，goto 数量 guard 和 relative
+  quality guard 都使用这份过滤后的结果。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:337`
+  新增 `RetargetFirstSuccessorIgnoringNewGotosPass` 测试桩，用来模拟 pass 自己过滤最终 goto。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5040`
+  新增 `testStructuringOptimizationPassUsesFilteredGotosForQuality()`，覆盖 filtered goto
+  允许 relative quality 接受的路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7673`
+  把新测试接入 `structuring-analysis-test`。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `cmake --build ./build --target phi-demote-test notdec structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/phi-demote-test`
+- `ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|shared-structurer-registry|structuring-smoke|structuring-analysis' --output-on-failure`
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-filtered-goto-quality.c --tr-level=2 --algo=structured-sailr`
+
+结果：通过。fortune smoke 为 `elapsed=208.78 user=232.95 sys=1.77 maxrss=1271460`。
+这次改动只影响最终 guard 的 goto 统计替换，不增加 structuring trial 次数；单次耗时比上一轮
+197 秒略高，但仍接近近期 195-205 秒区间，暂未看到明确算法级性能退化。
+
+## 当前判断
+
+实现效果：5/10。shared trial / quality guard 和 pass 自定义 goto 过滤更一致了；但
+`DuplicationReverter::getNewGotos()` 的 future irreducible 判断本身仍然只是保守子集。
+
+复杂度：2/10。只在 wrapper 层加一个小 helper，没有改 pass API。
+
+维护成本：2/10。以后具体 pass 只需要维护自己的 `getNewGotos()`，wrapper 不会再用另一套
+goto target 统计做 quality 判断。
+
 # 2026-06-24 实现记录：switch edge 同步只改对应边类型
 
 这次修 `CrossJumpReverter` 里 switch 相关的边身份。之前重定向时，switch 的 case 和 default
