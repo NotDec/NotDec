@@ -4339,6 +4339,25 @@ python3 external/NotDec-llvm2c/test/phi_demote_htypes_smoke.py --notdec build/bi
 
 结果：通过。
 
+## 2026-06-25 已补：SwitchReusedEntryRewriter 保留 reused entry tail
+
+这轮把 reused-entry 的一个细边界补死了。之前 `SwitchReusedEntryRewriter` 已经有测试确认它会把被复用的 switch entry 改成 synthetic goto，但还没有一条单测明确说：原 entry tail 不能被顺带复制或改写。现在新增的
+`testSwitchReusedEntryRewriterPreservesReusedEntryTail()` 直接把这件事钉住，确认 reused entry 仍然保留自己的 tail，synthetic goto 只负责把复用入口的 case 边改掉。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testSwitchReusedEntryRewriterPreservesReusedEntryTail()`，并挂进测试列表。
+
+验证：
+
+```bash
+cmake --build ./build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
+
 ## 2026-06-25 Angr 原始 SAILR 样例本地仍缺 `/sn640/binaries`
 
 这轮再次核对了 Angr 的原始测试输入。`test_fmt_deduplication`、`test_decompiling_reused_entries_between_switch_cases` 等样例都依赖 sibling 仓库 `/sn640/binaries` 里的真实二进制。当前本地没有这份资产，所以不能直接把这些 Angr case 迁到 NotDec。
