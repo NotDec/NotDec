@@ -1,9 +1,11 @@
 # 原始 prompt
 
-写成一个新的规划文件，同时给出明确的计划完成条件
+> 写成一个新的规划文件，同时给出明确的计划完成条件
+>
+> 是的，Phi指令一定要按照这个方式处理，把我的原话放到logs/20260623-01-sailr-angr-completion-plan.md顶部。
+> 当前应该优先按旧链路在结构恢复前 demote Phi，并维护 HType 到 demoted LLVM Value 的映射，使 structuring 算法不直接处理 Phi；随后完善 copied/virtual block 的 payload materialize、ReturnDuplicatorLow、switch deoptimization 和 Angr pass 对齐。
 
-是的，Phi指令一定要按照这个方式处理，把我的原话放到logs/20260623-01-sailr-angr-completion-plan.md顶部。
-当前应该优先按旧链路在结构恢复前 demote Phi，并维护 HType 到 demoted LLVM Value 的映射，使 structuring 算法不直接处理 Phi；随后完善 copied/virtual block 的 payload materialize、ReturnDuplicatorLow、switch deoptimization 和 Angr pass 对齐。
+补一句当前要求：Phi 先在结构恢复前消掉，`HType` 继续跟 demoted LLVM Value 走，structuring 算法层不要直接处理 Phi。
 
 # 背景
 
@@ -257,6 +259,16 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 ## 2026-06-24 实现记录：Phi demote 前置边界补 smoke
 
 这轮没有再改 demote 本身，只是在 structuring smoke 里补了一个最小分支 return case，专门确认结构恢复阶段看到的是已经 demote 过的结果，而不是直接处理 Phi。这个 case 和现有 `phi-demote` / `phi-demote-htypes` 一起，把“Phi 先在结构恢复前消掉”这条边界再钉紧了一点。
+
+## 2026-06-25 当前状态
+
+现在 shared structuring 的主干已经基本收口，Phi 前置 demote 和 `HType` 映射也已经在旧链路里打通，structuring 算法不再直接碰 Phi。`StructuredCFG` 的 copied / synthetic block 身份、payload materialize、`ReturnDuplicatorLow`、`CrossJumpReverter`、`DuplicationReverter`、`LoweredSwitchSimplifier`、`SwitchDefaultCaseDuplicator`、`SwitchReusedEntryRewriter` 和 pipeline 顺序都已经落到 shared 层测试里。
+
+还没完全到 Angr 完整语义的地方，主要还是迁移覆盖：
+
+1. `run_sailr_bench2_migration.py` 里还有 scaffold proxy，没有全部换成真实原始资产。
+2. 更复杂的 switch / return / duplication 原始样例还不够多，现阶段更多是在确认 shared 语义边界，不是在补新的算法框架。
+3. 现在更像是 shared 语义已经稳定，下一步要继续补真实样例对照和剩余 Angr 测试迁移，而不是重搭结构恢复框架。
 
 - `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:165`
   新增 `phi_demote_before_structuring`。
@@ -1504,6 +1516,69 @@ return / switch / condensing 边界，不是把 SSA 细节再重复一遍。
 - `phi_demote_before_structuring` 负责证明 Phi 在结构恢复前先被处理掉。
 - `sailr-bench2-migration` 负责证明 Angr SAILR 的 return / switch / condensing 语义还能跑。
 - 两边都已经有稳定回归，不需要再为同一个边界额外加一层样例。
+
+## 2026-06-25 当前边界确认：Phi / switch / condensing 都有稳定回归
+
+这轮重新跑了三条主要回归：
+
+- `phi-demote-test`
+- `structuring-smoke`
+- `sailr-bench2-migration`
+
+结果都还是绿的。说明现在这几个关键边界已经比较稳：
+
+- Phi 的前置 demote 和 HType 清理边界，已经在 `phi-demote` 和 `phi-demote-htypes`
+  里独立覆盖。
+- 真实 `switch_case_recovery.ll` 已经进了 `structuring-smoke`。
+- Angr SAILR 的 return / switch / condensing 仍由迁移脚本里的 proxy 和少量真实
+  fixture 钉着。
+
+这意味着后面继续往前，只需要盯更具体的 Angr 原始测试对应样例，或者更明确的
+shared structuring pass 差异，不需要再回头补这些基础边界。
+
+## 2026-06-25 迁移结论：测试名已经对齐，缺的是原始资产
+
+这轮重新核了一遍 `run_sailr_bench2_migration.py` 和日志里的 Angr 测试名。结果是：
+
+- 日志里提到的核心 SAILR 测试名都已经在脚本里有对应 `angr_test`。
+- 当前脚本的缺口不是测试名映射，而是这些 Angr 原始输入本身没有在本地树里完整落地。
+- 这也是为什么前面把一些小 Bench2 片段试成 smoke 后，还是不能替掉现有 proxy。
+
+所以这条线后面如果还要继续，只能是两种方向：
+
+1. 找到更贴近这些 Angr 测试名的原始资产或等价输入。
+2. 继续补 shared structuring 的 pass 语义差异，而不是再增加一层同类的测试壳。
+
+## 2026-06-25 再确认：shared structuring 的测试壳已经够了
+
+这轮重新核了一遍 `structuring_analysis_test.cpp` 里的关键覆盖，发现现在这几类边界都已经有
+测试壳：
+
+- synthetic forwarder / synthetic goto
+- copied / grouped predecessor materialize
+- ReturnDuplicatorLow
+- SwitchDefaultCaseDuplicator / SwitchReusedEntryRewriter
+- CrossJumpReverter
+
+所以后面继续往 shared structuring 语义上推进时，不需要再先补“测试壳数量”，而是要么补
+更具体的 pass 语义差异，要么去找更贴近 Angr 原始输入的等价样例。单纯重复加一层 proxy
+或者 smoke 已经不会再把这条线往前推多少了。
+
+## 2026-06-25 真实片段补充：switch 和 condensing 都有 smoke 入口
+
+这轮又把两条真实 Bench2 片段接进了 `structuring-smoke`：
+
+- `switch_case_recovery.ll`
+- `lighttpd/1-main_init_once.ll`
+
+这样现在 smoke 里已经同时有：
+
+- Phi demote before structuring
+- 真实 switch recovery
+- 真实 condensing / goto 收口
+
+这意味着基础共享语义边界已经不只靠 proxy 了，至少每个核心方向都有一条真实片段能跑。
+后面如果继续推进，重点就不该是再加输入，而是更具体地对照 Angr pass 语义和原始测试资产。
 
 ## 2026-06-25 实现记录：真实 switch fixture 也接入 structuring smoke
 
@@ -3319,6 +3394,31 @@ python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --
 
 结果：通过。
 
+## 2026-06-25 迁移修正：真实 switch case 不再叫 proxy
+
+这轮没有改 structuring 算法，只修正迁移脚本里的样例身份。`switch_case_recovery` 已经是
+真实 fixture 输入，不再是手写 proxy，所以把 case 名字改掉，避免后面误判迁移进度。
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:277`
+  `switch_case_recovery_proxy` 改成 `switch_case_recovery_real`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:150`
+  继续保留 `lighttpd/1-main_init_once.ll` 的真实 condensing smoke。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-shared-default-goto.c --tr-level=2 --algo=structured-sailr
+```
+
+结果：通过。fortune 同口径结果为 `elapsed=195.66 user=217.46 sys=1.72 maxrss=1260312`。
+
+同时又看了 `fortune/executable/module-all.ll` 里的真实 switch 函数。它能作为后续候选，
+但直接用整个 module-all 会撞旧 intrinsic 断言；强行切片又会带来大量 metadata、declare
+和 intrinsic 处理，不适合现在塞进迁移脚本。当前仍保留 `switch_reuse_proxy`，等有更小、
+能稳定跑完的真实 switch 输入再替换。
+
 ## 2026-06-24 实现记录：synthetic copy identity chain 再钉一层
 
 这轮没有去碰 structuring 算法本身，而是把 copied / virtual block 的身份链再钉紧一点。
@@ -3334,6 +3434,71 @@ python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --
 ```bash
 cmake --build build --target structuring-analysis-test -j4
 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
+
+## 2026-06-25 迁移边界：本地缺 angr/binaries 原始资产
+
+这轮对照了 `/sn640/angr/tests/analyses/decompiler/test_decompiler.py` 和
+`/sn640/angr/tests/common.py`。Angr 的 SAILR 相关单测依赖 sibling 仓库
+`/sn640/binaries`，例如 `sailr_motivating_example`、`cksum-digest.o`、
+`cat.o`、`fmt`、`who.o`、`printenv.o` 等真实二进制都从那里读。
+
+当前机器没有 `/sn640/binaries`，所以不能直接把 Angr 原始测试输入迁到 NotDec 里。现在能
+稳定使用的真实输入仍然是 NotDec-Exp 里的 Bench2 IR：
+
+- `hexx64/function-0x1156e0/native/function-0x1156e0.ll`
+- `python/one-_PyPegen_fill_token.cold.ll`
+- `lighttpd/1-main_init_once.ll`
+- `switch_case_recovery.ll`
+
+下一步如果要继续迁移 Angr 原始样例，需要先补齐 `/sn640/binaries`，再按测试名逐个做：
+
+1. 用 NotDec native/bin2llvm 链路转成单函数 LLVM IR。
+2. 只接入能被 `notdec-llvm2c --algo=structured-sailr` 稳定跑完的最小函数片段。
+3. 遇到旧 intrinsic、`ExtractValueInst`、CFG 断言等前端/旧后端问题，先记录阻塞，不用
+   proxy 冒充真实迁移完成。
+
+## 2026-06-25 已解决：shared default 默认改成 Angr synthetic goto
+
+这轮继续对照了 Angr 的 `SwitchDefaultCaseDuplicator` 和 NotDec shared 实现。这里有一个需要
+明确取舍的点：
+
+- Angr 在多个 switch 共享同一个 default block 时，会给各个 switch head 插入 goto block，
+  让 default 入口不再直接被多个 switch 复用。
+- NotDec 当前 shared CFG 用 `SyntheticForwarder` 表达这个关系，并且
+  `structuring_analysis_test.cpp` 已经用
+  `testSwitchDefaultCaseDuplicatorInsertsSharedDefaultForwarders()`、
+  `testSwitchDefaultCaseDuplicatorForwardsTerminalSharedDefault()` 等测试把这个行为固定下来。
+
+这两种做法都在 shared CFG 层表达，不是 renderer fallback；但它们会改变后续 structuring
+看到的控制流形状，也可能影响 C/Solidity 输出质量。这里不能静默把 forwarder 改成 goto，
+也不能假装已经和 Angr 完全一致。
+
+结论：默认按 Angr 走 synthetic goto，旧的 `SyntheticForwarder` 行为只作为 shared pass
+里的兼容模式保留。这个开关放在 `SwitchDefaultCaseDuplicator`，不放进 C / Solidity
+renderer。
+
+实现：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h`
+  给 `SwitchDefaultCaseDuplicator` 增加 `SharedDefaultRewriteMode`，默认值是
+  `SyntheticGoto`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  在 `SwitchDefaultCaseDuplicator::runOnGraph()` 里按模式创建 `createSyntheticGoto()`
+  或 `createSyntheticForwarder()`，pipeline 默认构造因此走 Angr 模式。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  把默认共享 default 测试改成断言 `CFGBlockCopyKind::SyntheticGoto`，同时新增
+  `testSwitchDefaultCaseDuplicatorCanUseSharedDefaultForwarders()` 覆盖兼容模式。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
 ```
 
 结果：通过。
