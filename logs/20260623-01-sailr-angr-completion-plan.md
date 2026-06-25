@@ -4315,6 +4315,30 @@ cmake --build ./build --target structuring-analysis-test -j4
 
 结果：通过。
 
+## 2026-06-25 已补：Phi demote 后的 HType 绑定回归
+
+这轮把“Phi 必须在结构恢复前 demote，而且 HType 要跟着 demoted LLVM Value 走”补成了更直接的单测。
+之前的 smoke 只是在 `ValueCTypes.txt` 里确认看不到 `phi` key，但这还不够；现在
+`phi_demote_test.cpp` 里新增了一条更窄的回归，确认 named Phi 被 `demoteSSAFixHT()` 处理后，
+`HTypeResult` 里不再保留 Phi 本体的类型条目，而是把类型落到 demoted 出来的 `alloca` 上。
+
+实现：
+
+- `external/NotDec-llvm2c/test/phi_demote_test.cpp`
+  新增 `testDemoteSSAFixHTMovesNamedPhiTypesToDemotedAlloca()`，覆盖 named Phi demote 后的
+  alloca 命名、`HTypeResult` 绑定和 `ContraVariantValues` 迁移。
+
+验证：
+
+```bash
+cmake --build ./build --target phi-demote-test -j4
+./build/external/NotDec-llvm2c/bin/phi-demote-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/phi_demote_htypes_smoke.py --notdec build/bin/notdec
+```
+
+结果：通过。
+
 ## 2026-06-25 Angr 原始 SAILR 样例本地仍缺 `/sn640/binaries`
 
 这轮再次核对了 Angr 的原始测试输入。`test_fmt_deduplication`、`test_decompiling_reused_entries_between_switch_cases` 等样例都依赖 sibling 仓库 `/sn640/binaries` 里的真实二进制。当前本地没有这份资产，所以不能直接把这些 Angr case 迁到 NotDec。
