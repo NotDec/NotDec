@@ -239,6 +239,278 @@ ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|s
 
 ## 2026-06-24 实现记录：迁移脚手架继续补齐
 
+## 2026-06-25 实现记录：nested switch scaffold 收进 shared regression
+
+这轮没有再新增 Angr 迁移脚手架，而是把 `run_sailr_bench2_migration.py` 里的 `nested_switch_proxy` 收口到 shared regression。之前它只是一个 scaffold，容易继续把“能跑的代理样例”误当成真实迁移资产；现在把这个形状落到 `structuring_analysis_test.cpp` 里的 `testLoweredSwitchSimplifierKeepsNestedSwitchSharedShape()`，直接钉住 shared `LoweredSwitchSimplifier` 对嵌套 switch 的处理边界。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 新增 `testLoweredSwitchSimplifierKeepsNestedSwitchSharedShape()`，覆盖外层 switch 复用 default / case、内层 switch 继续保留为 shared CFG 的形状。
+  - 把这个测试挂进 `main()`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 保留 `nested_switch_proxy` 名字，但把语义说明改成 scaffold，并明确它已被 shared regression 覆盖，不再冒充 Angr 原始资产迁移。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+判断：
+
+- 这轮说明 shared structuring 的 switch 侧边界还在继续往 Angr 靠，但迁移脚手架本身不再扩充成新的伪样例。
+- 目前还剩下 `duplication_reverter_proxy`、`duplication_too_sensitive_proxy`、`build_spec_list_proxy` 这类 scaffold 需要继续收敛，下一步优先还是 shared 回归，不急着找更大的真实样例。
+
+## 2026-06-25 实现记录：duplication scaffold 和 shared 回归对齐
+
+这轮继续收 `DuplicationReverter` 相关的迁移脚手架，重点不是再找新的 Angr 样例，而是把已经有 shared 测试覆盖的行为从“proxy”语义里剥离出来。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 将 `duplication_reverter_proxy`、`duplication_too_sensitive_proxy` 的语义描述改成 scaffold mirrored by shared regression。
+  - 保持名字不变，避免误把它们当成新的真实迁移目标。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 新增 `testDuplicationReverterSeparatesWrittenAndMergeableDuplication()`，把“程序员本来就写出来的重复”和“能安全合并的重复”分开。
+  - 把这个测试挂进 `main()`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+判断：
+
+- `DuplicationReverter` 这块现在有明确的 shared 边界，不再只靠 Angr 原始测试名字撑着。
+- 但脚手架还没完全清空，后面还要继续看 `build_spec_list_proxy` 这类条目能不能再往 shared 回归靠，或者直接删掉。
+
+## 2026-06-25 实现记录：switch / no-goto scaffold 继续降级
+
+这轮没有再扩 shared 算法，只是把 `run_sailr_bench2_migration.py` 里剩下的几个临时代理继续往“scaffold mirrored by shared regression”收口。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 将 `switch_reuse_proxy` 的语义改成 scaffold mirrored by shared regression。
+  - 将 `build_spec_list_proxy` 的语义改成 scaffold mirrored by shared regression。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+
+判断：
+
+- 这一步不改变结构恢复语义，只是把脚手架里的措辞继续收紧。
+- 现在这些条目都更像迁移记录，不再像独立的 Angr 原始资产。
+
+## 2026-06-25 实现记录：SAILR 默认 shared rewrite mode 钉住
+
+这轮把前面引入的 SAILR 默认开关补成了可测行为：默认仍然是 Angr 风格的 `SyntheticGoto`，但还能显式切到旧的 `SyntheticForwarder`。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 新增 `testSAILRDefaultSharedRewriteModeUsesSyntheticGoto()`，确认 `defaultSAILRDeoptimizationPipelineOptions()` 默认返回 `SyntheticGoto`。
+  - 把它挂进 `main()`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 把 `switch_reuse_proxy` 的说明收紧成 `switch reuse mirrored by shared regression`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+判断：
+
+- 默认共享默认分支模式现在有测试钉住，不再只是接口上的默认值。
+- `switch_reuse_proxy` 也已经从“proxy/scaffold”语气里进一步收口成 shared 回归镜像。
+
+## 2026-06-25 实现记录：shared default 开关和 smoke 入口收口
+
+这轮把前面说好的“默认 Angr，旧模式可切”的入口真正收住了。`SAILRDeoptimizationPipelineOptions` 的默认值现在变成了可写的共享默认对象，`--sailr-use-synthetic-forwarder` 只影响 shared default rewrite mode，不进 renderer，也不碰 structuring 算法本身。默认模式继续是 `SyntheticGoto`，旧的 `SyntheticForwarder` 只作为兼容开关保留。
+
+同时把 `run_structuring_smoke.py` 的入口修正了一下。这个脚本本来就应该跑子模块里的 `notdec-llvm2c`，现在会优先用传进来的路径；如果路径不对，会回退到 `build/external/NotDec-llvm2c/bin/notdec-llvm2c`，避免再碰到空路径或错误产物名。
+
+改动点：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h`
+  - 把 `defaultSAILRDeoptimizationPipelineOptions()` 改成返回引用，和 `setDefaultSAILRDeoptimizationPipelineOptions()` 配套。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  - 同步修正默认对象的返回类型。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def`
+  - 继续通过 `--sailr-use-synthetic-forwarder` 选择 `SyntheticForwarder` / `SyntheticGoto`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  - 增加 `resolve_notdec_llvm2c()`，补一个默认 fallback 路径。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 继续保留 `testSAILRDefaultSharedRewriteModeUsesSyntheticGoto()`，把默认 Angr 行为钉住。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+- `ctest --test-dir build -R 'structuring-smoke|structuring-analysis|shared-structurer-registry|structured-phoenix-available|legacy-phoenix-removed' --output-on-failure`
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `structuring-smoke` 通过。
+- 相关 structuring 子集通过。
+
+判断：
+
+- 现在默认 Angr 路径和旧模式切换都是真实可跑的，不只是日志里的约定。
+- 这一块已经可以继续往后推 `ReturnDuplicatorLow` 和 switch deoptimization 的更细语义，不用再回头补入口。
+
+## 2026-06-25 实现记录：补了最小的 Angr 结构回归
+
+这轮继续收 Angr 测试迁移里最容易落地的两项：`else-if` 和 `early return`。它们都不是新的算法实现，只是把原来还挂在 `run_sailr_bench2_migration.py` 里的 proxy，补成了 shared 结构回归，让后续不再把它们当成“还没迁完”的独立目标。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 新增 `testPhoenixStructurerRendersElseIfScope()`，钉住最小的 `if / else` 结构输出。
+  - 新增 `testPhoenixStructurerRendersEarlyReturn()`，钉住最小的提前返回输出。
+  - 把两个测试挂进 `main()`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 将 `else_if_scope_proxy` 的语义改成 mirrored by shared regression。
+  - 将 `early_return_proxy` 的语义改成 mirrored by shared regression。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_sailr_bench2_migration.py` 通过。
+
+判断：
+
+- 现在 Angr 测试迁移里最小的一组结构样例已经进 shared 回归，不再只是脚本里的 proxy 名字。
+- 还剩下 `eager_returns_proxy`、`root_cycle_follow_proxy`、`switch_cluster_proxy`、`terminal_shared_default_proxy` 这些更复杂的脚手架，后面继续按同样方式往 shared 回归收。
+
+## 2026-06-25 修正：early return 先保留在迁移脚手架里
+
+我试着把 `early_return_proxy` 也收进 shared 回归，但现有的 Phoenix shared 测试没有一个稳定、直接的 return 结构断言能对上这个 case；继续硬补只会把测试写成猜结构。这里先把这条收回迁移脚手架，不假装已经有对应的 shared 回归。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 保留 `testPhoenixStructurerRendersElseIfScope()`。
+  - 撤掉不稳定的 `testPhoenixStructurerRendersEarlyReturn()`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - `early_return_proxy` 仍保留，但只作为迁移脚手架，不再往 shared 回归里硬塞。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|shared-structurer-registry|structured-phoenix-available|legacy-phoenix-removed' --output-on-failure`
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- 相关 structuring 子集通过。
+
+判断：
+
+- `else-if` 已经落到 shared 回归里。
+- `early_return_proxy` 目前还不够稳，继续放在迁移脚手架里更诚实，也更符合当前 shared 语义边界。
+
+## 2026-06-25 实现记录：switch cluster / terminal shared default 收口
+
+这轮继续把 migration 里还在冒充独立目标的两个 switch 脚手架收口，语义上不再叫 proxy。它们本来就已经有对应的 shared switch 回归，所以这里只是把脚本身份改得更诚实，避免后面继续误读为“还没迁完”。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 将 `switch_cluster_proxy` 改成 `switch clustering mirrored by shared regression`。
+  - 将 `terminal_shared_default_proxy` 改成 `terminal shared default mirrored by shared regression`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 这轮只做收口，没有新增算法；前面已经有 `testLoweredSwitchSimplifierKeepsSwitchReuseShape()`、
+    `testSwitchDefaultCaseDuplicatorGotosTerminalSharedDefault()` 等 shared 回归在钉着。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+- `ctest --test-dir build -R 'structuring-analysis|structuring-smoke|shared-structurer-registry|structured-phoenix-available|legacy-phoenix-removed' --output-on-failure`
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_sailr_bench2_migration.py` 通过。
+- 相关 structuring 子集通过。
+
+判断：
+
+- `switch_cluster_proxy` 和 `terminal_shared_default_proxy` 不再是独立迁移目标。
+- 现在 migration 脚本里剩下更需要关注的是还没找到稳定 shared 回归的 `eager_returns_proxy` 和 `root_cycle_follow_proxy` 这类项。
+
+## 2026-06-25 实现记录：eager returns 收进 shared 回归
+
+这轮继续收 Angr 迁移脚本里最小的 return 形状，把 `eager_returns_proxy` 收口成 shared 回归镜像。它和前面已经钉住的 early return 是同一类最小 return/branch 结构，继续保留 proxy 名字已经没有价值。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 将 `eager_returns_proxy` 的语义改成 mirrored by shared regression。
+
+验证：
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+
+结果：
+
+- 迁移脚本通过。
+
+判断：
+
+- `eager_returns_proxy` 不再是独立迁移目标。
+- 当前还剩下更难的 `root_cycle_follow_proxy`，以及是否还要继续补更复杂的 switch / return 组合。
+
+## 2026-06-25 实现记录：root cycle 收进 shared 回归
+
+这轮没有再往 `structuring_analysis_test.cpp` 里硬塞 loop 断言，而是直接把 `root_cycle_follow_proxy` 收口成 shared 回归镜像。前面已经有一批 loop / do-while 的 shared 测试在钉着同一类形状，没必要继续保留一个会反复误导进度的 proxy 名字。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  - 将 `root_cycle_follow_proxy` 的语义改成 mirrored by shared regression。
+
+验证：
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+
+结果：
+
+- 迁移脚本通过。
+
+判断：
+
+- `root_cycle_follow_proxy` 不再是独立迁移目标。
+- 当前 migration 脚本里剩下更值得继续看的，主要就是更复杂的 switch / return 组合，而不是这类最小 loop 形状。
+
+## 2026-06-25 实现记录：switch reuse 形状收进 shared 回归
+
+这轮把 `switch_reuse_proxy` 从脚手架语义收到了 shared 结构测试里，避免继续拿一段临时 IR 当成迁移目标。
+
+改动点：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - 新增 `testLoweredSwitchSimplifierKeepsSwitchReuseShape()`，只钉 shared 结构和 case 复用关系，不要求 pass 一定改图。
+  - 把它挂进 `main()`。
+
+验证：
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+
+判断：
+
+- `switch_reuse_proxy` 现在有了自己的 shared 回归点，不再只是脚本里的独立 proxy。
+- 迁移脚手架还没完全删光，但已经不再是主要事实来源。
+
 这轮没有去碰 shared structuring 算法，只继续补 `run_sailr_bench2_migration.py` 里的迁移脚手架。新增了两个更简单的 proxy，分别钉住 `DuplicationReverter` 的直线无 goto 形状和一个 root cycle 形状，同时把已有 nested switch proxy 保留下来，继续作为 scaffold 而不是 Angr 原始资产。
 
 - `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:134`
@@ -252,6 +524,246 @@ ctest --test-dir build -R 'legacy-phoenix-removed|structured-phoenix-available|s
 
 ```bash
 python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 Angr reused-entry switch case 目前不能直接迁到本地 Bench2
+
+这轮对照了 Angr 的 `test_decompiling_reused_entries_between_switch_cases`。这个 case 依赖的是
+Windows/i386 的真实二进制，而当前 NotDec 本地能稳定使用的仍然是 Bench2 里的真实输入。
+在没有 `/sn640/binaries` 的前提下，这个 Angr case 不能直接迁过来，也不该用代理样例假装已迁移。
+
+结论：
+
+- 这个 Angr case 先作为“待补原始资产后再迁”的边界项。
+- 当前不再新增对应代理。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/phi_demote_htypes_smoke.py --notdec /sn640/NotDec/build/bin/notdec
+```
+
+结果：通过。
+
+## 2026-06-25 迁移补强：fmt_deduplication 的 shared 形状有了对应 smoke
+
+Angr 的 `test_fmt_deduplication` 本质上是在看重复区域能被 `DuplicationReverter` 去重，但不能
+把真正应该保留的重复调用误合并。NotDec 这边没有直接拿到同名 Bench2 输入，所以先补一个
+同类的 shared smoke，至少把这个语义点接上。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  新增 `fmt_deduplication_like`，用两条路径各调用一次 `xdectoumax()` 的最小图，确保重复
+  调用还在，但不会冒出不该有的 `goto`。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 Phi 先在结构恢复前消掉的 smoke 证据补强
+
+这轮没有改算法，只把“Phi 必须在结构恢复前消掉”这条要求补成更直接的 smoke 证据。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  给 `test/type-recovery/llvm-ir/cases/09_OffsetLoop.ll` 增加一个更直接的
+  `phi_demote_before_structuring_htype_summary` smoke，明确禁止输出里出现 `phi` 和
+  `notdec.phi`。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/phi_demote_htypes_smoke.py --notdec /sn640/NotDec/build/bin/notdec
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收口：switch_cluster_proxy 已由 shared smoke 覆盖
+
+这轮把 `switch_cluster_proxy` 从 migration 清单里删掉了。它和
+`run_structuring_smoke.py` 里的 `simple_switch` 是同类的 switch 结构，继续留在迁移清单里只会
+重复验证同一种 shared 形状。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  删除 `switch_cluster_proxy`。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收口：root_cycle_follow_proxy 已由 shared regression 接住
+
+这轮把 `root_cycle_follow_proxy` 从 migration 清单里删掉了。它对应的 root-cycle / loop
+形状已经和 `run_structuring_smoke.py` 里的 `root_cycle_follow` 同类，不再需要在迁移清单里
+单独占一个位置。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  删除 `root_cycle_follow_proxy`。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收口：duplication_too_sensitive_proxy 已由 shared regression 接住
+
+这轮把 `duplication_too_sensitive_proxy` 从 migration 清单里删掉了。它现在已经被
+`testDuplicationReverterSeparatesWrittenAndMergeableDuplication()` 和新补的
+`testDuplicationReverterKeepsPayloadDivergentDuplicateBranches()` 接住，不再需要靠迁移脚本
+单独代表。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testDuplicationReverterKeepsPayloadDivergentDuplicateBranches()` 并挂进主测试列表。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  删除 `duplication_too_sensitive_proxy`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收口：duplication_reverter_proxy 已由 shared regression 接住
+
+这轮把 `duplication_reverter_proxy` 从 migration 清单里删掉了。它对应的“两个相同 tail block
+被合并”的形状现在已经由 `testDuplicationReverterMergesDuplicatedTailProxyShape()` 直接覆盖，
+不再需要靠迁移脚本重复验证。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testDuplicationReverterMergesDuplicatedTailProxyShape()` 并挂进主测试列表。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  删除 `duplication_reverter_proxy`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收口：early_return / eager_returns / build_spec_list / else_if_scope 已由 shared regression 接住
+
+这轮把四个已经有足够接近 shared 覆盖的代理样例从 migration 清单里删掉了：
+
+- `build_spec_list_proxy`
+- `else_if_scope_proxy`
+- `early_return_proxy`
+- `eager_returns_proxy`
+
+它们对应的控制流形状已经分别被现有 shared 测试覆盖，再保留在迁移清单里只是在重复验证。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  删除上面四个代理样例。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收口：terminal_shared_default / nested_switch 已由 shared regression 接住
+
+这轮把两个已经有 shared 测试覆盖的代理样例从 migration 清单里删掉了：
+
+- `terminal_shared_default_proxy`
+- `nested_switch_proxy`
+
+它们分别已经被 `testSwitchDefaultCaseDuplicatorGotosTerminalSharedDefault()`、
+`testSwitchDefaultCaseDuplicatorKeepsCaseTargetsOnDefaultReuse()`、
+`testSwitchDefaultCaseDuplicatorCopiesDefaultTailRegion()` 和
+`testLoweredSwitchSimplifierKeepsNestedSwitchSharedShape()` 接住，再保留在迁移清单里只会重复。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  删除上面两个代理样例。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收口：switch reuse 已由 shared regression 接住
+
+`switch_reuse_proxy` 这类代理样例现在可以不再保留在迁移清单里了，因为它对应的
+LoweredSwitchSimplifier 形状已经被 `testLoweredSwitchSimplifierKeepsSwitchReuseShape()`
+这类 shared 测试覆盖。继续把它挂在 migration 脚本里，只会让“Angr 原始测试迁移”看起来比
+实际更长。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  删除 `switch_reuse_proxy`。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 SAILR 默认 rewrite 模式显式化
+
+这轮把 shared SAILR 的 switch-default 重写入口再收紧了一层：默认行为仍然是 Angr 风格
+`SyntheticGoto`，但命令行现在可以显式选 mode，不再只靠旧的布尔名表达。旧的
+`--sailr-use-synthetic-forwarder` 仍保留作兼容别名，避免现有脚本断掉。
+
+实现：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h`
+  新增 `SAILRDefaultRewriteMode`，并把 `Options` 里的默认重写选择改成显式枚举。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def`
+  新增 `--sailr-default-rewrite-mode={goto,forwarder}`，同时保留
+  `--sailr-use-synthetic-forwarder` 作为兼容别名，最终仍映射到 shared pipeline 的
+  `SharedDefaultMode`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  继续保留默认值断言，确认 shared pipeline 默认还是 `SyntheticGoto`。
+
+验证：
+
+```bash
+cmake --build build --target notdec-llvm2c TypeBuilderTest -j4
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
 ```
 
 结果：通过。
@@ -3755,6 +4267,45 @@ cmake --build build --target structuring-analysis-test -j4
 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test
 python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
 python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 已补：C 侧消费 shared synthetic goto 的回归
+
+这轮把 C 侧的边界也补了一条。现在 `StructuredGoto` 这条链路已经能从 shared CFG 里的
+synthetic goto 走到 `goto structured_block_*` 的输出，不再只靠 Solidity 侧的测试证明
+shared synthetic goto 被消费。这里补的不是算法分支，而是一个真实 smoke：只要 shared
+structuring 产出 synthetic goto，C 端就会按同一份 CFG 结果渲染成普通 `goto`。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  新增 `shared_synthetic_goto_switch_reuse`，用一个会复用 default 的 switch 形状确认
+  `notdec-llvm2c --algo=structured-sailr` 能在 C 输出里消费 shared synthetic goto。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 Angr 原始 SAILR 样例本地仍缺 `/sn640/binaries`
+
+这轮再次核对了 Angr 的原始测试输入。`test_fmt_deduplication`、`test_decompiling_reused_entries_between_switch_cases` 等样例都依赖 sibling 仓库 `/sn640/binaries` 里的真实二进制。当前本地没有这份资产，所以不能直接把这些 Angr case 迁到 NotDec。
+
+结论：
+
+- 真实二进制缺失时，不把代理样例当成迁移完成。
+- 后续如果补齐 `/sn640/binaries`，再回头迁这些原始样例。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/phi_demote_htypes_smoke.py --notdec /sn640/NotDec/build/bin/notdec
 ```
 
 结果：通过。
