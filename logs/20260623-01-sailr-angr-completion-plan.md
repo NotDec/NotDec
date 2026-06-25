@@ -256,6 +256,28 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-25 迁移补充：`test_true_a_graph_deduplication` 的 NotDec 对照
+
+前一轮尝试把迁移脚本里的 `duplication_reverter_proxy` 换成大体量真实 `fortune` 片段，
+结果先撞到 unhandled intrinsic，不适合作为稳定迁移基线。这里改成更直接的迁移方式：
+把 Angr 的 `test_true_a_graph_deduplication` 语义收进 NotDec 的 shared structuring
+单测，用 synthetic CFG 复刻“两个相同 tail 被 `DuplicationReverter` 合并”的核心形状。
+
+这个对照不是 renderer 侧脚本，也不是 scaffold proxy，而是 shared structuring 的纯语义回归：
+确认 `DuplicationReverter` 仍会合并等价块，保留原始 tail 的 `BlockId` 和 successor 关系。
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testDuplicationReverterMatchesTrueAGraphDeduplication()`。
+
+验证：
+
+```bash
+cmake --build ./build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
+
 ## 2026-06-25 实现记录：DuplicationReverter future goto cutoff 回归
 
 这次没有改算法，只补 Angr 对照测试。Angr
