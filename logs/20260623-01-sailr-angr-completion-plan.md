@@ -1463,6 +1463,84 @@ ctest --test-dir build -R 'sailr-bench2-migration|structuring-analysis' --output
 
 结果：最终迁移脚本和 CTest 子集通过；这类更激进的交叉复用样例暂不纳入主回归。
 
+## 2026-06-25 迁移边界：几个小的真实 Bench2 样例只能当 smoke
+
+这轮又试了几个更小的真实 Bench2 输入：
+
+- `libuv/1-uv__cancelled.ll`
+- `memcached/1-drive_machine.lto_priv.0.cold.ll`
+- `wolfssl/1-wc_PKCS7_DecodeEncryptedData.cold.ll`
+
+它们都能跑完，但输出都太短，基本只剩 `return;`，不够替换当前迁移脚本里的
+`switch_reuse_proxy`、`duplication_reverter_proxy` 或 `condensing_real_lighttpd`。所以这批
+样例先只记为 smoke，不纳入 Angr SAILR 迁移主回归。
+
+判断也更明确了：当前迁移脚本里真正能钉住语义边界的，还是那几个手写 proxy 和
+`switch_case_recovery.ll` 真实 fixture；更小的真实 Bench2 片段暂时只能证明链路能跑，
+不能证明语义对齐。
+
+## 2026-06-25 现阶段收口：迁移脚本先保留 proxy，smoke 只补稳定真实片段
+
+现在这条线先不再追求把所有 Angr SAILR 测试都换成真实 Bench2 输入。原因已经明确：
+
+- 真正小的真实片段，输出太短，只能做 smoke。
+- 真正能钉住语义边界的，还是 `switch_reuse_proxy`、`duplication_reverter_proxy`、
+  `condensing_real_lighttpd` 这类脚手架。
+- `switch_case_recovery.ll` 这种真实 fixture 可以保留，但它的角色是补一个真实片段，
+  不是替掉整个迁移集。
+
+所以后面继续推进时，迁移脚本先按“proxy + 少量真实 fixture”保住语义边界，smoke 只
+补稳定的小真实片段，不再继续找一个能一把替掉所有 proxy 的输入。
+
+## 2026-06-25 迁移再收口：phi demote 只在 smoke 里保留
+
+这轮又确认了一遍，`run_structuring_smoke.py` 里已经有
+`phi_demote_before_structuring`，它能把“结构恢复前先 demote Phi”的边界钉住。
+迁移脚本这边不需要再额外塞一个专门的 Phi 迁移样例，因为它真正负责的是 Angr SAILR 的
+return / switch / condensing 边界，不是把 SSA 细节再重复一遍。
+
+所以这条线当前的分工更清楚了：
+
+- `phi_demote_before_structuring` 负责证明 Phi 在结构恢复前先被处理掉。
+- `sailr-bench2-migration` 负责证明 Angr SAILR 的 return / switch / condensing 语义还能跑。
+- 两边都已经有稳定回归，不需要再为同一个边界额外加一层样例。
+
+## 2026-06-25 实现记录：真实 switch fixture 也接入 structuring smoke
+
+这轮把 `switch_case_recovery.ll` 也接进了 `structuring-smoke`，这样真实的 switch recovery
+片段就不只停留在 `sailr-bench2-migration` 里，而是也能在更基础的 structuring smoke 里
+跑一遍。这样能同时确认：
+
+- 真实 switch fixture 在 shared structuring 链路里还能跑通。
+- 这个 fixture 仍然保留 `switch / case / default / return` 的形状，没有退回 `goto`。
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:6`
+  增加仓库根路径解析，支持相对真实输入。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:128`
+  新增 `real_switch_fixture`。
+
+验证：
+
+```bash
+ctest --test-dir build -R 'phi-demote|structuring-smoke|sailr-bench2-migration|structuring-analysis' --output-on-failure
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+## 2026-06-25 迁移收尾：这条线先停在 proxy + real fixture 的稳定点
+
+这轮把真实小片段和 proxy 的边界再确认了一遍，`structuring-smoke`、
+`sailr-bench2-migration` 和 `structuring-analysis` 都还是绿的。结果也更明确了：
+
+- 小的真实 Bench2 片段能跑，但只够 smoke。
+- 当前真正稳定钉住 Angr SAILR 语义的，还是 proxy 和 `switch_case_recovery.ll` 这种真实片段。
+- 继续硬找“一把替掉所有 proxy 的真实输入”没有收益，容易把迁移脚本推向不稳定。
+
+所以这条迁移线先停在现在这个稳定点，后面如果继续补，只应围绕更贴近语义的真实片段
+或者更具体的 Angr 测试名对应样例，不再扩大输入范围。
+
 # 2026-06-24 实现记录：DuplicationReverter 过滤 future irreducible goto
 
 这次继续对照 Angr 当前 `duplication_reverter.py`。Angr 的 `DuplicationReverter`
