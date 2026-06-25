@@ -256,6 +256,33 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-25 实现记录：shared default rewrite 增加显式开关
+
+这次把 `SwitchDefaultCaseDuplicator` 的两种 shared 默认分支重写模式提成了显式开关：
+默认继续走 Angr 风格的 `SyntheticGoto`，兼容模式保留 `SyntheticForwarder`。
+开关放在 shared structuring 层，不进 renderer，也不改默认行为。
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h`
+  新增 `SAILRDeoptimizationPipelineOptions`，`buildSAILRDeoptimizationPipeline()` 现在可显式
+  选择 shared default rewrite 模式。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRStructurer.h`
+  `SAILRStructurer` 持有这份 pipeline 配置，结构恢复入口可以直接切换模式。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  `buildSAILRDeoptimizationPipeline()` 按配置创建 `SwitchDefaultCaseDuplicator`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRStructurer.cpp`
+  `SAILRStructurer::structure()` 传入这份配置。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testSAILRDeoptimizationPipelineCanUseSharedDefaultForwarders()`，确认兼容模式还能正常工作。
+
+验证：
+
+```bash
+cmake --build ./build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
+
 ## 2026-06-25 实现记录：ReturnDuplicatorLow 跳过 switch predecessor region
 
 这轮补的是 Angr `ReturnDuplicatorBase._find_endnode_regions()` 里的一个保守 guard：
