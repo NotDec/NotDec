@@ -4292,6 +4292,29 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 
 结果：通过。
 
+## 2026-06-25 已补：copied synthetic goto 的 materialize 身份回归
+
+这轮继续收 shared 复制链条里 synthetic goto 的边界。之前已经有 `duplicateRegion()` 里
+synthetic goto 的身份测试，但还缺一条明确验证：一旦它被复制成 `RegionCopy`，后续
+`materializeBlockBody()` 仍然会把 `PayloadMaterializeContext` 里的 `SourceBlock` /
+`CopiedFromBlock` / `BodyBlock` 这些身份字段维持在 shared 语义里，而不是把它当成 renderer
+临时块来处理。
+
+实现：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testStructuredCFGMaterializeCopiedSyntheticGotoKeepsIdentity()`，覆盖 copied synthetic
+  goto 在 materialize 前后的身份保持。
+
+验证：
+
+```bash
+cmake --build ./build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
+
 ## 2026-06-25 Angr 原始 SAILR 样例本地仍缺 `/sn640/binaries`
 
 这轮再次核对了 Angr 的原始测试输入。`test_fmt_deduplication`、`test_decompiling_reused_entries_between_switch_cases` 等样例都依赖 sibling 仓库 `/sn640/binaries` 里的真实二进制。当前本地没有这份资产，所以不能直接把这些 Angr case 迁到 NotDec。
