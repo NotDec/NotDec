@@ -256,6 +256,25 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-25 实现记录：DuplicationReverter future goto cutoff 回归
+
+这次没有改算法，只补 Angr 对照测试。Angr
+`DuplicationReverter._find_future_irreducible_gotos()` 会用 `max_endpoint_distance=5`
+判断 goto target 是否还能短路径到出口。NotDec shared 层已经有同样的过滤逻辑，这次把
+cutoff 边界钉住：target 距出口超过 5 步会被当作 future irreducible goto 过滤，5 步内保留。
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testDuplicationReverterKeepsGotosWithinEndpointCutoff()`。
+
+验证：
+
+```bash
+cmake --build ./build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
+
 ## 2026-06-25 实现记录：shared default rewrite 增加显式开关
 
 这次把 `SwitchDefaultCaseDuplicator` 的两种 shared 默认分支重写模式提成了显式开关：
