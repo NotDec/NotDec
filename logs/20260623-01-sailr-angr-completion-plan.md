@@ -3414,6 +3414,78 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 
 结果：通过。fortune 同口径结果为 `elapsed=195.66 user=217.46 sys=1.72 maxrss=1260312`。
 
+## 2026-06-25 实现记录：SwitchReusedEntryRewriter 只认真实 case edge
+
+这轮对照 Angr 的 `switch_reused_entry_rewriter.py`。Angr 判断 reused entry 时看的是
+entry node 的真实 predecessor，并且只把 jump table switch head 算进去；不是只看 case
+元数据。NotDec shared 层之前只用 `Cases.Target` 判断，可能把 case metadata 指到 entry
+但 successor edge 没有指到 entry 的不一致形状也当成 reused entry。
+
+这次把 `SwitchReusedEntryRewriter` 收紧到真实 CFG case edge：case target 必须存在于
+switch 的 case successor 段里，才参与 reused-entry 改写。这样更接近 Angr 的 predecessor
+语义，也避免 pass 只根据元数据创建 synthetic goto。
+
+实现：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  新增 `switchCaseEdgeReachesBlock()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  修改 `SwitchReusedEntryRewriter::runOnGraph()`，收集和复查 reused entry 时都使用
+  `switchCaseEdgeReachesBlock()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testSwitchReusedEntryRewriterRequiresRealCaseEdge()`，确认 case metadata 指向 entry
+  但 successor 没有 entry 时不会重写。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  保留 `testSwitchReusedEntryRewriterKeepsLowestSwitchIdEntry()`，继续钉住 Angr
+  “最低地址 switch 直接保留 entry，其它 switch 变 synthetic goto”的规则。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+性能：本轮只收紧 shared reused-entry 的触发条件，不新增 trial 次数或复制规模；没有再跑
+fortune 长耗时 smoke。
+
+## 2026-06-25 实现记录：reused-entry 的 Angr 边界再补两条
+
+这轮只补一个小的 Angr 对齐回归。Angr 的 `SwitchReusedEntryRewriter` 在多个 switch
+复用同一个 entry 时，会按地址排序，保留最低地址的 switch 继续直连 entry，其余 switch
+改成 synthetic goto。NotDec 当前 shared 实现已经按 `BlockId` 排序，但之前没有测试钉住
+“插入顺序和 `BlockId` 顺序不一致”时仍保留最低 id。
+
+同时收紧一个真实边界：Angr 是从 CFG predecessor 判断 entry 复用，不会只因为 switch
+case 元数据写了某个 target 就认为存在真实 case edge。shared 层现在要求 case target 同时在
+switch 的 case-successor 列表里，避免只有 `Cases` 字段指向 entry 时误触发 reused-entry
+rewrite。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  新增 `switchCaseEdgeReachesBlock()`，`SwitchReusedEntryRewriter::runOnGraph()` 用它判断
+  reused entry。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testSwitchReusedEntryRewriterKeepsLowestSwitchIdEntry()`，构造先插入高 id switch、
+  后插入低 id switch 的图，确认低 id switch 保持 case target 直连 entry，高 id switch
+  被改成 `CFGBlockCopyKind::SyntheticGoto`，且 goto 不连接回 entry。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testSwitchReusedEntryRewriterRequiresRealCaseEdge()`，确认只有 case 元数据指向 entry、
+  但 successor 列表没有真实边时不会改图。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
 同时又看了 `fortune/executable/module-all.ll` 里的真实 switch 函数。它能作为后续候选，
 但直接用整个 module-all 会撞旧 intrinsic 断言；强行切片又会带来大量 metadata、declare
 和 intrinsic 处理，不适合现在塞进迁移脚本。当前仍保留 `switch_reuse_proxy`，等有更小、
