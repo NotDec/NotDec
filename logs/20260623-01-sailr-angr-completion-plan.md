@@ -256,6 +256,53 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-25 实现记录：ReturnDuplicatorLow 跳过 switch predecessor region
+
+这轮补的是 Angr `ReturnDuplicatorBase._find_endnode_regions()` 里的一个保守 guard：
+如果 return region 的外部 predecessor 里有 indirect jump block，Angr 会跳过这个 region，
+避免把 jump-table / switch 入口误当成普通 goto return tail 复制。
+
+NotDec shared CFG 当前没有 AIL 的 indirect jump block 类型，最接近的 shared 表达是
+`TerminatorKind::Switch`。因此这轮只在 shared `ReturnDuplicatorLow` 里做保守映射：
+return region 的外部 predecessor 只要包含 switch block，就跳过这块 region。这个判断放在
+structuring pass 里，不放到 C / Solidity renderer。
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  新增 `hasSwitchPredecessor()`，`ReturnDuplicatorLow::runOnGraph()` 收集 region 后先过滤
+  switch predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testReturnDuplicatorLowSkipsSwitchPredecessorRegion()`，确认 switch 和普通 block
+  同时进入 return block 时，即使 goto summary 里有对应 edge，也不会复制 region。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+同轮还补了 synthetic goto 的 CFG / renderer 边界。Angr 的 synthetic goto block 在 graph
+里仍然有到目标 default 的 edge，方便后续 pass 看见真实 source-target；但输出时它应该只
+渲染成 goto，不能再把 successor 当普通 fallthrough 展开。
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h` 和
+  `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp`
+  新增 `StructuredCFG::createSyntheticGotoEdge()`，在保留
+  `CFGBlockCopyKind::SyntheticGoto`、`SyntheticSource`、`SyntheticTarget` 的同时，把
+  `Successors` 设为目标 block。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp`
+  对 synthetic goto block 跳过普通 fallthrough successor 展开，避免同一个 synthetic goto
+  被输出两次。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  `SwitchDefaultCaseDuplicator` 默认 Angr 模式改用 `createSyntheticGotoEdge()`，并在后续
+  default tail copy 检查里同时识别 synthetic forwarder 和 synthetic goto。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  补 `createSyntheticGotoEdge()` 身份测试，并把 shared default 默认测试改成断言 synthetic
+  goto 同时保留 CFG successor。
+
 ## 2026-06-24 实现记录：Phi demote 前置边界补 smoke
 
 这轮没有再改 demote 本身，只是在 structuring smoke 里补了一个最小分支 return case，专门确认结构恢复阶段看到的是已经 demote 过的结果，而不是直接处理 Phi。这个 case 和现有 `phi-demote` / `phi-demote-htypes` 一起，把“Phi 先在结构恢复前消掉”这条边界再钉紧了一点。
@@ -3452,6 +3499,53 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 
 性能：本轮只收紧 shared reused-entry 的触发条件，不新增 trial 次数或复制规模；没有再跑
 fortune 长耗时 smoke。
+
+## 2026-06-25 实现记录：switch default synthetic goto 保留真实 CFG edge
+
+这轮继续对照 Angr 的 `switch_default_case_duplicator.py`。Angr 在多个 switch 共享同一个
+default 时，会插入 goto block，同时在图里保留 `goto_node -> default_node` 边。NotDec
+前一轮已经默认改成 `SyntheticGoto`，但这个 synthetic goto 没有 successor，更像
+`SwitchReusedEntryRewriter` 的 virtual goto。这里语义不同：
+
+- reused-entry 的 goto 是虚边，Angr 明确不加 `goto -> entry`。
+- shared default 的 goto 是真实图边，Angr 会加 `goto -> default`。
+
+这次把这两个语义分开。`StructuredCFG` 新增带 successor 的 synthetic goto 创建入口；
+`SwitchDefaultCaseDuplicator` 默认使用它；`SwitchReusedEntryRewriter` 仍保持无 successor
+的 virtual goto。
+
+实现：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h`
+  新增 `StructuredCFG::createSyntheticGotoEdge()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp`
+  实现 `createSyntheticGotoEdge()`：保持 `CFGBlockCopyKind::SyntheticGoto` 和
+  `SyntheticSource` / `SyntheticTarget`，同时设置 `Successors = {Target}`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`
+  修改 `SwitchDefaultCaseDuplicator::runOnGraph()`，默认 shared-default goto 使用
+  `createSyntheticGotoEdge()`；后续 default tail 复制时跳过指向同一 default 的
+  synthetic goto / forwarder。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp`
+  fallback structurer 遇到 synthetic goto 时只输出 synthetic target goto，不再额外按
+  successor 输出第二个 goto。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  更新 shared default goto 测试，断言 synthetic goto 保留 `Successors == {default}`；
+  扩展 `testStructuredCFGCreateSyntheticBlock()` 覆盖 `createSyntheticGotoEdge()`；
+  扩展 `testGotoStructurerRendersSyntheticGoto()`，确认带 edge 的 synthetic goto 只渲染一次。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+性能：本轮只补 shared CFG edge 身份，不新增复制规模或 pipeline 迭代；没有再跑 fortune
+长耗时 smoke。
 
 ## 2026-06-25 实现记录：reused-entry 的 Angr 边界再补两条
 
