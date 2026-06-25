@@ -256,6 +256,28 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-25 迁移补充：`test_deduplication_too_sensitive_split_3` 的 NotDec 对照
+
+Angr 的 `test_deduplication_too_sensitive_split_3` 重点不是合并重复，而是证明有些表面重复
+是程序员本来就写出来的，不能因为靠近 goto 就被 SAILR 误删成更多 goto。当前仓库里没有
+对应的真实 Bench2 小输入能稳定直接替掉这个 case，所以这轮把它收进 NotDec 的 shared
+structuring 语义单测里，用 synthetic CFG 复刻“重复赋值但不该被合并”的核心判断。
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  新增 `testDuplicationReverterKeepsProgrammerWrittenDuplication()`。
+
+这个回归仍然是在 shared 层，不依赖 renderer，也不把 `phi` 当成 structuring 算法要直接
+理解的内容。
+
+验证：
+
+```bash
+cmake --build ./build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：通过。
+
 ## 2026-06-25 迁移补充：`test_true_a_graph_deduplication` 的 NotDec 对照
 
 前一轮尝试把迁移脚本里的 `duplication_reverter_proxy` 换成大体量真实 `fortune` 片段，
