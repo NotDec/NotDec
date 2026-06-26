@@ -1418,10 +1418,10 @@ cmake --build build --target structuring-analysis-test -j4
 - `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:316`：
   新增 `RecoverCopiedDephicationPass`，第一次 trial 里会复制一个含 dephication 的 region，
   再注入坏块；第二次 trial 需要看到复制出来的 block 和 dephication 元数据已经不在。
-- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6562`：
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6599`：
   新增 `testStructuringOptimizationPassRollsBackCopiedDephicationMetadata()`，直接跑
   `analyze()`，确认 rollback 后只保留原始 shared dephication。
-- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9212`：
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9283`：
   把新测试挂到主入口。
 
 验证：
@@ -1429,11 +1429,13 @@ cmake --build build --target structuring-analysis-test -j4
 ```bash
 cmake --build build --target structuring-analysis-test -j4
 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
 ```
 
 结果：
 
 - `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 3.12`。
 - rollback 后坏块 `99` 不在输出里。
 - rollback 后 copied dephication 的临时 block 不在输出里。
 - rollback 后只保留原始 `dephicationVVars()` / `dephicationIncomings()`。
