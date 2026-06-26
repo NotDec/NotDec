@@ -365,3 +365,54 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 实现效果：6/10。至少 copy / rollback 现在不会把 dephication metadata 搞坏。
 - 复杂度：5/10。增加了几条 helper，但都在 `StructuredCFG` 内，语义边界还算清楚。
 - 维护成本：5/10。后面要把复制规则继续收紧，避免 metadata 复制和 block 复制出现双轨。
+
+## 2026-06-26 实现记录：edge-scoped dephication materialize context
+
+这轮把 shared dephication 映射继续往下收口。现在 `PayloadMaterializeContext`
+不再拿整张表，而是只带当前 edge block 相关的 `DephicationIncoming` 和对应
+`DephicationVVar`，这样 copied block 的 payload rewrite 只消费自己这条边的
+shared 结果。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:88`：
+  `DephicationIncoming` 新增 `SourceIncomingBlock` / `SourceMergeBlock` /
+  `SourceEdgeBlock`，把 provenance 和当前位置拆开。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:100`：
+  `PayloadMaterializeContext` 新增 `DephicationVVars` /
+  `DephicationIncomings`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:200`：
+  `addDephicationIncoming()` 初始化 provenance 字段。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:300`：
+  `materializeBlockBodyImpl()` 改成只把当前 edge 的 dephication 子集传给 hook。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:637`：
+  `duplicateDephicationIncomings()` / `rewriteCopiedDephicationIncomings()` 按
+  provenance 规则更新 copied 记录。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:719`：
+  新增 edge 过滤和 vvar 收集 helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2109`：
+  扩展 dephication edge copy 测试，验证 copied 记录保留 source provenance，
+  且 materialize hook 只看到当前 edge 的 shared 映射。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.49`。
+
+当前完成度：
+
+- shared dephication 记录现在有 source/当前位置两层语义。
+- materialize hook 只消费当前 edge 的映射，不再拿整张表。
+- 还没把这套规则接到真正的 copy-vvar 选择和变量恢复里。
+
+评分：
+
+- 实现效果：6/10。copy edge 的 provenance 现在不打架了。
+- 复杂度：6/10。字段和 helper 多了一层，但语义比前面清楚。
+- 维护成本：5/10。下一步要把这份 edge-scoped context 真正用到变量恢复，而不是只停在 materialize hook。
