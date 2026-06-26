@@ -424,3 +424,53 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 
 - 这版把之前的性能回退基本收回来了。
 - 这仍然不是 Angr 的完整 merge graph，只是更保守的 goto 相关线性 tail 合并。
+
+## 2026-06-26 实现记录：ReturnDuplicatorLow 补 parent-aware goto source 和 dephication return 回归
+
+这轮没有继续扩大 P1 的 region 形状，只补了一层更贴近 Angr 的 goto 源点判断，并把
+`ReturnDuplicatorLow` 的 copied return / dephication vvar 语义再钉了一条回归。
+`gotoEdgeFromSourceOrParent()` 现在会先看当前 source 是否直接命中 goto，再回看一层
+非 branch 前驱；这样 `DuplicationReverter` 和 `ReturnDuplicatorLow` 都能吃到“真实 goto
+在上层块”的窄边界。与此同时，新测试确认 copied return region 在 materialize 时能拿到
+fresh vvar / dephication incoming，上下文里会分别走 `DephicationAssignment` 和普通
+`Statement` 路径。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:102-104`：
+  新增 `gotoEdgeFromSourceOrParent()` 前置声明，给后面的 goto 相关 pass 共用。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:643-646`：
+  `revertGotoRelatedCommonLinearRegionTail()` 改成用 parent-aware goto 判断筛候选。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:753-756`：
+  `revertGotoRelatedCommonStatementTail()` 同步改用同一个 helper。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:949-990`：
+  `gotoEdgeFromSourceOrParent()` 先看直连 goto，再看一层非 branch 前驱，最后再沿
+  return tail 做线性回退。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1938-1990`：
+  `ReturnDuplicatorLow::runOnGraph()` 改成先过 parent-aware goto 过滤，再做 predecessor
+  分组和复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4783-4871`：
+  新增 `testReturnDuplicatorLowCopiesReturnRegionWithDephicationVVars()`，覆盖 copied return
+  region 的 dephication vvar 复制和 payload rewrite。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9534`：
+  把新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e' ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-sailr-parent-goto.c --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_structuring_smoke.py` 通过。
+- fortune smoke 通过，当前本地 Debug + ASan 口径为 `elapsed=200.44`。
+
+当前完成度：
+
+- 这轮只补了 parent-aware goto 源点和一条 copied return / dephication 回归。
+- `ReturnDuplicatorLow` 还没补 Angr 那层更完整的 return region / Phi / vvar 一般语义。
