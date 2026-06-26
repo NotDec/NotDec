@@ -299,3 +299,51 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - P0 已支持一种“非完全相同 block”的保守相似合并形状。
 - 还没有实现 Angr 完整的 `AILMergeGraph`、statement move、子图 LCS、
   condition block 合成和复杂 split / reinsert。
+
+## 2026-06-26 实现记录：P0 候选再收窄到线性无环 tail
+
+上面那版公共 tail 提取再收窄了一次，避免把带回边或分叉的 shape 当成可分
+shared tail。现在候选块必须满足：
+
+- 原始 input block。
+- `BodyMaterialized == true` 且 `BodyBlock == Id`。
+- `Terminator == Fallthrough`。
+- `Successors.size() == 1`。
+- 不存在 dephication 上下文。
+- 两个候选 block 之间没有可达关系，避免把同一条链上的不同位置误当成
+  相似兄弟块。
+- 不再“找到第一个公共后缀就合并”，而是从所有候选里挑公共后缀最长的
+  那个。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:376`：
+  让 `canSplitCommonStatementTailBlock()` 同时检查 linear tail 形状。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:412`：
+  `commonStatementTailCandidate()` 额外拒绝互相可达的候选对。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:488`：
+  `revertGotoRelatedCommonStatementTail()` 先遍历所有候选，再挑最长公共后缀。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3961`：
+  新增 `testDuplicationReverterSkipsCommonTailWhenRegionIsNotLinear()`，用
+  一个带回边的 branch 候选确认不触发。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9349`：
+  注册新的反例测试。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_structuring_smoke.py` 通过。
+
+当前完成度：
+
+- 这个 P0 子集现在只覆盖“有 goto hint 的线性公共 tail”。
+- 还没碰 Angr 那条真正的相似子图合并、LCS、语句移动和 merged condition
+  graph。
