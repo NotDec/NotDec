@@ -801,3 +801,54 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：7/10。C 路径开始真正接入 shared vvar/incoming 表。
 - 复杂度：5/10。增加了 edge metadata 传递，但没有扩大到 renderer 语义判断。
 - 维护成本：5/10。metadata 字段还在 C CFG 上，后续迁到 shared builder 后可以删除。
+
+## 2026-06-26 实现记录：shared dephication edge context 查询
+
+这轮给 shared 层补了一个稳定查询入口。之前 `DephicationIncomings`、
+`DephicationVVars`、`DephicationVVarCopies` 只在 `materializeBlockBodyImpl()` 里
+临时拼成 `PayloadMaterializeContext`，后续 pass 或变量恢复如果想读同一份关系，
+只能自己重复拼。现在 `StructuredCFG::dephicationEdgeContext()` 可以按 edge block
+直接返回当前 edge 的 incoming、活动 vvar 和 copied vvar 映射，materialize 本身也
+改成复用这个接口。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:105`：
+  新增 `DephicationEdgeContext`，包含 `VVarCopies`、`VVars`、`Incomings`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:228`：
+  `StructuredCFG` 新增 `dephicationEdgeContext(BlockId)`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:230`：
+  实现 `StructuredCFG::dephicationEdgeContext()`，统一调用现有 edge incoming、
+  copied vvar 映射和 active vvar 查询。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:322`：
+  `materializeBlockBodyImpl()` 的 self-body 路径改成复用
+  `dephicationEdgeContext()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:391`：
+  copied-body materialize 路径同样复用 `dephicationEdgeContext()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2209`：
+  新增 `testStructuredCFGQueriesDephicationEdgeContext()`，覆盖原 edge、copied edge
+  和删除 copied merge 后的 retired/removed 状态。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.64`，和前几次 `2.54` 到 `2.61`
+同口径，未看到明显回退。
+
+当前完成度：
+
+- shared dephication 关系现在有了独立只读入口，后续变量恢复或 structuring pass
+  可以直接消费，不必靠 renderer 或 materialize hook 临时猜。
+- materialize 的 context 拼装和外部查询共用同一套逻辑。
+- 还没把变量恢复实际切到这个接口上。
+
+评分：
+
+- 实现效果：6/10。补上了消费入口，但还没接具体变量恢复 pass。
+- 复杂度：3/10。只是公开已有组合关系，没有引入新算法。
+- 维护成本：3/10。减少重复拼 context 的机会，接口语义比较窄。
