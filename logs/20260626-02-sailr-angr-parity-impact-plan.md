@@ -514,3 +514,50 @@ time ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-f
 - exact merge 现在能吃到 copied target 的来源身份。
 - common statement tail 也能在 copied successor 上继续工作。
 - 这还不是 Angr 的完整相似子图合并，只是把当前最主要的来源身份判断补齐了一层。
+
+## 2026-06-26 实现记录：ReturnDuplicatorLow 补 diamond return region 和 grouped predecessor materialize
+
+这轮继续往 P1 往前推，没有改默认开关，也没有碰 renderer。主要补的是
+`ReturnDuplicatorLow` 的两块 shared CFG 语义：一是从 return 终点往回识别更一般的
+diamond return region，二是 copied region 里的内部 predecessor 如果已经是成对复制的，
+就允许走 grouped predecessor materialize。这样复制 return region 时不再只靠线性尾部，
+而是能覆盖一类更像 Angr 的单入口分叉收口形状。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:322-412`：
+  新增 `DiamondReturnSide`、`collectDiamondReturnSide()` 和 `collectDiamondReturnRegion()`；
+  `findLinearReturnRegion()` 在 `AllowComplexReturnRegion` 打开时，先尝试从 return 终点回溯
+  diamond region，再回退到原来的线性回溯。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1238-1290`：
+  `materializeDuplicatedRegion()` 在 copied block 的内部 predecessor 已经成对复制时，允许
+  grouped predecessor materialize，一次把同一组 predecessor 的原始 / copied 对都传给
+  payload hook。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4952-5066`：
+  新增 `testReturnDuplicatorLowCopiesDiamondReturnRegionWithGroupedPredecessorRewrite()`，
+  覆盖 diamond return region 复制、grouped predecessor rewrite 和 return 终点一起删除。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9730` 左右：
+  把新测试接入 `main()`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e' ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-sailr-diamond-return.c --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_structuring_smoke.py` 通过。
+- `run_sailr_bench2_migration.py` 通过。
+- fortune smoke 通过，当前本地 Debug + ASan 口径为 `elapsed=198.72`。
+
+当前完成度：
+
+- `ReturnDuplicatorLow` 现在不只吃线性 return tail，也能吃一类单入口 diamond return region。
+- grouped predecessor materialize 现在能把 copied region 里的内部 predecessor 一起传给 payload hook。
+- 这还是保守版，没去碰 Angr 更宽的 Phi / vvar / region merge 语义。
