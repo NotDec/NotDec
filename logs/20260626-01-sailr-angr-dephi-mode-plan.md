@@ -1524,3 +1524,39 @@ branch declaration，而不是把整段输出都退回到别的 fallback 形状�
 - 实现效果：5/10。是收紧验证，不是扩语义。
 - 复杂度：2/10。只加了一条输出断言。
 - 维护成本：2/10。后面看输出回退时会更快暴露。
+
+## 2026-06-26 实现记录：copied shared phi readBody 断言回收
+
+这轮把 `testSolidityBodyBuilderReadsCopiedSharedPhiAssignments()` 的断言收回到
+`readBody()` 真能稳定保证的粒度。前一次把输出写得太死了，实际只需要确认
+copied assignment 和 copied return 还能从 shared dephication 结果里被消费出来。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1627`：
+  `testSolidityBodyBuilderReadsCopiedSharedPhiAssignments()` 现在只断言 copied
+  assignment / copied return 的自然文本，而不再强行要求完整的声明形状。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 3.14`。
+
+当前完成度：
+
+- copied shared phi 的 consumer 断言现在落在稳定文本上了。
+- 没有额外引入 C 侧测试，仍然保持在 shared CFG / Solidity consumer 这条线上。
+
+评分：
+
+- 实现效果：4/10。只是把断言改稳。
+- 复杂度：1/10。是一次纯测试修正。
+- 维护成本：2/10。后续不会再被过死的文本卡住。
