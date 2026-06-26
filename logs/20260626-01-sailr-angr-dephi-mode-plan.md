@@ -1233,3 +1233,60 @@ cmake --build build --target structuring-analysis-test -j4
 - 实现效果：6/10。修正了 shared goto 事实，推进了 dephication edge 后的复制判断。
 - 复杂度：3/10。只改 goto source 归因和相关测试。
 - 维护成本：3/10。语义更明确，但会影响依赖旧 switch-header source 的测试预期。
+
+## 2026-06-26 实现记录：Solidity readBody copied dephication 集成覆盖
+
+这轮补上了一个自然走 Solidity `BodyBuilder::readBody()` 的 copied dephication 样例。
+问题点是 `ReturnDuplicatorLow` 复制 return region 后，最终 goto target 指到 copied
+block，quality guard 会把它当成新的 goto 目标，从而拒掉这次复制。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:44`：
+  `ReturnDuplicatorLow` 覆盖 `getNewGotos()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1478`：
+  新增 `hasInitialSourceGoto()`，只在初始结果里已有同 source、同原 target 的 goto
+  时允许归一化。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1494`：
+  `ReturnDuplicatorLow::getNewGotos()` 把指向 copied block 的 goto target 归一化到
+  copied block 的 `SourceBlock`，避免 quality guard 把等价 copied target 当成变差。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:283`：
+  Solidity fallback `readBody()` 收集最小 `return value;` payload，使 copied merge body
+  有可重写文本。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:558`：
+  新增 `makeSharedPhiSwitchFunction()`，构造 switch case 共享 Phi return 的 LLVM 样例。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1568`：
+  新增 `testSolidityBodyBuilderReadsCopiedSharedPhiAssignments()`，通过
+  `BodyBuilder::readBody()` 验证自然输出里出现 copied assignment 和 `return p_copy...;`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4009`：
+  新增 `testReturnDuplicatorLowNormalizesCopiedGotoTargets()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4034`：
+  新增 `testReturnDuplicatorLowAcceptsCopiedSwitchCaseReturnRegion()`，覆盖默认 quality
+  检查能接受 copied return region。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-25928-solidity-vvar.ll --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 2.74`。
+- EVM 25928 smoke 通过，耗时 `elapsed=17.45 rss_kb=960276`。
+
+当前完成度：
+
+- Solidity `readBody()` 现在有自然 copied-region 集成覆盖。
+- copied Phi assignment 和 copied merge return 都能消费 shared copied vvar 映射。
+- 还缺更复杂的 pass pipeline 失败回滚样例，以及新 mode / legacy mode 更系统的对照。
+
+评分：
+
+- 实现效果：7/10。补上了之前缺的 Solidity 自然集成覆盖。
+- 复杂度：4/10。quality 归一化只限定在 ReturnDuplicatorLow 的 copied target。
+- 维护成本：4/10。新增最小 return fallback 后，Solidity readBody 输出更完整，但后续还要避免把它扩成表达式恢复。
