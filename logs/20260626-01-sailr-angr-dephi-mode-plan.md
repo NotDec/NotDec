@@ -852,3 +852,42 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：6/10。补上了消费入口，但还没接具体变量恢复 pass。
 - 复杂度：3/10。只是公开已有组合关系，没有引入新算法。
 - 维护成本：3/10。减少重复拼 context 的机会，接口语义比较窄。
+
+## 2026-06-26 实现记录：避免 copied edge 伪造 copied vvar 映射
+
+这轮修了一个 shared context 里的边界问题：如果只复制 dephication edge block，
+没有复制对应 merge block，那么 copied edge 仍然指向原来的 vvar。这种情况下
+`DephicationVVarCopies` 不应该暴露 `VVar -> 同一个 VVar`，否则后续变量恢复会误以为
+真的创建了 copied vvar。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:835`：
+  `dephicationVVarCopiesForIncomings()` 现在跳过 `SourceTarget == Target` 的
+  incoming，只在 copied edge 确实指向新 vvar 时返回映射。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2255`：
+  新增 `testStructuredCFGQueriesCopiedDephicationEdgeWithoutCopiedMerge()`，覆盖只
+  复制 incoming + edge、不复制 merge 的情况，确认 context 仍能看到原 vvar，但
+  `VVarCopies` 为空。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.57`，同口径未看到明显回退。
+
+当前完成度：
+
+- copied edge 未复制 merge 时，不再产生假的 copied vvar 映射。
+- dephication edge context 可以更可靠地被变量恢复或后续 pass 消费。
+- 还没接入真正的变量恢复 pass。
+
+评分：
+
+- 实现效果：6/10。修掉一个会误导后续消费方的映射问题。
+- 复杂度：2/10。只是过滤 self-copy 映射。
+- 维护成本：2/10。语义更清楚，后续消费时少一个特殊判断。
