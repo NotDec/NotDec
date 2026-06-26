@@ -1440,6 +1440,45 @@ cmake --build build --target structuring-analysis-test -j4
 - rollback 后 copied dephication 的临时 block 不在输出里。
 - rollback 后只保留原始 `dephicationVVars()` / `dephicationIncomings()`。
 
+## 2026-06-26 实现记录：copied dephication identity chain
+
+这轮继续把 shared dephication 的复制链钉实。目标不是再补输出对照，而是确认
+同一条 dephication edge 连续复制两次后，`SourceBlock`、`CopiedFromBlock`、
+`SourceId`、`SourceMergeBlock`、`SourceIncomingBlock` 这些链路字段都还能对上，
+后续 materialize 也能从 shared 表里拿到正确的 copied vvar。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2505`：
+  新增 `testStructuredCFGDuplicateCopiedDephicationEdgeKeepsIdentityChain()`，
+  先复制一次含 dephication 的 region，再复制复制出来的 region，检查二层 copied
+  edge / merge / incoming / vvar 都还指回原始 shared 记录。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9245`：
+  把新测试接到主入口。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- 二层 copied edge 的 `SourceTarget`、`Target` 和 `VVarCopies` 都能跟回第一层 copied 记录。
+
+当前完成度：
+
+- shared dephication 的 copy-of-copy 链现在已经有单测钉住。
+- 还没继续往 consumer 侧补新的运行时测试，但 shared 结果链条本身更稳了。
+
+评分：
+
+- 实现效果：6/10。把复制链语义补实了一层。
+- 复杂度：4/10。只是多了一条复制链测试。
+- 维护成本：3/10。后面看 copied dephication 退化时，这条测试会很直接。
+
 当前完成度：
 
 - 这条回滚边界现在已经被单测钉住。
