@@ -1489,3 +1489,38 @@ cmake --build build --target structuring-analysis-test -j4
 - 实现效果：6/10。把 rollback 语义补实了一点。
 - 复杂度：4/10。新增了一个小的失败试探类和一条回滚测试。
 - 维护成本：3/10。测试直接盯住 shared dephication 状态，后面好查回退。
+
+## 2026-06-26 实现记录：copied switch 消费端再收紧
+
+这轮还是没动 shared CFG 核心，只把 copied switch 的对照 smoke 再收紧一点。
+前面已经确认了 legacy / angr 的差异，这里补的是 consumer 端的一个小细节：
+angr 输出除了 copied vvar 和 copied return 之外，普通分支里还应该保留共享的
+branch declaration，而不是把整段输出都退回到别的 fallback 形状。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:618`：
+  `run_sailr_dephication_copied_switch_contrast_case()` 继续检查 copied switch 的 shared
+  branch declaration，避免把 angr 输出误认成退化版本。
+
+验证：
+
+```bash
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：
+
+- 对照 smoke 通过，耗时 `elapsed 3.09`。
+- copied switch 的 angr 输出仍然保留 `int p;`，同时保留 copied vvar 和 copied return。
+
+当前完成度：
+
+- copied switch 的对照现在更像真实 consumer 行为了。
+- 这条还是 smoke 级别，不是新的 shared CFG 语义。
+
+评分：
+
+- 实现效果：5/10。是收紧验证，不是扩语义。
+- 复杂度：2/10。只加了一条输出断言。
+- 维护成本：2/10。后面看输出回退时会更快暴露。
