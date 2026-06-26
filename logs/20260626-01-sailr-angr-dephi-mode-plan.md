@@ -255,3 +255,59 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 复杂度：5/10。新增回调和 edge block 较直接，但 C/Solidity 暂时存在两条
   Phi rewrite 路线，会增加理解成本。
 - 维护成本：5/10。后续应把 C 后端也迁到 shared CFG，避免长期双路径。
+
+## 2026-06-26 实现记录：最小 shared vvar 映射
+
+这轮补了 shared dephication 的最小数据层。它还不做 liveness /
+interference，也不创建 copied vvar；先让 shared CFG 能明确记录
+`phi -> vvar` 和每条 incoming assignment 属于哪条 edge block。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:18`：
+  新增 `VVarId` 和 `InvalidVVarId`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:116`：
+  新增 `DephicationVVar` / `DephicationIncoming`，记录 Phi 目标 vvar、
+  merge block、incoming block、edge block、assignment payload 和 incoming
+  名字。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:204`：
+  `StructuredCFG` 暴露 `dephicationVVars()` /
+  `dephicationIncomings()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:189`：
+  新增 `addDephicationVVar()` 和 `addDephicationIncoming()`。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:17`：
+  新增 `PendingPhiAssignment`，在 builder 内暂存 vvar、payload 和
+  incoming 名字。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:104`：
+  每个 Phi 先登记一个 shared vvar，再把 incoming assignment 聚合到
+  `(pred, merge)`。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:144`：
+  synthetic edge block 创建后，把 incoming 映射登记到 `StructuredCFG`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1454`：
+  扩展 `testLLVMFunctionCFGBuilderMaterializesPhiEdgePayloads()`，验证 `x`
+  这个 vvar 和来自 `a` / `b` 的 incoming 映射都在 shared CFG 里。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.50`。
+
+当前完成度：
+
+- shared CFG 已有最小 `phi -> vvar` 和 incoming assignment 映射。
+- 这一步只记录数据，不做变量合并、干扰判断或 copied vvar。
+- 后续需要让 materialize / rollback 消费这份映射，而不是只把它当测试数据。
+
+评分：
+
+- 实现效果：5/10。补上了 shared vvar 表的入口，但还没进入 copy-vvar 和
+  rewrite 决策。
+- 复杂度：4/10。数据结构很小，放在 shared CFG 里，暂时没有影响现有 pass。
+- 维护成本：4/10。后续要小心让 copy/materialize 使用这份表，避免它变成旁路
+  metadata。
