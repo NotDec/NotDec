@@ -979,3 +979,103 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：6/10。补齐了 copied merge body 的 shared 消费信息。
 - 复杂度：3/10。新增一个 block context，复用现有 dephication context 结构。
 - 维护成本：3/10。多了 `SourceId` 字段，但减少了后端按名字匹配的风险。
+
+## 2026-06-26 实现记录：C 后端消费 copied vvar rewrite
+
+这轮把 C 后端从“只复制 Clang payload”推进到“按 shared dephication context
+重写 DeclRef”。同时修了 copied switch region 下 assignment 和 merge body 不一致的问题：
+copied merge body 已经读 `p_copy` 时，对应 dephication edge assignment 也会重新物化成
+写 `p_copy`。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:29`：
+  新增 `assignmentTargetVar()`，从 C dephication assignment 的 LHS 记录原始 vvar
+  对应的 `VarDecl`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:40`：
+  新增 `DeclRefRewriter`，只按 shared 给出的 vvar copy 映射替换 `DeclRefExpr`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:63`：
+  新增 `DeclRefCollector`，最终只声明实际被使用的 copied vvar。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:86`：
+  `StructuredGotoAdapter` 新增 `DephicationVarDecls` 和
+  `CopiedDephicationDecls`，保存 shared vvar 到 C `VarDecl` 的映射。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:100`：
+  C 路径的 `setPayloadMaterializeHook()` 改为调用 `materializePayload()`，并声明支持
+  predecessor / grouped predecessor rewrite。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:133`：
+  `materializePayload()` 从 `PayloadMaterializeContext` 读取
+  `DephicationVVarCopies` 和 `CurrentDephicationIncoming`，再复制或重写 Clang
+  payload。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:155`：
+  `dephicationDeclReplacements()` 把 shared 的 `source vvar -> copied vvar`
+  转成 C AST 的 `ValueDecl -> ValueDecl`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:200`：
+  `copiedDephicationVarDecl()` 为 copied vvar 创建 `p_copyN` 这类局部变量。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:242`：
+  `prependUsedCopiedDephicationDecls()` 在最终语句前补 copied vvar 声明。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:379`：
+  `buildCFG()` 在读 C dephication edge assignment 时登记原始 vvar 的 `VarDecl`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:264`：
+  暴露 `redirectDephicationIncomingTarget()`，供 SAILR deoptimization 的手写重定向路径调用。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:344`：
+  `materializeBlockBodyImpl()` 允许 self-body 在 `BodyMaterialized=false` 且有 hook 时重新物化。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:619`：
+  `redirectPredecessors()` 先更新 dephication incoming target，再替换 CFG 边，并保持失败回滚。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:794`：
+  `redirectDephicationIncomingTarget()` 把原 edge incoming 指向 copied merge 的 copied vvar，
+  并重新物化 edge assignment。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:911`：
+  `dephicationVVarCopiesForIncomings()` 只按 `SourceTarget != Target` 判断 copied
+  vvar，不再要求 edge block 必须也是 copy。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:501`：
+  `redirectSwitchCases()` 在 switch case 重定向时同步 dephication incoming。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:596`：
+  `replaceDefaultSwitchSuccessor()` 在 default successor 重定向时同步 dephication incoming。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:935`：
+  `redirectNonSwitchCaseEdges()` 在非 case 边重定向时同步 dephication incoming。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2358`：
+  新增 `testStructuredCFGRedirectDephicationEdgeRematerializesAssignment()`，覆盖
+  dephication edge 指向 copied merge 后会重新物化 assignment。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:331`：
+  新增 `sailr_angr_dephication_copied_switch_region`，覆盖 `p_copy1 = a;`
+  和 `return p_copy1 + 1;` 必须一致。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 structuring smoke 耗时 `elapsed 2.70`，同口径未看到明显回退。
+
+额外手工检查的最小 IR 输出里，case1 已从错误的：
+
+```c
+p = a;
+return p_copy1 + 1;
+```
+
+变为：
+
+```c
+p_copy1 = a;
+return p_copy1 + 1;
+```
+
+当前完成度：
+
+- C 后端已经消费 shared copied vvar 映射，不再自己判断 Phi 语义。
+- copied merge body 和 dephication assignment 的 payload rewrite 已能保持一致。
+- Solidity 路径仍是字符串 payload 复制 hook，本轮没有把 Solidity 也改成 copied vvar
+  变量名重写。
+- rollback 覆盖仍主要来自 shared materialize / duplicate 既有测试，还缺更复杂的
+  angr dephication 失败样例。
+
+评分：
+
+- 实现效果：7/10。修掉 copied switch region 下最明显的 vvar 读写不一致问题。
+- 复杂度：5/10。C AST rewrite 逻辑增加了一些代码，但语义判断仍放在 shared context。
+- 维护成本：4/10。后续如果 Solidity 也要变量名级 rewrite，可以复用 shared context，
+  但 C 侧 `VarDecl` 映射还需要继续保持窄边界。
