@@ -1365,3 +1365,45 @@ shared vvar / copied block 这套结果在一个已经复制过的 region 里，
 - 实现效果：6/10。比普通 Phi 对照更贴近当前目标。
 - 复杂度：3/10。只是在 smoke 里多跑一组 mode。
 - 维护成本：3/10。以后能直接用这个 case 看 copied 语义有没有回退。
+
+## 2026-06-26 实现记录：copied dephication rollback 回归测试
+
+这轮继续补 shared 层的回滚边界，不再扩核心逻辑。目标很明确：
+验证 `StructuringOptimizationPass::analyze()` 在第一次 trial 失败后回滚时，
+不仅把坏块删掉，也把 trial 里临时生成的 copied dephication 表一起收回去。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:316`：
+  新增 `RecoverCopiedDephicationPass`，第一次 trial 里会复制一个含 dephication 的 region，
+  再注入坏块；第二次 trial 需要看到复制出来的 block 和 dephication 元数据已经不在。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6562`：
+  新增 `testStructuringOptimizationPassRollsBackCopiedDephicationMetadata()`，直接跑
+  `analyze()`，确认 rollback 后只保留原始 shared dephication。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9212`：
+  把新测试挂到主入口。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- rollback 后坏块 `99` 不在输出里。
+- rollback 后 copied dephication 的临时 block 不在输出里。
+- rollback 后只保留原始 `dephicationVVars()` / `dephicationIncomings()`。
+
+当前完成度：
+
+- 这条回滚边界现在已经被单测钉住。
+- 还没补更大范围的 pipeline 对照，但这不影响这次回滚语义本身。
+
+评分：
+
+- 实现效果：6/10。把 rollback 语义补实了一点。
+- 复杂度：4/10。新增了一个小的失败试探类和一条回滚测试。
+- 维护成本：3/10。测试直接盯住 shared dephication 状态，后面好查回退。
