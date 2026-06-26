@@ -1079,3 +1079,59 @@ return p_copy1 + 1;
 - 复杂度：5/10。C AST rewrite 逻辑增加了一些代码，但语义判断仍放在 shared context。
 - 维护成本：4/10。后续如果 Solidity 也要变量名级 rewrite，可以复用 shared context，
   但 C 侧 `VarDecl` 映射还需要继续保持窄边界。
+
+## 2026-06-26 实现记录：Solidity 字符串 payload 消费 copied vvar 映射
+
+这轮把 Solidity `BodyBuilder` 的 materialize hook 从纯字符串复制，推进到读取
+shared dephication copied vvar 映射后再改写 payload 文本。它仍不判断 Phi 语义，只把
+shared 给出的 `source vvar -> copied vvar` 转成 Solidity fallback 字符串里的完整标识符替换。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h:31`：
+  暴露 `BodyBuilder::rewriteCopiedDephicationVVars()`，方便测试字符串层完整标识符替换。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:39`：
+  新增 `isIdentifierChar()`，把字母数字和 `_` 作为 Solidity fallback 标识符边界。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:43`：
+  新增 `replaceIdentifier()`，只替换完整标识符，避免把 `panic` 或 `p_copy0`
+  里的 `p` 误改掉。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:64`：
+  新增 `copiedVVarName()`，按 shared copied vvar id 生成 `p_copyN` 这类名字。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:324`：
+  `readBody()` 从 `StructuredCFG::dephicationVVars()` 收集 shared vvar 名字。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:331`：
+  Solidity materialize hook 读取 `PayloadMaterializeContext::DephicationVVarCopies`，
+  转成字符串 rewrite 规则，并声明支持 predecessor / grouped predecessor rewrite。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:366`：
+  实现 `rewriteCopiedDephicationVVars()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1517`：
+  新增 `testSolidityBodyBuilderRewritesCopiedDephicationVVars()`，覆盖 assignment、
+  condition 以及完整标识符边界。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-25928-solidity-vvar.ll --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 2.69`。
+- EVM 25928 smoke 通过，耗时 `elapsed=17.79 rss_kb=958624`，同近期同口径记录接近。
+
+当前完成度：
+
+- Solidity fallback payload 现在也能消费 shared copied vvar 映射。
+- C / Solidity 两个后端都不再需要自己判断 copied vvar 语义。
+- 当前 Solidity 测试覆盖字符串 rewrite 和 shared context 两段；还缺一个自然触发
+  Solidity readBody copied region 的 LLVM IR 集成样例。
+
+评分：
+
+- 实现效果：6/10。Solidity 字符串 payload 已可按 shared copied vvar 映射重写。
+- 复杂度：3/10。只做完整标识符替换，没有引入 Solidity AST 级表达式恢复。
+- 维护成本：3/10。接口窄，但后续需要补更完整的 Solidity copied region 集成测试。
