@@ -1183,3 +1183,53 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：5/10。覆盖了一个关键失败分支，但还是直接调用 shared helper。
 - 复杂度：2/10。只新增测试，没有改生产逻辑。
 - 维护成本：2/10。测试构造较直接，后续 helper 行为变化时容易定位。
+
+## 2026-06-26 实现记录：switch case goto source 归因修正
+
+这轮修了 shared `GotoManager` 的 switch case goto source 归因。之前 case body 里的
+goto 会被记到 switch header 上；在 dephication edge 插到 case 和 merge 中间后，
+后续 SAILR pass 就可能找不到真正需要复制的 case 侧前驱。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:49`：
+  收集 `StructuredSwitchCase` 里的 goto 时，把当前 source 切到 case target，
+  不再沿用 switch header。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:853`：
+  调整 `testGotoManagerCollectsSwitchGotoEdgeKinds()`，验证 default goto 仍归
+  switch header，case goto 归 case target。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3239`：
+  `testCrossJumpReverterUsesSwitchCaseGotoKind()` 改成直接喂 case-kind goto，
+  保留 CrossJumpReverter 对 switch header case 边的旧覆盖。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3892`：
+  新增 `testReturnDuplicatorLowUsesSwitchCaseGotoSource()`，覆盖 case target 作为
+  goto source 时，`ReturnDuplicatorLow` 可以复制共享 return region。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-25928-solidity-vvar.ll --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 2.72`。
+- EVM 25928 smoke 通过，耗时 `elapsed=17.61 rss_kb=959320`。
+
+当前完成度：
+
+- switch case body 里的 goto source 更贴近真实 CFG 入口。
+- dephication edge 插入 case 和 merge 之间后，后续复制 pass 更容易拿到正确前驱。
+- 自然触发 Solidity `BodyBuilder::readBody()` copied-region 的 LLVM IR 集成样例仍没补上：
+  当前 switch + dephi 形状在完整 SAILR pipeline 里会被 quality guard 拒掉，不能硬写成
+  已覆盖。
+
+评分：
+
+- 实现效果：6/10。修正了 shared goto 事实，推进了 dephication edge 后的复制判断。
+- 复杂度：3/10。只改 goto source 归因和相关测试。
+- 维护成本：3/10。语义更明确，但会影响依赖旧 switch-header source 的测试预期。
