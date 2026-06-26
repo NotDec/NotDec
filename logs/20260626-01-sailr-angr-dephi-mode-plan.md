@@ -891,3 +891,43 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：6/10。修掉一个会误导后续消费方的映射问题。
 - 复杂度：2/10。只是过滤 self-copy 映射。
 - 维护成本：2/10。语义更清楚，后续消费时少一个特殊判断。
+
+## 2026-06-26 实现记录：materialize hook 暴露当前 dephication incoming
+
+这轮把 materialize hook 从“知道这是 dephication assignment”，推进到“知道当前
+assignment 对应哪条 incoming”。后续变量恢复或 payload rewrite 不需要再按 payload id
+自己回查 `DephicationIncomings`。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:136`：
+  `PayloadMaterializeContext` 新增 `CurrentDephicationIncoming`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:43`：
+  新增 `dephicationAssignmentIncoming()`，按 assignment payload 找到对应 incoming。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:416`：
+  `StructuredCFG::materializeBlockBodyImpl()` 调用 hook 前设置当前 incoming，调用后清空。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2195`：
+  `testStructuredCFGDuplicateDephicationEdgeCopiesMetadata()` 覆盖 copied edge 的
+  `CurrentDephicationIncoming`，确认 target 和 assignment 都是 copied 后的结果。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.60`，和前几次同口径结果接近，未看到明显回退。
+
+当前完成度：
+
+- materialize hook 可以直接消费当前 dephication incoming。
+- shared 层对 payload rewrite 暴露的信息更完整。
+- 变量恢复还没有实际切到 `dephicationEdgeContext()` / 当前 incoming 上。
+
+评分：
+
+- 实现效果：6/10。减少后续消费方重复匹配 incoming 的逻辑。
+- 复杂度：2/10。只是在已有 context 里补当前 statement 的精确信息。
+- 维护成本：2/10。接口语义窄，后续 hook 更容易写对。
