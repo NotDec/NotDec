@@ -931,3 +931,51 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：6/10。减少后续消费方重复匹配 incoming 的逻辑。
 - 复杂度：2/10。只是在已有 context 里补当前 statement 的精确信息。
 - 维护成本：2/10。接口语义窄，后续 hook 更容易写对。
+
+## 2026-06-26 实现记录：copied merge materialize 暴露 vvar copy context
+
+这轮补了 shared 层的 block 级 dephication context。之前 copied dephication edge
+能拿到 `原 vvar -> copied vvar`，但 copied merge body materialize 时拿不到这份映射。
+后续如果要把 merge body 里的 Phi 变量引用改到 copied vvar，就会被迫在后端猜。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:86`：
+  `DephicationVVar` 新增 `SourceId`，记录 copied vvar 来源。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:233`：
+  `StructuredCFG` 新增 `dephicationBlockContext(BlockId)`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:207`：
+  `addDephicationVVar()` 让原始 vvar 的 `SourceId` 指向自身。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:246`：
+  实现 `dephicationBlockContext()`，按 merge block 返回 active vvar 和 copied vvar 映射。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:337`：
+  `materializeBlockBodyImpl()` 在没有 edge incoming 时改用 block context。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:736`：
+  `duplicateDephicationVVars()` 复制 vvar 时保留原始 `SourceId`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:876`：
+  新增按 merge block 查询 vvar、按 vvar 来源生成 copy 映射的 helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2289`：
+  新增 `testStructuredCFGMaterializeCopiedMergeReportsDephicationVVarCopy()`，
+  覆盖 copied merge body 的 hook context 能看到 copied vvar 映射。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.60`，同口径未看到明显回退。
+
+当前完成度：
+
+- copied merge body materialize 可以消费 shared 层的 vvar copy 映射。
+- 后端后续重写 copied merge body 变量引用时，不需要自己按名字猜变量来源。
+- C / Solidity 还没有实际把 copied vvar 映射应用到 payload 变量引用上。
+
+评分：
+
+- 实现效果：6/10。补齐了 copied merge body 的 shared 消费信息。
+- 复杂度：3/10。新增一个 block context，复用现有 dephication context 结构。
+- 维护成本：3/10。多了 `SourceId` 字段，但减少了后端按名字匹配的风险。
