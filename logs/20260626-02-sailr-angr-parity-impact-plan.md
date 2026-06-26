@@ -561,3 +561,42 @@ python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --
 - `ReturnDuplicatorLow` 现在不只吃线性 return tail，也能吃一类单入口 diamond return region。
 - grouped predecessor materialize 现在能把 copied region 里的内部 predecessor 一起传给 payload hook。
 - 这还是保守版，没去碰 Angr 更宽的 Phi / vvar / region merge 语义。
+
+## 2026-06-26 实现记录：payload origin 贯通 copied payload 匹配
+
+这轮继续补 P0 的来源身份语义，不再只按裸 `PayloadId` 比较。现在 shared CFG 会记住
+payload 的 origin，`materializeBlockBody()` 里生成的新 payload 也会回写 origin，
+`DuplicationReverter` 则按 origin 识别 copied payload。这样 copied block 的 rewritten
+payload 只要来源一致，仍能参与相似 tail / block 合并。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:233-251,312`：
+  增加 `payloadOrigin()` / `setPayloadOrigin()` 和 `PayloadOrigins` map，给 shared CFG
+  记 payload 来源。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:282-295,382-532`：
+  在 `materializeBlockBodyImpl()` 的 fast path / hook path 里给 statement、condition、
+  switch case 以及 hook 生成的新 payload 记录来源。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:17-42,99-139,592-633,1305-1329`：
+  `samePayload()` / `samePayloads()` / `sameSwitchCaseValues()` / `commonStatementSuffixLength()`
+  改成按 origin 比较；`materializeDuplicatedRegion()` 复制块后也补 origin。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3571-3620`：
+  新增 `testDuplicationReverterMergesCopiedPayloadByOrigin()`，覆盖 copied payload 经过
+  materialize 后还能按 origin 合并。
+
+验证：
+
+```bash
+cmake --build build --target notdec-llvm2c notdec -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-sailr-payload-origin.c --tr-level=2
+```
+
+结果：
+
+- 三个 smoke 通过。
+- fortune 通过，`elapsed=202.89 user=230.20 sys=1.71 maxrss=1274424`。
+- 这轮还是保守版，只是把 copied payload 的来源身份补进 shared CFG 和相似判断，没有做
+  Angr 那种完整 merge graph。
