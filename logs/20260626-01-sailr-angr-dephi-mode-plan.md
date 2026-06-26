@@ -416,3 +416,47 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 实现效果：6/10。copy edge 的 provenance 现在不打架了。
 - 复杂度：6/10。字段和 helper 多了一层，但语义比前面清楚。
 - 维护成本：5/10。下一步要把这份 edge-scoped context 真正用到变量恢复，而不是只停在 materialize hook。
+
+## 2026-06-26 实现记录：去掉多余的 vvar 来源字段
+
+这轮没有推进到真正的 copied vvar 选择，只是把前面一版里多出来的
+`DephicationVVar::SourceId` 收掉了，保留 `SourceMergeBlock` 作为 provenance。
+这样 shared 变量身份还是单一的，不会再假装同一个 vvar 有两套来源。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:82`：
+  删掉 `DephicationVVar::SourceId`，只保留 `SourceMergeBlock`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:192`：
+  `addDephicationVVar()` 不再初始化 `SourceId`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:643`：
+  `duplicateDephicationIncomings()` 只复制 incoming provenance，不再尝试生成
+  一个假的 vvar 来源身份。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:660`：
+  `rewriteCopiedDephicationIncomings()` 仍只更新 copied edge 上的当前块位置。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2109`：
+  维持 copied edge 和 materialize hook 的检查，证明 provenance 收缩后现有
+  shared 边 materialize 仍然稳定。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.52`。
+
+当前完成度：
+
+- shared dephication 里暂时只保留一个 vvar 身份，再加一个 merge provenance。
+- 没有推进 copy-vvar 选择，也没有进入变量恢复决策。
+- 这轮是在把前面试出来的歧义收掉，避免后面继续分叉。
+
+评分：
+
+- 实现效果：4/10。只是把多余身份收掉，没有增加新能力。
+- 复杂度：3/10。删除字段比加字段更干净。
+- 维护成本：3/10。后面实现 copy-vvar 时不会被旧的 source id 误导。
