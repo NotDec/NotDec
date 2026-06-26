@@ -1366,6 +1366,47 @@ shared vvar / copied block 这套结果在一个已经复制过的 region 里，
 - 复杂度：3/10。只是在 smoke 里多跑一组 mode。
 - 维护成本：3/10。以后能直接用这个 case 看 copied 语义有没有回退。
 
+## 2026-06-26 实现记录：shared dephication 回滚试探
+
+这轮补的是结构恢复优化的回滚试探，不再往前加新语义。目标是确认
+`StructuringOptimizationPass::analyze()` 在第一轮试探里如果把 copied dephication
+状态和坏块一起塞进图里，第二轮重试时这些状态会跟着 rollback 一起消失，而不是
+残留到后续 shared structuring。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:417`：
+  新增 `RecoverCopiedDephicationPass`，第一轮复制带 shared dephication 的 region，
+  同时插入一个坏块，第二轮只检查回滚后的图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6599`：
+  新增 `testStructuringOptimizationPassRollsBackCopiedDephicationMetadata()`，
+  验证 `analyze()` 重试前已经把 copied edge / copied merge / 额外 vvar / incoming 都
+  回滚掉。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 3.33`。
+
+当前完成度：
+
+- shared dephication 的 rollback 试探已经有直接测试。
+- 还缺更贴近真实 pipeline 的失败回滚对照，但最小回滚边界已经被钉住。
+
+评分：
+
+- 实现效果：6/10。补的是回滚边界，不是新模式主逻辑。
+- 复杂度：4/10。新增一个受控失败 pass 和一条单测。
+- 维护成本：3/10。以后如果 rollback 行为变了，这条测试会先报出来。
+
 ## 2026-06-26 实现记录：copied dephication rollback 回归测试
 
 这轮继续补 shared 层的回滚边界，不再扩核心逻辑。目标很明确：
