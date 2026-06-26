@@ -1135,3 +1135,51 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：6/10。Solidity 字符串 payload 已可按 shared copied vvar 映射重写。
 - 复杂度：3/10。只做完整标识符替换，没有引入 Solidity AST 级表达式恢复。
 - 维护成本：3/10。接口窄，但后续需要补更完整的 Solidity copied region 集成测试。
+
+## 2026-06-26 实现记录：shared dephication redirect 失败回滚覆盖
+
+这轮补了一个 shared 层回滚测试，专门覆盖 dephication edge 重定向到 copied
+merge 时，如果 assignment 重新物化失败，不能留下半改的 incoming target、
+synthetic target 或 payload。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2435`：
+  新增 `testStructuredCFGRedirectDephicationEdgeFailureRollsBack()`。测试先构造
+  `1 -> edge 4 -> merge 3` 的 dephication edge，再复制 merge，最后让
+  `PayloadMaterializeKind::DephicationAssignment` 返回失败。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2475`：
+  验证 `redirectDephicationIncomingTarget(4, 3, CopyMerge)` 返回失败后，
+  edge body 仍是原 assignment 40，`SyntheticTarget` 仍指向原 merge 3。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2486`：
+  验证 shared incoming metadata 回滚到原 merge 3、原 vvar、原 assignment 40。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8896`：
+  把新测试加入 `structuring-analysis-test` 主测试列表。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e rss_kb=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-25928-solidity-vvar.ll --tr-level=2
+```
+
+结果：
+
+- 构建通过，目标已是最新。
+- `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 2.72`。
+- EVM 25928 smoke 通过，耗时 `elapsed=17.51 rss_kb=956800`。
+
+当前完成度：
+
+- shared dephication redirect 的失败回滚有了直接覆盖。
+- 这能防止 copied merge 重定向时只改了一半 metadata 或 payload。
+- 还缺 pass pipeline 里自然触发的失败样例。
+
+评分：
+
+- 实现效果：5/10。覆盖了一个关键失败分支，但还是直接调用 shared helper。
+- 复杂度：2/10。只新增测试，没有改生产逻辑。
+- 维护成本：2/10。测试构造较直接，后续 helper 行为变化时容易定位。
