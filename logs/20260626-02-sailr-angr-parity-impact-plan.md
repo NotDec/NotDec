@@ -474,3 +474,43 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 
 - 这轮只补了 parent-aware goto 源点和一条 copied return / dephication 回归。
 - `ReturnDuplicatorLow` 还没补 Angr 那层更完整的 return region / Phi / vvar 一般语义。
+
+## 2026-06-26 实现记录：DuplicationReverter 改成按来源身份比较 successor / case
+
+这轮把 `DuplicationReverter` 里原来只看字面 block id 的 exact merge，再往 Angr 的“按来源身份”靠了一步。现在 exact duplicate merge、goto 相关 common statement tail、goto 相关 linear region tail 三条路径，都不再用裸 `Successors` / `Cases` 做最终比较，而是先把 successor / case 目标映射成“同一个原始来源或同一条 copied identity”再决定是否合并。这样能覆盖 copied block 参与的形状，而不是只认完全相同的 id 序列。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:29-103`：
+  新增 `sameBlockReference()`、`sameSuccessorListByReference()`、`sameSwitchCasesByReference()` 和 reference-aware 的 block/region 比较 helper。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:511-663`：
+  `commonStatementTailCandidate()`、`commonLinearRegionTailCandidate()`、`extractCommonLinearRegionTail()` 都改成按来源身份比较 successor / case。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1897` 左右：
+  `DuplicationReverter::runOnGraph()` 的 exact duplicate merge 改成 reference-aware 比较。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3571`：
+  新增 `testDuplicationReverterMergesExactDuplicateBlocksWithCopiedSuccessorReference()`，覆盖一个 block 的 successor 指向 copied target 的 exact merge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3995`：
+  新增 `testDuplicationReverterExtractsGotoRelatedCommonStatementTailWithCopiedSuccessorReference()`，覆盖 common statement tail 在 copied successor 上也能保持合并。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9575`、`9589`：
+  把两条新测试注册进 `main()`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+time ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-sailr-reference-aware.c --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_structuring_smoke.py` 通过。
+- `fortune` 通过，`elapsed=199.776s`。
+
+当前完成度：
+
+- exact merge 现在能吃到 copied target 的来源身份。
+- common statement tail 也能在 copied successor 上继续工作。
+- 这还不是 Angr 的完整相似子图合并，只是把当前最主要的来源身份判断补齐了一层。
