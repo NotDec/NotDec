@@ -460,3 +460,289 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 实现效果：4/10。只是把多余身份收掉，没有增加新能力。
 - 复杂度：3/10。删除字段比加字段更干净。
 - 维护成本：3/10。后面实现 copy-vvar 时不会被旧的 source id 误导。
+
+## 2026-06-26 实现记录：复制 region 时同步复制 shared vvar
+
+这轮继续往前接 shared dephication 的真实消费点。现在 `duplicateRegion()`
+不只复制 edge 上的 incoming 记录，还会给被复制的 merge block 生成一份新的
+`DephicationVVar`，让 copied edge 的 materialize context 能拿到自己的 vvar
+身份，而不是一直沿用原 merge 的那份记录。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:253`：
+  新增 `duplicateDephicationVVars()` 和
+  `rewriteCopiedDephicationIncomingTargets()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:544`：
+  `duplicateRegion()` 现在会先复制 shared vvar，再重写 copied incoming 的
+  vvar 目标。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:664`：
+  新增 `duplicateDephicationVVars()` 和
+  `rewriteCopiedDephicationIncomingTargets()` 的实现。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2109`：
+  扩展 `testStructuredCFGDuplicateDephicationEdgeCopiesMetadata()`，验证复制
+  merge 后会多出一份新的 shared vvar，且 copied edge 的 materialize context
+  看到的是 copied vvar，不再是原来的 vvar。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.50`。
+
+当前完成度：
+
+- shared dephication 的 edge copy 现在能把 incoming、merge 和 vvar 一起带过去。
+- copied edge 的 materialize context 不再只看到原始 vvar。
+- 还没把这条 copied vvar 直接接到更高层的变量恢复判断里。
+
+评分：
+
+- 实现效果：6/10。shared copy 这一步终于不是只复制边记录。
+- 复杂度：5/10。多了一个 copied vvar 生成点，但还算在 `StructuredCFG` 内部。
+- 维护成本：5/10。后面接变量恢复时，能直接读这份 copied vvar 表。
+
+## 2026-06-26 实现记录：删除 copied merge 时退役 shared vvar
+
+这轮把 copied vvar 的回滚补上了。现在如果复制出来的 merge block 被删除，
+对应的 `DephicationVVar` 不会被硬删掉，也不会继续作为活动身份参与后续
+materialize，而是标成 `Retired`。这样 shared vvar 表能保留稳定 id，回滚时
+也不会留下还在活动的脏身份。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:85`：
+  `DephicationVVar` 新增 `Retired` 标记。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:262`：
+  新增 `removeDephicationVVarReferences()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:577`：
+  `removeBlock()` / `removeBlocks()` 成功后同步带回 `DephicationVVars`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:625`：
+  `removeBlockInPlace()` 删除 block 时顺手退役对应 merge 的 vvar。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:698`：
+  新增 `removeDephicationVVarReferences()`，只给命中的 vvar 打退役标记。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:747`：
+  `dephicationVVarsForIncomings()` 跳过已退役的 vvar。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2167`：
+  新增 `testStructuredCFGRemoveCopiedDephicationMergeRetiresVVar()`，验证删掉
+  copied merge 后原始 vvar 仍在，copied vvar 退役，活动 incoming 只剩原始那份。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.53`。
+
+当前完成度：
+
+- copied vvar 的生成和回滚现在都接上了。
+- remove 路径不会把 vvar id 打乱，只会把失效的那条标退役。
+- 还没把这套 copied vvar 结果继续往更上层的变量恢复决策里接。
+
+评分：
+
+- 实现效果：6/10。回滚不再漏掉 copied vvar。
+- 复杂度：5/10。只加了一个退役标记，没有改 id 体系。
+- 维护成本：5/10。后续变量恢复只要忽略 retired 就行。
+
+## 2026-06-26 实现记录：edge materialize 直接带 copied vvar 映射
+
+这轮没有再往 `DephicationVVar` 里塞新的身份字段，而是把 copied edge 对应的
+`original vvar -> copied vvar` 映射直接放进 `PayloadMaterializeContext`。这样
+shared 层仍然只保留一份原始 vvar 表和一份 copied vvar 表，但边级 materialize
+已经能直接读到自己这条边的复制关系，后面变量恢复或 payload rewrite 不需要
+再从别的地方猜。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:109`：
+  `PayloadMaterializeContext` 新增 `DephicationVVarCopies`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:264`：
+  新增 `dephicationVVarCopiesForIncomings()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:304` 和 `:372`：
+  `materializeBlockBodyImpl()` 为当前 edge 计算 `DephicationVVarCopies`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:811`：
+  新增 `dephicationVVarCopiesForIncomings()`，按当前 edge 的 incoming 收集
+  原 vvar 与 copied vvar 的对应关系。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2147`：
+  扩展 copied edge 测试，验证 materialize context 里能看到 `VVar -> CopyVVar`
+  的映射。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.60`。
+
+当前完成度：
+
+- copied edge 的 materialize 现在能直接拿到自己的 vvar 映射。
+- shared 层仍然保留原始 vvar 和 copied vvar 两张表，没有再引入第三套身份。
+- 还没把这份映射接到更上层的变量恢复判断或额外 rewrite 逻辑里。
+
+评分：
+
+- 实现效果：7/10。edge 级复制关系终于能直接读，不再靠猜。
+- 复杂度：5/10。多了一张 edge 级映射表，但还是 shared 层内的东西。
+- 维护成本：5/10。后续变量恢复能直接消费这张表，不必再拆字段。
+
+## 2026-06-26 实现记录：copied vvar 映射按 source target 对齐
+
+这轮修正了上一轮 edge 级 copied vvar 映射的隐患。之前映射是从 merge block
+反推原 vvar 和 copied vvar，单 Phi 没问题，但同一个 merge 里有多个 Phi 时会串。
+现在 `DephicationIncoming` 记录 `SourceTarget`，复制 edge 后仍保留原 vvar id，
+materialize context 里的 `DephicationVVarCopies` 直接按
+`SourceTarget -> Target` 生成，不再靠 merge block 猜。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:91`：
+  `DephicationIncoming` 新增 `SourceTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:207`：
+  `addDephicationIncoming()` 初始化 `SourceTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:657`：
+  `duplicateDephicationIncomings()` 保留 copied edge 的原始 vvar provenance。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:730`：
+  copied incoming 重写 target 时按 `SourceTarget` 查 copied vvar。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:812`：
+  `dephicationVVarCopiesForIncomings()` 直接返回 `SourceTarget -> Target`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:509`：
+  shared Phi 测试改成同一个 merge 里两个 Phi。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1464`：
+  验证两个 Phi 的 vvar 和 incoming 都分别记录 source target。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2149`：
+  手写 copied edge 测试验证原 incoming 和 copied incoming 的 `SourceTarget`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.58`。
+
+当前完成度：
+
+- copied vvar 映射已经能区分同一个 merge 里的多个 Phi。
+- edge materialize context 不再靠 merge block 反推 copied vvar。
+- 还没把这张映射接到更上层的变量恢复或真实 payload rewrite 决策。
+
+评分：
+
+- 实现效果：7/10。修掉了多 Phi 同 merge 的明显歧义。
+- 复杂度：5/10。多了一个 provenance 字段，但语义直接。
+- 维护成本：5/10。后续消费映射时可以按 vvar id 对齐，不必按 block 猜。
+
+## 2026-06-26 实现记录：shared materialize 标记 dephication assignment
+
+这轮把 copied vvar 映射往真实 payload rewrite 决策再推进一步。现在
+`materializeBlockBodyImpl()` 会识别当前 edge 上的 dephication assignment，并用
+新的 `PayloadMaterializeKind::DephicationAssignment` 调用 payload hook。这样后端
+hook 仍然只读 shared context，但已经能区分“普通 statement”和“Phi dephication
+assignment”，不需要自己根据 Phi 或 block 关系猜。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:69`：
+  `PayloadMaterializeKind` 新增 `DephicationAssignment`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:40`：
+  新增 `isDephicationAssignment()`，只用当前 edge 的
+  `DephicationIncomings` 判断 payload 是否是 dephication assignment。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:400`：
+  statement materialize 时，如果 payload 是当前 edge 的 assignment，就用
+  `DephicationAssignment` 调 hook，否则仍用普通 `Statement`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2178`：
+  copied edge 测试验证 hook 能看到 `DephicationAssignment`，并据此生成新的
+  assignment payload。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.54`。
+
+当前完成度：
+
+- shared materialize 已经真正消费 dephication incoming，能给 hook 明确的
+  assignment rewrite 信号。
+- 后端不需要参与 Phi 语义判断，只按 shared 给出的 kind 和 context 处理 payload。
+- 还没把 C 后端的临时 Phi rewrite 整体迁到 shared builder。
+
+评分：
+
+- 实现效果：7/10。payload rewrite 终于有了 shared 层的真实入口。
+- 复杂度：4/10。只是新增一个 materialize kind 和一个局部判断。
+- 维护成本：4/10。后续 C/Solidity 可以沿用同一 kind，不用再加 renderer 特判。
+
+## 2026-06-26 实现记录：C Phi edge metadata 接入 shared CFG
+
+这轮把 C 路径里临时生成的 Phi incoming edge block 标成 shared 能识别的
+SAILR dephication synthetic edge，并修掉同一条 LLVM incoming 边上多个 Phi 时会
+重复替换原 CFG 边的问题。现在 C CFG 仍然负责先生成 Clang assignment payload，
+但进入 `StructuredGotoAdapter` 后，这些 edge block 会带上 shared 的
+`CreatedBy = SAILRDephication`、source/target 信息，后续 structuring 可以按
+shared block 身份处理。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CFG.h:212`：
+  `CFGBlock` 新增 `IsSAILRDephicationEdge`、source block、target block 元数据。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CFG.h:441`：
+  新增 `isSAILRDephicationEdge()`、source/target getter 和
+  `setSAILRDephicationEdge()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1149`：
+  `SAFuncContext::materializePhiRewrites()` 改成按
+  `(incoming CFG block, merge CFG block)` 分组，一条边只创建一个 synthetic edge
+  block，同边多个 Phi assignment 按顺序放进同一个 block。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1196`：
+  新 edge block 调 `setSAILRDephicationEdge()` 保存原始 incoming/merge 身份。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:127`：
+  `StructuredGotoAdapter::buildCFG()` 把 C CFG 的 dephication edge 元数据转成
+  shared `CFGBlockOrigin::Synthetic`、`SyntheticForwarder` 和
+  `CFGBlockCreator::SAILRDephication`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:299`：
+  新增 `sailr_angr_dephication_multi_phi_same_edge`，覆盖同一个 merge 里两个 Phi
+  共享 incoming edge 的情况。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.61`，和前几次 `2.54`、`2.58`、
+`2.60` 同口径，未看到明显回退。
+
+当前完成度：
+
+- C angr dephication 模式下，同边多个 Phi 不再创建互相断开的 edge block。
+- C CFG 生成的 Phi assignment edge 已经带 shared synthetic/dephication 身份。
+- 这还不是完整迁移：C 路径仍然先在 `SAFuncContext::materializePhiRewrites()` 里
+  生成 edge block，后续还需要继续把 vvar 映射和 copied payload rewrite 更多地挪到
+  shared builder / shared materialize。
+
+评分：
+
+- 实现效果：7/10。修掉了多 Phi 同边的真实 CFG 问题，也让 C edge 能被 shared 层识别。
+- 复杂度：5/10。只加了小块 metadata 和分组逻辑，没有重写 C CFG 构造。
+- 维护成本：5/10。短期仍有 C 侧临时 edge block，但 shared adapter 已经有明确入口。
