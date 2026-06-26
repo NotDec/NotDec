@@ -146,3 +146,48 @@ copied block 不能只复用原 body。要让它在 shared 层按来源和复制
 2. 有至少一个新模式和旧模式的同样例对照测试。
 3. 结构恢复和后端渲染都能通过，不靠 renderer fallback 兜底。
 
+## 2026-06-26 实现记录：SAILR angr dephication 最小入口
+
+这轮先完成阶段一的一部分，并补了一个最小 Phi 合流样例。新模式还不是完整
+`GraphDephicationVVarMapping`，但已经不再靠 `reg2mem` 先删 Phi。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Interface.h:22`：新增
+  `SAILRDephicationMode`，默认 `LegacyDemoteSSA`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/Commandlines.def:57`：新增
+  `--sailr-dephication-mode=legacy|angr`，并写入 `Options`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1656`：
+  `decompileModule()` 只在 legacy 模式跑旧的 `demoteSSAFixHT()` / `demoteSSA()`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuralAnalysis.h:397`：
+  新增 `PendingPhiRewrite`，记录 Phi、目标 block、LLVM incoming block 和
+  incoming 下标。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuralAnalysis.h:697`：
+  `CFGBuilder::visitPHINode()` 在 angr 模式下为 Phi 建局部变量，并登记每条
+  incoming 边。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1136`：
+  新增 `SAFuncContext::registerPhiRewrite()` 和
+  `SAFuncContext::materializePhiRewrites()`，在 CFG 建边后给每条 Phi incoming
+  插入一个小 CFG edge block，payload 是 `phi_var = incoming_value`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2211`：
+  `SAFuncContext::run()` 在 CFG 建边后、CFGCleaner 前 materialize Phi rewrite。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:277`：
+  新增 `sailr_angr_dephication_phi`，用
+  `--sailr-dephication-mode=angr` 验证最小 Phi 合流输出包含 `int x;`、
+  `x = a;`、`x = b;`、`return x;`，且不出现 `phi` / `reg2mem`。
+
+验证：
+
+```bash
+cmake --build build --target notdec-llvm2c -j4
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。
+
+当前完成度：
+
+- 新 mode 可以单独开启，旧 demote 路线仍是默认。
+- 最小 Phi 合流样例在 angr 模式下能先降成普通变量赋值。
+- 还没完成 shared vvar 映射、copied vvar、复杂 copied block payload rewrite、
+  rollback 对照和 Solidity 共用验证。
