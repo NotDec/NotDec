@@ -311,3 +311,57 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 复杂度：4/10。数据结构很小，放在 shared CFG 里，暂时没有影响现有 pass。
 - 维护成本：4/10。后续要小心让 copy/materialize 使用这份表，避免它变成旁路
   metadata。
+
+## 2026-06-26 实现记录：shared dephication metadata 随 copy/rollback 走
+
+这轮继续补 shared 层的稳定性，不做完整 copied vvar 语义，只让
+`DephicationIncoming` 能跟着 `duplicateRegion()`、`materializeBlockBody()` 和
+`removeBlock()` 一起更新或回滚，避免 dephication metadata 留悬空引用。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:214`：
+  新增 `duplicateDephicationIncomings()`、
+  `rewriteCopiedDephicationIncomings()`、
+  `rewriteDephicationIncomingAssignments()` 和
+  `removeDephicationBlockReferences()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:152`：
+  `duplicateBlock()` 在 `addBlock()` 后复制 source edge 上的 dephication incoming
+  记录。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:531`：
+  `duplicateRegion()` 在 copy 的 block 全部就位后，重写 copied edge 的
+  `IncomingBlock` / `MergeBlock`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:560`：
+  `removeBlock()` / `removeBlocks()` 成功后同步清理 dephication incoming。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:629`：
+  新增 `rewriteCopiedDephicationIncomings()` 和
+  `rewriteDephicationIncomingAssignments()` 的实现。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2092`：
+  新增 `testStructuredCFGDuplicateDephicationEdgeCopiesMetadata()`，验证
+  copy edge 记录、materialize 后 assignment 重写。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2146`：
+  新增 `testStructuredCFGRemoveBlockMaintainsDephicationMetadata()`，验证失败回滚
+  不污染 metadata，成功删除会清掉悬空记录。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.52`。
+
+当前完成度：
+
+- shared dephication metadata 已经能跟着 copy / materialize / remove 走。
+- 还没做真正的 copied vvar 选择，也没把映射接到 structuring 的变量恢复决策。
+- 这轮只是在 shared 层把半套 metadata 的风险压住，避免 rollback 后留下悬空记录。
+
+评分：
+
+- 实现效果：6/10。至少 copy / rollback 现在不会把 dephication metadata 搞坏。
+- 复杂度：5/10。增加了几条 helper，但都在 `StructuredCFG` 内，语义边界还算清楚。
+- 维护成本：5/10。后面要把复制规则继续收紧，避免 metadata 复制和 block 复制出现双轨。
