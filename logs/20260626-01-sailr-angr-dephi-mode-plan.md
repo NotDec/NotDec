@@ -746,3 +746,58 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：7/10。修掉了多 Phi 同边的真实 CFG 问题，也让 C edge 能被 shared 层识别。
 - 复杂度：5/10。只加了小块 metadata 和分组逻辑，没有重写 C CFG 构造。
 - 维护成本：5/10。短期仍有 C 侧临时 edge block，但 shared adapter 已经有明确入口。
+
+## 2026-06-26 实现记录：C Phi edge 生成 shared vvar/incoming 表
+
+这轮把 C 路径的 Phi edge metadata 往 shared dephication 表再推进一步。之前
+`StructuredGotoAdapter` 只能把 C CFG 里的 Phi edge block 标成
+`SAILRDephication` synthetic block，但 shared CFG 里还没有对应的
+`DephicationVVar` / `DephicationIncoming`。现在 C CFG edge block 会记录每条
+assignment 对应的目标变量名和 incoming 名，adapter 转 shared CFG 时用这些记录
+创建 shared vvar 和 incoming。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CFG.h:216`：
+  `CFGBlock` 新增 `SAILRDephicationAssignment`，记录 statement index、target
+  name、incoming name。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CFG.h:456`：
+  新增 `getSAILRDephicationAssignments()` 和
+  `addSAILRDephicationAssignment()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:96`：
+  新增 `sharedValueName()`，给 C edge metadata 取稳定 incoming 名；常量直接用
+  文本，其他 unnamed value 暂用 `incoming`，不推进正常 temp 计数。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1206`：
+  `SAFuncContext::materializePhiRewrites()` 在 append assignment statement 时同步
+  记录 dephication assignment metadata。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:122`：
+  `StructuredGotoAdapter::buildCFG()` 新增局部 vvar 表，按 `(merge, target name)`
+  复用 shared vvar。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:179`：
+  转换 C dephication edge block 后，按 assignment metadata 调
+  `StructuredCFG::addDephicationVVar()` 和 `addDephicationIncoming()`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.58`，和前几次 `2.54`、`2.58`、
+`2.60`、`2.61` 同口径，未看到明显回退。
+
+当前完成度：
+
+- C edge 现在不只带 synthetic/source/target 身份，也会在 shared CFG 里生成
+  vvar 和 incoming 表。
+- 后续 shared materialize/copy 路径能看到 C 路径生成的 dephication incoming。
+- C 路径仍然先在 `SAFuncContext::materializePhiRewrites()` 里生成 Clang
+  assignment payload，后续还需要继续减少这部分 C 侧临时逻辑。
+
+评分：
+
+- 实现效果：7/10。C 路径开始真正接入 shared vvar/incoming 表。
+- 复杂度：5/10。增加了 edge metadata 传递，但没有扩大到 renderer 语义判断。
+- 维护成本：5/10。metadata 字段还在 C CFG 上，后续迁到 shared builder 后可以删除。
