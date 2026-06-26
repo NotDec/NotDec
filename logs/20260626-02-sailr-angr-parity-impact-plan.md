@@ -380,3 +380,47 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 
 - `ReturnDuplicatorLow` 现在按 Angr 更接近的方式先找 return region，再决定是否复制。
 - 还没补 Phi / vvar 的更细复制语义，但 region 识别门槛已经比原来少了一层不必要的 hook 依赖。
+
+## 2026-06-26 实现记录：P0 线性 tail 合并改成缓存版
+
+前一版把 `findLinearRegionFromHead()` 直接放进候选双层循环后，`fortune` 同口径时间涨到
+`391.39s`，回退太明显。这一轮把线性 tail 合并收回到缓存版，只在 `GotoManager`
+命中的候选周围做一次 region 计算，再复用缓存结果找最长公共后缀，保留“有 goto hint
+才动图”的语义，但不再每个候选都重复扫图。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:115-130`：
+  新增 `MaxLinearRegionMergeBlocks` 和 `cachedLinearRegion()`，给线性 region 候选加本轮缓存。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:497-684`：
+  `commonLinearRegionTailCandidate()`、`extractCommonLinearRegionTail()` 和
+  `revertGotoRelatedCommonLinearRegionTail()` 改成缓存驱动；仍然只围绕 `Current.Gotos`
+  的 goto target 找候选，并保留单入口、单出口、无环、小 region 和 rollback 限制。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1796-1808`：
+  `DuplicationReverter::runOnGraph()` 继续优先尝试线性 tail 合并，再回到旧的
+  statement tail / exact duplicate merge。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4021-4130`：
+  新增 `testDuplicationReverterMergesGotoRelatedLinearRegionTail()` 和
+  `testDuplicationReverterSkipsGotoRelatedLinearTailWithoutHint()`，分别覆盖有 goto hint 的
+ 线性 tail 合并和无 hint 的反例。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9292-9308`：
+  把新测试注册进 `main()` 固定回归入口。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e' ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-sailr-parity.c --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_structuring_smoke.py` 通过。
+- fortune smoke 通过，`elapsed=200.98`。
+
+当前状态：
+
+- 这版把之前的性能回退基本收回来了。
+- 这仍然不是 Angr 的完整 merge graph，只是更保守的 goto 相关线性 tail 合并。
