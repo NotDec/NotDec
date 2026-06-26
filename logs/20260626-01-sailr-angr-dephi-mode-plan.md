@@ -1327,3 +1327,41 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 实现效果：5/10。补的是对照证据，不是新语义。
 - 复杂度：2/10。只加了一条 smoke 分支。
 - 维护成本：2/10。以后可以直接拿这条 case 看 mode 切换有没有回退。
+
+## 2026-06-26 实现记录：copied switch dephication 模式对照
+
+这轮把对照 smoke 再往前挪了一步，从普通 Phi 合流换成了 copied switch region。
+原因很直接：当前目标不是证明“angr 模式能跑一个最小合流”，而是证明
+shared vvar / copied block 这套结果在一个已经复制过的 region 里，和旧的
+`reg2mem` 路径能明确区分开。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:540`：
+  新增 `run_sailr_dephication_copied_switch_contrast_case()`，对同一份 copied switch
+  IR 分别跑 `legacy` 和 `angr`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:597`：
+  smoke 主流程把 copied switch 对照接上。
+
+验证：
+
+```bash
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：
+
+- 对照 smoke 通过，耗时 `elapsed 3.15`。
+- legacy 输出里还是 `p_reg2mem`。
+- angr 输出里能看到 copied vvar declaration 和 copied payload。
+
+当前完成度：
+
+- 旧模式和新模式在 copied switch region 上已经能直接分辨。
+- 这条 case 还只是 smoke 级别，没把 shared 层复制回滚的所有边界都补完。
+
+评分：
+
+- 实现效果：6/10。比普通 Phi 对照更贴近当前目标。
+- 复杂度：3/10。只是在 smoke 里多跑一组 mode。
+- 维护成本：3/10。以后能直接用这个 case 看 copied 语义有没有回退。
