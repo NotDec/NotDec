@@ -191,3 +191,67 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 最小 Phi 合流样例在 angr 模式下能先降成普通变量赋值。
 - 还没完成 shared vvar 映射、copied vvar、复杂 copied block payload rewrite、
   rollback 对照和 Solidity 共用验证。
+
+## 2026-06-26 实现记录：shared CFG Phi edge payload
+
+这轮把上一轮只在 C CFG 侧做的 Phi incoming 赋值，推进到 shared
+`LLVMFunctionCFGBuilder`。现在 shared CFG 能在 `pred -> merge` 边上插入
+SAILR dephication synthetic edge block，payload 仍由后端提供。
+
+改动：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/LLVMFunctionCFGBuilder.h:14`：
+  forward declare `llvm::PHINode`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/LLVMFunctionCFGBuilder.h:35`：
+  `PayloadProvider` 新增 `getPhiAssignment()`，后端只负责生成 assignment
+  payload。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:52`：
+  `CFGBlockCreator` 新增 `SAILRDephication`，标记这类 synthetic edge block。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:17`：
+  新增 `valueName()`，给 unnamed value 和常量提供 shared fallback 名字。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:83`：
+  `LLVMFunctionCFGBuilder::build()` 收集每个 merge block 开头的 Phi incoming，
+  按 `(pred, merge)` 聚合 assignment payload。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:114`：
+  为每条含 Phi assignment 的边创建 synthetic forwarder block，并用
+  `StructuredCFG::replaceEdge()` 把原边改到 edge block。
+- `external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:277`：
+  Solidity payload provider 实现 `getPhiAssignment()`，当前格式是
+  `phi = incoming;`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:455`：
+  新增 shared Phi 测试辅助函数和字符串 payload provider。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1421`：
+  新增 `testLLVMFunctionCFGBuilderMaterializesPhiEdgePayloads()`，验证 shared
+  CFG 插入 `SAILRDephication` edge block，且 payload 是 `x = a;` /
+  `x = b;`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1455`：
+  新增 `testSolidityBodyBuilderReadsSharedPhiAssignments()`，验证 Solidity
+  `BodyBuilder::readBody()` 能读到 shared Phi assignment。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：通过。最后一次 smoke 耗时 `elapsed 2.49`。
+
+当前完成度：
+
+- shared CFG 已能表达最小 Phi incoming assignment，不再只靠 C renderer 侧
+  临时 CFG。
+- Solidity 已通过 shared `LLVMFunctionCFGBuilder` 消费同一份 edge payload。
+- C 后端仍保留上一轮的临时 C CFG Phi rewrite，尚未整体迁到 shared builder。
+- 还没完成 shared vvar 映射、copied vvar、复杂 copied block payload rewrite
+  和 rollback 失败样例。
+
+评分：
+
+- 实现效果：6/10。最小 shared Phi edge payload 打通了，但还不是完整
+  `GraphDephicationVVarMapping`。
+- 复杂度：5/10。新增回调和 edge block 较直接，但 C/Solidity 暂时存在两条
+  Phi rewrite 路线，会增加理解成本。
+- 维护成本：5/10。后续应把 C 后端也迁到 shared CFG，避免长期双路径。
