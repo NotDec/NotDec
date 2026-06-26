@@ -1290,3 +1290,40 @@ cmake --build build --target structuring-analysis-test notdec-llvm2c -j4
 - 实现效果：7/10。补上了之前缺的 Solidity 自然集成覆盖。
 - 复杂度：4/10。quality 归一化只限定在 ReturnDuplicatorLow 的 copied target。
 - 维护成本：4/10。新增最小 return fallback 后，Solidity readBody 输出更完整，但后续还要避免把它扩成表达式恢复。
+
+## 2026-06-26 实现记录：sailr dephication legacy/angr 对照 smoke
+
+这轮没有再改 shared CFG 主逻辑，只补了一条同一份 IR 的 legacy / angr 对照
+smoke。目的很简单：把“旧 Phi demote 还是默认路径”和“新 dephication 模式确实
+走 shared vvar / copied block 输出”这两件事放在同一个输入上一起验一遍。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:540`：
+  新增 `run_sailr_dephication_mode_contrast_case()`，用同一份 Phi 合流 IR 分别跑
+  `--sailr-dephication-mode=legacy` 和 `--sailr-dephication-mode=angr`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:581`：
+  smoke 主流程里把这条对照 case 接上。
+
+验证：
+
+```bash
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：
+
+- 对照 smoke 通过。
+- legacy 输出还是直接 `return a;` / `return b;`。
+- angr 输出是 `int x;`、`x = a;`、`x = b;`、`return x;`。
+
+当前完成度：
+
+- 旧模式和新模式在同一份 IR 上已经能直接对照。
+- 这条 smoke 只覆盖最小 Phi 合流，不代表 shared 层复制和 rollback 全部都补齐。
+
+评分：
+
+- 实现效果：5/10。补的是对照证据，不是新语义。
+- 复杂度：2/10。只加了一条 smoke 分支。
+- 维护成本：2/10。以后可以直接拿这条 case 看 mode 切换有没有回退。
