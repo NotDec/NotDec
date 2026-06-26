@@ -347,3 +347,36 @@ python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notde
 - 这个 P0 子集现在只覆盖“有 goto hint 的线性公共 tail”。
 - 还没碰 Angr 那条真正的相似子图合并、LCS、语句移动和 merged condition
   graph。
+
+## 2026-06-26 实现记录：P1 先放宽 ReturnDuplicatorLow 的 region gate
+
+这轮先把 `ReturnDuplicatorLow` 从“必须有 predecessor rewrite hook 才看 branch/switch return region”改回按 region 直接识别。因为 Angr 的 low return duplicator 本来就是从 end node 往回找单入口 return region，再决定要不要复制，是否支持 payload rewrite 只影响复制时的材料化，不该挡住 region 发现。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1693-1700`：
+  `ReturnDuplicatorLow::runOnGraph()` 里把 `AllowBranchReturnRegion` 改成始终开启，保留前驱筛选和 payload rewrite 判定，但不再用 hook 作为 region 发现前置条件。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4810-5065`：
+  重新整理 `testReturnDuplicatorLowCopiesBranchReturnRegionWithPayloadRewrite()` 和 `testReturnDuplicatorLowCopiesSwitchReturnRegionWithoutPredecessorRewriteSupport()`，用一条有 predecessor rewrite hook 的 branch 正例和一条无 hook 的 switch 正例覆盖返回 region 复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4927-5066`：
+  新增 `testReturnDuplicatorLowCopiesBranchReturnRegionWithoutPredecessorRewriteSupport()`，确认 branch return region 在没有 predecessor rewrite hook 时也会被复制。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e' ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-sailr-returndup.c --tr-level=2
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- `run_structuring_smoke.py` 通过。
+- fortune smoke 通过，当前本地 Debug + ASan 口径为 `elapsed=201.73`，和前一轮同口径基本持平，没有明显退化。
+
+当前完成度：
+
+- `ReturnDuplicatorLow` 现在按 Angr 更接近的方式先找 return region，再决定是否复制。
+- 还没补 Phi / vvar 的更细复制语义，但 region 识别门槛已经比原来少了一层不必要的 hook 依赖。
