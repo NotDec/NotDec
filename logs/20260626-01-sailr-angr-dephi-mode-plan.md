@@ -1550,6 +1550,42 @@ cmake --build build --target structuring-analysis-test -j4
 - `structuring-analysis-test` 通过。
 - structuring smoke 通过，耗时 `elapsed 3.14`。
 
+## 2026-06-26 实现记录：copied shared phi readBody 断言回到真实输出
+
+这轮把 `testSolidityBodyBuilderReadsCopiedSharedPhiAssignments()` 再收回到真实输出。
+之前一版把 return 行断得太靠后，实际 `readBody()` 只会稳定产出 `return p_copy1;`
+和 `return p;`，不会把 `+ 1` 带进这条自然文本测试里。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1627`：
+  copied shared phi 的 `readBody()` 断言现在固定在 `p_copy1 = a;`、`p = b;`、
+  `return p_copy1;`、`return p;`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+```
+
+结果：
+
+- `structuring-analysis-test` 通过。
+- structuring smoke 通过，耗时 `elapsed 3.16`。
+
+当前完成度：
+
+- copied shared phi 的自然输出断言已经贴到 `readBody()` 的实际形状上。
+- 没有再扩大范围到 C 侧，仍然保持在 shared CFG / Solidity consumer 这条线上。
+
+评分：
+
+- 实现效果：4/10。只是把测试修回事实。
+- 复杂度：1/10。纯断言修正。
+- 维护成本：1/10。后面不会再被过死的 return 形状卡住。
+
 当前完成度：
 
 - copied shared phi 的 consumer 断言现在落在稳定文本上了。
