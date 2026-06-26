@@ -528,6 +528,32 @@ python3 test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/No
 
 结果：通过。
 
+## 2026-06-25 迁移边界确认：Angr 原始测试暂时不能真迁
+
+这轮把 Angr 侧的几个原始 SAILR 测试重新核了一遍，确认它们都依赖 sibling 仓库
+`/sn640/angr/binaries` 里的真实二进制输入。当前本机没有这份目录，所以这些 case 现在
+只能看测试名和源码，不能直接在 NotDec 里做成真实迁移回归。
+
+我对照了这几条：
+
+- `test_sailr_motivating_example`
+- `test_who_condensing_opt_reversion`
+- `test_decompiling_sha384sum_digest_bsd_split_3`
+- `test_reverting_switch_clustering_and_lowering_cat_main_no_endpoint_dup`
+- `test_else_if_scope_printing`
+- `test_fmt_deduplication`
+- `test_decompiling_reused_entries_between_switch_cases`
+
+结论：
+
+- shared structuring 侧的主干已经基本收口，`Phi` 前置 demote、payload materialize、
+  return / switch / reused-entry 的 shared 语义都已经有回归。
+- Angr 原始测试的最后一段迁移，现在卡在外部资产，不是 shared 算法本身。
+- 这轮不再硬补新的 proxy，也不把现有 proxy 当成真实原始资产完成。
+
+后续如果把 `/sn640/angr/binaries` 补上，再回头迁这些原始 case；在那之前，继续补
+shared 语义的细边界更实际。
+
 ## 2026-06-25 Angr reused-entry switch case 目前不能直接迁到本地 Bench2
 
 这轮对照了 Angr 的 `test_decompiling_reused_entries_between_switch_cases`。这个 case 依赖的是
@@ -3923,6 +3949,22 @@ virtual variable 的对应关系先整理掉，再让后面的 structuring 算�
 NotDec 现在只有 `demoteSSAFixHT()` 这条旧链路，能把 Phi demote 掉并把 HType 迁到
 demoted LLVM Value 上，但还没有一个和 angr `GraphDephicationVVarMapping` 对齐的独立层。
 这个缺口现在先记着，不在 structuring 算法里硬补 vvar 语义。
+
+## 2026-06-25 再确认：vvar rewrite 还是 shared 语义里最后一块空白
+
+这轮继续核 Angr 侧源码后，确认 `GraphDephicationVVarMapping` 真的是一层独立入口，
+不是某个 renderer 小修补。NotDec 现在的 shared 层还没有对应的 `vvar` / static value
+rewrite 数据结构，所以后续如果要继续往 Angr 靠，不能只盯 `Phi` demote，也不能把
+vvar 处理塞进 C/Solidity renderer 里糊过去。
+
+当前状态更准确地说是：
+
+- `demoteSSAFixHT()` 已经把 Phi 提前消掉了。
+- `StructuredCFG` / payload materialize 已经能表达 copied / synthetic block 的 shared 身份。
+- 但 `vvar` / static value rewrite 这层还没在 shared 层单独立起来。
+
+这条线后面要继续推进，还是得先补 shared 的 vvar 表达，再往更复杂的 copied region 和
+Angr 原始测试迁移走。
 
 ## 2026-06-24 迁移验证：真实样例在子模块入口可跑
 

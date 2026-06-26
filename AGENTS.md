@@ -66,6 +66,14 @@ The test: Every changed line should trace directly to the user's request.
 9. evm2llvm 的 PHI 修复不能退回旧的 slot 模式 + mem2reg 思路。遇到 `PHIIncoming`
    语义问题时，要优先确认真实 CFG/SSA 语义，或者修复 Gigahorse 侧导出；如果问题复杂，
    先记录和归类，不要用 slot fallback 掩盖问题。
+10. Goal编写规范：Goal按照一下的三段格式编写：第一段 “基于 logs/xxx.md的规划进行”（启动goal前必须先生成对应规划文档）。第二段：使用200字左右描述当前用什么技术路线处理什么问题。第三段是固定内容，必须放这个原话：遇到了不确定的技术路线选择或计划里明显没有考虑到的事情时暂停goal。样例如下：
+```
+基于logs/20260623-01-sailr-angr-completion-plan.md基于完善SAILR的复刻，继续补齐 shared structuring 语义。
+
+优先按旧链路在结构恢复前 demote Phi，并维护 HType 到 demoted LLVM Value 的映射，使 structuring 算法不直接处理 Phi；随后完善 copied/virtual block 的 payload materialize、ReturnDuplicatorLow、switch deoptimization 和 Angr pass 对齐。最后将Angr那边的SAILR相关的测试迁移过来。
+
+遇到了不确定的技术路线选择或计划里明显没有考虑到的事情时暂停goal。
+```
 
 
 ## 1. Git 与 external/ 子模块
