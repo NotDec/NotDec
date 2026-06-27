@@ -1346,3 +1346,64 @@ region。
 - 复杂度：2/5。复用现有 prepend loop，删除一段专用 prefix helper，逻辑更集中。
 - 维护成本：2/5。新增测试固定组合形状；后续如果扩展 return region，只需要继续看
   `findLinearReturnRegion()` 的统一 prepend 路径。
+
+# 2026-06-27 P2 diamond return tail 实现记录
+
+本次继续推进 P2 的一般 return region。上一轮已经能把 diamond return region 上方的
+branch wrapper 一起复制，但 wrapper 的其它分支仍只能是线性 return tail。遇到
+`branch -> linear return tail / diamond return tail` 时，`ReturnDuplicatorLow` 还是不能把
+外层 branch 作为一个完整 region 复制。
+
+这次没有做任意 DAG 枚举，只给 closed return tail 增加一个保守 diamond 形状：两条
+fallthrough 路径必须各自只有单 predecessor，最后汇到同一个 closed terminal，terminal
+也只能有这两个 predecessor。然后 branch/switch prepend 继续复用同一个
+`collectClosedReturnTail()`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:349`
+  - 新增 `collectFallthroughPathToClosedTerminal()`，按单 predecessor fallthrough 链向后
+    收集到 return/unreachable。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:384`
+  - 新增 `collectClosedDiamondReturnTail()`，只接受两条路径汇到同一个 closed terminal
+    的 diamond tail。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:467`
+  - 新增 `collectClosedReturnTail()`，先试原有线性 tail，再试 diamond tail，失败时不污染
+    `Seen`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:604`
+  - `prependBranchReturnRegion()` 改用 `collectClosedReturnTail()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:639`
+  - `prependSwitchReturnRegion()` 改用 `collectClosedReturnTail()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5918`
+  - 新增 `testReturnDuplicatorLowCopiesBranchWithDiamondReturnTail()`。
+  - 构造外层 branch 的一侧是普通 return tail，另一侧是 diamond return tail；只复制带
+    goto 的 predecessor。
+  - 断言 copied outer branch、普通 tail、diamond head、左右路径、join terminal 都保留
+    source block、payload 和 terminator。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11101`
+  - 在 `main()` 注册新测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-diamond-tail.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.99 user=179.52 sys=1.69 maxrss=1268212`。和近期
+  `157s` 左右同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。补上 branch/switch wrapper 其它分支为 diamond tail 的保守形状，但
+  仍不是 Angr `_single_entry_region()` 的完整枚举。
+- 复杂度：2/5。新增一个小型 tail shape helper，复用现有 prepend 和复制流程。
+- 维护成本：2/5。规则比较保守，限制在 single-predecessor fallthrough diamond tail；
+  后续扩展其它 DAG 形状时继续收敛到 `collectClosedReturnTail()`。
