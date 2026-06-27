@@ -1900,3 +1900,45 @@ switch condition、case value 和 dephication assignment 能一起落到输出�
 - `return tail fork` 临时 IR：默认 `notdec-llvm2c --algo=structured-sailr` 输出仍有
   `goto structured_block_*`，没有形成干净的两个 copied fork region。
 - 本次只更新计划日志，没有改运行时代码，不涉及性能路径变化。
+
+# 2026-06-27 P3/P7 dephication contrast smoke 记录
+
+本次没有改算法，只把上一轮两个 `--sailr-dephication-mode=angr` smoke 补成
+legacy/angr 对比。目的不是新增恢复能力，而是固定真实 CLI 上的模式差异：legacy
+仍会走 `p_reg2mem`，angr 模式必须输出普通 vvar assignment，不能漏回 `reg2mem`。
+
+覆盖两个形状：
+
+- copied return tail：两个 switch case 共享 `shared_tail -> shared_ret`。
+- switch return region：两个外层 switch case 共享内层 switch，内层各分支汇到带 Phi
+  的 return block。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1277-1325`
+  - 新增 `run_sailr_dephication_copied_return_tail_contrast_case()`。
+  - legacy 断言 `p_reg2mem` 存在，angr 断言 copied vvar、`r = p_copy1 + 1;`
+    和 `return r;` 存在，且不泄漏 `p_reg2mem`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1328-1378`
+  - 新增 `run_sailr_dephication_switch_return_contrast_case()`。
+  - legacy 断言 `p_reg2mem` 和 `return *(int *)&p_reg2mem + 1;` 存在，
+    angr 断言 `int p;`、`p = a;`、`p = b;`、`p = x;` 和
+    `return p + 1;` 存在，且不泄漏 `p_reg2mem`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1399-1404`
+  - 在 `main()` 里调用两个新增 contrast case。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 copied return tail 和 switch return region 的 legacy/angr
+  对比覆盖，但没有新增 Angr 的全量 copied payload 消费能力。
+- 复杂度：1/5。只新增两个脚本 contrast case。
+- 维护成本：1/5。断言固定模式差异和 reg2mem 退化点；本次没有改运行时代码，不涉及
+  性能路径变化。
