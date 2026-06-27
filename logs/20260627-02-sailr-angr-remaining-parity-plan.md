@@ -1481,3 +1481,52 @@ fallthrough 路径必须各自只有单 predecessor，最后汇到同一个 clos
 
 - `cmake --build ./build --target structuring-analysis-test -j4` 通过。
 - `ctest --test-dir build -R '^structuring-analysis$' --output-on-failure` 通过。
+
+# 2026-06-27 P6 filtered goto quality 记录
+
+本次继续收口 P6 的质量判断。`StructuringOptimizationPass` 会让具体 pass 通过
+`getNewGotos()` 过滤最终 goto，再用过滤后的 goto 重新计算相对质量。之前重算时只替换
+`GotoTargets`，没有同步处理 label，导致一个被 pass 保留下来但当前结构里没有输出 label 的
+目标，也会参与 `totalGotos()` 和 target 数量判断。
+
+这次改成：过滤后的 goto target 如果没有当前 label，只有它本来就是初始 goto target 时才
+保留。这样能忽略真正没有输出 label 的临时目标，同时不破坏
+`ReturnDuplicatorLow` / `DuplicationReverter` 把 copied target 归一回原始 target 的行为。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:8-38`
+  - `qualityWithGotos()` 传入初始质量结果，重建过滤后的 `GotoTargets` 后，删除既没有
+    当前 label、也不是初始 goto target 的目标，并同步删除未使用 label。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:73-75`
+  - `acceptsFinalEvaluation()` 调用新的 `qualityWithGotos()` 参数。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:395-425`
+  - 新增 `DropSecondSuccessorWithUnlabeledFilteredGotoPass`，构造一个 filtered goto 指向
+    无 label 目标的测试 pass。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8564-8583`
+  - 新增 `testStructuringOptimizationPassNormalizesFilteredGotoQuality()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11351`
+  - 注册新测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `ctest --test-dir build -R '^structuring-analysis$' --output-on-failure` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-filtered-goto-quality.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.59 user=179.89 sys=1.50 maxrss=1268400`。和近期
+  `157s` 左右同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。修了 P6 里 filtered goto 质量统计的一条边界，但没有改变 pass
+  顺序或更大的质量模型。
+- 复杂度：1/5。只是在已有 `qualityWithGotos()` 里补 label/target 同步规则。
+- 维护成本：1/5。测试直接覆盖误判条件，同时现有 copied target 归一化用例继续通过。
