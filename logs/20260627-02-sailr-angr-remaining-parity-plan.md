@@ -2451,3 +2451,59 @@ goto 能保留 `SwitchCase` / `SwitchDefault`，线性 body 里的 synthetic got
   P6 相对质量判断里的假噪声。
 - 复杂度：1/5。只改两个收集器的遍历规则，不改变 structured tree 构造。
 - 维护成本：1/5。规则清楚：`Children` 只作为 `Sequence` 的顺序容器，控制节点用专用字段。
+
+# 2026-06-27 P2/P5 single-switch case/default overlap 拆边记录
+
+本次继续补 `ReturnDuplicatorLow` 的 switch case/default overlap。上一轮已经处理了
+“同一个 switch 加另一个外部 predecessor”时的拆边，但 `StructuredCFG::predecessorsOf()`
+按 block 去重；如果只有一个 switch block 同时用 default 和 case 指向同一个 return
+region，旧逻辑会因为只有一个 predecessor block 直接跳过。
+
+这次只把这种 switch 当成两条逻辑 incoming edge。后续复制和重定向仍复用已有
+`StructuredGotoEdgeKind` 拆边逻辑：明确是 `SwitchCase` 时只改 case target，明确是
+`SwitchDefault` 时只改 default successor，`Unknown` 仍跳过。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2116-2139`
+  - 新增 `hasCaseDefaultOverlapPredecessor()` 和
+    `hasMultipleLogicalPredecessors()`。
+  - 说明 `predecessorsOf()` 会按 block 去重，但 case/default 同目标仍是两条逻辑边。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2725-2728`
+  和 `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2739-2741`
+  - `ReturnDuplicatorLow::runOnGraph()` 在 region 收集和提交前检查逻辑 predecessor，
+    不再只用 block 数判断是否可复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5414-5506`
+  - 新增 `testReturnDuplicatorLowSplitsSingleSwitchCaseDefaultOverlapCaseOnly()`。
+  - 新增 `testReturnDuplicatorLowSplitsSingleSwitchCaseDefaultOverlapDefaultOnly()`。
+  - 新增 `testReturnDuplicatorLowSkipsAmbiguousSingleSwitchCaseDefaultOverlap()`。
+  - 覆盖单个 switch 的 case/default 同 target 时，明确 edge kind 可拆，未知 edge kind
+    保守不动。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12368-12370`
+  - 在 `main()` 中调用三个新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  第一次和二进制链接并行执行，报 `Text file busy`；顺序重跑通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-single-switch-overlap-return.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.46 user=179.60 sys=1.54 maxrss=1270364`。和上一轮
+  `157.22s` 同口径接近，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有 codegen 输出。
+
+## 影响判断
+
+- 实现效果：2/5。补了 `ReturnDuplicatorLow` 对单 switch case/default 同 target 的拆边
+  能力，但 P2 的一般 return region 和 P5 的 recovered switch metadata 仍未完成。
+- 复杂度：1/5。只改 predecessor 数量判断，不改变 region copy 或 edge rewrite helper。
+- 维护成本：1/5。新增逻辑只识别已有 shared CFG 能表达的 case/default overlap，未知
+  edge kind 继续保守跳过。
