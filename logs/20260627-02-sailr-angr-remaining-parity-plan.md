@@ -433,3 +433,64 @@ Angr 用 call 数限制 return region；shared CFG 当前没有 call counter，�
 
 后续 P2 仍剩：更完整的 single-entry region 枚举、删除原 region 后的 Phi/vvar
 incoming 处理，以及 P3 的 copied payload 全量消费。
+
+# 2026-06-27 P6 pass option 对齐记录
+
+本次核对 Angr `/sn640/angr` 当前 pass 默认参数后，补齐 shared pipeline 里
+`RequireStructurableGraph` 的差异。Angr 的 `LoweredSwitchSimplifier` 明确
+`require_structurable_graph=False`；`SwitchDefaultCaseDuplicator` 和
+`SwitchReusedEntryRewriter` 在 Angr 属于 AIL graph 创建后 / jump-table 相关 pass，
+不是 during-region structuring wrapper。NotDec 把这三个 pass 放进 shared pipeline
+时，之前仍继承了初始图必须 structurable 的默认值，会在 pass 有机会修复 switch
+形状前先被初始 structuring gate 拦住。
+
+这次只取消这三个 pass 的初始 structurable gate。修改后的候选仍会走
+`StructuringOptimizationPass::analyze()` 的最终 structuring 评估，失败不会提交。
+`DuplicationReverter`、`ReturnDuplicatorLow`、`CrossJumpReverter` 仍保持 Angr
+during-region pass 的默认 structurable/goto/quality gate。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1712`
+  - `SwitchReusedEntryRewriter::defaultOptions()` 设置
+    `RequireStructurableGraph = false`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1801`
+  - `LoweredSwitchSimplifier::defaultOptions()` 设置
+    `RequireStructurableGraph = false`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1906`
+  - `SwitchDefaultCaseDuplicator::defaultOptions()` 设置
+    `RequireStructurableGraph = false`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:349`
+  - 新增 `AddFirstSuccessorNoInitialStructuringPass` 测试 helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7331`
+  - 新增 `testStructuringOptimizationPassCanSkipInitialStructurableGraph()`，
+    覆盖初始 structuring 可跳过，但最终 structuring 失败仍拒绝。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7563`
+  - `testSAILRDeoptimizationDefaultOptionsMatchAngr()` 补齐
+    `RequireStructurableGraph` 字段检查。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-options.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=196.30 user=218.41 sys=1.70 maxrss=1272048`。和上一轮
+  `196.49s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。P6 的默认 option 又少了一个和 Angr 不一致的 gate，但 pass
+  顺序和质量统计仍需要真实样例继续审。
+- 复杂度：1/5。只改默认选项和测试，不改具体 CFG rewrite。
+- 维护成本：1/5。默认字段已有集中测试。
+
+P6 剩余工作：继续核对 copied target / virtual goto 的质量统计在真实样例里的效果；
+如果没有新差异，本项后续可以转成文档归档，而不是继续改默认值。
