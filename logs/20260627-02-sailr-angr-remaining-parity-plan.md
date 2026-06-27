@@ -1237,3 +1237,61 @@ case-only、case/default overlap 的 shared switch 来源分类。
 - 复杂度：1/5。只调整 pipeline 添加顺序和测试断言，不改具体 pass。
 - 维护成本：1/5。测试固定了 stage-order 语义，后续新增 pass 时需要同时说明属于哪个
   Angr 阶段。
+
+# 2026-06-27 P2/P7 prefixed switch return region 覆盖记录
+
+本次没有改算法，只补 P2/P7 覆盖。已有 `ReturnDuplicatorLow` 覆盖了 prefixed diamond
+return region、branch return region 和 switch return region，但少了
+`prefix -> switch -> return tails` 这个组合形状。
+
+这个形状当前 shared CFG 已能表达：prefix 是简单 fallthrough，后面是 switch，每个
+default/case tail 都闭合到 return。新增测试确认 `ReturnDuplicatorLow` 复制 region 时，
+prefix、switch condition、case value、default/case tail 和 return 都随同 copied
+region 一起保留，不需要 renderer 猜。
+
+脚本层 IR 一开始用单 case inner switch，会触发 `CFGBuilder::visitSwitchInst()` 对
+default+1 case 的断言。这个属于 LLVM CFG builder 的单 case switch 限制，不是本次
+return-region 目标，所以 smoke 改成 default+2 cases，继续覆盖 prefixed switch return
+region。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5820`
+  - 新增 `testReturnDuplicatorLowCopiesPrefixedSwitchReturnRegion()`。
+  - 构造两个 predecessor 共享 `prefix -> switch -> default/case return tail` 的形状，
+    只复制带 goto 的 predecessor，原 region 保留给另一条 predecessor。
+  - 断言 copied prefix、copied switch、case target、default/case tail 和 return 都
+    复制完整。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10893`
+  - 在测试入口注册新用例。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:439`
+  - 新增 `sailr_prefixed_switch_return_region`，通过 `notdec-llvm2c` 覆盖真实
+    LLVM CFG builder、SAILR structuring 和 C 输出。
+  - 断言输出包含外层 `switch (x)`、两个 case、内层 `switch (a + 1)`、
+    `case 10:`、`case 11:` 和三条 return；禁止 `goto prefix`、
+    `goto inner_default`、`goto inner_case`、`phi`、`reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过，ninja 无需重建。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  先因 inner switch 只有一个 case 触发 `CFGBuilder::visitSwitchInst()` 断言；改成两个
+  case 后通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过，ninja 无需重建。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-prefixed-switch-smoke.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.31 user=179.53 sys=1.52 maxrss=1265740`。和上一轮
+  `157.19s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了一个 P2/P7 组合覆盖，但没有新增 Angr 的完整 single-entry
+  region 枚举。
+- 复杂度：1/5。只加 C++ 和脚本测试，不改 CFG rewrite。
+- 维护成本：1/5。测试形状明确，脚本层也固定了真实输出不能退回 goto。
