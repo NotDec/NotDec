@@ -386,3 +386,50 @@ Angr 用 call 数限制 return region；shared CFG 当前没有 call counter，�
 
 后续 P2 仍要继续补 endnode region 枚举和更完整的 copied payload 处理；这次只是先把
 复制放大风险压住。
+
+# 2026-06-27 P2 unreachable end node 实现记录
+
+本次继续推进 P2 的 end node 枚举。Angr `ReturnDuplicatorBase._find_endnode_regions()`
+从所有无 successor 的 end node 反推 region；NotDec 之前只从 `Return` 终点进入，
+会漏掉 `Unreachable` 结尾的闭合 return/trap tail。shared CFG 已有
+`isClosedTerminal()`，所以这次只把终点判断改成复用它，不改变复制和 payload 重写。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:390`
+  - `collectDiamondReturnRegion()` 的 terminal 判断从只认 `Return` 放宽为
+    `isClosedTerminal()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:513`
+  - `findLinearReturnRegion()` 的入口判断同样改为 `isClosedTerminal()`，使
+    `Unreachable` tail 也能作为 end node 被反推。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5459`
+  - 新增 `testReturnDuplicatorLowCopiesUnreachableTailRegion()`，覆盖 goto 指向
+    trap tail 时复制 copied tail 和 copied unreachable block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10034`
+  - 在测试入口注册新用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-unreachable-retregion.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=196.49 user=219.18 sys=1.65 maxrss=1266724`。和上一轮
+  `197.80s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补上 end node 枚举里的一个明确缺口，但还没有完成 Angr 的全部
+  `_single_entry_region()` 语义。
+- 复杂度：1/5。只复用已有闭合终点判断。
+- 维护成本：1/5。测试覆盖了新增 reachable 行为。
+
+后续 P2 仍剩：更完整的 single-entry region 枚举、删除原 region 后的 Phi/vvar
+incoming 处理，以及 P3 的 copied payload 全量消费。
