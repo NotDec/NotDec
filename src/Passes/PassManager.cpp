@@ -128,12 +128,12 @@ struct UndoInstCombine : PassInfoMixin<UndoInstCombine> {
 // A Pass that convert module to C.
 struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
 
-  mlsub::MLsubRecovery &TR;
+  mlsub::MLsubRecovery *TR = nullptr;
   std::string OutFilePath;
   ::notdec::llvm2c::Options llvm2cOpt;
   bool disableTypeRecovery = false;
 
-  MLsubNotdecLLVM2C(mlsub::MLsubRecovery &TR, std::string outFilePath,
+  MLsubNotdecLLVM2C(mlsub::MLsubRecovery *TR, std::string outFilePath,
                     ::notdec::llvm2c::Options &llvm2cOpt,
                     bool disableTypeRecovery)
       : TR(TR), OutFilePath(outFilePath), llvm2cOpt(std::move(llvm2cOpt)),
@@ -146,7 +146,8 @@ struct MLsubNotdecLLVM2C : PassInfoMixin<MLsubNotdecLLVM2C> {
     // Run type recovery.
     std::unique_ptr<mlsub::MLsubRecovery::Result> HighTypes;
     if (!disableTypeRecovery) {
-      HighTypes = std::move(TR.getResult(M, MAM));
+      assert(TR != nullptr && "type recovery context is required");
+      HighTypes = std::move(TR->getResult(M, MAM));
     }
 
     std::error_code EC;
@@ -411,7 +412,8 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
 void PassEnv::add_llvm2c(std::string OutFilePath,
                          ::notdec::llvm2c::Options llvm2cOpt,
                          bool disableTypeRecovery) {
-  MPM.addPass(MLsubNotdecLLVM2C(*TR, OutFilePath, llvm2cOpt,
+  MPM.addPass(MLsubNotdecLLVM2C(disableTypeRecovery ? nullptr : TR.get(),
+                                OutFilePath, llvm2cOpt,
                                 disableTypeRecovery));
 }
 
