@@ -1077,3 +1077,49 @@ dephication edge 上有两个 vvar incoming”的形状。
   P3 的所有 renderer 消费路径都覆盖完。
 - 复杂度：1/5。只加测试，不改 shared CFG 或 deoptimization 逻辑。
 - 维护成本：1/5。测试直接检查 vvar copy map、incoming 和 assignment rewrite，失败点清楚。
+
+# 2026-06-27 P5 reused-entry case/default overlap 覆盖记录
+
+本次没有改算法，只补一个 C++ regression。目标是固定
+`SwitchReusedEntryRewriter` 在 case/default 交叉复用时的 shared CFG 语义：如果同一个
+switch 的 default 和 case 都指向同一个 reused entry，reused-entry pass 只虚拟化
+case 边，default 边仍然留在原 entry。这样 P5 后续接入 recovered switch / jump-table
+metadata 时，不会把 default-only、case-only 和 case/default overlap 混成一种边。
+
+这个测试不表示 P5 完成。P5 的核心缺口仍是 default / reused-entry 共用 recovered
+switch 表示，以及从 jump-table metadata 判断 default-only、case-only、交叉复用。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7239`
+  - 新增 `testSwitchReusedEntryRewriterSplitsCaseDefaultOverlap()`。
+  - 构造两个 switch 共享同一个 case entry，其中第二个 switch 的 default 和 case
+    都指向该 entry；断言重写后第二个 switch 的 case target 变成 synthetic goto，
+    default successor 仍指向原 entry，原 entry 的 tail 不被复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10819`
+  - 在测试入口注册该用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `git diff --check -- logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过，ninja 无需重建。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过，ninja 无需重建。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p5-reused-case-default-overlap.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.91 user=179.36 sys=1.62 maxrss=1267956`。和上一轮
+  `156.73s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：1/5。只补一个 P5 边界覆盖，不新增 switch metadata 能力。
+- 复杂度：1/5。只加测试，不改 CFG rewrite。
+- 维护成本：1/5。测试形状小，断言直接固定 case/default overlap 的边语义。
