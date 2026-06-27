@@ -1013,3 +1013,22 @@ vvar，同时保留 `SourceTarget` 指回原 vvar。
   P2/P7 代理，不是 Angr 全量迁移。
 - 复杂度：1/5。只加一个短 IR case。
 - 维护成本：1/5。断言围绕核心结构和禁止的 goto，后续诊断成本低。
+
+# 2026-06-27 branch return dephication 缺口检查记录
+
+这次顺着 P2/P3 再检查了一次 branch return region 的删原 region 方向，确认了一个点：
+`ReturnDuplicatorLow` 现有的 branch return payload rewrite 测试已经能覆盖条件、then/else
+和 grouped predecessor 复制，但 branch 这条线并没有一条稳的、可直接迁移的
+dephication/delete-original 回归，不适合硬塞一个不清楚 payload 位置的测试。
+
+我检查后没有保留新的代码改动，也没有改算法。这个结果的价值是把 branch 方向从
+“看起来像有缺口”收回到“当前证据不足，不继续硬补”，避免把 P2/P3 的工作拧到
+不稳的测试语义上。
+
+## 结论
+
+- `ReturnDuplicatorLow` 的 return/switch dephication delete-original 回归已经有明确
+  覆盖。
+- branch return region 这条线，当前缺的不是一个已经清楚的最小回归，而是更稳的
+  payload/edge 语义样例。
+- 这次没有新增文件修改，不进入提交。
