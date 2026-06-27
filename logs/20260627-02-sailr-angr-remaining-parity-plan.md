@@ -2394,3 +2394,60 @@ goto 能保留 `SwitchCase` / `SwitchDefault`，线性 body 里的 synthetic got
 - 复杂度：1/5。只改 `GotoManager` 的上下文传递规则，没有改变 structurer 或 pass 顺序。
 - 维护成本：1/5。规则只穿过线性 wrapper，边界清楚；后续如果补真正 switch metadata，
   也能继续复用这份 goto edge kind。
+
+# 2026-06-27 P6 switch helper children 重复统计记录
+
+本次继续补 P6 的 goto / quality 统计一致性。`GotoStructurer` 为了调试和线性展开，会把
+`If` / `Switch` 的 transfer 同时放进专用字段和 `Children`。`GotoManager` 和
+`ControlFlowStructureCounter` 之前会遍历两边，导致 switch case/default 的 goto 被额外算一
+次，甚至多出 `Unknown` edge kind。
+
+这次不改 structurer 输出，只收紧收集器：只有 `Sequence.Children` 参与 goto / quality
+收集；`If`、`Switch`、loop 等节点走 `Then`、`Else`、`Body`、`Default` 和
+`StructuredCases` 专用字段。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:62-89`
+  - 新增 `collectsChildList()`。
+  - `collectGotos()` 只在 `Sequence` 节点遍历 `Children`，避免 switch helper children
+    和 `StructuredCases` / `Default` 重复收集。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringQuality.cpp:8-10`
+  和 `external/NotDec-llvm2c/lib/Structuring/StructuringQuality.cpp:52-56`
+  - `ControlFlowStructureCounter` 使用同样的 `Sequence.Children` 规则，避免相对质量判断
+    把同一条 goto 算两次。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1081-1116`
+  - 新增 `testGotoManagerDoesNotDoubleCountSwitchHelperChildren()`。
+  - 覆盖 switch helper `Children` 和 `StructuredCases` / `Default` 同时存在时，只收一次
+    default goto 和一次 case goto，并保留 edge kind。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9357-9398`
+  - 新增 `testControlFlowStructureCounterDoesNotDoubleCountSwitchHelperChildren()`。
+  - 覆盖质量统计只给 default / case 两个目标各计一次。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12172`
+  和 `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12340`
+  - 在 `main()` 中调用两个新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/GotoManager.cpp lib/Structuring/StructuringQuality.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-switch-helper-child-quality.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.22 user=180.08 sys=1.47 maxrss=1274692`。和上一轮
+  `157.61s` 同口径接近，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有 codegen 输出。
+
+## 影响判断
+
+- 实现效果：2/5。修掉 switch helper children 导致的 goto / quality 重复统计，减少
+  P6 相对质量判断里的假噪声。
+- 复杂度：1/5。只改两个收集器的遍历规则，不改变 structured tree 构造。
+- 维护成本：1/5。规则清楚：`Children` 只作为 `Sequence` 的顺序容器，控制节点用专用字段。
