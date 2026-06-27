@@ -1407,3 +1407,42 @@ fallthrough 路径必须各自只有单 predecessor，最后汇到同一个 clos
 - 复杂度：2/5。新增一个小型 tail shape helper，复用现有 prepend 和复制流程。
 - 维护成本：2/5。规则比较保守，限制在 single-predecessor fallthrough diamond tail；
   后续扩展其它 DAG 形状时继续收敛到 `collectClosedReturnTail()`。
+
+# 2026-06-27 SAILRDeoptimization 编译歧义修复记录
+
+本次继续收口 `SAILRDeoptimization.cpp` 的一个编译问题，不改算法语义。前一轮新增了
+`hasInitialSourceGoto()` 的外层定义后，文件里还残留了一条匿名命名空间里的前置
+声明，导致 `DuplicationReverter::getNewGotos()` 和 `ReturnDuplicatorLow::getNewGotos()`
+都出现同名可见候选。这个问题只影响编译，不影响 P1-P7 的结构目标。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:498`
+  - 删除匿名命名空间里的旧 `hasInitialSourceGoto()` 前置声明。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1874`
+  - 在匿名命名空间外补一个 `hasInitialSourceGoto()` 前置声明，供
+    `DuplicationReverter::getNewGotos()` 和 `ReturnDuplicatorLow::getNewGotos()` 共用。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  - 这轮修复前失败，报 `hasInitialSourceGoto` 未声明和随后的一处重载歧义。
+  - 修复后通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-sailr-parity.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.65 user=180.22 sys=1.72 maxrss=1270540`。和近期
+  `157s` 左右同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：1/5。只修了编译可见性问题，没有动任何 structuring 语义。
+- 复杂度：1/5。只是删掉一个重复声明。
+- 维护成本：1/5。后续这类 helper 统一放在一个可见命名空间里，避免匿名 namespace
+  和外层 namespace 重名。
