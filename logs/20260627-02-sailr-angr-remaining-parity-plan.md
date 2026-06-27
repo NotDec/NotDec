@@ -1446,3 +1446,38 @@ fallthrough 路径必须各自只有单 predecessor，最后汇到同一个 clos
 - 复杂度：1/5。只是删掉一个重复声明。
 - 维护成本：1/5。后续这类 helper 统一放在一个可见命名空间里，避免匿名 namespace
   和外层 namespace 重名。
+
+# 2026-06-27 P6/P7 记录：默认选项对齐和真实样例边界
+
+这轮补了两件事，都是收边界，不是扩算法。
+
+1. `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8720-8759`
+   里的 `testSAILRDeoptimizationDefaultOptionsMatchAngr()`，现在也检查
+   `ReturnDuplicatorLow` 和 `CrossJumpReverter` 的 `MustImproveRelativeQuality`。
+   这两个 pass 之前只核了 `RequireGotos`、`PreventNewGotos`、`StrictlyLessGotos`，
+   现在把最后一条质量门也补上了。
+2. 这轮扫真实 Bench2 `module-all.ll` 时，下面这些样例都还是先被前端挡住，不适合拿来
+   替换迁移脚本里的 proxy：
+   - `selected-targets-native/lighttpd/executable/module-all.ll`
+   - `selected-targets-native/redis/server-symlink/module-all.ll`
+   - `selected-targets-native/fortune/executable/module-all.ll`
+   - `hexx64/java/module-all.ll`
+
+   它们都先撞到 `SAContext::getIntrinsic(): unhandled intrinsic`。
+   `hexx64/native/module-all.ll` 不是 intrinsic 问题，而是先撞到
+   `pred_iterator out of range!`。
+
+现在的结论是：这些 `module-all.ll` 还在当前 frontend 的支持边界外，先不要继续拿它们
+当 migration 基线。当前还能稳定保留的非平凡真实样例，还是
+`lighttpd/1-main_init_once.ll`，它已经在 `run_sailr_bench2_migration.py` 里。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8720-8759`
+  - `testSAILRDeoptimizationDefaultOptionsMatchAngr()` 新增两个
+    `MustImproveRelativeQuality` 断言。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `ctest --test-dir build -R '^structuring-analysis$' --output-on-failure` 通过。
