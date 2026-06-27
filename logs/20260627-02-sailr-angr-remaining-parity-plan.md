@@ -1761,3 +1761,41 @@ tail 后面是 `unreachable` 终点。
 - 复杂度：1/5。只新增一个 smoke case。
 - 维护成本：1/5。断言固定结构关键词和 goto/reg2mem 退化点；本次没有改运行时代码，
   不涉及性能路径变化。
+
+# 2026-06-27 P7 nested return region smoke 记录
+
+本次没有改算法，只把 P2 的 nested return region 覆盖提升到 `notdec-llvm2c`
+脚本层 smoke。这个用例固定一个具体形状：两个 switch case 共享外层 branch，
+外层一侧进入带 tail 的内层 branch，另一侧直接 return。
+
+这个 smoke 仍是 P2/P7 代理覆盖，不表示 Angr 的一般 single-entry return region
+已经完成。它只保证当前真实 `notdec-llvm2c` 链路不会把
+`branch -> nested branch return region / return tail` 退回成 `goto` 或 `reg2mem`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:585-632`
+  - 在 `CASES` 里新增 `sailr_nested_return_region`。
+  - 构造两个 switch case 共享 `head`，`head` 一侧进入
+    `left_tail -> left_branch -> left_ret/left_ret2`，另一侧进入 `right_ret`。
+  - 断言输出保留 `switch (x)`、两个 case、外层 `if (a == b)`、内层
+    `if (a > b)`、2 个 `a + 1;`、2 个 `return 7;`、2 个 `return 8;`
+    和 2 个 `return 9;`，同时不出现 `goto head`、`goto left_tail`、
+    `goto left_branch`、`goto right_ret`、`goto left_ret`、`goto left_ret2`、
+    `phi`、`reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 nested return region 的脚本级回归覆盖，但没有新增
+  Angr 的通用 region 枚举能力。
+- 复杂度：1/5。只新增一个 smoke case。
+- 维护成本：1/5。断言固定结构关键词和 goto/reg2mem 退化点；本次没有改运行时代码，
+  不涉及性能路径变化。
