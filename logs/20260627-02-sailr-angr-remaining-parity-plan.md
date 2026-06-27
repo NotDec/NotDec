@@ -2341,3 +2341,56 @@ case 只重定向 case target，default/non-case 只重定向普通 successor。
 - 复杂度：2/5。新增了两个 return-region 专用复制 helper，但没有改通用复制入口。
 - 维护成本：2/5。逻辑依赖已有 `StructuredGotoEdgeKind`，不明确时保守跳过；后续如果补
   merge graph / switch metadata，可以继续收窄或复用这条拆边路径。
+
+# 2026-06-27 P5/P6 switch 线性 body goto edge kind 记录
+
+本次补 `GotoManager` 的一个质量判断缺口。switch case/default 的 body 可能是
+`Sequence -> BasicBlock -> Goto` 这种线性外壳，之前只有直接挂在 case/default 节点上的
+goto 能保留 `SwitchCase` / `SwitchDefault`，线性 body 里的 synthetic goto 会退成
+`Unknown`。这会让后续 `ReturnDuplicatorLow`、`CrossJumpReverter` 这类按 edge kind 拆边的
+逻辑缺依据。
+
+这次只让 switch edge kind 穿过 `Sequence` 下的 `BasicBlock`、`Label`、`Goto` 等线性节点；
+遇到 `If`、`Switch`、loop、return/unreachable 就停止传递，避免把嵌套控制流里的普通 goto
+误标成 case/default。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:28-60`
+  - 新增 `preservesSwitchEdgeContext()` 和 `childEdgeKind()`。
+  - 只在线性 wrapper 内保留当前 switch edge kind。
+- `external/NotDec-llvm2c/lib/Structuring/GotoManager.cpp:76-79`
+  - `collectGotos()` 遍历 `Children` 时使用 `childEdgeKind()`，不再无条件清成
+    `Unknown`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1028-1079`
+  - 新增 `testGotoManagerKeepsSwitchEdgeKindsThroughLinearBodies()`，覆盖 default body 和
+    case body 都包一层 `Sequence + BasicBlock` 后，goto 仍保留 `SwitchDefault` /
+    `SwitchCase`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12091`
+  - 在 `main()` 中调用新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/GotoManager.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-goto-edge-kind-linear-body.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.61 user=179.83 sys=1.51 maxrss=1269764`。和上一轮
+  `159.25s` 同口径接近，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有 codegen 输出。
+
+## 影响判断
+
+- 实现效果：2/5。补了 P5/P6 的一条 edge kind 传播缺口，让线性 case/default body 里的
+  synthetic goto 能参与后续质量判断和拆边。
+- 复杂度：1/5。只改 `GotoManager` 的上下文传递规则，没有改变 structurer 或 pass 顺序。
+- 维护成本：1/5。规则只穿过线性 wrapper，边界清楚；后续如果补真正 switch metadata，
+  也能继续复用这份 goto edge kind。
