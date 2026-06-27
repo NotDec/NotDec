@@ -1835,3 +1835,41 @@ tail 后面是 `unreachable` 终点。
 - 复杂度：1/5。只新增一个 smoke case。
 - 维护成本：1/5。断言固定 copied vvar、tail assignment 和 return 输出；本次没有改
   运行时代码，不涉及性能路径变化。
+
+# 2026-06-27 P3/P7 switch return dephication smoke 记录
+
+本次没有改算法，只把 switch return region + dephication vvar 的真实 `notdec-llvm2c`
+链路补到脚本层 smoke。这个用例固定一个具体形状：两个外层 switch case 共享
+内层 switch，内层各分支汇到一个带 Phi 的 return block。
+
+这个 smoke 仍是 P3/P7 代理覆盖，不表示 copied payload / Phi / vvar 全量消费已经完成。
+它只保证当前 `--sailr-dephication-mode=angr` 下，复制 switch return region 时
+switch condition、case value 和 dephication assignment 能一起落到输出里，不退回
+`phi` 或 `reg2mem`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:366-420`
+  - 在 `CASES` 里新增 `sailr_angr_dephication_switch_return_region`。
+  - 构造两个外层 switch case 共享 `inner_switch`，内层 default、`case 10`、
+    `case 11` 都汇到 `inner_ret`，`inner_ret` 里含 `%p = phi` 和 `%r = add`。
+  - 使用 `--sailr-dephication-mode=angr`，断言输出保留 `int p;`、外层
+    `switch (x)`、2 个内层 `switch (a)`、`case 10:`、`case 11:`、
+    `p = a;`、`p = x;`、`p = b;` 和 2 个 `return p + 1;`，同时不出现
+    `phi`、`reg2mem`、`goto inner_switch`、`goto inner_ret`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 switch return region 和 dephication vvar 的脚本级组合覆盖，
+  但没有新增 Angr 的全量 copied payload 消费能力。
+- 复杂度：1/5。只新增一个 smoke case。
+- 维护成本：1/5。断言固定 switch/dephication 输出和退化点；本次没有改运行时代码，
+  不涉及性能路径变化。
