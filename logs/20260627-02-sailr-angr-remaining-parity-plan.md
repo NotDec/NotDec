@@ -1613,3 +1613,40 @@ diamond 退回成 `goto head/tail/ret` 或 `reg2mem`。
   Angr 的通用 region 枚举能力。
 - 复杂度：1/5。只新增一个 smoke case。
 - 维护成本：1/5。断言直接对应当前输出形状；本次没有改运行时代码，不涉及性能路径变化。
+
+# 2026-06-27 P7 diamond return tail smoke 记录
+
+本次没有改算法，只把 P2 的 diamond return tail 覆盖提升到 `notdec-llvm2c`
+脚本层 smoke。这个用例固定一个具体形状：两个 switch case 共享外层 branch，
+外层一侧是普通 return tail，另一侧是 diamond return tail。
+
+这个 smoke 仍是 P2/P7 代理覆盖，不表示 Angr 的一般 single-entry return region
+已经完成。它只保证当前真实 `notdec-llvm2c` 链路不会把
+`branch -> linear return tail / diamond return tail` 退回成 `goto` 或 `reg2mem`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:553-610`
+  - 在 `CASES` 里新增 `sailr_branch_diamond_return_tail`。
+  - 构造两个 switch case 共享 `outer`，`outer` 一侧进入普通 `return 7`
+    tail，另一侧进入 `diamond_head -> left/right -> diamond_ret`。
+  - 断言输出保留 `switch (x)`、两个 case、外层 `if (a == b)`、内层
+    `if (a > b)`、2 个 `return 7;` 和 4 个 `return 9;`，同时不出现
+    `goto outer`、`goto plain_tail`、`goto plain_ret`、`goto diamond_head`、
+    `goto diamond_ret`、`phi`、`reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 diamond return tail 的脚本级回归覆盖，但没有新增 Angr
+  的通用 region 枚举能力。
+- 复杂度：1/5。只新增一个 smoke case。
+- 维护成本：1/5。断言只固定结构关键词和 goto/reg2mem 退化点；本次没有改运行时代码，
+  不涉及性能路径变化。
