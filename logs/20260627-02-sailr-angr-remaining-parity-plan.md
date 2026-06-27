@@ -2507,3 +2507,39 @@ region，旧逻辑会因为只有一个 predecessor block 直接跳过。
 - 复杂度：1/5。只改 predecessor 数量判断，不改变 region copy 或 edge rewrite helper。
 - 维护成本：1/5。新增逻辑只识别已有 shared CFG 能表达的 case/default overlap，未知
   edge kind 继续保守跳过。
+
+# 2026-06-27 P2/P5 single-switch case/default both-edge 覆盖记录
+
+本次没有改运行时代码，只补 `ReturnDuplicatorLow` 的回归覆盖。上一节实现已经覆盖单个
+switch 的 case-only、default-only 和 unknown edge kind，但还缺“case 和 default 都明确
+是 goto”时的断言。这个场景应该复制两份 return region，并在原 region 没有 predecessor
+后删除原块。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5508-5547`
+  - 新增 `testReturnDuplicatorLowSplitsSingleSwitchCaseDefaultOverlapBothEdges()`。
+  - 构造单个 switch 的 default 和 case 都指向同一个 return block，同时提供
+    `SwitchCase` 和 `SwitchDefault` 两条 goto。
+  - 断言 default/case 分别指向不同 copied return，原 return block 被删除。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12412`
+  - 在 `main()` 中调用新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- 本次只改测试，不改 `lib/`、`include/` 或 codegen 运行路径，所以没有重新跑 fortune
+  性能 smoke；上一节 runtime 改动已经跑过同口径 fortune。
+
+## 影响判断
+
+- 实现效果：1/5。补齐上一节 single-switch overlap 的 both-edge 回归，不新增能力。
+- 复杂度：1/5。只新增一个 C++ 测试。
+- 维护成本：1/5。断言直接固定 default copy、case copy 和原 return 删除状态。
