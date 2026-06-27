@@ -494,3 +494,56 @@ during-region pass 的默认 structurable/goto/quality gate。
 
 P6 剩余工作：继续核对 copied target / virtual goto 的质量统计在真实样例里的效果；
 如果没有新差异，本项后续可以转成文档归档，而不是继续改默认值。
+
+# 2026-06-27 P4 路线检查
+
+本次检查了 NotDec 和 Angr 的 `LoweredSwitchSimplifier`。结论是：当前不能用一个小
+CFG 重写直接实现“if-chain 恢复 switch”，因为 shared CFG 还没有表达分支条件的语义。
+
+NotDec 现在的条件只是一层 payload 引用：
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h`
+  里的 `CFGBlock::Condition` 是 `PayloadRef`。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp` 里
+  `LLVMFunctionCFGBuilder::build()` 只通过 `PayloadProvider::getCondition()`
+  记录条件 payload，不保存 `x == const`、`x != const`、范围比较、变量身份、
+  true/false 目标这些语义。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp` 里的
+  `LoweredSwitchSimplifier::runOnGraph()` 目前只扫描已有 `Switch` terminator 的
+  case target 复用，并复制共享 case 线性 region；它没有解析 `Branch` 条件。
+
+Angr 的实现不同：
+
+- `/sn640/angr/angr/analyses/decompiler/optimization_passes/lowered_switch_simplifier.py`
+  的 `_find_switch_variable_comparison_type_a()`、`_type_b()`、`_type_c()` 直接解析
+  AIL `ConditionalJump` 里的 `BinaryOp(VirtualVariable, Const)`。
+- `StableVarExprHasher` 用 AIL variable map 判断多条比较是否来自同一个 switch
+  variable。
+- `_find_cascading_switch_variable_comparisons()` 再基于 `eq` / `gt`、case value、
+  default target、reachability 和 case 数过滤，最后生成 switch head。
+
+所以 P4 后续要先补 shared 条件模型，至少能表达：
+
+- 条件种类：`==`、`!=`、`>`、`>=`、`<`、`<=`。
+- 被比较的稳定变量身份。
+- 常量 case value。
+- 条件为 true / false 时分别对应哪个 successor。
+- payload 只负责打印，不参与语义判断。
+
+在这层补齐前，不应该用 payload 字符串解析或者 renderer 特判来恢复 switch。这样会把
+语义藏到后端里，也无法保证 C 和 Solidity 走同一份 shared CFG 结果。
+
+本次没有改算法，P4 暂时记录为需要先设计 shared condition metadata。后续可以先做
+LLVM `icmp` + branch 的最小模型，再迁移 Angr lowered switch 的 if-chain 测试。
+
+## 修改位置
+
+- `logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+  - 追加本节，记录 P4 的 blocker、涉及文件和后续路线。
+
+## 验证
+
+这次只改文档，不改代码路径，所以没有跑性能 smoke。检查命令：
+
+- `git diff -- logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+- `git status --short`
