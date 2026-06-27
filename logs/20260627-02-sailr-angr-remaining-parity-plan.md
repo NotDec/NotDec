@@ -1530,3 +1530,52 @@ fallthrough 路径必须各自只有单 predecessor，最后汇到同一个 clos
   顺序或更大的质量模型。
 - 复杂度：1/5。只是在已有 `qualityWithGotos()` 里补 label/target 同步规则。
 - 维护成本：1/5。测试直接覆盖误判条件，同时现有 copied target 归一化用例继续通过。
+
+# 2026-06-27 P2 direct-return-side diamond 记录
+
+本次继续推进 P2 的一般 return region。已有 closed diamond return tail 只接受两侧都有
+私有 fallthrough path 的形状，会漏掉一侧直接跳到共同 return、另一侧经过私有 tail
+再到同一个 return 的单入口闭合 region。
+
+这次只放宽这个保守形状，不做任意 DAG 枚举。直接 return 侧没有私有 block，所以 terminal
+predecessor 记为 branch head；同时 end-node 反推时要求 direct-return-side 的 diamond
+head 不能是组件入口，避免把 connected predecessor 误吃进 return region。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:384-391`
+  - 新增 `terminalPredecessorForReturnPath()`，处理直接 branch-to-return 侧的
+    terminal predecessor。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:426-440`
+  - `collectClosedDiamondReturnTail()` 允许一侧 path 只有 terminal，并用新 helper
+    计算 terminal predecessor。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:523-603`
+  - `collectDiamondReturnRegion()` 允许一侧没有私有 block，但遇到 direct side 时拒绝
+    吸收没有 predecessor 的组件入口。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5791-5861`
+  - 新增 `testReturnDuplicatorLowCopiesDiamondReturnRegionWithDirectReturnSide()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11366`
+  - 注册新测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `ctest --test-dir build -R '^structuring-analysis$' --output-on-failure` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-direct-diamond-return.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.99 user=179.17 sys=1.60 maxrss=1271616`。和近期
+  `157s` 左右同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。补上 direct-return-side diamond return region，但仍不是 Angr 的完整
+  `_single_entry_region()`。
+- 复杂度：2/5。只扩展现有 diamond 收集路径，另加组件入口保护。
+- 维护成本：2/5。规则仍是保守 shape 匹配，测试覆盖了误判风险最相关的复制结果。
