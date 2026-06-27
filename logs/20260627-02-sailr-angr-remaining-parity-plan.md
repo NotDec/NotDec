@@ -2229,3 +2229,55 @@ case/default overlap block；普通外部 predecessor 仍会复制 default regio
   但 P5 仍没有 recovered switch / jump-table metadata。
 - 复杂度：1/5。只收紧 default-region copy 的 predecessor 选择，不改复制机制。
 - 维护成本：1/5。新增回归直接覆盖 case 边是否被误重定向。
+
+# 2026-06-27 P6 copied goto edge kind 归一化记录
+
+本次推进 P6 的质量判断一致性。`DuplicationReverter` 和 `ReturnDuplicatorLow` 会把
+current goto 的 copied target 归一化到原 target，避免 copied block id 变化导致质量
+判断误判。但旧逻辑只看 source 和 target，没有看 `StructuredGotoEdgeKind`。如果一个
+goto 从 switch case 语义变成 default 语义，仍可能被当成同一条初始 goto。
+
+这次只收紧 copied-target 归一化条件：source、原 target、edge kind 三者都一致时才把
+copied target 还原为原 target。`NodeId` 不参与匹配，因为 structuring 后节点号本来不
+稳定。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2576`
+  - `hasInitialSourceGoto()` 增加 `InitialGoto.EdgeKind == Goto.EdgeKind` 判断。
+  - 影响 `DuplicationReverter::getNewGotos()` 和
+    `ReturnDuplicatorLow::getNewGotos()` 的 copied target 归一化。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4185`
+  - 新增 `testDuplicationReverterKeepsCopiedGotoTargetsWhenEdgeKindChanges()`。
+  - 覆盖初始 `SwitchCase` goto 和当前 copied target `SwitchDefault` goto 不会被归一化。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5248`
+  - 新增 `testReturnDuplicatorLowKeepsCopiedGotoTargetsWhenEdgeKindChanges()`。
+  - 覆盖同样的 edge kind 不一致场景。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12008`
+  和 `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12036`
+  - 在 `main()` 中调用两个新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-goto-edge-kind-normalize.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=155.96 user=177.31 sys=1.57 maxrss=1270180`。和上一轮
+  `156.07s` 同口径，没有明显退化；过程中的 global/type warning 仍是 fortune 既有
+  codegen 输出。
+
+## 影响判断
+
+- 实现效果：2/5。补了 copied target 质量判断里的 case/default edge kind 身份，但
+  P6 仍要继续看真实样例里的 pass option 和 quality 细节。
+- 复杂度：1/5。只加一个匹配条件和两个回归测试。
+- 维护成本：1/5。逻辑集中在 `hasInitialSourceGoto()`，调用方无需额外分支。
