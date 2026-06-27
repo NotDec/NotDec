@@ -61,7 +61,7 @@ trial / rollback / quality guard，以及 `SwitchDefaultCaseDuplicator`、
 
 # 剩余差距和处理顺序
 
-## P0：先建立 Angr 对照清单
+## P0：先建立 Angr 对照清单（已完成 2026-06-27）
 
 先把“到底差什么”列清楚。否则容易继续修一个小 case，就误以为对应 pass 完成。
 
@@ -77,6 +77,9 @@ trial / rollback / quality guard，以及 `SwitchDefaultCaseDuplicator`、
 - 有一张 pass 级别的差距表。
 - `20260627-01` 这种小实现会被标成某个 pass 的子项完成，而不是 pass 完成。
 - 后续发现的新差距有入口记录。
+
+完成记录见文末“2026-06-27 P0 实现记录”。P0 只建立清单，不表示后面的 P1-P7
+已经完成。
 
 ## P1：补 `DuplicationReverter` 的完整 merge graph 语义
 
@@ -245,3 +248,84 @@ copied region，就必须先看 payload / vvar / dephication context 是否能�
 
 第三个风险是测试继续停留在 proxy。proxy 可以帮助落地 shared CFG 行为，但最终
 必须用真实 Angr 测试和真实样例分类校验。
+
+# 2026-06-27 P0 实现记录
+
+本次只完成对照清单，没有改 C++ 算法。
+
+Angr 对照源码使用本机 `/sn640/angr`，提交 `63c05f1d4`。NotDec 对照范围是
+`external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h`
+和 `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp`。
+
+## Pass 对照表
+
+| Angr pass / 文件 | Angr 关键语义 | NotDec 当前状态 | 下一步 |
+| --- | --- | --- | --- |
+| `StructuringOptimizationPass`，`optimization_pass.py:443-654` | SAILR during-region pass wrapper，负责初始 structuring、goto guard、固定点、失败回滚、相对质量检查。 | 基本覆盖。NotDec 在 `StructuringOptimizationPass.h:16-24` 保存同类 option，在 `StructuringOptimizationPass.cpp:62-130` 做 evaluate、rollback、goto/quality guard。 | P6 继续核对 quality 细节，特别是 copied block 和 virtual goto 的统计是否和 Angr 一致。 |
+| `SwitchDefaultCaseDuplicator`，`switch_default_case_duplicator.py:20-166` | 基于 jump table 找 default case 复用；多 switch 共享 default 时写成 goto；外部 predecessor 复用时复制 default block。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:1893-2042` 处理已有 shared switch default，支持 synthetic goto / forwarder，也能复制线性 default region。还没有 Angr 那种直接消费 CFG jump table metadata 的入口。 | P5：接入 recovered switch / jump-table 元数据，区分 default-only、case-only、交叉复用。 |
+| `DuplicationReverter`，`duplication_reverter.py:36-180`、`655-730`、`1056-1175` | 从 goto 周边找候选，构造 `AILMergeGraph`，按相似语句/子图拆分公共部分，再重接 predecessor、successor、jump target。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:2044-2125` 覆盖 exact duplicate、common statement tail、linear region tail、copied-prefix shared tail，但还没有通用 merge graph、条件重建和非 tail 拆分。`20260627-01` 属于这个 pass 的 copied-prefix tail 子项。 | P1：先做保守 single-entry / single-exit DAG merge graph，不碰循环和宽表达式等价。 |
+| `SwitchReusedEntryRewriter`，`switch_reused_entry_rewriter.py:20-132` | 基于 jump table entry，发现多个 switch head 复用同一 case entry 时，为后续 head 建 virtual goto，不复制 entry。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:1701-1787` 基于 shared switch case edge 建 synthetic goto，保留最低 id 的 entry，已有 reuse limit。缺口仍是 jump-table/recovered switch metadata 和复杂 default/case 混用。 | P5：和 default 复用共用 shared switch 表示，明确 default-only 不进 case-entry 逻辑。 |
+| `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 名称相同但语义差距大。NotDec 在 `SAILRDeoptimization.cpp:1789-1891` 现在主要复制已有 switch 的共享 case 线性 region，并不是从 lowered if-chain 恢复 switch。 | P4：实现真正 if-chain/range-tree 到 shared switch 的恢复。 |
+| `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:2137-2252` 能复制线性 return tail、branch/diamond/fork 的一部分、grouped predecessor 和部分 payload。差距是 Angr 的通用 endnode region 枚举、call limit、Phi/vvar 全量处理。 | P2 + P3：先补一般 single-entry return region，再补 Phi/vvar/copied payload 全量消费。 |
+| `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 在 `SAILRDeoptimization.cpp:2254-2414` 复制线性 region，支持 switch case/default edge kind 拆分和 grouped predecessor，但限制用 statement 数，不是 Angr 的 call counter。 | P6/P7：核对成本限制和真实样例行为。 |
+| `ConstPropOptReverter`，`const_prop_reverter.py` | SAILR/DREAM 共享的前置去常量传播 pass，用于让后续相似性更容易成立。 | 暂未实现，且不在当前 shared CFG deoptimization pipeline。 | 暂不放 P1-P5 主线；P7 真实样例如果显示它是主因，再单独写计划。 |
+| `ReturnDuplicatorHigh`、`ReturnDeduplicator` | SAILR/DREAM 共享外围 pass，不是当前 low-level SAILR deoptimization 主差距。 | 暂不适用。NotDec 当前目标是 shared CFG 级 pass parity。 | 只记录，不作为本计划完成条件。 |
+
+## 当前测试迁移状态
+
+Angr 侧相关测试主要在：
+
+- `/sn640/angr/tests/analyses/decompiler/test_decompiler.py`
+  - `test_sailr_motivating_example`
+  - `test_fmt_deduplication`
+  - `test_true_a_graph_deduplication`
+  - `test_deduplication_too_sensitive_split_3`
+  - `test_reverting_switch_lowering_*`
+  - `test_decompiling_reused_entries_between_switch_cases`
+  - `test_decompiling_abnormal_switch_case_*`
+- `/sn640/angr/tests/analyses/decompiler/test_switch_default_case_dup.py`
+  - `test_switch_case_header_mismatch_caused_by_cmovs`
+- `/sn640/angr/tests/analyses/decompiler/test_dogbolt_regressions.py`
+  - LoweredSwitchSimplifier infinite-loop regression。
+
+NotDec 当前已有覆盖：
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
+  - `DuplicationReverter` 覆盖 exact、payload origin、common statement tail、
+    linear tail、copied-prefix tail、switch predecessor redirect。
+  - `ReturnDuplicatorLow` 覆盖 goto return target、grouped predecessor、
+    parent goto source、nested/diamond/fork/branch return region 的一部分。
+  - `SwitchDefaultCaseDuplicator` 覆盖 shared default goto、forwarder、linear tail、
+    grouped predecessor、rollback。
+  - `SwitchReusedEntryRewriter` 覆盖 reused case entry、limit、default-only skip。
+  - `LoweredSwitchSimplifier` 目前覆盖已有 switch case target 复用，不覆盖 if-chain
+    switch recovery。
+  - `CrossJumpReverter` 覆盖 linear goto target、grouped predecessor、case/default
+    edge kind。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  当前只有 5 个真实/半真实样例，分别代理 ReturnDuplicatorLow、CrossJumpReverter、
+  LoweredSwitchSimplifier 的一部分。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  覆盖 angr dephication Phi、multi-Phi、copied switch region，以及 SAILR/Phoenix
+  对比样例。
+
+测试分类：
+
+| 类别 | 当前结论 |
+| --- | --- |
+| 可直接迁移 | Switch default/reused-entry 的小图行为、CrossJumpReverter 线性目标、ReturnDuplicatorLow 简单 return tail。已有一部分在 `structuring_analysis_test.cpp`。 |
+| 需要 IR/payload 代理 | `DuplicationReverter` merge graph、ReturnDuplicatorLow Phi/vvar、LoweredSwitchSimplifier if-chain。Angr 测试基于 AIL 和真实 binary，NotDec 需要 shared CFG proxy 或 Bench2 IR。 |
+| 暂不适用 | Angr `ConstPropOptReverter`、`ReturnDuplicatorHigh`、`ReturnDeduplicator` 的非 shared-CFG 主线测试。除非真实样例证明它们阻塞 P1-P5，否则先不算本计划完成条件。 |
+
+## 这次修改的文件和行
+
+- `logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+  - 将 P0 标题改成已完成。
+  - 在文末追加本节，记录 Angr 源码版本、NotDec 对照文件、pass 差距表、测试迁移状态。
+
+## 验证
+
+这次只改文档，不改反编译代码路径，所以没有跑性能 smoke。完成后检查：
+
+- `git diff -- logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+- `git status --short`
