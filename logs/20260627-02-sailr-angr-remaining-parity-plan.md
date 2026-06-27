@@ -2139,3 +2139,42 @@ switch 条件模型。
   但仍不是 Angr 的完整 end-node region 搜索。
 - 复杂度：1/5。复用已有 joined diamond region 收集，只新增 wrapper side 的入口锚定。
 - 维护成本：1/5。正向回归覆盖 branch 和 switch 两个入口，逻辑不引入新的复制机制。
+
+# 2026-06-27 P3 copied dephication 原 region 删除后再复制回归记录
+
+本次补 P3 的 shared Phi / vvar / copied payload 覆盖，没有改运行时代码。目标是固定一个
+容易退化的链路：dephication region 被复制后删除原 region，只留下 copied region；
+后续再复制这份 copied region 时，shared CFG 仍要保留 copied vvar、incoming 来源链和
+materialize context。
+
+测试通过说明当前 `StructuredCFG::duplicateRegion()`、`removeBlocks()` 和
+`materializeBlockBody()` 已经能支撑这个子场景。它不表示 P3 全量完成；P1/P2 继续扩大
+region 时，仍要继续补更多 copied payload / Phi / vvar 组合回归。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2616-2738`
+  - 新增 `testStructuredCFGDuplicateCopiedDephicationEdgeAfterOriginalRemoval()`。
+  - 构造 `incoming -> dephication edge -> merge`，先复制完整 region，再删除原
+    `{incoming, edge, merge}`。
+  - 断言原 vvar retired、第一份 copied vvar 和 incoming 仍有效。
+  - 再复制第一份 copied region，断言第二份 copied incoming 的 `SourceIncomingBlock`、
+    `SourceMergeBlock`、`SourceEdgeBlock` 和 `SourceTarget` 保留上一层来源。
+  - materialize 第二份 copied edge / merge，确认 dephication assignment 和 copied merge
+    vvar context 都能被 hook 读到。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11850`
+  - 在 `main()` 中调用新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+
+本次只新增 C++ 回归测试，没有改运行时代码，不涉及性能路径变化。
+
+## 影响判断
+
+- 实现效果：1/5。补了 P3 的一个具体覆盖点，但没有新增 runtime 能力。
+- 复杂度：1/5。只新增一个 shared CFG 层测试。
+- 维护成本：1/5。测试直接固定 dephication 元数据链，失败时能定位到复制或删除逻辑。
