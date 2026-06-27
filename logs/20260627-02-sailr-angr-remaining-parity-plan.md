@@ -329,3 +329,60 @@ NotDec 当前已有覆盖：
 
 - `git diff -- logs/20260627-02-sailr-angr-remaining-parity-plan.md`
 - `git status --short`
+
+# 2026-06-27 P1 路线检查
+
+检查 `StructuredCFG::materializeBlockBody()`、`duplicateRegion()`、`redirectPredecessors()`
+后确认：当前 shared CFG 能复制 region、重写 successor/case target、materialize payload，
+但还没有 Angr `AILMergeGraph` 那种“两个不同前缀合并到一个公共主体后，用恢复出的条件
+选择不同后缀”的 shared 条件表达。
+
+因此，P1 不能直接做“中间公共段 + 两边后缀重接”的 merge graph，否则会把 incoming-
+specific successor 语义藏到普通 goto 或 renderer 行为里。后续 P1 要先补 shared
+guard/condition 表达，或者先限定到不需要条件重接的更窄形状。
+
+本次没有改算法，继续转向 P2 的一般 return region；P2 已经有 `duplicateRegion()`、
+payload materialize 和 predecessor rewrite 基础，能更直接推进。
+
+# 2026-06-27 P2 实现记录
+
+本次只补 `ReturnDuplicatorLow` 的复制成本限制，还没有推进 Phi / vvar 的完整消费。
+Angr 用 call 数限制 return region；shared CFG 当前没有 call counter，所以先用语句数做
+保守上限，避免大 return region 被复制后放大 CFG。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:34`
+  - `ReturnDuplicatorLow` 构造函数增加 `MaxDuplicatedStatements` 参数。
+  - `ReturnDuplicatorLow` 增加同名成员，默认值是 16。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1699`
+  - 新增 `statementCountInRegion(const StructuredCFG &, const ReturnRegion &)`，
+    用 return region 里的 block statement 数估算复制成本。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2196`
+  - `ReturnDuplicatorLow::runOnGraph()` 在复制前跳过超过上限的 region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4400`
+  - 新增 `testReturnDuplicatorLowSkipsLargeReturnRegion()`，覆盖多 block return
+    region 超限时不复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9974`
+  - 在测试入口注册新用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-backends/Structuring/SAILRDeoptimization.h lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-retlimit.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=197.80 user=220.01 sys=1.57 maxrss=1263732`。过程中仍有既有 codegen
+  warning / error 日志，但最终生成输出并正常退出。
+
+## 影响判断
+
+- 实现效果：3/5。补上了 Angr return duplication 成本保护的一部分，但还没有补通用
+  return region 和 Phi / vvar。
+- 复杂度：1/5。只增加一个计数 helper 和一个早退出判断，不改变 CFG 重写路径。
+- 维护成本：1/5。参数默认值集中在 pass 构造函数，测试覆盖超限行为。
+
+后续 P2 仍要继续补 endnode region 枚举和更完整的 copied payload 处理；这次只是先把
+复制放大风险压住。
