@@ -2281,3 +2281,63 @@ copied target 还原为原 target。`NodeId` 不参与匹配，因为 structurin
   P6 仍要继续看真实样例里的 pass option 和 quality 细节。
 - 复杂度：1/5。只加一个匹配条件和两个回归测试。
 - 维护成本：1/5。逻辑集中在 `hasInitialSourceGoto()`，调用方无需额外分支。
+
+# 2026-06-27 P2/P5 return switch case/default overlap 拆边记录
+
+本次补 `ReturnDuplicatorLow` 的一个 switch 边界：同一个 switch predecessor 既通过
+case 边又通过 default/non-case 边指向同一个 return region 时，旧逻辑会把整个
+predecessor 当成一类边复制，容易把 case 和 default 的身份混在一起。
+
+这次只在已有 goto 质量判断能明确区分 `SwitchCase` / `SwitchDefault` 时拆开处理：
+case 只重定向 case target，default/non-case 只重定向普通 successor。缺少 edge kind
+或还是 `Unknown` 时直接跳过，不猜。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2105-2176`
+  - 新增 `gotoEdgeKindsFor()`，读取当前 source 到 target 的 goto edge kind 集合。
+  - 新增 `copyRegionForNonCasePredecessors()`，复制 return region 后只重定向
+    non-case successor。
+  - 新增 `copyRegionForSwitchCases()`，复制 return region 后只重定向 switch case。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2753-2827`
+  - `ReturnDuplicatorLow::runOnGraph()` 在 component 内把普通 predecessor、
+    switch-case predecessor、switch-default/non-case predecessor 分开复制。
+  - 同一个 switch 同时命中 case 和 non-case 时，依赖 `StructuredGotoEdgeKind`
+    决定该复制哪条边；edge kind 不明确时跳过该 component。
+  - 删除原 return region 的条件改为 `Region.Head` 已经没有 predecessor，避免只拆走
+    其中一类边时误删原 region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5223-5322`
+  - 新增 `testReturnDuplicatorLowSplitsSwitchCaseDefaultOverlapCaseOnly()`，
+    覆盖只复制并重定向 case target。
+  - 新增 `testReturnDuplicatorLowSplitsSwitchCaseDefaultOverlapDefaultOnly()`，
+    覆盖只复制并重定向 default/non-case successor。
+  - 新增 `testReturnDuplicatorLowSkipsAmbiguousSwitchCaseDefaultOverlap()`，
+    覆盖 edge kind 不明确时保持原 CFG。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12136-12138`
+  - 在 `main()` 中调用这三个回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-switch-overlap-return.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=159.25 user=181.76 sys=1.59 maxrss=1273400`。和上一轮
+  `155.96s`、`156.07s` 同口径接近，没有明显退化；过程中的 global/type warning
+  仍是 fortune 既有 codegen 输出。
+
+## 影响判断
+
+- 实现效果：2/5。补了 return region 在 switch case/default overlap 下的边身份保留，
+  但 P2 的一般 return region 和 P5 的 switch metadata 还没完整补齐。
+- 复杂度：2/5。新增了两个 return-region 专用复制 helper，但没有改通用复制入口。
+- 维护成本：2/5。逻辑依赖已有 `StructuredGotoEdgeKind`，不明确时保守跳过；后续如果补
+  merge graph / switch metadata，可以继续收窄或复用这条拆边路径。
