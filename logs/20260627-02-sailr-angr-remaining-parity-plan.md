@@ -2085,3 +2085,57 @@ ReturnDuplicatorLow 复制过宽 region。
   single-entry return region 搜索。
 - 复杂度：2/5。只是在已有 joined diamond helper 上增加一个直接到 join 的边界分支。
 - 维护成本：2/5。新增正反两个 C++ 回归测试，能固定“单侧允许、两侧拒绝”的边界。
+
+# 2026-06-27 P2 branch/switch wrapper joined diamond tail 实现记录
+
+本次继续补 P2 的一般 return region 枚举。上一轮已经能从 terminal 反推
+`branch -> left/right -> join -> return`，但如果这个 joined diamond 只是外层
+branch/switch 的一条 closed side，`prependBranchReturnRegion()` 和
+`prependSwitchReturnRegion()` 仍只能吸收线性 tail 或 direct diamond tail。
+
+这次只补 wrapper 侧的保守适配：复用已有 `collectJoinedDiamondReturnRegion()` 识别
+body 形状，再额外确认它就是当前 wrapper side 的 head，且入口 predecessor 是外层
+branch/switch。没有新增更宽的 region 搜索，也没有碰 P1 merge graph 或 P4 lowered
+switch 条件模型。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:175-177`
+  - 前置声明 `collectJoinedDiamondReturnRegion()`，让 wrapper-tail helper 复用同一套
+    joined diamond 识别逻辑。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:484-526`
+  - 新增 `collectClosedJoinedDiamondReturnTail()`。
+  - 扫描 closed terminal，调用 `collectJoinedDiamondReturnRegion()`，只接受
+    `Region.Head == Head` 且 `Head` 的唯一 predecessor 是 `ExpectedPred` 的情况。
+  - 用 `Seen` 拒绝和当前 region 已有 block 重叠的候选。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:730-738`
+  - 在 `collectClosedReturnTail()` 里追加 joined-diamond tail 候选。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6379-6482`
+  - 新增 `testReturnDuplicatorLowCopiesBranchWithJoinedDiamondReturnTail()`。
+  - 覆盖外层 branch 的一条 side 是普通 return tail，另一条 side 是 joined diamond
+    return tail，断言 copied join 和 copied return 正确重接。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6597-6706`
+  - 新增 `testReturnDuplicatorLowCopiesSwitchWithJoinedDiamondReturnTail()`。
+  - 覆盖外层 switch case 指向 joined diamond return tail，断言 copied switch case target
+    指向 copied joined head。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11811-11814`
+  - 在 `main()` 中调用两个新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过，`elapsed 0.98`。上一轮同口径 direct-to-join joined diamond 验证约 `elapsed 0.97`，
+  没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了 branch/switch wrapper 下 joined diamond return tail 的缺口，
+  但仍不是 Angr 的完整 end-node region 搜索。
+- 复杂度：1/5。复用已有 joined diamond region 收集，只新增 wrapper side 的入口锚定。
+- 维护成本：1/5。正向回归覆盖 branch 和 switch 两个入口，逻辑不引入新的复制机制。
