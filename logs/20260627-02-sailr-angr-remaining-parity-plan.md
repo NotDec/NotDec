@@ -733,3 +733,49 @@ LLVMFunctionCFGBuilder、SAILR dephication mode、shared structuring 和 C backe
   binary 测试的完整迁移。
 - 复杂度：1/5。只加一个脚本 case。
 - 维护成本：1/5。输入 IR 短，断言直接对应 copied/original dephication 输出。
+
+# 2026-06-27 P6 infinite-loop quality parity 记录
+
+本次继续推进 P6。Angr 的 `StructuringOptimizationPass._improves_relative_quality()`
+只比较 `for`、`while`、`do-while` 三类 loop trade；`ControlFlowStructureCounter`
+没有 infinite-loop 计数。NotDec 之前在 `totalLoops()` 里把 `InfiniteLoop` 算进总数，
+会让 “for 变少但同时出现 infinite loop” 被当成同总数 loop trade 拒绝，和 Angr
+质量门槛不一致。
+
+这次只改相对质量比较，不改 `ControlFlowStructureCounter` 的采集字段。`InfiniteLoop`
+仍然可统计，但不参与 Angr parity 的 loop trade 总数。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/StructuringQuality.cpp:60`
+  - 修改 `totalLoops()`，只返回 `WhileLoops + DoWhileLoops + ForLoops`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7586`
+  - 新增 `testRelativeQualityIgnoresInfiniteLoopsForAngrParity()`，覆盖 `ForLoops`
+    变少但 `InfiniteLoops` 增加时不被相对质量检查拒绝。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10454`
+  - 在测试入口注册该用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/StructuringQuality.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-quality-loop-parity.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=155.76 user=177.84 sys=1.44 maxrss=1269144`。和前两轮
+  `197.80s`、`197.66s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。补齐一个 P6 质量门槛差异，但 P6 仍剩 copied target / virtual goto
+  的真实样例效果核对。
+- 复杂度：1/5。只改质量统计 helper 和一个单元测试。
+- 维护成本：1/5。行为直接对应 Angr counter 字段，后续如果 NotDec 引入 for-loop
+  节点也不需要改这条规则。
