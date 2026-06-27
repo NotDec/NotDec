@@ -969,3 +969,47 @@ vvar，同时保留 `SourceTarget` 指回原 vvar。
   但不新增 Angr 行为。
 - 复杂度：1/5。只加一个局部 regression。
 - 维护成本：1/5。断言直接固定 CFG、vvar 和 incoming 状态，后续失败原因比较明确。
+
+# 2026-06-27 P7 branch return region smoke 记录
+
+本次没有改算法，只把 `ReturnDuplicatorLow` 的 branch return region 覆盖提升到
+`notdec-llvm2c` 脚本层 smoke。目标是确认 LLVM IR 提升、SAILR structuring 和 C 输出
+都能稳定处理“两条 switch case 共享一个 `branch -> then/else return`”的形状。
+
+这个 smoke 仍是 P2/P7 的代理覆盖，不表示 Angr 的一般 return region 枚举已经完全迁移。
+它只固定一个具体形状：两个 switch case 都进入同一个 branch return region，输出里要保留
+两个 case，各自内联 `if (a == b)` 和两条 return，不允许回退成 `goto branch` 或
+`goto then/else`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:435`
+  - 新增 `sailr_branch_return_region` case，构造两个 switch case 共享一个 branch
+    return region 的 IR。
+  - 断言输出包含 `switch (x)`、`case 1:`、`case 2:`、`if (a == b)`、
+    `return 7;` 和 `return 8;`，并且不出现 `goto branch`、`goto then`、
+    `goto else`、`phi`、`reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p7-branch-return-smoke.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.95 user=179.35 sys=1.45 maxrss=1270196`。和上一轮
+  `160.55s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了一个真实提升链路上的 branch return region 脚本 smoke，但仍只是
+  P2/P7 代理，不是 Angr 全量迁移。
+- 复杂度：1/5。只加一个短 IR case。
+- 维护成本：1/5。断言围绕核心结构和禁止的 goto，后续诊断成本低。
