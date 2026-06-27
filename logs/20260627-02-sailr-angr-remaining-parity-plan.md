@@ -924,3 +924,48 @@ Angr binary 用例迁移和更多 end-node region 形状还要继续补。
   smoke，但仍没有迁移真实 Angr binary 用例。
 - 复杂度：1/5。只加一个短 IR smoke case。
 - 维护成本：1/5。断言只检查核心结构和禁止的 goto，不依赖完整格式细节。
+
+# 2026-06-27 P2/P3 delete original dephication return end 覆盖记录
+
+本次没有改算法，只补一个 C++ regression。它覆盖 `ReturnDuplicatorLow` 在所有
+dephication incoming 边都被复制后，删除原 return merge block 的情况。
+
+这个用例固定几个关键状态：两条 synthetic dephication edge 分别复制到不同的
+return copy；原 block 2 被删除；原 vvar 被标记 retired；原 merge block 的 vvar
+上下文被清空；剩下的 incoming 都落在复制后的 edge context 上，并且指向不同的 copied
+vvar，同时保留 `SourceTarget` 指回原 vvar。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4528`
+  - 新增
+    `testReturnDuplicatorLowDeletesOriginalReturnEndNodeWithDephicationVVars()`，
+    构造两个 predecessor 都通过 synthetic dephication edge 跳到同一个 return
+    merge 的形状，断言复制后原 return merge 删除、payload rewrite 生效、copied
+    vvar 和 copied incoming 都保持独立。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10615`
+  - 在测试入口注册该用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-delete-original-dephi.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=160.55 user=183.56 sys=1.62 maxrss=1271640`。和最近几轮
+  `155.87s`、`157.36s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补住 copied dephication return end 全覆盖后删除原 merge 的测试缺口，
+  但不新增 Angr 行为。
+- 复杂度：1/5。只加一个局部 regression。
+- 维护成本：1/5。断言直接固定 CFG、vvar 和 incoming 状态，后续失败原因比较明确。
