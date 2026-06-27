@@ -1,0 +1,247 @@
+# 原始 prompt
+
+> logs/20260627-01-sailr-angr-p0-copied-prefix-tail.md 这里不是分析了一部分，难道是里面分析的还没修完，还是说之前有没发现完全的？可能得写一个计划继续完整修复所有差距
+
+# 和 20260627-01 的关系
+
+`logs/20260627-01-sailr-angr-p0-copied-prefix-tail.md` 只完成了 P0 里的一小块：
+`DuplicationReverter` 的 shared-tail 候选允许已经 materialized 的 copied region
+prefix 参与合并。
+
+它没有表示 P0 已完成，也没有表示 SAILR 已经和 Angr 完全对齐。现在的情况是：
+
+- 已知的大差距还在，尤其是完整 merge graph、一般 return region、真正 lowered
+  switch 识别。
+- 也可能还有没暴露出来的细差距，需要继续对照 Angr 源码和迁移测试来发现。
+- 之前的实现记录是“补了一条确定安全的边界”，不是“完整修复所有差距”。
+
+# 背景
+
+当前 llvm2c 的 SAILR 已经有完整框架：SAILR structurer、deoptimization pipeline、
+trial / rollback / quality guard，以及 `SwitchDefaultCaseDuplicator`、
+`DuplicationReverter`、`SwitchReusedEntryRewriter`、`LoweredSwitchSimplifier`、
+`ReturnDuplicatorLow`、`CrossJumpReverter`。
+
+这说明现在不是“有没有 SAILR”的问题，而是每个 pass 还只覆盖了 Angr 语义的一部分。
+后续要做的不是继续堆零散 case，而是把差距按影响排序补完，并给每个保守差异留
+明确记录。
+
+# 目标
+
+目标是把当前实现从“接近 Angr 的框架和常见子集”推进到“已知 Angr SAILR 语义都
+有对应实现或明确说明为什么不做”。
+
+完成后应该能做到：
+
+1. 常见重复 region、shared tail、return tail、switch default / reused-entry 的输出
+   不再明显比 Angr 差。
+2. copied / virtual block 的 body、变量来源、edge、switch case/default target 都在
+   shared CFG 里表达，不靠 C 或 Solidity renderer 猜。
+3. 每个 Angr SAILR 相关 pass 都有 NotDec 对应状态：完成、刻意保守、暂不适用、
+   或还没做。
+4. 新发现的差距先归类，再决定是否实现，不再混进已有实现日志里。
+
+# 当前已完成的部分
+
+这些能力已经有基础，不需要重做：
+
+- SAILR pass pipeline 和 shared optimization wrapper。
+- pass 失败后的 rollback 和基本 quality guard。
+- copied / synthetic block 的独立 `BlockId` 和来源身份。
+- `CrossJumpReverter` 的 shared CFG 子集。
+- `ReturnDuplicatorLow` 的线性 return tail、部分 branch / diamond / grouped
+  predecessor 复制。
+- `DuplicationReverter` 的 exact merge、common statement tail、linear region tail、
+  copied-prefix shared tail。
+- 已有 switch 的部分 default 复用和 case entry 复用处理。
+- angr dephication 模式的最小入口、shared Phi edge payload、部分 vvar / copied
+  payload 回归。
+
+这些是后续继续补的基础，不等于完整对齐。
+
+# 剩余差距和处理顺序
+
+## P0：先建立 Angr 对照清单
+
+先把“到底差什么”列清楚。否则容易继续修一个小 case，就误以为对应 pass 完成。
+
+要做：
+
+- 对照 Angr 当前 SAILR / optimization pass 源码，列出每个类和关键方法。
+- 给 NotDec 现有实现标状态：已覆盖、部分覆盖、没覆盖、NotDec 暂不适用。
+- 把 Angr SAILR 相关测试分成三类：可直接迁移、需要 IR/payload 代理、不适用。
+- 每次实现后更新这个清单，避免日志分散后看不出总进度。
+
+判断标准：
+
+- 有一张 pass 级别的差距表。
+- `20260627-01` 这种小实现会被标成某个 pass 的子项完成，而不是 pass 完成。
+- 后续发现的新差距有入口记录。
+
+## P1：补 `DuplicationReverter` 的完整 merge graph 语义
+
+这是对输出影响最大的差距。当前 NotDec 还是保守 tail merge；Angr 会找相似子图，
+拆出公共部分，再把图重接回去。
+
+要做：
+
+- 候选仍先围绕 goto 和已有 quality guard，不做全图激进搜索。
+- 支持小型 single-entry / single-exit DAG region，不先碰循环 region。
+- 用 payload source identity、normalized statement、读写副作用信息做相似判断。
+- 支持 prefix / common / suffix 拆分，不只合并完全相同尾部。
+- 构造 shared merge graph，把公共主体变成显式 shared block 或 region。
+- 边、case target、default target、dephication context 都按 shared CFG 身份重写。
+- 失败时必须完整回滚。
+
+暂时不做：
+
+- 不做很宽的表达式等价证明。
+- 不移动有副作用或依赖不清楚的 statement。
+- 不为了减少 goto 破坏 payload 来源。
+
+判断标准：
+
+- 能合并“前缀不同、中间或尾部相同、后缀可重接”的两个相似 region。
+- 至少有一个非 exact-match、非纯 tail 的 shared merge 测试。
+- 不能合并的相似 region 有明确 skip 原因。
+- 合并后 goto 数或结构质量改善，且语义不靠 renderer 特判。
+
+## P2：补 `ReturnDuplicatorLow` 的一般 return region
+
+这是第二大差距。现在已经覆盖不少 return tail，但还不是 Angr 那种从 end node 往前找
+single-entry return region 的完整做法。
+
+要做：
+
+- 从所有 end node 反推 return region，而不是只从当前可识别 tail 形状出发。
+- 支持更一般的 branch / switch / 多 block return region。
+- 按 connected predecessor component 分组复制，避免复制过多。
+- 复制时处理 copied payload、Phi incoming、vvar 映射和 dephication context。
+- 删除原 region 时同步更新剩余 incoming 和 edge 元数据。
+- 保留 block / statement / call 成本限制。
+
+判断标准：
+
+- 一般 single-entry return region 能被复制，不只线性或 diamond。
+- 同一个 return region 被不同 predecessor 复制后，payload 可以有不同值来源。
+- Phi / vvar 不需要 renderer 猜。
+- 失败和部分复制都能回滚。
+
+## P3：补 shared Phi / vvar / copied payload 的全量消费
+
+这不是单独为了好看，而是 P1、P2 继续扩张的前提。没有这层，复制 region 很容易
+结构看起来对，但值来源错。
+
+要做：
+
+- 收口 legacy demote 和 angr dephication 两条路线的边界，默认先不急着切换。
+- 把 copied block 的 payload materialize 统一到 shared 层。
+- copied vvar、`vvar_to_vvar`、Phi incoming 删除/重定向都能被 pass 使用。
+- C 和 Solidity 消费同一份 shared 结果。
+
+判断标准：
+
+- copied return region 和 copied switch region 都有 predecessor-sensitive payload。
+- shared CFG 能解释每个 copied value 的来源。
+- legacy / angr 模式差异可解释。
+- 默认切换前有明确对照测试。
+
+## P4：实现真正的 `LoweredSwitchSimplifier`
+
+当前这个 pass 主要处理已有 switch case target 复用，还没有从 if-chain 恢复 switch。
+
+要做：
+
+- 先支持 `x == const` / `x != const` 链。
+- 再支持简单范围比较形成的 case/default 拆分。
+- 识别同一个 switch variable，收集 case value 和 default target。
+- 在 shared CFG 里生成 switch 语义，而不是 renderer 侧把 if-chain 打印成 switch。
+- 和 default / reused-entry pass 共用 case/default 表示。
+
+判断标准：
+
+- lowered if-chain 能恢复成 switch。
+- 普通 if-else 不被误识别。
+- case value、default target、fallthrough 都稳定。
+- 后续 case 复制仍走 shared CFG。
+
+## P5：补 switch default / reused-entry 的剩余语义
+
+这部分影响比 P1/P2/P4 小，但复杂 switch 会明显受影响。
+
+要做：
+
+- default 复用不只看 `Switch` terminator，还要结合 switch-case construct。
+- reused-entry 优先表达 virtual goto 语义，只有必要时复制 region。
+- default-only、case-only、case/default 交叉复用要分开处理。
+- jump-table 或 recovered switch 元数据进入 shared switch 表示。
+
+判断标准：
+
+- 多个 switch 共用 default 不再缠成 goto 网。
+- 多个 case 共用 entry 时不会错误 fallthrough。
+- default 复用不会被误当普通 case 复用。
+
+## P6：对齐 pass options、顺序和质量判断
+
+这部分不一定直接改变单个样例输出，但会影响稳定性。
+
+要做：
+
+- 重新核对 pass 顺序。
+- 核对 `RequireGotos`、`PreventNewGotos`、`StrictlyLessGotos`、
+  `MustImproveRelativeQuality`、`MaxOptIters`。
+- 给每个 pass 的 block / statement / call limit 留记录。
+- 质量判断对 copied target、virtual goto、normalized goto target 保持一致。
+
+判断标准：
+
+- 每个默认 option 都有 Angr 对照或 NotDec 保守理由。
+- 不接受 goto 更多、结构更差的候选。
+- 不因为 copied block id 不同误判质量退化。
+
+## P7：迁移 Angr 测试和真实样例分类
+
+最后用测试确认不是只修了手写 proxy。
+
+要做：
+
+- 把 Angr SAILR 相关测试继续迁到 shared regression。
+- 对不能直接迁移的测试，说明是 IR 表达差异、payload 差异，还是 NotDec 暂不适用。
+- 用真实样例分类：pass 没触发、trial 拒绝、结构改善、结构退化、payload 问题。
+- 每次扩大算法后做性能 smoke。
+
+判断标准：
+
+- `structuring-analysis-test` 覆盖每个关键差距。
+- `run_sailr_bench2_migration.py` 不再主要依赖 proxy 名字撑覆盖。
+- fortune 或当前关注样例同口径时间没有明显退化。
+
+# 总完成条件
+
+只有同时满足下面条件，才算“完整修复已知差距”：
+
+1. 有 Angr SAILR pass 对照清单，每个差异都有状态。
+2. `DuplicationReverter` 不再停留在 exact/common-tail/linear-tail 子集，至少覆盖
+   保守 merge graph。
+3. `ReturnDuplicatorLow` 覆盖一般 single-entry return region，并正确处理 copied
+   payload / Phi / vvar。
+4. `LoweredSwitchSimplifier` 能从常见 lowered if-chain 恢复 switch。
+5. switch default / reused-entry 的复杂复用有 shared CFG 表达。
+6. copied / virtual block 的变量和值来源不依赖 C 或 Solidity renderer。
+7. pass options 和 quality guard 差异都有记录。
+8. Angr 相关测试迁移或明确归类完成。
+9. `structuring-analysis-test`、`run_structuring_smoke.py`、
+   `run_sailr_bench2_migration.py` 通过。
+10. fortune 或同等级真实样例性能 smoke 没有明显退化。
+
+# 风险
+
+最大风险是把“结构看起来更像 Angr”和“值来源真的正确”混在一起。后续只要涉及
+copied region，就必须先看 payload / vvar / dephication context 是否能表达。
+
+第二个风险是把 Angr 的 AIL 语义硬套到 LLVM payload 上。能对齐的要对齐，不能直接
+对齐的要写清楚差异，不能静默假装一样。
+
+第三个风险是测试继续停留在 proxy。proxy 可以帮助落地 shared CFG 行为，但最终
+必须用真实 Angr 测试和真实样例分类校验。
