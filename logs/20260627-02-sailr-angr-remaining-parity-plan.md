@@ -647,3 +647,48 @@ merge vvar context 一起传给 materialize hook。P3/P7 剩余的真实差异�
   但没有新增 Angr 迁移样例，也没有解决 P1/P4 需要 shared condition metadata 的问题。
 - 复杂度：1/5。只加测试，不改 shared CFG copy 代码。
 - 维护成本：1/5。测试是局部构图，失败时能直接定位到 payload/context copy 路径。
+
+# 2026-06-27 P2/P3 return end-node dephication 覆盖记录
+
+本次继续补 `ReturnDuplicatorLow` 的组合回归测试，没有改算法。Angr 的
+`ReturnDuplicatorBase._find_endnode_regions()` 对多个 predecessor 指向同一个 end
+node 的情况，会把 end node 本身作为 return region。NotDec 已经有普通 return target
+复制测试，但还缺一个直接 return merge block 带 dephication vvar 的覆盖。
+
+新增测试用 LLVM builder 同类形状建图：两个 predecessor 先进入 dephication edge
+block，再进入同一个 return merge block。只复制带 goto 的那条 edge，确认 copied
+return merge 拿到 copied vvar，copied edge assignment 改写到 copied vvar，未复制的
+原 edge 和原 merge 仍保持原 vvar。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4393`
+  - 新增 `testReturnDuplicatorLowCopiesReturnEndNodeWithDephicationVVars()`。
+    用例覆盖直接 return end node 作为复制 region 时，dephication edge block 的
+    assignment、copied merge vvar、原 edge incoming、原 merge vvar 都保持正确。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10384`
+  - 在测试入口注册该用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-endnode-dephi-copy.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=197.66 user=219.95 sys=1.71 maxrss=1272132`。和上一轮
+  `197.89s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了 direct end-node return region 和 dephication edge block 的组合
+  覆盖，但 P2 的更完整 endnode region 枚举、P3 的全量 copied payload 消费还没完成。
+- 复杂度：1/5。只加测试，不改 CFG 复制和 dephication 表。
+- 维护成本：1/5。测试局部、边界明确，失败时能直接定位到 return end-node copy 或
+  dephication edge assignment materialize。
