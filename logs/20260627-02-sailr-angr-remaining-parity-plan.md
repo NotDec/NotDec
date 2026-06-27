@@ -599,3 +599,51 @@ shared-default goto 阶段没有改。已有 `replaceDefaultSwitchSuccessor()` �
 
 P5 剩余工作仍是：default / reused-entry 共用 recovered switch 表示，default-only、
 case-only、case/default 交叉复用有更明确的 shared edge kind。
+
+# 2026-06-27 P3/P7 copied payload 覆盖记录
+
+本次没有改算法，只补一个 shared structuring 回归测试。目标是把
+`ReturnDuplicatorLow` 的 switch return region 复制、dephication vvar 复制、
+payload materialize 三件事放在同一个用例里验证，避免后续只覆盖 branch return
+region 或普通 switch copy 时漏掉组合路径。
+
+这个测试不能代表 P3/P7 已完成。它只确认当前 shared CFG copy 机制已经能把 copied
+switch 的 condition、case value、return payload、dephication assignment 和 copied
+merge vvar context 一起传给 materialize hook。P3/P7 剩余的真实差异仍要靠更多 Angr
+迁移用例和真实样例继续看。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5777`
+  - 新增 `testReturnDuplicatorLowCopiesSwitchReturnRegionWithDephicationVVars()`。
+    用例构造两个外部 predecessor 进入同一个 switch，其中一个 predecessor 触发
+    `ReturnDuplicatorLow` 复制完整 switch return region；同时给 default return merge
+    block 添加 dephication vvar。
+  - 测试里的 materialize hook 检查 copied vvar、dephication assignment、
+    switch condition、case value 和 copied merge return payload 都带着正确 context，
+    并把 payload id 改写为 `+1000`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10270`
+  - 在测试入口注册该用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p3-switch-dephi-copy.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=197.89 user=219.93 sys=1.69 maxrss=1271600`。和上一轮
+  `193.36s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了 copied switch return region 与 dephication vvar 的组合覆盖，
+  但没有新增 Angr 迁移样例，也没有解决 P1/P4 需要 shared condition metadata 的问题。
+- 复杂度：1/5。只加测试，不改 shared CFG copy 代码。
+- 维护成本：1/5。测试是局部构图，失败时能直接定位到 payload/context copy 路径。
