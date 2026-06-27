@@ -1690,3 +1690,37 @@ diamond return tail。
 - 复杂度：1/5。只新增一个 smoke case。
 - 维护成本：1/5。断言固定结构关键词和 goto/reg2mem 退化点；本次没有改运行时代码，
   不涉及性能路径变化。
+
+# 2026-06-27 P7 unreachable tail smoke 记录
+
+本次没有改算法，只把 P2 的 unreachable end-node 覆盖提升到 `notdec-llvm2c`
+脚本层 smoke。这个用例固定一个具体形状：两个 switch case 共享一个普通 tail，
+tail 后面是 `unreachable` 终点。
+
+这个 smoke 仍是 P2/P7 代理覆盖，不表示 Angr 的一般 end-node region 枚举已经完成。
+它只保证当前真实 `notdec-llvm2c` 链路不会把 `tail -> unreachable` 共享区域退回成
+`goto tail/trap` 或 `reg2mem`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:400-429`
+  - 在 `CASES` 里新增 `sailr_unreachable_tail_region`。
+  - 构造两个 switch case 共享 `tail -> trap`，其中 `trap` 是 `unreachable`。
+  - 断言输出保留 `switch (x)`、两个 case、2 个 `a + 1;` 和 `return 0;`，
+    同时不出现 `goto tail`、`goto trap`、`phi`、`reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 unreachable end-node tail 的脚本级回归覆盖，但没有新增
+  Angr 的通用 region 枚举能力。
+- 复杂度：1/5。只新增一个 smoke case。
+- 维护成本：1/5。断言固定结构关键词和 goto/reg2mem 退化点；本次没有改运行时代码，
+  不涉及性能路径变化。
