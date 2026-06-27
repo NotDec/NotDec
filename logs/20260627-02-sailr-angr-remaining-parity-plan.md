@@ -692,3 +692,44 @@ return merge 拿到 copied vvar，copied edge assignment 改写到 copied vvar�
 - 复杂度：1/5。只加测试，不改 CFG 复制和 dephication 表。
 - 维护成本：1/5。测试局部、边界明确，失败时能直接定位到 return end-node copy 或
   dephication edge assignment materialize。
+
+# 2026-06-27 P7 copied return end smoke 记录
+
+本次把上一轮 direct return end-node + dephication 的 C++ 回归，补到
+`notdec-llvm2c` 脚本层 smoke。目的不是证明 P2/P3 完成，而是让真实
+LLVMFunctionCFGBuilder、SAILR dephication mode、shared structuring 和 C backend
+一起覆盖这个代理形状。
+
+新增 IR 用一个 switch 的两个 case 共享带 Phi 的 return block。`structured-sailr`
+在 `--sailr-dephication-mode=angr` 下会复制其中一条 case 到 copied return end，
+预期输出同时出现 copied vvar 返回和原 vvar 返回，并且不能泄漏 `phi` 或 `reg2mem`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:366`
+  - 新增 `sailr_angr_dephication_copied_return_end` case，覆盖 copied return end 通过
+    `notdec-llvm2c` 输出 `p_copy1 = a; return p_copy1;`，原共享分支输出
+    `p = b; return p;`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p7-return-end-smoke.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=197.80 user=219.84 sys=1.83 maxrss=1271852`。和上一轮
+  `197.66s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。把一个 P2/P3 代理形状提升到了脚本层 smoke，但仍不是 Angr 真实
+  binary 测试的完整迁移。
+- 复杂度：1/5。只加一个脚本 case。
+- 维护成本：1/5。输入 IR 短，断言直接对应 copied/original dephication 输出。
