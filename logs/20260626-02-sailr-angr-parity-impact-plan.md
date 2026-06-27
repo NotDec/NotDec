@@ -59,6 +59,49 @@ NotDec 第一阶段不需要一次做到 Angr 的全部表达式相似性。建�
 - 不因为相似判断过宽导致语义错。
 - 失败候选能干净回滚。
 
+## 2026-06-27 实现记录：ReturnDuplicatorLow 补 branch tail 的闭合 return 分支
+
+这轮没有继续往“通用 single-entry return region”硬推，那个方向会把
+`ReturnDuplicatorLow` 的已有小样例冲掉。最后只保留了一个更窄的补强：当
+`collectClosedLinearReturnTail()` 往前收尾部时，如果遇到的是一个两路 branch，
+且两个后继都是闭合 return/unreachable 终点，就把这条 branch 及其两个闭合
+后继一起纳入 return tail。这个补强只动 return tail 的一条窄边界，不碰 renderer，
+也不碰 dephication 默认开关。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:289-332`：
+  `collectClosedLinearReturnTail()` 现在在 fallthrough 链之外，也能接受一层
+  `branch + two closed terminal successors` 的 return tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5004-5108`：
+  新增 `testReturnDuplicatorLowCopiesNestedReturnRegion()`，覆盖一个带内层 branch
+  return tail 的 copied return region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9891-9893`：
+  把新测试接进 `main()`。
+
+验证：
+
+```bash
+cmake --build build --target structuring-analysis-test -j4
+ASAN_OPTIONS=detect_leaks=0 LSAN_OPTIONS=detect_leaks=0 ./build/external/NotDec-llvm2c/bin/structuring-analysis-test
+python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-sailr-branch-return.c --tr-level=2
+```
+
+结果：
+
+- 新增的 nested return 测试在当前 binary 里能正常跑过。
+- `structuring-analysis-test` 在关闭 leak detection 后通过。
+- `run_structuring_smoke.py` 通过。
+- `run_sailr_bench2_migration.py` 通过。
+- fortune smoke 通过，`elapsed=202.02 user=229.03 sys=2.20 maxrss=1272668`。
+
+当前判断：
+
+- 这轮只算补了一小块 return tail 边界，离“通用 single-entry return region”还差很远。
+- 下一步如果继续往 P1 推，应该回到和 Angr 更一致的 return/phi 语义边界，而不是再硬加更宽的图收集器。
+
 ## P1：完整化 ReturnDuplicatorLow 的 return region 复制
 
 这是第二大影响点。return tail 共享非常常见，处理好以后会明显减少 goto return。
