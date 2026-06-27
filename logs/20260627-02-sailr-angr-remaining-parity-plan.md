@@ -1982,3 +1982,57 @@ legacy/angr 对比。目的不是新增恢复能力，而是固定真实 CLI 上
 - 复杂度：1/5。只新增一个 C++ 回归测试。
 - 维护成本：1/5。测试直接调用 pass 入口，失败时能定位到 CrossJump 成本 gate；本次
   没有改运行时代码，不涉及性能路径变化。
+
+# 2026-06-27 P2 joined diamond return region 实现记录
+
+本次继续推进 P2 的一般 return region 枚举。之前 `ReturnDuplicatorLow` 能处理两侧直接
+汇到 return 的 diamond，也能处理一些 branch/switch wrapper，但还不能处理一个常见的
+single-entry 形状：`branch -> left/right -> join -> return`。这个形状的两侧先汇到一个
+普通 fallthrough join，再由 join 线性走到 closed terminal。
+
+这次只补这个保守子集，不做 Angr 的完整 single-entry region 搜索。新逻辑要求：
+
+- terminal 是 return 或 unreachable。
+- shared tail 从 join 到 terminal 必须是 fallthrough 单后继链。
+- 两条 private side 必须都是 fallthrough 单后继链，并回溯到同一个 branch head。
+- 不接受 loop、direct-to-join side、nested branch side、非线性 shared tail。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:480`
+  - 新增 `collectReverseFallthroughSideToBranch()`。
+  - 从 join 的两个 predecessor 向上回溯 private side，要求 side block 本身是
+    fallthrough 单后继，并最终回到同一个 branch head。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:536`
+  - 新增 `collectJoinedDiamondReturnRegion()`。
+  - 从 terminal 反推 shared tail，找到两前驱 join，再收集两个 private side，最后生成
+    `Head, left side, right side, shared tail` 的 region block 顺序。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:861`
+  - 在 `findLinearReturnRegion()` 中，当普通 diamond return region 不匹配时，再尝试
+    joined-diamond region，并保持已有 tail-to-head prepend 约定。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5895`
+  - 新增 `testReturnDuplicatorLowCopiesJoinedDiamondReturnRegion()`。
+  - 构造两个 predecessor 共享 `branch -> left/right -> join -> ret`，确认原 region 被删除，
+    两个 predecessor 分别得到完整 copied region，且 copied left/right 仍汇到同一 copied join。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11479`
+  - 在 `main()` 中调用新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过，`elapsed 0.98`。上一轮同口径 CrossJump 边界验证约 `elapsed 1.00`，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。补了一个真实的 P2 single-entry return region 缺口，但仍不是 Angr
+  的完整 end-node region 搜索。
+- 复杂度：2/5。新增一个保守收集 helper，约束写在代码里；没有改 renderer，也没有动
+  shared CFG copy API。
+- 维护成本：2/5。逻辑比原来的 direct diamond 多一层 join/tail 回溯，但边界清楚，
+  回归测试能覆盖误删原 region 和 copied join 重接。
