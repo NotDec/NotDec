@@ -2543,3 +2543,52 @@ switch 的 case-only、default-only 和 unknown edge kind，但还缺“case 和
 - 实现效果：1/5。补齐上一节 single-switch overlap 的 both-edge 回归，不新增能力。
 - 复杂度：1/5。只新增一个 C++ 测试。
 - 维护成本：1/5。断言直接固定 default copy、case copy 和原 return 删除状态。
+
+# 2026-06-27 P5/P6 CrossJump single-switch case/default both-edge 记录
+
+本次继续补 switch case/default edge kind 在 `CrossJumpReverter` 里的消费。此前
+`ReturnDuplicatorLow` 已经能在单个 switch 的 case/default 都指向同一 target 时同时拆
+两条逻辑边，但 `CrossJumpReverter` 仍用 `if / else if`，同一 switch 同时带
+`SwitchCase` 和 `SwitchDefault` goto 时只会复制 case 边，default 边还留在原 target。
+
+这次只修明确 edge kind 的场景：没有 `Unknown`，且至少有 `SwitchCase` 或
+`SwitchDefault` 时，case/default 可以同时进入对应复制路径；仍有 `Unknown` 时继续保守
+跳过。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2979-2988`
+  - `CrossJumpReverter::runOnGraph()` 在 case/default overlap 分支里允许同一个 switch
+    同时加入 `CasePreds` 和 `NonCasePreds`。
+  - `Unknown` 或没有明确 case/default edge kind 时仍设置 `HasAmbiguousSwitchPred` 并跳过。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3806-3859`
+  - 新增 `testCrossJumpReverterSplitsSingleSwitchCaseDefaultBothEdges()`。
+  - 覆盖单个 switch 的 case/default 都指向同一线性 target，且同时有
+    `SwitchCase` / `SwitchDefault` goto 时，两条边分别复制，原 target/tail/exit 被删除。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12452`
+  - 在 `main()` 中调用新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-crossjump-single-switch-both-edge.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=155.54 user=178.43 sys=1.59 maxrss=1274612`。和上一轮
+  `156.46s` 同口径接近，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有 codegen 输出。
+
+## 影响判断
+
+- 实现效果：2/5。补齐 CrossJump 对 single-switch case/default both-edge 的消费，减少
+  P5/P6 edge kind 已存在但 pass 没完整使用的缺口。
+- 复杂度：1/5。只把互斥分支改成可同时收集 case/default，不改 copy helper。
+- 维护成本：1/5。边界清楚：只接受明确 edge kind，Unknown 继续跳过。
