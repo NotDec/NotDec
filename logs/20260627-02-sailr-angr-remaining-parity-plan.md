@@ -831,3 +831,52 @@ switch return region 重写。这个边界先保守保留，避免用 Angr 没�
   goto 的真实样例效果还需要继续核对。
 - 复杂度：1/5。只增加一次采集后清理，不改 structuring 和 CFG copy 流程。
 - 维护成本：1/5。规则直接对应 Angr counter 后处理，边界也通过测试固定。
+
+# 2026-06-27 P2 prefixed diamond return region 记录
+
+本次继续推进 P2 的一般 return region 枚举。当前 NotDec 已能识别 diamond return
+region，但入口直接停在 diamond branch。如果 diamond 前还有一个简单 fallthrough
+wrapper，那么外部 predecessor 只会落在 wrapper 上，`ReturnDuplicatorLow` 看不到
+多个外部 predecessor，结果不会复制这个 return region。
+
+这次只处理保守情况：diamond region 前面的单前驱、单后继、fallthrough wrapper。
+不处理带条件、switch、循环或多 successor 的前缀，也不引入新的 shared 条件模型。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:441`
+  - 新增 `prependFallthroughPrefix()`，在 diamond region 识别后，把简单 fallthrough
+    wrapper 放进同一个 `ReturnRegion`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:545`
+  - `findLinearReturnRegion()` 在 `collectDiamondReturnRegion()` 成功后调用
+    `prependFallthroughPrefix()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5471`
+  - 新增 `testReturnDuplicatorLowCopiesPrefixedDiamondReturnRegion()`，覆盖
+    `fallthrough -> diamond -> shared return` 形状，只复制有 goto 的 predecessor，
+    原 region 保留给另一条 predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10507`
+  - 在测试入口注册该用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-prefixed-diamond-return.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.36 user=179.63 sys=1.69 maxrss=1272084`。和上一轮
+  `155.94s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了 P2 的一个具体 end-node return region 缺口，但还没有完成
+  Angr 的全部 single-entry region 枚举。
+- 复杂度：1/5。只扩展 diamond region 的简单前缀，不改复制流程。
+- 维护成本：1/5。规则保守，测试直接覆盖复制后的原 region 保留和 copied region 形状。
