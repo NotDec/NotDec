@@ -1799,3 +1799,39 @@ tail 后面是 `unreachable` 终点。
 - 复杂度：1/5。只新增一个 smoke case。
 - 维护成本：1/5。断言固定结构关键词和 goto/reg2mem 退化点；本次没有改运行时代码，
   不涉及性能路径变化。
+
+# 2026-06-27 P3/P7 copied return tail smoke 记录
+
+本次没有改算法，只把 copied return tail + dephication vvar 的真实 `notdec-llvm2c`
+链路补到脚本层 smoke。这个用例固定一个具体形状：两个 switch case 共享
+`shared_tail -> shared_ret`，`shared_tail` 里有 Phi 和 add，`shared_ret` 负责 return。
+
+这个 smoke 仍是 P3/P7 代理覆盖，不表示 copied payload / Phi / vvar 全量消费已经完成。
+它只保证当前 `--sailr-dephication-mode=angr` 下，复制两段 return tail 时不会退回
+`phi`、`reg2mem`，并且 copied vvar assignment 能落到 copied tail 上。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:400-438`
+  - 在 `CASES` 里新增 `sailr_angr_dephication_copied_return_tail`。
+  - 构造两个 switch case 共享 `shared_tail -> shared_ret` 的 IR，其中
+    `shared_tail` 含 `%p = phi` 和 `%r = add`。
+  - 使用 `--sailr-dephication-mode=angr`，断言输出保留 `int r;`、copied
+    `p_copy`、`p_copy1 = a;`、`r = p_copy1 + 1;`、`p = b;`、`r = p + 1;`
+    和 2 个 `return r;`，同时不出现 `phi`、`reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 copied return tail 和 dephication vvar 的脚本级回归覆盖，
+  但没有新增 Angr 的全量 copied payload 消费能力。
+- 复杂度：1/5。只新增一个 smoke case。
+- 维护成本：1/5。断言固定 copied vvar、tail assignment 和 return 输出；本次没有改
+  运行时代码，不涉及性能路径变化。
