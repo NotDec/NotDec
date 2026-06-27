@@ -547,3 +547,55 @@ LLVM `icmp` + branch 的最小模型，再迁移 Angr lowered switch 的 if-chai
 
 - `git diff -- logs/20260627-02-sailr-angr-remaining-parity-plan.md`
 - `git status --short`
+
+# 2026-06-27 P5 case/default overlap 实现记录
+
+本次继续推进 P5，只处理一个保守边界：`SwitchDefaultCaseDuplicator` 在复制 default
+region 给外部 predecessor 时，如果某个 switch 的 default target 同时也是 case
+target，不能把这个 switch 当普通 default predecessor 复制。shared CFG 当前还没有
+jump-table/recovered switch metadata 来标明“这次重写的是 default 边还是 case 边”，
+而通用 `redirectPredecessors()` 会同时改 `Successors` 和 `Cases`。所以这里先跳过
+这种重叠 switch，只复制真正外部 predecessor。
+
+shared-default goto 阶段没有改。已有 `replaceDefaultSwitchSuccessor()` 只更新
+`Successors.front()`，不会改 case target，继续保留原行为。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1083`
+  - 新增 `switchDefaultAlsoCaseTarget()`，判断 switch default 是否同时出现在 case
+    target 里。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2011`
+  - `SwitchDefaultCaseDuplicator::runOnGraph()` 在 default-region copy 的
+    `PredsToUpdate` 收集阶段跳过 case/default 重叠的 switch predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6106`
+  - 新增 `testSwitchDefaultCaseDuplicatorSkipsCaseDefaultOverlap()`，覆盖重叠 switch
+    保持 default/case 都指向原块，同时外部 predecessor 仍复制 default region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10157`
+  - 在测试入口注册新用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p5-case-default-overlap.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=193.36 user=222.26 sys=1.67 maxrss=1271568`。和上一轮
+  `196.30s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了 P5 的一个 case/default 交叉复用边界，但还没有接入
+  recovered switch / jump-table metadata。
+- 复杂度：1/5。只加一个判断和一个收集阶段 skip，不改 CFG copy 机制。
+- 维护成本：1/5。测试覆盖了保留重叠 switch 与复制外部 predecessor 两件事。
+
+P5 剩余工作仍是：default / reused-entry 共用 recovered switch 表示，default-only、
+case-only、case/default 交叉复用有更明确的 shared edge kind。
