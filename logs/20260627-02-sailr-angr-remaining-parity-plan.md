@@ -880,3 +880,47 @@ wrapper，那么外部 predecessor 只会落在 wrapper 上，`ReturnDuplicatorL
   Angr 的全部 single-entry region 枚举。
 - 复杂度：1/5。只扩展 diamond region 的简单前缀，不改复制流程。
 - 维护成本：1/5。规则保守，测试直接覆盖复制后的原 region 保留和 copied region 形状。
+
+# 2026-06-27 P7 prefixed diamond return smoke 记录
+
+本次没有改算法，只把上一轮 P2 的 prefixed diamond return region 覆盖提升到
+`notdec-llvm2c` 脚本层 smoke。目标是让 LLVMFunctionCFGBuilder、SAILR structuring
+和 C backend 一起覆盖这个代理形状，避免 C++ 局部构图通过但真实输出又退回到共享
+return region 的 goto。
+
+这个用例仍是 P2/P7 的代理覆盖，不表示一般 single-entry return region 已完成。真实
+Angr binary 用例迁移和更多 end-node region 形状还要继续补。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:400`
+  - 新增 `sailr_prefixed_diamond_return_region` case，构造两个 switch case 共享
+    `prefix -> diamond -> ret` 的 IR。
+  - 断言输出仍是 `switch (x)`、两个 case 都有 `return 7;`，且不出现 `goto prefix`
+    或 `goto ret`，同时不泄漏 `phi` / `reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 第一次和
+  `notdec-llvm2c` 并行构建时链接失败，表现为静态库符号缺失；随后顺序重跑通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 顺序重跑通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p7-prefixed-diamond-smoke.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=155.87 user=177.86 sys=1.60 maxrss=1269376`。和上一轮
+  `157.36s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。把 P2 prefixed diamond return region 的代理形状提升到了脚本层
+  smoke，但仍没有迁移真实 Angr binary 用例。
+- 复杂度：1/5。只加一个短 IR smoke case。
+- 维护成本：1/5。断言只检查核心结构和禁止的 goto，不依赖完整格式细节。
