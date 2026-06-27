@@ -2592,3 +2592,37 @@ switch 的 case-only、default-only 和 unknown edge kind，但还缺“case 和
   P5/P6 edge kind 已存在但 pass 没完整使用的缺口。
 - 复杂度：1/5。只把互斥分支改成可同时收集 case/default，不改 copy helper。
 - 维护成本：1/5。边界清楚：只接受明确 edge kind，Unknown 继续跳过。
+
+# 2026-06-27 P2/P7 switch joined-diamond return tail smoke 记录
+
+本次没有改运行时代码，只把 `ReturnDuplicatorLow` 已有的 switch wrapper + joined-diamond
+return tail C++ 覆盖提升到 `notdec-llvm2c` 脚本层 smoke。这个形状是外层 switch 的两个
+case 共享内层 switch，内层一个 case 进入 joined diamond tail，另一个 case 和 default
+走普通 return tail。
+
+这个用例仍是 P2/P7 代理覆盖，不表示 Angr 的一般 single-entry return region 枚举已经
+完成。它只固定当前 shared CFG 复制能力在真实输出层不会退回 goto、phi 或 reg2mem。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:922-987`
+  - 新增 `sailr_switch_joined_diamond_return_tail`。
+  - 输入 IR 覆盖外层 switch 共享内层 switch，内层 switch 的 case 10 进入 joined
+    diamond return tail，case 11 和 default 进入普通 return tail。
+  - 断言输出包含两份内层 `switch (a)`、case 10/11、`if (a > b)` 和三个 return 值。
+  - 断言不残留 `goto inner_switch`、`goto joined_head`、`goto join`、`goto joined_ret`、
+    `phi` 或 `reg2mem`。
+
+## 验证
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+本次只改脚本测试，不改 `lib/`、`include/` 或 codegen 运行路径，所以没有重新跑 fortune
+性能 smoke。
+
+## 影响判断
+
+- 实现效果：2/5。把 P2 的 switch joined-diamond return tail 代理形状提升到真实输出层。
+- 复杂度：1/5。只新增一个 smoke case。
+- 维护成本：1/5。断言集中检查 switch、return 数量和不应出现的 goto/phi/reg2mem。
