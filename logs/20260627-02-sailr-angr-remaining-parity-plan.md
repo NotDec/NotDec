@@ -2036,3 +2036,52 @@ single-entry 形状：`branch -> left/right -> join -> return`。这个形状的
   shared CFG copy API。
 - 维护成本：2/5。逻辑比原来的 direct diamond 多一层 join/tail 回溯，但边界清楚，
   回归测试能覆盖误删原 region 和 copied join 重接。
+
+# 2026-06-27 P2 direct-to-join joined diamond return region 实现记录
+
+本次继续推进 P2 的一般 return region 枚举。上一轮 joined diamond 要求 branch 的两侧
+都先走 private fallthrough side 再到 shared join；这次只放开其中一侧直接从 branch
+连到 join 的形状：`branch -> left -> join -> return`，另一条边是 `branch -> join`。
+
+这个放开仍然很保守：允许一侧 direct-to-join，但不接受两侧都是 direct-to-join 的
+all-direct join。后者和普通 direct diamond 的边界容易混在一起，先保留原行为，避免
+ReturnDuplicatorLow 复制过宽 region。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:480-539`
+  - 调整 `collectReverseFallthroughSideToBranch()`。
+  - 新增 `TailHead` 参数，初始期望后继改为 join。
+  - 当当前 block 是 branch，且 side 为空、branch successor 包含 join 时，把它识别为
+    单侧 direct-to-join，并返回同一个 branch head。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:541-618`
+  - 调整 `collectJoinedDiamondReturnRegion()`。
+  - 调用 side 回溯时传入 join；检查 head successor 时允许单侧 side 为空。
+  - 仍保留 `(LeftReverse.empty() && RightReverse.empty())` 拒绝 all-direct join。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5974-6049`
+  - 新增 `testReturnDuplicatorLowCopiesJoinedDiamondWithDirectJoinSide()`。
+  - 覆盖 `0,1 -> branch -> {left, join} -> return`，断言原 region 删除，两份 copied
+    region 都保留 copied left、copied join 和 copied return payload。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:6051-6083`
+  - 新增 `testReturnDuplicatorLowSkipsAllDirectJoinedDiamond()`。
+  - 覆盖 `{join, join}` 的 all-direct join，断言 pass 不改图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11590-11592`
+  - 在 `main()` 中调用两个新增回归测试。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `/usr/bin/time -f 'elapsed %e' python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过，`elapsed 0.97`。上一轮同口径 joined diamond 验证约 `elapsed 0.98`，没有明显退化。
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 direct-to-join side 这个小缺口，但还不是 Angr 的完整
+  single-entry return region 搜索。
+- 复杂度：2/5。只是在已有 joined diamond helper 上增加一个直接到 join 的边界分支。
+- 维护成本：2/5。新增正反两个 C++ 回归测试，能固定“单侧允许、两侧拒绝”的边界。
