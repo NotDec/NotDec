@@ -1180,3 +1180,60 @@ case-only、case/default overlap 的 shared switch 来源分类。
   switch。
 - 维护成本：2/5。规则依赖 shared CFG 的 target 信息，测试覆盖了不要重复 label，也通过
   既有 copied return smoke 防止误合并 copied case。
+
+# 2026-06-27 P6 pass stage order 对齐记录
+
+本次继续推进 P6，修正 shared SAILR pipeline 的 pass 顺序。之前测试名写的是
+`MatchesAngrOrder`，但实际顺序把 `DuplicationReverter` 放在
+`SwitchReusedEntryRewriter` 前面，不符合 Angr 的阶段调度。
+
+对照 `/sn640/angr` 当前代码后确认：
+
+- `SwitchDefaultCaseDuplicator` 和 `SwitchReusedEntryRewriter` 的 `STAGE` 都是
+  `AFTER_AIL_GRAPH_CREATION`。
+- `DuplicationReverter`、`LoweredSwitchSimplifier`、`ReturnDuplicatorLow`、
+  `CrossJumpReverter` 是 `DURING_REGION_IDENTIFICATION` 或继承这个阶段。
+- NotDec 现在没有 Angr 的完整 AIL stage，所以把这些 pass 折进 shared CFG pipeline
+  时，应该先跑两个 jump-table graph-creation pass，再跑 during-region pass。
+
+这次只调整顺序和测试命名，不改变任何单个 pass 的 CFG rewrite 规则。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2481`
+  - `buildSAILRDeoptimizationPipeline()` 里把 `SwitchReusedEntryRewriter` 移到
+    `DuplicationReverter` 前面。
+  - 新增短注释，说明 NotDec 是把 Angr 的两个阶段折到 shared CFG pipeline 里，但保留
+    stage 顺序。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8237`
+  - 将测试改名为 `testSAILRDeoptimizationPipelineMatchesAngrStageOrder()`。
+  - 断言顺序改为 `SwitchDefaultCaseDuplicator`、
+    `SwitchReusedEntryRewriter`、`DuplicationReverter`、
+    `LoweredSwitchSimplifier`、`ReturnDuplicatorLow`、`CrossJumpReverter`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10866`
+  - 更新测试入口调用新名字。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-stage-order.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.19 user=179.45 sys=1.75 maxrss=1269440`。和上一轮
+  `157.25s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。P6 的 pass 顺序现在按 Angr stage 折叠后对齐，但
+  `ConstPropOptReverter`、`ReturnDeduplicator` 等暂不适用项仍只记录不实现。
+- 复杂度：1/5。只调整 pipeline 添加顺序和测试断言，不改具体 pass。
+- 维护成本：1/5。测试固定了 stage-order 语义，后续新增 pass 时需要同时说明属于哪个
+  Angr 阶段。
