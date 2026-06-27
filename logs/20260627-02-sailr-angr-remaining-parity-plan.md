@@ -1032,3 +1032,48 @@ dephication/delete-original 回归，不适合硬塞一个不清楚 payload 位�
 - branch return region 这条线，当前缺的不是一个已经清楚的最小回归，而是更稳的
   payload/edge 语义样例。
 - 这次没有新增文件修改，不进入提交。
+
+# 2026-06-27 P3 multi-vvar return end 覆盖记录
+
+本次没有改算法，只补一个 C++ regression，推进 P3 的 shared Phi / vvar / copied
+payload 消费覆盖。现有脚本层已有 `multi_phi_same_edge`，但 C++ 的
+`ReturnDuplicatorLow` return-end 复制回归主要还是单 vvar。这里补上“同一条 copied
+dephication edge 上有两个 vvar incoming”的形状。
+
+这个测试固定几件事：复制 return end 后原 merge 被删除；同一条 edge 的两个 assignment
+都被 hook 按各自 vvar 重写；每条 copied edge 都拿到两个 copied vvar；copied incoming
+都指向 copied return merge，并保留 assignment 的重写结果。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4651`
+  - 新增 `testReturnDuplicatorLowCopiesReturnEndNodeWithMultipleDephicationVVars()`。
+  - 构造两个 synthetic dephication edge，每条 edge 同时给 `x` 和 `y` 两个 vvar 赋值，
+    然后复制共享 return end，断言 copied edge、copied vvar、assignment rewrite 和
+    incoming metadata 都一致。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10755`
+  - 在测试入口注册该用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p3-multi-vvar-return-end.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.73 user=179.08 sys=1.66 maxrss=1269212`。和上一轮
+  `156.95s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补住 P3 多 vvar copied payload 的一个关键 C++ 回归，但还没有把
+  P3 的所有 renderer 消费路径都覆盖完。
+- 复杂度：1/5。只加测试，不改 shared CFG 或 deoptimization 逻辑。
+- 维护成本：1/5。测试直接检查 vvar copy map、incoming 和 assignment rewrite，失败点清楚。
