@@ -2178,3 +2178,54 @@ region 时，仍要继续补更多 copied payload / Phi / vvar 组合回归。
 - 实现效果：1/5。补了 P3 的一个具体覆盖点，但没有新增 runtime 能力。
 - 复杂度：1/5。只新增一个 shared CFG 层测试。
 - 维护成本：1/5。测试直接固定 dephication 元数据链，失败时能定位到复制或删除逻辑。
+
+# 2026-06-27 P5 shared default 后 case 边保留记录
+
+本次继续推进 P5，只修一个边界：`SwitchDefaultCaseDuplicator` 第一阶段把 shared
+default 改成 synthetic goto 后，原 switch 的 case 边可能仍然指向原 default block。
+第二阶段复制 default region 时，如果把这种 switch 当普通 predecessor，会把 case
+target 也重定向到 copied default，混淆 case/default 身份。
+
+这次把第二阶段的 skip 条件改成：只要 switch 的 case 指向当前 default target，就不让
+它进入 default-region copy。这样 shared default rewrite 仍然保留，case 边继续指向原
+case/default overlap block；普通外部 predecessor 仍会复制 default region。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1492`
+  - 复用 `switchCaseReachesBlock()` 判断 case 边是否指向 default target，删除只服务于
+    旧窄条件的 `switchDefaultAlsoCaseTarget()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2427`
+  - `SwitchDefaultCaseDuplicator::runOnGraph()` 在收集 `PredsToUpdate` 时，跳过 case
+    指向当前 default target 的 switch predecessor。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7874`
+  - 新增 `testSwitchDefaultCaseDuplicatorKeepsCaseAfterSharedDefaultRewrite()`。
+  - 覆盖 shared default 先改写为 synthetic goto 后，case/default overlap switch 的
+    case target 仍指向原 default block，外部普通 predecessor 仍复制 default region。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12030`
+  - 在 `main()` 中调用新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p5-shared-default-case-skip.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.07 user=178.11 sys=1.54 maxrss=1270428`。和前几轮同口径
+  `193.36s`、`196.30s` 相比没有退化；过程中的 global/type warning 仍是 fortune
+  既有 codegen 输出。
+
+## 影响判断
+
+- 实现效果：2/5。补了 shared default rewrite 后 case/default overlap 的一个真实边界，
+  但 P5 仍没有 recovered switch / jump-table metadata。
+- 复杂度：1/5。只收紧 default-region copy 的 predecessor 选择，不改复制机制。
+- 维护成本：1/5。新增回归直接覆盖 case 边是否被误重定向。
