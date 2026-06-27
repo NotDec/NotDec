@@ -1579,3 +1579,37 @@ head 不能是组件入口，避免把 connected predecessor 误吃进 return re
   `_single_entry_region()`。
 - 复杂度：2/5。只扩展现有 diamond 收集路径，另加组件入口保护。
 - 维护成本：2/5。规则仍是保守 shape 匹配，测试覆盖了误判风险最相关的复制结果。
+
+# 2026-06-27 P7 direct-return-side diamond smoke 记录
+
+本次没有改算法，只把上一轮 P2 的 direct-return-side diamond return region 覆盖提升到
+`notdec-llvm2c` 脚本层 smoke。这个用例固定一个具体形状：两个 switch case 共享
+`head`，`head` 一侧直接到共同 `ret`，另一侧经过私有 `tail` 再到 `ret`。
+
+这个 smoke 仍是 P2/P7 代理覆盖，不表示 Angr 的一般 single-entry return region
+已经完成。它只保证当前真实 `notdec-llvm2c` 链路不会把这个 direct-return-side
+diamond 退回成 `goto head/tail/ret` 或 `reg2mem`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:439-472`
+  - 在 `CASES` 里新增 `sailr_direct_diamond_return_region`。
+  - 构造两个 switch case 共享 `head -> ret/tail -> ret` 的 IR。
+  - 断言输出保留 `switch (x)`、两个 case、`if (a == b)`、`a + 1;`
+    和 4 个 `return 7;`，同时不出现 `goto head`、`goto tail`、`goto ret`、
+    `phi`、`reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：2/5。补了 P2 direct-return-side diamond 的脚本级回归覆盖，但没有新增
+  Angr 的通用 region 枚举能力。
+- 复杂度：1/5。只新增一个 smoke case。
+- 维护成本：1/5。断言直接对应当前输出形状；本次没有改运行时代码，不涉及性能路径变化。
