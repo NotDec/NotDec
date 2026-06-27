@@ -1873,3 +1873,30 @@ switch condition、case value 和 dephication assignment 能一起落到输出�
 - 复杂度：1/5。只新增一个 smoke case。
 - 维护成本：1/5。断言固定 switch/dephication 输出和退化点；本次没有改运行时代码，
   不涉及性能路径变化。
+
+# 2026-06-27 P7 fork return region smoke 边界记录
+
+本次没有改代码，只确认 `TerminalForkRegion` 和 `ReturnTailForkRegion` 暂时不适合提升到
+`notdec-llvm2c` 脚本层 smoke。对应 C++ 回归里的 pass options 会放宽质量限制：
+`PreventNewGotos=false`、`MustImproveRelativeQuality=false`。真实 CLI 默认 SAILR
+没有这些测试专用选项。
+
+用临时 LLVM IR 验证 `return tail fork` 形状时，默认
+`./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr`
+输出仍包含多处 `goto structured_block_*`，不是一个适合固定成脚本 smoke 的干净输出。
+上一轮 `terminal fork` 临时验证也有同样问题。
+
+## 判断
+
+- `terminal fork` / `return tail fork` 继续保留在 C++ 回归层，覆盖底层 region copy
+  能力。
+- 脚本层 P7 暂时不加这两个 case，避免把“测试专用放宽质量选项下成立”的行为伪装成
+  默认真实链路行为。
+- 后续如果要脚本化，需要先让默认质量判断能接受该输出，或给 CLI 暴露明确的测试选项；
+  这不属于本次 P7 smoke 补覆盖范围。
+
+## 验证
+
+- `return tail fork` 临时 IR：默认 `notdec-llvm2c --algo=structured-sailr` 输出仍有
+  `goto structured_block_*`，没有形成干净的两个 copied fork region。
+- 本次只更新计划日志，没有改运行时代码，不涉及性能路径变化。
