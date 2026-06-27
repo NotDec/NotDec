@@ -1123,3 +1123,60 @@ switch 表示，以及从 jump-table metadata 判断 default-only、case-only、
 - 实现效果：1/5。只补一个 P5 边界覆盖，不新增 switch metadata 能力。
 - 复杂度：1/5。只加测试，不改 CFG rewrite。
 - 维护成本：1/5。测试形状小，断言直接固定 case/default overlap 的边语义。
+
+# 2026-06-27 P5 case/default overlap renderer 记录
+
+本次继续推进 P5，修一个脚本层暴露出来的输出问题：shared CFG 里同一个 switch 的
+case 和 default 可以指向同一个 target。之前 `StructuredGoto` 渲染 semantic switch
+时，会把 case body 和 default body 各渲染一份。如果两者最后都是同一个 shared block，
+C 输出里会出现重复的 `structured_block_N:` label。
+
+这次不改 shared CFG pass，只改 C renderer 对 semantic switch 的输出：只在同一个
+switch 内发现 case/default target overlap 时，把这些标签串成连续 `case/default`
+标签，最后一层挂同一份 body。普通多个 case 的 copied body 仍按各自 `NodeId` 分开，
+避免破坏 `ReturnDuplicatorLow` 的 copied return region 输出。
+
+这不表示 P5 完成。P5 仍缺 recovered switch / jump-table metadata，以及 default-only、
+case-only、case/default overlap 的 shared switch 来源分类。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:38`
+  - 新增 `SwitchBodyKey` 和 `SwitchBodyLabel`，用于在同一个 semantic switch 里识别
+    case/default target overlap。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:558`
+  - `StructuredGotoAdapter::renderSwitch(const StructuredTree &, const StructuredNode &)`
+    在 case/default overlap 时复用同一个 body，只输出一份 shared label/body。
+  - 合并条件只看当前 switch 的 default target 和 case target 是否重叠；其他 case
+    body 不按 target 合并，避免多个 copied case 被误合并。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:470`
+  - 新增 `sailr_switch_case_default_overlap_body_once`，用两个可达 switch 共享同一个
+    target，其中一个 switch 的 case/default 都指向 shared block。
+  - 断言输出包含 `switch (y)`、`case 2:`、`default:`、`b();`、`return 0;`，并且
+    `structured_block_5:` 只出现一次。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuredGoto.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过，ninja 无需重建。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p5-switch-overlap-render.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.25 user=179.50 sys=1.58 maxrss=1269844`。和上一轮
+  `156.91s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。修了 P5 case/default overlap 的真实 C 输出问题，但没有补 recovered
+  switch metadata。
+- 复杂度：2/5。renderer 增加了一个小型 case/default label 合并规则，范围只限 semantic
+  switch。
+- 维护成本：2/5。规则依赖 shared CFG 的 target 信息，测试覆盖了不要重复 label，也通过
+  既有 copied return smoke 防止误合并 copied case。
