@@ -779,3 +779,55 @@ LLVMFunctionCFGBuilder、SAILR dephication mode、shared structuring 和 C backe
 - 复杂度：1/5。只改质量统计 helper 和一个单元测试。
 - 维护成本：1/5。行为直接对应 Angr counter 字段，后续如果 NotDec 引入 for-loop
   节点也不需要改这条规则。
+
+# 2026-06-27 P6 goto label quality parity 记录
+
+本次继续推进 P6，补齐 Angr `ControlFlowStructureCounter` 的 label/goto 清理规则。
+Angr 在遍历后会丢掉没有输出 label 的 goto target，也会丢掉没有被 goto 用到的 label。
+NotDec 之前把这两类都留在质量计数里，可能让相对质量判断受未输出标签或未使用标签影响。
+
+这次只在 `ControlFlowStructureCounter::collect()` 的最终结果上做清理。没有把同样逻辑放进
+`qualityWithGotos()`，因为 `ReturnDuplicatorLow` 的 `getNewGotos()` 会把 copied target
+映射回原始 source target 给质量过滤使用；此前验证显示在那里清理会拒绝合法的 copied
+switch return region 重写。这个边界先保守保留，避免用 Angr 没有的 copied-target
+重映射细节硬套质量规则。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringQuality.h:27`
+  - 为 `ControlFlowStructureCounter` 新增 `normalizeGotoLabels()` 声明。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringQuality.cpp:78`
+  - `ControlFlowStructureCounter::collect()` 在遍历后调用 `normalizeGotoLabels()`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringQuality.cpp:85`
+  - 新增 `ControlFlowStructureCounter::normalizeGotoLabels()`，先删除没有对应 output label
+    的 `GotoTargets`，再删除没有被 goto 使用的 `OrderedLabels`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1005`
+  - 更新 `testStructuringEvaluatorCollectsGotoSummary()`，确认 goto edge 仍被记录，但没有
+    output label 的目标不进入质量计数。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7528`
+  - 扩展 `testControlFlowStructureCounterCollectsSharedQuality()`，覆盖未使用 label、有效
+    goto label、无 label 的 goto target 三种情况。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-backends/Structuring/StructuringQuality.h lib/Structuring/StructuringQuality.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p6-quality-label-normalize.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=155.94 user=178.32 sys=1.64 maxrss=1266176`。和上一轮
+  `155.76s` 同口径，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。补齐 P6 的 label/goto 质量计数差异，但 copied target / virtual
+  goto 的真实样例效果还需要继续核对。
+- 复杂度：1/5。只增加一次采集后清理，不改 structuring 和 CFG copy 流程。
+- 维护成本：1/5。规则直接对应 Angr counter 后处理，边界也通过测试固定。
