@@ -1295,3 +1295,54 @@ region。
   region 枚举。
 - 复杂度：1/5。只加 C++ 和脚本测试，不改 CFG rewrite。
 - 维护成本：1/5。测试形状明确，脚本层也固定了真实输出不能退回 goto。
+
+# 2026-06-27 P2 branch-prefixed diamond return region 实现记录
+
+本次继续推进 P2 的一般 return region 支持。已有 diamond return region 收集成功后会提前
+返回，只额外吸收简单 fallthrough prefix；如果 diamond 上方还有一个外层 branch，且
+另一个分支也是 return tail，`ReturnDuplicatorLow` 不能把这一层一起复制。
+
+这次没有新增一套 region 枚举逻辑，而是让 diamond 结果继续走已有的 prepend loop。这样
+外层 branch、switch、terminal fork 等已有保守规则可以复用，避免两个收集路径语义分叉。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:513`
+  - 修改 `findLinearReturnRegion()`。
+  - `collectDiamondReturnRegion()` 成功后不再提前返回，而是先反转
+    `Region.Blocks`，再继续走原来的 prepend loop。
+  - 删除只服务 diamond 的 `prependFallthroughPrefix()`，避免 fallthrough prefix 和
+    一般 prepend 规则分开维护。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5820`
+  - 新增 `testReturnDuplicatorLowCopiesBranchPrefixedDiamondReturnRegion()`。
+  - 构造 `branch -> diamond return region / return tail`，两个 predecessor 共享外层
+    branch，只复制带 goto 的 predecessor。
+  - 断言 copied outer branch、diamond head、左右路径、join、diamond return 和另一条
+    return tail 都保留 payload 与 terminator。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10991`
+  - 在 `main()` 注册新测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-branch-prefixed-diamond.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.91 user=180.21 sys=1.67 maxrss=1271744`。和近期
+  `157s` 左右的同口径结果一致，没有明显退化。
+
+## 影响判断
+
+- 实现效果：3/5。覆盖了 diamond return region 上方还有 branch wrapper 的常见形状，
+  但还不是 Angr `_single_entry_region()` 的完整 parity。
+- 复杂度：2/5。复用现有 prepend loop，删除一段专用 prefix helper，逻辑更集中。
+- 维护成本：2/5。新增测试固定组合形状；后续如果扩展 return region，只需要继续看
+  `findLinearReturnRegion()` 的统一 prepend 路径。
