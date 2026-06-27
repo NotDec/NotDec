@@ -1942,3 +1942,43 @@ legacy/angr 对比。目的不是新增恢复能力，而是固定真实 CLI 上
 - 复杂度：1/5。只新增两个脚本 contrast case。
 - 维护成本：1/5。断言固定模式差异和 reg2mem 退化点；本次没有改运行时代码，不涉及
   性能路径变化。
+
+# 2026-06-27 P6/P7 CrossJump 成本边界回归记录
+
+本次没有改算法，只补 `CrossJumpReverter` 的复制成本边界测试。Angr 的
+`CrossJumpReverter` 用 `max_call_duplications` 限制目标块里可复制的调用数；NotDec
+当前还没有 call counter，只用 `MaxDuplicatedStatements` 限制 copied linear region
+的语句数。这个测试只固定当前 NotDec 的保守上限行为，不表示 P6 的 call-counter
+成本模型已经和 Angr 对齐。
+
+脚本层继续不新增单独的 CrossJump smoke。默认 CLI 的 condensing 样例已经能覆盖真实
+结果，但很难证明某个小 IR 是由 `CrossJumpReverter` 单独触发，而不是前面的
+`ReturnDuplicatorLow` 或 structurer 自身消掉了 goto。这里先保留 C++ 级直接覆盖。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3130`
+  - 新增 `testCrossJumpReverterSkipsLargeLinearGotoTarget()`。
+  - 构造 `0 -> 1 -> 2`，并给 target block 1 放两条 payload statement。
+  - 直接喂 `StructuredGoto{0, 1}`，用 `MaxDuplicatedStatements=1` 运行
+    `CrossJumpReverter::runOnGraph()`，断言没有复制和改边，原 target 保留。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:11372`
+  - 在 `main()` 中调用新增回归测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：1/5。只固定当前 NotDec 的 statement 上限边界，没有实现 Angr call
+  counter。
+- 复杂度：1/5。只新增一个 C++ 回归测试。
+- 维护成本：1/5。测试直接调用 pass 入口，失败时能定位到 CrossJump 成本 gate；本次
+  没有改运行时代码，不涉及性能路径变化。
