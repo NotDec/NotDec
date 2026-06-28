@@ -3344,3 +3344,51 @@ renderer 优先消费这个字段。
   target 在 renderer 侧被猜错的问题；但仍没有完整 range-tree 和 recovered switch metadata。
 - 复杂度：2/5。新增一个结构树字段和几个小 helper，不改变 CFG copy 主流程。
 - 维护成本：2/5。后续所有新 switch structurer 分支需要写 `DefaultTarget`；已有分支已覆盖。
+
+# 2026-06-28 P4 lowered switch default 回流过滤记录
+
+本次继续补 Angr `LoweredSwitchSimplifier` 的保守过滤。Angr 会拒绝 default case 在同一
+region 里回到其他 case/comparison 节点的候选；NotDec 之前只检查 case/default target
+是否被链外节点进入，没有检查 default target 自己能否沿 CFG 回到 comparison chain。
+
+这次只补这条过滤：如果 default target 能到达当前 lowered if-chain 的 head 或被移除的
+comparison block，就不把这条 if-chain 恢复成 switch。这样避免 rewrite 删除 comparison
+block 后改变循环/回流语义。仍不处理 duplicated default 等价和完整 range-tree。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1953-1974`
+  - 新增 `loweredSwitchDefaultReachesChain()`，从 default target 做 reachability，命中
+    `Chain.Head` 或 `RemovedBlocks` 时拒绝候选。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2150-2156`
+  - 普通 lowered if-chain 收集完成后应用 default 回流过滤。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2219-2224`
+  - range-guarded lowered if-chain 也应用同一过滤。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10622-10661`
+  - 新增 `testLoweredSwitchSimplifierSkipsDefaultThatReachesIfChain()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13943-13946`
+  - 注册新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch-default-cycle.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=165.63 user=188.74 sys=1.77 maxrss=1273132`。和上一轮
+  `161.87s` 同口径，没有明显退化；过程中的 global/type warning 仍是 fortune 既有输出。
+
+## 影响判断
+
+- 实现效果：2/5。补上 Angr lowered switch default 回流过滤，但 P4 仍缺完整 range-tree
+  和 duplicated default 等价。
+- 复杂度：1/5。只新增一个 reachability 检查和一个负例。
+- 维护成本：1/5。规则保守；如果后续要允许某些结构化循环回流，需要先证明 rewrite 后
+  不会删除仍需要的 comparison block。
