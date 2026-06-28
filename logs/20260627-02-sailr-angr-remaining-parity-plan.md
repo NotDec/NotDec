@@ -3645,3 +3645,41 @@ switch rewrite 路径。
   P5 仍缺 recovered switch / jump-table metadata。
 - 复杂度：1/5。只增加一个收集期去重集合。
 - 维护成本：1/5。整数元数据来自 LLVM builder，缺失时仍走原保守路径。
+
+# 2026-06-28 P7 switch default/reused-entry migration 覆盖记录
+
+本次不改算法，只把 P5 的两个 shared CFG 行为补到 `run_sailr_bench2_migration.py`：
+shared default 和 reused case entry。之前 migration 脚本主要覆盖 ReturnDuplicatorLow、
+CrossJumpReverter 和 LoweredSwitchSimplifier，P5 只在 C++ 单测和 smoke 里有覆盖。
+
+这两个用例仍是 proxy，不表示 P5 完成。P5 仍缺 recovered switch / jump-table metadata，
+以及真实样例分类。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:174`
+  - 新增 `switch_shared_default_proxy`，代理 Angr
+    `test_switch_case_header_mismatch_caused_by_cmovs` 类的 shared default 行为。
+    断言输出保留两个 `switch (x)`，并通过 `goto structured_block_` 表达共享 default。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:236`
+  - 新增 `switch_reused_entry_proxy`，代理 Angr
+    `test_decompiling_reused_entries_between_switch_cases` 类的 reused case entry 行为。
+    断言输出保留两个 `switch (x)`，并对共享 case entry 生成 goto。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。migration 脚本覆盖从 8 个样例扩到 10 个样例，并补上 P5 代表行为；
+  但没有新增算法能力。
+- 复杂度：1/5。只新增两个内联 IR case。
+- 维护成本：1/5。断言集中在 switch 数量、case label 和 goto 形状，避免依赖局部块编号。
