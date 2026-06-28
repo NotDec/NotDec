@@ -3925,3 +3925,42 @@ hint 时，连续小整数比较链不能只凭形状恢复成 switch。NotDec C
   安全边界代理；但没有新增算法能力。
 - 复杂度：1/5。只新增一个内联 IR case。
 - 维护成本：1/5。断言只检查关键 return 和误识别的 switch/case 文本。
+
+# 2026-06-28 P4 range compare migration 覆盖记录
+
+本次不改算法，只把 `LoweredSwitchSimplifier` 的 range compare 保守边界补到
+`run_sailr_bench2_migration.py`。当前 shared CFG 里 `>` / `>=` / `<` / `<=`
+还不应该被恢复成 switch；它们只是 P4 的前置元数据，不代表 range-tree 已完成。
+
+这条代理只是确认：连续 range compare 在 C 输出层仍保留 if-chain，不会误变成
+`switch` / `case`。这和前面 `testLoweredSwitchSimplifierSkipsRangeConditionCompare()`
+的 C++ shared-CFG 负例是一致的。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:117`
+  - 新增 `lowered_switch_range_compare_proxy`，代理 range compare 还未恢复成 switch
+    的保守边界。
+  - 断言输出保留 `if (x > 7)`、`if (x > 9)`、`return 7;`、`return 9;`、
+    `return 0;`，并且不出现 `switch (x)`、`case 7:`、`case 9:`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-range-compare-report.csv`
+  通过；新增 case 的指标是 `switch_count=0`、`case_count=0`、`goto_count=0`、
+  `return_count=3`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。migration 脚本覆盖从 13 个样例扩到 14 个样例，并补上 P4 的一个
+  range compare 保守边界；但没有新增算法能力。
+- 复杂度：1/5。只新增一个内联 IR case。
+- 维护成本：1/5。断言只检查关键 if-chain 文本和 switch 误识别文本。
