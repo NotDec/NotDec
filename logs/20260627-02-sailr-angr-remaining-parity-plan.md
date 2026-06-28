@@ -3886,3 +3886,42 @@ fixture 或内联 IR 缺输出仍然是失败。这样本地可以继续验证�
 - 实现效果：1/5。修清楚 P7 smoke 的本地缺数据行为，但没有新增算法能力。
 - 复杂度：1/5。只给一个外部真实样例加 skip 标记，并补缺输出检查。
 - 维护成本：1/5。skip 必须显式标记，不会静默跳过仓库内回归。
+
+# 2026-06-28 P7 continuous lowered switch migration 覆盖记录
+
+本次不改算法，只把 P4 已有的 continuous if-chain 安全边界补到
+`run_sailr_bench2_migration.py`。Angr 的 lowered switch 恢复有保守过滤：没有 switch
+hint 时，连续小整数比较链不能只凭形状恢复成 switch。NotDec C++ 回归已有这个边界，
+但 migration 报告里还缺对应样例。
+
+这个用例仍是 proxy，不表示 P4 完成。P4 仍缺完整 range-tree、duplicated default 等价
+和 recovered switch / jump-table metadata。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:89`
+  - 新增 `lowered_switch_continuous_no_hint_proxy`，代理 continuous lowered if-chain
+    没有 switch hint 时不能恢复成 switch 的边界。
+  - 断言输出保留 `return 7;`、`return 8;`、`return 0;`，并且不出现
+    `switch (x)`、`case 7:`、`case 8:`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-continuous-report.csv`
+  通过；报告显示 1 个 `real` pass、4 个 `real` skip、8 个 `proxy` pass。新增 case
+  的指标是 `switch_count=0`、`case_count=0`、`goto_count=0`、`return_count=3`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。migration 脚本覆盖从 12 个样例扩到 13 个样例，并补上 P4 的一个
+  安全边界代理；但没有新增算法能力。
+- 复杂度：1/5。只新增一个内联 IR case。
+- 维护成本：1/5。断言只检查关键 return 和误识别的 switch/case 文本。
