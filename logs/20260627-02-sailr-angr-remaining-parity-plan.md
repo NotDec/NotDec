@@ -5074,3 +5074,45 @@ proxy 里的 `merge` 会回到 `then` arm，导致待合并 arm 不是只有共�
 - 实现效果：1/5。没有新增能力，但把 `branch_common_tail_pipeline_proxy` 的真实 blocker 进一步收窄。
 - 复杂度：1/5。只更新日志。
 - 维护成本：1/5。后续应从 loop/backedge 条件重接和质量门入手，不应直接放宽 common-tail 判断。
+
+# 2026-06-28 P2 terminal fork 管线分类记录
+
+转回 P2 的 `ReturnDuplicatorLow`。C++ 里已有 terminal fork return region 覆盖：
+`branch -> return / unreachable` 可以作为 return region 被复制。但用一个最小 LLVM IR 经过
+完整 `notdec-llvm2c --algo=structured-sailr` 时，默认管线仍会把两个 switch case 共同指到
+同一个 fork，并留下 `goto structured_block_1` 一类共享 fork goto。
+
+这说明 pass-level 能力和默认管线输出之间还有差距，可能和默认 quality gate、goto 摘要或
+unreachable 渲染有关。本次先把它加入 migration 的 expected-failure 分类，不把它误算成
+P2 已完成。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:319`
+  - 新增 `terminal_fork_return_region_proxy`。
+  - IR 构造两个 switch case 共享 `fork -> return / unreachable`。
+  - 期望默认管线最终复制 `return 7;` 到两个 case，不留下 `goto fork` / `goto ret` /
+    `goto trap`。当前输出仍只有一份 `return 7;`，因此归类为 expected output mismatch。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- 单独运行 `terminal_fork_return_region_proxy` 的 `run_case()`，结果为
+  `fail/output-mismatch`：`return 7;` 期望 2 次，当前 1 次。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-terminal-fork-gap.csv`
+  通过；CSV 统计为 13 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，3 个 `xfail/expected-output-mismatch`。新增的
+  `terminal_fork_return_region_proxy` 稳定归类为预期 output mismatch。
+
+本次只改 P7 报告分类，不改运行时代码；因此不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。没有新增算法能力，但把 P2 的 pass-level 和 pipeline-level 差距暴露出来。
+- 复杂度：1/5。只新增一个 migration proxy。
+- 维护成本：1/5。后续修默认管线后，应把这个 xfail 转成 pass。
