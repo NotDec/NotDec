@@ -3721,3 +3721,43 @@ migration 脚本还缺一个对应 Angr lowered switch 误识别保护的代理�
   安全边界代理；但没有新增算法能力。
 - 复杂度：1/5。只新增一个内联 IR case。
 - 维护成本：1/5。断言只检查关键输出和误识别的 switch/case 文本。
+
+# 2026-06-28 P7 migration 分类报告记录
+
+本次不改算法，只增强 `run_sailr_bench2_migration.py` 的可审计性。P7 的目标不是只跑
+proxy，而是要能看清每个样例对应哪个 Angr 测试、属于真实样例还是 proxy、覆盖哪条
+SAILR 语义。之前这些信息只隐含在脚本 case 字段里，不方便后续做真实样例分类。
+
+这次增加可选 CSV 报告输出，默认跑法不变。报告只记录当前脚本样例的分类和结果，
+不表示 P7 迁移完成；P7 仍缺更多真实样例，尤其是 `DuplicationReverter` merge graph
+和 recovered switch / jump-table metadata。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:4`
+  - 引入标准库 `csv`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:339`
+  - 新增 `case_kind()`，默认把带 `input` 的样例标成 `real`，带内联 `ir` 的样例标成
+    `proxy`，也允许 case 显式覆盖。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:386`
+  - 新增 `write_report()`，输出 `name,kind,angr_test,semantic,status,failures`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:396`
+  - CLI 增加 `--report-csv`，每个 case 跑完后记录 pass/fail 和失败摘要。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-report.csv`
+  通过；报告显示 5 个 `real`、6 个 `proxy`，全部 `pass`。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。让 P7 样例分类可输出、可检查，但没有新增算法能力。
+- 复杂度：1/5。只加一个可选 CSV 输出路径。
+- 维护成本：1/5。默认脚本行为不变，报告字段稳定且少。
