@@ -4833,3 +4833,57 @@ payload similarity / merge graph，而不是扩大 exact duplicate 规则。
   过宽 exact merge 冒充修复。
 - 复杂度：1/5。只新增一个负例和一处报告文案。
 - 维护成本：1/5。后续补 shared payload similarity 后，需要重新评估这个负例是否仍应保持。
+
+# 2026-06-28 P1 简单 call payload origin 记录
+
+上一节确认 `fmt_deduplication_proxy` 不能靠扩大 exact duplicate 规则修。继续往前推一小步：
+给 C adapter 里非常简单的相同 call 语句建立 shared payload origin。范围只限直接 callee、
+零参数的 `CallExpr`，不处理间接调用、带参数调用、表达式等价、返回值赋值，也不改变
+`DuplicationReverter` 的候选搜索和 branch-arm 合并规则。
+
+这样做的意义是给 P1 后续 merge graph / similar-statement 判断准备最小共享身份。当前
+`fmt_deduplication_proxy` 仍然 xfail，因为它还需要 Angr 那类 shared conditional dominator
+和 merge graph 重接；本次只补 payload 层材料。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:120`
+  - 新增 `simpleCallExpr()`，只识别 `CallExpr` 和外层 `ExprWithCleanups` 包住的 call。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:130`
+  - 新增 `directZeroArgCallee()`，只接受零参数、callee 去 cast 后是 `FunctionDecl` 的直接 call。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:162`
+  - 新增 `SimpleCallPayloads`，按 `FunctionDecl*` 记录简单 call 的首个 payload。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:240`
+  - 新增 `setSimpleCallOrigin()`，重复简单 call 复用首个 payload origin。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:581`
+  - `buildCFG()` 收集 statement payload 后调用 `setSimpleCallOrigin()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4803`
+  - 新增 `testDuplicationReverterExtractsCommonStatementTailByPayloadOrigin()`，
+    覆盖不同 payload id 但同 origin 的 statement tail 能被抽成 shared tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14499`
+  - 在测试入口调用新增 regression。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd per-function 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-call-origin.csv`
+  通过；CSV 统计为 13 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，1 个 `xfail/expected-output-mismatch`。`fmt_deduplication_proxy`
+  仍是预期的 P1 output gap。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-call-origin.c`
+  通过；同口径结果：`elapsed=53.76 user=53.37 sys=0.38 maxrss=674044`。
+
+## 影响判断
+
+- 实现效果：2/5。补了 P1 相似语句前置材料，但没有实现 merge graph，所以 `fmt` 仍不通过。
+- 复杂度：1/5。规则很窄，只按直接零参数 callee 复用 origin。
+- 维护成本：1/5。后续如果扩展到带参数 call，必须先有参数 payload 等价和副作用边界。
