@@ -2883,3 +2883,78 @@ P4 的范围提前扩大。
 - 复杂度：3/5。多了两个小缓存和一个新收集路径，但范围还算窄。
 - 维护成本：3/5。后续如果继续扩 `!=`、range tree、shared default 复用，要继续守住
   `EqualTargetIndex` 和 copied payload 的 origin 规则。
+
+# 2026-06-28 P4/P5 `!=` if-chain 与 switch 边分类记录
+
+本次继续推进 P4 和 P5 的 shared CFG 语义。P4 方面，`LoweredSwitchSimplifier`
+之前虽然有 `ConditionCompareKind::NotEqual` 元数据，但实际 if-chain 消费路径只接受
+`Equal`，所以 `x != c ? next : case` 这种常见 lowered switch 形状仍不会恢复成
+shared switch。现在改成按 `EqualTargetIndex` 选择 case 边，不再限制条件种类。
+
+P5 方面，之前各 pass 分别用 `Cases`、`Successors.front()` 和局部 overlap 判断来区分
+case/default 边。现在在 `StructuredCFG` 增加统一的 `SwitchEdgeKind` 查询入口，能明确
+返回 default-only、case-only、case/default overlap 或 unknown。当前先把
+`ReturnDuplicatorLow` / `CrossJumpReverter` 相关的共享 helper 收到这个入口上，还没有接入
+Angr 那种真实 jump-table metadata。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:69-77`
+  - 新增 `SwitchEdgeKind`，表达 default-only、case-only、default/case overlap 和
+    unknown。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:102-105`
+  - 补充 `ConditionCompare::EqualTargetIndex` 注释，说明 `ne` 时该字段指 false/equal
+    successor。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:296`
+  - 新增 `StructuredCFG::switchEdgeKind()` 查询接口。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:17-34`
+  - 新增 `switchEdgeKindForBlock()`，统一从 `Successors.front()` 和 `Cases` 判断 switch
+    边身份。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:617-623`
+  - 实现 `StructuredCFG::switchEdgeKind()`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1574-1586`
+  - 新增 `hasSwitchCaseEdge()` / `hasSwitchDefaultEdge()`，作为 SAILR pass 内部共享入口。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1713-1810`
+  - `LoweredSwitchSimplifier` 的 condition 收集从 `equalConditionCompare()` 改为
+    `matchedConditionCompare()`，不再拒绝 `ConditionCompareKind::NotEqual`。
+  - case target 仍统一使用 `EqualTargetIndex`，重复 case value 仍按 payload origin
+    去重。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2314-2355`
+  - `blockUsesSwitchCaseEdge()`、`blockUsesNonSwitchCaseEdge()` 和
+    `hasCaseDefaultOverlapPredecessor()` 改为使用 `switchEdgeKind()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:2339-2352`
+  - 新增 `testStructuredCFGClassifiesSwitchEdges()`，覆盖 case-only、case/default
+    overlap 和 unknown。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9858-9920`
+  - 新增 `testLoweredSwitchSimplifierBuildsSwitchFromNotEqualIfChain()`，用真实 LLVM IR
+    构造 `x != 7 -> x != 9` 链，断言恢复成 shared switch。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12870`
+  和 `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12984`
+  - 在测试入口注册新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-backends/Structuring/StructuredCFG.h lib/Structuring/StructuredCFG.cpp lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p4-ne-switch-edge.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.90 user=179.48 sys=1.80 maxrss=1272392`。和前几轮
+  `155-157s` 同口径基本一致，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有输出。
+
+## 影响判断
+
+- 实现效果：3/5。补上了 P4 的 `!=` if-chain 消费，也给 P5 的 default/case/overlap
+  判断提供了共享入口；但 range tree 和 recovered switch / jump-table metadata 仍未完成。
+- 复杂度：2/5。新增一个小枚举和查询接口，`LoweredSwitchSimplifier` 只放开已有
+  `ConditionCompare` 的消费范围。
+- 维护成本：2/5。后续 switch pass 可以复用 `switchEdgeKind()`，但如果接入真实
+  jump-table metadata，需要继续确认它和现有 `Successors/Cases` 约定是否一致。
