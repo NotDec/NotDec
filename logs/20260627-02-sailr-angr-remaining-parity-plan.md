@@ -4784,3 +4784,52 @@ expected-timeout。
 - 实现效果：1/5。没有新增算法能力，但把 P1 的真实输出缺口暴露出来。
 - 复杂度：1/5。只收紧一个 migration proxy 的期望。
 - 维护成本：1/5。后续实现 P1 merge graph 后，这个 xfail 应该转成 pass。
+
+# 2026-06-28 P1 fmt dedup 相似语句边界记录
+
+继续看 `fmt_deduplication_proxy` 时确认，当前缺口不是普通 exact duplicate block。
+Angr `test_fmt_deduplication` 依赖 `DuplicationReverter` 里的 `is_similar()`、
+`longest_ail_graph_subseq()` 和 shared conditional dominator；NotDec shared CFG 现在只有
+payload origin 相等，没有“两个不同 call 语句语义相同”的共享接口。直接按渲染文本或按 CFG
+形状合并会绕过 payload 语义，容易误合并手写重复分支。
+
+本次不改运行时代码，只把这个边界固定下来：即使当前结构化结果有 goto hint，只要两边 payload
+不同，`DuplicationReverter` 也不能把它当成 P1 修复。后续真正修 `fmt` 需要先补 shared
+payload similarity / merge graph，而不是扩大 exact duplicate 规则。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4733`
+  - 新增 `testDuplicationReverterKeepsDivergentBranchPayloadsWithGotoHint()`。
+  - 覆盖两条 branch arm 都汇入同一 successor，且当前 goto 指向其中一边，但两边 statement
+    payload 不同；期望 `DuplicationReverter` 不改图。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14456`
+  - 在测试入口调用新增 regression。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:255`
+  - `fmt_deduplication_proxy` 的 expected failure 文案改成缺 Angr-style similar-statement
+    merge graph。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `git diff --check`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-sim-boundary.csv`
+  通过；CSV 统计为 13 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，1 个 `xfail/expected-output-mismatch`。
+
+本次只改测试和报告文案，不改 `llvm2c` 运行时代码；因此不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。没有新增 merge graph 能力，但把 P1 的前置语义缺口说清楚，并防止后续用
+  过宽 exact merge 冒充修复。
+- 复杂度：1/5。只新增一个负例和一处报告文案。
+- 维护成本：1/5。后续补 shared payload similarity 后，需要重新评估这个负例是否仍应保持。
