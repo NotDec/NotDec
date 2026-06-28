@@ -3797,3 +3797,52 @@ SAILR 语义。之前这些信息只隐含在脚本 case 字段里，不方便�
   代表行为；但没有新增算法能力。
 - 复杂度：1/5。只新增一个内联 IR case。
 - 维护成本：1/5。断言关注共享 body 不重复和关键 switch 文本。
+
+# 2026-06-28 P7 migration 指标报告记录
+
+本次不改算法，只继续增强 `run_sailr_bench2_migration.py` 的报告。上一版 CSV 能看
+case 分类和 pass/fail，但还不能快速比较结构化输出质量，比如 switch、case、goto、
+return 数量。P7 后续要迁移更多真实样例，这些粗指标能帮助先发现明显退化。
+
+这次也把本地缺失真实输入的情况改成 `skip`。之前真实 Bench2 文件不在当前机器时，
+脚本会把它当成失败；这会混淆“样例缺失”和“结构化行为失败”。现在缺输入只写入报告，
+不会让整批脚本失败。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:397`
+  - 新增 `output_metrics()`，统计输出里的 `switch_count`、`case_count`、
+    `goto_count`、`return_count`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:406`
+  - `run_case()` 返回值改成 `status, failures, metrics`。
+  - 缺少真实输入文件时返回 `skip`，不再记入全局 failure。
+  - notdec-llvm2c 成功返回但没有输出文件时仍记为 `fail`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:454`
+  - CSV 字段增加 `switch_count`、`case_count`、`goto_count`、`return_count`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:487`
+  - 只有 `fail` 才合入全局失败列表，`skip` 只写报告。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-metrics-report.csv`
+  通过；报告显示 1 个 `real` pass、4 个 `real` skip、7 个 `proxy` pass。
+  当前 skip 的真实输入分别缺
+  `/sn640/NotDec-Exp/Bench2/bin2llvm-ir/hexx64/function-0x1156e0/native/function-0x1156e0.ll`、
+  `/sn640/NotDec-Exp/Bench2/bin2llvm-ir/python/one-_PyPegen_fill_token.cold.ll` 和
+  `/sn640/NotDec-Exp/Bench2/bin2llvm-ir/lighttpd/1-main_init_once.ll`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  未通过：当前机器在 `real_condensing_fixture.c` 处没有生成输出文件，脚本读取该文件时
+  抛出 `FileNotFoundError`。这条失败和本次 migration 报告脚本改动无关，不能作为算法
+  回归证据。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。报告能同时看分类、状态和粗结构指标，但没有新增算法能力。
+- 复杂度：1/5。只增加一个输出计数 helper，并让缺本地真实输入进入 `skip`。
+- 维护成本：1/5。默认脚本行为保持简单，CSV 字段仍是固定少量字段。
