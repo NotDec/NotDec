@@ -4264,3 +4264,49 @@ lighttpd / hexx64 / python 输入在本机不存在；直接跑 fortune 时，`n
 - 实现效果：1/5。真实 fortune smoke 少一个前端断言阻塞，但还没跑到完整真实样例输出。
 - 复杂度：1/5。复用已有 `umul` 处理思路，扩成同类 overflow intrinsic。
 - 维护成本：1/5。只处理 LLVM 标准 overflow intrinsic，不引入泛化聚合返回处理。
+
+# 2026-06-28 P7 fortune smoke 聚合返回 extractvalue 收窄记录
+
+继续推进上一节的 fortune smoke。overflow intrinsic 修掉后，fortune 卡在普通/native 多返回值
+函数的 `extractvalue`，形状是 `%x = extractvalue (call { i64, ... } @foo()), N`。这类不是
+SAILR 本身的问题，但会阻止真实样例跑到 structuring 阶段。
+
+本次只支持 call 返回 LLVM struct 后立刻取字段的窄形状：先把 call materialize 到一个局部
+struct 临时变量，再把 `extractvalue` 降成 `tmp.field_N`。不处理 `insertvalue` 链、不处理
+任意聚合表达式，也不修改匿名 struct 的打印格式。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1090`
+  - 新增 `materializeAggregateCallField()`，为 aggregate-return call 生成局部临时变量和
+    `tmp = call(...)`，并把 call 的表达式映射改成这个临时变量，避免多个字段访问重复调用。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1182`
+  - `CFGBuilder::visitExtractValueInst()` 在 overflow intrinsic 分支之后，支持单层 index 的
+    aggregate-return call 字段访问。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:398`
+  - 新增 `aggregate_return_extractvalue`，覆盖 `{ i64, i64 }` 返回值同时取两个字段时输出
+    `p = pair(a, b);` 和 `return p.field_0 + p.field_1;`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuralAnalysis.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过旧路径缺失的 lighttpd 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-aggregate-extract-migration.csv`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-module-all.c`
+  仍失败，但已经越过普通/native 多返回值 `extractvalue`；新失败是 `void*` deref 断言，
+  `elapsed=5.11 user=4.96 sys=0.14 maxrss=355948`。
+
+本次只影响 `llvm2c` 前端表达式构造和输出层 smoke，不影响主 NotDec pass pipeline。
+
+## 影响判断
+
+- 实现效果：1/5。真实 fortune smoke 又向前推进一段，但仍未跑到完整输出。
+- 复杂度：2/5。新增了 call materialize 和字段访问映射，范围仍限定在 call-return struct。
+- 维护成本：2/5。后续若要支持 `insertvalue` 或更复杂聚合，需要单独扩展，不能复用这段假装通用。
