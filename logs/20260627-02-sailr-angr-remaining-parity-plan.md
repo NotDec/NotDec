@@ -3266,3 +3266,81 @@ range guard 覆盖，就不能先单独恢复成 switch；否则外层 guard 没
 - 复杂度：2/5。只新增 target 前驱过滤和 range guard 祖先检查，不改 switch rewrite。
 - 维护成本：2/5。规则保守；后续如果要接受 duplicated default，需要先让 shared CFG
   能可靠表达 return value 或 default body 等价。
+
+# 2026-06-28 P4/P5 lowered switch 启发式和 default target 记录
+
+本次继续推进 P4，并顺手修掉 smoke 暴露出的 P5/C 输出语义问题。
+
+P4 方面，对齐 Angr `LoweredSwitchSimplifier` 的低误判过滤：如果 case 常量都有整数
+元数据，就统计连续 case run。连续 run 达到 6 个时不恢复；所有 case 都连续且当前图里
+没有已有 switch 时也不恢复；case body distinct target 少于 2 且没有已有 switch 时跳过。
+缺整数元数据时保留旧行为，避免靠 payload 文本猜。
+
+P5/renderer 方面，发现 lowered if-chain 被恢复成 shared switch 后，结构树里的 default
+target 来自重写后的候选 CFG，但 C renderer 仍从原始 shared block 猜 default target。
+这会把 `case 7` 和 `default` 误串成同一个 body，输出 `case 7: default: return 0;`。
+本次给 `StructuredNode` 增加 `DefaultTarget`，由 structurer 构造 switch 节点时写入，
+renderer 优先消费这个字段。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:400-403`
+  - `StructuredNode` 新增 `DefaultTarget`，保存结构树层的 switch default CFG target。
+- `external/NotDec-llvm2c/lib/Structuring/GotoStructurer.cpp:97`
+  - fallback switch 节点写入 `DefaultTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:576,1487,1898`
+  - Phoenix switch reduction、virtualized switch source、fallback switch 节点都写入
+    `DefaultTarget`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:53-57`
+  - `SwitchBodyLabel` 明确只保存当前 body 组最后一个 label，后面再绑定 body。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:706-767`
+  - C renderer 渲染 structured switch 时优先使用 `Node.DefaultTarget`，只在旧树没有
+    该字段时回退到原始 shared block successor；同时按出现顺序记录 case/default
+    body 组，避免再用 `std::map` 顺序绑定 label body。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:192`
+  - 新增 `MaxLoweredSwitchContinuousCases = 6`，对应 Angr 的默认阈值。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1953-2038`
+  - 新增 lowered switch case 整数收集、连续 run 统计和 Angr 启发式过滤。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2959-2979`
+  - `LoweredSwitchSimplifier::runOnGraph()` 在 if-chain rewrite 前应用启发式过滤。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:143-167`
+  - 新增 `lowered_if_chain_switch` 脚本级 smoke，要求 case 7、case 9 和 default 都输出
+    正确 body。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:185-214`
+  - 新增 `findFirstNodeKind()`，用于检查结构树中的 switch 节点。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10113-10160`
+  - 新增 `testSAILRStructurerKeepsLoweredSwitchDefaultTarget()`，固定 lowered switch
+    default target 不再从原始 block 猜。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10226-10273`
+  - 新增 `testLoweredSwitchSimplifierSkipsContinuousIfChainWithoutSwitchHint()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10275-10343`
+  - 新增 `testLoweredSwitchSimplifierAcceptsContinuousIfChainWithSwitchHint()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13895-13898`
+  - 注册新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j1` 通过。期间遇到一次本地
+  build 目录里的 `libnotdec-llvm2c.a` 只剩 `ASTManager.cpp.o` 的损坏产物；确认
+  `StructuralAnalysis.cpp.o` 仍有 `decompileModule` 符号后，删除该 `.a` 让 ninja
+  重新归档，随后通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch-render.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=161.87 user=184.81 sys=1.60 maxrss=1267276`。和上一轮
+  `161.65s` 同口径，没有明显退化；过程中的 global/type warning 仍是 fortune 既有输出。
+
+## 影响判断
+
+- 实现效果：3/5。P4 增加了 Angr 的关键误判过滤，P5 修掉 lowered switch default
+  target 在 renderer 侧被猜错的问题；但仍没有完整 range-tree 和 recovered switch metadata。
+- 复杂度：2/5。新增一个结构树字段和几个小 helper，不改变 CFG copy 主流程。
+- 维护成本：2/5。后续所有新 switch structurer 分支需要写 `DefaultTarget`；已有分支已覆盖。
