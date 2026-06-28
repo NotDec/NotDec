@@ -4209,3 +4209,58 @@ C++ 多 vvar 覆盖提升到 `notdec-llvm2c` 输出层。
 - 实现效果：1/5。把 P3 的 multi-vvar copied payload 覆盖推进到 migration 输出层。
 - 复杂度：1/5。只新增一个内联 IR proxy。
 - 维护成本：1/5。断言只看关键 copied 变量、Phi 消除和 return 数量。
+
+# 2026-06-28 P7 fortune smoke 前端阻塞收窄记录
+
+本次尝试用当前 Bench2 布局里的
+`selected-targets-native/fortune/executable/module-all.ll` 做真实样例 smoke。旧的函数级
+lighttpd / hexx64 / python 输入在本机不存在；直接跑 fortune 时，`notdec-llvm2c` 先卡在
+未处理的 LLVM overflow intrinsic，不到 SAILR structuring 阶段。
+
+这次只补 `llvm2c` 对 `sadd/uadd/ssub/smul/umul.with.overflow` 的保守处理：`extractvalue 0`
+降成普通 `add/sub/mul` 表达式，`extractvalue 1` 仍调用 fake helper
+`llvm_*_is_overflow_iN()`。这不是 SAILR pass parity 的完成项，只是把 P7 真实样例 smoke
+的第一个前端断言移开。重新跑 fortune 后，新的阻塞变成普通/native 多返回值函数的
+`extractvalue`，需要后续单独处理。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:108`
+  - 新增 overflow intrinsic helper，统一识别 add/sub/mul overflow intrinsic 和对应 fake
+    helper 名。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:942`
+  - `CFGBuilder::visitCallInst()` 对这些 overflow intrinsic 不再生成普通 call stmt，交给
+    `extractvalue` 消费。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1072`
+  - `CFGBuilder::visitExtractValueInst()` 支持 `sadd/uadd/ssub/usub/smul/umul.with.overflow`。
+  - 顺手修正 overflow helper 第二个实参从误用 `Op0` 改为 `Op1`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2004`
+  - `SAContext::getIntrinsic(std::string)` 支持所有 `llvm_*_is_overflow_iN` fake helper。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2186`
+  - `SAContext::createDecls()` 跳过已由 `extractvalue` 处理的 overflow intrinsic。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:354`
+  - 新增 `llvm_overflow_intrinsics_extractvalue`，覆盖 add/sub/mul overflow intrinsic 输出。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuralAnalysis.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过，目标已是最新。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-overflow-migration.csv`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过旧路径缺失的 lighttpd 输入。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-module-all.c`
+  仍失败，但已经越过 overflow intrinsic 声明断言；新失败是普通/native 多返回值
+  `extractvalue`，`elapsed=0.32 user=0.29 sys=0.03 maxrss=199096`。
+
+本次只影响 `llvm2c` 前端表达式构造和输出层 smoke，不影响主 NotDec pass pipeline。
+
+## 影响判断
+
+- 实现效果：1/5。真实 fortune smoke 少一个前端断言阻塞，但还没跑到完整真实样例输出。
+- 复杂度：1/5。复用已有 `umul` 处理思路，扩成同类 overflow intrinsic。
+- 维护成本：1/5。只处理 LLVM 标准 overflow intrinsic，不引入泛化聚合返回处理。
