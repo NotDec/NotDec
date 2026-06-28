@@ -266,8 +266,8 @@ Angr 对照源码使用本机 `/sn640/angr`，提交 `63c05f1d4`。NotDec 对照
 | `DuplicationReverter`，`duplication_reverter.py:36-180`、`655-730`、`1056-1175` | 从 goto 周边找候选，构造 `AILMergeGraph`，按相似语句/子图拆分公共部分，再重接 predecessor、successor、jump target。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:2044-2125` 覆盖 exact duplicate、common statement tail、linear region tail、copied-prefix shared tail，但还没有通用 merge graph、条件重建和非 tail 拆分。`20260627-01` 属于这个 pass 的 copied-prefix tail 子项。 | P1：先做保守 single-entry / single-exit DAG merge graph，不碰循环和宽表达式等价。 |
 | `SwitchReusedEntryRewriter`，`switch_reused_entry_rewriter.py:20-132` | 基于 jump table entry，发现多个 switch head 复用同一 case entry 时，为后续 head 建 virtual goto，不复制 entry。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:1701-1787` 基于 shared switch case edge 建 synthetic goto，保留最低 id 的 entry，已有 reuse limit。缺口仍是 jump-table/recovered switch metadata 和复杂 default/case 混用。 | P5：和 default 复用共用 shared switch 表示，明确 default-only 不进 case-entry 逻辑。 |
 | `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 名称相同但语义差距大。NotDec 在 `SAILRDeoptimization.cpp:1789-1891` 现在主要复制已有 switch 的共享 case 线性 region，并不是从 lowered if-chain 恢复 switch。 | P4：实现真正 if-chain/range-tree 到 shared switch 的恢复。 |
-| `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:2137-2252` 能复制线性 return tail、branch/diamond/fork 的一部分、grouped predecessor 和部分 payload。差距是 Angr 的通用 endnode region 枚举、call limit、Phi/vvar 全量处理。 | P2 + P3：先补一般 single-entry return region，再补 Phi/vvar/copied payload 全量消费。 |
-| `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 在 `SAILRDeoptimization.cpp:2254-2414` 复制线性 region，支持 switch case/default edge kind 拆分和 grouped predecessor，但限制用 statement 数，不是 Angr 的 call counter。 | P6/P7：核对成本限制和真实样例行为。 |
+| `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:3163-3323` 能复制线性 return tail、branch/diamond/fork 的一部分、grouped predecessor 和部分 payload，并已按 Angr 的调用数上限跳过 call-heavy region。差距仍是 Angr 的通用 endnode region 枚举和 Phi/vvar 全量处理。 | P2 + P3：继续补一般 single-entry return region，再补 Phi/vvar/copied payload 全量消费。 |
+| `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 在 `SAILRDeoptimization.cpp:3332-3488` 复制线性 region，支持 switch case/default edge kind 拆分、grouped predecessor 和 Angr 的 call-count 成本 guard。 | P7：继续核对真实样例行为和测试迁移，不再把 call counter 作为未实现项。 |
 | `ConstPropOptReverter`，`const_prop_reverter.py` | SAILR/DREAM 共享的前置去常量传播 pass，用于让后续相似性更容易成立。 | 暂未实现，且不在当前 shared CFG deoptimization pipeline。 | 暂不放 P1-P5 主线；P7 真实样例如果显示它是主因，再单独写计划。 |
 | `ReturnDuplicatorHigh`、`ReturnDeduplicator` | SAILR/DREAM 共享外围 pass，不是当前 low-level SAILR deoptimization 主差距。 | 暂不适用。NotDec 当前目标是 shared CFG 级 pass parity。 | 只记录，不作为本计划完成条件。 |
 
@@ -3153,3 +3153,61 @@ switch。case 超出 guard 时整体跳过，不做半截恢复。没有实现�
 - 复杂度：2/5。只新增一个 shared block 计数字段和两个 pass gate，不改复制流程。
 - 维护成本：2/5。后续新 backend 如果走 shared CFG，需要记得填 `CallCount`，否则会
   回到只按 statement 数估算。
+
+# 2026-06-28 P4 嵌套 range guard if-chain 消费记录
+
+本次继续推进 P4，但仍不做完整 range-tree。只补一个保守形状：多个空语句 range guard
+线性包住同一条 `==` / `!=` if-chain，并且每层 guard 的非 chain 分支都指向同一个
+default。所有 case 都必须落在每个 guard 允许的分支里；default 不一致时只允许内层
+guard 自己恢复成 switch，不跨外层 guard。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1784-1788`
+  - 新增 `hasOnlyPredecessor()`，避免消费仍被别的入口使用的内层 guard 或 if-chain head。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1881-1896`
+  - 新增 `loweredSwitchChainFitsRangeGuard()`，统一校验 compared value、default target
+    和 guard 覆盖关系。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1989-2048`
+  - `collectRangeGuardedLoweredSwitchIfChainFrom()` 递归消费线性 range guard 链；遇到
+    不同 default、重复 guard、非单前驱头或 case 不在范围内时保守跳过。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10207-10274`
+  - 新增 `testLoweredSwitchSimplifierBuildsSwitchFromNestedRangeGuardedIfChain()`，覆盖
+    `x >= 7 && x <= 9` 包住 `x == 7 / x == 9` 的恢复。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10427-10495`
+  - 新增 `testLoweredSwitchSimplifierKeepsOuterRangeGuardWithDifferentDefault()`，确认
+    default 不一致时不跨外层 guard。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13524-13531`
+  - 注册新增回归。
+- `logs/20260627-02-sailr-angr-remaining-parity-plan.md:266-270`
+  - 更新 P0 对照表里 `ReturnDuplicatorLow` 和 `CrossJumpReverter` 已有 call-count guard
+    的状态，避免继续把它当未实现项。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j1` 通过，显示 no work to do。
+  注意：此前和 `notdec` 并行构建时，`notdec-llvm2c-exe -j4` 出过一次
+  `StructuredGoto::execute()` 未定义链接错误；`notdec` 完成后顺序重跑正常，判断为
+  既有并行构建顺序问题，不是本次算法改动。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-nested-range-guard.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=160.63 user=182.81 sys=1.50 maxrss=1269300`。仍在近期
+  `156-163s` 范围内，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有输出。
+
+## 影响判断
+
+- 实现效果：3/5。补上常见双边界 guard 包住 equality chain 的形状，但还不是 Angr
+  的完整 range-tree。
+- 复杂度：2/5。只把一层 guard 收集扩展成线性 guard 链，不改 shared switch 表示。
+- 维护成本：2/5。规则保守，后续如果做一般 range-tree，需要重新设计多分支 guard
+  合取和 default 覆盖判断。
