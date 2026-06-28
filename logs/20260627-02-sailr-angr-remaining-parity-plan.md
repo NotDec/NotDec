@@ -2756,3 +2756,69 @@ switch return tail”这个形状。
 - 实现效果：1/5。只是把 Angr 测试的迁移边界写清楚。
 - 复杂度：1/5。只补计划记录。
 - 维护成本：1/5。后续如果补到真实样本，可以直接把本节改成实现记录。
+
+# 2026-06-28 P4 condition compare metadata 实现记录
+
+本次做的是 P4 `LoweredSwitchSimplifier` 的前置补强，没有实现 if-chain-to-switch。
+之前 shared CFG 只有不透明 payload，后续 pass 如果想识别 `x == const` 链，只能猜
+payload 文本或 payload id，不稳。现在把“条件比较了哪个值和哪个常量”记录到 shared
+CFG 里，渲染仍由 payload 负责，结构恢复 pass 只读语义元数据。
+
+这个元数据只覆盖 `==` 和 `!=`，且一边必须是整数常量。更复杂表达式先不做，避免把
+P4 的范围提前扩大。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:81-93`
+  - 新增 `ConditionCompareKind` 和 `ConditionCompare`，记录 compared value、constant
+    value 和等于/不等于。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:247-249`
+  - 新增 `StructuredCFG::conditionCompare()` 查询接口。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:267-269`
+  - 新增 `StructuredCFG::setConditionCompare()` 写入接口。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:330-331`
+  - 新增 `ConditionCompares` 表，按 condition payload origin 存储。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:290-316`
+  - 实现查询和写入；查询时走 `payloadOrigin()`，所以复制或 materialize 后的新
+    condition payload 也能查回原始比较元数据。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:38-73`
+  - 新增 `conditionCompareFromICmp()`，从 LLVM `icmp eq/ne` 中提取 value/constant。
+  - 支持常量在左边或右边两种写法。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:95-101`
+  - 构建 conditional branch 时写入 condition compare metadata。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:173-203`
+  - 从 Clang AST branch terminator 的 `BinaryOperator` 中提取 `==` / `!=` 和
+    `IntegerLiteral`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:392-399`
+  - C/Clang CFG 转 shared CFG 时写入 condition compare metadata。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1754-1803`
+  - 新增 `testLLVMFunctionCFGBuilderRecordsConditionCompare()`。
+  - 构造 `x == 7`，断言元数据存在，再复制并 materialize block，断言 copied condition
+    仍能通过 origin 查到同一组比较信息。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12661`
+  - 在 `main()` 中调用新增 C++ 回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-backends/Structuring/StructuredCFG.h lib/Structuring/LLVMFunctionCFGBuilder.cpp lib/Structuring/StructuredCFG.cpp lib/notdec-llvm2c/StructuredGoto.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p4-condition-compare.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=161.29 user=184.36 sys=1.61 maxrss=1276296`。和前几轮
+  `155-157s` 相比略高，但仍在 fortune 这类样例的波动范围内；过程中的 global/type
+  warning 仍是既有输出。
+
+## 影响判断
+
+- 实现效果：2/5。给 P4 降级 switch 恢复补了必要语义入口，但还没有真正合并 if-chain。
+- 复杂度：2/5。新增一个小元数据表和两个 builder 提取点，没有改变 structuring 主流程。
+- 维护成本：2/5。后续 P4 pass 消费这个接口即可；需要注意 copied payload 继续维护
+  origin 链。
