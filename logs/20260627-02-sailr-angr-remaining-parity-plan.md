@@ -2822,3 +2822,64 @@ P4 的范围提前扩大。
 - 复杂度：2/5。新增一个小元数据表和两个 builder 提取点，没有改变 structuring 主流程。
 - 维护成本：2/5。后续 P4 pass 消费这个接口即可；需要注意 copied payload 继续维护
   origin 链。
+
+# 2026-06-28 P4 if-chain 到 shared switch 的消费实现记录
+
+本次把上一节记录的 `ConditionCompare` 真正用起来了。目标不是做范围树，也不是把
+所有 lowered branch 都强行折成 switch，而是先吃最常见的 `x == const -> x == const`
+链，生成一个 shared switch，给 P4 的主线恢复补上第一条真实消费路径。
+
+为了避免误判，这次没有碰 `!=`、循环、分支外的额外 stmt，也没有尝试回收 case/default
+复用。实现只接受 `Equal`，并要求 compared value 一致、每个 compare block 只有一个
+前驱、没有自己的 statements，最后一跳是 default。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:89-93`
+  - `ConditionCompare` 增加 `EqualTargetIndex`，用来区分 equal 边在 branch successor
+    里的位置。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:38-101`
+  - 给 LLVM 侧 condition / switch case 加了本地 payload cache，避免同一个 `llvm::Value*`
+    或 `ConstantInt*` 每次构建出不同 payload id。
+  - `icmp eq` 记录 `EqualTargetIndex = 1`，`icmp ne` 记录 `EqualTargetIndex = 0`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:135-235`
+  - 给 Clang 侧 branch 条件也加了简单复用缓存，`DeclRefExpr` 和 `IntegerLiteral`
+    走稳定 payload。
+  - 同步写入 `EqualTargetIndex`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1699-1815`
+  - 新增 `LoweredSwitchIfCase` / `LoweredSwitchIfChain`。
+  - 新增 `equalConditionCompare()`、`canConsumeLoweredSwitchIfNode()`、
+    `collectLoweredSwitchIfChain()`、`rewriteLoweredSwitchIfChain()`。
+  - `LoweredSwitchSimplifier::runOnGraph()` 现在先消费 branch 链，再做原有 switch case
+    复用，生成的 switch 仍保持 shared CFG 约定：`Successors.front()` 是 default。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9778-9868`
+  - 新增 `testLoweredSwitchSimplifierBuildsSwitchFromIfChain()`。
+  - 真实用 LLVM IR 构造 `x == 7 -> x == 9` 链，断言被收成 `switch (x)`。
+  - 新增 `testLoweredSwitchSimplifierSkipsIfChainWithDifferentComparedValue()`，
+    断言 compared value 不一致时不会误折叠。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12880-12882`
+  - 在 `main()` 中调用新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-backends/Structuring/StructuredCFG.h lib/Structuring/LLVMFunctionCFGBuilder.cpp lib/Structuring/SAILRDeoptimization.cpp lib/notdec-llvm2c/StructuredGoto.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p4-condition-compare.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.56 user=180.06 sys=1.63 maxrss=1272652`。和前几轮
+  `155-157s` 基本一致，没有明显退化；过程中的 global/type warning 还是 fortune 既有输出。
+
+## 影响判断
+
+- 实现效果：3/5。P4 终于从“有元数据”变成“能把最常见的 if-chain 折成 switch”。
+- 复杂度：3/5。多了两个小缓存和一个新收集路径，但范围还算窄。
+- 维护成本：3/5。后续如果继续扩 `!=`、range tree、shared default 复用，要继续守住
+  `EqualTargetIndex` 和 copied payload 的 origin 规则。
