@@ -4982,3 +4982,60 @@ branch common-tail 子能力已经有 pass 级 regression，但一个最小 LLVM
 - 实现效果：1/5。没有新增算法能力，但把 pass 级覆盖和管线级覆盖的差距暴露出来。
 - 复杂度：1/5。只新增一个 migration proxy。
 - 维护成本：1/5。后续如果 structurer 能稳定提供该 goto hint，应把这个 xfail 转成 pass。
+
+# 2026-06-28 P1 branch arm goto hint 消费记录
+
+继续看上一个 `branch_common_tail_pipeline_proxy`。原因不是 common-tail 抽取本身完全不可用，
+而是 pass 之前只接受 `goto source` 正好是 branch header 的形状。真实结构里更常见的是
+goto 出现在某个 branch arm 的尾部，例如 arm -> merge/loop head。这次只补这一层消费能力：
+当当前 goto source 是 branch 的私有 arm，且 source 确实有 CFG 边到 goto target 时，
+`DuplicationReverter` 可以拿这个 arm 和 sibling arm 做 common statement tail 抽取。
+
+这仍不是管线级修复。完整 `notdec-llvm2c` 的 migration proxy 仍保持 xfail，因为当前
+structurer / goto 摘要还没有稳定把这个形状送到 pass，或者最终质量门没有接受该候选。
+后续要继续看的是 goto 摘要生成和质量判断，而不是继续扩大 tail merge 的匹配范围。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1088`
+  - 将 `sameGotoBranchPredecessorPair()` 收窄改名为 `sameBranchPredecessorPair()`，
+    不再要求调用方传入的 goto source 就是 branch header。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1108`
+  - 新增 `privateBranchSibling()`，只在目标 arm 有唯一 branch predecessor、且 sibling
+    是同一 branch 的另一条 successor 时返回 sibling。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1507`
+  - `revertGotoRelatedCommonStatementTail()` 新增 arm->target 形状：如果 `Goto.Source`
+    到 `Goto.Target` 是真实 CFG 边，就以 `Goto.Source` 作为待拆 tail 的 base block，
+    sibling 只来自 `privateBranchSibling()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4886`
+  - 新增 `testDuplicationReverterExtractsBranchCommonTailFromArmGotoHint()`，覆盖
+    `StructuredGoto{arm, merge}` 也能抽出 sibling arm 的共同 statement tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14645`
+  - 在测试入口调用新增 regression。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd per-function 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-arm-goto-tail.csv`
+  通过；CSV 统计为 13 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，2 个 `xfail/expected-output-mismatch`。`branch_common_tail_pipeline_proxy`
+  仍是预期 xfail。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-arm-goto-tail.c`
+  通过；同口径结果：`elapsed=54.83 user=54.43 sys=0.39 maxrss=666332`。
+
+本次改了 `llvm2c` 运行时代码，需要做 fortune 同口径性能 smoke。
+
+## 影响判断
+
+- 实现效果：2/5。pass 现在能消费更接近真实结构的 arm goto hint，但完整 pipeline xfail 还没解除。
+- 复杂度：2/5。新增一个很窄的 sibling 推导，不引入条件重接或全图 merge graph。
+- 维护成本：2/5。后续如果 pipeline 开始稳定触发这个形状，应把 migration xfail 转成 pass。
