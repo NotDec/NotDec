@@ -4636,3 +4636,47 @@ smoke。
 - 实现效果：1/5。没有新增算法能力，但后续真实样例分类更清楚。
 - 复杂度：1/5。只增加一个报告字段和简单分类函数。
 - 维护成本：1/5。分类基于现有失败文本，后续可按需要继续细分。
+
+# 2026-06-28 P7 lighttpd 真实样例路径分类记录
+
+继续推进 P7 的真实样例分类。上一节报告里 lighttpd 仍显示为 `missing-input`，但当前 Bench2
+已经没有旧的 `lighttpd/1-main_init_once.ll` per-function 布局，只有
+`selected-targets-native/lighttpd/executable/module-all.ll`。手动跑现有 module-all 后确认它能
+进入 `notdec-llvm2c`，但目前会在 Clang `QualType` null 断言处 abort。因此这里应该归类为
+真实 runner blocker，而不是路径缺失。
+
+这次把两个 lighttpd real case 指到现有 module-all，并标成 expected failure；同时把 CSV
+失败详情压成单行并截断，避免 runner stderr 把一条 case 拆成多行，影响后续统计。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:11`
+  - 新增 `MAX_FAILURE_DETAIL`，限制 CSV 失败详情长度。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:42`
+  - `goto_condensing_chain` 改用
+    `/sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/lighttpd/executable/module-all.ll`，
+    并标记当前 `QualType` runner blocker 为 expected failure。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:617`
+  - `condensing_real_lighttpd` 同步改用现有 module-all，并标记同一个 expected failure。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:657`
+  - 新增 `summarize_failure()`，把失败信息转成单行并截断。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:778`
+  - 写 CSV 时使用压缩后的失败详情。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-lighttpd-xfail-migration.csv`
+  通过。
+- `/tmp/notdec-sailr-lighttpd-xfail-migration.csv` 当前统计是：14 个 `pass/pass`，2 个
+  `skip/missing-input`，2 个 `xfail/expected-runner-failure`。剩余 missing input 是
+  hexx64 和 python；lighttpd 已经从 missing-input 升级为真实 runner blocker。
+
+本次只改 P7 迁移报告和真实样例路径，不改 SAILR pass，也不影响 `llvm2c` 性能。
+
+## 影响判断
+
+- 实现效果：1/5。没有新增算法能力，但真实样例分类更准确。
+- 复杂度：1/5。只更新路径、expected failure 和 CSV 摘要。
+- 维护成本：1/5。等 lighttpd runner blocker 修掉后，去掉 expected failure 即可。
