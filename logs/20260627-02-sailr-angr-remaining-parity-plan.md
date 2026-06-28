@@ -3846,3 +3846,43 @@ return 数量。P7 后续要迁移更多真实样例，这些粗指标能帮助�
 - 实现效果：1/5。报告能同时看分类、状态和粗结构指标，但没有新增算法能力。
 - 复杂度：1/5。只增加一个输出计数 helper，并让缺本地真实输入进入 `skip`。
 - 维护成本：1/5。默认脚本行为保持简单，CSV 字段仍是固定少量字段。
+
+# 2026-06-28 P7 structuring smoke 外部样例 skip 记录
+
+本次不改算法，只修 `run_structuring_smoke.py` 的本地数据缺失行为。这个脚本里有一个
+Bench2 真实 lighttpd 输入使用绝对路径。当前机器缺这个文件时，notdec-llvm2c 不会生成
+输出文件，脚本随后直接 `read_text()`，最后变成 `FileNotFoundError`。这会让 P7 smoke
+结果不清楚：看起来像脚本崩溃，而不是“外部真实样例缺失”。
+
+处理方式和 migration 脚本一致：只有显式标记的外部真实输入可以缺失时跳过；仓库内
+fixture 或内联 IR 缺输出仍然是失败。这样本地可以继续验证内联 proxy 和仓库内 fixture，
+但不会把缺 Bench2 文件伪装成算法回归。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:257`
+  - 给 `real_condensing_fixture` 增加 `skip_if_missing`，说明这个 case 依赖外部 Bench2
+    数据，本地缺失时可以跳过。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1364`
+  - `run_case()` 在输入文件不存在时先检查 `skip_if_missing`。
+  - 可跳过 case 打印 skip 信息并返回空 failure；不可跳过 case 返回明确 failure。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1386`
+  - notdec-llvm2c 成功返回但没有输出文件时，返回明确 failure，不再抛异常。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；输出
+  `real_condensing_fixture: skipped missing input file /sn640/NotDec-Exp/Bench2/bin2llvm-ir/lighttpd/1-main_init_once.ll`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-after-smoke-skip.csv`
+  通过。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。修清楚 P7 smoke 的本地缺数据行为，但没有新增算法能力。
+- 复杂度：1/5。只给一个外部真实样例加 skip 标记，并补缺输出检查。
+- 维护成本：1/5。skip 必须显式标记，不会静默跳过仓库内回归。
