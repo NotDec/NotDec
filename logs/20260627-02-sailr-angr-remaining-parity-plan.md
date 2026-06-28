@@ -3598,3 +3598,50 @@ CFG 已有的 copied block identity，并且只有 copied default 没有链外�
   P4 仍缺完整 range-tree，P5 仍缺 recovered switch / jump-table metadata。
 - 复杂度：1/5。只复用已有 copied block identity，删除前加链外前驱保护。
 - 维护成本：1/5。规则很窄，测试同时覆盖可合并和必须跳过两种情况。
+
+# 2026-06-28 P4 duplicate case value 过滤记录
+
+本次继续补 `LoweredSwitchSimplifier` 的误判过滤。Angr 在收集 lowered switch case 后会
+拒绝重复 case value；NotDec 之前只按 payload origin 去重。两个不同 payload id 如果
+都代表整数 `7`，仍可能被误恢复成带重复 case 的 switch。
+
+这次在已有 `ConditionCompare` 整数元数据存在时优先按 unsigned integer value 去重；
+缺整数元数据时继续沿用 payload origin 去重。该改动只发生在候选收集阶段，不改变
+switch rewrite 路径。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2120`
+  - `collectLoweredSwitchIfChain()` 增加 `IntegerCaseValues`，有整数元数据时按整数值
+    拒绝重复 case。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2147`
+  - case 收集时先检查整数重复；没有整数值时才回退到原来的 payload origin 去重。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10787`
+  - 新增 `testLoweredSwitchSimplifierSkipsDuplicateIntegerCaseValue()`，构造两个不同
+    case payload 但整数值都为 `7` 的 if-chain，确认不恢复 switch。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14200`
+  - 注册新增测试。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch-duplicate-case.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=158.57 user=180.78 sys=1.58 maxrss=1270984`。和近期
+  `157s-163s` 同口径，没有明显退化；输出中的 global/type warning 仍是 fortune 既有输出。
+
+## 影响判断
+
+- 实现效果：2/5。补上 Angr duplicate case value 过滤；P4 仍缺完整 range-tree，
+  P5 仍缺 recovered switch / jump-table metadata。
+- 复杂度：1/5。只增加一个收集期去重集合。
+- 维护成本：1/5。整数元数据来自 LLVM builder，缺失时仍走原保守路径。
