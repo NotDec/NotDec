@@ -4680,3 +4680,67 @@ smoke。
 - 实现效果：1/5。没有新增算法能力，但真实样例分类更准确。
 - 复杂度：1/5。只更新路径、expected failure 和 CSV 摘要。
 - 维护成本：1/5。等 lighttpd runner blocker 修掉后，去掉 expected failure 即可。
+
+# 2026-06-28 P7 wide integer runner blocker 记录
+
+继续推进 P7 的 lighttpd runner blocker。`selected-targets-native/lighttpd/executable/module-all.ll`
+先在 `i512` 负常量和宽 load 上触发 Clang `QualType` null / 打印器断言。这个问题不是 SAILR
+CFG 结构本身，而是 `llvm2c` 表达式构造和打印对 `_BitInt(N)` 支持不完整。
+
+这次只补宽整数 fallback，不改变类型恢复策略：LLVM 宽整数仍通过 `TypeBuilder::visitType()`
+落到 `_BitInt(N)`；负数宽常量创建 literal 时如果没有内建有符号整数类型，就用有符号
+`_BitInt(N)`；打印 `_BitInt(N)` integer literal 时不再强转 `BuiltinType`。lighttpd 修过这两处后
+不再快速 abort，但 90 秒内不能完成，因此迁移报告把它从 expected runner-failure 更新为
+expected-timeout。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:617`
+  - `CFGBuilder::visitLoadInst()` 的未知 load 类型 fallback 改用
+    `getTypeBuilder().visitType(*LoadTy)`，让 `load i512` 能得到 `_BitInt(512)`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:3019`
+  - `ExprBuilder::visitConstant()` 的负数无符号整数字面量路径增加 `SignedTy` fallback；
+    `getIntTypeForBitwidth(512, true)` 为空时改用 `Ctx.getBitIntType(false, 512)`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/ASTPrinter/StmtPrinter.cpp:1079`
+  - `StmtPrinter::VisitIntegerLiteral()` 支持非 `BuiltinType` integer literal，打印数值后直接返回，
+    避免 `_BitInt(N)` literal 触发 `castAs<BuiltinType>()` 断言。
+- `external/NotDec-llvm2c/test/structuring/fixtures/wide_negative_integer_literal.ll:1`
+  - 新增 `and i512 %x, -1` 回归输入。
+- `external/NotDec-llvm2c/test/structuring/fixtures/wide_integer_load.ll:1`
+  - 新增 `load i512` 回归输入。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:512`
+  - 新增 `wide_negative_integer_literal` 和 `wide_integer_load` 两个 smoke case。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:44`
+  - `goto_condensing_chain` 的 lighttpd xfail 文案改成 timeout，并设置 `timeout: 90`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:620`
+  - `condensing_real_lighttpd` 同步设置 90 秒 timeout。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:680`
+  - `run_case()` 给 `subprocess.run()` 传入 per-case timeout，并把超时分类为 `timeout`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的旧 lighttpd per-function 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-wide-int-migration.csv`
+  通过；CSV 统计为 14 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr external/NotDec-llvm2c/test/structuring/fixtures/wide_negative_integer_literal.ll -o /tmp/notdec-wide-negative.c`
+  通过，输出包含 `unsigned _BitInt(512)` 和 `return (int)(x & ...);`。
+- `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr external/NotDec-llvm2c/test/structuring/fixtures/wide_integer_load.ll -o /tmp/notdec-wide-load.c`
+  通过，输出包含 `return (int)*(unsigned _BitInt(512) *)p;`。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-wide-int.c`
+  通过；同口径结果：`elapsed=53.68 user=53.23 sys=0.43 maxrss=672812`。
+
+## 影响判断
+
+- 实现效果：2/5。修掉宽整数导致的 runner abort，lighttpd 前进到长时间运行 blocker。
+- 复杂度：1/5。只补已有 `_BitInt(N)` fallback 的两个漏点和打印器兼容。
+- 维护成本：1/5。后续 lighttpd 仍需单独看长跑原因；本次不扩大到类型恢复策略。
