@@ -3964,3 +3964,39 @@ hint 时，连续小整数比较链不能只凭形状恢复成 switch。NotDec C
   range compare 保守边界；但没有新增算法能力。
 - 复杂度：1/5。只新增一个内联 IR case。
 - 维护成本：1/5。断言只检查关键 if-chain 文本和 switch 误识别文本。
+
+# 2026-06-28 P7 fmt deduplication migration 覆盖记录
+
+本次不改算法，只把 Angr 的 `test_fmt_deduplication` 对应输出层代理补到
+`run_sailr_bench2_migration.py`。这个样例覆盖 `DuplicationReverter` 相关的重复调用
+尾部形状：两个分支都调用 `xdectoumax()`，再汇合到同一个 `return 0;`。
+
+当前覆盖仍是 proxy，只说明 C 输出层不会生成明显的 `goto left` / `goto right`，并不表示
+P1 的 merge graph 一般能力已经完成。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:143`
+  - 新增 `fmt_deduplication_proxy`，关联 Angr `test_fmt_deduplication`。
+  - 内联 IR 构造左右分支重复调用 `xdectoumax()` 后汇合返回的形状。
+  - 断言输出包含 `xdectoumax()` 和 `return 0;`，不出现 `goto left` / `goto right`，
+    并检查 `return 0;` 出现 2 次。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-fmt-dedup-report.csv`
+  通过；新增 case 的指标是 `switch_count=0`、`case_count=0`、`goto_count=0`、
+  `return_count=2`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。migration 脚本覆盖从 14 个样例扩到 15 个样例，并补上
+  `DuplicationReverter` 的一个输出层代理；但没有新增算法能力。
+- 复杂度：1/5。只新增一个内联 IR case。
+- 维护成本：1/5。断言只检查关键调用、返回和明显错误 goto。
