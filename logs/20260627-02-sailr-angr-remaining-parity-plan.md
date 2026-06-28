@@ -5039,3 +5039,38 @@ structurer / goto 摘要还没有稳定把这个形状送到 pass，或者最终
 - 实现效果：2/5。pass 现在能消费更接近真实结构的 arm goto hint，但完整 pipeline xfail 还没解除。
 - 复杂度：2/5。新增一个很窄的 sibling 推导，不引入条件重接或全图 merge graph。
 - 维护成本：2/5。后续如果 pipeline 开始稳定触发这个形状，应把 migration xfail 转成 pass。
+
+# 2026-06-28 P1 branch common-tail 回边边界记录
+
+继续尝试把 `branch_common_tail_pipeline_proxy` 从 xfail 推到 pass 时，确认了一个更具体的边界：
+proxy 里的 `merge` 会回到 `then` arm，导致待合并 arm 不是只有共同 branch predecessor。
+如果简单放开这个多 predecessor 限制，会同时碰到 `reachesBlock()` 的循环可达性检查；这已经不再是
+普通 common-tail split，而是需要 loop/backedge、condition 和质量判断一起参与的更大形状。
+
+因此本次不继续扩大 `DuplicationReverter` 的 branch common-tail safety gate。当前保留的能力是：
+没有回边额外 predecessor 时，pass 可以消费 `StructuredGoto{arm, merge}` hint；带回边的管线 proxy
+仍归在 P1 merge graph / condition 重接未完成范围内。
+
+## 修改位置
+
+本次没有保留新的代码改动，只补日志分类。尝试过的回边扩展没有提交，因为它需要放开多 predecessor
+和循环可达性两个安全门，已经超出当前窄 common-tail 修复。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+
+本次没有保留运行时代码改动，不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。没有新增能力，但把 `branch_common_tail_pipeline_proxy` 的真实 blocker 进一步收窄。
+- 复杂度：1/5。只更新日志。
+- 维护成本：1/5。后续应从 loop/backedge 条件重接和质量门入手，不应直接放宽 common-tail 判断。
