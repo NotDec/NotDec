@@ -3444,9 +3444,9 @@ NotDec 已有 `ConditionCompare::UnsignedIntegerValue`，所以这次不新增 b
 
 # 2026-06-28 P7 lowered switch default 回流 smoke 记录
 
-本次不改算法，只把上一节 P4 的 default 回流过滤提升到 `notdec-llvm2c` 脚本层 smoke。
-目的很窄：确认真实 IR 输入里 default 分支回到 comparison chain 时，不会被输出成
-`switch`，避免后续 P4 range-tree 或 switch metadata 改动把这个安全边界冲掉。
+本次只把上一节 P4 的 default 回流过滤提升到 `notdec-llvm2c` 脚本层 smoke，确认真实
+IR 输入里 default 分支回到 comparison chain 时，不会被输出成 `switch`。算法代码和
+C++ 单测已在前一节记录，这里不重复算一次实现。
 
 这个用例不表示 P4 或 P7 完成。P4 仍缺完整 range-tree、duplicated default 等价和
 recovered switch / jump-table metadata；P7 仍要继续迁移更多 Angr 真实样例。
@@ -3459,12 +3459,16 @@ recovered switch / jump-table metadata；P7 仍要继续迁移更多 Angr 真实
 
 ## 验证
 
-- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `git -C external/NotDec-llvm2c diff --check -- test/structuring/run_structuring_smoke.py`
+  通过。
+- `git diff --check -- logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+  通过。
 - `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
   通过。
 
 ## 影响判断
 
-- 实现效果：1/5。只新增脚本层负例覆盖，不扩大算法能力。
-- 复杂度：1/5。新增一个内联 IR smoke case。
-- 维护成本：1/5。断言只看“不恢复成 switch”的核心边界，后续输出局部排版变化不应影响。
+- 实现效果：1/5。只把 default 回流边界升到输出层 smoke；P4/P7 仍未完成。
+- 复杂度：1/5。只新增一个内联 IR smoke case。
+- 维护成本：1/5。规则保守；smoke 只看“不恢复成 switch”的核心边界，后续输出局部
+  排版变化不应影响。
