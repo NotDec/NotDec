@@ -3761,3 +3761,39 @@ SAILR 语义。之前这些信息只隐含在脚本 case 字段里，不方便�
 - 实现效果：1/5。让 P7 样例分类可输出、可检查，但没有新增算法能力。
 - 复杂度：1/5。只加一个可选 CSV 输出路径。
 - 维护成本：1/5。默认脚本行为不变，报告字段稳定且少。
+
+# 2026-06-28 P7 switch overlap migration 覆盖记录
+
+本次不改算法，只把 P5 已有的 switch case/default overlap 输出边界补到
+`run_sailr_bench2_migration.py`。这个形状之前在 C++ 和 smoke 里有覆盖，但 migration
+分类报告里还没有单独代表 P5 overlap 的样例。
+
+这仍是 proxy，不表示 P5 完成。P5 的核心缺口还是 recovered switch / jump-table metadata，
+以及真实样例分类。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:326`
+  - 新增 `switch_case_default_overlap_proxy`，代理同一个 switch 里 case/default 都落到
+    shared body 的输出边界。
+  - 断言 `switch (y)`、`case 2:`、`default:`、`b();`、`return 0;` 都存在，
+    并确认 `structured_block_5:` 只定义一次。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-overlap-report.csv`
+  通过；报告显示 5 个 `real`、7 个 `proxy`，全部 `pass`。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。migration 脚本覆盖从 11 个样例扩到 12 个样例，并补上 P5 overlap
+  代表行为；但没有新增算法能力。
+- 复杂度：1/5。只新增一个内联 IR case。
+- 维护成本：1/5。断言关注共享 body 不重复和关键 switch 文本。
