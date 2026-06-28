@@ -3078,6 +3078,10 @@ switch。case 超出 guard 时整体跳过，不做半截恢复。没有实现�
   退出码 0，`elapsed=160.53 user=182.55 sys=1.52 maxrss=1271812`。和前两轮
   `156.90s`、`163.14s` 同口径接近，没有明显退化；过程中的 global/type warning
   仍是 fortune 既有输出。
+- 宽整数元数据补丁后又跑了一次 fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-range-metadata-width.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=158.55 user=181.10 sys=1.65 maxrss=1269316`，仍在近期
+  `156-163s` 范围内。
 
 ## 影响判断
 
@@ -3087,3 +3091,65 @@ switch。case 超出 guard 时整体跳过，不做半截恢复。没有实现�
   `LoweredSwitchSimplifier` 内。
 - 维护成本：2/5。规则保守，后续如果要做更完整 range-tree，需要重新设计多 guard
   合取和 case 覆盖判断。
+
+# 2026-06-28 P2/P6 调用数复制成本实现记录
+
+本次把 Angr 的 call-count 复制成本 guard 接到 shared CFG。之前只用 statement 数限制
+复制，`ReturnDuplicatorLow` 会漏掉 Angr 的 `max_calls_in_regions=2`，`CrossJumpReverter`
+也只补过 statement 边界测试，没有真正实现 `max_call_duplications=1`。这次不改复制策略，
+只让已有 return-region 和 cross-jump 复制在调用数过高时跳过。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:225-228`
+  - `CFGBlock` 新增 `CallCount`，记录 backend-neutral 的调用成本。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:181-189`
+  - `LLVMFunctionCFGBuilder::build()` 统计 LLVM `CallBase` 指令。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:97-115`
+  - 新增 `CallExprCounter` 和 `callExprCount()`，递归统计 Clang AST 的 `CallExpr`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:475-482`
+  - `StructuredGotoAdapter::buildCFG()` 写入每个 shared block 的 `CallCount`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuredCFG.cpp:431-435` 和 `:554-559`
+  - copied block materialize 时同步复制 body block 的 `CallCount`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:34-56`
+  - `ReturnDuplicatorLow` 增加 `MaxDuplicatedCalls=2`。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:129-145`
+  - `CrossJumpReverter` 增加 `MaxDuplicatedCalls=1`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2636-2660`
+  - 新增 `callCountInRegion()`，分别统计 `LinearRegion` 和 `ReturnRegion`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:3163-3192`
+  - `ReturnDuplicatorLow::runOnGraph()` 超过调用数上限时跳过复制。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:3332-3363`
+  - `CrossJumpReverter::runOnGraph()` 超过调用数上限时跳过复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1929-1962`
+  - 新增 `testLLVMFunctionCFGBuilderRecordsCallCount()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:3600-3630`
+  - 新增 `testCrossJumpReverterSkipsCallHeavyLinearGotoTarget()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:5493-5525`
+  - 新增 `testReturnDuplicatorLowSkipsCallHeavyReturnRegion()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13275-13320`
+  - 在 `main()` 中注册三条新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过，ninja 显示 no work to do。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-call-count.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=161.03 user=183.38 sys=1.54 maxrss=1268336`。仍在近期
+  `156-163s` 范围内，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有输出。
+
+## 影响判断
+
+- 实现效果：3/5。补齐两个 Angr 成本 guard，但还没有把 pass 选项完整暴露到 CLI。
+- 复杂度：2/5。只新增一个 shared block 计数字段和两个 pass gate，不改复制流程。
+- 维护成本：2/5。后续新 backend 如果走 shared CFG，需要记得填 `CallCount`，否则会
+  回到只按 statement 数估算。
