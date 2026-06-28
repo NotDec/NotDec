@@ -4887,3 +4887,58 @@ payload similarity / merge graph，而不是扩大 exact duplicate 规则。
 - 实现效果：2/5。补了 P1 相似语句前置材料，但没有实现 merge graph，所以 `fmt` 仍不通过。
 - 复杂度：1/5。规则很窄，只按直接零参数 callee 复用 origin。
 - 维护成本：1/5。后续如果扩展到带参数 call，必须先有参数 payload 等价和副作用边界。
+
+# 2026-06-28 P1 branch common-tail 抽取记录
+
+继续推进 P1 的保守 merge graph 子集。之前 common statement tail 只接受两个候选 block
+的 predecessor set 不相交，因此同一个 branch predecessor 的 then/else 两边即使有相同
+后缀，也不会抽成 shared tail。本次只放开一个窄形状：当前 goto source 本身是二分支，
+goto target 是其中一边，另一边是唯一 sibling successor；两边 block 仍必须是 fallthrough、
+同 control shape、无 dephication context、只有同一个 branch predecessor，且只抽共同
+statement 后缀，不合并前缀和 branch 条件。
+
+这仍不是完整 Angr merge graph。`fmt_deduplication_proxy` 的整 arm 合并还缺 shared
+conditional dominator 和更一般的相似子图重接，所以本次后它仍保持 xfail。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1088`
+  - 新增 `sameGotoBranchPredecessorPair()`，确认两个候选 block 只有同一个 branch
+    predecessor，且这个 predecessor 就是当前 goto source。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1190`
+  - 新增 `commonBranchStatementTailCandidate()`，复用 common statement tail 的 payload
+    origin 比较和 block 安全条件，但允许上述同 branch predecessor 形状。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1487`
+  - `revertGotoRelatedCommonStatementTail()` 先找 goto target 的 branch sibling，只对这个
+    sibling 额外尝试 branch common-tail，避免对全图 block 做额外搜索。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4845`
+  - 新增 `testDuplicationReverterExtractsGotoBranchCommonStatementTail()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4886`
+  - 新增 `testDuplicationReverterKeepsBranchCommonStatementTailWithoutGotoHint()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14570`
+  - 在测试入口调用两个新增 regression。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd per-function 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-branch-tail-tight.csv`
+  通过；CSV 统计为 13 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，1 个 `xfail/expected-output-mismatch`。`fmt_deduplication_proxy`
+  仍是预期的 P1 output gap。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-branch-tail-tight.c`
+  通过；同口径结果：`elapsed=53.60 user=53.16 sys=0.43 maxrss=674584`。
+
+## 影响判断
+
+- 实现效果：2/5。补了同 branch predecessor 的 common-tail 子集，但仍不是完整 merge graph。
+- 复杂度：2/5。新增一个额外候选形状，并把搜索限制到 goto target 的 sibling 以控制性能。
+- 维护成本：2/5。后续如果扩到非 sibling 或整 arm 合并，必须先处理 condition/guard 重接。
