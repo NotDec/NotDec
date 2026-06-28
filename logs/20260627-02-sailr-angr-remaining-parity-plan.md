@@ -4310,3 +4310,45 @@ struct 临时变量，再把 `extractvalue` 降成 `tmp.field_N`。不处理 `in
 - 实现效果：1/5。真实 fortune smoke 又向前推进一段，但仍未跑到完整输出。
 - 复杂度：2/5。新增了 call materialize 和字段访问映射，范围仍限定在 call-return struct。
 - 维护成本：2/5。后续若要支持 `insertvalue` 或更复杂聚合，需要单独扩展，不能复用这段假装通用。
+
+# 2026-06-28 P7 fortune smoke opaque GEP 收窄记录
+
+继续推进 fortune smoke。上一节修掉 aggregate-return `extractvalue` 后，fortune 卡在
+`handleGEP()` 对 LLVM 22 opaque pointer 的 `void*` 解引用。IR 的 GEP 本身仍带
+`source element type`，所以这次只在 GEP 入口使用这个类型把 `void*` cast 成
+`source_element_type*`，再走已有 pointer arithmetic / deref 逻辑。不修改 `deref()` 的
+全局行为。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:442`
+  - `handleGEP(Ctx, EB, TB, GEPOperator&)` 在 pointer operand 是 `void*` 时，用
+    `GEPOperator::getSourceElementType()` 生成 typed pointer cast。
+  - 同步把常量表达式 GEP 调用点也传入 `TypeBuilder`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:415`
+  - 新增 `opaque_pointer_gep_source_type`，覆盖 `getelementptr i64, ptr %p, i64 1`
+    能输出 `*((long long *)p + 1LL)`，不再直接对 `void*` 做 GEP / deref。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuralAnalysis.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过旧路径缺失的 lighttpd 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-opaque-gep-migration.csv`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-module-all.c`
+  仍失败，但已经越过 `void*` GEP / deref 断言；新失败是 `CFGBlock::updateStmt` slot
+  断言，`elapsed=5.17 user=5.07 sys=0.09 maxrss=356208`。
+
+本次只影响 `llvm2c` GEP 表达式构造和输出层 smoke，不影响主 NotDec pass pipeline。
+
+## 影响判断
+
+- 实现效果：1/5。真实 fortune smoke 继续推进到下一个前端阻塞。
+- 复杂度：1/5。只利用 GEP 自带 source element type 做 cast。
+- 维护成本：1/5。不改变通用 `void*` 解引用策略。
