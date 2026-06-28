@@ -3011,3 +3011,71 @@ switch。range-tree lowered switch 恢复还没实现。
 - 复杂度：2/5。新增枚举值和少量 predicate 映射，没有改恢复算法。
 - 维护成本：2/5。后续实现 range-tree 时要继续复用 `TrueTargetIndex`，不要从 payload
   文本猜分支方向。
+
+# 2026-06-28 P4 range guard if-chain 消费记录
+
+本次只处理一层简单 range guard 包住 equality/inequality if-chain 的形状，例如
+`x <= 9 ? (x == 7 ? case7 : x == 9 ? case9 : default) : default`。只有能证明所有
+case 常量都落在 guard 允许范围内时，才把 guard 和内部 compare 链一起改成 shared
+switch。case 超出 guard 时整体跳过，不做半截恢复。没有实现一般 range-tree switch
+恢复。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:100-112`
+  - `ConditionCompare` 增加 64 位以内整数常量值和 signed/unsigned predicate 标记，
+    供 range guard 判断使用；payload 仍负责渲染。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:107-159`
+  - LLVM IR builder 记录 signed/unsigned predicate 和整数常量值，宽度超过 64 位时
+    不给 range 消费。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:273-287`
+  - Clang CFG 入口同步填充整数常量值，保持 true edge 为 successor 0 的约定。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:177-180`
+  - `LoweredSwitchIfCase` 保存原始 `ConditionCompare`，后续用它判断 case 常量是否
+    符合 range guard。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1742-1841`
+  - 新增 range compare 匹配和 case-in-range 判断，按 guard 的 signed/unsigned
+    语义比较。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1843-1962`
+  - 普通 if-chain 收集遇到外层 range guard 时默认跳过，避免把受 guard 限制的链条
+    单独恢复成可能误导后续 pass 的 switch。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1965-2011`
+  - 新增 `collectRangeGuardedLoweredSwitchIfChain()`，只消费 default 边一致且全部 case
+    都满足 guard 的一层形状。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2753-2758`
+  - `LoweredSwitchSimplifier` 先尝试 range-guarded 形状，再回到普通 if-chain。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1818-1895`
+  - range metadata 测试补 unsigned predicate 和整数值断言。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10016-10076`
+  - 新增正例，确认 `x <= 9` 包住 `x == 7 / x == 9` 能恢复成 switch。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10175-10227`
+  - 新增反例，`x <= 8` 包住 `x == 7 / x == 9` 时不消费 guard，也不折内部链。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13252-13257`
+  - 注册新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- include/notdec-backends/Structuring/StructuredCFG.h lib/Structuring/LLVMFunctionCFGBuilder.cpp lib/notdec-llvm2c/StructuredGoto.cpp lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-range-guard.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=160.53 user=182.55 sys=1.52 maxrss=1271812`。和前两轮
+  `156.90s`、`163.14s` 同口径接近，没有明显退化；过程中的 global/type warning
+  仍是 fortune 既有输出。
+
+## 影响判断
+
+- 实现效果：3/5。补上一个常见 guarded lowered-switch 形状，但还不是一般 range-tree
+  恢复。
+- 复杂度：3/5。新增整数元数据和一层 guard 收集逻辑，范围仍控制在
+  `LoweredSwitchSimplifier` 内。
+- 维护成本：2/5。规则保守，后续如果要做更完整 range-tree，需要重新设计多 guard
+  合取和 case 覆盖判断。
