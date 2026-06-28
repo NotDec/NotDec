@@ -261,13 +261,13 @@ Angr 对照源码使用本机 `/sn640/angr`，提交 `63c05f1d4`。NotDec 对照
 
 | Angr pass / 文件 | Angr 关键语义 | NotDec 当前状态 | 下一步 |
 | --- | --- | --- | --- |
-| `StructuringOptimizationPass`，`optimization_pass.py:443-654` | SAILR during-region pass wrapper，负责初始 structuring、goto guard、固定点、失败回滚、相对质量检查。 | 基本覆盖。NotDec 在 `StructuringOptimizationPass.h:16-24` 保存同类 option，在 `StructuringOptimizationPass.cpp:62-130` 做 evaluate、rollback、goto/quality guard。 | P6 继续核对 quality 细节，特别是 copied block 和 virtual goto 的统计是否和 Angr 一致。 |
-| `SwitchDefaultCaseDuplicator`，`switch_default_case_duplicator.py:20-166` | 基于 jump table 找 default case 复用；多 switch 共享 default 时写成 goto；外部 predecessor 复用时复制 default block。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:1893-2042` 处理已有 shared switch default，支持 synthetic goto / forwarder，也能复制线性 default region。还没有 Angr 那种直接消费 CFG jump table metadata 的入口。 | P5：接入 recovered switch / jump-table 元数据，区分 default-only、case-only、交叉复用。 |
-| `DuplicationReverter`，`duplication_reverter.py:36-180`、`655-730`、`1056-1175` | 从 goto 周边找候选，构造 `AILMergeGraph`，按相似语句/子图拆分公共部分，再重接 predecessor、successor、jump target。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:2044-2125` 覆盖 exact duplicate、common statement tail、linear region tail、copied-prefix shared tail，但还没有通用 merge graph、条件重建和非 tail 拆分。`20260627-01` 属于这个 pass 的 copied-prefix tail 子项。 | P1：先做保守 single-entry / single-exit DAG merge graph，不碰循环和宽表达式等价。 |
-| `SwitchReusedEntryRewriter`，`switch_reused_entry_rewriter.py:20-132` | 基于 jump table entry，发现多个 switch head 复用同一 case entry 时，为后续 head 建 virtual goto，不复制 entry。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:1701-1787` 基于 shared switch case edge 建 synthetic goto，保留最低 id 的 entry，已有 reuse limit。缺口仍是 jump-table/recovered switch metadata 和复杂 default/case 混用。 | P5：和 default 复用共用 shared switch 表示，明确 default-only 不进 case-entry 逻辑。 |
-| `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 部分覆盖。NotDec 已能消费 `==` / `!=` if-chain、一层和线性 nested range guard，并过滤 shared case/default target；仍缺 Angr 的完整 range-tree、duplicated default 等价和 jump-table/recovered switch metadata。 | P4：继续补 range-tree 和 duplicated default；P5：和 recovered switch metadata 共用 case/default 表示。 |
-| `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:3163-3323` 能复制线性 return tail、branch/diamond/fork 的一部分、grouped predecessor 和部分 payload，并已按 Angr 的调用数上限跳过 call-heavy region。差距仍是 Angr 的通用 endnode region 枚举和 Phi/vvar 全量处理。 | P2 + P3：继续补一般 single-entry return region，再补 Phi/vvar/copied payload 全量消费。 |
-| `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 在 `SAILRDeoptimization.cpp:3332-3488` 复制线性 region，支持 switch case/default edge kind 拆分、grouped predecessor 和 Angr 的 call-count 成本 guard。 | P7：继续核对真实样例行为和测试迁移，不再把 call counter 作为未实现项。 |
+| `StructuringOptimizationPass`，`optimization_pass.py:443-654` | SAILR during-region pass wrapper，负责初始 structuring、goto guard、固定点、失败回滚、相对质量检查。 | 基本覆盖。NotDec 在 `StructuringOptimizationPass.h:16-24` 保存同类 option，在 `StructuringOptimizationPass.cpp:62-130` 做 evaluate、rollback、goto/quality guard。后续又补了 Angr stage 顺序、filtered goto 统计、label/goto 清理和 helper children 去重。 | P6 剩余重点是继续用真实样例审 copied target、virtual goto、case/default edge kind 的质量统计。 |
+| `SwitchDefaultCaseDuplicator`，`switch_default_case_duplicator.py:20-166` | 基于 jump table 找 default case 复用；多 switch 共享 default 时写成 goto；外部 predecessor 复用时复制 default block。 | 部分覆盖。NotDec 已处理 shared switch default、synthetic goto / forwarder、线性 default region、case/default overlap 拆边、shared default 后 case 边保留和 C renderer 输出。还没有 Angr 那种直接消费 CFG jump table metadata 的入口。 | P5：接入 recovered switch / jump-table 元数据，继续区分 default-only、case-only、case/default 交叉复用。 |
+| `DuplicationReverter`，`duplication_reverter.py:36-180`、`655-730`、`1056-1175` | 从 goto 周边找候选，构造 `AILMergeGraph`，按相似语句/子图拆分公共部分，再重接 predecessor、successor、jump target。 | 部分覆盖。NotDec 覆盖 exact duplicate、common statement tail、linear region tail、copied-prefix shared tail、switch predecessor redirect 和 copied goto target 归一化；但还没有通用 merge graph、条件重建和非 tail 拆分。`20260627-01` 属于这个 pass 的 copied-prefix tail 子项。 | P1：先补 shared 条件/guard 表达，或者只做不需要条件重接的更窄 merge graph。 |
+| `SwitchReusedEntryRewriter`，`switch_reused_entry_rewriter.py:20-132` | 基于 jump table entry，发现多个 switch head 复用同一 case entry 时，为后续 head 建 virtual goto，不复制 entry。 | 部分覆盖。NotDec 基于 shared switch case edge 建 synthetic goto，保留最低 id 的 entry，已有 reuse limit，并补了 default-only skip、case/default overlap 和真实 C 输出边界。缺口仍是 jump-table/recovered switch metadata 和复杂 default/case 混用。 | P5：和 default 复用共用 recovered switch 表示，明确 default-only 不进 case-entry 逻辑。 |
+| `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 部分覆盖。NotDec 现在有 condition compare metadata，能消费 `==` / `!=` if-chain、一层和线性 nested range guard，并过滤 shared case/default target、连续 case、distinct target、default 回流和 all-ones sentinel；还补了结构树 `DefaultTarget` 和脚本 smoke。仍缺 Angr 的完整 range-tree、duplicated default 等价和 jump-table/recovered switch metadata。 | P4：继续补 range-tree 和 duplicated default；P5：和 recovered switch metadata 共用 case/default 表示。 |
+| `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 能复制线性 return tail、unreachable tail、nested/diamond/joined-diamond、direct-return side、branch/switch wrapper、switch return tail、grouped predecessor，并覆盖多 vvar、dephication incoming 删除/复制和 copied payload 的多个代理形状；也按调用数和语句数限制复制。差距仍是 Angr 的通用 single-entry region 枚举和 Phi/vvar 全量消费。 | P2 + P3：继续补更一般的 endnode region 枚举，并扩大 copied payload / vvar 的真实输出覆盖。 |
+| `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 复制线性 region，支持 switch case/default edge kind 拆分、grouped predecessor、Angr call-count 成本 guard、single-switch case/default both-edge 和 edge kind 传播。 | P7：继续核对真实样例行为和测试迁移；如果真实样例显示质量判断仍偏离，再回到 P6。 |
 | `ConstPropOptReverter`，`const_prop_reverter.py` | SAILR/DREAM 共享的前置去常量传播 pass，用于让后续相似性更容易成立。 | 暂未实现，且不在当前 shared CFG deoptimization pipeline。 | 暂不放 P1-P5 主线；P7 真实样例如果显示它是主因，再单独写计划。 |
 | `ReturnDuplicatorHigh`、`ReturnDeduplicator` | SAILR/DREAM 共享外围 pass，不是当前 low-level SAILR deoptimization 主差距。 | 暂不适用。NotDec 当前目标是 shared CFG 级 pass parity。 | 只记录，不作为本计划完成条件。 |
 
@@ -292,30 +292,34 @@ NotDec 当前已有覆盖：
 
 - `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp`
   - `DuplicationReverter` 覆盖 exact、payload origin、common statement tail、
-    linear tail、copied-prefix tail、switch predecessor redirect。
+    linear tail、copied-prefix tail、switch predecessor redirect 和 copied goto
+    target 归一化。
   - `ReturnDuplicatorLow` 覆盖 goto return target、grouped predecessor、
-    parent goto source、nested/diamond/fork/branch return region 的一部分。
+    parent goto source、nested/diamond/joined-diamond/fork/branch/switch return
+    region 的一部分，以及 dephication vvar / incoming 的多个复制和删除场景。
   - `SwitchDefaultCaseDuplicator` 覆盖 shared default goto、forwarder、linear tail、
-    grouped predecessor、rollback。
+    grouped predecessor、rollback、case/default overlap 和 shared default 后 case 边保留。
   - `SwitchReusedEntryRewriter` 覆盖 reused case entry、limit、default-only skip。
+    后续又补了 case/default overlap 的 shared CFG 和 renderer 覆盖。
   - `LoweredSwitchSimplifier` 覆盖已有 switch case target 复用、`==` / `!=`
-    if-chain、简单 range guard、nested range guard 和 shared target 过滤；仍不覆盖完整
-    range-tree 和 duplicated default 等价。
+    if-chain、简单 range guard、nested range guard、shared target 过滤、连续 case /
+    distinct target 启发式、default 回流和 all-ones sentinel；仍不覆盖完整 range-tree
+    和 duplicated default 等价。
   - `CrossJumpReverter` 覆盖 linear goto target、grouped predecessor、case/default
-    edge kind。
+    edge kind、call-count 成本和 single-switch case/default both-edge。
 - `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
   当前只有 5 个真实/半真实样例，分别代理 ReturnDuplicatorLow、CrossJumpReverter、
   LoweredSwitchSimplifier 的一部分。
 - `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
-  覆盖 angr dephication Phi、multi-Phi、copied switch region，以及 SAILR/Phoenix
-  对比样例。
+  覆盖 angr dephication Phi、multi-Phi、copied switch/return region、return region
+  多种代理形状、lowered switch 安全边界，以及 SAILR/Phoenix 对比样例。
 
 测试分类：
 
 | 类别 | 当前结论 |
 | --- | --- |
-| 可直接迁移 | Switch default/reused-entry 的小图行为、CrossJumpReverter 线性目标、ReturnDuplicatorLow 简单 return tail。已有一部分在 `structuring_analysis_test.cpp`。 |
-| 需要 IR/payload 代理 | `DuplicationReverter` merge graph、ReturnDuplicatorLow Phi/vvar、LoweredSwitchSimplifier if-chain。Angr 测试基于 AIL 和真实 binary，NotDec 需要 shared CFG proxy 或 Bench2 IR。 |
+| 可直接迁移 | Switch default/reused-entry 的小图行为、CrossJumpReverter 线性目标、ReturnDuplicatorLow 简单 return tail。已有较多在 `structuring_analysis_test.cpp` 和 `run_structuring_smoke.py`。 |
+| 需要 IR/payload 代理 | `DuplicationReverter` merge graph、ReturnDuplicatorLow Phi/vvar、LoweredSwitchSimplifier if-chain/range-tree。Angr 测试基于 AIL 和真实 binary，NotDec 需要 shared CFG proxy 或 Bench2 IR。 |
 | 暂不适用 | Angr `ConstPropOptReverter`、`ReturnDuplicatorHigh`、`ReturnDeduplicator` 的非 shared-CFG 主线测试。除非真实样例证明它们阻塞 P1-P5，否则先不算本计划完成条件。 |
 
 ## 这次修改的文件和行
