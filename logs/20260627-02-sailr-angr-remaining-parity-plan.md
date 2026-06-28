@@ -3472,3 +3472,33 @@ recovered switch / jump-table metadata；P7 仍要继续迁移更多 Angr 真实
 - 复杂度：1/5。只新增一个内联 IR smoke case。
 - 维护成本：1/5。规则保守；smoke 只看“不恢复成 switch”的核心边界，后续输出局部
   排版变化不应影响。
+
+# 2026-06-28 P7 lowered switch sentinel smoke 记录
+
+本次不改算法，只把上一节 P4 的 all-ones sentinel 过滤提升到 `notdec-llvm2c` 脚本层
+smoke。用例构造 `x == -1` 后继续检查 `x == 7` 的 if-chain，确认真实 IR 输出不会
+把这个错误/特殊返回值检查恢复成 `switch`。
+
+这个用例不表示 P4 或 P7 完成。P4 仍缺完整 range-tree、duplicated default 等价和
+recovered switch / jump-table metadata；P7 仍要继续迁移更多 Angr 真实样例。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:195-217`
+  - 新增 `lowered_if_chain_all_ones_sentinel`，断言输出保留 `return -1;`、
+    `return 7;`、`return 0;`，并且不出现 `switch (x)`、`case -1:`、`case 7:`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- test/structuring/run_structuring_smoke.py`
+  通过。
+- `git diff --check -- logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：1/5。只把 sentinel 安全边界升到输出层 smoke；P4/P7 仍未完成。
+- 复杂度：1/5。只新增一个内联 IR smoke case。
+- 维护成本：1/5。断言只看“不恢复成 switch”的核心边界，后续输出局部排版变化不应影响。
