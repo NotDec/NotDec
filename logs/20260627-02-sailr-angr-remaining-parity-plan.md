@@ -4352,3 +4352,49 @@ struct 临时变量，再把 `extractvalue` 降成 `tmp.field_N`。不处理 `in
 - 实现效果：1/5。真实 fortune smoke 继续推进到下一个前端阻塞。
 - 复杂度：1/5。只利用 GEP 自带 source element type 做 cast。
 - 维护成本：1/5。不改变通用 `void*` 解引用策略。
+
+# 2026-06-28 P7 fortune smoke lazy load slot fallback 记录
+
+fortune 继续往前跑后，前一个 blocker 已经从 `void*` GEP / deref 断言移开，新的停点是
+`CFGBlock::updateStmt()` 断言。这里的场景不是 slot 本身失效，而是 lazy load 先放进去的
+`NullStmt` 占位后来已经被别的语句填掉；这时再尝试把 load 临时变量塞回原 slot 会撞上
+旧实现的强断言。  
+
+这次把 `updateStmt()` 改成“占位还是 `NullStmt` 就原地替换；否则返回 `false`”，
+`SAFuncContext::addStmt()` 在 slot 已被占用时退回到正常 `appendStmt()`。这样不改 lazy load
+的主路径，只让已经被别的语句占住的 slot 不再把 fortune 卡死。fortune 重新跑后，确实越过
+了这个断言，新的 blocker 变成 `getLLVMTypeSize()` 的零尺寸断言，说明这次 fallback 是有效的。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CFG.h:508`
+  - `CFGBlock::updateStmt()` 改成返回 `bool`，slot 还是 `NullStmt` 时原地替换，否则返回
+    `false`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1271`
+  - `SAFuncContext::addStmt()` 在 `Slot` 已被占用时不再强行写回原位，改为追加语句。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CFG.h:507`
+  - 补了一句短注释，说明这个返回值就是给 lazy load 占位冲突兜底用的。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-llvm2c/CFG.h lib/notdec-llvm2c/StructuralAnalysis.cpp`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-slot-fallback-migration.csv`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-module-all.c`
+  这次已经越过 `CFGBlock::updateStmt` slot 断言，新的 blocker 是 `Utils.cpp:70` 的
+  `getLLVMTypeSize()` 零尺寸断言；`elapsed=22.50 user=22.19 sys=0.31 maxrss=644452`。
+
+本次还是只影响 `llvm2c` structuring / adapter 链路，不改 SAILR pass 选择和排序。
+
+## 影响判断
+
+- 实现效果：2/5。把 fortune 的一个真实前端断言收窄掉了，确实推进到下一层。
+- 复杂度：1/5。只是在已有 lazy load slot 机制上加了一个退路。
+- 维护成本：1/5。行为很局部，只有 slot 冲突时才走 fallback。
