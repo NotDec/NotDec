@@ -2958,3 +2958,56 @@ Angr 那种真实 jump-table metadata。
   `ConditionCompare` 的消费范围。
 - 维护成本：2/5。后续 switch pass 可以复用 `switchEdgeKind()`，但如果接入真实
   jump-table metadata，需要继续确认它和现有 `Successors/Cases` 约定是否一致。
+
+# 2026-06-28 P4 range condition metadata 记录
+
+本次只补 P4 的前置元数据，让 shared CFG 能记录 `> >= < <=` 这类 range compare。
+`LoweredSwitchSimplifier` 仍只消费 `==` / `!=` if-chain，不把 range compare 折成
+switch。range-tree lowered switch 恢复还没实现。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuredCFG.h:91-114`
+  - `ConditionCompareKind` 增加 `GreaterThan`、`GreaterEqual`、`LessThan`、
+    `LessEqual`。
+  - `ConditionCompare` 增加 `TrueTargetIndex`，range compare 的 `EqualTargetIndex`
+    暂时等于 true successor。
+- `external/NotDec-llvm2c/lib/Structuring/LLVMFunctionCFGBuilder.cpp:66-148`
+  - `conditionCompareFromICmp()` 支持 LLVM signed/unsigned range predicate。
+  - 常量在左侧时通过 `swappedConditionCompareKind()` 翻转比较方向。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:206-284`
+  - `conditionCompareFromBranchCondition()` 支持 Clang AST 的 `>`、`>=`、`<`、`<=`。
+  - 保持 Clang CFG true edge 为 successor 0 的约定。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1721-1733`
+  - `matchedConditionCompare()` 显式拒绝 range compare，避免当前 switch 恢复误吃。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1754-1863`
+  - 补 `TrueTargetIndex` 断言。
+  - 新增 `testLLVMFunctionCFGBuilderRecordsRangeConditionCompare()`，覆盖 range
+    compare 和常量左侧时的方向翻转。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10025-10069`
+  - 新增 `testLoweredSwitchSimplifierSkipsRangeConditionCompare()`，确认 range
+    compare 不会被当前 lowered-switch 恢复消费。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- include/notdec-backends/Structuring/StructuredCFG.h lib/Structuring/LLVMFunctionCFGBuilder.cpp lib/Structuring/SAILRDeoptimization.cpp lib/notdec-llvm2c/StructuredGoto.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-range-condition.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=163.14 user=185.07 sys=1.59 maxrss=1272840`。和前次
+  `elapsed=156.90 user=179.48 sys=1.80 maxrss=1272392` 同口径接近，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。只补 range compare 元数据，为后续 range-tree switch 恢复铺路。
+- 复杂度：2/5。新增枚举值和少量 predicate 映射，没有改恢复算法。
+- 维护成本：2/5。后续实现 range-tree 时要继续复用 `TrueTargetIndex`，不要从 payload
+  文本猜分支方向。
