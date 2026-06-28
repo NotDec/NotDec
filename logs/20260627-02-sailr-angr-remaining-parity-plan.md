@@ -4744,3 +4744,43 @@ expected-timeout。
 - 实现效果：2/5。修掉宽整数导致的 runner abort，lighttpd 前进到长时间运行 blocker。
 - 复杂度：1/5。只补已有 `_BitInt(N)` fallback 的两个漏点和打印器兼容。
 - 维护成本：1/5。后续 lighttpd 仍需单独看长跑原因；本次不扩大到类型恢复策略。
+
+# 2026-06-28 P7 fmt dedup proxy 重新分类记录
+
+继续核对 P7 migration 报告时发现 `fmt_deduplication_proxy` 的原检查太弱。当前输出虽然没有
+`goto`，但仍然是：
+
+- `if` 分支里一份 `xdectoumax(); return 0;`
+- `else` 分支里一份 `xdectoumax(); return 0;`
+
+这不代表 P1 `DuplicationReverter` 已经覆盖 Angr `test_fmt_deduplication` 的 dedup 语义。
+真正期望是重复调用/return 被抽成一份公共结构。当前 shared CFG 还没有通用 merge graph，
+直接实现需要新的相似子图和条件重接语义；这次先把报告改准，避免把 P1 缺口误算成 pass。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:255`
+  - `fmt_deduplication_proxy` 增加 `expected_failure`，明确这是 P1 output gap。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:278`
+  - 期望计数改为 `xdectoumax();` 出现 2 次（函数声明 1 次 + 实际调用 1 次），`return 0;`
+    出现 1 次。当前输出仍是声明 1 次 + 调用 2 次、`return 0;` 2 次，因此稳定 xfail。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- 单独调用 `fmt_deduplication_proxy` 的 `run_case()`，结果为 `fail/output-mismatch`：
+  `xdectoumax();` 期望 2 次，当前 3 次；`return 0;` 期望 1 次，当前 2 次。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-fmt-gap-migration.csv`
+  通过；CSV 统计为 13 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，1 个 `xfail/expected-output-mismatch`。
+
+本次只改 P7 报告分类，不改 `llvm2c` 或 SAILR pass；因此不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。没有新增算法能力，但把 P1 的真实输出缺口暴露出来。
+- 复杂度：1/5。只收紧一个 migration proxy 的期望。
+- 维护成本：1/5。后续实现 P1 merge graph 后，这个 xfail 应该转成 pass。
