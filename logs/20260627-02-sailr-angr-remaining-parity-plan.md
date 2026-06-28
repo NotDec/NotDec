@@ -4050,3 +4050,71 @@ structuring 结果。
   `xfail`，让 P4 输出层缺口可见。
 - 复杂度：1/5。只给脚本增加预期失败状态处理和一个内联 IR case。
 - 维护成本：1/5。`xpass` 会让脚本失败，避免缺口修好后继续被当成预期失败。
+
+# 2026-06-28 P4 range-tree lowered switch 修复记录
+
+本次修复上面登记的 range-tree 输出层缺口。真实路径里 `RetDupPass` 会把同一个
+default `return 0;` 拆成两个 AST payload，之前 shared-CFG 的 range-tree 合并要求左右
+default 完全同一目标，导致 `notdec-llvm2c --algo=structured-sailr` 仍输出嵌套 `if`。
+
+修复后，左右 equality chain 仍必须共享同一个比较变量、case 值互不重复、case 都符合
+range guard；只有两个 default 都是 closed terminal、语句 payload origin 相同、且只被
+当前链路进入时，才会把 duplicated default 合并为一个 switch default。adapter 侧只给
+简单整数字面量 `return` 建 shared payload origin，不复用 AST 节点。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:155`
+  - 增加 `blockOnlyReachedFrom()` 前置声明，供 range-tree default 合并做链内 predecessor
+    检查。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1901`
+  - 新增 `sameClosedDefaultBlock()`，只接受 closed terminal 且 statement origin 相同的
+    duplicated default。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1917`
+  - 新增 `mergeEquivalentRangeTreeDefaults()`，把链私有 duplicated default 合并到第一个
+    default，并把第二个 default 加入 removed block。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1943`
+  - `mergeRangeTreeLoweredSwitchIfChains()` 不再要求 default target id 完全相同，改为走
+    上面的保守等价 default 检查。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:131`
+  - 新增 `SimpleReturnPayloads`，记录简单整数字面量 return 的 canonical payload。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:170`
+  - 新增 `setSimpleReturnOrigin()`，让 duplicated `return 0;` 共享 payload origin。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:518`
+  - `buildCFG()` 在收集 block statement 时调用 `setSimpleReturnOrigin()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10849`
+  - 新增 `testLoweredSwitchSimplifierMergesRangeTreeDuplicatedDefaultReturns()`，覆盖左右
+    range-tree 分支各自有 duplicated default return 的 shared-CFG 合并。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:144`
+  - `lowered_switch_range_tree_output_gap` 改为 `lowered_switch_range_tree_proxy`，去掉
+    `expected_failure`，现在要求真实 `notdec-llvm2c` 输出 `switch (x)` 和四个 case。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuredGoto.cpp lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `/sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /tmp/notdec-sailr-debug-range-tree/range_tree.ll -o /tmp/notdec-sailr-debug-range-tree/range_tree.originfix.c`
+  输出包含 `switch (x)`、`case 7:`、`case 9:`、`case 11:`、`case 13:`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-originfix.csv`
+  初次按旧 xfail 运行得到 `xpass`，确认缺口已修复；更新预期后重新验证见最终记录。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-range-tree-fixed.csv`
+  通过；`lowered_switch_range_tree_proxy` 指标是 `switch_count=1`、`case_count=4`、
+  `goto_count=0`、`return_count=5`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+
+本次改动只影响 llvm2c 的 structuring / adapter 路径，不影响主 NotDec 类型恢复和 pass
+pipeline。性能 smoke 用 migration 和 structuring smoke 观察同类链路；没有跑 fortune，
+因为 fortune 不能代表这条 llvm2c range-tree 输出路径。
+
+## 影响判断
+
+- 实现效果：3/5。修掉 P4 里一个真实输出层缺口，range-tree lowered switch 能从 nested
+  if 恢复成 switch。
+- 复杂度：2/5。新增一个很窄的 default 等价判断和一个 adapter payload origin cache。
+- 维护成本：2/5。判断条件偏保守，只覆盖简单 literal return duplicated default；后续如果
+  要支持复杂 default，需要继续扩展 payload 等价来源。
