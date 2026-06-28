@@ -3392,3 +3392,79 @@ block 后改变循环/回流语义。仍不处理 duplicated default 等价和�
 - 复杂度：1/5。只新增一个 reachability 检查和一个负例。
 - 维护成本：1/5。规则保守；如果后续要允许某些结构化循环回流，需要先证明 rewrite 后
   不会删除仍需要的 comparison block。
+
+# 2026-06-28 P4 lowered switch all-ones sentinel 过滤记录
+
+本次继续补 Angr `LoweredSwitchSimplifier` 的低误判过滤。Angr 在 `eq` 链收集时遇到
+`0xffffffff` 或 `0xffffffffffffffff` 会放弃候选，因为这常见于先判断函数返回值 `-1`
+再进入其他控制流的形状，不一定是 switch case。
+
+NotDec 已有 `ConditionCompare::UnsignedIntegerValue`，所以这次不新增 bitwidth 或 payload
+解析，只按 Angr 的两个 unsigned sentinel 值过滤。缺整数元数据的 case 仍保持之前的
+保守行为，不靠文本猜。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:193-196`
+  - 新增 i32/i64 all-ones sentinel 常量。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2019-2032`
+  - 新增 `hasAllOnesSwitchSentinelCase()`，扫描 lowered switch case 的整数元数据。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2052-2058`
+  - `loweredSwitchChainPassesAngrHeuristics()` 在连续 case 和 distinct target 过滤前
+    先拒绝 all-ones sentinel。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10226-10283`
+  - 新增 `testLoweredSwitchSimplifierSkipsAllOnesSentinelIfChain()`，用真实 LLVM i32
+    `-1` 比较确认 `UnsignedIntegerValue == 0xffffffff`，并确认 if-chain 不被改写。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13994-13998`
+  - 注册新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch-sentinel.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=162.97 user=185.16 sys=1.70 maxrss=1269056`。和上一轮
+  `165.63s` 同口径，没有明显退化；过程中的 global/type warning 仍是 fortune 既有输出。
+
+## 影响判断
+
+- 实现效果：2/5。补上 Angr 的 all-ones sentinel 误判过滤；P4 仍缺完整 range-tree 和
+  duplicated default 等价。
+- 复杂度：1/5。只增加一个常量过滤 helper 和一个 LLVM IR 回归。
+- 维护成本：1/5。规则很窄；如果后续发现非 i32/i64 sentinel，需要先对照 Angr 再扩展。
+
+# 2026-06-28 P7 lowered switch default 回流 smoke 记录
+
+本次不改算法，只把上一节 P4 的 default 回流过滤提升到 `notdec-llvm2c` 脚本层 smoke。
+目的很窄：确认真实 IR 输入里 default 分支回到 comparison chain 时，不会被输出成
+`switch`，避免后续 P4 range-tree 或 switch metadata 改动把这个安全边界冲掉。
+
+这个用例不表示 P4 或 P7 完成。P4 仍缺完整 range-tree、duplicated default 等价和
+recovered switch / jump-table metadata；P7 仍要继续迁移更多 Angr 真实样例。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:166-191`
+  - 新增 `lowered_if_chain_default_cycle`，构造 `default -> check9` 的回流形状。
+  - 断言输出包含两个真实 case return，同时不包含 `switch (x)`、`case 7:`、`case 9:`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：1/5。只新增脚本层负例覆盖，不扩大算法能力。
+- 复杂度：1/5。新增一个内联 IR smoke case。
+- 维护成本：1/5。断言只看“不恢复成 switch”的核心边界，后续输出局部排版变化不应影响。
