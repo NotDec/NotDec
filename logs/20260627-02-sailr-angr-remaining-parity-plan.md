@@ -4444,3 +4444,52 @@ fortune 继续往前跑后，前一个 blocker 已经从 `void*` GEP / deref 断
 - 实现效果：2/5。真实 fortune smoke 从聚合 load/store 尺寸断言推进到下一类聚合表达式问题。
 - 复杂度：1/5。只把聚合类型从标量 size 路径分出来。
 - 维护成本：1/5。行为限定在 load/store aggregate 类型，不改变现有标量推断。
+
+# 2026-06-28 P7 fortune smoke extractvalue 聚合来源收窄记录
+
+继续推进 fortune smoke。上一节之后，fortune 卡在 `CFGBuilder::visitExtractValueInst()`：
+一种来源是 `extractvalue (insertvalue chain), N`，另一种来源是 reg2mem 后的 aggregate load
+再取字段。这次只处理这两种单层字段访问：`insertvalue` 链按字段号倒查最近一次写入并转发
+operand；已经能作为 C record 表达式的聚合值则生成 `field_N` 访问。嵌套字段和完整聚合构造
+仍不在本次范围内。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1167`
+  - 新增 `materializeAggregateExprField()`，把 aggregate load 这类已可表达的 record value 的
+    `extractvalue` 降成字段访问。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1193`
+  - 新增 `findInsertValueField()`，沿单层 `InsertValueInst` 链倒查目标字段的 inserted operand。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:1210`
+  - `CFGBuilder::visitExtractValueInst()` 在已有 overflow intrinsic 和 aggregate-return call 逻辑后，
+    支持上述两类单层聚合字段访问。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:460`
+  - 新增 `insertvalue_extractvalue_forward`，覆盖从 `{ i64, i64 }` insertvalue 链取两个字段后相加。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:476`
+  - 新增 `aggregate_load_extractvalue`，覆盖 `{ i64, i64 }` load 后取字段。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuralAnalysis.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-extractvalue-aggregate-migration.csv`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-extractvalue-aggregate.c`
+  仍失败，但已经越过 `visitExtractValueInst()` 的聚合来源断言；新 blocker 是
+  `ExprBuilder::getUndef()` 对 `visitReturnInst()` 里 `ret undef` 的非标量类型未处理。
+  本次同口径结果：`elapsed=22.48 user=22.20 sys=0.28 maxrss=643392`。
+
+本次只影响 `llvm2c` 的 `extractvalue` 表达式构造和 smoke 用例，不改 SAILR pass 排序，
+也不实现完整 `insertvalue` 聚合对象。
+
+## 影响判断
+
+- 实现效果：2/5。fortune 从 `extractvalue` 聚合来源断言推进到下一类 `undef` 表达式问题。
+- 复杂度：2/5。新增两个小 helper，但只处理单层字段访问。
+- 维护成本：2/5。后续完整聚合构造仍要单独实现，不能把这里当通用 aggregate builder。
