@@ -265,7 +265,7 @@ Angr 对照源码使用本机 `/sn640/angr`，提交 `63c05f1d4`。NotDec 对照
 | `SwitchDefaultCaseDuplicator`，`switch_default_case_duplicator.py:20-166` | 基于 jump table 找 default case 复用；多 switch 共享 default 时写成 goto；外部 predecessor 复用时复制 default block。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:1893-2042` 处理已有 shared switch default，支持 synthetic goto / forwarder，也能复制线性 default region。还没有 Angr 那种直接消费 CFG jump table metadata 的入口。 | P5：接入 recovered switch / jump-table 元数据，区分 default-only、case-only、交叉复用。 |
 | `DuplicationReverter`，`duplication_reverter.py:36-180`、`655-730`、`1056-1175` | 从 goto 周边找候选，构造 `AILMergeGraph`，按相似语句/子图拆分公共部分，再重接 predecessor、successor、jump target。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:2044-2125` 覆盖 exact duplicate、common statement tail、linear region tail、copied-prefix shared tail，但还没有通用 merge graph、条件重建和非 tail 拆分。`20260627-01` 属于这个 pass 的 copied-prefix tail 子项。 | P1：先做保守 single-entry / single-exit DAG merge graph，不碰循环和宽表达式等价。 |
 | `SwitchReusedEntryRewriter`，`switch_reused_entry_rewriter.py:20-132` | 基于 jump table entry，发现多个 switch head 复用同一 case entry 时，为后续 head 建 virtual goto，不复制 entry。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:1701-1787` 基于 shared switch case edge 建 synthetic goto，保留最低 id 的 entry，已有 reuse limit。缺口仍是 jump-table/recovered switch metadata 和复杂 default/case 混用。 | P5：和 default 复用共用 shared switch 表示，明确 default-only 不进 case-entry 逻辑。 |
-| `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 名称相同但语义差距大。NotDec 在 `SAILRDeoptimization.cpp:1789-1891` 现在主要复制已有 switch 的共享 case 线性 region，并不是从 lowered if-chain 恢复 switch。 | P4：实现真正 if-chain/range-tree 到 shared switch 的恢复。 |
+| `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 部分覆盖。NotDec 已能消费 `==` / `!=` if-chain、一层和线性 nested range guard，并过滤 shared case/default target；仍缺 Angr 的完整 range-tree、duplicated default 等价和 jump-table/recovered switch metadata。 | P4：继续补 range-tree 和 duplicated default；P5：和 recovered switch metadata 共用 case/default 表示。 |
 | `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 在 `SAILRDeoptimization.cpp:3163-3323` 能复制线性 return tail、branch/diamond/fork 的一部分、grouped predecessor 和部分 payload，并已按 Angr 的调用数上限跳过 call-heavy region。差距仍是 Angr 的通用 endnode region 枚举和 Phi/vvar 全量处理。 | P2 + P3：继续补一般 single-entry return region，再补 Phi/vvar/copied payload 全量消费。 |
 | `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 在 `SAILRDeoptimization.cpp:3332-3488` 复制线性 region，支持 switch case/default edge kind 拆分、grouped predecessor 和 Angr 的 call-count 成本 guard。 | P7：继续核对真实样例行为和测试迁移，不再把 call counter 作为未实现项。 |
 | `ConstPropOptReverter`，`const_prop_reverter.py` | SAILR/DREAM 共享的前置去常量传播 pass，用于让后续相似性更容易成立。 | 暂未实现，且不在当前 shared CFG deoptimization pipeline。 | 暂不放 P1-P5 主线；P7 真实样例如果显示它是主因，再单独写计划。 |
@@ -298,8 +298,9 @@ NotDec 当前已有覆盖：
   - `SwitchDefaultCaseDuplicator` 覆盖 shared default goto、forwarder、linear tail、
     grouped predecessor、rollback。
   - `SwitchReusedEntryRewriter` 覆盖 reused case entry、limit、default-only skip。
-  - `LoweredSwitchSimplifier` 目前覆盖已有 switch case target 复用，不覆盖 if-chain
-    switch recovery。
+  - `LoweredSwitchSimplifier` 覆盖已有 switch case target 复用、`==` / `!=`
+    if-chain、简单 range guard、nested range guard 和 shared target 过滤；仍不覆盖完整
+    range-tree 和 duplicated default 等价。
   - `CrossJumpReverter` 覆盖 linear goto target、grouped predecessor、case/default
     edge kind。
 - `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
@@ -3211,3 +3212,57 @@ guard 自己恢复成 switch，不跨外层 guard。
 - 复杂度：2/5。只把一层 guard 收集扩展成线性 guard 链，不改 shared switch 表示。
 - 维护成本：2/5。规则保守，后续如果做一般 range-tree，需要重新设计多分支 guard
   合取和 default 覆盖判断。
+
+# 2026-06-28 P4 lowered switch 共享 target 过滤记录
+
+本次继续推进 P4 的安全边界，不扩展完整 range-tree。Angr 的
+`LoweredSwitchSimplifier` 会过滤 case/default target 还被链外节点进入的候选，避免把普通
+共享块误当 switch case。NotDec 之前从 lowered if-chain 恢复 switch 时缺这个过滤。
+
+同时补一个 nested range guard 的候选顺序保护：内层 equality if-chain 如果已经被外层
+range guard 覆盖，就不能先单独恢复成 switch；否则外层 guard 没机会整体消费。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1867-1908`
+  - 新增 `rangeGuardCoversChainCases()`，并让 `loweredSwitchIfChainHasRangeGuard()`
+    沿前驱向上检查 range guard，避免内层 chain 抢先恢复。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1911-1948`
+  - 新增 `loweredSwitchTargetsOnlyReachedFromChain()`，要求 case/default target 只由
+    当前 comparison chain 进入；只放行 source 在 chain 内的 synthetic goto/forwarder。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2033-2040`
+  - 普通 if-chain 恢复前应用共享 target 过滤。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2103-2108`
+  - range-guarded if-chain 最终恢复前也应用同一过滤。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10276-10337`
+  - 新增 `testLoweredSwitchSimplifierSkipsInnerChainWhenRangeGuardDefaultDiffers()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10380-10485`
+  - 新增共享 case target 和共享 default target 两个负例。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13698-13701`
+  - 注册新增回归。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp lib/Structuring/SAILRStructurer.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch-shared-target.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=161.65 user=183.49 sys=1.62 maxrss=1266544`。仍在近期
+  `156-163s` 范围内，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有输出。
+
+## 影响判断
+
+- 实现效果：2/5。补了 Angr lowered switch 候选过滤的一条安全边界，但没有解决
+  duplicated default terminal 的等价判断，也不是完整 range-tree。
+- 复杂度：2/5。只新增 target 前驱过滤和 range guard 祖先检查，不改 switch rewrite。
+- 维护成本：2/5。规则保守；后续如果要接受 duplicated default，需要先让 shared CFG
+  能可靠表达 return value 或 default body 等价。
