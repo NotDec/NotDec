@@ -2626,3 +2626,62 @@ case 共享内层 switch，内层一个 case 进入 joined diamond tail，另一
 - 实现效果：2/5。把 P2 的 switch joined-diamond return tail 代理形状提升到真实输出层。
 - 复杂度：1/5。只新增一个 smoke case。
 - 维护成本：1/5。断言集中检查 switch、return 数量和不应出现的 goto/phi/reg2mem。
+
+# 2026-06-27 P2 branch wrapper switch return tail 实现记录
+
+本次继续补 `ReturnDuplicatorLow` 的一般 return region 枚举。之前
+`collectClosedReturnTail()` 可以把 branch、diamond、joined-diamond 当成 wrapper 里的
+closed return tail，但不能把一个内层 switch 当成 closed tail。这样会漏掉：
+外层 branch/switch 的一侧是普通 return tail，另一侧是一个所有分支都闭合到 return /
+unreachable 的 switch return tail。
+
+这次只补这个保守形状：switch 自身必须只有一个外部 predecessor，且 `Graph.successorsOf()`
+里的每个唯一 successor 都能被现有 `collectClosedReturnTail()` 证明为闭合 return tail。
+不解析 switch 条件，不做 lowered switch 恢复，也不碰 P1 merge graph。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:178-180`
+  - 为后面的递归调用补 `collectClosedReturnTail()` 前置声明。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:533-570`
+  - 新增 `collectClosedSwitchReturnTail()`。
+  - 要求 switch 是单前驱、唯一 successor 集合非空，每个 successor 都能收成 closed
+    return tail。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:783-790`
+  - `collectClosedReturnTail()` 在 linear、diamond、joined-diamond 之后尝试 switch tail。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7049-7159`
+  - 新增 `testReturnDuplicatorLowCopiesBranchWithSwitchReturnTail()`。
+  - 构造外层 branch，一侧普通 return tail，另一侧内层 switch return tail，断言复制后
+    copied branch、copied switch、default/case return tail 都保留来源和 payload。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12600`
+  - 在 `main()` 中调用新增 C++ 回归。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:850-902`
+  - 新增 `sailr_branch_switch_return_tail`。
+  - 输出层断言外层 switch 两个 case 共享的 branch 被复制，内层 switch 出现两份，且不残留
+    `goto outer`、`goto inner_switch`、`phi` 或 `reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-p2-branch-switch-return-tail.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=156.71 user=179.77 sys=1.68 maxrss=1270412`。和前几轮
+  `155-157s` 同口径接近，没有明显退化；过程中的 global/type warning 仍是 fortune
+  既有 codegen 输出。
+
+## 影响判断
+
+- 实现效果：3/5。补了一个真实 P2 single-entry return region 缺口，让 branch/switch
+  wrapper 能吸收闭合 switch return tail。
+- 复杂度：2/5。新增一个递归 helper，但条件保守，复用现有 `collectClosedReturnTail()`。
+- 维护成本：2/5。递归路径需要注意互相调用，不过单前驱、Seen 和 closed-tail 条件限制了
+  扩张范围。
