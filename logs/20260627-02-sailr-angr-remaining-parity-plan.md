@@ -265,7 +265,7 @@ Angr 对照源码使用本机 `/sn640/angr`，提交 `63c05f1d4`。NotDec 对照
 | `SwitchDefaultCaseDuplicator`，`switch_default_case_duplicator.py:20-166` | 基于 jump table 找 default case 复用；多 switch 共享 default 时写成 goto；外部 predecessor 复用时复制 default block。 | 部分覆盖。NotDec 已处理 shared switch default、synthetic goto / forwarder、线性 default region、case/default overlap 拆边、shared default 后 case 边保留和 C renderer 输出。还没有 Angr 那种直接消费 CFG jump table metadata 的入口。 | P5：接入 recovered switch / jump-table 元数据，继续区分 default-only、case-only、case/default 交叉复用。 |
 | `DuplicationReverter`，`duplication_reverter.py:36-180`、`655-730`、`1056-1175` | 从 goto 周边找候选，构造 `AILMergeGraph`，按相似语句/子图拆分公共部分，再重接 predecessor、successor、jump target。 | 部分覆盖。NotDec 覆盖 exact duplicate、common statement tail、linear region tail、copied-prefix shared tail、switch predecessor redirect 和 copied goto target 归一化；但还没有通用 merge graph、条件重建和非 tail 拆分。`20260627-01` 属于这个 pass 的 copied-prefix tail 子项。 | P1：先补 shared 条件/guard 表达，或者只做不需要条件重接的更窄 merge graph。 |
 | `SwitchReusedEntryRewriter`，`switch_reused_entry_rewriter.py:20-132` | 基于 jump table entry，发现多个 switch head 复用同一 case entry 时，为后续 head 建 virtual goto，不复制 entry。 | 部分覆盖。NotDec 基于 shared switch case edge 建 synthetic goto，保留最低 id 的 entry，已有 reuse limit，并补了 default-only skip、case/default overlap 和真实 C 输出边界。缺口仍是 jump-table/recovered switch metadata 和复杂 default/case 混用。 | P5：和 default 复用共用 recovered switch 表示，明确 default-only 不进 case-entry 逻辑。 |
-| `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 部分覆盖。NotDec 现在有 condition compare metadata，能消费 `==` / `!=` if-chain、一层和线性 nested range guard，并过滤 shared case/default target、连续 case、distinct target、default 回流和 all-ones sentinel；还补了结构树 `DefaultTarget` 和脚本 smoke。仍缺 Angr 的完整 range-tree、duplicated default 等价和 jump-table/recovered switch metadata。 | P4：继续补 range-tree 和 duplicated default；P5：和 recovered switch metadata 共用 case/default 表示。 |
+| `LoweredSwitchSimplifier`，`lowered_switch_simplifier.py:143-260`、`413-939` | 识别 `==` / `!=` 链和范围比较树，收集 case/default，生成 incomplete switch head，并处理 shared case node。 | 部分覆盖。NotDec 现在有 condition compare metadata，能消费 `==` / `!=` if-chain、一层和线性 nested range guard、左右 range-tree，并能保守合并 RetDup 产生的 duplicated default return；同时过滤 shared case/default target、连续 case、distinct target、default 回流、重复 case value 和 all-ones sentinel，也补了结构树 `DefaultTarget` 和脚本 smoke。剩余主要是 Angr 更完整的 range-tree 细节、shared case node 复杂复制，以及 jump-table/recovered switch metadata。 | P4：继续审 Angr 的 range-tree 细节和 shared case node 复制；P5：和 recovered switch metadata 共用 case/default 表示。 |
 | `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 能复制线性 return tail、unreachable tail、nested/diamond/joined-diamond、direct-return side、branch/switch wrapper、switch return tail、grouped predecessor，并覆盖多 vvar、dephication incoming 删除/复制和 copied payload 的多个代理形状；也按调用数和语句数限制复制。差距仍是 Angr 的通用 single-entry region 枚举和 Phi/vvar 全量消费。 | P2 + P3：继续补更一般的 endnode region 枚举，并扩大 copied payload / vvar 的真实输出覆盖。 |
 | `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 复制线性 region，支持 switch case/default edge kind 拆分、grouped predecessor、Angr call-count 成本 guard、single-switch case/default both-edge 和 edge kind 传播。 | P7：继续核对真实样例行为和测试迁移；如果真实样例显示质量判断仍偏离，再回到 P6。 |
 | `ConstPropOptReverter`，`const_prop_reverter.py` | SAILR/DREAM 共享的前置去常量传播 pass，用于让后续相似性更容易成立。 | 暂未实现，且不在当前 shared CFG deoptimization pipeline。 | 暂不放 P1-P5 主线；P7 真实样例如果显示它是主因，再单独写计划。 |
@@ -4077,7 +4077,7 @@ range guard；只有两个 default 都是 closed terminal、语句 payload origi
   - `mergeRangeTreeLoweredSwitchIfChains()` 不再要求 default target id 完全相同，改为走
     上面的保守等价 default 检查。
 - `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:131`
-  - 新增 `SimpleReturnPayloads`，记录简单整数字面量 return 的 canonical payload。
+  - 新增简单 return payload origin 缓存，记录整数字面量 return 的 canonical payload。
 - `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:170`
   - 新增 `setSimpleReturnOrigin()`，让 duplicated `return 0;` 共享 payload origin。
 - `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:518`
@@ -4118,3 +4118,52 @@ pipeline。性能 smoke 用 migration 和 structuring smoke 观察同类链路�
 - 复杂度：2/5。新增一个很窄的 default 等价判断和一个 adapter payload origin cache。
 - 维护成本：2/5。判断条件偏保守，只覆盖简单 literal return duplicated default；后续如果
   要支持复杂 default，需要继续扩展 payload 等价来源。
+
+# 2026-06-28 P4 range-tree return-var default 修复记录
+
+继续收窄 P4 的 range-tree 输出缺口。上一轮只让 `return 0;` 这类整数字面量 default
+共享 payload origin；同形状 IR 如果 default 是 `return x;`，`RetDupPass` 仍会生成两个
+不同 AST return payload，range-tree 合并会因为 duplicated default 语句 origin 不同而跳过。
+
+本次只扩展 adapter 侧的简单 return origin：整数字面量仍按值复用，`return <DeclRef>;`
+按同一个 `ValueDecl*` 复用。复杂表达式仍不做等价判断。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:131`
+  - 将简单 return origin 缓存拆成 `SimpleReturnDeclPayloads` 和
+    `SimpleReturnIntegerPayloads`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:171`
+  - `setSimpleReturnOrigin()` 除整数字面量外，也支持 `DeclRefExpr` 返回值。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:196`
+  - 新增 `lowered_switch_range_tree_return_var_proxy`，固定 range-tree duplicated default
+    为 `return x;` 时也能输出 `switch (x)`。
+- `logs/20260627-02-sailr-angr-remaining-parity-plan.md:268`
+  - 同步更新 P0 对照表里 `LoweredSwitchSimplifier` 的当前状态：range-tree 和
+    duplicated default 已有保守覆盖，剩余转向更完整 range-tree 细节、shared case node
+    复杂复制和 recovered switch metadata。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuredGoto.cpp test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `/sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /tmp/notdec-sailr-debug-range-tree/range_tree_retvar.ll -o /tmp/notdec-sailr-debug-range-tree/range_tree_retvar.fixed.c`
+  输出包含 `switch (x)`、四个 case 和 `return x;`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-return-var-final.csv`
+  通过；`lowered_switch_range_tree_return_var_proxy` 指标是 `switch_count=1`、
+  `case_count=4`、`goto_count=0`、`return_count=5`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+
+本次仍只影响 llvm2c structuring / adapter 链路，没有跑 fortune；migration 和 structuring
+smoke 覆盖了这条输出路径。
+
+## 影响判断
+
+- 实现效果：2/5。补上 range-tree duplicated default 的一个常见非字面量返回形状。
+- 复杂度：1/5。只扩展 adapter 的 simple return origin key，不改 range-tree 合并规则。
+- 维护成本：1/5。只接受 `DeclRefExpr`，没有引入任意表达式等价。
