@@ -4596,3 +4596,43 @@ aggregate、array、非 undef base 仍不处理，避免把这里变成不完整
 - 实现效果：2/5。fortune 的 insertvalue 聚合返回能落成 C 表达式，真实样例输出更完整。
 - 复杂度：2/5。新增一条保守的单层 struct 构造路径。
 - 维护成本：2/5。后续如果要支持嵌套 aggregate，需要单独设计，不能继续在这里硬扩。
+
+# 2026-06-28 P7 迁移报告分类记录
+
+继续推进 P7 的真实样例分类。现有 `run_sailr_bench2_migration.py` 只输出 pass/fail/skip
+和基础计数，看不出失败到底是输入缺失、runner 崩溃、仍有 goto、缺 switch/case，还是普通
+输出不匹配。这样不利于判断后续该回到 P1-P5 的哪条线。
+
+这次只扩展 CSV 报告，不改变任何 case 的通过标准。新增 `classification` 字段，把当前
+结果粗分为 `pass`、`missing-input`、`runner-failure`、`unexpected-goto`、
+`missing-structure`、`output-mismatch`，以及 xfail/xpass 的对应分类。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:637`
+  - 新增 `classify_failures()`，按状态和失败文本给迁移样例分类。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:654`
+  - `run_case()` 额外返回 `classification`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:712`
+  - CSV `fieldnames` 增加 `classification`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:736`
+  - 主循环把分类写入每行报告，并保留原有 fail/xpass 判定。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-classified-migration.csv`
+  通过。
+- `/tmp/notdec-sailr-classified-migration.csv` 当前统计是 14 个 `pass/pass`、4 个
+  `skip/missing-input`。缺失的真实输入仍是 hexx64、python、lighttpd 两个路径；代理样例
+  全部保持通过。
+
+本次只影响 P7 报告脚本，不影响 `llvm2c` 或 SAILR pass 执行；因此不需要 fortune 性能
+smoke。
+
+## 影响判断
+
+- 实现效果：1/5。没有新增算法能力，但后续真实样例分类更清楚。
+- 复杂度：1/5。只增加一个报告字段和简单分类函数。
+- 维护成本：1/5。分类基于现有失败文本，后续可按需要继续细分。
