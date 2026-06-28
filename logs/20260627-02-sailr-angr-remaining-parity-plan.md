@@ -4398,3 +4398,49 @@ fortune 继续往前跑后，前一个 blocker 已经从 `void*` GEP / deref 断
 - 实现效果：2/5。把 fortune 的一个真实前端断言收窄掉了，确实推进到下一层。
 - 复杂度：1/5。只是在已有 lazy load slot 机制上加了一个退路。
 - 维护成本：1/5。行为很局部，只有 slot 冲突时才走 fallback。
+
+# 2026-06-28 P7 fortune smoke aggregate load/store 尺寸收窄记录
+
+继续推进 fortune smoke。上一节的 lazy load slot fallback 之后，fortune 卡在
+`getLLVMTypeSize()` 对聚合类型的断言：先是 aggregate store，修掉后又落到 aggregate load。
+这次只处理 load/store 的类型选择：LLVM aggregate 没有标量 bitwidth，所以直接用
+`TypeBuilder::visitType()` 保留结构体类型；标量路径仍走原来的大小匹配和整数兜底。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:503`
+  - `CFGBuilder::visitStoreInst()` 遇到 aggregate store value 时直接恢复 record type，不再调用
+    `getLLVMTypeSize()`；后续大小比较只在 `StoreSize` 存在时执行。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:582`
+  - `CFGBuilder::visitLoadInst()` 遇到 aggregate load result 时直接恢复 record type，不再调用
+    `getLLVMTypeSize()`；标量 load 行为不变。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:428`
+  - 新增 `aggregate_store_type`，覆盖 `{ i64, i64 }` call 返回值直接 store 到指针。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:443`
+  - 新增 `aggregate_load_type`，覆盖 `{ i64, i64 }` load 后再 store 的 lazy load 表达式。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check lib/notdec-llvm2c/StructuralAnalysis.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-aggregate-load-migration.csv`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-aggregate-load.c`
+  仍失败，但已经越过 aggregate load/store 的 `getLLVMTypeSize()` 断言；新 blocker 是
+  `CFGBuilder::visitExtractValueInst()` 对 `insertvalue` 链后续 `extractvalue` 的未处理断言。
+  本次同口径结果：`elapsed=22.30 user=22.04 sys=0.26 maxrss=645824`。
+
+本次只影响 `llvm2c` 的 load/store 表达式类型选择和 structuring smoke，不改 SAILR pass
+排序，也不展开做完整 `insertvalue` 聚合构造支持。
+
+## 影响判断
+
+- 实现效果：2/5。真实 fortune smoke 从聚合 load/store 尺寸断言推进到下一类聚合表达式问题。
+- 复杂度：1/5。只把聚合类型从标量 size 路径分出来。
+- 维护成本：1/5。行为限定在 load/store aggregate 类型，不改变现有标量推断。
