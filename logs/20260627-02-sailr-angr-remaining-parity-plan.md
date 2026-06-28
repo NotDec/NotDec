@@ -4942,3 +4942,43 @@ conditional dominator 和更一般的相似子图重接，所以本次后它仍�
 - 实现效果：2/5。补了同 branch predecessor 的 common-tail 子集，但仍不是完整 merge graph。
 - 复杂度：2/5。新增一个额外候选形状，并把搜索限制到 goto target 的 sibling 以控制性能。
 - 维护成本：2/5。后续如果扩到非 sibling 或整 arm 合并，必须先处理 condition/guard 重接。
+
+# 2026-06-28 P7 branch common-tail 管线分类记录
+
+继续把 P1 的最近改动放到 P7 migration 分类里核对。结论是：`DuplicationReverter` 的
+branch common-tail 子能力已经有 pass 级 regression，但一个最小 LLVM IR 经过完整
+`notdec-llvm2c --algo=structured-sailr` 时，还不会自然产生这个 pass 需要的 goto hint。
+当前输出仍会在 then/else 两边各保留一份共同 call tail。
+
+因此本次不把它写成通过的 smoke，而是加一个 expected-failure proxy，避免以后看报告时误以为
+这个能力已经覆盖到真实管线。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:281`
+  - 新增 `branch_common_tail_pipeline_proxy`。
+  - IR 构造一个二分支，两边分别调用 `a()` / `b()` 后都有 `c()`，再回到 merge。
+  - 期望 `c();` 只出现声明加一处公共调用；当前管线输出仍是声明加两处分支调用，所以该 case
+    稳定归类为 `xfail/expected-output-mismatch`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-branch-tail-pipeline.csv`
+  通过；CSV 统计为 13 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，2 个 `xfail/expected-output-mismatch`。新增的
+  `branch_common_tail_pipeline_proxy` 稳定归类为预期 output mismatch：`c();`
+  期望 2 次，当前 3 次。
+
+本次只改 P7 报告分类，不改 `llvm2c` 运行时代码；因此不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。没有新增算法能力，但把 pass 级覆盖和管线级覆盖的差距暴露出来。
+- 复杂度：1/5。只新增一个 migration proxy。
+- 维护成本：1/5。后续如果 structurer 能稳定提供该 goto hint，应把这个 xfail 转成 pass。
