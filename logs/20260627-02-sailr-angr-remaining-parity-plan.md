@@ -2685,3 +2685,74 @@ unreachable 的 switch return tail。
 - 复杂度：2/5。新增一个递归 helper，但条件保守，复用现有 `collectClosedReturnTail()`。
 - 维护成本：2/5。递归路径需要注意互相调用，不过单前驱、Seen 和 closed-tail 条件限制了
   扩张范围。
+
+# 2026-06-27 P2/P7 switch wrapper switch return tail 覆盖记录
+
+本次没有改运行时代码，只补上一节 `collectClosedSwitchReturnTail()` 的另一条调用路径覆盖。
+上一节 C++ 和 smoke 已经覆盖 branch wrapper 里吸收内层 switch return tail；但同一个 helper
+也会被 `prependSwitchReturnRegion()` 使用，需要固定“外层 switch 的一个 case 进入内层
+switch return tail”这个形状。
+
+这个用例仍是 P2/P7 代理覆盖，不表示一般 single-entry return region 已完成。它只确认刚
+新增的 switch-tail helper 在 switch wrapper 路径下也能被消费。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:7161-7277`
+  - 新增 `testReturnDuplicatorLowCopiesSwitchWithSwitchReturnTail()`。
+  - 构造外层 switch，一侧普通 return tail，另一侧内层 switch return tail。
+  - 断言 copied outer switch、copied inner switch、default/case return tail 都保留
+    `SourceBlock` 和 payload。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12719`
+  - 在 `main()` 中调用新增 C++ 回归。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:905-969`
+  - 新增 `sailr_switch_switch_return_tail`。
+  - 输出层断言外层 switch 共享内层 switch，内层 switch 再进入 nested switch return tail；
+    输出包含两份 `switch (a)` 和两份 `switch (b)`，且不残留相关 goto、`phi` 或 `reg2mem`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/structuring_analysis_test.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+本次只改测试覆盖，不改 `lib/`、`include/` 或 codegen 运行路径，所以没有重新跑 fortune
+性能 smoke。
+
+## 影响判断
+
+- 实现效果：2/5。补齐上一节 switch return tail helper 的 switch-wrapper 路径覆盖。
+- 复杂度：1/5。只新增 C++ 和脚本 smoke。
+- 维护成本：1/5。断言直接固定 copied switch、nested switch 和无 goto/phi/reg2mem 输出。
+
+# 2026-06-28 P7 eager returns 边界检查
+
+我单独核了 Angr 的 `test_eager_returns_simplifier_no_duplication_of_default_case`。
+这条测试依赖 `ls_ubuntu_2004` 这个本地没有落盘的真实样本；在当前 workspace 里，
+我只找到了 `stat.o`、`uname.o`、`fmtmsg.o` 这类 glibc 对象，没有找到同名二进制。
+同时我试了几个很小的 switch proxy。它们在 NotDec 里仍会把 `50/51/52` 这类分支
+打印出来，说明它们不是 Angr 这条测试的等价代理，不能拿来冒充迁移完成。
+
+这条测试现在继续归到“需要真实样本，暂不迁移”的一类。后面如果补到同源样本，
+再回头对齐 default case 的 eager returns 收口；现在不把它算进已完成项。
+
+## 修改位置
+
+- `logs/20260627-02-sailr-angr-remaining-parity-plan.md`
+  - 追加本节，记录 `eager_returns` 的迁移边界和当前不适合直接 proxy 的原因。
+
+## 验证
+
+- `rg` / `find` 检查本地样本路径。
+- `notdec-llvm2c --algo=structured-sailr` 在几个临时 IR 上的输出对比。
+
+## 影响判断
+
+- 实现效果：1/5。只是把 Angr 测试的迁移边界写清楚。
+- 复杂度：1/5。只补计划记录。
+- 维护成本：1/5。后续如果补到真实样本，可以直接把本节改成实现记录。
