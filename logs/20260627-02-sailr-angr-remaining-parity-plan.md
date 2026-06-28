@@ -302,14 +302,16 @@ NotDec 当前已有覆盖：
   - `SwitchReusedEntryRewriter` 覆盖 reused case entry、limit、default-only skip。
     后续又补了 case/default overlap 的 shared CFG 和 renderer 覆盖。
   - `LoweredSwitchSimplifier` 覆盖已有 switch case target 复用、`==` / `!=`
-    if-chain、简单 range guard、nested range guard、shared target 过滤、连续 case /
-    distinct target 启发式、default 回流和 all-ones sentinel；仍不覆盖完整 range-tree
-    和 duplicated default 等价。
+    if-chain、简单 range guard、nested range guard、左右 range-tree、duplicated default
+    return 等价、shared target 过滤、连续 case / distinct target 启发式、default 回流、
+    duplicate case value 和 all-ones sentinel；仍不覆盖 recovered switch / jump-table
+    metadata 和 Angr 更完整的 shared case node 复制。
   - `CrossJumpReverter` 覆盖 linear goto target、grouped predecessor、case/default
     edge kind、call-count 成本和 single-switch case/default both-edge。
 - `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
-  当前只有 5 个真实/半真实样例，分别代理 ReturnDuplicatorLow、CrossJumpReverter、
-  LoweredSwitchSimplifier 的一部分。
+  当前有 18 个分类样例；本机缺 3 个外部真实输入，剩余 15 个 proxy/fixture 样例通过。
+  覆盖 `ReturnDuplicatorLow`、`DuplicationReverter`、`LoweredSwitchSimplifier`、
+  `SwitchDefaultCaseDuplicator`、`SwitchReusedEntryRewriter` 和部分 switch overlap 输出。
 - `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
   覆盖 angr dephication Phi、multi-Phi、copied switch/return region、return region
   多种代理形状、lowered switch 安全边界，以及 SAILR/Phoenix 对比样例。
@@ -4167,3 +4169,43 @@ smoke 覆盖了这条输出路径。
 - 实现效果：2/5。补上 range-tree duplicated default 的一个常见非字面量返回形状。
 - 复杂度：1/5。只扩展 adapter 的 simple return origin key，不改 range-tree 合并规则。
 - 维护成本：1/5。只接受 `DeclRefExpr`，没有引入任意表达式等价。
+
+# 2026-06-28 P3/P7 multi-vvar copied return migration 覆盖记录
+
+本次不改运行时代码，补一条输出层 migration proxy，并同步 P0 测试迁移清单。已有
+`copied_return_tail_dephication_proxy` 只覆盖单个 Phi/vvar 的 copied return tail；这次新增
+两个 Phi/vvar 同时进入 shared tail 的形状，确认 copied payload materialize 能同时处理
+`p` 和 `q` 两个 incoming。
+
+这仍是 proxy，不表示 P3 的 shared Phi / vvar / copied payload 全量消费完成；它只把已有
+C++ 多 vvar 覆盖提升到 `notdec-llvm2c` 输出层。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:362`
+  - 新增 `copied_return_tail_multi_vvar_proxy`，使用 `--sailr-dephication-mode=angr`。
+  - 内联 IR 构造两个 switch case 进入 shared tail，tail 内有 `%p` 和 `%q` 两个 Phi，
+    返回 `%p + %q`。
+  - 断言输出包含 `p_copy`、`q_copy`、`p = b;`、`q = d;` 和两处 `return s;`，并且没有
+    `phi`、`reg2mem`、`p_reg2mem`、`q_reg2mem`。
+- `logs/20260627-02-sailr-angr-remaining-parity-plan.md:304`
+  - 同步“当前测试迁移状态”：migration 脚本现在有 18 个分类样例，本机 15 个通过、
+    3 个因外部真实输入缺失跳过。
+
+## 验证
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-multi-vvar-final.csv`
+  通过；`copied_return_tail_multi_vvar_proxy` 指标是 `switch_count=1`、`case_count=2`、
+  `goto_count=0`、`return_count=3`。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+
+本次只是测试覆盖和日志同步，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。把 P3 的 multi-vvar copied payload 覆盖推进到 migration 输出层。
+- 复杂度：1/5。只新增一个内联 IR proxy。
+- 维护成本：1/5。断言只看关键 copied 变量、Phi 消除和 return 数量。
