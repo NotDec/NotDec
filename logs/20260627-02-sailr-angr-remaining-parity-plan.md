@@ -4000,3 +4000,53 @@ P1 的 merge graph 一般能力已经完成。
   `DuplicationReverter` 的一个输出层代理；但没有新增算法能力。
 - 复杂度：1/5。只新增一个内联 IR case。
 - 维护成本：1/5。断言只检查关键调用、返回和明显错误 goto。
+
+# 2026-06-28 P7 range-tree migration xfail 记录
+
+本次不改算法，只把 `LoweredSwitchSimplifier` 的 range-tree 输出层缺口登记到
+`run_sailr_bench2_migration.py`。当前 C++ shared-CFG 回归
+`testLoweredSwitchSimplifierBuildsSwitchFromRangeTree()` 已经能把左右两条 equality chain
+合成 switch，但同形状 LLVM IR 走 `notdec-llvm2c --algo=structured-sailr` 时仍输出嵌套
+`if`，没有生成 `switch (x)`。
+
+因此这次给 migration 脚本加 `xfail`，让报告能明确显示“这是已知未完成项”，而不是继续
+只靠已经通过的 proxy 撑覆盖。这个记录不表示 P4 完成，反而把 P4 的真实输出层缺口固定
+下来，后续要继续查主链路 CFG 到 shared CFG 的条件元数据、候选顺序或 rewrite 后的
+structuring 结果。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:143`
+  - 新增 `lowered_switch_range_tree_output_gap`，关联 Angr
+    `test_reverting_switch_lowering_range_tree`。
+  - 期望输出包含 `switch (x)`、`case 7:`、`case 9:`、`case 11:`、`case 13:` 和
+    `default:`；并且不再保留外层 `if (x <= 9)`、低半区 `if (x == 7)`、高半区
+    `if (x == 11)`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:625`
+  - `main()` 支持 case 标记 `expected_failure`。
+  - 预期失败写成 `xfail` 并进入 CSV；如果未来意外通过则写成 `xpass`，并让脚本失败，
+    逼后续把 xfail 改成正常 pass。
+
+## 验证
+
+- 手工用同形状临时 IR 跑
+  `/sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr`
+  确认当前输出仍是嵌套 `if`，没有 `switch`。
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-migration-range-tree-xfail-report.csv`
+  通过；新增 case 状态为 `xfail`，指标是 `switch_count=0`、`case_count=0`、
+  `goto_count=0`、`return_count=6`。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。migration 脚本覆盖从 15 个样例扩到 16 个样例，其中新增 1 个
+  `xfail`，让 P4 输出层缺口可见。
+- 复杂度：1/5。只给脚本增加预期失败状态处理和一个内联 IR case。
+- 维护成本：1/5。`xpass` 会让脚本失败，避免缺口修好后继续被当成预期失败。
