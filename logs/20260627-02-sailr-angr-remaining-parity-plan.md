@@ -4493,3 +4493,55 @@ operand；已经能作为 C record 表达式的聚合值则生成 `field_N` 访�
 - 实现效果：2/5。fortune 从 `extractvalue` 聚合来源断言推进到下一类 `undef` 表达式问题。
 - 复杂度：2/5。新增两个小 helper，但只处理单层字段访问。
 - 维护成本：2/5。后续完整聚合构造仍要单独实现，不能把这里当通用 aggregate builder。
+
+# 2026-06-28 P7 fortune smoke aggregate undef 收窄记录
+
+继续推进 fortune smoke。上一节之后，fortune 卡在 `ExprBuilder::getUndef()` 对非标量
+`ret poison` / `ret undef` 的断言。这次只处理 record 和 array 形状的 undef：record 按字段
+生成已有的 `llvm_undef_*()` 表达式，再包成 compound literal；array 先用 Clang 的
+implicit value init 表达式兜底。这样避免把 record undef 静默降成全零。
+
+这次还补了 `StmtTransform` 对 compound literal / init list 的递归处理，因为 lazy load
+重写路径会遍历 return 表达式；没有这层会在新生成的 record literal 上断言。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2804`
+  - `ExprBuilder::getUndef()` 支持 record undef，逐字段递归生成 undef initializer，并返回
+    `CompoundLiteralExpr`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2815`
+  - `ExprBuilder::getUndef()` 支持 array undef，返回 `ImplicitValueInitExpr`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CCodeTransform.h:332`
+  - `StmtTransform::TransformCompoundLiteralExpr()` 递归 transform initializer，必要时重建节点。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CCodeTransform.h:346`
+  - `StmtTransform::TransformInitListExpr()` 递归 transform 字段 initializer 和 array filler。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/CCodeTransform.h:393`
+  - `StmtTransform::TransformImplicitValueInitExpr()` 把 implicit value init 当叶子表达式放行。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:489`
+  - 新增 `aggregate_undef_return`，覆盖 `{ i64, i64 }` 函数直接返回 `poison` 的输出。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-llvm2c/CCodeTransform.h lib/notdec-llvm2c/StructuralAnalysis.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-aggregate-undef-migration.csv`
+  通过；CSV 18 个样例里真实输入缺失的 case 仍按 skip 记录。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-aggregate-undef.c`
+  通过并产出 C；同口径结果：`elapsed=54.52 user=54.10 sys=0.42 maxrss=667764`。
+  输出里仍有多处 `insertvalue` 链未降级警告，说明下一类聚合构造还没处理。
+
+本次只影响 `llvm2c` 的 undef 表达式构造、通用 AST transform 子集和 structuring smoke，
+不改 SAILR pass 排序，也不实现完整 `insertvalue` 聚合对象。
+
+## 影响判断
+
+- 实现效果：2/5。fortune 从 `getUndef()` 非标量断言推进到可以完整跑出 C，但仍有
+  `insertvalue` 聚合构造未降级。
+- 复杂度：2/5。record undef 和 AST transform 都是局部补齐，没有引入通用 aggregate builder。
+- 维护成本：2/5。后续如果实现完整 `insertvalue`，需要复用或替换这里的 record literal 构造。
