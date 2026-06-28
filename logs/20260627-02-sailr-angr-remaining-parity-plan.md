@@ -3052,6 +3052,12 @@ switch。case 超出 guard 时整体跳过，不做半截恢复。没有实现�
   - 新增反例，`x <= 8` 包住 `x == 7 / x == 9` 时不消费 guard，也不折内部链。
 - `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:13252-13257`
   - 注册新增回归。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:259-286`
+  - Clang AST 分支条件的整数元数据也改成只接受 64 位以内常量，避免宽整数直接
+    进入 `getSExtValue()` / `getZExtValue()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1807-1908`
+  - `testLLVMFunctionCFGBuilderRecordsRangeConditionCompare()` 补宽整数 case，确认 128 位
+    常量不会写入可比较整数值。
 
 ## 验证
 
@@ -3061,6 +3067,8 @@ switch。case 超出 guard 时整体跳过，不做半截恢复。没有实现�
 - `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
 - `cmake --build ./build --target notdec-llvm2c-exe -j4` 通过。
 - `cmake --build ./build --target notdec -j4` 通过。
+- 这次补丁后又重新跑了一次 `cmake --build ./build --target structuring-analysis-test -j4`
+  和 `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`，都通过。
 - `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
   通过。
 - `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
