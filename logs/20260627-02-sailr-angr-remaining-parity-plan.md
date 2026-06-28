@@ -3683,3 +3683,41 @@ CrossJumpReverter 和 LoweredSwitchSimplifier，P5 只在 C++ 单测和 smoke �
   但没有新增算法能力。
 - 复杂度：1/5。只新增两个内联 IR case。
 - 维护成本：1/5。断言集中在 switch 数量、case label 和 goto 形状，避免依赖局部块编号。
+
+# 2026-06-28 P7 lowered switch sentinel migration 覆盖记录
+
+本次不改算法，只把 P4 已有的 all-ones sentinel 安全边界补到
+`run_sailr_bench2_migration.py`。之前这个边界只在 C++ 和 smoke 层覆盖；
+migration 脚本还缺一个对应 Angr lowered switch 误识别保护的代理样例。
+
+这不是完整 range-tree 恢复。今天尝试过 range-tree 测试形状，但
+`testLoweredSwitchSimplifierBuildsSwitchFromRangeTree()` 仍不能稳定触发
+`Changed`，所以没有保留相关改动。P4 仍缺完整 range-tree、duplicated default
+等价和 recovered switch / jump-table metadata。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:62`
+  - 新增 `lowered_switch_sentinel_proxy`，代理 Angr lowered switch 中 all-ones
+    sentinel 不能被误恢复成 switch 的安全边界。
+  - 断言输出保留 `return -1;`、`return 7;`、`return 0;`，并且不出现
+    `switch (x)`、`case -1:`、`case 7:`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+本次只改测试脚本，不改反编译算法路径，所以没有跑 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。migration 脚本覆盖从 10 个样例扩到 11 个样例，并补上 P4 的一个
+  安全边界代理；但没有新增算法能力。
+- 复杂度：1/5。只新增一个内联 IR case。
+- 维护成本：1/5。断言只检查关键输出和误识别的 switch/case 文本。
