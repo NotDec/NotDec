@@ -4545,3 +4545,54 @@ implicit value init 表达式兜底。这样避免把 record undef 静默降成�
   `insertvalue` 聚合构造未降级。
 - 复杂度：2/5。record undef 和 AST transform 都是局部补齐，没有引入通用 aggregate builder。
 - 维护成本：2/5。后续如果实现完整 `insertvalue`，需要复用或替换这里的 record literal 构造。
+
+# 2026-06-28 P7 fortune smoke insertvalue 聚合返回收窄记录
+
+继续推进 fortune smoke。上一节之后，fortune 已经能跑出 C，但输出里还有大量
+`insertvalue` 链未处理。实际问题是 native summary 常把多寄存器返回写成
+`insertvalue ... undef` 链，然后直接 `ret { ... } %v`。之前 `extractvalue` 可以从这种链
+转发字段，但完整 aggregate return 会在 `ExprBuilder` 里拿不到表达式，容易退成空 return
+或只留下 warning。
+
+这次只补单层 struct 的 `insertvalue` 链：从最终 `InsertValueInst` 往前扫，收集每个字段
+最后一次写入；base 只接受 `undef` / `poison`，未写字段继续用上一节的字段级 undef。嵌套
+aggregate、array、非 undef base 仍不处理，避免把这里变成不完整的通用 aggregate builder。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuralAnalysis.h:327`
+  - 给 `ExprBuilder` 声明 `visitInsertValueInst()`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuralAnalysis.cpp:2558`
+  - 新增 `ExprBuilder::visitInsertValueInst()`，把单层 struct `insertvalue` 链降成
+    `CompoundLiteralExpr`。
+- `external/NotDec-llvm2c/include/notdec-llvm2c/StructuralAnalysis.h:725`
+  - `CFGBuilder::visitInsertValueInst()` 对纯 SSA 聚合构造做 no-op，实际表达式在使用点物化，
+    不再打印误导性的 `Cannot handle insertvalue`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:476`
+  - 新增 `insertvalue_aggregate_return`，覆盖 `{ i64, i64 }` insertvalue 链直接返回 struct。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check include/notdec-llvm2c/StructuralAnalysis.h lib/notdec-llvm2c/StructuralAnalysis.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的外部 lighttpd 输入。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-insertvalue-return-migration.csv`
+  通过；CSV 18 个样例里真实输入缺失的 case 仍按 skip 记录。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-fortune-insertvalue-return.c`
+  通过并产出 C；同口径结果：`elapsed=54.81 user=54.38 sys=0.42 maxrss=666332`。
+  输出中不再出现 `CFGBuilder: Cannot handle insertvalue`，并能看到多处
+  `return (struct (unnamed)){...};`，例如 `/tmp/notdec-sailr-fortune-insertvalue-return.c:1568`。
+
+本次只影响 `llvm2c` 的单层 struct 聚合返回表达式和日志噪声，不改 SAILR pass 排序，
+也不处理嵌套 aggregate / array / 非 undef base。
+
+## 影响判断
+
+- 实现效果：2/5。fortune 的 insertvalue 聚合返回能落成 C 表达式，真实样例输出更完整。
+- 复杂度：2/5。新增一条保守的单层 struct 构造路径。
+- 维护成本：2/5。后续如果要支持嵌套 aggregate，需要单独设计，不能继续在这里硬扩。
