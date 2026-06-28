@@ -3506,3 +3506,95 @@ recovered switch / jump-table metadata；P7 仍要继续迁移更多 Angr 真实
 - 实现效果：1/5。只把 sentinel 安全边界升到输出层 smoke；P4/P7 仍未完成。
 - 复杂度：1/5。只新增一个内联 IR smoke case。
 - 维护成本：1/5。断言只看“不恢复成 switch”的核心边界，后续输出局部排版变化不应影响。
+
+# 2026-06-28 P7 migration 覆盖补充记录
+
+本次不改算法，只扩展 `run_sailr_bench2_migration.py` 的迁移覆盖。之前脚本只有 5 个
+真实/半真实样例，P2/P3 的 copied Phi/vvar return region 主要还停在 smoke 脚本里。
+这次把已有稳定 proxy 升到 migration 层，让这个脚本同时覆盖：
+
+- `ReturnDuplicatorLow` 复制 branch return region。
+- `ReturnDuplicatorLow` 在 angr dephication 模式下复制带 Phi/vvar payload 的 return tail。
+- `LoweredSwitchSimplifier` 对 default 回流 comparison chain 的安全过滤。
+
+这些仍是 proxy，不表示 P2/P3/P4/P7 完成。P7 后续还要继续补真实样例分类，尤其是
+`DuplicationReverter` merge graph 和 recovered switch / jump-table metadata。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:61`
+  - 新增 `branch_return_region_proxy`，代理 Angr abnormal switch case 里
+    `ReturnDuplicatorLow` 复制 branch return region 后不能泄漏 `goto` / `phi` /
+    `reg2mem` 的要求。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:105`
+  - 新增 `copied_return_tail_dephication_proxy`，用
+    `--sailr-dephication-mode=angr` 覆盖 copied Phi/vvar payload 输出。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:147`
+  - 新增 `lowered_switch_default_cycle_regression`，代理 Angr Dogbolt lowered switch
+    无限循环回归，确认 default 回流时不恢复成 switch。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:188`
+  - `run_case()` 支持 per-case `args` 和 `counts` 断言。
+
+## 验证
+
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+
+## 影响判断
+
+- 实现效果：1/5。迁移脚本覆盖从 5 个样例扩到 8 个样例，P2/P3/P4 的代表性更好；
+  但还没有增加新的算法能力。
+- 复杂度：1/5。只给脚本增加 per-case 参数和计数断言。
+- 维护成本：1/5。新增用例复用已有 smoke 中稳定形状，断言只看核心结构和 payload。
+
+# 2026-06-28 P4 copied default range guard 实现记录
+
+本次补 `LoweredSwitchSimplifier` 的一条窄边界：range guard 的 default 边和内层
+if-chain 的 default 边如果不是同一个 block id，但二者是 copied/original 同源块，仍然
+可以按 Angr 的 duplicated default 形状恢复成 switch。之前 NotDec 要求两个 default
+target 的 id 完全相同，会漏掉前置 pass 已经复制 default block 的情况。
+
+这不是完整 range-tree，也没有接入 recovered switch / jump-table metadata。只复用 shared
+CFG 已有的 copied block identity，并且只有 copied default 没有链外前驱时才删除它。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1854`
+  - `loweredSwitchChainFitsRangeGuard()` 用 `sameBlockReference()` 判断 guard default
+    和 chain default 是否同源，不再只比较 block id。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1940`
+  - 新增 `blockOnlyReachedFrom()`，用于确认要删除的 copied default 只被当前 guard /
+    comparison chain 使用。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2237`
+  - `collectRangeGuardedLoweredSwitchIfChainFrom()` 在 default 同源但 id 不同时，把最终
+    switch default 改成 guard default，并把无链外前驱的 chain default 记入删除列表。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:580`
+  - 新增 `copiedBlock()` 测试 helper，构造 shared CFG copied/original 同源块。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10609`
+  - 新增 `testLoweredSwitchSimplifierMergesCopiedRangeGuardDefault()`，确认 copied default
+    被合并并删除，最终 switch 使用 guard default。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:10681`
+  - 新增 `testLoweredSwitchSimplifierSkipsSharedCopiedRangeGuardDefault()`，确认 copied
+    default 有链外前驱时不重写，避免删共享块。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check` 通过。
+- `cmake --build ./build --target structuring-analysis-test -j4` 通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test` 通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c /sn640/NotDec/build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过。
+- `cmake --build ./build --target notdec -j4` 通过。
+- fortune 性能 smoke：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-lowered-switch-copied-default.c --tr-level=2 --algo=structured-sailr`
+  退出码 0，`elapsed=157.90 user=180.07 sys=1.60 maxrss=1269496`。和近期
+  `158s-163s` 同口径，没有明显退化；输出中的 global/type warning 仍是 fortune 既有输出。
+
+## 影响判断
+
+- 实现效果：2/5。补上 range-guarded lowered switch 的 copied default 等价边界；
+  P4 仍缺完整 range-tree，P5 仍缺 recovered switch / jump-table metadata。
+- 复杂度：1/5。只复用已有 copied block identity，删除前加链外前驱保护。
+- 维护成本：1/5。规则很窄，测试同时覆盖可合并和必须跳过两种情况。
