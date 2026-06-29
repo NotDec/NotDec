@@ -5734,3 +5734,24 @@ fallthrough 走到一个闭合 return tail；两侧 return tail 的 payload orig
   switch chain 或一般 return region。
 - 复杂度：2/5。新增两个局部 helper，只接受线性私有链。
 - 维护成本：2/5。判断条件窄，测试覆盖了新增可收口形状。
+
+# 2026-06-29 P7 linear return chain smoke 覆盖
+
+本次不改算法，只把上一节的 `ReturnDeduplicator` 线性 branch return chain 形状补到
+`notdec-llvm2c` 脚本层 smoke。目的是真实走 LLVMFunctionCFGBuilder、SAILR pipeline
+和 C backend，确认最终输出只有一个共享 `return 0;`，不是只在 pass 级图测试里成立。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:245-272`
+  - 新增 `sailr_return_deduplicator_linear_chain`，覆盖两个私有线性 branch arm 最后
+    返回同一个值时，完整 pipeline 输出 `a();`、`b();` 和单个 `return 0;`。
+
+## 验证
+
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+
+本次只改 smoke 脚本，不改 runtime structuring，不需要 fortune 性能 smoke。
