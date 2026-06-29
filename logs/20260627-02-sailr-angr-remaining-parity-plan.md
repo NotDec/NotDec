@@ -5426,3 +5426,43 @@ goto hint 的情况下抽成 shared synthetic tail，pass 级 `runOnGraph()` 能
 `branch_common_tail_pipeline_proxy` 的真实缺口仍是 P1 的 loop/backedge 条件重接、
 virtual edge 选择或更完整 merge graph 语义；修复标准仍是完整 pipeline 输出减少 goto，
 而不是只让 `DuplicationReverter::runOnGraph()` 局部改图。
+
+# 2026-06-29 P7 migration timeout 复用记录
+
+继续跑 `run_sailr_bench2_migration.py` 时发现两个 lighttpd 真实样例当前指向同一个
+`module-all.ll`，并且都是预期 90s timeout。脚本之前会重复跑两次，导致一次完整 migration
+报告要多等 90s。
+
+本次只给脚本增加同输入、同参数、同 timeout 的 runner failure 缓存。缓存只保存 timeout /
+command failed / missing output 这类 runner 结果；成功输出不缓存，仍让每个 case 独立检查
+自己的 `contains`、`absent`、`counts` 和 `body_counts`。这样不会把一个 case 的 oracle 误用到
+另一个 case。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:747`
+  - `run_case()` 增加 `run_cache` 参数。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:763`
+  - 用 `(input_path, args, timeout)` 作为 runner 缓存 key；命中时返回 cached runner failure，
+    并在失败信息里标出 `reused cached result from same input`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:793`
+  - timeout、非零退出和缺输出文件写入缓存；普通输出 mismatch 不缓存。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:870`
+  - `main()` 为本次临时工作目录创建一次 `run_cache`。
+
+## 验证
+
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-cache2.csv`
+  通过；CSV 统计保持 `15 pass`、`2 skip`、`3 xfail`。
+  第二个 lighttpd case `condensing_real_lighttpd` 复用第一个 lighttpd timeout 结果，失败信息包含
+  `reused cached result from same input`。
+
+本次只改 P7 报告脚本，不改 `llvm2c` 运行时代码；不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。减少重复 timeout 等待，让 P7 报告更快出结果，但不增加算法能力。
+- 复杂度：1/5。缓存只在单次脚本进程内生效，key 只覆盖 runner 命令输入。
+- 维护成本：1/5。成功输出不缓存，避免不同 case oracle 相互污染。
