@@ -269,7 +269,7 @@ Angr 对照源码使用本机 `/sn640/angr`，提交 `63c05f1d4`。NotDec 对照
 | `ReturnDuplicatorLow` / `ReturnDuplicatorBase`，`return_duplicator_low.py:18-171`、`return_duplicator_base.py:69-220`、`219-660` | 从 end node 反推 single-entry return region，按 goto edge 和 connected predecessor component 复制，复制时处理 Phi、fresh vvar、label、删除原 region。 | 部分覆盖。NotDec 能复制线性 return tail、unreachable tail、terminal fork 默认管线、nested/diamond/joined-diamond、direct-return side、branch/switch wrapper、switch return tail、grouped predecessor，并覆盖多 vvar、dephication incoming 删除/复制和 copied payload 的多个代理形状；也按调用数和语句数限制复制。差距仍是 Angr 的通用 single-entry region 枚举和 Phi/vvar 全量消费。 | P2 + P3：继续补更一般的 endnode region 枚举，并扩大 copied payload / vvar 的真实输出覆盖。 |
 | `CrossJumpReverter`，`cross_jump_reverter.py:15-107` | 最后运行；对只有一个 goto 的块，复制目标的单 successor 线性块；限制调用数，要求 goto 数下降。 | 部分覆盖但方向接近。NotDec 复制线性 region，支持 switch case/default edge kind 拆分、grouped predecessor、Angr call-count 成本 guard、single-switch case/default both-edge 和 edge kind 传播。 | P7：继续核对真实样例行为和测试迁移；如果真实样例显示质量判断仍偏离，再回到 P6。 |
 | `ConstPropOptReverter`，`const_prop_reverter.py` | SAILR/DREAM 共享的前置去常量传播 pass，用于让后续相似性更容易成立。 | 暂未实现，且不在当前 shared CFG deoptimization pipeline。 | 暂不放 P1-P5 主线；P7 真实样例如果显示它是主因，再单独写计划。 |
-| `ReturnDuplicatorHigh`、`ReturnDeduplicator` | SAILR/DREAM 共享外围 pass，不是当前 low-level SAILR deoptimization 主差距。 | 暂不适用。NotDec 当前目标是 shared CFG 级 pass parity。 | 只记录，不作为本计划完成条件。 |
+| `ReturnDuplicatorHigh`、`ReturnDeduplicator` | SAILR/DREAM 共享外围 pass；`ReturnDeduplicator` 在 full preset 里紧跟 `ReturnDuplicatorLow`，把两侧相同 return 收回到共享 return。 | `ReturnDeduplicator` 已补 shared CFG 窄子集：两个私有 branch return arm 的末尾 return payload 相同时共享一个 return block。`ReturnDuplicatorHigh` 仍暂不适用。 | `ReturnDeduplicator` 后续只按真实 shared CFG 阻塞继续扩；`ReturnDuplicatorHigh` 暂不放 P1-P5 主线。 |
 
 ## 当前测试迁移状态
 
@@ -322,7 +322,7 @@ NotDec 当前已有覆盖：
 | --- | --- |
 | 可直接迁移 | Switch default/reused-entry 的小图行为、CrossJumpReverter 线性目标、ReturnDuplicatorLow 简单 return tail。已有较多在 `structuring_analysis_test.cpp` 和 `run_structuring_smoke.py`。 |
 | 需要 IR/payload 代理 | `DuplicationReverter` merge graph、ReturnDuplicatorLow Phi/vvar、LoweredSwitchSimplifier if-chain/range-tree。Angr 测试基于 AIL 和真实 binary，NotDec 需要 shared CFG proxy 或 Bench2 IR。 |
-| 暂不适用 | Angr `ConstPropOptReverter`、`ReturnDuplicatorHigh`、`ReturnDeduplicator` 的非 shared-CFG 主线测试。除非真实样例证明它们阻塞 P1-P5，否则先不算本计划完成条件。 |
+| 暂不适用 | Angr `ConstPropOptReverter`、`ReturnDuplicatorHigh` 的非 shared-CFG 主线测试，以及 `ReturnDeduplicator` 超出两个私有 branch return arm 的形状。除非真实样例证明它们阻塞 P1-P5，否则先不算本计划完成条件。 |
 
 ## 这次修改的文件和行
 
@@ -5262,3 +5262,101 @@ candidate search 和 `ReturnDeduplicator` 的配合。这里不为了代理把�
 - 复杂度：2/5。只新增一个 exact branch arm 合并入口，没有引入 merge graph。
 - 维护成本：2/5。规则依赖 goto 触发、私有 arm 和 shared compare metadata；后续扩展 no-goto
   candidate search 时需要先重新评估 `DuplicationReverter` 的 `RequireGotos` 语义。
+
+# 2026-06-29 P1 ReturnDeduplicator 窄子集
+
+继续看 `fmt_deduplication_proxy` 时确认，上一节解决的不是当前输出里的重复 return。
+Angr full preset 在 `ReturnDuplicatorLow` 后还有 `ReturnDeduplicator`，会把两个分支末尾相同的
+return 收回到共享 return。NotDec 之前没有这个 pass，导致 `ReturnDuplicatorLow` 复制出的
+`return 0;` 留在两个 arm 里。
+
+本次补 shared CFG 的窄子集：只处理同一个 branch 的两个私有 successor，二者都是 terminal return
+block，且最后一条 return payload 的 origin 相同。实现把两边末尾 return payload 移到一个 synthetic
+return block，两边 arm 保留自己的前缀语句并 fallthrough 到这个共享 return。这个规则不处理普通
+multi-block return dedup，也不处理 void return。
+
+为避免默认管线在大量无匹配函数上多做一次 structuring 评估，pass wrapper 加了两个保守选项：
+`MaxInputBlocks` 在大图上直接跳过，`EvaluateInputBeforeRun=false` 只让能先做便宜图匹配的 pass
+延迟输入评估。`ReturnDeduplicator` 真正改图后仍会评估改前和改后 CFG，并继续执行不新增 goto
+检查。
+
+`fmt_deduplication_proxy` 现在从“重复 call + 重复 return”缩到只剩重复 call；因此 xfail 继续保留，
+但理由改成缺 Angr-style no-goto candidate search。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/SAILRDeoptimization.h:59`
+  - 新增 `ReturnDeduplicator` pass 声明。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:23`
+  - 新增 `EvaluateInputBeforeRun`，让便宜图匹配 pass 可以先判断是否有改动。
+- `external/NotDec-llvm2c/include/notdec-backends/Structuring/StructuringOptimizationPass.h:27`
+  - 新增 `MaxInputBlocks`，大图在评估前跳过小图 cleanup pass。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:51`
+  - `needsInitialEvaluation()` 尊重 `EvaluateInputBeforeRun`。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:87`
+  - `analyze()` 在 `MaxInputBlocks` 超限时直接返回；延迟输入评估的 pass 只有改图后才补评估原图。
+- `external/NotDec-llvm2c/lib/Structuring/StructuringOptimizationPass.cpp:98`
+  - 新增 `HasInitialEvaluation` 状态，避免延迟输入评估时拿空的初始 goto 集做验收。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:3998`
+  - 新增 `ReturnDeduplicator::defaultOptions()`，不要求已有 goto，不做相对质量 gate，延迟输入评估，
+    但仍禁止新增 goto，并限制 500 个 block 以内。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4009`
+  - 新增 `canDeduplicateReturnArm()`，只接受 branch 私有 terminal return arm。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4021`
+  - 新增 `sameTailReturnPayload()`，按 payload origin 判断两个 return payload 是否相同。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4029`
+  - 新增 `ReturnDeduplicator::runOnGraph()`，抽出两个 arm 的末尾 return 到共享 synthetic return block。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4282`
+  - `buildSAILRDeoptimizationPipeline()` 在 `ReturnDuplicatorLow` 后、`CrossJumpReverter` 前加入
+    `ReturnDeduplicator`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:114`
+  - 新增 `TestReturnDeduplicator` 测试 wrapper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8962`
+  - 新增 `testReturnDeduplicatorSharesDuplicateBranchReturns()`，覆盖相同 return payload 的共享。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9002`
+  - 新增 `testReturnDeduplicatorKeepsDivergentBranchReturns()`，覆盖不同 return 不合并。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12072`
+  - 新增 `testStructuringOptimizationPassSkipsLargeInputBeforeRunning()`，覆盖 `MaxInputBlocks` 在
+    `runOnGraph()` 前生效。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12108`
+  - 新增 `testStructuringOptimizationPassDelayedInputEvaluationKeepsInitialGotos()`，覆盖延迟输入评估仍使用
+    真实初始 goto 集。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12325`
+  - 更新 SAILR pipeline 顺序断言，加入 `ReturnDeduplicator`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:12412`
+  - 更新默认 option 对齐测试，覆盖 `ReturnDeduplicator`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:255`
+  - 更新 `fmt_deduplication_proxy` 的 xfail 理由。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:845`
+  - 更新 direct diamond return region 的 `return 7;` 计数，接受共享 return 后的输出。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1286`
+  - 更新 switch diamond return tail 的 `return 9;` 计数，接受共享 return 后的输出。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过；仍有现有的 `--target=wasm32-wasi` deprecated 警告。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的 lighttpd per-function fixture。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-return-dedup.csv`
+  通过；CSV 统计为 14 个 `pass`，4 个 `xfail`，2 个 `skip`。
+  `fmt_deduplication_proxy` 现在 `return_count=1`，只剩 `xdectoumax();` 次数 mismatch。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-return-dedup-lazy.c`
+  通过；同口径结果：`elapsed=53.97 user=53.60 sys=0.36 maxrss=666064`。
+
+## 影响判断
+
+- 实现效果：2/5。补齐 Angr full preset 里的一个窄 `ReturnDeduplicator` 子集，`fmt` proxy 只剩重复
+  call，但完整 P1 candidate search 仍未完成。
+- 复杂度：3/5。pass 本身只处理两个私有 return arm，但为了避免 fortune 退化，wrapper 增加了延迟
+  输入评估和 block 上限两个选项。
+- 维护成本：3/5。规则依赖 shared payload origin；`EvaluateInputBeforeRun=false` 只能给先做便宜图
+  匹配的 pass 用，后续新增使用者必须保证改图后仍补原图和候选图评估。
