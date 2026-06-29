@@ -5360,3 +5360,39 @@ multi-block return dedup，也不处理 void return。
   输入评估和 block 上限两个选项。
 - 维护成本：3/5。规则依赖 shared payload origin；`EvaluateInputBeforeRun=false` 只能给先做便宜图
   匹配的 pass 用，后续新增使用者必须保证改图后仍补原图和候选图评估。
+
+# 2026-06-29 P7 fmt proxy 计数修正
+
+继续核对 `fmt_deduplication_proxy` 时发现，它在上一节后生成的函数体已经只有两个
+`xdectoumax();` 调用，失败原因是 migration 脚本的普通 `counts` 把函数声明
+`extern void xdectoumax();` 也算进去了。这不是 P1 算法缺口。
+
+本次不改 SAILR 算法，只给 migration case 增加函数体范围计数，让这个 proxy 按真实函数体输出
+计数，并移除它的 `expected_failure`。P1 剩余缺口仍是 `branch_common_tail_pipeline_proxy`
+这一类需要 full pipeline 产生 goto hint 或更完整 merge graph 的形状。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:252`
+  - `fmt_deduplication_proxy` 移除 `expected_failure`，把 `xdectoumax();` 改成 `body_counts`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:716`
+  - 新增 `function_body()`，从 `Function Definitions` marker 后开始计数。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:808`
+  - `run_case()` 支持 `body_counts`，用于避免函数声明干扰输出计数。
+
+## 验证
+
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- 单独运行 `fmt_deduplication_proxy` 的 `run_case()`：
+  通过；`status=pass`，`return_count=1`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-fmt-oracle.csv`
+  通过；CSV 统计为 15 个 `pass`，3 个 `xfail`，2 个 `skip`。
+  `fmt_deduplication_proxy` 为 `pass/pass`，`branch_common_tail_pipeline_proxy` 仍是 P1 预期
+  output mismatch。
+
+## 影响判断
+
+- 实现效果：1/5。修正 P7 分类，确认 `fmt_deduplication_proxy` 不再是当前缺口。
+- 复杂度：1/5。只扩展 migration oracle 的计数范围。
+- 维护成本：1/5。`body_counts` 只影响显式使用它的 case，普通 `counts` 不变。
