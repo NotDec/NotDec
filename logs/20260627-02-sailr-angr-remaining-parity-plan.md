@@ -5639,3 +5639,48 @@ switch 至少 3 个 successor。这个限制会漏掉 default + 单个 case 的�
 - 实现效果：1/5。只是补齐上一节 switch return 收口的一个漏掉边界。
 - 复杂度：1/5。运行时代码只改一个阈值，主要增加回归。
 - 维护成本：1/5。仍沿用 `deduplicateReturnArmGroup()` 的保守检查。
+
+# 2026-06-29 P2/P3 void return 收口
+
+本次继续补 `ReturnDeduplicator` 的窄边界。之前 `canDeduplicateReturnArm()` 要求
+return block 至少有一个 statement，这会漏掉 `return;` 这种没有返回值的私有 return
+arm。Angr 的 `ReturnDeduplicator` 比较的是 `Return` 语句本身，不要求一定有返回表达式。
+
+这次只放开空 return arm：两个 arm 都没有 statement 时视为相同 tail，生成一个空的
+synthetic return block；有返回值的旧路径仍按 payload origin 比较，不做表达式等价扩展。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4009-4018`
+  - `canDeduplicateReturnArm()` 不再因为 `Statements.empty()` 跳过空 `return;` arm。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4021-4027`
+  - `sameTailReturnPayload()` 在两边都为空时返回 true；一边为空一边非空仍拒绝。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4029-4082`
+  - `deduplicateReturnArmGroup()` 支持没有 shared payload 的 synthetic return。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9021-9049`
+  - 新增 `testReturnDeduplicatorSharesDuplicateVoidBranchReturns()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:15118-15122`
+  - 在测试入口注册新用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-void-return-dedup.csv`
+  通过；CSV 统计为 `17 pass`、`3 xfail`、`0 skip`。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-void-return-dedup.c`
+  通过；`elapsed=54.13 user=53.70 sys=0.42 maxrss=665564`。上一轮同口径是
+  `52.88s`，没有明显退化。
+
+## 影响判断
+
+- 实现效果：1/5。补了 `ReturnDeduplicator` 的空 `return;` 漏洞，但不代表一般
+  `ReturnDeduplicator` 或 P2/P3 完成。
+- 复杂度：1/5。只处理空 payload case，没有新增数据结构。
+- 维护成本：1/5。旧的 payload return 路径不变，新增测试能直接定位这个边界。
