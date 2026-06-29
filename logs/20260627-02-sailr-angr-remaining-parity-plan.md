@@ -5596,3 +5596,46 @@ region 枚举，也不改 `ReturnDuplicatorLow` 的复制逻辑。
 - 实现效果：2/5。补了 `ReturnDeduplicator` 的一个 switch return 收口子集。
 - 复杂度：2/5。只抽了一个小 helper，还是偏窄。
 - 维护成本：2/5。增加了一个 switch-case return 回归，但规则还是保守。
+
+# 2026-06-29 P2/P3 switch default+case return 收口
+
+上一节把 `ReturnDeduplicator` 扩到 switch 下多个 case return arm，但实现里仍要求
+switch 至少 3 个 successor。这个限制会漏掉 default + 单个 case 的两个私有 return arm。
+这类形状在 shared CFG 层是安全的：两个 target 不重复、都只有当前 switch 一个前驱、
+末尾 return payload origin 相同。
+
+本次只放开这个最小边界，把 switch arm 数量下限从 3 改成 2，并补 C++ 回归。试过把
+这个形状补进 `run_sailr_bench2_migration.py`，但 LLVM switch 只有一个 case 时前端
+`CFGBuilder::visitSwitchInst()` 会断言；改成两个 case 后完整 pipeline 不稳定触发
+`ReturnDeduplicator`，所以没有提交脚本层 proxy，避免把 pass 级行为伪装成 pipeline 覆盖。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4111`
+  - `ReturnDeduplicator::runOnGraph()` 对 switch return arm 的 successor 数下限从 3 改成 2。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9098`
+  - 新增 `testReturnDeduplicatorSharesDuplicateSwitchDefaultCaseReturns()`，覆盖 default + case
+    两个相同 return arm 共享同一个 synthetic return。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:15091`
+  - 在测试入口注册新用例。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过机器缺失的 lighttpd fixture。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-switch-default-return-dedup.csv`
+  通过；统计保持 `17 pass`、`3 xfail`、`0 skip`。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-switch-default-return-dedup.c`
+  通过；`elapsed=52.88 user=52.47 sys=0.40 maxrss=675368`，没有明显退化。
+
+## 影响判断
+
+- 实现效果：1/5。只是补齐上一节 switch return 收口的一个漏掉边界。
+- 复杂度：1/5。运行时代码只改一个阈值，主要增加回归。
+- 维护成本：1/5。仍沿用 `deduplicateReturnArmGroup()` 的保守检查。
