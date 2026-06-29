@@ -5545,3 +5545,54 @@ proxy 误标成 real。
 - 实现效果：1/5。补齐当前机器上的 P7 报告覆盖，但不增加算法能力，也不替代真实样例。
 - 复杂度：1/5。fallback 只在显式提供 `fallback_ir` 且真实输入缺失时启用。
 - 维护成本：1/5。CSV 明确区分 `real` 和 `proxy-fallback`，后续真实输入出现时自动回到 real。
+
+# 2026-06-29 P2/P3 switch return shared return 收口
+
+这次继续补 `ReturnDeduplicator` 的一个窄子集。之前它只接受一个 branch 的两侧
+return arm。Angr full preset 里 `ReturnDeduplicator` 还能把 switch 下多个私有 return
+arm 的相同尾 return 收成一个共享 return。本次只补这个同类共享，不碰更宽的 return
+region 枚举，也不改 `ReturnDuplicatorLow` 的复制逻辑。
+
+约束仍然保守：
+
+- 只接受同一父块下的 private return arm。
+- arm 必须只有该父块一个前驱。
+- arm 末尾 return payload origin 必须相同。
+- 继续跳过 case/default overlap 和重复 successor target。
+
+这样能把一部分 `ReturnDeduplicator` 的 full preset 子集补上，同时不把 switch 复用
+和 P1 common-tail 之类的结构混进去。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4026`
+  - 新增 `deduplicateReturnArmGroup()`，把一组 return arm 抽成共享 synthetic return。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4058`
+  - `ReturnDeduplicator::runOnGraph()` 先保留 branch 两臂的旧路径，再补 switch 多臂返回
+    的窄共享。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9044`
+  - 新增 `testReturnDeduplicatorSharesDuplicateSwitchCaseReturns()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:15000`
+  - 在测试入口注册新用例。
+
+## 验证
+
+- `cmake --build ./build --target structuring-analysis-test notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过机器缺失的 lighttpd fixture。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-switch-return-dedup.csv`
+  通过；统计保持 `17 pass`、`3 xfail`、`0 skip`，未引入新失败。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-switch-return-dedup.c`
+  通过；`elapsed=52.71 user=52.25 sys=0.45 maxrss=675440`，和上一轮同口径没有明显退化。
+
+本次是 runtime structuring 改动，保留了 `DuplicateBranchReturns` 的旧行为，只扩了 switch
+窄子集。
+
+## 影响判断
+
+- 实现效果：2/5。补了 `ReturnDeduplicator` 的一个 switch return 收口子集。
+- 复杂度：2/5。只抽了一个小 helper，还是偏窄。
+- 维护成本：2/5。增加了一个 switch-case return 回归，但规则还是保守。
