@@ -5408,3 +5408,21 @@ multi-block return dedup，也不处理 void return。
 - 实现效果：1/5。修正 P7 分类，确认 `fmt_deduplication_proxy` 不再是当前缺口。
 - 复杂度：1/5。只扩展 migration oracle 的计数范围。
 - 维护成本：1/5。`body_counts` 只影响显式使用它的 case，普通 `counts` 不变。
+
+# 2026-06-29 P1 branch common-tail 无 hint 路线排除记录
+
+继续检查 `branch_common_tail_pipeline_proxy`。真实 C CFG 是：
+
+- `B0` 按 `x == 0` 分到 `B2(a(); c())` 和 `B1(b(); c())`。
+- `B1`、`B2` 都到 `B3`。
+- `B3` 按 `y == 0` 回到 `B2` 或到 `B4(return 0)`。
+
+也就是说，`B2` 多了来自 `B3` 的回边。尝试把 `B1/B2` 的共同语句尾 `c();` 在没有
+goto hint 的情况下抽成 shared synthetic tail，pass 级 `runOnGraph()` 能改图，但放进正式
+`DuplicationReverter::analyze()` 后，结构化结果的 goto 数从 7 增到 9，被
+`PreventNewGotos` 正确拒绝。这个方向不能作为修复提交。
+
+后续不应直接放宽 common-tail safety gate，也不应给 loop 回边形状硬开 no-hint 抽尾。
+`branch_common_tail_pipeline_proxy` 的真实缺口仍是 P1 的 loop/backedge 条件重接、
+virtual edge 选择或更完整 merge graph 语义；修复标准仍是完整 pipeline 输出减少 goto，
+而不是只让 `DuplicationReverter::runOnGraph()` 局部改图。
