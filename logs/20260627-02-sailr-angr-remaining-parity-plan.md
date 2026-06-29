@@ -5197,3 +5197,68 @@ fork，但不会被 `PredsToUpdate` 自动扩进去。
 - 复杂度：2/5。只新增 terminal fork 和 switch case 私有跳板的窄规则，没有引入通用 region graph。
 - 维护成本：2/5。后续如果要覆盖普通多入口 return region，应该继续补 `_single_entry_region()`，不要把本次
   unreachable terminal fork 规则扩成通用 predecessor 合并。
+
+# 2026-06-29 P1 duplicate branch arm 窄合并
+
+本次继续推进 P1，但没有放宽到完整 Angr `AILMergeGraph`。先补一个安全子集：
+同一个 branch 的两个私有 successor 在当前结构化结果里已经和 goto 相关，且两个 arm 的控制形状、
+payload origin、successor 都相同时，`DuplicationReverter` 可以删掉其中一个 arm，把 branch 改成
+fallthrough 到保留 arm。这样覆盖“结构化已经暴露复制痕迹”的重复分支，不处理 no-goto 的普通源码重复。
+
+`fmt_deduplication_proxy` 这次重新确认后仍保留 xfail：这个代理没有初始 goto，而 Angr
+`DuplicationReverter` 默认 `require_gotos=True`；真实 `fmt` 还涉及前置 `ConstPropOptReverter`、
+candidate search 和 `ReturnDeduplicator` 的配合。这里不为了代理把无 goto 分支合并放开。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1137`
+  - 新增 `hasGotoTouchingBranchPair()`，要求本次重复 arm 合并必须和当前 goto 结果相关。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1153`
+  - 新增 `canMergePrivateBranchArm()`，只接受同一 branch 的两个私有 successor，并复用
+    `sameBlockShapeByReference()` 比较 payload origin 和控制形状。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1162`
+  - 新增 `canDiscardBranchCondition()`，只允许空条件或已有 shared compare metadata 的条件被删除，避免丢掉
+    不透明条件副作用。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1170`
+  - 新增 `revertGotoRelatedDuplicateBranchArms()`，把重复 branch arm 合并成一个 fallthrough arm。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:3714`
+  - `DuplicationReverter::runOnGraph()` 在 common-tail 规则前先尝试这个更窄的 exact branch arm 合并。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:4812`
+  - 新增 `testDuplicationReverterMergesGotoRelatedDuplicateBranchArms()`，覆盖有 goto 触发、payload origin
+    相同的两个私有 arm 合并。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14782`
+  - 把新回归接入 `structuring-analysis-test`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:255`
+  - 更新 `fmt_deduplication_proxy` 的 xfail 理由，明确剩余是 no-goto candidate search 和
+    `ReturnDeduplicator` 交互，不再简单写成“缺 merge graph”。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的 lighttpd per-function fixture。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-branch-arm-exact.csv`
+  通过；CSV 统计为 14 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，2 个 `xfail/expected-output-mismatch`。
+  `fmt_deduplication_proxy` 仍为预期 output mismatch。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-branch-arm-exact.c`
+  通过；同口径结果：`elapsed=52.50 user=52.08 sys=0.40 maxrss=674708`。
+
+本次改了 SAILR 运行时代码，fortune smoke 没看到同口径退化；上一轮记录为
+`elapsed=52.40 user=52.00 sys=0.39 maxrss=672512`。
+
+## 影响判断
+
+- 实现效果：2/5。补了 P1 一个可验证子集，但 `fmt_deduplication_proxy` 和完整 Angr merge graph 仍未完成。
+- 复杂度：2/5。只新增一个 exact branch arm 合并入口，没有引入 merge graph。
+- 维护成本：2/5。规则依赖 goto 触发、私有 arm 和 shared compare metadata；后续扩展 no-goto
+  candidate search 时需要先重新评估 `DuplicationReverter` 的 `RequireGotos` 语义。
