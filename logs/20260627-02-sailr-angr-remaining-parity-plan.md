@@ -5116,3 +5116,84 @@ P2 已完成。
 - 实现效果：1/5。没有新增算法能力，但把 P2 的 pass-level 和 pipeline-level 差距暴露出来。
 - 复杂度：1/5。只新增一个 migration proxy。
 - 维护成本：1/5。后续修默认管线后，应把这个 xfail 转成 pass。
+
+# 2026-06-29 P2 terminal fork 默认管线修复
+
+继续处理上面的 `terminal_fork_return_region_proxy`。问题不是单纯 pass-level
+缺能力：`ReturnDuplicatorLow` 能复制 `branch -> return / unreachable`，但 C backend
+给 LLVM `unreachable` 降出来的是空的无后继 CFG block，shared CFG 里没有被当作闭合终端；
+另外 Phoenix 初始 goto 可能只落在一个 switch case 跳板上，另一个同 switch case 跳板也跳到同一个
+fork，但不会被 `PredsToUpdate` 自动扩进去。
+
+本次做的是窄修复：
+
+- 只把 C backend 中“无后继、无语句、无 terminator”的空 block 标为 shared CFG 的
+  `Unreachable`，对应 LLVM `unreachable` 降出的 trap 空块。
+- `ReturnDuplicatorLow` 对 terminal fork leaf 增加同样的空 leaf 识别，复制这种 leaf 时把副本规范成
+  `Unreachable`，让后续 structuring 仍把它视为闭合终端。
+- 当 return region 包含 unreachable terminal，且已选 goto predecessor 是某个 switch case 的私有
+  fallthrough 跳板时，把同一个 switch 下、同样私有跳到 region head 的 sibling case 跳板一起复制。
+  这只覆盖当前 abnormal terminal fork 形状，不放宽普通 switch case return duplication。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:235`
+  - 新增 `isClosedTerminalForkLeaf()`，让 terminal fork 收集能识别空的 closed leaf。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:242`
+  - `prependTerminalForkRegion()` 改用 `isClosedTerminalForkLeaf()` 判断 fork 两侧。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:1677`
+  - 新增 `privateSwitchParentForJumpTo()`、`returnRegionContainsUnreachableTerminal()` 和
+    `expandToSiblingSwitchJumpPredecessors()`，只在 unreachable terminal region 下扩展同 switch 私有
+    case 跳板。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:2748`
+  - `materializeDuplicatedRegion()` 复制空 terminal fork leaf 时，把副本标成 `Unreachable`。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:3801`
+  - `ReturnDuplicatorLow::runOnGraph()` 在 connected predecessor component 后追加 sibling switch
+    case jump 扩展。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:588`
+  - C backend shared CFG adapter 只把空的无后继无 terminator block 标成 `Unreachable`，避免扩大到普通
+    无后继 block。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:779`
+  - 新增 `makeSwitchCaseTerminalForkFunction()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8238`
+  - 新增 `testReturnDuplicatorLowAcceptsSwitchCaseTerminalForkByDefault()`，覆盖默认 options 下的
+    switch case terminal fork 复制。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:8301`
+  - 新增 `testSAILRDeoptimizationPipelineCopiesSwitchCaseTerminalFork()`，覆盖完整 deopt pipeline。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:360`
+  - `terminal_fork_return_region_proxy` 去掉 expected failure，转成正常 pass 用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check`
+  通过。
+- `git diff --check`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- 单独运行 `terminal_fork_return_region_proxy` 的 `run_case()`：
+  `status=pass`，`classification=pass`，输出指标为 `switch_count=1`、`case_count=2`、
+  `goto_count=0`、`return_count=3`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；当前机器仍跳过缺失的 lighttpd per-function fixture。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-terminal-fork-narrow.csv`
+  通过；CSV 统计为 14 个 `pass/pass`，2 个 `skip/missing-input`，2 个
+  `xfail/expected-timeout`，2 个 `xfail/expected-output-mismatch`。
+  `terminal_fork_return_region_proxy` 为 `pass/pass`。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-terminal-fork-narrow.c`
+  通过；同口径结果：`elapsed=52.40 user=52.00 sys=0.39 maxrss=672512`。
+
+本次改了 SAILR 运行时代码和 C backend adapter，fortune smoke 没看到同口径退化；上次同类记录为
+`elapsed=54.83 user=54.43 sys=0.39 maxrss=666332`。
+
+## 影响判断
+
+- 实现效果：3/5。P2 terminal fork 的默认管线 proxy 已从 xfail 转成 pass，但一般
+  `_single_entry_region()` 枚举仍未完整复刻。
+- 复杂度：2/5。只新增 terminal fork 和 switch case 私有跳板的窄规则，没有引入通用 region graph。
+- 维护成本：2/5。后续如果要覆盖普通多入口 return region，应该继续补 `_single_entry_region()`，不要把本次
+  unreachable terminal fork 规则扩成通用 predecessor 合并。
