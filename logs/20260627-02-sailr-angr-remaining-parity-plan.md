@@ -5466,3 +5466,37 @@ command failed / missing output 这类 runner 结果；成功输出不缓存，�
 - 实现效果：1/5。减少重复 timeout 等待，让 P7 报告更快出结果，但不增加算法能力。
 - 复杂度：1/5。缓存只在单次脚本进程内生效，key 只覆盖 runner 命令输入。
 - 维护成本：1/5。成功输出不缓存，避免不同 case oracle 相互污染。
+
+# 2026-06-29 P1 branch common-tail goto 数量基线记录
+
+继续检查 `branch_common_tail_pipeline_proxy` 时试过在 Phoenix cleanup 里删除无条件
+控制转移后的不可达 sequence 节点。这个方向可以把该 proxy 的输出从 7 个 goto 降到
+5 个 goto，但规则过宽，会删掉 `linear_while_break`、`shared_synthetic_goto_switch_reuse`
+和 `root_cycle_follow` 需要的 fallback 控制流，`run_structuring_smoke.py` 会失败。因此本次不提交
+这条 runtime 清理。
+
+本次只把当前缺口的 goto 数量写进 migration oracle，避免后续只看到
+`unexpected-goto`，看不出是否有局部进展。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:316`
+  - 给 `branch_common_tail_pipeline_proxy` 增加 `expected_metrics: {"goto_count": 7}`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:834`
+  - `run_case()` 先计算一次 `metrics`，再按 case 里的 `expected_metrics` 校验具体指标。
+
+## 验证
+
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-expected-metrics.csv`
+  通过；CSV 统计为 `15 pass`、`2 skip`、`3 xfail`。
+  `branch_common_tail_pipeline_proxy` 仍为 `xfail/expected-unexpected-goto`，`goto_count=7`。
+
+本次只改 migration 报告脚本，不改 `llvm2c` runtime；不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。没有增加算法能力，但把 P1 当前输出质量固定成可比较指标。
+- 复杂度：1/5。只给显式 opt-in 的 case 校验现有 metrics。
+- 维护成本：1/5。默认 case 不受影响；以后若算法减少 goto，报告会直接暴露基线变化。
