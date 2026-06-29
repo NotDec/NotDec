@@ -5371,10 +5371,17 @@ multi-block return dedup，也不处理 void return。
 计数，并移除它的 `expected_failure`。P1 剩余缺口仍是 `branch_common_tail_pipeline_proxy`
 这一类需要 full pipeline 产生 goto hint 或更完整 merge graph 的形状。
 
+同类检查也覆盖了 `branch_common_tail_pipeline_proxy`。它的 `c();` 计数同样会被函数声明干扰，
+但真实问题不是调用次数，而是输出仍有 7 个 `goto structured_block_*`。因此这个 case 继续
+保留 xfail，但失败分类改为 `expected-unexpected-goto`，更准确地指向 P1 的 pipeline 结构缺口。
+
 ## 修改位置
 
 - `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:252`
   - `fmt_deduplication_proxy` 移除 `expected_failure`，把 `xdectoumax();` 改成 `body_counts`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:281`
+  - `branch_common_tail_pipeline_proxy` 把 `c();` 改成 `body_counts`，并明确要求无
+    `goto structured_block_`，让 xfail 分类落到真实 goto 缺口。
 - `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:716`
   - 新增 `function_body()`，从 `Function Definitions` marker 后开始计数。
 - `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:808`
@@ -5389,7 +5396,12 @@ multi-block return dedup，也不处理 void return。
 - `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-fmt-oracle.csv`
   通过；CSV 统计为 15 个 `pass`，3 个 `xfail`，2 个 `skip`。
   `fmt_deduplication_proxy` 为 `pass/pass`，`branch_common_tail_pipeline_proxy` 仍是 P1 预期
-  output mismatch。
+  `expected-unexpected-goto`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-branch-common-tail-oracle.csv`
+  通过；CSV 统计为 15 个 `pass`，3 个 `xfail`，2 个 `skip`。
+  `branch_common_tail_pipeline_proxy` 为 `xfail/expected-unexpected-goto`。
+- 单独运行 `branch_common_tail_pipeline_proxy` 的 `run_case()`：
+  预期 xfail；分类为 `expected-unexpected-goto`，当前输出仍有 7 个 goto。
 
 ## 影响判断
 
