@@ -5500,3 +5500,48 @@ command failed / missing output 这类 runner 结果；成功输出不缓存，�
 - 实现效果：1/5。没有增加算法能力，但把 P1 当前输出质量固定成可比较指标。
 - 复杂度：1/5。只给显式 opt-in 的 case 校验现有 metrics。
 - 维护成本：1/5。默认 case 不受影响；以后若算法减少 goto，报告会直接暴露基线变化。
+
+# 2026-06-29 P7 缺失真实输入的 proxy fallback
+
+`run_sailr_bench2_migration.py` 里 `return_tail_cleanup` 和 `early_exit_chain`
+依赖本机当前没有的真实 IR，之前完整报告会留下 2 个 `skip/missing-input`。这会让
+ReturnDuplicatorLow 的两个早期覆盖点在当前机器上完全不跑。
+
+本次不替代真实样例判断，只给这两个 case 加 proxy fallback：真实输入存在时仍跑真实
+IR；真实输入缺失时才写临时 IR，并在 CSV 的 `kind` 标成 `proxy-fallback`，同时在
+`failures` 字段记录原真实路径缺失。这样当前报告能实际跑完这些语义代理，也不会把
+proxy 误标成 real。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:22`
+  - `return_tail_cleanup` 增加早退 + tail return 的 fallback IR，并给 fallback 设置独立
+    `fallback_contains`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:48`
+  - `early_exit_chain` 增加两个条件共用失败 return 的 fallback IR。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:737`
+  - `case_kind()` 支持 `proxy-fallback`。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:784`
+  - `run_case()` 在真实输入缺失且 case 有 `fallback_ir` 时写临时 fallback IR，并返回
+    `used_fallback` 和 note。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:858`
+  - fallback 运行时优先使用 `fallback_contains`，避免真实 IR oracle 和 proxy oracle 混用。
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:933`
+  - CSV 行使用 `case_kind(case, used_fallback)`，并把 fallback note 写进 `failures` 字段。
+
+## 验证
+
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-fallback.csv`
+  通过；CSV 统计为 `17 pass`、`3 xfail`、`0 skip`。
+  `return_tail_cleanup` 和 `early_exit_chain` 在当前机器上为 `pass/pass/proxy-fallback`，
+  并记录真实输入缺失路径。
+
+本次只改 migration 报告脚本，不改 `llvm2c` runtime；不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。补齐当前机器上的 P7 报告覆盖，但不增加算法能力，也不替代真实样例。
+- 复杂度：1/5。fallback 只在显式提供 `fallback_ir` 且真实输入缺失时启用。
+- 维护成本：1/5。CSV 明确区分 `real` 和 `proxy-fallback`，后续真实输入出现时自动回到 real。
