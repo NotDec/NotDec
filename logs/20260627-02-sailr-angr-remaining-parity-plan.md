@@ -5838,3 +5838,68 @@ arm 各自调用后 `ret void`，最终完整 pipeline 输出一个共享 `retur
 - 实现效果：1/5。增加 Angr ret_dedupe 测试分类覆盖，但不新增算法能力。
 - 复杂度：1/5。只增加一个 proxy case。
 - 维护成本：1/5。oracle 只检查一个共享 `return;`、两个调用和无 `goto`。
+
+# 2026-06-29 P1 loop-header switch 虚拟边收口
+
+本次处理 fortune wasm/TR 输出里最明显的一类 `goto` 爆炸：`main` 的 `getopt()`
+switch 在循环头，旧的虚拟边兜底每次只生成一个 single-case switch，再把其它
+successor 顺序追加成 goto，导致同一个 `switch (getopt(...))` 被重复渲染多次。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:52`
+  - 给 `nodeTreeContainsKind()` 补 forward declaration，供 switch 虚拟化路径判断
+    source 是否已经包含结构化 loop。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1472`
+  - 新增 `buildTerminalBlockBody()`，只把 `return/unreachable` 目标块内联到 switch
+    case body，不复制普通非终止区域。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1493`
+  - 新增 `buildSwitchTargetBody()`，自然循环内的 switch case 优先内联 terminal
+    目标，否则继续走 `break/continue/goto` 控制转移。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1506`
+  - 修改 `buildVirtualizedSwitchSource()`。如果 source 已经是结构化 loop，不再用旧
+    tail switch 追加新的 switch；自然循环内第一次虚拟化 switch source 时生成完整
+    switch，而不是 single-case switch。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2576`
+  - 新增 `virtualizeTerminalSwitchLoopExits()`，对已经内联到 switch case 的 terminal
+    loop exit 删除真实图边，避免父 region 再为这些边补一段重复 switch。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2934`
+  - 在 `reduceGraphNaturalLoopOnce()` 里接入 terminal switch exit 虚拟化。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:144`
+  - 新增 `loop_header_switch_keeps_condition_once`，覆盖 `while` 循环头里带副作用
+    `switch (next())` 的情况，要求输出中只出现一次 `switch (next())`。
+
+## 验证
+
+- `cmake --build ./build --target notdec-llvm2c -j4`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+- `ctest --test-dir build -R 'structuring-(smoke|analysis)|sailr-bench2-migration|shared-structurer-registry' --output-on-failure`
+  4/4 通过。
+- standalone llvm2c fortune：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /tmp/notdec-fortune-wasm-sailr-tr2-20260629/llvm2c-before-demotessa.ll -o /tmp/notdec-fortune-wasm-before-sailr-after-switchfix.c`
+  通过；`elapsed=80.46 user=79.97 sys=0.48 maxrss=671328`。
+  `main` 的 goto 从 697 降到 495；`switch(getopt...)` 从 15 次降到 1 次。
+- 完整 wasm/TR fortune：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/lifting/wasm/cases/fortune.o3.wasm -o /tmp/notdec-fortune-wasm-sailr-tr2-switchfix-20260629.c --tr-level=2 --algo=structured-sailr --gen-work-dir --work-dir=/tmp/notdec-fortune-wasm-sailr-tr2-switchfix-20260629 --dump-htypes=/tmp/notdec-fortune-wasm-sailr-tr2-switchfix-20260629.htypes`
+  通过；`elapsed=166.14 user=193.64 sys=1.66 maxrss=1276836`。旧同口径是
+  `elapsed=163.40 user=192.72 sys=1.64 maxrss=1282836`，时间同量级，RSS 略低。
+  完整输出里 `main` 的 goto 从 697 降到 495；总 `goto/break/continue` 从约 912
+  降到 710；`switch(getopt...)` 从 15 次降到 1 次。
+- `gcc -std=gnu11 -w -fsyntax-only /tmp/notdec-fortune-wasm-sailr-tr2-switchfix-20260629.c`
+  仍失败。主要还是既有的递归/不完整 struct 声明、`break/continue` 脱离 loop，
+  以及 preheader 自跳转等问题，本次没有解决。
+
+## 影响判断
+
+- 实现效果：3/5。重复 switch/getopt 的大头修掉了，fortune goto 数明显下降；但 C
+  仍不可编译，preheader 自跳转还在。
+- 复杂度：2/5。只在 Phoenix switch 虚拟边和自然循环出口处理上加保守逻辑，没有改
+  region 基础模型。
+- 维护成本：2/5。新增 helper 都局部在 `PhoenixStructurer.cpp`，smoke 覆盖了副作用
+  switch 条件只渲染一次的核心行为。
+
+更好的后续方案是补一般的 loop-header switch reducer，让 case body 直接吸收简单
+回头块和 terminal 块，而不是依赖虚拟边兜底；同时单独处理 preheader label/self-goto
+错误。
