@@ -5903,3 +5903,77 @@ successor 顺序追加成 goto，导致同一个 `switch (getopt(...))` 被重�
 更好的后续方案是补一般的 loop-header switch reducer，让 case body 直接吸收简单
 回头块和 terminal 块，而不是依赖虚拟边兜底；同时单独处理 preheader label/self-goto
 错误。
+
+# 2026-06-29 P1 loop-header switch continue arm 内联
+
+本次接着上一节，把循环头 switch 的简单回头 case 直接收进 case body。目标形状很窄：
+case 目标只有一个前驱，来自 loop head；只有一个后继，回到 loop head；尾块是
+fallthrough。这样 `case: goto arm; arm: body; continue;` 可以变成
+`case: body; continue;`，不需要再在 switch 后面追加 label/goto。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2127`
+  - 新增 `followingEntryBlock()`，让已有 `dropGotoIntoFollowingNode()` 同时识别
+    label 和紧随 loop 的入口。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2135`
+  - 扩展 `dropGotoIntoFollowingNode()`，如果当前子 `Sequence` 的末尾 `goto`
+    指向紧随节点入口，就复制一个去掉尾部 `goto` 的子 `Sequence`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2633`
+  - 新增 `isSimpleLoopContinueSwitchArm()`，只匹配单前驱、单后继、回 loop head
+    的简单 switch arm。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2651`
+  - 新增 `buildLoopSwitchContinueArmBody()`，把 arm body 和 `continue` 组成 case
+    body。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2668`
+  - 新增 `buildLoopSwitchCaseBody()`，对简单回头 arm 走内联，其它 target 仍走
+    `break/continue/goto` 分类。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2690`
+  - 新增 `reduceLoopHeaderSwitchContinueArms()`，在自然循环 reducer 中折叠这类
+    loop-header switch。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3075`
+  - 在 `reduceGraphNaturalLoopOnce()` 中接入上面的 reducer。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:177`
+  - 加强 `loop_header_switch_keeps_condition_once`，要求 `case 1/2` 中直接出现
+    `a();` 和 `b();`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1665`
+  - 修正 ordered oracle：`after` 从 `before` 后面开始找，避免被函数声明里的
+    `a();`/`b();` 误命中。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/PhoenixStructurer.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c notdec structuring-analysis-test -j4`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- 完整 wasm/TR fortune：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-wasm-sailr-loopcase-cleanup-final.c --tr-level=2 --algo=structured-sailr --gen-work-dir --work-dir=/tmp/notdec-fortune-wasm-sailr-loopcase-cleanup-final`
+  通过；`elapsed=181.37 user=204.35 sys=1.57 maxrss=1273192`。上一轮
+  switchfix 同口径是 `elapsed=166.14 user=193.64 sys=1.66 maxrss=1276836`，
+  时间略高，RSS 同量级。
+
+## 结果
+
+- 新完整结果：`/tmp/notdec-fortune-wasm-sailr-loopcase-cleanup-final.c`。
+- `switch(getopt(...))` 仍为 1 次。
+- 总 `goto` 从原始 `/tmp/notdec-fortune-wasm-sailr-tr2-20260629.c` 的 912 降到
+  645；上一轮 switchfix 是 710。
+- 相比 `/tmp/notdec-fortune-wasm-sailr-current.c` 的 697，这次减少到 645。
+- `case 119/117/115/...` 等简单回头 arm 已经直接输出赋值和 `continue`。
+- `structured_block_4` preheader 自跳仍在，计数还是 6。这个不是本次 reducer 能解决的
+  问题，下一步应查 label 绑定到 loop entry 还是 preheader 的过程。
+
+## 影响判断
+
+- 实现效果：3/5。继续减少 fortune 的 goto，且 case body 更接近正常 C；但 C 仍不可编译，
+  preheader 自跳和部分重复 branch 还没解决。
+- 复杂度：2/5。新增 reducer 只匹配简单回头 arm，没有改 region 基础模型。
+- 维护成本：2/5。逻辑集中在 `PhoenixStructurer.cpp`，smoke 覆盖了核心输出形状。
