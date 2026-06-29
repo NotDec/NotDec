@@ -5755,3 +5755,55 @@ fallthrough 走到一个闭合 return tail；两侧 return tail 的 payload orig
   通过；仍只跳过本机缺失的 lighttpd fixture。
 
 本次只改 smoke 脚本，不改 runtime structuring，不需要 fortune 性能 smoke。
+
+# 2026-06-29 P2/P3 void return pipeline 收口
+
+继续核对上一轮 `ReturnDeduplicator` 的 void return 支持时发现一个 pipeline 缺口：
+pass-level 用空 return block 覆盖过 `return;`，但完整 `notdec-llvm2c` 路径里 void
+`ReturnStmt` 会作为 payload 放进 return block。之前 `StructuredGotoAdapter` 只给有
+返回值的简单 return 建 shared origin，两个 `return;` payload 没有共同 origin，
+所以 `ReturnDeduplicator` 不会把两臂收成共享 void return。
+
+这次不改 `ReturnDeduplicator` 的 CFG 规则，只补 C CFG adapter 的 payload origin：
+多个 void `ReturnStmt` 共享同一个 origin。这样现有的 return payload 比较可以自然处理
+`if (...) { a(); return; } else { b(); return; }`，同时保留两侧前缀语句。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:156-160`
+  - `StructuredGotoAdapter` 增加 `SimpleVoidReturnPayload`，记录第一个 void return
+    payload。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:200-213`
+  - `StructuredGotoAdapter::setSimpleReturnOrigin()` 在 `ReturnStmt` 没有返回值时，把后续
+    void return payload 的 origin 指向第一个 void return。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:274-296`
+  - 新增 `sailr_return_deduplicator_void_branch`，完整 pipeline 覆盖两侧调用后
+    `ret void` 最终只输出一个共享 `return;`。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/notdec-llvm2c/StructuredGoto.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c -j4`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-void-ret-dedup.csv`
+  通过；CSV 统计保持 `17 pass`、`3 xfail`、`0 skip`。xfail 仍是两个 lighttpd
+  timeout 和 `branch_common_tail_pipeline_proxy`。
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-void-ret-dedup.c`
+  通过；`elapsed=54.05 user=53.61 sys=0.42 maxrss=672532`。上一轮同口径是
+  `52.39s`，没有明显退化。
+
+## 影响判断
+
+- 实现效果：2/5。补上 `ReturnDeduplicator` void return 的完整 pipeline 覆盖，但不代表
+  一般 return region 或 Phi/vvar 消费完成。
+- 复杂度：1/5。只复用现有 payload origin 机制，没有改 CFG rewrite。
+- 维护成本：1/5。新增 smoke 能直接覆盖 C CFG adapter、SAILR pipeline 和 renderer 的组合路径。
