@@ -5684,3 +5684,53 @@ synthetic return block；有返回值的旧路径仍按 payload origin 比较，
   `ReturnDeduplicator` 或 P2/P3 完成。
 - 复杂度：1/5。只处理空 payload case，没有新增数据结构。
 - 维护成本：1/5。旧的 payload return 路径不变，新增测试能直接定位这个边界。
+
+# 2026-06-29 P2/P3 linear return chain 收口
+
+本次继续补 `ReturnDeduplicator` 的一个 Angr supergraph 差异。Angr 在 supergraph 上找
+if-return region，所以 branch 的两侧 child 可以是一条私有线性链，最后一个块才是真正
+return。NotDec 之前只接受 branch 直接指向 `Return` block，会漏掉这种“前缀块 +
+return tail”的形状。
+
+这次只补 branch 两侧的私有线性链：每个链上 block 只能有一个前驱，只能通过
+fallthrough 走到一个闭合 return tail；两侧 return tail 的 payload origin 必须相同。
+不处理 switch 链、不处理共享 tail、不移动非线性 region。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4095-4100`
+  - 新增 `LinearReturnArmChain`，只记录线性 arm 的 return tail。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4102-4139`
+  - 新增 `collectPrivateLinearReturnArmChain()`，只接受单前驱、fallthrough、闭合 return tail。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4141-4214`
+  - 新增 `deduplicateLinearReturnArmChains()`，把两条私有线性链的 return tail 收到共享
+    synthetic return。
+- `external/NotDec-llvm2c/lib/Structuring/SAILRDeoptimization.cpp:4216-4242`
+  - `ReturnDeduplicator::runOnGraph()` 在单块 return arm 失败后尝试线性链收口。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:9051-9103`
+  - 新增 `testReturnDeduplicatorSharesLinearBranchReturnChains()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:15172-15177`
+  - 在测试入口注册新用例。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/SAILRDeoptimization.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test notdec-llvm2c -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-linear-return-dedup.csv`
+  通过；CSV 统计为 `17 pass`、`3 xfail`、`0 skip`。
+- `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /sn640/NotDec-Exp/Bench2/bin2llvm-ir/selected-targets-native/fortune/executable/module-all.ll -o /tmp/notdec-sailr-linear-return-dedup.c`
+  通过；`elapsed=52.39 user=52.01 sys=0.37 maxrss=674444`。上一轮同口径是
+  `54.13s`，没有退化。
+
+## 影响判断
+
+- 实现效果：2/5。补了 `ReturnDeduplicator` 的一个 Angr supergraph 子集，但没有扩到
+  switch chain 或一般 return region。
+- 复杂度：2/5。新增两个局部 helper，只接受线性私有链。
+- 维护成本：2/5。判断条件窄，测试覆盖了新增可收口形状。
