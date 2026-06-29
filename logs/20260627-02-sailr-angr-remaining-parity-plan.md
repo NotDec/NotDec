@@ -5807,3 +5807,34 @@ pass-level 用空 return block 覆盖过 `return;`，但完整 `notdec-llvm2c` �
   一般 return region 或 Phi/vvar 消费完成。
 - 复杂度：1/5。只复用现有 payload origin 机制，没有改 CFG rewrite。
 - 维护成本：1/5。新增 smoke 能直接覆盖 C CFG adapter、SAILR pipeline 和 renderer 的组合路径。
+
+# 2026-06-29 P7 ret_dedupe migration 分类
+
+本次不改算法，只把上一节的 void return pipeline 行为加入 migration 报告。Angr
+`test_ret_dedupe_fakeret_1` 检查的是 structuring 过程中生成的重复 `return;` 能被
+`ReturnDeduplicator` 收口；NotDec 这里用 LLVM IR proxy 覆盖同一类结构：两个 branch
+arm 各自调用后 `ret void`，最终完整 pipeline 输出一个共享 `return;`，且没有 `goto`。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py:312-338`
+  - 新增 `return_deduplicator_void_branch_proxy`，归到
+    `test_ret_dedupe_fakeret_1`。
+
+## 验证
+
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py`
+  通过。
+- 单独运行 `return_deduplicator_void_branch_proxy` 的 `run_case()`：
+  `pass/pass`，`goto_count=0`。
+- `python3 external/NotDec-llvm2c/test/structuring/run_sailr_bench2_migration.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c --report-csv /tmp/notdec-sailr-ret-dedup-void-migration.csv`
+  通过；CSV 统计为 `18 pass`、`3 xfail`、`0 skip`。新增 case 为 `pass/pass`；
+  xfail 仍是两个 lighttpd timeout 和 `branch_common_tail_pipeline_proxy`。
+
+本次只改 P7 报告脚本，不改 runtime structuring，不需要 fortune 性能 smoke。
+
+## 影响判断
+
+- 实现效果：1/5。增加 Angr ret_dedupe 测试分类覆盖，但不新增算法能力。
+- 复杂度：1/5。只增加一个 proxy case。
+- 维护成本：1/5。oracle 只检查一个共享 `return;`、两个调用和无 `goto`。
