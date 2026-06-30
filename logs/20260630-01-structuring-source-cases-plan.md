@@ -527,3 +527,33 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 - 实现效果：7/10。减少了明确无用 goto，并收紧了 xfail。
 - 复杂度：2/10。只复用已有 terminal return 内联逻辑。
 - 维护成本：3/10。只处理 return terminal，不扩展非 terminal goto。
+
+# 2026-06-30 实现记录：新增 switch continue latch 小 case
+
+这轮继续看 `loop_switch_latch` 剩余的 `while=2`。实际输出里 `case 0` 的 `continue` 不能简单当作当前 C 结构里的 `continue;`：源码语义是先执行 `--limit`，再继续外层 loop。当前结构树把 switch、latch 和外层 loop 拆成双层 `while (1)`，并用 goto/label 拼接这个 latch。
+
+这已经不是单纯删 `while(1)` 或文本 cleanup，继续改会进入 target-aware `continue` 和 switch/loop 嵌套语义。因此本轮不硬改算法，先新增更小的 `switch_continue_latch` case，把问题从 `loop_switch_latch` 里拆出来。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/012_switch_continue_latch.c:4`：新增只覆盖 switch arm 里 latch-update + continue 的 source case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:130`：接入 `switch_continue_latch`，期望 `goto<=0`、`while<=1`，当前标为 xfail。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-switch-continue-latch
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-switch-continue-latch --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`switch_continue_latch` 是 expected failure，当前指标为 `goto=3, break=2, continue=4, switch=1, while=2, do=0`。本轮只新增测试和 xfail，没有改算法，所以不跑 fortune 性能 smoke。
+
+评分：
+
+- 实现效果：6/10。把 target-aware continue 问题独立出来，后续可以单独修。
+- 复杂度：2/10。只新增一个 source case 和 manifest 记录。
+- 维护成本：2/10。xfail 精确限制为 goto 和 while 数量，不吞掉其它全局坏形状。
