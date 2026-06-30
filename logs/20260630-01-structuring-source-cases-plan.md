@@ -229,3 +229,57 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 结果：通过。`guarded_loop_skip` 是 expected failure，当前输出指标为 `goto=1, break=0, continue=0, while=1, do=1`。
 
 本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
+# 2026-06-30 实现记录：修 guarded loop skip cleanup
+
+这轮修掉 `guarded_loop_skip` 暴露的小问题。实际 tree 形状是：
+
+- prefix sequence：初始化语句 + `if (skip) goto after`
+- 紧跟一个已经结构化的 loop
+- 再紧跟 after-loop label/body
+
+之前 cleanup 只会删除跳到“下一个节点入口”的 goto，但这里 goto 是跳过一个 loop 到后续块，所以保留了 goto。新规则只匹配这个连续形状，把它改成 `if (!skip) { loop; } after:`，不删除 after-loop label/body，因此 loop 内已有 break 仍能落到后续块。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2532`：新增 `foldGuardedLoopSkipIntoSequence()`，折叠 preheader guard 跳过紧邻 loop 的形状。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2574`：在 `buildSequenceFromRange()` 之前复制 `IfNode` 和 `Prefix`，避免 `StructuredTree` 扩容后旧指针悬空。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2757`：把新 fold 接入 `cleanupStructuredGotos()`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:26`：把 `loop_break_continue` 的 goto 上限从 1 收紧到 0。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:89`：去掉 `guarded_loop_skip` 的 xfail，保持 `goto<=0`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-guarded-fix3
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-guarded-fix3 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+/usr/bin/time -f '%e' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune-guarded-loop-fix.c --algo=structured-sailr
+```
+
+结果：全部通过。fortune smoke 正常退出，耗时 `94.59s`，和之前 `95.94s/95.83s/96.03s/97.20s` 同量级。
+
+当前输出指标：
+
+| case | goto | break | continue | switch | while | do |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| diamond_if_else | 0 | 0 | 0 | 0 | 0 | 0 |
+| early_return_chain | 0 | 0 | 0 | 0 | 0 | 0 |
+| guarded_loop_skip | 0 | 0 | 0 | 0 | 1 | 1 |
+| loop_break_continue | 0 | 2 | 1 | 0 | 1 | 1 |
+| nested_loop_break_continue | 3 | 3 | 2 | 0 | 2 | 2 |
+| nested_loop_switch | 2 | 1 | 1 | 1 | 1 | 1 |
+| switch_cluster | 0 | 4 | 0 | 1 | 0 | 0 |
+| tail_merge_return | 0 | 0 | 0 | 0 | 0 | 0 |
+
+评分：
+
+- 实现效果：8/10。修掉一个独立 xfail，并顺带把 `loop_break_continue` 降到 0 个 goto。
+- 复杂度：4/10。只是 cleanup 的一个窄 fold，但要注意 `StructuredTree` 扩容后的指针失效。
+- 维护成本：4/10。规则匹配严格，后续如果做 CFG 级 oracle，可以用它覆盖更多 skip-loop 形状。
