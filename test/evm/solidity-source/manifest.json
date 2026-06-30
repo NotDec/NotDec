@@ -1,0 +1,15 @@
+{
+  "suite": "evm.solidity-source",
+  "default_args": [
+    "--tr-level=2"
+  ],
+  "cases": [
+    {
+      "name": "empty_runtime",
+      "source": "cases/empty_runtime.sol",
+      "bytecode": "bytecode/empty_runtime.hex",
+      "input": "ir/empty_runtime.ll",
+      "expected": "expected/empty_runtime.sol"
+    }
+  ]
+}

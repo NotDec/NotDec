@@ -28,6 +28,8 @@ This mirrors the usual LLVM split:
   - EVM IR pass-pipeline suites.
   - `cases/` stores checked-in evm2llvm LLVM IR inputs.
   - Oracles check targeted EVM metadata instead of full IR text.
+  - `solidity-source/` stores manually accepted Solidity source regressions
+    with frozen evm2llvm IR and expected Solidity-like output.
 - `test/type-recovery/<suite>/`
   - Self-contained type recovery suites.
   - `manifest.json` defines the checked cases and per-suite setup.
@@ -49,6 +51,9 @@ This mirrors the usual LLVM split:
   - EVM Solidity compiler-pattern pass cases.
   - Currently checks nonpayable guard metadata counts on selected apehex
     evm2llvm outputs.
+- `test/evm/solidity-source/`
+  - Small Solidity source regressions accepted after manual review.
+  - Default CTest uses frozen evm2llvm IR and compares final `.sol` output.
 - `test/type-recovery/llvm-ir/`
   - Handwritten LLVM IR type recovery regression cases.
 - `test/type-recovery/sysy/`

@@ -68,6 +68,23 @@ function(add_evm_solidity_rewrite_suite test_name manifest_relpath)
 	)
 endfunction()
 
+function(add_evm_solidity_source_suite test_name manifest_relpath)
+	add_test(
+		NAME ${test_name}
+		COMMAND
+			${Python3_EXECUTABLE}
+			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_source_suite.py
+			--binary
+			$<TARGET_FILE:notdec>
+			--manifest
+			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
+			--project-root
+			${PROJECT_SOURCE_DIR}
+			--workdir
+			${CMAKE_CURRENT_BINARY_DIR}/artifacts/${test_name}
+	)
+endfunction()
+
 add_lifting_suite(
 	notdec.lifting.wasm
 	lifting/wasm/manifest.json
@@ -81,6 +98,11 @@ add_evm_solidity_patterns_suite(
 add_evm_solidity_rewrite_suite(
 	notdec.evm.solidity_rewrite
 	evm/solidity-rewrite/manifest.json
+)
+
+add_evm_solidity_source_suite(
+	notdec.evm.solidity_source
+	evm/solidity-source/manifest.json
 )
 
 add_type_recovery_suite(
