@@ -230,6 +230,30 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：收紧 xfail 精确匹配
+
+这轮没有改 SAILR 算法，只收紧 source-case runner 对 xfail 的判断。之前 `xfail_contains` 只要求每个失败都匹配一组宽泛文本，`loop_switch_latch` 用 `unexpected pattern` 会把其它全局坏形状也吞掉。新增 `xfail_exact` 后，已知失败的数量和文本都要匹配，防止 xfail 掩盖新问题。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py:121`：新增 `is_expected_xfail()`，保留旧的 `xfail_contains` 宽松语义。
+- `external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py:122`：新增 `xfail_exact`，要求失败数量相同，且 failure 和 expected 双向匹配。
+- `external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py:220`：runner 改为统一调用 `is_expected_xfail()`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:102`：`loop_switch_latch` 改用 `xfail_exact`，只允许 return 后 label 坏形状和 `goto<=0` 两个已知失败。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-xfail-exact
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-xfail-exact --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：通过。本轮只改测试 runner 和 manifest，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
 # 2026-06-30 实现记录：修 guarded loop skip cleanup
 
 这轮修掉 `guarded_loop_skip` 暴露的小问题。实际 tree 形状是：
