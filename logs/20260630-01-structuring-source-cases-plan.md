@@ -612,6 +612,36 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。`loop_switch_shared_latch` 当前指标为 `goto=4, break=1, continue=1, switch=1, while=1, do=1`。本轮只增加测试和 xfail，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：收紧 switch cluster goto oracle
+
+这轮没有改算法，只收紧早期过宽的 `switch_cluster` oracle。当前输出已经是正常 switch，`goto=0`：
+
+```c
+switch (x) {
+  case 1: ... break;
+  case 2: ... break;
+  case 7: ... break;
+  default: ... break;
+}
+```
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:51`：把 `switch_cluster` 的 goto 上限从 4 收紧到 0。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-tight-switch-oracle
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-tight-switch-oracle --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
 # 2026-06-30 实现记录：增加 terminal if 后死代码 oracle
 
 这轮继续扫描 xfail 输出，`nested_loop_break_continue` 里有明确坏形状：
