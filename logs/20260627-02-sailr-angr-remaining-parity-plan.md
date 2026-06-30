@@ -6105,3 +6105,85 @@ body 里的第一个 label；`InfiniteLoop.Block` 只是代表 block，可能和
 - 实现效果：2/5。清掉 fortune 里全部 `goto; while(1)` 入口跳转，总 goto 小幅下降。
 - 复杂度：1/5。只改入口识别，没有改 CFG、region 或 overlay。
 - 维护成本：1/5。逻辑集中在 cleanup 的入口判断，smoke 增加了输出形态防线。
+
+# 2026-06-30 P1 virtualized branch source root 和不可达 sibling 清理
+
+继续查上一轮结果里大量重复正反条件：
+`if (cond) goto A; goto B; if (!cond) goto B; goto A;`。确认这不是 C renderer
+重复渲染，而是 Phoenix 虚拟化边时，source 已经有 `StructuredRoot`，fallback 又把
+原 root 追加到新 sequence，然后再追加一套反向 branch transfer。另一个剩余形态是
+`goto X; if (...) ...`，其中后面的 `if` 在同一个 sequence 内没有 label/loop 入口，
+实际已经不可达。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1452`
+  - 在 `buildVirtualizedBranchSource()` 中先计算 `RenderKind`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1457`
+  - `buildVirtualizedBranchSource()` 遇到已有 `Source.StructuredRoot` 时，先调用
+    `rewriteStructuredSourceTargetTransfer()` 重写已有 target transfer；成功后直接返回，
+    不再把原 root 和新 if/goto 同时塞进 sequence。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2170`
+  - 新增 `isUnconditionalRenderedTransfer()`，只把会真实打印并终止当前顺序流的
+    `Goto/Break/Continue` 算作清理触发点。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2176`
+  - 新增 `endsWithUnconditionalRenderedTransfer()`，处理 sequence 末尾包了一层的情况。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2190`
+  - 新增 `containsEnterableNode()`，遇到 `Label` 或结构化 loop 就停止清理，避免删掉
+    仍可被其它 goto 进入的节点。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2215`
+  - 新增 `dropUnreachableAfterRenderedTransfer()`，删掉同一个 sequence 内无条件转移后、
+    且没有独立入口的 sibling。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2466`
+  - 在 `cleanupStructuredGotos()` 调用 `dropGotoIntoFollowingNode()` 后同步运行新的
+    不可达 sibling 清理；`foldGotoDiamond()` 后也再跑一次。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:195`
+  - 新增 `makeGotoNode()` 测试 helper。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:202`
+  - 新增 `treeKindCount()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:223`
+  - 新增 `treeContainsBlockKind()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:1105`
+  - 新增 `testBranchVirtualizationRewritesExistingSourceRoot()`，覆盖已有 source root 不应
+    再追加第二套 if/goto。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14114`
+  - 新增 `testPhoenixFallbackDropsUnreachableSiblingAfterGoto()`，覆盖 `goto` 后无入口 sibling
+    被清掉。
+
+## 验证
+
+- `cmake --build ./build --target notdec-llvm2c notdec structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过；仍有 wasi target deprecated 警告。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  失败；仍是既有 smoke 状态：缺少本机 lighttpd fixture，且
+  `phi_demote_before_structuring_htype` / summary 期望 `break;` 未满足。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure`
+  同上失败。
+- main-only repro：
+  `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /tmp/fortune-main-only.ll -o /tmp/fortune-main-only-unreachable-clean.c --no-demote-ssa`
+  通过；相比 `/tmp/fortune-main-only-branch-rewrite.c`，`goto` 从 308 降到 292，
+  连续双分支为 0，`goto; if` 为 0。
+- 完整 wasm/TR fortune：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-wasm-sailr-unreachable-clean.c --tr-level=2 --algo=structured-sailr --gen-work-dir --work-dir=/tmp/notdec-fortune-wasm-sailr-unreachable-clean`
+  通过；`elapsed=182.64 user=204.93 sys=1.70 maxrss=1270344`。上一轮同口径
+  `loop-entry-fix` 是 `elapsed=183.98 user=207.04 sys=1.56 maxrss=1275348`，
+  时间和 RSS 基本持平。
+
+## 结果
+
+- 新完整结果：`/tmp/notdec-fortune-wasm-sailr-unreachable-clean.c`。
+- 完整输出总 `goto` 从上一轮 639 降到 417。
+- 连续双分支模式从 470 降到 0。
+- `goto; if` 从 198 降到 0。
+- `goto; while(1)` 保持 0。
+- `continue=65`、`break=72`。减少的 `continue` 来自不可达 sibling 一起被删除。
+
+## 影响判断
+
+- 实现效果：4/5。fortune 里最显眼的重复正反分支被清掉，总 goto 明显下降。
+- 复杂度：2/5。只复用已有 source-root rewrite，并在 sequence cleanup 里加保守清理，
+  没改 region/overlay 模型。
+- 维护成本：2/5。新增 helper 比较直接，但 `containsEnterableNode()` 的保守边界以后要
+  跟新的结构化节点入口语义保持一致。
