@@ -254,6 +254,28 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：通过。本轮只改测试 runner 和 manifest，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：收紧 loop switch latch oracle
+
+这轮继续收紧 `loop_switch_latch` 的 xfail oracle。这个源码只有一个 loop，当前输出却有两个 `while (1)`，说明除了 goto 和 return 后 label 外，还存在多包了一层 loop 的坏形状。把 `while<=1` 加到 oracle 后，xfail 只允许这三个已知失败。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:104`：`loop_switch_latch` 的 `xfail_exact` 新增 `expected while<=1`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:110`：`loop_switch_latch` 新增 `max_counts.while=1`。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-tight-oracle2
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-tight-oracle2 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：通过。`loop_switch_latch` 当前指标是 `goto=1, break=2, continue=3, switch=1, while=2, do=0`。本轮只改 manifest oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
 # 2026-06-30 实现记录：修 guarded loop skip cleanup
 
 这轮修掉 `guarded_loop_skip` 暴露的小问题。实际 tree 形状是：
