@@ -6044,3 +6044,64 @@ B4 只初始化局部变量，B5 才是 `getopt` 循环头。结构树里坏形�
   大量 goto 仍需单独处理。
 - 复杂度：1/5。只在 fallback 补边前做内部目标过滤，没有改 region/overlay 基础模型。
 - 维护成本：1/5。逻辑集中在 `appendFallbackNode()` 附近，新增单测直接覆盖坏形态。
+
+# 2026-06-30 P1 infinite loop 入口 goto 清理
+
+继续查上一轮结果里剩下的 `goto structured_block_x; while (1) { structured_block_x: ... }`。
+确认这不是后端 label 渲染问题，而是 `cleanupStructuredGotos()` 判断“下一个节点入口”
+时把 `InfiniteLoop.Block` 当入口。实际 `while (1)` 渲染时先进入 body，第一个可执行入口是
+body 里的第一个 label；`InfiniteLoop.Block` 只是代表 block，可能和 body 入口不同。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2132`
+  - 修改 `structuredLoopEntryBlock()`：`InfiniteLoop` 和 `DoWhile` 一样用
+    `firstRenderedBlock(Tree, Node->Body)` 作为入口；只有 body 找不到块时才回退到
+    `Node->Block`。
+  - `While` 仍保留原逻辑，用条件块 `Node->Block` 作为入口。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:3`
+  - 引入 `re`，让 smoke 支持正则形式的 absent 检查。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:181`
+  - 在 `loop_header_switch_keeps_condition_once` 里禁止
+    `goto structured_block_x; while (1)`。
+- `external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py:1661`
+  - 新增 `regex_absent` 检查逻辑。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/PhoenixStructurer.cpp test/structuring/run_structuring_smoke.py`
+  通过。
+- `python3 -m py_compile external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py`
+  通过。
+- `cmake --build ./build --target notdec-llvm2c notdec structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过；仍有 wasi target deprecated 警告。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure`
+  通过。
+- main-only repro：
+  `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /tmp/fortune-main-only.ll -o /tmp/fortune-main-only-entry-fix.c --no-demote-ssa`
+  通过；`goto` 从 455 降到 453，`goto; while(1)` 从 4 降到 0。
+- 完整 wasm/TR fortune：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-wasm-sailr-loop-entry-fix.c --tr-level=2 --algo=structured-sailr --gen-work-dir --work-dir=/tmp/notdec-fortune-wasm-sailr-loop-entry-fix`
+  通过；`elapsed=183.98 user=207.04 sys=1.56 maxrss=1275348`。上一轮同口径
+  `internal-target-fix` 是 `elapsed=182.61 user=205.19 sys=1.79 maxrss=1272504`，
+  时间和 RSS 基本持平。
+
+## 结果
+
+- 新完整结果：`/tmp/notdec-fortune-wasm-sailr-loop-entry-fix.c`。
+- 完整输出总 `goto` 从 642 降到 639；`goto; while(1)` 从 6 降到 0。
+- `continue=74`、`break=74`、`switch(getopt...)` 仍为 1。
+- 剩余明显问题主要是重复正反条件的 `if/goto`，例如：
+  `if (cond) goto A; goto B; if (!cond) goto B; goto A;`。这和本次 loop 入口清理是不同路径，
+  下一步应单独查 `foldGotoDiamond()`、`dropGotoIntoFollowingNode()` 和 fallback branch
+  生成。
+
+## 影响判断
+
+- 实现效果：2/5。清掉 fortune 里全部 `goto; while(1)` 入口跳转，总 goto 小幅下降。
+- 复杂度：1/5。只改入口识别，没有改 CFG、region 或 overlay。
+- 维护成本：1/5。逻辑集中在 cleanup 的入口判断，smoke 增加了输出形态防线。
