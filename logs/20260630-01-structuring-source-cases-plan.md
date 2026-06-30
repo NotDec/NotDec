@@ -579,6 +579,39 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：增加 terminal if 后死代码 oracle
+
+这轮继续扫描 xfail 输出，`nested_loop_break_continue` 里有明确坏形状：
+
+```c
+if (cmp222) {
+    break;
+} else {
+    continue;
+}
+total_1_lcssa_reload = ...
+```
+
+`if` 两边都已经无条件离开当前控制流，后面再出现语句就是死代码。这个只命中 `nested_loop_break_continue`，说明它适合收成全局坏形状 oracle；实际修复仍要处理嵌套 loop region 被拆开的归约问题，本轮不硬改算法。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:15`：新增全局 `regex_absent`，禁止 `if (...) { break; } else { continue; }` 后面继续出现可执行语句或新控制结构。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:86`：`nested_loop_break_continue` 的 `xfail_exact` 新增这个已知坏形状，只允许它和原有 `goto<=0` 失败。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-terminal-if-oracle
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-terminal-if-oracle --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
 # 2026-06-30 实现记录：增加 continue 后不可达语句 oracle
 
 这轮扫描 12 个 source case 的当前输出，发现 `switch_continue_latch` 里有明确坏形状：
