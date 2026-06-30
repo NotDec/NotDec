@@ -395,3 +395,47 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 结果：通过。`loop_switch_latch` 是 expected failure，当前输出指标为 `goto=1, break=2, continue=3, switch=1, while=2, do=0`。
 
 本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
+# 2026-06-30 实现记录：新增 tail early return 小 case
+
+这轮继续查 `loop_two_returns`，尝试过两条小修路线：
+
+- 让 terminal-to-terminal exit 只有 return payload 相同才转成 `break`。
+- 在 renderer 里按 `break` 的目标区分 loop follow 和其它 terminal return。
+
+两条都没有形成可提交修复：前者会把现有 xfail 形状改乱但仍不解决 `loop_two_returns`；后者需要可靠维护 loop 的 break target，继续做会变成结构树目标语义重构，不适合在这个小 case 上硬猜。
+
+因此本轮先把问题再拆小，新增 `tail_early_return`。它去掉 header guard 的额外 goto，只保留 loop 尾部 early return 和 loop 后 return。当前输出仍会把 early return 误结构成 `break`，最后生成连续两个 return：
+
+```c
+if (call > -1) {
+    continue;
+} else {
+    break;
+}
+...
+return *(int *)&total_0_reg2mem + 1;
+return add;
+```
+
+这个 case 更清楚地说明问题在 “tail `if (continue) else break` 折 do-while 时没有区分不同 terminal exit”，后续应从结构树的 loop follow / target 语义修，不应只在 renderer 里猜。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/011_tail_early_return.c:3`：新增尾部 early return 小 case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:127`：接入 `tail_early_return`，期望 `goto<=0`，当前只允许 return 后不可达语句这个已知失败。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-tail-early-return-xfail
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-tail-early-return-xfail --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`tail_early_return` 是 expected failure，当前只触发 return 后不可达语句，不触发 goto 失败。
+
+本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
