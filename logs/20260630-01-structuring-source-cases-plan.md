@@ -557,3 +557,24 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 - 实现效果：6/10。把 target-aware continue 问题独立出来，后续可以单独修。
 - 复杂度：2/10。只新增一个 source case 和 manifest 记录。
 - 维护成本：2/10。xfail 精确限制为 goto 和 while 数量，不吞掉其它全局坏形状。
+
+# 2026-06-30 实现记录：收紧 nested loop xfail
+
+这轮没有改算法，只把 `nested_loop_break_continue` 的 xfail 从宽松 `xfail_contains` 改成精确匹配。当前这个 case 只触发 `expected goto<=0` 一个失败；继续用 contains 会吞掉其它新坏形状。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:82`：`nested_loop_break_continue` 改用 `xfail_exact`，只允许 `expected goto<=0`。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-tight-nested
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-tight-nested --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
