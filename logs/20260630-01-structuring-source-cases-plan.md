@@ -579,6 +579,38 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：新增 switch early return 小 case
+
+这轮新增非 loop 的 `switch_early_return`，覆盖 switch 某个 case 直接 return、其它 case 共享尾部 `sink(y); return y;` 的形状。当前输出有两个明确坏点：
+
+```c
+case 0:
+  return x;
+  break;
+case 2:
+  goto structured_block_8;
+```
+
+其中 `return` 后的 `break` 是死代码，case 2/default 还会 goto 到 case 1 内部 label。这个问题和 loop latch 无关，后续可以单独看 switch case body / shared tail 折叠。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/014_switch_early_return.c:3`：新增 switch early return 小 case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:163`：接入 `switch_early_return`，期望 `goto<=0`，当前标为 xfail，只允许 `goto<=0` 和 return 后语句两个已知失败。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-switch-early-return-xfail
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-switch-early-return-xfail --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`switch_early_return` 当前指标为 `goto=2, break=3, continue=0, switch=1, while=0, do=0`。本轮只增加测试和 xfail，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
 # 2026-06-30 实现记录：新增 loop switch shared latch 小 case
 
 这轮把 `nested_loop_switch` 和 `switch_continue_latch` 里的 switch/latch 问题继续拆小。新增 `loop_switch_shared_latch`，去掉 `continue`，只保留 loop header switch、多 case 写不同值、共享 `sink(total); --limit;` latch。当前输出仍有 4 个 goto：
