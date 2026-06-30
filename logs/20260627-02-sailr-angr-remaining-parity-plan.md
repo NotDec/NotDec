@@ -5977,3 +5977,70 @@ fallthrough。这样 `case: goto arm; arm: body; continue;` 可以变成
   preheader 自跳和部分重复 branch 还没解决。
 - 复杂度：2/5。新增 reducer 只匹配简单回头 arm，没有改 region 基础模型。
 - 维护成本：2/5。逻辑集中在 `PhoenixStructurer.cpp`，smoke 覆盖了核心输出形状。
+
+# 2026-06-30 P1 collapsed fallback 内部 successor 过滤
+
+本次继续查 `structured_block_4` preheader 自跳。确认原 IR 是正常的 `B4 -> B5`：
+B4 只初始化局部变量，B5 才是 `getopt` 循环头。结构树里坏形态是：
+`Label(4) + B4 body + goto 4 + while(block 5)`。这不是旧 Goto pass 追加的，
+而是 Phoenix fallback 渲染时把已合并节点内部的旧 tail successor 又渲染了一次。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1910`
+  - 新增 `isInternalFallbackTarget()`，判断 fallback 目标是否已经在当前 collapsed
+    node 的 `Blocks` 里。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1917`
+  - 新增 `shouldAppendVirtualFallbackTransfer()`，虚拟边继续保留原有“不要重复已有真实
+    successor”的过滤，同时先跳过内部目标。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1927`
+  - 修改 `appendFallbackNode()`：已结构化节点补虚拟边、fallthrough tail、自然循环
+    external successor 时，都跳过当前节点内部目标，避免旧 `TailBlock` 产生假 re-entry
+    `goto`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:195`
+  - 新增 `treeStartsWithLoopAtBlock()`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:212`
+  - 新增 `treeContainsGotoBeforeLoop()`，专门检查 `goto label; while (...)` 这种坏形态。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14000`
+  - 新增 `testPhoenixFallbackSkipsInternalCollapsedSuccessor()`，复现前置链汇入 collapsed
+    node 后不应再对内部 block 追加 goto。
+
+## 验证
+
+- `git -C external/NotDec-llvm2c diff --check -- lib/Structuring/PhoenixStructurer.cpp test/structuring/structuring_analysis_test.cpp`
+  通过。
+- `cmake --build ./build --target structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过；仍有 wasi target deprecated 警告。
+- `python3 external/NotDec-llvm2c/test/structuring/run_structuring_smoke.py --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c`
+  通过；仍只跳过本机缺失的 lighttpd fixture。
+- `ctest --test-dir build -R structuring-smoke --output-on-failure`
+  通过。
+- main-only repro：
+  `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /tmp/fortune-main-only.ll -o /tmp/fortune-main-only-fixed2.c --no-demote-ssa`
+  通过；`goto` 从 457 降到 455，`goto structured_block_4;` 从 1 降到 0，
+  `switch(getopt...)` 保持 1。
+- 完整 wasm/TR fortune：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-wasm-sailr-internal-target-fix.c --tr-level=2 --algo=structured-sailr --gen-work-dir --work-dir=/tmp/notdec-fortune-wasm-sailr-internal-target-fix`
+  通过；`elapsed=182.61 user=205.19 sys=1.79 maxrss=1272504`。上一轮同口径
+  `loopcase-cleanup-final` 是 `elapsed=181.37 user=204.35 sys=1.57 maxrss=1273192`，
+  时间和 RSS 基本持平。
+
+## 结果
+
+- 新完整结果：`/tmp/notdec-fortune-wasm-sailr-internal-target-fix.c`。
+- `main` 开头的 `_local_3_0/_local_4_0` 初始化后已经直接进入 `while (1)`，不再出现
+  `structured_block_4: ... goto structured_block_4; while (1)`。
+- 完整输出总 `goto` 从 645 降到 642；`continue=74`、`break=74`、`switch(getopt...)`
+  仍为 1。
+- 剩余 `structured_block_4` 自跳还有 5 个，但它们在其它函数/作用域，主要是重复
+  `if/goto` 钻石和 loop 内标签入口，不是这次修的 collapsed fallback 内部 successor
+  问题。
+
+## 影响判断
+
+- 实现效果：2/5。明确修掉 fortune main 的 preheader 自跳，goto 小幅下降；但剩余
+  大量 goto 仍需单独处理。
+- 复杂度：1/5。只在 fallback 补边前做内部目标过滤，没有改 region/overlay 基础模型。
+- 维护成本：1/5。逻辑集中在 `appendFallbackNode()` 附近，新增单测直接覆盖坏形态。
