@@ -579,6 +579,39 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：新增 loop switch shared latch 小 case
+
+这轮把 `nested_loop_switch` 和 `switch_continue_latch` 里的 switch/latch 问题继续拆小。新增 `loop_switch_shared_latch`，去掉 `continue`，只保留 loop header switch、多 case 写不同值、共享 `sink(total); --limit;` latch。当前输出仍有 4 个 goto：
+
+```c
+case 0: goto structured_block_5;
+case 1: goto structured_block_4;
+case 7: goto structured_block_3;
+...
+structured_block_5:
+  sink(add4);
+```
+
+这说明问题不只来自 target-aware `continue`，还包括 loop header switch 的多个 case body 没有折进共享 latch。修它需要把 switch case、case-local 赋值和共享 loop latch 一起组合，涉及 PHI/dephication 值和 loop latch 归约顺序；本轮先作为 xfail 固定，不硬改算法。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/013_loop_switch_shared_latch.c:4`：新增 loop header switch 共享 latch 小 case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:150`：接入 `loop_switch_shared_latch`，期望 `goto<=0`、`while<=1`，当前标为 xfail，只允许 `expected goto<=0`。
+
+验证：
+
+```bash
+rm -rf /tmp/notdec-structuring-source-cases-shared-latch-xfail
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-shared-latch-xfail --keep-work-dir
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`loop_switch_shared_latch` 当前指标为 `goto=4, break=1, continue=1, switch=1, while=1, do=1`。本轮只增加测试和 xfail，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
 # 2026-06-30 实现记录：增加 terminal if 后死代码 oracle
 
 这轮继续扫描 xfail 输出，`nested_loop_break_continue` 里有明确坏形状：
