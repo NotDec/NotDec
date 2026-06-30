@@ -439,3 +439,51 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 结果：全部通过。`tail_early_return` 是 expected failure，当前只触发 return 后不可达语句，不触发 goto 失败。
 
 本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
+# 2026-06-30 实现记录：修 loop terminal break 渲染
+
+这轮修掉 `loop_two_returns` 和 `tail_early_return` 的 xfail。两个 case 的共同形状是 loop 有两个 return 出口：一个是 loop 正常结束后的 return，另一个是 loop body 里的 early return。之前 SAILR 会把两个 terminal exit 都结构成 `break`，C 里的 `break` 只能落到 loop 后的一个位置，结果生成连续 return，语义错。
+
+这次不改 region 归约，只补齐 loop node 的 break target，并让 renderer 在 `break` 目标不是当前 loop follow、且目标是 return terminal block 时直接渲染成 return。这样 early return 不再被误写成 `break`，后续同一个 terminal block 也不会再重复输出。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:131`：新增 `graphNodeEntryBlock()`，把 graph follow node 转成 loop 的 `BreakTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:852`、`:919`、`:1040`：线性 while / while-with-break / do-while reducer 写入 loop `BreakTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1083`、`:1089`：self-loop reducer 写入条件分支另一侧作为 `BreakTarget`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3320`、`:3375`、`:3402`、`:3592`：graph natural loop 和 fallback loop 写入 `BreakTarget`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:165`：新增 `InlinedTerminalTargets`，避免 targeted early return 后重复输出同一 terminal block。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:174`：`RenderContext` 增加 `BreakTarget`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:558`：收集 label 时按 `BreakTarget` 判断目标不匹配的 break；可内联 return 的目标不再生成 label。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:575`：进入 while / do-while / infinite loop 时把 loop `BreakTarget` 传给子节点。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:778`：新增 `canRenderBreak()`，只有目标为空、目标未知或目标等于当前 `BreakTarget` 时才输出 C `break;`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:787`、`:792`：新增 targeted return 内联逻辑。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:114`、`:123`：去掉 `loop_two_returns` 和 `tail_early_return` 的 xfail，作为正常通过 case 固定下来。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-break-target4
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-break-target4 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+/usr/bin/time -f '%e' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune-break-target-final.c --algo=structured-sailr
+```
+
+结果：全部通过。fortune smoke 正常退出，耗时 `94.86s`，和之前 `94.59s/95.94s/95.83s/96.03s/97.20s` 同量级。
+
+这轮输出里：
+
+- `loop_two_returns`：`goto=0`，early return 输出为 loop 后 `return total_0_reload;`，正常 loop exit 输出为 loop 内 guard return。
+- `tail_early_return`：`goto=0`，early return 输出为 loop 后 `return add;`，正常 loop exit 输出为 loop 内 guard return。
+
+评分：
+
+- 实现效果：8/10。修掉两个明确 xfail，且没有引入新 goto。
+- 复杂度：5/10。需要把 loop follow target 传到 renderer，但没有改 region 识别和复制策略。
+- 维护成本：5/10。后续如果支持非 return 的 targeted break，还需要更完整的 target-aware control transfer；当前只处理明确 return terminal。
