@@ -2525,7 +2525,7 @@ void MLsubRecovery::run() {
   if (!MemoryType) {
     MemoryType = binarysub::make_variable(0, PointerSize);
   }
-  if (!StorageType) {
+  if (isEVMModule(M) && !StorageType) {
     StorageType = binarysub::make_variable(0, PointerSize);
   }
 
@@ -3107,7 +3107,7 @@ void MLsubRecovery::bottomUpPhase() {
 }
 
 void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
-                                    const llvm::DataLayout &DL,
+                                    unsigned PointerSizeBytes,
                                     bool SolveGlobals) {
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
@@ -3170,7 +3170,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     }
   }
 
-  TypeBuilderContext TBCtx(HCtx, DL, &BulkResult.structMerge,
+  TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, &BulkResult.structMerge,
                            &StructMergeRootGroups);
   TypeBuilder TB(TBCtx);
 
@@ -3239,6 +3239,7 @@ void ConstraintsGenerator::releaseBinarysubState() {
 
 void MLsubRecovery::genASTTypes(llvm::Module &M) {
   ResultVal = std::make_unique<Result>();
+  ResultVal->PrintEmptyStorageSection = isEVMModule(M);
   EVMStores.clear();
   // 合并所有类型到一个大的 HTypeResult 里面。
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
@@ -3303,7 +3304,8 @@ void MLsubRecovery::topDownPhase() {
     auto &Data = AG.AllSCCs.at(Ind);
     // 尝试运行简化算法，保存到ValueTypes里面。
     // solve memory if ind == 0
-    Data.Generator->genTypes(*HCtx, Mod.getDataLayout(), Ind == 0);
+    Data.Generator->genTypes(*HCtx, Mod.getDataLayout().getPointerSize(),
+                             Ind == 0);
   }
   for (auto &Data : AG.AllSCCs) {
     Data.Generator->releaseBinarysubState();

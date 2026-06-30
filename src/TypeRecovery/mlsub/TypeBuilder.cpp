@@ -1,5 +1,4 @@
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
-#include "notdec/Utils/Utils.h"
 #include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
@@ -12,18 +11,18 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
-#include <llvm/Support/Debug.h>
-#include <llvm/Support/FileSystem.h>
-#include <llvm/Support/raw_ostream.h>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
-
-#define DEBUG_TYPE "mlsub_typebuilder"
 
 namespace notdec::mlsub {
 
@@ -50,6 +49,14 @@ using binarysub::UUnion;
 
 using FieldEntry = std::pair<SimpleRange, HType *>;
 
+} // namespace notdec::mlsub
+
+namespace notdec {
+std::optional<std::string> getWorkDirOpt();
+} // namespace notdec
+
+namespace notdec::mlsub {
+
 static std::optional<unsigned> parseTupleFieldIndex(const std::string &Name) {
   if (Name.empty()) {
     return std::nullopt;
@@ -62,6 +69,15 @@ static std::optional<unsigned> parseTupleFieldIndex(const std::string &Name) {
     Value = Value * 10 + static_cast<unsigned>(C - '0');
   }
   return Value;
+}
+
+static bool consumeFront(std::string_view &Text, std::string_view Prefix) {
+  if (Text.size() < Prefix.size() ||
+      Text.compare(0, Prefix.size(), Prefix) != 0) {
+    return false;
+  }
+  Text.remove_prefix(Prefix.size());
+  return true;
 }
 
 static std::optional<std::vector<UTypePtr>>
@@ -127,53 +143,56 @@ HType *TypeBuilder::getBottomType(std::uint32_t BitSize) {
 
 namespace {
 
-constexpr llvm::StringLiteral kTraceConvertStructEnv =
+constexpr const char *kTraceConvertStructEnv =
     "NOTDEC_TYPEBUILDER_TRACE_CONVERTSTRUCT";
-constexpr llvm::StringLiteral kTraceConvertStructLogFile =
+constexpr const char *kTraceConvertStructLogFile =
     "04-typebuilder-convertstruct.log";
 
-bool envFlagEnabled(llvm::StringRef Name) {
-  auto *Value = std::getenv(Name.data());
+bool envFlagEnabled(const char *Name) {
+  auto *Value = std::getenv(Name);
   return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
 }
 
 bool shouldTraceConvertStruct() {
-  if (envFlagEnabled(kTraceConvertStructEnv)) {
-    return true;
-  }
-#ifndef NDEBUG
-  return ::llvm::DebugFlag && llvm::isCurrentDebugType(DEBUG_TYPE);
-#else
-  return false;
-#endif
+  return envFlagEnabled(kTraceConvertStructEnv);
 }
 
-void emitConvertStructTrace(llvm::StringRef Content) {
+void emitConvertStructTrace(std::string_view Content) {
   static bool ResetLogFile = false;
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     if (!ResetLogFile) {
-      if (std::error_code EC = llvm::sys::fs::create_directories(*WorkDir)) {
-        llvm::dbgs() << Content;
+      std::error_code EC;
+      std::filesystem::create_directories(*WorkDir, EC);
+      if (EC) {
+        std::cerr << Content;
         return;
       }
-      auto TraceLogPath = notdec::join(*WorkDir, kTraceConvertStructLogFile.str());
-      if (std::error_code EC = llvm::sys::fs::remove(TraceLogPath);
-          EC && EC != std::errc::no_such_file_or_directory) {
-        llvm::dbgs() << "Warning: cannot reset(rm) "
-                     << kTraceConvertStructLogFile << " in " << *WorkDir
-                     << ": " << EC.message() << "\n";
-        llvm::dbgs() << Content;
+      auto TraceLogPath =
+          std::filesystem::path(*WorkDir) / kTraceConvertStructLogFile;
+      std::filesystem::remove(TraceLogPath, EC);
+      if (EC) {
+        std::cerr << "Warning: cannot reset(rm) "
+                  << kTraceConvertStructLogFile << " in " << *WorkDir << ": "
+                  << EC.message() << "\n";
+        std::cerr << Content;
         return;
       }
       ResetLogFile = true;
     }
-    notdec::appendWorkDirLog(kTraceConvertStructLogFile, Content);
+    auto TraceLogPath =
+        std::filesystem::path(*WorkDir) / kTraceConvertStructLogFile;
+    std::ofstream OS(TraceLogPath, std::ios::app);
+    if (!OS) {
+      std::cerr << Content;
+      return;
+    }
+    OS << Content;
     return;
   }
-  llvm::dbgs() << Content;
+  std::cerr << Content;
 }
 
-void appendCurrentRootLabel(llvm::raw_ostream &OS,
+void appendCurrentRootLabel(std::ostream &OS,
                             const std::optional<std::string> &Label) {
   if (Label) {
     OS << *Label;
@@ -183,7 +202,7 @@ void appendCurrentRootLabel(llvm::raw_ostream &OS,
 }
 
 void appendCurrentDebugContext(
-    llvm::raw_ostream &OS, const std::optional<std::string> &RootLabel,
+    std::ostream &OS, const std::optional<std::string> &RootLabel,
     const std::vector<std::string> &DebugPath) {
   appendCurrentRootLabel(OS, RootLabel);
   if (DebugPath.empty()) {
@@ -198,7 +217,7 @@ void appendCurrentDebugContext(
   }
 }
 
-void appendCurrentDebugPathOnly(llvm::raw_ostream &OS,
+void appendCurrentDebugPathOnly(std::ostream &OS,
                                 const std::vector<std::string> &DebugPath) {
   if (DebugPath.empty()) {
     return;
@@ -209,6 +228,12 @@ void appendCurrentDebugPathOnly(llvm::raw_ostream &OS,
       OS << " -> ";
     }
     OS << DebugPath[I];
+  }
+}
+
+void appendIndent(std::ostream &OS, unsigned Spaces) {
+  for (unsigned I = 0; I < Spaces; ++I) {
+    OS << ' ';
   }
 }
 
@@ -226,7 +251,7 @@ ast::TypedDecl *findRecursiveAnchorDecl(HType *Ty) {
   }
   // 递归 body 常见形态是 bottom/top 与 struct* 的交并。anchor 只需要那个
   // 具体聚合 decl，不能因为外层 set 就退回单字段 fallback 壳。
-  if (auto *Set = llvm::dyn_cast<ast::SetUnionType>(Ty)) {
+  if (auto *Set = Ty->getAs<ast::SetUnionType>()) {
     for (auto *Term : Set->getTypes()) {
       if (auto *Decl = findRecursiveAnchorDecl(Term)) {
         return Decl;
@@ -234,7 +259,7 @@ ast::TypedDecl *findRecursiveAnchorDecl(HType *Ty) {
     }
     return nullptr;
   }
-  if (auto *Set = llvm::dyn_cast<ast::SetInterType>(Ty)) {
+  if (auto *Set = Ty->getAs<ast::SetInterType>()) {
     for (auto *Term : Set->getTypes()) {
       if (auto *Decl = findRecursiveAnchorDecl(Term)) {
         return Decl;
@@ -352,10 +377,11 @@ bool isVagueFieldBoundType(const HType *Ty) {
 // 2. if this union already has a concrete member, drop pure top/bottom noise
 // 3. if everything is vague, keep one representative per canonical type
 std::vector<HType *> simplifyUnionMembers(const std::vector<HType *> &Members) {
-  bool HasConcreteMember =
-      llvm::any_of(Members, [](const HType *Ty) {
-        return Ty != nullptr && !isVagueFieldBoundType(Ty);
-      });
+  bool HasConcreteMember = std::any_of(Members.begin(), Members.end(),
+                                       [](const HType *Ty) {
+                                         return Ty != nullptr &&
+                                                !isVagueFieldBoundType(Ty);
+                                       });
 
   std::vector<HType *> Result;
   for (auto *Member : Members) {
@@ -367,9 +393,10 @@ std::vector<HType *> simplifyUnionMembers(const std::vector<HType *> &Members) {
     }
 
     auto *Canon = Member->getCanonicalType();
-    bool AlreadyPresent = llvm::any_of(Result, [&](const HType *Existing) {
-      return Existing == Member || Existing->getCanonicalType() == Canon;
-    });
+    bool AlreadyPresent =
+        std::any_of(Result.begin(), Result.end(), [&](const HType *Existing) {
+          return Existing == Member || Existing->getCanonicalType() == Canon;
+        });
     if (AlreadyPresent) {
       continue;
     }
@@ -583,7 +610,7 @@ HType *TypeBuilder::parsePrimitiveName(const std::string &Name,
     auto *ExistingDecl = Ctx.getDecl(TypedefName);
     TypedefDecl *Decl = nullptr;
     if (ExistingDecl != nullptr) {
-      Decl = llvm::dyn_cast<TypedefDecl>(ExistingDecl);
+      Decl = ExistingDecl->getAs<TypedefDecl>();
       assert(Decl != nullptr &&
              "semantic primitive typedef name collided with non-typedef decl");
     } else {
@@ -799,20 +826,20 @@ void TypeBuilder::rememberExactRecordLayout(
 
 HType *TypeBuilder::getFieldAddressValueTy(HType *FieldTy, bool IsCovariant) {
   assert(FieldTy != nullptr && "field type cannot be null");
-  if (auto *DPT = llvm::dyn_cast<ast::DualPointerType>(FieldTy)) {
+  if (auto *DPT = FieldTy->getAs<ast::DualPointerType>()) {
     if (DPT->getLoadType() == nullptr && DPT->getStoreType() == nullptr) {
       return getTopType(DPT->getAccessSize());
     }
     return chooseDualPointerFieldValueTy(DPT, IsCovariant);
   }
-  if (auto *Set = llvm::dyn_cast<ast::SetUnionType>(FieldTy)) {
+  if (auto *Set = FieldTy->getAs<ast::SetUnionType>()) {
     std::vector<HType *> Terms;
     for (auto *Term : Set->getTypes()) {
       Terms.push_back(getFieldAddressValueTy(Term, IsCovariant));
     }
     return Ctx.getSetUnionType(false, std::move(Terms));
   }
-  if (auto *Set = llvm::dyn_cast<ast::SetInterType>(FieldTy)) {
+  if (auto *Set = FieldTy->getAs<ast::SetInterType>()) {
     std::vector<HType *> Terms;
     for (auto *Term : Set->getTypes()) {
       Terms.push_back(getFieldAddressValueTy(Term, IsCovariant));
@@ -936,9 +963,9 @@ HType *TypeBuilder::convertStorageRecord(
     return Parts;
   };
 
-  auto describePathPart = [](llvm::StringRef Part) {
-    if (Part.consume_front("slot:")) {
-      return "slot " + Part.str();
+  auto describePathPart = [](std::string_view Part) {
+    if (consumeFront(Part, "slot:")) {
+      return "slot " + std::string(Part);
     }
     if (Part == "map") {
       return std::string("mapping");
@@ -976,18 +1003,18 @@ HType *TypeBuilder::convertStorageRecord(
     if (Part == "long_index") {
       return std::string("long bytes/string index");
     }
-    if (Part.consume_front("field@slot+")) {
-      return "field slot offset " + Part.str();
+    if (consumeFront(Part, "field@slot+")) {
+      return "field slot offset " + std::string(Part);
     }
-    if (Part.consume_front("packed@")) {
-      return "packed field bits " + Part.str();
+    if (consumeFront(Part, "packed@")) {
+      return "packed field bits " + std::string(Part);
     }
-    return Part.str();
+    return std::string(Part);
   };
 
-  auto describeStoragePath = [&](llvm::StringRef Path) {
+  auto describeStoragePath = [&](std::string_view Path) {
     std::vector<std::string> DescribedParts;
-    for (const auto &Part : splitPath(Path.str())) {
+    for (const auto &Part : splitPath(std::string(Path))) {
       if (!Part.empty()) {
         DescribedParts.push_back(describePathPart(Part));
       }
@@ -1010,14 +1037,14 @@ HType *TypeBuilder::convertStorageRecord(
     return "storage path: " + Path + " (" + Description + ")";
   };
 
-  auto storageFieldName = [](llvm::StringRef Part) {
-    if (Part.consume_front("slot:")) {
-      return "slot_" + Part.str();
+  auto storageFieldName = [](std::string_view Part) {
+    if (consumeFront(Part, "slot:")) {
+      return "slot_" + std::string(Part);
     }
-    if (Part.consume_front("field@slot+")) {
-      return "field_slot_" + Part.str();
+    if (consumeFront(Part, "field@slot+")) {
+      return "field_slot_" + std::string(Part);
     }
-    if (Part.consume_front("packed@")) {
+    if (consumeFront(Part, "packed@")) {
       std::string Name = "packed_";
       for (char C : Part) {
         Name += std::isalnum(static_cast<unsigned char>(C)) ? C : '_';
@@ -1178,8 +1205,8 @@ HType *TypeBuilder::convert(UTypePtr Ty) {
 
   // Cycles must be anchored by an explicit URecursiveType.
   if (InProgress.count(Ty)) {
-    llvm::errs() << "Unexpected recursive UType without URecursiveType: "
-                 << binarysub::printType(Ty) << "\n";
+    std::cerr << "Unexpected recursive UType without URecursiveType: "
+              << binarysub::printType(Ty) << "\n";
     assert(false &&
            "Unexpected recursive UType without explicit URecursiveType");
   }
@@ -1355,8 +1382,8 @@ HType *TypeBuilder::craftStruct(const std::vector<FieldEntry> &Fields,
   for (size_t i = 0; i < Fields.size(); i++) {
     auto &Ent = Fields[i];
     if (Ent.first.Size == 0) {
-      llvm::errs() << "Warning: Skip zero sized field at offset: "
-                   << Ent.first.Start << "\n";
+      std::cerr << "Warning: Skip zero sized field at offset: "
+                << Ent.first.Start << "\n";
       continue;
     }
     auto EffectiveRange = Ent.first;
@@ -1532,9 +1559,8 @@ HType *TypeBuilder::convertStruct(
   ConvertStructTraceDepthScope TraceDepthScope(ConvertStructTraceDepth);
 
   if (shouldTraceConvertStruct()) {
-    std::string Trace;
-    llvm::raw_string_ostream OS(Trace);
-    OS.indent(TraceDepth * 2);
+    std::ostringstream OS;
+    appendIndent(OS, TraceDepth * 2);
     OS << "[TypeBuilder::convertStruct] begin ";
     if (TraceDepth == 0) {
       OS << "root=";
@@ -1553,7 +1579,7 @@ HType *TypeBuilder::convertStruct(
       const auto &Ent = RawFields[I];
       int64_t AccessedBits = accessedPointeeSizeInBits(Ent.second);
       int64_t AccessedBytes = AccessedBits <= 0 ? 0 : (AccessedBits + 7) / 8;
-      OS.indent((TraceDepth + 1) * 2);
+      appendIndent(OS, (TraceDepth + 1) * 2);
       OS << "[" << I << "] range=" << Ent.first.str()
          << " offset=" << Ent.first.offset << " access=[";
       for (size_t J = 0; J < Ent.first.access.size(); ++J) {
@@ -1567,8 +1593,7 @@ HType *TypeBuilder::convertStruct(
          << " accessed_bytes=" << AccessedBytes
          << " utype=" << binarysub::printType(Ent.second) << "\n";
     }
-    OS.flush();
-    emitConvertStructTrace(Trace);
+    emitConvertStructTrace(OS.str());
   }
 
   std::vector<FieldEntry> Fields;
@@ -1867,7 +1892,7 @@ HType *TypeBuilder::convertStruct(
         Members.push_back(E1);
       }
       if (Members.empty()) {
-        llvm::errs() << "Warning: Empty union!\n";
+        std::cerr << "Warning: Empty union!\n";
       }
       Members = simplifyUnionMembers(Members);
       // push the merged union back to fields, and iterate again
@@ -1930,9 +1955,8 @@ HType *TypeBuilder::convertStruct(
   if (PointeeSize) {
     if (PointeeSize.value() < Size) {
       if (shouldTraceConvertStruct()) {
-        std::string Trace;
-        llvm::raw_string_ostream OS(Trace);
-        OS.indent(TraceDepth * 2);
+        std::ostringstream OS;
+        appendIndent(OS, TraceDepth * 2);
         OS << "[TypeBuilder::convertStruct] pointee/layout mismatch ";
         if (TraceDepth == 0) {
           OS << "root=";
@@ -1946,8 +1970,7 @@ HType *TypeBuilder::convertStruct(
            << " first_field_start=" << Fields.front().first.Start
            << " first_field_size=" << Fields.front().first.Size
            << " field_count=" << Fields.size() << "\n";
-        OS.flush();
-        emitConvertStructTrace(Trace);
+        emitConvertStructTrace(OS.str());
       }
       Size = PointeeSize.value();
     }
@@ -1956,7 +1979,7 @@ HType *TypeBuilder::convertStruct(
     }
   }
   if (Fields.empty()) {
-    llvm::errs() << "Warning: Empty struct!\n";
+    std::cerr << "Warning: Empty struct!\n";
   }
 
   Result = craftStruct(

@@ -241,14 +241,17 @@ void writeDebugImportantHTypes(llvm::StringRef DebugDir,
   }
   Out << "\n";
 
-  Out << "[storage]\n";
-  if (Result.StorageDecl != nullptr) {
-    Out << "decl => " << Formatter.formatDeclName(*Result.StorageDecl) << "\n";
+  if (Result.PrintEmptyStorageSection || Result.StorageDecl != nullptr ||
+      Result.StorageType != nullptr) {
+    Out << "[storage]\n";
+    if (Result.StorageDecl != nullptr) {
+      Out << "decl => " << Formatter.formatDeclName(*Result.StorageDecl) << "\n";
+    }
+    if (Result.StorageType != nullptr) {
+      Out << "type => " << Formatter.formatType(Result.StorageType) << "\n";
+    }
+    Out << "\n";
   }
-  if (Result.StorageType != nullptr) {
-    Out << "type => " << Formatter.formatType(Result.StorageType) << "\n";
-  }
-  Out << "\n";
 
   Out << "[functions]\n";
   for (const auto &Entry : Functions) {

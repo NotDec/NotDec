@@ -3,7 +3,7 @@
 
 #include "binarysub/binarysub.h"
 #include "notdec-llvm2c/Interface/HType.h"
-#include <llvm/IR/DataLayout.h>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
@@ -18,18 +18,17 @@ using notdec::ast::HTypeContext;
 
 struct TypeBuilderContext {
   HTypeContext &Ctx;
-  const llvm::DataLayout &DL;
-  // Stored in bytes to match DataLayout and memory ranges.
+  // Stored in bytes to match memory ranges.
   const unsigned PointerSize;
   const binarysub::StructMergeInfo *StructMerge;
   const std::map<std::string, std::vector<std::uint32_t>>
       *StructMergeRootGroups;
 
-  TypeBuilderContext(HTypeContext &Ctx, const llvm::DataLayout &DL,
+  TypeBuilderContext(HTypeContext &Ctx, unsigned PointerSizeBytes,
                      const binarysub::StructMergeInfo *StructMerge = nullptr,
                      const std::map<std::string, std::vector<std::uint32_t>>
                          *StructMergeRootGroups = nullptr)
-      : Ctx(Ctx), DL(DL), PointerSize(DL.getPointerSize()),
+      : Ctx(Ctx), PointerSize(PointerSizeBytes),
         StructMerge(StructMerge), StructMergeRootGroups(StructMergeRootGroups) {}
 };
 

@@ -193,7 +193,7 @@ struct ConstraintsGenerator {
       flushPointerDerivedTypeConstraints();
     }
   }
-  void genTypes(ast::HTypeContext &HCtx, const llvm::DataLayout &DL,
+  void genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
                 bool SolveGlobals = false);
   void releaseBinarysubState();
 
