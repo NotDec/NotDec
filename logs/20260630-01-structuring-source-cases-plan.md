@@ -578,3 +578,32 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 ```
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
+# 2026-06-30 实现记录：增加 continue 后不可达语句 oracle
+
+这轮扫描 12 个 source case 的当前输出，发现 `switch_continue_latch` 里有明确坏形状：
+
+```c
+continue;
+sink(...);
+```
+
+以及 `continue;` 后继续落到 label。其它 case 没有同类 `break` / `return` / `goto` 后接语句命中。这个问题仍属于 target-aware `continue` 和 switch/loop latch 语义，不适合靠文本 cleanup 硬修；本轮只把它收进全局 oracle，避免后续 xfail 掩盖新坏形状。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:14`：新增全局 `regex_absent`，禁止 `continue;` 后面继续出现可执行语句、`while`、`if`、`switch`、`do` 或 `goto`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:139`：`switch_continue_latch` 的 `xfail_exact` 新增 `unexpected pattern 'continue;`，只允许这个已知坏形状和原有 `goto<=0`、`while<=1` 失败。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-continue-oracle
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-continue-oracle --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
