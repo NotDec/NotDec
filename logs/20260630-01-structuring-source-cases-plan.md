@@ -194,3 +194,38 @@ python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structur
 结果：通过。`nested_loop_break_continue` 仍是 expected failure，当前输出指标为 `goto=3, break=3, continue=2, while=2, do=2`。
 
 本轮只改测试和 runner，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
+# 2026-06-30 实现记录：新增 guarded loop skip 小 case
+
+这轮继续把大 case 拆小，新增 `guarded_loop_skip`，专门覆盖入口 guard 直接跳过 loop 到后续块的形状。当前 SAILR 输出仍有 1 个 goto：
+
+```c
+if (n <= 0) {
+    goto structured_block_6;
+}
+do { ... } while (...);
+structured_block_6:
+```
+
+这个问题也出现在 `loop_break_continue`，但新 case 去掉了 break/continue，只留下 guard + loop + loop 后 sink/return，后续可以更集中地修。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/008_guarded_loop_skip.c:1`：新增外部 `next()` 调用，避免 clang `-O2` 把 loop 折成闭式表达式。
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/008_guarded_loop_skip.c:4`：新增 guarded loop source case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:89`：接入 `guarded_loop_skip`，期望 `goto<=0`，当前标为 xfail。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-guarded
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-guarded --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：通过。`guarded_loop_skip` 是 expected failure，当前输出指标为 `goto=1, break=0, continue=0, while=1, do=1`。
+
+本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
