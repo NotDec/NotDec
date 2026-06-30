@@ -6187,3 +6187,63 @@ body 里的第一个 label；`InfiniteLoop.Block` 只是代表 block，可能和
   没改 region/overlay 模型。
 - 维护成本：2/5。新增 helper 比较直接，但 `containsEnterableNode()` 的保守边界以后要
   跟新的结构化节点入口语义保持一致。
+
+# 2026-06-30 P1 nested sequence fallthrough 入口清理
+
+继续看 `/tmp/notdec-fortune-wasm-sailr-unreachable-clean.c`，剩余最明显模式是
+`goto structured_block_X;` 后面文本上紧跟 `structured_block_X:`。确认其中大量来自
+cleanup 只识别“下一个节点本身是 Label/loop”，没有识别“下一个节点是 Sequence，首个
+child 是 Label”的情况。
+
+## 修改位置
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2167`
+  - 在 `followingEntryBlock()` 中递归查看 `Sequence` 的首个 child，使
+    `dropGotoIntoFollowingNode()` 能把 `goto X; Sequence(Label X, ...)` 当成自然下落。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:202`
+  - 新增 `UnreachableSiblingStructurer`，让原有
+    `testPhoenixFallbackDropsUnreachableSiblingAfterGoto()` 真正通过 Phoenix fallback 路径
+    测 cleanup，而不是改了一个没有传入被测入口的临时 `MutableRegionGraph`。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:232`
+  - 新增 `NestedSequenceFallthroughStructurer`，构造 `goto 3` 后接
+    `Sequence(Label 3, BasicBlock 3)` 的回归形状。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14186`
+  - 修正 `testPhoenixFallbackDropsUnreachableSiblingAfterGoto()`，只验证 `goto` 后无入口
+    sibling 被删除，且非 fallthrough 的 `goto 4` 仍保留。
+- `external/NotDec-llvm2c/test/structuring/structuring_analysis_test.cpp:14206`
+  - 新增 `testPhoenixFallbackDropsGotoToNestedSequenceEntry()`，覆盖本次 nested sequence
+    入口清理。
+
+## 验证
+
+- `cmake --build ./build --target notdec-llvm2c notdec structuring-analysis-test -j4`
+  通过。
+- `./build/external/NotDec-llvm2c/bin/structuring-analysis-test`
+  通过；仍有 wasi target deprecated 警告。
+- main-only repro：
+  `./build/external/NotDec-llvm2c/bin/notdec-llvm2c --algo=structured-sailr /tmp/fortune-main-only.ll -o /tmp/fortune-main-only-sequence-entry.c --no-demote-ssa`
+  通过；相比 `/tmp/fortune-main-only-unreachable-clean.c`，`goto` 从 292 降到 238，
+  `goto-label-next` 从 106 降到 6。
+- 完整 wasm/TR fortune：
+  `/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/type-recovery/realworld/cases/fortune.o3.wasm.ll -o /tmp/notdec-fortune-wasm-sailr-sequence-entry.c --tr-level=2 --algo=structured-sailr --gen-work-dir --work-dir=/tmp/notdec-fortune-wasm-sailr-sequence-entry`
+  通过；`elapsed=180.82 user=203.57 sys=1.59 maxrss=1264560`。上一轮同口径
+  `unreachable-clean` 是 `elapsed=182.64 user=204.93 sys=1.70 maxrss=1270344`，
+  时间和 RSS 基本持平。
+- 额外试过“跳过空 label/空 basic block 前缀再找目标 label”的清理，完整 fortune
+  `goto` 和 `goto-label-next` 没有改善，已撤回，不提交。
+
+## 结果
+
+- 新完整结果：`/tmp/notdec-fortune-wasm-sailr-sequence-entry.c`。
+- 完整输出总 `goto` 从 417 降到 348。
+- 文本紧邻 `goto X; structured_block_X:` 行数从 144 降到 14，即实际从 72 处降到 7 处。
+- `if (...) { goto A; } goto B; structured_block_B:` 行数从 240 降到 25。
+- 剩余 7 处紧邻 label 主要是 `if (...) goto A; goto B; B:`，从文本看像 fallthrough，
+  但没有被同层 sequence cleanup 命中，可能来自 raw `If` 渲染或跨层树结构。继续修需要
+  先 dump/定位 StructuredTree 来源，不能按 C 文本直接删除。
+
+## 影响判断
+
+- 实现效果：4/5。总 `goto` 再降 69 个，最显眼的 `goto; label` 噪声基本清完。
+- 复杂度：1/5。生产代码只扩展现有入口识别，不改 CFG、region 或 overlay。
+- 维护成本：1/5。逻辑很窄，测试覆盖了真实 fallback 路径和 nested sequence 入口。
