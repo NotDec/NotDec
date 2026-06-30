@@ -611,6 +611,48 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。`switch_early_return` 当前指标为 `goto=2, break=3, continue=0, switch=1, while=0, do=0`。本轮只增加测试和 xfail，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：修 switch terminal case 死 break
+
+这轮修掉 `switch_early_return` 暴露的一个明确小 bug：`buildSwitchCaseBody()` 之前无条件给每个结构化 case 末尾追加 `break`，即使 case body 已经 `return`。结果会生成：
+
+```c
+case 0:
+  return x;
+  break;
+```
+
+修复后 terminal case 不再补 `break`。`switch_early_return` 仍保留 `goto<=0` xfail，因为 case 2/default 还会 goto 到共享尾部 label，这属于 switch shared tail 折叠问题，未在本轮处理。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:51`：新增 `endsWithUnconditionalRenderedTransfer()` 前置声明，供 switch case body 构造判断结构子树是否已经终止。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:467`：`buildSwitchCaseBody()` 新增 `NeedsBreak`，只在 case body 没有终止时追加 `break`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:478`：普通 case node 直接看 tail block terminator，`Return` / `Unreachable` 不再补 `break`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:166`：`switch_early_return` 的 `xfail_exact` 收紧为只允许 `expected goto<=0`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-return-break-fix2
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-return-break-fix2 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+/usr/bin/time -f '%e' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune-switch-terminal-case.c --algo=structured-sailr
+```
+
+结果：全部通过。fortune smoke 正常退出，耗时 `95.50s`，和之前 `94.59s/94.86s/96.64s` 同量级。
+
+评分：
+
+- 实现效果：7/10。修掉明确死 `break`，但 switch shared tail 的 goto 仍需后续专门处理。
+- 复杂度：2/10。只调整 switch case body 是否补 `break`。
+- 维护成本：2/10。规则和 C switch 语义直接对应，风险低。
+
 # 2026-06-30 实现记录：新增 loop switch shared latch 小 case
 
 这轮把 `nested_loop_switch` 和 `switch_continue_latch` 里的 switch/latch 问题继续拆小。新增 `loop_switch_shared_latch`，去掉 `continue`，只保留 loop header switch、多 case 写不同值、共享 `sink(total); --limit;` latch。当前输出仍有 4 个 goto：
