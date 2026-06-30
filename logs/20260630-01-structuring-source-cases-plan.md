@@ -276,6 +276,34 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：通过。`loop_switch_latch` 当前指标是 `goto=1, break=2, continue=3, switch=1, while=2, do=0`。本轮只改 manifest oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-06-30 实现记录：新增 loop two returns 小 case
+
+这轮继续把 `loop_switch_latch` 里的坏形状拆小。新增 `loop_two_returns`，只覆盖 loop 内 early return 和 loop 后 return。当前 SAILR 输出没有 goto，但出现连续 return：
+
+```c
+return *(int *)&total_0_reg2mem + 1;
+return total_0_reload;
+```
+
+这说明 return 后不可达语句可以独立复现，不必绑在 loop-switch-latch 的 switch/latch 问题里。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/010_loop_two_returns.c:1`：新增 loop 内 early return 的小 source case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:113`：接入 `loop_two_returns`，当前标为 xfail，只允许 return 后不可达语句这个已知失败。
+
+验证：
+
+```bash
+rm -rf /tmp/notdec-structuring-source-cases-loop-two-returns
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-loop-two-returns --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：通过。`loop_two_returns` 是 expected failure，当前指标是 `goto=0, break=2, continue=1, switch=0, while=1, do=1`。本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
 # 2026-06-30 实现记录：修 guarded loop skip cleanup
 
 这轮修掉 `guarded_loop_skip` 暴露的小问题。实际 tree 形状是：
