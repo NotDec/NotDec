@@ -1,6 +1,6 @@
 #include "notdec/TypeRecovery/mlsub/HTypeNormalize.h"
 
-#include "notdec-llvm2c/Interface/HType.h"
+#include "binarysub/HType.h"
 
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>

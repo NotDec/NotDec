@@ -8,7 +8,7 @@
 #include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
 #include "notdec-llvm2c/Interface.h"
-#include "notdec-llvm2c/Interface/HType.h"
+#include "binarysub/HType.h"
 #include "notdec-llvm2c/Utils.h"
 #include "notdec/TypeRecovery/mlsub/HTypeDebug.h"
 #include "notdec/TypeRecovery/mlsub/HTypeNormalize.h"
@@ -3171,7 +3171,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   }
 
   TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, &BulkResult.structMerge,
-                           &StructMergeRootGroups);
+                           &StructMergeRootGroups, notdec::getWorkDirOpt());
   TypeBuilder TB(TBCtx);
 
   auto convertSolvedType = [&](const PolarVar &Var, llvm::StringRef RootLabel) {

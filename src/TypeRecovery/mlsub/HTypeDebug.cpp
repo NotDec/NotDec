@@ -1,6 +1,6 @@
 #include "notdec/TypeRecovery/mlsub/HTypeDebug.h"
 
-#include "notdec-llvm2c/Interface/HType.h"
+#include "binarysub/HType.h"
 #include "notdec-llvm2c/Utils.h"
 
 #include <llvm/ADT/ArrayRef.h>

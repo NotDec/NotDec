@@ -1,7 +1,7 @@
 #include "TypeRecovery/mlsub/PNDiff.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/Utils.h"
-#include "notdec-llvm2c/Interface/Range.h"
+#include "binarysub/Range.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 #include <cassert>
 #include <cctype>

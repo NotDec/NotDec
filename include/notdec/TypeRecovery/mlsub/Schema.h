@@ -1,7 +1,7 @@
 #ifndef _BINARYSUB_SCHEMA_H_
 #define _BINARYSUB_SCHEMA_H_
 
-#include "notdec-llvm2c/Interface/Range.h"
+#include "binarysub/Range.h"
 #include <cassert>
 #include <cstdint>
 #include <llvm/ADT/SmallVector.h>

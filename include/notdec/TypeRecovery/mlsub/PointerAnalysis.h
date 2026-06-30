@@ -13,7 +13,7 @@
 #include <llvm/IR/Value.h>
 
 #include "notdec-llvm2c/Interface/ExtValuePtr.h"
-#include "notdec-llvm2c/Interface/Range.h"
+#include "binarysub/Range.h"
 #include "notdec/TypeRecovery/mlsub/PAPath.h"
 
 namespace notdec::mlsub {

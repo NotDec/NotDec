@@ -19,7 +19,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "Utils/DSUMap.h"
-#include "notdec-llvm2c/Interface/Range.h"
+#include "binarysub/Range.h"
 #include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #include "notdec/TypeRecovery/LowTy.h"
 
