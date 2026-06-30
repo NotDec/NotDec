@@ -203,6 +203,10 @@ option(NOTDEC_ENABLE_BINARYSUB_PARALLEL
 	"Enable oneTBB based parallel binarysub bulk simplifier." ON)
 # TODO add tests
 
+set(BINARYSUB_ENABLE_TBB_PARALLEL ${NOTDEC_ENABLE_BINARYSUB_PARALLEL}
+	CACHE BOOL "Enable oneTBB based parallel bulk simplifier" FORCE)
+add_subdirectory(external/binarysub)
+
 if (NOTDEC_ENABLE_WASM)
 	add_subdirectory(external/NotDec-wasm2llvm)
 	
@@ -214,10 +218,6 @@ if (NOTDEC_ENABLE_LLVM2C)
 	add_subdirectory(external/NotDec-llvm2c)
 	add_compile_definitions(NOTDEC_ENABLE_LLVM2C)
 endif ()
-
-set(BINARYSUB_ENABLE_TBB_PARALLEL ${NOTDEC_ENABLE_BINARYSUB_PARALLEL}
-	CACHE BOOL "Enable oneTBB based parallel bulk simplifier" FORCE)
-add_subdirectory(external/binarysub)
 
 include_directories(${PROJECT_SOURCE_DIR}/include/notdec)
 include_directories(${PROJECT_SOURCE_DIR}/include)
