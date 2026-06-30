@@ -98,3 +98,70 @@ ctest --test-dir build -R structuring-source-cases --output-on-failure
 - 实现效果：8/10。已经能驱动 SAILR 小步改进，并把当前 goto 数量固定下来。
 - 复杂度：3/10。一个 Python runner、一个 manifest、几个小 C 文件，理解成本低。
 - 维护成本：3/10。新增 case 只需要加 C 文件和 manifest oracle；风险主要是文本 oracle 后续需要收紧。
+
+# 2026-06-30 实现记录：修 source-cases 暴露的 loop structuring 问题
+
+这轮基于 5 个 source case 跑 SAILR，发现两个明确问题：
+
+- `loop_break_continue` 里结构树把已经结构化的 loop source 再包了一层 branch source rewrite，导致 do-while 后面出现回到 loop body 的尾巴。这个输出会把 `call < 0` 的早退 break 错接回循环，属于语义 bug。
+- `nested_loop_switch` 里入口 guard 没折成 `if (...) return;`，而是按 block id 把 return 放在 loop 前；同时 return 后还残留不可达语句。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1455`：`buildVirtualizedBranchSource()` 遇到 source 已经包含 structured loop 时，不再额外生成 branch fallback，避免 loop 后重复补回跳。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:1804`：`rewriteLoopSuccessorExits()` 成功把 loop successor exit 重写成 `break` 后，同步 virtualize graph edge 并 detach overlay edge。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2205`：`endsWithUnconditionalRenderedTransfer()` 把 `Return` / `Unreachable` 也视为无条件结束，并识别 then/else 都结束的 `if`，用于删除后续死 `break`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2219`：`containsEnterableNode()` 只把被控制转移命中的 label 视为可进入，避免 return 后未命中 label 阻止不可达清理。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2296`：`dropGotoIntoFollowingNode()` 对 `if` 分支跳到下一块的情况删除该分支，让它自然 fallthrough。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2381`：新增 `collectGotoTargets()`，递归收集 tree 内真实控制转移目标，避免删掉 loop 内仍被 if/goto 命中的 label。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2434`：新增 `foldGuardedTerminalIntoSequence()`，把 `if goto return-block; goto loop-entry; label return-block; return; loop` 折成 guard return + 后续 loop；折叠前要求 terminal label 只有一个控制转移引用。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2571`、`:2693`：fold 和 cleanup 先复制子节点列表/结构节点再 `addNode()`，避免 `StructuredTree` vector 扩容后引用失效。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2688`：`cleanupStructuredGotos()` 接入 guarded terminal fold。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3368`：do-while 只在 while follow 找不到、但 do-while follow 明确时优先，避免错误偏向 do-while。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:166`：新增 `RenderContext`，只在真实 loop/switch 上下文里渲染 `break` / `continue`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:542`：`collectGotoTargets()` 对上下文外的 `break` / `continue` 收集 label，保证后续降级为 goto 时 label 会输出。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:733`：上下文外的 `break` / `continue` 降级为 `goto target`，避免函数体顶层输出非法 `continue;`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:7`：新增 bad-pattern oracle，禁止顶层 `break;` / `continue;` 和 return 后不可达语句。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:31`、`:66`：收紧 `loop_break_continue` 的 goto 上限到 1，`nested_loop_switch` 的 goto 上限到 2。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。
+
+当前输出指标：
+
+| case | goto | break | continue | switch | while | do |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| diamond_if_else | 0 | 0 | 0 | 0 | 0 | 0 |
+| loop_break_continue | 1 | 2 | 1 | 0 | 1 | 1 |
+| switch_cluster | 0 | 4 | 0 | 1 | 0 | 0 |
+| tail_merge_return | 0 | 0 | 0 | 0 | 0 | 0 |
+| nested_loop_switch | 2 | 1 | 1 | 1 | 1 | 1 |
+
+仍保留的问题：`nested_loop_switch` 的两个 goto 来自 switch case body 被留在 switch 后面的标签区。要继续降到 0，需要专门做 loop-header switch 的 case body 折叠或复制，不能和这次的线性 cleanup 混在一起。
+
+fortune 后端 smoke：
+
+```bash
+/usr/bin/time -f '%e' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune-source-cases-smoke.c --algo=structured-sailr
+```
+
+三次早期同口径运行：95.94s、95.83s、96.03s。修掉 cleanup 引用失效后复跑一次：97.20s，正常退出。
+
+评分：
+
+- 实现效果：8/10。修掉两个明确坏形状，`loop_break_continue` 降到 1 个 goto，`nested_loop_switch` 降到 2 个 goto。
+- 复杂度：5/10。新增 cleanup fold 和 renderer 上下文，范围不大但要维护 tree 语义。
+- 维护成本：5/10。后续如果加入 CFG 级 oracle，需要把这些 cleanup 规则再做更系统的 reachability 检查。
