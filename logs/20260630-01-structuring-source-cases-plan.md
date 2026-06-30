@@ -283,3 +283,41 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 - 实现效果：8/10。修掉一个独立 xfail，并顺带把 `loop_break_continue` 降到 0 个 goto。
 - 复杂度：4/10。只是 cleanup 的一个窄 fold，但要注意 `StructuredTree` 扩容后的指针失效。
 - 维护成本：4/10。规则匹配严格，后续如果做 CFG 级 oracle，可以用它覆盖更多 skip-loop 形状。
+
+# 2026-06-30 实现记录：新增 loop switch latch 小 case
+
+这轮继续拆 `nested_loop_switch` 的剩余 goto。新增 `loop_switch_latch`，去掉 `sink()` 和额外 tail merge，只保留 loop header switch、case 0 continue、case 1 走共享 latch、default return。
+
+当前输出还有 1 个 goto，并且出现 return 后再落到 label 的坏形状：
+
+```c
+if (limit_addr_09_reload <= 1) {
+    goto structured_block_7;
+}
+...
+return add;
+structured_block_7:
+return *(int *)&total_0_ph14_reg2mem;
+```
+
+这个 case 说明 `nested_loop_switch` 不是单纯文本 cleanup。要把 switch case 的 goto 降掉，通常需要把共享 latch 复制进 case body；但复制后 case body 里的 `break` 必须表示跳出外层 loop，而不是跳出 switch。当前 renderer 对 `break` / `continue` 只看是否处于 switch/loop 上下文，没有按目标块区分，所以这轮不直接改算法。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/009_loop_switch_latch.c:1`：新增最小 loop-switch-latch source case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:98`：接入 `loop_switch_latch`，期望 `goto<=0`，当前标为 xfail，匹配已知的 goto 和 return 后 label 坏形状。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-loop-switch-latch
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-loop-switch-latch --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：通过。`loop_switch_latch` 是 expected failure，当前输出指标为 `goto=1, break=2, continue=3, switch=1, while=2, do=0`。
+
+本轮只增加测试和已知失败记录，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
