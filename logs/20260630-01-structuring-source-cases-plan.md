@@ -165,3 +165,32 @@ fortune 后端 smoke：
 - 实现效果：8/10。修掉两个明确坏形状，`loop_break_continue` 降到 1 个 goto，`nested_loop_switch` 降到 2 个 goto。
 - 复杂度：5/10。新增 cleanup fold 和 renderer 上下文，范围不大但要维护 tree 语义。
 - 维护成本：5/10。后续如果加入 CFG 级 oracle，需要把这些 cleanup 规则再做更系统的 reachability 检查。
+
+# 2026-06-30 实现记录：继续增加 source case 和 xfail 记录
+
+这轮继续按“小源码 case 驱动”的方式推进，新增两个 case：
+
+- `early_return_chain`：覆盖连续 guard return。当前 SAILR 输出 0 个 goto，作为通过 case 固定下来。
+- `nested_loop_break_continue`：覆盖外层 loop 内嵌内层 loop，内层有 break/continue，外层 latch 在内层之后。当前 SAILR 把内层 loop 拆到外层 loop 外面，输出 3 个 goto，并把外层 latch 放到 `break/continue` 后面的不可达位置。这是明确坏形状，但修复涉及 loop region/overlay 归约顺序，先作为 xfail 记录，不在本轮硬改。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/006_early_return_chain.c:3`：新增连续 early return case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/007_nested_loop_break_continue.c:4`：新增嵌套 loop break/continue case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py:198`：支持 `xfail` 和 `xfail_contains`；只有所有失败都匹配已知失败文本时才算 expected failure，意外通过会报错。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:70`：接入 `early_return_chain`，要求 `goto<=0`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:78`：接入 `nested_loop_break_continue`，严格要求 `goto<=0`，当前标为 xfail，等待后续专门修 loop 嵌套归约。
+
+验证：
+
+```bash
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-goal
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-goal --keep-work-dir
+```
+
+结果：通过。`nested_loop_break_continue` 仍是 expected failure，当前输出指标为 `goto=3, break=3, continue=2, while=2, do=2`。
+
+本轮只改测试和 runner，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
