@@ -487,3 +487,43 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 - 实现效果：8/10。修掉两个明确 xfail，且没有引入新 goto。
 - 复杂度：5/10。需要把 loop follow target 传到 renderer，但没有改 region 识别和复制策略。
 - 维护成本：5/10。后续如果支持非 return 的 targeted break，还需要更完整的 target-aware control transfer；当前只处理明确 return terminal。
+
+# 2026-06-30 实现记录：内联 goto 到 return terminal
+
+这轮继续收窄 `loop_switch_latch` 的 xfail。上一轮 targeted `break` 已能内联 return，但普通 `goto` 到 return terminal 仍会生成 label，导致 `loop_switch_latch` 同时触发 goto、return 后 label、while 过多三个失败。
+
+这次只复用已有 `renderTargetedTerminal()`，让 renderer 遇到 `Goto` 指向 return terminal block 时直接输出 return；label 收集也跳过这种可内联目标。没有改 SAILR region 归约。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:554`：`collectGotoTargets()` 对可内联 return terminal 的 `Goto` 不再收集 label。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:743`：`Goto` 渲染先尝试 `renderTargetedTerminal()`，失败时才输出 `goto label`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:102`：把 `loop_switch_latch` 的 `xfail_exact` 收紧为只允许 `expected while<=1`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-goto-return2
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-goto-return2 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+/usr/bin/time -f '%e' ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
+  -o /tmp/fortune-goto-return.c --algo=structured-sailr
+```
+
+结果：全部通过。fortune smoke 正常退出，耗时 `96.64s`，仍在之前 `94.59s/94.86s/95.94s/95.83s/96.03s/97.20s` 范围内。
+
+当前影响：
+
+- `loop_switch_latch`：`goto=0`，不再触发 return 后 label，只剩 `while=2` 的 expected failure。
+- `nested_loop_break_continue`：`goto` 从 3 降到 2，但结构仍明显不对，继续保留 xfail。
+
+评分：
+
+- 实现效果：7/10。减少了明确无用 goto，并收紧了 xfail。
+- 复杂度：2/10。只复用已有 terminal return 内联逻辑。
+- 维护成本：3/10。只处理 return terminal，不扩展非 terminal goto。
