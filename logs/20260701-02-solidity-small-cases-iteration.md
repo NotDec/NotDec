@@ -759,3 +759,49 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.13 user=35.53 sys=0.76 maxrss=985772`。
+
+## 2026-07-01：return uint exponent lhs expression
+
+问题：
+
+`return_uint_exp_lhs_expr_01` 的源码语义是 `return (base ** exponent) ** outer;`。Solidity 的 `**` 是右结合，修复前 `formatReturnValue()` 没有给左侧同优先级 `**` 子表达式加括号，错误打印成 `return arg0 ** arg1 ** arg2;`，语义会变成 `arg0 ** (arg1 ** arg2)`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:396) 新增 `leftOperandNeedsSamePrecedenceParentheses()`，把 `**` 的左操作数标记为同优先级需要括号。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:400) 调整 `needsParentheses()`，支持左、右操作数分别传入同优先级括号规则。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:409) 扩展 `formatReturnValue()`，格式化二元表达式和 EVM helper 时也把左操作数规则传给子表达式。
+- [test/evm/solidity-source/cases/return_uint_exp_lhs_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_exp_lhs_expr_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_exp_lhs_expr_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_exp_lhs_expr_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_exp_lhs_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_exp_lhs_expr_01.sol:1) 固化输出，函数体包含 `return (arg0 ** arg1) ** arg2;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:110) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_exp_lhs_expr_01.ll -o /tmp/return_uint_exp_lhs_expr_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_exp_lhs_expr_01.ll -o /tmp/return_uint_exp_lhs_expr_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-exp-lhs-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_exp_lhs_expr_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function explhs(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return (arg0 ** arg1) ** arg2;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 2.30 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.79 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.08 user=34.39 sys=0.70 maxrss=983276`。
