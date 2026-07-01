@@ -70,6 +70,12 @@
       "source": "cases/return_uint_and_args_01.sol",
       "input": "ir/return_uint_and_args_01.ll",
       "expected": "expected/return_uint_and_args_01.sol"
+    },
+    {
+      "name": "return_uint_or_args_01",
+      "source": "cases/return_uint_or_args_01.sol",
+      "input": "ir/return_uint_or_args_01.ll",
+      "expected": "expected/return_uint_or_args_01.sol"
     }
   ]
 }
