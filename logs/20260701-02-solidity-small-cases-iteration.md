@@ -2505,3 +2505,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.29 user=34.49 sys=0.71 maxrss=985784`。
+
+## 2026-07-01：return bool and or lt uint
+
+问题：
+
+`return_bool_and_or_lt_uint_01` 的源码语义是 `return a < b && (c < d || e < f);`。这是对 `&&` 右侧嵌套 `||` 时括号保留的打印回归，如果少了括号，Solidity 语义会变成 `(a < b && c < d) || e < f`。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_bool_and_or_lt_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_and_or_lt_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `mixed()` 使用六个 `uint256` 参数，第 6 行返回一个 `<` 比较和两个 `<` 比较析取的 `&&`。
+- [test/evm/solidity-source/ir/return_bool_and_or_lt_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_and_or_lt_uint_01.ll:8) 新增冻结 IR，`public_mixed_uint256_uint256_uint256_uint256_uint256_uint256__0x2a()` 第 10-15 行用三个 `icmp ult`、一个 `or i1`、一个 `and i1` 和 `zext` 表示 bool 返回。
+- [test/evm/solidity-source/expected/return_bool_and_or_lt_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_and_or_lt_uint_01.sol:1) 固化输出，第 4 行为 `return arg0 < arg1 && (arg2 < arg3 || arg4 < arg5);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:297) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_and_or_lt_uint_01.ll -o /tmp/return_bool_and_or_lt_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_and_or_lt_uint_01.ll -o /tmp/return_bool_and_or_lt_uint_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-and-or-lt-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_and_or_lt_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function mixed(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3, uint256 arg4, uint256 arg5) public returns (bool ret0) {
+        // block_0:
+        return arg0 < arg1 && (arg2 < arg3 || arg4 < arg5);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 7.17 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.85 user=33.94 sys=0.74 maxrss=981864`。
