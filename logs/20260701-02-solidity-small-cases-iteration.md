@@ -32,6 +32,11 @@
 6. 跑 `notdec.evm.solidity_source`。影响 Solidity/storage rewrite 时，再跑 `notdec.evm.solidity_rewrite` 和 EVM 性能 smoke。
 7. 在本文件追加实现记录，写清楚改了哪里、验证命令和结果。
 
+现在优先从 apehex 数据集推进真实小合约。先用脚本筛出有源码的 Solidity 合约，
+按 runtime bytecode 字节数从小到大排序；再人工跳过 proxy、Vyper、源码和 runtime
+明显不对应的样例。只有生成 IR、检查 NotDec 输出后，才把源码、bytecode、IR 和
+expected 纳入本 suite。
+
 ## 接受标准
 
 - expected 不能只是“当前烂输出截图”。必须比修复前更接近源码语义。
@@ -3022,3 +3027,26 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.47 user=34.34 sys=0.67 maxrss=983916`。
+
+## 2026-07-01：apehex source-backed candidate flow
+
+问题：
+
+手写小例子推进太慢，需要改成从 apehex 有源码数据集中按 runtime bytecode 大小排序，从小到大挑真实合约纳入测试。
+
+改动：
+
+- [scripts/apehex-solidity-source-candidates.py](/sn640/NotDec/scripts/apehex-solidity-source-candidates.py:1) 新增候选筛选脚本，默认读取 `hex/ethereum/cleaned`，过滤 Solidity-looking source，按 runtime bytecode 大小排序并可导出候选源码、runtime 和 metadata。
+- [test/evm/solidity-source/README.md](/sn640/NotDec/test/evm/solidity-source/README.md:13) 增加 apehex 候选筛选命令和纳入规则。
+- 没有把最小 apehex 候选接入 `notdec.evm.solidity_source`。该候选是 constructor-only 合约，runtime IR 只包含 fallback/revert；creation IR 虽然包含 `setApprovalForAll(address,bool)` 调用，但当前 Solidity backend 还不能把 creation-code 形状打印成 constructor。
+
+验证：
+
+```bash
+python3 scripts/apehex-solidity-source-candidates.py --limit 30 --output /tmp/apehex-solidity-candidates.csv --export-dir /tmp/apehex-solidity-candidates
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+```
+
+结果：
+
+候选脚本输出的第一行来自 `hex/ethereum/cleaned/0070.parquet` 第 388 行，主源码是 constructor-only `Depositor`，runtime 21 bytes。这个样例暂时只作为候选，不固化为 expected。`notdec.evm.solidity_source` 通过，用时 9.14 秒。

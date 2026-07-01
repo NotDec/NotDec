@@ -46,3 +46,4 @@ build-main-no-llvm2c/
 build-evm2llvm/
 build-*/
 test-near/
+binarysub-private/

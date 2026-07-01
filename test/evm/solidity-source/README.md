@@ -10,6 +10,21 @@ Default CTest runs the stable part of the chain:
 ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
 ```
 
+Apehex source-backed candidates should be picked from smaller runtime bytecode
+to larger contracts:
+
+```bash
+python3 scripts/apehex-solidity-source-candidates.py \
+  --limit 30 \
+  --output /tmp/apehex-solidity-candidates.csv \
+  --export-dir /tmp/apehex-solidity-candidates
+```
+
+The script defaults to `/sn640/NotDecChainExp/apehex_evm_contracts`, reads
+`hex/ethereum/cleaned`, keeps Solidity-looking sources, deduplicates runtime
+bytecode, and sorts by `runtime_bytes`.  The exported files are only a staging
+area.  Promote a case here after its IR and NotDec output have been checked.
+
 Each case keeps the source-level evidence and the frozen input separately:
 
 - `cases/`: small Solidity source used to explain the case.
@@ -35,4 +50,3 @@ python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py \
 ./build/bin/notdec test/evm/solidity-source/ir/<case>.ll \
   -o /tmp/<case>.sol --tr-level=2
 ```
-
