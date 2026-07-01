@@ -442,3 +442,48 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=31.03 user=35.51 sys=0.79 maxrss=956816`。
+
+## 2026-07-01：return uint bitwise and
+
+问题：
+
+`return_uint_and_args_01` 的源码语义是 `return left & right;`。冻结 IR 里 EVM `AND` 已经是 LLVM 原生 `and i256`。修复前 `formatReturnValue()` 只认识 `add/sub/mul`，所以只能打印 `return masked;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:305) 扩展 `binaryOperatorText()`，把 `llvm::Instruction::And` 打印成 Solidity `&`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:320) 扩展 `binaryOperatorPrecedence()`，给 `&` 设置比加减更低的优先级。
+- [test/evm/solidity-source/cases/return_uint_and_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_and_args_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_and_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_and_args_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_and_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_and_args_01.sol:1) 固化输出，函数体包含 `return arg0 & arg1;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:68) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_and_args_01.ll -o /tmp/return_uint_and_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_and_args_01.ll -o /tmp/return_uint_and_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-and-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_and_args_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function bitand(uint256 arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 & arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 1.47 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.94 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.87 user=34.00 sys=0.70 maxrss=983332`。
