@@ -1512,3 +1512,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=31.07 user=35.20 sys=0.75 maxrss=982644`。
+
+## 2026-07-01：return uint add lhs mulmod
+
+问题：
+
+`return_uint_add_lhs_mulmod_01` 的源码语义是 `return mulmod(left, right, modulus) + base;`。前面已经固化了 `mulmod` 作为加法右操作数，这里补左操作数方向，确认函数调用表达式不会退回临时变量。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_add_lhs_mulmod_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_add_lhs_mulmod_01.sol:1) 新增源码证据，源码第 6 行包含 `return mulmod(left, right, modulus) + base;`。
+- [test/evm/solidity-source/ir/return_uint_add_lhs_mulmod_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_add_lhs_mulmod_01.ll:9) 新增冻结 IR，`public_addlhsmulmod_uint256_uint256_uint256_uint256__0x2a()` 先调用 `evm_mulmod`，再执行 `add`。
+- [test/evm/solidity-source/expected/return_uint_add_lhs_mulmod_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_add_lhs_mulmod_01.sol:1) 固化输出，函数体包含 `return mulmod(arg0, arg1, arg2) + arg3;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:218) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_add_lhs_mulmod_01.ll -o /tmp/return_uint_add_lhs_mulmod_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_add_lhs_mulmod_01.ll -o /tmp/return_uint_add_lhs_mulmod_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-add-lhs-mulmod-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_add_lhs_mulmod_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function addlhsmulmod(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) public returns (uint256 ret0) {
+        // block_0:
+        return mulmod(arg0, arg1, arg2) + arg3;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 4.47 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.47 user=34.58 sys=0.70 maxrss=982064`。
