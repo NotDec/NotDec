@@ -231,6 +231,34 @@ cmake --build ./build --target notdec -j4
 
 - `test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll` 跑通，`/usr/bin/time` 记录 `elapsed=23.09 user=27.17 sys=0.69 maxrss=994536`。
 
+## 实现记录：Solidity AST 最小骨架
+
+本次按小用例驱动先拆出 AST 目录，不扩大恢复规则。当前 `empty_runtime`
+输出不变，但 Reader/Printer 已经不再直接共享 `vector<string>` 作为函数体模型。
+
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h:10) 新增最小 AST/type 结构：`TypeRef`、`Parameter`、`StateVariable`、`EventDecl`、`RawStatement`、`Statement`、`Block`、`Function`、`Contract`、`SourceUnit`。设计上只保存反编译输出能确定的类型文本和语句节点，暂不复刻 solc 的完整 type checker annotation。
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/Ast.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/Ast.h:4) 改成兼容转发到新的 `Solidity/AST/Nodes.h`。
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/Reader.h:24) 和 [Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:132) 把 `readBody()` 返回值改为 `Block`，并把现有 `BodyBuilder::readBody()` 结果包成 `RawStatement`。`readStateVariables()`、`readReturns()`、`parseAbiParameters()` 分别在 [Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:109)、[Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:174)、[Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:240) 改为填 `TypeRef`。
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/Printer.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/Printer.h:24) 和 [Printer.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Printer.cpp:82) 新增 `printBlock()`、`printStatement()`、`printRawStatement()`、`printType()`，函数体打印从遍历字符串改为遍历 AST statement。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-backend-solidity -j4
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-ast-smoke.sol --tr-level=2
+```
+
+结果：前四条通过，`solidity_source` 用时 0.15 秒，`solidity_rewrite` 用时 101.42 秒。最后一条大 EVM smoke 在当前工作树触发 ASan，栈在 `lib/Structuring/PhoenixStructurer.cpp` 路径，21.17 秒失败；这次 AST 改动没有碰 structuring 代码，且当前子模块还有未暂存的 structuring 相关本地改动，后续应先处理或隔离后再取同口径性能数。
+
+影响评分：
+
+- 实现效果：7/10。先建立了可扩展 AST/type 落点，当前小用例输出保持稳定。
+- 理解成本：3/10。只新增一个 `AST/Nodes.h`，旧 include 保持可用。
+- 维护成本：3/10。`RawStatement` 明确是过渡层，后续每个小用例可以逐步替换成真实 statement/expr 节点。
+
 ## 实现记录：revert string 语句打印
 
 `revert_error_string_01.ll` 里的字符串没有完全丢。原始 IR 里 `run()` 先写入
