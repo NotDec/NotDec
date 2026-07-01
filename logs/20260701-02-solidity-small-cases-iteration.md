@@ -2423,3 +2423,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.96 user=33.94 sys=0.75 maxrss=984648`。
+
+## 2026-07-01：return bool outside range uint
+
+问题：
+
+`return_bool_outside_range_uint_01` 的源码语义是 `return value < lower || upper < value;`。这是对多个无符号比较通过 `i1 or` 组合时的打印回归，确认比较优先级和 Solidity `||` 输出稳定。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_bool_outside_range_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_outside_range_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `outside()` 使用三个 `uint256` 参数，第 6 行返回两个 `<` 比较的 `||`。
+- [test/evm/solidity-source/ir/return_bool_outside_range_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_outside_range_uint_01.ll:8) 新增冻结 IR，`public_outside_uint256_uint256_uint256__0x2a()` 第 10-13 行用两个 `icmp ult`、一个 `or i1` 和 `zext` 表示 bool 返回。
+- [test/evm/solidity-source/expected/return_bool_outside_range_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_outside_range_uint_01.sol:1) 固化输出，第 4 行为 `return arg0 < arg1 || arg2 < arg0;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:285) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_outside_range_uint_01.ll -o /tmp/return_bool_outside_range_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_outside_range_uint_01.ll -o /tmp/return_bool_outside_range_uint_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-outside-range-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_outside_range_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function outside(uint256 arg0, uint256 arg1, uint256 arg2) public returns (bool ret0) {
+        // block_0:
+        return arg0 < arg1 || arg2 < arg0;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 6.99 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.70 user=33.81 sys=0.71 maxrss=984056`。
