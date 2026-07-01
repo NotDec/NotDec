@@ -3212,3 +3212,51 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.05 user=35.35 sys=0.69 maxrss=985772`。
+
+## 2026-07-01：apehex empty public function runtime case
+
+问题：
+
+apehex 候选里 `ThreeBlindMice.threeEyedMan()` 是一个很小的 runtime bytecode 真实源码样例，源码语义是空 external 函数。当前输出已经能保留一个空 public selector 函数和 fallback revert，这次只固化这个真实样例。
+
+改动：
+
+- [test/evm/solidity-source/cases/apehex_empty_public_function_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_empty_public_function_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0083.parquet` 第 834 行，runtime 109 bytes。
+- [test/evm/solidity-source/bytecode/apehex_empty_public_function_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_empty_public_function_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_empty_public_function_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_empty_public_function_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_empty_public_function_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_empty_public_function_01.sol:1) 固化当前输出，包含空 selector 函数和 fallback revert。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:450) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/notdec-apehex-empty-public/runtime.hex -o /tmp/notdec-apehex-empty-public/empty_public.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-empty-public
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_empty_public_function_01.ll -o /tmp/apehex_empty_public_function_01.bc
+./build/bin/notdec /tmp/notdec-apehex-empty-public/empty_public.ll -o /tmp/notdec-apehex-empty-public/empty_public.before.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-empty-public-function-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_empty_public_function_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function public_0xf69cd2d2() public {
+        // block_0:
+    }
+
+    function fallback() public {
+        // block_0:
+        revert(); // empty
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 9.53 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.10 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.41 user=33.72 sys=0.61 maxrss=983128`。
