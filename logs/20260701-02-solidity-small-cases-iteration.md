@@ -2940,3 +2940,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.61 user=34.70 sys=0.78 maxrss=957764`。
+
+## 2026-07-01：return int signextend16 cast coverage
+
+问题：
+
+上一轮已经把 `evm_signextend(N, value)` 泛化打印成 `intM(value)`，但自动测试只覆盖了 byte index `0`，也就是 `int8(value)`。这次用 byte index `1` 的最小例子覆盖 `uint16 -> int16`，确认 `evmSignExtendType()` 的位宽计算不是只对 `int8` 生效。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_int_signextend16_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_int_signextend16_01.sol:1) 新增源码证据，源码第 5 行函数 `signextend16()` 返回 `int16(value)`。
+- [test/evm/solidity-source/ir/return_int_signextend16_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_int_signextend16_01.ll:1) 新增冻结 IR，核心是第 11 行 `evm_signextend(1, arg0)` 后单 word return。
+- [test/evm/solidity-source/expected/return_int_signextend16_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_int_signextend16_01.sol:1) 固化输出，函数体包含 `return int16(arg0);`，返回类型是 `int16 ret0`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:81) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_int_signextend16_01.ll -o /tmp/return_int_signextend16_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_int_signextend16_01.ll -o /tmp/return_int_signextend16_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-signextend16-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_int_signextend16_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function signextend16(uint16 arg0) public returns (int16 ret0) {
+        // block_0:
+        return int16(arg0);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 8.45 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.74 user=34.72 sys=0.78 maxrss=983008`。
