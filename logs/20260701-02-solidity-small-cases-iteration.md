@@ -3363,3 +3363,58 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.53 user=33.62 sys=0.71 maxrss=983160`。
+
+## 2026-07-01：apehex blob basefee runtime case
+
+问题：
+
+apehex 候选里 `A.getBlobBaseFeeYul()` / `A.getBlobBaseFeeSolidity()` 是一个很小的 runtime bytecode 真实源码样例，两个函数都返回 Cancun `BLOBBASEFEE` 语义。当前 Solidity backend 只把 `evm_basefee` 打成 `block.basefee`，`evm_blobbasefee` 仍直接露出 runtime helper 名，这次只补这个环境内建表达式映射，并固化真实样例。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:313) 在 `evmEnvBuiltinName` 里新增 `evm_blobbasefee -> block.blobbasefee`。
+- [test/evm/solidity-source/cases/apehex_blob_basefee_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_blob_basefee_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0022.parquet` 第 307 行，runtime 217 bytes。
+- [test/evm/solidity-source/bytecode/apehex_blob_basefee_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_blob_basefee_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_blob_basefee_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_blob_basefee_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_blob_basefee_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_blob_basefee_01.sol:1) 固化当前输出，两个 selector 都返回 `block.blobbasefee`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:471) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/apehex-solidity-candidates-round5/0236_19706127_98a1bbed64_12ac6fda0b0d/runtime.hex -o /tmp/notdec-apehex_blob_basefee_01/apehex_blob_basefee_01.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-apehex_blob_basefee_01
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_blob_basefee_01.ll -o /tmp/apehex_blob_basefee_01.bc
+./build/bin/notdec /tmp/notdec-apehex_blob_basefee_01/apehex_blob_basefee_01.ll -o /tmp/notdec-apehex_blob_basefee_01/apehex_blob_basefee_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-blob-basefee-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_blob_basefee_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function public_0x48a35d4e() public returns (uint256 ret0) {
+        // block_0:
+        return block.blobbasefee;
+    }
+
+    function public_0x5b85fe98() public returns (uint256 ret0) {
+        // block_0:
+        return block.blobbasefee;
+    }
+
+    function fallback() public {
+        // block_0:
+        revert(); // empty
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 10.41 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.25 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.67 user=33.88 sys=0.78 maxrss=983452`。

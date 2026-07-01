@@ -466,6 +466,13 @@
       "bytecode": "bytecode/apehex_usdc_rate_provider_01.hex",
       "input": "ir/apehex_usdc_rate_provider_01.ll",
       "expected": "expected/apehex_usdc_rate_provider_01.sol"
+    },
+    {
+      "name": "apehex_blob_basefee_01",
+      "source": "cases/apehex_blob_basefee_01.sol",
+      "bytecode": "bytecode/apehex_blob_basefee_01.hex",
+      "input": "ir/apehex_blob_basefee_01.ll",
+      "expected": "expected/apehex_blob_basefee_01.sol"
     }
   ]
 }
