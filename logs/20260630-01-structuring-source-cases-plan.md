@@ -1066,6 +1066,39 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过，CTest 5 个测试用时 4.64s。按用户要求，这轮不跑 fortune 时间 smoke。
 
+# 2026-07-01 实现记录：折叠 switch goto latch
+
+这轮继续处理 `switch_continue_latch`。当前坏形状是 `case 0` 先 `goto` 到 switch 后面的 label，label 后面其实是这个 case 自己的 latch，然后再 `continue`。这个形状可以用很窄的 renderer 后处理修掉：只在 switch 内唯一 goto 指向紧随 switch tail 里的 label，且这个 label 只有这一个 goto 入口时，把 label 后面的 tail 移回对应 case。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:915`：新增 `countGotoTargets()`，折叠前确认目标 label 只有一个 goto 入口。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:971`：新增 `collectTopLevelSingleGotoCases()`，只收当前 switch 顶层 case/default，避免误用嵌套 switch 的 goto。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:1075`：在 `foldSwitchContinueLatchIntoCase()` 里新增 goto-label-tail 分支，把 label 后面的 latch 移入唯一 goto case，并去掉多余内层 `while (1)`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:133`：收紧 `switch_continue_latch` 的 `xfail_exact`，只保留函数体缺少 `sink(total)` 这个真实剩余问题。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-goto-latch
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-goto-latch --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+git -C external/NotDec-llvm2c diff --check
+```
+
+结果：全部通过，CTest 5 个测试用时 4.63s。按用户最新要求，这轮不跑 fortune 时间 smoke。
+
+`switch_continue_latch` 当前输出为 `goto=0`、`while=1`，但函数体仍缺少 `sink(total)`，所以继续保留 xfail。`nested_loop_break_continue` 仍是原来的 `goto structured_block_3` 已知 xfail，没有回退。
+
+评分：
+
+- 实现效果：7/10。明确去掉一个小 case 里的 goto 和多余 while，但没有解决 `sink` 缺失。
+- 复杂度：5/10。仍是 renderer 末端窄规则，新增了两个保护条件，避免误折叠嵌套 switch 或多入口 label。
+- 维护成本：5/10。后续更好的位置仍可能是结构树层；当前规则先把小 case 锁住，避免扩大改动。
+
 本轮试过两个算法方向但没有落代码：一是给 renderer 加精确 `ContinueTarget`，会把多个已有正确 case 的 `continue` 退化成 `goto`；二是让 shared-latch switch reducer 同时收 continue arm，没命中 `loop_switch_latch`。这说明后续应继续围绕混合 case-local latch 单独拆 case，而不是把 renderer 的 continue 规则改宽或改窄。
 
 # 2026-07-01 实现记录：折叠 switch case-local latch
