@@ -1067,3 +1067,61 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 结果：全部通过，CTest 5 个测试用时 4.64s。按用户要求，这轮不跑 fortune 时间 smoke。
 
 本轮试过两个算法方向但没有落代码：一是给 renderer 加精确 `ContinueTarget`，会把多个已有正确 case 的 `continue` 退化成 `goto`；二是让 shared-latch switch reducer 同时收 continue arm，没命中 `loop_switch_latch`。这说明后续应继续围绕混合 case-local latch 单独拆 case，而不是把 renderer 的 continue 规则改宽或改窄。
+
+# 2026-07-01 实现记录：折叠 switch case-local latch
+
+这轮继续处理 `loop_switch_latch`。当前输出把一个 switch case 的本地 latch 放在 switch 后面，并额外包了一层 `while (1)`：
+
+```c
+while (1) {
+  while (1) {
+    switch (next()) {
+    case 0:
+      continue;
+    case 1:
+      break;
+    }
+    --limit;
+    if (...) return total;
+    continue;
+  }
+  total += 1;
+  --limit;
+  ...
+}
+```
+
+`case 0` 的 `continue` 实际应该先执行紧跟 switch 后面的 latch，再继续外层 loop。renderer 末端可以在很窄的条件下修这个形状：只有一个 case 是单独 `continue;`，switch 后面的 tail 不含 label，并且 tail 最后仍是 continue，才把 tail 移进这个 case，然后去掉内层 `while (1)`。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:854`：新增 `isRenderedContinue()`，识别末尾 continue。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:872`：新增 `isTrueLiteral()`，只匹配 `while (1)`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:888`：新增 `singleContinueStmt()`，只接受单条 continue case。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:915`：新增 `stmtContainsAnyLabel()`，避免移动带 label 的 tail。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:930`：新增 `collectSingleContinueCases()`，收集 switch 里单独 continue 的 case。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:956`：新增 `setSwitchCaseBody()`，替换目标 case body。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:996`：新增 `foldSwitchContinueLatchIntoCase()`，把 switch 后的 case-local latch 移进唯一 continue case，并展开内层 `while (1)`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:1072`：`renderCompound()` 接入这个 fold。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:103`：`loop_switch_latch` 去掉 xfail，继续要求 `goto<=0`、`while<=1`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-fold-switch-latch2
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-fold-switch-latch2 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过，CTest 5 个测试用时 4.65s。按用户要求，这轮不跑 fortune 时间 smoke。
+
+`loop_switch_latch` 当前输出为 `goto=0`、`while=1`、`switch=1`。`switch_continue_latch` 仍保留 xfail，因为它还有 label/goto 进入 case-local latch，和这次“无 label tail”规则不是同一个小形状。
+
+评分：
+
+- 实现效果：8/10。修掉一个明确 xfail，把混合 latch 的简单无 label 形状收紧为通过。
+- 复杂度：5/10。是 renderer 末端 AST fold，匹配条件比较窄；理解成本高于纯 oracle，但没有改 region 归约。
+- 维护成本：5/10。后续如果 Phoenix 能直接生成正确 switch case body，这个 fold 可以被结构树层修复替代。
