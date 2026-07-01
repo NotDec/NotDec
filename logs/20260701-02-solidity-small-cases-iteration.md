@@ -3164,3 +3164,51 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.79 user=33.91 sys=0.70 maxrss=981968`。
+
+## 2026-07-01：apehex empty payable fallback runtime case
+
+问题：
+
+apehex 候选里 `MyFallbackHandler` 是一个很小的 runtime bytecode 真实源码样例，源码只有 `fallback() external payable {}`。修复前输出是空合约，因为 Solidity backend 会跳过 `public___function_selector`，而这个样例没有普通 public selector 函数。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:62) 新增 `isFreeMemoryPointerInit()`，识别 Solidity 空 runtime 里的 `mstore(0x40, 0x80)`。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:74) 新增 `isDemoteSSAAllocaPoint()`，避免 `demoteSSA` 插入的占位 bitcast 影响空 fallback 识别。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:79) 新增 `isEmptyPayableFallbackSelector()`，只匹配单基本块、只有 free memory pointer 初始化和 `ret void` 的 selector entry。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:242) 在 `Reader::readContract()` 里记录该形状；当没有其他 public 函数且只找到一个候选时，输出 `fallback public payable`。
+- [test/evm/solidity-source/cases/apehex_empty_payable_fallback_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_empty_payable_fallback_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0060.parquet` 第 200 行，runtime 60 bytes。
+- [test/evm/solidity-source/bytecode/apehex_empty_payable_fallback_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_empty_payable_fallback_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_empty_payable_fallback_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_empty_payable_fallback_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_empty_payable_fallback_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_empty_payable_fallback_01.sol:1) 固化当前可接受输出，包含空 `fallback() public payable`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:443) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 scripts/apehex-solidity-source-candidates.py --limit 160 --output /tmp/apehex-solidity-candidates-round3.csv --export-dir /tmp/apehex-solidity-candidates-round3
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/notdec-apehex-fallback-payable/runtime.hex -o /tmp/notdec-apehex-fallback-payable/fallback_payable.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-fallback-payable
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_empty_payable_fallback_01.ll -o /tmp/apehex_empty_payable_fallback_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec /tmp/notdec-apehex-fallback-payable/fallback_payable.ll -o /tmp/notdec-apehex-fallback-payable/fallback_payable.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-empty-payable-fallback-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_empty_payable_fallback_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function fallback() public payable {
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 9.26 秒；`notdec.evm.solidity_rewrite` 通过，用时 99.40 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.05 user=35.35 sys=0.69 maxrss=985772`。
