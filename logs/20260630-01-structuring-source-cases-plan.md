@@ -579,6 +579,39 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-07-01 实现记录：清理 rendered compound 死语句
+
+这轮处理 `switch_continue_latch` 里的一个明确坏形状：渲染结果中 `continue;` 后面还跟着普通语句，例如 `sink(...)`、赋值和 goto。结构树里已有的 cleanup 没覆盖到最终 C AST 语句列表，所以在 `renderCompound()` 生成 compound 前做一次保守过滤。
+
+规则很窄：遇到 `goto` / `break` / `continue` / `return` 后，删除后续普通语句；如果遇到 `LabelStmt`，说明后续代码仍可能被 goto 进入，停止删除并保留 label。这样不会删掉可进入的 label 分支。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:813`：新增 `isRenderedTransfer()`，识别 C AST 层面的无条件跳转语句。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:820`：新增 `dropUnreachableRenderedStmts()`，删除无条件跳转后、下一个 label 前的普通语句。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:838`：`renderCompound()` 创建 `CompoundStmt` 前调用死语句过滤。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:13`：全局 return/continue 坏味道 regex 允许后续是 label，避免把可被 goto 进入的 label 当作死代码。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:138`：`switch_continue_latch` 的 xfail 收紧为只允许 `goto<=0` 和 `while<=1` 两个剩余问题。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-dead-render-final
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-dead-render-final --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`switch_continue_latch` 当前从 `goto=3` 降到 `goto=1`，死代码 pattern 不再触发；剩余 `while=2` 和 1 个 goto 仍属于 loop header/latch 结构问题。按用户最新要求，本轮没有跑 fortune 时间 smoke。
+
+评分：
+
+- 实现效果：6/10。删掉明显死语句，减少 `switch_continue_latch` 的 goto，但未解决双 while/latch 根因。
+- 复杂度：3/10。只在 C AST compound 语句列表上做局部过滤。
+- 维护成本：3/10。规则以 label 为恢复点，后续如果有 case/default label 进入 compound 再单独处理。
+
 # 2026-07-01 实现记录：放宽 shared latch case arm 限制
 
 这轮继续收紧 `nested_loop_switch`。上一轮 shared-latch reducer 只接受无调用的 case arm，因此 `nested_loop_switch` 里 `case 1` 的 `sink(add)` arm 没被折叠，输出仍有两个跳到 case/latch label 的 goto。
