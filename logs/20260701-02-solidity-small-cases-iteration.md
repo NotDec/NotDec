@@ -1945,3 +1945,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.23 user=34.39 sys=0.68 maxrss=985384`。
+
+## 2026-07-01：return bool eq zero uint
+
+问题：
+
+`return_bool_eq_zero_uint_01` 的源码语义是 `return value == 0;`。这个例子对应常见 EVM `ISZERO` 形状，确认 `icmp eq value, 0` 经过 `zext i1` 后能打印成 bool 返回表达式。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_bool_eq_zero_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_eq_zero_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `iszero()` 在第 6 行返回 `value == 0`。
+- [test/evm/solidity-source/ir/return_bool_eq_zero_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_eq_zero_uint_01.ll:8) 新增冻结 IR，`public_iszero_uint256__0x2a()` 第 10 行生成 `icmp eq i256 %arg0, 0`，第 11 行 `zext i1` 成 ABI word。
+- [test/evm/solidity-source/expected/return_bool_eq_zero_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_eq_zero_uint_01.sol:1) 固化输出，函数返回类型为 `bool`，第 4 行是 `return arg0 == 0;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:279) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_eq_zero_uint_01.ll -o /tmp/return_bool_eq_zero_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_eq_zero_uint_01.ll -o /tmp/return_bool_eq_zero_uint_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-eq-zero-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_eq_zero_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function iszero(uint256 arg0) public returns (bool ret0) {
+        // block_0:
+        return arg0 == 0;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 5.64 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.17 user=34.27 sys=0.72 maxrss=982676`。
