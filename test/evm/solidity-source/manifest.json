@@ -252,6 +252,12 @@
       "expected": "expected/return_bool_add_lt_uint_01.sol"
     },
     {
+      "name": "return_bool_lt_rhs_add_uint_01",
+      "source": "cases/return_bool_lt_rhs_add_uint_01.sol",
+      "input": "ir/return_bool_lt_rhs_add_uint_01.ll",
+      "expected": "expected/return_bool_lt_rhs_add_uint_01.sol"
+    },
+    {
       "name": "return_bool_lt_uint_01",
       "source": "cases/return_bool_lt_uint_01.sol",
       "input": "ir/return_bool_lt_uint_01.ll",

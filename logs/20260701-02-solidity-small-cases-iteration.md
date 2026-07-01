@@ -2710,3 +2710,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.71 user=33.84 sys=0.84 maxrss=983836`。
+
+## 2026-07-01：return bool lt rhs add uint
+
+问题：
+
+`return_bool_lt_rhs_add_uint_01` 的源码语义是 `return left < right + extra;`。这是对比较右操作数为算术子表达式的打印回归，确认 `<` 右侧的 `add` 不会被错误加括号或拆坏优先级。这个冻结 IR 和已有加法用例一样只检查打印形状，不覆盖 Solidity 0.8 溢出 revert。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_bool_lt_rhs_add_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_lt_rhs_add_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `ltrhsadd()` 使用三个 `uint256` 参数，第 6 行返回左值和右侧加法结果的 `<` 比较。
+- [test/evm/solidity-source/ir/return_bool_lt_rhs_add_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_lt_rhs_add_uint_01.ll:8) 新增冻结 IR，`public_ltrhsadd_uint256_uint256_uint256__0x2a()` 第 10-12 行用 `add`、`icmp ult` 和 `zext` 表示 bool 返回。
+- [test/evm/solidity-source/expected/return_bool_lt_rhs_add_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_lt_rhs_add_uint_01.sol:1) 固化输出，第 4 行为 `return arg0 < arg1 + arg2;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:255) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_lt_rhs_add_uint_01.ll -o /tmp/return_bool_lt_rhs_add_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_lt_rhs_add_uint_01.ll -o /tmp/return_bool_lt_rhs_add_uint_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-lt-rhs-add-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_lt_rhs_add_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function ltrhsadd(uint256 arg0, uint256 arg1, uint256 arg2) public returns (bool ret0) {
+        // block_0:
+        return arg0 < arg1 + arg2;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 7.81 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.83 user=33.83 sys=0.83 maxrss=982724`。
