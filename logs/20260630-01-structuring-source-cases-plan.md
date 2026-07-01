@@ -1125,3 +1125,26 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 - 实现效果：8/10。修掉一个明确 xfail，把混合 latch 的简单无 label 形状收紧为通过。
 - 复杂度：5/10。是 renderer 末端 AST fold，匹配条件比较窄；理解成本高于纯 oracle，但没有改 region 归约。
 - 维护成本：5/10。后续如果 Phoenix 能直接生成正确 switch case body，这个 fold 可以被结构树层修复替代。
+
+# 2026-07-01 实现记录：收紧 switch continue latch 的 sink oracle
+
+这轮继续看剩余的 `switch_continue_latch`。之前 oracle 只写了 `contains: "sink("`，会被函数声明 `extern void sink(...)` 满足；但当前函数体里实际没有 `sink(total)` 调用，说明 default 分支语义也丢了，不只是 `goto` 和两层 `while`。
+
+本轮先不改算法，只把这个已知坏形状写进 oracle，避免后续误把声明当成函数体调用。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:134`：`switch_continue_latch` 的 `xfail_exact` 新增缺少 body sink 的失败。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:140`：新增 `regex_contains: "^\\s+sink\\("`，要求反编译函数体中出现缩进的 sink 调用。
+
+验证：
+
+```bash
+rm -rf /tmp/notdec-structuring-source-cases-sink-oracle2
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-sink-oracle2 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过，CTest 5 个测试用时 4.64s。按用户要求，这轮不跑 fortune 时间 smoke。
