@@ -972,3 +972,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.04 user=34.18 sys=0.69 maxrss=983784`。
+
+## 2026-07-01：return uint shift rhs add
+
+问题：
+
+`return_uint_shl_rhs_add_01` 的源码语义是 `return value << (shift + extra);`。Solidity 中加法优先级高于 shift，当前输出可以省略右侧括号，打印成 `return arg0 << arg1 + arg2;`。这个 case 用来固化 shift 和加法优先级下的省括号行为。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_shl_rhs_add_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_shl_rhs_add_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_shl_rhs_add_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_shl_rhs_add_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_shl_rhs_add_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_shl_rhs_add_01.sol:1) 固化输出，函数体包含 `return arg0 << arg1 + arg2;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:140) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_shl_rhs_add_01.ll -o /tmp/return_uint_shl_rhs_add_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_shl_rhs_add_01.ll -o /tmp/return_uint_shl_rhs_add_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-shl-rhs-add-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_shl_rhs_add_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function shlrhsadd(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 << arg1 + arg2;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 2.89 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.22 user=34.43 sys=0.77 maxrss=984068`。
