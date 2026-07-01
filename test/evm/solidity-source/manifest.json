@@ -232,6 +232,12 @@
       "source": "cases/return_uint_not_mulmod_01.sol",
       "input": "ir/return_uint_not_mulmod_01.ll",
       "expected": "expected/return_uint_not_mulmod_01.sol"
+    },
+    {
+      "name": "return_bool_eq_uint_01",
+      "source": "cases/return_bool_eq_uint_01.sol",
+      "input": "ir/return_bool_eq_uint_01.ll",
+      "expected": "expected/return_bool_eq_uint_01.sol"
     }
   ]
 }

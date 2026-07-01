@@ -1635,3 +1635,67 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.46 user=34.52 sys=0.77 maxrss=982028`。
+
+## 2026-07-01：return bool eq uint
+
+问题：
+
+`return_bool_eq_uint_01` 的源码语义是 `return left == right;`。修复前当前输出是：
+
+```solidity
+contract Decompiled {
+    function iseq(uint256 arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        return evm.bool;
+    }
+}
+```
+
+也就是 `icmp/zext i1` 没有打印成比较表达式，单 word ABI bool 返回也被 `Reader::readReturns()` 继续当成 `uint256`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:329) 新增 `icmpPredicateText()` 和 `icmpPredicatePrecedence()`，把 LLVM `icmp` 谓词映射到 Solidity 比较运算符。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:453) 扩展 `formatReturnValue()`，先剥离 `zext i1`，再把 `ICmpInst` 打印成 `arg0 == arg1` 这类表达式。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:21) 新增 `constantIntValue()`、`constantIntToPtrValue()`、`isAbiBoolWord()`、`findStoredReturnValue()`、`returnsSingleBoolWord()`，只在单 word 返回值来自 `i1` 或 `zext i1` 时识别为 `bool`。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:227) 更新 `Reader::readReturns()`，单 word bool 返回打印为 `returns (bool ret0)`，其他静态返回仍保持 `uint256`。
+- [test/evm/solidity-source/cases/return_bool_eq_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_eq_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `iseq()` 在第 6 行返回 `left == right`。
+- [test/evm/solidity-source/ir/return_bool_eq_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_eq_uint_01.ll:8) 新增冻结 IR，`public_iseq_uint256_uint256__0x2a()` 第 10 行生成 `icmp eq`，第 11 行 `zext i1` 成 ABI word。
+- [test/evm/solidity-source/expected/return_bool_eq_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_eq_uint_01.sol:1) 固化输出，函数返回类型为 `bool`，第 4 行是 `return arg0 == arg1;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:237) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_eq_uint_01.ll -o /tmp/return_bool_eq_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_eq_uint_01.ll -o /tmp/return_bool_eq_uint_01.after.sol --tr-level=2
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-eq-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_eq_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function iseq(uint256 arg0, uint256 arg1) public returns (bool ret0) {
+        // block_0:
+        return arg0 == arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 5.13 秒。
+
+`notdec.evm.solidity_rewrite` 通过，用时 102.13 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=31.45 user=35.36 sys=0.79 maxrss=951060`。
+
+评估：
+
+实现效果：8/10，补上了最小 bool 比较返回链路。复杂度：3/10，只增加局部打印和局部返回类型识别。维护成本：3/10，后续要继续用小用例补 `!=`、`<`、组合比较和更完整的 ABI 返回类型。
