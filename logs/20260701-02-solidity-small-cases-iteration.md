@@ -623,3 +623,49 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.83 user=33.97 sys=0.65 maxrss=981888`。
+
+## 2026-07-01：return uint exponent
+
+问题：
+
+`return_uint_exp_args_01` 的源码语义是 `return base ** exponent;`。冻结 IR 里 EVM `EXP` 是 `evm_exp(base, exponent)`。修复前 `formatReturnValue()` 不认识 `evm_exp`，只能打印 `return powered;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:347) 扩展 `evmBinaryOperatorText()`，把 `evm_exp` 打印成 Solidity `**`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:360) 新增 `evmBinaryOperatorPrecedence()`，让 `**` 的优先级高于乘除模。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:431) 在 `formatReturnValue()` 中使用 EVM helper 自己的优先级。
+- [test/evm/solidity-source/cases/return_uint_exp_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_exp_args_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_exp_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_exp_args_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_exp_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_exp_args_01.sol:1) 固化输出，函数体包含 `return arg0 ** arg1;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:92) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_exp_args_01.ll -o /tmp/return_uint_exp_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_exp_args_01.ll -o /tmp/return_uint_exp_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-exp-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_exp_args_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function exp(uint256 arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 ** arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 1.97 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.00 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.18 user=34.32 sys=0.72 maxrss=983616`。
