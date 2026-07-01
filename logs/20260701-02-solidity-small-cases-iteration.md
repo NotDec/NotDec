@@ -2331,3 +2331,54 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.52 user=33.58 sys=0.76 maxrss=982820`。
+
+## 2026-07-01：return bool or ne zero uint
+
+问题：
+
+`return_bool_or_ne_zero_uint_01` 的源码语义是 `return left != 0 || right != 0;`。修复前当前输出是 `return arg0 | arg1 != 0;`，语义接近但不够像 Solidity 源码。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:493) 扩展 `formatReturnValue()` 里的 `icmp eq/ne (or x, y), 0` pattern，`== 0` 打印为两个零比较的 `&&`，`!= 0` 打印为两个非零比较的 `||`。
+- [test/evm/solidity-source/cases/return_bool_or_ne_zero_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_or_ne_zero_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `eithernonzero()` 使用两个 `uint256` 参数，第 6 行返回两个非零比较的 `||`。
+- [test/evm/solidity-source/ir/return_bool_or_ne_zero_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_or_ne_zero_uint_01.ll:8) 新增冻结 IR，`public_eithernonzero_uint256_uint256__0x2a()` 第 10-13 行用两个 `icmp ne`、一个 `or i1` 和 `zext` 表示 bool 返回。
+- [test/evm/solidity-source/expected/return_bool_or_ne_zero_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_or_ne_zero_uint_01.sol:1) 固化输出，第 4 行为 `return arg0 != 0 || arg1 != 0;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:297) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_or_ne_zero_uint_01.ll -o /tmp/return_bool_or_ne_zero_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_or_ne_zero_uint_01.ll -o /tmp/return_bool_or_ne_zero_uint_01.fixed.sol --tr-level=2
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_and_eq_zero_uint_01.ll -o /tmp/return_bool_and_eq_zero_uint_01.regress.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-or-ne-zero-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_or_ne_zero_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function eithernonzero(uint256 arg0, uint256 arg1) public returns (bool ret0) {
+        // block_0:
+        return arg0 != 0 || arg1 != 0;
+    }
+}
+```
+
+`return_bool_and_eq_zero_uint_01` 回归输出仍为 `return arg0 == 0 && arg1 == 0;`。
+
+`notdec.evm.solidity_source` 通过，用时 6.68 秒。`notdec.evm.solidity_rewrite` 通过，用时 100.90 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.86 user=34.02 sys=0.69 maxrss=983756`。
+
+评估：
+
+效果：把 `OR` 后与零做非等比较的常见 bool 形态打印回 Solidity `||`。复杂度：低，复用已有 `OR == 0` pattern，只补 `!= 0` 分支。维护成本：低；但这个仍是局部 pattern，复杂 bool 表达式后续应继续往独立 Solidity 表达式 AST 收敛。
