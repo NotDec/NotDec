@@ -1307,3 +1307,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=31.07 user=35.28 sys=0.68 maxrss=983532`。
+
+## 2026-07-01：return uint addmod arg expression
+
+问题：
+
+`return_uint_addmod_arg_expr_01` 的源码语义是 `return addmod(left + right, extra, modulus);`。上一步已经支持三参数内建函数 `addmod`，这里检查它的参数本身是表达式时能否继续递归打印，而不是退回临时变量。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_addmod_arg_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_addmod_arg_expr_01.sol:1) 新增源码证据，源码第 6 行包含 `return addmod(left + right, extra, modulus);`。
+- [test/evm/solidity-source/ir/return_uint_addmod_arg_expr_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_addmod_arg_expr_01.ll:9) 新增冻结 IR，`public_addmodargexpr_uint256_uint256_uint256_uint256__0x2a()` 先执行 `add`，再把结果传给 `evm_addmod`。
+- [test/evm/solidity-source/expected/return_uint_addmod_arg_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_addmod_arg_expr_01.sol:1) 固化输出，函数体包含 `return addmod(arg0 + arg1, arg2, arg3);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:188) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_addmod_arg_expr_01.ll -o /tmp/return_uint_addmod_arg_expr_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_addmod_arg_expr_01.ll -o /tmp/return_uint_addmod_arg_expr_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-addmod-arg-expr-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_addmod_arg_expr_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function addmodargexpr(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) public returns (uint256 ret0) {
+        // block_0:
+        return addmod(arg0 + arg1, arg2, arg3);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 3.83 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.00 user=34.10 sys=0.79 maxrss=981976`。
