@@ -224,3 +224,43 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.81 user=34.92 sys=0.70 maxrss=985400`。
+
+## 2026-07-01：return sub rhs expression coverage
+
+问题：
+
+上一轮已经修了嵌套表达式括号，但还缺少 `a - (b + c)` 这种右侧同优先级表达式的回归覆盖。当前后端已经能正确打印 `arg0 - (arg1 + arg2)`，这次只把行为固化下来。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_sub_rhs_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_sub_rhs_expr_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_sub_rhs_expr_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_sub_rhs_expr_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_sub_rhs_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_sub_rhs_expr_01.sol:1) 固化输出，函数体包含 `return arg0 - (arg1 + arg2);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:38) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_sub_rhs_expr_01.ll -o /tmp/return_uint_sub_rhs_expr_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_sub_rhs_expr_01.ll -o /tmp/return_uint_sub_rhs_expr_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+```
+
+结果：
+
+`return_uint_sub_rhs_expr_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function subExpr(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 - (arg1 + arg2);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 0.90 秒。
+
+性能：
+
+只新增 source case 和 expected，没有改代码，未跑性能 smoke。
