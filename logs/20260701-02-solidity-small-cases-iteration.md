@@ -2290,3 +2290,44 @@ EVM smoke 用时 `elapsed=29.95 user=34.10 sys=0.70 maxrss=981488`。
 评估：
 
 效果：`i1 or` 不再被误打印成位运算，bool `and/or` 可以打印为 Solidity 逻辑运算。复杂度：低，只按 LLVM 结果类型区分 bool 和整数。维护成本：低，后续如果要恢复短路控制流语义，需要在更前面的 AST/控制流层处理，这里不硬猜副作用。
+
+## 2026-07-01：return bool and ne zero uint
+
+问题：
+
+`return_bool_and_ne_zero_uint_01` 的源码语义是 `return left != 0 && right != 0;`。这是对 `i1 and` 直接打印为 Solidity `&&` 的小回归，避免后续退回位运算 `&`。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_bool_and_ne_zero_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_and_ne_zero_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `bothnonzero()` 使用两个 `uint256` 参数，第 6 行返回两个非零比较的 `&&`。
+- [test/evm/solidity-source/ir/return_bool_and_ne_zero_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_and_ne_zero_uint_01.ll:8) 新增冻结 IR，`public_bothnonzero_uint256_uint256__0x2a()` 第 10-13 行用两个 `icmp ne`、一个 `and i1` 和 `zext` 表示 bool 返回。
+- [test/evm/solidity-source/expected/return_bool_and_ne_zero_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_and_ne_zero_uint_01.sol:1) 固化输出，第 4 行为 `return arg0 != 0 && arg1 != 0;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:291) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_and_ne_zero_uint_01.ll -o /tmp/return_bool_and_ne_zero_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_and_ne_zero_uint_01.ll -o /tmp/return_bool_and_ne_zero_uint_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-and-ne-zero-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_and_ne_zero_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function bothnonzero(uint256 arg0, uint256 arg1) public returns (bool ret0) {
+        // block_0:
+        return arg0 != 0 && arg1 != 0;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 6.59 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.52 user=33.58 sys=0.76 maxrss=982820`。
