@@ -579,6 +579,42 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-07-01 实现记录：修 loop switch shared latch case
+
+这轮修掉 `loop_switch_shared_latch` 的 xfail。问题形状是 loop header 上的 switch 有多个 case 先进入无调用的小赋值块，再共享同一个 latch；之前 fallback 只能把 case 渲染成 `goto structured_block_X`，最后再落到 latch。
+
+这次只处理很窄的形状：switch 必须在自然循环头上，arm 必须只有 header 一个前驱、只有 latch 一个后继，并且 arm block 没有 call。case body 里用普通 switch `break` 落到随后渲染的 latch；terminal default 仍直接内联 return。为了避免新结构剩下 `goto` 回到 `while (1)` 顶部，又把无限循环体里跳回入口 label 的 goto 清理成 `continue`。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2251`：新增 `rewriteInfiniteLoopEntryGotos()`，复用 `copyReplacingTargetTransfer()` 把 `InfiniteLoop` body 内回跳入口的 goto 改成 `continue`，不进入嵌套 loop。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2806`：`cleanupStructuredGotos()` 中接入无限循环入口 goto cleanup。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3120`：新增 `isSimpleLoopSwitchSharedLatchArm()`，限制 arm 为单前驱、单后继到 latch、无 call 的 fallthrough block。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3147`：新增 `buildLoopSwitchSharedLatchArmBody()`，把 arm payload 放进 switch case，并追加普通 switch `break`。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3187`：新增 `buildLoopSwitchSharedLatchCaseBody()`，处理直接到 latch、折叠 arm 和 terminal target 三类 case body。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3211`：新增 `reduceLoopHeaderSwitchSharedLatchArms()`，折叠 loop header switch 的 shared-latch arms。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3694`：在自然循环构造里接入 shared-latch reducer。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:150`：去掉 `loop_switch_shared_latch` 的 xfail，固定要求 `goto<=0`、`while<=1`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-shared-latch-final
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-shared-latch-final --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`loop_switch_shared_latch` 当前 `goto=0, while=1, switch=1`。按用户最新要求，本轮没有跑 fortune 时间 smoke。
+
+评分：
+
+- 实现效果：8/10。修掉一个 loop/switch shared latch xfail，并减少 case 内部 goto。
+- 复杂度：5/10。新增一个局部 reducer 和一个 cleanup helper，范围仍限制在 loop header switch。
+- 维护成本：5/10。规则依赖 arm 无 call、共享 latch 这两个保守条件；后续要处理带调用 arm 或 continue/latch 混合形状需要单独扩展。
+
 # 2026-07-01 实现记录：新增 switch shared return tail 对照 case
 
 这轮新增 `switch_shared_return_tail`，覆盖非 loop switch 多个 case 赋值后共享 `sink(y); return y;` 的形状。这个 case 当前直接通过，输出没有 goto：
