@@ -1594,3 +1594,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=31.65 user=35.35 sys=0.87 maxrss=954776`。
+
+## 2026-07-01：return uint not mulmod
+
+问题：
+
+`return_uint_not_mulmod_01` 的源码语义是 `return ~mulmod(left, right, modulus);`。前面已经固化了 `~addmod(...)`，这里补 `mulmod` 方向，确认三参数内建调用作为一元 `~` 操作数时同样能直接打印。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_not_mulmod_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_not_mulmod_01.sol:1) 新增源码证据，源码第 5 行函数 `notmulmod()` 在第 6 行返回 `~mulmod(left, right, modulus)`。
+- [test/evm/solidity-source/ir/return_uint_not_mulmod_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_not_mulmod_01.ll:9) 新增冻结 IR，`public_notmulmod_uint256_uint256_uint256__0x2a()` 第 11 行调用 `evm_mulmod`，第 12 行用 `xor -1` 表示 EVM `NOT`。
+- [test/evm/solidity-source/expected/return_uint_not_mulmod_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_not_mulmod_01.sol:1) 固化输出，函数体第 4 行包含 `return ~mulmod(arg0, arg1, arg2);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:231) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_not_mulmod_01.ll -o /tmp/return_uint_not_mulmod_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_not_mulmod_01.ll -o /tmp/return_uint_not_mulmod_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-not-mulmod-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_not_mulmod_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function notmulmod(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return ~mulmod(arg0, arg1, arg2);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 4.70 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.46 user=34.52 sys=0.77 maxrss=982028`。
