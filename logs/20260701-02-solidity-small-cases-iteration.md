@@ -1263,3 +1263,47 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=31.15 user=35.22 sys=0.74 maxrss=985148`。
+
+## 2026-07-01：return uint mulmod
+
+问题：
+
+`return_uint_mulmod_args_01` 的源码语义是 `return mulmod(left, right, modulus);`。冻结 IR 里 EVM `MULMOD` 是三参数 helper `evm_mulmod(arg0, arg1, arg2)`。上一步已经让 `formatReturnValue()` 能打印三参数内建函数，但只接了 `evm_addmod`；修复前这个 case 仍退化成 `return result;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:377) 扩展 `evmTernaryBuiltinName()`，把 `evm_mulmod` 映射成 Solidity 内建函数 `mulmod`。
+- [test/evm/solidity-source/cases/return_uint_mulmod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_mulmod_args_01.sol:1) 新增源码证据，源码第 6 行包含 `return mulmod(left, right, modulus);`。
+- [test/evm/solidity-source/ir/return_uint_mulmod_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_mulmod_args_01.ll:9) 新增冻结 IR，`public_mulmodargs_uint256_uint256_uint256__0x2a()` 调用 `evm_mulmod` 后返回。
+- [test/evm/solidity-source/expected/return_uint_mulmod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_mulmod_args_01.sol:1) 固化输出，函数体包含 `return mulmod(arg0, arg1, arg2);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:182) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_mulmod_args_01.ll -o /tmp/return_uint_mulmod_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_mulmod_args_01.ll -o /tmp/return_uint_mulmod_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-mulmod-smoke.sol --tr-level=2
+```
+
+结果：
+
+修复前 `return_uint_mulmod_args_01` 输出 `return result;`。修复后输出：
+
+```solidity
+contract Decompiled {
+    function mulmodargs(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return mulmod(arg0, arg1, arg2);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 3.83 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.90 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=31.07 user=35.28 sys=0.68 maxrss=983532`。
