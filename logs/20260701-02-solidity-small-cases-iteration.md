@@ -3050,3 +3050,57 @@ ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
 结果：
 
 候选脚本输出的第一行来自 `hex/ethereum/cleaned/0070.parquet` 第 388 行，主源码是 constructor-only `Depositor`，runtime 21 bytes。这个样例暂时只作为候选，不固化为 expected。`notdec.evm.solidity_source` 通过，用时 9.14 秒。
+
+## 2026-07-01：apehex block.basefee runtime case
+
+问题：
+
+apehex 候选里 `BaseFeeChecker.getCurrentBaseFee()` 是一个很小的 runtime bytecode 真实源码样例，源码语义是 `return block.basefee;`。修复前当前输出只能识别到单 word 返回签名，但函数体为空，没有打印 `BASEFEE` 对应的 Solidity 表达式。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:309) 新增 `evmEnvBuiltinName()`，先把 `evm_basefee` 打印成 `block.basefee`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:617) 扩展 `formatReturnValue()`，允许一元 EVM 环境 builtin 作为 return 表达式。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:700) 新增 calloc-backed 单 word return 识别。`MemoryBufferAnalysis` 会把动态 ABI return buffer 改成 `calloc_unbounded()` 指针；这里只匹配 `ptrtoint` 返回指针和同块前序 `store`，不做跨块猜测。
+- [test/evm/solidity-source/cases/apehex_basefee_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_basefee_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0054.parquet` 第 976 行，runtime 115 bytes。
+- [test/evm/solidity-source/bytecode/apehex_basefee_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_basefee_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_basefee_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_basefee_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_basefee_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_basefee_01.sol:1) 固化当前可接受输出，函数体包含 `return block.basefee;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:429) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 scripts/apehex-solidity-source-candidates.py --limit 80 --output /tmp/apehex-solidity-candidates.csv --export-dir /tmp/apehex-solidity-candidates
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/notdec-apehex-basefee/runtime.hex -o /tmp/notdec-apehex-basefee/basefee.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-basefee
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_basefee_01.ll -o /tmp/apehex_basefee_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/apehex_basefee_01.ll -o /tmp/apehex_basefee_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-basefee-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_basefee_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function public_0xa365dfaf() public returns (uint256 ret0) {
+        // block_0:
+        return block.basefee;
+    }
+
+    function fallback() public {
+        // block_0:
+        revert(); // empty
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 8.76 秒；`notdec.evm.solidity_rewrite` 通过，用时 99.44 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.89 user=33.95 sys=0.74 maxrss=981260`。
