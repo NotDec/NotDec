@@ -579,6 +579,29 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-07-01 实现记录：新增 nested loop break-only 小 case
+
+这轮新增 `nested_loop_break_only`，把 `nested_loop_break_continue` 里剩余的问题继续拆小：去掉 inner loop 里的 `continue` 分支，只保留 outer loop、inner loop、inner break 和 outer latch。
+
+当前输出仍有一个进入 outer loop body label 的 goto，并且出现 `return 0;` 后跟包含可进入 label 的 `while (1)`。这说明剩余问题不依赖 inner continue，而是 nested loop 区域拆分和可进入 loop body label 的结构化问题。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/016_nested_loop_break_only.c:4`：新增 nested loop break-only 小源码。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:175`：接入 `nested_loop_break_only`，理想要求 `goto<=0`，当前 xfail 精确记录 `expected goto<=0` 和 `return` 后普通结构 pattern。
+
+验证：
+
+```bash
+rm -rf /tmp/notdec-structuring-source-cases-nested-break-only-final
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-nested-break-only-final --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`nested_loop_break_only` 当前 `goto=1, while=1, do=1`。按用户最新要求，本轮没有跑 fortune 时间 smoke。
+
 # 2026-07-01 实现记录：清理 if 双分支跳转后的死语句
 
 这轮继续处理 `nested_loop_break_continue` 的渲染层坏形状。输出里有：
