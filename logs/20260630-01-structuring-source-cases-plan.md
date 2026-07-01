@@ -1042,3 +1042,28 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 - 实现效果：8/10。明确减少一个 xfail case 的 goto，并把 oracle 收紧为通过。
 - 复杂度：4/10。是 renderer 末端局部 fold，没有改 region 归约；新增 helper 都是窄匹配。
 - 维护成本：4/10。后续更好的方案是在结构树层消除这种 guard/terminal/label 形状，顺便处理重复 guard；现在先用小 case 锁住当前 bug。
+
+# 2026-07-01 实现记录：新增 switch continue-only latch 对照 case
+
+这轮继续看 `loop_switch_latch` 和 `switch_continue_latch`。它们仍有两层 `while`，而且 case-local latch 和 shared latch 混在一起，直接改 reducer 容易扩大范围。先新增一个更小的正例：所有 switch case 都写不同值后走同一个 loop latch，没有混合 case-local latch。
+
+新增 case 的输出能稳定恢复成 `while + switch + continue`，`goto=0`、`while=1`。这说明当前 SAILR 能处理“switch 多 case 共享 latch”，剩余坏形状更集中在“一个 case 自己更新 latch 后 continue，另一个 case 落到共享 latch”的混合结构。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/017_switch_continue_only_latch.c:5`：新增 switch continue-only latch 小源码，用 `sink_a()` / `sink_b()` 防止 clang `-O2` 把 switch 合成 if/算术。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:184`：接入 `switch_continue_only_latch`，要求 `switch>=1`、`while>=1`、`goto<=0`、`while<=1`。
+
+验证：
+
+```bash
+rm -rf /tmp/notdec-structuring-source-cases-switch-continue-pass
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-switch-continue-pass --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过，CTest 5 个测试用时 4.64s。按用户要求，这轮不跑 fortune 时间 smoke。
+
+本轮试过两个算法方向但没有落代码：一是给 renderer 加精确 `ContinueTarget`，会把多个已有正确 case 的 `continue` 退化成 `goto`；二是让 shared-latch switch reducer 同时收 continue arm，没命中 `loop_switch_latch`。这说明后续应继续围绕混合 case-local latch 单独拆 case，而不是把 renderer 的 continue 规则改宽或改窄。
