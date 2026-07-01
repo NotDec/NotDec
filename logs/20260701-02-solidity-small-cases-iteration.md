@@ -1177,3 +1177,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.42 user=34.71 sys=0.67 maxrss=985068`。
+
+## 2026-07-01：return uint modulo rhs multiply
+
+问题：
+
+`return_uint_mod_rhs_mul_01` 的源码语义是 `return numerator % (denominator * scale);`。`%` 和 `*` 在 Solidity 中同优先级且左结合，如果输出成 `arg0 % arg1 * arg2`，语义会变成 `(arg0 % arg1) * arg2`。当前 backend 已能给 `%` 右侧乘法表达式加括号，本次只固化这个行为。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_mod_rhs_mul_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_mod_rhs_mul_01.sol:1) 新增源码证据，源码第 6 行包含 `return numerator % (denominator * scale);`。
+- [test/evm/solidity-source/ir/return_uint_mod_rhs_mul_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_mod_rhs_mul_01.ll:9) 新增冻结 IR，`public_modrhsmul_uint256_uint256_uint256__0x2a()` 先执行 `mul`，再调用 `evm_mod`。
+- [test/evm/solidity-source/expected/return_uint_mod_rhs_mul_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_mod_rhs_mul_01.sol:1) 固化输出，函数体包含 `return arg0 % (arg1 * arg2);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:170) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_mod_rhs_mul_01.ll -o /tmp/return_uint_mod_rhs_mul_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_mod_rhs_mul_01.ll -o /tmp/return_uint_mod_rhs_mul_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-mod-rhs-mul-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_mod_rhs_mul_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function modrhsmul(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 % (arg1 * arg2);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 3.52 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.00 user=34.15 sys=0.65 maxrss=982424`。
