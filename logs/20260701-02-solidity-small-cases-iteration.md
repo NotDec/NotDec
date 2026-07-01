@@ -178,3 +178,49 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=31.36 user=35.41 sys=0.75 maxrss=984496`。
+
+## 2026-07-01：return nested expression parentheses
+
+问题：
+
+`return_uint_nested_expr_01` 的源码语义是 `return (a + b) * c;`。修复前 `formatReturnValue()` 会递归打印二元表达式，但没有按 Solidity 运算符优先级加括号，输出变成 `return arg0 + arg1 * arg2;`，语义错误。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:318) 新增 `binaryOperatorPrecedence()`，为 `+`、`-`、`*` 提供最小优先级。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:330) 新增 `needsParentheses()`，子表达式优先级更低时加括号，同时保守处理右侧减法结合性。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:339) 扩展 `formatReturnValue()`，递归格式化返回表达式时传递父运算符信息。
+- [test/evm/solidity-source/cases/return_uint_nested_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_nested_expr_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_nested_expr_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_nested_expr_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_nested_expr_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_nested_expr_01.sol:1) 固化输出，函数体现在包含 `return (arg0 + arg1) * arg2;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:32) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_nested_expr_01.ll -o /tmp/return_uint_nested_expr_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_nested_expr_01.ll -o /tmp/return_uint_nested_expr_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-nested-expr-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_nested_expr_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function mix(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return (arg0 + arg1) * arg2;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 0.83 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.76 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.81 user=34.92 sys=0.70 maxrss=985400`。
