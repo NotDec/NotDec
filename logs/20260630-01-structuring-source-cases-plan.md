@@ -1066,6 +1066,51 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过，CTest 5 个测试用时 4.64s。按用户要求，这轮不跑 fortune 时间 smoke。
 
+# 2026-07-01 实现记录：收紧 switch default continue oracle
+
+这轮继续定位 `switch_continue_latch`。当前结构树里 default 分支被恢复成
+`Continue target=7`，而 7 号块实际是 `sink(total)` 所在的 default body。
+renderer 只看当前是否在 loop 里，没有区分 continue 的真实目标，所以最后输出成：
+
+```c
+default:
+  continue;
+```
+
+这会直接跳过 `sink(total)`，因此它是比“缺少 sink 文本”更具体的坏形状。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:137`：
+  `switch_continue_latch` 的 `xfail_exact` 新增 `default: continue` 失败。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:142`：
+  新增 case-local `regex_absent`，禁止该 case 输出
+  `default: { continue; }`。
+
+排查结论：
+
+- 尝试给 renderer 增加 target-aware continue，可以让 `sink` 暴露出来，但会让
+  `loop_break_continue`、`nested_loop_switch`、`loop_switch_latch`、
+  `switch_continue_only_latch` 等多个已通过 case 退成 goto，不提交。
+- 后续真正修复应优先做结构树层 mixed switch/latch reducer：同一个 loop header
+  switch 里允许一个 case-local continue arm，同时把 case1/default 这种共享 latch
+  arm 放回各自 case body，而不是在 renderer 里全局改变 continue 语义。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-default-continue-oracle
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-default-continue-oracle --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+git -C external/NotDec-llvm2c diff --check
+```
+
+结果：全部通过，CTest 5 个测试用时 4.68s。按用户要求，这轮没有跑 fortune
+时间 smoke。
+
 # 2026-07-01 实现记录：收紧 nested loop sink oracle
 
 这轮继续检查剩余 xfail，发现 `nested_loop_break_continue` 也有和
